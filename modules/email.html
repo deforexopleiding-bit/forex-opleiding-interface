@@ -591,6 +591,28 @@
       letter-spacing: 0.04em;
     }
 
+    .ai-loading {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 14px 0;
+      font-size: 13px;
+      color: var(--accent-cyan);
+    }
+    .ai-loading-spinner {
+      width: 16px; height: 16px;
+      border: 2px solid rgba(34, 211, 238, 0.25);
+      border-top-color: var(--accent-cyan);
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+      flex-shrink: 0;
+    }
+    .ai-error {
+      font-size: 12.5px;
+      color: var(--red);
+      padding: 10px 0 6px;
+    }
+
     .reply-box {
       width: 100%;
       min-height: 160px;
@@ -1199,19 +1221,87 @@
       return `${greeting}\n\n${filled}\n\n${signoff}`;
     }
 
-    function startAiProposal(uid) {
+    function loadKennisbankContext() {
+      try {
+        const profile = JSON.parse(localStorage.getItem('kennisbank_profile') || 'null');
+        const items   = JSON.parse(localStorage.getItem('kennisbank_items')   || '[]');
+        const profileText = profile
+          ? [
+              profile.naam        ? `Bedrijf: ${profile.naam}`         : '',
+              profile.slogan      ? `Slogan: ${profile.slogan}`         : '',
+              profile.beschrijving? `Beschrijving: ${profile.beschrijving}` : '',
+              profile.doelgroep   ? `Doelgroep: ${profile.doelgroep}`   : '',
+              profile.tov         ? `Tone of voice: ${profile.tov}`     : '',
+              profile.website     ? `Website: ${profile.website}`       : ''
+            ].filter(Boolean).join('\n')
+          : '';
+        return { profile: profileText, items };
+      } catch { return { profile: '', items: [] }; }
+    }
+
+    async function callGenerateReply(email) {
+      const bodyEntry = state.bodyCache[email.uid];
+      const body = (bodyEntry && !bodyEntry.loading && !bodyEntry.error)
+        ? (bodyEntry.text || '')
+        : '';
+
+      const kennisbankContext  = loadKennisbankContext();
+      const learningExamples   = loadLearningExamples();
+
+      const res = await fetch('/api/generate-reply', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: {
+            subject:     email.subject,
+            from:        email.from,
+            fromName:    email.fromName,
+            fromAddress: email.fromAddress,
+            mailbox:     email.mailbox,
+            category:    email.category,
+            body
+          },
+          kennisbankContext,
+          learningExamples
+        })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+      return data.reply;
+    }
+
+    async function startAiProposal(uid) {
       const email = findEmail(uid);
       if (!email) return;
-      const text = generateAiReply(email);
-      state.aiProposals[uid] = { original: text, current: text, generatedAt: new Date().toISOString() };
+      // Zet loading-staat direct zodat de UI reageert.
+      state.aiProposals[uid] = { loading: true };
+      render();
+      reopenEmail(uid);
+      try {
+        const text = await callGenerateReply(email);
+        state.aiProposals[uid] = { original: text, current: text, generatedAt: new Date().toISOString() };
+      } catch (err) {
+        state.aiProposals[uid] = { error: err.message };
+      }
       render();
       reopenEmail(uid);
     }
-    function regenerateAiProposal(uid) {
+
+    async function regenerateAiProposal(uid) {
       const email = findEmail(uid);
       if (!email) return;
-      const text = generateAiReply(email);
-      state.aiProposals[uid] = { original: text, current: text, generatedAt: new Date().toISOString() };
+      // Bewaar het vorige antwoord als referentie zodat het leer-systeem het
+      // kan vergelijken, maar toon de loading-staat in de UI.
+      const previous = state.aiProposals[uid]?.original;
+      state.aiProposals[uid] = { loading: true, previous };
+      render();
+      reopenEmail(uid);
+      try {
+        const text = await callGenerateReply(email);
+        state.aiProposals[uid] = { original: text, current: text, generatedAt: new Date().toISOString() };
+      } catch (err) {
+        state.aiProposals[uid] = { error: err.message };
+      }
       render();
       reopenEmail(uid);
     }
@@ -1715,6 +1805,23 @@
         return `
           <div class="actions">
             <button class="btn btn-ai" data-action="generate" data-uid="${e.uid}">${ICON_AI}Genereer antwoord</button>
+            ${markButtons(e)}
+          </div>`;
+      }
+      // Loading-toestand — AI is bezig met genereren.
+      if (proposal.loading) {
+        return `
+          <div class="ai-loading">
+            <span class="ai-loading-spinner"></span>
+            <span>AI schrijft antwoord…</span>
+          </div>`;
+      }
+      // Fout-toestand.
+      if (proposal.error) {
+        return `
+          <div class="ai-error">AI-generatie mislukt: ${escapeHtml(proposal.error)}</div>
+          <div class="actions">
+            <button class="btn btn-ai" data-action="generate" data-uid="${e.uid}">${ICON_AI}Opnieuw proberen</button>
             ${markButtons(e)}
           </div>`;
       }
