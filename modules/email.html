@@ -460,6 +460,61 @@
       word-break: break-word;
     }
 
+    /* Pagination */
+    .pagination {
+      margin-top: 24px;
+      padding-top: 20px;
+      border-top: 1px solid var(--border);
+    }
+    .pagination-info {
+      text-align: center;
+      font-size: 12px;
+      color: var(--text-faint);
+      margin-bottom: 12px;
+      font-variant-numeric: tabular-nums;
+    }
+    .pagination-buttons {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+    .page-btn {
+      font-family: inherit;
+      font-size: 13px;
+      font-weight: 500;
+      padding: 8px 12px;
+      min-width: 38px;
+      background: var(--bg-elev);
+      border: 1px solid var(--border);
+      color: var(--text-dim);
+      border-radius: 8px;
+      cursor: pointer;
+      font-variant-numeric: tabular-nums;
+      transition: all 0.18s ease;
+    }
+    .page-btn:hover:not(:disabled):not(.active) {
+      border-color: var(--border-strong);
+      color: var(--text);
+    }
+    .page-btn.active {
+      background: var(--text);
+      color: var(--bg);
+      border-color: var(--text);
+      font-weight: 600;
+    }
+    .page-btn:disabled {
+      opacity: 0.4;
+      cursor: not-allowed;
+    }
+    .page-ellipsis {
+      font-size: 13px;
+      color: var(--text-faint);
+      padding: 0 4px;
+      user-select: none;
+    }
+
     /* Spinner */
     .spinner {
       width: 28px; height: 28px;
@@ -612,10 +667,13 @@
         <p>We halen je e-mails op via IMAP en categoriseren ze automatisch.</p>
       </div>
     </section>
+
+    <nav class="pagination" id="pagination" aria-label="Paginanavigatie"></nav>
   </div>
 
   <script>
     const CATEGORIES = ['Nieuwe Lead', 'Appointment', 'Klantvraag', 'Factuurvraag', 'Reclame', 'Overig'];
+    const PAGE_SIZE = 50;
     const state = {
       emails: [],
       counters: { nieuweLead: 0, nieuweUitlegsessie: 0, totaalVandaag: 0 },
@@ -625,6 +683,7 @@
       dateFilter: 'today',      // 'today' | 'yesterday' | 'week' | 'custom'
       customFrom: '',           // YYYY-MM-DD
       customTo: '',             // YYYY-MM-DD
+      page: 1,                  // current page in inbox pagination
       decisions: {}, // uid -> { status: 'approved'|'dismissed'|null, replyText: string, editing: bool }
       fetchedAt: null
     };
@@ -754,6 +813,57 @@
       return state.emails.filter(passesFilters);
     }
 
+    function getPageButtons(total, current) {
+      if (total <= 7) {
+        return Array.from({ length: total }, (_, i) => i + 1);
+      }
+      const buttons = [1];
+      if (current > 4) buttons.push('…');
+      const start = Math.max(2, current - 1);
+      const end   = Math.min(total - 1, current + 1);
+      for (let i = start; i <= end; i++) buttons.push(i);
+      if (current < total - 3) buttons.push('…');
+      buttons.push(total);
+      return buttons;
+    }
+
+    function renderPagination(current, total, totalItems) {
+      if (total <= 1) {
+        $('pagination').innerHTML = totalItems > 0
+          ? `<div class="pagination-info">${totalItems} e-mail${totalItems === 1 ? '' : 's'}</div>`
+          : '';
+        return;
+      }
+
+      const buttons = getPageButtons(total, current).map((b) => {
+        if (b === '…') return '<span class="page-ellipsis">…</span>';
+        return `<button class="page-btn ${b === current ? 'active' : ''}" data-page="${b}">${b}</button>`;
+      }).join('');
+
+      $('pagination').innerHTML = `
+        <div class="pagination-info">Pagina ${current} van ${total} · ${totalItems} e-mails</div>
+        <div class="pagination-buttons">
+          <button class="page-btn" data-page="prev" ${current === 1 ? 'disabled' : ''}>← Vorige</button>
+          ${buttons}
+          <button class="page-btn" data-page="next" ${current === total ? 'disabled' : ''}>Volgende →</button>
+        </div>
+      `;
+
+      $('pagination').querySelectorAll('[data-page]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const v = btn.dataset.page;
+          let next;
+          if (v === 'prev')      next = Math.max(1, state.page - 1);
+          else if (v === 'next') next = Math.min(total, state.page + 1);
+          else                   next = parseInt(v, 10);
+          if (next === state.page) return;
+          state.page = next;
+          render();
+          window.scrollTo({ top: 0, behavior: 'smooth' });
+        });
+      });
+    }
+
     function render() {
       // dynamic period labels
       const period = periodLabel();
@@ -829,14 +939,20 @@
       $('filters').querySelectorAll('.pill').forEach((el) => {
         el.addEventListener('click', () => {
           state.filter = el.dataset.filter;
+          state.page = 1; // reset paginering bij filter-wissel
           render();
         });
       });
 
-      // inbox
+      // inbox + paginering
       const visible = state.filter === 'Alle'
         ? filtered
         : filtered.filter((e) => e.category === state.filter);
+
+      const totalPages = Math.max(1, Math.ceil(visible.length / PAGE_SIZE));
+      if (state.page > totalPages) state.page = 1;
+      const startIdx = (state.page - 1) * PAGE_SIZE;
+      const pageItems = visible.slice(startIdx, startIdx + PAGE_SIZE);
 
       if (visible.length === 0) {
         $('content').innerHTML = `
@@ -848,15 +964,18 @@
             <h3>Geen e-mails in deze selectie</h3>
             <p>Pas de adres- of datumfilter aan, of wacht op nieuwe berichten.</p>
           </div>`;
+        $('pagination').innerHTML = '';
         return;
       }
 
       $('content').innerHTML =
         '<div class="inbox">' +
-        visible.map(renderEmail).join('') +
+        pageItems.map(renderEmail).join('') +
         '</div>';
 
-      visible.forEach((e) => attachHandlers(e.uid));
+      pageItems.forEach((e) => attachHandlers(e.uid));
+
+      renderPagination(state.page, totalPages, visible.length);
     }
 
     function renderEmail(e) {
@@ -1004,6 +1123,7 @@
       // Address dropdown
       $('addressFilter').addEventListener('change', (ev) => {
         state.addressFilter = ev.target.value;
+        state.page = 1;
         render();
       });
 
@@ -1012,6 +1132,7 @@
       datePills.forEach((btn) => {
         btn.addEventListener('click', () => {
           state.dateFilter = btn.dataset.date;
+          state.page = 1;
           datePills.forEach((b) => b.classList.toggle('active', b === btn));
           $('customRange').classList.toggle('hidden', state.dateFilter !== 'custom');
           render();
@@ -1029,10 +1150,12 @@
 
       $('dateFrom').addEventListener('change', (ev) => {
         state.customFrom = ev.target.value;
+        state.page = 1;
         if (state.dateFilter === 'custom') render();
       });
       $('dateTo').addEventListener('change', (ev) => {
         state.customTo = ev.target.value;
+        state.page = 1;
         if (state.dateFilter === 'custom') render();
       });
     }

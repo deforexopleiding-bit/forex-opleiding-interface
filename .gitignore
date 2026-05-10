@@ -9,8 +9,9 @@ node_modules/
 # Vercel
 .vercel
 
-# Claude Code local settings
+# Claude Code local settings & internals
 .claude/settings.local.json
+.claude/worktrees/
 
 # Logs
 *.log

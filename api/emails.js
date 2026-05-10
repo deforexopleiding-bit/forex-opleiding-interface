@@ -26,15 +26,15 @@ export default async function handler(req, res) {
     const lock = await client.getMailboxLock('INBOX');
 
     try {
-      const sevenDaysAgo = new Date();
-      sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+      // Haal alles op vanaf 1 januari 2026 (frontend pagineert client-side).
+      const earliestDate = new Date('2026-01-01T00:00:00.000Z');
 
       const startOfToday = new Date();
       startOfToday.setHours(0, 0, 0, 0);
 
       const messages = [];
       for await (const msg of client.fetch(
-        { since: sevenDaysAgo },
+        { since: earliestDate },
         {
           envelope: true,
           flags: true,
@@ -75,7 +75,7 @@ export default async function handler(req, res) {
       return res.status(200).json({
         counters,
         byCategory,
-        emails: messages.slice(0, 40),
+        emails: messages.slice(0, 1000),
         fetchedAt: new Date().toISOString()
       });
     } finally {
