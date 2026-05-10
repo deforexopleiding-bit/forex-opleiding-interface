@@ -719,7 +719,33 @@
         </div>
       </article>
 
-      <!-- 7. WhatsApp Bot (concept) -->
+      <!-- 7. Takenbeheer (actief) -->
+      <article class="module">
+        <div class="module-head">
+          <div class="module-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="3" y="3" width="18" height="18" rx="2"/>
+              <line x1="9" y1="9" x2="15" y2="9"/>
+              <line x1="9" y1="13" x2="15" y2="13"/>
+              <line x1="9" y1="17" x2="12" y2="17"/>
+            </svg>
+          </div>
+          <span class="module-status"><span class="dot"></span>Actief</span>
+          <span id="takenBadge" style="display:none;margin-left:auto;background:#ef4444;color:#fff;font-size:11px;font-weight:700;border-radius:10px;padding:2px 8px;"></span>
+        </div>
+        <h3>Takenbeheer</h3>
+        <p>Kanban-bord voor het team: maak taken aan vanuit e-mails, wijs ze toe aan collega's en volg de voortgang op prioriteit en deadline.</p>
+        <div class="tools">
+          <span class="tool">Kanban</span>
+          <span class="tool">E-mail integratie</span>
+        </div>
+        <div class="module-foot">
+          <span class="metric" id="takenMetric">Laden…</span>
+          <a class="btn" href="modules/taken.html" style="text-decoration:none;">Open dashboard <span class="btn-arrow">→</span></a>
+        </div>
+      </article>
+
+      <!-- 8. WhatsApp Bot (concept) -->
       <article class="module concept">
         <div class="module-head">
           <div class="module-icon">
@@ -826,6 +852,22 @@
     setInterval(tick, 1000);
 
     document.getElementById('year').textContent = new Date().getFullYear();
+
+    // Taken-badge en metric op de module-card
+    (function() {
+      try {
+        const taken = JSON.parse(localStorage.getItem('taken_lijst') || '[]');
+        const open = taken.filter(t => t.status !== 'done');
+        const urgent = open.filter(t => t.prioriteit === 'Urgent' || t.prioriteit === 'Hoog');
+        const metricEl = document.getElementById('takenMetric');
+        const badgeEl  = document.getElementById('takenBadge');
+        if (metricEl) metricEl.textContent = `${open.length} open taak${open.length !== 1 ? 'en' : ''}`;
+        if (badgeEl && urgent.length) {
+          badgeEl.textContent = urgent.length;
+          badgeEl.style.display = 'inline-block';
+        }
+      } catch (e) {}
+    })();
   </script>
 </body>
 </html>

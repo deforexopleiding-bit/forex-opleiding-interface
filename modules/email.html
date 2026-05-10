@@ -194,6 +194,15 @@
       background: rgba(236, 72, 153, 0.18);
       border-color: rgba(236, 72, 153, 0.35);
     }
+    .btn-task {
+      background: rgba(168, 85, 247, 0.08);
+      border-color: rgba(168, 85, 247, 0.25);
+      color: #a855f7;
+    }
+    .btn-task:hover {
+      background: rgba(168, 85, 247, 0.18);
+      border-color: rgba(168, 85, 247, 0.35);
+    }
 
     /* Toast — korte bevestigingsmelding na een actie */
     .toast {
@@ -1343,6 +1352,19 @@
         : 'Antwoord verstuurd');
     }
 
+    function openTaakVanEmail(uid) {
+      const email = findEmail(uid);
+      if (!email) return;
+      const params = new URLSearchParams({
+        from_email: uid,
+        subject:    email.subject || '',
+        categorie:  email.category === 'Nieuwe Lead' || email.category === 'Klantvraag' ? 'Klant' : 'E-mail',
+        titel:      email.subject ? `Opvolgen: ${email.subject}` : 'Opvolgen e-mail',
+        prioriteit: ['Nieuwe Lead','Appointment'].includes(email.category) ? 'Hoog' : 'Normaal'
+      });
+      window.location.href = `taken.html?${params.toString()}`;
+    }
+
     function acceptSuggestion() {
       const top = state.suggestions[0];
       if (!top) return;
@@ -1762,6 +1784,7 @@
     const ICON_SEND         = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>';
     const ICON_REGEN        = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>';
     const ICON_CANCEL       = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>';
+    const ICON_TASK         = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="9" y1="9" x2="15" y2="9"/><line x1="9" y1="13" x2="15" y2="13"/><line x1="9" y1="17" x2="12" y2="17"/></svg>';
 
     function markButtons(e) {
       const parts = [];
@@ -1771,6 +1794,7 @@
       if (e.category !== 'Reclame') {
         parts.push(`<button class="btn btn-reclame" data-action="mark-reclame" data-uid="${e.uid}">${ICON_MARK_RECLAME}Markeren als reclame</button>`);
       }
+      parts.push(`<button class="btn btn-task" data-action="create-task" data-uid="${e.uid}">${ICON_TASK}Maak taak aan</button>`);
       return parts.join('');
     }
 
@@ -1956,6 +1980,7 @@
           if (action === 'regenerate')   { regenerateAiProposal(uid); return; }
           if (action === 'cancel')       { cancelAiProposal(uid);    return; }
           if (action === 'send')         { sendAiProposal(uid);      return; }
+          if (action === 'create-task')  { openTaakVanEmail(uid);    return; }
         });
       });
     }
