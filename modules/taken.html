@@ -1039,7 +1039,7 @@ function openDetail(id) {
     <div class="detail-meta-item"><div class="detail-meta-label">Prioriteit</div><div class="detail-meta-val">${t.prioriteit}</div></div>
     <div class="detail-meta-item"><div class="detail-meta-label">Categorie</div><div class="detail-meta-val">${CAT_ICONS[t.categorie]||''} ${t.categorie}</div></div>
     <div class="detail-meta-item"><div class="detail-meta-label">Toegewezen aan</div><div class="detail-meta-val">${c ? c.naam : '—'}</div></div>
-    <div class="detail-meta-item"><div class="detail-meta-label">Deadline</div><div class="detail-meta-val${isOverdue(t)?' style="color:var(--red)"':'}">${fmtDate(t.deadline)}</div></div>
+    <div class="detail-meta-item"><div class="detail-meta-label">Deadline</div><div class="detail-meta-val"${isOverdue(t) ? ' style="color:var(--red)"' : ''}>${fmtDate(t.deadline)}</div></div>
     <div class="detail-meta-item"><div class="detail-meta-label">Aangemaakt</div><div class="detail-meta-val">${fmtDate(t.aangemaakt)}</div></div>
     ${t.afgerondOp ? `<div class="detail-meta-item"><div class="detail-meta-label">Afgerond</div><div class="detail-meta-val" style="color:var(--green)">${fmtDate(t.afgerondOp)}</div></div>` : ''}
   `;
