@@ -352,7 +352,45 @@
       line-height: 1.45;
     }
     .suggestion-text strong { color: #ec4899; font-weight: 600; }
-    .suggestion-actions { display: flex; gap: 8px; }
+    .suggestion-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+    .btn-toggle-mail {
+      background: rgba(236, 72, 153, 0.08);
+      border-color: rgba(236, 72, 153, 0.25);
+      color: #ec4899;
+    }
+    .btn-toggle-mail:hover {
+      background: rgba(236, 72, 153, 0.18);
+      border-color: rgba(236, 72, 153, 0.35);
+    }
+    .suggestion-preview {
+      display: none;
+      width: 100%;
+      margin-top: 12px;
+      padding-top: 14px;
+      border-top: 1px solid rgba(236, 72, 153, 0.18);
+    }
+    .suggestion-preview.open { display: block; }
+    .suggestion-preview-meta {
+      display: grid;
+      grid-template-columns: auto 1fr;
+      gap: 4px 12px;
+      font-size: 12px;
+      margin-bottom: 10px;
+    }
+    .suggestion-preview-meta .sp-label { color: var(--text-faint); white-space: nowrap; }
+    .suggestion-preview-meta .sp-val   { color: var(--text-dim); }
+    .suggestion-preview-body {
+      font-size: 12px;
+      color: var(--text-dim);
+      white-space: pre-wrap;
+      max-height: 260px;
+      overflow-y: auto;
+      background: rgba(0,0,0,0.25);
+      border: 1px solid var(--border-strong);
+      border-radius: 8px;
+      padding: 12px 14px;
+      line-height: 1.65;
+    }
 
     /* AI buttons */
     .btn-ai {
@@ -1631,15 +1669,38 @@
       }
     }
 
+    let _suggestionPreviewOpen = false;
+
+    function toggleSuggestionPreview() {
+      _suggestionPreviewOpen = !_suggestionPreviewOpen;
+      const preview = document.getElementById('sg-preview');
+      const btn     = document.getElementById('sg-toggle-btn');
+      if (!preview || !btn) return;
+      preview.classList.toggle('open', _suggestionPreviewOpen);
+      btn.innerHTML = _suggestionPreviewOpen
+        ? '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/><line x1="1" y1="1" x2="23" y2="23"/></svg> Verberg e-mail'
+        : '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg> Toon e-mail';
+    }
+
     function renderSuggestionBanner() {
       const banner = $('suggestion-banner');
       if (!banner) return;
       const top = state.suggestions[0];
       if (!top) {
         banner.innerHTML = '';
+        _suggestionPreviewOpen = false;
         return;
       }
       const senderLabel = top.email.fromName || top.email.fromAddress || top.email.from || 'onbekende afzender';
+      const cached = state.bodyCache[top.email.uid];
+      const bodyText = cached?.text
+        ? escapeHtml(cached.text).slice(0, 2000) + (cached.text.length > 2000 ? '\n…' : '')
+        : '<span style="color:var(--text-faint);font-style:italic">Klik op de e-mail in de inbox om de inhoud te laden.</span>';
+
+      const toggleLabel = _suggestionPreviewOpen
+        ? '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/><line x1="1" y1="1" x2="23" y2="23"/></svg> Verberg e-mail'
+        : '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg> Toon e-mail';
+
       banner.innerHTML = `
         <div class="suggestion-banner">
           <div class="suggestion-icon">
@@ -1651,10 +1712,19 @@
           <div class="suggestion-actions">
             <button class="btn btn-reclame" data-suggestion="accept">Ja</button>
             <button class="btn" data-suggestion="dismiss">Nee</button>
+            <button class="btn btn-toggle-mail" id="sg-toggle-btn" onclick="toggleSuggestionPreview()">${toggleLabel}</button>
+          </div>
+          <div class="suggestion-preview${_suggestionPreviewOpen ? ' open' : ''}" id="sg-preview">
+            <div class="suggestion-preview-meta">
+              <span class="sp-label">Van:</span>      <span class="sp-val">${escapeHtml(top.email.from || senderLabel)}</span>
+              <span class="sp-label">Onderwerp:</span> <span class="sp-val">${escapeHtml(top.email.subject || '—')}</span>
+              <span class="sp-label">Datum:</span>     <span class="sp-val">${formatDateTime(top.email.date)}</span>
+            </div>
+            <div class="suggestion-preview-body">${bodyText}</div>
           </div>
         </div>`;
-      banner.querySelector('[data-suggestion="accept"]').addEventListener('click', acceptSuggestion);
-      banner.querySelector('[data-suggestion="dismiss"]').addEventListener('click', dismissSuggestion);
+      banner.querySelector('[data-suggestion="accept"]').addEventListener('click', () => { _suggestionPreviewOpen = false; acceptSuggestion(); });
+      banner.querySelector('[data-suggestion="dismiss"]').addEventListener('click', () => { _suggestionPreviewOpen = false; dismissSuggestion(); });
     }
 
     function render() {
