@@ -137,6 +137,44 @@
       border-color: rgba(168, 85, 247, 0.25);
     }
 
+    .counter.alert {
+      background:
+        linear-gradient(135deg, rgba(245, 158, 11, 0.06), rgba(245, 158, 11, 0.02)),
+        var(--bg-elev);
+      border-color: rgba(245, 158, 11, 0.25);
+    }
+    .counter.alert .counter-value { color: var(--amber); }
+
+    .counter.alert.urgent {
+      background:
+        linear-gradient(135deg, rgba(239, 68, 68, 0.07), rgba(239, 68, 68, 0.02)),
+        var(--bg-elev);
+      border-color: rgba(239, 68, 68, 0.28);
+    }
+    .counter.alert.urgent .counter-value { color: var(--red); }
+
+    .counter.kpi {
+      background:
+        linear-gradient(135deg, rgba(34, 197, 94, 0.07), rgba(34, 211, 238, 0.04)),
+        var(--bg-elev);
+      border-color: rgba(34, 197, 94, 0.22);
+    }
+    .counter.kpi .counter-value { color: var(--green); }
+
+    .auto-tag {
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--text-faint);
+      padding: 4px 10px;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      background: var(--bg);
+      white-space: nowrap;
+      letter-spacing: 0.02em;
+    }
+    .email.no-reply .email-row { cursor: default; }
+    .email.no-reply .email-row:hover { background: transparent; }
+
     .counter-label {
       font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em;
       color: var(--text-faint); font-weight: 600;
@@ -456,6 +494,38 @@
         <div class="counter-value" id="cntTotal">—</div>
         <div class="counter-sub">Alle inkomende berichten</div>
       </div>
+      <div class="counter alert urgent">
+        <div class="counter-label">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><path d="M14 2v6h6"></path><line x1="9" y1="14" x2="15" y2="14"></line><line x1="9" y1="17" x2="13" y2="17"></line></svg>
+          Openstaande factuurvragen
+        </div>
+        <div class="counter-value" id="cntInvOpen">—</div>
+        <div class="counter-sub">Vereist actie · 7 dagen</div>
+      </div>
+      <div class="counter alert">
+        <div class="counter-label">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
+          Onbeantwoord vandaag
+        </div>
+        <div class="counter-value" id="cntPending">—</div>
+        <div class="counter-sub">excl. leads &amp; afspraken</div>
+      </div>
+      <div class="counter">
+        <div class="counter-label">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle><path d="M22 11h-4"></path><path d="M22 14h-4"></path></svg>
+          Leads deze week
+        </div>
+        <div class="counter-value" id="cntLeadsWeek">—</div>
+        <div class="counter-sub">afgelopen 7 dagen</div>
+      </div>
+      <div class="counter kpi">
+        <div class="counter-label">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"></polyline><polyline points="17 6 23 6 23 12"></polyline></svg>
+          Conversie vandaag
+        </div>
+        <div class="counter-value" id="cntConv">—</div>
+        <div class="counter-sub">uitlegsessies / leads</div>
+      </div>
     </section>
 
     <div class="filters" id="filters"></div>
@@ -552,9 +622,35 @@
 
     function render() {
       // counters
-      $('cntLead').textContent = state.counters.nieuweLead ?? 0;
-      $('cntAppt').textContent = state.counters.nieuweUitlegsessie ?? 0;
+      const leadsToday = state.counters.nieuweLead ?? 0;
+      const apptToday  = state.counters.nieuweUitlegsessie ?? 0;
+      $('cntLead').textContent  = leadsToday;
+      $('cntAppt').textContent  = apptToday;
       $('cntTotal').textContent = state.counters.totaalVandaag ?? 0;
+
+      // derived stats (computed from the 7-day email list returned by the API)
+      const today0 = new Date(); today0.setHours(0, 0, 0, 0);
+      const todayMails = state.emails.filter((e) => new Date(e.date) >= today0);
+
+      const onbeantwoordVandaag = todayMails.filter(
+        (e) => e.unread && e.category !== 'Nieuwe Lead' && e.category !== 'Appointment'
+      ).length;
+
+      const openstaandeFact = state.emails.filter(
+        (e) => e.category === 'Factuurvraag' && e.unread
+      ).length;
+
+      const leadsDezeWeek = state.byCategory['Nieuwe Lead'] || 0;
+
+      const conversiePct = leadsToday > 0
+        ? Math.round((apptToday / leadsToday) * 100) + '%'
+        : '—';
+
+      $('cntInvOpen').textContent    = openstaandeFact;
+      $('cntPending').textContent    = onbeantwoordVandaag;
+      $('cntLeadsWeek').textContent  = leadsDezeWeek;
+      $('cntConv').textContent       = conversiePct;
+
       $('lastFetch').textContent = state.fetchedAt
         ? 'Laatst bijgewerkt: ' + new Date(state.fetchedAt).toLocaleTimeString('nl-NL')
         : '';
@@ -609,6 +705,22 @@
     }
 
     function renderEmail(e) {
+      // Leads en uitlegsessies worden alleen geteld + getoond — geen antwoord-UI.
+      if (e.category === 'Nieuwe Lead' || e.category === 'Appointment') {
+        return `
+        <article class="email no-reply" data-uid="${e.uid}">
+          <div class="email-row">
+            <span class="cat-badge" data-cat="${escapeHtml(e.category)}">${escapeHtml(e.category)}</span>
+            <div class="email-meta">
+              <div class="email-from">${escapeHtml(e.fromName || e.from)}</div>
+              <div class="email-subject">${escapeHtml(e.subject)}</div>
+            </div>
+            <div class="email-time">${escapeHtml(relativeTime(e.date))}</div>
+            <span class="auto-tag">Geen reactie vereist</span>
+          </div>
+        </article>`;
+      }
+
       const d = state.decisions[e.uid] || { status: null, replyText: e.aiReply, editing: false };
       const cls = ['email'];
       if (d.status === 'approved') cls.push('approved');
@@ -658,9 +770,12 @@
       const article = document.querySelector(`.email[data-uid="${uid}"]`);
       if (!article) return;
 
-      article.querySelector(`[data-toggle="${uid}"]`).addEventListener('click', () => {
-        article.classList.toggle('open');
-      });
+      const toggle = article.querySelector(`[data-toggle="${uid}"]`);
+      if (toggle) {
+        toggle.addEventListener('click', () => {
+          article.classList.toggle('open');
+        });
+      }
 
       article.querySelectorAll('[data-action]').forEach((btn) => {
         btn.addEventListener('click', (ev) => {
@@ -692,12 +807,12 @@
       const now = new Date();
       const m = (mins) => new Date(now.getTime() - mins * 60000).toISOString();
       const demo = [
-        { uid: 1, fromName: 'Mark Janssen',     from: 'Mark Janssen <mark@example.com>',     subject: 'Nieuwe Lead – aanvraag uitlegsessie',          date: m(8),    category: 'Nieuwe Lead' },
-        { uid: 2, fromName: 'Calendly',         from: 'Calendly <no-reply@calendly.com>',    subject: 'Nieuwe uitlegsessie ingepland: Sara de Wit',   date: m(45),   category: 'Appointment' },
-        { uid: 3, fromName: 'Linda Vermeer',    from: 'Linda Vermeer <linda@example.com>',   subject: 'Hoe werkt jullie module 3 precies?',           date: m(120),  category: 'Klantvraag' },
-        { uid: 4, fromName: 'Boekhouding BV',   from: 'Boekhouding BV <fact@boek.nl>',       subject: 'Vraag over factuur 2025-0418',                  date: m(180),  category: 'Factuurvraag' },
-        { uid: 5, fromName: 'Newsletter Forex', from: 'news@example.com',                    subject: 'Wekelijkse marktupdate',                        date: m(220),  category: 'Overig' },
-        { uid: 6, fromName: 'Pieter Hendriks',  from: 'Pieter Hendriks <pieter@example.com>',subject: 'Lead via Facebook formulier',                  date: m(260),  category: 'Nieuwe Lead' }
+        { uid: 1, fromName: 'Mark Janssen',     from: 'Mark Janssen <mark@example.com>',     subject: 'Nieuwe Lead – aanvraag uitlegsessie',          date: m(8),    category: 'Nieuwe Lead',  unread: true  },
+        { uid: 2, fromName: 'Calendly',         from: 'Calendly <no-reply@calendly.com>',    subject: 'Nieuwe uitlegsessie ingepland: Sara de Wit',   date: m(45),   category: 'Appointment',  unread: false },
+        { uid: 3, fromName: 'Linda Vermeer',    from: 'Linda Vermeer <linda@example.com>',   subject: 'Hoe werkt jullie module 3 precies?',           date: m(120),  category: 'Klantvraag',   unread: true  },
+        { uid: 4, fromName: 'Boekhouding BV',   from: 'Boekhouding BV <fact@boek.nl>',       subject: 'Vraag over factuur 2025-0418',                  date: m(180),  category: 'Factuurvraag', unread: true  },
+        { uid: 5, fromName: 'Newsletter Forex', from: 'news@example.com',                    subject: 'Wekelijkse marktupdate',                        date: m(220),  category: 'Overig',       unread: false },
+        { uid: 6, fromName: 'Pieter Hendriks',  from: 'Pieter Hendriks <pieter@example.com>',subject: 'Lead via Facebook formulier',                  date: m(260),  category: 'Nieuwe Lead',  unread: true  }
       ];
       const replyFor = (cat, name) => {
         const greet = `Beste ${name},`;
