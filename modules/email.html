@@ -172,8 +172,54 @@
       white-space: nowrap;
       letter-spacing: 0.02em;
     }
-    .email.no-reply .email-row { cursor: default; }
-    .email.no-reply .email-row:hover { background: transparent; }
+    /* No-reply categorieën zijn nu uitklapbaar voor de mark-knoppen.
+       Auto-tag + chevron staan beide rechts → 5 grid-kolommen. */
+    .email.no-reply .email-row {
+      grid-template-columns: auto 1fr auto auto auto;
+    }
+
+    .auto-info {
+      font-size: 13.5px;
+      color: var(--text-dim);
+      line-height: 1.55;
+      margin: 18px 0 14px;
+    }
+
+    .btn-reclame {
+      background: rgba(236, 72, 153, 0.08);
+      border-color: rgba(236, 72, 153, 0.25);
+      color: #ec4899;
+    }
+    .btn-reclame:hover {
+      background: rgba(236, 72, 153, 0.18);
+      border-color: rgba(236, 72, 153, 0.35);
+    }
+
+    /* Toast — korte bevestigingsmelding na een actie */
+    .toast {
+      position: fixed;
+      bottom: 28px;
+      left: 50%;
+      transform: translate(-50%, 20px);
+      background: var(--bg-elev-2);
+      border: 1px solid var(--border-strong);
+      color: var(--text);
+      padding: 11px 20px;
+      border-radius: 999px;
+      font-size: 13px;
+      font-weight: 500;
+      opacity: 0;
+      transition: opacity 0.25s ease, transform 0.25s ease;
+      z-index: 1000;
+      box-shadow: 0 14px 50px rgba(0, 0, 0, 0.5);
+      pointer-events: none;
+      max-width: calc(100vw - 40px);
+      text-align: center;
+    }
+    .toast.show {
+      opacity: 1;
+      transform: translate(-50%, 0);
+    }
 
     .counter-label {
       font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em;
@@ -687,19 +733,67 @@
   <script>
     const CATEGORIES = ['Nieuwe Lead', 'Appointment', 'Event Aanmelding', 'Klantvraag', 'Factuurvraag', 'Reclame', 'Overig'];
     const PAGE_SIZE = 50;
+    const STORAGE_KEY = 'forex-opleiding-email-overrides';
+
+    function loadOverrides() {
+      try {
+        const raw = localStorage.getItem(STORAGE_KEY);
+        if (!raw) return { category: {}, read: {} };
+        const parsed = JSON.parse(raw);
+        return {
+          category: parsed.category && typeof parsed.category === 'object' ? parsed.category : {},
+          read:     parsed.read     && typeof parsed.read     === 'object' ? parsed.read     : {}
+        };
+      } catch {
+        return { category: {}, read: {} };
+      }
+    }
+
     const state = {
       emails: [],
       counters: { nieuweLead: 0, nieuweUitlegsessie: 0, eventAanmelding: 0, totaalVandaag: 0 },
       byCategory: {},
       filter: 'Alle',           // category filter
       addressFilter: 'Alle',    // 'Alle' or specific recipient address
-      dateFilter: 'today',      // 'today' | 'yesterday' | 'week' | 'custom'
+      dateFilter: 'today',      // 'today' | 'yesterday' | 'week' | 'month' | 'custom'
       customFrom: '',           // YYYY-MM-DD
       customTo: '',             // YYYY-MM-DD
       page: 1,                  // current page in inbox pagination
       decisions: {}, // uid -> { status: 'approved'|'dismissed'|null, replyText: string, editing: bool }
+      overrides: loadOverrides(), // { category: { uid: 'Reclame' }, read: { uid: true } }
       fetchedAt: null
     };
+
+    function saveOverrides() {
+      try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state.overrides)); } catch {}
+    }
+
+    function applyOverrides() {
+      const cat  = state.overrides.category || {};
+      const read = state.overrides.read || {};
+      state.emails.forEach((e) => {
+        if (cat[e.uid])  e.category = cat[e.uid];
+        if (read[e.uid]) e.unread = false;
+      });
+    }
+
+    /* Toast — korte bevestiging na een actie */
+    let toastTimer;
+    function showToast(message) {
+      let toast = document.getElementById('toast');
+      if (!toast) {
+        toast = document.createElement('div');
+        toast.id = 'toast';
+        toast.className = 'toast';
+        document.body.appendChild(toast);
+      }
+      toast.textContent = message;
+      // force reflow zodat de transition triggert ook bij snelle achtereenvolgende toasts
+      void toast.offsetWidth;
+      toast.classList.add('show');
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => toast.classList.remove('show'), 2400);
+    }
 
     const $ = (id) => document.getElementById(id);
     const refreshBtn = $('refreshBtn');
@@ -739,6 +833,7 @@
         state.counters = data.counters || state.counters;
         state.byCategory = data.byCategory || {};
         state.fetchedAt = data.fetchedAt;
+        applyOverrides();
         // preserve decisions across refreshes
         state.emails.forEach((e) => {
           if (!state.decisions[e.uid]) {
@@ -895,6 +990,62 @@
       });
     }
 
+    /* Mark-as-read / mark-as-reclame acties.
+       Beide muteren state, slaan de override in localStorage op,
+       her-renderen en herstellen de open status van het mailtje. */
+    function findEmail(uid) {
+      return state.emails.find((e) => e.uid === uid);
+    }
+
+    function reopenEmail(uid) {
+      const article = document.querySelector(`.email[data-uid="${uid}"]`);
+      if (article) article.classList.add('open');
+    }
+
+    function markAsReclame(uid) {
+      const email = findEmail(uid);
+      if (!email || email.category === 'Reclame') return;
+      state.overrides.category[uid] = 'Reclame';
+      saveOverrides();
+      email.category = 'Reclame';
+      render();
+      reopenEmail(uid);
+      showToast('Gemarkeerd als reclame');
+    }
+
+    function markAsRead(uid) {
+      const email = findEmail(uid);
+      if (!email || !email.unread) return;
+      state.overrides.read[uid] = true;
+      saveOverrides();
+      email.unread = false;
+      render();
+      reopenEmail(uid);
+      showToast('Gemarkeerd als gelezen');
+      // IMAP-update fire-and-forget: localStorage zorgt al voor consistente UI,
+      // dus een mislukte server-call breekt de optimistische update niet.
+      pushReadFlagToImap(email);
+    }
+
+    async function pushReadFlagToImap(email) {
+      const compositeUid = String(email.uid || '');
+      const lastColon = compositeUid.lastIndexOf(':');
+      const imapUid = lastColon >= 0 ? compositeUid.slice(lastColon + 1) : compositeUid;
+      try {
+        const res = await fetch('/api/mark-read', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ mailbox: email.mailbox, uid: imapUid })
+        });
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}));
+          console.warn('IMAP mark-read failed:', data.error || res.status);
+        }
+      } catch (err) {
+        console.warn('IMAP mark-read network error:', err);
+      }
+    }
+
     function render() {
       // dynamic period labels
       const period = periodLabel();
@@ -1014,12 +1165,27 @@
       renderPagination(state.page, totalPages, visible.length);
     }
 
+    // SVG-iconen voor de mark-knoppen (compact, in dezelfde Lucide-stijl als de rest).
+    const ICON_MARK_READ = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>';
+    const ICON_MARK_RECLAME = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"></path><line x1="4" y1="22" x2="4" y2="15"></line></svg>';
+
+    function markButtons(e) {
+      const parts = [];
+      if (e.unread) {
+        parts.push(`<button class="btn" data-action="mark-read" data-uid="${e.uid}">${ICON_MARK_READ}Markeren als gelezen</button>`);
+      }
+      if (e.category !== 'Reclame') {
+        parts.push(`<button class="btn btn-reclame" data-action="mark-reclame" data-uid="${e.uid}">${ICON_MARK_RECLAME}Markeren als reclame</button>`);
+      }
+      return parts.join('');
+    }
+
     function renderEmail(e) {
       // Leads, uitlegsessies en event-aanmeldingen worden alleen geteld + getoond — geen antwoord-UI.
       if (e.category === 'Nieuwe Lead' || e.category === 'Appointment' || e.category === 'Event Aanmelding') {
         return `
         <article class="email no-reply" data-uid="${e.uid}">
-          <div class="email-row">
+          <div class="email-row" data-toggle="${e.uid}">
             <span class="cat-badge" data-cat="${escapeHtml(e.category)}">${escapeHtml(e.category)}</span>
             <div class="email-meta">
               <div class="email-from">${escapeHtml(e.fromName || e.from)}</div>
@@ -1027,6 +1193,13 @@
             </div>
             <div class="email-time">${escapeHtml(relativeTime(e.date))}</div>
             <span class="auto-tag">Geen reactie vereist</span>
+            <svg class="chevron" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
+          </div>
+          <div class="email-body">
+            <p class="auto-info">Deze e-mail wordt automatisch verwerkt — geen antwoord vereist. Je kunt 'm wel als gelezen markeren of verplaatsen naar Reclame als de classificatie niet klopt.</p>
+            <div class="actions">
+              ${markButtons(e)}
+            </div>
           </div>
         </article>`;
       }
@@ -1064,6 +1237,7 @@
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
                 Afwijzen
               </button>
+              ${markButtons(e)}
               ${
                 d.status === 'approved'
                   ? '<span class="approval-status ok">✓ Goedgekeurd — klaar om te versturen</span>'
@@ -1091,7 +1265,13 @@
         btn.addEventListener('click', (ev) => {
           ev.stopPropagation();
           const action = btn.dataset.action;
+
+          // Mark-as-* zit in eigen helpers met localStorage- en IMAP-flow.
+          if (action === 'mark-read')    { markAsRead(uid);    return; }
+          if (action === 'mark-reclame') { markAsReclame(uid); return; }
+
           const d = state.decisions[uid];
+          if (!d) return;
           const textarea = article.querySelector(`[data-reply="${uid}"]`);
           if (textarea) d.replyText = textarea.value;
 
@@ -1102,8 +1282,7 @@
           }
           render();
           // re-open the article we just acted on
-          const reopened = document.querySelector(`.email[data-uid="${uid}"]`);
-          if (reopened) reopened.classList.add('open');
+          reopenEmail(uid);
           if (action === 'edit' && d.editing) {
             const ta = document.querySelector(`[data-reply="${uid}"]`);
             if (ta) { ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); }
@@ -1155,6 +1334,7 @@
         return `${greet}\n\nBedankt voor je bericht. We komen zo snel mogelijk bij je terug.\n\n${sign}`;
       };
       state.emails = demo.map((e) => ({ ...e, aiReply: replyFor(e.category, e.fromName) }));
+      applyOverrides();
       state.counters = {
         nieuweLead: demo.filter((e) => e.category === 'Nieuwe Lead').length,
         nieuweUitlegsessie: demo.filter((e) => e.category === 'Appointment').length,
