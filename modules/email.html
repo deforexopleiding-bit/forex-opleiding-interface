@@ -661,6 +661,7 @@
         <button type="button" class="pill date-pill active" data-date="today">Vandaag</button>
         <button type="button" class="pill date-pill" data-date="yesterday">Gisteren</button>
         <button type="button" class="pill date-pill" data-date="week">Deze week</button>
+        <button type="button" class="pill date-pill" data-date="month">Deze maand</button>
         <button type="button" class="pill date-pill" data-date="custom">Aangepast</button>
         <span class="custom-range hidden" id="customRange">
           <input type="date" id="dateFrom" />
@@ -775,6 +776,7 @@
         case 'today':     return 'vandaag';
         case 'yesterday': return 'gisteren';
         case 'week':      return 'deze week';
+        case 'month':     return 'deze maand';
         case 'custom':    return 'in periode';
         default:          return 'vandaag';
       }
@@ -792,8 +794,22 @@
           return { from: y, to: today0 };
         }
         case 'week': {
-          const w = new Date(today0); w.setDate(w.getDate() - 6);
-          return { from: w, to: tomorrow0 };
+          // Kalenderweek maandag 00:00 t/m zondag 23:59:59.999
+          // (geïmplementeerd als ma 00:00 → volgende ma 00:00, exclusief).
+          const day = today0.getDay(); // 0 = zondag, 1 = maandag, …, 6 = zaterdag
+          const daysFromMonday = day === 0 ? 6 : day - 1;
+          const monday = new Date(today0);
+          monday.setDate(monday.getDate() - daysFromMonday);
+          const nextMonday = new Date(monday);
+          nextMonday.setDate(nextMonday.getDate() + 7);
+          return { from: monday, to: nextMonday };
+        }
+        case 'month': {
+          // 1e van de huidige maand 00:00 t/m laatste dag 23:59:59.999
+          // (geïmplementeerd als 1e van de maand → 1e van volgende maand, exclusief).
+          const first = new Date(today0.getFullYear(), today0.getMonth(), 1);
+          const next  = new Date(today0.getFullYear(), today0.getMonth() + 1, 1);
+          return { from: first, to: next };
         }
         case 'custom': {
           const from = state.customFrom
