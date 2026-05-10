@@ -1,0 +1,13 @@
+{
+  "name": "forex-opleiding-interface",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Agency Command Center — De Forex Opleiding",
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "imapflow": "^1.0.171"
+  }
+}

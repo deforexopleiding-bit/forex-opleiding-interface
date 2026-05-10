@@ -1,0 +1,730 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>E-mail analyse &amp; antwoord · Agency Command Center</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #0a0b10;
+      --bg-elev: #13151c;
+      --bg-elev-2: #181b25;
+      --bg-elev-3: #1f2330;
+      --border: rgba(255, 255, 255, 0.06);
+      --border-strong: rgba(255, 255, 255, 0.12);
+      --text: #f1f5f9;
+      --text-dim: #94a3b8;
+      --text-faint: #64748b;
+      --accent-cyan: #22d3ee;
+      --accent-violet: #a855f7;
+      --accent-grad: linear-gradient(135deg, #22d3ee 0%, #a855f7 100%);
+      --green: #22c55e;
+      --amber: #f59e0b;
+      --red: #ef4444;
+      --shadow: 0 10px 40px rgba(0, 0, 0, 0.4);
+    }
+
+    html, body { height: 100%; }
+
+    body {
+      font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      overflow-x: hidden;
+      position: relative;
+      line-height: 1.5;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+    }
+
+    body::before {
+      content: '';
+      position: fixed; inset: 0;
+      background-image:
+        radial-gradient(circle at 15% 10%, rgba(34, 211, 238, 0.10), transparent 45%),
+        radial-gradient(circle at 85% 90%, rgba(168, 85, 247, 0.10), transparent 50%);
+      pointer-events: none; z-index: 0;
+    }
+
+    body::after {
+      content: '';
+      position: fixed; inset: 0;
+      background-image:
+        linear-gradient(rgba(255, 255, 255, 0.025) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255, 255, 255, 0.025) 1px, transparent 1px);
+      background-size: 48px 48px;
+      mask-image: radial-gradient(circle at center, black 30%, transparent 75%);
+      -webkit-mask-image: radial-gradient(circle at center, black 30%, transparent 75%);
+      pointer-events: none; z-index: 0;
+    }
+
+    .app {
+      position: relative; z-index: 1;
+      max-width: 1400px;
+      margin: 0 auto;
+      padding: 32px 28px 64px;
+    }
+
+    /* Header */
+    header {
+      display: flex; align-items: center; justify-content: space-between;
+      gap: 24px; flex-wrap: wrap;
+      padding-bottom: 24px;
+      border-bottom: 1px solid var(--border);
+      margin-bottom: 28px;
+    }
+
+    .brand { display: flex; align-items: center; gap: 14px; }
+
+    .logo-mark {
+      width: 44px; height: 44px;
+      border-radius: 12px;
+      background: var(--accent-grad);
+      display: grid; place-items: center;
+      font-weight: 800; font-size: 16px;
+      letter-spacing: -0.5px; color: #0a0b10;
+      box-shadow: 0 6px 24px rgba(168, 85, 247, 0.35);
+    }
+
+    .brand h1 { font-size: 18px; font-weight: 700; letter-spacing: -0.3px; }
+    .brand .crumb { font-size: 12px; color: var(--text-dim); margin-top: 2px; }
+    .brand .crumb a { color: var(--text-dim); text-decoration: none; transition: color 0.2s; }
+    .brand .crumb a:hover { color: var(--accent-cyan); }
+    .brand .crumb .sep { margin: 0 6px; color: var(--text-faint); }
+
+    .header-actions { display: flex; gap: 10px; align-items: center; }
+
+    /* Title + meta */
+    .page-head {
+      display: flex; align-items: flex-end; justify-content: space-between;
+      gap: 20px; flex-wrap: wrap;
+      margin-bottom: 24px;
+    }
+    .page-head h2 {
+      font-size: 26px; font-weight: 700; letter-spacing: -0.5px;
+    }
+    .page-head .desc { font-size: 14px; color: var(--text-dim); margin-top: 6px; }
+
+    .last-fetch { font-size: 12px; color: var(--text-faint); }
+
+    /* Counters */
+    .counters {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 16px;
+      margin-bottom: 28px;
+    }
+
+    .counter {
+      background: var(--bg-elev);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 22px;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .counter.featured {
+      background:
+        linear-gradient(135deg, rgba(34, 211, 238, 0.08), rgba(168, 85, 247, 0.08)),
+        var(--bg-elev);
+      border-color: rgba(168, 85, 247, 0.25);
+    }
+
+    .counter-label {
+      font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em;
+      color: var(--text-faint); font-weight: 600;
+      display: flex; align-items: center; gap: 8px;
+    }
+
+    .counter-label svg { width: 14px; height: 14px; }
+
+    .counter-value {
+      font-size: 38px; font-weight: 700; letter-spacing: -1.5px;
+      margin: 12px 0 4px;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .counter-sub { font-size: 12px; color: var(--text-dim); }
+    .counter-sub.live { color: var(--green); }
+
+    /* Filter pills */
+    .filters {
+      display: flex; gap: 8px; flex-wrap: wrap;
+      margin-bottom: 22px;
+    }
+
+    .pill {
+      font-family: inherit;
+      font-size: 13px; font-weight: 500;
+      padding: 8px 14px;
+      border-radius: 999px;
+      background: var(--bg-elev);
+      border: 1px solid var(--border);
+      color: var(--text-dim);
+      cursor: pointer;
+      transition: all 0.18s ease;
+      display: inline-flex; align-items: center; gap: 8px;
+    }
+    .pill:hover { border-color: var(--border-strong); color: var(--text); }
+    .pill.active {
+      background: var(--text);
+      color: var(--bg);
+      border-color: var(--text);
+    }
+    .pill .count {
+      font-size: 11px;
+      padding: 1px 7px;
+      border-radius: 999px;
+      background: rgba(255,255,255,0.08);
+      font-variant-numeric: tabular-nums;
+      font-weight: 600;
+    }
+    .pill.active .count { background: rgba(0,0,0,0.15); }
+
+    /* Buttons */
+    .btn {
+      font-family: inherit;
+      font-size: 13px; font-weight: 500;
+      color: var(--text);
+      background: transparent;
+      border: 1px solid var(--border-strong);
+      border-radius: 8px;
+      padding: 8px 14px;
+      cursor: pointer;
+      display: inline-flex; align-items: center; gap: 8px;
+      transition: all 0.18s ease;
+    }
+    .btn:hover { background: rgba(255,255,255,0.04); border-color: rgba(255,255,255,0.2); }
+    .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    .btn svg { width: 14px; height: 14px; }
+
+    .btn-primary {
+      background: var(--accent-grad);
+      border-color: transparent;
+      color: #0a0b10;
+      font-weight: 600;
+    }
+    .btn-primary:hover { filter: brightness(1.1); background: var(--accent-grad); }
+
+    .btn-success {
+      background: rgba(34, 197, 94, 0.12);
+      border-color: rgba(34, 197, 94, 0.3);
+      color: var(--green);
+    }
+    .btn-success:hover { background: rgba(34, 197, 94, 0.2); }
+
+    .btn-danger {
+      background: rgba(239, 68, 68, 0.08);
+      border-color: rgba(239, 68, 68, 0.25);
+      color: var(--red);
+    }
+    .btn-danger:hover { background: rgba(239, 68, 68, 0.16); }
+
+    /* Email list */
+    .inbox { display: flex; flex-direction: column; gap: 12px; }
+
+    .email {
+      background: var(--bg-elev);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      overflow: hidden;
+      transition: border-color 0.2s ease;
+    }
+    .email:hover { border-color: var(--border-strong); }
+    .email.approved { border-color: rgba(34, 197, 94, 0.3); }
+    .email.dismissed { opacity: 0.5; }
+
+    .email-row {
+      display: grid;
+      grid-template-columns: auto 1fr auto auto;
+      gap: 16px;
+      align-items: center;
+      padding: 16px 20px;
+      cursor: pointer;
+      transition: background 0.18s ease;
+    }
+    .email-row:hover { background: rgba(255,255,255,0.02); }
+
+    .cat-badge {
+      font-size: 11px; font-weight: 600;
+      padding: 4px 10px;
+      border-radius: 6px;
+      letter-spacing: 0.02em;
+      white-space: nowrap;
+      border: 1px solid;
+    }
+    .cat-badge[data-cat="Nieuwe Lead"]   { color: var(--accent-cyan);   background: rgba(34, 211, 238, 0.10); border-color: rgba(34, 211, 238, 0.25); }
+    .cat-badge[data-cat="Appointment"]   { color: var(--accent-violet); background: rgba(168, 85, 247, 0.10); border-color: rgba(168, 85, 247, 0.25); }
+    .cat-badge[data-cat="Klantvraag"]    { color: var(--amber);         background: rgba(245, 158, 11, 0.10); border-color: rgba(245, 158, 11, 0.25); }
+    .cat-badge[data-cat="Factuurvraag"]  { color: var(--red);           background: rgba(239, 68, 68, 0.10);  border-color: rgba(239, 68, 68, 0.25);  }
+    .cat-badge[data-cat="Overig"]        { color: var(--text-dim);      background: rgba(148, 163, 184, 0.08); border-color: rgba(148, 163, 184, 0.20); }
+
+    .email-meta { min-width: 0; }
+    .email-from { font-size: 14px; font-weight: 600; color: var(--text); }
+    .email-subject {
+      font-size: 13px; color: var(--text-dim);
+      margin-top: 2px;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+
+    .email-time {
+      font-size: 12px; color: var(--text-faint);
+      font-variant-numeric: tabular-nums;
+      white-space: nowrap;
+    }
+
+    .chevron {
+      color: var(--text-faint);
+      transition: transform 0.2s ease;
+    }
+    .email.open .chevron { transform: rotate(180deg); }
+
+    .email-body {
+      display: none;
+      padding: 0 20px 20px;
+      border-top: 1px solid var(--border);
+    }
+    .email.open .email-body { display: block; }
+
+    .reply-label {
+      font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em;
+      color: var(--text-faint); font-weight: 600;
+      margin: 18px 0 10px;
+      display: flex; align-items: center; gap: 8px;
+    }
+    .reply-label .ai-tag {
+      background: var(--accent-grad);
+      color: #0a0b10;
+      padding: 2px 7px;
+      border-radius: 4px;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+    }
+
+    .reply-box {
+      width: 100%;
+      min-height: 160px;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 14px;
+      color: var(--text);
+      font-family: inherit;
+      font-size: 13.5px;
+      line-height: 1.6;
+      resize: vertical;
+    }
+    .reply-box:focus {
+      outline: none;
+      border-color: var(--accent-cyan);
+    }
+    .reply-box[readonly] { color: var(--text-dim); }
+
+    .actions {
+      display: flex; gap: 10px; flex-wrap: wrap;
+      margin-top: 14px;
+      align-items: center;
+    }
+
+    .approval-status {
+      margin-left: auto;
+      font-size: 12px;
+      font-weight: 600;
+    }
+    .approval-status.ok { color: var(--green); }
+    .approval-status.no { color: var(--red); }
+
+    /* States */
+    .state {
+      padding: 60px 20px;
+      text-align: center;
+      background: var(--bg-elev);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+    }
+    .state svg { width: 40px; height: 40px; margin-bottom: 14px; }
+    .state h3 { font-size: 16px; margin-bottom: 6px; }
+    .state p { font-size: 13px; color: var(--text-dim); max-width: 480px; margin: 0 auto 16px; }
+    .state .btn { margin: 4px; }
+    .state.error svg, .state.error h3 { color: var(--red); }
+    .state.error code {
+      display: block;
+      margin-top: 12px;
+      padding: 10px 14px;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      font-size: 12px;
+      color: var(--text-dim);
+      text-align: left;
+      max-width: 600px; margin-left: auto; margin-right: auto;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+
+    /* Spinner */
+    .spinner {
+      width: 28px; height: 28px;
+      border: 3px solid var(--border);
+      border-top-color: var(--accent-cyan);
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+      margin: 0 auto 14px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    @media (max-width: 600px) {
+      .app { padding: 20px 16px 48px; }
+      .email-row { grid-template-columns: auto 1fr auto; gap: 10px; padding: 14px; }
+      .email-time { display: none; }
+      .counter-value { font-size: 30px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <header>
+      <div class="brand">
+        <a href="../index.html" style="text-decoration:none;"><div class="logo-mark">AC</div></a>
+        <div>
+          <h1>E-mail analyse &amp; antwoord</h1>
+          <div class="crumb">
+            <a href="../index.html">Command Center</a>
+            <span class="sep">/</span>
+            Modules
+            <span class="sep">/</span>
+            E-mail
+          </div>
+        </div>
+      </div>
+      <div class="header-actions">
+        <button class="btn" id="refreshBtn">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="23 4 23 10 17 10"></polyline>
+            <polyline points="1 20 1 14 7 14"></polyline>
+            <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
+          </svg>
+          Vernieuwen
+        </button>
+        <a href="../index.html" class="btn">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="19" y1="12" x2="5" y2="12"></line>
+            <polyline points="12 19 5 12 12 5"></polyline>
+          </svg>
+          Terug
+        </a>
+      </div>
+    </header>
+
+    <div class="page-head">
+      <div>
+        <h2>Inbox van vandaag</h2>
+        <div class="desc">leads@deforexopleiding.nl · automatisch gecategoriseerd, AI-antwoorden ter goedkeuring</div>
+      </div>
+      <div class="last-fetch" id="lastFetch">—</div>
+    </div>
+
+    <section class="counters">
+      <div class="counter featured">
+        <div class="counter-label">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>
+          Nieuwe leads vandaag
+        </div>
+        <div class="counter-value" id="cntLead">—</div>
+        <div class="counter-sub live"><span style="display:inline-block;width:6px;height:6px;background:#22c55e;border-radius:50%;margin-right:6px;"></span>Live geüpdatet via IMAP</div>
+      </div>
+      <div class="counter featured">
+        <div class="counter-label">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>
+          Uitlegsessies ingepland
+        </div>
+        <div class="counter-value" id="cntAppt">—</div>
+        <div class="counter-sub live"><span style="display:inline-block;width:6px;height:6px;background:#22c55e;border-radius:50%;margin-right:6px;"></span>Live geüpdatet via IMAP</div>
+      </div>
+      <div class="counter">
+        <div class="counter-label">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"></path><polyline points="22,6 12,13 2,6"></polyline></svg>
+          Totaal mails vandaag
+        </div>
+        <div class="counter-value" id="cntTotal">—</div>
+        <div class="counter-sub">Alle inkomende berichten</div>
+      </div>
+    </section>
+
+    <div class="filters" id="filters"></div>
+
+    <section id="content">
+      <div class="state">
+        <div class="spinner"></div>
+        <h3>Mailbox laden…</h3>
+        <p>We halen je e-mails op via IMAP en categoriseren ze automatisch.</p>
+      </div>
+    </section>
+  </div>
+
+  <script>
+    const CATEGORIES = ['Nieuwe Lead', 'Appointment', 'Klantvraag', 'Factuurvraag', 'Overig'];
+    const state = {
+      emails: [],
+      counters: { nieuweLead: 0, nieuweUitlegsessie: 0, totaalVandaag: 0 },
+      byCategory: {},
+      filter: 'Alle',
+      decisions: {}, // uid -> { status: 'approved'|'dismissed'|null, replyText: string, editing: bool }
+      fetchedAt: null
+    };
+
+    const $ = (id) => document.getElementById(id);
+    const refreshBtn = $('refreshBtn');
+    refreshBtn.addEventListener('click', () => loadEmails());
+
+    function relativeTime(iso) {
+      const d = new Date(iso);
+      const now = new Date();
+      const diffMs = now - d;
+      const diffMin = Math.round(diffMs / 60000);
+      if (diffMin < 1) return 'zojuist';
+      if (diffMin < 60) return diffMin + ' min geleden';
+      const diffH = Math.round(diffMin / 60);
+      if (diffH < 24) return diffH + ' u geleden';
+      return d.toLocaleString('nl-NL', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
+    }
+
+    function escapeHtml(s) {
+      return String(s ?? '').replace(/[&<>"']/g, (c) =>
+        ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c])
+      );
+    }
+
+    async function loadEmails() {
+      refreshBtn.disabled = true;
+      $('content').innerHTML = `
+        <div class="state">
+          <div class="spinner"></div>
+          <h3>Mailbox laden…</h3>
+          <p>We halen je e-mails op via IMAP en categoriseren ze automatisch.</p>
+        </div>`;
+      try {
+        const res = await fetch('/api/emails', { cache: 'no-store' });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+        state.emails = data.emails || [];
+        state.counters = data.counters || state.counters;
+        state.byCategory = data.byCategory || {};
+        state.fetchedAt = data.fetchedAt;
+        // preserve decisions across refreshes
+        state.emails.forEach((e) => {
+          if (!state.decisions[e.uid]) {
+            state.decisions[e.uid] = { status: null, replyText: e.aiReply, editing: false };
+          }
+        });
+        render();
+      } catch (err) {
+        renderError(err.message);
+      } finally {
+        refreshBtn.disabled = false;
+      }
+    }
+
+    function renderError(msg) {
+      $('content').innerHTML = `
+        <div class="state error">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="10"></circle>
+            <line x1="12" y1="8" x2="12" y2="12"></line>
+            <line x1="12" y1="16" x2="12.01" y2="16"></line>
+          </svg>
+          <h3>Kan inbox niet laden</h3>
+          <p>De IMAP-verbinding faalde of de serverless functie draait nog niet. Controleer of <code>IMAP_HOST</code>, <code>IMAP_PORT</code>, <code>IMAP_USER</code> en <code>IMAP_PASS</code> als environment variables zijn ingesteld in Vercel.</p>
+          <code>${escapeHtml(msg)}</code>
+          <div style="margin-top:16px;">
+            <button class="btn" onclick="loadEmails()">Opnieuw proberen</button>
+            <button class="btn" onclick="loadDemo()">Toon voorbeelddata</button>
+          </div>
+        </div>`;
+    }
+
+    function render() {
+      // counters
+      $('cntLead').textContent = state.counters.nieuweLead ?? 0;
+      $('cntAppt').textContent = state.counters.nieuweUitlegsessie ?? 0;
+      $('cntTotal').textContent = state.counters.totaalVandaag ?? 0;
+      $('lastFetch').textContent = state.fetchedAt
+        ? 'Laatst bijgewerkt: ' + new Date(state.fetchedAt).toLocaleTimeString('nl-NL')
+        : '';
+
+      // filter pills
+      const totalCount = state.emails.length;
+      const pills = [
+        { key: 'Alle', count: totalCount },
+        ...CATEGORIES.map((c) => ({ key: c, count: state.byCategory[c] || 0 }))
+      ];
+      $('filters').innerHTML = pills
+        .map(
+          (p) => `
+        <button class="pill ${state.filter === p.key ? 'active' : ''}" data-filter="${escapeHtml(p.key)}">
+          ${escapeHtml(p.key)}
+          <span class="count">${p.count}</span>
+        </button>`
+        )
+        .join('');
+      $('filters').querySelectorAll('.pill').forEach((el) => {
+        el.addEventListener('click', () => {
+          state.filter = el.dataset.filter;
+          render();
+        });
+      });
+
+      // emails
+      const visible =
+        state.filter === 'Alle'
+          ? state.emails
+          : state.emails.filter((e) => e.category === state.filter);
+
+      if (visible.length === 0) {
+        $('content').innerHTML = `
+          <div class="state">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color: var(--text-faint);">
+              <path d="M22 12h-6l-2 3h-4l-2-3H2"></path>
+              <path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"></path>
+            </svg>
+            <h3>Geen e-mails in deze categorie</h3>
+            <p>Zodra er nieuwe berichten binnenkomen verschijnen ze hier automatisch.</p>
+          </div>`;
+        return;
+      }
+
+      $('content').innerHTML =
+        '<div class="inbox">' +
+        visible.map(renderEmail).join('') +
+        '</div>';
+
+      visible.forEach((e) => attachHandlers(e.uid));
+    }
+
+    function renderEmail(e) {
+      const d = state.decisions[e.uid] || { status: null, replyText: e.aiReply, editing: false };
+      const cls = ['email'];
+      if (d.status === 'approved') cls.push('approved');
+      if (d.status === 'dismissed') cls.push('dismissed');
+      return `
+        <article class="${cls.join(' ')}" data-uid="${e.uid}">
+          <div class="email-row" data-toggle="${e.uid}">
+            <span class="cat-badge" data-cat="${escapeHtml(e.category)}">${escapeHtml(e.category)}</span>
+            <div class="email-meta">
+              <div class="email-from">${escapeHtml(e.fromName || e.from)}</div>
+              <div class="email-subject">${escapeHtml(e.subject)}</div>
+            </div>
+            <div class="email-time">${escapeHtml(relativeTime(e.date))}</div>
+            <svg class="chevron" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
+          </div>
+          <div class="email-body">
+            <div class="reply-label">
+              <span class="ai-tag">AI</span> Voorgesteld antwoord
+            </div>
+            <textarea class="reply-box" data-reply="${e.uid}" ${d.editing ? '' : 'readonly'}>${escapeHtml(d.replyText)}</textarea>
+            <div class="actions">
+              <button class="btn btn-success" data-action="approve" data-uid="${e.uid}">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                Goedkeuren
+              </button>
+              <button class="btn" data-action="edit" data-uid="${e.uid}">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
+                ${d.editing ? 'Klaar met bewerken' : 'Bewerken'}
+              </button>
+              <button class="btn btn-danger" data-action="dismiss" data-uid="${e.uid}">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                Afwijzen
+              </button>
+              ${
+                d.status === 'approved'
+                  ? '<span class="approval-status ok">✓ Goedgekeurd — klaar om te versturen</span>'
+                  : d.status === 'dismissed'
+                    ? '<span class="approval-status no">Afgewezen</span>'
+                    : ''
+              }
+            </div>
+          </div>
+        </article>`;
+    }
+
+    function attachHandlers(uid) {
+      const article = document.querySelector(`.email[data-uid="${uid}"]`);
+      if (!article) return;
+
+      article.querySelector(`[data-toggle="${uid}"]`).addEventListener('click', () => {
+        article.classList.toggle('open');
+      });
+
+      article.querySelectorAll('[data-action]').forEach((btn) => {
+        btn.addEventListener('click', (ev) => {
+          ev.stopPropagation();
+          const action = btn.dataset.action;
+          const d = state.decisions[uid];
+          const textarea = article.querySelector(`[data-reply="${uid}"]`);
+          if (textarea) d.replyText = textarea.value;
+
+          if (action === 'approve') d.status = 'approved';
+          if (action === 'dismiss') d.status = 'dismissed';
+          if (action === 'edit') {
+            d.editing = !d.editing;
+          }
+          render();
+          // re-open the article we just acted on
+          const reopened = document.querySelector(`.email[data-uid="${uid}"]`);
+          if (reopened) reopened.classList.add('open');
+          if (action === 'edit' && d.editing) {
+            const ta = document.querySelector(`[data-reply="${uid}"]`);
+            if (ta) { ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); }
+          }
+        });
+      });
+    }
+
+    /* Demo data fallback so the page is visible even before the API is wired up */
+    function loadDemo() {
+      const now = new Date();
+      const m = (mins) => new Date(now.getTime() - mins * 60000).toISOString();
+      const demo = [
+        { uid: 1, fromName: 'Mark Janssen',     from: 'Mark Janssen <mark@example.com>',     subject: 'Nieuwe Lead – aanvraag uitlegsessie',          date: m(8),    category: 'Nieuwe Lead' },
+        { uid: 2, fromName: 'Calendly',         from: 'Calendly <no-reply@calendly.com>',    subject: 'Nieuwe uitlegsessie ingepland: Sara de Wit',   date: m(45),   category: 'Appointment' },
+        { uid: 3, fromName: 'Linda Vermeer',    from: 'Linda Vermeer <linda@example.com>',   subject: 'Hoe werkt jullie module 3 precies?',           date: m(120),  category: 'Klantvraag' },
+        { uid: 4, fromName: 'Boekhouding BV',   from: 'Boekhouding BV <fact@boek.nl>',       subject: 'Vraag over factuur 2025-0418',                  date: m(180),  category: 'Factuurvraag' },
+        { uid: 5, fromName: 'Newsletter Forex', from: 'news@example.com',                    subject: 'Wekelijkse marktupdate',                        date: m(220),  category: 'Overig' },
+        { uid: 6, fromName: 'Pieter Hendriks',  from: 'Pieter Hendriks <pieter@example.com>',subject: 'Lead via Facebook formulier',                  date: m(260),  category: 'Nieuwe Lead' }
+      ];
+      const replyFor = (cat, name) => {
+        const greet = `Beste ${name},`;
+        const sign = 'Met vriendelijke groet,\nTeam De Forex Opleiding';
+        if (cat === 'Nieuwe Lead') return `${greet}\n\nBedankt voor je interesse in De Forex Opleiding! Een van onze adviseurs neemt binnen 24 uur persoonlijk contact met je op.\n\n${sign}`;
+        if (cat === 'Appointment') return `${greet}\n\nBedankt voor de bevestiging — je uitlegsessie staat ingepland. Je ontvangt vlak voor de afspraak een herinnering.\n\n${sign}`;
+        if (cat === 'Klantvraag') return `${greet}\n\nBedankt voor je vraag. We komen uiterlijk binnen 1 werkdag bij je terug met een uitgebreid antwoord.\n\n${sign}`;
+        if (cat === 'Factuurvraag') return `${greet}\n\nBedankt voor je bericht over de factuur. We bekijken het direct.\n\n${sign}`;
+        return `${greet}\n\nBedankt voor je bericht. We komen zo snel mogelijk bij je terug.\n\n${sign}`;
+      };
+      state.emails = demo.map((e) => ({ ...e, aiReply: replyFor(e.category, e.fromName) }));
+      state.counters = {
+        nieuweLead: demo.filter((e) => e.category === 'Nieuwe Lead').length,
+        nieuweUitlegsessie: demo.filter((e) => e.category === 'Appointment').length,
+        totaalVandaag: demo.length
+      };
+      state.byCategory = CATEGORIES.reduce((acc, c) => {
+        acc[c] = demo.filter((e) => e.category === c).length;
+        return acc;
+      }, {});
+      state.fetchedAt = new Date().toISOString();
+      state.decisions = {};
+      demo.forEach((e) => { state.decisions[e.uid] = { status: null, replyText: replyFor(e.category, e.fromName), editing: false }; });
+      render();
+    }
+
+    loadEmails();
+  </script>
+</body>
+</html>
