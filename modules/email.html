@@ -391,6 +391,25 @@
       padding: 12px 14px;
       line-height: 1.65;
     }
+    .sg-body-status {
+      display: flex; align-items: center; gap: 8px;
+      font-size: 12px; color: var(--text-faint);
+      font-style: italic; padding: 6px 0;
+    }
+    .sg-body-error {
+      display: block;
+      font-size: 12px; color: var(--red);
+      font-style: normal; padding: 6px 0;
+    }
+    .sg-spinner {
+      width: 14px; height: 14px;
+      border: 2px solid rgba(236, 72, 153, 0.2);
+      border-top-color: #ec4899;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+      flex-shrink: 0;
+      display: inline-block;
+    }
 
     /* AI buttons */
     .btn-ai {
@@ -1671,6 +1690,9 @@
 
     let _suggestionPreviewOpen = false;
 
+    const ICON_EYE_OPEN   = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>';
+    const ICON_EYE_CLOSED = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/><line x1="1" y1="1" x2="23" y2="23"/></svg>';
+
     function toggleSuggestionPreview() {
       _suggestionPreviewOpen = !_suggestionPreviewOpen;
       const preview = document.getElementById('sg-preview');
@@ -1678,8 +1700,34 @@
       if (!preview || !btn) return;
       preview.classList.toggle('open', _suggestionPreviewOpen);
       btn.innerHTML = _suggestionPreviewOpen
-        ? '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/><line x1="1" y1="1" x2="23" y2="23"/></svg> Verberg e-mail'
-        : '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg> Toon e-mail';
+        ? `${ICON_EYE_CLOSED} Verberg e-mail`
+        : `${ICON_EYE_OPEN} Toon e-mail`;
+    }
+
+    async function loadSuggestionBody(email) {
+      if (state.bodyCache[email.uid]) return; // already loading or loaded (success/error)
+      state.bodyCache[email.uid] = { loading: true };
+      renderSuggestionBanner();
+      try {
+        const res = await fetch('/api/email-body', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ mailbox: email.mailbox, uid: extractImapUid(email.uid) })
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+        state.bodyCache[email.uid] = { loading: false, ...data };
+      } catch (err) {
+        state.bodyCache[email.uid] = { loading: false, error: err.message };
+      }
+      renderSuggestionBanner();
+    }
+
+    function retrySuggestionBody() {
+      const top = state.suggestions[0];
+      if (!top) return;
+      delete state.bodyCache[top.email.uid];
+      loadSuggestionBody(top.email);
     }
 
     function renderSuggestionBanner() {
@@ -1691,15 +1739,28 @@
         _suggestionPreviewOpen = false;
         return;
       }
+
+      // Kick off body fetch (no-op if already in cache)
+      loadSuggestionBody(top.email);
+
       const senderLabel = top.email.fromName || top.email.fromAddress || top.email.from || 'onbekende afzender';
       const cached = state.bodyCache[top.email.uid];
-      const bodyText = cached?.text
-        ? escapeHtml(cached.text).slice(0, 2000) + (cached.text.length > 2000 ? '\n…' : '')
-        : '<span style="color:var(--text-faint);font-style:italic">Klik op de e-mail in de inbox om de inhoud te laden.</span>';
+
+      let bodyHtml;
+      if (!cached || cached.loading) {
+        bodyHtml = '<div class="sg-body-status"><span class="sg-spinner"></span> Inhoud laden…</div>';
+      } else if (cached.error) {
+        bodyHtml = `<div class="sg-body-error">Kon inhoud niet laden: ${escapeHtml(cached.error)}<br>
+          <button class="btn btn-sm" style="margin-top:8px" onclick="retrySuggestionBody()">Opnieuw proberen</button></div>`;
+      } else {
+        const raw = cached.text || '';
+        const truncated = raw.length > 2000 ? raw.slice(0, 2000) + '\n…' : raw;
+        bodyHtml = `<div class="suggestion-preview-body">${escapeHtml(truncated)}</div>`;
+      }
 
       const toggleLabel = _suggestionPreviewOpen
-        ? '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/><line x1="1" y1="1" x2="23" y2="23"/></svg> Verberg e-mail'
-        : '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg> Toon e-mail';
+        ? `${ICON_EYE_CLOSED} Verberg e-mail`
+        : `${ICON_EYE_OPEN} Toon e-mail`;
 
       banner.innerHTML = `
         <div class="suggestion-banner">
@@ -1716,11 +1777,11 @@
           </div>
           <div class="suggestion-preview${_suggestionPreviewOpen ? ' open' : ''}" id="sg-preview">
             <div class="suggestion-preview-meta">
-              <span class="sp-label">Van:</span>      <span class="sp-val">${escapeHtml(top.email.from || senderLabel)}</span>
-              <span class="sp-label">Onderwerp:</span> <span class="sp-val">${escapeHtml(top.email.subject || '—')}</span>
-              <span class="sp-label">Datum:</span>     <span class="sp-val">${formatDateTime(top.email.date)}</span>
+              <span class="sp-label">Van:</span>       <span class="sp-val">${escapeHtml(top.email.from || senderLabel)}</span>
+              <span class="sp-label">Onderwerp:</span>  <span class="sp-val">${escapeHtml(top.email.subject || '—')}</span>
+              <span class="sp-label">Datum:</span>      <span class="sp-val">${formatDateTime(top.email.date)}</span>
             </div>
-            <div class="suggestion-preview-body">${bodyText}</div>
+            ${bodyHtml}
           </div>
         </div>`;
       banner.querySelector('[data-suggestion="accept"]').addEventListener('click', () => { _suggestionPreviewOpen = false; acceptSuggestion(); });
