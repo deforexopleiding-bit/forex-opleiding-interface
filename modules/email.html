@@ -275,6 +275,41 @@
     }
     .body-error { color: var(--red); }
 
+    /* Categorie-mover dropdown: handmatig verplaatsen tussen categorieën */
+    .category-mover {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+      padding: 10px 14px;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      margin: 12px 0 14px;
+    }
+    .category-mover label {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      font-weight: 600;
+      color: var(--text-faint);
+    }
+    .category-mover select {
+      background: var(--bg-elev);
+      border: 1px solid var(--border-strong);
+      color: var(--text);
+      padding: 6px 11px;
+      border-radius: 6px;
+      font-family: inherit;
+      font-size: 12.5px;
+      cursor: pointer;
+      outline: none;
+      transition: border-color 0.18s ease;
+      color-scheme: dark;
+    }
+    .category-mover select:hover  { border-color: rgba(255,255,255,0.2); }
+    .category-mover select:focus  { border-color: var(--accent-cyan); }
+
     /* Suggestion banner: "Lijkt op reclame van …" */
     .suggestion-banner {
       background:
@@ -1108,30 +1143,43 @@
        email_learning_examples (cap 100), zodat een toekomstige AI
        deze als few-shot context kan gebruiken.
        ───────────────────────────────────────────────────────────── */
+    // {subject} en {bodyHint} worden door generateAiReply ingevuld zodat het
+    // antwoord aansluit bij de specifieke mail. Bij echte LLM-integratie wordt
+    // hier state.bodyCache[uid].text als context meegegeven aan het model.
     const REPLY_TEMPLATES = {
       'Klantvraag': [
-        'Bedankt voor je bericht. We bekijken je vraag en komen uiterlijk binnen 1 werkdag bij je terug met een uitgebreid antwoord.',
+        'Bedankt voor je vraag over "{subject}". We bekijken het en komen uiterlijk binnen 1 werkdag bij je terug met een uitgebreid antwoord.',
         'Dank voor je bericht. Een collega kijkt zo snel mogelijk naar je vraag en mailt je terug met een onderbouwd antwoord.',
-        'Bedankt voor je interesse en je goede vraag. We pakken het direct op en geven je vandaag of morgen een terugkoppeling.'
+        'Bedankt voor je interesse en je goede vraag over "{subject}". We pakken het direct op en geven je vandaag of morgen een terugkoppeling.'
       ],
       'Factuurvraag': [
-        'Bedankt voor je bericht over de factuur. We bekijken het direct en zorgen dat je vandaag nog uitsluitsel krijgt.',
+        'Bedankt voor je bericht over de factuur. We bekijken "{subject}" direct en zorgen dat je vandaag nog uitsluitsel krijgt.',
         'Dank voor je vraag over de factuur. We checken het meteen na in onze administratie en komen vandaag of morgen bij je terug.',
         'Beste klant, je vraag over de factuur is in goede orde ontvangen. Onze administratie reageert zo spoedig mogelijk met de juiste informatie.'
+      ],
+      'Overig': [
+        'Bedankt voor je bericht over "{subject}". We hebben het in goede orde ontvangen en bekijken het zo snel mogelijk.',
+        'Dank voor je e-mail. We pakken het op en komen bij je terug zodra we meer kunnen zeggen over "{subject}".',
+        'Bedankt voor je bericht. Een collega kijkt ernaar en geeft je een passende terugkoppeling.'
       ]
     };
 
     function generateAiReply(email) {
       const templates = REPLY_TEMPLATES[email.category]
-        || ['Bedankt voor je bericht. We komen zo snel mogelijk bij je terug.'];
+        || ['Bedankt voor je bericht over "{subject}". We komen zo snel mogelijk bij je terug.'];
       const previous = state.aiProposals[email.uid]?.original;
       const candidates = templates.filter((t) => t !== previous);
       const pick = (candidates.length ? candidates : templates)[
         Math.floor(Math.random() * (candidates.length || templates.length))
       ];
+      // Vul placeholder met daadwerkelijk onderwerp/bodysnippet zodat het
+      // antwoord lokaal bij de inhoud aansluit.
+      const subjectRef = (email.subject || '').replace(/^(re:|fwd:)\s*/i, '').trim() || 'je bericht';
+      const filled = pick.replace(/\{subject\}/g, subjectRef);
+
       const greeting = `Beste ${email.fromName || 'daar'},`;
       const signoff = 'Met vriendelijke groet,\nTeam De Forex Opleiding';
-      return `${greeting}\n\n${pick}\n\n${signoff}`;
+      return `${greeting}\n\n${filled}\n\n${signoff}`;
     }
 
     function startAiProposal(uid) {
@@ -1662,9 +1710,20 @@
         </div>`;
     }
 
+    function renderCategoryMover(e) {
+      const opts = CATEGORIES.map((c) =>
+        `<option value="${escapeHtml(c)}"${c === e.category ? ' selected' : ''}>${escapeHtml(c)}</option>`
+      ).join('');
+      return `
+        <div class="category-mover">
+          <label for="cat-${escapeHtml(e.uid)}">Verplaats naar categorie</label>
+          <select id="cat-${escapeHtml(e.uid)}" data-categorize="${e.uid}">${opts}</select>
+        </div>`;
+    }
+
     function renderEmail(e) {
       const isNoReply  = e.category === 'Nieuwe Lead' || e.category === 'Appointment' || e.category === 'Event Aanmelding';
-      const isAi       = e.category === 'Klantvraag' || e.category === 'Factuurvraag';
+      const isAi       = e.category === 'Klantvraag' || e.category === 'Factuurvraag' || e.category === 'Overig';
 
       const cls = ['email'];
       if (isNoReply) cls.push('no-reply');
@@ -1702,6 +1761,7 @@
           ${row}
           <div class="email-body">
             ${content}
+            ${renderCategoryMover(e)}
             ${actionsHtml}
           </div>
         </article>`;
@@ -1735,6 +1795,27 @@
           if (state.aiProposals[uid]) {
             state.aiProposals[uid].current = replyBox.value;
           }
+        });
+      }
+
+      // Handmatige categorie-wijziging via de "Verplaats naar categorie" dropdown.
+      // Werkt via dezelfde overrides-store als markAsReclame, dus persistent
+      // over refreshes en consistent met de bestaande filter/stat-pipeline.
+      const moverSelect = article.querySelector(`[data-categorize="${uid}"]`);
+      if (moverSelect) {
+        moverSelect.addEventListener('change', (ev) => {
+          const newCategory = ev.target.value;
+          const email = findEmail(uid);
+          if (!email || newCategory === email.category) return;
+          state.overrides.category[uid] = newCategory;
+          saveOverrides();
+          // Bij verplaatsing naar Reclame ook het patroon leren —
+          // zelfde gedrag als de "Markeren als reclame"-knop.
+          if (newCategory === 'Reclame') recordReclamePattern(email);
+          email.category = newCategory;
+          render();
+          reopenEmail(uid);
+          showToast(`Verplaatst naar ${newCategory}`);
         });
       }
 

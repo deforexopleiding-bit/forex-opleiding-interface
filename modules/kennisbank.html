@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Kennisbank · Agency Command Center</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #0a0b10;
+      --bg-elev: #13151c;
+      --bg-elev-2: #181b25;
+      --border: rgba(255, 255, 255, 0.06);
+      --border-strong: rgba(255, 255, 255, 0.12);
+      --text: #f1f5f9;
+      --text-dim: #94a3b8;
+      --text-faint: #64748b;
+      --accent-cyan: #22d3ee;
+      --accent-violet: #a855f7;
+      --accent-grad: linear-gradient(135deg, #22d3ee 0%, #a855f7 100%);
+    }
+
+    html, body { height: 100%; }
+    body {
+      font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      overflow-x: hidden;
+      position: relative;
+      line-height: 1.5;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+    }
+    body::before {
+      content: '';
+      position: fixed; inset: 0;
+      background-image:
+        radial-gradient(circle at 15% 10%, rgba(34, 211, 238, 0.10), transparent 45%),
+        radial-gradient(circle at 85% 90%, rgba(168, 85, 247, 0.10), transparent 50%);
+      pointer-events: none; z-index: 0;
+    }
+    body::after {
+      content: '';
+      position: fixed; inset: 0;
+      background-image:
+        linear-gradient(rgba(255, 255, 255, 0.025) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255, 255, 255, 0.025) 1px, transparent 1px);
+      background-size: 48px 48px;
+      mask-image: radial-gradient(circle at center, black 30%, transparent 75%);
+      -webkit-mask-image: radial-gradient(circle at center, black 30%, transparent 75%);
+      pointer-events: none; z-index: 0;
+    }
+
+    .app {
+      position: relative; z-index: 1;
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 32px 28px 64px;
+    }
+
+    header {
+      display: flex; align-items: center; justify-content: space-between;
+      gap: 24px; flex-wrap: wrap;
+      padding-bottom: 24px;
+      border-bottom: 1px solid var(--border);
+      margin-bottom: 32px;
+    }
+    .brand { display: flex; align-items: center; gap: 14px; }
+    .logo-mark {
+      width: 44px; height: 44px;
+      border-radius: 12px;
+      background: var(--accent-grad);
+      display: grid; place-items: center;
+      font-weight: 800; font-size: 16px;
+      letter-spacing: -0.5px; color: #0a0b10;
+      box-shadow: 0 6px 24px rgba(168, 85, 247, 0.35);
+    }
+    .brand h1 { font-size: 18px; font-weight: 700; letter-spacing: -0.3px; }
+    .brand .crumb { font-size: 12px; color: var(--text-dim); margin-top: 2px; }
+    .brand .crumb a { color: var(--text-dim); text-decoration: none; transition: color 0.2s; }
+    .brand .crumb a:hover { color: var(--accent-cyan); }
+    .brand .crumb .sep { margin: 0 6px; color: var(--text-faint); }
+
+    .btn {
+      font-family: inherit;
+      font-size: 13px; font-weight: 500;
+      color: var(--text);
+      background: transparent;
+      border: 1px solid var(--border-strong);
+      border-radius: 8px;
+      padding: 8px 14px;
+      cursor: pointer;
+      display: inline-flex; align-items: center; gap: 8px;
+      text-decoration: none;
+      transition: all 0.18s ease;
+    }
+    .btn:hover { background: rgba(255,255,255,0.04); border-color: rgba(255,255,255,0.2); }
+    .btn svg { width: 14px; height: 14px; }
+
+    .page-head h2 {
+      font-size: 28px; font-weight: 700; letter-spacing: -0.5px;
+      margin-bottom: 6px;
+    }
+    .page-head .desc { font-size: 14px; color: var(--text-dim); }
+
+    .empty-state {
+      margin-top: 48px;
+      background: var(--bg-elev);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 56px 32px;
+      text-align: center;
+    }
+    .empty-state .icon {
+      width: 56px; height: 56px;
+      border-radius: 14px;
+      background: linear-gradient(135deg, rgba(34, 211, 238, 0.15), rgba(168, 85, 247, 0.15));
+      border: 1px solid var(--border);
+      display: grid; place-items: center;
+      margin: 0 auto 18px;
+      color: var(--accent-cyan);
+    }
+    .empty-state .icon svg { width: 26px; height: 26px; }
+    .empty-state h3 {
+      font-size: 18px; font-weight: 600;
+      letter-spacing: -0.2px;
+      margin-bottom: 8px;
+    }
+    .empty-state p {
+      font-size: 14px; color: var(--text-dim);
+      max-width: 540px; margin: 0 auto 22px;
+      line-height: 1.55;
+    }
+
+    .roadmap {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      gap: 14px;
+      margin-top: 36px;
+    }
+    .roadmap-item {
+      background: var(--bg-elev);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 18px;
+      opacity: 0.7;
+    }
+    .roadmap-item .pill {
+      display: inline-block;
+      font-size: 10.5px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      padding: 3px 9px;
+      border-radius: 999px;
+      background: rgba(148, 163, 184, 0.10);
+      color: var(--text-faint);
+      border: 1px solid rgba(148, 163, 184, 0.20);
+      margin-bottom: 10px;
+    }
+    .roadmap-item h4 {
+      font-size: 15px; font-weight: 600;
+      letter-spacing: -0.2px;
+      margin-bottom: 6px;
+    }
+    .roadmap-item p {
+      font-size: 13px; color: var(--text-dim);
+      line-height: 1.5;
+    }
+
+    @media (max-width: 600px) {
+      .app { padding: 20px 16px 48px; }
+      .empty-state { padding: 36px 22px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <header>
+      <div class="brand">
+        <a href="../index.html" style="text-decoration:none;"><div class="logo-mark">AC</div></a>
+        <div>
+          <h1>Kennisbank</h1>
+          <div class="crumb">
+            <a href="../index.html">Command Center</a>
+            <span class="sep">/</span>
+            Modules
+            <span class="sep">/</span>
+            Kennisbank
+          </div>
+        </div>
+      </div>
+      <a href="../index.html" class="btn">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <line x1="19" y1="12" x2="5" y2="12"></line>
+          <polyline points="12 19 5 12 12 5"></polyline>
+        </svg>
+        Terug
+      </a>
+    </header>
+
+    <div class="page-head">
+      <h2>Kennisbank</h2>
+      <div class="desc">Centrale plek voor procedures, FAQ's en interne kennis</div>
+    </div>
+
+    <div class="empty-state">
+      <div class="icon">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path>
+          <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path>
+        </svg>
+      </div>
+      <h3>Nog niet ingericht</h3>
+      <p>
+        Hier komen procedures, FAQ's en interne documentatie. Zodra de eerste set
+        artikelen klaar is, verschijnen ze hier doorzoekbaar en gegroepeerd per onderwerp.
+      </p>
+      <a href="../index.html" class="btn">Terug naar dashboard</a>
+    </div>
+
+    <section class="roadmap" aria-label="Geplande secties">
+      <article class="roadmap-item">
+        <span class="pill">Binnenkort</span>
+        <h4>Procedures</h4>
+        <p>Stappenplannen voor terugkerende werkzaamheden — onboarding, intake, facturatie.</p>
+      </article>
+      <article class="roadmap-item">
+        <span class="pill">Binnenkort</span>
+        <h4>FAQ's</h4>
+        <p>Veelgestelde klantvragen met canonieke antwoorden, gekoppeld aan de e-mail-AI.</p>
+      </article>
+      <article class="roadmap-item">
+        <span class="pill">Binnenkort</span>
+        <h4>Interne kennis</h4>
+        <p>Tooling-tutorials, integraties en verantwoordelijkheden per teamlid.</p>
+      </article>
+    </section>
+  </div>
+</body>
+</html>
