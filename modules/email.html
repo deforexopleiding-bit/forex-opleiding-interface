@@ -736,6 +736,8 @@
   const AI_CATS_KEY           = 'email_ai_categories';
   const SIGNATURE_KEY         = 'email_signature';
   const AI_CONF_KEY           = 'email_ai_confidence'; // uid -> { confidence, source }
+  const CACHE_VER_KEY         = 'email_cache_version';
+  const CACHE_VERSION         = '2'; // bump to force cache-clear after logic changes
 
   // ── SVG icons ──────────────────────────────────────────────────────────────
   const ICON_AI     = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3z"></path></svg>';
@@ -743,6 +745,40 @@
   const ICON_REGEN  = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>';
   const ICON_TASK   = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="9" y1="9" x2="15" y2="9"/><line x1="9" y1="13" x2="15" y2="13"/><line x1="9" y1="17" x2="12" y2="17"/></svg>';
   const ICON_READ   = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>';
+
+  // ── Harde categorisatieregels (spiegelt api/categorize.js) ───────────────
+  function applyHardRules(subject, from) {
+    const s      = (subject || '').toLowerCase();
+    const sender = (from || '').toLowerCase();
+    const domainMatch = sender.match(/@([\w.-]+)/);
+    const domain = domainMatch ? domainMatch[1] : '';
+
+    // REGEL 1 – Nieuwe Lead
+    const leadTerms = [
+      'nieuwe lead', 'new lead', 'lead 001', 'lead 002', 'lead - ', 'lead -',
+      'funnel', '10k challenge', '7-daagse', 'form submission',
+      'you have received a form'
+    ];
+    if (leadTerms.some((t) => s.includes(t))) return 'Nieuwe Lead';
+
+    // REGEL 2 – Appointment
+    const appointTerms = ['uitlegsessie', 'ingepland', 'nieuwe call'];
+    if (appointTerms.some((t) => s.includes(t))) return 'Appointment';
+
+    // REGEL 3 – Event Aanmelding
+    const eventTerms = ['event aanmelding', ' gent', 'aanmelding seminar', 'aanmelding webinar'];
+    if (eventTerms.some((t) => s.includes(t))) return 'Event Aanmelding';
+
+    // REGEL 4 – Bekende niet-reclame domeinen
+    const overigDomains = ['vimeo.com', 'youtube.com', 'linkedin.com'];
+    if (overigDomains.includes(domain)) return 'Overig';
+
+    return null;
+  }
+
+  function getHardRuleCategory(email) {
+    return applyHardRules(email.subject, email.from || email.fromAddress || '');
+  }
 
   // ── State ──────────────────────────────────────────────────────────────────
   const state = {
@@ -883,6 +919,21 @@
     });
   }
 
+  // Harde regels overschrijven AI-cache en Supabase (altijd laatste woord)
+  function applyHardRuleCategories() {
+    state.emails.forEach((e) => {
+      if (state.overrides.category[e.uid]) return; // handmatige override wint altijd
+      const hard = getHardRuleCategory(e);
+      if (hard) {
+        e.category = hard;
+        _aiCatCache[e.uid] = hard;
+        _aiConfCache[e.uid] = { confidence: 100, source: 'rule' };
+      }
+    });
+    saveJson(AI_CATS_KEY,  _aiCatCache);
+    saveJson(AI_CONF_KEY,  _aiConfCache);
+  }
+
   function getConfDotClass(uid) {
     const override = state.overrides.category[uid];
     if (override) return 'learned'; // manually set = purple
@@ -926,7 +977,12 @@
   }
 
   function kickOffAiCategorization() {
-    const todo = state.emails.filter((e) => !state.overrides.category[e.uid] && !_aiCatCache[e.uid]);
+    // Skip emails already resolved by hard rules or manual overrides
+    const todo = state.emails.filter((e) =>
+      !state.overrides.category[e.uid] &&
+      !_aiCatCache[e.uid] &&
+      !getHardRuleCategory(e)
+    );
     todo.forEach((e, i) => setTimeout(() => categorizeEmail(e), i * 150));
   }
 
@@ -936,13 +992,20 @@
     const fill = document.getElementById('reanalyzeFill');
     const lbl  = document.getElementById('reanalyzeLabel');
     if (btn) btn.disabled = true;
-    // Clear caches
+    // Clear AI caches (keep manual overrides)
     state.emails.forEach((e) => { delete _aiCatCache[e.uid]; delete _aiConfCache[e.uid]; });
     saveJson(AI_CATS_KEY,  _aiCatCache);
     saveJson(AI_CONF_KEY,  _aiConfCache);
-    const todo = [...state.emails];
-    if (!todo.length) { if (btn) btn.disabled = false; return; }
-    if (bar)  bar.classList.add('show');
+    // First pass: apply hard rules instantly (no API call needed)
+    applyHardRuleCategories();
+    const todo = state.emails.filter((e) =>
+      !state.overrides.category[e.uid] && !getHardRuleCategory(e)
+    );
+    if (!todo.length) {
+      applyAutoReclameClassification(); populateSuggestions(); render();
+      if (btn) btn.disabled = false; return;
+    }
+    if (bar) bar.classList.add('show');
     let done = 0;
     for (const email of todo) {
       if (lbl)  lbl.textContent = 'Heranalyseren ' + done + '/' + todo.length + '…';
@@ -951,7 +1014,7 @@
       done++;
     }
     if (fill) fill.style.width = '100%';
-    if (lbl)  lbl.textContent = 'Klaar! ' + done + ' mails hergeanalyseerd.';
+    if (lbl)  lbl.textContent = 'Klaar! ' + todo.length + ' mails hergeanalyseerd.';
     setTimeout(() => { if (bar) bar.classList.remove('show'); if (btn) btn.disabled = false; }, 2500);
     render();
   }
@@ -1303,12 +1366,21 @@
   function markNotReclame(uid) {
     const email = findEmail(uid);
     if (!email) return;
-    delete state.overrides.category[uid];
+    // Determine correct category: hard rules first, then AI cache (but never Reclame), else Overig
+    const hardCat   = getHardRuleCategory(email);
+    const cachedCat = _aiCatCache[uid];
+    const correctCat = hardCat || (cachedCat && cachedCat !== 'Reclame' ? cachedCat : 'Overig');
+    // Set an explicit override so applyAutoReclameClassification can't re-apply Reclame
+    state.overrides.category[uid] = correctCat;
     saveOverrides();
-    email.category = _aiCatCache[uid] || 'Overig';
+    email.category = correctCat;
+    // Update confidence dot to show this was manually corrected
+    _aiConfCache[uid] = { confidence: 95, source: 'learned' };
+    saveJson(AI_CONF_KEY, _aiConfCache);
     populateSuggestions();
     render();
-    showToast('Hersteld: niet reclame');
+    showToast('Mail verplaatst naar ' + correctCat);
+    sendLearningCorrection(email, 'Reclame', correctCat);
   }
 
   function markAsRead(uid) {
@@ -1763,6 +1835,7 @@
       state.fetchedAt = data.fetchedAt;
       applyOverrides();
       applyAiCategories();
+      applyHardRuleCategories();
       applyAutoReclameClassification();
       populateSuggestions();
       render();
@@ -1801,6 +1874,7 @@
     state.fetchedAt = new Date().toISOString();
     applyOverrides();
     applyAiCategories();
+    applyHardRuleCategories();
     applyAutoReclameClassification();
     populateSuggestions();
     render();
@@ -1857,8 +1931,21 @@
     });
   }
 
+  // ── Cache versie migratie ──────────────────────────────────────────────────
+  function checkCacheVersion() {
+    if (localStorage.getItem(CACHE_VER_KEY) !== CACHE_VERSION) {
+      // Nieuwe logica beschikbaar — wis AI-cache zodat harde regels direct gelden
+      Object.keys(_aiCatCache).forEach((k) => delete _aiCatCache[k]);
+      Object.keys(_aiConfCache).forEach((k) => delete _aiConfCache[k]);
+      saveJson(AI_CATS_KEY,  _aiCatCache);
+      saveJson(AI_CONF_KEY,  _aiConfCache);
+      localStorage.setItem(CACHE_VER_KEY, CACHE_VERSION);
+    }
+  }
+
   // ── Init ───────────────────────────────────────────────────────────────────
   function init() {
+    checkCacheVersion();
     initFilterBar();
     initTabs();
     initSigModal();

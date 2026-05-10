@@ -15,6 +15,35 @@ function getDomain(email) {
   return i >= 0 ? email.slice(i + 1).toLowerCase() : '';
 }
 
+// ── Harde regels — altijd vóór Supabase en AI ──────────────────────────────
+// Geeft een categorie string terug, of null als geen regel van toepassing is.
+function applyHardRules(subject, from) {
+  const s      = (subject || '').toLowerCase();
+  const domain = getDomain(extractEmail(from || ''));
+
+  // REGEL 1 – Nieuwe Lead (hoogste prioriteit)
+  const leadTerms = [
+    'nieuwe lead', 'new lead', 'lead 001', 'lead 002', 'lead - ', 'lead -',
+    'funnel', '10k challenge', '7-daagse', 'form submission',
+    'you have received a form'
+  ];
+  if (leadTerms.some((t) => s.includes(t))) return 'Nieuwe Lead';
+
+  // REGEL 2 – Appointment
+  const appointTerms = ['uitlegsessie', 'ingepland', 'nieuwe call'];
+  if (appointTerms.some((t) => s.includes(t))) return 'Appointment';
+
+  // REGEL 3 – Event Aanmelding
+  const eventTerms = ['event aanmelding', ' gent', 'aanmelding seminar', 'aanmelding webinar'];
+  if (eventTerms.some((t) => s.includes(t))) return 'Event Aanmelding';
+
+  // REGEL 4 – Bekende niet-reclame domeinen → Overig
+  const overigDomains = ['vimeo.com', 'youtube.com', 'linkedin.com'];
+  if (overigDomains.includes(domain)) return 'Overig';
+
+  return null; // geen harde regel van toepassing
+}
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
@@ -27,6 +56,12 @@ export default async function handler(req, res) {
 
   const senderEmail  = extractEmail(from || '');
   const senderDomain = getDomain(senderEmail);
+
+  // ── Stap 0: Harde regels — niet te overschrijven ──────────────────────
+  const hardCategory = applyHardRules(subject, from);
+  if (hardCategory) {
+    return res.status(200).json({ category: hardCategory, confidence: 100, source: 'rule', reasoning: 'Harde regel' });
+  }
 
   // ── Stap 1: check bestaande patronen in Supabase ───────────────────────
   if (senderEmail) {
