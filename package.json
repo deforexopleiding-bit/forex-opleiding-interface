@@ -8,6 +8,7 @@
     "node": ">=20"
   },
   "dependencies": {
-    "imapflow": "^1.0.171"
+    "imapflow": "^1.0.171",
+    "mailparser": "^3.6.5"
   }
 }
