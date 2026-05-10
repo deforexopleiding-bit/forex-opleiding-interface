@@ -1,37 +1,119 @@
 import { ImapFlow } from 'imapflow';
 
+// Mapping mailbox → env variable that holds its IMAP password.
+// To add another mailbox: add an entry here, set the password env var
+// in Vercel (and locally in .env), then add the address as an option
+// in modules/email.html.
+const ACCOUNTS = [
+  { user: 'leads@deforexopleiding.nl',         passEnv: 'IMAP_PASS' },
+  { user: 'info@deforexopleiding.nl',          passEnv: 'IMAP_PASS_INFO' },
+  { user: 'partners@deforexopleiding.nl',      passEnv: 'IMAP_PASS_PARTNERS' },
+  { user: 'administratie@deforexopleiding.nl', passEnv: 'IMAP_PASS_ADMINISTRATIE' }
+];
+
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
 
-  const { IMAP_HOST, IMAP_PORT, IMAP_USER, IMAP_PASS } = process.env;
-
-  if (!IMAP_HOST || !IMAP_USER || !IMAP_PASS) {
+  const { IMAP_HOST, IMAP_PORT } = process.env;
+  if (!IMAP_HOST) {
     return res.status(500).json({
-      error:
-        'IMAP environment variables not configured. Set IMAP_HOST, IMAP_PORT, IMAP_USER, IMAP_PASS in Vercel project settings (Settings → Environment Variables).'
+      error: 'IMAP_HOST not configured. Set IMAP_HOST in Vercel project settings.'
     });
   }
 
+  // Only fetch from accounts whose password is actually configured.
+  // Missing credentials = silently skipped, so the dashboard keeps
+  // working as you progressively add mailboxes.
+  const enabledAccounts = ACCOUNTS.filter((a) => process.env[a.passEnv]);
+  if (enabledAccounts.length === 0) {
+    return res.status(500).json({
+      error:
+        'No IMAP accounts configured. Set at least one of: ' +
+        ACCOUNTS.map((a) => a.passEnv).join(', ') +
+        ' in Vercel project settings.'
+    });
+  }
+
+  const earliestDate = new Date('2026-01-01T00:00:00.000Z');
+  const port = parseInt(IMAP_PORT || '993', 10);
+
+  // Fetch from each enabled mailbox in parallel — one slow account
+  // shouldn't block the others, and Vercel's 10s function timeout
+  // would be reached if we connected sequentially.
+  const results = await Promise.allSettled(
+    enabledAccounts.map((account) => fetchMailbox(IMAP_HOST, port, account, earliestDate))
+  );
+
+  const allMessages = [];
+  const errors = [];
+  results.forEach((r, idx) => {
+    const account = enabledAccounts[idx];
+    if (r.status === 'fulfilled') {
+      allMessages.push(...r.value);
+    } else {
+      errors.push({
+        mailbox: account.user,
+        error: String(r.reason?.message || r.reason)
+      });
+    }
+  });
+
+  // If every mailbox failed, surface that as an error response.
+  if (allMessages.length === 0 && errors.length > 0) {
+    return res.status(500).json({
+      error: 'Geen enkele mailbox kon worden uitgelezen.',
+      errors
+    });
+  }
+
+  allMessages.sort((a, b) => new Date(b.date) - new Date(a.date));
+
+  const startOfToday = new Date();
+  startOfToday.setHours(0, 0, 0, 0);
+  const todayMessages = allMessages.filter((m) => new Date(m.date) >= startOfToday);
+
+  const counters = {
+    nieuweLead:         todayMessages.filter((m) => m.category === 'Nieuwe Lead').length,
+    nieuweUitlegsessie: todayMessages.filter((m) => m.category === 'Appointment').length,
+    totaalVandaag:      todayMessages.length
+  };
+
+  const byCategory = {
+    'Nieuwe Lead': 0,
+    Appointment: 0,
+    Klantvraag: 0,
+    Factuurvraag: 0,
+    Reclame: 0,
+    Overig: 0
+  };
+  allMessages.forEach((m) => {
+    byCategory[m.category] = (byCategory[m.category] || 0) + 1;
+  });
+
+  return res.status(200).json({
+    counters,
+    byCategory,
+    emails: allMessages.slice(0, 1000),
+    mailboxes: enabledAccounts.map((a) => a.user),
+    errors: errors.length ? errors : undefined,
+    fetchedAt: new Date().toISOString()
+  });
+}
+
+async function fetchMailbox(host, port, account, earliestDate) {
   const client = new ImapFlow({
-    host: IMAP_HOST,
-    port: parseInt(IMAP_PORT || '993', 10),
+    host,
+    port,
     secure: true,
-    auth: { user: IMAP_USER, pass: IMAP_PASS },
+    auth: { user: account.user, pass: process.env[account.passEnv] },
     logger: false,
     socketTimeout: 9000
   });
 
+  await client.connect();
   try {
-    await client.connect();
     const lock = await client.getMailboxLock('INBOX');
-
     try {
-      // Haal alles op vanaf 1 januari 2026 (frontend pagineert client-side).
-      const earliestDate = new Date('2026-01-01T00:00:00.000Z');
-
-      const startOfToday = new Date();
-      startOfToday.setHours(0, 0, 0, 0);
-
       const messages = [];
       for await (const msg of client.fetch(
         { since: earliestDate },
@@ -42,57 +124,18 @@ export default async function handler(req, res) {
           headers: ['list-unsubscribe', 'precedence']
         }
       )) {
-        messages.push(parseMessage(msg));
+        messages.push(parseMessage(msg, account.user));
       }
-
-      messages.sort((a, b) => new Date(b.date) - new Date(a.date));
-
-      const todayMessages = messages.filter(
-        (m) => new Date(m.date) >= startOfToday
-      );
-
-      const counters = {
-        nieuweLead: todayMessages.filter((m) => m.category === 'Nieuwe Lead')
-          .length,
-        nieuweUitlegsessie: todayMessages.filter(
-          (m) => m.category === 'Appointment'
-        ).length,
-        totaalVandaag: todayMessages.length
-      };
-
-      const byCategory = {
-        'Nieuwe Lead': 0,
-        Appointment: 0,
-        Klantvraag: 0,
-        Factuurvraag: 0,
-        Reclame: 0,
-        Overig: 0
-      };
-      messages.forEach((m) => {
-        byCategory[m.category] = (byCategory[m.category] || 0) + 1;
-      });
-
-      return res.status(200).json({
-        counters,
-        byCategory,
-        emails: messages.slice(0, 1000),
-        fetchedAt: new Date().toISOString()
-      });
+      return messages;
     } finally {
       lock.release();
     }
-  } catch (err) {
-    return res.status(500).json({
-      error: `IMAP fout: ${err.message}`
-    });
   } finally {
-    try {
-      await client.logout();
-    } catch {}
+    try { await client.logout(); } catch {}
   }
 }
 
-function parseMessage(msg) {
+function parseMessage(msg, mailbox) {
   const subject = msg.envelope?.subject || '(geen onderwerp)';
   const fromEntry = msg.envelope?.from?.[0];
   const fromName = fromEntry?.name || '';
@@ -121,7 +164,10 @@ function parseMessage(msg) {
   const aiReply = generateReply(category, fromName || fromAddress);
 
   return {
-    uid: msg.uid,
+    // Mailbox-prefixed UID so two mailboxes with the same numeric UID
+    // don't collide in the frontend's decisions/state map.
+    uid: `${mailbox}:${msg.uid}`,
+    mailbox,
     subject,
     from: fromText,
     fromName: fromName || fromAddress.split('@')[0] || 'Onbekend',

@@ -572,7 +572,7 @@
     <div class="page-head">
       <div>
         <h2 id="inboxTitle">Inbox · vandaag</h2>
-        <div class="desc">leads@deforexopleiding.nl · automatisch gecategoriseerd, AI-antwoorden ter goedkeuring</div>
+        <div class="desc">4 postvakken · automatisch gecategoriseerd, AI-antwoorden ter goedkeuring</div>
       </div>
       <div class="last-fetch" id="lastFetch">—</div>
     </div>
@@ -642,6 +642,9 @@
         <select id="addressFilter">
           <option value="Alle">Alle adressen</option>
           <option value="leads@deforexopleiding.nl">leads@deforexopleiding.nl</option>
+          <option value="info@deforexopleiding.nl">info@deforexopleiding.nl</option>
+          <option value="partners@deforexopleiding.nl">partners@deforexopleiding.nl</option>
+          <option value="administratie@deforexopleiding.nl">administratie@deforexopleiding.nl</option>
         </select>
       </div>
       <div class="filter-group">
@@ -803,8 +806,11 @@
       const d = new Date(e.date);
       if (d < from || d >= to) return false;
       if (state.addressFilter !== 'Alle') {
-        const addr = (e.toAddress || '').toLowerCase();
-        if (addr !== state.addressFilter.toLowerCase()) return false;
+        // Match against the mailbox the message was fetched from,
+        // not the envelope "to" — that maps to the user's mental
+        // model of "which postvak zit ik in te kijken".
+        const mb = (e.mailbox || '').toLowerCase();
+        if (mb !== state.addressFilter.toLowerCase()) return false;
       }
       return true;
     }
@@ -902,7 +908,7 @@
         const d = new Date(e.date);
         if (d < weekFrom || d >= tomorrow0) return false;
         if (state.addressFilter !== 'Alle' &&
-            (e.toAddress || '').toLowerCase() !== state.addressFilter.toLowerCase()) return false;
+            (e.mailbox || '').toLowerCase() !== state.addressFilter.toLowerCase()) return false;
         return true;
       }).length;
 
@@ -1080,18 +1086,32 @@
     function loadDemo() {
       const now = new Date();
       const m = (mins) => new Date(now.getTime() - mins * 60000).toISOString();
-      const TO = 'leads@deforexopleiding.nl';
+      const MB = {
+        leads:  'leads@deforexopleiding.nl',
+        info:   'info@deforexopleiding.nl',
+        partn:  'partners@deforexopleiding.nl',
+        admin:  'administratie@deforexopleiding.nl'
+      };
       const demo = [
-        { uid: 1,  fromName: 'Mark Janssen',     from: 'Mark Janssen <mark@example.com>',           toAddress: TO, subject: 'Nieuwe Lead – aanvraag uitlegsessie',          date: m(8),    category: 'Nieuwe Lead',  unread: true  },
-        { uid: 2,  fromName: 'Calendly',         from: 'Calendly <no-reply@calendly.com>',          toAddress: TO, subject: 'Nieuwe uitlegsessie ingepland: Sara de Wit',   date: m(45),   category: 'Appointment',  unread: false },
-        { uid: 3,  fromName: 'Linda Vermeer',    from: 'Linda Vermeer <linda@example.com>',         toAddress: TO, subject: 'Hoe werkt jullie module 3 precies?',           date: m(120),  category: 'Klantvraag',   unread: true  },
-        { uid: 4,  fromName: 'Boekhouding BV',   from: 'Boekhouding BV <fact@boek.nl>',             toAddress: TO, subject: 'Vraag over factuur 2025-0418',                  date: m(180),  category: 'Factuurvraag', unread: true  },
-        { uid: 5,  fromName: 'Newsletter Forex', from: 'newsletter@news.example.com',               toAddress: TO, subject: 'Nieuwsbrief: wekelijkse marktupdate',           date: m(220),  category: 'Reclame',      unread: false },
-        { uid: 6,  fromName: 'Pieter Hendriks',  from: 'Pieter Hendriks <pieter@example.com>',      toAddress: TO, subject: 'Lead via Facebook formulier',                   date: m(260),  category: 'Nieuwe Lead',  unread: true  },
-        { uid: 7,  fromName: 'Mollie',           from: 'Mollie <noreply@mollie.com>',               toAddress: TO, subject: 'Betaling ontvangen — order #4218',              date: m(95),   category: 'Overig',       unread: true  },
-        { uid: 8,  fromName: 'Teamleader',       from: 'Teamleader <noreply@teamleader.eu>',        toAddress: TO, subject: 'Factuur voldaan: 2025-0418',                    date: m(150),  category: 'Overig',       unread: false },
-        { uid: 9,  fromName: 'GoHighLevel',      from: 'GoHighLevel <noreply@gohighlevel.com>',     toAddress: TO, subject: 'Nieuwe Event Aanmelding van Tom Bakker',        date: m(20),   category: 'Appointment',  unread: true  },
-        { uid: 10, fromName: 'Bol.com',          from: 'Bol.com <marketing@bol.com>',               toAddress: TO, subject: 'Speciale aanbieding: 30% korting deze week!',   date: m(330),  category: 'Reclame',      unread: true  }
+        // leads@ — lead-formulieren en uitlegsessies
+        { uid: `${MB.leads}:1`,  mailbox: MB.leads, fromName: 'Mark Janssen',     from: 'Mark Janssen <mark@example.com>',       toAddress: MB.leads, subject: 'Nieuwe Lead – aanvraag uitlegsessie',          date: m(8),    category: 'Nieuwe Lead',  unread: true  },
+        { uid: `${MB.leads}:2`,  mailbox: MB.leads, fromName: 'Calendly',         from: 'Calendly <no-reply@calendly.com>',      toAddress: MB.leads, subject: 'Nieuwe uitlegsessie ingepland: Sara de Wit',   date: m(45),   category: 'Appointment',  unread: false },
+        { uid: `${MB.leads}:3`,  mailbox: MB.leads, fromName: 'Pieter Hendriks',  from: 'Pieter Hendriks <pieter@example.com>',  toAddress: MB.leads, subject: 'Lead via Facebook formulier',                   date: m(260),  category: 'Nieuwe Lead',  unread: true  },
+        { uid: `${MB.leads}:4`,  mailbox: MB.leads, fromName: 'GoHighLevel',      from: 'GoHighLevel <noreply@gohighlevel.com>', toAddress: MB.leads, subject: 'Nieuwe Event Aanmelding van Tom Bakker',        date: m(20),   category: 'Appointment',  unread: true  },
+
+        // info@ — algemene klantvragen en newsletters
+        { uid: `${MB.info}:1`,   mailbox: MB.info,  fromName: 'Linda Vermeer',    from: 'Linda Vermeer <linda@example.com>',     toAddress: MB.info,  subject: 'Hoe werkt jullie module 3 precies?',           date: m(120),  category: 'Klantvraag',   unread: true  },
+        { uid: `${MB.info}:2`,   mailbox: MB.info,  fromName: 'Newsletter Forex', from: 'newsletter@news.example.com',           toAddress: MB.info,  subject: 'Nieuwsbrief: wekelijkse marktupdate',           date: m(220),  category: 'Reclame',      unread: false },
+        { uid: `${MB.info}:3`,   mailbox: MB.info,  fromName: 'Bol.com',          from: 'Bol.com <marketing@bol.com>',           toAddress: MB.info,  subject: 'Speciale aanbieding: 30% korting deze week!',   date: m(330),  category: 'Reclame',      unread: true  },
+
+        // partners@ — partnerschappen
+        { uid: `${MB.partn}:1`,  mailbox: MB.partn, fromName: 'Tom de Vries',     from: 'Tom de Vries <tom@xyz-broker.nl>',      toAddress: MB.partn, subject: 'Voorstel samenwerking — affiliate programma',  date: m(70),   category: 'Klantvraag',   unread: true  },
+        { uid: `${MB.partn}:2`,  mailbox: MB.partn, fromName: 'Erik van Dam',     from: 'Erik van Dam <erik@partner-co.com>',    toAddress: MB.partn, subject: 'Nieuwe Lead via affiliate-link',                date: m(310),  category: 'Nieuwe Lead',  unread: false },
+
+        // administratie@ — facturen en betalingsbevestigingen
+        { uid: `${MB.admin}:1`,  mailbox: MB.admin, fromName: 'Boekhouding BV',   from: 'Boekhouding BV <fact@boek.nl>',         toAddress: MB.admin, subject: 'Vraag over factuur 2025-0418',                  date: m(180),  category: 'Factuurvraag', unread: true  },
+        { uid: `${MB.admin}:2`,  mailbox: MB.admin, fromName: 'Mollie',           from: 'Mollie <noreply@mollie.com>',           toAddress: MB.admin, subject: 'Betaling ontvangen — order #4218',              date: m(95),   category: 'Overig',       unread: true  },
+        { uid: `${MB.admin}:3`,  mailbox: MB.admin, fromName: 'Teamleader',       from: 'Teamleader <noreply@teamleader.eu>',    toAddress: MB.admin, subject: 'Factuur voldaan: 2025-0418',                    date: m(150),  category: 'Overig',       unread: false }
       ];
       const replyFor = (cat, name) => {
         const greet = `Beste ${name},`;
