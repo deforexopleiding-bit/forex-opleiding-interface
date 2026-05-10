@@ -451,6 +451,92 @@
     .footer-user:hover { background: rgba(255,255,255,0.05); color: var(--text); }
     .footer-avatar { width: 26px; height: 26px; flex-shrink: 0; border-radius: 50%; background: var(--accent-grad); display: grid; place-items: center; font-size: 10px; font-weight: 800; color: #0a0b10; }
 
+    /* ── Custom category dropdown ── */
+    .cat-dd { position: relative; display: inline-flex; }
+    .cat-dd-trigger {
+      font-size: 11px; font-weight: 600; padding: 3px 9px; border-radius: 6px;
+      border: 1px solid; cursor: pointer; user-select: none;
+      display: inline-flex; align-items: center; gap: 3px; white-space: nowrap;
+      transition: filter 0.15s;
+    }
+    .cat-dd-trigger::after { content: '▾'; font-size: 8px; opacity: 0.5; margin-left: 2px; }
+    .cat-dd-trigger:hover { filter: brightness(1.18); }
+    .cat-dd-menu {
+      position: absolute; top: calc(100% + 5px); left: 0; z-index: 600;
+      background: var(--bg-elev-2); border: 1px solid var(--border-strong);
+      border-radius: 10px; padding: 4px; min-width: 190px;
+      box-shadow: 0 16px 48px rgba(0,0,0,0.6);
+      opacity: 0; transform: translateY(-6px); pointer-events: none;
+      transition: opacity 0.12s, transform 0.12s;
+    }
+    .cat-dd-menu.open { opacity: 1; transform: none; pointer-events: auto; }
+    .cat-dd-item {
+      display: flex; align-items: center; gap: 9px; width: 100%;
+      padding: 7px 10px; border-radius: 7px; cursor: pointer;
+      font-size: 12px; font-weight: 500; color: var(--text-dim);
+      transition: background 0.12s, color 0.12s;
+      border: none; background: none; text-align: left; font-family: inherit;
+    }
+    .cat-dd-item:hover { background: rgba(255,255,255,0.05); color: var(--text); }
+    .cat-dd-item.current { color: var(--text); font-weight: 600; }
+    .cat-dd-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+
+    /* ── Action menu ("⋯") ── */
+    .act-menu-wrap { position: relative; }
+    .act-menu-btn {
+      background: none; border: 1px solid transparent; border-radius: 6px;
+      color: var(--text-faint); padding: 2px 7px; cursor: pointer;
+      font-size: 18px; line-height: 1; transition: all 0.15s; font-family: inherit;
+    }
+    .act-menu-btn:hover { background: rgba(255,255,255,0.05); border-color: var(--border-strong); color: var(--text); }
+    .act-menu-dropdown {
+      position: absolute; top: calc(100% + 5px); right: 0; z-index: 600;
+      background: var(--bg-elev-2); border: 1px solid var(--border-strong);
+      border-radius: 10px; padding: 4px; min-width: 215px;
+      box-shadow: 0 16px 48px rgba(0,0,0,0.6);
+      opacity: 0; transform: translateY(-6px); pointer-events: none;
+      transition: opacity 0.12s, transform 0.12s;
+    }
+    .act-menu-dropdown.open { opacity: 1; transform: none; pointer-events: auto; }
+    .act-item {
+      display: flex; align-items: center; gap: 8px; width: 100%;
+      padding: 7px 10px; border-radius: 7px; cursor: pointer;
+      font-size: 12px; font-weight: 500; color: var(--text-dim);
+      transition: background 0.12s, color 0.12s;
+      border: none; background: none; text-align: left; font-family: inherit;
+    }
+    .act-item:hover { background: rgba(255,255,255,0.05); color: var(--text); }
+    .act-item svg { width: 13px; height: 13px; flex-shrink: 0; }
+    .act-divider { height: 1px; background: var(--border); margin: 3px 4px; }
+    .act-item.act-success:hover { background: rgba(34,197,94,0.07); color: var(--green); }
+    .act-item.act-danger:hover { background: rgba(239,68,68,0.07); color: var(--red); }
+    .act-item.act-violet:hover { background: rgba(168,85,247,0.07); color: var(--accent-violet); }
+    .act-sub-header {
+      font-size: 10px; text-transform: uppercase; letter-spacing: .07em;
+      font-weight: 700; color: var(--text-faint); padding: 6px 10px 3px; pointer-events: none;
+    }
+
+    /* ── Search ── */
+    .search-wrap { position: relative; display: inline-flex; align-items: center; }
+    .search-icon-inner { position: absolute; left: 9px; pointer-events: none; width: 13px; height: 13px; color: var(--text-faint); }
+    .search-input {
+      background: var(--bg); border: 1px solid var(--border-strong); color: var(--text);
+      padding: 6px 10px 6px 30px; border-radius: 7px; font-family: inherit;
+      font-size: 13px; outline: none; width: 170px;
+      transition: border-color 0.18s, width 0.2s; color-scheme: dark;
+    }
+    .search-input:focus { border-color: var(--accent-cyan); width: 230px; }
+    .search-input::placeholder { color: var(--text-faint); }
+    .search-count { font-size: 11px; color: var(--text-faint); white-space: nowrap; margin-left: 6px; }
+    .search-highlight { background: rgba(245,158,11,0.25); color: var(--amber); border-radius: 2px; padding: 0 1px; }
+
+    /* ── Snooze badge ── */
+    .snooze-badge {
+      font-size: 10px; font-weight: 600; padding: 2px 7px; border-radius: 5px;
+      background: rgba(168,85,247,0.10); border: 1px solid rgba(168,85,247,0.25);
+      color: var(--accent-violet); white-space: nowrap;
+    }
+
     /* ── Confidence dot ── */
     .conf-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; cursor: help; }
     .conf-dot.high     { background: var(--green); }
@@ -640,6 +726,13 @@
         <input type="date" id="dateTo" />
       </span>
     </div>
+    <div class="filter-group" style="margin-left:auto">
+      <div class="search-wrap">
+        <svg class="search-icon-inner" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        <input type="text" class="search-input" id="searchInput" placeholder="Zoeken… (Ctrl+F)" autocomplete="off" spellcheck="false" />
+      </div>
+      <span class="search-count" id="searchCount"></span>
+    </div>
   </div>
 
   <div class="cat-pills-bar" id="catPillsBar">
@@ -738,6 +831,8 @@
   const AI_CONF_KEY           = 'email_ai_confidence'; // uid -> { confidence, source }
   const CACHE_VER_KEY         = 'email_cache_version';
   const CACHE_VERSION         = '2'; // bump to force cache-clear after logic changes
+  const SNOOZE_KEY            = 'email_snooze_map';
+  const ACTION_FLAGS_KEY      = 'email_action_flags'; // uid -> true | false
 
   // ── SVG icons ──────────────────────────────────────────────────────────────
   const ICON_AI     = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3z"></path></svg>';
@@ -745,6 +840,19 @@
   const ICON_REGEN  = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>';
   const ICON_TASK   = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="9" y1="9" x2="15" y2="9"/><line x1="9" y1="13" x2="15" y2="13"/><line x1="9" y1="17" x2="12" y2="17"/></svg>';
   const ICON_READ   = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>';
+  const ICON_SNOOZE = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>';
+  const ICON_FLAG   = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" y1="22" x2="4" y2="15"/></svg>';
+  const ICON_NOACT  = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/></svg>';
+
+  const CAT_COLORS = {
+    'Nieuwe Lead':      '#22d3ee',
+    'Appointment':      '#a855f7',
+    'Event Aanmelding': '#14b8a6',
+    'Klantvraag':       '#f59e0b',
+    'Factuurvraag':     '#ef4444',
+    'Reclame':          '#ec4899',
+    'Overig':           '#64748b'
+  };
 
   // ── Harde categorisatieregels (spiegelt api/categorize.js) ───────────────
   function applyHardRules(subject, from) {
@@ -795,7 +903,10 @@
     reclameSelected: new Set(),
     suggestions: [],   // weak reclame matches: [{ email, pattern }]
     fetchedAt: null,
-    catFilter: 'Alle'
+    catFilter: 'Alle',
+    searchQuery: '',
+    snoozeMap:   loadJson(SNOOZE_KEY,       {}), // uid -> ISO date string
+    actionFlags: loadJson(ACTION_FLAGS_KEY, {})  // uid -> true (force actie) | false (no action)
   };
 
   // ── localStorage helpers ───────────────────────────────────────────────────
@@ -1484,10 +1595,186 @@
 
   function getFilteredEmails()  { return state.emails.filter(passesFilters); }
   function passesCatFilter(e)   { return state.catFilter === 'Alle' || e.category === state.catFilter; }
-  function getActieEmails(f)    { return f.filter((e) => ACTIE_CATS.has(e.category) && e.unread && passesCatFilter(e)); }
-  function getInfoEmails(f)     { return f.filter((e) => INFO_CATS.has(e.category) && passesCatFilter(e)); }
-  function getReclameEmails(f)  { return f.filter((e) => e.category === 'Reclame'); }
-  function getSuspectEmails()   { return state.suggestions.map((s) => s.email).filter(passesFilters); }
+
+  function getActieEmails(f) {
+    const now = new Date();
+    return f.filter((e) => {
+      if (!passesCatFilter(e)) return false;
+      if (!passesSearchFilter(e)) return false;
+      if (isSnoozed(e.uid)) return false;
+      if (state.actionFlags[e.uid] === false) return false; // explicitly excluded
+      if (state.actionFlags[e.uid] === true)  return true;  // explicitly included
+      return ACTIE_CATS.has(e.category) && e.unread;
+    });
+  }
+
+  function getInfoEmails(f) {
+    return f.filter((e) =>
+      INFO_CATS.has(e.category) &&
+      passesCatFilter(e) &&
+      passesSearchFilter(e) &&
+      state.actionFlags[e.uid] !== true // if force-actie, show there instead
+    );
+  }
+
+  function getReclameEmails(f) {
+    return f.filter((e) => e.category === 'Reclame' && passesSearchFilter(e));
+  }
+
+  function getSuspectEmails() {
+    return state.suggestions.map((s) => s.email).filter((e) => passesFilters(e) && passesSearchFilter(e));
+  }
+
+  // ── Search ────────────────────────────────────────────────────────────────
+  function passesSearchFilter(e) {
+    const q = state.searchQuery.trim().toLowerCase();
+    if (!q) return true;
+    const hay = [
+      e.from || '', e.fromName || '', e.fromAddress || '',
+      e.subject || '',
+      state.bodyCache[e.uid]?.text || ''
+    ].join(' ').toLowerCase();
+    return hay.includes(q);
+  }
+
+  function highlightMatch(text, query) {
+    if (!query) return escapeHtml(text);
+    const q = query.trim();
+    if (!q) return escapeHtml(text);
+    const idx = text.toLowerCase().indexOf(q.toLowerCase());
+    if (idx < 0) return escapeHtml(text);
+    return escapeHtml(text.slice(0, idx)) +
+      '<mark class="search-highlight">' + escapeHtml(text.slice(idx, idx + q.length)) + '</mark>' +
+      escapeHtml(text.slice(idx + q.length));
+  }
+
+  // ── Global dropdown manager ────────────────────────────────────────────────
+  function closeAllDropdowns() {
+    document.querySelectorAll('.cat-dd-menu.open, .act-menu-dropdown.open').forEach((m) => m.classList.remove('open'));
+  }
+  document.addEventListener('click', (ev) => {
+    if (!ev.target.closest('.cat-dd') && !ev.target.closest('.act-menu-wrap')) closeAllDropdowns();
+  });
+
+  // ── Custom category dropdown rendering ────────────────────────────────────
+  function renderCatDropdown(uid, category) {
+    const items = CATEGORIES.map((c) => {
+      const col = CAT_COLORS[c] || '#64748b';
+      return '<button class="cat-dd-item' + (c === category ? ' current' : '') +
+        '" data-dd-cat="' + escapeHtml(c) + '" data-dd-uid="' + escapeHtml(uid) + '">' +
+        '<span class="cat-dd-dot" style="background:' + col + '"></span>' +
+        escapeHtml(c) +
+        '</button>';
+    }).join('');
+    return '<div class="cat-dd">' +
+      '<div class="cat-badge cat-dd-trigger" data-cat="' + escapeHtml(category) +
+        '" data-open-dd="' + escapeHtml(uid) + '">' +
+        escapeHtml(category) +
+      '</div>' +
+      '<div class="cat-dd-menu" id="catDd-' + escapeHtml(uid) + '">' + items + '</div>' +
+    '</div>';
+  }
+
+  // ── Action menu rendering ─────────────────────────────────────────────────
+  function renderActionMenu(e) {
+    const uid = e.uid;
+    const isSn = state.snoozeMap[uid] && new Date(state.snoozeMap[uid]) > new Date();
+    const isForced = state.actionFlags[uid] === true;
+    const isNoAct  = state.actionFlags[uid] === false;
+    return '<div class="act-menu-wrap">' +
+      '<button class="act-menu-btn" data-open-act="' + escapeHtml(uid) + '" title="Meer opties">⋯</button>' +
+      '<div class="act-menu-dropdown" id="actMenu-' + escapeHtml(uid) + '">' +
+        '<div class="act-sub-header">Status</div>' +
+        '<button class="act-item' + (isForced ? ' act-success' : '') + '" data-act="mark-action" data-uid="' + escapeHtml(uid) + '">' +
+          ICON_FLAG + (isForced ? 'Actie vereist ✓' : 'Markeer als actie vereist') +
+        '</button>' +
+        '<button class="act-item' + (isNoAct ? ' act-violet' : '') + '" data-act="no-action" data-uid="' + escapeHtml(uid) + '">' +
+          ICON_NOACT + (isNoAct ? 'Geen actie nodig ✓' : 'Geen actie nodig') +
+        '</button>' +
+        '<div class="act-divider"></div>' +
+        '<div class="act-sub-header">Acties</div>' +
+        (e.unread ? '<button class="act-item" data-act="mark-read" data-uid="' + escapeHtml(uid) + '">' + ICON_READ + ' Markeer als gelezen</button>' : '') +
+        '<button class="act-item" data-act="create-task" data-uid="' + escapeHtml(uid) + '">' + ICON_TASK + ' Maak taak aan</button>' +
+        '<div class="act-divider"></div>' +
+        '<div class="act-sub-header">Snooz</div>' +
+        '<button class="act-item act-violet" data-act="snooze-day" data-uid="' + escapeHtml(uid) + '">' + ICON_SNOOZE + ' Tot morgen</button>' +
+        '<button class="act-item act-violet" data-act="snooze-week" data-uid="' + escapeHtml(uid) + '">' + ICON_SNOOZE + ' Tot volgende week</button>' +
+        (isSn ? '<button class="act-item act-success" data-act="unsnooze" data-uid="' + escapeHtml(uid) + '">' + ICON_READ + ' Snooze opheffen</button>' : '') +
+      '</div>' +
+    '</div>';
+  }
+
+  // ── Snooze helpers ────────────────────────────────────────────────────────
+  function snoozeEmail(uid, days) {
+    const until = new Date();
+    until.setDate(until.getDate() + days);
+    until.setHours(8, 0, 0, 0); // 8:00 ochtend
+    state.snoozeMap[uid] = until.toISOString();
+    saveJson(SNOOZE_KEY, state.snoozeMap);
+    // mark no-action until snooze wakes; auto-clear on wake (handled in getActieEmails)
+    const label = days === 1 ? 'morgen' : 'volgende week';
+    showToast('Gesnoozed tot ' + until.toLocaleDateString('nl-NL', { weekday:'long', day:'numeric', month:'short' }));
+    closeAllDropdowns();
+    render();
+    saveEmailAction(uid, 'snooze', until.toISOString());
+  }
+
+  function unsnoozeEmail(uid) {
+    delete state.snoozeMap[uid];
+    saveJson(SNOOZE_KEY, state.snoozeMap);
+    showToast('Snooze opgeheven');
+    closeAllDropdowns();
+    render();
+    saveEmailAction(uid, 'unsnooze', null);
+  }
+
+  function isSnoozed(uid) {
+    return state.snoozeMap[uid] && new Date(state.snoozeMap[uid]) > new Date();
+  }
+
+  // ── Action flag helpers ───────────────────────────────────────────────────
+  function setActionFlag(uid, val) {
+    if (val === null) delete state.actionFlags[uid];
+    else state.actionFlags[uid] = val;
+    saveJson(ACTION_FLAGS_KEY, state.actionFlags);
+  }
+
+  // ── Smart category change (no full-render flicker when staying in same tab) ──
+  function handleCategoryChange(uid, newCat) {
+    const email = findEmail(uid);
+    if (!email || newCat === email.category) { closeAllDropdowns(); return; }
+    const oldCat = email.category;
+    state.overrides.category[uid] = newCat;
+    saveOverrides();
+    if (newCat === 'Reclame') recordReclamePattern(email);
+    email.category = newCat;
+    _aiCatCache[uid]  = newCat;
+    _aiConfCache[uid] = { confidence: 95, source: 'learned' };
+    saveJson(AI_CATS_KEY,  _aiCatCache);
+    saveJson(AI_CONF_KEY,  _aiConfCache);
+    populateSuggestions();
+    closeAllDropdowns();
+    // Only do a full re-render when the email moves between tab groups
+    const wasActie = ACTIE_CATS.has(oldCat);
+    const isActie  = ACTIE_CATS.has(newCat) && email.unread && !isSnoozed(uid) && state.actionFlags[uid] !== false;
+    if (wasActie && isActie) {
+      updateActieCard(uid); // surgical — no flicker
+    } else {
+      render();
+    }
+    showToast('Verplaatst naar ' + newCat + ' · systeem heeft geleerd');
+    sendLearningCorrection(email, oldCat, newCat);
+    saveEmailAction(uid, 'recategorize', newCat);
+  }
+
+  // ── Supabase email_actions fire-and-forget ─────────────────────────────────
+  function saveEmailAction(emailId, action, value) {
+    fetch('/api/email-actions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email_id: emailId, action, value, set_by: 'Jeffrey' })
+    }).catch(() => {}); // fire-and-forget
+  }
 
   // ── Rendering: Actie tab ───────────────────────────────────────────────────
   function renderPreviewHtml(uid) {
@@ -1522,25 +1809,27 @@
     const proposal = state.aiProposals[e.uid];
     const hasProposal = !!proposal;
     const showGenBtn = !hasProposal || proposal.error;
+    const snoozed = isSnoozed(e.uid);
+    const q = state.searchQuery;
 
     return '<div class="actie-card' + (e.unread ? ' unread' : '') + '" data-uid="' + escapeHtml(e.uid) + '">' +
       '<div class="card-top">' +
         renderConfDot(e.uid) +
-        '<select class="cat-select-inline" data-categorize="' + escapeHtml(e.uid) + '">' + renderCatOptions(e.category) + '</select>' +
+        renderCatDropdown(e.uid, e.category) +
+        (snoozed ? '<span class="snooze-badge">Gesnoozed</span>' : '') +
         '<span class="card-time">' + escapeHtml(relativeTime(e.date)) + '</span>' +
         (e.unread ? '<span class="unread-dot" title="Ongelezen"></span>' : '') +
+        renderActionMenu(e) +
       '</div>' +
       '<div class="card-sender">' +
-        '<strong>' + escapeHtml(e.fromName || e.from || 'Onbekend') + '</strong>' +
-        (e.fromAddress ? '<span class="sender-addr">&lt;' + escapeHtml(e.fromAddress) + '&gt;</span>' : '') +
+        '<strong>' + highlightMatch(e.fromName || e.from || 'Onbekend', q) + '</strong>' +
+        (e.fromAddress ? '<span class="sender-addr">&lt;' + highlightMatch(e.fromAddress, q) + '&gt;</span>' : '') +
       '</div>' +
-      '<div class="card-subject">' + escapeHtml(e.subject || '(geen onderwerp)') + '</div>' +
+      '<div class="card-subject">' + highlightMatch(e.subject || '(geen onderwerp)', q) + '</div>' +
       renderPreviewHtml(e.uid) +
       renderAiSection(e) +
       '<div class="card-actions">' +
         (showGenBtn ? '<button class="btn btn-ai" data-action="generate" data-uid="' + escapeHtml(e.uid) + '">' + ICON_AI + ' Genereer AI antwoord</button>' : '') +
-        '<button class="btn btn-task" data-action="create-task" data-uid="' + escapeHtml(e.uid) + '">' + ICON_TASK + ' Maak taak aan</button>' +
-        (e.unread ? '<button class="btn" data-action="mark-read" data-uid="' + escapeHtml(e.uid) + '">' + ICON_READ + ' Markeer als gelezen</button>' : '') +
       '</div>' +
     '</div>';
   }
@@ -1560,24 +1849,64 @@
     const card = document.querySelector('.actie-card[data-uid="' + uid + '"]');
     if (!card) return;
 
-    const catSelect = card.querySelector('[data-categorize="' + uid + '"]');
-    if (catSelect) {
-      catSelect.addEventListener('change', (ev) => {
-        const newCat = ev.target.value;
-        const email  = findEmail(uid);
-        if (!email || newCat === email.category) return;
-        const oldCat = email.category;
-        state.overrides.category[uid] = newCat;
-        saveOverrides();
-        if (newCat === 'Reclame') recordReclamePattern(email);
-        email.category = newCat;
-        populateSuggestions();
-        render();
-        showToast('Verplaatst naar ' + newCat);
-        sendLearningCorrection(email, oldCat, newCat);
+    // ── Custom category dropdown ──────────────────────────────────────────
+    const ddTrigger = card.querySelector('[data-open-dd="' + uid + '"]');
+    if (ddTrigger) {
+      ddTrigger.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        const menu = document.getElementById('catDd-' + uid);
+        if (!menu) return;
+        const isOpen = menu.classList.contains('open');
+        closeAllDropdowns();
+        if (!isOpen) menu.classList.add('open');
       });
     }
+    card.querySelectorAll('[data-dd-uid="' + uid + '"]').forEach((item) => {
+      item.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        handleCategoryChange(uid, item.dataset.ddCat);
+      });
+    });
 
+    // ── Action menu ───────────────────────────────────────────────────────
+    const actBtn = card.querySelector('[data-open-act="' + uid + '"]');
+    if (actBtn) {
+      actBtn.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        const menu = document.getElementById('actMenu-' + uid);
+        if (!menu) return;
+        const isOpen = menu.classList.contains('open');
+        closeAllDropdowns();
+        if (!isOpen) menu.classList.add('open');
+      });
+    }
+    card.querySelectorAll('[data-act]').forEach((btn) => {
+      btn.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        closeAllDropdowns();
+        const act = btn.dataset.act;
+        const u   = btn.dataset.uid;
+        if (act === 'mark-action') {
+          const current = state.actionFlags[u] === true;
+          setActionFlag(u, current ? null : true);
+          showToast(current ? 'Actie vereist markering verwijderd' : 'Gemarkeerd als actie vereist · systeem heeft geleerd');
+          saveEmailAction(u, 'mark-action', !current);
+          updateActieCard(u);
+        } else if (act === 'no-action') {
+          const current = state.actionFlags[u] === false;
+          setActionFlag(u, current ? null : false);
+          showToast(current ? 'Mail staat weer in actie vereist' : 'Geen actie nodig · verwijderd uit lijst');
+          saveEmailAction(u, 'no-action', !current);
+          render();
+        } else if (act === 'mark-read')  { markAsRead(u); }
+        else if (act === 'create-task')  { openTaakVanEmail(u); }
+        else if (act === 'snooze-day')   { snoozeEmail(u, 1); }
+        else if (act === 'snooze-week')  { snoozeEmail(u, 7); }
+        else if (act === 'unsnooze')     { unsnoozeEmail(u); }
+      });
+    });
+
+    // ── Reply textarea ────────────────────────────────────────────────────
     const replyBox = card.querySelector('[data-reply="' + uid + '"]');
     if (replyBox) {
       replyBox.addEventListener('input', () => {
@@ -1585,32 +1914,73 @@
       });
     }
 
+    // ── AI proposal buttons ───────────────────────────────────────────────
     card.querySelectorAll('[data-action]').forEach((btn) => {
       btn.addEventListener('click', (ev) => {
         ev.stopPropagation();
         const action = btn.dataset.action;
         const u = btn.dataset.uid;
-        if (action === 'generate')    { startAiProposal(u); }
-        else if (action === 'regenerate') { regenerateAiProposal(u); }
-        else if (action === 'send')       { sendAiProposal(u); }
-        else if (action === 'cancel')     { cancelAiProposal(u); }
-        else if (action === 'mark-read')  { markAsRead(u); }
-        else if (action === 'create-task'){ openTaakVanEmail(u); }
+        if      (action === 'generate')    startAiProposal(u);
+        else if (action === 'regenerate')  regenerateAiProposal(u);
+        else if (action === 'send')        sendAiProposal(u);
+        else if (action === 'cancel')      cancelAiProposal(u);
       });
     });
   }
 
   // ── Rendering: Info tab ────────────────────────────────────────────────────
   function renderInfoRow(e) {
-    return '<div class="info-row">' +
+    const q = state.searchQuery;
+    const infoActMenu =
+      '<div class="act-menu-wrap" style="margin-left:4px">' +
+        '<button class="act-menu-btn" data-open-act="info-' + escapeHtml(e.uid) + '" title="Meer opties">⋯</button>' +
+        '<div class="act-menu-dropdown" id="actMenu-info-' + escapeHtml(e.uid) + '">' +
+          '<button class="act-item" data-act="mark-action" data-uid="' + escapeHtml(e.uid) + '">' + ICON_FLAG + ' Markeer als actie vereist</button>' +
+          '<button class="act-item" data-act="create-task"  data-uid="' + escapeHtml(e.uid) + '">' + ICON_TASK + ' Maak taak aan</button>' +
+          '<div class="act-divider"></div>' +
+          '<button class="act-item act-violet" data-act="snooze-day"  data-uid="' + escapeHtml(e.uid) + '">' + ICON_SNOOZE + ' Snooz tot morgen</button>' +
+          '<button class="act-item act-violet" data-act="snooze-week" data-uid="' + escapeHtml(e.uid) + '">' + ICON_SNOOZE + ' Snooz tot volgende week</button>' +
+        '</div>' +
+      '</div>';
+
+    return '<div class="info-row" data-uid="' + escapeHtml(e.uid) + '">' +
       '<span class="cat-badge" data-cat="' + escapeHtml(e.category) + '">' + escapeHtml(e.category) + '</span>' +
       '<div class="info-meta">' +
-        '<div class="info-from">' + escapeHtml(e.fromName || e.from || 'Onbekend') + '</div>' +
-        '<div class="info-subject">' + escapeHtml(e.subject || '(geen onderwerp)') + '</div>' +
+        '<div class="info-from">'    + highlightMatch(e.fromName || e.from || 'Onbekend', q) + '</div>' +
+        '<div class="info-subject">' + highlightMatch(e.subject || '(geen onderwerp)', q)     + '</div>' +
       '</div>' +
       '<span class="info-time">' + escapeHtml(relativeTime(e.date)) + '</span>' +
-      '<span class="auto-label">Geen actie</span>' +
+      infoActMenu +
     '</div>';
+  }
+
+  function attachInfoRowHandlers() {
+    document.querySelectorAll('.info-row[data-uid]').forEach((row) => {
+      const uid = row.dataset.uid;
+      const trigger = row.querySelector('[data-open-act="info-' + uid + '"]');
+      if (trigger) {
+        trigger.addEventListener('click', (ev) => {
+          ev.stopPropagation();
+          const menu = document.getElementById('actMenu-info-' + uid);
+          if (!menu) return;
+          const isOpen = menu.classList.contains('open');
+          closeAllDropdowns();
+          if (!isOpen) menu.classList.add('open');
+        });
+      }
+      row.querySelectorAll('[data-act]').forEach((btn) => {
+        btn.addEventListener('click', (ev) => {
+          ev.stopPropagation();
+          closeAllDropdowns();
+          const act = btn.dataset.act;
+          const u   = btn.dataset.uid;
+          if      (act === 'mark-action') { setActionFlag(u, true); showToast('Gemarkeerd als actie vereist'); saveEmailAction(u, 'mark-action', true); render(); }
+          else if (act === 'create-task') { openTaakVanEmail(u); }
+          else if (act === 'snooze-day')  { snoozeEmail(u, 1); }
+          else if (act === 'snooze-week') { snoozeEmail(u, 7); }
+        });
+      });
+    });
   }
 
   function renderInfoTab(emails) {
@@ -1774,6 +2144,17 @@
     document.getElementById('sLeadsWeek').textContent   = leadsWeek;
     document.getElementById('sConv').textContent        = conv;
 
+    // Search count
+    const searchEl = document.getElementById('searchCount');
+    if (searchEl) {
+      if (state.searchQuery.trim()) {
+        const total = actieEmails.length + infoEmails.length + reclameEmails.length + suspectEmails.length;
+        searchEl.textContent = total + ' resultaten voor "' + state.searchQuery.trim() + '"';
+      } else {
+        searchEl.textContent = '';
+      }
+    }
+
     // Status bar
     const n = actieEmails.length;
     document.getElementById('actionCount').textContent = n + ' mail' + (n === 1 ? '' : 's') + ' vereist actie';
@@ -1796,6 +2177,7 @@
         break;
       case 'info':
         content.innerHTML = renderInfoTab(infoEmails);
+        attachInfoRowHandlers();
         if (infoEmails.length > PAGE_SIZE) {
           const totalPages = Math.max(1, Math.ceil(infoEmails.length / PAGE_SIZE));
           attachPaginationHandlers(totalPages, 'infoPage');
@@ -1917,6 +2299,31 @@
         catPills.forEach((p) => p.classList.toggle('active', p === pill));
         render();
       });
+    });
+
+    // Search input
+    const searchEl = document.getElementById('searchInput');
+    if (searchEl) {
+      let _searchTimer;
+      searchEl.addEventListener('input', () => {
+        clearTimeout(_searchTimer);
+        _searchTimer = setTimeout(() => {
+          state.searchQuery = searchEl.value;
+          state.infoPage = 1;
+          render();
+        }, 180);
+      });
+      searchEl.addEventListener('keydown', (ev) => {
+        if (ev.key === 'Escape') { searchEl.value = ''; state.searchQuery = ''; render(); searchEl.blur(); }
+      });
+    }
+
+    // Ctrl+F / Cmd+F → focus search
+    document.addEventListener('keydown', (ev) => {
+      if ((ev.ctrlKey || ev.metaKey) && ev.key === 'f') {
+        const el = document.getElementById('searchInput');
+        if (el) { ev.preventDefault(); el.focus(); el.select(); }
+      }
     });
   }
 
