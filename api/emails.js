@@ -75,12 +75,14 @@ export default async function handler(req, res) {
   const counters = {
     nieuweLead:         todayMessages.filter((m) => m.category === 'Nieuwe Lead').length,
     nieuweUitlegsessie: todayMessages.filter((m) => m.category === 'Appointment').length,
+    eventAanmelding:    todayMessages.filter((m) => m.category === 'Event Aanmelding').length,
     totaalVandaag:      todayMessages.length
   };
 
   const byCategory = {
     'Nieuwe Lead': 0,
     Appointment: 0,
+    'Event Aanmelding': 0,
     Klantvraag: 0,
     Factuurvraag: 0,
     Reclame: 0,
@@ -249,13 +251,23 @@ function categorize(subject, fromAddress, headerInfo) {
     return 'Nieuwe Lead';
   }
 
-  // 2. Appointment — gebaseerd op onderwerp, ongeacht afzender.
-  // "Nieuwe Event Aanmelding", Calendly-bevestigingen etc. horen hier.
+  // 2. Event Aanmelding — eigen categorie voor seminar-/event-
+  //    aanmeldingen. Deze check staat VOOR Appointment, anders zou
+  //    "Aanmelding ingepland" als gewone afspraak worden geteld.
+  if (
+    s.includes('event aanmelding') ||
+    s.includes('aanmelding') ||
+    s.includes('gent')
+  ) {
+    return 'Event Aanmelding';
+  }
+
+  // 3. Appointment — alleen nog echte uitlegsessies / afspraken
+  //    (Event Aanmelding is hierboven al afgevangen).
   if (
     s.includes('uitlegsessie') ||
     s.includes('ingepland') ||
     s.includes('appointment') ||
-    s.includes('event aanmelding') ||
     s.includes('nieuwe afspraak') ||
     s.includes('afspraak ingepland')
   ) {
