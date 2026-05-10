@@ -35,7 +35,12 @@ export default async function handler(req, res) {
       const messages = [];
       for await (const msg of client.fetch(
         { since: sevenDaysAgo },
-        { envelope: true, flags: true, uid: true }
+        {
+          envelope: true,
+          flags: true,
+          uid: true,
+          headers: ['list-unsubscribe', 'precedence']
+        }
       )) {
         messages.push(parseMessage(msg));
       }
@@ -60,6 +65,7 @@ export default async function handler(req, res) {
         Appointment: 0,
         Klantvraag: 0,
         Factuurvraag: 0,
+        Reclame: 0,
         Overig: 0
       };
       messages.forEach((m) => {
@@ -99,7 +105,19 @@ function parseMessage(msg) {
   const date = msg.envelope?.date
     ? new Date(msg.envelope.date).toISOString()
     : new Date().toISOString();
-  const category = categorize(subject, fromAddress);
+
+  // Headers we requested are returned as a Buffer (or string) of raw text.
+  // Extract two bulk-mail signals: List-Unsubscribe (any presence) and
+  // Precedence: bulk/list/junk.
+  const headerText = msg.headers
+    ? (typeof msg.headers === 'string' ? msg.headers : msg.headers.toString('utf8')).toLowerCase()
+    : '';
+  const headerInfo = {
+    hasUnsubscribe: /^list-unsubscribe:/m.test(headerText),
+    isBulk:         /^precedence:\s*(bulk|list|junk)/m.test(headerText)
+  };
+
+  const category = categorize(subject, fromAddress, headerInfo);
   const aiReply = generateReply(category, fromName || fromAddress);
 
   return {
@@ -146,41 +164,82 @@ function isPaymentConfirmation(subject) {
   );
 }
 
-function categorize(subject, fromAddress) {
+function isMarketing(subject, fromAddress, headerInfo) {
+  const s = (subject || '').toLowerCase();
+  const f = (fromAddress || '').toLowerCase();
+
+  // Sterkste signaal: List-Unsubscribe header is per RFC 2369 een
+  // bulk-mail indicator → altijd Reclame.
+  if (headerInfo && headerInfo.hasUnsubscribe) return true;
+
+  // Marketing-trefwoorden in onderwerp.
+  const subjectKeywords = [
+    'aanbieding', 'korting', 'sale', 'newsletter', 'nieuwsbrief',
+    'promotie', 'gratis', 'exclusief aanbod', 'beperkte tijd'
+  ];
+  if (subjectKeywords.some((k) => s.includes(k))) return true;
+
+  // Marketing-achtige afzender + bulk-indicator (Precedence: bulk/list).
+  // We vereisen de bulk-indicator om eenmalige transactionele noreply-mails
+  // niet ten onrechte als reclame te markeren.
+  const localPart = f.split('@')[0] || '';
+  const senderHint =
+    /^(noreply|no-reply|marketing|newsletter|news|info|nieuws|promo)$/.test(localPart) ||
+    /^(noreply|no-reply|marketing|newsletter|news|info|nieuws|promo)[-._]/.test(localPart);
+  if (senderHint && headerInfo && headerInfo.isBulk) return true;
+
+  return false;
+}
+
+function categorize(subject, fromAddress, headerInfo) {
   const s = (subject || '').toLowerCase();
 
-  // Auto-bevestigingen van betaalproviders en no-reply afzenders → Overig.
-  // Belangrijk: deze check staat VOOR de factuur/betaling-regel zodat ze
-  // niet ten onrechte als Factuurvraag worden geteld.
-  if (isAutomatedSender(fromAddress) || isPaymentConfirmation(subject)) {
-    return 'Overig';
-  }
-
-  if (
-    s.includes('uitlegsessie') ||
-    s.includes('afspraak ingepland') ||
-    s.includes('nieuwe afspraak') ||
-    s.includes('appointment') ||
-    s.includes('ingepland')
-  ) {
-    return 'Appointment';
-  }
+  // 1. Lead — gebaseerd op onderwerp, ongeacht afzender.
   if (
     s.includes('nieuwe lead') ||
     s.includes('new lead') ||
-    s.includes('aanmelding') ||
-    /\blead\b/.test(s)
+    /\blead(s)?\b/.test(s)
   ) {
     return 'Nieuwe Lead';
   }
+
+  // 2. Appointment — gebaseerd op onderwerp, ongeacht afzender.
+  // "Nieuwe Event Aanmelding", Calendly-bevestigingen etc. horen hier.
+  if (
+    s.includes('uitlegsessie') ||
+    s.includes('ingepland') ||
+    s.includes('appointment') ||
+    s.includes('event aanmelding') ||
+    s.includes('nieuwe afspraak') ||
+    s.includes('afspraak ingepland')
+  ) {
+    return 'Appointment';
+  }
+
+  // 4. Specifieke betalingsbevestigingen → altijd Overig (vóór de
+  //    generieke factuur-check, anders wint die).
+  if (isPaymentConfirmation(subject)) {
+    return 'Overig';
+  }
+
+  // 3. Factuur / betaling onderwerpen — afzender bepaalt of het een
+  //    echte klantvraag is of een automatische bevestiging.
   if (
     s.includes('factuur') ||
     s.includes('invoice') ||
     s.includes('betaling') ||
     s.includes('payment')
   ) {
+    if (isAutomatedSender(fromAddress)) return 'Overig';
     return 'Factuurvraag';
   }
+
+  // 5. Reclame / marketing.
+  if (isMarketing(subject, fromAddress, headerInfo)) {
+    return 'Reclame';
+  }
+
+  // Klantvraag-heuristiek (fallback voor klantvragen zonder factuur-context).
   if (
     s.includes('?') ||
     s.includes('vraag') ||
@@ -191,6 +250,8 @@ function categorize(subject, fromAddress) {
   ) {
     return 'Klantvraag';
   }
+
+  // 6. Al het overige.
   return 'Overig';
 }
 

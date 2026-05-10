@@ -354,6 +354,7 @@
     .cat-badge[data-cat="Appointment"]   { color: var(--accent-violet); background: rgba(168, 85, 247, 0.10); border-color: rgba(168, 85, 247, 0.25); }
     .cat-badge[data-cat="Klantvraag"]    { color: var(--amber);         background: rgba(245, 158, 11, 0.10); border-color: rgba(245, 158, 11, 0.25); }
     .cat-badge[data-cat="Factuurvraag"]  { color: var(--red);           background: rgba(239, 68, 68, 0.10);  border-color: rgba(239, 68, 68, 0.25);  }
+    .cat-badge[data-cat="Reclame"]       { color: #ec4899;              background: rgba(236, 72, 153, 0.10); border-color: rgba(236, 72, 153, 0.25); }
     .cat-badge[data-cat="Overig"]        { color: var(--text-dim);      background: rgba(148, 163, 184, 0.08); border-color: rgba(148, 163, 184, 0.20); }
 
     .email-meta { min-width: 0; }
@@ -560,7 +561,7 @@
           Onbeantwoord <span class="period">vandaag</span>
         </div>
         <div class="counter-value" id="cntPending">—</div>
-        <div class="counter-sub">excl. leads &amp; afspraken</div>
+        <div class="counter-sub">excl. leads, afspraken &amp; reclame</div>
       </div>
       <div class="counter">
         <div class="counter-label">
@@ -614,7 +615,7 @@
   </div>
 
   <script>
-    const CATEGORIES = ['Nieuwe Lead', 'Appointment', 'Klantvraag', 'Factuurvraag', 'Overig'];
+    const CATEGORIES = ['Nieuwe Lead', 'Appointment', 'Klantvraag', 'Factuurvraag', 'Reclame', 'Overig'];
     const state = {
       emails: [],
       counters: { nieuweLead: 0, nieuweUitlegsessie: 0, totaalVandaag: 0 },
@@ -767,7 +768,10 @@
       const total     = filtered.length;
 
       const onbeantwoord = filtered.filter(
-        (e) => e.unread && e.category !== 'Nieuwe Lead' && e.category !== 'Appointment'
+        (e) => e.unread &&
+               e.category !== 'Nieuwe Lead' &&
+               e.category !== 'Appointment' &&
+               e.category !== 'Reclame'
       ).length;
 
       const openFact = filtered.filter(
@@ -959,14 +963,16 @@
       const m = (mins) => new Date(now.getTime() - mins * 60000).toISOString();
       const TO = 'leads@deforexopleiding.nl';
       const demo = [
-        { uid: 1, fromName: 'Mark Janssen',     from: 'Mark Janssen <mark@example.com>',     toAddress: TO, subject: 'Nieuwe Lead – aanvraag uitlegsessie',          date: m(8),    category: 'Nieuwe Lead',  unread: true  },
-        { uid: 2, fromName: 'Calendly',         from: 'Calendly <no-reply@calendly.com>',    toAddress: TO, subject: 'Nieuwe uitlegsessie ingepland: Sara de Wit',   date: m(45),   category: 'Appointment',  unread: false },
-        { uid: 3, fromName: 'Linda Vermeer',    from: 'Linda Vermeer <linda@example.com>',   toAddress: TO, subject: 'Hoe werkt jullie module 3 precies?',           date: m(120),  category: 'Klantvraag',   unread: true  },
-        { uid: 4, fromName: 'Boekhouding BV',   from: 'Boekhouding BV <fact@boek.nl>',       toAddress: TO, subject: 'Vraag over factuur 2025-0418',                  date: m(180),  category: 'Factuurvraag', unread: true  },
-        { uid: 5, fromName: 'Newsletter Forex', from: 'news@example.com',                    toAddress: TO, subject: 'Wekelijkse marktupdate',                        date: m(220),  category: 'Overig',       unread: false },
-        { uid: 6, fromName: 'Pieter Hendriks',  from: 'Pieter Hendriks <pieter@example.com>',toAddress: TO, subject: 'Lead via Facebook formulier',                  date: m(260),  category: 'Nieuwe Lead',  unread: true  },
-        { uid: 7, fromName: 'Mollie',           from: 'Mollie <noreply@mollie.com>',         toAddress: TO, subject: 'Betaling ontvangen — order #4218',              date: m(95),   category: 'Overig',       unread: true  },
-        { uid: 8, fromName: 'Teamleader',       from: 'Teamleader <noreply@teamleader.eu>',  toAddress: TO, subject: 'Factuur voldaan: 2025-0418',                    date: m(150),  category: 'Overig',       unread: false }
+        { uid: 1,  fromName: 'Mark Janssen',     from: 'Mark Janssen <mark@example.com>',           toAddress: TO, subject: 'Nieuwe Lead – aanvraag uitlegsessie',          date: m(8),    category: 'Nieuwe Lead',  unread: true  },
+        { uid: 2,  fromName: 'Calendly',         from: 'Calendly <no-reply@calendly.com>',          toAddress: TO, subject: 'Nieuwe uitlegsessie ingepland: Sara de Wit',   date: m(45),   category: 'Appointment',  unread: false },
+        { uid: 3,  fromName: 'Linda Vermeer',    from: 'Linda Vermeer <linda@example.com>',         toAddress: TO, subject: 'Hoe werkt jullie module 3 precies?',           date: m(120),  category: 'Klantvraag',   unread: true  },
+        { uid: 4,  fromName: 'Boekhouding BV',   from: 'Boekhouding BV <fact@boek.nl>',             toAddress: TO, subject: 'Vraag over factuur 2025-0418',                  date: m(180),  category: 'Factuurvraag', unread: true  },
+        { uid: 5,  fromName: 'Newsletter Forex', from: 'newsletter@news.example.com',               toAddress: TO, subject: 'Nieuwsbrief: wekelijkse marktupdate',           date: m(220),  category: 'Reclame',      unread: false },
+        { uid: 6,  fromName: 'Pieter Hendriks',  from: 'Pieter Hendriks <pieter@example.com>',      toAddress: TO, subject: 'Lead via Facebook formulier',                   date: m(260),  category: 'Nieuwe Lead',  unread: true  },
+        { uid: 7,  fromName: 'Mollie',           from: 'Mollie <noreply@mollie.com>',               toAddress: TO, subject: 'Betaling ontvangen — order #4218',              date: m(95),   category: 'Overig',       unread: true  },
+        { uid: 8,  fromName: 'Teamleader',       from: 'Teamleader <noreply@teamleader.eu>',        toAddress: TO, subject: 'Factuur voldaan: 2025-0418',                    date: m(150),  category: 'Overig',       unread: false },
+        { uid: 9,  fromName: 'GoHighLevel',      from: 'GoHighLevel <noreply@gohighlevel.com>',     toAddress: TO, subject: 'Nieuwe Event Aanmelding van Tom Bakker',        date: m(20),   category: 'Appointment',  unread: true  },
+        { uid: 10, fromName: 'Bol.com',          from: 'Bol.com <marketing@bol.com>',               toAddress: TO, subject: 'Speciale aanbieding: 30% korting deze week!',   date: m(330),  category: 'Reclame',      unread: true  }
       ];
       const replyFor = (cat, name) => {
         const greet = `Beste ${name},`;
