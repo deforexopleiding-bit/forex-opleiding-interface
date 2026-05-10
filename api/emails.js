@@ -94,10 +94,12 @@ function parseMessage(msg) {
   const fromText = fromName
     ? `${fromName} <${fromAddress}>`
     : fromAddress || 'Onbekend';
+  const toEntry = msg.envelope?.to?.[0];
+  const toAddress = toEntry?.address || '';
   const date = msg.envelope?.date
     ? new Date(msg.envelope.date).toISOString()
     : new Date().toISOString();
-  const category = categorize(subject);
+  const category = categorize(subject, fromAddress);
   const aiReply = generateReply(category, fromName || fromAddress);
 
   return {
@@ -106,6 +108,7 @@ function parseMessage(msg) {
     from: fromText,
     fromName: fromName || fromAddress.split('@')[0] || 'Onbekend',
     fromAddress,
+    toAddress,
     date,
     category,
     aiReply,
@@ -113,8 +116,45 @@ function parseMessage(msg) {
   };
 }
 
-function categorize(subject) {
+function isAutomatedSender(fromAddress) {
+  const f = (fromAddress || '').toLowerCase();
+  if (!f) return false;
+  // Specific payment provider / SaaS domains that send auto-confirmations.
+  // Extend this list as new providers come into use.
+  if (/@(mollie\.com|teamleader\.eu|stripe\.com|buckaroo\.nl|pay\.nl|paypal\.com)$/.test(f)) {
+    return true;
+  }
+  // Common no-reply local parts
+  const localPart = f.split('@')[0] || '';
+  if (/^(no[-_.]?reply|donotreply|do[-_.]?not[-_.]?reply|noresponse)$/.test(localPart)) {
+    return true;
+  }
+  return false;
+}
+
+function isPaymentConfirmation(subject) {
   const s = (subject || '').toLowerCase();
+  return (
+    s.includes('betaling ontvangen') ||
+    s.includes('betaling bevestigd') ||
+    s.includes('factuur voldaan') ||
+    s.includes('bedankt voor je betaling') ||
+    s.includes('bedankt voor uw betaling') ||
+    s.includes('payment confirmed') ||
+    s.includes('payment received') ||
+    s.includes('thank you for your payment')
+  );
+}
+
+function categorize(subject, fromAddress) {
+  const s = (subject || '').toLowerCase();
+
+  // Auto-bevestigingen van betaalproviders en no-reply afzenders → Overig.
+  // Belangrijk: deze check staat VOOR de factuur/betaling-regel zodat ze
+  // niet ten onrechte als Factuurvraag worden geteld.
+  if (isAutomatedSender(fromAddress) || isPaymentConfirmation(subject)) {
+    return 'Overig';
+  }
 
   if (
     s.includes('uitlegsessie') ||

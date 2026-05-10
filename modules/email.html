@@ -226,6 +226,58 @@
     }
     .pill.active .count { background: rgba(0,0,0,0.15); }
 
+    /* Filter bar (date + address) */
+    .filter-bar {
+      display: flex;
+      align-items: center;
+      gap: 12px 24px;
+      flex-wrap: wrap;
+      margin-bottom: 16px;
+      padding: 14px 18px;
+      background: var(--bg-elev);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+    }
+    .filter-group {
+      display: flex; align-items: center; gap: 8px;
+      flex-wrap: wrap;
+    }
+    .filter-group-label {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--text-faint);
+      font-weight: 600;
+      white-space: nowrap;
+      margin-right: 4px;
+    }
+    .filter-bar select,
+    .filter-bar input[type="date"] {
+      background: var(--bg);
+      border: 1px solid var(--border-strong);
+      color: var(--text);
+      padding: 7px 12px;
+      border-radius: 8px;
+      font-family: inherit;
+      font-size: 13px;
+      cursor: pointer;
+      outline: none;
+      transition: border-color 0.18s ease;
+      color-scheme: dark;
+    }
+    .filter-bar select:hover,
+    .filter-bar input[type="date"]:hover { border-color: rgba(255,255,255,0.2); }
+    .filter-bar select:focus,
+    .filter-bar input[type="date"]:focus { border-color: var(--accent-cyan); }
+    .filter-bar input[type="date"] { padding: 6px 10px; }
+    .date-pill { padding: 6px 14px; font-weight: 500; }
+    .custom-range {
+      display: flex; align-items: center; gap: 8px;
+      font-size: 13px; color: var(--text-dim);
+      flex-wrap: wrap;
+    }
+    .custom-range.hidden { display: none; }
+
     /* Buttons */
     .btn {
       font-family: inherit;
@@ -463,7 +515,7 @@
 
     <div class="page-head">
       <div>
-        <h2>Inbox van vandaag</h2>
+        <h2 id="inboxTitle">Inbox · vandaag</h2>
         <div class="desc">leads@deforexopleiding.nl · automatisch gecategoriseerd, AI-antwoorden ter goedkeuring</div>
       </div>
       <div class="last-fetch" id="lastFetch">—</div>
@@ -473,7 +525,7 @@
       <div class="counter featured">
         <div class="counter-label">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>
-          Nieuwe leads vandaag
+          Nieuwe leads <span class="period">vandaag</span>
         </div>
         <div class="counter-value" id="cntLead">—</div>
         <div class="counter-sub live"><span style="display:inline-block;width:6px;height:6px;background:#22c55e;border-radius:50%;margin-right:6px;"></span>Live geüpdatet via IMAP</div>
@@ -489,7 +541,7 @@
       <div class="counter">
         <div class="counter-label">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"></path><polyline points="22,6 12,13 2,6"></polyline></svg>
-          Totaal mails vandaag
+          Totaal mails <span class="period">vandaag</span>
         </div>
         <div class="counter-value" id="cntTotal">—</div>
         <div class="counter-sub">Alle inkomende berichten</div>
@@ -500,12 +552,12 @@
           Openstaande factuurvragen
         </div>
         <div class="counter-value" id="cntInvOpen">—</div>
-        <div class="counter-sub">Vereist actie · 7 dagen</div>
+        <div class="counter-sub">Vereist actie · <span class="period">7 dagen</span></div>
       </div>
       <div class="counter alert">
         <div class="counter-label">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
-          Onbeantwoord vandaag
+          Onbeantwoord <span class="period">vandaag</span>
         </div>
         <div class="counter-value" id="cntPending">—</div>
         <div class="counter-sub">excl. leads &amp; afspraken</div>
@@ -521,12 +573,34 @@
       <div class="counter kpi">
         <div class="counter-label">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"></polyline><polyline points="17 6 23 6 23 12"></polyline></svg>
-          Conversie vandaag
+          Conversie <span class="period">vandaag</span>
         </div>
         <div class="counter-value" id="cntConv">—</div>
         <div class="counter-sub">uitlegsessies / leads</div>
       </div>
     </section>
+
+    <div class="filter-bar">
+      <div class="filter-group">
+        <span class="filter-group-label">Adres</span>
+        <select id="addressFilter">
+          <option value="Alle">Alle adressen</option>
+          <option value="leads@deforexopleiding.nl">leads@deforexopleiding.nl</option>
+        </select>
+      </div>
+      <div class="filter-group">
+        <span class="filter-group-label">Datum</span>
+        <button type="button" class="pill date-pill active" data-date="today">Vandaag</button>
+        <button type="button" class="pill date-pill" data-date="yesterday">Gisteren</button>
+        <button type="button" class="pill date-pill" data-date="week">Deze week</button>
+        <button type="button" class="pill date-pill" data-date="custom">Aangepast</button>
+        <span class="custom-range hidden" id="customRange">
+          <input type="date" id="dateFrom" />
+          <span>tot</span>
+          <input type="date" id="dateTo" />
+        </span>
+      </div>
+    </div>
 
     <div class="filters" id="filters"></div>
 
@@ -545,7 +619,11 @@
       emails: [],
       counters: { nieuweLead: 0, nieuweUitlegsessie: 0, totaalVandaag: 0 },
       byCategory: {},
-      filter: 'Alle',
+      filter: 'Alle',           // category filter
+      addressFilter: 'Alle',    // 'Alle' or specific recipient address
+      dateFilter: 'today',      // 'today' | 'yesterday' | 'week' | 'custom'
+      customFrom: '',           // YYYY-MM-DD
+      customTo: '',             // YYYY-MM-DD
       decisions: {}, // uid -> { status: 'approved'|'dismissed'|null, replyText: string, editing: bool }
       fetchedAt: null
     };
@@ -620,46 +698,120 @@
         </div>`;
     }
 
-    function render() {
-      // counters
-      const leadsToday = state.counters.nieuweLead ?? 0;
-      const apptToday  = state.counters.nieuweUitlegsessie ?? 0;
-      $('cntLead').textContent  = leadsToday;
-      $('cntAppt').textContent  = apptToday;
-      $('cntTotal').textContent = state.counters.totaalVandaag ?? 0;
+    function periodLabel() {
+      switch (state.dateFilter) {
+        case 'today':     return 'vandaag';
+        case 'yesterday': return 'gisteren';
+        case 'week':      return 'deze week';
+        case 'custom':    return 'in periode';
+        default:          return 'vandaag';
+      }
+    }
 
-      // derived stats (computed from the 7-day email list returned by the API)
+    function getDateRange() {
       const today0 = new Date(); today0.setHours(0, 0, 0, 0);
-      const todayMails = state.emails.filter((e) => new Date(e.date) >= today0);
+      const tomorrow0 = new Date(today0); tomorrow0.setDate(tomorrow0.getDate() + 1);
 
-      const onbeantwoordVandaag = todayMails.filter(
+      switch (state.dateFilter) {
+        case 'today':
+          return { from: today0, to: tomorrow0 };
+        case 'yesterday': {
+          const y = new Date(today0); y.setDate(y.getDate() - 1);
+          return { from: y, to: today0 };
+        }
+        case 'week': {
+          const w = new Date(today0); w.setDate(w.getDate() - 6);
+          return { from: w, to: tomorrow0 };
+        }
+        case 'custom': {
+          const from = state.customFrom
+            ? new Date(state.customFrom + 'T00:00:00')
+            : new Date(0);
+          const toEnd = state.customTo
+            ? new Date(state.customTo + 'T23:59:59.999')
+            : new Date();
+          // make 'to' exclusive
+          return { from, to: new Date(toEnd.getTime() + 1) };
+        }
+        default:
+          return { from: today0, to: tomorrow0 };
+      }
+    }
+
+    function passesFilters(e) {
+      const { from, to } = getDateRange();
+      const d = new Date(e.date);
+      if (d < from || d >= to) return false;
+      if (state.addressFilter !== 'Alle') {
+        const addr = (e.toAddress || '').toLowerCase();
+        if (addr !== state.addressFilter.toLowerCase()) return false;
+      }
+      return true;
+    }
+
+    function getFilteredEmails() {
+      return state.emails.filter(passesFilters);
+    }
+
+    function render() {
+      // dynamic period labels
+      const period = periodLabel();
+      document.querySelectorAll('.period').forEach((el) => { el.textContent = period; });
+      $('inboxTitle').textContent = `Inbox · ${period}`;
+
+      const filtered = getFilteredEmails();
+
+      // stats — all derived from the filtered set
+      const leads     = filtered.filter((e) => e.category === 'Nieuwe Lead').length;
+      const appts     = filtered.filter((e) => e.category === 'Appointment').length;
+      const total     = filtered.length;
+
+      const onbeantwoord = filtered.filter(
         (e) => e.unread && e.category !== 'Nieuwe Lead' && e.category !== 'Appointment'
       ).length;
 
-      const openstaandeFact = state.emails.filter(
+      const openFact = filtered.filter(
         (e) => e.category === 'Factuurvraag' && e.unread
       ).length;
 
-      const leadsDezeWeek = state.byCategory['Nieuwe Lead'] || 0;
-
-      const conversiePct = leadsToday > 0
-        ? Math.round((apptToday / leadsToday) * 100) + '%'
+      const conv = leads > 0
+        ? Math.round((appts / leads) * 100) + '%'
         : '—';
 
-      $('cntInvOpen').textContent    = openstaandeFact;
-      $('cntPending').textContent    = onbeantwoordVandaag;
-      $('cntLeadsWeek').textContent  = leadsDezeWeek;
-      $('cntConv').textContent       = conversiePct;
+      // "Leads deze week" is altijd 7-dagen, ongeacht datumfilter — wel
+      // adresfilter toepassen voor consistentie.
+      const today0 = new Date(); today0.setHours(0, 0, 0, 0);
+      const tomorrow0 = new Date(today0); tomorrow0.setDate(tomorrow0.getDate() + 1);
+      const weekFrom = new Date(today0); weekFrom.setDate(weekFrom.getDate() - 6);
+      const leadsWeek = state.emails.filter((e) => {
+        if (e.category !== 'Nieuwe Lead') return false;
+        const d = new Date(e.date);
+        if (d < weekFrom || d >= tomorrow0) return false;
+        if (state.addressFilter !== 'Alle' &&
+            (e.toAddress || '').toLowerCase() !== state.addressFilter.toLowerCase()) return false;
+        return true;
+      }).length;
+
+      $('cntLead').textContent       = leads;
+      $('cntAppt').textContent       = appts;
+      $('cntTotal').textContent      = total;
+      $('cntInvOpen').textContent    = openFact;
+      $('cntPending').textContent    = onbeantwoord;
+      $('cntLeadsWeek').textContent  = leadsWeek;
+      $('cntConv').textContent       = conv;
 
       $('lastFetch').textContent = state.fetchedAt
         ? 'Laatst bijgewerkt: ' + new Date(state.fetchedAt).toLocaleTimeString('nl-NL')
         : '';
 
-      // filter pills
-      const totalCount = state.emails.length;
+      // category filter pills (counts based on filtered set)
+      const byCat = {};
+      CATEGORIES.forEach((c) => {
+        byCat[c] = filtered.filter((e) => e.category === c).length;
+      });
       const pills = [
-        { key: 'Alle', count: totalCount },
-        ...CATEGORIES.map((c) => ({ key: c, count: state.byCategory[c] || 0 }))
+        { key: 'Alle', count: total },
+        ...CATEGORIES.map((c) => ({ key: c, count: byCat[c] }))
       ];
       $('filters').innerHTML = pills
         .map(
@@ -677,11 +829,10 @@
         });
       });
 
-      // emails
-      const visible =
-        state.filter === 'Alle'
-          ? state.emails
-          : state.emails.filter((e) => e.category === state.filter);
+      // inbox
+      const visible = state.filter === 'Alle'
+        ? filtered
+        : filtered.filter((e) => e.category === state.filter);
 
       if (visible.length === 0) {
         $('content').innerHTML = `
@@ -690,8 +841,8 @@
               <path d="M22 12h-6l-2 3h-4l-2-3H2"></path>
               <path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"></path>
             </svg>
-            <h3>Geen e-mails in deze categorie</h3>
-            <p>Zodra er nieuwe berichten binnenkomen verschijnen ze hier automatisch.</p>
+            <h3>Geen e-mails in deze selectie</h3>
+            <p>Pas de adres- of datumfilter aan, of wacht op nieuwe berichten.</p>
           </div>`;
         return;
       }
@@ -806,13 +957,16 @@
     function loadDemo() {
       const now = new Date();
       const m = (mins) => new Date(now.getTime() - mins * 60000).toISOString();
+      const TO = 'leads@deforexopleiding.nl';
       const demo = [
-        { uid: 1, fromName: 'Mark Janssen',     from: 'Mark Janssen <mark@example.com>',     subject: 'Nieuwe Lead – aanvraag uitlegsessie',          date: m(8),    category: 'Nieuwe Lead',  unread: true  },
-        { uid: 2, fromName: 'Calendly',         from: 'Calendly <no-reply@calendly.com>',    subject: 'Nieuwe uitlegsessie ingepland: Sara de Wit',   date: m(45),   category: 'Appointment',  unread: false },
-        { uid: 3, fromName: 'Linda Vermeer',    from: 'Linda Vermeer <linda@example.com>',   subject: 'Hoe werkt jullie module 3 precies?',           date: m(120),  category: 'Klantvraag',   unread: true  },
-        { uid: 4, fromName: 'Boekhouding BV',   from: 'Boekhouding BV <fact@boek.nl>',       subject: 'Vraag over factuur 2025-0418',                  date: m(180),  category: 'Factuurvraag', unread: true  },
-        { uid: 5, fromName: 'Newsletter Forex', from: 'news@example.com',                    subject: 'Wekelijkse marktupdate',                        date: m(220),  category: 'Overig',       unread: false },
-        { uid: 6, fromName: 'Pieter Hendriks',  from: 'Pieter Hendriks <pieter@example.com>',subject: 'Lead via Facebook formulier',                  date: m(260),  category: 'Nieuwe Lead',  unread: true  }
+        { uid: 1, fromName: 'Mark Janssen',     from: 'Mark Janssen <mark@example.com>',     toAddress: TO, subject: 'Nieuwe Lead – aanvraag uitlegsessie',          date: m(8),    category: 'Nieuwe Lead',  unread: true  },
+        { uid: 2, fromName: 'Calendly',         from: 'Calendly <no-reply@calendly.com>',    toAddress: TO, subject: 'Nieuwe uitlegsessie ingepland: Sara de Wit',   date: m(45),   category: 'Appointment',  unread: false },
+        { uid: 3, fromName: 'Linda Vermeer',    from: 'Linda Vermeer <linda@example.com>',   toAddress: TO, subject: 'Hoe werkt jullie module 3 precies?',           date: m(120),  category: 'Klantvraag',   unread: true  },
+        { uid: 4, fromName: 'Boekhouding BV',   from: 'Boekhouding BV <fact@boek.nl>',       toAddress: TO, subject: 'Vraag over factuur 2025-0418',                  date: m(180),  category: 'Factuurvraag', unread: true  },
+        { uid: 5, fromName: 'Newsletter Forex', from: 'news@example.com',                    toAddress: TO, subject: 'Wekelijkse marktupdate',                        date: m(220),  category: 'Overig',       unread: false },
+        { uid: 6, fromName: 'Pieter Hendriks',  from: 'Pieter Hendriks <pieter@example.com>',toAddress: TO, subject: 'Lead via Facebook formulier',                  date: m(260),  category: 'Nieuwe Lead',  unread: true  },
+        { uid: 7, fromName: 'Mollie',           from: 'Mollie <noreply@mollie.com>',         toAddress: TO, subject: 'Betaling ontvangen — order #4218',              date: m(95),   category: 'Overig',       unread: true  },
+        { uid: 8, fromName: 'Teamleader',       from: 'Teamleader <noreply@teamleader.eu>',  toAddress: TO, subject: 'Factuur voldaan: 2025-0418',                    date: m(150),  category: 'Overig',       unread: false }
       ];
       const replyFor = (cat, name) => {
         const greet = `Beste ${name},`;
@@ -839,6 +993,45 @@
       render();
     }
 
+    /* Filter bar wiring */
+    function initFilterBar() {
+      // Address dropdown
+      $('addressFilter').addEventListener('change', (ev) => {
+        state.addressFilter = ev.target.value;
+        render();
+      });
+
+      // Date pills
+      const datePills = document.querySelectorAll('.date-pill');
+      datePills.forEach((btn) => {
+        btn.addEventListener('click', () => {
+          state.dateFilter = btn.dataset.date;
+          datePills.forEach((b) => b.classList.toggle('active', b === btn));
+          $('customRange').classList.toggle('hidden', state.dateFilter !== 'custom');
+          render();
+        });
+      });
+
+      // Custom date range — default to last 7 days
+      const fmt = (d) => d.toISOString().slice(0, 10);
+      const today = new Date();
+      const weekAgo = new Date(today); weekAgo.setDate(weekAgo.getDate() - 7);
+      $('dateFrom').value = fmt(weekAgo);
+      $('dateTo').value   = fmt(today);
+      state.customFrom    = fmt(weekAgo);
+      state.customTo      = fmt(today);
+
+      $('dateFrom').addEventListener('change', (ev) => {
+        state.customFrom = ev.target.value;
+        if (state.dateFilter === 'custom') render();
+      });
+      $('dateTo').addEventListener('change', (ev) => {
+        state.customTo = ev.target.value;
+        if (state.dateFilter === 'custom') render();
+      });
+    }
+
+    initFilterBar();
     loadEmails();
   </script>
 </body>
