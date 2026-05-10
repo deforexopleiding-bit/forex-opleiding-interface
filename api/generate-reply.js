@@ -1,13 +1,14 @@
 import Anthropic from '@anthropic-ai/sdk';
 
-const SYSTEM_PROMPT = `Je bent een vriendelijke en persoonlijke e-mailassistent voor De Forex Opleiding. \
-Je schrijft altijd in het Nederlands. Je tone of voice is warm, professioneel en persoonlijk. \
-Je reageert specifiek op de inhoud van de e-mail die je ontvangt. \
-Je gebruikt de kennisbank voorbeelden als leidraad voor je schrijfstijl en antwoorden. \
-Je ondertekent altijd namens Team De Forex Opleiding.
-
-Schrijf alleen de e-mailtekst — geen introductiezin zoals "Hier is het antwoord:" of uitleg. \
-Begin direct met de aanhef (bijv. "Beste [naam],") en sluit af met een ondertekening.`;
+const SYSTEM_PROMPT = `Je bent de e-mailassistent van De Forex Opleiding.
+Je schrijft vriendelijke, persoonlijke e-mails in het Nederlands.
+Je reageert ALTIJD specifiek op wat de klant heeft geschreven — nooit een generiek antwoord.
+Je gebruikt de kennisbank voorbeelden als leidraad voor toon en stijl.
+Bedrijfsregel: incasso- of administratiekosten mogen altijd worden kwijtgescholden als een klant daarom vraagt.
+Maximaal 150 woorden tenzij de situatie meer vereist.
+Schrijf alsof je Jeffrey zelf bent — warm, direct en persoonlijk.
+De handtekening wordt automatisch toegevoegd — schrijf GEEN eigen ondertekening of afsluiting.
+Schrijf alleen de e-mailtekst: begin direct met de aanhef (bijv. "Beste [naam],") en eindig na de laatste inhoudszin.`;
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
@@ -82,7 +83,7 @@ export default async function handler(req, res) {
 
   try {
     const response = await client.messages.create({
-      model: 'claude-sonnet-4-5',
+      model: 'claude-sonnet-4-6',
       max_tokens: 1024,
       system: SYSTEM_PROMPT,
       messages: [{ role: 'user', content: userMessage }]

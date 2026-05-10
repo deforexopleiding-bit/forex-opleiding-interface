@@ -3,721 +3,294 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>E-mail analyse &amp; antwoord · Agency Command Center</title>
+  <title>E-mail · Agency Command Center</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-
     :root {
-      --bg: #0a0b10;
-      --bg-elev: #13151c;
-      --bg-elev-2: #181b25;
-      --bg-elev-3: #1f2330;
-      --border: rgba(255, 255, 255, 0.06);
-      --border-strong: rgba(255, 255, 255, 0.12);
-      --text: #f1f5f9;
-      --text-dim: #94a3b8;
-      --text-faint: #64748b;
-      --accent-cyan: #22d3ee;
-      --accent-violet: #a855f7;
+      --bg: #0a0b10; --bg-elev: #13151c; --bg-elev-2: #181b25; --bg-elev-3: #1f2330;
+      --border: rgba(255,255,255,0.06); --border-strong: rgba(255,255,255,0.12);
+      --text: #f1f5f9; --text-dim: #94a3b8; --text-faint: #64748b;
+      --accent-cyan: #22d3ee; --accent-violet: #a855f7;
       --accent-grad: linear-gradient(135deg, #22d3ee 0%, #a855f7 100%);
-      --green: #22c55e;
-      --amber: #f59e0b;
-      --red: #ef4444;
-      --shadow: 0 10px 40px rgba(0, 0, 0, 0.4);
+      --green: #22c55e; --amber: #f59e0b; --red: #ef4444;
     }
-
     html, body { height: 100%; }
-
     body {
-      font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-      background: var(--bg);
-      color: var(--text);
-      min-height: 100vh;
-      overflow-x: hidden;
-      position: relative;
-      line-height: 1.5;
-      -webkit-font-smoothing: antialiased;
-      -moz-osx-font-smoothing: grayscale;
+      font-family: 'Inter', system-ui, sans-serif;
+      background: var(--bg); color: var(--text);
+      min-height: 100vh; overflow-x: hidden;
+      line-height: 1.5; -webkit-font-smoothing: antialiased;
     }
-
     body::before {
-      content: '';
-      position: fixed; inset: 0;
+      content: ''; position: fixed; inset: 0;
       background-image:
-        radial-gradient(circle at 15% 10%, rgba(34, 211, 238, 0.10), transparent 45%),
-        radial-gradient(circle at 85% 90%, rgba(168, 85, 247, 0.10), transparent 50%);
+        radial-gradient(circle at 15% 10%, rgba(34,211,238,0.10), transparent 45%),
+        radial-gradient(circle at 85% 90%, rgba(168,85,247,0.10), transparent 50%);
       pointer-events: none; z-index: 0;
     }
-
     body::after {
-      content: '';
-      position: fixed; inset: 0;
+      content: ''; position: fixed; inset: 0;
       background-image:
-        linear-gradient(rgba(255, 255, 255, 0.025) 1px, transparent 1px),
-        linear-gradient(90deg, rgba(255, 255, 255, 0.025) 1px, transparent 1px);
+        linear-gradient(rgba(255,255,255,0.025) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255,255,255,0.025) 1px, transparent 1px);
       background-size: 48px 48px;
       mask-image: radial-gradient(circle at center, black 30%, transparent 75%);
       -webkit-mask-image: radial-gradient(circle at center, black 30%, transparent 75%);
       pointer-events: none; z-index: 0;
     }
 
-    .app {
-      position: relative; z-index: 1;
-      margin-left: 220px;
-      padding: 32px 28px 64px;
-    }
+    /* ── Layout ── */
+    .app { position: relative; z-index: 1; margin-left: 220px; padding: 28px 28px 64px; }
 
-    /* Header */
+    /* ── Header ── */
     header {
       display: flex; align-items: center; justify-content: space-between;
-      gap: 24px; flex-wrap: wrap;
-      padding-bottom: 24px;
-      border-bottom: 1px solid var(--border);
-      margin-bottom: 28px;
+      gap: 16px; flex-wrap: wrap;
+      padding-bottom: 18px; border-bottom: 1px solid var(--border); margin-bottom: 14px;
     }
-
-    .brand { display: flex; align-items: center; gap: 14px; }
-
+    .brand { display: flex; align-items: center; gap: 12px; }
     .logo-mark {
-      width: 44px; height: 44px;
-      border-radius: 12px;
-      background: var(--accent-grad);
-      display: grid; place-items: center;
-      font-weight: 800; font-size: 16px;
-      letter-spacing: -0.5px; color: #0a0b10;
-      box-shadow: 0 6px 24px rgba(168, 85, 247, 0.35);
+      width: 40px; height: 40px; border-radius: 10px;
+      background: var(--accent-grad); display: grid; place-items: center;
+      font-weight: 800; font-size: 15px; color: #0a0b10;
     }
-
-    .brand h1 { font-size: 18px; font-weight: 700; letter-spacing: -0.3px; }
+    .brand h1 { font-size: 18px; font-weight: 700; }
     .brand .crumb { font-size: 12px; color: var(--text-dim); margin-top: 2px; }
-    .brand .crumb a { color: var(--text-dim); text-decoration: none; transition: color 0.2s; }
-    .brand .crumb a:hover { color: var(--accent-cyan); }
-    .brand .crumb .sep { margin: 0 6px; color: var(--text-faint); }
+    .header-actions { display: flex; gap: 8px; align-items: center; }
 
-    .header-actions { display: flex; gap: 10px; align-items: center; }
-
-    /* Title + meta */
-    .page-head {
-      display: flex; align-items: flex-end; justify-content: space-between;
-      gap: 20px; flex-wrap: wrap;
-      margin-bottom: 24px;
-    }
-    .page-head h2 {
-      font-size: 26px; font-weight: 700; letter-spacing: -0.5px;
-    }
-    .page-head .desc { font-size: 14px; color: var(--text-dim); margin-top: 6px; }
-
-    .last-fetch { font-size: 12px; color: var(--text-faint); }
-
-    /* Counters */
-    .counters {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-      gap: 16px;
-      margin-bottom: 28px;
-    }
-
-    .counter {
-      background: var(--bg-elev);
-      border: 1px solid var(--border);
-      border-radius: 14px;
-      padding: 22px;
-      position: relative;
-      overflow: hidden;
-    }
-
-    .counter.featured {
-      background:
-        linear-gradient(135deg, rgba(34, 211, 238, 0.08), rgba(168, 85, 247, 0.08)),
-        var(--bg-elev);
-      border-color: rgba(168, 85, 247, 0.25);
-    }
-
-    .counter.alert {
-      background:
-        linear-gradient(135deg, rgba(245, 158, 11, 0.06), rgba(245, 158, 11, 0.02)),
-        var(--bg-elev);
-      border-color: rgba(245, 158, 11, 0.25);
-    }
-    .counter.alert .counter-value { color: var(--amber); }
-
-    .counter.alert.urgent {
-      background:
-        linear-gradient(135deg, rgba(239, 68, 68, 0.07), rgba(239, 68, 68, 0.02)),
-        var(--bg-elev);
-      border-color: rgba(239, 68, 68, 0.28);
-    }
-    .counter.alert.urgent .counter-value { color: var(--red); }
-
-    .counter.kpi {
-      background:
-        linear-gradient(135deg, rgba(34, 197, 94, 0.07), rgba(34, 211, 238, 0.04)),
-        var(--bg-elev);
-      border-color: rgba(34, 197, 94, 0.22);
-    }
-    .counter.kpi .counter-value { color: var(--green); }
-
-    .auto-tag {
-      font-size: 11px;
-      font-weight: 600;
-      color: var(--text-faint);
-      padding: 4px 10px;
-      border-radius: 999px;
-      border: 1px solid var(--border);
-      background: var(--bg);
-      white-space: nowrap;
-      letter-spacing: 0.02em;
-    }
-    /* No-reply categorieën zijn nu uitklapbaar voor de mark-knoppen.
-       Auto-tag + chevron staan beide rechts → 5 grid-kolommen. */
-    .email.no-reply .email-row {
-      grid-template-columns: auto 1fr auto auto auto;
-    }
-
-    .auto-info {
-      font-size: 13.5px;
-      color: var(--text-dim);
-      line-height: 1.55;
-      margin: 18px 0 14px;
-    }
-
-    .btn-reclame {
-      background: rgba(236, 72, 153, 0.08);
-      border-color: rgba(236, 72, 153, 0.25);
-      color: #ec4899;
-    }
-    .btn-reclame:hover {
-      background: rgba(236, 72, 153, 0.18);
-      border-color: rgba(236, 72, 153, 0.35);
-    }
-    .btn-task {
-      background: rgba(168, 85, 247, 0.08);
-      border-color: rgba(168, 85, 247, 0.25);
-      color: #a855f7;
-    }
-    .btn-task:hover {
-      background: rgba(168, 85, 247, 0.18);
-      border-color: rgba(168, 85, 247, 0.35);
-    }
-
-    /* Toast — korte bevestigingsmelding na een actie */
-    .toast {
-      position: fixed;
-      bottom: 28px;
-      left: 50%;
-      transform: translate(-50%, 20px);
-      background: var(--bg-elev-2);
-      border: 1px solid var(--border-strong);
-      color: var(--text);
-      padding: 11px 20px;
-      border-radius: 999px;
-      font-size: 13px;
-      font-weight: 500;
-      opacity: 0;
-      transition: opacity 0.25s ease, transform 0.25s ease;
-      z-index: 1000;
-      box-shadow: 0 14px 50px rgba(0, 0, 0, 0.5);
-      pointer-events: none;
-      max-width: calc(100vw - 40px);
-      text-align: center;
-    }
-    .toast.show {
-      opacity: 1;
-      transform: translate(-50%, 0);
-    }
-
-    /* E-mail content (body, headers) binnen een uitgeklapte mail */
-    .email-content {
-      margin: 16px 0 18px;
-      padding-bottom: 16px;
-      border-bottom: 1px solid var(--border);
-    }
-    .email-detail-meta {
-      display: flex;
-      flex-direction: column;
-      gap: 4px;
-      padding: 12px 14px;
-      background: var(--bg);
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      margin-bottom: 14px;
-      font-size: 12.5px;
-    }
-    .email-detail-row {
-      display: flex;
-      gap: 10px;
-      align-items: baseline;
-      flex-wrap: wrap;
-    }
-    .email-detail-row .meta-key {
-      color: var(--text-faint);
-      font-weight: 600;
-      text-transform: uppercase;
-      letter-spacing: 0.06em;
-      font-size: 10.5px;
-      min-width: 56px;
-    }
-    .email-detail-row .meta-val {
-      color: var(--text-dim);
-      word-break: break-word;
-      flex: 1;
-    }
-    .email-body-text {
-      font-size: 13.5px;
-      color: var(--text);
-      line-height: 1.6;
-      white-space: pre-wrap;
-      word-wrap: break-word;
-      max-height: 420px;
-      overflow-y: auto;
-      padding: 6px 4px;
-    }
-    .body-loading, .body-error {
-      padding: 20px 0;
-      font-size: 13px;
-      color: var(--text-dim);
-      text-align: center;
-    }
-    .body-error { color: var(--red); }
-
-    /* Categorie-mover dropdown: handmatig verplaatsen tussen categorieën */
-    .category-mover {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      flex-wrap: wrap;
-      padding: 10px 14px;
-      background: var(--bg);
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      margin: 12px 0 14px;
-    }
-    .category-mover label {
-      font-size: 11px;
-      text-transform: uppercase;
-      letter-spacing: 0.06em;
-      font-weight: 600;
-      color: var(--text-faint);
-    }
-    .category-mover select {
-      background: var(--bg-elev);
-      border: 1px solid var(--border-strong);
-      color: var(--text);
-      padding: 6px 11px;
-      border-radius: 6px;
-      font-family: inherit;
-      font-size: 12.5px;
-      cursor: pointer;
-      outline: none;
-      transition: border-color 0.18s ease;
-      color-scheme: dark;
-    }
-    .category-mover select:hover  { border-color: rgba(255,255,255,0.2); }
-    .category-mover select:focus  { border-color: var(--accent-cyan); }
-
-    /* Suggestion banner: "Lijkt op reclame van …" */
-    .suggestion-banner {
-      background:
-        linear-gradient(135deg, rgba(236, 72, 153, 0.10), rgba(236, 72, 153, 0.04)),
-        var(--bg-elev);
-      border: 1px solid rgba(236, 72, 153, 0.30);
-      border-radius: 12px;
-      padding: 14px 18px;
-      margin-bottom: 18px;
-      display: flex;
-      align-items: center;
-      gap: 14px;
-      flex-wrap: wrap;
-    }
-    .suggestion-icon {
-      width: 36px;
-      height: 36px;
-      border-radius: 50%;
-      background: rgba(236, 72, 153, 0.14);
-      display: grid;
-      place-items: center;
-      color: #ec4899;
-      flex-shrink: 0;
-    }
-    .suggestion-icon svg { width: 18px; height: 18px; }
-    .suggestion-text {
-      flex: 1;
-      font-size: 13px;
-      color: var(--text);
-      min-width: 220px;
-      line-height: 1.45;
-    }
-    .suggestion-text strong { color: #ec4899; font-weight: 600; }
-    .suggestion-actions { display: flex; gap: 8px; flex-wrap: wrap; }
-    .btn-toggle-mail {
-      background: rgba(236, 72, 153, 0.08);
-      border-color: rgba(236, 72, 153, 0.25);
-      color: #ec4899;
-    }
-    .btn-toggle-mail:hover {
-      background: rgba(236, 72, 153, 0.18);
-      border-color: rgba(236, 72, 153, 0.35);
-    }
-    .suggestion-preview {
-      display: none;
-      width: 100%;
-      margin-top: 12px;
-      padding-top: 14px;
-      border-top: 1px solid rgba(236, 72, 153, 0.18);
-    }
-    .suggestion-preview.open { display: block; }
-    .suggestion-preview-meta {
-      display: grid;
-      grid-template-columns: auto 1fr;
-      gap: 4px 12px;
-      font-size: 12px;
-      margin-bottom: 10px;
-    }
-    .suggestion-preview-meta .sp-label { color: var(--text-faint); white-space: nowrap; }
-    .suggestion-preview-meta .sp-val   { color: var(--text-dim); }
-    .suggestion-preview-body {
-      font-size: 12px;
-      color: var(--text-dim);
-      white-space: pre-wrap;
-      max-height: 260px;
-      overflow-y: auto;
-      background: rgba(0,0,0,0.25);
-      border: 1px solid var(--border-strong);
-      border-radius: 8px;
-      padding: 12px 14px;
-      line-height: 1.65;
-    }
-    .sg-body-status {
-      display: flex; align-items: center; gap: 8px;
-      font-size: 12px; color: var(--text-faint);
-      font-style: italic; padding: 6px 0;
-    }
-    .sg-body-error {
-      display: block;
-      font-size: 12px; color: var(--red);
-      font-style: normal; padding: 6px 0;
-    }
-    .sg-spinner {
-      width: 14px; height: 14px;
-      border: 2px solid rgba(236, 72, 153, 0.2);
-      border-top-color: #ec4899;
-      border-radius: 50%;
-      animation: spin 0.8s linear infinite;
-      flex-shrink: 0;
-      display: inline-block;
-    }
-
-    /* AI buttons */
-    .btn-ai {
-      background: linear-gradient(135deg, rgba(34, 211, 238, 0.12), rgba(168, 85, 247, 0.12));
-      border-color: rgba(168, 85, 247, 0.30);
-      color: var(--text);
-    }
-    .btn-ai:hover {
-      background: linear-gradient(135deg, rgba(34, 211, 238, 0.22), rgba(168, 85, 247, 0.22));
-      border-color: rgba(168, 85, 247, 0.5);
-    }
-    .btn-send {
-      background: var(--accent-grad);
-      border-color: transparent;
-      color: #0a0b10;
-      font-weight: 600;
-    }
-    .btn-send:hover {
-      filter: brightness(1.1);
-      background: var(--accent-grad);
-    }
-
-    .counter-label {
-      font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em;
-      color: var(--text-faint); font-weight: 600;
-      display: flex; align-items: center; gap: 8px;
-    }
-
-    .counter-label svg { width: 14px; height: 14px; }
-
-    .counter-value {
-      font-size: 38px; font-weight: 700; letter-spacing: -1.5px;
-      margin: 12px 0 4px;
-      font-variant-numeric: tabular-nums;
-    }
-
-    .counter-sub { font-size: 12px; color: var(--text-dim); }
-    .counter-sub.live { color: var(--green); }
-
-    /* Filter pills */
-    .filters {
-      display: flex; gap: 8px; flex-wrap: wrap;
-      margin-bottom: 22px;
-    }
-
-    .pill {
-      font-family: inherit;
-      font-size: 13px; font-weight: 500;
-      padding: 8px 14px;
-      border-radius: 999px;
-      background: var(--bg-elev);
-      border: 1px solid var(--border);
-      color: var(--text-dim);
-      cursor: pointer;
-      transition: all 0.18s ease;
-      display: inline-flex; align-items: center; gap: 8px;
-    }
-    .pill:hover { border-color: var(--border-strong); color: var(--text); }
-    .pill.active {
-      background: var(--text);
-      color: var(--bg);
-      border-color: var(--text);
-    }
-    .pill .count {
-      font-size: 11px;
-      padding: 1px 7px;
-      border-radius: 999px;
-      background: rgba(255,255,255,0.08);
-      font-variant-numeric: tabular-nums;
-      font-weight: 600;
-    }
-    .pill.active .count { background: rgba(0,0,0,0.15); }
-
-    /* Filter bar (date + address) */
-    .filter-bar {
-      display: flex;
-      align-items: center;
-      gap: 12px 24px;
-      flex-wrap: wrap;
-      margin-bottom: 16px;
-      padding: 14px 18px;
-      background: var(--bg-elev);
-      border: 1px solid var(--border);
-      border-radius: 12px;
-    }
-    .filter-group {
-      display: flex; align-items: center; gap: 8px;
-      flex-wrap: wrap;
-    }
-    .filter-group-label {
-      font-size: 11px;
-      text-transform: uppercase;
-      letter-spacing: 0.08em;
-      color: var(--text-faint);
-      font-weight: 600;
-      white-space: nowrap;
-      margin-right: 4px;
-    }
-    .filter-bar select,
-    .filter-bar input[type="date"] {
-      background: var(--bg);
-      border: 1px solid var(--border-strong);
-      color: var(--text);
-      padding: 7px 12px;
-      border-radius: 8px;
-      font-family: inherit;
-      font-size: 13px;
-      cursor: pointer;
-      outline: none;
-      transition: border-color 0.18s ease;
-      color-scheme: dark;
-    }
-    .filter-bar select:hover,
-    .filter-bar input[type="date"]:hover { border-color: rgba(255,255,255,0.2); }
-    .filter-bar select:focus,
-    .filter-bar input[type="date"]:focus { border-color: var(--accent-cyan); }
-    .filter-bar input[type="date"] { padding: 6px 10px; }
-    .date-pill { padding: 6px 14px; font-weight: 500; }
-    .custom-range {
-      display: flex; align-items: center; gap: 8px;
-      font-size: 13px; color: var(--text-dim);
-      flex-wrap: wrap;
-    }
-    .custom-range.hidden { display: none; }
-
-    /* Buttons */
+    /* ── Buttons ── */
     .btn {
-      font-family: inherit;
-      font-size: 13px; font-weight: 500;
-      color: var(--text);
-      background: transparent;
-      border: 1px solid var(--border-strong);
-      border-radius: 8px;
-      padding: 8px 14px;
-      cursor: pointer;
-      display: inline-flex; align-items: center; gap: 8px;
-      transition: all 0.18s ease;
+      font-family: inherit; font-size: 13px; font-weight: 500;
+      color: var(--text); background: transparent;
+      border: 1px solid var(--border-strong); border-radius: 8px;
+      padding: 8px 14px; cursor: pointer;
+      display: inline-flex; align-items: center; gap: 6px;
+      transition: all 0.18s;
     }
+    .btn svg { width: 14px; height: 14px; flex-shrink: 0; }
     .btn:hover { background: rgba(255,255,255,0.04); border-color: rgba(255,255,255,0.2); }
     .btn:disabled { opacity: 0.5; cursor: not-allowed; }
-    .btn svg { width: 14px; height: 14px; }
-
-    .btn-primary {
-      background: var(--accent-grad);
-      border-color: transparent;
-      color: #0a0b10;
-      font-weight: 600;
-    }
+    .btn-primary { background: var(--accent-grad); border-color: transparent; color: #0a0b10; font-weight: 600; }
     .btn-primary:hover { filter: brightness(1.1); background: var(--accent-grad); }
-
-    .btn-success {
-      background: rgba(34, 197, 94, 0.12);
-      border-color: rgba(34, 197, 94, 0.3);
-      color: var(--green);
+    .btn-ai {
+      background: linear-gradient(135deg, rgba(34,211,238,0.12), rgba(168,85,247,0.12));
+      border-color: rgba(168,85,247,0.3); color: var(--text);
     }
-    .btn-success:hover { background: rgba(34, 197, 94, 0.2); }
+    .btn-ai:hover { background: linear-gradient(135deg, rgba(34,211,238,0.22), rgba(168,85,247,0.22)); border-color: rgba(168,85,247,0.5); }
+    .btn-send { background: var(--accent-grad); border-color: transparent; color: #0a0b10; font-weight: 600; }
+    .btn-send:hover { filter: brightness(1.1); background: var(--accent-grad); }
+    .btn-danger { background: rgba(239,68,68,0.08); border-color: rgba(239,68,68,0.25); color: var(--red); }
+    .btn-danger:hover { background: rgba(239,68,68,0.16); }
+    .btn-reclame { background: rgba(236,72,153,0.08); border-color: rgba(236,72,153,0.25); color: #ec4899; }
+    .btn-reclame:hover { background: rgba(236,72,153,0.18); }
+    .btn-task { background: rgba(168,85,247,0.08); border-color: rgba(168,85,247,0.25); color: #a855f7; }
+    .btn-task:hover { background: rgba(168,85,247,0.18); }
+    .btn-success { background: rgba(34,197,94,0.12); border-color: rgba(34,197,94,0.3); color: var(--green); }
+    .btn-success:hover { background: rgba(34,197,94,0.2); }
+    .btn-sm { padding: 5px 10px; font-size: 12px; }
 
-    .btn-danger {
-      background: rgba(239, 68, 68, 0.08);
-      border-color: rgba(239, 68, 68, 0.25);
-      color: var(--red);
+    /* ── Status bar ── */
+    .status-bar {
+      display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+      font-size: 13px; color: var(--text-dim); margin-bottom: 14px;
     }
-    .btn-danger:hover { background: rgba(239, 68, 68, 0.16); }
-
-    /* Email list */
-    .inbox { display: flex; flex-direction: column; gap: 12px; }
-
-    .email {
-      background: var(--bg-elev);
-      border: 1px solid var(--border);
-      border-radius: 14px;
-      overflow: hidden;
-      transition: border-color 0.2s ease;
+    .status-bar .sep { color: var(--text-faint); }
+    .status-refresh {
+      font-family: inherit; font-size: 12px; font-weight: 500;
+      color: var(--accent-cyan); background: none; border: none; cursor: pointer;
+      padding: 2px 6px; border-radius: 4px; transition: background 0.15s;
     }
-    .email:hover { border-color: var(--border-strong); }
-    .email.approved { border-color: rgba(34, 197, 94, 0.3); }
-    .email.dismissed { opacity: 0.5; }
+    .status-refresh:hover { background: rgba(34,211,238,0.1); }
 
-    .email-row {
-      display: grid;
-      grid-template-columns: auto 1fr auto auto;
-      gap: 16px;
-      align-items: center;
-      padding: 16px 20px;
-      cursor: pointer;
-      transition: background 0.18s ease;
+    /* ── Filter bar ── */
+    .filter-bar {
+      display: flex; align-items: center; gap: 12px 20px; flex-wrap: wrap;
+      margin-bottom: 14px; padding: 11px 16px;
+      background: var(--bg-elev); border: 1px solid var(--border); border-radius: 10px;
     }
-    .email-row:hover { background: rgba(255,255,255,0.02); }
+    .filter-group { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+    .filter-group-label {
+      font-size: 11px; text-transform: uppercase; letter-spacing: .08em;
+      color: var(--text-faint); font-weight: 600; white-space: nowrap;
+    }
+    .filter-bar select, .filter-bar input[type="date"] {
+      background: var(--bg); border: 1px solid var(--border-strong); color: var(--text);
+      padding: 6px 10px; border-radius: 7px;
+      font-family: inherit; font-size: 13px; cursor: pointer; outline: none;
+      transition: border-color 0.18s; color-scheme: dark;
+    }
+    .filter-bar select:hover, .filter-bar input[type="date"]:hover { border-color: rgba(255,255,255,0.2); }
+    .filter-bar select:focus, .filter-bar input[type="date"]:focus { border-color: var(--accent-cyan); }
+    .pill {
+      font-family: inherit; font-size: 12px; font-weight: 500;
+      padding: 5px 12px; border-radius: 999px;
+      background: var(--bg-elev); border: 1px solid var(--border);
+      color: var(--text-dim); cursor: pointer; transition: all 0.18s;
+    }
+    .pill:hover { border-color: var(--border-strong); color: var(--text); }
+    .pill.active { background: var(--text); color: var(--bg); border-color: var(--text); }
+    .custom-range { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text-dim); }
+    .custom-range.hidden { display: none; }
 
+    /* ── Tabs ── */
+    .tab-bar {
+      display: flex; gap: 2px;
+      margin-bottom: 18px;
+      background: var(--bg-elev); border: 1px solid var(--border); border-radius: 10px;
+      padding: 4px;
+    }
+    .tab {
+      font-family: inherit; font-size: 13px; font-weight: 500;
+      flex: 1; padding: 9px 12px;
+      background: none; border: none; border-radius: 7px;
+      color: var(--text-dim); cursor: pointer; transition: all 0.18s;
+      display: flex; align-items: center; justify-content: center; gap: 7px;
+    }
+    .tab:hover { background: rgba(255,255,255,0.04); color: var(--text); }
+    .tab.active { background: var(--bg-elev-2); color: var(--text); box-shadow: 0 1px 4px rgba(0,0,0,0.3); }
+    .tab svg { width: 13px; height: 13px; flex-shrink: 0; }
+    .tab-count {
+      font-size: 11px; font-weight: 700;
+      background: rgba(255,255,255,0.08); border-radius: 999px;
+      padding: 1px 7px; font-variant-numeric: tabular-nums;
+    }
+    .tab.active .tab-count { background: rgba(34,211,238,0.2); color: var(--accent-cyan); }
+
+    /* ── Category badges ── */
     .cat-badge {
-      font-size: 11px; font-weight: 600;
-      padding: 4px 10px;
-      border-radius: 6px;
-      letter-spacing: 0.02em;
-      white-space: nowrap;
-      border: 1px solid;
+      font-size: 11px; font-weight: 600; padding: 3px 9px; border-radius: 6px;
+      letter-spacing: .02em; white-space: nowrap; border: 1px solid; flex-shrink: 0;
     }
-    .cat-badge[data-cat="Nieuwe Lead"]   { color: var(--accent-cyan);   background: rgba(34, 211, 238, 0.10); border-color: rgba(34, 211, 238, 0.25); }
-    .cat-badge[data-cat="Appointment"]   { color: var(--accent-violet); background: rgba(168, 85, 247, 0.10); border-color: rgba(168, 85, 247, 0.25); }
-    .cat-badge[data-cat="Event Aanmelding"] { color: #14b8a6;          background: rgba(20, 184, 166, 0.10); border-color: rgba(20, 184, 166, 0.25); }
-    .cat-badge[data-cat="Klantvraag"]    { color: var(--amber);         background: rgba(245, 158, 11, 0.10); border-color: rgba(245, 158, 11, 0.25); }
-    .cat-badge[data-cat="Factuurvraag"]  { color: var(--red);           background: rgba(239, 68, 68, 0.10);  border-color: rgba(239, 68, 68, 0.25);  }
-    .cat-badge[data-cat="Reclame"]       { color: #ec4899;              background: rgba(236, 72, 153, 0.10); border-color: rgba(236, 72, 153, 0.25); }
-    .cat-badge[data-cat="Overig"]        { color: var(--text-dim);      background: rgba(148, 163, 184, 0.08); border-color: rgba(148, 163, 184, 0.20); }
+    .cat-badge[data-cat="Nieuwe Lead"]      { color: var(--accent-cyan);   background: rgba(34,211,238,0.10);  border-color: rgba(34,211,238,0.25); }
+    .cat-badge[data-cat="Appointment"]      { color: var(--accent-violet); background: rgba(168,85,247,0.10); border-color: rgba(168,85,247,0.25); }
+    .cat-badge[data-cat="Event Aanmelding"] { color: #14b8a6;              background: rgba(20,184,166,0.10);  border-color: rgba(20,184,166,0.25); }
+    .cat-badge[data-cat="Klantvraag"]       { color: var(--amber);         background: rgba(245,158,11,0.10);  border-color: rgba(245,158,11,0.25); }
+    .cat-badge[data-cat="Factuurvraag"]     { color: var(--red);           background: rgba(239,68,68,0.10);   border-color: rgba(239,68,68,0.25);  }
+    .cat-badge[data-cat="Reclame"]          { color: #ec4899;              background: rgba(236,72,153,0.10);  border-color: rgba(236,72,153,0.25); }
+    .cat-badge[data-cat="Overig"]           { color: var(--text-dim);      background: rgba(148,163,184,0.08); border-color: rgba(148,163,184,0.20); }
 
-    .email-meta { min-width: 0; }
-    .email-from { font-size: 14px; font-weight: 600; color: var(--text); }
-    .email-subject {
-      font-size: 13px; color: var(--text-dim);
-      margin-top: 2px;
-      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    /* ── Actie vereist cards ── */
+    .actie-list { display: flex; flex-direction: column; gap: 14px; }
+    .actie-card {
+      background: var(--bg-elev); border: 1px solid var(--border);
+      border-radius: 14px; padding: 18px 20px; transition: border-color 0.2s;
     }
-
-    .email-time {
-      font-size: 12px; color: var(--text-faint);
-      font-variant-numeric: tabular-nums;
-      white-space: nowrap;
+    .actie-card.unread { border-left: 3px solid var(--accent-cyan); }
+    .actie-card:hover { border-color: var(--border-strong); }
+    .card-top {
+      display: flex; align-items: center; gap: 10px; margin-bottom: 10px; flex-wrap: wrap;
     }
-
-    .chevron {
-      color: var(--text-faint);
-      transition: transform 0.2s ease;
+    .cat-select-inline {
+      font-family: inherit; font-size: 11px; font-weight: 600;
+      padding: 3px 8px; border-radius: 6px;
+      background: var(--bg); border: 1px solid var(--border-strong);
+      color: var(--text-dim); cursor: pointer; outline: none; color-scheme: dark;
+      transition: border-color 0.18s;
     }
-    .email.open .chevron { transform: rotate(180deg); }
-
-    .email-body {
-      display: none;
-      padding: 0 20px 20px;
-      border-top: 1px solid var(--border);
+    .cat-select-inline:focus { border-color: var(--accent-cyan); }
+    .card-time { font-size: 12px; color: var(--text-faint); margin-left: auto; white-space: nowrap; }
+    .unread-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent-cyan); flex-shrink: 0; }
+    .card-sender {
+      font-size: 14px; font-weight: 600; margin-bottom: 3px;
+      display: flex; align-items: center; gap: 7px; flex-wrap: wrap;
     }
-    .email.open .email-body { display: block; }
-
+    .sender-addr { font-size: 12px; color: var(--text-dim); font-weight: 400; }
+    .card-subject { font-size: 15px; font-weight: 700; margin-bottom: 10px; line-height: 1.35; }
+    .card-preview {
+      font-size: 13px; color: var(--text-dim); line-height: 1.55;
+      margin-bottom: 14px; padding: 10px 14px;
+      background: var(--bg); border: 1px solid var(--border); border-radius: 8px;
+      min-height: 48px; white-space: pre-wrap; word-break: break-word;
+    }
+    .card-preview.loading { display: flex; align-items: center; gap: 8px; color: var(--text-faint); font-style: italic; white-space: normal; }
+    .card-preview.error { color: var(--red); font-style: italic; white-space: normal; }
+    .card-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+    .card-reply-section {
+      margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--border);
+    }
     .reply-label {
-      font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em;
-      color: var(--text-faint); font-weight: 600;
-      margin: 18px 0 10px;
-      display: flex; align-items: center; gap: 8px;
+      font-size: 11px; text-transform: uppercase; letter-spacing: .08em;
+      color: var(--text-faint); font-weight: 600; margin-bottom: 8px;
+      display: flex; align-items: center; gap: 6px;
     }
-    .reply-label .ai-tag {
-      background: var(--accent-grad);
-      color: #0a0b10;
-      padding: 2px 7px;
-      border-radius: 4px;
-      font-weight: 700;
-      letter-spacing: 0.04em;
-    }
-
-    .ai-loading {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      padding: 14px 0;
-      font-size: 13px;
-      color: var(--accent-cyan);
-    }
-    .ai-loading-spinner {
-      width: 16px; height: 16px;
-      border: 2px solid rgba(34, 211, 238, 0.25);
-      border-top-color: var(--accent-cyan);
-      border-radius: 50%;
-      animation: spin 0.7s linear infinite;
-      flex-shrink: 0;
-    }
-    .ai-error {
-      font-size: 12.5px;
-      color: var(--red);
-      padding: 10px 0 6px;
-    }
-
+    .ai-tag { background: var(--accent-grad); color: #0a0b10; padding: 2px 7px; border-radius: 4px; font-weight: 700; letter-spacing: .04em; }
     .reply-box {
-      width: 100%;
-      min-height: 160px;
-      background: var(--bg);
-      border: 1px solid var(--border);
-      border-radius: 10px;
-      padding: 14px;
-      color: var(--text);
-      font-family: inherit;
-      font-size: 13.5px;
-      line-height: 1.6;
-      resize: vertical;
+      width: 100%; min-height: 180px;
+      background: var(--bg); border: 1px solid var(--border); border-radius: 10px;
+      padding: 14px; color: var(--text);
+      font-family: inherit; font-size: 13.5px; line-height: 1.6; resize: vertical;
     }
-    .reply-box:focus {
-      outline: none;
-      border-color: var(--accent-cyan);
+    .reply-box:focus { outline: none; border-color: var(--accent-cyan); }
+    .reply-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+    .card-ai-loading { display: flex; align-items: center; gap: 10px; padding: 12px 0; font-size: 13px; color: var(--accent-cyan); }
+    .card-ai-error { font-size: 13px; color: var(--red); padding: 8px 0; }
+    .ai-loading-spinner {
+      width: 15px; height: 15px;
+      border: 2px solid rgba(34,211,238,0.25); border-top-color: var(--accent-cyan);
+      border-radius: 50%; animation: spin 0.7s linear infinite; flex-shrink: 0;
     }
-    .reply-box[readonly] { color: var(--text-dim); }
-
-    .actions {
-      display: flex; gap: 10px; flex-wrap: wrap;
-      margin-top: 14px;
-      align-items: center;
+    .preview-spinner {
+      width: 13px; height: 13px;
+      border: 2px solid rgba(148,163,184,0.2); border-top-color: var(--text-dim);
+      border-radius: 50%; animation: spin 0.8s linear infinite;
+      display: inline-block; flex-shrink: 0;
     }
 
-    .approval-status {
-      margin-left: auto;
-      font-size: 12px;
-      font-weight: 600;
+    /* ── Informatie list ── */
+    .info-list { display: flex; flex-direction: column; gap: 8px; }
+    .info-row {
+      display: grid; grid-template-columns: auto 1fr auto auto;
+      gap: 14px; align-items: center;
+      padding: 13px 18px;
+      background: var(--bg-elev); border: 1px solid var(--border); border-radius: 10px;
+      transition: border-color 0.18s;
     }
-    .approval-status.ok { color: var(--green); }
-    .approval-status.no { color: var(--red); }
+    .info-row:hover { border-color: var(--border-strong); }
+    .info-meta { min-width: 0; }
+    .info-from { font-size: 14px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .info-subject { font-size: 13px; color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: 2px; }
+    .info-time { font-size: 12px; color: var(--text-faint); white-space: nowrap; }
+    .auto-label {
+      font-size: 11px; font-weight: 600; padding: 3px 9px; border-radius: 6px;
+      background: rgba(255,255,255,0.05); color: var(--text-faint); white-space: nowrap;
+    }
 
-    /* States */
+    /* ── Reclame review ── */
+    .reclame-section { margin-bottom: 24px; }
+    .reclame-section-title {
+      font-size: 12px; text-transform: uppercase; letter-spacing: .08em;
+      font-weight: 600; color: var(--text-faint);
+      margin-bottom: 10px; display: flex; align-items: center; gap: 10px;
+    }
+    .suspect-badge {
+      font-size: 10px; font-weight: 600; padding: 2px 7px; border-radius: 6px;
+      background: rgba(245,158,11,0.12); border: 1px solid rgba(245,158,11,0.25); color: var(--amber);
+    }
+    .reclame-bulk-bar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
+    .reclame-table {
+      background: var(--bg-elev); border: 1px solid var(--border); border-radius: 12px; overflow: hidden;
+    }
+    .reclame-row {
+      display: grid; grid-template-columns: 36px auto 1fr auto;
+      gap: 12px; align-items: center;
+      padding: 10px 16px; border-bottom: 1px solid var(--border);
+      transition: background 0.15s;
+    }
+    .reclame-row:last-child { border-bottom: none; }
+    .reclame-row:hover { background: rgba(255,255,255,0.02); }
+    .reclame-row.selected { background: rgba(236,72,153,0.05); }
+    .reclame-row input[type="checkbox"] { width: 15px; height: 15px; cursor: pointer; accent-color: #ec4899; }
+    .reclame-from { font-size: 13px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 160px; }
+    .reclame-subject { font-size: 13px; color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .reclame-time { font-size: 12px; color: var(--text-faint); white-space: nowrap; }
+
+    /* ── State / spinner / error ── */
     .state {
-      padding: 60px 20px;
-      text-align: center;
-      background: var(--bg-elev);
-      border: 1px solid var(--border);
-      border-radius: 14px;
+      padding: 56px 20px; text-align: center;
+      background: var(--bg-elev); border: 1px solid var(--border); border-radius: 14px;
     }
     .state svg { width: 40px; height: 40px; margin-bottom: 14px; }
     .state h3 { font-size: 16px; margin-bottom: 6px; }
@@ -725,94 +298,107 @@
     .state .btn { margin: 4px; }
     .state.error svg, .state.error h3 { color: var(--red); }
     .state.error code {
-      display: block;
-      margin-top: 12px;
-      padding: 10px 14px;
-      background: var(--bg);
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      font-size: 12px;
-      color: var(--text-dim);
-      text-align: left;
+      display: block; margin-top: 12px; padding: 10px 14px;
+      background: var(--bg); border: 1px solid var(--border); border-radius: 8px;
+      font-size: 12px; color: var(--text-dim); text-align: left;
       max-width: 600px; margin-left: auto; margin-right: auto;
-      white-space: pre-wrap;
-      word-break: break-word;
+      white-space: pre-wrap; word-break: break-word;
     }
-
-    /* Pagination */
-    .pagination {
-      margin-top: 24px;
-      padding-top: 20px;
-      border-top: 1px solid var(--border);
-    }
-    .pagination-info {
-      text-align: center;
-      font-size: 12px;
-      color: var(--text-faint);
-      margin-bottom: 12px;
-      font-variant-numeric: tabular-nums;
-    }
-    .pagination-buttons {
-      display: flex;
-      justify-content: center;
-      align-items: center;
-      gap: 6px;
-      flex-wrap: wrap;
-    }
-    .page-btn {
-      font-family: inherit;
-      font-size: 13px;
-      font-weight: 500;
-      padding: 8px 12px;
-      min-width: 38px;
-      background: var(--bg-elev);
-      border: 1px solid var(--border);
-      color: var(--text-dim);
-      border-radius: 8px;
-      cursor: pointer;
-      font-variant-numeric: tabular-nums;
-      transition: all 0.18s ease;
-    }
-    .page-btn:hover:not(:disabled):not(.active) {
-      border-color: var(--border-strong);
-      color: var(--text);
-    }
-    .page-btn.active {
-      background: var(--text);
-      color: var(--bg);
-      border-color: var(--text);
-      font-weight: 600;
-    }
-    .page-btn:disabled {
-      opacity: 0.4;
-      cursor: not-allowed;
-    }
-    .page-ellipsis {
-      font-size: 13px;
-      color: var(--text-faint);
-      padding: 0 4px;
-      user-select: none;
-    }
-
-    /* Spinner */
     .spinner {
       width: 28px; height: 28px;
-      border: 3px solid var(--border);
-      border-top-color: var(--accent-cyan);
-      border-radius: 50%;
-      animation: spin 0.8s linear infinite;
-      margin: 0 auto 14px;
+      border: 3px solid var(--border); border-top-color: var(--accent-cyan);
+      border-radius: 50%; animation: spin 0.8s linear infinite; margin: 0 auto 14px;
     }
     @keyframes spin { to { transform: rotate(360deg); } }
 
-    @media (max-width: 600px) {
-      .app { padding: 20px 16px 48px; }
-      .email-row { grid-template-columns: auto 1fr auto; gap: 10px; padding: 14px; }
-      .email-time { display: none; }
-      .counter-value { font-size: 30px; }
+    /* ── Pagination ── */
+    .pagination { margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--border); }
+    .pagination-info { text-align: center; font-size: 12px; color: var(--text-faint); margin-bottom: 10px; font-variant-numeric: tabular-nums; }
+    .pagination-buttons { display: flex; justify-content: center; gap: 6px; flex-wrap: wrap; }
+    .page-btn {
+      font-family: inherit; font-size: 13px; font-weight: 500;
+      padding: 7px 12px; min-width: 36px;
+      background: var(--bg-elev); border: 1px solid var(--border);
+      color: var(--text-dim); border-radius: 7px; cursor: pointer; transition: all 0.18s;
     }
+    .page-btn:hover:not(:disabled):not(.active) { border-color: var(--border-strong); color: var(--text); }
+    .page-btn.active { background: var(--text); color: var(--bg); border-color: var(--text); font-weight: 600; }
+    .page-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 
-    /* ══ Sidebar ══ */
+    /* ── Toast ── */
+    .toast {
+      position: fixed; bottom: 28px; left: 50%;
+      transform: translate(-50%, 20px);
+      background: var(--bg-elev-2); border: 1px solid var(--border-strong);
+      color: var(--text); padding: 11px 20px; border-radius: 999px;
+      font-size: 13px; font-weight: 500;
+      opacity: 0; transition: opacity 0.25s, transform 0.25s;
+      z-index: 1000; box-shadow: 0 14px 50px rgba(0,0,0,0.5);
+      pointer-events: none; max-width: calc(100vw - 40px); text-align: center;
+    }
+    .toast.show { opacity: 1; transform: translate(-50%, 0); }
+
+    /* ── Signature modal ── */
+    .modal-overlay {
+      position: fixed; inset: 0; z-index: 500;
+      background: rgba(0,0,0,0.7);
+      display: flex; align-items: flex-start; justify-content: center;
+      padding: 40px 20px; overflow-y: auto;
+    }
+    .modal-overlay.hidden { display: none; }
+    .modal-box {
+      background: var(--bg-elev); border: 1px solid var(--border-strong);
+      border-radius: 16px; width: 100%; max-width: 700px;
+      box-shadow: 0 24px 80px rgba(0,0,0,0.6);
+    }
+    .modal-header {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 20px 24px; border-bottom: 1px solid var(--border);
+    }
+    .modal-header h3 { font-size: 16px; font-weight: 700; }
+    .modal-close {
+      background: none; border: none; cursor: pointer;
+      color: var(--text-dim); font-size: 22px; line-height: 1; padding: 2px;
+      transition: color 0.15s;
+    }
+    .modal-close:hover { color: var(--text); }
+    .modal-body { padding: 24px; display: grid; grid-template-columns: 1fr 1fr; gap: 28px; }
+    .modal-footer { display: flex; gap: 8px; justify-content: flex-end; padding: 16px 24px; border-top: 1px solid var(--border); }
+    .sig-form-col { display: flex; flex-direction: column; gap: 13px; }
+    .form-group { display: flex; flex-direction: column; gap: 5px; }
+    .form-group label {
+      font-size: 11px; text-transform: uppercase; letter-spacing: .06em;
+      font-weight: 600; color: var(--text-faint);
+    }
+    .form-group input {
+      background: var(--bg); border: 1px solid var(--border-strong);
+      color: var(--text); padding: 8px 11px; border-radius: 7px;
+      font-family: inherit; font-size: 13px; outline: none;
+      transition: border-color 0.18s;
+    }
+    .form-group input:focus { border-color: var(--accent-cyan); }
+    .form-section-label {
+      font-size: 10px; text-transform: uppercase; letter-spacing: .08em;
+      font-weight: 700; color: var(--text-faint); padding-top: 4px;
+    }
+    .logo-drop {
+      border: 2px dashed var(--border-strong); border-radius: 8px;
+      padding: 14px 12px; text-align: center;
+      font-size: 12px; color: var(--text-faint); cursor: pointer;
+      transition: border-color 0.18s, background 0.18s;
+    }
+    .logo-drop:hover, .logo-drop.dragover { border-color: var(--accent-cyan); background: rgba(34,211,238,0.05); }
+    .logo-preview { max-width: 150px; max-height: 50px; border-radius: 4px; margin-top: 8px; display: block; }
+    .sig-preview-col { display: flex; flex-direction: column; gap: 8px; }
+    .sig-preview-label { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; font-weight: 600; color: var(--text-faint); }
+    .sig-preview-box {
+      background: var(--bg); border: 1px solid var(--border); border-radius: 8px;
+      padding: 14px; font-size: 13px; color: var(--text-dim);
+      white-space: pre-wrap; line-height: 1.65; min-height: 130px; flex: 1;
+    }
+    .sig-preview-note { font-size: 12px; color: var(--text-faint); }
+
+    /* ── Sidebar ── */
     .sidebar { position: fixed; top: 0; left: 0; bottom: 0; width: 220px; background: #0a0a0e; border-right: 1px solid rgba(255,255,255,0.05); display: flex; flex-direction: column; z-index: 200; overflow-y: auto; overflow-x: hidden; }
     .sidebar-logo { display: flex; align-items: center; gap: 11px; padding: 22px 16px 18px; border-bottom: 1px solid rgba(255,255,255,0.05); flex-shrink: 0; }
     .sidebar-logo-icon { width: 34px; height: 34px; flex-shrink: 0; border-radius: 9px; background: var(--accent-grad); display: grid; place-items: center; font-weight: 800; font-size: 12px; color: #0a0b10; }
@@ -832,1445 +418,1214 @@
     .footer-user { display: flex; align-items: center; gap: 9px; padding: 9px 10px; border-radius: 8px; color: var(--text-dim); font-size: 13px; font-weight: 500; cursor: pointer; transition: background .15s; }
     .footer-user:hover { background: rgba(255,255,255,0.05); color: var(--text); }
     .footer-avatar { width: 26px; height: 26px; flex-shrink: 0; border-radius: 50%; background: var(--accent-grad); display: grid; place-items: center; font-size: 10px; font-weight: 800; color: #0a0b10; }
+
+    @media (max-width: 640px) {
+      .app { padding: 16px 12px 48px; }
+      .modal-body { grid-template-columns: 1fr; }
+      .info-row { grid-template-columns: auto 1fr auto; }
+      .reclame-row { grid-template-columns: 28px 1fr auto; }
+    }
   </style>
 </head>
 <body>
+
+<!-- ── Sidebar ── -->
 <nav class="sidebar">
   <div class="sidebar-logo">
     <div class="sidebar-logo-icon">CC</div>
-    <div><div class="sidebar-logo-title">Command Center</div><div class="sidebar-logo-sub">De Forex Opleiding</div></div>
+    <div>
+      <div class="sidebar-logo-title">Command Center</div>
+      <div class="sidebar-logo-sub">De Forex Opleiding</div>
+    </div>
   </div>
   <div class="sidebar-nav">
-    <a class="nav-item" href="../index.html"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>Dashboard</a>
-    <a class="nav-item active" href="email.html"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>E-mail</a>
-    <a class="nav-item" href="taken.html"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="9" y1="9" x2="15" y2="9"/><line x1="9" y1="13" x2="15" y2="13"/><line x1="9" y1="17" x2="12" y2="17"/></svg>Takenbeheer<span class="nav-badge" id="navTakenBadge"></span></a>
-    <a class="nav-item" href="kennisbank.html"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>Kennisbank</a>
+    <a class="nav-item" href="../index.html">
+      <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+      Dashboard
+    </a>
+    <a class="nav-item active" href="email.html">
+      <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
+      E-mail
+    </a>
+    <a class="nav-item" href="taken.html">
+      <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="9" y1="9" x2="15" y2="9"/><line x1="9" y1="13" x2="15" y2="13"/><line x1="9" y1="17" x2="12" y2="17"/></svg>
+      Takenbeheer
+      <span class="nav-badge" id="navTakenBadge"></span>
+    </a>
+    <a class="nav-item" href="kennisbank.html">
+      <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>
+      Kennisbank
+    </a>
     <div class="nav-section">Binnenkort</div>
-    <div class="nav-item nav-concept"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>WhatsApp Bot<span class="nav-soon">Binnenkort</span></div>
-    <div class="nav-item nav-concept"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>Wanbetalers<span class="nav-soon">Binnenkort</span></div>
-    <div class="nav-item nav-concept"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>Contracten<span class="nav-soon">Binnenkort</span></div>
-    <div class="nav-item nav-concept"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>Onboarding<span class="nav-soon">Binnenkort</span></div>
+    <div class="nav-item nav-concept">
+      <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>
+      WhatsApp Bot<span class="nav-soon">Binnenkort</span>
+    </div>
+    <div class="nav-item nav-concept">
+      <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+      Contracten<span class="nav-soon">Binnenkort</span>
+    </div>
+    <div class="nav-item nav-concept">
+      <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+      Onboarding<span class="nav-soon">Binnenkort</span>
+    </div>
   </div>
   <div class="sidebar-footer">
-    <div class="footer-user"><div class="footer-avatar">JB</div><span>Jeffrey</span><svg style="width:13px;height:13px;margin-left:auto;flex-shrink:0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M4.93 4.93a10 10 0 0 0 0 14.14"/></svg></div>
+    <div class="footer-user">
+      <div class="footer-avatar">JB</div>
+      <span>Jeffrey</span>
+    </div>
   </div>
 </nav>
-<script>(function(){try{const t=JSON.parse(localStorage.getItem('taken_lijst')||'[]');const u=t.filter(x=>x.status!=='done'&&(x.prioriteit==='Urgent'||x.prioriteit==='Hoog'));if(u.length){const b=document.getElementById('navTakenBadge');if(b){b.textContent=u.length;b.classList.add('show');}}}catch(e){}})();</script>
-  <div class="app">
-    <header>
-      <div class="brand">
-        <a href="../index.html" style="text-decoration:none;"><div class="logo-mark">AC</div></a>
-        <div>
-          <h1>E-mail analyse &amp; antwoord</h1>
-          <div class="crumb">
-            <a href="../index.html">Command Center</a>
-            <span class="sep">/</span>
-            Modules
-            <span class="sep">/</span>
-            E-mail
-          </div>
-        </div>
-      </div>
-      <div class="header-actions">
-        <button class="btn" id="refreshBtn">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <polyline points="23 4 23 10 17 10"></polyline>
-            <polyline points="1 20 1 14 7 14"></polyline>
-            <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
-          </svg>
-          Vernieuwen
-        </button>
-        <a href="kennisbank.html" class="btn">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"></path>
-            <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"></path>
-          </svg>
-          Kennisbank
-        </a>
-        <a href="../index.html" class="btn">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <line x1="19" y1="12" x2="5" y2="12"></line>
-            <polyline points="12 19 5 12 12 5"></polyline>
-          </svg>
-          Terug
-        </a>
-      </div>
-    </header>
+<script>(function(){try{var t=JSON.parse(localStorage.getItem('taken_lijst')||'[]');var u=t.filter(function(x){return x.status!=='done'&&(x.prioriteit==='Urgent'||x.prioriteit==='Hoog');});if(u.length){var b=document.getElementById('navTakenBadge');if(b){b.textContent=u.length;b.classList.add('show');}}}catch(e){}})();</script>
 
-    <div class="page-head">
+<div class="app">
+  <header>
+    <div class="brand">
+      <div class="logo-mark">@</div>
       <div>
-        <h2 id="inboxTitle">Inbox · vandaag</h2>
-        <div class="desc">4 postvakken · automatisch gecategoriseerd, AI-antwoorden ter goedkeuring</div>
-      </div>
-      <div class="last-fetch" id="lastFetch">—</div>
-    </div>
-
-    <section class="counters">
-      <div class="counter featured">
-        <div class="counter-label">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>
-          Nieuwe leads <span class="period">vandaag</span>
-        </div>
-        <div class="counter-value" id="cntLead">—</div>
-        <div class="counter-sub live"><span style="display:inline-block;width:6px;height:6px;background:#22c55e;border-radius:50%;margin-right:6px;"></span>Live geüpdatet via IMAP</div>
-      </div>
-      <div class="counter featured">
-        <div class="counter-label">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>
-          Uitlegsessies ingepland
-        </div>
-        <div class="counter-value" id="cntAppt">—</div>
-        <div class="counter-sub live"><span style="display:inline-block;width:6px;height:6px;background:#22c55e;border-radius:50%;margin-right:6px;"></span>Live geüpdatet via IMAP</div>
-      </div>
-      <div class="counter featured">
-        <div class="counter-label">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="m22 11-3 3-2-2"></path></svg>
-          Event Aanmeldingen <span class="period">vandaag</span>
-        </div>
-        <div class="counter-value" id="cntEvents">—</div>
-        <div class="counter-sub live"><span style="display:inline-block;width:6px;height:6px;background:#22c55e;border-radius:50%;margin-right:6px;"></span>Seminars &amp; events</div>
-      </div>
-      <div class="counter">
-        <div class="counter-label">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"></path><polyline points="22,6 12,13 2,6"></polyline></svg>
-          Totaal mails <span class="period">vandaag</span>
-        </div>
-        <div class="counter-value" id="cntTotal">—</div>
-        <div class="counter-sub">Alle inkomende berichten</div>
-      </div>
-      <div class="counter alert urgent">
-        <div class="counter-label">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><path d="M14 2v6h6"></path><line x1="9" y1="14" x2="15" y2="14"></line><line x1="9" y1="17" x2="13" y2="17"></line></svg>
-          Openstaande factuurvragen
-        </div>
-        <div class="counter-value" id="cntInvOpen">—</div>
-        <div class="counter-sub">Vereist actie · <span class="period">7 dagen</span></div>
-      </div>
-      <div class="counter alert">
-        <div class="counter-label">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
-          Onbeantwoord <span class="period">vandaag</span>
-        </div>
-        <div class="counter-value" id="cntPending">—</div>
-        <div class="counter-sub">excl. leads, afspraken, events &amp; reclame</div>
-      </div>
-      <div class="counter">
-        <div class="counter-label">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle><path d="M22 11h-4"></path><path d="M22 14h-4"></path></svg>
-          Leads deze week
-        </div>
-        <div class="counter-value" id="cntLeadsWeek">—</div>
-        <div class="counter-sub">afgelopen 7 dagen</div>
-      </div>
-      <div class="counter kpi">
-        <div class="counter-label">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"></polyline><polyline points="17 6 23 6 23 12"></polyline></svg>
-          Conversie <span class="period">vandaag</span>
-        </div>
-        <div class="counter-value" id="cntConv">—</div>
-        <div class="counter-sub">uitlegsessies / leads</div>
-      </div>
-    </section>
-
-    <div id="suggestion-banner"></div>
-
-    <div class="filter-bar">
-      <div class="filter-group">
-        <span class="filter-group-label">Adres</span>
-        <select id="addressFilter">
-          <option value="Alle">Alle adressen</option>
-          <option value="leads@deforexopleiding.nl">leads@deforexopleiding.nl</option>
-          <option value="info@deforexopleiding.nl">info@deforexopleiding.nl</option>
-          <option value="partners@deforexopleiding.nl">partners@deforexopleiding.nl</option>
-          <option value="administratie@deforexopleiding.nl">administratie@deforexopleiding.nl</option>
-        </select>
-      </div>
-      <div class="filter-group">
-        <span class="filter-group-label">Datum</span>
-        <button type="button" class="pill date-pill active" data-date="today">Vandaag</button>
-        <button type="button" class="pill date-pill" data-date="yesterday">Gisteren</button>
-        <button type="button" class="pill date-pill" data-date="week">Deze week</button>
-        <button type="button" class="pill date-pill" data-date="month">Deze maand</button>
-        <button type="button" class="pill date-pill" data-date="custom">Aangepast</button>
-        <span class="custom-range hidden" id="customRange">
-          <input type="date" id="dateFrom" />
-          <span>tot</span>
-          <input type="date" id="dateTo" />
-        </span>
+        <h1>E-mail</h1>
+        <div class="crumb">Agency Command Center &middot; Inkomende berichten</div>
       </div>
     </div>
+    <div class="header-actions">
+      <button class="btn" id="refreshBtn">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+        Vernieuwen
+      </button>
+      <button class="btn" id="sigBtn">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M4.93 4.93a10 10 0 0 0 0 14.14"/></svg>
+        Handtekening
+      </button>
+    </div>
+  </header>
 
-    <div class="filters" id="filters"></div>
-
-    <section id="content">
-      <div class="state">
-        <div class="spinner"></div>
-        <h3>Mailbox laden…</h3>
-        <p>We halen je e-mails op via IMAP en categoriseren ze automatisch.</p>
-      </div>
-    </section>
-
-    <nav class="pagination" id="pagination" aria-label="Paginanavigatie"></nav>
+  <div class="status-bar">
+    <span id="actionCount">—</span>
+    <span class="sep">&middot;</span>
+    <span id="lastUpdateTime">Laatste update: —</span>
+    <button class="status-refresh" onclick="loadEmails()">&#8635; Vernieuwen</button>
   </div>
 
-  <script>
-    const CATEGORIES = ['Nieuwe Lead', 'Appointment', 'Event Aanmelding', 'Klantvraag', 'Factuurvraag', 'Reclame', 'Overig'];
-    const PAGE_SIZE = 50;
-    const STORAGE_KEY = 'forex-opleiding-email-overrides';
+  <div class="filter-bar">
+    <div class="filter-group">
+      <span class="filter-group-label">Adres</span>
+      <select id="addressFilter">
+        <option value="Alle">Alle adressen</option>
+        <option value="leads@deforexopleiding.nl">leads@deforexopleiding.nl</option>
+        <option value="info@deforexopleiding.nl">info@deforexopleiding.nl</option>
+        <option value="partners@deforexopleiding.nl">partners@deforexopleiding.nl</option>
+        <option value="administratie@deforexopleiding.nl">administratie@deforexopleiding.nl</option>
+      </select>
+    </div>
+    <div class="filter-group">
+      <span class="filter-group-label">Datum</span>
+      <button type="button" class="pill date-pill active" data-date="today">Vandaag</button>
+      <button type="button" class="pill date-pill" data-date="yesterday">Gisteren</button>
+      <button type="button" class="pill date-pill" data-date="week">Deze week</button>
+      <button type="button" class="pill date-pill" data-date="month">Deze maand</button>
+      <button type="button" class="pill date-pill" data-date="custom">Aangepast</button>
+      <span class="custom-range hidden" id="customRange">
+        <input type="date" id="dateFrom" />
+        <span>tot</span>
+        <input type="date" id="dateTo" />
+      </span>
+    </div>
+  </div>
 
-    function loadOverrides() {
-      try {
-        const raw = localStorage.getItem(STORAGE_KEY);
-        if (!raw) return { category: {}, read: {} };
-        const parsed = JSON.parse(raw);
-        return {
-          category: parsed.category && typeof parsed.category === 'object' ? parsed.category : {},
-          read:     parsed.read     && typeof parsed.read     === 'object' ? parsed.read     : {}
-        };
-      } catch {
-        return { category: {}, read: {} };
-      }
+  <div class="tab-bar" id="tabBar">
+    <button class="tab active" data-tab="actie">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.69 12 19.79 19.79 0 0 1 1.61 3.47 2 2 0 0 1 3.56 1h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L7.91 8.64a16 16 0 0 0 6 6l.91-.91a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 21.75 16z"/></svg>
+      Actie vereist
+      <span class="tab-count" id="tabCountActie">0</span>
+    </button>
+    <button class="tab" data-tab="info">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+      Informatie
+      <span class="tab-count" id="tabCountInfo">0</span>
+    </button>
+    <button class="tab" data-tab="reclame">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" y1="22" x2="4" y2="15"/></svg>
+      Reclame review
+      <span class="tab-count" id="tabCountReclame">0</span>
+    </button>
+  </div>
+
+  <div id="tabContent">
+    <div class="state">
+      <div class="spinner"></div>
+      <h3>Mailbox laden&hellip;</h3>
+      <p>We halen je e-mails op via IMAP en categoriseren ze automatisch.</p>
+    </div>
+  </div>
+</div>
+
+<!-- ── Handtekening modal ── -->
+<div id="sigModal" class="modal-overlay hidden">
+  <div class="modal-box">
+    <div class="modal-header">
+      <h3>Handtekening instellen</h3>
+      <button class="modal-close" onclick="closeSigModal()">&times;</button>
+    </div>
+    <div class="modal-body">
+      <div class="sig-form-col">
+        <div class="form-group"><label>Naam</label><input type="text" id="sigNaam" placeholder="Jeffrey Biemold" /></div>
+        <div class="form-group"><label>Functie</label><input type="text" id="sigFunctie" placeholder="Eigenaar" /></div>
+        <div class="form-group"><label>Telefoonnummer</label><input type="text" id="sigTelefoon" placeholder="+31 6 ..." /></div>
+        <div class="form-group"><label>Website</label><input type="text" id="sigWebsite" placeholder="www.deforexopleiding.nl" /></div>
+        <div class="form-group">
+          <label>Logo (sleep of klik &middot; max 200px breed)</label>
+          <div class="logo-drop" id="logoDrop" onclick="document.getElementById('logoFile').click()">
+            <span id="logoDropLabel">Sleep .png/.jpg hier of klik om te uploaden</span>
+            <img id="logoPreview" class="logo-preview" style="display:none" alt="Logo" />
+          </div>
+          <input type="file" id="logoFile" accept="image/png,image/jpeg,image/jpg" style="display:none" />
+        </div>
+        <div class="form-section-label">Sociale media</div>
+        <div class="form-group"><label>Instagram</label><input type="url" id="sigInstagram" placeholder="https://instagram.com/..." /></div>
+        <div class="form-group"><label>Facebook</label><input type="url" id="sigFacebook" placeholder="https://facebook.com/..." /></div>
+        <div class="form-group"><label>LinkedIn</label><input type="url" id="sigLinkedin" placeholder="https://linkedin.com/in/..." /></div>
+        <div class="form-group"><label>WhatsApp</label><input type="text" id="sigWhatsapp" placeholder="+31 6 ..." /></div>
+      </div>
+      <div class="sig-preview-col">
+        <div class="sig-preview-label">Voorbeeld handtekening</div>
+        <div id="sigPreviewBox" class="sig-preview-box"></div>
+        <p class="sig-preview-note">Wordt automatisch toegevoegd aan elk gegenereerd AI-antwoord.</p>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn" onclick="closeSigModal()">Annuleren</button>
+      <button class="btn btn-primary" onclick="saveSignature()">Opslaan</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast" class="toast"></div>
+
+<script>
+  // ── Constants ──────────────────────────────────────────────────────────────
+  const CATEGORIES    = ['Nieuwe Lead','Appointment','Event Aanmelding','Klantvraag','Factuurvraag','Reclame','Overig'];
+  const INFO_CATS     = new Set(['Nieuwe Lead','Appointment','Event Aanmelding']);
+  const ACTIE_CATS    = new Set(['Klantvraag','Factuurvraag','Overig']);
+  const PAGE_SIZE     = 30;
+  const STORAGE_KEY           = 'forex-opleiding-email-overrides';
+  const RECLAME_PATTERNS_KEY  = 'email_reclame_patterns';
+  const REJECTED_SUGG_KEY     = 'email_reclame_rejected';
+  const LEARNING_KEY          = 'email_learning_examples';
+  const REPLY_STATS_KEY       = 'email_reply_stats';
+  const AI_CATS_KEY           = 'email_ai_categories';
+  const SIGNATURE_KEY         = 'email_signature';
+
+  // ── SVG icons ──────────────────────────────────────────────────────────────
+  const ICON_AI     = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3z"></path></svg>';
+  const ICON_SEND   = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>';
+  const ICON_REGEN  = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>';
+  const ICON_TASK   = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="9" y1="9" x2="15" y2="9"/><line x1="9" y1="13" x2="15" y2="13"/><line x1="9" y1="17" x2="12" y2="17"/></svg>';
+  const ICON_READ   = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>';
+
+  // ── State ──────────────────────────────────────────────────────────────────
+  const state = {
+    emails: [],
+    activeTab: 'actie',
+    infoPage: 1,
+    addressFilter: 'Alle',
+    dateFilter: 'today',
+    customFrom: '',
+    customTo: '',
+    overrides: loadOverrides(),
+    bodyCache: {},     // uid -> { loading, text, from, to, date, error }
+    aiProposals: {},   // uid -> { original, current, loading, error, generatedAt }
+    reclameSelected: new Set(),
+    suggestions: [],   // weak reclame matches: [{ email, pattern }]
+    fetchedAt: null
+  };
+
+  // ── localStorage helpers ───────────────────────────────────────────────────
+  function loadJson(key, fallback) {
+    try { const r = localStorage.getItem(key); return r ? (JSON.parse(r) ?? fallback) : fallback; } catch { return fallback; }
+  }
+  function saveJson(key, val) { try { localStorage.setItem(key, JSON.stringify(val)); } catch {} }
+
+  function loadOverrides() {
+    try {
+      const r = localStorage.getItem(STORAGE_KEY);
+      if (!r) return { category: {}, read: {} };
+      const p = JSON.parse(r);
+      return { category: p.category && typeof p.category === 'object' ? p.category : {}, read: p.read && typeof p.read === 'object' ? p.read : {} };
+    } catch { return { category: {}, read: {} }; }
+  }
+  function saveOverrides() { try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state.overrides)); } catch {} }
+
+  function applyOverrides() {
+    const cat = state.overrides.category || {};
+    const read = state.overrides.read || {};
+    state.emails.forEach((e) => {
+      if (cat[e.uid])  e.category = cat[e.uid];
+      if (read[e.uid]) e.unread = false;
+    });
+  }
+
+  // ── Toast ──────────────────────────────────────────────────────────────────
+  let _toastTimer;
+  function showToast(msg) {
+    const t = document.getElementById('toast');
+    if (!t) return;
+    t.textContent = msg;
+    void t.offsetWidth;
+    t.classList.add('show');
+    clearTimeout(_toastTimer);
+    _toastTimer = setTimeout(() => t.classList.remove('show'), 2400);
+  }
+
+  // ── Reclame learning ───────────────────────────────────────────────────────
+  const KEYWORD_STOPWORDS = new Set(['de','het','een','voor','met','van','naar','die','dat','deze','dit','en','of','in','op','om','aan','is','als','bij','door','over','tot','uit','wij','jij','je','jouw','uw','we','jullie','ons','mij','mijn','the','a','an','and','or','for','with','from','on','are','this','that','your','our','you']);
+
+  function extractKeywords(subject) {
+    return (subject || '').toLowerCase().replace(/[^\p{L}\p{N}\s]+/gu,' ').split(/\s+/).filter((w) => w.length >= 4 && !KEYWORD_STOPWORDS.has(w)).slice(0, 6);
+  }
+  function getDomain(addr) { const i = (addr || '').lastIndexOf('@'); return i >= 0 ? addr.slice(i+1).toLowerCase() : ''; }
+
+  function loadReclamePatterns()  { return loadJson(RECLAME_PATTERNS_KEY, []); }
+  function saveReclamePatterns(p) { saveJson(RECLAME_PATTERNS_KEY, p); }
+  function loadRejectedSugg()     { const o = loadJson(REJECTED_SUGG_KEY, {}); return o && typeof o === 'object' ? o : {}; }
+  function saveRejectedSugg(uid)  { const r = loadRejectedSugg(); r[uid] = new Date().toISOString(); saveJson(REJECTED_SUGG_KEY, r); }
+  function loadLearningExamples() { return loadJson(LEARNING_KEY, []); }
+  function saveLearningExample(ex) { const a = loadLearningExamples(); a.push(ex); if (a.length > 100) a.splice(0, a.length-100); saveJson(LEARNING_KEY, a); }
+
+  function bumpReplyStat(kind) { const s = loadJson(REPLY_STATS_KEY, { approved:0, edited:0, rejected:0 }); s[kind] = (s[kind]||0)+1; saveJson(REPLY_STATS_KEY, s); }
+
+  function recordReclamePattern(email) {
+    const sender   = (email.fromAddress || getFromAddress(email)).toLowerCase();
+    const domain   = getDomain(sender);
+    const keywords = extractKeywords(email.subject);
+    const patterns = loadReclamePatterns();
+    const existing = patterns.find((p) => (sender && p.sender === sender) || (domain && p.domain === domain && !p.sender));
+    if (existing) {
+      existing.matchCount = (existing.matchCount||0)+1;
+      existing.keywords = [...new Set([...(existing.keywords||[]), ...keywords])].slice(0, 12);
+      existing.lastSeen = new Date().toISOString();
+    } else {
+      patterns.push({ sender, domain, keywords, matchCount:1, createdAt: new Date().toISOString(), lastSeen: new Date().toISOString() });
     }
+    saveReclamePatterns(patterns);
+  }
 
-    const state = {
-      emails: [],
-      counters: { nieuweLead: 0, nieuweUitlegsessie: 0, eventAanmelding: 0, totaalVandaag: 0 },
-      byCategory: {},
-      filter: 'Alle',           // category filter
-      addressFilter: 'Alle',    // 'Alle' or specific recipient address
-      dateFilter: 'today',      // 'today' | 'yesterday' | 'week' | 'month' | 'custom'
-      customFrom: '',           // YYYY-MM-DD
-      customTo: '',             // YYYY-MM-DD
-      page: 1,                  // current page in inbox pagination
-      overrides: loadOverrides(), // { category: { uid: 'Reclame' }, read: { uid: true } }
-      bodyCache: {},            // uid -> { loading, text, from, to, date, error? }
-      aiProposals: {},          // uid -> { original, current, generatedAt }
-      suggestions: [],          // queue van { email, pattern } voor weak-reclame matches
-      fetchedAt: null
-    };
-
-    function saveOverrides() {
-      try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state.overrides)); } catch {}
+  function scoreReclameMatch(email, patterns) {
+    const sender   = (email.fromAddress || getFromAddress(email)).toLowerCase();
+    const domain   = getDomain(sender);
+    const keywords = extractKeywords(email.subject);
+    let best = { strength:'none', overlap:0, pattern:null };
+    for (const p of patterns) {
+      const sameSender = sender && p.sender && sender === p.sender;
+      const sameDomain = domain && p.domain && domain === p.domain;
+      const overlap    = keywords.filter((k) => (p.keywords||[]).includes(k)).length;
+      let strength = 'none';
+      if (sameSender || sameDomain || overlap >= 2) strength = 'strong';
+      else if (overlap >= 1) strength = 'weak';
+      if (strength === 'strong' && best.strength !== 'strong') best = { strength, overlap, pattern:p };
+      else if (strength === 'weak' && best.strength === 'none') best = { strength, overlap, pattern:p };
+      else if (strength === best.strength && overlap > best.overlap) best = { strength, overlap, pattern:p };
     }
+    return best;
+  }
 
-    function applyOverrides() {
-      const cat  = state.overrides.category || {};
-      const read = state.overrides.read || {};
-      state.emails.forEach((e) => {
-        if (cat[e.uid])  e.category = cat[e.uid];
-        if (read[e.uid]) e.unread = false;
-      });
+  function applyAutoReclameClassification() {
+    const patterns = loadReclamePatterns();
+    if (!patterns.length) return;
+    state.emails.forEach((e) => {
+      if (e.category === 'Reclame' || state.overrides.category[e.uid]) return;
+      if (scoreReclameMatch(e, patterns).strength === 'strong') e.category = 'Reclame';
+    });
+  }
+
+  function populateSuggestions() {
+    const patterns = loadReclamePatterns();
+    state.suggestions = [];
+    if (!patterns.length) return;
+    const rejected = loadRejectedSugg();
+    for (const e of state.emails) {
+      if (e.category === 'Reclame' || rejected[e.uid]) continue;
+      const m = scoreReclameMatch(e, patterns);
+      if (m.strength === 'weak') state.suggestions.push({ email:e, pattern:m.pattern });
     }
+  }
 
-    /* Toast — korte bevestiging na een actie */
-    let toastTimer;
-    function showToast(message) {
-      let toast = document.getElementById('toast');
-      if (!toast) {
-        toast = document.createElement('div');
-        toast.id = 'toast';
-        toast.className = 'toast';
-        document.body.appendChild(toast);
-      }
-      toast.textContent = message;
-      void toast.offsetWidth;
-      toast.classList.add('show');
-      clearTimeout(toastTimer);
-      toastTimer = setTimeout(() => toast.classList.remove('show'), 2400);
-    }
+  // ── AI categorization (Claude API) ────────────────────────────────────────
+  const _aiCatCache = loadJson(AI_CATS_KEY, {});
 
-    /* ─────────────────────────────────────────────────────────────
-       Slim reclame-leersysteem.
-       Bij elke "Markeren als reclame" wordt een patroon opgeslagen
-       met (sender, domain, keywords). Volgende fetch scoort elk
-       binnenkomend mailtje hiertegen — zelfde domein/sender of 2+
-       keyword-overlap = sterke match (auto-reclame), 1 overlap =
-       zwakke match (suggestie-banner).
-       ───────────────────────────────────────────────────────────── */
-    const RECLAME_PATTERNS_KEY     = 'email_reclame_patterns';
-    const REJECTED_SUGGESTIONS_KEY = 'email_reclame_rejected';
-    const LEARNING_EXAMPLES_KEY    = 'email_learning_examples';
+  function applyAiCategories() {
+    state.emails.forEach((e) => {
+      if (state.overrides.category[e.uid]) return;
+      if (_aiCatCache[e.uid]) e.category = _aiCatCache[e.uid];
+    });
+  }
 
-    const KEYWORD_STOPWORDS = new Set([
-      'de','het','een','voor','met','van','naar','die','dat','deze','dit',
-      'en','of','in','op','om','aan','is','als','bij','door','over','tot',
-      'uit','wij','jij','je','jouw','uw','we','jullie','ons','mij','mijn',
-      'the','a','an','and','or','for','with','from','of','on','is','are',
-      'this','that','these','those','your','our','you'
-    ]);
-
-    function extractKeywords(subject) {
-      return (subject || '')
-        .toLowerCase()
-        .replace(/[^\p{L}\p{N}\s]+/gu, ' ')
-        .split(/\s+/)
-        .filter((w) => w.length >= 4 && !KEYWORD_STOPWORDS.has(w))
-        .slice(0, 6);
-    }
-    function getDomain(emailAddress) {
-      const at = (emailAddress || '').lastIndexOf('@');
-      return at >= 0 ? emailAddress.slice(at + 1).toLowerCase() : '';
-    }
-    function loadJson(key, fallback) {
-      try {
-        const raw = localStorage.getItem(key);
-        if (!raw) return fallback;
-        const parsed = JSON.parse(raw);
-        return parsed ?? fallback;
-      } catch { return fallback; }
-    }
-    function saveJson(key, value) {
-      try { localStorage.setItem(key, JSON.stringify(value)); } catch {}
-    }
-
-    function loadReclamePatterns() { return loadJson(RECLAME_PATTERNS_KEY, []); }
-    function saveReclamePatterns(p) { saveJson(RECLAME_PATTERNS_KEY, p); }
-    function loadRejectedSuggestions() {
-      const obj = loadJson(REJECTED_SUGGESTIONS_KEY, {});
-      return obj && typeof obj === 'object' ? obj : {};
-    }
-    function saveRejectedSuggestion(uid) {
-      const r = loadRejectedSuggestions();
-      r[uid] = new Date().toISOString();
-      saveJson(REJECTED_SUGGESTIONS_KEY, r);
-    }
-    function loadLearningExamples() { return loadJson(LEARNING_EXAMPLES_KEY, []); }
-    function saveLearningExample(example) {
-      const ex = loadLearningExamples();
-      ex.push(example);
-      if (ex.length > 100) ex.splice(0, ex.length - 100); // cap
-      saveJson(LEARNING_EXAMPLES_KEY, ex);
-    }
-
-    /* AI antwoord-statistieken — voedt de "AI kwaliteitsscore" stat in de
-       Kennisbank module. Approved = verzonden zonder edits, Edited = met
-       aanpassingen verzonden, Rejected = via "Annuleren" weggegooid. */
-    const REPLY_STATS_KEY = 'email_reply_stats';
-    function bumpReplyStat(kind) {
-      const stats = loadJson(REPLY_STATS_KEY, { approved: 0, edited: 0, rejected: 0 });
-      stats[kind] = (stats[kind] || 0) + 1;
-      saveJson(REPLY_STATS_KEY, stats);
-    }
-
-    function recordReclamePattern(email) {
-      const sender = (email.fromAddress || '').toLowerCase();
-      const domain = getDomain(sender);
-      const keywords = extractKeywords(email.subject);
-      const patterns = loadReclamePatterns();
-      const existing = patterns.find((p) =>
-        (sender && p.sender === sender) ||
-        (domain && p.domain && p.domain === domain && !p.sender)
-      );
-      if (existing) {
-        existing.matchCount = (existing.matchCount || 0) + 1;
-        const set = new Set([...(existing.keywords || []), ...keywords]);
-        existing.keywords = [...set].slice(0, 12);
-        existing.lastSeen = new Date().toISOString();
-      } else {
-        patterns.push({
-          sender, domain, keywords,
-          matchCount: 1,
-          createdAt: new Date().toISOString(),
-          lastSeen: new Date().toISOString()
-        });
-      }
-      saveReclamePatterns(patterns);
-    }
-
-    function scoreReclameMatch(email, patterns) {
-      const sender = (email.fromAddress || '').toLowerCase();
-      const domain = getDomain(sender);
-      const keywords = extractKeywords(email.subject);
-      let best = { strength: 'none', overlap: 0, pattern: null };
-      for (const p of patterns) {
-        const sameSender = sender && p.sender && sender === p.sender;
-        const sameDomain = domain && p.domain && domain === p.domain;
-        const overlap = keywords.filter((k) => (p.keywords || []).includes(k)).length;
-        let strength = 'none';
-        if (sameSender || sameDomain || overlap >= 2) strength = 'strong';
-        else if (overlap >= 1) strength = 'weak';
-        if (strength === 'strong' && best.strength !== 'strong') {
-          best = { strength, overlap, pattern: p };
-        } else if (strength === 'weak' && best.strength === 'none') {
-          best = { strength, overlap, pattern: p };
-        } else if (strength === best.strength && overlap > best.overlap) {
-          best = { strength, overlap, pattern: p };
-        }
-      }
-      return best;
-    }
-
-    function applyAutoReclameClassification() {
-      const patterns = loadReclamePatterns();
-      if (patterns.length === 0) return;
-      state.emails.forEach((e) => {
-        if (e.category === 'Reclame') return;
-        if (state.overrides.category[e.uid]) return; // expliciet door gebruiker gezet
-        const match = scoreReclameMatch(e, patterns);
-        if (match.strength === 'strong') {
-          e.category = 'Reclame';
-        }
-      });
-    }
-
-    function populateSuggestions() {
-      const patterns = loadReclamePatterns();
-      state.suggestions = [];
-      if (patterns.length === 0) return;
-      const rejected = loadRejectedSuggestions();
-      for (const e of state.emails) {
-        if (e.category === 'Reclame') continue;
-        if (rejected[e.uid]) continue;
-        const match = scoreReclameMatch(e, patterns);
-        if (match.strength === 'weak') {
-          state.suggestions.push({ email: e, pattern: match.pattern });
-        }
-      }
-    }
-
-    /* ─────────────────────────────────────────────────────────────
-       E-mailinhoud ophalen via /api/email-body — caché per uid.
-       ───────────────────────────────────────────────────────────── */
-    function extractImapUid(compositeUid) {
-      const s = String(compositeUid || '');
-      const lastColon = s.lastIndexOf(':');
-      return lastColon >= 0 ? s.slice(lastColon + 1) : s;
-    }
-
-    async function fetchEmailBody(email) {
-      if (state.bodyCache[email.uid] && !state.bodyCache[email.uid].error) return;
-      state.bodyCache[email.uid] = { loading: true };
-      updateEmailContent(email.uid);
-      try {
-        const res = await fetch('/api/email-body', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            mailbox: email.mailbox,
-            uid: extractImapUid(email.uid)
-          })
-        });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
-        state.bodyCache[email.uid] = { loading: false, ...data };
-      } catch (err) {
-        state.bodyCache[email.uid] = { loading: false, error: err.message };
-      }
-      updateEmailContent(email.uid);
-    }
-
-    function updateEmailContent(uid) {
-      const article = document.querySelector(`.email[data-uid="${uid}"]`);
-      if (!article) return;
-      const old = article.querySelector('.email-content');
-      if (!old) return;
-      const email = findEmail(uid);
-      if (!email) return;
-      const tmp = document.createElement('div');
-      tmp.innerHTML = renderEmailContent(email).trim();
-      const next = tmp.firstElementChild;
-      if (next) old.replaceWith(next);
-    }
-
-    function formatDateTime(iso) {
-      if (!iso) return '—';
-      const d = new Date(iso);
-      if (isNaN(d.getTime())) return '—';
-      return d.toLocaleString('nl-NL', {
-        day: '2-digit', month: 'long', year: 'numeric',
-        hour: '2-digit', minute: '2-digit'
-      });
-    }
-
-    /* ─────────────────────────────────────────────────────────────
-       AI antwoord-generator. Template-gebaseerd voor nu, maar het
-       interface is klaar voor échte LLM-integratie. Bij "Versturen"
-       met aanpassingen wordt origineel + jouw versie opgeslagen in
-       email_learning_examples (cap 100), zodat een toekomstige AI
-       deze als few-shot context kan gebruiken.
-       ───────────────────────────────────────────────────────────── */
-    // {subject} en {bodyHint} worden door generateAiReply ingevuld zodat het
-    // antwoord aansluit bij de specifieke mail. Bij echte LLM-integratie wordt
-    // hier state.bodyCache[uid].text als context meegegeven aan het model.
-    const REPLY_TEMPLATES = {
-      'Klantvraag': [
-        'Bedankt voor je vraag over "{subject}". We bekijken het en komen uiterlijk binnen 1 werkdag bij je terug met een uitgebreid antwoord.',
-        'Dank voor je bericht. Een collega kijkt zo snel mogelijk naar je vraag en mailt je terug met een onderbouwd antwoord.',
-        'Bedankt voor je interesse en je goede vraag over "{subject}". We pakken het direct op en geven je vandaag of morgen een terugkoppeling.'
-      ],
-      'Factuurvraag': [
-        'Bedankt voor je bericht over de factuur. We bekijken "{subject}" direct en zorgen dat je vandaag nog uitsluitsel krijgt.',
-        'Dank voor je vraag over de factuur. We checken het meteen na in onze administratie en komen vandaag of morgen bij je terug.',
-        'Beste klant, je vraag over de factuur is in goede orde ontvangen. Onze administratie reageert zo spoedig mogelijk met de juiste informatie.'
-      ],
-      'Overig': [
-        'Bedankt voor je bericht over "{subject}". We hebben het in goede orde ontvangen en bekijken het zo snel mogelijk.',
-        'Dank voor je e-mail. We pakken het op en komen bij je terug zodra we meer kunnen zeggen over "{subject}".',
-        'Bedankt voor je bericht. Een collega kijkt ernaar en geeft je een passende terugkoppeling.'
-      ]
-    };
-
-    function generateAiReply(email) {
-      const templates = REPLY_TEMPLATES[email.category]
-        || ['Bedankt voor je bericht over "{subject}". We komen zo snel mogelijk bij je terug.'];
-      const previous = state.aiProposals[email.uid]?.original;
-      const candidates = templates.filter((t) => t !== previous);
-      const pick = (candidates.length ? candidates : templates)[
-        Math.floor(Math.random() * (candidates.length || templates.length))
-      ];
-      // Vul placeholder met daadwerkelijk onderwerp/bodysnippet zodat het
-      // antwoord lokaal bij de inhoud aansluit.
-      const subjectRef = (email.subject || '').replace(/^(re:|fwd:)\s*/i, '').trim() || 'je bericht';
-      const filled = pick.replace(/\{subject\}/g, subjectRef);
-
-      const greeting = `Beste ${email.fromName || 'daar'},`;
-      const signoff = 'Met vriendelijke groet,\nTeam De Forex Opleiding';
-      return `${greeting}\n\n${filled}\n\n${signoff}`;
-    }
-
-    function loadKennisbankContext() {
-      try {
-        const profile = JSON.parse(localStorage.getItem('kennisbank_profile') || 'null');
-        const items   = JSON.parse(localStorage.getItem('kennisbank_items')   || '[]');
-        const profileText = profile
-          ? [
-              profile.naam        ? `Bedrijf: ${profile.naam}`         : '',
-              profile.slogan      ? `Slogan: ${profile.slogan}`         : '',
-              profile.beschrijving? `Beschrijving: ${profile.beschrijving}` : '',
-              profile.doelgroep   ? `Doelgroep: ${profile.doelgroep}`   : '',
-              profile.tov         ? `Tone of voice: ${profile.tov}`     : '',
-              profile.website     ? `Website: ${profile.website}`       : ''
-            ].filter(Boolean).join('\n')
-          : '';
-        return { profile: profileText, items };
-      } catch { return { profile: '', items: [] }; }
-    }
-
-    async function callGenerateReply(email) {
-      const bodyEntry = state.bodyCache[email.uid];
-      const body = (bodyEntry && !bodyEntry.loading && !bodyEntry.error)
-        ? (bodyEntry.text || '')
-        : '';
-
-      const kennisbankContext  = loadKennisbankContext();
-      const learningExamples   = loadLearningExamples();
-
-      const res = await fetch('/api/generate-reply', {
+  async function categorizeEmail(email) {
+    const bodyEntry = state.bodyCache[email.uid];
+    const bodySnippet = (bodyEntry && !bodyEntry.loading && !bodyEntry.error) ? (bodyEntry.text || '').slice(0, 500) : '';
+    try {
+      const res = await fetch('/api/categorize', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          email: {
-            subject:     email.subject,
-            from:        email.from,
-            fromName:    email.fromName,
-            fromAddress: email.fromAddress,
-            mailbox:     email.mailbox,
-            category:    email.category,
-            body
-          },
-          kennisbankContext,
-          learningExamples
-        })
+        body: JSON.stringify({ from: email.from || '', subject: email.subject || '', bodySnippet })
+      });
+      if (!res.ok) return;
+      const data = await res.json();
+      if (data.category && CATEGORIES.includes(data.category)) {
+        _aiCatCache[email.uid] = data.category;
+        saveJson(AI_CATS_KEY, _aiCatCache);
+        if (!state.overrides.category[email.uid]) {
+          email.category = data.category;
+          populateSuggestions();
+          render();
+        }
+      }
+    } catch {}
+  }
+
+  function kickOffAiCategorization() {
+    const todo = state.emails.filter((e) => !state.overrides.category[e.uid] && !_aiCatCache[e.uid]);
+    todo.forEach((e, i) => setTimeout(() => categorizeEmail(e), i * 150));
+  }
+
+  // ── Body fetching ──────────────────────────────────────────────────────────
+  function extractImapUid(compositeUid) {
+    const s = String(compositeUid || '');
+    const last = s.lastIndexOf(':');
+    return last >= 0 ? s.slice(last+1) : s;
+  }
+
+  function getFromAddress(email) {
+    if (email.fromAddress) return email.fromAddress;
+    const m = (email.from || '').match(/<([^>]+)>/);
+    return m ? m[1] : (email.from || '');
+  }
+
+  async function fetchEmailBody(email) {
+    if (state.bodyCache[email.uid] && !state.bodyCache[email.uid].error) return;
+    state.bodyCache[email.uid] = { loading: true };
+    updateCardPreview(email.uid);
+    try {
+      const res = await fetch('/api/email-body', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mailbox: email.mailbox, uid: extractImapUid(email.uid) })
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
-      return data.reply;
+      if (!res.ok) throw new Error(data.error || 'HTTP ' + res.status);
+      state.bodyCache[email.uid] = { loading: false, ...data };
+    } catch (err) {
+      state.bodyCache[email.uid] = { loading: false, error: err.message };
+    }
+    updateCardPreview(email.uid);
+  }
+
+  function updateCardPreview(uid) {
+    if (state.activeTab !== 'actie') return;
+    const card = document.querySelector('.actie-card[data-uid="' + uid + '"]');
+    if (!card) return;
+    const preview = card.querySelector('.card-preview');
+    if (!preview) return;
+    const cache = state.bodyCache[uid];
+    if (!cache || cache.loading) {
+      preview.className = 'card-preview loading';
+      preview.innerHTML = '<span class="preview-spinner"></span> Inhoud laden…';
+    } else if (cache.error) {
+      preview.className = 'card-preview error';
+      preview.textContent = 'Kon inhoud niet laden: ' + cache.error;
+    } else {
+      preview.className = 'card-preview';
+      const raw = cache.text || '';
+      preview.textContent = raw.slice(0, 300) + (raw.length > 300 ? '…' : '');
+    }
+  }
+
+  // ── Formatting ─────────────────────────────────────────────────────────────
+  function formatDateTime(iso) {
+    if (!iso) return '—';
+    const d = new Date(iso);
+    return isNaN(d) ? '—' : d.toLocaleString('nl-NL', { day:'2-digit', month:'long', year:'numeric', hour:'2-digit', minute:'2-digit' });
+  }
+  function relativeTime(iso) {
+    const d = new Date(iso);
+    const now = new Date();
+    const m = Math.round((now - d) / 60000);
+    if (m < 1) return 'zojuist';
+    if (m < 60) return m + ' min geleden';
+    const h = Math.round(m / 60);
+    if (h < 24) return h + ' u geleden';
+    return d.toLocaleString('nl-NL', { day:'2-digit', month:'short', hour:'2-digit', minute:'2-digit' });
+  }
+  function escapeHtml(s) {
+    return String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+  }
+
+  // ── Signature ──────────────────────────────────────────────────────────────
+  function loadSignature() {
+    return loadJson(SIGNATURE_KEY, { naam:'', functie:'', telefoon:'', website:'', instagram:'', facebook:'', linkedin:'', whatsapp:'', logoData:'' });
+  }
+
+  function formatSignatureText(sig) {
+    const lines = ['Met vriendelijke groet,', ''];
+    if (sig.naam)    lines.push(sig.naam);
+    if (sig.functie) lines.push(sig.functie);
+    if (sig.telefoon) lines.push('Tel: ' + sig.telefoon);
+    if (sig.website)  lines.push(sig.website);
+    const social = [];
+    if (sig.instagram) social.push('Instagram: ' + sig.instagram);
+    if (sig.facebook)  social.push('Facebook: '  + sig.facebook);
+    if (sig.linkedin)  social.push('LinkedIn: '  + sig.linkedin);
+    if (sig.whatsapp)  social.push('WhatsApp: '  + sig.whatsapp);
+    if (social.length) { lines.push(''); social.forEach((s) => lines.push(s)); }
+    return lines.join('\n');
+  }
+
+  function updateSigPreview() {
+    const sig = {
+      naam:      document.getElementById('sigNaam')?.value || '',
+      functie:   document.getElementById('sigFunctie')?.value || '',
+      telefoon:  document.getElementById('sigTelefoon')?.value || '',
+      website:   document.getElementById('sigWebsite')?.value || '',
+      instagram: document.getElementById('sigInstagram')?.value || '',
+      facebook:  document.getElementById('sigFacebook')?.value || '',
+      linkedin:  document.getElementById('sigLinkedin')?.value || '',
+      whatsapp:  document.getElementById('sigWhatsapp')?.value || '',
+      logoData:  ''
+    };
+    const box = document.getElementById('sigPreviewBox');
+    if (box) box.textContent = formatSignatureText(sig);
+  }
+
+  function openSigModal() {
+    const sig = loadSignature();
+    const fields = { sigNaam:'naam', sigFunctie:'functie', sigTelefoon:'telefoon', sigWebsite:'website', sigInstagram:'instagram', sigFacebook:'facebook', sigLinkedin:'linkedin', sigWhatsapp:'whatsapp' };
+    Object.entries(fields).forEach(([id, key]) => {
+      const el = document.getElementById(id);
+      if (el) el.value = sig[key] || '';
+    });
+    if (sig.logoData) {
+      const prev = document.getElementById('logoPreview');
+      const label = document.getElementById('logoDropLabel');
+      if (prev) { prev.src = sig.logoData; prev.style.display = 'block'; }
+      if (label) label.style.display = 'none';
+    }
+    updateSigPreview();
+    document.getElementById('sigModal').classList.remove('hidden');
+  }
+
+  function closeSigModal() {
+    document.getElementById('sigModal').classList.add('hidden');
+  }
+
+  function saveSignature() {
+    const logoImg = document.getElementById('logoPreview');
+    const sig = {
+      naam:      document.getElementById('sigNaam')?.value.trim() || '',
+      functie:   document.getElementById('sigFunctie')?.value.trim() || '',
+      telefoon:  document.getElementById('sigTelefoon')?.value.trim() || '',
+      website:   document.getElementById('sigWebsite')?.value.trim() || '',
+      instagram: document.getElementById('sigInstagram')?.value.trim() || '',
+      facebook:  document.getElementById('sigFacebook')?.value.trim() || '',
+      linkedin:  document.getElementById('sigLinkedin')?.value.trim() || '',
+      whatsapp:  document.getElementById('sigWhatsapp')?.value.trim() || '',
+      logoData:  (logoImg && logoImg.style.display !== 'none') ? logoImg.src : ''
+    };
+    saveJson(SIGNATURE_KEY, sig);
+    closeSigModal();
+    showToast('Handtekening opgeslagen');
+  }
+
+  function initSigModal() {
+    const inputs = document.querySelectorAll('#sigModal input[type="text"], #sigModal input[type="url"]');
+    inputs.forEach((el) => el.addEventListener('input', updateSigPreview));
+
+    const fileInput = document.getElementById('logoFile');
+    const logoDrop  = document.getElementById('logoDrop');
+    const logoPreview = document.getElementById('logoPreview');
+    const logoLabel = document.getElementById('logoDropLabel');
+
+    function handleFile(file) {
+      if (!file || !file.type.startsWith('image/')) return;
+      const reader = new FileReader();
+      reader.onload = (ev) => {
+        if (logoPreview) { logoPreview.src = ev.target.result; logoPreview.style.display = 'block'; }
+        if (logoLabel)   logoLabel.style.display = 'none';
+      };
+      reader.readAsDataURL(file);
     }
 
-    async function startAiProposal(uid) {
-      const email = findEmail(uid);
-      if (!email) return;
-      // Zet loading-staat direct zodat de UI reageert.
-      state.aiProposals[uid] = { loading: true };
-      render();
-      reopenEmail(uid);
-      try {
-        const text = await callGenerateReply(email);
-        state.aiProposals[uid] = { original: text, current: text, generatedAt: new Date().toISOString() };
-      } catch (err) {
-        state.aiProposals[uid] = { error: err.message };
-      }
-      render();
-      reopenEmail(uid);
+    if (fileInput) fileInput.addEventListener('change', (ev) => handleFile(ev.target.files[0]));
+    if (logoDrop) {
+      logoDrop.addEventListener('dragover', (ev) => { ev.preventDefault(); logoDrop.classList.add('dragover'); });
+      logoDrop.addEventListener('dragleave', () => logoDrop.classList.remove('dragover'));
+      logoDrop.addEventListener('drop', (ev) => { ev.preventDefault(); logoDrop.classList.remove('dragover'); handleFile(ev.dataTransfer.files[0]); });
     }
 
-    async function regenerateAiProposal(uid) {
-      const email = findEmail(uid);
-      if (!email) return;
-      // Bewaar het vorige antwoord als referentie zodat het leer-systeem het
-      // kan vergelijken, maar toon de loading-staat in de UI.
-      const previous = state.aiProposals[uid]?.original;
-      state.aiProposals[uid] = { loading: true, previous };
-      render();
-      reopenEmail(uid);
-      try {
-        const text = await callGenerateReply(email);
-        state.aiProposals[uid] = { original: text, current: text, generatedAt: new Date().toISOString() };
-      } catch (err) {
-        state.aiProposals[uid] = { error: err.message };
-      }
-      render();
-      reopenEmail(uid);
-    }
-    function cancelAiProposal(uid) {
-      delete state.aiProposals[uid];
-      bumpReplyStat('rejected');
-      render();
-      reopenEmail(uid);
-    }
-    function sendAiProposal(uid) {
-      const email = findEmail(uid);
-      const proposal = state.aiProposals[uid];
-      if (!email || !proposal) return;
-      const article = document.querySelector(`.email[data-uid="${uid}"]`);
-      const textarea = article?.querySelector(`[data-reply="${uid}"]`);
-      const userVersion = (textarea?.value || proposal.current || '').trim();
-      const aiText = (proposal.original || '').trim();
-      const wasEdited = userVersion && userVersion !== aiText;
-      if (wasEdited) {
-        saveLearningExample({
-          category: email.category,
-          originalEmail: {
-            subject: email.subject,
-            from: email.from,
-            body: state.bodyCache[email.uid]?.text || '',
-            date: email.date,
-            mailbox: email.mailbox
-          },
-          aiProposal: aiText,
-          userVersion,
-          savedAt: new Date().toISOString()
-        });
-      }
-      bumpReplyStat(wasEdited ? 'edited' : 'approved');
-      delete state.aiProposals[uid];
-      render();
-      showToast(wasEdited
-        ? 'Antwoord verstuurd · voorbeeld opgeslagen voor AI'
-        : 'Antwoord verstuurd');
-    }
+    document.getElementById('sigBtn').addEventListener('click', openSigModal);
+    document.getElementById('sigModal').addEventListener('click', (ev) => { if (ev.target === ev.currentTarget) closeSigModal(); });
+  }
 
-    function openTaakVanEmail(uid) {
-      const email = findEmail(uid);
-      if (!email) return;
-      const params = new URLSearchParams({
-        from_email: uid,
-        subject:    email.subject || '',
-        categorie:  email.category === 'Nieuwe Lead' || email.category === 'Klantvraag' ? 'Klant' : 'E-mail',
-        titel:      email.subject ? `Opvolgen: ${email.subject}` : 'Opvolgen e-mail',
-        prioriteit: ['Nieuwe Lead','Appointment'].includes(email.category) ? 'Hoog' : 'Normaal'
+  // ── Kennisbank context ─────────────────────────────────────────────────────
+  function loadKennisbankContext() {
+    try {
+      const profile = JSON.parse(localStorage.getItem('kennisbank_profile') || 'null');
+      const items   = JSON.parse(localStorage.getItem('kennisbank_items')   || '[]');
+      const profileText = profile ? [
+        profile.naam        ? 'Bedrijf: '        + profile.naam         : '',
+        profile.slogan      ? 'Slogan: '         + profile.slogan       : '',
+        profile.beschrijving? 'Beschrijving: '   + profile.beschrijving : '',
+        profile.doelgroep   ? 'Doelgroep: '      + profile.doelgroep    : '',
+        profile.tov         ? 'Tone of voice: '  + profile.tov          : '',
+        profile.website     ? 'Website: '        + profile.website      : ''
+      ].filter(Boolean).join('\n') : '';
+      return { profile: profileText, items };
+    } catch { return { profile:'', items:[] }; }
+  }
+
+  // ── AI reply generation ────────────────────────────────────────────────────
+  async function callGenerateReply(email) {
+    const bodyEntry = state.bodyCache[email.uid];
+    const body = (bodyEntry && !bodyEntry.loading && !bodyEntry.error) ? (bodyEntry.text || '') : '';
+    const res = await fetch('/api/generate-reply', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        email: { subject:email.subject, from:email.from, fromName:email.fromName, fromAddress:getFromAddress(email), mailbox:email.mailbox, category:email.category, body },
+        kennisbankContext: loadKennisbankContext(),
+        learningExamples:  loadLearningExamples()
+      })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'HTTP ' + res.status);
+    return data.reply;
+  }
+
+  function appendSignature(text) {
+    const sig = loadSignature();
+    const sigText = formatSignatureText(sig);
+    // Remove AI's own sign-off if present (it writes its own "Met vriendelijke groet")
+    const stripped = text.replace(/\n{2,}(met\s+(vriendelijke|hartelijke)\s+groet|team\s+de\s+forex)[^\n]*/si, '').trimEnd();
+    return stripped + '\n\n' + sigText;
+  }
+
+  function findEmail(uid) { return state.emails.find((e) => e.uid === uid); }
+
+  async function startAiProposal(uid) {
+    const email = findEmail(uid);
+    if (!email) return;
+    state.aiProposals[uid] = { loading: true };
+    updateActieCard(uid);
+    try {
+      const text = await callGenerateReply(email);
+      const full  = appendSignature(text);
+      state.aiProposals[uid] = { original: full, current: full, generatedAt: new Date().toISOString() };
+    } catch (err) {
+      state.aiProposals[uid] = { error: err.message };
+    }
+    updateActieCard(uid);
+  }
+
+  async function regenerateAiProposal(uid) {
+    const email = findEmail(uid);
+    if (!email) return;
+    const prev = state.aiProposals[uid]?.original;
+    state.aiProposals[uid] = { loading: true, previous: prev };
+    updateActieCard(uid);
+    try {
+      const text = await callGenerateReply(email);
+      const full  = appendSignature(text);
+      state.aiProposals[uid] = { original: full, current: full, generatedAt: new Date().toISOString() };
+    } catch (err) {
+      state.aiProposals[uid] = { error: err.message };
+    }
+    updateActieCard(uid);
+  }
+
+  function cancelAiProposal(uid) {
+    delete state.aiProposals[uid];
+    bumpReplyStat('rejected');
+    updateActieCard(uid);
+  }
+
+  function sendAiProposal(uid) {
+    const email    = findEmail(uid);
+    const proposal = state.aiProposals[uid];
+    if (!email || !proposal) return;
+    const card     = document.querySelector('.actie-card[data-uid="' + uid + '"]');
+    const textarea = card?.querySelector('[data-reply="' + uid + '"]');
+    const userVer  = (textarea?.value || proposal.current || '').trim();
+    const aiText   = (proposal.original || '').trim();
+    const wasEdited = userVer && userVer !== aiText;
+    if (wasEdited) {
+      saveLearningExample({
+        category: email.category,
+        originalEmail: { subject:email.subject, from:email.from, body:state.bodyCache[email.uid]?.text||'', date:email.date, mailbox:email.mailbox },
+        aiProposal: aiText, userVersion: userVer, savedAt: new Date().toISOString()
       });
-      window.location.href = `taken.html?${params.toString()}`;
     }
+    bumpReplyStat(wasEdited ? 'edited' : 'approved');
+    state.overrides.read[uid] = true;
+    saveOverrides();
+    const em = findEmail(uid);
+    if (em) em.unread = false;
+    delete state.aiProposals[uid];
+    render();
+    showToast(wasEdited ? 'Antwoord verstuurd · voorbeeld opgeslagen voor AI' : 'Antwoord verstuurd');
+  }
 
-    function acceptSuggestion() {
-      const top = state.suggestions[0];
-      if (!top) return;
-      // markAsReclame triggert recordReclamePattern (zie hieronder) +
-      // render(), dus we hoeven hier alleen de queue te poppen.
-      markAsReclame(top.email.uid);
-      state.suggestions.shift();
+  // Surgically re-render a single actie-card without full render()
+  function updateActieCard(uid) {
+    if (state.activeTab !== 'actie') return;
+    const card = document.querySelector('.actie-card[data-uid="' + uid + '"]');
+    if (!card) return;
+    const email = findEmail(uid);
+    if (!email) return;
+    const tmp = document.createElement('div');
+    tmp.innerHTML = renderActieCard(email);
+    const newCard = tmp.firstElementChild;
+    if (newCard) {
+      card.replaceWith(newCard);
+      attachActieCardHandlers(uid);
     }
-    function dismissSuggestion() {
-      const top = state.suggestions[0];
-      if (!top) return;
-      saveRejectedSuggestion(top.email.uid);
-      state.suggestions.shift();
-      render();
+  }
+
+  // ── Actions ────────────────────────────────────────────────────────────────
+  function markAsReclame(uid) {
+    const email = findEmail(uid);
+    if (!email || email.category === 'Reclame') return;
+    state.overrides.category[uid] = 'Reclame';
+    saveOverrides();
+    recordReclamePattern(email);
+    email.category = 'Reclame';
+    populateSuggestions();
+    render();
+    showToast('Gemarkeerd als reclame');
+  }
+
+  function markNotReclame(uid) {
+    const email = findEmail(uid);
+    if (!email) return;
+    delete state.overrides.category[uid];
+    saveOverrides();
+    email.category = _aiCatCache[uid] || 'Overig';
+    populateSuggestions();
+    render();
+    showToast('Hersteld: niet reclame');
+  }
+
+  function markAsRead(uid) {
+    const email = findEmail(uid);
+    if (!email || !email.unread) return;
+    state.overrides.read[uid] = true;
+    saveOverrides();
+    email.unread = false;
+    render();
+    showToast('Gemarkeerd als gelezen');
+    pushReadFlagToImap(email);
+  }
+
+  async function pushReadFlagToImap(email) {
+    try {
+      const res = await fetch('/api/mark-read', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mailbox: email.mailbox, uid: extractImapUid(String(email.uid||'')) })
+      });
+      if (!res.ok) { const d = await res.json().catch(()=>({})); console.warn('IMAP mark-read failed:', d.error || res.status); }
+    } catch (err) { console.warn('IMAP mark-read error:', err); }
+  }
+
+  function dismissSuggestion(uid) {
+    saveRejectedSugg(uid);
+    state.suggestions = state.suggestions.filter((s) => s.email.uid !== uid);
+    render();
+  }
+
+  function openTaakVanEmail(uid) {
+    const email = findEmail(uid);
+    if (!email) return;
+    const params = new URLSearchParams({
+      from_email: uid,
+      subject:    email.subject || '',
+      categorie:  (email.category === 'Nieuwe Lead' || email.category === 'Klantvraag') ? 'Klant' : 'E-mail',
+      titel:      email.subject ? 'Opvolgen: ' + email.subject : 'Opvolgen e-mail',
+      prioriteit: ['Nieuwe Lead','Appointment'].includes(email.category) ? 'Hoog' : 'Normaal'
+    });
+    window.location.href = 'taken.html?' + params.toString();
+  }
+
+  // ── Bulk reclame actions ───────────────────────────────────────────────────
+  function bulkMarkReclame() {
+    state.reclameSelected.forEach((uid) => markAsReclame(uid));
+    state.reclameSelected.clear();
+  }
+  function bulkMarkNotReclame() {
+    state.reclameSelected.forEach((uid) => markNotReclame(uid));
+    state.reclameSelected.clear();
+  }
+  function bulkDismissSuggestions() {
+    state.reclameSelected.forEach((uid) => {
+      saveRejectedSugg(uid);
+      state.suggestions = state.suggestions.filter((s) => s.email.uid !== uid);
+    });
+    state.reclameSelected.clear();
+    render();
+  }
+  function selectAllReclame() {
+    getReclameEmails(getFilteredEmails()).forEach((e) => state.reclameSelected.add(e.uid));
+    document.querySelectorAll('#reclameTable input[type="checkbox"]').forEach((cb) => { cb.checked = true; cb.closest('.reclame-row').classList.add('selected'); });
+  }
+  function selectAllSuspects() {
+    getSuspectEmails().forEach((e) => state.reclameSelected.add(e.uid));
+    document.querySelectorAll('#suspectTable input[type="checkbox"]').forEach((cb) => { cb.checked = true; cb.closest('.reclame-row').classList.add('selected'); });
+  }
+
+  // ── Filtering ──────────────────────────────────────────────────────────────
+  function getDateRange() {
+    const t0 = new Date(); t0.setHours(0,0,0,0);
+    const tm = new Date(t0); tm.setDate(tm.getDate()+1);
+    switch (state.dateFilter) {
+      case 'today':     return { from:t0, to:tm };
+      case 'yesterday': { const y=new Date(t0); y.setDate(y.getDate()-1); return { from:y, to:t0 }; }
+      case 'week': {
+        const day = t0.getDay();
+        const daysFromMon = day===0 ? 6 : day-1;
+        const mon = new Date(t0); mon.setDate(mon.getDate()-daysFromMon);
+        const nextMon = new Date(mon); nextMon.setDate(nextMon.getDate()+7);
+        return { from:mon, to:nextMon };
+      }
+      case 'month': { const f=new Date(t0.getFullYear(),t0.getMonth(),1); const n=new Date(t0.getFullYear(),t0.getMonth()+1,1); return { from:f, to:n }; }
+      case 'custom': {
+        const from = state.customFrom ? new Date(state.customFrom+'T00:00:00') : new Date(0);
+        const to   = state.customTo   ? new Date(state.customTo+'T23:59:59.999') : new Date();
+        return { from, to: new Date(to.getTime()+1) };
+      }
+      default: return { from:t0, to:tm };
     }
+  }
 
-    const $ = (id) => document.getElementById(id);
-    const refreshBtn = $('refreshBtn');
-    refreshBtn.addEventListener('click', () => loadEmails());
+  function passesFilters(e) {
+    const { from, to } = getDateRange();
+    const d = new Date(e.date);
+    if (d < from || d >= to) return false;
+    if (state.addressFilter !== 'Alle' && (e.mailbox||'').toLowerCase() !== state.addressFilter.toLowerCase()) return false;
+    return true;
+  }
 
-    function relativeTime(iso) {
-      const d = new Date(iso);
-      const now = new Date();
-      const diffMs = now - d;
-      const diffMin = Math.round(diffMs / 60000);
-      if (diffMin < 1) return 'zojuist';
-      if (diffMin < 60) return diffMin + ' min geleden';
-      const diffH = Math.round(diffMin / 60);
-      if (diffH < 24) return diffH + ' u geleden';
-      return d.toLocaleString('nl-NL', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
+  function getFilteredEmails()  { return state.emails.filter(passesFilters); }
+  function getActieEmails(f)    { return f.filter((e) => ACTIE_CATS.has(e.category) && e.unread); }
+  function getInfoEmails(f)     { return f.filter((e) => INFO_CATS.has(e.category)); }
+  function getReclameEmails(f)  { return f.filter((e) => e.category === 'Reclame'); }
+  function getSuspectEmails()   { return state.suggestions.map((s) => s.email).filter(passesFilters); }
+
+  // ── Rendering: Actie tab ───────────────────────────────────────────────────
+  function renderPreviewHtml(uid) {
+    const cache = state.bodyCache[uid];
+    if (!cache)          return '<div class="card-preview loading"><span class="preview-spinner"></span> Inhoud laden…</div>';
+    if (cache.loading)   return '<div class="card-preview loading"><span class="preview-spinner"></span> Inhoud laden…</div>';
+    if (cache.error)     return '<div class="card-preview error">Kon inhoud niet laden</div>';
+    const raw = cache.text || '';
+    return '<div class="card-preview">' + escapeHtml(raw.slice(0, 300)) + (raw.length > 300 ? '…' : '') + '</div>';
+  }
+
+  function renderAiSection(e) {
+    const p = state.aiProposals[e.uid];
+    if (!p) return '';
+    if (p.loading) return '<div class="card-ai-loading"><span class="ai-loading-spinner"></span> AI schrijft antwoord…</div>';
+    if (p.error)   return '<div class="card-ai-error">AI-fout: ' + escapeHtml(p.error) + '</div>';
+    return '<div class="card-reply-section">' +
+      '<div class="reply-label"><span class="ai-tag">AI</span> Voorgesteld antwoord</div>' +
+      '<textarea class="reply-box" data-reply="' + escapeHtml(e.uid) + '">' + escapeHtml(p.current) + '</textarea>' +
+      '<div class="reply-actions">' +
+        '<button class="btn btn-send" data-action="send" data-uid="' + escapeHtml(e.uid) + '">' + ICON_SEND + ' Versturen</button>' +
+        '<button class="btn" data-action="regenerate" data-uid="' + escapeHtml(e.uid) + '">' + ICON_REGEN + ' Opnieuw</button>' +
+        '<button class="btn btn-danger" data-action="cancel" data-uid="' + escapeHtml(e.uid) + '">Afwijzen</button>' +
+      '</div></div>';
+  }
+
+  function renderCatOptions(currentCat) {
+    return CATEGORIES.map((c) => '<option value="' + escapeHtml(c) + '"' + (c === currentCat ? ' selected' : '') + '>' + escapeHtml(c) + '</option>').join('');
+  }
+
+  function renderActieCard(e) {
+    const proposal = state.aiProposals[e.uid];
+    const hasProposal = !!proposal;
+    const showGenBtn = !hasProposal || proposal.error;
+
+    return '<div class="actie-card' + (e.unread ? ' unread' : '') + '" data-uid="' + escapeHtml(e.uid) + '">' +
+      '<div class="card-top">' +
+        '<select class="cat-select-inline" data-categorize="' + escapeHtml(e.uid) + '">' + renderCatOptions(e.category) + '</select>' +
+        '<span class="card-time">' + escapeHtml(relativeTime(e.date)) + '</span>' +
+        (e.unread ? '<span class="unread-dot" title="Ongelezen"></span>' : '') +
+      '</div>' +
+      '<div class="card-sender">' +
+        '<strong>' + escapeHtml(e.fromName || e.from || 'Onbekend') + '</strong>' +
+        (e.fromAddress ? '<span class="sender-addr">&lt;' + escapeHtml(e.fromAddress) + '&gt;</span>' : '') +
+      '</div>' +
+      '<div class="card-subject">' + escapeHtml(e.subject || '(geen onderwerp)') + '</div>' +
+      renderPreviewHtml(e.uid) +
+      renderAiSection(e) +
+      '<div class="card-actions">' +
+        (showGenBtn ? '<button class="btn btn-ai" data-action="generate" data-uid="' + escapeHtml(e.uid) + '">' + ICON_AI + ' Genereer AI antwoord</button>' : '') +
+        '<button class="btn btn-task" data-action="create-task" data-uid="' + escapeHtml(e.uid) + '">' + ICON_TASK + ' Maak taak aan</button>' +
+        (e.unread ? '<button class="btn" data-action="mark-read" data-uid="' + escapeHtml(e.uid) + '">' + ICON_READ + ' Markeer als gelezen</button>' : '') +
+      '</div>' +
+    '</div>';
+  }
+
+  function renderActieTab(emails) {
+    if (!emails.length) {
+      return '<div class="state">' +
+        '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:var(--green)"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>' +
+        '<h3>Alles bijgewerkt!</h3>' +
+        '<p>Er zijn geen onbeantwoorde berichten die actie vereisen.</p>' +
+      '</div>';
     }
+    return '<div class="actie-list">' + emails.map(renderActieCard).join('') + '</div>';
+  }
 
-    function escapeHtml(s) {
-      return String(s ?? '').replace(/[&<>"']/g, (c) =>
-        ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c])
-      );
-    }
+  function attachActieCardHandlers(uid) {
+    const card = document.querySelector('.actie-card[data-uid="' + uid + '"]');
+    if (!card) return;
 
-    async function loadEmails() {
-      refreshBtn.disabled = true;
-      $('content').innerHTML = `
-        <div class="state">
-          <div class="spinner"></div>
-          <h3>Mailbox laden…</h3>
-          <p>We halen je e-mails op via IMAP en categoriseren ze automatisch.</p>
-        </div>`;
-      try {
-        const res = await fetch('/api/emails', { cache: 'no-store' });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
-        state.emails = data.emails || [];
-        state.counters = data.counters || state.counters;
-        state.byCategory = data.byCategory || {};
-        state.fetchedAt = data.fetchedAt;
-        applyOverrides();
-        applyAutoReclameClassification();
+    const catSelect = card.querySelector('[data-categorize="' + uid + '"]');
+    if (catSelect) {
+      catSelect.addEventListener('change', (ev) => {
+        const newCat = ev.target.value;
+        const email  = findEmail(uid);
+        if (!email || newCat === email.category) return;
+        state.overrides.category[uid] = newCat;
+        saveOverrides();
+        if (newCat === 'Reclame') recordReclamePattern(email);
+        email.category = newCat;
         populateSuggestions();
         render();
-      } catch (err) {
-        renderError(err.message);
-      } finally {
-        refreshBtn.disabled = false;
-      }
+        showToast('Verplaatst naar ' + newCat);
+      });
     }
 
-    function renderError(msg) {
-      $('content').innerHTML = `
-        <div class="state error">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <circle cx="12" cy="12" r="10"></circle>
-            <line x1="12" y1="8" x2="12" y2="12"></line>
-            <line x1="12" y1="16" x2="12.01" y2="16"></line>
-          </svg>
-          <h3>Kan inbox niet laden</h3>
-          <p>De IMAP-verbinding faalde of de serverless functie draait nog niet. Controleer of <code>IMAP_HOST</code>, <code>IMAP_PORT</code>, <code>IMAP_USER</code> en <code>IMAP_PASS</code> als environment variables zijn ingesteld in Vercel.</p>
-          <code>${escapeHtml(msg)}</code>
-          <div style="margin-top:16px;">
-            <button class="btn" onclick="loadEmails()">Opnieuw proberen</button>
-            <button class="btn" onclick="loadDemo()">Toon voorbeelddata</button>
-          </div>
-        </div>`;
+    const replyBox = card.querySelector('[data-reply="' + uid + '"]');
+    if (replyBox) {
+      replyBox.addEventListener('input', () => {
+        if (state.aiProposals[uid]) state.aiProposals[uid].current = replyBox.value;
+      });
     }
 
-    function periodLabel() {
-      switch (state.dateFilter) {
-        case 'today':     return 'vandaag';
-        case 'yesterday': return 'gisteren';
-        case 'week':      return 'deze week';
-        case 'month':     return 'deze maand';
-        case 'custom':    return 'in periode';
-        default:          return 'vandaag';
-      }
+    card.querySelectorAll('[data-action]').forEach((btn) => {
+      btn.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        const action = btn.dataset.action;
+        const u = btn.dataset.uid;
+        if (action === 'generate')    { startAiProposal(u); }
+        else if (action === 'regenerate') { regenerateAiProposal(u); }
+        else if (action === 'send')       { sendAiProposal(u); }
+        else if (action === 'cancel')     { cancelAiProposal(u); }
+        else if (action === 'mark-read')  { markAsRead(u); }
+        else if (action === 'create-task'){ openTaakVanEmail(u); }
+      });
+    });
+  }
+
+  // ── Rendering: Info tab ────────────────────────────────────────────────────
+  function renderInfoRow(e) {
+    return '<div class="info-row">' +
+      '<span class="cat-badge" data-cat="' + escapeHtml(e.category) + '">' + escapeHtml(e.category) + '</span>' +
+      '<div class="info-meta">' +
+        '<div class="info-from">' + escapeHtml(e.fromName || e.from || 'Onbekend') + '</div>' +
+        '<div class="info-subject">' + escapeHtml(e.subject || '(geen onderwerp)') + '</div>' +
+      '</div>' +
+      '<span class="info-time">' + escapeHtml(relativeTime(e.date)) + '</span>' +
+      '<span class="auto-label">Geen actie</span>' +
+    '</div>';
+  }
+
+  function renderInfoTab(emails) {
+    if (!emails.length) {
+      return '<div class="state">' +
+        '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:var(--text-faint)"><path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></svg>' +
+        '<h3>Geen informatieve mails</h3>' +
+        '<p>Leads, afspraken en event-aanmeldingen verschijnen hier.</p>' +
+      '</div>';
+    }
+    const total = emails.length;
+    const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+    if (state.infoPage > totalPages) state.infoPage = 1;
+    const slice = emails.slice((state.infoPage-1)*PAGE_SIZE, state.infoPage*PAGE_SIZE);
+    let html = '<div class="info-list">' + slice.map(renderInfoRow).join('') + '</div>';
+    if (totalPages > 1) html += renderPagination(state.infoPage, totalPages, total, 'infoPage');
+    return html;
+  }
+
+  // ── Rendering: Reclame tab ─────────────────────────────────────────────────
+  function renderReclameRow(e, isSuspect) {
+    const isSelected = state.reclameSelected.has(e.uid);
+    return '<div class="reclame-row' + (isSelected ? ' selected' : '') + '" data-uid="' + escapeHtml(e.uid) + '">' +
+      '<input type="checkbox" data-uid="' + escapeHtml(e.uid) + '"' + (isSelected ? ' checked' : '') + ' />' +
+      '<span class="reclame-from">' + escapeHtml(e.fromName || e.from || 'Onbekend') + '</span>' +
+      '<span class="reclame-subject">' + escapeHtml(e.subject || '(geen onderwerp)') + '</span>' +
+      '<span class="reclame-time">' + escapeHtml(relativeTime(e.date)) + '</span>' +
+    '</div>';
+  }
+
+  function renderReclameTab(reclameEmails, suspectEmails) {
+    if (!reclameEmails.length && !suspectEmails.length) {
+      return '<div class="state">' +
+        '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:var(--green)"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>' +
+        '<h3>Inbox schoon!</h3>' +
+        '<p>Geen reclame of twijfelgevallen gevonden in de geselecteerde periode.</p>' +
+      '</div>';
     }
 
-    function getDateRange() {
-      const today0 = new Date(); today0.setHours(0, 0, 0, 0);
-      const tomorrow0 = new Date(today0); tomorrow0.setDate(tomorrow0.getDate() + 1);
+    let html = '';
 
-      switch (state.dateFilter) {
-        case 'today':
-          return { from: today0, to: tomorrow0 };
-        case 'yesterday': {
-          const y = new Date(today0); y.setDate(y.getDate() - 1);
-          return { from: y, to: today0 };
-        }
-        case 'week': {
-          // Kalenderweek maandag 00:00 t/m zondag 23:59:59.999
-          // (geïmplementeerd als ma 00:00 → volgende ma 00:00, exclusief).
-          const day = today0.getDay(); // 0 = zondag, 1 = maandag, …, 6 = zaterdag
-          const daysFromMonday = day === 0 ? 6 : day - 1;
-          const monday = new Date(today0);
-          monday.setDate(monday.getDate() - daysFromMonday);
-          const nextMonday = new Date(monday);
-          nextMonday.setDate(nextMonday.getDate() + 7);
-          return { from: monday, to: nextMonday };
-        }
-        case 'month': {
-          // 1e van de huidige maand 00:00 t/m laatste dag 23:59:59.999
-          // (geïmplementeerd als 1e van de maand → 1e van volgende maand, exclusief).
-          const first = new Date(today0.getFullYear(), today0.getMonth(), 1);
-          const next  = new Date(today0.getFullYear(), today0.getMonth() + 1, 1);
-          return { from: first, to: next };
-        }
-        case 'custom': {
-          const from = state.customFrom
-            ? new Date(state.customFrom + 'T00:00:00')
-            : new Date(0);
-          const toEnd = state.customTo
-            ? new Date(state.customTo + 'T23:59:59.999')
-            : new Date();
-          // make 'to' exclusive
-          return { from, to: new Date(toEnd.getTime() + 1) };
-        }
-        default:
-          return { from: today0, to: tomorrow0 };
-      }
+    if (suspectEmails.length) {
+      html += '<div class="reclame-section">' +
+        '<div class="reclame-section-title">Twijfelgevallen <span class="suspect-badge">' + suspectEmails.length + ' mogelijk reclame</span></div>' +
+        '<div class="reclame-bulk-bar">' +
+          '<button class="btn btn-sm" onclick="selectAllSuspects()">Selecteer alles</button>' +
+          '<button class="btn btn-sm btn-reclame" onclick="bulkMarkReclame()">Markeer als reclame</button>' +
+          '<button class="btn btn-sm" onclick="bulkDismissSuggestions()">Niet reclame</button>' +
+        '</div>' +
+        '<div class="reclame-table" id="suspectTable">' +
+          suspectEmails.map((e) => renderReclameRow(e, true)).join('') +
+        '</div>' +
+      '</div>';
     }
 
-    function passesFilters(e) {
-      const { from, to } = getDateRange();
-      const d = new Date(e.date);
-      if (d < from || d >= to) return false;
-      if (state.addressFilter !== 'Alle') {
-        // Match against the mailbox the message was fetched from,
-        // not the envelope "to" — that maps to the user's mental
-        // model of "which postvak zit ik in te kijken".
-        const mb = (e.mailbox || '').toLowerCase();
-        if (mb !== state.addressFilter.toLowerCase()) return false;
-      }
-      return true;
+    if (reclameEmails.length) {
+      html += '<div class="reclame-section">' +
+        '<div class="reclame-section-title">Gemarkeerde reclame</div>' +
+        '<div class="reclame-bulk-bar">' +
+          '<button class="btn btn-sm" onclick="selectAllReclame()">Selecteer alles</button>' +
+          '<button class="btn btn-sm btn-success" onclick="bulkMarkNotReclame()">Niet reclame (herstel)</button>' +
+        '</div>' +
+        '<div class="reclame-table" id="reclameTable">' +
+          reclameEmails.map((e) => renderReclameRow(e, false)).join('') +
+        '</div>' +
+      '</div>';
     }
 
-    function getFilteredEmails() {
-      return state.emails.filter(passesFilters);
-    }
+    return html;
+  }
 
-    function getPageButtons(total, current) {
-      if (total <= 7) {
-        return Array.from({ length: total }, (_, i) => i + 1);
-      }
-      const buttons = [1];
-      if (current > 4) buttons.push('…');
-      const start = Math.max(2, current - 1);
-      const end   = Math.min(total - 1, current + 1);
-      for (let i = start; i <= end; i++) buttons.push(i);
-      if (current < total - 3) buttons.push('…');
+  function attachReclameHandlers() {
+    document.querySelectorAll('#tabContent input[type="checkbox"][data-uid]').forEach((cb) => {
+      cb.addEventListener('change', () => {
+        const uid = cb.dataset.uid;
+        const row = cb.closest('.reclame-row');
+        if (cb.checked) { state.reclameSelected.add(uid); row?.classList.add('selected'); }
+        else            { state.reclameSelected.delete(uid); row?.classList.remove('selected'); }
+      });
+    });
+  }
+
+  // ── Pagination helper ──────────────────────────────────────────────────────
+  function renderPagination(current, total, totalItems, pageKey) {
+    const buttons = [];
+    if (total <= 7) {
+      for (let i = 1; i <= total; i++) buttons.push(i);
+    } else {
+      buttons.push(1);
+      if (current > 4) buttons.push('...');
+      const s = Math.max(2, current-1), e = Math.min(total-1, current+1);
+      for (let i = s; i <= e; i++) buttons.push(i);
+      if (current < total-3) buttons.push('...');
       buttons.push(total);
-      return buttons;
     }
+    const btnHtml = buttons.map((b) => {
+      if (b === '...') return '<span style="padding:0 4px;color:var(--text-faint)">…</span>';
+      return '<button class="page-btn' + (b === current ? ' active' : '') + '" data-page="' + b + '">' + b + '</button>';
+    }).join('');
+    return '<nav class="pagination">' +
+      '<div class="pagination-info">Pagina ' + current + ' van ' + total + ' · ' + totalItems + ' e-mails</div>' +
+      '<div class="pagination-buttons">' +
+        '<button class="page-btn" data-page="prev"' + (current === 1 ? ' disabled' : '') + '>← Vorige</button>' +
+        btnHtml +
+        '<button class="page-btn" data-page="next"' + (current === total ? ' disabled' : '') + '>Volgende →</button>' +
+      '</div>' +
+    '</nav>';
+  }
 
-    function renderPagination(current, total, totalItems) {
-      if (total <= 1) {
-        $('pagination').innerHTML = totalItems > 0
-          ? `<div class="pagination-info">${totalItems} e-mail${totalItems === 1 ? '' : 's'}</div>`
-          : '';
-        return;
-      }
-
-      const buttons = getPageButtons(total, current).map((b) => {
-        if (b === '…') return '<span class="page-ellipsis">…</span>';
-        return `<button class="page-btn ${b === current ? 'active' : ''}" data-page="${b}">${b}</button>`;
-      }).join('');
-
-      $('pagination').innerHTML = `
-        <div class="pagination-info">Pagina ${current} van ${total} · ${totalItems} e-mails</div>
-        <div class="pagination-buttons">
-          <button class="page-btn" data-page="prev" ${current === 1 ? 'disabled' : ''}>← Vorige</button>
-          ${buttons}
-          <button class="page-btn" data-page="next" ${current === total ? 'disabled' : ''}>Volgende →</button>
-        </div>
-      `;
-
-      $('pagination').querySelectorAll('[data-page]').forEach((btn) => {
-        btn.addEventListener('click', () => {
-          const v = btn.dataset.page;
-          let next;
-          if (v === 'prev')      next = Math.max(1, state.page - 1);
-          else if (v === 'next') next = Math.min(total, state.page + 1);
-          else                   next = parseInt(v, 10);
-          if (next === state.page) return;
-          state.page = next;
-          render();
-          window.scrollTo({ top: 0, behavior: 'smooth' });
-        });
+  function attachPaginationHandlers(totalPages, pageKey) {
+    document.querySelectorAll('#tabContent .page-btn').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const v = btn.dataset.page;
+        let next;
+        if (v === 'prev') next = Math.max(1, state[pageKey]-1);
+        else if (v === 'next') next = Math.min(totalPages, state[pageKey]+1);
+        else next = parseInt(v, 10);
+        if (next === state[pageKey]) return;
+        state[pageKey] = next;
+        render();
+        window.scrollTo({ top: 0, behavior: 'smooth' });
       });
-    }
+    });
+  }
 
-    /* Mark-as-read / mark-as-reclame acties.
-       Beide muteren state, slaan de override in localStorage op,
-       her-renderen en herstellen de open status van het mailtje. */
-    function findEmail(uid) {
-      return state.emails.find((e) => e.uid === uid);
-    }
+  // ── Main render ────────────────────────────────────────────────────────────
+  function render() {
+    const filtered     = getFilteredEmails();
+    const actieEmails  = getActieEmails(filtered);
+    const infoEmails   = getInfoEmails(filtered);
+    const reclameEmails= getReclameEmails(filtered);
+    const suspectEmails= getSuspectEmails();
 
-    function reopenEmail(uid) {
-      const article = document.querySelector(`.email[data-uid="${uid}"]`);
-      if (article) article.classList.add('open');
-    }
+    // Status bar
+    const n = actieEmails.length;
+    document.getElementById('actionCount').textContent = n + ' mail' + (n === 1 ? '' : 's') + ' vereist actie';
+    document.getElementById('lastUpdateTime').textContent = 'Laatste update: ' + (state.fetchedAt ? new Date(state.fetchedAt).toLocaleTimeString('nl-NL') : '—');
 
-    function markAsReclame(uid) {
-      const email = findEmail(uid);
-      if (!email || email.category === 'Reclame') return;
-      state.overrides.category[uid] = 'Reclame';
-      saveOverrides();
-      // Patroon leren zodat we volgende keer (bijna) hetzelfde mailtje
-      // automatisch of met suggestie kunnen opvangen.
-      recordReclamePattern(email);
-      email.category = 'Reclame';
-      render();
-      reopenEmail(uid);
-      showToast('Gemarkeerd als reclame');
-    }
+    // Tab counts
+    document.getElementById('tabCountActie').textContent   = actieEmails.length;
+    document.getElementById('tabCountInfo').textContent    = infoEmails.length;
+    document.getElementById('tabCountReclame').textContent = reclameEmails.length + suspectEmails.length;
 
-    function markAsRead(uid) {
-      const email = findEmail(uid);
-      if (!email || !email.unread) return;
-      state.overrides.read[uid] = true;
-      saveOverrides();
-      email.unread = false;
-      render();
-      reopenEmail(uid);
-      showToast('Gemarkeerd als gelezen');
-      // IMAP-update fire-and-forget: localStorage zorgt al voor consistente UI,
-      // dus een mislukte server-call breekt de optimistische update niet.
-      pushReadFlagToImap(email);
-    }
-
-    async function pushReadFlagToImap(email) {
-      const compositeUid = String(email.uid || '');
-      const lastColon = compositeUid.lastIndexOf(':');
-      const imapUid = lastColon >= 0 ? compositeUid.slice(lastColon + 1) : compositeUid;
-      try {
-        const res = await fetch('/api/mark-read', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ mailbox: email.mailbox, uid: imapUid })
+    // Tab content
+    const content = document.getElementById('tabContent');
+    switch (state.activeTab) {
+      case 'actie':
+        content.innerHTML = renderActieTab(actieEmails);
+        actieEmails.forEach((e) => {
+          attachActieCardHandlers(e.uid);
+          if (!state.bodyCache[e.uid]) fetchEmailBody(e);
         });
-        if (!res.ok) {
-          const data = await res.json().catch(() => ({}));
-          console.warn('IMAP mark-read failed:', data.error || res.status);
+        break;
+      case 'info':
+        content.innerHTML = renderInfoTab(infoEmails);
+        if (infoEmails.length > PAGE_SIZE) {
+          const totalPages = Math.max(1, Math.ceil(infoEmails.length / PAGE_SIZE));
+          attachPaginationHandlers(totalPages, 'infoPage');
         }
-      } catch (err) {
-        console.warn('IMAP mark-read network error:', err);
-      }
+        break;
+      case 'reclame':
+        content.innerHTML = renderReclameTab(reclameEmails, suspectEmails);
+        attachReclameHandlers();
+        break;
     }
+  }
 
-    let _suggestionPreviewOpen = false;
+  // ── Error state ────────────────────────────────────────────────────────────
+  function renderError(msg) {
+    document.getElementById('tabContent').innerHTML = '<div class="state error">' +
+      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>' +
+      '<h3>Kan inbox niet laden</h3>' +
+      '<p>Controleer of IMAP_HOST, IMAP_PORT, IMAP_USER en IMAP_PASS zijn ingesteld in Vercel.</p>' +
+      '<code>' + escapeHtml(msg) + '</code>' +
+      '<div style="margin-top:16px">' +
+        '<button class="btn" onclick="loadEmails()">Opnieuw proberen</button>' +
+        '<button class="btn" onclick="loadDemo()" style="margin-left:8px">Toon voorbeelddata</button>' +
+      '</div>' +
+    '</div>';
+  }
 
-    const ICON_EYE_OPEN   = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>';
-    const ICON_EYE_CLOSED = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/><line x1="1" y1="1" x2="23" y2="23"/></svg>';
-
-    function toggleSuggestionPreview() {
-      _suggestionPreviewOpen = !_suggestionPreviewOpen;
-      const preview = document.getElementById('sg-preview');
-      const btn     = document.getElementById('sg-toggle-btn');
-      if (!preview || !btn) return;
-      preview.classList.toggle('open', _suggestionPreviewOpen);
-      btn.innerHTML = _suggestionPreviewOpen
-        ? `${ICON_EYE_CLOSED} Verberg e-mail`
-        : `${ICON_EYE_OPEN} Toon e-mail`;
-    }
-
-    async function loadSuggestionBody(email) {
-      if (state.bodyCache[email.uid]) return; // already loading or loaded (success/error)
-      state.bodyCache[email.uid] = { loading: true };
-      renderSuggestionBanner();
-      try {
-        const res = await fetch('/api/email-body', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ mailbox: email.mailbox, uid: extractImapUid(email.uid) })
-        });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
-        state.bodyCache[email.uid] = { loading: false, ...data };
-      } catch (err) {
-        state.bodyCache[email.uid] = { loading: false, error: err.message };
-      }
-      renderSuggestionBanner();
-    }
-
-    function retrySuggestionBody() {
-      const top = state.suggestions[0];
-      if (!top) return;
-      delete state.bodyCache[top.email.uid];
-      loadSuggestionBody(top.email);
-    }
-
-    function renderSuggestionBanner() {
-      const banner = $('suggestion-banner');
-      if (!banner) return;
-      const top = state.suggestions[0];
-      if (!top) {
-        banner.innerHTML = '';
-        _suggestionPreviewOpen = false;
-        return;
-      }
-
-      // Kick off body fetch (no-op if already in cache)
-      loadSuggestionBody(top.email);
-
-      const senderLabel = top.email.fromName || top.email.fromAddress || top.email.from || 'onbekende afzender';
-      const cached = state.bodyCache[top.email.uid];
-
-      let bodyHtml;
-      if (!cached || cached.loading) {
-        bodyHtml = '<div class="sg-body-status"><span class="sg-spinner"></span> Inhoud laden…</div>';
-      } else if (cached.error) {
-        bodyHtml = `<div class="sg-body-error">Kon inhoud niet laden: ${escapeHtml(cached.error)}<br>
-          <button class="btn btn-sm" style="margin-top:8px" onclick="retrySuggestionBody()">Opnieuw proberen</button></div>`;
-      } else {
-        const raw = cached.text || '';
-        const truncated = raw.length > 2000 ? raw.slice(0, 2000) + '\n…' : raw;
-        bodyHtml = `<div class="suggestion-preview-body">${escapeHtml(truncated)}</div>`;
-      }
-
-      const toggleLabel = _suggestionPreviewOpen
-        ? `${ICON_EYE_CLOSED} Verberg e-mail`
-        : `${ICON_EYE_OPEN} Toon e-mail`;
-
-      banner.innerHTML = `
-        <div class="suggestion-banner">
-          <div class="suggestion-icon">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"></path><line x1="4" y1="22" x2="4" y2="15"></line></svg>
-          </div>
-          <div class="suggestion-text">
-            Deze mail lijkt op reclame van <strong>${escapeHtml(senderLabel)}</strong>. Markeren als reclame?
-          </div>
-          <div class="suggestion-actions">
-            <button class="btn btn-reclame" data-suggestion="accept">Ja</button>
-            <button class="btn" data-suggestion="dismiss">Nee</button>
-            <button class="btn btn-toggle-mail" id="sg-toggle-btn" onclick="toggleSuggestionPreview()">${toggleLabel}</button>
-          </div>
-          <div class="suggestion-preview${_suggestionPreviewOpen ? ' open' : ''}" id="sg-preview">
-            <div class="suggestion-preview-meta">
-              <span class="sp-label">Van:</span>       <span class="sp-val">${escapeHtml(top.email.from || senderLabel)}</span>
-              <span class="sp-label">Onderwerp:</span>  <span class="sp-val">${escapeHtml(top.email.subject || '—')}</span>
-              <span class="sp-label">Datum:</span>      <span class="sp-val">${formatDateTime(top.email.date)}</span>
-            </div>
-            ${bodyHtml}
-          </div>
-        </div>`;
-      banner.querySelector('[data-suggestion="accept"]').addEventListener('click', () => { _suggestionPreviewOpen = false; acceptSuggestion(); });
-      banner.querySelector('[data-suggestion="dismiss"]').addEventListener('click', () => { _suggestionPreviewOpen = false; dismissSuggestion(); });
-    }
-
-    function render() {
-      renderSuggestionBanner();
-      // dynamic period labels
-      const period = periodLabel();
-      document.querySelectorAll('.period').forEach((el) => { el.textContent = period; });
-      $('inboxTitle').textContent = `Inbox · ${period}`;
-
-      const filtered = getFilteredEmails();
-
-      // stats — all derived from the filtered set
-      const leads     = filtered.filter((e) => e.category === 'Nieuwe Lead').length;
-      const appts     = filtered.filter((e) => e.category === 'Appointment').length;
-      const events    = filtered.filter((e) => e.category === 'Event Aanmelding').length;
-      const total     = filtered.length;
-
-      // "Onbeantwoord" telt alleen mail die nog actie vereist —
-      // leads, afspraken, event-aanmeldingen en reclame zijn auto-verwerkt.
-      const onbeantwoord = filtered.filter(
-        (e) => e.unread &&
-               e.category !== 'Nieuwe Lead' &&
-               e.category !== 'Appointment' &&
-               e.category !== 'Event Aanmelding' &&
-               e.category !== 'Reclame'
-      ).length;
-
-      const openFact = filtered.filter(
-        (e) => e.category === 'Factuurvraag' && e.unread
-      ).length;
-
-      const conv = leads > 0
-        ? Math.round((appts / leads) * 100) + '%'
-        : '—';
-
-      // "Leads deze week" is altijd 7-dagen, ongeacht datumfilter — wel
-      // adresfilter toepassen voor consistentie.
-      const today0 = new Date(); today0.setHours(0, 0, 0, 0);
-      const tomorrow0 = new Date(today0); tomorrow0.setDate(tomorrow0.getDate() + 1);
-      const weekFrom = new Date(today0); weekFrom.setDate(weekFrom.getDate() - 6);
-      const leadsWeek = state.emails.filter((e) => {
-        if (e.category !== 'Nieuwe Lead') return false;
-        const d = new Date(e.date);
-        if (d < weekFrom || d >= tomorrow0) return false;
-        if (state.addressFilter !== 'Alle' &&
-            (e.mailbox || '').toLowerCase() !== state.addressFilter.toLowerCase()) return false;
-        return true;
-      }).length;
-
-      $('cntLead').textContent       = leads;
-      $('cntAppt').textContent       = appts;
-      $('cntEvents').textContent     = events;
-      $('cntTotal').textContent      = total;
-      $('cntInvOpen').textContent    = openFact;
-      $('cntPending').textContent    = onbeantwoord;
-      $('cntLeadsWeek').textContent  = leadsWeek;
-      $('cntConv').textContent       = conv;
-
-      $('lastFetch').textContent = state.fetchedAt
-        ? 'Laatst bijgewerkt: ' + new Date(state.fetchedAt).toLocaleTimeString('nl-NL')
-        : '';
-
-      // category filter pills (counts based on filtered set)
-      const byCat = {};
-      CATEGORIES.forEach((c) => {
-        byCat[c] = filtered.filter((e) => e.category === c).length;
-      });
-      const pills = [
-        { key: 'Alle', count: total },
-        ...CATEGORIES.map((c) => ({ key: c, count: byCat[c] }))
-      ];
-      $('filters').innerHTML = pills
-        .map(
-          (p) => `
-        <button class="pill ${state.filter === p.key ? 'active' : ''}" data-filter="${escapeHtml(p.key)}">
-          ${escapeHtml(p.key)}
-          <span class="count">${p.count}</span>
-        </button>`
-        )
-        .join('');
-      $('filters').querySelectorAll('.pill').forEach((el) => {
-        el.addEventListener('click', () => {
-          state.filter = el.dataset.filter;
-          state.page = 1; // reset paginering bij filter-wissel
-          render();
-        });
-      });
-
-      // inbox + paginering
-      const visible = state.filter === 'Alle'
-        ? filtered
-        : filtered.filter((e) => e.category === state.filter);
-
-      const totalPages = Math.max(1, Math.ceil(visible.length / PAGE_SIZE));
-      if (state.page > totalPages) state.page = 1;
-      const startIdx = (state.page - 1) * PAGE_SIZE;
-      const pageItems = visible.slice(startIdx, startIdx + PAGE_SIZE);
-
-      if (visible.length === 0) {
-        $('content').innerHTML = `
-          <div class="state">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color: var(--text-faint);">
-              <path d="M22 12h-6l-2 3h-4l-2-3H2"></path>
-              <path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"></path>
-            </svg>
-            <h3>Geen e-mails in deze selectie</h3>
-            <p>Pas de adres- of datumfilter aan, of wacht op nieuwe berichten.</p>
-          </div>`;
-        $('pagination').innerHTML = '';
-        return;
-      }
-
-      $('content').innerHTML =
-        '<div class="inbox">' +
-        pageItems.map(renderEmail).join('') +
-        '</div>';
-
-      pageItems.forEach((e) => attachHandlers(e.uid));
-
-      renderPagination(state.page, totalPages, visible.length);
-    }
-
-    // SVG-iconen (Lucide-stijl)
-    const ICON_MARK_READ    = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>';
-    const ICON_MARK_RECLAME = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"></path><line x1="4" y1="22" x2="4" y2="15"></line></svg>';
-    const ICON_AI           = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3z"></path></svg>';
-    const ICON_SEND         = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>';
-    const ICON_REGEN        = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>';
-    const ICON_CANCEL       = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>';
-    const ICON_TASK         = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="9" y1="9" x2="15" y2="9"/><line x1="9" y1="13" x2="15" y2="13"/><line x1="9" y1="17" x2="12" y2="17"/></svg>';
-
-    function markButtons(e) {
-      const parts = [];
-      if (e.unread) {
-        parts.push(`<button class="btn" data-action="mark-read" data-uid="${e.uid}">${ICON_MARK_READ}Markeren als gelezen</button>`);
-      }
-      if (e.category !== 'Reclame') {
-        parts.push(`<button class="btn btn-reclame" data-action="mark-reclame" data-uid="${e.uid}">${ICON_MARK_RECLAME}Markeren als reclame</button>`);
-      }
-      parts.push(`<button class="btn btn-task" data-action="create-task" data-uid="${e.uid}">${ICON_TASK}Maak taak aan</button>`);
-      return parts.join('');
-    }
-
-    function renderEmailContent(e) {
-      const cache = state.bodyCache[e.uid];
-      const fromText = (cache && cache.from) || e.from || e.fromAddress || 'Onbekend';
-      const toText   = (cache && cache.to)   || e.toAddress || e.mailbox || '—';
-      const dateText = formatDateTime((cache && cache.date) || e.date);
-
-      const header = `
-        <div class="email-detail-meta">
-          <div class="email-detail-row"><span class="meta-key">Van</span><span class="meta-val">${escapeHtml(fromText)}</span></div>
-          <div class="email-detail-row"><span class="meta-key">Aan</span><span class="meta-val">${escapeHtml(toText)}</span></div>
-          <div class="email-detail-row"><span class="meta-key">Datum</span><span class="meta-val">${escapeHtml(dateText)}</span></div>
-        </div>`;
-
-      let bodyHtml;
-      if (!cache || cache.loading) {
-        bodyHtml = '<div class="body-loading">Inhoud wordt geladen…</div>';
-      } else if (cache.error) {
-        bodyHtml = `<div class="body-error">Kon inhoud niet laden: ${escapeHtml(cache.error)}</div>`;
-      } else {
-        bodyHtml = `<div class="email-body-text">${escapeHtml(cache.text || '(geen inhoud beschikbaar)')}</div>`;
-      }
-      return `<div class="email-content">${header}${bodyHtml}</div>`;
-    }
-
-    function renderAiActions(e) {
-      const proposal = state.aiProposals[e.uid];
-      if (!proposal) {
-        // Geen actief voorstel — toon alleen de "Genereer antwoord" knop + mark-knoppen.
-        return `
-          <div class="actions">
-            <button class="btn btn-ai" data-action="generate" data-uid="${e.uid}">${ICON_AI}Genereer antwoord</button>
-            ${markButtons(e)}
-          </div>`;
-      }
-      // Loading-toestand — AI is bezig met genereren.
-      if (proposal.loading) {
-        return `
-          <div class="ai-loading">
-            <span class="ai-loading-spinner"></span>
-            <span>AI schrijft antwoord…</span>
-          </div>`;
-      }
-      // Fout-toestand.
-      if (proposal.error) {
-        return `
-          <div class="ai-error">AI-generatie mislukt: ${escapeHtml(proposal.error)}</div>
-          <div class="actions">
-            <button class="btn btn-ai" data-action="generate" data-uid="${e.uid}">${ICON_AI}Opnieuw proberen</button>
-            ${markButtons(e)}
-          </div>`;
-      }
-      // Actief voorstel — bewerkbaar tekstvak + Versturen / Opnieuw genereren / Annuleren.
-      return `
-        <div class="reply-label"><span class="ai-tag">AI</span> Voorgesteld antwoord</div>
-        <textarea class="reply-box" data-reply="${e.uid}">${escapeHtml(proposal.current)}</textarea>
-        <div class="actions">
-          <button class="btn btn-send" data-action="send" data-uid="${e.uid}">${ICON_SEND}Versturen</button>
-          <button class="btn" data-action="regenerate" data-uid="${e.uid}">${ICON_REGEN}Opnieuw genereren</button>
-          <button class="btn" data-action="cancel" data-uid="${e.uid}">${ICON_CANCEL}Annuleren</button>
-          ${markButtons(e)}
-        </div>`;
-    }
-
-    function renderCategoryMover(e) {
-      const opts = CATEGORIES.map((c) =>
-        `<option value="${escapeHtml(c)}"${c === e.category ? ' selected' : ''}>${escapeHtml(c)}</option>`
-      ).join('');
-      return `
-        <div class="category-mover">
-          <label for="cat-${escapeHtml(e.uid)}">Verplaats naar categorie</label>
-          <select id="cat-${escapeHtml(e.uid)}" data-categorize="${e.uid}">${opts}</select>
-        </div>`;
-    }
-
-    function renderEmail(e) {
-      const isNoReply  = e.category === 'Nieuwe Lead' || e.category === 'Appointment' || e.category === 'Event Aanmelding';
-      const isAi       = e.category === 'Klantvraag' || e.category === 'Factuurvraag' || e.category === 'Overig';
-
-      const cls = ['email'];
-      if (isNoReply) cls.push('no-reply');
-
-      const chevron = '<svg class="chevron" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>';
-
-      const row = `
-        <div class="email-row" data-toggle="${e.uid}">
-          <span class="cat-badge" data-cat="${escapeHtml(e.category)}">${escapeHtml(e.category)}</span>
-          <div class="email-meta">
-            <div class="email-from">${escapeHtml(e.fromName || e.from)}</div>
-            <div class="email-subject">${escapeHtml(e.subject)}</div>
-          </div>
-          <div class="email-time">${escapeHtml(relativeTime(e.date))}</div>
-          ${isNoReply ? '<span class="auto-tag">Geen reactie vereist</span>' : ''}
-          ${chevron}
-        </div>`;
-
-      const content = renderEmailContent(e);
-
-      let actionsHtml;
-      if (isNoReply) {
-        actionsHtml = `
-          <p class="auto-info">Deze e-mail wordt automatisch verwerkt — geen antwoord vereist. Je kunt 'm wel als gelezen markeren of verplaatsen naar Reclame als de classificatie niet klopt.</p>
-          <div class="actions">${markButtons(e)}</div>`;
-      } else if (isAi) {
-        actionsHtml = renderAiActions(e);
-      } else {
-        // Reclame, Overig — alleen mark-knoppen.
-        actionsHtml = `<div class="actions">${markButtons(e)}</div>`;
-      }
-
-      return `
-        <article class="${cls.join(' ')}" data-uid="${e.uid}">
-          ${row}
-          <div class="email-body">
-            ${content}
-            ${renderCategoryMover(e)}
-            ${actionsHtml}
-          </div>
-        </article>`;
-    }
-
-    function attachHandlers(uid) {
-      const article = document.querySelector(`.email[data-uid="${uid}"]`);
-      if (!article) return;
-
-      const toggle = article.querySelector(`[data-toggle="${uid}"]`);
-      if (toggle) {
-        toggle.addEventListener('click', () => {
-          const wasOpen = article.classList.contains('open');
-          article.classList.toggle('open');
-          // Bij eerste keer openklappen: body ophalen via API.
-          // Demo-data heeft de body al pre-cached, dus die fetch wordt overgeslagen.
-          if (!wasOpen) {
-            const email = findEmail(uid);
-            if (email && !state.bodyCache[uid]) {
-              fetchEmailBody(email);
-            }
-          }
-        });
-      }
-
-      // Sync de textarea-waarde naar state.aiProposals[uid].current bij elke
-      // keystroke, zodat "Versturen" altijd de meest recente versie heeft.
-      const replyBox = article.querySelector(`[data-reply="${uid}"]`);
-      if (replyBox) {
-        replyBox.addEventListener('input', () => {
-          if (state.aiProposals[uid]) {
-            state.aiProposals[uid].current = replyBox.value;
-          }
-        });
-      }
-
-      // Handmatige categorie-wijziging via de "Verplaats naar categorie" dropdown.
-      // Werkt via dezelfde overrides-store als markAsReclame, dus persistent
-      // over refreshes en consistent met de bestaande filter/stat-pipeline.
-      const moverSelect = article.querySelector(`[data-categorize="${uid}"]`);
-      if (moverSelect) {
-        moverSelect.addEventListener('change', (ev) => {
-          const newCategory = ev.target.value;
-          const email = findEmail(uid);
-          if (!email || newCategory === email.category) return;
-          state.overrides.category[uid] = newCategory;
-          saveOverrides();
-          // Bij verplaatsing naar Reclame ook het patroon leren —
-          // zelfde gedrag als de "Markeren als reclame"-knop.
-          if (newCategory === 'Reclame') recordReclamePattern(email);
-          email.category = newCategory;
-          render();
-          reopenEmail(uid);
-          showToast(`Verplaatst naar ${newCategory}`);
-        });
-      }
-
-      article.querySelectorAll('[data-action]').forEach((btn) => {
-        btn.addEventListener('click', (ev) => {
-          ev.stopPropagation();
-          const action = btn.dataset.action;
-          if (action === 'mark-read')    { markAsRead(uid);          return; }
-          if (action === 'mark-reclame') { markAsReclame(uid);       return; }
-          if (action === 'generate')     { startAiProposal(uid);     return; }
-          if (action === 'regenerate')   { regenerateAiProposal(uid); return; }
-          if (action === 'cancel')       { cancelAiProposal(uid);    return; }
-          if (action === 'send')         { sendAiProposal(uid);      return; }
-          if (action === 'create-task')  { openTaakVanEmail(uid);    return; }
-        });
-      });
-    }
-
-    /* Demo data fallback so the page is visible even before the API is wired up */
-    function loadDemo() {
-      const now = new Date();
-      const m = (mins) => new Date(now.getTime() - mins * 60000).toISOString();
-      const MB = {
-        leads:  'leads@deforexopleiding.nl',
-        info:   'info@deforexopleiding.nl',
-        partn:  'partners@deforexopleiding.nl',
-        admin:  'administratie@deforexopleiding.nl'
-      };
-      const demo = [
-        // leads@ — lead-formulieren en uitlegsessies
-        { uid: `${MB.leads}:1`,  mailbox: MB.leads, fromName: 'Mark Janssen',     from: 'Mark Janssen <mark@example.com>',       toAddress: MB.leads, subject: 'Nieuwe Lead – aanvraag uitlegsessie',          date: m(8),    category: 'Nieuwe Lead',  unread: true  },
-        { uid: `${MB.leads}:2`,  mailbox: MB.leads, fromName: 'Calendly',         from: 'Calendly <no-reply@calendly.com>',      toAddress: MB.leads, subject: 'Nieuwe uitlegsessie ingepland: Sara de Wit',   date: m(45),   category: 'Appointment',  unread: false },
-        { uid: `${MB.leads}:3`,  mailbox: MB.leads, fromName: 'Pieter Hendriks',  from: 'Pieter Hendriks <pieter@example.com>',  toAddress: MB.leads, subject: 'Lead via Facebook formulier',                   date: m(260),  category: 'Nieuwe Lead',  unread: true  },
-        { uid: `${MB.leads}:4`,  mailbox: MB.leads, fromName: 'GoHighLevel',      from: 'GoHighLevel <noreply@gohighlevel.com>', toAddress: MB.leads, subject: 'Nieuwe Event Aanmelding van Tom Bakker',        date: m(20),   category: 'Event Aanmelding', unread: true  },
-        { uid: `${MB.leads}:5`,  mailbox: MB.leads, fromName: 'Trading Academy',  from: 'Trading Academy <hi@trading-academy.nl>',toAddress: MB.leads, subject: 'Aanmelding ontvangen voor introductiedag',     date: m(360),  category: 'Event Aanmelding', unread: true  },
-
-        // info@ — algemene klantvragen en newsletters
-        { uid: `${MB.info}:1`,   mailbox: MB.info,  fromName: 'Linda Vermeer',    from: 'Linda Vermeer <linda@example.com>',     toAddress: MB.info,  subject: 'Hoe werkt jullie module 3 precies?',           date: m(120),  category: 'Klantvraag',       unread: true  },
-        { uid: `${MB.info}:2`,   mailbox: MB.info,  fromName: 'Newsletter Forex', from: 'newsletter@news.example.com',           toAddress: MB.info,  subject: 'Nieuwsbrief: wekelijkse marktupdate',           date: m(220),  category: 'Reclame',          unread: false },
-        { uid: `${MB.info}:3`,   mailbox: MB.info,  fromName: 'Bol.com',          from: 'Bol.com <marketing@bol.com>',           toAddress: MB.info,  subject: 'Speciale aanbieding: 30% korting deze week!',   date: m(330),  category: 'Reclame',          unread: true  },
-        { uid: `${MB.info}:4`,   mailbox: MB.info,  fromName: 'Eventbrite',       from: 'Eventbrite <noreply@eventbrite.com>',   toAddress: MB.info,  subject: 'Aanmelding seminar Gent — Lisa Peeters',        date: m(150),  category: 'Event Aanmelding', unread: true  },
-
-        // partners@ — partnerschappen
-        { uid: `${MB.partn}:1`,  mailbox: MB.partn, fromName: 'Tom de Vries',     from: 'Tom de Vries <tom@xyz-broker.nl>',      toAddress: MB.partn, subject: 'Voorstel samenwerking — affiliate programma',  date: m(70),   category: 'Klantvraag',   unread: true  },
-        { uid: `${MB.partn}:2`,  mailbox: MB.partn, fromName: 'Erik van Dam',     from: 'Erik van Dam <erik@partner-co.com>',    toAddress: MB.partn, subject: 'Nieuwe Lead via affiliate-link',                date: m(310),  category: 'Nieuwe Lead',  unread: false },
-
-        // administratie@ — facturen en betalingsbevestigingen
-        { uid: `${MB.admin}:1`,  mailbox: MB.admin, fromName: 'Boekhouding BV',   from: 'Boekhouding BV <fact@boek.nl>',         toAddress: MB.admin, subject: 'Vraag over factuur 2025-0418',                  date: m(180),  category: 'Factuurvraag', unread: true  },
-        { uid: `${MB.admin}:2`,  mailbox: MB.admin, fromName: 'Mollie',           from: 'Mollie <noreply@mollie.com>',           toAddress: MB.admin, subject: 'Betaling ontvangen — order #4218',              date: m(95),   category: 'Overig',       unread: true  },
-        { uid: `${MB.admin}:3`,  mailbox: MB.admin, fromName: 'Teamleader',       from: 'Teamleader <noreply@teamleader.eu>',    toAddress: MB.admin, subject: 'Factuur voldaan: 2025-0418',                    date: m(150),  category: 'Overig',       unread: false }
-      ];
-      const replyFor = (cat, name) => {
-        const greet = `Beste ${name},`;
-        const sign = 'Met vriendelijke groet,\nTeam De Forex Opleiding';
-        if (cat === 'Nieuwe Lead') return `${greet}\n\nBedankt voor je interesse in De Forex Opleiding! Een van onze adviseurs neemt binnen 24 uur persoonlijk contact met je op.\n\n${sign}`;
-        if (cat === 'Appointment') return `${greet}\n\nBedankt voor de bevestiging — je uitlegsessie staat ingepland. Je ontvangt vlak voor de afspraak een herinnering.\n\n${sign}`;
-        if (cat === 'Klantvraag') return `${greet}\n\nBedankt voor je vraag. We komen uiterlijk binnen 1 werkdag bij je terug met een uitgebreid antwoord.\n\n${sign}`;
-        if (cat === 'Factuurvraag') return `${greet}\n\nBedankt voor je bericht over de factuur. We bekijken het direct.\n\n${sign}`;
-        return `${greet}\n\nBedankt voor je bericht. We komen zo snel mogelijk bij je terug.\n\n${sign}`;
-      };
-      state.emails = demo.map((e) => ({ ...e, aiReply: replyFor(e.category, e.fromName) }));
+  // ── Load emails ────────────────────────────────────────────────────────────
+  async function loadEmails() {
+    const btn = document.getElementById('refreshBtn');
+    if (btn) btn.disabled = true;
+    document.getElementById('tabContent').innerHTML = '<div class="state"><div class="spinner"></div><h3>Mailbox laden…</h3><p>We halen je e-mails op via IMAP.</p></div>';
+    try {
+      const res  = await fetch('/api/emails', { cache: 'no-store' });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'HTTP ' + res.status);
+      state.emails = data.emails || [];
+      state.fetchedAt = data.fetchedAt;
       applyOverrides();
+      applyAiCategories();
       applyAutoReclameClassification();
       populateSuggestions();
-      // Pre-populate bodyCache met realistische placeholders voor demo
-      state.emails.forEach((e) => {
-        if (state.bodyCache[e.uid]) return;
-        state.bodyCache[e.uid] = {
-          loading: false,
-          from: e.from,
-          to: e.toAddress || e.mailbox,
-          date: e.date,
-          text: `[Demo-modus] Dit is een voorbeeldweergave van een ${e.category.toLowerCase()}-mail.\n\nOnderwerp: ${e.subject}\n\nIn de live-versie zou hier de volledige tekst van het bericht staan.`
-        };
-      });
-      state.counters = {
-        nieuweLead: demo.filter((e) => e.category === 'Nieuwe Lead').length,
-        nieuweUitlegsessie: demo.filter((e) => e.category === 'Appointment').length,
-        totaalVandaag: demo.length
-      };
-      state.byCategory = CATEGORIES.reduce((acc, c) => {
-        acc[c] = demo.filter((e) => e.category === c).length;
-        return acc;
-      }, {});
-      state.fetchedAt = new Date().toISOString();
       render();
+      kickOffAiCategorization();
+    } catch (err) {
+      renderError(err.message);
+    } finally {
+      if (btn) btn.disabled = false;
     }
+  }
 
-    /* Filter bar wiring */
-    function initFilterBar() {
-      // Address dropdown
-      $('addressFilter').addEventListener('change', (ev) => {
-        state.addressFilter = ev.target.value;
-        state.page = 1;
+  // ── Demo fallback ──────────────────────────────────────────────────────────
+  function loadDemo() {
+    const now = new Date();
+    const m   = (mins) => new Date(now.getTime() - mins*60000).toISOString();
+    const MB  = { leads:'leads@deforexopleiding.nl', info:'info@deforexopleiding.nl', partn:'partners@deforexopleiding.nl', admin:'administratie@deforexopleiding.nl' };
+    state.emails = [
+      { uid:MB.leads+':1',  mailbox:MB.leads, fromName:'Mark Janssen',    from:'Mark Janssen <mark@example.com>',       toAddress:MB.leads, subject:'Nieuwe Lead – aanvraag uitlegsessie',       date:m(8),   category:'Nieuwe Lead',      unread:true  },
+      { uid:MB.leads+':2',  mailbox:MB.leads, fromName:'Calendly',        from:'Calendly <no-reply@calendly.com>',      toAddress:MB.leads, subject:'Nieuwe uitlegsessie ingepland: Sara de Wit',    date:m(45),  category:'Appointment',      unread:false },
+      { uid:MB.leads+':3',  mailbox:MB.leads, fromName:'Pieter Hendriks', from:'Pieter Hendriks <pieter@example.com>',  toAddress:MB.leads, subject:'Lead via Facebook formulier',                  date:m(260), category:'Nieuwe Lead',      unread:true  },
+      { uid:MB.leads+':4',  mailbox:MB.leads, fromName:'GoHighLevel',     from:'GoHighLevel <noreply@gohighlevel.com>', toAddress:MB.leads, subject:'Nieuwe Event Aanmelding van Tom Bakker',       date:m(20),  category:'Event Aanmelding', unread:true  },
+      { uid:MB.info+':1',   mailbox:MB.info,  fromName:'Linda Vermeer',   from:'Linda Vermeer <linda@example.com>',     toAddress:MB.info,  subject:'Hoe werkt jullie module 3 precies?',           date:m(120), category:'Klantvraag',       unread:true  },
+      { uid:MB.info+':2',   mailbox:MB.info,  fromName:'Newsletter Forex',from:'newsletter@news.example.com',           toAddress:MB.info,  subject:'Nieuwsbrief: wekelijkse marktupdate',          date:m(220), category:'Reclame',          unread:false },
+      { uid:MB.info+':3',   mailbox:MB.info,  fromName:'Bol.com',         from:'Bol.com <marketing@bol.com>',           toAddress:MB.info,  subject:'Speciale aanbieding: 30% korting deze week!',  date:m(330), category:'Reclame',          unread:true  },
+      { uid:MB.info+':4',   mailbox:MB.info,  fromName:'Eventbrite',      from:'Eventbrite <noreply@eventbrite.com>',   toAddress:MB.info,  subject:'Aanmelding seminar Gent — Lisa Peeters', date:m(150), category:'Event Aanmelding', unread:true  },
+      { uid:MB.partn+':1',  mailbox:MB.partn, fromName:'Tom de Vries',    from:'Tom de Vries <tom@xyz-broker.nl>',      toAddress:MB.partn, subject:'Voorstel samenwerking — affiliate',       date:m(70),  category:'Klantvraag',       unread:true  },
+      { uid:MB.admin+':1',  mailbox:MB.admin, fromName:'Boekhouding BV',  from:'Boekhouding BV <fact@boek.nl>',         toAddress:MB.admin, subject:'Vraag over factuur 2025-0418',                 date:m(180), category:'Factuurvraag',     unread:true  },
+      { uid:MB.admin+':2',  mailbox:MB.admin, fromName:'Mollie',          from:'Mollie <noreply@mollie.com>',           toAddress:MB.admin, subject:'Betaling ontvangen — order #4218',        date:m(95),  category:'Overig',           unread:true  }
+    ];
+    state.emails.forEach((e) => {
+      state.bodyCache[e.uid] = {
+        loading: false, from: e.from, to: e.toAddress || e.mailbox, date: e.date,
+        text: '[Demo] Dit is een voorbeeldweergave van een ' + e.category.toLowerCase() + '-mail.\n\nOnderwerp: ' + e.subject + '\n\nIn de live-versie staat hier de volledige e-mailtekst.'
+      };
+    });
+    state.fetchedAt = new Date().toISOString();
+    applyOverrides();
+    applyAiCategories();
+    applyAutoReclameClassification();
+    populateSuggestions();
+    render();
+  }
+
+  // ── Filter bar wiring ──────────────────────────────────────────────────────
+  function initFilterBar() {
+    document.getElementById('addressFilter').addEventListener('change', (ev) => {
+      state.addressFilter = ev.target.value;
+      state.infoPage = 1;
+      render();
+    });
+
+    const datePills = document.querySelectorAll('.date-pill');
+    datePills.forEach((btn) => {
+      btn.addEventListener('click', () => {
+        state.dateFilter = btn.dataset.date;
+        state.infoPage = 1;
+        datePills.forEach((b) => b.classList.toggle('active', b === btn));
+        document.getElementById('customRange').classList.toggle('hidden', state.dateFilter !== 'custom');
         render();
       });
+    });
 
-      // Date pills
-      const datePills = document.querySelectorAll('.date-pill');
-      datePills.forEach((btn) => {
-        btn.addEventListener('click', () => {
-          state.dateFilter = btn.dataset.date;
-          state.page = 1;
-          datePills.forEach((b) => b.classList.toggle('active', b === btn));
-          $('customRange').classList.toggle('hidden', state.dateFilter !== 'custom');
-          render();
-        });
+    const fmt = (d) => d.toISOString().slice(0, 10);
+    const today = new Date();
+    const weekAgo = new Date(today); weekAgo.setDate(weekAgo.getDate()-7);
+    document.getElementById('dateFrom').value = fmt(weekAgo);
+    document.getElementById('dateTo').value   = fmt(today);
+    state.customFrom = fmt(weekAgo);
+    state.customTo   = fmt(today);
+
+    document.getElementById('dateFrom').addEventListener('change', (ev) => { state.customFrom = ev.target.value; if (state.dateFilter === 'custom') render(); });
+    document.getElementById('dateTo').addEventListener('change',   (ev) => { state.customTo   = ev.target.value; if (state.dateFilter === 'custom') render(); });
+  }
+
+  // ── Tab wiring ─────────────────────────────────────────────────────────────
+  function initTabs() {
+    document.getElementById('tabBar').querySelectorAll('.tab').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        state.activeTab = btn.dataset.tab;
+        document.querySelectorAll('#tabBar .tab').forEach((t) => t.classList.toggle('active', t === btn));
+        render();
       });
+    });
+  }
 
-      // Custom date range — default to last 7 days
-      const fmt = (d) => d.toISOString().slice(0, 10);
-      const today = new Date();
-      const weekAgo = new Date(today); weekAgo.setDate(weekAgo.getDate() - 7);
-      $('dateFrom').value = fmt(weekAgo);
-      $('dateTo').value   = fmt(today);
-      state.customFrom    = fmt(weekAgo);
-      state.customTo      = fmt(today);
-
-      $('dateFrom').addEventListener('change', (ev) => {
-        state.customFrom = ev.target.value;
-        state.page = 1;
-        if (state.dateFilter === 'custom') render();
-      });
-      $('dateTo').addEventListener('change', (ev) => {
-        state.customTo = ev.target.value;
-        state.page = 1;
-        if (state.dateFilter === 'custom') render();
-      });
-    }
-
+  // ── Init ───────────────────────────────────────────────────────────────────
+  function init() {
     initFilterBar();
+    initTabs();
+    initSigModal();
+    document.getElementById('refreshBtn').addEventListener('click', loadEmails);
     loadEmails();
-  </script>
+  }
+
+  init();
+</script>
 </body>
 </html>
