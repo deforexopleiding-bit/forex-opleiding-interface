@@ -8,7 +8,9 @@
     "node": ">=20"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.32.0",
     "imapflow": "^1.0.171",
-    "mailparser": "^3.6.5"
+    "mailparser": "^3.6.5",
+    "pdf-parse": "^1.1.1"
   }
 }

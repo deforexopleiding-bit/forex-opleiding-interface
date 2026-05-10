@@ -22,8 +22,10 @@
       --accent-cyan: #22d3ee;
       --accent-violet: #a855f7;
       --accent-grad: linear-gradient(135deg, #22d3ee 0%, #a855f7 100%);
+      --green: #22c55e;
+      --amber: #f59e0b;
+      --red: #ef4444;
     }
-
     html, body { height: 100%; }
     body {
       font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
@@ -37,16 +39,14 @@
       -moz-osx-font-smoothing: grayscale;
     }
     body::before {
-      content: '';
-      position: fixed; inset: 0;
+      content: ''; position: fixed; inset: 0;
       background-image:
         radial-gradient(circle at 15% 10%, rgba(34, 211, 238, 0.10), transparent 45%),
         radial-gradient(circle at 85% 90%, rgba(168, 85, 247, 0.10), transparent 50%);
       pointer-events: none; z-index: 0;
     }
     body::after {
-      content: '';
-      position: fixed; inset: 0;
+      content: ''; position: fixed; inset: 0;
       background-image:
         linear-gradient(rgba(255, 255, 255, 0.025) 1px, transparent 1px),
         linear-gradient(90deg, rgba(255, 255, 255, 0.025) 1px, transparent 1px);
@@ -58,7 +58,7 @@
 
     .app {
       position: relative; z-index: 1;
-      max-width: 1100px;
+      max-width: 1200px;
       margin: 0 auto;
       padding: 32px 28px 64px;
     }
@@ -68,7 +68,7 @@
       gap: 24px; flex-wrap: wrap;
       padding-bottom: 24px;
       border-bottom: 1px solid var(--border);
-      margin-bottom: 32px;
+      margin-bottom: 28px;
     }
     .brand { display: flex; align-items: center; gap: 14px; }
     .logo-mark {
@@ -86,6 +86,8 @@
     .brand .crumb a:hover { color: var(--accent-cyan); }
     .brand .crumb .sep { margin: 0 6px; color: var(--text-faint); }
 
+    .header-actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+
     .btn {
       font-family: inherit;
       font-size: 13px; font-weight: 500;
@@ -99,83 +101,467 @@
       text-decoration: none;
       transition: all 0.18s ease;
     }
-    .btn:hover { background: rgba(255,255,255,0.04); border-color: rgba(255,255,255,0.2); }
+    .btn:hover:not(:disabled) { background: rgba(255,255,255,0.04); border-color: rgba(255,255,255,0.2); }
+    .btn:disabled { opacity: 0.5; cursor: not-allowed; }
     .btn svg { width: 14px; height: 14px; }
-
-    .page-head h2 {
-      font-size: 28px; font-weight: 700; letter-spacing: -0.5px;
-      margin-bottom: 6px;
+    .btn-primary {
+      background: var(--accent-grad);
+      border-color: transparent;
+      color: #0a0b10;
+      font-weight: 600;
     }
+    .btn-primary:hover:not(:disabled) { filter: brightness(1.1); background: var(--accent-grad); }
+    .btn-danger {
+      background: rgba(239, 68, 68, 0.08);
+      border-color: rgba(239, 68, 68, 0.25);
+      color: var(--red);
+    }
+    .btn-danger:hover { background: rgba(239, 68, 68, 0.16); }
+    .btn-ghost { border-color: transparent; }
+
+    /* Page-head */
+    .page-head { margin-bottom: 24px; }
+    .page-head h2 { font-size: 28px; font-weight: 700; letter-spacing: -0.5px; margin-bottom: 6px; }
     .page-head .desc { font-size: 14px; color: var(--text-dim); }
-
-    .empty-state {
-      margin-top: 48px;
-      background: var(--bg-elev);
-      border: 1px solid var(--border);
-      border-radius: 16px;
-      padding: 56px 32px;
-      text-align: center;
+    .dirty-indicator {
+      display: inline-flex; align-items: center; gap: 6px;
+      font-size: 11.5px;
+      color: var(--amber);
+      margin-left: 10px;
     }
-    .empty-state .icon {
-      width: 56px; height: 56px;
-      border-radius: 14px;
-      background: linear-gradient(135deg, rgba(34, 211, 238, 0.15), rgba(168, 85, 247, 0.15));
-      border: 1px solid var(--border);
-      display: grid; place-items: center;
-      margin: 0 auto 18px;
-      color: var(--accent-cyan);
-    }
-    .empty-state .icon svg { width: 26px; height: 26px; }
-    .empty-state h3 {
-      font-size: 18px; font-weight: 600;
-      letter-spacing: -0.2px;
-      margin-bottom: 8px;
-    }
-    .empty-state p {
-      font-size: 14px; color: var(--text-dim);
-      max-width: 540px; margin: 0 auto 22px;
-      line-height: 1.55;
+    .dirty-indicator::before {
+      content: ''; width: 6px; height: 6px;
+      background: var(--amber); border-radius: 50%;
     }
 
-    .roadmap {
+    /* Stats */
+    .stats {
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
       gap: 14px;
-      margin-top: 36px;
+      margin-bottom: 28px;
     }
-    .roadmap-item {
+    .stat {
       background: var(--bg-elev);
       border: 1px solid var(--border);
       border-radius: 12px;
-      padding: 18px;
-      opacity: 0.7;
+      padding: 18px 20px;
     }
-    .roadmap-item .pill {
-      display: inline-block;
-      font-size: 10.5px;
-      font-weight: 600;
+    .stat-label {
+      font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em;
+      color: var(--text-faint); font-weight: 600;
+    }
+    .stat-value {
+      font-size: 28px; font-weight: 700; letter-spacing: -1px;
+      margin: 8px 0 4px;
+      font-variant-numeric: tabular-nums;
+    }
+    .stat-sub { font-size: 12px; color: var(--text-dim); }
+    .stat-breakdown {
+      display: flex; gap: 4px; flex-wrap: wrap;
+      margin-top: 10px;
+    }
+    .stat-breakdown .bd-item {
+      font-size: 11px; color: var(--text-dim);
+      padding: 2px 8px;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 999px;
+    }
+
+    /* Section card */
+    .section {
+      background: var(--bg-elev);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 26px 28px;
+      margin-bottom: 22px;
+    }
+    .section-head {
+      display: flex; align-items: center; gap: 12px;
+      margin-bottom: 18px;
+      flex-wrap: wrap;
+    }
+    .section-icon {
+      width: 36px; height: 36px;
+      border-radius: 10px;
+      background: linear-gradient(135deg, rgba(34, 211, 238, 0.10), rgba(168, 85, 247, 0.10));
+      border: 1px solid var(--border);
+      display: grid; place-items: center;
+      color: var(--accent-cyan);
+      flex-shrink: 0;
+    }
+    .section-icon svg { width: 18px; height: 18px; }
+    .section-title h3 { font-size: 16px; font-weight: 600; }
+    .section-title .sub { font-size: 12px; color: var(--text-faint); margin-top: 2px; }
+    .section-actions { margin-left: auto; display: flex; gap: 8px; }
+
+    /* Form fields */
+    .field { margin-bottom: 14px; }
+    .field-label {
+      display: block;
+      font-size: 11px;
       text-transform: uppercase;
       letter-spacing: 0.06em;
-      padding: 3px 9px;
-      border-radius: 999px;
-      background: rgba(148, 163, 184, 0.10);
+      font-weight: 600;
       color: var(--text-faint);
-      border: 1px solid rgba(148, 163, 184, 0.20);
-      margin-bottom: 10px;
-    }
-    .roadmap-item h4 {
-      font-size: 15px; font-weight: 600;
-      letter-spacing: -0.2px;
       margin-bottom: 6px;
     }
-    .roadmap-item p {
-      font-size: 13px; color: var(--text-dim);
-      line-height: 1.5;
+    .field-input,
+    .field-textarea,
+    .field-select {
+      width: 100%;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 10px 12px;
+      border-radius: 8px;
+      font-family: inherit;
+      font-size: 13.5px;
+      outline: none;
+      transition: border-color 0.18s ease;
+      color-scheme: dark;
     }
+    .field-input:focus, .field-textarea:focus, .field-select:focus {
+      border-color: var(--accent-cyan);
+    }
+    .field-textarea { resize: vertical; min-height: 84px; line-height: 1.55; }
+    .field-readonly {
+      background: var(--bg-elev-2);
+      color: var(--text-dim);
+    }
+    .field-grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    @media (max-width: 600px) { .field-grid-2 { grid-template-columns: 1fr; } }
+
+    /* FAQ list */
+    .faq-list { display: flex; flex-direction: column; gap: 10px; }
+    .faq-item {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 12px 14px;
+      display: flex; flex-direction: column; gap: 8px;
+    }
+    .faq-item .faq-row {
+      display: flex; gap: 8px; align-items: flex-start;
+    }
+    .faq-item input,
+    .faq-item textarea {
+      flex: 1;
+      background: var(--bg-elev-2);
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 8px 10px;
+      border-radius: 6px;
+      font-family: inherit;
+      font-size: 13px;
+      outline: none;
+    }
+    .faq-item input:focus, .faq-item textarea:focus { border-color: var(--accent-cyan); }
+    .faq-item textarea { resize: vertical; min-height: 56px; }
+    .faq-empty {
+      font-size: 12.5px; color: var(--text-faint);
+      text-align: center;
+      padding: 18px 0;
+    }
+
+    /* Drag & drop */
+    .uploader {
+      display: grid;
+      grid-template-columns: 1.4fr 1fr;
+      gap: 16px;
+    }
+    @media (max-width: 800px) { .uploader { grid-template-columns: 1fr; } }
+    .dropzone {
+      border: 2px dashed var(--border-strong);
+      border-radius: 12px;
+      padding: 28px 20px;
+      text-align: center;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      background: rgba(255, 255, 255, 0.01);
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      gap: 10px;
+      min-height: 200px;
+    }
+    .dropzone:hover { border-color: var(--accent-cyan); background: rgba(34, 211, 238, 0.04); }
+    .dropzone.dragover { border-color: var(--accent-cyan); background: rgba(34, 211, 238, 0.08); }
+    .dropzone svg { width: 36px; height: 36px; color: var(--text-faint); }
+    .dropzone strong { font-size: 14px; color: var(--text); }
+    .dropzone span { font-size: 12px; color: var(--text-dim); }
+    .dropzone input[type="file"] { display: none; }
+    .dropzone .or {
+      margin-top: 12px;
+      font-size: 11px;
+      color: var(--text-faint);
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+
+    .text-paste textarea {
+      min-height: 200px;
+      width: 100%;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 12px;
+      border-radius: 12px;
+      font-family: inherit;
+      font-size: 13.5px;
+      line-height: 1.55;
+      resize: vertical;
+      outline: none;
+    }
+    .text-paste textarea:focus { border-color: var(--accent-cyan); }
+
+    .staging {
+      margin-top: 20px;
+      padding: 18px;
+      background: var(--bg);
+      border: 1px solid var(--accent-cyan);
+      border-radius: 12px;
+    }
+    .staging-head {
+      display: flex; justify-content: space-between; align-items: center;
+      margin-bottom: 12px;
+    }
+    .staging-head .title {
+      font-size: 13px; font-weight: 600;
+      display: flex; align-items: center; gap: 8px;
+    }
+    .staging-source {
+      font-size: 11px; color: var(--text-faint);
+      padding: 3px 9px;
+      background: var(--bg-elev-2);
+      border: 1px solid var(--border);
+      border-radius: 999px;
+    }
+    .staging-status {
+      font-size: 12px; color: var(--text-dim);
+    }
+    .staging-loading {
+      display: inline-flex; align-items: center; gap: 8px;
+      color: var(--accent-cyan);
+      font-size: 12px;
+    }
+    .staging-loading::before {
+      content: '';
+      width: 14px; height: 14px;
+      border: 2px solid var(--border);
+      border-top-color: var(--accent-cyan);
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .staging-actions {
+      display: flex; gap: 8px;
+      margin-top: 12px;
+      flex-wrap: wrap;
+    }
+
+    /* Items list */
+    .filter-row {
+      display: flex; gap: 12px; align-items: center;
+      flex-wrap: wrap;
+      margin-bottom: 16px;
+    }
+    .search-input {
+      flex: 1;
+      min-width: 220px;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 9px 12px;
+      border-radius: 8px;
+      font-family: inherit;
+      font-size: 13px;
+      outline: none;
+    }
+    .search-input:focus { border-color: var(--accent-cyan); }
+    .type-pills { display: flex; gap: 6px; flex-wrap: wrap; }
+    .pill {
+      font-family: inherit;
+      font-size: 12.5px; font-weight: 500;
+      padding: 7px 12px;
+      border-radius: 999px;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      color: var(--text-dim);
+      cursor: pointer;
+      transition: all 0.18s ease;
+      display: inline-flex; align-items: center; gap: 6px;
+    }
+    .pill:hover { border-color: var(--border-strong); color: var(--text); }
+    .pill.active { background: var(--text); color: var(--bg); border-color: var(--text); }
+    .pill .pill-count {
+      font-size: 11px;
+      padding: 1px 6px;
+      border-radius: 999px;
+      background: rgba(255,255,255,0.08);
+      font-weight: 600;
+      font-variant-numeric: tabular-nums;
+    }
+    .pill.active .pill-count { background: rgba(0,0,0,0.15); }
+
+    .item-list { display: flex; flex-direction: column; gap: 10px; }
+    .item-empty {
+      padding: 32px 16px;
+      text-align: center;
+      font-size: 13px;
+      color: var(--text-faint);
+      background: var(--bg);
+      border: 1px dashed var(--border);
+      border-radius: 10px;
+    }
+    .item-card {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 14px 16px;
+    }
+    .item-meta {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      margin-bottom: 8px;
+      flex-wrap: wrap;
+      font-size: 11px;
+    }
+    .item-meta .badge {
+      font-weight: 600;
+      padding: 3px 9px;
+      border-radius: 6px;
+      letter-spacing: 0.02em;
+      border: 1px solid;
+    }
+    .badge-Klantvraag   { color: var(--amber);         background: rgba(245, 158, 11, 0.10); border-color: rgba(245, 158, 11, 0.25); }
+    .badge-Factuurvraag { color: var(--red);           background: rgba(239, 68, 68, 0.10);  border-color: rgba(239, 68, 68, 0.25); }
+    .badge-Klacht       { color: #f97316;              background: rgba(249, 115, 22, 0.10); border-color: rgba(249, 115, 22, 0.25); }
+    .badge-Algemeen     { color: var(--accent-cyan);   background: rgba(34, 211, 238, 0.10); border-color: rgba(34, 211, 238, 0.25); }
+    .badge-Overige      { color: var(--text-dim);      background: rgba(148, 163, 184, 0.08); border-color: rgba(148, 163, 184, 0.20); }
+    .item-meta .arrow {
+      font-weight: 600;
+      color: var(--text-faint);
+      padding: 3px 8px;
+      background: var(--bg-elev-2);
+      border-radius: 6px;
+    }
+    .item-meta .date { color: var(--text-faint); margin-left: auto; }
+    .item-content {
+      font-size: 13px;
+      color: var(--text-dim);
+      line-height: 1.55;
+      white-space: pre-wrap;
+      word-break: break-word;
+      max-height: 90px;
+      overflow: hidden;
+      position: relative;
+    }
+    .item-content.expanded { max-height: none; }
+    .item-content::after {
+      content: '';
+      position: absolute;
+      bottom: 0; left: 0; right: 0;
+      height: 28px;
+      background: linear-gradient(to bottom, transparent, var(--bg));
+      pointer-events: none;
+    }
+    .item-content.expanded::after { display: none; }
+    .item-note {
+      font-size: 12px;
+      color: var(--text-faint);
+      font-style: italic;
+      margin-top: 8px;
+      padding-top: 8px;
+      border-top: 1px dashed var(--border);
+    }
+    .item-actions {
+      display: flex; gap: 6px;
+      margin-top: 12px;
+      flex-wrap: wrap;
+    }
+    .item-actions .btn { padding: 5px 10px; font-size: 12px; }
+
+    /* Activate toggle */
+    .toggle-row {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      padding: 16px 18px;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+    }
+    .toggle-info { flex: 1; }
+    .toggle-info h4 { font-size: 14px; font-weight: 600; margin-bottom: 4px; }
+    .toggle-info p { font-size: 12.5px; color: var(--text-dim); line-height: 1.45; }
+    .toggle-switch {
+      position: relative;
+      width: 46px;
+      height: 26px;
+      flex-shrink: 0;
+    }
+    .toggle-switch input {
+      opacity: 0;
+      position: absolute;
+      width: 100%; height: 100%;
+      cursor: pointer;
+      z-index: 1;
+    }
+    .toggle-track {
+      position: absolute;
+      inset: 0;
+      background: var(--bg-elev-2);
+      border: 1px solid var(--border-strong);
+      border-radius: 999px;
+      transition: all 0.2s;
+    }
+    .toggle-knob {
+      position: absolute;
+      top: 2px;
+      left: 2px;
+      width: 20px;
+      height: 20px;
+      background: var(--text-dim);
+      border-radius: 50%;
+      transition: all 0.2s;
+    }
+    .toggle-switch input:checked ~ .toggle-track {
+      background: var(--accent-grad);
+      border-color: transparent;
+    }
+    .toggle-switch input:checked ~ .toggle-track .toggle-knob {
+      left: 22px;
+      background: white;
+    }
+
+    /* Toast */
+    .toast {
+      position: fixed;
+      bottom: 28px;
+      left: 50%;
+      transform: translate(-50%, 20px);
+      background: var(--bg-elev-2);
+      border: 1px solid var(--border-strong);
+      color: var(--text);
+      padding: 11px 20px;
+      border-radius: 999px;
+      font-size: 13px;
+      font-weight: 500;
+      opacity: 0;
+      transition: opacity 0.25s ease, transform 0.25s ease;
+      z-index: 1000;
+      box-shadow: 0 14px 50px rgba(0, 0, 0, 0.5);
+      pointer-events: none;
+      max-width: calc(100vw - 40px);
+      text-align: center;
+    }
+    .toast.show { opacity: 1; transform: translate(-50%, 0); }
 
     @media (max-width: 600px) {
       .app { padding: 20px 16px 48px; }
-      .empty-state { padding: 36px 22px; }
+      .section { padding: 20px; }
     }
   </style>
 </head>
@@ -195,52 +581,779 @@
           </div>
         </div>
       </div>
-      <a href="../index.html" class="btn">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <line x1="19" y1="12" x2="5" y2="12"></line>
-          <polyline points="12 19 5 12 12 5"></polyline>
-        </svg>
-        Terug
-      </a>
+      <div class="header-actions">
+        <a href="email.html" class="btn">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="3" y="5" width="18" height="14" rx="2"></rect>
+            <path d="m3 7 9 6 9-6"></path>
+          </svg>
+          E-mail module
+        </a>
+        <a href="../index.html" class="btn">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="19" y1="12" x2="5" y2="12"></line>
+            <polyline points="12 19 5 12 12 5"></polyline>
+          </svg>
+          Terug
+        </a>
+      </div>
     </header>
 
     <div class="page-head">
       <h2>Kennisbank</h2>
-      <div class="desc">Centrale plek voor procedures, FAQ's en interne kennis</div>
+      <div class="desc">Centrale leermodule — alle AI-bots gebruiken dit profiel + leermateriaal als context bij het opstellen van antwoorden.</div>
     </div>
 
-    <div class="empty-state">
-      <div class="icon">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path>
-          <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path>
-        </svg>
+    <!-- Stats -->
+    <section class="stats" id="stats"></section>
+
+    <!-- Bedrijfsprofiel -->
+    <section class="section">
+      <div class="section-head">
+        <div class="section-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M3 9.5L12 3l9 6.5V21H3V9.5z"></path>
+            <path d="M9 21V12h6v9"></path>
+          </svg>
+        </div>
+        <div class="section-title">
+          <h3>Bedrijfsprofiel <span id="profileDirty" class="dirty-indicator" style="display:none;">niet opgeslagen</span></h3>
+          <div class="sub">Vaste informatie die alle AI-bots altijd meekrijgen als context</div>
+        </div>
+        <div class="section-actions">
+          <button class="btn btn-primary" id="saveProfileBtn">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
+            Profiel opslaan
+          </button>
+        </div>
       </div>
-      <h3>Nog niet ingericht</h3>
-      <p>
-        Hier komen procedures, FAQ's en interne documentatie. Zodra de eerste set
-        artikelen klaar is, verschijnen ze hier doorzoekbaar en gegroepeerd per onderwerp.
-      </p>
-      <a href="../index.html" class="btn">Terug naar dashboard</a>
-    </div>
 
-    <section class="roadmap" aria-label="Geplande secties">
-      <article class="roadmap-item">
-        <span class="pill">Binnenkort</span>
-        <h4>Procedures</h4>
-        <p>Stappenplannen voor terugkerende werkzaamheden — onboarding, intake, facturatie.</p>
-      </article>
-      <article class="roadmap-item">
-        <span class="pill">Binnenkort</span>
-        <h4>FAQ's</h4>
-        <p>Veelgestelde klantvragen met canonieke antwoorden, gekoppeld aan de e-mail-AI.</p>
-      </article>
-      <article class="roadmap-item">
-        <span class="pill">Binnenkort</span>
-        <h4>Interne kennis</h4>
-        <p>Tooling-tutorials, integraties en verantwoordelijkheden per teamlid.</p>
-      </article>
+      <div class="field-grid-2">
+        <div class="field">
+          <label class="field-label">Bedrijfsnaam</label>
+          <input class="field-input field-readonly" id="bedrijfsnaam" readonly />
+        </div>
+        <div class="field">
+          <label class="field-label">Tone of voice</label>
+          <input class="field-input field-readonly" id="toneOfVoice" readonly />
+        </div>
+      </div>
+
+      <div class="field">
+        <label class="field-label" for="overOns">Over ons</label>
+        <textarea class="field-textarea" id="overOns" placeholder="Korte beschrijving van het bedrijf — wie zijn jullie, wat doen jullie, voor wie?"></textarea>
+      </div>
+
+      <div class="field">
+        <label class="field-label" for="nooitZeggen">Wat we NOOIT zeggen in communicatie</label>
+        <textarea class="field-textarea" id="nooitZeggen" placeholder="Verboden formuleringen, claims of toon. Bijv: 'gegarandeerde winst', 'risico-vrij', overdreven verkooppraat..."></textarea>
+      </div>
+
+      <div class="field">
+        <label class="field-label">Veelgestelde vragen + standaardantwoorden</label>
+        <div class="faq-list" id="faqList"></div>
+        <button class="btn" id="addFaqBtn" style="margin-top: 10px;">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+          Vraag toevoegen
+        </button>
+      </div>
+
+      <div class="field">
+        <label class="field-label" for="contactgegevens">Contactgegevens (mogen in antwoorden gebruikt worden)</label>
+        <textarea class="field-textarea" id="contactgegevens" placeholder="E-mail, telefoonnummer, openingstijden, adres — wat de bot mag delen in antwoorden."></textarea>
+      </div>
+    </section>
+
+    <!-- Upload -->
+    <section class="section">
+      <div class="section-head">
+        <div class="section-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+            <polyline points="17 8 12 3 7 8"></polyline>
+            <line x1="12" y1="3" x2="12" y2="15"></line>
+          </svg>
+        </div>
+        <div class="section-title">
+          <h3>Leermateriaal toevoegen</h3>
+          <div class="sub">Sleep een bestand of plak tekst — screenshots worden automatisch via Vision API uitgelezen</div>
+        </div>
+      </div>
+
+      <div class="uploader">
+        <div class="dropzone" id="dropzone" tabindex="0" role="button" aria-label="Bestand kiezen of slepen">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+            <polyline points="17 8 12 3 7 8"></polyline>
+            <line x1="12" y1="3" x2="12" y2="15"></line>
+          </svg>
+          <strong>Sleep een bestand hierheen</strong>
+          <span>.txt, .pdf, .png, .jpg — of klik om te kiezen</span>
+          <input type="file" id="fileInput" accept=".txt,.pdf,.png,.jpg,.jpeg,image/png,image/jpeg,application/pdf,text/plain" />
+          <span class="or">of plak tekst rechts ↗</span>
+        </div>
+
+        <div class="text-paste">
+          <textarea id="textPaste" placeholder="Plak hier directe tekst in (bijv. een mailantwoord, een procedure, een kennisartikel)…"></textarea>
+          <button class="btn" id="useTextBtn" style="margin-top: 10px;">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 11 12 14 22 4"></polyline><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path></svg>
+            Tekst gebruiken
+          </button>
+        </div>
+      </div>
+
+      <div id="staging"></div>
+    </section>
+
+    <!-- Overzicht -->
+    <section class="section">
+      <div class="section-head">
+        <div class="section-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="8" y1="6" x2="21" y2="6"></line><line x1="8" y1="12" x2="21" y2="12"></line><line x1="8" y1="18" x2="21" y2="18"></line>
+            <line x1="3" y1="6" x2="3.01" y2="6"></line><line x1="3" y1="12" x2="3.01" y2="12"></line><line x1="3" y1="18" x2="3.01" y2="18"></line>
+          </svg>
+        </div>
+        <div class="section-title">
+          <h3>Overzicht <span id="overviewCount" style="color:var(--text-faint); font-weight:500;"></span></h3>
+          <div class="sub">Alle opgeslagen leermateriaal — zoek, filter en beheer</div>
+        </div>
+      </div>
+
+      <div class="filter-row">
+        <input type="search" id="searchInput" class="search-input" placeholder="Zoek in inhoud of notities…" />
+        <div class="type-pills" id="typePills"></div>
+      </div>
+
+      <div class="item-list" id="itemList"></div>
+    </section>
+
+    <!-- Activeer toggle -->
+    <section class="section">
+      <div class="section-head">
+        <div class="section-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polyline>
+          </svg>
+        </div>
+        <div class="section-title">
+          <h3>Activeren voor AI-bots</h3>
+          <div class="sub">Wanneer aan: e-mail bot gebruikt automatisch profiel + alle leermateriaal als context</div>
+        </div>
+      </div>
+
+      <div class="toggle-row">
+        <div class="toggle-info">
+          <h4>Kennisbank activeren voor e-mail bot</h4>
+          <p>Bij elke "Genereer antwoord" actie in de e-mail module wordt het volledige bedrijfsprofiel + alle relevante kennisbank-items meegestuurd als context naar het AI-model.</p>
+        </div>
+        <label class="toggle-switch">
+          <input type="checkbox" id="activeToggle" />
+          <div class="toggle-track">
+            <div class="toggle-knob"></div>
+          </div>
+        </label>
+      </div>
     </section>
   </div>
+
+  <script>
+    /* ─────────────────────────────────────────────────────────────
+       Constants & state
+       ───────────────────────────────────────────────────────────── */
+    const PROFILE_KEY    = 'kennisbank_profile';
+    const ITEMS_KEY      = 'kennisbank_items';
+    const ACTIVE_KEY     = 'kennisbank_active';
+    const REPLY_STATS_KEY    = 'email_reply_stats';
+    const LEARNING_KEY       = 'email_learning_examples';
+
+    const TYPES = ['Klantvraag', 'Factuurvraag', 'Klacht', 'Algemeen', 'Overige'];
+
+    function loadJson(key, fallback) {
+      try {
+        const raw = localStorage.getItem(key);
+        if (!raw) return fallback;
+        const parsed = JSON.parse(raw);
+        return parsed ?? fallback;
+      } catch { return fallback; }
+    }
+    function saveJson(key, value) {
+      try { localStorage.setItem(key, JSON.stringify(value)); return true; } catch { return false; }
+    }
+
+    function defaultProfile() {
+      return {
+        bedrijfsnaam: 'De Forex Opleiding',
+        toneOfVoice: 'Vriendelijk & persoonlijk, altijd in het Nederlands',
+        overOns: '',
+        nooitZeggen: '',
+        faqs: [],
+        contactgegevens: '',
+        updatedAt: null
+      };
+    }
+
+    const state = {
+      profile: { ...defaultProfile(), ...loadJson(PROFILE_KEY, {}) },
+      items:   loadJson(ITEMS_KEY, []),
+      active:  loadJson(ACTIVE_KEY, false),
+      filter:  'Alle',
+      search:  '',
+      staging: null,        // { content, source, fileName, type, richting, note, status }
+      profileDirty: false
+    };
+
+    const $ = (id) => document.getElementById(id);
+
+    /* ─────────────────────────────────────────────────────────────
+       Toast
+       ───────────────────────────────────────────────────────────── */
+    let toastTimer;
+    function showToast(message) {
+      let toast = document.getElementById('toast');
+      if (!toast) {
+        toast = document.createElement('div');
+        toast.id = 'toast';
+        toast.className = 'toast';
+        document.body.appendChild(toast);
+      }
+      toast.textContent = message;
+      void toast.offsetWidth;
+      toast.classList.add('show');
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => toast.classList.remove('show'), 2400);
+    }
+
+    function escapeHtml(s) {
+      return String(s ?? '').replace(/[&<>"']/g, (c) =>
+        ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c])
+      );
+    }
+
+    function formatDateTime(iso) {
+      if (!iso) return '—';
+      const d = new Date(iso);
+      if (isNaN(d.getTime())) return '—';
+      return d.toLocaleString('nl-NL', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+    }
+
+    function uniqueId(prefix = 'k') {
+      return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`;
+    }
+
+    /* ─────────────────────────────────────────────────────────────
+       Stats
+       ───────────────────────────────────────────────────────────── */
+    function renderStats() {
+      const total = state.items.length;
+      const byType = TYPES.reduce((acc, t) => {
+        acc[t] = state.items.filter((i) => i.type === t).length;
+        return acc;
+      }, {});
+      const lastUpdate = state.items.length
+        ? state.items.map((i) => new Date(i.createdAt)).sort((a, b) => b - a)[0].toISOString()
+        : (state.profile.updatedAt || null);
+
+      // AI quality (uit email_reply_stats — incrementeel bijgehouden door email.html)
+      const replyStats = loadJson(REPLY_STATS_KEY, { approved: 0, edited: 0, rejected: 0 });
+      const totalReplies = (replyStats.approved || 0) + (replyStats.edited || 0) + (replyStats.rejected || 0);
+      const approvedPct = totalReplies > 0
+        ? Math.round(((replyStats.approved || 0) / totalReplies) * 100)
+        : null;
+
+      $('stats').innerHTML = `
+        <div class="stat">
+          <div class="stat-label">Totaal items</div>
+          <div class="stat-value">${total}</div>
+          <div class="stat-sub">In de kennisbank opgeslagen</div>
+        </div>
+        <div class="stat">
+          <div class="stat-label">Per categorie</div>
+          <div class="stat-value">${TYPES.length}</div>
+          <div class="stat-breakdown">
+            ${TYPES.map((t) => `<span class="bd-item">${escapeHtml(t)} · ${byType[t] || 0}</span>`).join('')}
+          </div>
+        </div>
+        <div class="stat">
+          <div class="stat-label">Laatste update</div>
+          <div class="stat-value" style="font-size: 18px;">${escapeHtml(formatDateTime(lastUpdate))}</div>
+          <div class="stat-sub">Profiel of leermateriaal</div>
+        </div>
+        <div class="stat">
+          <div class="stat-label">AI kwaliteitsscore</div>
+          <div class="stat-value">${approvedPct !== null ? approvedPct + '%' : '—'}</div>
+          <div class="stat-breakdown">
+            <span class="bd-item" style="color: var(--green);">✓ ${replyStats.approved || 0} goedgekeurd</span>
+            <span class="bd-item" style="color: var(--amber);">✎ ${replyStats.edited || 0} aangepast</span>
+            <span class="bd-item" style="color: var(--red);">✕ ${replyStats.rejected || 0} afgewezen</span>
+          </div>
+        </div>`;
+    }
+
+    /* ─────────────────────────────────────────────────────────────
+       Profiel
+       ───────────────────────────────────────────────────────────── */
+    function renderProfile() {
+      $('bedrijfsnaam').value = state.profile.bedrijfsnaam || 'De Forex Opleiding';
+      $('toneOfVoice').value  = state.profile.toneOfVoice  || 'Vriendelijk & persoonlijk, altijd in het Nederlands';
+      $('overOns').value       = state.profile.overOns       || '';
+      $('nooitZeggen').value   = state.profile.nooitZeggen   || '';
+      $('contactgegevens').value = state.profile.contactgegevens || '';
+      renderFaqs();
+      $('profileDirty').style.display = state.profileDirty ? 'inline-flex' : 'none';
+    }
+
+    function renderFaqs() {
+      const list = $('faqList');
+      const faqs = state.profile.faqs || [];
+      if (faqs.length === 0) {
+        list.innerHTML = `<div class="faq-empty">Nog geen veelgestelde vragen toegevoegd.</div>`;
+        return;
+      }
+      list.innerHTML = faqs.map((faq) => `
+        <div class="faq-item" data-faq-id="${escapeHtml(faq.id)}">
+          <div class="faq-row">
+            <input type="text" placeholder="Vraag…" value="${escapeHtml(faq.question || '')}" data-faq-field="question" />
+            <button class="btn btn-danger" data-faq-action="delete" title="Vraag verwijderen">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+            </button>
+          </div>
+          <textarea placeholder="Standaardantwoord…" data-faq-field="answer">${escapeHtml(faq.answer || '')}</textarea>
+        </div>`).join('');
+
+      list.querySelectorAll('[data-faq-id]').forEach((el) => {
+        const id = el.dataset.faqId;
+        el.querySelectorAll('[data-faq-field]').forEach((field) => {
+          field.addEventListener('input', () => {
+            const faq = state.profile.faqs.find((f) => f.id === id);
+            if (faq) {
+              faq[field.dataset.faqField] = field.value;
+              markProfileDirty();
+            }
+          });
+        });
+        el.querySelector('[data-faq-action="delete"]').addEventListener('click', () => {
+          state.profile.faqs = state.profile.faqs.filter((f) => f.id !== id);
+          markProfileDirty();
+          renderFaqs();
+        });
+      });
+    }
+
+    function markProfileDirty() {
+      state.profileDirty = true;
+      $('profileDirty').style.display = 'inline-flex';
+    }
+
+    function saveProfile() {
+      state.profile.overOns = $('overOns').value;
+      state.profile.nooitZeggen = $('nooitZeggen').value;
+      state.profile.contactgegevens = $('contactgegevens').value;
+      state.profile.updatedAt = new Date().toISOString();
+      saveJson(PROFILE_KEY, state.profile);
+      state.profileDirty = false;
+      $('profileDirty').style.display = 'none';
+      renderStats();
+      showToast('Profiel opgeslagen');
+    }
+
+    /* ─────────────────────────────────────────────────────────────
+       Upload — file processing → staging
+       ───────────────────────────────────────────────────────────── */
+    function readFileAsText(file) {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = () => reject(reader.error);
+        reader.readAsText(file);
+      });
+    }
+    function readFileAsBase64(file) {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => {
+          const result = reader.result || '';
+          const idx = result.indexOf(',');
+          resolve(idx >= 0 ? result.slice(idx + 1) : result);
+        };
+        reader.onerror = () => reject(reader.error);
+        reader.readAsDataURL(file);
+      });
+    }
+
+    async function processFile(file) {
+      const ext = (file.name.split('.').pop() || '').toLowerCase();
+      const mime = file.type || '';
+
+      // Init staging immediately so user gets feedback
+      state.staging = {
+        content: '',
+        source: ext === 'pdf' ? 'pdf'
+              : ext === 'txt' ? 'txt'
+              : (mime.startsWith('image/') || ext === 'png' || ext === 'jpg' || ext === 'jpeg') ? 'image'
+              : 'text',
+        fileName: file.name,
+        type: 'Algemeen',
+        richting: 'Inkomend',
+        note: '',
+        status: 'loading'
+      };
+      renderStaging();
+
+      try {
+        if (ext === 'txt' || mime === 'text/plain') {
+          state.staging.source = 'txt';
+          state.staging.content = await readFileAsText(file);
+        } else if (ext === 'pdf' || mime === 'application/pdf') {
+          state.staging.source = 'pdf';
+          const base64 = await readFileAsBase64(file);
+          const res = await fetch('/api/pdf-extract', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ data: base64 })
+          });
+          const data = await res.json();
+          if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+          state.staging.content = data.text || '';
+        } else if (mime.startsWith('image/') || ['png','jpg','jpeg'].includes(ext)) {
+          state.staging.source = 'image';
+          const base64 = await readFileAsBase64(file);
+          const res = await fetch('/api/vision-extract', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ image: base64, mimeType: mime || `image/${ext === 'jpg' ? 'jpeg' : ext}` })
+          });
+          const data = await res.json();
+          if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+          state.staging.content = data.text || '';
+        } else {
+          throw new Error(`Bestandstype "${ext}" niet ondersteund. Gebruik .txt, .pdf, .png of .jpg.`);
+        }
+        state.staging.status = 'ready';
+      } catch (err) {
+        state.staging.status = 'error';
+        state.staging.error = err.message;
+      }
+      renderStaging();
+    }
+
+    function startTextStaging(text) {
+      state.staging = {
+        content: text,
+        source: 'text',
+        fileName: null,
+        type: 'Algemeen',
+        richting: 'Inkomend',
+        note: '',
+        status: 'ready'
+      };
+      renderStaging();
+    }
+
+    function clearStaging() {
+      state.staging = null;
+      renderStaging();
+    }
+
+    function commitStaging() {
+      if (!state.staging || state.staging.status !== 'ready') return;
+      if (!state.staging.content || !state.staging.content.trim()) {
+        showToast('Geen inhoud om op te slaan');
+        return;
+      }
+      // Bij bewerken: oorspronkelijk item verwijderen zodat we niet dupliceren
+      const editingId = state.staging.editingId;
+      if (editingId) {
+        state.items = state.items.filter((i) => i.id !== editingId);
+      }
+      const item = {
+        id: uniqueId('k'),
+        type: state.staging.type,
+        richting: state.staging.richting,
+        note: state.staging.note || '',
+        content: state.staging.content.trim(),
+        source: state.staging.source,
+        fileName: state.staging.fileName,
+        createdAt: new Date().toISOString()
+      };
+      state.items.unshift(item);
+      saveJson(ITEMS_KEY, state.items);
+      clearStaging();
+      $('textPaste').value = '';
+      $('fileInput').value = '';
+      renderStats();
+      renderItems();
+      showToast(editingId ? 'Item bijgewerkt' : 'Toegevoegd aan kennisbank');
+    }
+
+    function renderStaging() {
+      const el = $('staging');
+      if (!state.staging) { el.innerHTML = ''; return; }
+      const s = state.staging;
+
+      const sourceBadge = {
+        text:  '📝 Direct getypte tekst',
+        txt:   '📄 Tekstbestand',
+        pdf:   '📑 PDF',
+        image: '🖼️ Screenshot (Vision API)'
+      }[s.source] || s.source;
+
+      let bodyHtml;
+      if (s.status === 'loading') {
+        bodyHtml = `<div class="staging-loading">Inhoud wordt uitgelezen…</div>`;
+      } else if (s.status === 'error') {
+        bodyHtml = `<div style="color: var(--red); font-size: 13px; padding: 10px 0;">Fout: ${escapeHtml(s.error || 'Onbekend')}</div>`;
+      } else {
+        bodyHtml = `
+          <div class="field">
+            <label class="field-label">Inhoud</label>
+            <textarea class="field-textarea" id="stagingContent" style="min-height: 140px;">${escapeHtml(s.content)}</textarea>
+          </div>
+          <div class="field-grid-2">
+            <div class="field">
+              <label class="field-label" for="stagingType">Type</label>
+              <select class="field-select" id="stagingType">
+                ${TYPES.map((t) => `<option value="${escapeHtml(t)}"${s.type === t ? ' selected' : ''}>${escapeHtml(t)}</option>`).join('')}
+              </select>
+            </div>
+            <div class="field">
+              <label class="field-label" for="stagingRichting">Richting</label>
+              <select class="field-select" id="stagingRichting">
+                <option value="Inkomend"${s.richting === 'Inkomend' ? ' selected' : ''}>Inkomend (van klant)</option>
+                <option value="Uitgaand"${s.richting === 'Uitgaand' ? ' selected' : ''}>Uitgaand (jouw antwoord)</option>
+              </select>
+            </div>
+          </div>
+          <div class="field">
+            <label class="field-label" for="stagingNote">Optionele notitie — waarom is dit een goed voorbeeld?</label>
+            <textarea class="field-textarea" id="stagingNote" placeholder="Bijv: 'Goed antwoord op een bezwaar over prijs'…">${escapeHtml(s.note || '')}</textarea>
+          </div>`;
+      }
+
+      el.innerHTML = `
+        <div class="staging">
+          <div class="staging-head">
+            <div class="title">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--accent-cyan)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 11 12 14 22 4"></polyline><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path></svg>
+              Klaar om toe te voegen ${s.fileName ? `· <span style="color:var(--text-faint);">${escapeHtml(s.fileName)}</span>` : ''}
+            </div>
+            <span class="staging-source">${sourceBadge}</span>
+          </div>
+          ${bodyHtml}
+          <div class="staging-actions">
+            <button class="btn btn-primary" id="stagingSaveBtn" ${s.status !== 'ready' ? 'disabled' : ''}>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
+              Toevoegen aan kennisbank
+            </button>
+            <button class="btn" id="stagingCancelBtn">Annuleren</button>
+          </div>
+        </div>`;
+
+      // Wire up listeners
+      const cancelBtn = $('stagingCancelBtn');
+      if (cancelBtn) cancelBtn.addEventListener('click', clearStaging);
+      const saveBtn = $('stagingSaveBtn');
+      if (saveBtn) saveBtn.addEventListener('click', commitStaging);
+
+      if (s.status === 'ready') {
+        $('stagingContent').addEventListener('input', (ev) => { state.staging.content = ev.target.value; });
+        $('stagingType').addEventListener('change', (ev) => { state.staging.type = ev.target.value; });
+        $('stagingRichting').addEventListener('change', (ev) => { state.staging.richting = ev.target.value; });
+        $('stagingNote').addEventListener('input', (ev) => { state.staging.note = ev.target.value; });
+      }
+    }
+
+    /* ─────────────────────────────────────────────────────────────
+       Overzicht
+       ───────────────────────────────────────────────────────────── */
+    function getFilteredItems() {
+      let items = state.items;
+      if (state.filter !== 'Alle') {
+        items = items.filter((i) => i.type === state.filter);
+      }
+      const q = state.search.trim().toLowerCase();
+      if (q) {
+        items = items.filter((i) =>
+          (i.content || '').toLowerCase().includes(q) ||
+          (i.note || '').toLowerCase().includes(q) ||
+          (i.fileName || '').toLowerCase().includes(q)
+        );
+      }
+      return items;
+    }
+
+    function renderItems() {
+      // Type pills
+      const counts = TYPES.reduce((acc, t) => {
+        acc[t] = state.items.filter((i) => i.type === t).length;
+        return acc;
+      }, { Alle: state.items.length });
+      const pillKeys = ['Alle', ...TYPES];
+      $('typePills').innerHTML = pillKeys.map((k) => `
+        <button class="pill ${state.filter === k ? 'active' : ''}" data-type-filter="${escapeHtml(k)}">
+          ${escapeHtml(k)}<span class="pill-count">${counts[k] || 0}</span>
+        </button>`).join('');
+      $('typePills').querySelectorAll('[data-type-filter]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          state.filter = btn.dataset.typeFilter;
+          renderItems();
+        });
+      });
+
+      const filtered = getFilteredItems();
+      $('overviewCount').textContent = filtered.length === state.items.length
+        ? `· ${state.items.length} ${state.items.length === 1 ? 'item' : 'items'}`
+        : `· ${filtered.length} van ${state.items.length}`;
+
+      const list = $('itemList');
+      if (filtered.length === 0) {
+        list.innerHTML = `<div class="item-empty">${state.items.length === 0
+          ? 'Nog geen leermateriaal — voeg je eerste item toe via de uploader hierboven.'
+          : 'Geen items gevonden voor deze filter/zoekterm.'}</div>`;
+        return;
+      }
+
+      list.innerHTML = filtered.map((item) => `
+        <article class="item-card" data-item-id="${escapeHtml(item.id)}">
+          <div class="item-meta">
+            <span class="badge badge-${escapeHtml(item.type)}">${escapeHtml(item.type)}</span>
+            <span class="arrow">${item.richting === 'Inkomend' ? '↓ Inkomend' : '↑ Uitgaand'}</span>
+            ${item.fileName ? `<span style="color:var(--text-faint); font-size:11px;">${escapeHtml(item.fileName)}</span>` : ''}
+            <span class="date">${escapeHtml(formatDateTime(item.createdAt))}</span>
+          </div>
+          <div class="item-content" data-content="${escapeHtml(item.id)}">${escapeHtml(item.content)}</div>
+          ${item.note ? `<div class="item-note">${escapeHtml(item.note)}</div>` : ''}
+          <div class="item-actions">
+            <button class="btn" data-item-action="expand">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
+              Volledig tonen
+            </button>
+            <button class="btn" data-item-action="edit">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
+              Bewerken
+            </button>
+            <button class="btn btn-danger" data-item-action="delete">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 6"></path></svg>
+              Verwijderen
+            </button>
+          </div>
+        </article>`).join('');
+
+      list.querySelectorAll('[data-item-id]').forEach((card) => {
+        const id = card.dataset.itemId;
+        card.querySelector('[data-item-action="expand"]').addEventListener('click', () => {
+          const c = card.querySelector(`[data-content="${id}"]`);
+          c.classList.toggle('expanded');
+        });
+        card.querySelector('[data-item-action="delete"]').addEventListener('click', () => {
+          if (!confirm('Dit item verwijderen uit de kennisbank?')) return;
+          state.items = state.items.filter((i) => i.id !== id);
+          saveJson(ITEMS_KEY, state.items);
+          renderStats();
+          renderItems();
+          showToast('Item verwijderd');
+        });
+        card.querySelector('[data-item-action="edit"]').addEventListener('click', () => {
+          const item = state.items.find((i) => i.id === id);
+          if (!item) return;
+          // Prefill staging with this item for editing — original wordt verwijderd
+          // bij commit zodat we niet dupliceren.
+          state.staging = {
+            content: item.content,
+            source: item.source,
+            fileName: item.fileName,
+            type: item.type,
+            richting: item.richting,
+            note: item.note || '',
+            status: 'ready',
+            editingId: id
+          };
+          renderStaging();
+          // Scroll naar de uploader sectie
+          document.querySelector('.uploader').scrollIntoView({ behavior: 'smooth', block: 'start' });
+        });
+      });
+    }
+
+    /* ─────────────────────────────────────────────────────────────
+       Activeer toggle
+       ───────────────────────────────────────────────────────────── */
+    function renderToggle() {
+      $('activeToggle').checked = !!state.active;
+    }
+
+    /* ─────────────────────────────────────────────────────────────
+       Wire-up
+       ───────────────────────────────────────────────────────────── */
+    function init() {
+      renderStats();
+      renderProfile();
+      renderItems();
+      renderToggle();
+
+      // Profile field listeners
+      ['overOns', 'nooitZeggen', 'contactgegevens'].forEach((id) => {
+        $(id).addEventListener('input', (ev) => {
+          state.profile[id] = ev.target.value;
+          markProfileDirty();
+        });
+      });
+
+      $('saveProfileBtn').addEventListener('click', saveProfile);
+      $('addFaqBtn').addEventListener('click', () => {
+        state.profile.faqs = state.profile.faqs || [];
+        state.profile.faqs.push({ id: uniqueId('faq'), question: '', answer: '' });
+        markProfileDirty();
+        renderFaqs();
+      });
+
+      // File input
+      const dropzone = $('dropzone');
+      const fileInput = $('fileInput');
+      dropzone.addEventListener('click', () => fileInput.click());
+      dropzone.addEventListener('keydown', (ev) => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); fileInput.click(); } });
+      fileInput.addEventListener('change', (ev) => {
+        const file = ev.target.files?.[0];
+        if (file) processFile(file);
+      });
+
+      // Drag & drop
+      ['dragenter', 'dragover'].forEach((ev) => {
+        dropzone.addEventListener(ev, (e) => { e.preventDefault(); e.stopPropagation(); dropzone.classList.add('dragover'); });
+      });
+      ['dragleave', 'drop'].forEach((ev) => {
+        dropzone.addEventListener(ev, (e) => { e.preventDefault(); e.stopPropagation(); dropzone.classList.remove('dragover'); });
+      });
+      dropzone.addEventListener('drop', (e) => {
+        const file = e.dataTransfer?.files?.[0];
+        if (file) processFile(file);
+      });
+
+      // Direct text input
+      $('useTextBtn').addEventListener('click', () => {
+        const text = $('textPaste').value.trim();
+        if (!text) { showToast('Plak eerst tekst in'); return; }
+        startTextStaging(text);
+      });
+
+      // Search
+      $('searchInput').addEventListener('input', (ev) => {
+        state.search = ev.target.value;
+        renderItems();
+      });
+
+      // Activate toggle
+      $('activeToggle').addEventListener('change', (ev) => {
+        state.active = ev.target.checked;
+        saveJson(ACTIVE_KEY, state.active);
+        showToast(state.active
+          ? 'Kennisbank actief — e-mail bot gebruikt deze data'
+          : 'Kennisbank inactief'
+        );
+      });
+    }
+
+    init();
+  </script>
 </body>
 </html>
