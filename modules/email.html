@@ -2693,9 +2693,9 @@
       'Onderwerp: ' + subject,
       '',
       'Samenvatting mail:',
-      inBody.slice(0, 300) || '(geen inhoud beschikbaar)',
+      inBody || '(geen inhoud beschikbaar)',
     ];
-    if (sentBody) lines.push('', 'Verstuurd antwoord:', sentBody.slice(0, 200));
+    if (sentBody) lines.push('', 'Verstuurd antwoord:', sentBody);
     const omschrijving = lines.join('\n');
 
     // Categorie
@@ -2809,7 +2809,7 @@
           '<button type="button" class="taak-context-toggle" onclick="var w=document.getElementById(\'tfContextWrap\'),open=w.style.display!==\'none\';w.style.display=open?\'none\':\'block\';this.textContent=open?\'Toon context ▼\':\'Verberg context ▲\';">Toon context ▼</button>' +
           '<div id="tfContextWrap" style="display:none;margin-top:6px">' +
             '<label class="taak-form-label">Context &amp; mailinhoud</label>' +
-            '<textarea class="taak-form-textarea" id="tfOmschrijving" style="min-height:80px">' + escapeHtml(f.omschrijving) + '</textarea>' +
+            '<textarea class="taak-form-textarea" id="tfOmschrijving" rows="10" style="min-height:200px">' + escapeHtml(f.omschrijving) + '</textarea>' +
           '</div>' +
         '</div>' +
         '<div class="taak-email-ref">📧 Gelinkt aan: <strong>' + escapeHtml(email.subject || '(geen onderwerp)') + '</strong> van ' + escapeHtml(email.fromName || email.from || '?') + '</div>' +
@@ -2880,8 +2880,11 @@
   }
 
   async function aiGenereerTaak(uid) {
+    console.log('aiGenereerTaak aangeroepen voor uid:', uid);
     const btn      = document.getElementById('btn-ai-taak-' + uid);
     const textarea = document.getElementById('taak-omschrijving-' + uid);
+    console.log('btn element:', btn);
+    console.log('textarea element:', textarea);
     if (!btn || !textarea) return;
 
     const email = findEmail(uid);
@@ -2893,7 +2896,7 @@
     const prev = textarea.value;
 
     try {
-      const body    = state.bodyCache?.[uid]?.text || '';
+      const body     = state.bodyCache?.[uid]?.text || '';
       const antwoord = _taakSentBody || state.sentReplies?.[uid]?.body || '';
 
       const res = await fetch('/api/generate-task', {
@@ -2903,12 +2906,13 @@
           subject:  email.subject  || '',
           from:     email.fromName || email.from || '',
           category: email.category || '',
-          body:     body.slice(0, 600),
-          reply:    antwoord.slice(0, 200),
+          body,
+          reply:    antwoord,
         }),
       });
 
       const data = await res.json();
+      console.log('API response:', data);
       if (!res.ok || !data.description) throw new Error(data.error || 'Lege respons');
 
       textarea.value       = data.description;
