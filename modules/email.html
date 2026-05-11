@@ -627,6 +627,10 @@
     .vt-reason-input::placeholder { color: var(--text-faint); }
     .vt-confirm-btn { font-family: inherit; font-size: 13px; font-weight: 600; padding: 7px 16px; border-radius: 8px; border: none; background: var(--accent-grad); color: #0a0b10; cursor: pointer; align-self: flex-start; }
     .vt-confirm-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    .vt-hint { font-size: 11px; color: var(--text-faint); font-style: italic; padding: 2px 0; }
+    .act-section-label { font-size: 10px; font-weight: 600; color: var(--text-faint); text-transform: uppercase; letter-spacing: .06em; padding: 4px 10px 2px; pointer-events: none; }
+    .info-vt-wrap { grid-column: 1 / -1; margin-top: 4px; }
+    .reclame-vt-wrap { grid-column: 1 / -1; margin-top: 4px; }
 
     /* ── Category filter pills ── */
     .cat-pills-bar { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 14px; align-items: center; }
@@ -1052,6 +1056,9 @@
   const ICON_SNOOZE = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>';
   const ICON_FLAG   = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" y1="22" x2="4" y2="15"/></svg>';
   const ICON_NOACT  = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/></svg>';
+  const ICON_INBOX  = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></svg>';
+  const ICON_INFO2  = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>';
+  const ICON_SPAM   = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="7.86 2 16.14 2 22 7.86 22 16.14 16.14 22 7.86 22 2 16.14 2 7.86 7.86 2"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>';
 
   const CAT_COLORS = {
     'Nieuwe Lead':      '#22d3ee',
@@ -1119,7 +1126,8 @@
     undoHistory: loadJson(UNDO_HISTORY_KEY, []),  // max 10 undo entries
     pendingPropagation: null,  // { uids, category, domain } waiting for user confirmation
     openVtPanel:   null,       // uid van open Verplaats & Train panel
-    vtPanelState:  { category: null, tags: [], requiresAction: null, reasonText: '' }
+    vtPanelContext: null,      // 'actie' | 'info' | 'reclame'
+    vtPanelState:  { category: null, tags: [], requiresAction: null, reasonText: '', targetSection: null, aiHintCategory: null, aiHintConfidence: null }
   };
 
   // ── localStorage helpers ───────────────────────────────────────────────────
@@ -1353,6 +1361,20 @@
         }
         showToast('↩ Verplaatsing ongedaan gemaakt');
 
+      } else if (type === 'section_move') {
+        const { email_id, old_flag, old_category } = data;
+        const email = findEmail(email_id);
+        if (email) {
+          email.category = old_category;
+          state.overrides.category[email_id] = old_category;
+          _aiCatCache[email_id] = old_category;
+          if (old_flag !== undefined && old_flag !== null) state.actionFlags[email_id] = old_flag;
+          else delete state.actionFlags[email_id];
+          saveOverrides(); saveJson(AI_CATS_KEY, _aiCatCache); saveJson(ACTION_FLAGS_KEY, state.actionFlags);
+          populateSuggestions(); render();
+        }
+        showToast('↩ Sectie-verplaatsing ongedaan gemaakt');
+
       } else {
         showToast('↩ Ongedaan gemaakt: ' + (entry.label || type));
       }
@@ -1545,12 +1567,20 @@
     ).join('');
     const actJa  = '<button class="vt-action-btn' + (ps.requiresAction === true  ? ' selected' : '') + '" onclick="vtSelectAction(true)">Ja</button>';
     const actNee = '<button class="vt-action-btn' + (ps.requiresAction === false ? ' selected' : '') + '" onclick="vtSelectAction(false)">Nee</button>';
+    const sectionBtns =
+      '<button class="vt-action-btn' + (ps.targetSection === 'actie'   ? ' selected' : '') + '" onclick="vtSelectSection(\'actie\')">'   + ICON_INBOX + ' Actie vereist</button>' +
+      '<button class="vt-action-btn' + (ps.targetSection === 'info'    ? ' selected' : '') + '" onclick="vtSelectSection(\'info\')">'    + ICON_INFO2 + ' Informatie</button>' +
+      '<button class="vt-action-btn' + (ps.targetSection === 'reclame' ? ' selected' : '') + '" onclick="vtSelectSection(\'reclame\')">' + ICON_SPAM  + ' Reclame review</button>';
     return '<div class="vt-panel" id="vtPanel-' + escapeHtml(uid) + '">' +
-      '<div><div class="vt-panel-label">Naar welke categorie?</div><div class="vt-cats">' + catBtns + '</div></div>' +
+      '<div>' +
+        (ps.aiHintCategory ? '<div class="vt-hint">Agent dacht: ' + escapeHtml(ps.aiHintCategory) + (ps.aiHintConfidence ? ' (' + ps.aiHintConfidence + '% zekerheid)' : '') + '</div>' : '') +
+        '<div class="vt-panel-label">Naar welke categorie?</div><div class="vt-cats">' + catBtns + '</div>' +
+      '</div>' +
       '<div><div class="vt-panel-label">Waarom? (optioneel)</div><div class="vt-tags">' + tagBtns + '</div>' +
         '<input class="vt-reason-input" type="text" placeholder="Eigen reden..." value="' + escapeHtml(ps.reasonText || '') +
           '" oninput="vtSetReason(this.value)"></div>' +
       '<div><div class="vt-panel-label">Actie vereist?</div><div class="vt-action-btns">' + actJa + actNee + '</div></div>' +
+      '<div><div class="vt-panel-label">Toon in welke tab?</div><div class="vt-action-btns">' + sectionBtns + '</div></div>' +
       '<div style="display:flex;gap:8px;align-items:center">' +
         '<button class="vt-confirm-btn"' + (!ps.category ? ' disabled' : '') +
           ' onclick="bevestigVerplaatsEnTrain(\'' + escapeHtml(uid) + '\')">📂 Verplaats &amp; Train Agent</button>' +
@@ -1559,24 +1589,117 @@
     '</div>';
   }
 
-  function vtSelectCat(cat)    { state.vtPanelState.category = cat;       if (state.openVtPanel) updateActieCard(state.openVtPanel); }
-  function vtToggleTag(tag)    { const t = state.vtPanelState.tags; const i = t.indexOf(tag); i >= 0 ? t.splice(i, 1) : t.push(tag); if (state.openVtPanel) updateActieCard(state.openVtPanel); }
-  function vtSelectAction(val) { state.vtPanelState.requiresAction = val;  if (state.openVtPanel) updateActieCard(state.openVtPanel); }
+  function vtSelectCat(cat) {
+    state.vtPanelState.category = cat;
+    if (ACTIE_CATS.has(cat)) state.vtPanelState.targetSection = 'actie';
+    else if (INFO_CATS.has(cat)) state.vtPanelState.targetSection = 'info';
+    else if (cat === 'Reclame') state.vtPanelState.targetSection = 'reclame';
+    else state.vtPanelState.targetSection = 'info';
+    updateVtPanelHost(state.openVtPanel);
+  }
+  function vtSelectSection(section) { state.vtPanelState.targetSection = section; updateVtPanelHost(state.openVtPanel); }
+  function vtToggleTag(tag)    { const t = state.vtPanelState.tags; const i = t.indexOf(tag); i >= 0 ? t.splice(i, 1) : t.push(tag); updateVtPanelHost(state.openVtPanel); }
+  function vtSelectAction(val) { state.vtPanelState.requiresAction = val; updateVtPanelHost(state.openVtPanel); }
   function vtSetReason(val)    { state.vtPanelState.reasonText = val; }
 
-  function verplaatsEnTrain(uid) {
+  function verplaatsEnTrain(uid, context) {
+    context = context || 'actie';
     if (state.openVtPanel === uid) { sluitVtPanel(); return; }
-    const prev = state.openVtPanel;
-    state.openVtPanel = uid;
-    state.vtPanelState = { category: null, tags: [], requiresAction: null, reasonText: '' };
-    if (prev) updateActieCard(prev);
-    updateActieCard(uid);
+    const prev    = state.openVtPanel;
+    const prevCtx = state.vtPanelContext;
+    state.openVtPanel    = uid;
+    state.vtPanelContext = context;
+    const aiCat  = _aiCatCache[uid] || null;
+    const aiConf = _aiConfCache[uid]?.confidence || null;
+    state.vtPanelState = { category: null, tags: [], requiresAction: null, reasonText: '',
+      targetSection: null, aiHintCategory: aiCat, aiHintConfidence: aiConf };
+    if (prev) {
+      if (prevCtx === 'actie') updateActieCard(prev);
+      else if (prevCtx === 'info') updateInfoRow(prev);
+      else render();
+    }
+    updateVtPanelHost(uid);
   }
 
   function sluitVtPanel() {
-    const prev = state.openVtPanel;
-    state.openVtPanel = null;
-    if (prev) updateActieCard(prev);
+    const prev    = state.openVtPanel;
+    const prevCtx = state.vtPanelContext;
+    state.openVtPanel    = null;
+    state.vtPanelContext = null;
+    if (prev) {
+      if (prevCtx === 'actie') updateActieCard(prev);
+      else if (prevCtx === 'info') updateInfoRow(prev);
+      else render();
+    }
+  }
+
+  function getEmailSection(e) {
+    const flag = state.actionFlags[e.uid];
+    if (flag === true)          return 'actie';
+    if (flag === false)         return 'info';
+    if (e.category === 'Reclame')       return 'reclame';
+    if (ACTIE_CATS.has(e.category))     return 'actie';
+    if (INFO_CATS.has(e.category))      return 'info';
+    return 'actie';
+  }
+
+  function updateVtPanelHost(uid) {
+    if (!uid) return;
+    if (state.vtPanelContext === 'actie') updateActieCard(uid);
+    else if (state.vtPanelContext === 'info') updateInfoRow(uid);
+    else render();
+  }
+
+  function updateInfoRow(uid) {
+    const el = document.querySelector('.info-row[data-uid="' + uid.replace(/"/g, '\\"') + '"]');
+    if (!el) { render(); return; }
+    const email = findEmail(uid);
+    if (!email) { render(); return; }
+    const tmp = document.createElement('div');
+    tmp.innerHTML = renderInfoRow(email);
+    el.replaceWith(tmp.firstElementChild);
+    attachInfoRowHandlers();
+  }
+
+  function verplaatsNaarSectie(uid, targetSection) {
+    const email = findEmail(uid);
+    if (!email) return;
+    const oldFlag = state.actionFlags[uid];
+    const oldCat  = email.category;
+
+    if (targetSection === 'actie') {
+      state.actionFlags[uid] = true;
+      saveJson(ACTION_FLAGS_KEY, state.actionFlags);
+    } else if (targetSection === 'info') {
+      state.actionFlags[uid] = false;
+      saveJson(ACTION_FLAGS_KEY, state.actionFlags);
+    } else if (targetSection === 'reclame') {
+      email.category = 'Reclame';
+      state.overrides.category[uid] = 'Reclame';
+      _aiCatCache[uid] = 'Reclame';
+      delete state.actionFlags[uid];
+      saveOverrides(); saveJson(AI_CATS_KEY, _aiCatCache); saveJson(ACTION_FLAGS_KEY, state.actionFlags);
+    }
+
+    const labels = { actie: 'Actie vereist', info: 'Informatie', reclame: 'Reclame review' };
+    const undoEntry = undoManager.push('section_move',
+      { email_id: uid, old_flag: oldFlag, old_category: oldCat, target_section: targetSection },
+      'Verplaatst naar ' + labels[targetSection] + ': ' + (email.fromName || email.from || '?'));
+    populateSuggestions(); render();
+    showUndoableToast('✓ Verplaatst naar ' + labels[targetSection], undoEntry);
+
+    const newRequiresAction = targetSection === 'actie' ? true : targetSection === 'info' ? false : null;
+    fetch('/api/learn', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        email_id: uid, sender: email.from || '', subject: email.subject || '',
+        body_snippet: (state.bodyCache[uid]?.text || '').slice(0, 300),
+        old_category: oldCat, new_category: targetSection === 'reclame' ? 'Reclame' : oldCat,
+        corrected_by: 'Jeffrey', correction_type: 'section_move',
+        old_requires_action: oldFlag ?? null, new_requires_action: newRequiresAction,
+        email_list: []
+      })
+    }).catch(() => {});
   }
 
   async function bevestigVerplaatsEnTrain(uid) {
@@ -1587,7 +1710,8 @@
 
     const oldCat  = email.category;
     const oldFlag = state.actionFlags[uid];
-    const newCat  = ps.category;
+    // Als sectie 'reclame', gebruik 'Reclame' als effectieve categorie
+    const newCat  = ps.targetSection === 'reclame' ? 'Reclame' : ps.category;
     const reason  = [...ps.tags, ps.reasonText].filter(Boolean).join(' · ');
 
     // Stap 1 — UI update
@@ -1599,6 +1723,17 @@
     saveOverrides(); saveJson(AI_CATS_KEY, _aiCatCache); saveJson(AI_CONF_KEY, _aiConfCache);
     if (ps.requiresAction !== null) {
       state.actionFlags[uid] = ps.requiresAction;
+      saveJson(ACTION_FLAGS_KEY, state.actionFlags);
+    }
+    // targetSection overschrijft actionFlags voor tab-plaatsing
+    if (ps.targetSection === 'actie') {
+      state.actionFlags[uid] = true;
+      saveJson(ACTION_FLAGS_KEY, state.actionFlags);
+    } else if (ps.targetSection === 'info') {
+      state.actionFlags[uid] = false;
+      saveJson(ACTION_FLAGS_KEY, state.actionFlags);
+    } else if (ps.targetSection === 'reclame') {
+      delete state.actionFlags[uid];
       saveJson(ACTION_FLAGS_KEY, state.actionFlags);
     }
     populateSuggestions(); render();
@@ -2472,6 +2607,10 @@
         '<button class="act-item act-violet" data-act="snooze-day" data-uid="' + escapeHtml(uid) + '">' + ICON_SNOOZE + ' Tot morgen</button>' +
         '<button class="act-item act-violet" data-act="snooze-week" data-uid="' + escapeHtml(uid) + '">' + ICON_SNOOZE + ' Tot volgende week</button>' +
         (isSn ? '<button class="act-item act-success" data-act="unsnooze" data-uid="' + escapeHtml(uid) + '">' + ICON_READ + ' Snooze opheffen</button>' : '') +
+        '<div class="act-divider"></div>' +
+        '<div class="act-section-label">Verplaats naar sectie</div>' +
+        (getEmailSection(e) !== 'info'    ? '<button class="act-item" data-act="move-info"    data-uid="' + escapeHtml(uid) + '">' + ICON_INFO2 + ' Informatie</button>'    : '') +
+        (getEmailSection(e) !== 'reclame' ? '<button class="act-item" data-act="move-reclame" data-uid="' + escapeHtml(uid) + '">' + ICON_SPAM  + ' Reclame review</button>' : '') +
       '</div>' +
     '</div>';
   }
@@ -2694,6 +2833,8 @@
         else if (act === 'snooze-day')   { snoozeEmail(u, 1); }
         else if (act === 'snooze-week')  { snoozeEmail(u, 7); }
         else if (act === 'unsnooze')     { unsnoozeEmail(u); }
+        else if (act === 'move-info')    { verplaatsNaarSectie(u, 'info'); }
+        else if (act === 'move-reclame') { verplaatsNaarSectie(u, 'reclame'); }
       });
     });
 
@@ -2715,7 +2856,7 @@
         else if (action === 'regenerate')      regenerateAiProposal(u);
         else if (action === 'send')            sendAiProposal(u);
         else if (action === 'cancel')          cancelAiProposal(u);
-        else if (action === 'verplaats-train') verplaatsEnTrain(u);
+        else if (action === 'verplaats-train') verplaatsEnTrain(u, 'actie');
       });
     });
   }
@@ -2723,15 +2864,23 @@
   // ── Rendering: Info tab ────────────────────────────────────────────────────
   function renderInfoRow(e) {
     const q = state.searchQuery;
+    const curSec = getEmailSection(e);
     const infoActMenu =
-      '<div class="act-menu-wrap" style="margin-left:4px">' +
-        '<button class="act-menu-btn" data-open-act="info-' + escapeHtml(e.uid) + '" title="Meer opties">⋯</button>' +
-        '<div class="act-menu-dropdown" id="actMenu-info-' + escapeHtml(e.uid) + '">' +
-          '<button class="act-item" data-act="mark-action" data-uid="' + escapeHtml(e.uid) + '">' + ICON_FLAG + ' Markeer als actie vereist</button>' +
-          '<button class="act-item" data-act="create-task"  data-uid="' + escapeHtml(e.uid) + '">' + ICON_TASK + ' Maak taak aan</button>' +
-          '<div class="act-divider"></div>' +
-          '<button class="act-item act-violet" data-act="snooze-day"  data-uid="' + escapeHtml(e.uid) + '">' + ICON_SNOOZE + ' Snooz tot morgen</button>' +
-          '<button class="act-item act-violet" data-act="snooze-week" data-uid="' + escapeHtml(e.uid) + '">' + ICON_SNOOZE + ' Snooz tot volgende week</button>' +
+      '<div style="display:flex;gap:4px;align-items:center">' +
+        '<button class="btn btn-sm" style="padding:3px 9px;font-size:11px" data-vt-uid="' + escapeHtml(e.uid) + '">📂 VT</button>' +
+        '<div class="act-menu-wrap">' +
+          '<button class="act-menu-btn" data-open-act="info-' + escapeHtml(e.uid) + '" title="Meer opties">⋯</button>' +
+          '<div class="act-menu-dropdown" id="actMenu-info-' + escapeHtml(e.uid) + '">' +
+            '<button class="act-item" data-act="mark-action" data-uid="' + escapeHtml(e.uid) + '">' + ICON_FLAG + ' Markeer als actie vereist</button>' +
+            '<button class="act-item" data-act="create-task"  data-uid="' + escapeHtml(e.uid) + '">' + ICON_TASK + ' Maak taak aan</button>' +
+            '<div class="act-divider"></div>' +
+            '<button class="act-item act-violet" data-act="snooze-day"  data-uid="' + escapeHtml(e.uid) + '">' + ICON_SNOOZE + ' Snooz tot morgen</button>' +
+            '<button class="act-item act-violet" data-act="snooze-week" data-uid="' + escapeHtml(e.uid) + '">' + ICON_SNOOZE + ' Snooz tot volgende week</button>' +
+            '<div class="act-divider"></div>' +
+            '<div class="act-section-label">Verplaats naar sectie</div>' +
+            '<button class="act-item" data-act="move-actie"   data-uid="' + escapeHtml(e.uid) + '">' + ICON_INBOX + ' Actie vereist</button>' +
+            (curSec !== 'reclame' ? '<button class="act-item" data-act="move-reclame" data-uid="' + escapeHtml(e.uid) + '">' + ICON_SPAM + ' Reclame review</button>' : '') +
+          '</div>' +
         '</div>' +
       '</div>';
 
@@ -2743,12 +2892,17 @@
       '</div>' +
       '<span class="info-time">' + escapeHtml(relativeTime(e.date)) + '</span>' +
       infoActMenu +
+      (state.openVtPanel === e.uid ? '<div class="info-vt-wrap">' + renderVtPanel(e.uid) + '</div>' : '') +
     '</div>';
   }
 
   function attachInfoRowHandlers() {
     document.querySelectorAll('.info-row[data-uid]').forEach((row) => {
       const uid = row.dataset.uid;
+      // VT button
+      const vtBtn = row.querySelector('[data-vt-uid="' + uid + '"]');
+      if (vtBtn) vtBtn.addEventListener('click', (ev) => { ev.stopPropagation(); verplaatsEnTrain(uid, 'info'); });
+      // ... menu trigger
       const trigger = row.querySelector('[data-open-act="info-' + uid + '"]');
       if (trigger) {
         trigger.addEventListener('click', (ev) => {
@@ -2772,9 +2926,11 @@
             saveEmailAction(u, 'mark-action', true);
             render();
             undoManager.push('requires_action', { email_id: u, old_flag: oldFlag }, 'Actie vereist gemarkeerd');
-          } else if (act === 'create-task') { openTaakVanEmail(u); }
-          else if (act === 'snooze-day')  { snoozeEmail(u, 1); }
-          else if (act === 'snooze-week') { snoozeEmail(u, 7); }
+          } else if (act === 'create-task')  { openTaakVanEmail(u); }
+          else if (act === 'snooze-day')     { snoozeEmail(u, 1); }
+          else if (act === 'snooze-week')    { snoozeEmail(u, 7); }
+          else if (act === 'move-actie')     { verplaatsNaarSectie(u, 'actie'); }
+          else if (act === 'move-reclame')   { verplaatsNaarSectie(u, 'reclame'); }
         });
       });
     });
@@ -2805,7 +2961,18 @@
       '<span class="reclame-from">' + escapeHtml(e.fromName || e.from || 'Onbekend') + '</span>' +
       '<span class="reclame-subject">' + escapeHtml(e.subject || '(geen onderwerp)') + '</span>' +
       '<span class="reclame-time">' + escapeHtml(relativeTime(e.date)) + '</span>' +
-      '<button class="btn btn-sm" style="padding:3px 9px;font-size:11px;white-space:nowrap" onclick="showNotReclamePicker(\'' + escapeHtml(e.uid) + '\')">Niet reclame</button>' +
+      '<div style="display:flex;gap:4px;align-items:center">' +
+        '<button class="btn btn-sm" style="padding:3px 9px;font-size:11px" data-vt-uid="' + escapeHtml(e.uid) + '">📂 VT</button>' +
+        '<div class="act-menu-wrap">' +
+          '<button class="act-menu-btn" data-open-act="reclame-' + escapeHtml(e.uid) + '" title="Meer opties">⋯</button>' +
+          '<div class="act-menu-dropdown" id="actMenu-reclame-' + escapeHtml(e.uid) + '">' +
+            '<div class="act-section-label">Verplaats naar sectie</div>' +
+            '<button class="act-item" data-act="move-actie" data-uid="' + escapeHtml(e.uid) + '">' + ICON_INBOX + ' Actie vereist</button>' +
+            '<button class="act-item" data-act="move-info"  data-uid="' + escapeHtml(e.uid) + '">' + ICON_INFO2 + ' Informatie</button>' +
+          '</div>' +
+        '</div>' +
+      '</div>' +
+      (state.openVtPanel === e.uid ? '<div class="reclame-vt-wrap">' + renderVtPanel(e.uid) + '</div>' : '') +
     '</div>';
   }
 
@@ -2857,6 +3024,34 @@
         const row = cb.closest('.reclame-row');
         if (cb.checked) { state.reclameSelected.add(uid); row?.classList.add('selected'); }
         else            { state.reclameSelected.delete(uid); row?.classList.remove('selected'); }
+      });
+    });
+    document.querySelectorAll('.reclame-row[data-uid]').forEach((row) => {
+      const uid = row.dataset.uid;
+      // VT button
+      const vtBtn = row.querySelector('[data-vt-uid="' + uid + '"]');
+      if (vtBtn) vtBtn.addEventListener('click', (ev) => { ev.stopPropagation(); verplaatsEnTrain(uid, 'reclame'); });
+      // ... menu trigger
+      const trigger = row.querySelector('[data-open-act="reclame-' + uid + '"]');
+      if (trigger) {
+        trigger.addEventListener('click', (ev) => {
+          ev.stopPropagation();
+          const menu = document.getElementById('actMenu-reclame-' + uid);
+          if (!menu) return;
+          const isOpen = menu.classList.contains('open');
+          closeAllDropdowns();
+          if (!isOpen) menu.classList.add('open');
+        });
+      }
+      row.querySelectorAll('[data-act]').forEach((btn) => {
+        btn.addEventListener('click', (ev) => {
+          ev.stopPropagation();
+          closeAllDropdowns();
+          const act = btn.dataset.act;
+          const u   = btn.dataset.uid;
+          if (act === 'move-actie') verplaatsNaarSectie(u, 'actie');
+          else if (act === 'move-info') verplaatsNaarSectie(u, 'info');
+        });
       });
     });
   }
