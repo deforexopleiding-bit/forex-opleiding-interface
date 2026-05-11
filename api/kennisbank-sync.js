@@ -51,14 +51,27 @@ export default async function handler(req, res) {
         updated_at:       new Date().toISOString()
       };
 
+      let insertErr;
       if (existing) {
-        await supabase.from('kennisbank_items').update(payload).eq('id', existing.id);
+        const { error } = await supabase.from('kennisbank_items').update(payload).eq('id', existing.id);
+        insertErr = error;
       } else {
-        await supabase.from('kennisbank_items').insert({
+        const { error } = await supabase.from('kennisbank_items').insert({
           ...payload,
           created_at: new Date().toISOString()
         });
+        insertErr = error;
+        // Fallback: kolom bestaat nog niet in Supabase (migratie niet gedraaid)
+        if (insertErr && insertErr.message?.includes('42703')) {
+          const { source_email_id: _s, auto_generated: _a, ...safePayload } = payload;
+          const { error: e2 } = await supabase.from('kennisbank_items').insert({
+            ...safePayload,
+            created_at: new Date().toISOString()
+          });
+          insertErr = e2;
+        }
       }
+      if (insertErr) throw insertErr;
       console.log(`[kennisbank-sync] upsert_item → label: ${labelKey} | auto: ${payload.auto_generated} | title: ${payload.title.slice(0, 40)}`);
       return res.status(200).json({ ok: true });
     } catch (err) {

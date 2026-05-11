@@ -824,19 +824,15 @@
 
     // ── Supabase sync ──────────────────────────────────────────────────────
     async function loadFromSupabase() {
-      const hasItems   = (loadJson(ITEMS_KEY, []).length > 0);
-      const hasProfile = !!loadJson(PROFILE_KEY, null)?.bedrijfsnaam;
-      if (hasItems && hasProfile) return; // localStorage is al gevuld
-
       try {
         const res = await fetch('/api/kennisbank-sync');
         if (!res.ok) return;
         const { items } = await res.json();
-        if (!Array.isArray(items) || items.length === 0) return;
+        if (!Array.isArray(items)) return;
 
-        // Haal profiel op (label = '_profile')
-        const profileRow = items.find((i) => i.label === '_profile');
-        if (profileRow && !hasProfile) {
+        // Profiel mergen (alleen als Supabase er een heeft)
+        const profileRow = items.find((i) => i.label === '_profile' || i.type === 'bedrijfsprofiel');
+        if (profileRow) {
           try {
             const parsed = JSON.parse(profileRow.content || '{}');
             if (parsed.bedrijfsnaam) {
@@ -846,24 +842,30 @@
           } catch {}
         }
 
-        // Haal reguliere items op (label begint met 'k_' of niet '_profile')
-        if (!hasItems) {
-          const regularItems = items
-            .filter((i) => i.label && i.label !== '_profile' && i.type !== 'bedrijfsprofiel')
-            .map((i) => ({
-              id:        i.label || i.id,
-              type:      i.type      || 'Algemeen',
-              richting:  i.direction || 'Inkomend',
-              note:      i.note      || '',
-              content:   i.content   || '',
-              source:    'text',
-              fileName:  i.category  || null,
-              createdAt: i.created_at || new Date().toISOString()
-            }));
-          if (regularItems.length > 0) {
-            state.items = regularItems;
-            saveJson(ITEMS_KEY, state.items);
-          }
+        // Items mergen: lokale items behouden, Supabase-items toevoegen als ze er niet al zijn
+        const localItems = loadJson(ITEMS_KEY, []);
+        const localIds = new Set(localItems.map((i) => i.id));
+
+        const remoteItems = items
+          .filter((i) => i.label !== '_profile' && i.type !== 'bedrijfsprofiel' && (i.label || i.id))
+          .map((i) => ({
+            id:        i.label || String(i.id),
+            type:      i.type      || 'Algemeen',
+            richting:  i.direction || null,
+            note:      i.note      || '',
+            content:   i.content   || '',
+            source:    'supabase',
+            fileName:  i.category  || null,
+            createdAt: i.created_at || new Date().toISOString()
+          }))
+          .filter((i) => !localIds.has(i.id));
+
+        if (remoteItems.length > 0) {
+          const merged = [...localItems, ...remoteItems];
+          state.items = merged;
+          saveJson(ITEMS_KEY, merged);
+        } else if (state.items.length === 0) {
+          state.items = localItems;
         }
 
         renderStats();
