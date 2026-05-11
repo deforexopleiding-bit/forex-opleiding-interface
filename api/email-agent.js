@@ -40,6 +40,45 @@ function extractBodyKeywords(text, maxWords = 10) {
     .slice(0, maxWords);
 }
 
+// ── Interne domeinen — worden NOOIT als Reclame gecategoriseerd ───────────────
+const INTERNAL_DOMAINS = ['deforexopleiding.nl', 'deforexopleiding.com'];
+
+// ── Absolute regels — altijd van toepassing, ook bij Re: en body-vragen ──────
+const ABSOLUTE_RULES = [
+  {
+    category: 'Nieuwe Lead',
+    requires_action: false,
+    test: (s) => /nieuwe\s*lead|new\s*lead|lead\s*(001|002|003|004|005)|funnel|10k.challenge|7.daagse|you\s+have\s+received\s+a\s+form|lead\s+-/i.test(s),
+  },
+  {
+    category: 'Appointment',
+    requires_action: false,
+    test: (s) => /uitlegsessie\s*(ingepland)?|nieuwe\s*call|appointment\s*booked|sessie\s*ingepland|call\s*ingepland/i.test(s),
+  },
+  {
+    category: 'Event Aanmelding',
+    requires_action: false,
+    test: (s) => /event\s*aanmelding|aanmelding\s*gent|seminar\s*aanmelding/i.test(s),
+  },
+];
+
+function applyAbsoluteRules(subject, senderDomain) {
+  // Mails van intern domein die overeenkomen met lead/sessie → altijd die categorie
+  const isInternal = INTERNAL_DOMAINS.some((d) => (senderDomain || '').includes(d));
+  const s = subject || '';
+  for (const rule of ABSOLUTE_RULES) {
+    if (rule.test(s)) {
+      console.log(`[email-agent] Absolute regel: "${s}" → ${rule.category}${isInternal ? ' (intern domein)' : ''}`);
+      return { category: rule.category, requires_action: rule.requires_action };
+    }
+  }
+  // Intern domein: nooit Reclame, val terug op Overig als niets matcht
+  if (isInternal && /lead|funnel|aanmelding|sessie|call|event|betaling|factuur/i.test(s)) {
+    return { category: 'Overig', requires_action: false };
+  }
+  return null;
+}
+
 // ── Harde inhoudsregels ───────────────────────────────────────────────────────
 const PAYMENT_DOMAINS = ['paypal.nl', 'paypal.com', 'mollie.com', 'stripe.com'];
 const HARD_RULES = [
@@ -350,7 +389,24 @@ export async function categorize({ from, subject, bodySnippet, date }) {
   const senderEmail  = extractEmail(from || '');
   const senderDomain = getDomain(senderEmail);
 
-  // Stap 1 — Re:/Fwd: en directe vraag-check
+  // Stap 1a — Absolute regels (lopen altijd, ook bij Re: en body-vragen)
+  const absResult = applyAbsoluteRules(subject, senderDomain);
+  if (absResult) {
+    return {
+      category:           absResult.category,
+      requires_action:    absResult.requires_action,
+      priority:           'laag',
+      confidence:         100,
+      source:             'absolute_rule',
+      reasoning:          'Absolute inhoudsregel — wordt nooit overschreven',
+      key_signals:        [],
+      suggested_reply_tone: 'niet_van_toepassing',
+      is_definitely_not_spam: absResult.category !== 'Reclame',
+      needs_review:       false
+    };
+  }
+
+  // Stap 1b — Re:/Fwd: en directe vraag-check
   // Re: mails en mails met een vraag in de body gaan ALTIJD naar AI — nooit harde regels
   const isReply     = isReplyOrForward(subject);
   const hasQuestion = detectDirectQuestion(bodySnippet);

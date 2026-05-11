@@ -2448,6 +2448,29 @@
     return stripped + '\n\n' + sigText;
   }
 
+  function buildMailHtml(plainBody) {
+    const sig = loadSignature();
+    const stripped = plainBody.replace(/\n{2,}(met\s+(vriendelijke|hartelijke)\s+groet|team\s+de\s+forex)[^\n]*/si, '').trimEnd();
+    const bodyHtml = stripped.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\n/g, '<br>');
+    const sigLines = [];
+    sigLines.push('<span style="color:#666">Met vriendelijke groet,</span><br>');
+    if (sig.naam)     sigLines.push('<strong>' + sig.naam.replace(/</g, '&lt;') + '</strong>' + (sig.functie ? ' · ' + sig.functie.replace(/</g, '&lt;') : '') + '<br>');
+    if (sig.logoData) sigLines.push('<img src="' + sig.logoData + '" alt="Logo" style="max-width:200px;height:auto;margin:6px 0;display:block"><br>');
+    if (sig.website)  sigLines.push('<a href="' + sig.website.replace(/"/g, '') + '" style="color:#534AB7">' + sig.website.replace(/</g, '&lt;') + '</a><br>');
+    if (sig.telefoon) sigLines.push(sig.telefoon.replace(/</g, '&lt;') + '<br>');
+    const socials = [];
+    if (sig.instagram) socials.push('<a href="' + sig.instagram.replace(/"/g, '') + '" style="color:#534AB7">Instagram</a>');
+    if (sig.facebook)  socials.push('<a href="' + sig.facebook.replace(/"/g, '')  + '" style="color:#534AB7">Facebook</a>');
+    if (sig.linkedin)  socials.push('<a href="' + sig.linkedin.replace(/"/g, '')  + '" style="color:#534AB7">LinkedIn</a>');
+    if (sig.whatsapp)  socials.push('<a href="https://wa.me/' + sig.whatsapp.replace(/\D/g, '') + '" style="color:#534AB7">WhatsApp</a>');
+    if (socials.length) sigLines.push(socials.join(' · '));
+    return '<div style="font-family:Arial,sans-serif;font-size:14px;line-height:1.6;color:#333">' +
+      bodyHtml +
+      '<br><br><div style="border-top:1px solid #eee;padding-top:10px;margin-top:10px;font-size:13px">' +
+      sigLines.join('') +
+      '</div></div>';
+  }
+
   function findEmail(uid) { return state.emails.find((e) => e.uid === uid); }
 
   async function startAiProposal(uid) {
@@ -2528,7 +2551,7 @@
     if (state.activeTab === 'actie') updateActieCard(uid); else render();
 
     try {
-      const sendPayload = { from_mailbox: fromMailbox, to: toAddr, subject, text: body, email_id: uid, category: email.category };
+      const sendPayload = { from_mailbox: fromMailbox, to: toAddr, subject, text: body, html: buildMailHtml(body), email_id: uid, category: email.category };
       if (ccVal)  sendPayload.cc  = ccVal;
       if (bccVal) sendPayload.bcc = bccVal;
       const res  = await fetch('/api/send-email', {
@@ -3704,12 +3727,12 @@
           '<span class="reply-meta-label">Aan:</span>' +
           '<input class="reply-meta-input" type="text" data-reply-to="' + escapeHtml(e.uid) + '" value="' + escapeHtml(toAddr) + '">' +
           '<div class="reply-meta-btns">' +
-            '<button class="btn btn-sm' + (showCc ? ' active' : '') + '" data-toggle-cc="' + escapeHtml(e.uid) + '">CC</button>' +
-            '<button class="btn btn-sm' + (showBcc ? ' active' : '') + '" data-toggle-bcc="' + escapeHtml(e.uid) + '">BCC</button>' +
+            '<button class="btn btn-sm" data-action="toggle-cc" data-uid="' + escapeHtml(e.uid) + '">CC</button>' +
+            '<button class="btn btn-sm" data-action="toggle-bcc" data-uid="' + escapeHtml(e.uid) + '">BCC</button>' +
           '</div>' +
         '</div>' +
-        (showCc  ? '<div class="reply-meta-row"><span class="reply-meta-label">CC:</span><input class="reply-meta-input" type="text" data-reply-cc="'  + escapeHtml(e.uid) + '" value="' + escapeHtml(state.replyCc[e.uid] || '')  + '" placeholder="CC-adressen (kommagescheiden)"></div>'  : '') +
-        (showBcc ? '<div class="reply-meta-row"><span class="reply-meta-label">BCC:</span><input class="reply-meta-input" type="text" data-reply-bcc="' + escapeHtml(e.uid) + '" value="' + escapeHtml(state.replyBcc[e.uid] || '') + '" placeholder="BCC-adressen (kommagescheiden)"></div>' : '') +
+        '<div id="cc-row-' + escapeHtml(e.uid) + '" class="reply-meta-row" style="display:none"><span class="reply-meta-label">CC:</span><input class="reply-meta-input" type="text" data-reply-cc="' + escapeHtml(e.uid) + '" value="' + escapeHtml(state.replyCc[e.uid] || '') + '" placeholder="CC-adressen (kommagescheiden)"></div>' +
+        '<div id="bcc-row-' + escapeHtml(e.uid) + '" class="reply-meta-row" style="display:none"><span class="reply-meta-label">BCC:</span><input class="reply-meta-input" type="text" data-reply-bcc="' + escapeHtml(e.uid) + '" value="' + escapeHtml(state.replyBcc[e.uid] || '') + '" placeholder="BCC-adressen (kommagescheiden)"></div>' +
       '</div>' +
       draftBanner +
       (draftBanner ? '' : '<div class="draft-indicator" data-draft-uid="' + escapeHtml(e.uid) + '" style="display:none"></div>') +
@@ -3988,19 +4011,6 @@
         }, 30000);
       });
     }
-    const ccBtn = card.querySelector('[data-toggle-cc="' + uid + '"]');
-    if (ccBtn) ccBtn.addEventListener('click', (ev) => {
-      ev.stopPropagation();
-      state.showCc[uid] = !state.showCc[uid];
-      updateActieCard(uid);
-    });
-    const bccBtn = card.querySelector('[data-toggle-bcc="' + uid + '"]');
-    if (bccBtn) bccBtn.addEventListener('click', (ev) => {
-      ev.stopPropagation();
-      state.showBcc[uid] = !state.showBcc[uid];
-      updateActieCard(uid);
-    });
-
     // ── AI proposal buttons + Verplaats & Train ──────────────────────────
     card.querySelectorAll('[data-action]').forEach((btn) => {
       btn.addEventListener('click', (ev) => {
@@ -4844,6 +4854,32 @@
     checkCacheVersion();
     initFilterBar();
     initTabs();
+
+    // CC/BCC toggle — event delegation op #tabContent zodat het in alle tabs werkt
+    document.getElementById('tabContent').addEventListener('click', (ev) => {
+      const ccBtn = ev.target.closest('[data-action="toggle-cc"]');
+      if (ccBtn) {
+        ev.stopPropagation();
+        const uid = ccBtn.dataset.uid;
+        const row = document.getElementById('cc-row-' + uid);
+        if (row) {
+          row.style.display = row.style.display === 'none' ? 'flex' : 'none';
+          if (row.style.display !== 'none') row.querySelector('input')?.focus();
+        }
+        return;
+      }
+      const bccBtn = ev.target.closest('[data-action="toggle-bcc"]');
+      if (bccBtn) {
+        ev.stopPropagation();
+        const uid = bccBtn.dataset.uid;
+        const row = document.getElementById('bcc-row-' + uid);
+        if (row) {
+          row.style.display = row.style.display === 'none' ? 'flex' : 'none';
+          if (row.style.display !== 'none') row.querySelector('input')?.focus();
+        }
+        return;
+      }
+    });
     initSigModal();
     document.getElementById('refreshBtn').addEventListener('click', loadEmails);
     document.getElementById('reanalyseerBtn').addEventListener('click', reanalyzeerAlles);

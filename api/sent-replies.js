@@ -1,42 +1,62 @@
-import { supabase } from './supabase.js';
-
 export default async function handler(req, res) {
   if (req.method !== 'GET') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
+  const supabaseUrl = process.env.SUPABASE_URL;
+  const supabaseKey = process.env.SUPABASE_ANON_KEY;
+
+  if (!supabaseUrl || !supabaseKey) {
+    return res.status(500).json({ error: 'SUPABASE_URL/KEY niet geconfigureerd', sent: [] });
+  }
+
   try {
     const page  = Math.max(1, parseInt(req.query?.page  || '1', 10));
     const limit = Math.min(200, Math.max(1, parseInt(req.query?.limit || '50', 10)));
-    const from  = (page - 1) * limit;
-    const to    = from + limit - 1;
+    const offset = (page - 1) * limit;
 
-    const { data, error, count } = await supabase
-      .from('email_actions')
-      .select('email_id, value, set_at, created_at', { count: 'exact' })
-      .eq('action', 'reply_sent')
-      .order('set_at', { ascending: false })
-      .range(from, to);
+    const url = `${supabaseUrl}/rest/v1/email_replies` +
+      `?select=email_id,email_subject,final_reply,from_address,to_address,cc_address,bcc_address,sent_at` +
+      `&order=sent_at.desc` +
+      `&limit=${limit}&offset=${offset}`;
 
-    if (error) throw error;
-
-    const sent = (data || []).map((row) => {
-      let parsed = {};
-      try { parsed = JSON.parse(row.value || '{}'); } catch {}
-      return { email_id: row.email_id, created_at: row.set_at || row.created_at, ...parsed };
+    const response = await fetch(url, {
+      headers: {
+        'apikey':        supabaseKey,
+        'Authorization': `Bearer ${supabaseKey}`,
+      },
     });
 
-    // Dedupliceer op email_id: frontend + server kunnen allebei opslaan
-    // Eerste (meest recente) entry per email_id wint (data al DESC gesorteerd)
-    const seen = new Set();
-    const unique = sent.filter((r) => {
-      const key = r.email_id && r.email_id !== 'manual' ? r.email_id : r.created_at;
+    if (!response.ok) {
+      const txt = await response.text().catch(() => '');
+      console.error('[sent-replies] Supabase fout:', response.status, txt);
+      return res.status(200).json({ sent: [], count: 0, page, limit, error: txt });
+    }
+
+    const data = await response.json();
+    console.log('[sent-replies] Opgehaald:', Array.isArray(data) ? data.length : 0, 'rijen');
+
+    const rows = (Array.isArray(data) ? data : []).map((row) => ({
+      email_id:   row.email_id,
+      created_at: row.sent_at,
+      to:         row.to_address,
+      from:       row.from_address,
+      subject:    row.email_subject,
+      body:       row.final_reply,
+      cc:         row.cc_address,
+      bcc:        row.bcc_address,
+    }));
+
+    // Dedupliceer op email_id
+    const seen   = new Set();
+    const unique = rows.filter((r) => {
+      const key = r.email_id || r.created_at;
       if (seen.has(key)) return false;
       seen.add(key);
       return true;
     });
 
-    return res.status(200).json({ sent: unique, count: count ?? unique.length, page, limit });
+    return res.status(200).json({ sent: unique, count: unique.length, page, limit });
   } catch (err) {
     console.error('[sent-replies] fout:', err.message);
     return res.status(500).json({ error: err.message, sent: [] });

@@ -1,5 +1,4 @@
 import nodemailer from 'nodemailer';
-import { supabase } from './supabase.js';
 
 // Mailbox → wachtwoord env-var (zelfde als IMAP)
 const SMTP_ACCOUNTS = {
@@ -12,12 +11,38 @@ const SMTP_ACCOUNTS = {
 const SMTP_HOST = 'smtp.strato.com';
 const SMTP_PORT = 465;
 
+async function saveToSupabase(record) {
+  const url  = process.env.SUPABASE_URL;
+  const key  = process.env.SUPABASE_ANON_KEY;
+  if (!url || !key) { console.warn('[send-email] SUPABASE_URL/KEY niet geconfigureerd'); return; }
+  try {
+    const r = await fetch(`${url}/rest/v1/email_replies`, {
+      method:  'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'apikey':        key,
+        'Authorization': `Bearer ${key}`,
+        'Prefer':        'return=minimal',
+      },
+      body: JSON.stringify(record),
+    });
+    if (!r.ok) {
+      const txt = await r.text().catch(() => '');
+      console.warn(`[send-email] email_replies insert mislukt (${r.status}):`, txt);
+    } else {
+      console.log('[send-email] email_replies opgeslagen');
+    }
+  } catch (e) {
+    console.warn('[send-email] email_replies fetch fout:', e.message);
+  }
+}
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
-  const { from_mailbox, to, subject, text, cc, bcc, email_id, category } = req.body || {};
+  const { from_mailbox, to, subject, text, html, cc, bcc, email_id, category } = req.body || {};
 
   if (!from_mailbox || !to || !subject || !text) {
     return res.status(400).json({ error: 'from_mailbox, to, subject en text zijn vereist' });
@@ -55,36 +80,23 @@ export default async function handler(req, res) {
       text,
       replyTo: from_mailbox,
     };
-    if (cc)  mailOpts.cc  = cc;
-    if (bcc) mailOpts.bcc = bcc;
+    if (html) mailOpts.html = html;
+    if (cc)   mailOpts.cc   = cc;
+    if (bcc)  mailOpts.bcc  = bcc;
 
     const info = await transporter.sendMail(mailOpts);
-
     console.log(`[send-email] Verstuurd — messageId: ${info.messageId} | geaccepteerd: ${info.accepted?.join(', ')}`);
 
-    // Sla op in Supabase (backup pad naast de frontend saveEmailAction call)
     const sentAt = new Date().toISOString();
-    supabase.from('email_actions').insert({
-      email_id: email_id || 'manual',
-      action:   'reply_sent',
-      value:    JSON.stringify({ to, from: from_mailbox, subject, body: text, cc: cc || null, bcc: bcc || null, category: category || null }),
-      set_by:   'smtp',
-      set_at:   sentAt
-    }).then(({ error }) => {
-      if (error) console.warn('[send-email] email_actions opslaan mislukt:', error.message);
-    });
-
-    supabase.from('email_replies').insert({
+    await saveToSupabase({
       email_id:      email_id || null,
       email_subject: subject,
       final_reply:   text,
       from_address:  from_mailbox,
       to_address:    to,
-      cc_address:    cc || null,
+      cc_address:    cc  || null,
       bcc_address:   bcc || null,
-      sent_at:       sentAt
-    }).then(({ error }) => {
-      if (error) console.warn('[send-email] email_replies opslaan mislukt:', error.message);
+      sent_at:       sentAt,
     });
 
     return res.status(200).json({
