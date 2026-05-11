@@ -7,6 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/dist/tabler-icons.min.css" />
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     :root {
@@ -385,17 +386,20 @@
       border-radius: 999px; font-size: 10px; font-weight: 700;
       min-width: 16px; height: 16px; padding: 0 4px; margin-left: 4px;
     }
-    #undoBtn {
-      background: var(--bg-elev-2);
-      border-color: var(--border-strong);
+    .btn-header {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 6px 14px; border-radius: 8px; font-size: 13px; font-weight: 600;
+      border: 1px solid var(--border-strong); cursor: pointer;
+      background: var(--bg-elev-2); color: var(--text-dim);
+      transition: background 0.15s, border-color 0.15s, color 0.15s;
     }
-    #undoBtn:disabled { opacity: 0.65; cursor: not-allowed; }
-    #undoBtn:not(:disabled) {
+    #btn-undo:not([disabled]) {
+      opacity: 1; cursor: pointer;
       color: var(--accent-cyan);
       border-color: rgba(34,211,238,0.45);
       background: rgba(34,211,238,0.06);
     }
-    #undoBtn:not(:disabled):hover {
+    #btn-undo:not([disabled]):hover {
       background: rgba(34,211,238,0.12);
       border-color: rgba(34,211,238,0.7);
     }
@@ -782,9 +786,10 @@
       </div>
     </div>
     <div class="header-actions">
-      <button class="btn" id="undoBtn" disabled onclick="handleUndo()" oncontextmenu="event.preventDefault(); showUndoDropdown()" title="Ongedaan maken (Ctrl+Z) · Rechtermuisklik voor geschiedenis">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 5.5 5.5v0a5.5 5.5 0 0 1-5.5 5.5H11"/></svg>
-        Ongedaan maken<span class="undo-badge" id="undoBadge" style="display:none">0</span>
+      <button class="btn-header" id="btn-undo" onclick="undoLastAction()" oncontextmenu="event.preventDefault(); showUndoDropdown()" disabled style="opacity:0.5;cursor:not-allowed" title="Ongedaan maken (Ctrl+Z) · Rechtermuisklik voor geschiedenis">
+        <i class="ti ti-arrow-back-up"></i>
+        <span>Ongedaan</span>
+        <span id="undo-count" style="display:none;background:#534AB7;color:white;border-radius:10px;padding:1px 6px;font-size:10px;margin-left:4px">0</span>
       </button>
       <button class="btn" id="refreshBtn">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
@@ -1223,14 +1228,22 @@
   const undoLastAction = handleUndo; // alias voor backwards-compatibiliteit
 
   function updateUndoButton() {
-    const count  = getUndoableActions().length;
-    const btn    = document.getElementById('undoBtn');
-    const badge  = document.getElementById('undoBadge');
+    const count = getUndoableActions().length;
+    const btn   = document.getElementById('btn-undo');
+    const badge = document.getElementById('undo-count');
     if (!btn) return;
-    btn.disabled = count === 0;
+    if (count === 0) {
+      btn.setAttribute('disabled', '');
+      btn.style.opacity = '0.5';
+      btn.style.cursor  = 'not-allowed';
+    } else {
+      btn.removeAttribute('disabled');
+      btn.style.opacity = '1';
+      btn.style.cursor  = 'pointer';
+    }
     if (badge) {
-      badge.textContent  = count;
-      badge.style.display = count > 0 ? 'inline-flex' : 'none';
+      badge.textContent   = count;
+      badge.style.display = count > 0 ? 'inline-block' : 'none';
     }
   }
 
@@ -1252,12 +1265,12 @@
           '</div>';
       }).join('') +
       '<button class="undo-dd-close" onclick="closeUndoDropdown()">Sluiten</button>';
-    const btn = document.getElementById('undoBtn');
+    const btn = document.getElementById('btn-undo');
     if (btn) btn.parentElement.appendChild(dd);
     // Sluit bij klik buiten dropdown
     setTimeout(() => {
       document.addEventListener('click', function _close(ev) {
-        if (!dd.contains(ev.target) && ev.target.id !== 'undoBtn') {
+        if (!dd.contains(ev.target) && ev.target.id !== 'btn-undo') {
           dd.remove(); document.removeEventListener('click', _close);
         }
       });
