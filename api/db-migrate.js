@@ -33,6 +33,27 @@ const EXPECTED = {
 
 // Tabellen die aangemaakt moeten worden als ze niet bestaan
 const TABLES_TO_CREATE = {
+  email_actions: `CREATE TABLE IF NOT EXISTS email_actions (
+  id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+  email_id text NOT NULL,
+  action text NOT NULL,
+  value text,
+  set_by text,
+  set_at timestamptz DEFAULT now(),
+  resolved_at timestamptz,
+  resolved_by text
+);
+CREATE INDEX IF NOT EXISTS email_actions_email_id_idx ON email_actions (email_id);
+ALTER TABLE email_actions DISABLE ROW LEVEL SECURITY;`,
+  email_replies: `CREATE TABLE IF NOT EXISTS email_replies (
+  id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+  email_subject text,
+  final_reply text,
+  from_address text,
+  to_address text,
+  sent_at timestamptz DEFAULT now()
+);
+ALTER TABLE email_replies DISABLE ROW LEVEL SECURITY;`,
   kennisbank_items: `CREATE TABLE IF NOT EXISTS kennisbank_items (
   id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
   type text,
