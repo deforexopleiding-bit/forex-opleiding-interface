@@ -2388,6 +2388,7 @@
       state.overrides.read[uid] = true;
       saveOverrides();
       email.unread = false;
+      pushReadFlagToImap(email);
       delete state.aiProposals[uid];
       render();
       showToast('✓ E-mail verstuurd · Verwijderd uit Actie vereist' + (wasEdited ? ' · voorbeeld opgeslagen' : ''));
@@ -3375,7 +3376,7 @@
     document.getElementById('lastUpdateTime').textContent = 'Laatste update: ' + (state.fetchedAt ? new Date(state.fetchedAt).toLocaleTimeString('nl-NL') : '—');
 
     // Tab counts
-    document.getElementById('tabCountAlle').textContent    = state.emails.length;
+    document.getElementById('tabCountAlle').textContent    = filtered.filter(passesCatFilter).length;
     document.getElementById('tabCountActie').textContent   = actieEmails.length;
     document.getElementById('tabCountInfo').textContent    = infoEmails.length;
     document.getElementById('tabCountReclame').textContent = reclameEmails.length + suspectEmails.length;
@@ -3383,14 +3384,16 @@
     // Tab content
     const content = document.getElementById('tabContent');
     switch (state.activeTab) {
-      case 'alle':
-        content.innerHTML = renderAlleTab(state.emails);
+      case 'alle': {
+        const alleEmails = filtered.filter(passesCatFilter).filter(passesSearchFilter);
+        content.innerHTML = renderAlleTab(alleEmails);
         attachAlleRowHandlers();
-        if (state.emails.length > PAGE_SIZE) {
-          const totalPages = Math.max(1, Math.ceil(state.emails.length / PAGE_SIZE));
+        if (alleEmails.length > PAGE_SIZE) {
+          const totalPages = Math.max(1, Math.ceil(alleEmails.length / PAGE_SIZE));
           attachPaginationHandlers(totalPages, 'allePage');
         }
         break;
+      }
       case 'actie':
         content.innerHTML = renderActieTab(actieEmails);
         actieEmails.forEach((e) => {
