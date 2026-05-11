@@ -95,6 +95,50 @@
     .btn-success:hover { background: rgba(34,197,94,0.2); }
     .btn-sm { padding: 5px 10px; font-size: 12px; }
 
+    /* ── Body expand panel ── */
+    .body-panel-wrap { grid-column: 1 / -1; margin-top: 6px; }
+    .body-panel { padding: 12px; background: rgba(255,255,255,0.02); border: 1px solid var(--border-strong); border-radius: 8px; }
+    .body-from { font-size: 13px; font-weight: 600; color: var(--text); }
+    .body-from .sender-addr { font-weight: 400; color: var(--text-dim); font-size: 12px; }
+    .body-text {
+      font-size: 13px; color: var(--text); line-height: 1.6;
+      white-space: pre-wrap; word-break: break-word;
+      max-height: 300px; overflow-y: auto; padding: 8px 10px;
+      background: rgba(0,0,0,0.25); border-radius: 6px; margin: 8px 0 10px;
+    }
+    .body-text.loading { color: var(--text-dim); }
+    .body-text.error   { color: var(--red); }
+    .body-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
+    .info-row.body-open, .reclame-row.body-open { border-color: rgba(83,74,183,0.35); }
+    .info-meta-click { cursor: pointer; flex: 1; min-width: 0; }
+    .info-meta-click:hover .info-from { color: var(--accent-cyan); }
+
+    /* ── Age badges ── */
+    .age-badge { display: inline-block; font-size: 10px; padding: 2px 7px; border-radius: 10px; font-weight: 600; }
+    .age-orange { background: rgba(245,158,11,0.15); color: #fbbf24; border: 1px solid rgba(245,158,11,0.3); }
+    .age-red    { background: rgba(239,68,68,0.15);  color: #f87171; border: 1px solid rgba(239,68,68,0.3); }
+
+    /* ── Kennisbank panel ── */
+    .kb-panel { margin-top: 8px; padding: 12px; background: rgba(83,74,183,0.06); border: 1px solid rgba(83,74,183,0.2); border-radius: 8px; }
+    .kb-panel-title { font-size: 13px; font-weight: 600; color: var(--text); margin-bottom: 10px; }
+    .kb-direction-row, .kb-cat-row, .kb-tag-row { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 8px; }
+    .kb-chip {
+      padding: 3px 10px; border-radius: 20px; font-size: 11px; font-weight: 500;
+      border: 1px solid var(--border-strong); color: var(--text-dim);
+      cursor: pointer; background: transparent; transition: all 0.15s; font-family: inherit;
+    }
+    .kb-chip:hover { border-color: rgba(83,74,183,0.5); color: var(--text); }
+    .kb-chip.active { background: rgba(83,74,183,0.2); border-color: rgba(83,74,183,0.5); color: #AFA9EC; }
+    .kb-note textarea {
+      width: 100%; box-sizing: border-box; background: rgba(0,0,0,0.2);
+      border: 1px solid var(--border); border-radius: 6px; color: var(--text);
+      font-family: inherit; font-size: 12px; padding: 6px 8px;
+      resize: vertical; min-height: 44px; margin-bottom: 8px;
+    }
+    .kb-autosave { font-size: 12px; color: var(--text-dim); margin-top: 6px; display: flex; align-items: center; gap: 6px; }
+    .kb-autosave input { cursor: pointer; }
+    .kb-saved-badge { font-size: 11px; padding: 2px 8px; border-radius: 10px; background: rgba(83,74,183,0.15); border: 1px solid rgba(83,74,183,0.3); color: #AFA9EC; white-space: nowrap; }
+
     /* ── Status bar ── */
     .status-bar {
       display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
@@ -1137,7 +1181,11 @@
     pendingPropagation: null,  // { uids, category, domain } waiting for user confirmation
     openVtPanel:   null,       // uid van open Verplaats & Train panel
     vtPanelContext: null,      // 'actie' | 'info' | 'reclame'
-    vtPanelState:  { category: null, tags: [], requiresAction: null, reasonText: '', targetSection: null, aiHintCategory: null, aiHintConfidence: null }
+    vtPanelState:  { category: null, tags: [], requiresAction: null, reasonText: '', targetSection: null, aiHintCategory: null, aiHintConfidence: null },
+    openBodyUid:   null,       // uid van open body panel (niet-actie tabs)
+    openKbPanel:   null,       // uid van open kennisbank-toevoegen panel
+    kbSaved:       loadJson('email_kb_saved', {}),  // uid → true (al opgeslagen)
+    kbForm:        {}          // uid → { direction, category, note, tags }
   };
 
   // ── localStorage helpers ───────────────────────────────────────────────────
@@ -2082,22 +2130,41 @@
   }
 
   function updateCardPreview(uid) {
-    if (state.activeTab !== 'actie') return;
-    const card = document.querySelector('.actie-card[data-uid="' + uid + '"]');
-    if (!card) return;
-    const preview = card.querySelector('.card-preview');
-    if (!preview) return;
     const cache = state.bodyCache[uid];
-    if (!cache || cache.loading) {
-      preview.className = 'card-preview loading';
-      preview.innerHTML = '<span class="preview-spinner"></span> Inhoud laden…';
-    } else if (cache.error) {
-      preview.className = 'card-preview error';
-      preview.textContent = 'Kon inhoud niet laden: ' + cache.error;
-    } else {
-      preview.className = 'card-preview';
-      const raw = cache.text || '';
-      preview.textContent = raw.slice(0, 300) + (raw.length > 300 ? '…' : '');
+    // Actie card preview
+    const card = document.querySelector('.actie-card[data-uid="' + uid + '"]');
+    if (card) {
+      const preview = card.querySelector('.card-preview');
+      if (preview) {
+        if (!cache || cache.loading) {
+          preview.className = 'card-preview loading';
+          preview.innerHTML = '<span class="preview-spinner"></span> Inhoud laden…';
+        } else if (cache.error) {
+          preview.className = 'card-preview error';
+          preview.textContent = 'Kon inhoud niet laden: ' + cache.error;
+        } else {
+          preview.className = 'card-preview';
+          const raw = cache.text || '';
+          preview.textContent = raw.slice(0, 300) + (raw.length > 300 ? '…' : '');
+        }
+      }
+    }
+    // Body panel (andere tabs)
+    const panel = document.querySelector('.body-panel[data-uid="' + uid + '"]');
+    if (panel) {
+      const bodyText = panel.querySelector('.body-text');
+      if (bodyText) {
+        if (!cache || cache.loading) {
+          bodyText.className = 'body-text loading';
+          bodyText.innerHTML = '<span class="preview-spinner"></span> Inhoud laden…';
+        } else if (cache.error) {
+          bodyText.className = 'body-text error';
+          bodyText.textContent = 'Kon inhoud niet laden: ' + cache.error;
+        } else {
+          bodyText.className = 'body-text';
+          bodyText.textContent = cache.text || '(geen inhoud)';
+        }
+      }
     }
   }
 
@@ -2338,9 +2405,11 @@
     const proposal = state.aiProposals[uid];
     if (!email || !proposal || proposal.sending) return;
 
-    const card     = document.querySelector('.actie-card[data-uid="' + uid + '"]');
-    const textarea = card?.querySelector('[data-reply="' + uid + '"]');
-    const body     = (textarea?.value || proposal.current || '').trim();
+    const card      = document.querySelector('.actie-card[data-uid="' + uid + '"]');
+    const bodyPanel = document.querySelector('.body-panel[data-uid="' + uid + '"]');
+    const textarea  = card?.querySelector('[data-reply="' + uid + '"]') ||
+                      bodyPanel?.querySelector('[data-reply="' + uid + '"]');
+    const body      = (textarea?.value || proposal.current || '').trim();
     const aiText   = (proposal.original || '').trim();
     const wasEdited = body && body !== aiText;
     const toAddr   = email.fromAddress || getFromAddress(email);
@@ -2349,7 +2418,7 @@
 
     // Toon laadstatus op de knop
     state.aiProposals[uid] = { ...proposal, sending: true };
-    updateActieCard(uid);
+    if (state.activeTab === 'actie') updateActieCard(uid); else render();
 
     try {
       const res  = await fetch('/api/send-email', {
@@ -2389,6 +2458,10 @@
       saveOverrides();
       email.unread = false;
       pushReadFlagToImap(email);
+      // Auto-save kennisbank als checkbox aangevinkt
+      const kbAutoEl = document.querySelector('[data-kb-autosave="' + uid + '"]');
+      if (kbAutoEl?.checked && !state.kbSaved[uid]) autoSaveKbItem(uid, email, body);
+
       delete state.aiProposals[uid];
       render();
       showToast('✓ E-mail verstuurd · Verwijderd uit Actie vereist' + (wasEdited ? ' · voorbeeld opgeslagen' : ''));
@@ -2688,6 +2761,7 @@
         '<div class="act-sub-header">Acties</div>' +
         (e.unread ? '<button class="act-item" data-act="mark-read" data-uid="' + escapeHtml(uid) + '">' + ICON_READ + ' Markeer als gelezen</button>' : '') +
         '<button class="act-item" data-act="create-task" data-uid="' + escapeHtml(uid) + '">' + ICON_TASK + ' Maak taak aan</button>' +
+        '<button class="act-item" data-act="kb-open" data-uid="' + escapeHtml(uid) + '">📚 Toevoegen aan kennisbank</button>' +
         '<div class="act-divider"></div>' +
         '<div class="act-sub-header">Snooz</div>' +
         '<button class="act-item act-violet" data-act="snooze-day" data-uid="' + escapeHtml(uid) + '">' + ICON_SNOOZE + ' Tot morgen</button>' +
@@ -2729,6 +2803,21 @@
   function isSnoozed(uid) {
     return state.snoozeMap[uid] && new Date(state.snoozeMap[uid]) > new Date();
   }
+
+  function getAgeIndicator(dateStr) {
+    const days = Math.floor((Date.now() - new Date(dateStr)) / 86400000);
+    if (days < 3) return '';
+    const cls = days >= 7 ? 'age-red' : 'age-orange';
+    return '<span class="age-badge ' + cls + '">Al ' + days + ' dag' + (days === 1 ? '' : 'en') + ' open</span>';
+  }
+
+  const KB_CATEGORIES  = ['Klantvraag', 'Factuurvraag', 'Klacht', 'Compliment', 'Algemeen', 'FAQ'];
+  const KB_TAGS        = ['Goede aanpak', 'Standaard antwoord', 'Lastige situatie', 'Terugkerend patroon'];
+  const KB_DIRECTIONS  = [
+    { val: 'both',     label: 'Volledig gesprek' },
+    { val: 'incoming', label: 'Alleen inkomend'  },
+    { val: 'outgoing', label: 'Alleen mijn antwoord' },
+  ];
 
   // ── Action flag helpers ───────────────────────────────────────────────────
   function setActionFlag(uid, val) {
@@ -2813,6 +2902,177 @@
     } catch {}
   }
 
+  // ── Kennisbank panel rendering & opslaan ──────────────────────────────────
+  function renderKbPanel(e) {
+    const f = state.kbForm[e.uid] || { direction: 'both', category: 'Algemeen', note: '', tags: [] };
+    const hasReply = !!(state.sentReplies[e.uid] || state.aiProposals[e.uid]?.current);
+    return '<div class="kb-panel">' +
+      '<div class="kb-panel-title">📚 Toevoegen aan kennisbank</div>' +
+      '<div style="font-size:11px;color:var(--text-faint);margin-bottom:6px">Richting:</div>' +
+      '<div class="kb-direction-row">' +
+        KB_DIRECTIONS
+          .filter((d) => d.val !== 'outgoing' || hasReply)
+          .map((d) => '<button class="kb-chip' + (f.direction === d.val ? ' active' : '') + '" data-kb-dir="' + d.val + '" data-uid="' + escapeHtml(e.uid) + '">' + d.label + '</button>')
+          .join('') +
+      '</div>' +
+      '<div style="font-size:11px;color:var(--text-faint);margin:6px 0 4px">Categorie:</div>' +
+      '<div class="kb-cat-row">' +
+        KB_CATEGORIES.map((c) => '<button class="kb-chip' + (f.category === c ? ' active' : '') + '" data-kb-cat="' + escapeHtml(c) + '" data-uid="' + escapeHtml(e.uid) + '">' + escapeHtml(c) + '</button>').join('') +
+      '</div>' +
+      '<div style="font-size:11px;color:var(--text-faint);margin:6px 0 4px">Tags:</div>' +
+      '<div class="kb-tag-row">' +
+        KB_TAGS.map((t) => '<button class="kb-chip' + ((f.tags||[]).includes(t) ? ' active' : '') + '" data-kb-tag="' + escapeHtml(t) + '" data-uid="' + escapeHtml(e.uid) + '">' + escapeHtml(t) + '</button>').join('') +
+      '</div>' +
+      '<div class="kb-note"><textarea placeholder="Notitie (optioneel) — bijv. goede manier om incassokosten kwijt te schelden" data-kb-note="' + escapeHtml(e.uid) + '">' + escapeHtml(f.note || '') + '</textarea></div>' +
+      '<button class="btn btn-primary btn-sm" data-kb-save="' + escapeHtml(e.uid) + '">Toevoegen aan kennisbank</button>' +
+      ' <button class="btn btn-sm" data-kb-close="' + escapeHtml(e.uid) + '">Annuleren</button>' +
+    '</div>';
+  }
+
+  function attachKbFormHandlers(uid) {
+    const noteEl = document.querySelector('[data-kb-note="' + uid + '"]');
+    if (noteEl) noteEl.addEventListener('input', () => { if (!state.kbForm[uid]) state.kbForm[uid] = {}; state.kbForm[uid].note = noteEl.value; });
+    document.querySelectorAll('[data-kb-dir][data-uid="' + uid + '"]').forEach((btn) => {
+      btn.addEventListener('click', (ev) => { ev.stopPropagation(); if (!state.kbForm[uid]) state.kbForm[uid] = {}; state.kbForm[uid].direction = btn.dataset.kbDir; render(); });
+    });
+    document.querySelectorAll('[data-kb-cat][data-uid="' + uid + '"]').forEach((btn) => {
+      btn.addEventListener('click', (ev) => { ev.stopPropagation(); if (!state.kbForm[uid]) state.kbForm[uid] = {}; state.kbForm[uid].category = btn.dataset.kbCat; render(); });
+    });
+    document.querySelectorAll('[data-kb-tag][data-uid="' + uid + '"]').forEach((btn) => {
+      btn.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        if (!state.kbForm[uid]) state.kbForm[uid] = {};
+        if (!state.kbForm[uid].tags) state.kbForm[uid].tags = [];
+        const tag = btn.dataset.kbTag;
+        const idx = state.kbForm[uid].tags.indexOf(tag);
+        if (idx >= 0) state.kbForm[uid].tags.splice(idx, 1); else state.kbForm[uid].tags.push(tag);
+        render();
+      });
+    });
+    const saveBtn = document.querySelector('[data-kb-save="' + uid + '"]');
+    if (saveBtn) saveBtn.addEventListener('click', (ev) => { ev.stopPropagation(); saveToKennisbank(uid); });
+    const closeBtn = document.querySelector('[data-kb-close="' + uid + '"]');
+    if (closeBtn) closeBtn.addEventListener('click', (ev) => { ev.stopPropagation(); state.openKbPanel = null; render(); });
+  }
+
+  async function saveToKennisbank(uid) {
+    const email = findEmail(uid);
+    if (!email) return;
+    const f = state.kbForm[uid] || { direction: 'both', category: 'Algemeen', note: '', tags: [] };
+    const incomingBody = state.bodyCache[uid]?.text || '';
+    const sentReply  = state.sentReplies[uid];
+    const aiProposal = state.aiProposals[uid];
+    const outgoingBody = aiProposal?.current || '';
+    let content;
+    if (f.direction === 'both') {
+      content = 'INKOMEND:\n' + incomingBody + (outgoingBody ? '\n\nMIJN ANTWOORD:\n' + outgoingBody : '');
+    } else if (f.direction === 'incoming') {
+      content = incomingBody;
+    } else {
+      content = outgoingBody;
+    }
+    const note = [f.note, ...(f.tags || [])].filter(Boolean).join(' · ');
+    const item = {
+      type: f.category || 'Algemeen', direction: f.direction === 'both' ? 'Beide' : f.direction === 'incoming' ? 'Inkomend' : 'Uitgaand',
+      title: (email.subject || '(geen onderwerp)').slice(0, 80), content,
+      label: 'email_' + uid, note: note || null,
+      auto_generated: false, source_email_id: String(uid), helpfulness_score: 0, times_used: 0
+    };
+    try {
+      const res = await fetch('/api/kennisbank-sync', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'upsert_item', item }) });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'HTTP ' + res.status);
+      state.kbSaved[uid] = true;
+      saveJson('email_kb_saved', state.kbSaved);
+      state.openKbPanel = null;
+      render();
+      showToast('✓ Toegevoegd aan kennisbank · Agent leert van dit gesprek');
+    } catch (err) {
+      showToast('Kennisbank opslaan mislukt: ' + err.message, 'error');
+    }
+  }
+
+  async function autoSaveKbItem(uid, email, sentBody) {
+    const incomingBody = state.bodyCache[uid]?.text || '';
+    const content = 'INKOMEND:\n' + incomingBody + '\n\nMIJN ANTWOORD:\n' + sentBody;
+    const item = {
+      type: email.category || 'Algemeen', direction: 'Beide',
+      title: (email.subject || '(geen onderwerp)').slice(0, 80), content,
+      label: 'email_' + uid, note: null, auto_generated: true, source_email_id: String(uid), helpfulness_score: 0, times_used: 0
+    };
+    try {
+      const res = await fetch('/api/kennisbank-sync', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'upsert_item', item }) });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'HTTP ' + res.status);
+      state.kbSaved[uid] = true;
+      saveJson('email_kb_saved', state.kbSaved);
+    } catch (err) { console.warn('[KB auto-save] mislukt:', err.message); }
+  }
+
+  // ── Body expand panel (niet-actie tabs) ───────────────────────────────────
+  function renderBodyPanel(e) {
+    const cache = state.bodyCache[e.uid];
+    const proposal = state.aiProposals[e.uid];
+    const showGenBtn = !proposal || proposal.error;
+    const kbSaved = state.kbSaved[e.uid];
+    let bodyHtml;
+    if (!cache || cache.loading) {
+      bodyHtml = '<div class="body-text loading"><span class="preview-spinner"></span> Inhoud laden…</div>';
+    } else if (cache.error) {
+      bodyHtml = '<div class="body-text error">Kon inhoud niet laden: ' + escapeHtml(cache.error) + '</div>';
+    } else {
+      bodyHtml = '<div class="body-text">' + escapeHtml(cache.text || '(geen inhoud)') + '</div>';
+    }
+    return '<div class="body-panel-wrap">' +
+      '<div class="body-panel" data-uid="' + escapeHtml(e.uid) + '">' +
+        '<div style="margin-bottom:8px">' +
+          '<div class="body-from"><strong>' + escapeHtml(e.fromName || e.from || 'Onbekend') + '</strong>' +
+            (e.fromAddress ? ' <span class="sender-addr">&lt;' + escapeHtml(e.fromAddress) + '&gt;</span>' : '') + '</div>' +
+          '<div style="font-size:11px;color:var(--text-faint);margin-top:3px">' + formatDateTime(e.date) + '</div>' +
+        '</div>' +
+        bodyHtml +
+        renderSentBadge(e.uid) +
+        renderAiSection(e) +
+        '<div class="body-actions">' +
+          (showGenBtn ? '<button class="btn btn-ai btn-sm" data-action="generate" data-uid="' + escapeHtml(e.uid) + '">' + ICON_AI + ' AI antwoord</button>' : '') +
+          (kbSaved ? '<span class="kb-saved-badge">📚 In kennisbank</span>'
+            : '<button class="btn btn-sm" data-kb-open="' + escapeHtml(e.uid) + '">📚 Kennisbank</button>') +
+        '</div>' +
+        (state.openKbPanel === e.uid ? renderKbPanel(e) : '') +
+      '</div>' +
+    '</div>';
+  }
+
+  function attachBodyPanelHandlers(uid) {
+    const panel = document.querySelector('.body-panel[data-uid="' + uid + '"]');
+    if (!panel) return;
+    const replyBox = panel.querySelector('[data-reply="' + uid + '"]');
+    if (replyBox) replyBox.addEventListener('input', () => { if (state.aiProposals[uid]) state.aiProposals[uid].current = replyBox.value; });
+    panel.querySelectorAll('[data-action]').forEach((btn) => {
+      btn.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        const action = btn.dataset.action;
+        const u = btn.dataset.uid;
+        if      (action === 'generate')   startAiProposal(u);
+        else if (action === 'regenerate') regenerateAiProposal(u);
+        else if (action === 'send')       sendAiProposal(u);
+        else if (action === 'cancel')     cancelAiProposal(u);
+      });
+    });
+    const kbBtn = panel.querySelector('[data-kb-open="' + uid + '"]');
+    if (kbBtn) kbBtn.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      state.openKbPanel = state.openKbPanel === uid ? null : uid;
+      if (state.openKbPanel === uid && !state.kbForm[uid]) {
+        const email = findEmail(uid);
+        const hasReply = !!(state.sentReplies[uid] || state.aiProposals[uid]?.current);
+        state.kbForm[uid] = { direction: hasReply ? 'both' : 'incoming', category: email?.category || 'Algemeen', note: '', tags: [] };
+      }
+      render();
+    });
+    attachKbFormHandlers(uid);
+  }
+
   // ── Rendering: Actie tab ───────────────────────────────────────────────────
   function renderPreviewHtml(uid) {
     const cache = state.bodyCache[uid];
@@ -2842,7 +3102,9 @@
         '<button class="btn btn-send" data-action="send" data-uid="' + escapeHtml(e.uid) + '">' + ICON_SEND + ' Versturen</button>' +
         '<button class="btn" data-action="regenerate" data-uid="' + escapeHtml(e.uid) + '">' + ICON_REGEN + ' Opnieuw</button>' +
         '<button class="btn btn-danger" data-action="cancel" data-uid="' + escapeHtml(e.uid) + '">Afwijzen</button>' +
-      '</div></div>';
+      '</div>' +
+      '<label class="kb-autosave"><input type="checkbox" data-kb-autosave="' + escapeHtml(e.uid) + '" checked> Toevoegen aan kennisbank na verzenden</label>' +
+      '</div>';
   }
 
   function renderSentBadge(uid) {
@@ -2865,11 +3127,13 @@
     const snoozed = isSnoozed(e.uid);
     const q = state.searchQuery;
 
+    const kbSaved = state.kbSaved[e.uid];
     return '<div class="actie-card' + (e.unread ? ' unread' : '') + '" data-uid="' + escapeHtml(e.uid) + '">' +
       '<div class="card-top">' +
         renderConfDot(e.uid) +
         renderCatDropdown(e.uid, e.category) +
         (snoozed ? '<span class="snooze-badge">Gesnoozed</span>' : '') +
+        getAgeIndicator(e.date) +
         '<span class="card-time">' + escapeHtml(relativeTime(e.date)) + '</span>' +
         (e.unread ? '<span class="unread-dot" title="Ongelezen"></span>' : '') +
         renderActionMenu(e) +
@@ -2887,7 +3151,10 @@
       '<div class="card-actions">' +
         (showGenBtn ? '<button class="btn btn-ai" data-action="generate" data-uid="' + escapeHtml(e.uid) + '">' + ICON_AI + ' Genereer AI antwoord</button>' : '') +
         '<button class="btn" data-action="verplaats-train" data-uid="' + escapeHtml(e.uid) + '" title="Verplaats mail en train de agent met context">📂 Verplaats &amp; Train</button>' +
+        (kbSaved ? '<span class="kb-saved-badge">📚 In kennisbank</span>'
+          : '<button class="btn" data-action="kb-open" data-uid="' + escapeHtml(e.uid) + '">📚 Kennisbank</button>') +
       '</div>' +
+      (state.openKbPanel === e.uid ? renderKbPanel(e) : '') +
       (state.openVtPanel === e.uid ? renderVtPanel(e.uid) : '') +
     '</div>';
   }
@@ -2910,6 +3177,8 @@
   function renderAlleRow(e) {
     const q = state.searchQuery;
     const curSec = getEmailSection(e);
+    const isOpen = state.openBodyUid === e.uid;
+    const kbSaved = state.kbSaved[e.uid];
     const actMenu =
       '<div style="display:flex;gap:4px;align-items:center">' +
         '<button class="btn btn-sm" style="padding:3px 9px;font-size:11px" data-vt-uid="' + escapeHtml(e.uid) + '">📂 VT</button>' +
@@ -2918,6 +3187,7 @@
           '<div class="act-menu-dropdown" id="actMenu-alle-' + escapeHtml(e.uid) + '">' +
             '<button class="act-item" data-act="mark-action"  data-uid="' + escapeHtml(e.uid) + '">' + ICON_FLAG + ' Markeer als actie vereist</button>' +
             '<button class="act-item" data-act="create-task"  data-uid="' + escapeHtml(e.uid) + '">' + ICON_TASK + ' Maak taak aan</button>' +
+            '<button class="act-item" data-act="kb-open" data-uid="' + escapeHtml(e.uid) + '">📚 Toevoegen aan kennisbank</button>' +
             '<div class="act-divider"></div>' +
             '<button class="act-item act-violet" data-act="snooze-day"  data-uid="' + escapeHtml(e.uid) + '">' + ICON_SNOOZE + ' Snooz tot morgen</button>' +
             '<button class="act-item act-violet" data-act="snooze-week" data-uid="' + escapeHtml(e.uid) + '">' + ICON_SNOOZE + ' Snooz tot volgende week</button>' +
@@ -2929,9 +3199,9 @@
           '</div>' +
         '</div>' +
       '</div>';
-    return '<div class="info-row" data-uid="' + escapeHtml(e.uid) + '">' +
+    return '<div class="info-row' + (isOpen ? ' body-open' : '') + '" data-uid="' + escapeHtml(e.uid) + '">' +
       '<span class="cat-badge" data-cat="' + escapeHtml(e.category) + '">' + escapeHtml(e.category) + '</span>' +
-      '<div class="info-meta">' +
+      '<div class="info-meta info-meta-click" data-toggle-body="' + escapeHtml(e.uid) + '">' +
         '<div class="info-from">'    + highlightMatch(e.fromName || e.from || 'Onbekend', q) + '</div>' +
         '<div class="info-subject">' + highlightMatch(e.subject || '(geen onderwerp)', q)     + '</div>' +
       '</div>' +
@@ -2939,12 +3209,24 @@
       actMenu +
       (state.trainingMode ? renderTrainingInfo(e.uid) : '') +
       (state.openVtPanel === e.uid ? '<div class="info-vt-wrap">' + renderVtPanel(e.uid) + '</div>' : '') +
+      (isOpen ? renderBodyPanel(e) : '') +
     '</div>';
   }
 
   function attachAlleRowHandlers() {
     document.querySelectorAll('.info-list .info-row[data-uid]').forEach((row) => {
       const uid = row.dataset.uid;
+      // Body toggle
+      const metaEl = row.querySelector('[data-toggle-body="' + uid + '"]');
+      if (metaEl) metaEl.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        state.openBodyUid = state.openBodyUid === uid ? null : uid;
+        if (state.openBodyUid === uid) {
+          const em = findEmail(uid);
+          if (em && !state.bodyCache[uid]) fetchEmailBody(em);
+        }
+        render();
+      });
       const vtBtn = row.querySelector('[data-vt-uid="' + uid + '"]');
       if (vtBtn) vtBtn.addEventListener('click', (ev) => {
         ev.stopPropagation();
@@ -2975,8 +3257,20 @@
           else if (act === 'move-actie')   { verplaatsNaarSectie(u, 'actie'); }
           else if (act === 'move-info')    { verplaatsNaarSectie(u, 'info'); }
           else if (act === 'move-reclame') { verplaatsNaarSectie(u, 'reclame'); }
+          else if (act === 'kb-open') {
+            state.openBodyUid = uid;
+            state.openKbPanel = state.openKbPanel === u ? null : u;
+            if (state.openKbPanel === u && !state.kbForm[u]) {
+              const em = findEmail(u);
+              if (em && !state.bodyCache[u]) fetchEmailBody(em);
+              const hasReply = !!(state.sentReplies[u] || state.aiProposals[u]?.current);
+              state.kbForm[u] = { direction: hasReply ? 'both' : 'incoming', category: em?.category || 'Algemeen', note: '', tags: [] };
+            }
+            render();
+          }
         });
       });
+      if (state.openBodyUid === uid) attachBodyPanelHandlers(uid);
     });
   }
 
@@ -3077,14 +3371,41 @@
         else if (action === 'send')            sendAiProposal(u);
         else if (action === 'cancel')          cancelAiProposal(u);
         else if (action === 'verplaats-train') verplaatsEnTrain(u, 'actie');
+        else if (action === 'kb-open') {
+          state.openKbPanel = state.openKbPanel === u ? null : u;
+          if (state.openKbPanel === u && !state.kbForm[u]) {
+            const em = findEmail(u);
+            const hasReply = !!(state.sentReplies[u] || state.aiProposals[u]?.current);
+            state.kbForm[u] = { direction: hasReply ? 'both' : 'incoming', category: em?.category || 'Algemeen', note: '', tags: [] };
+          }
+          render();
+        }
       });
     });
+    // KB-menu acties vanuit ... dropdown
+    card.querySelectorAll('[data-act="kb-open"]').forEach((btn) => {
+      btn.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        closeAllDropdowns();
+        const u = btn.dataset.uid;
+        state.openKbPanel = state.openKbPanel === u ? null : u;
+        if (state.openKbPanel === u && !state.kbForm[u]) {
+          const em = findEmail(u);
+          const hasReply = !!(state.sentReplies[u] || state.aiProposals[u]?.current);
+          state.kbForm[u] = { direction: hasReply ? 'both' : 'incoming', category: em?.category || 'Algemeen', note: '', tags: [] };
+        }
+        render();
+      });
+    });
+    attachKbFormHandlers(uid);
   }
 
   // ── Rendering: Info tab ────────────────────────────────────────────────────
   function renderInfoRow(e) {
     const q = state.searchQuery;
     const curSec = getEmailSection(e);
+    const isOpen = state.openBodyUid === e.uid;
+    const kbSaved = state.kbSaved[e.uid];
     const infoActMenu =
       '<div style="display:flex;gap:4px;align-items:center">' +
         '<button class="btn btn-sm" style="padding:3px 9px;font-size:11px" data-vt-uid="' + escapeHtml(e.uid) + '">📂 VT</button>' +
@@ -3093,6 +3414,7 @@
           '<div class="act-menu-dropdown" id="actMenu-info-' + escapeHtml(e.uid) + '">' +
             '<button class="act-item" data-act="mark-action" data-uid="' + escapeHtml(e.uid) + '">' + ICON_FLAG + ' Markeer als actie vereist</button>' +
             '<button class="act-item" data-act="create-task"  data-uid="' + escapeHtml(e.uid) + '">' + ICON_TASK + ' Maak taak aan</button>' +
+            '<button class="act-item" data-act="kb-open" data-uid="' + escapeHtml(e.uid) + '">📚 Toevoegen aan kennisbank</button>' +
             '<div class="act-divider"></div>' +
             '<button class="act-item act-violet" data-act="snooze-day"  data-uid="' + escapeHtml(e.uid) + '">' + ICON_SNOOZE + ' Snooz tot morgen</button>' +
             '<button class="act-item act-violet" data-act="snooze-week" data-uid="' + escapeHtml(e.uid) + '">' + ICON_SNOOZE + ' Snooz tot volgende week</button>' +
@@ -3104,9 +3426,9 @@
         '</div>' +
       '</div>';
 
-    return '<div class="info-row" data-uid="' + escapeHtml(e.uid) + '">' +
+    return '<div class="info-row' + (isOpen ? ' body-open' : '') + '" data-uid="' + escapeHtml(e.uid) + '">' +
       '<span class="cat-badge" data-cat="' + escapeHtml(e.category) + '">' + escapeHtml(e.category) + '</span>' +
-      '<div class="info-meta">' +
+      '<div class="info-meta info-meta-click" data-toggle-body="' + escapeHtml(e.uid) + '">' +
         '<div class="info-from">'    + highlightMatch(e.fromName || e.from || 'Onbekend', q) + '</div>' +
         '<div class="info-subject">' + highlightMatch(e.subject || '(geen onderwerp)', q)     + '</div>' +
       '</div>' +
@@ -3114,12 +3436,24 @@
       infoActMenu +
       (state.trainingMode ? renderTrainingInfo(e.uid) : '') +
       (state.openVtPanel === e.uid ? '<div class="info-vt-wrap">' + renderVtPanel(e.uid) + '</div>' : '') +
+      (isOpen ? renderBodyPanel(e) : '') +
     '</div>';
   }
 
   function attachInfoRowHandlers() {
     document.querySelectorAll('.info-row[data-uid]').forEach((row) => {
       const uid = row.dataset.uid;
+      // Body toggle op info-meta click
+      const metaEl = row.querySelector('[data-toggle-body="' + uid + '"]');
+      if (metaEl) metaEl.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        state.openBodyUid = state.openBodyUid === uid ? null : uid;
+        if (state.openBodyUid === uid) {
+          const em = findEmail(uid);
+          if (em && !state.bodyCache[uid]) fetchEmailBody(em);
+        }
+        render();
+      });
       // VT button
       const vtBtn = row.querySelector('[data-vt-uid="' + uid + '"]');
       if (vtBtn) vtBtn.addEventListener('click', (ev) => { ev.stopPropagation(); verplaatsEnTrain(uid, 'info'); });
@@ -3130,9 +3464,9 @@
           ev.stopPropagation();
           const menu = document.getElementById('actMenu-info-' + uid);
           if (!menu) return;
-          const isOpen = menu.classList.contains('open');
+          const isMenuOpen = menu.classList.contains('open');
           closeAllDropdowns();
-          if (!isOpen) menu.classList.add('open');
+          if (!isMenuOpen) menu.classList.add('open');
         });
       }
       row.querySelectorAll('[data-act]').forEach((btn) => {
@@ -3152,8 +3486,23 @@
           else if (act === 'snooze-week')    { snoozeEmail(u, 7); }
           else if (act === 'move-actie')     { verplaatsNaarSectie(u, 'actie'); }
           else if (act === 'move-reclame')   { verplaatsNaarSectie(u, 'reclame'); }
+          else if (act === 'kb-open') {
+            state.openBodyUid = uid;
+            state.openKbPanel = state.openKbPanel === u ? null : u;
+            if (state.openKbPanel === u && !state.kbForm[u]) {
+              const em = findEmail(u);
+              if (em && !state.bodyCache[u]) fetchEmailBody(em);
+              const hasReply = !!(state.sentReplies[u] || state.aiProposals[u]?.current);
+              state.kbForm[u] = { direction: hasReply ? 'both' : 'incoming', category: em?.category || 'Algemeen', note: '', tags: [] };
+            }
+            render();
+          }
         });
       });
+      // Body panel handlers
+      if (state.openBodyUid === uid) {
+        attachBodyPanelHandlers(uid);
+      }
     });
   }
 
@@ -3177,16 +3526,20 @@
   // ── Rendering: Reclame tab ─────────────────────────────────────────────────
   function renderReclameRow(e, isSuspect) {
     const isSelected = state.reclameSelected.has(e.uid);
-    return '<div class="reclame-row' + (isSelected ? ' selected' : '') + '" data-uid="' + escapeHtml(e.uid) + '">' +
+    const isOpen = state.openBodyUid === e.uid;
+    const kbSaved = state.kbSaved[e.uid];
+    return '<div class="reclame-row' + (isSelected ? ' selected' : '') + (isOpen ? ' body-open' : '') + '" data-uid="' + escapeHtml(e.uid) + '">' +
       '<input type="checkbox" data-uid="' + escapeHtml(e.uid) + '"' + (isSelected ? ' checked' : '') + ' />' +
-      '<span class="reclame-from">' + escapeHtml(e.fromName || e.from || 'Onbekend') + '</span>' +
-      '<span class="reclame-subject">' + escapeHtml(e.subject || '(geen onderwerp)') + '</span>' +
+      '<span class="reclame-from" data-toggle-body="' + escapeHtml(e.uid) + '" style="cursor:pointer">' + escapeHtml(e.fromName || e.from || 'Onbekend') + '</span>' +
+      '<span class="reclame-subject" data-toggle-body="' + escapeHtml(e.uid) + '" style="cursor:pointer">' + escapeHtml(e.subject || '(geen onderwerp)') + '</span>' +
       '<span class="reclame-time">' + escapeHtml(relativeTime(e.date)) + '</span>' +
       '<div style="display:flex;gap:4px;align-items:center">' +
         '<button class="btn btn-sm" style="padding:3px 9px;font-size:11px" data-vt-uid="' + escapeHtml(e.uid) + '">📂 VT</button>' +
         '<div class="act-menu-wrap">' +
           '<button class="act-menu-btn" data-open-act="reclame-' + escapeHtml(e.uid) + '" title="Meer opties">⋯</button>' +
           '<div class="act-menu-dropdown" id="actMenu-reclame-' + escapeHtml(e.uid) + '">' +
+            '<button class="act-item" data-act="kb-open" data-uid="' + escapeHtml(e.uid) + '">📚 Toevoegen aan kennisbank</button>' +
+            '<div class="act-divider"></div>' +
             '<div class="act-section-label">Verplaats naar sectie</div>' +
             '<button class="act-item" data-act="move-actie" data-uid="' + escapeHtml(e.uid) + '">' + ICON_INBOX + ' Actie vereist</button>' +
             '<button class="act-item" data-act="move-info"  data-uid="' + escapeHtml(e.uid) + '">' + ICON_INFO2 + ' Leadmanagement</button>' +
@@ -3195,6 +3548,7 @@
       '</div>' +
       (state.trainingMode ? renderTrainingInfo(e.uid) : '') +
       (state.openVtPanel === e.uid ? '<div class="reclame-vt-wrap">' + renderVtPanel(e.uid) + '</div>' : '') +
+      (isOpen ? renderBodyPanel(e) : '') +
     '</div>';
   }
 
@@ -3250,6 +3604,18 @@
     });
     document.querySelectorAll('.reclame-row[data-uid]').forEach((row) => {
       const uid = row.dataset.uid;
+      // Body toggle op from/subject click
+      row.querySelectorAll('[data-toggle-body="' + uid + '"]').forEach((el) => {
+        el.addEventListener('click', (ev) => {
+          ev.stopPropagation();
+          state.openBodyUid = state.openBodyUid === uid ? null : uid;
+          if (state.openBodyUid === uid) {
+            const em = findEmail(uid);
+            if (em && !state.bodyCache[uid]) fetchEmailBody(em);
+          }
+          render();
+        });
+      });
       // VT button
       const vtBtn = row.querySelector('[data-vt-uid="' + uid + '"]');
       if (vtBtn) vtBtn.addEventListener('click', (ev) => { ev.stopPropagation(); verplaatsEnTrain(uid, 'reclame'); });
@@ -3271,10 +3637,22 @@
           closeAllDropdowns();
           const act = btn.dataset.act;
           const u   = btn.dataset.uid;
-          if (act === 'move-actie') verplaatsNaarSectie(u, 'actie');
-          else if (act === 'move-info') verplaatsNaarSectie(u, 'info');
+          if      (act === 'move-actie') verplaatsNaarSectie(u, 'actie');
+          else if (act === 'move-info')  verplaatsNaarSectie(u, 'info');
+          else if (act === 'kb-open') {
+            state.openBodyUid = uid;
+            state.openKbPanel = state.openKbPanel === u ? null : u;
+            if (state.openKbPanel === u && !state.kbForm[u]) {
+              const em = findEmail(u);
+              if (em && !state.bodyCache[u]) fetchEmailBody(em);
+              const hasReply = !!(state.sentReplies[u] || state.aiProposals[u]?.current);
+              state.kbForm[u] = { direction: hasReply ? 'both' : 'incoming', category: em?.category || 'Algemeen', note: '', tags: [] };
+            }
+            render();
+          }
         });
       });
+      if (state.openBodyUid === uid) attachBodyPanelHandlers(uid);
     });
   }
 
@@ -3324,7 +3702,11 @@
   // ── Main render ────────────────────────────────────────────────────────────
   function render() {
     const filtered     = getFilteredEmails();
-    const actieEmails  = getActieEmails(filtered);
+    // Actie tab: negeert datum filter — toont ALLE openstaande mails (wel adres-filter)
+    const actieBase    = state.addressFilter === 'Alle'
+      ? state.emails
+      : state.emails.filter((e) => (e.mailbox||'').toLowerCase() === state.addressFilter.toLowerCase());
+    const actieEmails  = getActieEmails(actieBase);
     const infoEmails   = getInfoEmails(filtered);
     const reclameEmails= getReclameEmails(filtered);
     const suspectEmails= getSuspectEmails();
@@ -3392,6 +3774,7 @@
           const totalPages = Math.max(1, Math.ceil(alleEmails.length / PAGE_SIZE));
           attachPaginationHandlers(totalPages, 'allePage');
         }
+        if (state.openBodyUid) { const _em = findEmail(state.openBodyUid); if (_em && !state.bodyCache[state.openBodyUid]) fetchEmailBody(_em); }
         break;
       }
       case 'actie':
@@ -3408,10 +3791,12 @@
           const totalPages = Math.max(1, Math.ceil(infoEmails.length / PAGE_SIZE));
           attachPaginationHandlers(totalPages, 'infoPage');
         }
+        if (state.openBodyUid) { const _em = findEmail(state.openBodyUid); if (_em && !state.bodyCache[state.openBodyUid]) fetchEmailBody(_em); }
         break;
       case 'reclame':
         content.innerHTML = renderReclameTab(reclameEmails, suspectEmails);
         attachReclameHandlers();
+        if (state.openBodyUid) { const _em = findEmail(state.openBodyUid); if (_em && !state.bodyCache[state.openBodyUid]) fetchEmailBody(_em); }
         break;
     }
   }
