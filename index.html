@@ -530,11 +530,13 @@ function getPeriodDates(period, from, to) {
     prevEnd   = new Date(end);   prevEnd.setDate(prevEnd.getDate() - 7);
     label = 'Vergeleken met zelfde dag vorige week';
   } else if (period === 'week') {
-    start = startOfDay(new Date(now)); start.setDate(start.getDate() - 6);
-    end = endOfDay(now);
+    const day = now.getDay();
+    const daysFromMonday = day === 0 ? 6 : day - 1;
+    start = startOfDay(now); start.setDate(start.getDate() - daysFromMonday);
+    end   = new Date(start); end.setDate(start.getDate() + 6); end.setHours(23,59,59,999);
     prevStart = new Date(start); prevStart.setDate(prevStart.getDate() - 7);
-    prevEnd   = new Date(start); prevEnd.setDate(prevEnd.getDate() - 1); prevEnd.setHours(23,59,59,999);
-    label = 'Vergeleken met vorige week';
+    prevEnd   = new Date(prevStart); prevEnd.setDate(prevStart.getDate() + 6); prevEnd.setHours(23,59,59,999);
+    label = 'Vergeleken met vorige week (maandag t/m zondag)';
   } else if (period === 'month') {
     start = new Date(now.getFullYear(), now.getMonth(), 1);
     end = endOfDay(now);
@@ -554,7 +556,7 @@ function getPeriodDates(period, from, to) {
 }
 
 function getComparisonLabel(period) {
-  const map = { today:'Vergeleken met zelfde dag vorige week', yesterday:'Vergeleken met zelfde dag vorige week', week:'Vergeleken met vorige week', month:'Vergeleken met vorige maand', custom:'Vergeleken met zelfde periode daarvoor' };
+  const map = { today:'Vergeleken met zelfde dag vorige week', yesterday:'Vergeleken met zelfde dag vorige week', week:'Vergeleken met vorige week (maandag t/m zondag)', month:'Vergeleken met vorige maand', custom:'Vergeleken met zelfde periode daarvoor' };
   return map[period] || '';
 }
 
