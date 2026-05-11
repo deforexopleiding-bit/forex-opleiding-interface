@@ -73,8 +73,9 @@ export default async function handler(req, res) {
         .then((r) => log('new_patterns_week', r)),
 
       // Recente correcties — email_subject (niet subject), email_sender (niet sender_email)
+      // correction_type weggelaten — kolom bestaat mogelijk nog niet
       supabase.from('learn_examples')
-        .select('email_sender, sender_domain, old_category, new_category, email_subject, corrected_at, correction_type')
+        .select('email_sender, sender_domain, old_category, new_category, email_subject, corrected_at')
         .gte('corrected_at', weekAgoIso)
         .order('corrected_at', { ascending: false })
         .limit(20)

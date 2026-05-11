@@ -569,6 +569,23 @@
     }
     .reanalyze-fill { height: 100%; background: var(--accent-cyan); border-radius: 2px; transition: width 0.3s; }
 
+    /* ── DB migratie banner ── */
+    .db-migrate-banner {
+      display: flex; align-items: flex-start; gap: 12px; flex-wrap: wrap;
+      padding: 10px 16px; margin-bottom: 10px;
+      background: rgba(245,158,11,0.08); border: 1px solid rgba(245,158,11,0.25);
+      border-radius: 10px; font-size: 12px; color: var(--amber);
+    }
+    .db-migrate-banner strong { display: block; margin-bottom: 2px; }
+    .db-migrate-banner .dmb-actions { display: flex; gap: 8px; margin-top: 6px; flex-wrap: wrap; }
+    .db-migrate-sql {
+      display: none; margin-top: 8px; width: 100%;
+      background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
+      padding: 10px; font-size: 10px; font-family: monospace; color: var(--text-dim);
+      white-space: pre; overflow-x: auto; max-height: 200px;
+    }
+    .db-migrate-sql.show { display: block; }
+
     /* ── Leer banner ("Klopt deze categorie?") ── */
     .learn-banner {
       display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
@@ -739,6 +756,8 @@
       </button>
     </div>
   </header>
+
+  <div id="dbMigrateBanner" style="display:none"></div>
 
   <div class="status-bar">
     <span id="actionCount">—</span>
@@ -2686,6 +2705,41 @@ ALTER TABLE email_patterns DISABLE ROW LEVEL SECURITY;`;
     return errorBanner + stats + body + debugBtn;
   }
 
+  // ── DB migratie check (eenmalig per sessie) ───────────────────────────────
+  async function runDbMigrate() {
+    const SESSION_KEY = 'db_migrate_checked';
+    if (sessionStorage.getItem(SESSION_KEY)) return;
+    sessionStorage.setItem(SESSION_KEY, '1');
+    try {
+      const res  = await fetch('/api/db-migrate');
+      if (!res.ok) return;
+      const data = await res.json();
+      if (data.ok) return; // alles aanwezig
+      showDbMigrateBanner(data);
+    } catch { /* stil falen — niet kritiek */ }
+  }
+
+  function showDbMigrateBanner(data) {
+    const banner = document.getElementById('dbMigrateBanner');
+    if (!banner) return;
+    const missing = (data.missing || []).map((m) => `${m.table}.${m.col}`).join(', ');
+    const sqlId   = 'dbMigrateSql';
+    banner.style.display = 'block';
+    banner.innerHTML =
+      '<div class="db-migrate-banner">' +
+        '<div style="flex:1">' +
+          '<strong>Database update vereist</strong>' +
+          'Ontbrekende kolommen: <code style="font-size:11px">' + escapeHtml(missing) + '</code>' +
+          '<div class="dmb-actions">' +
+            '<button class="btn btn-sm" onclick="document.getElementById(\'' + sqlId + '\').classList.toggle(\'show\')">Toon SQL ▾</button>' +
+            '<button class="btn btn-sm" onclick="navigator.clipboard.writeText(document.getElementById(\'' + sqlId + '\').textContent);showToast(\'SQL gekopieerd\')">Kopieer SQL</button>' +
+            '<button class="btn btn-sm" onclick="this.closest(\'.db-migrate-banner\').parentElement.style.display=\'none\'">✕ Verbergen</button>' +
+          '</div>' +
+          '<pre class="db-migrate-sql" id="' + sqlId + '">' + escapeHtml(data.sql_to_run || '') + '</pre>' +
+        '</div>' +
+      '</div>';
+  }
+
   // ── Cache versie migratie ──────────────────────────────────────────────────
   function checkCacheVersion() {
     if (localStorage.getItem(CACHE_VER_KEY) !== CACHE_VERSION) {
@@ -2710,6 +2764,7 @@ ALTER TABLE email_patterns DISABLE ROW LEVEL SECURITY;`;
     document.getElementById('leerrapportModal').addEventListener('click', (ev) => {
       if (ev.target === ev.currentTarget) closeLeerrapport();
     });
+    runDbMigrate();
     loadEmails();
   }
 
