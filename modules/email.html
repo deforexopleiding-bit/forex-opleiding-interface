@@ -2516,22 +2516,134 @@
     body.innerHTML = '<div class="state"><div class="spinner"></div><h3>Rapport laden…</h3></div>';
     fetch('/api/learning-report')
       .then((r) => r.json())
-      .then((data) => { body.innerHTML = renderLeerrapport(data); })
-      .catch((err) => { body.innerHTML = '<div class="lr-empty">Kon rapport niet laden: ' + escapeHtml(err.message) + '</div>'; });
+      .then((data) => {
+        console.log('[Leerrapport] raw data:', data);
+        body.innerHTML = renderLeerrapport(data);
+      })
+      .catch((err) => {
+        body.innerHTML = '<div class="lr-empty">Kon rapport niet laden: ' + escapeHtml(err.message) + '</div>';
+      });
   }
 
   function closeLeerrapport() {
     document.getElementById('leerrapportModal')?.classList.add('hidden');
   }
 
+  function runDebugSupabase() {
+    const btn = document.getElementById('lrDebugBtn');
+    if (btn) { btn.disabled = true; btn.textContent = 'Laden…'; }
+    fetch('/api/debug-supabase?test_insert=1')
+      .then((r) => r.json())
+      .then((data) => {
+        console.log('[Supabase Debug]', data);
+        const body = document.getElementById('leerrapportBody');
+        const errCount = [data.learn_examples, data.email_patterns, data.learn_examples_cols, data.email_patterns_cols]
+          .filter((x) => x && !x.ok).length;
+        let html = '<div style="background:var(--bg-elev-3);border:1px solid var(--border);border-radius:10px;padding:16px;font-size:12px;">' +
+          '<div class="lr-section-title" style="margin-bottom:10px">Supabase diagnose · ' + data.timestamp + '</div>';
+
+        function row(label, obj) {
+          const ok = obj?.ok !== false;
+          const icon = ok ? '✓' : '✗';
+          const col  = ok ? 'var(--green)' : 'var(--red)';
+          let detail = '';
+          if (!ok && obj?.error) detail = ' — ' + obj.error;
+          else if (obj?.total_rows != null) detail = ' · ' + obj.total_rows + ' rijen · kolommen: ' + (obj.columns || []).join(', ');
+          else if (obj?.tested) detail = ' · ' + (obj.tested || []).length + ' kolommen OK';
+          return '<div style="margin:4px 0"><span style="color:' + col + ';font-weight:700">' + icon + '</span> <strong>' + label + '</strong>' + escapeHtml(detail) + '</div>';
+        }
+
+        html += row('learn_examples tabel', data.learn_examples);
+        html += row('email_patterns tabel', data.email_patterns);
+        html += row('learn_examples kolommen', data.learn_examples_cols);
+        html += row('email_patterns kolommen', data.email_patterns_cols);
+        if (data.test_insert) html += row('Test-insert (+ auto-delete)', data.test_insert);
+
+        if (errCount === 0) {
+          html += '<div style="margin-top:10px;color:var(--green)">Alles OK — tabellen en kolommen bestaan. Controleer of er al correcties zijn opgeslagen.</div>';
+        } else {
+          html += '<div style="margin-top:12px;color:var(--amber);font-size:11px">Zie hieronder de SQL die je in Supabase moet uitvoeren (SQL Editor):</div>' +
+            '<pre style="margin-top:6px;background:var(--bg);padding:10px;border-radius:6px;overflow:auto;font-size:10px;color:var(--text-dim)">' + escapeHtml(getSqlFix()) + '</pre>';
+        }
+
+        html += '</div>';
+        body.innerHTML = html + '<div style="margin-top:12px"><button class="btn btn-sm" onclick="openLeerrapport()">← Terug naar rapport</button></div>';
+      })
+      .catch((err) => { console.error('Debug fout:', err); })
+      .finally(() => { if (btn) { btn.disabled = false; btn.textContent = 'Debug'; } });
+  }
+
+  function getSqlFix() {
+    return `-- Voer dit uit in Supabase → SQL Editor
+
+-- Tabel learn_examples (aanmaken als niet bestaat)
+CREATE TABLE IF NOT EXISTS learn_examples (
+  id              uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+  email_id        text,
+  sender_email    text,
+  sender_domain   text,
+  subject         text,
+  body_snippet    text,
+  old_category    text,
+  new_category    text NOT NULL,
+  corrected_by    text,
+  correction_type text DEFAULT 'manual',
+  corrected_at    timestamptz DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS learn_examples_sender ON learn_examples(sender_email, new_category);
+CREATE INDEX IF NOT EXISTS learn_examples_domain ON learn_examples(sender_domain, new_category);
+CREATE INDEX IF NOT EXISTS learn_examples_date ON learn_examples(corrected_at);
+
+-- Tabel email_patterns (aanmaken als niet bestaat)
+CREATE TABLE IF NOT EXISTS email_patterns (
+  id               uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+  sender_email     text,
+  sender_domain    text,
+  category         text NOT NULL,
+  confidence       integer DEFAULT 60,
+  times_seen       integer DEFAULT 0,
+  times_corrected  integer DEFAULT 0,
+  source           text DEFAULT 'ai',
+  last_seen        timestamptz DEFAULT now(),
+  last_corrected_at timestamptz
+);
+CREATE INDEX IF NOT EXISTS email_patterns_email ON email_patterns(sender_email);
+CREATE INDEX IF NOT EXISTS email_patterns_domain ON email_patterns(sender_domain, confidence);
+
+-- Kolommen toevoegen als tabellen al bestaan maar kolommen missen
+ALTER TABLE email_patterns    ADD COLUMN IF NOT EXISTS source           text DEFAULT 'ai';
+ALTER TABLE email_patterns    ADD COLUMN IF NOT EXISTS last_corrected_at timestamptz;
+ALTER TABLE email_patterns    ADD COLUMN IF NOT EXISTS last_seen        timestamptz DEFAULT now();
+ALTER TABLE learn_examples    ADD COLUMN IF NOT EXISTS sender_domain    text;
+ALTER TABLE learn_examples    ADD COLUMN IF NOT EXISTS body_snippet     text;
+ALTER TABLE learn_examples    ADD COLUMN IF NOT EXISTS correction_type  text DEFAULT 'manual';
+
+-- RLS uitschakelen (of policies toevoegen voor anon)
+ALTER TABLE learn_examples  DISABLE ROW LEVEL SECURITY;
+ALTER TABLE email_patterns  DISABLE ROW LEVEL SECURITY;`;
+  }
+
   function renderLeerrapport(d) {
+    function statVal(v) { return v != null ? v : '—'; }
     const acc = d.accuracy_rate != null ? d.accuracy_rate + '%' : '—';
+    const accColor = d.accuracy_rate == null ? '' : d.accuracy_rate >= 80 ? ' green' : d.accuracy_rate >= 60 ? ' amber' : ' red';
+
+    // Foutmelding als er query errors zijn
+    let errorBanner = '';
+    if (d._errors?.length) {
+      errorBanner = '<div style="background:rgba(239,68,68,0.08);border:1px solid rgba(239,68,68,0.2);border-radius:8px;padding:10px 14px;font-size:12px;color:var(--red);margin-bottom:4px">' +
+        '<strong>⚠ Supabase query fouten (' + d._errors.length + ')</strong><br>' +
+        d._errors.map((e) => escapeHtml(e.query + ': ' + e.error)).join('<br>') +
+        '<br><button class="btn btn-sm btn-danger" style="margin-top:8px" onclick="runDebugSupabase()">Diagnose uitvoeren →</button>' +
+        '</div>';
+    }
+
     const stats = '<div class="lr-stats-grid">' +
-      '<div class="lr-stat"><div class="lr-stat-val cyan">' + (d.total_patterns || 0) + '</div><div class="lr-stat-label">Totaal patronen</div></div>' +
-      '<div class="lr-stat"><div class="lr-stat-val green">' + acc + '</div><div class="lr-stat-label">AI nauwkeurigheid</div></div>' +
-      '<div class="lr-stat"><div class="lr-stat-val amber">' + (d.corrections_this_week || 0) + '</div><div class="lr-stat-label">Correcties deze week</div></div>' +
-      '<div class="lr-stat"><div class="lr-stat-val violet">' + (d.total_corrections || 0) + '</div><div class="lr-stat-label">Totaal correcties</div></div>' +
-      '<div class="lr-stat"><div class="lr-stat-val cyan">' + (d.new_patterns_this_week || 0) + '</div><div class="lr-stat-label">Nieuwe patronen (week)</div></div>' +
+      '<div class="lr-stat"><div class="lr-stat-val cyan">'   + statVal(d.total_patterns)         + '</div><div class="lr-stat-label">Totaal patronen</div></div>' +
+      '<div class="lr-stat"><div class="lr-stat-val' + accColor + '">' + acc                       + '</div><div class="lr-stat-label">AI nauwkeurigheid</div></div>' +
+      '<div class="lr-stat"><div class="lr-stat-val amber">'  + statVal(d.corrections_this_week)  + '</div><div class="lr-stat-label">Correcties deze week</div></div>' +
+      '<div class="lr-stat"><div class="lr-stat-val violet">' + statVal(d.total_corrections)      + '</div><div class="lr-stat-label">Totaal correcties</div></div>' +
+      '<div class="lr-stat"><div class="lr-stat-val cyan">'   + statVal(d.new_patterns_this_week) + '</div><div class="lr-stat-label">Nieuwe patronen (week)</div></div>' +
     '</div>';
 
     function confBar(c) {
@@ -2540,7 +2652,6 @@
       return '<span class="lr-conf-bar"><span class="lr-conf-track"><span class="lr-conf-fill" style="width:' + pct + '%;background:' + col + '"></span></span>' + pct + '%</span>';
     }
 
-    // Top gecorrigeerd
     let topHtml = '';
     if (d.top_corrected?.length) {
       topHtml = '<div><div class="lr-section-title">Meest gecorrigeerde afzenders</div>' +
@@ -2550,11 +2661,9 @@
           '<td>' + escapeHtml(p.category) + '</td>' +
           '<td>' + confBar(p.confidence) + '</td>' +
           '<td>' + (p.times_corrected || 0) + '×</td></tr>'
-        ).join('') +
-        '</tbody></table></div>';
+        ).join('') + '</tbody></table></div>';
     }
 
-    // Lage confidence
     let lowHtml = '';
     if (d.low_confidence?.length) {
       lowHtml = '<div><div class="lr-section-title">Onzekere patronen (confidence &lt; 50%)</div>' +
@@ -2564,11 +2673,9 @@
           '<td>' + escapeHtml(p.category) + '</td>' +
           '<td>' + confBar(p.confidence) + '</td>' +
           '<td>' + (p.times_seen || 0) + '×</td></tr>'
-        ).join('') +
-        '</tbody></table></div>';
+        ).join('') + '</tbody></table></div>';
     }
 
-    // Recente correcties
     let recentHtml = '';
     if (d.recent_corrections?.length) {
       recentHtml = '<div><div class="lr-section-title">Recente correcties (afgelopen 7 dagen)</div>' +
@@ -2579,15 +2686,19 @@
             '<td style="color:var(--red)">' + escapeHtml(c.old_category || '—') + '</td>' +
             '<td style="color:var(--green)">' + escapeHtml(c.new_category) + '</td>' +
             '<td>' + dt + '</td></tr>';
-        }).join('') +
-        '</tbody></table></div>';
+        }).join('') + '</tbody></table></div>';
     }
 
-    const isEmpty = !d.top_corrected?.length && !d.low_confidence?.length && !d.recent_corrections?.length;
-    const body = isEmpty ? '<div class="lr-empty">Nog geen leerdata beschikbaar. Categoriseer e-mails om het systeem te laten leren.</div>' :
-      (topHtml || '') + (lowHtml || '') + (recentHtml || '');
+    const noData = !d.top_corrected?.length && !d.low_confidence?.length && !d.recent_corrections?.length;
+    const body = noData
+      ? '<div class="lr-empty">Nog geen leerdata. Gebruik het categorie-dropdown op e-mails om het systeem te trainen, of klik Debug om de databasestatus te controleren.</div>'
+      : (topHtml + lowHtml + recentHtml);
 
-    return stats + body;
+    const debugBtn = '<div style="margin-top:16px;text-align:right">' +
+      '<button class="btn btn-sm" id="lrDebugBtn" onclick="runDebugSupabase()" style="font-size:11px;opacity:0.6">Debug · Controleer database</button>' +
+      '</div>';
+
+    return errorBanner + stats + body + debugBtn;
   }
 
   // ── Cache versie migratie ──────────────────────────────────────────────────
