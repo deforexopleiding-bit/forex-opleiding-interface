@@ -6,7 +6,7 @@ export default async function handler(req, res) {
     try {
       const { data: items, error } = await supabase
         .from('kennisbank_items')
-        .select('id, type, direction, title, category, content, question, answer, label, note, times_used, times_helpful, helpfulness_score, auto_generated, source_email_id, created_at')
+        .select('id, type, direction, title, content, label, note, helpfulness_score, times_used, created_at')
         .order('helpfulness_score', { ascending: false });
 
       if (error) throw error;
@@ -63,7 +63,7 @@ export default async function handler(req, res) {
         insertErr = error;
         // Fallback: kolom bestaat nog niet in Supabase (migratie niet gedraaid)
         if (insertErr && insertErr.message?.includes('42703')) {
-          const { source_email_id: _s, auto_generated: _a, ...safePayload } = payload;
+          const { source_email_id: _s, auto_generated: _a, updated_at: _u, ...safePayload } = payload;
           const { error: e2 } = await supabase.from('kennisbank_items').insert({
             ...safePayload,
             created_at: new Date().toISOString()
