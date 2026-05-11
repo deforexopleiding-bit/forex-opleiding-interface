@@ -61,11 +61,11 @@ export default async function handler(req, res) {
           created_at: new Date().toISOString()
         });
         insertErr = error;
-        // Fallback: kolom bestaat nog niet in Supabase (migratie niet gedraaid)
+        // Fallback: één of meer kolommen bestaan nog niet — probeer met minimale set
         if (insertErr && insertErr.message?.includes('42703')) {
-          const { source_email_id: _s, auto_generated: _a, updated_at: _u, ...safePayload } = payload;
           const { error: e2 } = await supabase.from('kennisbank_items').insert({
-            ...safePayload,
+            type:       payload.type    || 'Algemeen',
+            content:    payload.content || '',
             created_at: new Date().toISOString()
           });
           insertErr = e2;
