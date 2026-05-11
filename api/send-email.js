@@ -16,7 +16,7 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
-  const { from_mailbox, to, subject, text } = req.body || {};
+  const { from_mailbox, to, subject, text, cc, bcc } = req.body || {};
 
   if (!from_mailbox || !to || !subject || !text) {
     return res.status(400).json({ error: 'from_mailbox, to, subject en text zijn vereist' });
@@ -47,13 +47,17 @@ export default async function handler(req, res) {
   });
 
   try {
-    const info = await transporter.sendMail({
-      from:     `"De Forex Opleiding" <${from_mailbox}>`,
+    const mailOpts = {
+      from:    `"De Forex Opleiding" <${from_mailbox}>`,
       to,
       subject,
       text,
-      replyTo:  from_mailbox,
-    });
+      replyTo: from_mailbox,
+    };
+    if (cc)  mailOpts.cc  = cc;
+    if (bcc) mailOpts.bcc = bcc;
+
+    const info = await transporter.sendMail(mailOpts);
 
     console.log(`[send-email] Verstuurd — messageId: ${info.messageId} | geaccepteerd: ${info.accepted?.join(', ')}`);
     return res.status(200).json({

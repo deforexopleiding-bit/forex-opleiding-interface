@@ -139,6 +139,36 @@
     .kb-autosave input { cursor: pointer; }
     .kb-saved-badge { font-size: 11px; padding: 2px 8px; border-radius: 10px; background: rgba(83,74,183,0.15); border: 1px solid rgba(83,74,183,0.3); color: #AFA9EC; white-space: nowrap; }
 
+    /* ── Reply meta (Van / Aan / CC / BCC) ── */
+    .reply-meta-grid { margin-bottom: 8px; border: 1px solid var(--border); border-radius: 7px; overflow: hidden; }
+    .reply-meta-row { display: flex; align-items: center; gap: 0; border-bottom: 1px solid var(--border); }
+    .reply-meta-row:last-child { border-bottom: none; }
+    .reply-meta-label { font-size: 11px; color: var(--text-faint); width: 36px; flex-shrink: 0; text-align: right; padding: 5px 8px 5px 6px; }
+    .reply-meta-select, .reply-meta-input {
+      flex: 1; background: transparent; border: none; color: var(--text);
+      font-family: inherit; font-size: 12px; padding: 5px 6px; outline: none;
+    }
+    .reply-meta-select option { background: var(--bg-elev); }
+    .reply-meta-btns { display: flex; gap: 4px; padding: 2px 6px; flex-shrink: 0; }
+
+    /* ── Draft indicator ── */
+    .draft-indicator { font-size: 11px; color: var(--text-faint); margin: 2px 0 3px; min-height: 14px; }
+    .btn-link { background: none; border: none; color: var(--accent-cyan); font-size: 11px; cursor: pointer; padding: 0; font-family: inherit; text-decoration: underline; }
+
+    /* ── Verzonden tab ── */
+    .verzonden-list { display: flex; flex-direction: column; gap: 8px; }
+    .verzonden-row { padding: 10px 14px; background: var(--bg-elev); border: 1px solid var(--border); border-radius: 10px; transition: border-color 0.18s; cursor: default; }
+    .verzonden-row:hover { border-color: var(--border-strong); }
+    .verzonden-row.body-open { border-color: rgba(83,74,183,0.35); }
+    .verzonden-meta { cursor: pointer; }
+    .verzonden-header { display: flex; align-items: center; gap: 8px; margin-bottom: 2px; }
+    .verzonden-to { font-size: 13px; font-weight: 600; }
+    .verzonden-subject { font-size: 13px; color: var(--text-dim); }
+    .verzonden-from-line { font-size: 11px; color: var(--text-faint); margin-top: 2px; }
+    .verzonden-preview { font-size: 12px; color: var(--text-dim); margin-top: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .verzonden-body { font-size: 13px; color: var(--text); line-height: 1.6; white-space: pre-wrap; word-break: break-word; max-height: 280px; overflow-y: auto; padding: 8px 10px; background: rgba(0,0,0,0.25); border-radius: 6px; margin-top: 8px; }
+    .verzonden-search-bar { display: flex; gap: 8px; align-items: center; margin-bottom: 12px; }
+
     /* ── Status bar ── */
     .status-bar {
       display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
@@ -1007,6 +1037,11 @@
       Alle mails
       <span class="tab-count" id="tabCountAlle">0</span>
     </button>
+    <button class="tab" data-tab="verzonden">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+      Verzonden
+      <span class="tab-count" id="tabCountVerzonden">0</span>
+    </button>
   </div>
 
   <div id="tabContent">
@@ -1182,10 +1217,21 @@
     openVtPanel:   null,       // uid van open Verplaats & Train panel
     vtPanelContext: null,      // 'actie' | 'info' | 'reclame'
     vtPanelState:  { category: null, tags: [], requiresAction: null, reasonText: '', targetSection: null, aiHintCategory: null, aiHintConfidence: null },
-    openBodyUid:   null,       // uid van open body panel (niet-actie tabs)
-    openKbPanel:   null,       // uid van open kennisbank-toevoegen panel
-    kbSaved:       loadJson('email_kb_saved', {}),  // uid → true (al opgeslagen)
-    kbForm:        {}          // uid → { direction, category, note, tags }
+    openBodyUid:     null,       // uid van open body panel (niet-actie tabs)
+    openKbPanel:     null,       // uid van open kennisbank-toevoegen panel
+    kbSaved:         loadJson('email_kb_saved', {}),  // uid → true (al opgeslagen)
+    kbForm:          {},         // uid → { direction, category, note, tags }
+    verzondenEmails: [],
+    verzondenPage:   1,
+    verzondenLoaded: false,
+    verzondenSearch: '',
+    openVerzondenId: null,       // created_at van open verzonden rij
+    replyFrom:       {},         // uid → gekozen van-adres
+    replyTo:         {},         // uid → gekozen aan-adres
+    showCc:          {},         // uid → bool
+    showBcc:         {},         // uid → bool
+    replyCc:         {},         // uid → cc tekst
+    replyBcc:        {}          // uid → bcc tekst
   };
 
   // ── localStorage helpers ───────────────────────────────────────────────────
@@ -2395,6 +2441,7 @@
       undoManager.push('ai_cancel', { email_id: uid, proposal: { ...proposal } },
         'AI antwoord afgewezen: ' + (email?.fromName || email?.from || uid));
     }
+    localStorage.removeItem('draft_' + uid);
     delete state.aiProposals[uid];
     bumpReplyStat('rejected');
     updateActieCard(uid);
@@ -2407,24 +2454,39 @@
 
     const card      = document.querySelector('.actie-card[data-uid="' + uid + '"]');
     const bodyPanel = document.querySelector('.body-panel[data-uid="' + uid + '"]');
-    const textarea  = card?.querySelector('[data-reply="' + uid + '"]') ||
-                      bodyPanel?.querySelector('[data-reply="' + uid + '"]');
-    const body      = (textarea?.value || proposal.current || '').trim();
-    const aiText   = (proposal.original || '').trim();
+    const container = card || bodyPanel;
+
+    // ── Lees alle DOM-waarden VÓÓR re-render (sending verwijdert de UI) ──
+    const textarea    = container?.querySelector('[data-reply="' + uid + '"]');
+    const fromSelect  = container?.querySelector('[data-reply-from="' + uid + '"]');
+    const toInput     = container?.querySelector('[data-reply-to="' + uid + '"]');
+    const ccInput     = container?.querySelector('[data-reply-cc="' + uid + '"]');
+    const bccInput    = container?.querySelector('[data-reply-bcc="' + uid + '"]');
+    const kbAutoEl    = container?.querySelector('[data-kb-autosave="' + uid + '"]');
+
+    const body         = (textarea?.value || proposal.current || '').trim();
+    const fromMailbox  = fromSelect?.value  || state.replyFrom[uid] || email.mailbox;
+    const toAddr       = toInput?.value?.trim()  || state.replyTo[uid]  || email.fromAddress || getFromAddress(email);
+    const ccVal        = ccInput?.value?.trim()  || state.replyCc[uid]  || '';
+    const bccVal       = bccInput?.value?.trim() || state.replyBcc[uid] || '';
+    const shouldSaveKb = kbAutoEl?.checked ?? true;
+
+    const aiText    = (proposal.original || '').trim();
     const wasEdited = body && body !== aiText;
-    const toAddr   = email.fromAddress || getFromAddress(email);
-    const rawSubj  = email.subject || '';
-    const subject  = /^re:/i.test(rawSubj) ? rawSubj : 'Re: ' + rawSubj;
+    const rawSubj   = email.subject || '';
+    const subject   = /^re:/i.test(rawSubj) ? rawSubj : 'Re: ' + rawSubj;
 
     // Toon laadstatus op de knop
     state.aiProposals[uid] = { ...proposal, sending: true };
     if (state.activeTab === 'actie') updateActieCard(uid); else render();
 
     try {
+      const sendPayload = { from_mailbox: fromMailbox, to: toAddr, subject, text: body };
+      if (ccVal)  sendPayload.cc  = ccVal;
+      if (bccVal) sendPayload.bcc = bccVal;
       const res  = await fetch('/api/send-email', {
-        method:  'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ from_mailbox: email.mailbox, to: toAddr, subject, text: body })
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(sendPayload)
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'HTTP ' + res.status);
@@ -2439,10 +2501,18 @@
       }
       bumpReplyStat(wasEdited ? 'edited' : 'approved');
 
-      // Verstuurd registreren
+      // Verstuurd registreren (met from-adres)
       const sentAt = new Date().toISOString();
-      state.sentReplies[uid] = { sentAt, to: toAddr };
+      state.sentReplies[uid] = { sentAt, to: toAddr, from: fromMailbox };
       saveJson(SENT_REPLIES_KEY, state.sentReplies);
+
+      // Sla op in Supabase via email_actions voor Verzonden tab
+      saveEmailAction(uid, 'reply_sent', JSON.stringify({
+        to: toAddr, from: fromMailbox, subject, body,
+        category: email.category, from_name: email.fromName || email.from || 'Onbekend'
+      }));
+      // Voeg toe aan lokale verzondenEmails zodat tab direct up-to-date is
+      state.verzondenEmails.unshift({ email_id: uid, created_at: sentAt, to: toAddr, from: fromMailbox, subject, body, category: email.category });
 
       // Verwijder uit Actie vereist → verplaats naar Leadmanagement
       setActionFlag(uid, false);
@@ -2458,17 +2528,21 @@
       saveOverrides();
       email.unread = false;
       pushReadFlagToImap(email);
-      // Auto-save kennisbank als checkbox aangevinkt
-      const kbAutoEl = document.querySelector('[data-kb-autosave="' + uid + '"]');
-      if (kbAutoEl?.checked && !state.kbSaved[uid]) autoSaveKbItem(uid, email, body);
+
+      // Draft verwijderen na verzenden
+      localStorage.removeItem('draft_' + uid);
+
+      // Auto-save kennisbank (waarde al vóór re-render gelezen — was de bug)
+      if (shouldSaveKb && !state.kbSaved[uid]) autoSaveKbItem(uid, email, body);
 
       delete state.aiProposals[uid];
       render();
-      showToast('✓ E-mail verstuurd · Verwijderd uit Actie vereist' + (wasEdited ? ' · voorbeeld opgeslagen' : ''));
+      const kbToast = shouldSaveKb && !state.kbSaved[uid] ? ' · Toegevoegd aan kennisbank' : '';
+      showToast('✓ E-mail verstuurd · Verwijderd uit Actie vereist' + kbToast + (wasEdited ? ' · voorbeeld opgeslagen' : ''));
     } catch (err) {
       // Fout: herstel proposal zodat gebruiker opnieuw kan proberen
       state.aiProposals[uid] = { ...proposal, sending: false };
-      updateActieCard(uid);
+      if (state.activeTab === 'actie') updateActieCard(uid); else render();
       showToast('Versturen mislukt: ' + err.message, 'error');
     }
   }
@@ -2811,6 +2885,13 @@
     return '<span class="age-badge ' + cls + '">Al ' + days + ' dag' + (days === 1 ? '' : 'en') + ' open</span>';
   }
 
+  const MAILBOXES = [
+    'leads@deforexopleiding.nl',
+    'info@deforexopleiding.nl',
+    'partners@deforexopleiding.nl',
+    'administratie@deforexopleiding.nl',
+  ];
+
   const KB_CATEGORIES  = ['Klantvraag', 'Factuurvraag', 'Klacht', 'Compliment', 'Algemeen', 'FAQ'];
   const KB_TAGS        = ['Goede aanpak', 'Standaard antwoord', 'Lastige situatie', 'Terugkerend patroon'];
   const KB_DIRECTIONS  = [
@@ -2900,6 +2981,87 @@
         render();
       }
     } catch {}
+  }
+
+  // ── Verzonden tab ─────────────────────────────────────────────────────────
+  async function loadVerzondenEmails() {
+    if (state.verzondenLoaded) return;
+    try {
+      const res  = await fetch('/api/sent-replies');
+      const data = await res.json();
+      state.verzondenEmails = data.sent || [];
+      state.verzondenLoaded = true;
+      if (state.activeTab === 'verzonden') render();
+    } catch (err) { console.warn('[Verzonden] laden mislukt:', err.message); }
+  }
+
+  function renderVerzondenTab() {
+    const q = (state.verzondenSearch || '').trim().toLowerCase();
+    const sq = state.searchQuery.trim().toLowerCase();
+    const query = q || sq;
+    let emails = state.verzondenEmails;
+    if (query) {
+      emails = emails.filter((e) => {
+        const hay = [e.to || '', e.from || '', e.subject || '', e.body || '', e.from_name || ''].join(' ').toLowerCase();
+        return hay.includes(query);
+      });
+    }
+    let html = '<div class="verzonden-search-bar">' +
+      '<input type="text" class="search-input" style="max-width:340px;flex:1" placeholder="Zoeken in verzonden…" data-verzonden-search value="' + escapeHtml(state.verzondenSearch) + '">' +
+      (query ? '<span style="font-size:12px;color:var(--text-dim)">' + emails.length + ' resultaat' + (emails.length !== 1 ? 'en' : '') + '</span>' : '') +
+    '</div>';
+
+    if (!state.verzondenLoaded) {
+      html += '<div class="state"><span class="preview-spinner"></span><p style="margin-top:8px">Verzonden mails laden…</p></div>';
+      return html;
+    }
+    if (!emails.length) {
+      html += '<div class="state"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:var(--text-faint)"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg><h3>Geen verzonden mails</h3><p>Verstuurde antwoorden verschijnen hier.</p></div>';
+      return html;
+    }
+    const total = emails.length;
+    const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+    if (state.verzondenPage > totalPages) state.verzondenPage = 1;
+    const slice = emails.slice((state.verzondenPage - 1) * PAGE_SIZE, state.verzondenPage * PAGE_SIZE);
+    html += '<div class="verzonden-list">' + slice.map((e) => renderVerzondenRow(e, query)).join('') + '</div>';
+    if (totalPages > 1) html += renderPagination(state.verzondenPage, totalPages, total, 'verzondenPage');
+    return html;
+  }
+
+  function renderVerzondenRow(e, q) {
+    const id = e.created_at || e.email_id;
+    const isOpen = state.openVerzondenId === id;
+    const preview = (e.body || '').slice(0, 150).replace(/\n/g, ' ');
+    const dt = formatDateTime(e.created_at);
+    return '<div class="verzonden-row' + (isOpen ? ' body-open' : '') + '" data-verzonden-id="' + escapeHtml(id) + '">' +
+      '<div class="verzonden-meta" data-toggle-verzonden="' + escapeHtml(id) + '">' +
+        '<div class="verzonden-header">' +
+          '<span class="verzonden-to">' + highlightMatch(e.to || '—', q || '') + '</span>' +
+          '<span class="info-time">' + escapeHtml(relativeTime(e.created_at)) + '</span>' +
+        '</div>' +
+        '<div class="verzonden-subject">' + highlightMatch(e.subject || '(geen onderwerp)', q || '') + '</div>' +
+        '<div class="verzonden-from-line">Via: ' + escapeHtml(e.from || '—') + ' · ' + escapeHtml(dt) + '</div>' +
+        (preview ? '<div class="verzonden-preview">' + highlightMatch(preview, q || '') + '</div>' : '') +
+      '</div>' +
+      (isOpen ? '<div class="verzonden-body">' + escapeHtml(e.body || '(geen inhoud)') + '</div>' : '') +
+    '</div>';
+  }
+
+  function attachVerzondenHandlers() {
+    // Verzonden zoeken
+    const searchEl = document.querySelector('[data-verzonden-search]');
+    if (searchEl) {
+      searchEl.addEventListener('input', () => { state.verzondenSearch = searchEl.value; state.verzondenPage = 1; render(); });
+      searchEl.addEventListener('click', (ev) => ev.stopPropagation());
+    }
+    // Toggle rij
+    document.querySelectorAll('[data-toggle-verzonden]').forEach((el) => {
+      el.addEventListener('click', () => {
+        const id = el.dataset.toggleVerzonden;
+        state.openVerzondenId = state.openVerzondenId === id ? null : id;
+        render();
+      });
+    });
   }
 
   // ── Kennisbank panel rendering & opslaan ──────────────────────────────────
@@ -3086,16 +3248,57 @@
   function renderAiSection(e) {
     const p = state.aiProposals[e.uid];
     if (!p) return '';
-    if (p.loading)  return '<div class="card-ai-loading"><span class="ai-loading-spinner"></span> AI schrijft antwoord…</div>';
-    if (p.sending)  return '<div class="card-ai-loading"><span class="ai-loading-spinner"></span> Versturen…</div>';
-    if (p.error)    return '<div class="card-ai-error">AI-fout: ' + escapeHtml(p.error) + '</div>';
+    if (p.loading) return '<div class="card-ai-loading"><span class="ai-loading-spinner"></span> AI schrijft antwoord…</div>';
+    if (p.sending) return '<div class="card-ai-loading"><span class="ai-loading-spinner"></span> Versturen…</div>';
+    if (p.error)   return '<div class="card-ai-error">AI-fout: ' + escapeHtml(p.error) + '</div>';
+
     const kbUsed = p.kennisbank_used ?? null;
     const kbMeta = kbUsed !== null
       ? '<div class="reply-kb-meta">Kennisbank: ' + kbUsed + ' item' + (kbUsed !== 1 ? 's' : '') + ' gebruikt' +
         (kbUsed === 0 ? ' <span style="color:var(--red)">· Kennisbank leeg</span>' : '') + '</div>'
       : '';
+
+    const fromMailbox = state.replyFrom[e.uid] || e.mailbox || MAILBOXES[0];
+    const toAddr      = state.replyTo[e.uid] || e.fromAddress || getFromAddress(e);
+    const showCc  = !!state.showCc[e.uid];
+    const showBcc = !!state.showBcc[e.uid];
+
+    // Draft: herstel als aanwezig
+    let draftBanner = '';
+    try {
+      const saved = localStorage.getItem('draft_' + e.uid);
+      if (saved) {
+        const d = JSON.parse(saved);
+        draftBanner = '<div class="draft-indicator" data-draft-uid="' + escapeHtml(e.uid) + '">Concept hersteld van ' + escapeHtml(d.savedAt || '') +
+          ' <button class="btn-link" data-clear-draft="' + escapeHtml(e.uid) + '">Verwijderen</button></div>';
+        if (!p._draftApplied) p.current = d.body || p.current;
+        p._draftApplied = true;
+      }
+    } catch {}
+
     return '<div class="card-reply-section">' +
       '<div class="reply-label"><span class="ai-tag">AI</span> Voorgesteld antwoord</div>' +
+      // Van / Aan / CC / BCC
+      '<div class="reply-meta-grid">' +
+        '<div class="reply-meta-row">' +
+          '<span class="reply-meta-label">Van:</span>' +
+          '<select class="reply-meta-select" data-reply-from="' + escapeHtml(e.uid) + '">' +
+            MAILBOXES.map((m) => '<option value="' + m + '"' + (m === fromMailbox ? ' selected' : '') + '>' + m + '</option>').join('') +
+          '</select>' +
+        '</div>' +
+        '<div class="reply-meta-row">' +
+          '<span class="reply-meta-label">Aan:</span>' +
+          '<input class="reply-meta-input" type="text" data-reply-to="' + escapeHtml(e.uid) + '" value="' + escapeHtml(toAddr) + '">' +
+          '<div class="reply-meta-btns">' +
+            '<button class="btn btn-sm' + (showCc ? ' active' : '') + '" data-toggle-cc="' + escapeHtml(e.uid) + '">CC</button>' +
+            '<button class="btn btn-sm' + (showBcc ? ' active' : '') + '" data-toggle-bcc="' + escapeHtml(e.uid) + '">BCC</button>' +
+          '</div>' +
+        '</div>' +
+        (showCc  ? '<div class="reply-meta-row"><span class="reply-meta-label">CC:</span><input class="reply-meta-input" type="text" data-reply-cc="'  + escapeHtml(e.uid) + '" value="' + escapeHtml(state.replyCc[e.uid] || '')  + '" placeholder="CC-adressen (kommagescheiden)"></div>'  : '') +
+        (showBcc ? '<div class="reply-meta-row"><span class="reply-meta-label">BCC:</span><input class="reply-meta-input" type="text" data-reply-bcc="' + escapeHtml(e.uid) + '" value="' + escapeHtml(state.replyBcc[e.uid] || '') + '" placeholder="BCC-adressen (kommagescheiden)"></div>' : '') +
+      '</div>' +
+      draftBanner +
+      (draftBanner ? '' : '<div class="draft-indicator" data-draft-uid="' + escapeHtml(e.uid) + '" style="display:none"></div>') +
       '<textarea class="reply-box" data-reply="' + escapeHtml(e.uid) + '">' + escapeHtml(p.current) + '</textarea>' +
       kbMeta +
       '<div class="reply-actions">' +
@@ -3104,15 +3307,16 @@
         '<button class="btn btn-danger" data-action="cancel" data-uid="' + escapeHtml(e.uid) + '">Afwijzen</button>' +
       '</div>' +
       '<label class="kb-autosave"><input type="checkbox" data-kb-autosave="' + escapeHtml(e.uid) + '" checked> Toevoegen aan kennisbank na verzenden</label>' +
-      '</div>';
+    '</div>';
   }
 
   function renderSentBadge(uid) {
     const s = state.sentReplies[uid];
     if (!s) return '';
     const dt = new Date(s.sentAt).toLocaleString('nl-NL', { day:'2-digit', month:'short', hour:'2-digit', minute:'2-digit' });
+    const fromLabel = s.from ? ' · via ' + escapeHtml(s.from) : '';
     return '<div style="margin:6px 0 2px;padding:5px 10px;background:rgba(34,197,94,0.08);border:1px solid rgba(34,197,94,0.25);border-radius:6px;font-size:11px;color:#4ade80;">' +
-      ICON_READ + ' Verstuurd op ' + dt + ' naar ' + escapeHtml(s.to) +
+      ICON_READ + ' Beantwoord op ' + dt + ' naar ' + escapeHtml(s.to) + fromLabel +
     '</div>';
   }
 
@@ -3285,6 +3489,8 @@
     return '<div class="actie-list">' + emails.map(renderActieCard).join('') + '</div>';
   }
 
+  const _draftTimers = {};
+
   function attachActieCardHandlers(uid) {
     const card = document.querySelector('.actie-card[data-uid="' + uid + '"]');
     if (!card) return;
@@ -3357,8 +3563,27 @@
     if (replyBox) {
       replyBox.addEventListener('input', () => {
         if (state.aiProposals[uid]) state.aiProposals[uid].current = replyBox.value;
+        clearTimeout(_draftTimers[uid]);
+        _draftTimers[uid] = setTimeout(() => {
+          const now = new Date().toLocaleTimeString('nl-NL', { hour: '2-digit', minute: '2-digit' });
+          localStorage.setItem('draft_' + uid, JSON.stringify({ body: replyBox.value, savedAt: now }));
+          const ind = document.querySelector('[data-draft-uid="' + uid + '"]');
+          if (ind) { ind.textContent = 'Concept opgeslagen om ' + now; ind.style.display = ''; }
+        }, 30000);
       });
     }
+    const ccBtn = card.querySelector('[data-toggle-cc="' + uid + '"]');
+    if (ccBtn) ccBtn.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      state.showCc[uid] = !state.showCc[uid];
+      updateActieCard(uid);
+    });
+    const bccBtn = card.querySelector('[data-toggle-bcc="' + uid + '"]');
+    if (bccBtn) bccBtn.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      state.showBcc[uid] = !state.showBcc[uid];
+      updateActieCard(uid);
+    });
 
     // ── AI proposal buttons + Verplaats & Train ──────────────────────────
     card.querySelectorAll('[data-action]').forEach((btn) => {
@@ -3758,10 +3983,11 @@
     document.getElementById('lastUpdateTime').textContent = 'Laatste update: ' + (state.fetchedAt ? new Date(state.fetchedAt).toLocaleTimeString('nl-NL') : '—');
 
     // Tab counts
-    document.getElementById('tabCountAlle').textContent    = filtered.filter(passesCatFilter).length;
-    document.getElementById('tabCountActie').textContent   = actieEmails.length;
-    document.getElementById('tabCountInfo').textContent    = infoEmails.length;
-    document.getElementById('tabCountReclame').textContent = reclameEmails.length + suspectEmails.length;
+    document.getElementById('tabCountAlle').textContent      = filtered.filter(passesCatFilter).length;
+    document.getElementById('tabCountActie').textContent     = actieEmails.length;
+    document.getElementById('tabCountInfo').textContent      = infoEmails.length;
+    document.getElementById('tabCountReclame').textContent   = reclameEmails.length + suspectEmails.length;
+    document.getElementById('tabCountVerzonden').textContent = state.verzondenEmails.length;
 
     // Tab content
     const content = document.getElementById('tabContent');
@@ -3797,6 +4023,15 @@
         content.innerHTML = renderReclameTab(reclameEmails, suspectEmails);
         attachReclameHandlers();
         if (state.openBodyUid) { const _em = findEmail(state.openBodyUid); if (_em && !state.bodyCache[state.openBodyUid]) fetchEmailBody(_em); }
+        break;
+      case 'verzonden':
+        if (!state.verzondenLoaded) loadVerzondenEmails();
+        content.innerHTML = renderVerzondenTab();
+        attachVerzondenHandlers();
+        if (state.verzondenEmails.length > PAGE_SIZE) {
+          const totalPages = Math.max(1, Math.ceil(state.verzondenEmails.length / PAGE_SIZE));
+          attachPaginationHandlers(totalPages, 'verzondenPage');
+        }
         break;
     }
   }
