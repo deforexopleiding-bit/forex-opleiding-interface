@@ -3899,6 +3899,7 @@
         else if (action === 'regenerate')      regenerateAiProposal(u);
         else if (action === 'send')            sendAiProposal(u);
         else if (action === 'cancel')          cancelAiProposal(u);
+        else if (action === 'create-task')     { console.log('Taak knop geklikt voor uid:', u); openTaakVanEmail(u); }
         else if (action === 'verplaats-train') verplaatsEnTrain(u, 'actie');
         else if (action === 'kb-open') {
           state.openKbPanel = state.openKbPanel === u ? null : u;
