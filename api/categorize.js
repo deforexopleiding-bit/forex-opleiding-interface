@@ -49,7 +49,7 @@ async function fetchAiContext(senderEmail, senderDomain) {
     // Eerdere correcties voor deze afzender (max 20)
     let corrQuery = supabase
       .from('learn_examples')
-      .select('old_category, new_category, subject, corrected_at')
+      .select('old_category, new_category, email_subject, corrected_at')
       .order('corrected_at', { ascending: false })
       .limit(20);
 
@@ -60,7 +60,7 @@ async function fetchAiContext(senderEmail, senderDomain) {
     const { data: corrections } = await corrQuery;
     if (corrections?.length) {
       correctionsContext = corrections
-        .map((c) => `- "${c.subject || '?'}" was "${c.old_category}" → gecorrigeerd naar "${c.new_category}"`)
+        .map((c) => `- "${c.email_subject || '?'}" was "${c.old_category}" → gecorrigeerd naar "${c.new_category}"`)
         .join('\n');
     }
 
@@ -68,7 +68,7 @@ async function fetchAiContext(senderEmail, senderDomain) {
     if (senderEmail) {
       const { data: pattern } = await supabase
         .from('email_patterns')
-        .select('category, confidence, times_seen, times_corrected, source')
+        .select('category, confidence, times_seen, source')
         .eq('sender_email', senderEmail)
         .maybeSingle();
 
@@ -76,12 +76,12 @@ async function fetchAiContext(senderEmail, senderDomain) {
         patternsContext =
           `Afzender: ${senderEmail} → ${pattern.category}` +
           ` (confidence: ${pattern.confidence}%, gezien: ${pattern.times_seen}x,` +
-          ` gecorrigeerd: ${pattern.times_corrected}x, bron: ${pattern.source || 'ai'})`;
+          ` bron: ${pattern.source || 'ai'})`;
       }
     } else if (senderDomain) {
       const { data: domainPat } = await supabase
         .from('email_patterns')
-        .select('category, confidence, times_seen, times_corrected')
+        .select('category, confidence, times_seen')
         .eq('sender_domain', senderDomain)
         .is('sender_email', null)
         .maybeSingle();
@@ -94,18 +94,19 @@ async function fetchAiContext(senderEmail, senderDomain) {
     }
 
     // Top 5 meest gecorrigeerde patronen (algemene leerdata)
-    const { data: topCorrected } = await supabase
+    // times_corrected bestaat niet in email_patterns — gebruik confidence + times_seen
+    const { data: topPatterns } = await supabase
       .from('email_patterns')
-      .select('sender_domain, sender_email, category, confidence, times_corrected')
-      .gt('times_corrected', 0)
-      .order('times_corrected', { ascending: false })
+      .select('sender_domain, sender_email, category, confidence, times_seen, source')
+      .gte('confidence', 70)
+      .order('confidence', { ascending: false })
       .limit(5);
 
-    if (topCorrected?.length) {
-      generalLearning = topCorrected
+    if (topPatterns?.length) {
+      generalLearning = topPatterns
         .map((p) =>
           `- ${p.sender_email || p.sender_domain || '?'}: ${p.category}` +
-          ` (${p.times_corrected}x gecorrigeerd, confidence: ${p.confidence}%)`
+          ` (confidence: ${p.confidence}%, gezien: ${p.times_seen}x, bron: ${p.source || 'ai'})`
         )
         .join('\n');
     }
@@ -118,44 +119,39 @@ async function fetchAiContext(senderEmail, senderDomain) {
 
 // ── Patroon bijwerken na AI-categorisatie ──────────────────────────────────
 async function updatePatternAfterAi(senderEmail, senderDomain, category, confidence, learnedFromCorrections) {
+  // email_patterns kolommen: id, sender_email, sender_domain, category, confidence,
+  //                           times_seen, source, last_corrected_at, created_at, updated_at
+  // GEEN times_corrected of last_seen
   try {
     const { data: existing } = await supabase
       .from('email_patterns')
-      .select('id, times_seen, confidence, category, times_corrected')
+      .select('id, times_seen, confidence, category, source')
       .eq('sender_email', senderEmail)
       .maybeSingle();
 
     if (existing) {
       const newTimesSeen = (existing.times_seen || 0) + 1;
-      // Als AI geleerd heeft van correcties: verhoog confidence
       const baseConf = existing.confidence || confidence;
-      const newConf  = learnedFromCorrections
-        ? Math.min(100, baseConf + 10)
-        : baseConf;
-      // Als 5x zelfde categorie → vaste regel (confidence 100)
-      const finalConf = newTimesSeen >= 5 && existing.category === category
-        ? 100
-        : newConf;
+      const newConf  = learnedFromCorrections ? Math.min(100, baseConf + 10) : baseConf;
+      const finalConf = newTimesSeen >= 5 && existing.category === category ? 100 : newConf;
 
       await supabase.from('email_patterns').update({
-        times_seen:  newTimesSeen,
-        confidence:  finalConf,
-        last_seen:   new Date().toISOString(),
-        source:      learnedFromCorrections ? 'ai_learned' : (existing.source || 'ai')
+        times_seen: newTimesSeen,
+        confidence: finalConf,
+        source:     learnedFromCorrections ? 'ai_learned' : (existing.source || 'ai')
       }).eq('id', existing.id);
     } else if (senderEmail) {
       await supabase.from('email_patterns').insert({
-        sender_email:    senderEmail,
-        sender_domain:   senderDomain || null,
+        sender_email:  senderEmail,
+        sender_domain: senderDomain || null,
         category,
-        confidence:      learnedFromCorrections ? Math.min(100, confidence + 10) : confidence,
-        times_seen:      1,
-        times_corrected: 0,
-        source:          'ai'
+        confidence:    learnedFromCorrections ? Math.min(100, confidence + 10) : confidence,
+        times_seen:    1,
+        source:        'ai'
       });
     }
   } catch (dbErr) {
-    console.warn('Supabase pattern opslaan mislukt:', dbErr.message);
+    console.warn('[categorize] pattern opslaan mislukt:', dbErr.message);
   }
 }
 
@@ -185,7 +181,7 @@ export default async function handler(req, res) {
     try {
       const { data: exact } = await supabase
         .from('email_patterns')
-        .select('category, confidence, times_seen, times_corrected')
+        .select('category, confidence, times_seen, source')
         .eq('sender_email', senderEmail)
         .gte('confidence', 80)
         .gte('times_seen', 3)
@@ -194,14 +190,14 @@ export default async function handler(req, res) {
 
       if (exact?.length) {
         const p = exact[0];
-        const source = (p.times_corrected || 0) > 0 ? 'learned' : 'pattern';
-        return res.status(200).json({ category: p.category, confidence: p.confidence, source });
+        const src = p.source === 'manual' || p.source === 'domain_learned' ? 'learned' : 'pattern';
+        return res.status(200).json({ category: p.category, confidence: p.confidence, source: src });
       }
 
       if (senderDomain) {
         const { data: domain } = await supabase
           .from('email_patterns')
-          .select('category, confidence, times_seen, times_corrected')
+          .select('category, confidence, times_seen, source')
           .eq('sender_domain', senderDomain)
           .is('sender_email', null)
           .gte('confidence', 80)
@@ -211,8 +207,8 @@ export default async function handler(req, res) {
 
         if (domain?.length) {
           const p = domain[0];
-          const source = (p.times_corrected || 0) > 0 ? 'learned' : 'pattern';
-          return res.status(200).json({ category: p.category, confidence: p.confidence, source });
+          const src = p.source === 'manual' || p.source === 'domain_learned' ? 'learned' : 'pattern';
+          return res.status(200).json({ category: p.category, confidence: p.confidence, source: src });
         }
       }
     } catch (err) {

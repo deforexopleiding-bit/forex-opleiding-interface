@@ -62,7 +62,7 @@ export default async function handler(req, res) {
   // Optionele kolommen die bestaan nadat de ALTER TABLE is uitgevoerd:
   if (email_id)        learnRow.email_id        = email_id;
   if (senderDomain)    learnRow.sender_domain   = senderDomain;
-  if (subject)         learnRow.subject         = subject;
+  if (subject)         learnRow.email_subject   = subject;       // kolom heet email_subject
   if (body_snippet)    learnRow.body_snippet    = String(body_snippet).slice(0, 500);
   if (old_category)    learnRow.old_category    = old_category;
   if (corrected_by)    learnRow.corrected_by    = corrected_by;
@@ -95,9 +95,10 @@ export default async function handler(req, res) {
   let newPatternCreated = false;
 
   try {
+    // email_patterns: GEEN times_corrected of last_seen — wel last_corrected_at
     const { data: existing, error: lookupErr } = await supabase
       .from('email_patterns')
-      .select('id, category, confidence, times_seen, times_corrected, source')
+      .select('id, category, confidence, times_seen, source')
       .eq('sender_email', senderEmail)
       .maybeSingle();
 
@@ -115,12 +116,9 @@ export default async function handler(req, res) {
         patternDeleted  = true;
         confidenceAfter = 0;
       } else {
-        const newCorrected = (existing.times_corrected || 0) + 1;
         const { error: updErr } = await supabase.from('email_patterns').update({
           category:          new_category,
           confidence:        newConf,
-          times_corrected:   newCorrected,
-          last_seen:         new Date().toISOString(),
           last_corrected_at: new Date().toISOString(),
           source:            'manual'
         }).eq('id', existing.id);
@@ -135,7 +133,6 @@ export default async function handler(req, res) {
         category:          new_category,
         confidence:        70,
         times_seen:        1,
-        times_corrected:   1,
         source:            'manual',
         last_corrected_at: new Date().toISOString()
       });
@@ -182,8 +179,7 @@ export default async function handler(req, res) {
             sender_email:      null,
             category:          new_category,
             confidence:        90,
-            times_seen:        count,
-            times_corrected:   count,
+            times_seen:        count || 3,
             source:            'domain_learned',
             last_corrected_at: new Date().toISOString()
           });
@@ -197,13 +193,13 @@ export default async function handler(req, res) {
       if (keywords.length > 0) {
         const { data: domainCorrections } = await supabase
           .from('learn_examples')
-          .select('subject')
+          .select('email_subject')
           .eq('sender_domain', senderDomain)
           .eq('new_category', new_category)
           .limit(20);
 
         if (domainCorrections?.length >= 3) {
-          const allSubjects = domainCorrections.map((c) => c.subject || '');
+          const allSubjects = domainCorrections.map((c) => c.email_subject || '');
           for (const kw of keywords) {
             const matchCount = allSubjects.filter((s) => s.toLowerCase().includes(kw)).length;
             if (matchCount >= 3) {
