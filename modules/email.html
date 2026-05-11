@@ -1926,12 +1926,16 @@
     try {
       const bodyEntry = state.bodyCache[email.uid];
       const bodySnippet = (bodyEntry && !bodyEntry.loading && !bodyEntry.error) ? (bodyEntry.text || '').slice(0, 200) : '';
-      const emailList = state.emails.map((e) => ({
-        uid:           e.uid,
-        sender_email:  e.fromAddress || getFromAddress(e),
-        sender_domain: getDomain(e.fromAddress || getFromAddress(e)),
-        subject:       e.subject || ''
-      }));
+      const emailList = state.emails.map((e) => {
+        const bc = state.bodyCache[e.uid];
+        return {
+          uid:           e.uid,
+          sender_email:  e.fromAddress || getFromAddress(e),
+          sender_domain: getDomain(e.fromAddress || getFromAddress(e)),
+          subject:       e.subject || '',
+          body_snippet:  (bc && !bc.loading && !bc.error) ? (bc.text || '').slice(0, 300) : ''
+        };
+      });
       const res = await fetch('/api/learn', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
