@@ -295,7 +295,7 @@
       background: rgba(255,255,255,0.05); color: var(--text-faint); white-space: nowrap;
     }
 
-    /* ── Reclame review ── */
+    /* ── Reclame / Overige ── */
     .reclame-section { margin-bottom: 24px; }
     .reclame-section-title {
       font-size: 12px; text-transform: uppercase; letter-spacing: .08em;
@@ -954,7 +954,7 @@
     </button>
     <button class="tab" data-tab="reclame">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" y1="22" x2="4" y2="15"/></svg>
-      Reclame review
+      Reclame / Overige
       <span class="tab-count" id="tabCountReclame">0</span>
     </button>
   </div>
@@ -1570,7 +1570,7 @@
     const sectionBtns =
       '<button class="vt-action-btn' + (ps.targetSection === 'actie'   ? ' selected' : '') + '" onclick="vtSelectSection(\'actie\')">'   + ICON_INBOX + ' Actie vereist</button>' +
       '<button class="vt-action-btn' + (ps.targetSection === 'info'    ? ' selected' : '') + '" onclick="vtSelectSection(\'info\')">'    + ICON_INFO2 + ' Informatie</button>' +
-      '<button class="vt-action-btn' + (ps.targetSection === 'reclame' ? ' selected' : '') + '" onclick="vtSelectSection(\'reclame\')">' + ICON_SPAM  + ' Reclame review</button>';
+      '<button class="vt-action-btn' + (ps.targetSection === 'reclame' ? ' selected' : '') + '" onclick="vtSelectSection(\'reclame\')">' + ICON_SPAM  + ' Reclame / Overige</button>';
     return '<div class="vt-panel" id="vtPanel-' + escapeHtml(uid) + '">' +
       '<div>' +
         (ps.aiHintCategory ? '<div class="vt-hint">Agent dacht: ' + escapeHtml(ps.aiHintCategory) + (ps.aiHintConfidence ? ' (' + ps.aiHintConfidence + '% zekerheid)' : '') + '</div>' : '') +
@@ -1681,7 +1681,7 @@
       saveOverrides(); saveJson(AI_CATS_KEY, _aiCatCache); saveJson(ACTION_FLAGS_KEY, state.actionFlags);
     }
 
-    const labels = { actie: 'Actie vereist', info: 'Informatie', reclame: 'Reclame review' };
+    const labels = { actie: 'Actie vereist', info: 'Informatie', reclame: 'Reclame / Overige' };
     const undoEntry = undoManager.push('section_move',
       { email_id: uid, old_flag: oldFlag, old_category: oldCat, target_section: targetSection },
       'Verplaatst naar ' + labels[targetSection] + ': ' + (email.fromName || email.from || '?'));
@@ -2610,7 +2610,7 @@
         '<div class="act-divider"></div>' +
         '<div class="act-section-label">Verplaats naar sectie</div>' +
         (getEmailSection(e) !== 'info'    ? '<button class="act-item" data-act="move-info"    data-uid="' + escapeHtml(uid) + '">' + ICON_INFO2 + ' Informatie</button>'    : '') +
-        (getEmailSection(e) !== 'reclame' ? '<button class="act-item" data-act="move-reclame" data-uid="' + escapeHtml(uid) + '">' + ICON_SPAM  + ' Reclame review</button>' : '') +
+        (getEmailSection(e) !== 'reclame' ? '<button class="act-item" data-act="move-reclame" data-uid="' + escapeHtml(uid) + '">' + ICON_SPAM  + ' Reclame / Overige</button>' : '') +
       '</div>' +
     '</div>';
   }
@@ -2879,7 +2879,7 @@
             '<div class="act-divider"></div>' +
             '<div class="act-section-label">Verplaats naar sectie</div>' +
             '<button class="act-item" data-act="move-actie"   data-uid="' + escapeHtml(e.uid) + '">' + ICON_INBOX + ' Actie vereist</button>' +
-            (curSec !== 'reclame' ? '<button class="act-item" data-act="move-reclame" data-uid="' + escapeHtml(e.uid) + '">' + ICON_SPAM + ' Reclame review</button>' : '') +
+            (curSec !== 'reclame' ? '<button class="act-item" data-act="move-reclame" data-uid="' + escapeHtml(e.uid) + '">' + ICON_SPAM + ' Reclame / Overige</button>' : '') +
           '</div>' +
         '</div>' +
       '</div>';
