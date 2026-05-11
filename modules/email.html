@@ -4195,9 +4195,6 @@
     document.getElementById('tabBar').querySelectorAll('.tab').forEach((btn) => {
       btn.addEventListener('click', () => {
         const newTab = btn.dataset.tab;
-        // Verzonden: reset verzondenLoaded zodat bij elk bezoek vers data geladen wordt
-        // Lokale items (unshift na send) blijven bewaard door merge in loadVerzondenEmails
-        if (newTab === 'verzonden') state.verzondenLoaded = false;
         state.activeTab = newTab;
         document.querySelectorAll('#tabBar .tab').forEach((t) => t.classList.toggle('active', t === btn));
         render();

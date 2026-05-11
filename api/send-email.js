@@ -63,14 +63,25 @@ export default async function handler(req, res) {
     console.log(`[send-email] Verstuurd — messageId: ${info.messageId} | geaccepteerd: ${info.accepted?.join(', ')}`);
 
     // Sla op in Supabase (backup pad naast de frontend saveEmailAction call)
+    const sentAt = new Date().toISOString();
     supabase.from('email_actions').insert({
       email_id: email_id || 'manual',
       action:   'reply_sent',
       value:    JSON.stringify({ to, from: from_mailbox, subject, body: text, cc: cc || null, bcc: bcc || null, category: category || null }),
       set_by:   'smtp',
-      set_at:   new Date().toISOString()
+      set_at:   sentAt
     }).then(({ error }) => {
-      if (error) console.warn('[send-email] Supabase opslaan mislukt:', error.message);
+      if (error) console.warn('[send-email] email_actions opslaan mislukt:', error.message);
+    });
+
+    supabase.from('email_replies').insert({
+      email_subject: subject,
+      final_reply:   text,
+      from_address:  from_mailbox,
+      to_address:    to,
+      sent_at:       sentAt
+    }).then(({ error }) => {
+      if (error) console.warn('[send-email] email_replies opslaan mislukt:', error.message);
     });
 
     return res.status(200).json({
