@@ -27,6 +27,26 @@ const EXPECTED = {
 
 // Tabellen die aangemaakt moeten worden als ze niet bestaan
 const TABLES_TO_CREATE = {
+  kennisbank_items: `CREATE TABLE IF NOT EXISTS kennisbank_items (
+  id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+  type text,
+  direction text,
+  title text,
+  category text,
+  content text,
+  question text,
+  answer text,
+  label text,
+  note text,
+  times_used integer DEFAULT 0,
+  times_helpful integer DEFAULT 0,
+  helpfulness_score integer DEFAULT 0,
+  auto_generated boolean DEFAULT false,
+  source_email_id text,
+  created_at timestamptz DEFAULT now(),
+  updated_at timestamptz DEFAULT now()
+);
+ALTER TABLE kennisbank_items DISABLE ROW LEVEL SECURITY;`,
   undo_history: `CREATE TABLE IF NOT EXISTS undo_history (
   id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
   action_type text NOT NULL,

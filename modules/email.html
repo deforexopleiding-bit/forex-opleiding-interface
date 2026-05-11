@@ -75,6 +75,7 @@
     .btn svg { width: 14px; height: 14px; flex-shrink: 0; }
     .btn:hover { background: rgba(255,255,255,0.04); border-color: rgba(255,255,255,0.2); }
     .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    .btn.active { background: rgba(83,74,183,0.15); border-color: rgba(83,74,183,0.5); color: #AFA9EC; }
     .btn-primary { background: var(--accent-grad); border-color: transparent; color: #0a0b10; font-weight: 600; }
     .btn-primary:hover { filter: brightness(1.1); background: var(--accent-grad); }
     .btn-ai {
@@ -167,6 +168,7 @@
     .pill:hover { border-color: var(--border-strong); color: var(--text); }
     .pill.active { background: var(--text); color: var(--bg); border-color: var(--text); }
     .custom-range { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text-dim); }
+    .hidden { display: none !important; }
     .custom-range.hidden { display: none; }
 
     /* ── Tabs ── */
@@ -804,6 +806,10 @@
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3z"/></svg>
         Heranalyseer
       </button>
+      <button class="btn" id="trainingBtn" onclick="toggleTrainingMode()" title="Training modus aan/uit — toont confidence en AI-signalen per mail">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+        Training
+      </button>
       <button class="btn" id="sigBtn">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M4.93 4.93a10 10 0 0 0 0 14.14"/></svg>
         Handtekening
@@ -857,6 +863,17 @@
     <div class="ai-loading-spinner"></div>
     <span id="reanalyzeLabel">Heranalyseren…</span>
     <div class="reanalyze-track"><div class="reanalyze-fill" id="reanalyzeFill" style="width:0%"></div></div>
+  </div>
+
+  <div id="propagation-banner" class="hidden" style="background:rgba(83,74,183,0.12);border:1px solid rgba(83,74,183,0.3);border-radius:8px;margin:8px 20px;padding:10px 14px;font-size:13px;color:var(--text-main);display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+    <span>📋 <strong><span id="prop-count">0</span> vergelijkbare mails</strong> van <em id="prop-domain"></em> gevonden. Ook verplaatsen naar <strong id="prop-category"></strong>?</span>
+    <button class="btn btn-success" style="padding:4px 12px;font-size:12px" onclick="confirmPropagation()">Ja, verplaats alle</button>
+    <button class="btn" style="padding:4px 12px;font-size:12px" onclick="dismissPropagation()">Nee, alleen deze</button>
+  </div>
+
+  <div id="kb-status-banner" class="hidden" style="background:rgba(245,158,11,0.10);border:1px solid rgba(245,158,11,0.3);border-radius:8px;margin:8px 20px;padding:10px 14px;font-size:13px;color:var(--amber);display:flex;align-items:center;gap:8px;">
+    ⚠️ Kennisbank is leeg — agent gebruikt alleen basiskennis.
+    <a href="kennisbank.html" style="color:var(--amber);text-decoration:underline;margin-left:4px">Vul de kennisbank aan →</a>
   </div>
 
   <div class="filter-bar">
@@ -1002,6 +1019,7 @@
   const AI_CATS_KEY           = 'email_ai_categories';
   const SIGNATURE_KEY         = 'email_signature';
   const AI_CONF_KEY           = 'email_ai_confidence'; // uid -> { confidence, source }
+  const AI_REQACTION_KEY      = 'email_ai_requires_action'; // uid -> boolean
   const CACHE_VER_KEY         = 'email_cache_version';
   const CACHE_VERSION         = '2'; // bump to force cache-clear after logic changes
   const SNOOZE_KEY            = 'email_snooze_map';
@@ -1081,7 +1099,8 @@
     searchQuery: '',
     snoozeMap:   loadJson(SNOOZE_KEY,       {}), // uid -> ISO date string
     actionFlags: loadJson(ACTION_FLAGS_KEY, {}), // uid -> true (force actie) | false (no action)
-    undoHistory: loadJson(UNDO_HISTORY_KEY, [])  // max 10 undo entries
+    undoHistory: loadJson(UNDO_HISTORY_KEY, []),  // max 10 undo entries
+    pendingPropagation: null   // { uids, category, domain } waiting for user confirmation
   };
 
   // ── localStorage helpers ───────────────────────────────────────────────────
@@ -1423,8 +1442,9 @@
   }
 
   // ── AI categorization (Claude API) ────────────────────────────────────────
-  const _aiCatCache  = loadJson(AI_CATS_KEY,  {});  // uid -> category string
-  const _aiConfCache = loadJson(AI_CONF_KEY,  {});  // uid -> { confidence, source }
+  const _aiCatCache         = loadJson(AI_CATS_KEY,       {});  // uid -> category string
+  const _aiConfCache        = loadJson(AI_CONF_KEY,       {});  // uid -> { confidence, source }
+  const _aiRequiresActionCache = loadJson(AI_REQACTION_KEY, {});  // uid -> boolean
 
   function applyAiCategories() {
     state.emails.forEach((e) => {
@@ -1465,22 +1485,39 @@
     return '<span class="conf-dot ' + cls + '" title="' + (titles[cls] || '') + '"></span>';
   }
 
+  function renderTrainingInfo(uid) {
+    const conf = _aiConfCache[uid];
+    if (!conf) return '';
+    const pct     = conf.confidence != null ? conf.confidence + '%' : '—';
+    const method  = conf.source || '—';
+    const signals = (conf.key_signals || []).join(', ') || '—';
+    const priority = conf.priority ? ' · Prioriteit: ' + conf.priority : '';
+    return '<div style="margin:6px 0 2px;padding:5px 8px;background:rgba(83,74,183,0.08);border:1px solid rgba(83,74,183,0.2);border-radius:6px;font-size:11px;color:var(--text-dim);">' +
+      '🎓 Confidence: <strong>' + pct + '</strong> · Methode: <strong>' + escapeHtml(method) + '</strong>' + priority +
+      (signals !== '—' ? ' · Signalen: ' + escapeHtml(signals) : '') +
+      '</div>';
+  }
+
   async function categorizeEmail(email) {
     const bodyEntry = state.bodyCache[email.uid];
     const bodySnippet = (bodyEntry && !bodyEntry.loading && !bodyEntry.error) ? (bodyEntry.text || '').slice(0, 500) : '';
     try {
-      const res = await fetch('/api/categorize', {
+      const res = await fetch('/api/email-agent', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ from: email.from || '', subject: email.subject || '', bodySnippet })
+        body: JSON.stringify({ from: email.from || '', subject: email.subject || '', bodySnippet, date: email.date || '' })
       });
       if (!res.ok) return;
       const data = await res.json();
       if (data.category && CATEGORIES.includes(data.category)) {
         _aiCatCache[email.uid]  = data.category;
-        _aiConfCache[email.uid] = { confidence: data.confidence || 60, source: data.source || 'ai' };
+        _aiConfCache[email.uid] = { confidence: data.confidence || 60, source: data.source || 'ai', priority: data.priority || 'normaal', reasoning: data.reasoning || '', key_signals: data.key_signals || [] };
         saveJson(AI_CATS_KEY,  _aiCatCache);
         saveJson(AI_CONF_KEY,  _aiConfCache);
+        if (data.requires_action !== undefined && state.actionFlags[email.uid] === undefined) {
+          _aiRequiresActionCache[email.uid] = data.requires_action;
+          saveJson(AI_REQACTION_KEY, _aiRequiresActionCache);
+        }
         if (!state.overrides.category[email.uid]) {
           email.category = data.category;
           populateSuggestions();
@@ -1501,7 +1538,7 @@
   }
 
   async function reanalyzeerAlles() {
-    const btn = document.getElementById('reanalyseerBtn');
+    const btn  = document.getElementById('reanalyseerBtn');
     const bar  = document.getElementById('reanalyzeBar');
     const fill = document.getElementById('reanalyzeFill');
     const lbl  = document.getElementById('reanalyzeLabel');
@@ -1512,7 +1549,7 @@
     state.emails.forEach((e) => { delete _aiCatCache[e.uid]; delete _aiConfCache[e.uid]; });
     saveJson(AI_CATS_KEY,  _aiCatCache);
     saveJson(AI_CONF_KEY,  _aiConfCache);
-    // First pass: apply hard rules instantly (no API call needed)
+    // First pass: apply hard rules instantly
     applyHardRuleCategories();
     const todo = state.emails.filter((e) =>
       !state.overrides.category[e.uid] && !getHardRuleCategory(e)
@@ -1524,17 +1561,65 @@
       return;
     }
     if (bar) bar.classList.add('show');
-    let done = 0;
-    for (const email of todo) {
-      if (lbl)  lbl.textContent = 'Heranalyseren ' + done + '/' + todo.length + '…';
-      if (fill) fill.style.width = Math.round((done / todo.length) * 100) + '%';
-      await categorizeEmail(email);
-      done++;
+    if (lbl) lbl.textContent = 'Batch heranalyse bezig…';
+    if (fill) fill.style.width = '10%';
+    try {
+      const emailList = todo.map((e) => ({
+        uid:          e.uid,
+        from:         e.from || '',
+        sender_email: e.fromAddress || getFromAddress(e),
+        sender_domain: getDomain(e.fromAddress || getFromAddress(e)),
+        subject:      e.subject || '',
+        body_snippet: (state.bodyCache[e.uid]?.text || '').slice(0, 300),
+        date:         e.date || '',
+        category:     e.category || ''
+      }));
+      if (fill) fill.style.width = '30%';
+      const res = await fetch('/api/reanalyze-all', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ emails: emailList })
+      });
+      if (fill) fill.style.width = '80%';
+      if (res.ok) {
+        const data = await res.json();
+        for (const r of (data.results || [])) {
+          if (!state.overrides.category[r.uid]) {
+            const email = state.emails.find((e) => e.uid === r.uid);
+            if (email && r.category && CATEGORIES.includes(r.category)) {
+              email.category = r.category;
+              _aiCatCache[r.uid]  = r.category;
+              _aiConfCache[r.uid] = { confidence: r.confidence || 60, source: r.source || 'ai', priority: r.priority || 'normaal' };
+              if (r.requires_action !== undefined && state.actionFlags[r.uid] === undefined) {
+                _aiRequiresActionCache[r.uid] = r.requires_action;
+              }
+            }
+          }
+        }
+        saveJson(AI_CATS_KEY,  _aiCatCache);
+        saveJson(AI_CONF_KEY,  _aiConfCache);
+        saveJson(AI_REQACTION_KEY, _aiRequiresActionCache);
+        const s = data.summary || {};
+        if (lbl) lbl.textContent = 'Klaar! ' + (s.changed || 0) + ' categorieën gewijzigd · ' + (s.analyzed || 0) + ' groepen geanalyseerd.';
+      } else {
+        // Fallback: één voor één categoriseren
+        if (lbl) lbl.textContent = 'Batch mislukt, individueel heranalyseren…';
+        let done = 0;
+        for (const email of todo) {
+          if (fill) fill.style.width = Math.round(80 + (done / todo.length) * 20) + '%';
+          await categorizeEmail(email);
+          done++;
+        }
+        if (lbl) lbl.textContent = 'Klaar! ' + todo.length + ' mails hergeanalyseerd.';
+      }
+    } catch (err) {
+      console.warn('[reanalyzeer] batch fout, fallback:', err.message);
+      if (lbl) lbl.textContent = 'Fout — individueel heranalyseren…';
+      for (const email of todo) await categorizeEmail(email);
     }
     if (fill) fill.style.width = '100%';
-    if (lbl)  lbl.textContent = 'Klaar! ' + todo.length + ' mails hergeanalyseerd.';
     setTimeout(() => { if (bar) bar.classList.remove('show'); if (btn) btn.disabled = false; }, 2500);
-    render();
+    applyAutoReclameClassification(); populateSuggestions(); render();
     undoManager.push('reanalyze', { snapshots }, 'Heranalyse · ' + todo.length + ' mails');
   }
 
@@ -1543,6 +1628,12 @@
     try {
       const bodyEntry = state.bodyCache[email.uid];
       const bodySnippet = (bodyEntry && !bodyEntry.loading && !bodyEntry.error) ? (bodyEntry.text || '').slice(0, 200) : '';
+      const emailList = state.emails.map((e) => ({
+        uid:           e.uid,
+        sender_email:  e.fromAddress || getFromAddress(e),
+        sender_domain: getDomain(e.fromAddress || getFromAddress(e)),
+        subject:       e.subject || ''
+      }));
       const res = await fetch('/api/learn', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1554,7 +1645,8 @@
           old_category:    oldCat,
           new_category:    newCat,
           corrected_by:    'Jeffrey',
-          correction_type: correctionType || 'manual'
+          correction_type: correctionType || 'manual',
+          email_list:      emailList
         })
       });
       if (res.ok) {
@@ -1572,8 +1664,63 @@
           const idx = h.findIndex((e) => e.id === undoEntry.id);
           if (idx >= 0) { h[idx] = undoEntry; saveJson(UNDO_HISTORY_KEY, h); }
         }
+        // Propagatie: auto-updates en bevestigingsverzoek
+        if ((data.propagated_automatically || 0) > 0) {
+          for (const uid of (data.propagated_uids || [])) {
+            const propEmail = state.emails.find((e) => e.uid === uid);
+            if (propEmail && !state.overrides.category[uid]) {
+              propEmail.category = newCat;
+              _aiCatCache[uid] = newCat;
+            }
+          }
+          saveJson(AI_CATS_KEY, _aiCatCache);
+          render();
+        }
+        if ((data.needs_confirmation || []).length > 0) {
+          state.pendingPropagation = {
+            uids:     data.needs_confirmation.map((e) => e.uid),
+            items:    data.needs_confirmation,
+            category: newCat,
+            domain:   getDomain(getFromAddress(email))
+          };
+          showPropagationBanner();
+        }
       }
     } catch { /* fire-and-forget */ }
+  }
+
+  function showPropagationBanner() {
+    const p = state.pendingPropagation;
+    if (!p) return;
+    let banner = document.getElementById('propagation-banner');
+    if (!banner) return;
+    banner.querySelector('#prop-count').textContent = p.items.length;
+    banner.querySelector('#prop-domain').textContent = p.domain || '?';
+    banner.querySelector('#prop-category').textContent = p.category;
+    banner.classList.remove('hidden');
+  }
+
+  function confirmPropagation() {
+    const p = state.pendingPropagation;
+    if (!p) return;
+    for (const uid of p.uids) {
+      const e = state.emails.find((x) => x.uid === uid);
+      if (e && !state.overrides.category[uid]) {
+        e.category = p.category;
+        _aiCatCache[uid] = p.category;
+        state.overrides.category[uid] = p.category;
+      }
+    }
+    saveJson(AI_CATS_KEY, _aiCatCache);
+    saveOverrides();
+    state.pendingPropagation = null;
+    document.getElementById('propagation-banner')?.classList.add('hidden');
+    populateSuggestions(); render();
+  }
+
+  function dismissPropagation() {
+    state.pendingPropagation = null;
+    document.getElementById('propagation-banner')?.classList.add('hidden');
   }
 
   // ── Body fetching ──────────────────────────────────────────────────────────
@@ -2301,6 +2448,7 @@
       '<div class="card-subject">' + highlightMatch(e.subject || '(geen onderwerp)', q) + '</div>' +
       renderPreviewHtml(e.uid) +
       renderLearnBanner(e.uid) +
+      (state.trainingMode ? renderTrainingInfo(e.uid) : '') +
       renderAiSection(e) +
       '<div class="card-actions">' +
         (showGenBtn ? '<button class="btn btn-ai" data-action="generate" data-uid="' + escapeHtml(e.uid) + '">' + ICON_AI + ' Genereer AI antwoord</button>' : '') +
@@ -2997,6 +3145,30 @@
   }
 
   // ── Init ───────────────────────────────────────────────────────────────────
+  // ── Training modus ────────────────────────────────────────────────────────
+  const TRAINING_MODE_KEY = 'email_training_mode';
+  if (!('trainingMode' in state)) state.trainingMode = loadJson(TRAINING_MODE_KEY, false);
+
+  function toggleTrainingMode() {
+    state.trainingMode = !state.trainingMode;
+    saveJson(TRAINING_MODE_KEY, state.trainingMode);
+    const btn = document.getElementById('trainingBtn');
+    if (btn) btn.classList.toggle('active', state.trainingMode);
+    render();
+  }
+
+  // ── Kennisbank status ─────────────────────────────────────────────────────
+  async function checkKennisbankStatus() {
+    try {
+      const res = await fetch('/api/kennisbank-sync');
+      if (!res.ok) return;
+      const data = await res.json();
+      if (!data.items || data.items.length === 0) {
+        document.getElementById('kb-status-banner')?.classList.remove('hidden');
+      }
+    } catch {}
+  }
+
   function init() {
     checkCacheVersion();
     initFilterBar();
@@ -3008,8 +3180,11 @@
     document.getElementById('leerrapportModal').addEventListener('click', (ev) => {
       if (ev.target === ev.currentTarget) closeLeerrapport();
     });
+    const trainingBtn = document.getElementById('trainingBtn');
+    if (trainingBtn) trainingBtn.classList.toggle('active', !!state.trainingMode);
     updateUndoButton();
     loadEmails();
+    checkKennisbankStatus();
   }
 
   init();
