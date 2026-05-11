@@ -3,6 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="version" content="2.1.0" />
   <title>E-mail · Agency Command Center</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -1123,163 +1124,230 @@
     _toastTimer = setTimeout(() => t.classList.remove('show'), 2400);
   }
 
-  function showUndoableToast(msg, undoEntry) {
-    const t = document.getElementById('toast');
-    if (!t) { showToast(msg); return; }
-    _pendingUndoEntry = undoEntry;
-    t.innerHTML = escapeHtml(msg) +
-      ' <button class="toast-undo-btn" onclick="handleToastUndo()">↩ Ongedaan maken</button>';
-    void t.offsetWidth;
-    t.classList.add('show');
-    clearTimeout(_toastTimer);
-    _toastTimer = setTimeout(() => { t.classList.remove('show'); _pendingUndoEntry = null; }, 8000);
-  }
+  // ── Undo Manager (universeel) ──────────────────────────────────────────────
+  const undoManager = {
+    get history()  { return state.undoHistory || []; },
+    set history(v) { state.undoHistory = v; saveJson(UNDO_HISTORY_KEY, v); },
 
-  function handleToastUndo() {
-    if (!_pendingUndoEntry) return;
-    const entry = _pendingUndoEntry;
-    _pendingUndoEntry = null;
-    clearTimeout(_toastTimer);
-    document.getElementById('toast')?.classList.remove('show');
-    performUndo(entry.id);
-  }
+    _avail() {
+      const cutoff = Date.now() - 24 * 3600 * 1000;
+      return this.history.filter((a) => !a.is_undone && new Date(a.performed_at).getTime() > cutoff);
+    },
 
-  // ── Undo systeem ───────────────────────────────────────────────────────────
-  function getUndoableActions() {
-    const cutoff = Date.now() - 24 * 3600 * 1000;
-    return (state.undoHistory || []).filter(
-      (a) => !a.is_undone && new Date(a.performed_at).getTime() > cutoff
-    );
-  }
+    push(actionType, undoData, description) {
+      const entry = {
+        id:           crypto.randomUUID(),
+        type:         actionType,
+        data:         undoData || {},
+        label:        description || actionType,
+        performed_at: new Date().toISOString(),
+        is_undone:    false
+      };
+      const h = this.history;
+      h.unshift(entry);
+      if (h.length > 10) h.length = 10;
+      this.history = h;
+      this.updateButton();
+      this._showToast(description, entry);
+      fetch('/api/undo', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'save', type: actionType, data: undoData, label: description })
+      }).catch(() => {});
+      return entry;
+    },
 
-  function pushUndoAction(type, data, label) {
-    const entry = {
-      id:           crypto.randomUUID(),
-      type,
-      data,
-      label:        label || type,
-      performed_at: new Date().toISOString(),
-      is_undone:    false
-    };
-    const h = state.undoHistory || [];
-    h.unshift(entry);
-    if (h.length > 10) h.length = 10;
-    state.undoHistory = h;
-    saveJson(UNDO_HISTORY_KEY, h);
-    updateUndoButton();
-    // Async opslaan in Supabase (best-effort)
-    fetch('/api/undo', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'save', type, data, label })
-    }).catch(() => {});
-    return entry;
-  }
+    async undo() {
+      const avail = this._avail();
+      if (!avail.length) { showToast('Geen acties om ongedaan te maken'); return; }
+      await this.executeUndo(avail[0]);
+    },
 
-  async function performUndo(entryId) {
-    const h = state.undoHistory || [];
-    const entry = h.find((e) => e.id === entryId);
-    if (!entry) { showToast('Actie niet gevonden'); return; }
-
-    const age = Date.now() - new Date(entry.performed_at).getTime();
-    if (age > 24 * 3600 * 1000) {
-      showToast('Deze actie is te oud om ongedaan te maken (>24 uur)');
-      return;
-    }
-
-    // Markeer lokaal als ongedaan
-    entry.is_undone = true;
-    saveJson(UNDO_HISTORY_KEY, h);
-    updateUndoButton();
-
-    // Herstel lokale UI-staat
-    const { type, data } = entry;
-    if (type === 'category_change' || type === 'mark_reclame' || type === 'not_spam') {
-      const { email_id, old_category } = data;
-      const email = findEmail(email_id);
-      if (email && old_category) {
-        email.category = old_category;
-        state.overrides.category[email_id] = old_category;
-        saveOverrides();
-        populateSuggestions();
-        render();
+    updateButton() {
+      const count = this._avail().length;
+      const btn   = document.getElementById('btn-undo');
+      const badge = document.getElementById('undo-count');
+      if (!btn) return;
+      if (count > 0) {
+        btn.removeAttribute('disabled');
+        btn.style.opacity     = '1';
+        btn.style.cursor      = 'pointer';
+        btn.style.borderColor = '#534AB7';
+        btn.style.color       = '#AFA9EC';
+        const top = this.history.find((a) => !a.is_undone);
+        btn.title = top ? 'Ongedaan maken: ' + top.label + ' (Ctrl+Z)' : 'Ongedaan maken (Ctrl+Z)';
+      } else {
+        btn.setAttribute('disabled', '');
+        btn.style.opacity     = '0.4';
+        btn.style.cursor      = 'not-allowed';
+        btn.style.borderColor = '#2a2a35';
+        btn.style.color       = '#888';
+        btn.title             = 'Geen acties om ongedaan te maken';
       }
-      showToast('Ongedaan gemaakt · Mail staat weer in ' + (old_category || 'vorige categorie'));
-    } else if (type === 'kennisbank_add') {
-      showToast('Kennisbank item verwijderd');
-    } else {
-      showToast('Ongedaan gemaakt');
-    }
+      if (badge) {
+        badge.textContent   = count;
+        badge.style.display = count > 0 ? 'inline-block' : 'none';
+      }
+    },
 
-    // Async Supabase reversal
-    fetch('/api/undo', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'undo', id: entry.id, type, data })
-    }).catch(() => {});
-  }
+    _showToast(description, entry) {
+      const t = document.getElementById('toast');
+      if (!t) return;
+      _pendingUndoEntry = entry;
+      t.innerHTML = escapeHtml(description || '') +
+        ' <span onclick="undoManager.undo()" style="color:#AFA9EC;cursor:pointer;text-decoration:underline;margin-left:8px">↩ Ongedaan maken</span>';
+      void t.offsetWidth;
+      t.classList.add('show');
+      clearTimeout(_toastTimer);
+      _toastTimer = setTimeout(() => { t.classList.remove('show'); _pendingUndoEntry = null; }, 8000);
+    },
 
-  function handleUndo() {
-    const actions = getUndoableActions();
-    if (!actions.length) { showToast('Geen acties om ongedaan te maken'); return; }
+    async executeUndo(entry) {
+      if (!entry) return;
+      const age = Date.now() - new Date(entry.performed_at).getTime();
+      if (age > 24 * 3600 * 1000) { showToast('Te oud om ongedaan te maken (>24 uur)'); return; }
+      const h = this.history;
+      const idx = h.findIndex((e) => e.id === entry.id);
+      if (idx >= 0) { h[idx].is_undone = true; this.history = h; }
+      this.updateButton();
 
-    performUndo(actions[0].id);
-  }
-  const undoLastAction = handleUndo; // alias voor backwards-compatibiliteit
+      const { type, data } = entry;
 
-  function updateUndoButton() {
-    const count = getUndoableActions().length;
-    const btn   = document.getElementById('btn-undo');
-    const badge = document.getElementById('undo-count');
-    if (!btn) return;
-    if (count === 0) {
-      btn.setAttribute('disabled', '');
-      btn.style.opacity = '0.5';
-      btn.style.cursor  = 'not-allowed';
-    } else {
-      btn.removeAttribute('disabled');
-      btn.style.opacity = '1';
-      btn.style.cursor  = 'pointer';
-    }
-    if (badge) {
-      badge.textContent   = count;
-      badge.style.display = count > 0 ? 'inline-block' : 'none';
-    }
-  }
-
-  function showUndoDropdown() {
-    document.getElementById('undoDropdown')?.remove();
-    const actions = getUndoableActions();
-    if (!actions.length) { showToast('Geen acties in geschiedenis'); return; }
-    const dd = document.createElement('div');
-    dd.id = 'undoDropdown';
-    dd.className = 'undo-dropdown';
-    dd.innerHTML =
-      '<div class="undo-dd-header">Geschiedenis <small>(' + actions.length + ' stap' + (actions.length !== 1 ? 'pen' : '') + ')</small></div>' +
-      actions.map((a) => {
-        const t = new Date(a.performed_at).toLocaleTimeString('nl-NL', { hour: '2-digit', minute: '2-digit' });
-        return '<div class="undo-dd-item">' +
-          '<span class="undo-dd-time">' + t + '</span>' +
-          '<span class="undo-dd-label">' + escapeHtml(a.label || a.type) + '</span>' +
-          '<button class="undo-dd-btn" onclick="performUndo(\'' + a.id + '\');closeUndoDropdown()">↩ Herstel</button>' +
-          '</div>';
-      }).join('') +
-      '<button class="undo-dd-close" onclick="closeUndoDropdown()">Sluiten</button>';
-    const btn = document.getElementById('btn-undo');
-    if (btn) btn.parentElement.appendChild(dd);
-    // Sluit bij klik buiten dropdown
-    setTimeout(() => {
-      document.addEventListener('click', function _close(ev) {
-        if (!dd.contains(ev.target) && ev.target.id !== 'btn-undo') {
-          dd.remove(); document.removeEventListener('click', _close);
+      if (['category_change', 'mark_reclame', 'not_spam'].includes(type)) {
+        const { email_id, old_category } = data;
+        const email = findEmail(email_id);
+        if (email && old_category) {
+          email.category = old_category;
+          state.overrides.category[email_id] = old_category;
+          saveOverrides();
+          populateSuggestions();
+          render();
         }
-      });
-    }, 0);
-  }
+        showToast('↩ Ongedaan: ' + (entry.label || type) + (old_category ? ' → ' + old_category : ''));
+        fetch('/api/undo', { method:'POST', headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({ action:'undo', id:entry.id, type, data }) }).catch(()=>{});
 
-  function closeUndoDropdown() {
-    document.getElementById('undoDropdown')?.remove();
-  }
+      } else if (type === 'mark_read') {
+        const { email_id } = data;
+        const email = findEmail(email_id);
+        if (email) { email.unread = true; delete state.overrides.read[email_id]; saveOverrides(); render(); }
+        showToast('↩ Terug gemarkeerd als ongelezen');
+
+      } else if (type === 'requires_action') {
+        const { email_id, old_flag } = data;
+        setActionFlag(email_id, old_flag !== undefined ? old_flag : null);
+        render();
+        showToast('↩ Actie vereist markering hersteld');
+
+      } else if (type === 'no_action') {
+        const { email_id, old_flag } = data;
+        setActionFlag(email_id, old_flag !== undefined ? old_flag : null);
+        render();
+        showToast('↩ Geen actie markering hersteld');
+
+      } else if (type === 'snooze') {
+        const { email_id } = data;
+        delete state.snoozeMap[email_id];
+        saveJson(SNOOZE_KEY, state.snoozeMap);
+        render();
+        showToast('↩ Snooze opgeheven');
+
+      } else if (type === 'ai_cancel') {
+        const { email_id, proposal } = data;
+        if (proposal) state.aiProposals[email_id] = proposal;
+        updateActieCard(email_id);
+        showToast('↩ AI antwoord hersteld');
+
+      } else if (type === 'ai_send') {
+        const { email_id, was_unread, proposal } = data;
+        const email = findEmail(email_id);
+        if (email && was_unread) {
+          email.unread = true;
+          delete state.overrides.read[email_id];
+          saveOverrides();
+        }
+        if (proposal) state.aiProposals[email_id] = proposal;
+        render();
+        showToast('↩ Mail ongelezen · antwoord hersteld (verzending kan niet ongedaan)');
+
+      } else if (type === 'bulk_reclame') {
+        const { items } = data;
+        (items || []).forEach(({ email_id, old_category }) => {
+          const email = findEmail(email_id);
+          if (email && old_category) { email.category = old_category; state.overrides.category[email_id] = old_category; }
+        });
+        saveOverrides(); populateSuggestions(); render();
+        showToast('↩ Bulk reclame ongedaan (' + (items?.length || 0) + ' mails hersteld)');
+
+      } else if (type === 'bulk_not_reclame') {
+        const { items } = data;
+        (items || []).forEach(({ email_id, old_category }) => {
+          const email = findEmail(email_id);
+          if (email && old_category) { email.category = old_category; state.overrides.category[email_id] = old_category; }
+        });
+        saveOverrides(); populateSuggestions(); render();
+        showToast('↩ Bulk niet-reclame ongedaan (' + (items?.length || 0) + ' mails hersteld)');
+
+      } else if (type === 'reanalyze') {
+        const { snapshots } = data;
+        (snapshots || []).forEach(({ email_id, old_category }) => {
+          const email = findEmail(email_id);
+          if (email) { email.category = old_category; state.overrides.category[email_id] = old_category; _aiCatCache[email_id] = old_category; }
+        });
+        saveOverrides(); saveJson(AI_CATS_KEY, _aiCatCache); populateSuggestions(); render();
+        showToast('↩ Heranalyse ongedaan · ' + (snapshots?.length || 0) + ' categorieën hersteld');
+
+      } else if (type === 'kennisbank_add') {
+        fetch('/api/undo', { method:'POST', headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({ action:'undo', id:entry.id, type, data }) }).catch(()=>{});
+        showToast('↩ Kennisbank item verwijderd');
+
+      } else {
+        showToast('↩ Ongedaan gemaakt: ' + (entry.label || type));
+      }
+    },
+
+    showDropdown() {
+      document.getElementById('undoDropdown')?.remove();
+      const actions = this._avail();
+      if (!actions.length) { showToast('Geen acties in geschiedenis'); return; }
+      const dd = document.createElement('div');
+      dd.id = 'undoDropdown';
+      dd.className = 'undo-dropdown';
+      dd.innerHTML =
+        '<div class="undo-dd-header">Geschiedenis <small>(' + actions.length + ' stap' + (actions.length !== 1 ? 'pen' : '') + ')</small></div>' +
+        actions.map((a) => {
+          const t = new Date(a.performed_at).toLocaleTimeString('nl-NL', { hour: '2-digit', minute: '2-digit' });
+          return '<div class="undo-dd-item">' +
+            '<span class="undo-dd-time">' + t + '</span>' +
+            '<span class="undo-dd-label">' + escapeHtml(a.label || a.type) + '</span>' +
+            '<button class="undo-dd-btn" onclick="undoManager.executeUndo(undoManager.history.find(e=>e.id===\'' + a.id + '\'));closeUndoDropdown()">↩ Herstel</button>' +
+            '</div>';
+        }).join('') +
+        '<button class="undo-dd-close" onclick="closeUndoDropdown()">Sluiten</button>';
+      const btn = document.getElementById('btn-undo');
+      if (btn) btn.parentElement.appendChild(dd);
+      setTimeout(() => {
+        document.addEventListener('click', function _close(ev) {
+          if (!dd.contains(ev.target) && ev.target.id !== 'btn-undo') {
+            dd.remove(); document.removeEventListener('click', _close);
+          }
+        });
+      }, 0);
+    }
+  };
+
+  // Backwards-compatibele shims
+  function getUndoableActions()          { return undoManager._avail(); }
+  function pushUndoAction(t, d, l)       { return undoManager.push(t, d, l); }
+  function performUndo(entryId)          { const e = undoManager.history.find((x) => x.id === entryId); if (e) undoManager.executeUndo(e); }
+  function handleUndo()                  { undoManager.undo(); }
+  const undoLastAction = handleUndo;
+  function updateUndoButton()            { undoManager.updateButton(); }
+  function showUndoDropdown()            { undoManager.showDropdown(); }
+  function closeUndoDropdown()           { document.getElementById('undoDropdown')?.remove(); }
+  function showUndoableToast(msg, entry) { undoManager._showToast(msg, entry); }
+  function handleToastUndo()             { undoManager.undo(); }
 
   // ── Reclame learning ───────────────────────────────────────────────────────
   const KEYWORD_STOPWORDS = new Set(['de','het','een','voor','met','van','naar','die','dat','deze','dit','en','of','in','op','om','aan','is','als','bij','door','over','tot','uit','wij','jij','je','jouw','uw','we','jullie','ons','mij','mijn','the','a','an','and','or','for','with','from','on','are','this','that','your','our','you']);
@@ -1438,6 +1506,8 @@
     const fill = document.getElementById('reanalyzeFill');
     const lbl  = document.getElementById('reanalyzeLabel');
     if (btn) btn.disabled = true;
+    // Snapshot huidige categorieën voor undo
+    const snapshots = state.emails.map((e) => ({ email_id: e.uid, old_category: e.category }));
     // Clear AI caches (keep manual overrides)
     state.emails.forEach((e) => { delete _aiCatCache[e.uid]; delete _aiConfCache[e.uid]; });
     saveJson(AI_CATS_KEY,  _aiCatCache);
@@ -1449,7 +1519,9 @@
     );
     if (!todo.length) {
       applyAutoReclameClassification(); populateSuggestions(); render();
-      if (btn) btn.disabled = false; return;
+      if (btn) btn.disabled = false;
+      undoManager.push('reanalyze', { snapshots }, 'Heranalyse · ' + state.emails.length + ' mails');
+      return;
     }
     if (bar) bar.classList.add('show');
     let done = 0;
@@ -1463,6 +1535,7 @@
     if (lbl)  lbl.textContent = 'Klaar! ' + todo.length + ' mails hergeanalyseerd.';
     setTimeout(() => { if (bar) bar.classList.remove('show'); if (btn) btn.disabled = false; }, 2500);
     render();
+    undoManager.push('reanalyze', { snapshots }, 'Heranalyse · ' + todo.length + ' mails');
   }
 
   // ── Learning correction ────────────────────────────────────────────────────
@@ -1757,6 +1830,12 @@
   }
 
   function cancelAiProposal(uid) {
+    const proposal = state.aiProposals[uid];
+    const email    = findEmail(uid);
+    if (proposal) {
+      undoManager.push('ai_cancel', { email_id: uid, proposal: { ...proposal } },
+        'AI antwoord afgewezen: ' + (email?.fromName || email?.from || uid));
+    }
     delete state.aiProposals[uid];
     bumpReplyStat('rejected');
     updateActieCard(uid);
@@ -1779,10 +1858,12 @@
       });
     }
     bumpReplyStat(wasEdited ? 'edited' : 'approved');
+    const wasUnread = !!email.unread;
+    undoManager.push('ai_send', { email_id: uid, was_unread: wasUnread, proposal: { ...proposal } },
+      'Antwoord verstuurd: ' + (email.fromName || email.from || uid));
     state.overrides.read[uid] = true;
     saveOverrides();
-    const em = findEmail(uid);
-    if (em) em.unread = false;
+    email.unread = false;
     delete state.aiProposals[uid];
     render();
     showToast(wasEdited ? 'Antwoord verstuurd · voorbeeld opgeslagen voor AI' : 'Antwoord verstuurd');
@@ -1826,31 +1907,33 @@
   function markNotReclame(uid) {
     const email = findEmail(uid);
     if (!email) return;
-    // Determine correct category: hard rules first, then AI cache (but never Reclame), else Overig
+    const oldCat = email.category;
     const hardCat   = getHardRuleCategory(email);
     const cachedCat = _aiCatCache[uid];
     const correctCat = hardCat || (cachedCat && cachedCat !== 'Reclame' ? cachedCat : 'Overig');
-    // Set an explicit override so applyAutoReclameClassification can't re-apply Reclame
     state.overrides.category[uid] = correctCat;
     saveOverrides();
     email.category = correctCat;
-    // Update confidence dot to show this was manually corrected
     _aiConfCache[uid] = { confidence: 95, source: 'learned' };
     saveJson(AI_CONF_KEY, _aiConfCache);
     populateSuggestions();
     render();
-    showToast('Mail verplaatst naar ' + correctCat);
-    sendLearningCorrection(email, 'Reclame', correctCat);
+    const undoEntry = undoManager.push('not_spam', {
+      email_id: uid, old_category: oldCat, new_category: correctCat,
+      email_sender: email.fromAddress || getFromAddress(email), email_subject: email.subject
+    }, 'Niet reclame: ' + (email.fromName || getFromAddress(email) || uid) + ' → ' + correctCat);
+    sendLearningCorrection(email, 'Reclame', correctCat, 'not_spam', undoEntry);
   }
 
   function markAsRead(uid) {
     const email = findEmail(uid);
     if (!email || !email.unread) return;
+    undoManager.push('mark_read', { email_id: uid },
+      'Gelezen: ' + (email.fromName || email.from || uid));
     state.overrides.read[uid] = true;
     saveOverrides();
     email.unread = false;
     render();
-    showToast('Gemarkeerd als gelezen');
     pushReadFlagToImap(email);
   }
 
@@ -1886,12 +1969,42 @@
 
   // ── Bulk reclame actions ───────────────────────────────────────────────────
   function bulkMarkReclame() {
-    state.reclameSelected.forEach((uid) => markAsReclame(uid));
+    const items = [...state.reclameSelected].map((uid) => {
+      const email = findEmail(uid);
+      return email ? { email_id: uid, old_category: email.category } : null;
+    }).filter(Boolean);
+    items.forEach(({ email_id }) => {
+      const email = findEmail(email_id);
+      if (!email) return;
+      state.overrides.category[email_id] = 'Reclame';
+      email.category = 'Reclame';
+      recordReclamePattern(email);
+      sendLearningCorrection(email, email.category, 'Reclame', 'manual', null);
+    });
+    saveOverrides(); populateSuggestions(); render();
     state.reclameSelected.clear();
+    if (items.length > 0)
+      undoManager.push('bulk_reclame', { items }, items.length + ' mails als reclame gemarkeerd');
   }
   function bulkMarkNotReclame() {
-    state.reclameSelected.forEach((uid) => markNotReclame(uid));
+    const items = [...state.reclameSelected].map((uid) => {
+      const email = findEmail(uid);
+      return email ? { email_id: uid, old_category: email.category } : null;
+    }).filter(Boolean);
+    items.forEach(({ email_id }) => {
+      const email = findEmail(email_id);
+      if (!email) return;
+      const hardCat   = getHardRuleCategory(email);
+      const cachedCat = _aiCatCache[email_id];
+      const correctCat = hardCat || (cachedCat && cachedCat !== 'Reclame' ? cachedCat : 'Overig');
+      state.overrides.category[email_id] = correctCat;
+      email.category = correctCat;
+      sendLearningCorrection(email, 'Reclame', correctCat, 'not_spam', null);
+    });
+    saveOverrides(); populateSuggestions(); render();
     state.reclameSelected.clear();
+    if (items.length > 0)
+      undoManager.push('bulk_not_reclame', { items }, items.length + ' mails als niet-reclame gemarkeerd');
   }
   function bulkDismissSuggestions() {
     state.reclameSelected.forEach((uid) => {
@@ -2055,14 +2168,15 @@
 
   // ── Snooze helpers ────────────────────────────────────────────────────────
   function snoozeEmail(uid, days) {
+    const email = findEmail(uid);
     const until = new Date();
     until.setDate(until.getDate() + days);
-    until.setHours(8, 0, 0, 0); // 8:00 ochtend
+    until.setHours(8, 0, 0, 0);
     state.snoozeMap[uid] = until.toISOString();
     saveJson(SNOOZE_KEY, state.snoozeMap);
-    // mark no-action until snooze wakes; auto-clear on wake (handled in getActieEmails)
-    const label = days === 1 ? 'morgen' : 'volgende week';
-    showToast('Gesnoozed tot ' + until.toLocaleDateString('nl-NL', { weekday:'long', day:'numeric', month:'short' }));
+    const dateStr = until.toLocaleDateString('nl-NL', { weekday:'long', day:'numeric', month:'short' });
+    undoManager.push('snooze', { email_id: uid },
+      'Gesnoozed tot ' + dateStr + ': ' + (email?.fromName || email?.from || uid));
     closeAllDropdowns();
     render();
     saveEmailAction(uid, 'snooze', until.toISOString());
@@ -2248,16 +2362,20 @@
         const u   = btn.dataset.uid;
         if (act === 'mark-action') {
           const current = state.actionFlags[u] === true;
+          const oldFlag = state.actionFlags[u];
           setActionFlag(u, current ? null : true);
-          showToast(current ? 'Actie vereist markering verwijderd' : 'Gemarkeerd als actie vereist · systeem heeft geleerd');
           saveEmailAction(u, 'mark-action', !current);
           updateActieCard(u);
+          undoManager.push('requires_action', { email_id: u, old_flag: oldFlag },
+            current ? 'Actie vereist verwijderd' : 'Actie vereist gemarkeerd');
         } else if (act === 'no-action') {
           const current = state.actionFlags[u] === false;
+          const oldFlag = state.actionFlags[u];
           setActionFlag(u, current ? null : false);
-          showToast(current ? 'Mail staat weer in actie vereist' : 'Geen actie nodig · verwijderd uit lijst');
           saveEmailAction(u, 'no-action', !current);
           render();
+          undoManager.push('no_action', { email_id: u, old_flag: oldFlag },
+            current ? 'Geen actie markering verwijderd' : 'Geen actie nodig gemarkeerd');
         } else if (act === 'mark-read')  { markAsRead(u); }
         else if (act === 'create-task')  { openTaakVanEmail(u); }
         else if (act === 'snooze-day')   { snoozeEmail(u, 1); }
@@ -2334,8 +2452,13 @@
           closeAllDropdowns();
           const act = btn.dataset.act;
           const u   = btn.dataset.uid;
-          if      (act === 'mark-action') { setActionFlag(u, true); showToast('Gemarkeerd als actie vereist'); saveEmailAction(u, 'mark-action', true); render(); }
-          else if (act === 'create-task') { openTaakVanEmail(u); }
+          if (act === 'mark-action') {
+            const oldFlag = state.actionFlags[u];
+            setActionFlag(u, true);
+            saveEmailAction(u, 'mark-action', true);
+            render();
+            undoManager.push('requires_action', { email_id: u, old_flag: oldFlag }, 'Actie vereist gemarkeerd');
+          } else if (act === 'create-task') { openTaakVanEmail(u); }
           else if (act === 'snooze-day')  { snoozeEmail(u, 1); }
           else if (act === 'snooze-week') { snoozeEmail(u, 7); }
         });
