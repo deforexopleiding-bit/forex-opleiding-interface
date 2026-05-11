@@ -16,6 +16,13 @@ const EXPECTED = {
     { col: 'source',           sql: "text DEFAULT 'ai'" },
     { col: 'last_corrected_at',sql: 'timestamptz' },
   ],
+  kennisbank_items: [
+    { col: 'times_used',        sql: 'integer DEFAULT 0' },
+    { col: 'times_helpful',     sql: 'integer DEFAULT 0' },
+    { col: 'helpfulness_score', sql: 'integer DEFAULT 0' },
+    { col: 'auto_generated',    sql: 'boolean DEFAULT false' },
+    { col: 'source_email_id',   sql: 'text' },
+  ],
 };
 
 async function colExists(table, col) {
@@ -62,6 +69,7 @@ export default async function handler(req, res) {
   lines.push('', '-- RLS uitschakelen (nodig voor anon key)');
   lines.push('ALTER TABLE learn_examples DISABLE ROW LEVEL SECURITY;');
   lines.push('ALTER TABLE email_patterns DISABLE ROW LEVEL SECURITY;');
+  lines.push('ALTER TABLE kennisbank_items DISABLE ROW LEVEL SECURITY;');
   report.sql_to_run = lines.join('\n');
 
   // ── Probeer via RPC (werkt alleen als de functie al bestaat in Supabase) ──
@@ -87,7 +95,6 @@ export default async function handler(req, res) {
   }
 
   if (rpcWorked) {
-    // Verifieer of kolommen nu bestaan
     const stillMissing = [];
     for (const { table, col } of report.missing) {
       if (!(await colExists(table, col))) stillMissing.push({ table, col });

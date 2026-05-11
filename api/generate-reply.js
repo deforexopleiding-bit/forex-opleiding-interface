@@ -1,4 +1,5 @@
 import Anthropic from '@anthropic-ai/sdk';
+import { supabase } from './supabase.js';
 
 const SYSTEM_PROMPT = `Je bent de e-mailassistent van De Forex Opleiding.
 Je schrijft vriendelijke, persoonlijke e-mails in het Nederlands.
@@ -22,7 +23,7 @@ export default async function handler(req, res) {
     });
   }
 
-  const { email, kennisbankContext, learningExamples } = req.body || {};
+  const { email, kennisbankContext: frontendKb, learningExamples: frontendEx, auto_save_reply } = req.body || {};
 
   if (!email) {
     return res.status(400).json({ error: 'email ontbreekt in request body' });
@@ -30,17 +31,51 @@ export default async function handler(req, res) {
 
   const client = new Anthropic({ apiKey });
 
-  // Bouw de gebruikers-context op
-  const parts = [];
+  // ── Server-side kennisbank ophalen uit Supabase ───────────────────────────
+  let serverKbItems = [];
+  let serverLearnEx = [];
+  let kennisbankUsed = 0;
+  let learningExamplesUsed = 0;
 
-  // Bedrijfsprofiel uit kennisbank
-  if (kennisbankContext?.profile) {
-    parts.push(`## Bedrijfsprofiel\n${kennisbankContext.profile}`);
+  try {
+    // Haal meest helpfulle kennisbank-items op (gesorteerd op helpfulness_score)
+    const { data: kbItems } = await supabase
+      .from('kennisbank_items')
+      .select('title, category, content, question, answer, helpfulness_score, times_helpful')
+      .order('helpfulness_score', { ascending: false })
+      .limit(10);
+    serverKbItems = kbItems || [];
+    kennisbankUsed = serverKbItems.length;
+    console.log(`[generate-reply] kennisbank: ${kennisbankUsed} items geladen`);
+
+    // Haal recente correcties op voor de categorie van deze e-mail
+    if (email?.category) {
+      const { data: learnEx } = await supabase
+        .from('learn_examples')
+        .select('email_subject, new_category, corrected_at, body_snippet')
+        .eq('new_category', email.category)
+        .order('corrected_at', { ascending: false })
+        .limit(5);
+      serverLearnEx = learnEx || [];
+      learningExamplesUsed = serverLearnEx.length;
+    }
+  } catch (e) {
+    console.warn('[generate-reply] kennisbank fetch fout:', e.message);
   }
 
-  // Kennisbank-items (FAQ, stijlgids, etc.)
-  if (kennisbankContext?.items?.length) {
-    const itemText = kennisbankContext.items
+  // ── Prompt opbouwen ───────────────────────────────────────────────────────
+  const parts = [];
+
+  // Bedrijfsprofiel (server-side kennisbank heeft prioriteit, anders frontend fallback)
+  const kbProfile = frontendKb?.profile || '';
+  if (kbProfile) {
+    parts.push(`## Bedrijfsprofiel\n${kbProfile}`);
+  }
+
+  // Kennisbank-items: server-side eerst, dan frontend-fallback als server leeg is
+  const effectiveKbItems = serverKbItems.length > 0 ? serverKbItems : (frontendKb?.items || []);
+  if (effectiveKbItems.length > 0) {
+    const itemText = effectiveKbItems
       .map((item) => {
         const lines = [];
         if (item.title) lines.push(`### ${item.title}`);
@@ -55,13 +90,19 @@ export default async function handler(req, res) {
     parts.push(`## Kennisbank\n${itemText}`);
   }
 
-  // Leervoorbeelden: eerder goedgekeurde/bewerkte antwoorden als few-shot
-  if (learningExamples?.length) {
-    const recent = learningExamples.slice(-5); // max 5 meest recente
+  // Leervoorbeelden: server-side recent voor deze categorie
+  const effectiveLearnEx = serverLearnEx.length > 0 ? serverLearnEx : (frontendEx || []);
+  if (effectiveLearnEx.length > 0) {
+    const recent = effectiveLearnEx.slice(-5);
     const exText = recent
-      .map((ex) =>
-        `Categorie: ${ex.category}\nOnderwerp: ${ex.originalEmail?.subject || '—'}\nGoedgekeurd antwoord:\n${ex.userVersion}`
-      )
+      .map((ex) => {
+        if (ex.userVersion) {
+          // Frontend-formaat
+          return `Categorie: ${ex.category}\nOnderwerp: ${ex.originalEmail?.subject || '—'}\nGoedgekeurd antwoord:\n${ex.userVersion}`;
+        }
+        // Server-formaat (learn_examples)
+        return `Categorie: ${ex.new_category}\nOnderwerp: ${ex.email_subject || '—'}\nBody-fragment: ${ex.body_snippet || '—'}`;
+      })
       .join('\n\n---\n\n');
     parts.push(`## Eerdere goedgekeurde antwoorden (schrijfstijl leidraad)\n${exText}`);
   }
@@ -90,7 +131,29 @@ export default async function handler(req, res) {
     });
 
     const reply = response.content[0]?.text?.trim() || '';
-    return res.status(200).json({ reply });
+
+    // ── Auto-save goede replies naar kennisbank ───────────────────────────
+    if (auto_save_reply && reply && email?.subject) {
+      supabase.from('kennisbank_items').insert({
+        title:           `Auto: ${String(email.subject).slice(0, 60)}`,
+        category:        email.category || 'Overig',
+        content:         reply,
+        auto_generated:  true,
+        source_email_id: email.uid || null,
+        times_used:      1,
+        helpfulness_score: 50,
+      })
+        .then(({ error }) => {
+          if (error) console.warn('[generate-reply] auto-save kennisbank fout:', error.message);
+          else console.log('[generate-reply] Reply auto-opgeslagen in kennisbank');
+        });
+    }
+
+    return res.status(200).json({
+      reply,
+      kennisbank_used:        kennisbankUsed,
+      learning_examples_used: learningExamplesUsed
+    });
   } catch (err) {
     console.error('Anthropic API error:', err);
     return res.status(500).json({

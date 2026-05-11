@@ -256,6 +256,7 @@
       font-family: inherit; font-size: 13.5px; line-height: 1.6; resize: vertical;
     }
     .reply-box:focus { outline: none; border-color: var(--accent-cyan); }
+    .reply-kb-meta { font-size: 11px; color: var(--muted); margin: 4px 0 2px; }
     .reply-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
     .card-ai-loading { display: flex; align-items: center; gap: 10px; padding: 12px 0; font-size: 13px; color: var(--accent-cyan); }
     .card-ai-error { font-size: 13px; color: var(--red); padding: 8px 0; }
@@ -569,23 +570,6 @@
     }
     .reanalyze-fill { height: 100%; background: var(--accent-cyan); border-radius: 2px; transition: width 0.3s; }
 
-    /* ── DB migratie banner ── */
-    .db-migrate-banner {
-      display: flex; align-items: flex-start; gap: 12px; flex-wrap: wrap;
-      padding: 10px 16px; margin-bottom: 10px;
-      background: rgba(245,158,11,0.08); border: 1px solid rgba(245,158,11,0.25);
-      border-radius: 10px; font-size: 12px; color: var(--amber);
-    }
-    .db-migrate-banner strong { display: block; margin-bottom: 2px; }
-    .db-migrate-banner .dmb-actions { display: flex; gap: 8px; margin-top: 6px; flex-wrap: wrap; }
-    .db-migrate-sql {
-      display: none; margin-top: 8px; width: 100%;
-      background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
-      padding: 10px; font-size: 10px; font-family: monospace; color: var(--text-dim);
-      white-space: pre; overflow-x: auto; max-height: 200px;
-    }
-    .db-migrate-sql.show { display: block; }
-
     /* ── Leer banner ("Klopt deze categorie?") ── */
     .learn-banner {
       display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
@@ -756,8 +740,6 @@
       </button>
     </div>
   </header>
-
-  <div id="dbMigrateBanner" style="display:none"></div>
 
   <div class="status-bar">
     <span id="actionCount">—</span>
@@ -1486,14 +1468,14 @@
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        email: { subject:email.subject, from:email.from, fromName:email.fromName, fromAddress:getFromAddress(email), mailbox:email.mailbox, category:email.category, body },
+        email: { uid:email.uid, subject:email.subject, from:email.from, fromName:email.fromName, fromAddress:getFromAddress(email), mailbox:email.mailbox, category:email.category, body },
         kennisbankContext: loadKennisbankContext(),
         learningExamples:  loadLearningExamples()
       })
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'HTTP ' + res.status);
-    return data.reply;
+    return { reply: data.reply, kennisbank_used: data.kennisbank_used ?? 0, learning_examples_used: data.learning_examples_used ?? 0 };
   }
 
   function appendSignature(text) {
@@ -1512,9 +1494,9 @@
     state.aiProposals[uid] = { loading: true };
     updateActieCard(uid);
     try {
-      const text = await callGenerateReply(email);
-      const full  = appendSignature(text);
-      state.aiProposals[uid] = { original: full, current: full, generatedAt: new Date().toISOString() };
+      const result = await callGenerateReply(email);
+      const full   = appendSignature(result.reply);
+      state.aiProposals[uid] = { original: full, current: full, generatedAt: new Date().toISOString(), kennisbank_used: result.kennisbank_used, learning_examples_used: result.learning_examples_used };
     } catch (err) {
       state.aiProposals[uid] = { error: err.message };
     }
@@ -1528,9 +1510,9 @@
     state.aiProposals[uid] = { loading: true, previous: prev };
     updateActieCard(uid);
     try {
-      const text = await callGenerateReply(email);
-      const full  = appendSignature(text);
-      state.aiProposals[uid] = { original: full, current: full, generatedAt: new Date().toISOString() };
+      const result = await callGenerateReply(email);
+      const full   = appendSignature(result.reply);
+      state.aiProposals[uid] = { original: full, current: full, generatedAt: new Date().toISOString(), kennisbank_used: result.kennisbank_used, learning_examples_used: result.learning_examples_used };
     } catch (err) {
       state.aiProposals[uid] = { error: err.message };
     }
@@ -1915,9 +1897,15 @@
     if (!p) return '';
     if (p.loading) return '<div class="card-ai-loading"><span class="ai-loading-spinner"></span> AI schrijft antwoord…</div>';
     if (p.error)   return '<div class="card-ai-error">AI-fout: ' + escapeHtml(p.error) + '</div>';
+    const kbUsed = p.kennisbank_used ?? null;
+    const kbMeta = kbUsed !== null
+      ? '<div class="reply-kb-meta">Kennisbank: ' + kbUsed + ' item' + (kbUsed !== 1 ? 's' : '') + ' gebruikt' +
+        (kbUsed === 0 ? ' <span style="color:var(--red)">· Kennisbank leeg</span>' : '') + '</div>'
+      : '';
     return '<div class="card-reply-section">' +
       '<div class="reply-label"><span class="ai-tag">AI</span> Voorgesteld antwoord</div>' +
       '<textarea class="reply-box" data-reply="' + escapeHtml(e.uid) + '">' + escapeHtml(p.current) + '</textarea>' +
+      kbMeta +
       '<div class="reply-actions">' +
         '<button class="btn btn-send" data-action="send" data-uid="' + escapeHtml(e.uid) + '">' + ICON_SEND + ' Versturen</button>' +
         '<button class="btn" data-action="regenerate" data-uid="' + escapeHtml(e.uid) + '">' + ICON_REGEN + ' Opnieuw</button>' +
@@ -2502,14 +2490,16 @@
     if (existing) { existing.classList.toggle('show'); return; }
     const row = document.querySelector('.reclame-row[data-uid="' + uid + '"]');
     if (!row) return;
-    const cats = ['Nieuwe Lead', 'Appointment', 'Klantvraag', 'Factuurvraag', 'Overig'];
+    const cats = ['Nieuwe Lead', 'Appointment', 'Event Aanmelding', 'Klantvraag', 'Factuurvraag', 'Overig'];
     const picker = document.createElement('div');
     picker.id = 'nrp-' + uid;
     picker.className = 'not-reclame-picker show';
     picker.innerHTML = '<span>Verplaats naar:</span>' +
       cats.map((c) => '<button class="nrp-cat" onclick="handleNotReclameChoice(\'' + escapeHtml(uid) + '\', \'' + escapeHtml(c) + '\')">' + escapeHtml(c) + '</button>').join('') +
-      '<button class="nrp-cancel" onclick="document.getElementById(\'nrp-' + uid + '\').classList.remove(\'show\')">Annuleer</button>';
+      '<button class="nrp-cancel" onclick="document.getElementById(\'nrp-' + uid + '\').classList.remove(\'show\')">Annuleer</button>' +
+      '<span class="nrp-hint" id="nrp-hint-' + uid + '" style="display:none;font-size:11px;color:var(--muted);margin-left:8px;">Selecteer een categorie of klik Annuleer</span>';
     row.insertAdjacentElement('afterend', picker);
+    setTimeout(() => { const h = document.getElementById('nrp-hint-' + uid); if (h) h.style.display = 'inline'; }, 3000);
   }
 
   function handleNotReclameChoice(uid, newCat) {
@@ -2523,7 +2513,7 @@
     render();
     const domain = (email.fromAddress || getFromAddress(email)).split('@')[1] || email.from;
     showToast('Verplaatst naar ' + newCat + ' · Systeem leert: ' + domain + ' is geen reclame · Wordt voortaan herkend als ' + newCat);
-    sendLearningCorrection(email, oldCat, newCat, 'not_reclame');
+    sendLearningCorrection(email, oldCat, newCat, 'not_spam');
   }
 
   // ── Leerrapport modal ──────────────────────────────────────────────────────
@@ -2535,119 +2525,22 @@
     body.innerHTML = '<div class="state"><div class="spinner"></div><h3>Rapport laden…</h3></div>';
     fetch('/api/learning-report')
       .then((r) => r.json())
-      .then((data) => {
-        console.log('[Leerrapport] raw data:', data);
-        body.innerHTML = renderLeerrapport(data);
-      })
-      .catch((err) => {
-        body.innerHTML = '<div class="lr-empty">Kon rapport niet laden: ' + escapeHtml(err.message) + '</div>';
-      });
+      .then((data) => { body.innerHTML = renderLeerrapport(data); })
+      .catch((err) => { body.innerHTML = '<div class="lr-empty">Kon rapport niet laden: ' + escapeHtml(err.message) + '</div>'; });
   }
 
   function closeLeerrapport() {
     document.getElementById('leerrapportModal')?.classList.add('hidden');
   }
 
-  function runDebugSupabase() {
-    const btn = document.getElementById('lrDebugBtn');
-    if (btn) { btn.disabled = true; btn.textContent = 'Laden…'; }
-    fetch('/api/debug-supabase?test_insert=1')
-      .then((r) => r.json())
-      .then((data) => {
-        console.log('[Supabase Debug]', data);
-        const body = document.getElementById('leerrapportBody');
-        const errCount = [data.learn_examples, data.email_patterns, data.learn_examples_cols, data.email_patterns_cols]
-          .filter((x) => x && !x.ok).length;
-        let html = '<div style="background:var(--bg-elev-3);border:1px solid var(--border);border-radius:10px;padding:16px;font-size:12px;">' +
-          '<div class="lr-section-title" style="margin-bottom:10px">Supabase diagnose · ' + data.timestamp + '</div>';
-
-        function row(label, obj) {
-          const ok = obj?.ok !== false;
-          const icon = ok ? '✓' : '✗';
-          const col  = ok ? 'var(--green)' : 'var(--red)';
-          let detail = '';
-          if (!ok && obj?.error) detail = ' — ' + obj.error;
-          else if (obj?.total_rows != null) detail = ' · ' + obj.total_rows + ' rijen · kolommen: ' + (obj.columns || []).join(', ');
-          else if (obj?.tested) detail = ' · ' + (obj.tested || []).length + ' kolommen OK';
-          return '<div style="margin:4px 0"><span style="color:' + col + ';font-weight:700">' + icon + '</span> <strong>' + label + '</strong>' + escapeHtml(detail) + '</div>';
-        }
-
-        html += row('learn_examples tabel', data.learn_examples);
-        html += row('email_patterns tabel', data.email_patterns);
-        html += row('learn_examples kolommen', data.learn_examples_cols);
-        html += row('email_patterns kolommen', data.email_patterns_cols);
-        if (data.test_insert) html += row('Test-insert (+ auto-delete)', data.test_insert);
-
-        if (errCount === 0) {
-          html += '<div style="margin-top:10px;color:var(--green)">Alles OK — tabellen en kolommen bestaan. Controleer of er al correcties zijn opgeslagen.</div>';
-        } else {
-          html += '<div style="margin-top:12px;color:var(--amber);font-size:11px">Zie hieronder de SQL die je in Supabase moet uitvoeren (SQL Editor):</div>' +
-            '<pre style="margin-top:6px;background:var(--bg);padding:10px;border-radius:6px;overflow:auto;font-size:10px;color:var(--text-dim)">' + escapeHtml(getSqlFix()) + '</pre>';
-        }
-
-        html += '</div>';
-        body.innerHTML = html + '<div style="margin-top:12px"><button class="btn btn-sm" onclick="openLeerrapport()">← Terug naar rapport</button></div>';
-      })
-      .catch((err) => { console.error('Debug fout:', err); })
-      .finally(() => { if (btn) { btn.disabled = false; btn.textContent = 'Debug'; } });
-  }
-
-  function getSqlFix() {
-    return `-- Voer dit uit in Supabase → SQL Editor
--- Beide tabellen bestaan al — dit voegt ALLEEN ontbrekende kolommen toe.
-
--- ── learn_examples: ontbrekende kolommen toevoegen ──────────────────────────
--- De tabel gebruikt al 'email_sender' (niet 'sender_email'), dat is correct.
-ALTER TABLE learn_examples ADD COLUMN IF NOT EXISTS email_id        text;
-ALTER TABLE learn_examples ADD COLUMN IF NOT EXISTS sender_domain   text;
-ALTER TABLE learn_examples ADD COLUMN IF NOT EXISTS subject         text;
-ALTER TABLE learn_examples ADD COLUMN IF NOT EXISTS body_snippet    text;
-ALTER TABLE learn_examples ADD COLUMN IF NOT EXISTS old_category    text;
-ALTER TABLE learn_examples ADD COLUMN IF NOT EXISTS corrected_by    text;
-ALTER TABLE learn_examples ADD COLUMN IF NOT EXISTS correction_type text DEFAULT 'manual';
-ALTER TABLE learn_examples ADD COLUMN IF NOT EXISTS corrected_at    timestamptz DEFAULT now();
-
-CREATE INDEX IF NOT EXISTS learn_examples_sender ON learn_examples(email_sender, new_category);
-CREATE INDEX IF NOT EXISTS learn_examples_domain ON learn_examples(sender_domain, new_category);
-CREATE INDEX IF NOT EXISTS learn_examples_date   ON learn_examples(corrected_at);
-
--- ── email_patterns: ontbrekende kolommen toevoegen ──────────────────────────
-ALTER TABLE email_patterns ADD COLUMN IF NOT EXISTS sender_domain    text;
-ALTER TABLE email_patterns ADD COLUMN IF NOT EXISTS times_seen       integer DEFAULT 0;
-ALTER TABLE email_patterns ADD COLUMN IF NOT EXISTS times_corrected  integer DEFAULT 0;
-ALTER TABLE email_patterns ADD COLUMN IF NOT EXISTS source           text DEFAULT 'ai';
-ALTER TABLE email_patterns ADD COLUMN IF NOT EXISTS last_seen        timestamptz DEFAULT now();
-ALTER TABLE email_patterns ADD COLUMN IF NOT EXISTS last_corrected_at timestamptz;
-
-CREATE INDEX IF NOT EXISTS email_patterns_email  ON email_patterns(sender_email);
-CREATE INDEX IF NOT EXISTS email_patterns_domain ON email_patterns(sender_domain, confidence);
-
--- ── RLS uitschakelen zodat de anon key kan schrijven ────────────────────────
-ALTER TABLE learn_examples DISABLE ROW LEVEL SECURITY;
-ALTER TABLE email_patterns DISABLE ROW LEVEL SECURITY;`;
-  }
-
   function renderLeerrapport(d) {
-    function statVal(v) { return v != null ? v : '—'; }
     const acc = d.accuracy_rate != null ? d.accuracy_rate + '%' : '—';
-    const accColor = d.accuracy_rate == null ? '' : d.accuracy_rate >= 80 ? ' green' : d.accuracy_rate >= 60 ? ' amber' : ' red';
-
-    // Foutmelding als er query errors zijn
-    let errorBanner = '';
-    if (d._errors?.length) {
-      errorBanner = '<div style="background:rgba(239,68,68,0.08);border:1px solid rgba(239,68,68,0.2);border-radius:8px;padding:10px 14px;font-size:12px;color:var(--red);margin-bottom:4px">' +
-        '<strong>⚠ Supabase query fouten (' + d._errors.length + ')</strong><br>' +
-        d._errors.map((e) => escapeHtml(e.query + ': ' + e.error)).join('<br>') +
-        '<br><button class="btn btn-sm btn-danger" style="margin-top:8px" onclick="runDebugSupabase()">Diagnose uitvoeren →</button>' +
-        '</div>';
-    }
-
     const stats = '<div class="lr-stats-grid">' +
-      '<div class="lr-stat"><div class="lr-stat-val cyan">'   + statVal(d.total_patterns)         + '</div><div class="lr-stat-label">Totaal patronen</div></div>' +
-      '<div class="lr-stat"><div class="lr-stat-val' + accColor + '">' + acc                       + '</div><div class="lr-stat-label">AI nauwkeurigheid</div></div>' +
-      '<div class="lr-stat"><div class="lr-stat-val amber">'  + statVal(d.corrections_this_week)  + '</div><div class="lr-stat-label">Correcties deze week</div></div>' +
-      '<div class="lr-stat"><div class="lr-stat-val violet">' + statVal(d.total_corrections)      + '</div><div class="lr-stat-label">Totaal correcties</div></div>' +
-      '<div class="lr-stat"><div class="lr-stat-val cyan">'   + statVal(d.new_patterns_this_week) + '</div><div class="lr-stat-label">Nieuwe patronen (week)</div></div>' +
+      '<div class="lr-stat"><div class="lr-stat-val cyan">' + (d.total_patterns || 0) + '</div><div class="lr-stat-label">Totaal patronen</div></div>' +
+      '<div class="lr-stat"><div class="lr-stat-val green">' + acc + '</div><div class="lr-stat-label">AI nauwkeurigheid</div></div>' +
+      '<div class="lr-stat"><div class="lr-stat-val amber">' + (d.corrections_this_week || 0) + '</div><div class="lr-stat-label">Correcties deze week</div></div>' +
+      '<div class="lr-stat"><div class="lr-stat-val violet">' + (d.total_corrections || 0) + '</div><div class="lr-stat-label">Totaal correcties</div></div>' +
+      '<div class="lr-stat"><div class="lr-stat-val cyan">' + (d.new_patterns_this_week || 0) + '</div><div class="lr-stat-label">Nieuwe patronen (week)</div></div>' +
     '</div>';
 
     function confBar(c) {
@@ -2656,6 +2549,7 @@ ALTER TABLE email_patterns DISABLE ROW LEVEL SECURITY;`;
       return '<span class="lr-conf-bar"><span class="lr-conf-track"><span class="lr-conf-fill" style="width:' + pct + '%;background:' + col + '"></span></span>' + pct + '%</span>';
     }
 
+    // Top gecorrigeerd
     let topHtml = '';
     if (d.top_corrected?.length) {
       topHtml = '<div><div class="lr-section-title">Meest gecorrigeerde afzenders</div>' +
@@ -2665,9 +2559,11 @@ ALTER TABLE email_patterns DISABLE ROW LEVEL SECURITY;`;
           '<td>' + escapeHtml(p.category) + '</td>' +
           '<td>' + confBar(p.confidence) + '</td>' +
           '<td>' + (p.times_corrected || 0) + '×</td></tr>'
-        ).join('') + '</tbody></table></div>';
+        ).join('') +
+        '</tbody></table></div>';
     }
 
+    // Lage confidence
     let lowHtml = '';
     if (d.low_confidence?.length) {
       lowHtml = '<div><div class="lr-section-title">Onzekere patronen (confidence &lt; 50%)</div>' +
@@ -2677,9 +2573,11 @@ ALTER TABLE email_patterns DISABLE ROW LEVEL SECURITY;`;
           '<td>' + escapeHtml(p.category) + '</td>' +
           '<td>' + confBar(p.confidence) + '</td>' +
           '<td>' + (p.times_seen || 0) + '×</td></tr>'
-        ).join('') + '</tbody></table></div>';
+        ).join('') +
+        '</tbody></table></div>';
     }
 
+    // Recente correcties
     let recentHtml = '';
     if (d.recent_corrections?.length) {
       recentHtml = '<div><div class="lr-section-title">Recente correcties (afgelopen 7 dagen)</div>' +
@@ -2690,54 +2588,15 @@ ALTER TABLE email_patterns DISABLE ROW LEVEL SECURITY;`;
             '<td style="color:var(--red)">' + escapeHtml(c.old_category || '—') + '</td>' +
             '<td style="color:var(--green)">' + escapeHtml(c.new_category) + '</td>' +
             '<td>' + dt + '</td></tr>';
-        }).join('') + '</tbody></table></div>';
+        }).join('') +
+        '</tbody></table></div>';
     }
 
-    const noData = !d.top_corrected?.length && !d.low_confidence?.length && !d.recent_corrections?.length;
-    const body = noData
-      ? '<div class="lr-empty">Nog geen leerdata. Gebruik het categorie-dropdown op e-mails om het systeem te trainen, of klik Debug om de databasestatus te controleren.</div>'
-      : (topHtml + lowHtml + recentHtml);
+    const isEmpty = !d.top_corrected?.length && !d.low_confidence?.length && !d.recent_corrections?.length;
+    const body = isEmpty ? '<div class="lr-empty">Nog geen leerdata beschikbaar. Categoriseer e-mails om het systeem te laten leren.</div>' :
+      (topHtml || '') + (lowHtml || '') + (recentHtml || '');
 
-    const debugBtn = '<div style="margin-top:16px;text-align:right">' +
-      '<button class="btn btn-sm" id="lrDebugBtn" onclick="runDebugSupabase()" style="font-size:11px;opacity:0.6">Debug · Controleer database</button>' +
-      '</div>';
-
-    return errorBanner + stats + body + debugBtn;
-  }
-
-  // ── DB migratie check (eenmalig per sessie) ───────────────────────────────
-  async function runDbMigrate() {
-    const SESSION_KEY = 'db_migrate_checked';
-    if (sessionStorage.getItem(SESSION_KEY)) return;
-    sessionStorage.setItem(SESSION_KEY, '1');
-    try {
-      const res  = await fetch('/api/db-migrate');
-      if (!res.ok) return;
-      const data = await res.json();
-      if (data.ok) return; // alles aanwezig
-      showDbMigrateBanner(data);
-    } catch { /* stil falen — niet kritiek */ }
-  }
-
-  function showDbMigrateBanner(data) {
-    const banner = document.getElementById('dbMigrateBanner');
-    if (!banner) return;
-    const missing = (data.missing || []).map((m) => `${m.table}.${m.col}`).join(', ');
-    const sqlId   = 'dbMigrateSql';
-    banner.style.display = 'block';
-    banner.innerHTML =
-      '<div class="db-migrate-banner">' +
-        '<div style="flex:1">' +
-          '<strong>Database update vereist</strong>' +
-          'Ontbrekende kolommen: <code style="font-size:11px">' + escapeHtml(missing) + '</code>' +
-          '<div class="dmb-actions">' +
-            '<button class="btn btn-sm" onclick="document.getElementById(\'' + sqlId + '\').classList.toggle(\'show\')">Toon SQL ▾</button>' +
-            '<button class="btn btn-sm" onclick="navigator.clipboard.writeText(document.getElementById(\'' + sqlId + '\').textContent);showToast(\'SQL gekopieerd\')">Kopieer SQL</button>' +
-            '<button class="btn btn-sm" onclick="this.closest(\'.db-migrate-banner\').parentElement.style.display=\'none\'">✕ Verbergen</button>' +
-          '</div>' +
-          '<pre class="db-migrate-sql" id="' + sqlId + '">' + escapeHtml(data.sql_to_run || '') + '</pre>' +
-        '</div>' +
-      '</div>';
+    return stats + body;
   }
 
   // ── Cache versie migratie ──────────────────────────────────────────────────
@@ -2764,7 +2623,6 @@ ALTER TABLE email_patterns DISABLE ROW LEVEL SECURITY;`;
     document.getElementById('leerrapportModal').addEventListener('click', (ev) => {
       if (ev.target === ev.currentTarget) closeLeerrapport();
     });
-    runDbMigrate();
     loadEmails();
   }
 

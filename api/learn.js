@@ -54,15 +54,13 @@ export default async function handler(req, res) {
   const senderDomain = getDomain(senderEmail);
 
   // ── Stap 1: Sla correctie op in learn_examples ────────────────────────
-  // Kolom: email_sender (niet sender_email — zo heet het in de Supabase tabel)
   const learnRow = {
     email_sender:    senderEmail  || null,
     new_category,
   };
-  // Optionele kolommen die bestaan nadat de ALTER TABLE is uitgevoerd:
   if (email_id)        learnRow.email_id        = email_id;
   if (senderDomain)    learnRow.sender_domain   = senderDomain;
-  if (subject)         learnRow.email_subject   = subject;       // kolom heet email_subject
+  if (subject)         learnRow.email_subject   = subject;
   if (body_snippet)    learnRow.body_snippet    = String(body_snippet).slice(0, 500);
   if (old_category)    learnRow.old_category    = old_category;
   if (corrected_by)    learnRow.corrected_by    = corrected_by;
@@ -72,7 +70,6 @@ export default async function handler(req, res) {
   try {
     const { error } = await supabase.from('learn_examples').insert(learnRow);
     if (error) {
-      // Fallback: probeer alleen de gegarandeerd bestaande kolommen
       console.warn('[learn] Volledige insert mislukt, probeer minimale insert:', error.message);
       const { error: err2 } = await supabase.from('learn_examples').insert({
         email_sender: senderEmail || null,
@@ -87,7 +84,75 @@ export default async function handler(req, res) {
     console.error('[learn] learn_examples insert crash:', err.message);
   }
 
-  // ── Stap 2: Slim patroon bijwerken in email_patterns ─────────────────
+  // ── Stap 2: not_spam specifieke logica ────────────────────────────────
+  if (correction_type === 'not_spam' && senderDomain) {
+    try {
+      // Verlaag confidence van reclame-patroon voor deze afzender
+      const { data: reclamePat } = await supabase.from('email_patterns')
+        .select('id, confidence, source')
+        .eq('sender_email', senderEmail)
+        .eq('category', 'Reclame')
+        .maybeSingle();
+
+      if (reclamePat) {
+        const newConf = (reclamePat.confidence || 70) - 30;
+        if (newConf < 20) {
+          await supabase.from('email_patterns').delete().eq('id', reclamePat.id);
+          console.log(`[learn] Reclame-patroon verwijderd voor ${senderEmail} (confidence te laag na not_spam)`);
+        } else {
+          await supabase.from('email_patterns')
+            .update({ confidence: newConf, last_corrected_at: new Date().toISOString() })
+            .eq('id', reclamePat.id);
+          console.log(`[learn] Reclame-confidence verlaagd naar ${newConf} voor ${senderEmail}`);
+        }
+      }
+
+      // Verlaag ook domein-level reclame-patroon
+      const { data: domainReclamePat } = await supabase.from('email_patterns')
+        .select('id, confidence')
+        .eq('sender_domain', senderDomain)
+        .is('sender_email', null)
+        .eq('category', 'Reclame')
+        .maybeSingle();
+
+      if (domainReclamePat) {
+        const newConf = (domainReclamePat.confidence || 70) - 20;
+        if (newConf < 20) {
+          await supabase.from('email_patterns').delete().eq('id', domainReclamePat.id);
+        } else {
+          await supabase.from('email_patterns')
+            .update({ confidence: newConf })
+            .eq('id', domainReclamePat.id);
+        }
+      }
+
+      // Tel not_spam correcties voor dit domein
+      const { count: notSpamCount } = await supabase.from('learn_examples')
+        .select('id', { count: 'exact', head: true })
+        .eq('sender_domain', senderDomain)
+        .eq('correction_type', 'not_spam');
+
+      // Na 3x not_spam voor hetzelfde domein: whitelist entry aanmaken
+      if ((notSpamCount || 0) >= 3) {
+        const { error: wlErr } = await supabase.from('email_patterns').upsert({
+          sender_domain:     senderDomain,
+          sender_email:      null,
+          category:          new_category,
+          confidence:        95,
+          times_seen:        notSpamCount,
+          source:            'whitelist',
+          last_corrected_at: new Date().toISOString()
+        }, { onConflict: 'sender_domain' });
+
+        if (wlErr) console.warn('[learn] Whitelist upsert fout:', wlErr.message);
+        else console.log(`[learn] Whitelist aangemaakt voor domein ${senderDomain} na ${notSpamCount}x not_spam`);
+      }
+    } catch (err) {
+      console.error('[learn] not_spam logica crash:', err.message);
+    }
+  }
+
+  // ── Stap 3: Slim patroon bijwerken in email_patterns ──────────────────
   let confidenceBefore = null;
   let confidenceAfter  = null;
   let patternUpdated   = false;
@@ -95,7 +160,6 @@ export default async function handler(req, res) {
   let newPatternCreated = false;
 
   try {
-    // email_patterns: GEEN times_corrected of last_seen — wel last_corrected_at
     const { data: existing, error: lookupErr } = await supabase
       .from('email_patterns')
       .select('id, category, confidence, times_seen, source')
@@ -126,7 +190,8 @@ export default async function handler(req, res) {
         patternUpdated  = true;
         confidenceAfter = newConf;
       }
-    } else {
+    } else if (correction_type !== 'not_spam') {
+      // Nieuw patroon aanmaken (niet bij not_spam — dan willen we juist geen reclame-patroon)
       const { error: insErr } = await supabase.from('email_patterns').insert({
         sender_email:      senderEmail,
         sender_domain:     senderDomain || null,
@@ -141,7 +206,7 @@ export default async function handler(req, res) {
     }
 
     // Check: 3+ correcties zelfde domein → confidence 90
-    if (senderDomain && !patternDeleted) {
+    if (senderDomain && !patternDeleted && correction_type !== 'not_spam') {
       const { count } = await supabase
         .from('learn_examples')
         .select('id', { count: 'exact', head: true })
@@ -213,7 +278,7 @@ export default async function handler(req, res) {
     console.error('[learn] email_patterns update crash:', err.message);
   }
 
-  // ── Stap 3: Rijke feedback ────────────────────────────────────────────
+  // ── Stap 4: Rijke feedback ────────────────────────────────────────────
   let patternExamples = 0;
   try {
     const { count } = await supabase
@@ -225,7 +290,9 @@ export default async function handler(req, res) {
 
   const domain = senderDomain || senderEmail;
   let message = `Systeem heeft geleerd`;
-  if (confidenceBefore !== null && confidenceAfter !== null) {
+  if (correction_type === 'not_spam') {
+    message = `Niet-reclame melding opgeslagen voor ${domain}`;
+  } else if (confidenceBefore !== null && confidenceAfter !== null) {
     message += ` · Confidence: ${confidenceBefore}% → ${confidenceAfter}%`;
   }
   if (patternDeleted) {
@@ -247,6 +314,7 @@ export default async function handler(req, res) {
     confidence_before:    confidenceBefore,
     confidence_after:     confidenceAfter,
     high_confidence:      (confidenceAfter || 0) >= 90,
+    correction_type:      correction_type || 'manual',
     message
   });
 }
