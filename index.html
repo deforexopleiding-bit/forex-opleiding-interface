@@ -3,10 +3,11 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Command Center · De Forex Opleiding</title>
+  <title>Dashboard · De Forex Opleiding</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -39,7 +40,6 @@
       overflow-x: hidden;
     }
 
-    /* ── Background atmosphere ── */
     body::before {
       content: ''; position: fixed; inset: 0;
       background-image:
@@ -58,9 +58,7 @@
       pointer-events: none; z-index: 0;
     }
 
-    /* ══════════════════════════════════════
-       SIDEBAR
-    ══════════════════════════════════════ */
+    /* ── Sidebar ── */
     .sidebar {
       position: fixed; top: 0; left: 0; bottom: 0;
       width: var(--sidebar-w);
@@ -70,7 +68,6 @@
       z-index: 200;
       overflow-y: auto; overflow-x: hidden;
     }
-
     .sidebar-logo {
       display: flex; align-items: center; gap: 11px;
       padding: 22px 16px 18px;
@@ -83,256 +80,208 @@
       background: var(--accent-grad);
       display: grid; place-items: center;
       font-weight: 800; font-size: 12px; color: #0a0b10;
-      letter-spacing: -.3px;
     }
-    .sidebar-logo-title {
-      font-size: 12.5px; font-weight: 700; color: var(--text);
-      line-height: 1.25; white-space: nowrap;
-    }
-    .sidebar-logo-sub {
-      font-size: 10px; color: var(--text-faint); margin-top: 2px;
-    }
-
+    .sidebar-logo-title { font-size: 12.5px; font-weight: 700; color: var(--text); line-height: 1.25; white-space: nowrap; }
+    .sidebar-logo-sub   { font-size: 10px; color: var(--text-faint); margin-top: 2px; }
     .sidebar-nav { flex: 1; padding: 10px 8px; }
-
     .nav-section {
       font-size: 10px; text-transform: uppercase; letter-spacing: .7px;
       color: var(--text-faint); font-weight: 600;
       padding: 14px 10px 5px;
     }
-
     .nav-item {
       display: flex; align-items: center; gap: 9px;
-      padding: 8px 10px;
-      border-radius: 8px;
-      color: var(--text-dim);
-      font-size: 13px; font-weight: 500;
+      padding: 8px 10px; border-radius: 8px;
+      color: var(--text-dim); font-size: 13px; font-weight: 500;
       text-decoration: none; cursor: pointer;
       transition: background .15s, color .15s;
-      margin-bottom: 1px;
-      user-select: none;
+      margin-bottom: 1px; user-select: none;
     }
-    .nav-item:hover:not(.nav-concept) {
-      background: rgba(255,255,255,0.05);
-      color: var(--text);
-    }
-    .nav-item.active {
-      background: rgba(168,85,247,0.14);
-      color: #a855f7;
-    }
-    .nav-item.nav-concept {
-      color: var(--text-faint); cursor: default; opacity: .65;
-    }
+    .nav-item:hover:not(.nav-concept) { background: rgba(255,255,255,0.05); color: var(--text); }
+    .nav-item.active { background: rgba(168,85,247,0.14); color: #a855f7; }
+    .nav-item.nav-concept { color: var(--text-faint); cursor: default; opacity: .65; }
     .nav-icon { width: 15px; height: 15px; flex-shrink: 0; }
-    .nav-badge {
-      margin-left: auto;
-      background: var(--red); color: #fff;
-      font-size: 10px; font-weight: 700;
-      border-radius: 10px; padding: 1px 6px;
-      display: none;
-    }
+    .nav-badge { margin-left: auto; background: var(--red); color: #fff; font-size: 10px; font-weight: 700; border-radius: 10px; padding: 1px 6px; display: none; }
     .nav-badge.show { display: inline-block; }
-    .nav-soon {
-      margin-left: auto;
-      font-size: 9px; font-weight: 600;
-      color: var(--text-faint);
-      background: rgba(255,255,255,0.05);
-      border-radius: 4px; padding: 1px 5px;
-      letter-spacing: .2px;
-    }
-
-    .sidebar-footer {
-      flex-shrink: 0;
-      padding: 8px 8px 14px;
-      border-top: 1px solid rgba(255,255,255,0.05);
-    }
-    .footer-user {
-      display: flex; align-items: center; gap: 9px;
-      padding: 9px 10px;
-      border-radius: 8px;
-      color: var(--text-dim);
-      font-size: 13px; font-weight: 500;
-      cursor: pointer;
-      transition: background .15s;
-    }
+    .nav-soon { margin-left: auto; font-size: 9px; font-weight: 600; color: var(--text-faint); background: rgba(255,255,255,0.05); border-radius: 4px; padding: 1px 5px; }
+    .sidebar-footer { flex-shrink: 0; padding: 8px 8px 14px; border-top: 1px solid rgba(255,255,255,0.05); }
+    .footer-user { display: flex; align-items: center; gap: 9px; padding: 9px 10px; border-radius: 8px; color: var(--text-dim); font-size: 13px; font-weight: 500; cursor: pointer; transition: background .15s; }
     .footer-user:hover { background: rgba(255,255,255,0.05); color: var(--text); }
-    .footer-avatar {
-      width: 26px; height: 26px; flex-shrink: 0;
-      border-radius: 50%;
-      background: var(--accent-grad);
-      display: grid; place-items: center;
-      font-size: 10px; font-weight: 800; color: #0a0b10;
-    }
+    .footer-avatar { width: 26px; height: 26px; flex-shrink: 0; border-radius: 50%; background: var(--accent-grad); display: grid; place-items: center; font-size: 10px; font-weight: 800; color: #0a0b10; }
 
-    /* ══════════════════════════════════════
-       MAIN CONTENT
-    ══════════════════════════════════════ */
-    .main {
-      margin-left: var(--sidebar-w);
-      min-height: 100vh;
-      position: relative; z-index: 1;
-    }
+    /* ── Main ── */
+    .main { margin-left: var(--sidebar-w); min-height: 100vh; position: relative; z-index: 1; }
+    .main-inner { padding: 28px 28px 64px; max-width: 1400px; }
 
-    .main-inner {
-      padding: 32px 32px 64px;
-      max-width: 1200px;
-    }
-
-    /* ── Page header ── */
-    .page-header {
+    /* ── Top header ── */
+    .top-header {
       display: flex; align-items: flex-start; justify-content: space-between;
-      gap: 16px; flex-wrap: wrap;
+      gap: 16px; flex-wrap: wrap; margin-bottom: 20px;
+    }
+    .greeting { font-size: 22px; font-weight: 800; letter-spacing: -.4px; }
+    .greeting-sub { font-size: 13px; color: var(--text-dim); margin-top: 3px; }
+
+    /* ── Period selector ── */
+    .period-bar { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+    .period-btn {
+      padding: 6px 13px; border-radius: 8px; border: 1px solid var(--border-strong);
+      background: var(--bg-elev); color: var(--text-dim);
+      font-size: 12px; font-weight: 500; cursor: pointer;
+      transition: all .15s; font-family: inherit;
+    }
+    .period-btn:hover { background: var(--bg-elev-2); color: var(--text); }
+    .period-btn.active { background: rgba(168,85,247,0.18); border-color: #7c3aed; color: #c4b5fd; font-weight: 600; }
+    .custom-range { display: none; align-items: center; gap: 6px; margin-left: 4px; }
+    .custom-range.show { display: flex; }
+    .custom-range input[type="date"] {
+      padding: 5px 8px; border-radius: 7px; border: 1px solid var(--border-strong);
+      background: var(--bg-elev-2); color: var(--text); font-size: 12px; font-family: inherit;
+    }
+    .custom-range input[type="date"]::-webkit-calendar-picker-indicator { filter: invert(0.7); }
+    .comparison-bar {
+      font-size: 11px; color: var(--text-faint); margin-top: 8px; margin-bottom: 20px;
+      padding-top: 8px; border-top: 1px solid var(--border);
+    }
+
+    /* ── Hero stats ── */
+    .hero-grid {
+      display: grid;
+      grid-template-columns: repeat(6, 1fr);
+      gap: 12px;
       margin-bottom: 28px;
     }
-    .page-title { font-size: 22px; font-weight: 800; letter-spacing: -.4px; }
-    .page-sub { font-size: 13px; color: var(--text-dim); margin-top: 3px; }
-    .header-clock {
-      text-align: right; font-size: 13px; color: var(--text-dim);
-      padding-top: 4px;
-    }
-    .header-clock .time { font-size: 20px; font-weight: 700; color: var(--text); }
-
-    /* ── Stats grid ── */
-    .stats-grid {
-      display: grid;
-      grid-template-columns: repeat(4, 1fr);
-      gap: 14px;
-      margin-bottom: 32px;
-    }
-    .stat-card {
+    .hero-card {
       background: var(--bg-elev);
       border: 1px solid var(--border);
       border-radius: 14px;
-      padding: 18px 20px;
+      padding: 16px 18px;
       position: relative; overflow: hidden;
+      cursor: default;
+      transition: border-color .2s;
     }
-    .stat-card::after {
+    .hero-card.clickable { cursor: pointer; }
+    .hero-card.clickable:hover { border-color: var(--border-strong); background: var(--bg-elev-2); }
+    .hero-card::after {
       content: ''; position: absolute; top: 0; left: 0; right: 0; height: 2px;
-      background: var(--accent-grad); opacity: .5;
+      background: var(--accent-grad); opacity: .4;
     }
-    .stat-label {
-      font-size: 11px; text-transform: uppercase; letter-spacing: .6px;
-      color: var(--text-faint); font-weight: 600; margin-bottom: 8px;
-    }
-    .stat-val {
-      font-size: 32px; font-weight: 800; line-height: 1;
-      margin-bottom: 4px; letter-spacing: -.5px;
-    }
-    .stat-val.cyan   { color: var(--accent-cyan); }
-    .stat-val.violet { color: var(--accent-violet); }
-    .stat-val.red    { color: var(--red); }
-    .stat-val.green  { color: var(--green); }
-    .stat-val.amber  { color: var(--amber); }
-    .stat-sub { font-size: 11px; color: var(--text-faint); }
+    .hero-label { font-size: 10px; text-transform: uppercase; letter-spacing: .6px; color: var(--text-faint); font-weight: 600; margin-bottom: 8px; }
+    .hero-val { font-size: 30px; font-weight: 800; line-height: 1; margin-bottom: 5px; letter-spacing: -.5px; }
+    .hero-val.cyan   { color: var(--accent-cyan); }
+    .hero-val.violet { color: var(--accent-violet); }
+    .hero-val.green  { color: var(--green); }
+    .hero-val.amber  { color: var(--amber); }
+    .hero-val.red    { color: var(--red); }
+    .hero-trend { font-size: 11px; font-weight: 500; }
+    .hero-trend.up   { color: var(--green); }
+    .hero-trend.down { color: var(--red); }
+    .hero-trend.neutral { color: var(--text-faint); }
+    .hero-sub { font-size: 10px; color: var(--text-faint); margin-top: 3px; }
 
-    /* ── Section ── */
-    .section { margin-bottom: 36px; }
-    .section-header {
-      display: flex; align-items: center; justify-content: space-between;
-      margin-bottom: 16px;
-    }
-    .section-title {
-      font-size: 15px; font-weight: 700;
-      color: var(--text); letter-spacing: -.2px;
-    }
-
-    /* ── Module cards ── */
-    .modules-grid {
+    /* ── Two-column ── */
+    .dash-grid {
       display: grid;
-      grid-template-columns: repeat(3, 1fr);
-      gap: 14px;
+      grid-template-columns: 1fr 340px;
+      gap: 20px;
+      margin-bottom: 28px;
     }
-    .module-card {
+
+    /* ── Chart cards ── */
+    .chart-card {
       background: var(--bg-elev);
       border: 1px solid var(--border);
       border-radius: 14px;
       padding: 20px;
-      text-decoration: none; color: inherit;
-      display: flex; flex-direction: column; gap: 10px;
-      transition: border-color .2s, background .2s;
+      margin-bottom: 14px;
     }
-    .module-card:hover:not(.concept-card) {
-      border-color: var(--border-strong);
-      background: var(--bg-elev-2);
+    .chart-card:last-child { margin-bottom: 0; }
+    .chart-title { font-size: 13px; font-weight: 700; margin-bottom: 16px; color: var(--text); }
+    .chart-wrap { position: relative; }
+    .gauge-wrap { position: relative; max-width: 280px; margin: 0 auto; }
+    .gauge-center {
+      position: absolute; bottom: 0; left: 50%; transform: translateX(-50%);
+      text-align: center; line-height: 1;
     }
-    .module-card.concept-card { opacity: .5; cursor: default; }
-    .module-card-head {
-      display: flex; align-items: center; justify-content: space-between;
+    .gauge-pct { font-size: 28px; font-weight: 800; letter-spacing: -.5px; }
+    .gauge-sub { font-size: 11px; color: var(--text-faint); margin-top: 3px; }
+
+    /* ── Side panel ── */
+    .side-panel { display: flex; flex-direction: column; gap: 14px; }
+    .side-card {
+      background: var(--bg-elev);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 18px;
+      flex: 1;
     }
-    .module-icon {
-      width: 38px; height: 38px;
-      background: var(--bg-elev-2);
-      border: 1px solid var(--border-strong);
-      border-radius: 10px;
-      display: grid; place-items: center;
-      color: var(--accent-cyan);
+    .side-title { font-size: 13px; font-weight: 700; margin-bottom: 14px; color: var(--text); display: flex; align-items: center; justify-content: space-between; }
+    .side-link { font-size: 11px; font-weight: 500; color: var(--accent-violet); text-decoration: none; }
+    .side-link:hover { text-decoration: underline; }
+
+    /* ── Task items ── */
+    .task-item { display: flex; align-items: flex-start; gap: 10px; padding: 9px 0; border-bottom: 1px solid var(--border); }
+    .task-item:last-child { border-bottom: none; }
+    .task-badge {
+      flex-shrink: 0; font-size: 9px; font-weight: 700; padding: 2px 6px; border-radius: 5px;
+      text-transform: uppercase; letter-spacing: .3px; margin-top: 2px;
     }
-    .module-icon.violet { color: var(--accent-violet); }
-    .module-icon.green  { color: var(--green); }
-    .module-icon.amber  { color: var(--amber); }
-    .module-icon svg { width: 18px; height: 18px; }
-    .module-status {
-      display: flex; align-items: center; gap: 5px;
-      font-size: 11px; font-weight: 600; color: var(--green);
-    }
-    .module-status .dot {
-      width: 6px; height: 6px; border-radius: 50%;
-      background: var(--green);
-      animation: pulse 2s infinite;
-    }
-    .module-status.concept { color: var(--text-faint); }
-    .module-status.concept .dot { background: var(--text-faint); animation: none; }
-    @keyframes pulse {
-      0%, 100% { opacity: 1; } 50% { opacity: .4; }
-    }
-    .module-card h3 { font-size: 14px; font-weight: 700; }
-    .module-card p  { font-size: 12px; color: var(--text-dim); line-height: 1.5; }
-    .module-card-foot {
-      display: flex; align-items: center; justify-content: space-between;
-      margin-top: auto; padding-top: 4px;
-    }
-    .module-metric { font-size: 11px; color: var(--text-faint); }
-    .btn-card {
-      font-size: 12px; font-weight: 600;
-      color: var(--accent-violet);
-      display: flex; align-items: center; gap: 4px;
-    }
+    .task-badge.Urgent { background: rgba(239,68,68,0.18); color: #f87171; }
+    .task-badge.Hoog   { background: rgba(245,158,11,0.18); color: #fbbf24; }
+    .task-badge.Normaal { background: rgba(34,211,238,0.12); color: #67e8f9; }
+    .task-badge.Laag   { background: rgba(255,255,255,0.06); color: var(--text-faint); }
+    .task-title { font-size: 12px; font-weight: 500; line-height: 1.4; }
+    .task-deadline { font-size: 10px; color: var(--text-faint); margin-top: 2px; }
+    .task-empty { font-size: 12px; color: var(--text-faint); text-align: center; padding: 16px 0; }
 
     /* ── Activity feed ── */
-    .activity-list { display: flex; flex-direction: column; gap: 0; }
-    .activity-item {
-      display: flex; align-items: flex-start; gap: 12px;
-      padding: 12px 0;
-      border-bottom: 1px solid var(--border);
-    }
+    .activity-item { display: flex; align-items: flex-start; gap: 8px; padding: 8px 0; border-bottom: 1px solid var(--border); }
     .activity-item:last-child { border-bottom: none; }
-    .activity-dot {
-      width: 8px; height: 8px; border-radius: 50%;
-      flex-shrink: 0; margin-top: 5px;
+    .activity-emoji { font-size: 14px; flex-shrink: 0; line-height: 1.4; }
+    .activity-body { flex: 1; min-width: 0; }
+    .activity-desc { font-size: 11.5px; font-weight: 500; line-height: 1.4; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .activity-time { font-size: 10px; color: var(--text-faint); margin-top: 1px; }
+
+    /* ── Quote ── */
+    .quote-section { text-align: center; padding: 20px 0 8px; }
+    .quote-text { font-style: italic; font-size: 13px; color: var(--text-faint); line-height: 1.6; max-width: 600px; margin: 0 auto; }
+    .quote-refresh { font-size: 10px; color: var(--text-faint); opacity: .5; margin-top: 6px; cursor: pointer; }
+    .quote-refresh:hover { opacity: 1; }
+
+    /* ── Skeleton ── */
+    .sk {
+      background: linear-gradient(90deg, var(--bg-elev) 0%, var(--bg-elev-2) 50%, var(--bg-elev) 100%);
+      background-size: 200% 100%;
+      animation: shimmer 1.4s ease-in-out infinite;
+      border-radius: 6px;
+      display: inline-block;
     }
-    .activity-body { flex: 1; }
-    .activity-title { font-size: 13px; font-weight: 500; }
-    .activity-time  { font-size: 11px; color: var(--text-faint); margin-top: 2px; }
-    .activity-empty {
-      padding: 24px 0; text-align: center;
-      font-size: 13px; color: var(--text-faint);
+    @keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+
+    /* ── Error banner ── */
+    .error-banner {
+      background: rgba(239,68,68,0.1); border: 1px solid rgba(239,68,68,0.25);
+      border-radius: 10px; padding: 12px 16px; margin-bottom: 16px;
+      font-size: 12px; color: #fca5a5; display: none; align-items: center; gap: 8px;
     }
+    .error-banner.show { display: flex; }
+
+    /* ── Last updated ── */
+    .last-updated { font-size: 10px; color: var(--text-faint); text-align: right; margin-bottom: 4px; }
 
     /* ── Scrollbar ── */
     ::-webkit-scrollbar { width: 5px; height: 5px; }
     ::-webkit-scrollbar-track { background: transparent; }
     ::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 3px; }
 
-    @media (max-width: 1024px) {
-      .stats-grid { grid-template-columns: repeat(2, 1fr); }
-      .modules-grid { grid-template-columns: repeat(2, 1fr); }
+    @media (max-width: 1200px) {
+      .hero-grid { grid-template-columns: repeat(3, 1fr); }
+      .dash-grid  { grid-template-columns: 1fr; }
     }
-    @media (max-width: 680px) {
-      .sidebar { transform: translateX(-100%); }
-      .main { margin-left: 0; }
+    @media (max-width: 768px) {
+      .hero-grid { grid-template-columns: repeat(2, 1fr); }
+      .sidebar   { transform: translateX(-100%); }
+      .main      { margin-left: 0; }
       .main-inner { padding: 20px 16px 48px; }
-      .stats-grid { grid-template-columns: 1fr 1fr; }
-      .modules-grid { grid-template-columns: 1fr; }
     }
   </style>
 </head>
@@ -349,7 +298,6 @@
   </div>
 
   <div class="sidebar-nav">
-    <!-- Active modules -->
     <a class="nav-item active" href="index.html">
       <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
       Dashboard
@@ -357,6 +305,7 @@
     <a class="nav-item" href="modules/email.html">
       <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
       E-mail
+      <span class="nav-badge" id="navEmailBadge"></span>
     </a>
     <a class="nav-item" href="modules/taken.html">
       <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="9" y1="9" x2="15" y2="9"/><line x1="9" y1="13" x2="15" y2="13"/><line x1="9" y1="17" x2="12" y2="17"/></svg>
@@ -368,27 +317,18 @@
       Kennisbank
     </a>
 
-    <!-- Concept modules -->
     <div class="nav-section">Binnenkort</div>
     <div class="nav-item nav-concept">
       <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>
-      WhatsApp Bot
-      <span class="nav-soon">Binnenkort</span>
+      WhatsApp Bot <span class="nav-soon">Binnenkort</span>
     </div>
     <div class="nav-item nav-concept">
       <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
-      Wanbetalers
-      <span class="nav-soon">Binnenkort</span>
-    </div>
-    <div class="nav-item nav-concept">
-      <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
-      Contracten
-      <span class="nav-soon">Binnenkort</span>
+      Wanbetalers <span class="nav-soon">Binnenkort</span>
     </div>
     <div class="nav-item nav-concept">
       <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
-      Onboarding
-      <span class="nav-soon">Binnenkort</span>
+      Onboarding <span class="nav-soon">Binnenkort</span>
     </div>
   </div>
 
@@ -405,269 +345,609 @@
 <div class="main">
   <div class="main-inner">
 
-    <!-- Page header -->
-    <div class="page-header">
+    <!-- Header -->
+    <div class="top-header">
       <div>
-        <div class="page-title">Dashboard</div>
-        <div class="page-sub">Welkom terug — hier is je overzicht</div>
+        <div class="greeting" id="greeting">Goedemorgen Jeffrey ☀️</div>
+        <div class="greeting-sub" id="greetingSub">Hier is je overzicht van vandaag</div>
       </div>
-      <div class="header-clock">
-        <div class="time" id="clock">00:00</div>
-        <div id="dateDisplay" style="color:var(--text-dim);font-size:12px;margin-top:3px"></div>
+      <div>
+        <div class="period-bar" id="periodBar">
+          <button class="period-btn active" data-period="today">Vandaag</button>
+          <button class="period-btn" data-period="yesterday">Gisteren</button>
+          <button class="period-btn" data-period="week">Deze week</button>
+          <button class="period-btn" data-period="month">Deze maand</button>
+          <button class="period-btn" data-period="custom">Aangepast</button>
+          <div class="custom-range" id="customRange">
+            <input type="date" id="customFrom" />
+            <span style="color:var(--text-faint);font-size:12px">→</span>
+            <input type="date" id="customTo" />
+            <button class="period-btn" id="customApply" style="margin-left:2px">Toepassen</button>
+          </div>
+        </div>
+        <div class="last-updated" id="lastUpdated"></div>
       </div>
     </div>
 
-    <!-- Stats -->
-    <div class="stats-grid">
-      <div class="stat-card">
-        <div class="stat-label">Open taken</div>
-        <div class="stat-val cyan" id="sOpenTaken">—</div>
-        <div class="stat-sub">in kanban</div>
+    <div class="comparison-bar" id="comparisonBar">Vergeleken met zelfde dag vorige week</div>
+
+    <!-- Error banner -->
+    <div class="error-banner" id="errorBanner">
+      ⚠️ <span id="errorMsg">Kon data niet laden, probeer opnieuw.</span>
+      <button onclick="loadDashboard()" style="margin-left:auto;padding:3px 10px;border-radius:6px;border:1px solid rgba(239,68,68,0.4);background:transparent;color:#fca5a5;font-size:11px;cursor:pointer;font-family:inherit">Opnieuw laden</button>
+    </div>
+
+    <!-- Hero stats -->
+    <div class="hero-grid" id="heroGrid">
+      <div class="hero-card"><div class="hero-label">Nieuwe Leads</div><div class="hero-val violet sk" style="width:60px;height:30px"></div><div class="hero-trend sk" style="width:80px;height:13px;margin-top:6px"></div></div>
+      <div class="hero-card"><div class="hero-label">Uitlegsessies</div><div class="hero-val green sk" style="width:40px;height:30px"></div><div class="hero-trend sk" style="width:80px;height:13px;margin-top:6px"></div></div>
+      <div class="hero-card"><div class="hero-label">Conversie %</div><div class="hero-val amber sk" style="width:60px;height:30px"></div><div class="hero-trend sk" style="width:80px;height:13px;margin-top:6px"></div></div>
+      <div class="hero-card clickable" onclick="location.href='modules/taken.html'"><div class="hero-label">Open Taken</div><div class="hero-val cyan sk" style="width:40px;height:30px"></div><div class="hero-trend sk" style="width:90px;height:13px;margin-top:6px"></div></div>
+      <div class="hero-card clickable" onclick="location.href='modules/email.html?tab=actie'"><div class="hero-label">Onbeantwoord</div><div class="hero-val red sk" style="width:40px;height:30px"></div><div class="hero-trend sk" style="width:70px;height:13px;margin-top:6px"></div></div>
+      <div class="hero-card"><div class="hero-label">Event Aanmeldingen</div><div class="hero-val cyan sk" style="width:40px;height:30px"></div><div class="hero-trend sk" style="width:80px;height:13px;margin-top:6px"></div></div>
+    </div>
+
+    <!-- Two-column -->
+    <div class="dash-grid">
+
+      <!-- Left: charts -->
+      <div>
+        <div class="chart-card">
+          <div class="chart-title">Leads & Uitlegsessies per dag</div>
+          <div class="chart-wrap" style="height:200px">
+            <canvas id="lineChart"></canvas>
+          </div>
+        </div>
+
+        <div class="chart-card" style="display:grid;grid-template-columns:1fr 1fr;gap:20px;align-items:center">
+          <div>
+            <div class="chart-title">Conversie</div>
+            <div class="gauge-wrap">
+              <canvas id="gaugeChart" height="140"></canvas>
+              <div class="gauge-center" id="gaugeCenterText">
+                <div class="gauge-pct" id="gaugePct" style="color:var(--amber)">—%</div>
+                <div class="gauge-sub" id="gaugeSub">— sessies van — leads</div>
+              </div>
+            </div>
+          </div>
+          <div>
+            <div class="chart-title">Leads vs Sessies</div>
+            <div class="chart-wrap" style="height:160px">
+              <canvas id="barChart"></canvas>
+            </div>
+          </div>
+        </div>
       </div>
-      <div class="stat-card">
-        <div class="stat-label">Urgent / Hoog</div>
-        <div class="stat-val red" id="sUrgent">—</div>
-        <div class="stat-sub">prioriteit</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-label">AI antwoorden</div>
-        <div class="stat-val green" id="sAI">—</div>
-        <div class="stat-sub">gegenereerd</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-label">Kennisbank items</div>
-        <div class="stat-val violet" id="sKB">—</div>
-        <div class="stat-sub">opgeslagen</div>
+
+      <!-- Right: tasks + activity -->
+      <div class="side-panel">
+
+        <div class="side-card">
+          <div class="side-title">
+            Open taken <span id="taskCount" style="font-weight:400;color:var(--text-faint)"></span>
+            <a class="side-link" href="modules/taken.html">Bekijk alles →</a>
+          </div>
+          <div id="taskList"><div class="task-empty">Laden…</div></div>
+        </div>
+
+        <div class="side-card">
+          <div class="side-title">Recente activiteit</div>
+          <div id="activityFeed"><div class="task-empty">Laden…</div></div>
+        </div>
+
       </div>
     </div>
 
-    <!-- Active modules -->
-    <section class="section">
-      <div class="section-header">
-        <div class="section-title">Actieve modules</div>
+    <!-- Daily quote -->
+    <div class="quote-section">
+      <div class="quote-text" id="quoteText">
+        <span class="sk" style="display:inline-block;width:400px;height:16px;border-radius:4px"></span>
       </div>
-      <div class="modules-grid">
-
-        <a class="module-card" href="modules/email.html">
-          <div class="module-card-head">
-            <div class="module-icon">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
-            </div>
-            <div class="module-status"><span class="dot"></span> Actief</div>
-          </div>
-          <h3>E-mail inbox</h3>
-          <p>AI-gestuurde inbox met automatische categorisering, reclame-detectie en antwoordgeneratie.</p>
-          <div class="module-card-foot">
-            <span class="module-metric">4 mailboxen</span>
-            <span class="btn-card">Open →</span>
-          </div>
-        </a>
-
-        <a class="module-card" href="modules/taken.html">
-          <div class="module-card-head">
-            <div class="module-icon violet">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="9" y1="9" x2="15" y2="9"/><line x1="9" y1="13" x2="15" y2="13"/><line x1="9" y1="17" x2="12" y2="17"/></svg>
-            </div>
-            <div class="module-status"><span class="dot"></span> Actief</div>
-          </div>
-          <h3>Takenbeheer</h3>
-          <p>Kanban-bord voor het team: maak taken aan vanuit e-mails en volg voortgang op prioriteit.</p>
-          <div class="module-card-foot">
-            <span class="module-metric" id="cardTakenMetric">Laden…</span>
-            <span class="btn-card">Open →</span>
-          </div>
-        </a>
-
-        <a class="module-card" href="modules/kennisbank.html">
-          <div class="module-card-head">
-            <div class="module-icon green">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>
-            </div>
-            <div class="module-status"><span class="dot"></span> Actief</div>
-          </div>
-          <h3>Kennisbank</h3>
-          <p>Centrale plek voor procedures, FAQ's en interne documentatie — doorzoekbaar door AI.</p>
-          <div class="module-card-foot">
-            <span class="module-metric" id="cardKBMetric">Laden…</span>
-            <span class="btn-card">Open →</span>
-          </div>
-        </a>
-
-      </div>
-    </section>
-
-    <!-- Concept modules -->
-    <section class="section">
-      <div class="section-header">
-        <div class="section-title">In ontwikkeling</div>
-      </div>
-      <div class="modules-grid">
-
-        <div class="module-card concept-card">
-          <div class="module-card-head">
-            <div class="module-icon amber">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>
-            </div>
-            <div class="module-status concept"><span class="dot"></span> Binnenkort</div>
-          </div>
-          <h3>WhatsApp Bot</h3>
-          <p>AI-bot die WhatsApp-berichten beantwoordt en leads kwalificeert.</p>
-        </div>
-
-        <div class="module-card concept-card">
-          <div class="module-card-head">
-            <div class="module-icon">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
-            </div>
-            <div class="module-status concept"><span class="dot"></span> Binnenkort</div>
-          </div>
-          <h3>Wanbetalers</h3>
-          <p>Automatische opvolging van betalingsachterstanden en herinneringen.</p>
-        </div>
-
-        <div class="module-card concept-card">
-          <div class="module-card-head">
-            <div class="module-icon">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
-            </div>
-            <div class="module-status concept"><span class="dot"></span> Binnenkort</div>
-          </div>
-          <h3>Contracten</h3>
-          <p>Digitale contracten genereren, versturen en beheren.</p>
-        </div>
-
-        <div class="module-card concept-card">
-          <div class="module-card-head">
-            <div class="module-icon violet">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
-            </div>
-            <div class="module-status concept"><span class="dot"></span> Binnenkort</div>
-          </div>
-          <h3>Onboarding</h3>
-          <p>Geautomatiseerd onboardingproces voor nieuwe klanten.</p>
-        </div>
-
-      </div>
-    </section>
-
-    <!-- Recent activity -->
-    <section class="section">
-      <div class="section-header">
-        <div class="section-title">Recente activiteit</div>
-      </div>
-      <div class="activity-list" id="activityFeed">
-        <div class="activity-empty">Activiteit wordt geladen…</div>
-      </div>
-    </section>
+      <div class="quote-refresh" id="quoteRefresh" onclick="fetchQuote(true)">↺ nieuwe quote</div>
+    </div>
 
   </div><!-- /main-inner -->
 </div><!-- /main -->
 
 <script>
-// ── Clock & date ──
-function tick() {
-  const n = new Date();
-  const pad = x => String(x).padStart(2,'0');
-  document.getElementById('clock').textContent = `${pad(n.getHours())}:${pad(n.getMinutes())}`;
-  document.getElementById('dateDisplay').textContent = n.toLocaleDateString('nl-NL', {
-    weekday: 'long', day: 'numeric', month: 'long'
-  });
+// ═══════════════════════════════════
+// STATE
+// ═══════════════════════════════════
+const EMAIL_CACHE_KEY    = 'dashboard_emails_v1';
+const EMAIL_CACHE_TTL_MS = 30 * 60 * 1000; // 30 min
+const QUOTE_CACHE_KEY    = 'dashboard_quote_v1';
+
+let activePeriod  = 'today';
+let customFrom    = null;
+let customTo      = null;
+let lineChartInst = null;
+let gaugeInst     = null;
+let barChartInst  = null;
+let refreshTimer  = null;
+let emailData     = null; // cached email list
+
+// ═══════════════════════════════════
+// INIT
+// ═══════════════════════════════════
+setGreeting();
+document.querySelectorAll('.period-btn[data-period]').forEach(btn => {
+  btn.addEventListener('click', () => selectPeriod(btn.dataset.period));
+});
+document.getElementById('customApply').addEventListener('click', () => {
+  customFrom = document.getElementById('customFrom').value;
+  customTo   = document.getElementById('customTo').value;
+  if (customFrom && customTo) loadDashboard();
+});
+
+loadDashboard();
+scheduleRefresh();
+
+// ═══════════════════════════════════
+// GREETING
+// ═══════════════════════════════════
+function setGreeting() {
+  const h = new Date().getHours();
+  const greet = h < 12 ? 'Goedemorgen' : h < 18 ? 'Goedemiddag' : 'Goedenavond';
+  const icon  = h < 18 ? '☀️' : '🌙';
+  document.getElementById('greeting').textContent = `${greet} Jeffrey ${icon}`;
 }
-tick();
-setInterval(tick, 10000);
 
-// ── Stats from localStorage ──
-function loadStats() {
-  try {
-    const taken = JSON.parse(localStorage.getItem('taken_lijst') || '[]');
-    const open   = taken.filter(t => t.status !== 'done');
-    const urgent = open.filter(t => t.prioriteit === 'Urgent' || t.prioriteit === 'Hoog');
-    document.getElementById('sOpenTaken').textContent = open.length;
-    document.getElementById('sUrgent').textContent    = urgent.length;
-    document.getElementById('cardTakenMetric').textContent = `${open.length} open taak${open.length !== 1 ? 'en' : ''}`;
-
-    // Nav badge
-    if (urgent.length) {
-      const badge = document.getElementById('navTakenBadge');
-      badge.textContent = urgent.length;
-      badge.classList.add('show');
-    }
-  } catch(e) {}
-
-  try {
-    const ex = JSON.parse(localStorage.getItem('email_learning_examples') || '[]');
-    document.getElementById('sAI').textContent = ex.length;
-  } catch(e) {}
-
-  try {
-    const kb = JSON.parse(localStorage.getItem('kennisbank_items') || '[]');
-    document.getElementById('sKB').textContent = kb.length;
-    document.getElementById('cardKBMetric').textContent = `${kb.length} item${kb.length !== 1 ? 's' : ''}`;
-  } catch(e) {}
+// ═══════════════════════════════════
+// PERIOD
+// ═══════════════════════════════════
+function selectPeriod(p) {
+  activePeriod = p;
+  document.querySelectorAll('.period-btn[data-period]').forEach(b => b.classList.toggle('active', b.dataset.period === p));
+  document.getElementById('customRange').classList.toggle('show', p === 'custom');
+  if (p !== 'custom') loadDashboard();
 }
 
-// ── Recent activity ──
-function loadActivity() {
-  const items = [];
-  try {
-    const taken = JSON.parse(localStorage.getItem('taken_lijst') || '[]');
-    taken
-      .filter(t => t.aangemaakt)
-      .sort((a,b) => new Date(b.aangemaakt) - new Date(a.aangemaakt))
-      .slice(0, 5)
-      .forEach(t => {
-        items.push({
-          color: t.prioriteit === 'Urgent' ? '#ef4444' : t.prioriteit === 'Hoog' ? '#f59e0b' : '#22d3ee',
-          title: `Taak aangemaakt: ${t.titel}`,
-          time: new Date(t.aangemaakt)
-        });
-      });
-  } catch(e) {}
+function getPeriodDates(period, from, to) {
+  const now = new Date();
+  const startOfDay = d => { const x = new Date(d); x.setHours(0,0,0,0); return x; };
+  const endOfDay   = d => { const x = new Date(d); x.setHours(23,59,59,999); return x; };
 
-  try {
-    const ex = JSON.parse(localStorage.getItem('email_learning_examples') || '[]');
-    ex
-      .filter(e => e.savedAt)
-      .sort((a,b) => new Date(b.savedAt) - new Date(a.savedAt))
-      .slice(0, 3)
-      .forEach(e => {
-        items.push({
-          color: '#a855f7',
-          title: `AI antwoord opgeslagen: ${e.originalEmail?.subject || e.category || '—'}`,
-          time: new Date(e.savedAt)
-        });
-      });
-  } catch(e) {}
+  let start, end, prevStart, prevEnd, label;
 
-  items.sort((a,b) => b.time - a.time);
+  if (period === 'today') {
+    start = startOfDay(now); end = endOfDay(now);
+    prevStart = new Date(start); prevStart.setDate(prevStart.getDate() - 7);
+    prevEnd   = new Date(end);   prevEnd.setDate(prevEnd.getDate() - 7);
+    label = 'Vergeleken met zelfde dag vorige week';
+  } else if (period === 'yesterday') {
+    const y = new Date(now); y.setDate(y.getDate() - 1);
+    start = startOfDay(y); end = endOfDay(y);
+    prevStart = new Date(start); prevStart.setDate(prevStart.getDate() - 7);
+    prevEnd   = new Date(end);   prevEnd.setDate(prevEnd.getDate() - 7);
+    label = 'Vergeleken met zelfde dag vorige week';
+  } else if (period === 'week') {
+    start = startOfDay(new Date(now)); start.setDate(start.getDate() - 6);
+    end = endOfDay(now);
+    prevStart = new Date(start); prevStart.setDate(prevStart.getDate() - 7);
+    prevEnd   = new Date(start); prevEnd.setDate(prevEnd.getDate() - 1); prevEnd.setHours(23,59,59,999);
+    label = 'Vergeleken met vorige week';
+  } else if (period === 'month') {
+    start = new Date(now.getFullYear(), now.getMonth(), 1);
+    end = endOfDay(now);
+    prevStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    prevEnd   = new Date(start); prevEnd.setDate(prevEnd.getDate() - 1); prevEnd.setHours(23,59,59,999);
+    label = 'Vergeleken met vorige maand';
+  } else if (period === 'custom' && from && to) {
+    start = startOfDay(new Date(from)); end = endOfDay(new Date(to));
+    const days = Math.ceil((end - start) / 86400000);
+    prevStart = new Date(start); prevStart.setDate(prevStart.getDate() - days);
+    prevEnd   = new Date(start); prevEnd.setDate(prevEnd.getDate() - 1); prevEnd.setHours(23,59,59,999);
+    label = 'Vergeleken met zelfde periode daarvoor';
+  } else {
+    return getPeriodDates('today');
+  }
+  return { start, end, prevStart, prevEnd, label };
+}
 
-  const feed = document.getElementById('activityFeed');
-  if (!items.length) {
-    feed.innerHTML = '<div class="activity-empty">Nog geen activiteit — open een module om te beginnen.</div>';
+function getComparisonLabel(period) {
+  const map = { today:'Vergeleken met zelfde dag vorige week', yesterday:'Vergeleken met zelfde dag vorige week', week:'Vergeleken met vorige week', month:'Vergeleken met vorige maand', custom:'Vergeleken met zelfde periode daarvoor' };
+  return map[period] || '';
+}
+
+// ═══════════════════════════════════
+// MAIN LOAD
+// ═══════════════════════════════════
+async function loadDashboard() {
+  document.getElementById('comparisonBar').textContent = getComparisonLabel(activePeriod);
+  document.getElementById('errorBanner').classList.remove('show');
+
+  const [statsRes, emailRes] = await Promise.all([
+    fetchDashboardStats(),
+    fetchEmails(),
+  ]);
+
+  if (!emailRes && !statsRes) {
+    showError('Kon data niet laden — controleer je verbinding.');
     return;
   }
 
-  const pad = x => String(x).padStart(2,'0');
-  feed.innerHTML = items.slice(0, 8).map(item => {
-    const d = item.time;
-    const timeStr = isNaN(d) ? '' : `${d.toLocaleDateString('nl-NL', { day: 'numeric', month: 'short' })} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
-    return `
-      <div class="activity-item">
-        <div class="activity-dot" style="background:${item.color}"></div>
-        <div class="activity-body">
-          <div class="activity-title">${escHtml(item.title)}</div>
-          ${timeStr ? `<div class="activity-time">${timeStr}</div>` : ''}
-        </div>
-      </div>`;
-  }).join('');
+  const { start, end, prevStart, prevEnd } = getPeriodDates(activePeriod, customFrom, customTo);
+  const emails     = emailRes?.emails || [];
+  const current    = filterEmails(emails, start, end);
+  const previous   = filterEmails(emails, prevStart, prevEnd);
+
+  renderHeroStats(current, previous, statsRes?.tasks, statsRes?.unanswered);
+  renderCharts(current, previous, start, end);
+  renderTasks(statsRes?.tasks);
+  renderActivity(statsRes?.recent_activity || [], current);
+  updateNavBadges(statsRes?.tasks);
+  document.getElementById('lastUpdated').textContent = 'Bijgewerkt ' + fmtTime(new Date());
 }
 
-function escHtml(s) {
-  return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+// ═══════════════════════════════════
+// DATA FETCHING
+// ═══════════════════════════════════
+async function fetchDashboardStats() {
+  try {
+    const r = await fetch('/api/dashboard-stats');
+    if (!r.ok) throw new Error(r.status);
+    return await r.json();
+  } catch { return null; }
 }
 
-loadStats();
-loadActivity();
+async function fetchEmails() {
+  // Check cache
+  try {
+    const cached = JSON.parse(localStorage.getItem(EMAIL_CACHE_KEY) || 'null');
+    if (cached && (Date.now() - cached.ts) < EMAIL_CACHE_TTL_MS) {
+      return cached.data;
+    }
+  } catch {}
+
+  try {
+    const r = await fetch('/api/emails');
+    if (!r.ok) throw new Error(r.status);
+    const data = await r.json();
+    localStorage.setItem(EMAIL_CACHE_KEY, JSON.stringify({ ts: Date.now(), data }));
+    return data;
+  } catch { return null; }
+}
+
+// ═══════════════════════════════════
+// HELPERS
+// ═══════════════════════════════════
+function filterEmails(emails, start, end) {
+  return emails.filter(e => {
+    const d = new Date(e.date);
+    return d >= start && d <= end;
+  });
+}
+
+function countCat(emails, cat) {
+  return emails.filter(e => e.category === cat).length;
+}
+
+function trendHtml(curr, prev) {
+  if (prev === 0 && curr === 0) return '<span class="hero-trend neutral">— geen data</span>';
+  if (prev === 0) return `<span class="hero-trend up">↑ nieuw vs vorige periode</span>`;
+  const pct = Math.round(((curr - prev) / prev) * 100);
+  const cls = pct >= 0 ? 'up' : 'down';
+  const dir = pct >= 0 ? '↑' : '↓';
+  return `<span class="hero-trend ${cls}">${dir} ${Math.abs(pct)}% vs vorige periode</span>`;
+}
+
+function esc(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+function fmtTime(d) {
+  return d.toLocaleTimeString('nl-NL', { hour:'2-digit', minute:'2-digit' });
+}
+
+function fmtDateShort(d) {
+  return new Date(d).toLocaleDateString('nl-NL', { day:'numeric', month:'short' });
+}
+
+function fmtDateTime(d) {
+  const dt = new Date(d);
+  if (isNaN(dt)) return '';
+  return dt.toLocaleDateString('nl-NL', { day:'numeric', month:'short' }) + ' ' + fmtTime(dt);
+}
+
+function showError(msg) {
+  document.getElementById('errorMsg').textContent = msg;
+  document.getElementById('errorBanner').classList.add('show');
+}
+
+// ═══════════════════════════════════
+// HERO STATS
+// ═══════════════════════════════════
+function renderHeroStats(current, previous, tasks, unanswered) {
+  const leads      = countCat(current, 'Nieuwe Lead');
+  const prevLeads  = countCat(previous, 'Nieuwe Lead');
+  const sessies    = countCat(current, 'Appointment');
+  const prevSess   = countCat(previous, 'Appointment');
+  const events     = countCat(current, 'Event Aanmelding');
+  const prevEvents = countCat(previous, 'Event Aanmelding');
+  const conv       = leads > 0 ? Math.round((sessies / leads) * 100) : 0;
+  const prevConv   = prevLeads > 0 ? Math.round((prevSess / prevLeads) * 100) : 0;
+
+  const openTasks  = tasks?.total    ?? '—';
+  const urgentHigh = ((tasks?.urgent ?? 0) + (tasks?.high ?? 0));
+  const mailCount  = unanswered?.count ?? '—';
+
+  const convColor = conv >= 30 ? 'var(--green)' : conv >= 15 ? 'var(--amber)' : 'var(--red)';
+  const periodLabel = activePeriod === 'today' ? 'vandaag' : activePeriod === 'yesterday' ? 'gisteren' : 'in deze periode';
+
+  document.getElementById('heroGrid').innerHTML = `
+    <div class="hero-card">
+      <div class="hero-label">Nieuwe Leads</div>
+      <div class="hero-val violet">${leads}</div>
+      ${trendHtml(leads, prevLeads)}
+      <div class="hero-sub">${periodLabel}</div>
+    </div>
+    <div class="hero-card">
+      <div class="hero-label">Uitlegsessies</div>
+      <div class="hero-val green">${sessies}</div>
+      ${trendHtml(sessies, prevSess)}
+      <div class="hero-sub">ingepland</div>
+    </div>
+    <div class="hero-card">
+      <div class="hero-label">Conversie %</div>
+      <div class="hero-val" style="color:${convColor}">${conv}%</div>
+      ${trendHtml(conv, prevConv)}
+      <div class="hero-sub">${sessies} sessies van ${leads} leads</div>
+    </div>
+    <div class="hero-card clickable" onclick="location.href='modules/taken.html'">
+      <div class="hero-label">Open Taken</div>
+      <div class="hero-val cyan">${openTasks}</div>
+      <span class="hero-trend ${urgentHigh > 0 ? 'down' : 'neutral'}">${urgentHigh > 0 ? urgentHigh + ' urgent/hoog' : 'Geen urgente taken'}</span>
+      <div class="hero-sub">klik om te beheren</div>
+    </div>
+    <div class="hero-card clickable" onclick="location.href='modules/email.html'">
+      <div class="hero-label">Onbeantwoord</div>
+      <div class="hero-val red">${mailCount}</div>
+      <span class="hero-trend ${mailCount > 0 ? 'down' : 'neutral'}">${mailCount > 0 ? 'vereisen actie' : '✓ alles beantwoord'}</span>
+      <div class="hero-sub">openstaande acties</div>
+    </div>
+    <div class="hero-card">
+      <div class="hero-label">Event Aanmeldingen</div>
+      <div class="hero-val cyan">${events}</div>
+      ${trendHtml(events, prevEvents)}
+      <div class="hero-sub">${periodLabel}</div>
+    </div>
+  `;
+}
+
+// ═══════════════════════════════════
+// CHARTS
+// ═══════════════════════════════════
+function getDayLabels(start, end) {
+  const labels = [], dates = [];
+  const cur = new Date(start); cur.setHours(0,0,0,0);
+  const e   = new Date(end);   e.setHours(0,0,0,0);
+  while (cur <= e) {
+    labels.push(cur.toLocaleDateString('nl-NL', { day:'numeric', month:'short' }));
+    dates.push(new Date(cur));
+    cur.setDate(cur.getDate() + 1);
+  }
+  return { labels, dates };
+}
+
+function countPerDay(emails, dates, cat) {
+  return dates.map(d => {
+    const next = new Date(d); next.setDate(next.getDate() + 1);
+    return emails.filter(e => {
+      const dt = new Date(e.date);
+      return dt >= d && dt < next && (cat ? e.category === cat : true);
+    }).length;
+  });
+}
+
+const chartDefaults = {
+  responsive: true, maintainAspectRatio: false,
+  plugins: { legend: { labels: { color: '#94a3b8', font: { size: 11 } } }, tooltip: { backgroundColor: '#181b25', borderColor: 'rgba(255,255,255,0.1)', borderWidth: 1, titleColor: '#f1f5f9', bodyColor: '#94a3b8' } },
+  scales: {
+    x: { grid: { color: 'rgba(255,255,255,0.04)' }, ticks: { color: '#64748b', font: { size: 10 } } },
+    y: { grid: { color: 'rgba(255,255,255,0.04)' }, ticks: { color: '#64748b', font: { size: 10 }, stepSize: 1 }, beginAtZero: true }
+  }
+};
+
+function renderCharts(current, previous, start, end) {
+  const { labels, dates } = getDayLabels(start, end);
+
+  // Collapse to weekly buckets if >30 days for readability
+  const leadsDay  = countPerDay(current, dates, 'Nieuwe Lead');
+  const sessDay   = countPerDay(current, dates, 'Appointment');
+
+  // Line chart
+  if (lineChartInst) lineChartInst.destroy();
+  const lCtx = document.getElementById('lineChart').getContext('2d');
+  lineChartInst = new Chart(lCtx, {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [
+        { label: 'Leads', data: leadsDay, borderColor: '#a855f7', backgroundColor: 'rgba(168,85,247,0.1)', tension: .3, fill: true, pointRadius: 3, pointBackgroundColor: '#a855f7' },
+        { label: 'Sessies', data: sessDay, borderColor: '#22c55e', backgroundColor: 'rgba(34,197,94,0.08)', tension: .3, fill: true, pointRadius: 3, pointBackgroundColor: '#22c55e' },
+      ]
+    },
+    options: { ...chartDefaults }
+  });
+
+  // Gauge
+  const leads = leadsDay.reduce((a,b)=>a+b,0);
+  const sess  = sessDay.reduce((a,b)=>a+b,0);
+  const conv  = leads > 0 ? Math.round((sess / leads) * 100) : 0;
+  const convColor = conv >= 30 ? '#22c55e' : conv >= 15 ? '#f59e0b' : '#ef4444';
+
+  if (gaugeInst) gaugeInst.destroy();
+  const gCtx = document.getElementById('gaugeChart').getContext('2d');
+  gaugeInst = new Chart(gCtx, {
+    type: 'doughnut',
+    data: {
+      datasets: [{
+        data: [conv, 100 - conv],
+        backgroundColor: [convColor, 'rgba(255,255,255,0.05)'],
+        borderWidth: 0,
+        circumference: 180,
+        rotation: -90,
+      }]
+    },
+    options: { responsive: true, maintainAspectRatio: true, cutout: '72%', plugins: { legend: { display: false }, tooltip: { enabled: false } } }
+  });
+  document.getElementById('gaugePct').textContent  = conv + '%';
+  document.getElementById('gaugePct').style.color  = convColor;
+  document.getElementById('gaugeSub').textContent  = `${sess} sessies van ${leads} leads`;
+
+  // Bar chart (most recent 7 days only if period longer)
+  const barLabels = labels.slice(-7);
+  const barLeads  = leadsDay.slice(-7);
+  const barSess   = sessDay.slice(-7);
+
+  if (barChartInst) barChartInst.destroy();
+  const bCtx = document.getElementById('barChart').getContext('2d');
+  barChartInst = new Chart(bCtx, {
+    type: 'bar',
+    data: {
+      labels: barLabels,
+      datasets: [
+        { label: 'Leads', data: barLeads, backgroundColor: 'rgba(168,85,247,0.7)', borderRadius: 4 },
+        { label: 'Sessies', data: barSess, backgroundColor: 'rgba(34,197,94,0.7)', borderRadius: 4 },
+      ]
+    },
+    options: { ...chartDefaults, plugins: { ...chartDefaults.plugins, legend: { display: false } } }
+  });
+}
+
+// ═══════════════════════════════════
+// TASKS
+// ═══════════════════════════════════
+function renderTasks(tasks) {
+  const el = document.getElementById('taskList');
+  const cnt = document.getElementById('taskCount');
+  if (!tasks) { el.innerHTML = '<div class="task-empty">Kon taken niet laden</div>'; return; }
+
+  cnt.textContent = `(${tasks.total})`;
+
+  // Nav badge
+  const urgHigh = tasks.urgent + tasks.high;
+  const nb = document.getElementById('navTakenBadge');
+  if (urgHigh > 0) { nb.textContent = urgHigh; nb.classList.add('show'); } else { nb.classList.remove('show'); }
+
+  if (!tasks.items?.length) {
+    el.innerHTML = '<div class="task-empty">✓ Geen open taken</div>';
+    return;
+  }
+
+  const priorityOrder = { Urgent: 0, Hoog: 1, Normaal: 2, Laag: 3 };
+  const sorted = [...tasks.items].sort((a,b) => (priorityOrder[a.prioriteit]||2) - (priorityOrder[b.prioriteit]||2));
+
+  el.innerHTML = sorted.map(t => `
+    <div class="task-item">
+      <span class="task-badge ${esc(t.prioriteit || 'Normaal')}">${esc(t.prioriteit || 'Normaal')}</span>
+      <div>
+        <div class="task-title">${esc(t.titel || '—')}</div>
+        ${t.deadline ? `<div class="task-deadline">📅 ${esc(t.deadline)}</div>` : ''}
+      </div>
+    </div>
+  `).join('');
+}
+
+// ═══════════════════════════════════
+// ACTIVITY FEED
+// ═══════════════════════════════════
+function renderActivity(serverActivity, currentEmails) {
+  const items = [...serverActivity];
+
+  // Add today's new leads from email data
+  const today = new Date(); today.setHours(0,0,0,0);
+  currentEmails
+    .filter(e => e.category === 'Nieuwe Lead' && new Date(e.date) >= today)
+    .slice(0, 3)
+    .forEach(e => {
+      items.push({ emoji:'🟢', description:`Nieuwe lead — ${e.subject || e.from || '?'}`, timestamp: e.date });
+    });
+
+  currentEmails
+    .filter(e => e.category === 'Appointment' && new Date(e.date) >= today)
+    .slice(0, 2)
+    .forEach(e => {
+      items.push({ emoji:'📅', description:`Uitlegsessie — ${e.subject || '?'}`, timestamp: e.date });
+    });
+
+  items.sort((a,b) => new Date(b.timestamp) - new Date(a.timestamp));
+
+  const el = document.getElementById('activityFeed');
+  if (!items.length) {
+    el.innerHTML = '<div class="task-empty">Nog geen activiteit vandaag</div>';
+    return;
+  }
+
+  el.innerHTML = items.slice(0, 10).map(i => `
+    <div class="activity-item">
+      <span class="activity-emoji">${i.emoji || '●'}</span>
+      <div class="activity-body">
+        <div class="activity-desc">${esc(i.description)}</div>
+        ${i.timestamp ? `<div class="activity-time">${fmtDateTime(i.timestamp)}</div>` : ''}
+      </div>
+    </div>
+  `).join('');
+}
+
+// ═══════════════════════════════════
+// NAV BADGES
+// ═══════════════════════════════════
+function updateNavBadges(tasks) {
+  const nb = document.getElementById('navEmailBadge');
+  // email badge handled separately; nav badges for email come from module itself
+  if (!tasks) return;
+  const urgHigh = (tasks.urgent || 0) + (tasks.high || 0);
+  const tb = document.getElementById('navTakenBadge');
+  if (urgHigh) { tb.textContent = urgHigh; tb.classList.add('show'); } else { tb.classList.remove('show'); }
+}
+
+// ═══════════════════════════════════
+// DAILY QUOTE
+// ═══════════════════════════════════
+async function fetchQuote(force = false) {
+  const today = new Date().toDateString();
+  if (!force) {
+    try {
+      const cached = JSON.parse(localStorage.getItem(QUOTE_CACHE_KEY) || 'null');
+      if (cached && cached.day === today) {
+        document.getElementById('quoteText').textContent = '✦ ' + cached.quote;
+        return;
+      }
+    } catch {}
+  }
+
+  // Get current lead count for personalisation
+  let leads = 0, conv = 0;
+  try {
+    const cached = JSON.parse(localStorage.getItem(EMAIL_CACHE_KEY) || 'null');
+    if (cached?.data?.emails) {
+      const todayStart = new Date(); todayStart.setHours(0,0,0,0);
+      const todayEmails = cached.data.emails.filter(e => new Date(e.date) >= todayStart);
+      leads = todayEmails.filter(e => e.category === 'Nieuwe Lead').length;
+      const sess = todayEmails.filter(e => e.category === 'Appointment').length;
+      conv = leads > 0 ? Math.round((sess / leads) * 100) : 0;
+    }
+  } catch {}
+
+  try {
+    const r = await fetch(`/api/daily-quote?leads=${leads}&conversie=${conv}`);
+    const data = await r.json();
+    const quote = data.quote || '';
+    localStorage.setItem(QUOTE_CACHE_KEY, JSON.stringify({ day: today, quote }));
+    document.getElementById('quoteText').textContent = '✦ ' + quote;
+  } catch {
+    document.getElementById('quoteText').textContent = '✦ Elke dag een nieuwe kans om te groeien.';
+  }
+}
+fetchQuote();
+
+// ═══════════════════════════════════
+// AUTO REFRESH
+// ═══════════════════════════════════
+function scheduleRefresh() {
+  clearTimeout(refreshTimer);
+  refreshTimer = setTimeout(() => { loadDashboard(); scheduleRefresh(); }, 5 * 60 * 1000);
+}
 </script>
+
 </body>
 </html>
