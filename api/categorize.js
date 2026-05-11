@@ -53,7 +53,8 @@ async function fetchAiContext(senderEmail, senderDomain) {
       .order('corrected_at', { ascending: false })
       .limit(20);
 
-    if (senderEmail) corrQuery = corrQuery.eq('sender_email', senderEmail);
+    // Kolom heet 'email_sender' in de Supabase tabel (niet 'sender_email')
+    if (senderEmail) corrQuery = corrQuery.eq('email_sender', senderEmail);
     else if (senderDomain) corrQuery = corrQuery.eq('sender_domain', senderDomain);
 
     const { data: corrections } = await corrQuery;

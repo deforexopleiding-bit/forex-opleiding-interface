@@ -2575,52 +2575,37 @@
 
   function getSqlFix() {
     return `-- Voer dit uit in Supabase → SQL Editor
+-- Beide tabellen bestaan al — dit voegt ALLEEN ontbrekende kolommen toe.
 
--- Tabel learn_examples (aanmaken als niet bestaat)
-CREATE TABLE IF NOT EXISTS learn_examples (
-  id              uuid DEFAULT gen_random_uuid() PRIMARY KEY,
-  email_id        text,
-  sender_email    text,
-  sender_domain   text,
-  subject         text,
-  body_snippet    text,
-  old_category    text,
-  new_category    text NOT NULL,
-  corrected_by    text,
-  correction_type text DEFAULT 'manual',
-  corrected_at    timestamptz DEFAULT now()
-);
-CREATE INDEX IF NOT EXISTS learn_examples_sender ON learn_examples(sender_email, new_category);
+-- ── learn_examples: ontbrekende kolommen toevoegen ──────────────────────────
+-- De tabel gebruikt al 'email_sender' (niet 'sender_email'), dat is correct.
+ALTER TABLE learn_examples ADD COLUMN IF NOT EXISTS email_id        text;
+ALTER TABLE learn_examples ADD COLUMN IF NOT EXISTS sender_domain   text;
+ALTER TABLE learn_examples ADD COLUMN IF NOT EXISTS subject         text;
+ALTER TABLE learn_examples ADD COLUMN IF NOT EXISTS body_snippet    text;
+ALTER TABLE learn_examples ADD COLUMN IF NOT EXISTS old_category    text;
+ALTER TABLE learn_examples ADD COLUMN IF NOT EXISTS corrected_by    text;
+ALTER TABLE learn_examples ADD COLUMN IF NOT EXISTS correction_type text DEFAULT 'manual';
+ALTER TABLE learn_examples ADD COLUMN IF NOT EXISTS corrected_at    timestamptz DEFAULT now();
+
+CREATE INDEX IF NOT EXISTS learn_examples_sender ON learn_examples(email_sender, new_category);
 CREATE INDEX IF NOT EXISTS learn_examples_domain ON learn_examples(sender_domain, new_category);
-CREATE INDEX IF NOT EXISTS learn_examples_date ON learn_examples(corrected_at);
+CREATE INDEX IF NOT EXISTS learn_examples_date   ON learn_examples(corrected_at);
 
--- Tabel email_patterns (aanmaken als niet bestaat)
-CREATE TABLE IF NOT EXISTS email_patterns (
-  id               uuid DEFAULT gen_random_uuid() PRIMARY KEY,
-  sender_email     text,
-  sender_domain    text,
-  category         text NOT NULL,
-  confidence       integer DEFAULT 60,
-  times_seen       integer DEFAULT 0,
-  times_corrected  integer DEFAULT 0,
-  source           text DEFAULT 'ai',
-  last_seen        timestamptz DEFAULT now(),
-  last_corrected_at timestamptz
-);
-CREATE INDEX IF NOT EXISTS email_patterns_email ON email_patterns(sender_email);
+-- ── email_patterns: ontbrekende kolommen toevoegen ──────────────────────────
+ALTER TABLE email_patterns ADD COLUMN IF NOT EXISTS sender_domain    text;
+ALTER TABLE email_patterns ADD COLUMN IF NOT EXISTS times_seen       integer DEFAULT 0;
+ALTER TABLE email_patterns ADD COLUMN IF NOT EXISTS times_corrected  integer DEFAULT 0;
+ALTER TABLE email_patterns ADD COLUMN IF NOT EXISTS source           text DEFAULT 'ai';
+ALTER TABLE email_patterns ADD COLUMN IF NOT EXISTS last_seen        timestamptz DEFAULT now();
+ALTER TABLE email_patterns ADD COLUMN IF NOT EXISTS last_corrected_at timestamptz;
+
+CREATE INDEX IF NOT EXISTS email_patterns_email  ON email_patterns(sender_email);
 CREATE INDEX IF NOT EXISTS email_patterns_domain ON email_patterns(sender_domain, confidence);
 
--- Kolommen toevoegen als tabellen al bestaan maar kolommen missen
-ALTER TABLE email_patterns    ADD COLUMN IF NOT EXISTS source           text DEFAULT 'ai';
-ALTER TABLE email_patterns    ADD COLUMN IF NOT EXISTS last_corrected_at timestamptz;
-ALTER TABLE email_patterns    ADD COLUMN IF NOT EXISTS last_seen        timestamptz DEFAULT now();
-ALTER TABLE learn_examples    ADD COLUMN IF NOT EXISTS sender_domain    text;
-ALTER TABLE learn_examples    ADD COLUMN IF NOT EXISTS body_snippet     text;
-ALTER TABLE learn_examples    ADD COLUMN IF NOT EXISTS correction_type  text DEFAULT 'manual';
-
--- RLS uitschakelen (of policies toevoegen voor anon)
-ALTER TABLE learn_examples  DISABLE ROW LEVEL SECURITY;
-ALTER TABLE email_patterns  DISABLE ROW LEVEL SECURITY;`;
+-- ── RLS uitschakelen zodat de anon key kan schrijven ────────────────────────
+ALTER TABLE learn_examples DISABLE ROW LEVEL SECURITY;
+ALTER TABLE email_patterns DISABLE ROW LEVEL SECURITY;`;
   }
 
   function renderLeerrapport(d) {

@@ -32,14 +32,19 @@ export default async function handler(req, res) {
       totalCorrectionsRes,
       aiCategorizationsRes,
     ] = await Promise.all([
-      supabase.from('email_patterns').select('id', { count: 'exact', head: true })
+
+      // Totaal patronen
+      supabase.from('email_patterns')
+        .select('id', { count: 'exact', head: true })
         .then((r) => log('total_patterns', r)),
 
+      // Correcties deze week — kolom heet 'corrected_at' (na ALTER TABLE)
       supabase.from('learn_examples')
         .select('id', { count: 'exact', head: true })
         .gte('corrected_at', weekAgoIso)
         .then((r) => log('corrections_this_week', r)),
 
+      // Top 5 meest gecorrigeerde afzenders (email_patterns)
       supabase.from('email_patterns')
         .select('sender_email, sender_domain, category, confidence, times_corrected, times_seen')
         .gt('times_corrected', 0)
@@ -47,6 +52,7 @@ export default async function handler(req, res) {
         .limit(5)
         .then((r) => log('top_corrected', r)),
 
+      // Patronen met lage confidence (email_patterns)
       supabase.from('email_patterns')
         .select('sender_email, sender_domain, category, confidence, times_seen, times_corrected, source')
         .lt('confidence', 50)
@@ -54,22 +60,26 @@ export default async function handler(req, res) {
         .limit(10)
         .then((r) => log('low_confidence', r)),
 
+      // Nieuw geleerde patronen deze week (email_patterns)
       supabase.from('email_patterns')
         .select('id', { count: 'exact', head: true })
         .gte('last_seen', weekAgoIso)
         .then((r) => log('new_patterns_week', r)),
 
+      // Recente correcties — kolom heet 'email_sender' (niet 'sender_email')
       supabase.from('learn_examples')
-        .select('sender_email, sender_domain, old_category, new_category, subject, corrected_at, correction_type')
+        .select('email_sender, sender_domain, old_category, new_category, subject, corrected_at, correction_type')
         .gte('corrected_at', weekAgoIso)
         .order('corrected_at', { ascending: false })
         .limit(20)
         .then((r) => log('recent_corrections', r)),
 
+      // Totaal correcties ooit
       supabase.from('learn_examples')
         .select('id', { count: 'exact', head: true })
         .then((r) => log('total_corrections', r)),
 
+      // Accuracy berekening via email_patterns
       supabase.from('email_patterns')
         .select('times_seen, times_corrected')
         .limit(1000)
@@ -86,22 +96,28 @@ export default async function handler(req, res) {
       }
     }
 
+    // Recente correcties: normaliseer email_sender → sender_email voor frontend
+    const recentCorrections = (recentLearnedRes.data ?? []).map((c) => ({
+      ...c,
+      sender_email: c.email_sender ?? c.sender_email ?? null,
+    }));
+
     const response = {
-      total_patterns:         totalPatternsRes.error   ? null : (totalPatternsRes.count   ?? 0),
-      corrections_this_week:  correctionsWeekRes.error ? null : (correctionsWeekRes.count ?? 0),
-      total_corrections:      totalCorrectionsRes.error? null : (totalCorrectionsRes.count ?? 0),
-      new_patterns_this_week: newPatternsRes.error     ? null : (newPatternsRes.count     ?? 0),
+      total_patterns:         totalPatternsRes.error    ? null : (totalPatternsRes.count    ?? 0),
+      corrections_this_week:  correctionsWeekRes.error  ? null : (correctionsWeekRes.count  ?? 0),
+      total_corrections:      totalCorrectionsRes.error ? null : (totalCorrectionsRes.count  ?? 0),
+      new_patterns_this_week: newPatternsRes.error      ? null : (newPatternsRes.count      ?? 0),
       accuracy_rate:          accuracyRate,
-      top_corrected:          topCorrectedRes.data     ?? [],
-      low_confidence:         lowConfRes.data          ?? [],
-      recent_corrections:     recentLearnedRes.data    ?? [],
+      top_corrected:          topCorrectedRes.data      ?? [],
+      low_confidence:         lowConfRes.data           ?? [],
+      recent_corrections:     recentCorrections,
     };
 
     if (_errors.length) {
       response._errors = _errors;
     }
 
-    console.log('[learning-report] response:', JSON.stringify({ ...response, top_corrected: response.top_corrected.length + ' items', recent_corrections: response.recent_corrections.length + ' items' }));
+    console.log('[learning-report] klaar · fouten:', _errors.length, '· patronen:', response.total_patterns, '· correcties:', response.total_corrections);
     return res.status(200).json(response);
   } catch (err) {
     console.error('Learning report crash:', err);

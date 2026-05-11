@@ -54,24 +54,40 @@ export default async function handler(req, res) {
   const senderDomain = getDomain(senderEmail);
 
   // ── Stap 1: Sla correctie op in learn_examples ────────────────────────
+  // Kolom: email_sender (niet sender_email — zo heet het in de Supabase tabel)
+  const learnRow = {
+    email_sender:    senderEmail  || null,
+    new_category,
+  };
+  // Optionele kolommen die bestaan nadat de ALTER TABLE is uitgevoerd:
+  if (email_id)        learnRow.email_id        = email_id;
+  if (senderDomain)    learnRow.sender_domain   = senderDomain;
+  if (subject)         learnRow.subject         = subject;
+  if (body_snippet)    learnRow.body_snippet    = String(body_snippet).slice(0, 500);
+  if (old_category)    learnRow.old_category    = old_category;
+  if (corrected_by)    learnRow.corrected_by    = corrected_by;
+  learnRow.correction_type = correction_type || 'manual';
+  learnRow.corrected_at    = new Date().toISOString();
+
   try {
-    await supabase.from('learn_examples').insert({
-      email_id:        email_id    || null,
-      sender_email:    senderEmail || null,
-      sender_domain:   senderDomain || null,
-      subject:         subject     || null,
-      body_snippet:    body_snippet ? String(body_snippet).slice(0, 500) : null,
-      old_category:    old_category || null,
-      new_category,
-      corrected_by:    corrected_by    || null,
-      correction_type: correction_type || 'manual',
-      corrected_at:    new Date().toISOString()
-    });
+    const { error } = await supabase.from('learn_examples').insert(learnRow);
+    if (error) {
+      // Fallback: probeer alleen de gegarandeerd bestaande kolommen
+      console.warn('[learn] Volledige insert mislukt, probeer minimale insert:', error.message);
+      const { error: err2 } = await supabase.from('learn_examples').insert({
+        email_sender: senderEmail || null,
+        new_category,
+      });
+      if (err2) console.error('[learn] Minimale insert ook mislukt:', err2.message);
+      else console.log('[learn] Minimale insert gelukt voor', senderEmail);
+    } else {
+      console.log('[learn] learn_examples insert OK voor', senderEmail);
+    }
   } catch (err) {
-    console.warn('learn_examples insert mislukt:', err.message);
+    console.error('[learn] learn_examples insert crash:', err.message);
   }
 
-  // ── Stap 2: Slim patroon bijwerken ────────────────────────────────────
+  // ── Stap 2: Slim patroon bijwerken in email_patterns ─────────────────
   let confidenceBefore = null;
   let confidenceAfter  = null;
   let patternUpdated   = false;
@@ -79,35 +95,28 @@ export default async function handler(req, res) {
   let newPatternCreated = false;
 
   try {
-    const { data: existing } = await supabase
+    const { data: existing, error: lookupErr } = await supabase
       .from('email_patterns')
       .select('id, category, confidence, times_seen, times_corrected, source')
       .eq('sender_email', senderEmail)
       .maybeSingle();
+
+    if (lookupErr) console.warn('[learn] email_patterns lookup fout:', lookupErr.message);
 
     confidenceBefore = existing?.confidence ?? null;
 
     if (existing) {
       const matches = existing.category === new_category;
       const rawConf = existing.confidence || 60;
-      let newConf;
-
-      if (matches) {
-        // Correctie bevestigt bestaand patroon → +15
-        newConf = Math.min(100, rawConf + 15);
-      } else {
-        // Correctie tegenspreekt bestaand patroon → -20
-        newConf = rawConf - 20;
-      }
+      const newConf = matches ? Math.min(100, rawConf + 15) : rawConf - 20;
 
       if (newConf < 30) {
-        // Patroon is te onbetrouwbaar → verwijder het
         await supabase.from('email_patterns').delete().eq('id', existing.id);
-        patternDeleted = true;
+        patternDeleted  = true;
         confidenceAfter = 0;
       } else {
         const newCorrected = (existing.times_corrected || 0) + 1;
-        await supabase.from('email_patterns').update({
+        const { error: updErr } = await supabase.from('email_patterns').update({
           category:          new_category,
           confidence:        newConf,
           times_corrected:   newCorrected,
@@ -115,12 +124,12 @@ export default async function handler(req, res) {
           last_corrected_at: new Date().toISOString(),
           source:            'manual'
         }).eq('id', existing.id);
-        patternUpdated   = true;
-        confidenceAfter  = newConf;
+        if (updErr) console.warn('[learn] email_patterns update fout:', updErr.message);
+        patternUpdated  = true;
+        confidenceAfter = newConf;
       }
     } else {
-      // Nieuw patroon aanmaken
-      await supabase.from('email_patterns').insert({
+      const { error: insErr } = await supabase.from('email_patterns').insert({
         sender_email:      senderEmail,
         sender_domain:     senderDomain || null,
         category:          new_category,
@@ -130,11 +139,11 @@ export default async function handler(req, res) {
         source:            'manual',
         last_corrected_at: new Date().toISOString()
       });
-      newPatternCreated = true;
-      confidenceAfter   = 70;
+      if (insErr) console.warn('[learn] email_patterns insert fout:', insErr.message);
+      else { newPatternCreated = true; confidenceAfter = 70; }
     }
 
-    // Check: 3+ correcties zelfde richting van zelfde domein → confidence 90
+    // Check: 3+ correcties zelfde domein → confidence 90
     if (senderDomain && !patternDeleted) {
       const { count } = await supabase
         .from('learn_examples')
@@ -143,7 +152,6 @@ export default async function handler(req, res) {
         .eq('new_category', new_category);
 
       if ((count || 0) >= 3) {
-        // Ophoog naar 90 als het niet al hoger zit
         const { data: domainPat } = await supabase
           .from('email_patterns')
           .select('id, confidence')
@@ -157,7 +165,6 @@ export default async function handler(req, res) {
           confidenceAfter = 90;
         }
 
-        // Zet ook domein-patroon (zonder sender_email) op 90+
         const { data: baseDomainPat } = await supabase
           .from('email_patterns')
           .select('id, confidence')
@@ -179,16 +186,15 @@ export default async function handler(req, res) {
             times_corrected:   count,
             source:            'domain_learned',
             last_corrected_at: new Date().toISOString()
-          }).select(); // ignore duplicate errors
+          });
         }
       }
     }
 
-    // ── Stap 3: Auto-keyword patroon genereren ─────────────────────────
+    // Auto-keyword logging
     if (subject && senderDomain) {
       const keywords = extractKeywords(subject);
       if (keywords.length > 0) {
-        // Haal recente correcties op voor dit domein naar dezelfde categorie
         const { data: domainCorrections } = await supabase
           .from('learn_examples')
           .select('subject')
@@ -198,29 +204,26 @@ export default async function handler(req, res) {
 
         if (domainCorrections?.length >= 3) {
           const allSubjects = domainCorrections.map((c) => c.subject || '');
-          keywords.forEach(async (kw) => {
+          for (const kw of keywords) {
             const matchCount = allSubjects.filter((s) => s.toLowerCase().includes(kw)).length;
             if (matchCount >= 3) {
-              // Trefwoord herhaalt 3x → noteer als auto-learned in algemene patronen
-              // We slaan dit op als een notitie in email_patterns (source: auto_learned)
-              // met een speciale sender_email op basis van keyword signature
-              console.log(`Auto-keyword patroon: "${kw}" → ${new_category} (${matchCount}x bij ${senderDomain})`);
+              console.log(`[learn] Auto-keyword patroon: "${kw}" → ${new_category} (${matchCount}x bij ${senderDomain})`);
             }
-          });
+          }
         }
       }
     }
   } catch (err) {
-    console.warn('email_patterns update mislukt:', err.message);
+    console.error('[learn] email_patterns update crash:', err.message);
   }
 
-  // ── Stap 4: Rijke feedback samenstellen ──────────────────────────────
+  // ── Stap 3: Rijke feedback ────────────────────────────────────────────
   let patternExamples = 0;
   try {
     const { count } = await supabase
       .from('learn_examples')
       .select('id', { count: 'exact', head: true })
-      .eq('sender_email', senderEmail);
+      .eq('email_sender', senderEmail);
     patternExamples = count || 0;
   } catch {}
 
