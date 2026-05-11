@@ -788,6 +788,7 @@
     .taak-form-textarea { resize: vertical; min-height: 80px; }
     .taak-email-ref { font-size: 12px; color: var(--text-faint); padding: 8px 12px; background: rgba(255,255,255,0.04); border-radius: 6px; border: 1px solid var(--border); }
     .taak-created-badge { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; padding: 2px 8px; border-radius: 10px; background: rgba(34,197,94,0.12); border: 1px solid rgba(34,197,94,0.3); color: #4ade80; white-space: nowrap; }
+    .taak-context-toggle { background: none; border: none; color: var(--text-dim); font-size: 11px; cursor: pointer; padding: 2px 0; text-decoration: underline; text-underline-offset: 2px; }
 
     /* ── Leerrapport modal ── */
     .lr-modal-body { padding: 24px; display: flex; flex-direction: column; gap: 20px; }
@@ -2712,7 +2713,15 @@
     const jeffrey  = collegas.find((c) => c.naam && c.naam.toLowerCase().includes('jeffrey'));
     const toegewezenAan = jeffrey?.id || '';
 
-    return { titel, omschrijving, categorie, prioriteit, deadline, toegewezenAan };
+    const taakomschrijvingMap = {
+      'Klantvraag':   'Terugkoppeling geven aan klant over hun vraag',
+      'Factuurvraag': 'Betalingsregeling of factuurvraag oplossen',
+      'Appointment':  'Voorbereiding afspraak / sessie',
+      'Nieuwe Lead':  'Lead opvolgen en contact opnemen',
+    };
+    const taakomschrijving = taakomschrijvingMap[cat] || '';
+
+    return { titel, omschrijving, taakomschrijving, categorie, prioriteit, deadline, toegewezenAan };
   }
 
   function openTaakVanEmail(uid) {
@@ -2774,7 +2783,7 @@
       '<div class="modal-header"><h3>📋 Taak aanmaken</h3><button class="modal-close" onclick="closeTaakModal()">&times;</button></div>' +
       '<div class="taak-form-body">' +
         '<div><label class="taak-form-label">Taaknaam *</label><input class="taak-form-input" id="tfTitel" value="' + escapeHtml(f.titel) + '" /></div>' +
-        '<div><label class="taak-form-label">Omschrijving</label><textarea class="taak-form-textarea" id="tfOmschrijving" style="min-height:100px">' + escapeHtml(f.omschrijving) + '</textarea></div>' +
+        '<div><label class="taak-form-label">Wat moet er gedaan worden?</label><textarea class="taak-form-textarea" id="tfTaakomschrijving" rows="3">' + escapeHtml(f.taakomschrijving) + '</textarea></div>' +
         '<div class="taak-form-row">' +
           '<div><label class="taak-form-label">Prioriteit</label><select class="taak-form-select" id="tfPrioriteit">' + prioOpts + '</select></div>' +
           '<div><label class="taak-form-label">Categorie</label><select class="taak-form-select" id="tfCategorie">' + catOpts + '</select></div>' +
@@ -2782,6 +2791,13 @@
         '<div class="taak-form-row">' +
           '<div><label class="taak-form-label">Toegewezen aan</label><select class="taak-form-select" id="tfToegewezen">' + colOpts + '</select></div>' +
           '<div><label class="taak-form-label">Deadline</label><input class="taak-form-input" type="date" id="tfDeadline" value="' + f.deadline + '" /></div>' +
+        '</div>' +
+        '<div>' +
+          '<button type="button" class="taak-context-toggle" onclick="var w=document.getElementById(\'tfContextWrap\'),open=w.style.display!==\'none\';w.style.display=open?\'none\':\'block\';this.textContent=open?\'Toon context ▼\':\'Verberg context ▲\';">Toon context ▼</button>' +
+          '<div id="tfContextWrap" style="display:none;margin-top:6px">' +
+            '<label class="taak-form-label">Context &amp; mailinhoud</label>' +
+            '<textarea class="taak-form-textarea" id="tfOmschrijving" style="min-height:80px">' + escapeHtml(f.omschrijving) + '</textarea>' +
+          '</div>' +
         '</div>' +
         '<div class="taak-email-ref">📧 Gelinkt aan: <strong>' + escapeHtml(email.subject || '(geen onderwerp)') + '</strong> van ' + escapeHtml(email.fromName || email.from || '?') + '</div>' +
       '</div>' +
@@ -2796,12 +2812,13 @@
     const email = findEmail(uid);
     if (!uid || !email) return;
 
-    const titel       = document.getElementById('tfTitel')?.value.trim() || 'Opvolgen e-mail';
-    const omschrijving= document.getElementById('tfOmschrijving')?.value || '';
-    const prioriteit  = document.getElementById('tfPrioriteit')?.value  || 'Normaal';
-    const categorie   = document.getElementById('tfCategorie')?.value   || 'Overige';
-    const toegewezenAan = document.getElementById('tfToegewezen')?.value || '';
-    const deadline    = document.getElementById('tfDeadline')?.value    || '';
+    const titel          = document.getElementById('tfTitel')?.value.trim() || 'Opvolgen e-mail';
+    const omschrijving   = document.getElementById('tfTaakomschrijving')?.value.trim() || '';
+    const notities       = document.getElementById('tfOmschrijving')?.value || '';
+    const prioriteit     = document.getElementById('tfPrioriteit')?.value  || 'Normaal';
+    const categorie      = document.getElementById('tfCategorie')?.value   || 'Overige';
+    const toegewezenAan  = document.getElementById('tfToegewezen')?.value  || '';
+    const deadline       = document.getElementById('tfDeadline')?.value    || '';
 
     const taak = {
       id:           'taak_' + uid + '_' + Date.now(),
@@ -2814,7 +2831,7 @@
       emailId:      uid,
       emailSubject: email.subject || '',
       status:       'todo',
-      notities:     '',
+      notities,
       aangemaakt:   new Date().toISOString(),
       afgerondOp:   null
     };
@@ -3434,10 +3451,11 @@
         ev.stopPropagation();
         const action = btn.dataset.action;
         const u = btn.dataset.uid;
-        if      (action === 'generate')   startAiProposal(u);
-        else if (action === 'regenerate') regenerateAiProposal(u);
-        else if (action === 'send')       sendAiProposal(u);
-        else if (action === 'cancel')     cancelAiProposal(u);
+        if      (action === 'generate')    startAiProposal(u);
+        else if (action === 'regenerate')  regenerateAiProposal(u);
+        else if (action === 'send')        sendAiProposal(u);
+        else if (action === 'cancel')      cancelAiProposal(u);
+        else if (action === 'create-task') openTaakVanEmail(u);
       });
     });
     const kbBtn = panel.querySelector('[data-kb-open="' + uid + '"]');
