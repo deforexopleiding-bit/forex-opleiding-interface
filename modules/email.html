@@ -375,6 +375,7 @@
       display: flex; align-items: center; gap: 10px;
     }
     .toast.show { opacity: 1; transform: translate(-50%, 0); pointer-events: auto; }
+    .toast.error { background: #2a1010; border-color: rgba(239,68,68,0.5); color: #f87171; }
     .toast-undo-btn {
       background: var(--accent-cyan); color: #0a0b10; border: none; border-radius: 6px;
       padding: 3px 10px; font-size: 12px; font-weight: 700; cursor: pointer;
@@ -1052,6 +1053,7 @@
   const SNOOZE_KEY            = 'email_snooze_map';
   const ACTION_FLAGS_KEY      = 'email_action_flags'; // uid -> true | false
   const UNDO_HISTORY_KEY      = 'email_undo_history'; // max 10 entries
+  const SENT_REPLIES_KEY      = 'email_sent_replies'; // uid -> { sentAt, to }
 
   // ── SVG icons ──────────────────────────────────────────────────────────────
   const ICON_AI     = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3z"></path></svg>';
@@ -1130,7 +1132,8 @@
     searchQuery: '',
     snoozeMap:   loadJson(SNOOZE_KEY,       {}), // uid -> ISO date string
     actionFlags: loadJson(ACTION_FLAGS_KEY, {}), // uid -> true (force actie) | false (no action)
-    undoHistory: loadJson(UNDO_HISTORY_KEY, []),  // max 10 undo entries
+    undoHistory:  loadJson(UNDO_HISTORY_KEY,   []),  // max 10 undo entries
+    sentReplies:  loadJson(SENT_REPLIES_KEY,   {}),  // uid -> { sentAt, to }
     pendingPropagation: null,  // { uids, category, domain } waiting for user confirmation
     openVtPanel:   null,       // uid van open Verplaats & Train panel
     vtPanelContext: null,      // 'actie' | 'info' | 'reclame'
@@ -1166,15 +1169,16 @@
   let _toastTimer;
   let _pendingUndoEntry = null;
 
-  function showToast(msg) {
+  function showToast(msg, type) {
     const t = document.getElementById('toast');
     if (!t) return;
     _pendingUndoEntry = null;
     t.innerHTML = escapeHtml(msg);
+    t.classList.toggle('error', type === 'error');
     void t.offsetWidth;
     t.classList.add('show');
     clearTimeout(_toastTimer);
-    _toastTimer = setTimeout(() => t.classList.remove('show'), 2400);
+    _toastTimer = setTimeout(() => { t.classList.remove('show'); t.classList.remove('error'); }, type === 'error' ? 5000 : 2400);
   }
 
   // ── Undo Manager (universeel) ──────────────────────────────────────────────
@@ -2310,32 +2314,63 @@
     updateActieCard(uid);
   }
 
-  function sendAiProposal(uid) {
+  async function sendAiProposal(uid) {
     const email    = findEmail(uid);
     const proposal = state.aiProposals[uid];
-    if (!email || !proposal) return;
+    if (!email || !proposal || proposal.sending) return;
+
     const card     = document.querySelector('.actie-card[data-uid="' + uid + '"]');
     const textarea = card?.querySelector('[data-reply="' + uid + '"]');
-    const userVer  = (textarea?.value || proposal.current || '').trim();
+    const body     = (textarea?.value || proposal.current || '').trim();
     const aiText   = (proposal.original || '').trim();
-    const wasEdited = userVer && userVer !== aiText;
-    if (wasEdited) {
-      saveLearningExample({
-        category: email.category,
-        originalEmail: { subject:email.subject, from:email.from, body:state.bodyCache[email.uid]?.text||'', date:email.date, mailbox:email.mailbox },
-        aiProposal: aiText, userVersion: userVer, savedAt: new Date().toISOString()
+    const wasEdited = body && body !== aiText;
+    const toAddr   = email.fromAddress || getFromAddress(email);
+    const rawSubj  = email.subject || '';
+    const subject  = /^re:/i.test(rawSubj) ? rawSubj : 'Re: ' + rawSubj;
+
+    // Toon laadstatus op de knop
+    state.aiProposals[uid] = { ...proposal, sending: true };
+    updateActieCard(uid);
+
+    try {
+      const res  = await fetch('/api/send-email', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ from_mailbox: email.mailbox, to: toAddr, subject, text: body })
       });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'HTTP ' + res.status);
+
+      // Leervoorbeeld opslaan als gebruiker het antwoord bewerkt had
+      if (wasEdited) {
+        saveLearningExample({
+          category: email.category,
+          originalEmail: { subject: email.subject, from: email.from, body: state.bodyCache[email.uid]?.text || '', date: email.date, mailbox: email.mailbox },
+          aiProposal: aiText, userVersion: body, savedAt: new Date().toISOString()
+        });
+      }
+      bumpReplyStat(wasEdited ? 'edited' : 'approved');
+
+      // Verstuurd registreren
+      const sentAt = new Date().toISOString();
+      state.sentReplies[uid] = { sentAt, to: toAddr };
+      saveJson(SENT_REPLIES_KEY, state.sentReplies);
+
+      const wasUnread = !!email.unread;
+      undoManager.push('ai_send', { email_id: uid, was_unread: wasUnread, proposal: { ...proposal } },
+        'Antwoord verstuurd: ' + (email.fromName || email.from || uid));
+      state.overrides.read[uid] = true;
+      saveOverrides();
+      email.unread = false;
+      delete state.aiProposals[uid];
+      render();
+      showToast('E-mail verstuurd naar ' + toAddr + (wasEdited ? ' · voorbeeld opgeslagen' : ''));
+    } catch (err) {
+      // Fout: herstel proposal zodat gebruiker opnieuw kan proberen
+      state.aiProposals[uid] = { ...proposal, sending: false };
+      updateActieCard(uid);
+      showToast('Versturen mislukt: ' + err.message, 'error');
     }
-    bumpReplyStat(wasEdited ? 'edited' : 'approved');
-    const wasUnread = !!email.unread;
-    undoManager.push('ai_send', { email_id: uid, was_unread: wasUnread, proposal: { ...proposal } },
-      'Antwoord verstuurd: ' + (email.fromName || email.from || uid));
-    state.overrides.read[uid] = true;
-    saveOverrides();
-    email.unread = false;
-    delete state.aiProposals[uid];
-    render();
-    showToast(wasEdited ? 'Antwoord verstuurd · voorbeeld opgeslagen voor AI' : 'Antwoord verstuurd');
   }
 
   // Surgically re-render a single actie-card without full render()
@@ -2764,8 +2799,9 @@
   function renderAiSection(e) {
     const p = state.aiProposals[e.uid];
     if (!p) return '';
-    if (p.loading) return '<div class="card-ai-loading"><span class="ai-loading-spinner"></span> AI schrijft antwoord…</div>';
-    if (p.error)   return '<div class="card-ai-error">AI-fout: ' + escapeHtml(p.error) + '</div>';
+    if (p.loading)  return '<div class="card-ai-loading"><span class="ai-loading-spinner"></span> AI schrijft antwoord…</div>';
+    if (p.sending)  return '<div class="card-ai-loading"><span class="ai-loading-spinner"></span> Versturen…</div>';
+    if (p.error)    return '<div class="card-ai-error">AI-fout: ' + escapeHtml(p.error) + '</div>';
     const kbUsed = p.kennisbank_used ?? null;
     const kbMeta = kbUsed !== null
       ? '<div class="reply-kb-meta">Kennisbank: ' + kbUsed + ' item' + (kbUsed !== 1 ? 's' : '') + ' gebruikt' +
@@ -2780,6 +2816,15 @@
         '<button class="btn" data-action="regenerate" data-uid="' + escapeHtml(e.uid) + '">' + ICON_REGEN + ' Opnieuw</button>' +
         '<button class="btn btn-danger" data-action="cancel" data-uid="' + escapeHtml(e.uid) + '">Afwijzen</button>' +
       '</div></div>';
+  }
+
+  function renderSentBadge(uid) {
+    const s = state.sentReplies[uid];
+    if (!s) return '';
+    const dt = new Date(s.sentAt).toLocaleString('nl-NL', { day:'2-digit', month:'short', hour:'2-digit', minute:'2-digit' });
+    return '<div style="margin:6px 0 2px;padding:5px 10px;background:rgba(34,197,94,0.08);border:1px solid rgba(34,197,94,0.25);border-radius:6px;font-size:11px;color:#4ade80;">' +
+      ICON_READ + ' Verstuurd op ' + dt + ' naar ' + escapeHtml(s.to) +
+    '</div>';
   }
 
   function renderCatOptions(currentCat) {
@@ -2810,6 +2855,7 @@
       renderPreviewHtml(e.uid) +
       renderLearnBanner(e.uid) +
       (state.trainingMode ? renderTrainingInfo(e.uid) : '') +
+      renderSentBadge(e.uid) +
       renderAiSection(e) +
       '<div class="card-actions">' +
         (showGenBtn ? '<button class="btn btn-ai" data-action="generate" data-uid="' + escapeHtml(e.uid) + '">' + ICON_AI + ' Genereer AI antwoord</button>' : '') +
