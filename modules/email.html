@@ -276,7 +276,7 @@
       display: inline-block; flex-shrink: 0;
     }
 
-    /* ── Informatie list ── */
+    /* ── Leadmanagement list ── */
     .info-list { display: flex; flex-direction: column; gap: 8px; }
     .info-row {
       display: grid; grid-template-columns: auto 1fr auto auto;
@@ -943,25 +943,25 @@
   </div>
 
   <div class="tab-bar" id="tabBar">
-    <button class="tab" data-tab="alle">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
-      Alle mails
-      <span class="tab-count" id="tabCountAlle">0</span>
-    </button>
     <button class="tab active" data-tab="actie">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.69 12 19.79 19.79 0 0 1 1.61 3.47 2 2 0 0 1 3.56 1h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L7.91 8.64a16 16 0 0 0 6 6l.91-.91a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 21.75 16z"/></svg>
       Actie vereist
       <span class="tab-count" id="tabCountActie">0</span>
     </button>
     <button class="tab" data-tab="info">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
-      Informatie
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+      Leadmanagement
       <span class="tab-count" id="tabCountInfo">0</span>
     </button>
     <button class="tab" data-tab="reclame">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" y1="22" x2="4" y2="15"/></svg>
       Reclame / Overige
       <span class="tab-count" id="tabCountReclame">0</span>
+    </button>
+    <button class="tab" data-tab="alle">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
+      Alle mails
+      <span class="tab-count" id="tabCountAlle">0</span>
     </button>
   </div>
 
@@ -1587,7 +1587,7 @@
     const actNee = '<button class="vt-action-btn' + (ps.requiresAction === false ? ' selected' : '') + '" onclick="vtSelectAction(false)">Nee</button>';
     const sectionBtns =
       '<button class="vt-action-btn' + (ps.targetSection === 'actie'   ? ' selected' : '') + '" onclick="vtSelectSection(\'actie\')">'   + ICON_INBOX + ' Actie vereist</button>' +
-      '<button class="vt-action-btn' + (ps.targetSection === 'info'    ? ' selected' : '') + '" onclick="vtSelectSection(\'info\')">'    + ICON_INFO2 + ' Informatie</button>' +
+      '<button class="vt-action-btn' + (ps.targetSection === 'info'    ? ' selected' : '') + '" onclick="vtSelectSection(\'info\')">'    + ICON_INFO2 + ' Leadmanagement</button>' +
       '<button class="vt-action-btn' + (ps.targetSection === 'reclame' ? ' selected' : '') + '" onclick="vtSelectSection(\'reclame\')">' + ICON_SPAM  + ' Reclame / Overige</button>';
     return '<div class="vt-panel" id="vtPanel-' + escapeHtml(uid) + '">' +
       '<div>' +
@@ -1702,7 +1702,7 @@
       saveEmailAction(uid, 'recategorize', 'Reclame');
     }
 
-    const labels = { actie: 'Actie vereist', info: 'Informatie', reclame: 'Reclame / Overige' };
+    const labels = { actie: 'Actie vereist', info: 'Leadmanagement', reclame: 'Reclame / Overige' };
     const undoEntry = undoManager.push('section_move',
       { email_id: uid, old_flag: oldFlag, old_category: oldCat, target_section: targetSection },
       'Verplaatst naar ' + labels[targetSection] + ': ' + (email.fromName || email.from || '?'));
@@ -2375,7 +2375,7 @@
       state.sentReplies[uid] = { sentAt, to: toAddr };
       saveJson(SENT_REPLIES_KEY, state.sentReplies);
 
-      // Verwijder uit Actie vereist → verplaats naar Informatie
+      // Verwijder uit Actie vereist → verplaats naar Leadmanagement
       setActionFlag(uid, false);
       saveEmailAction(uid, 'no-action', true);
 
@@ -2694,7 +2694,7 @@
         (isSn ? '<button class="act-item act-success" data-act="unsnooze" data-uid="' + escapeHtml(uid) + '">' + ICON_READ + ' Snooze opheffen</button>' : '') +
         '<div class="act-divider"></div>' +
         '<div class="act-section-label">Verplaats naar sectie</div>' +
-        (getEmailSection(e) !== 'info'    ? '<button class="act-item" data-act="move-info"    data-uid="' + escapeHtml(uid) + '">' + ICON_INFO2 + ' Informatie</button>'    : '') +
+        (getEmailSection(e) !== 'info'    ? '<button class="act-item" data-act="move-info"    data-uid="' + escapeHtml(uid) + '">' + ICON_INFO2 + ' Leadmanagement</button>'    : '') +
         (getEmailSection(e) !== 'reclame' ? '<button class="act-item" data-act="move-reclame" data-uid="' + escapeHtml(uid) + '">' + ICON_SPAM  + ' Reclame / Overige</button>' : '') +
       '</div>' +
     '</div>';
@@ -2923,7 +2923,7 @@
             '<div class="act-divider"></div>' +
             '<div class="act-section-label">Verplaats naar sectie</div>' +
             (curSec !== 'actie'   ? '<button class="act-item" data-act="move-actie"   data-uid="' + escapeHtml(e.uid) + '">' + ICON_INBOX + ' Actie vereist</button>'    : '') +
-            (curSec !== 'info'    ? '<button class="act-item" data-act="move-info"    data-uid="' + escapeHtml(e.uid) + '">' + ICON_INFO2 + ' Informatie</button>'        : '') +
+            (curSec !== 'info'    ? '<button class="act-item" data-act="move-info"    data-uid="' + escapeHtml(e.uid) + '">' + ICON_INFO2 + ' Leadmanagement</button>'        : '') +
             (curSec !== 'reclame' ? '<button class="act-item" data-act="move-reclame" data-uid="' + escapeHtml(e.uid) + '">' + ICON_SPAM  + ' Reclame / Overige</button>' : '') +
           '</div>' +
         '</div>' +
@@ -3160,7 +3160,7 @@
     if (!emails.length) {
       return '<div class="state">' +
         '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:var(--text-faint)"><path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></svg>' +
-        '<h3>Geen informatieve mails</h3>' +
+        '<h3>Geen leads of informatie</h3>' +
         '<p>Leads, afspraken en event-aanmeldingen verschijnen hier.</p>' +
       '</div>';
     }
@@ -3188,7 +3188,7 @@
           '<div class="act-menu-dropdown" id="actMenu-reclame-' + escapeHtml(e.uid) + '">' +
             '<div class="act-section-label">Verplaats naar sectie</div>' +
             '<button class="act-item" data-act="move-actie" data-uid="' + escapeHtml(e.uid) + '">' + ICON_INBOX + ' Actie vereist</button>' +
-            '<button class="act-item" data-act="move-info"  data-uid="' + escapeHtml(e.uid) + '">' + ICON_INFO2 + ' Informatie</button>' +
+            '<button class="act-item" data-act="move-info"  data-uid="' + escapeHtml(e.uid) + '">' + ICON_INFO2 + ' Leadmanagement</button>' +
           '</div>' +
         '</div>' +
       '</div>' +
