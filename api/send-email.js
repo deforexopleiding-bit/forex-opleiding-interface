@@ -62,11 +62,13 @@ export default async function handler(req, res) {
       accepted:  info.accepted || [],
     });
   } catch (err) {
-    console.error(`[send-email] SMTP fout (${from_mailbox} → ${to}):`, err.message, err.code || '');
+    console.error(`[send-email] SMTP fout (${from_mailbox} → ${to}):`, err.message, 'code:', err.code || '—', 'responseCode:', err.responseCode || '—', 'response:', err.response || '—');
     return res.status(500).json({
-      error:   err.message || 'Onbekende SMTP fout',
-      code:    err.code    || null,
-      command: err.command || null,
+      error:        err.message      || 'Onbekende SMTP fout',
+      code:         err.code         || null,
+      responseCode: err.responseCode || null,
+      response:     err.response     || null,
+      command:      err.command      || null,
     });
   }
 }

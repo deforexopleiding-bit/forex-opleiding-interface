@@ -2356,6 +2356,13 @@
       state.sentReplies[uid] = { sentAt, to: toAddr };
       saveJson(SENT_REPLIES_KEY, state.sentReplies);
 
+      // Verwijder uit Actie vereist → verplaats naar Informatie
+      setActionFlag(uid, false);
+      saveEmailAction(uid, 'no-action', true);
+
+      // Leer: beantwoorde mail vereist geen actie meer
+      sendLearningCorrection(email, email.category, email.category, 'resolved_by_reply');
+
       const wasUnread = !!email.unread;
       undoManager.push('ai_send', { email_id: uid, was_unread: wasUnread, proposal: { ...proposal } },
         'Antwoord verstuurd: ' + (email.fromName || email.from || uid));
@@ -2364,7 +2371,7 @@
       email.unread = false;
       delete state.aiProposals[uid];
       render();
-      showToast('E-mail verstuurd naar ' + toAddr + (wasEdited ? ' · voorbeeld opgeslagen' : ''));
+      showToast('✓ E-mail verstuurd · Verwijderd uit Actie vereist' + (wasEdited ? ' · voorbeeld opgeslagen' : ''));
     } catch (err) {
       // Fout: herstel proposal zodat gebruiker opnieuw kan proberen
       state.aiProposals[uid] = { ...proposal, sending: false };
