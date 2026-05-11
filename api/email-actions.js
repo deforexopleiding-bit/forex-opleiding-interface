@@ -22,6 +22,26 @@ const VALID_ACTIONS = [
 ];
 
 export default async function handler(req, res) {
+  // ── GET ?load_overrides=1 — laad actionFlags + categorie overrides ────────
+  if (req.method === 'GET') {
+    if (req.query?.load_overrides !== '1') {
+      return res.status(405).json({ error: 'Method not allowed' });
+    }
+    try {
+      const { data, error } = await supabase
+        .from('email_actions')
+        .select('email_id, action, value, set_at')
+        .in('action', ['mark-action', 'no-action', 'recategorize'])
+        .order('set_at', { ascending: false })
+        .limit(500);
+      if (error) throw error;
+      return res.status(200).json({ rows: data || [] });
+    } catch (err) {
+      console.error('[email-actions] GET fout:', err.message);
+      return res.status(200).json({ rows: [], error: err.message });
+    }
+  }
+
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }

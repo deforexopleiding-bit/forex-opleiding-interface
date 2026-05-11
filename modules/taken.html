@@ -803,6 +803,48 @@ function load(key) {
 }
 function save(key, val) { localStorage.setItem(key, JSON.stringify(val)); }
 
+// ── Supabase sync ────────────────────────────────────────────────────────────
+async function loadTakenFromSupabase() {
+  if (taken.length > 0) return; // localStorage heeft al data
+  try {
+    const res = await fetch('/api/taken');
+    if (!res.ok) return;
+    const { taken: rows } = await res.json();
+    if (!Array.isArray(rows) || rows.length === 0) return;
+    taken = rows.map((r) => ({
+      id:            r.id,
+      titel:         r.titel          || '',
+      omschrijving:  r.omschrijving   || '',
+      prioriteit:    r.prioriteit     || 'Normaal',
+      categorie:     r.categorie      || 'Overige',
+      toegewezenAan: r.toegewezen_aan || '',
+      deadline:      r.deadline       || '',
+      emailId:       r.email_id       || '',
+      emailSubject:  r.email_subject  || '',
+      status:        r.status         || 'todo',
+      notities:      r.notities       || '',
+      aangemaakt:    r.aangemaakt     || r.updated_at,
+      afgerondOp:    r.afgerond_op    || null
+    }));
+    save('taken_lijst', taken);
+    render();
+  } catch {}
+}
+
+function syncTaakToSupabase(taak) {
+  fetch('/api/taken', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ task: taak })
+  }).catch(() => {});
+}
+
+function deleteTaakFromSupabase(id) {
+  fetch('/api/taken', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action: 'delete', id })
+  }).catch(() => {});
+}
+
 function defaultCollegas() {
   return [
     { id: crypto.randomUUID(), naam: 'Jeffrey', kleur: '#22d3ee' },
@@ -1013,6 +1055,7 @@ function onDrop(e, newStatus) {
   if (newStatus !== 'done') t.afgerondOp = null;
   dragId = null;
   save('taken_lijst', taken);
+  syncTaakToSupabase(t);
   render();
 }
 
@@ -1122,6 +1165,8 @@ function saveNieuweTaak() {
   }
 
   save('taken_lijst', taken);
+  const savedTaak = editMode ? taakById(detailId) : taken[taken.length - 1];
+  if (savedTaak) syncTaakToSupabase(savedTaak);
   closeNieuweTaak();
   render();
 }
@@ -1180,6 +1225,7 @@ function setDetailStatus(st) {
   if (st !== 'done') t.afgerondOp = null;
   document.querySelectorAll('.status-btn').forEach(b => b.classList.toggle('active', b.dataset.s === st));
   save('taken_lijst', taken);
+  syncTaakToSupabase(t);
   render();
 }
 
@@ -1189,6 +1235,7 @@ function saveDetail() {
   if (!t) return;
   t.notities = document.getElementById('detailNotities').value;
   save('taken_lijst', taken);
+  syncTaakToSupabase(t);
   closeDetail();
   render();
 }
@@ -1202,8 +1249,10 @@ function editTaakFromDetail() {
 function deleteTaak() {
   if (!detailId) return;
   if (!confirm('Taak verwijderen?')) return;
-  taken = taken.filter(t => t.id !== detailId);
+  const id = detailId;
+  taken = taken.filter(t => t.id !== id);
   save('taken_lijst', taken);
+  deleteTaakFromSupabase(id);
   closeDetail();
   render();
 }
@@ -1301,6 +1350,7 @@ function init() {
   if (!huidig && collegas.length) huidig = collegas[0].id;
   render();
   handleUrlParams();
+  loadTakenFromSupabase(); // herstel vanuit Supabase als localStorage leeg is
 }
 
 init();

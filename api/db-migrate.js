@@ -64,6 +64,23 @@ ALTER TABLE kennisbank_items DISABLE ROW LEVEL SECURITY;`,
   is_undone boolean DEFAULT false
 );
 ALTER TABLE undo_history DISABLE ROW LEVEL SECURITY;`,
+  taken_items: `CREATE TABLE IF NOT EXISTS taken_items (
+  id text PRIMARY KEY,
+  titel text,
+  omschrijving text,
+  prioriteit text DEFAULT 'Normaal',
+  categorie text DEFAULT 'Overige',
+  toegewezen_aan text,
+  deadline text,
+  email_id text,
+  email_subject text,
+  status text DEFAULT 'todo',
+  notities text,
+  aangemaakt timestamptz,
+  afgerond_op timestamptz,
+  updated_at timestamptz DEFAULT now()
+);
+ALTER TABLE taken_items DISABLE ROW LEVEL SECURITY;`,
 };
 
 async function tableExists(table) {

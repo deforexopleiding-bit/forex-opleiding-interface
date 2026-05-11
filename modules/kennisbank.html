@@ -822,6 +822,77 @@
       try { localStorage.setItem(key, JSON.stringify(value)); return true; } catch { return false; }
     }
 
+    // ── Supabase sync ──────────────────────────────────────────────────────
+    async function loadFromSupabase() {
+      const hasItems   = (loadJson(ITEMS_KEY, []).length > 0);
+      const hasProfile = !!loadJson(PROFILE_KEY, null)?.bedrijfsnaam;
+      if (hasItems && hasProfile) return; // localStorage is al gevuld
+
+      try {
+        const res = await fetch('/api/kennisbank-sync');
+        if (!res.ok) return;
+        const { items } = await res.json();
+        if (!Array.isArray(items) || items.length === 0) return;
+
+        // Haal profiel op (label = '_profile')
+        const profileRow = items.find((i) => i.label === '_profile');
+        if (profileRow && !hasProfile) {
+          try {
+            const parsed = JSON.parse(profileRow.content || '{}');
+            if (parsed.bedrijfsnaam) {
+              state.profile = { ...defaultProfile(), ...parsed };
+              saveJson(PROFILE_KEY, state.profile);
+            }
+          } catch {}
+        }
+
+        // Haal reguliere items op (label begint met 'k_' of niet '_profile')
+        if (!hasItems) {
+          const regularItems = items
+            .filter((i) => i.label && i.label !== '_profile' && i.type !== 'bedrijfsprofiel')
+            .map((i) => ({
+              id:        i.label || i.id,
+              type:      i.type      || 'Algemeen',
+              richting:  i.direction || 'Inkomend',
+              note:      i.note      || '',
+              content:   i.content   || '',
+              source:    'text',
+              fileName:  i.category  || null,
+              createdAt: i.created_at || new Date().toISOString()
+            }));
+          if (regularItems.length > 0) {
+            state.items = regularItems;
+            saveJson(ITEMS_KEY, state.items);
+          }
+        }
+
+        renderStats();
+        renderProfile();
+        renderItems();
+      } catch {}
+    }
+
+    function syncItemToSupabase(item) {
+      fetch('/api/kennisbank-sync', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'upsert_item', item })
+      }).catch(() => {});
+    }
+
+    function deleteItemFromSupabase(id) {
+      fetch('/api/kennisbank-sync', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'delete_item', local_id: id })
+      }).catch(() => {});
+    }
+
+    function syncProfileToSupabase() {
+      fetch('/api/kennisbank-sync', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'sync_profile', profile: state.profile })
+      }).catch(() => {});
+    }
+
     function defaultProfile() {
       return {
         bedrijfsnaam: 'De Forex Opleiding',
@@ -992,6 +1063,7 @@
       state.profile.contactgegevens = $('contactgegevens').value;
       state.profile.updatedAt = new Date().toISOString();
       saveJson(PROFILE_KEY, state.profile);
+      syncProfileToSupabase();
       state.profileDirty = false;
       $('profileDirty').style.display = 'none';
       renderStats();
@@ -1119,6 +1191,7 @@
       };
       state.items.unshift(item);
       saveJson(ITEMS_KEY, state.items);
+      syncItemToSupabase(item);
       clearStaging();
       $('textPaste').value = '';
       $('fileInput').value = '';
@@ -1290,6 +1363,7 @@
           if (!confirm('Dit item verwijderen uit de kennisbank?')) return;
           state.items = state.items.filter((i) => i.id !== id);
           saveJson(ITEMS_KEY, state.items);
+          deleteItemFromSupabase(id);
           renderStats();
           renderItems();
           showToast('Item verwijderd');
@@ -1331,6 +1405,7 @@
       renderProfile();
       renderItems();
       renderToggle();
+      loadFromSupabase(); // herstel vanuit Supabase als localStorage leeg is
 
       // Profile field listeners
       ['overOns', 'nooitZeggen', 'contactgegevens'].forEach((id) => {

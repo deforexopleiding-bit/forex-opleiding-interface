@@ -1670,15 +1670,18 @@
     if (targetSection === 'actie') {
       state.actionFlags[uid] = true;
       saveJson(ACTION_FLAGS_KEY, state.actionFlags);
+      saveEmailAction(uid, 'mark-action', true);
     } else if (targetSection === 'info') {
       state.actionFlags[uid] = false;
       saveJson(ACTION_FLAGS_KEY, state.actionFlags);
+      saveEmailAction(uid, 'no-action', true);
     } else if (targetSection === 'reclame') {
       email.category = 'Reclame';
       state.overrides.category[uid] = 'Reclame';
       _aiCatCache[uid] = 'Reclame';
       delete state.actionFlags[uid];
       saveOverrides(); saveJson(AI_CATS_KEY, _aiCatCache); saveJson(ACTION_FLAGS_KEY, state.actionFlags);
+      saveEmailAction(uid, 'recategorize', 'Reclame');
     }
 
     const labels = { actie: 'Actie vereist', info: 'Informatie', reclame: 'Reclame / Overige' };
@@ -1729,12 +1732,15 @@
     if (ps.targetSection === 'actie') {
       state.actionFlags[uid] = true;
       saveJson(ACTION_FLAGS_KEY, state.actionFlags);
+      saveEmailAction(uid, 'mark-action', true);
     } else if (ps.targetSection === 'info') {
       state.actionFlags[uid] = false;
       saveJson(ACTION_FLAGS_KEY, state.actionFlags);
+      saveEmailAction(uid, 'no-action', true);
     } else if (ps.targetSection === 'reclame') {
       delete state.actionFlags[uid];
       saveJson(ACTION_FLAGS_KEY, state.actionFlags);
+      saveEmailAction(uid, 'recategorize', 'Reclame');
     }
     populateSuggestions(); render();
 
@@ -2696,6 +2702,41 @@
     }).catch(() => {}); // fire-and-forget
   }
 
+  async function loadOverridesFromSupabase() {
+    try {
+      const res = await fetch('/api/email-actions?load_overrides=1');
+      if (!res.ok) return;
+      const { rows } = await res.json();
+      if (!Array.isArray(rows) || rows.length === 0) return;
+      // Laatste actie per email_id bepaalt de huidige staat (rows zijn DESC op set_at)
+      const seen = new Set();
+      let changed = false;
+      for (const row of rows) {
+        if (seen.has(row.email_id)) continue;
+        seen.add(row.email_id);
+        if (row.action === 'mark-action') {
+          if (state.actionFlags[row.email_id] === undefined) {
+            state.actionFlags[row.email_id] = true; changed = true;
+          }
+        } else if (row.action === 'no-action') {
+          if (state.actionFlags[row.email_id] === undefined) {
+            state.actionFlags[row.email_id] = false; changed = true;
+          }
+        } else if (row.action === 'recategorize' && row.value) {
+          if (!state.overrides.category[row.email_id]) {
+            state.overrides.category[row.email_id] = row.value; changed = true;
+          }
+        }
+      }
+      if (changed) {
+        saveJson(ACTION_FLAGS_KEY, state.actionFlags);
+        saveOverrides();
+        applyOverrides();
+        render();
+      }
+    } catch {}
+  }
+
   // ── Rendering: Actie tab ───────────────────────────────────────────────────
   function renderPreviewHtml(uid) {
     const cache = state.bodyCache[uid];
@@ -3219,6 +3260,7 @@
       populateSuggestions();
       render();
       kickOffAiCategorization();
+      loadOverridesFromSupabase();
     } catch (err) {
       renderError(err.message);
     } finally {

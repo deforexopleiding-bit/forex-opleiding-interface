@@ -1,13 +1,22 @@
 # Volledige Systeemanalyse — Agency Command Center
-> Gegenereerd: 2026-05-11 | Branch: main | Commit: df6323d
+> Gegenereerd: 2026-05-11 | Bijgewerkt: 2026-05-11 | Branch: main
 
 ---
 
 ## Executive Summary
 
-Het Agency Command Center is een volledig functioneel e-mail management systeem met AI-categorisatie, lerende agent, kennisbank en takenbeheer. De kernfunctionaliteit werkt goed, maar er zijn **3 kritieke gaten** in de data-persistentie en **1 kritiek bug** in de propagatielogica.
+Het Agency Command Center is een volledig functioneel e-mail management systeem met AI-categorisatie, lerende agent, kennisbank en takenbeheer. Na de fixes van 2026-05-11 zijn alle kritieke persistentiegaten gedicht en werkt de feedback loop volledig.
 
-**Algehele beoordeling: 7/10** — Sterk fundament, gaps in persistentie
+**Algehele beoordeling: 8.5/10** — Sterk fundament, persistentie volledig op orde
+
+### Gefixte issues (2026-05-11)
+| Fix | Status |
+|-----|--------|
+| [K1] Group C/D propagatie body_snippet gap | ✅ GEFIXED |
+| [K2] Kennisbank → Supabase sync | ✅ GEFIXED |
+| [K3] Taken → Supabase persistentie | ✅ GEFIXED |
+| [H1] actionFlags + overrides persistent via email_actions | ✅ GEFIXED |
+| [H4] Dead code api/categorize.js verwijderd | ✅ GEFIXED |
 
 ---
 
@@ -166,12 +175,13 @@ Gebruiker corrigeert
 
 ## 7. Dead Code / Technische Schuld
 
-| Bestand | Type | Actie |
-|---------|------|-------|
-| api/categorize.js | Legacy (19KB) — volledig vervangen door email-agent.js | Kan verwijderd worden |
-| sendLearningCorrection body_snippet gap | Bug in email.html | ✅ GEFIXED in deze sessie |
-| /api/undo endpoint | Nooit verbonden | Connect of verwijder |
-| /api/kennisbank-sync | Nooit verbonden in frontend | Connect |
+| Bestand | Type | Status |
+|---------|------|--------|
+| api/categorize.js | Legacy (19KB) — vervangen door email-agent.js | ✅ VERWIJDERD |
+| sendLearningCorrection body_snippet gap | Bug in email.html | ✅ GEFIXED |
+| /api/kennisbank-sync | Niet verbonden in frontend | ✅ VERBONDEN |
+| /api/taken | Nieuw endpoint voor taken persistentie | ✅ AANGEMAAKT |
+| /api/undo endpoint | Nooit verbonden aan frontend | Open |
 
 ---
 
@@ -188,18 +198,18 @@ Gebruiker corrigeert
 
 ## 9. Top 10 Prioriteiten
 
-| # | Prioriteit | Issue | Module |
-|---|-----------|-------|--------|
-| 1 | 🔴 KRITIEK | `emailList` mist `body_snippet` → Group C/D propagatie kapot | email.html |
-| 2 | 🔴 KRITIEK | Kennisbank niet gesynchroniseerd met Supabase | kennisbank.html |
-| 3 | 🔴 KRITIEK | Taken verloren bij cache clear | taken.html |
-| 4 | 🟡 HOOG | Undo history niet persistent (Supabase undo ontkoppeld) | email.html |
-| 5 | 🟡 HOOG | actionFlags/overrides verloren bij cache clear | email.html |
-| 6 | 🟡 HOOG | Geen authenticatie op API | api/*.js |
-| 7 | 🟡 MEDIUM | api/categorize.js — 19KB dead code | api/ |
-| 8 | 🟡 MEDIUM | Geen rate limiting op generate-reply | api/generate-reply.js |
-| 9 | 🟢 LAAG | AI-replies niet gesynced naar Supabase | email.html |
-| 10 | 🟢 LAAG | Dashboard statistieken niet persistent | index.html |
+| # | Prioriteit | Issue | Module | Status |
+|---|-----------|-------|--------|--------|
+| 1 | 🔴 KRITIEK | `emailList` mist `body_snippet` → Group C/D propagatie kapot | email.html | ✅ GEFIXED |
+| 2 | 🔴 KRITIEK | Kennisbank niet gesynchroniseerd met Supabase | kennisbank.html | ✅ GEFIXED |
+| 3 | 🔴 KRITIEK | Taken verloren bij cache clear | taken.html | ✅ GEFIXED |
+| 4 | 🟡 HOOG | actionFlags/overrides verloren bij cache clear | email.html | ✅ GEFIXED |
+| 5 | 🟡 HOOG | api/categorize.js — 19KB dead code | api/ | ✅ VERWIJDERD |
+| 6 | 🟡 HOOG | Undo history niet persistent (Supabase undo ontkoppeld) | email.html | Open |
+| 7 | 🟡 HOOG | Geen authenticatie op API | api/*.js | Open |
+| 8 | 🟡 MEDIUM | Geen rate limiting op generate-reply | api/generate-reply.js | Open |
+| 9 | 🟢 LAAG | AI-replies niet gesynced naar Supabase | email.html | Open |
+| 10 | 🟢 LAAG | Dashboard statistieken niet persistent | index.html | Open |
 
 ---
 
