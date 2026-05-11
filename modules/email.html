@@ -2791,11 +2791,11 @@
       '<div class="taak-form-body">' +
         '<div><label class="taak-form-label">Taaknaam *</label><input class="taak-form-input" id="tfTitel" value="' + escapeHtml(f.titel) + '" /></div>' +
         '<div>' +
-          '<div class="taak-label-row">' +
-            '<label class="taak-form-label">Wat moet er gedaan worden?</label>' +
-            '<button type="button" id="btnAiTaak" class="btn-ai-taak" onclick="aiGenereerTaak(\'' + escapeHtml(uid) + '\')">✨ Genereer met AI</button>' +
+          '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">' +
+            '<label style="font-size:11px;color:#888;text-transform:uppercase;letter-spacing:0.08em">Wat moet er gedaan worden?</label>' +
+            '<button type="button" id="btn-ai-taak-' + escapeHtml(uid) + '" onclick="aiGenereerTaak(\'' + escapeHtml(uid) + '\')" style="font-size:11px;padding:3px 10px;border-radius:6px;background:#1a1830;border:0.5px solid #534AB7;color:#AFA9EC;cursor:pointer;display:flex;align-items:center;gap:4px">✨ Genereer met AI</button>' +
           '</div>' +
-          '<textarea class="taak-form-textarea" id="tfTaakomschrijving" rows="3">' + escapeHtml(f.taakomschrijving) + '</textarea>' +
+          '<textarea class="taak-form-textarea" id="taak-omschrijving-' + escapeHtml(uid) + '" rows="3">' + escapeHtml(f.taakomschrijving) + '</textarea>' +
         '</div>' +
         '<div class="taak-form-row">' +
           '<div><label class="taak-form-label">Prioriteit</label><select class="taak-form-select" id="tfPrioriteit">' + prioOpts + '</select></div>' +
@@ -2826,7 +2826,7 @@
     if (!uid || !email) return;
 
     const titel          = document.getElementById('tfTitel')?.value.trim() || 'Opvolgen e-mail';
-    const omschrijving   = document.getElementById('tfTaakomschrijving')?.value.trim() || '';
+    const omschrijving   = document.getElementById('taak-omschrijving-' + uid)?.value.trim() || '';
     const notities       = document.getElementById('tfOmschrijving')?.value || '';
     const prioriteit     = document.getElementById('tfPrioriteit')?.value  || 'Normaal';
     const categorie      = document.getElementById('tfCategorie')?.value   || 'Overige';
@@ -2880,49 +2880,54 @@
   }
 
   async function aiGenereerTaak(uid) {
-    const btn      = document.getElementById('btnAiTaak');
-    const textarea = document.getElementById('tfTaakomschrijving');
+    const btn      = document.getElementById('btn-ai-taak-' + uid);
+    const textarea = document.getElementById('taak-omschrijving-' + uid);
     if (!btn || !textarea) return;
 
     const email = findEmail(uid);
     if (!email) return;
 
-    btn.disabled    = true;
-    btn.innerHTML   = '<span class="spin">⟳</span> Bezig…';
-    const prev      = textarea.value;
+    btn.innerHTML = '<span style="animation:spin 1s linear infinite;display:inline-block">⟳</span> Genereren...';
+    btn.disabled  = true;
+    textarea.placeholder = 'AI genereert taakomschrijving...';
+    const prev = textarea.value;
 
     try {
-      const bodyText    = state.bodyCache[uid]?.text || '';
-      const sentBody    = _taakSentBody || state.sentReplies[uid]?.body || '';
+      const body    = state.bodyCache?.[uid]?.text || '';
+      const antwoord = _taakSentBody || state.sentReplies?.[uid]?.body || '';
 
       const res = await fetch('/api/generate-task', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          subject:         email.subject    || '',
-          fromName:        email.fromName   || email.from || '',
-          category:        email.category   || 'Algemeen',
-          bodySnippet:     bodyText,
-          sentBodySnippet: sentBody,
+          subject:  email.subject  || '',
+          from:     email.fromName || email.from || '',
+          category: email.category || '',
+          body:     body.slice(0, 600),
+          reply:    antwoord.slice(0, 200),
         }),
       });
 
       const data = await res.json();
-      if (!res.ok || !data.taakomschrijving) throw new Error(data.error || 'Lege respons');
+      if (!res.ok || !data.description) throw new Error(data.error || 'Lege respons');
 
-      textarea.value  = data.taakomschrijving;
-      btn.innerHTML   = '✓ Gegenereerd';
-      btn.style.color = '#4ade80';
+      textarea.value       = data.description;
+      textarea.placeholder = '';
+      btn.innerHTML        = '✓ Gegenereerd';
+      btn.style.color      = '#1D9E75';
+      btn.style.borderColor = '#0F6E56';
       setTimeout(() => {
-        btn.innerHTML   = '✨ Genereer met AI';
-        btn.style.color = '';
-        btn.disabled    = false;
+        btn.innerHTML        = '✨ Genereer met AI';
+        btn.style.color      = '#AFA9EC';
+        btn.style.borderColor = '#534AB7';
+        btn.disabled         = false;
       }, 2500);
     } catch (err) {
-      textarea.value  = prev;
-      btn.innerHTML   = '✨ Genereer met AI';
-      btn.disabled    = false;
-      showToast('AI generatie mislukt: ' + (err.message || 'onbekende fout'));
+      console.error('AI taak genereren mislukt:', err);
+      textarea.value       = prev;
+      textarea.placeholder = 'Beschrijf wat er gedaan moet worden...';
+      btn.innerHTML        = '✨ Genereer met AI';
+      btn.disabled         = false;
     }
   }
 

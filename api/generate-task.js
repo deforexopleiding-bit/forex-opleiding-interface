@@ -17,18 +17,18 @@ export default async function handler(req, res) {
     return res.status(500).json({ error: 'ANTHROPIC_API_KEY niet geconfigureerd.' });
   }
 
-  const { subject, fromName, category, bodySnippet, sentBodySnippet } = req.body || {};
-  if (!subject && !bodySnippet) {
-    return res.status(400).json({ error: 'subject of bodySnippet vereist' });
+  const { subject, from, category, body, reply } = req.body || {};
+  if (!subject && !body) {
+    return res.status(400).json({ error: 'subject of body vereist' });
   }
 
   const lines = [
-    `E-mail van: ${fromName || 'Onbekend'}`,
+    `E-mail van: ${from || 'Onbekend'}`,
     `Onderwerp: ${subject || '(geen onderwerp)'}`,
     `Categorie: ${category || 'Algemeen'}`,
-    `Inhoud: ${(bodySnippet || '').slice(0, 600) || '(niet beschikbaar)'}`,
+    `Inhoud: ${(body || '').slice(0, 600) || '(niet beschikbaar)'}`,
   ];
-  if (sentBodySnippet) lines.push(`Verstuurd antwoord: ${sentBodySnippet.slice(0, 200)}`);
+  if (reply) lines.push(`Verstuurd antwoord: ${reply.slice(0, 200)}`);
   lines.push('\nGenereer een concrete taakomschrijving.');
 
   try {
@@ -44,7 +44,7 @@ export default async function handler(req, res) {
     if (!text) return res.status(500).json({ error: 'Lege respons van AI' });
 
     console.log(`[generate-task] uid snippet: "${(bodySnippet || '').slice(0, 40)}" → "${text.slice(0, 60)}"`);
-    return res.status(200).json({ taakomschrijving: text });
+    return res.status(200).json({ description: text });
   } catch (err) {
     console.error('[generate-task] fout:', err.message);
     return res.status(500).json({ error: err.message || 'Onbekende AI fout' });
