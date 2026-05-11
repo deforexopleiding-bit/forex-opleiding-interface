@@ -57,13 +57,14 @@ export default async function handler(req, res) {
   }
 
   try {
-    await supabase.from('email_actions').insert({
+    const { error: dbErr } = await supabase.from('email_actions').insert({
       email_id,
       action,
       value:  value != null ? String(value) : null,
       set_by: set_by || null,
       set_at: new Date().toISOString()
     });
+    if (dbErr) throw dbErr;
 
     return res.status(200).json({ ok: true });
   } catch (err) {

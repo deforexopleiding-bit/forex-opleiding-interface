@@ -2454,7 +2454,7 @@
     const email = findEmail(uid);
     if (!email) return;
     state.aiProposals[uid] = { loading: true };
-    updateActieCard(uid);
+    if (state.activeTab === 'actie') updateActieCard(uid); else render();
     try {
       const result = await callGenerateReply(email);
       const full   = appendSignature(result.reply);
@@ -2462,7 +2462,7 @@
     } catch (err) {
       state.aiProposals[uid] = { error: err.message };
     }
-    updateActieCard(uid);
+    if (state.activeTab === 'actie') updateActieCard(uid); else render();
   }
 
   async function regenerateAiProposal(uid) {
@@ -2470,7 +2470,7 @@
     if (!email) return;
     const prev = state.aiProposals[uid]?.original;
     state.aiProposals[uid] = { loading: true, previous: prev };
-    updateActieCard(uid);
+    if (state.activeTab === 'actie') updateActieCard(uid); else render();
     try {
       const result = await callGenerateReply(email);
       const full   = appendSignature(result.reply);
@@ -2478,7 +2478,7 @@
     } catch (err) {
       state.aiProposals[uid] = { error: err.message };
     }
-    updateActieCard(uid);
+    if (state.activeTab === 'actie') updateActieCard(uid); else render();
   }
 
   function cancelAiProposal(uid) {
@@ -2491,7 +2491,7 @@
     localStorage.removeItem('draft_' + uid);
     delete state.aiProposals[uid];
     bumpReplyStat('rejected');
-    updateActieCard(uid);
+    if (state.activeTab === 'actie') updateActieCard(uid); else render();
   }
 
   async function sendAiProposal(uid) {
@@ -4251,6 +4251,7 @@
         const row = cb.closest('.reclame-row');
         if (cb.checked) { state.reclameSelected.add(uid); row?.classList.add('selected'); }
         else            { state.reclameSelected.delete(uid); row?.classList.remove('selected'); }
+        render();
       });
     });
     document.querySelectorAll('.reclame-row[data-uid]').forEach((row) => {
