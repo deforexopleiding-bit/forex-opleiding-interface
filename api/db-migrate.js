@@ -25,6 +25,28 @@ const EXPECTED = {
   ],
 };
 
+// Tabellen die aangemaakt moeten worden als ze niet bestaan
+const TABLES_TO_CREATE = {
+  undo_history: `CREATE TABLE IF NOT EXISTS undo_history (
+  id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+  action_type text NOT NULL,
+  action_data jsonb NOT NULL DEFAULT '{}'::jsonb,
+  label text,
+  performed_by text DEFAULT 'Jeffrey',
+  performed_at timestamptz DEFAULT now(),
+  undone_at timestamptz,
+  is_undone boolean DEFAULT false
+);
+ALTER TABLE undo_history DISABLE ROW LEVEL SECURITY;`,
+};
+
+async function tableExists(table) {
+  try {
+    const { error } = await supabase.from(table).select('id').limit(1);
+    return !error;
+  } catch { return false; }
+}
+
 async function colExists(table, col) {
   try {
     const { error } = await supabase.from(table).select(col).limit(1);
@@ -37,7 +59,14 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
-  const report = { tables: {}, missing: [], sql_to_run: '', ok: false };
+  const report = { tables: {}, missing: [], missing_tables: [], sql_to_run: '', ok: false };
+
+  // ── Detecteer ontbrekende tabellen ────────────────────────────────────────
+  for (const [table, createSql] of Object.entries(TABLES_TO_CREATE)) {
+    const exists = await tableExists(table);
+    report.tables[table] = exists ? { _table: 'ok' } : { _table: 'MISSING' };
+    if (!exists) report.missing_tables.push({ table, createSql });
+  }
 
   // ── Detecteer ontbrekende kolommen ────────────────────────────────────────
   for (const [table, cols] of Object.entries(EXPECTED)) {
@@ -49,14 +78,21 @@ export default async function handler(req, res) {
     }
   }
 
-  if (report.missing.length === 0) {
+  if (report.missing.length === 0 && report.missing_tables.length === 0) {
     report.ok = true;
-    report.message = 'Alle kolommen aanwezig — geen migratie nodig.';
+    report.message = 'Alle tabellen en kolommen aanwezig — geen migratie nodig.';
     return res.status(200).json(report);
   }
 
-  // ── Bouw ALTER TABLE SQL voor de ontbrekende kolommen ────────────────────
+  // ── Bouw SQL voor ontbrekende tabellen ───────────────────────────────────
   const lines = ['-- Voer dit uit in Supabase → SQL Editor', ''];
+  for (const { table, createSql } of report.missing_tables) {
+    lines.push(`-- Nieuwe tabel: ${table}`);
+    lines.push(createSql);
+    lines.push('');
+  }
+
+  // ── Bouw ALTER TABLE SQL voor de ontbrekende kolommen ────────────────────
   let lastTable = null;
   for (const { table, col } of report.missing) {
     const def = EXPECTED[table].find((c) => c.col === col);
@@ -82,6 +118,11 @@ export default async function handler(req, res) {
   //
   let rpcWorked = false;
   try {
+    for (const { createSql } of report.missing_tables) {
+      const { error } = await supabase.rpc('run_schema_migration', { sql: createSql });
+      if (!error) rpcWorked = true;
+      else console.warn('[db-migrate] RPC tabel-aanmaak fout:', error.message);
+    }
     for (const { table, col } of report.missing) {
       const def = EXPECTED[table].find((c) => c.col === col);
       const { error } = await supabase.rpc('run_schema_migration', {
@@ -99,7 +140,11 @@ export default async function handler(req, res) {
     for (const { table, col } of report.missing) {
       if (!(await colExists(table, col))) stillMissing.push({ table, col });
     }
-    report.ok = stillMissing.length === 0;
+    const stillMissingTables = [];
+    for (const { table } of report.missing_tables) {
+      if (!(await tableExists(table))) stillMissingTables.push(table);
+    }
+    report.ok = stillMissing.length === 0 && stillMissingTables.length === 0;
     report.rpc_applied = true;
     report.still_missing = stillMissing;
     report.message = report.ok

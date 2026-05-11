@@ -67,18 +67,20 @@ export default async function handler(req, res) {
   learnRow.correction_type = correction_type || 'manual';
   learnRow.corrected_at    = new Date().toISOString();
 
+  let learnExampleId = null;
   try {
-    const { error } = await supabase.from('learn_examples').insert(learnRow);
+    const { data: inserted, error } = await supabase.from('learn_examples').insert(learnRow).select('id').single();
     if (error) {
       console.warn('[learn] Volledige insert mislukt, probeer minimale insert:', error.message);
-      const { error: err2 } = await supabase.from('learn_examples').insert({
+      const { data: ins2, error: err2 } = await supabase.from('learn_examples').insert({
         email_sender: senderEmail || null,
         new_category,
-      });
+      }).select('id').single();
       if (err2) console.error('[learn] Minimale insert ook mislukt:', err2.message);
-      else console.log('[learn] Minimale insert gelukt voor', senderEmail);
+      else { learnExampleId = ins2?.id || null; console.log('[learn] Minimale insert gelukt voor', senderEmail); }
     } else {
-      console.log('[learn] learn_examples insert OK voor', senderEmail);
+      learnExampleId = inserted?.id || null;
+      console.log('[learn] learn_examples insert OK voor', senderEmail, '· id:', learnExampleId);
     }
   } catch (err) {
     console.error('[learn] learn_examples insert crash:', err.message);
@@ -307,6 +309,7 @@ export default async function handler(req, res) {
     ok:                   true,
     sender_email:         senderEmail,
     new_category,
+    learn_example_id:     learnExampleId,
     pattern_examples:     patternExamples,
     pattern_updated:      patternUpdated,
     pattern_deleted:      patternDeleted,
