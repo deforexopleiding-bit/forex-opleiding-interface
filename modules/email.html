@@ -385,8 +385,20 @@
       border-radius: 999px; font-size: 10px; font-weight: 700;
       min-width: 16px; height: 16px; padding: 0 4px; margin-left: 4px;
     }
-    #undoBtn:disabled { opacity: 0.45; cursor: not-allowed; }
-    #undoBtn:not(:disabled) { color: var(--accent-cyan); border-color: var(--accent-cyan); }
+    #undoBtn {
+      background: var(--bg-elev-2);
+      border-color: var(--border-strong);
+    }
+    #undoBtn:disabled { opacity: 0.65; cursor: not-allowed; }
+    #undoBtn:not(:disabled) {
+      color: var(--accent-cyan);
+      border-color: rgba(34,211,238,0.45);
+      background: rgba(34,211,238,0.06);
+    }
+    #undoBtn:not(:disabled):hover {
+      background: rgba(34,211,238,0.12);
+      border-color: rgba(34,211,238,0.7);
+    }
     .undo-dropdown {
       position: absolute; top: calc(100% + 8px); right: 0;
       background: var(--surface); border: 1px solid var(--border);
@@ -1205,8 +1217,10 @@
   function handleUndo() {
     const actions = getUndoableActions();
     if (!actions.length) { showToast('Geen acties om ongedaan te maken'); return; }
+
     performUndo(actions[0].id);
   }
+  const undoLastAction = handleUndo; // alias voor backwards-compatibiliteit
 
   function updateUndoButton() {
     const count  = getUndoableActions().length;
