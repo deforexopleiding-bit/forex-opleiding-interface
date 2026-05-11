@@ -234,6 +234,18 @@
     .activity-desc { font-size: 11.5px; font-weight: 500; line-height: 1.4; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .activity-time { font-size: 10px; color: var(--text-faint); margin-top: 1px; }
 
+    /* ── Meeting table ── */
+    .meeting-section { background: var(--bg-elev); border: 1px solid var(--border); border-radius: 12px; padding: 20px 24px 16px; margin-bottom: 20px; cursor: pointer; transition: border-color .2s; }
+    .meeting-section:hover { border-color: var(--accent); }
+    .meeting-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
+    .meeting-title { font-size: 13px; font-weight: 600; }
+    .meeting-goto { font-size: 11px; color: var(--accent); }
+    .meeting-svg-wrap { display: flex; justify-content: center; }
+    @keyframes breathe { 0%,100%{transform:scale(1);} 50%{transform:scale(1.06);} }
+    .agent-avatar-anim { animation: breathe 3s ease-in-out infinite; transform-origin: center; }
+    .agent-avatar-anim:nth-child(2) { animation-delay: .8s; }
+    .agent-avatar-anim:nth-child(3) { animation-delay: 1.6s; }
+
     /* ── Quote ── */
     .quote-section { text-align: center; padding: 20px 0 8px; }
     .quote-text { font-style: italic; font-size: 13px; color: var(--text-faint); line-height: 1.6; max-width: 600px; margin: 0 auto; }
@@ -307,6 +319,11 @@
     <a class="nav-item" href="modules/kennisbank.html">
       <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>
       Kennisbank
+    </a>
+    <a class="nav-item" href="modules/agents.html">
+      <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/><circle cx="6" cy="13" r="2.5"/><path d="M2 20c0-2.5 1.8-4 4-4"/><circle cx="18" cy="13" r="2.5"/><path d="M22 20c0-2.5-1.8-4-4-4"/></svg>
+      Agents
+      <span class="nav-badge">3</span>
     </a>
 
     <div class="nav-section">Binnenkort</div>
@@ -427,6 +444,48 @@
           <div id="activityFeed"><div class="task-empty">Laden…</div></div>
         </div>
 
+      </div>
+    </div>
+
+    <!-- Meeting table -->
+    <div class="meeting-section" onclick="location.href='modules/agents.html'">
+      <div class="meeting-header">
+        <span class="meeting-title">🏢 Het team is aanwezig</span>
+        <span class="meeting-goto">Open vergaderkamer →</span>
+      </div>
+      <div class="meeting-svg-wrap">
+        <svg id="meetingSvg" viewBox="0 0 420 200" width="420" height="200" xmlns="http://www.w3.org/2000/svg">
+          <!-- Table -->
+          <rect x="110" y="60" width="200" height="90" rx="12" fill="#1e293b" stroke="#334155" stroke-width="2"/>
+          <!-- Chairs -->
+          <rect x="185" y="38" width="50" height="18" rx="6" fill="#0f172a" stroke="#334155" stroke-width="1.5"/>
+          <rect x="185" y="154" width="50" height="18" rx="6" fill="#0f172a" stroke="#334155" stroke-width="1.5"/>
+          <rect x="80" y="96" width="18" height="18" rx="6" fill="#0f172a" stroke="#334155" stroke-width="1.5"/>
+          <rect x="322" y="96" width="18" height="18" rx="6" fill="#0f172a" stroke="#334155" stroke-width="1.5"/>
+          <!-- Simon (top, purple) -->
+          <g class="agent-avatar-anim">
+            <circle cx="210" cy="30" r="18" fill="#534AB7" stroke="#6d64cc" stroke-width="2"/>
+            <text x="210" y="35" text-anchor="middle" font-size="13" font-weight="700" fill="white">S</text>
+            <text x="210" y="62" text-anchor="middle" font-size="9" fill="#94a3b8">Simon</text>
+          </g>
+          <!-- Leon (left, green) -->
+          <g class="agent-avatar-anim">
+            <circle cx="72" cy="105" r="18" fill="#16a34a" stroke="#22c55e" stroke-width="2"/>
+            <text x="72" y="110" text-anchor="middle" font-size="13" font-weight="700" fill="white">L</text>
+            <text x="72" y="137" text-anchor="middle" font-size="9" fill="#94a3b8">Leon</text>
+          </g>
+          <!-- Aron (right, gold) -->
+          <g class="agent-avatar-anim">
+            <circle cx="348" cy="105" r="18" fill="#b45309" stroke="#f59e0b" stroke-width="2"/>
+            <text x="348" y="110" text-anchor="middle" font-size="13" font-weight="700" fill="white">A</text>
+            <text x="348" y="137" text-anchor="middle" font-size="9" fill="#94a3b8">Aron</text>
+          </g>
+          <!-- Talking bubble (dynamically positioned) -->
+          <g id="talkBubble" opacity="0" style="transition:opacity .4s">
+            <rect id="bubbleRect" x="220" y="8" width="130" height="28" rx="8" fill="#1e293b" stroke="#475569" stroke-width="1.5"/>
+            <text id="bubbleText" x="285" y="27" text-anchor="middle" font-size="10" fill="#e2e8f0">...</text>
+          </g>
+        </svg>
       </div>
     </div>
 
@@ -950,6 +1009,51 @@ async function fetchQuote(force = false) {
   }
 }
 fetchQuote();
+
+// ═══════════════════════════════════
+// MEETING TABLE BUBBLES
+(function() {
+  const AGENTS = [
+    { id: 'simon', bx: 220, by: 5,   bw: 150 },
+    { id: 'leon',  bx: 15,  by: 83,  bw: 140 },
+    { id: 'aron',  bx: 258, by: 83,  bw: 145 },
+  ];
+  const LINES = [
+    'Inbox verwerkt ✓',
+    'Nieuwe leads vandaag!',
+    'Mail verstuurd.',
+    'Taken bijgewerkt.',
+    'Factuur ingepland.',
+    'Alles op schema.',
+    'Contract klaar.',
+    'Rapport gegenereerd.',
+    'Betalingen gecheckt.',
+    'Planning bijgewerkt.',
+  ];
+  let timer;
+  function showBubble() {
+    const bubble = document.getElementById('talkBubble');
+    const rect   = document.getElementById('bubbleRect');
+    const text   = document.getElementById('bubbleText');
+    if (!bubble) return;
+    const agent = AGENTS[Math.floor(Math.random() * AGENTS.length)];
+    const line  = LINES[Math.floor(Math.random() * LINES.length)];
+    rect.setAttribute('x', agent.bx);
+    rect.setAttribute('y', agent.by);
+    rect.setAttribute('width', agent.bw);
+    text.setAttribute('x', agent.bx + agent.bw / 2);
+    text.setAttribute('y', agent.by + 18);
+    text.textContent = line;
+    bubble.style.opacity = '1';
+    clearTimeout(timer);
+    timer = setTimeout(() => {
+      bubble.style.opacity = '0';
+      const next = 4000 + Math.random() * 3000;
+      setTimeout(showBubble, next);
+    }, 2800);
+  }
+  setTimeout(showBubble, 1500);
+})();
 
 // ═══════════════════════════════════
 // AUTO REFRESH

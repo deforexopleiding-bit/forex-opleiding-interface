@@ -110,6 +110,54 @@ ALTER TABLE undo_history DISABLE ROW LEVEL SECURITY;`,
   updated_at timestamptz DEFAULT now()
 );
 ALTER TABLE taken_items DISABLE ROW LEVEL SECURITY;`,
+  agents: `CREATE TABLE IF NOT EXISTS agents (
+  id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+  name text NOT NULL,
+  role text NOT NULL,
+  department text NOT NULL,
+  avatar_color text DEFAULT '#534AB7',
+  avatar_emoji text DEFAULT '🤖',
+  module_url text,
+  is_active boolean DEFAULT true,
+  personality text,
+  capabilities text[],
+  created_at timestamptz DEFAULT now()
+);
+ALTER TABLE agents DISABLE ROW LEVEL SECURITY;`,
+  agent_conversations: `CREATE TABLE IF NOT EXISTS agent_conversations (
+  id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+  agent_id uuid,
+  agent_name text,
+  role text,
+  content text NOT NULL,
+  conversation_session text,
+  created_at timestamptz DEFAULT now()
+);
+ALTER TABLE agent_conversations DISABLE ROW LEVEL SECURITY;`,
+  agent_meetings: `CREATE TABLE IF NOT EXISTS agent_meetings (
+  id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+  title text,
+  agenda text,
+  participants text[],
+  transcript jsonb DEFAULT '[]',
+  summary text,
+  action_points jsonb DEFAULT '[]',
+  status text DEFAULT 'active',
+  created_by text DEFAULT 'Jeffrey',
+  created_at timestamptz DEFAULT now(),
+  ended_at timestamptz
+);
+ALTER TABLE agent_meetings DISABLE ROW LEVEL SECURITY;`,
+  agent_kennisbank: `CREATE TABLE IF NOT EXISTS agent_kennisbank (
+  id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+  agent_id uuid,
+  agent_name text,
+  content text,
+  category text,
+  learned_from text,
+  created_at timestamptz DEFAULT now()
+);
+ALTER TABLE agent_kennisbank DISABLE ROW LEVEL SECURITY;`,
 };
 
 async function tableExists(table) {
@@ -260,6 +308,40 @@ export default async function handler(req, res) {
   } catch (e) {
     console.warn('[db-migrate] trusted_sender seed fout:', e.message);
     report.trusted_senders_seeded = false;
+  }
+
+  // ── Seed agents ──────────────────────────────────────────────────────────
+  try {
+    const { data: existingAgents } = await supabase.from('agents').select('name').limit(1);
+    if (existingAgents !== null && existingAgents.length === 0) {
+      await supabase.from('agents').insert([
+        {
+          name: 'Simon', role: 'E-mail Agent', department: 'Communicatie',
+          avatar_color: '#534AB7', avatar_emoji: '📧', module_url: '/modules/email.html',
+          personality: 'Je bent Simon, de E-mail Agent van De Forex Opleiding. Je bent nauwkeurig, efficient en vriendelijk. Je beheert alle inkomende en uitgaande e-mails en leert continu van correcties. Je communiceert altijd in het Nederlands. Als Jeffrey je iets vraagt over de inbox, geef je concrete cijfers en inzichten. Als Jeffrey je vraagt een actie uit te voeren, bevestig je eerst voordat je uitvoert.',
+          capabilities: ['E-mails categoriseren', 'AI antwoorden genereren', 'Leads tellen', 'Kennisbank vullen', 'Rapporten genereren'],
+        },
+        {
+          name: 'Leon', role: 'Administratief Medewerker', department: 'Administratie',
+          avatar_color: '#1D9E75', avatar_emoji: '📋', module_url: null,
+          personality: 'Je bent Leon, de Administratief Medewerker van De Forex Opleiding. Je bent georganiseerd, proactief en precies. Je beheert administratieve processen, contracten en klant onboarding. Je communiceert altijd in het Nederlands. Je houdt overzicht over alle lopende processen en taken.',
+          capabilities: ['Documenten beheren', 'Contracten opstellen', 'Klanten onboarden', 'Taken coördineren', 'Rapporten maken'],
+        },
+        {
+          name: 'Aron', role: 'Financieel Medewerker', department: 'Financiën',
+          avatar_color: '#EF9F27', avatar_emoji: '💰', module_url: null,
+          personality: 'Je bent Aron, de Financieel Medewerker van De Forex Opleiding. Je bent analytisch, betrouwbaar en resultaatgericht. Je beheert facturen, betalingen en financiële rapporten. Je communiceert altijd in het Nederlands. Je hebt oog voor detail en signaleert financiële risico\'s proactief.',
+          capabilities: ['Facturen opvolgen', 'Wanbetalers beheren', 'Financiële rapporten', 'Teamleader koppeling', 'Betalingsherinneringen'],
+        },
+      ]);
+      report.agents_seeded = true;
+      console.log('[db-migrate] Agents geseeded: Simon, Leon, Aron');
+    } else {
+      report.agents_seeded = false;
+    }
+  } catch (e) {
+    console.warn('[db-migrate] agents seed fout:', e.message);
+    report.agents_seeded = false;
   }
 
   console.log('[db-migrate]', report.message, '· ontbrekend:', report.missing.map((m) => `${m.table}.${m.col}`).join(', '));

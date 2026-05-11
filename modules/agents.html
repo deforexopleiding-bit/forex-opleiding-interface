@@ -1,0 +1,881 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>AI Agents · De Forex Opleiding</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com"/>
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg:#0a0b10; --bg-elev:#13151c; --bg-elev-2:#181b25;
+      --border:rgba(255,255,255,0.06); --border-strong:rgba(255,255,255,0.12);
+      --text:#f1f5f9; --text-dim:#94a3b8; --text-faint:#64748b;
+      --accent-cyan:#22d3ee; --accent-violet:#a855f7;
+      --accent-grad:linear-gradient(135deg,#22d3ee 0%,#a855f7 100%);
+      --green:#22c55e; --amber:#f59e0b; --red:#ef4444; --sidebar-w:220px;
+    }
+    html,body{height:100%;}
+    body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--text);min-height:100vh;-webkit-font-smoothing:antialiased;overflow-x:hidden;}
+    body::before{content:'';position:fixed;inset:0;background-image:radial-gradient(circle at 25% 15%,rgba(34,211,238,0.07),transparent 45%),radial-gradient(circle at 80% 85%,rgba(168,85,247,0.08),transparent 50%);pointer-events:none;z-index:0;}
+
+    /* Sidebar */
+    .sidebar{position:fixed;top:0;left:0;bottom:0;width:var(--sidebar-w);background:#0a0a0e;border-right:1px solid rgba(255,255,255,0.05);display:flex;flex-direction:column;z-index:200;overflow-y:auto;}
+    .sidebar-logo{display:flex;align-items:center;justify-content:center;padding:18px 16px 16px;border-bottom:1px solid rgba(255,255,255,0.05);flex-shrink:0;}
+    .sidebar-logo img{max-width:140px;height:auto;display:block;}
+    .sidebar-logo-fallback{font-size:13px;font-weight:700;color:var(--text);}
+    .sidebar-nav{flex:1;padding:10px 8px;}
+    .nav-section{font-size:10px;text-transform:uppercase;letter-spacing:.7px;color:var(--text-faint);font-weight:600;padding:14px 10px 5px;}
+    .nav-item{display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;color:var(--text-dim);font-size:13px;font-weight:500;text-decoration:none;cursor:pointer;transition:background .15s,color .15s;margin-bottom:1px;user-select:none;}
+    .nav-item:hover:not(.nav-concept){background:rgba(255,255,255,0.05);color:var(--text);}
+    .nav-item.active{background:rgba(168,85,247,0.14);color:#a855f7;}
+    .nav-item.nav-concept{color:var(--text-faint);cursor:default;opacity:.65;}
+    .nav-icon{width:15px;height:15px;flex-shrink:0;}
+    .nav-badge{margin-left:auto;background:var(--red);color:#fff;font-size:10px;font-weight:700;border-radius:10px;padding:1px 6px;display:none;}
+    .nav-badge.show{display:inline-block;}
+    .nav-soon{margin-left:auto;font-size:9px;font-weight:600;color:var(--text-faint);background:rgba(255,255,255,0.05);border-radius:4px;padding:1px 5px;}
+    .sidebar-footer{flex-shrink:0;padding:8px 8px 14px;border-top:1px solid rgba(255,255,255,0.05);}
+    .footer-user{display:flex;align-items:center;gap:9px;padding:9px 10px;border-radius:8px;color:var(--text-dim);font-size:13px;font-weight:500;cursor:pointer;transition:background .15s;}
+    .footer-user:hover{background:rgba(255,255,255,0.05);color:var(--text);}
+    .footer-avatar{width:26px;height:26px;flex-shrink:0;border-radius:50%;background:var(--accent-grad);display:grid;place-items:center;font-size:10px;font-weight:800;color:#0a0b10;}
+
+    /* Main */
+    .main{margin-left:var(--sidebar-w);min-height:100vh;position:relative;z-index:1;}
+    .main-inner{padding:28px 28px 64px;max-width:1200px;}
+    .hidden{display:none!important;}
+
+    /* ── Overview ── */
+    .page-header{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-bottom:28px;}
+    .page-title{font-size:22px;font-weight:800;letter-spacing:-.4px;}
+    .page-sub{font-size:13px;color:var(--text-dim);margin-top:3px;}
+    .header-actions{display:flex;gap:10px;align-items:center;}
+    .btn{padding:8px 16px;border-radius:9px;border:1px solid var(--border-strong);background:var(--bg-elev);color:var(--text-dim);font-size:13px;font-weight:500;cursor:pointer;transition:all .15s;font-family:inherit;}
+    .btn:hover{background:var(--bg-elev-2);color:var(--text);}
+    .btn-primary{background:rgba(168,85,247,0.18);border-color:#7c3aed;color:#c4b5fd;}
+    .btn-primary:hover{background:rgba(168,85,247,0.28);color:#e9d5ff;}
+
+    /* Agent cards */
+    .agents-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:20px;}
+    .agent-card{background:var(--bg-elev);border:1px solid var(--border);border-radius:16px;padding:24px;text-align:center;transition:border-color .2s,transform .2s;}
+    .agent-card:hover{border-color:var(--border-strong);transform:translateY(-2px);}
+    .avatar-wrap{display:inline-block;margin-bottom:14px;animation:breathe 3s ease-in-out infinite;}
+    @keyframes breathe{0%,100%{transform:scale(1);}50%{transform:scale(1.03);}}
+    .agent-name{font-size:18px;font-weight:800;margin-bottom:4px;}
+    .agent-role{font-size:12px;color:var(--text-dim);margin-bottom:4px;}
+    .agent-dept{font-size:11px;color:var(--text-faint);}
+    .status-dot{display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:600;color:var(--green);margin:10px 0;}
+    .status-dot::before{content:'';width:6px;height:6px;border-radius:50%;background:var(--green);animation:pulse 2s infinite;}
+    @keyframes pulse{0%,100%{opacity:1;}50%{opacity:.4;}}
+    .module-link{font-size:11px;color:var(--accent-violet);}
+    .caps-list{margin:12px 0;text-align:left;}
+    .cap-item{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--text-dim);padding:2px 0;}
+    .cap-dot{width:4px;height:4px;border-radius:50%;flex-shrink:0;}
+    .card-actions{display:flex;gap:8px;justify-content:center;margin-top:14px;flex-wrap:wrap;}
+    .btn-sm{padding:6px 12px;border-radius:7px;border:1px solid var(--border-strong);background:var(--bg-elev-2);color:var(--text-dim);font-size:12px;font-weight:500;cursor:pointer;transition:all .15s;font-family:inherit;}
+    .btn-sm:hover{background:var(--bg);color:var(--text);}
+
+    /* ── Chat ── */
+    .chat-layout{display:grid;grid-template-columns:260px 1fr;gap:0;height:calc(100vh - 112px);min-height:400px;}
+    .chat-sidebar{background:var(--bg-elev);border:1px solid var(--border);border-radius:14px 0 0 14px;padding:20px;overflow-y:auto;}
+    .chat-agent-name{font-size:16px;font-weight:800;margin-bottom:2px;}
+    .chat-agent-role{font-size:11px;color:var(--text-dim);margin-bottom:14px;}
+    .chat-caps-title{font-size:10px;text-transform:uppercase;letter-spacing:.6px;color:var(--text-faint);font-weight:600;margin-bottom:8px;}
+    .chat-cap{font-size:11px;color:var(--text-dim);padding:3px 0;display:flex;align-items:center;gap:6px;}
+    .chat-main{display:flex;flex-direction:column;background:var(--bg-elev);border:1px solid var(--border);border-left:none;border-radius:0 14px 14px 0;}
+    .chat-header{padding:14px 18px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px;}
+    .chat-title{font-size:14px;font-weight:700;}
+    .chat-messages{flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:12px;}
+    .msg{display:flex;gap:10px;align-items:flex-start;max-width:85%;}
+    .msg.msg-user{margin-left:auto;flex-direction:row-reverse;}
+    .msg-avatar{width:28px;height:28px;border-radius:50%;flex-shrink:0;display:grid;place-items:center;font-size:12px;font-weight:800;}
+    .msg-bubble{padding:10px 14px;border-radius:12px;font-size:13px;line-height:1.5;}
+    .msg-agent .msg-bubble{background:var(--bg-elev-2);color:var(--text);border-radius:4px 12px 12px 12px;}
+    .msg-user  .msg-bubble{background:rgba(168,85,247,0.18);color:#e9d5ff;border-radius:12px 4px 12px 12px;}
+    .msg-time{font-size:10px;color:var(--text-faint);margin-top:4px;}
+    .typing{display:flex;gap:5px;align-items:center;padding:12px 14px;background:var(--bg-elev-2);border-radius:4px 12px 12px 12px;width:fit-content;}
+    .typing span{width:6px;height:6px;border-radius:50%;background:var(--text-faint);animation:typing-dot 1.2s infinite;}
+    .typing span:nth-child(2){animation-delay:.2s;}
+    .typing span:nth-child(3){animation-delay:.4s;}
+    @keyframes typing-dot{0%,80%,100%{transform:scale(0.8);opacity:.5;}40%{transform:scale(1.1);opacity:1;}}
+    .chat-input-area{padding:12px 16px;border-top:1px solid var(--border);}
+    .chat-input-row{display:flex;gap:8px;}
+    .chat-input{flex:1;padding:10px 14px;background:var(--bg-elev-2);border:1px solid var(--border-strong);border-radius:10px;color:var(--text);font-size:13px;font-family:inherit;resize:none;outline:none;}
+    .chat-input:focus{border-color:rgba(168,85,247,0.5);}
+    .chat-send{padding:10px 16px;background:rgba(168,85,247,0.2);border:1px solid #7c3aed;border-radius:10px;color:#c4b5fd;font-size:13px;cursor:pointer;font-family:inherit;transition:all .15s;}
+    .chat-send:hover{background:rgba(168,85,247,0.35);}
+    .quick-btns{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;}
+    .quick-btn{padding:5px 10px;border-radius:7px;border:1px solid var(--border-strong);background:var(--bg-elev-2);color:var(--text-dim);font-size:11px;cursor:pointer;font-family:inherit;transition:all .15s;}
+    .quick-btn:hover{background:var(--bg);color:var(--text);}
+
+    /* ── Meeting setup ── */
+    .meeting-setup-card{background:var(--bg-elev);border:1px solid var(--border);border-radius:16px;padding:32px;max-width:600px;margin:0 auto;}
+    .meeting-setup-title{font-size:20px;font-weight:800;margin-bottom:6px;}
+    .meeting-setup-sub{font-size:13px;color:var(--text-dim);margin-bottom:24px;}
+    .participant-item{display:flex;align-items:center;gap:12px;padding:10px 14px;border-radius:10px;border:1px solid var(--border);background:var(--bg-elev-2);margin-bottom:8px;cursor:pointer;transition:border-color .15s;}
+    .participant-item.selected{border-color:rgba(168,85,247,0.5);background:rgba(168,85,247,0.08);}
+    .participant-check{width:16px;height:16px;border-radius:4px;border:2px solid var(--border-strong);display:grid;place-items:center;}
+    .participant-item.selected .participant-check{background:#7c3aed;border-color:#7c3aed;}
+    .participant-name{font-size:13px;font-weight:600;}
+    .participant-role{font-size:11px;color:var(--text-dim);}
+    .agenda-input{width:100%;padding:12px 14px;background:var(--bg-elev-2);border:1px solid var(--border-strong);border-radius:10px;color:var(--text);font-size:13px;font-family:inherit;outline:none;margin-top:16px;}
+    .agenda-input:focus{border-color:rgba(168,85,247,0.5);}
+
+    /* ── Meeting room ── */
+    .meeting-room-layout{display:flex;flex-direction:column;gap:0;height:calc(100vh - 112px);}
+    .meeting-table-wrap{flex-shrink:0;padding:20px;background:var(--bg-elev);border:1px solid var(--border);border-radius:14px 14px 0 0;position:relative;}
+    .meeting-table-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;}
+    .meeting-table-title{font-size:13px;font-weight:700;}
+    .table-scene{position:relative;height:180px;display:flex;align-items:center;justify-content:center;}
+    .m-table{width:200px;height:100px;border-radius:50px;background:var(--bg-elev-2);border:2px solid var(--border-strong);box-shadow:0 4px 20px rgba(0,0,0,0.4);position:absolute;}
+    .seat{position:absolute;display:flex;flex-direction:column;align-items:center;gap:4px;}
+    .seat-avatar{width:46px;height:46px;border-radius:50%;display:grid;place-items:center;font-size:20px;border:2px solid var(--border-strong);background:var(--bg-elev-2);transition:box-shadow .3s;animation:breathe 3s ease-in-out infinite;}
+    .seat-avatar.speaking{box-shadow:0 0 0 3px rgba(168,85,247,0.6),0 0 16px rgba(168,85,247,0.3);}
+    .seat-name{font-size:10px;font-weight:600;color:var(--text-dim);}
+    .talk-bubble{position:absolute;background:var(--bg-elev);border:1px solid var(--border-strong);border-radius:8px;padding:5px 9px;font-size:10px;color:var(--text-dim);white-space:nowrap;pointer-events:none;opacity:0;transition:opacity .3s;bottom:100%;margin-bottom:6px;}
+    .talk-bubble.show{opacity:1;}
+    .meeting-transcript{flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:8px;background:var(--bg-elev);border:1px solid var(--border);border-top:none;}
+    .t-msg{display:flex;gap:8px;align-items:flex-start;}
+    .t-speaker{font-size:11px;font-weight:700;flex-shrink:0;padding-top:1px;}
+    .t-content{font-size:12px;line-height:1.5;color:var(--text-dim);}
+    .t-time{font-size:10px;color:var(--text-faint);margin-left:auto;flex-shrink:0;}
+    .meeting-input-area{padding:12px 16px;border:1px solid var(--border);border-top:none;border-radius:0 0 14px 14px;background:var(--bg-elev);}
+
+    /* ── Summary ── */
+    .summary-card{background:var(--bg-elev);border:1px solid var(--border);border-radius:14px;padding:24px;}
+    .summary-title{font-size:16px;font-weight:800;margin-bottom:14px;}
+    .summary-text{font-size:13px;line-height:1.7;color:var(--text-dim);margin-bottom:20px;white-space:pre-wrap;}
+    .action-point{display:flex;align-items:flex-start;gap:10px;padding:10px 12px;border-radius:8px;background:var(--bg-elev-2);margin-bottom:6px;}
+    .ap-check{width:16px;height:16px;border-radius:4px;border:2px solid var(--border-strong);flex-shrink:0;margin-top:1px;}
+    .ap-title{font-size:13px;font-weight:500;}
+    .ap-meta{font-size:11px;color:var(--text-faint);margin-top:2px;}
+    .summary-actions{display:flex;gap:10px;margin-top:16px;flex-wrap:wrap;}
+
+    /* ── Report modal ── */
+    .report-overlay{position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:500;display:flex;align-items:center;justify-content:center;padding:20px;}
+    .report-modal{background:var(--bg-elev);border:1px solid var(--border-strong);border-radius:16px;width:100%;max-width:700px;max-height:80vh;display:flex;flex-direction:column;}
+    .report-header{padding:18px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;}
+    .report-title{font-size:15px;font-weight:700;}
+    .report-close{background:none;border:none;color:var(--text-faint);font-size:18px;cursor:pointer;padding:0 4px;}
+    .report-body{flex:1;overflow-y:auto;padding:20px;}
+    .report-content{font-size:13px;line-height:1.8;color:var(--text-dim);white-space:pre-wrap;}
+    .report-content h1,.report-content h2,.report-content h3{color:var(--text);margin:16px 0 8px;}
+    .report-content strong{color:var(--text);}
+
+    ::-webkit-scrollbar{width:5px;height:5px;}
+    ::-webkit-scrollbar-track{background:transparent;}
+    ::-webkit-scrollbar-thumb{background:var(--border-strong);border-radius:3px;}
+    @media(max-width:1024px){.agents-grid{grid-template-columns:1fr 1fr;}.chat-layout{grid-template-columns:1fr;height:auto;}}
+    @media(max-width:680px){.sidebar{transform:translateX(-100%);}.main{margin-left:0;}.agents-grid{grid-template-columns:1fr;}}
+  </style>
+</head>
+<body>
+
+<nav class="sidebar">
+  <div class="sidebar-logo" id="sidebarLogo">
+    <img id="sidebarLogoImg" src="https://www.deforexopleiding.nl/wp-content/uploads/2023/01/Logo-De-Forex-Opleiding-wit.png" alt="De Forex Opleiding" onerror="handleLogoError()"/>
+  </div>
+  <div class="sidebar-nav">
+    <a class="nav-item" href="../index.html">
+      <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+      Dashboard
+    </a>
+    <a class="nav-item" href="email.html">
+      <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
+      E-mail
+    </a>
+    <a class="nav-item" href="taken.html">
+      <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="9" y1="9" x2="15" y2="9"/><line x1="9" y1="13" x2="15" y2="13"/><line x1="9" y1="17" x2="12" y2="17"/></svg>
+      Takenbeheer
+    </a>
+    <a class="nav-item" href="kennisbank.html">
+      <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>
+      Kennisbank
+    </a>
+    <a class="nav-item active" href="agents.html">
+      <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M20 21a8 8 0 1 0-16 0"/><circle cx="12" cy="8" r="1.5" fill="currentColor"/></svg>
+      AI Agents
+      <span class="nav-badge show" style="background:rgba(168,85,247,0.3);color:#c4b5fd;border:1px solid rgba(168,85,247,0.4)">3</span>
+    </a>
+    <div class="nav-section">Binnenkort</div>
+    <div class="nav-item nav-concept">
+      <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>
+      WhatsApp Bot <span class="nav-soon">Binnenkort</span>
+    </div>
+    <div class="nav-item nav-concept">
+      <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+      Wanbetalers <span class="nav-soon">Binnenkort</span>
+    </div>
+  </div>
+  <div class="sidebar-footer">
+    <div class="footer-user">
+      <div class="footer-avatar">JB</div>
+      <span>Jeffrey</span>
+    </div>
+  </div>
+</nav>
+
+<div class="main">
+  <div class="main-inner">
+
+    <!-- ══ VIEW: OVERVIEW ══ -->
+    <div id="viewOverview">
+      <div class="page-header">
+        <div>
+          <div class="page-title">AI Agents · De Forex Opleiding</div>
+          <div class="page-sub">Jouw team van intelligente medewerkers</div>
+        </div>
+        <div class="header-actions">
+          <button class="btn btn-primary" onclick="showView('meeting')">🏛️ Vergaderruimte</button>
+        </div>
+      </div>
+      <div class="agents-grid" id="agentsGrid">
+        <!-- Rendered by JS -->
+      </div>
+    </div>
+
+    <!-- ══ VIEW: CHAT ══ -->
+    <div id="viewChat" class="hidden">
+      <div class="page-header" style="margin-bottom:16px">
+        <div>
+          <button class="btn" onclick="showView('overview')" style="margin-bottom:8px">← Terug</button>
+          <div class="page-title" id="chatPageTitle">Chat</div>
+        </div>
+      </div>
+      <div class="chat-layout">
+        <div class="chat-sidebar">
+          <div id="chatAgentAvatar" style="margin-bottom:12px;text-align:center"></div>
+          <div class="chat-agent-name" id="chatAgentName"></div>
+          <div class="chat-agent-role" id="chatAgentRole"></div>
+          <div class="chat-caps-title">Capabilities</div>
+          <div id="chatCaps"></div>
+        </div>
+        <div class="chat-main">
+          <div class="chat-header">
+            <div id="chatHeaderEmoji" style="font-size:18px"></div>
+            <div class="chat-title" id="chatHeaderTitle"></div>
+            <button class="btn-sm" onclick="generateReport()" style="margin-left:auto">📊 Rapport</button>
+          </div>
+          <div class="chat-messages" id="chatMessages"></div>
+          <div class="chat-input-area">
+            <div class="chat-input-row">
+              <textarea class="chat-input" id="chatInput" rows="2" placeholder="Typ je bericht..." onkeydown="handleChatKey(event)"></textarea>
+              <button class="chat-send" onclick="sendChat()">→</button>
+            </div>
+            <div class="quick-btns" id="quickBtns"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ══ VIEW: MEETING ══ -->
+    <div id="viewMeeting" class="hidden">
+      <div class="page-header" style="margin-bottom:16px">
+        <div>
+          <button class="btn" onclick="showView('overview')" style="margin-bottom:8px">← Terug</button>
+          <div class="page-title">🏛️ Vergaderruimte</div>
+        </div>
+      </div>
+
+      <!-- Setup -->
+      <div id="meetingSetup">
+        <div class="meeting-setup-card">
+          <div class="meeting-setup-title">Nieuwe vergadering starten</div>
+          <div class="meeting-setup-sub">Selecteer deelnemers en voer de agenda in</div>
+          <div id="participantList"></div>
+          <input class="agenda-input" id="agendaInput" placeholder="Agenda / onderwerp van de vergadering..." />
+          <div style="margin-top:16px;display:flex;justify-content:flex-end">
+            <button class="btn btn-primary" onclick="startMeeting()" style="padding:10px 24px;font-size:13px">Start vergadering →</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Active meeting -->
+      <div id="meetingRoom" class="hidden">
+        <div class="meeting-room-layout">
+          <div class="meeting-table-wrap">
+            <div class="meeting-table-header">
+              <div class="meeting-table-title" id="meetingTitle"></div>
+              <button class="btn" onclick="endMeeting()" style="font-size:12px;padding:5px 12px">Vergadering afsluiten</button>
+            </div>
+            <div class="table-scene" id="tableScene">
+              <div class="m-table"></div>
+              <!-- Seats rendered by JS -->
+            </div>
+          </div>
+          <div class="meeting-transcript" id="meetingTranscript"></div>
+          <div class="meeting-input-area">
+            <div class="chat-input-row">
+              <input class="chat-input" id="meetingInput" placeholder="Zeg iets in de vergadering..." onkeydown="handleMeetingKey(event)" style="height:40px"/>
+              <button class="chat-send" id="meetingSendBtn" onclick="sendMeetingMessage()">→</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Summary -->
+      <div id="meetingSummary" class="hidden">
+        <div class="summary-card">
+          <div class="summary-title">📋 Vergadering samenvatting</div>
+          <div class="summary-text" id="summaryText"></div>
+          <div style="font-size:13px;font-weight:700;margin-bottom:10px">Actiepunten</div>
+          <div id="actionPointsList"></div>
+          <div class="summary-actions">
+            <button class="btn btn-primary" onclick="approveMeeting()">✓ Goedkeuren &amp; taken aanmaken</button>
+            <button class="btn" onclick="showView('meeting')">↩ Nieuwe vergadering</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- Report modal -->
+<div class="report-overlay hidden" id="reportOverlay">
+  <div class="report-modal">
+    <div class="report-header">
+      <div class="report-title" id="reportTitle">Rapport</div>
+      <button class="report-close" onclick="closeReport()">✕</button>
+    </div>
+    <div class="report-body">
+      <div class="report-content" id="reportContent"></div>
+    </div>
+    <div style="padding:12px 20px;border-top:1px solid var(--border);display:flex;justify-content:flex-end">
+      <button class="btn btn-sm" onclick="closeReport()">Sluiten</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ═══════════════════════════════════
+// AGENT DEFINITIONS (fallback if API fails)
+// ═══════════════════════════════════
+const AGENTS_FALLBACK = [
+  { id: null, name:'Simon', role:'E-mail Agent', department:'Communicatie', avatar_color:'#534AB7', avatar_emoji:'📧', module_url:'/modules/email.html',
+    capabilities:['E-mails categoriseren','AI antwoorden genereren','Leads tellen','Kennisbank vullen','Rapporten genereren'],
+    quick_actions:[{key:'dagrapport',label:'📊 Dagrapport'},{key:'inbox_status',label:'📧 Inbox status'},{key:'heranalyseer',label:'🔄 Heranalyseer'},{key:'train_agent',label:'📚 Train agent'}] },
+  { id: null, name:'Leon',  role:'Administratief Medewerker', department:'Administratie', avatar_color:'#1D9E75', avatar_emoji:'📋', module_url:null,
+    capabilities:['Documenten beheren','Contracten opstellen','Klanten onboarden','Taken coördineren','Rapporten maken'],
+    quick_actions:[{key:'taken_overzicht',label:'📋 Taken overzicht'},{key:'openstaande_contracten',label:'📄 Contracten'},{key:'rapport',label:'📊 Rapport'}] },
+  { id: null, name:'Aron',  role:'Financieel Medewerker', department:'Financiën', avatar_color:'#EF9F27', avatar_emoji:'💰', module_url:null,
+    capabilities:['Facturen opvolgen','Wanbetalers beheren','Financiële rapporten','Teamleader koppeling','Betalingsherinneringen'],
+    quick_actions:[{key:'openstaande_facturen',label:'💸 Facturen'},{key:'betalingen',label:'💳 Betalingen'},{key:'rapport',label:'📊 Rapport'}] },
+];
+
+// ═══════════════════════════════════
+// SVG AVATARS
+// ═══════════════════════════════════
+const AVATARS = {
+  Simon: `<svg viewBox="0 0 100 120" width="90" height="108" xmlns="http://www.w3.org/2000/svg">
+    <circle cx="50" cy="45" r="38" fill="#534AB7" opacity="0.12"/>
+    <rect x="22" y="72" width="56" height="48" rx="12" fill="#534AB7"/>
+    <rect x="22" y="72" width="56" height="8" rx="5" fill="#6055c7"/>
+    <polygon points="42,72 50,82 58,72" fill="white" opacity="0.9"/>
+    <polygon points="48,82 52,82 54,100 50,106 46,100" fill="#3d3499"/>
+    <circle cx="50" cy="42" r="26" fill="#FBBF80"/>
+    <path d="M 27 39 Q 29 14 50 12 Q 71 14 73 39" fill="#3d2c1e"/>
+    <rect x="24" y="37" width="5" height="10" rx="2" fill="#3d2c1e"/>
+    <rect x="71" y="37" width="5" height="10" rx="2" fill="#3d2c1e"/>
+    <rect x="30" y="37" width="16" height="11" rx="4" fill="none" stroke="#534AB7" stroke-width="2.5"/>
+    <rect x="54" y="37" width="16" height="11" rx="4" fill="none" stroke="#534AB7" stroke-width="2.5"/>
+    <line x1="46" y1="42" x2="54" y2="42" stroke="#534AB7" stroke-width="2"/>
+    <line x1="24" y1="42" x2="30" y2="42" stroke="#534AB7" stroke-width="2"/>
+    <line x1="70" y1="42" x2="76" y2="42" stroke="#534AB7" stroke-width="2"/>
+    <circle cx="38" cy="42" r="3" fill="#1e1e2e"/>
+    <circle cx="62" cy="42" r="3" fill="#1e1e2e"/>
+    <circle cx="39" cy="41" r="1" fill="white"/>
+    <circle cx="63" cy="41" r="1" fill="white"/>
+    <path d="M 40 55 Q 50 62 60 55" fill="none" stroke="#c47735" stroke-width="2" stroke-linecap="round"/>
+    <rect x="30" y="84" width="22" height="16" rx="2" fill="rgba(255,255,255,0.12)"/>
+    <polyline points="30,86 41,93 52,86" fill="none" stroke="rgba(255,255,255,0.4)" stroke-width="1.5"/>
+  </svg>`,
+  Leon: `<svg viewBox="0 0 100 120" width="90" height="108" xmlns="http://www.w3.org/2000/svg">
+    <circle cx="50" cy="45" r="38" fill="#1D9E75" opacity="0.12"/>
+    <rect x="22" y="72" width="56" height="48" rx="12" fill="#1D9E75"/>
+    <rect x="22" y="72" width="56" height="8" rx="5" fill="#24bb8b"/>
+    <polygon points="42,72 50,82 58,72" fill="white" opacity="0.9"/>
+    <circle cx="50" cy="42" r="26" fill="#FBBF80"/>
+    <path d="M 27 39 Q 29 14 50 12 Q 71 14 73 39" fill="#2c1a0e"/>
+    <line x1="50" y1="12" x2="50" y2="25" stroke="#3d2c1e" stroke-width="3"/>
+    <rect x="24" y="37" width="4" height="8" rx="2" fill="#2c1a0e"/>
+    <rect x="72" y="37" width="4" height="8" rx="2" fill="#2c1a0e"/>
+    <circle cx="39" cy="42" r="3.5" fill="#1e1e2e"/>
+    <circle cx="61" cy="42" r="3.5" fill="#1e1e2e"/>
+    <circle cx="40" cy="41" r="1.2" fill="white"/>
+    <circle cx="62" cy="41" r="1.2" fill="white"/>
+    <path d="M 34 35 Q 39 33 44 35" fill="none" stroke="#2c1a0e" stroke-width="2" stroke-linecap="round"/>
+    <path d="M 56 35 Q 61 33 66 35" fill="none" stroke="#2c1a0e" stroke-width="2" stroke-linecap="round"/>
+    <line x1="42" y1="55" x2="58" y2="55" stroke="#c47735" stroke-width="2" stroke-linecap="round"/>
+    <rect x="32" y="82" width="18" height="24" rx="2" fill="rgba(255,255,255,0.18)"/>
+    <rect x="38" y="79" width="6" height="5" rx="1" fill="rgba(255,255,255,0.35)"/>
+    <line x1="35" y1="89" x2="47" y2="89" stroke="rgba(255,255,255,0.5)" stroke-width="1.5"/>
+    <line x1="35" y1="93" x2="47" y2="93" stroke="rgba(255,255,255,0.5)" stroke-width="1.5"/>
+    <line x1="35" y1="97" x2="43" y2="97" stroke="rgba(255,255,255,0.5)" stroke-width="1.5"/>
+  </svg>`,
+  Aron: `<svg viewBox="0 0 100 120" width="90" height="108" xmlns="http://www.w3.org/2000/svg">
+    <circle cx="50" cy="45" r="38" fill="#EF9F27" opacity="0.12"/>
+    <rect x="22" y="72" width="56" height="48" rx="12" fill="#EF9F27"/>
+    <rect x="22" y="72" width="56" height="8" rx="5" fill="#f5b547"/>
+    <polygon points="42,72 50,82 58,72" fill="white" opacity="0.9"/>
+    <polygon points="48,82 52,82 54,100 50,106 46,100" fill="#c47d0c"/>
+    <circle cx="50" cy="42" r="26" fill="#FBBF80"/>
+    <path d="M 27 41 Q 26 14 50 12 Q 74 14 73 41" fill="#1a1a1a"/>
+    <rect x="24" y="38" width="4" height="8" rx="2" fill="#1a1a1a"/>
+    <rect x="72" y="38" width="4" height="8" rx="2" fill="#1a1a1a"/>
+    <ellipse cx="39" cy="42" rx="4" ry="3" fill="#1e1e2e"/>
+    <ellipse cx="61" cy="42" rx="4" ry="3" fill="#1e1e2e"/>
+    <circle cx="40" cy="41" r="1.2" fill="white"/>
+    <circle cx="62" cy="41" r="1.2" fill="white"/>
+    <line x1="34" y1="35" x2="45" y2="37" stroke="#1a1a1a" stroke-width="2.5" stroke-linecap="round"/>
+    <line x1="55" y1="37" x2="66" y2="35" stroke="#1a1a1a" stroke-width="2.5" stroke-linecap="round"/>
+    <path d="M 43 56 Q 50 62 57 56" fill="none" stroke="#c47735" stroke-width="2" stroke-linecap="round"/>
+    <rect x="32" y="82" width="22" height="18" rx="2" fill="rgba(255,255,255,0.12)"/>
+    <line x1="35" y1="97" x2="35" y2="87" stroke="rgba(255,255,255,0.55)" stroke-width="2"/>
+    <line x1="35" y1="97" x2="51" y2="97" stroke="rgba(255,255,255,0.55)" stroke-width="2"/>
+    <polyline points="37,93 41,88 45,91 51,84" fill="none" stroke="rgba(255,255,255,0.55)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+  </svg>`,
+};
+
+// ═══════════════════════════════════
+// STATE
+// ═══════════════════════════════════
+let agents = [];
+let activeAgent = null;
+let chatHistory = [];
+let chatSessionId = 'session_' + Date.now();
+let meetingId = null;
+let meetingTranscript = [];
+let pendingActionPoints = [];
+let selectedParticipants = new Set(['Simon', 'Leon', 'Aron']);
+let bubbleTimer = null;
+
+// ═══════════════════════════════════
+// INIT
+// ═══════════════════════════════════
+async function init() {
+  try {
+    const r = await fetch('/api/agents');
+    const data = await r.json();
+    if (data.agents?.length) {
+      agents = data.agents.map(a => {
+        const fb = AGENTS_FALLBACK.find(f => f.name === a.name);
+        return { ...a, quick_actions: fb?.quick_actions || [], capabilities: a.capabilities || fb?.capabilities || [] };
+      });
+    } else { agents = AGENTS_FALLBACK; }
+  } catch { agents = AGENTS_FALLBACK; }
+  renderOverview();
+  renderParticipantList();
+}
+
+// ═══════════════════════════════════
+// VIEW MANAGEMENT
+// ═══════════════════════════════════
+function showView(view, agent) {
+  document.getElementById('viewOverview').classList.toggle('hidden', view !== 'overview');
+  document.getElementById('viewChat').classList.toggle('hidden', view !== 'chat');
+  document.getElementById('viewMeeting').classList.toggle('hidden', view !== 'meeting');
+  clearInterval(bubbleTimer);
+  if (view === 'chat' && agent) openChat(agent);
+  if (view === 'meeting') {
+    document.getElementById('meetingSetup').classList.remove('hidden');
+    document.getElementById('meetingRoom').classList.add('hidden');
+    document.getElementById('meetingSummary').classList.add('hidden');
+  }
+}
+
+// ═══════════════════════════════════
+// OVERVIEW
+// ═══════════════════════════════════
+function renderOverview() {
+  const grid = document.getElementById('agentsGrid');
+  grid.innerHTML = agents.map(a => {
+    const caps = (a.capabilities || []).slice(0, 4).map(c =>
+      `<div class="cap-item"><span class="cap-dot" style="background:${a.avatar_color}"></span>${esc(c)}</div>`
+    ).join('');
+    const moduleLink = a.module_url ? `<a href="${esc(a.module_url)}" class="module-link" style="color:${a.avatar_color}" target="_blank">Module openen →</a>` : '';
+    return `
+      <div class="agent-card">
+        <div class="avatar-wrap" onclick="showView('chat','${esc(a.name)}')" style="cursor:pointer">
+          ${AVATARS[a.name] || `<div style="width:90px;height:108px;display:grid;place-items:center;font-size:40px;background:var(--bg-elev-2);border-radius:12px;border:1px solid var(--border)">${a.avatar_emoji}</div>`}
+        </div>
+        <div class="agent-name" style="color:${a.avatar_color}">${esc(a.name)}</div>
+        <div class="agent-role">${esc(a.role)}</div>
+        <div class="agent-dept">${esc(a.department)}</div>
+        <div class="status-dot">Actief</div>
+        ${moduleLink}
+        <div class="caps-list">${caps}</div>
+        <div class="card-actions">
+          <button class="btn-sm" style="border-color:${a.avatar_color}40;color:${a.avatar_color}" onclick="showView('chat','${esc(a.name)}')">💬 Chat</button>
+          <button class="btn-sm" onclick="generateReportFor('${esc(a.name)}')">📊 Rapport</button>
+        </div>
+      </div>`;
+  }).join('');
+}
+
+// ═══════════════════════════════════
+// CHAT
+// ═══════════════════════════════════
+function openChat(agentName) {
+  activeAgent = agents.find(a => a.name === agentName);
+  if (!activeAgent) return;
+  chatHistory = [];
+  chatSessionId = 'session_' + Date.now();
+
+  document.getElementById('chatPageTitle').textContent = `Chat met ${activeAgent.name}`;
+  document.getElementById('chatHeaderTitle').textContent = `${activeAgent.name} — ${activeAgent.role}`;
+  document.getElementById('chatHeaderEmoji').textContent = activeAgent.avatar_emoji || '🤖';
+  document.getElementById('chatAgentName').textContent = activeAgent.name;
+  document.getElementById('chatAgentRole').textContent = activeAgent.role + ' · ' + activeAgent.department;
+  document.getElementById('chatAgentAvatar').innerHTML = AVATARS[activeAgent.name] || '';
+  document.getElementById('chatCaps').innerHTML = (activeAgent.capabilities || []).map(c =>
+    `<div class="chat-cap"><span style="width:5px;height:5px;border-radius:50%;background:${activeAgent.avatar_color};flex-shrink:0"></span>${esc(c)}</div>`
+  ).join('');
+
+  // Quick action buttons
+  const qa = activeAgent.quick_actions || [];
+  document.getElementById('quickBtns').innerHTML = qa.map(q =>
+    `<button class="quick-btn" onclick="sendQuickAction('${q.key}')">${q.label}</button>`
+  ).join('');
+
+  // Clear messages and send greeting
+  document.getElementById('chatMessages').innerHTML = '';
+  const hour = new Date().getHours();
+  const greet = hour < 12 ? 'Goedemorgen' : hour < 18 ? 'Goedemiddag' : 'Goedenavond';
+  addChatMsg('assistant', `${greet} Jeffrey! Ik ben ${activeAgent.name}, jouw ${activeAgent.role}. Hoe kan ik je vandaag helpen?`);
+}
+
+function addChatMsg(role, content) {
+  const msgs = document.getElementById('chatMessages');
+  const isUser = role === 'user';
+  const color = isUser ? '#a855f7' : (activeAgent?.avatar_color || '#534AB7');
+  const avatar = isUser ? 'JB' : (activeAgent?.avatar_emoji || '🤖');
+  const timeStr = new Date().toLocaleTimeString('nl-NL', { hour:'2-digit', minute:'2-digit' });
+  const div = document.createElement('div');
+  div.className = `msg msg-${role === 'user' ? 'user' : 'agent'}`;
+  div.innerHTML = `
+    <div class="msg-avatar" style="background:${color}22;color:${color}">${avatar}</div>
+    <div>
+      <div class="msg-bubble">${formatMd(esc(content))}</div>
+      <div class="msg-time">${timeStr}</div>
+    </div>`;
+  msgs.appendChild(div);
+  msgs.scrollTop = msgs.scrollHeight;
+  if (role !== 'user') chatHistory.push({ role: 'assistant', content });
+  else chatHistory.push({ role: 'user', content });
+}
+
+function showTyping() {
+  const msgs = document.getElementById('chatMessages');
+  const div = document.createElement('div');
+  div.className = 'msg msg-agent'; div.id = 'typingIndicator';
+  div.innerHTML = `<div class="msg-avatar" style="background:${activeAgent?.avatar_color || '#534AB7'}22;color:${activeAgent?.avatar_color || '#534AB7'}">${activeAgent?.avatar_emoji || '🤖'}</div><div class="typing"><span></span><span></span><span></span></div>`;
+  msgs.appendChild(div);
+  msgs.scrollTop = msgs.scrollHeight;
+}
+
+function removeTyping() {
+  document.getElementById('typingIndicator')?.remove();
+}
+
+async function sendChat(message) {
+  const input = document.getElementById('chatInput');
+  const msg = (message || input.value).trim();
+  if (!msg || !activeAgent) return;
+  input.value = '';
+  addChatMsg('user', msg);
+  showTyping();
+  try {
+    const r = await fetch('/api/agent-chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ agent_id: activeAgent.id, agent_name: activeAgent.name, message: msg, conversation_history: chatHistory.slice(-20), session_id: chatSessionId }),
+    });
+    const data = await r.json();
+    removeTyping();
+    if (data.error) addChatMsg('assistant', `⚠️ ${data.error}`);
+    else addChatMsg('assistant', data.response);
+  } catch (err) {
+    removeTyping();
+    addChatMsg('assistant', '⚠️ Verbindingsfout. Probeer opnieuw.');
+  }
+}
+
+async function sendQuickAction(key) {
+  if (!activeAgent) return;
+  const qa = activeAgent.quick_actions?.find(q => q.key === key);
+  if (qa) addChatMsg('user', qa.label);
+  showTyping();
+  try {
+    const r = await fetch('/api/agent-chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ agent_id: activeAgent.id, agent_name: activeAgent.name, quick_action: key, conversation_history: chatHistory.slice(-20), session_id: chatSessionId }),
+    });
+    const data = await r.json();
+    removeTyping();
+    addChatMsg('assistant', data.error ? `⚠️ ${data.error}` : data.response);
+  } catch {
+    removeTyping();
+    addChatMsg('assistant', '⚠️ Verbindingsfout.');
+  }
+}
+
+function handleChatKey(e) {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendChat(); }
+}
+
+// ═══════════════════════════════════
+// REPORT
+// ═══════════════════════════════════
+async function generateReport() { generateReportFor(activeAgent?.name); }
+
+async function generateReportFor(agentName) {
+  const agent = agents.find(a => a.name === agentName);
+  if (!agent) return;
+  document.getElementById('reportTitle').textContent = `📊 Dagrapport — ${agent.name}`;
+  document.getElementById('reportContent').innerHTML = '<div style="color:var(--text-faint);text-align:center;padding:32px">Rapport genereren…</div>';
+  document.getElementById('reportOverlay').classList.remove('hidden');
+  try {
+    const r = await fetch('/api/agent-report', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ agent_id: agent.id, agent_name: agent.name, report_type: 'dagrapport' }),
+    });
+    const data = await r.json();
+    document.getElementById('reportContent').innerHTML = data.error
+      ? `<div style="color:var(--red)">⚠️ ${esc(data.error)}</div>`
+      : formatMd(esc(data.report || ''));
+  } catch {
+    document.getElementById('reportContent').innerHTML = '<div style="color:var(--red)">⚠️ Kon rapport niet genereren.</div>';
+  }
+}
+
+function closeReport() { document.getElementById('reportOverlay').classList.add('hidden'); }
+
+// ═══════════════════════════════════
+// MEETING
+// ═══════════════════════════════════
+function renderParticipantList() {
+  document.getElementById('participantList').innerHTML = AGENTS_FALLBACK.map(a => `
+    <div class="participant-item ${selectedParticipants.has(a.name) ? 'selected' : ''}" onclick="toggleParticipant('${a.name}',this)">
+      <div class="participant-check">${selectedParticipants.has(a.name) ? '✓' : ''}</div>
+      <div style="font-size:18px">${a.avatar_emoji}</div>
+      <div>
+        <div class="participant-name">${esc(a.name)}</div>
+        <div class="participant-role">${esc(a.role)}</div>
+      </div>
+    </div>`).join('');
+}
+
+function toggleParticipant(name, el) {
+  if (selectedParticipants.has(name)) { selectedParticipants.delete(name); el.classList.remove('selected'); el.querySelector('.participant-check').textContent = ''; }
+  else { selectedParticipants.add(name); el.classList.add('selected'); el.querySelector('.participant-check').textContent = '✓'; }
+}
+
+function renderMeetingTable(participants) {
+  const scene = document.getElementById('tableScene');
+  // Remove old seats
+  scene.querySelectorAll('.seat').forEach(s => s.remove());
+
+  const positions = [
+    { top: '8px',  left: '50%', transform: 'translateX(-50%)' },  // top
+    { top: '50%',  left: '12px', transform: 'translateY(-50%)' }, // left
+    { top: '50%',  right: '12px', transform: 'translateY(-50%)' },// right
+    { bottom: '8px', left: '50%', transform: 'translateX(-50%)' }, // bottom (Jeffrey)
+  ];
+
+  const allSeats = [...participants.map(n => agents.find(a => a.name === n) || AGENTS_FALLBACK.find(a => a.name === n)), { name:'Jeffrey', avatar_emoji:'👤', avatar_color:'#a855f7' }];
+
+  allSeats.forEach((agent, i) => {
+    if (i >= positions.length) return;
+    const pos = positions[i];
+    const seat = document.createElement('div');
+    seat.className = 'seat';
+    seat.id = `seat-${agent.name}`;
+    Object.assign(seat.style, { position:'absolute', ...pos });
+    seat.innerHTML = `
+      <div class="talk-bubble" id="bubble-${agent.name}"></div>
+      <div class="seat-avatar" style="border-color:${agent.avatar_color}40;animation-delay:${i*0.8}s" id="avatar-${agent.name}">${agent.avatar_emoji}</div>
+      <div class="seat-name" style="color:${agent.avatar_color}">${agent.name}</div>`;
+    scene.appendChild(seat);
+  });
+}
+
+const BUBBLES = {
+  Simon: ['📧 19 leads vandaag!', '🔍 Analyseren...', '✉️ 3 nieuwe mails!', '📊 Rapport klaar!'],
+  Leon:  ['📋 Alles georganiseerd!', '✅ Taken bijgewerkt!', '📁 Contract klaar!', '🗂️ Archief up-to-date!'],
+  Aron:  ['💰 Betalingen up-to-date!', '📈 Groei +12%!', '💳 Factuur verstuurd!', '📉 Kosten geanalyseerd!'],
+  Jeffrey: ['👍 Goed bezig!', '🎯 Focus!', '💡 Goed idee!'],
+};
+
+function startBubbles(participants) {
+  const all = [...participants, 'Jeffrey'];
+  function showBubble() {
+    const name = all[Math.floor(Math.random() * all.length)];
+    const msgs = BUBBLES[name] || ['...'];
+    const msg = msgs[Math.floor(Math.random() * msgs.length)];
+    const bubble = document.getElementById(`bubble-${name}`);
+    const avatar = document.getElementById(`avatar-${name}`);
+    if (bubble && avatar) {
+      bubble.textContent = msg;
+      bubble.classList.add('show');
+      avatar.classList.add('speaking');
+      setTimeout(() => { bubble.classList.remove('show'); avatar.classList.remove('speaking'); }, 2500);
+    }
+  }
+  clearInterval(bubbleTimer);
+  showBubble();
+  bubbleTimer = setInterval(showBubble, 4000 + Math.random() * 3000);
+}
+
+async function startMeeting() {
+  const agenda = document.getElementById('agendaInput').value.trim();
+  if (!agenda) { alert('Voer eerst een agenda in.'); return; }
+  if (selectedParticipants.size === 0) { alert('Selecteer minimaal één deelnemer.'); return; }
+
+  const participants = [...selectedParticipants];
+  document.getElementById('meetingSetup').classList.add('hidden');
+  document.getElementById('meetingRoom').classList.remove('hidden');
+  document.getElementById('meetingTitle').textContent = `🏛️ ${agenda}`;
+  document.getElementById('meetingTranscript').innerHTML = '<div style="color:var(--text-faint);text-align:center;padding:20px">Vergadering starten…</div>';
+
+  renderMeetingTable(participants);
+
+  try {
+    const r = await fetch('/api/agent-meeting', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'start', participants, agenda, title: agenda }),
+    });
+    const data = await r.json();
+    if (data.error) throw new Error(data.error);
+    meetingId = data.meeting_id;
+    meetingTranscript = data.transcript || [];
+    renderTranscript();
+    startBubbles(participants);
+  } catch (err) {
+    document.getElementById('meetingTranscript').innerHTML = `<div style="color:var(--red);padding:16px">⚠️ ${esc(err.message)}</div>`;
+  }
+}
+
+function renderTranscript() {
+  const el = document.getElementById('meetingTranscript');
+  const agent = name => agents.find(a => a.name === name) || AGENTS_FALLBACK.find(a => a.name === name) || { avatar_color: '#a855f7', avatar_emoji: '👤' };
+  el.innerHTML = meetingTranscript.map(m => {
+    const a = agent(m.speaker);
+    const time = m.timestamp ? new Date(m.timestamp).toLocaleTimeString('nl-NL', { hour:'2-digit', minute:'2-digit' }) : '';
+    return `<div class="t-msg">
+      <span style="font-size:14px">${a.avatar_emoji || '👤'}</span>
+      <span class="t-speaker" style="color:${a.avatar_color || '#a855f7'};min-width:60px">${esc(m.speaker)}</span>
+      <span class="t-content">${esc(m.content)}</span>
+      <span class="t-time">${time}</span>
+    </div>`;
+  }).join('');
+  el.scrollTop = el.scrollHeight;
+}
+
+async function sendMeetingMessage() {
+  const input = document.getElementById('meetingInput');
+  const msg = input.value.trim();
+  if (!msg || !meetingId) return;
+  input.value = '';
+  document.getElementById('meetingSendBtn').disabled = true;
+
+  try {
+    const r = await fetch('/api/agent-meeting', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'message', meeting_id: meetingId, message: msg }),
+    });
+    const data = await r.json();
+    if (data.error) throw new Error(data.error);
+    meetingTranscript = data.transcript || meetingTranscript;
+    renderTranscript();
+  } catch (err) {
+    meetingTranscript.push({ speaker: 'System', content: `⚠️ ${err.message}`, timestamp: new Date().toISOString(), type: 'system' });
+    renderTranscript();
+  } finally {
+    document.getElementById('meetingSendBtn').disabled = false;
+  }
+}
+
+function handleMeetingKey(e) {
+  if (e.key === 'Enter') { e.preventDefault(); sendMeetingMessage(); }
+}
+
+async function endMeeting() {
+  if (!meetingId) return;
+  clearInterval(bubbleTimer);
+  document.getElementById('meetingRoom').classList.add('hidden');
+  document.getElementById('meetingSummary').classList.remove('hidden');
+  document.getElementById('summaryText').textContent = 'Samenvatting genereren…';
+  document.getElementById('actionPointsList').innerHTML = '';
+
+  try {
+    const r = await fetch('/api/agent-meeting', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'end', meeting_id: meetingId }),
+    });
+    const data = await r.json();
+    if (data.error) throw new Error(data.error);
+    document.getElementById('summaryText').textContent = data.summary || '';
+    pendingActionPoints = data.action_points || [];
+    document.getElementById('actionPointsList').innerHTML = pendingActionPoints.map((ap, i) => `
+      <div class="action-point">
+        <div class="ap-check"></div>
+        <div>
+          <div class="ap-title">${esc(ap.title)}</div>
+          <div class="ap-meta">👤 ${esc(ap.assignee)} · 📅 ${esc(ap.deadline || '—')}</div>
+        </div>
+      </div>`).join('') || '<div style="color:var(--text-faint);font-size:13px">Geen actiepunten gevonden.</div>';
+  } catch (err) {
+    document.getElementById('summaryText').textContent = `⚠️ ${err.message}`;
+  }
+}
+
+async function approveMeeting() {
+  if (!pendingActionPoints.length) { alert('Geen actiepunten om goed te keuren.'); return; }
+  try {
+    const r = await fetch('/api/agent-meeting', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'approve', meeting_id: meetingId, action_points: pendingActionPoints }),
+    });
+    const data = await r.json();
+    if (data.error) throw new Error(data.error);
+    alert(`✓ ${data.tasks_created} taken aangemaakt in Takenbeheer!`);
+    showView('overview');
+  } catch (err) {
+    alert(`⚠️ ${err.message}`);
+  }
+}
+
+// ═══════════════════════════════════
+// UTILS
+// ═══════════════════════════════════
+function esc(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+function formatMd(s) {
+  return s
+    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+    .replace(/^## (.+)$/gm, '<div style="font-size:14px;font-weight:700;color:var(--text);margin:12px 0 4px">$1</div>')
+    .replace(/^### (.+)$/gm, '<div style="font-size:13px;font-weight:600;color:var(--text-dim);margin:8px 0 2px">$1</div>')
+    .replace(/^- (.+)$/gm, '<div style="padding-left:12px">• $1</div>')
+    .replace(/\n/g, '<br>');
+}
+
+function handleLogoError() {
+  try {
+    const b64 = localStorage.getItem('signature_logo_base64');
+    if (b64?.startsWith('data:image')) { document.getElementById('sidebarLogoImg').src = b64; return; }
+  } catch {}
+  document.getElementById('sidebarLogo').innerHTML = '<span class="sidebar-logo-fallback">De Forex Opleiding</span>';
+}
+
+init();
+</script>
+</body>
+</html>
