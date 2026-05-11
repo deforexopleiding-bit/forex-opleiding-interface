@@ -1925,7 +1925,7 @@
         body: JSON.stringify({
           email_id: uid, sender: email.from || '', subject: email.subject || '',
           body_snippet: bodySnippet, old_category: oldCat, new_category: newCat,
-          corrected_by: 'Jeffrey', correction_type: 'manual_with_reason',
+          corrected_by: 'Jeffrey', correction_type: 'manual_absolute',
           old_requires_action: oldFlag ?? null,
           new_requires_action: ps.requiresAction ?? null,
           reason, email_list: emailList
@@ -2387,8 +2387,10 @@
       if (!file || !file.type.startsWith('image/')) return;
       const reader = new FileReader();
       reader.onload = (ev) => {
-        if (logoPreview) { logoPreview.src = ev.target.result; logoPreview.style.display = 'block'; }
+        const dataUrl = ev.target.result;
+        if (logoPreview) { logoPreview.src = dataUrl; logoPreview.style.display = 'block'; }
         if (logoLabel)   logoLabel.style.display = 'none';
+        try { localStorage.setItem('signature_logo_base64', dataUrl); } catch {}
         updateSigPreview();
       };
       reader.readAsDataURL(file);
@@ -2455,7 +2457,8 @@
     const sigLines = [];
     sigLines.push('<span style="color:#666">Met vriendelijke groet,</span><br>');
     if (sig.naam)     sigLines.push('<strong>' + sig.naam.replace(/</g, '&lt;') + '</strong>' + (sig.functie ? ' · ' + sig.functie.replace(/</g, '&lt;') : '') + '<br>');
-    if (sig.logoData && sig.logoData.startsWith('data:image')) sigLines.push('<img src="' + sig.logoData + '" alt="" style="max-width:200px;height:auto;margin:6px 0;display:block"><br>');
+    const logoData = (() => { try { return localStorage.getItem('signature_logo_base64') || sig.logoData || ''; } catch { return sig.logoData || ''; } })();
+    if (logoData && logoData.startsWith('data:image')) sigLines.push('<img src="' + logoData + '" alt="" style="max-width:200px;height:auto;margin:6px 0;display:block"><br>');
     if (sig.website)  sigLines.push('<a href="' + sig.website.replace(/"/g, '') + '" style="color:#534AB7">' + sig.website.replace(/</g, '&lt;') + '</a><br>');
     if (sig.telefoon) sigLines.push(sig.telefoon.replace(/</g, '&lt;') + '<br>');
     const socials = [];
@@ -4218,8 +4221,9 @@
       const n = state.reclameSelected.size;
       html += '<div class="bulk-selectie-bar">' +
         '<span class="bulk-count">' + n + ' mail' + (n > 1 ? 's' : '') + ' geselecteerd</span>' +
-        '<button class="btn btn-sm" style="background:rgba(139,92,246,0.2);border-color:#7c3aed;color:#c4b5fd" onclick="openBulkVtModal()">📂 Verplaats &amp; Train</button>' +
+        '<button class="btn btn-sm" onclick="getReclameEmails(getFilteredEmails()).forEach(e=>state.reclameSelected.add(e.uid));render()">Selecteer alles</button>' +
         '<button class="btn btn-sm" onclick="state.reclameSelected.clear();render()">✕ Deselecteer alles</button>' +
+        '<button class="btn btn-sm" style="background:rgba(139,92,246,0.2);border-color:#7c3aed;color:#c4b5fd" onclick="openBulkVtModal()">📂 Verplaats &amp; Train</button>' +
       '</div>';
     }
 

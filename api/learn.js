@@ -323,6 +323,33 @@ export default async function handler(req, res) {
     console.error('[learn] email_patterns update crash:', err.message);
   }
 
+  // ── Stap 3b: manual_absolute — permanente override met hoogste prioriteit ─
+  if (correction_type === 'manual_absolute' && senderEmail) {
+    try {
+      const { data: pat } = await supabase.from('email_patterns')
+        .select('id').eq('sender_email', senderEmail).maybeSingle();
+      const now = new Date().toISOString();
+      if (pat) {
+        await supabase.from('email_patterns').update({
+          category: new_category, confidence: 100, times_seen: 999,
+          source: 'manual_absolute', last_corrected_at: now,
+          ...patternExtras
+        }).eq('id', pat.id);
+      } else {
+        await supabase.from('email_patterns').insert({
+          sender_email: senderEmail, sender_domain: senderDomain || null,
+          category: new_category, confidence: 100, times_seen: 999,
+          source: 'manual_absolute', last_corrected_at: now,
+          ...patternExtras
+        });
+      }
+      confidenceAfter = 100;
+      console.log(`[learn] manual_absolute patroon opgeslagen voor ${senderEmail} → ${new_category}`);
+    } catch (e) {
+      console.warn('[learn] manual_absolute upsert fout:', e.message);
+    }
+  }
+
   // ── Stap 4: Propagatie berekenen ────────────────────────────────────────
   const { groupA, groupB, groupC_auto, groupC_confirm, groupD } = computePropagation(
     email_list, senderEmail, senderDomain, subject || '', body_snippet || '', email_id, reason || ''

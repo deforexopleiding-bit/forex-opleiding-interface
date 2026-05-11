@@ -389,6 +389,32 @@ export async function categorize({ from, subject, bodySnippet, date }) {
   const senderEmail  = extractEmail(from || '');
   const senderDomain = getDomain(senderEmail);
 
+  // Stap 0 — Handmatige absolute overrides (hoogste prioriteit, altijd)
+  if (senderEmail) {
+    try {
+      const { data: manualPat } = await supabase.from('email_patterns')
+        .select('category, requires_action')
+        .eq('sender_email', senderEmail)
+        .eq('source', 'manual_absolute')
+        .maybeSingle();
+      if (manualPat) {
+        console.log(`[email-agent] manual_absolute override voor ${senderEmail}: ${manualPat.category}`);
+        return {
+          category:             manualPat.category,
+          requires_action:      manualPat.requires_action || false,
+          priority:             'laag',
+          confidence:           100,
+          source:               'manual_override',
+          reasoning:            'Handmatige override — nooit overschreven',
+          key_signals:          ['manual_override'],
+          suggested_reply_tone: 'niet_van_toepassing',
+          is_definitely_not_spam: manualPat.category !== 'Reclame',
+          needs_review:         false
+        };
+      }
+    } catch (e) { console.warn('[email-agent] manual_absolute check fout:', e.message); }
+  }
+
   // Stap 1a — Absolute regels (lopen altijd, ook bij Re: en body-vragen)
   const absResult = applyAbsoluteRules(subject, senderDomain);
   if (absResult) {
