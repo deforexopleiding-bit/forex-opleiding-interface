@@ -789,6 +789,13 @@
     .taak-email-ref { font-size: 12px; color: var(--text-faint); padding: 8px 12px; background: rgba(255,255,255,0.04); border-radius: 6px; border: 1px solid var(--border); }
     .taak-created-badge { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; padding: 2px 8px; border-radius: 10px; background: rgba(34,197,94,0.12); border: 1px solid rgba(34,197,94,0.3); color: #4ade80; white-space: nowrap; }
     .taak-context-toggle { background: none; border: none; color: var(--text-dim); font-size: 11px; cursor: pointer; padding: 2px 0; text-decoration: underline; text-underline-offset: 2px; }
+    .taak-label-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px; }
+    .taak-label-row .taak-form-label { margin-bottom: 0; }
+    .btn-ai-taak { display: inline-flex; align-items: center; gap: 4px; background: rgba(139,92,246,0.15); border: 1px solid rgba(139,92,246,0.35); color: #a78bfa; font-size: 11px; font-weight: 600; padding: 3px 9px; border-radius: 6px; cursor: pointer; transition: background .15s; white-space: nowrap; }
+    .btn-ai-taak:hover { background: rgba(139,92,246,0.28); }
+    .btn-ai-taak:disabled { opacity: .5; cursor: not-allowed; }
+    .btn-ai-taak .spin { display: inline-block; animation: spin .7s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
 
     /* ── Leerrapport modal ── */
     .lr-modal-body { padding: 24px; display: flex; flex-direction: column; gap: 20px; }
@@ -2783,7 +2790,13 @@
       '<div class="modal-header"><h3>📋 Taak aanmaken</h3><button class="modal-close" onclick="closeTaakModal()">&times;</button></div>' +
       '<div class="taak-form-body">' +
         '<div><label class="taak-form-label">Taaknaam *</label><input class="taak-form-input" id="tfTitel" value="' + escapeHtml(f.titel) + '" /></div>' +
-        '<div><label class="taak-form-label">Wat moet er gedaan worden?</label><textarea class="taak-form-textarea" id="tfTaakomschrijving" rows="3">' + escapeHtml(f.taakomschrijving) + '</textarea></div>' +
+        '<div>' +
+          '<div class="taak-label-row">' +
+            '<label class="taak-form-label">Wat moet er gedaan worden?</label>' +
+            '<button type="button" id="btnAiTaak" class="btn-ai-taak" onclick="aiGenereerTaak(\'' + escapeHtml(uid) + '\')">✨ Genereer met AI</button>' +
+          '</div>' +
+          '<textarea class="taak-form-textarea" id="tfTaakomschrijving" rows="3">' + escapeHtml(f.taakomschrijving) + '</textarea>' +
+        '</div>' +
         '<div class="taak-form-row">' +
           '<div><label class="taak-form-label">Prioriteit</label><select class="taak-form-select" id="tfPrioriteit">' + prioOpts + '</select></div>' +
           '<div><label class="taak-form-label">Categorie</label><select class="taak-form-select" id="tfCategorie">' + catOpts + '</select></div>' +
@@ -2864,6 +2877,53 @@
     closeTaakModal();
     render();
     showToast('✓ Taak aangemaakt · ' + titel.slice(0, 50));
+  }
+
+  async function aiGenereerTaak(uid) {
+    const btn      = document.getElementById('btnAiTaak');
+    const textarea = document.getElementById('tfTaakomschrijving');
+    if (!btn || !textarea) return;
+
+    const email = findEmail(uid);
+    if (!email) return;
+
+    btn.disabled    = true;
+    btn.innerHTML   = '<span class="spin">⟳</span> Bezig…';
+    const prev      = textarea.value;
+
+    try {
+      const bodyText    = state.bodyCache[uid]?.text || '';
+      const sentBody    = _taakSentBody || state.sentReplies[uid]?.body || '';
+
+      const res = await fetch('/api/generate-task', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          subject:         email.subject    || '',
+          fromName:        email.fromName   || email.from || '',
+          category:        email.category   || 'Algemeen',
+          bodySnippet:     bodyText,
+          sentBodySnippet: sentBody,
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok || !data.taakomschrijving) throw new Error(data.error || 'Lege respons');
+
+      textarea.value  = data.taakomschrijving;
+      btn.innerHTML   = '✓ Gegenereerd';
+      btn.style.color = '#4ade80';
+      setTimeout(() => {
+        btn.innerHTML   = '✨ Genereer met AI';
+        btn.style.color = '';
+        btn.disabled    = false;
+      }, 2500);
+    } catch (err) {
+      textarea.value  = prev;
+      btn.innerHTML   = '✨ Genereer met AI';
+      btn.disabled    = false;
+      showToast('AI generatie mislukt: ' + (err.message || 'onbekende fout'));
+    }
   }
 
   // ── Bulk reclame actions ───────────────────────────────────────────────────
