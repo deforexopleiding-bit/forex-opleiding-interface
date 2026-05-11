@@ -3116,34 +3116,71 @@
   }
   async function executeBulkVt() {
     if (!_bulkVtCat) { showToast('Selecteer eerst een categorie'); return; }
-    const uids   = [...state.reclameSelected];
+    const mailsToProcess = [...state.reclameSelected];
     const reason = _bulkVtReason || document.getElementById('bulkVtReasonText')?.value || 'bulk_correctie';
-    let moved = 0;
-    for (const uid of uids) {
+    console.log('Bulk VT uitvoeren voor', mailsToProcess.length, 'mails');
+    let successCount = 0;
+
+    for (const uid of mailsToProcess) {
       const email = state.emails.find((e) => String(e.uid) === String(uid));
-      if (!email) continue;
-      const oldCat   = email.category;
+      if (!email) { console.warn('Mail niet gevonden voor uid:', uid); continue; }
+
+      const oldCat = email.category;
+      const requiresAction = ['Klantvraag', 'Factuurvraag'].includes(_bulkVtCat);
+
+      // Persist via overrides zodat de wijziging survives re-render + reload
+      if (!state.overrides) state.overrides = { category: {}, read: {} };
+      state.overrides.category[uid] = _bulkVtCat;
       email.category = _bulkVtCat;
+      _aiCatCache[uid] = _bulkVtCat;
+
       if (_bulkVtSection) {
         const flagVal = _bulkVtSection === 'actie' ? true : _bulkVtSection === 'info' ? false : null;
         setActionFlag(uid, flagVal);
         saveEmailAction(uid, 'move-' + _bulkVtSection, true);
       }
-      fetch('/api/learn', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          action: 'correct_category', email_id: uid,
-          old_category: oldCat, new_category: _bulkVtCat,
-          reason, sender_domain: (email.fromAddress || email.from || '').split('@')[1] || '',
-          body_snippet: (state.bodyCache?.[uid]?.text || '').slice(0, 200),
-        }),
-      }).catch(() => {});
-      moved++;
+
+      try {
+        const learnResp = await fetch('/api/learn', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            email_id:            String(uid),
+            email_sender:        email.fromAddress || email.from || '',
+            sender_domain:       getDomain(email.fromAddress || email.from || ''),
+            email_subject:       email.subject || '',
+            body_snippet:        (state.bodyCache?.[uid]?.text || '').slice(0, 300),
+            old_category:        oldCat,
+            new_category:        _bulkVtCat,
+            old_requires_action: false,
+            new_requires_action: requiresAction,
+            corrected_by:        'Jeffrey',
+            correction_type:     'manual_absolute',
+            reason:              reason || 'bulk_vt',
+          }),
+        });
+        const learnResult = await learnResp.json();
+        console.log('Learn result voor uid', uid, ':', learnResult);
+        successCount++;
+      } catch (err) {
+        console.error('Fout bij verwerken uid', uid, ':', err);
+      }
     }
+
+    // Persist overrides + AI-cache
+    saveOverrides();
+    saveJson(AI_CATS_KEY, _aiCatCache);
+
+    // Verwijder rijen direct uit de DOM voor snelle feedback
+    mailsToProcess.forEach((uid) => {
+      const el = document.querySelector(`[data-uid="${uid}"]`);
+      if (el) el.closest('.reclame-row, .mail-card, .email-row')?.remove();
+    });
+
     state.reclameSelected.clear();
     closeBulkVtModal();
     render();
-    showToast('✓ ' + moved + ' mail' + (moved > 1 ? 's' : '') + ' verplaatst naar ' + _bulkVtCat + ' · Agent getraind');
+    showToast('✓ ' + successCount + ' mail' + (successCount > 1 ? 's' : '') + ' verplaatst naar ' + _bulkVtCat + ' · Agent getraind');
+    console.log('Bulk VT klaar:', successCount, 'van', mailsToProcess.length, 'verwerkt');
   }
 
   // ── Filtering ──────────────────────────────────────────────────────────────
