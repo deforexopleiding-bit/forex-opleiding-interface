@@ -98,6 +98,27 @@ function applyHardRules(subject, from, bodySnippet) {
   return null;
 }
 
+// ── Re:/Fwd: detectie ────────────────────────────────────────────────────────
+function isReplyOrForward(subject) {
+  return /^(re|re\.|fw|fwd|antw|antwoord)\s*:/i.test((subject || '').trim());
+}
+
+// ── Directe vraag/actie detectie in body ─────────────────────────────────────
+const QUESTION_SIGNALS = [
+  'waar ', 'wanneer ', 'hoe ', 'wat ', 'kan ik', 'zou ik', 'kunt u', 'kun je',
+  'graag ', 'help', 'probleem', 'klacht', 'terugbellen', ' adres', ' info ',
+  'vraag', 'weet u', 'weet je', 'kunt u mij', 'zou u', 'zou je',
+  'meer informatie', 'meer info', 'niet gelukt', 'werkt niet', 'begrijp niet',
+  'snap niet', 'uitleg', 'kunt u mij', 'mag ik', 'is er'
+];
+
+function detectDirectQuestion(bodySnippet) {
+  if (!bodySnippet) return false;
+  const b = bodySnippet.toLowerCase();
+  if (b.includes('?')) return true;
+  return QUESTION_SIGNALS.some((w) => b.includes(w));
+}
+
 // ── Reclame-signalen tellen ───────────────────────────────────────────────────
 function countReclameSignals(subject, bodySnippet) {
   let signals = 0;
@@ -329,24 +350,37 @@ export async function categorize({ from, subject, bodySnippet, date }) {
   const senderEmail  = extractEmail(from || '');
   const senderDomain = getDomain(senderEmail);
 
-  // Stap 1 — Harde regels
-  const hard = applyHardRules(subject, from, bodySnippet);
-  if (hard) {
-    return {
-      category:           hard.category,
-      requires_action:    hard.requires_action,
-      priority:           'laag',
-      confidence:         100,
-      source:             'rule',
-      reasoning:          'Harde inhoudsregel',
-      key_signals:        [],
-      suggested_reply_tone: 'niet_van_toepassing',
-      is_definitely_not_spam: hard.category !== 'Reclame',
-      needs_review:       false
-    };
+  // Stap 1 — Re:/Fwd: en directe vraag-check
+  // Re: mails en mails met een vraag in de body gaan ALTIJD naar AI — nooit harde regels
+  const isReply     = isReplyOrForward(subject);
+  const hasQuestion = detectDirectQuestion(bodySnippet);
+
+  if (isReply) {
+    console.log(`[email-agent] Re:/Fwd: onderwerp "${subject}" — harde regels overgeslagen, volledige AI analyse`);
+  } else if (hasQuestion) {
+    console.log(`[email-agent] Directe vraag gedetecteerd in body — harde regels overgeslagen voor "${subject}"`);
   }
 
-  // Stap 2 — Blacklist
+  // Stap 2 — Harde regels (ALLEEN als geen Re: en geen directe vraag in body)
+  if (!isReply && !hasQuestion) {
+    const hard = applyHardRules(subject, from, bodySnippet);
+    if (hard) {
+      return {
+        category:           hard.category,
+        requires_action:    hard.requires_action,
+        priority:           'laag',
+        confidence:         95,
+        source:             'rule',
+        reasoning:          'Harde inhoudsregel',
+        key_signals:        [],
+        suggested_reply_tone: 'niet_van_toepassing',
+        is_definitely_not_spam: hard.category !== 'Reclame',
+        needs_review:       false
+      };
+    }
+  }
+
+  // Stap 3 — Blacklist
   const isBlacklisted = await checkBlacklist(senderEmail, senderDomain);
   if (isBlacklisted) {
     return {
@@ -357,7 +391,7 @@ export async function categorize({ from, subject, bodySnippet, date }) {
     };
   }
 
-  // Stap 3 — Whitelist
+  // Stap 4 — Whitelist
   const { whitelisted, category: wlCat } = await checkWhitelist(senderEmail, senderDomain);
   if (whitelisted) {
     const cat = wlCat || 'Overig';
@@ -371,22 +405,24 @@ export async function categorize({ from, subject, bodySnippet, date }) {
     };
   }
 
-  // Stap 4 — Hoge-confidence patroon
-  const pattern = await lookupHighConfidencePattern(senderEmail, senderDomain, subject, bodySnippet);
-  if (pattern) {
-    const src = ['manual', 'domain_learned', 'hardcoded'].includes(pattern.source) ? 'learned' : 'pattern';
-    const cat = pattern.category;
-    return {
-      category: cat, requires_action: deriveRequiresAction(cat, null),
-      priority: cat === 'Klantvraag' || cat === 'Factuurvraag' ? 'normaal' : 'laag',
-      confidence: pattern.confidence, source: src,
-      reasoning: `Bekend patroon (gezien: ${pattern.times_seen}x)`,
-      key_signals: ['patroon gevonden'], suggested_reply_tone: cat === 'Klantvraag' ? 'vriendelijk' : 'niet_van_toepassing',
-      is_definitely_not_spam: cat !== 'Reclame', needs_review: false
-    };
+  // Stap 5 — Hoge-confidence patroon (overgeslagen voor Re: mails — inhoud is leidend)
+  if (!isReply) {
+    const pattern = await lookupHighConfidencePattern(senderEmail, senderDomain, subject, bodySnippet);
+    if (pattern) {
+      const src = ['manual', 'domain_learned', 'hardcoded'].includes(pattern.source) ? 'learned' : 'pattern';
+      const cat = pattern.category;
+      return {
+        category: cat, requires_action: deriveRequiresAction(cat, null),
+        priority: cat === 'Klantvraag' || cat === 'Factuurvraag' ? 'normaal' : 'laag',
+        confidence: pattern.confidence, source: src,
+        reasoning: `Bekend patroon (gezien: ${pattern.times_seen}x)`,
+        key_signals: ['patroon gevonden'], suggested_reply_tone: cat === 'Klantvraag' ? 'vriendelijk' : 'niet_van_toepassing',
+        is_definitely_not_spam: cat !== 'Reclame', needs_review: false
+      };
+    }
   }
 
-  // Stap 5 — Volledige AI-analyse
+  // Stap 6 — Volledige AI-analyse
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) {
     return { category: 'Overig', requires_action: false, priority: 'laag', confidence: 50,
@@ -418,13 +454,19 @@ ${correctionsContext}
 BEKENDE PATRONEN:
 ${patternContext}
 
+KRITIEKE REGEL — INHOUD GAAT ALTIJD BOVEN ONDERWERP:
+Als de mail begint met "Re:", "RE:", "Antw:" of "Fwd:", of als er een vraag in de body staat,
+NEGEER dan het onderwerp voor categorisatie. Een mail met "Gent" in het onderwerp maar
+een vraag in de body ("waar was het adres?") is een Klantvraag, geen Event Aanmelding.
+INHOUD IS LEIDEND. Het onderwerp is slechts een hint, niet bepalend.
+
 CATEGORIEËN — gebruik deze definities EXACT:
 
 Nieuwe Lead: Automatische notificatie dat iemand interesse heeft getoond. Ingevuld formulier, aanmelding, lead notificatie. NOOIT actie vereist (informatief).
 
 Appointment: Bevestiging van een ingeplande sessie, call of afspraak. NOOIT actie vereist (informatief).
 
-Event Aanmelding: Aanmelding voor een seminar, event of workshop. NOOIT actie vereist (informatief).
+Event Aanmelding: Aanmelding voor een seminar, event of workshop (informatief systeemnotificatie). NOOIT actie vereist. Gebruik NIET als de body een persoonlijke vraag bevat.
 
 Klantvraag: Een BESTAANDE klant stelt een vraag of heeft een probleem. Vraagt om uitleg, heeft een klacht, wil iets weten. ALTIJD actie vereist.
 
@@ -463,7 +505,13 @@ Geef terug als JSON:
 }
 Geef ALLEEN de JSON terug.`;
 
+  const contextFlags = [
+    isReply     ? '⚠️ DIT IS EEN REPLY/FWD — negeer onderwerp voor categorisatie, analyseer ALLEEN de body.' : '',
+    hasQuestion ? '⚠️ DIRECTE VRAAG GEDETECTEERD in body — categoriseer als Klantvraag tenzij de body duidelijk iets anders aangeeft.' : ''
+  ].filter(Boolean).join('\n');
+
   const userContent = [
+    contextFlags,
     'Van: ' + (from || '—'),
     'Onderwerp: ' + (subject || '—'),
     date ? 'Datum: ' + date : '',
@@ -506,7 +554,7 @@ Geef ALLEEN de JSON terug.`;
 
     const requiresAction = deriveRequiresAction(category, parsed?.requires_action);
 
-    // Stap 6 — Patroon opslaan + auto-whitelist
+    // Stap 7 — Patroon opslaan + auto-whitelist
     savePattern(senderEmail, senderDomain, category, confidence, learnedFromCorr)
       .catch(() => {});
 
@@ -525,7 +573,7 @@ Geef ALLEEN de JSON terug.`;
       source: learnedFromCorr ? 'ai_learned' : 'ai',
       reasoning, key_signals: keySignals, suggested_reply_tone: replyTone,
       is_definitely_not_spam: isNotSpam,
-      needs_review: confidence < 60
+      needs_review: confidence < 70
     };
   } catch (err) {
     console.error('[email-agent] AI fout:', err.message);
