@@ -2989,7 +2989,11 @@
     try {
       const res  = await fetch('/api/sent-replies');
       const data = await res.json();
-      state.verzondenEmails = data.sent || [];
+      const apiSent = data.sent || [];
+      // Merge: bewaar lokale items (unshift na send) die nog niet in de DB zitten
+      const apiIds = new Set(apiSent.map((r) => r.email_id));
+      const localOnly = state.verzondenEmails.filter((r) => !apiIds.has(r.email_id));
+      state.verzondenEmails = [...localOnly, ...apiSent];
       state.verzondenLoaded = true;
       if (state.activeTab === 'verzonden') render();
     } catch (err) { console.warn('[Verzonden] laden mislukt:', err.message); }
@@ -3011,7 +3015,8 @@
       (query ? '<span style="font-size:12px;color:var(--text-dim)">' + emails.length + ' resultaat' + (emails.length !== 1 ? 'en' : '') + '</span>' : '') +
     '</div>';
 
-    if (!state.verzondenLoaded) {
+    // Toon spinner alleen als nog aan het laden EN geen lokale data beschikbaar
+    if (!state.verzondenLoaded && !emails.length) {
       html += '<div class="state"><span class="preview-spinner"></span><p style="margin-top:8px">Verzonden mails laden…</p></div>';
       return html;
     }
