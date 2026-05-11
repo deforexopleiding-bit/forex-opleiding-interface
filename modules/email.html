@@ -495,7 +495,7 @@
     .sig-preview-box {
       background: var(--bg); border: 1px solid var(--border); border-radius: 8px;
       padding: 14px; font-size: 13px; color: var(--text-dim);
-      white-space: pre-wrap; line-height: 1.65; min-height: 130px; flex: 1;
+      line-height: 1.65; min-height: 130px; flex: 1;
     }
     .sig-preview-note { font-size: 12px; color: var(--text-faint); }
 
@@ -2141,7 +2141,25 @@
     return lines.join('\n');
   }
 
+  function formatSignatureHtml(sig) {
+    const lines = ['<span style="color:var(--text-dim)">Met vriendelijke groet,</span>', ''];
+    if (sig.naam)    lines.push('<strong>' + escapeHtml(sig.naam) + '</strong>');
+    if (sig.functie) lines.push(escapeHtml(sig.functie));
+    if (sig.telefoon) lines.push('Tel: ' + escapeHtml(sig.telefoon));
+    if (sig.website)  lines.push('<a href="' + escapeHtml(sig.website) + '" style="color:var(--accent-cyan)" target="_blank">' + escapeHtml(sig.website) + '</a>');
+    if (sig.logoData) lines.push('<img src="' + sig.logoData + '" style="max-width:200px;height:auto;margin-top:8px;border-radius:4px;display:block;" alt="Logo">');
+    const social = [];
+    if (sig.instagram) social.push('Instagram: ' + escapeHtml(sig.instagram));
+    if (sig.facebook)  social.push('Facebook: '  + escapeHtml(sig.facebook));
+    if (sig.linkedin)  social.push('LinkedIn: '  + escapeHtml(sig.linkedin));
+    if (sig.whatsapp)  social.push('WhatsApp: '  + escapeHtml(sig.whatsapp));
+    if (social.length) { lines.push(''); social.forEach((s) => lines.push(s)); }
+    return lines.join('<br>');
+  }
+
   function updateSigPreview() {
+    const logoImg = document.getElementById('logoPreview');
+    const logoData = (logoImg && logoImg.style.display !== 'none' && logoImg.src) ? logoImg.src : '';
     const sig = {
       naam:      document.getElementById('sigNaam')?.value || '',
       functie:   document.getElementById('sigFunctie')?.value || '',
@@ -2151,10 +2169,10 @@
       facebook:  document.getElementById('sigFacebook')?.value || '',
       linkedin:  document.getElementById('sigLinkedin')?.value || '',
       whatsapp:  document.getElementById('sigWhatsapp')?.value || '',
-      logoData:  ''
+      logoData,
     };
     const box = document.getElementById('sigPreviewBox');
-    if (box) box.textContent = formatSignatureText(sig);
+    if (box) box.innerHTML = formatSignatureHtml(sig);
   }
 
   function openSigModal() {
@@ -2211,6 +2229,7 @@
       reader.onload = (ev) => {
         if (logoPreview) { logoPreview.src = ev.target.result; logoPreview.style.display = 'block'; }
         if (logoLabel)   logoLabel.style.display = 'none';
+        updateSigPreview();
       };
       reader.readAsDataURL(file);
     }
