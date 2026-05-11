@@ -1297,13 +1297,34 @@
   }
   function saveOverrides() { try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state.overrides)); } catch {} }
 
+  const TRUSTED_SENDERS_CLIENT = new Set([
+    'no-reply-forms@webflow.com',
+    'noreply@send.lcmsgsndr.net',
+    'info+deforexopleiding.nl@send.lcmsgsndr.net',
+  ]);
+
   function applyOverrides() {
     const cat = state.overrides.category || {};
     const read = state.overrides.read || {};
+    let staleCleaned = false;
     state.emails.forEach((e) => {
-      if (cat[e.uid])  e.category = cat[e.uid];
+      const sender = (e.fromAddress || getFromAddress(e) || '').toLowerCase();
+      // Verwijder Reclame/Overig overrides voor vertrouwde afzenders
+      if (cat[e.uid] && TRUSTED_SENDERS_CLIENT.has(sender) &&
+          (cat[e.uid] === 'Reclame' || cat[e.uid] === 'Overig')) {
+        delete state.overrides.category[e.uid];
+        delete _aiCatCache[e.uid];
+        staleCleaned = true;
+      } else if (cat[e.uid]) {
+        e.category = cat[e.uid];
+      }
       if (read[e.uid]) e.unread = false;
     });
+    if (staleCleaned) {
+      saveOverrides();
+      saveJson(AI_CATS_KEY, _aiCatCache);
+      console.log('[applyOverrides] Verouderde Reclame overrides gewist voor vertrouwde afzenders');
+    }
   }
 
   // ── Toast ──────────────────────────────────────────────────────────────────

@@ -228,6 +228,40 @@ export default async function handler(req, res) {
     report.message = `${report.missing.length} kolom(men) ontbreken. Voer de SQL hieronder uit in Supabase om dit te fixen.`;
   }
 
+  // ── Seed vertrouwde afzenders in email_patterns ──────────────────────────
+  const TRUSTED = [
+    { email: 'no-reply-forms@webflow.com',                      domain: 'webflow.com' },
+    { email: 'noreply@send.lcmsgsndr.net',                      domain: 'send.lcmsgsndr.net' },
+    { email: 'info+deforexopleiding.nl@send.lcmsgsndr.net',     domain: 'send.lcmsgsndr.net' },
+  ];
+  const trustedEmails = TRUSTED.map((t) => t.email);
+  try {
+    // Verwijder verkeerde Reclame patronen voor deze afzenders
+    await supabase.from('email_patterns')
+      .delete()
+      .eq('category', 'Reclame')
+      .in('sender_email', trustedEmails);
+    // Upsert als trusted_sender
+    for (const t of TRUSTED) {
+      const { error } = await supabase.from('email_patterns').upsert({
+        sender_email:  t.email,
+        sender_domain: t.domain,
+        category:      'Nieuwe Lead',
+        confidence:    100,
+        source:        'trusted_sender',
+        times_seen:    999,
+        requires_action: false,
+        last_corrected_at: new Date().toISOString(),
+      }, { onConflict: 'sender_email' });
+      if (error) console.warn('[db-migrate] trusted_sender upsert fout:', t.email, error.message);
+      else console.log('[db-migrate] trusted_sender geseeded:', t.email);
+    }
+    report.trusted_senders_seeded = true;
+  } catch (e) {
+    console.warn('[db-migrate] trusted_sender seed fout:', e.message);
+    report.trusted_senders_seeded = false;
+  }
+
   console.log('[db-migrate]', report.message, '· ontbrekend:', report.missing.map((m) => `${m.table}.${m.col}`).join(', '));
   return res.status(200).json(report);
 }

@@ -43,6 +43,20 @@ function extractBodyKeywords(text, maxWords = 10) {
 // ── Interne domeinen — worden NOOIT als Reclame gecategoriseerd ───────────────
 const INTERNAL_DOMAINS = ['deforexopleiding.nl', 'deforexopleiding.com'];
 
+// ── Vertrouwde afzenders — altijd correct gecategoriseerd op onderwerp ─────────
+const TRUSTED_LEAD_SENDERS = new Set([
+  'no-reply-forms@webflow.com',
+  'noreply@send.lcmsgsndr.net',
+  'info+deforexopleiding.nl@send.lcmsgsndr.net',
+]);
+
+function classifyTrustedSender(subject) {
+  const s = (subject || '').toLowerCase();
+  if (/uitlegsessie|ingepland|nieuwe call|appointment|sessie\s*ingepland|call\s*ingepland/i.test(s)) return 'Appointment';
+  if (/event|aanmelding|gent|seminar|workshop/i.test(s)) return 'Event Aanmelding';
+  return 'Nieuwe Lead'; // standaard voor webflow forms en lead mailers
+}
+
 // ── Absolute regels — altijd van toepassing, ook bij Re: en body-vragen ──────
 const ABSOLUTE_RULES = [
   {
@@ -389,7 +403,26 @@ export async function categorize({ from, subject, bodySnippet, date }) {
   const senderEmail  = extractEmail(from || '');
   const senderDomain = getDomain(senderEmail);
 
-  // Stap 0 — Handmatige absolute overrides (hoogste prioriteit, altijd)
+  // Stap 0a — Vertrouwde afzenders (hardcoded, snelste pad)
+  if (TRUSTED_LEAD_SENDERS.has(senderEmail)) {
+    const category = classifyTrustedSender(subject);
+    console.log(`[email-agent] Trusted sender ${senderEmail} → ${category}`);
+    savePattern(senderEmail, senderDomain, category, 100, false).catch(() => {});
+    return {
+      category,
+      requires_action:      false,
+      priority:             'laag',
+      confidence:           100,
+      source:               'trusted_sender',
+      reasoning:            `Vertrouwde afzender — altijd ${category}`,
+      key_signals:          ['trusted_sender'],
+      suggested_reply_tone: 'niet_van_toepassing',
+      is_definitely_not_spam: true,
+      needs_review:         false
+    };
+  }
+
+  // Stap 0b — Handmatige absolute overrides (hoogste prioriteit, altijd)
   if (senderEmail) {
     try {
       const { data: manualPat } = await supabase.from('email_patterns')
