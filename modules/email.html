@@ -776,6 +776,19 @@
     }
     .nrp-cancel:hover { color: var(--text); }
 
+    /* ── Taak modal ── */
+    .taak-confirm-body { padding: 20px 24px 24px; }
+    .taak-confirm-subject { font-size: 13px; color: var(--text); background: rgba(255,255,255,0.05); padding: 8px 12px; border-radius: 6px; margin: 8px 0 20px; border-left: 3px solid var(--accent-cyan); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .taak-confirm-actions { display: flex; gap: 8px; justify-content: flex-end; }
+    .taak-form-body { padding: 20px 24px; display: flex; flex-direction: column; gap: 13px; max-height: calc(100vh - 200px); overflow-y: auto; }
+    .taak-form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .taak-form-label { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; font-weight: 600; color: var(--text-faint); margin-bottom: 4px; display: block; }
+    .taak-form-input, .taak-form-select, .taak-form-textarea { width: 100%; background: var(--bg); border: 1px solid var(--border-strong); color: var(--text); padding: 8px 11px; border-radius: 7px; font-size: 13px; font-family: inherit; box-sizing: border-box; }
+    .taak-form-input:focus, .taak-form-select:focus, .taak-form-textarea:focus { outline: none; border-color: var(--accent-cyan); }
+    .taak-form-textarea { resize: vertical; min-height: 80px; }
+    .taak-email-ref { font-size: 12px; color: var(--text-faint); padding: 8px 12px; background: rgba(255,255,255,0.04); border-radius: 6px; border: 1px solid var(--border); }
+    .taak-created-badge { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; padding: 2px 8px; border-radius: 10px; background: rgba(34,197,94,0.12); border: 1px solid rgba(34,197,94,0.3); color: #4ade80; white-space: nowrap; }
+
     /* ── Leerrapport modal ── */
     .lr-modal-body { padding: 24px; display: flex; flex-direction: column; gap: 20px; }
     .lr-stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; }
@@ -1109,6 +1122,13 @@
   </div>
 </div>
 
+<!-- ── Taak modal ── -->
+<div id="taakModal" class="modal-overlay hidden" onclick="closeTaakModal()">
+  <div class="modal-box" id="taakModalBox" style="max-width:560px" onclick="event.stopPropagation()">
+    <!-- Gevuld door renderTaakModal() -->
+  </div>
+</div>
+
 <div id="toast" class="toast"></div>
 
 <script>
@@ -1231,8 +1251,14 @@
     showCc:          {},         // uid → bool
     showBcc:         {},         // uid → bool
     replyCc:         {},         // uid → cc tekst
-    replyBcc:        {}          // uid → bcc tekst
+    replyBcc:        {},         // uid → bcc tekst
+    taakCreated:     loadJson('email_taak_created', {})  // uid → true
   };
+
+  // ── Taak modal state (buiten render cycle) ────────────────────────────────
+  let _taakModalUid  = null;
+  let _taakModalMode = null;   // 'confirm' | 'form'
+  let _taakSentBody  = '';     // tijdelijk: antwoord dat verstuurd is
 
   // ── localStorage helpers ───────────────────────────────────────────────────
   function loadJson(key, fallback) {
@@ -2539,6 +2565,7 @@
       render();
       const kbToast = shouldSaveKb && !state.kbSaved[uid] ? ' · Toegevoegd aan kennisbank' : '';
       showToast('✓ E-mail verstuurd · Verwijderd uit Actie vereist' + kbToast + (wasEdited ? ' · voorbeeld opgeslagen' : ''));
+      if (!state.taakCreated[uid]) setTimeout(() => openTaakConfirm(uid, body), 400);
     } catch (err) {
       // Fout: herstel proposal zodat gebruiker opnieuw kan proberen
       state.aiProposals[uid] = { ...proposal, sending: false };
@@ -2632,17 +2659,194 @@
     render();
   }
 
+  // ── Taak aanmaken vanuit mail ──────────────────────────────────────────────
+  function _taakAutoFill(uid, email, sentBody) {
+    const inBody    = state.bodyCache[uid]?.text || '';
+    const subject   = email.subject || '(geen onderwerp)';
+    const fromName  = email.fromName || email.from || 'Onbekend';
+    const cat       = email.category || 'Algemeen';
+    const bodyLower = (inBody + ' ' + subject).toLowerCase();
+
+    // Taaknaam
+    const titleMap = {
+      'Factuurvraag': 'Opvolgen factuurvraag — ' + fromName,
+      'Klantvraag':   'Terugkoppeling klant — ' + fromName,
+      'Nieuwe Lead':  'Lead opvolgen — ' + fromName,
+      'Klacht':       'Klacht afhandelen — ' + fromName,
+      'Appointment':  'Afspraak bevestigen — ' + fromName,
+    };
+    const titel = (titleMap[cat] || ('Opvolgen: ' + subject)).slice(0, 100);
+
+    // Omschrijving
+    const now = new Date().toLocaleString('nl-NL', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+    const lines = [
+      'Reactie verstuurd op ' + now + (email.mailbox ? ' via ' + email.mailbox : ''),
+      'Klant: ' + fromName + (email.fromAddress ? ' (' + email.fromAddress + ')' : ''),
+      'Onderwerp: ' + subject,
+      '',
+      'Samenvatting mail:',
+      inBody.slice(0, 300) || '(geen inhoud beschikbaar)',
+    ];
+    if (sentBody) lines.push('', 'Verstuurd antwoord:', sentBody.slice(0, 200));
+    const omschrijving = lines.join('\n');
+
+    // Categorie
+    const catMap = { 'Klantvraag': 'Klant', 'Factuurvraag': 'Factuur', 'Reclame': 'Intern',
+                     'Overig': 'Intern', 'Nieuwe Lead': 'Lead', 'Appointment': 'Afspraak' };
+    const categorie = catMap[cat] || 'Overige';
+
+    // Prioriteit
+    let prioriteit = 'Normaal';
+    if (cat === 'Factuurvraag' || cat === 'Nieuwe Lead') prioriteit = 'Hoog';
+    if (cat === 'Klacht') prioriteit = 'Urgent';
+    if (/dringend|urgent|zo snel mogelijk|vandaag/.test(bodyLower)) prioriteit = 'Urgent';
+    else if (/graag|wanneer|terugbellen/.test(bodyLower) && prioriteit !== 'Urgent') prioriteit = 'Hoog';
+
+    // Deadline
+    const addDays = (n) => { const d = new Date(); d.setHours(0,0,0,0); d.setDate(d.getDate() + n); return d.toISOString().slice(0, 10); };
+    const nextFri  = () => { const d = new Date(); d.setHours(0,0,0,0); const diff = (5 - d.getDay() + 7) % 7 || 7; d.setDate(d.getDate() + diff); return d.toISOString().slice(0, 10); };
+    const deadline = prioriteit === 'Urgent' ? addDays(1) : prioriteit === 'Hoog' ? addDays(2) : prioriteit === 'Normaal' ? addDays(3) : nextFri();
+
+    // Standaard toegewezen aan Jeffrey
+    const collegas = (() => { try { return JSON.parse(localStorage.getItem('taken_collegas') || '[]'); } catch { return []; } })();
+    const jeffrey  = collegas.find((c) => c.naam && c.naam.toLowerCase().includes('jeffrey'));
+    const toegewezenAan = jeffrey?.id || '';
+
+    return { titel, omschrijving, categorie, prioriteit, deadline, toegewezenAan };
+  }
+
   function openTaakVanEmail(uid) {
     const email = findEmail(uid);
     if (!email) return;
-    const params = new URLSearchParams({
-      from_email: uid,
-      subject:    email.subject || '',
-      categorie:  (email.category === 'Nieuwe Lead' || email.category === 'Klantvraag') ? 'Klant' : 'E-mail',
-      titel:      email.subject ? 'Opvolgen: ' + email.subject : 'Opvolgen e-mail',
-      prioriteit: ['Nieuwe Lead','Appointment'].includes(email.category) ? 'Hoog' : 'Normaal'
-    });
-    window.location.href = 'taken.html?' + params.toString();
+    if (!state.bodyCache[uid]) fetchEmailBody(email);
+    _taakModalUid  = uid;
+    _taakModalMode = 'form';
+    _taakSentBody  = '';
+    renderTaakModal();
+    document.getElementById('taakModal').classList.remove('hidden');
+  }
+
+  function openTaakConfirm(uid, sentBody) {
+    _taakModalUid  = uid;
+    _taakModalMode = 'confirm';
+    _taakSentBody  = sentBody || '';
+    renderTaakModal();
+    document.getElementById('taakModal').classList.remove('hidden');
+  }
+
+  function closeTaakModal() {
+    document.getElementById('taakModal').classList.add('hidden');
+    _taakModalUid = null;
+    _taakModalMode = null;
+  }
+
+  function renderTaakModal() {
+    const box   = document.getElementById('taakModalBox');
+    const uid   = _taakModalUid;
+    const email = findEmail(uid);
+    if (!box || !email) return;
+
+    if (_taakModalMode === 'confirm') {
+      const subj = escapeHtml(email.subject || '(geen onderwerp)');
+      box.innerHTML =
+        '<div class="modal-header"><h3>📋 Taak aanmaken?</h3><button class="modal-close" onclick="closeTaakModal()">&times;</button></div>' +
+        '<div class="taak-confirm-body">' +
+          '<div style="font-size:13px;color:var(--text-dim);margin-bottom:6px">Je hebt geantwoord op:</div>' +
+          '<div class="taak-confirm-subject">' + subj + '</div>' +
+          '<div class="taak-confirm-actions">' +
+            '<button class="btn" onclick="closeTaakModal()">Nee, sluiten</button>' +
+            '<button class="btn btn-primary" onclick="_taakModalMode=\'form\';renderTaakModal()">Ja, maak taak aan</button>' +
+          '</div>' +
+        '</div>';
+      return;
+    }
+
+    // Form mode
+    const f = _taakAutoFill(uid, email, _taakSentBody);
+    const cats = ['Overige','E-mail','Factuur','Klant','Intern','Afspraak','Lead'];
+    const prios = ['Laag','Normaal','Hoog','Urgent'];
+    const collegas = (() => { try { return JSON.parse(localStorage.getItem('taken_collegas') || '[]'); } catch { return []; } })();
+    const catOpts  = cats.map((c) => '<option value="' + c + '"' + (c === f.categorie ? ' selected' : '') + '>' + c + '</option>').join('');
+    const prioOpts = prios.map((p) => '<option value="' + p + '"' + (p === f.prioriteit ? ' selected' : '') + '>' + p + '</option>').join('');
+    const colOpts  = '<option value="">— Niemand —</option>' + collegas.filter((c) => c.naam).map((c) => '<option value="' + escapeHtml(c.id) + '"' + (c.id === f.toegewezenAan ? ' selected' : '') + '>' + escapeHtml(c.naam) + '</option>').join('');
+
+    box.innerHTML =
+      '<div class="modal-header"><h3>📋 Taak aanmaken</h3><button class="modal-close" onclick="closeTaakModal()">&times;</button></div>' +
+      '<div class="taak-form-body">' +
+        '<div><label class="taak-form-label">Taaknaam *</label><input class="taak-form-input" id="tfTitel" value="' + escapeHtml(f.titel) + '" /></div>' +
+        '<div><label class="taak-form-label">Omschrijving</label><textarea class="taak-form-textarea" id="tfOmschrijving" style="min-height:100px">' + escapeHtml(f.omschrijving) + '</textarea></div>' +
+        '<div class="taak-form-row">' +
+          '<div><label class="taak-form-label">Prioriteit</label><select class="taak-form-select" id="tfPrioriteit">' + prioOpts + '</select></div>' +
+          '<div><label class="taak-form-label">Categorie</label><select class="taak-form-select" id="tfCategorie">' + catOpts + '</select></div>' +
+        '</div>' +
+        '<div class="taak-form-row">' +
+          '<div><label class="taak-form-label">Toegewezen aan</label><select class="taak-form-select" id="tfToegewezen">' + colOpts + '</select></div>' +
+          '<div><label class="taak-form-label">Deadline</label><input class="taak-form-input" type="date" id="tfDeadline" value="' + f.deadline + '" /></div>' +
+        '</div>' +
+        '<div class="taak-email-ref">📧 Gelinkt aan: <strong>' + escapeHtml(email.subject || '(geen onderwerp)') + '</strong> van ' + escapeHtml(email.fromName || email.from || '?') + '</div>' +
+      '</div>' +
+      '<div class="modal-footer">' +
+        '<button class="btn" onclick="closeTaakModal()">Annuleren</button>' +
+        '<button class="btn btn-primary" onclick="createTaakFromModal()">✓ Taak aanmaken</button>' +
+      '</div>';
+  }
+
+  async function createTaakFromModal() {
+    const uid   = _taakModalUid;
+    const email = findEmail(uid);
+    if (!uid || !email) return;
+
+    const titel       = document.getElementById('tfTitel')?.value.trim() || 'Opvolgen e-mail';
+    const omschrijving= document.getElementById('tfOmschrijving')?.value || '';
+    const prioriteit  = document.getElementById('tfPrioriteit')?.value  || 'Normaal';
+    const categorie   = document.getElementById('tfCategorie')?.value   || 'Overige';
+    const toegewezenAan = document.getElementById('tfToegewezen')?.value || '';
+    const deadline    = document.getElementById('tfDeadline')?.value    || '';
+
+    const taak = {
+      id:           'taak_' + uid + '_' + Date.now(),
+      titel,
+      omschrijving,
+      prioriteit,
+      categorie,
+      toegewezenAan,
+      deadline,
+      emailId:      uid,
+      emailSubject: email.subject || '',
+      status:       'todo',
+      notities:     '',
+      aangemaakt:   new Date().toISOString(),
+      afgerondOp:   null
+    };
+
+    // Sla op in localStorage (taken.html leest dit)
+    try {
+      const lijst = JSON.parse(localStorage.getItem('taken_lijst') || '[]');
+      lijst.unshift(taak);
+      localStorage.setItem('taken_lijst', JSON.stringify(lijst));
+    } catch {}
+
+    // Sync naar Supabase
+    fetch('/api/taken', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ task: taak })
+    }).catch(() => {});
+
+    // Markeer als aangemaakt
+    state.taakCreated[uid] = true;
+    saveJson('email_taak_created', state.taakCreated);
+
+    // Update taken badge in sidebar
+    try {
+      const lijst = JSON.parse(localStorage.getItem('taken_lijst') || '[]');
+      const urgent = lijst.filter((t) => t.status !== 'done' && (t.prioriteit === 'Urgent' || t.prioriteit === 'Hoog')).length;
+      const badge = document.getElementById('navTakenBadge');
+      if (badge) { badge.textContent = urgent; badge.classList.toggle('show', urgent > 0); }
+    } catch {}
+
+    closeTaakModal();
+    render();
+    showToast('✓ Taak aangemaakt · ' + titel.slice(0, 50));
   }
 
   // ── Bulk reclame actions ───────────────────────────────────────────────────
@@ -3212,6 +3416,8 @@
           (showGenBtn ? '<button class="btn btn-ai btn-sm" data-action="generate" data-uid="' + escapeHtml(e.uid) + '">' + ICON_AI + ' AI antwoord</button>' : '') +
           (kbSaved ? '<span class="kb-saved-badge">📚 In kennisbank</span>'
             : '<button class="btn btn-sm" data-kb-open="' + escapeHtml(e.uid) + '">📚 Kennisbank</button>') +
+          (state.taakCreated[e.uid] ? '<span class="taak-created-badge">📋 Taak aangemaakt</span>'
+            : '<button class="btn btn-sm" data-action="create-task" data-uid="' + escapeHtml(e.uid) + '">📋 Taak</button>') +
         '</div>' +
         (state.openKbPanel === e.uid ? renderKbPanel(e) : '') +
       '</div>' +
@@ -3370,6 +3576,8 @@
         '<button class="btn" data-action="verplaats-train" data-uid="' + escapeHtml(e.uid) + '" title="Verplaats mail en train de agent met context">📂 Verplaats &amp; Train</button>' +
         (kbSaved ? '<span class="kb-saved-badge">📚 In kennisbank</span>'
           : '<button class="btn" data-action="kb-open" data-uid="' + escapeHtml(e.uid) + '">📚 Kennisbank</button>') +
+        (state.taakCreated[e.uid] ? '<span class="taak-created-badge">📋 Taak aangemaakt</span>'
+          : '<button class="btn" data-action="create-task" data-uid="' + escapeHtml(e.uid) + '">📋 Taak</button>') +
       '</div>' +
       (state.openKbPanel === e.uid ? renderKbPanel(e) : '') +
       (state.openVtPanel === e.uid ? renderVtPanel(e.uid) : '') +
@@ -4184,6 +4392,11 @@
         const el = document.getElementById('searchInput');
         if (el) { ev.preventDefault(); el.focus(); el.select(); }
       }
+    });
+
+    // ESC → sluit taak modal
+    document.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Escape' && _taakModalUid) closeTaakModal();
     });
 
     // Ctrl+Z / Cmd+Z → undo laatste actie
