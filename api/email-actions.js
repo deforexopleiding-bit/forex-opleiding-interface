@@ -18,7 +18,8 @@ import { supabase } from './supabase.js';
 
 const VALID_ACTIONS = [
   'recategorize', 'mark-action', 'no-action',
-  'snooze', 'unsnooze', 'mark-read', 'create-task'
+  'snooze', 'unsnooze', 'mark-read', 'create-task',
+  'reply_sent'
 ];
 
 export default async function handler(req, res) {

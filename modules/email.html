@@ -2481,7 +2481,7 @@
     if (state.activeTab === 'actie') updateActieCard(uid); else render();
 
     try {
-      const sendPayload = { from_mailbox: fromMailbox, to: toAddr, subject, text: body };
+      const sendPayload = { from_mailbox: fromMailbox, to: toAddr, subject, text: body, email_id: uid, category: email.category };
       if (ccVal)  sendPayload.cc  = ccVal;
       if (bccVal) sendPayload.bcc = bccVal;
       const res  = await fetch('/api/send-email', {
