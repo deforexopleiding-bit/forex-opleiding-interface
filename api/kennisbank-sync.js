@@ -28,23 +28,27 @@ export default async function handler(req, res) {
   if (body.action === 'upsert_item') {
     const item = body.item;
     if (!item) return res.status(400).json({ error: 'item vereist' });
-    const localId = item.id || null;
+
+    // Gebruik item.label als deduplicatiesleutel (niet item.id — auto-gegenereerde items hebben geen id)
+    const labelKey = item.label || item.id || null;
 
     try {
-      // Zoek bestaand item op local_id (label veld)
-      const { data: existing } = localId
-        ? await supabase.from('kennisbank_items').select('id').eq('label', localId).maybeSingle()
+      const { data: existing } = labelKey
+        ? await supabase.from('kennisbank_items').select('id').eq('label', labelKey).maybeSingle()
         : { data: null };
 
       const payload = {
-        type:      item.type      || 'Algemeen',
-        direction: item.richting  || item.direction || null,
-        title:     (item.content  || '').slice(0, 80) || 'Item',
-        category:  item.fileName  || null,
-        content:   item.content   || '',
-        note:      item.note      || null,
-        label:     localId,
-        updated_at: new Date().toISOString()
+        type:             item.type            || 'Algemeen',
+        direction:        item.direction       || item.richting || null,
+        title:            (item.title || '').slice(0, 200) || (item.content || '').slice(0, 80) || 'Item',
+        content:          item.content         || '',
+        note:             item.note            || null,
+        label:            labelKey,
+        auto_generated:   item.auto_generated  ?? false,
+        source_email_id:  item.source_email_id ? String(item.source_email_id) : null,
+        helpfulness_score: item.helpfulness_score ?? 0,
+        times_used:       item.times_used      ?? 0,
+        updated_at:       new Date().toISOString()
       };
 
       if (existing) {
@@ -52,11 +56,10 @@ export default async function handler(req, res) {
       } else {
         await supabase.from('kennisbank_items').insert({
           ...payload,
-          helpfulness_score: 0,
-          times_used: 0,
-          auto_generated: false
+          created_at: new Date().toISOString()
         });
       }
+      console.log(`[kennisbank-sync] upsert_item → label: ${labelKey} | auto: ${payload.auto_generated} | title: ${payload.title.slice(0, 40)}`);
       return res.status(200).json({ ok: true });
     } catch (err) {
       console.error('[kennisbank-sync] upsert_item fout:', err.message);

@@ -4194,7 +4194,11 @@
   function initTabs() {
     document.getElementById('tabBar').querySelectorAll('.tab').forEach((btn) => {
       btn.addEventListener('click', () => {
-        state.activeTab = btn.dataset.tab;
+        const newTab = btn.dataset.tab;
+        // Verzonden: reset verzondenLoaded zodat bij elk bezoek vers data geladen wordt
+        // Lokale items (unshift na send) blijven bewaard door merge in loadVerzondenEmails
+        if (newTab === 'verzonden') state.verzondenLoaded = false;
+        state.activeTab = newTab;
         document.querySelectorAll('#tabBar .tab').forEach((t) => t.classList.toggle('active', t === btn));
         render();
       });
@@ -4397,8 +4401,6 @@
 
   // ── Kennisbank status ─────────────────────────────────────────────────────
   async function checkKennisbankStatus() {
-    const localItems = loadJson('kennisbank_items', []);
-    if (localItems.length > 0) return;
     try {
       const res = await fetch('/api/kennisbank-sync');
       if (!res.ok) return;
@@ -4406,9 +4408,9 @@
       const realItems = (data.items || []).filter(
         (i) => i.label !== '_profile' && i.type !== 'bedrijfsprofiel'
       );
-      if (realItems.length === 0) {
-        document.getElementById('kb-status-banner')?.classList.remove('hidden');
-      }
+      const banner = document.getElementById('kb-status-banner');
+      if (banner) banner.classList.toggle('hidden', realItems.length > 0);
+      console.log(`[Kennisbank] ${realItems.length} items in Supabase`);
     } catch {}
   }
 
