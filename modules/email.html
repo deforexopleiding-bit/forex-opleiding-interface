@@ -3073,6 +3073,11 @@
   function renderKbPanel(e) {
     const f = state.kbForm[e.uid] || { direction: 'both', category: 'Algemeen', note: '', tags: [] };
     const hasReply = !!(state.sentReplies[e.uid] || state.aiProposals[e.uid]?.current);
+    const incomingPreview = (state.bodyCache[e.uid]?.text || '').slice(0, 300);
+    const outgoingPreview = (state.aiProposals[e.uid]?.current || '').slice(0, 300);
+    const showIncoming = f.direction === 'both' || f.direction === 'incoming';
+    const showOutgoing = (f.direction === 'both' || f.direction === 'outgoing') && outgoingPreview;
+    const previewStyle = 'font-size:11px;color:var(--text-dim);background:rgba(0,0,0,0.2);border-radius:6px;padding:6px 8px;max-height:80px;overflow-y:auto;white-space:pre-wrap;word-break:break-word;margin-bottom:6px';
     return '<div class="kb-panel">' +
       '<div class="kb-panel-title">📚 Toevoegen aan kennisbank</div>' +
       '<div style="font-size:11px;color:var(--text-faint);margin-bottom:6px">Richting:</div>' +
@@ -3082,6 +3087,8 @@
           .map((d) => '<button class="kb-chip' + (f.direction === d.val ? ' active' : '') + '" data-kb-dir="' + d.val + '" data-uid="' + escapeHtml(e.uid) + '">' + d.label + '</button>')
           .join('') +
       '</div>' +
+      (showIncoming && incomingPreview ? '<div style="font-size:11px;color:var(--text-faint);margin:4px 0 2px">Inkomend (voorbeeld):</div><div style="' + previewStyle + '">' + escapeHtml(incomingPreview) + (incomingPreview.length >= 300 ? '…' : '') + '</div>' : '') +
+      (showOutgoing ? '<div style="font-size:11px;color:var(--text-faint);margin:4px 0 2px">Mijn antwoord (voorbeeld):</div><div style="' + previewStyle + '">' + escapeHtml(outgoingPreview) + (outgoingPreview.length >= 300 ? '…' : '') + '</div>' : '') +
       '<div style="font-size:11px;color:var(--text-faint);margin:6px 0 4px">Categorie:</div>' +
       '<div class="kb-cat-row">' +
         KB_CATEGORIES.map((c) => '<button class="kb-chip' + (f.category === c ? ' active' : '') + '" data-kb-cat="' + escapeHtml(c) + '" data-uid="' + escapeHtml(e.uid) + '">' + escapeHtml(c) + '</button>').join('') +
@@ -3132,7 +3139,7 @@
     const outgoingBody = aiProposal?.current || '';
     let content;
     if (f.direction === 'both') {
-      content = 'INKOMEND:\n' + incomingBody + (outgoingBody ? '\n\nMIJN ANTWOORD:\n' + outgoingBody : '');
+      content = 'INKOMEND (van klant):\n' + incomingBody + (outgoingBody ? '\n\n---\n\nMIJN ANTWOORD:\n' + outgoingBody : '');
     } else if (f.direction === 'incoming') {
       content = incomingBody;
     } else {
@@ -3161,11 +3168,12 @@
 
   async function autoSaveKbItem(uid, email, sentBody) {
     const incomingBody = state.bodyCache[uid]?.text || '';
-    const content = 'INKOMEND:\n' + incomingBody + '\n\nMIJN ANTWOORD:\n' + sentBody;
+    const content = 'INKOMEND (van klant):\n' + incomingBody + '\n\n---\n\nMIJN ANTWOORD:\n' + sentBody;
     const item = {
       type: email.category || 'Algemeen', direction: 'Beide',
       title: (email.subject || '(geen onderwerp)').slice(0, 80), content,
-      label: 'email_' + uid, note: null, auto_generated: true, source_email_id: String(uid), helpfulness_score: 0, times_used: 0
+      label: 'email_' + uid, note: 'Auto-opgeslagen na verzenden — volledig gesprek',
+      auto_generated: true, source_email_id: String(uid), helpfulness_score: 0, times_used: 0
     };
     try {
       const res = await fetch('/api/kennisbank-sync', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'upsert_item', item }) });
