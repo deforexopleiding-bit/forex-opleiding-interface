@@ -381,6 +381,13 @@
       background: rgba(245,158,11,0.12); border: 1px solid rgba(245,158,11,0.25); color: var(--amber);
     }
     .reclame-bulk-bar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
+    .bulk-selectie-bar { position: sticky; top: 0; z-index: 20; background: rgba(26,24,48,0.97); border: 1px solid rgba(139,92,246,0.35); border-radius: 8px; padding: 10px 14px; margin-bottom: 12px; display: flex; align-items: center; gap: 10px; backdrop-filter: blur(4px); }
+    .bulk-selectie-bar .bulk-count { font-size: 13px; font-weight: 600; color: #a78bfa; flex: 1; }
+    .bulk-vt-chip { display: inline-flex; align-items: center; justify-content: center; padding: 5px 12px; border-radius: 6px; font-size: 12px; font-weight: 600; cursor: pointer; border: 1px solid var(--border-strong); background: var(--bg); color: var(--text); transition: background .12s, border-color .12s; }
+    .bulk-vt-chip:hover, .bulk-vt-chip.active { background: rgba(139,92,246,0.18); border-color: #7c3aed; color: #c4b5fd; }
+    .bulk-vt-section { margin-bottom: 14px; }
+    .bulk-vt-section-label { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--text-faint); font-weight: 600; margin-bottom: 6px; }
+    .bulk-vt-chips { display: flex; gap: 6px; flex-wrap: wrap; }
     .reclame-table {
       background: var(--bg-elev); border: 1px solid var(--border); border-radius: 12px; overflow: hidden;
     }
@@ -1134,6 +1141,12 @@
 <div id="taakModal" class="modal-overlay hidden" onclick="closeTaakModal()">
   <div class="modal-box" id="taakModalBox" style="max-width:560px" onclick="event.stopPropagation()">
     <!-- Gevuld door renderTaakModal() -->
+  </div>
+</div>
+
+<div id="bulkVtModal" class="modal-overlay hidden" onclick="closeBulkVtModal()">
+  <div class="modal-box" id="bulkVtModalBox" style="max-width:480px" onclick="event.stopPropagation()">
+    <!-- Gevuld door renderBulkVtModal() -->
   </div>
 </div>
 
@@ -2881,24 +2894,35 @@
 
   async function aiGenereerTaak(uid) {
     console.log('aiGenereerTaak aangeroepen voor uid:', uid);
-    const btn      = document.getElementById('btn-ai-taak-' + uid);
-    const textarea = document.getElementById('taak-omschrijving-' + uid);
-    console.log('btn element:', btn);
-    console.log('textarea element:', textarea);
-    if (!btn || !textarea) return;
 
-    const email = findEmail(uid);
-    if (!email) return;
+    const textarea =
+      document.getElementById('taak-omschrijving-' + uid) ||
+      document.querySelector('.taak-form-body textarea#taak-omschrijving-' + uid);
 
-    btn.innerHTML = '<span style="animation:spin 1s linear infinite;display:inline-block">⟳</span> Genereren...';
-    btn.disabled  = true;
-    textarea.placeholder = 'AI genereert taakomschrijving...';
-    const prev = textarea.value;
+    const btn =
+      document.getElementById('btn-ai-taak-' + uid) ||
+      document.querySelector('.btn-ai-taak-actief');
+
+    console.log('textarea element:', textarea, 'btn element:', btn);
+
+    if (!textarea) {
+      console.error('Textarea niet gevonden voor uid:', uid);
+      return;
+    }
+
+    const email = state.emails?.find((e) => String(e.uid) === String(uid)) || findEmail(uid);
+    if (!email) { console.error('Email niet gevonden voor uid:', uid); return; }
+
+    if (btn) { btn.innerHTML = '⟳ Genereren...'; btn.disabled = true; }
+    textarea.value = '';
+    textarea.placeholder = 'AI genereert...';
+
+    const body     = state.bodyCache?.[uid]?.text || state.bodyCache?.[String(uid)]?.text || '';
+    const antwoord = _taakSentBody || state.sentReplies?.[uid]?.body || '';
+
+    console.log('AI taak genereren voor:', email.subject, '| body lengte:', body.length);
 
     try {
-      const body     = state.bodyCache?.[uid]?.text || '';
-      const antwoord = _taakSentBody || state.sentReplies?.[uid]?.body || '';
-
       const res = await fetch('/api/generate-task', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -2907,31 +2931,36 @@
           from:     email.fromName || email.from || '',
           category: email.category || '',
           body,
-          reply:    antwoord,
+          reply: antwoord,
         }),
       });
 
       const data = await res.json();
-      console.log('API response:', data);
-      if (!res.ok || !data.description) throw new Error(data.error || 'Lege respons');
+      console.log('AI taak response:', data);
 
-      textarea.value       = data.description;
-      textarea.placeholder = '';
-      btn.innerHTML        = '✓ Gegenereerd';
-      btn.style.color      = '#1D9E75';
-      btn.style.borderColor = '#0F6E56';
-      setTimeout(() => {
-        btn.innerHTML        = '✨ Genereer met AI';
-        btn.style.color      = '#AFA9EC';
-        btn.style.borderColor = '#534AB7';
-        btn.disabled         = false;
-      }, 2500);
+      if (data.description) {
+        textarea.value            = data.description;
+        textarea.placeholder      = '';
+        textarea.style.border     = '1px solid #1D9E75';
+        if (btn) {
+          btn.innerHTML            = '✓ Gegenereerd';
+          btn.style.color          = '#1D9E75';
+          btn.style.borderColor    = '#0F6E56';
+          setTimeout(() => {
+            btn.innerHTML          = '✨ Genereer met AI';
+            btn.style.color        = '#AFA9EC';
+            btn.style.borderColor  = '#534AB7';
+            btn.disabled           = false;
+            textarea.style.border  = '';
+          }, 2500);
+        }
+      } else {
+        throw new Error('Geen description in response: ' + JSON.stringify(data));
+      }
     } catch (err) {
       console.error('AI taak genereren mislukt:', err);
-      textarea.value       = prev;
-      textarea.placeholder = 'Beschrijf wat er gedaan moet worden...';
-      btn.innerHTML        = '✨ Genereer met AI';
-      btn.disabled         = false;
+      if (btn) { btn.innerHTML = '✨ Genereer met AI'; btn.disabled = false; }
+      textarea.placeholder = 'Genereren mislukt — probeer opnieuw';
     }
   }
 
@@ -2989,6 +3018,85 @@
   function selectAllSuspects() {
     getSuspectEmails().forEach((e) => state.reclameSelected.add(e.uid));
     document.querySelectorAll('#suspectTable input[type="checkbox"]').forEach((cb) => { cb.checked = true; cb.closest('.reclame-row').classList.add('selected'); });
+  }
+
+  // ── Bulk Verplaats & Train ─────────────────────────────────────────────────
+  let _bulkVtCat     = '';
+  let _bulkVtSection = '';
+  let _bulkVtReason  = '';
+
+  function openBulkVtModal() {
+    _bulkVtCat = ''; _bulkVtSection = ''; _bulkVtReason = '';
+    const modal = document.getElementById('bulkVtModal');
+    if (!modal) return;
+    modal.classList.remove('hidden');
+    renderBulkVtModal();
+  }
+  function closeBulkVtModal() {
+    document.getElementById('bulkVtModal')?.classList.add('hidden');
+  }
+  function renderBulkVtModal() {
+    const box = document.getElementById('bulkVtModalBox');
+    if (!box) return;
+    const n    = state.reclameSelected.size;
+    const cats = ['Nieuwe Lead','Appointment','Klantvraag','Factuurvraag','Overige'];
+    const secs = [['actie','Actie vereist'],['info','Leadmanagement'],['reclame','Reclame/Overige']];
+    const reasons = ['Betaalbevestiging','Systeemmail','Geen vraag','Spam','Fout herkend'];
+    const catChips = cats.map((c) =>
+      '<button type="button" class="bulk-vt-chip' + (c === _bulkVtCat ? ' active' : '') +
+      '" onclick="_bulkVtCat=\'' + c + '\';renderBulkVtModal()">' + c + '</button>'
+    ).join('');
+    const secChips = secs.map(([k,l]) =>
+      '<button type="button" class="bulk-vt-chip' + (k === _bulkVtSection ? ' active' : '') +
+      '" onclick="_bulkVtSection=\'' + k + '\';renderBulkVtModal()">' + l + '</button>'
+    ).join('');
+    const rsChips = reasons.map((r) =>
+      '<button type="button" class="bulk-vt-chip' + (r === _bulkVtReason ? ' active' : '') +
+      '" onclick="_bulkVtReason=\'' + r + '\';renderBulkVtModal()">' + r + '</button>'
+    ).join('');
+    box.innerHTML =
+      '<div class="modal-header"><h3>📂 ' + n + ' mail' + (n > 1 ? 's' : '') + ' verplaatsen</h3><button class="modal-close" onclick="closeBulkVtModal()">&times;</button></div>' +
+      '<div style="padding:18px 22px;display:flex;flex-direction:column;gap:16px">' +
+        '<div class="bulk-vt-section"><div class="bulk-vt-section-label">Naar welke categorie?</div><div class="bulk-vt-chips">' + catChips + '</div></div>' +
+        '<div class="bulk-vt-section"><div class="bulk-vt-section-label">Naar welke tab?</div><div class="bulk-vt-chips">' + secChips + '</div></div>' +
+        '<div class="bulk-vt-section"><div class="bulk-vt-section-label">Waarom? (optioneel)</div><div class="bulk-vt-chips">' + rsChips + '</div>' +
+          '<input class="taak-form-input" id="bulkVtReasonText" placeholder="Eigen reden..." style="margin-top:8px" value="" /></div>' +
+      '</div>' +
+      '<div class="modal-footer">' +
+        '<button class="btn" onclick="closeBulkVtModal()">Annuleren</button>' +
+        '<button class="btn btn-primary" onclick="executeBulkVt()">✓ Verplaats alle ' + n + ' mail' + (n > 1 ? 's' : '') + '</button>' +
+      '</div>';
+  }
+  async function executeBulkVt() {
+    if (!_bulkVtCat) { showToast('Selecteer eerst een categorie'); return; }
+    const uids   = [...state.reclameSelected];
+    const reason = _bulkVtReason || document.getElementById('bulkVtReasonText')?.value || 'bulk_correctie';
+    let moved = 0;
+    for (const uid of uids) {
+      const email = state.emails.find((e) => String(e.uid) === String(uid));
+      if (!email) continue;
+      const oldCat   = email.category;
+      email.category = _bulkVtCat;
+      if (_bulkVtSection) {
+        const flagVal = _bulkVtSection === 'actie' ? true : _bulkVtSection === 'info' ? false : null;
+        setActionFlag(uid, flagVal);
+        saveEmailAction(uid, 'move-' + _bulkVtSection, true);
+      }
+      fetch('/api/learn', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'correct_category', email_id: uid,
+          old_category: oldCat, new_category: _bulkVtCat,
+          reason, sender_domain: (email.fromAddress || email.from || '').split('@')[1] || '',
+          body_snippet: (state.bodyCache?.[uid]?.text || '').slice(0, 200),
+        }),
+      }).catch(() => {});
+      moved++;
+    }
+    state.reclameSelected.clear();
+    closeBulkVtModal();
+    render();
+    showToast('✓ ' + moved + ' mail' + (moved > 1 ? 's' : '') + ' verplaatst naar ' + _bulkVtCat + ' · Agent getraind');
   }
 
   // ── Filtering ──────────────────────────────────────────────────────────────
@@ -4097,6 +4205,15 @@
 
     let html = '';
 
+    if (state.reclameSelected.size > 0) {
+      const n = state.reclameSelected.size;
+      html += '<div class="bulk-selectie-bar">' +
+        '<span class="bulk-count">' + n + ' mail' + (n > 1 ? 's' : '') + ' geselecteerd</span>' +
+        '<button class="btn btn-sm" style="background:rgba(139,92,246,0.2);border-color:#7c3aed;color:#c4b5fd" onclick="openBulkVtModal()">📂 Verplaats &amp; Train</button>' +
+        '<button class="btn btn-sm" onclick="state.reclameSelected.clear();render()">✕ Deselecteer alles</button>' +
+      '</div>';
+    }
+
     if (suspectEmails.length) {
       html += '<div class="reclame-section">' +
         '<div class="reclame-section-title">Twijfelgevallen <span class="suspect-badge">' + suspectEmails.length + ' mogelijk reclame</span></div>' +
@@ -4250,13 +4367,15 @@
     const appts       = filtered.filter((e) => e.category === 'Appointment').length;
     const events      = filtered.filter((e) => e.category === 'Event Aanmelding').length;
     const total       = filtered.length;
-    const openFact    = filtered.filter((e) => e.category === 'Factuurvraag' && e.unread).length;
+    const openFact    = state.emails.filter((e) => e.category === 'Factuurvraag' && !state.sentReplies[e.uid]).length;
     const onbeantw    = filtered.filter((e) => e.unread && !INFO_CATS.has(e.category) && e.category !== 'Reclame').length;
     const conv        = leads > 0 ? Math.round((appts / leads) * 100) + '%' : '—';
 
-    // Leads deze week (laatste 7 dagen, ongeacht datumfilter)
+    // Leads deze week (vanaf maandag van huidige week, ongeacht datumfilter)
     const t0w = new Date(); t0w.setHours(0,0,0,0);
-    const weekFrom = new Date(t0w); weekFrom.setDate(weekFrom.getDate() - 6);
+    const dayOfWeek = t0w.getDay(); // 0=zo, 1=ma, ..., 6=za
+    const daysToMonday = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
+    const weekFrom = new Date(t0w); weekFrom.setDate(weekFrom.getDate() + daysToMonday);
     const tom = new Date(t0w); tom.setDate(tom.getDate() + 1);
     const leadsWeek = state.emails.filter((e) => {
       if (e.category !== 'Nieuwe Lead') return false;

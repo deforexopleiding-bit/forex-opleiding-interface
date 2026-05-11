@@ -29,6 +29,11 @@ const EXPECTED = {
     { col: 'auto_generated',    sql: 'boolean DEFAULT false' },
     { col: 'source_email_id',   sql: 'text' },
   ],
+  email_replies: [
+    { col: 'email_id',    sql: 'text' },
+    { col: 'cc_address',  sql: 'text' },
+    { col: 'bcc_address', sql: 'text' },
+  ],
 };
 
 // Tabellen die aangemaakt moeten worden als ze niet bestaan
@@ -47,10 +52,13 @@ CREATE INDEX IF NOT EXISTS email_actions_email_id_idx ON email_actions (email_id
 ALTER TABLE email_actions DISABLE ROW LEVEL SECURITY;`,
   email_replies: `CREATE TABLE IF NOT EXISTS email_replies (
   id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+  email_id text,
   email_subject text,
   final_reply text,
   from_address text,
   to_address text,
+  cc_address text,
+  bcc_address text,
   sent_at timestamptz DEFAULT now()
 );
 ALTER TABLE email_replies DISABLE ROW LEVEL SECURITY;`,

@@ -75,10 +75,13 @@ export default async function handler(req, res) {
     });
 
     supabase.from('email_replies').insert({
+      email_id:      email_id || null,
       email_subject: subject,
       final_reply:   text,
       from_address:  from_mailbox,
       to_address:    to,
+      cc_address:    cc || null,
+      bcc_address:   bcc || null,
       sent_at:       sentAt
     }).then(({ error }) => {
       if (error) console.warn('[send-email] email_replies opslaan mislukt:', error.message);

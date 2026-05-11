@@ -26,16 +26,16 @@ export default async function handler(req, res) {
     `E-mail van: ${from || 'Onbekend'}`,
     `Onderwerp: ${subject || '(geen onderwerp)'}`,
     `Categorie: ${category || 'Algemeen'}`,
-    `Inhoud: ${(body || '').slice(0, 600) || '(niet beschikbaar)'}`,
+    `Inhoud: ${body || '(niet beschikbaar)'}`,
   ];
-  if (reply) lines.push(`Verstuurd antwoord: ${reply.slice(0, 200)}`);
+  if (reply) lines.push(`Verstuurd antwoord: ${reply}`);
   lines.push('\nGenereer een concrete taakomschrijving.');
 
   try {
     const client = new Anthropic({ apiKey });
     const msg = await client.messages.create({
       model:      'claude-haiku-4-5-20251001',
-      max_tokens: 150,
+      max_tokens: 200,
       system:     SYSTEM_PROMPT,
       messages:   [{ role: 'user', content: lines.join('\n') }],
     });
@@ -43,7 +43,7 @@ export default async function handler(req, res) {
     const text = (msg.content?.[0]?.text || '').trim();
     if (!text) return res.status(500).json({ error: 'Lege respons van AI' });
 
-    console.log(`[generate-task] uid snippet: "${(bodySnippet || '').slice(0, 40)}" → "${text.slice(0, 60)}"`);
+    console.log(`[generate-task] onderwerp: "${(subject || '').slice(0, 40)}" → "${text.slice(0, 60)}"`);
     return res.status(200).json({ description: text });
   } catch (err) {
     console.error('[generate-task] fout:', err.message);
