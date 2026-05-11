@@ -69,20 +69,13 @@
       overflow-y: auto; overflow-x: hidden;
     }
     .sidebar-logo {
-      display: flex; align-items: center; gap: 11px;
-      padding: 22px 16px 18px;
+      display: flex; align-items: center; justify-content: center;
+      padding: 18px 16px 16px;
       border-bottom: 1px solid rgba(255,255,255,0.05);
       flex-shrink: 0;
     }
-    .sidebar-logo-icon {
-      width: 34px; height: 34px; flex-shrink: 0;
-      border-radius: 9px;
-      background: var(--accent-grad);
-      display: grid; place-items: center;
-      font-weight: 800; font-size: 12px; color: #0a0b10;
-    }
-    .sidebar-logo-title { font-size: 12.5px; font-weight: 700; color: var(--text); line-height: 1.25; white-space: nowrap; }
-    .sidebar-logo-sub   { font-size: 10px; color: var(--text-faint); margin-top: 2px; }
+    .sidebar-logo img { max-width: 140px; height: auto; display: block; }
+    .sidebar-logo-fallback { font-size: 13px; font-weight: 700; color: var(--text); white-space: nowrap; }
     .sidebar-nav { flex: 1; padding: 10px 8px; }
     .nav-section {
       font-size: 10px; text-transform: uppercase; letter-spacing: .7px;
@@ -289,12 +282,11 @@
 
 <!-- ══ SIDEBAR ══ -->
 <nav class="sidebar">
-  <div class="sidebar-logo">
-    <div class="sidebar-logo-icon">CC</div>
-    <div>
-      <div class="sidebar-logo-title">Command Center</div>
-      <div class="sidebar-logo-sub">De Forex Opleiding</div>
-    </div>
+  <div class="sidebar-logo" id="sidebarLogo">
+    <img id="sidebarLogoImg"
+      src="https://www.deforexopleiding.nl/wp-content/uploads/2023/01/Logo-De-Forex-Opleiding-wit.png"
+      alt="De Forex Opleiding"
+      onerror="handleLogoError()" />
   </div>
 
   <div class="sidebar-nav">
@@ -450,6 +442,23 @@
 </div><!-- /main -->
 
 <script>
+// ── Logo fallback ──
+function handleLogoError() {
+  const img = document.getElementById('sidebarLogoImg');
+  if (!img) return;
+  // Try localStorage base64 logo first
+  try {
+    const b64 = localStorage.getItem('signature_logo_base64');
+    if (b64 && b64.startsWith('data:image')) { img.src = b64; img.onerror = useFallbackText; return; }
+  } catch {}
+  useFallbackText();
+}
+function useFallbackText() {
+  const wrap = document.getElementById('sidebarLogo');
+  if (!wrap) return;
+  wrap.innerHTML = '<span class="sidebar-logo-fallback">De Forex Opleiding</span>';
+}
+
 // ═══════════════════════════════════
 // STATE
 // ═══════════════════════════════════
