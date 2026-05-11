@@ -21,15 +21,23 @@ function getDomain(email) {
   const i = (email || '').lastIndexOf('@');
   return i >= 0 ? email.slice(i + 1).toLowerCase() : '';
 }
+const STOPWORDS_AGENT = new Set(['de','het','een','voor','met','van','naar','die','dat','deze','dit',
+  'en','of','in','op','om','aan','is','als','bij','door','over','tot','uit','the','a','an',
+  'and','or','for','with','from','on','are','this','that','your']);
+
 function extractKeywords(text) {
-  const stopwords = new Set(['de','het','een','voor','met','van','naar','die','dat','deze','dit',
-    'en','of','in','op','om','aan','is','als','bij','door','over','tot','uit','the','a','an',
-    'and','or','for','with','from','on','are','this','that','your']);
   return (text || '').toLowerCase()
     .replace(/[^\p{L}\p{N}\s]+/gu, ' ')
     .split(/\s+/)
-    .filter((w) => w.length >= 4 && !stopwords.has(w))
+    .filter((w) => w.length >= 4 && !STOPWORDS_AGENT.has(w))
     .slice(0, 6);
+}
+function extractBodyKeywords(text, maxWords = 10) {
+  return (text || '').toLowerCase()
+    .replace(/[^\p{L}\p{N}\s]+/gu, ' ')
+    .split(/\s+/)
+    .filter((w) => w.length >= 4 && !STOPWORDS_AGENT.has(w))
+    .slice(0, maxWords);
 }
 
 // ── Harde inhoudsregels ───────────────────────────────────────────────────────
@@ -166,11 +174,12 @@ async function checkBlacklist(senderEmail, senderDomain) {
 }
 
 async function lookupHighConfidencePattern(senderEmail, senderDomain, subject, bodySnippet) {
+  let result = null;
   try {
     for (const [field, value] of [[senderEmail ? 'sender_email' : null, senderEmail], ['sender_domain', senderDomain]]) {
       if (!field || !value) continue;
       const query = supabase.from('email_patterns')
-        .select('category, confidence, times_seen, source')
+        .select('category, confidence, times_seen, source, requires_action')
         .gte('confidence', 85)
         .gte('times_seen', 3)
         .order('confidence', { ascending: false })
@@ -183,14 +192,36 @@ async function lookupHighConfidencePattern(senderEmail, senderDomain, subject, b
       if (data?.length) {
         const p = data[0];
         if (p.category === 'Reclame') {
-          if (countReclameSignals(subject, bodySnippet) >= 1) return p;
-          continue; // niet genoeg signalen — ga door naar AI
+          if (countReclameSignals(subject, bodySnippet) >= 1) { result = p; break; }
+          continue;
         }
-        return p;
+        result = p; break;
       }
     }
   } catch (e) { console.warn('[email-agent] pattern lookup fout:', e.message); }
-  return null;
+
+  // Body keyword fallback — patronen geleerd via Verplaats & Train
+  if (!result) {
+    const bodyKws = extractBodyKeywords(bodySnippet || '', 10);
+    if (bodyKws.length >= 4) {
+      try {
+        const { data: bkPatterns } = await supabase.from('email_patterns')
+          .select('category, confidence, times_seen, body_keywords, requires_action')
+          .not('body_keywords', 'is', null)
+          .gte('confidence', 75)
+          .gte('times_seen', 2);
+        for (const pat of (bkPatterns || [])) {
+          const overlap = (pat.body_keywords || []).filter((w) => bodyKws.includes(w)).length;
+          if (overlap >= 4) {
+            result = { category: pat.category, confidence: pat.confidence, source: 'body_learned', requires_action: pat.requires_action };
+            break;
+          }
+        }
+      } catch (e) { console.warn('[email-agent] body_keywords lookup fout:', e.message); }
+    }
+  }
+
+  return result;
 }
 
 // ── Kennisbank + correcties context ─────────────────────────────────────────

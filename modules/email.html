@@ -611,6 +611,23 @@
     .conf-dot.learned  { background: var(--accent-violet); }
     .conf-dot.uncertain{ background: var(--amber); }
 
+    /* ── Verplaats & Train panel ── */
+    .vt-panel { margin-top: 10px; padding: 12px 14px; background: var(--bg-elev-2); border: 1px solid var(--border-strong); border-radius: 10px; display: flex; flex-direction: column; gap: 10px; }
+    .vt-panel-label { font-size: 11px; font-weight: 600; color: var(--text-dim); text-transform: uppercase; letter-spacing: .06em; margin-bottom: 4px; }
+    .vt-cats { display: flex; flex-wrap: wrap; gap: 5px; }
+    .vt-cat-btn { font-family: inherit; font-size: 12px; font-weight: 600; padding: 4px 11px; border-radius: 999px; border: 1px solid var(--border-strong); background: var(--bg-elev); color: var(--text-dim); cursor: pointer; transition: all .15s; }
+    .vt-cat-btn.selected { background: rgba(83,74,183,0.18); border-color: rgba(83,74,183,0.5); color: #AFA9EC; }
+    .vt-tags { display: flex; flex-wrap: wrap; gap: 5px; }
+    .vt-tag { font-family: inherit; font-size: 11px; padding: 3px 9px; border-radius: 999px; border: 1px solid var(--border); background: transparent; color: var(--text-dim); cursor: pointer; transition: all .15s; }
+    .vt-tag.selected { background: rgba(34,211,238,0.10); border-color: rgba(34,211,238,0.35); color: var(--accent-cyan); }
+    .vt-action-btns { display: flex; gap: 6px; }
+    .vt-action-btn { font-family: inherit; font-size: 12px; padding: 4px 14px; border-radius: 8px; border: 1px solid var(--border-strong); background: transparent; color: var(--text-dim); cursor: pointer; transition: all .15s; }
+    .vt-action-btn.selected { background: rgba(34,197,94,0.12); border-color: rgba(34,197,94,0.35); color: var(--green); }
+    .vt-reason-input { width: 100%; box-sizing: border-box; font-family: inherit; font-size: 12px; background: var(--bg-elev); border: 1px solid var(--border); border-radius: 6px; padding: 6px 10px; color: var(--text-main); margin-top: 6px; }
+    .vt-reason-input::placeholder { color: var(--text-faint); }
+    .vt-confirm-btn { font-family: inherit; font-size: 13px; font-weight: 600; padding: 7px 16px; border-radius: 8px; border: none; background: var(--accent-grad); color: #0a0b10; cursor: pointer; align-self: flex-start; }
+    .vt-confirm-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
     /* ── Category filter pills ── */
     .cat-pills-bar { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 14px; align-items: center; }
     .cat-pills-label { font-size: 11px; color: var(--text-faint); font-weight: 600; text-transform: uppercase; letter-spacing: .08em; white-space: nowrap; }
@@ -1100,7 +1117,9 @@
     snoozeMap:   loadJson(SNOOZE_KEY,       {}), // uid -> ISO date string
     actionFlags: loadJson(ACTION_FLAGS_KEY, {}), // uid -> true (force actie) | false (no action)
     undoHistory: loadJson(UNDO_HISTORY_KEY, []),  // max 10 undo entries
-    pendingPropagation: null   // { uids, category, domain } waiting for user confirmation
+    pendingPropagation: null,  // { uids, category, domain } waiting for user confirmation
+    openVtPanel:   null,       // uid van open Verplaats & Train panel
+    vtPanelState:  { category: null, tags: [], requiresAction: null, reasonText: '' }
   };
 
   // ── localStorage helpers ───────────────────────────────────────────────────
@@ -1321,6 +1340,19 @@
           body: JSON.stringify({ action:'undo', id:entry.id, type, data }) }).catch(()=>{});
         showToast('↩ Kennisbank item verwijderd');
 
+      } else if (type === 'verplaats_train') {
+        const { email_id, old_category, old_requires_action } = data;
+        const email = findEmail(email_id);
+        if (email) {
+          email.category = old_category;
+          state.overrides.category[email_id] = old_category;
+          _aiCatCache[email_id] = old_category;
+          if (old_requires_action !== undefined) state.actionFlags[email_id] = old_requires_action;
+          saveOverrides(); saveJson(AI_CATS_KEY, _aiCatCache); saveJson(ACTION_FLAGS_KEY, state.actionFlags);
+          populateSuggestions(); render();
+        }
+        showToast('↩ Verplaatsing ongedaan gemaakt');
+
       } else {
         showToast('↩ Ongedaan gemaakt: ' + (entry.label || type));
       }
@@ -1496,6 +1528,137 @@
       '🎓 Confidence: <strong>' + pct + '</strong> · Methode: <strong>' + escapeHtml(method) + '</strong>' + priority +
       (signals !== '—' ? ' · Signalen: ' + escapeHtml(signals) : '') +
       '</div>';
+  }
+
+  // ── Verplaats & Train ────────────────────────────────────────────────────────
+  const VT_REASON_TAGS = ['Betaalbevestiging','Systeemmail','Notificatie','Geen vraag','Spam','Fout herkend'];
+
+  function renderVtPanel(uid) {
+    const ps = state.vtPanelState;
+    const catBtns = CATEGORIES.map((c) =>
+      '<button class="vt-cat-btn' + (ps.category === c ? ' selected' : '') +
+      '" onclick="vtSelectCat(\'' + c.replace(/'/g, "\\'") + '\')">' + escapeHtml(c) + '</button>'
+    ).join('');
+    const tagBtns = VT_REASON_TAGS.map((t) =>
+      '<button class="vt-tag' + (ps.tags.includes(t) ? ' selected' : '') +
+      '" onclick="vtToggleTag(\'' + t.replace(/'/g, "\\'") + '\')">' + escapeHtml(t) + '</button>'
+    ).join('');
+    const actJa  = '<button class="vt-action-btn' + (ps.requiresAction === true  ? ' selected' : '') + '" onclick="vtSelectAction(true)">Ja</button>';
+    const actNee = '<button class="vt-action-btn' + (ps.requiresAction === false ? ' selected' : '') + '" onclick="vtSelectAction(false)">Nee</button>';
+    return '<div class="vt-panel" id="vtPanel-' + escapeHtml(uid) + '">' +
+      '<div><div class="vt-panel-label">Naar welke categorie?</div><div class="vt-cats">' + catBtns + '</div></div>' +
+      '<div><div class="vt-panel-label">Waarom? (optioneel)</div><div class="vt-tags">' + tagBtns + '</div>' +
+        '<input class="vt-reason-input" type="text" placeholder="Eigen reden..." value="' + escapeHtml(ps.reasonText || '') +
+          '" oninput="vtSetReason(this.value)"></div>' +
+      '<div><div class="vt-panel-label">Actie vereist?</div><div class="vt-action-btns">' + actJa + actNee + '</div></div>' +
+      '<div style="display:flex;gap:8px;align-items:center">' +
+        '<button class="vt-confirm-btn"' + (!ps.category ? ' disabled' : '') +
+          ' onclick="bevestigVerplaatsEnTrain(\'' + escapeHtml(uid) + '\')">📂 Verplaats &amp; Train Agent</button>' +
+        '<button class="btn" style="padding:6px 12px;font-size:12px" onclick="sluitVtPanel()">Annuleren</button>' +
+      '</div>' +
+    '</div>';
+  }
+
+  function vtSelectCat(cat)    { state.vtPanelState.category = cat;       if (state.openVtPanel) updateActieCard(state.openVtPanel); }
+  function vtToggleTag(tag)    { const t = state.vtPanelState.tags; const i = t.indexOf(tag); i >= 0 ? t.splice(i, 1) : t.push(tag); if (state.openVtPanel) updateActieCard(state.openVtPanel); }
+  function vtSelectAction(val) { state.vtPanelState.requiresAction = val;  if (state.openVtPanel) updateActieCard(state.openVtPanel); }
+  function vtSetReason(val)    { state.vtPanelState.reasonText = val; }
+
+  function verplaatsEnTrain(uid) {
+    if (state.openVtPanel === uid) { sluitVtPanel(); return; }
+    const prev = state.openVtPanel;
+    state.openVtPanel = uid;
+    state.vtPanelState = { category: null, tags: [], requiresAction: null, reasonText: '' };
+    if (prev) updateActieCard(prev);
+    updateActieCard(uid);
+  }
+
+  function sluitVtPanel() {
+    const prev = state.openVtPanel;
+    state.openVtPanel = null;
+    if (prev) updateActieCard(prev);
+  }
+
+  async function bevestigVerplaatsEnTrain(uid) {
+    const ps = state.vtPanelState;
+    if (!ps.category) return;
+    const email = findEmail(uid);
+    if (!email) return;
+
+    const oldCat  = email.category;
+    const oldFlag = state.actionFlags[uid];
+    const newCat  = ps.category;
+    const reason  = [...ps.tags, ps.reasonText].filter(Boolean).join(' · ');
+
+    // Stap 1 — UI update
+    sluitVtPanel();
+    email.category = newCat;
+    state.overrides.category[uid] = newCat;
+    _aiCatCache[uid]  = newCat;
+    _aiConfCache[uid] = { confidence: 90, source: 'manual_trained' };
+    saveOverrides(); saveJson(AI_CATS_KEY, _aiCatCache); saveJson(AI_CONF_KEY, _aiConfCache);
+    if (ps.requiresAction !== null) {
+      state.actionFlags[uid] = ps.requiresAction;
+      saveJson(ACTION_FLAGS_KEY, state.actionFlags);
+    }
+    populateSuggestions(); render();
+
+    // Stap 2 — Undo
+    const undoEntry = undoManager.push('verplaats_train', {
+      email_id: uid, old_category: oldCat, new_category: newCat,
+      old_requires_action: oldFlag, new_requires_action: ps.requiresAction
+    }, 'Verplaatst naar ' + newCat + ': ' + (email.fromName || email.from || '?'));
+
+    // Stap 3 — API (800 char body, reason, email_list met body_snippets)
+    try {
+      const bodyEntry   = state.bodyCache[uid];
+      const bodySnippet = (bodyEntry?.text || '').slice(0, 800);
+      const emailList   = state.emails.map((e) => ({
+        uid:           e.uid,
+        sender_email:  e.fromAddress || getFromAddress(e),
+        sender_domain: getDomain(e.fromAddress || getFromAddress(e)),
+        subject:       e.subject || '',
+        body_snippet:  (state.bodyCache[e.uid]?.text || '').slice(0, 300)
+      }));
+      const res = await fetch('/api/learn', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email_id: uid, sender: email.from || '', subject: email.subject || '',
+          body_snippet: bodySnippet, old_category: oldCat, new_category: newCat,
+          corrected_by: 'Jeffrey', correction_type: 'manual_with_reason',
+          old_requires_action: oldFlag ?? null,
+          new_requires_action: ps.requiresAction ?? null,
+          reason, email_list: emailList
+        })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.confidence_after != null) {
+          _aiConfCache[uid] = { confidence: data.confidence_after, source: 'manual_trained' };
+          saveJson(AI_CONF_KEY, _aiConfCache);
+        }
+        if (undoEntry && data.learn_example_id) {
+          undoEntry.data.learn_example_id = data.learn_example_id;
+          const h = state.undoHistory || []; const idx = h.findIndex((e) => e.id === undoEntry.id);
+          if (idx >= 0) { h[idx] = undoEntry; saveJson(UNDO_HISTORY_KEY, h); }
+        }
+        for (const propUid of (data.propagated_uids || [])) {
+          const pe = state.emails.find((e) => e.uid === propUid);
+          if (pe && !state.overrides.category[propUid]) { pe.category = newCat; _aiCatCache[propUid] = newCat; }
+        }
+        saveJson(AI_CATS_KEY, _aiCatCache);
+        if ((data.needs_confirmation || []).length > 0) {
+          state.pendingPropagation = {
+            uids: data.needs_confirmation.map((e) => e.uid),
+            items: data.needs_confirmation,
+            category: newCat,
+            domain: getDomain(getFromAddress(email))
+          };
+          showPropagationBanner();
+        }
+        if ((data.propagated_uids || []).length > 0 || (data.needs_confirmation || []).length > 0) render();
+      }
+    } catch { /* fire-and-forget */ }
   }
 
   async function categorizeEmail(email) {
@@ -2452,7 +2615,9 @@
       renderAiSection(e) +
       '<div class="card-actions">' +
         (showGenBtn ? '<button class="btn btn-ai" data-action="generate" data-uid="' + escapeHtml(e.uid) + '">' + ICON_AI + ' Genereer AI antwoord</button>' : '') +
+        '<button class="btn" data-action="verplaats-train" data-uid="' + escapeHtml(e.uid) + '" title="Verplaats mail en train de agent met context">📂 Verplaats &amp; Train</button>' +
       '</div>' +
+      (state.openVtPanel === e.uid ? renderVtPanel(e.uid) : '') +
     '</div>';
   }
 
@@ -2540,16 +2705,17 @@
       });
     }
 
-    // ── AI proposal buttons ───────────────────────────────────────────────
+    // ── AI proposal buttons + Verplaats & Train ──────────────────────────
     card.querySelectorAll('[data-action]').forEach((btn) => {
       btn.addEventListener('click', (ev) => {
         ev.stopPropagation();
         const action = btn.dataset.action;
         const u = btn.dataset.uid;
-        if      (action === 'generate')    startAiProposal(u);
-        else if (action === 'regenerate')  regenerateAiProposal(u);
-        else if (action === 'send')        sendAiProposal(u);
-        else if (action === 'cancel')      cancelAiProposal(u);
+        if      (action === 'generate')        startAiProposal(u);
+        else if (action === 'regenerate')      regenerateAiProposal(u);
+        else if (action === 'send')            sendAiProposal(u);
+        else if (action === 'cancel')          cancelAiProposal(u);
+        else if (action === 'verplaats-train') verplaatsEnTrain(u);
       });
     });
   }

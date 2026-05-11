@@ -3,18 +3,24 @@ import { supabase } from './supabase.js';
 // Verwachte schema's — pas dit aan als de tabellen uitbreiden
 const EXPECTED = {
   learn_examples: [
-    { col: 'email_id',        sql: 'text' },
-    { col: 'sender_domain',   sql: 'text' },
-    { col: 'body_snippet',    sql: 'text' },
-    { col: 'correction_type', sql: "text DEFAULT 'manual'" },
-    { col: 'old_category',    sql: 'text' },
-    { col: 'corrected_by',    sql: 'text' },
+    { col: 'email_id',                  sql: 'text' },
+    { col: 'sender_domain',             sql: 'text' },
+    { col: 'body_snippet',              sql: 'text' },
+    { col: 'correction_type',           sql: "text DEFAULT 'manual'" },
+    { col: 'old_category',              sql: 'text' },
+    { col: 'corrected_by',              sql: 'text' },
+    { col: 'reason',                    sql: 'text' },
+    { col: 'body_keywords',             sql: 'text[]' },
+    { col: 'requires_action_corrected', sql: 'boolean' },
   ],
   email_patterns: [
     { col: 'sender_domain',    sql: 'text' },
     { col: 'times_seen',       sql: 'integer DEFAULT 0' },
     { col: 'source',           sql: "text DEFAULT 'ai'" },
     { col: 'last_corrected_at',sql: 'timestamptz' },
+    { col: 'body_keywords',    sql: 'text[]' },
+    { col: 'requires_action',  sql: 'boolean DEFAULT false' },
+    { col: 'reason',           sql: 'text' },
   ],
   kennisbank_items: [
     { col: 'times_used',        sql: 'integer DEFAULT 0' },

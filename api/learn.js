@@ -11,6 +11,9 @@ const STOPWORDS = new Set([
   'a','an','and','or','for','with','from','on','are','this','that','your'
 ]);
 
+const PAYMENT_KWS  = ['betaald','ontvangen','transactie','receipt','payment','factuur','voldaan','invoice','paid','transaction','betaling'];
+const SYSTEM_SNDS  = ['noreply','no-reply','notifications','notification','mailer','donotreply'];
+
 function extractEmail(str) {
   const m = (str || '').match(/<([^>]+)>/);
   return (m ? m[1] : str).toLowerCase().trim();
@@ -26,42 +29,85 @@ function extractKeywords(subject) {
     .filter((w) => w.length >= 4 && !STOPWORDS.has(w))
     .slice(0, 6);
 }
+function extractBodyKeywords(text, maxWords = 10) {
+  return (text || '').toLowerCase()
+    .replace(/[^\p{L}\p{N}\s]+/gu, ' ')
+    .split(/\s+/)
+    .filter((w) => w.length >= 4 && !STOPWORDS.has(w))
+    .slice(0, maxWords);
+}
 
-// ── Propagatie: bepaal welke mails vergelijkbaar zijn ────────────────────────
-function computePropagation(emailList, senderEmail, senderDomain, subject, emailId) {
+// ── Propagatie ────────────────────────────────────────────────────────────────
+function computePropagation(emailList, senderEmail, senderDomain, subject, bodySnippet, emailId, reason) {
   if (!Array.isArray(emailList) || emailList.length === 0) {
-    return { groupA: [], groupB: [], groupC: [] };
+    return { groupA: [], groupB: [], groupC_auto: [], groupC_confirm: [], groupD: [] };
   }
 
-  const correctedWords = extractKeywords(subject);
+  const correctedWords   = extractKeywords(subject);
+  const correctedBodyKws = extractBodyKeywords(bodySnippet, 10);
 
-  // Groep A — exacte afzender match (auto-update)
+  // Groep A — exacte afzender (auto)
   const groupA = emailList.filter(
     (e) => e.sender_email && e.sender_email === senderEmail && e.uid !== emailId
   );
-
-  // Groep B — zelfde domein + >= 2 overlappende onderwerp-woorden (auto-update)
   const groupAUids = new Set(groupA.map((e) => e.uid));
+
+  // Groep B — zelfde domein + >= 2 onderwerp-woorden (auto)
   const groupB = senderDomain
     ? emailList.filter((e) => {
         if (!e.sender_domain || e.sender_domain !== senderDomain) return false;
         if (e.uid === emailId || groupAUids.has(e.uid)) return false;
-        const overlap = extractKeywords(e.subject || '').filter((w) => correctedWords.includes(w));
-        return overlap.length >= 2;
+        return extractKeywords(e.subject || '').filter((w) => correctedWords.includes(w)).length >= 2;
       })
     : [];
-
-  // Groep C — alleen zelfde domein, ander onderwerp (vraag bevestiging)
   const groupBUids = new Set(groupB.map((e) => e.uid));
-  const groupC = senderDomain
+
+  // Groep C — zelfde domein + body-keyword overlap (auto >= 4, bevestiging >= 2)
+  const groupC_auto = (senderDomain && correctedBodyKws.length >= 2)
     ? emailList.filter((e) => {
         if (!e.sender_domain || e.sender_domain !== senderDomain) return false;
         if (e.uid === emailId || groupAUids.has(e.uid) || groupBUids.has(e.uid)) return false;
-        return true;
+        return extractBodyKeywords(e.body_snippet || '', 10).filter((w) => correctedBodyKws.includes(w)).length >= 4;
+      })
+    : [];
+  const groupC_auto_Uids = new Set(groupC_auto.map((e) => e.uid));
+
+  const groupC_confirm = (senderDomain && correctedBodyKws.length >= 2)
+    ? emailList.filter((e) => {
+        if (!e.sender_domain || e.sender_domain !== senderDomain) return false;
+        if (e.uid === emailId || groupAUids.has(e.uid) || groupBUids.has(e.uid) || groupC_auto_Uids.has(e.uid)) return false;
+        const overlap = extractBodyKeywords(e.body_snippet || '', 10).filter((w) => correctedBodyKws.includes(w)).length;
+        return overlap >= 2;
       })
     : [];
 
-  return { groupA, groupB, groupC };
+  // Groep D — reden-gebaseerd (alle mails, ongeacht domein)
+  const usedUids = new Set([
+    emailId,
+    ...groupAUids, ...groupBUids, ...groupC_auto_Uids,
+    ...groupC_confirm.map((e) => e.uid)
+  ]);
+  const groupD = [];
+  if (reason?.includes('Betaalbevestiging')) {
+    for (const e of emailList) {
+      if (usedUids.has(e.uid)) continue;
+      const body = (e.body_snippet || '').toLowerCase();
+      if (PAYMENT_KWS.filter((w) => body.includes(w)).length >= 2) {
+        groupD.push(e); usedUids.add(e.uid);
+      }
+    }
+  }
+  if (reason?.includes('Systeemmail')) {
+    for (const e of emailList) {
+      if (usedUids.has(e.uid)) continue;
+      const sender = (e.sender_email || '').toLowerCase();
+      if (SYSTEM_SNDS.some((k) => sender.includes(k))) {
+        groupD.push(e); usedUids.add(e.uid);
+      }
+    }
+  }
+
+  return { groupA, groupB, groupC_auto, groupC_confirm, groupD };
 }
 
 export default async function handler(req, res) {
@@ -80,7 +126,8 @@ export default async function handler(req, res) {
     correction_type,
     old_requires_action,
     new_requires_action,
-    email_list             // Nieuw: voor propagatie
+    reason,
+    email_list
   } = req.body || {};
 
   if (!sender || !new_category) {
@@ -92,17 +139,21 @@ export default async function handler(req, res) {
 
   const senderEmail  = extractEmail(sender);
   const senderDomain = getDomain(senderEmail);
+  const bodyKws      = extractBodyKeywords(body_snippet, 10);
 
   // ── Stap 1: Sla correctie op in learn_examples ────────────────────────
   const learnRow = { email_sender: senderEmail || null, new_category };
-  if (email_id)                      learnRow.email_id             = email_id;
-  if (senderDomain)                  learnRow.sender_domain        = senderDomain;
-  if (subject)                       learnRow.email_subject        = subject;
-  if (body_snippet)                  learnRow.body_snippet         = String(body_snippet).slice(0, 500);
-  if (old_category)                  learnRow.old_category         = old_category;
-  if (corrected_by)                  learnRow.corrected_by         = corrected_by;
-  if (old_requires_action != null)   learnRow.old_requires_action  = old_requires_action;
-  if (new_requires_action != null)   learnRow.new_requires_action  = new_requires_action;
+  if (email_id)                      learnRow.email_id                 = email_id;
+  if (senderDomain)                  learnRow.sender_domain            = senderDomain;
+  if (subject)                       learnRow.email_subject            = subject;
+  if (body_snippet)                  learnRow.body_snippet             = String(body_snippet).slice(0, 500);
+  if (old_category)                  learnRow.old_category             = old_category;
+  if (corrected_by)                  learnRow.corrected_by             = corrected_by;
+  if (old_requires_action != null)   learnRow.old_requires_action      = old_requires_action;
+  if (new_requires_action != null)   learnRow.new_requires_action      = new_requires_action;
+  if (reason)                        learnRow.reason                   = String(reason).slice(0, 200);
+  if (bodyKws.length)                learnRow.body_keywords            = bodyKws;
+  if (new_requires_action != null)   learnRow.requires_action_corrected = new_requires_action;
   learnRow.correction_type = correction_type || 'manual';
   learnRow.corrected_at    = new Date().toISOString();
 
@@ -188,6 +239,12 @@ export default async function handler(req, res) {
   let patternDeleted    = false;
   let newPatternCreated = false;
 
+  const patternExtras = {
+    ...(reason && { reason: String(reason).slice(0, 200) }),
+    ...(bodyKws.length && { body_keywords: bodyKws }),
+    ...(new_requires_action != null && { requires_action: new_requires_action }),
+  };
+
   try {
     const { data: existing } = await supabase.from('email_patterns')
       .select('id, category, confidence, times_seen, source')
@@ -201,7 +258,6 @@ export default async function handler(req, res) {
       const rawConf = existing.confidence || 60;
       let newConf   = matches ? Math.min(100, rawConf + 20) : rawConf - 25;
 
-      // Domein-historiek: 3x dezelfde correctie → 95, 5x → 100
       if (senderDomain && !matches) {
         const { count: sameCorrections } = await supabase.from('learn_examples')
           .select('id', { count: 'exact', head: true })
@@ -210,10 +266,8 @@ export default async function handler(req, res) {
 
         if ((sameCorrections || 0) >= 5) {
           newConf = 100;
-          console.log(`[learn] 5x zelfde correctie voor ${senderDomain} → confidence 100 (harde regel)`);
         } else if ((sameCorrections || 0) >= 3) {
           newConf = Math.max(newConf, 95);
-          console.log(`[learn] 3x zelfde correctie voor ${senderDomain} → confidence 95`);
         }
       }
 
@@ -223,7 +277,8 @@ export default async function handler(req, res) {
       } else {
         await supabase.from('email_patterns').update({
           category: new_category, confidence: newConf,
-          last_corrected_at: new Date().toISOString(), source: 'manual'
+          last_corrected_at: new Date().toISOString(), source: 'manual',
+          ...patternExtras
         }).eq('id', existing.id);
         patternUpdated = true; confidenceAfter = newConf;
       }
@@ -231,7 +286,8 @@ export default async function handler(req, res) {
       await supabase.from('email_patterns').insert({
         sender_email: senderEmail, sender_domain: senderDomain || null,
         category: new_category, confidence: 70, times_seen: 1,
-        source: 'manual', last_corrected_at: new Date().toISOString()
+        source: 'manual', last_corrected_at: new Date().toISOString(),
+        ...patternExtras
       });
       newPatternCreated = true; confidenceAfter = 70;
     }
@@ -268,22 +324,23 @@ export default async function handler(req, res) {
   }
 
   // ── Stap 4: Propagatie berekenen ────────────────────────────────────────
-  const { groupA, groupB, groupC } = computePropagation(
-    email_list, senderEmail, senderDomain, subject || '', email_id
+  const { groupA, groupB, groupC_auto, groupC_confirm, groupD } = computePropagation(
+    email_list, senderEmail, senderDomain, subject || '', body_snippet || '', email_id, reason || ''
   );
 
-  const propagatedAutomatically = groupA.length + groupB.length;
-  const needsConfirmation = groupC.map((e) => ({
+  const propagatedAutomatically = groupA.length + groupB.length + groupC_auto.length + groupD.length;
+  const propagatedUids          = [...groupA, ...groupB, ...groupC_auto, ...groupD].map((e) => e.uid);
+  const needsConfirmation       = groupC_confirm.map((e) => ({
     uid:     e.uid,
     from:    e.sender_email || e.sender_domain || '?',
     subject: e.subject || ''
   }));
 
   if (propagatedAutomatically > 0) {
-    console.log(`[learn] Propagatie: ${groupA.length} exacte + ${groupB.length} domein+subject = ${propagatedAutomatically} auto-updates`);
+    console.log(`[learn] Propagatie: A=${groupA.length} B=${groupB.length} C_auto=${groupC_auto.length} D=${groupD.length} = ${propagatedAutomatically} auto`);
   }
   if (needsConfirmation.length > 0) {
-    console.log(`[learn] Bevestiging nodig voor ${needsConfirmation.length} mails van domein ${senderDomain}`);
+    console.log(`[learn] Bevestiging nodig voor ${needsConfirmation.length} mails`);
   }
 
   // ── Stap 5: Feedback bericht ────────────────────────────────────────────
@@ -301,27 +358,27 @@ export default async function handler(req, res) {
   } else if (confidenceBefore !== null && confidenceAfter !== null) {
     message += ` · Confidence: ${confidenceBefore}% → ${confidenceAfter}%`;
   }
-  if (patternDeleted)    message += ' · Oud fout patroon verwijderd';
-  else if (newPatternCreated) message += ` · Mails van ${domain} worden voortaan als ${new_category} herkend`;
-  else if (patternUpdated)    message += ` · Patroon voor ${domain} bijgewerkt`;
+  if (patternDeleted)          message += ' · Oud fout patroon verwijderd';
+  else if (newPatternCreated)  message += ` · Mails van ${domain} worden voortaan als ${new_category} herkend`;
+  else if (patternUpdated)     message += ` · Patroon voor ${domain} bijgewerkt`;
   if (propagatedAutomatically > 0) message += ` · ${propagatedAutomatically} vergelijkbare mails bijgewerkt`;
 
   return res.status(200).json({
-    ok:                    true,
-    sender_email:          senderEmail,
+    ok:                       true,
+    sender_email:             senderEmail,
     new_category,
-    learn_example_id:      learnExampleId,
-    pattern_examples:      patternExamples,
-    pattern_updated:       patternUpdated,
-    pattern_deleted:       patternDeleted,
-    new_pattern_created:   newPatternCreated,
-    confidence_before:     confidenceBefore,
-    confidence_after:      confidenceAfter,
-    high_confidence:       (confidenceAfter || 0) >= 90,
-    correction_type:       correction_type || 'manual',
+    learn_example_id:         learnExampleId,
+    pattern_examples:         patternExamples,
+    pattern_updated:          patternUpdated,
+    pattern_deleted:          patternDeleted,
+    new_pattern_created:      newPatternCreated,
+    confidence_before:        confidenceBefore,
+    confidence_after:         confidenceAfter,
+    high_confidence:          (confidenceAfter || 0) >= 90,
+    correction_type:          correction_type || 'manual',
     propagated_automatically: propagatedAutomatically,
-    propagated_uids:       [...groupA, ...groupB].map((e) => e.uid),
-    needs_confirmation:    needsConfirmation,
+    propagated_uids:          propagatedUids,
+    needs_confirmation:       needsConfirmation,
     message
   });
 }
