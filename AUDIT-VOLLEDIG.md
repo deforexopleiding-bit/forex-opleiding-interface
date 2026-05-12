@@ -1,5 +1,5 @@
 # Volledige Systeemanalyse — Agency Command Center
-> Gegenereerd: 2026-05-11 | Bijgewerkt: 2026-05-12 (Module 1.3 kennisbank) | Branch: main
+> Gegenereerd: 2026-05-11 | Bijgewerkt: 2026-05-12 (Agents Batch 1) | Branch: main
 
 ---
 
@@ -136,6 +136,8 @@ Gebruiker corrigeert
 | /api/mark-read | POST | ✅ | IMAP mark-as-read |
 | /api/email-actions | POST | ✅ | Acties loggen in Supabase |
 | /api/undo | POST | ⚠️ | Bestaat, NIET verbonden in frontend |
+| /api/agent-conversations | GET/POST | ✅ | History laden + new-session |
+| /api/agent-learnings | GET/POST | ✅ | Feedback opslaan + ophalen |
 | /api/vision-extract | POST | ✅ | Claude Vision (afbeeldingen) |
 | /api/pdf-extract | POST | ✅ | PDF tekst extractie |
 | /api/debug-supabase | GET | ✅ | Diagnostics |
@@ -152,6 +154,7 @@ Gebruiker corrigeert
 | learn_examples | id, email_id, sender_domain, body_snippet, correction_type, old_category, corrected_by, reason, body_keywords, requires_action_corrected | Uit | ✅ Actief |
 | kennisbank_items | id, type, direction, title, category, content, question, answer, label, note, times_used, times_helpful, helpfulness_score, auto_generated, source_email_id | Uit | ⚠️ Aangemaakt, sync niet verbonden |
 | undo_history | id, action_type, action_data, label, performed_by, performed_at, undone_at, is_undone | Uit | ⚠️ Aangemaakt, NIET gevuld |
+| agent_learnings | id, agent_id, agent_name, trigger_text, ideal_response, created_at, updated_at | Uit | ✅ Aangemaakt (Batch 1) |
 | email_actions | id, email_id, action, value, created_at | Uit | ✅ Actief |
 
 ---

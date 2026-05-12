@@ -109,6 +109,18 @@
     .quick-btn{padding:5px 10px;border-radius:7px;border:1px solid var(--border-strong);background:var(--bg-elev-2);color:var(--text-dim);font-size:11px;cursor:pointer;font-family:inherit;transition:all .15s;}
     .quick-btn:hover{background:var(--bg);color:var(--text);}
 
+    /* ── Feedback buttons & training ── */
+    .chat-msg-actions{display:flex;gap:6px;margin-top:6px;}
+    .chat-like-btn,.chat-train-btn{padding:3px 8px;border-radius:6px;border:1px solid var(--border-strong);background:transparent;color:var(--text-faint);font-size:11px;cursor:pointer;font-family:inherit;transition:all .15s;line-height:1.4;}
+    .chat-like-btn:hover{background:rgba(34,197,94,0.12);color:var(--green);border-color:rgba(34,197,94,0.3);}
+    .chat-train-btn:hover{background:rgba(168,85,247,0.12);color:#c4b5fd;border-color:rgba(168,85,247,0.3);}
+    .chat-train-form{margin-top:8px;display:flex;flex-direction:column;gap:6px;}
+    .chat-train-textarea{padding:8px 10px;background:var(--bg-elev-2);border:1px solid var(--border-strong);border-radius:8px;color:var(--text);font-size:12px;font-family:inherit;resize:none;outline:none;overflow-y:auto;max-height:calc(3 * 1.5em + 16px);}
+    .chat-train-textarea:focus{border-color:rgba(168,85,247,0.5);}
+
+    /* ── Toast ── */
+    @keyframes agents-slide-in{from{transform:translateX(20px);opacity:0;}to{transform:translateX(0);opacity:1;}}
+
     /* ── Meeting setup ── */
     .meeting-setup-card{background:var(--bg-elev);border:1px solid var(--border);border-radius:16px;padding:32px;max-width:600px;margin:0 auto;}
     .meeting-setup-title{font-size:20px;font-weight:800;margin-bottom:6px;}
@@ -255,7 +267,8 @@
           <div class="chat-header">
             <div id="chatHeaderEmoji" style="font-size:18px"></div>
             <div class="chat-title" id="chatHeaderTitle"></div>
-            <button class="btn-sm" onclick="generateReport()" style="margin-left:auto">📊 Rapport</button>
+            <button class="btn-sm" id="newSessionBtn" style="margin-left:auto" title="Nieuwe sessie starten">+ Nieuwe sessie</button>
+            <button class="btn-sm" onclick="generateReport()">📊 Rapport</button>
           </div>
           <div class="chat-messages" id="chatMessages"></div>
           <div class="chat-input-area">
@@ -445,6 +458,8 @@ let agents = [];
 let activeAgent = null;
 let chatHistory = [];
 let chatSessionId = 'session_' + Date.now();
+let chatHistoryLoaded = false;
+let lastUserMessage = '';    // voor feedback-knoppen: trigger text
 let meetingId = null;
 let meetingTranscript = [];
 let pendingActionPoints = [];
@@ -467,6 +482,13 @@ async function init() {
   } catch { agents = AGENTS_FALLBACK; }
   renderOverview();
   renderParticipantList();
+
+  // "+ Nieuwe sessie" knop
+  document.getElementById('newSessionBtn')?.addEventListener('click', () => {
+    if (!activeAgent) return;
+    if (!confirm(`Nieuwe sessie starten met ${activeAgent.name}? De huidige chat verdwijnt van het scherm (geschiedenis blijft bewaard in de database).`)) return;
+    startFreshSession();
+  });
 }
 
 // ═══════════════════════════════════
@@ -517,11 +539,9 @@ function renderOverview() {
 // ═══════════════════════════════════
 // CHAT
 // ═══════════════════════════════════
-function openChat(agentName) {
+async function openChat(agentName) {
   activeAgent = agents.find(a => a.name === agentName);
   if (!activeAgent) return;
-  chatHistory = [];
-  chatSessionId = 'session_' + Date.now();
 
   document.getElementById('chatPageTitle').textContent = `Chat met ${activeAgent.name}`;
   document.getElementById('chatHeaderTitle').textContent = `${activeAgent.name} — ${activeAgent.role}`;
@@ -539,31 +559,91 @@ function openChat(agentName) {
     `<button class="quick-btn" onclick="sendQuickAction('${q.key}')">${q.label}</button>`
   ).join('');
 
-  // Clear messages and send greeting
+  // Reset state + show loading
+  chatHistory = [];
+  lastUserMessage = '';
+  chatHistoryLoaded = false;
+  const msgs = document.getElementById('chatMessages');
+  msgs.innerHTML = '<div style="color:var(--text-faint);text-align:center;padding:32px;font-size:13px">Geschiedenis laden…</div>';
+
+  // Probeer geschiedenis te laden vanuit Supabase
+  try {
+    const r = await fetch(`/api/agent-conversations?agent_name=${encodeURIComponent(activeAgent.name)}`);
+    if (r.ok) {
+      const data = await r.json();
+      if (data.messages?.length > 0) {
+        msgs.innerHTML = '';
+        chatSessionId = data.session_id || ('session_' + Date.now());
+        data.messages.forEach(m => addChatMsg(m.role === 'user' ? 'user' : 'assistant', m.content, false));
+        chatHistoryLoaded = true;
+        msgs.scrollTop = msgs.scrollHeight;
+        return; // Geen greeting — geschiedenis geladen
+      }
+    }
+  } catch (e) {
+    console.warn('[agents] history laden fout:', e.message);
+  }
+
+  // Geen geschiedenis of fout → verse sessie met greeting
+  startFreshSession();
+}
+
+function startFreshSession() {
+  chatHistory = [];
+  lastUserMessage = '';
+  chatHistoryLoaded = false;
+  chatSessionId = 'session_' + Date.now();
   document.getElementById('chatMessages').innerHTML = '';
   const hour = new Date().getHours();
   const greet = hour < 12 ? 'Goedemorgen' : hour < 18 ? 'Goedemiddag' : 'Goedenavond';
   addChatMsg('assistant', `${greet} Jeffrey! Ik ben ${activeAgent.name}, jouw ${activeAgent.role}. Hoe kan ik je vandaag helpen?`);
 }
 
-function addChatMsg(role, content) {
+function addChatMsg(role, content, pushToHistory = true) {
   const msgs = document.getElementById('chatMessages');
   const isUser = role === 'user';
-  const color = isUser ? '#a855f7' : (activeAgent?.avatar_color || '#534AB7');
+  const color  = isUser ? '#a855f7' : (activeAgent?.avatar_color || '#534AB7');
   const avatar = isUser ? 'JB' : (activeAgent?.avatar_emoji || '🤖');
   const timeStr = new Date().toLocaleTimeString('nl-NL', { hour:'2-digit', minute:'2-digit' });
+
+  // Sla de trigger op vóór eventuele push (voor feedback-knoppen van assistant)
+  const triggerForFeedback = isUser ? '' : lastUserMessage;
+  if (isUser) lastUserMessage = content;
+
   const div = document.createElement('div');
-  div.className = `msg msg-${role === 'user' ? 'user' : 'agent'}`;
-  div.innerHTML = `
-    <div class="msg-avatar" style="background:${color}22;color:${color}">${avatar}</div>
-    <div>
-      <div class="msg-bubble">${formatMd(esc(content))}</div>
-      <div class="msg-time">${timeStr}</div>
-    </div>`;
+  div.className = `msg msg-${isUser ? 'user' : 'agent'}`;
+
+  if (isUser) {
+    div.innerHTML = `
+      <div class="msg-avatar" style="background:${color}22;color:${color}">${avatar}</div>
+      <div>
+        <div class="msg-bubble">${formatMd(esc(content))}</div>
+        <div class="msg-time">${timeStr}</div>
+      </div>`;
+  } else {
+    div.innerHTML = `
+      <div class="msg-avatar" style="background:${color}22;color:${color}">${avatar}</div>
+      <div style="min-width:0;flex:1">
+        <div class="msg-bubble">${formatMd(esc(content))}</div>
+        <div class="msg-time">${timeStr}</div>
+        <div class="chat-msg-actions">
+          <button class="chat-like-btn">👍</button>
+          <button class="chat-train-btn">✏️ Train mij</button>
+        </div>
+      </div>`;
+    // Gebruik closures voor feedback — geen data-attributen met onveilige content
+    const likeBtn  = div.querySelector('.chat-like-btn');
+    const trainBtn = div.querySelector('.chat-train-btn');
+    likeBtn.addEventListener('click', () => saveLearning(triggerForFeedback, content, likeBtn));
+    trainBtn.addEventListener('click', () => toggleTrainForm(div, triggerForFeedback));
+  }
+
   msgs.appendChild(div);
   msgs.scrollTop = msgs.scrollHeight;
-  if (role !== 'user') chatHistory.push({ role: 'assistant', content });
-  else chatHistory.push({ role: 'user', content });
+
+  if (pushToHistory) {
+    chatHistory.push({ role: isUser ? 'user' : 'assistant', content });
+  }
 }
 
 function showTyping() {
@@ -851,6 +931,91 @@ async function approveMeeting() {
   } catch (err) {
     alert(`⚠️ ${err.message}`);
   }
+}
+
+// ═══════════════════════════════════
+// LEARNING FEEDBACK
+// ═══════════════════════════════════
+async function saveLearning(triggerText, idealResponse, btn) {
+  if (!triggerText || !idealResponse || !activeAgent) {
+    showToast('Geen context beschikbaar voor opslaan', 'error');
+    return;
+  }
+  if (btn) { btn.disabled = true; btn.textContent = '…'; }
+  try {
+    const r = await fetch('/api/agent-learnings', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({
+        agent_id:       activeAgent.id || null,
+        agent_name:     activeAgent.name,
+        trigger_text:   triggerText,
+        ideal_response: idealResponse,
+      }),
+    });
+    const data = await r.json();
+    if (data.ok) {
+      showToast('Goed onthouden! ✓');
+      if (btn) { btn.textContent = '✓'; btn.style.color = 'var(--green)'; }
+    } else {
+      showToast('Opslaan mislukt: ' + (data.error || '?'), 'error');
+      if (btn) { btn.disabled = false; btn.textContent = '👍'; }
+    }
+  } catch {
+    showToast('Verbindingsfout bij opslaan', 'error');
+    if (btn) { btn.disabled = false; btn.textContent = '👍'; }
+  }
+}
+
+function toggleTrainForm(msgDiv, triggerText) {
+  const existing = msgDiv.querySelector('.chat-train-form');
+  if (existing) { existing.remove(); return; }
+
+  const form = document.createElement('div');
+  form.className = 'chat-train-form';
+
+  const ta = document.createElement('textarea');
+  ta.className = 'chat-train-textarea';
+  ta.rows = 1;
+  ta.placeholder = 'Typ het ideale antwoord…';
+  // Auto-grow tot max 3 regels
+  ta.addEventListener('input', () => {
+    ta.style.height = 'auto';
+    const lh = parseFloat(getComputedStyle(ta).lineHeight) || 20;
+    const maxH = lh * 3 + 16;
+    ta.style.height = Math.min(ta.scrollHeight, maxH) + 'px';
+    ta.style.overflowY = ta.scrollHeight > maxH ? 'auto' : 'hidden';
+  });
+
+  const saveBtn = document.createElement('button');
+  saveBtn.className = 'btn-sm';
+  saveBtn.textContent = 'Opslaan';
+  saveBtn.addEventListener('click', async () => {
+    const val = ta.value.trim();
+    if (!val) return;
+    saveBtn.disabled = true;
+    saveBtn.textContent = 'Opslaan…';
+    await saveLearning(triggerText, val, null);
+    form.remove();
+  });
+
+  form.appendChild(ta);
+  form.appendChild(saveBtn);
+
+  const actionsDiv = msgDiv.querySelector('.chat-msg-actions');
+  if (actionsDiv) actionsDiv.after(form);
+  ta.focus();
+}
+
+function showToast(msg, type = 'success') {
+  const t = document.createElement('div');
+  t.style.cssText = `position:fixed;bottom:24px;right:24px;z-index:9999;
+    background:${type === 'success' ? 'var(--green)' : 'var(--red)'};
+    color:#fff;padding:10px 16px;border-radius:8px;font-size:13px;font-weight:600;
+    box-shadow:0 4px 12px rgba(0,0,0,.4);animation:agents-slide-in .2s ease;`;
+  t.textContent = msg;
+  document.body.appendChild(t);
+  setTimeout(() => t.remove(), 3000);
 }
 
 // ═══════════════════════════════════

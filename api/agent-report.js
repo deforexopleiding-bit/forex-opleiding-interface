@@ -21,14 +21,24 @@ export default async function handler(req, res) {
 
     if (name === 'Simon') {
       try {
-        const baseUrl = process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3000';
-        const r = await fetch(`${baseUrl}/api/dashboard-stats`);
-        if (r.ok) {
-          const s = await r.json();
-          dataCtx += `\nOpen taken: ${s.tasks?.total || 0} (urgent: ${s.tasks?.urgent || 0})`;
-          dataCtx += `\nOnbeantwoorde mails: ${s.unanswered?.count || 0}`;
-        }
-      } catch {}
+        const [takenRes, unresolvedRes] = await Promise.allSettled([
+          supabase.from('taken_items')
+            .select('id', { count: 'exact', head: true })
+            .neq('status', 'done')
+            .neq('status', 'afgerond'),
+          supabase.from('email_actions')
+            .select('email_id')
+            .is('resolved_at', null)
+            .limit(500),
+        ]);
+        const openTaken = takenRes.status === 'fulfilled' ? (takenRes.value.count ?? 0) : 0;
+        const onbeantwoord = unresolvedRes.status === 'fulfilled'
+          ? new Set((unresolvedRes.value.data || []).map(a => a.email_id)).size : 0;
+        dataCtx += `\nOpen taken: ${openTaken}`;
+        dataCtx += `\nOnbeantwoorde acties: ${onbeantwoord}`;
+      } catch (e) {
+        console.error('[agent-report] Simon context fout:', e.message);
+      }
       const { data: learns } = await supabase.from('learn_examples').select('old_category,created_at').order('created_at', { ascending: false }).limit(20);
       if (learns?.length) dataCtx += `\nRecente trainingen: ${learns.length} correcties`;
     }

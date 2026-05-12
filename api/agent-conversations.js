@@ -1,0 +1,44 @@
+import { supabase } from './supabase.js';
+
+// GET  /api/agent-conversations?agent_name=<name>
+//      → { messages: [{role, content, created_at, conversation_session}], session_id }
+// POST /api/agent-conversations  { action: 'new_session' }
+//      → { session_id: 'session_<timestamp>' }
+
+export default async function handler(req, res) {
+  res.setHeader('Cache-Control', 'no-store');
+
+  if (req.method === 'GET') {
+    const { agent_name, session } = req.query;
+    if (!agent_name && !session) return res.status(400).json({ error: 'agent_name of session vereist' });
+
+    let query = supabase
+      .from('agent_conversations')
+      .select('role, content, created_at, conversation_session')
+      .order('created_at', { ascending: true })
+      .limit(60);
+
+    if (session)     query = query.eq('conversation_session', session);
+    else             query = query.eq('agent_name', agent_name);
+
+    const { data, error } = await query;
+    if (error) {
+      console.error('[agent-conversations] GET fout:', error.message);
+      return res.status(500).json({ error: error.message });
+    }
+    return res.status(200).json({
+      messages:   data || [],
+      session_id: data?.[0]?.conversation_session || null,
+    });
+  }
+
+  if (req.method === 'POST') {
+    const { action } = req.body || {};
+    if (action === 'new_session') {
+      return res.status(200).json({ session_id: 'session_' + Date.now() });
+    }
+    return res.status(400).json({ error: 'Onbekende actie' });
+  }
+
+  return res.status(405).json({ error: 'Method not allowed' });
+}

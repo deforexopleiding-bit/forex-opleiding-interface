@@ -1,5 +1,5 @@
 # TODO — Agency Command Center
-> Bijgewerkt: 2026-05-12 (Module 1.2) | Gebaseerd op AUDIT-VOLLEDIG.md
+> Bijgewerkt: 2026-05-12 (Agents Batch 1) | Gebaseerd op AUDIT-VOLLEDIG.md
 
 ---
 
@@ -38,6 +38,12 @@
 **Probleem:** `/api/undo` endpoint bestaat maar wordt nooit aangeroepen. Frontend undo is puur localStorage.  
 **Fix:** Roep `/api/undo` aan bij `undoManager.push()` en `undoManager.executeUndo()`  
 **Schatting:** 2 uur
+
+### [H5] Agents Batch 2 — scheidslijn tussen sessies
+**Bestand:** `modules/agents.html`  
+**Probleem:** Geschiedenis van meerdere sessies wordt samengevoegd getoond zonder visuele scheiding  
+**Fix:** Groepeer berichten per `conversation_session` in de history-render, toon datum/tijdstip header per sessie  
+**Schatting:** 1 uur
 
 ### [H3] Authenticatie op API endpoints
 **Bestanden:** `api/*.js`  
@@ -140,6 +146,15 @@
 - [x] Module 1.3 UX-verbeteringen:
   - Bijlagen direct zichtbaar bij Actie tab render — fetchEmailBody roept updateActieCard aan (volledige re-render met gevulde cache)
   - Onderwerp-veld in reply composer — data-reply-subject input, pre-filled met Re: <origineel>, state.replySubject[] persistent over re-renders
+- [x] Agents Batch 1 — memory + learning + shared brain + hygiene (2026-05-12):
+  - db-migrate.js: agent_learnings tabel toegevoegd
+  - api/agent-conversations.js: NIEUW — history laden (GET) + new-session (POST)
+  - api/agent-learnings.js: NIEUW — learnings opslaan (POST) + ophalen (GET)
+  - api/agent-chat.js: awaited inserts, directe Supabase stats voor Simon (geen localhost HTTP), learnings in systeem-prompt
+  - api/agent-report.js: localhost fix + silent catch fix
+  - api/agent-meeting.js: agentRows null-guard
+  - api/email-agent.js: buildAiContext + systeem-prompt met Simon's learnings
+  - modules/agents.html: history laden bij openChat, "+ Nieuwe sessie" knop met confirm, 👍/✏️ knoppen per assistant-bericht, train textarea (max 3 regels), toast functie
 - [x] Module 1.3 Kennisbank Supabase-first:
   - localStorage uitgefaseerd (kennisbank_items + kennisbank_profile), one-shot cleanup via sessionStorage flag
   - kennisbank-sync.js: PUT (update by uuid) + DELETE (by uuid) endpoints toegevoegd, GET 500 bij fout

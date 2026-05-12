@@ -160,6 +160,16 @@ ALTER TABLE agent_meetings DISABLE ROW LEVEL SECURITY;`,
   created_at timestamptz DEFAULT now()
 );
 ALTER TABLE agent_kennisbank DISABLE ROW LEVEL SECURITY;`,
+  agent_learnings: `CREATE TABLE IF NOT EXISTS agent_learnings (
+  id bigint generated always as identity primary key,
+  agent_id text,
+  agent_name text not null,
+  trigger_text text not null,
+  ideal_response text not null,
+  created_at timestamptz default now(),
+  updated_at timestamptz default now()
+);
+ALTER TABLE agent_learnings DISABLE ROW LEVEL SECURITY;`,
 };
 
 async function tableExists(table) {

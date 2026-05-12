@@ -35,7 +35,8 @@ export default async function handler(req, res) {
       }).select().single();
       if (error) throw error;
 
-      const { data: agentRows } = await supabase.from('agents').select('name,personality').in('name', participants || []);
+      const { data: agentRows, error: agentErr } = await supabase.from('agents').select('name,personality').in('name', participants || []);
+      if (agentErr) console.error('[agent-meeting] agents fetch fout:', agentErr.message);
       const pMap = Object.fromEntries((agentRows || []).map(a => [a.name, a.personality]));
 
       const transcript = [];
@@ -58,7 +59,8 @@ export default async function handler(req, res) {
       const jeffMsg = { speaker: 'Jeffrey', content: message, timestamp: new Date().toISOString(), type: 'user' };
       transcript.push(jeffMsg);
 
-      const { data: agentRows } = await supabase.from('agents').select('name,personality').in('name', meeting.participants || []);
+      const { data: agentRows, error: agentErr2 } = await supabase.from('agents').select('name,personality').in('name', meeting.participants || []);
+      if (agentErr2) console.error('[agent-meeting] agents fetch fout:', agentErr2.message);
       const pMap = Object.fromEntries((agentRows || []).map(a => [a.name, a.personality]));
 
       const newMsgs = [jeffMsg];

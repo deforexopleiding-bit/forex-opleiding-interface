@@ -355,7 +355,19 @@ async function buildAiContext(senderEmail, senderDomain) {
     }
   } catch {}
 
-  return { bedrijfsprofiel, correctionsContext, patternContext, kennisbankVoorbeelden };
+  // ── Simon's geleerde inzichten ───────────────────────────────────────────────
+  let simonLearnings = [];
+  try {
+    const { data: learnings } = await supabase
+      .from('agent_learnings')
+      .select('trigger_text, ideal_response')
+      .eq('agent_name', 'Simon')
+      .order('created_at', { ascending: false })
+      .limit(10);
+    simonLearnings = learnings || [];
+  } catch {}
+
+  return { bedrijfsprofiel, correctionsContext, patternContext, kennisbankVoorbeelden, simonLearnings };
 }
 
 // ── Patroon opslaan na AI-analyse ─────────────────────────────────────────────
@@ -545,7 +557,7 @@ export async function categorize({ from, subject, bodySnippet, date }) {
       suggested_reply_tone: 'niet_van_toepassing', is_definitely_not_spam: false, needs_review: true };
   }
 
-  const { bedrijfsprofiel, correctionsContext, patternContext, kennisbankVoorbeelden } =
+  const { bedrijfsprofiel, correctionsContext, patternContext, kennisbankVoorbeelden, simonLearnings } =
     await buildAiContext(senderEmail, senderDomain);
 
   const client = new Anthropic({ apiKey });
@@ -568,7 +580,10 @@ ${correctionsContext}
 
 BEKENDE PATRONEN:
 ${patternContext}
-
+${simonLearnings.length > 0 ? `
+SIMON'S GELEERDE INZICHTEN (hoog prioriteit):
+${simonLearnings.map((l, i) => `${i + 1}. Context: "${l.trigger_text.slice(0, 100)}" → Inzicht: "${l.ideal_response.slice(0, 150)}"`).join('\n')}
+` : ''}
 KRITIEKE REGEL — INHOUD GAAT ALTIJD BOVEN ONDERWERP:
 Als de mail begint met "Re:", "RE:", "Antw:" of "Fwd:", of als er een vraag in de body staat,
 NEGEER dan het onderwerp voor categorisatie. Een mail met "Gent" in het onderwerp maar
