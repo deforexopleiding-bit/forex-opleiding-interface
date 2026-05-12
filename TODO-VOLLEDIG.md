@@ -93,6 +93,14 @@
 
 ## 🏗️ ARCHITECTUUR — Tooling foundation
 
+### [A2] Mail-sync naar Supabase ✅ FASE 1 GEFIXED (2026-05-12)
+**Wat opgelost:**
+- `email_messages` tabel + `email_sync_log` tabel toegevoegd aan `db-migrate.js`
+- `api/sync-emails.js`: cron-endpoint met CRON_SECRET auth, per-mailbox incrementele UID-sync, categorize() integratie, idempotente upsert, 55s abort-guard
+- `vercel.json`: cron `*/5 * * * *` op `/api/sync-emails`
+- `api/sync-status.js`: monitoring-endpoint met log-history, per-mailbox tellingen, categorie-verdeling
+- **Fase 2 (nog open):** body_snippet via partial IMAP fetch; Simon's search_emails tool de live email_messages tabel laten bevragen
+
 ### [A1] email_categorizations tabel — per-mail categorie-opslag
 **Prioriteit:** Hoog (blokkeert eerlijke email-statistieken in Simon)  
 **Probleem:** AI-categorisaties worden alleen in `localStorage._aiCatCache` opgeslagen. `get_email_stats` kan daardoor geen actuele "hoeveel Nieuwe Leads vandaag"-vraag beantwoorden via Supabase. De tool retourneert nu historische patronen als benadering, met duidelijke kanttekening.  

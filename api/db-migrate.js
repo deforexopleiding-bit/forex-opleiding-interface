@@ -170,6 +170,40 @@ ALTER TABLE agent_kennisbank DISABLE ROW LEVEL SECURITY;`,
   updated_at timestamptz default now()
 );
 ALTER TABLE agent_learnings DISABLE ROW LEVEL SECURITY;`,
+  email_messages: `CREATE TABLE IF NOT EXISTS email_messages (
+  id            bigint generated always as identity primary key,
+  mailbox       text not null,
+  imap_uid      bigint not null,
+  message_id    text,
+  from_address  text,
+  from_name     text,
+  subject       text,
+  received_at   timestamptz,
+  body_snippet  text,
+  category      text,
+  requires_action boolean default false,
+  confidence    integer,
+  ai_source     text,
+  raw_flags     text[],
+  is_read       boolean default false,
+  synced_at     timestamptz default now(),
+  UNIQUE (mailbox, imap_uid)
+);
+CREATE INDEX IF NOT EXISTS idx_email_messages_mailbox_received ON email_messages (mailbox, received_at DESC);
+CREATE INDEX IF NOT EXISTS idx_email_messages_category ON email_messages (category);
+ALTER TABLE email_messages DISABLE ROW LEVEL SECURITY;`,
+  email_sync_log: `CREATE TABLE IF NOT EXISTS email_sync_log (
+  id          bigint generated always as identity primary key,
+  mailbox     text not null,
+  synced_at   timestamptz default now(),
+  new_count   integer default 0,
+  last_uid    bigint default 0,
+  duration_ms integer,
+  status      text default 'ok',
+  error_msg   text
+);
+CREATE INDEX IF NOT EXISTS idx_email_sync_log_mailbox ON email_sync_log (mailbox, synced_at DESC);
+ALTER TABLE email_sync_log DISABLE ROW LEVEL SECURITY;`,
 };
 
 async function tableExists(table) {
