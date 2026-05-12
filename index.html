@@ -139,7 +139,7 @@
     /* ── Hero stats ── */
     .hero-grid {
       display: grid;
-      grid-template-columns: repeat(6, 1fr);
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
       gap: 12px;
       margin-bottom: 28px;
     }
@@ -278,12 +278,41 @@
     ::-webkit-scrollbar-track { background: transparent; }
     ::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 3px; }
 
-    @media (max-width: 1200px) {
-      .hero-grid { grid-template-columns: repeat(3, 1fr); }
-      .dash-grid  { grid-template-columns: 1fr; }
+    /* ── KPI cards met sparklines ── */
+    .kpi-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 14px;
+      margin-bottom: 14px;
     }
-    @media (max-width: 768px) {
-      .hero-grid { grid-template-columns: repeat(2, 1fr); }
+    .kpi-card {
+      background: var(--bg-elev);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 20px 20px 14px;
+      position: relative; overflow: hidden;
+    }
+    .kpi-card::after {
+      content: ''; position: absolute; top: 0; left: 0; right: 0; height: 2px;
+      opacity: .5;
+    }
+    .kpi-card.leads::after  { background: #a855f7; }
+    .kpi-card.sessies::after { background: #22c55e; }
+    .kpi-top { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 4px; }
+    .kpi-label { font-size: 10px; text-transform: uppercase; letter-spacing: .6px; color: var(--text-faint); font-weight: 600; }
+    .kpi-val { font-size: 38px; font-weight: 800; line-height: 1; letter-spacing: -.8px; margin-bottom: 3px; }
+    .kpi-val.violet { color: var(--accent-violet); }
+    .kpi-val.green  { color: var(--green); }
+    .kpi-sub { font-size: 11px; color: var(--text-faint); margin-bottom: 12px; }
+    .kpi-sparkline-wrap { position: relative; height: 52px; margin: 0 -4px; }
+    .kpi-sparkline-wrap canvas { display: block; }
+    .kpi-empty-line { font-size: 10px; color: var(--text-faint); text-align: center; padding-top: 16px; }
+
+    @media (max-width: 1200px) {
+      .dash-grid { grid-template-columns: 1fr; }
+    }
+    @media (max-width: 640px) {
+      .kpi-grid { grid-template-columns: 1fr; }
       .sidebar   { transform: translateX(-100%); }
       .main      { margin-left: 0; }
       .main-inner { padding: 20px 16px 48px; }
@@ -399,30 +428,47 @@
     <!-- Two-column -->
     <div class="dash-grid">
 
-      <!-- Left: charts -->
+      <!-- Left: KPI cards + conversie gauge -->
       <div>
-        <div class="chart-card">
-          <div class="chart-title">Leads & Uitlegsessies per dag</div>
-          <div class="chart-wrap" style="height:200px">
-            <canvas id="lineChart"></canvas>
+        <!-- KPI cards met sparklines -->
+        <div class="kpi-grid">
+          <div class="kpi-card leads">
+            <div class="kpi-label">Leads</div>
+            <div class="kpi-val violet" id="kpiLeadsVal">—</div>
+            <div class="kpi-sub" id="kpiLeadsSub"></div>
+            <div id="kpiLeadsTrend"></div>
+            <div class="kpi-sparkline-wrap">
+              <canvas id="sparkLeads" height="52"></canvas>
+              <div class="kpi-empty-line" id="kpiLeadsEmpty" style="display:none">Nog geen data</div>
+            </div>
+          </div>
+          <div class="kpi-card sessies">
+            <div class="kpi-label">Uitlegsessies</div>
+            <div class="kpi-val green" id="kpiSessiesVal">—</div>
+            <div class="kpi-sub" id="kpiSessiesSub"></div>
+            <div id="kpiSessiesTrend"></div>
+            <div class="kpi-sparkline-wrap">
+              <canvas id="sparkSessies" height="52"></canvas>
+              <div class="kpi-empty-line" id="kpiSessiesEmpty" style="display:none">Nog geen data</div>
+            </div>
           </div>
         </div>
 
-        <div class="chart-card" style="display:grid;grid-template-columns:1fr 1fr;gap:20px;align-items:center">
-          <div>
+        <!-- Conversie gauge -->
+        <div class="chart-card" style="display:flex;align-items:center;gap:24px">
+          <div style="flex:0 0 auto">
             <div class="chart-title">Conversie</div>
-            <div class="gauge-wrap">
-              <canvas id="gaugeChart" height="140"></canvas>
+            <div class="gauge-wrap" style="max-width:200px">
+              <canvas id="gaugeChart" height="110"></canvas>
               <div class="gauge-center" id="gaugeCenterText">
                 <div class="gauge-pct" id="gaugePct" style="color:var(--amber)">—%</div>
                 <div class="gauge-sub" id="gaugeSub">— sessies van — leads</div>
               </div>
             </div>
           </div>
-          <div>
-            <div class="chart-title">Leads vs Sessies</div>
-            <div class="chart-wrap" style="height:160px">
-              <canvas id="barChart"></canvas>
+          <div style="flex:1;min-width:0">
+            <div style="font-size:12px;color:var(--text-faint);line-height:1.7" id="convLegend">
+              Conversie = percentage leads dat een uitlegsessie inplant in de geselecteerde periode.
             </div>
           </div>
         </div>
@@ -525,14 +571,14 @@ const EMAIL_CACHE_KEY    = 'dashboard_emails_v1';
 const EMAIL_CACHE_TTL_MS = 30 * 60 * 1000; // 30 min
 const QUOTE_CACHE_KEY    = 'dashboard_quote_v1';
 
-let activePeriod  = 'today';
-let customFrom    = null;
-let customTo      = null;
-let lineChartInst = null;
-let gaugeInst     = null;
-let barChartInst  = null;
-let refreshTimer  = null;
-let emailData     = null; // cached email list
+let activePeriod    = 'today';
+let customFrom      = null;
+let customTo        = null;
+let gaugeInst       = null;
+let sparkLeadsInst  = null;
+let sparkSessInst   = null;
+let refreshTimer    = null;
+let emailData       = null; // cached email list
 
 // ═══════════════════════════════════
 // INIT
@@ -642,7 +688,7 @@ async function loadDashboard() {
   const previous   = filterEmails(emails, prevStart, prevEnd);
 
   renderHeroStats(current, previous, statsRes?.tasks, statsRes?.unanswered);
-  renderCharts(current, previous, start, end);
+  renderKpiCards(emails, current, previous);
   renderTasks(statsRes?.tasks);
   renderActivity(statsRes?.recent_activity || [], current);
   updateNavBadges(statsRes?.tasks);
@@ -783,65 +829,161 @@ function renderHeroStats(current, previous, tasks, unanswered) {
 }
 
 // ═══════════════════════════════════
-// CHARTS
+// KPI CARDS + SPARKLINES
 // ═══════════════════════════════════
-function getDayLabels(start, end) {
-  const labels = [], dates = [];
-  const cur = new Date(start); cur.setHours(0,0,0,0);
-  const e   = new Date(end);   e.setHours(0,0,0,0);
-  while (cur <= e) {
-    labels.push(cur.toLocaleDateString('nl-NL', { day:'numeric', month:'short' }));
-    dates.push(new Date(cur));
-    cur.setDate(cur.getDate() + 1);
+
+// Bouw array van laatste N dagen t/m vandaag
+function lastNDays(n) {
+  const days = [];
+  for (let i = n - 1; i >= 0; i--) {
+    const d = new Date(); d.setHours(0,0,0,0); d.setDate(d.getDate() - i);
+    days.push(d);
   }
-  return { labels, dates };
+  return days;
 }
 
-function countPerDay(emails, dates, cat) {
-  return dates.map(d => {
-    const next = new Date(d); next.setDate(next.getDate() + 1);
-    return emails.filter(e => {
-      const dt = new Date(e.date);
-      return dt >= d && dt < next && (cat ? e.category === cat : true);
-    }).length;
+function countForDay(emails, day, cat) {
+  const next = new Date(day); next.setDate(next.getDate() + 1);
+  return emails.filter(e => {
+    const dt = new Date(e.date);
+    return dt >= day && dt < next && e.category === cat;
+  }).length;
+}
+
+function hexToRgba(hex, alpha) {
+  const r = parseInt(hex.slice(1,3),16);
+  const g = parseInt(hex.slice(3,5),16);
+  const b = parseInt(hex.slice(5,7),16);
+  return `rgba(${r},${g},${b},${alpha})`;
+}
+
+function buildSparkline(canvasId, emptyId, data, color) {
+  const canvas = document.getElementById(canvasId);
+  if (!canvas) return;
+
+  const allZero = data.every(v => v === 0);
+  const emptyEl = document.getElementById(emptyId);
+  if (allZero) {
+    if (emptyEl) emptyEl.style.display = '';
+    canvas.style.display = 'none';
+    return null;
+  }
+  if (emptyEl) emptyEl.style.display = 'none';
+  canvas.style.display = '';
+
+  const max    = Math.max(...data, 1);
+  const min    = Math.min(...data);
+  const maxIdx = data.indexOf(max);
+  const minIdx = data.lastIndexOf(min); // last occurrence to avoid same index as max
+
+  const pointColors = data.map((_, i) => {
+    if (i === maxIdx) return color;
+    if (i === minIdx && min < max) return '#ef4444';
+    return 'transparent';
   });
-}
+  const pointRadius = data.map((_, i) => (i === maxIdx || (i === minIdx && min < max)) ? 3.5 : 0);
 
-const chartDefaults = {
-  responsive: true, maintainAspectRatio: false,
-  plugins: { legend: { labels: { color: '#94a3b8', font: { size: 11 } } }, tooltip: { backgroundColor: '#181b25', borderColor: 'rgba(255,255,255,0.1)', borderWidth: 1, titleColor: '#f1f5f9', bodyColor: '#94a3b8' } },
-  scales: {
-    x: { grid: { color: 'rgba(255,255,255,0.04)' }, ticks: { color: '#64748b', font: { size: 10 } } },
-    y: { grid: { color: 'rgba(255,255,255,0.04)' }, ticks: { color: '#64748b', font: { size: 10 }, stepSize: 1 }, beginAtZero: true }
-  }
-};
+  const crosshairPlugin = {
+    id: 'crosshair',
+    afterDraw(chart) {
+      const { ctx, chartArea, tooltip } = chart;
+      if (!tooltip?._active?.length) return;
+      const x = tooltip._active[0].element.x;
+      ctx.save();
+      ctx.setLineDash([3, 3]);
+      ctx.strokeStyle = 'rgba(255,255,255,0.2)';
+      ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(x, chartArea.top); ctx.lineTo(x, chartArea.bottom); ctx.stroke();
+      ctx.restore();
+    }
+  };
 
-function renderCharts(current, previous, start, end) {
-  const { labels, dates } = getDayLabels(start, end);
+  const fill = hexToRgba(color, 0.12);
 
-  // Collapse to weekly buckets if >30 days for readability
-  const leadsDay  = countPerDay(current, dates, 'Nieuwe Lead');
-  const sessDay   = countPerDay(current, dates, 'Appointment');
-
-  // Line chart
-  if (lineChartInst) lineChartInst.destroy();
-  const lCtx = document.getElementById('lineChart').getContext('2d');
-  lineChartInst = new Chart(lCtx, {
+  return new Chart(canvas.getContext('2d'), {
     type: 'line',
     data: {
-      labels,
-      datasets: [
-        { label: 'Leads', data: leadsDay, borderColor: '#a855f7', backgroundColor: 'rgba(168,85,247,0.1)', tension: .3, fill: true, pointRadius: 3, pointBackgroundColor: '#a855f7' },
-        { label: 'Sessies', data: sessDay, borderColor: '#22c55e', backgroundColor: 'rgba(34,197,94,0.08)', tension: .3, fill: true, pointRadius: 3, pointBackgroundColor: '#22c55e' },
-      ]
+      labels: data.map((_, i) => {
+        const d = new Date(); d.setDate(d.getDate() - (data.length - 1 - i));
+        return d.toLocaleDateString('nl-NL', { day:'numeric', month:'short' });
+      }),
+      datasets: [{
+        data,
+        borderColor: color,
+        borderWidth: 1.5,
+        backgroundColor: fill,
+        fill: true,
+        tension: 0.35,
+        pointRadius,
+        pointBackgroundColor: pointColors,
+        pointBorderColor: pointColors,
+        pointHoverRadius: 4,
+        pointHoverBackgroundColor: color,
+      }]
     },
-    options: { ...chartDefaults }
+    plugins: [crosshairPlugin],
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: { duration: 300 },
+      layout: { padding: { top: 8, bottom: 2, left: 2, right: 2 } },
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          backgroundColor: '#181b25',
+          borderColor: 'rgba(255,255,255,0.12)',
+          borderWidth: 1,
+          titleColor: '#94a3b8',
+          bodyColor: '#f1f5f9',
+          titleFont: { size: 10 },
+          bodyFont:  { size: 13, weight: '700' },
+          padding: 8,
+          displayColors: false,
+          callbacks: {
+            title: ctx => ctx[0].label,
+            label: ctx => ctx.parsed.y + (ctx.dataset.label ? ' ' + ctx.dataset.label.toLowerCase() : '')
+          }
+        }
+      },
+      scales: {
+        x: { display: false },
+        y: { display: false, beginAtZero: true }
+      }
+    }
   });
+}
 
-  // Gauge
-  const leads = leadsDay.reduce((a,b)=>a+b,0);
-  const sess  = sessDay.reduce((a,b)=>a+b,0);
-  const conv  = leads > 0 ? Math.round((sess / leads) * 100) : 0;
+function renderKpiCards(allEmails, current, previous) {
+  const leads   = current.filter(e => e.category === 'Nieuwe Lead').length;
+  const sessies = current.filter(e => e.category === 'Appointment').length;
+  const prevL   = previous.filter(e => e.category === 'Nieuwe Lead').length;
+  const prevS   = previous.filter(e => e.category === 'Appointment').length;
+
+  const periodLabel = {
+    today: 'vandaag', yesterday: 'gisteren',
+    week: 'deze week', month: 'deze maand', custom: 'geselecteerde periode'
+  }[activePeriod] || 'in deze periode';
+
+  document.getElementById('kpiLeadsVal').textContent  = leads;
+  document.getElementById('kpiSessiesVal').textContent = sessies;
+  document.getElementById('kpiLeadsSub').textContent  = `Leads ${periodLabel}`;
+  document.getElementById('kpiSessiesSub').textContent = `Sessies ${periodLabel}`;
+  document.getElementById('kpiLeadsTrend').innerHTML  = trendHtml(leads, prevL);
+  document.getElementById('kpiSessiesTrend').innerHTML = trendHtml(sessies, prevS);
+
+  // Sparklines — altijd laatste 14 dagen, ongeacht periode-selectie
+  const days      = lastNDays(14);
+  const leadsData = days.map(d => countForDay(allEmails, d, 'Nieuwe Lead'));
+  const sessData  = days.map(d => countForDay(allEmails, d, 'Appointment'));
+
+  if (sparkLeadsInst) { sparkLeadsInst.destroy(); sparkLeadsInst = null; }
+  if (sparkSessInst)  { sparkSessInst.destroy();  sparkSessInst  = null; }
+
+  sparkLeadsInst = buildSparkline('sparkLeads',  'kpiLeadsEmpty',  leadsData, '#a855f7');
+  sparkSessInst  = buildSparkline('sparkSessies', 'kpiSessiesEmpty', sessData, '#22c55e');
+
+  // Conversie gauge
+  const conv      = leads > 0 ? Math.round((sessies / leads) * 100) : 0;
   const convColor = conv >= 30 ? '#22c55e' : conv >= 15 ? '#f59e0b' : '#ef4444';
 
   if (gaugeInst) gaugeInst.destroy();
@@ -857,30 +999,14 @@ function renderCharts(current, previous, start, end) {
         rotation: -90,
       }]
     },
-    options: { responsive: true, maintainAspectRatio: true, cutout: '72%', plugins: { legend: { display: false }, tooltip: { enabled: false } } }
+    options: {
+      responsive: true, maintainAspectRatio: true, cutout: '72%',
+      plugins: { legend: { display: false }, tooltip: { enabled: false } }
+    }
   });
-  document.getElementById('gaugePct').textContent  = conv + '%';
-  document.getElementById('gaugePct').style.color  = convColor;
-  document.getElementById('gaugeSub').textContent  = `${sess} sessies van ${leads} leads`;
-
-  // Bar chart (most recent 7 days only if period longer)
-  const barLabels = labels.slice(-7);
-  const barLeads  = leadsDay.slice(-7);
-  const barSess   = sessDay.slice(-7);
-
-  if (barChartInst) barChartInst.destroy();
-  const bCtx = document.getElementById('barChart').getContext('2d');
-  barChartInst = new Chart(bCtx, {
-    type: 'bar',
-    data: {
-      labels: barLabels,
-      datasets: [
-        { label: 'Leads', data: barLeads, backgroundColor: 'rgba(168,85,247,0.7)', borderRadius: 4 },
-        { label: 'Sessies', data: barSess, backgroundColor: 'rgba(34,197,94,0.7)', borderRadius: 4 },
-      ]
-    },
-    options: { ...chartDefaults, plugins: { ...chartDefaults.plugins, legend: { display: false } } }
-  });
+  document.getElementById('gaugePct').textContent = conv + '%';
+  document.getElementById('gaugePct').style.color = convColor;
+  document.getElementById('gaugeSub').textContent = `${sessies} sessies van ${leads} leads`;
 }
 
 // ═══════════════════════════════════
@@ -907,12 +1033,13 @@ function renderTasks(tasks) {
   const sorted = [...tasks.items].sort((a,b) => (priorityOrder[a.prioriteit]||2) - (priorityOrder[b.prioriteit]||2));
 
   el.innerHTML = sorted.map(t => `
-    <div class="task-item">
+    <div class="task-item" style="cursor:pointer" onclick="location.href='modules/taken.html?taskId=${esc(t.id)}'">
       <span class="task-badge ${esc(t.prioriteit || 'Normaal')}">${esc(t.prioriteit || 'Normaal')}</span>
-      <div>
+      <div style="min-width:0;flex:1">
         <div class="task-title">${esc(t.titel || '—')}</div>
         ${t.deadline ? `<div class="task-deadline">📅 ${esc(t.deadline)}</div>` : ''}
       </div>
+      <svg style="width:11px;height:11px;flex-shrink:0;color:var(--text-faint)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
     </div>
   `).join('');
 }

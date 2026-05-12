@@ -810,30 +810,56 @@ function save(key, val) { localStorage.setItem(key, JSON.stringify(val)); }
 
 // ── Supabase sync ────────────────────────────────────────────────────────────
 async function loadTakenFromSupabase() {
-  if (taken.length > 0) return; // localStorage heeft al data
   try {
     const res = await fetch('/api/taken');
     if (!res.ok) return;
     const { taken: rows } = await res.json();
+
+    // Éénmalige migratie: push localStorage-taken die niet in Supabase staan
+    if (taken.length > 0 && Array.isArray(rows)) {
+      const inSupabase = new Set(rows.map(r => r.id));
+      const toMigrate  = taken.filter(t => !inSupabase.has(t.id));
+      if (toMigrate.length > 0) {
+        fetch('/api/taken', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'bulk_upsert', tasks: toMigrate })
+        }).catch(() => {});
+      }
+      // Voeg Supabase-taken toe die ontbreken in localStorage (bv. via ander apparaat)
+      const inLocal = new Set(taken.map(t => t.id));
+      const fromSupabase = (rows || []).filter(r => !inLocal.has(r.id)).map(fromRow);
+      if (fromSupabase.length > 0) {
+        taken = [...taken, ...fromSupabase];
+        save('taken_lijst', taken);
+        render();
+      }
+      return;
+    }
+
+    // localStorage leeg: laad alles vanuit Supabase
     if (!Array.isArray(rows) || rows.length === 0) return;
-    taken = rows.map((r) => ({
-      id:            r.id,
-      titel:         r.titel          || '',
-      omschrijving:  r.omschrijving   || '',
-      prioriteit:    r.prioriteit     || 'Normaal',
-      categorie:     r.categorie      || 'Overige',
-      toegewezenAan: r.toegewezen_aan || '',
-      deadline:      r.deadline       || '',
-      emailId:       r.email_id       || '',
-      emailSubject:  r.email_subject  || '',
-      status:        r.status         || 'todo',
-      notities:      r.notities       || '',
-      aangemaakt:    r.aangemaakt     || r.updated_at,
-      afgerondOp:    r.afgerond_op    || null
-    }));
+    taken = rows.map(fromRow);
     save('taken_lijst', taken);
     render();
   } catch {}
+}
+
+function fromRow(r) {
+  return {
+    id:            r.id,
+    titel:         r.titel          || '',
+    omschrijving:  r.omschrijving   || '',
+    prioriteit:    r.prioriteit     || 'Normaal',
+    categorie:     r.categorie      || 'Overige',
+    toegewezenAan: r.toegewezen_aan || '',
+    deadline:      r.deadline       || '',
+    emailId:       r.email_id       || '',
+    emailSubject:  r.email_subject  || '',
+    status:        r.status         || 'todo',
+    notities:      r.notities       || '',
+    aangemaakt:    r.aangemaakt     || r.updated_at,
+    afgerondOp:    r.afgerond_op    || null
+  };
 }
 
 function syncTaakToSupabase(taak) {
@@ -1331,6 +1357,24 @@ function overlayClick(e, overlayId) {
 
 function handleUrlParams() {
   const p = new URLSearchParams(window.location.search);
+
+  // Scroll naar en highlight een specifieke taak (van dashboard)
+  if (p.has('taskId')) {
+    const taskId = p.get('taskId');
+    window.history.replaceState({}, '', window.location.pathname);
+    // Wacht tot render klaar is, open dan het detail-panel
+    requestAnimationFrame(() => {
+      const el = document.getElementById('card-' + taskId);
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        el.style.boxShadow = '0 0 0 2px #a855f7, 0 0 16px rgba(168,85,247,0.4)';
+        setTimeout(() => { el.style.boxShadow = ''; }, 2500);
+      }
+      openDetail(taskId);
+    });
+    return;
+  }
+
   if (p.has('from_email') || p.has('titel')) {
     openNieuweTaak({
       emailId:      p.get('from_email') || '',
@@ -1340,7 +1384,6 @@ function handleUrlParams() {
       prioriteit:   p.get('prioriteit') || 'Normaal',
       omschrijving: p.get('omschrijving') || ''
     });
-    // clean URL without reload
     window.history.replaceState({}, '', window.location.pathname);
   }
 }
