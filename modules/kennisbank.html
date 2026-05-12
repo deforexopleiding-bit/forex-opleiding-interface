@@ -803,11 +803,16 @@
     /* ─────────────────────────────────────────────────────────────
        Constants & state
        ───────────────────────────────────────────────────────────── */
-    const PROFILE_KEY    = 'kennisbank_profile';
-    const ITEMS_KEY      = 'kennisbank_items';
-    const ACTIVE_KEY     = 'kennisbank_active';
+    const ACTIVE_KEY         = 'kennisbank_active';
     const REPLY_STATS_KEY    = 'email_reply_stats';
     const LEARNING_KEY       = 'email_learning_examples';
+
+    // Eenmalige localStorage cleanup — kennisbank is nu volledig Supabase-first
+    if (!sessionStorage.getItem('kb_migrated_v2')) {
+      try { localStorage.removeItem('kennisbank_items');  } catch {}
+      try { localStorage.removeItem('kennisbank_profile'); } catch {}
+      sessionStorage.setItem('kb_migrated_v2', '1');
+    }
 
     const TYPES = ['Klantvraag', 'Factuurvraag', 'Klacht', 'Algemeen', 'Overige'];
 
@@ -823,77 +828,84 @@
       try { localStorage.setItem(key, JSON.stringify(value)); return true; } catch { return false; }
     }
 
-    // ── Supabase sync ──────────────────────────────────────────────────────
+    // ── Supabase — single source of truth ─────────────────────────────────
     async function loadFromSupabase() {
+      $('itemList').innerHTML = '<div class="item-empty" style="opacity:0.6">Kennisbank laden…</div>';
       try {
         const res = await fetch('/api/kennisbank-sync');
-        if (!res.ok) return;
-        const { items } = await res.json();
-        if (!Array.isArray(items)) return;
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        const { items, error: apiErr } = await res.json();
+        if (apiErr) throw new Error(apiErr);
+        if (!Array.isArray(items)) throw new Error('Onverwacht antwoord van server');
 
-        // Profiel mergen (alleen als Supabase er een heeft)
+        // Profiel (rij met label '_profile' of type 'bedrijfsprofiel')
         const profileRow = items.find((i) => i.label === '_profile' || i.type === 'bedrijfsprofiel');
-        if (profileRow) {
-          try {
-            const parsed = JSON.parse(profileRow.content || '{}');
-            if (parsed.bedrijfsnaam) {
-              state.profile = { ...defaultProfile(), ...parsed };
-              saveJson(PROFILE_KEY, state.profile);
-            }
-          } catch {}
-        }
+        state.profile = profileRow
+          ? (() => { try { return { ...defaultProfile(), ...JSON.parse(profileRow.content || '{}') }; } catch { return defaultProfile(); } })()
+          : defaultProfile();
 
-        // Items mergen: lokale items behouden, Supabase-items toevoegen als ze er niet al zijn
-        const localItems = loadJson(ITEMS_KEY, []);
-        const localIds = new Set(localItems.map((i) => i.id));
-
-        const remoteItems = items
-          .filter((i) => i.label !== '_profile' && i.type !== 'bedrijfsprofiel' && (i.label || i.id))
+        // Items (profiel-rij uitsluiten) — id is de Supabase uuid
+        state.items = items
+          .filter((i) => i.type !== 'bedrijfsprofiel' && i.label !== '_profile')
           .map((i) => ({
-            id:        i.label || String(i.id),
+            id:        String(i.id),
             type:      i.type      || 'Algemeen',
             richting:  i.direction || null,
             note:      i.note      || '',
             content:   i.content   || '',
-            source:    'supabase',
             fileName:  i.category  || null,
             createdAt: i.created_at || new Date().toISOString()
-          }))
-          .filter((i) => !localIds.has(i.id));
-
-        if (remoteItems.length > 0) {
-          const merged = [...localItems, ...remoteItems];
-          state.items = merged;
-          saveJson(ITEMS_KEY, merged);
-        } else if (state.items.length === 0) {
-          state.items = localItems;
-        }
+          }));
 
         renderStats();
         renderProfile();
         renderItems();
-      } catch {}
+      } catch (err) {
+        console.error('[kennisbank] loadFromSupabase fout:', err.message);
+        $('itemList').innerHTML = `<div class="item-empty" style="color:var(--red)">Kennisbank kon niet geladen worden — refresh de pagina of probeer later opnieuw.<br><small style="color:var(--text-faint); font-weight:400">${escapeHtml(err.message)}</small></div>`;
+      }
     }
 
-    function syncItemToSupabase(item) {
-      fetch('/api/kennisbank-sync', {
+    // CREATE — POST upsert_item + re-fetch
+    async function createItemInSupabase(item) {
+      const res = await fetch('/api/kennisbank-sync', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: 'upsert_item', item })
-      }).catch(() => {});
+      });
+      const data = await res.json();
+      if (!res.ok || data.error) throw new Error(data.error || 'HTTP ' + res.status);
+      await loadFromSupabase();
     }
 
-    function deleteItemFromSupabase(id) {
-      fetch('/api/kennisbank-sync', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'delete_item', local_id: id })
-      }).catch(() => {});
+    // UPDATE — PUT op Supabase uuid + re-fetch
+    async function updateItemInSupabase(id, item) {
+      const res = await fetch('/api/kennisbank-sync?id=' + encodeURIComponent(id), {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(item)
+      });
+      const data = await res.json();
+      if (!res.ok || data.error) throw new Error(data.error || 'HTTP ' + res.status);
+      await loadFromSupabase();
     }
 
-    function syncProfileToSupabase() {
-      fetch('/api/kennisbank-sync', {
+    // DELETE — DELETE op Supabase uuid + re-fetch
+    async function deleteItemFromSupabase(id) {
+      const res = await fetch('/api/kennisbank-sync?id=' + encodeURIComponent(id), {
+        method: 'DELETE'
+      });
+      const data = await res.json();
+      if (!res.ok || data.error) throw new Error(data.error || 'HTTP ' + res.status);
+      await loadFromSupabase();
+    }
+
+    // SYNC PROFILE — POST sync_profile (geen re-fetch nodig, state is al bijgewerkt)
+    async function syncProfileToSupabase() {
+      const res = await fetch('/api/kennisbank-sync', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: 'sync_profile', profile: state.profile })
-      }).catch(() => {});
+      });
+      const data = await res.json();
+      if (!res.ok || data.error) throw new Error(data.error || 'HTTP ' + res.status);
     }
 
     function defaultProfile() {
@@ -909,8 +921,8 @@
     }
 
     const state = {
-      profile: { ...defaultProfile(), ...loadJson(PROFILE_KEY, {}) },
-      items:   loadJson(ITEMS_KEY, []),
+      profile: defaultProfile(),
+      items:   [],
       active:  loadJson(ACTIVE_KEY, false),
       filter:  'Alle',
       search:  '',
@@ -1060,17 +1072,23 @@
       $('profileDirty').style.display = 'inline-flex';
     }
 
-    function saveProfile() {
+    async function saveProfile() {
       state.profile.overOns = $('overOns').value;
       state.profile.nooitZeggen = $('nooitZeggen').value;
       state.profile.contactgegevens = $('contactgegevens').value;
       state.profile.updatedAt = new Date().toISOString();
-      saveJson(PROFILE_KEY, state.profile);
-      syncProfileToSupabase();
       state.profileDirty = false;
       $('profileDirty').style.display = 'none';
       renderStats();
-      showToast('Profiel opgeslagen');
+      try {
+        await syncProfileToSupabase();
+        showToast('Profiel opgeslagen');
+      } catch (err) {
+        state.profileDirty = true;
+        $('profileDirty').style.display = 'inline-flex';
+        showToast('Profiel niet opgeslagen — probeer opnieuw');
+        console.error('[kennisbank] saveProfile fout:', err.message);
+      }
     }
 
     /* ─────────────────────────────────────────────────────────────
@@ -1171,36 +1189,41 @@
       renderStaging();
     }
 
-    function commitStaging() {
+    async function commitStaging() {
       if (!state.staging || state.staging.status !== 'ready') return;
       if (!state.staging.content || !state.staging.content.trim()) {
         showToast('Geen inhoud om op te slaan');
         return;
       }
-      // Bij bewerken: oorspronkelijk item verwijderen zodat we niet dupliceren
+
+      const saveBtn = $('stagingSaveBtn');
+      if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = 'Opslaan…'; }
+
       const editingId = state.staging.editingId;
-      if (editingId) {
-        state.items = state.items.filter((i) => i.id !== editingId);
-      }
       const item = {
-        id: uniqueId('k'),
-        type: state.staging.type,
+        type:     state.staging.type,
         richting: state.staging.richting,
-        note: state.staging.note || '',
-        content: state.staging.content.trim(),
-        source: state.staging.source,
+        note:     state.staging.note     || '',
+        content:  state.staging.content.trim(),
+        source:   state.staging.source,
         fileName: state.staging.fileName,
-        createdAt: new Date().toISOString()
       };
-      state.items.unshift(item);
-      saveJson(ITEMS_KEY, state.items);
-      syncItemToSupabase(item);
-      clearStaging();
-      $('textPaste').value = '';
-      $('fileInput').value = '';
-      renderStats();
-      renderItems();
-      showToast(editingId ? 'Item bijgewerkt' : 'Toegevoegd aan kennisbank');
+
+      try {
+        if (editingId) {
+          await updateItemInSupabase(editingId, item);
+        } else {
+          await createItemInSupabase(item);
+        }
+        clearStaging();
+        $('textPaste').value = '';
+        $('fileInput').value = '';
+        showToast(editingId ? 'Item bijgewerkt' : 'Toegevoegd aan kennisbank');
+      } catch (err) {
+        if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = 'Toevoegen aan kennisbank'; }
+        showToast('Item niet opgeslagen — probeer opnieuw');
+        console.error('[kennisbank] commitStaging fout:', err.message);
+      }
     }
 
     function renderStaging() {
@@ -1362,14 +1385,15 @@
           const c = card.querySelector(`[data-content="${id}"]`);
           c.classList.toggle('expanded');
         });
-        card.querySelector('[data-item-action="delete"]').addEventListener('click', () => {
+        card.querySelector('[data-item-action="delete"]').addEventListener('click', async () => {
           if (!confirm('Dit item verwijderen uit de kennisbank?')) return;
-          state.items = state.items.filter((i) => i.id !== id);
-          saveJson(ITEMS_KEY, state.items);
-          deleteItemFromSupabase(id);
-          renderStats();
-          renderItems();
-          showToast('Item verwijderd');
+          try {
+            await deleteItemFromSupabase(id);
+            showToast('Item verwijderd');
+          } catch (err) {
+            showToast('Item niet verwijderd — probeer opnieuw');
+            console.error('[kennisbank] delete fout:', err.message);
+          }
         });
         card.querySelector('[data-item-action="edit"]').addEventListener('click', () => {
           const item = state.items.find((i) => i.id === id);
@@ -1404,11 +1428,8 @@
        Wire-up
        ───────────────────────────────────────────────────────────── */
     function init() {
-      renderStats();
-      renderProfile();
-      renderItems();
       renderToggle();
-      loadFromSupabase(); // herstel vanuit Supabase als localStorage leeg is
+      loadFromSupabase(); // Supabase is de enige bron — toont loading state + rendert alles na load
 
       // Profile field listeners
       ['overOns', 'nooitZeggen', 'contactgegevens'].forEach((id) => {

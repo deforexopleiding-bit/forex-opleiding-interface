@@ -6,18 +6,57 @@ export default async function handler(req, res) {
     try {
       const { data: items, error } = await supabase
         .from('kennisbank_items')
-        .select('id, type, direction, title, content, label, note, helpfulness_score, times_used, created_at')
+        .select('id, type, direction, title, content, label, note, category, helpfulness_score, times_used, created_at, updated_at')
         .order('helpfulness_score', { ascending: false });
 
       if (error) throw error;
       return res.status(200).json({ items: items || [], count: (items || []).length });
     } catch (err) {
       console.error('[kennisbank-sync] GET fout:', err.message);
-      return res.status(200).json({ items: [], count: 0, error: err.message });
+      return res.status(500).json({ items: [], count: 0, error: err.message });
     }
   }
 
-  // ── POST — sync localStorage data naar Supabase ────────────────────────
+  // ── PUT — update item op Supabase uuid ───────────────────────────────────
+  if (req.method === 'PUT') {
+    const id = req.query?.id;
+    if (!id) return res.status(400).json({ error: 'id vereist' });
+    const item = req.body || {};
+    try {
+      const payload = {
+        type:       item.type                        || 'Algemeen',
+        direction:  item.richting || item.direction  || null,
+        content:    item.content                     || '',
+        note:       item.note                        || null,
+        updated_at: new Date().toISOString(),
+      };
+      if (item.title) payload.title = String(item.title).slice(0, 200);
+      const { error } = await supabase.from('kennisbank_items').update(payload).eq('id', id);
+      if (error) throw error;
+      console.log('[kennisbank-sync] PUT id:', id);
+      return res.status(200).json({ ok: true });
+    } catch (err) {
+      console.error('[kennisbank-sync] PUT fout:', err.message);
+      return res.status(500).json({ error: err.message });
+    }
+  }
+
+  // ── DELETE — verwijder item op Supabase uuid ─────────────────────────────
+  if (req.method === 'DELETE') {
+    const id = req.query?.id;
+    if (!id) return res.status(400).json({ error: 'id vereist' });
+    try {
+      const { error } = await supabase.from('kennisbank_items').delete().eq('id', id);
+      if (error) throw error;
+      console.log('[kennisbank-sync] DELETE id:', id);
+      return res.status(200).json({ ok: true });
+    } catch (err) {
+      console.error('[kennisbank-sync] DELETE fout:', err.message);
+      return res.status(500).json({ error: err.message });
+    }
+  }
+
+  // ── POST — sync acties ────────────────────────────────────────────────────
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
@@ -30,7 +69,7 @@ export default async function handler(req, res) {
     if (!item) return res.status(400).json({ error: 'item vereist' });
 
     // Gebruik item.label als deduplicatiesleutel (niet item.id — auto-gegenereerde items hebben geen id)
-    const labelKey = item.label || item.id || null;
+    const labelKey = item.label || null;
 
     try {
       const { data: existing } = labelKey
@@ -39,7 +78,7 @@ export default async function handler(req, res) {
 
       const payload = {
         type:             item.type            || 'Algemeen',
-        direction:        item.direction       || item.richting || null,
+        direction:        item.richting        || item.direction || null,
         title:            (item.title || '').slice(0, 200) || (item.content || '').slice(0, 80) || 'Item',
         content:          item.content         || '',
         note:             item.note            || null,

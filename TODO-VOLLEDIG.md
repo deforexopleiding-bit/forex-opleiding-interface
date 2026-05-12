@@ -11,11 +11,13 @@
 **Fix:** Voeg `body_snippet` toe aan elk item in emailList vanuit `state.bodyCache`  
 **Status:** ✅ GEFIXED (2026-05-11)
 
-### [K2] Kennisbank → Supabase sync
-**Bestand:** `modules/kennisbank.html`  
-**Probleem:** Alle kennisbank items staan alleen in localStorage. `/api/kennisbank-sync` bestaat maar wordt nooit aangeroepen.  
-**Fix:** Voeg sync toe bij: startup (laad van Supabase), na item-wijziging (push naar Supabase)  
-**Schatting:** 2-3 uur
+### [K2] Kennisbank → Supabase sync ✅ VOLLEDIG GEFIXED (2026-05-12)
+**Wat opgelost:**
+- Gap 1: `loadFromSupabase()` awaited + re-render na load (was: fire-and-forget zonder re-render)
+- Gap 2: CRUD writes awaited met proper error handling + toast bij failure (was: `.catch(() => {})`)
+- Gap 3: DELETE/UPDATE op Supabase uuid via PUT+DELETE HTTP methoden (was: label-gebaseerde deduplicatie)
+- localStorage volledig uitgefaseerd voor items en profiel (one-shot cleanup via `kb_migrated_v2` sessionStorage flag)
+- Foutmelding bij laadprobleem: "Kennisbank kon niet geladen worden — refresh de pagina"
 
 ### [K3] Taken → Supabase persistentie ✅ GEFIXED
 **Bestand:** `modules/taken.html`  
@@ -138,3 +140,9 @@
 - [x] Module 1.3 UX-verbeteringen:
   - Bijlagen direct zichtbaar bij Actie tab render — fetchEmailBody roept updateActieCard aan (volledige re-render met gevulde cache)
   - Onderwerp-veld in reply composer — data-reply-subject input, pre-filled met Re: <origineel>, state.replySubject[] persistent over re-renders
+- [x] Module 1.3 Kennisbank Supabase-first:
+  - localStorage uitgefaseerd (kennisbank_items + kennisbank_profile), one-shot cleanup via sessionStorage flag
+  - kennisbank-sync.js: PUT (update by uuid) + DELETE (by uuid) endpoints toegevoegd, GET 500 bij fout
+  - loadFromSupabase(): loading state, error state met bericht, re-render na succes
+  - CRUD writes awaited: toast bij failure, save-knop re-enabled bij fout
+  - Supabase cleanup SQL: zie hieronder voor handmatige uitvoering

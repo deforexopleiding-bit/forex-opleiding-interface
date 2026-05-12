@@ -1,5 +1,5 @@
 # Volledige Systeemanalyse — Agency Command Center
-> Gegenereerd: 2026-05-11 | Bijgewerkt: 2026-05-12 (Module 1.3) | Branch: main
+> Gegenereerd: 2026-05-11 | Bijgewerkt: 2026-05-12 (Module 1.3 kennisbank) | Branch: main
 
 ---
 
@@ -30,6 +30,7 @@ Het Agency Command Center is een volledig functioneel e-mail management systeem 
 | Bijlagen-sectie leeg na async body-load | ✅ GEFIXED |
 | Bijlagen niet direct zichtbaar bij Actie tab render (fetchEmailBody race) | ✅ GEFIXED |
 | Onderwerp-veld ontbreekt in reply composer | ✅ NIEUW |
+| [K2] Kennisbank Supabase-first — 3 gaps opgelost (2026-05-12) | ✅ VOLLEDIG GEFIXED |
 
 ---
 
@@ -70,7 +71,7 @@ Het Agency Command Center is een volledig functioneel e-mail management systeem 
 | CRUD kennisbank items | ✅ | Toevoegen/bewerken/verwijderen |
 | Leermodule (lessen) | ✅ | Volledig |
 | Vision/PDF extractie | ✅ | /api/vision-extract, /api/pdf-extract |
-| Supabase sync | ❌ | /api/kennisbank-sync bestaat maar is NIET aangeroepen |
+| Supabase sync | ✅ | Supabase is nu single source of truth — localStorage volledig uitgefaseerd |
 | Items gebruikt in AI-replies | ✅ | generate-reply haalt ze server-side op |
 
 ### Taken module (`modules/taken.html`)
@@ -168,8 +169,8 @@ Gebruiker corrigeert
 | emailAiReplies | email.html | Gegenereerde replies | ❌ |
 | undoHistory | email.html | Undo stack (10 items) | ❌ |
 | reclamePatterns | email.html | Lokale reclame whitelist | ❌ |
-| kennisbankItems | kennisbank.html | Alle kennisbank items | ❌ (sync niet verbonden) |
-| kennisbankProfile | kennisbank.html | Bedrijfsprofiel | ❌ |
+| kennisbankItems | kennisbank.html | Alle kennisbank items | ✅ Verwijderd — Supabase is nu primary |
+| kennisbankProfile | kennisbank.html | Bedrijfsprofiel | ✅ Verwijderd — Supabase is nu primary |
 | takenItems | taken.html | Alle taken | ✅ (Supabase taken_items) |
 | dashboardStats | index.html | Statistieken | ⚠️ (KPI via email query, taken via API) |
 | bedrijfsprofiel | index.html | Profiel | ❌ |
