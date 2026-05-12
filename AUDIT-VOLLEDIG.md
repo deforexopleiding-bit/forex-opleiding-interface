@@ -25,6 +25,9 @@ Het Agency Command Center is een volledig functioneel e-mail management systeem 
 | Verzonden mails verdwijnen na refresh (saveToSupabase silent fail) | ✅ GEFIXED |
 | Bijlagen ontvangen tonen + downloaden | ✅ NIEUW |
 | Bijlagen meesturen in composer | ✅ NIEUW |
+| send-email.js insert altijd met attachments:null → PostgREST error | ✅ GEFIXED |
+| Bijlagen upload-handler niet actief in Actie tab | ✅ GEFIXED |
+| Bijlagen-sectie leeg na async body-load | ✅ GEFIXED |
 
 ---
 

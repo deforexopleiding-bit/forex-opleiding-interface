@@ -2314,7 +2314,9 @@
 
   function updateCardPreview(uid) {
     const cache = state.bodyCache[uid];
-    // Actie card preview
+    const email = findEmail(uid);
+
+    // ── Actie card: update preview text + inject attach section ───────────
     const card = document.querySelector('.actie-card[data-uid="' + uid + '"]');
     if (card) {
       const preview = card.querySelector('.card-preview');
@@ -2331,8 +2333,23 @@
           preview.textContent = raw.slice(0, 300) + (raw.length > 300 ? '…' : '');
         }
       }
+      // Inject bijlagen-sectie wanneer body geladen is en bijlagen aanwezig zijn
+      if (cache && !cache.loading && !cache.error && cache.attachments && cache.attachments.length > 0) {
+        const html = renderAttachments(uid, email);
+        if (html) {
+          let sect = card.querySelector('.attach-section');
+          if (sect) {
+            sect.outerHTML = html;
+          } else {
+            // Voeg in vóór .card-actions (staat altijd in het kaartje)
+            const anchor = card.querySelector('.card-actions');
+            if (anchor) anchor.insertAdjacentHTML('beforebegin', html);
+          }
+        }
+      }
     }
-    // Body panel (andere tabs)
+
+    // ── Body panel (Alle/Info/Reclame tabs): update body-text + attach sect ─
     const panel = document.querySelector('.body-panel[data-uid="' + uid + '"]');
     if (panel) {
       const bodyText = panel.querySelector('.body-text');
@@ -2346,6 +2363,19 @@
         } else {
           bodyText.className = 'body-text';
           bodyText.textContent = cache.text || '(geen inhoud)';
+        }
+      }
+      // Inject bijlagen-sectie wanneer body geladen is en bijlagen aanwezig zijn
+      if (cache && !cache.loading && !cache.error && cache.attachments && cache.attachments.length > 0) {
+        const html = renderAttachments(uid, email);
+        if (html) {
+          let sect = panel.querySelector('.attach-section');
+          if (sect) {
+            sect.outerHTML = html;
+          } else {
+            // Voeg in direct na .body-text
+            if (bodyText) bodyText.insertAdjacentHTML('afterend', html);
+          }
         }
       }
     }
@@ -3859,13 +3889,42 @@
       render();
     });
     attachKbFormHandlers(uid);
+    attachAttachmentHandlers(uid);
+  }
 
-    // ── Bijlagen upload handlers ──────────────────────────────────────────
+  // ── Gedeelde bijlagen-upload handlers (werkt voor body-panel én actie-card) ──
+  function _attachContainer(uid) {
+    return document.querySelector('.body-panel[data-uid="' + uid + '"]') ||
+           document.querySelector('.actie-card[data-uid="' + uid + '"]');
+  }
+
+  function _refreshAttachBar(uid) {
+    const c = _attachContainer(uid);
+    if (!c) return;
+    const newWrap = document.createElement('div');
+    newWrap.innerHTML = renderAttachUpload(uid);
+    const oldBar  = c.querySelector('.attach-bar');
+    const oldPrev = c.querySelector('.attach-preview-list');
+    if (oldBar)  oldBar.replaceWith(newWrap.querySelector('.attach-bar') || document.createTextNode(''));
+    if (oldPrev) oldPrev.remove();
+    const newPrev = newWrap.querySelector('.attach-preview-list');
+    if (newPrev) {
+      const bar = c.querySelector('.attach-bar');
+      if (bar) bar.insertAdjacentElement('afterend', newPrev);
+    }
+    attachAttachmentHandlers(uid); // re-wire new elements
+  }
+
+  function attachAttachmentHandlers(uid) {
     const MAX_FILES = 5;
     const MAX_BYTES = 8 * 1024 * 1024; // 8 MB raw
 
-    const attachInput = panel.querySelector('[data-attach-input="' + uid + '"]');
-    if (attachInput) {
+    const c = _attachContainer(uid);
+    if (!c) return;
+
+    const attachInput = c.querySelector('[data-attach-input="' + uid + '"]');
+    if (attachInput && !attachInput._handlerBound) {
+      attachInput._handlerBound = true;
       attachInput.addEventListener('change', async (ev) => {
         ev.stopPropagation();
         const files = Array.from(ev.target.files || []);
@@ -3882,57 +3941,28 @@
           }
           const content = await new Promise((resolve) => {
             const reader = new FileReader();
-            reader.onload = (e) => resolve(e.target.result.split(',')[1]); // base64 part
+            reader.onload = (e2) => resolve(e2.target.result.split(',')[1]);
             reader.readAsDataURL(file);
           });
           combined.push({ filename: file.name, contentType: file.type || 'application/octet-stream', size: file.size, content });
         }
         state.pendingAttachments[uid] = combined;
         attachInput.value = '';
-        // Partial re-render: only the attach section
-        const panel2 = document.querySelector('.body-panel[data-uid="' + uid + '"]');
-        if (panel2) {
-          const existingBar = panel2.querySelector('.attach-bar');
-          const existingPreview = panel2.querySelector('.attach-preview-list');
-          const newWrap = document.createElement('div');
-          newWrap.innerHTML = renderAttachUpload(uid);
-          if (existingBar) {
-            existingBar.replaceWith(newWrap.querySelector('.attach-bar'));
-          }
-          if (existingPreview) existingPreview.remove();
-          const newPreview = newWrap.querySelector('.attach-preview-list');
-          if (newPreview) {
-            const bar2 = panel2.querySelector('.attach-bar');
-            if (bar2) bar2.insertAdjacentElement('afterend', newPreview);
-          }
-          attachBodyPanelHandlers(uid);
-        }
+        _refreshAttachBar(uid);
       });
     }
 
     // Verwijder-knopjes in attach preview
-    panel.querySelectorAll('[data-attach-remove]').forEach((btn) => {
+    c.querySelectorAll('[data-attach-remove]').forEach((btn) => {
+      if (btn._handlerBound) return;
+      btn._handlerBound = true;
       btn.addEventListener('click', (ev) => {
         ev.stopPropagation();
         const idx = parseInt(btn.dataset.attachRemove, 10);
         const u   = btn.dataset.attachUid;
         if (state.pendingAttachments[u]) {
           state.pendingAttachments[u].splice(idx, 1);
-          const panel3 = document.querySelector('.body-panel[data-uid="' + u + '"]');
-          if (panel3) {
-            const newWrap = document.createElement('div');
-            newWrap.innerHTML = renderAttachUpload(u);
-            const existingBar3 = panel3.querySelector('.attach-bar');
-            const existingPrev3 = panel3.querySelector('.attach-preview-list');
-            if (existingBar3) existingBar3.replaceWith(newWrap.querySelector('.attach-bar'));
-            if (existingPrev3) existingPrev3.remove();
-            const newPrev3 = newWrap.querySelector('.attach-preview-list');
-            if (newPrev3) {
-              const bar3 = panel3.querySelector('.attach-bar');
-              if (bar3) bar3.insertAdjacentElement('afterend', newPrev3);
-            }
-            attachBodyPanelHandlers(u);
-          }
+          _refreshAttachBar(u);
         }
       });
     });
@@ -4374,6 +4404,7 @@
       });
     });
     attachKbFormHandlers(uid);
+    attachAttachmentHandlers(uid);
   }
 
   // ── Rendering: Info tab ────────────────────────────────────────────────────

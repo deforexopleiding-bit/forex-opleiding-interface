@@ -85,7 +85,9 @@ export default async function handler(req, res) {
     const sentAt = new Date().toISOString();
 
     // Sla op via supabase-js client (betrouwbaarder dan directe REST fetch)
-    const { error: dbErr } = await supabase.from('email_replies').insert({
+    // Omit attachments field when null — PostgREST rejects unknown columns if the
+    // attachments JSONB column hasn't been added to the live table yet via db-migrate.
+    const insertPayload = {
       email_id:      email_id || null,
       email_subject: subject,
       final_reply:   text,
@@ -94,8 +96,9 @@ export default async function handler(req, res) {
       cc_address:    cc  || null,
       bcc_address:   bcc || null,
       sent_at:       sentAt,
-      attachments:   attachMeta,
-    });
+    };
+    if (attachMeta !== null) insertPayload.attachments = attachMeta;
+    const { error: dbErr } = await supabase.from('email_replies').insert(insertPayload);
     if (dbErr) {
       console.warn('[send-email] email_replies insert mislukt:', dbErr.message);
     } else {

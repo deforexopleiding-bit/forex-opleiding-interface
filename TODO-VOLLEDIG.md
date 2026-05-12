@@ -131,3 +131,7 @@
 - [x] Verzonden mails persisteren na refresh — supabase-js client in send-email.js, dbSaved flag + amber toast
 - [x] Bijlagen ontvangen tonen — email-body geeft metadata, /api/email-attachment endpoint voor download
 - [x] Bijlagen meesturen — composer upload UI, max 5 bestanden / 8 MB raw, nodemailer MIME, metadata in email_replies
+- [x] Module 1.2 finale fixes (3 bugs na deployment):
+  - send-email.js conditionally omits attachments field → PostgREST error bij ontbrekende kolom opgelost
+  - attachAttachmentHandlers() geëxtraheerd als gedeelde helper → werkt in Actie tab én body panels
+  - updateCardPreview() injecteert bijlagen-sectie na async body-load in alle tabs
