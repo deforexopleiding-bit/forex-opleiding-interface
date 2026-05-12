@@ -39,6 +39,10 @@
 **Fix:** Roep `/api/undo` aan bij `undoManager.push()` en `undoManager.executeUndo()`  
 **Schatting:** 2 uur
 
+### [H6] Agents tool-gebruik — add_knowledge_base_item schrijft naar kennisbank ✅ GEFIXED
+**Bestand:** `api/agent-tools.js` + `api/agent-chat.js`  
+**Oplossing:** Tool toegevoegd met validatie (min 20 / max 5000 tekens), write-tag isolatie, bevestigingsworkflow in Simon's prompt. Simon vraagt altijd preview-bevestiging voordat hij opslaat.
+
 ### [H5] Agents Batch 2 — scheidslijn tussen sessies
 **Bestand:** `modules/agents.html`  
 **Probleem:** Geschiedenis van meerdere sessies wordt samengevoegd getoond zonder visuele scheiding  

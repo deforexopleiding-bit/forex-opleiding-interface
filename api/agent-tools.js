@@ -176,6 +176,35 @@ const TOOL_DEFINITIONS = {
     },
   },
 
+  add_knowledge_base_item: {
+    name: 'add_knowledge_base_item',
+    description: 'Voegt een nieuw item toe aan de kennisbank. GEBRUIK DEZE TOOL ALLEEN NA EXPLICIETE BEVESTIGING VAN DE GEBRUIKER. Toon altijd eerst een preview van wat je gaat opslaan en wacht op "ja", "doe maar", "sla op" of vergelijkbare bevestiging. Roep deze tool NOOIT aan zonder expliciete toestemming.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        title: {
+          type: 'string',
+          description: 'Titel van het kennisbank-item (niet leeg).',
+        },
+        content: {
+          type: 'string',
+          description: 'De daadwerkelijke inhoud of uitleg (minimaal 20, maximaal 5000 tekens).',
+        },
+        category: {
+          type: 'string',
+          enum: ['Klantvraag', 'Factuurvraag', 'Klacht', 'FAQ', 'Algemeen'],
+          description: 'Categorie van het item.',
+        },
+        direction: {
+          type: 'string',
+          enum: ['inkomend', 'uitgaand', 'beide'],
+          description: 'Voor inkomende of uitgaande communicatie. Standaard: "beide".',
+        },
+      },
+      required: ['title', 'content', 'category'],
+    },
+  },
+
 };
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -193,10 +222,11 @@ const TOOL_TAGS = {
   get_recent_corrections:         ['email', 'learning'],
   query_knowledge_base:           ['knowledge'],
   get_email_categorization_stats: ['email', 'learning'],
+  add_knowledge_base_item:        ['knowledge_write'],
 };
 
 const AGENT_TAGS = {
-  Simon: ['email', 'tasks', 'knowledge', 'learning'],
+  Simon: ['email', 'tasks', 'knowledge', 'learning', 'knowledge_write'],
   Leon:  ['tasks'],
   Aron:  ['tasks'],
 };
@@ -232,6 +262,7 @@ export async function execute(toolName, input) {
     case 'get_recent_corrections':           return executeGetRecentCorrections(input || {});
     case 'query_knowledge_base':             return executeQueryKnowledgeBase(input || {});
     case 'get_email_categorization_stats':   return executeGetEmailCategorizationStats(input || {});
+    case 'add_knowledge_base_item':          return executeAddKnowledgeBaseItem(input || {});
     default:
       throw new Error(`Onbekende tool: "${toolName}"`);
   }
@@ -369,39 +400,48 @@ async function executeSearchEmails({ query, period = 'last_7_days', limit = 5 })
 async function executeGetUnansweredEmails({ limit = 10 }) {
   const lim = Math.min(Math.max(parseInt(limit) || 10, 1), 30);
 
-  // Stap 1: emails die actie vereisen
-  // Frontend logt 'mark-action' + value='true' wanneer gebruiker een mail markeert
-  const { data: actionRequired } = await supabase
+  // Haal alle relevante acties op in één query
+  const { data: allActions } = await supabase
     .from('email_actions')
-    .select('email_id, set_at')
-    .eq('action', 'mark-action').eq('value', 'true')
-    .order('set_at', { ascending: false }).limit(50);
+    .select('email_id, action, set_at')
+    .in('action', ['mark-action', 'no-action', 'reply_sent'])
+    .order('set_at', { ascending: false })
+    .limit(500);
 
-  if (!actionRequired?.length) {
-    return { count: 0, emails: [], note: 'Geen e-mails gevonden die actie vereisen.' };
+  const rows = allActions || [];
+
+  // Per email_id: bepaal de definitieve toestand (nieuwste actie wint)
+  const latestAction = {};
+  for (const r of rows) {
+    if (!latestAction[r.email_id]) latestAction[r.email_id] = r; // rijen zijn DESC, dus eerste = nieuwste
   }
 
-  const emailIds = actionRequired.map(a => a.email_id);
+  // Bevestigd open: ooit mark-action=true, meest recente actie is NIET no-action/reply_sent
+  const RESOLVED = new Set(['no-action', 'reply_sent']);
+  const confirmed = Object.values(latestAction)
+    .filter(r => r.action === 'mark-action' && !RESOLVED.has(r.action));
 
-  // Stap 2: welke zijn al beantwoord + verrijkingsinfo
-  const [repliedRes, infoRes] = await Promise.allSettled([
-    supabase.from('email_actions').select('email_id').eq('action', 'reply_sent').in('email_id', emailIds),
-    supabase.from('learn_examples').select('email_id, sender_domain, body_snippet').in('email_id', emailIds),
-  ]);
-
-  const repliedIds = new Set((repliedRes.status  === 'fulfilled' ? repliedRes.value.data  || [] : []).map(r => r.email_id));
-  const infoMap    = Object.fromEntries((infoRes.status === 'fulfilled' ? infoRes.value.data || [] : []).map(e => [e.email_id, e]));
-  const unanswered = actionRequired.filter(a => !repliedIds.has(a.email_id));
+  // Verrijken met domain/preview uit learn_examples
+  const confirmedIds = confirmed.map(r => r.email_id);
+  let infoMap = {};
+  if (confirmedIds.length > 0) {
+    const { data: info } = await supabase
+      .from('learn_examples')
+      .select('email_id, sender_domain, body_snippet')
+      .in('email_id', confirmedIds);
+    infoMap = Object.fromEntries((info || []).map(e => [e.email_id, e]));
+  }
 
   return {
-    count: unanswered.length,
-    emails: unanswered.slice(0, lim).map(a => ({
-      email_id:         a.email_id,
-      sender_domain:    infoMap[a.email_id]?.sender_domain || '(onbekend)',
-      preview:          infoMap[a.email_id]?.body_snippet?.slice(0, 100) || null,
-      openstaand_sinds: a.set_at,
+    confirmed_count: confirmed.length,
+    confirmed_emails: confirmed.slice(0, lim).map(r => ({
+      email_id:         r.email_id,
+      sender_domain:    infoMap[r.email_id]?.sender_domain || '(onbekend)',
+      preview:          infoMap[r.email_id]?.body_snippet?.slice(0, 100) || null,
+      openstaand_sinds: r.set_at,
     })),
-    note: 'Gebaseerd op email_actions (requires_action=true) minus verzonden replies.',
+    limitation: 'Dit toont alleen mails die expliciet zijn gemarkeerd via de "Actie vereist" knop. AI-gecategoriseerde mails in actie-categorieën (Klantvraag, Factuurvraag, Overig) kunnen niet centraal worden opgevraagd zonder een email_categorizations tabel (staat op de architectuur-roadmap als [A1]).',
+    suggested_action: 'Voor het complete beeld: open de mailmodule → Actie vereist tab. De UI toont alle gecategoriseerde + gemarkeerde mails.',
   };
 }
 
@@ -458,6 +498,38 @@ async function executeQueryKnowledgeBase({ topic }) {
       content:           item.content?.slice(0, 300) || '',
       helpfulness_score: item.helpfulness_score,
     })),
+  };
+}
+
+async function executeAddKnowledgeBaseItem({ title, content, category, direction = 'beide' }) {
+  // Validatie
+  const t = title?.trim()   || '';
+  const c = content?.trim() || '';
+  if (!t)          return { ok: false, error: 'Titel mag niet leeg zijn.' };
+  if (c.length < 20)  return { ok: false, error: 'Inhoud moet minimaal 20 tekens bevatten.' };
+  if (c.length > 5000) return { ok: false, error: 'Inhoud mag maximaal 5000 tekens bevatten.' };
+
+  const { data, error } = await supabase
+    .from('kennisbank_items')
+    .insert({
+      type:              'item',
+      title:             t,
+      content:           c,
+      category:          category || 'Algemeen',
+      direction:         direction || 'beide',
+      helpfulness_score: 50,
+      auto_generated:    true,
+      note:              'Aangemaakt door AI agent Simon',
+    })
+    .select('id')
+    .single();
+
+  if (error) return { ok: false, error: 'Opslaan mislukt: ' + error.message };
+
+  return {
+    ok:      true,
+    id:      data.id,
+    message: `Toegevoegd aan kennisbank: "${t}"`,
   };
 }
 
