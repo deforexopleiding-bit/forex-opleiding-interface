@@ -4110,6 +4110,7 @@
       renderPreviewHtml(e.uid) +
       renderLearnBanner(e.uid) +
       (state.trainingMode ? renderTrainingInfo(e.uid) : '') +
+      renderAttachments(e.uid, e) +
       renderSentBadge(e.uid) +
       renderAiSection(e) +
       '<div class="card-actions">' +
