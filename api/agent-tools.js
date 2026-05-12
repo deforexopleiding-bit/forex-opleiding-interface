@@ -244,38 +244,63 @@ export async function execute(toolName, input) {
 async function executeGetEmailStats({ period = 'last_7_days', categories = [] }) {
   const { from, to } = getDateRange(period);
 
-  const { data: actions, error } = await supabase
-    .from('email_actions')
-    .select('action, value, set_at')
-    .gte('set_at', from)
-    .lte('set_at', to);
+  const [actionsRes, patternsRes] = await Promise.allSettled([
+    supabase
+      .from('email_actions')
+      .select('action, value, set_at')
+      .gte('set_at', from)
+      .lte('set_at', to),
+    supabase
+      .from('email_patterns')
+      .select('category, times_seen')
+      .order('times_seen', { ascending: false })
+      .limit(100),
+  ]);
 
-  if (error) throw new Error('email_actions query fout: ' + error.message);
+  const rows     = actionsRes.status     === 'fulfilled' ? (actionsRes.value.data     || []) : [];
+  const patterns = patternsRes.status === 'fulfilled' ? (patternsRes.value.data || []) : [];
 
-  const rows = actions || [];
-  const byActionType = {};
-  const byCategory   = {};
-
+  // ── Periode-acties ────────────────────────────────────────────────────────
+  const byAction      = {};
+  const recategorized = {};
   for (const a of rows) {
-    byActionType[a.action] = (byActionType[a.action] || 0) + 1;
-    // Categorieën komen van 'recategorize' acties (value = nieuwe categorie)
+    byAction[a.action] = (byAction[a.action] || 0) + 1;
     if (a.action === 'recategorize' && a.value) {
-      byCategory[a.value] = (byCategory[a.value] || 0) + 1;
+      recategorized[a.value] = (recategorized[a.value] || 0) + 1;
     }
   }
 
+  // ── Historische patronen per categorie ────────────────────────────────────
+  const byCategory = {};
+  for (const p of patterns) {
+    if (!p.category) continue;
+    byCategory[p.category] = (byCategory[p.category] || 0) + (p.times_seen || 0);
+  }
+
   // Optioneel filteren op gevraagde categorieën
-  const filteredCategories = (categories || []).length > 0
+  const filteredPatterns = (categories || []).length > 0
     ? Object.fromEntries(Object.entries(byCategory).filter(([k]) => categories.includes(k)))
     : byCategory;
 
   return {
     period,
     date_range: { from: from.slice(0, 16), to: to.slice(0, 16) },
-    total_actions:    rows.length,
-    by_action_type:   byActionType,
-    by_category:      filteredCategories,
-    note: 'Categorieën zijn gebaseerd op handmatige hercategorisaties in email_actions. Niet-gecategoriseerde e-mails (enkel AI-verwerkt) staan hier niet in.',
+
+    period_actions: {
+      description: `Acties uitgevoerd in de gevraagde periode (${period})`,
+      note: 'Dit zijn handmatige acties (replies sturen, hercategoriseren, markeren, etc.) — NIET het totaal aantal binnengekomen mails per categorie.',
+      total:     rows.length,
+      by_action: byAction,
+      manually_recategorized_to: recategorized,
+    },
+
+    historical_patterns: {
+      description: 'Bekende afzender-patronen (alle tijd, geen periode-filter)',
+      note: 'Dit is het totaal aantal keren dat een patroon door AI of handmatig is herkend, historisch verzameld. Niet beperkt tot de gevraagde periode.',
+      by_category: filteredPatterns,
+    },
+
+    limitation: 'Categorie-toewijzingen worden niet per mail in Supabase opgeslagen — AI-categorisaties leven alleen in de browser-cache. Voor exacte aantallen per dag is een schema-uitbreiding nodig (email_categorizations tabel).',
   };
 }
 
@@ -455,7 +480,7 @@ async function executeGetEmailCategorizationStats({ period = 'last_7_days' }) {
 async function executeGetOpenTasks({ priority = 'all', limit = 10 }) {
   let query = supabase
     .from('taken_items')
-    .select('titel, prioriteit, status, deadline, toegewezen_aan, categorie')
+    .select('titel, omschrijving, notities, prioriteit, status, deadline, toegewezen_aan, categorie')
     .neq('status', 'done')
     .neq('status', 'afgerond')
     .limit(Math.min(Math.max(parseInt(limit) || 10, 1), 50));
@@ -481,11 +506,13 @@ async function executeGetOpenTasks({ priority = 'all', limit = 10 }) {
     })
     .map(t => ({
       titel:          t.titel,
+      omschrijving:   t.omschrijving  || null,
+      notities:       t.notities      || null,
       prioriteit:     t.prioriteit,
       status:         t.status,
-      deadline:       t.deadline || null,
+      deadline:       t.deadline      || null,
       toegewezen_aan: t.toegewezen_aan || 'Jeffrey',
-      categorie:      t.categorie || null,
+      categorie:      t.categorie     || null,
     }));
 
   return {

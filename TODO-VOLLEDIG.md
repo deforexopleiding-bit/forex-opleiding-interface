@@ -1,5 +1,5 @@
 # TODO — Agency Command Center
-> Bijgewerkt: 2026-05-12 (Agents Batch 1) | Gebaseerd op AUDIT-VOLLEDIG.md
+> Bijgewerkt: 2026-05-12 (Tool-use Fase 2+3 + fixes) | Gebaseerd op AUDIT-VOLLEDIG.md
 
 ---
 
@@ -84,6 +84,30 @@
 **Probleem:** Statistieken zijn localStorage-only  
 **Fix:** Gebruik learning-report API data als primaire bron  
 **Schatting:** 1 uur
+
+---
+
+## 🏗️ ARCHITECTUUR — Tooling foundation
+
+### [A1] email_categorizations tabel — per-mail categorie-opslag
+**Prioriteit:** Hoog (blokkeert eerlijke email-statistieken in Simon)  
+**Probleem:** AI-categorisaties worden alleen in `localStorage._aiCatCache` opgeslagen. `get_email_stats` kan daardoor geen actuele "hoeveel Nieuwe Leads vandaag"-vraag beantwoorden via Supabase. De tool retourneert nu historische patronen als benadering, met duidelijke kanttekening.  
+**Fix:** Nieuwe tabel aanmaken in db-migrate.js:
+```sql
+CREATE TABLE IF NOT EXISTS email_categorizations (
+  id          bigint generated always as identity primary key,
+  email_id    text not null,
+  mailbox     text,
+  category    text,
+  confidence  integer,
+  source      text default 'ai',   -- 'ai' | 'manual'
+  categorized_at timestamptz default now()
+);
+CREATE INDEX IF NOT EXISTS idx_email_cat_date ON email_categorizations (categorized_at);
+```
+En in `api/email-agent.js`: bij elke categorisatie een rij invoegen.  
+**Impact:** `get_email_stats` kan dan echte per-periode-aantallen teruggeven.  
+**Schatting:** 2-3 uur
 
 ---
 
