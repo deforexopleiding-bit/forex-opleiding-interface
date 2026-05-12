@@ -146,6 +146,10 @@
 - [x] Module 1.3 UX-verbeteringen:
   - Bijlagen direct zichtbaar bij Actie tab render — fetchEmailBody roept updateActieCard aan (volledige re-render met gevulde cache)
   - Onderwerp-veld in reply composer — data-reply-subject input, pre-filled met Re: <origineel>, state.replySubject[] persistent over re-renders
+- [x] Agents Batch 1 — volledig afgerond (2026-05-12):
+  - Sessie persistence via localStorage per agent (agent_active_session_<name>)
+  - api/agent-conversations.js: session_id teruggestuurd ook als berichten leeg (verse sessie)
+  - Tooltips op 👍 en ✏️ knoppen, hint-tekst onder chat-input
 - [x] Agents Batch 1 — memory + learning + shared brain + hygiene (2026-05-12):
   - db-migrate.js: agent_learnings tabel toegevoegd
   - api/agent-conversations.js: NIEUW — history laden (GET) + new-session (POST)

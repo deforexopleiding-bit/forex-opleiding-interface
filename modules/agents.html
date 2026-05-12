@@ -277,6 +277,7 @@
               <button class="chat-send" onclick="sendChat()">→</button>
             </div>
             <div class="quick-btns" id="quickBtns"></div>
+            <div style="font-size:11px;color:var(--text-faint);margin-top:6px">💡 Wil je Simon een regel leren? Gebruik <strong style="color:var(--text-dim)">✏️ Train mij</strong> op een antwoord, niet 👍</div>
           </div>
         </div>
       </div>
@@ -566,14 +567,31 @@ async function openChat(agentName) {
   const msgs = document.getElementById('chatMessages');
   msgs.innerHTML = '<div style="color:var(--text-faint);text-align:center;padding:32px;font-size:13px">Geschiedenis laden…</div>';
 
-  // Probeer geschiedenis te laden vanuit Supabase
+  // ── Sessie persistentie via localStorage ──────────────────────────────────
+  // Elke agent heeft z'n eigen actieve session_id opgeslagen in localStorage
+  const lsKey = `agent_active_session_${activeAgent.name}`;
+  const savedSession = localStorage.getItem(lsKey);
+
   try {
-    const r = await fetch(`/api/agent-conversations?agent_name=${encodeURIComponent(activeAgent.name)}`);
+    let url;
+    if (savedSession) {
+      // Specifieke sessie ophalen (na "Nieuwe sessie" of bestaande sessie)
+      url = `/api/agent-conversations?session=${encodeURIComponent(savedSession)}`;
+    } else {
+      // Eerste keer / localStorage leeg → meest recente sessie voor deze agent
+      url = `/api/agent-conversations?agent_name=${encodeURIComponent(activeAgent.name)}`;
+    }
+
+    const r = await fetch(url);
     if (r.ok) {
       const data = await r.json();
+      // Sla session_id op (ook als berichten leeg zijn — verse sessie bewaren)
+      const sid = data.session_id || savedSession || ('session_' + Date.now());
+      chatSessionId = sid;
+      localStorage.setItem(lsKey, sid);
+
       if (data.messages?.length > 0) {
         msgs.innerHTML = '';
-        chatSessionId = data.session_id || ('session_' + Date.now());
         data.messages.forEach(m => addChatMsg(m.role === 'user' ? 'user' : 'assistant', m.content, false));
         chatHistoryLoaded = true;
         msgs.scrollTop = msgs.scrollHeight;
@@ -584,8 +602,14 @@ async function openChat(agentName) {
     console.warn('[agents] history laden fout:', e.message);
   }
 
-  // Geen geschiedenis of fout → verse sessie met greeting
-  startFreshSession();
+  // Geen berichten → verse sessie met greeting (chatSessionId al gezet hierboven)
+  chatHistory = [];
+  lastUserMessage = '';
+  chatHistoryLoaded = false;
+  msgs.innerHTML = '';
+  const hour = new Date().getHours();
+  const greet = hour < 12 ? 'Goedemorgen' : hour < 18 ? 'Goedemiddag' : 'Goedenavond';
+  addChatMsg('assistant', `${greet} Jeffrey! Ik ben ${activeAgent.name}, jouw ${activeAgent.role}. Hoe kan ik je vandaag helpen?`);
 }
 
 function startFreshSession() {
@@ -593,6 +617,10 @@ function startFreshSession() {
   lastUserMessage = '';
   chatHistoryLoaded = false;
   chatSessionId = 'session_' + Date.now();
+  // Persisteer nieuwe sessie zodat refresh op dezelfde (lege) sessie landt
+  if (activeAgent) {
+    localStorage.setItem(`agent_active_session_${activeAgent.name}`, chatSessionId);
+  }
   document.getElementById('chatMessages').innerHTML = '';
   const hour = new Date().getHours();
   const greet = hour < 12 ? 'Goedemorgen' : hour < 18 ? 'Goedemiddag' : 'Goedenavond';
@@ -627,8 +655,8 @@ function addChatMsg(role, content, pushToHistory = true) {
         <div class="msg-bubble">${formatMd(esc(content))}</div>
         <div class="msg-time">${timeStr}</div>
         <div class="chat-msg-actions">
-          <button class="chat-like-btn">👍</button>
-          <button class="chat-train-btn">✏️ Train mij</button>
+          <button class="chat-like-btn" title="Goed voorbeeld — markeer dit antwoord als ideale stijl (voor toekomstige antwoorden)">👍</button>
+          <button class="chat-train-btn" title="Leer mij een specifieke regel of correctie (voor toekomstige beslissingen)">✏️ Train mij</button>
         </div>
       </div>`;
     // Gebruik closures voor feedback — geen data-attributen met onveilige content
@@ -664,6 +692,9 @@ async function sendChat(message) {
   const msg = (message || input.value).trim();
   if (!msg || !activeAgent) return;
   input.value = '';
+  // Zorg dat session altijd in localStorage staat vóór de API-call
+  const lsKey = `agent_active_session_${activeAgent.name}`;
+  if (!localStorage.getItem(lsKey)) localStorage.setItem(lsKey, chatSessionId);
   addChatMsg('user', msg);
   showTyping();
   try {
@@ -684,6 +715,9 @@ async function sendChat(message) {
 
 async function sendQuickAction(key) {
   if (!activeAgent) return;
+  // Zorg dat session altijd in localStorage staat vóór de API-call
+  const lsKeyQA = `agent_active_session_${activeAgent.name}`;
+  if (!localStorage.getItem(lsKeyQA)) localStorage.setItem(lsKeyQA, chatSessionId);
   const qa = activeAgent.quick_actions?.find(q => q.key === key);
   if (qa) addChatMsg('user', qa.label);
   showTyping();

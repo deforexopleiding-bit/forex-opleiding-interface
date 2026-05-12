@@ -26,9 +26,12 @@ export default async function handler(req, res) {
       console.error('[agent-conversations] GET fout:', error.message);
       return res.status(500).json({ error: error.message });
     }
+    // Als session expliciet opgegeven maar leeg → geef de session_id terug zodat
+    // de frontend de sessie kan bewaren voor toekomstige berichten
+    const resolvedSessionId = data?.[0]?.conversation_session || session || null;
     return res.status(200).json({
       messages:   data || [],
-      session_id: data?.[0]?.conversation_session || null,
+      session_id: resolvedSessionId,
     });
   }
 

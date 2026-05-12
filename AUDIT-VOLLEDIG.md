@@ -1,5 +1,5 @@
 # Volledige Systeemanalyse — Agency Command Center
-> Gegenereerd: 2026-05-11 | Bijgewerkt: 2026-05-12 (Agents Batch 1) | Branch: main
+> Gegenereerd: 2026-05-11 | Bijgewerkt: 2026-05-12 (Agents Batch 1 + sessie persistence) | Branch: main
 
 ---
 
