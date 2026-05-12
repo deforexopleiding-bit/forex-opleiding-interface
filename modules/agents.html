@@ -632,13 +632,38 @@ function startFreshSession() {
   addChatMsg('assistant', `${greet} Jeffrey! Ik ben ${activeAgent.name}, jouw ${activeAgent.role}. Hoe kan ik je vandaag helpen?`);
 }
 
-function showSearchingHint() {
+function showSearchingHint(agentName) {
+  const TOOL_HINTS = {
+    Simon: [
+      '📊 Email statistieken ophalen…',
+      '✅ Open taken controleren…',
+      '🔍 Inbox doorzoeken…',
+      '📬 Onbeantwoorde mails checken…',
+      '🧠 Kennisbank raadplegen…',
+      '📈 Categorisatie-prestaties analyseren…',
+    ],
+    Leon: ['✅ Taken bekijken…'],
+    Aron: ['✅ Taken bekijken…'],
+  };
+  const hints = TOOL_HINTS[agentName] || ['🔍 Gegevens ophalen…'];
+  let i = 0;
+
   const ti = document.getElementById('typingIndicator');
-  if (!ti) return;
+  if (!ti) return null;
   const typingDiv = ti.querySelector('.typing');
-  if (typingDiv && !ti.querySelector('.typing-note')) {
-    typingDiv.insertAdjacentHTML('afterend', '<div class="typing-note">🔍 Even opzoeken…</div>');
-  }
+  if (!typingDiv || ti.querySelector('.typing-note')) return null;
+
+  const noteEl = document.createElement('div');
+  noteEl.className = 'typing-note';
+  noteEl.textContent = hints[0];
+  typingDiv.insertAdjacentElement('afterend', noteEl);
+
+  const interval = setInterval(() => {
+    i = (i + 1) % hints.length;
+    noteEl.textContent = hints[i];
+  }, 2500);
+
+  return interval;
 }
 
 function addChatMsg(role, content, pushToHistory = true, toolsUsed = []) {
@@ -712,8 +737,11 @@ async function sendChat(message) {
   if (!localStorage.getItem(lsKey)) localStorage.setItem(lsKey, chatSessionId);
   addChatMsg('user', msg);
   showTyping();
-  // Na 1,5s: toon "🔍 Even opzoeken…" als antwoord nog uitblijft
-  const searchHint = setTimeout(showSearchingHint, 1500);
+  // Na 1,5s: toon een roterende tool-hint als antwoord nog uitblijft
+  let hintInterval = null;
+  const searchHint = setTimeout(() => {
+    hintInterval = showSearchingHint(activeAgent.name);
+  }, 1500);
   try {
     const r = await fetch('/api/agent-chat', {
       method: 'POST',
@@ -721,6 +749,7 @@ async function sendChat(message) {
       body: JSON.stringify({ agent_id: activeAgent.id, agent_name: activeAgent.name, message: msg, conversation_history: chatHistory.slice(-20), session_id: chatSessionId }),
     });
     clearTimeout(searchHint);
+    if (hintInterval) { clearInterval(hintInterval); hintInterval = null; }
     const data = await r.json();
     removeTyping();
     if (data.error) {
@@ -730,6 +759,7 @@ async function sendChat(message) {
     }
   } catch (err) {
     clearTimeout(searchHint);
+    if (hintInterval) { clearInterval(hintInterval); hintInterval = null; }
     removeTyping();
     addChatMsg('assistant', '⚠️ Verbindingsfout. Probeer opnieuw.');
   }
@@ -743,7 +773,10 @@ async function sendQuickAction(key) {
   const qa = activeAgent.quick_actions?.find(q => q.key === key);
   if (qa) addChatMsg('user', qa.label);
   showTyping();
-  const searchHint2 = setTimeout(showSearchingHint, 1500);
+  let hintInterval2 = null;
+  const searchHint2 = setTimeout(() => {
+    hintInterval2 = showSearchingHint(activeAgent.name);
+  }, 1500);
   try {
     const r = await fetch('/api/agent-chat', {
       method: 'POST',
@@ -751,11 +784,13 @@ async function sendQuickAction(key) {
       body: JSON.stringify({ agent_id: activeAgent.id, agent_name: activeAgent.name, quick_action: key, conversation_history: chatHistory.slice(-20), session_id: chatSessionId }),
     });
     clearTimeout(searchHint2);
+    if (hintInterval2) { clearInterval(hintInterval2); hintInterval2 = null; }
     const data = await r.json();
     removeTyping();
     addChatMsg('assistant', data.error ? `⚠️ ${data.error}` : data.response, true, data.tools_used);
   } catch {
     clearTimeout(searchHint2);
+    if (hintInterval2) { clearInterval(hintInterval2); hintInterval2 = null; }
     removeTyping();
     addChatMsg('assistant', '⚠️ Verbindingsfout.');
   }
