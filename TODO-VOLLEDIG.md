@@ -99,7 +99,8 @@
 - `api/sync-emails.js`: cron-endpoint met CRON_SECRET auth, per-mailbox incrementele UID-sync, categorize() integratie, idempotente upsert, 55s abort-guard
 - `vercel.json`: cron `*/5 * * * *` op `/api/sync-emails`
 - `api/sync-status.js`: monitoring-endpoint met log-history, per-mailbox tellingen, categorie-verdeling
-- **Fase 2 (nog open):** body_snippet via partial IMAP fetch; Simon's search_emails tool de live email_messages tabel laten bevragen
+- 12 kolomnaam-mismatches gefixed (2026-05-12): alle Supabase-queries gealigneerd met werkelijk schema
+- **Fase 2 (nog open):** snippet via partial IMAP fetch; Simon's search_emails tool de live email_messages tabel laten bevragen
 
 ### [A1] email_categorizations tabel — per-mail categorie-opslag
 **Prioriteit:** Hoog (blokkeert eerlijke email-statistieken in Simon)  

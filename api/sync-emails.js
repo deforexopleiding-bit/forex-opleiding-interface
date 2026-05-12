@@ -56,12 +56,12 @@ export default async function handler(req, res) {
     } catch (err) {
       console.error(`[sync-emails] ${account.mailbox} fout:`, err.message);
       await supabase.from('email_sync_log').insert({
-        mailbox:     account.mailbox,
-        new_count:   0,
-        last_uid:    0,
-        duration_ms: Date.now() - boxStart,
-        status:      'error',
-        error_msg:   err.message.slice(0, 500),
+        mailbox:       account.mailbox,
+        mails_new:     0,
+        last_uid:      0,
+        duration_ms:   Date.now() - boxStart,
+        status:        'error',
+        error_message: err.message.slice(0, 500),
       }).catch(() => {});
       results.push({ mailbox: account.mailbox, status: 'error', error: err.message });
     }
@@ -144,17 +144,19 @@ async function syncMailbox({ account, host, port }) {
         const receivedAt  = env.date ? new Date(env.date).toISOString() : new Date().toISOString();
         const isRead      = msg.flags?.has('\\Seen') ?? false;
 
-        // AI-categorisatie (envelope-only; body_snippet toegevoegd in Fase 2)
+        // AI-categorisatie (envelope-only; snippet toegevoegd in Fase 2)
         let category       = 'Onbekend';
         let requiresAction = false;
         let confidence     = 0;
         let aiSource       = 'none';
+        let catReason      = '';
         try {
           const cat  = await categorize({ from: fromAddress, subject, bodySnippet: '', date: receivedAt });
           category       = cat.category        || 'Onbekend';
           requiresAction = cat.requires_action  ?? false;
           confidence     = cat.confidence       ?? 0;
           aiSource       = cat.source           || 'ai';
+          catReason      = cat.reason           || '';
         } catch (catErr) {
           console.warn(`[sync-emails] categorize fout ${account.mailbox}/${uid}:`, catErr.message);
         }
@@ -162,20 +164,19 @@ async function syncMailbox({ account, host, port }) {
         if (uid > maxUid) maxUid = uid;
 
         rows.push({
-          mailbox:         account.mailbox,
-          imap_uid:        uid,
-          message_id:      env.messageId || null,
-          from_address:    fromAddress,
-          from_name:       fromName,
+          mailbox:             account.mailbox,
+          imap_uid:            uid,
+          message_id:          env.messageId || null,
+          from_address:        fromAddress,
+          from_name:           fromName,
           subject,
-          received_at:     receivedAt,
-          body_snippet:    null, // Fase 2: partial IMAP fetch voor tekst-preview
+          date_received:       receivedAt,
+          snippet:             null, // Fase 2: partial IMAP fetch voor tekst-preview
           category,
-          requires_action: requiresAction,
-          confidence,
-          ai_source:       aiSource,
-          raw_flags:       Array.from(msg.flags || []),
-          is_read:         isRead,
+          requires_action:     requiresAction,
+          category_confidence: confidence,
+          category_reason:     `[bron: ${aiSource}] ${catReason}`.trim(),
+          is_read:             isRead,
         });
       }
 
@@ -204,7 +205,7 @@ async function syncMailbox({ account, host, port }) {
   const duration = Date.now() - boxStart;
   await supabase.from('email_sync_log').insert({
     mailbox:     account.mailbox,
-    new_count:   newCount,
+    mails_new:   newCount,
     last_uid:    maxUid,
     duration_ms: duration,
     status:      'ok',

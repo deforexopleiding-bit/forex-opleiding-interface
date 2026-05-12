@@ -9,7 +9,7 @@ export default async function handler(req, res) {
     const { data: logs, error: logErr } = await supabase
       .from('email_sync_log')
       .select('*')
-      .order('synced_at', { ascending: false })
+      .order('completed_at', { ascending: false })
       .limit(20);
 
     if (logErr) throw new Error('sync_log ophalen mislukt: ' + logErr.message);
@@ -35,13 +35,13 @@ export default async function handler(req, res) {
     }
 
     // ── Laatste sync-tijdstip (over alle mailboxen) ───────────────────────
-    const lastSync = logs?.[0]?.synced_at || null;
+    const lastSync = logs?.[0]?.completed_at || logs?.[0]?.started_at || null;
 
     // ── Eventuele recente fouten ──────────────────────────────────────────
     const recentErrors = (logs || [])
       .filter(l => l.status === 'error')
       .slice(0, 5)
-      .map(l => ({ mailbox: l.mailbox, error: l.error_msg, at: l.synced_at }));
+      .map(l => ({ mailbox: l.mailbox, error: l.error_message, at: l.completed_at }));
 
     return res.status(200).json({
       ok:                     true,

@@ -240,14 +240,27 @@ Gebruiker corrigeert
 ## 10. Recente Commits (laatste 10)
 
 ```
-df6323d  Email: vervang Reclame review door Reclame / Overige
-ef16522  Email module: universele sectie-verplaatsing + VT uitbreidingen
-bdbf201  Verplaats & Train: inline panel + body-based propagatie
-3c7aabe  Email Agent: 6-delige intelligente agent implementatie
-05a942b  Universeel undo systeem: undoManager + tracking op alle acties
-367f441  Undo knop: vervang door btn-header met Tabler Icon + undo-count badge
-9d7515e  Fix: undo knop zichtbaar maken in header
-88c444a  V6: universeel undo systeem (max 10 stappen, Ctrl+Z, toast, dropdown)
-4d4f304  V1-V5: slimmere categorisatie, not_spam leerlogica, server-side kennisbank
-17e7170  db-migrate endpoint + migratiebanner + fix correction_type query
+[bijgewerkt na audit 2026-05-12 — zie git log voor actuele commits]
+186a322  feat: mail-sync Fase 1 -- cron + email_messages tabel + sync endpoint
+bf41289  fix: get_unanswered_emails eerlijke transparantie + feat: add_knowledge_base_item
+bbd1b43  fix: get_unanswered_emails action-waarde + search_emails eerlijke melding
+12403b7  fix: tools-completering + email_stats nuance + task details
+1b77667  feat: tool-use architectuur fase 2+3 -- Simon krijgt volledige toolkit
+bd21e9a  feat: tool-use architectuur Fase 1 — framework + 2 tools voor Simon
 ```
+
+---
+
+## 11. Lessons Learned — Terugkerende patronen om te voorkomen
+
+### Kolomnamen altijd letterlijk cross-checken met schema
+
+**Patroon:** Code schrijft Supabase-queries met aangenomen kolomnamen die niet overeenkomen met het werkelijke schema → runtime-fouten na deployment.
+
+**Voorbeelden uit dit project:**
+- `synced_at` → bestond niet op `email_sync_log` (correct: `completed_at`)
+- `new_count` → bestond niet op `email_sync_log` (correct: `mails_new`)
+- `error_msg` → bestond niet (correct: `error_message`)
+- `received_at`, `body_snippet`, `confidence`, `ai_source`, `raw_flags` → bestonden niet op `email_messages`
+
+**Regel:** Bij elke nieuwe Supabase-query — insert, select, update of order — de gebruikte kolomnamen letterlijk cross-checken tegen het werkelijke schema. Gebruik `db-migrate.js` (TABLES_TO_CREATE) of de tabel-definitie die de gebruiker opgeeft als bron. **Nooit aannames doen over kolomnamen.** Dit geldt ook voor kolomnamen in `.order()`, `.eq()` en `.select()` calls — niet alleen inserts.
