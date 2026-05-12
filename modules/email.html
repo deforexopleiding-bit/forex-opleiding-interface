@@ -1174,7 +1174,8 @@
   const AI_REQACTION_KEY      = 'email_ai_requires_action'; // uid -> boolean
   const CONFIRMED_EMAILS_KEY  = 'emailConfirmedBanners'; // Set van bevestigde uids
   const CACHE_VER_KEY         = 'email_cache_version';
-  const CACHE_VERSION         = '2.1'; // bump to force cache-clear after logic changes
+  const CACHE_VERSION         = '3.0'; // bump: applyAutoReclame bypass fix + sender-override cache
+  const OVERRIDE_CACHE_KEY    = 'email_override_by_sender'; // senderEmail -> category
   const SNOOZE_KEY            = 'email_snooze_map';
   const ACTION_FLAGS_KEY      = 'email_action_flags'; // uid -> true | false
   const UNDO_HISTORY_KEY      = 'email_undo_history'; // max 10 entries
@@ -1292,6 +1293,29 @@
   }
   function saveJson(key, val) { try { localStorage.setItem(key, JSON.stringify(val)); } catch {} }
 
+  // ── Sender-based override cache (survives new email UIDs) ─────────────────
+  function getOverrideCache() {
+    try { return JSON.parse(localStorage.getItem(OVERRIDE_CACHE_KEY) || '{}'); } catch { return {}; }
+  }
+  function saveToOverrideCache(senderEmail, category) {
+    if (!senderEmail) return;
+    const c = getOverrideCache(); c[senderEmail] = category;
+    localStorage.setItem(OVERRIDE_CACHE_KEY, JSON.stringify(c));
+  }
+
+  // ── Verwijder reclame-patroon voor afzender/domein ─────────────────────────
+  function removeFromReclamePatterns(senderEmail, senderDomain) {
+    const patterns = loadReclamePatterns();
+    const before = patterns.length;
+    const cleaned = patterns.filter((p) =>
+      !(p.sender === senderEmail || (senderDomain && p.domain === senderDomain && !p.sender))
+    );
+    if (cleaned.length !== before) {
+      saveReclamePatterns(cleaned);
+      console.log('[removeFromReclamePatterns] Verwijderd voor', senderEmail || senderDomain);
+    }
+  }
+
   function loadOverrides() {
     try {
       const r = localStorage.getItem(STORAGE_KEY);
@@ -1311,23 +1335,31 @@
   function applyOverrides() {
     const cat = state.overrides.category || {};
     const read = state.overrides.read || {};
+    const senderCache = getOverrideCache();
     let staleCleaned = false;
     state.emails.forEach((e) => {
       const sender = (e.fromAddress || getFromAddress(e) || '').toLowerCase();
-      if (TRUSTED_SENDERS_CLIENT.has(sender) &&
-          (_aiCatCache[e.uid] === 'Reclame' || _aiCatCache[e.uid] === 'Overig')) {
-        delete _aiCatCache[e.uid];
-        delete state.overrides.category[e.uid];
-        staleCleaned = true;
+      // Vertrouwde afzenders: wis stale Reclame/Overig cache en herstel correcte categorie
+      if (TRUSTED_SENDERS_CLIENT.has(sender)) {
+        if (_aiCatCache[e.uid] === 'Reclame' || _aiCatCache[e.uid] === 'Overig' ||
+            e.category === 'Reclame' || e.category === 'Overig') {
+          delete _aiCatCache[e.uid];
+          delete state.overrides.category[e.uid];
+          staleCleaned = true;
+        }
       } else if (cat[e.uid]) {
         e.category = cat[e.uid];
+      } else if (senderCache[sender]) {
+        // Sender-based override: nieuwe mails van dezelfde afzender erven de correctie
+        e.category = senderCache[sender];
+        state.overrides.category[e.uid] = senderCache[sender];
+        staleCleaned = true;
       }
       if (read[e.uid]) e.unread = false;
     });
     if (staleCleaned) {
       saveOverrides();
       saveJson(AI_CATS_KEY, _aiCatCache);
-      console.log('[applyOverrides] Verouderde Reclame overrides gewist voor vertrouwde afzenders');
     }
   }
 
@@ -1656,6 +1688,9 @@
     if (!patterns.length) return;
     state.emails.forEach((e) => {
       if (e.category === 'Reclame' || state.overrides.category[e.uid]) return;
+      const sender = (e.fromAddress || getFromAddress(e) || '').toLowerCase();
+      if (TRUSTED_SENDERS_CLIENT.has(sender)) return;  // nooit auto-reclame voor vertrouwde afzenders
+      if (getHardRuleCategory(e)) return;               // nooit auto-reclame als harde regel van toepassing is
       if (scoreReclameMatch(e, patterns).strength === 'strong') e.category = 'Reclame';
     });
   }
@@ -1908,6 +1943,14 @@
     _aiCatCache[uid]  = newCat;
     _aiConfCache[uid] = { confidence: 90, source: 'manual_trained' };
     saveOverrides(); saveJson(AI_CATS_KEY, _aiCatCache); saveJson(AI_CONF_KEY, _aiConfCache);
+    // Sender-based override: nieuwe mails van dezelfde afzender erven de correctie
+    const _vtSenderEmail = (email.fromAddress || getFromAddress(email) || '').toLowerCase();
+    const _vtSenderDomain = getDomain(_vtSenderEmail);
+    saveToOverrideCache(_vtSenderEmail, newCat);
+    // Als de oude categorie Reclame was: wis het domein uit de lokale reclame-patterns
+    if (oldCat === 'Reclame' && newCat !== 'Reclame') {
+      removeFromReclamePatterns(_vtSenderEmail, _vtSenderDomain);
+    }
     if (ps.requiresAction !== null) {
       state.actionFlags[uid] = ps.requiresAction;
       saveJson(ACTION_FLAGS_KEY, state.actionFlags);
@@ -3132,12 +3175,20 @@
 
       const oldCat = email.category;
       const requiresAction = ['Klantvraag', 'Factuurvraag'].includes(_bulkVtCat);
+      const bulkSenderRaw   = email.from || email.fromAddress || '';
+      const bulkSenderEmail = (email.fromAddress || getFromAddress(email) || '').toLowerCase();
+      const bulkSenderDomain = getDomain(bulkSenderEmail);
 
       // Persist via overrides zodat de wijziging survives re-render + reload
       if (!state.overrides) state.overrides = { category: {}, read: {} };
       state.overrides.category[uid] = _bulkVtCat;
       email.category = _bulkVtCat;
       _aiCatCache[uid] = _bulkVtCat;
+      // Sender-based override + reclame-patterns opschonen
+      saveToOverrideCache(bulkSenderEmail, _bulkVtCat);
+      if (oldCat === 'Reclame' && _bulkVtCat !== 'Reclame') {
+        removeFromReclamePatterns(bulkSenderEmail, bulkSenderDomain);
+      }
 
       if (_bulkVtSection) {
         const flagVal = _bulkVtSection === 'actie' ? true : _bulkVtSection === 'info' ? false : null;
@@ -3150,9 +3201,9 @@
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             email_id:            String(uid),
-            email_sender:        email.fromAddress || email.from || '',
-            sender_domain:       getDomain(email.fromAddress || email.from || ''),
-            email_subject:       email.subject || '',
+            sender:              bulkSenderRaw,
+            sender_domain:       bulkSenderDomain,
+            subject:             email.subject || '',
             body_snippet:        (state.bodyCache?.[uid]?.text || '').slice(0, 300),
             old_category:        oldCat,
             new_category:        _bulkVtCat,
@@ -3163,8 +3214,12 @@
             reason:              reason || 'bulk_vt',
           }),
         });
-        const learnResult = await learnResp.json();
-        console.log('Learn result voor uid', uid, ':', learnResult);
+        if (learnResp.ok) {
+          const learnResult = await learnResp.json();
+          console.log('Learn result voor uid', uid, ':', learnResult.message);
+        } else {
+          console.warn('Learn mislukt voor uid', uid, ':', learnResp.status);
+        }
         successCount++;
       } catch (err) {
         console.error('Fout bij verwerken uid', uid, ':', err);
@@ -3433,6 +3488,33 @@
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email_id: emailId, action, value, set_by: 'Jeffrey' })
     }).catch(() => {}); // fire-and-forget
+  }
+
+  async function syncOverrideCacheFromSupabase() {
+    try {
+      const res = await fetch('/api/email-patterns?source=manual_absolute');
+      if (!res.ok) return;
+      const { patterns } = await res.json();
+      if (!Array.isArray(patterns) || !patterns.length) return;
+      const cache = getOverrideCache();
+      let added = 0;
+      patterns.forEach((p) => {
+        if (p.sender_email && p.category) { cache[p.sender_email] = p.category; added++; }
+      });
+      if (added) {
+        localStorage.setItem(OVERRIDE_CACHE_KEY, JSON.stringify(cache));
+        console.log('[syncOverrideCacheFromSupabase]', added, 'manual_absolute patronen geladen');
+        // Pas direct toe op geladen mails
+        state.emails.forEach((e) => {
+          const s = (e.fromAddress || getFromAddress(e) || '').toLowerCase();
+          if (cache[s] && !state.overrides.category[e.uid]) {
+            e.category = cache[s];
+            state.overrides.category[e.uid] = cache[s];
+          }
+        });
+        saveOverrides(); render();
+      }
+    } catch {}
   }
 
   async function loadOverridesFromSupabase() {
@@ -4574,6 +4656,7 @@
       render();
       kickOffAiCategorization();
       loadOverridesFromSupabase();
+      syncOverrideCacheFromSupabase();
     } catch (err) {
       renderError(err.message);
     } finally {
@@ -4879,11 +4962,21 @@
   // ── Cache versie migratie ──────────────────────────────────────────────────
   function checkCacheVersion() {
     if (localStorage.getItem(CACHE_VER_KEY) !== CACHE_VERSION) {
-      // Nieuwe logica beschikbaar — wis AI-cache zodat harde regels direct gelden
+      // Wis AI-cache zodat harde regels direct gelden
       Object.keys(_aiCatCache).forEach((k) => delete _aiCatCache[k]);
       Object.keys(_aiConfCache).forEach((k) => delete _aiConfCache[k]);
-      saveJson(AI_CATS_KEY,  _aiCatCache);
-      saveJson(AI_CONF_KEY,  _aiConfCache);
+      saveJson(AI_CATS_KEY, _aiCatCache);
+      saveJson(AI_CONF_KEY, _aiConfCache);
+      // Wis reclame-patronen voor vertrouwde afzenders (webflow, lcmsgsndr)
+      const TRUSTED_DOMAINS = ['webflow.com', 'send.lcmsgsndr.net', 'lcmsgsndr.net'];
+      const patterns = loadReclamePatterns();
+      const cleaned = patterns.filter((p) =>
+        !TRUSTED_DOMAINS.some((d) => (p.domain || '').includes(d) || (p.sender || '').includes(d))
+      );
+      if (cleaned.length !== patterns.length) {
+        saveReclamePatterns(cleaned);
+        console.log('[checkCacheVersion] Reclame-patronen voor vertrouwde domeinen gewist:', patterns.length - cleaned.length);
+      }
       localStorage.setItem(CACHE_VER_KEY, CACHE_VERSION);
     }
   }
@@ -4918,6 +5011,12 @@
 
   function init() {
     checkCacheVersion();
+    // Éénmalig: verwijder stale Reclame-patronen in Supabase voor vertrouwde afzenders
+    if (!localStorage.getItem('trusted_reclame_cleaned_v1')) {
+      fetch('/api/email-patterns', { method: 'DELETE' })
+        .then((r) => r.ok && localStorage.setItem('trusted_reclame_cleaned_v1', '1'))
+        .catch(() => {});
+    }
     initFilterBar();
     initTabs();
 
