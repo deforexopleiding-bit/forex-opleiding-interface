@@ -1,5 +1,5 @@
 # Volledige Systeemanalyse — Agency Command Center
-> Gegenereerd: 2026-05-11 | Bijgewerkt: 2026-05-11 | Branch: main
+> Gegenereerd: 2026-05-11 | Bijgewerkt: 2026-05-12 | Branch: main
 
 ---
 
@@ -9,7 +9,7 @@ Het Agency Command Center is een volledig functioneel e-mail management systeem 
 
 **Algehele beoordeling: 8.5/10** — Sterk fundament, persistentie volledig op orde
 
-### Gefixte issues (2026-05-11)
+### Gefixte issues (2026-05-11 – 2026-05-12)
 | Fix | Status |
 |-----|--------|
 | [K1] Group C/D propagatie body_snippet gap | ✅ GEFIXED |
@@ -17,6 +17,11 @@ Het Agency Command Center is een volledig functioneel e-mail management systeem 
 | [K3] Taken → Supabase persistentie | ✅ GEFIXED |
 | [H1] actionFlags + overrides persistent via email_actions | ✅ GEFIXED |
 | [H4] Dead code api/categorize.js verwijderd | ✅ GEFIXED |
+| Dashboard taken-teller toont 0 (sync guard bug) | ✅ GEFIXED |
+| Hero stats responsive grid (overflow op smalle schermen) | ✅ GEFIXED |
+| Volgorde hero stats: Event Aanmeldingen naast Uitlegsessies | ✅ GEFIXED |
+| KPI sparklines (14-daags) vervangen useless 1-dag chart | ✅ GEFIXED |
+| db-migrate init call in taken.html (tabel garantie) | ✅ GEFIXED |
 
 ---
 
@@ -62,14 +67,18 @@ Het Agency Command Center is een volledig functioneel e-mail management systeem 
 | Feature | Status | Details |
 |---------|--------|---------|
 | Taak aanmaken/voltooien | ✅ | Volledig functioneel |
-| Supabase persistentie | ❌ | 100% localStorage — verlies bij cache clear |
+| Supabase persistentie | ✅ | `/api/taken` + `taken_items` tabel; bi-directionele sync bij init |
+| db-migrate init call | ✅ | Éénmalig (db_migrated_v1 flag) voor table garantie |
 
 ### Dashboard (`index.html`)
 
 | Feature | Status | Details |
 |---------|--------|---------|
-| Statistieken overzicht | ✅ | |
-| Supabase persistentie | ❌ | 100% localStorage |
+| Hero stats (6 KPI-kaarten) | ✅ | Responsive auto-fit grid |
+| Volgorde: Leads → Sessies → Events → Conversie → Taken → Onbeantwoord | ✅ | Event Aanmeldingen naast Uitlegsessies |
+| Open Taken teller | ✅ | Via `/api/dashboard-stats` → `taken_items` |
+| KPI sparklines (14 dagen) | ✅ | Leads + Sessies met min/max markers |
+| Taken klikbaar → taken.html?taskId | ✅ | |
 
 ---
 
@@ -150,8 +159,8 @@ Gebruiker corrigeert
 | reclamePatterns | email.html | Lokale reclame whitelist | ❌ |
 | kennisbankItems | kennisbank.html | Alle kennisbank items | ❌ (sync niet verbonden) |
 | kennisbankProfile | kennisbank.html | Bedrijfsprofiel | ❌ |
-| takenItems | taken.html | Alle taken | ❌ |
-| dashboardStats | index.html | Statistieken | ❌ |
+| takenItems | taken.html | Alle taken | ✅ (Supabase taken_items) |
+| dashboardStats | index.html | Statistieken | ⚠️ (KPI via email query, taken via API) |
 | bedrijfsprofiel | index.html | Profiel | ❌ |
 
 **Risico:** Alle user-data gaat verloren bij een browser cache clear. Alleen email_patterns, learn_examples en email_actions zijn duurzaam opgeslagen.
@@ -202,7 +211,7 @@ Gebruiker corrigeert
 |---|-----------|-------|--------|--------|
 | 1 | 🔴 KRITIEK | `emailList` mist `body_snippet` → Group C/D propagatie kapot | email.html | ✅ GEFIXED |
 | 2 | 🔴 KRITIEK | Kennisbank niet gesynchroniseerd met Supabase | kennisbank.html | ✅ GEFIXED |
-| 3 | 🔴 KRITIEK | Taken verloren bij cache clear | taken.html | ✅ GEFIXED |
+| 3 | 🔴 KRITIEK | Taken verloren bij cache clear | taken.html | ✅ GEFIXED (+ db-migrate init) |
 | 4 | 🟡 HOOG | actionFlags/overrides verloren bij cache clear | email.html | ✅ GEFIXED |
 | 5 | 🟡 HOOG | api/categorize.js — 19KB dead code | api/ | ✅ VERWIJDERD |
 | 6 | 🟡 HOOG | Undo history niet persistent (Supabase undo ontkoppeld) | email.html | Open |

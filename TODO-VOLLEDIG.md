@@ -1,5 +1,5 @@
 # TODO — Agency Command Center
-> Bijgewerkt: 2026-05-11 | Gebaseerd op AUDIT-VOLLEDIG.md
+> Bijgewerkt: 2026-05-12 | Gebaseerd op AUDIT-VOLLEDIG.md
 
 ---
 
@@ -17,11 +17,9 @@
 **Fix:** Voeg sync toe bij: startup (laad van Supabase), na item-wijziging (push naar Supabase)  
 **Schatting:** 2-3 uur
 
-### [K3] Taken → Supabase persistentie
+### [K3] Taken → Supabase persistentie ✅ GEFIXED
 **Bestand:** `modules/taken.html`  
-**Probleem:** Alle taken in localStorage — verlies bij cache clear  
-**Fix:** Nieuwe tabel `taken_items` in Supabase, of hergebruik bestaand schema  
-**Schatting:** 2-3 uur
+**Oplossing:** `taken_items` tabel + `/api/taken` endpoint; bi-directionele sync bij init; db-migrate éénmalig aangeroepen via `db_migrated_v1` flag
 
 ---
 
@@ -124,3 +122,9 @@
 - [x] Kalenderweek + maand filter
 - [x] "Reclame / Overige" naam doorgevoerd (was: Reclame review)
 - [x] Group C/D body_snippet fix (K1)
+- [x] Taken → Supabase persistentie (K3): taken_items tabel, bi-directionele sync, db-migrate init
+- [x] Dashboard sync guard bug (Open Taken toonde 0): if (taken.length > 0) return verwijderd
+- [x] Dashboard hero stats responsive grid (auto-fit minmax)
+- [x] Dashboard hero volgorde: Event Aanmeldingen direct na Uitlegsessies
+- [x] Dashboard KPI sparklines 14 dagen (Leads + Sessies met min/max markers)
+- [x] Taken klikbaar in dashboard → taken.html?taskId

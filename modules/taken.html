@@ -1398,6 +1398,9 @@ function init() {
   if (!huidig && collegas.length) huidig = collegas[0].id;
   render();
   handleUrlParams();
+  if (!localStorage.getItem('db_migrated_v1')) {
+    fetch('/api/db-migrate').then(r => { if (r.ok) localStorage.setItem('db_migrated_v1', '1'); }).catch(() => {});
+  }
   loadTakenFromSupabase(); // herstel vanuit Supabase als localStorage leeg is
 }
 
