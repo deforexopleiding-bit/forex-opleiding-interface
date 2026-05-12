@@ -135,3 +135,6 @@
   - send-email.js conditionally omits attachments field → PostgREST error bij ontbrekende kolom opgelost
   - attachAttachmentHandlers() geëxtraheerd als gedeelde helper → werkt in Actie tab én body panels
   - updateCardPreview() injecteert bijlagen-sectie na async body-load in alle tabs
+- [x] Module 1.3 UX-verbeteringen:
+  - Bijlagen direct zichtbaar bij Actie tab render — fetchEmailBody roept updateActieCard aan (volledige re-render met gevulde cache)
+  - Onderwerp-veld in reply composer — data-reply-subject input, pre-filled met Re: <origineel>, state.replySubject[] persistent over re-renders

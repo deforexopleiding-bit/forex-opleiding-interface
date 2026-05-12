@@ -1299,6 +1299,7 @@
     showBcc:         {},         // uid → bool
     replyCc:         {},         // uid → cc tekst
     replyBcc:        {},         // uid → bcc tekst
+    replySubject:    {},         // uid → aangepast onderwerp
     taakCreated:          loadJson('email_taak_created', {}),  // uid → true
     pendingAttachments:   {}   // uid → [{filename, contentType, size, content (base64)}]
   };
@@ -2309,7 +2310,12 @@
     } catch (err) {
       state.bodyCache[email.uid] = { loading: false, error: err.message };
     }
-    updateCardPreview(email.uid);
+    // Volledig herrender actie-card zodat bijlagen direct zichtbaar zijn via renderAttachments
+    if (state.activeTab === 'actie' && document.querySelector('.actie-card[data-uid="' + email.uid + '"]')) {
+      updateActieCard(email.uid);
+    } else {
+      updateCardPreview(email.uid);
+    }
   }
 
   function updateCardPreview(uid) {
@@ -2656,6 +2662,7 @@
     const toInput     = container?.querySelector('[data-reply-to="' + uid + '"]');
     const ccInput     = container?.querySelector('[data-reply-cc="' + uid + '"]');
     const bccInput    = container?.querySelector('[data-reply-bcc="' + uid + '"]');
+    const subjInput   = container?.querySelector('[data-reply-subject="' + uid + '"]');
     const kbAutoEl    = container?.querySelector('[data-kb-autosave="' + uid + '"]');
 
     const body         = (textarea?.value || proposal.current || '').trim();
@@ -2665,10 +2672,11 @@
     const bccVal       = bccInput?.value?.trim() || state.replyBcc[uid] || '';
     const shouldSaveKb = kbAutoEl?.checked ?? true;
 
-    const aiText    = (proposal.original || '').trim();
-    const wasEdited = body && body !== aiText;
-    const rawSubj   = email.subject || '';
-    const subject   = /^re:/i.test(rawSubj) ? rawSubj : 'Re: ' + rawSubj;
+    const aiText      = (proposal.original || '').trim();
+    const wasEdited   = body && body !== aiText;
+    const rawSubj     = email.subject || '';
+    const defaultSubj = /^re:/i.test(rawSubj) ? rawSubj : 'Re: ' + rawSubj;
+    const subject     = subjInput?.value?.trim() || state.replySubject[uid] || defaultSubj;
 
     // Toon laadstatus op de knop
     state.aiProposals[uid] = { ...proposal, sending: true };
@@ -3888,6 +3896,10 @@
       }
       render();
     });
+    // ── Onderwerp input ────────────────────────────────────────────────────
+    const subjEl = panel.querySelector('[data-reply-subject="' + uid + '"]');
+    if (subjEl) subjEl.addEventListener('input', () => { state.replySubject[uid] = subjEl.value; });
+
     attachKbFormHandlers(uid);
     attachAttachmentHandlers(uid);
   }
@@ -4012,8 +4024,11 @@
         (kbUsed === 0 ? ' <span style="color:var(--red)">· Kennisbank leeg</span>' : '') + '</div>'
       : '';
 
-    const fromMailbox = state.replyFrom[e.uid] || e.mailbox || MAILBOXES[0];
-    const toAddr      = state.replyTo[e.uid] || e.fromAddress || getFromAddress(e);
+    const fromMailbox  = state.replyFrom[e.uid] || e.mailbox || MAILBOXES[0];
+    const toAddr       = state.replyTo[e.uid] || e.fromAddress || getFromAddress(e);
+    const rawSubjDef   = e.subject || '';
+    const defaultSubj  = /^re:/i.test(rawSubjDef) ? rawSubjDef : 'Re: ' + rawSubjDef;
+    const replySubject = state.replySubject[e.uid] || defaultSubj;
 
     // Draft: herstel als aanwezig
     let draftBanner = '';
@@ -4048,6 +4063,10 @@
         '</div>' +
         '<div id="cc-row-' + escapeHtml(e.uid) + '" class="reply-meta-row" style="display:none"><span class="reply-meta-label">CC:</span><input class="reply-meta-input" type="text" data-reply-cc="' + escapeHtml(e.uid) + '" value="' + escapeHtml(state.replyCc[e.uid] || '') + '" placeholder="CC-adressen (kommagescheiden)"><button style="background:none;border:none;color:#666;cursor:pointer;padding:0 4px;font-size:14px" onclick="document.getElementById(\'cc-row-' + escapeHtml(e.uid) + '\').style.display=\'none\'">✕</button></div>' +
         '<div id="bcc-row-' + escapeHtml(e.uid) + '" class="reply-meta-row" style="display:none"><span class="reply-meta-label">BCC:</span><input class="reply-meta-input" type="text" data-reply-bcc="' + escapeHtml(e.uid) + '" value="' + escapeHtml(state.replyBcc[e.uid] || '') + '" placeholder="BCC-adressen (kommagescheiden)"><button style="background:none;border:none;color:#666;cursor:pointer;padding:0 4px;font-size:14px" onclick="document.getElementById(\'bcc-row-' + escapeHtml(e.uid) + '\').style.display=\'none\'">✕</button></div>' +
+        '<div class="reply-meta-row">' +
+          '<span class="reply-meta-label">Onderwerp:</span>' +
+          '<input class="reply-meta-input" type="text" style="flex:1" data-reply-subject="' + escapeHtml(e.uid) + '" value="' + escapeHtml(replySubject) + '">' +
+        '</div>' +
       '</div>' +
       draftBanner +
       (draftBanner ? '' : '<div class="draft-indicator" data-draft-uid="' + escapeHtml(e.uid) + '" style="display:none"></div>') +
@@ -4403,6 +4422,10 @@
         render();
       });
     });
+    // ── Onderwerp input ────────────────────────────────────────────────────
+    const subjEl = card.querySelector('[data-reply-subject="' + uid + '"]');
+    if (subjEl) subjEl.addEventListener('input', () => { state.replySubject[uid] = subjEl.value; });
+
     attachKbFormHandlers(uid);
     attachAttachmentHandlers(uid);
   }

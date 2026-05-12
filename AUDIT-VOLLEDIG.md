@@ -1,5 +1,5 @@
 # Volledige Systeemanalyse — Agency Command Center
-> Gegenereerd: 2026-05-11 | Bijgewerkt: 2026-05-12 (Module 1.2) | Branch: main
+> Gegenereerd: 2026-05-11 | Bijgewerkt: 2026-05-12 (Module 1.3) | Branch: main
 
 ---
 
@@ -28,6 +28,8 @@ Het Agency Command Center is een volledig functioneel e-mail management systeem 
 | send-email.js insert altijd met attachments:null → PostgREST error | ✅ GEFIXED |
 | Bijlagen upload-handler niet actief in Actie tab | ✅ GEFIXED |
 | Bijlagen-sectie leeg na async body-load | ✅ GEFIXED |
+| Bijlagen niet direct zichtbaar bij Actie tab render (fetchEmailBody race) | ✅ GEFIXED |
+| Onderwerp-veld ontbreekt in reply composer | ✅ NIEUW |
 
 ---
 
