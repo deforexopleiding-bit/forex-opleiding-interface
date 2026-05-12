@@ -157,7 +157,18 @@
     .t-speaker{font-size:11px;font-weight:700;flex-shrink:0;padding-top:1px;}
     .t-content{font-size:12px;line-height:1.5;color:var(--text-dim);}
     .t-time{font-size:10px;color:var(--text-faint);margin-left:auto;flex-shrink:0;}
-    .meeting-input-area{padding:12px 16px;border:1px solid var(--border);border-top:none;border-radius:0 0 14px 14px;background:var(--bg-elev);}
+    .meeting-input-area{padding:12px 16px;border:1px solid var(--border);border-top:none;border-radius:0 0 14px 14px;background:var(--bg-elev);position:relative;}
+    .ext-input-popover{position:absolute;bottom:64px;left:16px;background:var(--bg-elev-2);border:1px solid var(--border-strong);border-radius:12px;padding:16px;width:320px;z-index:50;box-shadow:0 8px 24px rgba(0,0,0,0.4);}
+
+    /* ── Meeting history ── */
+    .meeting-history-card{background:var(--bg-elev);border:1px solid var(--border);border-radius:14px;padding:20px;max-width:600px;margin:20px auto 0;}
+    .meeting-history-title{font-size:14px;font-weight:700;margin-bottom:12px;}
+    .meeting-row{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:8px;background:var(--bg-elev-2);margin-bottom:6px;}
+    .meeting-row-title{font-size:13px;font-weight:500;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+    .meeting-row-date{font-size:11px;color:var(--text-faint);flex-shrink:0;}
+    .meeting-type-badge{font-size:10px;font-weight:600;padding:2px 7px;border-radius:10px;flex-shrink:0;}
+    .badge-team{background:rgba(168,85,247,0.15);color:#c4b5fd;border:1px solid rgba(168,85,247,0.3);}
+    .badge-standup{background:rgba(34,211,238,0.12);color:#22d3ee;border:1px solid rgba(34,211,238,0.25);}
 
     /* ── Summary ── */
     .summary-card{background:var(--bg-elev);border:1px solid var(--border);border-radius:14px;padding:24px;}
@@ -308,6 +319,11 @@
             <button class="btn btn-primary" onclick="startMeeting()" style="padding:10px 24px;font-size:13px">Start vergadering →</button>
           </div>
         </div>
+        <!-- B7: Vergadergeschiedenis -->
+        <div class="meeting-history-card">
+          <div class="meeting-history-title">📅 Vergadergeschiedenis</div>
+          <div id="meetingHistoryList"><div style="color:var(--text-faint);font-size:12px">Laden…</div></div>
+        </div>
       </div>
 
       <!-- Active meeting -->
@@ -325,8 +341,22 @@
           </div>
           <div class="meeting-transcript" id="meetingTranscript"></div>
           <div class="meeting-input-area">
+            <div id="extInputPopover" class="ext-input-popover hidden">
+              <div style="font-size:12px;font-weight:700;margin-bottom:10px">Externe input toevoegen</div>
+              <select id="extInputType" class="agenda-input" style="margin-top:0;margin-bottom:8px">
+                <option value="text">Tekst</option>
+                <option value="url">URL</option>
+              </select>
+              <input id="extInputLabel" class="agenda-input" style="margin-top:0;margin-bottom:8px" placeholder="Label (optioneel)"/>
+              <textarea id="extInputContent" class="agenda-input" rows="3" style="margin-top:0;margin-bottom:8px;resize:vertical" placeholder="Tekst of URL…"></textarea>
+              <div style="display:flex;gap:8px;justify-content:flex-end">
+                <button class="btn" onclick="toggleExtInput()" style="font-size:12px;padding:5px 12px">Annuleren</button>
+                <button class="btn btn-primary" onclick="submitExternalInput()" style="font-size:12px;padding:5px 12px">Toevoegen</button>
+              </div>
+            </div>
             <div class="chat-input-row">
-              <input class="chat-input" id="meetingInput" placeholder="Zeg iets in de vergadering..." onkeydown="handleMeetingKey(event)" style="height:40px"/>
+              <button onclick="toggleExtInput()" title="Externe input toevoegen" style="height:40px;padding:0 10px;background:var(--bg-elev-2);border:1px solid var(--border);border-radius:8px;cursor:pointer;font-size:16px;flex-shrink:0">📎</button>
+              <input class="chat-input" id="meetingInput" placeholder="Zeg iets in de vergadering… (@Simon, @Leon, @Aron)" onkeydown="handleMeetingKey(event)" style="height:40px"/>
               <button class="chat-send" id="meetingSendBtn" onclick="sendMeetingMessage()">→</button>
             </div>
           </div>
@@ -342,6 +372,7 @@
           <div id="actionPointsList"></div>
           <div class="summary-actions">
             <button class="btn btn-primary" onclick="approveMeeting()">✓ Goedkeuren &amp; taken aanmaken</button>
+            <button class="btn" id="rapportBtn" onclick="showCurrentRapport()" style="display:none">📄 Rapport bekijken</button>
             <button class="btn" onclick="showView('meeting')">↩ Nieuwe vergadering</button>
           </div>
         </div>
@@ -469,6 +500,8 @@ let lastUserMessage = '';    // voor feedback-knoppen: trigger text
 let meetingId = null;
 let meetingTranscript = [];
 let pendingActionPoints = [];
+let pendingRapportMd = '';
+let pendingMeetingTitle = '';
 let selectedParticipants = new Set(['Simon', 'Leon', 'Aron']);
 let bubbleTimer = null;
 
@@ -510,6 +543,7 @@ function showView(view, agent) {
     document.getElementById('meetingSetup').classList.remove('hidden');
     document.getElementById('meetingRoom').classList.add('hidden');
     document.getElementById('meetingSummary').classList.add('hidden');
+    loadMeetingHistory();
   }
 }
 
@@ -909,6 +943,8 @@ async function startMeeting() {
   if (!agenda) { alert('Voer eerst een agenda in.'); return; }
   if (selectedParticipants.size === 0) { alert('Selecteer minimaal één deelnemer.'); return; }
 
+  pendingMeetingTitle = agenda;
+  pendingRapportMd = '';
   const participants = [...selectedParticipants];
   document.getElementById('meetingSetup').classList.add('hidden');
   document.getElementById('meetingRoom').classList.remove('hidden');
@@ -997,6 +1033,9 @@ async function endMeeting() {
     if (data.error) throw new Error(data.error);
     document.getElementById('summaryText').textContent = data.summary || '';
     pendingActionPoints = data.action_points || [];
+    pendingRapportMd    = data.rapport_md || '';
+    const rapportBtn = document.getElementById('rapportBtn');
+    if (rapportBtn) rapportBtn.style.display = pendingRapportMd ? '' : 'none';
     document.getElementById('actionPointsList').innerHTML = pendingActionPoints.map((ap, i) => `
       <div class="action-point">
         <div class="ap-check"></div>
@@ -1024,6 +1063,76 @@ async function approveMeeting() {
     showView('overview');
   } catch (err) {
     alert(`⚠️ ${err.message}`);
+  }
+}
+
+// ── B3: Externe input ─────────────────────────────────────────────────────
+function toggleExtInput() {
+  document.getElementById('extInputPopover').classList.toggle('hidden');
+}
+
+async function submitExternalInput() {
+  const input_type = document.getElementById('extInputType').value;
+  const content    = document.getElementById('extInputContent').value.trim();
+  const label      = document.getElementById('extInputLabel').value.trim();
+  if (!content || !meetingId) return;
+  document.getElementById('extInputPopover').classList.add('hidden');
+  try {
+    const r = await fetch('/api/agent-meeting', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'add_external_input', meeting_id: meetingId, input_type, content, label }),
+    });
+    const data = await r.json();
+    if (data.error) throw new Error(data.error);
+    showToast(`Externe input toegevoegd (${data.external_inputs.length} totaal)`);
+    document.getElementById('extInputContent').value = '';
+    document.getElementById('extInputLabel').value   = '';
+  } catch (err) {
+    showToast(`⚠️ ${err.message}`, 'error');
+  }
+}
+
+// ── B7: Meeting rapport + dashboard ──────────────────────────────────────
+function showCurrentRapport() {
+  if (!pendingRapportMd) return;
+  showMeetingRapport(pendingMeetingTitle || 'Rapport', pendingRapportMd);
+}
+
+function showMeetingRapport(title, rapportMd) {
+  document.getElementById('reportTitle').textContent = `📄 ${title}`;
+  document.getElementById('reportContent').innerHTML = formatMd(esc(rapportMd));
+  document.getElementById('reportOverlay').classList.remove('hidden');
+}
+
+async function loadMeetingHistory() {
+  const el = document.getElementById('meetingHistoryList');
+  if (!el) return;
+  try {
+    const r = await fetch('/api/agent-meeting?action=get_history');
+    const data = await r.json();
+    if (data.error) throw new Error(data.error);
+    const meetings = data.meetings || [];
+    if (!meetings.length) {
+      el.innerHTML = '<div style="color:var(--text-faint);font-size:12px">Geen vergaderingen gevonden.</div>';
+      return;
+    }
+    el.innerHTML = meetings.map(m => {
+      const date       = new Date(m.created_at).toLocaleDateString('nl-NL', { day:'2-digit', month:'short', year:'numeric' });
+      const badgeClass = m.meeting_type === 'standup' ? 'badge-standup' : 'badge-team';
+      const badgeLabel = m.meeting_type === 'standup' ? 'Standup' : 'Team';
+      const rapportBtn = m.rapport_md
+        ? `<button class="btn" onclick='showMeetingRapport(${JSON.stringify(esc(m.title))}, ${JSON.stringify(m.rapport_md)})' style="font-size:11px;padding:3px 8px">📄 Rapport</button>`
+        : '';
+      return `<div class="meeting-row">
+        <span class="meeting-type-badge ${badgeClass}">${badgeLabel}</span>
+        <span class="meeting-row-title" title="${esc(m.title)}">${esc(m.title)}</span>
+        <span class="meeting-row-date">${date}</span>
+        ${rapportBtn}
+      </div>`;
+    }).join('');
+  } catch (err) {
+    el.innerHTML = `<div style="color:var(--red);font-size:12px">⚠️ ${esc(err.message)}</div>`;
   }
 }
 

@@ -7,6 +7,10 @@
     {
       "path": "/api/backfill-emails",
       "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/api/standup-weekly",
+      "schedule": "0 8 * * 1"
     }
   ],
   "headers": [
