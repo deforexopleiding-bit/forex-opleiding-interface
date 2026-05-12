@@ -22,8 +22,8 @@ export default async function handler(req, res) {
   // ── Authenticatie: alleen Vercel cron of handmatige trigger met CRON_SECRET ──
   const secret = process.env.CRON_SECRET;
   if (secret) {
-    const authHeader = req.headers.authorization || '';
-    const querySecret = req.query?.secret || '';
+    const authHeader  = req.headers.authorization || '';
+    const querySecret = req.query?.secret         || '';
     if (authHeader !== `Bearer ${secret}` && querySecret !== secret) {
       return res.status(401).json({ error: 'Unauthorized — CRON_SECRET vereist' });
     }
@@ -32,11 +32,11 @@ export default async function handler(req, res) {
   const { IMAP_HOST, IMAP_PORT } = process.env;
   if (!IMAP_HOST) return res.status(500).json({ error: 'IMAP_HOST niet geconfigureerd' });
 
-  const port     = parseInt(IMAP_PORT || '993', 10);
+  const port      = parseInt(IMAP_PORT || '993', 10);
   const startedAt = Date.now();
   const results   = [];
 
-  // ── Verwerk mailboxen sequentieel (parallel zou de 55s-grens overschrijden) ──
+  // ── Verwerk mailboxen sequentieel — per-mailbox isolatie: fout in één stopt de rest niet ──
   for (const account of ACCOUNTS) {
     if (Date.now() - startedAt > ABORT_MS) {
       results.push({ mailbox: account.mailbox, status: 'skipped', reason: 'timeout-guard' });
@@ -50,20 +50,35 @@ export default async function handler(req, res) {
     }
 
     const boxStart = Date.now();
+    console.log(`[sync-emails] Starting sync for mailbox: ${account.mailbox}`);
+
     try {
-      const r = await syncMailbox({ account, host: IMAP_HOST, port });
+      const r = await syncMailbox({ account, host: IMAP_HOST, port, boxStart });
+      console.log(`[sync-emails] Finished mailbox ${account.mailbox}: ${r.new_count} new mails, last_uid=${r.last_uid}, ${r.duration_ms}ms`);
       results.push({ mailbox: account.mailbox, status: 'ok', ...r });
+
     } catch (err) {
-      console.error(`[sync-emails] ${account.mailbox} fout:`, err.message);
-      await supabase.from('email_sync_log').insert({
-        mailbox:       account.mailbox,
-        mails_new:     0,
-        last_uid:      0,
-        duration_ms:   Date.now() - boxStart,
-        status:        'error',
-        error_message: err.message.slice(0, 500),
-      }).catch(() => {});
-      results.push({ mailbox: account.mailbox, status: 'error', error: err.message });
+      console.error(`[sync-emails] Mailbox ${account.mailbox} failed:`, err.message);
+
+      // Sync-log fout-entry — standaard await patroon (geen .catch() chaining)
+      try {
+        const { error: logErr } = await supabase.from('email_sync_log').insert({
+          mailbox:       account.mailbox,
+          started_at:    new Date(boxStart).toISOString(),
+          completed_at:  new Date().toISOString(),
+          mails_new:     0,
+          last_uid:      0,
+          duration_ms:   Date.now() - boxStart,
+          status:        'failed',
+          error_message: err.message.slice(0, 500),
+        });
+        if (logErr) console.error(`[sync-emails] Sync_log insert failed for ${account.mailbox}:`, logErr.message);
+      } catch (logWriteErr) {
+        console.error(`[sync-emails] Sync_log insert threw for ${account.mailbox}:`, logWriteErr.message);
+      }
+
+      results.push({ mailbox: account.mailbox, status: 'failed', error: err.message });
+      // Expliciet doorgaan naar volgende mailbox — geen abort
     }
   }
 
@@ -75,21 +90,23 @@ export default async function handler(req, res) {
 }
 
 // ── Sync één mailbox ────────────────────────────────────────────────────────
-async function syncMailbox({ account, host, port }) {
-  const boxStart = Date.now();
-
+async function syncMailbox({ account, host, port, boxStart }) {
   // Bepaal de hoogste reeds gesynchroniseerde UID voor deze mailbox
-  const { data: lastRow } = await supabase
+  const { data: lastRow, error: uidErr } = await supabase
     .from('email_messages')
     .select('imap_uid')
     .eq('mailbox', account.mailbox)
     .order('imap_uid', { ascending: false })
     .limit(1);
 
-  const lastUid      = lastRow?.[0]?.imap_uid ?? 0;
-  const isInitial    = lastUid === 0;
+  if (uidErr) console.warn(`[sync-emails] lastUid ophalen fout voor ${account.mailbox}:`, uidErr.message);
 
-  // ImapFlow verbinding (hogere socketTimeout dan de live-UI: we hebben meer tijd)
+  const lastUid   = lastRow?.[0]?.imap_uid ?? 0;
+  const isInitial = lastUid === 0;
+
+  console.log(`[sync-emails] ${account.mailbox}: lastUid=${lastUid}, isInitial=${isInitial}`);
+
+  // ImapFlow verbinding
   const client = new ImapFlow({
     host,
     port,
@@ -107,8 +124,8 @@ async function syncMailbox({ account, host, port }) {
   try {
     const lock = await client.getMailboxLock('INBOX');
     try {
-      // ── Berichten ophalen (envelope + flags + uid) ────────────────────────
-      // Eerste sync: afgelopen 7 dagen (beperkt tot INITIAL_SYNC_LIMIT recentste)
+      // ── Berichten ophalen (envelope + flags + uid) ──────────────────────
+      // Eerste sync: afgelopen 7 dagen, max INITIAL_SYNC_LIMIT recentste
       // Incrementeel: UID-range vanaf lastUid+1
       const rawMsgs = [];
 
@@ -119,7 +136,7 @@ async function syncMailbox({ account, host, port }) {
         }
         // Meest recente eerst; neem maximaal INITIAL_SYNC_LIMIT
         rawMsgs.sort((a, b) => (b.uid ?? 0) - (a.uid ?? 0));
-        rawMsgs.splice(INITIAL_SYNC_LIMIT); // in-place truncation
+        rawMsgs.splice(INITIAL_SYNC_LIMIT);
       } else {
         for await (const msg of client.fetch(
           `${lastUid + 1}:*`,
@@ -130,7 +147,9 @@ async function syncMailbox({ account, host, port }) {
         }
       }
 
-      // ── Categoriseer en bouw insert-rows ─────────────────────────────────
+      console.log(`[sync-emails] ${account.mailbox}: ${rawMsgs.length} berichten te verwerken`);
+
+      // ── Categoriseer en bouw insert-rows ─────────────────────────────
       const rows = [];
       for (const msg of rawMsgs) {
         const uid = msg.uid;
@@ -180,15 +199,15 @@ async function syncMailbox({ account, host, port }) {
         });
       }
 
-      // ── Batch-insert — idempotent via ON CONFLICT DO NOTHING ─────────────
+      // ── Batch-insert — idempotent via ON CONFLICT DO NOTHING ───────────
       if (rows.length > 0) {
         const { error: insertErr } = await supabase
           .from('email_messages')
           .upsert(rows, { onConflict: 'mailbox,imap_uid', ignoreDuplicates: true });
 
         if (insertErr) {
-          console.error(`[sync-emails] insert fout ${account.mailbox}:`, insertErr.message);
-          // Niet fataal: gooi geen error, log alleen
+          console.error(`[sync-emails] email_messages insert fout ${account.mailbox}:`, insertErr.message);
+          // Niet fataal: mails zijn mogelijk gedeeltelijk geschreven
         } else {
           newCount = rows.length;
         }
@@ -201,15 +220,22 @@ async function syncMailbox({ account, host, port }) {
     try { await client.logout(); } catch {}
   }
 
-  // ── Sync-log bijwerken ────────────────────────────────────────────────────
+  // ── Sync-log bijwerken — standaard await patroon (geen .catch() chaining) ──
   const duration = Date.now() - boxStart;
-  await supabase.from('email_sync_log').insert({
-    mailbox:     account.mailbox,
-    mails_new:   newCount,
-    last_uid:    maxUid,
-    duration_ms: duration,
-    status:      'ok',
-  }).catch(e => console.warn('[sync-emails] log insert fout:', e.message));
+  try {
+    const { error: logErr } = await supabase.from('email_sync_log').insert({
+      mailbox:      account.mailbox,
+      started_at:   new Date(boxStart).toISOString(),
+      completed_at: new Date().toISOString(),
+      mails_new:    newCount,
+      last_uid:     maxUid,
+      duration_ms:  duration,
+      status:       'ok',
+    });
+    if (logErr) console.error(`[sync-emails] Sync_log insert failed for ${account.mailbox}:`, logErr.message);
+  } catch (logWriteErr) {
+    console.error(`[sync-emails] Sync_log insert threw for ${account.mailbox}:`, logWriteErr.message);
+  }
 
   return { new_count: newCount, last_uid: maxUid, duration_ms: duration };
 }

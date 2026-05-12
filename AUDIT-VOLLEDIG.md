@@ -264,3 +264,16 @@ bd21e9a  feat: tool-use architectuur Fase 1 — framework + 2 tools voor Simon
 - `received_at`, `body_snippet`, `confidence`, `ai_source`, `raw_flags` → bestonden niet op `email_messages`
 
 **Regel:** Bij elke nieuwe Supabase-query — insert, select, update of order — de gebruikte kolomnamen letterlijk cross-checken tegen het werkelijke schema. Gebruik `db-migrate.js` (TABLES_TO_CREATE) of de tabel-definitie die de gebruiker opgeeft als bron. **Nooit aannames doen over kolomnamen.** Dit geldt ook voor kolomnamen in `.order()`, `.eq()` en `.select()` calls — niet alleen inserts.
+
+### Supabase queries: altijd `const { data, error } = await ...` — nooit `.catch()` chaining
+
+**Patroon:** `supabase.from(...).insert({...}).catch(e => ...)` crasht met TypeError in productie.
+
+**Reden:** `PostgrestBuilder` in supabase-js is een *lazy thenable* — de query wordt pas uitgevoerd wanneer `.then()` aangeroepen wordt. `.catch()` is niet gegarandeerd beschikbaar als standalone methode. Geen enkel ander bestand in het project gebruikt dit patroon.
+
+**Regel:** Gebruik **altijd** het standaard patroon:
+```js
+const { data, error } = await supabase.from('tabel').insert({ ... });
+if (error) console.error('[module] insert fout:', error.message);
+```
+Nooit `.catch()` chaining op een `PostgrestBuilder`. Gebruik een `try/catch` blok als je fouten wilt onderdrukken.
