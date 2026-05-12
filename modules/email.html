@@ -336,6 +336,25 @@
     .reply-box:focus { outline: none; border-color: var(--accent-cyan); }
     .reply-kb-meta { font-size: 11px; color: var(--muted); margin: 4px 0 2px; }
     .reply-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+
+    /* ── Bijlagen (ontvangen) ── */
+    .attach-section { margin-top: 10px; border-top: 1px solid var(--border); padding-top: 8px; }
+    .attach-section-label { font-size: 11px; color: var(--text-faint); margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.05em; }
+    .attach-list { list-style: none; display: flex; flex-wrap: wrap; gap: 6px; }
+    .attach-item { display: flex; align-items: center; gap: 6px; padding: 5px 10px; background: rgba(255,255,255,0.04); border: 1px solid var(--border-strong); border-radius: 6px; font-size: 12px; color: var(--text); text-decoration: none; transition: background 0.15s; }
+    .attach-item:hover { background: rgba(255,255,255,0.08); }
+    .attach-icon { font-size: 14px; line-height: 1; }
+    .attach-name { max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .attach-size { color: var(--text-faint); font-size: 11px; flex-shrink: 0; }
+
+    /* ── Bijlagen (verzenden) ── */
+    .attach-bar { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
+    .attach-bar-label { font-size: 12px; cursor: pointer; padding: 4px 10px; background: rgba(255,255,255,0.05); border: 1px solid var(--border-strong); border-radius: 5px; color: var(--text-dim); transition: background 0.15s; display: inline-flex; align-items: center; gap: 5px; }
+    .attach-bar-label:hover { background: rgba(255,255,255,0.1); color: var(--text); }
+    .attach-bar-count { font-size: 11px; color: var(--text-faint); }
+    .attach-preview-list { list-style: none; display: flex; flex-wrap: wrap; gap: 5px; margin-top: 5px; }
+    .attach-preview-item { display: flex; align-items: center; gap: 5px; padding: 3px 8px; background: rgba(255,255,255,0.04); border: 1px solid var(--border-strong); border-radius: 5px; font-size: 11px; color: var(--text-dim); }
+    .attach-preview-remove { background: none; border: none; color: var(--red); cursor: pointer; font-size: 13px; line-height: 1; padding: 0 2px; }
     .card-ai-loading { display: flex; align-items: center; gap: 10px; padding: 12px 0; font-size: 13px; color: var(--accent-cyan); }
     .card-ai-error { font-size: 13px; color: var(--red); padding: 8px 0; }
     .ai-loading-spinner {
@@ -457,6 +476,7 @@
     }
     .toast.show { opacity: 1; transform: translate(-50%, 0); pointer-events: auto; }
     .toast.error { background: #2a1010; border-color: rgba(239,68,68,0.5); color: #f87171; }
+    .toast.warn  { background: #1e1500; border-color: rgba(245,158,11,0.5); color: #fbbf24; }
     .toast-undo-btn {
       background: var(--accent-cyan); color: #0a0b10; border: none; border-radius: 6px;
       padding: 3px 10px; font-size: 12px; font-weight: 700; cursor: pointer;
@@ -1279,7 +1299,8 @@
     showBcc:         {},         // uid → bool
     replyCc:         {},         // uid → cc tekst
     replyBcc:        {},         // uid → bcc tekst
-    taakCreated:     loadJson('email_taak_created', {})  // uid → true
+    taakCreated:          loadJson('email_taak_created', {}),  // uid → true
+    pendingAttachments:   {}   // uid → [{filename, contentType, size, content (base64)}]
   };
 
   // ── Taak modal state (buiten render cycle) ────────────────────────────────
@@ -1373,10 +1394,11 @@
     _pendingUndoEntry = null;
     t.innerHTML = escapeHtml(msg);
     t.classList.toggle('error', type === 'error');
+    t.classList.toggle('warn',  type === 'warn');
     void t.offsetWidth;
     t.classList.add('show');
     clearTimeout(_toastTimer);
-    _toastTimer = setTimeout(() => { t.classList.remove('show'); t.classList.remove('error'); }, type === 'error' ? 5000 : 2400);
+    _toastTimer = setTimeout(() => { t.classList.remove('show'); t.classList.remove('error'); t.classList.remove('warn'); }, type === 'error' ? 5000 : type === 'warn' ? 4000 : 2400);
   }
 
   // ── Undo Manager (universeel) ──────────────────────────────────────────────
@@ -2626,6 +2648,8 @@
       const sendPayload = { from_mailbox: fromMailbox, to: toAddr, subject, text: appendSignature(body), html: buildMailHtml(body), email_id: uid, category: email.category };
       if (ccVal)  sendPayload.cc  = ccVal;
       if (bccVal) sendPayload.bcc = bccVal;
+      const attachToSend = state.pendingAttachments[uid];
+      if (Array.isArray(attachToSend) && attachToSend.length > 0) sendPayload.attachments = attachToSend;
       const res  = await fetch('/api/send-email', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(sendPayload)
@@ -2643,6 +2667,14 @@
       }
       bumpReplyStat(wasEdited ? 'edited' : 'approved');
 
+      // Waarschuw als DB-opslag mislukte (mail is wel verstuurd)
+      if (data.dbSaved === false) {
+        setTimeout(() => showToast('⚠️ Mail verstuurd maar niet opgeslagen in historiek', 'warn'), 600);
+      }
+
+      // Wis bijlagen na verzending
+      delete state.pendingAttachments[uid];
+
       // Verstuurd registreren (met from-adres)
       const sentAt = new Date().toISOString();
       state.sentReplies[uid] = { sentAt, to: toAddr, from: fromMailbox };
@@ -2654,7 +2686,10 @@
         category: email.category, from_name: email.fromName || email.from || 'Onbekend'
       }));
       // Voeg toe aan lokale verzondenEmails zodat tab direct up-to-date is
-      state.verzondenEmails.unshift({ email_id: uid, created_at: sentAt, to: toAddr, from: fromMailbox, subject, body, category: email.category });
+      const sentAttachMeta = Array.isArray(attachToSend) && attachToSend.length > 0
+        ? attachToSend.map((a) => ({ filename: a.filename, size: a.size, contentType: a.contentType }))
+        : null;
+      state.verzondenEmails.unshift({ email_id: uid, created_at: sentAt, to: toAddr, from: fromMailbox, subject, body, category: email.category, attachments: sentAttachMeta });
 
       // Verwijder uit Actie vereist → verplaats naar Leadmanagement
       setActionFlag(uid, false);
@@ -3618,6 +3653,11 @@
         (preview ? '<div class="verzonden-preview">' + highlightMatch(preview, q || '') + '</div>' : '') +
       '</div>' +
       (isOpen ? '<div class="verzonden-body">' + escapeHtml(e.body || '(geen inhoud)') + '</div>' : '') +
+      (isOpen && e.attachments && e.attachments.length > 0
+        ? '<div class="attach-section" style="margin:8px 0 0"><div class="attach-section-label">📎 Bijlagen</div><ul class="attach-list">' +
+            e.attachments.map((a) => `<li><span class="attach-item" style="cursor:default"><span class="attach-icon">${attachIcon(a.contentType)}</span><span class="attach-name">${escapeHtml(a.filename)}</span><span class="attach-size">${escapeHtml(formatFileSize(a.size))}</span></span></li>`).join('') +
+          '</ul></div>'
+        : '') +
     '</div>';
   }
 
@@ -3775,6 +3815,7 @@
           '<div style="font-size:11px;color:var(--text-faint);margin-top:3px">' + formatDateTime(e.date) + '</div>' +
         '</div>' +
         bodyHtml +
+        renderAttachments(e.uid, e) +
         renderSentBadge(e.uid) +
         renderAiSection(e) +
         '<div class="body-actions">' +
@@ -3818,6 +3859,83 @@
       render();
     });
     attachKbFormHandlers(uid);
+
+    // ── Bijlagen upload handlers ──────────────────────────────────────────
+    const MAX_FILES = 5;
+    const MAX_BYTES = 8 * 1024 * 1024; // 8 MB raw
+
+    const attachInput = panel.querySelector('[data-attach-input="' + uid + '"]');
+    if (attachInput) {
+      attachInput.addEventListener('change', async (ev) => {
+        ev.stopPropagation();
+        const files = Array.from(ev.target.files || []);
+        const existing = state.pendingAttachments[uid] || [];
+        const combined = [...existing];
+
+        for (const file of files) {
+          if (combined.length >= MAX_FILES) {
+            showToast(`Max ${MAX_FILES} bestanden per mail`, 'warn'); break;
+          }
+          const totalRaw = combined.reduce((s, a) => s + (a.size || 0), 0) + file.size;
+          if (totalRaw > MAX_BYTES) {
+            showToast('Bestanden te groot, max 8 MB totaal', 'warn'); break;
+          }
+          const content = await new Promise((resolve) => {
+            const reader = new FileReader();
+            reader.onload = (e) => resolve(e.target.result.split(',')[1]); // base64 part
+            reader.readAsDataURL(file);
+          });
+          combined.push({ filename: file.name, contentType: file.type || 'application/octet-stream', size: file.size, content });
+        }
+        state.pendingAttachments[uid] = combined;
+        attachInput.value = '';
+        // Partial re-render: only the attach section
+        const panel2 = document.querySelector('.body-panel[data-uid="' + uid + '"]');
+        if (panel2) {
+          const existingBar = panel2.querySelector('.attach-bar');
+          const existingPreview = panel2.querySelector('.attach-preview-list');
+          const newWrap = document.createElement('div');
+          newWrap.innerHTML = renderAttachUpload(uid);
+          if (existingBar) {
+            existingBar.replaceWith(newWrap.querySelector('.attach-bar'));
+          }
+          if (existingPreview) existingPreview.remove();
+          const newPreview = newWrap.querySelector('.attach-preview-list');
+          if (newPreview) {
+            const bar2 = panel2.querySelector('.attach-bar');
+            if (bar2) bar2.insertAdjacentElement('afterend', newPreview);
+          }
+          attachBodyPanelHandlers(uid);
+        }
+      });
+    }
+
+    // Verwijder-knopjes in attach preview
+    panel.querySelectorAll('[data-attach-remove]').forEach((btn) => {
+      btn.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        const idx = parseInt(btn.dataset.attachRemove, 10);
+        const u   = btn.dataset.attachUid;
+        if (state.pendingAttachments[u]) {
+          state.pendingAttachments[u].splice(idx, 1);
+          const panel3 = document.querySelector('.body-panel[data-uid="' + u + '"]');
+          if (panel3) {
+            const newWrap = document.createElement('div');
+            newWrap.innerHTML = renderAttachUpload(u);
+            const existingBar3 = panel3.querySelector('.attach-bar');
+            const existingPrev3 = panel3.querySelector('.attach-preview-list');
+            if (existingBar3) existingBar3.replaceWith(newWrap.querySelector('.attach-bar'));
+            if (existingPrev3) existingPrev3.remove();
+            const newPrev3 = newWrap.querySelector('.attach-preview-list');
+            if (newPrev3) {
+              const bar3 = panel3.querySelector('.attach-bar');
+              if (bar3) bar3.insertAdjacentElement('afterend', newPrev3);
+            }
+            attachBodyPanelHandlers(u);
+          }
+        }
+      });
+    });
   }
 
   // ── Rendering: Actie tab ───────────────────────────────────────────────────
@@ -3828,6 +3946,27 @@
     if (cache.error)     return '<div class="card-preview error">Kon inhoud niet laden</div>';
     const raw = cache.text || '';
     return '<div class="card-preview">' + escapeHtml(raw.slice(0, 300)) + (raw.length > 300 ? '…' : '') + '</div>';
+  }
+
+  // ── Bijlagen upload UI (verzenden) ─────────────────────────────────────────
+  function renderAttachUpload(uid) {
+    const pending = state.pendingAttachments[uid] || [];
+    const countLabel = pending.length > 0 ? `${pending.length} bestand${pending.length !== 1 ? 'en' : ''}` : '';
+    const previewItems = pending.map((a, i) =>
+      `<li class="attach-preview-item">` +
+        `<span>${escapeHtml(a.filename)}</span>` +
+        `<span style="color:var(--text-faint)">(${escapeHtml(formatFileSize(a.size))})</span>` +
+        `<button class="attach-preview-remove" data-attach-remove="${i}" data-attach-uid="${escapeHtml(uid)}" title="Verwijderen">✕</button>` +
+      `</li>`
+    ).join('');
+    return `<div class="attach-bar">` +
+        `<label class="attach-bar-label" title="Bijlage toevoegen (max 5, totaal 8 MB)">` +
+          `📎 Bijlage` +
+          `<input type="file" multiple style="display:none" data-attach-input="${escapeHtml(uid)}">` +
+        `</label>` +
+        (countLabel ? `<span class="attach-bar-count">${escapeHtml(countLabel)}</span>` : '') +
+      `</div>` +
+      (previewItems ? `<ul class="attach-preview-list">${previewItems}</ul>` : '');
   }
 
   function renderAiSection(e) {
@@ -3884,6 +4023,7 @@
       (draftBanner ? '' : '<div class="draft-indicator" data-draft-uid="' + escapeHtml(e.uid) + '" style="display:none"></div>') +
       '<textarea class="reply-box" data-reply="' + escapeHtml(e.uid) + '">' + escapeHtml(p.current) + '</textarea>' +
       kbMeta +
+      renderAttachUpload(e.uid) +
       '<div class="reply-actions">' +
         '<button class="btn btn-send" data-action="send" data-uid="' + escapeHtml(e.uid) + '">' + ICON_SEND + ' Versturen</button>' +
         '<button class="btn" data-action="regenerate" data-uid="' + escapeHtml(e.uid) + '">' + ICON_REGEN + ' Opnieuw</button>' +
@@ -3891,6 +4031,42 @@
       '</div>' +
       '<label class="kb-autosave"><input type="checkbox" data-kb-autosave="' + escapeHtml(e.uid) + '" checked> Toevoegen aan kennisbank na verzenden</label>' +
     '</div>';
+  }
+
+  // ── Bijlagen (ontvangen) ──────────────────────────────────────────────────
+  function attachIcon(contentType) {
+    const ct = (contentType || '').toLowerCase();
+    if (ct === 'application/pdf') return '📄';
+    if (ct.startsWith('image/')) return '🖼️';
+    if (ct.includes('word') || ct.includes('document')) return '📝';
+    if (ct.includes('excel') || ct.includes('sheet')) return '📊';
+    if (ct.includes('zip') || ct.includes('compressed') || ct.includes('archive')) return '🗜️';
+    return '📎';
+  }
+
+  function formatFileSize(bytes) {
+    if (!bytes || bytes === 0) return '';
+    if (bytes < 1024)        return bytes + ' B';
+    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+    return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+  }
+
+  function renderAttachments(uid, email) {
+    const cache = state.bodyCache[uid];
+    if (!cache || !cache.attachments || cache.attachments.length === 0) return '';
+    const mailbox = email?.mailbox || '';
+    const imapUid = extractImapUid(uid);
+    const items = cache.attachments.map((a) => {
+      const icon = attachIcon(a.contentType);
+      const size = formatFileSize(a.size);
+      const href = `/api/email-attachment?mailbox=${encodeURIComponent(mailbox)}&uid=${encodeURIComponent(imapUid)}&index=${a.index}`;
+      return `<li><a class="attach-item" href="${escapeHtml(href)}" download="${escapeHtml(a.filename)}" target="_blank">` +
+        `<span class="attach-icon">${icon}</span>` +
+        `<span class="attach-name" title="${escapeHtml(a.filename)}">${escapeHtml(a.filename)}</span>` +
+        (size ? `<span class="attach-size">${escapeHtml(size)}</span>` : '') +
+        `</a></li>`;
+    }).join('');
+    return `<div class="attach-section"><div class="attach-section-label">📎 Bijlagen (${cache.attachments.length})</div><ul class="attach-list">${items}</ul></div>`;
   }
 
   function renderSentBadge(uid) {

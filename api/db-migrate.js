@@ -33,6 +33,7 @@ const EXPECTED = {
     { col: 'email_id',    sql: 'text' },
     { col: 'cc_address',  sql: 'text' },
     { col: 'bcc_address', sql: 'text' },
+    { col: 'attachments', sql: 'jsonb DEFAULT NULL' },
   ],
 };
 
@@ -59,7 +60,8 @@ ALTER TABLE email_actions DISABLE ROW LEVEL SECURITY;`,
   to_address text,
   cc_address text,
   bcc_address text,
-  sent_at timestamptz DEFAULT now()
+  sent_at timestamptz DEFAULT now(),
+  attachments jsonb DEFAULT NULL
 );
 ALTER TABLE email_replies DISABLE ROW LEVEL SECURITY;`,
   kennisbank_items: `CREATE TABLE IF NOT EXISTS kennisbank_items (

@@ -1,4 +1,5 @@
 import nodemailer from 'nodemailer';
+import { supabase } from './supabase.js';
 
 // Mailbox → wachtwoord env-var (zelfde als IMAP)
 const SMTP_ACCOUNTS = {
@@ -11,30 +12,9 @@ const SMTP_ACCOUNTS = {
 const SMTP_HOST = 'smtp.strato.com';
 const SMTP_PORT = 465;
 
-async function saveToSupabase(record) {
-  const url  = process.env.SUPABASE_URL;
-  const key  = process.env.SUPABASE_ANON_KEY;
-  if (!url || !key) { console.warn('[send-email] SUPABASE_URL/KEY niet geconfigureerd'); return; }
-  try {
-    const r = await fetch(`${url}/rest/v1/email_replies`, {
-      method:  'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'apikey':        key,
-        'Authorization': `Bearer ${key}`,
-        'Prefer':        'return=minimal',
-      },
-      body: JSON.stringify(record),
-    });
-    if (!r.ok) {
-      const txt = await r.text().catch(() => '');
-      console.warn(`[send-email] email_replies insert mislukt (${r.status}):`, txt);
-    } else {
-      console.log('[send-email] email_replies opgeslagen');
-    }
-  } catch (e) {
-    console.warn('[send-email] email_replies fetch fout:', e.message);
-  }
+// Sanitiseer bestandsnaam: geen path-traversal-tekens
+function safeFilename(name) {
+  return String(name || 'bijlage').replace(/[/\\]/g, '_').replace(/\.\./g, '_').slice(0, 255);
 }
 
 export default async function handler(req, res) {
@@ -42,7 +22,7 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
-  const { from_mailbox, to, subject, text, html, cc, bcc, email_id, category } = req.body || {};
+  const { from_mailbox, to, subject, text, html, cc, bcc, email_id, category, attachments } = req.body || {};
 
   if (!from_mailbox || !to || !subject || !text) {
     return res.status(400).json({ error: 'from_mailbox, to, subject en text zijn vereist' });
@@ -84,11 +64,28 @@ export default async function handler(req, res) {
     if (cc)   mailOpts.cc   = cc;
     if (bcc)  mailOpts.bcc  = bcc;
 
+    // Bijlagen meesturen als MIME-attachments
+    if (Array.isArray(attachments) && attachments.length > 0) {
+      mailOpts.attachments = attachments.map((a) => ({
+        filename:    safeFilename(a.filename),
+        contentType: a.contentType || 'application/octet-stream',
+        content:     Buffer.from(a.content || '', 'base64'),
+        encoding:    'base64',
+      }));
+    }
+
     const info = await transporter.sendMail(mailOpts);
     console.log(`[send-email] Verstuurd — messageId: ${info.messageId} | geaccepteerd: ${info.accepted?.join(', ')}`);
 
+    // Attachment metadata voor opslag (filenames + sizes, geen content)
+    const attachMeta = Array.isArray(attachments) && attachments.length > 0
+      ? attachments.map((a) => ({ filename: safeFilename(a.filename), contentType: a.contentType || 'application/octet-stream', size: a.size || 0 }))
+      : null;
+
     const sentAt = new Date().toISOString();
-    await saveToSupabase({
+
+    // Sla op via supabase-js client (betrouwbaarder dan directe REST fetch)
+    const { error: dbErr } = await supabase.from('email_replies').insert({
       email_id:      email_id || null,
       email_subject: subject,
       final_reply:   text,
@@ -97,12 +94,19 @@ export default async function handler(req, res) {
       cc_address:    cc  || null,
       bcc_address:   bcc || null,
       sent_at:       sentAt,
+      attachments:   attachMeta,
     });
+    if (dbErr) {
+      console.warn('[send-email] email_replies insert mislukt:', dbErr.message);
+    } else {
+      console.log('[send-email] email_replies opgeslagen');
+    }
 
     return res.status(200).json({
-      ok: true,
+      ok:        true,
       messageId: info.messageId,
       accepted:  info.accepted || [],
+      dbSaved:   !dbErr,
     });
   } catch (err) {
     console.error(`[send-email] SMTP fout (${from_mailbox} → ${to}):`, err.message, 'code:', err.code || '—', 'responseCode:', err.responseCode || '—', 'response:', err.response || '—');

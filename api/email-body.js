@@ -81,6 +81,14 @@ export default async function handler(req, res) {
       const fromEntry = parsed.from?.value?.[0];
       const toEntries = parsed.to?.value || [];
 
+      // Bijlagen metadata (geen content — aparte download via /api/email-attachment)
+      const attachments = (parsed.attachments || []).map((a, i) => ({
+        index:       i,
+        filename:    a.filename || `bijlage-${i + 1}`,
+        contentType: a.contentType || 'application/octet-stream',
+        size:        a.size || a.content?.length || 0,
+      }));
+
       return res.status(200).json({
         subject: parsed.subject || '',
         from: fromEntry
@@ -92,7 +100,8 @@ export default async function handler(req, res) {
         cc: parsed.cc?.text || '',
         date: parsed.date ? new Date(parsed.date).toISOString() : null,
         text,
-        hasHtml: Boolean(parsed.html)
+        hasHtml:     Boolean(parsed.html),
+        attachments,
       });
     } finally {
       lock.release();

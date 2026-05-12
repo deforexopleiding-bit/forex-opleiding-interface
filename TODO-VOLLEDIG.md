@@ -1,5 +1,5 @@
 # TODO — Agency Command Center
-> Bijgewerkt: 2026-05-12 | Gebaseerd op AUDIT-VOLLEDIG.md
+> Bijgewerkt: 2026-05-12 (Module 1.2) | Gebaseerd op AUDIT-VOLLEDIG.md
 
 ---
 
@@ -128,3 +128,6 @@
 - [x] Dashboard hero volgorde: Event Aanmeldingen direct na Uitlegsessies
 - [x] Dashboard KPI sparklines 14 dagen (Leads + Sessies met min/max markers)
 - [x] Taken klikbaar in dashboard → taken.html?taskId
+- [x] Verzonden mails persisteren na refresh — supabase-js client in send-email.js, dbSaved flag + amber toast
+- [x] Bijlagen ontvangen tonen — email-body geeft metadata, /api/email-attachment endpoint voor download
+- [x] Bijlagen meesturen — composer upload UI, max 5 bestanden / 8 MB raw, nodemailer MIME, metadata in email_replies

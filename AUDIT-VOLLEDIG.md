@@ -1,5 +1,5 @@
 # Volledige Systeemanalyse — Agency Command Center
-> Gegenereerd: 2026-05-11 | Bijgewerkt: 2026-05-12 | Branch: main
+> Gegenereerd: 2026-05-11 | Bijgewerkt: 2026-05-12 (Module 1.2) | Branch: main
 
 ---
 
@@ -22,6 +22,9 @@ Het Agency Command Center is een volledig functioneel e-mail management systeem 
 | Volgorde hero stats: Event Aanmeldingen naast Uitlegsessies | ✅ GEFIXED |
 | KPI sparklines (14-daags) vervangen useless 1-dag chart | ✅ GEFIXED |
 | db-migrate init call in taken.html (tabel garantie) | ✅ GEFIXED |
+| Verzonden mails verdwijnen na refresh (saveToSupabase silent fail) | ✅ GEFIXED |
+| Bijlagen ontvangen tonen + downloaden | ✅ NIEUW |
+| Bijlagen meesturen in composer | ✅ NIEUW |
 
 ---
 
@@ -37,7 +40,9 @@ Het Agency Command Center is een volledig functioneel e-mail management systeem 
 | Whitelist/blacklist domein | ✅ | Persistert in email_patterns |
 | Actie vereist / Informatie tabs | ✅ | actionFlags in localStorage |
 | Reclame / Overige tab | ✅ | Category = 'Reclame' |
-| E-mail body laden (email-body) | ✅ | IMAP fetch on-demand, gecached |
+| E-mail body laden (email-body) | ✅ | IMAP fetch on-demand, gecached; attachment metadata inbegrepen |
+| Bijlagen ontvangen tonen | ✅ | email-body geeft metadata, email-attachment endpoint streamt download |
+| Bijlagen meesturen | ✅ | Composer upload UI, max 5 bestanden / 8 MB raw; nodemailer MIME |
 | AI-reply genereren (generate-reply) | ✅ | Claude Sonnet 4.6, kennisbank context |
 | Verplaats & Train (VT panel) | ✅ | Inline panel, bevestiging naar /api/learn |
 | Universele sectie-verplaatsing | ✅ | `...` menu in alle 3 tabs |
@@ -50,7 +55,8 @@ Het Agency Command Center is een volledig functioneel e-mail management systeem 
 | Taak aanmaken | ✅ | Doorsturen naar taken.html |
 | Kalenderweek + maand filter | ✅ | |
 | E-mail acties (email-actions) | ✅ | Gelogd in Supabase email_actions |
-| Group C/D propagatie via body_snippet | ❌ | emailList mist body_snippet → propagatie werkt niet |
+| Group C/D propagatie via body_snippet | ✅ | GEFIXED (2026-05-11) |
+| Verzonden mails persisteren | ✅ | supabase-js client, dbSaved flag, amber toast bij failure |
 
 ### Kennisbank module (`modules/kennisbank.html`)
 
