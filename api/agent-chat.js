@@ -1,7 +1,8 @@
 import { supabase } from './supabase.js';
+import { getToolsForAgent, execute } from './agent-tools.js';
 
 const FALLBACK_PROMPTS = {
-  Simon: `Je bent Simon, de E-mail Agent van De Forex Opleiding. Je bent nauwkeurig, efficient en vriendelijk. Je beheert alle inkomende en uitgaande e-mails en leert continu van correcties. Je communiceert altijd in het Nederlands. Je hebt toegang tot actuele inbox-data. Als Jeffrey je iets vraagt over de inbox, geef je concrete cijfers en inzichten. Als Jeffrey je vraagt een actie uit te voeren, bevestig je eerst voordat je uitvoert.`,
+  Simon: `Je bent Simon, de E-mail Agent van De Forex Opleiding. Je bent nauwkeurig, efficient en vriendelijk. Je beheert alle inkomende en uitgaande e-mails en leert continu van correcties. Je communiceert altijd in het Nederlands. Je hebt toegang tot actuele data via tools. Als Jeffrey je iets vraagt over de inbox of taken, gebruik dan de beschikbare tools om actuele cijfers op te halen. Als Jeffrey je vraagt een actie uit te voeren, bevestig je eerst voordat je uitvoert.`,
   Leon:  `Je bent Leon, de Administratief Medewerker van De Forex Opleiding. Je bent georganiseerd, proactief en precies. Je beheert administratieve processen, contracten en klant onboarding. Je communiceert altijd in het Nederlands. Je houdt overzicht over alle lopende processen en taken.`,
   Aron:  `Je bent Aron, de Financieel Medewerker van De Forex Opleiding. Je bent analytisch, betrouwbaar en resultaatgericht. Je beheert facturen, betalingen en financiële rapporten. Je communiceert altijd in het Nederlands. Je hebt oog voor detail en signaleert financiële risico's proactief.`,
 };
@@ -18,6 +19,8 @@ const QUICK_ACTION_MESSAGES = {
   rapport:                 'Genereer een samenvatting rapport van de huidige status. Gebruik markdown opmaak.',
 };
 
+const MAX_TOOL_ROUNDS = 5;
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
   res.setHeader('Cache-Control', 'no-store');
@@ -27,7 +30,7 @@ export default async function handler(req, res) {
   if (!apiKey) return res.status(500).json({ error: 'ANTHROPIC_API_KEY niet geconfigureerd' });
 
   try {
-    // Load agent from Supabase
+    // ── Agent laden ──────────────────────────────────────────────────────────
     let agent = null;
     if (agent_id) {
       const { data } = await supabase.from('agents').select('*').eq('id', agent_id).single();
@@ -36,77 +39,129 @@ export default async function handler(req, res) {
     const name       = agent?.name       || agent_name || 'Agent';
     const systemBase = agent?.personality || FALLBACK_PROMPTS[name] || `Je bent ${name}, een medewerker van De Forex Opleiding. Communiceer altijd in het Nederlands.`;
 
-    // ── Simon: live context via directe Supabase queries (geen HTTP roundtrip) ──
+    // ── Simon: geleerde correcties in systeem-prompt ──────────────────────────
+    // Statistieken worden NU via tools opgezocht — niet meer vooraf geïnjecteerd
     let contextStr = '';
     if (name === 'Simon') {
       try {
-        const [takenRes, unresolvedRes, learningsRes] = await Promise.allSettled([
-          // Open taken: status niet 'done' en niet 'afgerond'
-          supabase.from('taken_items')
-            .select('id', { count: 'exact', head: true })
-            .neq('status', 'done')
-            .neq('status', 'afgerond'),
-          // Onbeantwoorde acties: email_actions zonder resolved_at
-          supabase.from('email_actions')
-            .select('email_id')
-            .is('resolved_at', null)
-            .limit(500),
-          // Geleerde correcties van Simon
-          supabase.from('agent_learnings')
-            .select('trigger_text, ideal_response')
-            .eq('agent_name', 'Simon')
-            .order('created_at', { ascending: false })
-            .limit(15),
-        ]);
+        const { data: learnings } = await supabase
+          .from('agent_learnings')
+          .select('trigger_text, ideal_response')
+          .eq('agent_name', 'Simon')
+          .order('created_at', { ascending: false })
+          .limit(15);
 
-        const openTaken = takenRes.status === 'fulfilled'
-          ? (takenRes.value.count ?? '?') : '?';
-
-        const onbeantwoord = unresolvedRes.status === 'fulfilled'
-          ? new Set((unresolvedRes.value.data || []).map(a => a.email_id)).size : '?';
-
-        const learnings = learningsRes.status === 'fulfilled'
-          ? (learningsRes.value.data || []) : [];
-
-        contextStr = `\n\nACTUELE DATA (${new Date().toLocaleString('nl-NL')}):\n- Open taken: ${openTaken}\n- Onbeantwoorde acties (unresolved): ${onbeantwoord}`;
-
-        if (learnings.length > 0) {
-          contextStr += '\n\nGELEERDE CORRECTIES (hoog prioriteit — volg deze patronen):\n' +
+        if (learnings?.length > 0) {
+          contextStr = '\n\nGELEERDE CORRECTIES (hoog prioriteit — volg deze patronen):\n' +
             learnings.map((l, i) =>
               `${i + 1}. Situatie: "${l.trigger_text.slice(0, 120)}" → Ideaal: "${l.ideal_response.slice(0, 200)}"`
             ).join('\n');
         }
       } catch (e) {
-        console.warn('[agent-chat] Simon context fout:', e.message);
+        console.warn('[agent-chat] learnings ophalen fout:', e.message);
       }
     }
 
     const systemPrompt = systemBase + contextStr;
     const userMessage  = (quick_action && QUICK_ACTION_MESSAGES[quick_action]) || message || 'Hoi!';
 
-    const messages = [
+    // ── Tools bepalen voor deze agent ─────────────────────────────────────────
+    const tools     = getToolsForAgent(name);
+    const hasTools  = tools.length > 0;
+
+    // ── Berichten opbouwen ────────────────────────────────────────────────────
+    let currentMessages = [
       ...conversation_history.slice(-20).map(m => ({ role: m.role, content: m.content })),
       { role: 'user', content: userMessage },
     ];
 
-    const claudeResp = await fetch('https://api.anthropic.com/v1/messages', {
-      method:  'POST',
-      headers: { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
-      body:    JSON.stringify({ model: 'claude-sonnet-4-6', max_tokens: 1024, system: systemPrompt, messages }),
-    });
+    // ── Tool-use loop (max MAX_TOOL_ROUNDS rondes) ─────────────────────────────
+    let finalResponse = '';
+    const toolsUsed   = [];
+    let rounds        = 0;
 
-    if (!claudeResp.ok) throw new Error(`Claude API: ${claudeResp.status}`);
-    const claudeData = await claudeResp.json();
-    const response   = claudeData.content?.[0]?.text?.trim() || 'Ik kon je vraag niet verwerken.';
+    while (rounds < MAX_TOOL_ROUNDS) {
+      rounds++;
 
-    // ── Opslaan in Supabase (awaited — niet meer fire-and-forget) ──────────────
+      const requestBody = {
+        model:      'claude-sonnet-4-6',
+        max_tokens: 1024,
+        system:     systemPrompt,
+        messages:   currentMessages,
+      };
+      if (hasTools) requestBody.tools = tools;
+
+      const claudeResp = await fetch('https://api.anthropic.com/v1/messages', {
+        method:  'POST',
+        headers: { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
+        body:    JSON.stringify(requestBody),
+      });
+
+      if (!claudeResp.ok) throw new Error(`Claude API: ${claudeResp.status}`);
+      const claudeData = await claudeResp.json();
+
+      // ── Geen tool-gebruik → definitief antwoord ────────────────────────────
+      if (claudeData.stop_reason !== 'tool_use') {
+        const textBlock = (claudeData.content || []).find(b => b.type === 'text');
+        finalResponse = textBlock?.text?.trim() || 'Ik kon je vraag niet verwerken.';
+        break;
+      }
+
+      // ── Tool-gebruik: uitvoeren en resultaten toevoegen ────────────────────
+      const assistantContent = claudeData.content || [];
+      const toolUseBlocks    = assistantContent.filter(b => b.type === 'tool_use');
+
+      // Voeg assistant-bericht toe (met tool_use blocks) aan de conversatie
+      currentMessages.push({ role: 'assistant', content: assistantContent });
+
+      // Voer alle gevraagde tools uit
+      const toolResults = [];
+      for (const block of toolUseBlocks) {
+        console.log(`[agent-chat] Tool-aanroep: ${block.name} |`, JSON.stringify(block.input));
+        toolsUsed.push(block.name);
+
+        try {
+          const result = await execute(block.name, block.input);
+          toolResults.push({
+            type:        'tool_result',
+            tool_use_id: block.id,
+            content:     JSON.stringify(result),
+          });
+        } catch (toolErr) {
+          console.error(`[agent-chat] Tool ${block.name} fout:`, toolErr.message);
+          toolResults.push({
+            type:        'tool_result',
+            tool_use_id: block.id,
+            content:     JSON.stringify({ error: toolErr.message }),
+            is_error:    true,
+          });
+        }
+      }
+
+      // Voeg tool-resultaten toe als user-bericht
+      currentMessages.push({ role: 'user', content: toolResults });
+    }
+
+    // Fallback als de loop eindigde zonder definitief antwoord
+    if (!finalResponse) {
+      finalResponse = 'Ik heb meerdere databronnen geraadpleegd maar kon geen volledig antwoord formuleren.';
+    }
+
+    // ── Opslaan in Supabase (awaited) ──────────────────────────────────────────
     const { error: saveErr } = await supabase.from('agent_conversations').insert([
       { agent_id: agent_id || null, agent_name: name, role: 'user',      content: userMessage, conversation_session: session_id },
-      { agent_id: agent_id || null, agent_name: name, role: 'assistant', content: response,    conversation_session: session_id },
+      { agent_id: agent_id || null, agent_name: name, role: 'assistant', content: finalResponse, conversation_session: session_id },
     ]);
     if (saveErr) console.error('[agent-chat] save fout:', saveErr.message);
 
-    return res.status(200).json({ response, agent_name: name, timestamp: new Date().toISOString() });
+    return res.status(200).json({
+      response:    finalResponse,
+      agent_name:  name,
+      tools_used:  toolsUsed,
+      tool_rounds: rounds,
+      timestamp:   new Date().toISOString(),
+    });
+
   } catch (err) {
     console.error('[agent-chat]', err.message);
     return res.status(500).json({ error: err.message });

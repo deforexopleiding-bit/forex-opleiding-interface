@@ -109,6 +109,11 @@
     .quick-btn{padding:5px 10px;border-radius:7px;border:1px solid var(--border-strong);background:var(--bg-elev-2);color:var(--text-dim);font-size:11px;cursor:pointer;font-family:inherit;transition:all .15s;}
     .quick-btn:hover{background:var(--bg);color:var(--text);}
 
+    /* ── Tool-gebruik indicator ── */
+    .typing-note{font-size:11px;color:var(--text-faint);margin-top:6px;padding:0 2px;animation:fade-in .3s ease;}
+    .tools-used-note{font-size:11px;color:var(--text-faint);margin-top:4px;padding:2px 0;display:flex;align-items:center;gap:4px;}
+    @keyframes fade-in{from{opacity:0}to{opacity:1}}
+
     /* ── Feedback buttons & training ── */
     .chat-msg-actions{display:flex;gap:6px;margin-top:6px;}
     .chat-like-btn,.chat-train-btn{padding:3px 8px;border-radius:6px;border:1px solid var(--border-strong);background:transparent;color:var(--text-faint);font-size:11px;cursor:pointer;font-family:inherit;transition:all .15s;line-height:1.4;}
@@ -627,7 +632,16 @@ function startFreshSession() {
   addChatMsg('assistant', `${greet} Jeffrey! Ik ben ${activeAgent.name}, jouw ${activeAgent.role}. Hoe kan ik je vandaag helpen?`);
 }
 
-function addChatMsg(role, content, pushToHistory = true) {
+function showSearchingHint() {
+  const ti = document.getElementById('typingIndicator');
+  if (!ti) return;
+  const typingDiv = ti.querySelector('.typing');
+  if (typingDiv && !ti.querySelector('.typing-note')) {
+    typingDiv.insertAdjacentHTML('afterend', '<div class="typing-note">🔍 Even opzoeken…</div>');
+  }
+}
+
+function addChatMsg(role, content, pushToHistory = true, toolsUsed = []) {
   const msgs = document.getElementById('chatMessages');
   const isUser = role === 'user';
   const color  = isUser ? '#a855f7' : (activeAgent?.avatar_color || '#534AB7');
@@ -654,6 +668,7 @@ function addChatMsg(role, content, pushToHistory = true) {
       <div style="min-width:0;flex:1">
         <div class="msg-bubble">${formatMd(esc(content))}</div>
         <div class="msg-time">${timeStr}</div>
+        ${(toolsUsed || []).length > 0 ? `<div class="tools-used-note">🔧 ${toolsUsed.join(', ')}</div>` : ''}
         <div class="chat-msg-actions">
           <button class="chat-like-btn" title="Goed voorbeeld — markeer dit antwoord als ideale stijl (voor toekomstige antwoorden)">👍</button>
           <button class="chat-train-btn" title="Leer mij een specifieke regel of correctie (voor toekomstige beslissingen)">✏️ Train mij</button>
@@ -697,17 +712,24 @@ async function sendChat(message) {
   if (!localStorage.getItem(lsKey)) localStorage.setItem(lsKey, chatSessionId);
   addChatMsg('user', msg);
   showTyping();
+  // Na 1,5s: toon "🔍 Even opzoeken…" als antwoord nog uitblijft
+  const searchHint = setTimeout(showSearchingHint, 1500);
   try {
     const r = await fetch('/api/agent-chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ agent_id: activeAgent.id, agent_name: activeAgent.name, message: msg, conversation_history: chatHistory.slice(-20), session_id: chatSessionId }),
     });
+    clearTimeout(searchHint);
     const data = await r.json();
     removeTyping();
-    if (data.error) addChatMsg('assistant', `⚠️ ${data.error}`);
-    else addChatMsg('assistant', data.response);
+    if (data.error) {
+      addChatMsg('assistant', `⚠️ ${data.error}`);
+    } else {
+      addChatMsg('assistant', data.response, true, data.tools_used);
+    }
   } catch (err) {
+    clearTimeout(searchHint);
     removeTyping();
     addChatMsg('assistant', '⚠️ Verbindingsfout. Probeer opnieuw.');
   }
@@ -721,16 +743,19 @@ async function sendQuickAction(key) {
   const qa = activeAgent.quick_actions?.find(q => q.key === key);
   if (qa) addChatMsg('user', qa.label);
   showTyping();
+  const searchHint2 = setTimeout(showSearchingHint, 1500);
   try {
     const r = await fetch('/api/agent-chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ agent_id: activeAgent.id, agent_name: activeAgent.name, quick_action: key, conversation_history: chatHistory.slice(-20), session_id: chatSessionId }),
     });
+    clearTimeout(searchHint2);
     const data = await r.json();
     removeTyping();
-    addChatMsg('assistant', data.error ? `⚠️ ${data.error}` : data.response);
+    addChatMsg('assistant', data.error ? `⚠️ ${data.error}` : data.response, true, data.tools_used);
   } catch {
+    clearTimeout(searchHint2);
     removeTyping();
     addChatMsg('assistant', '⚠️ Verbindingsfout.');
   }
