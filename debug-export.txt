@@ -1,0 +1,1709 @@
+================================================================================
+DEBUG EXPORT — De Forex Opleiding Interface
+Gegenereerd: 2026-05-12
+Doel: volledig contextbestand voor nieuwe chat-sessie
+Bevat: VOLLEDIGE inhoud van alle 5 API bestanden + email.html sleutelcode
+================================================================================
+
+
+================================================================================
+SECTIE 1 — api/email-agent.js (volledig, 716 regels)
+================================================================================
+
+import Anthropic from '@anthropic-ai/sdk';
+import { supabase } from './supabase.js';
+
+const VALID_CATEGORIES = [
+  'Nieuwe Lead', 'Appointment', 'Event Aanmelding',
+  'Klantvraag', 'Factuurvraag', 'Reclame', 'Overig'
+];
+
+const FALLBACK_BEDRIJFSPROFIEL = `De Forex Opleiding is een financiële trading opleiding in Nederland.
+Klanten zijn mensen die forex trading willen leren.
+Producten: uitlegsessies, online cursussen, 10K challenge, 7-daagse challenge.
+Leads komen binnen via formulieren op de website en funnels.
+Jeffrey is de eigenaar en beantwoordt persoonlijk alle klantvragen.`;
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+function extractEmail(str) {
+  const m = (str || '').match(/<([^>]+)>/);
+  return (m ? m[1] : str).toLowerCase().trim();
+}
+function getDomain(email) {
+  const i = (email || '').lastIndexOf('@');
+  return i >= 0 ? email.slice(i + 1).toLowerCase() : '';
+}
+const STOPWORDS_AGENT = new Set(['de','het','een','voor','met','van','naar','die','dat','deze','dit',
+  'en','of','in','op','om','aan','is','als','bij','door','over','tot','uit','the','a','an',
+  'and','or','for','with','from','on','are','this','that','your']);
+
+function extractKeywords(text) {
+  return (text || '').toLowerCase()
+    .replace(/[^\p{L}\p{N}\s]+/gu, ' ')
+    .split(/\s+/)
+    .filter((w) => w.length >= 4 && !STOPWORDS_AGENT.has(w))
+    .slice(0, 6);
+}
+function extractBodyKeywords(text, maxWords = 10) {
+  return (text || '').toLowerCase()
+    .replace(/[^\p{L}\p{N}\s]+/gu, ' ')
+    .split(/\s+/)
+    .filter((w) => w.length >= 4 && !STOPWORDS_AGENT.has(w))
+    .slice(0, maxWords);
+}
+
+// ── Interne domeinen — worden NOOIT als Reclame gecategoriseerd ───────────────
+const INTERNAL_DOMAINS = ['deforexopleiding.nl', 'deforexopleiding.com'];
+
+// ── Vertrouwde afzenders — altijd correct gecategoriseerd op onderwerp ─────────
+const TRUSTED_LEAD_SENDERS = new Set([
+  'no-reply-forms@webflow.com',
+  'noreply@send.lcmsgsndr.net',
+  'info+deforexopleiding.nl@send.lcmsgsndr.net',
+]);
+
+function classifyTrustedSender(subject) {
+  const s = (subject || '').toLowerCase();
+  if (/uitlegsessie|ingepland|nieuwe call|appointment|sessie\s*ingepland|call\s*ingepland/i.test(s)) return 'Appointment';
+  if (/event|aanmelding|gent|seminar|workshop/i.test(s)) return 'Event Aanmelding';
+  return 'Nieuwe Lead'; // standaard voor webflow forms en lead mailers
+}
+
+// ── Absolute regels — altijd van toepassing, ook bij Re: en body-vragen ──────
+const ABSOLUTE_RULES = [
+  {
+    category: 'Nieuwe Lead',
+    requires_action: false,
+    test: (s) => /nieuwe\s*lead|new\s*lead|lead\s*(001|002|003|004|005)|funnel|10k.challenge|7.daagse|you\s+have\s+received\s+a\s+form|lead\s+-/i.test(s),
+  },
+  {
+    category: 'Appointment',
+    requires_action: false,
+    test: (s) => /uitlegsessie\s*(ingepland)?|nieuwe\s*call|appointment\s*booked|sessie\s*ingepland|call\s*ingepland/i.test(s),
+  },
+  {
+    category: 'Event Aanmelding',
+    requires_action: false,
+    test: (s) => /event\s*aanmelding|aanmelding\s*gent|seminar\s*aanmelding/i.test(s),
+  },
+];
+
+function applyAbsoluteRules(subject, senderDomain) {
+  const isInternal = INTERNAL_DOMAINS.some((d) => (senderDomain || '').includes(d));
+  const s = subject || '';
+  for (const rule of ABSOLUTE_RULES) {
+    if (rule.test(s)) {
+      console.log(`[email-agent] Absolute regel: "${s}" → ${rule.category}${isInternal ? ' (intern domein)' : ''}`);
+      return { category: rule.category, requires_action: rule.requires_action };
+    }
+  }
+  if (isInternal && /lead|funnel|aanmelding|sessie|call|event|betaling|factuur/i.test(s)) {
+    return { category: 'Overig', requires_action: false };
+  }
+  return null;
+}
+
+// ── Harde inhoudsregels ───────────────────────────────────────────────────────
+const PAYMENT_DOMAINS = ['paypal.nl', 'paypal.com', 'mollie.com', 'stripe.com'];
+const HARD_RULES = [
+  {
+    category: 'Nieuwe Lead',
+    requires_action: false,
+    patterns: ['nieuwe lead', 'new lead', 'lead 001', 'lead 002', 'lead 003', 'lead 004', 'lead 005',
+      'funnel', '10k challenge', '7-daagse', 'form submission', 'you have received a form',
+      'lead - ', 'lead -']
+  },
+  {
+    category: 'Appointment',
+    requires_action: false,
+    patterns: ['uitlegsessie ingepland', 'uitlegsessie', 'ingepland', 'nieuwe call',
+      'appointment booked', 'sessie ingepland', 'call ingepland']
+  },
+  {
+    category: 'Event Aanmelding',
+    requires_action: false,
+    patterns: ['event aanmelding', 'aanmelding gent', 'seminar aanmelding',
+      'aanmelding seminar', 'aanmelding webinar', ' gent']
+  },
+  {
+    category: 'Overig',
+    requires_action: false,
+    patterns: ['betaling ontvangen', 'factuur voldaan', 'payment confirmed',
+      'je factuur werd betaald', 'werd online betaald', 'creditcard-betaling ontvangen',
+      'ontvangstbewijs', 'transactiebewijs', 'your receipt', 'payment receipt',
+      'je betaling is ontvangen', 'je bestelling is bevestigd']
+  }
+];
+const OVERIG_DOMAINS = ['vimeo.com', 'youtube.com', 'linkedin.com'];
+
+function applyHardRules(subject, from, bodySnippet) {
+  const s      = (subject || '').toLowerCase();
+  const b      = (bodySnippet || '').toLowerCase();
+  const domain = getDomain(extractEmail(from || ''));
+
+  for (const rule of HARD_RULES) {
+    if (rule.patterns.some((p) => s.includes(p) || b.includes(p))) {
+      return { category: rule.category, requires_action: rule.requires_action };
+    }
+  }
+
+  if (PAYMENT_DOMAINS.includes(domain)) {
+    return { category: 'Overig', requires_action: false };
+  }
+  if (domain === 'teamleader.eu') {
+    const isPayment = ['betaald', 'payment', 'receipt', 'factuur'].some((t) => b.includes(t) || s.includes(t));
+    if (isPayment) return { category: 'Overig', requires_action: false };
+  }
+  if (OVERIG_DOMAINS.includes(domain)) {
+    return { category: 'Overig', requires_action: false };
+  }
+
+  return null;
+}
+
+// ── Re:/Fwd: detectie ────────────────────────────────────────────────────────
+function isReplyOrForward(subject) {
+  return /^(re|re\.|fw|fwd|antw|antwoord)\s*:/i.test((subject || '').trim());
+}
+
+// ── Directe vraag/actie detectie in body ─────────────────────────────────────
+const QUESTION_SIGNALS = [
+  'waar ', 'wanneer ', 'hoe ', 'wat ', 'kan ik', 'zou ik', 'kunt u', 'kun je',
+  'graag ', 'help', 'probleem', 'klacht', 'terugbellen', ' adres', ' info ',
+  'vraag', 'weet u', 'weet je', 'kunt u mij', 'zou u', 'zou je',
+  'meer informatie', 'meer info', 'niet gelukt', 'werkt niet', 'begrijp niet',
+  'snap niet', 'uitleg', 'kunt u mij', 'mag ik', 'is er'
+];
+
+function detectDirectQuestion(bodySnippet) {
+  if (!bodySnippet) return false;
+  const b = bodySnippet.toLowerCase();
+  if (b.includes('?')) return true;
+  return QUESTION_SIGNALS.some((w) => b.includes(w));
+}
+
+// ── Reclame-signalen tellen ───────────────────────────────────────────────────
+function countReclameSignals(subject, bodySnippet) {
+  let signals = 0;
+  const s = (subject || '').toLowerCase();
+  const b = (bodySnippet || '').toLowerCase();
+
+  const promoTerms = ['unsubscribe', 'nieuwsbrief', 'uitschrijven', 'promotie',
+    'aanbieding', 'korting', 'deals', 'sale', 'newsletter', 'abonnement',
+    'gratis', 'exclusief aanbod', 'beperkte tijd', 'afmelden'];
+  if (promoTerms.some((t) => s.includes(t))) signals++;
+
+  const bulkMailHeaders = ['mailchimp', 'sendgrid', 'klaviyo', 'campaign monitor',
+    'mailerlite', 'activecampaign', 'hubspot'];
+  if (bulkMailHeaders.some((t) => b.includes(t))) signals++;
+
+  if (b.includes('uitschrijven') || b.includes('unsubscribe') || b.includes('afmelden')) signals++;
+
+  const coldOutreach = ['ik kom even langs', 'even kennismaken', 'mijn diensten',
+    'zou je interesse hebben', 'ik help bedrijven', 'wij bieden aan', 'vrijblijvend gesprek',
+    'ik wilde je even', 'wij hebben een oplossing'];
+  if (coldOutreach.some((t) => b.includes(t) || s.includes(t))) signals++;
+
+  const hasPersonalGreeting = /beste\s+\w|hallo\s+\w|dag\s+\w|geachte\s+\w/i.test(b);
+  if (b.length > 80 && !hasPersonalGreeting) signals++;
+
+  return signals;
+}
+
+// ── Supabase: whitelist / blacklist / patroon ─────────────────────────────────
+async function checkWhitelist(senderEmail, senderDomain) {
+  try {
+    if (senderEmail) {
+      const { data } = await supabase.from('email_patterns')
+        .select('category, confidence')
+        .eq('sender_email', senderEmail)
+        .eq('source', 'whitelist')
+        .maybeSingle();
+      if (data) return { whitelisted: true, category: data.category };
+    }
+    if (senderDomain) {
+      const { data } = await supabase.from('email_patterns')
+        .select('category, confidence')
+        .eq('sender_domain', senderDomain)
+        .is('sender_email', null)
+        .eq('source', 'whitelist')
+        .maybeSingle();
+      if (data) return { whitelisted: true, category: data.category };
+    }
+  } catch (e) { console.warn('[email-agent] whitelist check fout:', e.message); }
+  return { whitelisted: false };
+}
+
+async function checkBlacklist(senderEmail, senderDomain) {
+  try {
+    if (senderEmail) {
+      const { data } = await supabase.from('email_patterns')
+        .select('id')
+        .eq('sender_email', senderEmail)
+        .eq('source', 'blacklist')
+        .maybeSingle();
+      if (data) return true;
+    }
+    if (senderDomain) {
+      const { data } = await supabase.from('email_patterns')
+        .select('id')
+        .eq('sender_domain', senderDomain)
+        .is('sender_email', null)
+        .eq('source', 'blacklist')
+        .maybeSingle();
+      if (data) return true;
+    }
+  } catch (e) { console.warn('[email-agent] blacklist check fout:', e.message); }
+  return false;
+}
+
+async function lookupHighConfidencePattern(senderEmail, senderDomain, subject, bodySnippet) {
+  let result = null;
+  try {
+    for (const [field, value] of [[senderEmail ? 'sender_email' : null, senderEmail], ['sender_domain', senderDomain]]) {
+      if (!field || !value) continue;
+      const query = supabase.from('email_patterns')
+        .select('category, confidence, times_seen, source, requires_action')
+        .gte('confidence', 85)
+        .gte('times_seen', 3)
+        .order('confidence', { ascending: false })
+        .limit(1);
+
+      const { data } = field === 'sender_email'
+        ? await query.eq('sender_email', value)
+        : await query.eq('sender_domain', value).is('sender_email', null);
+
+      if (data?.length) {
+        const p = data[0];
+        if (p.category === 'Reclame') {
+          if (countReclameSignals(subject, bodySnippet) >= 1) { result = p; break; }
+          continue;
+        }
+        result = p; break;
+      }
+    }
+  } catch (e) { console.warn('[email-agent] pattern lookup fout:', e.message); }
+
+  if (!result) {
+    const bodyKws = extractBodyKeywords(bodySnippet || '', 10);
+    if (bodyKws.length >= 4) {
+      try {
+        const { data: bkPatterns } = await supabase.from('email_patterns')
+          .select('category, confidence, times_seen, body_keywords, requires_action')
+          .not('body_keywords', 'is', null)
+          .gte('confidence', 75)
+          .gte('times_seen', 2);
+        for (const pat of (bkPatterns || [])) {
+          const overlap = (pat.body_keywords || []).filter((w) => bodyKws.includes(w)).length;
+          if (overlap >= 4) {
+            result = { category: pat.category, confidence: pat.confidence, source: 'body_learned', requires_action: pat.requires_action };
+            break;
+          }
+        }
+      } catch (e) { console.warn('[email-agent] body_keywords lookup fout:', e.message); }
+    }
+  }
+
+  return result;
+}
+
+// ── Kennisbank + correcties context ─────────────────────────────────────────
+async function buildAiContext(senderEmail, senderDomain) {
+  let bedrijfsprofiel    = FALLBACK_BEDRIJFSPROFIEL;
+  let correctionsContext = 'Geen eerdere correcties.';
+  let patternContext     = 'Geen bekende patronen.';
+  let kennisbankVoorbeelden = '';
+
+  try {
+    const { data: kbItems } = await supabase.from('kennisbank_items')
+      .select('type, category, title, content, helpfulness_score')
+      .order('helpfulness_score', { ascending: false })
+      .limit(15);
+
+    if (kbItems?.length) {
+      const profiel = kbItems.find((k) => k.type === 'bedrijfsprofiel');
+      if (profiel) bedrijfsprofiel = profiel.content || FALLBACK_BEDRIJFSPROFIEL;
+
+      const examples = kbItems
+        .filter((k) => k.type !== 'bedrijfsprofiel')
+        .map((k) => `- [${k.category || k.type}] ${k.title || (k.content || '').slice(0, 80)}`)
+        .join('\n');
+      if (examples) kennisbankVoorbeelden = examples;
+    }
+  } catch {}
+
+  try {
+    let corrQuery = supabase.from('learn_examples')
+      .select('old_category, new_category, email_subject, corrected_at')
+      .order('corrected_at', { ascending: false })
+      .limit(10);
+    if (senderEmail) corrQuery = corrQuery.eq('email_sender', senderEmail);
+    else if (senderDomain) corrQuery = corrQuery.eq('sender_domain', senderDomain);
+    const { data: corr } = await corrQuery;
+    if (corr?.length) {
+      correctionsContext = corr
+        .map((c) => `- "${c.email_subject || '?'}" → gecorrigeerd van "${c.old_category}" naar "${c.new_category}"`)
+        .join('\n');
+    }
+  } catch {}
+
+  try {
+    const ref = senderEmail || senderDomain;
+    const field = senderEmail ? 'sender_email' : 'sender_domain';
+    if (ref) {
+      const { data: pat } = await supabase.from('email_patterns')
+        .select('category, confidence, times_seen, source')
+        .eq(field, ref)
+        .order('confidence', { ascending: false })
+        .limit(3);
+      if (pat?.length) {
+        patternContext = pat
+          .map((p) => `- ${p.category} (confidence: ${p.confidence}%, gezien: ${p.times_seen}x, bron: ${p.source})`)
+          .join('\n');
+      }
+    }
+  } catch {}
+
+  return { bedrijfsprofiel, correctionsContext, patternContext, kennisbankVoorbeelden };
+}
+
+// ── Patroon opslaan na AI-analyse ─────────────────────────────────────────────
+async function savePattern(senderEmail, senderDomain, category, confidence, learnedFromCorrections) {
+  if (!senderEmail) return;
+  try {
+    const { data: existing } = await supabase.from('email_patterns')
+      .select('id, times_seen, confidence, category, source')
+      .eq('sender_email', senderEmail)
+      .maybeSingle();
+
+    if (existing) {
+      const newSeen = (existing.times_seen || 0) + 1;
+      const newConf = learnedFromCorrections
+        ? Math.min(100, (existing.confidence || confidence) + 10)
+        : (existing.confidence || confidence);
+      const finalConf = newSeen >= 5 && existing.category === category ? 100 : newConf;
+      await supabase.from('email_patterns').update({
+        times_seen: newSeen,
+        confidence: finalConf,
+        source: learnedFromCorrections ? 'ai_learned' : (existing.source || 'ai')
+      }).eq('id', existing.id);
+    } else {
+      await supabase.from('email_patterns').insert({
+        sender_email:  senderEmail,
+        sender_domain: senderDomain || null,
+        category,
+        confidence:    learnedFromCorrections ? Math.min(100, confidence + 10) : confidence,
+        times_seen:    1,
+        source:        'ai'
+      });
+    }
+  } catch (e) { console.warn('[email-agent] pattern opslaan fout:', e.message); }
+}
+
+// ── `requires_action` afleiden van categorie (als AI het niet geeft) ─────────
+function deriveRequiresAction(category, aiValue) {
+  if (aiValue !== undefined && aiValue !== null) return !!aiValue;
+  if (category === 'Klantvraag' || category === 'Factuurvraag') return true;
+  return false;
+}
+
+// ── Centrale handler ──────────────────────────────────────────────────────────
+export async function categorize({ from, subject, bodySnippet, date }) {
+  const senderEmail  = extractEmail(from || '');
+  const senderDomain = getDomain(senderEmail);
+
+  // Stap 0a — Vertrouwde afzenders (hardcoded, snelste pad)
+  if (TRUSTED_LEAD_SENDERS.has(senderEmail)) {
+    const category = classifyTrustedSender(subject);
+    console.log(`[email-agent] Trusted sender ${senderEmail} → ${category}`);
+    savePattern(senderEmail, senderDomain, category, 100, false).catch(() => {});
+    return {
+      category,
+      requires_action:      false,
+      priority:             'laag',
+      confidence:           100,
+      source:               'trusted_sender',
+      reasoning:            `Vertrouwde afzender — altijd ${category}`,
+      key_signals:          ['trusted_sender'],
+      suggested_reply_tone: 'niet_van_toepassing',
+      is_definitely_not_spam: true,
+      needs_review:         false
+    };
+  }
+
+  // Stap 0b — Handmatige absolute overrides (hoogste prioriteit, altijd)
+  if (senderEmail) {
+    try {
+      const { data: manualPat } = await supabase.from('email_patterns')
+        .select('category, requires_action')
+        .eq('sender_email', senderEmail)
+        .eq('source', 'manual_absolute')
+        .maybeSingle();
+      if (manualPat) {
+        console.log(`[email-agent] manual_absolute override voor ${senderEmail}: ${manualPat.category}`);
+        return {
+          category:             manualPat.category,
+          requires_action:      manualPat.requires_action || false,
+          priority:             'laag',
+          confidence:           100,
+          source:               'manual_override',
+          reasoning:            'Handmatige override — nooit overschreven',
+          key_signals:          ['manual_override'],
+          suggested_reply_tone: 'niet_van_toepassing',
+          is_definitely_not_spam: manualPat.category !== 'Reclame',
+          needs_review:         false
+        };
+      }
+    } catch (e) { console.warn('[email-agent] manual_absolute check fout:', e.message); }
+  }
+
+  // Stap 1a — Absolute regels (lopen altijd, ook bij Re: en body-vragen)
+  const absResult = applyAbsoluteRules(subject, senderDomain);
+  if (absResult) {
+    return {
+      category:           absResult.category,
+      requires_action:    absResult.requires_action,
+      priority:           'laag',
+      confidence:         100,
+      source:             'absolute_rule',
+      reasoning:          'Absolute inhoudsregel — wordt nooit overschreven',
+      key_signals:        [],
+      suggested_reply_tone: 'niet_van_toepassing',
+      is_definitely_not_spam: absResult.category !== 'Reclame',
+      needs_review:       false
+    };
+  }
+
+  // Stap 1b — Re:/Fwd: en directe vraag-check
+  const isReply     = isReplyOrForward(subject);
+  const hasQuestion = detectDirectQuestion(bodySnippet);
+
+  if (isReply) {
+    console.log(`[email-agent] Re:/Fwd: onderwerp "${subject}" — harde regels overgeslagen, volledige AI analyse`);
+  } else if (hasQuestion) {
+    console.log(`[email-agent] Directe vraag gedetecteerd in body — harde regels overgeslagen voor "${subject}"`);
+  }
+
+  // Stap 2 — Harde regels (ALLEEN als geen Re: en geen directe vraag in body)
+  if (!isReply && !hasQuestion) {
+    const hard = applyHardRules(subject, from, bodySnippet);
+    if (hard) {
+      return {
+        category:           hard.category,
+        requires_action:    hard.requires_action,
+        priority:           'laag',
+        confidence:         95,
+        source:             'rule',
+        reasoning:          'Harde inhoudsregel',
+        key_signals:        [],
+        suggested_reply_tone: 'niet_van_toepassing',
+        is_definitely_not_spam: hard.category !== 'Reclame',
+        needs_review:       false
+      };
+    }
+  }
+
+  // Stap 3 — Blacklist
+  const isBlacklisted = await checkBlacklist(senderEmail, senderDomain);
+  if (isBlacklisted) {
+    return {
+      category: 'Reclame', requires_action: false, priority: 'laag',
+      confidence: 95, source: 'blacklist', reasoning: 'Afzender staat op blacklist',
+      key_signals: ['blacklist'], suggested_reply_tone: 'niet_van_toepassing',
+      is_definitely_not_spam: false, needs_review: false
+    };
+  }
+
+  // Stap 4 — Whitelist
+  const { whitelisted, category: wlCat } = await checkWhitelist(senderEmail, senderDomain);
+  if (whitelisted) {
+    const cat = wlCat || 'Overig';
+    return {
+      category: cat, requires_action: deriveRequiresAction(cat, null),
+      priority: cat === 'Klantvraag' ? 'normaal' : 'laag',
+      confidence: 95, source: 'whitelist',
+      reasoning: 'Afzender staat op whitelist',
+      key_signals: ['whitelist'], suggested_reply_tone: cat === 'Klantvraag' ? 'vriendelijk' : 'niet_van_toepassing',
+      is_definitely_not_spam: true, needs_review: false
+    };
+  }
+
+  // Stap 5 — Hoge-confidence patroon (overgeslagen voor Re: mails)
+  if (!isReply) {
+    const pattern = await lookupHighConfidencePattern(senderEmail, senderDomain, subject, bodySnippet);
+    if (pattern) {
+      const src = ['manual', 'domain_learned', 'hardcoded'].includes(pattern.source) ? 'learned' : 'pattern';
+      const cat = pattern.category;
+      return {
+        category: cat, requires_action: deriveRequiresAction(cat, null),
+        priority: cat === 'Klantvraag' || cat === 'Factuurvraag' ? 'normaal' : 'laag',
+        confidence: pattern.confidence, source: src,
+        reasoning: `Bekend patroon (gezien: ${pattern.times_seen}x)`,
+        key_signals: ['patroon gevonden'], suggested_reply_tone: cat === 'Klantvraag' ? 'vriendelijk' : 'niet_van_toepassing',
+        is_definitely_not_spam: cat !== 'Reclame', needs_review: false
+      };
+    }
+  }
+
+  // Stap 6 — Volledige AI-analyse
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) {
+    return { category: 'Overig', requires_action: false, priority: 'laag', confidence: 50,
+      source: 'fallback', reasoning: 'ANTHROPIC_API_KEY ontbreekt', key_signals: [],
+      suggested_reply_tone: 'niet_van_toepassing', is_definitely_not_spam: false, needs_review: true };
+  }
+
+  const { bedrijfsprofiel, correctionsContext, patternContext, kennisbankVoorbeelden } =
+    await buildAiContext(senderEmail, senderDomain);
+
+  const client = new Anthropic({ apiKey });
+
+  const systemPrompt = `Je bent de intelligente e-mail classificatie agent van De Forex Opleiding, een financiële trading opleiding in Nederland.
+
+JOUW TAAK:
+1. Lees de VOLLEDIGE inhoud van de e-mail
+2. Begrijp de intentie van de afzender
+3. Beslis welke categorie van toepassing is
+4. Beslis of er actie vereist is van Jeffrey
+
+BEDRIJFSCONTEXT:
+${bedrijfsprofiel}
+
+${kennisbankVoorbeelden ? `VOORBEELDEN UIT KENNISBANK:\n${kennisbankVoorbeelden}\n` : ''}
+
+EERDERE BESLISSINGEN VOOR DEZE AFZENDER (hoogste prioriteit — volg dit):
+${correctionsContext}
+
+BEKENDE PATRONEN:
+${patternContext}
+
+KRITIEKE REGEL — INHOUD GAAT ALTIJD BOVEN ONDERWERP:
+Als de mail begint met "Re:", "RE:", "Antw:" of "Fwd:", of als er een vraag in de body staat,
+NEGEER dan het onderwerp voor categorisatie. Een mail met "Gent" in het onderwerp maar
+een vraag in de body ("waar was het adres?") is een Klantvraag, geen Event Aanmelding.
+INHOUD IS LEIDEND. Het onderwerp is slechts een hint, niet bepalend.
+
+CATEGORIEËN — gebruik deze definities EXACT:
+
+Nieuwe Lead: Automatische notificatie dat iemand interesse heeft getoond. Ingevuld formulier, aanmelding, lead notificatie. NOOIT actie vereist (informatief).
+
+Appointment: Bevestiging van een ingeplande sessie, call of afspraak. NOOIT actie vereist (informatief).
+
+Event Aanmelding: Aanmelding voor een seminar, event of workshop (informatief systeemnotificatie). NOOIT actie vereist. Gebruik NIET als de body een persoonlijke vraag bevat.
+
+Klantvraag: Een BESTAANDE klant stelt een vraag of heeft een probleem. Vraagt om uitleg, heeft een klacht, wil iets weten. ALTIJD actie vereist.
+
+Factuurvraag: Vraag over een factuur, betaling, kosten of betalingsregeling. Betwist factuur, kwijtschelding, betalingsregeling. ALTIJD actie vereist.
+
+Reclame: Ongewenste marketing, nieuwsbrieven, promoties. MINIMAAL 2 reclame-signalen vereist (zie regels). Geen actie vereist.
+
+Overig: Betalingsbevestigingen, systeemnotificaties, automatische bevestigingen, alles wat nergens past. Geen actie vereist tenzij er expliciet een vraag staat.
+
+RECLAME REGELS — mail is ALLEEN Reclame als MINIMAAL 2 van:
+1. Promotionele woorden in onderwerp (aanbieding, sale, korting, gratis, exclusief, deal)
+2. Bulk-mail afzender (mailchimp, sendgrid, klaviyo, campaign monitor)
+3. Body bevat uitschrijven/unsubscribe/afmelden link
+4. List-Unsubscribe header aanwezig
+5. Bekende reclame afzender in patronen
+Bij twijfel: kies Overig.
+
+ACTIE VEREIST REGELS:
+- Klantvraag → ALTIJD true
+- Factuurvraag → ALTIJD true
+- Mail bevat directe vraag aan Jeffrey → true
+- Mail bevat klacht of probleem → true + priority HOOG
+- Bevestigingen, notificaties, leads → ALTIJD false
+
+Geef terug als JSON:
+{
+  "category": "Nieuwe Lead|Appointment|Event Aanmelding|Klantvraag|Factuurvraag|Reclame|Overig",
+  "requires_action": true|false,
+  "priority": "laag|normaal|hoog|urgent",
+  "confidence": 0-100,
+  "reasoning": "max 200 tekens NL",
+  "key_signals": ["max 3 concrete signalen"],
+  "suggested_reply_tone": "vriendelijk|formeel|urgent|niet_van_toepassing",
+  "is_definitely_not_spam": true|false,
+  "auto_propagate_to_similar": true|false
+}
+Geef ALLEEN de JSON terug.`;
+
+  const contextFlags = [
+    isReply     ? '⚠️ DIT IS EEN REPLY/FWD — negeer onderwerp voor categorisatie, analyseer ALLEEN de body.' : '',
+    hasQuestion ? '⚠️ DIRECTE VRAAG GEDETECTEERD in body — categoriseer als Klantvraag tenzij de body duidelijk iets anders aangeeft.' : ''
+  ].filter(Boolean).join('\n');
+
+  const userContent = [
+    contextFlags,
+    'Van: ' + (from || '—'),
+    'Onderwerp: ' + (subject || '—'),
+    date ? 'Datum: ' + date : '',
+    bodySnippet ? 'Inhoud (eerste 1500 tekens):\n' + String(bodySnippet).slice(0, 1500) : ''
+  ].filter(Boolean).join('\n');
+
+  try {
+    const response = await client.messages.create({
+      model:      'claude-haiku-4-5-20251001',
+      max_tokens: 400,
+      system:     systemPrompt,
+      messages:   [{ role: 'user', content: userContent }]
+    });
+
+    const raw = (response.content[0]?.text || '').trim();
+    let parsed = null;
+    try {
+      const m = raw.match(/\{[\s\S]*\}/);
+      if (m) parsed = JSON.parse(m[0]);
+    } catch {}
+
+    let category         = VALID_CATEGORIES.includes(parsed?.category) ? parsed.category : 'Overig';
+    const confidence     = typeof parsed?.confidence === 'number' ? Math.min(100, Math.max(0, Math.round(parsed.confidence))) : 60;
+    const reasoning      = String(parsed?.reasoning || '').slice(0, 300);
+    const keySignals     = Array.isArray(parsed?.key_signals) ? parsed.key_signals.slice(0, 3) : [];
+    const isNotSpam      = parsed?.is_definitely_not_spam === true;
+    const learnedFromCorr = parsed?.auto_propagate_to_similar !== false;
+    const replyTone      = ['vriendelijk','formeel','urgent','niet_van_toepassing'].includes(parsed?.suggested_reply_tone)
+      ? parsed.suggested_reply_tone : 'niet_van_toepassing';
+    const priority       = ['laag','normaal','hoog','urgent'].includes(parsed?.priority) ? parsed.priority : 'laag';
+
+    if (category === 'Reclame') {
+      const signals = countReclameSignals(subject, bodySnippet);
+      if (signals < 1 && confidence < 80) {
+        category = 'Overig';
+        console.log(`[email-agent] AI zei Reclame maar ${signals} signalen + ${confidence}% conf — teruggevallen op Overig`);
+      }
+    }
+
+    const requiresAction = deriveRequiresAction(category, parsed?.requires_action);
+
+    savePattern(senderEmail, senderDomain, category, confidence, learnedFromCorr)
+      .catch(() => {});
+
+    if (isNotSpam && category !== 'Reclame' && senderEmail) {
+      supabase.from('email_patterns').upsert({
+        sender_email: senderEmail, sender_domain: senderDomain || null,
+        category, confidence: 90, times_seen: 1, source: 'whitelist',
+        last_corrected_at: new Date().toISOString()
+      }, { onConflict: 'sender_email' }).then(({ error }) => {
+        if (!error) console.log(`[email-agent] Auto-whitelist: ${senderEmail} (${category})`);
+      });
+    }
+
+    return {
+      category, requires_action: requiresAction, priority, confidence,
+      source: learnedFromCorr ? 'ai_learned' : 'ai',
+      reasoning, key_signals: keySignals, suggested_reply_tone: replyTone,
+      is_definitely_not_spam: isNotSpam,
+      needs_review: confidence < 70
+    };
+  } catch (err) {
+    console.error('[email-agent] AI fout:', err.message);
+    return {
+      category: 'Overig', requires_action: false, priority: 'laag',
+      confidence: 40, source: 'error', reasoning: 'AI analyse mislukt: ' + err.message,
+      key_signals: [], suggested_reply_tone: 'niet_van_toepassing',
+      is_definitely_not_spam: false, needs_review: true
+    };
+  }
+}
+
+// ── HTTP handler ─────────────────────────────────────────────────────────────
+export default async function handler(req, res) {
+  if (req.method !== 'POST') {
+    return res.status(405).json({ error: 'Method not allowed' });
+  }
+  const { from, subject, bodySnippet, date } = req.body || {};
+  if (!from && !subject) {
+    return res.status(400).json({ error: 'from of subject vereist' });
+  }
+  const result = await categorize({ from, subject, bodySnippet, date });
+  return res.status(200).json(result);
+}
+
+
+================================================================================
+SECTIE 2 — api/learn.js (volledig, 411 regels)
+================================================================================
+
+import { supabase } from './supabase.js';
+
+const VALID_CATEGORIES = [
+  'Nieuwe Lead','Appointment','Event Aanmelding',
+  'Klantvraag','Factuurvraag','Reclame','Overig'
+];
+
+const STOPWORDS = new Set([
+  'de','het','een','voor','met','van','naar','die','dat','deze','dit','en',
+  'of','in','op','om','aan','is','als','bij','door','over','tot','uit','the',
+  'a','an','and','or','for','with','from','on','are','this','that','your'
+]);
+
+const PAYMENT_KWS  = ['betaald','ontvangen','transactie','receipt','payment','factuur','voldaan','invoice','paid','transaction','betaling'];
+const SYSTEM_SNDS  = ['noreply','no-reply','notifications','notification','mailer','donotreply'];
+
+function extractEmail(str) {
+  const m = (str || '').match(/<([^>]+)>/);
+  return (m ? m[1] : str).toLowerCase().trim();
+}
+function getDomain(email) {
+  const i = (email || '').lastIndexOf('@');
+  return i >= 0 ? email.slice(i + 1).toLowerCase() : '';
+}
+function extractKeywords(subject) {
+  return (subject || '').toLowerCase()
+    .replace(/[^\p{L}\p{N}\s]+/gu, ' ')
+    .split(/\s+/)
+    .filter((w) => w.length >= 4 && !STOPWORDS.has(w))
+    .slice(0, 6);
+}
+function extractBodyKeywords(text, maxWords = 10) {
+  return (text || '').toLowerCase()
+    .replace(/[^\p{L}\p{N}\s]+/gu, ' ')
+    .split(/\s+/)
+    .filter((w) => w.length >= 4 && !STOPWORDS.has(w))
+    .slice(0, maxWords);
+}
+
+// ── Propagatie ────────────────────────────────────────────────────────────────
+function computePropagation(emailList, senderEmail, senderDomain, subject, bodySnippet, emailId, reason) {
+  if (!Array.isArray(emailList) || emailList.length === 0) {
+    return { groupA: [], groupB: [], groupC_auto: [], groupC_confirm: [], groupD: [] };
+  }
+
+  const correctedWords   = extractKeywords(subject);
+  const correctedBodyKws = extractBodyKeywords(bodySnippet, 10);
+
+  const groupA = emailList.filter(
+    (e) => e.sender_email && e.sender_email === senderEmail && e.uid !== emailId
+  );
+  const groupAUids = new Set(groupA.map((e) => e.uid));
+
+  const groupB = senderDomain
+    ? emailList.filter((e) => {
+        if (!e.sender_domain || e.sender_domain !== senderDomain) return false;
+        if (e.uid === emailId || groupAUids.has(e.uid)) return false;
+        return extractKeywords(e.subject || '').filter((w) => correctedWords.includes(w)).length >= 2;
+      })
+    : [];
+  const groupBUids = new Set(groupB.map((e) => e.uid));
+
+  const groupC_auto = (senderDomain && correctedBodyKws.length >= 2)
+    ? emailList.filter((e) => {
+        if (!e.sender_domain || e.sender_domain !== senderDomain) return false;
+        if (e.uid === emailId || groupAUids.has(e.uid) || groupBUids.has(e.uid)) return false;
+        return extractBodyKeywords(e.body_snippet || '', 10).filter((w) => correctedBodyKws.includes(w)).length >= 4;
+      })
+    : [];
+  const groupC_auto_Uids = new Set(groupC_auto.map((e) => e.uid));
+
+  const groupC_confirm = (senderDomain && correctedBodyKws.length >= 2)
+    ? emailList.filter((e) => {
+        if (!e.sender_domain || e.sender_domain !== senderDomain) return false;
+        if (e.uid === emailId || groupAUids.has(e.uid) || groupBUids.has(e.uid) || groupC_auto_Uids.has(e.uid)) return false;
+        const overlap = extractBodyKeywords(e.body_snippet || '', 10).filter((w) => correctedBodyKws.includes(w)).length;
+        return overlap >= 2;
+      })
+    : [];
+
+  const usedUids = new Set([
+    emailId,
+    ...groupAUids, ...groupBUids, ...groupC_auto_Uids,
+    ...groupC_confirm.map((e) => e.uid)
+  ]);
+  const groupD = [];
+  if (reason?.includes('Betaalbevestiging')) {
+    for (const e of emailList) {
+      if (usedUids.has(e.uid)) continue;
+      const body = (e.body_snippet || '').toLowerCase();
+      if (PAYMENT_KWS.filter((w) => body.includes(w)).length >= 2) {
+        groupD.push(e); usedUids.add(e.uid);
+      }
+    }
+  }
+  if (reason?.includes('Systeemmail')) {
+    for (const e of emailList) {
+      if (usedUids.has(e.uid)) continue;
+      const sender = (e.sender_email || '').toLowerCase();
+      if (SYSTEM_SNDS.some((k) => sender.includes(k))) {
+        groupD.push(e); usedUids.add(e.uid);
+      }
+    }
+  }
+
+  return { groupA, groupB, groupC_auto, groupC_confirm, groupD };
+}
+
+export default async function handler(req, res) {
+  if (req.method !== 'POST') {
+    return res.status(405).json({ error: 'Method not allowed' });
+  }
+
+  const {
+    email_id,
+    sender,        // VEREIST — extractEmail() wordt erop toegepast
+    subject,
+    body_snippet,
+    old_category,
+    new_category,  // VEREIST
+    corrected_by,
+    correction_type,  // 'manual' | 'manual_absolute' | 'not_spam'
+    old_requires_action,
+    new_requires_action,
+    reason,
+    email_list
+  } = req.body || {};
+
+  if (!sender || !new_category) {
+    return res.status(400).json({ error: 'sender en new_category zijn vereist' });
+  }
+  if (!VALID_CATEGORIES.includes(new_category)) {
+    return res.status(400).json({ error: `Ongeldige categorie: ${new_category}` });
+  }
+
+  const senderEmail  = extractEmail(sender);
+  const senderDomain = getDomain(senderEmail);
+  const bodyKws      = extractBodyKeywords(body_snippet, 10);
+
+  // Stap 1: Sla correctie op in learn_examples
+  const learnRow = { email_sender: senderEmail || null, new_category };
+  if (email_id)                      learnRow.email_id                 = email_id;
+  if (senderDomain)                  learnRow.sender_domain            = senderDomain;
+  if (subject)                       learnRow.email_subject            = subject;
+  if (body_snippet)                  learnRow.body_snippet             = String(body_snippet).slice(0, 500);
+  if (old_category)                  learnRow.old_category             = old_category;
+  if (corrected_by)                  learnRow.corrected_by             = corrected_by;
+  if (old_requires_action != null)   learnRow.old_requires_action      = old_requires_action;
+  if (new_requires_action != null)   learnRow.new_requires_action      = new_requires_action;
+  if (reason)                        learnRow.reason                   = String(reason).slice(0, 200);
+  if (bodyKws.length)                learnRow.body_keywords            = bodyKws;
+  if (new_requires_action != null)   learnRow.requires_action_corrected = new_requires_action;
+  learnRow.correction_type = correction_type || 'manual';
+  learnRow.corrected_at    = new Date().toISOString();
+
+  let learnExampleId = null;
+  try {
+    const { data: inserted, error } = await supabase.from('learn_examples').insert(learnRow).select('id').single();
+    if (error) {
+      console.warn('[learn] Volledige insert mislukt, probeer minimale insert:', error.message);
+      const { data: ins2, error: err2 } = await supabase.from('learn_examples').insert({
+        email_sender: senderEmail || null, new_category,
+      }).select('id').single();
+      if (err2) console.error('[learn] Minimale insert ook mislukt:', err2.message);
+      else { learnExampleId = ins2?.id || null; }
+    } else {
+      learnExampleId = inserted?.id || null;
+      console.log('[learn] learn_examples insert OK voor', senderEmail, '· id:', learnExampleId);
+    }
+  } catch (err) {
+    console.error('[learn] learn_examples insert crash:', err.message);
+  }
+
+  // Stap 2: not_spam specifieke logica
+  if (correction_type === 'not_spam' && senderDomain) {
+    try {
+      const { data: reclamePat } = await supabase.from('email_patterns')
+        .select('id, confidence, source')
+        .eq('sender_email', senderEmail)
+        .eq('category', 'Reclame')
+        .maybeSingle();
+
+      if (reclamePat) {
+        const newConf = (reclamePat.confidence || 70) - 30;
+        if (newConf < 20) {
+          await supabase.from('email_patterns').delete().eq('id', reclamePat.id);
+        } else {
+          await supabase.from('email_patterns')
+            .update({ confidence: newConf, last_corrected_at: new Date().toISOString() })
+            .eq('id', reclamePat.id);
+        }
+      }
+
+      const { data: domainReclamePat } = await supabase.from('email_patterns')
+        .select('id, confidence')
+        .eq('sender_domain', senderDomain)
+        .is('sender_email', null)
+        .eq('category', 'Reclame')
+        .maybeSingle();
+
+      if (domainReclamePat) {
+        const newConf = (domainReclamePat.confidence || 70) - 20;
+        if (newConf < 20) {
+          await supabase.from('email_patterns').delete().eq('id', domainReclamePat.id);
+        } else {
+          await supabase.from('email_patterns').update({ confidence: newConf }).eq('id', domainReclamePat.id);
+        }
+      }
+
+      const { count: notSpamCount } = await supabase.from('learn_examples')
+        .select('id', { count: 'exact', head: true })
+        .eq('sender_domain', senderDomain)
+        .eq('correction_type', 'not_spam');
+
+      if ((notSpamCount || 0) >= 3) {
+        await supabase.from('email_patterns').upsert({
+          sender_domain: senderDomain, sender_email: null,
+          category: new_category, confidence: 95, times_seen: notSpamCount,
+          source: 'whitelist', last_corrected_at: new Date().toISOString()
+        }, { onConflict: 'sender_domain' });
+      }
+    } catch (err) {
+      console.error('[learn] not_spam logica crash:', err.message);
+    }
+  }
+
+  // Stap 3: Patroon bijwerken in email_patterns
+  let confidenceBefore  = null;
+  let confidenceAfter   = null;
+  let patternUpdated    = false;
+  let patternDeleted    = false;
+  let newPatternCreated = false;
+
+  const patternExtras = {
+    ...(reason && { reason: String(reason).slice(0, 200) }),
+    ...(bodyKws.length && { body_keywords: bodyKws }),
+    ...(new_requires_action != null && { requires_action: new_requires_action }),
+  };
+
+  try {
+    const { data: existing } = await supabase.from('email_patterns')
+      .select('id, category, confidence, times_seen, source')
+      .eq('sender_email', senderEmail)
+      .maybeSingle();
+
+    confidenceBefore = existing?.confidence ?? null;
+
+    if (existing) {
+      const matches = existing.category === new_category;
+      const rawConf = existing.confidence || 60;
+      let newConf   = matches ? Math.min(100, rawConf + 20) : rawConf - 25;
+
+      if (senderDomain && !matches) {
+        const { count: sameCorrections } = await supabase.from('learn_examples')
+          .select('id', { count: 'exact', head: true })
+          .eq('sender_domain', senderDomain)
+          .eq('new_category', new_category);
+
+        if ((sameCorrections || 0) >= 5) newConf = 100;
+        else if ((sameCorrections || 0) >= 3) newConf = Math.max(newConf, 95);
+      }
+
+      if (newConf < 25) {
+        await supabase.from('email_patterns').delete().eq('id', existing.id);
+        patternDeleted = true; confidenceAfter = 0;
+      } else {
+        await supabase.from('email_patterns').update({
+          category: new_category, confidence: newConf,
+          last_corrected_at: new Date().toISOString(), source: 'manual',
+          ...patternExtras
+        }).eq('id', existing.id);
+        patternUpdated = true; confidenceAfter = newConf;
+      }
+    } else if (correction_type !== 'not_spam') {
+      await supabase.from('email_patterns').insert({
+        sender_email: senderEmail, sender_domain: senderDomain || null,
+        category: new_category, confidence: 70, times_seen: 1,
+        source: 'manual', last_corrected_at: new Date().toISOString(),
+        ...patternExtras
+      });
+      newPatternCreated = true; confidenceAfter = 70;
+    }
+
+    if (senderDomain && !patternDeleted && correction_type !== 'not_spam') {
+      const { count } = await supabase.from('learn_examples')
+        .select('id', { count: 'exact', head: true })
+        .eq('sender_domain', senderDomain).eq('new_category', new_category);
+
+      if ((count || 0) >= 3) {
+        const { data: basePat } = await supabase.from('email_patterns')
+          .select('id, confidence')
+          .eq('sender_domain', senderDomain).is('sender_email', null).maybeSingle();
+
+        if (basePat) {
+          if ((basePat.confidence || 0) < 90) {
+            await supabase.from('email_patterns')
+              .update({ confidence: 90, source: 'domain_learned', last_corrected_at: new Date().toISOString() })
+              .eq('id', basePat.id);
+          }
+        } else {
+          await supabase.from('email_patterns').insert({
+            sender_domain: senderDomain, sender_email: null,
+            category: new_category, confidence: 90, times_seen: count || 3,
+            source: 'domain_learned', last_corrected_at: new Date().toISOString()
+          });
+        }
+        if (!confidenceAfter || confidenceAfter < 90) confidenceAfter = 90;
+      }
+    }
+  } catch (err) {
+    console.error('[learn] email_patterns update crash:', err.message);
+  }
+
+  // Stap 3b: manual_absolute — permanente override met hoogste prioriteit
+  if (correction_type === 'manual_absolute' && senderEmail) {
+    try {
+      const { data: pat } = await supabase.from('email_patterns')
+        .select('id').eq('sender_email', senderEmail).maybeSingle();
+      const now = new Date().toISOString();
+      if (pat) {
+        await supabase.from('email_patterns').update({
+          category: new_category, confidence: 100, times_seen: 999,
+          source: 'manual_absolute', last_corrected_at: now,
+          ...patternExtras
+        }).eq('id', pat.id);
+      } else {
+        await supabase.from('email_patterns').insert({
+          sender_email: senderEmail, sender_domain: senderDomain || null,
+          category: new_category, confidence: 100, times_seen: 999,
+          source: 'manual_absolute', last_corrected_at: now,
+          ...patternExtras
+        });
+      }
+      confidenceAfter = 100;
+    } catch (e) {
+      console.warn('[learn] manual_absolute upsert fout:', e.message);
+    }
+  }
+
+  // Stap 4: Propagatie berekenen
+  const { groupA, groupB, groupC_auto, groupC_confirm, groupD } = computePropagation(
+    email_list, senderEmail, senderDomain, subject || '', body_snippet || '', email_id, reason || ''
+  );
+
+  const propagatedAutomatically = groupA.length + groupB.length + groupC_auto.length + groupD.length;
+  const propagatedUids          = [...groupA, ...groupB, ...groupC_auto, ...groupD].map((e) => e.uid);
+  const needsConfirmation       = groupC_confirm.map((e) => ({
+    uid:     e.uid,
+    from:    e.sender_email || e.sender_domain || '?',
+    subject: e.subject || ''
+  }));
+
+  // Stap 5: Feedback bericht
+  let patternExamples = 0;
+  try {
+    const { count } = await supabase.from('learn_examples')
+      .select('id', { count: 'exact', head: true }).eq('email_sender', senderEmail);
+    patternExamples = count || 0;
+  } catch {}
+
+  const domain = senderDomain || senderEmail;
+  let message = 'Systeem heeft geleerd';
+  if (correction_type === 'not_spam') {
+    message = `Niet-reclame melding opgeslagen voor ${domain}`;
+  } else if (confidenceBefore !== null && confidenceAfter !== null) {
+    message += ` · Confidence: ${confidenceBefore}% → ${confidenceAfter}%`;
+  }
+  if (patternDeleted)          message += ' · Oud fout patroon verwijderd';
+  else if (newPatternCreated)  message += ` · Mails van ${domain} worden voortaan als ${new_category} herkend`;
+  else if (patternUpdated)     message += ` · Patroon voor ${domain} bijgewerkt`;
+  if (propagatedAutomatically > 0) message += ` · ${propagatedAutomatically} vergelijkbare mails bijgewerkt`;
+
+  return res.status(200).json({
+    ok:                       true,
+    sender_email:             senderEmail,
+    new_category,
+    learn_example_id:         learnExampleId,
+    pattern_examples:         patternExamples,
+    pattern_updated:          patternUpdated,
+    pattern_deleted:          patternDeleted,
+    new_pattern_created:      newPatternCreated,
+    confidence_before:        confidenceBefore,
+    confidence_after:         confidenceAfter,
+    high_confidence:          (confidenceAfter || 0) >= 90,
+    correction_type:          correction_type || 'manual',
+    propagated_automatically: propagatedAutomatically,
+    propagated_uids:          propagatedUids,
+    needs_confirmation:       needsConfirmation,
+    message
+  });
+}
+
+
+================================================================================
+SECTIE 3 — api/send-email.js (volledig, 117 regels)
+================================================================================
+
+import nodemailer from 'nodemailer';
+
+// Mailbox → wachtwoord env-var (zelfde als IMAP)
+const SMTP_ACCOUNTS = {
+  'leads@deforexopleiding.nl':         'IMAP_PASS',
+  'info@deforexopleiding.nl':          'IMAP_PASS_INFO',
+  'partners@deforexopleiding.nl':      'IMAP_PASS_PARTNERS',
+  'administratie@deforexopleiding.nl': 'IMAP_PASS_ADMINISTRATIE',
+};
+
+const SMTP_HOST = 'smtp.strato.com';
+const SMTP_PORT = 465;
+
+async function saveToSupabase(record) {
+  const url  = process.env.SUPABASE_URL;
+  const key  = process.env.SUPABASE_ANON_KEY;
+  if (!url || !key) { console.warn('[send-email] SUPABASE_URL/KEY niet geconfigureerd'); return; }
+  try {
+    const r = await fetch(`${url}/rest/v1/email_replies`, {
+      method:  'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'apikey':        key,
+        'Authorization': `Bearer ${key}`,
+        'Prefer':        'return=minimal',
+      },
+      body: JSON.stringify(record),
+    });
+    if (!r.ok) {
+      const txt = await r.text().catch(() => '');
+      console.warn(`[send-email] email_replies insert mislukt (${r.status}):`, txt);
+    } else {
+      console.log('[send-email] email_replies opgeslagen');
+    }
+  } catch (e) {
+    console.warn('[send-email] email_replies fetch fout:', e.message);
+  }
+}
+
+export default async function handler(req, res) {
+  if (req.method !== 'POST') {
+    return res.status(405).json({ error: 'Method not allowed' });
+  }
+
+  const { from_mailbox, to, subject, text, html, cc, bcc, email_id, category } = req.body || {};
+
+  if (!from_mailbox || !to || !subject || !text) {
+    return res.status(400).json({ error: 'from_mailbox, to, subject en text zijn vereist' });
+  }
+
+  const passEnv = SMTP_ACCOUNTS[from_mailbox.toLowerCase()];
+  if (!passEnv) {
+    return res.status(400).json({ error: `Onbekende mailbox: ${from_mailbox}` });
+  }
+
+  const password = process.env[passEnv];
+  if (!password) {
+    return res.status(500).json({
+      error: `SMTP wachtwoord voor ${from_mailbox} niet geconfigureerd (env var: ${passEnv})`
+    });
+  }
+
+  const transporter = nodemailer.createTransport({
+    host:   SMTP_HOST,
+    port:   SMTP_PORT,
+    secure: true,
+    auth: { user: from_mailbox, pass: password },
+  });
+
+  try {
+    const mailOpts = {
+      from:    `"De Forex Opleiding" <${from_mailbox}>`,
+      to, subject, text,
+      replyTo: from_mailbox,
+    };
+    if (html) mailOpts.html = html;
+    if (cc)   mailOpts.cc   = cc;
+    if (bcc)  mailOpts.bcc  = bcc;
+
+    const info = await transporter.sendMail(mailOpts);
+
+    const sentAt = new Date().toISOString();
+    await saveToSupabase({
+      email_id:      email_id || null,
+      email_subject: subject,
+      final_reply:   text,
+      from_address:  from_mailbox,
+      to_address:    to,
+      cc_address:    cc  || null,
+      bcc_address:   bcc || null,
+      sent_at:       sentAt,
+    });
+
+    return res.status(200).json({
+      ok: true,
+      messageId: info.messageId,
+      accepted:  info.accepted || [],
+    });
+  } catch (err) {
+    return res.status(500).json({
+      error:        err.message      || 'Onbekende SMTP fout',
+      code:         err.code         || null,
+      responseCode: err.responseCode || null,
+      response:     err.response     || null,
+      command:      err.command      || null,
+    });
+  }
+}
+
+
+================================================================================
+SECTIE 4 — api/sent-replies.js (volledig, 64 regels)
+================================================================================
+
+export default async function handler(req, res) {
+  if (req.method !== 'GET') {
+    return res.status(405).json({ error: 'Method not allowed' });
+  }
+
+  const supabaseUrl = process.env.SUPABASE_URL;
+  const supabaseKey = process.env.SUPABASE_ANON_KEY;
+
+  if (!supabaseUrl || !supabaseKey) {
+    return res.status(500).json({ error: 'SUPABASE_URL/KEY niet geconfigureerd', sent: [] });
+  }
+
+  try {
+    const page  = Math.max(1, parseInt(req.query?.page  || '1', 10));
+    const limit = Math.min(200, Math.max(1, parseInt(req.query?.limit || '50', 10)));
+    const offset = (page - 1) * limit;
+
+    const url = `${supabaseUrl}/rest/v1/email_replies` +
+      `?select=email_id,email_subject,final_reply,from_address,to_address,cc_address,bcc_address,sent_at` +
+      `&order=sent_at.desc` +
+      `&limit=${limit}&offset=${offset}`;
+
+    const response = await fetch(url, {
+      headers: {
+        'apikey':        supabaseKey,
+        'Authorization': `Bearer ${supabaseKey}`,
+      },
+    });
+
+    if (!response.ok) {
+      const txt = await response.text().catch(() => '');
+      return res.status(200).json({ sent: [], count: 0, page, limit, error: txt });
+    }
+
+    const data = await response.json();
+    const rows = (Array.isArray(data) ? data : []).map((row) => ({
+      email_id:   row.email_id,
+      created_at: row.sent_at,
+      to:         row.to_address,
+      from:       row.from_address,
+      subject:    row.email_subject,
+      body:       row.final_reply,
+      cc:         row.cc_address,
+      bcc:        row.bcc_address,
+    }));
+
+    const seen   = new Set();
+    const unique = rows.filter((r) => {
+      const key = r.email_id || r.created_at;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+
+    return res.status(200).json({ sent: unique, count: unique.length, page, limit });
+  } catch (err) {
+    return res.status(500).json({ error: err.message, sent: [] });
+  }
+}
+
+
+================================================================================
+SECTIE 5 — api/kennisbank-sync.js (volledig, 209 regels)
+================================================================================
+
+import { supabase } from './supabase.js';
+
+export default async function handler(req, res) {
+  // GET — haal alle kennisbank items op
+  if (req.method === 'GET') {
+    try {
+      const { data: items, error } = await supabase
+        .from('kennisbank_items')
+        .select('id, type, direction, title, content, label, note, helpfulness_score, times_used, created_at')
+        .order('helpfulness_score', { ascending: false });
+
+      if (error) throw error;
+      return res.status(200).json({ items: items || [], count: (items || []).length });
+    } catch (err) {
+      return res.status(200).json({ items: [], count: 0, error: err.message });
+    }
+  }
+
+  if (req.method !== 'POST') {
+    return res.status(405).json({ error: 'Method not allowed' });
+  }
+
+  const body = req.body || {};
+
+  // Actie: upsert_item
+  if (body.action === 'upsert_item') {
+    const item = body.item;
+    if (!item) return res.status(400).json({ error: 'item vereist' });
+
+    const labelKey = item.label || item.id || null;
+
+    try {
+      const { data: existing } = labelKey
+        ? await supabase.from('kennisbank_items').select('id').eq('label', labelKey).maybeSingle()
+        : { data: null };
+
+      const payload = {
+        type:             item.type            || 'Algemeen',
+        direction:        item.direction       || item.richting || null,
+        title:            (item.title || '').slice(0, 200) || (item.content || '').slice(0, 80) || 'Item',
+        content:          item.content         || '',
+        note:             item.note            || null,
+        label:            labelKey,
+        auto_generated:   item.auto_generated  ?? false,
+        source_email_id:  item.source_email_id ? String(item.source_email_id) : null,
+        helpfulness_score: item.helpfulness_score ?? 0,
+        times_used:       item.times_used      ?? 0,
+        updated_at:       new Date().toISOString()
+      };
+
+      if (existing) {
+        await supabase.from('kennisbank_items').update(payload).eq('id', existing.id);
+      } else {
+        const { error: insertErr } = await supabase.from('kennisbank_items').insert({
+          ...payload, created_at: new Date().toISOString()
+        });
+        if (insertErr && insertErr.message?.includes('42703')) {
+          await supabase.from('kennisbank_items').insert({
+            type: payload.type || 'Algemeen', content: payload.content || '',
+            created_at: new Date().toISOString()
+          });
+        }
+      }
+      return res.status(200).json({ ok: true });
+    } catch (err) {
+      return res.status(500).json({ error: err.message });
+    }
+  }
+
+  if (body.action === 'delete_item') {
+    const localId = body.local_id;
+    if (!localId) return res.status(400).json({ error: 'local_id vereist' });
+    try {
+      await supabase.from('kennisbank_items').delete().eq('label', localId);
+      return res.status(200).json({ ok: true });
+    } catch (err) {
+      return res.status(500).json({ error: err.message });
+    }
+  }
+
+  if (body.action === 'sync_profile') {
+    const profile = body.profile;
+    if (!profile) return res.status(400).json({ error: 'profile vereist' });
+    try {
+      const { data: existing } = await supabase
+        .from('kennisbank_items').select('id').eq('label', '_profile').maybeSingle();
+
+      const payload = {
+        type:    'bedrijfsprofiel',
+        label:   '_profile',
+        title:   profile.bedrijfsnaam || 'Bedrijfsprofiel',
+        content: JSON.stringify(profile),
+        helpfulness_score: 100,
+        updated_at: new Date().toISOString()
+      };
+
+      if (existing) {
+        await supabase.from('kennisbank_items').update(payload).eq('id', existing.id);
+      } else {
+        await supabase.from('kennisbank_items').insert({ ...payload, times_used: 0, auto_generated: false });
+      }
+      return res.status(200).json({ ok: true });
+    } catch (err) {
+      return res.status(500).json({ error: err.message });
+    }
+  }
+
+  // Legacy: bulk sync van localStorage items + profile
+  const { profile, items } = body;
+  let synced = 0, skipped = 0;
+  const errors = [];
+
+  if (profile && (profile.naam || profile.beschrijving)) {
+    const profileContent = [
+      profile.naam         ? `Bedrijfsnaam: ${profile.naam}` : '',
+      profile.beschrijving ? `Beschrijving: ${profile.beschrijving}` : '',
+      profile.doelgroep    ? `Doelgroep: ${profile.doelgroep}` : '',
+      profile.tov          ? `Tone of voice: ${profile.tov}` : '',
+      profile.website      ? `Website: ${profile.website}` : '',
+    ].filter(Boolean).join('\n');
+
+    try {
+      const { data: existing } = await supabase.from('kennisbank_items')
+        .select('id').eq('type', 'bedrijfsprofiel').maybeSingle();
+
+      if (existing) {
+        await supabase.from('kennisbank_items')
+          .update({ content: profileContent, label: profile.naam || 'Bedrijfsprofiel' })
+          .eq('id', existing.id);
+        skipped++;
+      } else {
+        await supabase.from('kennisbank_items').insert({
+          type: 'bedrijfsprofiel', title: profile.naam || 'Bedrijfsprofiel',
+          label: profile.naam || 'Bedrijfsprofiel', content: profileContent,
+          helpfulness_score: 100, times_used: 0
+        });
+        synced++;
+      }
+    } catch (e) { errors.push('Profiel crash: ' + e.message); }
+  }
+
+  if (Array.isArray(items)) {
+    for (const item of items) {
+      if (!item.title && !item.content) continue;
+      try {
+        const { data: existing } = await supabase.from('kennisbank_items')
+          .select('id').eq('title', item.title || '').eq('type', item.type || item.category || '').maybeSingle();
+
+        if (existing) { skipped++; continue; }
+
+        await supabase.from('kennisbank_items').insert({
+          type:              item.type || item.category || 'Overig',
+          direction:         item.direction || null,
+          title:             item.title || item.content?.slice(0, 80) || 'Item',
+          content:           item.content || '',
+          label:             item.label || null,
+          note:              item.note || null,
+          times_used:        item.times_used || 0,
+          helpfulness_score: item.helpfulness_score || 0,
+          auto_generated:    item.auto_generated || false,
+          source_email_id:   item.source_email_id || null
+        });
+        synced++;
+      } catch (e) { errors.push(`Item crash: ${e.message}`); }
+    }
+  }
+
+  return res.status(200).json({ synced, skipped, errors });
+}
+
+
+================================================================================
+SECTIE 6 — modules/email.html: override cache functies (getEffectiveCategory bestaat NIET)
+================================================================================
+
+NOOT: getEffectiveCategory() is NOOIT geïmplementeerd in email.html.
+De equivalente logica zit verspreid over applyOverrides(), applyHardRuleCategories()
+en applyAutoReclameClassification(). Hieronder de OVERRIDE CACHE functies die
+worden gebruikt om sender-gebaseerde correcties te onthouden over nieuwe UIDs heen.
+
+// ── Constanten (modules/email.html ~r1177) ────────────────────────────────────
+const CACHE_VER_KEY      = 'email_cache_version';
+const CACHE_VERSION      = '3.0'; // bump: applyAutoReclame bypass fix + sender-override cache
+const OVERRIDE_CACHE_KEY = 'email_override_by_sender'; // senderEmail -> category
+
+// ── Sender-based override cache (~r1297) ─────────────────────────────────────
+function getOverrideCache() {
+  try { return JSON.parse(localStorage.getItem(OVERRIDE_CACHE_KEY) || '{}'); } catch { return {}; }
+}
+function saveToOverrideCache(senderEmail, category) {
+  if (!senderEmail) return;
+  const c = getOverrideCache(); c[senderEmail] = category;
+  localStorage.setItem(OVERRIDE_CACHE_KEY, JSON.stringify(c));
+}
+
+// ── Verwijder reclame-patroon voor afzender/domein (~r1307) ──────────────────
+function removeFromReclamePatterns(senderEmail, senderDomain) {
+  const patterns = loadReclamePatterns();
+  const before = patterns.length;
+  const cleaned = patterns.filter((p) =>
+    !(p.sender === senderEmail || (senderDomain && p.domain === senderDomain && !p.sender))
+  );
+  if (cleaned.length !== before) {
+    saveReclamePatterns(cleaned);
+  }
+}
+
+// ── applyOverrides() — trusted senders worden teruggezet (~r3490) ─────────────
+// Voor vertrouwde afzenders: wis AI-cache en category als die fout stond
+if (TRUSTED_SENDERS_CLIENT.has(sender)) {
+  if (_aiCatCache[e.uid] === 'Reclame' || _aiCatCache[e.uid] === 'Overig' ||
+      e.category === 'Reclame' || e.category === 'Overig') {
+    delete _aiCatCache[e.uid];
+    delete state.overrides.category[e.uid];
+    staleCleaned = true;
+  }
+} else if (cat[e.uid]) {
+  e.category = cat[e.uid];
+} else if (senderCache[sender]) {
+  e.category = senderCache[sender];
+  state.overrides.category[e.uid] = senderCache[sender];
+  staleCleaned = true;
+}
+
+// ── applyAutoReclameClassification() — FIXED (~r2900) ─────────────────────────
+// BUG FIX: blokkeer overwrite voor trusted senders en hard-rule matches
+const sender = (e.fromAddress || getFromAddress(e) || '').toLowerCase();
+if (TRUSTED_SENDERS_CLIENT.has(sender)) return;   // NIEUW
+if (getHardRuleCategory(e)) return;                // NIEUW
+if (scoreReclameMatch(e, patterns).strength === 'strong') e.category = 'Reclame';
+
+// ── bevestigVerplaatsEnTrain() — na UI update (~r3820) ────────────────────────
+const _vtSenderEmail = (email.fromAddress || getFromAddress(email) || '').toLowerCase();
+const _vtSenderDomain = getDomain(_vtSenderEmail);
+saveToOverrideCache(_vtSenderEmail, newCat);
+if (oldCat === 'Reclame' && newCat !== 'Reclame') {
+  removeFromReclamePatterns(_vtSenderEmail, _vtSenderDomain);
+}
+
+// ── syncOverrideCacheFromSupabase() (~r3490) ──────────────────────────────────
+async function syncOverrideCacheFromSupabase() {
+  try {
+    const resp = await fetch('/api/email-patterns?source=manual_absolute');
+    if (!resp.ok) return;
+    const { patterns } = await resp.json();
+    const cache = getOverrideCache();
+    let added = 0;
+    patterns.forEach((p) => {
+      if (p.sender_email && p.category) { cache[p.sender_email] = p.category; added++; }
+    });
+    if (added) {
+      localStorage.setItem(OVERRIDE_CACHE_KEY, JSON.stringify(cache));
+      state.emails.forEach((e) => {
+        const s = (e.fromAddress || getFromAddress(e) || '').toLowerCase();
+        if (cache[s] && !state.overrides.category[e.uid]) {
+          e.category = cache[s];
+          state.overrides.category[e.uid] = cache[s];
+        }
+      });
+    }
+  } catch {}
+}
+
+
+================================================================================
+SECTIE 7 — modules/email.html: CACHE_VERSION + checkCacheVersion()
+================================================================================
+
+// ── Cache versie migratie (~r4963) ────────────────────────────────────────────
+function checkCacheVersion() {
+  if (localStorage.getItem(CACHE_VER_KEY) !== CACHE_VERSION) {
+    // Wis AI-cache zodat harde regels direct gelden
+    Object.keys(_aiCatCache).forEach((k) => delete _aiCatCache[k]);
+    Object.keys(_aiConfCache).forEach((k) => delete _aiConfCache[k]);
+    saveJson(AI_CATS_KEY, _aiCatCache);
+    saveJson(AI_CONF_KEY, _aiConfCache);
+
+    // Wis reclame-patronen voor vertrouwde domeinen
+    const TRUSTED_DOMAINS = ['webflow.com', 'lcmsgsndr.net', 'deforexopleiding'];
+    const patterns = loadReclamePatterns();
+    const cleaned = patterns.filter((p) =>
+      !TRUSTED_DOMAINS.some((d) => (p.domain || '').includes(d) || (p.sender || '').includes(d))
+    );
+    if (cleaned.length !== patterns.length) {
+      saveReclamePatterns(cleaned);
+      console.log('[checkCacheVersion] Reclame-patronen voor vertrouwde domeinen gewist:', patterns.length - cleaned.length);
+    }
+    localStorage.setItem(CACHE_VER_KEY, CACHE_VERSION);
+  }
+}
+
+// Versiehistorie:
+//   '1'   — origineel
+//   '2'   — trusted sender server-fix
+//   '2.1' — applyOverrides stale cache fix
+//   '3.0' — applyAutoReclame bypass + sender-override cache (2026-05-12)
+
+// Aanroep: init() → checkCacheVersion() (als eerste actie)
+
+// init() roept ook aan:
+//   - syncOverrideCacheFromSupabase()  — laadt manual_absolute patronen bij page load
+//   - DELETE /api/email-patterns       — éénmalig: verwijdert stale Reclame-entries voor trusted senders
+
+// Andere relevante localStorage sleutels:
+//   'email_ai_categories'      — _aiCatCache:    uid → category string
+//   'email_ai_confidence'      — _aiConfCache:   uid → { confidence, source }
+//   'email_reclame_patterns'   — lokale reclame patronen: [{ sender, domain, keywords }]
+//   'email_override_by_sender' — sender-keyed override: { email → category }
+//   'forex-opleiding-email-overrides' — { category: {uid→cat}, read: {uid→bool} }
+//   'email_action_flags'       — uid → true|false (actie vereist)
+
+
+================================================================================
+SUPABASE TABELSCHEMA'S (afgeleid uit code-analyse)
+================================================================================
+
+Tabel: email_patterns
+  id               uuid PK
+  sender_email     text (nullable, unique voor email-level)
+  sender_domain    text (nullable)
+  category         text
+  confidence       int (0-100)
+  times_seen       int
+  source           text: 'ai' | 'ai_learned' | 'manual' | 'manual_absolute' | 'domain_learned' | 'whitelist' | 'blacklist'
+  requires_action  boolean (nullable)
+  body_keywords    text[] (nullable)
+  reason           text (nullable)
+  last_corrected_at timestamptz (nullable)
+
+Tabel: learn_examples
+  id                      uuid PK
+  email_id                text (nullable)
+  email_sender            text (nullable)
+  sender_domain           text (nullable)
+  email_subject           text (nullable)
+  body_snippet            text (nullable, max 500)
+  body_keywords           text[] (nullable)
+  old_category            text (nullable)
+  new_category            text
+  corrected_by            text (nullable)
+  correction_type         text: 'manual' | 'manual_absolute' | 'not_spam'
+  old_requires_action     boolean (nullable)
+  new_requires_action     boolean (nullable)
+  requires_action_corrected boolean (nullable)
+  reason                  text (nullable, max 200)
+  corrected_at            timestamptz
+
+Tabel: email_replies (geschreven via send-email.js)
+  email_id      text (nullable)
+  email_subject text
+  final_reply   text
+  from_address  text
+  to_address    text
+  cc_address    text (nullable)
+  bcc_address   text (nullable)
+  sent_at       timestamptz
+
+Tabel: kennisbank_items
+  id               uuid PK
+  type             text
+  direction        text (nullable)
+  title            text
+  content          text
+  label            text (nullable, deduplicatiesleutel)
+  note             text (nullable)
+  auto_generated   boolean
+  source_email_id  text (nullable)
+  helpfulness_score int
+  times_used       int
+  created_at       timestamptz
+  updated_at       timestamptz (nullable)
+
+
+================================================================================
+SAMENVATTING FIXES (commit 2026-05-12)
+================================================================================
+
+Probleem: "Nieuwe lead" en "Nieuwe uitlegsessie" mails bleven terugkomen
+in Reclame/Overige ondanks herhaalde correcties.
+
+Root causes:
+  1. applyAutoReclameClassification() overschreef harde regels:
+     - Domein (send.lcmsgsndr.net/webflow.com) in email_reclame_patterns
+     - Functie checkte niet op TRUSTED_SENDERS_CLIENT of getHardRuleCategory()
+  2. executeBulkVt() stuurde 'email_sender' ipv 'sender' → learn.js altijd 400 fout
+     → manual_absolute nooit opgeslagen in Supabase
+  3. Na correctie van Reclame→X bleef domein in reclame-patterns
+     → nieuwe mails van hetzelfde adres meteen weer Reclame
+  4. Overrides UID-gebonden → nieuwe mails erfden geen correctie
+
+Fixes:
+  A. applyAutoReclameClassification() — +TRUSTED_SENDERS_CLIENT check
+                                      — +getHardRuleCategory() check
+  B. executeBulkVt() — 'email_sender' → 'sender' (learn.js eis)
+  C. bevestigVerplaatsEnTrain() + executeBulkVt() — removeFromReclamePatterns()
+  D. Nieuw: getOverrideCache() / saveToOverrideCache() (sender-keyed)
+  E. applyOverrides() — ook sender-based cache toepassen op nieuwe mails
+  F. syncOverrideCacheFromSupabase() — laadt manual_absolute bij page load
+  G. api/email-patterns.js — GET (haal manual_absolute op) + DELETE (cleanup)
+  H. checkCacheVersion 3.0 — wist trusted-sender domeinen uit reclame-patterns
+  I. init() — éénmalige DELETE van stale Reclame-entries in Supabase
+
+
+================================================================================
+EINDE DEBUG EXPORT
+================================================================================
