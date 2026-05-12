@@ -192,6 +192,29 @@ ALTER TABLE agent_learnings DISABLE ROW LEVEL SECURITY;`,
 CREATE INDEX IF NOT EXISTS idx_email_messages_mailbox_received ON email_messages (mailbox, received_at DESC);
 CREATE INDEX IF NOT EXISTS idx_email_messages_category ON email_messages (category);
 ALTER TABLE email_messages DISABLE ROW LEVEL SECURITY;`,
+  backfill_progress: `CREATE TABLE IF NOT EXISTS backfill_progress (
+  id                    uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  mailbox               text NOT NULL UNIQUE,
+  start_date            timestamptz NOT NULL,
+  end_date              timestamptz,
+  status                text NOT NULL DEFAULT 'pending',
+  total_uids            int,
+  oldest_uid            bigint,
+  newest_uid            bigint,
+  last_processed_uid    bigint,
+  mails_total_estimated int DEFAULT 0,
+  mails_processed       int DEFAULT 0,
+  mails_skipped         int DEFAULT 0,
+  mails_failed          int DEFAULT 0,
+  started_at            timestamptz DEFAULT now(),
+  last_batch_at         timestamptz,
+  completed_at          timestamptz,
+  error_count           int DEFAULT 0,
+  last_error            text,
+  last_error_at         timestamptz
+);
+CREATE INDEX IF NOT EXISTS idx_backfill_status ON backfill_progress (status, last_batch_at);
+ALTER TABLE backfill_progress DISABLE ROW LEVEL SECURITY;`,
   email_sync_log: `CREATE TABLE IF NOT EXISTS email_sync_log (
   id          bigint generated always as identity primary key,
   mailbox     text not null,

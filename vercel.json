@@ -3,6 +3,10 @@
     {
       "path": "/api/sync-emails",
       "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/api/backfill-emails",
+      "schedule": "*/5 * * * *"
     }
   ],
   "headers": [

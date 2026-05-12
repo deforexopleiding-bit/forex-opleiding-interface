@@ -277,3 +277,28 @@ const { data, error } = await supabase.from('tabel').insert({ ... });
 if (error) console.error('[module] insert fout:', error.message);
 ```
 Nooit `.catch()` chaining op een `PostgrestBuilder`. Gebruik een `try/catch` blok als je fouten wilt onderdrukken.
+
+### Vercel functions: 60s hard timeout — bouw altijd een self-checkpoint mechanisme
+
+**Patroon:** Een Vercel serverless function die meer werk heeft dan in 60s past, crasht zonder progress op te slaan. Alle verwerkte data is dan alsnog verloren voor het tracking-systeem.
+
+**Regel:**
+- Stel een eigen abort-grens in van **50s** (`MAX_RUN_MS = 50_000`): controleer de timer ná elke verwerkingseenheid (mail, rij) en stop veilig
+- Sla de voortgang op in Supabase vóór de function eindigt: `last_processed_uid`, `mails_processed`, etc.
+- De volgende run pikt exact op waar de vorige gestopt is — geen duplicaten door idempotente inserts (`ON CONFLICT DO NOTHING`)
+- Gebruik **NOOIT** `setTimeout` als abort-mechanisme in async code — check de klok expliciet
+
+### Backfill jobs: altijd progress tracken in een aparte tabel
+
+**Regel:** Als je meer dan één run nodig hebt om een historische dataset te verwerken:
+1. Maak een `*_progress` tabel aan VÓÓR je begint (schema: mailbox, status, oldest_uid, newest_uid, last_processed_uid, mails_processed, error_count)
+2. Initialiseer eenmalig via een start-endpoint (UID-range bepalen)
+3. Verwerk in batches van 50–100 items per run
+4. Update `last_processed_uid` na elke batch — dit IS de checkpoint
+5. Markeer als `completed` als `last_processed_uid >= newest_uid`
+
+Dit patroon maakt backfill jobs **idempotent**, **resumable** en **observeerbaar**.
+
+### IMAP SINCE searches: éénmalig per mailbox, niet per batch
+
+**Regel:** `client.search({ since: date })` scant de hele mailbox en kan seconden kosten. Doe dit **alleen in de init-stap** (backfill-start.js) om `oldest_uid` en `newest_uid` te bepalen. In de batch-stap (backfill-emails.js): gebruik UID-ranges (`${startUid}:${newestUid}`) die direct adresseren — geen volledige SINCE scan per batch.
