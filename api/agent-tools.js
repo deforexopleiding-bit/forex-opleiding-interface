@@ -309,9 +309,15 @@ async function executeSearchEmails({ query, period = 'last_7_days', limit = 5 })
   const term = `%${query}%`;
   const lim  = Math.min(Math.max(parseInt(limit) || 5, 1), 20);
 
-  // Emails zijn niet in Supabase — zoek in twee proxy-tabellen:
-  // 1. email_replies  = verzonden replies (email_id, email_subject, to_address, from_address, sent_at)
-  // 2. learn_examples = gecorrigeerde inkomende mails (email_id, sender_domain, body_snippet, old_category, created_at)
+  // ── BEPERKING ──────────────────────────────────────────────────────────────
+  // De live inbox leeft in IMAP, niet in Supabase. Nieuw ontvangen mails
+  // die nog niet beantwoord of gecorrigeerd zijn staan in géén tabel.
+  // Zoekopdrachten in de live inbox zijn daardoor niet ondersteund vanuit
+  // deze tool. De twee beschikbare proxy-bronnen zijn:
+  //   1. email_replies  = mails die zijn beantwoord via de reply-composer
+  //   2. learn_examples = mails die handmatig zijn gecorrigeerd (Verplaats & Train)
+  // ──────────────────────────────────────────────────────────────────────────
+
   const [repliesRes, examplesRes] = await Promise.allSettled([
     supabase.from('email_replies')
       .select('email_id, email_subject, to_address, from_address, sent_at')
@@ -328,16 +334,35 @@ async function executeSearchEmails({ query, period = 'last_7_days', limit = 5 })
   const replies  = repliesRes.status  === 'fulfilled' ? (repliesRes.value.data  || []) : [];
   const examples = examplesRes.status === 'fulfilled' ? (examplesRes.value.data || []) : [];
 
-  const results = [
-    ...replies.map(r  => ({ source: 'verzonden_reply', email_id: r.email_id, subject: r.email_subject, afzender: r.from_address, datum: r.sent_at })),
-    ...examples.map(e => ({ source: 'inkomend', email_id: e.email_id, domein: e.sender_domain, preview: e.body_snippet?.slice(0, 100) || null, categorie: e.old_category, datum: e.created_at })),
-  ];
+  const verzonden = replies.map(r  => ({
+    bron: 'beantwoord',
+    email_id: r.email_id,
+    onderwerp: r.email_subject,
+    van: r.from_address,
+    datum: r.sent_at,
+  }));
+  const gecorrigeerd = examples.map(e => ({
+    bron: 'gecorrigeerd',
+    email_id: e.email_id,
+    domein: e.sender_domain,
+    preview: e.body_snippet?.slice(0, 100) || null,
+    categorie: e.old_category,
+    datum: e.created_at,
+  }));
+
+  const alles = [...verzonden, ...gecorrigeerd].slice(0, lim);
 
   return {
-    query, period,
-    total: results.length,
-    results: results.slice(0, lim),
-    note: 'Gecombineerd uit verzonden replies + gecorrigeerde inkomende mails. Live inbox niet doorzoekbaar via Supabase.',
+    query,
+    period,
+    live_inbox_doorzoekbaar: false,
+    beperking: 'De live inbox leeft in IMAP en is niet opgeslagen in Supabase. Alleen mails die zijn beantwoord of handmatig gecorrigeerd zijn doorzoekbaar. Als je naar een specifieke recente mail zoekt die nog open staat, kan ik die niet vinden via deze tool — maar ik kan je helpen hem te vinden via de Actie vereist-tab in de e-mailmodule.',
+    gevonden_in_database: alles.length,
+    resultaten: alles,
+    bronnen_doorzocht: [
+      'email_replies (beantwoorde mails)',
+      'learn_examples (handmatig gecorrigeerde mails)',
+    ],
   };
 }
 
@@ -345,10 +370,11 @@ async function executeGetUnansweredEmails({ limit = 10 }) {
   const lim = Math.min(Math.max(parseInt(limit) || 10, 1), 30);
 
   // Stap 1: emails die actie vereisen
+  // Frontend logt 'mark-action' + value='true' wanneer gebruiker een mail markeert
   const { data: actionRequired } = await supabase
     .from('email_actions')
     .select('email_id, set_at')
-    .eq('action', 'requires_action').eq('value', 'true')
+    .eq('action', 'mark-action').eq('value', 'true')
     .order('set_at', { ascending: false }).limit(50);
 
   if (!actionRequired?.length) {
