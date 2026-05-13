@@ -8,12 +8,69 @@ const FALLBACK_PROMPTS = {
   Aron:  `Je bent Aron, de Financieel Medewerker van De Forex Opleiding. Je bent analytisch en resultaatgericht. Je communiceert in het Nederlands.`,
 };
 
-// Keyword-routing (alleen actief als chair de default 'Simon' is)
+// Keyword-routing per domein
 const DOMAIN_MAP = {
-  Simon: ['mail', 'email', 'inbox', 'leads', 'communicatie', 'bericht', 'reply', 'antwoord', 'klantvraag', 'afzender', 'opzeg'],
-  Leon:  ['administratie', 'contract', 'document', 'onboarding', 'taken', 'planning', 'medewerker', 'mentor', 'agenda', 'todo'],
-  Aron:  ['financieel', 'factuur', 'betaling', 'kosten', 'omzet', 'budget', 'incasso', 'mollie', 'wanbetal', 'euro'],
+  Simon: ['mail', 'email', 'inbox', 'leads', 'communicatie', 'bericht', 'reply', 'antwoord', 'klantvraag', 'afzender', 'opzeg', 'verzoek', 'sturen'],
+  Leon:  ['administratie', 'contract', 'document', 'onboarding', 'taken', 'planning', 'medewerker', 'mentor', 'agenda', 'todo', 'intake', 'formulier'],
+  Aron:  ['financieel', 'factuur', 'betaling', 'kosten', 'omzet', 'budget', 'incasso', 'mollie', 'wanbetal', 'euro', 'geld', 'inkomsten', 'uitgaven'],
 };
+
+// Collectieve woorden → alle agents reageren
+const COLLECTIEVE_WOORDEN = ['jullie', 'iedereen', 'allen', 'alle drie', 'allebei', 'iemand', 'wie kan', 'wie weet'];
+
+// Vaste responsevolgorde
+const RESPONSE_ORDER = ['Simon', 'Leon', 'Aron'];
+
+// 5-laagse agent-selectie
+async function pickRelevantAgents(message, participants, apiKey) {
+  const lower = message.toLowerCase();
+
+  // Laag 1: @-mentions
+  const mentions = (message.match(/@(\w+)/g) || []).map(m => m.slice(1));
+  const valid = mentions.filter(n => participants.includes(n));
+  if (valid.length) return valid;
+
+  // Laag 2: Collectieve woorden → alle aanwezige agents
+  if (COLLECTIEVE_WOORDEN.some(w => lower.includes(w))) return [...participants];
+
+  // Laag 3: Naam-detectie ("waarom reageert Leon niet?")
+  const named = participants.filter(n => lower.includes(n.toLowerCase()));
+  if (named.length) return named;
+
+  // Laag 4: Keyword-matching
+  const keywordMatches = [];
+  for (const [agent, kws] of Object.entries(DOMAIN_MAP)) {
+    if (participants.includes(agent) && kws.some(kw => lower.includes(kw))) keywordMatches.push(agent);
+  }
+  if (keywordMatches.length) return keywordMatches;
+
+  // Laag 5: LLM routing (Haiku, snel + goedkoop)
+  try {
+    const resp = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
+      body: JSON.stringify({
+        model: 'claude-haiku-4-5',
+        max_tokens: 60,
+        system: 'Je bent een routing-assistent. Geef ALLEEN agent-namen gescheiden door komma\'s, geen uitleg.',
+        messages: [{
+          role: 'user',
+          content: `Aanwezige agents: ${participants.join(', ')}\nSimon = e-mail/leads/communicatie\nLeon = contracten/planning/taken/mentoren\nAron = facturen/betalingen/omzet/budget\n\nBericht: "${message}"\n\nWelke agent(s) moeten reageren?`,
+        }],
+      }),
+    });
+    const d = await resp.json();
+    const text = d.content?.[0]?.text?.trim() || '';
+    const suggested = text.split(/[\s,]+/).map(n => n.trim()).filter(n => participants.includes(n));
+    if (suggested.length) return suggested;
+  } catch (e) {
+    console.error('[agent-meeting] LLM routing fout:', e.message);
+  }
+
+  // Fallback: Simon of eerste beschikbare
+  if (participants.includes('Simon')) return ['Simon'];
+  return participants.slice(0, 1);
+}
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -271,42 +328,28 @@ export default async function handler(req, res) {
       if (agentErr2) console.error('[agent-meeting] agents fetch fout:', agentErr2.message);
       const pMap = Object.fromEntries((agentRows || []).map(a => [a.name, a.personality]));
 
-      // @-mention parsing
-      const mentionedNames = (message.match(/@(\w+)/g) || []).map(m => m.slice(1));
-      const validMentions  = mentionedNames.filter(n => (meeting.participants || []).includes(n));
+      // 5-laagse agent-selectie
+      const participants = meeting.participants || [];
+      const selected = await pickRelevantAgents(message, participants, apiKey);
 
-      let respondingAgents;
-      if (validMentions.length > 0) {
-        respondingAgents = validMentions;
-      } else {
-        const chair = meeting.chair_agent || 'Simon';
-        if (chair === 'Simon') {
-          const lowerMsg = message.toLowerCase();
-          const expert = (meeting.participants || []).find(n =>
-            n !== chair && (DOMAIN_MAP[n] || []).some(kw => lowerMsg.includes(kw))
-          );
-          respondingAgents = [...new Set([chair, expert].filter(Boolean).filter(n => (meeting.participants || []).includes(n)))];
-        } else {
-          respondingAgents = (meeting.participants || []).includes(chair) ? [chair] : (meeting.participants || []);
-        }
-        if (!respondingAgents.length) {
-          const fallback = (meeting.participants || []).find(n => n in DOMAIN_MAP) || (meeting.participants || [])[0];
-          respondingAgents = fallback ? [fallback] : [];
-        }
-      }
+      // Sorteer in vaste volgorde: Simon → Leon → Aron; onbekende agents achteraan
+      const orderedAgents = [
+        ...RESPONSE_ORDER.filter(n => selected.includes(n)),
+        ...selected.filter(n => !RESPONSE_ORDER.includes(n)),
+      ];
 
-      const newMsgs = [jeffMsg];
-      for (const name of respondingAgents) {
+      const responses = [];
+      for (const name of orderedAgents) {
         const personality = pMap[name] || FALLBACK_PROMPTS[name] || `Je bent ${name}.`;
-        const mc = validMentions.includes(name) ? `Je bent direct aangesproken via @${name}.` : '';
+        const mc = message.includes(`@${name}`) ? `Je bent direct aangesproken via @${name}.` : '';
         const reply = await agentRespond(apiKey, name, personality, meeting.agenda, transcript, message, mc, meeting.external_inputs || []);
         const agentMsg = { speaker: name, content: reply, timestamp: new Date().toISOString(), type: 'agent' };
         transcript.push(agentMsg);
-        newMsgs.push(agentMsg);
+        responses.push(agentMsg);
       }
 
       await supabase.from('agent_meetings').update({ transcript }).eq('id', meeting_id);
-      return res.status(200).json({ messages: newMsgs, transcript });
+      return res.status(200).json({ responses, transcript });
     }
 
     // ── END ───────────────────────────────────────────────────────────────────
