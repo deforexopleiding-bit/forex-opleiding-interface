@@ -170,6 +170,41 @@
     .badge-team{background:rgba(168,85,247,0.15);color:#c4b5fd;border:1px solid rgba(168,85,247,0.3);}
     .badge-standup{background:rgba(34,211,238,0.12);color:#22d3ee;border:1px solid rgba(34,211,238,0.25);}
 
+    /* ── Chips / assignee multi-select ── */
+    .chips-row{display:flex;flex-wrap:wrap;gap:4px;min-height:24px;margin-bottom:4px;}
+    .chip{display:inline-flex;align-items:center;gap:4px;background:rgba(168,85,247,0.15);border:1px solid rgba(168,85,247,0.3);border-radius:20px;padding:2px 8px;font-size:11px;font-weight:500;color:#c4b5fd;}
+    .chip.agent{background:rgba(34,211,238,0.1);border-color:rgba(34,211,238,0.3);color:#22d3ee;}
+    .chip.freelance{background:rgba(245,158,11,0.1);border-color:rgba(245,158,11,0.3);color:#f59e0b;}
+    .chip .chip-x{cursor:pointer;opacity:.7;font-size:10px;line-height:1;margin-left:2px;}
+    .chip .chip-x:hover{opacity:1;}
+    .assignee-dropdown{position:absolute;top:calc(100% + 2px);left:0;right:0;background:var(--bg-elev-2);border:1px solid var(--border-strong);border-radius:8px;z-index:200;max-height:180px;overflow-y:auto;box-shadow:0 8px 24px rgba(0,0,0,0.4);}
+    .assignee-opt{padding:7px 12px;font-size:12px;cursor:pointer;display:flex;align-items:center;gap:8px;}
+    .assignee-opt:hover{background:rgba(255,255,255,0.06);}
+    .assignee-opt-group{padding:5px 12px 2px;font-size:10px;font-weight:700;color:var(--text-faint);text-transform:uppercase;letter-spacing:.5px;}
+
+    /* ── Task review modal ── */
+    .review-item{padding:12px 16px;border-bottom:1px solid var(--border);position:relative;}
+    .review-item:last-child{border-bottom:none;}
+    .review-item-header{display:flex;align-items:center;gap:8px;margin-bottom:8px;}
+    .review-label{font-size:11px;font-weight:600;color:var(--text-faint);margin-bottom:4px;}
+    .review-input{width:100%;background:var(--bg-elev);border:1px solid var(--border);border-radius:6px;padding:7px 10px;font-size:13px;color:var(--text);font-family:inherit;outline:none;}
+    .review-input:focus{border-color:var(--accent-violet);}
+    .review-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:8px;}
+    .review-remove{position:absolute;top:12px;right:12px;background:none;border:none;cursor:pointer;color:var(--text-faint);font-size:14px;padding:2px 5px;border-radius:4px;}
+    .review-remove:hover{background:rgba(239,68,68,0.15);color:var(--red);}
+
+    /* ── Instant-add popover ── */
+    .instant-task-popover{position:absolute;bottom:64px;right:16px;background:var(--bg-elev-2);border:1px solid var(--border-strong);border-radius:12px;padding:16px;width:320px;z-index:50;box-shadow:0 8px 24px rgba(0,0,0,0.4);}
+
+    /* ── Meeting tasks section ── */
+    .mtask-row{display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:7px;background:var(--bg-elev-2);margin-bottom:5px;}
+    .mtask-title{font-size:12px;font-weight:500;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+    .mtask-meta{font-size:10px;color:var(--text-faint);flex-shrink:0;}
+    .prio-badge{font-size:9px;font-weight:700;padding:1px 6px;border-radius:8px;flex-shrink:0;}
+    .prio-Hoog,.prio-Urgent{background:rgba(239,68,68,0.15);color:#f87171;border:1px solid rgba(239,68,68,0.3);}
+    .prio-Normaal{background:rgba(100,116,139,0.15);color:#94a3b8;border:1px solid rgba(100,116,139,0.3);}
+    .prio-Laag{background:rgba(34,197,94,0.1);color:#4ade80;border:1px solid rgba(34,197,94,0.25);}
+
     /* ── Summary ── */
     .summary-card{background:var(--bg-elev);border:1px solid var(--border);border-radius:14px;padding:24px;}
     .summary-title{font-size:16px;font-weight:800;margin-bottom:14px;}
@@ -324,6 +359,11 @@
           <div class="meeting-history-title">📅 Vergadergeschiedenis</div>
           <div id="meetingHistoryList"><div style="color:var(--text-faint);font-size:12px">Laden…</div></div>
         </div>
+        <!-- Fase 5: Taken uit meetings -->
+        <div class="meeting-history-card" style="margin-top:12px">
+          <div class="meeting-history-title">📋 Actieve taken uit meetings</div>
+          <div id="meetingTasksList"><div style="color:var(--text-faint);font-size:12px">Laden…</div></div>
+        </div>
       </div>
 
       <!-- Active meeting -->
@@ -354,8 +394,32 @@
                 <button class="btn btn-primary" onclick="submitExternalInput()" style="font-size:12px;padding:5px 12px">Toevoegen</button>
               </div>
             </div>
+            <div id="instantTaskPopover" class="instant-task-popover hidden">
+              <div style="font-size:12px;font-weight:700;margin-bottom:10px">📋 Nieuwe taak toevoegen</div>
+              <div class="review-label">Titel *</div>
+              <input id="itTitel" class="review-input" style="margin-bottom:8px" placeholder="Beschrijving van de taak…"/>
+              <div class="review-label">Toewijzen aan</div>
+              <div id="itAssigneeWrap" style="margin-bottom:8px;position:relative"></div>
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px">
+                <div>
+                  <div class="review-label">Deadline</div>
+                  <input id="itDeadline" class="review-input" type="date"/>
+                </div>
+                <div>
+                  <div class="review-label">Prioriteit</div>
+                  <select id="itPrioriteit" class="review-input">
+                    <option>Normaal</option><option>Hoog</option><option>Urgent</option><option>Laag</option>
+                  </select>
+                </div>
+              </div>
+              <div style="display:flex;gap:8px;justify-content:flex-end">
+                <button class="btn" onclick="toggleInstantTask()" style="font-size:12px;padding:5px 12px">Annuleren</button>
+                <button class="btn btn-primary" onclick="submitInstantTask()" style="font-size:12px;padding:5px 12px">Toevoegen</button>
+              </div>
+            </div>
             <div class="chat-input-row">
               <button onclick="toggleExtInput()" title="Externe input toevoegen" style="height:40px;padding:0 10px;background:var(--bg-elev-2);border:1px solid var(--border);border-radius:8px;cursor:pointer;font-size:16px;flex-shrink:0">📎</button>
+              <button onclick="toggleInstantTask()" title="Taak toevoegen" style="height:40px;padding:0 10px;background:var(--bg-elev-2);border:1px solid var(--border);border-radius:8px;cursor:pointer;font-size:16px;flex-shrink:0">📋</button>
               <input class="chat-input" id="meetingInput" placeholder="Zeg iets in de vergadering… (@Simon, @Leon, @Aron)" onkeydown="handleMeetingKey(event)" style="height:40px"/>
               <button class="chat-send" id="meetingSendBtn" onclick="sendMeetingMessage()">→</button>
             </div>
@@ -371,7 +435,7 @@
           <div style="font-size:13px;font-weight:700;margin-bottom:10px">Actiepunten</div>
           <div id="actionPointsList"></div>
           <div class="summary-actions">
-            <button class="btn btn-primary" onclick="approveMeeting()">✓ Goedkeuren &amp; taken aanmaken</button>
+            <button class="btn btn-primary" onclick="approveMeeting()">✎ Bewerk &amp; goedkeuren</button>
             <button class="btn" id="rapportBtn" onclick="showCurrentRapport()" style="display:none">📄 Rapport bekijken</button>
             <button class="btn" onclick="showView('meeting')">↩ Nieuwe vergadering</button>
           </div>
@@ -379,6 +443,26 @@
       </div>
     </div>
 
+  </div>
+</div>
+
+<!-- Task review modal -->
+<div id="taskReviewOverlay" class="report-overlay hidden">
+  <div class="report-modal" style="max-width:720px">
+    <div class="report-header">
+      <div class="report-title">📋 Actiepunten bewerken</div>
+      <button class="report-close" onclick="closeTaskReview()">✕</button>
+    </div>
+    <div class="report-body" id="taskReviewBody" style="padding:0;overflow-y:auto;max-height:60vh">
+      <div style="padding:20px;color:var(--text-faint)">Laden…</div>
+    </div>
+    <div style="padding:12px 20px;border-top:1px solid var(--border);display:flex;gap:10px;flex-wrap:wrap;justify-content:space-between;align-items:center">
+      <button class="btn" onclick="addReviewItem()" style="font-size:12px">+ Nieuw actiepunt</button>
+      <div style="display:flex;gap:8px">
+        <button class="btn" onclick="closeTaskReview()">Annuleren</button>
+        <button class="btn btn-primary" onclick="confirmApprove()" id="confirmApproveBtn">✓ Taken aanmaken</button>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -544,6 +628,7 @@ function showView(view, agent) {
     document.getElementById('meetingRoom').classList.add('hidden');
     document.getElementById('meetingSummary').classList.add('hidden');
     loadMeetingHistory();
+    loadMeetingTasks();
   }
 }
 
@@ -1036,33 +1121,321 @@ async function endMeeting() {
     pendingRapportMd    = data.rapport_md || '';
     const rapportBtn = document.getElementById('rapportBtn');
     if (rapportBtn) rapportBtn.style.display = pendingRapportMd ? '' : 'none';
-    document.getElementById('actionPointsList').innerHTML = pendingActionPoints.map((ap, i) => `
-      <div class="action-point">
-        <div class="ap-check"></div>
-        <div>
-          <div class="ap-title">${esc(ap.title)}</div>
-          <div class="ap-meta">👤 ${esc(ap.assignee)} · 📅 ${esc(ap.deadline || '—')}</div>
-        </div>
-      </div>`).join('') || '<div style="color:var(--text-faint);font-size:13px">Geen actiepunten gevonden.</div>';
+    // Nieuwe format: { titel, assignees:[], deadline, prioriteit }
+    document.getElementById('actionPointsList').innerHTML = pendingActionPoints.length
+      ? pendingActionPoints.map(ap => `
+        <div class="action-point">
+          <div class="ap-check"></div>
+          <div>
+            <div class="ap-title">${esc(ap.titel || ap.title || '')}</div>
+            <div class="ap-meta">
+              👤 ${esc((ap.assignees||[ap.assignee]).filter(Boolean).join(', ') || '—')} ·
+              📅 ${esc(ap.deadline || '—')} ·
+              ${esc(ap.prioriteit || 'Normaal')}
+            </div>
+          </div>
+        </div>`).join('')
+      : '<div style="color:var(--text-faint);font-size:13px">Geen actiepunten — klik op "Bewerk &amp; goedkeuren" om handmatig toe te voegen.</div>';
   } catch (err) {
     document.getElementById('summaryText').textContent = `⚠️ ${err.message}`;
   }
 }
 
+// ── Review-scherm flow ────────────────────────────────────────────────────
+let reviewActionPoints  = [];   // huidige staat van het review-scherm
+let reviewAssigneeOpts  = [];   // gecombineerde agents + teamleden opties
+let reviewSelectorState = {};   // { idx: [{ name, type, id }] } — geselecteerde assignees per item
+
 async function approveMeeting() {
-  if (!pendingActionPoints.length) { alert('Geen actiepunten om goed te keuren.'); return; }
+  if (!pendingActionPoints.length) {
+    alert('Geen actiepunten gevonden. Sluit de vergadering eerst af.');
+    return;
+  }
+  // Open het review-scherm: haal verrijkte data op van de server
+  document.getElementById('taskReviewBody').innerHTML = '<div style="padding:20px;color:var(--text-faint)">Laden…</div>';
+  document.getElementById('taskReviewOverlay').classList.remove('hidden');
   try {
     const r = await fetch('/api/agent-meeting', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'approve', meeting_id: meetingId, action_points: pendingActionPoints }),
+      body: JSON.stringify({ action: 'preview_tasks', meeting_id: meetingId }),
     });
     const data = await r.json();
     if (data.error) throw new Error(data.error);
-    alert(`✓ ${data.tasks_created} taken aangemaakt in Takenbeheer!`);
+
+    reviewActionPoints = (data.action_points || []).map(ap => ({
+      titel:       ap.titel || '',
+      beschrijving: ap.beschrijving || '',
+      assignees:   ap.assignees_resolved || [],
+      deadline:    ap.deadline || '',
+      prioriteit:  ap.prioriteit || 'Normaal',
+    }));
+    reviewAssigneeOpts = [
+      ...(data.agents_options      || []).map(a => ({ ...a, group: '🤖 Agents' })),
+      ...(data.team_members_options || []).map(m => ({ ...m, group: '👤 Team' })),
+    ];
+    reviewSelectorState = {};
+
+    renderTaskReviewModal();
+  } catch (err) {
+    document.getElementById('taskReviewBody').innerHTML = `<div style="padding:20px;color:var(--red)">⚠️ ${esc(err.message)}</div>`;
+  }
+}
+
+function closeTaskReview() {
+  document.getElementById('taskReviewOverlay').classList.add('hidden');
+}
+
+function renderTaskReviewModal() {
+  const body = document.getElementById('taskReviewBody');
+  if (!reviewActionPoints.length) {
+    body.innerHTML = '<div style="padding:20px;color:var(--text-faint);font-size:13px">Geen actiepunten — je kunt handmatig toevoegen.</div>';
+    return;
+  }
+  body.innerHTML = reviewActionPoints.map((ap, idx) => buildReviewItemHTML(ap, idx)).join('');
+  // Initialiseer selector state
+  reviewActionPoints.forEach((ap, idx) => {
+    reviewSelectorState[idx] = ap.assignees ? [...ap.assignees] : [];
+    renderAssigneeChips(idx);
+    initAssigneeInput(idx);
+  });
+}
+
+function buildReviewItemHTML(ap, idx) {
+  return `
+  <div class="review-item" id="review-item-${idx}">
+    <button class="review-remove" onclick="removeReviewItem(${idx})" title="Verwijder dit actiepunt">✕</button>
+    <div class="review-label">Actiepunt</div>
+    <input class="review-input" id="ri-titel-${idx}" value="${esc(ap.titel)}" placeholder="Beschrijving…" oninput="reviewActionPoints[${idx}].titel=this.value"/>
+    <div class="review-grid">
+      <div>
+        <div class="review-label" style="margin-top:8px">Toewijzen aan</div>
+        <div id="chips-${idx}" class="chips-row"></div>
+        <div style="position:relative">
+          <input class="review-input" id="assignee-input-${idx}" placeholder="Typ naam…" autocomplete="off"
+            oninput="onAssigneeInput(${idx}, this.value)"
+            onfocus="onAssigneeInput(${idx}, this.value)"
+            onblur="setTimeout(()=>hideAssigneeDropdown(${idx}),150)"/>
+          <div class="assignee-dropdown hidden" id="assignee-drop-${idx}"></div>
+        </div>
+      </div>
+      <div>
+        <div class="review-label" style="margin-top:8px">Deadline</div>
+        <input class="review-input" id="ri-deadline-${idx}" type="date" value="${esc(ap.deadline||'')}" oninput="reviewActionPoints[${idx}].deadline=this.value"/>
+        <div class="review-label" style="margin-top:8px">Prioriteit</div>
+        <select class="review-input" id="ri-prio-${idx}" onchange="reviewActionPoints[${idx}].prioriteit=this.value">
+          ${['Normaal','Hoog','Urgent','Laag'].map(p => `<option${ap.prioriteit===p?' selected':''}>${p}</option>`).join('')}
+        </select>
+      </div>
+    </div>
+  </div>`;
+}
+
+function renderAssigneeChips(idx) {
+  const el = document.getElementById(`chips-${idx}`);
+  if (!el) return;
+  const selected = reviewSelectorState[idx] || [];
+  el.innerHTML = selected.map((a, ci) => `
+    <span class="chip ${a.type || ''}" data-idx="${idx}" data-ci="${ci}">
+      ${a.type === 'agent' ? '🤖' : a.type === 'freelance' ? '🔗' : '👤'} ${esc(a.name)}
+      <span class="chip-x" onclick="removeAssigneeChip(${idx},${ci})">✕</span>
+    </span>`).join('');
+}
+
+function removeAssigneeChip(idx, ci) {
+  if (!reviewSelectorState[idx]) return;
+  reviewSelectorState[idx].splice(ci, 1);
+  renderAssigneeChips(idx);
+}
+
+function initAssigneeInput(idx) {
+  // Niets nodig bij initialisatie — oninput handler is inline
+}
+
+function onAssigneeInput(idx, val) {
+  const drop = document.getElementById(`assignee-drop-${idx}`);
+  if (!drop) return;
+  const term = val.toLowerCase().trim();
+  const selected = reviewSelectorState[idx] || [];
+  const selectedIds = new Set(selected.map(a => `${a.type}:${a.id}`));
+
+  const opts = reviewAssigneeOpts.filter(o =>
+    !selectedIds.has(`${o.type}:${o.id}`) &&
+    (term === '' || o.name.toLowerCase().includes(term))
+  );
+
+  if (!opts.length && term !== '') { drop.classList.add('hidden'); return; }
+
+  let html = '';
+  let lastGroup = '';
+  for (const o of opts.slice(0, 12)) {
+    if (o.group !== lastGroup) { html += `<div class="assignee-opt-group">${o.group}</div>`; lastGroup = o.group; }
+    const icon = o.type === 'agent' ? '🤖' : o.type === 'freelance' ? '🔗' : '👤';
+    html += `<div class="assignee-opt" onmousedown="selectAssignee(${idx}, ${JSON.stringify(JSON.stringify(o))})">${icon} ${esc(o.name)}<span style="margin-left:auto;font-size:10px;color:var(--text-faint)">${o.type}</span></div>`;
+  }
+  drop.innerHTML = html;
+  drop.classList.toggle('hidden', !html);
+}
+
+function selectAssignee(idx, oStr) {
+  const o = JSON.parse(oStr);
+  if (!reviewSelectorState[idx]) reviewSelectorState[idx] = [];
+  const already = reviewSelectorState[idx].some(a => a.id === o.id && a.type === o.type);
+  if (!already) reviewSelectorState[idx].push({ name: o.name, type: o.type, id: o.id });
+  renderAssigneeChips(idx);
+  const input = document.getElementById(`assignee-input-${idx}`);
+  if (input) { input.value = ''; }
+  hideAssigneeDropdown(idx);
+}
+
+function hideAssigneeDropdown(idx) {
+  const drop = document.getElementById(`assignee-drop-${idx}`);
+  if (drop) drop.classList.add('hidden');
+}
+
+function removeReviewItem(idx) {
+  reviewActionPoints.splice(idx, 1);
+  renderTaskReviewModal();
+}
+
+function addReviewItem() {
+  reviewActionPoints.push({ titel: '', beschrijving: '', assignees: [], deadline: '', prioriteit: 'Normaal' });
+  renderTaskReviewModal();
+  // Scroll naar nieuw item
+  const body = document.getElementById('taskReviewBody');
+  if (body) body.scrollTop = body.scrollHeight;
+}
+
+async function confirmApprove() {
+  const btn = document.getElementById('confirmApproveBtn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Aanmaken…'; }
+
+  // Synchroniseer assignees van selectorState naar reviewActionPoints
+  const finalPoints = reviewActionPoints.map((ap, idx) => ({
+    ...ap,
+    assignees: reviewSelectorState[idx] || ap.assignees || [],
+  }));
+
+  try {
+    const r = await fetch('/api/agent-meeting', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'approve', meeting_id: meetingId, action_points: finalPoints }),
+    });
+    const data = await r.json();
+    if (data.error) throw new Error(data.error);
+    closeTaskReview();
+    showToast(`✓ ${data.tasks_created} taken aangemaakt (${data.assignees_set} toewijzingen)`);
     showView('overview');
   } catch (err) {
-    alert(`⚠️ ${err.message}`);
+    showToast(`⚠️ ${err.message}`, 'error');
+    if (btn) { btn.disabled = false; btn.textContent = '✓ Taken aanmaken'; }
+  }
+}
+
+// ── Fase 3: Instant-add taak tijdens meeting ──────────────────────────────
+let instantSelectorState = [];
+
+function toggleInstantTask() {
+  const pop = document.getElementById('instantTaskPopover');
+  pop.classList.toggle('hidden');
+  if (!pop.classList.contains('hidden')) {
+    // Bouw assignee-selector in de popover
+    instantSelectorState = [];
+    buildInstantAssigneeSelector();
+    document.getElementById('itTitel').value = '';
+    document.getElementById('itDeadline').value = '';
+    document.getElementById('itPrioriteit').value = 'Normaal';
+  }
+}
+
+function buildInstantAssigneeSelector() {
+  const wrap = document.getElementById('itAssigneeWrap');
+  if (!wrap) return;
+  wrap.innerHTML = `
+    <div class="chips-row" id="it-chips"></div>
+    <div style="position:relative">
+      <input class="review-input" id="it-assignee-input" placeholder="Typ naam…" autocomplete="off"
+        oninput="onItAssigneeInput(this.value)"
+        onfocus="onItAssigneeInput(this.value)"
+        onblur="setTimeout(()=>document.getElementById('it-assignee-drop')?.classList.add('hidden'),150)"/>
+      <div class="assignee-dropdown hidden" id="it-assignee-drop"></div>
+    </div>`;
+}
+
+function renderInstantChips() {
+  const el = document.getElementById('it-chips');
+  if (!el) return;
+  el.innerHTML = instantSelectorState.map((a, i) => `
+    <span class="chip ${a.type||''}">${a.type==='agent'?'🤖':a.type==='freelance'?'🔗':'👤'} ${esc(a.name)}
+      <span class="chip-x" onclick="instantSelectorState.splice(${i},1);renderInstantChips()">✕</span>
+    </span>`).join('');
+}
+
+function onItAssigneeInput(val) {
+  const drop = document.getElementById('it-assignee-drop');
+  if (!drop) return;
+  const term = val.toLowerCase().trim();
+  const selectedIds = new Set(instantSelectorState.map(a => `${a.type}:${a.id}`));
+  const opts = reviewAssigneeOpts.filter(o =>
+    !selectedIds.has(`${o.type}:${o.id}`) &&
+    (term === '' || o.name.toLowerCase().includes(term))
+  );
+  let html = '';
+  let lastGroup = '';
+  for (const o of opts.slice(0, 12)) {
+    if (o.group !== lastGroup) { html += `<div class="assignee-opt-group">${o.group}</div>`; lastGroup = o.group; }
+    const icon = o.type==='agent'?'🤖':o.type==='freelance'?'🔗':'👤';
+    html += `<div class="assignee-opt" onmousedown="selectItAssignee(${JSON.stringify(JSON.stringify(o))})">${icon} ${esc(o.name)}</div>`;
+  }
+  drop.innerHTML = html || (term ? `<div class="assignee-opt" style="color:var(--text-faint)">${esc(val)} (onbekend)</div>` : '');
+  drop.classList.toggle('hidden', !html && !term);
+}
+
+function selectItAssignee(oStr) {
+  const o = JSON.parse(oStr);
+  if (!instantSelectorState.some(a => a.id === o.id)) instantSelectorState.push({ name: o.name, type: o.type, id: o.id });
+  renderInstantChips();
+  const input = document.getElementById('it-assignee-input');
+  if (input) input.value = '';
+  document.getElementById('it-assignee-drop')?.classList.add('hidden');
+}
+
+async function submitInstantTask() {
+  const titel = document.getElementById('itTitel').value.trim();
+  if (!titel) { showToast('Vul een titel in', 'error'); return; }
+  // Laad reviewAssigneeOpts als nog niet geladen (outside of review flow)
+  if (!reviewAssigneeOpts.length) {
+    try {
+      const r = await fetch('/api/agent-meeting', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'preview_tasks', meeting_id: meetingId }),
+      });
+      const d = await r.json();
+      reviewAssigneeOpts = [
+        ...(d.agents_options||[]).map(a=>({...a,group:'🤖 Agents'})),
+        ...(d.team_members_options||[]).map(m=>({...m,group:'👤 Team'})),
+      ];
+    } catch {}
+  }
+  try {
+    const r = await fetch('/api/agent-meeting', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action:    'add_instant_task',
+        meeting_id: meetingId,
+        titel,
+        assignees: instantSelectorState,
+        deadline:  document.getElementById('itDeadline').value || null,
+        prioriteit: document.getElementById('itPrioriteit').value,
+      }),
+    });
+    const data = await r.json();
+    if (data.error) throw new Error(data.error);
+    showToast(data.message || 'Taak toegevoegd!');
+    document.getElementById('instantTaskPopover').classList.add('hidden');
+  } catch (err) {
+    showToast(`⚠️ ${err.message}`, 'error');
   }
 }
 
@@ -1103,6 +1476,37 @@ function showMeetingRapport(title, rapportMd) {
   document.getElementById('reportTitle').textContent = `📄 ${title}`;
   document.getElementById('reportContent').innerHTML = formatMd(esc(rapportMd));
   document.getElementById('reportOverlay').classList.remove('hidden');
+}
+
+async function loadMeetingTasks() {
+  const el = document.getElementById('meetingTasksList');
+  if (!el) return;
+  try {
+    const r = await fetch('/api/agent-meeting?action=get_meeting_tasks');
+    const data = await r.json();
+    if (data.error) throw new Error(data.error);
+    const tasks = data.tasks || [];
+    if (!tasks.length) {
+      el.innerHTML = '<div style="color:var(--text-faint);font-size:12px">Geen actieve taken uit meetings.</div>';
+      return;
+    }
+    el.innerHTML = tasks.map(t => {
+      const chips = (t.assignees || []).map(a =>
+        `<span class="chip ${a.assignee_type||''}" style="font-size:9px;padding:1px 6px">${esc(a.assignee_name)}</span>`
+      ).join('');
+      const deadline = t.deadline ? `📅 ${t.deadline}` : '';
+      const prio = t.prioriteit || 'Normaal';
+      return `<div class="mtask-row">
+        <span class="prio-badge prio-${prio}">${prio}</span>
+        <span class="mtask-title" title="${esc(t.titel)}">${esc(t.titel)}</span>
+        <span style="display:flex;gap:3px;flex-shrink:0">${chips}</span>
+        ${deadline ? `<span class="mtask-meta">${deadline}</span>` : ''}
+        <span class="mtask-meta" style="font-size:9px;max-width:100px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(t.meeting_title)}">${esc(t.meeting_title)}</span>
+      </div>`;
+    }).join('');
+  } catch (err) {
+    el.innerHTML = `<div style="color:var(--red);font-size:12px">⚠️ ${esc(err.message)}</div>`;
+  }
 }
 
 async function loadMeetingHistory() {
