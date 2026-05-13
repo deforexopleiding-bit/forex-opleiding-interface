@@ -11,6 +11,10 @@
     {
       "path": "/api/standup-weekly",
       "schedule": "0 8 * * 1"
+    },
+    {
+      "path": "/api/agent-expire-approvals",
+      "schedule": "0 * * * *"
     }
   ],
   "headers": [

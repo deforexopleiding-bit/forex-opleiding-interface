@@ -205,6 +205,23 @@
     .prio-Normaal{background:rgba(100,116,139,0.15);color:#94a3b8;border:1px solid rgba(100,116,139,0.3);}
     .prio-Laag{background:rgba(34,197,94,0.1);color:#4ade80;border:1px solid rgba(34,197,94,0.25);}
 
+    /* ── Approval inbox + audit log ── */
+    .approval-row{display:flex;align-items:center;gap:8px;padding:9px 12px;border-radius:8px;background:var(--bg-elev-2);margin-bottom:5px;cursor:pointer;transition:background .15s;}
+    .approval-row:hover{background:rgba(255,255,255,0.05);}
+    .audit-row{display:flex;align-items:center;gap:8px;padding:8px 12px;border-radius:8px;background:var(--bg-elev-2);margin-bottom:4px;cursor:pointer;transition:background .15s;}
+    .audit-row:hover{background:rgba(255,255,255,0.05);}
+    .audit-status-ok{color:var(--green);font-size:14px;flex-shrink:0;}
+    .audit-status-err{color:var(--red);font-size:14px;flex-shrink:0;}
+    .approval-urgency-red{color:var(--red);font-size:10px;font-weight:700;flex-shrink:0;}
+    .approval-urgency-amber{color:var(--amber);font-size:10px;font-weight:700;flex-shrink:0;}
+    .chip.simon{background:rgba(34,211,238,0.1);border-color:rgba(34,211,238,0.3);color:#22d3ee;}
+    .chip.leon{background:rgba(168,85,247,0.12);border-color:rgba(168,85,247,0.3);color:#c4b5fd;}
+    .chip.aron{background:rgba(245,158,11,0.1);border-color:rgba(245,158,11,0.3);color:#f59e0b;}
+    /* Inline approval card in chat */
+    .inline-approval-card{background:var(--bg-elev-2);border:1px solid var(--border-strong);border-radius:12px;padding:14px;margin-top:10px;}
+    .inline-approval-preview{font-size:12px;color:var(--text-dim);background:var(--bg-elev);border-radius:8px;padding:10px;margin:10px 0;white-space:pre-wrap;max-height:160px;overflow-y:auto;}
+    .inline-approval-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;}
+
     /* ── Summary ── */
     .summary-card{background:var(--bg-elev);border:1px solid var(--border);border-radius:14px;padding:24px;}
     .summary-title{font-size:16px;font-weight:800;margin-bottom:14px;}
@@ -364,6 +381,31 @@
           <div class="meeting-history-title">📋 Actieve taken uit meetings</div>
           <div id="meetingTasksList"><div style="color:var(--text-faint);font-size:12px">Laden…</div></div>
         </div>
+
+        <!-- Fase C1: Approval inbox -->
+        <div class="meeting-history-card" style="margin-top:12px">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">
+            <div class="meeting-history-title" style="margin:0">🔔 Approvals</div>
+            <span id="approvalBadge" class="hidden" style="background:var(--red);color:#fff;border-radius:10px;padding:1px 8px;font-size:11px;font-weight:700;min-width:20px;text-align:center"></span>
+            <button class="btn btn-sm" style="margin-left:auto;padding:3px 10px;font-size:11px" onclick="loadApprovals()">↻</button>
+          </div>
+          <div id="approvalList"><div style="color:var(--text-faint);font-size:12px">Laden…</div></div>
+        </div>
+
+        <!-- Fase C1: Audit log -->
+        <div class="meeting-history-card" style="margin-top:12px">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">
+            <div class="meeting-history-title" style="margin:0">📋 Audit Log</div>
+            <div style="margin-left:auto;display:flex;gap:6px;align-items:center">
+              <select id="auditFilterAgent" class="agenda-input" style="margin:0;padding:4px 8px;font-size:11px;width:auto" onchange="loadAuditLog()">
+                <option value="">Alle agents</option>
+                <option>Simon</option><option>Leon</option><option>Aron</option>
+              </select>
+              <button class="btn btn-sm" style="padding:3px 10px;font-size:11px" onclick="exportAuditCsv()">⬇ CSV</button>
+            </div>
+          </div>
+          <div id="auditLogList"><div style="color:var(--text-faint);font-size:12px">Laden…</div></div>
+        </div>
       </div>
 
       <!-- Active meeting -->
@@ -462,6 +504,23 @@
         <button class="btn" onclick="closeTaskReview()">Annuleren</button>
         <button class="btn btn-primary" onclick="confirmApprove()" id="confirmApproveBtn">✓ Taken aanmaken</button>
       </div>
+    </div>
+  </div>
+</div>
+
+<!-- Approval detail modal (Fase C1) -->
+<div id="approvalDetailOverlay" class="report-overlay hidden">
+  <div class="report-modal" style="max-width:680px">
+    <div class="report-header">
+      <div class="report-title" id="approvalDetailTitle">Approval</div>
+      <button class="report-close" onclick="closeApprovalDetail()">✕</button>
+    </div>
+    <div class="report-body" id="approvalDetailBody" style="max-height:52vh;overflow-y:auto;padding:20px"></div>
+    <div style="padding:12px 20px;border-top:1px solid var(--border);display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+      <input id="approvalComment" class="review-input" style="flex:1;min-width:160px" placeholder="Opmerking (optioneel)…"/>
+      <button class="btn btn-sm" style="background:rgba(239,68,68,0.15);color:var(--red);border:1px solid rgba(239,68,68,0.3)" onclick="rejectApproval()">✗ Afkeuren</button>
+      <button class="btn btn-sm" style="background:rgba(34,197,94,0.15);color:var(--green);border:1px solid rgba(34,197,94,0.3)" onclick="approveSelected()">✓ Geselecteerde</button>
+      <button class="btn btn-sm btn-primary" onclick="approveAll()">✓ Alle goedkeuren</button>
     </div>
   </div>
 </div>
@@ -629,6 +688,8 @@ function showView(view, agent) {
     document.getElementById('meetingSummary').classList.add('hidden');
     loadMeetingHistory();
     loadMeetingTasks();
+    startApprovalPolling();
+    loadAuditLog();
   }
 }
 
@@ -1652,6 +1713,221 @@ function handleLogoError() {
     if (b64?.startsWith('data:image')) { document.getElementById('sidebarLogoImg').src = b64; return; }
   } catch {}
   document.getElementById('sidebarLogo').innerHTML = '<span class="sidebar-logo-fallback">De Forex Opleiding</span>';
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// FASE C1 — Approval inbox + Audit log
+// ═══════════════════════════════════════════════════════════════════════════
+
+let currentApprovalId   = null;
+let currentApprovalData = null;
+let approvalPollInterval = null;
+
+function relTime(iso) {
+  if (!iso) return '';
+  const diff = Date.now() - new Date(iso).getTime();
+  const mins = Math.floor(diff / 60000);
+  if (mins < 2)  return 'zojuist';
+  if (mins < 60) return `${mins}m`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24)  return `${hrs}u`;
+  return `${Math.floor(hrs / 24)}d`;
+}
+
+async function loadApprovals() {
+  try {
+    const res  = await fetch('/api/agent-approval?action=list');
+    const data = await res.json();
+    const list   = document.getElementById('approvalList');
+    const badge  = document.getElementById('approvalBadge');
+    if (!list) return;
+    const pending = data.pending || [];
+    badge.textContent = pending.length;
+    badge.classList.toggle('hidden', pending.length === 0);
+    if (!pending.length) {
+      list.innerHTML = '<div style="color:var(--text-faint);font-size:12px">Geen openstaande approvals</div>';
+      return;
+    }
+    list.innerHTML = pending.map(a => {
+      const hrs = a.expires_at ? Math.floor((new Date(a.expires_at) - Date.now()) / 3600000) : 999;
+      const urgencyHtml = hrs < 24 ? `<span class="approval-urgency-red">⚠ ${hrs}u</span>`
+                        : hrs < 48 ? `<span class="approval-urgency-amber">${hrs}u</span>` : '';
+      const name = a.agent_name || '';
+      const title = esc(a.payload?.title || a.description || a.action || '');
+      return `<div class="approval-row" onclick="showApprovalDetail('${a.id}')">
+        <span class="chip ${name.toLowerCase()}">${esc(name)}</span>
+        <span style="font-size:10px;color:var(--text-faint);flex-shrink:0">${esc(a.action)}</span>
+        <span style="font-size:12px;font-weight:500;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${title}</span>
+        <span style="font-size:10px;color:var(--text-faint);flex-shrink:0">${relTime(a.created_at)}</span>
+        ${urgencyHtml}
+      </div>`;
+    }).join('');
+  } catch (e) {
+    console.error('[approvals]', e.message);
+  }
+}
+
+async function showApprovalDetail(approvalId) {
+  currentApprovalId = approvalId;
+  document.getElementById('approvalDetailTitle').textContent = 'Laden…';
+  document.getElementById('approvalDetailBody').innerHTML = '<div style="padding:20px;color:var(--text-faint)">Laden…</div>';
+  document.getElementById('approvalDetailOverlay').classList.remove('hidden');
+  try {
+    const res  = await fetch(`/api/agent-approval?action=get_detail&approval_id=${approvalId}`);
+    const data = await res.json();
+    currentApprovalData = data.approval;
+    const ap    = data.approval;
+    const title = ap.payload?.title || ap.action || 'Approval';
+    document.getElementById('approvalDetailTitle').textContent = `${ap.agent_name}: ${title}`;
+    const items = ap.payload?.preview_data || [];
+    let bodyHtml = ap.description ? `<div style="font-size:12px;color:var(--text-faint);margin-bottom:14px">${esc(ap.description)}</div>` : '';
+    if (items.length) {
+      bodyHtml += items.map((item, i) => {
+        const itemTitle = item.subject || item.titel || item.title || item.task_title || `Item ${i + 1}`;
+        const preview   = item.concept_text || item.body || item.notes || '';
+        return `<div style="display:flex;align-items:flex-start;gap:10px;padding:10px;background:var(--bg-elev);border-radius:8px;margin-bottom:8px">
+          <input type="checkbox" id="apitem-${i}" checked style="margin-top:3px;flex-shrink:0"/>
+          <div style="flex:1;min-width:0">
+            <div style="font-size:12px;font-weight:600;margin-bottom:4px">${esc(itemTitle)}</div>
+            ${preview ? `<div style="font-size:11px;color:var(--text-faint);white-space:pre-wrap;max-height:100px;overflow:hidden">${esc(preview.slice(0, 400))}</div>` : ''}
+            <div style="font-size:10px;color:var(--text-faint);margin-top:4px">${Object.entries(item).filter(([k]) => !['concept_text','body','notes','subject','titel','title','task_title'].includes(k)).map(([k,v]) => `${k}: ${String(v).slice(0,80)}`).join(' · ')}</div>
+          </div>
+        </div>`;
+      }).join('');
+    } else {
+      bodyHtml += `<pre style="font-size:11px;color:var(--text-faint);white-space:pre-wrap;overflow:auto;max-height:200px">${esc(JSON.stringify(ap.payload, null, 2))}</pre>`;
+    }
+    document.getElementById('approvalDetailBody').innerHTML = bodyHtml;
+    document.getElementById('approvalComment').value = '';
+  } catch (e) {
+    document.getElementById('approvalDetailBody').innerHTML = `<div style="color:var(--red);padding:20px">${esc(e.message)}</div>`;
+  }
+}
+
+function closeApprovalDetail() {
+  document.getElementById('approvalDetailOverlay').classList.add('hidden');
+  currentApprovalId   = null;
+  currentApprovalData = null;
+}
+
+async function approveAll()      { await _doApprove(null); }
+async function approveSelected() {
+  const checkboxes = document.querySelectorAll('[id^="apitem-"]');
+  const indices    = [...checkboxes].map((cb, i) => cb.checked ? i : -1).filter(i => i >= 0);
+  await _doApprove(indices.length ? indices : null);
+}
+
+async function _doApprove(indices) {
+  if (!currentApprovalId) return;
+  const btns = document.querySelectorAll('#approvalDetailOverlay .btn');
+  btns.forEach(b => { b.disabled = true; });
+  const comment = document.getElementById('approvalComment')?.value?.trim() || undefined;
+  try {
+    const res  = await fetch('/api/agent-approval', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ action: 'approve', approval_id: currentApprovalId,
+                                approved_item_indices: indices, decided_by: 'Jeffrey', comment }),
+    });
+    const data = await res.json();
+    closeApprovalDetail();
+    const hasErrors = data.errors?.length > 0;
+    showToast(hasErrors
+      ? `${data.executed} uitgevoerd, ${data.failed} gefaald`
+      : `✓ ${data.executed} item${data.executed !== 1 ? 's' : ''} goedgekeurd en uitgevoerd`,
+      hasErrors ? 'error' : 'success');
+    loadApprovals();
+    loadAuditLog();
+  } catch (e) {
+    showToast('Fout bij uitvoeren: ' + e.message, 'error');
+    btns.forEach(b => { b.disabled = false; });
+  }
+}
+
+async function rejectApproval() {
+  if (!currentApprovalId) return;
+  const reason   = document.getElementById('approvalComment')?.value?.trim() || '';
+  const decided_by = 'Jeffrey';
+  try {
+    await fetch('/api/agent-approval', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ action: 'reject', approval_id: currentApprovalId, rejection_reason: reason, decided_by }),
+    });
+    closeApprovalDetail();
+    showToast('Approval afgewezen', 'error');
+    loadApprovals();
+    loadAuditLog();
+  } catch (e) {
+    showToast('Fout: ' + e.message, 'error');
+  }
+}
+
+function startApprovalPolling() {
+  if (approvalPollInterval) clearInterval(approvalPollInterval);
+  loadApprovals();
+  approvalPollInterval = setInterval(loadApprovals, 30000);
+}
+
+// ── Inline approval (Pad 1 — vanuit agent-chat) ───────────────────────────
+
+async function handleInlineApproval(approvalId, previewTitle, previewItems, action) {
+  // Wordt aangeroepen vanuit renderChatMessage wanneer pending_approval: true
+  try {
+    const indices = null; // goedkeur alles bij inline
+    const res  = await fetch('/api/agent-approval', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ action, approval_id: approvalId, approved_item_indices: indices, decided_by: 'Jeffrey' }),
+    });
+    const data = await res.json();
+    loadApprovals();
+    loadAuditLog();
+    return data;
+  } catch (e) { return { ok: false, error: e.message }; }
+}
+
+// ── Audit log ─────────────────────────────────────────────────────────────
+
+async function loadAuditLog() {
+  const el = document.getElementById('auditLogList');
+  if (!el) return;
+  const agentFilter = document.getElementById('auditFilterAgent')?.value || '';
+  try {
+    const url  = `/api/agent-audit?action=list&limit=20${agentFilter ? '&agent_filter=' + encodeURIComponent(agentFilter) : ''}`;
+    const res  = await fetch(url);
+    const data = await res.json();
+    const entries = data.entries || [];
+    if (!entries.length) {
+      el.innerHTML = '<div style="color:var(--text-faint);font-size:12px">Geen audit-entries</div>';
+      return;
+    }
+    el.innerHTML = entries.map(e => {
+      const isOk  = e.status === 'success';
+      const name  = e.agent_name || 'system';
+      return `<div class="audit-row" onclick='showAuditDetail(${JSON.stringify(JSON.stringify(e))})'>
+        <span class="${isOk ? 'audit-status-ok' : 'audit-status-err'}">${isOk ? '✓' : '✗'}</span>
+        <span class="chip ${name.toLowerCase()}" style="font-size:10px">${esc(name)}</span>
+        <span style="font-size:11px;font-weight:500;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(e.action)}</span>
+        <span style="font-size:10px;color:var(--text-faint);flex-shrink:0">${relTime(e.created_at)}</span>
+        ${e.triggered_by && e.triggered_by !== 'system' ? `<span style="font-size:10px;color:var(--text-faint);flex-shrink:0">✓ ${esc(e.triggered_by)}</span>` : ''}
+      </div>`;
+    }).join('');
+  } catch (e) {
+    el.innerHTML = `<div style="color:var(--red);font-size:12px">${esc(e.message)}</div>`;
+  }
+}
+
+function showAuditDetail(entryStr) {
+  try {
+    const entry = JSON.parse(entryStr);
+    alert(JSON.stringify(entry, null, 2));
+  } catch {}
+}
+
+function exportAuditCsv() {
+  const agentFilter = document.getElementById('auditFilterAgent')?.value || '';
+  window.open(`/api/agent-audit?action=export_csv${agentFilter ? '&agent_filter=' + encodeURIComponent(agentFilter) : ''}`, '_blank');
 }
 
 init();
