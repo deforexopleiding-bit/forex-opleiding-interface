@@ -15,34 +15,75 @@
     .meeting-setup-sub{font-size:12px;color:var(--text-dim);margin-top:2px;}
     .participant-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:16px;}
     .participant-item{display:flex;flex-direction:column;align-items:center;gap:5px;padding:12px 8px;border-radius:10px;border:1px solid var(--border);background:var(--bg-elev-2);cursor:pointer;transition:border-color .15s,background .15s;text-align:center;}
-    .participant-item:hover{border-color:rgba(168,85,247,0.4);}
-    .participant-item.selected{border-color:rgba(168,85,247,0.5);background:rgba(168,85,247,0.08);}
+    .participant-item:hover{border-color:rgba(104,139,155,0.5);}
+    .participant-item.selected{border-color:rgba(104,139,155,0.6);background:rgba(9,61,84,0.15);}
     .participant-check{width:16px;height:16px;border-radius:4px;border:2px solid var(--border-strong);display:grid;place-items:center;font-size:10px;}
-    .participant-item.selected .participant-check{background:#7c3aed;border-color:#7c3aed;}
+    .participant-item.selected .participant-check{background:var(--brand-primary-light);border-color:var(--brand-primary-light);}
     .participant-name{font-size:12px;font-weight:600;}
     .participant-role{font-size:10px;color:var(--text-dim);}
     .agenda-label{font-size:11px;font-weight:600;color:var(--text-faint);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px;margin-top:16px;}
     .agenda-input{width:100%;padding:10px 14px;background:var(--bg-elev-2);border:1px solid var(--border-strong);border-radius:10px;color:var(--text);font-size:13px;font-family:inherit;outline:none;box-sizing:border-box;}
-    .agenda-input:focus{border-color:rgba(168,85,247,0.5);}
+    .agenda-input:focus{border-color:rgba(104,139,155,0.6);}
     /* ── Meeting room ── */
     .meeting-room-layout{display:flex;flex-direction:column;gap:0;height:calc(100vh - 140px);}
-    .meeting-table-wrap{flex-shrink:0;padding:20px;background:var(--bg-elev);border:1px solid var(--border);border-radius:14px 14px 0 0;position:relative;}
-    .meeting-table-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;}
-    .meeting-table-title{font-size:13px;font-weight:700;}
-    .table-scene{position:relative;height:180px;display:flex;align-items:center;justify-content:center;}
-    .m-table{width:200px;height:100px;border-radius:50px;background:var(--bg-elev-2);border:2px solid var(--border-strong);box-shadow:0 4px 20px rgba(0,0,0,0.4);position:absolute;}
-    .seat{position:absolute;display:flex;flex-direction:column;align-items:center;gap:4px;}
-    .seat-avatar{width:46px;height:46px;border-radius:50%;display:grid;place-items:center;font-size:20px;border:2px solid var(--border-strong);background:var(--bg-elev-2);transition:box-shadow .3s;animation:breathe 3s ease-in-out infinite;}
-    .seat-avatar.speaking{box-shadow:0 0 0 3px rgba(168,85,247,0.6),0 0 16px rgba(168,85,247,0.3);}
-    .seat-name{font-size:10px;font-weight:600;color:var(--text-dim);}
-    .talk-bubble{position:absolute;background:var(--bg-elev);border:1px solid var(--border-strong);border-radius:8px;padding:5px 9px;font-size:10px;color:var(--text-dim);white-space:nowrap;pointer-events:none;opacity:0;transition:opacity .3s;bottom:100%;margin-bottom:6px;}
-    .talk-bubble.show{opacity:1;}
-    .meeting-transcript{flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:8px;background:var(--bg-elev);border:1px solid var(--border);border-top:none;}
-    .t-msg{display:flex;gap:8px;align-items:flex-start;}
-    .t-speaker{font-size:11px;font-weight:700;flex-shrink:0;padding-top:1px;}
-    .t-content{font-size:12px;line-height:1.5;color:var(--text-dim);}
-    .t-time{font-size:10px;color:var(--text-faint);margin-left:auto;flex-shrink:0;}
+    .meeting-transcript{flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:0;background:var(--bg-elev);border:1px solid var(--border);border-top:none;}
     .meeting-input-area{padding:12px 16px;border:1px solid var(--border);border-top:none;border-radius:0 0 14px 14px;background:var(--bg-elev);position:relative;}
+
+    /* ── Meeting stage (U-shape) ── */
+    .meeting-stage{background:linear-gradient(180deg,#0a1f2e 0%,#082230 100%);border-radius:14px 14px 0 0;padding:1.25rem 1.5rem;position:relative;flex-shrink:0;}
+    .meeting-stage-header{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:1.25rem;}
+    .meeting-stage-title{font-size:14px;font-weight:700;color:#fff;}
+    .meeting-stage-sub{font-size:11px;color:rgba(255,255,255,0.45);margin-top:3px;}
+    .live-indicator{display:flex;align-items:center;gap:6px;font-size:10px;color:rgba(255,255,255,0.45);}
+    .live-dot{width:6px;height:6px;background:#1D9E75;border-radius:50%;animation:pulse-soft 2s infinite;}
+
+    .meeting-u-shape{position:relative;height:260px;max-width:500px;margin:0 auto;}
+    .meeting-u-shape::before{content:'';position:absolute;top:64px;left:20px;right:20px;bottom:0;border:1.5px dashed rgba(104,139,155,0.25);border-bottom:none;border-radius:110px 110px 0 0;pointer-events:none;}
+
+    .agent-seat{position:absolute;text-align:center;transition:opacity .3s;}
+    .agent-seat.idle{opacity:.65;}
+    .agent-seat.active{opacity:1;}
+    .agent-seat-center{top:4px;left:50%;transform:translateX(-50%);}
+    .agent-seat-left{top:34px;left:14px;}
+    .agent-seat-right{top:34px;right:14px;}
+    .agent-seat-front{bottom:8px;left:50%;transform:translateX(-50%);}
+
+    .avatar-wrapper{position:relative;display:inline-block;}
+    .agent-avatar{width:66px;height:66px;border-radius:50%;border:2px solid rgba(104,139,155,0.4);background:#0a1f2e;display:block;object-fit:cover;}
+    .agent-seat-center .agent-avatar{width:78px;height:78px;}
+    .agent-seat.active .agent-avatar{border-color:rgba(29,158,117,0.7);box-shadow:0 0 0 4px rgba(29,158,117,0.25);animation:speaking-glow 1.8s infinite;}
+
+    .status-dot{position:absolute;bottom:2px;right:2px;width:11px;height:11px;border-radius:50%;border:2px solid #0a1f2e;}
+    .status-idle{background:#64748b;}
+    .status-typing{background:#1D9E75;animation:pulse-soft 1.3s infinite;}
+
+    .agent-seat-name{font-size:11px;font-weight:600;color:rgba(255,255,255,0.8);margin-top:6px;}
+    .agent-seat.active .agent-seat-name{color:#fff;}
+    .agent-func-badge{font-size:9px;color:rgba(255,255,255,0.45);margin-top:2px;padding:2px 7px;background:rgba(104,139,155,0.15);border-radius:4px;display:inline-block;}
+    .agent-seat.active .agent-func-badge{background:rgba(9,61,84,0.55);border:0.5px solid rgba(104,139,155,0.35);color:rgba(255,255,255,0.75);}
+
+    .typing-indicator{margin-top:5px;font-size:10px;color:#688b9b;display:flex;align-items:center;gap:4px;justify-content:center;}
+    .typing-dot{width:4px;height:4px;background:#688b9b;border-radius:50%;animation:pulse-soft 1.3s infinite;}
+
+    .jeffrey-avatar{width:66px;height:66px;border-radius:50%;background:linear-gradient(135deg,#093d54,#688b9b);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:15px;border:2px solid #688b9b;margin:0 auto;box-shadow:0 0 0 3px rgba(104,139,155,0.2);}
+
+    .meeting-system-msg{margin-top:.75rem;padding:8px 12px;background:rgba(9,61,84,0.45);border-radius:8px;font-size:11px;color:rgba(255,255,255,0.6);}
+
+    /* ── Transcript bubbles ── */
+    .t-msg{display:flex;align-items:flex-start;gap:9px;padding:9px 0;border-bottom:1px solid rgba(255,255,255,0.04);}
+    .t-msg:last-child{border-bottom:none;}
+    .t-avatar{width:32px;height:32px;border-radius:50%;flex-shrink:0;border:1px solid rgba(255,255,255,0.1);background:#0a1f2e;object-fit:cover;}
+    .t-jeffrey-avatar{width:32px;height:32px;border-radius:50%;flex-shrink:0;background:linear-gradient(135deg,#093d54,#688b9b);display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:#fff;}
+    .t-msg-body{flex:1;min-width:0;}
+    .t-speaker-row{display:flex;align-items:baseline;gap:6px;margin-bottom:3px;}
+    .t-speaker{font-size:11px;font-weight:700;}
+    .t-func-badge{font-size:9px;color:var(--text-faint);background:rgba(255,255,255,0.05);border-radius:3px;padding:1px 5px;}
+    .t-time{font-size:10px;color:var(--text-faint);margin-left:auto;flex-shrink:0;}
+    .t-content{font-size:12px;line-height:1.6;color:var(--text-dim);}
+    .t-msg.speaking .t-content{border-left:2px solid rgba(29,158,117,0.5);padding-left:6px;}
+
+    @keyframes pulse-soft{0%,100%{opacity:1;}50%{opacity:.35;}}
+    @keyframes speaking-glow{0%,100%{box-shadow:0 0 0 4px rgba(29,158,117,0.25);}50%{box-shadow:0 0 0 8px rgba(29,158,117,0.12);}}
     .ext-input-popover{position:absolute;bottom:64px;left:16px;background:var(--bg-elev-2);border:1px solid var(--border-strong);border-radius:12px;padding:16px;width:320px;z-index:50;box-shadow:0 8px 24px rgba(0,0,0,0.4);}
     /* ── Chips / assignee ── */
     .chips-row{display:flex;flex-wrap:wrap;gap:4px;min-height:24px;margin-bottom:4px;}
@@ -75,7 +116,6 @@
     .ap-title{font-size:13px;font-weight:500;}
     .ap-meta{font-size:11px;color:var(--text-faint);margin-top:2px;}
     .summary-actions{display:flex;gap:10px;margin-top:16px;flex-wrap:wrap;}
-    @keyframes breathe{0%,100%{transform:scale(1);}50%{transform:scale(1.03);}}
     .chat-input{flex:1;padding:10px 14px;background:var(--bg-elev-2);border:1px solid var(--border-strong);border-radius:10px;color:var(--text);font-size:13px;font-family:inherit;resize:none;outline:none;}
     .chat-input:focus{border-color:rgba(104,139,155,0.5);}
     .chat-send{padding:10px 16px;background:rgba(9,61,84,0.35);border:1px solid var(--brand-primary-light);border-radius:10px;color:var(--brand-secondary-light);font-size:13px;cursor:pointer;font-family:inherit;transition:all .15s;}
@@ -229,14 +269,23 @@
     <!-- Active meeting -->
     <div id="meetingRoom" class="hidden">
       <div class="meeting-room-layout">
-        <div class="meeting-table-wrap">
-          <div class="meeting-table-header">
-            <div class="meeting-table-title" id="meetingTitle"></div>
-            <button class="btn" onclick="endMeeting()" style="font-size:12px;padding:5px 12px">Vergadering afsluiten</button>
+        <!-- U-SHAPE STAGE -->
+        <div class="meeting-stage" id="meetingStage">
+          <div class="meeting-stage-header">
+            <div>
+              <div class="meeting-stage-title" id="stageMeetingTitle">Vergadering</div>
+              <div class="meeting-stage-sub" id="stageMeetingTime">Gestart om —</div>
+            </div>
+            <div style="display:flex;align-items:center;gap:10px">
+              <div class="live-indicator">
+                <span class="live-text">Live</span>
+                <span class="live-dot"></span>
+              </div>
+              <button class="btn" onclick="endMeeting()" style="font-size:12px;padding:5px 12px">Vergadering afsluiten</button>
+            </div>
           </div>
-          <div class="table-scene" id="tableScene">
-            <div class="m-table"></div>
-          </div>
+          <div class="meeting-u-shape" id="meetingUShape"></div>
+          <div class="meeting-system-msg hidden" id="meetingSystemMsg"></div>
         </div>
         <div class="meeting-transcript" id="meetingTranscript"></div>
         <div class="meeting-input-area">
@@ -337,11 +386,10 @@ const AGENTS_FALLBACK = [
 
 let agents = AGENTS_FALLBACK;
 
-const BUBBLES = {
-  Simon: ['📧 19 leads vandaag!', '🔍 Analyseren...', '✉️ 3 nieuwe mails!', '📊 Rapport klaar!'],
-  Leon:  ['📋 Alles georganiseerd!', '✅ Taken bijgewerkt!', '📁 Contract klaar!', '🗂️ Archief up-to-date!'],
-  Aron:  ['💰 Betalingen up-to-date!', '📈 Groei +12%!', '💳 Factuur verstuurd!', '📉 Kosten geanalyseerd!'],
-  Jeffrey: ['👍 Goed bezig!', '🎯 Focus!', '💡 Goed idee!'],
+const AGENT_KEYWORDS_FE = {
+  Simon: ['mail','email','inbox','lead','antwoord','klantvraag','reply','afzender','opzeg'],
+  Leon:  ['contract','administratie','taak','planning','document','medewerker','mentor','agenda','todo'],
+  Aron:  ['factuur','betaling','incasso','euro','omzet','kosten','budget','wanbetal','mollie'],
 };
 
 // ── Meeting state ──────────────────────────────────────────────────────────
@@ -383,7 +431,7 @@ function showMeetingSetup() {
   document.getElementById('meetingSetup').classList.remove('hidden');
   document.getElementById('meetingRoom').classList.add('hidden');
   document.getElementById('meetingSummary').classList.add('hidden');
-  clearInterval(bubbleTimer);
+  clearAgentSpeaking();
   loadAllArchiveData(); // ververs archief na afsluiten vergadering
 }
 
@@ -393,7 +441,8 @@ function showMeetingSetup() {
 function renderParticipantList() {
   document.getElementById('participantList').innerHTML = AGENTS_FALLBACK.map(a => `
     <div class="participant-item ${selectedParticipants.has(a.name) ? 'selected' : ''}" onclick="toggleParticipant('${a.name}',this)">
-      <div style="font-size:22px">${a.avatar_emoji}</div>
+      <img src="${esc(AgentShared.getAvatarUrl(a.name))}" alt="${esc(a.name)}"
+        style="width:44px;height:44px;border-radius:50%;border:2px solid ${a.avatar_color}40;background:#0a1f2e;object-fit:cover" loading="lazy"/>
       <div class="participant-name">${esc(a.name)}</div>
       <div class="participant-role" style="font-size:9px">${esc(a.role)}</div>
       <div class="participant-check">${selectedParticipants.has(a.name) ? '✓' : ''}</div>
@@ -598,54 +647,91 @@ function openDecisionDetail(id) {
 }
 
 // ═══════════════════════════════════
-// MEETING TABLE
+// MEETING STAGE (U-SHAPE)
 // ═══════════════════════════════════
-function renderMeetingTable(participants) {
-  const scene = document.getElementById('tableScene');
-  scene.querySelectorAll('.seat').forEach(s => s.remove());
-  const positions = [
-    { top: '8px',  left: '50%', transform: 'translateX(-50%)' },
-    { top: '50%',  left: '12px', transform: 'translateY(-50%)' },
-    { top: '50%',  right: '12px', transform: 'translateY(-50%)' },
-    { bottom: '8px', left: '50%', transform: 'translateX(-50%)' },
-  ];
-  const allSeats = [
-    ...participants.map(n => agents.find(a => a.name === n) || AGENTS_FALLBACK.find(a => a.name === n)),
-    { name:'Jeffrey', avatar_emoji:'👤', avatar_color:'#a855f7' },
-  ];
-  allSeats.forEach((agent, i) => {
-    if (i >= positions.length) return;
-    const pos  = positions[i];
-    const seat = document.createElement('div');
-    seat.className = 'seat';
-    seat.id = `seat-${agent.name}`;
-    Object.assign(seat.style, { position:'absolute', ...pos });
-    seat.innerHTML = `
-      <div class="talk-bubble" id="bubble-${agent.name}"></div>
-      <div class="seat-avatar" style="border-color:${agent.avatar_color}40;animation-delay:${i*0.8}s" id="avatar-${agent.name}">${agent.avatar_emoji}</div>
-      <div class="seat-name" style="color:${agent.avatar_color}">${agent.name}</div>`;
-    scene.appendChild(seat);
+function renderMeetingStage(participants, topic) {
+  const positions = ['center', 'left', 'right'];
+  const shape = document.getElementById('meetingUShape');
+  shape.innerHTML = '';
+
+  participants.slice(0, 3).forEach((name, i) => {
+    const url  = AgentShared.getAvatarUrl(name);
+    const func = AgentShared.getAgentFunction(name);
+    const pos  = positions[i] || 'center';
+    const div  = document.createElement('div');
+    div.className = `agent-seat agent-seat-${pos} idle`;
+    div.dataset.agent = name;
+    div.innerHTML = `
+      <div class="avatar-wrapper">
+        <img class="agent-avatar" src="${esc(url)}" alt="${esc(name)}" loading="lazy"/>
+        <span class="status-dot status-idle"></span>
+      </div>
+      <div class="agent-seat-name">${esc(name)}</div>
+      <div class="agent-func-badge">${esc(func)}</div>`;
+    shape.appendChild(div);
+  });
+
+  // Jeffrey altijd onderaan
+  const jDiv = document.createElement('div');
+  jDiv.className = 'agent-seat agent-seat-front idle';
+  jDiv.dataset.agent = 'Jeffrey';
+  jDiv.innerHTML = `
+    <div class="jeffrey-avatar">JB</div>
+    <div class="agent-seat-name" style="color:rgba(255,255,255,0.7)">Jeffrey</div>
+    <div class="agent-func-badge">Eigenaar</div>`;
+  shape.appendChild(jDiv);
+
+  const now = new Date().toLocaleTimeString('nl-NL', { hour:'2-digit', minute:'2-digit' });
+  const msg = document.getElementById('meetingSystemMsg');
+  if (msg) {
+    msg.textContent = `Vergadering gestart om ${now} · Onderwerp: ${topic || '—'} · Deelnemers: ${participants.join(', ')}, Jeffrey`;
+    msg.classList.remove('hidden');
+  }
+  const titleEl = document.getElementById('stageMeetingTitle');
+  const subEl   = document.getElementById('stageMeetingTime');
+  if (titleEl) titleEl.textContent = topic || 'Vergadering';
+  if (subEl)   subEl.textContent   = `Gestart om ${now} · Vergaderruimte`;
+}
+
+function setAgentSpeaking(agentName) {
+  document.querySelectorAll('.agent-seat').forEach(seat => {
+    seat.classList.remove('active');
+    seat.classList.add('idle');
+    const dot = seat.querySelector('.status-dot');
+    if (dot) dot.className = 'status-dot status-idle';
+    seat.querySelector('.typing-indicator')?.remove();
+  });
+  const seat = document.querySelector(`[data-agent="${agentName}"]`);
+  if (!seat) return;
+  seat.classList.remove('idle');
+  seat.classList.add('active');
+  const dot = seat.querySelector('.status-dot');
+  if (dot) dot.className = 'status-dot status-typing';
+  const ind = document.createElement('div');
+  ind.className = 'typing-indicator';
+  ind.innerHTML = '<span class="typing-dot"></span>aan het typen…';
+  seat.appendChild(ind);
+}
+
+function clearAgentSpeaking() {
+  document.querySelectorAll('.agent-seat').forEach(seat => {
+    seat.classList.remove('active');
+    seat.classList.add('idle');
+    const dot = seat.querySelector('.status-dot');
+    if (dot) dot.className = 'status-dot status-idle';
+    seat.querySelector('.typing-indicator')?.remove();
   });
 }
 
-function startBubbles(participants) {
-  const all = [...participants, 'Jeffrey'];
-  function showBubble() {
-    const name   = all[Math.floor(Math.random() * all.length)];
-    const msgs   = BUBBLES[name] || ['...'];
-    const msg    = msgs[Math.floor(Math.random() * msgs.length)];
-    const bubble = document.getElementById(`bubble-${name}`);
-    const avatar = document.getElementById(`avatar-${name}`);
-    if (bubble && avatar) {
-      bubble.textContent = msg;
-      bubble.classList.add('show');
-      avatar.classList.add('speaking');
-      setTimeout(() => { bubble.classList.remove('show'); avatar.classList.remove('speaking'); }, 2500);
-    }
+function pickAgentsForMessage(message, participants) {
+  const lower    = message.toLowerCase();
+  const mentions = (message.match(/@(\w+)/g) || []).map(m => m.slice(1));
+  if (mentions.length) return mentions.filter(n => participants.includes(n));
+  const matches = [];
+  for (const [agent, kws] of Object.entries(AGENT_KEYWORDS_FE)) {
+    if (participants.includes(agent) && kws.some(kw => lower.includes(kw))) matches.push(agent);
   }
-  clearInterval(bubbleTimer);
-  showBubble();
-  bubbleTimer = setInterval(showBubble, 4000 + Math.random() * 3000);
+  return matches.length ? matches : (participants.includes('Simon') ? ['Simon'] : participants.slice(0, 1));
 }
 
 // ═══════════════════════════════════
@@ -666,11 +752,11 @@ async function startStandup() {
 async function _doStartMeeting(participants, agenda, meetingType) {
   pendingMeetingTitle = agenda;
   pendingRapportMd    = '';
+  shownBadges.clear();
   document.getElementById('meetingSetup').classList.add('hidden');
   document.getElementById('meetingRoom').classList.remove('hidden');
-  document.getElementById('meetingTitle').textContent = `🏛️ ${agenda}`;
-  document.getElementById('meetingTranscript').innerHTML = '<div style="color:var(--text-faint);text-align:center;padding:20px">Vergadering starten…</div>';
-  renderMeetingTable(participants);
+  document.getElementById('meetingTranscript').innerHTML = '';
+  renderMeetingStage(participants, agenda);
   try {
     const r = await fetch('/api/agent-meeting', {
       method: 'POST',
@@ -681,8 +767,8 @@ async function _doStartMeeting(participants, agenda, meetingType) {
     if (data.error) throw new Error(data.error);
     meetingId = data.meeting_id;
     meetingTranscript = data.transcript || [];
-    renderTranscript();
-    startBubbles(participants);
+    // Render any messages the backend returned (typically empty now)
+    meetingTranscript.forEach(m => addTranscriptMsg(m.speaker, m.content, m.timestamp));
   } catch (err) {
     document.getElementById('meetingTranscript').innerHTML = `<div style="color:var(--red);padding:16px">⚠️ ${esc(err.message)}</div>`;
   }
@@ -691,19 +777,41 @@ async function _doStartMeeting(participants, agenda, meetingType) {
 // ═══════════════════════════════════
 // TRANSCRIPT
 // ═══════════════════════════════════
-function renderTranscript() {
-  const el = document.getElementById('meetingTranscript');
-  const agent = name => agents.find(a => a.name === name) || AGENTS_FALLBACK.find(a => a.name === name) || { avatar_color: '#a855f7', avatar_emoji: '👤' };
-  el.innerHTML = meetingTranscript.map(m => {
-    const a    = agent(m.speaker);
-    const time = m.timestamp ? new Date(m.timestamp).toLocaleTimeString('nl-NL', { hour:'2-digit', minute:'2-digit' }) : '';
-    return `<div class="t-msg">
-      <span style="font-size:14px">${a.avatar_emoji || '👤'}</span>
-      <span class="t-speaker" style="color:${a.avatar_color || '#a855f7'};min-width:60px">${esc(m.speaker)}</span>
-      <span class="t-content">${esc(m.content)}</span>
-      <span class="t-time">${time}</span>
+const shownBadges = new Set();
+
+function addTranscriptMsg(speaker, content, timestamp) {
+  const el  = document.getElementById('meetingTranscript');
+  if (!el) return;
+  const div = document.createElement('div');
+  div.className = 't-msg';
+
+  const isJeffrey = speaker === 'Jeffrey';
+  const avatarHtml = isJeffrey
+    ? `<div class="t-jeffrey-avatar">JB</div>`
+    : `<img class="t-avatar" src="${esc(AgentShared.getAvatarUrl(speaker))}" alt="${esc(speaker)}" loading="lazy"/>`;
+
+  const showBadge = !shownBadges.has(speaker) && !isJeffrey;
+  if (showBadge) shownBadges.add(speaker);
+  const badgeHtml = showBadge
+    ? `<span class="t-func-badge">${esc(AgentShared.getAgentFunction(speaker))}</span>`
+    : '';
+
+  const time  = timestamp
+    ? new Date(timestamp).toLocaleTimeString('nl-NL', { hour:'2-digit', minute:'2-digit' })
+    : new Date().toLocaleTimeString('nl-NL', { hour:'2-digit', minute:'2-digit' });
+  const color = isJeffrey ? 'var(--brand-secondary-light)' : 'var(--text)';
+
+  div.innerHTML = `
+    ${avatarHtml}
+    <div class="t-msg-body">
+      <div class="t-speaker-row">
+        <span class="t-speaker" style="color:${color}">${esc(speaker)}</span>
+        ${badgeHtml}
+        <span class="t-time">${time}</span>
+      </div>
+      <div class="t-content">${esc(content)}</div>
     </div>`;
-  }).join('');
+  el.appendChild(div);
   el.scrollTop = el.scrollHeight;
 }
 
@@ -713,6 +821,14 @@ async function sendMeetingMessage() {
   if (!msg || !meetingId) return;
   input.value = '';
   document.getElementById('meetingSendBtn').disabled = true;
+
+  // Voeg user-bericht toe + voorspel wie antwoordt
+  addTranscriptMsg('Jeffrey', msg);
+  meetingTranscript.push({ speaker: 'Jeffrey', content: msg, timestamp: new Date().toISOString(), type: 'user' });
+
+  const predicted = pickAgentsForMessage(msg, [...selectedParticipants]);
+  if (predicted[0]) setAgentSpeaking(predicted[0]);
+
   try {
     const r = await fetch('/api/agent-meeting', {
       method: 'POST',
@@ -720,12 +836,17 @@ async function sendMeetingMessage() {
       body: JSON.stringify({ action: 'message', meeting_id: meetingId, message: msg }),
     });
     const data = await r.json();
+    clearAgentSpeaking();
     if (data.error) throw new Error(data.error);
-    meetingTranscript = data.transcript || meetingTranscript;
-    renderTranscript();
+    // Render alleen de nieuwe agent-berichten (Jeffrey is al toegevoegd)
+    const newAgentMsgs = (data.messages || []).filter(m => m.speaker !== 'Jeffrey');
+    newAgentMsgs.forEach(m => {
+      meetingTranscript.push(m);
+      addTranscriptMsg(m.speaker, m.content, m.timestamp);
+    });
   } catch (err) {
-    meetingTranscript.push({ speaker: 'System', content: `⚠️ ${err.message}`, timestamp: new Date().toISOString(), type: 'system' });
-    renderTranscript();
+    clearAgentSpeaking();
+    addTranscriptMsg('System', `⚠️ ${err.message}`);
   } finally {
     document.getElementById('meetingSendBtn').disabled = false;
   }
@@ -740,7 +861,7 @@ function handleMeetingKey(e) {
 // ═══════════════════════════════════
 async function endMeeting() {
   if (!meetingId) return;
-  clearInterval(bubbleTimer);
+  clearAgentSpeaking();
   document.getElementById('meetingRoom').classList.add('hidden');
   document.getElementById('meetingSummary').classList.remove('hidden');
   document.getElementById('summaryText').textContent = 'Samenvatting genereren…';

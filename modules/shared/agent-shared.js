@@ -275,6 +275,18 @@
     }
   }
 
+  // ── Avatar & agent-functie helpers ────────────────────────────────────────
+
+  function getAvatarUrl(agentName) {
+    const bg = agentName === 'Leon' ? '1a6644' : agentName === 'Aron' ? 'b45309' : '093d54';
+    return `https://api.dicebear.com/7.x/personas/svg?seed=${encodeURIComponent(agentName)}&backgroundColor=${bg}`;
+  }
+
+  function getAgentFunction(agentName) {
+    const map = { Simon: 'E-mail Agent', Leon: 'Administratie', Aron: 'Financieel', Jeffrey: 'Eigenaar' };
+    return map[agentName] || 'Agent';
+  }
+
   // ── Logo fallback (hergebruikt in alle modules) ────────────────────────────
 
   function handleLogoError() {
@@ -307,5 +319,7 @@
     startApprovalPolling,
     stopApprovalPolling,
     handleLogoError,
+    getAvatarUrl,
+    getAgentFunction,
   };
 })();

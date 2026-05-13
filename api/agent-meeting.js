@@ -10,9 +10,9 @@ const FALLBACK_PROMPTS = {
 
 // Keyword-routing (alleen actief als chair de default 'Simon' is)
 const DOMAIN_MAP = {
-  Simon: ['email', 'mail', 'inbox', 'leads', 'communicatie', 'bericht'],
-  Leon:  ['administratie', 'contract', 'document', 'onboarding', 'taken', 'planning'],
-  Aron:  ['financieel', 'factuur', 'betaling', 'kosten', 'omzet', 'budget'],
+  Simon: ['mail', 'email', 'inbox', 'leads', 'communicatie', 'bericht', 'reply', 'antwoord', 'klantvraag', 'afzender', 'opzeg'],
+  Leon:  ['administratie', 'contract', 'document', 'onboarding', 'taken', 'planning', 'medewerker', 'mentor', 'agenda', 'todo'],
+  Aron:  ['financieel', 'factuur', 'betaling', 'kosten', 'omzet', 'budget', 'incasso', 'mollie', 'wanbetal', 'euro'],
 };
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -245,18 +245,7 @@ export default async function handler(req, res) {
                 }
               }
 
-              for (const [name, tasks] of Object.entries(tasksByAgent)) {
-                const capped = tasks.slice(0, 5);
-                const personality = pMap[name] || FALLBACK_PROMPTS[name] || `Je bent ${name}.`;
-                const tasksList = capped.map(t => `- "${t.titel}" (deadline: ${t.deadline || 'geen'})`).join('\n');
-                const trigger = `Je hebt de volgende openstaande actiepunten uit vorige vergaderingen:\n${tasksList}\n\nGeef een korte statusupdate (1-2 zinnen per punt) aan het begin van de vergadering.`;
-                const statusMsg = await agentRespond(apiKey, name, personality, agenda, [], trigger);
-                transcript.push({ speaker: name, content: statusMsg, timestamp: new Date().toISOString(), type: 'status_update' });
-
-                // Update last_status_check_at
-                const ids = capped.map(t => t.id);
-                await supabase.from('taken_items').update({ last_status_check_at: new Date().toISOString() }).in('id', ids);
-              }
+              // Taken beschikbaar als context — geen statusberichten genereren bij start
             }
           }
         } catch (b5Err) {
@@ -264,13 +253,7 @@ export default async function handler(req, res) {
         }
       }
 
-      // ── Agent introducties ─────────────────────────────────────────────────
-      for (const name of (participants || [])) {
-        const personality = pMap[name] || FALLBACK_PROMPTS[name] || `Je bent ${name}.`;
-        const intro = await agentRespond(apiKey, name, personality, agenda, [], `De vergadering start. Stel jezelf kort voor en geef aan hoe jij aan de agenda "${agenda}" kunt bijdragen.`);
-        transcript.push({ speaker: name, content: intro, timestamp: new Date().toISOString(), type: 'agent' });
-      }
-
+      // Transcript starten zonder forced introducties — agents reageren op eerste bericht
       await supabase.from('agent_meetings').update({ transcript }).eq('id', meeting.id);
       return res.status(200).json({ meeting_id: meeting.id, transcript });
     }
@@ -306,7 +289,10 @@ export default async function handler(req, res) {
         } else {
           respondingAgents = (meeting.participants || []).includes(chair) ? [chair] : (meeting.participants || []);
         }
-        if (!respondingAgents.length) respondingAgents = meeting.participants || [];
+        if (!respondingAgents.length) {
+          const fallback = (meeting.participants || []).find(n => n in DOMAIN_MAP) || (meeting.participants || [])[0];
+          respondingAgents = fallback ? [fallback] : [];
+        }
       }
 
       const newMsgs = [jeffMsg];
