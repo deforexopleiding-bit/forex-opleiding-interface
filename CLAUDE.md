@@ -79,6 +79,26 @@ Werkelijke kolomnamen agent_audit_log:
 5. Test-instructies geven NA elke push, in stappenformaat
 6. Bij twijfel: stop en vraag, niet blind doorgaan
 
+## VERPLICHTE COMMIT-WORKFLOW
+
+Een commit zonder bewezen push is GEEN voltooide taak.
+
+Bij elke logische taak:
+1. Maak commit met logische message
+2. Run: git push origin main
+3. Plak de letterlijke output van git push in het rapport
+   (bv. "63f03e4..907a8f1 main -> main")
+4. Wacht 30 sec voor Vercel auto-deploy
+5. Verifieer met curl of HTTP request dat live URL bijgewerkt is
+6. PAS DAN melden "klaar"
+
+Bij conflicten of "rejected" errors: STOP, geen --force,
+rapporteer en wacht op instructie.
+
+ANTI-PATTERN: rapporteren "Commit X geslaagd" zonder push-output.
+Dit veroorzaakte op 13 mei 2026 drie testcycli omdat commits
+nooit gepusht waren.
+
 ## Code-stijl
 - Nederlandse strings in UI, Engelse code/comments
 - Async/await > callbacks of .then-chains
