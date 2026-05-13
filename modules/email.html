@@ -948,7 +948,7 @@
       <button class="btn-header" id="btn-undo" onclick="undoLastAction()" oncontextmenu="event.preventDefault(); showUndoDropdown()" disabled style="opacity:0.5;cursor:not-allowed" title="Ongedaan maken (Ctrl+Z) · Rechtermuisklik voor geschiedenis">
         <i class="ti ti-arrow-back-up"></i>
         <span>Ongedaan</span>
-        <span id="undo-count" style="display:none;background:#534AB7;color:white;border-radius:10px;padding:1px 6px;font-size:10px;margin-left:4px">0</span>
+        <span id="undo-count" style="display:none;background:#1a5773;color:white;border-radius:10px;padding:1px 6px;font-size:10px;margin-left:4px">0</span>
       </button>
       <button class="btn" id="refreshBtn">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
@@ -1457,7 +1457,7 @@
         btn.removeAttribute('disabled');
         btn.style.opacity     = '1';
         btn.style.cursor      = 'pointer';
-        btn.style.borderColor = '#534AB7';
+        btn.style.borderColor = '#1a5773';
         btn.style.color       = '#AFA9EC';
         const top = this.history.find((a) => !a.is_undone);
         btn.title = top ? 'Ongedaan maken: ' + top.label + ' (Ctrl+Z)' : 'Ongedaan maken (Ctrl+Z)';
@@ -2592,13 +2592,13 @@
     if (sig.naam)     sigLines.push('<strong>' + sig.naam.replace(/</g, '&lt;') + '</strong>' + (sig.functie ? ' · ' + sig.functie.replace(/</g, '&lt;') : '') + '<br>');
     const logoData = (() => { try { return localStorage.getItem('signature_logo_base64') || sig.logoData || ''; } catch { return sig.logoData || ''; } })();
     if (logoData && logoData.startsWith('data:image')) sigLines.push('<img src="' + logoData + '" alt="" style="max-width:200px;height:auto;margin:6px 0;display:block"><br>');
-    if (sig.website)  sigLines.push('<a href="' + sig.website.replace(/"/g, '') + '" style="color:#534AB7">' + sig.website.replace(/</g, '&lt;') + '</a><br>');
+    if (sig.website)  sigLines.push('<a href="' + sig.website.replace(/"/g, '') + '" style="color:#1a5773">' + sig.website.replace(/</g, '&lt;') + '</a><br>');
     if (sig.telefoon) sigLines.push(sig.telefoon.replace(/</g, '&lt;') + '<br>');
     const socials = [];
-    if (sig.instagram) socials.push('<a href="' + sig.instagram.replace(/"/g, '') + '" style="color:#534AB7">Instagram</a>');
-    if (sig.facebook)  socials.push('<a href="' + sig.facebook.replace(/"/g, '')  + '" style="color:#534AB7">Facebook</a>');
-    if (sig.linkedin)  socials.push('<a href="' + sig.linkedin.replace(/"/g, '')  + '" style="color:#534AB7">LinkedIn</a>');
-    if (sig.whatsapp)  socials.push('<a href="https://wa.me/' + sig.whatsapp.replace(/\D/g, '') + '" style="color:#534AB7">WhatsApp</a>');
+    if (sig.instagram) socials.push('<a href="' + sig.instagram.replace(/"/g, '') + '" style="color:#1a5773">Instagram</a>');
+    if (sig.facebook)  socials.push('<a href="' + sig.facebook.replace(/"/g, '')  + '" style="color:#1a5773">Facebook</a>');
+    if (sig.linkedin)  socials.push('<a href="' + sig.linkedin.replace(/"/g, '')  + '" style="color:#1a5773">LinkedIn</a>');
+    if (sig.whatsapp)  socials.push('<a href="https://wa.me/' + sig.whatsapp.replace(/\D/g, '') + '" style="color:#1a5773">WhatsApp</a>');
     if (socials.length) sigLines.push(socials.join(' · '));
     return '<div style="font-family:Arial,sans-serif;font-size:14px;line-height:1.6;color:#333">' +
       bodyHtml +
@@ -2981,7 +2981,7 @@
         '<div>' +
           '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">' +
             '<label style="font-size:11px;color:#888;text-transform:uppercase;letter-spacing:0.08em">Wat moet er gedaan worden?</label>' +
-            '<button type="button" id="btn-ai-taak-' + escapeHtml(uid) + '" onclick="aiGenereerTaak(\'' + escapeHtml(uid) + '\')" style="font-size:11px;padding:3px 10px;border-radius:6px;background:#1a1830;border:0.5px solid #534AB7;color:#AFA9EC;cursor:pointer;display:flex;align-items:center;gap:4px">✨ Genereer met AI</button>' +
+            '<button type="button" id="btn-ai-taak-' + escapeHtml(uid) + '" onclick="aiGenereerTaak(\'' + escapeHtml(uid) + '\')" style="font-size:11px;padding:3px 10px;border-radius:6px;background:#1a1830;border:0.5px solid #1a5773;color:#AFA9EC;cursor:pointer;display:flex;align-items:center;gap:4px">✨ Genereer met AI</button>' +
           '</div>' +
           '<textarea class="taak-form-textarea" id="taak-omschrijving-' + escapeHtml(uid) + '" rows="3">' + escapeHtml(f.taakomschrijving) + '</textarea>' +
         '</div>' +
@@ -3124,7 +3124,7 @@
           setTimeout(() => {
             btn.innerHTML          = '✨ Genereer met AI';
             btn.style.color        = '#AFA9EC';
-            btn.style.borderColor  = '#534AB7';
+            btn.style.borderColor  = '#1a5773';
             btn.disabled           = false;
             textarea.style.border  = '';
           }, 2500);

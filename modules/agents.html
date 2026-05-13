@@ -209,7 +209,7 @@ const { esc, formatMd, showToast } = AgentShared;
 // AGENT DEFINITIONS
 // ═══════════════════════════════════
 const AGENTS_FALLBACK = [
-  { id: null, name:'Simon', role:'E-mail Agent', department:'Communicatie', avatar_color:'#534AB7', avatar_emoji:'📧', module_url:'/modules/email.html',
+  { id: null, name:'Simon', role:'E-mail Agent', department:'Communicatie', avatar_color:'#1a5773', avatar_emoji:'📧', module_url:'/modules/email.html',
     capabilities:['E-mails categoriseren','AI antwoorden genereren','Leads tellen','Kennisbank vullen','Rapporten genereren'],
     quick_actions:[{key:'dagrapport',label:'📊 Dagrapport'},{key:'inbox_status',label:'📧 Inbox status'},{key:'heranalyseer',label:'🔄 Heranalyseer'},{key:'train_agent',label:'📚 Train agent'}] },
   { id: null, name:'Leon',  role:'Administratief Medewerker', department:'Administratie', avatar_color:'#1D9E75', avatar_emoji:'📋', module_url:null,
@@ -223,8 +223,8 @@ const AGENTS_FALLBACK = [
 // ── SVG Avatars ──────────────────────────────────────────────────────────────
 const AVATARS = {
   Simon: `<svg viewBox="0 0 100 120" width="90" height="108" xmlns="http://www.w3.org/2000/svg">
-    <circle cx="50" cy="45" r="38" fill="#534AB7" opacity="0.12"/>
-    <rect x="22" y="72" width="56" height="48" rx="12" fill="#534AB7"/>
+    <circle cx="50" cy="45" r="38" fill="#1a5773" opacity="0.12"/>
+    <rect x="22" y="72" width="56" height="48" rx="12" fill="#1a5773"/>
     <rect x="22" y="72" width="56" height="8" rx="5" fill="#6055c7"/>
     <polygon points="42,72 50,82 58,72" fill="white" opacity="0.9"/>
     <polygon points="48,82 52,82 54,100 50,106 46,100" fill="#3d3499"/>
@@ -232,11 +232,11 @@ const AVATARS = {
     <path d="M 27 39 Q 29 14 50 12 Q 71 14 73 39" fill="#3d2c1e"/>
     <rect x="24" y="37" width="5" height="10" rx="2" fill="#3d2c1e"/>
     <rect x="71" y="37" width="5" height="10" rx="2" fill="#3d2c1e"/>
-    <rect x="30" y="37" width="16" height="11" rx="4" fill="none" stroke="#534AB7" stroke-width="2.5"/>
-    <rect x="54" y="37" width="16" height="11" rx="4" fill="none" stroke="#534AB7" stroke-width="2.5"/>
-    <line x1="46" y1="42" x2="54" y2="42" stroke="#534AB7" stroke-width="2"/>
-    <line x1="24" y1="42" x2="30" y2="42" stroke="#534AB7" stroke-width="2"/>
-    <line x1="70" y1="42" x2="76" y2="42" stroke="#534AB7" stroke-width="2"/>
+    <rect x="30" y="37" width="16" height="11" rx="4" fill="none" stroke="#1a5773" stroke-width="2.5"/>
+    <rect x="54" y="37" width="16" height="11" rx="4" fill="none" stroke="#1a5773" stroke-width="2.5"/>
+    <line x1="46" y1="42" x2="54" y2="42" stroke="#1a5773" stroke-width="2"/>
+    <line x1="24" y1="42" x2="30" y2="42" stroke="#1a5773" stroke-width="2"/>
+    <line x1="70" y1="42" x2="76" y2="42" stroke="#1a5773" stroke-width="2"/>
     <circle cx="38" cy="42" r="3" fill="#1e1e2e"/>
     <circle cx="62" cy="42" r="3" fill="#1e1e2e"/>
     <circle cx="39" cy="41" r="1" fill="white"/>
@@ -464,7 +464,7 @@ function showSearchingHint(agentName) {
 function addChatMsg(role, content, pushToHistory = true, toolsUsed = []) {
   const msgs   = document.getElementById('chatMessages');
   const isUser = role === 'user';
-  const color  = isUser ? '#a855f7' : (activeAgent?.avatar_color || '#534AB7');
+  const color  = isUser ? '#688b9b' : (activeAgent?.avatar_color || '#1a5773');
   const avatar = isUser ? 'JB' : (activeAgent?.avatar_emoji || '🤖');
   const timeStr = new Date().toLocaleTimeString('nl-NL', { hour:'2-digit', minute:'2-digit' });
   const triggerForFeedback = isUser ? '' : lastUserMessage;
@@ -508,7 +508,7 @@ function showTyping() {
   const div  = document.createElement('div');
   div.className = 'msg msg-agent';
   div.id = 'typingIndicator';
-  div.innerHTML = `<div class="msg-avatar" style="background:${activeAgent?.avatar_color || '#534AB7'}22;color:${activeAgent?.avatar_color || '#534AB7'}">${activeAgent?.avatar_emoji || '🤖'}</div><div class="typing"><span></span><span></span><span></span></div>`;
+  div.innerHTML = `<div class="msg-avatar" style="background:${activeAgent?.avatar_color || '#1a5773'}22;color:${activeAgent?.avatar_color || '#1a5773'}">${activeAgent?.avatar_emoji || '🤖'}</div><div class="typing"><span></span><span></span><span></span></div>`;
   msgs.appendChild(div);
   msgs.scrollTop = msgs.scrollHeight;
 }
@@ -674,7 +674,7 @@ function toggleTrainForm(msgDiv, triggerText) {
 function addInlineApprovalCards(approvals) {
   const msgs = document.getElementById('chatMessages');
   if (!msgs || !approvals?.length) return;
-  const color  = activeAgent?.avatar_color || '#534AB7';
+  const color  = activeAgent?.avatar_color || '#1a5773';
   const avatar = activeAgent?.avatar_emoji || '🤖';
   for (const ap of approvals) {
     const items = ap.preview || [];

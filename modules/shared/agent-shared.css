@@ -8,8 +8,23 @@
   --bg:#0a0b10; --bg-elev:#13151c; --bg-elev-2:#181b25;
   --border:rgba(255,255,255,0.06); --border-strong:rgba(255,255,255,0.12);
   --text:#f1f5f9; --text-dim:#94a3b8; --text-faint:#64748b;
-  --accent-cyan:#22d3ee; --accent-violet:#a855f7;
-  --accent-grad:linear-gradient(135deg,#22d3ee 0%,#a855f7 100%);
+  --accent-cyan:#22d3ee;
+  /* Huisstijl */
+  --brand-primary:#093d54;
+  --brand-primary-light:#1a5773;
+  --brand-primary-dark:#052938;
+  --brand-secondary:#688b9b;
+  --brand-secondary-light:#8aa5b3;
+  --brand-secondary-dark:#4d6f7d;
+  /* Semantic */
+  --color-success:#1D9E75;
+  --color-warning:#EF9F27;
+  --color-danger:#D85A30;
+  /* Legacy aliases — behoudt backwards compat */
+  --accent-violet:var(--brand-secondary);
+  --purple:var(--brand-secondary);
+  --accent:var(--brand-secondary);
+  --accent-grad:linear-gradient(135deg,#093d54 0%,#688b9b 100%);
   --green:#22c55e; --amber:#f59e0b; --red:#ef4444; --sidebar-w:220px;
 }
 
@@ -25,8 +40,8 @@ body {
 body::before {
   content: ''; position: fixed; inset: 0;
   background-image:
-    radial-gradient(circle at 25% 15%, rgba(34,211,238,0.07), transparent 45%),
-    radial-gradient(circle at 80% 85%, rgba(168,85,247,0.08), transparent 50%);
+    radial-gradient(circle at 25% 15%, rgba(9,61,84,0.18), transparent 45%),
+    radial-gradient(circle at 80% 85%, rgba(104,139,155,0.09), transparent 50%);
   pointer-events: none; z-index: 0;
 }
 
@@ -40,7 +55,7 @@ body::before {
 .nav-item { display:flex; align-items:center; gap:9px; padding:8px 10px; border-radius:8px; color:var(--text-dim); font-size:13px; font-weight:500; text-decoration:none; cursor:pointer; transition:background .15s,color .15s; margin-bottom:1px; user-select:none; }
 .nav-icon { width:15px; height:15px; flex-shrink:0; }
 .nav-item:hover:not(.nav-concept) { background:rgba(255,255,255,0.05); color:var(--text); }
-.nav-item.active { background:rgba(168,85,247,0.14); color:#a855f7; }
+.nav-item.active { background:rgba(26,87,115,0.22); color:var(--brand-secondary-light); }
 .nav-item.nav-concept { color:var(--text-faint); cursor:default; opacity:.65; }
 .nav-badge { margin-left:auto; background:var(--red); color:#fff; font-size:10px; font-weight:700; border-radius:10px; padding:1px 6px; display:none; }
 .nav-badge.show { display:inline-block; }
@@ -58,8 +73,8 @@ body::before {
 /* ── Buttons ── */
 .btn { padding:8px 16px; border-radius:9px; border:1px solid var(--border-strong); background:var(--bg-elev); color:var(--text-dim); font-size:13px; font-weight:500; cursor:pointer; transition:all .15s; font-family:inherit; }
 .btn:hover { background:var(--bg-elev-2); color:var(--text); }
-.btn-primary { background:rgba(168,85,247,0.18); border-color:#7c3aed; color:#c4b5fd; }
-.btn-primary:hover { background:rgba(168,85,247,0.28); color:#e9d5ff; }
+.btn-primary { background:rgba(9,61,84,0.35); border-color:var(--brand-primary-light); color:var(--brand-secondary-light); }
+.btn-primary:hover { background:rgba(26,87,115,0.45); color:var(--text); }
 .btn-sm { padding:6px 12px; border-radius:7px; border:1px solid var(--border-strong); background:var(--bg-elev-2); color:var(--text-dim); font-size:12px; font-weight:500; cursor:pointer; transition:all .15s; font-family:inherit; }
 .btn-sm:hover { background:var(--bg); color:var(--text); }
 
@@ -70,13 +85,13 @@ body::before {
 .header-actions { display:flex; gap:10px; align-items:center; }
 
 /* ── Chips ── */
-.chip { display:inline-flex; align-items:center; gap:4px; background:rgba(168,85,247,0.15); border:1px solid rgba(168,85,247,0.3); border-radius:20px; padding:2px 8px; font-size:11px; font-weight:500; color:#c4b5fd; }
+.chip { display:inline-flex; align-items:center; gap:4px; background:rgba(104,139,155,0.15); border:1px solid rgba(104,139,155,0.3); border-radius:20px; padding:2px 8px; font-size:11px; font-weight:500; color:var(--brand-secondary-light); }
 .chip.agent  { background:rgba(34,211,238,0.1);  border-color:rgba(34,211,238,0.3);  color:#22d3ee; }
 .chip.freelance { background:rgba(245,158,11,0.1); border-color:rgba(245,158,11,0.3); color:#f59e0b; }
 .chip .chip-x { cursor:pointer; opacity:.7; font-size:10px; line-height:1; margin-left:2px; }
 .chip .chip-x:hover { opacity:1; }
 .chip.simon  { background:rgba(34,211,238,0.1);  border-color:rgba(34,211,238,0.3);  color:#22d3ee; }
-.chip.leon   { background:rgba(168,85,247,0.12); border-color:rgba(168,85,247,0.3);  color:#c4b5fd; }
+.chip.leon   { background:rgba(104,139,155,0.15); border-color:rgba(104,139,155,0.3); color:var(--brand-secondary-light); }
 .chip.aron   { background:rgba(245,158,11,0.1);  border-color:rgba(245,158,11,0.3);  color:#f59e0b; }
 
 /* ── Approval inbox ── */
