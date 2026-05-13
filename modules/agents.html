@@ -1271,21 +1271,27 @@ function onAssigneeInput(idx, val) {
   for (const o of opts.slice(0, 12)) {
     if (o.group !== lastGroup) { html += `<div class="assignee-opt-group">${o.group}</div>`; lastGroup = o.group; }
     const icon = o.type === 'agent' ? '🤖' : o.type === 'freelance' ? '🔗' : '👤';
-    html += `<div class="assignee-opt" onmousedown="selectAssignee(${idx}, ${JSON.stringify(JSON.stringify(o))})">${icon} ${esc(o.name)}<span style="margin-left:auto;font-size:10px;color:var(--text-faint)">${o.type}</span></div>`;
+    html += `<div class="assignee-opt" onmousedown="selectAssignee(${idx}, ${reviewAssigneeOpts.indexOf(o)})">${icon} ${esc(o.name)}<span style="margin-left:auto;font-size:10px;color:var(--text-faint)">${o.type}</span></div>`;
   }
   drop.innerHTML = html;
   drop.classList.toggle('hidden', !html);
 }
 
-function selectAssignee(idx, oStr) {
-  const o = JSON.parse(oStr);
+function selectAssignee(idx, optIdx) {
+  console.log('[chip-add] click event registered for ap-index', idx, 'option', optIdx);
+  const o = reviewAssigneeOpts[optIdx];
+  if (!o) { console.warn('[chip-add] assignee not found at index', optIdx, 'reviewAssigneeOpts length:', reviewAssigneeOpts.length); return; }
+  console.log('[chip-add] adding assignee:', o);
   if (!reviewSelectorState[idx]) reviewSelectorState[idx] = [];
   const already = reviewSelectorState[idx].some(a => a.id === o.id && a.type === o.type);
   if (!already) reviewSelectorState[idx].push({ name: o.name, type: o.type, id: o.id });
+  console.log('[chip-add] state.assignees now:', reviewSelectorState[idx]);
   renderAssigneeChips(idx);
   const input = document.getElementById(`assignee-input-${idx}`);
   if (input) { input.value = ''; }
   hideAssigneeDropdown(idx);
+  const chipsEl = document.getElementById(`chips-${idx}`);
+  console.log('[chip-add] re-render complete, DOM chips count:', chipsEl ? chipsEl.children.length : 'not found');
 }
 
 function hideAssigneeDropdown(idx) {
@@ -1386,14 +1392,15 @@ function onItAssigneeInput(val) {
   for (const o of opts.slice(0, 12)) {
     if (o.group !== lastGroup) { html += `<div class="assignee-opt-group">${o.group}</div>`; lastGroup = o.group; }
     const icon = o.type==='agent'?'🤖':o.type==='freelance'?'🔗':'👤';
-    html += `<div class="assignee-opt" onmousedown="selectItAssignee(${JSON.stringify(JSON.stringify(o))})">${icon} ${esc(o.name)}</div>`;
+    html += `<div class="assignee-opt" onmousedown="selectItAssignee(${reviewAssigneeOpts.indexOf(o)})">${icon} ${esc(o.name)}</div>`;
   }
   drop.innerHTML = html || (term ? `<div class="assignee-opt" style="color:var(--text-faint)">${esc(val)} (onbekend)</div>` : '');
   drop.classList.toggle('hidden', !html && !term);
 }
 
-function selectItAssignee(oStr) {
-  const o = JSON.parse(oStr);
+function selectItAssignee(optIdx) {
+  const o = reviewAssigneeOpts[optIdx];
+  if (!o) { console.warn('[chip-add] instant: assignee not found at index', optIdx, 'reviewAssigneeOpts length:', reviewAssigneeOpts.length); return; }
   if (!instantSelectorState.some(a => a.id === o.id)) instantSelectorState.push({ name: o.name, type: o.type, id: o.id });
   renderInstantChips();
   const input = document.getElementById('it-assignee-input');
