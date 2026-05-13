@@ -69,17 +69,16 @@ export default async function handler(req, res) {
     return res.status(500).json({ error: claimErr.message });
   }
 
-  // ── Haal volgende batch op (body_fetched_at IS NULL, id > last_processed_id) ─
-  const lastId = progress.last_processed_id != null ? parseInt(progress.last_processed_id) : 0;
-
+  // ── Haal volgende batch op ────────────────────────────────────────────────
+  // Geen cursor nodig: de NULL-status op body_fetched_at/body_fetch_error IS
+  // de voortgang. Elke run pakt automatisch de volgende niet-verwerkte mails.
   const { data: batch, error: batchErr } = await supabase
     .from('email_messages')
     .select('id, imap_uid')
     .eq('mailbox', progress.mailbox)
     .is('body_fetched_at', null)
     .is('body_fetch_error', null)
-    .gt('id', lastId)
-    .order('id', { ascending: true })
+    .order('imap_uid', { ascending: true })
     .limit(BATCH_SIZE);
 
   if (batchErr) {
@@ -101,7 +100,7 @@ export default async function handler(req, res) {
     return res.status(200).json({ ok: true, mailbox: progress.mailbox, status: 'completed', batch_done: 0 });
   }
 
-  console.log(`[backfill-bodies] Start batch ${progress.mailbox}: ${batch.length} mails, lastId=${lastId}`);
+  console.log(`[backfill-bodies] Start batch ${progress.mailbox}: ${batch.length} mails zonder body`);
 
   // ── IMAP verbinding ───────────────────────────────────────────────────────
   const client = new ImapFlow({
@@ -113,10 +112,9 @@ export default async function handler(req, res) {
     socketTimeout: 20_000,
   });
 
-  let batchFetched  = 0;
-  let batchFailed   = 0;
-  let maxProcessedId = lastId;
-  let timerAborted  = false;
+  let batchFetched = 0;
+  let batchFailed  = 0;
+  let timerAborted = false;
 
   try {
     await client.connect();
@@ -171,7 +169,6 @@ export default async function handler(req, res) {
           batchFailed++;
         }
 
-        if (row.id > maxProcessedId) maxProcessedId = row.id;
       }
     } finally {
       lock.release();
@@ -209,11 +206,10 @@ export default async function handler(req, res) {
 
   try {
     await supabase.from('backfill_body_progress').update({
-      last_processed_id: maxProcessedId,
-      bodies_fetched:    newFetched,
-      bodies_failed:     newFailed,
-      last_batch_at:     new Date().toISOString(),
-      status:            isComplete ? 'completed' : 'in_progress',
+      bodies_fetched: newFetched,
+      bodies_failed:  newFailed,
+      last_batch_at:  new Date().toISOString(),
+      status:         isComplete ? 'completed' : 'in_progress',
       ...(isComplete ? { completed_at: new Date().toISOString() } : {}),
     }).eq('id', progress.id);
   } catch (updateErr) {

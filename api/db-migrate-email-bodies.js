@@ -9,20 +9,24 @@ const NEW_COLS = [
   { col: 'body_fetch_error', sql: 'text' },
 ];
 
+// Geen last_processed_id kolom — voortgang wordt bijgehouden via
+// body_fetched_at/body_fetch_error NULL-status op email_messages zelf.
 const BACKFILL_BODY_TABLE = `CREATE TABLE IF NOT EXISTS backfill_body_progress (
-  id                uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  mailbox           text NOT NULL UNIQUE,
-  status            text NOT NULL DEFAULT 'pending',
-  last_processed_id bigint,
-  bodies_fetched    int DEFAULT 0,
-  bodies_failed     int DEFAULT 0,
-  last_batch_at     timestamptz,
-  completed_at      timestamptz,
-  error_count       int DEFAULT 0,
-  last_error        text,
-  last_error_at     timestamptz
+  id             uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  mailbox        text NOT NULL UNIQUE,
+  status         text NOT NULL DEFAULT 'pending',
+  bodies_fetched int DEFAULT 0,
+  bodies_failed  int DEFAULT 0,
+  last_batch_at  timestamptz,
+  completed_at   timestamptz,
+  error_count    int DEFAULT 0,
+  last_error     text,
+  last_error_at  timestamptz
 );
 ALTER TABLE backfill_body_progress DISABLE ROW LEVEL SECURITY;`;
+
+// Verwijder last_processed_id als het nog bestaat (bigint/uuid mismatch fix)
+const DROP_CURSOR_COL = `ALTER TABLE backfill_body_progress DROP COLUMN IF EXISTS last_processed_id;`;
 
 async function colExists(table, col) {
   try {
@@ -89,6 +93,28 @@ export default async function handler(req, res) {
       }
     } catch (e) {
       console.warn('[db-migrate-bodies] RPC niet beschikbaar voor tabel:', e.message);
+    }
+  }
+
+  // ── Verwijder last_processed_id kolom als die nog bestaat (uuid/bigint fix) ─
+  // Idempotent via DROP COLUMN IF EXISTS — veilig bij herhaalde aanroep.
+  if (tableOk || applied.includes('tabel:backfill_body_progress')) {
+    try {
+      const hasCursor = await colExists('backfill_body_progress', 'last_processed_id');
+      if (hasCursor) {
+        sqlLines.push('', '-- Verwijder verouderde cursor-kolom (bigint/uuid mismatch)');
+        sqlLines.push(DROP_CURSOR_COL);
+        const { error } = await supabase.rpc('run_schema_migration', { sql: DROP_CURSOR_COL });
+        if (!error) {
+          applied.push('drop:last_processed_id');
+          rpcWorked = true;
+          console.log('[db-migrate-bodies] last_processed_id kolom verwijderd');
+        } else {
+          console.warn('[db-migrate-bodies] DROP COLUMN fout:', error.message);
+        }
+      }
+    } catch (e) {
+      console.warn('[db-migrate-bodies] DROP COLUMN check threw:', e.message);
     }
   }
 

@@ -43,15 +43,14 @@ export default async function handler(req, res) {
       .from('backfill_body_progress')
       .upsert({
         mailbox,
-        status:            'pending',
-        last_processed_id: null,
-        bodies_fetched:    0,
-        bodies_failed:     0,
-        last_batch_at:     null,
-        completed_at:      null,
-        error_count:       0,
-        last_error:        null,
-        last_error_at:     null,
+        status:        'pending',
+        bodies_fetched: 0,
+        bodies_failed:  0,
+        last_batch_at:  null,
+        completed_at:   null,
+        error_count:    0,
+        last_error:     null,
+        last_error_at:  null,
       }, { onConflict: 'mailbox' });
 
     if (upsertErr) {
