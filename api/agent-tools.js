@@ -118,6 +118,10 @@ const TOOL_DEFINITIONS = {
           type: 'integer',
           description: 'Maximum aantal resultaten. Standaard: 10, max: 50.',
         },
+        search_in_body: {
+          type: 'boolean',
+          description: 'Ook zoeken in body_text (trager). Standaard: false.',
+        },
       },
       required: ['query'],
     },
@@ -196,6 +200,21 @@ const TOOL_DEFINITIONS = {
   get_email_detail: {
     name: 'get_email_detail',
     description: 'Geeft volledige details van één specifieke e-mail op basis van ID. Gebruik dit als een ander tool een email_id heeft teruggegeven en je meer details wil, of als de gebruiker een specifieke mail wil bekijken. Geeft afzender, onderwerp, categorie, snippet (indien beschikbaar) en metadata.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        email_id: {
+          type: 'string',
+          description: 'Het ID (bigint als string) van de e-mail uit email_messages.',
+        },
+      },
+      required: ['email_id'],
+    },
+  },
+
+  get_email_body: {
+    name: 'get_email_body',
+    description: 'Geeft de volledige berichttekst (body_text) van één e-mail op basis van ID. Gebruik dit na get_email_detail als je de inhoud van een mail moet lezen voor analyse of reply. Tekst wordt afgekapt op 8000 tekens. Als body nog niet beschikbaar is, geeft het de status terug.',
     input_schema: {
       type: 'object',
       properties: {
@@ -413,6 +432,7 @@ const TOOL_TAGS = {
   query_knowledge_base:           ['knowledge'],
   get_email_categorization_stats: ['email', 'learning'],
   get_email_detail:               ['email'],          // Fase 3 — nieuw
+  get_email_body:                 ['email'],          // Fase 2 — body-fetch
   // Schrijf-tool
   add_knowledge_base_item:        ['knowledge_write'],
   // C2 — Simon schrijf-tools
@@ -476,6 +496,7 @@ export async function execute(toolName, input, agentName = 'system') {
     case 'query_knowledge_base':           return executeQueryKnowledgeBase(i);
     case 'get_email_categorization_stats': return executeGetEmailCategorizationStats(i);
     case 'get_email_detail':               return executeGetEmailDetail(i);       // Fase 3
+    case 'get_email_body':                 return executeGetEmailBody(i);         // Fase 2
     // ── Bestaande schrijf-tool (al met eigen bevestigingsprotocol in system prompt) ──
     case 'add_knowledge_base_item':        return executeAddKnowledgeBaseItem(i);
 
@@ -732,17 +753,21 @@ async function executeGetEmailStats({ period_days, mailbox } = {}) {
   };
 }
 
-async function executeSearchEmails({ query, mailbox, category, since_days = 30, limit = 10 } = {}) {
+async function executeSearchEmails({ query, mailbox, category, since_days = 30, limit = 10, search_in_body = false } = {}) {
   // Fase 3: directe query op email_messages (5000+ mails)
   const lim   = Math.min(Math.max(parseInt(limit) || 10, 1), 50);
   const days  = Math.min(Math.max(parseInt(since_days) || 30, 1), 365);
   const since = new Date(Date.now() - days * 86400000).toISOString();
   const term  = `%${query}%`;
 
+  const orFilter = search_in_body
+    ? `subject.ilike.${term},from_address.ilike.${term},from_name.ilike.${term},body_text.ilike.${term}`
+    : `subject.ilike.${term},from_address.ilike.${term},from_name.ilike.${term}`;
+
   let q = supabase
     .from('email_messages')
     .select('id, mailbox, from_address, from_name, subject, snippet, date_received, category, category_confidence, requires_action')
-    .or(`subject.ilike.${term},from_address.ilike.${term},from_name.ilike.${term}`)
+    .or(orFilter)
     .gte('date_received', since)
     .order('date_received', { ascending: false })
     .limit(lim);
@@ -773,7 +798,10 @@ async function executeSearchEmails({ query, mailbox, category, since_days = 30, 
       requires_action:      m.requires_action,
       snippet:              m.snippet || null,
     })),
-    note: 'snippet is null voor mails gesynchroniseerd vóór Fase 2 (partial IMAP fetch nog niet actief).',
+    search_in_body,
+    note: search_in_body
+      ? 'body_text is beschikbaar voor mails die al backfilled zijn.'
+      : 'Gebruik search_in_body:true om ook in de berichttekst te zoeken (trager).',
   };
 }
 
@@ -1000,7 +1028,7 @@ async function executeGetEmailDetail({ email_id } = {}) {
 
   const { data, error } = await supabase
     .from('email_messages')
-    .select('id, mailbox, imap_uid, from_address, from_name, subject, date_received, snippet, category, category_confidence, category_reason, requires_action, is_read')
+    .select('id, mailbox, imap_uid, from_address, from_name, subject, date_received, snippet, body_text, body_fetched_at, category, category_confidence, category_reason, requires_action, is_read')
     .eq('id', email_id)
     .maybeSingle();
 
@@ -1023,9 +1051,40 @@ async function executeGetEmailDetail({ email_id } = {}) {
     requires_action:     data.requires_action,
     is_read:             data.is_read,
     snippet:             data.snippet || null,
-    note:                data.snippet
+    body_preview:        data.body_text?.slice(0, 500) || data.snippet?.slice(0, 300) || null,
+    body_available:      !!data.body_fetched_at,
+    note: data.body_fetched_at
       ? null
-      : 'Volledige berichttekst niet beschikbaar — snippet is null (Fase 2: partial IMAP fetch nog niet geïmplementeerd).',
+      : 'Body nog niet opgehaald — gebruik get_email_body voor actuele status of wacht tot backfill klaar is.',
+  };
+}
+
+async function executeGetEmailBody({ email_id } = {}) {
+  if (!email_id) return { error: 'email_id is verplicht' };
+
+  const { data, error } = await supabase
+    .from('email_messages')
+    .select('id, subject, body_text, body_fetched_at, body_truncated, body_fetch_error')
+    .eq('id', email_id)
+    .maybeSingle();
+
+  if (error) throw new Error('body-query fout: ' + error.message);
+  if (!data)  return { error: `E-mail #${email_id} niet gevonden in email_messages` };
+
+  const text = data.body_text?.slice(0, 8000) || null;
+  console.log(`[agent-tools] get_email_body: id=${email_id} → ${text ? text.length + ' tekens' : 'geen body'}`);
+
+  return {
+    id:           data.id,
+    subject:      data.subject,
+    body_text:    text,
+    truncated:    (text?.length ?? 0) >= 8000,
+    body_fetched: !!data.body_fetched_at,
+    note: !data.body_fetched_at
+      ? (data.body_fetch_error
+          ? `Body-fetch fout: ${data.body_fetch_error}`
+          : 'Body nog niet opgehaald — backfill-cron loopt nog. Probeer later opnieuw.')
+      : null,
   };
 }
 

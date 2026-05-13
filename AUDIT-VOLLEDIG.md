@@ -80,6 +80,46 @@ Genormaliseerde keuzes zijn vaak beter dan de originele spec:
 
 ---
 
+## Fase 2 sessie — 2026-05-13
+
+### Les 5 — IMAP body-fetch met ImapFlow + mailparser
+
+**Context:** Body-fetch toegevoegd aan live-sync en backfill. Twee keuzes werken goed samen:
+
+**Techniek:**
+```js
+const bodyMsg = await client.fetchOne(uid, { source: true }, { uid: true });
+const parsed  = await simpleParser(bodyMsg.source, { skipImageLinks: true });
+// parsed.text = plain-text, parsed.html = HTML
+```
+- `fetchOne` met `{ source: true }` geeft het volledige RFC822 bericht terug als Buffer
+- `simpleParser` (mailparser) handelt MIME-parsing, charset-conversie en multipart af
+- `skipImageLinks: true` voorkomt dat embedded images als grote base64-blobs worden geparsed
+
+**Garantie:** Altijd try/catch per mail — een body-fout mag nooit de envelope-sync breken:
+```js
+try {
+  // body fetch + update
+} catch (bodyErr) {
+  row.body_fetch_error = bodyErr.message.slice(0, 200);
+  // Geen body_fetched_at → backfill pakt dit niet opnieuw op
+}
+```
+
+**Storage-beslissing:** Supabase Pro (8GB) geeft voldoende ruimte voor text + HTML beide op te slaan. Bij 5613 mails × ~10KB gemiddeld = ~55MB. Groei van 1-2 jaar is comfortabel binnen de limieten. Geen compressie of pruning nodig.
+
+---
+
+### Les 6 — Verouderde kolomnamen in parallelle bestanden
+
+**Symptoom:** `executeIdentifyPaymentConcerns` en `executeDraftPaymentReminder` in `agent-tool-executor.js` gebruikten `received_at`, `confidence`, `body_snippet` — terwijl de live tabel `date_received`, `category_confidence`, `snippet` heeft.
+
+**Oorzaak:** `agent-tool-executor.js` was geschreven vóór de Fase 3-correcties in `agent-tools.js`. Twee bestanden querien dezelfde tabel onafhankelijk, waardoor de schema-fix niet automatisch doorwerkte.
+
+**Algemene regel:** Bij schema-wijzigingen of schema-correcties: altijd een grep doen op de gewijzigde kolomnamen (`grep -r "received_at" api/`) om alle bestanden te vinden die de tabel bevragen. Schema-correcties in één bestand verbergen fouten in parallelle bestanden.
+
+---
+
 ## Eerdere sessies
 
-*(Voeg hier lessen toe uit eerdere sessies zodra die worden gedocumenteerd.)*
+*(Fase A, B, C — zie commits tot en met 9adb307)*

@@ -1,4 +1,5 @@
 import { ImapFlow } from 'imapflow';
+import { simpleParser } from 'mailparser';
 import { supabase } from './supabase.js';
 import { categorize } from './email-agent.js';
 
@@ -197,6 +198,30 @@ async function syncMailbox({ account, host, port, boxStart }) {
           category_reason:     `[bron: ${aiSource}] ${catReason}`.trim(),
           is_read:             isRead,
         });
+      }
+
+      // ── Body ophalen voor nieuwe mails (Fase 2) ─────────────────────────
+      // Zelfde IMAP-sessie is al open — geen extra verbinding nodig.
+      // Try/catch per mail: body-fout mag metadata-sync nooit breken.
+      const BODY_LIMIT = 100_000;
+      for (const row of rows) {
+        try {
+          const bodyMsg = await client.fetchOne(row.imap_uid, { source: true }, { uid: true });
+          if (bodyMsg?.source) {
+            const parsed  = await simpleParser(bodyMsg.source, { skipImageLinks: true });
+            const rawText = parsed.text || '';
+            const rawHtml = parsed.html || '';
+            row.body_text       = rawText.slice(0, BODY_LIMIT) || null;
+            row.body_html       = rawHtml.slice(0, BODY_LIMIT) || null;
+            row.body_fetched_at = new Date().toISOString();
+            row.body_truncated  = rawText.length > BODY_LIMIT || rawHtml.length > BODY_LIMIT;
+            row.snippet         = rawText.slice(0, 300).trim() || null;
+          }
+        } catch (bodyErr) {
+          console.warn(`[sync-emails] body-fetch fout ${account.mailbox}/${row.imap_uid}:`, bodyErr.message);
+          row.body_fetch_error = bodyErr.message.slice(0, 200);
+          // Geen body_fetched_at gezet → backfill kan later opnieuw proberen
+        }
       }
 
       // ── Batch-insert — idempotent via ON CONFLICT DO NOTHING ───────────

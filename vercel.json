@@ -15,6 +15,10 @@
     {
       "path": "/api/agent-expire-approvals",
       "schedule": "0 * * * *"
+    },
+    {
+      "path": "/api/backfill-bodies",
+      "schedule": "*/5 * * * *"
     }
   ],
   "headers": [

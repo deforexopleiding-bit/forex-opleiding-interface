@@ -116,11 +116,12 @@ async function executeCreateMeetingFollowup({ topic, deelnemende_agents, voorges
 async function executeSendEmailReply({ email_id, to, subject, body, from_mailbox } = {}) {
   if (!body) throw new Error('body is verplicht voor send_email_reply');
 
-  // Haal original email op voor context (from_address, mailbox, subject)
+  // Haal originele email op voor context (from_address, mailbox, subject, body_text)
   let emailCtx = null;
   if (email_id) {
     const { data } = await supabase.from('email_messages')
-      .select('from_address, from_name, subject, mailbox').eq('id', Number(email_id)).single();
+      .select('from_address, from_name, subject, mailbox, body_text, snippet')
+      .eq('id', Number(email_id)).maybeSingle();
     emailCtx = data;
   }
 
@@ -130,6 +131,12 @@ async function executeSendEmailReply({ email_id, to, subject, body, from_mailbox
 
   if (!recipientTo) throw new Error('Ontvanger (to) kan niet worden bepaald — geef to mee of een geldig email_id');
 
+  // Voeg een geciteerd fragment toe als context (eerste 500 tekens van origineel body)
+  const bodyCtx = emailCtx?.body_text?.slice(0, 500) || emailCtx?.snippet?.slice(0, 300) || null;
+  const finalBody = bodyCtx
+    ? `${body}\n\n---\n${bodyCtx.split('\n').slice(0, 5).map(l => '> ' + l).join('\n')}`
+    : body;
+
   const r = await fetch(`${getBaseUrl()}/api/send-email`, {
     method:  'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -137,7 +144,7 @@ async function executeSendEmailReply({ email_id, to, subject, body, from_mailbox
       from_mailbox: fromMailbox,
       to:           recipientTo,
       subject:      replySubject,
-      text:         body,
+      text:         finalBody,
       email_id:     email_id ? String(email_id) : undefined,
     }),
   });
@@ -174,10 +181,10 @@ async function executeScheduleEmailFollowup({ email_id, delay_hours = 24, remind
 export async function executeIdentifyPaymentConcerns({ since_days = 14, include_replied = false } = {}) {
   const since = new Date(Date.now() - Number(since_days) * 86400000).toISOString();
   const { data: emails, error } = await supabase.from('email_messages')
-    .select('id, from_address, from_name, subject, received_at, confidence')
+    .select('id, from_address, from_name, subject, date_received, category_confidence')
     .eq('category', 'Factuurvraag')
-    .gte('received_at', since)
-    .order('received_at', { ascending: false });
+    .gte('date_received', since)
+    .order('date_received', { ascending: false });
   if (error) throw new Error(`email_messages query fout: ${error.message}`);
 
   const { data: replied } = await supabase.from('email_replies').select('email_id');
@@ -190,8 +197,8 @@ export async function executeIdentifyPaymentConcerns({ since_days = 14, include_
       sender:       e.from_address,
       name:         e.from_name,
       subject:      e.subject,
-      received_at:  e.received_at,
-      urgency_score: e.confidence,
+      received_at:  e.date_received,
+      urgency_score: e.category_confidence,
     }));
 
   // Audit als read-actie
@@ -209,10 +216,11 @@ async function executeDraftPaymentReminder({ email_ids = [], tone = 'friendly', 
   const concepts = [];
   for (const email_id of email_ids.slice(0, 10)) {
     const { data: email } = await supabase.from('email_messages')
-      .select('from_address, from_name, subject, received_at, body_snippet').eq('id', Number(email_id)).single();
+      .select('from_address, from_name, subject, date_received, snippet, body_text').eq('id', Number(email_id)).maybeSingle();
     if (!email) { console.warn(`[draft_payment_reminder] email ${email_id} niet gevonden`); continue; }
 
     const toneLabel = tone === 'friendly' ? 'vriendelijke' : tone === 'firm' ? 'zakelijke' : 'dringende';
+    const bodyContext = email.body_text?.slice(0, 200) || email.snippet?.slice(0, 200) || 'geen';
     const claudeResp = await fetch('https://api.anthropic.com/v1/messages', {
       method:  'POST',
       headers: { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
@@ -223,8 +231,8 @@ async function executeDraftPaymentReminder({ email_ids = [], tone = 'friendly', 
           `Schrijf een ${toneLabel} betalingsherinnering voor de volgende factuurvraag:\n` +
           `Van: ${email.from_name || email.from_address}\n` +
           `Onderwerp: ${email.subject}\n` +
-          `Ontvangen: ${email.received_at?.split('T')[0]}\n` +
-          `Context: ${email.body_snippet?.slice(0, 200) || 'geen'}\n` +
+          `Ontvangen: ${email.date_received?.split('T')[0]}\n` +
+          `Context: ${bodyContext}\n` +
           (custom_note ? `Extra instructie: ${custom_note}\n` : '') +
           `\nMax 3 alinea's. Begin met de aanhef.`,
         }],

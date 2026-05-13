@@ -93,14 +93,15 @@
 
 ## 🏗️ ARCHITECTUUR — Tooling foundation
 
-### [A2] Mail-sync naar Supabase ✅ FASE 1 GEFIXED (2026-05-12)
+### [A2] Mail-sync naar Supabase ✅ FASE 1+2 VOLLEDIG GEFIXED (2026-05-13)
 **Wat opgelost:**
 - `email_messages` tabel + `email_sync_log` tabel toegevoegd aan `db-migrate.js`
 - `api/sync-emails.js`: cron-endpoint met CRON_SECRET auth, per-mailbox incrementele UID-sync, categorize() integratie, idempotente upsert, 55s abort-guard
 - `vercel.json`: cron `*/5 * * * *` op `/api/sync-emails`
 - `api/sync-status.js`: monitoring-endpoint met log-history, per-mailbox tellingen, categorie-verdeling
 - 12 kolomnaam-mismatches gefixed (2026-05-12): alle Supabase-queries gealigneerd met werkelijk schema
-- **Fase 2 (nog open):** snippet via partial IMAP fetch; Simon's search_emails tool de live email_messages tabel laten bevragen
+- **Fase 2 (2026-05-13):** body_text + body_html per mail via simpleParser (mailparser). Live-sync haalt body mee bij nieuwe mails. Backfill voor 5613 historische mails via `api/backfill-bodies.js` (cron */5). `get_email_body` tool toegevoegd voor agents. `get_email_detail` toont `body_preview`. `search_emails` ondersteunt `search_in_body:true`.
+- **Fase 3 (Fase 3 van tools):** Simon's search_emails, get_unanswered_emails, get_email_stats, get_email_categorization_stats direct op email_messages (2026-05-13)
 
 ### [A1] email_categorizations tabel — per-mail categorie-opslag
 **Prioriteit:** Hoog (blokkeert eerlijke email-statistieken in Simon)  
@@ -164,9 +165,8 @@ En in `api/email-agent.js`: bij elke categorisatie een rij invoegen.
 **Wat:** `identify_payment_concerns` en `draft_payment_reminder` zijn nu gebaseerd op e-mailcategorisering (`Factuurvraag`). Koppeling met Mollie API zou echte openstaande facturen geven.
 **Waarom geparkeerd:** Mollie API-key + integratie is apart project. Aron communiceert de disclaimer al.
 
-### [P-C4] Fase 3 mail-sync — Simon's tools naar `email_messages`
-**Wat:** `search_emails` en `get_unanswered_emails` bevragen nu de `email_replies` / `learn_examples` tabellen (proxy). Upgrade: direct bevragen van `email_messages` (al gesynchroniseerd via cron).
-**Waarom geparkeerd:** Zie `[A2]` in Architectuur-sectie. Fase 2 van de mail-sync staat nog open.
+### [P-C4] Fase 3 mail-sync — Simon's tools naar `email_messages` ✅ GEREED (2026-05-13)
+**Opgelost:** Alle Simon-tools bevragen nu direct `email_messages`. Body-fetch (Fase 2) volledig geïmplementeerd. Zie `[A2]`.
 
 ### [P-C5] B2 chair-detectie strenger
 **Wat:** De chair-agent in de vergaderruimte is soms te chatty — interrupts te vaak. Drempel verhogen of detectie op basis van speaking-time.
