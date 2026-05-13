@@ -56,6 +56,13 @@ async function resolveAssignee(name) {
   return { name, type: 'employee', id: name };
 }
 
+// Hulpfunctie: accepteer alleen geldige UUID-strings voor uuid-kolommen
+// Agents gebruiken hun naam als id (bv. 'Simon') — dat is geen UUID
+function toUuidOrNull(id) {
+  if (!id) return null;
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id) ? id : null;
+}
+
 // Maak één taak aan + taken_assignees rijen
 async function createTask({ titel, beschrijving, assignees, deadline, prioriteit, source_meeting_id, categorie = 'Vergadering' }) {
   const taskId = crypto.randomUUID();
@@ -71,14 +78,16 @@ async function createTask({ titel, beschrijving, assignees, deadline, prioriteit
     status:            'todo',
     toegewezen_aan:    first?.name || null,
     assigned_to_type:  first?.type || null,
-    assigned_to_id:    first?.id   || null,
-    source_meeting_id: source_meeting_id || null,
+    // assigned_to_id is uuid — agents hebben naam-strings (geen UUID), bewaar null voor hen
+    assigned_to_id:    toUuidOrNull(first?.id),
+    source_meeting_id: toUuidOrNull(source_meeting_id),
     deadline:          deadline   || null,
     categorie,
     aangemaakt:        now,
     updated_at:        now,
   };
 
+  console.log(`[createTask] INSERT taken_items: "${taskRow.titel}", assigned_to_type=${taskRow.assigned_to_type}, source_meeting_id=${taskRow.source_meeting_id}`);
   const { error: taskErr } = await supabase.from('taken_items').insert(taskRow);
   if (taskErr) throw new Error(`taken_items insert fout: ${taskErr.message}`);
 
@@ -448,20 +457,30 @@ export default async function handler(req, res) {
 
       let tasksCreated  = 0;
       let assigneesSet  = 0;
+      const taskIds     = [];
+      const errors      = [];
 
-      for (const ap of pts) {
-        // Resolve alle assignees
+      console.log(`[approve] received ${pts.length} action_points, meeting_id=${meeting_id}`);
+
+      for (let i = 0; i < pts.length; i++) {
+        const ap = pts[i];
+        console.log(`[approve] processing item ${i}: titel="${ap.titel || ap.title}", assignees=${JSON.stringify(ap.assignees)}`);
+
+        // Resolve alle assignees — accepteer string (naam) of object { name, type, id }
         const resolvedAssignees = await Promise.all(
           (ap.assignees || []).map(a => {
-            // Accepteer zowel string (naam) als object { name, type, id }
             const name = typeof a === 'string' ? a : a.name;
             return resolveAssignee(name);
           })
         );
         const validAssignees = resolvedAssignees.filter(Boolean);
 
+        if (!validAssignees.length) {
+          console.warn(`[approve] item ${i} heeft 0 geldige assignees — taak wordt toch aangemaakt`);
+        }
+
         try {
-          await createTask({
+          const taskId = await createTask({
             titel:             ap.titel || ap.title || '(naamloos)',
             beschrijving:      ap.beschrijving || null,
             assignees:         validAssignees,
@@ -471,12 +490,24 @@ export default async function handler(req, res) {
           });
           tasksCreated++;
           assigneesSet += validAssignees.length;
+          taskIds.push(taskId);
+          console.log(`[approve] item ${i} aangemaakt: taskId=${taskId}, assignees=${validAssignees.length}`);
         } catch (taskErr) {
-          console.error('[agent-meeting] taak aanmaken fout:', taskErr.message);
+          const msg = `item ${i} ("${ap.titel || ap.title}"): ${taskErr.message}`;
+          console.error('[approve] taak aanmaken fout:', msg);
+          errors.push(msg);
         }
       }
 
-      return res.status(200).json({ ok: true, tasks_created: tasksCreated, assignees_set: assigneesSet });
+      console.log(`[approve] loop complete — created=${tasksCreated}, assignees=${assigneesSet}, errors=${errors.length}`);
+
+      return res.status(200).json({
+        ok:            errors.length === 0 || tasksCreated > 0,
+        tasks_created: tasksCreated,
+        assignees_set: assigneesSet,
+        task_ids:      taskIds,
+        errors:        errors.length ? errors : undefined,
+      });
     }
 
     // ── ADD INSTANT TASK ──────────────────────────────────────────────────────
