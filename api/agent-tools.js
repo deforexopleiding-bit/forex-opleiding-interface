@@ -670,7 +670,7 @@ async function executeGetEmailStats({ period_days, mailbox } = {}) {
 
   let qCurr = supabase
     .from('email_messages')
-    .select('id, category, mailbox, date_received, category_confidence')
+    .select('id, category, mailbox, date_received')
     .gte('date_received', since)
     .limit(2000);
   if (mailbox) qCurr = qCurr.eq('mailbox', mailbox);
@@ -784,12 +784,12 @@ async function executeGetUnansweredEmails({ days_old = 7, mailbox, limit = 20 } 
   const since = new Date(Date.now() - days * 86400000).toISOString();
 
   // Stap 1: haal kandidaten op — geen Reclame, geen Onbekend, geen Spam
-  const SKIP_CATS = new Set(['Reclame', 'Onbekend', 'Spam', 'Nieuwsbrief']);
+  const SKIP_CATS = ['Reclame', 'Onbekend', 'Spam', 'Nieuwsbrief'];
 
   let q = supabase
     .from('email_messages')
-    .select('id, mailbox, from_address, from_name, subject, date_received, category, category_confidence, requires_action, snippet')
-    .not('category', 'in', `(${[...SKIP_CATS].join(',')})`)
+    .select('id, mailbox, from_address, from_name, subject, date_received, category, category_confidence, requires_action')
+    .not('category', 'in', `(${SKIP_CATS.join(',')})`)
     .not('category', 'is', null)
     .gte('date_received', since)
     .order('date_received', { ascending: true })  // oudste eerst = meest urgent
@@ -829,7 +829,6 @@ async function executeGetUnansweredEmails({ days_old = 7, mailbox, limit = 20 } 
 
   return {
     total_count:     unanswered.length,
-    shown:           Math.min(unanswered.length, lim),
     period_days:     days,
     mailbox_filter:  mailbox || 'alle',
     by_category:     byCategory,
@@ -844,7 +843,6 @@ async function executeGetUnansweredEmails({ days_old = 7, mailbox, limit = 20 } 
       category:            m.category,
       category_confidence: m.category_confidence,
       requires_action:     m.requires_action,
-      snippet:             m.snippet || null,
     })),
     note: 'Onbeantwoord = geen entry in email_replies. Reclame, Onbekend, Spam en Nieuwsbrief zijn uitgesloten.',
   };
@@ -1003,7 +1001,7 @@ async function executeGetEmailDetail({ email_id } = {}) {
   const { data, error } = await supabase
     .from('email_messages')
     .select('id, mailbox, imap_uid, from_address, from_name, subject, date_received, snippet, category, category_confidence, category_reason, requires_action, is_read')
-    .eq('id', String(email_id))
+    .eq('id', email_id)
     .maybeSingle();
 
   if (error) throw new Error('email_messages detail-query fout: ' + error.message);
