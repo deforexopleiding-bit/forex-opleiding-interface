@@ -148,6 +148,44 @@ En in `api/email-agent.js`: bij elke categorisatie een rij invoegen.
 
 ---
 
+## 🅿️ PARKEER-LIJST — Fase C (niet in scope, bewust uitgesteld)
+
+> Bijgewerkt: 2026-05-13 na Fase C sessie (commits `bf3ff35`, `9adb307`)
+
+### [P-C1] reject_reason workflow uitbreiden
+**Wat:** Optionele modal bij afkeuren in de approval-inbox — laat Jeffrey een reden invullen die bewaard wordt in `agent_approval_queue.reject_reason` en zichtbaar is in het audit-log.
+**Waarom geparkeerd:** Core-flow werkt zonder. Purist refinement.
+
+### [P-C2] Aparte `rejected_by` kolom in approval queue
+**Wat:** Aparte `rejected_by` kolom naast `approved_by` voor duidelijkere querying. Nu worden beide gevallen via `approved_by` opgeslagen.
+**Waarom geparkeerd:** Functioneel correct, uitbreiding is een schema-migratie.
+
+### [P-C3] Mollie-integratie voor Aron's `draft_payment_reminder`
+**Wat:** `identify_payment_concerns` en `draft_payment_reminder` zijn nu gebaseerd op e-mailcategorisering (`Factuurvraag`). Koppeling met Mollie API zou echte openstaande facturen geven.
+**Waarom geparkeerd:** Mollie API-key + integratie is apart project. Aron communiceert de disclaimer al.
+
+### [P-C4] Fase 3 mail-sync — Simon's tools naar `email_messages`
+**Wat:** `search_emails` en `get_unanswered_emails` bevragen nu de `email_replies` / `learn_examples` tabellen (proxy). Upgrade: direct bevragen van `email_messages` (al gesynchroniseerd via cron).
+**Waarom geparkeerd:** Zie `[A2]` in Architectuur-sectie. Fase 2 van de mail-sync staat nog open.
+
+### [P-C5] B2 chair-detectie strenger
+**Wat:** De chair-agent in de vergaderruimte is soms te chatty — interrupts te vaak. Drempel verhogen of detectie op basis van speaking-time.
+**Waarom geparkeerd:** UX-verbetering, geen blocker.
+
+### [P-C6] B5 status-update limit per agent (max 5)
+**Wat:** Leon en Aron kunnen `update_task_status` onbeperkt aanroepen in één ronde. Max 5 per tool-round toevoegen als guard.
+**Waarom geparkeerd:** Approval-workflow beschermt Jeffrey al; limit is extra veiligheidslaag.
+
+### [P-C7] Instant-add knop tijdens vergadering voor multi-assignee
+**Wat:** Snelknop om tijdens een lopende meeting direct een taak toe te voegen met multi-assignee UI (nu enkel via actiepunten-review na afloop).
+**Waarom geparkeerd:** Feature-wens, geen blocker voor core-vergaderworkflow.
+
+### [P-C8] Voice input voor vergaderruimte
+**Wat:** Spraak-naar-tekst voor agent-berichten tijdens de meeting, zodat Jeffrey hands-free kan chatten.
+**Waarom geparkeerd:** Browser Web Speech API instabiel. Toekomst.
+
+---
+
 ## Voltooide items ✅
 
 - [x] AI-categorisatie met Claude Haiku (email-agent.js)
