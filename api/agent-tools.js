@@ -53,22 +53,21 @@ const TOOL_DEFINITIONS = {
 
   get_email_stats: {
     name: 'get_email_stats',
-    description: 'Geeft statistieken over e-mail activiteit per categorie voor een bepaalde periode. Gebruik dit als de gebruiker vraagt hoeveel leads, appointments, klantvragen, antwoorden of andere e-mail categorieën er zijn binnengekomen of verwerkt in de inbox.',
+    description: 'Geeft statistieken over ontvangen e-mails direct uit email_messages (5000+ mails). Inclusief totaal per categorie, per mailbox, dagelijkse trend en vergelijking met vorige periode. Gebruik dit voor vragen over hoeveel mails er zijn binnengekomen, leads, factuurvragen, etc.',
     input_schema: {
       type: 'object',
       properties: {
-        period: {
-          type: 'string',
-          enum: ['today', 'yesterday', 'this_week', 'this_month', 'last_7_days'],
-          description: 'De periode waarover statistieken gewenst zijn',
+        period_days: {
+          type: 'integer',
+          description: 'Aantal dagen terugkijken. Standaard: 7. Max: 90.',
         },
-        categories: {
-          type: 'array',
-          items: { type: 'string' },
-          description: 'Optioneel: filter op specifieke categorieën (bv. ["Nieuwe Lead", "Klantvraag"]). Weglaten = alle categorieën.',
+        mailbox: {
+          type: 'string',
+          enum: ['leads', 'info', 'partners', 'administratie'],
+          description: 'Filter op één mailbox (optioneel — weglaten = alle mailboxen).',
         },
       },
-      required: ['period'],
+      required: [],
     },
   },
 
@@ -94,22 +93,30 @@ const TOOL_DEFINITIONS = {
 
   search_emails: {
     name: 'search_emails',
-    description: 'Zoekt specifieke e-mails op basis van zoekterm, afzender of onderwerp. Gebruik dit als de gebruiker een specifieke mail wil terugvinden of details wil over recente mails met een bepaald onderwerp of afzender.',
+    description: 'Zoekt e-mails in email_messages (5000+ mails) op onderwerp, afzender of naam. Geeft volledige context per mail: afzender, onderwerp, categorie, ontvangstdatum. Gebruik dit voor elke zoekvraag over mails.',
     input_schema: {
       type: 'object',
       properties: {
         query: {
           type: 'string',
-          description: 'Zoekterm — wordt vergeleken met onderwerp, afzender en berichtinhoud.',
+          description: 'Zoekterm — wordt vergeleken met onderwerp, afzender en naam.',
         },
-        period: {
+        mailbox: {
           type: 'string',
-          enum: ['today', 'yesterday', 'this_week', 'this_month', 'last_7_days'],
-          description: 'Periode om in te zoeken. Standaard: "last_7_days".',
+          enum: ['leads', 'info', 'partners', 'administratie'],
+          description: 'Filter op specifieke mailbox (optioneel).',
+        },
+        category: {
+          type: 'string',
+          description: 'Filter op categorie, bijv. "Nieuwe Lead", "Factuurvraag" (optioneel).',
+        },
+        since_days: {
+          type: 'integer',
+          description: 'Terugkijkperiode in dagen. Standaard: 30.',
         },
         limit: {
           type: 'integer',
-          description: 'Maximum aantal resultaten. Standaard: 5.',
+          description: 'Maximum aantal resultaten. Standaard: 10, max: 50.',
         },
       },
       required: ['query'],
@@ -118,13 +125,22 @@ const TOOL_DEFINITIONS = {
 
   get_unanswered_emails: {
     name: 'get_unanswered_emails',
-    description: 'Geeft e-mails die actie vereisen maar nog onbeantwoord of onopgelost zijn. Gebruik dit als de gebruiker vraagt welke mails nog open staan, onbeantwoord zijn, of aandacht nodig hebben.',
+    description: 'Geeft e-mails die nog niet beantwoord zijn: mails die in email_messages staan maar géén entry in email_replies hebben, uitgezonderd Reclame en Onbekend. Inclusief totaaltelling per categorie en leeftijd. Gebruik dit voor vragen over openstaande of onbeantwoorde mails.',
     input_schema: {
       type: 'object',
       properties: {
+        days_old: {
+          type: 'integer',
+          description: 'Kijk terug dit aantal dagen. Standaard: 7.',
+        },
+        mailbox: {
+          type: 'string',
+          enum: ['leads', 'info', 'partners', 'administratie'],
+          description: 'Filter op mailbox (optioneel).',
+        },
         limit: {
           type: 'integer',
-          description: 'Maximum aantal e-mails om terug te geven. Standaard: 10.',
+          description: 'Maximum aantal e-mails in de resultaten. Standaard: 20.',
         },
       },
       required: [],
@@ -163,7 +179,7 @@ const TOOL_DEFINITIONS = {
 
   get_email_categorization_stats: {
     name: 'get_email_categorization_stats',
-    description: 'Geeft inzicht in hoe goed Simon e-mails categoriseert: verwerkte mails, aantal correcties, categorieverdeling en lage-zekerheid patronen. Gebruik dit als de gebruiker vraagt naar Simons prestaties, accuracy of trainingsvoortgang.',
+    description: 'Geeft inzicht in de categorisatiekwaliteit: verdeling per categorie, gemiddelde zekerheid (category_confidence), en voorbeelden van mails met lage zekerheid (< 50). Gebruik dit als de gebruiker vraagt naar Simons accuracy of categorisatieprestaties.',
     input_schema: {
       type: 'object',
       properties: {
@@ -174,6 +190,21 @@ const TOOL_DEFINITIONS = {
         },
       },
       required: [],
+    },
+  },
+
+  get_email_detail: {
+    name: 'get_email_detail',
+    description: 'Geeft volledige details van één specifieke e-mail op basis van ID. Gebruik dit als een ander tool een email_id heeft teruggegeven en je meer details wil, of als de gebruiker een specifieke mail wil bekijken. Geeft afzender, onderwerp, categorie, snippet (indien beschikbaar) en metadata.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        email_id: {
+          type: 'string',
+          description: 'Het ID (bigint als string) van de e-mail uit email_messages.',
+        },
+      },
+      required: ['email_id'],
     },
   },
 
@@ -373,7 +404,7 @@ const TOOL_DEFINITIONS = {
 // gemeenschappelijk hebben met de agent.
 
 const TOOL_TAGS = {
-  // Bestaande read-tools
+  // Read-tools
   get_email_stats:                ['email'],
   get_open_tasks:                 ['tasks'],
   search_emails:                  ['email'],
@@ -381,7 +412,8 @@ const TOOL_TAGS = {
   get_recent_corrections:         ['email', 'learning'],
   query_knowledge_base:           ['knowledge'],
   get_email_categorization_stats: ['email', 'learning'],
-  // Bestaande schrijf-tool
+  get_email_detail:               ['email'],          // Fase 3 — nieuw
+  // Schrijf-tool
   add_knowledge_base_item:        ['knowledge_write'],
   // C2 — Simon schrijf-tools
   send_email_reply:               ['email_write'],
@@ -401,8 +433,10 @@ const TOOL_TAGS = {
 const AGENT_TAGS = {
   Simon: ['email', 'tasks', 'knowledge', 'learning', 'knowledge_write',
           'email_write', 'decisions_write', 'meetings_write'],
-  Leon:  ['tasks', 'tasks_write', 'decisions_write', 'meetings_write', 'categorize_write'],
-  Aron:  ['tasks', 'payment_read', 'payment_write', 'decisions_write', 'meetings_write'],
+  // Leon en Aron krijgen 'email' tag zodat ze search_emails en get_email_detail
+  // kunnen gebruiken voor contract- en betalingscontext
+  Leon:  ['email', 'tasks', 'tasks_write', 'decisions_write', 'meetings_write', 'categorize_write'],
+  Aron:  ['email', 'tasks', 'payment_read', 'payment_write', 'decisions_write', 'meetings_write'],
 };
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -433,7 +467,7 @@ export async function execute(toolName, input, agentName = 'system') {
   console.log(`[agent-tools] execute: ${toolName} | agent: ${agentName} |`, JSON.stringify(input));
   const i = input || {};
   switch (toolName) {
-    // ── Bestaande read-tools ────────────────────────────────────────────────
+    // ── Read-tools ──────────────────────────────────────────────────────────
     case 'get_email_stats':                return executeGetEmailStats(i);
     case 'get_open_tasks':                 return executeGetOpenTasks(i);
     case 'search_emails':                  return executeSearchEmails(i);
@@ -441,6 +475,7 @@ export async function execute(toolName, input, agentName = 'system') {
     case 'get_recent_corrections':         return executeGetRecentCorrections(i);
     case 'query_knowledge_base':           return executeQueryKnowledgeBase(i);
     case 'get_email_categorization_stats': return executeGetEmailCategorizationStats(i);
+    case 'get_email_detail':               return executeGetEmailDetail(i);       // Fase 3
     // ── Bestaande schrijf-tool (al met eigen bevestigingsprotocol in system prompt) ──
     case 'add_knowledge_base_item':        return executeAddKnowledgeBaseItem(i);
 
@@ -516,23 +551,24 @@ export async function execute(toolName, input, agentName = 'system') {
     case 'bulk_categorize_review': {
       const threshold = Math.min(Math.max(parseInt(i.confidence_threshold) || 50, 0), 100);
       const lim       = Math.min(Math.max(parseInt(i.limit) || 20, 1), 50);
+      // email_messages werkelijke kolomnamen: snippet, category_confidence, date_received
       const { data: emails } = await supabase.from('email_messages')
-        .select('id, from_address, subject, body_snippet, category, confidence')
-        .lt('confidence', threshold)
+        .select('id, from_address, subject, snippet, category, category_confidence')
+        .lt('category_confidence', threshold)
         .not('category', 'is', null)
-        .order('received_at', { ascending: false })
+        .order('date_received', { ascending: false })
         .limit(lim);
       if (!emails?.length) {
-        return { ok: true, message: `Geen e-mails gevonden met confidence < ${threshold}.`, count: 0 };
+        return { ok: true, message: `Geen e-mails gevonden met category_confidence < ${threshold}.`, count: 0 };
       }
       const previewItems = emails.map(e => ({
         email_id:      String(e.id),
         subject:       e.subject || '(geen onderwerp)',
         from_address:  e.from_address || '(onbekend)',
         current_cat:   e.category,
-        confidence:    e.confidence,
-        snippet:       e.body_snippet?.slice(0, 100) || '',
-        suggested_cat: suggestCategory(e.subject || '', e.body_snippet || '', e.category),
+        confidence:    e.category_confidence,
+        snippet:       e.snippet?.slice(0, 100) || '',
+        suggested_cat: suggestCategory(e.subject || '', e.snippet || '', e.category),
       }));
       const title = `Categorisatie-review (${previewItems.length} mails, confidence < ${threshold})`;
       return createApprovalRequest(agentName, 'bulk_categorize_review', title,
@@ -611,177 +647,206 @@ function suggestCategory(subject, snippet, currentCat) {
 // ═══════════════════════════════════════════════════════════════════════════
 // IMPLEMENTATIES
 // ═══════════════════════════════════════════════════════════════════════════
+//
+// email_messages werkelijk schema (bron: sync-emails.js / backfill-emails.js)
+// ─────────────────────────────────────────────────────────────────────────
+// id (bigint auto) | mailbox (text) | imap_uid (bigint)
+// from_address (text) | from_name (text) | subject (text)
+// date_received (timestamptz)   ← LET OP: NIET received_at
+// snippet (text, nullable)      ← LET OP: NIET body_snippet (nu null voor alle mails)
+// category (text) | requires_action (bool)
+// category_confidence (int 0-100) ← LET OP: NIET confidence
+// category_reason (text) | is_read (bool)
+// Indexen: (mailbox, date_received DESC), (category)
+// ─────────────────────────────────────────────────────────────────────────
+// db-migrate.js CREATE TABLE gebruikt oudere namen (received_at, body_snippet,
+// confidence, ai_source) — die definitie is verouderd t.o.v. de live tabel.
 
-async function executeGetEmailStats({ period = 'last_7_days', categories = [] }) {
-  const { from, to } = getDateRange(period);
+async function executeGetEmailStats({ period_days, mailbox } = {}) {
+  // Fase 3: directe query op email_messages
+  const days  = Math.min(Math.max(parseInt(period_days) || 7, 1), 90);
+  const since = new Date(Date.now() - days * 86400000).toISOString();
+  const prevSince = new Date(Date.now() - days * 2 * 86400000).toISOString();
 
-  const [actionsRes, patternsRes] = await Promise.allSettled([
-    supabase
-      .from('email_actions')
-      .select('action, value, set_at')
-      .gte('set_at', from)
-      .lte('set_at', to),
-    supabase
-      .from('email_patterns')
-      .select('category, times_seen')
-      .order('times_seen', { ascending: false })
-      .limit(100),
-  ]);
+  let qCurr = supabase
+    .from('email_messages')
+    .select('id, category, mailbox, date_received, category_confidence')
+    .gte('date_received', since)
+    .limit(2000);
+  if (mailbox) qCurr = qCurr.eq('mailbox', mailbox);
 
-  const rows     = actionsRes.status     === 'fulfilled' ? (actionsRes.value.data     || []) : [];
-  const patterns = patternsRes.status === 'fulfilled' ? (patternsRes.value.data || []) : [];
+  let qPrev = supabase
+    .from('email_messages')
+    .select('id')
+    .gte('date_received', prevSince)
+    .lt('date_received', since)
+    .limit(2000);
+  if (mailbox) qPrev = qPrev.eq('mailbox', mailbox);
 
-  // ── Periode-acties ────────────────────────────────────────────────────────
-  const byAction      = {};
-  const recategorized = {};
-  for (const a of rows) {
-    byAction[a.action] = (byAction[a.action] || 0) + 1;
-    if (a.action === 'recategorize' && a.value) {
-      recategorized[a.value] = (recategorized[a.value] || 0) + 1;
-    }
-  }
+  const [currRes, prevRes] = await Promise.allSettled([qCurr, qPrev]);
+  const current = currRes.status === 'fulfilled' ? (currRes.value.data || []) : [];
+  const prev    = prevRes.status === 'fulfilled' ? (prevRes.value.data || []) : [];
 
-  // ── Historische patronen per categorie ────────────────────────────────────
+  // Aggregaten
   const byCategory = {};
-  for (const p of patterns) {
-    if (!p.category) continue;
-    byCategory[p.category] = (byCategory[p.category] || 0) + (p.times_seen || 0);
+  const byMailbox  = {};
+  const byDay      = {};
+
+  for (const m of current) {
+    const cat = m.category || 'Onbekend';
+    byCategory[cat]    = (byCategory[cat]    || 0) + 1;
+    byMailbox[m.mailbox] = (byMailbox[m.mailbox] || 0) + 1;
+    const day = (m.date_received || '').slice(0, 10);
+    if (day) byDay[day] = (byDay[day] || 0) + 1;
   }
 
-  // Optioneel filteren op gevraagde categorieën
-  const filteredPatterns = (categories || []).length > 0
-    ? Object.fromEntries(Object.entries(byCategory).filter(([k]) => categories.includes(k)))
-    : byCategory;
+  const daily_trend = Object.entries(byDay)
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([date, count]) => ({ date, count }));
+
+  const prevCount = prev.length;
+  const currCount = current.length;
+  const pctChange = prevCount > 0
+    ? Math.round(((currCount - prevCount) / prevCount) * 100)
+    : null;
+
+  console.log(`[agent-tools] get_email_stats: ${currCount} mails in ${days}d, prev=${prevCount}`);
 
   return {
-    period,
-    date_range: { from: from.slice(0, 16), to: to.slice(0, 16) },
-
-    period_actions: {
-      description: `Acties uitgevoerd in de gevraagde periode (${period})`,
-      note: 'Dit zijn handmatige acties (replies sturen, hercategoriseren, markeren, etc.) — NIET het totaal aantal binnengekomen mails per categorie.',
-      total:     rows.length,
-      by_action: byAction,
-      manually_recategorized_to: recategorized,
+    period_days: days,
+    date_from:   since.slice(0, 10),
+    mailbox_filter: mailbox || 'alle',
+    total_received: currCount,
+    by_category:  byCategory,
+    by_mailbox:   byMailbox,
+    daily_trend,
+    comparison_to_previous_period: {
+      previous_count: prevCount,
+      current_count:  currCount,
+      change_pct:     pctChange,
+      direction:      pctChange === null ? 'onbekend'
+                    : pctChange > 0 ? 'stijging'
+                    : pctChange < 0 ? 'daling'
+                    : 'gelijk',
     },
-
-    historical_patterns: {
-      description: 'Bekende afzender-patronen (alle tijd, geen periode-filter)',
-      note: 'Dit is het totaal aantal keren dat een patroon door AI of handmatig is herkend, historisch verzameld. Niet beperkt tot de gevraagde periode.',
-      by_category: filteredPatterns,
-    },
-
-    limitation: 'Categorie-toewijzingen worden niet per mail in Supabase opgeslagen — AI-categorisaties leven alleen in de browser-cache. Voor exacte aantallen per dag is een schema-uitbreiding nodig (email_categorizations tabel).',
   };
 }
 
-async function executeSearchEmails({ query, period = 'last_7_days', limit = 5 }) {
-  const { from, to } = getDateRange(period);
-  const term = `%${query}%`;
-  const lim  = Math.min(Math.max(parseInt(limit) || 5, 1), 20);
+async function executeSearchEmails({ query, mailbox, category, since_days = 30, limit = 10 } = {}) {
+  // Fase 3: directe query op email_messages (5000+ mails)
+  const lim   = Math.min(Math.max(parseInt(limit) || 10, 1), 50);
+  const days  = Math.min(Math.max(parseInt(since_days) || 30, 1), 365);
+  const since = new Date(Date.now() - days * 86400000).toISOString();
+  const term  = `%${query}%`;
 
-  // ── BEPERKING ──────────────────────────────────────────────────────────────
-  // De live inbox leeft in IMAP, niet in Supabase. Nieuw ontvangen mails
-  // die nog niet beantwoord of gecorrigeerd zijn staan in géén tabel.
-  // Zoekopdrachten in de live inbox zijn daardoor niet ondersteund vanuit
-  // deze tool. De twee beschikbare proxy-bronnen zijn:
-  //   1. email_replies  = mails die zijn beantwoord via de reply-composer
-  //   2. learn_examples = mails die handmatig zijn gecorrigeerd (Verplaats & Train)
-  // ──────────────────────────────────────────────────────────────────────────
+  let q = supabase
+    .from('email_messages')
+    .select('id, mailbox, from_address, from_name, subject, snippet, date_received, category, category_confidence, requires_action')
+    .or(`subject.ilike.${term},from_address.ilike.${term},from_name.ilike.${term}`)
+    .gte('date_received', since)
+    .order('date_received', { ascending: false })
+    .limit(lim);
 
-  const [repliesRes, examplesRes] = await Promise.allSettled([
-    supabase.from('email_replies')
-      .select('email_id, email_subject, to_address, from_address, sent_at')
-      .or(`email_subject.ilike.${term},to_address.ilike.${term},from_address.ilike.${term}`)
-      .gte('sent_at', from).lte('sent_at', to)
-      .order('sent_at', { ascending: false }).limit(lim),
-    supabase.from('learn_examples')
-      .select('email_id, sender_domain, body_snippet, old_category, created_at')
-      .or(`body_snippet.ilike.${term},sender_domain.ilike.${term}`)
-      .gte('created_at', from).lte('created_at', to)
-      .order('created_at', { ascending: false }).limit(lim),
-  ]);
+  if (mailbox)  q = q.eq('mailbox', mailbox);
+  if (category) q = q.eq('category', category);
 
-  const replies  = repliesRes.status  === 'fulfilled' ? (repliesRes.value.data  || []) : [];
-  const examples = examplesRes.status === 'fulfilled' ? (examplesRes.value.data || []) : [];
+  const { data, error } = await q;
+  if (error) throw new Error('email_messages search fout: ' + error.message);
 
-  const verzonden = replies.map(r  => ({
-    bron: 'beantwoord',
-    email_id: r.email_id,
-    onderwerp: r.email_subject,
-    van: r.from_address,
-    datum: r.sent_at,
-  }));
-  const gecorrigeerd = examples.map(e => ({
-    bron: 'gecorrigeerd',
-    email_id: e.email_id,
-    domein: e.sender_domain,
-    preview: e.body_snippet?.slice(0, 100) || null,
-    categorie: e.old_category,
-    datum: e.created_at,
-  }));
-
-  const alles = [...verzonden, ...gecorrigeerd].slice(0, lim);
+  console.log(`[agent-tools] search_emails: query="${query}" → ${(data||[]).length} resultaten`);
 
   return {
     query,
-    period,
-    live_inbox_doorzoekbaar: false,
-    beperking: 'De live inbox leeft in IMAP en is niet opgeslagen in Supabase. Alleen mails die zijn beantwoord of handmatig gecorrigeerd zijn doorzoekbaar. Als je naar een specifieke recente mail zoekt die nog open staat, kan ik die niet vinden via deze tool — maar ik kan je helpen hem te vinden via de Actie vereist-tab in de e-mailmodule.',
-    gevonden_in_database: alles.length,
-    resultaten: alles,
-    bronnen_doorzocht: [
-      'email_replies (beantwoorde mails)',
-      'learn_examples (handmatig gecorrigeerde mails)',
-    ],
+    period_days:  days,
+    mailbox_filter: mailbox  || 'alle',
+    category_filter: category || 'alle',
+    count:        (data || []).length,
+    results:      (data || []).map(m => ({
+      id:                   m.id,
+      mailbox:              m.mailbox,
+      sender:               m.from_address,
+      sender_name:          m.from_name,
+      subject:              m.subject,
+      received_at:          m.date_received,
+      category:             m.category,
+      category_confidence:  m.category_confidence,
+      requires_action:      m.requires_action,
+      snippet:              m.snippet || null,
+    })),
+    note: 'snippet is null voor mails gesynchroniseerd vóór Fase 2 (partial IMAP fetch nog niet actief).',
   };
 }
 
-async function executeGetUnansweredEmails({ limit = 10 }) {
-  const lim = Math.min(Math.max(parseInt(limit) || 10, 1), 30);
+async function executeGetUnansweredEmails({ days_old = 7, mailbox, limit = 20 } = {}) {
+  // Fase 3: directe query op email_messages + cross-check met email_replies
+  const lim   = Math.min(Math.max(parseInt(limit) || 20, 1), 50);
+  const days  = Math.min(Math.max(parseInt(days_old) || 7, 1), 90);
+  const since = new Date(Date.now() - days * 86400000).toISOString();
 
-  // Haal alle relevante acties op in één query
-  const { data: allActions } = await supabase
-    .from('email_actions')
-    .select('email_id, action, set_at')
-    .in('action', ['mark-action', 'no-action', 'reply_sent'])
-    .order('set_at', { ascending: false })
-    .limit(500);
+  // Stap 1: haal kandidaten op — geen Reclame, geen Onbekend, geen Spam
+  const SKIP_CATS = new Set(['Reclame', 'Onbekend', 'Spam', 'Nieuwsbrief']);
 
-  const rows = allActions || [];
+  let q = supabase
+    .from('email_messages')
+    .select('id, mailbox, from_address, from_name, subject, date_received, category, category_confidence, requires_action, snippet')
+    .not('category', 'in', `(${[...SKIP_CATS].join(',')})`)
+    .not('category', 'is', null)
+    .gte('date_received', since)
+    .order('date_received', { ascending: true })  // oudste eerst = meest urgent
+    .limit(lim * 4);                               // ruimere pool voor reply-filter
 
-  // Per email_id: bepaal de definitieve toestand (nieuwste actie wint)
-  const latestAction = {};
-  for (const r of rows) {
-    if (!latestAction[r.email_id]) latestAction[r.email_id] = r; // rijen zijn DESC, dus eerste = nieuwste
+  if (mailbox) q = q.eq('mailbox', mailbox);
+
+  const { data: candidates, error } = await q;
+  if (error) throw new Error('email_messages query fout: ' + error.message);
+
+  // Stap 2: cross-check met email_replies (beantwoorde mails uitsluiten)
+  const ids = (candidates || []).map(m => String(m.id));
+  let repliedIds = new Set();
+  if (ids.length > 0) {
+    const { data: replied } = await supabase
+      .from('email_replies')
+      .select('email_id')
+      .in('email_id', ids);
+    repliedIds = new Set((replied || []).map(r => String(r.email_id)));
   }
 
-  // Bevestigd open: ooit mark-action=true, meest recente actie is NIET no-action/reply_sent
-  const RESOLVED = new Set(['no-action', 'reply_sent']);
-  const confirmed = Object.values(latestAction)
-    .filter(r => r.action === 'mark-action' && !RESOLVED.has(r.action));
+  const unanswered = (candidates || []).filter(m => !repliedIds.has(String(m.id)));
 
-  // Verrijken met domain/preview uit learn_examples
-  const confirmedIds = confirmed.map(r => r.email_id);
-  let infoMap = {};
-  if (confirmedIds.length > 0) {
-    const { data: info } = await supabase
-      .from('learn_examples')
-      .select('email_id, sender_domain, body_snippet')
-      .in('email_id', confirmedIds);
-    infoMap = Object.fromEntries((info || []).map(e => [e.email_id, e]));
+  // Aggregaten
+  const byCategory = {};
+  for (const m of unanswered) {
+    const cat = m.category || 'Onbekend';
+    byCategory[cat] = (byCategory[cat] || 0) + 1;
   }
+
+  const oldest = unanswered[0];
+  const oldestDays = oldest
+    ? Math.floor((Date.now() - new Date(oldest.date_received).getTime()) / 86400000)
+    : 0;
+
+  console.log(`[agent-tools] get_unanswered_emails: ${unanswered.length} open van ${(candidates||[]).length} kandidaten`);
 
   return {
-    confirmed_count: confirmed.length,
-    confirmed_emails: confirmed.slice(0, lim).map(r => ({
-      email_id:         r.email_id,
-      sender_domain:    infoMap[r.email_id]?.sender_domain || '(onbekend)',
-      preview:          infoMap[r.email_id]?.body_snippet?.slice(0, 100) || null,
-      openstaand_sinds: r.set_at,
+    total_count:     unanswered.length,
+    shown:           Math.min(unanswered.length, lim),
+    period_days:     days,
+    mailbox_filter:  mailbox || 'alle',
+    by_category:     byCategory,
+    oldest_age_days: oldestDays,
+    emails:          unanswered.slice(0, lim).map(m => ({
+      id:                  m.id,
+      mailbox:             m.mailbox,
+      sender:              m.from_address,
+      sender_name:         m.from_name,
+      subject:             m.subject,
+      received_at:         m.date_received,
+      category:            m.category,
+      category_confidence: m.category_confidence,
+      requires_action:     m.requires_action,
+      snippet:             m.snippet || null,
     })),
-    limitation: 'Dit toont alleen mails die expliciet zijn gemarkeerd via de "Actie vereist" knop. AI-gecategoriseerde mails in actie-categorieën (Klantvraag, Factuurvraag, Overig) kunnen niet centraal worden opgevraagd zonder een email_categorizations tabel (staat op de architectuur-roadmap als [A1]).',
-    suggested_action: 'Voor het complete beeld: open de mailmodule → Actie vereist tab. De UI toont alle gecategoriseerde + gemarkeerde mails.',
+    note: 'Onbeantwoord = geen entry in email_replies. Reclame, Onbekend, Spam en Nieuwsbrief zijn uitgesloten.',
   };
 }
 
@@ -873,30 +938,42 @@ async function executeAddKnowledgeBaseItem({ title, content, category, direction
   };
 }
 
-async function executeGetEmailCategorizationStats({ period = 'last_7_days' }) {
+async function executeGetEmailCategorizationStats({ period = 'last_7_days' } = {}) {
+  // Fase 3: directe query op email_messages voor category + category_confidence
   const { from, to } = getDateRange(period);
 
-  const [corrRes, patternsRes] = await Promise.allSettled([
+  const [msgsRes, corrRes] = await Promise.allSettled([
+    supabase.from('email_messages')
+      .select('id, category, category_confidence')
+      .gte('date_received', from)
+      .lte('date_received', to)
+      .limit(2000),
     supabase.from('learn_examples')
       .select('old_category, correction_type, created_at')
-      .gte('created_at', from).lte('created_at', to),
-    supabase.from('email_patterns')
-      .select('sender_domain, category, confidence, times_seen, source')
-      .order('times_seen', { ascending: false }).limit(50),
+      .gte('created_at', from)
+      .lte('created_at', to),
   ]);
 
-  const corrections = corrRes.status     === 'fulfilled' ? (corrRes.value.data     || []) : [];
-  const patterns    = patternsRes.status === 'fulfilled' ? (patternsRes.value.data || []) : [];
+  const msgs        = msgsRes.status === 'fulfilled' ? (msgsRes.value.data || []) : [];
+  const corrections = corrRes.status === 'fulfilled' ? (corrRes.value.data || []) : [];
 
-  const categoryDist = {};
-  for (const p of patterns) {
-    categoryDist[p.category] = (categoryDist[p.category] || 0) + (p.times_seen || 0);
+  const byCategory     = {};
+  let   totalConf      = 0;
+  let   lowConfCount   = 0;
+  const lowConfExamples = [];
+
+  for (const m of msgs) {
+    const cat  = m.category || 'Onbekend';
+    byCategory[cat] = (byCategory[cat] || 0) + 1;
+    const conf = m.category_confidence ?? 0;
+    totalConf += conf;
+    if (conf < 50) {
+      lowConfCount++;
+      if (lowConfExamples.length < 5) {
+        lowConfExamples.push({ id: m.id, category: cat, confidence: conf });
+      }
+    }
   }
-
-  const lowConf = patterns
-    .filter(p => (p.confidence || 100) < 70)
-    .slice(0, 5)
-    .map(p => ({ domein: p.sender_domain, categorie: p.category, confidence: p.confidence }));
 
   const corrTypes = {};
   for (const c of corrections) {
@@ -904,14 +981,53 @@ async function executeGetEmailCategorizationStats({ period = 'last_7_days' }) {
     corrTypes[key] = (corrTypes[key] || 0) + 1;
   }
 
+  console.log(`[agent-tools] get_email_categorization_stats: ${msgs.length} mails, lowConf=${lowConfCount}`);
+
   return {
     period,
-    date_range: { from: from.slice(0, 16), to: to.slice(0, 16) },
-    correcties_in_periode:    corrections.length,
-    correctie_types:          corrTypes,
-    totaal_patronen:          patterns.length,
-    categorie_distributie:    categoryDist,
-    lage_confidence_patronen: lowConf,
+    date_range:            { from: from.slice(0, 16), to: to.slice(0, 16) },
+    total:                 msgs.length,
+    by_category:           byCategory,
+    average_confidence:    msgs.length ? Math.round(totalConf / msgs.length) : 0,
+    low_confidence_count:  lowConfCount,
+    low_confidence_examples: lowConfExamples,
+    correcties_in_periode: corrections.length,
+    correctie_types:       corrTypes,
+    note:                  'category_confidence is integer 0-100. Grenswaarde lage zekerheid: < 50.',
+  };
+}
+
+async function executeGetEmailDetail({ email_id } = {}) {
+  if (!email_id) return { error: 'email_id is verplicht' };
+
+  const { data, error } = await supabase
+    .from('email_messages')
+    .select('id, mailbox, imap_uid, from_address, from_name, subject, date_received, snippet, category, category_confidence, category_reason, requires_action, is_read')
+    .eq('id', String(email_id))
+    .maybeSingle();
+
+  if (error) throw new Error('email_messages detail-query fout: ' + error.message);
+  if (!data)  return { error: `E-mail #${email_id} niet gevonden in email_messages` };
+
+  console.log(`[agent-tools] get_email_detail: id=${email_id} → ${data.subject}`);
+
+  return {
+    id:                  data.id,
+    mailbox:             data.mailbox,
+    imap_uid:            data.imap_uid,
+    sender:              data.from_address,
+    sender_name:         data.from_name,
+    subject:             data.subject,
+    received_at:         data.date_received,
+    category:            data.category,
+    category_confidence: data.category_confidence,
+    category_reason:     data.category_reason,
+    requires_action:     data.requires_action,
+    is_read:             data.is_read,
+    snippet:             data.snippet || null,
+    note:                data.snippet
+      ? null
+      : 'Volledige berichttekst niet beschikbaar — snippet is null (Fase 2: partial IMAP fetch nog niet geïmplementeerd).',
   };
 }
 
