@@ -936,6 +936,7 @@ async function sendChat(message) {
       addChatMsg('assistant', `⚠️ ${data.error}`);
     } else {
       addChatMsg('assistant', data.response, true, data.tools_used);
+      if (data.pending_approvals?.length) addInlineApprovalCards(data.pending_approvals);
     }
   } catch (err) {
     clearTimeout(searchHint);
@@ -967,7 +968,12 @@ async function sendQuickAction(key) {
     if (hintInterval2) { clearInterval(hintInterval2); hintInterval2 = null; }
     const data = await r.json();
     removeTyping();
-    addChatMsg('assistant', data.error ? `⚠️ ${data.error}` : data.response, true, data.tools_used);
+    if (data.error) {
+      addChatMsg('assistant', `⚠️ ${data.error}`);
+    } else {
+      addChatMsg('assistant', data.response, true, data.tools_used);
+      if (data.pending_approvals?.length) addInlineApprovalCards(data.pending_approvals);
+    }
   } catch {
     clearTimeout(searchHint2);
     if (hintInterval2) { clearInterval(hintInterval2); hintInterval2 = null; }
@@ -1870,6 +1876,78 @@ function startApprovalPolling() {
 }
 
 // ── Inline approval (Pad 1 — vanuit agent-chat) ───────────────────────────
+
+/**
+ * Render approval-cards in de chat direct na het agent-antwoord.
+ * Eén kaart per pending_approval item.
+ */
+function addInlineApprovalCards(approvals) {
+  const msgs = document.getElementById('chatMessages');
+  if (!msgs || !approvals?.length) return;
+  const color  = activeAgent?.avatar_color || '#534AB7';
+  const avatar = activeAgent?.avatar_emoji || '🤖';
+
+  for (const ap of approvals) {
+    const items = ap.preview || [];
+    // Preview-items HTML
+    const previewHtml = items.length
+      ? items.map((item, idx) => {
+          const label = esc(item.subject || item.titel || item.title || item.task_title || `Item ${idx + 1}`);
+          const details = Object.entries(item)
+            .filter(([k]) => !['subject','titel','title','task_title'].includes(k))
+            .map(([k, v]) => `<span style="color:var(--text-faint)">${esc(k)}:</span> ${esc(String(v ?? '').slice(0, 80))}`)
+            .join('  ·  ');
+          return `<div style="padding:8px 10px;background:var(--bg-elev);border-radius:6px;margin-top:6px">
+            <div style="font-size:11px;font-weight:600;margin-bottom:3px">${label}</div>
+            <div style="font-size:10px;line-height:1.5">${details}</div>
+          </div>`;
+        }).join('')
+      : '';
+
+    const wrapper = document.createElement('div');
+    wrapper.className = 'msg msg-agent';
+    wrapper.innerHTML = `
+      <div class="msg-avatar" style="background:${color}22;color:${color}">${avatar}</div>
+      <div class="inline-approval-card" id="apcard-${ap.approval_id}">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+          <span style="font-size:14px">🔔</span>
+          <span style="font-size:13px;font-weight:600;flex:1">${esc(ap.title || ap.action_type)}</span>
+          ${ap.description ? `<span style="font-size:10px;color:var(--text-faint)">${esc(ap.description)}</span>` : ''}
+        </div>
+        ${previewHtml}
+        <div class="inline-approval-actions">
+          <button class="btn btn-sm" style="background:rgba(239,68,68,0.12);color:var(--red);border:1px solid rgba(239,68,68,0.25)"
+            onclick="inlineReject('${ap.approval_id}',this)">✗ Afkeuren</button>
+          <button class="btn btn-sm btn-primary"
+            onclick="inlineApprove('${ap.approval_id}',this)">✓ Goedkeuren</button>
+        </div>
+      </div>`;
+    msgs.appendChild(wrapper);
+  }
+  msgs.scrollTop = msgs.scrollHeight;
+}
+
+async function inlineApprove(approvalId, btn) {
+  if (btn) { btn.disabled = true; btn.textContent = 'Uitvoeren…'; }
+  const data = await handleInlineApproval(approvalId, null, null, 'approve');
+  const card = document.getElementById(`apcard-${approvalId}`);
+  if (data?.ok !== false && !data?.error) {
+    if (card) card.innerHTML = `<div style="color:var(--green);font-size:12px;padding:6px">
+      ✓ Uitgevoerd${data?.executed ? ` (${data.executed} actie${data.executed > 1 ? 's' : ''})` : ''}</div>`;
+    showToast(data?.executed ? `${data.executed} actie(s) uitgevoerd ✓` : 'Goedgekeurd ✓', 'success');
+  } else {
+    if (btn) { btn.disabled = false; btn.textContent = '✓ Goedkeuren'; }
+    showToast('Fout: ' + (data?.errors?.[0] || data?.error || 'onbekend'), 'error');
+  }
+}
+
+async function inlineReject(approvalId, btn) {
+  if (btn) { btn.disabled = true; }
+  await handleInlineApproval(approvalId, null, null, 'reject');
+  const card = document.getElementById(`apcard-${approvalId}`);
+  if (card) card.innerHTML = `<div style="color:var(--text-faint);font-size:12px;padding:6px">✗ Afgewezen</div>`;
+  showToast('Afgewezen', 'info');
+}
 
 async function handleInlineApproval(approvalId, previewTitle, previewItems, action) {
   // Wordt aangeroepen vanuit renderChatMessage wanneer pending_approval: true

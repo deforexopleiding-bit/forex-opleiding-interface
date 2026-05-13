@@ -1,4 +1,5 @@
 import { supabase } from './supabase.js';
+import { executeIdentifyPaymentConcerns } from './agent-tool-executor.js';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // DATUM-HULPFUNCTIES
@@ -205,6 +206,163 @@ const TOOL_DEFINITIONS = {
     },
   },
 
+
+
+  // ── C2 — Simon schrijf-tools (via approval) ─────────────────────────────
+
+  send_email_reply: {
+    name: 'send_email_reply',
+    description: 'Stel een e-mailreply op ter goedkeuring van Jeffrey. De tool maakt automatisch een approval-request aan — Jeffrey moet goedkeuren voordat de mail daadwerkelijk wordt verzonden. Gebruik ALLEEN als Jeffrey expliciet vraagt om een reply. Geeft { pending_approval: true, approval_id } terug.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        email_id:     { type: 'string', description: 'ID van de originele e-mail (optioneel).' },
+        to:           { type: 'string', description: 'Ontvanger e-mailadres.' },
+        subject:      { type: 'string', description: 'Onderwerp van de reply.' },
+        body:         { type: 'string', description: 'Volledige tekst van de reply.' },
+        from_mailbox: { type: 'string', description: 'Verzendmailbox (optioneel).' },
+      },
+      required: ['body'],
+    },
+  },
+
+  schedule_email_followup: {
+    name: 'schedule_email_followup',
+    description: 'Plan een follow-up herinnering als taak. Maakt een approval-request aan voor Jeffrey. Geeft { pending_approval: true } terug.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        email_id:      { type: 'string', description: 'ID van de e-mail (optioneel).' },
+        delay_hours:   { type: 'integer', description: 'Uren tot follow-up (standaard: 24).' },
+        reminder_text: { type: 'string', description: 'Beschrijving van de follow-up taak.' },
+      },
+      required: ['reminder_text'],
+    },
+  },
+
+  add_decision_to_log: {
+    name: 'add_decision_to_log',
+    description: 'Registreer een beslissing in het beslissingslog. Maakt een approval-request aan voor Jeffrey. Geeft { pending_approval: true } terug.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        titel:            { type: 'string', description: 'Korte titel van de beslissing.' },
+        beschrijving:     { type: 'string', description: 'Uitgebreide omschrijving (optioneel).' },
+        onderbouwing:     { type: 'string', description: 'Waarom is deze beslissing genomen? (optioneel).' },
+        betrokken_agents: {
+          description: 'Agent(s) betrokken bij de beslissing.',
+          oneOf: [{ type: 'string' }, { type: 'array', items: { type: 'string' } }],
+        },
+        meeting_id: { type: 'string', description: 'UUID van gerelateerde vergadering (optioneel).' },
+      },
+      required: ['titel'],
+    },
+  },
+
+  create_meeting_followup: {
+    name: 'create_meeting_followup',
+    description: 'Maak een concept follow-up vergadering aan. Maakt een approval-request aan voor Jeffrey. Geeft { pending_approval: true } terug.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        topic:              { type: 'string', description: 'Onderwerp van de follow-up vergadering.' },
+        deelnemende_agents: { type: 'array', items: { type: 'string' }, description: 'Namen van deelnemende agents.' },
+        voorgestelde_datum: { type: 'string', description: 'Voorgestelde datum (YYYY-MM-DD, optioneel).' },
+        agenda_notities:    { type: 'string', description: 'Agenda-notities (optioneel).' },
+      },
+      required: ['topic'],
+    },
+  },
+
+  // ── C3 — Aron tools ──────────────────────────────────────────────────────
+
+  identify_payment_concerns: {
+    name: 'identify_payment_concerns',
+    description: 'Identificeer e-mails in de categorie "Factuurvraag" die mogelijk een openstaande betaling signaleren. Dit is een read-only analyse — geen goedkeuring vereist. Geeft direct een lijst van relevante e-mails terug. DISCLAIMER: gebaseerd op e-mailcategorisering, niet op Mollie of boekhouddata.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        since_days:      { type: 'integer', description: 'Terugkijkperiode in dagen (standaard: 14).' },
+        include_replied: { type: 'boolean', description: 'Inclusief al beantwoorde e-mails (standaard: false).' },
+      },
+      required: [],
+    },
+  },
+
+  draft_payment_reminder: {
+    name: 'draft_payment_reminder',
+    description: 'Stel conceptbetalingsherinneringen op voor een lijst van e-mails. Maakt een approval-request aan — Jeffrey keurt elk concept goed voordat het wordt verzonden. Geeft { pending_approval: true } terug. DISCLAIMER: niet gebaseerd op werkelijke openstaande facturen.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        email_ids:   { type: 'array', items: { type: 'string' }, description: 'Lijst van e-mail IDs.' },
+        tone:        { type: 'string', enum: ['friendly', 'formal', 'urgent'], description: 'Toon (standaard: "friendly").' },
+        custom_note: { type: 'string', description: 'Extra tekst die in elke herinnering wordt opgenomen (optioneel).' },
+      },
+      required: ['email_ids'],
+    },
+  },
+
+  mark_invoice_followup: {
+    name: 'mark_invoice_followup',
+    description: 'Maak een follow-up taak aan voor een factuurvraag-e-mail. Maakt een approval-request aan voor Jeffrey. Geeft { pending_approval: true } terug.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        email_id:      { type: 'string', description: 'ID van de e-mail.' },
+        followup_date: { type: 'string', description: 'Datum van de follow-up (YYYY-MM-DD).' },
+        notes:         { type: 'string', description: 'Optionele notities.' },
+      },
+      required: ['email_id'],
+    },
+  },
+
+  // ── C3 — Leon tools ──────────────────────────────────────────────────────
+
+  create_task_for_contract: {
+    name: 'create_task_for_contract',
+    description: 'Maak een taak aan voor een contract of onboarding-proces. Maakt een approval-request aan voor Jeffrey. Geeft { pending_approval: true } terug.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        task_title:       { type: 'string', description: 'Titel van de taak.' },
+        contract_subject: { type: 'string', description: 'Omschrijving van het contract of proces.' },
+        related_email_id: { type: 'string', description: 'Gerelateerde e-mail ID (optioneel).' },
+        deadline:         { type: 'string', description: 'Deadline (YYYY-MM-DD, optioneel).' },
+        assignee_name:    { type: 'string', description: 'Naam van de toe te wijzen persoon (optioneel).' },
+        notes:            { type: 'string', description: 'Aanvullende notities (optioneel).' },
+      },
+      required: ['task_title'],
+    },
+  },
+
+  update_task_status: {
+    name: 'update_task_status',
+    description: 'Pas de status van een bestaande taak aan. Maakt een approval-request aan voor Jeffrey. Geeft { pending_approval: true } terug.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        task_id:    { type: 'string', description: 'UUID van de taak.' },
+        new_status: { type: 'string', enum: ['todo', 'in_progress', 'done', 'afgerond'], description: 'Nieuwe status.' },
+        notes:      { type: 'string', description: 'Optionele notitie bij de statuswijziging.' },
+      },
+      required: ['task_id', 'new_status'],
+    },
+  },
+
+  bulk_categorize_review: {
+    name: 'bulk_categorize_review',
+    description: 'Analyseer e-mails met lage categorisatiezekerheid en stel verbeterde categorieën voor. Maakt een approval-request aan — Jeffrey keurt elke suggestie goed voordat de categorie wordt aangepast. Geeft { pending_approval: true } terug.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        confidence_threshold: { type: 'integer', description: 'Max confidence-score om op te nemen (0-100, standaard: 50).' },
+        limit:                { type: 'integer', description: 'Max e-mails om te analyseren (standaard: 20).' },
+      },
+      required: [],
+    },
+  },
+
 };
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -215,6 +373,7 @@ const TOOL_DEFINITIONS = {
 // gemeenschappelijk hebben met de agent.
 
 const TOOL_TAGS = {
+  // Bestaande read-tools
   get_email_stats:                ['email'],
   get_open_tasks:                 ['tasks'],
   search_emails:                  ['email'],
@@ -222,13 +381,28 @@ const TOOL_TAGS = {
   get_recent_corrections:         ['email', 'learning'],
   query_knowledge_base:           ['knowledge'],
   get_email_categorization_stats: ['email', 'learning'],
+  // Bestaande schrijf-tool
   add_knowledge_base_item:        ['knowledge_write'],
+  // C2 — Simon schrijf-tools
+  send_email_reply:               ['email_write'],
+  schedule_email_followup:        ['email_write'],
+  add_decision_to_log:            ['decisions_write'],
+  create_meeting_followup:        ['meetings_write'],
+  // C3 — Aron tools
+  identify_payment_concerns:      ['payment_read'],
+  draft_payment_reminder:         ['payment_write'],
+  mark_invoice_followup:          ['payment_write'],
+  // C3 — Leon tools
+  create_task_for_contract:       ['tasks_write'],
+  update_task_status:             ['tasks_write'],
+  bulk_categorize_review:         ['categorize_write'],
 };
 
 const AGENT_TAGS = {
-  Simon: ['email', 'tasks', 'knowledge', 'learning', 'knowledge_write'],
-  Leon:  ['tasks'],
-  Aron:  ['tasks'],
+  Simon: ['email', 'tasks', 'knowledge', 'learning', 'knowledge_write',
+          'email_write', 'decisions_write', 'meetings_write'],
+  Leon:  ['tasks', 'tasks_write', 'decisions_write', 'meetings_write', 'categorize_write'],
+  Aron:  ['tasks', 'payment_read', 'payment_write', 'decisions_write', 'meetings_write'],
 };
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -250,22 +424,188 @@ export function getToolsForAgent(agentName) {
 
 /**
  * Voert een tool uit op basis van naam en input.
- * Logt de aanroep voor debugging.
+ * Voor schrijf-tools: maakt een approval-request aan en geeft { pending_approval: true } terug.
+ * @param {string} toolName
+ * @param {object} input
+ * @param {string} agentName — naam van de aanroepende agent (voor approval-record)
  */
-export async function execute(toolName, input) {
-  console.log(`[agent-tools] execute: ${toolName} |`, JSON.stringify(input));
+export async function execute(toolName, input, agentName = 'system') {
+  console.log(`[agent-tools] execute: ${toolName} | agent: ${agentName} |`, JSON.stringify(input));
+  const i = input || {};
   switch (toolName) {
-    case 'get_email_stats':                  return executeGetEmailStats(input || {});
-    case 'get_open_tasks':                   return executeGetOpenTasks(input || {});
-    case 'search_emails':                    return executeSearchEmails(input || {});
-    case 'get_unanswered_emails':            return executeGetUnansweredEmails(input || {});
-    case 'get_recent_corrections':           return executeGetRecentCorrections(input || {});
-    case 'query_knowledge_base':             return executeQueryKnowledgeBase(input || {});
-    case 'get_email_categorization_stats':   return executeGetEmailCategorizationStats(input || {});
-    case 'add_knowledge_base_item':          return executeAddKnowledgeBaseItem(input || {});
+    // ── Bestaande read-tools ────────────────────────────────────────────────
+    case 'get_email_stats':                return executeGetEmailStats(i);
+    case 'get_open_tasks':                 return executeGetOpenTasks(i);
+    case 'search_emails':                  return executeSearchEmails(i);
+    case 'get_unanswered_emails':          return executeGetUnansweredEmails(i);
+    case 'get_recent_corrections':         return executeGetRecentCorrections(i);
+    case 'query_knowledge_base':           return executeQueryKnowledgeBase(i);
+    case 'get_email_categorization_stats': return executeGetEmailCategorizationStats(i);
+    // ── Bestaande schrijf-tool (al met eigen bevestigingsprotocol in system prompt) ──
+    case 'add_knowledge_base_item':        return executeAddKnowledgeBaseItem(i);
+
+    // ── C2 — Simon schrijf-tools (via approval) ─────────────────────────────
+    case 'send_email_reply': {
+      const { to, subject, body } = i;
+      const title = subject ? `Reply: ${subject}` : (to ? `Reply naar ${to}` : 'E-mailreply');
+      return createApprovalRequest(agentName, 'send_email_reply', title,
+        `Concept reply${to ? ' naar ' + to : ''}`, [i], 24);
+    }
+    case 'schedule_email_followup': {
+      const { reminder_text, delay_hours = 24 } = i;
+      return createApprovalRequest(agentName, 'schedule_email_followup',
+        `Follow-up: ${reminder_text}`, `Herinnering over ${delay_hours}u`, [i], 48);
+    }
+    case 'add_decision_to_log': {
+      const { titel } = i;
+      return createApprovalRequest(agentName, 'add_decision_to_log',
+        `Beslissing: ${titel}`, i.beschrijving || null, [i], 168);
+    }
+    case 'create_meeting_followup': {
+      const { topic } = i;
+      return createApprovalRequest(agentName, 'create_meeting_followup',
+        `Follow-up vergadering: ${topic}`, i.agenda_notities || null, [i], 168);
+    }
+
+    // ── C3 — Aron read-tool (direct uitvoeren) ───────────────────────────────
+    case 'identify_payment_concerns':
+      return executeIdentifyPaymentConcerns(i);
+
+    // ── C3 — Aron schrijf-tools ──────────────────────────────────────────────
+    case 'draft_payment_reminder': {
+      const { email_ids, tone = 'friendly', custom_note } = i;
+      const ids = Array.isArray(email_ids) ? email_ids : [email_ids].filter(Boolean);
+      if (!ids.length) return { ok: false, error: 'Geen email_ids opgegeven.' };
+      // Haal e-mailinfo op voor de concepten
+      const { data: emails } = await supabase.from('email_messages')
+        .select('id, from_address, from_name, subject').in('id', ids);
+      const emailMap = Object.fromEntries((emails || []).map(e => [String(e.id), e]));
+      const previewItems = ids.map(eid => {
+        const email = emailMap[String(eid)] || {};
+        const body = buildReminderBody(email.from_name, tone, custom_note);
+        return {
+          email_id: eid,
+          to:       email.from_address || null,
+          subject:  `Re: ${email.subject || 'Openstaande factuur'}`,
+          body,
+          tone,
+        };
+      });
+      const title = `Betalingsherinneringen (${previewItems.length} mail${previewItems.length > 1 ? 's' : ''})`;
+      return createApprovalRequest(agentName, 'send_email_reply', title,
+        `Toon: ${tone} — concepten voor goedkeuring`, previewItems, 48);
+    }
+    case 'mark_invoice_followup': {
+      const { email_id, followup_date, notes } = i;
+      const title = `Factuur follow-up${followup_date ? ' voor ' + followup_date : ''}`;
+      return createApprovalRequest(agentName, 'mark_invoice_followup', title,
+        notes || `Follow-up voor e-mail #${email_id}`, [i], 72);
+    }
+
+    // ── C3 — Leon schrijf-tools ──────────────────────────────────────────────
+    case 'create_task_for_contract': {
+      const { task_title } = i;
+      return createApprovalRequest(agentName, 'create_task_for_contract',
+        `Taak: ${task_title}`, i.contract_subject || null, [i], 168);
+    }
+    case 'update_task_status': {
+      const { task_id, new_status } = i;
+      return createApprovalRequest(agentName, 'update_task_status',
+        `Status → ${new_status}`, `Taak ${task_id}`, [i], 48);
+    }
+    case 'bulk_categorize_review': {
+      const threshold = Math.min(Math.max(parseInt(i.confidence_threshold) || 50, 0), 100);
+      const lim       = Math.min(Math.max(parseInt(i.limit) || 20, 1), 50);
+      const { data: emails } = await supabase.from('email_messages')
+        .select('id, from_address, subject, body_snippet, category, confidence')
+        .lt('confidence', threshold)
+        .not('category', 'is', null)
+        .order('received_at', { ascending: false })
+        .limit(lim);
+      if (!emails?.length) {
+        return { ok: true, message: `Geen e-mails gevonden met confidence < ${threshold}.`, count: 0 };
+      }
+      const previewItems = emails.map(e => ({
+        email_id:      String(e.id),
+        subject:       e.subject || '(geen onderwerp)',
+        from_address:  e.from_address || '(onbekend)',
+        current_cat:   e.category,
+        confidence:    e.confidence,
+        snippet:       e.body_snippet?.slice(0, 100) || '',
+        suggested_cat: suggestCategory(e.subject || '', e.body_snippet || '', e.category),
+      }));
+      const title = `Categorisatie-review (${previewItems.length} mails, confidence < ${threshold})`;
+      return createApprovalRequest(agentName, 'bulk_categorize_review', title,
+        'Stel verbeterde categorieën voor ter goedkeuring', previewItems, 168);
+    }
+
     default:
       throw new Error(`Onbekende tool: "${toolName}"`);
   }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// HELPERS
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * Maakt een approval-record aan in agent_approval_queue en geeft het
+ * pending_approval token terug zodat agent-chat.js het kan doorsturen.
+ */
+async function createApprovalRequest(agentName, actionType, title, description, previewData, expiresHours = 168) {
+  const expiresAt = new Date(Date.now() + expiresHours * 3600000).toISOString();
+  const { data, error } = await supabase.from('agent_approval_queue').insert({
+    agent_name:   agentName,
+    action:       actionType,
+    payload:      { title, preview_data: previewData || [] },
+    description:  description || null,
+    requested_by: 'agent',
+    status:       'pending',
+    created_at:   new Date().toISOString(),
+    expires_at:   expiresAt,
+  }).select('id').single();
+
+  if (error) throw new Error(`Approval aanmaken mislukt: ${error.message}`);
+
+  console.log(`[agent-tools] approval aangemaakt: ${data.id} (${agentName}/${actionType})`);
+  return {
+    pending_approval: true,
+    approval_id:      data.id,
+    action_type:      actionType,
+    title,
+    description,
+    preview:          previewData,
+  };
+}
+
+/**
+ * Bouw een betalingsherinnering-tekst op basis van toon en naam.
+ */
+function buildReminderBody(fromName, tone, customNote) {
+  const aanhef = fromName ? `Geachte ${fromName},` : 'Geachte relatie,';
+  let body;
+  if (tone === 'urgent') {
+    body = `Wij verzoeken u dringend de openstaande betaling zo spoedig mogelijk te voldoen.`;
+  } else if (tone === 'formal') {
+    body = `Wij verwijzen u beleefd naar de openstaande factuur waarvoor wij nog geen betaling hebben ontvangen.`;
+  } else {
+    body = `Wij hopen dat alles goed met u gaat. Hierbij een vriendelijke herinnering omtrent de openstaande factuur.`;
+  }
+  return [aanhef, '', body, customNote ? customNote : '', '', 'Met vriendelijke groet,', 'De Forex Opleiding']
+    .filter(line => line !== undefined).join('\n').trim();
+}
+
+/**
+ * Eenvoudige heuristiek voor e-mailcategoriesuggessties.
+ */
+function suggestCategory(subject, snippet, currentCat) {
+  const text = (subject + ' ' + snippet).toLowerCase();
+  if (/factuur|betaling|invoice|payment|rekening/.test(text)) return 'Factuurvraag';
+  if (/klacht|probleem|issue|complaint|ontevreden/.test(text)) return 'Klacht';
+  if (/lead|interesse|aanmeld|info aanvraag/.test(text))       return 'Nieuwe Lead';
+  if (/afspraak|appointment|gesprek|bellen/.test(text))         return 'Afspraakaanvraag';
+  if (/vraag|hulp|ondersteuning|support/.test(text))            return 'Klantvraag';
+  return currentCat || 'Klantvraag';
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

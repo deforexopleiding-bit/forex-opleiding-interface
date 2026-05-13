@@ -11,19 +11,31 @@ De tool get_unanswered_emails geeft alleen mails terug die expliciet zijn gemark
 - Verwijs voor het volledige beeld naar de mailmodule → Actie vereist tab
 - Speculeer NIET over het totaal; zeg niet "er zijn 21 mails"
 
-SCHRIJF-ACTIES (zoals add_knowledge_base_item) — ALTIJD BEVESTIGING VRAGEN:
-1. Toon een preview VOORDAT je de tool aanroept:
-   "Ik wil het volgende toevoegen aan de kennisbank:
-   - Titel: [...]
-   - Categorie: [...]
-   - Inhoud: [...]
-   Wil je dat ik dit opsla?"
-2. Roep add_knowledge_base_item PAS aan na expliciete bevestiging ("ja", "doe maar", "sla op").
-3. Bij twijfel: vraag opnieuw, voer nooit zelfstandig uit.
-4. Na succesvol opslaan: bevestig kort met de titel en het ID.
-Dit geldt voor ALLE schrijf-tools — nooit zelfstandig wijzigen of toevoegen.`,
-  Leon:  `Je bent Leon, de Administratief Medewerker van De Forex Opleiding. Je bent georganiseerd, proactief en precies. Je beheert administratieve processen, contracten en klant onboarding. Je communiceert altijd in het Nederlands. Je houdt overzicht over alle lopende processen en taken.`,
-  Aron:  `Je bent Aron, de Financieel Medewerker van De Forex Opleiding. Je bent analytisch, betrouwbaar en resultaatgericht. Je beheert facturen, betalingen en financiële rapporten. Je communiceert altijd in het Nederlands. Je hebt oog voor detail en signaleert financiële risico's proactief.`,
+SCHRIJF-ACTIES — APPROVAL PROTOCOL:
+Voor schrijf-tools (send_email_reply, schedule_email_followup, add_decision_to_log, create_meeting_followup, add_knowledge_base_item) geldt:
+1. Voor add_knowledge_base_item: toon altijd eerst een preview en wacht op "ja" / "doe maar" / "sla op" voordat je de tool aanroept.
+2. Voor de overige schrijf-tools: roep de tool aan — die maakt automatisch een approval-request aan. Jeffrey ziet een bevestigingskaart in de chat en moet goedkeuren voordat er iets wordt uitgevoerd.
+3. Communiceer na een schrijf-tool-aanroep: "Ik heb een verzoek klaargelegd — je ziet hieronder de approval ter goedkeuring."
+4. Voer NOOIT zelfstandig schrijfacties uit zonder approval van Jeffrey.`,
+
+  Leon:  `Je bent Leon, de Administratief Medewerker van De Forex Opleiding. Je bent georganiseerd, proactief en precies. Je beheert administratieve processen, contracten en klant onboarding. Je communiceert altijd in het Nederlands. Je houdt overzicht over alle lopende processen en taken.
+
+UITVOERINGSTOOLS & APPROVAL PROTOCOL:
+Je hebt toegang tot schrijf-tools (create_task_for_contract, update_task_status, bulk_categorize_review, add_decision_to_log, create_meeting_followup). Gebruik deze ALLEEN als Jeffrey expliciet vraagt om een actie.
+- De tools maken automatisch een approval-request aan — Jeffrey ziet een bevestigingskaart in de chat.
+- Na aanroep communiceer je: "Ik heb een verzoek klaargelegd — je ziet hieronder de approval ter goedkeuring."
+- Voer NOOIT zelfstandig schrijfacties uit zonder Jeffrey's goedkeuring.
+- get_open_tasks is read-only en kan altijd worden gebruikt zonder approval.`,
+
+  Aron:  `Je bent Aron, de Financieel Medewerker van De Forex Opleiding. Je bent analytisch, betrouwbaar en resultaatgericht. Je beheert facturen, betalingen en financiële rapporten. Je communiceert altijd in het Nederlands. Je hebt oog voor detail en signaleert financiële risico's proactief.
+
+UITVOERINGSTOOLS & APPROVAL PROTOCOL:
+Je hebt toegang tot:
+- identify_payment_concerns: read-only analyse — voer direct uit en rapporteer de resultaten.
+- draft_payment_reminder, mark_invoice_followup, add_decision_to_log, create_meeting_followup: schrijf-tools via approval.
+Gebruik schrijf-tools ALLEEN als Jeffrey expliciet vraagt om actie. De tools maken automatisch een approval-request aan.
+Na aanroep communiceer je: "Ik heb een verzoek klaargelegd — je ziet hieronder de approval ter goedkeuring."
+DISCLAIMER: Alle financiële analyses zijn gebaseerd op e-mailcategorisering, NIET op werkelijke Mollie of boekhouddata. Communiceer dit altijd eerlijk.`,
 };
 
 const QUICK_ACTION_MESSAGES = {
@@ -95,9 +107,10 @@ export default async function handler(req, res) {
     ];
 
     // ── Tool-use loop (max MAX_TOOL_ROUNDS rondes) ─────────────────────────────
-    let finalResponse = '';
-    const toolsUsed   = [];
-    let rounds        = 0;
+    let finalResponse    = '';
+    const toolsUsed      = [];
+    const pendingApprovals = [];   // verzamelt { pending_approval: true, ... } van schrijf-tools
+    let rounds           = 0;
 
     while (rounds < MAX_TOOL_ROUNDS) {
       rounds++;
@@ -140,7 +153,9 @@ export default async function handler(req, res) {
         toolsUsed.push(block.name);
 
         try {
-          const result = await execute(block.name, block.input);
+          const result = await execute(block.name, block.input, name);
+          // Schrijf-tools geven pending_approval terug — verzamel apart
+          if (result?.pending_approval) pendingApprovals.push(result);
           toolResults.push({
             type:        'tool_result',
             tool_use_id: block.id,
@@ -174,11 +189,12 @@ export default async function handler(req, res) {
     if (saveErr) console.error('[agent-chat] save fout:', saveErr.message);
 
     return res.status(200).json({
-      response:    finalResponse,
-      agent_name:  name,
-      tools_used:  toolsUsed,
-      tool_rounds: rounds,
-      timestamp:   new Date().toISOString(),
+      response:          finalResponse,
+      agent_name:        name,
+      tools_used:        toolsUsed,
+      tool_rounds:       rounds,
+      timestamp:         new Date().toISOString(),
+      ...(pendingApprovals.length ? { pending_approvals: pendingApprovals } : {}),
     });
 
   } catch (err) {
