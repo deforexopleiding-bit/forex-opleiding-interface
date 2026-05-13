@@ -205,7 +205,7 @@ const TOOL_DEFINITIONS = {
       properties: {
         email_id: {
           type: 'string',
-          description: 'Het ID (bigint als string) van de e-mail uit email_messages.',
+          description: 'UUID van de e-mail uit email_messages (formaat 8-4-4-4-12 hex, bijv. "9b0ae4c8-7f2e-4c1a-b890-1234abcd5678"). Verkrijgbaar via search_emails of get_unanswered_emails — gebruik nooit een volgnummer zoals "1".',
         },
       },
       required: ['email_id'],
@@ -220,7 +220,7 @@ const TOOL_DEFINITIONS = {
       properties: {
         email_id: {
           type: 'string',
-          description: 'Het ID (bigint als string) van de e-mail uit email_messages.',
+          description: 'UUID van de e-mail uit email_messages (formaat 8-4-4-4-12 hex, bijv. "9b0ae4c8-7f2e-4c1a-b890-1234abcd5678"). Verkrijgbaar via search_emails of get_unanswered_emails — gebruik nooit een volgnummer zoals "1".',
         },
       },
       required: ['email_id'],
@@ -266,7 +266,7 @@ const TOOL_DEFINITIONS = {
     input_schema: {
       type: 'object',
       properties: {
-        email_id:     { type: 'string', description: 'ID van de originele e-mail (optioneel).' },
+        email_id:     { type: 'string', description: 'UUID van de originele e-mail (optioneel). Formaat: 8-4-4-4-12 hex.' },
         to:           { type: 'string', description: 'Ontvanger e-mailadres.' },
         subject:      { type: 'string', description: 'Onderwerp van de reply.' },
         body:         { type: 'string', description: 'Volledige tekst van de reply.' },
@@ -282,7 +282,7 @@ const TOOL_DEFINITIONS = {
     input_schema: {
       type: 'object',
       properties: {
-        email_id:      { type: 'string', description: 'ID van de e-mail (optioneel).' },
+        email_id:      { type: 'string', description: 'UUID van de e-mail (optioneel). Formaat: 8-4-4-4-12 hex.' },
         delay_hours:   { type: 'integer', description: 'Uren tot follow-up (standaard: 24).' },
         reminder_text: { type: 'string', description: 'Beschrijving van de follow-up taak.' },
       },
@@ -345,7 +345,7 @@ const TOOL_DEFINITIONS = {
     input_schema: {
       type: 'object',
       properties: {
-        email_ids:   { type: 'array', items: { type: 'string' }, description: 'Lijst van e-mail IDs.' },
+        email_ids:   { type: 'array', items: { type: 'string' }, description: 'Lijst van e-mail UUIDs (formaat 8-4-4-4-12 hex). Verkrijgbaar via identify_payment_concerns of search_emails.' },
         tone:        { type: 'string', enum: ['friendly', 'formal', 'urgent'], description: 'Toon (standaard: "friendly").' },
         custom_note: { type: 'string', description: 'Extra tekst die in elke herinnering wordt opgenomen (optioneel).' },
       },
@@ -359,7 +359,7 @@ const TOOL_DEFINITIONS = {
     input_schema: {
       type: 'object',
       properties: {
-        email_id:      { type: 'string', description: 'ID van de e-mail.' },
+        email_id:      { type: 'string', description: 'UUID van de e-mail uit email_messages (formaat 8-4-4-4-12 hex). Verkrijgbaar via identify_payment_concerns of search_emails.' },
         followup_date: { type: 'string', description: 'Datum van de follow-up (YYYY-MM-DD).' },
         notes:         { type: 'string', description: 'Optionele notities.' },
       },
@@ -377,7 +377,7 @@ const TOOL_DEFINITIONS = {
       properties: {
         task_title:       { type: 'string', description: 'Titel van de taak.' },
         contract_subject: { type: 'string', description: 'Omschrijving van het contract of proces.' },
-        related_email_id: { type: 'string', description: 'Gerelateerde e-mail ID (optioneel).' },
+        related_email_id: { type: 'string', description: 'UUID van de gerelateerde e-mail (optioneel). Formaat: 8-4-4-4-12 hex.' },
         deadline:         { type: 'string', description: 'Deadline (YYYY-MM-DD, optioneel).' },
         assignee_name:    { type: 'string', description: 'Naam van de toe te wijzen persoon (optioneel).' },
         notes:            { type: 'string', description: 'Aanvullende notities (optioneel).' },
@@ -1023,8 +1023,13 @@ async function executeGetEmailCategorizationStats({ period = 'last_7_days' } = {
   };
 }
 
+function isValidUuid(s) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s);
+}
+
 async function executeGetEmailDetail({ email_id } = {}) {
   if (!email_id) return { error: 'email_id is verplicht' };
+  if (!isValidUuid(email_id)) return { error: `email_id '${email_id}' is geen geldige UUID. Gebruik search_emails of get_unanswered_emails om actuele IDs op te halen — geen volgnummers zoals "1".` };
 
   const { data, error } = await supabase
     .from('email_messages')
@@ -1061,6 +1066,7 @@ async function executeGetEmailDetail({ email_id } = {}) {
 
 async function executeGetEmailBody({ email_id } = {}) {
   if (!email_id) return { error: 'email_id is verplicht' };
+  if (!isValidUuid(email_id)) return { error: `email_id '${email_id}' is geen geldige UUID. Gebruik search_emails of get_unanswered_emails om actuele IDs op te halen — geen volgnummers zoals "1".` };
 
   const { data, error } = await supabase
     .from('email_messages')

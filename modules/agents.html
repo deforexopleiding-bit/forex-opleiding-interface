@@ -77,9 +77,19 @@
 </head>
 <body>
 
-<!-- Redirect oud #vergaderruimte hash -->
+<!-- Hash-redirects: stuur oude deep-links door naar de juiste module -->
 <script>
-  if (location.hash === '#vergaderruimte') location.replace('/modules/meetings.html');
+  (function () {
+    var h = location.hash;
+    if (h === '#vergaderruimte' || h === '#vergadering') {
+      window.location.replace('/modules/meetings.html');
+      throw new Error('redirect');
+    }
+    if (h === '#control-center' || h === '#cc' || h === '#approvals') {
+      window.location.replace('/modules/control-center.html');
+      throw new Error('redirect');
+    }
+  })();
 </script>
 
 <nav class="sidebar">
