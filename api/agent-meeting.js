@@ -175,6 +175,18 @@ export default async function handler(req, res) {
       }
     }
 
+    // Beslissingen ophalen
+    if (action === 'get_decisions') {
+      const { data: decisions, error } = await supabase
+        .from('decisions')
+        .select('id, title, description, decided_by, decision_date, status, tags, meeting_id, created_at')
+        .order('decision_date', { ascending: false })
+        .order('id', { ascending: false })
+        .limit(100);
+      if (error) return res.status(500).json({ error: error.message });
+      return res.status(200).json({ decisions: decisions || [] });
+    }
+
     return res.status(405).json({ error: 'Method not allowed' });
   }
 

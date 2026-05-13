@@ -10,16 +10,19 @@
   <link rel="stylesheet" href="/modules/shared/agent-shared.css"/>
   <style>
     /* ── Meeting setup ── */
-    .meeting-setup-card{background:var(--bg-elev);border:1px solid var(--border);border-radius:16px;padding:32px;max-width:600px;margin:0 auto;}
-    .meeting-setup-title{font-size:20px;font-weight:800;margin-bottom:6px;}
-    .meeting-setup-sub{font-size:13px;color:var(--text-dim);margin-bottom:24px;}
-    .participant-item{display:flex;align-items:center;gap:12px;padding:10px 14px;border-radius:10px;border:1px solid var(--border);background:var(--bg-elev-2);margin-bottom:8px;cursor:pointer;transition:border-color .15s;}
+    .meeting-setup-card{background:var(--bg-elev);border:1px solid var(--border);border-radius:16px;padding:24px;max-width:640px;margin:0 auto;}
+    .meeting-setup-title{font-size:18px;font-weight:800;}
+    .meeting-setup-sub{font-size:12px;color:var(--text-dim);margin-top:2px;}
+    .participant-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:16px;}
+    .participant-item{display:flex;flex-direction:column;align-items:center;gap:5px;padding:12px 8px;border-radius:10px;border:1px solid var(--border);background:var(--bg-elev-2);cursor:pointer;transition:border-color .15s,background .15s;text-align:center;}
+    .participant-item:hover{border-color:rgba(168,85,247,0.4);}
     .participant-item.selected{border-color:rgba(168,85,247,0.5);background:rgba(168,85,247,0.08);}
-    .participant-check{width:16px;height:16px;border-radius:4px;border:2px solid var(--border-strong);display:grid;place-items:center;}
+    .participant-check{width:16px;height:16px;border-radius:4px;border:2px solid var(--border-strong);display:grid;place-items:center;font-size:10px;}
     .participant-item.selected .participant-check{background:#7c3aed;border-color:#7c3aed;}
-    .participant-name{font-size:13px;font-weight:600;}
-    .participant-role{font-size:11px;color:var(--text-dim);}
-    .agenda-input{width:100%;padding:12px 14px;background:var(--bg-elev-2);border:1px solid var(--border-strong);border-radius:10px;color:var(--text);font-size:13px;font-family:inherit;outline:none;margin-top:16px;}
+    .participant-name{font-size:12px;font-weight:600;}
+    .participant-role{font-size:10px;color:var(--text-dim);}
+    .agenda-label{font-size:11px;font-weight:600;color:var(--text-faint);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px;margin-top:16px;}
+    .agenda-input{width:100%;padding:10px 14px;background:var(--bg-elev-2);border:1px solid var(--border-strong);border-radius:10px;color:var(--text);font-size:13px;font-family:inherit;outline:none;box-sizing:border-box;}
     .agenda-input:focus{border-color:rgba(168,85,247,0.5);}
     /* ── Meeting room ── */
     .meeting-room-layout{display:flex;flex-direction:column;gap:0;height:calc(100vh - 140px);}
@@ -41,15 +44,6 @@
     .t-time{font-size:10px;color:var(--text-faint);margin-left:auto;flex-shrink:0;}
     .meeting-input-area{padding:12px 16px;border:1px solid var(--border);border-top:none;border-radius:0 0 14px 14px;background:var(--bg-elev);position:relative;}
     .ext-input-popover{position:absolute;bottom:64px;left:16px;background:var(--bg-elev-2);border:1px solid var(--border-strong);border-radius:12px;padding:16px;width:320px;z-index:50;box-shadow:0 8px 24px rgba(0,0,0,0.4);}
-    /* ── Meeting history ── */
-    .meeting-history-card{background:var(--bg-elev);border:1px solid var(--border);border-radius:14px;padding:20px;max-width:600px;margin:20px auto 0;}
-    .meeting-history-title{font-size:14px;font-weight:700;margin-bottom:12px;}
-    .meeting-row{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:8px;background:var(--bg-elev-2);margin-bottom:6px;}
-    .meeting-row-title{font-size:13px;font-weight:500;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
-    .meeting-row-date{font-size:11px;color:var(--text-faint);flex-shrink:0;}
-    .meeting-type-badge{font-size:10px;font-weight:600;padding:2px 7px;border-radius:10px;flex-shrink:0;}
-    .badge-team{background:rgba(168,85,247,0.15);color:#c4b5fd;border:1px solid rgba(168,85,247,0.3);}
-    .badge-standup{background:rgba(34,211,238,0.12);color:#22d3ee;border:1px solid rgba(34,211,238,0.25);}
     /* ── Chips / assignee ── */
     .chips-row{display:flex;flex-wrap:wrap;gap:4px;min-height:24px;margin-bottom:4px;}
     .assignee-dropdown{position:absolute;top:calc(100% + 2px);left:0;right:0;background:var(--bg-elev-2);border:1px solid var(--border-strong);border-radius:8px;z-index:200;max-height:180px;overflow-y:auto;box-shadow:0 8px 24px rgba(0,0,0,0.4);}
@@ -67,14 +61,11 @@
     .review-remove:hover{background:rgba(239,68,68,0.15);color:var(--red);}
     /* ── Instant-add popover ── */
     .instant-task-popover{position:absolute;bottom:64px;right:16px;background:var(--bg-elev-2);border:1px solid var(--border-strong);border-radius:12px;padding:16px;width:320px;z-index:50;box-shadow:0 8px 24px rgba(0,0,0,0.4);}
-    /* ── Meeting tasks section ── */
-    .mtask-row{display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:7px;background:var(--bg-elev-2);margin-bottom:5px;}
-    .mtask-title{font-size:12px;font-weight:500;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
-    .mtask-meta{font-size:10px;color:var(--text-faint);flex-shrink:0;}
+    /* ── Prio badges (ook gebruikt in archief-tab) ── */
     .prio-badge{font-size:9px;font-weight:700;padding:1px 6px;border-radius:8px;flex-shrink:0;}
-    .prio-Hoog,.prio-Urgent{background:rgba(239,68,68,0.15);color:#f87171;border:1px solid rgba(239,68,68,0.3);}
-    .prio-Normaal{background:rgba(100,116,139,0.15);color:#94a3b8;border:1px solid rgba(100,116,139,0.3);}
-    .prio-Laag{background:rgba(34,197,94,0.1);color:#4ade80;border:1px solid rgba(34,197,94,0.25);}
+    .prio-Hoog,.prio-Urgent,.prio-hoog,.prio-urgent{background:rgba(239,68,68,0.15);color:#f87171;border:1px solid rgba(239,68,68,0.3);}
+    .prio-Normaal,.prio-normaal{background:rgba(100,116,139,0.15);color:#94a3b8;border:1px solid rgba(100,116,139,0.3);}
+    .prio-Laag,.prio-laag{background:rgba(34,197,94,0.1);color:#4ade80;border:1px solid rgba(34,197,94,0.25);}
     /* ── Summary ── */
     .summary-card{background:var(--bg-elev);border:1px solid var(--border);border-radius:14px;padding:24px;}
     .summary-title{font-size:16px;font-weight:800;margin-bottom:14px;}
@@ -90,7 +81,38 @@
     .chat-send{padding:10px 16px;background:rgba(168,85,247,0.2);border:1px solid #7c3aed;border-radius:10px;color:#c4b5fd;font-size:13px;cursor:pointer;font-family:inherit;transition:all .15s;}
     .chat-send:hover{background:rgba(168,85,247,0.35);}
     .chat-input-row{display:flex;gap:8px;}
-    @media(max-width:1024px){.meeting-setup-card,.meeting-history-card{max-width:100%;}}
+
+    /* ── Archief tabs ── */
+    .archive-card{background:var(--bg-elev);border:1px solid var(--border);border-radius:14px;max-width:640px;margin:16px auto 0;overflow:hidden;}
+    .archive-tabs{display:flex;border-bottom:1px solid var(--border);}
+    .tab-btn{flex:1;padding:12px 6px;background:transparent;border:none;border-bottom:2px solid transparent;color:var(--text-faint);font-size:12px;cursor:pointer;font-family:inherit;display:flex;align-items:center;justify-content:center;gap:5px;transition:color .15s,background .15s;white-space:nowrap;}
+    .tab-btn:hover:not(.active){color:var(--text);background:rgba(255,255,255,0.03);}
+    .tab-btn.active{color:var(--text);font-weight:600;border-bottom-color:#8b5cf6;}
+    .tab-count{background:var(--bg-elev-2);color:var(--text-faint);padding:1px 6px;border-radius:8px;font-size:10px;font-weight:600;}
+    .tab-content{padding:4px 0;min-height:160px;}
+    .list-item{display:flex;align-items:center;gap:10px;padding:10px 16px;border-bottom:1px solid var(--border);cursor:pointer;transition:background .12s;}
+    .list-item:hover{background:rgba(255,255,255,0.025);}
+    .list-item:last-child{border-bottom:none;}
+    .list-item.no-click{cursor:default;}
+    .list-item.no-click:hover{background:transparent;}
+    .item-number{color:var(--text-faint);font-size:11px;min-width:18px;font-variant-numeric:tabular-nums;flex-shrink:0;}
+    .item-content{flex:1;min-width:0;}
+    .item-title{font-size:13px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+    .item-meta{font-size:11px;color:var(--text-faint);margin-top:2px;}
+    .item-badge{font-size:10px;padding:2px 7px;background:var(--bg-elev-2);border:1px solid var(--border);border-radius:6px;color:var(--text-faint);flex-shrink:0;white-space:nowrap;}
+    .empty-state{padding:36px 20px;text-align:center;color:var(--text-faint);font-size:13px;}
+    .archive-loading{padding:20px 16px;color:var(--text-faint);font-size:12px;}
+
+    /* ── Paginering ── */
+    .tab-pagination{display:flex;align-items:center;justify-content:space-between;padding:10px 16px;border-top:1px solid var(--border);font-size:12px;}
+    .page-info{color:var(--text-faint);}
+    .page-controls{display:flex;gap:4px;}
+    .page-controls button{padding:3px 9px;background:var(--bg-elev-2);border:1px solid var(--border);color:var(--text-dim);font-size:12px;border-radius:6px;cursor:pointer;font-family:inherit;transition:background .12s;}
+    .page-controls button:hover:not(:disabled):not(.active){background:rgba(255,255,255,0.06);}
+    .page-controls button:disabled{opacity:.35;cursor:not-allowed;}
+    .page-controls button.active{background:#8b5cf6;color:#fff;border-color:#8b5cf6;}
+
+    @media(max-width:1024px){.meeting-setup-card,.archive-card{max-width:100%;}}
   </style>
 </head>
 <body>
@@ -157,46 +179,51 @@
       </div>
     </div>
 
-    <!-- Setup -->
+    <!-- Setup + archief -->
     <div id="meetingSetup">
+
+      <!-- Setup card -->
       <div class="meeting-setup-card">
-        <div class="meeting-setup-title">Nieuwe vergadering starten</div>
-        <div class="meeting-setup-sub">Selecteer deelnemers en voer de agenda in</div>
-        <div id="participantList"></div>
-        <input class="agenda-input" id="agendaInput" placeholder="Agenda / onderwerp van de vergadering…"/>
-        <div style="margin-top:16px;display:flex;gap:8px;justify-content:flex-end">
-          <button class="btn" onclick="startStandup()" style="font-size:12px">⚡ Dagelijkse standup</button>
-          <button class="btn btn-primary" onclick="startMeeting()" style="padding:10px 24px;font-size:13px">Start vergadering →</button>
+        <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px">
+          <div>
+            <div class="meeting-setup-title">Nieuwe vergadering</div>
+            <div class="meeting-setup-sub">Selecteer deelnemers en vul het onderwerp in</div>
+          </div>
+          <button class="btn" onclick="startStandup()" style="font-size:11px;padding:6px 12px;flex-shrink:0">⚡ Standup</button>
         </div>
+
+        <div id="participantList" class="participant-grid"></div>
+
+        <div class="agenda-label">Onderwerp / Agenda</div>
+        <input class="agenda-input" id="agendaInput" placeholder="Vergadering onderwerp"/>
+
+        <button class="btn btn-primary" onclick="startMeeting()" style="width:100%;margin-top:14px;padding:11px;font-size:13px;display:block;text-align:center">
+          Start vergadering →
+        </button>
       </div>
 
-      <!-- Vergadergeschiedenis -->
-      <div class="meeting-history-card">
-        <div class="meeting-history-title">📅 Vergadergeschiedenis</div>
-        <div id="meetingHistoryList"><div style="color:var(--text-faint);font-size:12px">Laden…</div></div>
-      </div>
-
-      <!-- Actieve taken uit meetings -->
-      <div class="meeting-history-card" style="margin-top:12px">
-        <div class="meeting-history-title">📋 Actieve taken uit meetings</div>
-        <div id="meetingTasksList"><div style="color:var(--text-faint);font-size:12px">Laden…</div></div>
-      </div>
-
-      <!-- Standup sectie -->
-      <div class="meeting-history-card" style="margin-top:12px">
-        <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">
-          <div class="meeting-history-title" style="margin:0">📊 Standups</div>
+      <!-- Tabbed archief -->
+      <div class="archive-card">
+        <div class="archive-tabs">
+          <button class="tab-btn active" data-tab="history" onclick="switchTab('history')">
+            📜 Geschiedenis <span class="tab-count" id="countHistory">…</span>
+          </button>
+          <button class="tab-btn" data-tab="tasks" onclick="switchTab('tasks')">
+            ✅ Taken <span class="tab-count" id="countTasks">…</span>
+          </button>
+          <button class="tab-btn" data-tab="standups" onclick="switchTab('standups')">
+            📊 Standups <span class="tab-count" id="countStandups">…</span>
+          </button>
+          <button class="tab-btn" data-tab="decisions" onclick="switchTab('decisions')">
+            📚 Beslissingen <span class="tab-count" id="countDecisions">…</span>
+          </button>
         </div>
-        <div id="standupList"><div style="color:var(--text-faint);font-size:12px">Laden…</div></div>
+        <div id="tabContent" class="tab-content">
+          <div class="archive-loading">Laden…</div>
+        </div>
+        <div id="tabPagination"></div>
       </div>
 
-      <!-- Beslissingslog -->
-      <div class="meeting-history-card" style="margin-top:12px">
-        <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">
-          <div class="meeting-history-title" style="margin:0">📋 Beslissingslog</div>
-        </div>
-        <div id="decisionLogList"><div style="color:var(--text-faint);font-size:12px">Laden…</div></div>
-      </div>
     </div>
 
     <!-- Active meeting -->
@@ -215,12 +242,12 @@
         <div class="meeting-input-area">
           <div id="extInputPopover" class="ext-input-popover hidden">
             <div style="font-size:12px;font-weight:700;margin-bottom:10px">Externe input toevoegen</div>
-            <select id="extInputType" class="agenda-input" style="margin-top:0;margin-bottom:8px">
+            <select id="extInputType" class="agenda-input" style="margin-bottom:8px">
               <option value="text">Tekst</option>
               <option value="url">URL</option>
             </select>
-            <input id="extInputLabel" class="agenda-input" style="margin-top:0;margin-bottom:8px" placeholder="Label (optioneel)"/>
-            <textarea id="extInputContent" class="agenda-input" rows="3" style="margin-top:0;margin-bottom:8px;resize:vertical" placeholder="Tekst of URL…"></textarea>
+            <input id="extInputLabel" class="agenda-input" style="margin-bottom:8px" placeholder="Label (optioneel)"/>
+            <textarea id="extInputContent" class="agenda-input" rows="3" style="margin-bottom:8px;resize:vertical" placeholder="Tekst of URL…"></textarea>
             <div style="display:flex;gap:8px;justify-content:flex-end">
               <button class="btn" onclick="toggleExtInput()" style="font-size:12px;padding:5px 12px">Annuleren</button>
               <button class="btn btn-primary" onclick="submitExternalInput()" style="font-size:12px;padding:5px 12px">Toevoegen</button>
@@ -300,7 +327,7 @@
 const { esc, formatMd, showToast, relTime } = AgentShared;
 
 // ═══════════════════════════════════
-// AGENT DEFINITIONS (benodigd voor seat-rendering)
+// AGENT DEFINITIONS
 // ═══════════════════════════════════
 const AGENTS_FALLBACK = [
   { id: null, name:'Simon', role:'E-mail Agent', department:'Communicatie', avatar_color:'#534AB7', avatar_emoji:'📧' },
@@ -317,7 +344,7 @@ const BUBBLES = {
   Jeffrey: ['👍 Goed bezig!', '🎯 Focus!', '💡 Goed idee!'],
 };
 
-// ── State ──────────────────────────────────────────────────────────────────
+// ── Meeting state ──────────────────────────────────────────────────────────
 let meetingId = null;
 let meetingTranscript = [];
 let pendingActionPoints = [];
@@ -331,6 +358,12 @@ let reviewAssigneeOpts  = [];
 let reviewSelectorState = {};
 let instantSelectorState = [];
 
+// ── Archief state ──────────────────────────────────────────────────────────
+let activeTab = 'history';
+const PAGE_SIZE = 10;
+const tabPages = { history: 1, tasks: 1, standups: 1, decisions: 1 };
+const tabData  = { history: [], tasks: [], standups: [], decisions: [] };
+
 // ═══════════════════════════════════
 // INIT
 // ═══════════════════════════════════
@@ -341,10 +374,7 @@ async function init() {
     if (data.agents?.length) agents = data.agents;
   } catch {}
   renderParticipantList();
-  loadMeetingHistory();
-  loadMeetingTasks();
-  loadStandupReports();
-  loadDecisionLog();
+  loadAllArchiveData();
   AgentShared.startApprovalPolling();
 }
 
@@ -354,6 +384,7 @@ function showMeetingSetup() {
   document.getElementById('meetingRoom').classList.add('hidden');
   document.getElementById('meetingSummary').classList.add('hidden');
   clearInterval(bubbleTimer);
+  loadAllArchiveData(); // ververs archief na afsluiten vergadering
 }
 
 // ═══════════════════════════════════
@@ -362,12 +393,10 @@ function showMeetingSetup() {
 function renderParticipantList() {
   document.getElementById('participantList').innerHTML = AGENTS_FALLBACK.map(a => `
     <div class="participant-item ${selectedParticipants.has(a.name) ? 'selected' : ''}" onclick="toggleParticipant('${a.name}',this)">
+      <div style="font-size:22px">${a.avatar_emoji}</div>
+      <div class="participant-name">${esc(a.name)}</div>
+      <div class="participant-role" style="font-size:9px">${esc(a.role)}</div>
       <div class="participant-check">${selectedParticipants.has(a.name) ? '✓' : ''}</div>
-      <div style="font-size:18px">${a.avatar_emoji}</div>
-      <div>
-        <div class="participant-name">${esc(a.name)}</div>
-        <div class="participant-role">${esc(a.role)}</div>
-      </div>
     </div>`).join('');
 }
 
@@ -381,6 +410,191 @@ function toggleParticipant(name, el) {
     el.classList.add('selected');
     el.querySelector('.participant-check').textContent = '✓';
   }
+}
+
+// ═══════════════════════════════════
+// ARCHIEF — TABS & PAGINERING
+// ═══════════════════════════════════
+function switchTab(tabName) {
+  activeTab = tabName;
+  document.querySelectorAll('.tab-btn').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.tab === tabName);
+  });
+  renderActiveTab();
+}
+
+function renderActiveTab() {
+  const data      = tabData[activeTab] || [];
+  const page      = tabPages[activeTab];
+  const totalPages = Math.max(1, Math.ceil(data.length / PAGE_SIZE));
+  const start     = (page - 1) * PAGE_SIZE;
+  const slice     = data.slice(start, start + PAGE_SIZE);
+  const container = document.getElementById('tabContent');
+  if (!container) return;
+
+  if (!slice.length) {
+    container.innerHTML = '<div class="empty-state">Geen items gevonden</div>';
+    document.getElementById('tabPagination').innerHTML = '';
+    return;
+  }
+
+  container.innerHTML = slice.map((item, idx) => renderItemForTab(activeTab, item, start + idx + 1)).join('');
+  renderPagination(data.length, page, totalPages);
+}
+
+function renderItemForTab(tab, item, number) {
+  switch (tab) {
+    case 'history': {
+      const parts = Array.isArray(item.participants) ? item.participants.join(', ') : (item.participants || '');
+      const badge = item.rapport_md
+        ? `<span class="item-badge" style="background:rgba(168,85,247,0.1);color:#c4b5fd;border-color:rgba(168,85,247,0.3)">📄 rapport</span>`
+        : '';
+      return `<div class="list-item" onclick="openMeetingRapport('${esc(item.id)}')">
+        <span class="item-number">${number}</span>
+        <div class="item-content">
+          <div class="item-title">${esc(item.title)}</div>
+          <div class="item-meta">${formatDate(item.created_at)}${parts ? ' · ' + esc(parts) : ''}</div>
+        </div>
+        ${badge}
+      </div>`;
+    }
+    case 'tasks': {
+      const assignee = item.assignees?.[0]?.assignee_name || item.toegewezen_aan || '—';
+      const deadline = item.deadline || 'geen deadline';
+      const prio = item.prioriteit || 'Normaal';
+      return `<div class="list-item no-click">
+        <span class="item-number">${number}</span>
+        <div class="item-content">
+          <div class="item-title">${esc(item.titel)}</div>
+          <div class="item-meta">${esc(assignee)} · ${esc(deadline)}</div>
+        </div>
+        <span class="item-badge prio-badge prio-${esc(prio)}">${esc(prio)}</span>
+      </div>`;
+    }
+    case 'standups': {
+      const parts = Array.isArray(item.participants) ? item.participants.join(', ') : 'Alle agents';
+      const badge = item.rapport_md
+        ? `<span class="item-badge" style="background:rgba(34,211,238,0.08);color:#22d3ee;border-color:rgba(34,211,238,0.25)">📄 rapport</span>`
+        : '';
+      return `<div class="list-item" onclick="openMeetingRapport('${esc(item.id)}')">
+        <span class="item-number">${number}</span>
+        <div class="item-content">
+          <div class="item-title">${esc(item.title)}</div>
+          <div class="item-meta">${formatDate(item.created_at)} · ${esc(parts)}</div>
+        </div>
+        ${badge}
+      </div>`;
+    }
+    case 'decisions': {
+      return `<div class="list-item" onclick="openDecisionDetail('${esc(item.id)}')">
+        <span class="item-number">${number}</span>
+        <div class="item-content">
+          <div class="item-title">${esc(item.title)}</div>
+          <div class="item-meta">${formatDate(item.decision_date)}${item.decided_by ? ' · ' + esc(item.decided_by) : ''}</div>
+        </div>
+      </div>`;
+    }
+    default: return '';
+  }
+}
+
+function renderPagination(total, current, totalPages) {
+  const container = document.getElementById('tabPagination');
+  if (!container || total === 0) { if (container) container.innerHTML = ''; return; }
+  const from = (current - 1) * PAGE_SIZE + 1;
+  const to   = Math.min(current * PAGE_SIZE, total);
+  container.innerHTML = `
+    <span class="page-info">Toont ${from}–${to} van ${total}</span>
+    <div class="page-controls">
+      <button onclick="changePage(${Math.max(1, current - 1)})" ${current === 1 ? 'disabled' : ''}>‹ Vorige</button>
+      ${generatePageButtons(current, totalPages)}
+      <button onclick="changePage(${Math.min(totalPages, current + 1)})" ${current === totalPages ? 'disabled' : ''}>Volgende ›</button>
+    </div>`;
+}
+
+function generatePageButtons(current, totalPages) {
+  if (totalPages <= 1) return '';
+  const pages = [];
+  if (totalPages <= 5) {
+    for (let p = 1; p <= totalPages; p++) pages.push(p);
+  } else {
+    pages.push(1);
+    if (current > 3) pages.push('...');
+    for (let p = Math.max(2, current - 1); p <= Math.min(totalPages - 1, current + 1); p++) pages.push(p);
+    if (current < totalPages - 2) pages.push('...');
+    pages.push(totalPages);
+  }
+  return pages.map(p => {
+    if (p === '...') return `<button disabled style="opacity:.4;background:none;border:none;cursor:default">…</button>`;
+    return `<button onclick="changePage(${p})"${p === current ? ' class="active"' : ''}>${p}</button>`;
+  }).join('');
+}
+
+function changePage(newPage) {
+  tabPages[activeTab] = newPage;
+  renderActiveTab();
+  document.querySelector('.archive-card')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+function formatDate(iso) {
+  if (!iso) return '—';
+  return new Date(iso).toLocaleDateString('nl-NL', { day: '2-digit', month: 'short', year: 'numeric' });
+}
+
+// ── Archief data laden ─────────────────────────────────────────────────────
+async function loadAllArchiveData() {
+  document.getElementById('tabContent').innerHTML = '<div class="archive-loading">Laden…</div>';
+  document.getElementById('tabPagination').innerHTML = '';
+
+  try {
+    const [historyRes, tasksRes, standupsRes, decisionsRes] = await Promise.all([
+      fetch('/api/agent-meeting?action=get_history').then(r => r.json()),
+      fetch('/api/agent-meeting?action=get_meeting_tasks').then(r => r.json()),
+      fetch('/api/agent-meeting?action=get_history&meeting_type=standup').then(r => r.json()),
+      fetch('/api/agent-meeting?action=get_decisions').then(r => r.json()),
+    ]);
+
+    tabData.history   = (historyRes.meetings  || []).filter(m => m.meeting_type !== 'standup');
+    tabData.tasks     = tasksRes.tasks         || [];
+    tabData.standups  = standupsRes.meetings   || [];
+    tabData.decisions = decisionsRes.decisions || [];
+
+    // Tellingen bijwerken
+    document.getElementById('countHistory').textContent   = tabData.history.length;
+    document.getElementById('countTasks').textContent     = tabData.tasks.length;
+    document.getElementById('countStandups').textContent  = tabData.standups.length;
+    document.getElementById('countDecisions').textContent = tabData.decisions.length;
+
+    // Reset pagina's naar 1 bij refresh
+    tabPages.history = tabPages.tasks = tabPages.standups = tabPages.decisions = 1;
+  } catch (err) {
+    tabData.history = tabData.tasks = tabData.standups = tabData.decisions = [];
+    console.error('[meetings] loadAllArchiveData fout:', err.message);
+  }
+
+  renderActiveTab();
+}
+
+// ── Rapport / beslissing openen ────────────────────────────────────────────
+function openMeetingRapport(id) {
+  const all = [...tabData.history, ...tabData.standups];
+  const m = all.find(m => m.id === id);
+  if (!m) return;
+  if (!m.rapport_md) { showToast('Geen rapport beschikbaar voor deze vergadering', 'error'); return; }
+  AgentShared.showReport(`📄 ${m.title}`, m.rapport_md);
+}
+
+function openDecisionDetail(id) {
+  const d = tabData.decisions.find(d => d.id === id);
+  if (!d) return;
+  const md = [
+    `## ${d.title}`,
+    d.description ? `\n${d.description}` : '',
+    `\n**Beslist door:** ${d.decided_by || '—'}`,
+    `**Datum:** ${d.decision_date || '—'}`,
+    d.status ? `**Status:** ${d.status}` : '',
+  ].filter(Boolean).join('\n');
+  AgentShared.showReport('📋 Beslissing', md);
 }
 
 // ═══════════════════════════════════
@@ -439,7 +653,7 @@ function startBubbles(participants) {
 // ═══════════════════════════════════
 async function startMeeting() {
   const agenda = document.getElementById('agendaInput').value.trim();
-  if (!agenda) { alert('Voer eerst een agenda in.'); return; }
+  if (!agenda) { alert('Voer eerst een onderwerp in.'); return; }
   if (selectedParticipants.size === 0) { alert('Selecteer minimaal één deelnemer.'); return; }
   await _doStartMeeting([...selectedParticipants], agenda, 'team');
 }
@@ -882,128 +1096,6 @@ function showCurrentRapport() {
 
 function showMeetingRapport(title, rapportMd) {
   AgentShared.showReport(`📄 ${title}`, rapportMd);
-}
-
-// ═══════════════════════════════════
-// DATA LADEN
-// ═══════════════════════════════════
-async function loadMeetingTasks() {
-  const el = document.getElementById('meetingTasksList');
-  if (!el) return;
-  try {
-    const r    = await fetch('/api/agent-meeting?action=get_meeting_tasks');
-    const data = await r.json();
-    if (data.error) throw new Error(data.error);
-    const tasks = data.tasks || [];
-    if (!tasks.length) {
-      el.innerHTML = '<div style="color:var(--text-faint);font-size:12px">Geen actieve taken uit meetings.</div>';
-      return;
-    }
-    el.innerHTML = tasks.map(t => {
-      const chips    = (t.assignees || []).map(a => `<span class="chip ${a.assignee_type||''}" style="font-size:9px;padding:1px 6px">${esc(a.assignee_name)}</span>`).join('');
-      const deadline = t.deadline ? `📅 ${t.deadline}` : '';
-      const prio     = t.prioriteit || 'Normaal';
-      return `<div class="mtask-row">
-        <span class="prio-badge prio-${prio}">${prio}</span>
-        <span class="mtask-title" title="${esc(t.titel)}">${esc(t.titel)}</span>
-        <span style="display:flex;gap:3px;flex-shrink:0">${chips}</span>
-        ${deadline ? `<span class="mtask-meta">${deadline}</span>` : ''}
-        <span class="mtask-meta" style="font-size:9px;max-width:100px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(t.meeting_title)}">${esc(t.meeting_title)}</span>
-      </div>`;
-    }).join('');
-  } catch (err) {
-    el.innerHTML = `<div style="color:var(--red);font-size:12px">⚠️ ${esc(err.message)}</div>`;
-  }
-}
-
-async function loadMeetingHistory() {
-  const el = document.getElementById('meetingHistoryList');
-  if (!el) return;
-  try {
-    const r       = await fetch('/api/agent-meeting?action=get_history');
-    const data    = await r.json();
-    if (data.error) throw new Error(data.error);
-    const meetings = data.meetings || [];
-    if (!meetings.length) {
-      el.innerHTML = '<div style="color:var(--text-faint);font-size:12px">Geen vergaderingen gevonden.</div>';
-      return;
-    }
-    el.innerHTML = meetings.map(m => {
-      const date       = new Date(m.created_at).toLocaleDateString('nl-NL', { day:'2-digit', month:'short', year:'numeric' });
-      const badgeClass = m.meeting_type === 'standup' ? 'badge-standup' : 'badge-team';
-      const badgeLabel = m.meeting_type === 'standup' ? 'Standup' : 'Team';
-      const rapportBtn = m.rapport_md
-        ? `<button class="btn" onclick='showMeetingRapport(${JSON.stringify(esc(m.title))}, ${JSON.stringify(m.rapport_md)})' style="font-size:11px;padding:3px 8px">📄 Rapport</button>`
-        : '';
-      return `<div class="meeting-row">
-        <span class="meeting-type-badge ${badgeClass}">${badgeLabel}</span>
-        <span class="meeting-row-title" title="${esc(m.title)}">${esc(m.title)}</span>
-        <span class="meeting-row-date">${date}</span>
-        ${rapportBtn}
-      </div>`;
-    }).join('');
-  } catch (err) {
-    el.innerHTML = `<div style="color:var(--red);font-size:12px">⚠️ ${esc(err.message)}</div>`;
-  }
-}
-
-async function loadStandupReports() {
-  const el = document.getElementById('standupList');
-  if (!el) return;
-  try {
-    const r    = await fetch('/api/agent-meeting?action=get_history&meeting_type=standup');
-    const data = await r.json();
-    if (data.error) throw new Error(data.error);
-    const meetings = data.meetings || [];
-    if (!meetings.length) {
-      el.innerHTML = '<div style="color:var(--text-faint);font-size:12px">Nog geen standups gevonden.</div>';
-      return;
-    }
-    el.innerHTML = meetings.map(m => {
-      const date = new Date(m.created_at).toLocaleDateString('nl-NL', { day:'2-digit', month:'short', year:'numeric' });
-      const time = new Date(m.created_at).toLocaleTimeString('nl-NL', { hour:'2-digit', minute:'2-digit' });
-      const participants = Array.isArray(m.participants) ? m.participants.join(', ') : m.participants || '';
-      const rapportBtn   = m.rapport_md
-        ? `<button class="btn" onclick='showMeetingRapport(${JSON.stringify(esc(m.title))}, ${JSON.stringify(m.rapport_md)})' style="font-size:11px;padding:3px 8px">📄 Rapport</button>`
-        : '';
-      return `<div class="meeting-row">
-        <span class="meeting-type-badge badge-standup">Standup</span>
-        <span class="meeting-row-title">${esc(m.title)}</span>
-        <span class="meeting-row-date">${date} ${time}</span>
-        <span style="font-size:10px;color:var(--text-faint);flex-shrink:0">${esc(participants)}</span>
-        ${rapportBtn}
-      </div>`;
-    }).join('');
-  } catch (err) {
-    el.innerHTML = `<div style="color:var(--red);font-size:12px">⚠️ ${esc(err.message)}</div>`;
-  }
-}
-
-async function loadDecisionLog() {
-  const el = document.getElementById('decisionLogList');
-  if (!el) return;
-  try {
-    // Alle vergaderingen met een rapport = vergadering met beslissingen
-    const r    = await fetch('/api/agent-meeting?action=get_history');
-    const data = await r.json();
-    if (data.error) throw new Error(data.error);
-    const withRapport = (data.meetings || []).filter(m => m.rapport_md && m.meeting_type !== 'standup');
-    if (!withRapport.length) {
-      el.innerHTML = '<div style="color:var(--text-faint);font-size:12px">Nog geen vergaderingen met rapport/beslissingen gevonden.</div>';
-      return;
-    }
-    el.innerHTML = withRapport.map(m => {
-      const date = new Date(m.created_at).toLocaleDateString('nl-NL', { day:'2-digit', month:'short', year:'numeric' });
-      return `<div class="meeting-row">
-        <span class="meeting-type-badge badge-team">Team</span>
-        <span class="meeting-row-title" title="${esc(m.title)}">${esc(m.title)}</span>
-        <span class="meeting-row-date">${date}</span>
-        <button class="btn" onclick='showMeetingRapport(${JSON.stringify(esc(m.title))}, ${JSON.stringify(m.rapport_md)})' style="font-size:11px;padding:3px 8px">📋 Beslissingen</button>
-      </div>`;
-    }).join('');
-  } catch (err) {
-    el.innerHTML = `<div style="color:var(--red);font-size:12px">⚠️ ${esc(err.message)}</div>`;
-  }
 }
 
 init();
