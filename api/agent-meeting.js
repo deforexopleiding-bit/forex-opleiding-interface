@@ -120,11 +120,14 @@ export default async function handler(req, res) {
 
     // B7: vergadergeschiedenis
     if (action === 'get_history') {
-      const { data: meetings, error } = await supabase
+      const meetingTypeFilter = req.query?.meeting_type || '';
+      let q = supabase
         .from('agent_meetings')
         .select('id, title, created_at, ended_at, participants, meeting_type, status, rapport_md, rapport_generated_at')
         .order('created_at', { ascending: false })
-        .limit(10);
+        .limit(20);
+      if (meetingTypeFilter) q = q.eq('meeting_type', meetingTypeFilter);
+      const { data: meetings, error } = await q;
       if (error) return res.status(500).json({ error: error.message });
       return res.status(200).json({ meetings: meetings || [] });
     }

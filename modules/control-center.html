@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Control Center · De Forex Opleiding</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com"/>
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
+  <link rel="stylesheet" href="/modules/shared/agent-shared.css"/>
+  <style>
+    /* ── KPI banner ── */
+    .kpi-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(180px,1fr)); gap:14px; margin-bottom:24px; }
+    .kpi-card { background:var(--bg-elev); border:1px solid var(--border); border-radius:12px; padding:16px 20px; }
+    .kpi-label { font-size:11px; color:var(--text-faint); text-transform:uppercase; letter-spacing:.5px; font-weight:600; margin-bottom:6px; }
+    .kpi-value { font-size:24px; font-weight:800; color:var(--text); }
+    .kpi-sub   { font-size:11px; color:var(--text-dim); margin-top:3px; }
+
+    /* ── Section card ── */
+    .cc-card { background:var(--bg-elev); border:1px solid var(--border); border-radius:14px; padding:20px; margin-bottom:20px; }
+    .cc-card-header { display:flex; align-items:center; gap:10px; justify-content:space-between; margin-bottom:14px; }
+    .cc-card-title { font-size:14px; font-weight:700; display:flex; align-items:center; gap:8px; }
+    .approval-badge-inline { background:var(--red); color:#fff; border-radius:10px; padding:1px 8px; font-size:11px; font-weight:700; min-width:20px; text-align:center; }
+
+    /* ── Filter input ── */
+    .filter-select { padding:4px 8px; background:var(--bg-elev-2); border:1px solid var(--border); border-radius:6px; color:var(--text-dim); font-size:11px; font-family:inherit; outline:none; }
+    .filter-select:focus { border-color:var(--accent-violet); }
+
+    @media(max-width:1024px) { .kpi-grid { grid-template-columns:repeat(2,1fr); } }
+  </style>
+</head>
+<body>
+
+<nav class="sidebar">
+  <div class="sidebar-logo" id="sidebarLogo">
+    <img id="sidebarLogoImg" src="https://www.deforexopleiding.nl/wp-content/uploads/2023/01/Logo-De-Forex-Opleiding-wit.png" alt="De Forex Opleiding" onerror="AgentShared.handleLogoError()"/>
+  </div>
+  <div class="sidebar-nav">
+    <a class="nav-item" href="../index.html">
+      <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+      Dashboard
+    </a>
+    <a class="nav-item" href="email.html">
+      <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
+      E-mail
+    </a>
+    <a class="nav-item" href="taken.html">
+      <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="9" y1="9" x2="15" y2="9"/><line x1="9" y1="13" x2="15" y2="13"/><line x1="9" y1="17" x2="12" y2="17"/></svg>
+      Takenbeheer
+    </a>
+    <a class="nav-item" href="kennisbank.html">
+      <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>
+      Kennisbank
+    </a>
+    <a class="nav-item" href="agents.html">
+      <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M20 21a8 8 0 1 0-16 0"/></svg>
+      AI Agents
+    </a>
+    <a class="nav-item" href="meetings.html">
+      <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+      Vergaderruimte
+    </a>
+    <a class="nav-item active" href="control-center.html">
+      <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+      Control Center
+      <span id="ccApprovalBadge" class="nav-badge">0</span>
+    </a>
+    <div class="nav-section">Binnenkort</div>
+    <div class="nav-item nav-concept">
+      <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>
+      WhatsApp Bot <span class="nav-soon">Binnenkort</span>
+    </div>
+    <div class="nav-item nav-concept">
+      <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+      Wanbetalers <span class="nav-soon">Binnenkort</span>
+    </div>
+  </div>
+  <div class="sidebar-footer">
+    <div class="footer-user">
+      <div class="footer-avatar">JB</div>
+      <span>Jeffrey</span>
+    </div>
+  </div>
+</nav>
+
+<div class="main">
+  <div class="main-inner">
+
+    <div class="page-header">
+      <div>
+        <div class="page-title">🎛️ Control Center</div>
+        <div class="page-sub">KPIs, agent-approvals en audit log</div>
+      </div>
+      <div class="header-actions">
+        <button class="btn" onclick="refreshAll()" style="font-size:12px">↺ Vernieuwen</button>
+      </div>
+    </div>
+
+    <!-- KPI banner -->
+    <div class="kpi-grid" id="kpiBanner">
+      <div class="kpi-card">
+        <div class="kpi-label">Openstaande approvals</div>
+        <div class="kpi-value" id="kpiApprovals">—</div>
+        <div class="kpi-sub">Wachten op jouw goedkeuring</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">Vergaderingen vandaag</div>
+        <div class="kpi-value" id="kpiMeetingsToday">—</div>
+        <div class="kpi-sub">Gestart de afgelopen 24u</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">Acties uitgevoerd (7d)</div>
+        <div class="kpi-value" id="kpiActionsWeek">—</div>
+        <div class="kpi-sub">Goedgekeurde agent-acties</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">Fouten (7d)</div>
+        <div class="kpi-value" id="kpiErrorsWeek">—</div>
+        <div class="kpi-sub">Mislukte agent-acties</div>
+      </div>
+    </div>
+
+    <!-- Approval inbox -->
+    <div class="cc-card">
+      <div class="cc-card-header">
+        <div class="cc-card-title">
+          🔔 Approval Inbox
+          <span id="approvalBadge" class="approval-badge-inline hidden">0</span>
+        </div>
+        <button class="btn btn-sm" onclick="AgentShared.loadApprovals()">↺ Vernieuwen</button>
+      </div>
+      <div id="approvalList">
+        <div style="color:var(--text-faint);font-size:12px">Laden…</div>
+      </div>
+    </div>
+
+    <!-- Audit log -->
+    <div class="cc-card">
+      <div class="cc-card-header">
+        <div class="cc-card-title">📋 Audit Log</div>
+        <div style="display:flex;gap:8px;align-items:center">
+          <select id="auditFilterAgent" class="filter-select" onchange="loadAuditLog()">
+            <option value="">Alle agents</option>
+            <option>Simon</option><option>Leon</option><option>Aron</option>
+          </select>
+          <button class="btn btn-sm" onclick="exportAuditCsv()">⬇ CSV</button>
+        </div>
+      </div>
+      <div id="auditLogList">
+        <div style="color:var(--text-faint);font-size:12px">Laden…</div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script src="/modules/shared/agent-shared.js"></script>
+<script>
+const { esc, relTime, showToast } = AgentShared;
+
+// ═══════════════════════════════════
+// AUDIT LOG
+// ═══════════════════════════════════
+async function loadAuditLog() {
+  const el          = document.getElementById('auditLogList');
+  if (!el) return;
+  const agentFilter = document.getElementById('auditFilterAgent')?.value || '';
+  try {
+    const url  = `/api/agent-audit?action=list&limit=30${agentFilter ? '&agent_filter=' + encodeURIComponent(agentFilter) : ''}`;
+    const res  = await fetch(url);
+    const data = await res.json();
+    const entries = data.entries || [];
+    if (!entries.length) {
+      el.innerHTML = '<div style="color:var(--text-faint);font-size:12px">Geen audit-entries</div>';
+      return;
+    }
+    el.innerHTML = entries.map(e => {
+      const isOk = e.status === 'success';
+      const name = e.agent_name || 'system';
+      return `<div class="audit-row" onclick='showAuditDetail(${JSON.stringify(JSON.stringify(e))})'>
+        <span class="${isOk ? 'audit-status-ok' : 'audit-status-err'}">${isOk ? '✓' : '✗'}</span>
+        <span class="chip ${name.toLowerCase()}" style="font-size:10px">${esc(name)}</span>
+        <span style="font-size:11px;font-weight:500;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(e.action)}</span>
+        <span style="font-size:10px;color:var(--text-faint);flex-shrink:0">${relTime(e.created_at)}</span>
+        ${e.triggered_by && e.triggered_by !== 'system' ? `<span style="font-size:10px;color:var(--text-faint);flex-shrink:0">✓ ${esc(e.triggered_by)}</span>` : ''}
+      </div>`;
+    }).join('');
+  } catch (e) {
+    el.innerHTML = `<div style="color:var(--red);font-size:12px">${esc(e.message)}</div>`;
+  }
+}
+
+function showAuditDetail(entryStr) {
+  try {
+    const entry = JSON.parse(entryStr);
+    alert(JSON.stringify(entry, null, 2));
+  } catch {}
+}
+
+function exportAuditCsv() {
+  const agentFilter = document.getElementById('auditFilterAgent')?.value || '';
+  window.open(`/api/agent-audit?action=export_csv${agentFilter ? '&agent_filter=' + encodeURIComponent(agentFilter) : ''}`, '_blank');
+}
+
+// ═══════════════════════════════════
+// KPI BANNER
+// ═══════════════════════════════════
+async function loadKPIBanner() {
+  try {
+    // Approvals count
+    const apRes  = await fetch('/api/agent-approval?action=list');
+    const apData = await apRes.json();
+    const pendingCount = (apData.pending || []).length;
+    const kpiApprovals = document.getElementById('kpiApprovals');
+    if (kpiApprovals) kpiApprovals.textContent = pendingCount;
+
+    // Audit stats (7 days)
+    const auditRes  = await fetch('/api/agent-audit?action=list&limit=200');
+    const auditData = await auditRes.json();
+    const entries   = auditData.entries || [];
+    const oneWeekAgo = Date.now() - 7 * 24 * 3600 * 1000;
+    const weekEntries = entries.filter(e => new Date(e.created_at).getTime() > oneWeekAgo);
+    const actionsWeek = weekEntries.filter(e => e.status === 'success').length;
+    const errorsWeek  = weekEntries.filter(e => e.status !== 'success').length;
+    const kpiAct = document.getElementById('kpiActionsWeek');
+    const kpiErr = document.getElementById('kpiErrorsWeek');
+    if (kpiAct) kpiAct.textContent = actionsWeek;
+    if (kpiErr) { kpiErr.textContent = errorsWeek; kpiErr.style.color = errorsWeek > 0 ? 'var(--red)' : 'var(--green)'; }
+
+    // Meetings today
+    const mtgRes  = await fetch('/api/agent-meeting?action=get_history');
+    const mtgData = await mtgRes.json();
+    const oneDayAgo = Date.now() - 24 * 3600 * 1000;
+    const todayMtgs = (mtgData.meetings || []).filter(m => new Date(m.created_at).getTime() > oneDayAgo).length;
+    const kpiMtg = document.getElementById('kpiMeetingsToday');
+    if (kpiMtg) kpiMtg.textContent = todayMtgs;
+  } catch (e) {
+    console.warn('[CC] KPI banner fout:', e.message);
+  }
+}
+
+// ═══════════════════════════════════
+// INIT
+// ═══════════════════════════════════
+function refreshAll() {
+  loadKPIBanner();
+  AgentShared.loadApprovals();
+  loadAuditLog();
+}
+
+async function init() {
+  loadKPIBanner();
+  AgentShared.startApprovalPolling();
+  loadAuditLog();
+}
+
+init();
+</script>
+</body>
+</html>
