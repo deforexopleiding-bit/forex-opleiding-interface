@@ -1,5 +1,5 @@
 # TODO — Agency Command Center
-> Bijgewerkt: 2026-05-15 (Fase C admin panel + Fase E rollout) | Gebaseerd op AUDIT-VOLLEDIG.md
+> Bijgewerkt: 2026-05-14 (Rol-architectuur + Endp-1A + C5 owner_id + C6.2 RLS prep) | Gebaseerd op AUDIT-VOLLEDIG.md
 
 ---
 
@@ -163,12 +163,8 @@ En in `api/email-agent.js`: bij elke categorisatie een rij invoegen.
 
 > Bijgewerkt: 2026-05-13 na Fase C sessie (commits `bf3ff35`, `9adb307`)
 
-### [endp-1] Bearer-only validatie op 28 browser-endpoints (pre-D2)
-**Bestanden:** alle api/*.js met `import { supabase } from './supabase.js'` (browser-triggered)
-**Probleem:** Zodra D2 RLS user-tabellen krijgt, gaan anon queries niets meer terugkrijgen voor niet-ingelogde users
-**Fix:** Per request een Supabase client maken met Bearer token uit Authorization header, zodat RLS `auth.uid()` correct evalueert
-**Timing:** Vóór Fase D2 start
-**Schatting:** 3-4 uur
+### [endp-1] Bearer-only validatie op 9 browser-endpoints ✅ GEDAAN (2026-05-14, commits bac5bc0 + 708e8c3)
+**Opgelost:** `createUserClient(req)` helper in `api/supabase.js`; 9 endpoints omgezet; `apiFetch` wrapper in agent-shared.js; email.html + kennisbank.html + taken.html + agents.html bijgewerkt. meetings.html + agents.html gefixed in aparte commit 1978f00.
 
 ### [endp-2] Setup/one-time endpoints verwijderen
 **Bestanden:** `api/admin-seed-users.js`, `api/db-migrate.js`, `api/db-migrate-batch-meetings.js`, `api/db-migrate-batch-meetings-v2.js`, `api/db-migrate-email-bodies.js`, `api/debug-supabase.js`, `api/test-smtp.js`
@@ -282,6 +278,27 @@ En in `api/email-agent.js`: bij elke categorisatie een rij invoegen.
 - [x] Logo regression fix — handleLogoError verwijderd uit alle 8 modules (2026-05-15, commit c8aa3a3)
 - [x] Fase E rollout — auth-aware sidebar naar 6 modules (2026-05-15, commit 82cccea):
   - email.html, taken.html, kennisbank.html, agents.html, meetings.html, control-center.html
+- [x] Pre-D1 two-client Supabase architectuur (2026-05-14, commit f24491f):
+  - `createUserClient(req)` helper in api/supabase.js (JWT-aware, fallback naar anon)
+  - `supabaseAdmin` gescheiden van user-facing client; `verifyAdmin` + `logAudit` shared
+- [x] Endp-1A — Bearer-only upgrade 9 browser-endpoints (2026-05-14, commits bac5bc0 + 708e8c3):
+  - email-actions, email-patterns, sent-replies, taken, undo, generate-reply, learn, send-email, kennisbank-sync
+  - apiFetch wrapper in agent-shared.js; Bearer headers in email.html, kennisbank.html, taken.html, agents.html
+- [x] C1 — Rol-architectuur document (2026-05-14, commit ba57a3f):
+  - docs/role-architecture.md: hiërarchisch RLS design, 5 rollen, patronen 1-5, beleidsmatrix, implementatievolgorde
+- [x] C2b — Admin gates uitgebreid voor super_admin + manager (2026-05-14, commit a130e04):
+  - verifyAdmin: ADMIN_ROLES = ['super_admin','admin','manager']
+  - admin-users.js: VALID_ROLES uitgebreid + super_admin-grant guard (POST + PATCH)
+  - admin.html: requireAuth array, dropdowns, conditional super_admin visibility, CSS badges
+- [x] C5 — Backend schrijft owner_id bij CREATE (2026-05-14, commit 93a7243):
+  - taken.js: Optie A split (insert met owner_id, update zonder)
+  - agent-meeting.js + agent-chat.js: dual import pattern, owner_id/user_id bij insert
+  - send-email.js: sent_by_id via auth.uid()
+  - undo.js: performed_by_id via auth.uid()
+- [x] C5 fix — Authorization headers meetings.html + agents.html (2026-05-14, commit 1978f00):
+  - meetings.html: 12 fetch-calls → apiFetch; agents.html: 2 fetch-calls → apiFetch
+- [x] C6.2 fix — READ-handlers agent-meeting.js naar createUserClient (2026-05-14, commit bcb821f):
+  - 6 SELECT-branches in GET-handler omgezet; smoke test C-1 ✅
 - [x] Agents Batch 1 — volledig afgerond (2026-05-12):
   - Sessie persistence via localStorage per agent (agent_active_session_<name>)
   - api/agent-conversations.js: session_id teruggestuurd ook als berichten leeg (verse sessie)
@@ -304,18 +321,46 @@ En in `api/email-agent.js`: bij elke categorisatie een rij invoegen.
 
 ---
 
-## Volgende sessie priority items (status 15 mei)
+## Volgende sessie priority items (status 14 mei — na rol-architectuur + C5)
 
-### [E2] Fase E2 — Admin-link conditioneel op role=admin
+### [C6.2-smoke] Smoke test C6.2 voltooien — tests C-2 t/m G
+**Context:** Chrome extension disconnected na test C-1. Tests C-2 (Amigo ziet eigen meeting) t/m G (decisions filtering) zijn niet uitgevoerd.
+**Actie:** Opnieuw opstarten Chrome extension + volledige smoke test matrix doorlopen
+**Prioriteit:** Hoog (valideert C6.2 RLS correct voor team-launch)
+
+### [C6.1] RLS rollout D1b1 — 5 authenticated-all tabellen
+**Tabellen:** kennisbank_items, agent_kennisbank, agent_learnings, learn_examples, undo_history, email_actions
+**Patroon:** Patroon 2 (authenticated read/write — iedereen die ingelogd is)
+**Timing:** Na C6.2 smoke test volledig groen
+**Prioriteit:** Medium
+
+### [C6.3] RLS rollout C6.3 — 7 admin/super/manager tabellen
+**Tabellen:** profiles, email_patterns, email_messages, team_members, agent_approval_queue, agent_audit_log, email_sync_log
+**Patroon:** Patroon 3/4/5 (admin-only of via parent FK)
+**Timing:** Na C6.1 + C6.2 volledig gevalideerd
+**Prioriteit:** Medium
+
+### [E2] Fase E2 — Admin-link conditioneel op ADMIN_ROLES
 **Bestand:** `modules/shared/agent-shared.js` — `renderUserSection()`
-**Probleem:** Admin-link wordt altijd getoond (of nooit) ongeacht de rol van de ingelogde user
-**Fix:** Toon "⚙ Admin" link alleen als `profile.role === 'admin'`
+**Probleem:** Admin-link tonen vereist check op `['super_admin','admin','manager']` — niet alleen `'admin'`
+**Fix:** `if (ADMIN_ROLES.includes(profile.role))` of array-includes check
 **Prioriteit:** Medium
 
 ### [E3] Maxim + Dave aanmaken via admin panel
 **Actie:** Jeffrey kan dit zelf doen via /modules/admin.html
 - Aanmaken + recovery link sturen + eerste login valideren per user
 **Prioriteit:** Hoog (blokkeert team-toegang)
+
+### [endp-2-cleanup] One-time + dead endpoints verwijderen
+**Bestanden:** admin-seed-users.js, db-migrate.js, db-migrate-batch-meetings.js, db-migrate-batch-meetings-v2.js, db-migrate-email-bodies.js, debug-supabase.js, test-smtp.js, backfill-start.js, backfill-bodies-start.js, verify-meeting-tasks.js (check first)
+**Fix:** Verwijderen in losse opschoning-commit (deel van [endp-2]+[endp-5])
+**Schatting:** 30 minuten
+**Prioriteit:** Laag
+
+### [D2-RLS] Fase D2 RLS rollout
+**Tabellen:** taken_items, taken_assignees, decisions, agent_meetings, agent_conversations, email_replies, email_patterns, email_sync_log
+**Timing:** Na C6 volledig afgerond + team-accounts actief
+**Prioriteit:** Medium (blokkeert multi-user data-isolatie)
 
 ### [P-CC1] Paginatitels inconsistent
 **Bestanden:** `modules/*.html`, `index.html`

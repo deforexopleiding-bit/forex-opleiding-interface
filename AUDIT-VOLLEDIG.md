@@ -4,6 +4,96 @@ Chronologische verzameling van technische bevindingen en debuglessen opgedaan ti
 
 ---
 
+## Sessie 14 mei 2026 — Rol-architectuur + Endp-1A + C5 owner_id + C6.2 RLS prep
+
+### Wat is gebouwd
+
+- **Pre-D1 two-client refactor** (commit f24491f):
+  * `createUserClient(req)` helper toegevoegd aan `api/supabase.js`
+  * Per-request JWT-aware Supabase client; fallback naar anon bij geen Bearer token
+  * `supabaseAdmin` (service_role) gescheiden van user-facing client
+  * `verifyAdmin` + `logAudit` als shared auth helpers
+
+- **Endp-1A: Bearer-only upgrade** (commits bac5bc0 + 708e8c3):
+  * 9 browser-endpoints omgezet naar `createUserClient(req)`: email-actions, email-patterns,
+    sent-replies, taken, undo, generate-reply, learn, send-email, kennisbank-sync
+  * Frontend: `apiFetch` wrapper in `agent-shared.js` injecteert Authorization header
+  * email.html (9 aanroepen), kennisbank.html, taken.html, agents.html bijgewerkt
+
+- **C1 — Rol-architectuur document** (commit ba57a3f):
+  * `docs/role-architecture.md` aangemaakt met volledig hiërarchisch RLS design
+  * 5 rollen: super_admin → manager → admin → sales/mentor/administratie/viewer
+  * RLS-policy patronen 1-5 gedocumenteerd + beleidsmatrix (21 tabellen × 3 operaties)
+  * Implementatievolgorde C1–C6 vastgelegd als referentie-document
+
+- **C2b — Admin gates uitbreiden** (commit a130e04):
+  * `api/supabase.js`: `ADMIN_ROLES = ['super_admin','admin','manager']` in `verifyAdmin`
+  * `api/admin-users.js`: VALID_ROLES uitgebreid + super_admin-grant guard (POST + PATCH)
+  * `modules/admin.html`: `requireAuth` accepteert array van 3 rollen; dropdown + conditional
+    super_admin visibility via JS; CSS badges voor super_admin (paars) en manager (cyaan)
+
+- **C5 — Backend schrijft owner_id bij CREATE** (commit 93a7243):
+  * `api/taken.js`: Optie A split — existence-check → INSERT met owner_id voor nieuwe taken,
+    upsert zonder owner_id voor bestaande (voorkomt overschrijven)
+  * `api/agent-meeting.js`: dual import pattern; `owner_id` bij `action === 'start'`
+  * `api/agent-chat.js`: `user_id` op beide rijen via `createUserClient` insert
+  * `api/send-email.js`: `sent_by_id` via `auth.uid()`
+  * `api/undo.js`: `performed_by_id` via `auth.uid()`
+
+- **C5 fix — Authorization headers voor meetings + agents** (commit 1978f00):
+  * `modules/meetings.html`: 12 fetch-calls omgezet naar `AgentShared.apiFetch`
+  * `modules/agents.html`: 2 fetch-calls omgezet naar `AgentShared.apiFetch`
+  * Root cause: modules buiten endp-1A scope → geen Bearer → `auth.uid()` = null → owner_id NULL
+
+- **C6.2 fix — READ-handlers in agent-meeting** (commit bcb821f):
+  * 6 SELECT-branches in GET-handler omgezet naar `userClient` (i.p.v. anon `supabase`)
+  * Root cause: C5 fixte alleen INSERT-branch; GET-branches bleven op module-scope anon client
+  * Smoke test C-1 ✅ — Jeffrey ziet 1 eigen meeting, niet Amigo's 29
+
+### Architectuur-beslissingen
+
+- **Two-client model**: `supabase` (anon) voor niet-RLS tabellen (agents, agent_learnings);
+  `createUserClient(req)` voor alle tabellen met RLS
+- **Dual-import patroon**: `import { supabase, createUserClient }` — beide clients in hetzelfde
+  endpoint voor gemengde tabellen (RLS + niet-RLS in één handler)
+- **Optie A split (taken.js)**: existence-check vóór elke write — owner_id alleen bij INSERT,
+  nooit bij UPDATE (prevents ownership hijack op bestaande taken)
+- **ADMIN_ROLES constante**: single source of truth voor alle admin-gate checks in backend + frontend
+- **Backward compat**: legacy text-velden (`created_by`, `performed_by`) behouden naast
+  nieuwe UUID-kolommen (`owner_id`, `performed_by_id`) voor zachte migratie
+
+### Lessons Learned tijdens deze sessie
+
+**Les J — RLS-keten heeft vier schakels — elke schakel kan breken**
+Een lege response-array (geen error, geen status 500) kan op vier plaatsen falen:
+(1) Frontend stuurt geen Bearer header,
+(2) Backend gebruikt geen `createUserClient`,
+(3) `auth.uid()` evalueert als NULL,
+(4) RLS-policy filtert de row weg.
+Elk symptoom ziet er identiek uit. Diagnostisch protocol: (a) log `auth.uid()` server-side,
+(b) check Authorization header in request-headers, (c) controleer of RLS al actief is op de tabel.
+
+**Les K — Dual-import: module-scope is niet request-scope**
+`agent-meeting.js` importeerde `supabase` op module-niveau (anon client, éénmalig aangemaakt bij
+startup). Bij C5 werd de INSERT-branch gefixed, maar de vijf GET-branches bleven op de module-scope
+anon client. Na C6.2 RLS go-live: alle GETs retourneerden leeg — geen error. Module-level singletons
+zijn request-agnostisch. Alle RLS-queries moeten per-request een `userClient` aanmaken, ook in GET-branches.
+
+**Les L — RLS fix scope strekt zich uit over alle branches**
+Bij het upgraden van een endpoint naar `createUserClient`: maak eerst een lijst van alle
+`.from()` calls in het bestand. `agent-meeting.js` had 6 SELECT-branches — alleen de INSERT-branch
+werd in C5 gefixed. De overige 5 faalden na RLS go-live. Regel: Check het volledige bestand vóór
+commit, niet alleen de branch die de bug vertoont.
+
+**Les M — Frontend scope-grenzen zijn geen garantie voor volledigheid**
+endp-1A had een expliciete scope van 9 endpoints. `meetings.html` viel buiten die scope en stuurde
+nooit een Bearer token. `owner_id` bleef NULL voor alle nieuwe meetings na C5 deploy.
+Regel: Na elke Bearer-upgrade op backend-endpoints — grep alle `fetch(` aanroepen die die endpoints
+targeten en vervang door `apiFetch`. Een scope-grens in een plan beschermt niet tegen impliciete
+aannames bij de caller.
+
+---
+
 ## Sessie 14 mei 2026 — Auth Module Fase A+B
 
 ### Wat is gebouwd
