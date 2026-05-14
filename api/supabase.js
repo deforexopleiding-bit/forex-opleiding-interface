@@ -41,6 +41,9 @@ export function createUserClient(req) {
   );
 }
 
+// Rollen die toegang geven tot het admin panel + admin-endpoints
+const ADMIN_ROLES = ['super_admin', 'admin', 'manager'];
+
 /**
  * Verify Bearer token belongs to an active admin.
  * Returns { user, profile } on success, null otherwise.
@@ -63,7 +66,7 @@ export async function verifyAdmin(req) {
     .eq('id', user.id)
     .single();
 
-  if (!profile || profile.role !== 'admin' || !profile.is_active) return null;
+  if (!profile || !ADMIN_ROLES.includes(profile.role) || !profile.is_active) return null;
   return { user, profile };
 }
 

@@ -5,7 +5,7 @@
 import nodemailer from 'nodemailer';
 import { supabaseAdmin, verifyAdmin } from './supabase.js';
 
-const VALID_ROLES = ['admin', 'sales', 'mentor', 'administratie', 'viewer'];
+const VALID_ROLES = ['super_admin', 'admin', 'manager', 'sales', 'mentor', 'administratie', 'viewer'];
 const SITE_URL    = 'https://forex-opleiding-interface.vercel.app';
 
 // ── Audit helper ──────────────────────────────────────────────────────────────
@@ -223,6 +223,9 @@ export default async function handler(req, res) {
     if (!VALID_ROLES.includes(role)) {
       return res.status(400).json({ error: `Ongeldige rol. Kies uit: ${VALID_ROLES.join(', ')}.` });
     }
+    if (role === 'super_admin' && admin.profile.role !== 'super_admin') {
+      return res.status(403).json({ error: 'Alleen super_admin kan de super_admin-rol toekennen.' });
+    }
 
     // 409 als profile al bestaat
     const { data: duplicate } = await supabaseAdmin
@@ -310,6 +313,9 @@ export default async function handler(req, res) {
     if (role !== undefined) {
       if (!VALID_ROLES.includes(role)) {
         return res.status(400).json({ error: `Ongeldige rol. Kies uit: ${VALID_ROLES.join(', ')}.` });
+      }
+      if (role === 'super_admin' && admin.profile.role !== 'super_admin') {
+        return res.status(403).json({ error: 'Alleen super_admin kan de super_admin-rol toekennen.' });
       }
       updates.role = role;
     }
