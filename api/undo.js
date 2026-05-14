@@ -24,6 +24,9 @@ export default async function handler(req, res) {
 
   // ── Sla nieuwe actie op ──────────────────────────────────────────────────
   if (action === 'save') {
+    const { data: { user: authUser } } = await supabase.auth.getUser();
+    const userId = authUser?.id || null;
+
     try {
       // Trim: verwijder oudste entries als er >= 10 zijn
       const { data: existing } = await supabase.from('undo_history')
@@ -37,10 +40,11 @@ export default async function handler(req, res) {
       }
 
       const { data: inserted, error: insErr } = await supabase.from('undo_history').insert({
-        action_type:  type,
-        action_data:  actionData || {},
-        label:        label || type,
-        performed_by: performed_by,
+        action_type:    type,
+        action_data:    actionData || {},
+        label:          label || type,
+        performed_by:   performed_by,
+        performed_by_id: userId,
       }).select('id').single();
 
       if (insErr) {

@@ -1,4 +1,4 @@
-import { supabase } from './supabase.js';
+import { supabase, createUserClient } from './supabase.js';
 
 const AGENT_NAMES = ['Simon', 'Leon', 'Aron'];
 
@@ -256,8 +256,12 @@ export default async function handler(req, res) {
   try {
     // ── START ─────────────────────────────────────────────────────────────────
     if (action === 'start') {
-      const { data: meeting, error } = await supabase.from('agent_meetings').insert({
-        title: title || agenda, agenda, participants, transcript: [], status: 'active', created_by: 'Jeffrey',
+      const userClient = createUserClient(req);
+      const { data: { user: authUser } } = await userClient.auth.getUser();
+      const userId = authUser?.id || null;
+
+      const { data: meeting, error } = await userClient.from('agent_meetings').insert({
+        title: title || agenda, agenda, participants, transcript: [], status: 'active', created_by: 'Jeffrey', owner_id: userId,
       }).select().single();
       if (error) throw error;
 

@@ -1,4 +1,4 @@
-import { supabase } from './supabase.js';
+import { supabase, createUserClient } from './supabase.js';
 import { getToolsForAgent, execute } from './agent-tools.js';
 
 const FALLBACK_PROMPTS = {
@@ -182,9 +182,13 @@ export default async function handler(req, res) {
     }
 
     // ── Opslaan in Supabase (awaited) ──────────────────────────────────────────
-    const { error: saveErr } = await supabase.from('agent_conversations').insert([
-      { agent_id: agent_id || null, agent_name: name, role: 'user',      content: userMessage, conversation_session: session_id },
-      { agent_id: agent_id || null, agent_name: name, role: 'assistant', content: finalResponse, conversation_session: session_id },
+    const userClient = createUserClient(req);
+    const { data: { user: authUser } } = await userClient.auth.getUser();
+    const userId = authUser?.id || null;
+
+    const { error: saveErr } = await userClient.from('agent_conversations').insert([
+      { agent_id: agent_id || null, agent_name: name, role: 'user',      content: userMessage, conversation_session: session_id, user_id: userId },
+      { agent_id: agent_id || null, agent_name: name, role: 'assistant', content: finalResponse, conversation_session: session_id, user_id: userId },
     ]);
     if (saveErr) console.error('[agent-chat] save fout:', saveErr.message);
 

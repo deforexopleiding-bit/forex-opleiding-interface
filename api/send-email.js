@@ -85,6 +85,8 @@ export default async function handler(req, res) {
       : null;
 
     const sentAt = new Date().toISOString();
+    const { data: { user: authUser } } = await supabase.auth.getUser();
+    const userId = authUser?.id || null;
 
     // Sla op via supabase-js client (betrouwbaarder dan directe REST fetch)
     // Omit attachments field when null — PostgREST rejects unknown columns if the
@@ -98,6 +100,7 @@ export default async function handler(req, res) {
       cc_address:    cc  || null,
       bcc_address:   bcc || null,
       sent_at:       sentAt,
+      sent_by_id:    userId,
     };
     if (attachMeta !== null) insertPayload.attachments = attachMeta;
     const { error: dbErr } = await supabase.from('email_replies').insert(insertPayload);
