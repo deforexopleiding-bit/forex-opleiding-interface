@@ -1,4 +1,4 @@
-import { supabase } from './supabase.js';
+import { createUserClient } from './supabase.js';
 
 function toRow(task) {
   return {
@@ -20,6 +20,7 @@ function toRow(task) {
 }
 
 export default async function handler(req, res) {
+  const supabase = createUserClient(req);
   res.setHeader('Cache-Control', 'no-store');
 
   if (req.method === 'GET') {

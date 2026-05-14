@@ -20,10 +20,13 @@ export default async function handler(req, res) {
       `&order=sent_at.desc` +
       `&limit=${limit}&offset=${offset}`;
 
+    // Gebruik user JWT als aanwezig, anders anon key (RLS-fallback)
+    const reqAuth  = req.headers?.authorization || '';
+    const bearerToken = reqAuth.startsWith('Bearer ') ? reqAuth.slice(7) : supabaseKey;
     const response = await fetch(url, {
       headers: {
         'apikey':        supabaseKey,
-        'Authorization': `Bearer ${supabaseKey}`,
+        'Authorization': `Bearer ${bearerToken}`,
       },
     });
 

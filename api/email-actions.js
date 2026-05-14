@@ -1,4 +1,4 @@
-import { supabase } from './supabase.js';
+import { createUserClient } from './supabase.js';
 
 /*
   Supabase table (run once in SQL editor):
@@ -23,6 +23,8 @@ const VALID_ACTIONS = [
 ];
 
 export default async function handler(req, res) {
+  const supabase = createUserClient(req);
+
   // ── GET ?load_overrides=1 — laad actionFlags + categorie overrides ────────
   if (req.method === 'GET') {
     if (req.query?.load_overrides !== '1') {

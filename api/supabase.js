@@ -19,6 +19,29 @@ export const supabaseAdmin = createClient(
 );
 
 /**
+ * Per-request user-aware Supabase client.
+ * Passes the Bearer JWT so RLS auth.uid() evaluates correctly.
+ * Falls back to anon client if no valid Bearer token present.
+ *
+ * Usage:
+ *   const supabase = createUserClient(req);
+ *   const { data } = await supabase.from('table').select('*');
+ */
+export function createUserClient(req) {
+  const authHeader = req.headers?.authorization || '';
+  if (!authHeader.startsWith('Bearer ')) return supabase;
+  const token = authHeader.slice(7);
+  return createClient(
+    process.env.SUPABASE_URL || '',
+    process.env.SUPABASE_ANON_KEY || '',
+    {
+      auth: { persistSession: false },
+      global: { headers: { Authorization: `Bearer ${token}` } },
+    }
+  );
+}
+
+/**
  * Verify Bearer token belongs to an active admin.
  * Returns { user, profile } on success, null otherwise.
  *

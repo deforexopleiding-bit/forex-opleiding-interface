@@ -1,6 +1,8 @@
-import { supabase } from './supabase.js';
+import { createUserClient } from './supabase.js';
 
 export default async function handler(req, res) {
+  const supabase = createUserClient(req);
+
   if (req.method === 'GET') {
     const user = req.query?.user || 'Jeffrey';
     const { data, error } = await supabase.from('undo_history')

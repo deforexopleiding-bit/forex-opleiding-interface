@@ -1,5 +1,5 @@
 import nodemailer from 'nodemailer';
-import { supabase } from './supabase.js';
+import { createUserClient } from './supabase.js';
 
 // Mailbox → wachtwoord env-var (zelfde als IMAP)
 const SMTP_ACCOUNTS = {
@@ -18,6 +18,8 @@ function safeFilename(name) {
 }
 
 export default async function handler(req, res) {
+  const supabase = createUserClient(req);
+
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }

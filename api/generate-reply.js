@@ -1,5 +1,5 @@
 import Anthropic from '@anthropic-ai/sdk';
-import { supabase } from './supabase.js';
+import { createUserClient } from './supabase.js';
 
 const SYSTEM_PROMPT = `Je bent de e-mailassistent van De Forex Opleiding.
 Je schrijft vriendelijke, persoonlijke e-mails in het Nederlands.
@@ -12,6 +12,8 @@ De handtekening wordt automatisch toegevoegd — schrijf GEEN eigen ondertekenin
 Schrijf alleen de e-mailtekst: begin direct met de aanhef (bijv. "Beste [naam],") en eindig na de laatste inhoudszin.`;
 
 export default async function handler(req, res) {
+  const supabase = createUserClient(req);
+
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }

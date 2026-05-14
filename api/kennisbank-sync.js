@@ -1,6 +1,8 @@
-import { supabase } from './supabase.js';
+import { createUserClient } from './supabase.js';
 
 export default async function handler(req, res) {
+  const supabase = createUserClient(req);
+
   // ── GET — haal alle kennisbank items op ──────────────────────────────────
   if (req.method === 'GET') {
     try {

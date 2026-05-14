@@ -1,4 +1,4 @@
-import { supabase } from './supabase.js';
+import { createUserClient } from './supabase.js';
 
 const VALID_CATEGORIES = [
   'Nieuwe Lead','Appointment','Event Aanmelding',
@@ -111,6 +111,8 @@ function computePropagation(emailList, senderEmail, senderDomain, subject, bodyS
 }
 
 export default async function handler(req, res) {
+  const supabase = createUserClient(req);
+
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }

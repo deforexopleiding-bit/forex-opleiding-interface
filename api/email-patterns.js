@@ -1,9 +1,10 @@
-import { supabase } from './supabase.js';
+import { createUserClient } from './supabase.js';
 
 const TRUSTED_SENDER_EMAILS  = ['no-reply-forms@webflow.com', 'noreply@send.lcmsgsndr.net', 'info+deforexopleiding.nl@send.lcmsgsndr.net'];
 const TRUSTED_SENDER_DOMAINS = ['webflow.com', 'send.lcmsgsndr.net', 'lcmsgsndr.net'];
 
 export default async function handler(req, res) {
+  const supabase = createUserClient(req);
   res.setHeader('Cache-Control', 'no-store');
 
   // GET — haal patronen op, optioneel gefilterd op source
