@@ -282,10 +282,7 @@
 <!-- ══ SIDEBAR ══ -->
 <nav class="sidebar">
   <div class="sidebar-logo" id="sidebarLogo">
-    <img id="sidebarLogoImg"
-      src="https://www.deforexopleiding.nl/wp-content/uploads/2023/01/Logo-De-Forex-Opleiding-wit.png"
-      alt="De Forex Opleiding"
-      onerror="handleLogoError()" />
+    <span class="sidebar-logo-fallback">De Forex Opleiding</span>
   </div>
   <div class="sidebar-nav">
     <a class="nav-item active" href="index.html">
@@ -450,21 +447,6 @@
 <script src="/modules/shared/supabase-client.js"></script>
 <script src="/modules/shared/agent-shared.js"></script>
 <script>
-// ── Logo fallback ──
-function handleLogoError() {
-  const img = document.getElementById('sidebarLogoImg');
-  if (!img) return;
-  try {
-    const b64 = localStorage.getItem('signature_logo_base64');
-    if (b64 && b64.startsWith('data:image')) { img.src = b64; img.onerror = useFallbackText; return; }
-  } catch {}
-  useFallbackText();
-}
-function useFallbackText() {
-  const wrap = document.getElementById('sidebarLogo');
-  if (wrap) wrap.innerHTML = '<span class="sidebar-logo-fallback">De Forex Opleiding</span>';
-}
-
 // ═══════════════════════════════════
 // STATE
 // ═══════════════════════════════════

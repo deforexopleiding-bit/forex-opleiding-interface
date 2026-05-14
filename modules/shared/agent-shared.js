@@ -347,19 +347,6 @@
       </div>`;
   }
 
-  // ── Logo fallback (hergebruikt in alle modules) ────────────────────────────
-
-  function handleLogoError() {
-    try {
-      const b64 = localStorage.getItem('signature_logo_base64');
-      if (b64?.startsWith('data:image')) {
-        document.getElementById('sidebarLogoImg').src = b64;
-        return;
-      }
-    } catch {}
-    document.getElementById('sidebarLogo').innerHTML = '<span class="sidebar-logo-fallback">De Forex Opleiding</span>';
-  }
-
   // ── Export ─────────────────────────────────────────────────────────────────
 
   window.AgentShared = {
@@ -378,7 +365,6 @@
     rejectApproval,
     startApprovalPolling,
     stopApprovalPolling,
-    handleLogoError,
     getAvatarUrl,
     getAgentFunction,
     renderUserSection,
