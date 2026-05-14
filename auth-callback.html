@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Inloggen… — De Forex Opleiding</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --brand-secondary: #688b9b;
+      --bg-dark: #0a0b10;
+      --text-primary: #e8edf2;
+      --text-muted: #8899a8;
+    }
+
+    *, *::before, *::after {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: 'Inter', sans-serif;
+      background: var(--bg-dark);
+      color: var(--text-primary);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      padding: 24px 16px;
+    }
+
+    .brand {
+      font-size: 12px;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--brand-secondary);
+      margin-bottom: 40px;
+    }
+
+    .heading {
+      font-size: 26px;
+      font-weight: 700;
+      color: var(--text-primary);
+      margin-bottom: 8px;
+    }
+
+    .subtext {
+      font-size: 14px;
+      color: var(--text-muted);
+      margin-bottom: 0;
+    }
+
+    .spinner {
+      width: 36px;
+      height: 36px;
+      border: 3px solid rgba(104, 139, 155, 0.2);
+      border-top-color: #688b9b;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+      margin: 20px auto;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+  </style>
+</head>
+<body>
+  <div class="brand">De Forex Opleiding</div>
+  <div class="heading">Even geduld…</div>
+  <div class="spinner"></div>
+  <div class="subtext">Je wordt ingelogd</div>
+
+  <script src="/modules/shared/supabase-client.js"></script>
+  <script>
+    (function () {
+      async function init() {
+        await new Promise(r => setTimeout(r, 1000));
+
+        const { data: { session } } = await window.supabase.auth.getSession();
+
+        if (session) {
+          const returnTo = new URLSearchParams(location.search).get('returnTo') || '/index.html';
+          window.location.href = returnTo;
+        } else {
+          let resolved = false;
+
+          window.supabase.auth.onAuthStateChange((event, session) => {
+            if (resolved) return;
+            if (session) {
+              resolved = true;
+              window.location.href = '/index.html';
+            }
+          });
+
+          setTimeout(() => {
+            if (!resolved) {
+              resolved = true;
+              window.location.href = '/login.html?error=callback_failed';
+            }
+          }, 5000);
+        }
+      }
+
+      function waitForAuth() {
+        if (window._authSharedReady) {
+          init();
+        } else {
+          window.addEventListener('authSharedReady', init, { once: true });
+        }
+      }
+
+      if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', waitForAuth);
+      } else {
+        waitForAuth();
+      }
+    })();
+  </script>
+</body>
+</html>

@@ -1,0 +1,655 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Inloggen · De Forex Opleiding</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #0a0b10;
+      --bg-elev: #13151c;
+      --bg-elev-2: #181b25;
+      --border: rgba(255,255,255,0.06);
+      --border-strong: rgba(255,255,255,0.12);
+      --text: #f1f5f9;
+      --text-dim: #94a3b8;
+      --text-faint: #64748b;
+      --accent-cyan: #22d3ee;
+      --brand-primary: #093d54;
+      --brand-primary-light: #1a5773;
+      --brand-secondary: #688b9b;
+      --brand-secondary-light: #8aa5b3;
+      --color-success: #1D9E75;
+      --color-warning: #EF9F27;
+      --color-danger: #D85A30;
+      --green: #22c55e;
+      --amber: #f59e0b;
+      --red: #ef4444;
+    }
+
+    html, body {
+      height: 100%;
+      font-family: 'Inter', system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      -webkit-font-smoothing: antialiased;
+      line-height: 1.5;
+      overflow-x: hidden;
+    }
+
+    body::before {
+      content: ''; position: fixed; inset: 0;
+      background-image:
+        radial-gradient(circle at 20% 15%, rgba(9,61,84,0.2), transparent 45%),
+        radial-gradient(circle at 80% 85%, rgba(104,139,155,0.08), transparent 50%);
+      pointer-events: none; z-index: 0;
+    }
+
+    body::after {
+      content: ''; position: fixed; inset: 0;
+      background-image:
+        linear-gradient(rgba(255,255,255,0.016) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255,255,255,0.016) 1px, transparent 1px);
+      background-size: 48px 48px;
+      mask-image: radial-gradient(circle at center, black 30%, transparent 75%);
+      -webkit-mask-image: radial-gradient(circle at center, black 30%, transparent 75%);
+      pointer-events: none; z-index: 0;
+    }
+
+    /* ── Card ── */
+    .login-card {
+      position: absolute;
+      top: 50%; left: 50%;
+      transform: translate(-50%, -50%);
+      width: calc(100% - 32px);
+      max-width: 420px;
+      background: var(--bg-elev);
+      border: 1px solid var(--border-strong);
+      border-radius: 16px;
+      padding: 36px 32px 28px;
+      z-index: 10;
+    }
+
+    /* ── Logo ── */
+    .card-logo {
+      display: flex;
+      justify-content: center;
+      margin-bottom: 24px;
+    }
+    .card-logo img {
+      max-width: 160px;
+      height: auto;
+      display: block;
+    }
+    .card-logo-fallback {
+      font-size: 15px;
+      font-weight: 700;
+      color: var(--text);
+    }
+
+    /* ── Header ── */
+    .card-title {
+      font-size: 20px;
+      font-weight: 700;
+      color: var(--text);
+      text-align: center;
+      margin-bottom: 4px;
+    }
+    .card-subtitle {
+      font-size: 13px;
+      color: var(--text-faint);
+      text-align: center;
+      margin-bottom: 28px;
+    }
+
+    /* ── Tabs ── */
+    .tabs {
+      display: flex;
+      background: var(--bg-elev-2);
+      border-radius: 10px;
+      padding: 4px;
+      margin-bottom: 24px;
+      gap: 4px;
+    }
+    .tab-btn {
+      flex: 1;
+      padding: 8px 12px;
+      border: none;
+      border-radius: 7px;
+      background: transparent;
+      color: var(--text-dim);
+      font-family: inherit;
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: background .15s, color .15s;
+    }
+    .tab-btn.active {
+      background: var(--brand-primary);
+      color: #fff;
+    }
+    .tab-btn:not(.active):hover {
+      background: rgba(255,255,255,0.05);
+      color: var(--text);
+    }
+
+    /* ── Forms ── */
+    .tab-panel { display: block; }
+    .tab-panel.hidden { display: none; }
+
+    .form-group {
+      margin-bottom: 16px;
+    }
+    .form-group label {
+      display: block;
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-dim);
+      margin-bottom: 6px;
+      text-transform: uppercase;
+      letter-spacing: .4px;
+    }
+    .form-group input {
+      width: 100%;
+      background: var(--bg-elev-2);
+      border: 1px solid var(--border-strong);
+      border-radius: 8px;
+      padding: 10px 14px;
+      font-family: inherit;
+      font-size: 14px;
+      color: var(--text);
+      outline: none;
+      transition: border-color .15s;
+    }
+    .form-group input:focus {
+      border-color: var(--brand-secondary);
+    }
+    .form-group input::placeholder {
+      color: var(--text-faint);
+    }
+
+    /* ── Submit button ── */
+    .btn-primary {
+      width: 100%;
+      padding: 11px 16px;
+      background: var(--brand-primary);
+      border: none;
+      border-radius: 8px;
+      color: #fff;
+      font-family: inherit;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background .15s, opacity .15s;
+      margin-top: 4px;
+    }
+    .btn-primary:hover:not(:disabled) {
+      background: var(--brand-primary-light);
+    }
+    .btn-primary:disabled {
+      opacity: .6;
+      cursor: not-allowed;
+    }
+
+    /* ── Forgot password link ── */
+    .forgot-link {
+      display: block;
+      text-align: right;
+      font-size: 12px;
+      color: var(--text-faint);
+      margin-top: -8px;
+      margin-bottom: 16px;
+      cursor: pointer;
+      text-decoration: underline;
+      text-decoration-color: transparent;
+      transition: color .15s, text-decoration-color .15s;
+    }
+    .forgot-link:hover {
+      color: var(--brand-secondary-light);
+      text-decoration-color: var(--brand-secondary-light);
+    }
+
+    /* ── Forgot password inline form ── */
+    #forgotPanel {
+      margin-top: 20px;
+      padding-top: 20px;
+      border-top: 1px solid var(--border);
+    }
+    #forgotPanel h3 {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text-dim);
+      margin-bottom: 12px;
+    }
+    .btn-secondary {
+      width: 100%;
+      padding: 10px 16px;
+      background: transparent;
+      border: 1px solid var(--border-strong);
+      border-radius: 8px;
+      color: var(--text-dim);
+      font-family: inherit;
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: background .15s, color .15s, border-color .15s;
+      margin-top: 4px;
+    }
+    .btn-secondary:hover:not(:disabled) {
+      background: rgba(255,255,255,0.05);
+      color: var(--text);
+      border-color: var(--border-strong);
+    }
+    .btn-secondary:disabled {
+      opacity: .6;
+      cursor: not-allowed;
+    }
+
+    /* ── Banners ── */
+    .banner {
+      border-radius: 8px;
+      padding: 10px 14px;
+      font-size: 13px;
+      font-weight: 500;
+      margin-bottom: 20px;
+      display: none;
+    }
+    .banner.show { display: block; }
+    .banner-error {
+      background: rgba(216,90,48,0.15);
+      border: 1px solid rgba(216,90,48,0.3);
+      color: #f87171;
+    }
+    .banner-success {
+      background: rgba(29,158,117,0.15);
+      border: 1px solid rgba(29,158,117,0.3);
+      color: #34d399;
+    }
+    .banner-info {
+      background: rgba(34,211,238,0.1);
+      border: 1px solid rgba(34,211,238,0.2);
+      color: var(--accent-cyan);
+    }
+
+    /* ── Inline form error ── */
+    .field-error {
+      font-size: 11px;
+      color: #f87171;
+      margin-top: 4px;
+      display: none;
+    }
+    .field-error.show { display: block; }
+
+    /* ── Card footer ── */
+    .card-footer {
+      margin-top: 24px;
+      padding-top: 18px;
+      border-top: 1px solid var(--border);
+      text-align: center;
+      font-size: 12px;
+      color: var(--text-faint);
+    }
+
+    /* ── Page footer ── */
+    .page-footer {
+      position: fixed;
+      bottom: 16px;
+      left: 0; right: 0;
+      text-align: center;
+      font-size: 11px;
+      color: var(--text-faint);
+      opacity: .5;
+      z-index: 10;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="login-card" id="loginCard">
+
+    <!-- Logo -->
+    <div class="card-logo" id="cardLogo">
+      <img
+        id="cardLogoImg"
+        src="https://www.deforexopleiding.nl/wp-content/uploads/2023/01/Logo-De-Forex-Opleiding-wit.png"
+        alt="De Forex Opleiding"
+        onerror="handleLogoError()" />
+    </div>
+
+    <!-- Header -->
+    <h1 class="card-title">Inloggen</h1>
+    <p class="card-subtitle">Agency Command Center</p>
+
+    <!-- Global banner (url param errors / successes) -->
+    <div class="banner banner-error" id="globalBanner"></div>
+    <div class="banner banner-success" id="globalBannerSuccess"></div>
+
+    <!-- Tabs -->
+    <div class="tabs" role="tablist">
+      <button class="tab-btn active" id="tabPassword" role="tab" aria-selected="true" onclick="switchTab('password')">Wachtwoord</button>
+      <button class="tab-btn" id="tabMagic" role="tab" aria-selected="false" onclick="switchTab('magic')">Magic Link</button>
+    </div>
+
+    <!-- Panel: Wachtwoord -->
+    <div class="tab-panel" id="panelPassword" role="tabpanel">
+      <div class="banner banner-error hidden" id="pwError"></div>
+
+      <form id="formPassword" novalidate>
+        <div class="form-group">
+          <label for="pwEmail">E-mailadres</label>
+          <input type="email" id="pwEmail" name="email" placeholder="jouw@email.nl" autocomplete="email" required />
+          <span class="field-error" id="pwEmailErr">Vul een geldig e-mailadres in.</span>
+        </div>
+        <div class="form-group">
+          <label for="pwPassword">Wachtwoord</label>
+          <input type="password" id="pwPassword" name="password" placeholder="••••••••" autocomplete="current-password" required />
+          <span class="field-error" id="pwPasswordErr">Vul je wachtwoord in.</span>
+        </div>
+
+        <span class="forgot-link" id="forgotToggle" onclick="toggleForgot()">Wachtwoord vergeten?</span>
+
+        <button type="submit" class="btn-primary" id="pwSubmit">Inloggen</button>
+      </form>
+
+      <!-- Forgot password inline -->
+      <div id="forgotPanel" class="hidden">
+        <h3>Wachtwoord resetten</h3>
+        <div class="banner banner-info hidden" id="resetInfo"></div>
+        <div class="banner banner-error hidden" id="resetError"></div>
+        <form id="formReset" novalidate>
+          <div class="form-group">
+            <label for="resetEmail">E-mailadres</label>
+            <input type="email" id="resetEmail" name="email" placeholder="jouw@email.nl" autocomplete="email" required />
+            <span class="field-error" id="resetEmailErr">Vul een geldig e-mailadres in.</span>
+          </div>
+          <button type="submit" class="btn-secondary" id="resetSubmit">Reset-link versturen</button>
+        </form>
+      </div>
+    </div>
+
+    <!-- Panel: Magic Link -->
+    <div class="tab-panel hidden" id="panelMagic" role="tabpanel">
+      <div class="banner banner-info hidden" id="magicInfo"></div>
+      <div class="banner banner-error hidden" id="magicError"></div>
+
+      <form id="formMagic" novalidate>
+        <div class="form-group">
+          <label for="magicEmail">E-mailadres</label>
+          <input type="email" id="magicEmail" name="email" placeholder="jouw@email.nl" autocomplete="email" required />
+          <span class="field-error" id="magicEmailErr">Vul een geldig e-mailadres in.</span>
+        </div>
+        <button type="submit" class="btn-primary" id="magicSubmit">Magic link versturen</button>
+      </form>
+    </div>
+
+    <!-- Card footer -->
+    <div class="card-footer">
+      Vragen? Neem contact op met je admin.
+    </div>
+  </div>
+
+  <!-- Page footer -->
+  <footer class="page-footer">De Forex Opleiding &ndash; Agency Command Center</footer>
+
+  <script src="/modules/shared/supabase-client.js"></script>
+  <script>
+    'use strict';
+
+    /* ── Logo fallback ── */
+    function handleLogoError() {
+      const img = document.getElementById('cardLogoImg');
+      if (!img) return;
+      try {
+        const b64 = localStorage.getItem('signature_logo_base64');
+        if (b64 && b64.startsWith('data:image')) { img.src = b64; img.onerror = useFallbackText; return; }
+      } catch (e) {}
+      useFallbackText();
+    }
+    function useFallbackText() {
+      const wrap = document.getElementById('cardLogo');
+      if (wrap) wrap.innerHTML = '<span class="card-logo-fallback">De Forex Opleiding</span>';
+    }
+
+    /* ── Tab switching ── */
+    function switchTab(tab) {
+      const isPw = tab === 'password';
+      document.getElementById('tabPassword').classList.toggle('active', isPw);
+      document.getElementById('tabMagic').classList.toggle('active', !isPw);
+      document.getElementById('tabPassword').setAttribute('aria-selected', isPw);
+      document.getElementById('tabMagic').setAttribute('aria-selected', !isPw);
+      document.getElementById('panelPassword').classList.toggle('hidden', !isPw);
+      document.getElementById('panelMagic').classList.toggle('hidden', isPw);
+    }
+
+    /* ── Forgot password toggle ── */
+    function toggleForgot() {
+      const panel = document.getElementById('forgotPanel');
+      const isHidden = panel.classList.contains('hidden');
+      panel.classList.toggle('hidden', !isHidden);
+      document.getElementById('forgotToggle').textContent = isHidden ? 'Annuleren' : 'Wachtwoord vergeten?';
+    }
+
+    /* ── Banner helpers ── */
+    function showBanner(id, msg) {
+      const el = document.getElementById(id);
+      if (!el) return;
+      el.textContent = msg;
+      el.classList.add('show');
+      el.classList.remove('hidden');
+    }
+    function hideBanner(id) {
+      const el = document.getElementById(id);
+      if (!el) return;
+      el.classList.remove('show');
+      el.classList.add('hidden');
+    }
+
+    /* ── Field error helpers ── */
+    function showFieldError(id, msg) {
+      const el = document.getElementById(id);
+      if (!el) return;
+      el.textContent = msg;
+      el.classList.add('show');
+    }
+    function clearFieldErrors(...ids) {
+      ids.forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.classList.remove('show');
+      });
+    }
+
+    /* ── Email validation ── */
+    function isValidEmail(v) {
+      return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v.trim());
+    }
+
+    /* ── Loading state ── */
+    function setLoading(btnId, loading, label = 'Inloggen', loadingLabel = 'Laden…') {
+      const btn = document.getElementById(btnId);
+      if (!btn) return;
+      btn.disabled = loading;
+      btn.textContent = loading ? loadingLabel : label;
+    }
+
+    /* ── URL param error/success banners ── */
+    function handleUrlParams() {
+      const params = new URLSearchParams(location.search);
+      const error = params.get('error');
+      const reset = params.get('reset');
+
+      if (error === 'inactive') {
+        showBanner('globalBanner', 'Je account is gedeactiveerd. Neem contact op met de admin.');
+        document.getElementById('globalBanner').classList.add('show');
+      } else if (error === 'no_access') {
+        showBanner('globalBanner', 'Geen toegang tot deze pagina.');
+        document.getElementById('globalBanner').classList.add('show');
+      } else if (error === 'callback_failed') {
+        showBanner('globalBanner', 'Inloggen via link mislukt. Probeer opnieuw.');
+        document.getElementById('globalBanner').classList.add('show');
+      }
+
+      if (reset === 'success') {
+        showBanner('globalBannerSuccess', 'Wachtwoord gewijzigd! Je kunt nu inloggen.');
+        document.getElementById('globalBannerSuccess').classList.add('show');
+      }
+    }
+
+    /* ── Map Supabase error to Dutch message ── */
+    function mapAuthError(error) {
+      if (!error) return 'Er is een onbekende fout opgetreden.';
+      const msg = (error.message || '').toLowerCase();
+      if (msg.includes('invalid login credentials') || msg.includes('invalid email or password')) {
+        return 'E-mailadres of wachtwoord onjuist.';
+      }
+      if (msg.includes('email not confirmed')) {
+        return 'Bevestig eerst je e-mailadres via de verificatiemail.';
+      }
+      if (msg.includes('too many requests') || msg.includes('rate limit')) {
+        return 'Te veel pogingen. Wacht even en probeer opnieuw.';
+      }
+      if (msg.includes('network') || msg.includes('fetch')) {
+        return 'Verbindingsfout, probeer opnieuw.';
+      }
+      return 'Er is een fout opgetreden. Probeer opnieuw.';
+    }
+
+    /* ── Redirect after login ── */
+    function redirectAfterLogin() {
+      const returnTo = new URLSearchParams(location.search).get('returnTo') || '/index.html';
+      window.location.href = returnTo;
+    }
+
+    /* ── Main init (waits for AuthShared) ── */
+    async function init() {
+      handleUrlParams();
+
+      await window._authSharedReady;
+
+      if (!window.AuthShared) {
+        showBanner('globalBanner', 'Configuratiefout — neem contact op met de admin.');
+        document.getElementById('globalBanner').classList.add('show');
+        return;
+      }
+
+      // Redirect if already logged in
+      const session = await window.AuthShared.getSession();
+      if (session) {
+        redirectAfterLogin();
+        return;
+      }
+
+      // Auth state change listener
+      window.supabase.auth.onAuthStateChange((event, sess) => {
+        if (event === 'SIGNED_IN' && sess) {
+          redirectAfterLogin();
+        }
+      });
+
+      /* ── Form: Wachtwoord ── */
+      document.getElementById('formPassword').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        clearFieldErrors('pwEmailErr', 'pwPasswordErr');
+        hideBanner('pwError');
+
+        const email    = document.getElementById('pwEmail').value.trim();
+        const password = document.getElementById('pwPassword').value;
+
+        let valid = true;
+        if (!isValidEmail(email)) {
+          showFieldError('pwEmailErr', 'Vul een geldig e-mailadres in.');
+          valid = false;
+        }
+        if (!password) {
+          showFieldError('pwPasswordErr', 'Vul je wachtwoord in.');
+          valid = false;
+        }
+        if (!valid) return;
+
+        setLoading('pwSubmit', true, 'Inloggen');
+        try {
+          const { error } = await window.supabase.auth.signInWithPassword({ email, password });
+          if (error) {
+            showBanner('pwError', mapAuthError(error));
+          }
+          // On success, onAuthStateChange handles redirect
+        } catch (err) {
+          showBanner('pwError', 'Verbindingsfout, probeer opnieuw.');
+        } finally {
+          setLoading('pwSubmit', false, 'Inloggen');
+        }
+      });
+
+      /* ── Form: Magic Link ── */
+      document.getElementById('formMagic').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        clearFieldErrors('magicEmailErr');
+        hideBanner('magicError');
+        hideBanner('magicInfo');
+
+        const email = document.getElementById('magicEmail').value.trim();
+        if (!isValidEmail(email)) {
+          showFieldError('magicEmailErr', 'Vul een geldig e-mailadres in.');
+          return;
+        }
+
+        setLoading('magicSubmit', true, 'Magic link versturen');
+        try {
+          const { error } = await window.supabase.auth.signInWithOtp({
+            email,
+            options: { emailRedirectTo: window.location.origin + '/auth-callback.html' },
+          });
+          if (error) {
+            showBanner('magicError', mapAuthError(error));
+          } else {
+            showBanner('magicInfo', 'Magic link verzonden! Check je email.');
+          }
+        } catch (err) {
+          showBanner('magicError', 'Verbindingsfout, probeer opnieuw.');
+        } finally {
+          setLoading('magicSubmit', false, 'Magic link versturen');
+        }
+      });
+
+      /* ── Form: Wachtwoord resetten ── */
+      document.getElementById('formReset').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        clearFieldErrors('resetEmailErr');
+        hideBanner('resetError');
+        hideBanner('resetInfo');
+
+        const email = document.getElementById('resetEmail').value.trim();
+        if (!isValidEmail(email)) {
+          showFieldError('resetEmailErr', 'Vul een geldig e-mailadres in.');
+          return;
+        }
+
+        setLoading('resetSubmit', true, 'Reset-link versturen');
+        try {
+          const { error } = await window.supabase.auth.resetPasswordForEmail(email, {
+            redirectTo: window.location.origin + '/reset-password.html',
+          });
+          if (error) {
+            showBanner('resetError', mapAuthError(error));
+          } else {
+            showBanner('resetInfo', 'Reset-link verzonden! Check je email.');
+            // Disable submit to prevent double-send
+            document.getElementById('resetSubmit').disabled = true;
+          }
+        } catch (err) {
+          showBanner('resetError', 'Verbindingsfout, probeer opnieuw.');
+        } finally {
+          setLoading('resetSubmit', false, 'Reset-link versturen');
+        }
+      });
+    }
+
+    init();
+  </script>
+</body>
+</html>
