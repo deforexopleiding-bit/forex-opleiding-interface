@@ -347,6 +347,22 @@
       </div>`;
   }
 
+  // ── apiFetch: fetch wrapper met automatische Authorization header ────────────
+
+  async function apiFetch(url, options = {}) {
+    const token = await window.AuthShared?.getAccessToken?.().catch(() => null);
+    const headers = {
+      ...(options.headers || {}),
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    };
+    // Content-Type alleen toevoegen als body aanwezig en niet expliciet overschreven
+    // (voorkomt issues met FormData uploads — die hebben eigen multipart boundary)
+    if (options.body && !headers['Content-Type'] && typeof options.body === 'string') {
+      headers['Content-Type'] = 'application/json';
+    }
+    return fetch(url, { ...options, headers });
+  }
+
   // ── Export ─────────────────────────────────────────────────────────────────
 
   window.AgentShared = {
@@ -368,5 +384,6 @@
     getAvatarUrl,
     getAgentFunction,
     renderUserSection,
+    apiFetch,
   };
 })();

@@ -838,7 +838,7 @@
     async function loadFromSupabase() {
       $('itemList').innerHTML = '<div class="item-empty" style="opacity:0.6">Kennisbank laden…</div>';
       try {
-        const res = await fetch('/api/kennisbank-sync');
+        const res = await window.AgentShared.apiFetch('/api/kennisbank-sync');
         if (!res.ok) throw new Error('HTTP ' + res.status);
         const { items, error: apiErr } = await res.json();
         if (apiErr) throw new Error(apiErr);
@@ -874,7 +874,7 @@
 
     // CREATE — POST upsert_item + re-fetch
     async function createItemInSupabase(item) {
-      const res = await fetch('/api/kennisbank-sync', {
+      const res = await window.AgentShared.apiFetch('/api/kennisbank-sync', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: 'upsert_item', item })
       });
@@ -885,7 +885,7 @@
 
     // UPDATE — PUT op Supabase uuid + re-fetch
     async function updateItemInSupabase(id, item) {
-      const res = await fetch('/api/kennisbank-sync?id=' + encodeURIComponent(id), {
+      const res = await window.AgentShared.apiFetch('/api/kennisbank-sync?id=' + encodeURIComponent(id), {
         method: 'PUT', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(item)
       });
@@ -896,7 +896,7 @@
 
     // DELETE — DELETE op Supabase uuid + re-fetch
     async function deleteItemFromSupabase(id) {
-      const res = await fetch('/api/kennisbank-sync?id=' + encodeURIComponent(id), {
+      const res = await window.AgentShared.apiFetch('/api/kennisbank-sync?id=' + encodeURIComponent(id), {
         method: 'DELETE'
       });
       const data = await res.json();
@@ -906,7 +906,7 @@
 
     // SYNC PROFILE — POST sync_profile (geen re-fetch nodig, state is al bijgewerkt)
     async function syncProfileToSupabase() {
-      const res = await fetch('/api/kennisbank-sync', {
+      const res = await window.AgentShared.apiFetch('/api/kennisbank-sync', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: 'sync_profile', profile: state.profile })
       });

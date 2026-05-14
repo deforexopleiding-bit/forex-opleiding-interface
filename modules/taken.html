@@ -816,7 +816,7 @@ function save(key, val) { localStorage.setItem(key, JSON.stringify(val)); }
 // ── Supabase sync ────────────────────────────────────────────────────────────
 async function loadTakenFromSupabase() {
   try {
-    const res = await fetch('/api/taken');
+    const res = await window.AgentShared.apiFetch('/api/taken');
     if (!res.ok) return;
     const { taken: rows } = await res.json();
 
@@ -825,7 +825,7 @@ async function loadTakenFromSupabase() {
       const inSupabase = new Set(rows.map(r => r.id));
       const toMigrate  = taken.filter(t => !inSupabase.has(t.id));
       if (toMigrate.length > 0) {
-        fetch('/api/taken', {
+        window.AgentShared.apiFetch('/api/taken', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ action: 'bulk_upsert', tasks: toMigrate })
         }).catch(() => {});
@@ -868,14 +868,14 @@ function fromRow(r) {
 }
 
 function syncTaakToSupabase(taak) {
-  fetch('/api/taken', {
+  window.AgentShared.apiFetch('/api/taken', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ task: taak })
   }).catch(() => {});
 }
 
 function deleteTaakFromSupabase(id) {
-  fetch('/api/taken', {
+  window.AgentShared.apiFetch('/api/taken', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ action: 'delete', id })
   }).catch(() => {});

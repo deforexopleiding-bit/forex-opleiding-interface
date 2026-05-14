@@ -1433,7 +1433,7 @@
       this.history = h;
       this.updateButton();
       this._showToast(description, entry);
-      fetch('/api/undo', {
+      window.AgentShared.apiFetch('/api/undo', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: 'save', type: actionType, data: undoData, label: description })
@@ -1508,7 +1508,7 @@
           render();
         }
         showToast('↩ Ongedaan: ' + (entry.label || type) + (old_category ? ' → ' + old_category : ''));
-        fetch('/api/undo', { method:'POST', headers:{'Content-Type':'application/json'},
+        window.AgentShared.apiFetch('/api/undo', { method:'POST', headers:{'Content-Type':'application/json'},
           body: JSON.stringify({ action:'undo', id:entry.id, type, data }) }).catch(()=>{});
 
       } else if (type === 'mark_read') {
@@ -1582,7 +1582,7 @@
         showToast('↩ Heranalyse ongedaan · ' + (snapshots?.length || 0) + ' categorieën hersteld');
 
       } else if (type === 'kennisbank_add') {
-        fetch('/api/undo', { method:'POST', headers:{'Content-Type':'application/json'},
+        window.AgentShared.apiFetch('/api/undo', { method:'POST', headers:{'Content-Type':'application/json'},
           body: JSON.stringify({ action:'undo', id:entry.id, type, data }) }).catch(()=>{});
         showToast('↩ Kennisbank item verwijderd');
 
@@ -1940,7 +1940,7 @@
     showUndoableToast('✓ Verplaatst naar ' + labels[targetSection], undoEntry);
 
     const newRequiresAction = targetSection === 'actie' ? true : targetSection === 'info' ? false : null;
-    fetch('/api/learn', {
+    window.AgentShared.apiFetch('/api/learn', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         email_id: uid, sender: email.from || '', subject: email.subject || '',
@@ -2017,7 +2017,7 @@
         subject:       e.subject || '',
         body_snippet:  (state.bodyCache[e.uid]?.text || '').slice(0, 300)
       }));
-      const res = await fetch('/api/learn', {
+      const res = await window.AgentShared.apiFetch('/api/learn', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           email_id: uid, sender: email.from || '', subject: email.subject || '',
@@ -2198,7 +2198,7 @@
           body_snippet:  (bc && !bc.loading && !bc.error) ? (bc.text || '').slice(0, 300) : ''
         };
       });
-      const res = await fetch('/api/learn', {
+      const res = await window.AgentShared.apiFetch('/api/learn', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -2560,7 +2560,7 @@
   async function callGenerateReply(email) {
     const bodyEntry = state.bodyCache[email.uid];
     const body = (bodyEntry && !bodyEntry.loading && !bodyEntry.error) ? (bodyEntry.text || '') : '';
-    const res = await fetch('/api/generate-reply', {
+    const res = await window.AgentShared.apiFetch('/api/generate-reply', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -2694,7 +2694,7 @@
       if (bccVal) sendPayload.bcc = bccVal;
       const attachToSend = state.pendingAttachments[uid];
       if (Array.isArray(attachToSend) && attachToSend.length > 0) sendPayload.attachments = attachToSend;
-      const res  = await fetch('/api/send-email', {
+      const res  = await window.AgentShared.apiFetch('/api/send-email', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(sendPayload)
       });
@@ -3044,7 +3044,7 @@
     } catch {}
 
     // Sync naar Supabase
-    fetch('/api/taken', {
+    window.AgentShared.apiFetch('/api/taken', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ task: taak })
     }).catch(() => {});
@@ -3276,7 +3276,7 @@
       }
 
       try {
-        const learnResp = await fetch('/api/learn', {
+        const learnResp = await window.AgentShared.apiFetch('/api/learn', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             email_id:            String(uid),
@@ -3562,7 +3562,7 @@
 
   // ── Supabase email_actions fire-and-forget ─────────────────────────────────
   function saveEmailAction(emailId, action, value) {
-    fetch('/api/email-actions', {
+    window.AgentShared.apiFetch('/api/email-actions', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email_id: emailId, action, value, set_by: 'Jeffrey' })
@@ -3571,7 +3571,7 @@
 
   async function syncOverrideCacheFromSupabase() {
     try {
-      const res = await fetch('/api/email-patterns?source=manual_absolute');
+      const res = await window.AgentShared.apiFetch('/api/email-patterns?source=manual_absolute');
       if (!res.ok) return;
       const { patterns } = await res.json();
       if (!Array.isArray(patterns) || !patterns.length) return;
@@ -3598,7 +3598,7 @@
 
   async function loadOverridesFromSupabase() {
     try {
-      const res = await fetch('/api/email-actions?load_overrides=1');
+      const res = await window.AgentShared.apiFetch('/api/email-actions?load_overrides=1');
       if (!res.ok) return;
       const { rows } = await res.json();
       if (!Array.isArray(rows) || rows.length === 0) return;
@@ -3635,7 +3635,7 @@
   async function loadVerzondenEmails() {
     if (state.verzondenLoaded) return;
     try {
-      const res  = await fetch('/api/sent-replies');
+      const res  = await window.AgentShared.apiFetch('/api/sent-replies');
       const data = await res.json();
       const apiSent = data.sent || [];
       // Merge: bewaar lokale items (unshift na send) die nog niet in de DB zitten
@@ -3806,7 +3806,7 @@
       auto_generated: false, source_email_id: String(uid), helpfulness_score: 0, times_used: 0
     };
     try {
-      const res = await fetch('/api/kennisbank-sync', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'upsert_item', item }) });
+      const res = await window.AgentShared.apiFetch('/api/kennisbank-sync', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'upsert_item', item }) });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'HTTP ' + res.status);
       state.kbSaved[uid] = true;
@@ -3829,7 +3829,7 @@
       auto_generated: true, source_email_id: String(uid), helpfulness_score: 0, times_used: 0
     };
     try {
-      const res = await fetch('/api/kennisbank-sync', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'upsert_item', item }) });
+      const res = await window.AgentShared.apiFetch('/api/kennisbank-sync', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'upsert_item', item }) });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'HTTP ' + res.status);
       state.kbSaved[uid] = true;
@@ -5234,7 +5234,7 @@
   // ── Kennisbank status ─────────────────────────────────────────────────────
   async function checkKennisbankStatus() {
     try {
-      const res = await fetch('/api/kennisbank-sync');
+      const res = await window.AgentShared.apiFetch('/api/kennisbank-sync');
       if (!res.ok) return;
       const data = await res.json();
       const realItems = (data.items || []).filter(
@@ -5250,7 +5250,7 @@
     checkCacheVersion();
     // Éénmalig: verwijder stale Reclame-patronen in Supabase voor vertrouwde afzenders
     if (!localStorage.getItem('trusted_reclame_cleaned_v1')) {
-      fetch('/api/email-patterns', { method: 'DELETE' })
+      window.AgentShared.apiFetch('/api/email-patterns', { method: 'DELETE' })
         .then((r) => r.ok && localStorage.setItem('trusted_reclame_cleaned_v1', '1'))
         .catch(() => {});
     }
