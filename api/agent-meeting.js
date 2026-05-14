@@ -174,11 +174,12 @@ export default async function handler(req, res) {
   // ── GET ───────────────────────────────────────────────────────────────────
   if (req.method === 'GET') {
     const action = req.query?.action;
+    const userClient = createUserClient(req);
 
     // B7: vergadergeschiedenis
     if (action === 'get_history') {
       const meetingTypeFilter = req.query?.meeting_type || '';
-      let q = supabase
+      let q = userClient
         .from('agent_meetings')
         .select('id, title, created_at, ended_at, participants, meeting_type, status, rapport_md, rapport_generated_at')
         .order('created_at', { ascending: false })
@@ -192,7 +193,7 @@ export default async function handler(req, res) {
     // Fase 5: taken uit meetings voor dashboard
     if (action === 'get_meeting_tasks') {
       try {
-        const { data: tasks, error: tasksErr } = await supabase
+        const { data: tasks, error: tasksErr } = await userClient
           .from('taken_items')
           .select('id, titel, status, prioriteit, deadline, source_meeting_id')
           .not('source_meeting_id', 'is', null)
@@ -206,7 +207,7 @@ export default async function handler(req, res) {
 
         // Meeting titels ophalen
         const meetingIds = [...new Set(tasks.map(t => t.source_meeting_id))];
-        const { data: meetings } = await supabase.from('agent_meetings').select('id, title').in('id', meetingIds);
+        const { data: meetings } = await userClient.from('agent_meetings').select('id, title').in('id', meetingIds);
         const meetingMap = Object.fromEntries((meetings || []).map(m => [m.id, m.title]));
 
         // Assignees ophalen
@@ -234,7 +235,7 @@ export default async function handler(req, res) {
 
     // Beslissingen ophalen
     if (action === 'get_decisions') {
-      const { data: decisions, error } = await supabase
+      const { data: decisions, error } = await userClient
         .from('decisions')
         .select('id, title, description, decided_by, decision_date, status, tags, meeting_id, created_at')
         .order('decision_date', { ascending: false })
@@ -477,7 +478,8 @@ export default async function handler(req, res) {
     // ── PREVIEW TASKS ─────────────────────────────────────────────────────────
     // Geeft de actiepunten terug verrijkt met resolved assignees + opties voor dropdown
     if (action === 'preview_tasks') {
-      const { data: meeting, error: mErr } = await supabase
+      const userClient = createUserClient(req);
+      const { data: meeting, error: mErr } = await userClient
         .from('agent_meetings').select('action_points, participants').eq('id', meeting_id).single();
       if (mErr || !meeting) return res.status(404).json({ error: 'Vergadering niet gevonden' });
 
@@ -489,7 +491,7 @@ export default async function handler(req, res) {
       }));
 
       // Opties voor dropdown: agents + actieve teamleden
-      const { data: teamOpts } = await supabase
+      const { data: teamOpts } = await userClient
         .from('team_members').select('id, name, type').eq('is_active', true).order('name');
 
       return res.status(200).json({
