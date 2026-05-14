@@ -138,10 +138,7 @@
     </div>
   </div>
   <div class="sidebar-footer">
-    <div class="footer-user">
-      <div class="footer-avatar">JB</div>
-      <span>Jeffrey</span>
-    </div>
+    <div class="footer-user"></div>
   </div>
 </nav>
 
@@ -201,6 +198,7 @@
   </div>
 </div>
 
+<script src="/modules/shared/supabase-client.js"></script>
 <script src="/modules/shared/agent-shared.js"></script>
 <script>
 const { esc, formatMd, showToast } = AgentShared;
@@ -693,6 +691,9 @@ async function handleInlineApproval(approvalId, action) {
 }
 
 init();
+if (window._authSharedReady) {
+  window._authSharedReady.then(() => window.AgentShared?.renderUserSection());
+}
 </script>
 </body>
 </html>

@@ -927,10 +927,7 @@
     </div>
   </div>
   <div class="sidebar-footer">
-    <div class="footer-user">
-      <div class="footer-avatar">JB</div>
-      <span>Jeffrey</span>
-    </div>
+    <div class="footer-user"></div>
   </div>
 </nav>
 <script>(function(){try{var t=JSON.parse(localStorage.getItem('taken_lijst')||'[]');var u=t.filter(function(x){return x.status!=='done'&&(x.prioriteit==='Urgent'||x.prioriteit==='Hoog');});if(u.length){var b=document.getElementById('navTakenBadge');if(b){b.textContent=u.length;b.classList.add('show');}}}catch(e){}})();</script>
@@ -1184,6 +1181,8 @@
 
 <div id="toast" class="toast"></div>
 
+<script src="/modules/shared/supabase-client.js"></script>
+<script src="/modules/shared/agent-shared.js"></script>
 <script>
   // ── Constants ──────────────────────────────────────────────────────────────
   const CATEGORIES    = ['Nieuwe Lead','Appointment','Event Aanmelding','Klantvraag','Factuurvraag','Reclame','Overig'];
@@ -5273,6 +5272,9 @@
   }
 
   init();
+  if (window._authSharedReady) {
+    window._authSharedReady.then(() => window.AgentShared?.renderUserSection());
+  }
 </script>
 </body>
 </html>

@@ -608,7 +608,7 @@
     <div class="nav-item nav-concept"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>Onboarding<span class="nav-soon">Binnenkort</span></div>
   </div>
   <div class="sidebar-footer">
-    <div class="footer-user"><div class="footer-avatar">JB</div><span>Jeffrey</span><svg style="width:13px;height:13px;margin-left:auto;flex-shrink:0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M4.93 4.93a10 10 0 0 0 0 14.14"/></svg></div>
+    <div class="footer-user"></div>
   </div>
 </nav>
 <script>(function(){try{const t=JSON.parse(localStorage.getItem('taken_lijst')||'[]');const u=t.filter(x=>x.status!=='done'&&(x.prioriteit==='Urgent'||x.prioriteit==='Hoog'));if(u.length){const b=document.getElementById('navTakenBadge');if(b){b.textContent=u.length;b.classList.add('show');}}}catch(e){}})();</script>
@@ -803,6 +803,8 @@
     </section>
   </div>
 
+  <script src="/modules/shared/supabase-client.js"></script>
+  <script src="/modules/shared/agent-shared.js"></script>
   <script>
     /* ─────────────────────────────────────────────────────────────
        Constants & state
@@ -1498,6 +1500,9 @@
     }
 
     init();
+    if (window._authSharedReady) {
+      window._authSharedReady.then(() => window.AgentShared?.renderUserSection());
+    }
   </script>
 </body>
 </html>

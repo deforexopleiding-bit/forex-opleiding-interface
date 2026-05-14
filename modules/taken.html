@@ -548,13 +548,7 @@
   </span>
 
   <div class="sidebar-spacer"></div>
-  <div class="sidebar-user">
-    <div class="sidebar-avatar">JB</div>
-    <div>
-      <div class="sidebar-user-info">Jeffrey</div>
-      <div class="sidebar-user-role">Eigenaar</div>
-    </div>
-  </div>
+  <div class="sidebar-user footer-user"></div>
 </nav>
 
 <script>
@@ -797,6 +791,8 @@
   </div>
 </div>
 
+<script src="/modules/shared/supabase-client.js"></script>
+<script src="/modules/shared/agent-shared.js"></script>
 <script>
 // ════════════════════════════════════════════════════
 // State & helpers
@@ -1414,6 +1410,9 @@ function init() {
 }
 
 init();
+if (window._authSharedReady) {
+  window._authSharedReady.then(() => window.AgentShared?.renderUserSection());
+}
 </script>
 </body>
 </html>
