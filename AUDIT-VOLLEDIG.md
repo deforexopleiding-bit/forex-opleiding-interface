@@ -77,6 +77,65 @@ eigen telefoon, module dient als digitaal afvinkpunt.
 
 ---
 
+## Sessie 15 mei 2026 — Fase C Admin + Fase E Auth-Aware Sidebar
+
+### Wat is gebouwd
+- Admin panel (commits 1cdf138):
+  * api/admin-users.js: GET/POST/PATCH/DELETE met verifyAdmin, logAudit, recovery link via Strato SMTP
+  * modules/admin.html: user-management UI, self-row guard, resend invite
+
+- Mini Fase E + auth-aware index (commits f06a37f):
+  * agent-shared.js: renderUserSection() toegevoegd + geëxporteerd
+  * index.html: supabase-client.js + agent-shared.js geladen, footer-user leeg, dynamic name in greeting
+
+- Logo regression fix (commit c8aa3a3):
+  * handleLogoError verwijderd uit alle 8 module-pagina's
+
+- Fase E rollout (commit 82cccea):
+  * email.html, taken.html, kennisbank.html, agents.html, meetings.html, control-center.html
+
+### Lessons Learned tijdens deze sessie
+
+**Les E — Diagnose vóór fix: verifieer de aanname**
+Symptoom: sidebar toonde hardcoded "Jeffrey" i.p.v. ingelogde user. Verkeerde aanname:
+getProfile() miste `.eq('id', user.id)` filter. De code was al correct. Werkelijke oorzaak:
+index.html laadde supabase-client.js niet → window.AuthShared undefined → hardcoded HTML
+bleef staan. Oplossing: scripts laden + footer-user leeg maken.
+Regel: Verifieer werkende code vóór je hem "fixt". Lees het bestand eerst.
+
+**Les F — Hardcoded fallbacks zijn tijdbommen**
+`<div class="footer-user"><div class="footer-avatar">JB</div><span>Jeffrey</span>…</div>`
+stond in elke module. Werkt prima zonder auth, maar blokkeert dynamische rendering zodra
+auth beschikbaar is. De hardcoded tekst is altijd "winnen" van de async auth-check.
+Regel: Hardcoded user-data in HTML is altijd tijdelijk. Maak het leeg bij implementatie
+van de auth-laag — wacht niet op een aparte "opruim-sprint".
+
+**Les G — Site-wide grep bij timing-bugs in gedeelde patronen**
+handleLogoError was gefixed op auth-pagina's (Fase B, 14 mei), maar het identieke
+`<img onerror="handleLogoError()">` patroon stond in 8 module-pagina's. Alleen ontdekt
+door expliciete `grep -r "handleLogoError"` na de Fase B fix.
+Regel: Bij een timing-bug in één bestand: voer altijd een site-wide grep uit op het patroon.
+Partiële fixes creëren valse zekerheid — het systeem lijkt gerepareerd maar andere
+instanties falen nog steeds.
+
+**Les H — Cross-tool werkwijze: regie versus uitvoering**
+Chat-Claude (web/app) = regie, planning, prompts schrijven.
+Claude Code (terminal) = file-operaties, git, commits.
+Claude in Chrome (extensie) = browser-acties, live validatie.
+Regel: Elke tool heeft één rol. Claude Code voert nooit browser-tests uit. Claude in Chrome
+schrijft nooit code. Chat-Claude schrijft kant-en-klare prompts voor elke overdracht —
+geen halve instructies waarbij de andere tool zelf moet invullen.
+
+**Les I — Scope creep detectie in planfase**
+Een plan file bevatte onbedoeld vier onderwerpen tegelijk: vergaderruimte redesign,
+agents.html splitting, Fase E rollout, én infrastructuur-updates. Jeffrey herkende het
+direct en verwierp het plan.
+Regel: Een plan-bestand heeft één onderwerp. Als het plan meer dan één "## Commit"-sectie
+bevat, of meer dan drie bestanden aanraakt die geen directe samenhang hebben, is de scope
+te breed. Schrijf het plan opnieuw.
+
+---
+
 ## Fase C sessie — 2026-05-13
 
 ### Les 1 — Silent INSERT failures: controleer kolomtypes (commit `2c5385b`)

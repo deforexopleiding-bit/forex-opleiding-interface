@@ -1,5 +1,5 @@
 # TODO — Agency Command Center
-> Bijgewerkt: 2026-05-13 (Refactoring agents → 3 modules) | Gebaseerd op AUDIT-VOLLEDIG.md
+> Bijgewerkt: 2026-05-15 (Fase C admin panel + Fase E rollout) | Gebaseerd op AUDIT-VOLLEDIG.md
 
 ---
 
@@ -242,6 +242,15 @@ En in `api/email-agent.js`: bij elke categorisatie een rij invoegen.
   - /auth-callback.html
   - modules/shared/supabase-client.js + window.AuthShared helper
   - api/config.js (publieke keys voor browser)
+- [x] Auth Fase C — Admin panel (2026-05-15):
+  - api/admin-users.js: GET/POST/PATCH/DELETE, verifyAdmin, logAudit, recovery link via Strato SMTP
+  - modules/admin.html: user-management UI, self-row guard, resend invite
+- [x] Mini Fase E — renderUserSection (2026-05-15):
+  - agent-shared.js: renderUserSection() toegevoegd + geëxporteerd
+  - index.html: supabase-client.js + agent-shared.js geladen, footer-user leeg, renderUserSection call
+- [x] Logo regression fix — handleLogoError verwijderd uit alle 8 modules (2026-05-15, commit c8aa3a3)
+- [x] Fase E rollout — auth-aware sidebar naar 6 modules (2026-05-15, commit 82cccea):
+  - email.html, taken.html, kennisbank.html, agents.html, meetings.html, control-center.html
 - [x] Agents Batch 1 — volledig afgerond (2026-05-12):
   - Sessie persistence via localStorage per agent (agent_active_session_<name>)
   - api/agent-conversations.js: session_id teruggestuurd ook als berichten leeg (verse sessie)
@@ -264,21 +273,24 @@ En in `api/email-agent.js`: bij elke categorisatie een rij invoegen.
 
 ---
 
-## Volgende sessie priority items (status 14 mei 09:00)
+## Volgende sessie priority items (status 15 mei)
 
-### Fase C — Admin Panel (eerstvolgend)
-- /modules/admin.html met user-management UI *(code al klaar, nog niet gecommit)*
-- /api/admin-users.js endpoint (GET list, POST create, PATCH update, DELETE deactivate) *(code al klaar)*
-- Verifieer is_admin() server-side bij elke admin endpoint call
-- Magic link auto-versturen bij user-create
-- Eerste echte test: Maxim/Amigo/Dave via UI aanmaken
+### [E2] Fase E2 — Admin-link conditioneel op role=admin
+**Bestand:** `modules/shared/agent-shared.js` — `renderUserSection()`
+**Probleem:** Admin-link wordt altijd getoond (of nooit) ongeacht de rol van de ingelogde user
+**Fix:** Toon "⚙ Admin" link alleen als `profile.role === 'admin'`
+**Prioriteit:** Medium
 
-### Fase E — Wie-ben-ik indicator
-- Update agent-shared.js met renderUserSection() + initAuth() + toggleUserMenu()
-- Update sidebar CSS in agent-shared.css
-- Update HTML sidebar in alle 7+ modules (vervang footer-user > JB-avatar)
-- Soft launch: indicator zichtbaar, geen verplichte login
-- Admin-link alleen zichtbaar voor role=admin
+### [E3] Maxim + Dave aanmaken via admin panel
+**Actie:** Jeffrey kan dit zelf doen via /modules/admin.html
+- Aanmaken + recovery link sturen + eerste login valideren per user
+**Prioriteit:** Hoog (blokkeert team-toegang)
+
+### [P-CC1] Paginatitels inconsistent
+**Bestanden:** `modules/*.html`, `index.html`
+**Probleem:** Mix van "Naam · De Forex Opleiding" en "Naam | De Forex Opleiding" in `<title>` tags
+**Fix:** Standaardiseer naar "Paginanaam · De Forex Opleiding" in alle modules
+**Prioriteit:** Laag
 
 ### Fase D — RLS op bestaande tabellen (gefaseerd over 3 sub-sprints)
 DOE PER SUB-SPRINT: TEST + DEPLOY + VERIFICATIE voor volgende
