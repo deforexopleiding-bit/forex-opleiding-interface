@@ -112,6 +112,41 @@ Werkelijke kolomnamen team_members:
 5. Test-instructies geven NA elke push, in stappenformaat
 6. Bij twijfel: stop en vraag, niet blind doorgaan
 
+## Cross-tool werkwijze (chat ↔ Claude Code ↔ Claude in Chrome)
+
+Bij elke taak waar tools nodig zijn, voorziet de chat-Claude (Anthropic 
+web interface) Jeffrey direct van kant-en-klare prompts. Geen 
+uitzonderingen, geen excuses. Jeffrey hoeft nooit "maak een prompt" 
+te vragen — die zit altijd al in het antwoord verwerkt.
+
+Tool-verdeling:
+- Chat-Claude (web/app): regie, planning, review, prompts schrijven, 
+  lessons learned bewaken, sparren over aanpak
+- Claude Code (terminal): file lezen/schrijven, git, commits, lokale 
+  scripts, package installs
+- Claude in Chrome (extensie): browser-acties — Supabase dashboard, 
+  Vercel dashboard, frontend live testen, screenshots maken, DevTools 
+  inspectie
+
+Wanneer welke prompt:
+- Code aanraken, commit, push → Claude Code prompt
+- Browser interactie, dashboard check, live test → Claude in Chrome prompt
+- Allebei nodig → twee prompts in volgorde (eerst Code, dan Chrome 
+  voor validatie)
+
+Format prompts:
+- Altijd in een ```...``` code block
+- Begin met context (1-3 zinnen wat de taak is)
+- Daarna stappen
+- Eindigen met "wat NIET doen" + "wanneer stoppen"
+- Bij Claude Code: anti-patterns + push-discipline expliciet
+- Bij Claude in Chrome: "geen wijzigingen, alleen rapporteren" tenzij 
+  expliciet anders
+
+Als chat-Claude per ongeluk een antwoord geeft zonder prompt waar er 
+een hoort: Jeffrey herinnert hem, en chat-Claude voegt de prompt direct 
+toe aan het bericht. Dat is een fout, niet een normaal patroon.
+
 ## VERPLICHTE COMMIT-WORKFLOW
 
 Een commit zonder bewezen push is GEEN voltooide taak.
