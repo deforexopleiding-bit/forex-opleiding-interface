@@ -885,6 +885,7 @@ function scheduleRefresh() {
 // INIT
 // ═══════════════════════════════════
 (async () => {
+  await window._authSharedReady;
   const profile = await window.AuthShared?.requireAuth();
   if (!profile) return;
   loadDashboard();

@@ -1434,6 +1434,7 @@
        Wire-up
        ───────────────────────────────────────────────────────────── */
     async function init() {
+      await window._authSharedReady;
       const profile = await window.AuthShared.requireAuth();
       if (!profile) return;
       renderToggle();
