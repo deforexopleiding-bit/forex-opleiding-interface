@@ -333,11 +333,7 @@
     </div>
   </div>
   <div class="sidebar-footer">
-    <div class="footer-user">
-      <div class="footer-avatar">JB</div>
-      <span>Jeffrey</span>
-      <svg style="width:14px;height:14px;margin-left:auto;flex-shrink:0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M4.93 4.93a10 10 0 0 0 0 14.14"/></svg>
-    </div>
+    <div class="footer-user"></div>
   </div>
 </nav>
 
@@ -451,6 +447,8 @@
   </div><!-- /main-inner -->
 </div><!-- /main -->
 
+<script src="/modules/shared/supabase-client.js"></script>
+<script src="/modules/shared/agent-shared.js"></script>
 <script>
 // ── Logo fallback ──
 function handleLogoError() {
@@ -538,12 +536,28 @@ function renderAll(data, period) {
 // GREETING
 // ═══════════════════════════════════
 function renderGreeting(greeting, period) {
-  const h = new Date().getHours();
-  const icon = h < 18 ? '☀️' : '🌙';
-  document.getElementById('greetingTitle').textContent = `${greeting?.tijd_groet || 'Goedemorgen'} Jeffrey ${icon}`;
+  const h        = new Date().getHours();
+  const icon     = h < 18 ? '☀️' : '🌙';
+  const greetWord = greeting?.tijd_groet || (h < 12 ? 'Goedemorgen' : h < 18 ? 'Goedemiddag' : 'Goedenavond');
+
+  // Synchrone eerste render — geen naam (soft launch: geen requireAuth)
+  document.getElementById('greetingTitle').textContent = `${greetWord} ${icon}`;
   const datum = new Date().toLocaleDateString('nl-NL', { weekday:'long', day:'numeric', month:'long' });
   document.getElementById('greetingInsight').textContent = `${datum} · ${greeting?.inzicht || ''}`;
   document.getElementById('greetingUpdated').textContent = `Bijgewerkt om ${fmtTime(new Date())}`;
+
+  // Async naam-injectie zodra auth beschikbaar (niet-blokkerend)
+  if (window._authSharedReady) {
+    window._authSharedReady.then(async () => {
+      try {
+        const profile   = await window.AuthShared?.getProfile();
+        const firstName = (profile?.full_name || '').trim().split(/\s+/)[0] || '';
+        if (firstName) {
+          document.getElementById('greetingTitle').textContent = `${greetWord} ${firstName} ${icon}`;
+        }
+      } catch {}
+    });
+  }
 }
 
 // ═══════════════════════════════════
@@ -889,6 +903,11 @@ function scheduleRefresh() {
 // INIT
 // ═══════════════════════════════════
 loadDashboard();
+
+// Auth-aware sidebar footer (niet-blokkerend)
+if (window._authSharedReady) {
+  window._authSharedReady.then(() => window.AgentShared?.renderUserSection());
+}
 </script>
 </body>
 </html>

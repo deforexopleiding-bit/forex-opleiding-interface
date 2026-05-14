@@ -287,6 +287,66 @@
     return map[agentName] || 'Agent';
   }
 
+  // ── User section in sidebar footer ───────────────────────────────────────
+
+  async function renderUserSection(profile) {
+    const target = document.querySelector('.user-section, .footer-user');
+    if (!target) return;
+
+    // Haal profiel op als niet meegegeven
+    if (!profile && window.AuthShared) {
+      try {
+        if (window._authSharedReady) await window._authSharedReady;
+        profile = await window.AuthShared.getProfile();
+      } catch {}
+    }
+
+    if (!profile) {
+      target.innerHTML = `<a href="/login.html"
+        style="color:var(--text-faint);font-size:12px;text-decoration:none;padding:6px 0;display:block">
+        Inloggen
+      </a>`;
+      return;
+    }
+
+    const nameParts = (profile.full_name || '').trim().split(/\s+/).filter(Boolean);
+    const initials = nameParts.length >= 2
+      ? (nameParts[0][0] + nameParts[nameParts.length - 1][0]).toUpperCase()
+      : nameParts.length === 1
+        ? nameParts[0][0].toUpperCase()
+        : (profile.email[0] || '?').toUpperCase();
+
+    const shortEmail = profile.email.length > 24
+      ? profile.email.slice(0, 21) + '…'
+      : profile.email;
+
+    target.innerHTML = `
+      <div style="display:flex;align-items:center;gap:9px">
+        <div style="width:30px;height:30px;border-radius:50%;
+          background:linear-gradient(135deg,#093d54,#688b9b);
+          display:flex;align-items:center;justify-content:center;
+          color:#fff;font-weight:700;font-size:11px;flex-shrink:0">
+          ${esc(initials)}
+        </div>
+        <div style="flex:1;min-width:0;overflow:hidden">
+          <div style="font-size:12px;font-weight:600;color:var(--text);
+            white-space:nowrap;overflow:hidden;text-overflow:ellipsis">
+            ${esc(profile.full_name || profile.email)}
+          </div>
+          <div style="font-size:10px;color:var(--text-faint);
+            white-space:nowrap;overflow:hidden;text-overflow:ellipsis">
+            ${esc(shortEmail)}
+          </div>
+        </div>
+        <button
+          onclick="(async()=>{if(window.AuthShared)await window.AuthShared.signOut();window.location.href='/login.html';})()"
+          style="background:transparent;border:none;color:var(--text-faint);
+            cursor:pointer;padding:3px;border-radius:4px;flex-shrink:0;
+            line-height:1;font-size:14px"
+          title="Uitloggen">&#8617;</button>
+      </div>`;
+  }
+
   // ── Logo fallback (hergebruikt in alle modules) ────────────────────────────
 
   function handleLogoError() {
@@ -321,5 +381,6 @@
     handleLogoError,
     getAvatarUrl,
     getAgentFunction,
+    renderUserSection,
   };
 })();
