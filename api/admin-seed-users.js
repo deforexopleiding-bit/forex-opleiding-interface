@@ -12,12 +12,9 @@
 import { createClient } from '@supabase/supabase-js';
 import crypto from 'crypto';
 
-// Initial users — replace placeholder emails with real addresses before first run
+// Initial seed — Jeffrey only. Overige users worden via admin panel aangemaakt (Fase C).
 const SEED_USERS = [
-  { email: 'biemoldjeffrey@gmail.com', name: 'Jeffrey Biemold', role: 'admin'  },
-  { email: 'TODO_maxim@deforexopleiding.nl',  name: 'Maxim',           role: 'admin'  },
-  { email: 'TODO_amigo@deforexopleiding.nl',  name: 'Amigo',           role: 'admin'  },
-  { email: 'TODO_dave@deforexopleiding.nl',   name: 'Dave',            role: 'sales'  },
+  { email: 'biemoldjeffrey@gmail.com', name: 'Jeffrey Biemold', role: 'admin' },
 ];
 
 export default async function handler(req, res) {
@@ -38,16 +35,6 @@ export default async function handler(req, res) {
     process.env.SUPABASE_URL,
     process.env.SUPABASE_SERVICE_ROLE_KEY
   );
-
-  // Guard: refuse if TODO placeholders are still present
-  const hasTodos = SEED_USERS.some(u => u.email.startsWith('TODO_'));
-  if (hasTodos) {
-    const todos = SEED_USERS.filter(u => u.email.startsWith('TODO_')).map(u => u.email);
-    return res.status(400).json({
-      error: 'Placeholder emails still present — update SEED_USERS in api/admin-seed-users.js first',
-      todos,
-    });
-  }
 
   const results = [];
   for (const user of SEED_USERS) {
