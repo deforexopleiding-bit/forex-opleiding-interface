@@ -1,0 +1,372 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Admin · De Forex Opleiding</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com"/>
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
+  <link rel="stylesheet" href="/modules/shared/agent-shared.css"/>
+  <style>
+    /* ── Admin-specifieke styles ── */
+    .page-header { display:flex; align-items:flex-start; justify-content:space-between; margin-bottom:24px; flex-wrap:wrap; gap:12px; }
+    .page-title { font-size:22px; font-weight:700; letter-spacing:-.3px; margin-bottom:3px; }
+    .page-sub { font-size:12px; color:var(--text-faint); }
+    .admin-stats { display:flex; gap:12px; margin-bottom:20px; flex-wrap:wrap; }
+    .stat-chip { background:var(--bg-elev); border:1px solid var(--border); border-radius:10px; padding:12px 16px; min-width:110px; }
+    .stat-chip-value { font-size:24px; font-weight:700; line-height:1; }
+    .stat-chip-label { font-size:10px; text-transform:uppercase; color:var(--text-faint); font-weight:600; letter-spacing:.5px; margin-top:4px; }
+    .section-card { background:var(--bg-elev); border:1px solid var(--border); border-radius:12px; padding:20px; margin-bottom:16px; }
+    .section-header { display:flex; align-items:center; gap:10px; margin-bottom:16px; font-size:14px; font-weight:600; }
+    .user-count-badge { font-size:11px; font-weight:500; padding:2px 8px; border-radius:10px; background:var(--bg-elev-2); color:var(--text-faint); }
+    .users-table { width:100%; border-collapse:collapse; }
+    .users-table th { text-align:left; padding:10px 12px; font-size:10px; text-transform:uppercase; color:var(--text-faint); font-weight:600; letter-spacing:.5px; border-bottom:1px solid var(--border); }
+    .users-table td { padding:12px; border-bottom:0.5px solid rgba(255,255,255,0.04); font-size:13px; vertical-align:middle; }
+    .users-table tr:last-child td { border-bottom:none; }
+    .users-table tr:hover td { background:rgba(255,255,255,0.02); }
+    .user-cell { display:flex; align-items:center; gap:10px; }
+    .user-avatar-sm { width:34px; height:34px; border-radius:50%; background:linear-gradient(135deg,#093d54,#688b9b); display:flex; align-items:center; justify-content:center; color:#fff; font-weight:600; font-size:12px; flex-shrink:0; }
+    .user-name-text { font-size:13px; font-weight:500; }
+    .user-email-text { font-size:11px; color:var(--text-faint); }
+    .role-badge { display:inline-block; padding:3px 9px; border-radius:6px; font-size:11px; font-weight:500; }
+    .role-badge.admin { background:rgba(9,61,84,0.35); color:var(--brand-secondary-light); border:1px solid rgba(26,87,115,0.4); }
+    .role-badge.sales { background:rgba(29,158,117,0.15); color:#1D9E75; border:1px solid rgba(29,158,117,0.3); }
+    .role-badge.mentor { background:rgba(104,139,155,0.15); color:#8aa5b3; border:1px solid rgba(104,139,155,0.3); }
+    .role-badge.administratie { background:rgba(239,159,39,0.12); color:#EF9F27; border:1px solid rgba(239,159,39,0.25); }
+    .role-badge.viewer { background:rgba(255,255,255,0.05); color:var(--text-faint); border:1px solid var(--border); }
+    .active-dot { display:inline-block; width:8px; height:8px; border-radius:50%; background:var(--color-success); }
+    .inactive-dot { background:var(--text-faint); }
+    .role-select-inline { background:var(--bg-elev-2); border:1px solid var(--border); border-radius:6px; padding:4px 8px; font-size:12px; color:var(--text); font-family:inherit; cursor:pointer; }
+    .action-btn { background:transparent; border:none; padding:5px 8px; border-radius:6px; color:var(--text-faint); cursor:pointer; font-size:12px; }
+    .action-btn:hover { background:rgba(255,255,255,0.06); color:var(--text); }
+    .modal-overlay { position:fixed; inset:0; background:rgba(0,0,0,0.6); z-index:500; display:flex; align-items:center; justify-content:center; backdrop-filter:blur(4px); }
+    .modal-overlay.hidden { display:none!important; }
+    .modal-card { background:var(--bg-elev); border:1px solid var(--border-strong); border-radius:14px; width:100%; max-width:440px; margin:20px; }
+    .modal-header { display:flex; align-items:center; justify-content:space-between; padding:16px 20px; border-bottom:1px solid var(--border); }
+    .modal-title { font-size:15px; font-weight:600; }
+    .modal-close { background:transparent; border:none; color:var(--text-faint); font-size:16px; cursor:pointer; padding:4px; line-height:1; }
+    .modal-body { padding:20px; }
+    .modal-footer { display:flex; justify-content:flex-end; gap:8px; padding:14px 20px; border-top:1px solid var(--border); }
+    .form-group { margin-bottom:14px; }
+    .form-label { display:block; font-size:12px; font-weight:600; color:var(--text-dim); margin-bottom:6px; }
+    .form-input { width:100%; background:var(--bg-elev-2); border:1px solid var(--border-strong); border-radius:8px; padding:9px 12px; font-size:13px; color:var(--text); font-family:inherit; outline:none; transition:border-color .15s; }
+    .form-input:focus { border-color:var(--brand-secondary); }
+    .form-error { margin-top:10px; padding:8px 12px; background:rgba(239,68,68,0.1); border:1px solid rgba(239,68,68,0.25); border-radius:8px; font-size:12px; color:#fca5a5; }
+  </style>
+</head>
+<body>
+
+<nav class="sidebar">
+  <div class="sidebar-logo" id="sidebarLogo">
+    <img id="sidebarLogoImg"
+      src="https://www.deforexopleiding.nl/wp-content/uploads/2023/01/Logo-De-Forex-Opleiding-wit.png"
+      alt="De Forex Opleiding"
+      onerror="window.AgentShared?.handleLogoError()"/>
+  </div>
+  <div class="sidebar-nav">
+    <a class="nav-item" href="../index.html">
+      <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+      Dashboard
+    </a>
+    <a class="nav-item" href="email.html">
+      <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
+      E-mail
+    </a>
+    <a class="nav-item" href="taken.html">
+      <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="9" y1="9" x2="15" y2="9"/><line x1="9" y1="13" x2="15" y2="13"/><line x1="9" y1="17" x2="12" y2="17"/></svg>
+      Takenbeheer
+    </a>
+    <a class="nav-item" href="kennisbank.html">
+      <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>
+      Kennisbank
+    </a>
+    <a class="nav-item" href="agents.html">
+      <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M20 21a8 8 0 1 0-16 0"/></svg>
+      AI Agents
+    </a>
+    <a class="nav-item" href="meetings.html">
+      <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+      Vergaderruimte
+    </a>
+    <a class="nav-item" href="control-center.html">
+      <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+      Control Center
+    </a>
+    <a class="nav-item active" href="admin.html">
+      <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+      Admin
+    </a>
+  </div>
+  <div class="sidebar-footer">
+    <div class="user-section"></div>
+  </div>
+</nav>
+
+<div class="main">
+  <div class="main-inner">
+
+    <div class="page-header">
+      <div>
+        <h1 class="page-title">Gebruikersbeheer</h1>
+        <p class="page-sub">Beheer toegang tot het Agency Command Center</p>
+      </div>
+      <button class="btn btn-primary" onclick="openInviteModal()">+ Nieuwe gebruiker</button>
+    </div>
+
+    <!-- Stats row -->
+    <div class="admin-stats" id="adminStats"></div>
+
+    <!-- Users table -->
+    <div class="section-card">
+      <div class="section-header">
+        <span>Gebruikers <span class="user-count-badge" id="userCountBadge">0</span></span>
+        <button class="btn btn-sm" onclick="loadUsers()">&#8634;</button>
+      </div>
+      <div id="usersTableWrap">
+        <div style="color:var(--text-faint);font-size:13px;padding:20px">Laden&hellip;</div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- Invite modal -->
+<div class="modal-overlay hidden" id="inviteModal">
+  <div class="modal-card">
+    <div class="modal-header">
+      <div class="modal-title">Nieuwe gebruiker uitnodigen</div>
+      <button class="modal-close" onclick="closeInviteModal()">&#x2715;</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-group">
+        <label class="form-label">E-mailadres</label>
+        <input type="email" id="inviteEmail" class="form-input" placeholder="naam@voorbeeld.nl" />
+      </div>
+      <div class="form-group">
+        <label class="form-label">Volledige naam</label>
+        <input type="text" id="inviteName" class="form-input" placeholder="Voornaam Achternaam" />
+      </div>
+      <div class="form-group">
+        <label class="form-label">Rol</label>
+        <select id="inviteRole" class="form-input">
+          <option value="viewer">Viewer</option>
+          <option value="sales">Sales</option>
+          <option value="mentor">Mentor</option>
+          <option value="administratie">Administratie</option>
+          <option value="admin">Admin</option>
+        </select>
+      </div>
+      <div class="form-error hidden" id="inviteError"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn" onclick="closeInviteModal()">Annuleren</button>
+      <button class="btn btn-primary" onclick="submitInvite()" id="inviteBtn">Uitnodigen</button>
+    </div>
+  </div>
+</div>
+
+<script src="/modules/shared/supabase-client.js"></script>
+<script src="/modules/shared/agent-shared.js"></script>
+<script>
+let currentProfile = null;
+let accessToken = null;
+
+async function init() {
+  await window._authSharedReady;
+  currentProfile = await window.AuthShared.requireAuth(['admin']);
+  if (!currentProfile) return; // requireAuth redirect al gedaan
+
+  accessToken = await window.AuthShared.getAccessToken();
+
+  // Render user section
+  if (window.AgentShared) {
+    await window.AgentShared.renderUserSection(currentProfile);
+  }
+
+  loadUsers();
+}
+
+async function apiRequest(method, path, body) {
+  const opts = {
+    method,
+    headers: {
+      'Authorization': `Bearer ${accessToken}`,
+      'Content-Type': 'application/json',
+    },
+  };
+  if (body) opts.body = JSON.stringify(body);
+  const res = await fetch(path, opts);
+  return res.json();
+}
+
+async function loadUsers() {
+  const wrap = document.getElementById('usersTableWrap');
+  wrap.innerHTML = '<div style="color:var(--text-faint);font-size:13px;padding:20px">Laden…</div>';
+
+  try {
+    const data = await apiRequest('GET', '/api/admin-users');
+    if (data.error) throw new Error(data.error);
+
+    const users = data.users || [];
+    document.getElementById('userCountBadge').textContent = users.length;
+
+    // Stats
+    const byRole = {};
+    users.forEach(u => { byRole[u.role] = (byRole[u.role] || 0) + 1; });
+    document.getElementById('adminStats').innerHTML = Object.entries(byRole)
+      .map(([role, count]) => `<div class="stat-chip"><div class="stat-chip-value">${count}</div><div class="stat-chip-label">${role}</div></div>`)
+      .join('');
+
+    if (!users.length) {
+      wrap.innerHTML = '<div style="color:var(--text-faint);font-size:13px;padding:20px">Geen gebruikers gevonden</div>';
+      return;
+    }
+
+    const rows = users.map(u => {
+      const initials = (u.full_name || u.email).split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2);
+      const lastLogin = u.last_login_at ? new Date(u.last_login_at).toLocaleDateString('nl-NL') : '—';
+      const isActive = u.is_active;
+      return `<tr>
+        <td>
+          <div class="user-cell">
+            <div class="user-avatar-sm">${initials}</div>
+            <div>
+              <div class="user-name-text">${esc(u.full_name || '—')}</div>
+              <div class="user-email-text">${esc(u.email)}</div>
+            </div>
+          </div>
+        </td>
+        <td>
+          <select class="role-select-inline" onchange="changeRole('${u.id}', this.value)">
+            ${['admin','sales','mentor','administratie','viewer'].map(r => `<option value="${r}" ${u.role===r?'selected':''}>${r}</option>`).join('')}
+          </select>
+        </td>
+        <td>
+          <span class="active-dot${isActive ? '' : ' inactive-dot'}"></span>
+          ${isActive ? 'Actief' : 'Inactief'}
+        </td>
+        <td style="color:var(--text-faint)">${lastLogin}</td>
+        <td>
+          ${u.id === currentProfile?.id
+            ? `<span style="color:var(--text-faint);font-size:12px">Jij</span>`
+            : isActive
+              ? `<button class="action-btn" onclick="resendInvite('${esc(u.email)}')">&#8634; Opnieuw uitnodigen</button>
+                 <button class="action-btn" onclick="deactivateUser('${u.id}', '${esc(u.email)}')">Deactiveer</button>`
+              : `<button class="action-btn" onclick="reactivateUser('${u.id}')">Heractiveer</button>`}
+        </td>
+      </tr>`;
+    }).join('');
+
+    wrap.innerHTML = `<table class="users-table">
+      <thead><tr>
+        <th>Gebruiker</th><th>Rol</th><th>Status</th><th>Laatste login</th><th>Acties</th>
+      </tr></thead>
+      <tbody>${rows}</tbody>
+    </table>`;
+  } catch (e) {
+    wrap.innerHTML = `<div style="color:var(--red);font-size:13px;padding:20px">Fout: ${esc(e.message)}</div>`;
+  }
+}
+
+function esc(s) { return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+async function changeRole(userId, newRole) {
+  try {
+    const data = await apiRequest('PATCH', `/api/admin-users?id=${userId}`, { role: newRole });
+    if (data.error) throw new Error(data.error);
+    window.AgentShared?.showToast(`Rol gewijzigd naar ${newRole}`, 'success');
+    loadUsers();
+  } catch (e) {
+    window.AgentShared?.showToast('Fout bij wijzigen rol', 'error');
+  }
+}
+
+async function deactivateUser(userId, email) {
+  if (!confirm(`Gebruiker ${email} deactiveren?`)) return;
+  try {
+    const data = await apiRequest('DELETE', `/api/admin-users?id=${userId}`);
+    if (data.error) throw new Error(data.error);
+    window.AgentShared?.showToast('Gebruiker gedeactiveerd', 'success');
+    loadUsers();
+  } catch (e) {
+    window.AgentShared?.showToast('Fout bij deactiveren', 'error');
+  }
+}
+
+async function reactivateUser(userId) {
+  try {
+    const data = await apiRequest('PATCH', `/api/admin-users?id=${userId}`, { is_active: true });
+    if (data.error) throw new Error(data.error);
+    window.AgentShared?.showToast('Gebruiker geheractiveerd', 'success');
+    loadUsers();
+  } catch (e) {
+    window.AgentShared?.showToast('Fout bij heractiveren', 'error');
+  }
+}
+
+async function resendInvite(email) {
+  if (!confirm(`Uitnodigingsmail opnieuw sturen naar ${email}?`)) return;
+  try {
+    const data = await apiRequest('POST', '/api/admin-users', { email, resend_only: true });
+    if (data.error) throw new Error(data.error);
+    window.AgentShared?.showToast('Uitnodigingsmail verstuurd', 'success');
+  } catch (e) {
+    window.AgentShared?.showToast(`Fout: ${e.message}`, 'error');
+  }
+}
+
+function openInviteModal() {
+  document.getElementById('inviteEmail').value = '';
+  document.getElementById('inviteName').value = '';
+  document.getElementById('inviteRole').value = 'viewer';
+  document.getElementById('inviteError').classList.add('hidden');
+  document.getElementById('inviteModal').classList.remove('hidden');
+  document.getElementById('inviteEmail').focus();
+}
+
+function closeInviteModal() {
+  document.getElementById('inviteModal').classList.add('hidden');
+}
+
+async function submitInvite() {
+  const email    = document.getElementById('inviteEmail').value.trim();
+  const fullName = document.getElementById('inviteName').value.trim();
+  const role     = document.getElementById('inviteRole').value;
+  const errEl    = document.getElementById('inviteError');
+  const btn      = document.getElementById('inviteBtn');
+
+  if (!email) {
+    errEl.textContent = 'E-mailadres is verplicht';
+    errEl.classList.remove('hidden');
+    return;
+  }
+
+  btn.disabled = true;
+  btn.textContent = 'Uitnodigen…';
+  errEl.classList.add('hidden');
+
+  try {
+    const data = await apiRequest('POST', '/api/admin-users', { email, full_name: fullName, role });
+    if (data.error) throw new Error(data.error);
+    window.AgentShared?.showToast(`${email} uitgenodigd als ${role}`, 'success');
+    closeInviteModal();
+    loadUsers();
+  } catch (e) {
+    errEl.textContent = e.message;
+    errEl.classList.remove('hidden');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Uitnodigen';
+  }
+}
+
+// Sluit modal bij ESC
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') closeInviteModal();
+});
+
+init();
+</script>
+</body>
+</html>
