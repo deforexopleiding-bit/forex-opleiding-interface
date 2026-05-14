@@ -82,10 +82,12 @@
       justify-content: center;
       margin-bottom: 24px;
     }
-    .card-logo img {
-      max-width: 160px;
-      height: auto;
-      display: block;
+    .brand-mark {
+      font-size: 17px;
+      font-weight: 700;
+      color: var(--text);
+      letter-spacing: -0.2px;
+      text-align: center;
     }
     .card-logo-fallback {
       font-size: 15px;
@@ -314,12 +316,8 @@
   <div class="login-card" id="loginCard">
 
     <!-- Logo -->
-    <div class="card-logo" id="cardLogo">
-      <img
-        id="cardLogoImg"
-        src="https://www.deforexopleiding.nl/wp-content/uploads/2023/01/Logo-De-Forex-Opleiding-wit.png"
-        alt="De Forex Opleiding"
-        onerror="handleLogoError()" />
+    <div class="card-logo">
+      <div class="brand-mark">De Forex Opleiding</div>
     </div>
 
     <!-- Header -->
@@ -400,21 +398,6 @@
   <script src="/modules/shared/supabase-client.js"></script>
   <script>
     'use strict';
-
-    /* ── Logo fallback ── */
-    function handleLogoError() {
-      const img = document.getElementById('cardLogoImg');
-      if (!img) return;
-      try {
-        const b64 = localStorage.getItem('signature_logo_base64');
-        if (b64 && b64.startsWith('data:image')) { img.src = b64; img.onerror = useFallbackText; return; }
-      } catch (e) {}
-      useFallbackText();
-    }
-    function useFallbackText() {
-      const wrap = document.getElementById('cardLogo');
-      if (wrap) wrap.innerHTML = '<span class="card-logo-fallback">De Forex Opleiding</span>';
-    }
 
     /* ── Tab switching ── */
     function switchTab(tab) {
