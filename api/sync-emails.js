@@ -1,6 +1,6 @@
 import { ImapFlow } from 'imapflow';
 import { simpleParser } from 'mailparser';
-import { supabase } from './supabase.js';
+import { supabaseAdmin as supabase, checkCronAuth } from './supabase.js';
 import { categorize } from './email-agent.js';
 
 // Spiegelt de ACCOUNTS array uit emails.js — voeg nieuwe mailboxen op één plek toe
@@ -20,15 +20,9 @@ const ABORT_MS = 55_000;
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
 
-  // ── Authenticatie: alleen Vercel cron of handmatige trigger met CRON_SECRET ──
-  const secret = process.env.CRON_SECRET;
-  if (secret) {
-    const authHeader  = req.headers.authorization || '';
-    const querySecret = req.query?.secret         || '';
-    if (authHeader !== `Bearer ${secret}` && querySecret !== secret) {
-      return res.status(401).json({ error: 'Unauthorized — CRON_SECRET vereist' });
-    }
-  }
+  // ── Authenticatie: CRON_SECRET verplicht ─────────────────────────────────
+  const cronAuth = checkCronAuth(req);
+  if (!cronAuth.ok) return res.status(cronAuth.status).json(cronAuth.body);
 
   const { IMAP_HOST, IMAP_PORT } = process.env;
   if (!IMAP_HOST) return res.status(500).json({ error: 'IMAP_HOST niet geconfigureerd' });

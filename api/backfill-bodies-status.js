@@ -1,9 +1,12 @@
-import { supabase } from './supabase.js';
+import { supabaseAdmin as supabase, verifyAdmin } from './supabase.js';
 
 const MAILBOXES = ['leads', 'info', 'partners', 'administratie'];
 
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
+
+  const admin = await verifyAdmin(req);
+  if (!admin) return res.status(403).json({ error: 'Admin only' });
 
   // ── Haal progress-rijen op ────────────────────────────────────────────────
   const { data: progressRows, error: progErr } = await supabase

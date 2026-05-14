@@ -1,5 +1,5 @@
 import { ImapFlow } from 'imapflow';
-import { supabase } from './supabase.js';
+import { supabaseAdmin as supabase, checkCronAuth } from './supabase.js';
 import { categorize } from './email-agent.js';
 
 const ACCOUNTS = [
@@ -15,15 +15,9 @@ const MAX_RUN_MS = 50_000;  // Abort vóór Vercel's 60s hard timeout
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
 
-  // ── Auth ──────────────────────────────────────────────────────────────────
-  const secret = process.env.CRON_SECRET;
-  if (secret) {
-    const authHeader  = req.headers.authorization || '';
-    const querySecret = req.query?.secret         || '';
-    if (authHeader !== `Bearer ${secret}` && querySecret !== secret) {
-      return res.status(401).json({ error: 'Unauthorized — CRON_SECRET vereist' });
-    }
-  }
+  // ── Authenticatie: CRON_SECRET verplicht ─────────────────────────────────
+  const cronAuth = checkCronAuth(req);
+  if (!cronAuth.ok) return res.status(cronAuth.status).json(cronAuth.body);
 
   const { IMAP_HOST, IMAP_PORT } = process.env;
   if (!IMAP_HOST) return res.status(500).json({ error: 'IMAP_HOST niet geconfigureerd' });

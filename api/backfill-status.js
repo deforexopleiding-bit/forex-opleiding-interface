@@ -1,8 +1,11 @@
-import { supabase } from './supabase.js';
+import { supabaseAdmin as supabase, verifyAdmin } from './supabase.js';
 
 export default async function handler(req, res) {
   if (req.method !== 'GET') return res.status(405).json({ error: 'Method not allowed' });
   res.setHeader('Cache-Control', 'no-store');
+
+  const admin = await verifyAdmin(req);
+  if (!admin) return res.status(403).json({ error: 'Admin only' });
 
   try {
     // ── Backfill voortgang per mailbox ────────────────────────────────────

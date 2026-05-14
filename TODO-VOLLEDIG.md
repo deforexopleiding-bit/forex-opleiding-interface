@@ -163,6 +163,37 @@ En in `api/email-agent.js`: bij elke categorisatie een rij invoegen.
 
 > Bijgewerkt: 2026-05-13 na Fase C sessie (commits `bf3ff35`, `9adb307`)
 
+### [endp-1] Bearer-only validatie op 28 browser-endpoints (pre-D2)
+**Bestanden:** alle api/*.js met `import { supabase } from './supabase.js'` (browser-triggered)
+**Probleem:** Zodra D2 RLS user-tabellen krijgt, gaan anon queries niets meer terugkrijgen voor niet-ingelogde users
+**Fix:** Per request een Supabase client maken met Bearer token uit Authorization header, zodat RLS `auth.uid()` correct evalueert
+**Timing:** Vóór Fase D2 start
+**Schatting:** 3-4 uur
+
+### [endp-2] Setup/one-time endpoints verwijderen
+**Bestanden:** `api/admin-seed-users.js`, `api/db-migrate.js`, `api/db-migrate-batch-meetings.js`, `api/db-migrate-batch-meetings-v2.js`, `api/db-migrate-email-bodies.js`, `api/debug-supabase.js`, `api/test-smtp.js`
+**Probleem:** One-time endpoints die al uitgevoerd zijn; blijven deployment-surface vergroten
+**Fix:** Verwijderen in losse opschoning-commit
+**Schatting:** 30 minuten
+
+### [endp-3] verify-meeting-tasks + daily-quote: dode code check
+**Bestanden:** `api/verify-meeting-tasks.js`, `api/daily-quote.js`
+**Probleem:** Niet in vercel.json — worden ze überhaupt aangeroepen?
+**Fix:** Grep op aanroepen; indien geen → verwijderen (deel van endp-2)
+**Schatting:** 15 minuten
+
+### [endp-4] DEP0169 url.parse() deprecation warnings opruimen
+**Bestanden:** alle 5 cron-endpoints (zichtbaar in Vercel logs)
+**Probleem:** `url.parse()` deprecated in Node.js, stuurt warnings in Vercel logs
+**Fix:** Vervang door `new URL(req.url, 'http://localhost')` pattern
+**Schatting:** 30 minuten
+
+### [endp-5] backfill-start + backfill-bodies-start: dode code
+**Bestanden:** `api/backfill-start.js`, `api/backfill-bodies-start.js`
+**Probleem:** Backfill is afgerond (5613 mails), endpoints worden nergens vanuit frontend aangeroepen. Effectief dode code.
+**Fix:** Verwijderen (samen met endp-2 setup endpoints) in losse opschoning-commit
+**Schatting:** 5 minuten (deel van endp-2)
+
 ### [P-C1] reject_reason workflow uitbreiden
 **Wat:** Optionele modal bij afkeuren in de approval-inbox — laat Jeffrey een reden invullen die bewaard wordt in `agent_approval_queue.reject_reason` en zichtbaar is in het audit-log.
 **Waarom geparkeerd:** Core-flow werkt zonder. Purist refinement.

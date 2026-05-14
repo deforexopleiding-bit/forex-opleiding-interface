@@ -2,46 +2,11 @@
 // All operations require a valid admin Bearer token.
 // Writes audit entries to agent_audit_log after every mutation.
 
-import { createClient } from '@supabase/supabase-js';
 import nodemailer from 'nodemailer';
-
-const SUPABASE_URL      = process.env.SUPABASE_URL      || '';
-const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY || '';
-const SERVICE_ROLE_KEY  = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
+import { supabaseAdmin, verifyAdmin } from './supabase.js';
 
 const VALID_ROLES = ['admin', 'sales', 'mentor', 'administratie', 'viewer'];
 const SITE_URL    = 'https://forex-opleiding-interface.vercel.app';
-
-// Service-role client — bypasses RLS for admin operations.
-const supabaseAdmin = createClient(SUPABASE_URL, SERVICE_ROLE_KEY, {
-  auth: { autoRefreshToken: false, persistSession: false },
-});
-
-// ── Auth helper ───────────────────────────────────────────────────────────────
-
-/**
- * Verify Bearer token belongs to an active admin.
- * Returns { user, profile } on success, null otherwise.
- */
-async function verifyAdmin(authHeader) {
-  if (!authHeader?.startsWith('Bearer ')) return null;
-  const token = authHeader.slice(7);
-
-  const supabaseAnon = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-    auth: { autoRefreshToken: false, persistSession: false },
-  });
-  const { data: userData, error: userError } = await supabaseAnon.auth.getUser(token);
-  if (userError || !userData?.user) return null;
-
-  const { data: profile } = await supabaseAdmin
-    .from('profiles')
-    .select('*')
-    .eq('id', userData.user.id)
-    .single();
-
-  if (!profile || profile.role !== 'admin' || !profile.is_active) return null;
-  return { user: userData.user, profile };
-}
 
 // ── Audit helper ──────────────────────────────────────────────────────────────
 
@@ -184,7 +149,7 @@ export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
   res.setHeader('Content-Type', 'application/json');
 
-  const admin = await verifyAdmin(req.headers.authorization);
+  const admin = await verifyAdmin(req);
   if (!admin) {
     return res.status(403).json({ error: 'Toegang geweigerd. Admin-rol vereist.' });
   }
