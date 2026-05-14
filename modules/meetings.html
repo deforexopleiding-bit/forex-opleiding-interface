@@ -619,10 +619,10 @@ async function loadAllArchiveData() {
 
   try {
     const [historyRes, tasksRes, standupsRes, decisionsRes] = await Promise.all([
-      fetch('/api/agent-meeting?action=get_history').then(r => r.json()),
-      fetch('/api/agent-meeting?action=get_meeting_tasks').then(r => r.json()),
-      fetch('/api/agent-meeting?action=get_history&meeting_type=standup').then(r => r.json()),
-      fetch('/api/agent-meeting?action=get_decisions').then(r => r.json()),
+      window.AgentShared.apiFetch('/api/agent-meeting?action=get_history').then(r => r.json()),
+      window.AgentShared.apiFetch('/api/agent-meeting?action=get_meeting_tasks').then(r => r.json()),
+      window.AgentShared.apiFetch('/api/agent-meeting?action=get_history&meeting_type=standup').then(r => r.json()),
+      window.AgentShared.apiFetch('/api/agent-meeting?action=get_decisions').then(r => r.json()),
     ]);
 
     tabData.history   = (historyRes.meetings  || []).filter(m => m.meeting_type !== 'standup');
@@ -795,7 +795,7 @@ async function _doStartMeeting(participants, agenda, meetingType) {
   document.getElementById('meetingTranscript').innerHTML = '';
   renderMeetingStage(participants, agenda);
   try {
-    const r = await fetch('/api/agent-meeting', {
+    const r = await window.AgentShared.apiFetch('/api/agent-meeting', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ action: 'start', participants, agenda, title: agenda, meeting_type: meetingType }),
@@ -867,7 +867,7 @@ async function sendMeetingMessage() {
   if (predicted[0]) setAgentSpeaking(predicted[0]);
 
   try {
-    const r = await fetch('/api/agent-meeting', {
+    const r = await window.AgentShared.apiFetch('/api/agent-meeting', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ action: 'message', meeting_id: meetingId, message: msg }),
@@ -912,7 +912,7 @@ async function endMeeting() {
   document.getElementById('summaryText').textContent = 'Samenvatting genereren…';
   document.getElementById('actionPointsList').innerHTML = '';
   try {
-    const r = await fetch('/api/agent-meeting', {
+    const r = await window.AgentShared.apiFetch('/api/agent-meeting', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ action: 'end', meeting_id: meetingId }),
@@ -951,7 +951,7 @@ async function approveMeeting() {
   document.getElementById('taskReviewBody').innerHTML = '<div style="padding:20px;color:var(--text-faint)">Laden…</div>';
   document.getElementById('taskReviewOverlay').classList.remove('hidden');
   try {
-    const r = await fetch('/api/agent-meeting', {
+    const r = await window.AgentShared.apiFetch('/api/agent-meeting', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ action: 'preview_tasks', meeting_id: meetingId }),
@@ -1102,7 +1102,7 @@ async function confirmApprove() {
     assignees: reviewSelectorState[idx] || ap.assignees || [],
   }));
   try {
-    const r = await fetch('/api/agent-meeting', {
+    const r = await window.AgentShared.apiFetch('/api/agent-meeting', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ action: 'approve', meeting_id: meetingId, action_points: finalPoints }),
@@ -1194,7 +1194,7 @@ async function submitInstantTask() {
   if (!titel) { showToast('Vul een titel in', 'error'); return; }
   if (!reviewAssigneeOpts.length) {
     try {
-      const r = await fetch('/api/agent-meeting', {
+      const r = await window.AgentShared.apiFetch('/api/agent-meeting', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: 'preview_tasks', meeting_id: meetingId }),
       });
@@ -1206,7 +1206,7 @@ async function submitInstantTask() {
     } catch {}
   }
   try {
-    const r = await fetch('/api/agent-meeting', {
+    const r = await window.AgentShared.apiFetch('/api/agent-meeting', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         action:    'add_instant_task',
@@ -1240,7 +1240,7 @@ async function submitExternalInput() {
   if (!content || !meetingId) return;
   document.getElementById('extInputPopover').classList.add('hidden');
   try {
-    const r = await fetch('/api/agent-meeting', {
+    const r = await window.AgentShared.apiFetch('/api/agent-meeting', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ action: 'add_external_input', meeting_id: meetingId, input_type, content, label }),
