@@ -4,6 +4,79 @@ Chronologische verzameling van technische bevindingen en debuglessen opgedaan ti
 
 ---
 
+## Sessie 14 mei 2026 — Auth Module Fase A+B
+
+### Wat is gebouwd
+- Database foundation auth (commit 1da21f8):
+  * profiles tabel met 5 rollen + indexes
+  * Trigger on_auth_user_created voor automatische profile creation
+  * 4 helper functies: get_user_role, is_admin, has_role, has_any_role
+  * 5 RLS policies op profiles (view own, view all admin, update
+    admin, insert admin, update own)
+
+- Seed endpoint (commit c8ac9dd):
+  * api/admin-seed-users.js (one-time gebruik)
+  * SEED_SECRET guard, alleen Jeffrey geseed
+  * Cleanup: SEED_SECRET verwijderd uit Vercel na seed
+
+- Login flow (commits faf5fda + 6e9ad91):
+  * /login.html met Wachtwoord + Magic Link tabs
+  * /reset-password.html
+  * /auth-callback.html
+  * modules/shared/supabase-client.js + window.AuthShared helper
+  * api/config endpoint voor publieke Supabase keys
+  * Fix: handleLogoError ReferenceError opgelost (vervangen
+    door .brand-mark text div)
+
+### Architectuur-beslissingen
+- Supabase Auth (niet Clerk/Auth0): al onderdeel van Pro plan
+- Email + wachtwoord + magic link (geen OAuth Google)
+- 5 rollen: admin / sales / mentor / administratie / viewer
+- Soft launch principe: bestaande modules werken zonder login
+  tot Fase D klaar is
+
+### Eerste users
+- Jeffrey Biemold (admin) — biemoldjeffrey@gmail.com
+- Maxim, Amigo, Dave worden via admin panel toegevoegd in Fase C
+
+### Validatie
+- Profile correct aangemaakt via trigger ✅
+- Wachtwoord-reset flow getest ✅
+- Eerste login succesvol via password ✅
+- Bestaande modules ongebroken na deploy ✅
+
+### Lessons Learned tijdens deze sessie
+
+**Les A — handleLogoError ReferenceError op auth-pagina's**
+Auth-pagina's (login.html, reset-password.html, auth-callback.html)
+laden agent-shared.js NIET (pre-auth context). Een `<img onerror=
+"handleLogoError()">` vuurt bovendien vóór het inline script
+geparsed is (img staat midden in body, script onderaan). Dubbele
+timing-fout. Oplossing: vervang img+onerror door een
+`.brand-mark` tekst-div. Geen externe afbeelding, geen ReferenceError.
+
+**Les B — Sensitive env vars niet leesbaar na opslaan in Vercel**
+SEED_SECRET was aangemerkt als Sensitive in Vercel. Na opslaan
+niet meer leesbaar in dashboard. Tijdens seed-call tijdelijk
+geblokkeerd. Oplossing: setup-secrets (eenmalig gebruik) als
+niet-Sensitive bewaren, OF waarde direct in 1Password opslaan
+voor de setup-periode. Productie-keys (service_role, API keys):
+wél Sensitive.
+
+**Les C — Push-discipline: commit ≠ deploy**
+Claude Code rapporteerde "commit geslaagd" zonder push. Dit
+veroorzaakte meerdere testcycli (ook op 13 mei). CLAUDE.md
+bijgewerkt: push-output letterlijk plakken is verplicht bij
+elke taak.
+
+**Les D — WhatsApp Coexistence niet beschikbaar voor EU-nummers**
+Onderzocht voor Follow-up Module. Meta's Coexistence feature
+(zakelijk + persoonlijk op één nummer) is niet beschikbaar voor
++31/+32 nummers. Architectuur bijgesteld: Dave handmatig via
+eigen telefoon, module dient als digitaal afvinkpunt.
+
+---
+
 ## Fase C sessie — 2026-05-13
 
 ### Les 1 — Silent INSERT failures: controleer kolomtypes (commit `2c5385b`)

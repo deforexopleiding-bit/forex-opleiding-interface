@@ -1,5 +1,15 @@
 # TODO — Agency Command Center
-> Bijgewerkt: 2026-05-12 (Tool-use Fase 2+3 + fixes) | Gebaseerd op AUDIT-VOLLEDIG.md
+> Bijgewerkt: 2026-05-13 (Refactoring agents → 3 modules) | Gebaseerd op AUDIT-VOLLEDIG.md
+
+---
+
+## 🟢 NIET-BLOKKEREND — Toekomstige verbeteringen
+
+### [NB1] KPI banner CC uitbreiden met meeting-taken counter
+**Bestand:** `modules/control-center.html` — `loadKPIBanner()` + KPI-grid HTML  
+**Verzoek:** Voeg een vijfde KPI-kaart toe: "Actieve meeting-taken: N" met klik-door naar Takenbeheer  
+**Aanpak:** `GET /api/agent-task?action=list&source=meeting&status=open` → count → `<a href="taken.html">` wrapper om de kaart  
+**Prioriteit:** Laag — Takenbeheer-module dekt dit al af, dit is een shortcut
 
 ---
 
@@ -221,6 +231,17 @@ En in `api/email-agent.js`: bij elke categorisatie een rij invoegen.
 - [x] Module 1.3 UX-verbeteringen:
   - Bijlagen direct zichtbaar bij Actie tab render — fetchEmailBody roept updateActieCard aan (volledige re-render met gevulde cache)
   - Onderwerp-veld in reply composer — data-reply-subject input, pre-filled met Re: <origineel>, state.replySubject[] persistent over re-renders
+- [x] Auth Fase A — Database foundation (2026-05-14):
+  - profiles tabel + indexes + trigger on_auth_user_created
+  - 4 RLS helper functies (get_user_role, is_admin, has_role, has_any_role)
+  - 5 RLS policies op profiles tabel
+  - api/admin-seed-users.js (one-time, Jeffrey geseed, SEED_SECRET verwijderd)
+- [x] Auth Fase B — Login flow (2026-05-14):
+  - /login.html (wachtwoord + magic link + wachtwoord vergeten inline)
+  - /reset-password.html
+  - /auth-callback.html
+  - modules/shared/supabase-client.js + window.AuthShared helper
+  - api/config.js (publieke keys voor browser)
 - [x] Agents Batch 1 — volledig afgerond (2026-05-12):
   - Sessie persistence via localStorage per agent (agent_active_session_<name>)
   - api/agent-conversations.js: session_id teruggestuurd ook als berichten leeg (verse sessie)
@@ -240,3 +261,71 @@ En in `api/email-agent.js`: bij elke categorisatie een rij invoegen.
   - loadFromSupabase(): loading state, error state met bericht, re-render na succes
   - CRUD writes awaited: toast bij failure, save-knop re-enabled bij fout
   - Supabase cleanup SQL: zie hieronder voor handmatige uitvoering
+
+---
+
+## Volgende sessie priority items (status 14 mei 09:00)
+
+### Fase C — Admin Panel (eerstvolgend)
+- /modules/admin.html met user-management UI *(code al klaar, nog niet gecommit)*
+- /api/admin-users.js endpoint (GET list, POST create, PATCH update, DELETE deactivate) *(code al klaar)*
+- Verifieer is_admin() server-side bij elke admin endpoint call
+- Magic link auto-versturen bij user-create
+- Eerste echte test: Maxim/Amigo/Dave via UI aanmaken
+
+### Fase E — Wie-ben-ik indicator
+- Update agent-shared.js met renderUserSection() + initAuth() + toggleUserMenu()
+- Update sidebar CSS in agent-shared.css
+- Update HTML sidebar in alle 7+ modules (vervang footer-user > JB-avatar)
+- Soft launch: indicator zichtbaar, geen verplichte login
+- Admin-link alleen zichtbaar voor role=admin
+
+### Fase D — RLS op bestaande tabellen (gefaseerd over 3 sub-sprints)
+DOE PER SUB-SPRINT: TEST + DEPLOY + VERIFICATIE voor volgende
+
+**D1** (start hier, niet-kritieke tabellen):
+- kennisbank_items, agent_kennisbank
+- agent_learnings, learn_examples
+- undo_history, email_actions
+- backfill_progress, backfill_body_progress
+
+**D2** (middel-kritieke tabellen):
+- taken_items, taken_assignees, taken
+- decisions, agent_meetings, agent_conversations
+- email_replies, email_patterns, email_sync_log
+
+**D3** (hoogst-kritieke):
+- email_messages (5613+ mails!)
+- agent_approval_queue
+- agent_audit_log
+- team_members
+- profiles (policies staan hier al op)
+
+---
+
+## Follow-up Module (Sales Call Tracking)
+
+### Architectuur-beslissingen (definitief 13-14 mei)
+- Voicememo strategie: Dave handmatig vanaf eigen telefoon — module is verplicht afvinkpunt + steekproef screenshots
+- Geen automation vanaf Dave's persoonlijke WhatsApp (ban-risico)
+- WhatsApp Coexistence werkt NIET voor NL/EU nummers (verified via Meta docs)
+- No-show + 24u opvolging via Business API (geverifieerd bedrijfsnummer)
+- Email reminders via bestaande GHL automation (geen wijziging)
+- Screenshot review: D-optie (AI Haiku eerste check + Jeffrey alleen verdachte)
+- Dagelijkse notificatie via eigen module (niet GHL), 09:00
+- Post-call invul: zacht geadviseerd (B), niet hard verplicht
+- Open taken: dashboard wordt aanleiding om systeem actief te gebruiken
+- Klantwaarde gemiddelde: €4000 (2880-12000 range)
+- 50-100 calls/maand verwacht
+
+### Stack bevestigd
+- GHL: Agency Pro account (V2 API + OAuth beschikbaar)
+- Zoom: Pro account (webhooks mogelijk)
+- WhatsApp Business API: via GHL relatie
+- Voicememo via Dave eigen telefoon (handmatig, geen API)
+
+### Fase planning
+- **Fase 1** (1 week, ~5-7 uur Claude Code): Detectie + Visibiliteit
+- **Fase 2** (3-5 dagen): No-show automation
+- **Fase 3** (3-5 dagen): Post-call invul-flow + screenshot upload
+- **Fase 4** (1 week): Follow-up drip-campagnes niet-kopers

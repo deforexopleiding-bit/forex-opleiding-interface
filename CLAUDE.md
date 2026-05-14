@@ -20,11 +20,12 @@ Lokaal: C:/Users/jeffr/forex-opleiding-interface
   classificatie)
 - Mail: IMAP Strato — 4 mailboxen: leads, info, partners, 
   administratie
-- Auth: geen (interne tool, single-user)
+- Auth: Supabase Auth (email/wachtwoord + magic link, 5 rollen: admin/sales/mentor/administratie/viewer)
 
 ## Auth & secrets
 - CRON_SECRET in environment variables (Vercel + 1Password)
-- Supabase service role key in env vars
+- SUPABASE_URL + SUPABASE_ANON_KEY in env vars (publiek — ook browser-side via /api/config)
+- SUPABASE_SERVICE_ROLE_KEY in env vars (sensitive — alleen server-side)
 - ANTHROPIC_API_KEY in env vars
 - Strato IMAP credentials per mailbox in env vars
 
@@ -36,9 +37,20 @@ Lokaal: C:/Users/jeffr/forex-opleiding-interface
 - /modules/agents.html — 1-op-1 chat met agents
 - /modules/meetings.html — Vergaderruimte
 - /modules/control-center.html — Approvals + Audit log
+- /modules/admin.html — Gebruikersbeheer (alleen admin role)
 - /modules/shared/agent-shared.js — cross-modulaire functies 
-  (showToast, esc, formatMd, relTime, showReport, approval-helpers)
+  (showToast, esc, formatMd, relTime, showReport, approval-helpers,
+   getAvatarUrl, renderUserSection, initAuth)
 - /modules/shared/agent-shared.css — gedeelde styling
+- /modules/shared/supabase-client.js — browser Supabase client +
+  window.AuthShared (getSession, getUser, getProfile, signOut,
+  requireAuth, getAccessToken)
+
+Auth-pagina's (pre-login, laden agent-shared.js NIET):
+- /login.html — Login (wachtwoord + magic link)
+- /reset-password.html — Wachtwoord instellen
+- /auth-callback.html — Magic link exchange
+- /api/config.js — publieke Supabase keys voor browser
 
 ## Database schema waarheid
 KRITIEK: db-migrate.js kan VEROUDERD zijn. Lees autoritatieve 
@@ -69,6 +81,27 @@ Werkelijke kolomnamen agent_audit_log:
 - approval_id (uuid FK)
 - triggered_by
 
+Werkelijke kolomnamen profiles (auth — aangemaakt 14 mei 2026):
+- id uuid REFERENCES auth.users(id) PRIMARY KEY
+- email text UNIQUE NOT NULL
+- full_name text
+- role text CHECK (admin/sales/mentor/administratie/viewer)
+- is_active boolean DEFAULT true
+- team_member_id uuid REFERENCES team_members
+- avatar_url text
+- created_at, updated_at, last_login_at timestamptz
+- created_by uuid REFERENCES auth.users
+
+Werkelijke kolomnamen team_members:
+- id uuid
+- name text
+- role text
+- type text (medewerker / mentor / etc)
+- email text
+- avatar_emoji, avatar_color text
+- is_active boolean
+- created_at timestamptz
+
 ## Werkwijze
 1. ALTIJD eerst plan voor non-triviale taken (3+ stappen of nieuwe 
    architectuur). Plan rapporteren, wachten op groen licht, dan pas 
@@ -89,15 +122,16 @@ Bij elke logische taak:
 3. Plak de letterlijke output van git push in het rapport
    (bv. "63f03e4..907a8f1 main -> main")
 4. Wacht 30 sec voor Vercel auto-deploy
-5. Verifieer met curl of HTTP request dat live URL bijgewerkt is
+5. Bij kritieke wijzigingen: verifieer met curl/HTTP dat
+   live URL bijgewerkt is
 6. PAS DAN melden "klaar"
 
 Bij conflicten of "rejected" errors: STOP, geen --force,
 rapporteer en wacht op instructie.
 
 ANTI-PATTERN: rapporteren "Commit X geslaagd" zonder push-output.
-Dit veroorzaakte op 13 mei 2026 drie testcycli omdat commits
-nooit gepusht waren.
+Dit veroorzaakte op 13-14 mei 2026 meerdere testcycli omdat commits
+nooit gepusht waren (vergaderruimte fixes 907a8f1 en auth foundation).
 
 ## Code-stijl
 - Nederlandse strings in UI, Engelse code/comments
@@ -131,6 +165,25 @@ deze fouten:
    bestanden blijven hangen. Periodieke grep helpt.
 9. Bij storage-keuzes: Pro plan geeft 8GB headroom voor 1-2 jaar 
    groei zonder zorgen.
+10. Push verifiëren NOOIT overslaan. Claude Code rapporteert
+    soms "commit X gemaakt" terwijl push niet is gebeurd.
+    Dit kostte op 13-14 mei meerdere testcycli. Push-output
+    letterlijk plakken is verplicht.
+11. Auth-pagina's (pre-auth) laden NIET agent-shared.js.
+    Bij kopiëren van sidebar-templates: verwijder
+    onerror="handleLogoError()" — functie bestaat alleen in
+    agent-shared.js dat hier niet beschikbaar is.
+12. Sensitive env vars in Vercel zijn niet meer leesbaar na
+    opslaan. Voor setup-secrets (zoals SEED_SECRET): Sensitive
+    UIT houden, of waarde direct in 1Password bewaren. Voor
+    productie-keys (service_role, API keys): wel Sensitive.
+13. WhatsApp Coexistence werkt NIET voor EU-nummers (NL +31,
+    BE +32). Bij Follow-up Module: Dave handmatig vanaf eigen
+    telefoon, geen Business API + telefoon-coexistence.
+14. Auth foundation soft launch principe: bouw login + admin
+    panel WITHOUT verplichte auth op bestaande modules.
+    Pas in Fase D voorzichtig RLS toepassen, gefaseerd over
+    3 sub-sprints om data-zichtbaarheid niet te breken.
 
 ## Geheugen-bestanden
 - AUDIT-VOLLEDIG.md: Lessons Learned + architectuur-historie
@@ -153,6 +206,11 @@ deze fouten:
    een elegantere oplossing?". Niet over-engineeren voor simpele 
    fixes.
 9. Pause-momenten respecteren bij grote batches
+10. Soft-launch principe bij auth: bouw login + admin foundation
+    voor je RLS toepast op bestaande tabellen.
+11. Bij MCP/external API integraties: eerst onderzoek wat
+    technisch kan (web search, documentatie lezen) VOOR plan
+    schrijven. Voorkomt plannen voor onhaalbare features.
 
 ## Cron jobs
 Lopend op Vercel:
