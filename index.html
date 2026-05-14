@@ -522,7 +522,7 @@ function renderGreeting(greeting, period) {
   const icon     = h < 18 ? '☀️' : '🌙';
   const greetWord = greeting?.tijd_groet || (h < 12 ? 'Goedemorgen' : h < 18 ? 'Goedemiddag' : 'Goedenavond');
 
-  // Synchrone eerste render — geen naam (soft launch: geen requireAuth)
+  // Synchrone eerste render — geen naam (Post-RLS rollout 2026-05-14: auth-gate active)
   document.getElementById('greetingTitle').textContent = `${greetWord} ${icon}`;
   const datum = new Date().toLocaleDateString('nl-NL', { weekday:'long', day:'numeric', month:'long' });
   document.getElementById('greetingInsight').textContent = `${datum} · ${greeting?.inzicht || ''}`;
@@ -884,7 +884,11 @@ function scheduleRefresh() {
 // ═══════════════════════════════════
 // INIT
 // ═══════════════════════════════════
-loadDashboard();
+(async () => {
+  const profile = await window.AuthShared?.requireAuth();
+  if (!profile) return;
+  loadDashboard();
+})();
 
 // Auth-aware sidebar footer (niet-blokkerend)
 if (window._authSharedReady) {

@@ -1433,7 +1433,9 @@
     /* ─────────────────────────────────────────────────────────────
        Wire-up
        ───────────────────────────────────────────────────────────── */
-    function init() {
+    async function init() {
+      const profile = await window.AuthShared.requireAuth();
+      if (!profile) return;
       renderToggle();
       loadFromSupabase(); // Supabase is de enige bron — toont loading state + rendert alles na load
 

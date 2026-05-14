@@ -1397,7 +1397,9 @@ function handleUrlParams() {
 // Init
 // ════════════════════════════════════════════════════
 
-function init() {
+async function init() {
+  const profile = await window.AuthShared.requireAuth();
+  if (!profile) return;
   // Ensure all collegas have ids
   collegas = collegas.map(c => ({ id: c.id || crypto.randomUUID(), naam: c.naam || '', kleur: c.kleur || '#22d3ee' }));
   if (!huidig && collegas.length) huidig = collegas[0].id;

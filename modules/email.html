@@ -5246,7 +5246,9 @@
     } catch {}
   }
 
-  function init() {
+  async function init() {
+    const profile = await window.AuthShared.requireAuth();
+    if (!profile) return;
     checkCacheVersion();
     // Éénmalig: verwijder stale Reclame-patronen in Supabase voor vertrouwde afzenders
     if (!localStorage.getItem('trusted_reclame_cleaned_v1')) {

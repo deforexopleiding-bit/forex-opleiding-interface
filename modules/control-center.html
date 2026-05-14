@@ -247,6 +247,8 @@ function refreshAll() {
 }
 
 async function init() {
+  const profile = await window.AuthShared.requireAuth();
+  if (!profile) return;
   loadKPIBanner();
   AgentShared.startApprovalPolling();
   loadAuditLog();

@@ -417,6 +417,8 @@ const tabData  = { history: [], tasks: [], standups: [], decisions: [] };
 // INIT
 // ═══════════════════════════════════
 async function init() {
+  const profile = await window.AuthShared.requireAuth();
+  if (!profile) return;
   try {
     const r = await fetch('/api/agents');
     const data = await r.json();
