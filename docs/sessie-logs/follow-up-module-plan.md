@@ -1,8 +1,15 @@
-# Follow-up Module — Volledig project plan
+# Follow-up Module — Volledig project plan v2.2
 
 > Quick Win #1 voor De Forex Opleiding (Jeffrey Biemold).
-> Doel: volledige follow-up flow voor sales calls die via
-> GoHighLevel + Zoom worden ingepland.
+> Versie: 2.2 (15 mei 2026)
+> Doel: volledige follow-up flow voor sales calls die via GoHighLevel + Zoom worden ingepland.
+
+## Versie-historie
+
+- **v1.0**: oorspronkelijk — module zou WhatsApp Business API integreren voor messaging
+- **v2.0**: scope herzien — GHL eigenaar van messaging, module wordt detectie+trigger+tracking laag
+- **v2.1**: WhatsApp conversaties zichtbaarheid + reply-functionaliteit toegevoegd via GHL webhook + API
+- **v2.2**: rapportages en admin-features gericht op ALLE ADMIN_ROLES (super_admin + admin + manager), niet alleen Jeffrey persoonlijk
 
 ## Economische onderbouwing
 
@@ -15,50 +22,75 @@
 - Extra omzet bij realistische doelen: **+€44.000/maand = €528.000/jaar**
 - Conservatieve schatting bij halve resultaten: +€264.000/jaar
 
-## Hoofdflow — 3 follow-up momenten
+## Architectuur — Module vs GHL
 
-1. **Pre-call** (2u voor de call): warm voicememo van Dave
-2. **No-show** (10 min over tijd): direct WhatsApp + 24u later opnieuw
-3. **Post-call niet-koper**: gestructureerde drip-campagne op basis van bezwaar + warmte
+### Module is eigenaar van
 
-## Pre-call: voicememo strategie
+- Voicememo accountability (Dave's afvink-workflow)
+- Steekproef-screenshot upload + Haiku review
+- Zoom webhook ontvangst + no-show detectie
+- Post-call invul-formulier (bezwaar, warmte, terugkomdatum, notitie)
+- Snelle notities per call
+- Dashboard met 5 secties + detail-scherm per lead
+- WhatsApp conversatie zichtbaarheid (via GHL data) + reply UX
+- Notificatie-engine voor Dave (in-app banners, sidebar-badges)
+- Trigger-API calls naar GHL workflows
+- Status-tracking van GHL workflows
+- Rapportages naar alle ADMIN_ROLES (dagelijks + wekelijks)
 
-### Definitieve beslissing (na lange brainstorm)
+### GHL blijft eigenaar van
 
-- Dave neemt voicememo **handmatig** vanaf eigen telefoon
-- Module dient als verplicht afvinkpunt + accountability
-- Geen automation vanaf Dave's persoonlijke WhatsApp (ban-risico bij Meta detection)
-- Geen AI-stem klonen (ethisch + reputatie-risico in financiële sector)
+- Afspraakbevestiging na inplannen (email + WhatsApp)
+- Pre-call reminders 2u / 10min / bij start naar de lead (email + WhatsApp)
+- **No-show messaging** (getriggerd door Module via API)
+- Drip-campagnes voor niet-kopers (getriggerd door Module met bezwaar als custom field)
+- WhatsApp-notificaties naar Dave (07:00 daily list, 2u pre-call, 17:00 EOD)
+- WhatsApp Business API integratie (alle verzending verloopt via GHL)
+- Geverifieerd bedrijfsnummer en template-management
 
-### Waarom handmatig via Dave's eigen telefoon
+### Wat de module NIET doet
 
+- Geen directe WhatsApp Business API integratie in eigen code
+- Geen email-verzending van marketing/follow-up berichten
+- Geen drip-engine in eigen code
+- Geen Teamleader-koppeling (Dave geeft handmatig "klant geworden" status)
+
+## Rol-gebaseerde toegang
+
+Module gebruikt bestaande `ADMIN_ROLES = ['super_admin', 'admin', 'manager']` constante uit `api/supabase.js`. Drie toegangsniveaus:
+
+| Rol | Wat ziet/krijgt deze rol |
+|-----|--------------------------|
+| sales (Dave) | Eigen workflow, eigen voicememo's, eigen leads, eigen messages |
+| ADMIN_ROLES | Alles platform-breed: alle Dave's data, screenshot review queue, alle rapportages |
+| mentor / administratie / viewer | Module niet zichtbaar in sidebar |
+
+Bij groei (meer ADMIN_ROLES gebruikers): allemaal krijgen dezelfde rapporten en notificaties. KISS principe — eventueel later differentiëren per rol als 10+ admins.
+
+## Hoofdflow — Drie kernfuncties
+
+### 1. Voicememo accountability
+
+Dave moet voor elke ingeplande call een voicememo sturen vanaf zijn eigen telefoon. Module is verplicht afvinkpunt + accountability.
+
+**Waarom handmatig via Dave's eigen telefoon:**
 - WhatsApp Business API automation = afzender wordt "De Forex Opleiding" niet "Dave persoonlijk"
-- WhatsApp Coexistence Mode (zowel API als app op zelfde nummer) is **NIET beschikbaar voor EU/NL nummers** (verified bij Meta docs)
-- Dave's 1-tap actie per call (~2 sec) is geen probleem bij 5/dag volume
+- WhatsApp Coexistence Mode niet beschikbaar voor EU/NL nummers
 - Persoonlijke ervaring voor lead = warmer + hogere conversie
+- Dave's 1-tap actie per call (~2 sec) is geen probleem bij 5/dag volume
 
-### Dave's workflow per dag
+**Workflow:**
+- 07:00 dagelijks: Dave krijgt WhatsApp via GHL met lijst calls van die dag
+- 2u voor elke call: WhatsApp via GHL als persoonlijke reminder per call
+- Timing voicememo: flexibel — als Dave het maar doet vóór de call
+- Dave vinkt af in module zodra verstuurd
 
-'s Ochtends (09:00 of bij eerste login) krijgt Dave de lijst van calls van die dag via:
-- WhatsApp notificatie (via Business API geverifieerd nummer)
-- Email
-- In-module dashboard view
-
-Per call moet Dave:
-1. Voicememo opnemen op eigen telefoon (via WhatsApp Business App naar lead's nummer)
-2. In module aanvinken "voicememo verstuurd"
-3. Steekproefgewijs (3e, 8e, 13e... met willekeurig interval) screenshot uploaden als bewijs
-
-### Steekproef-logica
-
+**Steekproef-logica:**
 - Dave's afvink-teller per dag begint op 0
-- Op de 3e, 8e, 13e (random tussen elke 3-5) afvinking: screenshot upload **verplicht**
+- Op de 3e, 8e, 13e (random tussen elke 3-5) afvinking: screenshot upload verplicht
 - Dave kan niet verder afvinken zonder screenshot
-- Screenshot upload via mobile of laptop
 
-### Screenshot review
-
-**Optie D gekozen:** AI Haiku eerste check + Jeffrey alleen verdachte cases.
+**Screenshot review (Haiku eerste check + ADMIN_ROLES alleen verdachte):**
 
 Haiku analyseert:
 - Is het een WhatsApp screenshot?
@@ -66,309 +98,524 @@ Haiku analyseert:
 - Naar juiste lead-nummer (match met appointment)?
 - Op juiste tijd (binnen 30 min van verwachte verzending)?
 
-Bij OK → groen vinkje, geen actie.
-Bij verdacht → notificatie naar Jeffrey voor handmatige review.
+Bij OK → groen vinkje. Bij verdacht → notificatie naar alle ADMIN_ROLES users.
 
-## No-show automation
+### 2. No-show detectie en GHL trigger
 
-### Detectie
-
+**Detectie via Zoom webhooks:**
 - Lead is "no-show" als 10 min na call-start tijd niet in Zoom is verschenen
-- Zoom webhooks gebruikt: `meeting.started`, `meeting.participant_joined`
+- Webhooks: `meeting.started`, `meeting.participant_joined`
 - Match Zoom meeting ID met GHL appointment in database
-- Trigger no-show flow als geen participant joined binnen 10 min
 
-### Automatische acties bij no-show
+**Module actie:**
+- Markeer `follow_up_appointments.status = 'no_show'`
+- Roep GHL workflow aan via API trigger (preferred) of custom field update (fallback)
+- Log trigger in `follow_up_messages_sent`
 
-- **T+10min**: WhatsApp via Business API "Hey {naam}, je had een call met ons om {tijd}. Geen probleem - hier kun je een nieuwe inplannen: {link}"
-- **T+10min**: Email met zelfde boodschap
-- **T+24u**: WhatsApp herinnering + email
-- Beide via geverifieerd bedrijfsnummer (**niet** Dave's persoonlijke)
-- Pre-call reminders blijven via bestaande GHL automation (2u, 10min, bij start) — niet aanraken
+**GHL doet de rest:**
+- GHL workflow stuurt no-show WhatsApp + email
+- GHL doet eventuele 24u herinnering
+- Module ontvangt status via GHL conversation webhook
 
-## Post-call invul-flow
+**Belangrijk: bij Fase 2 go-live moet huidige GHL no-show flow UIT staan, vervangen door API-getriggerde versie.**
 
-Na elke call moet Dave invullen (sterk geadviseerd, niet hard verplicht).
+### 3. Post-call invul-flow
 
-### Velden
+Na elke completed call vult Dave het formulier in.
 
-**Uitkomst** (single select):
-- Klant geworden
-- Follow-up nodig (warme lead)
-- No-show (geen reactie tijdens call)
-- Niet relevant voor follow-up (slechte fit, niet ICP)
-- No-decision yet (denkt erover na)
+**Eerste vraag — Uitkomst:**
+- **Klant geworden** → formulier klaar, geen vervolgvragen
+- **Geen klant** → vervolgvragen verschijnen
+- **No-show** → automatisch ingevuld door Module
 
-**Bezwaar** (multi-select, alleen bij follow-up/no-decision):
+**Vervolgvragen bij "Geen klant":**
+
+Bezwaren (multi-select):
 - Te duur
 - Timing niet goed
 - Partner overleg
 - Twijfel winstgevendheid
 - Technische zorgen
+- Angst voor verliezen
+- Eerdere slechte ervaring met trading
+- Twijfel of forex überhaupt werkt
+- Regulatie-zorgen
+- Tijd om te traden
+- Demo-versus-live drempel
 - Anders: ___ (vrij tekst)
 
-**Volgende actie**:
+Volgende actie:
 - Bellen op datum
 - Email sturen
 - Event-uitnodiging
 - Sluiten zonder follow-up
+- **Niet meer opvolgen** (uitsluiting van alle automation)
 
-**Overige velden**:
+Overige velden:
 - Wanneer terugkomen: datum picker (optioneel)
-- Warmte: 1-10 score (hoe waarschijnlijk koopt deze nog)
+- Warmte: 1-10 score
 - Korte notitie: vrij tekstveld
 
-### Uitzondering
+**Invul-verplichting: Optie C (niet blokkerend):**
+- Dave kan blijven werken
+- Permanente rode banner bovenaan dashboard
+- Sidebar-badge met aantal openstaand
+- 17:00 WhatsApp EOD-reminder via GHL als niet ingevuld
+- Dagelijks rapport naar ADMIN_ROLES bij rode flags
 
-"Niet relevant voor follow-up" → lead wordt **uitgesloten** van alle automatische follow-up drip-campagnes. Reden wordt wel bijgehouden voor data-analyse.
+## UI — Module structuur
 
-## Follow-up drip campagnes (niet-kopers)
+### Hoofdpagina: `/modules/follow-up.html`
 
-### Trigger
+Vijf secties op één pagina, mobile-responsive:
 
-Post-call invul met "Follow-up nodig" of "No-decision yet" + warmte ≥ 5 + niet "niet relevant".
+**Sectie 1 — Vandaag**
+- Chronologische lijst calls vandaag
+- Per rij: tijd, lead-naam, telefoonnummer (klikbaar), status-indicators, knoppen (Voicememo verstuurd / Invul formulier / Snelle notitie)
+- Klik op rij → opent detail-scherm
+- Bovenaan: rode banner bij achterstand (Optie C nudge)
 
-### Campagne-varianten per bezwaar-categorie
+**Sectie 2 — Aankomende dagen**
+- Compacte tabel, week vooruit, gegroepeerd per dag
+- Zichtbaarheid voor planning, geen acties
 
-- **Te duur**: 3-mail sequentie over ROI + betalingsplan
-- **Timing**: 2-week follow-up + 1-maand check-in
-- **Partner overleg**: helpdesk-content + getuigenissen
-- **Twijfel winstgevendheid**: case studies + Trustpilot reviews
+**Sectie 3 — Achterstand** (alleen zichtbaar als er iets is)
+- Niet-ingevulde formulieren van eerdere dagen
+- Verstreken opvolgingen (>2 dagen voorbij terugkomdatum)
+- Per rij: datum, lead-naam, type, actie-knop
 
-### Kanaal
+**Sectie 4 — Geplande opvolgingen**
+- Toont leads met `terugkom_datum` gezet
+- Deze week (rood) / Komende 30 dagen (oranje) / Verder weg (groen compact)
+- Per rij: lead-naam, telefoonnummer, originele call-datum + bezwaar, geplande opvolgdatum, warmte-score, notitie
+- Knoppen: "Opvolging geregeld" / "Verzet opvolgdatum"
+- 1 dag voor opvolgdatum: WhatsApp via GHL naar Dave
+- 2 dagen na verstreken: in Sectie 3 + ADMIN_ROLES rapport
 
-- Email + WhatsApp via Business API (geverifieerd bedrijfsnummer)
-- Niet via Dave's persoonlijke telefoon (volume te hoog)
-- Bestaande GHL contacts geüpdatet met tags
+**Sectie 5 — Admin view** (zichtbaar voor alle ADMIN_ROLES, niet voor Dave)
+- Statistieken: % voicememo-compliance (vandaag/week/maand)
+- Verdachte screenshots in review-queue
+- Recente no-shows met GHL workflow-status
+- "Bekijk alles van Dave" link
+- Bij meerdere sales-users in de toekomst: filter op user
 
-### Escalatie
+**Filters (admin)**: periode + status + zoek op naam + (toekomst) sales-user
 
-- Bij warmte ≥ 8 of expliciete reply: notificatie naar Dave
-- Dave kan dan persoonlijk overnemen (voicememo, bel)
+**Historie**: 30 dagen standaard, "Laad meer" knop
+
+### Detail-scherm: `/modules/follow-up-lead.html?id={appointment_id}`
+
+Apart detail-scherm per lead met tabs:
+
+**Header:**
+- Lead-naam + telefoonnummer
+- Status-indicator (klant geworden / opvolging / no-show / gepland)
+- Back-knop naar herkomst-sectie
+
+**Tab: Calls**
+- Chronologisch overzicht alle calls van deze lead (gepland + historisch)
+- Per call: datum, tijd, status, link naar Zoom-recording indien beschikbaar
+
+**Tab: WhatsApp**
+- Chat-thread laatste 90 dagen berichten (gesynced via GHL)
+- Berichten gegroepeerd per dag, bedrijfsnummer + lead nummer onderscheiden
+- Onderaan: reply-veld
+  - **Binnen 24u-venster**: free-text reply box, gaat via GHL API als regulier bericht
+  - **Buiten 24u-venster**: gele banner "Lead is buiten 24u-venster, gebruik een template" + template-keuze dropdown uit GHL goedgekeurde templates
+- Verzending: POST naar GHL `/conversations/{id}/messages` API
+- Module detecteert venster automatisch op basis van timestamp laatste lead-bericht
+
+**Tab: Outcome**
+- Ingevuld post-call formulier (bezwaren, warmte, terugkomdatum, etc.)
+- Bewerkbaar als nog niet definitief
+
+**Tab: Notities**
+- Alle snelle notities chronologisch
+- Inline notitie toevoegen mogelijk
+
+### Mobile
+
+Mobile-responsive (geen PWA). Past bij toekomstige site-brede mobile rollout.
+
+## Notificatie-systeem (anti-laksheid voor Dave)
+
+### Laag 1 — In-module banner (permanent)
+Bovenaan elke module-pagina, niet weg te klikken bij openstaande acties.
+
+### Laag 2 — Sidebar-badge (heel platform door)
+Rood bolletje bij "Follow-up" link met aantal openstaande acties.
+
+### Laag 3 — Dagelijkse WhatsApp 17:00 via GHL
+Bij openstaande acties: nudge-bericht naar Dave.
+
+### Laag 4 — Dagelijks rapport ADMIN_ROLES bij rode flags
+Email naar email-adres van elke ADMIN_ROLES user + in-app notificatie. Alleen bij iets in Achterstand. Schaalbaar: voegt automatisch nieuwe admin-users toe als die later worden aangemaakt.
+
+### Laag 5 — Wekelijks compliance-rapport (zondag 17:00)
+Email naar email-adres van elke ADMIN_ROLES user + in-app notificatie:
+- % voicememo's op tijd deze week
+- % formulieren ingevuld binnen 24u
+- Aantal verstreken opvolgingen
+- Trend over 4 weken
+- Per sales-user uitsplitsing (relevant bij meerdere sales in toekomst)
+
+### Bewust NIET in scope
+
+- Geen blokkering van Dave's werk
+- Geen push notifications (vereist PWA)
+- Geen excessieve frequentie (max 1 EOD-reminder per dag)
+
+## WhatsApp conversaties — Sync architectuur
+
+### Strategie: webhook-eerst, polling als safety net
+
+**Initiële sync per lead:**
+- Bij eerste keer dat een lead in module verschijnt: eenmalig laatste 90 dagen WhatsApp-berichten ophalen via GHL API
+- Endpoint: `GET /conversations/search` + `GET /conversations/{id}/messages`
+- Opslaan in `follow_up_messages` tabel
+
+**Realtime updates:**
+- GHL conversation webhook stuurt elk nieuw bericht direct naar Module
+- Endpoint: `/api/ghl-conversation-webhook`
+- Webhook-handler verifieert secret, slaat bericht op, triggert UI-update
+- Idempotent: zelfde event-id niet dubbel opslaan
+
+**Polling als safety net:**
+- Cron-job `/api/follow-up-ghl-message-sync` elke 15 min
+- Check of er berichten zijn van laatste 15 min die niet via webhook binnenkwamen
+- Vangt webhook delivery failures op
+
+**Verzenden vanuit Module:**
+- Module detecteert 24u-venster (timestamp laatste bericht van lead)
+- Binnen venster: POST naar GHL `/conversations/{id}/messages` met free-text body
+- Buiten venster: POST met template-id + variabelen
+- Response opslaan in `follow_up_messages` met `direction = 'outbound'`
+
+## Database schema
+
+### follow_up_appointments
+
+- `id` (uuid)
+- `ghl_appointment_id` (string, unique)
+- `zoom_meeting_id` (string, nullable)
+- `lead_name` (text)
+- `lead_email` (text)
+- `lead_phone` (text)
+- `lead_ghl_contact_id` (string)
+- `scheduled_at` (timestamp)
+- `duration_minutes` (int)
+- `status` (enum: scheduled / in_progress / completed / no_show / cancelled)
+- `voicememo_status` (enum: pending / sent / skipped)
+- `voicememo_sent_at` (timestamp, nullable)
+- `voicememo_sent_by` (uuid, FK profiles, nullable) — wie heeft afgevinkt
+- `requires_screenshot` (boolean)
+- `screenshot_url` (text, nullable)
+- `screenshot_uploaded_at` (timestamp, nullable)
+- `snelle_notitie` (text, nullable)
+- `owner_id` (uuid, FK profiles) — voor RLS: welke sales-user is verantwoordelijk
+- `created_at`, `updated_at` (timestamptz)
+
+### follow_up_outcomes
+
+- `id` (uuid)
+- `appointment_id` (uuid, FK)
+- `outcome` (enum: klant_geworden / geen_klant / no_show)
+- `bezwaren` (text[]) — alleen bij geen_klant
+- `volgende_actie` (enum) — alleen bij geen_klant
+- `terugkom_datum` (date, nullable)
+- `warmte_score` (int 1-10, nullable)
+- `notitie` (text, nullable)
+- `opvolging_status` (enum: gepland / geregeld / verzet / vervallen, default null)
+- `opvolging_geregeld_at` (timestamp, nullable)
+- `niet_meer_opvolgen` (boolean, default false)
+- `ingevuld_door` (uuid, FK profiles)
+- `ingevuld_at` (timestamp)
+
+### follow_up_messages
+
+- `id` (uuid)
+- `ghl_message_id` (string, unique) — voor idempotency
+- `ghl_conversation_id` (string)
+- `lead_ghl_contact_id` (string)
+- `appointment_id` (uuid, FK, nullable) — beste-match koppeling, kan ontbreken
+- `direction` (enum: inbound / outbound)
+- `channel` (enum: whatsapp / email / sms)
+- `body` (text)
+- `template_id` (string, nullable) — voor outbound template-berichten
+- `template_variables` (jsonb, nullable)
+- `sent_at` (timestamp)
+- `received_at` (timestamp) — wanneer Module het zag
+- `source` (enum: webhook / polling_sync / initial_sync)
+
+### follow_up_messages_sent (status-tracking GHL workflows)
+
+- `id` (uuid)
+- `appointment_id` (uuid, FK)
+- `trigger_type` (enum: no_show_immediate / no_show_24h / drip_per_bezwaar / opvolging_reminder)
+- `ghl_workflow_id` (string, nullable)
+- `triggered_at` (timestamp)
+- `ghl_response_status` (enum: triggered / failed / completed, nullable)
+- `lead_responded` (boolean, default false)
+- `lead_responded_at` (timestamp, nullable)
+
+### follow_up_events_log
+
+- `id` (uuid)
+- `source` (enum: ghl / zoom / manual / cron)
+- `event_type` (string)
+- `payload` (jsonb)
+- `received_at` (timestamp)
+- `processed` (boolean)
+
+### follow_up_screenshot_audit
+
+- `id` (uuid)
+- `sales_user_id` (uuid, FK profiles) — generieke naam i.p.v. dave_user_id, schaalbaar bij meerdere sales
+- `screenshot_url` (text)
+- `appointment_id` (uuid, FK)
+- `ai_review_result` (enum: ok / suspicious / missing)
+- `ai_review_reasoning` (text, nullable)
+- `admin_reviewed` (boolean, default false) — generieke naam i.p.v. jeffrey_reviewed
+- `admin_reviewer_id` (uuid, FK profiles, nullable) — welke ADMIN_ROLES user heeft gereviewd
+- `review_notes` (text, nullable)
+- `uploaded_at` (timestamp)
+
+### follow_up_notifications_sent
+
+- `id` (uuid)
+- `recipient_user_id` (uuid, FK profiles)
+- `notification_type` (enum: dave_eod / admin_daily_flag / admin_weekly / admin_screenshot_review)
+- `sent_at` (timestamp)
+- `channel` (enum: whatsapp_ghl / email / in_app)
+- `payload_summary` (jsonb)
+
+### RLS
+
+- sales-role users zien alleen rows waar `owner_id = auth.uid()` of waar zij betrokken zijn
+- ADMIN_ROLES users zien alles
+- Niet relevant voor mentoren/administratie/viewer
+- Screenshot bewaartermijn: 30 dagen (cron-job verwijdert)
+- Messages bewaren: 90 dagen rolling window per lead (cron-job verwijdert oudere)
 
 ## Externe systemen stack
 
 ### Bevestigd beschikbaar
 
-- **GoHighLevel**: Agency Pro account
-  - V2 API beschikbaar (Calendar, Contacts, Webhooks endpoints OK)
-  - Private Integration Tokens kunnen worden aangemaakt
-  - Custom field updates mogelijk
-- **Zoom**: Pro account
-  - Webhooks ondersteund: meeting.started, meeting.ended, meeting.participant_joined, meeting.participant_left
-  - Marketplace App aanmaken voor webhook configuratie
-- **WhatsApp Business API**: actief via GHL relatie
-  - Geverifieerd bedrijfsnummer beschikbaar
-  - Template berichten en automation reeds in gebruik
-- **Teamleader**: voor klant-conversie data (klanten worden hierin vastgelegd via offertes)
-- **Supabase Pro**: 8GB plan, voor onze module-data
+- **GoHighLevel Agency Pro**
+  - V2 API: Calendar, Contacts, Conversations, Workflows
+  - Private Integration Tokens
+  - Custom field updates
+  - API workflow triggers
+  - Conversation webhooks
+- **Zoom Pro**
+  - Webhooks: meeting.started, meeting.ended, meeting.participant_joined, meeting.participant_left
+  - Marketplace App voor webhook config
+- **WhatsApp Business API via GHL**
+  - Geverifieerd bedrijfsnummer
+  - Templates al in gebruik
+- **Anthropic API** — Haiku voor screenshot review
+- **Supabase Pro** — 8GB plan + Storage voor screenshots
 
 ### Niet via dit systeem
 
-- Dave's persoonlijke telefoon: alleen handmatige voicememo's vanaf eigen WhatsApp (niet via API)
+- Dave's persoonlijke telefoon: alleen handmatige voicememo's
+- Teamleader: geen koppeling
 
-## Database schema (te bouwen in Fase 1)
+## Cron-jobs
 
-### follow_up_appointments
+Negen cron-jobs bovenop bestaande vijf:
 
-| Kolom | Type | Omschrijving |
-|-------|------|--------------|
-| `id` | uuid | Primary key |
-| `ghl_appointment_id` | string, unique | GHL calendar event ID |
-| `zoom_meeting_id` | string, nullable | Zoom meeting ID |
-| `lead_name` | text | Naam lead |
-| `lead_email` | text | Email lead |
-| `lead_phone` | text | Telefoonnummer lead |
-| `lead_ghl_contact_id` | string | GHL contact ID |
-| `scheduled_at` | timestamp | Geplande tijd |
-| `duration_minutes` | int | Duur in minuten |
-| `status` | enum | scheduled / in_progress / completed / no_show / cancelled |
-| `voicememo_status` | enum | pending / sent / skipped |
-| `voicememo_sent_at` | timestamp, nullable | Tijdstip verzending |
-| `voicememo_sent_by` | text, default 'Dave' | Wie heeft verzonden |
-| `requires_screenshot` | boolean | Steekproef verplicht |
-| `screenshot_url` | text, nullable | URL bewijs-screenshot |
-| `screenshot_uploaded_at` | timestamp, nullable | Upload tijdstip |
-| `created_at`, `updated_at` | timestamptz | Metadata |
-
-### follow_up_outcomes
-
-| Kolom | Type | Omschrijving |
-|-------|------|--------------|
-| `id` | uuid | Primary key |
-| `appointment_id` | uuid, FK | Koppeling aan appointment |
-| `outcome` | enum | Uitkomst call |
-| `bezwaren` | text[] | Geselecteerde bezwaren |
-| `volgende_actie` | enum | Vervolgactie |
-| `terugkom_datum` | date, nullable | Geplande terugkomst |
-| `warmte_score` | int 1-10, nullable | Koopwaarschijnlijkheid |
-| `notitie` | text, nullable | Vrije notitie |
-| `ingevuld_door` | text | Naam invuller |
-| `ingevuld_at` | timestamp | Invultijdstip |
-
-### follow_up_messages_sent
-
-| Kolom | Type | Omschrijving |
-|-------|------|--------------|
-| `id` | uuid | Primary key |
-| `appointment_id` | uuid, FK | Koppeling |
-| `channel` | enum | whatsapp / email / voicememo_manual |
-| `type` | enum | no_show_immediate / no_show_24h / follow_up_drip / pre_call_reminder |
-| `sent_at` | timestamp | Verzenddatum |
-| `ghl_message_id` | string, nullable | GHL bericht ID |
-| `response_received` | boolean | Reactie ontvangen? |
-| `response_at` | timestamp, nullable | Tijdstip reactie |
-
-### follow_up_events_log
-
-| Kolom | Type | Omschrijving |
-|-------|------|--------------|
-| `id` | uuid | Primary key |
-| `source` | enum | ghl / zoom / manual |
-| `event_type` | string | Type event |
-| `payload` | jsonb | Volledige event payload |
-| `received_at` | timestamp | Ontvangstijdstip |
-| `processed` | boolean | Verwerkt? |
-
-### follow_up_screenshot_audit
-
-| Kolom | Type | Omschrijving |
-|-------|------|--------------|
-| `id` | uuid | Primary key |
-| `dave_user_id` | string | Dave's user ID |
-| `screenshot_url` | text | Screenshot URL |
-| `appointment_id` | uuid, FK | Koppeling |
-| `ai_review_result` | enum | ok / suspicious / missing |
-| `jeffrey_reviewed` | boolean, default false | Handmatig nagekeken? |
-| `review_notes` | text, nullable | Opmerkingen Jeffrey |
-| `uploaded_at` | timestamp | Upload tijdstip |
-
-### RLS
-
-- Dave (sales role) ziet alleen eigen voicememo workflows + leads
-- Jeffrey (admin) ziet alles
-- Niet relevant voor mentoren/administratie
+| Cron | Schedule | Doel |
+|------|----------|------|
+| `/api/follow-up-ghl-appointment-poll` | Elke 15 min | Nieuwe GHL appointments ophalen |
+| `/api/follow-up-no-show-detect` | Elke 5 min | Check appointments waarvan tijd verstreken + geen Zoom-join |
+| `/api/follow-up-ghl-message-sync` | Elke 15 min | Safety-net polling voor gemiste webhook messages |
+| `/api/follow-up-dave-eod` | 17:00 dagelijks | EOD WhatsApp via GHL bij openstaande acties |
+| `/api/follow-up-admin-daily` | 19:00 dagelijks | Email + in-app bij rode flags naar alle ADMIN_ROLES |
+| `/api/follow-up-admin-weekly` | Zondag 17:00 | Wekelijks compliance-rapport naar alle ADMIN_ROLES |
+| `/api/follow-up-screenshot-cleanup` | 03:00 dagelijks | Verwijder screenshots ouder dan 30 dagen |
+| `/api/follow-up-message-cleanup` | 03:00 dagelijks | Verwijder messages ouder dan 90 dagen |
+| `/api/follow-up-opvolging-reminder` | 09:00 dagelijks | Reminder Dave 1 dag voor opvolging + aging |
 
 ## Fase planning
 
-### Fase 1 — Detectie + Visibiliteit (1 week werk, ~5-7 uur Claude Code)
+### Fase 1A — Foundation + Dashboard (4-6 uur Claude Code, 3-5 dagen)
 
-**Doel**: data komt binnen, dashboard toont status, geen automation.
+**Doel**: data komt binnen, dashboard toont calls, geen automation, geen conversaties.
 
-- GHL connector endpoint (Calendar polling elke 15 min)
+- Database schema aanmaken (alle 7 tabellen + RLS)
+- GHL connector endpoint (Calendar polling cron)
 - Zoom webhook ontvanger endpoint
-- Database schema aanmaken
-- `/modules/follow-up.html` dashboard
-  - Vandaag's lijst met voicememo afvinklijst
-  - Aankomende week overzicht
-  - Jeffrey ziet alle Dave's activiteit
-  - Mobile-first design (Dave gebruikt telefoon)
-- No-show detectie logica (10 min over tijd flag)
-- Steekproef-screenshot logica + upload UI
+- `/modules/follow-up.html` dashboard met 5 secties (geen conversaties-tab)
+- `/modules/follow-up-lead.html` detail-scherm (Calls + Outcome + Notities tabs, geen WhatsApp-tab)
+- Voicememo afvink-workflow + steekproef-logica
+- Screenshot upload + Haiku review
+- Mobile-responsive
+- Notificatie laag 1 + 2 (banner + sidebar-badge)
+- Admin view zichtbaar voor alle ADMIN_ROLES
+- Smoke test → moet werken zonder enige messaging-feature
 
-### Fase 2 — No-show automation (3-5 dagen)
+### Fase 1B — WhatsApp conversaties read-only (3-4 uur Claude Code, 2-3 dagen)
 
-- WhatsApp + Email automation bij T+10min
-- 24u herinnering
-- GHL contact tag updates
-- Verificatie geen race-condities
+**Doel**: Dave ziet WhatsApp-historie per lead, kan nog niet antwoorden.
 
-### Fase 3 — Post-call invul flow (3-5 dagen)
+- GHL conversation webhook endpoint
+- Initial sync logic (90 dagen per lead bij eerste verschijning)
+- Polling safety-net cron
+- WhatsApp-tab in detail-scherm (read-only)
+- `follow_up_messages` tabel vullen
+- Smoke test → Dave ziet messages, geen reply mogelijk
 
-- Modal/form na elke completed call
+### Fase 1C — WhatsApp reply functionaliteit (2-3 uur Claude Code, 2 dagen)
+
+**Doel**: Dave kan vanuit module antwoorden via GHL.
+
+- 24u-venster detectie
+- Free-text reply box binnen venster
+- Template-keuze buiten venster
+- POST naar GHL `/conversations/{id}/messages`
+- Outbound bericht direct in chat-thread
+- Smoke test → reply komt aan bij lead via bedrijfsnummer
+
+### Fase 2 — Notificaties + No-show automation (3-4 uur Claude Code, 3-5 dagen)
+
+- Notificatie laag 3 + 4 + 5 (WhatsApp EOD, dagelijks/wekelijks rapport)
+- Resolve ADMIN_ROLES-users dynamisch in cron-jobs (geen hardcoded emails)
+- GHL workflow trigger bij no-show
+- GHL huidige no-show flow uitschakelen (handmatig ADMIN)
+- Race-condition verificatie
+- Reply detectie via conversation webhook → workflow stop
+
+### Fase 3 — Post-call invul-flow (3-4 uur Claude Code, 3-5 dagen)
+
+- Modal/form na completed call
 - Bezwaar-tracking database
-- "Niet relevant" exclusion logic
-- Screenshot upload + AI review (Haiku)
-- Jeffrey notificatie bij verdachte screenshots
+- "Niet meer opvolgen" exclusion logic
+- Geplande opvolgingen (Sectie 4)
+- Opvolging-aging cron
 
-### Fase 4 — Follow-up drip campagnes (1 week)
+### Fase 4 — Follow-up drip via GHL (5-7 uur Claude Code, 1 week)
 
-- Drip-campagne templates per bezwaar-categorie
-- WhatsApp + Email via Business API
-- Warmte-gebaseerde escalatie
-- Jeffrey notificatie bij hot leads
-- Reply detectie en handoff
+- GHL workflows per bezwaar (handmatig ADMIN)
+- Module triggert workflow op basis van bezwaar + warmte
+- Reply detectie → workflow stop
+- Warmte ≥ 8 escalatie naar Dave
+- Handover-knop
 
-## Pre-work voor Jeffrey (vóór Fase 1 implementatie)
+## Pre-work (vóór Fase 1A implementatie)
+
+Uit te voeren door een super_admin of admin user.
 
 ### 1. GoHighLevel Private Integration Token (5-10 min)
 
-- Login GHL → Settings → Private Integrations
-- Token aanmaken met scopes:
-  - `contacts.readonly`
-  - `calendars.readonly`
-  - `calendars/events.readonly`
-  - `conversations.readonly`
-  - `conversations/message.write`
-- Vercel env var: `GHL_API_KEY`
+Login GHL → Settings → Private Integrations. Token aanmaken met scopes:
+- `contacts.readonly`
+- `contacts.write` (custom field updates)
+- `calendars.readonly`
+- `calendars/events.readonly`
+- `conversations.readonly`
+- `conversations/message.readonly`
+- `conversations/message.write`
+- `workflows.readonly`
+- `workflows.write` (API triggers)
+
+Vercel env vars: `GHL_API_KEY`, `GHL_LOCATION_ID`
 
 ### 2. Zoom Marketplace App (10-15 min)
 
-- marketplace.zoom.us → Develop → Build App
+marketplace.zoom.us → Develop → Build App
 - Type: "Server-to-Server OAuth"
 - Naam: "De Forex Opleiding Follow-up"
-- Webhooks aanzetten voor:
-  - meeting.started
-  - meeting.ended
-  - meeting.participant_joined
-  - meeting.participant_left
+- Webhooks: meeting.started, meeting.ended, meeting.participant_joined, meeting.participant_left
 - Webhook URL: `https://forex-opleiding-interface.vercel.app/api/zoom-webhook`
 - Vercel env vars: `ZOOM_ACCOUNT_ID`, `ZOOM_CLIENT_ID`, `ZOOM_CLIENT_SECRET`, `ZOOM_WEBHOOK_SECRET`
 
-### 3. WhatsApp templates voorbereiden (via GHL)
+### 3. GHL Conversation Webhook (Fase 1B pre-work)
 
-- No-show direct template
-- No-show 24u herinnering template
-- Pre-call dagelijkse lijst voor Dave template
-- Goedkeuring door Meta vragen (1-7 dagen verwerking)
+GHL Dashboard → Settings → Webhooks
+- Event: conversation.message.created (inbound + outbound)
+- URL: `https://forex-opleiding-interface.vercel.app/api/ghl-conversation-webhook`
+- Vercel env var: `GHL_WEBHOOK_SECRET`
+
+### 4. GHL workflows voor Dave-notificaties (Fase 2 pre-work)
+
+Drie workflows met "API trigger" startpunt:
+
+**Workflow 1: Dave Daily Call List**
+- Template: "Goedemorgen Dave! Je hebt {{count}} calls vandaag: {{call_list}}"
+
+**Workflow 2: Dave Pre-Call Reminder**
+- Template: "Hee Dave, over 2u call met {{lead_name}} ({{lead_phone}}). Stuur even een voicememo!"
+
+**Workflow 3: Dave EOD Reminder**
+- Template: "Hee Dave, je hebt nog {{count}} calls niet ingevuld. Doe dit even voordat je afsluit."
+
+Meta-goedkeuring vragen voor templates (1-7 dagen).
+
+### 5. GHL workflows voor no-show automation (Fase 2 pre-work)
+
+- "No-show Immediate" workflow met API trigger
+- "No-show 24u" workflow met API trigger
+- Huidige GHL no-show flow op handmatig zetten bij Fase 2 go-live
 
 ## Afhankelijkheden
 
-### Vereist af voor Fase 1 start
-
+Vereist af voor Fase 1A start:
 - Auth Fase A+B+C+D+E volledig live ✓ (15 mei 2026)
-- Dave heeft een sales role account ✓ (15 mei 2026)
-- Jeffrey kan via admin panel Dave's account beheren ✓
-- RLS werkt op bestaande tabellen (Fase D voltooid) ✓ (17 tabellen)
-
-**Reden**: module heeft user-context nodig (Dave logt in, ziet eigen workflow), mobile-first design vereist sessie-management, screenshot uploads moeten aan user gekoppeld worden, Jeffrey notificaties hebben admin-context nodig.
+- Dave heeft sales role account ✓
+- Admin panel werkt ✓
+- RLS werkt op bestaande tabellen ✓ (17 tabellen)
+- ADMIN_ROLES constante beschikbaar in api/supabase.js ✓
 
 ## Tijdsbudget totaal
 
 | Fase | Claude Code tijd | Doorlooptijd |
 |------|------------------|--------------|
-| Voorbereidings-werk Jeffrey | ~30-45 min | — |
-| Fase 1 | 5-7 uur | 1 week |
-| Fase 2 | 3-4 uur | 3-5 dagen |
-| Fase 3 | 3-4 uur | 3-5 dagen |
-| Fase 4 | 5-7 uur | 1 week |
-| **Totaal** | **~16-22 uur** | **3-4 weken** |
+| Pre-work admin (GHL + Zoom setup) | — | 30-60 min |
+| Fase 1A — Foundation + Dashboard | 4-6 uur | 3-5 dagen |
+| Fase 1B — WhatsApp conversaties read | 3-4 uur | 2-3 dagen |
+| Fase 1C — WhatsApp reply | 2-3 uur | 2 dagen |
+| Fase 2 — Notificaties + No-show | 3-4 uur | 3-5 dagen |
+| Fase 3 — Post-call invul-flow | 3-4 uur | 3-5 dagen |
+| Fase 4 — Drip via GHL | 5-7 uur | 1 week |
+| **Totaal** | **~20-28 uur** | **4-5 weken** |
 
 ## Success metrics
 
 Maandelijks meten:
-
 - % calls met voicememo verzonden (target: 95%+)
 - % screenshots succesvol bij steekproef (target: 100%)
+- % formulieren ingevuld binnen 24u (target: 90%+)
 - No-show recovery rate (target: 33%)
 - Conversie call → klant (target: 25% → 33%)
-- Aantal hot leads via drip naar Dave (track in dashboard)
+- Aantal verstreken opvolgingen per maand (target: <5%)
+- Aantal hot leads via drip naar Dave
 - Extra omzet via follow-up (target: +€44k/maand)
 
-## Openstaande vragen voor eerste Fase 1 sessie
+## Beantwoorde vragen (referentie)
 
-1. WhatsApp template content schrijven (no-show, 24u, daily lijst)
-2. Exacte tijd dagelijkse notificatie naar Dave (08:30 / 09:00 / 06:00?)
-3. Mobile-first design: PWA installeerbaar of mobile-responsive genoeg?
-4. Screenshot bewaartermijn (voor audit): 30 dagen? 90 dagen? Voor altijd?
-5. Bezwaar-categorieën: zijn er nog meer specifiek voor forex opleiding sector?
+- **Voicememo timing**: flexibel
+- **Notificatie-kanaal Dave**: WhatsApp via GHL
+- **Dagelijkse lijst tijd**: 07:00
+- **Pre-call reminder**: 2u voor elke call
+- **EOD-reminder Dave**: 17:00 dagelijks bij openstaande acties
+- **Wekelijks rapport**: zondag 17:00 via email + in-app, naar alle ADMIN_ROLES
+- **Dagelijks rapport**: bij rode flags via email + in-app, naar alle ADMIN_ROLES
+- **Rol-toegang**: alle ADMIN_ROLES krijgen gelijke admin-features (super_admin + admin + manager)
+- **Mobile**: responsive (geen PWA)
+- **Screenshot bewaartermijn**: 30 dagen
+- **Bezwaar-categorieën**: 11 voorlopig, Dave verfijnt later
+- **Invul-verplichting**: Optie C (niet blokkerend, alle nudges actief)
+- **Klant-detectie**: handmatig door Dave (geen Teamleader-koppeling)
+- **GHL no-show flow**: vervangen door API-getriggerde versie bij Fase 2
+- **WhatsApp conversaties**: zichtbaar via webhook + 90 dagen sync
+- **Conversatie UI**: detail-scherm per lead met tabs (Calls/WhatsApp/Outcome/Notities)
+- **Reply mechanisme**: free-text binnen 24u-venster, template buiten
 
-## Start prompt voor Fase 1 sessie
+## Start prompt voor Fase 1A sessie
 
-Wanneer Auth is afgerond en Fase 1 start, gebruik:
-
-> "Follow-up Module Fase 1 — Detectie + Visibiliteit bouwen.
+> "Follow-up Module Fase 1A — Foundation + Dashboard bouwen.
 >
-> Lees eerst CLAUDE.md, TODO-VOLLEDIG.md en het complete follow-up plan in `docs/sessie-logs/follow-up-module-plan.md`.
+> Lees eerst CLAUDE.md, TODO-VOLLEDIG.md en het complete plan in `docs/sessie-logs/follow-up-module-plan.md`.
 >
-> Bevestig dat je de context begrijpt, beantwoord de 5 openstaande vragen door me te vragen, daarna plan first voordat je gaat bouwen."
+> Bevestig dat je de context begrijpt. Dan plan first met gefaseerd commit-plan + smoke tests tussen elke fase, daarna pas bouwen."
