@@ -27,6 +27,7 @@
 - [x] C6.3 RLS rollout (SQL): email_patterns, email_sync_log, email_messages, decisions, agent_approval_queue, agent_audit_log, team_members
 - [x] C7 — auth-gate op 7 module-pagina's (commit c409033): requireAuth() vóór data-fetches
 - [x] C7 fix — await _authSharedReady race-condition (commit 4d69ebf): alle 7 init() functies
+- Dashboard data + admin nav-link fix (commit a5a4c09): dashboard-stats.js via createUserClient + cache verwijderd voor cross-user veiligheid, admin nav-link in 7 sidebars met role-toggle
 
 ---
 
@@ -67,6 +68,16 @@
 **Bestand:** `reset-password.html`
 **Probleem:** Zonder geldig reset-token redirect naar `/login?error=callback_failed`. Werkt veilig maar user-experience kan beter met inline "voer e-mail in voor nieuw reset-verzoek" UI.
 **Fix:** Detecteer ontbrekend token → toon inline reset-formulier i.p.v. redirect
+
+### [polish-11] dashboard open_taken semantiek
+**Bestand:** `api/dashboard-stats.js`
+**Probleem:** dashboard-stats filtert open_taken op deadline-in-periode, niet status='open'. Resultaat: Amigo ziet 0 open taken op dashboard ondanks 4 actieve in /modules/taken.html.
+**Beslissing nodig:** Tonen we "alle open" of "open met deadline in periode"?
+
+### [polish-12] admin-knoppen misleidend voor manager
+**Bestand:** `modules/admin.html`
+**Probleem:** Jeffrey (manager) ziet "Deactiveer" en "Opnieuw uitnodigen" knoppen voor Amigo's rij. Server-side admin-users.js gate werkt correct (PATCH 403), maar UI toont knoppen die effectief niets doen bij klik.
+**Fix:** Hide actie-knoppen voor rijen waar caller geen rechten heeft.
 
 ---
 

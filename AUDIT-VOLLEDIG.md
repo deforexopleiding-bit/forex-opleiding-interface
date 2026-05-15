@@ -130,6 +130,18 @@ C6.1, C6.2, C6.3 RLS policies
 
 Zie TODO-VOLLEDIG.md polish sectie.
 
+### Aanvulling — Post-RLS regressie-fix (commit a5a4c09)
+
+Twee regressies ontdekt na sprint-afsluiting:
+
+- **Dashboard zeros:** /api/dashboard-stats gebruikte anon supabase client + had in-memory cache. Na C6.2 RLS rollout: anon = 0 rows. Fix: createUserClient(req) + cache weg (voorkomt cross-user data-leak).
+
+- **Admin-link sidebar template drift:** /index.html sidebar miste Admin-link, /modules/admin.html had het wel. Twee verschillende hardcoded sidebars in codebase. Fix: admin-link in 7 sidebars toegevoegd met role-toggle (display='' if ADMIN_ROLES.includes(profile.role)).
+
+Smoke test: 8/8 groen. Per-user dashboard data correct geïsoleerd via RLS (Jeffrey ziet 2 eigen meetings, Amigo 30).
+
+Polish-11, polish-12 geparkeerd voor latere sprint.
+
 ---
 
 ## Sessie 14 mei 2026 — Rol-architectuur + Endp-1A + C5 owner_id + C6.2 RLS prep

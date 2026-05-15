@@ -7,6 +7,7 @@
 - **Middag:** D1 batch 1 RLS (cron SQL). Endp-1A backend + frontend (9 endpoints + apiFetch wrapper).
 - **Late middag:** Schema-onderzoek onthulde: owner-data was text, niet uuid. Beleidsmatrix herwerkt. Role-architectuur ontworpen.
 - **Avond:** C1 documentatie. C2 schema-migratie + C2b admin gates. C3 owner-kolommen. C4 backfill 349 rijen. C5 backend schrijft owner_id. C6.1/2/3 RLS rollout. C7 UI auth-gate + race-condition fix.
+- **Eind van de dag:** Twee post-rollout regressies ontdekt en gefixt (dashboard zeros + admin-link sidebar drift, commit a5a4c09). Smoke test 8/8 groen. Twee nieuwe polish-items geparkeerd (polish-11/12). Eindstand 25 commits.
 
 ---
 
@@ -78,9 +79,11 @@ Zie AUDIT-VOLLEDIG.md sectie 2026-05-14 voor alle 8 lessen.
 | Tabellen RLS-aware | 17 |
 | Pagina's auth-gegated | 7 |
 | Productie-users | 2 (Amigo super_admin, Jeffrey manager) |
-| Commits vandaag | ~16 |
+| Commits vandaag | ~25 |
 | SQL-migraties | 7 |
 | Rollbacks | 0 |
 | Downtime | 0 |
 
-**Klaar voor volgende sessie:** Maxim + Dave aanmaken, polish-items 3-9, nieuwe features.
+**Klaar voor volgende sessie:** Maxim + Dave aanmaken, polish-items restant, nieuwe features.
+
+**Geparkeerde polish:** 2 nieuwe items (open_taken semantiek polish-11, admin UI knoppen polish-12).
