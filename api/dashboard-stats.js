@@ -1,21 +1,12 @@
-import { supabase } from './supabase.js';
-
-// ── In-memory cache (30 sec) ─────────────────────────────────────────────────
-let _cache   = null;
-let _cacheTs = 0;
-const CACHE_MS = 30_000;
+import { createUserClient } from './supabase.js';
 
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
 
   const period = req.query?.period || 'today';
 
-  // Serve from cache if fresh + same period
-  if (_cache && _cache.period === period && (Date.now() - _cacheTs) < CACHE_MS) {
-    return res.status(200).json(_cache);
-  }
-
   try {
+    const supabase = createUserClient(req);
     const now = new Date();
     const h   = now.getHours();
 
@@ -257,9 +248,6 @@ export default async function handler(req, res) {
       unanswered:      { count: onbeantwoord },
       recent_activity: recentActivity.slice(0, 5),
     };
-
-    _cache   = payload;
-    _cacheTs = Date.now();
 
     return res.status(200).json(payload);
 
