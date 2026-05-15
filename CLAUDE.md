@@ -20,7 +20,7 @@ Lokaal: C:/Users/jeffr/forex-opleiding-interface
   classificatie)
 - Mail: IMAP Strato — 4 mailboxen: leads, info, partners, 
   administratie
-- Auth: Supabase Auth (email/wachtwoord + magic link, 5 rollen: admin/sales/mentor/administratie/viewer)
+- Auth: Supabase Auth (email/wachtwoord + magic link, 7 rollen: super_admin/admin/manager/sales/mentor/administratie/viewer)
 
 ## Auth & secrets
 - CRON_SECRET in environment variables (Vercel + 1Password)
@@ -28,6 +28,35 @@ Lokaal: C:/Users/jeffr/forex-opleiding-interface
 - SUPABASE_SERVICE_ROLE_KEY in env vars (sensitive — alleen server-side)
 - ANTHROPIC_API_KEY in env vars
 - Strato IMAP credentials per mailbox in env vars
+
+## Productie-users
+- Jeffrey Biemold — biemoldjeffrey@gmail.com — rol: manager
+- Amigo — super_admin (systeem-account, ziet alles platform-breed)
+- Maxim, Dave: nog aan te maken via /modules/admin.html
+
+## RLS-status (2026-05-15)
+- 17 tabellen met actieve RLS-policies (volledig live na C6.1/6.2/6.3)
+- Auth-gate actief op alle 7 module-pagina's (requireAuth vóór data-fetches)
+- Pattern: alle module init() doen await window._authSharedReady + requireAuth()
+- dashboard-stats.js gebruikt createUserClient(req) — RLS-aware
+
+## Architectuur — Role-Based Access Control
+- ADMIN_ROLES = ['super_admin', 'admin', 'manager'] — in api/supabase.js
+- createUserClient(req): per-request JWT-aware Supabase client (api/supabase.js)
+- apiFetch: frontend wrapper die Bearer-token injecteert (modules/shared/agent-shared.js)
+- window._authSharedReady: Promise van async IIFE in supabase-client.js; ALTIJD awaiten vóór AuthShared
+- requireAuth(roles?): checkt sessie + profiel.is_active + rol; redirect naar /login.html?returnTo=...
+- Sidebar admin-link: zichtbaar als ADMIN_ROLES.includes(profile.role), standaard display:none
+
+## Open polish-items (2026-05-15)
+- polish-11: dashboard open_taken semantiek (deadline-filter vs status='open')
+- polish-12: admin UI knoppen misleidend voor manager (server-side 403 werkt, UI niet)
+- Zie TODO-VOLLEDIG.md ## 🔧 Polish-items voor volledige lijst
+
+## Volgende prioriteiten
+1. Maxim + Dave aanmaken via /modules/admin.html
+2. polish-11 / polish-12 oppakken
+3. endp-2-cleanup: one-time endpoints verwijderen (admin-seed, db-migrate, debug-*, test-*)
 
 ## Module-architectuur
 - /index.html — Dashboard
@@ -37,7 +66,7 @@ Lokaal: C:/Users/jeffr/forex-opleiding-interface
 - /modules/agents.html — 1-op-1 chat met agents
 - /modules/meetings.html — Vergaderruimte
 - /modules/control-center.html — Approvals + Audit log
-- /modules/admin.html — Gebruikersbeheer (alleen admin role)
+- /modules/admin.html — Gebruikersbeheer (ADMIN_ROLES: super_admin/admin/manager)
 - /modules/shared/agent-shared.js — cross-modulaire functies 
   (showToast, esc, formatMd, relTime, showReport, approval-helpers,
    getAvatarUrl, renderUserSection, initAuth)
@@ -85,7 +114,8 @@ Werkelijke kolomnamen profiles (auth — aangemaakt 14 mei 2026):
 - id uuid REFERENCES auth.users(id) PRIMARY KEY
 - email text UNIQUE NOT NULL
 - full_name text
-- role text CHECK (admin/sales/mentor/administratie/viewer)
+- role text CHECK (super_admin/admin/manager/sales/mentor/administratie/viewer)
+- manager_id uuid REFERENCES profiles(id) (FK voor hiërarchie)
 - is_active boolean DEFAULT true
 - team_member_id uuid REFERENCES team_members
 - avatar_url text
