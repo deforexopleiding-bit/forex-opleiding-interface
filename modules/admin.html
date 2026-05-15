@@ -37,6 +37,8 @@
     .role-badge.viewer { background:rgba(255,255,255,0.05); color:var(--text-faint); border:1px solid var(--border); }
     .role-badge.super_admin { background:rgba(139,92,246,0.15); color:#a78bfa; border:1px solid rgba(139,92,246,0.3); }
     .role-badge.manager { background:rgba(14,116,144,0.15); color:#22d3ee; border:1px solid rgba(14,116,144,0.3); }
+    .role-badge.editable { cursor: pointer; }
+    .role-badge.editable:hover { opacity: 0.8; }
     .active-dot { display:inline-block; width:8px; height:8px; border-radius:50%; background:var(--color-success); }
     .inactive-dot { background:var(--text-faint); }
     .role-select-inline { background:var(--bg-elev-2); border:1px solid var(--border); border-radius:6px; padding:4px 8px; font-size:12px; color:var(--text); font-family:inherit; cursor:pointer; }
@@ -245,12 +247,16 @@ async function loadUsers() {
           </div>
         </td>
         <td>
-          <select class="role-select-inline" onchange="changeRole('${u.id}', this.value)">
-            ${[
+          ${(() => {
+            const editableRoles = [
               ...(currentProfile?.role === 'super_admin' ? ['super_admin'] : []),
               'manager','admin','sales','mentor','administratie','viewer'
-            ].map(r => `<option value="${r}" ${u.role===r?'selected':''}>${r}</option>`).join('')}
-          </select>
+            ];
+            const canEdit = u.id !== currentProfile?.id && editableRoles.includes(u.role);
+            return canEdit
+              ? `<span class="role-badge ${u.role} editable" data-user-id="${u.id}" data-role="${u.role}" onclick="toggleRoleEdit('${u.id}','${u.role}')">${u.role}</span>`
+              : `<span class="role-badge ${u.role}">${u.role}</span>`;
+          })()}
         </td>
         <td>
           <span class="active-dot${isActive ? '' : ' inactive-dot'}"></span>
@@ -290,6 +296,39 @@ async function changeRole(userId, newRole) {
   } catch (e) {
     window.AgentShared?.showToast('Fout bij wijzigen rol', 'error');
   }
+}
+
+function toggleRoleEdit(userId, currentRole) {
+  const badge = document.querySelector(`.role-badge.editable[data-user-id="${userId}"]`);
+  if (!badge) return;
+
+  const select = document.createElement('select');
+  select.className = 'role-select-inline';
+
+  const opts = [
+    ...(currentProfile?.role === 'super_admin' ? ['super_admin'] : []),
+    'manager','admin','sales','mentor','administratie','viewer'
+  ];
+  opts.forEach(r => {
+    const o = document.createElement('option');
+    o.value = r; o.textContent = r;
+    if (r === currentRole) o.selected = true;
+    select.appendChild(o);
+  });
+
+  select.onchange = async () => {
+    const newRole = select.value;
+    if (newRole === currentRole) { select.replaceWith(badge); return; }
+    await changeRole(userId, newRole);
+    // loadUsers() in changeRole re-renders table — no manual restore needed
+  };
+
+  select.onblur = () => {
+    setTimeout(() => { if (document.body.contains(select)) select.replaceWith(badge); }, 150);
+  };
+
+  badge.replaceWith(select);
+  select.focus();
 }
 
 async function deactivateUser(userId, email) {

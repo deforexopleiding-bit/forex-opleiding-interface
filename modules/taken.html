@@ -952,8 +952,8 @@ function populeerFilterCollega() {
   sel.innerHTML = '<option value="">Alle collega\'s</option>';
   collegas.filter(c => c.naam).forEach(c => {
     const o = document.createElement('option');
-    o.value = c.id; o.textContent = c.naam;
-    if (c.id === cur) o.selected = true;
+    o.value = c.naam; o.textContent = c.naam;
+    if (c.naam === cur) o.selected = true;
     sel.appendChild(o);
   });
 }
@@ -969,7 +969,7 @@ function filteredTaken() {
   const sort = document.getElementById('sortBy').value;
 
   let list = taken.filter(t => {
-    if (fc && t.toegewezenAan !== fc) return false;
+    if (fc && (collegaById(t.toegewezenAan)?.naam || t.toegewezenAan) !== fc) return false;
     if (fp && t.prioriteit !== fp) return false;
     if (fcat && t.categorie !== fcat) return false;
     return true;

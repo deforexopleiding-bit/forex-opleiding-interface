@@ -1,4 +1,4 @@
-import { supabase } from './supabase.js';
+import { createUserClient } from './supabase.js';
 
 // GET  /api/agent-conversations?agent_name=<name>
 //      → { messages: [{role, content, created_at, conversation_session}], session_id }
@@ -7,6 +7,7 @@ import { supabase } from './supabase.js';
 
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
+  const supabase = createUserClient(req);
 
   if (req.method === 'GET') {
     const { agent_name, session } = req.query;

@@ -226,7 +226,7 @@ async function loadKPIBanner() {
     if (kpiErr) { kpiErr.textContent = errorsWeek; kpiErr.style.color = errorsWeek > 0 ? 'var(--red)' : 'var(--green)'; }
 
     // Meetings today
-    const mtgRes  = await fetch('/api/agent-meeting?action=get_history');
+    const mtgRes  = await window.AgentShared.apiFetch('/api/agent-meeting?action=get_history');
     const mtgData = await mtgRes.json();
     const oneDayAgo = Date.now() - 24 * 3600 * 1000;
     const todayMtgs = (mtgData.meetings || []).filter(m => new Date(m.created_at).getTime() > oneDayAgo).length;

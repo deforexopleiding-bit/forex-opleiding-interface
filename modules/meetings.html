@@ -426,7 +426,7 @@ async function init() {
     if (data.agents?.length) agents = data.agents;
   } catch {}
   renderParticipantList();
-  loadAllArchiveData();
+  await loadAllArchiveData();
   AgentShared.startApprovalPolling();
   loadTeamMembers();
 }
