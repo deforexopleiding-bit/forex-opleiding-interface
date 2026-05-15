@@ -1,5 +1,72 @@
 # TODO — Agency Command Center
-> Bijgewerkt: 2026-05-14 (Rol-architectuur + Endp-1A + C5 owner_id + C6.2 RLS prep) | Gebaseerd op AUDIT-VOLLEDIG.md
+> Bijgewerkt: 2026-05-14 (Fase C t/m C7 auth-gate volledig) | Gebaseerd op AUDIT-VOLLEDIG.md
+
+---
+
+## ✅ Gerealiseerd 2026-05-14 — Fase C + Role-architectuur + RLS + Auth-gate
+
+- [x] Fase C admin panel (commit 1cdf138): api/admin-users.js GET/POST/PATCH/DELETE, verifyAdmin, logAudit, recovery link via Strato SMTP; modules/admin.html user-management UI
+- [x] Mini Fase E — renderUserSection (commit f06a37f): agent-shared.js + auth-aware index.html footer
+- [x] Logo regression fix — handleLogoError verwijderd uit alle modules (commit c8aa3a3)
+- [x] Fase E rollout — auth-aware sidebar naar 6 modules (commit 82cccea)
+- [x] docs sessie-log 14 mei admin+E rollout (commit 291a354)
+- [x] Pre-D1 two-client Supabase architectuur (commit f24491f): createUserClient(req), supabaseAdmin gescheiden, verifyAdmin + logAudit
+- [x] D1 batch 1 RLS (SQL): backfill_progress + backfill_body_progress super-only policies
+- [x] Endp-1A backend — createUserClient op 9 endpoints (commit bac5bc0)
+- [x] Endp-1A frontend — apiFetch wrapper + 22 call-sites (commit 708e8c3)
+- [x] C1 — role-architecture document (commit ba57a3f): docs/role-architecture.md
+- [x] C2 — profiles schema-migratie (SQL): 7-rollen check, manager_id FK + index
+- [x] C2b — admin gates voor super_admin + manager (commit a130e04): ADMIN_ROLES, VALID_ROLES, super_admin-grant guard, CSS badges
+- [x] C3 — owner-kolommen op 5 tabellen (SQL): 6 kolommen toegevoegd
+- [x] C4 — backfill 349 rijen naar Amigo uuid (SQL)
+- [x] C5 — backend schrijft owner_id bij CREATE (commit 93a7243): taken (Optie A split), agent-meeting, agent-chat, send-email, undo
+- [x] C5 fix — Authorization headers meetings + agents (commit 1978f00): 14 fetch → apiFetch
+- [x] C6.1 RLS rollout (SQL): kennisbank_items, agent_kennisbank, agent_learnings, learn_examples, email_actions
+- [x] C6.2 RLS rollout (SQL): taken_items, agent_meetings, agent_conversations, email_replies, undo_history
+- [x] C6.2 fix — read-handlers agent-meeting via createUserClient (commit bcb821f)
+- [x] C6.3 RLS rollout (SQL): email_patterns, email_sync_log, email_messages, decisions, agent_approval_queue, agent_audit_log, team_members
+- [x] C7 — auth-gate op 7 module-pagina's (commit c409033): requireAuth() vóór data-fetches
+- [x] C7 fix — await _authSharedReady race-condition (commit 4d69ebf): alle 7 init() functies
+
+---
+
+## 🔧 Polish-items (ontdekt tijdens RLS + auth-gate rollout)
+
+### [polish-3] Taken UI filter mismatch
+**Bestand:** `modules/taken.html` — view-selector
+**Probleem:** taken.html filtert op pre-existing `colleagues.id` ipv `auth.users.id`. Taken met `toegewezen_aan` = legacy-id verschijnen niet bij default-view.
+**Fix:** View-selector koppelen aan ingelogde user's uuid i.p.v. hardcoded colleague-id
+**Impact:** Jeffrey ziet eigen taken niet tenzij hij zijn collega-entry selecteert
+
+### [polish-4] Admin inline role-selector incomplete voor super_admin
+**Bestand:** `modules/admin.html` — inline role-selector
+**Probleem:** In manager-view toont inline role-selector "manager" als hoogste optie. Als super_admin user wordt bekeken, valt select terug op leeg/verkeerd. Read-only fallback nodig voor rollen buiten de eigen selectielijst.
+**Fix:** Fallback: als `u.role` niet in opties zit → toon `<span class="role-badge ...">` i.p.v. `<select>`
+
+### [polish-5] Role-badge CSS aanwezig maar niet gebruikt
+**Bestand:** `modules/admin.html`
+**Probleem:** CSS `.role-badge.super_admin` + `.role-badge.manager` toegevoegd in C2b maar tabel gebruikt inline-selects. Badges alleen zichtbaar als polish-4 fix select vervangt door badge.
+**Fix:** Na polish-4: badges activeren voor weergave; CSS opruimen als besloten wordt badges niet te gebruiken
+
+### [polish-6] agent-conversations endpoint soms 0 messages
+**Bestand:** `api/agent-conversations.js`
+**Probleem:** `/api/agent-conversations` met session_id retourneert soms 0 messages terwijl SQL data toont. Endpoint-logica onduidelijk over RLS-interactie na C6.2.
+**Fix:** Endpoint inspecteren op RLS-filtering + createUserClient aanroep; smoke test na fix
+
+### [polish-7] control-center directe fetch inconsistentie
+**Bestand:** `modules/control-center.html`
+**Probleem:** 1 directe `fetch('/api/agent-meeting?action=get_history')` nog niet via apiFetch. Geen owner-write dus geen RLS-impact; consistency-improvement.
+**Fix:** Vervang door `AgentShared.apiFetch(...)` — 5 minuten
+
+### [polish-8] meetings.html first-refresh race condition
+**Bestand:** `modules/meetings.html`
+**Probleem:** Eerste hard refresh toont soms Geschiedenis: 0; tweede refresh correct. Mogelijke JWT-bootstrap race condition na await _authSharedReady.
+**Fix:** Onderzoek of loadAllArchiveData() te vroeg vuurt; mogelijk extra await nodig
+
+### [polish-9] reset-password.html UX verbetering
+**Bestand:** `reset-password.html`
+**Probleem:** Zonder geldig reset-token redirect naar `/login?error=callback_failed`. Werkt veilig maar user-experience kan beter met inline "voer e-mail in voor nieuw reset-verzoek" UI.
+**Fix:** Detecteer ontbrekend token → toon inline reset-formulier i.p.v. redirect
 
 ---
 

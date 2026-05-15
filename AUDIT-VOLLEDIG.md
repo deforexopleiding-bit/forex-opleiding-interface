@@ -4,6 +4,134 @@ Chronologische verzameling van technische bevindingen en debuglessen opgedaan ti
 
 ---
 
+## 2026-05-14 — Role-architectuur + RLS rollout + Auth-gate volledig
+
+### Wat is gebouwd
+
+Hiërarchische role-based access control met strikte silo's:
+- super_admin (Amigo): ziet alles platform-breed
+- manager (Jeffrey, Maxim): alleen eigen werk, geen collega-managers, geen onderliggenden
+- sales / mentor / administratie / viewer: schema voorbereid
+- manager_id FK op profiles voor metadata (geen RLS-impact)
+- UI-auth-gate: alle pagina's vereisen login, redirect via `/login.html?returnTo=<pad>`
+
+### Schema-wijzigingen
+
+- profiles_role_check uitgebreid naar 7 rollen
+- profiles.manager_id uuid FK + index
+- 6 owner-kolommen toegevoegd op 5 data-tabellen:
+  - taken_items: owner_id, created_by_id
+  - agent_meetings: owner_id
+  - agent_conversations: user_id
+  - email_replies: sent_by_id
+  - undo_history: performed_by_id
+- 349 bestaande rijen gebackfilled naar Amigo (super_admin)
+- Helper functies: `is_super_admin()`, `is_manager_or_above()`, `is_admin()`
+
+### RLS-rollout (17 tabellen + auth-gate UI)
+
+**D1 batch 1** (cron-endpoints, super only):
+- backfill_progress, backfill_body_progress
+
+**C6.1** (5 tabellen) — authenticated read+write:
+- kennisbank_items, agent_kennisbank, agent_learnings, learn_examples, email_actions
+
+**C6.2** (5 tabellen) — owner+super:
+- taken_items, agent_meetings, agent_conversations, email_replies, undo_history
+
+**C6.3** (7 tabellen):
+- email_patterns (authenticated)
+- email_sync_log (super)
+- email_messages (manager+)
+- decisions (via meeting parent)
+- agent_approval_queue (manager+)
+- agent_audit_log (super)
+- team_members (auth read, super write)
+
+**C7 — UI auth-gate:**
+- 7 module-pagina's: `requireAuth()` vóór data-fetches
+- Pre-auth pagina's overgeslagen: login, auth-callback, reset-password
+- Race-condition fix: `await window._authSharedReady` vóór `requireAuth()` (anders TypeError silent swallowed)
+
+### Backend wijzigingen
+
+- `api/supabase.js`: createUserClient(req) + ADMIN_ROLES const + verifyAdmin uitgebreid
+- 9 endpoints naar createUserClient (endp-1A): email-actions, email-patterns, sent-replies,
+  taken, undo, generate-reply, learn, send-email, kennisbank-sync
+- 5 INSERT-handlers schrijven owner_id uit auth.uid() (C5): taken, agent-meeting,
+  agent-chat, send-email, undo
+- agent-meeting.js read-handlers via createUserClient (C6.2 fix)
+
+### Frontend wijzigingen
+
+- agent-shared.js: apiFetch wrapper + renderUserSection
+- 22 call-sites naar apiFetch (endp-1A)
+- 14 call-sites in meetings + agents naar apiFetch (C5 fix)
+- 7 pagina's: `await _authSharedReady` + `requireAuth()` (C7)
+
+### Validatie
+
+- Anon: redirect naar login op ELKE pagina, 0 data-zichtbaarheid
+- Jeffrey (manager): 1 eigen taak, 2 eigen meetings, 2 eigen conversations, 5677 inbox mails
+- Amigo (super_admin): 9 taken, 30 meetings, 318 conversations, 5677 mails, 45 decisions
+- Cron-jobs: service_role bypasst RLS correct
+- ReturnTo flow: na login direct naar oorspronkelijk verzochte pagina
+
+### Commits (2026-05-14)
+
+| Hash | Beschrijving |
+|------|-------------|
+| f24491f | Pre-D1 refactor: two-client Supabase architectuur |
+| bac5bc0 | Endp-1A backend: createUserClient op 9 endpoints |
+| 708e8c3 | Endp-1A frontend: apiFetch wrapper + 22 call-sites |
+| ba57a3f | C1: role-architecture doc |
+| a130e04 | C2b: admin gates voor super_admin + manager |
+| 93a7243 | C5: backend schrijft owner_id bij CREATE |
+| 1978f00 | C5 fix: Authorization headers meetings + agents |
+| bcb821f | C6.2 fix: read-handlers via createUserClient |
+| c409033 | C7: auth-gate op alle module-pagina's |
+| 4d69ebf | C7 fix: await _authSharedReady voor race-condition |
+
+Plus via Supabase SQL-dashboard (geen commits):
+D1 batch 1, C2 profiles-schema, C3 owner-kolommen, C4 backfill 349 rijen,
+C6.1, C6.2, C6.3 RLS policies
+
+### Belangrijke lessen geleerd
+
+1. **Schema-veronderstellingen verifiëren vóór SQL.** Beleidsmatrix ging uit van uuid-owner
+   kolommen, bestaande data was text. Schema-onderzoek vóór migratie voorkwam verkeerde policies.
+
+2. **Frontend Bearer-header is fundamenteel voor RLS-keten.** Backend kan createUserClient
+   correct gebruiken maar als frontend geen Authorization meestuurt, valt het terug op anon
+   → RLS = 0 rows. Module-specifiek auditeren noodzakelijk.
+
+3. **READ-handlers in dual-import endpoints zijn blinde vlek.** C5 INSERT-fix lijkt compleet
+   maar RLS faalt bij SELECT als reads nog op anon supabase staan.
+
+4. **UI-filters kunnen RLS-correctheid verbergen.** Taken-pagina filtert op
+   pre-existing colleagues.id, niet auth.users.id. UI toont 0 terwijl API correct 1
+   retourneert. API-laag altijd eerst verifiëren.
+
+5. **Gefaseerd uitrollen redt project.** Eén grote SQL-batch had meerdere bugs tegelijk
+   veroorzaakt. Sub-batches (C6.1/2/3) met smoke test tussen elk hielden diagnose simpel.
+
+6. **Owner-text-data is fragiel voor RLS.** Velden zoals created_by = "Jeffrey" (text) niet
+   bruikbaar voor auth.uid() matching. Schema-migratie naar uuid is essentieel.
+
+7. **Anon-fallback is feature, geen bug.** Uitgelogde user ziet 0 rows via RLS; UI moet
+   dit gracefully aan: redirect of CTA.
+
+8. **Async race-conditions in init() zijn silent killers.** AuthShared was nog niet ready
+   toen module init() draaide → TypeError door fire-and-forget gesloopt → silent gate bypass.
+   Werkte "per ongeluk" op index.html door HTML-buffer tussen scripts.
+   Fix: `await window._authSharedReady` vóór gate.
+
+### Geparkeerde aandachtspunten
+
+Zie TODO-VOLLEDIG.md polish sectie.
+
+---
+
 ## Sessie 14 mei 2026 — Rol-architectuur + Endp-1A + C5 owner_id + C6.2 RLS prep
 
 ### Wat is gebouwd
