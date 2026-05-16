@@ -202,7 +202,7 @@
     </section>
   </main>
 
-  <script type="module">
+  <script>
     const ALLOWED_ROLES = ['sales', 'manager', 'admin', 'super_admin'];
 
     function formatTime(iso) {
@@ -381,6 +381,7 @@
     }
 
     async function init() {
+      await window._authSharedReady;
       await window.AuthShared.requireAuth(ALLOWED_ROLES);
 
       await Promise.all([
