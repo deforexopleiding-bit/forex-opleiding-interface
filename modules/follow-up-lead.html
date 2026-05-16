@@ -83,6 +83,15 @@
     }
     .ld-tab-content { display: none; }
     .ld-tab-content.active { display: block; }
+    .wa-day-header { text-align:center; font-size:12px; color:var(--text-secondary,rgba(255,255,255,0.5)); margin:16px 0 8px; text-transform:uppercase; letter-spacing:0.5px; }
+    .wa-msg-row { display:flex; flex-direction:column; margin-bottom:10px; }
+    .wa-msg-row-inbound { align-items:flex-start; }
+    .wa-msg-row-outbound { align-items:flex-end; }
+    .wa-msg { max-width:75%; padding:8px 12px; border-radius:12px; font-size:14px; line-height:1.4; word-wrap:break-word; }
+    .wa-msg-inbound { background:var(--surface-2,rgba(255,255,255,0.06)); color:var(--text-primary,#fff); border-bottom-left-radius:4px; }
+    .wa-msg-outbound { background:var(--brand,#093d54); color:#fff; border-bottom-right-radius:4px; }
+    .wa-msg-meta { font-size:11px; color:var(--text-secondary,rgba(255,255,255,0.5)); margin-top:2px; padding:0 4px; }
+    .wa-channel-badge { display:inline-block; padding:1px 6px; border-radius:3px; font-size:10px; text-transform:uppercase; letter-spacing:0.5px; margin-left:6px; background:rgba(255,255,255,0.08); color:rgba(255,255,255,0.6); }
     .ld-card {
       background: var(--surface-2, rgba(255,255,255,0.04));
       border: 1px solid var(--border, rgba(255,255,255,0.08));
@@ -240,6 +249,7 @@
 
   <script>
     const ALLOWED_ROLES = ['sales', 'manager', 'admin', 'super_admin'];
+    let whatsappLoaded = false;
 
     const OUTCOME_LABELS = {
       klant_geworden: 'Klant geworden',
@@ -369,12 +379,16 @@
 
         <div class="ld-tabs">
           <button class="ld-tab active" data-tab="calls">Calls</button>
+          <button class="ld-tab" data-tab="whatsapp">WhatsApp</button>
           <button class="ld-tab" data-tab="outcome">Outcome</button>
           <button class="ld-tab" data-tab="notities">Notities</button>
         </div>
 
         <div id="tab-calls" class="ld-tab-content active">${renderCallsTab(appt, history)}</div>
         <div id="tab-outcome" class="ld-tab-content">${renderOutcomeTab(outcome)}</div>
+        <div id="tab-whatsapp" class="ld-tab-content">
+          <div id="whatsapp-messages-container"><div class="ld-loading">Berichten laden…</div></div>
+        </div>
         <div id="tab-notities" class="ld-tab-content">
           <div class="ld-placeholder">Notities — binnenkort beschikbaar.</div>
         </div>`;
@@ -385,6 +399,10 @@
           root.querySelectorAll('.ld-tab-content').forEach(c => c.classList.remove('active'));
           btn.classList.add('active');
           root.querySelector('#tab-' + btn.dataset.tab).classList.add('active');
+
+          if (btn.dataset.tab === 'whatsapp' && !whatsappLoaded) {
+            loadWhatsAppMessages(appt.lead_ghl_contact_id);
+          }
         });
       });
 
@@ -455,6 +473,65 @@
           }
         });
       }
+    }
+
+    async function loadWhatsAppMessages(contactId) {
+      if (!contactId) {
+        document.getElementById('whatsapp-messages-container').innerHTML = '<div class="ld-empty">Geen contact-ID beschikbaar.</div>';
+        return;
+      }
+      whatsappLoaded = true;
+      const container = document.getElementById('whatsapp-messages-container');
+      if (!container) return;
+
+      try {
+        const token = await window.AuthShared.getAccessToken();
+        const res = await fetch(`/api/follow-up-messages?contact_id=${encodeURIComponent(contactId)}`, {
+          headers: { Authorization: 'Bearer ' + token },
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          throw new Error(err.error || `HTTP ${res.status}`);
+        }
+        const data = await res.json();
+        renderWhatsApp(container, data.messages || []);
+      } catch (err) {
+        container.innerHTML = `<div class="ld-empty" style="color:#fca5a5;">Fout: ${err.message}</div>`;
+        whatsappLoaded = false;
+      }
+    }
+
+    function renderWhatsApp(container, messages) {
+      if (messages.length === 0) {
+        container.innerHTML = '<div class="ld-empty">Nog geen berichten in conversatie.</div>';
+        return;
+      }
+
+      const sorted = [...messages].sort((a, b) => new Date(a.sent_at) - new Date(b.sent_at));
+      let html = '<div style="display:flex;flex-direction:column;padding:8px 0;">';
+      let lastDate = null;
+
+      for (const msg of sorted) {
+        const dt = new Date(msg.sent_at);
+        const dateKey = dt.toDateString();
+
+        if (dateKey !== lastDate) {
+          html += `<div class="wa-day-header">${dt.toLocaleDateString('nl-NL', { weekday: 'long', day: 'numeric', month: 'long' })}</div>`;
+          lastDate = dateKey;
+        }
+
+        const timeStr = dt.toLocaleTimeString('nl-NL', { hour: '2-digit', minute: '2-digit' });
+        const bodyText = (msg.body || '(geen tekst)').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+        html += `
+          <div class="wa-msg-row wa-msg-row-${msg.direction}">
+            <div class="wa-msg wa-msg-${msg.direction}">${bodyText}</div>
+            <div class="wa-msg-meta">${timeStr}<span class="wa-channel-badge">${msg.channel}</span></div>
+          </div>`;
+      }
+
+      html += '</div>';
+      container.innerHTML = html;
     }
 
     async function init() {
