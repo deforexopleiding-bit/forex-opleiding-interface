@@ -1,7 +1,7 @@
-# Follow-up Module — Volledig project plan v2.2
+# Follow-up Module — Volledig project plan v2.3
 
 > Quick Win #1 voor De Forex Opleiding (Jeffrey Biemold).
-> Versie: 2.2 (15 mei 2026)
+> Versie: 2.3 (15 mei 2026)
 > Doel: volledige follow-up flow voor sales calls die via GoHighLevel + Zoom worden ingepland.
 
 ## Versie-historie
@@ -10,6 +10,7 @@
 - **v2.0**: scope herzien — GHL eigenaar van messaging, module wordt detectie+trigger+tracking laag
 - **v2.1**: WhatsApp conversaties zichtbaarheid + reply-functionaliteit toegevoegd via GHL webhook + API
 - **v2.2**: rapportages en admin-features gericht op ALLE ADMIN_ROLES (super_admin + admin + manager), niet alleen Jeffrey persoonlijk
+- **v2.3**: GHL scope-correcties na verificatie in dashboard — `conversations.readonly` bestaat niet (gesplitst in message/reports/livechat), `workflows.write` bestaat niet (Workflows-API is read-only, triggering via Inbound Webhook trigger per workflow)
 
 ## Economische onderbouwing
 
@@ -109,7 +110,7 @@ Bij OK → groen vinkje. Bij verdacht → notificatie naar alle ADMIN_ROLES user
 
 **Module actie:**
 - Markeer `follow_up_appointments.status = 'no_show'`
-- Roep GHL workflow aan via API trigger (preferred) of custom field update (fallback)
+- Roep GHL workflow aan via Inbound Webhook trigger (POST naar workflow-URL)
 - Log trigger in `follow_up_messages_sent`
 
 **GHL doet de rest:**
@@ -508,18 +509,37 @@ Uit te voeren door een super_admin of admin user.
 
 ### 1. GoHighLevel Private Integration Token (5-10 min)
 
-Login GHL → Settings → Private Integrations. Token aanmaken met scopes:
-- `contacts.readonly`
-- `contacts.write` (custom field updates)
-- `calendars.readonly`
-- `calendars/events.readonly`
-- `conversations.readonly`
-- `conversations/message.readonly`
-- `conversations/message.write`
-- `workflows.readonly`
-- `workflows.write` (API triggers)
+Login GHL → Settings → Private Integrations. Token aanmaken met deze 6 scopes:
+- `contacts.readonly` — leads ophalen voor matching
+- `contacts.write` — custom field updates op contacts
+- `calendars.readonly` — calendar metadata
+- `calendars/events.readonly` — appointments ophalen (kerndata)
+- `conversations/message.readonly` — WhatsApp-berichten lezen
+- `conversations/message.write` — replies versturen vanuit module
 
 Vercel env vars: `GHL_API_KEY`, `GHL_LOCATION_ID`
+
+**Niet nodig**: `workflows.readonly` / `workflows.write` — GHL Workflows-API is read-only. Workflow-triggering gaat via per-workflow Inbound Webhook URLs, niet via scoped API-call.
+
+### Workflow-triggering architectuur
+
+GHL Workflows API is read-only. Triggering gebeurt via "Inbound Webhook" trigger per workflow:
+
+1. Per workflow in GHL: trigger = "Inbound Webhook" → unieke URL
+2. URL kopiëren en opslaan als Vercel env var
+3. Module doet POST naar die URL met JSON-payload (lead-data, context)
+4. Workflow start in GHL met die payload
+
+**Vercel env vars per workflow**:
+- `GHL_WEBHOOK_NO_SHOW_IMMEDIATE_URL`
+- `GHL_WEBHOOK_NO_SHOW_24H_URL`
+- `GHL_WEBHOOK_DRIP_PER_BEZWAAR_URL`
+- `GHL_WEBHOOK_DAVE_DAILY_LIST_URL`
+- `GHL_WEBHOOK_DAVE_PRE_CALL_URL`
+- `GHL_WEBHOOK_DAVE_EOD_URL`
+- `GHL_WEBHOOK_OPVOLGING_REMINDER_URL`
+
+Security: webhook-URLs zelf zijn de credential. Module voegt eigen secret toe als header bij elke POST (verificatie aan GHL-zijde moeilijk, maar audit-trail in `follow_up_events_log`).
 
 ### 2. Zoom Marketplace App (10-15 min)
 
@@ -539,7 +559,7 @@ GHL Dashboard → Settings → Webhooks
 
 ### 4. GHL workflows voor Dave-notificaties (Fase 2 pre-work)
 
-Drie workflows met "API trigger" startpunt:
+Drie workflows met "Inbound Webhook trigger" startpunt:
 
 **Workflow 1: Dave Daily Call List**
 - Template: "Goedemorgen Dave! Je hebt {{count}} calls vandaag: {{call_list}}"
@@ -554,8 +574,8 @@ Meta-goedkeuring vragen voor templates (1-7 dagen).
 
 ### 5. GHL workflows voor no-show automation (Fase 2 pre-work)
 
-- "No-show Immediate" workflow met API trigger
-- "No-show 24u" workflow met API trigger
+- "No-show Immediate" workflow met Inbound Webhook trigger
+- "No-show 24u" workflow met Inbound Webhook trigger
 - Huidige GHL no-show flow op handmatig zetten bij Fase 2 go-live
 
 ## Afhankelijkheden
