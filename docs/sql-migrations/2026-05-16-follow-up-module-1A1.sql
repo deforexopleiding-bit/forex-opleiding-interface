@@ -341,7 +341,7 @@ VALUES (
   'follow-up-screenshots',
   false,
   10485760,
-  ARRAY['image/png','image/jpeg','image/jpg','image/webp']
+  ARRAY['image/png','image/jpeg','image/jpg','image/webp','image/heic','image/heif']
 )
 ON CONFLICT (id) DO NOTHING;
 
