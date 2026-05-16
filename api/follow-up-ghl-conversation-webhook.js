@@ -5,12 +5,50 @@
 //
 // POST /api/follow-up-ghl-conversation-webhook
 //   Header: X-Webhook-Token: <GHL_WEBHOOK_TOKEN>
-//   Body: { message: {...}, contact: {...}, ... }
+//   Body: flat GHL Custom Data format ÓÓÓK nested { message, contact } format
 //
 // Defensief: GHL payload-structuur kan verschillen per message-type.
 // Onbekende velden worden gelogd zonder crash.
 
 import { supabaseAdmin } from './supabase.js';
+
+function normalizePayload(body) {
+  // Detecteer flat vs nested format en normaliseer naar 1 interne shape.
+  // Returns: { message: {...}, contact: {...}, type: '...' }
+
+  if (!body || typeof body !== 'object') {
+    return { message: null, contact: null, type: null };
+  }
+
+  // Als 'message' object al genest aanwezig is → nested format
+  if (body.message && typeof body.message === 'object') {
+    return {
+      message: body.message,
+      contact: body.contact || null,
+      type: body.type || null,
+    };
+  }
+
+  // Anders: flat format — reconstrueer nested
+  return {
+    message: {
+      id: body.message_id || body.messageId || body.id || null,
+      body: body.message_body || body.messageBody || body.body || body.text || null,
+      type: body.channel || body.messageType || body.message_type || body.type || null,
+      messageType: body.channel || body.messageType || body.message_type || null,
+      direction: body.direction || (body.type === 'OutboundMessage' ? 'outbound' : 'inbound'),
+      dateAdded: body.message_date || body.messageDate || body.dateAdded || body.date_added || null,
+      conversationId: body.conversation_id || body.conversationId || null,
+      contactId: body.contact_id || body.contactId || null,
+    },
+    contact: {
+      id: body.contact_id || body.contactId || null,
+      firstName: body.contact_first_name || body.contactFirstName || body.first_name || null,
+      lastName: body.contact_last_name || body.contactLastName || body.last_name || null,
+    },
+    type: body.type || null,
+  };
+}
 
 const GHL_TYPE_TO_CHANNEL = {
   TYPE_WHATSAPP: 'whatsapp',
@@ -75,8 +113,10 @@ export default async function handler(req, res) {
     .then(() => {})
     .catch(err => console.error('[ghl-conversation-webhook] events_log insert failed:', err.message));
 
-  // GHL stuurt verschillende event-types — message kan als wrapper of direct payload komen
-  const message = body.message || body;
+  // Normaliseer flat én nested GHL payload naar één interne shape
+  const normalized = normalizePayload(body);
+  const message = normalized.message;
+  const contact = normalized.contact;
 
   if (!message || typeof message !== 'object') {
     return res.status(200).json({ received: true, processed: false, reason: 'no-message' });
@@ -100,8 +140,8 @@ export default async function handler(req, res) {
     return res.status(200).json({ received: true, processed: false, reason: 'no-direction' });
   }
 
-  const conversationId = message.conversationId || body.conversationId;
-  const contactId = message.contactId || body.contactId || body?.contact?.id;
+  const conversationId = message?.conversationId || normalized.message?.conversationId || null;
+  const contactId = message?.contactId || contact?.id || null;
   const sentAt = message.dateAdded || message.dateCreated || message.createdAt || new Date().toISOString();
 
   if (!conversationId || !contactId) {
