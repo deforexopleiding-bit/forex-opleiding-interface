@@ -310,6 +310,19 @@
           ${appt.snelle_notitie ? `<div class="ld-row"><span class="ld-row-label">Snelle notitie</span><span class="ld-row-value">${appt.snelle_notitie}</span></div>` : ''}
           ${appt.zoom_meeting_id ? `<div class="ld-row"><span class="ld-row-label">Zoom meeting</span><span class="ld-row-value" style="font-family:monospace;font-size:12px;">${appt.zoom_meeting_id}</span></div>` : ''}
         </div>
+        ${appt.requires_screenshot ? `
+        <div class="ld-card" style="border-color: ${appt.screenshot_url ? 'rgba(34,197,94,0.3)' : 'rgba(234,179,8,0.3)'};">
+          <div class="ld-card-title" style="color: ${appt.screenshot_url ? '#86efac' : '#fde047'};">📸 Screenshot verificatie</div>
+          ${appt.screenshot_url ? `
+            <div style="font-size: 13px; color: #86efac;">✓ Screenshot ingediend</div>
+          ` : `
+            <div style="font-size: 13px; color: var(--text-secondary, rgba(255,255,255,0.7)); margin-bottom: 10px;">Steekproef: upload een screenshot van je verzonden voicememo of de afgeronde call.</div>
+            <input type="file" id="screenshot-file-input" accept="image/png,image/jpeg,image/webp,image/heic,image/heif" style="display:none;">
+            <button id="screenshot-upload-btn" class="fu-voicememo-button">Screenshot uploaden</button>
+            <div id="screenshot-result" style="margin-top:10px;font-size:13px;"></div>
+          `}
+        </div>
+        ` : ''}
         <div class="ld-card">
           <div class="ld-card-title">Eerdere calls (${history.length})</div>
           ${historyHtml}
@@ -373,6 +386,63 @@
           root.querySelector('#tab-' + btn.dataset.tab).classList.add('active');
         });
       });
+
+      const fileInput = root.querySelector('#screenshot-file-input');
+      const uploadBtn = root.querySelector('#screenshot-upload-btn');
+      const resultEl = root.querySelector('#screenshot-result');
+
+      if (uploadBtn && fileInput) {
+        uploadBtn.addEventListener('click', () => fileInput.click());
+        fileInput.addEventListener('change', async (e) => {
+          const file = e.target.files[0];
+          if (!file) return;
+
+          uploadBtn.disabled = true;
+          uploadBtn.textContent = 'Uploaden…';
+          resultEl.textContent = '';
+
+          try {
+            const { data: { user } } = await window.supabase.auth.getUser();
+            if (!user) throw new Error('Niet ingelogd');
+
+            const ext = (file.name.split('.').pop() || 'png').toLowerCase();
+            const path = `${user.id}/${appt.id}/${Date.now()}.${ext}`;
+
+            const { error: uploadErr } = await window.supabase.storage
+              .from('follow-up-screenshots')
+              .upload(path, file, { contentType: file.type, upsert: false });
+
+            if (uploadErr) throw new Error('Upload mislukt: ' + uploadErr.message);
+
+            uploadBtn.textContent = 'Beoordelen…';
+
+            const token = await window.AuthShared.getAccessToken();
+            const reviewRes = await fetch('/api/follow-up-screenshot-review', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+              body: JSON.stringify({ appointment_id: appt.id, storage_path: path }),
+            });
+
+            if (!reviewRes.ok) {
+              const err = await reviewRes.json().catch(() => ({}));
+              throw new Error(err.error || `HTTP ${reviewRes.status}`);
+            }
+
+            const reviewData = await reviewRes.json();
+            const colors = { ok: '#86efac', suspicious: '#fde047', missing: '#fca5a5' };
+            const labels = { ok: '✓ Goedgekeurd', suspicious: '⚠ Verdacht — admin review', missing: '✗ Ongeldig' };
+            resultEl.innerHTML = `
+              <div style="color:${colors[reviewData.result] || '#fff'};">${labels[reviewData.result] || reviewData.result}</div>
+              <div style="color:var(--text-secondary,rgba(255,255,255,0.6));margin-top:4px;font-size:12px;">${reviewData.reasoning || ''}</div>`;
+            uploadBtn.style.display = 'none';
+          } catch (err) {
+            resultEl.textContent = 'Fout: ' + err.message;
+            resultEl.style.color = '#fca5a5';
+            uploadBtn.disabled = false;
+            uploadBtn.textContent = 'Opnieuw proberen';
+          }
+        });
+      }
     }
 
     async function init() {

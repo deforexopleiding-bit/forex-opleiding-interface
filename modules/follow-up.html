@@ -267,6 +267,7 @@
       <div>
         <h1>Follow-up Module</h1>
         <p class="page-subtitle">Sales-calls van Dave — voicememo's, no-shows en opvolging.</p>
+        <a href="follow-up-admin.html" id="admin-link" style="display:none; margin-top:8px; color:var(--text-secondary,rgba(255,255,255,0.7)); text-decoration:none; font-size:13px;">📋 Screenshot reviews →</a>
       </div>
     </header>
 
@@ -710,7 +711,12 @@
 
     async function init() {
       await window._authSharedReady;
-      await window.AuthShared.requireAuth(ALLOWED_ROLES);
+      const profile = await window.AuthShared.requireAuth(ALLOWED_ROLES);
+
+      if (profile && ['admin', 'manager', 'super_admin'].includes(profile.role)) {
+        const adminLink = document.getElementById('admin-link');
+        if (adminLink) adminLink.style.display = 'inline-block';
+      }
 
       await Promise.all([
         renderSection('opvolging_today', 'list-opvolging-today', 'count-opvolging-today', false),

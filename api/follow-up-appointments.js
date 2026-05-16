@@ -196,7 +196,7 @@ async function handlePatch(req, res, supabase, user) {
     .from('follow_up_appointments')
     .update(update)
     .eq('id', id)
-    .select('id, voicememo_status, voicememo_sent_at, voicememo_sent_by')
+    .select('id, voicememo_status, voicememo_sent_at, voicememo_sent_by, owner_id')
     .single();
 
   if (error) {
@@ -204,5 +204,22 @@ async function handlePatch(req, res, supabase, user) {
     return res.status(error.code === 'PGRST116' ? 404 : 500).json({ error: error.message });
   }
 
-  return res.status(200).json({ updated: data });
+  let requiresScreenshot = false;
+  if (voicememo_status === 'sent' && data.owner_id) {
+    const { count } = await supabase
+      .from('follow_up_appointments')
+      .select('id', { count: 'exact', head: true })
+      .eq('owner_id', data.owner_id)
+      .eq('voicememo_status', 'sent');
+
+    if (count && count >= 3 && (count - 3) % 5 === 0) {
+      requiresScreenshot = true;
+      await supabase
+        .from('follow_up_appointments')
+        .update({ requires_screenshot: true })
+        .eq('id', id);
+    }
+  }
+
+  return res.status(200).json({ updated: data, requires_screenshot: requiresScreenshot });
 }

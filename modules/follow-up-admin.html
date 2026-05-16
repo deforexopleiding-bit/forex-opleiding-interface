@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Follow-up Admin — Screenshot Reviews</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="shared/agent-shared.css">
+  <script src="shared/supabase-client.js"></script>
+  <script src="shared/agent-shared.js"></script>
+  <style>
+    .admin-card {
+      background: var(--surface-2, rgba(255,255,255,0.04));
+      border: 1px solid var(--border, rgba(255,255,255,0.08));
+      border-radius: 8px;
+      padding: 16px;
+      margin-bottom: 12px;
+    }
+    .admin-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      margin-bottom: 8px;
+    }
+    .admin-result-suspicious { color: #fde047; font-weight: 600; font-size: 14px; }
+    .admin-result-missing { color: #fca5a5; font-weight: 600; font-size: 14px; }
+    .admin-date { color: var(--text-secondary, rgba(255,255,255,0.6)); font-size: 13px; }
+    .admin-reasoning {
+      color: var(--text-secondary, rgba(255,255,255,0.7));
+      margin: 8px 0;
+      font-size: 13px;
+      line-height: 1.5;
+    }
+    .admin-screenshot {
+      max-width: 100%;
+      max-height: 400px;
+      border-radius: 6px;
+      margin-top: 10px;
+      display: block;
+    }
+    .admin-actions { display: flex; gap: 8px; margin-top: 12px; }
+    .admin-btn-approve {
+      background: var(--brand, #093d54);
+      color: #fff;
+      border: none;
+      padding: 8px 14px;
+      border-radius: 6px;
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+    }
+    .admin-btn-reject {
+      background: transparent;
+      color: var(--text-primary, #fff);
+      border: 1px solid var(--border, rgba(255,255,255,0.15));
+      padding: 8px 14px;
+      border-radius: 6px;
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+    }
+    .admin-btn-approve:hover { opacity: 0.85; }
+    .admin-btn-reject:hover { background: rgba(255,255,255,0.05); }
+    .admin-btn-approve:disabled, .admin-btn-reject:disabled { opacity: 0.4; cursor: default; }
+    .admin-empty {
+      padding: 40px;
+      text-align: center;
+      color: var(--text-secondary, rgba(255,255,255,0.5));
+      font-size: 14px;
+    }
+    .admin-error {
+      padding: 20px;
+      background: rgba(239,68,68,0.08);
+      border: 1px solid rgba(239,68,68,0.2);
+      border-radius: 8px;
+      color: #fca5a5;
+      font-size: 14px;
+    }
+    .admin-appt-link {
+      color: #93c5fd;
+      text-decoration: none;
+      font-size: 13px;
+    }
+    .admin-appt-link:hover { text-decoration: underline; }
+  </style>
+</head>
+<body>
+  <nav class="sidebar">
+    <div class="sidebar-logo">
+      <a href="../index.html" style="color: inherit; text-decoration: none;">
+        <strong>Agency CC</strong>
+      </a>
+    </div>
+    <div class="sidebar-nav">
+      <a class="nav-item" href="../index.html">
+        <svg class="nav-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path></svg>
+        Dashboard
+      </a>
+      <a class="nav-item" href="taken.html">
+        <svg class="nav-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4"></path><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path></svg>
+        Taken
+      </a>
+      <a class="nav-item" href="email.html">
+        <svg class="nav-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"></path><polyline points="22,6 12,13 2,6"></polyline></svg>
+        Email
+      </a>
+      <a class="nav-item" href="kennisbank.html">
+        <svg class="nav-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"></path><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"></path></svg>
+        Kennisbank
+      </a>
+      <a class="nav-item" href="meetings.html">
+        <svg class="nav-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>
+        Meetings
+      </a>
+      <a class="nav-item" href="agents.html">
+        <svg class="nav-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"></path></svg>
+        Agents
+      </a>
+      <a class="nav-item" href="control-center.html">
+        <svg class="nav-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+        Control Center
+      </a>
+      <a class="nav-item active" href="follow-up.html">
+        <svg class="nav-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"></path></svg>
+        Follow-up
+      </a>
+      <a class="nav-item" href="admin.html">
+        <svg class="nav-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>
+        Admin
+      </a>
+    </div>
+  </nav>
+
+  <main class="main-content">
+    <a href="follow-up.html" style="display:inline-flex;align-items:center;gap:6px;color:var(--text-secondary,rgba(255,255,255,0.6));font-size:14px;text-decoration:none;margin-bottom:20px;">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"></polyline></svg>
+      Terug naar Follow-up
+    </a>
+    <header class="page-header">
+      <div>
+        <h1>Screenshot Review Queue</h1>
+        <p class="page-subtitle">Screenshots gemarkeerd als verdacht of ontbrekend — handmatige review.</p>
+      </div>
+    </header>
+
+    <div id="admin-queue">
+      <div class="admin-empty">Laden…</div>
+    </div>
+  </main>
+
+  <script>
+    const ALLOWED_ROLES = ['admin', 'manager', 'super_admin'];
+
+    async function init() {
+      await window._authSharedReady;
+      await window.AuthShared.requireAuth(ALLOWED_ROLES);
+
+      const container = document.getElementById('admin-queue');
+
+      try {
+        const { data, error } = await window.supabase
+          .from('follow_up_screenshot_audit')
+          .select('id, sales_user_id, screenshot_url, appointment_id, ai_review_result, ai_review_reasoning, uploaded_at')
+          .in('ai_review_result', ['suspicious', 'missing'])
+          .eq('admin_reviewed', false)
+          .order('uploaded_at', { ascending: false });
+
+        if (error) throw error;
+
+        if (!data || data.length === 0) {
+          container.innerHTML = '<div class="admin-empty">Geen openstaande reviews. 🎉</div>';
+          return;
+        }
+
+        container.innerHTML = '';
+
+        for (const item of data) {
+          const card = document.createElement('div');
+          card.className = 'admin-card';
+          card.dataset.auditId = item.id;
+
+          const { data: signedUrlData } = await window.supabase.storage
+            .from('follow-up-screenshots')
+            .createSignedUrl(item.screenshot_url, 300);
+
+          const imgHtml = signedUrlData?.signedUrl
+            ? `<img class="admin-screenshot" src="${signedUrlData.signedUrl}" alt="Screenshot">`
+            : '<div class="admin-empty">Kon screenshot niet laden.</div>';
+
+          card.innerHTML = `
+            <div class="admin-header">
+              <div class="admin-result-${item.ai_review_result}">
+                ${item.ai_review_result === 'suspicious' ? '⚠ Verdacht' : '✗ Ontbrekend'}
+              </div>
+              <div class="admin-date">${new Date(item.uploaded_at).toLocaleString('nl-NL')}</div>
+            </div>
+            <div class="admin-reasoning">${item.ai_review_reasoning || '(geen reasoning)'}</div>
+            <a class="admin-appt-link" href="follow-up-lead.html?id=${item.appointment_id}">Appointment bekijken →</a>
+            ${imgHtml}
+            <div class="admin-actions">
+              <button class="admin-btn-approve" data-action="approve" data-id="${item.id}">Goedkeuren</button>
+              <button class="admin-btn-reject" data-action="reject" data-id="${item.id}">Afkeuren</button>
+            </div>`;
+
+          container.appendChild(card);
+        }
+
+        container.addEventListener('click', async (e) => {
+          const btn = e.target.closest('button[data-action]');
+          if (!btn) return;
+
+          const action = btn.dataset.action;
+          const auditId = btn.dataset.id;
+
+          let notes = null;
+          if (action === 'reject') {
+            notes = prompt('Reden voor afkeuren (optioneel):');
+            if (notes === null) return;
+          }
+
+          btn.disabled = true;
+          const card = btn.closest('.admin-card');
+          card.querySelectorAll('button').forEach(b => b.disabled = true);
+
+          try {
+            const { data: { user } } = await window.supabase.auth.getUser();
+            const { error } = await window.supabase
+              .from('follow_up_screenshot_audit')
+              .update({
+                admin_reviewed: true,
+                admin_reviewer_id: user.id,
+                review_notes: notes || (action === 'approve' ? 'Goedgekeurd' : 'Afgekeurd'),
+              })
+              .eq('id', auditId);
+
+            if (error) throw error;
+
+            card.style.transition = 'opacity 0.3s';
+            card.style.opacity = '0';
+            setTimeout(() => {
+              card.remove();
+              if (container.querySelectorAll('.admin-card').length === 0) {
+                container.innerHTML = '<div class="admin-empty">Geen openstaande reviews. 🎉</div>';
+              }
+            }, 300);
+          } catch (err) {
+            alert('Fout: ' + err.message);
+            card.querySelectorAll('button').forEach(b => b.disabled = false);
+          }
+        });
+      } catch (err) {
+        container.innerHTML = `<div class="admin-error">Fout bij laden: ${err.message}</div>`;
+      }
+    }
+
+    init();
+  </script>
+</body>
+</html>
