@@ -38,8 +38,9 @@ export default async function handler(req, res) {
 
     const url = new URL(`${GHL_API_BASE}/calendars/events`);
     url.searchParams.set('locationId', process.env.GHL_LOCATION_ID);
-    url.searchParams.set('startTime', startDate.toISOString());
-    url.searchParams.set('endTime', endDate.toISOString());
+    url.searchParams.set('userId',     process.env.GHL_DAVE_USER_ID);
+    url.searchParams.set('startTime',  String(startDate.getTime()));
+    url.searchParams.set('endTime',    String(endDate.getTime()));
 
     const ghlRes = await fetch(url.toString(), {
       headers: {
