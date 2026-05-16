@@ -124,6 +124,95 @@
         justify-content: flex-start;
       }
     }
+    .fu-modal-backdrop {
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.7);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 1000;
+      padding: 20px;
+    }
+    .fu-modal {
+      background: var(--bg, #0a0b10);
+      border: 1px solid var(--border, rgba(255,255,255,0.15));
+      border-radius: 12px;
+      max-width: 520px;
+      width: 100%;
+      max-height: 90vh;
+      overflow-y: auto;
+    }
+    .fu-modal-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 16px 20px;
+      border-bottom: 1px solid var(--border, rgba(255,255,255,0.08));
+    }
+    .fu-modal-header h2 {
+      margin: 0;
+      font-size: 18px;
+      color: var(--text-primary, #fff);
+    }
+    .fu-modal-close {
+      background: none;
+      border: none;
+      color: var(--text-secondary, rgba(255,255,255,0.6));
+      font-size: 24px;
+      cursor: pointer;
+      padding: 0 8px;
+    }
+    .fu-modal-body { padding: 20px; }
+    .fu-field { margin-bottom: 16px; }
+    .fu-label {
+      display: block;
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--text-secondary, rgba(255,255,255,0.7));
+      margin-bottom: 6px;
+    }
+    .fu-outcome-options, .fu-bezwaren-options {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+    .fu-outcome-btn, .fu-bezwaar-btn {
+      padding: 8px 14px;
+      background: var(--surface-2, rgba(255,255,255,0.04));
+      border: 1px solid var(--border, rgba(255,255,255,0.12));
+      color: var(--text-primary, #fff);
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 13px;
+    }
+    .fu-outcome-btn.active, .fu-bezwaar-btn.active {
+      background: var(--brand, #093d54);
+      border-color: var(--brand, #093d54);
+    }
+    .fu-input, .fu-select, .fu-slider {
+      width: 100%;
+      padding: 8px 10px;
+      background: var(--surface-2, rgba(255,255,255,0.04));
+      border: 1px solid var(--border, rgba(255,255,255,0.12));
+      color: var(--text-primary, #fff);
+      border-radius: 6px;
+      font-size: 14px;
+      font-family: inherit;
+    }
+    .fu-textarea { resize: vertical; min-height: 60px; }
+    .fu-warmte-display {
+      text-align: right;
+      font-size: 13px;
+      color: var(--text-secondary, rgba(255,255,255,0.6));
+      margin-top: 4px;
+    }
+    .fu-modal-actions {
+      display: flex;
+      gap: 10px;
+      justify-content: flex-end;
+      margin-top: 20px;
+    }
   </style>
 </head>
 <body>
@@ -181,6 +270,26 @@
       </div>
     </header>
 
+    <section class="fu-section" id="section-opvolging-today">
+      <div class="fu-section-header">
+        <div class="fu-section-title">Opvolging vandaag</div>
+        <div class="fu-section-count" id="count-opvolging-today">—</div>
+      </div>
+      <div id="list-opvolging-today">
+        <div class="fu-loading">Laden…</div>
+      </div>
+    </section>
+
+    <section class="fu-section" id="section-open-acties">
+      <div class="fu-section-header">
+        <div class="fu-section-title">Open acties</div>
+        <div class="fu-section-count" id="count-open-acties">—</div>
+      </div>
+      <div id="list-open-acties">
+        <div class="fu-loading">Laden…</div>
+      </div>
+    </section>
+
     <section class="fu-section" id="section-today">
       <div class="fu-section-header">
         <div class="fu-section-title">Vandaag</div>
@@ -200,10 +309,85 @@
         <div class="fu-loading">Laden…</div>
       </div>
     </section>
+
+    <section class="fu-section" id="section-recent-completed">
+      <div class="fu-section-header">
+        <div class="fu-section-title">Recent afgerond</div>
+        <div class="fu-section-count" id="count-recent-completed">—</div>
+      </div>
+      <div id="list-recent-completed">
+        <div class="fu-loading">Laden…</div>
+      </div>
+    </section>
   </main>
+
+  <div class="fu-modal-backdrop" id="outcome-modal" style="display:none;">
+    <div class="fu-modal">
+      <div class="fu-modal-header">
+        <h2 id="outcome-modal-title">Call afronden</h2>
+        <button class="fu-modal-close" type="button" id="outcome-modal-close">×</button>
+      </div>
+      <div class="fu-modal-body">
+        <div class="fu-field">
+          <label class="fu-label">Uitkomst</label>
+          <div class="fu-outcome-options">
+            <button type="button" class="fu-outcome-btn" data-value="klant_geworden">Klant geworden</button>
+            <button type="button" class="fu-outcome-btn" data-value="geen_klant">Geen klant</button>
+            <button type="button" class="fu-outcome-btn" data-value="no_show">No-show</button>
+          </div>
+        </div>
+        <div class="fu-field fu-bezwaren-field" style="display:none;">
+          <label class="fu-label">Bezwaren (meerdere mogelijk)</label>
+          <div class="fu-bezwaren-options" id="bezwaren-options"></div>
+        </div>
+        <div class="fu-field fu-warmte-field" style="display:none;">
+          <label class="fu-label">Warmte (1=koud, 10=heet)</label>
+          <input type="range" min="1" max="10" value="5" id="warmte-slider" class="fu-slider">
+          <div class="fu-warmte-display"><span id="warmte-value">5</span> / 10</div>
+        </div>
+        <div class="fu-field fu-volgende-field" style="display:none;">
+          <label class="fu-label">Volgende actie</label>
+          <select class="fu-select" id="volgende-actie-select">
+            <option value="">— Kies —</option>
+            <option value="bellen">Bellen</option>
+            <option value="email">Email</option>
+            <option value="event">Event uitnodigen</option>
+            <option value="sluiten">Sluiten (klant wordt)</option>
+            <option value="niet_meer_opvolgen">Niet meer opvolgen</option>
+          </select>
+        </div>
+        <div class="fu-field fu-terugkom-field" style="display:none;">
+          <label class="fu-label">Terugkom datum (optioneel)</label>
+          <input type="date" class="fu-input" id="terugkom-date">
+        </div>
+        <div class="fu-field">
+          <label class="fu-label">Notitie (optioneel)</label>
+          <textarea class="fu-input fu-textarea" id="outcome-notitie" rows="3"></textarea>
+        </div>
+        <div class="fu-modal-actions">
+          <button type="button" class="fu-voicememo-button" id="outcome-submit" disabled>Opslaan</button>
+          <button type="button" class="fu-voicememo-button" id="outcome-cancel" style="background:transparent; border:1px solid var(--border, rgba(255,255,255,0.15));">Annuleren</button>
+        </div>
+      </div>
+    </div>
+  </div>
 
   <script>
     const ALLOWED_ROLES = ['sales', 'manager', 'admin', 'super_admin'];
+
+    const BEZWAREN = [
+      { value: 'te_duur', label: 'Te duur' },
+      { value: 'partner_overleg', label: 'Partner overleg' },
+      { value: 'angst_voor_verliezen', label: 'Angst voor verliezen' },
+      { value: 'timing', label: 'Verkeerde timing' },
+      { value: 'twijfel', label: 'Twijfel/aarzeling' },
+      { value: 'concurrent', label: 'Concurrent overweging' },
+      { value: 'niet_serieus', label: 'Niet serieus' },
+      { value: 'geen_geld', label: 'Geen geld' },
+      { value: 'wil_zelf_proberen', label: 'Wil zelf proberen' },
+      { value: 'geen_tijd', label: 'Geen tijd' },
+      { value: 'overig', label: 'Anders' },
+    ];
 
     function formatTime(iso) {
       const d = new Date(iso);
@@ -230,6 +414,11 @@
       const card = document.createElement('div');
       card.className = 'fu-card';
       card.dataset.appointmentId = appt.id;
+      card.style.cursor = 'pointer';
+      card.addEventListener('click', (e) => {
+        if (e.target.closest('button')) return;
+        window.location.href = `follow-up-lead.html?id=${appt.id}`;
+      });
 
       const info = document.createElement('div');
       info.className = 'fu-card-info';
@@ -293,6 +482,16 @@
         skipBtn.addEventListener('click', () => markVoicememo(appt.id, 'skipped', card));
         voicememo.appendChild(skipBtn);
       }
+
+      const outcomeBtn = document.createElement('button');
+      outcomeBtn.className = 'fu-voicememo-button';
+      outcomeBtn.style.marginTop = '8px';
+      outcomeBtn.textContent = 'Outcome invullen';
+      outcomeBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        openOutcomeModal(appt);
+      });
+      voicememo.appendChild(outcomeBtn);
 
       card.appendChild(voicememo);
       return card;
@@ -380,13 +579,145 @@
       }
     }
 
+    let currentOutcomeAppt = null;
+    let currentOutcomeChoice = null;
+    let currentBezwaren = new Set();
+
+    function openOutcomeModal(appt) {
+      currentOutcomeAppt = appt;
+      currentOutcomeChoice = null;
+      currentBezwaren = new Set();
+
+      document.getElementById('outcome-modal-title').textContent =
+        `Call afronden — ${appt.lead_name}`;
+
+      document.querySelectorAll('.fu-outcome-btn').forEach(b => b.classList.remove('active'));
+      document.querySelector('.fu-bezwaren-field').style.display = 'none';
+      document.querySelector('.fu-warmte-field').style.display = 'none';
+      document.querySelector('.fu-volgende-field').style.display = 'none';
+      document.querySelector('.fu-terugkom-field').style.display = 'none';
+      document.getElementById('outcome-notitie').value = '';
+      document.getElementById('warmte-slider').value = '5';
+      document.getElementById('warmte-value').textContent = '5';
+      document.getElementById('volgende-actie-select').value = '';
+      document.getElementById('terugkom-date').value = '';
+      document.getElementById('outcome-submit').disabled = true;
+
+      const bezwarenContainer = document.getElementById('bezwaren-options');
+      bezwarenContainer.innerHTML = '';
+      for (const b of BEZWAREN) {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'fu-bezwaar-btn';
+        btn.dataset.value = b.value;
+        btn.textContent = b.label;
+        btn.addEventListener('click', () => {
+          if (currentBezwaren.has(b.value)) {
+            currentBezwaren.delete(b.value);
+            btn.classList.remove('active');
+          } else {
+            currentBezwaren.add(b.value);
+            btn.classList.add('active');
+          }
+        });
+        bezwarenContainer.appendChild(btn);
+      }
+
+      document.getElementById('outcome-modal').style.display = 'flex';
+    }
+
+    function closeOutcomeModal() {
+      document.getElementById('outcome-modal').style.display = 'none';
+      currentOutcomeAppt = null;
+      currentOutcomeChoice = null;
+      currentBezwaren = new Set();
+    }
+
+    document.addEventListener('click', (e) => {
+      const outcomeBtn = e.target.closest('.fu-outcome-btn');
+      if (outcomeBtn) {
+        document.querySelectorAll('.fu-outcome-btn').forEach(b => b.classList.remove('active'));
+        outcomeBtn.classList.add('active');
+        currentOutcomeChoice = outcomeBtn.dataset.value;
+
+        document.querySelector('.fu-bezwaren-field').style.display = currentOutcomeChoice === 'geen_klant' ? 'block' : 'none';
+        document.querySelector('.fu-warmte-field').style.display = currentOutcomeChoice === 'geen_klant' ? 'block' : 'none';
+        document.querySelector('.fu-volgende-field').style.display = currentOutcomeChoice !== 'no_show' ? 'block' : 'none';
+        document.querySelector('.fu-terugkom-field').style.display = currentOutcomeChoice !== 'no_show' ? 'block' : 'none';
+        document.getElementById('outcome-submit').disabled = false;
+      }
+    });
+
+    document.getElementById('outcome-modal-close')?.addEventListener('click', closeOutcomeModal);
+    document.getElementById('outcome-cancel')?.addEventListener('click', closeOutcomeModal);
+    document.getElementById('outcome-modal')?.addEventListener('click', (e) => {
+      if (e.target.id === 'outcome-modal') closeOutcomeModal();
+    });
+
+    document.getElementById('warmte-slider')?.addEventListener('input', (e) => {
+      document.getElementById('warmte-value').textContent = e.target.value;
+    });
+
+    document.getElementById('outcome-submit')?.addEventListener('click', async () => {
+      if (!currentOutcomeAppt || !currentOutcomeChoice) return;
+
+      const submitBtn = document.getElementById('outcome-submit');
+      submitBtn.disabled = true;
+      submitBtn.textContent = 'Opslaan…';
+
+      const payload = {
+        appointment_id: currentOutcomeAppt.id,
+        outcome: currentOutcomeChoice,
+      };
+
+      if (currentOutcomeChoice === 'geen_klant') {
+        payload.bezwaren = Array.from(currentBezwaren);
+        payload.warmte_score = parseInt(document.getElementById('warmte-slider').value, 10);
+      }
+
+      if (currentOutcomeChoice !== 'no_show') {
+        const va = document.getElementById('volgende-actie-select').value;
+        if (va) payload.volgende_actie = va;
+        const td = document.getElementById('terugkom-date').value;
+        if (td) payload.terugkom_datum = td;
+      }
+
+      const notitie = document.getElementById('outcome-notitie').value.trim();
+      if (notitie) payload.notitie = notitie;
+
+      try {
+        const token = await window.AuthShared.getAccessToken();
+        const res = await fetch('/api/follow-up-outcomes', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`,
+          },
+          body: JSON.stringify(payload),
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          throw new Error(err.error || `HTTP ${res.status}`);
+        }
+        closeOutcomeModal();
+        location.reload();
+      } catch (err) {
+        alert('Fout bij opslaan: ' + err.message);
+        submitBtn.disabled = false;
+        submitBtn.textContent = 'Opslaan';
+      }
+    });
+
     async function init() {
       await window._authSharedReady;
       await window.AuthShared.requireAuth(ALLOWED_ROLES);
 
       await Promise.all([
+        renderSection('opvolging_today', 'list-opvolging-today', 'count-opvolging-today', false),
+        renderSection('open_acties', 'list-open-acties', 'count-open-acties', true),
         renderSection('today', 'list-today', 'count-today', false),
         renderSection('week', 'list-week', 'count-week', true),
+        renderSection('recent_completed', 'list-recent-completed', 'count-recent-completed', true),
       ]);
     }
 

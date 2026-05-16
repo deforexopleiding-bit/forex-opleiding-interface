@@ -57,6 +57,91 @@ async function handleGet(req, res, supabase) {
     endDate = new Date(now);
     startDate = new Date(now);
     startDate.setDate(startDate.getDate() - 7);
+  } else if (period === 'opvolging_today') {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const tomorrow = new Date(today);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+
+    const { data: outcomes, error: outErr } = await supabase
+      .from('follow_up_outcomes')
+      .select('appointment_id, terugkom_datum, opvolging_status')
+      .gte('terugkom_datum', today.toISOString().slice(0, 10))
+      .lt('terugkom_datum', tomorrow.toISOString().slice(0, 10))
+      .in('opvolging_status', ['gepland', 'verzet']);
+
+    if (outErr) {
+      return res.status(500).json({ error: outErr.message });
+    }
+
+    const ids = (outcomes || []).map(o => o.appointment_id);
+    if (ids.length === 0) {
+      return res.status(200).json({ period, count: 0, appointments: [] });
+    }
+
+    const { data, error } = await supabase
+      .from('follow_up_appointments')
+      .select('id, lead_name, lead_email, lead_phone, scheduled_at, status, voicememo_status, owner_id')
+      .in('id', ids);
+
+    return res.status(200).json({
+      period,
+      count: data?.length || 0,
+      appointments: data || [],
+    });
+
+  } else if (period === 'recent_completed') {
+    const since = new Date();
+    since.setDate(since.getDate() - 14);
+
+    const { data, error } = await supabase
+      .from('follow_up_appointments')
+      .select('id, lead_name, lead_email, scheduled_at, status, voicememo_status, owner_id')
+      .in('status', ['completed', 'no_show'])
+      .gte('scheduled_at', since.toISOString())
+      .order('scheduled_at', { ascending: false })
+      .limit(10);
+
+    if (error) {
+      return res.status(500).json({ error: error.message });
+    }
+    return res.status(200).json({ period, count: data?.length || 0, appointments: data || [] });
+
+  } else if (period === 'open_acties') {
+    const cutoff = new Date();
+    cutoff.setHours(cutoff.getHours() - 1);
+
+    const { data: appts, error: apptErr } = await supabase
+      .from('follow_up_appointments')
+      .select('id, lead_name, lead_email, scheduled_at, status, voicememo_status, owner_id')
+      .lt('scheduled_at', cutoff.toISOString())
+      .in('status', ['scheduled', 'in_progress', 'completed', 'no_show'])
+      .order('scheduled_at', { ascending: false })
+      .limit(50);
+
+    if (apptErr) {
+      return res.status(500).json({ error: apptErr.message });
+    }
+
+    const apptIds = (appts || []).map(a => a.id);
+    if (apptIds.length === 0) {
+      return res.status(200).json({ period, count: 0, appointments: [] });
+    }
+
+    const { data: existingOutcomes } = await supabase
+      .from('follow_up_outcomes')
+      .select('appointment_id')
+      .in('appointment_id', apptIds);
+
+    const withOutcome = new Set((existingOutcomes || []).map(o => o.appointment_id));
+    const openActies = (appts || []).filter(a => !withOutcome.has(a.id));
+
+    return res.status(200).json({
+      period,
+      count: openActies.length,
+      appointments: openActies,
+    });
+
   } else {
     startDate = new Date(now);
     startDate.setHours(0, 0, 0, 0);
