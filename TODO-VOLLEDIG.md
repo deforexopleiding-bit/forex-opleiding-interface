@@ -1,5 +1,8 @@
 # TODO — Agency Command Center
-> Bijgewerkt: 2026-05-14 (Fase C t/m C7 auth-gate volledig) | Gebaseerd op AUDIT-VOLLEDIG.md
+> Bijgewerkt: 2026-05-15 (Fase C t/m C7 auth-gate volledig) | Gebaseerd op AUDIT-VOLLEDIG.md
+>
+> **Strategische context**: zie `docs/sessie-logs/Strategisch-Plan-De-Forex-Opleiding.md` (12 mei 2026) voor 12-maands roadmap en €300K-€700K aan upside-lekken.
+> **Follow-up Module plan**: zie `docs/sessie-logs/follow-up-module-plan.md` v2.2.
 
 ---
 
@@ -78,6 +81,17 @@
 **Bestand:** `modules/admin.html`
 **Probleem:** Jeffrey (manager) ziet "Deactiveer" en "Opnieuw uitnodigen" knoppen voor Amigo's rij. Server-side admin-users.js gate werkt correct (PATCH 403), maar UI toont knoppen die effectief niets doen bij klik.
 **Fix:** Hide actie-knoppen voor rijen waar caller geen rechten heeft.
+
+---
+
+## 🔐 Geparkeerde Auth-items (15 mei 2026)
+
+Diagnose recovery-link flow + SMTP-config geparkeerd tijdens scope-discussie Follow-up Module.
+
+- **[auth-1]** Dave + Maxim handmatig wachtwoord setten via Supabase dashboard (tijdelijke unblock zodat ze kunnen inloggen)
+- **[auth-2]** Diagnose-flow recovery-link afmaken: verse link genereren via `/api/admin-generate-link` endpoint (live, commit 37366b1), openen in nieuwe tab, observeren of reset-password.html werkt of fallback verschijnt. Bij fallback: frontend-fix nodig in reset-password.html (race-condition vermoeden, vergelijkbaar met C7 fix).
+- **[auth-3]** Custom SMTP configureren via Strato `noreply@deforexopleiding.nl` in Supabase Authentication settings. Vereist: Strato mailbox aanmaken, SMTP credentials, SPF/DKIM/DMARC records in DNS. Lost rate limit (2/h → onbeperkt) en deliverability op.
+- **[auth-endp]** `/api/admin-generate-link` endpoint hoort bij `endp-2-cleanup` familie voor verwijdering na voltooiing auth-2.
 
 ---
 
@@ -469,29 +483,35 @@ DOE PER SUB-SPRINT: TEST + DEPLOY + VERIFICATIE voor volgende
 
 ---
 
-## Follow-up Module (Sales Call Tracking)
+## 📞 Follow-up Module
 
-### Architectuur-beslissingen (definitief 13-14 mei)
-- Voicememo strategie: Dave handmatig vanaf eigen telefoon — module is verplicht afvinkpunt + steekproef screenshots
-- Geen automation vanaf Dave's persoonlijke WhatsApp (ban-risico)
-- WhatsApp Coexistence werkt NIET voor NL/EU nummers (verified via Meta docs)
-- No-show + 24u opvolging via Business API (geverifieerd bedrijfsnummer)
-- Email reminders via bestaande GHL automation (geen wijziging)
-- Screenshot review: D-optie (AI Haiku eerste check + Jeffrey alleen verdachte)
-- Dagelijkse notificatie via eigen module (niet GHL), 09:00
-- Post-call invul: zacht geadviseerd (B), niet hard verplicht
-- Open taken: dashboard wordt aanleiding om systeem actief te gebruiken
-- Klantwaarde gemiddelde: €4000 (2880-12000 range)
-- 50-100 calls/maand verwacht
+Volledig plan staat in `docs/sessie-logs/follow-up-module-plan.md` (versie 2.2, commit a6175d4).
 
-### Stack bevestigd
-- GHL: Agency Pro account (V2 API + OAuth beschikbaar)
-- Zoom: Pro account (webhooks mogelijk)
-- WhatsApp Business API: via GHL relatie
-- Voicememo via Dave eigen telefoon (handmatig, geen API)
+### Pre-work voor Fase 1A (uit te voeren door ADMIN_ROLES user)
+
+- **[fu-pre-1]** GoHighLevel Private Integration Token aanmaken met 9 scopes (zie plan). Vercel env vars: `GHL_API_KEY`, `GHL_LOCATION_ID`. ~5-10 min.
+- **[fu-pre-2]** Zoom Marketplace App aanmaken met 4 webhooks. Vercel env vars: `ZOOM_ACCOUNT_ID`, `ZOOM_CLIENT_ID`, `ZOOM_CLIENT_SECRET`, `ZOOM_WEBHOOK_SECRET`. ~10-15 min.
+- **[fu-pre-3]** (Fase 1B) GHL Conversation Webhook configureren voor `conversation.message.created`. Vercel env var: `GHL_WEBHOOK_SECRET`. ~5 min.
+- **[fu-pre-4]** (Fase 2) Drie GHL workflows voor Dave-notificaties (Daily Call List / Pre-Call Reminder / EOD Reminder) met API trigger + Meta-goedkeuring templates aanvragen (1-7 dagen wachttijd).
+- **[fu-pre-5]** (Fase 2) Twee GHL no-show workflows (Immediate / 24u) met API trigger + huidige GHL no-show flow op handmatig zetten bij Fase 2 go-live.
 
 ### Fase planning
-- **Fase 1** (1 week, ~5-7 uur Claude Code): Detectie + Visibiliteit
-- **Fase 2** (3-5 dagen): No-show automation
-- **Fase 3** (3-5 dagen): Post-call invul-flow + screenshot upload
-- **Fase 4** (1 week): Follow-up drip-campagnes niet-kopers
+
+| Fase | Werk | Doorlooptijd |
+|------|------|--------------|
+| 1A — Foundation + Dashboard | 4-6u Claude Code | 3-5 dagen |
+| 1B — WhatsApp conversaties read | 3-4u | 2-3 dagen |
+| 1C — WhatsApp reply | 2-3u | 2 dagen |
+| 2 — Notificaties + No-show | 3-4u | 3-5 dagen |
+| 3 — Post-call invul-flow | 3-4u | 3-5 dagen |
+| 4 — Drip via GHL | 5-7u | 1 week |
+| **Totaal** | **~20-28u** | **4-5 weken** |
+
+---
+
+## 🧹 Geparkeerd voor cleanup (volgende sessie)
+
+- **[todo-clean-1]** Sectie "Voltooide items" en "Volgende sessie priority items" saneren — items uit 14-15 mei (C6.1/2/3, E2, E3, etc.) zijn voltooid maar staan nog als open in sectie 12. Verplaatsen naar Voltooide items met datum.
+- **[todo-clean-2]** Polish-items 3-9 zijn voltooid (commit f235696), markeren als ✅ in sectie.
+- **[todo-clean-3]** Strategisch Plan bestand toevoegen aan `docs/sessie-logs/Strategisch-Plan-De-Forex-Opleiding.md` (12 mei 2026, momenteel alleen in chat-context geüpload).
+- **[todo-clean-4]** Volledig consistent format toepassen op TODO-VOLLEDIG.md (alle items met dezelfde tags, dezelfde status-emojis).
