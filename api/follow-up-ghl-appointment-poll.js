@@ -5,7 +5,7 @@
 //
 // Haalt appointments op van vandaag 00:00 t/m +7 dagen.
 // Idempotent: upsert op ghl_appointment_id.
-// owner_id wordt NIET gezet bij poll — system-import zonder user-context.
+// owner_id = DAVE_PROFILE_ID zodat sales-user (Dave) zijn eigen appointments via RLS kan zien
 
 import { supabaseAdmin, checkCronAuth } from './supabase.js';
 
@@ -19,8 +19,12 @@ export default async function handler(req, res) {
   const cronAuth = checkCronAuth(req);
   if (!cronAuth.ok) return res.status(cronAuth.status).json(cronAuth.body);
 
-  if (!process.env.GHL_API_KEY || !process.env.GHL_LOCATION_ID) {
-    return res.status(500).json({ error: 'GHL_API_KEY of GHL_LOCATION_ID niet geconfigureerd.' });
+  const requiredEnvVars = ['GHL_API_KEY', 'GHL_LOCATION_ID', 'GHL_DAVE_USER_ID', 'DAVE_PROFILE_ID'];
+  for (const name of requiredEnvVars) {
+    if (!process.env[name]) {
+      console.error('[follow-up-ghl-poll] missing env var:', name);
+      return res.status(500).json({ error: `Env var ${name} niet geconfigureerd.` });
+    }
   }
 
   const startTime = Date.now();
@@ -59,6 +63,11 @@ export default async function handler(req, res) {
         break;
       }
 
+      if (event.assignedUserId && event.assignedUserId !== process.env.GHL_DAVE_USER_ID) {
+        results.push({ id: event.id, skipped: true, reason: 'not-dave' });
+        continue;
+      }
+
       const row = {
         ghl_appointment_id: event.id,
         lead_name:           event.title || event.contactName || 'Onbekend',
@@ -68,6 +77,7 @@ export default async function handler(req, res) {
         scheduled_at:        event.startTime,
         duration_minutes:    event.durationMinutes || 30,
         status:              mapGhlStatus(event.appointmentStatus),
+        owner_id:            process.env.DAVE_PROFILE_ID,
         updated_at:          new Date().toISOString(),
       };
 
