@@ -1,25 +1,21 @@
 // api/zoom-webhook.js
 //
-// Stub endpoint voor Zoom Marketplace webhooks (Follow-up Module).
-//
-// VERSIE: stub — handelt alleen CRC URL validation af voor Zoom
-// Marketplace app verification. Echte event-handlers (meeting.started,
-// meeting.ended, meeting.participant_joined/left) komen in Fase 1A
-// van de Follow-up Module.
+// Zoom Marketplace webhook handler voor Follow-up Module (Fase 1A).
 //
 // POST /api/zoom-webhook
 //
-// Zoom URL Validation Request body:
-//   { event: "endpoint.url_validation", payload: { plainToken: "..." } }
+// Twee flows:
+// 1. CRC URL validation — Zoom valideert endpoint bij app-activatie
+//    Body: { event: "endpoint.url_validation", payload: { plainToken: "..." } }
+//    Response: { plainToken, encryptedToken: "<HMAC-SHA256 hex>" }
 //
-// Required response within 3 seconds:
-//   { plainToken: "...", encryptedToken: "<HMAC-SHA256 hex>" }
-//
-// Echte events worden later geverifieerd via x-zm-signature header.
-// Voor nu loggen we ze alleen en geven 200 terug zodat Zoom geen
-// retries doet.
+// 2. Meeting events — meeting.started / participant_joined / ended / left
+//    Worden geverifieerd via x-zm-signature + gelogd in follow_up_events_log.
+//    No-show detectie gebeurt in aparte cron (follow-up-no-show-detect),
+//    niet hier — voorkomt race conditions.
 
 import crypto from 'node:crypto';
+import { supabaseAdmin } from './supabase.js';
 
 const SECRET_TOKEN = process.env.ZOOM_WEBHOOK_SECRET_TOKEN;
 
@@ -39,8 +35,7 @@ export default async function handler(req, res) {
   const body = req.body || {};
   const event = body.event;
 
-  // CRC URL validation request van Zoom (eenmalig bij Validate-klik
-  // in Marketplace + bij app activatie)
+  // ── 1. CRC URL validation ─────────────────────────────────────────────────
   if (event === 'endpoint.url_validation') {
     const plainToken = body?.payload?.plainToken;
     if (!plainToken || typeof plainToken !== 'string') {
@@ -55,8 +50,73 @@ export default async function handler(req, res) {
     return res.status(200).json({ plainToken, encryptedToken });
   }
 
-  // Andere events: stub-gedrag — log en accept. Echte handling
-  // komt in Fase 1A.
-  console.log('[zoom-webhook] event ontvangen (stub):', event);
-  return res.status(200).json({ received: true, stub: true });
+  // ── 2. Signature verificatie voor echte events ────────────────────────────
+  const zmSignature  = req.headers['x-zm-signature'];
+  const zmTimestamp  = req.headers['x-zm-request-timestamp'];
+
+  if (zmSignature && zmTimestamp) {
+    const rawBody = JSON.stringify(body);
+    const message  = `v0:${zmTimestamp}:${rawBody}`;
+    const expected = 'v0=' + crypto
+      .createHmac('sha256', SECRET_TOKEN)
+      .update(message)
+      .digest('hex');
+
+    if (expected !== zmSignature) {
+      console.warn('[zoom-webhook] ongeldige signature voor event:', event);
+      return res.status(401).json({ error: 'Ongeldige Zoom webhook signature.' });
+    }
+  }
+
+  // ── 3. Meeting events — loggen + Supabase update ─────────────────────────
+  const payload    = body.payload || {};
+  const meetingObj = payload.object || {};
+  const meetingId  = String(meetingObj.id || '');
+
+  if (event === 'meeting.started') {
+    await logEvent('zoom', event, payload);
+    // Optioneel: zoom_meeting_id koppelen aan appointment op basis van meetingId
+    if (meetingId) {
+      await supabaseAdmin
+        .from('follow_up_appointments')
+        .update({ zoom_meeting_id: meetingId, updated_at: new Date().toISOString() })
+        .eq('zoom_meeting_id', meetingId);
+    }
+    return res.status(200).json({ received: true });
+  }
+
+  if (event === 'meeting.participant_joined') {
+    await logEvent('zoom', event, payload);
+    return res.status(200).json({ received: true });
+  }
+
+  if (event === 'meeting.ended') {
+    await logEvent('zoom', event, payload);
+    return res.status(200).json({ received: true });
+  }
+
+  if (event === 'meeting.participant_left') {
+    await logEvent('zoom', event, payload);
+    return res.status(200).json({ received: true });
+  }
+
+  // Onbekend event — accepteren zodat Zoom geen retries doet
+  console.log('[zoom-webhook] onbekend event ontvangen:', event);
+  return res.status(200).json({ received: true });
+}
+
+async function logEvent(source, eventType, payload) {
+  try {
+    const { error } = await supabaseAdmin
+      .from('follow_up_events_log')
+      .insert({
+        source:     source,
+        event_type: eventType,
+        payload:    payload,
+        processed:  false,
+      });
+    if (error) console.error('[zoom-webhook] log insert fout:', error.message);
+  } catch (e) {
+    console.error('[zoom-webhook] log exception:', e.message);
+  }
 }
