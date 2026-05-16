@@ -133,9 +133,14 @@ export default async function handler(req, res) {
       aiReasoning = `Anthropic API fout ${ar.status}: ${errText.slice(0, 200)}`;
     } else {
       const aData = await ar.json();
-      const text = aData.content?.[0]?.text?.trim() || '';
+      const rawText = aData.content?.[0]?.text?.trim() || '';
+      // Strip eventuele markdown code-fences (Haiku voegt soms ```json ... ``` toe)
+      const cleanedText = rawText
+        .replace(/^```(?:json)?\s*\n?/i, '')
+        .replace(/\n?\s*```\s*$/, '')
+        .trim();
       try {
-        const parsed = JSON.parse(text);
+        const parsed = JSON.parse(cleanedText);
         if (['ok', 'suspicious', 'missing'].includes(parsed.result)) {
           aiResult = parsed.result;
         }
@@ -143,7 +148,7 @@ export default async function handler(req, res) {
           aiReasoning = parsed.reasoning.slice(0, 500);
         }
       } catch (parseErr) {
-        console.error('[screenshot-review] JSON parse error:', parseErr.message, 'raw:', text.slice(0, 200));
+        console.error('[screenshot-review] JSON parse error:', parseErr.message, 'rawText:', rawText.slice(0, 300));
         aiReasoning = 'AI-response was geen valide JSON';
       }
     }

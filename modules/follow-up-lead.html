@@ -394,9 +394,15 @@
 
       if (uploadBtn && fileInput) {
         uploadBtn.addEventListener('click', () => fileInput.click());
+        let uploadInProgress = false;
         fileInput.addEventListener('change', async (e) => {
           const file = e.target.files[0];
           if (!file) return;
+          if (uploadInProgress) {
+            console.log('[follow-up] upload already in progress, skipping duplicate');
+            return;
+          }
+          uploadInProgress = true;
 
           uploadBtn.disabled = true;
           uploadBtn.textContent = 'Uploaden…';
@@ -445,6 +451,7 @@
             resultEl.style.color = '#fca5a5';
             uploadBtn.disabled = false;
             uploadBtn.textContent = 'Opnieuw proberen';
+            uploadInProgress = false;
           }
         });
       }
