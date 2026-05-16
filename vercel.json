@@ -23,6 +23,10 @@
     {
       "path": "/api/follow-up-ghl-appointment-poll",
       "schedule": "*/15 * * * *"
+    },
+    {
+      "path": "/api/follow-up-no-show-detect",
+      "schedule": "*/5 * * * *"
     }
   ],
   "headers": [

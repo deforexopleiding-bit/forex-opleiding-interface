@@ -114,7 +114,7 @@ export default async function handler(req, res) {
   }
 
   if (TRACKED_EVENTS.has(event)) {
-    const { error } = await supabaseAdmin
+    const { error: logErr } = await supabaseAdmin
       .from('follow_up_events_log')
       .insert({
         source: 'zoom',
@@ -123,10 +123,15 @@ export default async function handler(req, res) {
         processed: false,
       });
 
-    if (error) {
-      console.error('[zoom-webhook] kon event niet loggen:', error.message);
+    if (logErr) {
+      console.error('[zoom-webhook] kon event niet loggen:', logErr.message);
     }
-    return res.status(200).json({ received: true, logged: !error });
+
+    if (event === 'meeting.started') {
+      await tryMapAppointment(body);
+    }
+
+    return res.status(200).json({ received: true, logged: !logErr });
   }
 
   console.log('[zoom-webhook] niet-getrackt event:', event);
@@ -139,4 +144,65 @@ async function readRawBody(req) {
     chunks.push(typeof chunk === 'string' ? Buffer.from(chunk) : chunk);
   }
   return Buffer.concat(chunks).toString('utf8');
+}
+
+async function tryMapAppointment(body) {
+  const meetingObject = body?.payload?.object;
+  if (!meetingObject) return;
+
+  const zoomMeetingId = String(meetingObject.id || '');
+  const meetingStartTime = meetingObject.start_time;
+  const hostEmail = (meetingObject.host_email || '').toLowerCase();
+
+  if (!zoomMeetingId) return;
+
+  // Strategie 1: match via lead-email in participants (komt later via participant_joined event)
+  // Strategie 2 (nu actief): match via scheduled_at tijd-proximity ± 15 min
+  // Match alleen Dave's appointments (host_email check)
+  const daveEmail = (process.env.DAVE_ZOOM_EMAIL || '').toLowerCase();
+  if (daveEmail && hostEmail && hostEmail !== daveEmail) {
+    console.log('[zoom-webhook] meeting started door niet-Dave host:', hostEmail);
+    return;
+  }
+
+  if (!meetingStartTime) return;
+
+  const startDate = new Date(meetingStartTime);
+  const windowStart = new Date(startDate.getTime() - 15 * 60_000);
+  const windowEnd = new Date(startDate.getTime() + 15 * 60_000);
+
+  const { data: candidates } = await supabaseAdmin
+    .from('follow_up_appointments')
+    .select('id, scheduled_at, zoom_meeting_id')
+    .gte('scheduled_at', windowStart.toISOString())
+    .lte('scheduled_at', windowEnd.toISOString())
+    .is('zoom_meeting_id', null);
+
+  if (!candidates || candidates.length === 0) {
+    console.log('[zoom-webhook] geen unmapped appointment binnen window voor zoom meeting', zoomMeetingId);
+    return;
+  }
+
+  // Pak de dichtstbijzijnde
+  candidates.sort((a, b) => {
+    const diffA = Math.abs(new Date(a.scheduled_at).getTime() - startDate.getTime());
+    const diffB = Math.abs(new Date(b.scheduled_at).getTime() - startDate.getTime());
+    return diffA - diffB;
+  });
+
+  const target = candidates[0];
+
+  const { error: updateErr } = await supabaseAdmin
+    .from('follow_up_appointments')
+    .update({
+      zoom_meeting_id: zoomMeetingId,
+      status: 'in_progress',
+    })
+    .eq('id', target.id);
+
+  if (updateErr) {
+    console.error('[zoom-webhook] kon mapping niet schrijven:', updateErr.message);
+  } else {
+    console.log('[zoom-webhook] zoom_meeting_id', zoomMeetingId, 'gekoppeld aan appointment', target.id);
+  }
 }
