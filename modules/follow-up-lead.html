@@ -11,6 +11,7 @@
   <script src="shared/supabase-client.js"></script>
   <script src="shared/agent-shared.js"></script>
   <style>
+    .main-content { margin-left: var(--sidebar-w, 220px); min-height: 100vh; padding: 28px 28px 64px; max-width: 1200px; position: relative; z-index: 1; }
     .ld-back {
       display: inline-flex;
       align-items: center;
@@ -434,7 +435,11 @@
             resultEl.innerHTML = `
               <div style="color:${colors[reviewData.result] || '#fff'};">${labels[reviewData.result] || reviewData.result}</div>
               <div style="color:var(--text-secondary,rgba(255,255,255,0.6));margin-top:4px;font-size:12px;">${reviewData.reasoning || ''}</div>`;
-            uploadBtn.style.display = 'none';
+            uploadBtn.disabled = true;
+            uploadBtn.textContent = 'Geüpload';
+            uploadBtn.style.opacity = '0.5';
+            uploadBtn.style.cursor = 'default';
+            fileInput.value = '';
           } catch (err) {
             resultEl.textContent = 'Fout: ' + err.message;
             resultEl.style.color = '#fca5a5';

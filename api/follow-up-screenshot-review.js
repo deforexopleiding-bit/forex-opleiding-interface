@@ -29,14 +29,23 @@ Antwoord ALLEEN met geldige JSON, exact dit format:
 
 Gebruik result waarde "ok" als duidelijk valide, "suspicious" als twijfelachtig of onduidelijk, "missing" als duidelijk geen valide bewijs.`;
 
-const ALLOWED_MIME = {
+const ANTHROPIC_SUPPORTED_MIME = {
   png: 'image/png',
   jpg: 'image/jpeg',
   jpeg: 'image/jpeg',
   webp: 'image/webp',
-  heic: 'image/heic',
-  heif: 'image/heif',
+  gif: 'image/gif',
 };
+
+function detectImageMediaType(buffer) {
+  if (!buffer || buffer.length < 12) return null;
+  if (buffer[0] === 0x89 && buffer[1] === 0x50 && buffer[2] === 0x4E && buffer[3] === 0x47) return 'image/png';
+  if (buffer[0] === 0xFF && buffer[1] === 0xD8 && buffer[2] === 0xFF) return 'image/jpeg';
+  if (buffer[0] === 0x47 && buffer[1] === 0x49 && buffer[2] === 0x46) return 'image/gif';
+  if (buffer[0] === 0x52 && buffer[1] === 0x49 && buffer[2] === 0x46 && buffer[3] === 0x46
+    && buffer[8] === 0x57 && buffer[9] === 0x45 && buffer[10] === 0x42 && buffer[11] === 0x50) return 'image/webp';
+  return null;
+}
 
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
@@ -87,10 +96,12 @@ export default async function handler(req, res) {
   }
 
   const arrayBuffer = await fileBlob.arrayBuffer();
-  const base64 = Buffer.from(arrayBuffer).toString('base64');
+  const fileBuffer = Buffer.from(arrayBuffer);
+  const base64 = fileBuffer.toString('base64');
 
-  const ext = storage_path.split('.').pop()?.toLowerCase() || 'png';
-  const mediaType = ALLOWED_MIME[ext] || 'image/png';
+  const ext = (storage_path.split('.').pop() || 'png').toLowerCase();
+  const detectedMime = detectImageMediaType(fileBuffer);
+  const mediaType = detectedMime || ANTHROPIC_SUPPORTED_MIME[ext] || 'image/jpeg';
 
   let aiResult = 'suspicious';
   let aiReasoning = 'AI-review niet beschikbaar';
@@ -118,8 +129,8 @@ export default async function handler(req, res) {
 
     if (!ar.ok) {
       const errText = await ar.text();
-      console.error('[screenshot-review] anthropic error:', ar.status, errText);
-      aiReasoning = `Anthropic API fout ${ar.status}`;
+      console.error('[screenshot-review] anthropic error:', ar.status, 'mediaType:', mediaType, 'detected:', detectedMime, 'ext:', ext, 'base64Len:', base64.length, 'errBody:', errText.slice(0, 500));
+      aiReasoning = `Anthropic API fout ${ar.status}: ${errText.slice(0, 200)}`;
     } else {
       const aData = await ar.json();
       const text = aData.content?.[0]?.text?.trim() || '';
