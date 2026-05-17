@@ -57,6 +57,12 @@ async function handleGet(req, res, supabase) {
     endDate = new Date(now);
     startDate = new Date(now);
     startDate.setDate(startDate.getDate() - 7);
+  } else if (period === 'opvolging_overdue') {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    return await fetchOpvolgingRange(supabase, null, today, period, res);
+
   } else if (period === 'opvolging_today') {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
@@ -268,9 +274,12 @@ async function fetchOpvolgingRange(supabase, startDate, endDate, period, res) {
   let query = supabase
     .from('follow_up_outcomes')
     .select('appointment_id, terugkom_datum, opvolging_status')
-    .gte('terugkom_datum', startDate.toISOString().slice(0, 10))
-    .in('opvolging_status', ['gepland', 'verzet']);
+    .in('opvolging_status', ['gepland', 'verzet'])
+    .not('terugkom_datum', 'is', null);
 
+  if (startDate) {
+    query = query.gte('terugkom_datum', startDate.toISOString().slice(0, 10));
+  }
   if (endDate) {
     query = query.lt('terugkom_datum', endDate.toISOString().slice(0, 10));
   }

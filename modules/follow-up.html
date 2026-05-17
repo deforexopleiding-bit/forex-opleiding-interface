@@ -271,6 +271,16 @@
       </div>
     </header>
 
+    <section class="fu-section" id="section-opvolging-overdue">
+      <div class="fu-section-header">
+        <div class="fu-section-title">Achterstallige opvolgingen</div>
+        <div class="fu-section-count" id="count-opvolging-overdue">—</div>
+      </div>
+      <div id="list-opvolging-overdue">
+        <div class="fu-loading">Laden…</div>
+      </div>
+    </section>
+
     <section class="fu-section" id="section-opvolging-today">
       <div class="fu-section-header">
         <div class="fu-section-title">Opvolging vandaag</div>
@@ -831,6 +841,7 @@
       }
 
       await Promise.all([
+        renderSection('opvolging_overdue', 'list-opvolging-overdue', 'count-opvolging-overdue', false),
         renderSection('opvolging_today', 'list-opvolging-today', 'count-opvolging-today', false),
         renderSection('opvolging_week', 'list-opvolging-week', 'count-opvolging-week', false),
         renderSection('opvolging_30d', 'list-opvolging-30d', 'count-opvolging-30d', false),
