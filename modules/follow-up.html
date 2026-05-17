@@ -281,6 +281,36 @@
       </div>
     </section>
 
+    <section class="fu-section" id="section-opvolging-week">
+      <div class="fu-section-header">
+        <div class="fu-section-title">Opvolging komende 7 dagen</div>
+        <div class="fu-section-count" id="count-opvolging-week">—</div>
+      </div>
+      <div id="list-opvolging-week">
+        <div class="fu-loading">Laden…</div>
+      </div>
+    </section>
+
+    <section class="fu-section" id="section-opvolging-30d">
+      <div class="fu-section-header">
+        <div class="fu-section-title">Opvolging 8-30 dagen</div>
+        <div class="fu-section-count" id="count-opvolging-30d">—</div>
+      </div>
+      <div id="list-opvolging-30d">
+        <div class="fu-loading">Laden…</div>
+      </div>
+    </section>
+
+    <section class="fu-section" id="section-opvolging-verder">
+      <div class="fu-section-header">
+        <div class="fu-section-title">Opvolging verder dan 30 dagen</div>
+        <div class="fu-section-count" id="count-opvolging-verder">—</div>
+      </div>
+      <div id="list-opvolging-verder">
+        <div class="fu-loading">Laden…</div>
+      </div>
+    </section>
+
     <section class="fu-section" id="section-open-acties">
       <div class="fu-section-header">
         <div class="fu-section-title">Open acties</div>
@@ -321,6 +351,25 @@
       </div>
     </section>
   </main>
+
+  <div class="fu-modal-backdrop" id="snelle-notitie-modal" style="display:none;">
+    <div class="fu-modal">
+      <div class="fu-modal-header">
+        <h2 id="snelle-notitie-modal-title">Snelle notitie</h2>
+        <button class="fu-modal-close" type="button" id="snelle-notitie-modal-close">×</button>
+      </div>
+      <div class="fu-modal-body">
+        <div class="fu-field">
+          <label class="fu-label">Korte notitie bij deze afspraak</label>
+          <textarea class="fu-input fu-textarea" id="snelle-notitie-textarea" rows="4" maxlength="2000" placeholder="Bv. lead reageerde lauw, wil interne discussie eerst…"></textarea>
+        </div>
+        <div class="fu-modal-actions">
+          <button type="button" class="fu-voicememo-button" id="snelle-notitie-submit">Opslaan</button>
+          <button type="button" class="fu-voicememo-button" id="snelle-notitie-cancel" style="background:transparent; border:1px solid var(--border, rgba(255,255,255,0.15));">Annuleren</button>
+        </div>
+      </div>
+    </div>
+  </div>
 
   <div class="fu-modal-backdrop" id="outcome-modal" style="display:none;">
     <div class="fu-modal">
@@ -484,6 +533,19 @@
         voicememo.appendChild(skipBtn);
       }
 
+      const notitieBtn = document.createElement('button');
+      notitieBtn.className = 'fu-voicememo-button';
+      notitieBtn.style.background = 'transparent';
+      notitieBtn.style.border = '1px solid var(--border, rgba(255,255,255,0.15))';
+      notitieBtn.style.marginTop = '8px';
+      notitieBtn.style.marginRight = '6px';
+      notitieBtn.textContent = appt.snelle_notitie ? '📝 Notitie bewerken' : '📝 Snelle notitie';
+      notitieBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        openSnelleNotitieModal(appt);
+      });
+      voicememo.appendChild(notitieBtn);
+
       const outcomeBtn = document.createElement('button');
       outcomeBtn.className = 'fu-voicememo-button';
       outcomeBtn.style.marginTop = '8px';
@@ -493,6 +555,56 @@
         openOutcomeModal(appt);
       });
       voicememo.appendChild(outcomeBtn);
+
+      if (appt.terugkom_datum && appt.opvolging_status !== 'geregeld') {
+        const geregeldBtn = document.createElement('button');
+        geregeldBtn.className = 'fu-voicememo-button';
+        geregeldBtn.style.marginTop = '8px';
+        geregeldBtn.style.marginRight = '6px';
+        geregeldBtn.textContent = '✓ Opvolging geregeld';
+        geregeldBtn.addEventListener('click', async (e) => {
+          e.stopPropagation();
+          if (!confirm('Markeer deze opvolging als geregeld?')) return;
+          try {
+            const token = await window.AuthShared.getAccessToken();
+            const r = await fetch('/api/follow-up-opvolging-status', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+              body: JSON.stringify({ appointment_id: appt.id, action: 'geregeld' }),
+            });
+            if (!r.ok) { const e2 = await r.json().catch(() => ({})); throw new Error(e2.error || `HTTP ${r.status}`); }
+            location.reload();
+          } catch (err) { alert('Fout: ' + err.message); }
+        });
+        voicememo.appendChild(geregeldBtn);
+
+        const verzetBtn = document.createElement('button');
+        verzetBtn.className = 'fu-voicememo-button';
+        verzetBtn.style.marginTop = '8px';
+        verzetBtn.style.marginRight = '6px';
+        verzetBtn.style.background = 'transparent';
+        verzetBtn.style.border = '1px solid var(--border, rgba(255,255,255,0.15))';
+        verzetBtn.textContent = '📅 Verzet';
+        verzetBtn.addEventListener('click', async (e) => {
+          e.stopPropagation();
+          const newDate = prompt('Nieuwe terugkom-datum (YYYY-MM-DD):', appt.terugkom_datum);
+          if (!newDate || !/^\d{4}-\d{2}-\d{2}$/.test(newDate)) {
+            if (newDate !== null) alert('Ongeldig datumformaat. Gebruik YYYY-MM-DD.');
+            return;
+          }
+          try {
+            const token = await window.AuthShared.getAccessToken();
+            const r = await fetch('/api/follow-up-opvolging-status', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+              body: JSON.stringify({ appointment_id: appt.id, action: 'verzet', new_terugkom_datum: newDate }),
+            });
+            if (!r.ok) { const e2 = await r.json().catch(() => ({})); throw new Error(e2.error || `HTTP ${r.status}`); }
+            location.reload();
+          } catch (err) { alert('Fout: ' + err.message); }
+        });
+        voicememo.appendChild(verzetBtn);
+      }
 
       card.appendChild(voicememo);
       return card;
@@ -720,12 +832,59 @@
 
       await Promise.all([
         renderSection('opvolging_today', 'list-opvolging-today', 'count-opvolging-today', false),
+        renderSection('opvolging_week', 'list-opvolging-week', 'count-opvolging-week', false),
+        renderSection('opvolging_30d', 'list-opvolging-30d', 'count-opvolging-30d', false),
+        renderSection('opvolging_verder', 'list-opvolging-verder', 'count-opvolging-verder', false),
         renderSection('open_acties', 'list-open-acties', 'count-open-acties', true),
         renderSection('today', 'list-today', 'count-today', false),
         renderSection('week', 'list-week', 'count-week', true),
         renderSection('recent_completed', 'list-recent-completed', 'count-recent-completed', true),
       ]);
     }
+
+    let currentNotitieAppt = null;
+
+    function openSnelleNotitieModal(appt) {
+      currentNotitieAppt = appt;
+      document.getElementById('snelle-notitie-modal-title').textContent =
+        `Snelle notitie — ${appt.lead_name}`;
+      document.getElementById('snelle-notitie-textarea').value = appt.snelle_notitie || '';
+      document.getElementById('snelle-notitie-modal').style.display = 'flex';
+    }
+
+    function closeSnelleNotitieModal() {
+      document.getElementById('snelle-notitie-modal').style.display = 'none';
+      currentNotitieAppt = null;
+    }
+
+    document.getElementById('snelle-notitie-modal-close')?.addEventListener('click', closeSnelleNotitieModal);
+    document.getElementById('snelle-notitie-cancel')?.addEventListener('click', closeSnelleNotitieModal);
+    document.getElementById('snelle-notitie-modal')?.addEventListener('click', (e) => {
+      if (e.target.id === 'snelle-notitie-modal') closeSnelleNotitieModal();
+    });
+
+    document.getElementById('snelle-notitie-submit')?.addEventListener('click', async () => {
+      if (!currentNotitieAppt) return;
+      const submitBtn = document.getElementById('snelle-notitie-submit');
+      submitBtn.disabled = true;
+      submitBtn.textContent = 'Opslaan…';
+      const text = document.getElementById('snelle-notitie-textarea').value.trim();
+      try {
+        const token = await window.AuthShared.getAccessToken();
+        const r = await fetch(`/api/follow-up-appointment-detail?id=${encodeURIComponent(currentNotitieAppt.id)}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+          body: JSON.stringify({ snelle_notitie: text }),
+        });
+        if (!r.ok) { const e2 = await r.json().catch(() => ({})); throw new Error(e2.error || `HTTP ${r.status}`); }
+        closeSnelleNotitieModal();
+        location.reload();
+      } catch (err) {
+        alert('Fout bij opslaan: ' + err.message);
+        submitBtn.disabled = false;
+        submitBtn.textContent = 'Opslaan';
+      }
+    });
 
     init();
   </script>

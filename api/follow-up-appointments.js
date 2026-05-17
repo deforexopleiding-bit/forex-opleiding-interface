@@ -84,11 +84,44 @@ async function handleGet(req, res, supabase) {
       .select('id, lead_name, lead_email, lead_phone, scheduled_at, status, voicememo_status, owner_id')
       .in('id', ids);
 
+    // Merge terugkom_datum + opvolging_status uit outcomes
+    const outcomeMap = new Map((outcomes || []).map(o => [o.appointment_id, o]));
+    const enriched = (data || []).map(a => ({
+      ...a,
+      terugkom_datum: outcomeMap.get(a.id)?.terugkom_datum,
+      opvolging_status: outcomeMap.get(a.id)?.opvolging_status,
+    }));
+
     return res.status(200).json({
       period,
-      count: data?.length || 0,
-      appointments: data || [],
+      count: enriched.length,
+      appointments: enriched,
     });
+
+  } else if (period === 'opvolging_week') {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const tomorrow = new Date(today);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    const weekEnd = new Date(today);
+    weekEnd.setDate(weekEnd.getDate() + 7);
+
+    return await fetchOpvolgingRange(supabase, tomorrow, weekEnd, period, res);
+
+  } else if (period === 'opvolging_30d') {
+    const start = new Date();
+    start.setHours(0, 0, 0, 0);
+    start.setDate(start.getDate() + 8);
+    const end = new Date();
+    end.setDate(end.getDate() + 30);
+
+    return await fetchOpvolgingRange(supabase, start, end, period, res);
+
+  } else if (period === 'opvolging_verder') {
+    const start = new Date();
+    start.setDate(start.getDate() + 31);
+
+    return await fetchOpvolgingRange(supabase, start, null, period, res);
 
   } else if (period === 'recent_completed') {
     const since = new Date();
@@ -130,11 +163,18 @@ async function handleGet(req, res, supabase) {
 
     const { data: existingOutcomes } = await supabase
       .from('follow_up_outcomes')
-      .select('appointment_id')
+      .select('appointment_id, niet_meer_opvolgen')
       .in('appointment_id', apptIds);
 
     const withOutcome = new Set((existingOutcomes || []).map(o => o.appointment_id));
-    const openActies = (appts || []).filter(a => !withOutcome.has(a.id));
+    const nietMeerOpvolgen = new Set(
+      (existingOutcomes || [])
+        .filter(o => o.niet_meer_opvolgen === true)
+        .map(o => o.appointment_id)
+    );
+    const openActies = (appts || []).filter(a =>
+      !withOutcome.has(a.id) && !nietMeerOpvolgen.has(a.id)
+    );
 
     return res.status(200).json({
       period,
@@ -222,4 +262,45 @@ async function handlePatch(req, res, supabase, user) {
   }
 
   return res.status(200).json({ updated: data, requires_screenshot: requiresScreenshot });
+}
+
+async function fetchOpvolgingRange(supabase, startDate, endDate, period, res) {
+  let query = supabase
+    .from('follow_up_outcomes')
+    .select('appointment_id, terugkom_datum, opvolging_status')
+    .gte('terugkom_datum', startDate.toISOString().slice(0, 10))
+    .in('opvolging_status', ['gepland', 'verzet']);
+
+  if (endDate) {
+    query = query.lt('terugkom_datum', endDate.toISOString().slice(0, 10));
+  }
+
+  const { data: outcomes, error: outErr } = await query;
+
+  if (outErr) {
+    return res.status(500).json({ error: outErr.message });
+  }
+
+  const ids = (outcomes || []).map(o => o.appointment_id);
+  if (ids.length === 0) {
+    return res.status(200).json({ period, count: 0, appointments: [] });
+  }
+
+  const { data, error } = await supabase
+    .from('follow_up_appointments')
+    .select('id, lead_name, lead_email, lead_phone, scheduled_at, status, voicememo_status, owner_id')
+    .in('id', ids);
+
+  if (error) {
+    return res.status(500).json({ error: error.message });
+  }
+
+  const outcomeMap = new Map((outcomes || []).map(o => [o.appointment_id, o]));
+  const enriched = (data || []).map(a => ({
+    ...a,
+    terugkom_datum: outcomeMap.get(a.id)?.terugkom_datum,
+    opvolging_status: outcomeMap.get(a.id)?.opvolging_status,
+  }));
+
+  return res.status(200).json({ period, count: enriched.length, appointments: enriched });
 }
