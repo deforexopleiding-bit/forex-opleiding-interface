@@ -10,18 +10,16 @@
 // Defensief: GHL payload-structuur kan verschillen per message-type.
 // Onbekende velden worden gelogd zonder crash.
 
+import crypto from 'crypto';
 import { supabaseAdmin } from './supabase.js';
 
 function normalizePayload(body) {
-  // Detecteer flat vs nested format en normaliseer naar 1 interne shape.
-  // Returns: { message: {...}, contact: {...}, type: '...' }
-
   if (!body || typeof body !== 'object') {
     return { message: null, contact: null, type: null };
   }
 
-  // Als 'message' object al genest aanwezig is → nested format
-  if (body.message && typeof body.message === 'object') {
+  // SHAPE 1: Origineel test-format met message als object met id
+  if (body.message && typeof body.message === 'object' && body.message.id) {
     return {
       message: body.message,
       contact: body.contact || null,
@@ -29,22 +27,57 @@ function normalizePayload(body) {
     };
   }
 
-  // Anders: flat format — reconstrueer nested
+  // SHAPE 2: Echte GHL standard-data — root-level contact + nested message zonder message.id of conversationId
+  if (body.message && typeof body.message === 'object') {
+    const contactId = body.contact_id || body.contactId || body?.contact?.id || null;
+    const bodyText = body.message.body || body.message.text || '';
+    const direction = body.message.direction || 'inbound';
+
+    // Synthetic message id voor dedup: hash van contact + body + minute-bucket
+    // Minute-bucket voorkomt dat retries binnen 1 minuut nieuwe records maken
+    const minuteBucket = Math.floor(Date.now() / 60000);
+    const hashSource = `${contactId || 'unknown'}|${bodyText.slice(0, 200)}|${direction}|${minuteBucket}`;
+    const syntheticId = 'ghl-synth-' + crypto.createHash('sha256').update(hashSource).digest('hex').slice(0, 24);
+
+    return {
+      message: {
+        id: syntheticId,
+        body: bodyText,
+        type: body.message.type || null,
+        messageType: body.message.type || null,
+        direction,
+        status: body.message.status || null,
+        dateAdded: new Date().toISOString(),
+        conversationId: null,
+        contactId,
+      },
+      contact: {
+        id: contactId,
+        firstName: body.first_name || body.firstName || body?.contact?.firstName || null,
+        lastName: body.last_name || body.lastName || body?.contact?.lastName || null,
+        email: body.email || body?.contact?.email || null,
+        phone: body.phone || body?.contact?.phone || null,
+      },
+      type: body.type || null,
+    };
+  }
+
+  // SHAPE 3: Flat keys fallback (legacy)
   return {
     message: {
       id: body.message_id || body.messageId || body.id || null,
       body: body.message_body || body.messageBody || body.body || body.text || null,
-      type: body.channel || body.messageType || body.message_type || body.type || null,
+      type: body.channel || body.messageType || body.message_type || null,
       messageType: body.channel || body.messageType || body.message_type || null,
       direction: body.direction || (body.type === 'OutboundMessage' ? 'outbound' : 'inbound'),
-      dateAdded: body.message_date || body.messageDate || body.dateAdded || body.date_added || null,
+      dateAdded: body.message_date || body.dateAdded || body.date_added || null,
       conversationId: body.conversation_id || body.conversationId || null,
       contactId: body.contact_id || body.contactId || null,
     },
     contact: {
       id: body.contact_id || body.contactId || null,
-      firstName: body.contact_first_name || body.contactFirstName || body.first_name || null,
-      lastName: body.contact_last_name || body.contactLastName || body.last_name || null,
+      firstName: body.contact_first_name || body.first_name || null,
+      lastName: body.contact_last_name || body.last_name || null,
     },
     type: body.type || null,
   };
@@ -56,8 +89,14 @@ const GHL_TYPE_TO_CHANNEL = {
   TYPE_EMAIL: 'email',
   TYPE_CALL: null,
   WhatsApp: 'whatsapp',
+  'WhatsApp Business': 'whatsapp',
   SMS: 'sms',
   Email: 'email',
+  EMAIL: 'email',
+  IVR: null,
+  'Facebook Messenger': null,
+  'Instagram DM': null,
+  'GMB Messaging': null,
 };
 
 function detectChannel(message) {
@@ -144,9 +183,14 @@ export default async function handler(req, res) {
   const contactId = message?.contactId || contact?.id || null;
   const sentAt = message.dateAdded || message.dateCreated || message.createdAt || new Date().toISOString();
 
-  if (!conversationId || !contactId) {
-    console.warn('[ghl-conversation-webhook] missing conversationId or contactId');
-    return res.status(200).json({ received: true, processed: false, reason: 'missing-ids' });
+  if (!contactId) {
+    console.warn('[ghl-conversation-webhook] missing contactId');
+    return res.status(200).json({ received: true, processed: false, reason: 'missing-contact-id' });
+  }
+
+  // conversationId is optioneel — GHL standard-data heeft het niet altijd
+  if (!conversationId) {
+    console.log('[ghl-conversation-webhook] geen conversationId — gebruik contactId als virtual convo');
   }
 
   // Koppel aan meest recente appointment van deze contact
@@ -164,7 +208,7 @@ export default async function handler(req, res) {
 
   const row = {
     ghl_message_id: ghlMessageId,
-    ghl_conversation_id: conversationId,
+    ghl_conversation_id: conversationId || `virtual-${contactId}`,
     lead_ghl_contact_id: contactId,
     appointment_id: appointmentId,
     direction,
