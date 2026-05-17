@@ -8,6 +8,7 @@
 // Side-effect: update follow_up_appointments.status op basis van outcome.
 
 import { createUserClient } from './supabase.js';
+import { addGhlTags, tagsFromOutcome } from './ghl-tag-helper.js';
 
 const OUTCOME_TO_STATUS = {
   klant_geworden: 'completed',
@@ -77,9 +78,39 @@ export default async function handler(req, res) {
     return res.status(500).json({ error: 'Outcome saved but status update failed: ' + updateErr.message });
   }
 
+  // Haal contact-id op voor tag-call
+  const { data: apptForTag } = await supabase
+    .from('follow_up_appointments')
+    .select('lead_ghl_contact_id, owner_id')
+    .eq('id', appointment_id)
+    .single();
+
+  let tagResult = null;
+  if (apptForTag?.lead_ghl_contact_id) {
+    const tagsToAdd = tagsFromOutcome({
+      outcome,
+      bezwaren: outcomeRow.bezwaren,
+    });
+
+    if (tagsToAdd.length > 0) {
+      try {
+        tagResult = await addGhlTags(apptForTag.lead_ghl_contact_id, tagsToAdd, {
+          source: 'outcome-save',
+          appointment_id,
+          outcome,
+          owner_id: apptForTag.owner_id,
+        });
+      } catch (err) {
+        console.error('[outcomes-post] tag-call exception:', err.message);
+        // Niet blokkerend
+      }
+    }
+  }
+
   return res.status(200).json({
     outcome_id: outcomeData.id,
     appointment_id,
     new_status: newStatus,
+    tags: tagResult ? { added: tagResult.tagsAdded, errors: tagResult.errors } : null,
   });
 }

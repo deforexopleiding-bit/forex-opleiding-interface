@@ -19,6 +19,7 @@
 // Side-effect: schrijft no-show event naar follow_up_events_log voor audit.
 
 import { supabaseAdmin, checkCronAuth } from './supabase.js';
+import { addGhlTags } from './ghl-tag-helper.js';
 
 const PATH_A_BUFFER_MIN = 10;
 const PATH_B_BUFFER_MIN = 30;
@@ -45,7 +46,7 @@ export default async function handler(req, res) {
     // PAD A — Met zoom_meeting_id
     const { data: pathACandidates, error: pathAErr } = await supabaseAdmin
       .from('follow_up_appointments')
-      .select('id, zoom_meeting_id, scheduled_at, status, lead_name')
+      .select('id, zoom_meeting_id, scheduled_at, status, lead_name, lead_ghl_contact_id, owner_id')
       .not('zoom_meeting_id', 'is', null)
       .lt('scheduled_at', pathACutoff.toISOString())
       .in('status', ['scheduled', 'in_progress']);
@@ -66,7 +67,7 @@ export default async function handler(req, res) {
     // PAD B — Zonder zoom_meeting_id
     const { data: pathBCandidates, error: pathBErr } = await supabaseAdmin
       .from('follow_up_appointments')
-      .select('id, scheduled_at, status, lead_name')
+      .select('id, scheduled_at, status, lead_name, lead_ghl_contact_id, owner_id')
       .is('zoom_meeting_id', null)
       .lt('scheduled_at', pathBCutoff.toISOString())
       .eq('status', 'scheduled');
@@ -137,4 +138,18 @@ async function markAsNoShow(appt, reason) {
       payload: { appointment_id: appt.id, reason, scheduled_at: appt.scheduled_at },
       processed: true,
     });
+
+  // Tag in GHL voor follow-up workflow
+  if (appt.lead_ghl_contact_id) {
+    try {
+      await addGhlTags(appt.lead_ghl_contact_id, ['followup-no-show'], {
+        source: 'no-show-detect',
+        appointment_id: appt.id,
+        owner_id: appt.owner_id,
+      });
+    } catch (err) {
+      console.error('[no-show-detect] tag-call exception:', err.message);
+      // Niet blokkerend — no-show status is al gezet
+    }
+  }
 }
