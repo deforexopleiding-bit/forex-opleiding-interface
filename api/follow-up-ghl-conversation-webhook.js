@@ -99,13 +99,59 @@ const GHL_TYPE_TO_CHANNEL = {
   'GMB Messaging': null,
 };
 
+// GHL Workflow Webhook stuurt message.type als INTEGER enum (anders dan
+// Marketplace API InboundMessage payload die strings gebruikt). Mapping
+// op basis van praktijk-observatie. Bij onbekende integers: log warning
+// in detectChannel zodat we mapping kunnen uitbreiden.
+const MESSAGE_TYPE_ID_TO_CHANNEL = {
+  1: 'sms',
+  2: 'email',
+  3: 'webchat',
+  4: 'gmb_messaging',     // Google My Business
+  5: null,                // Phone Call — niet getrackt
+  6: null,                // Voicemail — niet getrackt
+  7: 'facebook_messenger',
+  8: 'instagram_dm',
+  9: 'gmb_messaging',
+  10: null,               // SMS Review — niet getrackt
+  11: null,               // Email Review — niet getrackt
+  12: 'activity',         // Generic activity
+  13: null,               // Custom — onzeker
+  14: null,
+  15: null,
+  16: null,
+  17: null,
+  18: null,
+  19: 'whatsapp',         // ← bevestigd via testbericht 16 mei 2026
+  20: null,
+  21: null,
+  22: null,
+};
+
 function detectChannel(message) {
-  const type = message?.messageType || message?.type || '';
-  if (GHL_TYPE_TO_CHANNEL[type] !== undefined) return GHL_TYPE_TO_CHANNEL[type];
+  const type = message?.messageType ?? message?.type;
+  if (type === null || type === undefined) return null;
+
+  // INTEGER pad: GHL Workflow Webhook stuurt enum-IDs
+  if (typeof type === 'number' || /^\d+$/.test(String(type))) {
+    const numericType = Number(type);
+    if (MESSAGE_TYPE_ID_TO_CHANNEL[numericType] !== undefined) {
+      return MESSAGE_TYPE_ID_TO_CHANNEL[numericType];
+    }
+    console.warn('[ghl-conversation-webhook] onbekende numeric message-type:', numericType, 'overweeg toevoegen aan MESSAGE_TYPE_ID_TO_CHANNEL');
+    return null;
+  }
+
+  // STRING pad: Marketplace API style + alternatieven
+  if (GHL_TYPE_TO_CHANNEL[type] !== undefined) {
+    return GHL_TYPE_TO_CHANNEL[type];
+  }
   const lower = String(type).toLowerCase();
   if (lower.includes('whatsapp')) return 'whatsapp';
   if (lower.includes('sms')) return 'sms';
   if (lower.includes('email')) return 'email';
+
+  console.warn('[ghl-conversation-webhook] onbekend string message-type:', type);
   return null;
 }
 
