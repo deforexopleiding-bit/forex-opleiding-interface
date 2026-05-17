@@ -12,7 +12,6 @@
 
 import crypto from 'crypto';
 import { supabaseAdmin } from './supabase.js';
-import { addGhlTags } from './ghl-tag-helper.js';
 
 function normalizePayload(body) {
   if (!body || typeof body !== 'object') {
@@ -242,17 +241,15 @@ export default async function handler(req, res) {
 
   // Koppel aan meest recente appointment van deze contact
   let appointmentId = null;
-  let appointmentStatus = null;
   const { data: appts } = await supabaseAdmin
     .from('follow_up_appointments')
-    .select('id, scheduled_at, status')
+    .select('id, scheduled_at')
     .eq('lead_ghl_contact_id', contactId)
     .order('scheduled_at', { ascending: false })
     .limit(1);
 
   if (appts && appts.length > 0) {
     appointmentId = appts[0].id;
-    appointmentStatus = appts[0].status;
   }
 
   const row = {
@@ -278,26 +275,11 @@ export default async function handler(req, res) {
     return res.status(500).json({ error: upsertErr.message });
   }
 
-  // Reply-stop: inbound bericht van lead die al no_show of completed is → stop GHL workflow
-  let stopTagResult = null;
-  const STOP_STATUSES = ['no_show', 'completed'];
-  if (direction === 'inbound' && STOP_STATUSES.includes(appointmentStatus)) {
-    try {
-      stopTagResult = await addGhlTags(contactId, ['followup-stop-workflow'], {
-        source: 'ghl',
-        appointment_id: appointmentId,
-      });
-    } catch (err) {
-      console.error('[ghl-conversation-webhook] reply-stop tag exception:', err.message);
-    }
-  }
-
   return res.status(200).json({
     received: true,
     processed: true,
     direction,
     channel,
     appointment_id: appointmentId,
-    stop_workflow_tag: stopTagResult ? stopTagResult.success : null,
   });
 }
