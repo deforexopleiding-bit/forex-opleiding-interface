@@ -57,7 +57,7 @@ export default async function handler(req, res) {
   // RLS-aware: gebruik user-client zodat alleen eigen leads gevonden worden
   const { data: appt, error: apptErr } = await supabase
     .from('follow_up_appointments')
-    .select('id, lead_name, lead_ghl_contact_id, lead_first_name')
+    .select('id, lead_name, lead_ghl_contact_id')
     .eq('id', appointment_id)
     .single();
 
@@ -79,7 +79,7 @@ export default async function handler(req, res) {
 
   if (template_name) {
     ghlBody.templateId = template_name;
-    const firstName = appt.lead_first_name || (appt.lead_name?.split(' ')[0]) || 'daar';
+    const firstName = (appt.lead_name?.split(' ')[0]) || 'daar';
     ghlBody.templateVariables = { 1: firstName };
     displayBody = `[template: ${template_name}] firstName=${firstName}`;
   } else {
