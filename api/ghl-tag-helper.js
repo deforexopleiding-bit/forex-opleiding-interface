@@ -62,7 +62,7 @@ export async function addGhlTags(ghlContactId, tags, options = {}) {
       await supabaseAdmin
         .from('follow_up_events_log')
         .insert({
-          source: 'ghl-tag',
+          source: 'ghl',
           event_type: 'tag_add_failed',
           payload: {
             ghlContactId,
@@ -86,7 +86,7 @@ export async function addGhlTags(ghlContactId, tags, options = {}) {
     await supabaseAdmin
       .from('follow_up_events_log')
       .insert({
-        source: 'ghl-tag',
+        source: 'ghl',
         event_type: 'tag_added',
         payload: {
           ghlContactId,
