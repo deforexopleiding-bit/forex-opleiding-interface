@@ -92,69 +92,6 @@
     .wa-msg-outbound { background:var(--brand,#093d54); color:#fff; border-bottom-right-radius:4px; }
     .wa-msg-meta { font-size:11px; color:var(--text-secondary,rgba(255,255,255,0.5)); margin-top:2px; padding:0 4px; }
     .wa-channel-badge { display:inline-block; padding:1px 6px; border-radius:3px; font-size:10px; text-transform:uppercase; letter-spacing:0.5px; margin-left:6px; background:rgba(255,255,255,0.08); color:rgba(255,255,255,0.6); }
-    .wa-reply-rail {
-      border-top: 1px solid var(--border, rgba(255,255,255,0.1));
-      padding: 12px;
-      background: var(--surface-2, rgba(255,255,255,0.03));
-      margin-top: 16px;
-    }
-    .wa-template-row {
-      display: flex;
-      gap: 8px;
-      flex-wrap: wrap;
-      margin-bottom: 10px;
-    }
-    .wa-template-btn {
-      padding: 6px 12px;
-      background: rgba(255,255,255,0.06);
-      border: 1px solid var(--border, rgba(255,255,255,0.12));
-      color: var(--text-primary, #fff);
-      border-radius: 16px;
-      cursor: pointer;
-      font-size: 12px;
-      font-family: inherit;
-    }
-    .wa-template-btn:hover { background: rgba(255,255,255,0.1); }
-    .wa-template-btn:disabled { opacity: 0.4; cursor: not-allowed; }
-    .wa-freeform-row {
-      display: flex;
-      gap: 8px;
-      align-items: flex-end;
-    }
-    .wa-textarea {
-      flex: 1;
-      min-height: 60px;
-      max-height: 200px;
-      padding: 8px 10px;
-      background: var(--surface-1, rgba(255,255,255,0.04));
-      border: 1px solid var(--border, rgba(255,255,255,0.12));
-      color: var(--text-primary, #fff);
-      border-radius: 8px;
-      font-family: inherit;
-      font-size: 14px;
-      resize: vertical;
-    }
-    .wa-textarea:disabled { opacity: 0.4; cursor: not-allowed; }
-    .wa-send-btn {
-      padding: 10px 18px;
-      background: var(--brand, #093d54);
-      color: #fff;
-      border: none;
-      border-radius: 8px;
-      cursor: pointer;
-      font-size: 13px;
-      font-weight: 500;
-    }
-    .wa-send-btn:disabled { opacity: 0.4; cursor: not-allowed; }
-    .wa-window-info {
-      font-size: 11px;
-      color: var(--text-secondary, rgba(255,255,255,0.5));
-      margin-bottom: 8px;
-      padding: 6px 8px;
-      background: rgba(0,0,0,0.2);
-      border-radius: 4px;
-    }
-    .wa-window-info-warn { color: #fde047; }
     .ld-card {
       background: var(--surface-2, rgba(255,255,255,0.04));
       border: 1px solid var(--border, rgba(255,255,255,0.08));
@@ -313,7 +250,6 @@
   <script>
     const ALLOWED_ROLES = ['sales', 'manager', 'admin', 'super_admin'];
     let whatsappLoaded = false;
-    let data = null;
 
     const OUTCOME_LABELS = {
       klant_geworden: 'Klant geworden',
@@ -452,17 +388,6 @@
         <div id="tab-outcome" class="ld-tab-content">${renderOutcomeTab(outcome)}</div>
         <div id="tab-whatsapp" class="ld-tab-content">
           <div id="whatsapp-messages-container"><div class="ld-loading">Berichten laden…</div></div>
-          <div class="wa-reply-rail" id="wa-reply-rail" style="display:none;">
-            <div id="wa-window-info"></div>
-            <div class="wa-template-row">
-              <button class="wa-template-btn" data-template="afspraak_maken_romy" title="Bedankt voor het leuke gesprek...">📅 Afspraak maken</button>
-              <button class="wa-template-btn" data-template="opvolging_afspraak_maken" title="Hey ! Was het nog gelukt...">🔄 Opvolging afspraak</button>
-            </div>
-            <div class="wa-freeform-row">
-              <textarea id="wa-textarea" class="wa-textarea" placeholder="Typ een vrij bericht…" disabled></textarea>
-              <button id="wa-send-btn" class="wa-send-btn" disabled>Stuur</button>
-            </div>
-          </div>
         </div>
         <div id="tab-notities" class="ld-tab-content">
           <div class="ld-placeholder">Notities — binnenkort beschikbaar.</div>
@@ -570,8 +495,6 @@
         }
         const responseData = await res.json();
         renderWhatsApp(container, responseData.messages || []);
-        updateReplyRailState(responseData.messages || []);
-        bindReplyRailHandlers();
       } catch (err) {
         container.innerHTML = `<div class="ld-empty" style="color:#fca5a5;">Fout: ${err.message}</div>`;
         whatsappLoaded = false;
@@ -611,105 +534,6 @@
       container.innerHTML = html;
     }
 
-    function updateReplyRailState(messages) {
-      const rail = document.getElementById('wa-reply-rail');
-      if (!rail) return;
-      rail.style.display = 'block';
-
-      const inboundMessages = messages.filter(m => m.direction === 'inbound');
-      const lastInbound = inboundMessages.length > 0
-        ? new Date(inboundMessages[inboundMessages.length - 1].sent_at)
-        : null;
-
-      const now = new Date();
-      const hoursSince = lastInbound ? (now - lastInbound) / (1000 * 60 * 60) : Infinity;
-      const withinWindow = hoursSince < 24;
-
-      const textarea = document.getElementById('wa-textarea');
-      const sendBtn = document.getElementById('wa-send-btn');
-      const info = document.getElementById('wa-window-info');
-
-      if (withinWindow) {
-        textarea.disabled = false;
-        sendBtn.disabled = false;
-        info.className = 'wa-window-info';
-        info.textContent = `✓ Binnen 24u-venster (laatste inbound ${Math.floor(hoursSince)}u geleden) — vrij bericht of template`;
-      } else {
-        textarea.disabled = true;
-        sendBtn.disabled = true;
-        info.className = 'wa-window-info wa-window-info-warn';
-        info.textContent = lastInbound
-          ? `⚠ Buiten 24u-venster (laatste inbound ${Math.floor(hoursSince)}u geleden) — alleen templates beschikbaar`
-          : '⚠ Geen inbound bericht ontvangen — alleen templates beschikbaar';
-      }
-    }
-
-    let replyHandlersBound = false;
-    function bindReplyRailHandlers() {
-      if (replyHandlersBound) return;
-      replyHandlersBound = true;
-
-      document.querySelectorAll('.wa-template-btn').forEach(btn => {
-        btn.addEventListener('click', async () => {
-          const templateName = btn.dataset.template;
-          if (!confirm(`Versturen van template "${templateName}"?`)) return;
-          await sendWhatsAppMessage(
-            { appointment_id: data.appointment.id, template_name: templateName },
-            btn
-          );
-        });
-      });
-
-      const sendBtn = document.getElementById('wa-send-btn');
-      const textarea = document.getElementById('wa-textarea');
-      sendBtn?.addEventListener('click', async () => {
-        const text = textarea.value.trim();
-        if (!text) return;
-        await sendWhatsAppMessage(
-          { appointment_id: data.appointment.id, message_text: text },
-          sendBtn
-        );
-        textarea.value = '';
-      });
-    }
-
-    async function sendWhatsAppMessage(payload, btnElement) {
-      const originalText = btnElement.textContent;
-      btnElement.disabled = true;
-      btnElement.textContent = 'Versturen…';
-
-      try {
-        const token = await window.AuthShared.getAccessToken();
-        const res = await fetch('/api/follow-up-send-whatsapp', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${token}`,
-          },
-          body: JSON.stringify(payload),
-        });
-
-        if (!res.ok) {
-          const err = await res.json().catch(() => ({}));
-          throw new Error(err.error || `HTTP ${res.status}`);
-        }
-
-        const result = await res.json();
-        btnElement.textContent = '✓ Verstuurd';
-
-        setTimeout(() => {
-          whatsappLoaded = false;
-          loadWhatsAppMessages(data.appointment.lead_ghl_contact_id);
-        }, 800);
-
-        return result;
-      } catch (err) {
-        btnElement.textContent = originalText;
-        btnElement.disabled = false;
-        alert('Verzenden mislukt: ' + err.message);
-      }
-    }
-
     async function init() {
       await window._authSharedReady;
       await window.AuthShared.requireAuth(ALLOWED_ROLES);
@@ -732,8 +556,7 @@
         return;
       }
 
-      data = await res.json();
-      const { appointment, outcome, lead_history } = data;
+      const { appointment, outcome, lead_history } = await res.json();
       document.title = (appointment.lead_name || 'Lead') + ' — Agency Command Center';
       renderLeadDetail(appointment, outcome, lead_history);
     }
