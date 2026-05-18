@@ -228,52 +228,130 @@ async function handleGet(req, res, supabase) {
 }
 
 async function handlePatch(req, res, supabase, user) {
-  const { id, voicememo_status } = req.body || {};
+  const { id, voicememo_status, status: newStatus } = req.body || {};
 
   if (!id || typeof id !== 'string') {
     return res.status(400).json({ error: 'Veld id ontbreekt of ongeldig.' });
   }
 
-  if (!['pending', 'sent', 'skipped', 'no_whatsapp'].includes(voicememo_status)) {
-    return res.status(400).json({ error: 'voicememo_status moet pending, sent, skipped of no_whatsapp zijn.' });
-  }
-
-  const update = {
-    voicememo_status,
-    voicememo_sent_at: voicememo_status === 'sent' ? new Date().toISOString() : null,
-    voicememo_sent_by: voicememo_status === 'sent' ? user.id : null,
-  };
-
-  const { data, error } = await supabase
-    .from('follow_up_appointments')
-    .update(update)
-    .eq('id', id)
-    .select('id, voicememo_status, voicememo_sent_at, voicememo_sent_by, owner_id')
-    .single();
-
-  if (error) {
-    console.error('[appointments-patch] db error:', error.message);
-    return res.status(error.code === 'PGRST116' ? 404 : 500).json({ error: error.message });
-  }
-
-  let requiresScreenshot = false;
-  if (voicememo_status === 'sent' && data.owner_id) {
-    const { count } = await supabase
-      .from('follow_up_appointments')
-      .select('id', { count: 'exact', head: true })
-      .eq('owner_id', data.owner_id)
-      .eq('voicememo_status', 'sent');
-
-    if (count && count >= 3 && (count - 3) % 5 === 0) {
-      requiresScreenshot = true;
-      await supabase
-        .from('follow_up_appointments')
-        .update({ requires_screenshot: true })
-        .eq('id', id);
+  // ── PAD A: voicememo_status bijwerken ──────────────────────────────────────
+  if (voicememo_status !== undefined) {
+    if (!['pending', 'sent', 'skipped', 'no_whatsapp'].includes(voicememo_status)) {
+      return res.status(400).json({ error: 'voicememo_status moet pending, sent, skipped of no_whatsapp zijn.' });
     }
+
+    const update = {
+      voicememo_status,
+      voicememo_sent_at: voicememo_status === 'sent' ? new Date().toISOString() : null,
+      voicememo_sent_by: voicememo_status === 'sent' ? user.id : null,
+    };
+
+    const { data, error } = await supabase
+      .from('follow_up_appointments')
+      .update(update)
+      .eq('id', id)
+      .select('id, voicememo_status, voicememo_sent_at, voicememo_sent_by, owner_id')
+      .single();
+
+    if (error) {
+      console.error('[appointments-patch] db error:', error.message);
+      return res.status(error.code === 'PGRST116' ? 404 : 500).json({ error: error.message });
+    }
+
+    let requiresScreenshot = false;
+    if (voicememo_status === 'sent' && data.owner_id) {
+      const { count } = await supabase
+        .from('follow_up_appointments')
+        .select('id', { count: 'exact', head: true })
+        .eq('owner_id', data.owner_id)
+        .eq('voicememo_status', 'sent');
+
+      if (count && count >= 3 && (count - 3) % 5 === 0) {
+        requiresScreenshot = true;
+        await supabase
+          .from('follow_up_appointments')
+          .update({ requires_screenshot: true })
+          .eq('id', id);
+      }
+    }
+
+    return res.status(200).json({ updated: data, requires_screenshot: requiresScreenshot });
   }
 
-  return res.status(200).json({ updated: data, requires_screenshot: requiresScreenshot });
+  // ── PAD B: status handmatig wijzigen (admin/manager/super_admin + eigen sales) ──
+  if (newStatus !== undefined) {
+    const ALLOWED_STATUSES = ['scheduled', 'in_progress', 'completed', 'no_show', 'cancelled'];
+    if (!ALLOWED_STATUSES.includes(newStatus)) {
+      return res.status(400).json({ error: 'Ongeldige status. Toegestaan: ' + ALLOWED_STATUSES.join(', ') });
+    }
+
+    // Haal profile op voor role-check
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('role')
+      .eq('id', user.id)
+      .single();
+
+    if (!profile) {
+      return res.status(403).json({ error: 'Profiel niet gevonden.' });
+    }
+
+    const STATUS_ALLOWED_ROLES = ['sales', 'manager', 'admin', 'super_admin'];
+    if (!STATUS_ALLOWED_ROLES.includes(profile.role)) {
+      return res.status(403).json({ error: 'Onvoldoende rechten om status te wijzigen.' });
+    }
+
+    // Haal huidige status + eigenaar op voor audit en salescheck
+    const { data: currentAppt, error: fetchErr } = await supabase
+      .from('follow_up_appointments')
+      .select('status, owner_id')
+      .eq('id', id)
+      .single();
+
+    if (fetchErr || !currentAppt) {
+      return res.status(404).json({ error: 'Appointment niet gevonden of geen toegang.' });
+    }
+
+    // Sales mag uitsluitend eigen appointments wijzigen (extra check bovenop RLS)
+    if (profile.role === 'sales' && currentAppt.owner_id !== user.id) {
+      return res.status(403).json({ error: 'Sales mag alleen eigen appointments wijzigen.' });
+    }
+
+    if (currentAppt.status === newStatus) {
+      return res.status(200).json({ success: true, message: 'Status was al ' + newStatus });
+    }
+
+    const { error: updateErr } = await supabase
+      .from('follow_up_appointments')
+      .update({ status: newStatus })
+      .eq('id', id);
+
+    if (updateErr) {
+      console.error('[appointments-patch] status update error:', updateErr.message);
+      return res.status(500).json({ error: updateErr.message });
+    }
+
+    // Audit-log
+    await supabase
+      .from('follow_up_events_log')
+      .insert({
+        source: 'manual',
+        event_type: 'manual_status_change',
+        payload: {
+          appointment_id: id,
+          from: currentAppt.status,
+          to: newStatus,
+          changed_by_user_id: user.id,
+          changed_by_role: profile.role,
+        },
+        processed: true,
+      });
+
+    return res.status(200).json({ success: true, from: currentAppt.status, to: newStatus });
+  }
+
+  // Geen geldig veld meegegeven
+  return res.status(400).json({ error: 'Geef voicememo_status of status mee in de body.' });
 }
 
 async function fetchOpvolgingRange(supabase, startDate, endDate, period, res) {

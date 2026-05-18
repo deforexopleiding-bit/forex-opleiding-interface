@@ -97,7 +97,7 @@ export default async function handler(req, res) {
 
 async function checkLeadJoined(zoomMeetingId) {
   // Returns true als geen lead-participant joined (= no-show)
-  // Returns false als wel een participant met email != Dave joined
+  // Returns false als wel een participant joined die niet Dave is
   const { data: events } = await supabaseAdmin
     .from('follow_up_events_log')
     .select('payload')
@@ -111,12 +111,20 @@ async function checkLeadJoined(zoomMeetingId) {
 
   for (const evt of events) {
     const participantEmail = (evt.payload?.payload?.object?.participant?.email || '').toLowerCase();
-    if (participantEmail && participantEmail !== daveEmail) {
+
+    // Participant zonder e-mail = telefonisch ingebeld of Zoom-gast zonder account.
+    // Behandel als geldige join — niet als no-show.
+    if (!participantEmail) {
+      return false;
+    }
+
+    // Geldige e-mail die niet van Dave is = lead joinde
+    if (participantEmail !== daveEmail) {
       return false;
     }
   }
 
-  return true;
+  return true; // alleen Dave joinde, of niemand anders
 }
 
 async function markAsNoShow(appt, reason) {
