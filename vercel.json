@@ -31,6 +31,14 @@
     {
       "path": "/api/follow-up-ghl-conversations-poll",
       "schedule": "*/15 * * * *"
+    },
+    {
+      "path": "/api/follow-up-admin-daily",
+      "schedule": "0 19 * * *"
+    },
+    {
+      "path": "/api/follow-up-admin-weekly",
+      "schedule": "0 8 * * 0"
     }
   ],
   "headers": [
