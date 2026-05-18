@@ -147,6 +147,10 @@
       font-size: 11px; font-weight: 700;
       color: #fff; flex-shrink: 0;
     }
+    .sidebar-footer { flex-shrink: 0; padding: 8px 8px 14px; border-top: 1px solid var(--border); }
+    .footer-user { display: flex; align-items: center; gap: 10px; padding: 9px 10px; border-radius: 8px; color: var(--text-dim); font-size: 13px; font-weight: 500; cursor: pointer; transition: background .15s; }
+    .footer-user:hover { background: var(--nav-item-hover); color: var(--text); }
+    .footer-avatar { width: 26px; height: 26px; flex-shrink: 0; border-radius: 50%; background: var(--accent-grad); display: grid; place-items: center; font-size: 10px; font-weight: 800; color: #fff; }
     .sidebar-user-info { font-size: 12px; font-weight: 600; }
     .sidebar-user-role { font-size: 11px; color: var(--text-dim); font-weight: 400; }
 
@@ -560,7 +564,9 @@
   </span>
 
   <div class="sidebar-spacer"></div>
-  <div class="sidebar-user footer-user"></div>
+  <div class="sidebar-footer">
+    <div class="footer-user"></div>
+  </div>
 </nav>
 
 <script>
@@ -1422,6 +1428,7 @@ async function init() {
   // Ensure all collegas have ids
   collegas = collegas.map(c => ({ id: c.id || crypto.randomUUID(), naam: c.naam || '', kleur: c.kleur || '#22d3ee' }));
   if (!huidig && collegas.length) huidig = collegas[0].id;
+  window.AgentShared?.renderUserSection(profile);
   render();
   handleUrlParams();
   if (!localStorage.getItem('db_migrated_v1')) {
@@ -1431,9 +1438,6 @@ async function init() {
 }
 
 init();
-if (window._authSharedReady) {
-  window._authSharedReady.then(() => window.AgentShared?.renderUserSection());
-}
 </script>
 </body>
 </html>
