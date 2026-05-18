@@ -9,6 +9,11 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
   <link rel="stylesheet" href="/modules/shared/agent-shared.css"/>
   <style>
+    /* ── AI Agents accent kleur (violet) — bewust niet in shared tokens; agent-specifiek ── */
+    :root             { --ai-accent: #a855f7; --ai-accent-soft: rgba(168,85,247,0.18); }
+    [data-theme="light"] { --ai-accent-text: #6d28d9; }
+    [data-theme="dark"]  { --ai-accent-text: #c4b5fd; }
+
     /* ── Agent cards (overview) ── */
     .agents-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:20px;}
     .agent-card{background:var(--bg-elev);border:1px solid var(--border);border-radius:16px;padding:24px;text-align:center;transition:border-color .2s,transform .2s;}
@@ -43,7 +48,7 @@
     .msg-avatar{width:28px;height:28px;border-radius:50%;flex-shrink:0;display:grid;place-items:center;font-size:12px;font-weight:800;}
     .msg-bubble{padding:10px 14px;border-radius:12px;font-size:13px;line-height:1.5;}
     .msg-agent .msg-bubble{background:var(--bg-elev-2);color:var(--text);border-radius:4px 12px 12px 12px;}
-    .msg-user  .msg-bubble{background:rgba(168,85,247,0.18);color:#e9d5ff;border-radius:12px 4px 12px 12px;}
+    .msg-user  .msg-bubble{background:var(--ai-accent-soft);color:var(--ai-accent-text);border-radius:12px 4px 12px 12px;}
     .msg-time{font-size:10px;color:var(--text-faint);margin-top:4px;}
     .typing{display:flex;gap:5px;align-items:center;padding:12px 14px;background:var(--bg-elev-2);border-radius:4px 12px 12px 12px;width:fit-content;}
     .typing span{width:6px;height:6px;border-radius:50%;background:var(--text-faint);animation:typing-dot 1.2s infinite;}
@@ -54,7 +59,7 @@
     .chat-input-row{display:flex;gap:8px;}
     .chat-input{flex:1;padding:10px 14px;background:var(--bg-elev-2);border:1px solid var(--border-strong);border-radius:10px;color:var(--text);font-size:13px;font-family:inherit;resize:none;outline:none;}
     .chat-input:focus{border-color:rgba(168,85,247,0.5);}
-    .chat-send{padding:10px 16px;background:rgba(168,85,247,0.2);border:1px solid #7c3aed;border-radius:10px;color:#c4b5fd;font-size:13px;cursor:pointer;font-family:inherit;transition:all .15s;}
+    .chat-send{padding:10px 16px;background:rgba(168,85,247,0.2);border:1px solid var(--ai-accent);border-radius:10px;color:var(--ai-accent-text);font-size:13px;cursor:pointer;font-family:inherit;transition:all .15s;}
     .chat-send:hover{background:rgba(168,85,247,0.35);}
     .quick-btns{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;}
     .quick-btn{padding:5px 10px;border-radius:7px;border:1px solid var(--border-strong);background:var(--bg-elev-2);color:var(--text-dim);font-size:11px;cursor:pointer;font-family:inherit;transition:all .15s;}
@@ -66,8 +71,8 @@
     /* Feedback & training */
     .chat-msg-actions{display:flex;gap:6px;margin-top:6px;}
     .chat-like-btn,.chat-train-btn{padding:3px 8px;border-radius:6px;border:1px solid var(--border-strong);background:transparent;color:var(--text-faint);font-size:11px;cursor:pointer;font-family:inherit;transition:all .15s;line-height:1.4;}
-    .chat-like-btn:hover{background:rgba(34,197,94,0.12);color:var(--green);border-color:rgba(34,197,94,0.3);}
-    .chat-train-btn:hover{background:rgba(168,85,247,0.12);color:#c4b5fd;border-color:rgba(168,85,247,0.3);}
+    .chat-like-btn:hover{background:var(--color-success-soft);color:var(--color-success);border-color:var(--color-success);}
+    .chat-train-btn:hover{background:rgba(168,85,247,0.12);color:var(--ai-accent-text);border-color:rgba(168,85,247,0.3);}
     .chat-train-form{margin-top:8px;display:flex;flex-direction:column;gap:6px;}
     .chat-train-textarea{padding:8px 10px;background:var(--bg-elev-2);border:1px solid var(--border-strong);border-radius:8px;color:var(--text);font-size:12px;font-family:inherit;resize:none;outline:none;overflow-y:auto;}
     .chat-train-textarea:focus{border-color:rgba(168,85,247,0.5);}
@@ -116,7 +121,7 @@
     <a class="nav-item active" href="agents.html">
       <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M20 21a8 8 0 1 0-16 0"/></svg>
       AI Agents
-      <span class="nav-badge show" style="background:rgba(168,85,247,0.3);color:#c4b5fd;border:1px solid rgba(168,85,247,0.4)">3</span>
+      <span class="nav-badge show" style="background:rgba(168,85,247,0.3);color:var(--ai-accent-text);border:1px solid rgba(168,85,247,0.4)">3</span>
     </a>
     <a class="nav-item" href="meetings.html">
       <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
@@ -296,7 +301,7 @@ function renderOverview() {
       <div class="agent-card">
         <div class="avatar-wrap" onclick="showView('chat','${esc(a.name)}')" style="cursor:pointer">
           <img src="${esc(AgentShared.getAvatarUrl(a.name))}"
-            style="width:90px;height:90px;border-radius:50%;border:2px solid ${a.avatar_color}40;background:#0a1f2e;display:block;object-fit:cover"
+            style="width:90px;height:90px;border-radius:50%;border:2px solid ${a.avatar_color}40;background:var(--surface-2);display:block;object-fit:cover"
             alt="${esc(a.name)}" loading="lazy"/>
         </div>
         <div class="agent-name" style="color:${a.avatar_color}">${esc(a.name)}</div>
@@ -326,7 +331,7 @@ async function openChat(agentName) {
   document.getElementById('chatAgentName').textContent = activeAgent.name;
   document.getElementById('chatAgentRole').textContent = activeAgent.role + ' · ' + activeAgent.department;
   document.getElementById('chatAgentAvatar').innerHTML = `<img src="${AgentShared.getAvatarUrl(activeAgent.name)}"
-    style="width:80px;height:80px;border-radius:50%;border:2px solid ${activeAgent.avatar_color}40;background:#0a1f2e;object-fit:cover"
+    style="width:80px;height:80px;border-radius:50%;border:2px solid ${activeAgent.avatar_color}40;background:var(--surface-2);object-fit:cover"
     alt="${AgentShared.esc(activeAgent.name)}" loading="lazy"/>`;
   document.getElementById('chatCaps').innerHTML = (activeAgent.capabilities || []).map(c =>
     `<div class="chat-cap"><span style="width:5px;height:5px;border-radius:50%;background:${activeAgent.avatar_color};flex-shrink:0"></span>${esc(c)}</div>`
@@ -421,7 +426,7 @@ function addChatMsg(role, content, pushToHistory = true, toolsUsed = []) {
   const avatarHtml = isUser
     ? `<div class="msg-avatar" style="background:${color}22;color:${color}">JB</div>`
     : `<img src="${AgentShared.getAvatarUrl(activeAgent?.name || '')}"
-        style="width:36px;height:36px;border-radius:50%;flex-shrink:0;border:1px solid ${color}40;background:#0a1f2e;object-fit:cover"
+        style="width:36px;height:36px;border-radius:50%;flex-shrink:0;border:1px solid ${color}40;background:var(--surface-2);object-fit:cover"
         alt="${AgentShared.esc(activeAgent?.name || '')}" loading="lazy"/>`;
 
   const div = document.createElement('div');
@@ -464,7 +469,7 @@ function showTyping() {
   div.className = 'msg msg-agent';
   div.id = 'typingIndicator';
   div.innerHTML = `<img src="${AgentShared.getAvatarUrl(activeAgent?.name || '')}"
-    style="width:36px;height:36px;border-radius:50%;flex-shrink:0;border:1px solid ${color}40;background:#0a1f2e;object-fit:cover"
+    style="width:36px;height:36px;border-radius:50%;flex-shrink:0;border:1px solid ${color}40;background:var(--surface-2);object-fit:cover"
     alt="${AgentShared.esc(activeAgent?.name || '')}" loading="lazy"/>
     <div class="typing"><span></span><span></span><span></span></div>`;
   msgs.appendChild(div);
@@ -651,7 +656,7 @@ function addInlineApprovalCards(approvals) {
     wrapper.className = 'msg msg-agent';
     wrapper.innerHTML = `
       <img src="${AgentShared.getAvatarUrl(activeAgent?.name || '')}"
-        style="width:36px;height:36px;border-radius:50%;flex-shrink:0;border:1px solid ${color}40;background:#0a1f2e;object-fit:cover"
+        style="width:36px;height:36px;border-radius:50%;flex-shrink:0;border:1px solid ${color}40;background:var(--surface-2);object-fit:cover"
         alt="${AgentShared.esc(activeAgent?.name || '')}" loading="lazy"/>
       <div class="inline-approval-card" id="apcard-${ap.approval_id}">
         <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">

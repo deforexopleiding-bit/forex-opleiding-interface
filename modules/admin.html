@@ -22,28 +22,28 @@
     .user-count-badge { font-size:11px; font-weight:500; padding:2px 8px; border-radius:10px; background:var(--bg-elev-2); color:var(--text-faint); }
     .users-table { width:100%; border-collapse:collapse; }
     .users-table th { text-align:left; padding:10px 12px; font-size:10px; text-transform:uppercase; color:var(--text-faint); font-weight:600; letter-spacing:.5px; border-bottom:1px solid var(--border); }
-    .users-table td { padding:12px; border-bottom:0.5px solid rgba(255,255,255,0.04); font-size:13px; vertical-align:middle; }
+    .users-table td { padding:12px; border-bottom:0.5px solid var(--border-subtle); font-size:13px; vertical-align:middle; }
     .users-table tr:last-child td { border-bottom:none; }
-    .users-table tr:hover td { background:rgba(255,255,255,0.02); }
+    .users-table tr:hover td { background:var(--surface-card); }
     .user-cell { display:flex; align-items:center; gap:10px; }
-    .user-avatar-sm { width:34px; height:34px; border-radius:50%; background:linear-gradient(135deg,#093d54,#688b9b); display:flex; align-items:center; justify-content:center; color:#fff; font-weight:600; font-size:12px; flex-shrink:0; }
+    .user-avatar-sm { width:34px; height:34px; border-radius:50%; background:var(--brand-primary); display:flex; align-items:center; justify-content:center; color:var(--text-inverse); font-weight:600; font-size:12px; flex-shrink:0; }
     .user-name-text { font-size:13px; font-weight:500; }
     .user-email-text { font-size:11px; color:var(--text-faint); }
     .role-badge { display:inline-block; padding:3px 9px; border-radius:6px; font-size:11px; font-weight:500; }
-    .role-badge.admin { background:rgba(9,61,84,0.35); color:var(--brand-secondary-light); border:1px solid rgba(26,87,115,0.4); }
-    .role-badge.sales { background:rgba(29,158,117,0.15); color:#1D9E75; border:1px solid rgba(29,158,117,0.3); }
-    .role-badge.mentor { background:rgba(104,139,155,0.15); color:#8aa5b3; border:1px solid rgba(104,139,155,0.3); }
-    .role-badge.administratie { background:rgba(239,159,39,0.12); color:#EF9F27; border:1px solid rgba(239,159,39,0.25); }
-    .role-badge.viewer { background:rgba(255,255,255,0.05); color:var(--text-faint); border:1px solid var(--border); }
-    .role-badge.super_admin { background:rgba(139,92,246,0.15); color:#a78bfa; border:1px solid rgba(139,92,246,0.3); }
-    .role-badge.manager { background:rgba(14,116,144,0.15); color:#22d3ee; border:1px solid rgba(14,116,144,0.3); }
+    .role-badge.admin { background:var(--brand-primary-soft); color:var(--brand-primary); border:1px solid var(--brand-primary); }
+    .role-badge.sales { background:var(--color-success-soft); color:var(--color-success-text); border:1px solid var(--color-success); }
+    .role-badge.mentor { background:var(--color-neutral-soft); color:var(--color-neutral-text); border:1px solid var(--color-neutral); }
+    .role-badge.administratie { background:var(--color-warning-soft); color:var(--color-warning-text); border:1px solid var(--color-warning); }
+    .role-badge.viewer { background:var(--color-neutral-soft); color:var(--text-secondary); border:1px solid var(--border-subtle); }
+    .role-badge.super_admin { background:rgba(139,92,246,0.12); color:#6d28d9; border:1px solid rgba(139,92,246,0.35); } /* geen violet-token beschikbaar; #6d28d9 heeft ≥4.5:1 contrast op wit */
+    .role-badge.manager { background:var(--color-info-soft); color:var(--color-info-text); border:1px solid var(--color-info); }
     .role-badge.editable { cursor: pointer; }
     .role-badge.editable:hover { opacity: 0.8; }
     .active-dot { display:inline-block; width:8px; height:8px; border-radius:50%; background:var(--color-success); }
     .inactive-dot { background:var(--text-faint); }
     .role-select-inline { background:var(--bg-elev-2); border:1px solid var(--border); border-radius:6px; padding:4px 8px; font-size:12px; color:var(--text); font-family:inherit; cursor:pointer; }
     .action-btn { background:transparent; border:none; padding:5px 8px; border-radius:6px; color:var(--text-faint); cursor:pointer; font-size:12px; }
-    .action-btn:hover { background:rgba(255,255,255,0.06); color:var(--text); }
+    .action-btn:hover { background:var(--surface-card-hover); color:var(--text); }
     .modal-overlay { position:fixed; inset:0; background:rgba(0,0,0,0.6); z-index:500; display:flex; align-items:center; justify-content:center; backdrop-filter:blur(4px); }
     .modal-overlay.hidden { display:none!important; }
     .modal-card { background:var(--bg-elev); border:1px solid var(--border-strong); border-radius:14px; width:100%; max-width:440px; margin:20px; }
@@ -56,7 +56,7 @@
     .form-label { display:block; font-size:12px; font-weight:600; color:var(--text-dim); margin-bottom:6px; }
     .form-input { width:100%; background:var(--bg-elev-2); border:1px solid var(--border-strong); border-radius:8px; padding:9px 12px; font-size:13px; color:var(--text); font-family:inherit; outline:none; transition:border-color .15s; }
     .form-input:focus { border-color:var(--brand-secondary); }
-    .form-error { margin-top:10px; padding:8px 12px; background:rgba(239,68,68,0.1); border:1px solid rgba(239,68,68,0.25); border-radius:8px; font-size:12px; color:#fca5a5; }
+    .form-error { margin-top:10px; padding:8px 12px; background:var(--color-danger-soft); border:1px solid var(--color-danger); border-radius:8px; font-size:12px; color:var(--color-danger-text); }
   </style>
 </head>
 <body>
