@@ -7,7 +7,7 @@
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { computeMetrics } from './follow-up-metrics.js';
 
-const ALLOWED_ROLES = ['super_admin', 'admin', 'manager'];
+const ALLOWED_ROLES = ['super_admin', 'admin', 'manager', 'sales'];
 const ALLOWED_PERIODS = ['today', 'week', 'month'];
 
 export default async function handler(req, res) {
@@ -39,8 +39,11 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: `period moet één van: ${ALLOWED_PERIODS.join(', ')}` });
   }
 
+  // Sales ziet alleen eigen data; andere rollen zien alles
+  const ownerScope = profile.role === 'sales' ? user.id : null;
+
   try {
-    const metrics = await computeMetrics(supabaseAdmin, { period });
+    const metrics = await computeMetrics(supabaseAdmin, { period, ownerScope });
     return res.status(200).json({ metrics });
   } catch (err) {
     console.error('[dashboard-metrics] error:', err.message);

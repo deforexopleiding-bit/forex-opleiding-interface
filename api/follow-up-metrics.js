@@ -11,7 +11,7 @@
  * @returns {Promise<Object>}
  */
 export async function computeMetrics(supabaseAdmin, opts = {}) {
-  const { period = 'today' } = opts;
+  const { period = 'today', ownerScope = null } = opts;
   const ranges = getRanges();
   const range = ranges[period] || ranges.today;
 
@@ -21,11 +21,36 @@ export async function computeMetrics(supabaseAdmin, opts = {}) {
     range_end: range.end.toISOString(),
   };
 
-  const { data: appts } = await supabaseAdmin
-    .from('follow_up_appointments')
-    .select('id, status, voicememo_status')
-    .gte('scheduled_at', range.start.toISOString())
-    .lt('scheduled_at', range.end.toISOString());
+  // ── Owner-scope helpers ───────────────────────────────────────────────────
+  // apptQ(q): voeg owner_id filter toe aan een appointment query
+  const apptQ = (q) => ownerScope ? q.eq('owner_id', ownerScope) : q;
+
+  // ownerApptIds: pre-fetched set van alle appointment IDs voor deze owner,
+  // gebruikt om outcome-queries te scopen. Alleen geladen als ownerScope gezet is.
+  let ownerApptIds = null;
+  if (ownerScope) {
+    const { data: ownerAppts } = await supabaseAdmin
+      .from('follow_up_appointments')
+      .select('id')
+      .eq('owner_id', ownerScope);
+    ownerApptIds = (ownerAppts || []).map(a => a.id);
+  }
+
+  // outcomeQ(q): filter outcome-query op owner's appointment IDs
+  const outcomeQ = (q) => {
+    if (!ownerApptIds) return q;
+    if (ownerApptIds.length === 0) return q.in('appointment_id', ['00000000-0000-0000-0000-000000000000']);
+    return q.in('appointment_id', ownerApptIds);
+  };
+  // ─────────────────────────────────────────────────────────────────────────
+
+  const { data: appts } = await apptQ(
+    supabaseAdmin
+      .from('follow_up_appointments')
+      .select('id, status, voicememo_status')
+      .gte('scheduled_at', range.start.toISOString())
+      .lt('scheduled_at', range.end.toISOString())
+  );
 
   metrics.appointments_total = appts?.length || 0;
   metrics.appointments_scheduled = appts?.filter(a => a.status === 'scheduled').length || 0;
@@ -34,11 +59,13 @@ export async function computeMetrics(supabaseAdmin, opts = {}) {
   metrics.voicememos_sent = appts?.filter(a => a.voicememo_status === 'sent').length || 0;
   metrics.voicememos_relevant = appts?.filter(a => a.voicememo_status !== 'no_whatsapp').length || 0;
 
-  const { data: outcomes } = await supabaseAdmin
-    .from('follow_up_outcomes')
-    .select('id, outcome, bezwaren')
-    .gte('ingevuld_at', range.start.toISOString())
-    .lt('ingevuld_at', range.end.toISOString());
+  const { data: outcomes } = await outcomeQ(
+    supabaseAdmin
+      .from('follow_up_outcomes')
+      .select('id, outcome, bezwaren, appointment_id')
+      .gte('ingevuld_at', range.start.toISOString())
+      .lt('ingevuld_at', range.end.toISOString())
+  );
 
   metrics.outcomes_total = outcomes?.length || 0;
   metrics.outcomes_klant = outcomes?.filter(o => o.outcome === 'klant_geworden').length || 0;
@@ -70,22 +97,27 @@ export async function computeMetrics(supabaseAdmin, opts = {}) {
 
   const today = new Date();
   today.setHours(0, 0, 0, 0);
-  const { data: overdue } = await supabaseAdmin
-    .from('follow_up_outcomes')
-    .select('id')
-    .in('opvolging_status', ['gepland', 'verzet'])
-    .not('terugkom_datum', 'is', null)
-    .lt('terugkom_datum', today.toISOString().slice(0, 10));
+
+  const { data: overdue } = await outcomeQ(
+    supabaseAdmin
+      .from('follow_up_outcomes')
+      .select('id, appointment_id')
+      .in('opvolging_status', ['gepland', 'verzet'])
+      .not('terugkom_datum', 'is', null)
+      .lt('terugkom_datum', today.toISOString().slice(0, 10))
+  );
 
   metrics.opvolgingen_overdue = overdue?.length || 0;
   metrics.achterstallig_opvolgingen = metrics.opvolgingen_overdue;
 
   // Outcomes achterstallig: completed/no_show van vóór vandaag zonder outcome
-  const { data: oldDone } = await supabaseAdmin
-    .from('follow_up_appointments')
-    .select('id')
-    .lt('scheduled_at', today.toISOString())
-    .in('status', ['completed', 'no_show']);
+  const { data: oldDone } = await apptQ(
+    supabaseAdmin
+      .from('follow_up_appointments')
+      .select('id')
+      .lt('scheduled_at', today.toISOString())
+      .in('status', ['completed', 'no_show'])
+  );
 
   const oldDoneIds = (oldDone || []).map(a => a.id);
   let achterstalligOutcomes = 0;
@@ -100,11 +132,13 @@ export async function computeMetrics(supabaseAdmin, opts = {}) {
   metrics.achterstallig_outcomes = achterstalligOutcomes;
 
   // Voicememos achterstallig: scheduled van vóór vandaag met voicememo_status = 'pending'
-  const { data: oldPending } = await supabaseAdmin
-    .from('follow_up_appointments')
-    .select('id')
-    .lt('scheduled_at', today.toISOString())
-    .eq('voicememo_status', 'pending');
+  const { data: oldPending } = await apptQ(
+    supabaseAdmin
+      .from('follow_up_appointments')
+      .select('id')
+      .lt('scheduled_at', today.toISOString())
+      .eq('voicememo_status', 'pending')
+  );
 
   metrics.achterstallig_voicememos = (oldPending || []).length;
 
@@ -114,11 +148,13 @@ export async function computeMetrics(supabaseAdmin, opts = {}) {
     metrics.achterstallig_voicememos;
 
   // Outcomes ontbrekend vandaag (voor dagrapport email)
-  const { data: todayDone } = await supabaseAdmin
-    .from('follow_up_appointments')
-    .select('id')
-    .gte('scheduled_at', today.toISOString())
-    .in('status', ['completed', 'no_show']);
+  const { data: todayDone } = await apptQ(
+    supabaseAdmin
+      .from('follow_up_appointments')
+      .select('id')
+      .gte('scheduled_at', today.toISOString())
+      .in('status', ['completed', 'no_show'])
+  );
 
   const todayDoneIds = (todayDone || []).map(a => a.id);
   let missingToday = 0;
