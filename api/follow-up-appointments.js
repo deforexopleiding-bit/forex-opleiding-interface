@@ -7,7 +7,7 @@
 //     ADMIN_ROLES ziet alles)
 //
 // PATCH /api/follow-up-appointments
-//   Body: { id: uuid, voicememo_status: 'sent'|'skipped' }
+//   Body: { id: uuid, voicememo_status: 'pending'|'sent'|'skipped'|'no_whatsapp' }
 //   → Update voicememo afvinken na verzending door Dave
 //
 // Auth: Authorization Bearer <supabase-jwt> via createUserClient
@@ -234,8 +234,8 @@ async function handlePatch(req, res, supabase, user) {
     return res.status(400).json({ error: 'Veld id ontbreekt of ongeldig.' });
   }
 
-  if (!['sent', 'skipped'].includes(voicememo_status)) {
-    return res.status(400).json({ error: 'voicememo_status moet sent of skipped zijn.' });
+  if (!['pending', 'sent', 'skipped', 'no_whatsapp'].includes(voicememo_status)) {
+    return res.status(400).json({ error: 'voicememo_status moet pending, sent, skipped of no_whatsapp zijn.' });
   }
 
   const update = {

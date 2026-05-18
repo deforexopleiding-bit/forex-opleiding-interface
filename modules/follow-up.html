@@ -14,10 +14,10 @@
     .main-content { margin-left: var(--sidebar-w, 220px); min-height: 100vh; padding: 28px 28px 64px; max-width: 1200px; position: relative; z-index: 1; }
 
     .fu-metrics-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin: 0 0 28px; }
-    .fu-metric-card { background: var(--card-bg, rgba(255,255,255,0.04)); border: 1px solid var(--border, rgba(255,255,255,0.08)); border-radius: 8px; padding: 16px; }
-    .fu-metric-label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--muted, rgba(255,255,255,0.5)); margin-bottom: 6px; }
-    .fu-metric-value { font-size: 28px; font-weight: 700; color: var(--fg, #ffffff); line-height: 1; }
-    .fu-metric-sub { font-size: 12px; color: var(--muted, rgba(255,255,255,0.5)); margin-top: 4px; }
+    .fu-metric-card { background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.12); border-radius: 10px; padding: 14px 16px; }
+    .fu-metric-label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; color: rgba(255,255,255,0.55); margin-bottom: 6px; }
+    .fu-metric-value { font-size: 26px; font-weight: 500; color: rgba(255,255,255,0.95); line-height: 1; }
+    .fu-metric-sub { font-size: 11px; color: rgba(255,255,255,0.45); margin-top: 8px; }
     .fu-metric-value.success { color: #4ade80; }
     .fu-metric-value.warning { color: #facc15; }
     .fu-metric-value.danger  { color: #f87171; }
@@ -117,11 +117,9 @@
     .fu-tab-panel.active { display: block; }
     .fu-metric-card { position: relative; }
     .fu-metric-morgen {
-      position: absolute;
-      bottom: 10px;
-      right: 12px;
-      font-size: 11px;
-      color: var(--muted, rgba(255,255,255,0.45));
+      font-size: 10px;
+      color: rgba(255,255,255,0.4);
+      margin-top: 4px;
     }
     /* Segmented control */
     .fu-time-toggle {
@@ -153,21 +151,24 @@
 
     /* Appointment cards */
     .fu-card {
-      background: rgba(255,255,255,0.04);
-      border: 0.5px solid rgba(255,255,255,0.1);
+      background: rgba(255,255,255,0.06);
+      border: 1px solid rgba(255,255,255,0.14);
       border-radius: 10px;
-      padding: 14px 18px;
+      padding: 0;
       margin-bottom: 8px;
+      overflow: hidden;
+      transition: background 0.15s, border-color 0.15s;
+    }
+    .fu-card:hover {
+      background: rgba(255,255,255,0.09);
+      border-color: rgba(255,255,255,0.22);
+    }
+    .fu-card-header {
       display: flex;
       justify-content: space-between;
       align-items: center;
       gap: 12px;
-      cursor: pointer;
-      transition: background 0.15s, border-color 0.15s;
-    }
-    .fu-card:hover {
-      background: rgba(255,255,255,0.06);
-      border-color: rgba(255,255,255,0.16);
+      padding: 14px 18px;
     }
     .fu-card-left {
       display: flex;
@@ -176,64 +177,101 @@
       min-width: 0;
       flex: 1;
     }
+    .fu-card-right {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-shrink: 0;
+    }
     .fu-card-avatar {
-      width: 36px;
-      height: 36px;
+      width: 38px;
+      height: 38px;
       border-radius: 50%;
       display: flex;
       align-items: center;
       justify-content: center;
-      font-size: 12px;
+      font-size: 13px;
       font-weight: 500;
       flex-shrink: 0;
     }
-    .fu-card-avatar.status-scheduled  { background: rgba(59,130,246,0.15); color: #93c5fd; }
-    .fu-card-avatar.status-in-progress { background: rgba(234,179,8,0.15); color: #fde047; }
-    .fu-card-avatar.status-completed  { background: rgba(34,197,94,0.15); color: #86efac; }
-    .fu-card-avatar.status-no-show    { background: rgba(239,68,68,0.15); color: #fca5a5; }
-    .fu-card-avatar.status-cancelled, .fu-card-avatar.status-default { background: rgba(255,255,255,0.08); color: rgba(255,255,255,0.55); }
+    .fu-card-avatar.status-scheduled   { background: rgba(59,130,246,0.18); color: #93c5fd; }
+    .fu-card-avatar.status-in-progress { background: rgba(234,179,8,0.18); color: #fde047; }
+    .fu-card-avatar.status-completed   { background: rgba(34,197,94,0.18); color: #86efac; }
+    .fu-card-avatar.status-no-show     { background: rgba(239,68,68,0.18); color: #fca5a5; }
+    .fu-card-avatar.status-cancelled,
+    .fu-card-avatar.status-default     { background: rgba(255,255,255,0.1); color: rgba(255,255,255,0.6); }
     .fu-card-name {
-      font-size: 14px;
+      font-size: 15px;
       font-weight: 500;
-      color: var(--fg, #fff);
+      color: rgba(255,255,255,0.95);
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
     }
     .fu-card-meta {
       font-size: 12px;
-      color: var(--muted, rgba(255,255,255,0.55));
+      color: rgba(255,255,255,0.55);
       margin-top: 2px;
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      flex-wrap: wrap;
     }
     .fu-card-badge {
       display: inline-block;
-      padding: 1px 8px;
-      border-radius: 8px;
+      padding: 3px 9px;
+      border-radius: 10px;
       font-size: 10px;
       font-weight: 500;
-      text-transform: uppercase;
       letter-spacing: 0.3px;
     }
-    .fu-card-badge.status-scheduled  { background: rgba(59,130,246,0.15); color: #93c5fd; }
-    .fu-card-badge.status-in-progress { background: rgba(234,179,8,0.15); color: #fde047; }
-    .fu-card-badge.status-completed  { background: rgba(34,197,94,0.15); color: #86efac; }
-    .fu-card-badge.status-no-show    { background: rgba(239,68,68,0.15); color: #fca5a5; }
-    .fu-card-badge.status-cancelled, .fu-card-badge.status-default { background: rgba(255,255,255,0.08); color: rgba(255,255,255,0.55); }
-    .fu-card-right {
+    .fu-card-badge.status-scheduled   { background: rgba(59,130,246,0.18); color: #93c5fd; }
+    .fu-card-badge.status-in-progress { background: rgba(234,179,8,0.18); color: #fde047; }
+    .fu-card-badge.status-completed   { background: rgba(34,197,94,0.18); color: #86efac; }
+    .fu-card-badge.status-no-show     { background: rgba(239,68,68,0.18); color: #fca5a5; }
+    .fu-card-badge.status-cancelled,
+    .fu-card-badge.status-default     { background: rgba(255,255,255,0.08); color: rgba(255,255,255,0.6); }
+    .fu-card-memo-btn {
+      width: 30px;
+      height: 30px;
+      border-radius: 50%;
+      background: rgba(255,255,255,0.06);
+      border: 1px solid rgba(255,255,255,0.14);
       display: flex;
       align-items: center;
-      gap: 8px;
-      flex-shrink: 0;
+      justify-content: center;
+      cursor: pointer;
+      font-size: 14px;
+      transition: background 0.15s;
+      padding: 0;
     }
-    .fu-card-memo-icon { font-size: 15px; width: 20px; text-align: center; }
-    .fu-card-memo-icon.sent    { color: #4ade80; }
-    .fu-card-memo-icon.skipped { color: rgba(255,255,255,0.35); }
-    .fu-card-memo-icon.todo    { color: #facc15; }
-
+    .fu-card-memo-btn:hover    { background: rgba(255,255,255,0.12); }
+    .fu-card-memo-btn:disabled { opacity: 0.5; cursor: wait; }
+    .fu-card-memo-btn.sent     { color: #4ade80; }
+    .fu-card-memo-btn.skipped  { color: rgba(255,255,255,0.45); }
+    .fu-card-memo-btn.todo     { color: #facc15; }
+    .fu-card-actions {
+      display: flex;
+      gap: 8px;
+      padding: 10px 18px 14px;
+      border-top: 1px solid rgba(255,255,255,0.1);
+      flex-wrap: wrap;
+    }
+    .fu-card-action-btn {
+      background: rgba(255,255,255,0.05);
+      border: 1px solid rgba(255,255,255,0.14);
+      color: rgba(255,255,255,0.85);
+      padding: 6px 12px;
+      border-radius: 6px;
+      font-size: 12px;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      font-family: inherit;
+      transition: background 0.15s, border-color 0.15s;
+    }
+    .fu-card-action-btn:hover {
+      background: rgba(255,255,255,0.1);
+      border-color: rgba(255,255,255,0.22);
+    }
+    .fu-card-action-btn i { font-size: 13px; }
     .fu-voicememo-button {
       background: var(--brand, #093d54);
       color: #fff;
@@ -245,21 +283,16 @@
       cursor: pointer;
       transition: opacity 0.15s;
     }
-    .fu-voicememo-button:hover { opacity: 0.85; }
+    .fu-voicememo-button:hover    { opacity: 0.85; }
     .fu-voicememo-button:disabled { opacity: 0.4; cursor: default; }
-    .fu-metric-context {
-      font-size: 11px;
-      color: rgba(255,255,255,0.4);
-      margin-top: 6px;
-    }
     .fu-loading {
       text-align: center;
       padding: 32px;
       color: var(--text-secondary, rgba(255,255,255,0.6));
     }
     @media (max-width: 720px) {
-      .fu-card { flex-direction: column; align-items: flex-start; }
-      .fu-card-right { flex-wrap: wrap; }
+      .fu-card-header { flex-wrap: wrap; }
+      .fu-card-actions { gap: 6px; }
     }
     .fu-modal-backdrop {
       position: fixed;
@@ -667,13 +700,14 @@
       card.dataset.appointmentId = appt.id;
 
       const statusKey = (appt.status || 'default').toLowerCase().replace(/_/g, '-');
-      const statusLabel = {
+      const STATUS_LABELS = {
         'scheduled':   'Gepland',
         'completed':   'Afgerond',
         'no-show':     'No-show',
         'cancelled':   'Geannuleerd',
         'in-progress': 'Bezig',
-      }[statusKey] || appt.status || '—';
+      };
+      const statusLabel = STATUS_LABELS[statusKey] || appt.status || '—';
 
       const initials = (appt.lead_name || '?')
         .split(' ').filter(Boolean).slice(0, 2)
@@ -683,19 +717,22 @@
       const timeStr = scheduledDate
         ? scheduledDate.toLocaleTimeString('nl-NL', { hour: '2-digit', minute: '2-digit' })
         : '—';
-      const dateStr = scheduledDate
-        ? scheduledDate.toLocaleDateString('nl-NL', { day: 'numeric', month: 'short' })
-        : '';
+      const duration = appt.duration_minutes || 30;
 
-      const memoStatus = appt.voicememo_status || 'todo';
+      const memoCycleOrder = ['pending', 'sent', 'no_whatsapp', 'skipped'];
       const memoMap = {
-        sent:    { cls: 'sent',    icon: 'ti-microphone-2', title: 'Voicememo verzonden' },
-        skipped: { cls: 'skipped', icon: 'ti-microphone-off', title: 'Overgeslagen' },
-        todo:    { cls: 'todo',    icon: 'ti-clock', title: 'Voicememo nog te verzenden' },
+        pending:      { icon: 'ti-clock',         cls: 'todo',    title: 'Voicememo nog te doen' },
+        sent:         { icon: 'ti-microphone-2',   cls: 'sent',    title: 'Voicememo verzonden' },
+        no_whatsapp:  { icon: 'ti-message-off',    cls: 'skipped', title: 'Geen WhatsApp' },
+        skipped:      { icon: 'ti-microphone-off', cls: 'skipped', title: 'Overgeslagen' },
       };
-      const memo = memoMap[memoStatus] || memoMap.todo;
+      const memoCurrent = appt.voicememo_status || 'pending';
+      const memoInfo = memoMap[memoCurrent] || memoMap.pending;
 
-      // Left: avatar + name/meta
+      // ── Header row ────────────────────────────────────────────────
+      const header = document.createElement('div');
+      header.className = 'fu-card-header';
+
       const left = document.createElement('div');
       left.className = 'fu-card-left';
 
@@ -704,89 +741,137 @@
       avatar.textContent = initials;
       left.appendChild(avatar);
 
-      const bodyEl = document.createElement('div');
-      bodyEl.style.minWidth = '0';
-      bodyEl.innerHTML =
+      const infoEl = document.createElement('div');
+      infoEl.style.minWidth = '0';
+      infoEl.innerHTML =
         `<div class="fu-card-name">${escapeHtml(appt.lead_name || '—')}</div>` +
-        `<div class="fu-card-meta">` +
-          `${dateStr ? escapeHtml(dateStr) + ' · ' : ''}${escapeHtml(timeStr)} · ` +
-          `<span class="fu-card-badge status-${statusKey}">${escapeHtml(statusLabel)}</span>` +
-          `${appt.terugkom_datum ? ` · <span style="color:rgba(255,255,255,0.45);">opvolg ${escapeHtml(appt.terugkom_datum)}</span>` : ''}` +
+        `<div class="fu-card-meta">${escapeHtml(timeStr)} · ${duration} min` +
+          `${appt.terugkom_datum ? ` · opvolg ${escapeHtml(appt.terugkom_datum)}` : ''}` +
         `</div>`;
-      left.appendChild(bodyEl);
-      card.appendChild(left);
+      left.appendChild(infoEl);
+      header.appendChild(left);
 
-      // Right: memo icon + action buttons
       const right = document.createElement('div');
       right.className = 'fu-card-right';
 
-      const memoIcon = document.createElement('i');
-      memoIcon.className = `ti ${memo.icon} fu-card-memo-icon ${memo.cls}`;
-      memoIcon.title = memo.title;
-      memoIcon.setAttribute('aria-label', memo.title);
-      right.appendChild(memoIcon);
-
-      const notitieBtn = document.createElement('button');
-      notitieBtn.className = 'fu-voicememo-button';
-      notitieBtn.textContent = appt.snelle_notitie ? 'Notitie' : 'Notitie';
-      notitieBtn.style.opacity = appt.snelle_notitie ? '1' : '0.65';
-      notitieBtn.addEventListener('click', (e) => { e.stopPropagation(); openSnelleNotitieModal(appt); });
-      right.appendChild(notitieBtn);
-
-      const outcomeBtn = document.createElement('button');
-      outcomeBtn.className = 'fu-voicememo-button';
-      outcomeBtn.textContent = 'Outcome';
-      outcomeBtn.addEventListener('click', (e) => { e.stopPropagation(); openOutcomeModal(appt); });
-      right.appendChild(outcomeBtn);
-
-      if (appt.terugkom_datum && appt.opvolging_status !== 'geregeld') {
-        const geregeldBtn = document.createElement('button');
-        geregeldBtn.className = 'fu-voicememo-button';
-        geregeldBtn.textContent = '✓ Geregeld';
-        geregeldBtn.addEventListener('click', async (e) => {
-          e.stopPropagation();
-          if (!confirm('Markeer opvolging als geregeld?')) return;
-          try {
-            const token = await window.AuthShared.getAccessToken();
-            const r = await fetch('/api/follow-up-opvolging-status', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-              body: JSON.stringify({ appointment_id: appt.id, action: 'geregeld' }),
-            });
-            if (!r.ok) { const e2 = await r.json().catch(() => ({})); throw new Error(e2.error || `HTTP ${r.status}`); }
-            location.reload();
-          } catch (err) { alert('Fout: ' + err.message); }
-        });
-        right.appendChild(geregeldBtn);
-
-        const verzetBtn = document.createElement('button');
-        verzetBtn.className = 'fu-voicememo-button';
-        verzetBtn.textContent = 'Verzet';
-        verzetBtn.addEventListener('click', async (e) => {
-          e.stopPropagation();
-          const newDate = prompt('Nieuwe terugkom-datum (YYYY-MM-DD):', appt.terugkom_datum);
-          if (!newDate || !/^\d{4}-\d{2}-\d{2}$/.test(newDate)) {
-            if (newDate !== null) alert('Ongeldig datumformaat. Gebruik YYYY-MM-DD.');
-            return;
+      const memoBtn = document.createElement('button');
+      memoBtn.className = `fu-card-memo-btn ${memoInfo.cls}`;
+      memoBtn.title = memoInfo.title + ' · klik om te wijzigen';
+      memoBtn.setAttribute('aria-label', memoInfo.title);
+      memoBtn.innerHTML = `<i class="ti ${memoInfo.icon}" aria-hidden="true"></i>`;
+      memoBtn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        const idx = memoCycleOrder.indexOf(memoCurrent);
+        const nextStatus = memoCycleOrder[(idx + 1) % memoCycleOrder.length];
+        memoBtn.disabled = true;
+        try {
+          const token = await window.AuthShared.getAccessToken();
+          const res = await fetch('/api/follow-up-appointments', {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+            body: JSON.stringify({ id: appt.id, voicememo_status: nextStatus }),
+          });
+          if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.error || `HTTP ${res.status}`);
           }
-          try {
-            const token = await window.AuthShared.getAccessToken();
-            const r = await fetch('/api/follow-up-opvolging-status', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-              body: JSON.stringify({ appointment_id: appt.id, action: 'verzet', new_terugkom_datum: newDate }),
-            });
-            if (!r.ok) { const e2 = await r.json().catch(() => ({})); throw new Error(e2.error || `HTTP ${r.status}`); }
-            location.reload();
-          } catch (err) { alert('Fout: ' + err.message); }
+          location.reload();
+        } catch (err) {
+          alert('Fout: ' + err.message);
+          memoBtn.disabled = false;
+        }
+      });
+      right.appendChild(memoBtn);
+
+      const badge = document.createElement('span');
+      badge.className = `fu-card-badge status-${statusKey}`;
+      badge.textContent = statusLabel;
+      right.appendChild(badge);
+
+      header.appendChild(right);
+      card.appendChild(header);
+
+      // ── Actions row (alleen scheduled + opvolging-cards) ──────────
+      const showActions = statusKey === 'scheduled' || !!appt.terugkom_datum;
+
+      if (showActions) {
+        const actions = document.createElement('div');
+        actions.className = 'fu-card-actions';
+
+        const outcomeBtn = document.createElement('button');
+        outcomeBtn.className = 'fu-card-action-btn';
+        outcomeBtn.innerHTML = '<i class="ti ti-clipboard" aria-hidden="true"></i> Outcome';
+        outcomeBtn.addEventListener('click', (e) => { e.stopPropagation(); openOutcomeModal(appt); });
+        actions.appendChild(outcomeBtn);
+
+        const notitieBtn = document.createElement('button');
+        notitieBtn.className = 'fu-card-action-btn';
+        notitieBtn.innerHTML = `<i class="ti ti-note" aria-hidden="true"></i> ${appt.snelle_notitie ? 'Notitie bewerken' : 'Notitie'}`;
+        notitieBtn.addEventListener('click', (e) => { e.stopPropagation(); openSnelleNotitieModal(appt); });
+        actions.appendChild(notitieBtn);
+
+        const detailBtn = document.createElement('button');
+        detailBtn.className = 'fu-card-action-btn';
+        detailBtn.innerHTML = '<i class="ti ti-external-link" aria-hidden="true"></i> Detail';
+        detailBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          window.location.href = `/modules/follow-up-lead.html?id=${appt.id}`;
         });
-        right.appendChild(verzetBtn);
+        actions.appendChild(detailBtn);
+
+        if (appt.terugkom_datum && appt.opvolging_status !== 'geregeld') {
+          const geregeldBtn = document.createElement('button');
+          geregeldBtn.className = 'fu-card-action-btn';
+          geregeldBtn.innerHTML = '<i class="ti ti-check" aria-hidden="true"></i> Geregeld';
+          geregeldBtn.addEventListener('click', async (e) => {
+            e.stopPropagation();
+            if (!confirm('Markeer opvolging als geregeld?')) return;
+            try {
+              const token = await window.AuthShared.getAccessToken();
+              const res = await fetch('/api/follow-up-opvolging-status', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+                body: JSON.stringify({ appointment_id: appt.id, action: 'geregeld' }),
+              });
+              if (!res.ok) { const e2 = await res.json().catch(() => ({})); throw new Error(e2.error || `HTTP ${res.status}`); }
+              location.reload();
+            } catch (err) { alert('Fout: ' + err.message); }
+          });
+          actions.appendChild(geregeldBtn);
+
+          const verzetBtn = document.createElement('button');
+          verzetBtn.className = 'fu-card-action-btn';
+          verzetBtn.innerHTML = '<i class="ti ti-calendar" aria-hidden="true"></i> Verzet';
+          verzetBtn.addEventListener('click', async (e) => {
+            e.stopPropagation();
+            const newDate = prompt('Nieuwe terugkom-datum (YYYY-MM-DD):', appt.terugkom_datum);
+            if (!newDate || !/^\d{4}-\d{2}-\d{2}$/.test(newDate)) {
+              if (newDate !== null) alert('Ongeldig datumformaat.');
+              return;
+            }
+            try {
+              const token = await window.AuthShared.getAccessToken();
+              const res = await fetch('/api/follow-up-opvolging-status', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+                body: JSON.stringify({ appointment_id: appt.id, action: 'verzet', new_terugkom_datum: newDate }),
+              });
+              if (!res.ok) { const e2 = await res.json().catch(() => ({})); throw new Error(e2.error || `HTTP ${res.status}`); }
+              location.reload();
+            } catch (err) { alert('Fout: ' + err.message); }
+          });
+          actions.appendChild(verzetBtn);
+        }
+
+        card.appendChild(actions);
+
+        card.style.cursor = 'pointer';
+        card.addEventListener('click', (e) => {
+          if (e.target.closest('button')) return;
+          window.location.href = `/modules/follow-up-lead.html?id=${appt.id}`;
+        });
       }
 
-      card.appendChild(right);
-      card.addEventListener('click', () => {
-        window.location.href = `/modules/follow-up-lead.html?id=${appt.id}`;
-      });
       return card;
     }
 
@@ -1206,7 +1291,7 @@
         {
           label: "Voicememo's",
           value: m.voicememos_sent,
-          sub: `van ${m.appointments_total}`,
+          sub: `van ${m.voicememos_relevant ?? m.appointments_total}`,
         },
         {
           label: 'Outcomes vandaag',

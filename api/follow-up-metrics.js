@@ -32,6 +32,7 @@ export async function computeMetrics(supabaseAdmin, opts = {}) {
   metrics.appointments_completed = appts?.filter(a => a.status === 'completed').length || 0;
   metrics.appointments_no_show = appts?.filter(a => a.status === 'no_show').length || 0;
   metrics.voicememos_sent = appts?.filter(a => a.voicememo_status === 'sent').length || 0;
+  metrics.voicememos_relevant = appts?.filter(a => a.voicememo_status !== 'no_whatsapp').length || 0;
 
   const { data: outcomes } = await supabaseAdmin
     .from('follow_up_outcomes')
