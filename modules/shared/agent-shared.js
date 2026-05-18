@@ -3,6 +3,12 @@
    control-center.html.  Geëxporteerd als window.AgentShared.
    ──────────────────────────────────────────────────────────────────────────── */
 
+/* Theme boot — direct uitvoeren vóór CSS-render om FOUC te voorkomen */
+(function() {
+  var stored = localStorage.getItem('agency-cc-theme');
+  document.documentElement.setAttribute('data-theme', stored || 'light');
+})();
+
 (function () {
   'use strict';
 
@@ -347,6 +353,25 @@
       </div>`;
   }
 
+  // ── Theme-toggle injectie in sidebar footer ──────────────────────────────────
+
+  function injectThemeToggle() {
+    if (document.getElementById('agentThemeToggle')) return;
+    const footer = document.querySelector('.sidebar-footer');
+    if (!footer) return;
+    const btn = document.createElement('button');
+    btn.id = 'agentThemeToggle';
+    btn.setAttribute('data-theme-toggle', '');
+    const currentTheme = document.documentElement.getAttribute('data-theme') || 'light';
+    btn.setAttribute('aria-label', currentTheme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode');
+    btn.title = currentTheme === 'dark' ? 'Light mode' : 'Dark mode';
+    btn.style.cssText = 'display:flex;align-items:center;gap:8px;width:100%;padding:7px 10px;background:transparent;border:1px solid var(--sidebar-border);border-radius:8px;color:var(--text-secondary);cursor:pointer;font-size:13px;font-family:inherit;margin-top:6px;transition:background .15s;';
+    btn.innerHTML = `<i class="${currentTheme === 'dark' ? 'ti ti-sun' : 'ti ti-moon'}"></i><span>Theme</span>`;
+    btn.addEventListener('mouseenter', function() { this.style.background = 'var(--sidebar-item-hover)'; });
+    btn.addEventListener('mouseleave', function() { this.style.background = 'transparent'; });
+    footer.appendChild(btn);
+  }
+
   // ── apiFetch: fetch wrapper met automatische Authorization header ────────────
 
   async function apiFetch(url, options = {}) {
@@ -384,6 +409,7 @@
     getAvatarUrl,
     getAgentFunction,
     renderUserSection,
+    injectThemeToggle,
     apiFetch,
   };
 })();
