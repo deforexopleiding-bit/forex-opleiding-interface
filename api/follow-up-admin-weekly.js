@@ -31,7 +31,7 @@ export default async function handler(req, res) {
 
     const today = new Date().toISOString().slice(0, 10);
     const { data: alreadySent } = await supabaseAdmin
-      .from('follow_up_notifications_sent')
+      .from('follow_up_admin_report_log')
       .select('recipient')
       .eq('notification_type', 'admin_weekly')
       .eq('reference_date', today);
@@ -56,7 +56,7 @@ export default async function handler(req, res) {
 
       if (sendResult.success) {
         await supabaseAdmin
-          .from('follow_up_notifications_sent')
+          .from('follow_up_admin_report_log')
           .insert({
             notification_type: 'admin_weekly',
             reference_date: today,

@@ -4,11 +4,11 @@
 --       zodat dezelfde dag/week niet dubbel verstuurd wordt bij retry.
 --
 -- ROLLBACK:
---   DROP TABLE IF EXISTS follow_up_notifications_sent;
+--   DROP TABLE IF EXISTS follow_up_admin_report_log;
 
 BEGIN;
 
-CREATE TABLE IF NOT EXISTS public.follow_up_notifications_sent (
+CREATE TABLE IF NOT EXISTS public.follow_up_admin_report_log (
   id               uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   notification_type text NOT NULL
     CHECK (notification_type IN ('admin_daily', 'admin_weekly')),
@@ -19,18 +19,18 @@ CREATE TABLE IF NOT EXISTS public.follow_up_notifications_sent (
   UNIQUE (notification_type, reference_date, recipient)
 );
 
-COMMENT ON TABLE public.follow_up_notifications_sent IS
+COMMENT ON TABLE public.follow_up_admin_report_log IS
   'Dedup-log voor automatische admin-notificaties. Voorkomt dubbele '
   'verzending bij cron-herstart of Vercel retries.';
 
-CREATE INDEX IF NOT EXISTS idx_notifications_sent_lookup
-  ON public.follow_up_notifications_sent (notification_type, reference_date);
+CREATE INDEX IF NOT EXISTS idx_admin_report_log_lookup
+  ON public.follow_up_admin_report_log (notification_type, reference_date);
 
-ALTER TABLE public.follow_up_notifications_sent ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.follow_up_admin_report_log ENABLE ROW LEVEL SECURITY;
 
 -- Alleen admin-rollen mogen lezen (audit trail)
-CREATE POLICY "notifications_sent_admin_read"
-  ON public.follow_up_notifications_sent
+CREATE POLICY "admin_report_log_admin_read"
+  ON public.follow_up_admin_report_log
   FOR SELECT
   USING (has_any_role(ARRAY['super_admin', 'admin', 'manager']));
 
