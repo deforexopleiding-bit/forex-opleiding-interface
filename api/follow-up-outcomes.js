@@ -1,11 +1,11 @@
 // api/follow-up-outcomes.js
 //
-// POST endpoint voor opslaan van post-call outcome.
-// Body: { appointment_id, outcome, bezwaren: string[], warmte_score: 1-10,
-//          terugkom_datum: 'YYYY-MM-DD', terugkom_datetime: ISO8601,
-//          volgende_actie: string, notitie: string }
-//
-// Side-effect: update follow_up_appointments.status op basis van outcome.
+// GET  ?appointment_id=<uuid> → bestaande outcome of null (200)
+// POST body: { appointment_id, outcome, bezwaren: string[], warmte_score: 1-10,
+//              terugkom_datum: 'YYYY-MM-DD', terugkom_datetime: ISO8601,
+//              volgende_actie: string, notitie: string }
+//      → UPSERT (onConflict: appointment_id); side-effect: update appointment status.
+
 
 import { createUserClient } from './supabase.js';
 import { addGhlTags, tagsFromOutcome } from './ghl-tag-helper.js';
@@ -32,7 +32,7 @@ export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
   res.setHeader('Content-Type', 'application/json');
 
-  if (req.method !== 'POST') {
+  if (req.method !== 'GET' && req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed.' });
   }
 
@@ -40,6 +40,25 @@ export default async function handler(req, res) {
   const { data: { user }, error: authErr } = await supabase.auth.getUser();
   if (authErr || !user) {
     return res.status(401).json({ error: 'Niet geauthenticeerd.' });
+  }
+
+  // ── GET: haal bestaande outcome op voor pre-fill modal ───────────────────
+  if (req.method === 'GET') {
+    const { appointment_id } = req.query;
+    if (!appointment_id) {
+      return res.status(400).json({ error: 'appointment_id vereist' });
+    }
+    const { data, error } = await supabase
+      .from('follow_up_outcomes')
+      .select('*')
+      .eq('appointment_id', appointment_id)
+      .maybeSingle();
+    if (error) {
+      console.error('[outcomes-get] error:', error.message);
+      return res.status(500).json({ error: error.message });
+    }
+    // 200 + null bij geen rij — voorkomt console-noise op "new outcome" flows
+    return res.status(200).json(data || null);
   }
 
   const body = req.body || {};
@@ -74,14 +93,16 @@ export default async function handler(req, res) {
     ingevuld_door: user.id,
   };
 
+  outcomeRow.ingevuld_at = new Date().toISOString();
+
   const { data: outcomeData, error: outcomeErr } = await supabase
     .from('follow_up_outcomes')
-    .insert(outcomeRow)
+    .upsert(outcomeRow, { onConflict: 'appointment_id', ignoreDuplicates: false })
     .select('id')
     .single();
 
   if (outcomeErr) {
-    console.error('[outcomes-post] insert error:', outcomeErr.message);
+    console.error('[outcomes-upsert] error:', outcomeErr.message);
     return res.status(500).json({ error: outcomeErr.message });
   }
 

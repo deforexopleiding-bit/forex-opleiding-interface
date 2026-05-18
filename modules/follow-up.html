@@ -961,7 +961,8 @@
         if (statusKey !== 'cancelled') {
           const outcomeBtn = document.createElement('button');
           outcomeBtn.className = 'fu-card-action-btn';
-          outcomeBtn.innerHTML = '<i class="ti ti-clipboard" aria-hidden="true"></i> Outcome';
+          const outcomeLabel = appt.has_outcome ? 'Outcome wijzigen' : 'Outcome';
+          outcomeBtn.innerHTML = `<i class="ti ti-clipboard" aria-hidden="true"></i> ${outcomeLabel}`;
           outcomeBtn.addEventListener('click', (e) => { e.stopPropagation(); openOutcomeModal(appt); });
           actions.appendChild(outcomeBtn);
         }
@@ -1144,13 +1145,13 @@
     // Outcomes die volgende actie tonen
     const OUTCOME_SHOW_VOLGENDE = new Set(['klant_geworden', 'geen_klant', 'interesse_uitstel', 'interesse_overleg']);
 
-    function openOutcomeModal(appt) {
+    async function openOutcomeModal(appt) {
       currentOutcomeAppt = appt;
       currentOutcomeChoice = null;
       currentBezwaren = new Set();
 
       document.getElementById('outcome-modal-title').textContent =
-        `Call afronden — ${appt.lead_name}`;
+        `${appt.has_outcome ? 'Outcome wijzigen' : 'Call afronden'} — ${appt.lead_name}`;
 
       document.querySelectorAll('.fu-outcome-btn').forEach(b => b.classList.remove('active'));
       document.querySelector('.fu-bezwaren-field').style.display = 'none';
@@ -1185,6 +1186,62 @@
       }
 
       document.getElementById('outcome-modal').style.display = 'flex';
+
+      // ── Pre-fill bij wijzigen ─────────────────────────────────────────────
+      if (appt.has_outcome) {
+        try {
+          const token = await window.AuthShared.getAccessToken();
+          const resp = await fetch(`/api/follow-up-outcomes?appointment_id=${appt.id}`, {
+            headers: { 'Authorization': 'Bearer ' + token },
+          });
+          if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+          const existing = await resp.json();
+          if (!existing) return;
+
+          // Outcome-knop activeren (triggert ook veld-zichtbaarheid via global listener)
+          const outcomeBtn = document.querySelector(`.fu-outcome-btn[data-value="${existing.outcome}"]`);
+          if (outcomeBtn) {
+            outcomeBtn.click();
+          }
+
+          // Warmte slider
+          if (existing.warmte_score != null) {
+            document.getElementById('warmte-slider').value = existing.warmte_score;
+            document.getElementById('warmte-value').textContent = existing.warmte_score;
+          }
+
+          // Notitie
+          if (existing.notitie) {
+            document.getElementById('outcome-notitie').value = existing.notitie;
+          }
+
+          // Volgende actie
+          if (existing.volgende_actie) {
+            document.getElementById('volgende-actie-select').value = existing.volgende_actie;
+          }
+
+          // Bezwaren — klik bestaande chips actief
+          if (Array.isArray(existing.bezwaren)) {
+            existing.bezwaren.forEach(bVal => {
+              const chip = bezwarenContainer.querySelector(`.fu-bezwaar-btn[data-value="${bVal}"]`);
+              if (chip) chip.click();
+            });
+          }
+
+          // Terugkom datum + tijd
+          if (existing.terugkom_datetime) {
+            const dt = new Date(existing.terugkom_datetime);
+            document.getElementById('terugkom-date').value = dt.toISOString().slice(0, 10);
+            document.getElementById('terugkom-time').value = dt.toLocaleTimeString('nl-NL', {
+              hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Amsterdam',
+            }).slice(0, 5);
+          } else if (existing.terugkom_datum) {
+            document.getElementById('terugkom-date').value = existing.terugkom_datum;
+          }
+        } catch (err) {
+          console.warn('[outcome-prefill] kon bestaande outcome niet ophalen:', err.message);
+        }
+      }
     }
 
     function closeOutcomeModal() {
