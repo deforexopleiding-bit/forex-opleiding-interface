@@ -14,17 +14,17 @@ const OUTCOME_TO_STATUS = {
   klant_geworden:    'completed',
   geen_klant:        'completed',
   no_show:           'no_show',
-  terugbellen:       'scheduled',   // open houden
   niet_bereikt:      'no_show',
-  in_beraad:         'completed',
-  offerte_verzonden: 'completed',
-  afgesloten:        'completed',
+  interesse_uitstel: 'completed',
+  interesse_overleg: 'completed',
+  geen_interesse:    'completed',
+  niet_geschikt:     'completed',
 };
 
 const VALID_OUTCOMES = [
   'klant_geworden', 'geen_klant', 'no_show',
-  'terugbellen', 'niet_bereikt', 'in_beraad',
-  'offerte_verzonden', 'afgesloten',
+  'niet_bereikt', 'interesse_uitstel', 'interesse_overleg',
+  'geen_interesse', 'niet_geschikt',
 ];
 const VALID_VOLGENDE_ACTIES = ['bellen', 'email', 'event', 'sluiten', 'niet_meer_opvolgen'];
 

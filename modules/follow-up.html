@@ -424,7 +424,7 @@
     }
     .fu-outcome-grid {
       display: grid;
-      grid-template-columns: repeat(3, 1fr);
+      grid-template-columns: repeat(2, 1fr);
       gap: 8px;
     }
     .fu-outcome-btn, .fu-bezwaar-btn {
@@ -709,9 +709,11 @@
             <button type="button" class="fu-outcome-btn" data-value="klant_geworden">✅ Klant geworden</button>
             <button type="button" class="fu-outcome-btn" data-value="geen_klant">❌ Geen klant</button>
             <button type="button" class="fu-outcome-btn" data-value="no_show">👻 No-show</button>
-            <button type="button" class="fu-outcome-btn" data-value="terugbellen">📞 Terugbellen</button>
             <button type="button" class="fu-outcome-btn" data-value="niet_bereikt">📵 Niet bereikt</button>
-            <button type="button" class="fu-outcome-btn" data-value="in_beraad">🤔 In beraad</button>
+            <button type="button" class="fu-outcome-btn" data-value="interesse_uitstel">⏰ Interesse, uitstel</button>
+            <button type="button" class="fu-outcome-btn" data-value="interesse_overleg">👥 Interesse, overleg</button>
+            <button type="button" class="fu-outcome-btn" data-value="geen_interesse">🚫 Geen interesse</button>
+            <button type="button" class="fu-outcome-btn" data-value="niet_geschikt">🙅 Niet geschikt</button>
           </div>
         </div>
         <div class="fu-field fu-bezwaren-field" style="display:none;">
@@ -1136,11 +1138,11 @@
     let currentBezwaren = new Set();
 
     // Outcomes die bezwaren tonen
-    const OUTCOME_SHOW_BEZWAREN = new Set(['geen_klant', 'in_beraad']);
+    const OUTCOME_SHOW_BEZWAREN = new Set(['interesse_uitstel', 'interesse_overleg', 'geen_interesse']);
     // Outcomes die terugkom tonen
-    const OUTCOME_SHOW_TERUGKOM = new Set(['geen_klant', 'terugbellen', 'niet_bereikt', 'in_beraad']);
+    const OUTCOME_SHOW_TERUGKOM = new Set(['interesse_uitstel', 'interesse_overleg']);
     // Outcomes die volgende actie tonen
-    const OUTCOME_SHOW_VOLGENDE = new Set(['klant_geworden', 'geen_klant', 'terugbellen', 'in_beraad']);
+    const OUTCOME_SHOW_VOLGENDE = new Set(['klant_geworden', 'geen_klant', 'interesse_uitstel', 'interesse_overleg']);
 
     function openOutcomeModal(appt) {
       currentOutcomeAppt = appt;
