@@ -142,8 +142,12 @@ body::before {
 
 /* ── Sidebar ── */
 .sidebar { position:fixed; top:0; left:0; bottom:0; width:var(--sidebar-w); background:var(--sidebar-bg); border-right:1px solid var(--sidebar-border); display:flex; flex-direction:column; z-index:200; overflow-y:auto; }
-.sidebar-logo { display:flex; align-items:center; justify-content:center; padding:18px 16px 16px; border-bottom:1px solid var(--sidebar-border); flex-shrink:0; }
-.sidebar-logo img { max-width:140px; height:auto; display:block; }
+.sidebar-logo { display:flex; align-items:center; justify-content:center; padding:14px 16px; border-bottom:1px solid var(--sidebar-border); flex-shrink:0; }
+.sidebar-logo img { max-height:40px; width:auto; max-width:160px; object-fit:contain; display:block; }
+.sidebar-logo .logo-dark  { display:block; }
+.sidebar-logo .logo-light { display:none; }
+[data-theme="dark"] .sidebar-logo .logo-dark  { display:none; }
+[data-theme="dark"] .sidebar-logo .logo-light { display:block; }
 .sidebar-logo-fallback { font-size:13px; font-weight:700; color:var(--text); }
 .sidebar-nav { flex:1; padding:10px 8px; }
 .nav-section { font-size:10px; text-transform:uppercase; letter-spacing:.7px; color:var(--text-faint); font-weight:600; padding:14px 10px 5px; }

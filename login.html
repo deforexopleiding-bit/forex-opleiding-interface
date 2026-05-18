@@ -55,22 +55,18 @@
 
     /* ── Logo ── */
     .card-logo {
-      display: flex;
-      justify-content: center;
-      margin-bottom: 24px;
-    }
-    .brand-mark {
-      font-size: 17px;
-      font-weight: 700;
-      color: var(--text);
-      letter-spacing: -0.2px;
       text-align: center;
+      margin-bottom: 28px;
     }
-    .card-logo-fallback {
-      font-size: 15px;
-      font-weight: 700;
-      color: var(--text);
+    .card-logo img {
+      max-width: 220px;
+      height: auto;
+      display: inline-block;
     }
+    .card-logo .logo-dark  { display: inline-block; }
+    .card-logo .logo-light { display: none; }
+    [data-theme="dark"] .card-logo .logo-dark  { display: none; }
+    [data-theme="dark"] .card-logo .logo-light { display: inline-block; }
 
     /* ── Header ── */
     .card-title {
@@ -294,7 +290,8 @@
 
     <!-- Logo -->
     <div class="card-logo">
-      <div class="brand-mark">De Forex Opleiding</div>
+      <img src="/img/logo-dark.png"  alt="De Forex Opleiding" class="logo-dark">
+      <img src="/img/logo-light.png" alt="De Forex Opleiding" class="logo-light">
     </div>
 
     <!-- Header -->
