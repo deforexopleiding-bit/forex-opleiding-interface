@@ -7,31 +7,8 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/modules/shared/agent-shared.css" />
   <style>
-    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-
-    :root {
-      --bg: #0a0b10;
-      --bg-elev: #13151c;
-      --bg-elev-2: #181b25;
-      --border: rgba(255,255,255,0.06);
-      --border-strong: rgba(255,255,255,0.12);
-      --text: #f1f5f9;
-      --text-dim: #94a3b8;
-      --text-faint: #64748b;
-      --accent-cyan: #22d3ee;
-      --brand-primary: #093d54;
-      --brand-primary-light: #1a5773;
-      --brand-secondary: #688b9b;
-      --brand-secondary-light: #8aa5b3;
-      --color-success: #1D9E75;
-      --color-warning: #EF9F27;
-      --color-danger: #D85A30;
-      --green: #22c55e;
-      --amber: #f59e0b;
-      --red: #ef4444;
-    }
-
     html, body {
       height: 100%;
       font-family: 'Inter', system-ui, sans-serif;
@@ -134,10 +111,10 @@
     }
     .tab-btn.active {
       background: var(--brand-primary);
-      color: #fff;
+      color: var(--text-inverse);
     }
     .tab-btn:not(.active):hover {
-      background: rgba(255,255,255,0.05);
+      background: var(--sidebar-item-hover);
       color: var(--text);
     }
 
@@ -183,7 +160,7 @@
       background: var(--brand-primary);
       border: none;
       border-radius: 8px;
-      color: #fff;
+      color: var(--text-inverse);
       font-family: inherit;
       font-size: 14px;
       font-weight: 600;
@@ -244,7 +221,7 @@
       margin-top: 4px;
     }
     .btn-secondary:hover:not(:disabled) {
-      background: rgba(255,255,255,0.05);
+      background: var(--sidebar-item-hover);
       color: var(--text);
       border-color: var(--border-strong);
     }
@@ -264,25 +241,25 @@
     }
     .banner.show { display: block; }
     .banner-error {
-      background: rgba(216,90,48,0.15);
-      border: 1px solid rgba(216,90,48,0.3);
-      color: #f87171;
+      background: var(--color-danger-soft);
+      border: 1px solid var(--color-danger);
+      color: var(--color-danger-text);
     }
     .banner-success {
-      background: rgba(29,158,117,0.15);
-      border: 1px solid rgba(29,158,117,0.3);
-      color: #34d399;
+      background: var(--color-success-soft);
+      border: 1px solid var(--color-success);
+      color: var(--color-success-text);
     }
     .banner-info {
-      background: rgba(34,211,238,0.1);
-      border: 1px solid rgba(34,211,238,0.2);
-      color: var(--accent-cyan);
+      background: var(--color-info-soft);
+      border: 1px solid var(--color-info);
+      color: var(--color-info-text);
     }
 
     /* ── Inline form error ── */
     .field-error {
       font-size: 11px;
-      color: #f87171;
+      color: var(--color-danger-text);
       margin-top: 4px;
       display: none;
     }
