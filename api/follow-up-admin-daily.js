@@ -139,9 +139,21 @@ function buildDailyHtml(m, today) {
     </table>
     ` : ''}
 
-    <h2 style="color:#093d54; font-size:16px; margin:24px 0 12px;">⚠️ Achterstallige opvolgingen</h2>
-    <p style="margin:0; font-size:28px; font-weight:700; color:${overdueColor};">${m.opvolgingen_overdue}</p>
-    ${m.opvolgingen_overdue > 0 ? '<p style="margin:8px 0 0; color:#6b7280; font-size:13px;">Open de Follow-up Module om deze af te handelen.</p>' : ''}
+    ${m.outcomes_missing_today > 0 ? `
+    <div style="padding:12px 16px; background:#fef3c7; border-left:4px solid #d97706; border-radius:4px; margin:16px 0;">
+      <p style="margin:0; font-size:14px; color:#92400e;"><strong>⚠ ${m.outcomes_missing_today} outcome${m.outcomes_missing_today > 1 ? 's' : ''} nog niet ingevuld vandaag.</strong></p>
+      <p style="margin:4px 0 0; font-size:13px; color:#78350f;">Open de Follow-up Module om deze in te vullen voor het eind van de dag.</p>
+    </div>
+    ` : ''}
+
+    <h2 style="color:#093d54; font-size:16px; margin:24px 0 12px;">⚠️ Achterstallig (totaal)</h2>
+    <table cellpadding="0" cellspacing="0" border="0" width="100%" style="border-collapse:collapse; font-size:14px;">
+      <tr><td style="padding:6px 0; color:#374151;">Opvolgingen over tijd</td><td style="text-align:right; font-weight:600; color:${m.achterstallig_opvolgingen > 0 ? '#dc2626' : '#6b7280'};">${m.achterstallig_opvolgingen ?? m.opvolgingen_overdue}</td></tr>
+      <tr><td style="padding:6px 0; color:#374151;">Outcomes ontbrekend</td><td style="text-align:right; font-weight:600; color:${(m.achterstallig_outcomes ?? 0) > 0 ? '#dc2626' : '#6b7280'};">${m.achterstallig_outcomes ?? 0}</td></tr>
+      <tr><td style="padding:6px 0; color:#374151;">Voicememo's uitstaand</td><td style="text-align:right; font-weight:600; color:${(m.achterstallig_voicememos ?? 0) > 0 ? '#dc2626' : '#6b7280'};">${m.achterstallig_voicememos ?? 0}</td></tr>
+    </table>
+    <p style="margin:8px 0 0; font-size:28px; font-weight:700; color:${overdueColor};">${m.achterstallig_totaal ?? m.opvolgingen_overdue}</p>
+    ${(m.achterstallig_totaal ?? m.opvolgingen_overdue) > 0 ? '<p style="margin:8px 0 0; color:#6b7280; font-size:13px;">Open de Follow-up Module om deze af te handelen.</p>' : ''}
   `;
 
   return wrapEmailHtml('Dagrapport Follow-up Module', body);
@@ -163,7 +175,11 @@ OUTCOMES
   Geen klant: ${m.outcomes_geen_klant}
 ${m.conversion_rate !== null ? `  Conversion: ${m.conversion_rate}%` : ''}
 
-ACHTERSTALLIGE OPVOLGINGEN: ${m.opvolgingen_overdue}
+${m.outcomes_missing_today > 0 ? `⚠ OUTCOMES ONTBREKEND VANDAAG: ${m.outcomes_missing_today}\n` : ''}
+ACHTERSTALLIG TOTAAL: ${m.achterstallig_totaal ?? m.opvolgingen_overdue}
+  Opvolgingen: ${m.achterstallig_opvolgingen ?? m.opvolgingen_overdue}
+  Outcomes ontbrekend: ${m.achterstallig_outcomes ?? 0}
+  Voicememo's uitstaand: ${m.achterstallig_voicememos ?? 0}
 
 ---
 Agency Command Center — Follow-up Module

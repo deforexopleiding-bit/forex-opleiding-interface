@@ -219,11 +219,23 @@ async function handleGet(req, res, supabase) {
     return res.status(500).json({ error: error.message });
   }
 
+  // Verrijk met has_outcome voor visuele outcome-indicator op cards
+  const apptIds = (data || []).map(a => a.id);
+  let enrichedAppts = data || [];
+  if (apptIds.length > 0) {
+    const { data: outcomes } = await supabase
+      .from('follow_up_outcomes')
+      .select('appointment_id')
+      .in('appointment_id', apptIds);
+    const outcomeSet = new Set((outcomes || []).map(o => o.appointment_id));
+    enrichedAppts = data.map(a => ({ ...a, has_outcome: outcomeSet.has(a.id) }));
+  }
+
   return res.status(200).json({
     period,
     range: { start: startDate.toISOString(), end: endDate.toISOString() },
-    count: data?.length || 0,
-    appointments: data || [],
+    count: enrichedAppts.length,
+    appointments: enrichedAppts,
   });
 }
 

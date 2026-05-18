@@ -78,6 +78,59 @@ export async function computeMetrics(supabaseAdmin, opts = {}) {
     .lt('terugkom_datum', today.toISOString().slice(0, 10));
 
   metrics.opvolgingen_overdue = overdue?.length || 0;
+  metrics.achterstallig_opvolgingen = metrics.opvolgingen_overdue;
+
+  // Outcomes achterstallig: completed/no_show van vóór vandaag zonder outcome
+  const { data: oldDone } = await supabaseAdmin
+    .from('follow_up_appointments')
+    .select('id')
+    .lt('scheduled_at', today.toISOString())
+    .in('status', ['completed', 'no_show']);
+
+  const oldDoneIds = (oldDone || []).map(a => a.id);
+  let achterstalligOutcomes = 0;
+  if (oldDoneIds.length > 0) {
+    const { data: filledOutcomes } = await supabaseAdmin
+      .from('follow_up_outcomes')
+      .select('appointment_id')
+      .in('appointment_id', oldDoneIds);
+    const filledSet = new Set((filledOutcomes || []).map(o => o.appointment_id));
+    achterstalligOutcomes = oldDoneIds.filter(id => !filledSet.has(id)).length;
+  }
+  metrics.achterstallig_outcomes = achterstalligOutcomes;
+
+  // Voicememos achterstallig: scheduled van vóór vandaag met voicememo_status = 'pending'
+  const { data: oldPending } = await supabaseAdmin
+    .from('follow_up_appointments')
+    .select('id')
+    .lt('scheduled_at', today.toISOString())
+    .eq('voicememo_status', 'pending');
+
+  metrics.achterstallig_voicememos = (oldPending || []).length;
+
+  metrics.achterstallig_totaal =
+    metrics.achterstallig_opvolgingen +
+    metrics.achterstallig_outcomes +
+    metrics.achterstallig_voicememos;
+
+  // Outcomes ontbrekend vandaag (voor dagrapport email)
+  const { data: todayDone } = await supabaseAdmin
+    .from('follow_up_appointments')
+    .select('id')
+    .gte('scheduled_at', today.toISOString())
+    .in('status', ['completed', 'no_show']);
+
+  const todayDoneIds = (todayDone || []).map(a => a.id);
+  let missingToday = 0;
+  if (todayDoneIds.length > 0) {
+    const { data: todayOutcomes } = await supabaseAdmin
+      .from('follow_up_outcomes')
+      .select('appointment_id')
+      .in('appointment_id', todayDoneIds);
+    const todayFilledSet = new Set((todayOutcomes || []).map(o => o.appointment_id));
+    missingToday = todayDoneIds.filter(id => !todayFilledSet.has(id)).length;
+  }
+  metrics.outcomes_missing_today = missingToday;
 
   return metrics;
 }

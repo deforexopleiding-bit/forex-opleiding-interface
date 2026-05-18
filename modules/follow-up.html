@@ -280,6 +280,22 @@
       border-color: var(--border-strong);
     }
     .fu-card-action-btn i { font-size: 13px; }
+    .fu-card.fu-card-needs-outcome {
+      border-color: var(--color-warning);
+      border-width: 2px;
+    }
+    .fu-card.fu-card-needs-outcome::before {
+      content: '⚠ Outcome vereist';
+      display: block;
+      background: var(--color-warning-soft);
+      color: var(--color-warning-text);
+      padding: 4px 12px;
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.02em;
+      border-bottom: 1px solid var(--color-warning);
+      border-radius: 10px 10px 0 0;
+    }
     .fu-voicememo-button {
       background: var(--brand, #093d54);
       color: #fff;
@@ -803,18 +819,26 @@
       header.appendChild(right);
       card.appendChild(header);
 
-      // ── Actions row (alleen scheduled + opvolging-cards) ──────────
-      const showActions = statusKey === 'scheduled' || !!appt.terugkom_datum;
+      // ── Outcome ontbreekt — visuele indicator ─────────────────────
+      if (['completed', 'no_show'].includes(statusKey) && !appt.has_outcome) {
+        card.classList.add('fu-card-needs-outcome');
+      }
+
+      // ── Actions row — alle statussen ──────────────────────────────
+      const showActions = true;
 
       if (showActions) {
         const actions = document.createElement('div');
         actions.className = 'fu-card-actions';
 
-        const outcomeBtn = document.createElement('button');
-        outcomeBtn.className = 'fu-card-action-btn';
-        outcomeBtn.innerHTML = '<i class="ti ti-clipboard" aria-hidden="true"></i> Outcome';
-        outcomeBtn.addEventListener('click', (e) => { e.stopPropagation(); openOutcomeModal(appt); });
-        actions.appendChild(outcomeBtn);
+        // Outcome-knop: niet voor cancelled (die hoeft geen outcome)
+        if (statusKey !== 'cancelled') {
+          const outcomeBtn = document.createElement('button');
+          outcomeBtn.className = 'fu-card-action-btn';
+          outcomeBtn.innerHTML = '<i class="ti ti-clipboard" aria-hidden="true"></i> Outcome';
+          outcomeBtn.addEventListener('click', (e) => { e.stopPropagation(); openOutcomeModal(appt); });
+          actions.appendChild(outcomeBtn);
+        }
 
         const notitieBtn = document.createElement('button');
         notitieBtn.className = 'fu-card-action-btn';
@@ -1319,8 +1343,11 @@
         },
         {
           label: 'Achterstallig',
-          value: m.opvolgingen_overdue,
-          cls: m.opvolgingen_overdue > 0 ? 'danger' : 'success',
+          value: m.achterstallig_totaal ?? m.opvolgingen_overdue ?? 0,
+          sub: m.achterstallig_totaal != null
+            ? `${m.achterstallig_opvolgingen ?? 0} opvolg · ${m.achterstallig_outcomes ?? 0} outc · ${m.achterstallig_voicememos ?? 0} memo`
+            : undefined,
+          cls: (m.achterstallig_totaal ?? m.opvolgingen_overdue ?? 0) > 0 ? 'danger' : 'success',
         },
       ];
 
