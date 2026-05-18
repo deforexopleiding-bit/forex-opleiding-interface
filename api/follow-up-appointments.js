@@ -48,6 +48,12 @@ async function handleGet(req, res, supabase) {
     startDate.setHours(0, 0, 0, 0);
     endDate = new Date(startDate);
     endDate.setDate(endDate.getDate() + 1);
+  } else if (period === 'morgen') {
+    startDate = new Date(now);
+    startDate.setHours(0, 0, 0, 0);
+    startDate.setDate(startDate.getDate() + 1);
+    endDate = new Date(startDate);
+    endDate.setDate(endDate.getDate() + 1);
   } else if (period === 'week') {
     startDate = new Date(now);
     startDate.setHours(0, 0, 0, 0);

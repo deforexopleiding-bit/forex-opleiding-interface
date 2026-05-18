@@ -44,12 +44,84 @@
       color: var(--text-secondary, rgba(255,255,255,0.6));
     }
     .fu-empty {
-      padding: 24px;
-      text-align: center;
-      color: var(--text-secondary, rgba(255,255,255,0.6));
-      background: var(--surface-2, rgba(255,255,255,0.03));
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 12px 16px;
+      color: var(--muted, rgba(255,255,255,0.55));
+      font-size: 13px;
+      background: var(--card-bg, rgba(255,255,255,0.04));
       border-radius: 8px;
+    }
+    .fu-empty-icon { color: #4ade80; font-size: 16px; }
+
+    /* Tabs navigation */
+    .fu-tabs {
+      display: flex;
+      gap: 4px;
+      border-bottom: 0.5px solid var(--border, rgba(255,255,255,0.15));
+      margin: 0 0 24px;
+      overflow-x: auto;
+      scrollbar-width: none;
+    }
+    .fu-tabs::-webkit-scrollbar { display: none; }
+    .fu-tab {
+      padding: 10px 18px;
       font-size: 14px;
+      color: var(--muted, rgba(255,255,255,0.55));
+      cursor: pointer;
+      border-bottom: 2px solid transparent;
+      white-space: nowrap;
+      position: relative;
+      background: none;
+      border-top: none;
+      border-left: none;
+      border-right: none;
+      font-family: inherit;
+      transition: color 0.15s;
+    }
+    .fu-tab:hover { color: var(--fg, #fff); }
+    .fu-tab.active {
+      color: var(--fg, #fff);
+      border-bottom-color: var(--fg, #fff);
+      font-weight: 500;
+    }
+    .fu-tab-count {
+      display: inline-block;
+      background: var(--card-bg, rgba(255,255,255,0.08));
+      color: var(--muted, rgba(255,255,255,0.65));
+      padding: 1px 7px;
+      border-radius: 10px;
+      font-size: 11px;
+      margin-left: 6px;
+      font-weight: 400;
+    }
+    .fu-tab.active .fu-tab-count {
+      background: rgba(255,255,255,0.18);
+      color: var(--fg, #fff);
+    }
+    .fu-tab-count.urgent {
+      background: rgba(248,113,113,0.18);
+      color: #fca5a5;
+    }
+    .fu-tab-dot {
+      display: inline-block;
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: #f87171;
+      margin-left: 6px;
+      vertical-align: middle;
+    }
+    .fu-tab-panel { display: none; }
+    .fu-tab-panel.active { display: block; }
+    .fu-metric-card { position: relative; }
+    .fu-metric-morgen {
+      position: absolute;
+      bottom: 10px;
+      right: 12px;
+      font-size: 11px;
+      color: var(--muted, rgba(255,255,255,0.45));
     }
     .fu-card {
       background: var(--surface-2, rgba(255,255,255,0.04));
@@ -286,95 +358,128 @@
       <div class="fu-metrics-row" id="fu-metrics-row"></div>
     </div>
 
-    <section class="fu-section" id="section-opvolging-overdue">
-      <div class="fu-section-header">
-        <div class="fu-section-title">Achterstallige opvolgingen</div>
-        <div class="fu-section-count" id="count-opvolging-overdue">—</div>
-      </div>
-      <div id="list-opvolging-overdue">
-        <div class="fu-loading">Laden…</div>
-      </div>
-    </section>
+    <nav class="fu-tabs" role="tablist">
+      <button class="fu-tab active" data-tab="vandaag" role="tab" aria-selected="true">
+        Vandaag<span class="fu-tab-count" id="tab-count-vandaag">—</span>
+      </button>
+      <button class="fu-tab" data-tab="open-acties" role="tab" aria-selected="false">
+        Open acties<span class="fu-tab-count" id="tab-count-open-acties">—</span>
+      </button>
+      <button class="fu-tab" data-tab="opvolging" role="tab" aria-selected="false">
+        Opvolging<span class="fu-tab-count" id="tab-count-opvolging">—</span><span class="fu-tab-dot" id="tab-dot-opvolging" style="display:none;"></span>
+      </button>
+      <button class="fu-tab" data-tab="komend" role="tab" aria-selected="false">
+        Komend<span class="fu-tab-count" id="tab-count-komend">—</span>
+      </button>
+      <button class="fu-tab" data-tab="archief" role="tab" aria-selected="false">
+        Archief
+      </button>
+    </nav>
 
-    <section class="fu-section" id="section-opvolging-today">
-      <div class="fu-section-header">
-        <div class="fu-section-title">Opvolging vandaag</div>
-        <div class="fu-section-count" id="count-opvolging-today">—</div>
-      </div>
-      <div id="list-opvolging-today">
-        <div class="fu-loading">Laden…</div>
-      </div>
-    </section>
+    <div class="fu-tab-panel active" data-panel="vandaag">
+      <section class="fu-section" id="section-today">
+        <div class="fu-section-header">
+          <div class="fu-section-title">Vandaag</div>
+          <div class="fu-section-count" id="count-today">—</div>
+        </div>
+        <div id="list-today">
+          <div class="fu-loading">Laden…</div>
+        </div>
+      </section>
+    </div>
 
-    <section class="fu-section" id="section-opvolging-week">
-      <div class="fu-section-header">
-        <div class="fu-section-title">Opvolging komende 7 dagen</div>
-        <div class="fu-section-count" id="count-opvolging-week">—</div>
-      </div>
-      <div id="list-opvolging-week">
-        <div class="fu-loading">Laden…</div>
-      </div>
-    </section>
+    <div class="fu-tab-panel" data-panel="open-acties">
+      <section class="fu-section" id="section-open-acties">
+        <div class="fu-section-header">
+          <div class="fu-section-title">Open acties</div>
+          <div class="fu-section-count" id="count-open-acties">—</div>
+        </div>
+        <div id="list-open-acties">
+          <div class="fu-loading">Laden…</div>
+        </div>
+      </section>
+      <section class="fu-section" id="section-recent-completed">
+        <div class="fu-section-header">
+          <div class="fu-section-title">Recent afgerond</div>
+          <div class="fu-section-count" id="count-recent-completed">—</div>
+        </div>
+        <div id="list-recent-completed">
+          <div class="fu-loading">Laden…</div>
+        </div>
+      </section>
+    </div>
 
-    <section class="fu-section" id="section-opvolging-30d">
-      <div class="fu-section-header">
-        <div class="fu-section-title">Opvolging 8-30 dagen</div>
-        <div class="fu-section-count" id="count-opvolging-30d">—</div>
-      </div>
-      <div id="list-opvolging-30d">
-        <div class="fu-loading">Laden…</div>
-      </div>
-    </section>
+    <div class="fu-tab-panel" data-panel="opvolging">
+      <section class="fu-section" id="section-opvolging-overdue">
+        <div class="fu-section-header">
+          <div class="fu-section-title">Achterstallige opvolgingen</div>
+          <div class="fu-section-count" id="count-opvolging-overdue">—</div>
+        </div>
+        <div id="list-opvolging-overdue">
+          <div class="fu-loading">Laden…</div>
+        </div>
+      </section>
+      <section class="fu-section" id="section-opvolging-today">
+        <div class="fu-section-header">
+          <div class="fu-section-title">Opvolging vandaag</div>
+          <div class="fu-section-count" id="count-opvolging-today">—</div>
+        </div>
+        <div id="list-opvolging-today">
+          <div class="fu-loading">Laden…</div>
+        </div>
+      </section>
+      <section class="fu-section" id="section-opvolging-week">
+        <div class="fu-section-header">
+          <div class="fu-section-title">Opvolging komende 7 dagen</div>
+          <div class="fu-section-count" id="count-opvolging-week">—</div>
+        </div>
+        <div id="list-opvolging-week">
+          <div class="fu-loading">Laden…</div>
+        </div>
+      </section>
+      <section class="fu-section" id="section-opvolging-30d">
+        <div class="fu-section-header">
+          <div class="fu-section-title">Opvolging 8-30 dagen</div>
+          <div class="fu-section-count" id="count-opvolging-30d">—</div>
+        </div>
+        <div id="list-opvolging-30d">
+          <div class="fu-loading">Laden…</div>
+        </div>
+      </section>
+      <section class="fu-section" id="section-opvolging-verder">
+        <div class="fu-section-header">
+          <div class="fu-section-title">Opvolging verder dan 30 dagen</div>
+          <div class="fu-section-count" id="count-opvolging-verder">—</div>
+        </div>
+        <div id="list-opvolging-verder">
+          <div class="fu-loading">Laden…</div>
+        </div>
+      </section>
+    </div>
 
-    <section class="fu-section" id="section-opvolging-verder">
-      <div class="fu-section-header">
-        <div class="fu-section-title">Opvolging verder dan 30 dagen</div>
-        <div class="fu-section-count" id="count-opvolging-verder">—</div>
-      </div>
-      <div id="list-opvolging-verder">
-        <div class="fu-loading">Laden…</div>
-      </div>
-    </section>
+    <div class="fu-tab-panel" data-panel="komend">
+      <section class="fu-section" id="section-week">
+        <div class="fu-section-header">
+          <div class="fu-section-title">Komende 7 dagen</div>
+          <div class="fu-section-count" id="count-week">—</div>
+        </div>
+        <div id="list-week">
+          <div class="fu-loading">Laden…</div>
+        </div>
+      </section>
+    </div>
 
-    <section class="fu-section" id="section-open-acties">
-      <div class="fu-section-header">
-        <div class="fu-section-title">Open acties</div>
-        <div class="fu-section-count" id="count-open-acties">—</div>
-      </div>
-      <div id="list-open-acties">
-        <div class="fu-loading">Laden…</div>
-      </div>
-    </section>
-
-    <section class="fu-section" id="section-today">
-      <div class="fu-section-header">
-        <div class="fu-section-title">Vandaag</div>
-        <div class="fu-section-count" id="count-today">—</div>
-      </div>
-      <div id="list-today">
-        <div class="fu-loading">Laden…</div>
-      </div>
-    </section>
-
-    <section class="fu-section" id="section-week">
-      <div class="fu-section-header">
-        <div class="fu-section-title">Komende 7 dagen</div>
-        <div class="fu-section-count" id="count-week">—</div>
-      </div>
-      <div id="list-week">
-        <div class="fu-loading">Laden…</div>
-      </div>
-    </section>
-
-    <section class="fu-section" id="section-recent-completed">
-      <div class="fu-section-header">
-        <div class="fu-section-title">Recent afgerond</div>
-        <div class="fu-section-count" id="count-recent-completed">—</div>
-      </div>
-      <div id="list-recent-completed">
-        <div class="fu-loading">Laden…</div>
-      </div>
-    </section>
+    <div class="fu-tab-panel" data-panel="archief">
+      <section class="fu-section" id="section-archief">
+        <div class="fu-section-header">
+          <div class="fu-section-title">Archief — afgerond ouder dan 30 dagen</div>
+          <div class="fu-section-count" id="count-archief">—</div>
+        </div>
+        <div id="list-archief">
+          <div class="fu-loading">Klik op de tab om te laden…</div>
+        </div>
+      </section>
+    </div>
   </main>
 
   <div class="fu-modal-backdrop" id="snelle-notitie-modal" style="display:none;">
@@ -684,6 +789,18 @@
       return res.json();
     }
 
+    const EMPTY_LABELS = {
+      'today':               'Geen afspraken vandaag',
+      'open_acties':         'Geen open acties · alles bij',
+      'recent_completed':    'Geen recente afgeronde calls',
+      'opvolging_overdue':   'Geen achterstallige opvolgingen',
+      'opvolging_today':     'Geen opvolgingen vandaag',
+      'opvolging_week':      'Geen opvolgingen komende week',
+      'opvolging_30d':       'Geen opvolgingen 8-30 dagen',
+      'opvolging_verder':    'Geen opvolgingen verder dan 30 dagen',
+      'week':                'Geen afspraken komende 7 dagen',
+    };
+
     async function renderSection(period, containerId, countId, includeDate) {
       const container = document.getElementById(containerId);
       const countEl = document.getElementById(countId);
@@ -693,12 +810,14 @@
         countEl.textContent = `${data.count} ${data.count === 1 ? 'afspraak' : 'afspraken'}`;
         container.innerHTML = '';
 
+        const sectionKey = containerId.replace('list-', '');
+        allSectionCounts[sectionKey] = data.count;
+        updateTabCounts();
+
         if (data.appointments.length === 0) {
           const empty = document.createElement('div');
           empty.className = 'fu-empty';
-          empty.textContent = period === 'today'
-            ? 'Geen afspraken vandaag.'
-            : 'Geen afspraken de komende 7 dagen.';
+          empty.innerHTML = `<i class="ti ti-circle-check fu-empty-icon" aria-hidden="true"></i>${EMPTY_LABELS[period] || 'Geen items'}`;
           container.appendChild(empty);
           return;
         }
@@ -846,6 +965,93 @@
       }
     });
 
+    let archiefLoaded = false;
+    const allSectionCounts = {};
+
+    function switchTab(tabId) {
+      document.querySelectorAll('.fu-tab').forEach(t => {
+        const active = t.dataset.tab === tabId;
+        t.classList.toggle('active', active);
+        t.setAttribute('aria-selected', String(active));
+      });
+      document.querySelectorAll('.fu-tab-panel').forEach(p => {
+        p.classList.toggle('active', p.dataset.panel === tabId);
+      });
+      if (tabId === 'archief' && !archiefLoaded) {
+        archiefLoaded = true;
+        loadArchief();
+      }
+    }
+
+    function updateTabCounts() {
+      const todayCount = allSectionCounts['today'] ?? null;
+      if (todayCount !== null) document.getElementById('tab-count-vandaag').textContent = todayCount;
+
+      const openCount = allSectionCounts['open-acties'] ?? null;
+      if (openCount !== null) {
+        const el = document.getElementById('tab-count-open-acties');
+        el.textContent = openCount;
+        el.classList.toggle('urgent', openCount > 0);
+      }
+
+      const opvolgingKeys = ['opvolging-overdue', 'opvolging-today', 'opvolging-week', 'opvolging-30d', 'opvolging-verder'];
+      if (opvolgingKeys.some(k => k in allSectionCounts)) {
+        const total = opvolgingKeys.reduce((s, k) => s + (allSectionCounts[k] || 0), 0);
+        document.getElementById('tab-count-opvolging').textContent = total;
+        const overdue = allSectionCounts['opvolging-overdue'] || 0;
+        document.getElementById('tab-dot-opvolging').style.display = overdue > 0 ? 'inline-block' : 'none';
+      }
+
+      const komendCount = allSectionCounts['week'] ?? null;
+      if (komendCount !== null) document.getElementById('tab-count-komend').textContent = komendCount;
+    }
+
+    async function loadArchief() {
+      const listEl = document.getElementById('list-archief');
+      const countEl = document.getElementById('count-archief');
+      try {
+        const token = await window.AuthShared.getAccessToken();
+        const res = await fetch('/api/follow-up-archief', {
+          headers: { 'Authorization': 'Bearer ' + token },
+        });
+        if (!res.ok) {
+          listEl.innerHTML = '<div class="fu-empty"><i class="ti ti-alert-circle" style="color:#f87171; font-size:16px;" aria-hidden="true"></i>Kon archief niet laden</div>';
+          return;
+        }
+        const { count, appointments } = await res.json();
+        countEl.textContent = `${count} ${count === 1 ? 'afspraak' : 'afspraken'}`;
+        listEl.innerHTML = '';
+        if (count === 0) {
+          listEl.innerHTML = '<div class="fu-empty"><i class="ti ti-circle-check fu-empty-icon" aria-hidden="true"></i>Geen oudere afspraken in archief</div>';
+        } else {
+          appointments.forEach(appt => listEl.appendChild(renderCard(appt, true)));
+        }
+      } catch (err) {
+        console.error('Archief load error:', err);
+        listEl.innerHTML = '<div class="fu-empty"><i class="ti ti-alert-circle" style="color:#f87171; font-size:16px;" aria-hidden="true"></i>Fout bij laden archief</div>';
+      }
+    }
+
+    async function loadMorgenCount() {
+      try {
+        const token = await window.AuthShared.getAccessToken();
+        const res = await fetch('/api/follow-up-appointments?period=morgen', {
+          headers: { 'Authorization': 'Bearer ' + token },
+        });
+        if (!res.ok) return;
+        const { count } = await res.json();
+        if (count === undefined) return;
+        const vandaagCard = document.querySelector('.fu-metric-card');
+        if (!vandaagCard) return;
+        const span = document.createElement('span');
+        span.className = 'fu-metric-morgen';
+        span.textContent = `↘ morgen: ${count}`;
+        vandaagCard.appendChild(span);
+      } catch (err) {
+        console.warn('[follow-up] morgen-count fout:', err.message);
+      }
+    }
+
     async function init() {
       await window._authSharedReady;
       const profile = await window.AuthShared.requireAuth(ALLOWED_ROLES);
@@ -854,6 +1060,10 @@
         const adminLink = document.getElementById('admin-link');
         if (adminLink) adminLink.style.display = 'inline-block';
       }
+
+      document.querySelectorAll('.fu-tab').forEach(tab => {
+        tab.addEventListener('click', () => switchTab(tab.dataset.tab));
+      });
 
       loadDashboardMetrics(); // parallel, niet-blokkerend
 
@@ -880,6 +1090,7 @@
         if (!r.ok) return;
         const { metrics: m } = await r.json();
         renderMetrics(m);
+        loadMorgenCount();
       } catch (err) {
         console.warn('[follow-up] metrics fetch error:', err.message);
       }
