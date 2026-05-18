@@ -271,14 +271,16 @@ async function handlePatch(req, res, supabase, user) {
     }
 
     let requiresScreenshot = false;
-    if (voicememo_status === 'sent' && data.owner_id) {
-      const { count } = await supabase
-        .from('follow_up_appointments')
-        .select('id', { count: 'exact', head: true })
-        .eq('owner_id', data.owner_id)
-        .eq('voicememo_status', 'sent');
+    if (voicememo_status === 'sent') {
+      // Super_admin is vertrouwd — geen screenshot steekproef
+      const { data: userProfile } = await supabase
+        .from('profiles')
+        .select('role')
+        .eq('id', user.id)
+        .single();
 
-      if (count && count >= 3 && (count - 3) % 5 === 0) {
+      const isSuperAdmin = userProfile?.role === 'super_admin';
+      if (!isSuperAdmin && Math.random() < 0.15) {
         requiresScreenshot = true;
         await supabase
           .from('follow_up_appointments')

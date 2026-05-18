@@ -27,7 +27,10 @@ export default async function handler(req, res) {
       return res.status(200).json({ sent: 0, reason: 'Geen recipients gevonden' });
     }
 
-    const metrics = await computeMetrics(supabaseAdmin, { period: 'today' });
+    const [metrics, morgenOpvolgingen] = await Promise.all([
+      computeMetrics(supabaseAdmin, { period: 'today' }),
+      fetchMorgenOpvolgingen(supabaseAdmin),
+    ]);
 
     const today = new Date().toISOString().slice(0, 10);
     const { data: alreadySent } = await supabaseAdmin
@@ -44,8 +47,8 @@ export default async function handler(req, res) {
     }
 
     const subject = `Follow-up dagrapport — ${new Date().toLocaleDateString('nl-NL', { day: 'numeric', month: 'long' })}`;
-    const htmlTemplate = buildDailyHtml(metrics, today);
-    const text = buildDailyText(metrics, today);
+    const htmlTemplate = buildDailyHtml(metrics, morgenOpvolgingen, today);
+    const text = buildDailyText(metrics, morgenOpvolgingen, today);
 
     const results = [];
     for (const recipient of toSend) {
@@ -92,7 +95,39 @@ export default async function handler(req, res) {
   }
 }
 
-function buildDailyHtml(m, today) {
+async function fetchMorgenOpvolgingen(supabase) {
+  const now = new Date();
+  const tomorrow = new Date(now);
+  tomorrow.setHours(0, 0, 0, 0);
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  const dayAfter = new Date(tomorrow);
+  dayAfter.setDate(dayAfter.getDate() + 1);
+
+  const { data: outcomes } = await supabase
+    .from('follow_up_outcomes')
+    .select('appointment_id, terugkom_datum, terugkom_datetime, opvolging_status')
+    .in('opvolging_status', ['gepland', 'verzet'])
+    .gte('terugkom_datum', tomorrow.toISOString().slice(0, 10))
+    .lt('terugkom_datum', dayAfter.toISOString().slice(0, 10));
+
+  if (!outcomes || outcomes.length === 0) return [];
+
+  const ids = outcomes.map(o => o.appointment_id);
+  const { data: appts } = await supabase
+    .from('follow_up_appointments')
+    .select('id, lead_name, lead_phone, owner_id')
+    .in('id', ids);
+
+  const apptMap = new Map((appts || []).map(a => [a.id, a]));
+  return outcomes.map(o => ({
+    ...apptMap.get(o.appointment_id),
+    terugkom_datum: o.terugkom_datum,
+    terugkom_datetime: o.terugkom_datetime,
+    opvolging_status: o.opvolging_status,
+  })).filter(o => o.id);
+}
+
+function buildDailyHtml(m, morgen, today) {
   const dateStr = new Date(today).toLocaleDateString('nl-NL', { weekday: 'long', day: 'numeric', month: 'long' });
 
   const bezwaarRows = (m.top_bezwaren || []).map(b =>
@@ -154,12 +189,37 @@ function buildDailyHtml(m, today) {
     </table>
     <p style="margin:8px 0 0; font-size:28px; font-weight:700; color:${overdueColor};">${m.achterstallig_totaal ?? m.opvolgingen_overdue}</p>
     ${(m.achterstallig_totaal ?? m.opvolgingen_overdue) > 0 ? '<p style="margin:8px 0 0; color:#6b7280; font-size:13px;">Open de Follow-up Module om deze af te handelen.</p>' : ''}
+
+    ${morgen.length > 0 ? `
+    <h2 style="color:#093d54; font-size:16px; margin:24px 0 12px;">📅 Opvolgingen morgen (${morgen.length})</h2>
+    <table cellpadding="0" cellspacing="0" border="0" width="100%" style="border-collapse:collapse; font-size:14px;">
+      <tr style="border-bottom:1px solid #e5e7eb;">
+        <th style="text-align:left; padding:6px 0; color:#6b7280; font-weight:500; font-size:12px;">Lead</th>
+        <th style="text-align:right; padding:6px 0; color:#6b7280; font-weight:500; font-size:12px;">Tijd</th>
+      </tr>
+      ${morgen.map(o => {
+        const tijdStr = o.terugkom_datetime
+          ? new Date(o.terugkom_datetime).toLocaleTimeString('nl-NL', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Amsterdam' })
+          : '—';
+        return `<tr>
+          <td style="padding:6px 0; color:#374151;">${escapeHtmlEmail(o.lead_name || '—')}</td>
+          <td style="text-align:right; font-weight:600; color:#374151;">${tijdStr}</td>
+        </tr>`;
+      }).join('')}
+    </table>
+    ` : ''}
   `;
 
   return wrapEmailHtml('Dagrapport Follow-up Module', body);
 }
 
-function buildDailyText(m, today) {
+function escapeHtmlEmail(str) {
+  return String(str).replace(/[&<>"']/g, c =>
+    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])
+  );
+}
+
+function buildDailyText(m, morgen, today) {
   const dateStr = new Date(today).toLocaleDateString('nl-NL', { weekday: 'long', day: 'numeric', month: 'long' });
   return `Follow-up dagrapport — ${dateStr}
 
@@ -180,7 +240,15 @@ ACHTERSTALLIG TOTAAL: ${m.achterstallig_totaal ?? m.opvolgingen_overdue}
   Opvolgingen: ${m.achterstallig_opvolgingen ?? m.opvolgingen_overdue}
   Outcomes ontbrekend: ${m.achterstallig_outcomes ?? 0}
   Voicememo's uitstaand: ${m.achterstallig_voicememos ?? 0}
-
+${morgen.length > 0 ? `
+OPVOLGINGEN MORGEN (${morgen.length})
+${morgen.map(o => {
+    const tijdStr = o.terugkom_datetime
+      ? new Date(o.terugkom_datetime).toLocaleTimeString('nl-NL', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Amsterdam' })
+      : '—';
+    return `  ${o.lead_name || '—'} — ${tijdStr}`;
+  }).join('\n')}
+` : ''}
 ---
 Agency Command Center — Follow-up Module
 De Forex Opleiding NL B.V.`;

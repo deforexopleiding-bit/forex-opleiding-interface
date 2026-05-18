@@ -235,25 +235,76 @@
     .fu-card-badge.status-no-show     { background: var(--color-danger);   color: var(--text-inverse); }
     .fu-card-badge.status-cancelled,
     .fu-card-badge.status-default     { background: var(--color-neutral);  color: var(--text-inverse); }
-    .fu-card-memo-btn {
-      width: 30px;
-      height: 30px;
-      border-radius: 50%;
+    /* ── Voicememo dropdown ─────────────────────────────────────── */
+    .fu-memo-wrap {
+      position: relative;
+    }
+    .fu-memo-toggle {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      padding: 4px 8px;
+      border-radius: 20px;
       background: var(--surface-card);
       border: 1px solid var(--border-default);
+      cursor: pointer;
+      font-size: 13px;
+      transition: background 0.15s;
+      color: var(--text-primary);
+    }
+    .fu-memo-toggle:hover    { background: var(--surface-card-hover); }
+    .fu-memo-toggle.sent     { color: var(--color-success-text); border-color: var(--color-success); }
+    .fu-memo-toggle.skipped  { color: var(--text-tertiary); }
+    .fu-memo-toggle.todo     { color: var(--color-warning-text); border-color: var(--color-warning); }
+    .fu-memo-caret { font-size: 11px; opacity: 0.6; }
+    .fu-memo-dropdown {
+      position: absolute;
+      top: calc(100% + 6px);
+      right: 0;
+      z-index: 100;
+      background: var(--surface-2);
+      border: 1px solid var(--border-default);
+      border-radius: 8px;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.25);
+      padding: 4px;
+      min-width: 160px;
+      display: none;
+    }
+    .fu-memo-dropdown.open { display: block; }
+    .fu-memo-option {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      width: 100%;
+      padding: 8px 10px;
+      border: none;
+      background: transparent;
+      color: var(--text-primary);
+      font-size: 13px;
+      border-radius: 6px;
+      cursor: pointer;
+      text-align: left;
+      font-family: inherit;
+      transition: background 0.12s;
+    }
+    .fu-memo-option:hover  { background: var(--surface-card-hover); }
+    .fu-memo-option.active { background: var(--brand-primary-soft); font-weight: 600; }
+    .fu-memo-option:disabled { opacity: 0.5; cursor: wait; }
+    /* ── Screenshot badge ───────────────────────────────────────── */
+    .fu-screenshot-badge {
       display: flex;
       align-items: center;
       justify-content: center;
-      cursor: pointer;
-      font-size: 14px;
-      transition: background 0.15s;
-      padding: 0;
+      width: 26px;
+      height: 26px;
+      border-radius: 50%;
+      background: var(--color-warning-soft);
+      border: 1px solid var(--color-warning);
+      color: var(--color-warning-text);
+      font-size: 13px;
+      cursor: default;
+      flex-shrink: 0;
     }
-    .fu-card-memo-btn:hover    { background: var(--brand-primary-soft); }
-    .fu-card-memo-btn:disabled { opacity: 0.5; cursor: wait; }
-    .fu-card-memo-btn.sent     { color: #4ade80; }
-    .fu-card-memo-btn.skipped  { color: var(--text-tertiary); }
-    .fu-card-memo-btn.todo     { color: #facc15; }
     .fu-card-actions {
       display: flex;
       gap: 8px;
@@ -371,6 +422,11 @@
       flex-wrap: wrap;
       gap: 8px;
     }
+    .fu-outcome-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 8px;
+    }
     .fu-outcome-btn, .fu-bezwaar-btn {
       padding: 8px 14px;
       background: var(--surface-2, rgba(255,255,255,0.04));
@@ -379,11 +435,24 @@
       border-radius: 6px;
       cursor: pointer;
       font-size: 13px;
+      font-family: inherit;
+      text-align: center;
+      transition: background 0.15s, border-color 0.15s;
+    }
+    .fu-outcome-btn:hover, .fu-bezwaar-btn:hover {
+      background: var(--surface-card-hover);
     }
     .fu-outcome-btn.active, .fu-bezwaar-btn.active {
-      background: var(--brand, #093d54);
-      border-color: var(--brand, #093d54);
+      background: var(--brand-primary, #093d54);
+      border-color: var(--brand-primary, #093d54);
+      color: var(--text-inverse, #fff);
     }
+    .fu-terugkom-row {
+      display: flex;
+      gap: 8px;
+    }
+    .fu-terugkom-date-input { flex: 2; }
+    .fu-terugkom-time-input { flex: 1; }
     .fu-input, .fu-select, .fu-slider {
       width: 100%;
       padding: 8px 10px;
@@ -636,17 +705,20 @@
       <div class="fu-modal-body">
         <div class="fu-field">
           <label class="fu-label">Uitkomst</label>
-          <div class="fu-outcome-options">
-            <button type="button" class="fu-outcome-btn" data-value="klant_geworden">Klant geworden</button>
-            <button type="button" class="fu-outcome-btn" data-value="geen_klant">Geen klant</button>
-            <button type="button" class="fu-outcome-btn" data-value="no_show">No-show</button>
+          <div class="fu-outcome-options fu-outcome-grid">
+            <button type="button" class="fu-outcome-btn" data-value="klant_geworden">✅ Klant geworden</button>
+            <button type="button" class="fu-outcome-btn" data-value="geen_klant">❌ Geen klant</button>
+            <button type="button" class="fu-outcome-btn" data-value="no_show">👻 No-show</button>
+            <button type="button" class="fu-outcome-btn" data-value="terugbellen">📞 Terugbellen</button>
+            <button type="button" class="fu-outcome-btn" data-value="niet_bereikt">📵 Niet bereikt</button>
+            <button type="button" class="fu-outcome-btn" data-value="in_beraad">🤔 In beraad</button>
           </div>
         </div>
         <div class="fu-field fu-bezwaren-field" style="display:none;">
           <label class="fu-label">Bezwaren (meerdere mogelijk)</label>
           <div class="fu-bezwaren-options" id="bezwaren-options"></div>
         </div>
-        <div class="fu-field fu-warmte-field" style="display:none;">
+        <div class="fu-field">
           <label class="fu-label">Warmte (1=koud, 10=heet)</label>
           <input type="range" min="1" max="10" value="5" id="warmte-slider" class="fu-slider">
           <div class="fu-warmte-display"><span id="warmte-value">5</span> / 10</div>
@@ -663,8 +735,11 @@
           </select>
         </div>
         <div class="fu-field fu-terugkom-field" style="display:none;">
-          <label class="fu-label">Terugkom datum (optioneel)</label>
-          <input type="date" class="fu-input" id="terugkom-date">
+          <label class="fu-label">Terugkom moment</label>
+          <div class="fu-terugkom-row">
+            <input type="date" class="fu-input fu-terugkom-date-input" id="terugkom-date">
+            <input type="time" class="fu-input fu-terugkom-time-input" id="terugkom-time" value="10:00">
+          </div>
         </div>
         <div class="fu-field">
           <label class="fu-label">Notitie (optioneel)</label>
@@ -747,12 +822,11 @@
         : '—';
       const duration = appt.duration_minutes || 30;
 
-      const memoCycleOrder = ['pending', 'sent', 'no_whatsapp', 'skipped'];
       const memoMap = {
-        pending:      { icon: 'ti-clock',         cls: 'todo',    title: 'Voicememo nog te doen' },
-        sent:         { icon: 'ti-microphone-2',   cls: 'sent',    title: 'Voicememo verzonden' },
-        no_whatsapp:  { icon: 'ti-message-off',    cls: 'skipped', title: 'Geen WhatsApp' },
-        skipped:      { icon: 'ti-microphone-off', cls: 'skipped', title: 'Overgeslagen' },
+        pending:      { icon: 'ti-clock',         cls: 'todo',    label: 'Nog te doen' },
+        sent:         { icon: 'ti-microphone-2',   cls: 'sent',    label: 'Verzonden' },
+        no_whatsapp:  { icon: 'ti-message-off',    cls: 'skipped', label: 'Geen WhatsApp' },
+        skipped:      { icon: 'ti-microphone-off', cls: 'skipped', label: 'Overgeslagen' },
       };
       const memoCurrent = appt.voicememo_status || 'pending';
       const memoInfo = memoMap[memoCurrent] || memoMap.pending;
@@ -782,34 +856,84 @@
       const right = document.createElement('div');
       right.className = 'fu-card-right';
 
-      const memoBtn = document.createElement('button');
-      memoBtn.className = `fu-card-memo-btn ${memoInfo.cls}`;
-      memoBtn.title = memoInfo.title + ' · klik om te wijzigen';
-      memoBtn.setAttribute('aria-label', memoInfo.title);
-      memoBtn.innerHTML = `<i class="ti ${memoInfo.icon}" aria-hidden="true"></i>`;
-      memoBtn.addEventListener('click', async (e) => {
-        e.stopPropagation();
-        const idx = memoCycleOrder.indexOf(memoCurrent);
-        const nextStatus = memoCycleOrder[(idx + 1) % memoCycleOrder.length];
-        memoBtn.disabled = true;
-        try {
-          const token = await window.AuthShared.getAccessToken();
-          const res = await fetch('/api/follow-up-appointments', {
-            method: 'PATCH',
-            headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
-            body: JSON.stringify({ id: appt.id, voicememo_status: nextStatus }),
-          });
-          if (!res.ok) {
-            const err = await res.json().catch(() => ({}));
-            throw new Error(err.error || `HTTP ${res.status}`);
+      // ── Voicememo dropdown ───────────────────────────────────
+      const memoWrap = document.createElement('div');
+      memoWrap.className = 'fu-memo-wrap';
+
+      const memoCurrent2 = memoCurrent; // capture voor closure
+      const memoToggle = document.createElement('button');
+      memoToggle.className = `fu-memo-toggle ${memoInfo.cls}`;
+      memoToggle.title = 'Voicememo status wijzigen';
+      memoToggle.setAttribute('aria-haspopup', 'listbox');
+      memoToggle.innerHTML = `<i class="ti ${memoInfo.icon}" aria-hidden="true"></i><i class="ti ti-chevron-down fu-memo-caret" aria-hidden="true"></i>`;
+
+      const memoDropdown = document.createElement('div');
+      memoDropdown.className = 'fu-memo-dropdown';
+      memoDropdown.setAttribute('role', 'listbox');
+
+      const memoOptions = [
+        { value: 'pending',     icon: 'ti-clock',         label: 'Nog te doen' },
+        { value: 'sent',        icon: 'ti-microphone-2',   label: 'Verzonden' },
+        { value: 'no_whatsapp', icon: 'ti-message-off',    label: 'Geen WhatsApp' },
+        { value: 'skipped',     icon: 'ti-microphone-off', label: 'Overgeslagen' },
+      ];
+      for (const opt of memoOptions) {
+        const optEl = document.createElement('button');
+        optEl.className = 'fu-memo-option' + (opt.value === memoCurrent2 ? ' active' : '');
+        optEl.setAttribute('role', 'option');
+        optEl.setAttribute('aria-selected', opt.value === memoCurrent2 ? 'true' : 'false');
+        optEl.innerHTML = `<i class="ti ${opt.icon}" aria-hidden="true"></i>${opt.label}`;
+        optEl.addEventListener('click', async (e) => {
+          e.stopPropagation();
+          if (opt.value === memoCurrent2) { memoDropdown.classList.remove('open'); return; }
+          optEl.disabled = true;
+          try {
+            const token = await window.AuthShared.getAccessToken();
+            const res = await fetch('/api/follow-up-appointments', {
+              method: 'PATCH',
+              headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+              body: JSON.stringify({ id: appt.id, voicememo_status: opt.value }),
+            });
+            if (!res.ok) {
+              const err = await res.json().catch(() => ({}));
+              throw new Error(err.error || `HTTP ${res.status}`);
+            }
+            const result = await res.json();
+            memoDropdown.classList.remove('open');
+            // Screenshot steekproef: toon melding als backend vraagt om screenshot
+            if (result.requires_screenshot) {
+              alert('📸 Steekproef: upload een screenshot van de WhatsApp-voicememo als bewijs. Ga naar de detailpagina om te uploaden.');
+            }
+            location.reload();
+          } catch (err) {
+            alert('Fout: ' + err.message);
+            optEl.disabled = false;
           }
-          location.reload();
-        } catch (err) {
-          alert('Fout: ' + err.message);
-          memoBtn.disabled = false;
-        }
+        });
+        memoDropdown.appendChild(optEl);
+      }
+
+      memoToggle.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const isOpen = memoDropdown.classList.toggle('open');
+        memoToggle.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
       });
-      right.appendChild(memoBtn);
+
+      // Sluit dropdown bij klik buiten component
+      document.addEventListener('click', () => memoDropdown.classList.remove('open'), { capture: true, once: false });
+
+      memoWrap.appendChild(memoToggle);
+      memoWrap.appendChild(memoDropdown);
+      right.appendChild(memoWrap);
+
+      // ── Screenshot indicator ──────────────────────────────────
+      if (appt.requires_screenshot && !appt.screenshot_url) {
+        const screenshotBadge = document.createElement('span');
+        screenshotBadge.className = 'fu-screenshot-badge';
+        screenshotBadge.title = 'Screenshot vereist als bewijs';
+        screenshotBadge.innerHTML = '<i class="ti ti-camera" aria-hidden="true"></i>';
+        right.appendChild(screenshotBadge);
+      }
 
       const badge = document.createElement('span');
       badge.className = `fu-card-badge status-${statusKey}`;
@@ -1011,6 +1135,13 @@
     let currentOutcomeChoice = null;
     let currentBezwaren = new Set();
 
+    // Outcomes die bezwaren tonen
+    const OUTCOME_SHOW_BEZWAREN = new Set(['geen_klant', 'in_beraad']);
+    // Outcomes die terugkom tonen
+    const OUTCOME_SHOW_TERUGKOM = new Set(['geen_klant', 'terugbellen', 'niet_bereikt', 'in_beraad']);
+    // Outcomes die volgende actie tonen
+    const OUTCOME_SHOW_VOLGENDE = new Set(['klant_geworden', 'geen_klant', 'terugbellen', 'in_beraad']);
+
     function openOutcomeModal(appt) {
       currentOutcomeAppt = appt;
       currentOutcomeChoice = null;
@@ -1021,7 +1152,6 @@
 
       document.querySelectorAll('.fu-outcome-btn').forEach(b => b.classList.remove('active'));
       document.querySelector('.fu-bezwaren-field').style.display = 'none';
-      document.querySelector('.fu-warmte-field').style.display = 'none';
       document.querySelector('.fu-volgende-field').style.display = 'none';
       document.querySelector('.fu-terugkom-field').style.display = 'none';
       document.getElementById('outcome-notitie').value = '';
@@ -1029,6 +1159,7 @@
       document.getElementById('warmte-value').textContent = '5';
       document.getElementById('volgende-actie-select').value = '';
       document.getElementById('terugkom-date').value = '';
+      document.getElementById('terugkom-time').value = '10:00';
       document.getElementById('outcome-submit').disabled = true;
 
       const bezwarenContainer = document.getElementById('bezwaren-options');
@@ -1063,15 +1194,17 @@
 
     document.addEventListener('click', (e) => {
       const outcomeBtn = e.target.closest('.fu-outcome-btn');
-      if (outcomeBtn) {
+      if (outcomeBtn && document.getElementById('outcome-modal').style.display !== 'none') {
         document.querySelectorAll('.fu-outcome-btn').forEach(b => b.classList.remove('active'));
         outcomeBtn.classList.add('active');
         currentOutcomeChoice = outcomeBtn.dataset.value;
 
-        document.querySelector('.fu-bezwaren-field').style.display = currentOutcomeChoice === 'geen_klant' ? 'block' : 'none';
-        document.querySelector('.fu-warmte-field').style.display = currentOutcomeChoice === 'geen_klant' ? 'block' : 'none';
-        document.querySelector('.fu-volgende-field').style.display = currentOutcomeChoice !== 'no_show' ? 'block' : 'none';
-        document.querySelector('.fu-terugkom-field').style.display = currentOutcomeChoice !== 'no_show' ? 'block' : 'none';
+        document.querySelector('.fu-bezwaren-field').style.display =
+          OUTCOME_SHOW_BEZWAREN.has(currentOutcomeChoice) ? 'block' : 'none';
+        document.querySelector('.fu-volgende-field').style.display =
+          OUTCOME_SHOW_VOLGENDE.has(currentOutcomeChoice) ? 'block' : 'none';
+        document.querySelector('.fu-terugkom-field').style.display =
+          OUTCOME_SHOW_TERUGKOM.has(currentOutcomeChoice) ? 'block' : 'none';
         document.getElementById('outcome-submit').disabled = false;
       }
     });
@@ -1096,18 +1229,30 @@
       const payload = {
         appointment_id: currentOutcomeAppt.id,
         outcome: currentOutcomeChoice,
+        warmte_score: parseInt(document.getElementById('warmte-slider').value, 10),
       };
 
-      if (currentOutcomeChoice === 'geen_klant') {
+      if (OUTCOME_SHOW_BEZWAREN.has(currentOutcomeChoice)) {
         payload.bezwaren = Array.from(currentBezwaren);
-        payload.warmte_score = parseInt(document.getElementById('warmte-slider').value, 10);
       }
 
-      if (currentOutcomeChoice !== 'no_show') {
+      if (OUTCOME_SHOW_VOLGENDE.has(currentOutcomeChoice)) {
         const va = document.getElementById('volgende-actie-select').value;
         if (va) payload.volgende_actie = va;
+      }
+
+      if (OUTCOME_SHOW_TERUGKOM.has(currentOutcomeChoice)) {
         const td = document.getElementById('terugkom-date').value;
-        if (td) payload.terugkom_datum = td;
+        const tt = document.getElementById('terugkom-time').value || '10:00';
+        if (td) {
+          payload.terugkom_datum = td;
+          // Sla ook terugkom_datetime op als ISO (Amsterdam-tijd)
+          const dtStr = `${td}T${tt}:00`;
+          const dtLocal = new Date(dtStr);
+          if (!isNaN(dtLocal.getTime())) {
+            payload.terugkom_datetime = dtLocal.toISOString();
+          }
+        }
       }
 
       const notitie = document.getElementById('outcome-notitie').value.trim();

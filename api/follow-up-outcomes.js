@@ -1,8 +1,8 @@
 // api/follow-up-outcomes.js
 //
 // POST endpoint voor opslaan van post-call outcome.
-// Body: { appointment_id, outcome: 'klant_geworden'|'geen_klant'|'no_show',
-//          bezwaren: string[], warmte_score: 1-10, terugkom_datum: 'YYYY-MM-DD',
+// Body: { appointment_id, outcome, bezwaren: string[], warmte_score: 1-10,
+//          terugkom_datum: 'YYYY-MM-DD', terugkom_datetime: ISO8601,
 //          volgende_actie: string, notitie: string }
 //
 // Side-effect: update follow_up_appointments.status op basis van outcome.
@@ -11,12 +11,21 @@ import { createUserClient } from './supabase.js';
 import { addGhlTags, tagsFromOutcome } from './ghl-tag-helper.js';
 
 const OUTCOME_TO_STATUS = {
-  klant_geworden: 'completed',
-  geen_klant: 'completed',
-  no_show: 'no_show',
+  klant_geworden:    'completed',
+  geen_klant:        'completed',
+  no_show:           'no_show',
+  terugbellen:       'scheduled',   // open houden
+  niet_bereikt:      'no_show',
+  in_beraad:         'completed',
+  offerte_verzonden: 'completed',
+  afgesloten:        'completed',
 };
 
-const VALID_OUTCOMES = ['klant_geworden', 'geen_klant', 'no_show'];
+const VALID_OUTCOMES = [
+  'klant_geworden', 'geen_klant', 'no_show',
+  'terugbellen', 'niet_bereikt', 'in_beraad',
+  'offerte_verzonden', 'afgesloten',
+];
 const VALID_VOLGENDE_ACTIES = ['bellen', 'email', 'event', 'sluiten', 'niet_meer_opvolgen'];
 
 export default async function handler(req, res) {
@@ -43,15 +52,24 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: `outcome moet één van: ${VALID_OUTCOMES.join(', ')}` });
   }
 
+  // terugkom_datetime heeft prioriteit; terugkom_datum is backward-compat
+  const terugkomDt = body.terugkom_datetime && !isNaN(Date.parse(body.terugkom_datetime))
+    ? new Date(body.terugkom_datetime).toISOString()
+    : null;
+  const terugkomDatum = body.terugkom_datum && /^\d{4}-\d{2}-\d{2}$/.test(body.terugkom_datum)
+    ? body.terugkom_datum
+    : (terugkomDt ? terugkomDt.slice(0, 10) : null);
+
   const outcomeRow = {
     appointment_id,
     outcome,
     bezwaren: Array.isArray(body.bezwaren) ? body.bezwaren : null,
     volgende_actie: VALID_VOLGENDE_ACTIES.includes(body.volgende_actie) ? body.volgende_actie : null,
-    terugkom_datum: body.terugkom_datum && /^\d{4}-\d{2}-\d{2}$/.test(body.terugkom_datum) ? body.terugkom_datum : null,
+    terugkom_datum: terugkomDatum,
+    terugkom_datetime: terugkomDt,
     warmte_score: Number.isInteger(body.warmte_score) && body.warmte_score >= 1 && body.warmte_score <= 10 ? body.warmte_score : null,
     notitie: typeof body.notitie === 'string' && body.notitie.length > 0 ? body.notitie : null,
-    opvolging_status: body.terugkom_datum ? 'gepland' : null,
+    opvolging_status: terugkomDatum ? 'gepland' : null,
     niet_meer_opvolgen: body.volgende_actie === 'niet_meer_opvolgen',
     ingevuld_door: user.id,
   };
