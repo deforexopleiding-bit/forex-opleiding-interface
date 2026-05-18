@@ -131,6 +131,10 @@ export default async function handler(req, res) {
       await tryMapAppointment(body);
     }
 
+    if (event === 'meeting.participant_joined') {
+      await tryMarkInProgress(body);
+    }
+
     return res.status(200).json({ received: true, logged: !logErr });
   }
 
@@ -144,6 +148,53 @@ async function readRawBody(req) {
     chunks.push(typeof chunk === 'string' ? Buffer.from(chunk) : chunk);
   }
   return Buffer.concat(chunks).toString('utf8');
+}
+
+async function tryMarkInProgress(body) {
+  const meetingObject = body?.payload?.object;
+  if (!meetingObject) return;
+
+  const zoomMeetingId = String(meetingObject.id || '');
+  if (!zoomMeetingId) return;
+
+  const participantEmail = (meetingObject?.participant?.email || '').toLowerCase();
+  const daveEmail = (process.env.DAVE_ZOOM_EMAIL || '').toLowerCase();
+
+  // Lege email = telefoon-inbel of gast zonder account → telt als lead-join
+  // Geldige email die niet Dave is → ook lead-join
+  const isLeadJoin = !participantEmail || participantEmail !== daveEmail;
+  if (!isLeadJoin) {
+    console.log('[zoom-webhook] host joinde eigen meeting, geen in_progress update');
+    return;
+  }
+
+  const { data: appt } = await supabaseAdmin
+    .from('follow_up_appointments')
+    .select('id, status')
+    .eq('zoom_meeting_id', zoomMeetingId)
+    .maybeSingle();
+
+  if (!appt) {
+    console.log('[zoom-webhook] geen appointment gevonden voor zoom_meeting_id', zoomMeetingId);
+    return;
+  }
+
+  // Alleen 'scheduled' → 'in_progress'; niet overschrijven als al completed/no_show
+  if (appt.status !== 'scheduled') {
+    console.log('[zoom-webhook] appointment', appt.id, 'heeft al status', appt.status, '— in_progress skip');
+    return;
+  }
+
+  const { error: updateErr } = await supabaseAdmin
+    .from('follow_up_appointments')
+    .update({ status: 'in_progress' })
+    .eq('id', appt.id);
+
+  if (updateErr) {
+    console.error('[zoom-webhook] in_progress update mislukt:', updateErr.message);
+  } else {
+    console.log('[zoom-webhook] in_progress gezet voor appointment', appt.id, 'via lead-join participant_joined');
+  }
 }
 
 async function tryMapAppointment(body) {
@@ -196,7 +247,6 @@ async function tryMapAppointment(body) {
     .from('follow_up_appointments')
     .update({
       zoom_meeting_id: zoomMeetingId,
-      status: 'in_progress',
     })
     .eq('id', target.id);
 
