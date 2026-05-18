@@ -351,6 +351,8 @@
             line-height:1;font-size:14px"
           title="Uitloggen">&#8617;</button>
       </div>`;
+
+    injectThemeToggle();
   }
 
   // ── Theme-toggle injectie in sidebar footer ──────────────────────────────────

@@ -12,13 +12,20 @@
   <script src="shared/agent-shared.js"></script>
   <script src="shared/theme-shared.js"></script>
   <style>
+    /* Lokale aliases — backward compat tot volledige refactor */
+    :root {
+      --fg: var(--text-primary);
+      --muted: var(--text-secondary);
+      --card-bg: var(--surface-card);
+    }
+
     .main-content { margin-left: var(--sidebar-w, 220px); min-height: 100vh; padding: 28px 28px 64px; max-width: 1200px; position: relative; z-index: 1; }
 
     .fu-metrics-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin: 0 0 28px; }
-    .fu-metric-card { background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.12); border-radius: 10px; padding: 14px 16px; }
-    .fu-metric-label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; color: rgba(255,255,255,0.55); margin-bottom: 6px; }
-    .fu-metric-value { font-size: 26px; font-weight: 500; color: rgba(255,255,255,0.95); line-height: 1; }
-    .fu-metric-sub { font-size: 11px; color: rgba(255,255,255,0.45); margin-top: 8px; }
+    .fu-metric-card { background: var(--surface-card); border: 1px solid var(--border-default); border-radius: 10px; padding: 14px 16px; }
+    .fu-metric-label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-secondary); margin-bottom: 6px; }
+    .fu-metric-value { font-size: 26px; font-weight: 500; color: var(--text-primary); line-height: 1; }
+    .fu-metric-sub { font-size: 11px; color: var(--text-tertiary); margin-top: 8px; }
     .fu-metric-value.success { color: #4ade80; }
     .fu-metric-value.warning { color: #facc15; }
     .fu-metric-value.danger  { color: #f87171; }
@@ -98,7 +105,7 @@
       font-weight: 400;
     }
     .fu-tab.active .fu-tab-count {
-      background: rgba(255,255,255,0.18);
+      background: var(--brand-primary-soft-hover);
       color: var(--fg, #fff);
     }
     .fu-tab-count.urgent {
@@ -119,7 +126,7 @@
     .fu-metric-card { position: relative; }
     .fu-metric-morgen {
       font-size: 10px;
-      color: rgba(255,255,255,0.4);
+      color: var(--text-tertiary);
       margin-top: 4px;
     }
     /* Segmented control */
@@ -145,15 +152,15 @@
     }
     .fu-toggle-btn:hover { color: var(--fg, #fff); }
     .fu-toggle-btn.active {
-      background: rgba(255,255,255,0.1);
+      background: var(--surface-card-hover);
       color: var(--fg, #fff);
       font-weight: 500;
     }
 
     /* Appointment cards */
     .fu-card {
-      background: rgba(255,255,255,0.06);
-      border: 1px solid rgba(255,255,255,0.14);
+      background: var(--surface-card);
+      border: 1px solid var(--border-default);
       border-radius: 10px;
       padding: 0;
       margin-bottom: 8px;
@@ -161,8 +168,8 @@
       transition: background 0.15s, border-color 0.15s;
     }
     .fu-card:hover {
-      background: rgba(255,255,255,0.09);
-      border-color: rgba(255,255,255,0.22);
+      background: var(--surface-card-hover);
+      border-color: var(--border-strong);
     }
     .fu-card-header {
       display: flex;
@@ -200,18 +207,18 @@
     .fu-card-avatar.status-completed   { background: rgba(34,197,94,0.18); color: #86efac; }
     .fu-card-avatar.status-no-show     { background: rgba(239,68,68,0.18); color: #fca5a5; }
     .fu-card-avatar.status-cancelled,
-    .fu-card-avatar.status-default     { background: rgba(255,255,255,0.1); color: rgba(255,255,255,0.6); }
+    .fu-card-avatar.status-default     { background: var(--surface-card-hover); color: var(--text-secondary); }
     .fu-card-name {
       font-size: 15px;
       font-weight: 500;
-      color: rgba(255,255,255,0.95);
+      color: var(--text-primary);
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
     }
     .fu-card-meta {
       font-size: 12px;
-      color: rgba(255,255,255,0.55);
+      color: var(--text-secondary);
       margin-top: 2px;
     }
     .fu-card-badge {
@@ -227,13 +234,13 @@
     .fu-card-badge.status-completed   { background: rgba(34,197,94,0.18); color: #86efac; }
     .fu-card-badge.status-no-show     { background: rgba(239,68,68,0.18); color: #fca5a5; }
     .fu-card-badge.status-cancelled,
-    .fu-card-badge.status-default     { background: rgba(255,255,255,0.08); color: rgba(255,255,255,0.6); }
+    .fu-card-badge.status-default     { background: var(--surface-card-hover); color: var(--text-secondary); }
     .fu-card-memo-btn {
       width: 30px;
       height: 30px;
       border-radius: 50%;
-      background: rgba(255,255,255,0.06);
-      border: 1px solid rgba(255,255,255,0.14);
+      background: var(--surface-card);
+      border: 1px solid var(--border-default);
       display: flex;
       align-items: center;
       justify-content: center;
@@ -242,22 +249,22 @@
       transition: background 0.15s;
       padding: 0;
     }
-    .fu-card-memo-btn:hover    { background: rgba(255,255,255,0.12); }
+    .fu-card-memo-btn:hover    { background: var(--brand-primary-soft); }
     .fu-card-memo-btn:disabled { opacity: 0.5; cursor: wait; }
     .fu-card-memo-btn.sent     { color: #4ade80; }
-    .fu-card-memo-btn.skipped  { color: rgba(255,255,255,0.45); }
+    .fu-card-memo-btn.skipped  { color: var(--text-tertiary); }
     .fu-card-memo-btn.todo     { color: #facc15; }
     .fu-card-actions {
       display: flex;
       gap: 8px;
       padding: 10px 18px 14px;
-      border-top: 1px solid rgba(255,255,255,0.1);
+      border-top: 1px solid var(--border-subtle);
       flex-wrap: wrap;
     }
     .fu-card-action-btn {
-      background: rgba(255,255,255,0.05);
-      border: 1px solid rgba(255,255,255,0.14);
-      color: rgba(255,255,255,0.85);
+      background: var(--surface-card);
+      border: 1px solid var(--border-default);
+      color: var(--text-primary);
       padding: 6px 12px;
       border-radius: 6px;
       font-size: 12px;
@@ -269,8 +276,8 @@
       transition: background 0.15s, border-color 0.15s;
     }
     .fu-card-action-btn:hover {
-      background: rgba(255,255,255,0.1);
-      border-color: rgba(255,255,255,0.22);
+      background: var(--surface-card-hover);
+      border-color: var(--border-strong);
     }
     .fu-card-action-btn i { font-size: 13px; }
     .fu-voicememo-button {
@@ -430,6 +437,9 @@
         <svg class="nav-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>
         Admin
       </a>
+    </div>
+    <div class="sidebar-footer">
+      <div class="footer-user"></div>
     </div>
   </nav>
 
@@ -1240,6 +1250,7 @@
     async function init() {
       await window._authSharedReady;
       const profile = await window.AuthShared.requireAuth(ALLOWED_ROLES);
+      window.AgentShared?.renderUserSection(profile);
 
       if (profile && ['admin', 'manager', 'super_admin'].includes(profile.role)) {
         const adminLink = document.getElementById('admin-link');
