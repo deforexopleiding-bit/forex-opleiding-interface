@@ -54,11 +54,11 @@
       text-transform: uppercase;
       letter-spacing: 0.5px;
     }
-    .ld-status-scheduled { background: var(--color-info-soft); color: var(--color-info-text); }
-    .ld-status-in_progress { background: var(--color-warning-soft); color: var(--color-warning-text); }
-    .ld-status-completed { background: var(--color-success-soft); color: var(--color-success-text); }
-    .ld-status-no_show { background: var(--color-danger-soft); color: var(--color-danger-text); }
-    .ld-status-cancelled { background: var(--color-neutral-soft); color: var(--color-neutral-text); }
+    .ld-status-scheduled { background: var(--color-info); color: var(--text-inverse); }
+    .ld-status-in_progress { background: var(--color-warning); color: var(--text-inverse); }
+    .ld-status-completed { background: var(--color-success); color: var(--text-inverse); }
+    .ld-status-no_show { background: var(--color-danger); color: var(--text-inverse); }
+    .ld-status-cancelled { background: var(--color-neutral); color: var(--text-inverse); }
     .ld-tabs {
       display: flex;
       gap: 4px;
@@ -234,6 +234,9 @@
         <svg class="nav-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>
         Admin
       </a>
+    </div>
+    <div class="sidebar-footer">
+      <div class="footer-user"></div>
     </div>
   </nav>
 
@@ -537,7 +540,8 @@
 
     async function init() {
       await window._authSharedReady;
-      await window.AuthShared.requireAuth(ALLOWED_ROLES);
+      const profile = await window.AuthShared.requireAuth(ALLOWED_ROLES);
+      window.AgentShared?.renderUserSection(profile);
 
       const params = new URLSearchParams(location.search);
       const id = params.get('id');

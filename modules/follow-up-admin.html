@@ -133,6 +133,9 @@
         Admin
       </a>
     </div>
+    <div class="sidebar-footer">
+      <div class="footer-user"></div>
+    </div>
   </nav>
 
   <main class="main-content">
@@ -157,7 +160,8 @@
 
     async function init() {
       await window._authSharedReady;
-      await window.AuthShared.requireAuth(ALLOWED_ROLES);
+      const profile = await window.AuthShared.requireAuth(ALLOWED_ROLES);
+      window.AgentShared?.renderUserSection(profile);
 
       const container = document.getElementById('admin-queue');
 
