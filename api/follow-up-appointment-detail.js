@@ -57,12 +57,18 @@ async function handleGet(req, res) {
     .limit(20);
 
   // Screenshot audit status ophalen (tabel bestaat als screenshot-audit feature actief is)
-  const { data: screenshotAudit } = await supabase
-    .from('follow_up_screenshot_audit')
-    .select('admin_reviewed, ai_review_result, review_notes')
-    .eq('appointment_id', id)
-    .maybeSingle()
-    .catch(() => ({ data: null }));
+  // Geen .catch() chaining — supabase v2 geeft errors altijd via result.error, niet via rejection
+  let screenshotAudit = null;
+  try {
+    const { data: auditData } = await supabase
+      .from('follow_up_screenshot_audit')
+      .select('admin_reviewed, ai_review_result, review_notes')
+      .eq('appointment_id', id)
+      .maybeSingle();
+    screenshotAudit = auditData || null;
+  } catch {
+    // Tabel bestaat mogelijk nog niet — niet blokkerend
+  }
 
   return res.status(200).json({
     appointment: appt,

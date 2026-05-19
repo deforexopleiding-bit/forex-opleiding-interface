@@ -8,6 +8,7 @@
 // owner_id = DAVE_PROFILE_ID zodat sales-user (Dave) zijn eigen appointments via RLS kan zien
 
 import { supabaseAdmin, checkCronAuth } from './supabase.js';
+import { fetchGhlContact } from './_lib/ghl-contact.js';
 
 const GHL_API_BASE = 'https://services.leadconnectorhq.com';
 const ABORT_MS = 55_000;
@@ -86,11 +87,24 @@ export default async function handler(req, res) {
         console.log('[follow-up-ghl-poll] status behouden (handmatig gemuteerd):', event.id, existing.status);
       }
 
+      // Email/phone: GHL calendar events bevatten niet altijd deze velden.
+      // Als ze ontbreken in het event, haal ze op via de Contacts API.
+      let leadEmail = event.email || null;
+      let leadPhone = event.phone || null;
+
+      if ((!leadEmail || !leadPhone) && event.contactId) {
+        const contact = await fetchGhlContact(event.contactId);
+        if (contact) {
+          if (!leadEmail && contact.email) leadEmail = contact.email;
+          if (!leadPhone && contact.phone) leadPhone = contact.phone;
+        }
+      }
+
       const row = {
         ghl_appointment_id: event.id,
         lead_name:           event.title || event.contactName || 'Onbekend',
-        lead_email:          event.email || null,
-        lead_phone:          event.phone || null,
+        lead_email:          leadEmail,
+        lead_phone:          leadPhone,
         lead_ghl_contact_id: event.contactId,
         scheduled_at:        event.startTime,
         duration_minutes:    event.durationMinutes || 30,
@@ -106,7 +120,7 @@ export default async function handler(req, res) {
       if (error) {
         console.error('[follow-up-ghl-poll] upsert fout:', event.id, error.message);
       }
-      results.push({ id: event.id, ok: !error, error: error?.message || null });
+      results.push({ id: event.id, ok: !error, email: leadEmail ? 'ja' : 'nee', error: error?.message || null });
     }
 
     const ok     = results.filter(r => r.ok).length;
