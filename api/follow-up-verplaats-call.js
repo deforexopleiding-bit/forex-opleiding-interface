@@ -69,7 +69,7 @@ export default async function handler(req, res) {
         duration_minutes
       );
     } catch (zoomErr) {
-      console.error('[verplaats-call] Zoom update failed:', zoomErr.message);
+      console.error('[verplaats-call] Zoom update failed:', zoomErr?.message, zoomErr);
       // Niet abort — DB update mag wel doorgaan
     }
   }
@@ -84,15 +84,29 @@ export default async function handler(req, res) {
         newEnd.toISOString()
       );
     } catch (ghlErr) {
-      console.error('[verplaats-call] GHL update failed:', ghlErr.message);
+      console.error('[verplaats-call] GHL update failed:', ghlErr?.message, ghlErr);
     }
   }
 
-  // Step 3: Maak NIEUWE appointment-rij (nieuwe scheduled_at, parent_appointment_id = oud id)
+  // Step 3: Zet oude rij EERST naar 'verplaatst' zodat ghl_appointment_id
+  // vrijkomt vóór de child-INSERT (UNIQUE constraint op ghl_appointment_id).
+  const { error: updateErr } = await supabaseAdmin
+    .from('follow_up_appointments')
+    .update({ status: 'verplaatst' })
+    .eq('id', oldAppt.id);
+
+  if (updateErr) {
+    console.error('[verplaats-call] Parent-update failed:', updateErr.message);
+    return res.status(500).json({ error: updateErr.message });
+  }
+
+  // Step 4: Maak NIEUWE appointment-rij (nieuwe scheduled_at, parent_appointment_id = oud id).
+  // ghl_appointment_id = null: parent behoudt de GHL-id als historisch record;
+  // child krijgt geen GHL-id om UNIQUE constraint te respecteren.
   const { data: newAppt, error: insertErr } = await supabaseAdmin
     .from('follow_up_appointments')
     .insert({
-      ghl_appointment_id: oldAppt.ghl_appointment_id,
+      ghl_appointment_id: null,
       zoom_meeting_id: oldAppt.zoom_meeting_id,
       zoom_join_url: oldAppt.zoom_join_url,
       lead_name: oldAppt.lead_name,
@@ -110,14 +124,14 @@ export default async function handler(req, res) {
     .single();
 
   if (insertErr) {
+    // Child-insert failed — probeer parent terug te zetten naar scheduled
+    console.error('[verplaats-call] Child-insert failed:', insertErr.message);
+    await supabaseAdmin
+      .from('follow_up_appointments')
+      .update({ status: 'scheduled' })
+      .eq('id', oldAppt.id);
     return res.status(500).json({ error: insertErr.message });
   }
-
-  // Update oude rij naar 'verplaatst'
-  await supabaseAdmin
-    .from('follow_up_appointments')
-    .update({ status: 'verplaatst' })
-    .eq('id', oldAppt.id);
 
   // Audit log
   await supabaseAdmin
