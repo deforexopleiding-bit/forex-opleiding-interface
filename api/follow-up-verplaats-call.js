@@ -1,6 +1,11 @@
 import { createClient } from '@supabase/supabase-js';
 import { updateZoomMeetingTime } from './_lib/zoom-meeting.js';
 import { updateGhlAppointmentTime } from './_lib/ghl-appointment.js';
+import dayjs from 'dayjs';
+import utc from 'dayjs/plugin/utc.js';
+import timezone from 'dayjs/plugin/timezone.js';
+dayjs.extend(utc);
+dayjs.extend(timezone);
 
 const supabaseAdmin = createClient(
   process.env.SUPABASE_URL,
@@ -56,8 +61,11 @@ export default async function handler(req, res) {
     return res.status(403).json({ error: 'Niet jouw appointment' });
   }
 
-  const newStart = new Date(new_datetime);
-  const newEnd = new Date(newStart.getTime() + duration_minutes * 60 * 1000);
+  // new_datetime arrives as "2026-07-01T14:00:00" (no Z, no offset) — Amsterdam local time
+  // Parse as Europe/Amsterdam, convert to UTC for storage and API calls
+  const newDateUTC = dayjs.tz(new_datetime, 'Europe/Amsterdam').utc();
+  const newStartISO = newDateUTC.toISOString();
+  const newEndISO = newDateUTC.add(duration_minutes, 'minute').toISOString();
 
   // Step 1: Zoom meeting tijd updaten (best effort)
   let zoomResult = null;
@@ -65,7 +73,7 @@ export default async function handler(req, res) {
     try {
       zoomResult = await updateZoomMeetingTime(
         oldAppt.zoom_meeting_id,
-        newStart.toISOString(),
+        newStartISO,
         duration_minutes
       );
     } catch (zoomErr) {
@@ -80,8 +88,8 @@ export default async function handler(req, res) {
     try {
       ghlResult = await updateGhlAppointmentTime(
         oldAppt.ghl_appointment_id,
-        newStart.toISOString(),
-        newEnd.toISOString()
+        newStartISO,
+        newEndISO
       );
     } catch (ghlErr) {
       console.error('[verplaats-call] GHL update failed:', ghlErr?.message, ghlErr);
@@ -113,7 +121,7 @@ export default async function handler(req, res) {
       lead_email: oldAppt.lead_email,
       lead_phone: oldAppt.lead_phone,
       lead_ghl_contact_id: oldAppt.lead_ghl_contact_id,
-      scheduled_at: newStart.toISOString(),
+      scheduled_at: newStartISO,
       duration_minutes,
       status: 'scheduled',
       voicememo_status: 'pending',
@@ -143,7 +151,7 @@ export default async function handler(req, res) {
       payload: {
         from_appointment_id: oldAppt.id,
         from_datetime: oldAppt.scheduled_at,
-        to_datetime: newStart.toISOString(),
+        to_datetime: newStartISO,
         zoom_updated: !!zoomResult,
         ghl_updated: !!ghlResult,
         changed_by: user.id,
