@@ -483,29 +483,89 @@ DOE PER SUB-SPRINT: TEST + DEPLOY + VERIFICATIE voor volgende
 
 ---
 
-## 📞 Follow-up Module
+## 📞 Follow-up Module — Status 19 mei 2026
 
-Volledig plan staat in `docs/sessie-logs/follow-up-module-plan.md` (versie 2.2, commit a6175d4).
+Volledig oorspronkelijk plan staat in `docs/sessie-logs/follow-up-module-plan.md` (versie 2.2, commit a6175d4).
+Module is live in productie. Dave en Jeffrey gebruiken het actief.
 
-### Pre-work voor Fase 1A (uit te voeren door ADMIN_ROLES user)
+### [PENDING] Acties Jeffrey direct
+- [ ] Verifieer profiles syntax-fix productie (owner-filter dropdown bevat Dave)
+- [ ] Zoom env vars Vercel: ZOOM_ACCOUNT_ID, ZOOM_CLIENT_ID, ZOOM_CLIENT_SECRET
+- [ ] End-to-end test call-verplaatsen feature
 
-- **[fu-pre-1]** GoHighLevel Private Integration Token aanmaken met 9 scopes (zie plan). Vercel env vars: `GHL_API_KEY`, `GHL_LOCATION_ID`. ~5-10 min.
-- **[fu-pre-2]** Zoom Marketplace App aanmaken met 4 webhooks. Vercel env vars: `ZOOM_ACCOUNT_ID`, `ZOOM_CLIENT_ID`, `ZOOM_CLIENT_SECRET`, `ZOOM_WEBHOOK_SECRET`. ~10-15 min.
-- **[fu-pre-3]** (Fase 1B) GHL Conversation Webhook configureren voor `conversation.message.created`. Vercel env var: `GHL_WEBHOOK_SECRET`. ~5 min.
-- **[fu-pre-4]** (Fase 2) Drie GHL workflows voor Dave-notificaties (Daily Call List / Pre-Call Reminder / EOD Reminder) met API trigger + Meta-goedkeuring templates aanvragen (1-7 dagen wachttijd).
-- **[fu-pre-5]** (Fase 2) Twee GHL no-show workflows (Immediate / 24u) met API trigger + huidige GHL no-show flow op handmatig zetten bij Fase 2 go-live.
+### [PENDING] v1.2 polish (niet kritiek)
+- [ ] SHAPE2 webhook parser fix (poll vangt outbound nu)
+- [ ] Frontend "Jazeker..." duplicate rendering (DB OK, DOM 2x)
+- [ ] Stats-misleading poll-cron messages_upserted (telt skips als upsert)
+- [ ] console.error in poll-cron fail-branch (debugging-blind anders)
+- [ ] Constraint cleanup polling_sync uit source-check
+- [ ] Item 6 datepicker re-verificatie (waarschijnlijk OK)
+- [ ] Beoordelen UI-state visueel bewijs (geen test-data > 30 min beschikbaar)
+- [ ] Verplaats-feature end-to-end test (Zoom + GHL update)
 
-### Fase planning
+### [PENDING] Roadmap follow-up volgende sessies
+- [ ] 5 GHL outbound workflows: klant, geen-klant, te-duur, partner, timing
+- [ ] Tag-architectuur per workflow
+- [ ] Zoom Item 8 trigger code-cleanup (gerevert maar dead-code aanwezig)
+- [ ] WhatsApp template verzending vanuit command-center
+- [ ] Lead-detail timeline (calls + messages + outcomes + notities chronologisch)
 
-| Fase | Werk | Doorlooptijd |
-|------|------|--------------|
-| 1A — Foundation + Dashboard | 4-6u Claude Code | 3-5 dagen |
-| 1B — WhatsApp conversaties read | 3-4u | 2-3 dagen |
-| 1C — WhatsApp reply | 2-3u | 2 dagen |
-| 2 — Notificaties + No-show | 3-4u | 3-5 dagen |
-| 3 — Post-call invul-flow | 3-4u | 3-5 dagen |
-| 4 — Drip via GHL | 5-7u | 1 week |
-| **Totaal** | **~20-28u** | **4-5 weken** |
+### [DONE] Fase 6.1 — 7 items + Item 7 UNIQUE
+- [x] Topbar voor sales bij achterstallig
+- [x] WhatsApp outbound zichtbaar (via poll-cron)
+- [x] Voicememo dropdown 4 opties + position:fixed
+- [x] Zoom-link card + lead-detail
+- [x] Screenshot-audit 3 statussen
+- [x] Item 6 datepicker code-correct
+- [x] Item 7 outcome UPSERT + UNIQUE constraint
+- [x] Marc no-show handmatig via UI
+
+### [DONE] Fase 6.1 deel 2 — 11 items
+- [x] Klantgegevens email+phone GHL sync (26/26)
+- [x] Klantgegevens display lead-detail
+- [x] Notities-tab functioneel
+- [x] Open acties cards reden-strip
+- [x] Voicememo-knop tekst-label
+- [x] Samuel has_outcome refresh-bug
+- [x] Zoom auto-track gerevert
+- [x] Jelmer no-show cron-loop fix
+- [x] Lead-detail eerdere calls sectie
+- [x] Topbar sales-rol
+- [x] Lead-detail .catch chain crash hotfix
+
+### [DONE] Fase 6.2 — 6 punten
+- [x] Zoom-knop altijd zichtbaar fallback URL
+- [x] polling_sync -> poll naming
+- [x] Inbound UNIQUE ghl_message_id (bestond al)
+- [x] Beoordelen UI-state frontend-only
+- [x] Opvolging max 7 + paginering + sort + zoek
+- [x] Recent afgerond vandaag+gisteren
+
+### [DONE] Fase 6.3 — 4 features
+- [x] Achterstallig voicememo cancelled-filter
+- [x] Card-datum format "19 mei - 09:00"
+- [x] Call-verplaatsen feature (Zoom + GHL + parent_appointment_id)
+- [x] Maandkalender-view (maand/week/dag + owner-filter)
+
+### [DONE] Bug-fixes en hotfixes
+- [x] Lead-detail .catch chain crash
+- [x] Live email/phone sync appointment-create
+- [x] Poll-cron CHECK constraint incident (3,5u stilstand)
+- [x] Zoom velden in API-response (5 SELECT-statements)
+- [x] Recent afgerond bovengrens
+- [x] has_outcome enrichment alle secties
+- [x] profiles.full_name kolom-rename
+- [x] Maand-view off-by-one rendering
+- [x] PostgREST alias syntax profiles
+
+### [DONE] Infrastructuur
+- [x] conversations.readonly scope GHL PIT-token
+- [x] Audit-log entries voor data-cleanups
+- [x] follow_up_notities tabel + endpoint
+- [x] parent_appointment_id kolom
+- [x] zoom_join_url kolom
+- [x] status 'verplaatst' aan CHECK constraint
+- [x] api/_lib/zoom-meeting.js + api/_lib/ghl-appointment.js helpers
 
 ---
 

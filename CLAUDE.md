@@ -293,3 +293,27 @@ Lopend op Vercel:
 - GoHighLevel — marketing automation
 - Discord — community
 - Trustpilot — reviews (4.8, 85+ reviews)
+
+## Lessons Learned — 19 mei 2026 sessie
+
+### SQL & Database
+- Voor toekomstige migraties: ALTIJD eerst Claude in Chrome pre-flight schema-check voordat we ALTER/INSERT/UPDATE schrijven. Schema-aannames (naam vs full_name, warmte vs warmte_score) hebben meerdere uren werk gekost.
+- PostgREST alias-syntax in supabase-js: gebruik `alias:column` ipv SQL `column AS alias`. SQL-style is foutgevoelig (typo "full_nameASnaam" zonder spaties veroorzaakt runtime error).
+- CHECK constraints na rename-operaties: code wijzigingen die nieuwe enum-values introduceren MOETEN gepaard gaan met ALTER constraint EERST, anders falen alle inserts stilletjes.
+
+### Vercel Functions debugging
+- ALTIJD console.error in fail-branches van API-handlers. `errors++` counter zonder console.error maakt debugging onmogelijk (3,5 uur stilstand niet zichtbaar in Vercel logs zonder error-text).
+- Function-level summary-logs zoals `[handler] done: { errors: 395 }` zijn nutteloos zonder individuele error-text — laat altijd minstens de eerste 3 errors per invocation door.
+
+### Frontend rendering
+- Voor date-vergelijking in UI: gebruik NOOIT `toISOString().split('T')[0]` voor day-matching. UTC-conversie veroorzaakt off-by-one bij timezone-grens. Gebruik `getFullYear/Month/Date` van Date-objecten in lokale tijd.
+- Position:fixed dropdowns vereisen handmatige positioning via getBoundingClientRect + scroll-listener om te sluiten bij scroll.
+
+### GHL integratie
+- Custom Conversation Provider config zit op agency-niveau. Location-admin (onze toegang) kan webhook-URLs niet beheren. Voor outbound message visibility: poll-cron uitbreiden via API is praktischer dan workflow-trigger zoeken.
+- conversations.readonly scope is vereist voor /conversations/search endpoint. /conversations/message.readonly geeft alleen losse messages.
+
+### Werkstroom
+- Drie-rol-pattern (chat-Claude regie / Claude Code filesystem / Claude in Chrome browser) werkt goed voor complexe productie-wijzigingen.
+- Voor destructive SQL (DELETE/ALTER): Claude in Chrome bereidt voor, Jeffrey klikt Run. Pattern succesvol in 4 SQL-incidenten deze sessie.
+- Mini-fix commits direct na grote commit zijn beter dan grote commit later corrigeren — toont bug-fix transparant in git-history.
