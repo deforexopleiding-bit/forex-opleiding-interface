@@ -30,8 +30,8 @@ export default async function handler(req, res) {
   const { role } = req.query;
   let query = supabaseAdmin
     .from('profiles')
-    .select('id, naam, email, role')
-    .order('naam');
+    .select('id, full_name AS naam, email, role')
+    .order('full_name');
 
   if (role) query = query.eq('role', role);
 

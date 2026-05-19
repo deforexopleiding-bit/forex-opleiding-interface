@@ -2310,21 +2310,32 @@
       label.textContent = ref.toLocaleDateString('nl-NL', { month: 'long', year: 'numeric' });
 
       const firstDay = new Date(year, month, 1);
-      const lastDay = new Date(year, month + 1, 0);
-      const startWeekday = (firstDay.getDay() + 6) % 7; // ma=0
 
+      // Bepaal Monday-first weekday (ma=0, zo=6)
+      let startWeekday = firstDay.getDay() - 1;
+      if (startWeekday < 0) startWeekday = 6; // zondag → laatste kolom
+
+      // Eerste cel = startWeekday dagen vóór de 1e van de maand
+      const gridStart = new Date(firstDay);
+      gridStart.setDate(gridStart.getDate() - startWeekday);
+
+      // Bouw altijd 42 cellen (6 rijen × 7 kolommen)
       const days = [];
-      for (let i = startWeekday - 1; i >= 0; i--) {
-        days.push({ date: new Date(year, month, -i), otherMonth: true });
+      for (let i = 0; i < 42; i++) {
+        const cellDate = new Date(gridStart);
+        cellDate.setDate(cellDate.getDate() + i);
+        days.push({
+          date: cellDate,
+          otherMonth: cellDate.getMonth() !== month,
+        });
       }
-      for (let d = 1; d <= lastDay.getDate(); d++) {
-        days.push({ date: new Date(year, month, d), otherMonth: false });
-      }
-      while (days.length < 42) {
-        const last = days[days.length - 1].date;
-        const next = new Date(last);
-        next.setDate(next.getDate() + 1);
-        days.push({ date: next, otherMonth: true });
+
+      // Helper: vergelijk op lokale Y/M/D om timezone-issues te vermijden
+      function sameLocalDay(cellDate, apptIso) {
+        const apptDate = new Date(apptIso);
+        return apptDate.getFullYear() === cellDate.getFullYear() &&
+               apptDate.getMonth() === cellDate.getMonth() &&
+               apptDate.getDate() === cellDate.getDate();
       }
 
       let html = '<div class="fu-kal-headers">';
@@ -2335,9 +2346,8 @@
 
       html += '<div class="fu-kal-month-grid">';
       days.forEach(({ date, otherMonth }) => {
-        const dateStr = date.toISOString().split('T')[0];
         const isToday = date.toDateString() === new Date().toDateString();
-        const dayAppts = kalenderAppts.filter(a => a.scheduled_at.split('T')[0] === dateStr);
+        const dayAppts = kalenderAppts.filter(a => sameLocalDay(date, a.scheduled_at));
 
         html += `
           <div class="fu-kal-cell ${otherMonth ? 'other-month' : ''} ${isToday ? 'today' : ''}">
@@ -2368,9 +2378,13 @@
       for (let i = 0; i < 7; i++) {
         const day = new Date(monday);
         day.setDate(day.getDate() + i);
-        const dateStr = day.toISOString().split('T')[0];
-        const dayAppts = kalenderAppts.filter(a => a.scheduled_at.split('T')[0] === dateStr);
         const isToday = day.toDateString() === new Date().toDateString();
+        const dayAppts = kalenderAppts.filter(a => {
+          const apptDate = new Date(a.scheduled_at);
+          return apptDate.getFullYear() === day.getFullYear() &&
+                 apptDate.getMonth() === day.getMonth() &&
+                 apptDate.getDate() === day.getDate();
+        });
 
         html += `
           <div class="fu-kal-week-day ${isToday ? 'today' : ''}">
@@ -2389,12 +2403,15 @@
 
     function renderDayView(grid, label) {
       const ref = kalenderState.refDate;
-      const dateStr = ref.toISOString().split('T')[0];
-
       label.textContent = ref.toLocaleDateString('nl-NL', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
 
       const dayAppts = kalenderAppts
-        .filter(a => a.scheduled_at.split('T')[0] === dateStr)
+        .filter(a => {
+          const apptDate = new Date(a.scheduled_at);
+          return apptDate.getFullYear() === ref.getFullYear() &&
+                 apptDate.getMonth() === ref.getMonth() &&
+                 apptDate.getDate() === ref.getDate();
+        })
         .sort((a, b) => a.scheduled_at.localeCompare(b.scheduled_at));
 
       let html = '<div class="fu-kal-day-list">';
