@@ -93,15 +93,28 @@ async function handleGet(req, res, supabase) {
 
     const { data, error } = await supabase
       .from('follow_up_appointments')
-      .select('id, lead_name, lead_email, lead_phone, scheduled_at, status, voicememo_status, owner_id')
+      .select('id, lead_name, lead_email, lead_phone, scheduled_at, status, voicememo_status, zoom_meeting_id, zoom_join_url, owner_id')
       .in('id', ids);
 
     // Merge terugkom_datum + opvolging_status uit outcomes
     const outcomeMap = new Map((outcomes || []).map(o => [o.appointment_id, o]));
+
+    // Verrijk met has_outcome
+    const todayOutcomeIds = (data || []).map(a => a.id);
+    let todayOutcomeSet = new Set();
+    if (todayOutcomeIds.length > 0) {
+      const { data: todayOutcomes } = await supabase
+        .from('follow_up_outcomes')
+        .select('appointment_id')
+        .in('appointment_id', todayOutcomeIds);
+      todayOutcomeSet = new Set((todayOutcomes || []).map(o => o.appointment_id));
+    }
+
     const enriched = (data || []).map(a => ({
       ...a,
       terugkom_datum: outcomeMap.get(a.id)?.terugkom_datum,
       opvolging_status: outcomeMap.get(a.id)?.opvolging_status,
+      has_outcome: todayOutcomeSet.has(a.id),
     }));
 
     return res.status(200).json({
@@ -142,11 +155,15 @@ async function handleGet(req, res, supabase) {
     const yesterday = new Date(today);
     yesterday.setDate(yesterday.getDate() - 1);
 
+    const tomorrow = new Date(today);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+
     const { data, error } = await supabase
       .from('follow_up_appointments')
-      .select('id, lead_name, lead_email, scheduled_at, status, voicememo_status, owner_id')
+      .select('id, lead_name, lead_email, scheduled_at, status, voicememo_status, zoom_meeting_id, zoom_join_url, owner_id')
       .in('status', ['completed', 'no_show'])
       .gte('scheduled_at', yesterday.toISOString())
+      .lt('scheduled_at', tomorrow.toISOString())
       .order('scheduled_at', { ascending: false })
       .limit(50);
 
@@ -174,7 +191,7 @@ async function handleGet(req, res, supabase) {
 
     const { data: appts, error: apptErr } = await supabase
       .from('follow_up_appointments')
-      .select('id, lead_name, lead_email, scheduled_at, status, voicememo_status, owner_id')
+      .select('id, lead_name, lead_email, scheduled_at, status, voicememo_status, zoom_meeting_id, zoom_join_url, owner_id')
       .lt('scheduled_at', cutoff.toISOString())
       .in('status', ['scheduled', 'in_progress', 'completed', 'no_show'])
       .order('scheduled_at', { ascending: false })
@@ -219,7 +236,7 @@ async function handleGet(req, res, supabase) {
 
   let query = supabase
     .from('follow_up_appointments')
-    .select('id, lead_name, lead_email, lead_phone, scheduled_at, duration_minutes, status, voicememo_status, voicememo_sent_at, requires_screenshot, screenshot_url, snelle_notitie, owner_id, created_at')
+    .select('id, lead_name, lead_email, lead_phone, scheduled_at, duration_minutes, status, voicememo_status, voicememo_sent_at, requires_screenshot, screenshot_url, snelle_notitie, zoom_meeting_id, zoom_join_url, owner_id, created_at')
     .gte('scheduled_at', startDate.toISOString())
     .lt('scheduled_at', endDate.toISOString())
     .order('scheduled_at', { ascending: true });
@@ -411,11 +428,22 @@ async function fetchOpvolgingRange(supabase, startDate, endDate, period, res) {
 
   const { data, error } = await supabase
     .from('follow_up_appointments')
-    .select('id, lead_name, lead_email, lead_phone, scheduled_at, status, voicememo_status, owner_id')
+    .select('id, lead_name, lead_email, lead_phone, scheduled_at, status, voicememo_status, zoom_meeting_id, zoom_join_url, owner_id')
     .in('id', ids);
 
   if (error) {
     return res.status(500).json({ error: error.message });
+  }
+
+  // Verrijk met has_outcome zodat opvolging-cards de juiste "Outcome" / "Outcome wijzigen" knop tonen
+  const apptIds = (data || []).map(a => a.id);
+  let hasOutcomeSet = new Set();
+  if (apptIds.length > 0) {
+    const { data: existingOutcomes } = await supabase
+      .from('follow_up_outcomes')
+      .select('appointment_id')
+      .in('appointment_id', apptIds);
+    hasOutcomeSet = new Set((existingOutcomes || []).map(o => o.appointment_id));
   }
 
   const outcomeMap = new Map((outcomes || []).map(o => [o.appointment_id, o]));
@@ -423,6 +451,7 @@ async function fetchOpvolgingRange(supabase, startDate, endDate, period, res) {
     ...a,
     terugkom_datum: outcomeMap.get(a.id)?.terugkom_datum,
     opvolging_status: outcomeMap.get(a.id)?.opvolging_status,
+    has_outcome: hasOutcomeSet.has(a.id),
   }));
 
   return res.status(200).json({ period, count: enriched.length, appointments: enriched });
