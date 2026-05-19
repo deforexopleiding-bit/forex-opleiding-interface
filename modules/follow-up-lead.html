@@ -54,11 +54,12 @@
       text-transform: uppercase;
       letter-spacing: 0.5px;
     }
-    .ld-status-scheduled { background: var(--color-info); color: var(--text-inverse); }
-    .ld-status-in_progress { background: var(--color-warning); color: var(--text-inverse); }
-    .ld-status-completed { background: var(--color-success); color: var(--text-inverse); }
-    .ld-status-no_show { background: var(--color-danger); color: var(--text-inverse); }
-    .ld-status-cancelled { background: var(--color-neutral); color: var(--text-inverse); }
+    /* Contrast-fix: soft bg + semantische tekstkleur — werkt correct in licht én donker thema */
+    .ld-status-scheduled { background: var(--color-info-soft); color: var(--color-info-text); }
+    .ld-status-in_progress { background: var(--color-warning-soft); color: var(--color-warning-text); }
+    .ld-status-completed { background: var(--color-success-soft); color: var(--color-success-text); }
+    .ld-status-no_show { background: var(--color-danger-soft); color: var(--color-danger-text); }
+    .ld-status-cancelled { background: var(--color-neutral-soft); color: var(--color-neutral-text); }
     .ld-tabs {
       display: flex;
       gap: 4px;
