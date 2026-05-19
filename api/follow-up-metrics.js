@@ -131,13 +131,15 @@ export async function computeMetrics(supabaseAdmin, opts = {}) {
   }
   metrics.achterstallig_outcomes = achterstalligOutcomes;
 
-  // Voicememos achterstallig: scheduled van vóór vandaag met voicememo_status = 'pending'
+  // Voicememos achterstallig: alleen voor appointments waar de call
+  // daadwerkelijk plaatsvond. Cancelled telt niet mee.
   const { data: oldPending } = await apptQ(
     supabaseAdmin
       .from('follow_up_appointments')
       .select('id')
       .lt('scheduled_at', today.toISOString())
       .eq('voicememo_status', 'pending')
+      .in('status', ['completed', 'no_show'])
   );
 
   metrics.achterstallig_voicememos = (oldPending || []).length;
