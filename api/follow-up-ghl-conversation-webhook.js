@@ -31,7 +31,18 @@ function normalizePayload(body) {
   if (body.message && typeof body.message === 'object') {
     const contactId = body.contact_id || body.contactId || body?.contact?.id || null;
     const bodyText = body.message.body || body.message.text || '';
-    const direction = body.message.direction || 'inbound';
+
+    // Detecteer direction expliciet — 'inbound' als default was fout voor outbound berichten
+    let direction = body.message.direction;
+    if (!direction) {
+      // Heuristiek: userId aanwezig (= door user/Dave verzonden) zonder contactId = outbound
+      if (body.message?.userId && !body.message?.contactId) {
+        direction = 'outbound';
+      } else {
+        direction = 'inbound';
+        console.warn('[ghl-webhook] SHAPE2 direction onbekend, fallback inbound. userId:', body.message?.userId, 'contactId:', body.message?.contactId);
+      }
+    }
 
     // Synthetic message id voor dedup: hash van contact + body + minute-bucket
     // Minute-bucket voorkomt dat retries binnen 1 minuut nieuwe records maken

@@ -37,6 +37,8 @@ function detectDirection(message) {
   const type = String(message?.type || '').toLowerCase();
   if (type.includes('inbound')) return 'inbound';
   if (type.includes('outbound')) return 'outbound';
+  // Heuristiek: userId zonder contactId = outbound (door user/Dave verzonden)
+  if (message?.userId && !message?.contactId) return 'outbound';
   return null;
 }
 

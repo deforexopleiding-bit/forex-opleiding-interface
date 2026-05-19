@@ -258,16 +258,15 @@
     .fu-memo-toggle.todo     { color: var(--color-warning-text); border-color: var(--color-warning); }
     .fu-memo-caret { font-size: 11px; opacity: 0.6; }
     .fu-memo-dropdown {
-      position: absolute;
-      top: calc(100% + 6px);
-      right: 0;
-      z-index: 100;
+      position: fixed; /* was: absolute — .fu-card overflow:hidden knipt absolute af */
+      /* top + left worden via JS gezet op basis van getBoundingClientRect */
+      z-index: 1500;
       background: var(--surface-2);
       border: 1px solid var(--border-default);
       border-radius: 8px;
       box-shadow: 0 8px 24px rgba(0,0,0,0.25);
       padding: 4px;
-      min-width: 160px;
+      min-width: 180px;
       display: none;
     }
     .fu-memo-dropdown.open { display: block; }
@@ -919,9 +918,21 @@
         e.stopPropagation();
         const isOpen = memoDropdown.classList.toggle('open');
         memoToggle.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+        if (isOpen) {
+          // Positie berekenen met fixed positioning (omzeilt .fu-card overflow:hidden)
+          const btnRect = memoToggle.getBoundingClientRect();
+          const dropW = 180;
+          let left = btnRect.right - dropW;
+          let top  = btnRect.bottom + 6;
+          if (left < 8) left = 8;
+          // Open naar boven als onvoldoende ruimte beneden (4 opties × ~41px + padding)
+          if (top + 190 > window.innerHeight - 8) top = btnRect.top - 190 - 6;
+          memoDropdown.style.left = left + 'px';
+          memoDropdown.style.top  = top  + 'px';
+        }
       });
 
-      // Sluit dropdown bij klik buiten component
+      // Sluit dropdown bij klik buiten component of bij scrollen
       document.addEventListener('click', () => memoDropdown.classList.remove('open'), { capture: true, once: false });
 
       memoWrap.appendChild(memoToggle);
@@ -1475,6 +1486,11 @@
         console.warn('[follow-up] morgen-count fout:', err.message);
       }
     }
+
+    // Globaal: sluit alle open memo-dropdowns bij scrollen (fixed positioning beweegt niet mee)
+    window.addEventListener('scroll', () => {
+      document.querySelectorAll('.fu-memo-dropdown.open').forEach(d => d.classList.remove('open'));
+    }, { passive: true, capture: true });
 
     async function init() {
       await window._authSharedReady;
