@@ -160,7 +160,7 @@ export default async function handler(req, res) {
               template_id: msg.templateId || null,
               template_variables: msg.templateVariables || null,
               sent_at: msg.dateAdded || msg.dateCreated || msg.createdAt || new Date().toISOString(),
-              source: 'polling_sync',
+              source: 'poll',
             };
 
             const { error: upErr } = await supabaseAdmin
