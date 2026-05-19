@@ -402,6 +402,55 @@
     }
     .fu-zoom-btn:hover { background: #2270CC !important; }
 
+    /* Beoordelen-status badge */
+    .fu-card-badge.status-beoordelen {
+      background: var(--color-warning-soft);
+      color: var(--color-warning-text);
+      border: 1px solid var(--color-warning);
+    }
+
+    /* Opvolging paginering */
+    .fu-pagination {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      gap: 12px;
+      padding: 12px 0 4px;
+    }
+    .fu-page-btn {
+      padding: 6px 14px;
+      background: var(--surface-card);
+      border: 1px solid var(--border-default);
+      border-radius: 6px;
+      color: var(--text-primary);
+      font-size: 13px;
+      cursor: pointer;
+      font-family: inherit;
+      transition: background 0.15s;
+    }
+    .fu-page-btn:hover:not(:disabled) { background: var(--surface-card-hover); }
+    .fu-page-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+    .fu-page-info { font-size: 13px; color: var(--text-secondary); }
+
+    /* Opvolging zoek */
+    .fu-opvolging-search { margin-bottom: 16px; }
+    .fu-opvolging-search input {
+      width: 100%;
+      padding: 10px 14px;
+      background: var(--surface-card);
+      border: 1px solid var(--border-default);
+      border-radius: 8px;
+      color: var(--text-primary);
+      font-size: 14px;
+      font-family: inherit;
+      box-sizing: border-box;
+    }
+    .fu-opvolging-search input:focus {
+      outline: 2px solid var(--brand-primary);
+      outline-offset: 2px;
+      border-color: var(--brand-primary);
+    }
+
     /* Voicememo-label tekst naast icoon */
     .fu-memo-label { margin-left: 4px; font-size: 12px; }
     .fu-memo-toggle { padding: 6px 10px !important; width: auto !important; }
@@ -684,6 +733,9 @@
     </div>
 
     <div class="fu-tab-panel" data-panel="opvolging">
+      <div class="fu-opvolging-search">
+        <input type="text" id="opvolging-search-input" placeholder="🔍 Zoek op naam…" autocomplete="off">
+      </div>
       <section class="fu-section" id="section-opvolging-overdue">
         <div class="fu-section-header">
           <div class="fu-section-title">Achterstallige opvolgingen</div>
@@ -879,7 +931,20 @@
         'cancelled':   'Geannuleerd',
         'in-progress': 'Bezig',
       };
-      const statusLabel = STATUS_LABELS[statusKey] || appt.status || '—';
+
+      // "Beoordelen" UI-state: scheduled call >30 min geleden zonder outcome (frontend-only)
+      let displayStatusKey = statusKey;
+      let displayStatusLabel = STATUS_LABELS[statusKey] || appt.status || '—';
+
+      if (statusKey === 'scheduled' && !appt.has_outcome && appt.scheduled_at) {
+        const thirtyMinAfter = new Date(new Date(appt.scheduled_at).getTime() + 30 * 60 * 1000);
+        if (new Date() > thirtyMinAfter) {
+          displayStatusKey = 'beoordelen';
+          displayStatusLabel = 'Beoordelen';
+        }
+      }
+
+      const statusLabel = displayStatusLabel;
 
       const initials = (appt.lead_name || '?')
         .split(' ').filter(Boolean).slice(0, 2)
@@ -1032,8 +1097,8 @@
       }
 
       const badge = document.createElement('span');
-      badge.className = `fu-card-badge status-${statusKey}`;
-      badge.textContent = statusLabel;
+      badge.className = `fu-card-badge status-${displayStatusKey}`;
+      badge.textContent = displayStatusLabel;
       right.appendChild(badge);
 
       header.appendChild(right);
@@ -1044,6 +1109,9 @@
         const rawStatus = (appt.status || '').toLowerCase();
         if (['completed', 'no_show'].includes(rawStatus) && !appt.has_outcome) {
           redenen.push('Outcome ontbreekt');
+        }
+        if (displayStatusKey === 'beoordelen') {
+          redenen.push('Beoordelen — outcome ontbreekt');
         }
         if (rawStatus === 'scheduled' && appt.voicememo_status === 'pending'
             && appt.scheduled_at && new Date(appt.scheduled_at) < new Date()) {
@@ -1103,10 +1171,11 @@
         });
         actions.appendChild(detailBtn);
 
-        if (appt.zoom_join_url) {
+        if (appt.zoom_join_url || appt.zoom_meeting_id) {
+          const zoomUrl = appt.zoom_join_url || `https://zoom.us/j/${appt.zoom_meeting_id}`;
           const zoomBtn = document.createElement('a');
           zoomBtn.className = 'fu-card-action-btn fu-zoom-btn';
-          zoomBtn.href = appt.zoom_join_url;
+          zoomBtn.href = zoomUrl;
           zoomBtn.target = '_blank';
           zoomBtn.rel = 'noopener';
           zoomBtn.innerHTML = '<i class="ti ti-video" aria-hidden="true"></i> Zoom openen';
@@ -1231,6 +1300,90 @@
       'week':                'Geen afspraken komende 7 dagen',
     };
 
+    // ── Opvolging: paginering + zoek + sort ──────────────────────────
+    const PAGE_SIZE = 7;
+    const allOpvolgingData = {};   // containerId → alle appointments (ongefilterd)
+    const opvolgingPages   = {};   // containerId → huidig paginanummer
+    let opvolgingSearchTerm = '';
+
+    function renderOpvolgingList(containerId, emptyLabel) {
+      const container = document.getElementById(containerId);
+      if (!container) return;
+
+      const allItems = allOpvolgingData[containerId] || [];
+
+      // Filter op naam
+      const term = opvolgingSearchTerm;
+      const filtered = term
+        ? allItems.filter(a => (a.lead_name || '').toLowerCase().includes(term))
+        : allItems;
+
+      // Sort: vroegste terugkom-datum eerst
+      const sorted = filtered.slice().sort((a, b) => {
+        const da = new Date(a.terugkom_datetime || a.terugkom_datum || a.scheduled_at);
+        const db = new Date(b.terugkom_datetime || b.terugkom_datum || b.scheduled_at);
+        return da - db;
+      });
+
+      container.innerHTML = '';
+
+      if (sorted.length === 0) {
+        const empty = document.createElement('div');
+        empty.className = 'fu-empty';
+        empty.innerHTML = `<i class="ti ti-circle-check fu-empty-icon" aria-hidden="true"></i>${term ? 'Geen resultaten voor "' + escapeHtml(term) + '"' : emptyLabel}`;
+        container.appendChild(empty);
+        return;
+      }
+
+      // Paginering
+      const currentPage = opvolgingPages[containerId] || 0;
+      const totalPages  = Math.ceil(sorted.length / PAGE_SIZE);
+      const safePage    = Math.min(currentPage, totalPages - 1);
+      opvolgingPages[containerId] = safePage;
+
+      const pageItems = sorted.slice(safePage * PAGE_SIZE, (safePage + 1) * PAGE_SIZE);
+      pageItems.forEach(appt => container.appendChild(renderCard(appt, true, false)));
+
+      if (sorted.length > PAGE_SIZE) {
+        const pag = document.createElement('div');
+        pag.className = 'fu-pagination';
+        pag.innerHTML = `
+          <button class="fu-page-btn" data-dir="-1" ${safePage === 0 ? 'disabled' : ''}>← Vorige</button>
+          <span class="fu-page-info">Pagina ${safePage + 1} van ${totalPages} (${sorted.length} items)</span>
+          <button class="fu-page-btn" data-dir="1"  ${safePage >= totalPages - 1 ? 'disabled' : ''}>Volgende →</button>`;
+        pag.querySelectorAll('.fu-page-btn').forEach(btn => {
+          btn.addEventListener('click', () => {
+            const newPage = (opvolgingPages[containerId] || 0) + parseInt(btn.dataset.dir, 10);
+            if (newPage >= 0 && newPage < totalPages) {
+              opvolgingPages[containerId] = newPage;
+              renderOpvolgingList(containerId, emptyLabel);
+            }
+          });
+        });
+        container.appendChild(pag);
+      }
+    }
+
+    // Search-input listener — initialiseren zodra DOM beschikbaar is
+    function initOpvolgingSearch() {
+      const searchInput = document.getElementById('opvolging-search-input');
+      if (!searchInput) return;
+      searchInput.addEventListener('input', (e) => {
+        opvolgingSearchTerm = e.target.value.toLowerCase().trim();
+        // Reset paginering bij nieuwe zoekterm
+        Object.keys(opvolgingPages).forEach(k => opvolgingPages[k] = 0);
+        // Re-render alle opvolging-secties vanuit cache
+        const opvolgingSections = [
+          { id: 'list-opvolging-overdue', label: EMPTY_LABELS['opvolging_overdue'] },
+          { id: 'list-opvolging-today',   label: EMPTY_LABELS['opvolging_today'] },
+          { id: 'list-opvolging-week',    label: EMPTY_LABELS['opvolging_week'] },
+          { id: 'list-opvolging-30d',     label: EMPTY_LABELS['opvolging_30d'] },
+          { id: 'list-opvolging-verder',  label: EMPTY_LABELS['opvolging_verder'] },
+        ];
+        opvolgingSections.forEach(s => renderOpvolgingList(s.id, s.label));
+      });
+    }
+
     async function renderSection(period, containerId, countId, includeDate) {
       const container = document.getElementById(containerId);
       const countEl = document.getElementById(countId);
@@ -1243,6 +1396,13 @@
         const sectionKey = containerId.replace('list-', '');
         allSectionCounts[sectionKey] = data.count;
         updateTabCounts();
+
+        // Opvolging-secties: sla data op en gebruik paginated renderer
+        if (period.startsWith('opvolging_')) {
+          allOpvolgingData[containerId] = data.appointments || [];
+          renderOpvolgingList(containerId, EMPTY_LABELS[period] || 'Geen items');
+          return;
+        }
 
         if (data.appointments.length === 0) {
           const empty = document.createElement('div');
@@ -1630,6 +1790,7 @@
         tab.addEventListener('click', () => switchTab(tab.dataset.tab));
       });
       bindTimeToggle();
+      initOpvolgingSearch();  // zoek-input in opvolging-tab activeren
 
       loadDashboardMetrics(); // parallel, niet-blokkerend
 

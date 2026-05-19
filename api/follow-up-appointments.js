@@ -136,16 +136,19 @@ async function handleGet(req, res, supabase) {
     return await fetchOpvolgingRange(supabase, start, null, period, res);
 
   } else if (period === 'recent_completed') {
-    const since = new Date();
-    since.setDate(since.getDate() - 14);
+    // Optie C: vandaag + gisteren (00:00 gisteren t/m einde vandaag)
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const yesterday = new Date(today);
+    yesterday.setDate(yesterday.getDate() - 1);
 
     const { data, error } = await supabase
       .from('follow_up_appointments')
       .select('id, lead_name, lead_email, scheduled_at, status, voicememo_status, owner_id')
       .in('status', ['completed', 'no_show'])
-      .gte('scheduled_at', since.toISOString())
+      .gte('scheduled_at', yesterday.toISOString())
       .order('scheduled_at', { ascending: false })
-      .limit(10);
+      .limit(50);
 
     if (error) {
       return res.status(500).json({ error: error.message });
