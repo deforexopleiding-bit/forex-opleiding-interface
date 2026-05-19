@@ -260,7 +260,7 @@
     .fu-memo-dropdown {
       position: fixed; /* was: absolute — .fu-card overflow:hidden knipt absolute af */
       /* top + left worden via JS gezet op basis van getBoundingClientRect */
-      z-index: 1500;
+      z-index: 9999; /* boven alle cards/UI; modal-backdrop staat op 10000 */
       background: var(--surface-2);
       border: 1px solid var(--border-default);
       border-radius: 8px;
@@ -375,7 +375,7 @@
       display: flex;
       align-items: center;
       justify-content: center;
-      z-index: 1000;
+      z-index: 10000; /* boven dropdown (9999) — modal altijd op voorgrond */
       padding: 20px;
     }
     .fu-modal {
@@ -921,12 +921,27 @@
         if (isOpen) {
           // Positie berekenen met fixed positioning (omzeilt .fu-card overflow:hidden)
           const btnRect = memoToggle.getBoundingClientRect();
+          const DROPDOWN_H = 200; // 4 opties × ~40px + padding
+          const MARGIN = 12;
           const dropW = 180;
+
+          // Horizontaal: rechts-uitgelijnd aan knop, niet buiten linker rand
           let left = btnRect.right - dropW;
-          let top  = btnRect.bottom + 6;
-          if (left < 8) left = 8;
-          // Open naar boven als onvoldoende ruimte beneden (4 opties × ~41px + padding)
-          if (top + 190 > window.innerHeight - 8) top = btnRect.top - 190 - 6;
+          if (left < MARGIN) left = MARGIN;
+
+          // Verticaal: beschikbare ruimte onder vs boven vergelijken
+          const spaceBelow = window.innerHeight - btnRect.bottom - MARGIN;
+          const spaceAbove = btnRect.top - MARGIN;
+          let top;
+          if (spaceBelow < DROPDOWN_H && spaceAbove > spaceBelow) {
+            // Onvoldoende ruimte onder én meer ruimte boven → open omhoog
+            top = btnRect.top - DROPDOWN_H - 6;
+          } else {
+            top = btnRect.bottom + 6;
+          }
+          // Veiligheid: niet boven viewport beginnen
+          if (top < MARGIN) top = MARGIN;
+
           memoDropdown.style.left = left + 'px';
           memoDropdown.style.top  = top  + 'px';
         }
@@ -1488,7 +1503,8 @@
     }
 
     // Globaal: sluit alle open memo-dropdowns bij scrollen (fixed positioning beweegt niet mee)
-    window.addEventListener('scroll', () => {
+    // capture:true vangt scroll-events van ALLE containers (incl. main-content overflow-scroll)
+    document.addEventListener('scroll', () => {
       document.querySelectorAll('.fu-memo-dropdown.open').forEach(d => d.classList.remove('open'));
     }, { passive: true, capture: true });
 
