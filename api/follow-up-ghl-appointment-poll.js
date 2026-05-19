@@ -69,6 +69,23 @@ export default async function handler(req, res) {
         continue;
       }
 
+      // Check of dit appointment al bestaat met een handmatig gemuteerde status
+      const { data: existing } = await supabaseAdmin
+        .from('follow_up_appointments')
+        .select('status')
+        .eq('ghl_appointment_id', event.id)
+        .maybeSingle();
+
+      const manualStatuses = ['no_show', 'completed', 'in_progress', 'cancelled'];
+      const ghlMappedStatus = mapGhlStatus(event.appointmentStatus);
+      const useStatus = (existing && manualStatuses.includes(existing.status))
+        ? existing.status  // Bewaar handmatig gezette status
+        : ghlMappedStatus;
+
+      if (existing && manualStatuses.includes(existing.status)) {
+        console.log('[follow-up-ghl-poll] status behouden (handmatig gemuteerd):', event.id, existing.status);
+      }
+
       const row = {
         ghl_appointment_id: event.id,
         lead_name:           event.title || event.contactName || 'Onbekend',
@@ -77,7 +94,7 @@ export default async function handler(req, res) {
         lead_ghl_contact_id: event.contactId,
         scheduled_at:        event.startTime,
         duration_minutes:    event.durationMinutes || 30,
-        status:              mapGhlStatus(event.appointmentStatus),
+        status:              useStatus,
         owner_id:            process.env.DAVE_PROFILE_ID,
         updated_at:          new Date().toISOString(),
       };

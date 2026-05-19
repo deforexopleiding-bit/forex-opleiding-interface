@@ -56,10 +56,19 @@ async function handleGet(req, res) {
     .order('scheduled_at', { ascending: false })
     .limit(20);
 
+  // Screenshot audit status ophalen (tabel bestaat als screenshot-audit feature actief is)
+  const { data: screenshotAudit } = await supabase
+    .from('follow_up_screenshot_audit')
+    .select('admin_reviewed, ai_review_result, review_notes')
+    .eq('appointment_id', id)
+    .maybeSingle()
+    .catch(() => ({ data: null }));
+
   return res.status(200).json({
     appointment: appt,
     outcome: outcome || null,
     lead_history: history || [],
+    screenshot_audit: screenshotAudit || null,
   });
 }
 

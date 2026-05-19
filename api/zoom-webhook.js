@@ -131,9 +131,8 @@ export default async function handler(req, res) {
       await tryMapAppointment(body);
     }
 
-    if (event === 'meeting.participant_joined') {
-      await tryMarkInProgress(body);
-    }
+    // Status-tracking via Zoom uitgeschakeld op verzoek Jeffrey 2026-05-19
+    // Dave doet status-wijzigingen handmatig via Wijzig-knop
 
     return res.status(200).json({ received: true, logged: !logErr });
   }
@@ -204,6 +203,7 @@ async function tryMapAppointment(body) {
   const zoomMeetingId = String(meetingObject.id || '');
   const meetingStartTime = meetingObject.start_time;
   const hostEmail = (meetingObject.host_email || '').toLowerCase();
+  const joinUrl = meetingObject.join_url || null;
 
   if (!zoomMeetingId) return;
 
@@ -243,16 +243,17 @@ async function tryMapAppointment(body) {
 
   const target = candidates[0];
 
+  const updateRow = { zoom_meeting_id: zoomMeetingId };
+  if (joinUrl) updateRow.zoom_join_url = joinUrl;
+
   const { error: updateErr } = await supabaseAdmin
     .from('follow_up_appointments')
-    .update({
-      zoom_meeting_id: zoomMeetingId,
-    })
+    .update(updateRow)
     .eq('id', target.id);
 
   if (updateErr) {
     console.error('[zoom-webhook] kon mapping niet schrijven:', updateErr.message);
   } else {
-    console.log('[zoom-webhook] zoom_meeting_id', zoomMeetingId, 'gekoppeld aan appointment', target.id);
+    console.log('[zoom-webhook] zoom_meeting_id', zoomMeetingId, joinUrl ? '+ join_url' : '', 'gekoppeld aan appointment', target.id);
   }
 }

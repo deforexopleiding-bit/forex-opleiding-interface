@@ -59,8 +59,8 @@ export default async function handler(req, res) {
         const isNoShow = await checkLeadJoined(appt.zoom_meeting_id);
         if (!isNoShow) continue;
 
-        await markAsNoShow(appt, 'path_a_no_lead_joined');
-        detectedNoShows.push({ id: appt.id, path: 'A', lead: appt.lead_name });
+        const marked = await markAsNoShow(appt, 'path_a_no_lead_joined');
+        if (marked) detectedNoShows.push({ id: appt.id, path: 'A', lead: appt.lead_name });
       }
     }
 
@@ -77,8 +77,8 @@ export default async function handler(req, res) {
       errors.push({ path: 'B', error: pathBErr.message });
     } else {
       for (const appt of pathBCandidates || []) {
-        await markAsNoShow(appt, 'path_b_never_joined_zoom');
-        detectedNoShows.push({ id: appt.id, path: 'B', lead: appt.lead_name });
+        const marked = await markAsNoShow(appt, 'path_b_never_joined_zoom');
+        if (marked) detectedNoShows.push({ id: appt.id, path: 'B', lead: appt.lead_name });
       }
     }
 
@@ -128,14 +128,27 @@ async function checkLeadJoined(zoomMeetingId) {
 }
 
 async function markAsNoShow(appt, reason) {
+  // Guard: alleen overschrijven als status nog scheduled/in_progress is
+  const { data: current } = await supabaseAdmin
+    .from('follow_up_appointments')
+    .select('status')
+    .eq('id', appt.id)
+    .maybeSingle();
+
+  if (!current || !['scheduled', 'in_progress'].includes(current.status)) {
+    console.log('[no-show-detect] status al gewijzigd, skip:', appt.id, current?.status);
+    return false;
+  }
+
   const { error: updateErr } = await supabaseAdmin
     .from('follow_up_appointments')
-    .update({ status: 'no_show' })
-    .eq('id', appt.id);
+    .update({ status: 'no_show', updated_at: new Date().toISOString() })
+    .eq('id', appt.id)
+    .in('status', ['scheduled', 'in_progress']); // double-check race
 
   if (updateErr) {
     console.error('[no-show-detect] update error:', updateErr.message);
-    return;
+    return false;
   }
 
   await supabaseAdmin
@@ -160,4 +173,5 @@ async function markAsNoShow(appt, reason) {
       // Niet blokkerend — no-show status is al gezet
     }
   }
+  return true;
 }

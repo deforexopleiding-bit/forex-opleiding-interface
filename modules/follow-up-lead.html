@@ -189,6 +189,131 @@
       border: 1px dashed var(--border-subtle);
       border-radius: 8px;
     }
+
+    /* Screenshot review status */
+    .ld-review-status {
+      padding: 8px 12px;
+      border-radius: 6px;
+      margin-top: 8px;
+      font-size: 13px;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .ld-review-status.pending  { background: var(--color-warning-soft); color: var(--color-warning-text); }
+    .ld-review-status.approved { background: var(--color-success-soft); color: var(--color-success-text); }
+    .ld-review-status.rejected { background: var(--color-danger-soft);  color: var(--color-danger-text); }
+
+    /* Zoom-knop in lead header */
+    .ld-zoom-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 7px 14px;
+      background: #2D8CFF;
+      color: white;
+      text-decoration: none;
+      border-radius: 7px;
+      font-size: 14px;
+      font-weight: 500;
+      transition: background 0.15s;
+      margin-top: 12px;
+    }
+    .ld-zoom-btn:hover { background: #2270CC; color: white; }
+
+    /* Contactgegevens block */
+    .ld-contact-block {
+      background: var(--surface-card);
+      border: 1px solid var(--border-subtle);
+      padding: 16px;
+      border-radius: 8px;
+      margin-bottom: 16px;
+    }
+    .ld-contact-block-title {
+      font-size: 13px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: var(--text-secondary);
+      margin-bottom: 10px;
+    }
+    .ld-contact-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 5px 0;
+      font-size: 14px;
+      color: var(--text-primary);
+    }
+    .ld-contact-row a {
+      color: var(--brand-primary);
+      text-decoration: none;
+    }
+    .ld-contact-row a:hover { text-decoration: underline; }
+    .ld-contact-empty {
+      color: var(--text-tertiary);
+      font-size: 13px;
+      font-style: italic;
+    }
+
+    /* Notities tab */
+    .ld-notities-list { margin-bottom: 20px; }
+    .ld-notitie-item {
+      background: var(--surface-card);
+      border: 1px solid var(--border-subtle);
+      border-radius: 8px;
+      padding: 14px 16px;
+      margin-bottom: 10px;
+    }
+    .ld-notitie-meta {
+      display: flex;
+      justify-content: space-between;
+      font-size: 12px;
+      color: var(--text-secondary);
+      margin-bottom: 8px;
+    }
+    .ld-notitie-body {
+      font-size: 14px;
+      color: var(--text-primary);
+      line-height: 1.5;
+    }
+    .ld-notitie-empty {
+      color: var(--text-secondary);
+      font-size: 14px;
+      padding: 20px 0;
+      text-align: center;
+    }
+    .ld-notitie-form {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .ld-notitie-form textarea {
+      background: var(--surface-card);
+      border: 1px solid var(--border-default);
+      border-radius: 8px;
+      color: var(--text-primary);
+      padding: 10px 12px;
+      font-size: 14px;
+      font-family: inherit;
+      resize: vertical;
+      outline: none;
+    }
+    .ld-notitie-form textarea:focus { border-color: var(--brand-primary); }
+    .ld-notitie-form button {
+      align-self: flex-start;
+      background: var(--brand-primary);
+      color: var(--text-inverse);
+      border: none;
+      border-radius: 7px;
+      padding: 8px 18px;
+      font-size: 14px;
+      font-weight: 500;
+      cursor: pointer;
+      font-family: inherit;
+    }
+    .ld-notitie-form button:hover { opacity: 0.9; }
+    .ld-notitie-form button:disabled { opacity: 0.4; cursor: default; }
   </style>
 </head>
 <body>
@@ -293,6 +418,11 @@
       return 'ld-status ld-status-' + (map[s] || 'scheduled');
     }
 
+    function escapeHtml(str) {
+      if (!str) return '';
+      return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    }
+
     function statusLabel(s) {
       const map = { scheduled: 'Gepland', in_progress: 'Bezig', completed: 'Afgerond', no_show: 'No-show', cancelled: 'Geannuleerd' };
       return map[s] || s;
@@ -331,16 +461,31 @@
           ${appt.zoom_meeting_id ? `<div class="ld-row"><span class="ld-row-label">Zoom meeting</span><span class="ld-row-value" style="font-family:monospace;font-size:12px;">${appt.zoom_meeting_id}</span></div>` : ''}
         </div>
         ${appt.requires_screenshot ? `
-        <div class="ld-card" style="border-color: ${appt.screenshot_url ? 'rgba(34,197,94,0.3)' : 'rgba(234,179,8,0.3)'};">
-          <div class="ld-card-title" style="color: ${appt.screenshot_url ? '#86efac' : '#fde047'};">📸 Screenshot verificatie</div>
-          ${appt.screenshot_url ? `
-            <div style="font-size: 13px; color: #86efac;">✓ Screenshot ingediend</div>
-          ` : `
+        <div class="ld-card">
+          <div class="ld-card-title">📸 Screenshot verificatie</div>
+          ${(() => {
+            const audit = appt._screenshotAudit;
+            let reviewStatus;
+            if (audit?.admin_reviewed) {
+              reviewStatus = audit.ai_review_result === 'approved' ? 'goedgekeurd'
+                : audit.ai_review_result === 'rejected' ? 'afgekeurd' : 'wacht-op-review';
+            } else {
+              reviewStatus = appt.screenshot_url ? 'wacht-op-review' : 'niet-ingediend';
+            }
+            const statusHtml = {
+              'wacht-op-review': '<div class="ld-review-status pending">⏳ Wacht op review</div>',
+              'goedgekeurd':     '<div class="ld-review-status approved">✓ Goedgekeurd</div>',
+              'afgekeurd':       `<div class="ld-review-status rejected">✗ Afgekeurd${audit?.review_notes ? ': ' + audit.review_notes : ''}</div>`,
+              'niet-ingediend':  '',
+            };
+            return statusHtml[reviewStatus] || '';
+          })()}
+          ${!appt.screenshot_url ? `
             <div style="font-size: 13px; color: var(--text-secondary); margin-bottom: 10px;">Steekproef: upload een screenshot van je verzonden voicememo of de afgeronde call.</div>
             <input type="file" id="screenshot-file-input" accept="image/png,image/jpeg,image/webp,image/heic,image/heif" style="display:none;">
             <button id="screenshot-upload-btn" class="fu-voicememo-button">Screenshot uploaden</button>
             <div id="screenshot-result" style="margin-top:10px;font-size:13px;"></div>
-          `}
+          ` : ''}
         </div>
         ` : ''}
         <div class="ld-card">
@@ -384,6 +529,7 @@
             ${appt.lead_phone ? `<span>📞 <a href="tel:${appt.lead_phone}">${appt.lead_phone}</a></span>` : ''}
             <span class="${statusClass(appt.status)}">${statusLabel(appt.status)}</span>
           </div>
+          ${appt.zoom_join_url ? `<a href="${escapeHtml(appt.zoom_join_url)}" target="_blank" rel="noopener" class="ld-zoom-btn"><i class="ti ti-video" aria-hidden="true"></i> Zoom-meeting openen</a>` : ''}
         </div>
 
         <div class="ld-tabs">
@@ -399,8 +545,72 @@
           <div id="whatsapp-messages-container"><div class="ld-loading">Berichten laden…</div></div>
         </div>
         <div id="tab-notities" class="ld-tab-content">
-          <div class="ld-placeholder">Notities — binnenkort beschikbaar.</div>
+          <div class="ld-notities-list" id="notities-list"><div class="ld-loading">Notities laden…</div></div>
+          <form class="ld-notitie-form" id="notitie-form">
+            <textarea id="notitie-body" placeholder="Notitie toevoegen..." rows="3" required></textarea>
+            <button type="submit">Notitie opslaan</button>
+          </form>
         </div>`;
+
+      // ── Notities tab: laden + opslaan ─────────────────────────────
+      let notitiesLoaded = false;
+
+      async function loadNotities() {
+        const list = root.querySelector('#notities-list');
+        if (!list) return;
+        try {
+          const token = await window.AuthShared.getAccessToken();
+          const r = await fetch(`/api/follow-up-notities?appointment_id=${encodeURIComponent(appt.id)}`, {
+            headers: { 'Authorization': 'Bearer ' + token },
+          });
+          const data = await r.json();
+          list.innerHTML = (data.notities || []).map(n => `
+            <div class="ld-notitie-item">
+              <div class="ld-notitie-meta">
+                <strong>${escapeHtml(n.created_by_name || 'Onbekend')}</strong>
+                <span>${new Date(n.created_at).toLocaleString('nl-NL')}</span>
+              </div>
+              <div class="ld-notitie-body">${escapeHtml(n.body).replace(/\n/g, '<br>')}</div>
+            </div>
+          `).join('') || '<div class="ld-notitie-empty">Nog geen notities.</div>';
+        } catch (err) {
+          if (root.querySelector('#notities-list')) {
+            root.querySelector('#notities-list').innerHTML = `<div class="ld-error">Fout: ${err.message}</div>`;
+          }
+        }
+      }
+
+      const notitieForm = root.querySelector('#notitie-form');
+      if (notitieForm) {
+        notitieForm.addEventListener('submit', async (e) => {
+          e.preventDefault();
+          const bodyEl = root.querySelector('#notitie-body');
+          const submitBtn = notitieForm.querySelector('button[type="submit"]');
+          const body = bodyEl?.value?.trim();
+          if (!body) return;
+          submitBtn.disabled = true;
+          submitBtn.textContent = 'Opslaan…';
+          try {
+            const token = await window.AuthShared.getAccessToken();
+            const res = await fetch('/api/follow-up-notities', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+              body: JSON.stringify({ appointment_id: appt.id, body }),
+            });
+            if (!res.ok) {
+              const err = await res.json().catch(() => ({}));
+              throw new Error(err.error || `HTTP ${res.status}`);
+            }
+            bodyEl.value = '';
+            await loadNotities();
+          } catch (err) {
+            alert('Fout bij opslaan: ' + err.message);
+          } finally {
+            submitBtn.disabled = false;
+            submitBtn.textContent = 'Notitie opslaan';
+          }
+        });
+      }
 
       root.querySelectorAll('.ld-tab').forEach(btn => {
         btn.addEventListener('click', () => {
@@ -411,6 +621,10 @@
 
           if (btn.dataset.tab === 'whatsapp' && !whatsappLoaded) {
             loadWhatsAppMessages(appt.lead_ghl_contact_id);
+          }
+          if (btn.dataset.tab === 'notities' && !notitiesLoaded) {
+            notitiesLoaded = true;
+            loadNotities();
           }
         });
       });
@@ -613,7 +827,9 @@
         return;
       }
 
-      const { appointment, outcome, lead_history } = await res.json();
+      const { appointment, outcome, lead_history, screenshot_audit } = await res.json();
+      // Voeg screenshot_audit toe aan appointment object voor gebruik in renderCallsTab
+      appointment._screenshotAudit = screenshot_audit || null;
       document.title = (appointment.lead_name || 'Lead') + ' — Agency Command Center';
       renderLeadDetail(appointment, outcome, lead_history);
     }

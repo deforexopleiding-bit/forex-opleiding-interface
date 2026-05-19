@@ -346,6 +346,66 @@
       border-bottom: 1px solid var(--color-warning);
       border-radius: 10px 10px 0 0;
     }
+    /* Topbar voor sales-rol bij achterstallige taken */
+    .fu-overdue-topbar {
+      display: none;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 12px 16px;
+      background: var(--color-warning-soft);
+      border: 1px solid var(--color-warning);
+      border-radius: 8px;
+      margin-bottom: 16px;
+      color: var(--color-warning-text);
+      font-size: 14px;
+      font-weight: 500;
+    }
+    .fu-overdue-content {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .fu-overdue-action {
+      padding: 6px 14px;
+      background: var(--color-warning);
+      color: var(--text-inverse);
+      border: none;
+      border-radius: 6px;
+      font-weight: 500;
+      cursor: pointer;
+      font-family: inherit;
+      font-size: 13px;
+      white-space: nowrap;
+    }
+    .fu-overdue-action:hover { opacity: 0.9; }
+
+    /* Open acties — reden-strip */
+    .fu-card-reason {
+      background: var(--color-warning-soft);
+      color: var(--color-warning-text);
+      padding: 6px 12px;
+      font-size: 12px;
+      font-weight: 500;
+      border-bottom: 1px solid var(--color-warning);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      border-radius: 10px 10px 0 0;
+    }
+
+    /* Zoom-knop op card */
+    .fu-zoom-btn {
+      background: #2D8CFF !important;
+      color: white !important;
+      text-decoration: none !important;
+    }
+    .fu-zoom-btn:hover { background: #2270CC !important; }
+
+    /* Voicememo-label tekst naast icoon */
+    .fu-memo-label { margin-left: 4px; font-size: 12px; }
+    .fu-memo-toggle { padding: 6px 10px !important; width: auto !important; }
+
     .fu-voicememo-button {
       background: var(--brand, #093d54);
       color: #fff;
@@ -536,6 +596,14 @@
         <a href="follow-up-admin.html" id="admin-link" style="display:none; margin-top:8px; color:var(--text-secondary,rgba(255,255,255,0.7)); text-decoration:none; font-size:13px;">📋 Screenshot reviews →</a>
       </div>
     </header>
+
+    <div id="fu-overdue-topbar" class="fu-overdue-topbar">
+      <div class="fu-overdue-content">
+        <i class="ti ti-alert-triangle" aria-hidden="true"></i>
+        <span class="fu-overdue-text"></span>
+      </div>
+      <button class="fu-overdue-action" type="button">Bekijken</button>
+    </div>
 
     <div id="fu-metrics-container" style="display:none;">
       <div class="fu-metrics-row" id="fu-metrics-row"></div>
@@ -798,7 +866,7 @@
       );
     }
 
-    function renderCard(appt) {
+    function renderCard(appt, includeDate, isOpenActies) {
       const card = document.createElement('div');
       card.className = 'fu-card';
       card.dataset.appointmentId = appt.id;
@@ -866,7 +934,7 @@
       memoToggle.className = `fu-memo-toggle ${memoInfo.cls}`;
       memoToggle.title = 'Voicememo status wijzigen';
       memoToggle.setAttribute('aria-haspopup', 'listbox');
-      memoToggle.innerHTML = `<i class="ti ${memoInfo.icon}" aria-hidden="true"></i><i class="ti ti-chevron-down fu-memo-caret" aria-hidden="true"></i>`;
+      memoToggle.innerHTML = `<i class="ti ${memoInfo.icon}" aria-hidden="true"></i><span class="fu-memo-label">${memoInfo.label}</span><i class="ti ti-chevron-down fu-memo-caret" aria-hidden="true"></i>`;
 
       const memoDropdown = document.createElement('div');
       memoDropdown.className = 'fu-memo-dropdown';
@@ -969,6 +1037,33 @@
       right.appendChild(badge);
 
       header.appendChild(right);
+
+      // ── Open acties: reden-strip ──────────────────────────────────
+      if (isOpenActies) {
+        const redenen = [];
+        const rawStatus = (appt.status || '').toLowerCase();
+        if (['completed', 'no_show'].includes(rawStatus) && !appt.has_outcome) {
+          redenen.push('Outcome ontbreekt');
+        }
+        if (rawStatus === 'scheduled' && appt.voicememo_status === 'pending'
+            && appt.scheduled_at && new Date(appt.scheduled_at) < new Date()) {
+          redenen.push('Voicememo achterstallig');
+        }
+        if (appt.requires_screenshot && !appt.screenshot_url) {
+          redenen.push('Screenshot vereist');
+        }
+        if (appt.terugkom_datum && new Date(appt.terugkom_datum) < new Date()
+            && appt.opvolging_status !== 'geregeld') {
+          redenen.push('Opvolging achterstallig');
+        }
+        if (redenen.length > 0) {
+          const reasonStrip = document.createElement('div');
+          reasonStrip.className = 'fu-card-reason';
+          reasonStrip.innerHTML = `<i class="ti ti-alert-circle" aria-hidden="true"></i> ${redenen.join(' · ')}`;
+          card.appendChild(reasonStrip);
+        }
+      }
+
       card.appendChild(header);
 
       // ── Outcome ontbreekt — visuele indicator ─────────────────────
@@ -1007,6 +1102,17 @@
           window.location.href = `/modules/follow-up-lead.html?id=${appt.id}`;
         });
         actions.appendChild(detailBtn);
+
+        if (appt.zoom_join_url) {
+          const zoomBtn = document.createElement('a');
+          zoomBtn.className = 'fu-card-action-btn fu-zoom-btn';
+          zoomBtn.href = appt.zoom_join_url;
+          zoomBtn.target = '_blank';
+          zoomBtn.rel = 'noopener';
+          zoomBtn.innerHTML = '<i class="ti ti-video" aria-hidden="true"></i> Zoom openen';
+          zoomBtn.addEventListener('click', (e) => e.stopPropagation());
+          actions.appendChild(zoomBtn);
+        }
 
         if (appt.terugkom_datum && appt.opvolging_status !== 'geregeld') {
           const geregeldBtn = document.createElement('button');
@@ -1146,8 +1252,9 @@
           return;
         }
 
+        const isOpenActies = period === 'open_acties';
         for (const appt of data.appointments) {
-          container.appendChild(renderCard(appt, includeDate));
+          container.appendChild(renderCard(appt, includeDate, isOpenActies));
         }
       } catch (err) {
         container.innerHTML = '';
@@ -1511,6 +1618,7 @@
     async function init() {
       await window._authSharedReady;
       const profile = await window.AuthShared.requireAuth(ALLOWED_ROLES);
+      currentProfile = profile;
       window.AgentShared?.renderUserSection(profile);
 
       if (profile && ['admin', 'manager', 'super_admin'].includes(profile.role)) {
@@ -1554,7 +1662,41 @@
       }
     }
 
+    let currentProfile = null;
+
+    function renderOverdueTopbar(metrics, profile) {
+      const bar = document.getElementById('fu-overdue-topbar');
+      if (!bar) return;
+
+      if (profile?.role !== 'sales') {
+        bar.style.display = 'none';
+        return;
+      }
+
+      const totaal = metrics.achterstallig_totaal || 0;
+      if (totaal === 0) {
+        bar.style.display = 'none';
+        return;
+      }
+
+      const parts = [];
+      if (metrics.achterstallig_opvolgingen) parts.push(`${metrics.achterstallig_opvolgingen} opvolgingen`);
+      if (metrics.achterstallig_outcomes) parts.push(`${metrics.achterstallig_outcomes} outcomes`);
+      if (metrics.achterstallig_voicememos) parts.push(`${metrics.achterstallig_voicememos} voicememos`);
+
+      bar.querySelector('.fu-overdue-text').textContent =
+        `Je hebt ${totaal} achterstallige taak${totaal > 1 ? 'en' : ''}: ${parts.join(' · ')}`;
+      bar.style.display = 'flex';
+
+      bar.querySelector('.fu-overdue-action').onclick = () => {
+        const tab = document.querySelector('[data-tab="open-acties"]');
+        if (tab) tab.click();
+      };
+    }
+
     function renderMetrics(m) {
+      renderOverdueTopbar(m, currentProfile);
+
       const cards = [
         {
           label: 'Afspraken vandaag',

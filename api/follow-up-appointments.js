@@ -150,7 +150,20 @@ async function handleGet(req, res, supabase) {
     if (error) {
       return res.status(500).json({ error: error.message });
     }
-    return res.status(200).json({ period, count: data?.length || 0, appointments: data || [] });
+
+    // Verrijk met has_outcome (bug-fix: was ontbrekend, veroorzaakte verkeerde "Outcome" label na opslaan)
+    const rcIds = (data || []).map(a => a.id);
+    let rcEnriched = data || [];
+    if (rcIds.length > 0) {
+      const { data: rcOutcomes } = await supabase
+        .from('follow_up_outcomes')
+        .select('appointment_id')
+        .in('appointment_id', rcIds);
+      const rcOutcomeSet = new Set((rcOutcomes || []).map(o => o.appointment_id));
+      rcEnriched = data.map(a => ({ ...a, has_outcome: rcOutcomeSet.has(a.id) }));
+    }
+
+    return res.status(200).json({ period, count: rcEnriched.length, appointments: rcEnriched });
 
   } else if (period === 'open_acties') {
     const cutoff = new Date();
