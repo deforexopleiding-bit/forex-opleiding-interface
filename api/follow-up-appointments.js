@@ -160,7 +160,7 @@ async function handleGet(req, res, supabase) {
 
     const { data, error } = await supabase
       .from('follow_up_appointments')
-      .select('id, lead_name, lead_email, scheduled_at, status, voicememo_status, zoom_meeting_id, zoom_join_url, owner_id')
+      .select('id, lead_name, lead_email, scheduled_at, status, voicememo_status, zoom_meeting_id, zoom_join_url, owner_id, parent_appointment_id')
       .in('status', ['completed', 'no_show'])
       .gte('scheduled_at', yesterday.toISOString())
       .lt('scheduled_at', tomorrow.toISOString())
@@ -191,7 +191,7 @@ async function handleGet(req, res, supabase) {
 
     const { data: appts, error: apptErr } = await supabase
       .from('follow_up_appointments')
-      .select('id, lead_name, lead_email, scheduled_at, status, voicememo_status, zoom_meeting_id, zoom_join_url, owner_id')
+      .select('id, lead_name, lead_email, scheduled_at, status, voicememo_status, zoom_meeting_id, zoom_join_url, owner_id, parent_appointment_id')
       .lt('scheduled_at', cutoff.toISOString())
       .in('status', ['scheduled', 'in_progress', 'completed', 'no_show'])
       .order('scheduled_at', { ascending: false })
@@ -236,7 +236,7 @@ async function handleGet(req, res, supabase) {
 
   let query = supabase
     .from('follow_up_appointments')
-    .select('id, lead_name, lead_email, lead_phone, scheduled_at, duration_minutes, status, voicememo_status, voicememo_sent_at, requires_screenshot, screenshot_url, snelle_notitie, zoom_meeting_id, zoom_join_url, owner_id, created_at')
+    .select('id, lead_name, lead_email, lead_phone, scheduled_at, duration_minutes, status, voicememo_status, voicememo_sent_at, requires_screenshot, screenshot_url, snelle_notitie, zoom_meeting_id, zoom_join_url, owner_id, created_at, parent_appointment_id')
     .gte('scheduled_at', startDate.toISOString())
     .lt('scheduled_at', endDate.toISOString())
     .order('scheduled_at', { ascending: true });
@@ -263,6 +263,9 @@ async function handleGet(req, res, supabase) {
     const outcomeSet = new Set((outcomes || []).map(o => o.appointment_id));
     enrichedAppts = data.map(a => ({ ...a, has_outcome: outcomeSet.has(a.id) }));
   }
+
+  // Verrijk met parent_outcome voor card-context label (child-appointments)
+  enrichedAppts = await enrichWithParentOutcome(supabase, enrichedAppts);
 
   return res.status(200).json({
     period,
@@ -399,6 +402,29 @@ async function handlePatch(req, res, supabase, user) {
 
   // Geen geldig veld meegegeven
   return res.status(400).json({ error: 'Geef voicememo_status of status mee in de body.' });
+}
+
+// Verrijk appointments met parent_outcome voor child-rows (parent-child follow-up patroon).
+// Batch-query: één extra round-trip voor alle unieke parent_ids in de set.
+async function enrichWithParentOutcome(supabase, appointments) {
+  const parentIds = [...new Set(
+    appointments.map(a => a.parent_appointment_id).filter(Boolean)
+  )];
+  if (parentIds.length === 0) return appointments;
+
+  const { data: parentOutcomes } = await supabase
+    .from('follow_up_outcomes')
+    .select('appointment_id, outcome, ingevuld_at')
+    .in('appointment_id', parentIds);
+
+  const outcomeMap = new Map((parentOutcomes || []).map(o => [o.appointment_id, o]));
+
+  return appointments.map(a => ({
+    ...a,
+    parent_outcome: a.parent_appointment_id
+      ? (outcomeMap.get(a.parent_appointment_id) || null)
+      : null,
+  }));
 }
 
 async function fetchOpvolgingRange(supabase, startDate, endDate, period, res) {

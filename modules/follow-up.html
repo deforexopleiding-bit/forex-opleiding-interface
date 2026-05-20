@@ -1099,6 +1099,23 @@
           </div>
         </div>
         <div class="fu-field">
+          <label class="fu-label">Vervolg-call inplannen</label>
+          <div class="fu-outcome-options fu-outcome-grid">
+            <button type="button" class="fu-outcome-btn" data-followup="geen">⛔ Niet inplannen</button>
+            <button type="button" class="fu-outcome-btn" data-followup="intern">📋 Intern (zonder Zoom/GHL)</button>
+            <button type="button" class="fu-outcome-btn" data-followup="agenda">📅 Agenda (Zoom + GHL)</button>
+          </div>
+          <div id="followup-datetime-row" style="display:none; margin-top:10px;">
+            <div class="fu-terugkom-row">
+              <input type="date" class="fu-input fu-terugkom-date-input" id="followup-date">
+              <input type="time" class="fu-input fu-terugkom-time-input" id="followup-time" value="10:00">
+            </div>
+          </div>
+          <div id="followup-error" style="display:none; color:#b91c1c; background:#fef2f2;
+               border:1px solid #fecaca; border-radius:6px; padding:10px 12px;
+               margin-top:8px; font-size:14px;"></div>
+        </div>
+        <div class="fu-field">
           <label class="fu-label">Notitie (optioneel)</label>
           <textarea class="fu-input fu-textarea" id="outcome-notitie" rows="3"></textarea>
         </div>
@@ -1376,6 +1393,14 @@
       }
 
       card.appendChild(header);
+
+      // ── Parent outcome context — toon bij child-appointments (follow-up rijen) ──
+      if (appt.parent_outcome?.outcome) {
+        const contextRow = document.createElement('div');
+        contextRow.style.cssText = 'font-size:12px; color:var(--text-secondary); padding:4px 12px 0; opacity:0.8;';
+        contextRow.textContent = `↳ Vorige call: ${outcomeLabel(appt.parent_outcome.outcome)}`;
+        card.appendChild(contextRow);
+      }
 
       // ── Outcome ontbreekt — visuele indicator ─────────────────────
       if (['completed', 'no_show'].includes(statusKey) && !appt.has_outcome) {
@@ -1684,6 +1709,7 @@
 
     let currentOutcomeAppt = null;
     let currentOutcomeChoice = null;
+    let currentFollowUpType = null;
     let currentBezwaren = new Set();
 
     // Outcomes die bezwaren tonen
@@ -1711,6 +1737,12 @@
       document.getElementById('volgende-actie-select').value = '';
       document.getElementById('terugkom-date').value = '';
       document.getElementById('terugkom-time').value = '10:00';
+      // Reset follow-up planning sectie
+      currentFollowUpType = null;
+      document.getElementById('followup-datetime-row').style.display = 'none';
+      document.getElementById('followup-error').style.display = 'none';
+      document.getElementById('followup-date').value = '';
+      document.getElementById('followup-time').value = '10:00';
       document.getElementById('outcome-submit').disabled = true;
 
       const bezwarenContainer = document.getElementById('bezwaren-options');
@@ -1796,13 +1828,16 @@
       document.getElementById('outcome-modal').style.display = 'none';
       currentOutcomeAppt = null;
       currentOutcomeChoice = null;
+      currentFollowUpType = null;
       currentBezwaren = new Set();
     }
 
     document.addEventListener('click', (e) => {
-      const outcomeBtn = e.target.closest('.fu-outcome-btn');
-      if (outcomeBtn && document.getElementById('outcome-modal').style.display !== 'none') {
-        document.querySelectorAll('.fu-outcome-btn').forEach(b => b.classList.remove('active'));
+      if (document.getElementById('outcome-modal').style.display === 'none') return;
+
+      const outcomeBtn = e.target.closest('.fu-outcome-btn[data-value]');
+      if (outcomeBtn) {
+        document.querySelectorAll('.fu-outcome-btn[data-value]').forEach(b => b.classList.remove('active'));
         outcomeBtn.classList.add('active');
         currentOutcomeChoice = outcomeBtn.dataset.value;
 
@@ -1812,7 +1847,18 @@
           OUTCOME_SHOW_VOLGENDE.has(currentOutcomeChoice) ? 'block' : 'none';
         document.querySelector('.fu-terugkom-field').style.display =
           OUTCOME_SHOW_TERUGKOM.has(currentOutcomeChoice) ? 'block' : 'none';
-        document.getElementById('outcome-submit').disabled = false;
+        document.getElementById('outcome-submit').disabled = !(currentOutcomeChoice && currentFollowUpType);
+      }
+
+      const followUpBtn = e.target.closest('.fu-outcome-btn[data-followup]');
+      if (followUpBtn) {
+        document.querySelectorAll('.fu-outcome-btn[data-followup]').forEach(b => b.classList.remove('active'));
+        followUpBtn.classList.add('active');
+        currentFollowUpType = followUpBtn.dataset.followup;
+        document.getElementById('followup-datetime-row').style.display =
+          currentFollowUpType !== 'geen' ? 'block' : 'none';
+        document.getElementById('followup-error').style.display = 'none';
+        document.getElementById('outcome-submit').disabled = !(currentOutcomeChoice && currentFollowUpType);
       }
     });
 
@@ -1827,16 +1873,19 @@
     });
 
     document.getElementById('outcome-submit')?.addEventListener('click', async () => {
-      if (!currentOutcomeAppt || !currentOutcomeChoice) return;
+      if (!currentOutcomeAppt || !currentOutcomeChoice || !currentFollowUpType) return;
 
       const submitBtn = document.getElementById('outcome-submit');
+      const errDiv = document.getElementById('followup-error');
       submitBtn.disabled = true;
       submitBtn.textContent = 'Opslaan…';
+      errDiv.style.display = 'none';
 
       const payload = {
         appointment_id: currentOutcomeAppt.id,
         outcome: currentOutcomeChoice,
         warmte_score: parseInt(document.getElementById('warmte-slider').value, 10),
+        follow_up_type: currentFollowUpType,
       };
 
       if (OUTCOME_SHOW_BEZWAREN.has(currentOutcomeChoice)) {
@@ -1862,6 +1911,21 @@
         }
       }
 
+      // Follow-up datum + tijd (Amsterdam local, server doet dayjs.tz conversie)
+      if (currentFollowUpType !== 'geen') {
+        const fd = document.getElementById('followup-date').value;
+        const ft = document.getElementById('followup-time').value || '10:00';
+        if (!fd) {
+          errDiv.textContent = 'Vul een datum in voor de vervolg-call.';
+          errDiv.style.display = 'block';
+          submitBtn.disabled = false;
+          submitBtn.textContent = 'Opslaan';
+          return;
+        }
+        payload.follow_up_datetime = `${fd}T${ft}:00`;
+        payload.follow_up_duration_minutes = currentOutcomeAppt.duration_minutes || 30;
+      }
+
       const notitie = document.getElementById('outcome-notitie').value.trim();
       if (notitie) payload.notitie = notitie;
 
@@ -1877,12 +1941,17 @@
         });
         if (!res.ok) {
           const err = await res.json().catch(() => ({}));
-          throw new Error(err.error || `HTTP ${res.status}`);
+          errDiv.textContent = err.error || `Fout bij opslaan (HTTP ${res.status})`;
+          errDiv.style.display = 'block';
+          submitBtn.disabled = false;
+          submitBtn.textContent = 'Opslaan';
+          return;
         }
         closeOutcomeModal();
         location.reload();
       } catch (err) {
-        alert('Fout bij opslaan: ' + err.message);
+        errDiv.textContent = 'Fout bij opslaan: ' + err.message;
+        errDiv.style.display = 'block';
         submitBtn.disabled = false;
         submitBtn.textContent = 'Opslaan';
       }
@@ -2200,6 +2269,21 @@
     });
 
     init();
+
+    // ── Outcome helpers ───────────────────────────────────────────────
+    function outcomeLabel(key) {
+      const labels = {
+        klant_geworden:    'Klant geworden',
+        geen_klant:        'Geen klant',
+        no_show:           'No-show',
+        niet_bereikt:      'Niet bereikt',
+        interesse_uitstel: 'Interesse (uitstel)',
+        interesse_overleg: 'Interesse (overleg)',
+        geen_interesse:    'Geen interesse',
+        niet_geschikt:     'Niet geschikt',
+      };
+      return labels[key] || key;
+    }
 
     // ── Verplaats-modal ───────────────────────────────────────────────
     let currentVerplaatsAppt = null;
