@@ -406,7 +406,7 @@ async function handlePatch(req, res, supabase, user) {
 
 // Verrijk appointments met parent_outcome voor child-rows (parent-child follow-up patroon).
 // Batch-query: één extra round-trip voor alle unieke parent_ids in de set.
-async function enrichWithParentOutcome(supabase, appointments) {
+export async function enrichWithParentOutcome(supabase, appointments) {
   const parentIds = [...new Set(
     appointments.map(a => a.parent_appointment_id).filter(Boolean)
   )];

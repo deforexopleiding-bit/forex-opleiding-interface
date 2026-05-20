@@ -3,6 +3,7 @@
 // GET endpoint: alle komende afspraken vanaf vandaag 00:00, max 100.
 
 import { createUserClient } from './supabase.js';
+import { enrichWithParentOutcome } from './follow-up-appointments.js';
 
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
@@ -23,7 +24,7 @@ export default async function handler(req, res) {
 
   const { data, error } = await supabase
     .from('follow_up_appointments')
-    .select('id, lead_name, lead_email, lead_phone, scheduled_at, status, voicememo_status, owner_id, snelle_notitie')
+    .select('id, lead_name, lead_email, lead_phone, scheduled_at, status, voicememo_status, owner_id, snelle_notitie, parent_appointment_id')
     .gte('scheduled_at', today.toISOString())
     .in('status', ['scheduled', 'in_progress'])
     .order('scheduled_at', { ascending: true })
@@ -34,9 +35,11 @@ export default async function handler(req, res) {
     return res.status(500).json({ error: error.message });
   }
 
+  const enriched = await enrichWithParentOutcome(supabase, data || []);
+
   return res.status(200).json({
     period: 'all-komende',
-    count: data?.length || 0,
-    appointments: data || [],
+    count: enriched.length,
+    appointments: enriched,
   });
 }
