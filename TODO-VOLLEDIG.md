@@ -502,6 +502,21 @@ Module is live in productie. Dave en Jeffrey gebruiken het actief.
 - [ ] Item 6 datepicker re-verificatie (waarschijnlijk OK)
 - [ ] Beoordelen UI-state visueel bewijs (geen test-data > 30 min beschikbaar)
 - [ ] Verplaats-feature end-to-end test (Zoom + GHL update)
+- [ ] mapGhlError naar shared helper api/_lib/ghl-error.js (staat nu dubbel in outcomes.js + verplaats-call.js)
+- [ ] Visuele verificatie card-context label "↳ Vorige call: ..." in productie na eerste echte follow-up call
+
+### [DONE] 20 mei 2026 — Bugfixes + validate-first + follow-up planning
+- [x] no_show poll-sync fix: mapGhlStatus noshow → scheduled (commit 4ed1331)
+- [x] follow-up-no-show-detect cron uitgeschakeld in vercel.json, file behouden (commit 9b04efd)
+- [x] validate-first refactor api/follow-up-verplaats-call.js: GHL blocking-first → 422 op fail (commit 1a2c817)
+- [x] inline error div verplaats-modal, alert() verwijderd, mapGhlError NL-messages (commit 1a2c817)
+- [x] api/_lib/ghl-appointment.js: err.ghlStatus + err.ghlBody op thrown Error (commit 1a2c817)
+- [x] hotfix: showToast → window.AgentShared?.showToast in verplaats submit handler (commit 70ec45b)
+- [x] feat: follow-up call inplannen vanuit outcome-modal (intern/agenda, parent-child, card-context) (commit 51b3a8d)
+- [x] enrichWithParentOutcome() helper in follow-up-appointments.js — card-context label voor child-rows
+- [x] SQL-migratie 1: status-based partial unique ingekrompen (Supabase manueel)
+- [x] SQL-migratie 2: notnull_uidx DROP (Supabase manueel)
+- [x] SQL-cleanups: BANESA + Jeffrey terug naar scheduled na auto-no_show
 
 ### [PENDING] Roadmap follow-up volgende sessies
 - [ ] 5 GHL outbound workflows: klant, geen-klant, te-duur, partner, timing

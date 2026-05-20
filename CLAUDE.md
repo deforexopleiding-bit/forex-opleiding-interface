@@ -317,3 +317,28 @@ Lopend op Vercel:
 - Drie-rol-pattern (chat-Claude regie / Claude Code filesystem / Claude in Chrome browser) werkt goed voor complexe productie-wijzigingen.
 - Voor destructive SQL (DELETE/ALTER): Claude in Chrome bereidt voor, Jeffrey klikt Run. Pattern succesvol in 4 SQL-incidenten deze sessie.
 - Mini-fix commits direct na grote commit zijn beter dan grote commit later corrigeren — toont bug-fix transparant in git-history.
+
+## Lessons Learned — 20 mei 2026 sessie
+
+### Diagnose & debugging
+- Stop-and-diagnose spaart uren: bij "no_show wordt onverwacht gezet" waren er 4 mogelijke paden
+  (poll-cron mapGhlStatus, no-show-detect cron PAD A, PAD B, outcomes endpoint). Eerst alle paden
+  lezen met grep vóór je iets wijzigt — voorkwam 3 verkeerde fixes.
+- Partial unique index kan GEEN ON CONFLICT arbiter zijn in PostgREST/supabase-js.
+  Oplossing: 2-step SELECT → UPDATE/INSERT pattern (zie follow-up-ghl-appointment-poll.js commit 4ed1331).
+
+### API & sync
+- Validate-first > try-then-recover voor sync-kritieke flows: bij GHL/DB sync moet externe API-call
+  ALTIJD blocking-first zijn. Als GHL faalt → 422 teruggeven, geen DB-mutaties. Undo na gedeeltelijke
+  schrijf is complex en foutgevoelig.
+- Duplicate helper-functies vermijden: mapGhlError() staat nu in zowel follow-up-outcomes.js als
+  follow-up-verplaats-call.js. Refactor naar api/_lib/ghl-error.js staat in TODO.
+- Disabled crons: bestand bewaren (niet deleten), entry verwijderen uit vercel.json. Bestand blijft
+  bereikbaar via HTTP (auth-gate beschermt), maar wordt niet meer automatisch getriggerd.
+
+### Werkstroom & tooling
+- Cursor git diff UI rendert soms niet. Workaround: `git diff file > /tmp/d.txt && cat /tmp/d.txt`.
+  Pas toepassen als diff in chat niet zichtbaar is. Niet standaard gebruiken (trager).
+- Productie-testing vereist data-prep voorzichtigheid: geen outcomes registreren op toekomstige
+  scheduled calls van echte leads. Gebruik leads die al test-rommel hebben of prep test-data via
+  SQL eerst.
