@@ -171,6 +171,7 @@ async function tryMarkInProgress(body) {
     .from('follow_up_appointments')
     .select('id, status')
     .eq('zoom_meeting_id', zoomMeetingId)
+    .eq('status', 'scheduled')
     .maybeSingle();
 
   if (!appt) {
