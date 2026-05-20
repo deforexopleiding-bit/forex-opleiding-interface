@@ -175,7 +175,9 @@ function mapGhlStatus(ghlStatus) {
   const map = {
     confirmed: 'scheduled',
     showed:    'completed',
-    noshow:    'no_show',
+    // noshow: poll mag GEEN no_show zetten — alleen via command-center
+    // outcome (api/follow-up-outcomes.js). GHL markeert events autonoom
+    // als noshow zodra tijd voorbij is, ook tijdens lopende calls.
     cancelled: 'cancelled',
     invalid:   'cancelled',
   };
