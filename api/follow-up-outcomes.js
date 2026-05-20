@@ -117,7 +117,7 @@ export default async function handler(req, res) {
   // ── Fetch parent appointment (vroeg — voor validate-first + child-insert + tags) ──
   const { data: parentAppt, error: apptErr } = await supabase
     .from('follow_up_appointments')
-    .select('id, ghl_appointment_id, zoom_meeting_id, zoom_join_url, lead_name, lead_email, lead_phone, lead_ghl_contact_id, owner_id, duration_minutes')
+    .select('id, status, ghl_appointment_id, zoom_meeting_id, zoom_join_url, lead_name, lead_email, lead_phone, lead_ghl_contact_id, owner_id, duration_minutes')
     .eq('id', appointment_id)
     .maybeSingle();
 
@@ -204,7 +204,11 @@ export default async function handler(req, res) {
   }
 
   // ── Parent appointment status update ─────────────────────────────────────
-  const newStatus = OUTCOME_TO_STATUS[outcome];
+  // Beschermde statussen: outcome is administratief, flow-status niet aanpassen.
+  const PROTECTED_STATUSES = ['cancelled', 'verplaatst', 'verwijderd'];
+  const newStatus = PROTECTED_STATUSES.includes(parentAppt.status)
+    ? parentAppt.status
+    : OUTCOME_TO_STATUS[outcome];
   const { error: updateErr } = await supabase
     .from('follow_up_appointments')
     .update({ status: newStatus })

@@ -1572,47 +1572,20 @@
       }
 
       // ── Actions row — alle statussen ──────────────────────────────
-      if (true) {
+      {
         const actions = document.createElement('div');
         actions.className = 'fu-card-actions';
         actions.style.position = 'relative';
 
-        // Outcome-knop: voor alle statussen
-        const outcomeBtn = document.createElement('button');
-        outcomeBtn.className = 'fu-card-action-btn';
-        const outcomeLabel = appt.has_outcome ? 'Outcome wijzigen' : 'Outcome toevoegen';
-        outcomeBtn.innerHTML = `<i class="ti ti-clipboard" aria-hidden="true"></i> ${outcomeLabel}`;
-        outcomeBtn.addEventListener('click', (e) => { e.stopPropagation(); openOutcomeModal(appt); });
-        actions.appendChild(outcomeBtn);
+        const isOpvolgCard = appt.terugkom_datum && appt.opvolging_status !== 'geregeld';
+        const cutoff30 = new Date(Date.now() - 30 * 60 * 1000);
+        const isActiveZoom = statusKey === 'scheduled' && appt.zoom_join_url && new Date(appt.scheduled_at) >= cutoff30;
 
-        const notitieBtn = document.createElement('button');
-        notitieBtn.className = 'fu-card-action-btn';
-        notitieBtn.innerHTML = `<i class="ti ti-note" aria-hidden="true"></i> ${appt.snelle_notitie ? 'Notitie bewerken' : 'Notitie'}`;
-        notitieBtn.addEventListener('click', (e) => { e.stopPropagation(); openSnelleNotitieModal(appt); });
-        actions.appendChild(notitieBtn);
+        let outcomeIsPrimary = false;
+        let zoomIsPrimary = false;
 
-        const detailBtn = document.createElement('button');
-        detailBtn.className = 'fu-card-action-btn';
-        detailBtn.innerHTML = '<i class="ti ti-external-link" aria-hidden="true"></i> Detail';
-        detailBtn.addEventListener('click', (e) => {
-          e.stopPropagation();
-          window.location.href = `/modules/follow-up-lead.html?id=${appt.id}`;
-        });
-        actions.appendChild(detailBtn);
-
-        if (appt.zoom_join_url || appt.zoom_meeting_id) {
-          const zoomUrl = appt.zoom_join_url || `https://zoom.us/j/${appt.zoom_meeting_id}`;
-          const zoomBtn = document.createElement('a');
-          zoomBtn.className = 'fu-card-action-btn fu-zoom-btn';
-          zoomBtn.href = zoomUrl;
-          zoomBtn.target = '_blank';
-          zoomBtn.rel = 'noopener';
-          zoomBtn.innerHTML = '<i class="ti ti-video" aria-hidden="true"></i> Zoom openen';
-          zoomBtn.addEventListener('click', (e) => e.stopPropagation());
-          actions.appendChild(zoomBtn);
-        }
-
-        if (appt.terugkom_datum && appt.opvolging_status !== 'geregeld') {
+        if (isOpvolgCard) {
+          // Primair-1: Geregeld
           const geregeldBtn = document.createElement('button');
           geregeldBtn.className = 'fu-card-action-btn';
           geregeldBtn.innerHTML = '<i class="ti ti-check" aria-hidden="true"></i> Geregeld';
@@ -1632,6 +1605,7 @@
           });
           actions.appendChild(geregeldBtn);
 
+          // Primair-2: Verzet
           const verzetBtn = document.createElement('button');
           verzetBtn.className = 'fu-card-action-btn';
           verzetBtn.innerHTML = '<i class="ti ti-calendar" aria-hidden="true"></i> Verzet';
@@ -1654,13 +1628,81 @@
             } catch (err) { alert('Fout: ' + err.message); }
           });
           actions.appendChild(verzetBtn);
+          // Outcome verhuist naar dropdown
+
+        } else if (isActiveZoom) {
+          // Primair-1: Zoom (scheduled call binnen 30-min window met join-URL)
+          zoomIsPrimary = true;
+          const zoomBtn = document.createElement('a');
+          zoomBtn.className = 'fu-card-action-btn fu-zoom-btn';
+          zoomBtn.href = appt.zoom_join_url;
+          zoomBtn.target = '_blank';
+          zoomBtn.rel = 'noopener';
+          zoomBtn.innerHTML = '<i class="ti ti-video" aria-hidden="true"></i> Zoom openen';
+          zoomBtn.addEventListener('click', (e) => e.stopPropagation());
+          actions.appendChild(zoomBtn);
+
+          // Primair-2: Detail
+          const detailBtn = document.createElement('button');
+          detailBtn.className = 'fu-card-action-btn';
+          detailBtn.innerHTML = '<i class="ti ti-external-link" aria-hidden="true"></i> Detail';
+          detailBtn.addEventListener('click', (e) => { e.stopPropagation(); window.location.href = `/modules/follow-up-lead.html?id=${appt.id}`; });
+          actions.appendChild(detailBtn);
+
+        } else {
+          // Primair-1: Outcome
+          outcomeIsPrimary = true;
+          const outcomeBtn = document.createElement('button');
+          outcomeBtn.className = 'fu-card-action-btn';
+          const outcomeLabel = appt.has_outcome ? 'Outcome wijzigen' : 'Outcome toevoegen';
+          outcomeBtn.innerHTML = `<i class="ti ti-clipboard" aria-hidden="true"></i> ${outcomeLabel}`;
+          outcomeBtn.addEventListener('click', (e) => { e.stopPropagation(); openOutcomeModal(appt); });
+          actions.appendChild(outcomeBtn);
+
+          // Primair-2: Detail
+          const detailBtn = document.createElement('button');
+          detailBtn.className = 'fu-card-action-btn';
+          detailBtn.innerHTML = '<i class="ti ti-external-link" aria-hidden="true"></i> Detail';
+          detailBtn.addEventListener('click', (e) => { e.stopPropagation(); window.location.href = `/modules/follow-up-lead.html?id=${appt.id}`; });
+          actions.appendChild(detailBtn);
         }
 
-        // ── ⋯ Meer-dropdown: Verplaatsen / Annuleren / Verwijderen ──────────
+        // ── ⋯ Meer-dropdown ────────────────────────────────────────
         const dropdown = document.createElement('div');
         dropdown.className = 'fu-dropdown';
         dropdown.hidden = true;
 
+        // Outcome in dropdown als hij niet primair was
+        if (!outcomeIsPrimary) {
+          const outcomeItem = document.createElement('button');
+          outcomeItem.className = 'fu-dropdown-item';
+          const outcomeItemLabel = appt.has_outcome ? 'Outcome wijzigen' : 'Outcome toevoegen';
+          outcomeItem.innerHTML = `<i class="ti ti-clipboard" aria-hidden="true"></i> ${outcomeItemLabel}`;
+          outcomeItem.addEventListener('click', (e) => { e.stopPropagation(); dropdown.hidden = true; openOutcomeModal(appt); });
+          dropdown.appendChild(outcomeItem);
+        }
+
+        // Notitie altijd in dropdown
+        const notitieItem = document.createElement('button');
+        notitieItem.className = 'fu-dropdown-item';
+        notitieItem.innerHTML = `<i class="ti ti-note" aria-hidden="true"></i> ${appt.snelle_notitie ? 'Notitie bewerken' : 'Notitie'}`;
+        notitieItem.addEventListener('click', (e) => { e.stopPropagation(); dropdown.hidden = true; openSnelleNotitieModal(appt); });
+        dropdown.appendChild(notitieItem);
+
+        // Zoom in dropdown als niet primair maar wel beschikbaar
+        if ((appt.zoom_join_url || appt.zoom_meeting_id) && !zoomIsPrimary) {
+          const zoomUrl = appt.zoom_join_url || `https://zoom.us/j/${appt.zoom_meeting_id}`;
+          const zoomItem = document.createElement('a');
+          zoomItem.className = 'fu-dropdown-item';
+          zoomItem.href = zoomUrl;
+          zoomItem.target = '_blank';
+          zoomItem.rel = 'noopener';
+          zoomItem.innerHTML = '<i class="ti ti-video" aria-hidden="true"></i> Zoom openen';
+          zoomItem.addEventListener('click', (e) => { e.stopPropagation(); dropdown.hidden = true; });
+          dropdown.appendChild(zoomItem);
+        }
+
+        // Verplaatsen + Annuleren alleen scheduled
         if (statusKey === 'scheduled') {
           const verplaatsItem = document.createElement('button');
           verplaatsItem.className = 'fu-dropdown-item';
@@ -1669,12 +1711,13 @@
           dropdown.appendChild(verplaatsItem);
 
           const annuleerItem = document.createElement('button');
-          annuleerItem.className = 'fu-dropdown-item';
+          annuleerItem.className = 'fu-dropdown-item fu-dropdown-item--danger';
           annuleerItem.innerHTML = '<i class="ti ti-x" aria-hidden="true"></i> Annuleren';
           annuleerItem.addEventListener('click', (e) => { e.stopPropagation(); dropdown.hidden = true; openAnnuleerModal(appt); });
           dropdown.appendChild(annuleerItem);
         }
 
+        // Verwijderen overal behalve al-verwijderd
         if (statusKey !== 'verwijderd') {
           const verwijderItem = document.createElement('button');
           verwijderItem.className = 'fu-dropdown-item fu-dropdown-item--danger';
@@ -1683,19 +1726,18 @@
           dropdown.appendChild(verwijderItem);
         }
 
-        if (dropdown.children.length > 0) {
-          const moreBtn = document.createElement('button');
-          moreBtn.className = 'fu-card-action-btn fu-action-more';
-          moreBtn.setAttribute('aria-label', 'Meer acties');
-          moreBtn.textContent = '⋯';
-          moreBtn.addEventListener('click', (e) => {
-            e.stopPropagation();
-            document.querySelectorAll('.fu-dropdown').forEach(d => { if (d !== dropdown) d.hidden = true; });
-            dropdown.hidden = !dropdown.hidden;
-          });
-          actions.appendChild(moreBtn);
-          actions.appendChild(dropdown);
-        }
+        // ⋯ knop altijd tonen (dropdown heeft altijd minstens Notitie)
+        const moreBtn = document.createElement('button');
+        moreBtn.className = 'fu-card-action-btn fu-action-more';
+        moreBtn.setAttribute('aria-label', 'Meer acties');
+        moreBtn.textContent = '⋯';
+        moreBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          document.querySelectorAll('.fu-dropdown').forEach(d => { if (d !== dropdown) d.hidden = true; });
+          dropdown.hidden = !dropdown.hidden;
+        });
+        actions.appendChild(moreBtn);
+        actions.appendChild(dropdown);
 
         card.appendChild(actions);
 
@@ -2772,8 +2814,10 @@
       }
     });
 
-    // Sluit alle dropdowns bij klik buiten kaart
-    document.addEventListener('click', () => {
+    // Sluit alle dropdowns bij klik buiten ⋯ of dropdown zelf (Optie 2)
+    document.addEventListener('click', (e) => {
+      if (e.target.closest('.fu-action-more')) return;
+      if (e.target.closest('.fu-dropdown')) return;
       document.querySelectorAll('.fu-dropdown').forEach(d => { d.hidden = true; });
     });
 
