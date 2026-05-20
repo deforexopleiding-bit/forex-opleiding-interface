@@ -170,6 +170,7 @@ export default async function handler(req, res) {
             if (!upErr) {
               stats.messages_upserted++;
             } else {
+              console.error('[conversations-poll] upsert error:', contactId, conversationId, upErr?.message, upErr);
               stats.errors++;
             }
           }

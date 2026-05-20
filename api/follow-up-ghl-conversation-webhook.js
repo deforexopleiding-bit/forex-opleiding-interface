@@ -197,15 +197,6 @@ export default async function handler(req, res) {
 
   const body = req.body || {};
 
-  // [TEMP DEBUG] Verbose payload logging voor SHAPE2 diagnose
-  // TODO: verwijder na SHAPE2 parser fix (commit B+1)
-  console.log('[ghl-webhook-debug] full body:', JSON.stringify(body, null, 2));
-  console.log('[ghl-webhook-debug] headers:', JSON.stringify({
-    'content-type': req.headers['content-type'],
-    'user-agent': req.headers['user-agent'],
-    'x-ghl-signature': req.headers['x-ghl-signature'] ? 'present' : 'missing',
-  }));
-
   // Log altijd het event voor audit + debug
   await supabaseAdmin
     .from('follow_up_events_log')
