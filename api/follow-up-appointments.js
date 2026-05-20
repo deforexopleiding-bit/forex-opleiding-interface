@@ -282,7 +282,7 @@ async function handleGet(req, res, supabase) {
     const cutoff30 = new Date(Date.now() - 30 * 60 * 1000);
     enrichedAppts = enrichedAppts.filter(a =>
       new Date(a.scheduled_at) >= cutoff30
-      || ['cancelled', 'verplaatst'].includes(a.status)
+      && !['cancelled', 'verplaatst'].includes(a.status)
     );
   }
 
