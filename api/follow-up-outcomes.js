@@ -30,12 +30,13 @@ const OUTCOME_TO_STATUS = {
   interesse_overleg: 'completed',
   geen_interesse:    'completed',
   niet_geschikt:     'completed',
+  wil_niet_meer:     'cancelled',
 };
 
 const VALID_OUTCOMES = [
   'klant_geworden', 'geen_klant', 'no_show',
   'niet_bereikt', 'interesse_uitstel', 'interesse_overleg',
-  'geen_interesse', 'niet_geschikt',
+  'geen_interesse', 'niet_geschikt', 'wil_niet_meer',
 ];
 const VALID_VOLGENDE_ACTIES = ['bellen', 'email', 'event', 'sluiten', 'niet_meer_opvolgen'];
 const VALID_FOLLOW_UP_TYPES = ['geen', 'intern', 'agenda'];

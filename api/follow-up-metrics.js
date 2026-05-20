@@ -52,17 +52,20 @@ export async function computeMetrics(supabaseAdmin, opts = {}) {
       .lt('scheduled_at', range.end.toISOString())
   );
 
-  metrics.appointments_total = appts?.length || 0;
-  metrics.appointments_scheduled = appts?.filter(a => a.status === 'scheduled').length || 0;
-  metrics.appointments_completed = appts?.filter(a => a.status === 'completed').length || 0;
-  metrics.appointments_no_show = appts?.filter(a => a.status === 'no_show').length || 0;
-  metrics.voicememos_sent = appts?.filter(a => a.voicememo_status === 'sent').length || 0;
-  metrics.voicememos_relevant = appts?.filter(a => a.voicememo_status !== 'no_whatsapp').length || 0;
+  // Exclude cancelled/verplaatst from totals — die tellen niet mee als echte afspraken
+  const activeAppts = (appts || []).filter(a => !['cancelled', 'verplaatst'].includes(a.status));
+
+  metrics.appointments_total = activeAppts.length;
+  metrics.appointments_scheduled = activeAppts.filter(a => a.status === 'scheduled').length;
+  metrics.appointments_completed = activeAppts.filter(a => a.status === 'completed').length;
+  metrics.appointments_no_show = activeAppts.filter(a => a.status === 'no_show').length;
+  metrics.voicememos_sent = activeAppts.filter(a => a.voicememo_status === 'sent').length;
+  metrics.voicememos_relevant = activeAppts.filter(a => a.voicememo_status !== 'no_whatsapp').length;
 
   // Call-type split: first_calls / agenda_followups / intern_followups
-  metrics.first_calls       = appts?.filter(a => !a.parent_appointment_id).length || 0;
-  metrics.agenda_followups  = appts?.filter(a =>  a.parent_appointment_id &&  a.ghl_appointment_id).length || 0;
-  metrics.intern_followups  = appts?.filter(a =>  a.parent_appointment_id && !a.ghl_appointment_id).length || 0;
+  metrics.first_calls       = activeAppts.filter(a => !a.parent_appointment_id).length;
+  metrics.agenda_followups  = activeAppts.filter(a =>  a.parent_appointment_id &&  a.ghl_appointment_id).length;
+  metrics.intern_followups  = activeAppts.filter(a =>  a.parent_appointment_id && !a.ghl_appointment_id).length;
 
   const { data: outcomes } = await outcomeQ(
     supabaseAdmin
@@ -125,16 +128,16 @@ export async function computeMetrics(supabaseAdmin, opts = {}) {
   );
 
   const oldDoneIds = (oldDone || []).map(a => a.id);
-  let achterstalligOutcomes = 0;
+  let noOutcomeIds = new Set();
   if (oldDoneIds.length > 0) {
     const { data: filledOutcomes } = await supabaseAdmin
       .from('follow_up_outcomes')
       .select('appointment_id')
       .in('appointment_id', oldDoneIds);
     const filledSet = new Set((filledOutcomes || []).map(o => o.appointment_id));
-    achterstalligOutcomes = oldDoneIds.filter(id => !filledSet.has(id)).length;
+    noOutcomeIds = new Set(oldDoneIds.filter(id => !filledSet.has(id)));
   }
-  metrics.achterstallig_outcomes = achterstalligOutcomes;
+  metrics.achterstallig_outcomes = noOutcomeIds.size;
 
   // Voicememos achterstallig: alleen voor appointments waar de call
   // daadwerkelijk plaatsvond. Cancelled telt niet mee.
@@ -147,12 +150,13 @@ export async function computeMetrics(supabaseAdmin, opts = {}) {
       .in('status', ['completed', 'no_show'])
   );
 
-  metrics.achterstallig_voicememos = (oldPending || []).length;
+  const pendingMemoIds = new Set((oldPending || []).map(a => a.id));
+  metrics.achterstallig_voicememos = pendingMemoIds.size;
 
+  // Dedup: één appointment kan zowel outcome als voicememo missen → tel als één taak
+  const achterstalligApptIds = new Set([...noOutcomeIds, ...pendingMemoIds]);
   metrics.achterstallig_totaal =
-    metrics.achterstallig_opvolgingen +
-    metrics.achterstallig_outcomes +
-    metrics.achterstallig_voicememos;
+    metrics.achterstallig_opvolgingen + achterstalligApptIds.size;
 
   // Outcomes ontbrekend vandaag (voor dagrapport email)
   const { data: todayDone } = await apptQ(

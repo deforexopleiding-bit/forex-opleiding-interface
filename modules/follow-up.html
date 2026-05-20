@@ -207,6 +207,7 @@
     .fu-card-avatar.status-completed   { background: var(--color-success-soft); color: var(--color-success-text); }
     .fu-card-avatar.status-no-show     { background: var(--color-danger-soft);  color: var(--color-danger-text); }
     .fu-card-avatar.status-cancelled,
+    .fu-card-avatar.status-verplaatst,
     .fu-card-avatar.status-default     { background: var(--color-neutral-soft); color: var(--color-neutral-text); }
     .fu-card-name {
       font-size: 15px;
@@ -234,7 +235,10 @@
     .fu-card-badge.status-completed   { background: var(--color-success);  color: var(--text-inverse); }
     .fu-card-badge.status-no-show     { background: var(--color-danger);   color: var(--text-inverse); }
     .fu-card-badge.status-cancelled,
+    .fu-card-badge.status-verplaatst,
     .fu-card-badge.status-default     { background: var(--color-neutral);  color: var(--text-inverse); }
+    /* Inactive cards (cancelled / verplaatst) */
+    .fu-card-inactive                  { opacity: 0.55; background: var(--color-neutral-soft) !important; }
     /* ── Voicememo dropdown ─────────────────────────────────────── */
     .fu-memo-wrap {
       position: relative;
@@ -1069,6 +1073,7 @@
             <button type="button" class="fu-outcome-btn" data-value="interesse_overleg">👥 Interesse, overleg</button>
             <button type="button" class="fu-outcome-btn" data-value="geen_interesse">🚫 Geen interesse</button>
             <button type="button" class="fu-outcome-btn" data-value="niet_geschikt">🙅 Niet geschikt</button>
+            <button type="button" class="fu-outcome-btn" data-value="wil_niet_meer">🛑 Wil niet meer</button>
           </div>
         </div>
         <div class="fu-field fu-bezwaren-field" style="display:none;">
@@ -1177,12 +1182,16 @@
       card.dataset.appointmentId = appt.id;
 
       const statusKey = (appt.status || 'default').toLowerCase().replace(/_/g, '-');
+      if (['cancelled', 'verplaatst'].includes(statusKey)) {
+        card.classList.add('fu-card-inactive');
+      }
       const STATUS_LABELS = {
         'scheduled':   'Gepland',
         'completed':   'Afgerond',
         'no-show':     'No-show',
         'cancelled':   'Geannuleerd',
         'in-progress': 'Bezig',
+        'verplaatst':  'Verplaatst',
       };
 
       // "Beoordelen" UI-state: scheduled call >30 min geleden zonder outcome (frontend-only)
@@ -1418,8 +1427,8 @@
         const actions = document.createElement('div');
         actions.className = 'fu-card-actions';
 
-        // Outcome-knop: niet voor cancelled (die hoeft geen outcome)
-        if (statusKey !== 'cancelled') {
+        // Outcome-knop: niet voor cancelled/verplaatst (die hoeven geen outcome)
+        if (!['cancelled', 'verplaatst'].includes(statusKey)) {
           const outcomeBtn = document.createElement('button');
           outcomeBtn.className = 'fu-card-action-btn';
           const outcomeLabel = appt.has_outcome ? 'Outcome wijzigen' : 'Outcome';
@@ -1697,7 +1706,13 @@
         }
 
         const isOpenActies = period === 'open_acties';
-        for (const appt of data.appointments) {
+        const INACTIVE_STATUSES = new Set(['cancelled', 'verplaatst']);
+        const sorted = [...data.appointments].sort((a, b) => {
+          const ia = INACTIVE_STATUSES.has((a.status || '').toLowerCase()) ? 1 : 0;
+          const ib = INACTIVE_STATUSES.has((b.status || '').toLowerCase()) ? 1 : 0;
+          return ia - ib;
+        });
+        for (const appt of sorted) {
           container.appendChild(renderCard(appt, includeDate, isOpenActies));
         }
       } catch (err) {
@@ -2308,6 +2323,7 @@
         interesse_overleg: 'Interesse (overleg)',
         geen_interesse:    'Geen interesse',
         niet_geschikt:     'Niet geschikt',
+        wil_niet_meer:     'Wil niet meer',
       };
       return labels[key] || key;
     }
