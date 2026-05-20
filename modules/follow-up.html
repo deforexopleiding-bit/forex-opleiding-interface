@@ -2273,7 +2273,7 @@
 
         const data = await res.json();
         const zoomWarn = !data.zoom_updated && currentVerplaatsAppt.zoom_meeting_id;
-        showToast('Call verplaatst' + (zoomWarn ? ' (Zoom-update faalde)' : ''));
+        window.AgentShared?.showToast('Call verplaatst' + (zoomWarn ? ' (Zoom-update faalde)' : ''));
         closeVerplaatsModal();
         location.reload();
       } catch (err) {
