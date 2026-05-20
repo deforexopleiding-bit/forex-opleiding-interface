@@ -303,13 +303,12 @@
       position: absolute;
       right: 0;
       top: calc(100% + 4px);
-      background: var(--surface-elevated, #1f2937);
-      border: 1px solid var(--border-color, rgba(255,255,255,0.12));
+      background: var(--surface-2);
+      border: 1px solid var(--border-default);
       border-radius: 8px;
-      box-shadow: 0 4px 16px rgba(0,0,0,.25);
-      min-width: 170px;
+      box-shadow: 0 4px 16px rgba(0,0,0,.15);
+      min-width: 180px;
       z-index: 200;
-      overflow: hidden;
     }
     .fu-dropdown-item {
       display: flex;
@@ -322,12 +321,13 @@
       border: none;
       font-size: 14px;
       cursor: pointer;
-      color: var(--text-primary, #f9fafb);
+      color: var(--text-primary);
       white-space: nowrap;
+      text-decoration: none;
     }
-    .fu-dropdown-item:hover { background: var(--color-neutral-soft, rgba(255,255,255,0.06)); }
-    .fu-dropdown-item--danger { color: #f87171; }
-    .fu-dropdown-item--danger:hover { background: rgba(185,28,28,0.12); }
+    .fu-dropdown-item:hover { background: var(--surface-card-hover); }
+    .fu-dropdown-item--danger { color: var(--color-danger-text, #b91c1c); }
+    .fu-dropdown-item--danger:hover { background: var(--color-danger-soft, rgba(185,28,28,0.08)); }
     /* ── Voicememo dropdown ─────────────────────────────────────── */
     .fu-memo-wrap {
       position: relative;
@@ -1575,7 +1575,7 @@
       {
         const actions = document.createElement('div');
         actions.className = 'fu-card-actions';
-        actions.style.position = 'relative';
+        // position:relative hoeft niet op actions — zit op moreWrap
 
         const isOpvolgCard = appt.terugkom_datum && appt.opvolging_status !== 'geregeld';
         const cutoff30 = new Date(Date.now() - 30 * 60 * 1000);
@@ -1726,7 +1726,11 @@
           dropdown.appendChild(verwijderItem);
         }
 
-        // ⋯ knop altijd tonen (dropdown heeft altijd minstens Notitie)
+        // ⋯ knop + dropdown in eigen wrapper zodat dropdown tov ⋯ gepositioneerd is
+        const moreWrap = document.createElement('div');
+        moreWrap.style.position = 'relative';
+        moreWrap.style.display = 'inline-block';
+
         const moreBtn = document.createElement('button');
         moreBtn.className = 'fu-card-action-btn fu-action-more';
         moreBtn.setAttribute('aria-label', 'Meer acties');
@@ -1736,8 +1740,9 @@
           document.querySelectorAll('.fu-dropdown').forEach(d => { if (d !== dropdown) d.hidden = true; });
           dropdown.hidden = !dropdown.hidden;
         });
-        actions.appendChild(moreBtn);
-        actions.appendChild(dropdown);
+        moreWrap.appendChild(moreBtn);
+        moreWrap.appendChild(dropdown);
+        actions.appendChild(moreWrap);
 
         card.appendChild(actions);
 
