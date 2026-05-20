@@ -164,7 +164,7 @@
       border-radius: 10px;
       padding: 0;
       margin-bottom: 8px;
-      overflow: hidden;
+      overflow: visible;
       transition: background 0.15s, border-color 0.15s;
     }
     .fu-card:hover {
@@ -1579,7 +1579,7 @@
 
         const isOpvolgCard = appt.terugkom_datum && appt.opvolging_status !== 'geregeld';
         const cutoff30 = new Date(Date.now() - 30 * 60 * 1000);
-        const isActiveZoom = statusKey === 'scheduled' && appt.zoom_join_url && new Date(appt.scheduled_at) >= cutoff30;
+        const isActiveZoom = statusKey === 'scheduled' && (appt.zoom_join_url || appt.zoom_meeting_id) && new Date(appt.scheduled_at) >= cutoff30;
 
         let outcomeIsPrimary = false;
         let zoomIsPrimary = false;
@@ -1635,7 +1635,7 @@
           zoomIsPrimary = true;
           const zoomBtn = document.createElement('a');
           zoomBtn.className = 'fu-card-action-btn fu-zoom-btn';
-          zoomBtn.href = appt.zoom_join_url;
+          zoomBtn.href = appt.zoom_join_url || `https://zoom.us/j/${appt.zoom_meeting_id}`;
           zoomBtn.target = '_blank';
           zoomBtn.rel = 'noopener';
           zoomBtn.innerHTML = '<i class="ti ti-video" aria-hidden="true"></i> Zoom openen';
