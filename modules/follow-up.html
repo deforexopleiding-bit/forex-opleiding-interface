@@ -1237,11 +1237,12 @@
       avatar.textContent = initials;
       left.appendChild(avatar);
 
+      const callType = getCallType(appt);
       const infoEl = document.createElement('div');
       infoEl.style.minWidth = '0';
       infoEl.innerHTML =
         `<div class="fu-card-name">${escapeHtml(appt.lead_name || '—')}</div>` +
-        `<div class="fu-card-meta">${escapeHtml(datumText)}` +
+        `<div class="fu-card-meta">${callTypeIcon(callType)}${escapeHtml(datumText)}` +
           `${appt.terugkom_datum ? ` · opvolg ${escapeHtml(appt.terugkom_datum)}` : ''}` +
         `</div>`;
       left.appendChild(infoEl);
@@ -1250,7 +1251,8 @@
       const right = document.createElement('div');
       right.className = 'fu-card-right';
 
-      // ── Voicememo dropdown ───────────────────────────────────
+      // ── Voicememo dropdown (niet tonen voor intern-children) ─────────
+      if (callType !== 'intern') {
       const memoWrap = document.createElement('div');
       memoWrap.className = 'fu-memo-wrap';
 
@@ -1346,6 +1348,7 @@
       memoWrap.appendChild(memoToggle);
       memoWrap.appendChild(memoDropdown);
       right.appendChild(memoWrap);
+      } // end if (callType !== 'intern')
 
       // ── Screenshot indicator ──────────────────────────────────
       if (appt.requires_screenshot && !appt.screenshot_url) {
@@ -1398,7 +1401,8 @@
       if (appt.parent_outcome?.outcome) {
         const contextRow = document.createElement('div');
         contextRow.style.cssText = 'font-size:12px; color:var(--text-secondary); padding:4px 12px 0; opacity:0.8;';
-        contextRow.textContent = `↳ Vorige call: ${outcomeLabel(appt.parent_outcome.outcome)}`;
+        const internSuffix = callType === 'intern' ? ' · Intern' : '';
+        contextRow.textContent = `↳ Vorige call: ${outcomeLabel(appt.parent_outcome.outcome)}${internSuffix}`;
         card.appendChild(contextRow);
       }
 
@@ -2184,9 +2188,19 @@
 
       const cards = [
         {
-          label: 'Afspraken vandaag',
-          value: m.appointments_total,
-          sub: `${m.appointments_completed} afgerond · ${m.appointments_no_show} no-show`,
+          label: 'Eerste calls',
+          value: m.first_calls ?? m.appointments_total,
+          sub: `van ${m.appointments_total} vandaag`,
+        },
+        {
+          label: 'Follow-up agenda',
+          value: m.agenda_followups ?? 0,
+          sub: 'Zoom + GHL',
+        },
+        {
+          label: 'Follow-up intern',
+          value: m.intern_followups ?? 0,
+          sub: 'Zonder Zoom/GHL',
         },
         {
           label: "Voicememo's",
@@ -2269,6 +2283,18 @@
     });
 
     init();
+
+    // ── Call-type helpers ─────────────────────────────────────────────
+    function getCallType(appt) {
+      if (!appt.parent_appointment_id) return 'first';
+      if (!appt.ghl_appointment_id)    return 'intern';
+      return 'agenda';
+    }
+    function callTypeIcon(type) {
+      if (type === 'intern') return '📞 ';
+      if (type === 'agenda') return '📅 ';
+      return '';
+    }
 
     // ── Outcome helpers ───────────────────────────────────────────────
     function outcomeLabel(key) {

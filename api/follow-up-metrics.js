@@ -47,7 +47,7 @@ export async function computeMetrics(supabaseAdmin, opts = {}) {
   const { data: appts } = await apptQ(
     supabaseAdmin
       .from('follow_up_appointments')
-      .select('id, status, voicememo_status')
+      .select('id, status, voicememo_status, parent_appointment_id, ghl_appointment_id')
       .gte('scheduled_at', range.start.toISOString())
       .lt('scheduled_at', range.end.toISOString())
   );
@@ -58,6 +58,11 @@ export async function computeMetrics(supabaseAdmin, opts = {}) {
   metrics.appointments_no_show = appts?.filter(a => a.status === 'no_show').length || 0;
   metrics.voicememos_sent = appts?.filter(a => a.voicememo_status === 'sent').length || 0;
   metrics.voicememos_relevant = appts?.filter(a => a.voicememo_status !== 'no_whatsapp').length || 0;
+
+  // Call-type split: first_calls / agenda_followups / intern_followups
+  metrics.first_calls       = appts?.filter(a => !a.parent_appointment_id).length || 0;
+  metrics.agenda_followups  = appts?.filter(a =>  a.parent_appointment_id &&  a.ghl_appointment_id).length || 0;
+  metrics.intern_followups  = appts?.filter(a =>  a.parent_appointment_id && !a.ghl_appointment_id).length || 0;
 
   const { data: outcomes } = await outcomeQ(
     supabaseAdmin
