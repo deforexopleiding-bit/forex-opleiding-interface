@@ -283,13 +283,13 @@ async function handleGet(req, res, supabase) {
   enrichedAppts = await enrichWithParentOutcome(supabase, enrichedAppts);
 
   // Optie-C filter: today-tab toont alleen calls binnen 30-min grace-window
-  // (toekomst + net begonnen) of met status cancelled/verplaatst.
+  // (toekomst + net begonnen); cancelled/verplaatst/verwijderd worden altijd uitgefilterd.
   // Calls van >30min geleden zonder outcome: verschijnen in Open acties.
   if (period === 'today') {
     const cutoff30 = new Date(Date.now() - 30 * 60 * 1000);
     enrichedAppts = enrichedAppts.filter(a =>
       new Date(a.scheduled_at) >= cutoff30
-      && !['cancelled', 'verplaatst'].includes(a.status)
+      && !['cancelled', 'verplaatst', 'verwijderd'].includes(a.status)
     );
   }
 

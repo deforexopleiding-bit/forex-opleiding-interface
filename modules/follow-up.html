@@ -208,6 +208,7 @@
     .fu-card-avatar.status-no-show     { background: var(--color-danger-soft);  color: var(--color-danger-text); }
     .fu-card-avatar.status-cancelled,
     .fu-card-avatar.status-verplaatst,
+    .fu-card-avatar.status-verwijderd,
     .fu-card-avatar.status-default     { background: var(--color-neutral-soft); color: var(--color-neutral-text); }
     .fu-card-name {
       font-size: 15px;
@@ -237,6 +238,8 @@
     .fu-card-badge.status-cancelled,
     .fu-card-badge.status-verplaatst,
     .fu-card-badge.status-default     { background: var(--color-neutral);  color: var(--text-inverse); }
+    .fu-card-badge.status-verwijderd  { background: #b91c1c; color: #fff; }
+    .fu-card-avatar.status-verwijderd { background: #fecaca; color: #7f1d1d; }
     /* Outcome-badges op afgeronde cards */
     .fu-card-badge.outcome-green { background:#d1fae5; color:#065f46; }
     .fu-card-badge.outcome-amber { background:#fef3c7; color:#92400e; }
@@ -283,6 +286,48 @@
       justify-content: center;
       margin-top: 16px;
     }
+    /* ── Acties ⋯ dropdown ──────────────────────────────────────── */
+    .fu-action-more {
+      background: transparent;
+      border: 1px solid var(--border-color, rgba(255,255,255,0.15));
+      border-radius: 6px;
+      color: var(--text-secondary, #6b7280);
+      cursor: pointer;
+      font-size: 16px;
+      line-height: 1;
+      padding: 4px 10px;
+      flex-shrink: 0;
+    }
+    .fu-action-more:hover { background: var(--color-neutral-soft, #f3f4f6); }
+    .fu-dropdown {
+      position: absolute;
+      right: 0;
+      top: calc(100% + 4px);
+      background: var(--surface-elevated, #1f2937);
+      border: 1px solid var(--border-color, rgba(255,255,255,0.12));
+      border-radius: 8px;
+      box-shadow: 0 4px 16px rgba(0,0,0,.25);
+      min-width: 170px;
+      z-index: 200;
+      overflow: hidden;
+    }
+    .fu-dropdown-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      width: 100%;
+      text-align: left;
+      padding: 9px 14px;
+      background: none;
+      border: none;
+      font-size: 14px;
+      cursor: pointer;
+      color: var(--text-primary, #f9fafb);
+      white-space: nowrap;
+    }
+    .fu-dropdown-item:hover { background: var(--color-neutral-soft, rgba(255,255,255,0.06)); }
+    .fu-dropdown-item--danger { color: #f87171; }
+    .fu-dropdown-item--danger:hover { background: rgba(185,28,28,0.12); }
     /* ── Voicememo dropdown ─────────────────────────────────────── */
     .fu-memo-wrap {
       position: relative;
@@ -1135,6 +1180,30 @@
     </div>
   </div>
 
+  <div class="fu-modal-backdrop" id="verwijder-modal" style="display:none;">
+    <div class="fu-modal">
+      <div class="fu-modal-header">
+        <h2>Afspraak verwijderen</h2>
+        <button class="fu-modal-close" type="button" id="verwijder-modal-close">×</button>
+      </div>
+      <div class="fu-modal-body">
+        <p style="color:var(--text-secondary);margin-bottom:12px;">Lead: <strong id="verwijder-lead-name"></strong></p>
+        <div class="fu-field">
+          <label class="fu-label">Reden (optioneel)</label>
+          <textarea class="fu-input fu-textarea" id="verwijder-reden" rows="3" maxlength="500" placeholder="Bv. testafspraak, dubbele invoer…"></textarea>
+        </div>
+        <p style="color:#b45309;background:#fffbeb;border:1px solid #fcd34d;border-radius:6px;padding:10px 12px;font-size:13px;margin-bottom:12px;">
+          ⚠️ Klant ontvangt een cancel-bevestiging als de afspraak in GHL staat.
+        </p>
+        <div id="verwijder-error" style="display:none; color:#b91c1c; background:#fef2f2; border:1px solid #fecaca; border-radius:6px; padding:10px 12px; margin-bottom:12px; font-size:14px;"></div>
+        <div class="fu-modal-actions">
+          <button type="button" class="fu-voicememo-button" id="verwijder-cancel" style="background:transparent;border:1px solid var(--border,rgba(255,255,255,0.15));">Sluiten</button>
+          <button type="button" class="fu-voicememo-button" id="verwijder-save" style="background:#b91c1c;">Bevestig verwijderen</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <div class="fu-modal-backdrop" id="outcome-modal" style="display:none;">
     <div class="fu-modal">
       <div class="fu-modal-header">
@@ -1268,6 +1337,7 @@
         'cancelled':   'Geannuleerd',
         'in-progress': 'Bezig',
         'verplaatst':  'Verplaatst',
+        'verwijderd':  'Verwijderd',
       };
 
       // "Beoordelen" UI-state: scheduled call >30 min geleden zonder outcome (frontend-only)
@@ -1502,21 +1572,18 @@
       }
 
       // ── Actions row — alle statussen ──────────────────────────────
-      const showActions = true;
-
-      if (showActions) {
+      if (true) {
         const actions = document.createElement('div');
         actions.className = 'fu-card-actions';
+        actions.style.position = 'relative';
 
-        // Outcome-knop: niet voor cancelled/verplaatst (die hoeven geen outcome)
-        if (!['cancelled', 'verplaatst'].includes(statusKey)) {
-          const outcomeBtn = document.createElement('button');
-          outcomeBtn.className = 'fu-card-action-btn';
-          const outcomeLabel = appt.has_outcome ? 'Outcome wijzigen' : 'Outcome';
-          outcomeBtn.innerHTML = `<i class="ti ti-clipboard" aria-hidden="true"></i> ${outcomeLabel}`;
-          outcomeBtn.addEventListener('click', (e) => { e.stopPropagation(); openOutcomeModal(appt); });
-          actions.appendChild(outcomeBtn);
-        }
+        // Outcome-knop: voor alle statussen
+        const outcomeBtn = document.createElement('button');
+        outcomeBtn.className = 'fu-card-action-btn';
+        const outcomeLabel = appt.has_outcome ? 'Outcome wijzigen' : 'Outcome toevoegen';
+        outcomeBtn.innerHTML = `<i class="ti ti-clipboard" aria-hidden="true"></i> ${outcomeLabel}`;
+        outcomeBtn.addEventListener('click', (e) => { e.stopPropagation(); openOutcomeModal(appt); });
+        actions.appendChild(outcomeBtn);
 
         const notitieBtn = document.createElement('button');
         notitieBtn.className = 'fu-card-action-btn';
@@ -1543,27 +1610,6 @@
           zoomBtn.innerHTML = '<i class="ti ti-video" aria-hidden="true"></i> Zoom openen';
           zoomBtn.addEventListener('click', (e) => e.stopPropagation());
           actions.appendChild(zoomBtn);
-        }
-
-        // Verplaats-knop + Annuleer-knop: alleen op scheduled appointments
-        if (statusKey === 'scheduled') {
-          const verplaatsBtn = document.createElement('button');
-          verplaatsBtn.className = 'fu-card-action-btn';
-          verplaatsBtn.innerHTML = '<i class="ti ti-calendar-event" aria-hidden="true"></i> Verplaatsen';
-          verplaatsBtn.addEventListener('click', (e) => {
-            e.stopPropagation();
-            openVerplaatsModal(appt);
-          });
-          actions.appendChild(verplaatsBtn);
-
-          const annuleerBtn = document.createElement('button');
-          annuleerBtn.className = 'fu-card-action-btn';
-          annuleerBtn.innerHTML = '<i class="ti ti-x" aria-hidden="true"></i> Annuleren';
-          annuleerBtn.addEventListener('click', (e) => {
-            e.stopPropagation();
-            openAnnuleerModal(appt);
-          });
-          actions.appendChild(annuleerBtn);
         }
 
         if (appt.terugkom_datum && appt.opvolging_status !== 'geregeld') {
@@ -1608,6 +1654,47 @@
             } catch (err) { alert('Fout: ' + err.message); }
           });
           actions.appendChild(verzetBtn);
+        }
+
+        // ── ⋯ Meer-dropdown: Verplaatsen / Annuleren / Verwijderen ──────────
+        const dropdown = document.createElement('div');
+        dropdown.className = 'fu-dropdown';
+        dropdown.hidden = true;
+
+        if (statusKey === 'scheduled') {
+          const verplaatsItem = document.createElement('button');
+          verplaatsItem.className = 'fu-dropdown-item';
+          verplaatsItem.innerHTML = '<i class="ti ti-calendar-event" aria-hidden="true"></i> Verplaatsen';
+          verplaatsItem.addEventListener('click', (e) => { e.stopPropagation(); dropdown.hidden = true; openVerplaatsModal(appt); });
+          dropdown.appendChild(verplaatsItem);
+
+          const annuleerItem = document.createElement('button');
+          annuleerItem.className = 'fu-dropdown-item';
+          annuleerItem.innerHTML = '<i class="ti ti-x" aria-hidden="true"></i> Annuleren';
+          annuleerItem.addEventListener('click', (e) => { e.stopPropagation(); dropdown.hidden = true; openAnnuleerModal(appt); });
+          dropdown.appendChild(annuleerItem);
+        }
+
+        if (statusKey !== 'verwijderd') {
+          const verwijderItem = document.createElement('button');
+          verwijderItem.className = 'fu-dropdown-item fu-dropdown-item--danger';
+          verwijderItem.innerHTML = '<i class="ti ti-trash" aria-hidden="true"></i> Verwijderen';
+          verwijderItem.addEventListener('click', (e) => { e.stopPropagation(); dropdown.hidden = true; openVerwijderModal(appt); });
+          dropdown.appendChild(verwijderItem);
+        }
+
+        if (dropdown.children.length > 0) {
+          const moreBtn = document.createElement('button');
+          moreBtn.className = 'fu-card-action-btn fu-action-more';
+          moreBtn.setAttribute('aria-label', 'Meer acties');
+          moreBtn.textContent = '⋯';
+          moreBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            document.querySelectorAll('.fu-dropdown').forEach(d => { if (d !== dropdown) d.hidden = true; });
+            dropdown.hidden = !dropdown.hidden;
+          });
+          actions.appendChild(moreBtn);
+          actions.appendChild(dropdown);
         }
 
         card.appendChild(actions);
@@ -2613,6 +2700,81 @@
         saveBtn.disabled = false;
         saveBtn.textContent = 'Bevestig annulering';
       }
+    });
+
+    // ── Verwijder-modal ───────────────────────────────────────────────
+    let currentVerwijderAppt = null;
+
+    function openVerwijderModal(appt) {
+      currentVerwijderAppt = appt;
+      document.getElementById('verwijder-lead-name').textContent = appt.lead_name;
+      document.getElementById('verwijder-reden').value = '';
+      const errDiv = document.getElementById('verwijder-error');
+      errDiv.style.display = 'none';
+      errDiv.textContent = '';
+      document.getElementById('verwijder-modal').style.display = 'flex';
+    }
+
+    function closeVerwijderModal() {
+      document.getElementById('verwijder-modal').style.display = 'none';
+      currentVerwijderAppt = null;
+    }
+
+    document.getElementById('verwijder-modal-close')?.addEventListener('click', closeVerwijderModal);
+    document.getElementById('verwijder-cancel')?.addEventListener('click', closeVerwijderModal);
+    document.getElementById('verwijder-modal')?.addEventListener('click', (e) => {
+      if (e.target.id === 'verwijder-modal') closeVerwijderModal();
+    });
+
+    document.getElementById('verwijder-save')?.addEventListener('click', async () => {
+      if (!currentVerwijderAppt) return;
+
+      const reden = document.getElementById('verwijder-reden').value.trim();
+      const saveBtn = document.getElementById('verwijder-save');
+      saveBtn.disabled = true;
+      saveBtn.textContent = 'Bezig…';
+
+      try {
+        const token = await window.AuthShared.getAccessToken();
+        const res = await fetch('/api/follow-up-verwijder', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer ' + token,
+          },
+          body: JSON.stringify({
+            appointment_id: currentVerwijderAppt.id,
+            reden: reden || undefined,
+          }),
+        });
+
+        const errDiv = document.getElementById('verwijder-error');
+        errDiv.style.display = 'none';
+
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          errDiv.textContent = err.error || `Onbekende fout (HTTP ${res.status})`;
+          errDiv.style.display = 'block';
+          saveBtn.disabled = false;
+          saveBtn.textContent = 'Bevestig verwijderen';
+          return;
+        }
+
+        window.AgentShared?.showToast('Afspraak verwijderd');
+        closeVerwijderModal();
+        location.reload();
+      } catch (err) {
+        const errDiv = document.getElementById('verwijder-error');
+        errDiv.textContent = 'Fout: ' + err.message;
+        errDiv.style.display = 'block';
+        saveBtn.disabled = false;
+        saveBtn.textContent = 'Bevestig verwijderen';
+      }
+    });
+
+    // Sluit alle dropdowns bij klik buiten kaart
+    document.addEventListener('click', () => {
+      document.querySelectorAll('.fu-dropdown').forEach(d => { d.hidden = true; });
     });
 
     // ── Kalender-tab ──────────────────────────────────────────────────

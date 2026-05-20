@@ -59,3 +59,18 @@ export async function updateZoomMeetingTime(meetingId, newStartIso, durationMinu
 
   return { success: true };
 }
+
+export async function deleteZoomMeeting(meetingId) {
+  if (!meetingId) throw new Error('meetingId vereist');
+  const token = await getZoomAccessToken();
+  const res = await fetch(`https://api.zoom.us/v2/meetings/${meetingId}`, {
+    method: 'DELETE',
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  // 204 = succesvol verwijderd, 404 = al verwijderd (beide acceptabel)
+  if (!res.ok && res.status !== 204 && res.status !== 404) {
+    const errText = await res.text();
+    throw new Error(`Zoom meeting delete failed: ${res.status} ${errText}`);
+  }
+  return { success: true };
+}

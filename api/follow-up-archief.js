@@ -1,7 +1,7 @@
 // api/follow-up-archief.js
 //
 // GET endpoint voor archief-tab: afgeronde en no-show appointments
-// (completed, no_show, cancelled, verplaatst)
+// (completed, no_show, cancelled, verplaatst, verwijderd)
 //
 // Query params:
 //   q        — optionele zoekterm op lead_name (ILIKE)
@@ -31,7 +31,7 @@ export default async function handler(req, res) {
   const to       = from + pageSize - 1;
 
   // Pre-fetch IDs van appointments die een outcome-rij hebben.
-  // Archief toont: cancelled/verplaatst altijd + completed/no_show alleen mét outcome.
+  // Archief toont: cancelled/verplaatst/verwijderd altijd + completed/no_show alleen mét outcome.
   const { data: outcomeRows } = await supabase
     .from('follow_up_outcomes')
     .select('appointment_id');
@@ -49,10 +49,10 @@ export default async function handler(req, res) {
 
   if (outcomeIds.length > 0) {
     query = query.or(
-      `status.in.(cancelled,verplaatst),and(status.in.(completed,no_show),id.in.(${outcomeIds.join(',')}))`
+      `status.in.(cancelled,verplaatst,verwijderd),and(status.in.(completed,no_show),id.in.(${outcomeIds.join(',')}))`
     );
   } else {
-    query = query.in('status', ['cancelled', 'verplaatst']);
+    query = query.in('status', ['cancelled', 'verplaatst', 'verwijderd']);
   }
 
   if (q) {
