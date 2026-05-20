@@ -67,22 +67,7 @@ export default async function handler(req, res) {
   const newStartISO = newDateUTC.toISOString();
   const newEndISO = newDateUTC.add(duration_minutes, 'minute').toISOString();
 
-  // Step 1: Zoom meeting tijd updaten (best effort)
-  let zoomResult = null;
-  if (oldAppt.zoom_meeting_id) {
-    try {
-      zoomResult = await updateZoomMeetingTime(
-        oldAppt.zoom_meeting_id,
-        newStartISO,
-        duration_minutes
-      );
-    } catch (zoomErr) {
-      console.error('[verplaats-call] Zoom update failed:', zoomErr?.message, zoomErr);
-      // Niet abort — DB update mag wel doorgaan
-    }
-  }
-
-  // Step 2: GHL appointment tijd updaten (best effort)
+  // Step 1: GHL appointment tijd updaten — blocking (faal → abort vóór DB-mutaties)
   let ghlResult = null;
   if (oldAppt.ghl_appointment_id) {
     try {
@@ -93,10 +78,16 @@ export default async function handler(req, res) {
       );
     } catch (ghlErr) {
       console.error('[verplaats-call] GHL update failed:', ghlErr?.message, ghlErr);
+      const status = ghlErr?.ghlStatus || 500;
+      const body = ghlErr?.ghlBody || '';
+      return res.status(422).json({
+        error: mapGhlError(status, body),
+        ghl_status: status,
+      });
     }
   }
 
-  // Step 3: Zet oude rij EERST naar 'verplaatst' zodat ghl_appointment_id
+  // Step 2: Zet oude rij EERST naar 'verplaatst' zodat ghl_appointment_id
   // vrijkomt vóór de child-INSERT (UNIQUE constraint op ghl_appointment_id).
   const { error: updateErr } = await supabaseAdmin
     .from('follow_up_appointments')
@@ -108,7 +99,7 @@ export default async function handler(req, res) {
     return res.status(500).json({ error: updateErr.message });
   }
 
-  // Step 4: Maak NIEUWE appointment-rij (nieuwe scheduled_at, parent_appointment_id = oud id).
+  // Step 3: Maak NIEUWE appointment-rij (nieuwe scheduled_at, parent_appointment_id = oud id).
   // ghl_appointment_id = null: parent behoudt de GHL-id als historisch record;
   // child krijgt geen GHL-id om UNIQUE constraint te respecteren.
   const { data: newAppt, error: insertErr } = await supabaseAdmin
@@ -141,6 +132,21 @@ export default async function handler(req, res) {
     return res.status(500).json({ error: insertErr.message });
   }
 
+  // Step 4: Zoom meeting tijd updaten (best effort — faal blokkeert niet)
+  let zoomResult = null;
+  if (oldAppt.zoom_meeting_id) {
+    try {
+      zoomResult = await updateZoomMeetingTime(
+        oldAppt.zoom_meeting_id,
+        newStartISO,
+        duration_minutes
+      );
+    } catch (zoomErr) {
+      console.error('[verplaats-call] Zoom update failed:', zoomErr?.message, zoomErr);
+      // Niet abort — DB-mutaties zijn al geslaagd
+    }
+  }
+
   // Audit log
   await supabaseAdmin
     .from('follow_up_events_log')
@@ -164,4 +170,17 @@ export default async function handler(req, res) {
     zoom_updated: !!zoomResult,
     ghl_updated: !!ghlResult,
   });
+}
+
+function mapGhlError(status, body) {
+  if (status === 400) {
+    if (body.includes('slot') || body.includes('available')) {
+      return 'Slot niet beschikbaar in Dave\'s GHL-kalender (mogelijk weekend, buiten werktijd, of conflict)';
+    }
+    return `Ongeldige aanvraag bij GHL: ${body.slice(0, 120)}`;
+  }
+  if (status === 401) return 'Geen GHL-toegang (token-issue) — neem contact op met beheerder';
+  if (status === 404) return 'Afspraak bestaat niet meer in GHL';
+  if (status >= 500) return 'GHL is tijdelijk niet beschikbaar — probeer het over enkele minuten opnieuw';
+  return `GHL-fout ${status}: ${body.slice(0, 120)}`;
 }

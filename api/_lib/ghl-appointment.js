@@ -30,8 +30,11 @@ export async function updateGhlAppointmentTime(appointmentId, newStartIso, newEn
   );
 
   if (!res.ok) {
-    const errText = await res.text();
-    throw new Error(`GHL appointment update failed: ${res.status} ${errText}`);
+    const errBody = await res.text();
+    const err = new Error(`GHL appointment update failed: ${res.status} ${errBody}`);
+    err.ghlStatus = res.status;
+    err.ghlBody = errBody;
+    throw err;
   }
 
   return await res.json();

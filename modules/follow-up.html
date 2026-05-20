@@ -1040,6 +1040,9 @@
           <label class="fu-label">Nieuwe tijd</label>
           <input type="time" id="verplaats-tijd" class="fu-input" value="09:00" required />
         </div>
+        <div id="verplaats-error" style="display:none; color:#b91c1c;
+             background:#fef2f2; border:1px solid #fecaca; border-radius:6px;
+             padding:10px 12px; margin-bottom:12px; font-size:14px;"></div>
         <div class="fu-modal-actions">
           <button type="button" class="fu-voicememo-button" id="verplaats-cancel" style="background:transparent;border:1px solid var(--border,rgba(255,255,255,0.15));">Annuleren</button>
           <button type="button" class="fu-voicememo-button" id="verplaats-save">Verplaatsen</button>
@@ -2256,21 +2259,27 @@
           }),
         });
 
+        const errDiv = document.getElementById('verplaats-error');
+        errDiv.style.display = 'none';
+
         if (!res.ok) {
           const err = await res.json().catch(() => ({}));
-          throw new Error(err.error || `HTTP ${res.status}`);
+          errDiv.textContent = err.error || `Onbekende fout (HTTP ${res.status})`;
+          errDiv.style.display = 'block';
+          saveBtn.disabled = false;
+          saveBtn.textContent = 'Verplaatsen';
+          return;
         }
 
         const data = await res.json();
-        let msg = 'Call verplaatst.';
-        if (!data.zoom_updated && currentVerplaatsAppt.zoom_meeting_id) msg += ' (Zoom-update faalde)';
-        if (!data.ghl_updated && currentVerplaatsAppt.ghl_appointment_id) msg += ' (GHL-update faalde)';
-        alert(msg);
-
+        const zoomWarn = !data.zoom_updated && currentVerplaatsAppt.zoom_meeting_id;
+        showToast('Call verplaatst' + (zoomWarn ? ' (Zoom-update faalde)' : ''));
         closeVerplaatsModal();
         location.reload();
       } catch (err) {
-        alert('Fout: ' + err.message);
+        const errDiv = document.getElementById('verplaats-error');
+        errDiv.textContent = 'Fout: ' + err.message;
+        errDiv.style.display = 'block';
         saveBtn.disabled = false;
         saveBtn.textContent = 'Verplaatsen';
       }
