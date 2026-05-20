@@ -162,7 +162,7 @@ async function handleGet(req, res, supabase) {
     const { data, error } = await supabase
       .from('follow_up_appointments')
       .select('id, lead_name, lead_email, scheduled_at, status, voicememo_status, zoom_meeting_id, zoom_join_url, owner_id, parent_appointment_id')
-      .in('status', ['completed', 'no_show'])
+      .in('status', ['completed', 'no_show', 'cancelled', 'verplaatst'])
       .gte('scheduled_at', yesterday.toISOString())
       .lt('scheduled_at', tomorrow.toISOString())
       .order('scheduled_at', { ascending: false })
@@ -191,8 +191,7 @@ async function handleGet(req, res, supabase) {
     return res.status(200).json({ period, count: rcEnriched.length, appointments: rcEnriched });
 
   } else if (period === 'open_acties') {
-    const cutoff = new Date();
-    cutoff.setHours(cutoff.getHours() - 1);
+    const cutoff = new Date(Date.now() - 30 * 60 * 1000);
 
     const { data: appts, error: apptErr } = await supabase
       .from('follow_up_appointments')
@@ -275,6 +274,17 @@ async function handleGet(req, res, supabase) {
 
   // Verrijk met parent_outcome voor card-context label (child-appointments)
   enrichedAppts = await enrichWithParentOutcome(supabase, enrichedAppts);
+
+  // Optie-C filter: today-tab toont alleen calls binnen 30-min grace-window
+  // (toekomst + net begonnen) of met status cancelled/verplaatst.
+  // Calls van >30min geleden zonder outcome: verschijnen in Open acties.
+  if (period === 'today') {
+    const cutoff30 = new Date(Date.now() - 30 * 60 * 1000);
+    enrichedAppts = enrichedAppts.filter(a =>
+      new Date(a.scheduled_at) >= cutoff30
+      || ['cancelled', 'verplaatst'].includes(a.status)
+    );
+  }
 
   return res.status(200).json({
     period,
