@@ -1055,6 +1055,31 @@
     </div>
   </div>
 
+  <!-- Annuleer-modal -->
+  <div class="fu-modal-backdrop" id="annuleer-modal" style="display:none;">
+    <div class="fu-modal">
+      <div class="fu-modal-header">
+        <h2>Call annuleren</h2>
+        <button class="fu-modal-close" type="button" id="annuleer-modal-close">×</button>
+      </div>
+      <div class="fu-modal-body">
+        <p style="color:var(--text-secondary);margin-bottom:12px;">Lead: <strong id="annuleer-lead-name"></strong></p>
+        <div class="fu-field">
+          <label class="fu-label">Reden (optioneel)</label>
+          <textarea class="fu-input fu-textarea" id="annuleer-reden" rows="3" maxlength="500" placeholder="Bv. lead heeft zelf geannuleerd…"></textarea>
+        </div>
+        <p style="color:#b45309;background:#fffbeb;border:1px solid #fcd34d;border-radius:6px;padding:10px 12px;font-size:13px;margin-bottom:12px;">
+          ⚠️ Klant ontvangt een cancel-bevestiging via GHL.
+        </p>
+        <div id="annuleer-error" style="display:none; color:#b91c1c; background:#fef2f2; border:1px solid #fecaca; border-radius:6px; padding:10px 12px; margin-bottom:12px; font-size:14px;"></div>
+        <div class="fu-modal-actions">
+          <button type="button" class="fu-voicememo-button" id="annuleer-cancel" style="background:transparent;border:1px solid var(--border,rgba(255,255,255,0.15));">Sluiten</button>
+          <button type="button" class="fu-voicememo-button" id="annuleer-save" style="background:#b91c1c;">Bevestig annulering</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <div class="fu-modal-backdrop" id="outcome-modal" style="display:none;">
     <div class="fu-modal">
       <div class="fu-modal-header">
@@ -1464,7 +1489,7 @@
           actions.appendChild(zoomBtn);
         }
 
-        // Verplaats-knop: alleen op scheduled appointments
+        // Verplaats-knop + Annuleer-knop: alleen op scheduled appointments
         if (statusKey === 'scheduled') {
           const verplaatsBtn = document.createElement('button');
           verplaatsBtn.className = 'fu-card-action-btn';
@@ -1474,6 +1499,15 @@
             openVerplaatsModal(appt);
           });
           actions.appendChild(verplaatsBtn);
+
+          const annuleerBtn = document.createElement('button');
+          annuleerBtn.className = 'fu-card-action-btn';
+          annuleerBtn.innerHTML = '<i class="ti ti-x" aria-hidden="true"></i> Annuleren';
+          annuleerBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            openAnnuleerModal(appt);
+          });
+          actions.appendChild(annuleerBtn);
         }
 
         if (appt.terugkom_datum && appt.opvolging_status !== 'geregeld') {
@@ -2409,6 +2443,76 @@
         errDiv.style.display = 'block';
         saveBtn.disabled = false;
         saveBtn.textContent = 'Verplaatsen';
+      }
+    });
+
+    // ── Annuleer-modal ────────────────────────────────────────────────
+    let currentAnnuleerAppt = null;
+
+    function openAnnuleerModal(appt) {
+      currentAnnuleerAppt = appt;
+      document.getElementById('annuleer-lead-name').textContent = appt.lead_name;
+      document.getElementById('annuleer-reden').value = '';
+      const errDiv = document.getElementById('annuleer-error');
+      errDiv.style.display = 'none';
+      errDiv.textContent = '';
+      document.getElementById('annuleer-modal').style.display = 'flex';
+    }
+
+    function closeAnnuleerModal() {
+      document.getElementById('annuleer-modal').style.display = 'none';
+      currentAnnuleerAppt = null;
+    }
+
+    document.getElementById('annuleer-modal-close')?.addEventListener('click', closeAnnuleerModal);
+    document.getElementById('annuleer-cancel')?.addEventListener('click', closeAnnuleerModal);
+    document.getElementById('annuleer-modal')?.addEventListener('click', (e) => {
+      if (e.target.id === 'annuleer-modal') closeAnnuleerModal();
+    });
+
+    document.getElementById('annuleer-save')?.addEventListener('click', async () => {
+      if (!currentAnnuleerAppt) return;
+
+      const reden = document.getElementById('annuleer-reden').value.trim();
+      const saveBtn = document.getElementById('annuleer-save');
+      saveBtn.disabled = true;
+      saveBtn.textContent = 'Bezig…';
+
+      try {
+        const token = await window.AuthShared.getAccessToken();
+        const res = await fetch('/api/follow-up-annuleer', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer ' + token,
+          },
+          body: JSON.stringify({
+            appointment_id: currentAnnuleerAppt.id,
+            reden: reden || undefined,
+          }),
+        });
+
+        const errDiv = document.getElementById('annuleer-error');
+        errDiv.style.display = 'none';
+
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          errDiv.textContent = err.error || `Onbekende fout (HTTP ${res.status})`;
+          errDiv.style.display = 'block';
+          saveBtn.disabled = false;
+          saveBtn.textContent = 'Bevestig annulering';
+          return;
+        }
+
+        window.AgentShared?.showToast('Call geannuleerd');
+        closeAnnuleerModal();
+        location.reload();
+      } catch (err) {
+        const errDiv = document.getElementById('annuleer-error');
+        errDiv.textContent = 'Fout: ' + err.message;
+        errDiv.style.display = 'block';
+        saveBtn.disabled = false;
+        saveBtn.textContent = 'Bevestig annulering';
       }
     });
 
