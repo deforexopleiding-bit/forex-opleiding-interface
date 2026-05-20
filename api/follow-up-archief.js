@@ -36,6 +36,7 @@ export default async function handler(req, res) {
     .from('follow_up_outcomes')
     .select('appointment_id');
   const outcomeIds = (outcomeRows || []).map(r => r.appointment_id);
+  const outcomeIdSet = new Set(outcomeIds);
 
   let query = supabase
     .from('follow_up_appointments')
@@ -69,12 +70,17 @@ export default async function handler(req, res) {
   const total      = count ?? 0;
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
 
+  const enriched = (data || []).map(appt => ({
+    ...appt,
+    has_outcome: outcomeIdSet.has(appt.id),
+  }));
+
   return res.status(200).json({
     period:       'archief',
     total,
     page,
     pageSize,
     totalPages,
-    appointments: data || [],
+    appointments: enriched,
   });
 }
