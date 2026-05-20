@@ -1189,14 +1189,11 @@
         ? scheduledDate.toLocaleTimeString('nl-NL', { hour: '2-digit', minute: '2-digit' })
         : '—';
       // Card-datum: "19 mei – 09:00" (toon datum+tijd) of alleen "09:00" (vandaag-tab)
-      const isVandaag = scheduledDate
-        ? scheduledDate.toDateString() === new Date().toDateString()
-        : false;
       const datumKort = scheduledDate
-        ? scheduledDate.toLocaleDateString('nl-NL', { day: 'numeric', month: 'short' })
+        ? scheduledDate.toLocaleDateString('nl-NL', { day: 'numeric', month: 'short' }).replace('.', '')
         : '';
       const datumText = scheduledDate
-        ? (isVandaag ? timeStr : `${datumKort} – ${timeStr}`)
+        ? `${datumKort} – ${timeStr}`
         : '—';
 
       const memoMap = {
