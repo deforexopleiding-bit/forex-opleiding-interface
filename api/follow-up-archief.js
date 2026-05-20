@@ -26,7 +26,7 @@ export default async function handler(req, res) {
 
   const q        = (req.query.q || '').trim();
   const page     = Math.max(1, parseInt(req.query.page, 10) || 1);
-  const pageSize = 20;
+  const pageSize = Math.min(50, Math.max(1, parseInt(req.query.pageSize, 10) || 20));
   const from     = (page - 1) * pageSize;
   const to       = from + pageSize - 1;
 

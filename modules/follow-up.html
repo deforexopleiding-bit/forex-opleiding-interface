@@ -242,8 +242,47 @@
     .fu-card-badge.outcome-amber { background:#fef3c7; color:#92400e; }
     .fu-card-badge.outcome-red   { background:#fee2e2; color:#991b1b; }
     .fu-card-badge.outcome-gray  { background:#e5e7eb; color:#374151; }
-    /* Inactive cards (cancelled / verplaatst / completed / no_show) */
-    .fu-card-inactive                  { opacity: 0.55; background: var(--color-neutral-soft) !important; }
+    /* ── Archief pill-paginering ─────────────────────────────────── */
+    .fu-pagination {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 12px;
+      border-radius: 999px;
+      background: var(--color-neutral-soft, #f3f4f6);
+      font-size: 14px;
+      color: var(--text-secondary, #6b7280);
+      width: fit-content;
+    }
+    .fu-pagination-btn {
+      background: transparent;
+      border: none;
+      color: var(--text-primary, #111827);
+      font-size: 18px;
+      line-height: 1;
+      padding: 4px 10px;
+      border-radius: 50%;
+      cursor: pointer;
+      transition: background 0.15s, color 0.15s;
+    }
+    .fu-pagination-btn:hover:not(:disabled) {
+      background: var(--color-accent-soft, rgba(59, 130, 246, 0.1));
+      color: var(--color-accent, #2563eb);
+    }
+    .fu-pagination-btn:disabled {
+      opacity: 0.3;
+      cursor: not-allowed;
+    }
+    .fu-pagination-info {
+      font-variant-numeric: tabular-nums;
+      min-width: 50px;
+      text-align: center;
+      user-select: none;
+    }
+    #archief-pagination-wrap {
+      justify-content: center;
+      margin-top: 16px;
+    }
     /* ── Voicememo dropdown ─────────────────────────────────────── */
     .fu-memo-wrap {
       position: relative;
@@ -990,10 +1029,12 @@
         <div id="list-archief">
           <div class="fu-loading">Klik op de tab om te laden…</div>
         </div>
-        <div id="archief-pagination" style="display:none;align-items:center;gap:12px;margin-top:16px;justify-content:center;">
-          <button id="archief-prev" class="fu-btn fu-btn-sm">← Vorige</button>
-          <span id="archief-page-info" style="font-size:13px;color:var(--text-muted,#6b7280);"></span>
-          <button id="archief-next" class="fu-btn fu-btn-sm">Volgende →</button>
+        <div id="archief-pagination-wrap" style="display:none;">
+          <div class="fu-pagination" id="archief-pagination">
+            <button class="fu-pagination-btn" id="archief-prev" aria-label="Vorige pagina">‹</button>
+            <span class="fu-pagination-info" id="archief-page-info">1 / 1</span>
+            <button class="fu-pagination-btn" id="archief-next" aria-label="Volgende pagina">›</button>
+          </div>
         </div>
       </section>
     </div>
@@ -1220,9 +1261,6 @@
       card.dataset.appointmentId = appt.id;
 
       const statusKey = (appt.status || 'default').toLowerCase().replace(/_/g, '-');
-      if (['cancelled', 'verplaatst', 'completed', 'no_show'].includes(statusKey)) {
-        card.classList.add('fu-card-inactive');
-      }
       const STATUS_LABELS = {
         'scheduled':   'Gepland',
         'completed':   'Afgerond',
@@ -2123,12 +2161,12 @@
     }
 
     async function loadArchief() {
-      const listEl       = document.getElementById('list-archief');
-      const countEl      = document.getElementById('count-archief');
-      const pageInfoEl   = document.getElementById('archief-page-info');
-      const paginationEl = document.getElementById('archief-pagination');
-      const prevBtn      = document.getElementById('archief-prev');
-      const nextBtn      = document.getElementById('archief-next');
+      const listEl    = document.getElementById('list-archief');
+      const countEl   = document.getElementById('count-archief');
+      const wrapEl    = document.getElementById('archief-pagination-wrap');
+      const pageInfoEl = document.getElementById('archief-page-info');
+      const prevBtn   = document.getElementById('archief-prev');
+      const nextBtn   = document.getElementById('archief-next');
       listEl.innerHTML = '<div class="fu-loading">Laden…</div>';
       try {
         const token = await window.AuthShared.getAccessToken();
@@ -2139,7 +2177,7 @@
         });
         if (!res.ok) {
           listEl.innerHTML = '<div class="fu-empty"><i class="ti ti-alert-circle" style="color:#f87171;font-size:16px;" aria-hidden="true"></i>Kon archief niet laden</div>';
-          paginationEl.style.display = 'none';
+          wrapEl.style.display = 'none';
           return;
         }
         const { total, page, totalPages, appointments } = await res.json();
@@ -2147,16 +2185,16 @@
         listEl.innerHTML = '';
         if (appointments.length === 0) {
           listEl.innerHTML = '<div class="fu-empty"><i class="ti ti-circle-check fu-empty-icon" aria-hidden="true"></i>Geen afspraken gevonden</div>';
-          paginationEl.style.display = 'none';
+          wrapEl.style.display = 'none';
         } else {
           appointments.forEach(appt => listEl.appendChild(renderCard(appt, true)));
           if (totalPages > 1) {
-            paginationEl.style.display = 'flex';
-            pageInfoEl.textContent = `Pagina ${page} van ${totalPages}`;
+            wrapEl.style.display = 'flex';
+            pageInfoEl.textContent = `${page} / ${totalPages}`;
             prevBtn.disabled = page <= 1;
             nextBtn.disabled = page >= totalPages;
           } else {
-            paginationEl.style.display = 'none';
+            wrapEl.style.display = 'none';
           }
         }
       } catch (err) {
