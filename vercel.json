@@ -25,10 +25,6 @@
       "schedule": "*/15 * * * *"
     },
     {
-      "path": "/api/follow-up-no-show-detect",
-      "schedule": "*/5 * * * *"
-    },
-    {
       "path": "/api/follow-up-ghl-conversations-poll",
       "schedule": "*/15 * * * *"
     },

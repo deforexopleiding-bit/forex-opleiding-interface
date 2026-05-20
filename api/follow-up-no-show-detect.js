@@ -1,3 +1,9 @@
+// DISABLED 2026-05-20: no-show detection mag alleen via Dave's
+// outcome-modal. Deze cron is uitgeschakeld in vercel.json.
+// File blijft staan voor toekomstige refactor of als spec wijzigt.
+// Endpoint blijft callable via HTTP (auth-gate beschermt) maar
+// wordt niet meer automatisch getriggerd.
+//
 // api/follow-up-no-show-detect.js
 //
 // Cron-endpoint dat elke 5 min detecteert of geplande appointments
