@@ -199,7 +199,10 @@ async function handleGet(req, res, supabase) {
       .lt('scheduled_at', cutoff.toISOString())
       .in('status', ['scheduled', 'in_progress', 'completed', 'no_show'])
       .order('scheduled_at', { ascending: false })
-      .limit(50);
+      // Limit ruimer dan strikt nodig: outcome-filter gebeurt in JS na fetch,
+      // dus we willen voldoende ruimte om legacy items zonder outcome te vinden
+      // ook al zijn ze ouder dan de meest recente 50.
+      .limit(500);
 
     if (apptErr) {
       return res.status(500).json({ error: apptErr.message });
@@ -247,6 +250,10 @@ async function handleGet(req, res, supabase) {
 
   if (statusFilter && statusFilter.length > 0) {
     query = query.in('status', statusFilter);
+  } else if (period !== 'today') {
+    // Default voor toekomst-periodes (week, morgen, custom):
+    // alleen actieve afspraken — cancelled/verplaatst niet tonen in komende-overzichten.
+    query = query.in('status', ['scheduled', 'in_progress']);
   }
 
   const { data, error } = await query;

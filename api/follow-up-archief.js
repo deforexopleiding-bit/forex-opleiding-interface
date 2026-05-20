@@ -30,15 +30,29 @@ export default async function handler(req, res) {
   const from     = (page - 1) * pageSize;
   const to       = from + pageSize - 1;
 
+  // Pre-fetch IDs van appointments die een outcome-rij hebben.
+  // Archief toont: cancelled/verplaatst altijd + completed/no_show alleen mét outcome.
+  const { data: outcomeRows } = await supabase
+    .from('follow_up_outcomes')
+    .select('appointment_id');
+  const outcomeIds = (outcomeRows || []).map(r => r.appointment_id);
+
   let query = supabase
     .from('follow_up_appointments')
     .select(
       'id, lead_name, lead_email, lead_phone, scheduled_at, status, voicememo_status, owner_id, snelle_notitie',
       { count: 'exact' }
     )
-    .in('status', ['completed', 'no_show', 'cancelled', 'verplaatst'])
     .order('scheduled_at', { ascending: false })
     .range(from, to);
+
+  if (outcomeIds.length > 0) {
+    query = query.or(
+      `status.in.(cancelled,verplaatst),and(status.in.(completed,no_show),id.in.(${outcomeIds.join(',')}))`
+    );
+  } else {
+    query = query.in('status', ['cancelled', 'verplaatst']);
+  }
 
   if (q) {
     const escaped = q.replace(/%/g, '\\%').replace(/_/g, '\\_');
