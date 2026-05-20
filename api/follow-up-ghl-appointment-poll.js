@@ -73,7 +73,7 @@ export default async function handler(req, res) {
       // Check of dit appointment al bestaat met een handmatig gemuteerde status
       const { data: existing } = await supabaseAdmin
         .from('follow_up_appointments')
-        .select('status')
+        .select('id, status')
         .eq('ghl_appointment_id', event.id)
         .maybeSingle();
 
@@ -82,6 +82,10 @@ export default async function handler(req, res) {
       const useStatus = (existing && manualStatuses.includes(existing.status))
         ? existing.status  // Bewaar handmatig gezette status
         : ghlMappedStatus;
+
+      // GHL is source of truth: als row eerder 'verplaatst' was (door onze UI)
+      // maar GHL zet hem terug naar scheduled, zijn child-rijen (ghl_id=null) wees-rijen.
+      const wasVerplaatst = existing?.status === 'verplaatst';
 
       if (existing && manualStatuses.includes(existing.status)) {
         console.log('[follow-up-ghl-poll] status behouden (handmatig gemuteerd):', event.id, existing.status);
@@ -121,6 +125,27 @@ export default async function handler(req, res) {
         console.error('[follow-up-ghl-poll] upsert fout:', event.id, error.message);
       }
       results.push({ id: event.id, ok: !error, email: leadEmail ? 'ja' : 'nee', error: error?.message || null });
+
+      // GHL-rollback detectie: parent was 'verplaatst' maar GHL zette hem terug naar scheduled.
+      // Cancel wees-children (ghl_id=null) zodat ze niet dubbel in de UI verschijnen.
+      if (wasVerplaatst && useStatus === 'scheduled' && !error) {
+        const { data: orphans, error: orphErr } = await supabaseAdmin
+          .from('follow_up_appointments')
+          .update({
+            status: 'cancelled',
+            updated_at: new Date().toISOString(),
+          })
+          .eq('parent_appointment_id', existing.id)
+          .is('ghl_appointment_id', null)
+          .eq('status', 'scheduled')
+          .select('id');
+
+        if (orphErr) {
+          console.error('[appointment-poll] orphan cleanup failed:', existing.id, orphErr?.message, orphErr);
+        } else if (orphans?.length > 0) {
+          console.log('[appointment-poll] orphans gecancelled:', existing.id, 'children:', orphans.map(o => o.id));
+        }
+      }
     }
 
     const ok     = results.filter(r => r.ok).length;
