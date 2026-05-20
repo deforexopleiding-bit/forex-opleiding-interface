@@ -237,7 +237,12 @@
     .fu-card-badge.status-cancelled,
     .fu-card-badge.status-verplaatst,
     .fu-card-badge.status-default     { background: var(--color-neutral);  color: var(--text-inverse); }
-    /* Inactive cards (cancelled / verplaatst) */
+    /* Outcome-badges op afgeronde cards */
+    .fu-card-badge.outcome-green { background:#d1fae5; color:#065f46; }
+    .fu-card-badge.outcome-amber { background:#fef3c7; color:#92400e; }
+    .fu-card-badge.outcome-red   { background:#fee2e2; color:#991b1b; }
+    .fu-card-badge.outcome-gray  { background:#e5e7eb; color:#374151; }
+    /* Inactive cards (cancelled / verplaatst / completed / no_show) */
     .fu-card-inactive                  { opacity: 0.55; background: var(--color-neutral-soft) !important; }
     /* ── Voicememo dropdown ─────────────────────────────────────── */
     .fu-memo-wrap {
@@ -1091,7 +1096,6 @@
           <label class="fu-label">Uitkomst</label>
           <div class="fu-outcome-options fu-outcome-grid">
             <button type="button" class="fu-outcome-btn" data-value="klant_geworden">✅ Klant geworden</button>
-            <button type="button" class="fu-outcome-btn" data-value="geen_klant">❌ Geen klant</button>
             <button type="button" class="fu-outcome-btn" data-value="no_show">👻 No-show</button>
             <button type="button" class="fu-outcome-btn" data-value="niet_bereikt">📵 Niet bereikt</button>
             <button type="button" class="fu-outcome-btn" data-value="interesse_uitstel">⏰ Interesse, uitstel</button>
@@ -1207,7 +1211,7 @@
       card.dataset.appointmentId = appt.id;
 
       const statusKey = (appt.status || 'default').toLowerCase().replace(/_/g, '-');
-      if (['cancelled', 'verplaatst'].includes(statusKey)) {
+      if (['cancelled', 'verplaatst', 'completed', 'no_show'].includes(statusKey)) {
         card.classList.add('fu-card-inactive');
       }
       const STATUS_LABELS = {
@@ -1394,8 +1398,13 @@
       }
 
       const badge = document.createElement('span');
-      badge.className = `fu-card-badge status-${displayStatusKey}`;
-      badge.textContent = displayStatusLabel;
+      if (appt.outcome && ['completed', 'no_show'].includes(statusKey)) {
+        badge.className = `fu-card-badge outcome-${outcomeBadgeColor(appt.outcome)}`;
+        badge.textContent = outcomeLabel(appt.outcome);
+      } else {
+        badge.className = `fu-card-badge status-${displayStatusKey}`;
+        badge.textContent = displayStatusLabel;
+      }
       right.appendChild(badge);
 
       header.appendChild(right);
@@ -1740,7 +1749,7 @@
         }
 
         const isOpenActies = period === 'open_acties';
-        const INACTIVE_STATUSES = new Set(['cancelled', 'verplaatst']);
+        const INACTIVE_STATUSES = new Set(['cancelled', 'verplaatst', 'completed', 'no_show']);
         const sorted = [...data.appointments].sort((a, b) => {
           const ia = INACTIVE_STATUSES.has((a.status || '').toLowerCase()) ? 1 : 0;
           const ib = INACTIVE_STATUSES.has((b.status || '').toLowerCase()) ? 1 : 0;
@@ -1770,7 +1779,7 @@
     // Outcomes die terugkom tonen
     const OUTCOME_SHOW_TERUGKOM = new Set(['interesse_uitstel', 'interesse_overleg']);
     // Outcomes die volgende actie tonen
-    const OUTCOME_SHOW_VOLGENDE = new Set(['klant_geworden', 'geen_klant', 'interesse_uitstel', 'interesse_overleg']);
+    const OUTCOME_SHOW_VOLGENDE = new Set(['klant_geworden', 'interesse_uitstel', 'interesse_overleg']);
 
     async function openOutcomeModal(appt) {
       currentOutcomeAppt = appt;
@@ -2347,10 +2356,17 @@
     }
 
     // ── Outcome helpers ───────────────────────────────────────────────
+    function outcomeBadgeColor(outcome) {
+      if (outcome === 'klant_geworden') return 'green';
+      if (outcome === 'interesse_uitstel' || outcome === 'interesse_overleg') return 'amber';
+      if (outcome === 'niet_bereikt' || outcome === 'no_show') return 'gray';
+      // geen_interesse, niet_geschikt, wil_niet_meer, overige
+      return 'red';
+    }
+
     function outcomeLabel(key) {
       const labels = {
         klant_geworden:    'Klant geworden',
-        geen_klant:        'Geen klant',
         no_show:           'No-show',
         niet_bereikt:      'Niet bereikt',
         interesse_uitstel: 'Interesse (uitstel)',

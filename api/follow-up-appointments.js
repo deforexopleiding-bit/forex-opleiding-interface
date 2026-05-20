@@ -77,7 +77,7 @@ async function handleGet(req, res, supabase) {
 
     const { data: outcomes, error: outErr } = await supabase
       .from('follow_up_outcomes')
-      .select('appointment_id, terugkom_datum, opvolging_status')
+      .select('appointment_id, outcome, terugkom_datum, opvolging_status')
       .gte('terugkom_datum', today.toISOString().slice(0, 10))
       .lt('terugkom_datum', tomorrow.toISOString().slice(0, 10))
       .in('opvolging_status', ['gepland', 'verzet']);
@@ -115,6 +115,7 @@ async function handleGet(req, res, supabase) {
       terugkom_datum: outcomeMap.get(a.id)?.terugkom_datum,
       opvolging_status: outcomeMap.get(a.id)?.opvolging_status,
       has_outcome: todayOutcomeSet.has(a.id),
+      outcome: outcomeMap.get(a.id)?.outcome || null,
     }));
 
     return res.status(200).json({
@@ -177,10 +178,14 @@ async function handleGet(req, res, supabase) {
     if (rcIds.length > 0) {
       const { data: rcOutcomes } = await supabase
         .from('follow_up_outcomes')
-        .select('appointment_id')
+        .select('appointment_id, outcome')
         .in('appointment_id', rcIds);
-      const rcOutcomeSet = new Set((rcOutcomes || []).map(o => o.appointment_id));
-      rcEnriched = data.map(a => ({ ...a, has_outcome: rcOutcomeSet.has(a.id) }));
+      const rcOutcomeMap = new Map((rcOutcomes || []).map(o => [o.appointment_id, o]));
+      rcEnriched = data.map(a => ({
+        ...a,
+        has_outcome: rcOutcomeMap.has(a.id),
+        outcome: rcOutcomeMap.get(a.id)?.outcome || null,
+      }));
     }
 
     return res.status(200).json({ period, count: rcEnriched.length, appointments: rcEnriched });
@@ -258,10 +263,14 @@ async function handleGet(req, res, supabase) {
   if (apptIds.length > 0) {
     const { data: outcomes } = await supabase
       .from('follow_up_outcomes')
-      .select('appointment_id')
+      .select('appointment_id, outcome')
       .in('appointment_id', apptIds);
-    const outcomeSet = new Set((outcomes || []).map(o => o.appointment_id));
-    enrichedAppts = data.map(a => ({ ...a, has_outcome: outcomeSet.has(a.id) }));
+    const outcomeEnrichMap = new Map((outcomes || []).map(o => [o.appointment_id, o]));
+    enrichedAppts = data.map(a => ({
+      ...a,
+      has_outcome: outcomeEnrichMap.has(a.id),
+      outcome: outcomeEnrichMap.get(a.id)?.outcome || null,
+    }));
   }
 
   // Verrijk met parent_outcome voor card-context label (child-appointments)
@@ -430,7 +439,7 @@ export async function enrichWithParentOutcome(supabase, appointments) {
 async function fetchOpvolgingRange(supabase, startDate, endDate, period, res) {
   let query = supabase
     .from('follow_up_outcomes')
-    .select('appointment_id, terugkom_datum, opvolging_status')
+    .select('appointment_id, outcome, terugkom_datum, opvolging_status')
     .in('opvolging_status', ['gepland', 'verzet'])
     .not('terugkom_datum', 'is', null);
 
@@ -478,6 +487,7 @@ async function fetchOpvolgingRange(supabase, startDate, endDate, period, res) {
     terugkom_datum: outcomeMap.get(a.id)?.terugkom_datum,
     opvolging_status: outcomeMap.get(a.id)?.opvolging_status,
     has_outcome: hasOutcomeSet.has(a.id),
+    outcome: outcomeMap.get(a.id)?.outcome || null,
   }));
 
   return res.status(200).json({ period, count: enriched.length, appointments: enriched });

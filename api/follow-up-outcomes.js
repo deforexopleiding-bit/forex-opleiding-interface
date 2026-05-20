@@ -23,7 +23,6 @@ dayjs.extend(timezone);
 
 const OUTCOME_TO_STATUS = {
   klant_geworden:    'completed',
-  geen_klant:        'completed',
   no_show:           'no_show',
   niet_bereikt:      'no_show',
   interesse_uitstel: 'completed',
@@ -34,7 +33,7 @@ const OUTCOME_TO_STATUS = {
 };
 
 const VALID_OUTCOMES = [
-  'klant_geworden', 'geen_klant', 'no_show',
+  'klant_geworden', 'no_show',
   'niet_bereikt', 'interesse_uitstel', 'interesse_overleg',
   'geen_interesse', 'niet_geschikt', 'wil_niet_meer',
 ];
