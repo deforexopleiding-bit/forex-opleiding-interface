@@ -860,7 +860,7 @@
         Opvolging<span class="fu-tab-count" id="tab-count-opvolging">—</span><span class="fu-tab-dot" id="tab-dot-opvolging" style="display:none;"></span>
       </button>
       <button class="fu-tab" data-tab="archief" role="tab" aria-selected="false">
-        Archief
+        Afgehandelde afspraken
       </button>
       <button class="fu-tab" data-tab="kalender" role="tab" aria-selected="false">
         Kalender
@@ -980,11 +980,20 @@
     <div class="fu-tab-panel" data-panel="archief">
       <section class="fu-section" id="section-archief">
         <div class="fu-section-header">
-          <div class="fu-section-title">Archief — afgerond ouder dan 30 dagen</div>
+          <div class="fu-section-title">Afgehandelde afspraken</div>
           <div class="fu-section-count" id="count-archief">—</div>
+        </div>
+        <div style="margin-bottom:12px;">
+          <input type="search" id="archief-search" placeholder="Zoek op naam…"
+            style="width:100%;padding:8px 12px;border:1px solid var(--border-color,#e5e7eb);border-radius:6px;font-size:14px;">
         </div>
         <div id="list-archief">
           <div class="fu-loading">Klik op de tab om te laden…</div>
+        </div>
+        <div id="archief-pagination" style="display:none;align-items:center;gap:12px;margin-top:16px;justify-content:center;">
+          <button id="archief-prev" class="fu-btn fu-btn-sm">← Vorige</button>
+          <span id="archief-page-info" style="font-size:13px;color:var(--text-muted,#6b7280);"></span>
+          <button id="archief-next" class="fu-btn fu-btn-sm">Volgende →</button>
         </div>
       </section>
     </div>
@@ -2020,6 +2029,9 @@
     });
 
     let archiefLoaded = false;
+    let archiefPage   = 1;
+    let archiefSearch = '';
+    let archiefSearchTimer = null;
     let allKomendeLoaded = false;
     let timeToggleListenersAttached = false;
     const allSectionCounts = {};
@@ -2084,6 +2096,7 @@
       });
       if (tabId === 'archief' && !archiefLoaded) {
         archiefLoaded = true;
+        archiefPage = 1;
         loadArchief();
       }
     }
@@ -2110,30 +2123,62 @@
     }
 
     async function loadArchief() {
-      const listEl = document.getElementById('list-archief');
-      const countEl = document.getElementById('count-archief');
+      const listEl       = document.getElementById('list-archief');
+      const countEl      = document.getElementById('count-archief');
+      const pageInfoEl   = document.getElementById('archief-page-info');
+      const paginationEl = document.getElementById('archief-pagination');
+      const prevBtn      = document.getElementById('archief-prev');
+      const nextBtn      = document.getElementById('archief-next');
+      listEl.innerHTML = '<div class="fu-loading">Laden…</div>';
       try {
         const token = await window.AuthShared.getAccessToken();
-        const res = await fetch('/api/follow-up-archief', {
+        const params = new URLSearchParams({ page: archiefPage, pageSize: 20 });
+        if (archiefSearch) params.set('q', archiefSearch);
+        const res = await fetch('/api/follow-up-archief?' + params, {
           headers: { 'Authorization': 'Bearer ' + token },
         });
         if (!res.ok) {
-          listEl.innerHTML = '<div class="fu-empty"><i class="ti ti-alert-circle" style="color:#f87171; font-size:16px;" aria-hidden="true"></i>Kon archief niet laden</div>';
+          listEl.innerHTML = '<div class="fu-empty"><i class="ti ti-alert-circle" style="color:#f87171;font-size:16px;" aria-hidden="true"></i>Kon archief niet laden</div>';
+          paginationEl.style.display = 'none';
           return;
         }
-        const { count, appointments } = await res.json();
-        countEl.textContent = `${count} ${count === 1 ? 'afspraak' : 'afspraken'}`;
+        const { total, page, totalPages, appointments } = await res.json();
+        countEl.textContent = `${total} ${total === 1 ? 'afspraak' : 'afspraken'}`;
         listEl.innerHTML = '';
-        if (count === 0) {
-          listEl.innerHTML = '<div class="fu-empty"><i class="ti ti-circle-check fu-empty-icon" aria-hidden="true"></i>Geen oudere afspraken in archief</div>';
+        if (appointments.length === 0) {
+          listEl.innerHTML = '<div class="fu-empty"><i class="ti ti-circle-check fu-empty-icon" aria-hidden="true"></i>Geen afspraken gevonden</div>';
+          paginationEl.style.display = 'none';
         } else {
           appointments.forEach(appt => listEl.appendChild(renderCard(appt, true)));
+          if (totalPages > 1) {
+            paginationEl.style.display = 'flex';
+            pageInfoEl.textContent = `Pagina ${page} van ${totalPages}`;
+            prevBtn.disabled = page <= 1;
+            nextBtn.disabled = page >= totalPages;
+          } else {
+            paginationEl.style.display = 'none';
+          }
         }
       } catch (err) {
         console.error('Archief load error:', err);
-        listEl.innerHTML = '<div class="fu-empty"><i class="ti ti-alert-circle" style="color:#f87171; font-size:16px;" aria-hidden="true"></i>Fout bij laden archief</div>';
+        listEl.innerHTML = '<div class="fu-empty"><i class="ti ti-alert-circle" style="color:#f87171;font-size:16px;" aria-hidden="true"></i>Fout bij laden archief</div>';
       }
     }
+
+    document.getElementById('archief-prev').addEventListener('click', () => {
+      if (archiefPage > 1) { archiefPage--; loadArchief(); }
+    });
+    document.getElementById('archief-next').addEventListener('click', () => {
+      archiefPage++; loadArchief();
+    });
+    document.getElementById('archief-search').addEventListener('input', (e) => {
+      clearTimeout(archiefSearchTimer);
+      archiefSearchTimer = setTimeout(() => {
+        archiefSearch = e.target.value.trim();
+        archiefPage = 1;
+        if (archiefLoaded) loadArchief();
+      }, 300);
+    });
 
     async function loadMorgenCount() {
       try {
