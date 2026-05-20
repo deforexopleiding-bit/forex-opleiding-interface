@@ -1170,8 +1170,9 @@
       let displayStatusLabel = STATUS_LABELS[statusKey] || appt.status || '—';
 
       if (statusKey === 'scheduled' && !appt.has_outcome && appt.scheduled_at) {
-        const thirtyMinAfter = new Date(new Date(appt.scheduled_at).getTime() + 30 * 60 * 1000);
-        if (new Date() > thirtyMinAfter) {
+        const durationMs = (appt.duration_minutes || 30) * 60 * 1000;
+        const callEndTime = new Date(new Date(appt.scheduled_at).getTime() + durationMs);
+        if (new Date() > callEndTime) {
           displayStatusKey = 'beoordelen';
           displayStatusLabel = 'Beoordelen';
         }
