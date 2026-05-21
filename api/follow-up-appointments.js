@@ -225,11 +225,15 @@ async function handleGet(req, res, supabase) {
         .map(o => o.appointment_id)
     );
     const openActies = (appts || []).filter(a => {
-      if (nietMeerOpvolgen.has(a.id)) return false;
-      const noOutcome = !withOutcome.has(a.id);
       const memoPending = a.voicememo_status === 'pending';
-      // Toon als outcome ontbreekt ÓF voicememo nog pending is
-      return noOutcome || memoPending;
+      const noOutcome = !withOutcome.has(a.id);
+      const nietMeer = nietMeerOpvolgen.has(a.id);
+
+      // Memo pending is altijd actie nodig (voicememo verplicht per business rule)
+      if (memoPending) return true;
+
+      // Anders: outcome ontbreekt EN niet als 'klaar' gemarkeerd
+      return noOutcome && !nietMeer;
     });
 
     return res.status(200).json({
