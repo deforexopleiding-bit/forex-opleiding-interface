@@ -549,6 +549,43 @@
       border-color: var(--brand-primary);
     }
 
+    /* Opvolging sub-tabs */
+    .fu-subtabs {
+      display: flex;
+      gap: 0;
+      border-bottom: 0.5px solid var(--border-default);
+      margin-bottom: 16px;
+    }
+    .fu-subtab {
+      padding: 8px 14px;
+      background: transparent;
+      border: none;
+      border-bottom: 2px solid transparent;
+      font-size: 13px;
+      color: var(--text-secondary);
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .fu-subtab:hover { color: var(--text-primary); }
+    .fu-subtab.active {
+      color: var(--text-primary);
+      border-bottom-color: var(--text-primary);
+      font-weight: 500;
+    }
+    .fu-subtab-count {
+      display: inline-block;
+      background: var(--surface-2, #f3f4f6);
+      color: var(--text-secondary);
+      padding: 1px 7px;
+      border-radius: 10px;
+      font-size: 11px;
+      margin-left: 4px;
+    }
+    .fu-subtab-count-amber:not(:empty):not(.is-zero) {
+      background: #fef3c7;
+      color: #92400e;
+    }
+
     /* Voicememo-label tekst naast icoon */
     .fu-memo-label { margin-left: 4px; font-size: 12px; }
     .fu-memo-toggle { padding: 6px 10px !important; width: auto !important; }
@@ -1016,72 +1053,86 @@
     </div>
 
     <div class="fu-tab-panel" data-panel="opvolging">
-      <div class="fu-opvolging-search">
-        <input type="text" id="opvolging-search-input" placeholder="🔍 Zoek op naam…" autocomplete="off">
+      <div class="fu-subtabs" role="tablist">
+        <button class="fu-subtab active" data-subtab="followups" role="tab" aria-selected="true">
+          Follow-ups <span class="fu-subtab-count" id="subtab-count-followups">—</span>
+        </button>
+        <button class="fu-subtab" data-subtab="wacht" role="tab" aria-selected="false">
+          Wacht op reschedule <span class="fu-subtab-count fu-subtab-count-amber" id="subtab-count-wacht">—</span>
+        </button>
       </div>
-      <section class="fu-section" id="section-wacht-reschedule" style="display:none;">
-        <div class="fu-section-header">
-          <div class="fu-section-title">Wacht op reschedule</div>
-          <div class="fu-section-count" id="count-wacht-reschedule">—</div>
+
+      <div class="fu-subtab-panel" data-subpanel="followups">
+        <div class="fu-opvolging-search">
+          <input type="text" id="opvolging-search-input" placeholder="🔍 Zoek op naam…" autocomplete="off">
         </div>
-        <div class="fu-bucket" data-bucket="recent">
-          <h4 style="font-size:13px;color:#059669;margin:12px 0 8px;">🟢 Recent (0-3 dagen)</h4>
-          <div id="list-wacht-recent"></div>
-        </div>
-        <div class="fu-bucket" data-bucket="stale">
-          <h4 style="font-size:13px;color:#d97706;margin:12px 0 8px;">🟡 Te lang stil (4-7 dagen)</h4>
-          <div id="list-wacht-stale"></div>
-        </div>
-        <div class="fu-bucket" data-bucket="forgotten">
-          <h4 style="font-size:13px;color:#dc2626;margin:12px 0 8px;">🔴 Mogelijk vergeten (8+ dagen)</h4>
-          <div id="list-wacht-forgotten"></div>
-        </div>
-      </section>
-      <section class="fu-section" id="section-opvolging-overdue">
-        <div class="fu-section-header">
-          <div class="fu-section-title">Achterstallige opvolgingen</div>
-          <div class="fu-section-count" id="count-opvolging-overdue">—</div>
-        </div>
-        <div id="list-opvolging-overdue">
-          <div class="fu-loading">Laden…</div>
-        </div>
-      </section>
-      <section class="fu-section" id="section-opvolging-today">
-        <div class="fu-section-header">
-          <div class="fu-section-title">Opvolging vandaag</div>
-          <div class="fu-section-count" id="count-opvolging-today">—</div>
-        </div>
-        <div id="list-opvolging-today">
-          <div class="fu-loading">Laden…</div>
-        </div>
-      </section>
-      <section class="fu-section" id="section-opvolging-week">
-        <div class="fu-section-header">
-          <div class="fu-section-title">Opvolging komende 7 dagen</div>
-          <div class="fu-section-count" id="count-opvolging-week">—</div>
-        </div>
-        <div id="list-opvolging-week">
-          <div class="fu-loading">Laden…</div>
-        </div>
-      </section>
-      <section class="fu-section" id="section-opvolging-30d">
-        <div class="fu-section-header">
-          <div class="fu-section-title">Opvolging 8-30 dagen</div>
-          <div class="fu-section-count" id="count-opvolging-30d">—</div>
-        </div>
-        <div id="list-opvolging-30d">
-          <div class="fu-loading">Laden…</div>
-        </div>
-      </section>
-      <section class="fu-section" id="section-opvolging-verder">
-        <div class="fu-section-header">
-          <div class="fu-section-title">Opvolging verder dan 30 dagen</div>
-          <div class="fu-section-count" id="count-opvolging-verder">—</div>
-        </div>
-        <div id="list-opvolging-verder">
-          <div class="fu-loading">Laden…</div>
-        </div>
-      </section>
+        <section class="fu-section" id="section-opvolging-overdue">
+          <div class="fu-section-header">
+            <div class="fu-section-title">Achterstallige opvolgingen</div>
+            <div class="fu-section-count" id="count-opvolging-overdue">—</div>
+          </div>
+          <div id="list-opvolging-overdue">
+            <div class="fu-loading">Laden…</div>
+          </div>
+        </section>
+        <section class="fu-section" id="section-opvolging-today">
+          <div class="fu-section-header">
+            <div class="fu-section-title">Opvolging vandaag</div>
+            <div class="fu-section-count" id="count-opvolging-today">—</div>
+          </div>
+          <div id="list-opvolging-today">
+            <div class="fu-loading">Laden…</div>
+          </div>
+        </section>
+        <section class="fu-section" id="section-opvolging-week">
+          <div class="fu-section-header">
+            <div class="fu-section-title">Opvolging komende 7 dagen</div>
+            <div class="fu-section-count" id="count-opvolging-week">—</div>
+          </div>
+          <div id="list-opvolging-week">
+            <div class="fu-loading">Laden…</div>
+          </div>
+        </section>
+        <section class="fu-section" id="section-opvolging-30d">
+          <div class="fu-section-header">
+            <div class="fu-section-title">Opvolging 8-30 dagen</div>
+            <div class="fu-section-count" id="count-opvolging-30d">—</div>
+          </div>
+          <div id="list-opvolging-30d">
+            <div class="fu-loading">Laden…</div>
+          </div>
+        </section>
+        <section class="fu-section" id="section-opvolging-verder">
+          <div class="fu-section-header">
+            <div class="fu-section-title">Opvolging verder dan 30 dagen</div>
+            <div class="fu-section-count" id="count-opvolging-verder">—</div>
+          </div>
+          <div id="list-opvolging-verder">
+            <div class="fu-loading">Laden…</div>
+          </div>
+        </section>
+      </div>
+
+      <div class="fu-subtab-panel" data-subpanel="wacht" style="display:none;">
+        <section class="fu-section" id="section-wacht-reschedule" style="display:none;">
+          <div class="fu-section-header">
+            <div class="fu-section-title">Wacht op reschedule</div>
+            <div class="fu-section-count" id="count-wacht-reschedule">—</div>
+          </div>
+          <div class="fu-bucket" data-bucket="recent">
+            <h4 style="font-size:13px;color:#059669;margin:12px 0 8px;">🟢 Recent (0-3 dagen)</h4>
+            <div id="list-wacht-recent"></div>
+          </div>
+          <div class="fu-bucket" data-bucket="stale">
+            <h4 style="font-size:13px;color:#d97706;margin:12px 0 8px;">🟡 Te lang stil (4-7 dagen)</h4>
+            <div id="list-wacht-stale"></div>
+          </div>
+          <div class="fu-bucket" data-bucket="forgotten">
+            <h4 style="font-size:13px;color:#dc2626;margin:12px 0 8px;">🔴 Mogelijk vergeten (8+ dagen)</h4>
+            <div id="list-wacht-forgotten"></div>
+          </div>
+        </section>
+      </div>
     </div>
 
     <div class="fu-tab-panel" data-panel="archief">
@@ -1976,6 +2027,12 @@
       try {
         const { appointments } = await fetchAppointments('wacht_op_reschedule');
 
+        const subtabCountEl = document.getElementById('subtab-count-wacht');
+        if (subtabCountEl) {
+          subtabCountEl.textContent = appointments?.length || 0;
+          subtabCountEl.classList.toggle('is-zero', !appointments || appointments.length === 0);
+        }
+
         if (!appointments || appointments.length === 0) {
           section.style.display = 'none';
           return;
@@ -2397,6 +2454,8 @@
       if (opvolgingKeys.some(k => k in allSectionCounts)) {
         const total = opvolgingKeys.reduce((s, k) => s + (allSectionCounts[k] || 0), 0);
         document.getElementById('tab-count-opvolging').textContent = total;
+        const followupsCountEl = document.getElementById('subtab-count-followups');
+        if (followupsCountEl) followupsCountEl.textContent = total;
         const overdue = allSectionCounts['opvolging-overdue'] || 0;
         document.getElementById('tab-dot-opvolging').style.display = overdue > 0 ? 'inline-block' : 'none';
       }
@@ -2500,6 +2559,18 @@
 
       document.querySelectorAll('.fu-tab').forEach(tab => {
         tab.addEventListener('click', () => switchTab(tab.dataset.tab));
+      });
+      document.querySelectorAll('.fu-subtab').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const target = btn.dataset.subtab;
+          document.querySelectorAll('.fu-subtab').forEach(b => {
+            b.classList.toggle('active', b === btn);
+            b.setAttribute('aria-selected', b === btn ? 'true' : 'false');
+          });
+          document.querySelectorAll('.fu-subtab-panel').forEach(p => {
+            p.style.display = p.dataset.subpanel === target ? 'block' : 'none';
+          });
+        });
       });
       bindTimeToggle();
       initOpvolgingSearch();  // zoek-input in opvolging-tab activeren
