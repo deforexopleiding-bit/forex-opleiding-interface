@@ -53,6 +53,17 @@
     .fu-metric-label { font-size: 11px; color: var(--text-secondary); margin-bottom: 2px; }
     .fu-metric-value { font-size: 22px; font-weight: 500; color: var(--text-primary); line-height: 1.1; }
     .fu-metric-sub { font-size: 11px; color: var(--text-tertiary); margin-top: 2px; }
+    .fu-metric-card:first-child { grid-column: span 2; }
+    .fu-metric-subpills { display: flex; gap: 4px; margin-top: 8px; flex-wrap: wrap; }
+    .fu-metric-subpill {
+      font-size: 10px;
+      background: var(--surface-2, #f3f4f6);
+      color: var(--text-secondary, #6b7280);
+      padding: 3px 8px;
+      border-radius: 4px;
+      white-space: nowrap;
+    }
+    .fu-metric-subpill-active { background: #E6F1FB; color: #185FA5; }
     .fu-metric-value.success { color: #4ade80; }
     .fu-metric-value.warning { color: #facc15; }
     .fu-metric-value.danger  { color: #f87171; }
@@ -2064,11 +2075,15 @@
       try {
         const { appointments } = await fetchAppointments('wacht_op_reschedule');
 
+        const wachtCount = appointments?.length || 0;
         const subtabCountEl = document.getElementById('subtab-count-wacht');
         if (subtabCountEl) {
-          subtabCountEl.textContent = appointments?.length || 0;
-          subtabCountEl.classList.toggle('is-zero', !appointments || appointments.length === 0);
+          subtabCountEl.textContent = wachtCount;
+          subtabCountEl.classList.toggle('is-zero', wachtCount === 0);
         }
+        // Hoofdtab-teller meerekenen (follow-ups + wacht)
+        allSectionCounts['wacht-reschedule'] = wachtCount;
+        updateTabCounts();
 
         if (!appointments || appointments.length === 0) {
           section.style.display = 'none';
@@ -2490,7 +2505,9 @@
       const opvolgingKeys = ['opvolging-overdue', 'opvolging-today', 'opvolging-week', 'opvolging-30d', 'opvolging-verder'];
       if (opvolgingKeys.some(k => k in allSectionCounts)) {
         const total = opvolgingKeys.reduce((s, k) => s + (allSectionCounts[k] || 0), 0);
-        document.getElementById('tab-count-opvolging').textContent = total;
+        const wachtCount = allSectionCounts['wacht-reschedule'] || 0;
+        // Hoofdtab-teller = follow-ups + wacht op reschedule
+        document.getElementById('tab-count-opvolging').textContent = total + wachtCount;
         const followupsCountEl = document.getElementById('subtab-count-followups');
         if (followupsCountEl) followupsCountEl.textContent = total;
         const overdue = allSectionCounts['opvolging-overdue'] || 0;
@@ -2680,44 +2697,31 @@
     function renderMetrics(m) {
       renderOverdueTopbar(m, currentProfile);
 
+      const eersteCount = m.first_calls ?? m.appointments_total ?? 0;
+      const agendaCount = m.agenda_followups ?? 0;
+      const internCount = m.intern_followups ?? 0;
+
       const cards = [
         {
-          label: 'Eerste calls',
-          value: m.first_calls ?? m.appointments_total,
-          sub: `van ${m.appointments_total} vandaag`,
+          label: 'Calls vandaag',
+          value: eersteCount,
           icon: 'ti-phone',
           iconClass: 'blue',
+          subPills: [
+            { label: 'Totaal', value: eersteCount, active: true },
+            { label: 'Zoom', value: agendaCount },
+            { label: 'Intern', value: internCount },
+          ],
         },
         {
-          label: 'Follow-up agenda',
-          value: m.agenda_followups ?? 0,
-          sub: 'Zoom + GHL',
-          icon: 'ti-calendar-plus',
-          iconClass: 'neutral',
-        },
-        {
-          label: 'Follow-up intern',
-          value: m.intern_followups ?? 0,
-          sub: 'Zonder Zoom/GHL',
-          icon: 'ti-calendar-event',
-          iconClass: 'neutral',
-        },
-        {
-          label: "Voicememo's",
-          value: m.voicememos_sent,
-          sub: `van ${m.voicememos_relevant ?? m.appointments_total}`,
-          icon: 'ti-microphone-2',
-          iconClass: 'purple',
-        },
-        {
-          label: 'Outcomes vandaag',
+          label: 'Outcomes',
           value: m.outcomes_total,
           sub: `${m.outcomes_klant} klant · ${m.outcomes_geen_klant} geen klant`,
           icon: 'ti-target',
           iconClass: 'green',
         },
         {
-          label: 'Conversion vandaag',
+          label: 'Conversie',
           value: m.conversion_rate !== null ? m.conversion_rate + '%' : '—',
           cls: m.conversion_rate !== null && m.conversion_rate >= 50 ? 'success'
              : m.conversion_rate !== null && m.conversion_rate < 30  ? 'danger' : '',
@@ -2735,9 +2739,8 @@
           iconClass: 'neutral',
         },
         {
-          label: 'Wacht op reschedule',
+          label: 'Wacht reschedule',
           value: m.wacht_op_reschedule_count ?? 0,
-          sub: 'leads in opvolging',
           icon: 'ti-clock-hour-3',
           iconClass: 'amber',
         },
@@ -2752,6 +2755,13 @@
             <div class="fu-metric-label">${c.label}</div>
             <div class="fu-metric-value ${c.cls || ''}">${c.value}</div>
             ${c.sub ? `<div class="fu-metric-sub">${c.sub}</div>` : ''}
+            ${c.subPills ? `
+              <div class="fu-metric-subpills">
+                ${c.subPills.map(p => `
+                  <span class="fu-metric-subpill ${p.active ? 'fu-metric-subpill-active' : ''}">${p.label} · ${p.value}</span>
+                `).join('')}
+              </div>
+            ` : ''}
           </div>
         </div>
       `).join('');
