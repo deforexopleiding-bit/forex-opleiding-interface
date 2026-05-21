@@ -115,8 +115,19 @@ export async function computeMetrics(supabaseAdmin, opts = {}) {
       .lt('terugkom_datum', today.toISOString().slice(0, 10))
   );
 
-  metrics.opvolgingen_overdue = overdue?.length || 0;
-  metrics.achterstallig_opvolgingen = metrics.opvolgingen_overdue;
+  // Sluit cancelled/verplaatst/verwijderd uit — alleen actieve appointments tellen mee.
+  const overdueApptIds = (overdue || []).map(o => o.appointment_id);
+  let activeOverdueCount = overdueApptIds.length;
+  if (overdueApptIds.length > 0) {
+    const { data: activeAppts } = await supabaseAdmin
+      .from('follow_up_appointments')
+      .select('id')
+      .in('id', overdueApptIds)
+      .in('status', ['scheduled', 'in_progress', 'completed', 'no_show']);
+    activeOverdueCount = (activeAppts || []).length;
+  }
+  metrics.opvolgingen_overdue = activeOverdueCount;
+  metrics.achterstallig_opvolgingen = activeOverdueCount;
 
   // Outcomes achterstallig: completed/no_show van vóór vandaag zonder outcome
   const { data: oldDone } = await apptQ(
