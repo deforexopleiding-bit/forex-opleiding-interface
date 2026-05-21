@@ -224,9 +224,13 @@ async function handleGet(req, res, supabase) {
         .filter(o => o.niet_meer_opvolgen === true)
         .map(o => o.appointment_id)
     );
-    const openActies = (appts || []).filter(a =>
-      !withOutcome.has(a.id) && !nietMeerOpvolgen.has(a.id)
-    );
+    const openActies = (appts || []).filter(a => {
+      if (nietMeerOpvolgen.has(a.id)) return false;
+      const noOutcome = !withOutcome.has(a.id);
+      const memoPending = a.voicememo_status === 'pending';
+      // Toon als outcome ontbreekt ÓF voicememo nog pending is
+      return noOutcome || memoPending;
+    });
 
     return res.status(200).json({
       period,
