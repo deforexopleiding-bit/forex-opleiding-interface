@@ -59,6 +59,12 @@ export default async function handler(req, res) {
     const json = await ghlRes.json();
     const events = json.events || json.data || [];
 
+    if (events.length > 0) {
+      console.log('[ghl-poll-debug] sample event keys:', Object.keys(events[0]));
+      console.log('[ghl-poll-debug] sample event.location:', JSON.stringify(events[0].location));
+      console.log('[ghl-poll-debug] sample full event:', JSON.stringify(events[0], null, 2).slice(0, 1500));
+    }
+
     for (const event of events) {
       if (Date.now() - startTime > ABORT_MS) {
         results.push({ skipped: true, reason: 'timeout' });
