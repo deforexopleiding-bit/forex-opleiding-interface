@@ -23,11 +23,36 @@
 
     .main-content { margin-left: var(--sidebar-w, 220px); min-height: 100vh; padding: 28px 28px 64px; max-width: 1200px; position: relative; z-index: 1; }
 
-    .fu-metrics-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin: 0 0 28px; }
-    .fu-metric-card { background: var(--surface-card); border: 1px solid var(--border-default); border-radius: 10px; padding: 14px 16px; }
-    .fu-metric-label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-secondary); margin-bottom: 6px; }
-    .fu-metric-value { font-size: 26px; font-weight: 500; color: var(--text-primary); line-height: 1; }
-    .fu-metric-sub { font-size: 11px; color: var(--text-tertiary); margin-top: 8px; }
+    .fu-metrics-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; margin: 0 0 28px; }
+    .fu-metric-card {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      background: var(--surface-card);
+      border: 1px solid var(--border-default);
+      border-radius: 10px;
+      padding: 14px 16px;
+    }
+    .fu-metric-icon {
+      width: 38px;
+      height: 38px;
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+    .fu-metric-icon .ti { font-size: 18px; }
+    .fu-metric-icon-blue    { background: #E6F1FB; color: #185FA5; }
+    .fu-metric-icon-purple  { background: #EEEDFE; color: #534AB7; }
+    .fu-metric-icon-green   { background: #EAF3DE; color: #3B6D11; }
+    .fu-metric-icon-teal    { background: #E1F5EE; color: #0F6E56; }
+    .fu-metric-icon-amber   { background: #FAEEDA; color: #854F0B; }
+    .fu-metric-icon-neutral { background: var(--surface-2, #F3F4F6); color: var(--text-secondary, #6B7280); }
+    .fu-metric-content { min-width: 0; flex: 1; }
+    .fu-metric-label { font-size: 11px; color: var(--text-secondary); margin-bottom: 2px; }
+    .fu-metric-value { font-size: 22px; font-weight: 500; color: var(--text-primary); line-height: 1.1; }
+    .fu-metric-sub { font-size: 11px; color: var(--text-tertiary); margin-top: 2px; }
     .fu-metric-value.success { color: #4ade80; }
     .fu-metric-value.warning { color: #facc15; }
     .fu-metric-value.danger  { color: #f87171; }
@@ -76,7 +101,10 @@
     }
     .fu-tabs::-webkit-scrollbar { display: none; }
     .fu-tab {
-      padding: 10px 18px;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 12px 18px;
       font-size: 14px;
       color: var(--muted, rgba(255,255,255,0.55));
       cursor: pointer;
@@ -90,6 +118,7 @@
       font-family: inherit;
       transition: color 0.15s;
     }
+    .fu-tab .ti { font-size: 15px; line-height: 1; }
     .fu-tab:hover { color: var(--fg, #fff); }
     .fu-tab.active {
       color: var(--fg, #fff);
@@ -977,19 +1006,27 @@
 
     <nav class="fu-tabs" role="tablist">
       <button class="fu-tab active" data-tab="vandaag" role="tab" aria-selected="true">
-        Vandaag<span class="fu-tab-count" id="tab-count-vandaag">—</span>
+        <i class="ti ti-calendar-event" aria-hidden="true"></i>
+        <span>Vandaag</span>
+        <span class="fu-tab-count" id="tab-count-vandaag">—</span>
       </button>
       <button class="fu-tab" data-tab="open-acties" role="tab" aria-selected="false">
-        Open acties<span class="fu-tab-count" id="tab-count-open-acties">—</span>
+        <i class="ti ti-list-check" aria-hidden="true"></i>
+        <span>Open acties</span>
+        <span class="fu-tab-count" id="tab-count-open-acties">—</span>
       </button>
       <button class="fu-tab" data-tab="opvolging" role="tab" aria-selected="false">
-        Opvolging<span class="fu-tab-count" id="tab-count-opvolging">—</span><span class="fu-tab-dot" id="tab-dot-opvolging" style="display:none;"></span>
+        <i class="ti ti-arrow-loop-right" aria-hidden="true"></i>
+        <span>Opvolging</span>
+        <span class="fu-tab-count" id="tab-count-opvolging">—</span><span class="fu-tab-dot" id="tab-dot-opvolging" style="display:none;"></span>
       </button>
       <button class="fu-tab" data-tab="archief" role="tab" aria-selected="false">
-        Afgehandelde afspraken
+        <i class="ti ti-checks" aria-hidden="true"></i>
+        <span>Afgehandelde afspraken</span>
       </button>
       <button class="fu-tab" data-tab="kalender" role="tab" aria-selected="false">
-        Kalender
+        <i class="ti ti-calendar" aria-hidden="true"></i>
+        <span>Kalender</span>
       </button>
     </nav>
 
@@ -2531,10 +2568,11 @@
         if (count === undefined) return;
         const vandaagCard = document.querySelector('.fu-metric-card');
         if (!vandaagCard) return;
+        const target = vandaagCard.querySelector('.fu-metric-content') || vandaagCard;
         const span = document.createElement('span');
         span.className = 'fu-metric-morgen';
         span.textContent = `↘ morgen: ${count}`;
-        vandaagCard.appendChild(span);
+        target.appendChild(span);
       } catch (err) {
         console.warn('[follow-up] morgen-count fout:', err.message);
       }
@@ -2647,32 +2685,44 @@
           label: 'Eerste calls',
           value: m.first_calls ?? m.appointments_total,
           sub: `van ${m.appointments_total} vandaag`,
+          icon: 'ti-phone',
+          iconClass: 'blue',
         },
         {
           label: 'Follow-up agenda',
           value: m.agenda_followups ?? 0,
           sub: 'Zoom + GHL',
+          icon: 'ti-calendar-plus',
+          iconClass: 'neutral',
         },
         {
           label: 'Follow-up intern',
           value: m.intern_followups ?? 0,
           sub: 'Zonder Zoom/GHL',
+          icon: 'ti-calendar-event',
+          iconClass: 'neutral',
         },
         {
           label: "Voicememo's",
           value: m.voicememos_sent,
           sub: `van ${m.voicememos_relevant ?? m.appointments_total}`,
+          icon: 'ti-microphone-2',
+          iconClass: 'purple',
         },
         {
           label: 'Outcomes vandaag',
           value: m.outcomes_total,
           sub: `${m.outcomes_klant} klant · ${m.outcomes_geen_klant} geen klant`,
+          icon: 'ti-target',
+          iconClass: 'green',
         },
         {
           label: 'Conversion vandaag',
           value: m.conversion_rate !== null ? m.conversion_rate + '%' : '—',
           cls: m.conversion_rate !== null && m.conversion_rate >= 50 ? 'success'
              : m.conversion_rate !== null && m.conversion_rate < 30  ? 'danger' : '',
+          icon: 'ti-trending-up',
+          iconClass: 'teal',
         },
         {
           label: 'Achterstallig',
@@ -2681,19 +2731,28 @@
             ? `${m.achterstallig_opvolgingen ?? 0} opvolg · ${m.achterstallig_outcomes ?? 0} outc · ${m.achterstallig_voicememos ?? 0} memo`
             : undefined,
           cls: (m.achterstallig_totaal ?? m.opvolgingen_overdue ?? 0) > 0 ? 'danger' : 'success',
+          icon: 'ti-alert-circle',
+          iconClass: 'neutral',
         },
         {
           label: 'Wacht op reschedule',
           value: m.wacht_op_reschedule_count ?? 0,
           sub: 'leads in opvolging',
+          icon: 'ti-clock-hour-3',
+          iconClass: 'amber',
         },
       ];
 
       document.getElementById('fu-metrics-row').innerHTML = cards.map(c => `
         <div class="fu-metric-card">
-          <div class="fu-metric-label">${c.label}</div>
-          <div class="fu-metric-value ${c.cls || ''}">${c.value}</div>
-          ${c.sub ? `<div class="fu-metric-sub">${c.sub}</div>` : ''}
+          <div class="fu-metric-icon fu-metric-icon-${c.iconClass || 'neutral'}">
+            <i class="ti ${c.icon || ''}" aria-hidden="true"></i>
+          </div>
+          <div class="fu-metric-content">
+            <div class="fu-metric-label">${c.label}</div>
+            <div class="fu-metric-value ${c.cls || ''}">${c.value}</div>
+            ${c.sub ? `<div class="fu-metric-sub">${c.sub}</div>` : ''}
+          </div>
         </div>
       `).join('');
       document.getElementById('fu-metrics-container').style.display = 'block';
