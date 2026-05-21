@@ -1582,7 +1582,9 @@
 
         const isOpvolgCard = appt.terugkom_datum && appt.opvolging_status !== 'geregeld';
         const cutoff30 = new Date(Date.now() - 30 * 60 * 1000);
-        const isActiveZoom = statusKey === 'scheduled' && (appt.zoom_join_url || appt.zoom_meeting_id) && new Date(appt.scheduled_at) >= cutoff30;
+        const isScheduledFuture = statusKey === 'scheduled' && new Date(appt.scheduled_at) >= cutoff30;
+        const isBeoordelen = statusKey === 'scheduled' && new Date(appt.scheduled_at) < cutoff30 && !appt.has_outcome;
+        const hasZoom = !!(appt.zoom_join_url || appt.zoom_meeting_id);
 
         let outcomeIsPrimary = false;
         let zoomIsPrimary = false;
@@ -1633,8 +1635,8 @@
           actions.appendChild(verzetBtn);
           // Outcome verhuist naar dropdown
 
-        } else if (isActiveZoom) {
-          // Primair-1: Zoom (scheduled call binnen 30-min window met join-URL)
+        } else if (isScheduledFuture && hasZoom) {
+          // [Zoom] [Detail] — Outcome naar dropdown
           zoomIsPrimary = true;
           const zoomBtn = document.createElement('a');
           zoomBtn.className = 'fu-card-action-btn fu-zoom-btn';
@@ -1652,8 +1654,34 @@
           detailBtn.addEventListener('click', (e) => { e.stopPropagation(); window.location.href = `/modules/follow-up-lead.html?id=${appt.id}`; });
           actions.appendChild(detailBtn);
 
+        } else if (isBeoordelen && hasZoom) {
+          // [Outcome] [Zoom] [Detail] — drie primaire knoppen
+          outcomeIsPrimary = true;
+          zoomIsPrimary = true;
+          const outcomeBtn = document.createElement('button');
+          outcomeBtn.className = 'fu-card-action-btn';
+          const outcomeLabel = appt.has_outcome ? 'Outcome wijzigen' : 'Outcome toevoegen';
+          outcomeBtn.innerHTML = `<i class="ti ti-clipboard" aria-hidden="true"></i> ${outcomeLabel}`;
+          outcomeBtn.addEventListener('click', (e) => { e.stopPropagation(); openOutcomeModal(appt); });
+          actions.appendChild(outcomeBtn);
+
+          const zoomBtn = document.createElement('a');
+          zoomBtn.className = 'fu-card-action-btn fu-zoom-btn';
+          zoomBtn.href = appt.zoom_join_url || `https://zoom.us/j/${appt.zoom_meeting_id}`;
+          zoomBtn.target = '_blank';
+          zoomBtn.rel = 'noopener';
+          zoomBtn.innerHTML = '<i class="ti ti-video" aria-hidden="true"></i> Zoom openen';
+          zoomBtn.addEventListener('click', (e) => e.stopPropagation());
+          actions.appendChild(zoomBtn);
+
+          const detailBtn = document.createElement('button');
+          detailBtn.className = 'fu-card-action-btn';
+          detailBtn.innerHTML = '<i class="ti ti-external-link" aria-hidden="true"></i> Detail';
+          detailBtn.addEventListener('click', (e) => { e.stopPropagation(); window.location.href = `/modules/follow-up-lead.html?id=${appt.id}`; });
+          actions.appendChild(detailBtn);
+
         } else {
-          // Primair-1: Outcome
+          // Default: [Outcome] [Detail]
           outcomeIsPrimary = true;
           const outcomeBtn = document.createElement('button');
           outcomeBtn.className = 'fu-card-action-btn';
