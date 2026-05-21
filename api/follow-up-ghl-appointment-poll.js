@@ -3,7 +3,7 @@
 // Cron-endpoint: pollt GHL Calendar Events API en upsert appointments
 // naar follow_up_appointments. Draait elke 15 minuten via vercel.json.
 //
-// Haalt appointments op van vandaag 00:00 t/m +7 dagen.
+// Haalt appointments op van vandaag 00:00 t/m +30 dagen.
 // Idempotent: upsert op ghl_appointment_id.
 // owner_id = DAVE_PROFILE_ID zodat sales-user (Dave) zijn eigen appointments via RLS kan zien
 
@@ -36,7 +36,7 @@ export default async function handler(req, res) {
     const startDate = new Date();
     startDate.setHours(0, 0, 0, 0);
     const endDate = new Date(startDate);
-    endDate.setDate(endDate.getDate() + 7);
+    endDate.setDate(endDate.getDate() + 30);
 
     const url = new URL(`${GHL_API_BASE}/calendars/events`);
     url.searchParams.set('locationId', process.env.GHL_LOCATION_ID);
@@ -190,10 +190,62 @@ export default async function handler(req, res) {
       }
     }
 
+    // ── Ghost-cleanup: scheduled DB-rijen die GHL niet meer teruggeeft ────────
+    let ghostsHandled = 0;
+    if (events.length > 0) {
+      const ghlIds = new Set(events.map(e => e.id));
+
+      const { data: dbScheduled } = await supabaseAdmin
+        .from('follow_up_appointments')
+        .select('id, ghl_appointment_id, lead_name, scheduled_at')
+        .eq('status', 'scheduled')
+        .not('ghl_appointment_id', 'is', null)
+        .gte('scheduled_at', startDate.toISOString())
+        .lt('scheduled_at', endDate.toISOString());
+
+      const ghosts = (dbScheduled || []).filter(a => !ghlIds.has(a.ghl_appointment_id));
+
+      for (const ghost of ghosts) {
+        // Status flip naar 'verplaatst' (klant heeft via GHL gereschedduld)
+        await supabaseAdmin
+          .from('follow_up_appointments')
+          .update({
+            status: 'verplaatst',
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', ghost.id);
+
+        // Audit-log entry
+        await supabaseAdmin
+          .from('follow_up_events_log')
+          .insert({
+            appointment_id: ghost.id,
+            event_type: 'appointment_ghost_verplaatst',
+            source: 'ghl-poll-ghost-cleanup',
+            payload: {
+              ghl_appointment_id: ghost.ghl_appointment_id,
+              lead_name: ghost.lead_name,
+              scheduled_at: ghost.scheduled_at,
+              reason: 'GHL stuurde event niet meer (klant rescheduled of geannuleerd)',
+              poll_window_days: 30,
+            },
+          });
+
+        console.log('[follow-up-ghl-poll] ghost verplaatst:', ghost.id, ghost.lead_name, ghost.scheduled_at);
+        ghostsHandled++;
+      }
+
+      if (ghostsHandled > 0) {
+        console.log(`[follow-up-ghl-poll] ${ghostsHandled} ghost(s) als verplaatst gemarkeerd`);
+      }
+    } else {
+      console.log('[follow-up-ghl-poll] events.length=0, ghost-cleanup overgeslagen');
+    }
+
     const ok     = results.filter(r => r.ok).length;
     const failed = results.filter(r => !r.ok && !r.skipped).length;
     console.log(`[follow-up-ghl-poll] ${ok} gesynchroniseerd, ${failed} mislukt van ${events.length} events`);
-    return res.status(200).json({ synced: ok, failed, total: events.length, results });
+    return res.status(200).json({ synced: ok, failed, total: events.length, ghosts: ghostsHandled, results });
   } catch (err) {
     console.error('[follow-up-ghl-poll] onverwachte fout:', err.message);
     return res.status(500).json({ error: err.message });
