@@ -203,23 +203,8 @@ export default async function handler(req, res) {
         .gte('scheduled_at', startDate.toISOString())
         .lt('scheduled_at', endDate.toISOString());
 
-      const targetId = 'Ejb49lSDqZMYLzP8nkjJ';
-      console.log('[ghost-debug] events received:', events.length);
-      console.log('[ghost-debug] ghlIds total:', ghlIds.size);
-      console.log('[ghost-debug] is target in ghlIds:', ghlIds.has(targetId));
-      console.log('[ghost-debug] ALL ghlIds:', Array.from(ghlIds).join(','));
-      console.log('[ghost-debug] dbScheduled count:', dbScheduled?.length || 0);
-      console.log('[ghost-debug] window:', startDate.toISOString(), '→', endDate.toISOString());
-
-      const targetRow = (dbScheduled || []).find(a => a.ghl_appointment_id === targetId);
-      console.log('[ghost-debug] target in dbScheduled:', targetRow ? 'YES' : 'NO');
-      if (targetRow) console.log('[ghost-debug] target row data:', JSON.stringify(targetRow));
-
-      console.log('[ghost-debug] dbScheduled ghl_ids:',
-        (dbScheduled || []).map(a => a.ghl_appointment_id).join(','));
-
       const ghosts = (dbScheduled || []).filter(a => !ghlIds.has(a.ghl_appointment_id));
-      console.log('[ghost-debug] ghosts found:', ghosts.length);
+      console.log('[follow-up-ghl-poll] ghosts found:', ghosts.length);
 
       for (const ghost of ghosts) {
         // Status flip naar 'verplaatst' (klant heeft via GHL gereschedduld)
@@ -235,21 +220,21 @@ export default async function handler(req, res) {
         const { error: auditErr } = await supabaseAdmin
           .from('follow_up_events_log')
           .insert({
-            appointment_id: ghost.id,
+            source: 'cron',
             event_type: 'appointment_ghost_verplaatst',
-            source: 'ghl-poll-ghost-cleanup',
             payload: {
+              appointment_id: ghost.id,
               ghl_appointment_id: ghost.ghl_appointment_id,
               lead_name: ghost.lead_name,
               scheduled_at: ghost.scheduled_at,
+              cleanup_source: 'ghl-poll-ghost-cleanup',
               reason: 'GHL stuurde event niet meer (klant rescheduled of geannuleerd)',
               poll_window_days: 30,
             },
+            processed: true,
           });
         if (auditErr) {
-          console.error('[ghost-debug] audit-log insert FAILED:', auditErr);
-        } else {
-          console.log('[ghost-debug] audit-log insert OK for', ghost.id);
+          console.error('[follow-up-ghl-poll] ghost audit-log insert FAILED:', auditErr);
         }
 
         console.log('[follow-up-ghl-poll] ghost verplaatst:', ghost.id, ghost.lead_name, ghost.scheduled_at);
