@@ -150,7 +150,18 @@ export async function computeMetrics(supabaseAdmin, opts = {}) {
       .in('status', ['completed', 'no_show'])
   );
 
-  const pendingMemoIds = new Set((oldPending || []).map(a => a.id));
+  // Sluit niet_meer_opvolgen uit — die hoeven geen voicememo meer.
+  const rawPendingIds = (oldPending || []).map(a => a.id);
+  let nietMeerMemoSet = new Set();
+  if (rawPendingIds.length > 0) {
+    const { data: nietMeerMemo } = await supabaseAdmin
+      .from('follow_up_outcomes')
+      .select('appointment_id')
+      .eq('niet_meer_opvolgen', true)
+      .in('appointment_id', rawPendingIds);
+    nietMeerMemoSet = new Set((nietMeerMemo || []).map(o => o.appointment_id));
+  }
+  const pendingMemoIds = new Set(rawPendingIds.filter(id => !nietMeerMemoSet.has(id)));
   metrics.achterstallig_voicememos = pendingMemoIds.size;
 
   // Dedup: één appointment kan zowel outcome als voicememo missen → tel als één taak
