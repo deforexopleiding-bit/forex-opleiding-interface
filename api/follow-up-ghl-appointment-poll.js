@@ -232,7 +232,7 @@ export default async function handler(req, res) {
           .eq('id', ghost.id);
 
         // Audit-log entry
-        await supabaseAdmin
+        const { error: auditErr } = await supabaseAdmin
           .from('follow_up_events_log')
           .insert({
             appointment_id: ghost.id,
@@ -246,6 +246,11 @@ export default async function handler(req, res) {
               poll_window_days: 30,
             },
           });
+        if (auditErr) {
+          console.error('[ghost-debug] audit-log insert FAILED:', auditErr);
+        } else {
+          console.log('[ghost-debug] audit-log insert OK for', ghost.id);
+        }
 
         console.log('[follow-up-ghl-poll] ghost verplaatst:', ghost.id, ghost.lead_name, ghost.scheduled_at);
         ghostsHandled++;
