@@ -74,3 +74,27 @@ export async function deleteZoomMeeting(meetingId) {
   }
   return { success: true };
 }
+
+export async function listUpcomingZoomMeetings(userId) {
+  if (!userId) {
+    console.warn('[zoom] listUpcomingZoomMeetings: no userId provided');
+    return [];
+  }
+  try {
+    const token = await getZoomAccessToken();
+    const res = await fetch(
+      `https://api.zoom.us/v2/users/${userId}/meetings?type=upcoming&page_size=300`,
+      { headers: { Authorization: `Bearer ${token}` } }
+    );
+    if (!res.ok) {
+      const errText = await res.text();
+      console.warn('[zoom] listUpcomingZoomMeetings failed:', res.status, errText.slice(0, 200));
+      return [];
+    }
+    const json = await res.json();
+    return json.meetings || [];
+  } catch (err) {
+    console.warn('[zoom] listUpcomingZoomMeetings exception:', err.message);
+    return [];
+  }
+}

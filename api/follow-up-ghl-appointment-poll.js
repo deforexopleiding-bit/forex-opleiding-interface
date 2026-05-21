@@ -9,6 +9,7 @@
 
 import { supabaseAdmin, checkCronAuth } from './supabase.js';
 import { fetchGhlContact } from './_lib/ghl-contact.js';
+import { listUpcomingZoomMeetings } from './_lib/zoom-meeting.js';
 
 const GHL_API_BASE = 'https://services.leadconnectorhq.com';
 const ABORT_MS = 55_000;
@@ -59,11 +60,20 @@ export default async function handler(req, res) {
     const json = await ghlRes.json();
     const events = json.events || json.data || [];
 
-    if (events.length > 0) {
-      console.log('[ghl-poll-debug] sample event keys:', Object.keys(events[0]));
-      console.log('[ghl-poll-debug] sample event.location:', JSON.stringify(events[0].location));
-      console.log('[ghl-poll-debug] sample full event:', JSON.stringify(events[0], null, 2).slice(0, 1500));
+    // Haal Dave's upcoming Zoom-meetings op (graceful: lege array bij fout)
+    const zoomUserId = process.env.ZOOM_USER_ID;
+    const zoomMeetings = await listUpcomingZoomMeetings(zoomUserId);
+
+    // Bouw match-map: ISO-minuut ('YYYY-MM-DDTHH:MM') → array van { id, join_url, topic }
+    const zoomByMinute = new Map();
+    for (const m of zoomMeetings) {
+      const key = new Date(m.start_time).toISOString().slice(0, 16);
+      const entry = { id: String(m.id), join_url: m.join_url || null, topic: m.topic || '' };
+      const arr = zoomByMinute.get(key);
+      if (arr) arr.push(entry);
+      else zoomByMinute.set(key, [entry]);
     }
+    console.log('[follow-up-ghl-poll] zoom upcoming meetings:', zoomMeetings.length);
 
     for (const event of events) {
       if (Date.now() - startTime > ABORT_MS) {
@@ -79,7 +89,7 @@ export default async function handler(req, res) {
       // Check of dit appointment al bestaat met een handmatig gemuteerde status
       const { data: existing } = await supabaseAdmin
         .from('follow_up_appointments')
-        .select('id, status')
+        .select('id, status, zoom_meeting_id, zoom_join_url')
         .eq('ghl_appointment_id', event.id)
         .maybeSingle();
 
@@ -110,6 +120,17 @@ export default async function handler(req, res) {
         }
       }
 
+      // Match Zoom-meeting op start_time-minuut + topic-fallback
+      const apptMinute = new Date(event.startTime).toISOString().slice(0, 16);
+      const zoomCandidates = zoomByMinute.get(apptMinute) || [];
+      let zoomMatch = null;
+      if (zoomCandidates.length === 1) {
+        zoomMatch = zoomCandidates[0];
+      } else if (zoomCandidates.length > 1) {
+        const title = (event.title || '').toLowerCase();
+        zoomMatch = zoomCandidates.find(c => title && c.topic.toLowerCase().includes(title)) || zoomCandidates[0];
+      }
+
       const row = {
         ghl_appointment_id: event.id,
         lead_name:           event.title || event.contactName || 'Onbekend',
@@ -121,6 +142,8 @@ export default async function handler(req, res) {
         status:              useStatus,
         owner_id:            process.env.DAVE_PROFILE_ID,
         updated_at:          new Date().toISOString(),
+        zoom_meeting_id:     zoomMatch?.id       || existing?.zoom_meeting_id || null,
+        zoom_join_url:       zoomMatch?.join_url || existing?.zoom_join_url   || null,
       };
 
       // 2-step pattern: SELECT existing → UPDATE of INSERT
