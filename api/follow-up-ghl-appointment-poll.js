@@ -203,12 +203,20 @@ export default async function handler(req, res) {
         .gte('scheduled_at', startDate.toISOString())
         .lt('scheduled_at', endDate.toISOString());
 
+      const targetId = 'Ejb49lSDqZMYLzP8nkjJ';
       console.log('[ghost-debug] events received:', events.length);
-      console.log('[ghost-debug] ghlIds:', Array.from(ghlIds).slice(0, 5), '... total:', ghlIds.size);
+      console.log('[ghost-debug] ghlIds total:', ghlIds.size);
+      console.log('[ghost-debug] is target in ghlIds:', ghlIds.has(targetId));
+      console.log('[ghost-debug] ALL ghlIds:', Array.from(ghlIds).join(','));
       console.log('[ghost-debug] dbScheduled count:', dbScheduled?.length || 0);
       console.log('[ghost-debug] window:', startDate.toISOString(), '→', endDate.toISOString());
-      console.log('[ghost-debug] sample dbScheduled ghl_ids:',
-        (dbScheduled || []).slice(0, 5).map(a => ({ id: a.ghl_appointment_id, name: a.lead_name })));
+
+      const targetRow = (dbScheduled || []).find(a => a.ghl_appointment_id === targetId);
+      console.log('[ghost-debug] target in dbScheduled:', targetRow ? 'YES' : 'NO');
+      if (targetRow) console.log('[ghost-debug] target row data:', JSON.stringify(targetRow));
+
+      console.log('[ghost-debug] dbScheduled ghl_ids:',
+        (dbScheduled || []).map(a => a.ghl_appointment_id).join(','));
 
       const ghosts = (dbScheduled || []).filter(a => !ghlIds.has(a.ghl_appointment_id));
       console.log('[ghost-debug] ghosts found:', ghosts.length);
