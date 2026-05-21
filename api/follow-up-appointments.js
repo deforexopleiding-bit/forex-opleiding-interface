@@ -150,6 +150,18 @@ async function handleGet(req, res, supabase) {
 
     return await fetchOpvolgingRange(supabase, start, null, period, res);
 
+  } else if (period === 'wacht_op_reschedule') {
+    const { data, error } = await supabase
+      .from('follow_up_appointments')
+      .select('id, lead_name, lead_email, lead_phone, scheduled_at, status, voicememo_status, zoom_meeting_id, zoom_join_url, owner_id, parent_appointment_id, snelle_notitie')
+      .eq('status', 'wacht_op_reschedule')
+      .order('updated_at', { ascending: false });
+
+    if (error) {
+      return res.status(500).json({ error: error.message });
+    }
+    return res.status(200).json({ period, count: (data || []).length, appointments: data || [] });
+
   } else if (period === 'recent_completed') {
     // Optie C: vandaag + gisteren (00:00 gisteren t/m einde vandaag)
     const today = new Date();

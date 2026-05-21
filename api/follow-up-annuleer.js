@@ -49,10 +49,11 @@ export default async function handler(req, res) {
     return res.status(403).json({ error: 'Onvoldoende rechten' });
   }
 
-  const { appointment_id, reden } = req.body || {};
+  const { appointment_id, reden, mode = 'definitief' } = req.body || {};
   if (!appointment_id) {
     return res.status(400).json({ error: 'appointment_id verplicht' });
   }
+  const newStatus = mode === 'wacht_reschedule' ? 'wacht_op_reschedule' : 'cancelled';
 
   const { data: appt, error: fetchErr } = await supabaseAdmin
     .from('follow_up_appointments')
@@ -104,15 +105,16 @@ export default async function handler(req, res) {
     }
   }
 
-  // ── DB update: status=cancelled + reden append aan snelle_notitie ─────────
+  // ── DB update: status + reden append aan snelle_notitie ──────────────────
   const nu = new Date().toLocaleString('nl-NL', { timeZone: 'Europe/Amsterdam' });
-  const redenSuffix = reden?.trim() ? `\n[${nu}] Geannuleerd: ${reden.trim()}` : '';
+  const actieLabel = mode === 'wacht_reschedule' ? 'Wacht op reschedule' : 'Geannuleerd';
+  const redenSuffix = reden?.trim() ? `\n[${nu}] ${actieLabel}: ${reden.trim()}` : '';
   const newNote = ((appt.snelle_notitie || '') + redenSuffix).trim().slice(0, 2000) || null;
 
   const { error: updateErr } = await supabaseAdmin
     .from('follow_up_appointments')
     .update({
-      status: 'cancelled',
+      status: newStatus,
       snelle_notitie: newNote,
       updated_at: new Date().toISOString(),
     })
@@ -130,9 +132,11 @@ export default async function handler(req, res) {
     .from('follow_up_events_log')
     .insert({
       appointment_id,
-      event_type: 'appointment_cancelled',
+      event_type: mode === 'wacht_reschedule' ? 'appointment_wacht_op_reschedule' : 'appointment_cancelled',
       source: 'manual',
       payload: {
+        mode,
+        new_status: newStatus,
         reden: reden?.trim() || null,
         ghl_cancelled: ghlCancelled,
         changed_by: user.id,
@@ -142,6 +146,7 @@ export default async function handler(req, res) {
   return res.status(200).json({
     success: true,
     ghl_cancelled: ghlCancelled,
+    new_status: newStatus,
   });
 }
 

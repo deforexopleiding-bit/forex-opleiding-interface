@@ -93,7 +93,8 @@ export default async function handler(req, res) {
         .eq('ghl_appointment_id', event.id)
         .maybeSingle();
 
-      const manualStatuses = ['no_show', 'completed', 'in_progress', 'cancelled'];
+      const manualStatuses = ['no_show', 'completed', 'in_progress', 'cancelled',
+                              'verplaatst', 'verwijderd', 'wacht_op_reschedule'];
       const ghlMappedStatus = mapGhlStatus(event.appointmentStatus);
       const useStatus = (existing && manualStatuses.includes(existing.status))
         ? existing.status  // Bewaar handmatig gezette status
@@ -207,11 +208,11 @@ export default async function handler(req, res) {
       console.log('[follow-up-ghl-poll] ghosts found:', ghosts.length);
 
       for (const ghost of ghosts) {
-        // Status flip naar 'verplaatst' (klant heeft via GHL gereschedduld)
+        // Status flip naar 'wacht_op_reschedule' (klant heeft via GHL gereschedduld)
         await supabaseAdmin
           .from('follow_up_appointments')
           .update({
-            status: 'verplaatst',
+            status: 'wacht_op_reschedule',
             updated_at: new Date().toISOString(),
           })
           .eq('id', ghost.id);
@@ -221,7 +222,7 @@ export default async function handler(req, res) {
           .from('follow_up_events_log')
           .insert({
             source: 'cron',
-            event_type: 'appointment_ghost_verplaatst',
+            event_type: 'appointment_ghost_wacht_op_reschedule',
             payload: {
               appointment_id: ghost.id,
               ghl_appointment_id: ghost.ghl_appointment_id,
@@ -237,21 +238,70 @@ export default async function handler(req, res) {
           console.error('[follow-up-ghl-poll] ghost audit-log insert FAILED:', auditErr);
         }
 
-        console.log('[follow-up-ghl-poll] ghost verplaatst:', ghost.id, ghost.lead_name, ghost.scheduled_at);
+        console.log('[follow-up-ghl-poll] ghost wacht_op_reschedule:', ghost.id, ghost.lead_name, ghost.scheduled_at);
         ghostsHandled++;
       }
 
       if (ghostsHandled > 0) {
-        console.log(`[follow-up-ghl-poll] ${ghostsHandled} ghost(s) als verplaatst gemarkeerd`);
+        console.log(`[follow-up-ghl-poll] ${ghostsHandled} ghost(s) als wacht_op_reschedule gemarkeerd`);
       }
     } else {
       console.log('[follow-up-ghl-poll] events.length=0, ghost-cleanup overgeslagen');
     }
 
+    // ── Auto-resolve: wacht_op_reschedule rijen waarvan de lead een nieuwe scheduled heeft ──
+    const { data: waitingList } = await supabaseAdmin
+      .from('follow_up_appointments')
+      .select('id, lead_ghl_contact_id, lead_name, scheduled_at')
+      .eq('status', 'wacht_op_reschedule')
+      .not('lead_ghl_contact_id', 'is', null);
+
+    let resolvedCount = 0;
+    for (const waiting of (waitingList || [])) {
+      const { data: newScheduled } = await supabaseAdmin
+        .from('follow_up_appointments')
+        .select('id')
+        .eq('lead_ghl_contact_id', waiting.lead_ghl_contact_id)
+        .eq('status', 'scheduled')
+        .gte('scheduled_at', new Date().toISOString())
+        .neq('id', waiting.id)
+        .limit(1);
+
+      if (newScheduled && newScheduled.length > 0) {
+        await supabaseAdmin
+          .from('follow_up_appointments')
+          .update({ status: 'cancelled', updated_at: new Date().toISOString() })
+          .eq('id', waiting.id);
+
+        await supabaseAdmin
+          .from('follow_up_events_log')
+          .insert({
+            source: 'cron',
+            event_type: 'appointment_auto_resolved',
+            payload: {
+              appointment_id: waiting.id,
+              lead_name: waiting.lead_name,
+              old_status: 'wacht_op_reschedule',
+              new_status: 'cancelled',
+              resolved_by_appointment: newScheduled[0].id,
+              reason: 'Klant heeft nieuwe afspraak ingepland',
+            },
+            processed: true,
+          });
+
+        resolvedCount++;
+        console.log('[follow-up-ghl-poll] auto-resolved:', waiting.id, waiting.lead_name);
+      }
+    }
+
+    if (resolvedCount > 0) {
+      console.log(`[follow-up-ghl-poll] ${resolvedCount} wacht_op_reschedule auto-resolved`);
+    }
+
     const ok     = results.filter(r => r.ok).length;
     const failed = results.filter(r => !r.ok && !r.skipped).length;
     console.log(`[follow-up-ghl-poll] ${ok} gesynchroniseerd, ${failed} mislukt van ${events.length} events`);
-    return res.status(200).json({ synced: ok, failed, total: events.length, ghosts: ghostsHandled, results });
+    return res.status(200).json({ synced: ok, failed, total: events.length, ghosts: ghostsHandled, resolved: resolvedCount, results });
   } catch (err) {
     console.error('[follow-up-ghl-poll] onverwachte fout:', err.message);
     return res.status(500).json({ error: err.message });

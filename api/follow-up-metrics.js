@@ -190,6 +190,15 @@ export async function computeMetrics(supabaseAdmin, opts = {}) {
   }
   metrics.outcomes_missing_today = missingToday;
 
+  // Wacht op reschedule: aantal appointments in afwachting van nieuwe datum
+  const { count: waitCount } = await apptQ(
+    supabaseAdmin
+      .from('follow_up_appointments')
+      .select('id', { count: 'exact', head: true })
+      .eq('status', 'wacht_op_reschedule')
+  );
+  metrics.wacht_op_reschedule_count = waitCount || 0;
+
   return metrics;
 }
 
