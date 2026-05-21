@@ -203,7 +203,15 @@ export default async function handler(req, res) {
         .gte('scheduled_at', startDate.toISOString())
         .lt('scheduled_at', endDate.toISOString());
 
+      console.log('[ghost-debug] events received:', events.length);
+      console.log('[ghost-debug] ghlIds:', Array.from(ghlIds).slice(0, 5), '... total:', ghlIds.size);
+      console.log('[ghost-debug] dbScheduled count:', dbScheduled?.length || 0);
+      console.log('[ghost-debug] window:', startDate.toISOString(), '→', endDate.toISOString());
+      console.log('[ghost-debug] sample dbScheduled ghl_ids:',
+        (dbScheduled || []).slice(0, 5).map(a => ({ id: a.ghl_appointment_id, name: a.lead_name })));
+
       const ghosts = (dbScheduled || []).filter(a => !ghlIds.has(a.ghl_appointment_id));
+      console.log('[ghost-debug] ghosts found:', ghosts.length);
 
       for (const ghost of ghosts) {
         // Status flip naar 'verplaatst' (klant heeft via GHL gereschedduld)
