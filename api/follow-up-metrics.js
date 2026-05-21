@@ -199,6 +199,24 @@ export async function computeMetrics(supabaseAdmin, opts = {}) {
   );
   metrics.wacht_op_reschedule_count = waitCount || 0;
 
+  // Afspraken nog te gaan vandaag: scheduled, vandaag, minder dan 30 min na starttijd voorbij
+  const remTodayStart = new Date();
+  remTodayStart.setHours(0, 0, 0, 0);
+  const remTodayEnd = new Date(remTodayStart);
+  remTodayEnd.setDate(remTodayEnd.getDate() + 1);
+  const remCutoff = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+
+  const { count: remainingCount } = await apptQ(
+    supabaseAdmin
+      .from('follow_up_appointments')
+      .select('id', { count: 'exact', head: true })
+      .eq('status', 'scheduled')
+      .gte('scheduled_at', remTodayStart.toISOString())
+      .lt('scheduled_at', remTodayEnd.toISOString())
+      .gt('scheduled_at', remCutoff)
+  );
+  metrics.appointments_remaining_today = remainingCount || 0;
+
   return metrics;
 }
 

@@ -2715,8 +2715,8 @@
 
       // Hero: afspraken vandaag. Tomorrow-count komt async via loadMorgenCount().
       const todayTotal = m.appointments_total ?? 0;
-      const todayDone = (m.appointments_completed || 0) + (m.appointments_no_show || 0);
-      const todayRemaining = Math.max(0, todayTotal - todayDone);
+      const todayRemaining = m.appointments_remaining_today ?? 0;
+      const todayDone = Math.max(0, todayTotal - todayRemaining);
 
       const cards = [
         {
