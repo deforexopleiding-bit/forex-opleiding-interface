@@ -153,7 +153,7 @@ async function handleGet(req, res, supabase) {
   } else if (period === 'wacht_op_reschedule') {
     const { data, error } = await supabase
       .from('follow_up_appointments')
-      .select('id, lead_name, lead_email, lead_phone, scheduled_at, status, voicememo_status, zoom_meeting_id, zoom_join_url, owner_id, parent_appointment_id, snelle_notitie')
+      .select('id, lead_name, lead_email, lead_phone, scheduled_at, updated_at, status, voicememo_status, zoom_meeting_id, zoom_join_url, owner_id, parent_appointment_id, snelle_notitie')
       .eq('status', 'wacht_op_reschedule')
       .order('updated_at', { ascending: false });
 

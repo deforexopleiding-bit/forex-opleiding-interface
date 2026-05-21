@@ -242,6 +242,8 @@
     .fu-card-badge.status-default     { background: var(--color-neutral);  color: var(--text-inverse); }
     .fu-card-badge.status-verwijderd  { background: #b91c1c; color: #fff; }
     .fu-card-avatar.status-verwijderd { background: #fecaca; color: #7f1d1d; }
+    .fu-card-badge.status-wacht-op-reschedule  { background: #fef3c7; color: #92400e; }
+    .fu-card-avatar.status-wacht-op-reschedule { background: #fef3c7; color: #92400e; }
     /* Outcome-badges op afgeronde cards */
     .fu-card-badge.outcome-green { background:#d1fae5; color:#065f46; }
     .fu-card-badge.outcome-amber { background:#fef3c7; color:#92400e; }
@@ -1017,6 +1019,24 @@
       <div class="fu-opvolging-search">
         <input type="text" id="opvolging-search-input" placeholder="🔍 Zoek op naam…" autocomplete="off">
       </div>
+      <section class="fu-section" id="section-wacht-reschedule" style="display:none;">
+        <div class="fu-section-header">
+          <div class="fu-section-title">Wacht op reschedule</div>
+          <div class="fu-section-count" id="count-wacht-reschedule">—</div>
+        </div>
+        <div class="fu-bucket" data-bucket="recent">
+          <h4 style="font-size:13px;color:#059669;margin:12px 0 8px;">🟢 Recent (0-3 dagen)</h4>
+          <div id="list-wacht-recent"></div>
+        </div>
+        <div class="fu-bucket" data-bucket="stale">
+          <h4 style="font-size:13px;color:#d97706;margin:12px 0 8px;">🟡 Te lang stil (4-7 dagen)</h4>
+          <div id="list-wacht-stale"></div>
+        </div>
+        <div class="fu-bucket" data-bucket="forgotten">
+          <h4 style="font-size:13px;color:#dc2626;margin:12px 0 8px;">🔴 Mogelijk vergeten (8+ dagen)</h4>
+          <div id="list-wacht-forgotten"></div>
+        </div>
+      </section>
       <section class="fu-section" id="section-opvolging-overdue">
         <div class="fu-section-header">
           <div class="fu-section-title">Achterstallige opvolgingen</div>
@@ -1167,6 +1187,22 @@
       </div>
       <div class="fu-modal-body">
         <p style="color:var(--text-secondary);margin-bottom:12px;">Lead: <strong id="annuleer-lead-name"></strong></p>
+        <div class="fu-annuleer-options" style="margin-bottom:16px;">
+          <label style="display:block;padding:8px;cursor:pointer;">
+            <input type="radio" name="annuleer-mode" value="definitief" checked />
+            <strong>Definitief annuleren</strong>
+            <div style="font-size:12px;color:var(--text-secondary);margin-left:24px;">
+              Lead is weg → komt in Archief
+            </div>
+          </label>
+          <label style="display:block;padding:8px;cursor:pointer;">
+            <input type="radio" name="annuleer-mode" value="wacht_reschedule" />
+            <strong>Wacht op nieuwe afspraak</strong>
+            <div style="font-size:12px;color:var(--text-secondary);margin-left:24px;">
+              Lead in opvolging → automatisch sluiten zodra klant nieuwe datum boekt
+            </div>
+          </label>
+        </div>
         <div class="fu-field">
           <label class="fu-label">Reden (optioneel)</label>
           <textarea class="fu-input fu-textarea" id="annuleer-reden" rows="3" maxlength="500" placeholder="Bv. lead heeft zelf geannuleerd…"></textarea>
@@ -1317,6 +1353,7 @@
         completed: 'Afgerond',
         no_show: 'No-show',
         cancelled: 'Geannuleerd',
+        wacht_op_reschedule: 'Wacht op reschedule',
       };
       return labels[status] || status;
     }
@@ -1341,6 +1378,7 @@
         'in-progress': 'Bezig',
         'verplaatst':  'Verplaatst',
         'verwijderd':  'Verwijderd',
+        'wacht-op-reschedule': 'Wacht op reschedule',
       };
 
       // "Beoordelen" UI-state: scheduled call >30 min geleden zonder outcome (frontend-only)
@@ -1932,6 +1970,46 @@
       });
     }
 
+    async function loadWachtReschedule() {
+      const section = document.getElementById('section-wacht-reschedule');
+      if (!section) return;
+      try {
+        const { appointments } = await fetchAppointments('wacht_op_reschedule');
+
+        if (!appointments || appointments.length === 0) {
+          section.style.display = 'none';
+          return;
+        }
+
+        section.style.display = 'block';
+        document.getElementById('count-wacht-reschedule').textContent = appointments.length;
+
+        const now = Date.now();
+        const buckets = { recent: [], stale: [], forgotten: [] };
+        for (const appt of appointments) {
+          const ageDays = (now - new Date(appt.updated_at || appt.scheduled_at).getTime()) / 86400000;
+          if (ageDays <= 3) buckets.recent.push(appt);
+          else if (ageDays <= 7) buckets.stale.push(appt);
+          else buckets.forgotten.push(appt);
+        }
+
+        ['recent', 'stale', 'forgotten'].forEach(b => {
+          const listEl = document.getElementById(`list-wacht-${b}`);
+          const bucketDiv = document.querySelector(`[data-bucket="${b}"]`);
+          listEl.innerHTML = '';
+          if (buckets[b].length === 0) {
+            bucketDiv.style.display = 'none';
+          } else {
+            bucketDiv.style.display = 'block';
+            buckets[b].forEach(appt => listEl.appendChild(renderCard(appt)));
+          }
+        });
+      } catch (err) {
+        console.warn('[follow-up] wacht-op-reschedule load error:', err.message);
+        section.style.display = 'none';
+      }
+    }
+
     async function renderSection(period, containerId, countId, includeDate) {
       const container = document.getElementById(containerId);
       const countEl = document.getElementById(countId);
@@ -2429,6 +2507,7 @@
       loadDashboardMetrics(); // parallel, niet-blokkerend
 
       await Promise.all([
+        loadWachtReschedule(),
         renderSection('opvolging_overdue', 'list-opvolging-overdue', 'count-opvolging-overdue', false),
         renderSection('opvolging_today', 'list-opvolging-today', 'count-opvolging-today', false),
         renderSection('opvolging_week', 'list-opvolging-week', 'count-opvolging-week', false),
@@ -2531,6 +2610,11 @@
             ? `${m.achterstallig_opvolgingen ?? 0} opvolg · ${m.achterstallig_outcomes ?? 0} outc · ${m.achterstallig_voicememos ?? 0} memo`
             : undefined,
           cls: (m.achterstallig_totaal ?? m.opvolgingen_overdue ?? 0) > 0 ? 'danger' : 'success',
+        },
+        {
+          label: 'Wacht op reschedule',
+          value: m.wacht_op_reschedule_count ?? 0,
+          sub: 'leads in opvolging',
         },
       ];
 
@@ -2717,6 +2801,8 @@
       currentAnnuleerAppt = appt;
       document.getElementById('annuleer-lead-name').textContent = appt.lead_name;
       document.getElementById('annuleer-reden').value = '';
+      const defMode = document.querySelector('input[name="annuleer-mode"][value="definitief"]');
+      if (defMode) defMode.checked = true;
       const errDiv = document.getElementById('annuleer-error');
       errDiv.style.display = 'none';
       errDiv.textContent = '';
@@ -2738,6 +2824,7 @@
       if (!currentAnnuleerAppt) return;
 
       const reden = document.getElementById('annuleer-reden').value.trim();
+      const mode = document.querySelector('input[name="annuleer-mode"]:checked')?.value || 'definitief';
       const saveBtn = document.getElementById('annuleer-save');
       saveBtn.disabled = true;
       saveBtn.textContent = 'Bezig…';
@@ -2753,6 +2840,7 @@
           body: JSON.stringify({
             appointment_id: currentAnnuleerAppt.id,
             reden: reden || undefined,
+            mode,
           }),
         });
 
@@ -2768,7 +2856,7 @@
           return;
         }
 
-        window.AgentShared?.showToast('Call geannuleerd');
+        window.AgentShared?.showToast(mode === 'wacht_reschedule' ? 'Gemarkeerd: wacht op reschedule' : 'Call geannuleerd');
         closeAnnuleerModal();
         location.reload();
       } catch (err) {
