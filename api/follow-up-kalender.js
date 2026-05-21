@@ -37,6 +37,7 @@ export default async function handler(req, res) {
   let query = supabaseAdmin
     .from('follow_up_appointments')
     .select('id, lead_name, scheduled_at, status, duration_minutes, owner_id')
+    .eq('status', 'scheduled')
     .gte('scheduled_at', start)
     .lte('scheduled_at', end)
     .order('scheduled_at');
