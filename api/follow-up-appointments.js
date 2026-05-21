@@ -489,7 +489,8 @@ async function fetchOpvolgingRange(supabase, startDate, endDate, period, res) {
   const { data, error } = await supabase
     .from('follow_up_appointments')
     .select('id, lead_name, lead_email, lead_phone, scheduled_at, status, voicememo_status, zoom_meeting_id, zoom_join_url, owner_id')
-    .in('id', ids);
+    .in('id', ids)
+    .in('status', ['scheduled', 'in_progress', 'completed', 'no_show']);
 
   if (error) {
     return res.status(500).json({ error: error.message });
