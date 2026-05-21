@@ -1400,6 +1400,7 @@
             <option value="event">Event uitnodigen</option>
             <option value="sluiten">Sluiten (klant wordt)</option>
             <option value="niet_meer_opvolgen">Niet meer opvolgen</option>
+            <option value="onboarding_starten" id="volgende-optie-onboarding" hidden>Onboarding starten</option>
           </select>
         </div>
         <div class="fu-field fu-terugkom-field" style="display:none;">
@@ -2326,6 +2327,12 @@
           OUTCOME_SHOW_BEZWAREN.has(currentOutcomeChoice) ? 'block' : 'none';
         document.querySelector('.fu-volgende-field').style.display =
           OUTCOME_SHOW_VOLGENDE.has(currentOutcomeChoice) ? 'block' : 'none';
+        // 'Onboarding starten' alleen tonen bij Klant geworden
+        const onboardingOpt = document.getElementById('volgende-optie-onboarding');
+        const showOnboarding = currentOutcomeChoice === 'klant_geworden';
+        onboardingOpt.hidden = !showOnboarding;
+        const vaSel = document.getElementById('volgende-actie-select');
+        if (!showOnboarding && vaSel.value === 'onboarding_starten') vaSel.value = '';
         document.querySelector('.fu-terugkom-field').style.display =
           OUTCOME_SHOW_TERUGKOM.has(currentOutcomeChoice) ? 'block' : 'none';
         document.getElementById('outcome-submit').disabled = !(currentOutcomeChoice && currentFollowUpType);

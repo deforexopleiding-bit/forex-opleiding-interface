@@ -37,7 +37,7 @@ const VALID_OUTCOMES = [
   'niet_bereikt', 'interesse_uitstel', 'interesse_overleg',
   'geen_interesse', 'niet_geschikt', 'wil_niet_meer',
 ];
-const VALID_VOLGENDE_ACTIES = ['bellen', 'email', 'event', 'sluiten', 'niet_meer_opvolgen'];
+const VALID_VOLGENDE_ACTIES = ['bellen', 'email', 'event', 'sluiten', 'niet_meer_opvolgen', 'onboarding_starten'];
 const VALID_FOLLOW_UP_TYPES = ['geen', 'intern', 'agenda'];
 
 export default async function handler(req, res) {
