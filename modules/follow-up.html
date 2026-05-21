@@ -23,7 +23,8 @@
 
     .main-content { margin-left: var(--sidebar-w, 220px); min-height: 100vh; padding: 28px 28px 64px; max-width: 1200px; position: relative; z-index: 1; }
 
-    .fu-metrics-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; margin: 0 0 28px; }
+    .fu-metrics-row { display: grid; grid-template-columns: 2fr 1fr 1fr; gap: 12px; margin: 0 0 28px; }
+    @media (max-width: 720px) { .fu-metrics-row { grid-template-columns: 1fr; } }
     .fu-metric-card {
       display: flex;
       align-items: center;
@@ -53,17 +54,36 @@
     .fu-metric-label { font-size: 11px; color: var(--text-secondary); margin-bottom: 2px; }
     .fu-metric-value { font-size: 22px; font-weight: 500; color: var(--text-primary); line-height: 1.1; }
     .fu-metric-sub { font-size: 11px; color: var(--text-tertiary); margin-top: 2px; }
-    .fu-metric-card:first-child { grid-column: span 2; }
-    .fu-metric-subpills { display: flex; gap: 4px; margin-top: 8px; flex-wrap: wrap; }
-    .fu-metric-subpill {
-      font-size: 10px;
-      background: var(--surface-2, #f3f4f6);
-      color: var(--text-secondary, #6b7280);
-      padding: 3px 8px;
-      border-radius: 4px;
-      white-space: nowrap;
+    /* Hero-card (afspraken vandaag) */
+    .fu-metric-card-hero {
+      background: linear-gradient(135deg, var(--brand-primary), var(--brand-primary-hover));
+      color: var(--text-inverse, #ffffff);
+      padding: 18px 20px;
+      flex-direction: column;
+      align-items: stretch;
+      justify-content: space-between;
+      gap: 14px;
+      min-height: 120px;
     }
-    .fu-metric-subpill-active { background: #E6F1FB; color: #185FA5; }
+    .fu-hero-label { font-size: 11px; opacity: 0.65; letter-spacing: 0.5px; margin-bottom: 6px; }
+    .fu-hero-value-row { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+    .fu-hero-value { font-size: 36px; font-weight: 500; line-height: 1; }
+    .fu-hero-sub { font-size: 14px; opacity: 0.75; }
+    .fu-hero-segments { display: flex; gap: 3px; margin-bottom: 6px; }
+    .fu-hero-segment { height: 5px; flex: 1; background: rgba(255,255,255,0.2); border-radius: 2px; }
+    .fu-hero-segment.is-done { background: rgba(255,255,255,0.9); }
+    .fu-hero-tomorrow { font-size: 11px; opacity: 0.6; }
+    /* Actions-card */
+    .fu-metric-card-actions { flex-direction: column; align-items: stretch; gap: 10px; padding: 14px 16px; }
+    .fu-metric-actions-header { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
+    .fu-metric-actions-header .ti { font-size: 14px; color: var(--text-secondary); }
+    .fu-metric-actions-header span { font-size: 11px; color: var(--text-secondary); letter-spacing: 0.3px; }
+    .fu-metric-action-row { display: flex; align-items: center; justify-content: space-between; padding: 4px 0; }
+    .fu-metric-action-row.is-amber { background: #FAEEDA; margin: 0 -16px; padding: 4px 16px; border-radius: 4px; }
+    .fu-metric-action-row.is-amber .fu-metric-action-label { color: #633806; }
+    .fu-metric-action-row.is-amber .fu-metric-action-value { color: #412402; }
+    .fu-metric-action-label { font-size: 12px; color: var(--text-primary); }
+    .fu-metric-action-value { font-size: 14px; font-weight: 500; }
     .fu-metric-value.success { color: #4ade80; }
     .fu-metric-value.warning { color: #facc15; }
     .fu-metric-value.danger  { color: #f87171; }
@@ -998,7 +1018,7 @@
     <header class="page-header">
       <div>
         <h1>Follow-up Module</h1>
-        <p class="page-subtitle">Sales-calls van Dave — voicememo's, no-shows en opvolging.</p>
+        <p class="page-subtitle">Sales-afspraken van Dave — voicememo's, no-shows en opvolging.</p>
         <a href="follow-up-admin.html" id="admin-link" style="display:none; margin-top:8px; color:var(--text-secondary,rgba(255,255,255,0.7)); text-decoration:none; font-size:13px;">📋 Screenshot reviews →</a>
       </div>
     </header>
@@ -1976,7 +1996,7 @@
     const EMPTY_LABELS = {
       'today':               'Geen afspraken vandaag',
       'open_acties':         'Geen open acties · alles bij',
-      'recent_completed':    'Geen recente afgeronde calls',
+      'recent_completed':    'Geen recente afgeronde afspraken',
       'opvolging_overdue':   'Geen achterstallige opvolgingen',
       'opvolging_today':     'Geen opvolgingen vandaag',
       'opvolging_week':      'Geen opvolgingen komende week',
@@ -2583,13 +2603,9 @@
         if (!res.ok) return;
         const { count } = await res.json();
         if (count === undefined) return;
-        const vandaagCard = document.querySelector('.fu-metric-card');
-        if (!vandaagCard) return;
-        const target = vandaagCard.querySelector('.fu-metric-content') || vandaagCard;
-        const span = document.createElement('span');
-        span.className = 'fu-metric-morgen';
-        span.textContent = `↘ morgen: ${count}`;
-        target.appendChild(span);
+        // Tomorrow-count toont in de hero-card (vervangt oude morgen-badge)
+        const heroTomorrowEl = document.getElementById('fu-hero-tomorrow-count');
+        if (heroTomorrowEl) heroTomorrowEl.textContent = count;
       } catch (err) {
         console.warn('[follow-up] morgen-count fout:', err.message);
       }
@@ -2697,74 +2713,95 @@
     function renderMetrics(m) {
       renderOverdueTopbar(m, currentProfile);
 
-      const eersteCount = m.first_calls ?? m.appointments_total ?? 0;
-      const agendaCount = m.agenda_followups ?? 0;
-      const internCount = m.intern_followups ?? 0;
+      // Hero: afspraken vandaag. Tomorrow-count komt async via loadMorgenCount().
+      const todayTotal = m.appointments_total ?? 0;
+      const todayDone = (m.appointments_completed || 0) + (m.appointments_no_show || 0);
+      const todayRemaining = Math.max(0, todayTotal - todayDone);
 
       const cards = [
         {
-          label: 'Calls vandaag',
-          value: eersteCount,
-          icon: 'ti-phone',
-          iconClass: 'blue',
-          subPills: [
-            { label: 'Totaal', value: eersteCount, active: true },
-            { label: 'Zoom', value: agendaCount },
-            { label: 'Intern', value: internCount },
-          ],
+          type: 'hero',
+          label: 'AFSPRAKEN VANDAAG',
+          remainingCount: todayRemaining,
+          totalCount: todayTotal,
+          doneCount: todayDone,
         },
         {
-          label: 'Outcomes',
-          value: m.outcomes_total,
-          sub: `${m.outcomes_klant} klant · ${m.outcomes_geen_klant} geen klant`,
-          icon: 'ti-target',
-          iconClass: 'green',
-        },
-        {
+          type: 'standard',
           label: 'Conversie',
           value: m.conversion_rate !== null ? m.conversion_rate + '%' : '—',
-          cls: m.conversion_rate !== null && m.conversion_rate >= 50 ? 'success'
-             : m.conversion_rate !== null && m.conversion_rate < 30  ? 'danger' : '',
+          sub: `${m.outcomes_klant ?? 0} klant · ${m.outcomes_geen_klant ?? 0} geen klant`,
           icon: 'ti-trending-up',
           iconClass: 'teal',
+          cls: m.conversion_rate !== null && m.conversion_rate >= 50 ? 'success'
+             : m.conversion_rate !== null && m.conversion_rate < 30  ? 'danger' : '',
         },
         {
-          label: 'Achterstallig',
-          value: m.achterstallig_totaal ?? m.opvolgingen_overdue ?? 0,
-          sub: m.achterstallig_totaal != null
-            ? `${m.achterstallig_opvolgingen ?? 0} opvolg · ${m.achterstallig_outcomes ?? 0} outc · ${m.achterstallig_voicememos ?? 0} memo`
-            : undefined,
-          cls: (m.achterstallig_totaal ?? m.opvolgingen_overdue ?? 0) > 0 ? 'danger' : 'success',
-          icon: 'ti-alert-circle',
-          iconClass: 'neutral',
-        },
-        {
-          label: 'Wacht reschedule',
-          value: m.wacht_op_reschedule_count ?? 0,
-          icon: 'ti-clock-hour-3',
-          iconClass: 'amber',
+          type: 'actions',
+          label: 'ACTIE NODIG',
+          items: [
+            { label: 'Achterstallig', value: m.achterstallig_totaal ?? m.opvolgingen_overdue ?? 0 },
+            { label: 'Wacht reschedule', value: m.wacht_op_reschedule_count ?? 0, amber: true },
+          ],
         },
       ];
 
-      document.getElementById('fu-metrics-row').innerHTML = cards.map(c => `
-        <div class="fu-metric-card">
-          <div class="fu-metric-icon fu-metric-icon-${c.iconClass || 'neutral'}">
-            <i class="ti ${c.icon || ''}" aria-hidden="true"></i>
-          </div>
-          <div class="fu-metric-content">
-            <div class="fu-metric-label">${c.label}</div>
-            <div class="fu-metric-value ${c.cls || ''}">${c.value}</div>
-            ${c.sub ? `<div class="fu-metric-sub">${c.sub}</div>` : ''}
-            ${c.subPills ? `
-              <div class="fu-metric-subpills">
-                ${c.subPills.map(p => `
-                  <span class="fu-metric-subpill ${p.active ? 'fu-metric-subpill-active' : ''}">${p.label} · ${p.value}</span>
-                `).join('')}
+      const renderCardHTML = (c) => {
+        if (c.type === 'hero') {
+          const segments = [];
+          for (let i = 0; i < c.totalCount; i++) {
+            segments.push(`<div class="fu-hero-segment ${i < c.doneCount ? 'is-done' : ''}"></div>`);
+          }
+          return `
+            <div class="fu-metric-card fu-metric-card-hero">
+              <div class="fu-hero-content">
+                <div class="fu-hero-label">${c.label}</div>
+                <div class="fu-hero-value-row">
+                  <span class="fu-hero-value">${c.remainingCount}</span>
+                  <span class="fu-hero-sub">van ${c.totalCount} afspraken te gaan</span>
+                </div>
               </div>
-            ` : ''}
+              <div class="fu-hero-progress">
+                <div class="fu-hero-segments">${segments.join('')}</div>
+                <div class="fu-hero-tomorrow">Morgen: <span id="fu-hero-tomorrow-count">—</span> afspraken</div>
+              </div>
+            </div>
+          `;
+        }
+
+        if (c.type === 'actions') {
+          return `
+            <div class="fu-metric-card fu-metric-card-actions">
+              <div class="fu-metric-actions-header">
+                <i class="ti ti-bell" aria-hidden="true"></i>
+                <span>${c.label}</span>
+              </div>
+              ${c.items.map(item => `
+                <div class="fu-metric-action-row ${item.amber ? 'is-amber' : ''}">
+                  <span class="fu-metric-action-label">${item.label}</span>
+                  <span class="fu-metric-action-value">${item.value}</span>
+                </div>
+              `).join('')}
+            </div>
+          `;
+        }
+
+        // standard
+        return `
+          <div class="fu-metric-card">
+            <div class="fu-metric-icon fu-metric-icon-${c.iconClass || 'neutral'}">
+              <i class="ti ${c.icon || ''}" aria-hidden="true"></i>
+            </div>
+            <div class="fu-metric-content">
+              <div class="fu-metric-label">${c.label}</div>
+              <div class="fu-metric-value ${c.cls || ''}">${c.value}</div>
+              ${c.sub ? `<div class="fu-metric-sub">${c.sub}</div>` : ''}
+            </div>
           </div>
-        </div>
-      `).join('');
+        `;
+      };
+
+      document.getElementById('fu-metrics-row').innerHTML = cards.map(renderCardHTML).join('');
       document.getElementById('fu-metrics-container').style.display = 'block';
     }
 
