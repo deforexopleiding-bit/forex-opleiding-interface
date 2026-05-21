@@ -83,8 +83,10 @@ export default async function handler(req, res) {
     'Nieuwe Lead': 0,
     Appointment: 0,
     'Event Aanmelding': 0,
-    Klantvraag: 0,
-    Factuurvraag: 0,
+    Klantvragen: 0,
+    Betaalbevestigingen: 0,
+    'Openstaande facturen': 0,
+    'Aankopen/betalingen': 0,
     Reclame: 0,
     Overig: 0
   };
@@ -289,7 +291,7 @@ function categorize(subject, fromAddress, headerInfo) {
     s.includes('payment')
   ) {
     if (isAutomatedSender(fromAddress)) return 'Overig';
-    return 'Factuurvraag';
+    return 'Klantvragen';
   }
 
   // 5. Reclame / marketing.
@@ -306,7 +308,7 @@ function categorize(subject, fromAddress, headerInfo) {
     s.includes('werkt niet') ||
     s.includes('support')
   ) {
-    return 'Klantvraag';
+    return 'Klantvragen';
   }
 
   // 6. Al het overige.
@@ -322,10 +324,8 @@ function generateReply(category, name) {
       return `${greeting}\n\nBedankt voor je interesse in De Forex Opleiding! Een van onze adviseurs neemt binnen 24 uur persoonlijk contact met je op om je situatie te bespreken en de juiste vervolgstappen te plannen.\n\nIn de tussentijd kun je alvast onze gratis introductievideo bekijken.\n\n${signoff}`;
     case 'Appointment':
       return `${greeting}\n\nBedankt voor de bevestiging — je uitlegsessie staat ingepland. Je ontvangt vlak voor de afspraak een herinnering met de toegangslink.\n\nMocht je voor die tijd nog vragen hebben, laat het gerust weten.\n\n${signoff}`;
-    case 'Klantvraag':
+    case 'Klantvragen':
       return `${greeting}\n\nBedankt voor je bericht. We bekijken je vraag en komen zo spoedig mogelijk (uiterlijk binnen 1 werkdag) bij je terug met een uitgebreid antwoord.\n\n${signoff}`;
-    case 'Factuurvraag':
-      return `${greeting}\n\nBedankt voor je bericht over de factuur. We bekijken het direct en zorgen dat je vandaag nog uitsluitsel krijgt. Mocht het sneller moeten, dan ben je telefonisch ook welkom.\n\n${signoff}`;
     default:
       return `${greeting}\n\nBedankt voor je bericht. We hebben het in goede orde ontvangen en komen zo snel mogelijk bij je terug.\n\n${signoff}`;
   }

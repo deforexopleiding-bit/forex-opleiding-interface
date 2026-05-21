@@ -3,7 +3,8 @@ import { supabase } from './supabase.js';
 
 const VALID_CATEGORIES = [
   'Nieuwe Lead', 'Appointment', 'Event Aanmelding',
-  'Klantvraag', 'Factuurvraag', 'Reclame', 'Overig'
+  'Klantvragen', 'Betaalbevestigingen', 'Openstaande facturen', 'Aankopen/betalingen',
+  'Reclame', 'Overig'
 ];
 
 const FALLBACK_BEDRIJFSPROFIEL = `De Forex Opleiding is een financiële trading opleiding in Nederland.
@@ -405,9 +406,8 @@ async function savePattern(senderEmail, senderDomain, category, confidence, lear
 
 // ── `requires_action` afleiden van categorie (als AI het niet geeft) ─────────
 function deriveRequiresAction(category, aiValue) {
-  if (aiValue !== undefined && aiValue !== null) return !!aiValue;
-  if (category === 'Klantvraag' || category === 'Factuurvraag') return true;
-  return false;
+  // Categorie is leidend: alleen Klantvragen en Openstaande facturen vereisen actie.
+  return category === 'Klantvragen' || category === 'Openstaande facturen';
 }
 
 // ── Centrale handler ──────────────────────────────────────────────────────────
@@ -524,10 +524,10 @@ export async function categorize({ from, subject, bodySnippet, date }) {
     const cat = wlCat || 'Overig';
     return {
       category: cat, requires_action: deriveRequiresAction(cat, null),
-      priority: cat === 'Klantvraag' ? 'normaal' : 'laag',
+      priority: cat === 'Klantvragen' ? 'normaal' : 'laag',
       confidence: 95, source: 'whitelist',
       reasoning: 'Afzender staat op whitelist',
-      key_signals: ['whitelist'], suggested_reply_tone: cat === 'Klantvraag' ? 'vriendelijk' : 'niet_van_toepassing',
+      key_signals: ['whitelist'], suggested_reply_tone: cat === 'Klantvragen' ? 'vriendelijk' : 'niet_van_toepassing',
       is_definitely_not_spam: true, needs_review: false
     };
   }
@@ -540,10 +540,10 @@ export async function categorize({ from, subject, bodySnippet, date }) {
       const cat = pattern.category;
       return {
         category: cat, requires_action: deriveRequiresAction(cat, null),
-        priority: cat === 'Klantvraag' || cat === 'Factuurvraag' ? 'normaal' : 'laag',
+        priority: cat === 'Klantvragen' ? 'normaal' : 'laag',
         confidence: pattern.confidence, source: src,
         reasoning: `Bekend patroon (gezien: ${pattern.times_seen}x)`,
-        key_signals: ['patroon gevonden'], suggested_reply_tone: cat === 'Klantvraag' ? 'vriendelijk' : 'niet_van_toepassing',
+        key_signals: ['patroon gevonden'], suggested_reply_tone: cat === 'Klantvragen' ? 'vriendelijk' : 'niet_van_toepassing',
         is_definitely_not_spam: cat !== 'Reclame', needs_review: false
       };
     }
@@ -587,7 +587,7 @@ ${simonLearnings.map((l, i) => `${i + 1}. Context: "${l.trigger_text.slice(0, 10
 KRITIEKE REGEL — INHOUD GAAT ALTIJD BOVEN ONDERWERP:
 Als de mail begint met "Re:", "RE:", "Antw:" of "Fwd:", of als er een vraag in de body staat,
 NEGEER dan het onderwerp voor categorisatie. Een mail met "Gent" in het onderwerp maar
-een vraag in de body ("waar was het adres?") is een Klantvraag, geen Event Aanmelding.
+een vraag in de body ("waar was het adres?") is een Klantvragen, geen Event Aanmelding.
 INHOUD IS LEIDEND. Het onderwerp is slechts een hint, niet bepalend.
 
 CATEGORIEËN — gebruik deze definities EXACT:
@@ -598,9 +598,13 @@ Appointment: Bevestiging van een ingeplande sessie, call of afspraak. NOOIT acti
 
 Event Aanmelding: Aanmelding voor een seminar, event of workshop (informatief systeemnotificatie). NOOIT actie vereist. Gebruik NIET als de body een persoonlijke vraag bevat.
 
-Klantvraag: Een BESTAANDE klant stelt een vraag of heeft een probleem. Vraagt om uitleg, heeft een klacht, wil iets weten. ALTIJD actie vereist.
+Klantvragen: Alle vragen en berichten van klanten — vragen over hun bestelling, hun factuur, of klanten die willen annuleren. Vragen over leverstatus, support-issues, wijzigingsverzoeken. Ook factuur-vragen ('waarom sta ik op X?', 'kan ik termijnen?', 'klopt deze factuur?'). ALTIJD actie vereist.
 
-Factuurvraag: Vraag over een factuur, betaling, kosten of betalingsregeling. Betwist factuur, kwijtschelding, betalingsregeling. ALTIJD actie vereist.
+Betaalbevestigingen: Inkomende betalingsbevestigingen van KLANTEN. Mail van bank/Mollie/Stripe/iDeal dat een klant heeft betaald. Payment-receipts uit de klantenkant. Niet: eigen betaling-bevestigingen (dat is 'Aankopen/betalingen'). Geen actie vereist.
+
+Openstaande facturen: Facturen die IK moet betalen. Leveranciers, abonnementen, hosting, tools, subscripties. Mail met 'factuur bijgevoegd' of 'verzoek tot betaling' VAN een leverancier AAN mij. Vervaldatum/betaaltermijn meestal genoemd. ALTIJD actie vereist.
+
+Aankopen/betalingen: Bevestiging van EIGEN uitgevoerde betalingen. Mail dat IK heb betaald — bankbevestiging van uitgaande betaling, order-confirmaties, abonnement-betalingen die zijn doorgegaan. Geen actie vereist.
 
 Reclame: Ongewenste marketing, nieuwsbrieven, promoties. MINIMAAL 2 reclame-signalen vereist (zie regels). Geen actie vereist.
 
@@ -615,15 +619,15 @@ RECLAME REGELS — mail is ALLEEN Reclame als MINIMAAL 2 van:
 Bij twijfel: kies Overig.
 
 ACTIE VEREIST REGELS:
-- Klantvraag → ALTIJD true
-- Factuurvraag → ALTIJD true
+- Klantvragen → ALTIJD true
+- Openstaande facturen → ALTIJD true (moeten betaald worden)
 - Mail bevat directe vraag aan Jeffrey → true
 - Mail bevat klacht of probleem → true + priority HOOG
-- Bevestigingen, notificaties, leads → ALTIJD false
+- Bevestigingen, notificaties, leads, betaalbevestigingen, eigen betalingen → ALTIJD false
 
 Geef terug als JSON:
 {
-  "category": "Nieuwe Lead|Appointment|Event Aanmelding|Klantvraag|Factuurvraag|Reclame|Overig",
+  "category": "Nieuwe Lead|Appointment|Event Aanmelding|Klantvragen|Betaalbevestigingen|Openstaande facturen|Aankopen/betalingen|Reclame|Overig",
   "requires_action": true|false,
   "priority": "laag|normaal|hoog|urgent",
   "confidence": 0-100,
@@ -637,7 +641,7 @@ Geef ALLEEN de JSON terug.`;
 
   const contextFlags = [
     isReply     ? '⚠️ DIT IS EEN REPLY/FWD — negeer onderwerp voor categorisatie, analyseer ALLEEN de body.' : '',
-    hasQuestion ? '⚠️ DIRECTE VRAAG GEDETECTEERD in body — categoriseer als Klantvraag tenzij de body duidelijk iets anders aangeeft.' : ''
+    hasQuestion ? '⚠️ DIRECTE VRAAG GEDETECTEERD in body — categoriseer als Klantvragen tenzij de body duidelijk iets anders aangeeft.' : ''
   ].filter(Boolean).join('\n');
 
   const userContent = [
