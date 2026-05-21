@@ -146,14 +146,22 @@ export default async function handler(req, res) {
         zoom_join_url:       zoomMatch?.join_url || existing?.zoom_join_url   || null,
       };
 
-      // Atomic upsert op ghl_appointment_id (UNIQUE partial index WHERE NOT NULL).
-      // existing-select hierboven blijft nodig voor zoom-data fallback in row.
-      const { error } = await supabaseAdmin
-        .from('follow_up_appointments')
-        .upsert(row, {
-          onConflict: 'ghl_appointment_id',
-          ignoreDuplicates: false,
-        });
+      // 2-step pattern: SELECT existing → UPDATE of INSERT
+      // Reden: partial-unique constraints zijn geen geldige ON CONFLICT-arbiter
+      // in PostgREST. existing.id is al beschikbaar van de select boven.
+      let error;
+      if (existing?.id) {
+        const { error: upErr } = await supabaseAdmin
+          .from('follow_up_appointments')
+          .update(row)
+          .eq('id', existing.id);
+        error = upErr;
+      } else {
+        const { error: insErr } = await supabaseAdmin
+          .from('follow_up_appointments')
+          .insert(row);
+        error = insErr;
+      }
 
       if (error) {
         console.error('[follow-up-ghl-poll] upsert fout:', event.id, error.message);
