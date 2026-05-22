@@ -122,11 +122,17 @@
     .body-text {
       font-size: 13px; color: var(--text); line-height: 1.6;
       white-space: pre-wrap; word-break: break-word;
-      max-height: 300px; overflow-y: auto; padding: 8px 10px;
+      padding: 8px 10px;
       background: rgba(0,0,0,0.25); border-radius: 6px; margin: 8px 0 10px;
     }
     .body-text.loading { color: var(--text-dim); }
     .body-text.error   { color: var(--red); }
+    .btn-read-more {
+      display: inline-block; background: transparent; border: none;
+      color: var(--accent-violet, #534AB7); cursor: pointer;
+      font-size: 12px; margin-top: 6px; padding: 0; text-decoration: underline;
+    }
+    .btn-read-more:hover { opacity: 0.8; }
     .body-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
     .info-row.body-open, .reclame-row.body-open { border-color: rgba(83,74,183,0.35); }
     .info-meta-click { cursor: pointer; flex: 1; min-width: 0; }
@@ -1370,6 +1376,7 @@
     customTo: '',
     overrides: loadOverrides(),
     bodyCache: {},     // uid -> { loading, text, from, to, date, error }
+    bodyExpanded: {},  // uid -> true/false (Lees meer/minder, alleen in geheugen)
     aiProposals: {},   // uid -> { original, current, loading, error, generatedAt }
     bulkSelected: new Set(),
     suggestions: [],   // weak reclame matches: [{ email, pattern }]
@@ -2436,8 +2443,7 @@
           preview.textContent = 'Kon inhoud niet laden: ' + cache.error;
         } else {
           preview.className = 'card-preview';
-          const raw = cache.text || '';
-          preview.textContent = raw.slice(0, 300) + (raw.length > 300 ? '…' : '');
+          preview.innerHTML = renderBodyPreviewHtml(uid, cache.text || '');
         }
       }
       // Inject bijlagen-sectie wanneer body geladen is en bijlagen aanwezig zijn
@@ -2469,7 +2475,7 @@
           bodyText.textContent = 'Kon inhoud niet laden: ' + cache.error;
         } else {
           bodyText.className = 'body-text';
-          bodyText.textContent = cache.text || '(geen inhoud)';
+          bodyText.innerHTML = renderBodyPreviewHtml(uid, cache.text || '(geen inhoud)');
         }
       }
       // Inject bijlagen-sectie wanneer body geladen is en bijlagen aanwezig zijn
@@ -3488,6 +3494,17 @@
     if (!ev.target.closest('.cat-dd') && !ev.target.closest('.act-menu-wrap')) closeAllDropdowns();
   });
 
+  // 'Lees meer/minder' toggle — capture-fase zodat geen kaart/rij-handler eerst vuurt
+  document.addEventListener('click', (ev) => {
+    const btn = ev.target.closest('[data-action="toggle-body"]');
+    if (!btn) return;
+    ev.preventDefault();
+    ev.stopPropagation();
+    const uid = btn.dataset.uid;
+    state.bodyExpanded[uid] = state.bodyExpanded[uid] !== true;
+    render();
+  }, true);
+
   // ── Custom category dropdown rendering ────────────────────────────────────
   function renderCatDropdown(uid, category) {
     const items = CATEGORIES.map((c) => {
@@ -3943,7 +3960,7 @@
     } else if (cache.error) {
       bodyHtml = '<div class="body-text error">Kon inhoud niet laden: ' + escapeHtml(cache.error) + '</div>';
     } else {
-      bodyHtml = '<div class="body-text">' + escapeHtml(cache.text || '(geen inhoud)') + '</div>';
+      bodyHtml = '<div class="body-text">' + renderBodyPreviewHtml(e.uid, cache.text || '(geen inhoud)') + '</div>';
     }
     return '<div class="body-panel-wrap">' +
       '<div class="body-panel" data-uid="' + escapeHtml(e.uid) + '">' +
@@ -4080,14 +4097,24 @@
     });
   }
 
+  // ── Body-preview met 'Lees meer/minder' toggle (300 tekens default) ─────────
+  function renderBodyPreviewHtml(uid, raw) {
+    const text = String(raw || '');
+    if (text.length <= 300) return escapeHtml(text);
+    const expanded = state.bodyExpanded[uid] === true;
+    const shown = expanded ? text : text.slice(0, 300) + '…';
+    const label = expanded ? 'Lees minder' : 'Lees meer';
+    return escapeHtml(shown) +
+      '<button class="btn-read-more" data-action="toggle-body" data-uid="' + escapeHtml(uid) + '">' + label + '</button>';
+  }
+
   // ── Rendering: Actie tab ───────────────────────────────────────────────────
   function renderPreviewHtml(uid) {
     const cache = state.bodyCache[uid];
     if (!cache)          return '<div class="card-preview loading"><span class="preview-spinner"></span> Inhoud laden…</div>';
     if (cache.loading)   return '<div class="card-preview loading"><span class="preview-spinner"></span> Inhoud laden…</div>';
     if (cache.error)     return '<div class="card-preview error">Kon inhoud niet laden</div>';
-    const raw = cache.text || '';
-    return '<div class="card-preview">' + escapeHtml(raw.slice(0, 300)) + (raw.length > 300 ? '…' : '') + '</div>';
+    return '<div class="card-preview">' + renderBodyPreviewHtml(uid, cache.text || '') + '</div>';
   }
 
   // ── Bijlagen upload UI (verzenden) ─────────────────────────────────────────
