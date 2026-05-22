@@ -3,7 +3,7 @@ import { supabase } from './supabase.js';
 
 const VALID_CATEGORIES = [
   'Nieuwe Lead', 'Appointment', 'Event Aanmelding',
-  'Klantvragen', 'Betaalbevestigingen', 'Openstaande facturen', 'Aankopen/betalingen',
+  'Klantvragen', 'Partners', 'Betaalbevestigingen', 'Openstaande facturen', 'Aankopen/betalingen',
   'Reclame', 'Overig'
 ];
 
@@ -406,8 +406,8 @@ async function savePattern(senderEmail, senderDomain, category, confidence, lear
 
 // ── `requires_action` afleiden van categorie (als AI het niet geeft) ─────────
 function deriveRequiresAction(category, aiValue) {
-  // Categorie is leidend: alleen Klantvragen en Openstaande facturen vereisen actie.
-  return category === 'Klantvragen' || category === 'Openstaande facturen';
+  // Categorie is leidend: Klantvragen, Partners en Openstaande facturen vereisen actie.
+  return category === 'Klantvragen' || category === 'Partners' || category === 'Openstaande facturen';
 }
 
 // ── Centrale handler ──────────────────────────────────────────────────────────
@@ -600,6 +600,8 @@ Event Aanmelding: Aanmelding voor een seminar, event of workshop (informatief sy
 
 Klantvragen: Alle vragen en berichten van klanten — vragen over hun bestelling, hun factuur, of klanten die willen annuleren. Vragen over leverstatus, support-issues, wijzigingsverzoeken. Ook factuur-vragen ('waarom sta ik op X?', 'kan ik termijnen?', 'klopt deze factuur?'). ALTIJD actie vereist.
 
+Partners: Zakelijke vragen of correspondentie van externe partijen (geen klant van De Forex Opleiding). Voorbeelden: samenwerkingsverzoeken, affiliate partners, leveranciers met vragen (niet factuur-gerelateerd), vragen van andere bedrijven of trading-scholen, B2B-correspondentie, onderhandelingen, marketing partnerships. NIET: klanten met vragen (Klantvragen), facturen die je moet betalen (Openstaande facturen), of reclame (Reclame). ALTIJD actie vereist.
+
 Betaalbevestigingen: Inkomende betalingsbevestigingen van KLANTEN. Mail van bank/Mollie/Stripe/iDeal dat een klant heeft betaald. Payment-receipts uit de klantenkant. Niet: eigen betaling-bevestigingen (dat is 'Aankopen/betalingen'). Geen actie vereist.
 
 Openstaande facturen: Facturen die IK moet betalen. Leveranciers, abonnementen, hosting, tools, subscripties. Mail met 'factuur bijgevoegd' of 'verzoek tot betaling' VAN een leverancier AAN mij. Vervaldatum/betaaltermijn meestal genoemd. ALTIJD actie vereist.
@@ -620,6 +622,7 @@ Bij twijfel: kies Overig.
 
 ACTIE VEREIST REGELS:
 - Klantvragen → ALTIJD true
+- Partners → ALTIJD true
 - Openstaande facturen → ALTIJD true (moeten betaald worden)
 - Mail bevat directe vraag aan Jeffrey → true
 - Mail bevat klacht of probleem → true + priority HOOG
@@ -627,7 +630,7 @@ ACTIE VEREIST REGELS:
 
 Geef terug als JSON:
 {
-  "category": "Nieuwe Lead|Appointment|Event Aanmelding|Klantvragen|Betaalbevestigingen|Openstaande facturen|Aankopen/betalingen|Reclame|Overig",
+  "category": "Nieuwe Lead|Appointment|Event Aanmelding|Klantvragen|Partners|Betaalbevestigingen|Openstaande facturen|Aankopen/betalingen|Reclame|Overig",
   "requires_action": true|false,
   "priority": "laag|normaal|hoog|urgent",
   "confidence": 0-100,

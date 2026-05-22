@@ -84,6 +84,7 @@ export default async function handler(req, res) {
     Appointment: 0,
     'Event Aanmelding': 0,
     Klantvragen: 0,
+    Partners: 0,
     Betaalbevestigingen: 0,
     'Openstaande facturen': 0,
     'Aankopen/betalingen': 0,
@@ -326,6 +327,8 @@ function generateReply(category, name) {
       return `${greeting}\n\nBedankt voor de bevestiging — je uitlegsessie staat ingepland. Je ontvangt vlak voor de afspraak een herinnering met de toegangslink.\n\nMocht je voor die tijd nog vragen hebben, laat het gerust weten.\n\n${signoff}`;
     case 'Klantvragen':
       return `${greeting}\n\nBedankt voor je bericht. We bekijken je vraag en komen zo spoedig mogelijk (uiterlijk binnen 1 werkdag) bij je terug met een uitgebreid antwoord.\n\n${signoff}`;
+    case 'Partners':
+      return `${greeting}\n\nBedankt voor je bericht. We bekijken je voorstel en nemen zo spoedig mogelijk contact met je op.\n\n${signoff}`;
     default:
       return `${greeting}\n\nBedankt voor je bericht. We hebben het in goede orde ontvangen en komen zo snel mogelijk bij je terug.\n\n${signoff}`;
   }

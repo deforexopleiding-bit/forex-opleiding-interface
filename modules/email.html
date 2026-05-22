@@ -292,6 +292,7 @@
     .cat-badge[data-cat="Appointment"]      { color: var(--accent-violet); background: rgba(168,85,247,0.10); border-color: rgba(168,85,247,0.25); }
     .cat-badge[data-cat="Event Aanmelding"] { color: #14b8a6;              background: rgba(20,184,166,0.10);  border-color: rgba(20,184,166,0.25); }
     .cat-badge[data-cat="Klantvragen"]          { color: #2f7fd1;    background: rgba(24,95,165,0.10);  border-color: rgba(24,95,165,0.25); }
+    .cat-badge[data-cat="Partners"]             { color: #14b8a6;    background: rgba(15,110,86,0.12);  border-color: rgba(15,110,86,0.28); }
     .cat-badge[data-cat="Betaalbevestigingen"]  { color: #5a9e2a;    background: rgba(59,109,17,0.10);  border-color: rgba(59,109,17,0.25); }
     .cat-badge[data-cat="Openstaande facturen"] { color: var(--red); background: rgba(163,45,45,0.10);  border-color: rgba(163,45,45,0.25); }
     .cat-badge[data-cat="Aankopen/betalingen"]  { color: var(--amber); background: rgba(133,79,11,0.12); border-color: rgba(133,79,11,0.28); }
@@ -1238,12 +1239,12 @@
   <script src="/modules/shared/theme-shared.js"></script>
 <script>
   // ── Constants ──────────────────────────────────────────────────────────────
-  const CATEGORIES    = ['Nieuwe Lead','Appointment','Event Aanmelding','Klantvragen','Betaalbevestigingen','Openstaande facturen','Aankopen/betalingen','Reclame','Overig'];
+  const CATEGORIES    = ['Nieuwe Lead','Appointment','Event Aanmelding','Klantvragen','Partners','Betaalbevestigingen','Openstaande facturen','Aankopen/betalingen','Reclame','Overig'];
 
   // Tab-groepen: categorie → tab. Reclame/Verzonden apart afgehandeld.
   const TAB_GROUPS = {
     sales:   new Set(['Nieuwe Lead', 'Appointment', 'Event Aanmelding']),
-    klanten: new Set(['Klantvragen']),
+    klanten: new Set(['Klantvragen', 'Partners']),
     finance: new Set(['Betaalbevestigingen', 'Openstaande facturen', 'Aankopen/betalingen']),
     reclame: new Set(['Reclame']),
     overig:  new Set(['Overig']),
@@ -1253,7 +1254,7 @@
   // Sub-categorie pills per hoofdtab (null = geen pills-rij)
   const SUB_TABS = {
     sales:     ['Nieuwe Lead', 'Appointment', 'Event Aanmelding'],
-    klanten:   null,
+    klanten:   ['Klantvragen', 'Partners'],
     finance:   ['Betaalbevestigingen', 'Openstaande facturen', 'Aankopen/betalingen'],
     reclame:   null,
     overig:    null,
@@ -1279,7 +1280,7 @@
   const AI_REQACTION_KEY      = 'email_ai_requires_action'; // uid -> boolean
   const CONFIRMED_EMAILS_KEY  = 'emailConfirmedBanners'; // Set van bevestigde uids
   const CACHE_VER_KEY         = 'email_cache_version';
-  const CACHE_VERSION         = '4.0'; // bump: 9-categorie refactor (Klantvragen + Finance) + 6 tabs
+  const CACHE_VERSION         = '5.0'; // bump: nieuwe categorie 'Partners' toegevoegd
   const OVERRIDE_CACHE_KEY    = 'email_override_by_sender'; // senderEmail -> category
   const SNOOZE_KEY            = 'email_snooze_map';
   const ACTION_FLAGS_KEY      = 'email_action_flags'; // uid -> true | false
@@ -1304,6 +1305,7 @@
     'Appointment':           '#185FA5',
     'Event Aanmelding':      '#534AB7',
     'Klantvragen':           '#185FA5',
+    'Partners':              '#0F6E56',
     'Betaalbevestigingen':   '#3B6D11',
     'Openstaande facturen':  '#A32D2D',
     'Aankopen/betalingen':   '#854F0B',
@@ -2948,6 +2950,7 @@
     const titleMap = {
       'Openstaande facturen': 'Factuur betalen — ' + fromName,
       'Klantvragen':  'Terugkoppeling klant — ' + fromName,
+      'Partners':     'Partner opvolgen — ' + fromName,
       'Nieuwe Lead':  'Lead opvolgen — ' + fromName,
       'Klacht':       'Klacht afhandelen — ' + fromName,
       'Appointment':  'Afspraak bevestigen — ' + fromName,
@@ -2968,7 +2971,7 @@
     const omschrijving = lines.join('\n');
 
     // Categorie
-    const catMap = { 'Klantvragen': 'Klant', 'Openstaande facturen': 'Factuur',
+    const catMap = { 'Klantvragen': 'Klant', 'Partners': 'Intern', 'Openstaande facturen': 'Factuur',
                      'Betaalbevestigingen': 'Factuur', 'Aankopen/betalingen': 'Factuur',
                      'Reclame': 'Intern',
                      'Overig': 'Intern', 'Nieuwe Lead': 'Lead', 'Appointment': 'Afspraak' };
@@ -2993,6 +2996,7 @@
 
     const taakomschrijvingMap = {
       'Klantvragen':          'Terugkoppeling geven aan klant over hun vraag',
+      'Partners':             'Partner / zakelijke correspondentie opvolgen',
       'Openstaande facturen': 'Openstaande factuur betalen',
       'Appointment':  'Voorbereiding afspraak / sessie',
       'Nieuwe Lead':  'Lead opvolgen en contact opnemen',
@@ -3272,7 +3276,7 @@
     const box = document.getElementById('bulkVtModalBox');
     if (!box) return;
     const n    = state.bulkSelected.size;
-    const cats = ['Nieuwe Lead','Appointment','Event Aanmelding','Klantvragen','Betaalbevestigingen','Openstaande facturen','Aankopen/betalingen','Overig'];
+    const cats = ['Nieuwe Lead','Appointment','Event Aanmelding','Klantvragen','Partners','Betaalbevestigingen','Openstaande facturen','Aankopen/betalingen','Overig'];
     const reasons = ['Betaalbevestiging','Systeemmail','Geen vraag','Spam','Fout herkend'];
     const catChips = cats.map((c) =>
       '<button type="button" class="bulk-vt-chip' + (c === _bulkVtCat ? ' active' : '') +
@@ -4874,7 +4878,8 @@
 
     const teKlantvragen = filtered.filter((e) => e.category === 'Klantvragen').length;
     const teFacturen    = filtered.filter((e) => e.category === 'Openstaande facturen').length;
-    const teTotal       = teKlantvragen + teFacturen;
+    const tePartners    = filtered.filter((e) => e.category === 'Partners').length;
+    const teTotal       = teKlantvragen + teFacturen + tePartners;
 
     const nieuwLeads  = filtered.filter((e) => e.category === 'Nieuwe Lead').length;
     const nieuwAppts  = filtered.filter((e) => e.category === 'Appointment').length;
@@ -5214,7 +5219,7 @@
     if (existing) { existing.classList.toggle('show'); return; }
     const row = document.querySelector('.reclame-row[data-uid="' + uid + '"]');
     if (!row) return;
-    const cats = ['Nieuwe Lead', 'Appointment', 'Event Aanmelding', 'Klantvragen', 'Betaalbevestigingen', 'Openstaande facturen', 'Aankopen/betalingen', 'Overig'];
+    const cats = ['Nieuwe Lead', 'Appointment', 'Event Aanmelding', 'Klantvragen', 'Partners', 'Betaalbevestigingen', 'Openstaande facturen', 'Aankopen/betalingen', 'Overig'];
     const picker = document.createElement('div');
     picker.id = 'nrp-' + uid;
     picker.className = 'not-reclame-picker show';
