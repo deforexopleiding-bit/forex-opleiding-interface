@@ -1066,10 +1066,6 @@
     <button class="btn" style="padding:4px 12px;font-size:12px" onclick="dismissPropagation()">Nee, alleen deze</button>
   </div>
 
-  <div id="kb-status-banner" class="hidden" style="background:rgba(245,158,11,0.10);border:1px solid rgba(245,158,11,0.3);border-radius:8px;margin:8px 20px;padding:10px 14px;font-size:13px;color:var(--amber);display:flex;align-items:center;gap:8px;">
-    ⚠️ Kennisbank is leeg — agent gebruikt alleen basiskennis.
-    <a href="kennisbank.html" style="color:var(--amber);text-decoration:underline;margin-left:4px">Vul de kennisbank aan →</a>
-  </div>
 
   <div class="filter-bar">
     <div class="filter-group">
@@ -5345,21 +5341,6 @@
     render();
   }
 
-  // ── Kennisbank status ─────────────────────────────────────────────────────
-  async function checkKennisbankStatus() {
-    try {
-      const res = await window.AgentShared.apiFetch('/api/kennisbank-sync');
-      if (!res.ok) return;
-      const data = await res.json();
-      const realItems = (data.items || []).filter(
-        (i) => i.label !== '_profile' && i.type !== 'bedrijfsprofiel'
-      );
-      const banner = document.getElementById('kb-status-banner');
-      if (banner) banner.classList.toggle('hidden', realItems.length > 0);
-      console.log(`[Kennisbank] ${realItems.length} items in Supabase`);
-    } catch {}
-  }
-
   async function init() {
     await window._authSharedReady;
     const profile = await window.AuthShared.requireAuth();
@@ -5390,7 +5371,6 @@
     if (trainingBtn) trainingBtn.classList.toggle('active', !!state.trainingMode);
     updateUndoButton();
     loadEmails();
-    checkKennisbankStatus();
   }
 
   init();
