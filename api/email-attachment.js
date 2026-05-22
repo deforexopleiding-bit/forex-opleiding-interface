@@ -72,8 +72,10 @@ export default async function handler(req, res) {
       const contentType = attachment.contentType || 'application/octet-stream';
       const content    = attachment.content; // Buffer
 
+      // ?disposition=inline → toon in browser (bijv. PDF afdrukken); default = download
+      const disposition = req.query.disposition === 'inline' ? 'inline' : 'attachment';
       res.setHeader('Content-Type', contentType);
-      res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+      res.setHeader('Content-Disposition', `${disposition}; filename="${filename}"`);
       res.setHeader('Content-Length', content.length);
       return res.status(200).send(content);
 
