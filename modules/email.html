@@ -803,6 +803,33 @@
     }
     .reanalyze-fill { height: 100%; background: var(--accent-cyan); border-radius: 2px; transition: width 0.3s; }
 
+    /* ── Reclassify modal ── */
+    .reclassify-body { padding: 20px 24px; }
+    .reclassify-body h4 { font-size: 14px; font-weight: 700; margin: 0 0 12px; }
+    .reclassify-scope { display: flex; flex-direction: column; gap: 10px; margin-bottom: 14px; }
+    .reclassify-scope label {
+      display: flex; align-items: flex-start; gap: 9px; padding: 11px 13px;
+      background: var(--bg-elev-2); border: 1px solid var(--border); border-radius: 9px;
+      cursor: pointer; font-size: 13px; color: var(--text); transition: border-color 0.15s;
+    }
+    .reclassify-scope label:hover { border-color: var(--border-strong); }
+    .reclassify-scope input[type="radio"] { margin-top: 2px; }
+    .reclassify-scope .scope-sub { display: block; font-size: 11px; color: var(--text-dim); margin-top: 2px; }
+    .reclassify-hint { font-size: 12px; color: var(--text-dim); margin: 10px 0 0; }
+    .progress-bar { height: 8px; background: var(--bg-elev-2); border-radius: 4px; overflow: hidden; margin: 6px 0 10px; }
+    .progress-bar-fill { height: 100%; background: var(--accent-violet, #534AB7); transition: width 0.3s; width: 0; }
+    .reclassify-progress-stats { display: flex; flex-wrap: wrap; gap: 14px; font-size: 12px; color: var(--text-dim); }
+    .reclassify-progress-stats strong { color: var(--text); }
+    .reclassify-preview-table { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 4px; }
+    .reclassify-preview-table th { text-align: left; padding: 6px; color: var(--text-dim); font-weight: 600; border-bottom: 1px solid var(--border-strong); }
+    .reclassify-preview-table td { padding: 6px; border-bottom: 1px solid var(--border); color: var(--text); vertical-align: top; }
+    .reclassify-preview-table .cell-subject { max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .reclassify-changed-badge { background: rgba(168,85,247,0.18); color: var(--accent-violet, #a855f7); padding: 2px 7px; border-radius: 4px; font-size: 10px; font-weight: 600; }
+    .reclassify-same { color: var(--text-faint); font-size: 11px; }
+    .reclassify-summary-cats { display: flex; flex-direction: column; gap: 5px; margin-top: 8px; }
+    .reclassify-summary-cats .row { display: flex; justify-content: space-between; font-size: 12px; padding: 4px 8px; background: var(--bg-elev-2); border-radius: 6px; }
+    .reclassify-state-msg { font-size: 13px; color: var(--text-dim); padding: 14px 0; display: flex; align-items: center; gap: 10px; }
+
     /* ── Leer banner ("Klopt deze categorie?") ── */
     .learn-banner {
       display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
@@ -1007,6 +1034,10 @@
       <button class="btn" id="reanalyseerBtn">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3z"/></svg>
         Heranalyseer
+      </button>
+      <button class="btn" id="reclassifyBtn" style="display:none" onclick="openReclassifyModal()" title="Herclassificeer bestaande mails in de database met de huidige classifier (admin)">
+        <i class="ti ti-refresh"></i>
+        Reclassify
       </button>
       <button class="btn" id="trainingBtn" onclick="toggleTrainingMode()" title="Training modus aan/uit — toont confidence en AI-signalen per mail">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
@@ -1235,6 +1266,17 @@
   </div>
 </div>
 
+<!-- ── Reclassify modal ── -->
+<div id="reclassifyModal" class="modal-overlay hidden">
+  <div class="modal-box" style="max-width:780px">
+    <div class="modal-header">
+      <h3>Reclassify mails</h3>
+      <button class="modal-close" onclick="closeReclassifyModal()">&times;</button>
+    </div>
+    <div class="reclassify-body" id="reclassifyBody"></div>
+  </div>
+</div>
+
 <!-- ── Taak modal ── -->
 <div id="taakModal" class="modal-overlay hidden" onclick="closeTaakModal()">
   <div class="modal-box" id="taakModalBox" style="max-width:560px" onclick="event.stopPropagation()">
@@ -1377,6 +1419,7 @@
     overrides: loadOverrides(),
     bodyCache: {},     // uid -> { loading, text, from, to, date, error }
     bodyExpanded: {},  // uid -> true/false (Lees meer/minder, alleen in geheugen)
+    reclassifyState: { step: 'init', scope: 'old-categories', running: false, progress: null, preview: null },
     aiProposals: {},   // uid -> { original, current, loading, error, generatedAt }
     bulkSelected: new Set(),
     suggestions: [],   // weak reclame matches: [{ email, pattern }]
@@ -2262,6 +2305,165 @@
     setTimeout(() => { if (bar) bar.classList.remove('show'); if (btn) btn.disabled = false; }, 2500);
     applyAutoReclameClassification(); populateSuggestions(); render();
     undoManager.push('reanalyze', { snapshots }, 'Heranalyse · ' + todo.length + ' mails');
+  }
+
+  // ── Reclassify: bestaande mails in DB herclassificeren (admin) ──────────────
+  const RECLASSIFY_BATCH = 5;          // mails per request (Vercel-timeout-veilig)
+  const RECLASSIFY_MAX_BATCHES = 3000; // veiligheidslimiet tegen oneindige loop
+
+  function openReclassifyModal() {
+    state.reclassifyState = { step: 'init', scope: 'old-categories', running: false, progress: null, preview: null };
+    document.getElementById('reclassifyModal').classList.remove('hidden');
+    renderReclassify();
+  }
+
+  function closeReclassifyModal() {
+    state.reclassifyState.running = false; // breekt een lopende loop af
+    document.getElementById('reclassifyModal').classList.add('hidden');
+    render(); // mail-lijst verversen na eventuele wijzigingen
+  }
+
+  function reclassifyApi(body) {
+    return fetch('/api/email-reclassify', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }).then((r) => r.json());
+  }
+
+  function renderReclassify(extraHtml) {
+    const body = document.getElementById('reclassifyBody');
+    if (!body) return;
+    const st = state.reclassifyState;
+    if (extraHtml) { body.innerHTML = extraHtml; return; }
+
+    if (st.step === 'init') {
+      body.innerHTML =
+        '<h4>Welke mails herclassificeren?</h4>' +
+        '<div class="reclassify-scope">' +
+          '<label><input type="radio" name="reclassifyScope" value="old-categories"' + (st.scope === 'old-categories' ? ' checked' : '') + '>' +
+            '<span>Oude categorieën<span class="scope-sub">Factuurvraag / Klantvraag / Overig — meeste vandaag waarschijnlijk Overig</span></span></label>' +
+          '<label><input type="radio" name="reclassifyScope" value="test-batch"' + (st.scope === 'test-batch' ? ' checked' : '') + '>' +
+            '<span>Test-batch<span class="scope-sub">Recente mails, alle categorieën — kleine proef</span></span></label>' +
+        '</div>' +
+        '<p class="reclassify-hint">Eerst een preview (dry-run, schrijft niets), daarna goedkeuren en in batches uitvoeren.</p>' +
+        '<div class="modal-footer" style="padding:16px 0 0">' +
+          '<button class="btn" onclick="closeReclassifyModal()">Annuleer</button>' +
+          '<button class="btn btn-ai" onclick="runReclassifyPreview()">Start preview</button>' +
+        '</div>';
+      return;
+    }
+
+    if (st.step === 'preview') {
+      const rows = (st.preview?.results || []).map((r) => {
+        if (r.error) {
+          return '<tr><td class="cell-subject">' + escapeHtml(r.subject || '—') + '</td><td colspan="2" class="reclassify-same">Fout: ' + escapeHtml(r.error) + '</td><td></td></tr>';
+        }
+        const catCell = r.changed
+          ? escapeHtml(r.oldCategory || '—') + ' → <strong>' + escapeHtml(r.newCategory || '—') + '</strong>'
+          : '<span class="reclassify-same">' + escapeHtml(r.newCategory || '—') + '</span>';
+        const actCell = (r.oldRequiresAction === r.newRequiresAction)
+          ? '<span class="reclassify-same">' + (r.newRequiresAction ? 'actie' : '—') + '</span>'
+          : (r.oldRequiresAction ? 'actie' : '—') + ' → <strong>' + (r.newRequiresAction ? 'actie' : '—') + '</strong>';
+        const badge = r.changed ? '<span class="reclassify-changed-badge">gewijzigd</span>' : '';
+        return '<tr><td class="cell-subject">' + escapeHtml(r.subject || '—') + '</td><td>' + catCell + '</td><td>' + actCell + '</td><td>' + badge + '</td></tr>';
+      }).join('');
+      const s = st.preview?.summary || {};
+      body.innerHTML =
+        '<h4>Preview · ' + (st.preview?.processed || 0) + ' voorbeeld-mails</h4>' +
+        '<p class="reclassify-hint">' + (s.changed || 0) + ' zouden wijzigen · ' + (s.unchanged || 0) + ' ongewijzigd · ' + (s.errors || 0) + ' fouten. Dit is een dry-run — er is nog niets opgeslagen.</p>' +
+        '<table class="reclassify-preview-table"><thead><tr><th>Onderwerp</th><th>Categorie</th><th>Actie</th><th></th></tr></thead><tbody>' +
+          (rows || '<tr><td colspan="4" class="reclassify-same">Geen mails gevonden voor deze scope.</td></tr>') +
+        '</tbody></table>' +
+        '<div class="modal-footer" style="padding:16px 0 0">' +
+          '<button class="btn" onclick="closeReclassifyModal()">Annuleer</button>' +
+          '<button class="btn btn-ai" onclick="runReclassifyBulk()"' + ((st.preview?.results || []).length ? '' : ' disabled') + '>Goedkeur &amp; start bulk-uitvoering</button>' +
+        '</div>';
+      return;
+    }
+
+    if (st.step === 'running' || st.step === 'done') {
+      const p = st.progress || { processed: 0, batchCount: 0, changed: 0, unchanged: 0, errors: 0, byCategory: {} };
+      const done = st.step === 'done';
+      const cats = Object.entries(p.byCategory || {}).sort((a, b) => b[1] - a[1])
+        .map(([cat, n]) => '<div class="row"><span>' + escapeHtml(cat) + '</span><strong>' + n + '</strong></div>').join('');
+      body.innerHTML =
+        '<h4>' + (done ? 'Klaar' : 'Bezig met herclassificeren…') + '</h4>' +
+        '<div class="progress-bar"><div class="progress-bar-fill" style="width:' + (done ? 100 : Math.min(95, 10 + p.batchCount * 5)) + '%"></div></div>' +
+        '<div class="reclassify-progress-stats">' +
+          '<span>Verwerkt: <strong>' + p.processed + '</strong></span>' +
+          '<span>Gewijzigd: <strong>' + p.changed + '</strong></span>' +
+          '<span>Ongewijzigd: <strong>' + p.unchanged + '</strong></span>' +
+          '<span>Fouten: <strong>' + p.errors + '</strong></span>' +
+          '<span>Batches: <strong>' + p.batchCount + '</strong></span>' +
+        '</div>' +
+        (cats ? '<div class="reclassify-summary-cats">' + cats + '</div>' : '') +
+        (done
+          ? '<div class="modal-footer" style="padding:16px 0 0"><button class="btn btn-ai" onclick="closeReclassifyModal()">Sluit</button></div>'
+          : '<p class="reclassify-hint">Modal niet sluiten tot dit klaar is. (Sluiten stopt de uitvoering veilig — al verwerkte mails blijven opgeslagen.)</p>');
+      return;
+    }
+  }
+
+  async function runReclassifyPreview() {
+    const sel = document.querySelector('input[name="reclassifyScope"]:checked');
+    state.reclassifyState.scope = sel ? sel.value : 'old-categories';
+    state.reclassifyState.step = 'preview';
+    renderReclassify('<div class="reclassify-state-msg"><div class="ai-loading-spinner"></div> Preview wordt opgehaald…</div>');
+    try {
+      const data = await reclassifyApi({ mode: 'preview', scope: state.reclassifyState.scope, limit: RECLASSIFY_BATCH, skipReclassified: false });
+      if (data.error) { renderReclassify('<div class="reclassify-state-msg">Fout: ' + escapeHtml(data.error) + '</div>'); return; }
+      state.reclassifyState.preview = data;
+      renderReclassify();
+    } catch (err) {
+      renderReclassify('<div class="reclassify-state-msg">Fout: ' + escapeHtml(err.message) + '</div>');
+    }
+  }
+
+  async function runReclassifyBulk() {
+    const st = state.reclassifyState;
+    st.step = 'running';
+    st.running = true;
+    st.progress = { processed: 0, batchCount: 0, changed: 0, unchanged: 0, errors: 0, byCategory: {} };
+    renderReclassify();
+
+    while (st.running && st.progress.batchCount < RECLASSIFY_MAX_BATCHES) {
+      let data;
+      try {
+        data = await reclassifyApi({ mode: 'execute', scope: st.scope, limit: RECLASSIFY_BATCH, skipReclassified: true });
+      } catch (err) {
+        renderReclassify('<div class="reclassify-state-msg">Netwerkfout: ' + escapeHtml(err.message) + '</div>');
+        st.running = false;
+        return;
+      }
+      if (data.error) {
+        renderReclassify('<div class="reclassify-state-msg">Fout: ' + escapeHtml(data.error) + '</div>');
+        st.running = false;
+        return;
+      }
+      if (!data.processed) break; // niets meer te doen
+
+      const s = data.summary || {};
+      st.progress.batchCount++;
+      st.progress.processed += data.processed;
+      st.progress.changed   += s.changed   || 0;
+      st.progress.unchanged += s.unchanged || 0;
+      st.progress.errors    += s.errors    || 0;
+      Object.entries(s.byCategory || {}).forEach(([cat, n]) => {
+        st.progress.byCategory[cat] = (st.progress.byCategory[cat] || 0) + n;
+      });
+      renderReclassify();
+
+      // Stop als een batch volledig faalt (anders blijft skipReclassified hangen)
+      if (s.errors === data.processed) {
+        renderReclassify('<div class="reclassify-state-msg">Gestopt: een hele batch faalde. ' + st.progress.processed + ' mails verwerkt vóór de fout.</div>');
+        st.running = false;
+        return;
+      }
+      await new Promise((r) => setTimeout(r, 400));
+    }
+
+    if (st.running) { st.step = 'done'; st.running = false; renderReclassify(); }
   }
 
   // ── Learning correction ────────────────────────────────────────────────────
@@ -5464,6 +5666,8 @@
     if (ADMIN_ROLES.includes(profile.role)) {
       const adminLink = document.getElementById('adminNavLink');
       if (adminLink) adminLink.style.display = '';
+      const reclassifyBtn = document.getElementById('reclassifyBtn');
+      if (reclassifyBtn) reclassifyBtn.style.display = '';
     }
     checkCacheVersion();
     // Éénmalig: verwijder stale Reclame-patronen in Supabase voor vertrouwde afzenders
@@ -5481,6 +5685,10 @@
     document.getElementById('leerrapportBtn').addEventListener('click', openLeerrapport);
     document.getElementById('leerrapportModal').addEventListener('click', (ev) => {
       if (ev.target === ev.currentTarget) closeLeerrapport();
+    });
+    document.getElementById('reclassifyModal').addEventListener('click', (ev) => {
+      // Alleen sluiten via overlay-klik wanneer er geen bulk-loop draait
+      if (ev.target === ev.currentTarget && !state.reclassifyState.running) closeReclassifyModal();
     });
     const trainingBtn = document.getElementById('trainingBtn');
     if (trainingBtn) trainingBtn.classList.toggle('active', !!state.trainingMode);
