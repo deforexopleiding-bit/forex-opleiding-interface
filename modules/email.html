@@ -19,6 +19,8 @@
       --accent-cyan: #2563eb; --accent-violet: #6d28d9;
       --accent-grad: linear-gradient(135deg, #093d54 0%, #688b9b 100%);
       --green: #059669; --amber: #d97706; --red: #dc2626;
+      --hero-blue-from: #042C53; --hero-blue-to: #0C447C;
+      --hero-green-from: #173404; --hero-green-to: #27500A;
       --nav-item-hover: rgba(0,0,0,0.04);
       --nav-item-active: rgba(9,61,84,0.10);
       --nav-item-active-text: #093d54;
@@ -30,6 +32,8 @@
       --accent-cyan: #22d3ee; --accent-violet: #a855f7;
       --accent-grad: linear-gradient(135deg, #22d3ee 0%, #a855f7 100%);
       --green: #10b981; --amber: #f59e0b; --red: #ef4444;
+      --hero-blue-from: #0C447C; --hero-blue-to: #185FA5;
+      --hero-green-from: #27500A; --hero-green-to: #3B6D11;
       --nav-item-hover: rgba(255,255,255,0.05);
       --nav-item-active: rgba(168,85,247,0.14);
       --nav-item-active-text: #a855f7;
@@ -198,36 +202,31 @@
     .status-refresh:hover { background: rgba(34,211,238,0.1); }
 
     /* ── Compact stats bar ── */
-    .stats-bar {
-      display: flex; gap: 6px; flex-wrap: nowrap; overflow-x: auto;
-      margin-bottom: 14px;
-      scrollbar-width: none;
+    /* ── Stats-row: dual hero + 2 mid-cards ── */
+    .stats-row { display: grid; grid-template-columns: 2fr 1fr 1fr 2fr; gap: 10px; margin-bottom: 16px; }
+    @media (max-width: 900px) { .stats-row { grid-template-columns: 1fr 1fr; } }
+    .stat-hero {
+      color: #ffffff; border-radius: 10px; padding: 16px 18px;
+      display: flex; flex-direction: column; justify-content: space-between; min-height: 125px;
     }
-    .stats-bar::-webkit-scrollbar { display: none; }
-    .stat-chip {
-      display: flex; align-items: center; gap: 8px; flex-shrink: 0;
-      padding: 8px 12px;
-      background: var(--bg-elev); border: 1px solid var(--border); border-radius: 10px;
-      min-width: 0; white-space: nowrap;
-      transition: border-color 0.18s;
+    .stat-hero-blue  { background: linear-gradient(135deg, var(--hero-blue-from), var(--hero-blue-to)); }
+    .stat-hero-green { background: linear-gradient(135deg, var(--hero-green-from), var(--hero-green-to)); }
+    .stat-hero-label { font-size: 11px; opacity: 0.7; letter-spacing: 0.5px; margin-bottom: 6px; }
+    .stat-hero-value-row { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+    .stat-hero-value { font-size: 32px; font-weight: 500; line-height: 1; font-variant-numeric: tabular-nums; }
+    .stat-hero-sub { font-size: 13px; opacity: 0.75; }
+    .stat-hero-pills { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 12px; }
+    .stat-hero-pill { font-size: 11px; background: rgba(255,255,255,0.15); padding: 3px 9px; border-radius: 4px; white-space: nowrap; }
+    .stat-mid {
+      background: var(--bg-elev); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px;
+      display: flex; flex-direction: column; justify-content: space-between; min-height: 125px;
     }
-    .stat-chip:hover { border-color: var(--border-strong); }
-    .stat-chip.alert  { border-color: rgba(245,158,11,0.25);  background: rgba(245,158,11,0.04); }
-    .stat-chip.urgent { border-color: rgba(239,68,68,0.28);   background: rgba(239,68,68,0.04); }
-    .stat-chip.kpi    { border-color: rgba(34,197,94,0.22);   background: rgba(34,197,94,0.04); }
-    .stat-chip.lead   { border-color: rgba(34,211,238,0.22);  background: rgba(34,211,238,0.04); }
-    .stat-icon { width: 13px; height: 13px; flex-shrink: 0; color: var(--text-faint); }
-    .stat-chip.alert  .stat-icon { color: var(--amber); }
-    .stat-chip.urgent .stat-icon { color: var(--red); }
-    .stat-chip.kpi    .stat-icon { color: var(--green); }
-    .stat-chip.lead   .stat-icon { color: var(--accent-cyan); }
-    .stat-body { display: flex; flex-direction: column; line-height: 1.2; }
-    .stat-value { font-size: 16px; font-weight: 700; font-variant-numeric: tabular-nums; color: var(--text); }
-    .stat-chip.alert  .stat-value { color: var(--amber); }
-    .stat-chip.urgent .stat-value { color: var(--red); }
-    .stat-chip.kpi    .stat-value { color: var(--green); }
-    .stat-chip.lead   .stat-value { color: var(--accent-cyan); }
-    .stat-label { font-size: 10px; color: var(--text-faint); font-weight: 500; letter-spacing: .02em; }
+    .stat-mid-header { display: flex; align-items: center; gap: 6px; margin-bottom: 10px; }
+    .stat-mid-icon { font-size: 14px; color: var(--text-faint); }
+    .stat-mid-label { font-size: 11px; color: var(--text-faint); letter-spacing: 0.3px; }
+    .stat-mid-value { font-size: 24px; font-weight: 500; line-height: 1; font-variant-numeric: tabular-nums; color: var(--text); }
+    .stat-mid-perc { font-size: 14px; color: var(--text-faint); }
+    .stat-mid-sub { font-size: 11px; color: var(--text-faint); }
 
     /* ── Filter bar ── */
     .filter-bar {
@@ -1004,39 +1003,55 @@
     <button class="status-refresh" onclick="loadEmails()">&#8635; Vernieuwen</button>
   </div>
 
-  <div class="stats-bar" id="statsBar">
-    <div class="stat-chip lead">
-      <svg class="stat-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
-      <div class="stat-body"><span class="stat-value" id="sLead">—</span><span class="stat-label">Nieuwe leads</span></div>
+  <div class="stats-row" id="statsRow">
+
+    <div class="stat-hero stat-hero-blue">
+      <div class="stat-hero-top">
+        <div class="stat-hero-label">TE BEANTWOORDEN</div>
+        <div class="stat-hero-value-row">
+          <span class="stat-hero-value" id="statTeBeantwoorden">0</span>
+          <span class="stat-hero-sub">mails wachten</span>
+        </div>
+      </div>
+      <div class="stat-hero-pills">
+        <span class="stat-hero-pill">Klantvragen · <span id="statSubKlantvragen">0</span></span>
+        <span class="stat-hero-pill">Facturen · <span id="statSubFacturen">0</span></span>
+      </div>
     </div>
-    <div class="stat-chip lead">
-      <svg class="stat-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
-      <div class="stat-body"><span class="stat-value" id="sAppt">—</span><span class="stat-label">Uitlegsessies</span></div>
+
+    <div class="stat-mid">
+      <div class="stat-mid-header">
+        <i class="ti ti-sparkles stat-mid-icon" aria-hidden="true" style="color:#534AB7;"></i>
+        <span class="stat-mid-label">AI DRAFTS</span>
+      </div>
+      <div class="stat-mid-value" id="statAiDrafts" style="color:#534AB7;">0</div>
+      <div class="stat-mid-sub">klaar voor review</div>
     </div>
-    <div class="stat-chip">
-      <svg class="stat-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="m22 11-3 3-2-2"/></svg>
-      <div class="stat-body"><span class="stat-value" id="sEvents">—</span><span class="stat-label">Event aanmeld.</span></div>
+
+    <div class="stat-mid">
+      <div class="stat-mid-header">
+        <i class="ti ti-tag stat-mid-icon" aria-hidden="true"></i>
+        <span class="stat-mid-label">CATEGORIE</span>
+      </div>
+      <div class="stat-mid-value"><span id="statCategoriePerc">0</span><span class="stat-mid-perc">%</span></div>
+      <div class="stat-mid-sub"><span id="statCategorieOpen">0</span> ongesorteerd</div>
     </div>
-    <div class="stat-chip">
-      <svg class="stat-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
-      <div class="stat-body"><span class="stat-value" id="sTotal">—</span><span class="stat-label">Totaal mails</span></div>
+
+    <div class="stat-hero stat-hero-green">
+      <div class="stat-hero-top">
+        <div class="stat-hero-label">NIEUW</div>
+        <div class="stat-hero-value-row">
+          <span class="stat-hero-value" id="statNieuw">0</span>
+          <span class="stat-hero-sub">aanmeldingen</span>
+        </div>
+      </div>
+      <div class="stat-hero-pills">
+        <span class="stat-hero-pill">Leads · <span id="statSubLeads">0</span></span>
+        <span class="stat-hero-pill">Appts · <span id="statSubAppts">0</span></span>
+        <span class="stat-hero-pill">Events · <span id="statSubEvents">0</span></span>
+      </div>
     </div>
-    <div class="stat-chip urgent">
-      <svg class="stat-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><line x1="9" y1="14" x2="15" y2="14"/><line x1="9" y1="17" x2="13" y2="17"/></svg>
-      <div class="stat-body"><span class="stat-value" id="sFactuur">—</span><span class="stat-label">Open factuurvr.</span></div>
-    </div>
-    <div class="stat-chip alert">
-      <svg class="stat-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-      <div class="stat-body"><span class="stat-value" id="sOnbeantwoord">—</span><span class="stat-label">Onbeantwoord</span></div>
-    </div>
-    <div class="stat-chip">
-      <svg class="stat-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg>
-      <div class="stat-body"><span class="stat-value" id="sLeadsWeek">—</span><span class="stat-label">Leads deze week</span></div>
-    </div>
-    <div class="stat-chip kpi">
-      <svg class="stat-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
-      <div class="stat-body"><span class="stat-value" id="sConv">—</span><span class="stat-label">Conversie</span></div>
-    </div>
+
   </div>
 
   <div class="reanalyze-bar" id="reanalyzeBar">
@@ -4837,37 +4852,47 @@
     const salesEmails   = infoEmails.filter((e) => TAB_GROUPS.sales.has(e.category));
     const overigEmails  = infoEmails.filter((e) => TAB_GROUPS.overig.has(e.category));
 
-    // ── Stats berekenen ────────────────────────────────────────────────────
-    const leads       = filtered.filter((e) => e.category === 'Nieuwe Lead').length;
-    const appts       = filtered.filter((e) => e.category === 'Appointment').length;
-    const events      = filtered.filter((e) => e.category === 'Event Aanmelding').length;
-    const total       = filtered.length;
-    const openFact    = state.emails.filter((e) => e.category === 'Factuurvraag' && !state.sentReplies[e.uid]).length;
-    const onbeantw    = filtered.filter((e) => e.unread && !INFO_CATS.has(e.category) && e.category !== 'Reclame').length;
-    const conv        = leads > 0 ? Math.round((appts / leads) * 100) + '%' : '—';
+    // ── Stats-row (dual hero + 2 mid-cards) — rekent over 'filtered' (datum + adres) ──
+    const setStat = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
 
-    // Leads deze week (vanaf maandag van huidige week, ongeacht datumfilter)
-    const t0w = new Date(); t0w.setHours(0,0,0,0);
-    const dayOfWeek = t0w.getDay(); // 0=zo, 1=ma, ..., 6=za
-    const daysToMonday = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
-    const weekFrom = new Date(t0w); weekFrom.setDate(weekFrom.getDate() + daysToMonday);
-    const tom = new Date(t0w); tom.setDate(tom.getDate() + 1);
-    const leadsWeek = state.emails.filter((e) => {
-      if (e.category !== 'Nieuwe Lead') return false;
-      const d = new Date(e.date);
-      if (d < weekFrom || d >= tom) return false;
-      if (state.addressFilter !== 'Alle' && (e.mailbox||'').toLowerCase() !== state.addressFilter.toLowerCase()) return false;
-      return true;
-    }).length;
+    const teKlantvragen = filtered.filter((e) => e.category === 'Klantvragen').length;
+    const teFacturen    = filtered.filter((e) => e.category === 'Openstaande facturen').length;
+    const teTotal       = teKlantvragen + teFacturen;
 
-    document.getElementById('sLead').textContent        = leads;
-    document.getElementById('sAppt').textContent        = appts;
-    document.getElementById('sEvents').textContent      = events;
-    document.getElementById('sTotal').textContent       = total;
-    document.getElementById('sFactuur').textContent     = openFact;
-    document.getElementById('sOnbeantwoord').textContent= onbeantw;
-    document.getElementById('sLeadsWeek').textContent   = leadsWeek;
-    document.getElementById('sConv').textContent        = conv;
+    const nieuwLeads  = filtered.filter((e) => e.category === 'Nieuwe Lead').length;
+    const nieuwAppts  = filtered.filter((e) => e.category === 'Appointment').length;
+    const nieuwEvents = filtered.filter((e) => e.category === 'Event Aanmelding').length;
+    const nieuwTotal  = nieuwLeads + nieuwAppts + nieuwEvents;
+
+    const overigCount = filtered.filter((e) => e.category === 'Overig').length;
+    const totalCount  = filtered.length;
+    const catPerc     = totalCount > 0 ? Math.round(((totalCount - overigCount) / totalCount) * 100) : null;
+
+    const draftsCount = Object.keys(localStorage).filter((k) => k.startsWith('draft_')).length;
+
+    setStat('statTeBeantwoorden', teTotal);
+    setStat('statSubKlantvragen', teKlantvragen);
+    setStat('statSubFacturen', teFacturen);
+
+    setStat('statAiDrafts', draftsCount);
+
+    const percEl = document.getElementById('statCategoriePerc');
+    if (percEl) {
+      const percSym = percEl.nextElementSibling; // <span class="stat-mid-perc">%</span>
+      if (catPerc === null) {
+        percEl.textContent = '—';
+        if (percSym) percSym.style.display = 'none';
+      } else {
+        percEl.textContent = catPerc;
+        if (percSym) percSym.style.display = '';
+      }
+    }
+    setStat('statCategorieOpen', overigCount);
+
+    setStat('statNieuw', nieuwTotal);
+    setStat('statSubLeads', nieuwLeads);
+    setStat('statSubAppts', nieuwAppts);
+    setStat('statSubEvents', nieuwEvents);
 
     // Search count
     const searchEl = document.getElementById('searchCount');
