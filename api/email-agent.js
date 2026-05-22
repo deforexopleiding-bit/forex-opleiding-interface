@@ -404,10 +404,12 @@ async function savePattern(senderEmail, senderDomain, category, confidence, lear
   } catch (e) { console.warn('[email-agent] pattern opslaan fout:', e.message); }
 }
 
-// ── `requires_action` afleiden van categorie (als AI het niet geeft) ─────────
+// ── `requires_action` afleiden ───────────────────────────────────────────────
+// AI-leading: gebruik de AI-beoordeling als die er is; anders fallback op categorie.
 function deriveRequiresAction(category, aiValue) {
-  // Categorie is leidend: Klantvragen, Partners en Openstaande facturen vereisen actie.
-  return category === 'Klantvragen' || category === 'Partners' || category === 'Openstaande facturen';
+  if (typeof aiValue === 'boolean') return aiValue;
+  // Fallback (trusted-sender/pattern-paden zonder AI): categorie-gebaseerd.
+  return ['Klantvragen', 'Partners', 'Openstaande facturen'].includes(category);
 }
 
 // ── Centrale handler ──────────────────────────────────────────────────────────
@@ -620,13 +622,31 @@ RECLAME REGELS — mail is ALLEEN Reclame als MINIMAAL 2 van:
 5. Bekende reclame afzender in patronen
 Bij twijfel: kies Overig.
 
-ACTIE VEREIST REGELS:
-- Klantvragen → ALTIJD true
-- Partners → ALTIJD true
-- Openstaande facturen → ALTIJD true (moeten betaald worden)
-- Mail bevat directe vraag aan Jeffrey → true
+ACTIE VEREIST (requires_action) — beoordeel dit ONAFHANKELIJK van de categorie:
+Bepaal of deze mail een reactie of handeling van mij vereist.
+
+requires_action = TRUE als:
+- De mail stelt een vraag waar antwoord op verwacht wordt
+- De mail vraagt om een actie (betaling, ondertekening, beslissing)
+- Een klant wacht op service of antwoord
+- Een factuur moet betaald worden
+- Een partner/leverancier vraagt om reactie
+- De mail bevat 'graag reactie', 'kun je laten weten', 'wachten op antwoord' of vergelijkbaar
 - Mail bevat klacht of probleem → true + priority HOOG
-- Bevestigingen, notificaties, leads, betaalbevestigingen, eigen betalingen → ALTIJD false
+
+requires_action = FALSE als:
+- Puur informatieve mail (nieuwsbrief, notificatie, update, bevestiging)
+- Reclame of marketing
+- Automatische bevestiging (betaling ontvangen, order geplaatst)
+- Aanmelding zonder vraag (Lead/Appointment/Event — systeem handelt af via flow)
+- Mail lijkt al beantwoord (in thread)
+- Geen concrete actie gevraagd
+
+LET OP: requires_action is INDEPENDENT van categorie. Voorbeelden:
+- 'Klantvragen' = meestal true, maar soms false (klant bevestigt iets, geen vraag)
+- 'Overig' = meestal false, maar soms true (iemand vraagt direct iets)
+- 'Reclame' = altijd false
+- 'Nieuwe Lead' = false (systeem handelt af via flow)
 
 Geef terug als JSON:
 {
