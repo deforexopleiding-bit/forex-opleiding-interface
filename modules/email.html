@@ -426,6 +426,12 @@
     .bulk-vt-chip:hover, .bulk-vt-chip.active { background: rgba(139,92,246,0.18); border-color: #7c3aed; color: #c4b5fd; }
     .bulk-vt-section { margin-bottom: 14px; }
     .bulk-vt-section-label { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--text-faint); font-weight: 600; margin-bottom: 6px; }
+    /* Factuur afdrukken (Openstaande facturen) */
+    .btn-print-factuur { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; background: var(--accent-violet, #534AB7); color: #fff; border: none; border-radius: 6px; font-size: 12px; font-weight: 600; cursor: pointer; transition: opacity .15s; }
+    .btn-print-factuur:hover { opacity: 0.9; }
+    .badge-afgedrukt { display: inline-flex; align-items: center; gap: 4px; padding: 4px 10px; background: var(--bg-elev); color: var(--green, #059669); border: 1px solid var(--green, #059669); border-radius: 999px; font-size: 11px; font-weight: 500; }
+    .checkbox-afgedrukt { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; color: var(--text-dim); cursor: pointer; margin-left: 4px; }
+    .checkbox-afgedrukt input { accent-color: var(--green, #059669); cursor: pointer; }
     .bulk-vt-chips { display: flex; gap: 6px; flex-wrap: wrap; }
     .reclame-table {
       background: var(--bg-elev); border: 1px solid var(--border); border-radius: 12px; overflow: hidden;
@@ -1382,6 +1388,7 @@
     replyBcc:        {},         // uid → bcc tekst
     replySubject:    {},         // uid → aangepast onderwerp
     taakCreated:          loadJson('email_taak_created', {}),  // uid → true
+    factuurPrinted:       loadJson('email_factuur_printed', {}),  // uid → true (Openstaande facturen afgedrukt)
     pendingAttachments:   {}   // uid → [{filename, contentType, size, content (base64)}]
   };
 
@@ -2376,6 +2383,27 @@
     } else {
       updateCardPreview(email.uid);
     }
+  }
+
+  // Open de eerste PDF-bijlage van een factuur-mail in een nieuw tabblad (afdrukken).
+  async function printFactuur(uid) {
+    const email = findEmail(uid);
+    if (!email) return;
+    const cache = state.bodyCache[uid];
+    if (!cache || cache.loading || cache.error) {
+      await fetchEmailBody(email);
+    }
+    const attachments = state.bodyCache[uid]?.attachments || [];
+    const pdfs = attachments.filter((a) => a.contentType === 'application/pdf');
+    if (pdfs.length === 0) {
+      showToast('Geen PDF-bijlage gevonden in deze mail', 'warning');
+      return;
+    }
+    if (pdfs.length > 1) showToast(pdfs.length + ' PDFs gevonden — eerste wordt geopend', 'info');
+    const imapUid = extractImapUid(uid);
+    const url = '/api/email-attachment?mailbox=' + encodeURIComponent(email.mailbox) +
+      '&uid=' + encodeURIComponent(imapUid) + '&index=' + pdfs[0].index + '&disposition=inline';
+    window.open(url, '_blank');
   }
 
   function updateCardPreview(uid) {
@@ -4197,6 +4225,11 @@
       renderSentBadge(e.uid) +
       renderAiSection(e) +
       '<div class="card-actions">' +
+        (e.category === 'Openstaande facturen' ? (
+          state.factuurPrinted[e.uid]
+            ? '<span class="badge-afgedrukt"><i class="ti ti-printer-check" aria-hidden="true"></i> Afgedrukt</span>'
+            : '<button class="btn-print-factuur" data-action="print-factuur" data-uid="' + escapeHtml(e.uid) + '"><i class="ti ti-printer" aria-hidden="true"></i> Factuur afdrukken</button>'
+        ) + '<label class="checkbox-afgedrukt"><input type="checkbox" class="cb-afgedrukt" data-uid="' + escapeHtml(e.uid) + '"' + (state.factuurPrinted[e.uid] ? ' checked' : '') + ' /> Afgedrukt</label>' : '') +
         (showGenBtn ? '<button class="btn btn-ai" data-action="generate" data-uid="' + escapeHtml(e.uid) + '">' + ICON_AI + ' Genereer AI antwoord</button>' : '') +
         '<button class="btn" data-action="verplaats-train" data-uid="' + escapeHtml(e.uid) + '" title="Verplaats mail en train de agent met context">📂 Verplaats &amp; Train</button>' +
         (kbSaved ? '<span class="kb-saved-badge">📚 In kennisbank</span>'
@@ -4423,6 +4456,17 @@
       });
     });
 
+    // ── 'Afgedrukt' checkbox (Openstaande facturen) ──────────────────────
+    card.querySelectorAll('.cb-afgedrukt[data-uid="' + uid + '"]').forEach((cb) => {
+      cb.addEventListener('change', (ev) => {
+        ev.stopPropagation();
+        if (cb.checked) state.factuurPrinted[uid] = true;
+        else delete state.factuurPrinted[uid];
+        saveJson('email_factuur_printed', state.factuurPrinted);
+        render();
+      });
+    });
+
     // ── Reply textarea ────────────────────────────────────────────────────
     const replyBox = card.querySelector('[data-reply="' + uid + '"]');
     if (replyBox) {
@@ -4448,6 +4492,7 @@
         else if (action === 'send')            sendAiProposal(u);
         else if (action === 'cancel')          cancelAiProposal(u);
         else if (action === 'create-task')     { console.log('Taak knop geklikt voor uid:', u); openTaakVanEmail(u); }
+        else if (action === 'print-factuur')   printFactuur(u);
         else if (action === 'verplaats-train') verplaatsEnTrain(u, 'actie');
         else if (action === 'kb-open') {
           state.openKbPanel = state.openKbPanel === u ? null : u;
