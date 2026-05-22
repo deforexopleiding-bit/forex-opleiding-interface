@@ -1125,6 +1125,11 @@
       Overig
       <span class="tab-count" id="tabCountOverig">0</span>
     </button>
+    <button class="tab" data-tab="alle">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
+      Alle mails
+      <span class="tab-count" id="tabCountAlle">0</span>
+    </button>
     <button class="tab" data-tab="verzonden">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
       Verzonden
@@ -4870,6 +4875,7 @@
     document.getElementById('tabCountFinance').textContent   = financeEmails.length;
     document.getElementById('tabCountReclame').textContent   = reclameEmails.length + suspectEmails.length;
     document.getElementById('tabCountOverig').textContent    = overigEmails.length;
+    document.getElementById('tabCountAlle').textContent      = filtered.filter(passesCatFilter).length;
     document.getElementById('tabCountVerzonden').textContent = state.verzondenEmails.length;
 
     // Tab content
@@ -4910,6 +4916,17 @@
         attachReclameHandlers();
         if (state.openBodyUid) { const _em = findEmail(state.openBodyUid); if (_em && !state.bodyCache[state.openBodyUid]) fetchEmailBody(_em); }
         break;
+      case 'alle': {
+        const alleEmails = filtered.filter(passesCatFilter).filter(passesSearchFilter);
+        content.innerHTML = renderAlleTab(alleEmails);
+        attachAlleRowHandlers();
+        if (alleEmails.length > PAGE_SIZE) {
+          const totalPages = Math.max(1, Math.ceil(alleEmails.length / PAGE_SIZE));
+          attachPaginationHandlers(totalPages, 'allePage');
+        }
+        if (state.openBodyUid) { const _em = findEmail(state.openBodyUid); if (_em && !state.bodyCache[state.openBodyUid]) fetchEmailBody(_em); }
+        break;
+      }
       case 'verzonden':
         if (!state.verzondenLoaded) loadVerzondenEmails();
         content.innerHTML = renderVerzondenTab();
