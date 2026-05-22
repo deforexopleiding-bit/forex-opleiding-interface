@@ -754,7 +754,9 @@
     .reclame-vt-wrap { grid-column: 1 / -1; margin-top: 4px; }
 
     /* ── Category filter pills ── */
-    .cat-pills-bar { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 14px; align-items: center; }
+    .cat-pills-bar { display: none; gap: 4px; align-items: center; padding: 12px 4px 14px; border-bottom: 0.5px solid var(--border); margin-bottom: 14px; }
+    .cat-pills-bar.is-visible { display: flex; }
+    .cat-pills { display: flex; gap: 6px; flex-wrap: wrap; }
     .cat-pills-label { font-size: 11px; color: var(--text-faint); font-weight: 600; text-transform: uppercase; letter-spacing: .08em; white-space: nowrap; }
     .cat-pill {
       font-family: inherit; font-size: 11px; font-weight: 600;
@@ -1087,11 +1089,6 @@
     </div>
   </div>
 
-  <div class="cat-pills-bar" id="catPillsBar" style="display:none;">
-    <span class="cat-pills-label">Categorie</span>
-    <div class="cat-pills" id="categoryFilterPills" style="display:flex;gap:6px;flex-wrap:wrap;"></div>
-  </div>
-
   <div class="tab-bar" id="tabBar">
     <button class="tab active" data-tab="sales">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
@@ -1128,6 +1125,10 @@
       Verzonden
       <span class="tab-count" id="tabCountVerzonden">0</span>
     </button>
+  </div>
+
+  <div class="cat-pills-bar" id="catPillsBar">
+    <div class="cat-pills" id="categoryFilterPills"></div>
   </div>
 
   <div id="tabContent">
@@ -4815,12 +4816,12 @@
     const subTabs = SUB_TABS[state.activeTab];
 
     if (!subTabs) {
-      row.style.display = 'none';
+      row.classList.remove('is-visible');
       pillsContainer.innerHTML = '';
       return;
     }
 
-    row.style.display = 'flex';
+    row.classList.add('is-visible');
     pillsContainer.innerHTML = '';
 
     const tabCatSet = TAB_GROUPS[state.activeTab];
