@@ -95,7 +95,8 @@ function applyAbsoluteRules(subject, senderDomain) {
 }
 
 // ── Harde inhoudsregels ───────────────────────────────────────────────────────
-const PAYMENT_DOMAINS = ['paypal.nl', 'paypal.com', 'mollie.com', 'stripe.com'];
+const INCOMING_PAYMENT_DOMAINS = ['mollie.com', 'stripe.com'];   // klant betaalt ons → Betaalbevestigingen
+const OUTGOING_PAYMENT_DOMAINS = ['paypal.com', 'paypal.nl'];     // wij betalen (vaak) → Aankopen/betalingen
 const HARD_RULES = [
   {
     category: 'Nieuwe Lead',
@@ -116,14 +117,23 @@ const HARD_RULES = [
     patterns: ['event aanmelding', 'aanmelding gent', 'seminar aanmelding',
       'aanmelding seminar', 'aanmelding webinar', ' gent']
   },
+  // Inkomende klant-betalingen → Betaalbevestigingen (deterministisch, eenduidig)
   {
-    category: 'Overig',
+    category: 'Betaalbevestigingen',
     requires_action: false,
     patterns: ['betaling ontvangen', 'factuur voldaan', 'payment confirmed',
       'je factuur werd betaald', 'werd online betaald', 'creditcard-betaling ontvangen',
-      'ontvangstbewijs', 'transactiebewijs', 'your receipt', 'payment receipt',
-      'je betaling is ontvangen', 'je bestelling is bevestigd']
+      'je betaling is ontvangen']
+  },
+  // Eigen uitgevoerde betalingen/bestellingen → Aankopen/betalingen (deterministisch)
+  {
+    category: 'Aankopen/betalingen',
+    requires_action: false,
+    patterns: ['je bestelling is bevestigd', 'your order is confirmed', 'order confirmation']
   }
+  // Ambigue patterns ('ontvangstbewijs', 'transactiebewijs', 'your receipt',
+  // 'payment receipt') bewust VERWIJDERD — die kunnen eigen aankoop óf
+  // klant-bevestiging zijn; de AI beslist nu op basis van de volledige inhoud.
 ];
 const OVERIG_DOMAINS = ['vimeo.com', 'youtube.com', 'linkedin.com'];
 
@@ -138,12 +148,15 @@ function applyHardRules(subject, from, bodySnippet) {
     }
   }
 
-  if (PAYMENT_DOMAINS.includes(domain)) {
-    return { category: 'Overig', requires_action: false };
+  if (INCOMING_PAYMENT_DOMAINS.includes(domain)) {
+    return { category: 'Betaalbevestigingen', requires_action: false };
+  }
+  if (OUTGOING_PAYMENT_DOMAINS.includes(domain)) {
+    return { category: 'Aankopen/betalingen', requires_action: false };
   }
   if (domain === 'teamleader.eu') {
     const isPayment = ['betaald', 'payment', 'receipt', 'factuur'].some((t) => b.includes(t) || s.includes(t));
-    if (isPayment) return { category: 'Overig', requires_action: false };
+    if (isPayment) return { category: 'Betaalbevestigingen', requires_action: false };
   }
   if (OVERIG_DOMAINS.includes(domain)) {
     return { category: 'Overig', requires_action: false };
