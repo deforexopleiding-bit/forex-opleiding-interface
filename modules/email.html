@@ -4825,7 +4825,9 @@
     pillsContainer.innerHTML = '';
 
     const tabCatSet = TAB_GROUPS[state.activeTab];
-    const tabEmails = state.emails.filter((e) => tabCatSet.has(e.category));
+    // Tel over dezelfde gefilterde set als de tabs (datum + adres) — consistente counts
+    const baseEmails = getFilteredEmails();
+    const tabEmails = baseEmails.filter((e) => tabCatSet.has(e.category));
 
     const makePill = (cat, label, count) => {
       const pill = document.createElement('button');
@@ -4837,16 +4839,14 @@
     };
 
     makePill('Alle', 'Alle', tabEmails.length);
-    subTabs.forEach((cat) => makePill(cat, cat, state.emails.filter((e) => e.category === cat).length));
+    subTabs.forEach((cat) => makePill(cat, cat, baseEmails.filter((e) => e.category === cat).length));
   }
 
   function render() {
     renderCategoryPills();
     const filtered     = getFilteredEmails();
-    // Actie tab: negeert datum filter — toont ALLE openstaande mails (wel adres-filter)
-    const actieBase    = state.addressFilter === 'Alle'
-      ? state.emails
-      : state.emails.filter((e) => (e.mailbox||'').toLowerCase() === state.addressFilter.toLowerCase());
+    // Alle tabs respecteren nu de datum- + adres-filter (consistente counts/content)
+    const actieBase    = filtered;
     const actieEmails  = getActieEmails(actieBase);
     const infoEmails   = getInfoEmails(filtered);
     const reclameEmails= getReclameEmails(filtered);
