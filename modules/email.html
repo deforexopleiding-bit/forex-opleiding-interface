@@ -1874,10 +1874,6 @@
     ).join('');
     const actJa  = '<button class="vt-action-btn' + (ps.requiresAction === true  ? ' selected' : '') + '" onclick="vtSelectAction(true)">Ja</button>';
     const actNee = '<button class="vt-action-btn' + (ps.requiresAction === false ? ' selected' : '') + '" onclick="vtSelectAction(false)">Nee</button>';
-    const sectionBtns =
-      '<button class="vt-action-btn' + (ps.targetSection === 'actie'   ? ' selected' : '') + '" onclick="vtSelectSection(\'actie\')">'   + ICON_INBOX + ' Actie vereist</button>' +
-      '<button class="vt-action-btn' + (ps.targetSection === 'info'    ? ' selected' : '') + '" onclick="vtSelectSection(\'info\')">'    + ICON_INFO2 + ' Leadmanagement</button>' +
-      '<button class="vt-action-btn' + (ps.targetSection === 'reclame' ? ' selected' : '') + '" onclick="vtSelectSection(\'reclame\')">' + ICON_SPAM  + ' Reclame / Overige</button>';
     return '<div class="vt-panel" id="vtPanel-' + escapeHtml(uid) + '">' +
       '<div>' +
         (ps.aiHintCategory ? '<div class="vt-hint">Agent dacht: ' + escapeHtml(ps.aiHintCategory) + (ps.aiHintConfidence ? ' (' + ps.aiHintConfidence + '% zekerheid)' : '') + '</div>' : '') +
@@ -1887,24 +1883,19 @@
         '<input class="vt-reason-input" type="text" placeholder="Eigen reden..." value="' + escapeHtml(ps.reasonText || '') +
           '" oninput="vtSetReason(this.value)"></div>' +
       '<div><div class="vt-panel-label">Actie vereist?</div><div class="vt-action-btns">' + actJa + actNee + '</div></div>' +
-      '<div><div class="vt-panel-label">Toon in welke tab?</div><div class="vt-action-btns">' + sectionBtns + '</div></div>' +
       '<div style="display:flex;gap:8px;align-items:center">' +
         '<button class="vt-confirm-btn"' + (!ps.category ? ' disabled' : '') +
-          ' onclick="bevestigVerplaatsEnTrain(\'' + escapeHtml(uid) + '\')">📂 Verplaats &amp; Train Agent</button>' +
+          ' onclick="bevestigVerplaatsEnTrain(\'' + escapeHtml(uid) + '\')">📂 Train Agent</button>' +
         '<button class="btn" style="padding:6px 12px;font-size:12px" onclick="sluitVtPanel()">Annuleren</button>' +
       '</div>' +
     '</div>';
   }
 
   function vtSelectCat(cat) {
+    // Categorie bepaalt automatisch de tab via TAB_GROUPS — geen aparte tab-keuze meer.
     state.vtPanelState.category = cat;
-    if (ACTIE_CATS.has(cat)) state.vtPanelState.targetSection = 'actie';
-    else if (INFO_CATS.has(cat)) state.vtPanelState.targetSection = 'info';
-    else if (cat === 'Reclame') state.vtPanelState.targetSection = 'reclame';
-    else state.vtPanelState.targetSection = 'info';
     updateVtPanelHost(state.openVtPanel);
   }
-  function vtSelectSection(section) { state.vtPanelState.targetSection = section; updateVtPanelHost(state.openVtPanel); }
   function vtToggleTag(tag)    { const t = state.vtPanelState.tags; const i = t.indexOf(tag); i >= 0 ? t.splice(i, 1) : t.push(tag); updateVtPanelHost(state.openVtPanel); }
   function vtSelectAction(val) { state.vtPanelState.requiresAction = val; updateVtPanelHost(state.openVtPanel); }
   function vtSetReason(val)    { state.vtPanelState.reasonText = val; }
@@ -2020,8 +2011,8 @@
 
     const oldCat  = email.category;
     const oldFlag = state.actionFlags[uid];
-    // Als sectie 'reclame', gebruik 'Reclame' als effectieve categorie
-    const newCat  = ps.targetSection === 'reclame' ? 'Reclame' : ps.category;
+    // Categorie is leidend; de tab volgt automatisch uit TAB_GROUPS.
+    const newCat  = ps.category;
     const reason  = [...ps.tags, ps.reasonText].filter(Boolean).join(' · ');
 
     // Stap 1 — UI update
@@ -2039,23 +2030,11 @@
     if (oldCat === 'Reclame' && newCat !== 'Reclame') {
       removeFromReclamePatterns(_vtSenderEmail, _vtSenderDomain);
     }
+    // 'Actie vereist?' (Ja/Nee) is de handmatige override voor de actionFlag.
     if (ps.requiresAction !== null) {
       state.actionFlags[uid] = ps.requiresAction;
       saveJson(ACTION_FLAGS_KEY, state.actionFlags);
-    }
-    // targetSection overschrijft actionFlags voor tab-plaatsing
-    if (ps.targetSection === 'actie') {
-      state.actionFlags[uid] = true;
-      saveJson(ACTION_FLAGS_KEY, state.actionFlags);
-      saveEmailAction(uid, 'mark-action', true);
-    } else if (ps.targetSection === 'info') {
-      state.actionFlags[uid] = false;
-      saveJson(ACTION_FLAGS_KEY, state.actionFlags);
-      saveEmailAction(uid, 'no-action', true);
-    } else if (ps.targetSection === 'reclame') {
-      delete state.actionFlags[uid];
-      saveJson(ACTION_FLAGS_KEY, state.actionFlags);
-      saveEmailAction(uid, 'recategorize', 'Reclame');
+      saveEmailAction(uid, ps.requiresAction ? 'mark-action' : 'no-action', true);
     }
     populateSuggestions(); render();
 
