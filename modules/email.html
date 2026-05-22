@@ -4932,16 +4932,10 @@
     // ── Stats-row (dual hero + 2 mid-cards) — rekent over 'filtered' (datum + adres) ──
     const setStat = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
 
-    // Hero-totaal: negeert datum-filter (oude onbeantwoorde mails niet missen),
-    // maar respecteert WEL het adres-filter (mailbox-keuze). Sub-pills blijven datum-gefilterd.
-    const teAdresBase = state.addressFilter === 'Alle'
-      ? state.emails
-      : state.emails.filter((e) => (e.mailbox || '').toLowerCase() === state.addressFilter.toLowerCase());
-    const teTotalAll = teAdresBase.filter((e) =>
-      e.category === 'Klantvragen' ||
-      e.category === 'Openstaande facturen' ||
-      e.category === 'Partners'
-    ).length;
+    // Hero-totaal = EXACT dezelfde set als de 'Te beantwoorden' tab (getEffectiveRequiresAction,
+    // excl. Reclame, adres-gefilterd, datum genegeerd) → hero en tab tonen altijd hetzelfde getal
+    // en updaten mee bij toggle. Sub-pills blijven category-based + datum-gefilterd.
+    const teTotalAll = teBeantwoordenEmails.length;
     const teKlantvragen = filtered.filter((e) => e.category === 'Klantvragen').length;
     const teFacturen    = filtered.filter((e) => e.category === 'Openstaande facturen').length;
 
