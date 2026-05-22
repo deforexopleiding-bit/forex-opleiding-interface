@@ -433,6 +433,11 @@
     .badge-afgedrukt { display: inline-flex; align-items: center; gap: 4px; padding: 4px 10px; background: var(--bg-elev); color: var(--green, #059669); border: 1px solid var(--green, #059669); border-radius: 999px; font-size: 11px; font-weight: 500; }
     .checkbox-afgedrukt { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; color: var(--text-dim); cursor: pointer; margin-left: 4px; }
     .checkbox-afgedrukt input { accent-color: var(--green, #059669); cursor: pointer; }
+    /* Actie vereist — badge + toggle */
+    .badge-actie-vereist { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; background: #FCEBEB; color: #791F1F; border: 1px solid #F09595; border-radius: 4px; font-size: 10px; font-weight: 500; margin-left: 6px; white-space: nowrap; }
+    [data-theme="dark"] .badge-actie-vereist { background: rgba(162,45,45,0.2); color: #F09595; border-color: #A32D2D; }
+    .btn-toggle-actie { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; background: transparent; border: 1px solid var(--border); border-radius: 6px; font-size: 12px; cursor: pointer; color: var(--text-dim); white-space: nowrap; }
+    .btn-toggle-actie:hover { background: var(--bg-elev); color: var(--text); }
     .bulk-vt-chips { display: flex; gap: 6px; flex-wrap: wrap; }
     .reclame-table {
       background: var(--bg-elev); border: 1px solid var(--border); border-radius: 12px; overflow: hidden;
@@ -3588,6 +3593,29 @@
     saveJson(ACTION_FLAGS_KEY, state.actionFlags);
   }
 
+  // Effectieve requires_action: handmatige override → AI-cache → DB-waarde.
+  function getEffectiveRequiresAction(e) {
+    if (!e) return false;
+    const uid = e.uid;
+    if (state.actionFlags[uid] !== undefined) return state.actionFlags[uid] === true;
+    if (_aiRequiresActionCache[uid] !== undefined) return _aiRequiresActionCache[uid] === true;
+    return e.requires_action === true;
+  }
+
+  // Toggle 'Actie vereist' (handmatige override) + persist naar DB (optimistic).
+  function toggleActieVereist(uid) {
+    const current  = getEffectiveRequiresAction(findEmail(uid));
+    const newValue = !current;
+    setActionFlag(uid, newValue);
+    render();
+    fetch('/api/email-action-flag', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email_id: uid, requires_action: newValue }),
+    }).then((r) => {
+      if (!r.ok) { showToast('Kon actie-status niet opslaan', 'error'); setActionFlag(uid, current); render(); }
+    }).catch(() => { showToast('Netwerkfout bij opslaan', 'error'); });
+  }
+
   // ── Smart category change (no full-render flicker when staying in same tab) ──
   function handleCategoryChange(uid, newCat) {
     const email = findEmail(uid);
@@ -4221,7 +4249,9 @@
         '<strong>' + highlightMatch(e.fromName || e.from || 'Onbekend', q) + '</strong>' +
         (e.fromAddress ? '<span class="sender-addr">&lt;' + highlightMatch(e.fromAddress, q) + '&gt;</span>' : '') +
       '</div>' +
-      '<div class="card-subject">' + highlightMatch(e.subject || '(geen onderwerp)', q) + '</div>' +
+      '<div class="card-subject">' + highlightMatch(e.subject || '(geen onderwerp)', q) +
+        (getEffectiveRequiresAction(e) ? '<span class="badge-actie-vereist"><i class="ti ti-flag" aria-hidden="true"></i> Actie</span>' : '') +
+      '</div>' +
       renderPreviewHtml(e.uid) +
       renderLearnBanner(e.uid) +
       (state.trainingMode ? renderTrainingInfo(e.uid) : '') +
@@ -4229,6 +4259,10 @@
       renderSentBadge(e.uid) +
       renderAiSection(e) +
       '<div class="card-actions">' +
+        '<button class="btn-toggle-actie" data-action="toggle-actie" data-uid="' + escapeHtml(e.uid) + '">' +
+          '<i class="ti ' + (getEffectiveRequiresAction(e) ? 'ti-flag-off' : 'ti-flag') + '" aria-hidden="true"></i> ' +
+          (getEffectiveRequiresAction(e) ? 'Beantwoord' : 'Actie vereist') +
+        '</button>' +
         (e.category === 'Openstaande facturen' ? (
           state.factuurPrinted[e.uid]
             ? '<span class="badge-afgedrukt"><i class="ti ti-printer-check" aria-hidden="true"></i> Afgedrukt</span>'
@@ -4278,6 +4312,7 @@
     const kbSaved = state.kbSaved[e.uid];
     const actMenu =
       '<div style="display:flex;gap:4px;align-items:center">' +
+        '<button class="btn-toggle-actie" data-act="toggle-actie" data-uid="' + escapeHtml(e.uid) + '"><i class="ti ' + (getEffectiveRequiresAction(e) ? 'ti-flag-off' : 'ti-flag') + '" aria-hidden="true"></i> ' + (getEffectiveRequiresAction(e) ? 'Beantwoord' : 'Actie') + '</button>' +
         '<button class="btn btn-sm" style="padding:3px 9px;font-size:11px" data-vt-uid="' + escapeHtml(e.uid) + '">📂 VT</button>' +
         '<div class="act-menu-wrap">' +
           '<button class="act-menu-btn" data-open-act="alle-' + escapeHtml(e.uid) + '" title="Meer opties">⋯</button>' +
@@ -4302,7 +4337,8 @@
       '<span class="cat-badge" data-cat="' + escapeHtml(e.category) + '">' + escapeHtml(e.category) + '</span>' +
       '<div class="info-meta info-meta-click" data-toggle-body="' + escapeHtml(e.uid) + '">' +
         '<div class="info-from">'    + highlightMatch(e.fromName || e.from || 'Onbekend', q) + '</div>' +
-        '<div class="info-subject">' + highlightMatch(e.subject || '(geen onderwerp)', q)     + '</div>' +
+        '<div class="info-subject">' + highlightMatch(e.subject || '(geen onderwerp)', q) +
+          (getEffectiveRequiresAction(e) ? '<span class="badge-actie-vereist"><i class="ti ti-flag" aria-hidden="true"></i> Actie</span>' : '') + '</div>' +
       '</div>' +
       '<span class="info-time">' + escapeHtml(relativeTime(e.date)) + '</span>' +
       actMenu +
@@ -4356,7 +4392,8 @@
           closeAllDropdowns();
           const act = btn.dataset.act;
           const u   = btn.dataset.uid;
-          if      (act === 'mark-action')  { setActionFlag(u, true); saveEmailAction(u, 'mark-action', true); render(); }
+          if      (act === 'toggle-actie') { toggleActieVereist(u); }
+          else if (act === 'mark-action')  { setActionFlag(u, true); saveEmailAction(u, 'mark-action', true); render(); }
           else if (act === 'create-task')  { openTaakVanEmail(u); }
           else if (act === 'snooze-day')   { snoozeEmail(u, 1); }
           else if (act === 'snooze-week')  { snoozeEmail(u, 7); }
@@ -4497,6 +4534,7 @@
         else if (action === 'cancel')          cancelAiProposal(u);
         else if (action === 'create-task')     { console.log('Taak knop geklikt voor uid:', u); openTaakVanEmail(u); }
         else if (action === 'print-factuur')   printFactuur(u);
+        else if (action === 'toggle-actie')    toggleActieVereist(u);
         else if (action === 'verplaats-train') verplaatsEnTrain(u, 'actie');
         else if (action === 'kb-open') {
           state.openKbPanel = state.openKbPanel === u ? null : u;
@@ -4540,6 +4578,7 @@
     const kbSaved = state.kbSaved[e.uid];
     const infoActMenu =
       '<div style="display:flex;gap:4px;align-items:center">' +
+        '<button class="btn-toggle-actie" data-act="toggle-actie" data-uid="' + escapeHtml(e.uid) + '"><i class="ti ' + (getEffectiveRequiresAction(e) ? 'ti-flag-off' : 'ti-flag') + '" aria-hidden="true"></i> ' + (getEffectiveRequiresAction(e) ? 'Beantwoord' : 'Actie') + '</button>' +
         '<button class="btn btn-sm" style="padding:3px 9px;font-size:11px" data-vt-uid="' + escapeHtml(e.uid) + '">📂 VT</button>' +
         '<div class="act-menu-wrap">' +
           '<button class="act-menu-btn" data-open-act="info-' + escapeHtml(e.uid) + '" title="Meer opties">⋯</button>' +
@@ -4562,7 +4601,8 @@
       '<span class="cat-badge" data-cat="' + escapeHtml(e.category) + '">' + escapeHtml(e.category) + '</span>' +
       '<div class="info-meta info-meta-click" data-toggle-body="' + escapeHtml(e.uid) + '">' +
         '<div class="info-from">'    + highlightMatch(e.fromName || e.from || 'Onbekend', q) + '</div>' +
-        '<div class="info-subject">' + highlightMatch(e.subject || '(geen onderwerp)', q)     + '</div>' +
+        '<div class="info-subject">' + highlightMatch(e.subject || '(geen onderwerp)', q) +
+          (getEffectiveRequiresAction(e) ? '<span class="badge-actie-vereist"><i class="ti ti-flag" aria-hidden="true"></i> Actie</span>' : '') + '</div>' +
       '</div>' +
       '<span class="info-time">' + escapeHtml(relativeTime(e.date)) + '</span>' +
       infoActMenu +
@@ -4607,7 +4647,8 @@
           closeAllDropdowns();
           const act = btn.dataset.act;
           const u   = btn.dataset.uid;
-          if (act === 'mark-action') {
+          if (act === 'toggle-actie') { toggleActieVereist(u); }
+          else if (act === 'mark-action') {
             const oldFlag = state.actionFlags[u];
             setActionFlag(u, true);
             saveEmailAction(u, 'mark-action', true);
