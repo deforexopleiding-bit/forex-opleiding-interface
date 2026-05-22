@@ -4876,10 +4876,15 @@
     // ── Stats-row (dual hero + 2 mid-cards) — rekent over 'filtered' (datum + adres) ──
     const setStat = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
 
+    // Hero-totaal: ALTIJD over state.emails (negeert datum-filter) zodat oude
+    // onbeantwoorde mails nooit gemist worden. Sub-pills blijven datum-gefilterd.
+    const teTotalAll = state.emails.filter((e) =>
+      e.category === 'Klantvragen' ||
+      e.category === 'Openstaande facturen' ||
+      e.category === 'Partners'
+    ).length;
     const teKlantvragen = filtered.filter((e) => e.category === 'Klantvragen').length;
     const teFacturen    = filtered.filter((e) => e.category === 'Openstaande facturen').length;
-    const tePartners    = filtered.filter((e) => e.category === 'Partners').length;
-    const teTotal       = teKlantvragen + teFacturen + tePartners;
 
     const nieuwLeads  = filtered.filter((e) => e.category === 'Nieuwe Lead').length;
     const nieuwAppts  = filtered.filter((e) => e.category === 'Appointment').length;
@@ -4892,7 +4897,7 @@
 
     const draftsCount = Object.keys(localStorage).filter((k) => k.startsWith('draft_')).length;
 
-    setStat('statTeBeantwoorden', teTotal);
+    setStat('statTeBeantwoorden', teTotalAll);
     setStat('statSubKlantvragen', teKlantvragen);
     setStat('statSubFacturen', teFacturen);
 
