@@ -416,8 +416,8 @@
       background: rgba(245,158,11,0.12); border: 1px solid rgba(245,158,11,0.25); color: var(--amber);
     }
     .reclame-bulk-bar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
-    .bulk-selectie-bar { position: sticky; top: 0; z-index: 20; background: rgba(26,24,48,0.97); border: 1px solid rgba(139,92,246,0.35); border-radius: 8px; padding: 10px 14px; margin-bottom: 12px; display: flex; align-items: center; gap: 10px; backdrop-filter: blur(4px); }
-    .bulk-selectie-bar .bulk-count { font-size: 13px; font-weight: 600; color: #a78bfa; flex: 1; }
+    .bulk-selectie-bar { position: sticky; top: 0; z-index: 20; background: var(--bg-elev); border: 1px solid var(--accent-violet, #534AB7); color: var(--text); border-radius: 8px; padding: 10px 14px; margin-bottom: 12px; display: flex; align-items: center; gap: 10px; backdrop-filter: blur(4px); }
+    .bulk-selectie-bar .bulk-count { font-size: 13px; font-weight: 600; color: var(--accent-violet, #534AB7); flex: 1; }
     .bulk-vt-chip { display: inline-flex; align-items: center; justify-content: center; padding: 5px 12px; border-radius: 6px; font-size: 12px; font-weight: 600; cursor: pointer; border: 1px solid var(--border-strong); background: var(--bg); color: var(--text); transition: background .12s, border-color .12s; }
     .bulk-vt-chip:hover, .bulk-vt-chip.active { background: rgba(139,92,246,0.18); border-color: #7c3aed; color: #c4b5fd; }
     .bulk-vt-section { margin-bottom: 14px; }
@@ -3247,11 +3247,11 @@
 
   // ── Bulk Verplaats & Train ─────────────────────────────────────────────────
   let _bulkVtCat     = '';
-  let _bulkVtSection = '';
+  let _bulkVtAction  = null; // null = auto (categorie bepaalt), true/false = handmatige override
   let _bulkVtReason  = '';
 
   function openBulkVtModal() {
-    _bulkVtCat = ''; _bulkVtSection = ''; _bulkVtReason = '';
+    _bulkVtCat = ''; _bulkVtAction = null; _bulkVtReason = '';
     const modal = document.getElementById('bulkVtModal');
     if (!modal) return;
     modal.classList.remove('hidden');
@@ -3265,31 +3265,28 @@
     if (!box) return;
     const n    = state.reclameSelected.size;
     const cats = ['Nieuwe Lead','Appointment','Event Aanmelding','Klantvragen','Betaalbevestigingen','Openstaande facturen','Aankopen/betalingen','Overig'];
-    const secs = [['actie','Actie vereist'],['info','Leadmanagement'],['reclame','Reclame/Overige']];
     const reasons = ['Betaalbevestiging','Systeemmail','Geen vraag','Spam','Fout herkend'];
     const catChips = cats.map((c) =>
       '<button type="button" class="bulk-vt-chip' + (c === _bulkVtCat ? ' active' : '') +
       '" onclick="_bulkVtCat=\'' + c + '\';renderBulkVtModal()">' + c + '</button>'
     ).join('');
-    const secChips = secs.map(([k,l]) =>
-      '<button type="button" class="bulk-vt-chip' + (k === _bulkVtSection ? ' active' : '') +
-      '" onclick="_bulkVtSection=\'' + k + '\';renderBulkVtModal()">' + l + '</button>'
-    ).join('');
+    const actJa  = '<button type="button" class="bulk-vt-chip' + (_bulkVtAction === true  ? ' active' : '') + '" onclick="_bulkVtAction=true;renderBulkVtModal()">Ja</button>';
+    const actNee = '<button type="button" class="bulk-vt-chip' + (_bulkVtAction === false ? ' active' : '') + '" onclick="_bulkVtAction=false;renderBulkVtModal()">Nee</button>';
     const rsChips = reasons.map((r) =>
       '<button type="button" class="bulk-vt-chip' + (r === _bulkVtReason ? ' active' : '') +
       '" onclick="_bulkVtReason=\'' + r + '\';renderBulkVtModal()">' + r + '</button>'
     ).join('');
     box.innerHTML =
-      '<div class="modal-header"><h3>📂 ' + n + ' mail' + (n > 1 ? 's' : '') + ' verplaatsen</h3><button class="modal-close" onclick="closeBulkVtModal()">&times;</button></div>' +
+      '<div class="modal-header"><h3>📂 Train Agent (' + n + ' mail' + (n > 1 ? 's' : '') + ')</h3><button class="modal-close" onclick="closeBulkVtModal()">&times;</button></div>' +
       '<div style="padding:18px 22px;display:flex;flex-direction:column;gap:16px">' +
         '<div class="bulk-vt-section"><div class="bulk-vt-section-label">Naar welke categorie?</div><div class="bulk-vt-chips">' + catChips + '</div></div>' +
-        '<div class="bulk-vt-section"><div class="bulk-vt-section-label">Naar welke tab?</div><div class="bulk-vt-chips">' + secChips + '</div></div>' +
+        '<div class="bulk-vt-section"><div class="bulk-vt-section-label">Actie vereist?</div><div class="bulk-vt-chips">' + actJa + actNee + '</div></div>' +
         '<div class="bulk-vt-section"><div class="bulk-vt-section-label">Waarom? (optioneel)</div><div class="bulk-vt-chips">' + rsChips + '</div>' +
           '<input class="taak-form-input" id="bulkVtReasonText" placeholder="Eigen reden..." style="margin-top:8px" value="" /></div>' +
       '</div>' +
       '<div class="modal-footer">' +
         '<button class="btn" onclick="closeBulkVtModal()">Annuleren</button>' +
-        '<button class="btn btn-primary" onclick="executeBulkVt()">✓ Verplaats alle ' + n + ' mail' + (n > 1 ? 's' : '') + '</button>' +
+        '<button class="btn btn-primary" onclick="executeBulkVt()">✓ Train Agent (' + n + ' mail' + (n > 1 ? 's' : '') + ')</button>' +
       '</div>';
   }
   async function executeBulkVt() {
@@ -3304,7 +3301,9 @@
       if (!email) { console.warn('Mail niet gevonden voor uid:', uid); continue; }
 
       const oldCat = email.category;
-      const requiresAction = ['Klantvragen', 'Openstaande facturen'].includes(_bulkVtCat);
+      const requiresAction = _bulkVtAction !== null
+        ? _bulkVtAction
+        : ['Klantvragen', 'Openstaande facturen'].includes(_bulkVtCat);
       const bulkSenderRaw   = email.from || email.fromAddress || '';
       const bulkSenderEmail = (email.fromAddress || getFromAddress(email) || '').toLowerCase();
       const bulkSenderDomain = getDomain(bulkSenderEmail);
@@ -3320,11 +3319,9 @@
         removeFromReclamePatterns(bulkSenderEmail, bulkSenderDomain);
       }
 
-      if (_bulkVtSection) {
-        const flagVal = _bulkVtSection === 'actie' ? true : _bulkVtSection === 'info' ? false : null;
-        setActionFlag(uid, flagVal);
-        saveEmailAction(uid, 'move-' + _bulkVtSection, true);
-      }
+      // 'Actie vereist?' override (handmatig) of auto o.b.v. categorie.
+      setActionFlag(uid, requiresAction);
+      saveEmailAction(uid, requiresAction ? 'mark-action' : 'no-action', true);
 
       try {
         const learnResp = await window.AgentShared.apiFetch('/api/learn', {
