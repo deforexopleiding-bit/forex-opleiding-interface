@@ -110,6 +110,27 @@ export default async function handler(req, res) {
       console.log('[send-email] email_replies opgeslagen');
     }
 
+    // ── Thread-detectie: de beantwoorde mail hoeft niet meer in 'Te beantwoorden' ──
+    // email_id is de composite uid '<mailbox>:<imap_uid>' (zie api/emails.js).
+    if (email_id) {
+      try {
+        const lastColon   = String(email_id).lastIndexOf(':');
+        const origMailbox = lastColon >= 0 ? email_id.slice(0, lastColon) : null;
+        const origUid     = lastColon >= 0 ? email_id.slice(lastColon + 1) : null;
+        if (origMailbox && origUid) {
+          const { error: markErr } = await supabase
+            .from('email_messages')
+            .update({ requires_action: false })
+            .eq('mailbox', origMailbox)
+            .eq('imap_uid', origUid);
+          if (markErr) console.warn('[send-email] requires_action mark mislukt:', markErr.message);
+          else console.log('[send-email] requires_action=false gezet op beantwoorde mail', email_id);
+        }
+      } catch (markEx) {
+        console.warn('[send-email] thread-mark fout:', markEx.message);
+      }
+    }
+
     return res.status(200).json({
       ok:        true,
       messageId: info.messageId,
