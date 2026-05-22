@@ -604,11 +604,38 @@ Klantvragen: Alle vragen en berichten van klanten — vragen over hun bestelling
 
 Partners: Zakelijke vragen of correspondentie van externe partijen (geen klant van De Forex Opleiding). Voorbeelden: samenwerkingsverzoeken, affiliate partners, leveranciers met vragen (niet factuur-gerelateerd), vragen van andere bedrijven of trading-scholen, B2B-correspondentie, onderhandelingen, marketing partnerships. NIET: klanten met vragen (Klantvragen), facturen die je moet betalen (Openstaande facturen), of reclame (Reclame). ALTIJD actie vereist.
 
-Betaalbevestigingen: Inkomende betalingsbevestigingen van KLANTEN. Mail van bank/Mollie/Stripe/iDeal dat een klant heeft betaald. Payment-receipts uit de klantenkant. Niet: eigen betaling-bevestigingen (dat is 'Aankopen/betalingen'). Geen actie vereist.
+Betaalbevestigingen: Inkomende betalingsbevestigingen WANNEER EEN KLANT van De Forex Opleiding heeft betaald. Mail van een betaalprovider (Mollie, Stripe, iDeal, PayPal-zakelijk) of bank dat een klant een aankoop heeft gedaan / abonnement betaald / factuur voldaan.
+Keywords: 'nieuwe betaling ontvangen', 'payment received', 'betaling van [klantnaam]', 'Mollie - nieuwe betaling', 'Stripe payment', 'iDeal betaling ontvangen'.
+Voorbeelden (TRUE):
+- 'Nieuwe betaling van €99 — Jan Janssen heeft betaald' -> Betaalbevestigingen
+- 'Mollie: payment_id mol_xxx ontvangen' -> Betaalbevestigingen
+- 'Stripe charge succeeded — klant XYZ' -> Betaalbevestigingen
+NIET: bevestiging van EIGEN uitgevoerde betaling (= Aankopen/betalingen). NIET: klant die over een factuur vraagt (= Klantvragen). Geen actie vereist.
 
-Openstaande facturen: Facturen die IK moet betalen. Leveranciers, abonnementen, hosting, tools, subscripties. Mail met 'factuur bijgevoegd' of 'verzoek tot betaling' VAN een leverancier AAN mij. Vervaldatum/betaaltermijn meestal genoemd. ALTIJD actie vereist.
+Openstaande facturen: Facturen die IK moet betalen — van LEVERANCIERS, diensten, abonnementen, hosting providers, tools. Mail mét factuur als bijlage of een duidelijk verzoek tot betaling AAN MIJ.
+Keywords: 'factuur bijgevoegd', 'verzoek tot betaling', 'vervaldatum', 'te betalen voor [datum]', 'betaalherinnering', 'invoice attached', 'outstanding invoice', 'betalen binnen X dagen'.
+Afzenders die hier vaak vallen: Vercel, Supabase, OpenAI, Anthropic, Google Workspace, AWS, hosting-bedrijven, abonnement-diensten, marketing-tools (HighLevel etc.), accountant, telefoonbedrijven, energie, water.
+Voorbeelden (TRUE):
+- 'Vercel invoice attached — due 30 days' -> Openstaande facturen
+- 'Factuur 2026/001 van [leverancier]' -> Openstaande facturen
+- 'Betaalherinnering Hostnet' -> Openstaande facturen
+NIET: jouw eigen verzonden factuur (verzonden). NIET: een vraag over een factuur (= Klantvragen). ALTIJD actie vereist.
 
-Aankopen/betalingen: Bevestiging van EIGEN uitgevoerde betalingen. Mail dat IK heb betaald — bankbevestiging van uitgaande betaling, order-confirmaties, abonnement-betalingen die zijn doorgegaan. Geen actie vereist.
+Aankopen/betalingen: Bevestiging van EIGEN UITGEVOERDE BETALINGEN. Mails die bevestigen dat IK (of De Forex Opleiding als bedrijf) iets HEEFT BETAALD of besteld. Banktransactie-bevestigingen van uitgaande betalingen, order-bevestigingen, abonnement-verlengingen die zijn doorgegaan, receipts van diensten waar ik aan betaal.
+Keywords: 'ontvangstbewijs', 'receipt', 'uw betaling van €X', 'your payment has been processed', 'order bevestiging', 'abonnement vernieuwd', 'your subscription was renewed', 'transaction confirmation', 'betaling voltooid', 'uw bestelling is verwerkt', 'afschrijving voltooid'.
+Afzenders die hier vaak vallen: PayPal-bevestigingen, bank-transactiemails, SaaS-providers (na auto-renewal), e-commerce confirmations, abonnement-services, betaalplatforms (bij uitgaand).
+Voorbeelden (TRUE):
+- 'Ontvangstbewijs van uw recente transactie' -> Aankopen/betalingen
+- 'Receipt for your payment of €19.99' -> Aankopen/betalingen
+- 'Your subscription has been renewed' -> Aankopen/betalingen
+- 'PayPal: u heeft €50 betaald aan [bedrijf]' -> Aankopen/betalingen
+NIET: factuur die nog betaald moet worden (= Openstaande facturen). NIET: inkomende betaling van een klant (= Betaalbevestigingen). Geen actie vereist.
+
+KRITIEK ONDERSCHEID Finance-categorieën — vraag: WIE betaalt aan WIE?
+- Klant -> Mij = Betaalbevestigingen
+- Leverancier -> Mij (factuur, nog te betalen) = Openstaande facturen
+- Ik -> Leverancier (reeds bevestigd/uitgevoerd) = Aankopen/betalingen
+Een 'ontvangstbewijs' / 'receipt' / 'transaction confirmation' van een EIGEN betaling is ALTIJD Aankopen/betalingen, NOOIT Overig.
 
 Reclame: Ongewenste marketing, nieuwsbrieven, promoties. MINIMAAL 2 reclame-signalen vereist (zie regels). Geen actie vereist.
 
