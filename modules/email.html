@@ -395,6 +395,10 @@
       transition: border-color 0.18s;
     }
     .info-row:hover { border-color: var(--border-strong); }
+    /* Selecteerbare Alle-rij: extra checkbox-kolom (eigen class zodat Sales/Overig niet breken) */
+    .info-row--sel { grid-template-columns: auto auto 1fr auto auto; }
+    .info-row--sel.selected { border-color: var(--accent-violet, #534AB7); background: rgba(83,74,183,0.06); }
+    .info-row-check { width: 15px; height: 15px; cursor: pointer; accent-color: var(--accent-violet, #534AB7); }
     .info-meta { min-width: 0; }
     .info-from { font-size: 14px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .info-subject { font-size: 13px; color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: 2px; }
@@ -427,7 +431,7 @@
       background: var(--bg-elev); border: 1px solid var(--border); border-radius: 12px; overflow: hidden;
     }
     .reclame-row {
-      display: grid; grid-template-columns: 36px auto 1fr auto;
+      display: grid; grid-template-columns: auto 1fr auto;
       gap: 12px; align-items: center;
       padding: 10px 16px; border-bottom: 1px solid var(--border);
       transition: background 0.15s;
@@ -882,13 +886,14 @@
       border-radius: 5px; color: var(--green); transition: all 0.15s;
     }
     .lr-confirm-btn:hover { background: rgba(34,197,94,0.14); }
-    .reclame-row { grid-template-columns: 36px auto 1fr auto auto; }
+    .reclame-row { grid-template-columns: auto 1fr auto auto; }
 
     @media (max-width: 640px) {
       .app { padding: 16px 12px 48px; }
       .modal-body { grid-template-columns: 1fr; }
       .info-row { grid-template-columns: auto 1fr auto; }
-      .reclame-row { grid-template-columns: 28px 1fr auto; }
+      .info-row--sel { grid-template-columns: auto auto 1fr auto; }
+      .reclame-row { grid-template-columns: 1fr auto; }
     }
   </style>
 </head>
@@ -1347,7 +1352,7 @@
     overrides: loadOverrides(),
     bodyCache: {},     // uid -> { loading, text, from, to, date, error }
     aiProposals: {},   // uid -> { original, current, loading, error, generatedAt }
-    reclameSelected: new Set(),
+    bulkSelected: new Set(),
     suggestions: [],   // weak reclame matches: [{ email, pattern }]
     fetchedAt: null,
     catFilter: 'Alle',
@@ -3189,60 +3194,35 @@
     }
   }
 
-  // ── Bulk reclame actions ───────────────────────────────────────────────────
-  function bulkMarkReclame() {
-    const items = [...state.reclameSelected].map((uid) => {
-      const email = findEmail(uid);
-      return email ? { email_id: uid, old_category: email.category } : null;
-    }).filter(Boolean);
-    items.forEach(({ email_id }) => {
-      const email = findEmail(email_id);
-      if (!email) return;
-      state.overrides.category[email_id] = 'Reclame';
-      email.category = 'Reclame';
-      recordReclamePattern(email);
-      sendLearningCorrection(email, email.category, 'Reclame', 'manual', null);
-    });
+  // ── Reclame markeer-acties (per rij) ───────────────────────────────────────
+  function markReclameOne(uid) {
+    const email = findEmail(uid);
+    if (!email) return;
+    const oldCat = email.category;
+    state.overrides.category[uid] = 'Reclame';
+    email.category = 'Reclame';
+    recordReclamePattern(email);
+    sendLearningCorrection(email, oldCat, 'Reclame', 'manual', null);
     saveOverrides(); populateSuggestions(); render();
-    state.reclameSelected.clear();
-    if (items.length > 0)
-      undoManager.push('bulk_reclame', { items }, items.length + ' mails als reclame gemarkeerd');
+    undoManager.push('bulk_reclame', { items: [{ email_id: uid, old_category: oldCat }] }, '1 mail als reclame gemarkeerd');
   }
-  function bulkMarkNotReclame() {
-    const items = [...state.reclameSelected].map((uid) => {
-      const email = findEmail(uid);
-      return email ? { email_id: uid, old_category: email.category } : null;
-    }).filter(Boolean);
-    items.forEach(({ email_id }) => {
-      const email = findEmail(email_id);
-      if (!email) return;
-      const hardCat   = getHardRuleCategory(email);
-      const cachedCat = _aiCatCache[email_id];
-      const correctCat = hardCat || (cachedCat && cachedCat !== 'Reclame' ? cachedCat : 'Overig');
-      state.overrides.category[email_id] = correctCat;
-      email.category = correctCat;
-      sendLearningCorrection(email, 'Reclame', correctCat, 'not_spam', null);
-    });
+  function markNotReclameOne(uid) {
+    const email = findEmail(uid);
+    if (!email) return;
+    const oldCat    = email.category;
+    const hardCat   = getHardRuleCategory(email);
+    const cachedCat = _aiCatCache[uid];
+    const correctCat = hardCat || (cachedCat && cachedCat !== 'Reclame' ? cachedCat : 'Overig');
+    state.overrides.category[uid] = correctCat;
+    email.category = correctCat;
+    sendLearningCorrection(email, 'Reclame', correctCat, 'not_spam', null);
     saveOverrides(); populateSuggestions(); render();
-    state.reclameSelected.clear();
-    if (items.length > 0)
-      undoManager.push('bulk_not_reclame', { items }, items.length + ' mails als niet-reclame gemarkeerd');
+    undoManager.push('bulk_not_reclame', { items: [{ email_id: uid, old_category: oldCat }] }, '1 mail als niet-reclame gemarkeerd');
   }
-  function bulkDismissSuggestions() {
-    state.reclameSelected.forEach((uid) => {
-      saveRejectedSugg(uid);
-      state.suggestions = state.suggestions.filter((s) => s.email.uid !== uid);
-    });
-    state.reclameSelected.clear();
+  function dismissSuggestionOne(uid) {
+    saveRejectedSugg(uid);
+    state.suggestions = state.suggestions.filter((s) => s.email.uid !== uid);
     render();
-  }
-  function selectAllReclame() {
-    getReclameEmails(getFilteredEmails()).forEach((e) => state.reclameSelected.add(e.uid));
-    document.querySelectorAll('#reclameTable input[type="checkbox"]').forEach((cb) => { cb.checked = true; cb.closest('.reclame-row').classList.add('selected'); });
-  }
-  function selectAllSuspects() {
-    getSuspectEmails().forEach((e) => state.reclameSelected.add(e.uid));
-    document.querySelectorAll('#suspectTable input[type="checkbox"]').forEach((cb) => { cb.checked = true; cb.closest('.reclame-row').classList.add('selected'); });
   }
 
   // ── Bulk Verplaats & Train ─────────────────────────────────────────────────
@@ -3263,7 +3243,7 @@
   function renderBulkVtModal() {
     const box = document.getElementById('bulkVtModalBox');
     if (!box) return;
-    const n    = state.reclameSelected.size;
+    const n    = state.bulkSelected.size;
     const cats = ['Nieuwe Lead','Appointment','Event Aanmelding','Klantvragen','Betaalbevestigingen','Openstaande facturen','Aankopen/betalingen','Overig'];
     const reasons = ['Betaalbevestiging','Systeemmail','Geen vraag','Spam','Fout herkend'];
     const catChips = cats.map((c) =>
@@ -3291,7 +3271,7 @@
   }
   async function executeBulkVt() {
     if (!_bulkVtCat) { showToast('Selecteer eerst een categorie'); return; }
-    const mailsToProcess = [...state.reclameSelected];
+    const mailsToProcess = [...state.bulkSelected];
     const reason = _bulkVtReason || document.getElementById('bulkVtReasonText')?.value || 'bulk_correctie';
     console.log('Bulk VT uitvoeren voor', mailsToProcess.length, 'mails');
     let successCount = 0;
@@ -3360,10 +3340,10 @@
     // Verwijder rijen direct uit de DOM voor snelle feedback
     mailsToProcess.forEach((uid) => {
       const el = document.querySelector(`[data-uid="${uid}"]`);
-      if (el) el.closest('.reclame-row, .mail-card, .email-row')?.remove();
+      if (el) el.closest('.reclame-row, .info-row, .mail-card, .email-row')?.remove();
     });
 
-    state.reclameSelected.clear();
+    state.bulkSelected.clear();
     closeBulkVtModal();
     render();
     showToast('✓ ' + successCount + ' mail' + (successCount > 1 ? 's' : '') + ' verplaatst naar ' + _bulkVtCat + ' · Agent getraind');
@@ -4239,7 +4219,17 @@
     const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
     if (state.allePage > totalPages) state.allePage = 1;
     const slice = sorted.slice((state.allePage - 1) * PAGE_SIZE, state.allePage * PAGE_SIZE);
-    let html = '<div class="info-list">' + slice.map((e) => renderAlleRow(e)).join('') + '</div>';
+    let html = '';
+    if (state.bulkSelected.size > 0) {
+      const n = state.bulkSelected.size;
+      html += '<div class="bulk-selectie-bar">' +
+        '<span class="bulk-count">' + n + ' mail' + (n > 1 ? 's' : '') + ' geselecteerd</span>' +
+        '<button class="btn btn-sm" onclick="getFilteredEmails().filter(passesCatFilter).filter(passesSearchFilter).forEach(e=>state.bulkSelected.add(e.uid));render()">Selecteer alles</button>' +
+        '<button class="btn btn-sm" onclick="state.bulkSelected.clear();render()">✕ Deselecteer alles</button>' +
+        '<button class="btn btn-sm" style="background:rgba(83,74,183,0.18);border-color:var(--accent-violet,#534AB7);color:var(--accent-violet,#534AB7)" onclick="openBulkVtModal()">📂 Train Agent</button>' +
+      '</div>';
+    }
+    html += '<div class="info-list">' + slice.map((e) => renderAlleRow(e)).join('') + '</div>';
     if (totalPages > 1) html += renderPagination(state.allePage, totalPages, total, 'allePage');
     return html;
   }
@@ -4269,7 +4259,9 @@
           '</div>' +
         '</div>' +
       '</div>';
-    return '<div class="info-row' + (isOpen ? ' body-open' : '') + '" data-uid="' + escapeHtml(e.uid) + '">' +
+    const isSel = state.bulkSelected.has(e.uid);
+    return '<div class="info-row info-row--sel' + (isSel ? ' selected' : '') + (isOpen ? ' body-open' : '') + '" data-uid="' + escapeHtml(e.uid) + '">' +
+      '<input type="checkbox" class="info-row-check" data-bulk-uid="' + escapeHtml(e.uid) + '"' + (isSel ? ' checked' : '') + ' />' +
       '<span class="cat-badge" data-cat="' + escapeHtml(e.category) + '">' + escapeHtml(e.category) + '</span>' +
       '<div class="info-meta info-meta-click" data-toggle-body="' + escapeHtml(e.uid) + '">' +
         '<div class="info-from">'    + highlightMatch(e.fromName || e.from || 'Onbekend', q) + '</div>' +
@@ -4286,6 +4278,13 @@
   function attachAlleRowHandlers() {
     document.querySelectorAll('.info-list .info-row[data-uid]').forEach((row) => {
       const uid = row.dataset.uid;
+      // Bulk-select checkbox
+      const chk = row.querySelector('.info-row-check[data-bulk-uid="' + uid + '"]');
+      if (chk) chk.addEventListener('change', (ev) => {
+        ev.stopPropagation();
+        if (chk.checked) state.bulkSelected.add(uid); else state.bulkSelected.delete(uid);
+        render();
+      });
       // Body toggle
       const metaEl = row.querySelector('[data-toggle-body="' + uid + '"]');
       if (metaEl) metaEl.addEventListener('click', (ev) => {
@@ -4609,11 +4608,14 @@
 
   // ── Rendering: Reclame tab ─────────────────────────────────────────────────
   function renderReclameRow(e, isSuspect) {
-    const isSelected = state.reclameSelected.has(e.uid);
     const isOpen = state.openBodyUid === e.uid;
     const kbSaved = state.kbSaved[e.uid];
-    return '<div class="reclame-row' + (isSelected ? ' selected' : '') + (isOpen ? ' body-open' : '') + '" data-uid="' + escapeHtml(e.uid) + '">' +
-      '<input type="checkbox" data-uid="' + escapeHtml(e.uid) + '"' + (isSelected ? ' checked' : '') + ' />' +
+    // Per-rij markeer-acties (vervangen de oude bulk-selectie in de Reclame-tab)
+    const markeerBtns = isSuspect
+      ? '<button class="act-item" data-act="mark-reclame"   data-uid="' + escapeHtml(e.uid) + '">' + ICON_SPAM + ' Markeer als reclame</button>' +
+        '<button class="act-item act-success" data-act="dismiss-suspect" data-uid="' + escapeHtml(e.uid) + '">' + ICON_READ + ' Niet reclame</button>'
+      : '<button class="act-item act-success" data-act="herstel-reclame" data-uid="' + escapeHtml(e.uid) + '">' + ICON_READ + ' Niet reclame (herstel)</button>';
+    return '<div class="reclame-row' + (isOpen ? ' body-open' : '') + '" data-uid="' + escapeHtml(e.uid) + '">' +
       '<span class="reclame-from" data-toggle-body="' + escapeHtml(e.uid) + '" style="cursor:pointer">' + escapeHtml(e.fromName || e.from || 'Onbekend') + '</span>' +
       '<span class="reclame-subject" data-toggle-body="' + escapeHtml(e.uid) + '" style="cursor:pointer">' + escapeHtml(e.subject || '(geen onderwerp)') + '</span>' +
       '<span class="reclame-time">' + escapeHtml(relativeTime(e.date)) + '</span>' +
@@ -4622,6 +4624,8 @@
         '<div class="act-menu-wrap">' +
           '<button class="act-menu-btn" data-open-act="reclame-' + escapeHtml(e.uid) + '" title="Meer opties">⋯</button>' +
           '<div class="act-menu-dropdown" id="actMenu-reclame-' + escapeHtml(e.uid) + '">' +
+            markeerBtns +
+            '<div class="act-divider"></div>' +
             '<button class="act-item" data-act="kb-open" data-uid="' + escapeHtml(e.uid) + '">📚 Toevoegen aan kennisbank</button>' +
             '<div class="act-divider"></div>' +
             '<div class="act-section-label">Verplaats naar sectie</div>' +
@@ -4647,24 +4651,9 @@
 
     let html = '';
 
-    if (state.reclameSelected.size > 0) {
-      const n = state.reclameSelected.size;
-      html += '<div class="bulk-selectie-bar">' +
-        '<span class="bulk-count">' + n + ' mail' + (n > 1 ? 's' : '') + ' geselecteerd</span>' +
-        '<button class="btn btn-sm" onclick="getReclameEmails(getFilteredEmails()).forEach(e=>state.reclameSelected.add(e.uid));render()">Selecteer alles</button>' +
-        '<button class="btn btn-sm" onclick="state.reclameSelected.clear();render()">✕ Deselecteer alles</button>' +
-        '<button class="btn btn-sm" style="background:rgba(139,92,246,0.2);border-color:#7c3aed;color:#c4b5fd" onclick="openBulkVtModal()">📂 Verplaats &amp; Train</button>' +
-      '</div>';
-    }
-
     if (suspectEmails.length) {
       html += '<div class="reclame-section">' +
         '<div class="reclame-section-title">Twijfelgevallen <span class="suspect-badge">' + suspectEmails.length + ' mogelijk reclame</span></div>' +
-        '<div class="reclame-bulk-bar">' +
-          '<button class="btn btn-sm" onclick="selectAllSuspects()">Selecteer alles</button>' +
-          '<button class="btn btn-sm btn-reclame" onclick="bulkMarkReclame()">Markeer als reclame</button>' +
-          '<button class="btn btn-sm" onclick="bulkDismissSuggestions()">Niet reclame</button>' +
-        '</div>' +
         '<div class="reclame-table" id="suspectTable">' +
           suspectEmails.map((e) => renderReclameRow(e, true)).join('') +
         '</div>' +
@@ -4674,10 +4663,6 @@
     if (reclameEmails.length) {
       html += '<div class="reclame-section">' +
         '<div class="reclame-section-title">Gemarkeerde reclame</div>' +
-        '<div class="reclame-bulk-bar">' +
-          '<button class="btn btn-sm" onclick="selectAllReclame()">Selecteer alles</button>' +
-          '<button class="btn btn-sm btn-success" onclick="bulkMarkNotReclame()">Niet reclame (herstel)</button>' +
-        '</div>' +
         '<div class="reclame-table" id="reclameTable">' +
           reclameEmails.map((e) => renderReclameRow(e, false)).join('') +
         '</div>' +
@@ -4688,15 +4673,6 @@
   }
 
   function attachReclameHandlers() {
-    document.querySelectorAll('#tabContent input[type="checkbox"][data-uid]').forEach((cb) => {
-      cb.addEventListener('change', () => {
-        const uid = cb.dataset.uid;
-        const row = cb.closest('.reclame-row');
-        if (cb.checked) { state.reclameSelected.add(uid); row?.classList.add('selected'); }
-        else            { state.reclameSelected.delete(uid); row?.classList.remove('selected'); }
-        render();
-      });
-    });
     document.querySelectorAll('.reclame-row[data-uid]').forEach((row) => {
       const uid = row.dataset.uid;
       // Body toggle op from/subject click
@@ -4732,7 +4708,10 @@
           closeAllDropdowns();
           const act = btn.dataset.act;
           const u   = btn.dataset.uid;
-          if      (act === 'move-actie') verplaatsNaarSectie(u, 'actie');
+          if      (act === 'mark-reclame')    markReclameOne(u);
+          else if (act === 'dismiss-suspect') dismissSuggestionOne(u);
+          else if (act === 'herstel-reclame') markNotReclameOne(u);
+          else if (act === 'move-actie') verplaatsNaarSectie(u, 'actie');
           else if (act === 'move-info')  verplaatsNaarSectie(u, 'info');
           else if (act === 'kb-open') {
             state.openBodyUid = uid;
