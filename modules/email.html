@@ -764,6 +764,7 @@
     }
     .cat-pill:hover { border-color: var(--border-strong); color: var(--text); }
     .cat-pill.active { background: var(--text); color: var(--bg); border-color: var(--text); }
+    .cat-pill .pill-count { opacity: 0.6; font-weight: 700; margin-left: 2px; }
 
     /* ── Reanalyze progress ── */
     .reanalyze-bar {
@@ -1086,17 +1087,9 @@
     </div>
   </div>
 
-  <div class="cat-pills-bar" id="catPillsBar">
+  <div class="cat-pills-bar" id="catPillsBar" style="display:none;">
     <span class="cat-pills-label">Categorie</span>
-    <button class="cat-pill active" data-cat="Alle">Alle</button>
-    <button class="cat-pill" data-cat="Nieuwe Lead">Nieuwe Lead</button>
-    <button class="cat-pill" data-cat="Appointment">Appointment</button>
-    <button class="cat-pill" data-cat="Event Aanmelding">Event Aanmelding</button>
-    <button class="cat-pill" data-cat="Klantvragen">Klantvragen</button>
-    <button class="cat-pill" data-cat="Betaalbevestigingen">Betaalbevestigingen</button>
-    <button class="cat-pill" data-cat="Openstaande facturen">Openstaande facturen</button>
-    <button class="cat-pill" data-cat="Aankopen/betalingen">Aankopen/betalingen</button>
-    <button class="cat-pill" data-cat="Overig">Overig</button>
+    <div class="cat-pills" id="categoryFilterPills" style="display:flex;gap:6px;flex-wrap:wrap;"></div>
   </div>
 
   <div class="tab-bar" id="tabBar">
@@ -1234,6 +1227,16 @@
   };
   // Render-stijl per tab: 'info' = lead-rijen, 'actie' = actie-cards, 'reclame' = reclame-rijen
   const TAB_RENDER = { sales: 'info', klanten: 'actie', finance: 'actie', overig: 'info', reclame: 'reclame' };
+  // Sub-categorie pills per hoofdtab (null = geen pills-rij)
+  const SUB_TABS = {
+    sales:     ['Nieuwe Lead', 'Appointment', 'Event Aanmelding'],
+    klanten:   null,
+    finance:   ['Betaalbevestigingen', 'Openstaande facturen', 'Aankopen/betalingen'],
+    reclame:   null,
+    overig:    null,
+    alle:      null,
+    verzonden: null,
+  };
   // Tabs die de actie-card layout gebruiken (voor surgical card-updates ipv full render)
   function isActieStyleTab() { return state.activeTab === 'klanten' || state.activeTab === 'finance'; }
 
@@ -4804,7 +4807,40 @@
   }
 
   // ── Main render ────────────────────────────────────────────────────────────
+  // Categorie sub-pills: dynamisch per hoofdtab (alleen sales/finance).
+  function renderCategoryPills() {
+    const row = document.getElementById('catPillsBar');
+    const pillsContainer = document.getElementById('categoryFilterPills');
+    if (!row || !pillsContainer) return;
+    const subTabs = SUB_TABS[state.activeTab];
+
+    if (!subTabs) {
+      row.style.display = 'none';
+      pillsContainer.innerHTML = '';
+      return;
+    }
+
+    row.style.display = 'flex';
+    pillsContainer.innerHTML = '';
+
+    const tabCatSet = TAB_GROUPS[state.activeTab];
+    const tabEmails = state.emails.filter((e) => tabCatSet.has(e.category));
+
+    const makePill = (cat, label, count) => {
+      const pill = document.createElement('button');
+      pill.className = 'cat-pill' + (state.catFilter === cat ? ' active' : '');
+      pill.dataset.cat = cat;
+      pill.innerHTML = escapeHtml(label) + ' <span class="pill-count">' + count + '</span>';
+      pill.onclick = () => { state.catFilter = cat; render(); };
+      pillsContainer.appendChild(pill);
+    };
+
+    makePill('Alle', 'Alle', tabEmails.length);
+    subTabs.forEach((cat) => makePill(cat, cat, state.emails.filter((e) => e.category === cat).length));
+  }
+
   function render() {
+    renderCategoryPills();
     const filtered     = getFilteredEmails();
     // Actie tab: negeert datum filter — toont ALLE openstaande mails (wel adres-filter)
     const actieBase    = state.addressFilter === 'Alle'
@@ -5043,14 +5079,7 @@
     document.getElementById('dateFrom').addEventListener('change', (ev) => { state.customFrom = ev.target.value; if (state.dateFilter === 'custom') render(); });
     document.getElementById('dateTo').addEventListener('change',   (ev) => { state.customTo   = ev.target.value; if (state.dateFilter === 'custom') render(); });
 
-    const catPills = document.querySelectorAll('#catPillsBar .cat-pill');
-    catPills.forEach((pill) => {
-      pill.addEventListener('click', () => {
-        state.catFilter = pill.dataset.cat;
-        catPills.forEach((p) => p.classList.toggle('active', p === pill));
-        render();
-      });
-    });
+    // Categorie-pills worden dynamisch gerenderd (renderCategoryPills) met inline onclick.
 
     // Search input
     const searchEl = document.getElementById('searchInput');
@@ -5100,6 +5129,7 @@
       btn.addEventListener('click', () => {
         const newTab = btn.dataset.tab;
         state.activeTab = newTab;
+        state.catFilter = 'Alle'; // reset sub-categorie filter bij hoofdtab-wissel
         document.querySelectorAll('#tabBar .tab').forEach((t) => t.classList.toggle('active', t === btn));
         render();
       });
