@@ -639,7 +639,13 @@ Een 'ontvangstbewijs' / 'receipt' / 'transaction confirmation' van een EIGEN bet
 
 Reclame: Ongewenste marketing, nieuwsbrieven, promoties. MINIMAAL 2 reclame-signalen vereist (zie regels). Geen actie vereist.
 
-Overig: Betalingsbevestigingen, systeemnotificaties, automatische bevestigingen, alles wat nergens past. Geen actie vereist tenzij er expliciet een vraag staat.
+Overig: Alles wat niet bij de andere categorieën te plaatsen is — random correspondentie zonder duidelijk doel, miscellaneous communicatie, mails die geen vraag stellen en geen bestelling/betaling/factuur zijn. Geen actie vereist tenzij er expliciet een vraag staat.
+KRITIEK NIET in Overig:
+- Betaal-/transactiebevestigingen -> zie Finance-categorieën (Betaalbevestigingen / Openstaande facturen / Aankopen/betalingen)
+- Automatische bevestigingen van betalingen of facturen -> zie Finance-categorieën
+- Reclame/marketing -> Reclame
+- Klantvragen -> Klantvragen
+Wees terughoudend met Overig: alleen kiezen als de mail ECHT nergens anders bij past. Twijfel? Probeer eerst een specifieke categorie.
 
 RECLAME REGELS — mail is ALLEEN Reclame als MINIMAAL 2 van:
 1. Promotionele woorden in onderwerp (aanbieding, sale, korting, gratis, exclusief, deal)
