@@ -1494,6 +1494,41 @@
       window._authSharedReady.then(() => window.AgentShared?.renderUserSection());
     }
   </script>
+<script>
+// RBAC frontend-gating (fail-open) — Kennisbank. Verbergt knoppen zonder permission
+// via CSS-injectie (werkt ook op dynamisch gerenderde items). super_admin = alles.
+(function () {
+  var RULES = [
+    ['#saveProfileBtn', 'kennisbank.profile.edit'],
+    ['#addFaqBtn', 'kennisbank.faq.add'],
+    ['[data-faq-action="delete"]', 'kennisbank.faq.add'],
+    ['#dropzone', 'kennisbank.material.upload'],
+    ['#textPaste', 'kennisbank.material.upload'],
+    ['#useTextBtn', 'kennisbank.material.upload'],
+    ['#activeToggle', 'kennisbank.bots.activate'],
+    ['[data-item-action="edit"]', 'kennisbank.item.edit'],
+    ['[data-item-action="delete"]', 'kennisbank.item.delete']
+  ];
+  async function applyRbacGating() {
+    try { if (window._authSharedReady) await window._authSharedReady; } catch (e) {}
+    if (!window.RBAC || typeof window.RBAC.ensurePermissionsLoaded !== 'function') return; // fail-open
+    var perms;
+    try { perms = await window.RBAC.ensurePermissionsLoaded(); } catch (e) { return; }      // fail-open
+    var roles = (typeof window.RBAC.getUserRoles === 'function' && window.RBAC.getUserRoles()) || [];
+    if (!roles.length) return;   // geen rollen / laadfout → fail-open
+    if (perms.has('*')) return;  // super_admin → alles
+    var css = RULES.filter(function (r) { return !perms.has(r[1]); })
+      .map(function (r) { return r[0] + '{display:none !important;}'; }).join('\n');
+    if (css) {
+      var st = document.createElement('style');
+      st.id = 'rbac-gating';
+      st.textContent = css;
+      document.head.appendChild(st);
+    }
+  }
+  applyRbacGating();
+})();
+</script>
 <script src="/modules/shared/permissions.js"></script>
 <script src="/modules/shared/sidebar.js"></script>
 </body>
