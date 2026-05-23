@@ -41,6 +41,15 @@
     .role-badge.manager { background:var(--color-info-soft); color:var(--color-info-text); border:1px solid var(--color-info); }
     .role-badge.editable { cursor: pointer; }
     .role-badge.editable:hover { opacity: 0.8; }
+    /* Multi-role chips */
+    .user-roles-cell { display:flex; flex-direction:column; gap:5px; }
+    .extra-roles { display:flex; flex-wrap:wrap; gap:4px; align-items:center; }
+    .role-chip { display:inline-flex; align-items:center; gap:3px; padding:2px 8px; border-radius:12px; background:var(--bg-elev-2); border:1px solid var(--border); font-size:10px; color:var(--text-dim); }
+    .role-chip[data-role="super_admin"] { background:rgba(139,92,246,0.12); color:#6d28d9; border:1px solid rgba(139,92,246,0.35); }
+    .role-chip-remove { background:none; border:none; color:var(--text-faint); cursor:pointer; font-size:11px; line-height:1; padding:0; }
+    .role-chip-remove:hover { color:var(--color-danger,#dc2626); }
+    .role-add-btn { padding:1px 8px; border:1px dashed var(--border-strong); border-radius:12px; background:transparent; color:var(--text-faint); cursor:pointer; font-size:10px; font-family:inherit; }
+    .role-add-btn:hover { color:var(--text); border-color:var(--text-dim); }
     .active-dot { display:inline-block; width:8px; height:8px; border-radius:50%; background:var(--color-success); }
     .inactive-dot { background:var(--text-faint); }
     .role-select-inline { background:var(--bg-elev-2); border:1px solid var(--border); border-radius:6px; padding:4px 8px; font-size:12px; color:var(--text); font-family:inherit; cursor:pointer; }
@@ -530,12 +539,21 @@ async function loadUsers() {
           ${(() => {
             const editableRoles = [
               ...(currentProfile?.role === 'super_admin' ? ['super_admin'] : []),
-              'manager','admin','sales','mentor','administratie','viewer'
+              'manager','admin','sales','mentor','marketing','administratie','viewer'
             ];
             const canEdit = u.id !== currentProfile?.id && editableRoles.includes(u.role);
-            return canEdit
+            const primaryBadge = canEdit
               ? `<span class="role-badge ${u.role} editable" data-user-id="${u.id}" data-role="${u.role}" onclick="toggleRoleEdit('${u.id}','${u.role}')">${u.role}</span>`
-              : `<span class="role-badge ${u.role}">${u.role}</span>`;
+              : `<span class="role-badge ${u.role}" data-role="${u.role}">${u.role}</span>`;
+            const isSuper = currentProfile?.role === 'super_admin';
+            const extra = (Array.isArray(u.all_roles) ? u.all_roles : []).filter(r => r !== u.role);
+            const chips = extra.map(r =>
+              `<span class="role-chip" data-role="${r}">${r}` +
+              (isSuper && r !== 'super_admin' ? `<button class="role-chip-remove" onclick="removeUserRole('${u.id}','${r}')" title="Rol verwijderen">×</button>` : '') +
+              `</span>`).join('');
+            const addBtn = isSuper ? `<button class="role-add-btn" onclick="showAddRoleMenu(event,'${u.id}')">+ rol</button>` : '';
+            return `<div class="user-roles-cell"><div class="primary-role">${primaryBadge}</div>` +
+              ((chips || addBtn) ? `<div class="extra-roles">${chips}${addBtn}</div>` : '') + `</div>`;
           })()}
         </td>
         <td>
@@ -587,7 +605,7 @@ function toggleRoleEdit(userId, currentRole) {
 
   const opts = [
     ...(currentProfile?.role === 'super_admin' ? ['super_admin'] : []),
-    'manager','admin','sales','mentor','administratie','viewer'
+    'manager','admin','sales','mentor','marketing','administratie','viewer'
   ];
   opts.forEach(r => {
     const o = document.createElement('option');
@@ -609,6 +627,52 @@ function toggleRoleEdit(userId, currentRole) {
 
   badge.replaceWith(select);
   select.focus();
+}
+
+// ── Multi-role: extra rollen toevoegen/verwijderen via user_roles ─────────────
+const ADMIN_ALL_ROLES = ['super_admin','manager','admin','sales','mentor','marketing','administratie','viewer'];
+
+function showAddRoleMenu(ev, userId) {
+  ev.stopPropagation();
+  const btn = ev.currentTarget;
+  const cell = btn.closest('.user-roles-cell');
+  const have = new Set();
+  cell?.querySelectorAll('[data-role]').forEach(el => have.add(el.getAttribute('data-role')));
+  const avail = ADMIN_ALL_ROLES.filter(r => !have.has(r));
+  if (!avail.length) { window.AgentShared?.showToast('Alle rollen al toegekend', 'info'); return; }
+
+  const sel = document.createElement('select');
+  sel.className = 'role-select-inline';
+  sel.innerHTML = '<option value="">+ rol…</option>' + avail.map(r => `<option value="${r}">${r}</option>`).join('');
+  sel.onchange = () => { if (sel.value) addUserRole(userId, sel.value); };
+  sel.onblur = () => { setTimeout(() => { if (document.body.contains(sel)) sel.replaceWith(btn); }, 150); };
+  btn.replaceWith(sel);
+  sel.focus();
+}
+
+async function addUserRole(userId, role) {
+  try {
+    const data = await apiRequest('PATCH', `/api/admin-users?id=${userId}`, { add_role: role });
+    if (data.error) throw new Error(data.error);
+    window.AgentShared?.showToast(`Rol '${role}' toegevoegd`, 'success');
+    loadUsers();
+  } catch (e) {
+    window.AgentShared?.showToast('Fout: ' + e.message, 'error');
+    loadUsers();
+  }
+}
+
+async function removeUserRole(userId, role) {
+  if (!confirm(`Rol '${role}' verwijderen voor deze gebruiker?`)) return;
+  try {
+    const data = await apiRequest('PATCH', `/api/admin-users?id=${userId}`, { remove_role: role });
+    if (data.error) throw new Error(data.error);
+    window.AgentShared?.showToast(`Rol '${role}' verwijderd`, 'success');
+    loadUsers();
+  } catch (e) {
+    window.AgentShared?.showToast('Fout: ' + e.message, 'error');
+    loadUsers();
+  }
 }
 
 async function deactivateUser(userId, email) {

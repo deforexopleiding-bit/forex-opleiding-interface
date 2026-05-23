@@ -5,7 +5,7 @@
 import nodemailer from 'nodemailer';
 import { supabaseAdmin, verifyAdmin } from './supabase.js';
 
-const VALID_ROLES = ['super_admin', 'admin', 'manager', 'sales', 'mentor', 'administratie', 'viewer'];
+const VALID_ROLES = ['super_admin', 'admin', 'manager', 'sales', 'mentor', 'marketing', 'administratie', 'viewer'];
 const SITE_URL    = 'https://forex-opleiding-interface.vercel.app';
 
 // ── Audit helper ──────────────────────────────────────────────────────────────
@@ -164,7 +164,17 @@ export default async function handler(req, res) {
       .order('email');
 
     if (error) return res.status(500).json({ error: error.message });
-    return res.status(200).json({ users });
+
+    // Multi-role: voeg alle user_roles per gebruiker toe (bron van waarheid voor permissions)
+    const { data: roleRows } = await supabaseAdmin.from('user_roles').select('user_id, role');
+    const rolesByUser = {};
+    (roleRows || []).forEach((r) => { (rolesByUser[r.user_id] ||= []).push(r.role); });
+    const withRoles = (users || []).map((u) => ({
+      ...u,
+      all_roles: rolesByUser[u.id] || (u.role ? [u.role] : []),
+    }));
+
+    return res.status(200).json({ users: withRoles });
   }
 
   // ── POST — nieuwe user aanmaken ÓÓÓF resend invite ────────────────────────
@@ -307,7 +317,41 @@ export default async function handler(req, res) {
     const userId = req.query.id;
     if (!userId) return res.status(400).json({ error: 'Query parameter ?id is verplicht.' });
 
-    const { role, is_active, full_name } = req.body || {};
+    const { role, is_active, full_name, add_role, remove_role } = req.body || {};
+
+    // ── Multi-role beheer via user_roles (alleen super_admin) ─────────────────
+    if (add_role !== undefined || remove_role !== undefined) {
+      if (admin.profile.role !== 'super_admin') {
+        return res.status(403).json({ error: 'Alleen super_admin kan rollen beheren.' });
+      }
+      const target = add_role !== undefined ? add_role : remove_role;
+      if (!VALID_ROLES.includes(target)) {
+        return res.status(400).json({ error: `Ongeldige rol. Kies uit: ${VALID_ROLES.join(', ')}.` });
+      }
+
+      if (add_role !== undefined) {
+        const { error } = await supabaseAdmin
+          .from('user_roles')
+          .upsert({ user_id: userId, role: add_role, assigned_by: admin.user.id }, { onConflict: 'user_id,role' });
+        if (error) return res.status(500).json({ error: error.message });
+        await logAudit({ action: 'add_role', payload: { target_id: userId, role: add_role, admin_email: admin.profile.email }, triggered_by: admin.profile.email });
+      } else {
+        if (remove_role === 'super_admin') {
+          return res.status(400).json({ error: 'De super_admin-rol kan niet via de UI verwijderd worden.' });
+        }
+        const { data: cur } = await supabaseAdmin.from('user_roles').select('role').eq('user_id', userId);
+        if ((cur || []).length <= 1) {
+          return res.status(400).json({ error: 'Een gebruiker moet minstens één rol houden.' });
+        }
+        const { error } = await supabaseAdmin.from('user_roles').delete().eq('user_id', userId).eq('role', remove_role);
+        if (error) return res.status(500).json({ error: error.message });
+        await logAudit({ action: 'remove_role', payload: { target_id: userId, role: remove_role, admin_email: admin.profile.email }, triggered_by: admin.profile.email });
+      }
+
+      const { data: updated } = await supabaseAdmin.from('user_roles').select('role').eq('user_id', userId);
+      return res.status(200).json({ message: 'Rollen bijgewerkt.', roles: (updated || []).map((r) => r.role) });
+    }
+
     const updates = {};
 
     if (role !== undefined) {
