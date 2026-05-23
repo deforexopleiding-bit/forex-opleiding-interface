@@ -85,6 +85,11 @@
     .rbac-auto { font-size:10px; color:var(--brand-primary); font-weight:600; }
     .rbac-row-match { background:rgba(234,179,8,0.12); }
     .rbac-matrix input[type=checkbox] { width:16px; height:16px; cursor:pointer; }
+    .rbac-btn-sm { padding:4px 10px; font-size:11px; background:var(--bg-elev); border:1px solid var(--border); border-radius:8px; color:var(--text-dim); cursor:pointer; display:inline-flex; align-items:center; gap:4px; font-family:inherit; white-space:nowrap; }
+    .rbac-btn-sm:hover { background:var(--bg-elev-2); color:var(--text); }
+    .rbac-role-head { display:flex; flex-direction:column; align-items:center; gap:3px; }
+    .rbac-role-all { font-size:9px; padding:1px 6px; background:transparent; border:1px solid var(--border); border-radius:3px; color:var(--text-faint); cursor:pointer; font-family:inherit; text-transform:none; letter-spacing:0; }
+    .rbac-role-all:hover { background:var(--bg-elev); color:var(--text); }
   </style>
 </head>
 <body>
@@ -128,6 +133,8 @@
     <div id="tab-rechten" class="admin-tab-panel" style="display:none">
       <div class="rbac-toolbar">
         <input id="rbacSearch" class="form-input" style="max-width:260px" placeholder="Zoek functie&hellip;" oninput="renderMatrix()" />
+        <button class="rbac-btn-sm" type="button" onclick="setAllInCurrentModule(true)" title="Alle functies aanvinken voor alle rollen in deze module"><i class="ti ti-checks"></i> Alles aan</button>
+        <button class="rbac-btn-sm" type="button" onclick="setAllInCurrentModule(false)" title="Alle functies uitvinken voor alle rollen in deze module"><i class="ti ti-x"></i> Alles uit</button>
         <span class="rbac-dirty" id="rbacDirty"></span>
         <button class="btn btn-primary" id="rbacSaveBtn" onclick="savePermissions()" disabled>Opslaan</button>
       </div>
@@ -362,7 +369,7 @@ function renderMatrix() {
   const q = (document.getElementById('rbacSearch')?.value || '').trim().toLowerCase();
   const editRoles = RBAC_ROLES.filter(r => !r.auto);
   const head = '<tr><th>Functie</th><th class="role-col">super_admin</th>' +
-    editRoles.map(r => `<th class="role-col">${esc(r.label)}</th>`).join('') + '</tr>';
+    editRoles.map(r => `<th class="role-col"><div class="rbac-role-head"><span>${esc(r.label)}</span><button type="button" class="rbac-role-all" onclick="toggleRoleInCurrentModule('${r.key}')" title="Alle functies in deze module aan/uit voor ${esc(r.label)}">alles</button></div></th>`).join('') + '</tr>';
   const feats = mod.features.filter(f => !q || f.label.toLowerCase().includes(q) || f.key.toLowerCase().includes(q));
   const rows = feats.map(f => {
     const cells = editRoles.map(r => {
@@ -376,6 +383,28 @@ function renderMatrix() {
   const empty = `<tr><td colspan="${editRoles.length + 2}" style="color:var(--text-faint);padding:20px">Geen functies gevonden</td></tr>`;
   document.getElementById('rbacMatrixWrap').innerHTML =
     `<table class="rbac-matrix"><thead>${head}</thead><tbody>${rows || empty}</tbody></table>`;
+}
+
+// Bulk: alle functies × alle rollen in de HUIDIGE module aan/uit (super_admin overgeslagen).
+function setAllInCurrentModule(value) {
+  const mod = FEATURE_REGISTRY.find(m => m.moduleKey === rbacActiveModule);
+  if (!mod) return;
+  RBAC_ROLES.filter(r => !r.auto).forEach(r => {
+    if (!rbacMatrix[r.key]) rbacMatrix[r.key] = {};
+    mod.features.forEach(f => { rbacMatrix[r.key][f.key] = value; });
+  });
+  rbacDirty = true; renderMatrix(); updateRbacSaveState();
+}
+
+// Per rol: alle functies in de HUIDIGE module togglen (alles aan → uit, anders → aan).
+function toggleRoleInCurrentModule(roleKey) {
+  const mod = FEATURE_REGISTRY.find(m => m.moduleKey === rbacActiveModule);
+  if (!mod) return;
+  if (!rbacMatrix[roleKey]) rbacMatrix[roleKey] = {};
+  const allOn = mod.features.every(f => rbacMatrix[roleKey][f.key] === true);
+  const val = !allOn;
+  mod.features.forEach(f => { rbacMatrix[roleKey][f.key] = val; });
+  rbacDirty = true; renderMatrix(); updateRbacSaveState();
 }
 
 function onRbacToggle(cb) {
