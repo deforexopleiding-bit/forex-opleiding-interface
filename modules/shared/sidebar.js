@@ -127,6 +127,9 @@
     if (window.RBAC && typeof window.RBAC.ensurePermissionsLoaded === 'function') {
       window.RBAC.ensurePermissionsLoaded();
     }
+    // Laat pagina-scripts weten dat de sidebar-DOM klaar is (bv. nav-badge updates
+    // die anders kunnen racen met de mount).
+    window.dispatchEvent(new CustomEvent('sidebar:mounted'));
   }
 
   if (document.readyState === 'loading') {

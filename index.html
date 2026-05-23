@@ -728,7 +728,12 @@ function renderAgents(agentStatus, aggregate) {
 // ═══════════════════════════════════
 function updateNavBadges(data) {
   const takenBadge = document.getElementById('navTakenBadge');
-  if (takenBadge && data.tasks) {
+  if (!takenBadge) {
+    // Sidebar nog niet gemount → opnieuw proberen zodra die klaar is (geen race).
+    window.addEventListener('sidebar:mounted', () => updateNavBadges(data), { once: true });
+    return;
+  }
+  if (data.tasks) {
     const urgHigh = (data.tasks.urgent||0) + (data.tasks.high||0);
     if (urgHigh > 0) { takenBadge.textContent = urgHigh; takenBadge.classList.add('show'); }
     else { takenBadge.classList.remove('show'); }
