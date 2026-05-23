@@ -53,6 +53,17 @@
     .cfg-preview { position:sticky; top:16px; background:var(--bg-elev); border:1px solid var(--border); border-radius:12px; overflow:hidden; }
     .cfg-preview-head { padding:10px 14px; background:var(--bg-elev-2); border-bottom:1px solid var(--border); font-size:12px; font-weight:700; color:var(--text-dim); display:flex; align-items:center; gap:6px; }
     .cfg-preview pre { margin:0; padding:14px; font-size:12px; line-height:1.55; color:var(--text); white-space:pre-wrap; word-break:break-word; max-height:70vh; overflow-y:auto; font-family:'Inter',monospace; }
+    /* Versiegeschiedenis modal */
+    .hidden { display:none !important; }
+    .lisa-modal { position:fixed; inset:0; background:rgba(0,0,0,.6); z-index:500; display:flex; align-items:flex-start; justify-content:center; padding:48px 20px; overflow-y:auto; }
+    .lisa-modal-card { background:var(--bg-elev); border:1px solid var(--border-strong,var(--border)); border-radius:14px; width:100%; max-width:640px; }
+    .lisa-modal-head { display:flex; align-items:center; justify-content:space-between; padding:14px 18px; border-bottom:1px solid var(--border); font-weight:700; font-size:14px; }
+    .lisa-modal-close { background:none; border:none; color:var(--text-faint); font-size:20px; cursor:pointer; line-height:1; }
+    .lisa-modal-body { padding:14px 18px; }
+    .hist-table { width:100%; border-collapse:collapse; font-size:12px; }
+    .hist-table th { text-align:left; padding:7px 8px; color:var(--text-faint); font-size:10px; text-transform:uppercase; border-bottom:1px solid var(--border); }
+    .hist-table td { padding:8px; border-bottom:0.5px solid var(--border); vertical-align:middle; }
+    .hist-active { font-size:10px; font-weight:700; color:var(--color-success-text,#15803d); background:var(--color-success-soft,rgba(34,197,94,.12)); padding:1px 6px; border-radius:6px; }
   </style>
 </head>
 <body>
@@ -93,6 +104,7 @@
       <div class="cfg-toolbar">
         <span class="cfg-version-badge" id="cfgVersionBadge">Versie —</span>
         <div class="spacer"></div>
+        <button class="btn" id="cfgHistoryBtn" onclick="openHistory()"><i class="ti ti-history"></i> Versie geschiedenis</button>
         <button class="btn" id="cfgResetBtn" onclick="loadConfig()">Reset</button>
         <button class="btn" id="cfgSaveDraftBtn" onclick="saveConfig(false)">Opslaan als draft</button>
         <button class="btn btn-primary" id="cfgPublishBtn" onclick="saveConfig(true)">Publiceren</button>
@@ -152,7 +164,9 @@
 
         <!-- Live preview -->
         <div class="cfg-preview">
-          <div class="cfg-preview-head"><i class="ti ti-eye"></i> Live preview — samengestelde system prompt</div>
+          <div class="cfg-preview-head"><i class="ti ti-eye"></i> Live preview — samengestelde system prompt
+            <button class="btn btn-sm" style="margin-left:auto" onclick="kopieerPrompt()"><i class="ti ti-copy"></i> Kopieer prompt</button>
+          </div>
           <pre id="cfgPreview">—</pre>
         </div>
       </div>
@@ -168,6 +182,13 @@
       <div class="placeholder"><i class="ti ti-history" style="font-size:28px"></i><p>Audit &amp; versiegeschiedenis — volgt in een latere fase.</p></div>
     </div>
 
+  </div>
+</div>
+
+<div class="lisa-modal hidden" id="historyModal">
+  <div class="lisa-modal-card">
+    <div class="lisa-modal-head"><span>Versiegeschiedenis</span><button class="lisa-modal-close" onclick="closeHistory()">&times;</button></div>
+    <div class="lisa-modal-body" id="historyBody"></div>
   </div>
 </div>
 
@@ -210,11 +231,10 @@ function switchFase(f) {
 // ── Config laden ──────────────────────────────────────────────────────────
 async function loadConfig() {
   try {
-    const { data, error } = await window.supabase
-      .from('lisa_config').select('*').eq('is_active', true)
-      .order('version', { ascending: false }).limit(1).maybeSingle();
-    if (error) throw error;
-    activeCfg = data || {};
+    const res = await window.AgentShared.apiFetch('/api/lisa-config');
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'HTTP ' + res.status);
+    activeCfg = data.config || {};
     cfg = {
       persona_name: activeCfg.persona_name || 'Lisa',
       persona_age: activeCfg.persona_age || '',
@@ -334,18 +354,7 @@ async function saveConfig(publish) {
   const origTxt = btn.textContent;
   btn.disabled = true; btn.textContent = publish ? 'Publiceren…' : 'Opslaan…';
   try {
-    // Volgende versienummer
-    const { data: vRow } = await window.supabase.from('lisa_config').select('version').order('version', { ascending: false }).limit(1).maybeSingle();
-    const nextVersion = (vRow?.version || 0) + 1;
-
-    // Snapshot: behoud alle niet-bewerkte velden uit de actieve config
-    const base = { ...(activeCfg || {}) };
-    delete base.id; delete base.created_at;
-
-    const payload = {
-      ...base,
-      version: nextVersion,
-      is_active: !!publish,                         // trigger zet andere versies inactief
+    const editPayload = {
       persona_name: cfg.persona_name,
       persona_age: cfg.persona_age,
       persona_background: cfg.persona_background,
@@ -359,18 +368,64 @@ async function saveConfig(publish) {
       phase_situatie: cfg.phases.situatie,
       phase_band: cfg.phases.band,
       phase_call: cfg.phases.call,
-      created_by: currentProfile?.id || null,
-      notes: publish ? 'Gepubliceerd via config-editor' : 'Draft opgeslagen via config-editor',
     };
-
-    const { error } = await window.supabase.from('lisa_config').insert(payload);
-    if (error) throw error;
-    window.AgentShared?.showToast(publish ? ('Gepubliceerd als v' + nextVersion + ' (nu actief)') : ('Draft opgeslagen als v' + nextVersion), 'success');
+    const res = await window.AgentShared.apiFetch('/api/lisa-config?action=' + (publish ? 'publish' : 'save_draft'), {
+      method: 'POST', body: JSON.stringify(editPayload),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (res.status === 403) { window.AgentShared?.showToast('Geen rechten voor deze actie', 'error'); return; }
+    if (!res.ok) throw new Error(data.error || 'HTTP ' + res.status);
+    window.AgentShared?.showToast(data.message || (publish ? 'Gepubliceerd' : 'Draft opgeslagen'), 'success');
     await loadConfig();
   } catch (e) {
     window.AgentShared?.showToast((publish ? 'Publiceren' : 'Opslaan') + ' mislukt: ' + e.message, 'error');
   } finally {
     btn.disabled = false; btn.textContent = origTxt;
+  }
+}
+
+// ── Kopieer prompt ────────────────────────────────────────────────────────────
+async function kopieerPrompt() {
+  const txt = document.getElementById('cfgPreview').textContent || '';
+  try { await navigator.clipboard.writeText(txt); window.AgentShared?.showToast('Prompt gekopieerd', 'success'); }
+  catch (e) { window.AgentShared?.showToast('Kopiëren mislukt', 'error'); }
+}
+
+// ── Versiegeschiedenis + rollback ─────────────────────────────────────────────
+async function openHistory() {
+  const ov = document.getElementById('historyModal');
+  const body = document.getElementById('historyBody');
+  ov.classList.remove('hidden');
+  body.innerHTML = '<div style="color:var(--text-faint);padding:20px">Laden…</div>';
+  try {
+    const res = await window.AgentShared.apiFetch('/api/lisa-config?action=history');
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'HTTP ' + res.status);
+    const rows = (data.versions || []).map((v) => {
+      const dt = v.created_at ? new Date(v.created_at).toLocaleString('nl-NL') : '—';
+      const badge = v.is_active ? '<span class="hist-active">actief</span>' : '';
+      const rb = v.is_active ? '' : '<button class="btn btn-sm" onclick="rollbackVersion(\'' + v.id + '\',' + v.version + ')">Rollback</button>';
+      return '<tr><td>v' + v.version + ' ' + badge + '</td><td>' + esc(dt) + '</td><td>' + esc(v.notes || '') + '</td><td style="text-align:right">' + rb + '</td></tr>';
+    }).join('');
+    body.innerHTML = '<table class="hist-table"><thead><tr><th>Versie</th><th>Aangemaakt</th><th>Notitie</th><th></th></tr></thead><tbody>' +
+      (rows || '<tr><td colspan="4" style="color:var(--text-faint);padding:16px">Geen versies</td></tr>') + '</tbody></table>';
+  } catch (e) {
+    body.innerHTML = '<div style="color:var(--color-danger,#dc2626);padding:20px">Fout: ' + esc(e.message) + '</div>';
+  }
+}
+function closeHistory() { document.getElementById('historyModal').classList.add('hidden'); }
+async function rollbackVersion(id, version) {
+  if (!confirm('Terugzetten naar v' + version + '? Dit maakt een nieuwe actieve versie met deze inhoud.')) return;
+  try {
+    const res = await window.AgentShared.apiFetch('/api/lisa-config?action=rollback', { method: 'POST', body: JSON.stringify({ id }) });
+    const data = await res.json().catch(() => ({}));
+    if (res.status === 403) { window.AgentShared?.showToast('Geen rechten voor rollback', 'error'); return; }
+    if (!res.ok) throw new Error(data.error || 'HTTP ' + res.status);
+    window.AgentShared?.showToast(data.message || 'Teruggezet', 'success');
+    closeHistory();
+    await loadConfig();
+  } catch (e) {
+    window.AgentShared?.showToast('Rollback mislukt: ' + e.message, 'error');
   }
 }
 
