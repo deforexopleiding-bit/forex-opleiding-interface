@@ -8,6 +8,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
   <link rel="stylesheet" href="/modules/shared/agent-shared.css"/>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/dist/tabler-icons.min.css" />
   <style>
     /* ── Admin-specifieke styles ── */
     .page-header { display:flex; align-items:flex-start; justify-content:space-between; margin-bottom:24px; flex-wrap:wrap; gap:12px; }
@@ -58,6 +59,32 @@
     .form-input { width:100%; background:var(--bg-elev-2); border:1px solid var(--border-strong); border-radius:8px; padding:9px 12px; font-size:13px; color:var(--text); font-family:inherit; outline:none; transition:border-color .15s; }
     .form-input:focus { border-color:var(--brand-secondary); }
     .form-error { margin-top:10px; padding:8px 12px; background:var(--color-danger-soft); border:1px solid var(--color-danger); border-radius:8px; font-size:12px; color:var(--color-danger-text); }
+    /* ── Tabs ── */
+    .admin-tabs { display:flex; gap:4px; border-bottom:1px solid var(--border); margin-bottom:20px; }
+    .admin-tab { background:transparent; border:none; padding:10px 16px; font-size:13px; font-weight:600; color:var(--text-faint); cursor:pointer; border-bottom:2px solid transparent; font-family:inherit; }
+    .admin-tab:hover { color:var(--text); }
+    .admin-tab.active { color:var(--text); border-bottom-color:var(--brand-primary); }
+    /* ── Rechten-matrix ── */
+    .rbac-toolbar { display:flex; align-items:center; gap:12px; margin-bottom:10px; }
+    .rbac-dirty { font-size:12px; color:var(--color-warning-text,#b45309); margin-left:auto; }
+    .rbac-hint { font-size:12px; color:var(--text-faint); margin-bottom:14px; line-height:1.5; }
+    .rbac-layout { display:grid; grid-template-columns:210px 1fr; gap:16px; align-items:start; }
+    .rbac-modules { display:flex; flex-direction:column; gap:2px; }
+    .rbac-mod-btn { display:flex; align-items:center; gap:8px; padding:9px 12px; border-radius:8px; background:transparent; border:1px solid transparent; color:var(--text-dim); font-size:13px; font-weight:500; cursor:pointer; text-align:left; font-family:inherit; width:100%; }
+    .rbac-mod-btn:hover { background:var(--bg-elev-2); color:var(--text); }
+    .rbac-mod-btn.active { background:var(--brand-primary-soft); color:var(--brand-primary); border-color:var(--brand-primary); }
+    .rbac-mod-btn .ti { font-size:16px; flex-shrink:0; }
+    .rbac-matrix-wrap { overflow-x:auto; border:1px solid var(--border); border-radius:12px; }
+    .rbac-matrix { width:100%; border-collapse:collapse; font-size:13px; }
+    .rbac-matrix th, .rbac-matrix td { padding:9px 12px; border-bottom:0.5px solid var(--border-subtle,var(--border)); text-align:left; }
+    .rbac-matrix th { font-size:10px; text-transform:uppercase; letter-spacing:.5px; color:var(--text-faint); font-weight:600; background:var(--bg-elev-2); }
+    .rbac-matrix th.role-col, .rbac-matrix td.role-col { text-align:center; white-space:nowrap; }
+    .rbac-matrix tr:last-child td { border-bottom:none; }
+    .rbac-feat-label { font-weight:500; }
+    .rbac-feat-key { font-size:10px; color:var(--text-faint); font-family:monospace; }
+    .rbac-auto { font-size:10px; color:var(--brand-primary); font-weight:600; }
+    .rbac-row-match { background:rgba(234,179,8,0.12); }
+    .rbac-matrix input[type=checkbox] { width:16px; height:16px; cursor:pointer; }
   </style>
 </head>
 <body>
@@ -75,6 +102,13 @@
       <button class="btn btn-primary" onclick="openInviteModal()">+ Nieuwe gebruiker</button>
     </div>
 
+    <div class="admin-tabs">
+      <button class="admin-tab active" data-tab="gebruikers" onclick="switchAdminTab('gebruikers')">Gebruikers</button>
+      <button class="admin-tab" data-tab="rechten" id="rechtenTabBtn" onclick="switchAdminTab('rechten')" style="display:none">Rechten</button>
+    </div>
+
+    <div id="tab-gebruikers" class="admin-tab-panel">
+
     <!-- Stats row -->
     <div class="admin-stats" id="adminStats"></div>
 
@@ -86,6 +120,24 @@
       </div>
       <div id="usersTableWrap">
         <div style="color:var(--text-faint);font-size:13px;padding:20px">Laden&hellip;</div>
+      </div>
+    </div>
+
+    </div><!-- /tab-gebruikers -->
+
+    <div id="tab-rechten" class="admin-tab-panel" style="display:none">
+      <div class="rbac-toolbar">
+        <input id="rbacSearch" class="form-input" style="max-width:260px" placeholder="Zoek functie&hellip;" oninput="renderMatrix()" />
+        <span class="rbac-dirty" id="rbacDirty"></span>
+        <button class="btn btn-primary" id="rbacSaveBtn" onclick="savePermissions()" disabled>Opslaan</button>
+      </div>
+      <div class="rbac-hint">
+        <strong>super_admin</strong> heeft altijd alle rechten (geen vinkjes). Wijzigingen worden pas opgeslagen na klikken op &laquo;Opslaan&raquo;.
+        Let op: enforcement staat nog uit &mdash; dit vult alleen de rechtentabel.
+      </div>
+      <div class="rbac-layout">
+        <div class="rbac-modules" id="rbacModules"></div>
+        <div class="rbac-matrix-wrap" id="rbacMatrixWrap"><div style="color:var(--text-faint);padding:20px">Laden&hellip;</div></div>
       </div>
     </div>
 
@@ -136,6 +188,238 @@
 let currentProfile = null;
 let accessToken = null;
 
+// ── RBAC feature-registry (master-lijst feature_keys) ──────────────────────
+const FEATURE_REGISTRY = [
+  { moduleKey:'dashboard', moduleLabel:'Dashboard', moduleIcon:'ti-dashboard', features:[
+    { key:'dashboard.module.access', label:'Module zichtbaar' },
+  ]},
+  { moduleKey:'email', moduleLabel:'E-mail', moduleIcon:'ti-mail', features:[
+    { key:'email.module.access', label:'Module zichtbaar' },
+    { key:'email.tab.tebeantwoorden', label:'Tab: Te beantwoorden' },
+    { key:'email.tab.sales', label:'Tab: Sales' },
+    { key:'email.tab.klanten', label:'Tab: Klanten' },
+    { key:'email.tab.finance', label:'Tab: Finance' },
+    { key:'email.tab.reclame', label:'Tab: Reclame' },
+    { key:'email.tab.overig', label:'Tab: Overig' },
+    { key:'email.tab.alle', label:'Tab: Alle mails' },
+    { key:'email.tab.verzonden', label:'Tab: Verzonden' },
+    { key:'email.reply.send', label:'Reply versturen' },
+    { key:'email.ai.generate', label:'AI antwoord genereren' },
+    { key:'email.forward.send', label:'Doorsturen' },
+    { key:'email.move_train.run', label:'Verplaats & Train' },
+    { key:'email.bulk.train', label:'Bulk Train Agent' },
+    { key:'email.actie.toggle', label:'Actie vereist toggle' },
+    { key:'email.factuur.print', label:'Factuur afdrukken' },
+    { key:'email.markread.toggle', label:'Markeer gelezen/ongelezen' },
+    { key:'email.kennisbank.add', label:'Toevoegen aan Kennisbank' },
+    { key:'email.taak.create', label:'Taak aanmaken' },
+    { key:'email.reclassify.run', label:'Reclassify knop' },
+    { key:'email.heranalyseer.run', label:'Heranalyseer knop' },
+    { key:'email.leerrapport.view', label:'Leerrapport bekijken' },
+    { key:'email.training.toggle', label:'Training toggle' },
+    { key:'email.signature.edit', label:'Handtekening bewerken' },
+  ]},
+  { moduleKey:'taken', moduleLabel:'Takenbeheer', moduleIcon:'ti-checklist', features:[
+    { key:'taken.module.access', label:'Module zichtbaar' },
+    { key:'taken.task.create', label:'Taak aanmaken' },
+    { key:'taken.task.edit', label:'Taak bewerken' },
+    { key:'taken.task.delete', label:'Taak verwijderen' },
+    { key:'taken.task.status_change', label:'Status wijzigen' },
+    { key:'taken.collega.manage', label:'Collega\'s beheren' },
+  ]},
+  { moduleKey:'kennisbank', moduleLabel:'Kennisbank', moduleIcon:'ti-book-2', features:[
+    { key:'kennisbank.module.access', label:'Module zichtbaar' },
+    { key:'kennisbank.profile.edit', label:'Bedrijfsprofiel bewerken' },
+    { key:'kennisbank.faq.add', label:'FAQ toevoegen' },
+    { key:'kennisbank.material.upload', label:'Materiaal uploaden' },
+    { key:'kennisbank.item.edit', label:'Item bewerken' },
+    { key:'kennisbank.item.delete', label:'Item verwijderen' },
+    { key:'kennisbank.bots.activate', label:'Activeren voor AI (gevoelig)' },
+  ]},
+  { moduleKey:'agents', moduleLabel:'AI Agents', moduleIcon:'ti-robot', features:[
+    { key:'agents.module.access', label:'Module zichtbaar' },
+    { key:'agents.view.overview', label:'Overview zien' },
+    { key:'agents.view.chat', label:'Chat zien' },
+    { key:'agents.chat.use', label:'Chat gebruiken' },
+    { key:'agents.report.generate', label:'Rapport genereren' },
+    { key:'agents.session.new', label:'Nieuwe sessie starten' },
+    { key:'agents.train.rule', label:'Train mij / teach-rule' },
+    { key:'agents.example.mark_good', label:'Voorbeeld markeren' },
+    { key:'agents.approval.act', label:'Approve/Reject acties' },
+  ]},
+  { moduleKey:'meetings', moduleLabel:'Vergaderruimte', moduleIcon:'ti-users', features:[
+    { key:'meetings.module.access', label:'Module zichtbaar' },
+    { key:'meetings.tab.history', label:'Tab: Geschiedenis' },
+    { key:'meetings.tab.tasks', label:'Tab: Taken' },
+    { key:'meetings.tab.standups', label:'Tab: Standups' },
+    { key:'meetings.tab.decisions', label:'Tab: Beslissingen' },
+    { key:'meetings.meeting.start', label:'Vergadering starten' },
+    { key:'meetings.standup.start', label:'Standup starten' },
+    { key:'meetings.meeting.end', label:'Vergadering beeindigen' },
+    { key:'meetings.meeting.approve', label:'Vergadering goedkeuren' },
+    { key:'meetings.tasks.confirm_create', label:'Taken bevestigen aanmaken' },
+    { key:'meetings.input.add', label:'Input toevoegen' },
+  ]},
+  { moduleKey:'controlcenter', moduleLabel:'Control Center', moduleIcon:'ti-target', features:[
+    { key:'controlcenter.module.access', label:'Module zichtbaar' },
+    { key:'controlcenter.kpi.view', label:'KPI bekijken' },
+    { key:'controlcenter.approvals.view', label:'Approvals bekijken' },
+    { key:'controlcenter.audit.view', label:'Audit log bekijken' },
+    { key:'controlcenter.approval.act', label:'Approve/Reject' },
+    { key:'controlcenter.audit.export', label:'Audit CSV export (gevoelig)' },
+  ]},
+  { moduleKey:'followup', moduleLabel:'Follow-up', moduleIcon:'ti-chart-line', features:[
+    { key:'followup.module.access', label:'Module zichtbaar' },
+    { key:'followup.tab.vandaag', label:'Tab: Vandaag' },
+    { key:'followup.tab.openacties', label:'Tab: Open acties' },
+    { key:'followup.tab.opvolging', label:'Tab: Opvolging' },
+    { key:'followup.tab.archief', label:'Tab: Archief' },
+    { key:'followup.tab.kalender', label:'Tab: Kalender' },
+    { key:'followup.metrics.view', label:'Dashboard-metrics' },
+    { key:'followup.overdue.view', label:'Overdue topbar' },
+    { key:'followup.scope.all_vs_own', label:'Alle sales zien (vs eigen)' },
+    { key:'followup.call.move', label:'Call verplaatsen' },
+    { key:'followup.call.cancel', label:'Call annuleren' },
+    { key:'followup.appointment.delete', label:'Appointment verwijderen' },
+    { key:'followup.note.save', label:'Notitie opslaan' },
+    { key:'followup.lead.view', label:'Lead detail bekijken' },
+    { key:'followup.screenshot.upload', label:'Screenshot uploaden' },
+    { key:'followup.lead.note', label:'Lead notitie' },
+    { key:'followup.admin.module.access', label:'Admin-review module' },
+    { key:'followup.audit.approve', label:'Audit goedkeuren' },
+    { key:'followup.audit.reject', label:'Audit afkeuren' },
+  ]},
+  { moduleKey:'admin', moduleLabel:'Admin', moduleIcon:'ti-settings', features:[
+    { key:'admin.module.access', label:'Module zichtbaar' },
+    { key:'admin.user.invite', label:'Gebruiker uitnodigen' },
+    { key:'admin.user.role_change', label:'Rol wijzigen' },
+    { key:'admin.user.deactivate', label:'Deactiveren' },
+    { key:'admin.user.reactivate', label:'Reactiveren' },
+    { key:'admin.invite.resend', label:'Uitnodiging herhalen' },
+    { key:'admin.role.assign_super_admin', label:'super_admin toekennen (kritiek)' },
+    { key:'admin.permissions.edit', label:'Rechten matrix bewerken (super only)' },
+  ]},
+];
+
+// super_admin = auto (impliciet alles, geen vinkjes). Overige rollen wel.
+const RBAC_ROLES = [
+  { key:'super_admin', label:'super_admin', auto:true },
+  { key:'manager', label:'manager' },
+  { key:'sales', label:'sales' },
+  { key:'mentor', label:'mentor' },
+  { key:'marketing', label:'marketing' },
+  { key:'administratie', label:'administratie' },
+];
+
+let rbacMatrix = {};          // { role: { feature_key: bool } }
+let rbacActiveModule = 'email';
+let rbacDirty = false;
+let rbacLoaded = false;
+
+function switchAdminTab(name) {
+  if (name !== 'rechten' && rbacDirty) {
+    if (!confirm('Niet-opgeslagen wijzigingen in Rechten. Wisselen zonder opslaan?')) return;
+    rbacDirty = false; updateRbacSaveState();
+  }
+  document.querySelectorAll('.admin-tab').forEach(b => b.classList.toggle('active', b.dataset.tab === name));
+  document.getElementById('tab-gebruikers').style.display = name === 'gebruikers' ? '' : 'none';
+  document.getElementById('tab-rechten').style.display    = name === 'rechten'    ? '' : 'none';
+  const inviteBtn = document.querySelector('.page-header .btn-primary');
+  if (inviteBtn) inviteBtn.style.display = name === 'gebruikers' ? '' : 'none';
+  if (name === 'rechten' && !rbacLoaded) loadPermissionsMatrix();
+}
+
+async function loadPermissionsMatrix() {
+  rbacMatrix = {};
+  RBAC_ROLES.forEach(r => { if (!r.auto) rbacMatrix[r.key] = {}; });
+  try {
+    const { data, error } = await window.supabase.from('role_permissions').select('role, feature_key, allowed');
+    if (error) throw error;
+    (data || []).forEach(row => {
+      if (rbacMatrix[row.role]) rbacMatrix[row.role][row.feature_key] = row.allowed === true;
+    });
+    rbacLoaded = true;
+    renderModuleList();
+    renderMatrix();
+  } catch (e) {
+    document.getElementById('rbacMatrixWrap').innerHTML =
+      '<div style="color:var(--red);padding:20px">Fout bij laden: ' + esc(e.message) + '</div>';
+  }
+}
+
+function renderModuleList() {
+  document.getElementById('rbacModules').innerHTML = FEATURE_REGISTRY.map(m =>
+    `<button class="rbac-mod-btn${m.moduleKey === rbacActiveModule ? ' active' : ''}" onclick="selectRbacModule('${m.moduleKey}')">` +
+      `<i class="ti ${m.moduleIcon}"></i><span>${esc(m.moduleLabel)}</span></button>`
+  ).join('');
+}
+
+function selectRbacModule(key) { rbacActiveModule = key; renderModuleList(); renderMatrix(); }
+
+function renderMatrix() {
+  const mod = FEATURE_REGISTRY.find(m => m.moduleKey === rbacActiveModule);
+  if (!mod) return;
+  const q = (document.getElementById('rbacSearch')?.value || '').trim().toLowerCase();
+  const editRoles = RBAC_ROLES.filter(r => !r.auto);
+  const head = '<tr><th>Functie</th><th class="role-col">super_admin</th>' +
+    editRoles.map(r => `<th class="role-col">${esc(r.label)}</th>`).join('') + '</tr>';
+  const feats = mod.features.filter(f => !q || f.label.toLowerCase().includes(q) || f.key.toLowerCase().includes(q));
+  const rows = feats.map(f => {
+    const cells = editRoles.map(r => {
+      const checked = (rbacMatrix[r.key] && rbacMatrix[r.key][f.key]) ? ' checked' : '';
+      return `<td class="role-col"><input type="checkbox" data-role="${r.key}" data-key="${esc(f.key)}"${checked} onchange="onRbacToggle(this)"></td>`;
+    }).join('');
+    const match = q && (f.label.toLowerCase().includes(q) || f.key.toLowerCase().includes(q));
+    return `<tr class="${match ? 'rbac-row-match' : ''}"><td><div class="rbac-feat-label">${esc(f.label)}</div>` +
+      `<div class="rbac-feat-key">${esc(f.key)}</div></td><td class="role-col"><span class="rbac-auto">auto</span></td>${cells}</tr>`;
+  }).join('');
+  const empty = `<tr><td colspan="${editRoles.length + 2}" style="color:var(--text-faint);padding:20px">Geen functies gevonden</td></tr>`;
+  document.getElementById('rbacMatrixWrap').innerHTML =
+    `<table class="rbac-matrix"><thead>${head}</thead><tbody>${rows || empty}</tbody></table>`;
+}
+
+function onRbacToggle(cb) {
+  const role = cb.dataset.role, key = cb.dataset.key;
+  if (!rbacMatrix[role]) rbacMatrix[role] = {};
+  rbacMatrix[role][key] = cb.checked;
+  rbacDirty = true; updateRbacSaveState();
+}
+
+function updateRbacSaveState() {
+  const btn = document.getElementById('rbacSaveBtn');
+  const note = document.getElementById('rbacDirty');
+  if (btn) btn.disabled = !rbacDirty;
+  if (note) note.textContent = rbacDirty ? 'Niet-opgeslagen wijzigingen' : '';
+}
+
+async function savePermissions() {
+  const btn = document.getElementById('rbacSaveBtn');
+  btn.disabled = true; btn.textContent = 'Opslaan…';
+  try {
+    const now = new Date().toISOString();
+    const ups = [];
+    RBAC_ROLES.filter(r => !r.auto).forEach(r => {
+      FEATURE_REGISTRY.forEach(m => m.features.forEach(f => {
+        ups.push({
+          role: r.key, feature_key: f.key,
+          allowed: !!(rbacMatrix[r.key] && rbacMatrix[r.key][f.key]),
+          updated_at: now, updated_by: currentProfile?.id || null,
+        });
+      }));
+    });
+    const { error } = await window.supabase.from('role_permissions').upsert(ups, { onConflict: 'role,feature_key' });
+    if (error) throw error;
+    rbacDirty = false;
+    window.AgentShared?.showToast('Rechten opgeslagen (' + ups.length + ' cellen)', 'success');
+  } catch (e) {
+    window.AgentShared?.showToast('Opslaan mislukt: ' + e.message, 'error');
+  } finally {
+    btn.textContent = 'Opslaan'; updateRbacSaveState();
+  }
+}
+
+window.addEventListener('beforeunload', (e) => { if (rbacDirty) { e.preventDefault(); e.returnValue = ''; } });
+
 async function init() {
   await window._authSharedReady;
   currentProfile = await window.AuthShared.requireAuth(['admin', 'super_admin', 'manager']);
@@ -145,6 +429,12 @@ async function init() {
   if (currentProfile.role !== 'super_admin') {
     const opt = document.querySelector('#inviteRole option[value="super_admin"]');
     if (opt) opt.remove();
+  }
+
+  // Rechten-matrix tab alleen voor super_admin (echte afdwinging via RLS in migratie 002)
+  if (currentProfile.role === 'super_admin') {
+    const rb = document.getElementById('rechtenTabBtn');
+    if (rb) rb.style.display = '';
   }
 
   accessToken = await window.AuthShared.getAccessToken();
