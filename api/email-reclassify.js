@@ -16,6 +16,7 @@
 
 import { supabaseAdmin } from './supabase.js';
 import { categorize } from './email-agent.js';
+import { requirePermissionFailOpen } from './_lib/requirePermission.js';
 
 const MARKER          = 'reclassify-2026-05-22';
 const OLD_CATEGORIES  = ['Factuurvraag', 'Klantvraag', 'Overig'];
@@ -29,6 +30,11 @@ export default async function handler(req, res) {
 
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
+  }
+
+  // RBAC (fail-open): alleen 403 bij bewezen-geen-permission.
+  if (!(await requirePermissionFailOpen(req, 'email.reclassify.run'))) {
+    return res.status(403).json({ error: 'Insufficient permissions', feature: 'email.reclassify.run' });
   }
 
   const {

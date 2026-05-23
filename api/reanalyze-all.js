@@ -1,8 +1,14 @@
 import { categorize } from './email-agent.js';
+import { requirePermissionFailOpen } from './_lib/requirePermission.js';
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
+  }
+
+  // RBAC (fail-open): alleen 403 bij bewezen-geen-permission.
+  if (!(await requirePermissionFailOpen(req, 'email.heranalyseer.run'))) {
+    return res.status(403).json({ error: 'Insufficient permissions', feature: 'email.heranalyseer.run' });
   }
 
   const { emails } = req.body || {};

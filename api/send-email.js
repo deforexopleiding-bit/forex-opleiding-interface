@@ -1,5 +1,6 @@
 import nodemailer from 'nodemailer';
 import { createUserClient } from './supabase.js';
+import { requirePermissionFailOpen } from './_lib/requirePermission.js';
 
 // Mailbox → wachtwoord env-var (zelfde als IMAP)
 const SMTP_ACCOUNTS = {
@@ -25,6 +26,12 @@ export default async function handler(req, res) {
   }
 
   const { from_mailbox, to, subject, text, html, cc, bcc, email_id, category, attachments } = req.body || {};
+
+  // RBAC (fail-open): reply heeft email_id, doorsturen niet → andere permission.
+  const featureKey = email_id ? 'email.reply.send' : 'email.forward.send';
+  if (!(await requirePermissionFailOpen(req, featureKey))) {
+    return res.status(403).json({ error: 'Insufficient permissions', feature: featureKey });
+  }
 
   if (!from_mailbox || !to || !subject || !text) {
     return res.status(400).json({ error: 'from_mailbox, to, subject en text zijn vereist' });
