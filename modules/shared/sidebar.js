@@ -123,6 +123,10 @@
     if (window.AgentShared && typeof window.AgentShared.renderUserSection === 'function') {
       window.AgentShared.renderUserSection();
     }
+    // Pre-load RBAC-permissions zodat canSync() klaar is voor module-code (voorbereidend).
+    if (window.RBAC && typeof window.RBAC.ensurePermissionsLoaded === 'function') {
+      window.RBAC.ensurePermissionsLoaded();
+    }
   }
 
   if (document.readyState === 'loading') {
