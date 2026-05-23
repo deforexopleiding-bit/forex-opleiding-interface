@@ -197,6 +197,7 @@
     .thread-item-body { padding: 0 12px 12px; font-size: 13px; line-height: 1.6; white-space: pre-wrap; word-break: break-word; color: var(--text); }
     .thread-count-badge { display: inline-flex; align-items: center; gap: 3px; margin-left: 6px; padding: 0 6px; border-radius: 8px; background: var(--bg-elev-3); color: var(--text-dim); font-size: 10px; font-weight: 600; vertical-align: middle; }
     .thread-count-badge .ti { font-size: 11px; }
+    .no-access { padding: 40px; text-align: center; color: var(--text-dim); font-size: 14px; background: var(--bg-elev); border: 1px solid var(--border); border-radius: 12px; margin: 20px; }
     .body-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
     .info-row.body-open, .reclame-row.body-open { border-color: rgba(83,74,183,0.35); }
     .info-meta-click { cursor: pointer; flex: 1; min-width: 0; }
@@ -1344,7 +1345,7 @@
   const AI_REQACTION_KEY      = 'email_ai_requires_action'; // uid -> boolean
   const CONFIRMED_EMAILS_KEY  = 'emailConfirmedBanners'; // Set van bevestigde uids
   const CACHE_VER_KEY         = 'email_cache_version';
-  const CACHE_VERSION         = '11.0'; // bump: thread-view (gesprek) + thread-count badge
+  const CACHE_VERSION         = '12.0'; // bump: RBAC fail-open enforcement (frontend gating)
   const OVERRIDE_CACHE_KEY    = 'email_override_by_sender'; // senderEmail -> category
   const SNOOZE_KEY            = 'email_snooze_map';
   const ACTION_FLAGS_KEY      = 'email_action_flags'; // uid -> true | false
@@ -4562,7 +4563,7 @@
       kbMeta +
       renderAttachUpload(e.uid) +
       '<div class="reply-actions">' +
-        '<button class="btn btn-send" data-action="send" data-uid="' + escapeHtml(e.uid) + '">' + ICON_SEND + ' Versturen</button>' +
+        (emailCan('email.reply.send') ? '<button class="btn btn-send" data-action="send" data-uid="' + escapeHtml(e.uid) + '">' + ICON_SEND + ' Versturen</button>' : '') +
         '<button class="btn" data-action="regenerate" data-uid="' + escapeHtml(e.uid) + '">' + ICON_REGEN + ' Opnieuw</button>' +
         '<button class="btn btn-danger" data-action="cancel" data-uid="' + escapeHtml(e.uid) + '">Afwijzen</button>' +
       '</div>' +
@@ -4655,25 +4656,25 @@
       renderThreadSection(e.uid) +
       renderAiSection(e) +
       '<div class="card-actions">' +
-        '<button class="btn-toggle-actie" data-action="toggle-actie" data-uid="' + escapeHtml(e.uid) + '">' +
+        (emailCan('email.actie.toggle') ? '<button class="btn-toggle-actie" data-action="toggle-actie" data-uid="' + escapeHtml(e.uid) + '">' +
           '<i class="ti ' + (getEffectiveRequiresAction(e) ? 'ti-flag-off' : 'ti-flag') + '" aria-hidden="true"></i> ' +
           (getEffectiveRequiresAction(e) ? 'Beantwoord' : 'Actie vereist') +
-        '</button>' +
-        (e.category === 'Openstaande facturen' ? (
+        '</button>' : '') +
+        (e.category === 'Openstaande facturen' && emailCan('email.factuur.print') ? (
           state.factuurPrinted[e.uid]
             ? '<span class="badge-afgedrukt"><i class="ti ti-printer-check" aria-hidden="true"></i> Afgedrukt</span>'
             : '<button class="btn-print-factuur" data-action="print-factuur" data-uid="' + escapeHtml(e.uid) + '"><i class="ti ti-printer" aria-hidden="true"></i> Factuur afdrukken</button>'
         ) + '<label class="checkbox-afgedrukt"><input type="checkbox" class="cb-afgedrukt" data-uid="' + escapeHtml(e.uid) + '"' + (state.factuurPrinted[e.uid] ? ' checked' : '') + ' /> Afgedrukt</label>' : '') +
-        (showGenBtn ? '<button class="btn btn-ai" data-action="generate" data-uid="' + escapeHtml(e.uid) + '">' + ICON_AI + ' Genereer AI antwoord</button>' : '') +
-        '<button class="btn" data-action="verplaats-train" data-uid="' + escapeHtml(e.uid) + '" title="Verplaats mail en train de agent met context">📂 Verplaats &amp; Train</button>' +
-        '<button class="btn" data-action="doorsturen" data-uid="' + escapeHtml(e.uid) + '"><i class="ti ti-arrow-forward" aria-hidden="true"></i> Doorsturen</button>' +
-        (e.unread
+        (showGenBtn && emailCan('email.ai.generate') ? '<button class="btn btn-ai" data-action="generate" data-uid="' + escapeHtml(e.uid) + '">' + ICON_AI + ' Genereer AI antwoord</button>' : '') +
+        (emailCan('email.move_train.run') ? '<button class="btn" data-action="verplaats-train" data-uid="' + escapeHtml(e.uid) + '" title="Verplaats mail en train de agent met context">📂 Verplaats &amp; Train</button>' : '') +
+        (emailCan('email.forward.send') ? '<button class="btn" data-action="doorsturen" data-uid="' + escapeHtml(e.uid) + '"><i class="ti ti-arrow-forward" aria-hidden="true"></i> Doorsturen</button>' : '') +
+        (emailCan('email.markread.toggle') ? (e.unread
           ? '<button class="btn" data-action="mark-read" data-uid="' + escapeHtml(e.uid) + '"><i class="ti ti-mail-opened" aria-hidden="true"></i> Markeer gelezen</button>'
-          : '<button class="btn" data-action="mark-unread" data-uid="' + escapeHtml(e.uid) + '"><i class="ti ti-mail" aria-hidden="true"></i> Markeer ongelezen</button>') +
+          : '<button class="btn" data-action="mark-unread" data-uid="' + escapeHtml(e.uid) + '"><i class="ti ti-mail" aria-hidden="true"></i> Markeer ongelezen</button>') : '') +
         (kbSaved ? '<span class="kb-saved-badge">📚 In kennisbank</span>'
-          : '<button class="btn" data-action="kb-open" data-uid="' + escapeHtml(e.uid) + '">📚 Kennisbank</button>') +
+          : (emailCan('email.kennisbank.add') ? '<button class="btn" data-action="kb-open" data-uid="' + escapeHtml(e.uid) + '">📚 Kennisbank</button>' : '')) +
         (state.taakCreated[e.uid] ? '<span class="taak-created-badge">📋 Taak aangemaakt</span>'
-          : '<button class="btn" data-action="create-task" data-uid="' + escapeHtml(e.uid) + '">📋 Taak</button>') +
+          : (emailCan('email.taak.create') ? '<button class="btn" data-action="create-task" data-uid="' + escapeHtml(e.uid) + '">📋 Taak</button>' : '')) +
       '</div>' +
       (state.openKbPanel === e.uid ? renderKbPanel(e) : '') +
       (state.openVtPanel === e.uid ? renderVtPanel(e.uid) : '') +
@@ -4698,7 +4699,7 @@
         '<span class="bulk-count">' + n + ' mail' + (n > 1 ? 's' : '') + ' geselecteerd</span>' +
         '<button class="btn btn-sm" onclick="getFilteredEmails().filter(passesCatFilter).filter(passesSearchFilter).forEach(e=>state.bulkSelected.add(e.uid));render()">Selecteer alles</button>' +
         '<button class="btn btn-sm" onclick="state.bulkSelected.clear();render()">✕ Deselecteer alles</button>' +
-        '<button class="btn btn-sm" style="background:rgba(83,74,183,0.18);border-color:var(--accent-violet,#534AB7);color:var(--accent-violet,#534AB7)" onclick="openBulkVtModal()">📂 Train Agent</button>' +
+        (emailCan('email.bulk.train') ? '<button class="btn btn-sm" style="background:rgba(83,74,183,0.18);border-color:var(--accent-violet,#534AB7);color:var(--accent-violet,#534AB7)" onclick="openBulkVtModal()">📂 Train Agent</button>' : '') +
       '</div>';
     }
     html += '<div class="info-list">' + slice.map((e) => renderAlleRow(e)).join('') + '</div>';
@@ -5911,6 +5912,60 @@
     render();
   }
 
+  // ── RBAC enforcement (fail-open) ────────────────────────────────────────────
+  // rbacActive wordt pas true als permissions succesvol geladen zijn én de user
+  // minstens één rol heeft. Tot dan (of bij laadfout) toont emailCan() ALLES,
+  // zodat een mislukte permission-load niemand buitensluit.
+  let rbacActive = false;
+
+  function emailCan(key) {
+    if (!rbacActive) return true;            // fail-open
+    return window.RBAC.canSync(key);         // super_admin = '*' → true
+  }
+
+  async function applyRbacGating() {
+    if (!window.RBAC) return;                                  // geen helper → fail-open
+    try { await window.RBAC.ensurePermissionsLoaded(); } catch { return; } // laadfout → fail-open
+    const roles = window.RBAC.getUserRoles();
+    if (!roles || roles.length === 0) return;                  // geen rollen / laadfout → fail-open
+    rbacActive = true;
+
+    const gate = (selector, key) => {
+      const allowed = window.RBAC.canSync(key);
+      document.querySelectorAll(selector).forEach((el) => { el.style.display = allowed ? '' : 'none'; });
+    };
+
+    // Module-toegang: geen toegang → melding i.p.v. de module (sidebar blijft staan).
+    if (!window.RBAC.canSync('email.module.access')) {
+      const app = document.querySelector('.app');
+      if (app) {
+        app.style.display = 'none';
+        app.insertAdjacentHTML('beforebegin', '<div class="no-access">Je hebt geen toegang tot de e-mailmodule.</div>');
+      }
+      return;
+    }
+
+    // Tabs
+    gate('[data-tab="tebeantwoorden"]', 'email.tab.tebeantwoorden');
+    gate('[data-tab="sales"]', 'email.tab.sales');
+    gate('[data-tab="klanten"]', 'email.tab.klanten');
+    gate('[data-tab="finance"]', 'email.tab.finance');
+    gate('[data-tab="reclame"]', 'email.tab.reclame');
+    gate('[data-tab="overig"]', 'email.tab.overig');
+    gate('[data-tab="alle"]', 'email.tab.alle');
+    gate('[data-tab="verzonden"]', 'email.tab.verzonden');
+
+    // Admin-bar knoppen (echte IDs)
+    gate('#reclassifyBtn', 'email.reclassify.run');
+    gate('#reanalyseerBtn', 'email.heranalyseer.run');
+    gate('#leerrapportBtn', 'email.leerrapport.view');
+    gate('#trainingBtn', 'email.training.toggle');
+    gate('#sigBtn', 'email.signature.edit');
+
+    // Her-render zodat de action-knoppen (render-time emailCan) toegepast worden.
+    render();
+  }
+
   async function init() {
     await window._authSharedReady;
     const profile = await window.AuthShared.requireAuth();
@@ -5947,6 +6002,7 @@
     if (trainingBtn) trainingBtn.classList.toggle('active', !!state.trainingMode);
     updateUndoButton();
     loadEmails();
+    applyRbacGating(); // RBAC fail-open gating (verbergt knoppen/tabs zonder permission)
   }
 
   init();
