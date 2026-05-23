@@ -3327,6 +3327,34 @@
     });
 
   </script>
+<script>
+// RBAC frontend-gating (fail-open) — Follow-up. super_admin = alles.
+(function () {
+  var RULES = [
+    ['.fu-tab[data-tab="vandaag"]', 'followup.tab.vandaag'],
+    ['.fu-tab[data-tab="open-acties"]', 'followup.tab.openacties'],
+    ['.fu-tab[data-tab="opvolging"]', 'followup.tab.opvolging'],
+    ['.fu-tab[data-tab="archief"]', 'followup.tab.archief'],
+    ['.fu-tab[data-tab="kalender"]', 'followup.tab.kalender'],
+    ['#fu-overdue-topbar', 'followup.overdue.view'],
+    ['#fu-kal-owner-filter', 'followup.scope.all_vs_own'],
+    ['#admin-link', 'followup.admin.module.access']
+  ];
+  async function applyRbacGating() {
+    try { if (window._authSharedReady) await window._authSharedReady; } catch (e) {}
+    if (!window.RBAC || typeof window.RBAC.ensurePermissionsLoaded !== 'function') return;
+    var perms;
+    try { perms = await window.RBAC.ensurePermissionsLoaded(); } catch (e) { return; }
+    var roles = (typeof window.RBAC.getUserRoles === 'function' && window.RBAC.getUserRoles()) || [];
+    if (!roles.length) return;
+    if (perms.has('*')) return;
+    var css = RULES.filter(function (r) { return !perms.has(r[1]); })
+      .map(function (r) { return r[0] + '{display:none !important;}'; }).join('\n');
+    if (css) { var st = document.createElement('style'); st.id = 'rbac-gating'; st.textContent = css; document.head.appendChild(st); }
+  }
+  applyRbacGating();
+})();
+</script>
 <script src="/modules/shared/permissions.js"></script>
 <script src="/modules/shared/sidebar.js"></script>
 </body>
