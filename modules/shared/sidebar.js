@@ -110,6 +110,59 @@
     } catch (e) { /* geen taken in cache */ }
   }
 
+  // ── RBAC module-gating (fail-open, consistent met email-enforcement) ────────
+  // data-module gebruikt koppeltekens (control-center/follow-up); de feature-keys
+  // niet (controlcenter./followup.) — daarom een expliciete mapping.
+  var MODULE_FEATURE_MAP = {
+    'dashboard': 'dashboard.module.access',
+    'email': 'email.module.access',
+    'taken': 'taken.module.access',
+    'kennisbank': 'kennisbank.module.access',
+    'agents': 'agents.module.access',
+    'meetings': 'meetings.module.access',
+    'control-center': 'controlcenter.module.access',
+    'follow-up': 'followup.module.access',
+    'admin': 'admin.module.access'
+  };
+
+  function blockPageAccess() {
+    if (document.querySelector('.rbac-no-access')) return;
+    Array.prototype.forEach.call(document.body.children, function (el) {
+      if (el.id === 'sidebar-mount' || el.tagName === 'SCRIPT') return;
+      el.style.display = 'none';
+    });
+    var div = document.createElement('div');
+    div.className = 'rbac-no-access';
+    div.style.cssText = 'margin-left:220px;padding:64px 24px;text-align:center;font-family:Inter,system-ui,sans-serif;color:var(--text-dim,#64748b);';
+    div.innerHTML =
+      '<h2 style="font-size:20px;font-weight:700;margin:0 0 8px;color:var(--text,#0f172a)">Geen toegang</h2>' +
+      '<p style="font-size:14px;margin:0 0 16px">Je hebt geen rechten om deze module te bekijken.</p>' +
+      '<a href="/index.html" style="font-size:13px;color:var(--accent-violet,#6d28d9);text-decoration:underline">Terug naar dashboard</a>';
+    document.body.appendChild(div);
+  }
+
+  async function applyModuleGating() {
+    if (!window.RBAC || typeof window.RBAC.ensurePermissionsLoaded !== 'function') return; // geen helper → fail-open
+    var perms;
+    try { perms = await window.RBAC.ensurePermissionsLoaded(); } catch (e) { return; }      // laadfout → fail-open
+    var roles = (typeof window.RBAC.getUserRoles === 'function' && window.RBAC.getUserRoles()) || [];
+    if (!roles.length) return;   // geen rollen / laadfout → fail-open (niets verbergen)
+    if (perms.has('*')) return;  // super_admin → alles zichtbaar
+
+    // 1) Sidebar-links verbergen zonder <module>.module.access
+    Object.keys(MODULE_FEATURE_MAP).forEach(function (modKey) {
+      var link = document.querySelector('#sidebar-mount [data-module="' + modKey + '"]');
+      if (link && !perms.has(MODULE_FEATURE_MAP[modKey])) link.style.display = 'none';
+    });
+
+    // 2) Pagina-content blokkeren bij directe URL (defense-in-depth).
+    //    email.html regelt dit zelf → hier overslaan om dubbele melding te voorkomen.
+    var cur = currentModule();
+    if (cur === 'email') return;
+    var fk = MODULE_FEATURE_MAP[cur];
+    if (fk && !perms.has(fk)) blockPageAccess();
+  }
+
   function mountSidebar() {
     var mount = document.getElementById('sidebar-mount');
     if (!mount || mount.dataset.mounted === '1') return;
@@ -123,10 +176,9 @@
     if (window.AgentShared && typeof window.AgentShared.renderUserSection === 'function') {
       window.AgentShared.renderUserSection();
     }
-    // Pre-load RBAC-permissions zodat canSync() klaar is voor module-code (voorbereidend).
-    if (window.RBAC && typeof window.RBAC.ensurePermissionsLoaded === 'function') {
-      window.RBAC.ensurePermissionsLoaded();
-    }
+    // RBAC module-gating (fail-open): laadt permissions, verbergt ontoegankelijke
+    // sidebar-links én blokkeert de pagina-content bij directe URL zonder toegang.
+    applyModuleGating();
     // Laat pagina-scripts weten dat de sidebar-DOM klaar is (bv. nav-badge updates
     // die anders kunnen racen met de mount).
     window.dispatchEvent(new CustomEvent('sidebar:mounted'));
