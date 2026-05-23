@@ -137,7 +137,7 @@
             <div id="chatHeaderEmoji" style="font-size:18px"></div>
             <div class="chat-title" id="chatHeaderTitle"></div>
             <button class="btn-sm" id="newSessionBtn" style="margin-left:auto" title="Nieuwe sessie starten">+ Nieuwe sessie</button>
-            <button class="btn-sm" onclick="generateReport()">📊 Rapport</button>
+            <button class="btn-sm js-report-btn" onclick="generateReport()">📊 Rapport</button>
           </div>
           <div class="chat-messages" id="chatMessages"></div>
           <div class="chat-input-area">
@@ -252,7 +252,7 @@ function renderOverview() {
         <div class="caps-list">${caps}</div>
         <div class="card-actions">
           <button class="btn-sm" style="border-color:${a.avatar_color}40;color:${a.avatar_color}" onclick="showView('chat','${esc(a.name)}')">💬 Chat</button>
-          <button class="btn-sm" onclick="generateReportFor('${esc(a.name)}')">📊 Rapport</button>
+          <button class="btn-sm js-report-btn" onclick="generateReportFor('${esc(a.name)}')">📊 Rapport</button>
         </div>
       </div>`;
   }).join('');
@@ -656,6 +656,34 @@ init();
 if (window._authSharedReady) {
   window._authSharedReady.then(() => window.AgentShared?.renderUserSection());
 }
+</script>
+<script>
+// RBAC frontend-gating (fail-open) — AI Agents. super_admin = alles.
+// view.overview/view.chat + train.rule/example.mark_good niet gegate
+// (geen stabiele selector / showView-gedreven) — server is echte verdediging.
+(function () {
+  var RULES = [
+    ['#newSessionBtn', 'agents.session.new'],
+    ['.chat-send', 'agents.chat.use'],
+    ['#chatInput', 'agents.chat.use'],
+    ['.quick-btn', 'agents.chat.use'],
+    ['.js-report-btn', 'agents.report.generate'],
+    ['.inline-approval-actions', 'agents.approval.act']
+  ];
+  async function applyRbacGating() {
+    try { if (window._authSharedReady) await window._authSharedReady; } catch (e) {}
+    if (!window.RBAC || typeof window.RBAC.ensurePermissionsLoaded !== 'function') return;
+    var perms;
+    try { perms = await window.RBAC.ensurePermissionsLoaded(); } catch (e) { return; }
+    var roles = (typeof window.RBAC.getUserRoles === 'function' && window.RBAC.getUserRoles()) || [];
+    if (!roles.length) return;
+    if (perms.has('*')) return;
+    var css = RULES.filter(function (r) { return !perms.has(r[1]); })
+      .map(function (r) { return r[0] + '{display:none !important;}'; }).join('\n');
+    if (css) { var st = document.createElement('style'); st.id = 'rbac-gating'; st.textContent = css; document.head.appendChild(st); }
+  }
+  applyRbacGating();
+})();
 </script>
 <script src="/modules/shared/permissions.js"></script>
 <script src="/modules/shared/sidebar.js"></script>
