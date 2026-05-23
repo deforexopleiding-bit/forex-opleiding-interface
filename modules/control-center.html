@@ -71,7 +71,7 @@
     </div>
 
     <!-- Approval inbox -->
-    <div class="cc-card">
+    <div class="cc-card" id="ccApprovalCard">
       <div class="cc-card-header">
         <div class="cc-card-title">
           🔔 Approval Inbox
@@ -85,7 +85,7 @@
     </div>
 
     <!-- Audit log -->
-    <div class="cc-card">
+    <div class="cc-card" id="ccAuditCard">
       <div class="cc-card-header">
         <div class="cc-card-title">📋 Audit Log</div>
         <div style="display:flex;gap:8px;align-items:center">
@@ -93,7 +93,7 @@
             <option value="">Alle agents</option>
             <option>Simon</option><option>Leon</option><option>Aron</option>
           </select>
-          <button class="btn btn-sm" onclick="exportAuditCsv()">⬇ CSV</button>
+          <button class="btn btn-sm" id="ccExportCsvBtn" onclick="exportAuditCsv()">⬇ CSV</button>
         </div>
       </div>
       <div id="auditLogList">
@@ -214,6 +214,32 @@ init();
 if (window._authSharedReady) {
   window._authSharedReady.then(() => window.AgentShared?.renderUserSection());
 }
+</script>
+<script>
+// RBAC frontend-gating (fail-open) — Control Center. super_admin = alles.
+// approval.act-knoppen zitten in gedeelde agent-shared modal → niet granulair
+// gegate (approvals.view verbergt de hele inbox-kaart).
+(function () {
+  var RULES = [
+    ['#kpiBanner', 'controlcenter.kpi.view'],
+    ['#ccApprovalCard', 'controlcenter.approvals.view'],
+    ['#ccAuditCard', 'controlcenter.audit.view'],
+    ['#ccExportCsvBtn', 'controlcenter.audit.export']
+  ];
+  async function applyRbacGating() {
+    try { if (window._authSharedReady) await window._authSharedReady; } catch (e) {}
+    if (!window.RBAC || typeof window.RBAC.ensurePermissionsLoaded !== 'function') return;
+    var perms;
+    try { perms = await window.RBAC.ensurePermissionsLoaded(); } catch (e) { return; }
+    var roles = (typeof window.RBAC.getUserRoles === 'function' && window.RBAC.getUserRoles()) || [];
+    if (!roles.length) return;
+    if (perms.has('*')) return;
+    var css = RULES.filter(function (r) { return !perms.has(r[1]); })
+      .map(function (r) { return r[0] + '{display:none !important;}'; }).join('\n');
+    if (css) { var st = document.createElement('style'); st.id = 'rbac-gating'; st.textContent = css; document.head.appendChild(st); }
+  }
+  applyRbacGating();
+})();
 </script>
 <script src="/modules/shared/permissions.js"></script>
 <script src="/modules/shared/sidebar.js"></script>
