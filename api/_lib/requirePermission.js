@@ -5,9 +5,28 @@
 // Gebruikt de DB-functie user_has_permission(user_uuid, fkey) uit migratie 002
 // (super_admin = altijd true; anders union over user_roles × role_permissions).
 //
-// NB (Fase 2, voorbereidend): nog nergens aangeroepen. role_permissions is leeg,
-// dus inschakelen zou alles behalve super_admin blokkeren. Wire pas in zodra de
-// matrix gevuld is.
+// STATUS (Fase 4):
+// WEL afgedwongen (token aanwezig, ondubbelzinnige actie, hoog-risico):
+//   - send-email.js          → email.reply.send / email.forward.send (reply vs forward)
+//   - email-reclassify.js    → email.reclassify.run
+//   - reanalyze-all.js       → email.heranalyseer.run
+//
+// BEWUST NIET server-side afgedwongen op de overige (interne) modules — alleen
+// frontend-gating + bestaande auth/RLS. Reden (zie diagnose RBAC Fase 4):
+//   1) Inert: meerdere endpoints worden vanuit de frontend met raw fetch (zonder
+//      Bearer-token) aangeroepen → requirePermissionFailOpen valt fail-open terug,
+//      dus de check zou niets doen. O.a. alle follow-up-* endpoints
+//      (follow-up.html gebruikt 13× raw fetch, 0× apiFetch).
+//   2) Ambigu / false-positive-risico: gedeelde multi-purpose endpoints koppelen
+//      meerdere frontend-feature-keys aan één pad, dus een enkele key-check zou
+//      legitiem-toegestane acties onterecht met 403 blokkeren. O.a.:
+//        - kennisbank-sync.js  (POST action=upsert_item dekt faq.add + material.upload
+//                               + item.edit; PUT/DELETE = item.edit/delete; sync_profile)
+//        - taken.js            (POST met body.action voor create/edit/status/delete)
+//        - agent-approval.js / agent-meeting.js (gedeeld over control-center/agents/
+//                               follow-up-admin met verschillende keys per module)
+// Echte server-side afdwinging hier vereist OR-over-meerdere-keys + apiFetch-omzetting
+// en is laag-waarde/hoog-risico voor deze interne tools — daarom uitgesteld.
 
 import { supabase, supabaseAdmin } from '../supabase.js';
 
