@@ -20,7 +20,7 @@ export default async function handler(req, res) {
   const body = typeof req.body === 'string'
     ? JSON.parse(req.body || '{}')
     : (req.body || {});
-  const { mailbox, uid } = body;
+  const { mailbox, uid, seen = true } = body; // seen=false → markeer als ongelezen (\Seen verwijderen)
 
   if (!mailbox || uid === undefined || uid === null || uid === '') {
     return res.status(400).json({
@@ -58,10 +58,14 @@ export default async function handler(req, res) {
     await client.connect();
     const lock = await client.getMailboxLock('INBOX');
     try {
-      // Zet de \Seen flag via UID-adressering. ImapFlow accepteert
+      // Zet/verwijder de \Seen flag via UID-adressering. ImapFlow accepteert
       // strings of numbers; we sturen string voor robuustheid.
-      await client.messageFlagsAdd(String(uid), ['\\Seen'], { uid: true });
-      return res.status(200).json({ ok: true });
+      if (seen === false) {
+        await client.messageFlagsRemove(String(uid), ['\\Seen'], { uid: true });
+      } else {
+        await client.messageFlagsAdd(String(uid), ['\\Seen'], { uid: true });
+      }
+      return res.status(200).json({ ok: true, seen: seen !== false });
     } finally {
       lock.release();
     }

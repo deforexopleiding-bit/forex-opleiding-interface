@@ -162,6 +162,17 @@
     .mail-row-cat { font-size: 10px; padding: 1px 6px; border-radius: 4px; }
     .mail-row-time { font-size: 10px; color: var(--text-faint); white-space: nowrap; padding-top: 2px; }
     @media (max-width: 900px) { .email-split-layout { grid-template-columns: 1fr; } .email-list-pane { max-height: 320px; } }
+
+    /* ── Doorstuur-paneel ── */
+    .forward-panel { border-top: 1px solid var(--border); padding: 16px; margin-top: 12px; background: var(--bg-elev-2); border-radius: 10px; }
+    .forward-panel h4 { font-size: 14px; margin: 0 0 12px; }
+    .forward-panel label { display: block; font-size: 11px; color: var(--text-dim); margin: 8px 0 4px; }
+    .forward-panel input, .forward-panel textarea {
+      width: 100%; padding: 7px 10px; border: 1px solid var(--border-strong); border-radius: 6px;
+      background: var(--bg); color: var(--text); font-size: 13px; font-family: inherit; box-sizing: border-box;
+    }
+    .forward-panel textarea { resize: vertical; }
+    .forward-actions { display: flex; gap: 8px; margin-top: 12px; }
     .body-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
     .info-row.body-open, .reclame-row.body-open { border-color: rgba(83,74,183,0.35); }
     .info-meta-click { cursor: pointer; flex: 1; min-width: 0; }
@@ -1369,7 +1380,7 @@
   const AI_REQACTION_KEY      = 'email_ai_requires_action'; // uid -> boolean
   const CONFIRMED_EMAILS_KEY  = 'emailConfirmedBanners'; // Set van bevestigde uids
   const CACHE_VER_KEY         = 'email_cache_version';
-  const CACHE_VERSION         = '9.0'; // bump: Outlook 2-paneel layout (lijst + body-paneel)
+  const CACHE_VERSION         = '10.0'; // bump: hero op ongelezen + Markeer ongelezen + Doorsturen
   const OVERRIDE_CACHE_KEY    = 'email_override_by_sender'; // senderEmail -> category
   const SNOOZE_KEY            = 'email_snooze_map';
   const ACTION_FLAGS_KEY      = 'email_action_flags'; // uid -> true | false
@@ -1441,6 +1452,7 @@
     emails: [],
     activeTab: 'sales',
     selectedMailUid: null,  // 2-paneel: geselecteerde mail (rechter body-paneel)
+    forwardingUid: null,    // uid van mail waarvoor het doorstuur-paneel open is
     infoPage: 1,
     allePage: 1,
     addressFilter: 'Alle',
@@ -3182,6 +3194,94 @@
     } catch (err) { console.warn('IMAP mark-read error:', err); }
   }
 
+  function markAsUnread(uid) {
+    const email = findEmail(uid);
+    if (!email || email.unread) return;
+    email.unread = true;
+    delete state.overrides.read[uid]; // anders zet de read-override 'm bij reload weer op gelezen
+    saveOverrides();
+    render();
+    pushUnreadFlagToImap(email);
+  }
+
+  async function pushUnreadFlagToImap(email) {
+    try {
+      const res = await fetch('/api/mark-read', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mailbox: email.mailbox, uid: extractImapUid(String(email.uid||'')), seen: false })
+      });
+      if (!res.ok) { const d = await res.json().catch(()=>({})); console.warn('IMAP mark-unread failed:', d.error || res.status); }
+    } catch (err) { console.warn('IMAP mark-unread error:', err); }
+  }
+
+  // ── Doorsturen ──────────────────────────────────────────────────────────────
+  function openForwardPanel(uid) {
+    state.forwardingUid = uid;
+    const e = findEmail(uid);
+    if (e && !state.bodyCache[uid]) fetchEmailBody(e).then(render); // body nodig voor citaat
+    render();
+  }
+
+  function closeForwardPanel() {
+    state.forwardingUid = null;
+    render();
+  }
+
+  function renderForwardPanel(uid) {
+    const e = findEmail(uid);
+    if (!e) return '';
+    const cached = state.bodyCache[uid];
+    const body = (cached && !cached.loading && !cached.error) ? (cached.text || '') : '';
+    const fwdSubject = /^fwd:/i.test(e.subject || '') ? e.subject : 'Fwd: ' + (e.subject || '');
+    const fwdBody = '\n\n---------- Doorgestuurd bericht ----------\n' +
+      'Van: ' + (e.fromName || e.fromAddress || e.from || 'Onbekend') + '\n' +
+      'Datum: ' + formatDateTime(e.date) + '\n' +
+      'Onderwerp: ' + (e.subject || '') + '\n\n' + body;
+    return '<div class="forward-panel">' +
+      '<h4>Doorsturen</h4>' +
+      '<label>Naar:</label>' +
+      '<input type="email" id="fwd-to-' + escapeHtml(uid) + '" placeholder="email@voorbeeld.nl" />' +
+      '<label>Onderwerp:</label>' +
+      '<input type="text" id="fwd-subject-' + escapeHtml(uid) + '" value="' + escapeHtml(fwdSubject) + '" />' +
+      '<label>Bericht:</label>' +
+      '<textarea id="fwd-body-' + escapeHtml(uid) + '" rows="10">' + escapeHtml(fwdBody) + '</textarea>' +
+      '<div class="forward-actions">' +
+        '<button class="btn btn-ai" data-action="send-forward" data-uid="' + escapeHtml(uid) + '"><i class="ti ti-send" aria-hidden="true"></i> Doorsturen</button>' +
+        '<button class="btn" data-action="cancel-forward" data-uid="' + escapeHtml(uid) + '">Annuleer</button>' +
+      '</div>' +
+    '</div>';
+  }
+
+  async function sendForward(uid) {
+    const email = findEmail(uid);
+    if (!email) return;
+    const toEl   = document.getElementById('fwd-to-' + uid);
+    const subjEl = document.getElementById('fwd-subject-' + uid);
+    const bodyEl = document.getElementById('fwd-body-' + uid);
+    const to      = (toEl?.value || '').trim();
+    const subject = (subjEl?.value || '').trim() || ('Fwd: ' + (email.subject || ''));
+    const text    = bodyEl?.value || '';
+    if (!to) { showToast('Geef een ontvanger op', 'error'); return; }
+    const fromMailbox = state.replyFrom[uid] || email.mailbox;
+    const sendBtn = document.querySelector('[data-action="send-forward"][data-uid="' + uid + '"]');
+    if (sendBtn) sendBtn.disabled = true;
+    try {
+      const res = await window.AgentShared.apiFetch('/api/send-email', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        // Geen email_id: dit is een nieuwe doorstuur-mail, geen reply (markeert origineel niet als beantwoord)
+        body: JSON.stringify({ from_mailbox: fromMailbox, to, subject, text, html: buildMailHtml(text), category: email.category })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'HTTP ' + res.status);
+      showToast('Doorgestuurd naar ' + to, 'success');
+      closeForwardPanel();
+    } catch (err) {
+      if (sendBtn) sendBtn.disabled = false;
+      showToast('Doorsturen mislukt: ' + err.message, 'error');
+    }
+  }
+
   function dismissSuggestion(uid) {
     saveRejectedSugg(uid);
     state.suggestions = state.suggestions.filter((s) => s.email.uid !== uid);
@@ -4536,6 +4636,10 @@
         ) + '<label class="checkbox-afgedrukt"><input type="checkbox" class="cb-afgedrukt" data-uid="' + escapeHtml(e.uid) + '"' + (state.factuurPrinted[e.uid] ? ' checked' : '') + ' /> Afgedrukt</label>' : '') +
         (showGenBtn ? '<button class="btn btn-ai" data-action="generate" data-uid="' + escapeHtml(e.uid) + '">' + ICON_AI + ' Genereer AI antwoord</button>' : '') +
         '<button class="btn" data-action="verplaats-train" data-uid="' + escapeHtml(e.uid) + '" title="Verplaats mail en train de agent met context">📂 Verplaats &amp; Train</button>' +
+        '<button class="btn" data-action="doorsturen" data-uid="' + escapeHtml(e.uid) + '"><i class="ti ti-arrow-forward" aria-hidden="true"></i> Doorsturen</button>' +
+        (e.unread
+          ? '<button class="btn" data-action="mark-read" data-uid="' + escapeHtml(e.uid) + '"><i class="ti ti-mail-opened" aria-hidden="true"></i> Markeer gelezen</button>'
+          : '<button class="btn" data-action="mark-unread" data-uid="' + escapeHtml(e.uid) + '"><i class="ti ti-mail" aria-hidden="true"></i> Markeer ongelezen</button>') +
         (kbSaved ? '<span class="kb-saved-badge">📚 In kennisbank</span>'
           : '<button class="btn" data-action="kb-open" data-uid="' + escapeHtml(e.uid) + '">📚 Kennisbank</button>') +
         (state.taakCreated[e.uid] ? '<span class="taak-created-badge">📋 Taak aangemaakt</span>'
@@ -4543,6 +4647,7 @@
       '</div>' +
       (state.openKbPanel === e.uid ? renderKbPanel(e) : '') +
       (state.openVtPanel === e.uid ? renderVtPanel(e.uid) : '') +
+      (state.forwardingUid === e.uid ? renderForwardPanel(e.uid) : '') +
     '</div>';
   }
 
@@ -4891,6 +4996,11 @@
         else if (action === 'print-factuur')   printFactuur(u);
         else if (action === 'toggle-actie')    toggleActieVereist(u);
         else if (action === 'verplaats-train') verplaatsEnTrain(u, 'actie');
+        else if (action === 'mark-read')       markAsRead(u);
+        else if (action === 'mark-unread')     markAsUnread(u);
+        else if (action === 'doorsturen')      openForwardPanel(u);
+        else if (action === 'send-forward')    sendForward(u);
+        else if (action === 'cancel-forward')  closeForwardPanel();
         else if (action === 'kb-open') {
           state.openKbPanel = state.openKbPanel === u ? null : u;
           if (state.openKbPanel === u && !state.kbForm[u]) {
@@ -5275,7 +5385,7 @@
       ? state.emails
       : state.emails.filter((e) => (e.mailbox || '').toLowerCase() === state.addressFilter.toLowerCase());
     const teBeantwoordenEmails = teAdresBaseTab
-      .filter((e) => e.category !== 'Reclame' && getEffectiveRequiresAction(e))
+      .filter((e) => e.unread === true && e.category !== 'Reclame' && getEffectiveRequiresAction(e))
       .sort((a, b) => new Date(b.date) - new Date(a.date));
 
     // ── Stats-row (dual hero + 2 mid-cards) — rekent over 'filtered' (datum + adres) ──
