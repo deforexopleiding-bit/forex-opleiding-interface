@@ -231,10 +231,11 @@ function switchFase(f) {
 // ── Config laden ──────────────────────────────────────────────────────────
 async function loadConfig() {
   try {
-    const res = await window.AgentShared.apiFetch('/api/lisa-config');
+    const res = await window.AgentShared.apiFetch('/api/lisa-config?which=latest');
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'HTTP ' + res.status);
-    activeCfg = data.config || {};
+    activeCfg = data.config || {};   // hoogste versie (draft of actief) — wat de editor bewerkt
+    const liveVersion = data.active_version;
     cfg = {
       persona_name: activeCfg.persona_name || 'Lisa',
       persona_age: activeCfg.persona_age || '',
@@ -251,9 +252,10 @@ async function loadConfig() {
       const p = activeCfg[key] || {};
       cfg.phases[f] = { system: p.system || '', transition: p.transition || '', examples: Array.isArray(p.examples) ? p.examples.slice() : [] };
     });
-    const vtxt = activeCfg.version ? ('Versie ' + activeCfg.version + (activeCfg.is_active ? ' (actief)' : '')) : 'Geen config';
+    const isDraft = activeCfg.id && activeCfg.is_active === false;
+    const vtxt = activeCfg.version ? ('Versie ' + activeCfg.version + (isDraft ? ' (draft)' : ' (actief)')) : 'Geen config';
     document.getElementById('cfgVersionBadge').textContent = vtxt;
-    document.getElementById('activeVersionBadge').textContent = 'Actieve config: ' + (activeCfg.version ? ('v' + activeCfg.version) : '—');
+    document.getElementById('activeVersionBadge').textContent = 'Actieve config: ' + (liveVersion ? ('v' + liveVersion) : '—');
     renderConfig();
   } catch (e) {
     window.AgentShared?.showToast('Config laden mislukt: ' + e.message, 'error');
@@ -350,6 +352,7 @@ function updatePreview() {
 
 // ── Opslaan / publiceren (snapshot: nieuwe versie-rij) ───────────────────────
 async function saveConfig(publish) {
+  if (publish && !confirm('Nieuwe versie maken en activeren? Deze versie wordt direct door Lisa gebruikt.')) return;
   const btn = document.getElementById(publish ? 'cfgPublishBtn' : 'cfgSaveDraftBtn');
   const origTxt = btn.textContent;
   btn.disabled = true; btn.textContent = publish ? 'Publiceren…' : 'Opslaan…';
@@ -417,7 +420,7 @@ function closeHistory() { document.getElementById('historyModal').classList.add(
 async function rollbackVersion(id, version) {
   if (!confirm('Terugzetten naar v' + version + '? Dit maakt een nieuwe actieve versie met deze inhoud.')) return;
   try {
-    const res = await window.AgentShared.apiFetch('/api/lisa-config?action=rollback', { method: 'POST', body: JSON.stringify({ id }) });
+    const res = await window.AgentShared.apiFetch('/api/lisa-config?action=rollback', { method: 'POST', body: JSON.stringify({ version_id: id }) });
     const data = await res.json().catch(() => ({}));
     if (res.status === 403) { window.AgentShared?.showToast('Geen rechten voor rollback', 'error'); return; }
     if (!res.ok) throw new Error(data.error || 'HTTP ' + res.status);

@@ -33,6 +33,14 @@ async function activeConfig(select = '*') {
   return data || null;
 }
 
+// Hoogste versie (kan een draft zijn) — wat de editor bewerkt.
+async function latestConfig(select = '*') {
+  const { data } = await supabaseAdmin
+    .from('lisa_config').select(select)
+    .order('version', { ascending: false }).limit(1).maybeSingle();
+  return data || null;
+}
+
 async function nextVersion() {
   const { data } = await supabaseAdmin
     .from('lisa_config').select('version').order('version', { ascending: false }).limit(1).maybeSingle();
@@ -61,6 +69,13 @@ export default async function handler(req, res) {
       if (error) return res.status(500).json({ error: error.message });
       return res.status(200).json({ versions: data || [] });
     }
+    // ?which=latest → de editor bewerkt de hoogste versie (draft of actief);
+    //   default → de actieve (live) config (voor de Lisa-backend later).
+    if ((req.query.which || 'active') === 'latest') {
+      const latest = await latestConfig('*');
+      const act = await activeConfig('version');
+      return res.status(200).json({ config: latest, active_version: act?.version || null });
+    }
     const config = await activeConfig('*');
     return res.status(200).json({ config });
   }
@@ -73,26 +88,46 @@ export default async function handler(req, res) {
       if (!(await requirePermissionFailOpen(req, 'lisa.config.edit'))) {
         return res.status(403).json({ error: 'Insufficient permissions', feature: 'lisa.config.edit' });
       }
-      const act = await activeConfig('id');
-      if (!act) return res.status(400).json({ error: 'Geen actieve config om bij te werken.' });
       const updates = pick(body, EDIT_FIELDS);
       if (Object.keys(updates).length === 0) return res.status(400).json({ error: 'Geen velden om bij te werken.' });
-      const { error } = await supabaseAdmin.from('lisa_config').update(updates).eq('id', act.id);
+      const latest = await latestConfig('*');
+      if (latest && latest.is_active === false) {
+        // Open draft bijwerken (gepubliceerde versies blijven immutable → rollback klopt).
+        const { error } = await supabaseAdmin.from('lisa_config').update(updates).eq('id', latest.id);
+        if (error) return res.status(500).json({ error: error.message });
+        return res.status(200).json({ ok: true, version: latest.version, message: 'Draft bijgewerkt (v' + latest.version + ')' });
+      }
+      // Laatste versie is gepubliceerd → nieuwe draft-versie (snapshot + edits, inactief).
+      const base = { ...(latest || {}) };
+      delete base.id; delete base.created_at;
+      const next = (latest?.version || 0) + 1;
+      const payload = { ...base, ...updates, version: next, is_active: false, created_by: admin.user.id, notes: 'Draft' };
+      const { error } = await supabaseAdmin.from('lisa_config').insert(payload);
       if (error) return res.status(500).json({ error: error.message });
-      return res.status(200).json({ ok: true, message: 'Draft opgeslagen' });
+      return res.status(200).json({ ok: true, version: next, message: 'Draft opgeslagen (v' + next + ')' });
     }
 
     if (action === 'publish') {
       if (!(await requirePermissionFailOpen(req, 'lisa.config.publish'))) {
         return res.status(403).json({ error: 'Insufficient permissions', feature: 'lisa.config.publish' });
       }
-      const act = await activeConfig('*');               // snapshot van huidige actieve config
+      const updates = pick(body, EDIT_FIELDS);
+      const latest = await latestConfig('*');
+      if (latest && latest.is_active === false) {
+        // Bestaande draft live zetten (trigger deactiveert de vorige actieve versie).
+        const { error } = await supabaseAdmin.from('lisa_config')
+          .update({ ...updates, is_active: true, notes: body.notes || 'Gepubliceerd via config-editor' })
+          .eq('id', latest.id);
+        if (error) return res.status(500).json({ error: error.message });
+        return res.status(200).json({ ok: true, version: latest.version, message: 'Versie ' + latest.version + ' live' });
+      }
+      // Geen openstaande draft → nieuwe actieve versie vanaf de actieve config + edits.
       const next = await nextVersion();
-      const base = { ...(act || {}) };
+      const base = { ...(latest || {}) };
       delete base.id; delete base.created_at;
       const payload = {
         ...base,
-        ...pick(body, EDIT_FIELDS),                       // + huidige editor-waarden
+        ...updates,
         version: next,
         is_active: true,                                  // trigger zet andere versies inactief
         created_by: admin.user.id,
@@ -107,8 +142,8 @@ export default async function handler(req, res) {
       if (!(await requirePermissionFailOpen(req, 'lisa.config.publish'))) {
         return res.status(403).json({ error: 'Insufficient permissions', feature: 'lisa.config.publish' });
       }
-      const srcId = body.id;
-      if (!srcId) return res.status(400).json({ error: 'id van doelversie vereist.' });
+      const srcId = body.version_id || body.id;
+      if (!srcId) return res.status(400).json({ error: 'version_id van doelversie vereist.' });
       const { data: src } = await supabaseAdmin.from('lisa_config').select('*').eq('id', srcId).maybeSingle();
       if (!src) return res.status(404).json({ error: 'Versie niet gevonden.' });
       const next = await nextVersion();
