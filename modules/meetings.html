@@ -376,11 +376,7 @@ async function init() {
   await window._authSharedReady;
   const profile = await window.AuthShared.requireAuth();
   if (!profile) return;
-  const ADMIN_ROLES = ['super_admin', 'admin', 'manager'];
-  if (ADMIN_ROLES.includes(profile.role)) {
-    const adminLink = document.getElementById('adminNavLink');
-    if (adminLink) adminLink.style.display = '';
-  }
+  // adminNavLink wordt nu centraal door sidebar.js gegate (RBAC-voorbereiding)
   try {
     const r = await fetch('/api/agents');
     const data = await r.json();

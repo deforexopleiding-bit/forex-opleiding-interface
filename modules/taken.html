@@ -1354,11 +1354,7 @@ async function init() {
   await window._authSharedReady;
   const profile = await window.AuthShared.requireAuth();
   if (!profile) return;
-  const ADMIN_ROLES = ['super_admin', 'admin', 'manager'];
-  if (ADMIN_ROLES.includes(profile.role)) {
-    const adminLink = document.getElementById('adminNavLink');
-    if (adminLink) adminLink.style.display = '';
-  }
+  // adminNavLink wordt nu centraal door sidebar.js gegate (RBAC-voorbereiding)
   // Ensure all collegas have ids
   collegas = collegas.map(c => ({ id: c.id || crypto.randomUUID(), naam: c.naam || '', kleur: c.kleur || '#22d3ee' }));
   if (!huidig && collegas.length) huidig = collegas[0].id;

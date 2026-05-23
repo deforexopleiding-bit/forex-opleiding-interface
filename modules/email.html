@@ -5915,10 +5915,10 @@
     await window._authSharedReady;
     const profile = await window.AuthShared.requireAuth();
     if (!profile) return;
+    // adminNavLink wordt nu centraal door sidebar.js gegate; hier alleen de
+    // pagina-specifieke Reclassify-knop (admin-only) onthullen.
     const ADMIN_ROLES = ['super_admin', 'admin', 'manager'];
     if (ADMIN_ROLES.includes(profile.role)) {
-      const adminLink = document.getElementById('adminNavLink');
-      if (adminLink) adminLink.style.display = '';
       const reclassifyBtn = document.getElementById('reclassifyBtn');
       if (reclassifyBtn) reclassifyBtn.style.display = '';
     }
