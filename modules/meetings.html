@@ -181,7 +181,7 @@
             <div class="meeting-setup-title">Nieuwe vergadering</div>
             <div class="meeting-setup-sub">Selecteer deelnemers en vul het onderwerp in</div>
           </div>
-          <button class="btn" onclick="startStandup()" style="font-size:11px;padding:6px 12px;flex-shrink:0">⚡ Standup</button>
+          <button class="btn" id="mtgStandupBtn" onclick="startStandup()" style="font-size:11px;padding:6px 12px;flex-shrink:0">⚡ Standup</button>
         </div>
 
         <div id="participantList" class="participant-grid"></div>
@@ -189,7 +189,7 @@
         <div class="agenda-label">Onderwerp / Agenda</div>
         <input class="agenda-input" id="agendaInput" placeholder="Vergadering onderwerp"/>
 
-        <button class="btn btn-primary" onclick="startMeeting()" style="width:100%;margin-top:14px;padding:11px;font-size:13px;display:block;text-align:center">
+        <button class="btn btn-primary" id="mtgStartBtn" onclick="startMeeting()" style="width:100%;margin-top:14px;padding:11px;font-size:13px;display:block;text-align:center">
           Start vergadering →
         </button>
       </div>
@@ -233,7 +233,7 @@
                 <span class="live-text">Live</span>
                 <span class="live-dot"></span>
               </div>
-              <button class="btn" onclick="endMeeting()" style="font-size:12px;padding:5px 12px">Vergadering afsluiten</button>
+              <button class="btn" id="mtgEndBtn" onclick="endMeeting()" style="font-size:12px;padding:5px 12px">Vergadering afsluiten</button>
             </div>
           </div>
           <div class="meeting-u-shape" id="meetingUShape"></div>
@@ -295,7 +295,7 @@
         <div style="font-size:13px;font-weight:700;margin-bottom:10px">Actiepunten</div>
         <div id="actionPointsList"></div>
         <div class="summary-actions">
-          <button class="btn btn-primary" onclick="approveMeeting()">✎ Bewerk &amp; goedkeuren</button>
+          <button class="btn btn-primary" id="mtgApproveBtn" onclick="approveMeeting()">✎ Bewerk &amp; goedkeuren</button>
           <button class="btn" id="rapportBtn" onclick="showCurrentRapport()" style="display:none">📄 Rapport bekijken</button>
           <button class="btn" onclick="showMeetingSetup()">↩ Nieuwe vergadering</button>
         </div>
@@ -1231,6 +1231,36 @@ init();
 if (window._authSharedReady) {
   window._authSharedReady.then(() => window.AgentShared?.renderUserSection());
 }
+</script>
+<script>
+// RBAC frontend-gating (fail-open) — Vergaderruimte. super_admin = alles.
+(function () {
+  var RULES = [
+    ['.tab-btn[data-tab="history"]', 'meetings.tab.history'],
+    ['.tab-btn[data-tab="tasks"]', 'meetings.tab.tasks'],
+    ['.tab-btn[data-tab="standups"]', 'meetings.tab.standups'],
+    ['.tab-btn[data-tab="decisions"]', 'meetings.tab.decisions'],
+    ['#mtgStartBtn', 'meetings.meeting.start'],
+    ['#mtgStandupBtn', 'meetings.standup.start'],
+    ['#mtgEndBtn', 'meetings.meeting.end'],
+    ['#mtgApproveBtn', 'meetings.meeting.approve'],
+    ['#confirmApproveBtn', 'meetings.tasks.confirm_create'],
+    ['#meetingSendBtn', 'meetings.input.add']
+  ];
+  async function applyRbacGating() {
+    try { if (window._authSharedReady) await window._authSharedReady; } catch (e) {}
+    if (!window.RBAC || typeof window.RBAC.ensurePermissionsLoaded !== 'function') return;
+    var perms;
+    try { perms = await window.RBAC.ensurePermissionsLoaded(); } catch (e) { return; }
+    var roles = (typeof window.RBAC.getUserRoles === 'function' && window.RBAC.getUserRoles()) || [];
+    if (!roles.length) return;
+    if (perms.has('*')) return;
+    var css = RULES.filter(function (r) { return !perms.has(r[1]); })
+      .map(function (r) { return r[0] + '{display:none !important;}'; }).join('\n');
+    if (css) { var st = document.createElement('style'); st.id = 'rbac-gating'; st.textContent = css; document.head.appendChild(st); }
+  }
+  applyRbacGating();
+})();
 </script>
 <script src="/modules/shared/permissions.js"></script>
 <script src="/modules/shared/sidebar.js"></script>
