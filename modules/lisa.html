@@ -1,0 +1,407 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Lisa AI · De Forex Opleiding</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com"/>
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
+  <link rel="stylesheet" href="/modules/shared/agent-shared.css"/>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/dist/tabler-icons.min.css" />
+  <style>
+    .page-header { display:flex; align-items:flex-start; justify-content:space-between; margin-bottom:18px; flex-wrap:wrap; gap:12px; }
+    .page-title { font-size:22px; font-weight:700; letter-spacing:-.3px; display:flex; align-items:center; gap:10px; }
+    .page-sub { font-size:12px; color:var(--text-faint); margin-top:3px; }
+    .cfg-version-badge { font-size:11px; font-weight:600; padding:3px 10px; border-radius:999px; background:var(--brand-primary-soft,rgba(9,61,84,.1)); color:var(--brand-primary,#093d54); border:1px solid var(--brand-primary,#093d54); }
+    /* Tabs */
+    .tabs { display:flex; gap:4px; border-bottom:1px solid var(--border); margin-bottom:20px; flex-wrap:wrap; }
+    .tab { background:transparent; border:none; padding:10px 16px; font-size:13px; font-weight:600; color:var(--text-faint); cursor:pointer; border-bottom:2px solid transparent; font-family:inherit; display:inline-flex; align-items:center; gap:6px; }
+    .tab:hover { color:var(--text); }
+    .tab.active { color:var(--text); border-bottom-color:var(--brand-primary,#093d54); }
+    .tab-panel { display:none; }
+    .tab-panel.active { display:block; }
+    .placeholder { padding:48px 20px; text-align:center; color:var(--text-faint); background:var(--bg-elev); border:1px dashed var(--border); border-radius:12px; }
+    /* Config layout */
+    .cfg-toolbar { display:flex; align-items:center; gap:10px; margin-bottom:14px; flex-wrap:wrap; }
+    .cfg-toolbar .spacer { flex:1; }
+    .cfg-subtabs { display:flex; gap:4px; margin-bottom:16px; flex-wrap:wrap; }
+    .cfg-subtab { background:var(--bg-elev-2); border:1px solid var(--border); padding:6px 13px; font-size:12px; font-weight:600; color:var(--text-dim); cursor:pointer; border-radius:8px; font-family:inherit; }
+    .cfg-subtab.active { background:var(--brand-primary-soft,rgba(9,61,84,.1)); color:var(--brand-primary,#093d54); border-color:var(--brand-primary,#093d54); }
+    .cfg-grid { display:grid; grid-template-columns:1fr 1fr; gap:20px; align-items:start; }
+    @media (max-width:1100px){ .cfg-grid { grid-template-columns:1fr; } }
+    .cfg-editor { display:flex; flex-direction:column; gap:14px; }
+    .cfg-sub-panel { display:none; }
+    .cfg-sub-panel.active { display:flex; flex-direction:column; gap:14px; }
+    .field-label { display:block; font-size:12px; font-weight:600; color:var(--text-dim); margin-bottom:5px; }
+    .field-hint { font-size:11px; color:var(--text-faint); font-weight:400; }
+    .field-input, .field-textarea, .field-select { width:100%; background:var(--bg-elev-2); border:1px solid var(--border-strong,var(--border)); border-radius:8px; padding:9px 12px; font-size:13px; color:var(--text); font-family:inherit; outline:none; box-sizing:border-box; }
+    .field-textarea { resize:vertical; min-height:80px; line-height:1.5; }
+    .field-input:focus, .field-textarea:focus, .field-select:focus { border-color:var(--brand-primary,#093d54); }
+    .list-row { display:flex; gap:8px; align-items:flex-start; margin-bottom:6px; }
+    .list-row .field-input, .list-row .field-textarea { flex:1; }
+    .list-del { background:none; border:1px solid var(--border); border-radius:6px; color:var(--text-faint); cursor:pointer; padding:6px 9px; font-size:13px; flex-shrink:0; }
+    .list-del:hover { color:var(--color-danger,#dc2626); border-color:var(--color-danger,#dc2626); }
+    .list-add { align-self:flex-start; background:transparent; border:1px dashed var(--border-strong,var(--border)); border-radius:8px; padding:6px 12px; font-size:12px; color:var(--text-dim); cursor:pointer; font-family:inherit; }
+    .list-add:hover { color:var(--text); }
+    .fase-tabs { display:flex; gap:4px; margin-bottom:12px; flex-wrap:wrap; }
+    .fase-tab { background:transparent; border:1px solid var(--border); padding:4px 11px; font-size:11px; font-weight:600; color:var(--text-dim); cursor:pointer; border-radius:999px; font-family:inherit; }
+    .fase-tab.active { background:var(--brand-primary,#093d54); color:#fff; border-color:var(--brand-primary,#093d54); }
+    .fase-panel { display:none; flex-direction:column; gap:12px; }
+    .fase-panel.active { display:flex; }
+    /* Live preview */
+    .cfg-preview { position:sticky; top:16px; background:var(--bg-elev); border:1px solid var(--border); border-radius:12px; overflow:hidden; }
+    .cfg-preview-head { padding:10px 14px; background:var(--bg-elev-2); border-bottom:1px solid var(--border); font-size:12px; font-weight:700; color:var(--text-dim); display:flex; align-items:center; gap:6px; }
+    .cfg-preview pre { margin:0; padding:14px; font-size:12px; line-height:1.55; color:var(--text); white-space:pre-wrap; word-break:break-word; max-height:70vh; overflow-y:auto; font-family:'Inter',monospace; }
+  </style>
+</head>
+<body>
+
+<div id="sidebar-mount"></div>
+
+<div class="main">
+  <div class="main-inner">
+
+    <div class="page-header">
+      <div>
+        <h1 class="page-title"><i class="ti ti-robot" style="color:var(--brand-primary,#093d54)"></i> Lisa AI Appointmentsetter</h1>
+        <p class="page-sub">Instagram-DM kwalificatie &amp; call-booking</p>
+      </div>
+      <span class="cfg-version-badge" id="activeVersionBadge">Actieve config: —</span>
+    </div>
+
+    <div class="tabs">
+      <button class="tab active" data-tab="live"    onclick="switchTab('live')"><i class="ti ti-messages"></i> Live</button>
+      <button class="tab" data-tab="stats"   onclick="switchTab('stats')"><i class="ti ti-chart-bar"></i> Stats</button>
+      <button class="tab" data-tab="config"  onclick="switchTab('config')"><i class="ti ti-settings"></i> Config</button>
+      <button class="tab" data-tab="sandbox" onclick="switchTab('sandbox')"><i class="ti ti-flask"></i> Sandbox</button>
+      <button class="tab" data-tab="logs"    onclick="switchTab('logs')"><i class="ti ti-history"></i> Logs</button>
+    </div>
+
+    <!-- LIVE (placeholder, F11) -->
+    <div class="tab-panel" id="panel-live">
+      <div class="placeholder"><i class="ti ti-messages" style="font-size:28px"></i><p>Live conversaties &amp; monitoring — volgt in een latere fase.</p></div>
+    </div>
+
+    <!-- STATS (placeholder) -->
+    <div class="tab-panel" id="panel-stats">
+      <div class="placeholder"><i class="ti ti-chart-bar" style="font-size:28px"></i><p>Statistieken-dashboard — volgt in een latere fase.</p></div>
+    </div>
+
+    <!-- CONFIG (volledig) -->
+    <div class="tab-panel" id="panel-config">
+      <div class="cfg-toolbar">
+        <span class="cfg-version-badge" id="cfgVersionBadge">Versie —</span>
+        <div class="spacer"></div>
+        <button class="btn" id="cfgResetBtn" onclick="loadConfig()">Reset</button>
+        <button class="btn" id="cfgSaveDraftBtn" onclick="saveConfig(false)">Opslaan als draft</button>
+        <button class="btn btn-primary" id="cfgPublishBtn" onclick="saveConfig(true)">Publiceren</button>
+      </div>
+
+      <div class="cfg-subtabs">
+        <button class="cfg-subtab active" data-sub="persona" onclick="switchCfgSub('persona')">Persona</button>
+        <button class="cfg-subtab" data-sub="dos" onclick="switchCfgSub('dos')">Do's &amp; Don'ts</button>
+        <button class="cfg-subtab" data-sub="fases" onclick="switchCfgSub('fases')">Fases</button>
+      </div>
+
+      <div class="cfg-grid">
+        <div class="cfg-editor">
+          <!-- Persona -->
+          <div class="cfg-sub-panel active" id="sub-persona">
+            <div><label class="field-label">Naam</label><input class="field-input" id="f_persona_name" oninput="onCfgInput()" /></div>
+            <div><label class="field-label">Leeftijd</label><input class="field-input" id="f_persona_age" oninput="onCfgInput()" /></div>
+            <div><label class="field-label">Achtergrondverhaal</label><textarea class="field-textarea" id="f_persona_background" style="min-height:120px" oninput="onCfgInput()"></textarea></div>
+            <div><label class="field-label">Tone-of-voice <span class="field-hint">(bv. vriendelijk / professioneel / casual / speels)</span></label><input class="field-input" id="f_persona_tone" oninput="onCfgInput()" /></div>
+            <div><label class="field-label">Schrijfstijl <span class="field-hint">(voorbeelden van hoe Lisa schrijft)</span></label><textarea class="field-textarea" id="f_persona_writing_style" oninput="onCfgInput()"></textarea></div>
+            <div><label class="field-label">Emoji-gebruik</label>
+              <select class="field-select" id="f_emoji_usage" onchange="onCfgInput()">
+                <option value="nooit">nooit</option>
+                <option value="spaarzaam">spaarzaam</option>
+                <option value="normaal">normaal</option>
+                <option value="veel">veel</option>
+              </select>
+            </div>
+          </div>
+
+          <!-- Do's & Don'ts -->
+          <div class="cfg-sub-panel" id="sub-dos">
+            <div>
+              <label class="field-label">Do's <span class="field-hint">— wat Lisa MOET doen</span></label>
+              <div id="dosList"></div>
+              <button class="list-add" onclick="addListItem('dos')">+ Voeg Do toe</button>
+            </div>
+            <div>
+              <label class="field-label">Don'ts <span class="field-hint">— wat Lisa NOOIT mag doen</span></label>
+              <div id="dontsList"></div>
+              <button class="list-add" onclick="addListItem('donts')">+ Voeg Don't toe</button>
+            </div>
+          </div>
+
+          <!-- Fases -->
+          <div class="cfg-sub-panel" id="sub-fases">
+            <div class="fase-tabs">
+              <button class="fase-tab active" data-fase="intro" onclick="switchFase('intro')">Intro</button>
+              <button class="fase-tab" data-fase="doel" onclick="switchFase('doel')">Doel</button>
+              <button class="fase-tab" data-fase="situatie" onclick="switchFase('situatie')">Situatie</button>
+              <button class="fase-tab" data-fase="band" onclick="switchFase('band')">Band</button>
+              <button class="fase-tab" data-fase="call" onclick="switchFase('call')">Call</button>
+            </div>
+            <div id="fasePanels"></div>
+          </div>
+        </div>
+
+        <!-- Live preview -->
+        <div class="cfg-preview">
+          <div class="cfg-preview-head"><i class="ti ti-eye"></i> Live preview — samengestelde system prompt</div>
+          <pre id="cfgPreview">—</pre>
+        </div>
+      </div>
+    </div>
+
+    <!-- SANDBOX (placeholder, F9) -->
+    <div class="tab-panel" id="panel-sandbox">
+      <div class="placeholder"><i class="ti ti-flask" style="font-size:28px"></i><p>Sandbox-chat tegen Lisa — volgt in een latere fase.</p></div>
+    </div>
+
+    <!-- LOGS (placeholder) -->
+    <div class="tab-panel" id="panel-logs">
+      <div class="placeholder"><i class="ti ti-history" style="font-size:28px"></i><p>Audit &amp; versiegeschiedenis — volgt in een latere fase.</p></div>
+    </div>
+
+  </div>
+</div>
+
+<script src="/modules/shared/supabase-client.js"></script>
+<script src="/modules/shared/agent-shared.js"></script>
+<script src="/modules/shared/theme-shared.js"></script>
+<script>
+const FASES = ['intro','doel','situatie','band','call'];
+const FASE_LABELS = { intro:'Intro', doel:'Doel', situatie:'Situatie', band:'Band', call:'Call' };
+let currentProfile = null;
+let activeCfg = null;   // volledige geladen actieve config-row (incl. niet-bewerkte velden)
+let cfg = null;         // werkende vorm (alleen de in deze tab bewerkbare velden)
+let curFase = 'intro';
+
+function esc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+async function init() {
+  await window._authSharedReady;
+  currentProfile = await window.AuthShared.requireAuth();
+  if (!currentProfile) return;
+  if (window.AgentShared) await window.AgentShared.renderUserSection(currentProfile);
+  await loadConfig();
+}
+
+// ── Tabs ──────────────────────────────────────────────────────────────────
+function switchTab(name) {
+  document.querySelectorAll('.tab').forEach(b => b.classList.toggle('active', b.dataset.tab === name));
+  document.querySelectorAll('.tab-panel').forEach(p => p.classList.toggle('active', p.id === 'panel-' + name));
+}
+function switchCfgSub(name) {
+  document.querySelectorAll('.cfg-subtab').forEach(b => b.classList.toggle('active', b.dataset.sub === name));
+  document.querySelectorAll('.cfg-sub-panel').forEach(p => p.classList.toggle('active', p.id === 'sub-' + name));
+}
+function switchFase(f) {
+  curFase = f;
+  document.querySelectorAll('.fase-tab').forEach(b => b.classList.toggle('active', b.dataset.fase === f));
+  document.querySelectorAll('.fase-panel').forEach(p => p.classList.toggle('active', p.dataset.fase === f));
+}
+
+// ── Config laden ──────────────────────────────────────────────────────────
+async function loadConfig() {
+  try {
+    const { data, error } = await window.supabase
+      .from('lisa_config').select('*').eq('is_active', true)
+      .order('version', { ascending: false }).limit(1).maybeSingle();
+    if (error) throw error;
+    activeCfg = data || {};
+    cfg = {
+      persona_name: activeCfg.persona_name || 'Lisa',
+      persona_age: activeCfg.persona_age || '',
+      persona_background: activeCfg.persona_background || '',
+      persona_tone: activeCfg.persona_tone || '',
+      persona_writing_style: activeCfg.persona_writing_style || '',
+      emoji_usage: activeCfg.emoji_usage || 'spaarzaam',
+      dos: Array.isArray(activeCfg.dos) ? activeCfg.dos.slice() : [],
+      donts: Array.isArray(activeCfg.donts) ? activeCfg.donts.slice() : [],
+      phases: {},
+    };
+    FASES.forEach(f => {
+      const key = f === 'intro' ? 'phase_intro' : 'phase_' + f;
+      const p = activeCfg[key] || {};
+      cfg.phases[f] = { system: p.system || '', transition: p.transition || '', examples: Array.isArray(p.examples) ? p.examples.slice() : [] };
+    });
+    const vtxt = activeCfg.version ? ('Versie ' + activeCfg.version + (activeCfg.is_active ? ' (actief)' : '')) : 'Geen config';
+    document.getElementById('cfgVersionBadge').textContent = vtxt;
+    document.getElementById('activeVersionBadge').textContent = 'Actieve config: ' + (activeCfg.version ? ('v' + activeCfg.version) : '—');
+    renderConfig();
+  } catch (e) {
+    window.AgentShared?.showToast('Config laden mislukt: ' + e.message, 'error');
+  }
+}
+
+function renderConfig() {
+  document.getElementById('f_persona_name').value = cfg.persona_name;
+  document.getElementById('f_persona_age').value = cfg.persona_age;
+  document.getElementById('f_persona_background').value = cfg.persona_background;
+  document.getElementById('f_persona_tone').value = cfg.persona_tone;
+  document.getElementById('f_persona_writing_style').value = cfg.persona_writing_style;
+  document.getElementById('f_emoji_usage').value = cfg.emoji_usage;
+  renderList('dos'); renderList('donts');
+  renderFasePanels();
+  updatePreview();
+}
+
+// ── Persona inputs ──────────────────────────────────────────────────────────
+function onCfgInput() {
+  cfg.persona_name = document.getElementById('f_persona_name').value;
+  cfg.persona_age = document.getElementById('f_persona_age').value;
+  cfg.persona_background = document.getElementById('f_persona_background').value;
+  cfg.persona_tone = document.getElementById('f_persona_tone').value;
+  cfg.persona_writing_style = document.getElementById('f_persona_writing_style').value;
+  cfg.emoji_usage = document.getElementById('f_emoji_usage').value;
+  updatePreview();
+}
+
+// ── Do's / Don'ts lijsten ───────────────────────────────────────────────────
+function renderList(which) {
+  const arr = cfg[which];
+  const host = document.getElementById(which === 'dos' ? 'dosList' : 'dontsList');
+  host.innerHTML = arr.map((v, i) =>
+    '<div class="list-row"><input class="field-input" value="' + esc(v) + '" oninput="updateListItem(\'' + which + '\',' + i + ',this.value)" />' +
+    '<button class="list-del" onclick="removeListItem(\'' + which + '\',' + i + ')" title="Verwijderen">&times;</button></div>'
+  ).join('');
+}
+function addListItem(which){ cfg[which].push(''); renderList(which); updatePreview(); }
+function updateListItem(which, i, val){ cfg[which][i] = val; updatePreview(); }
+function removeListItem(which, i){ cfg[which].splice(i, 1); renderList(which); updatePreview(); }
+
+// ── Fase panels ─────────────────────────────────────────────────────────────
+function renderFasePanels() {
+  const host = document.getElementById('fasePanels');
+  host.innerHTML = FASES.map(f => {
+    const p = cfg.phases[f];
+    const ex = p.examples.map((v, i) =>
+      '<div class="list-row"><textarea class="field-textarea" style="min-height:50px" oninput="updateFaseExample(\'' + f + '\',' + i + ',this.value)">' + esc(v) + '</textarea>' +
+      '<button class="list-del" onclick="removeFaseExample(\'' + f + '\',' + i + ')" title="Verwijderen">&times;</button></div>'
+    ).join('');
+    return '<div class="fase-panel' + (f === curFase ? ' active' : '') + '" data-fase="' + f + '">' +
+      '<div><label class="field-label">System prompt — fase ' + FASE_LABELS[f] + '</label>' +
+        '<textarea class="field-textarea" style="min-height:140px" oninput="updateFase(\'' + f + '\',\'system\',this.value)">' + esc(p.system) + '</textarea></div>' +
+      '<div><label class="field-label">Overgangscriteria <span class="field-hint">— wanneer door naar de volgende fase?</span></label>' +
+        '<textarea class="field-textarea" oninput="updateFase(\'' + f + '\',\'transition\',this.value)">' + esc(p.transition) + '</textarea></div>' +
+      '<div><label class="field-label">Voorbeeldberichten</label>' + ex +
+        '<button class="list-add" onclick="addFaseExample(\'' + f + '\')">+ Voeg voorbeeld toe</button></div>' +
+    '</div>';
+  }).join('');
+}
+function updateFase(f, key, val){ cfg.phases[f][key] = val; updatePreview(); }
+function addFaseExample(f){ cfg.phases[f].examples.push(''); renderFasePanels(); updatePreview(); }
+function updateFaseExample(f, i, val){ cfg.phases[f].examples[i] = val; updatePreview(); }
+function removeFaseExample(f, i){ cfg.phases[f].examples.splice(i, 1); renderFasePanels(); updatePreview(); }
+
+// ── Live preview ────────────────────────────────────────────────────────────
+function updatePreview() {
+  let out = '';
+  out += 'PERSONA\n';
+  out += 'Naam: ' + (cfg.persona_name || '—') + (cfg.persona_age ? (' (' + cfg.persona_age + ')') : '') + '\n';
+  if (cfg.persona_tone) out += 'Toon: ' + cfg.persona_tone + '\n';
+  out += 'Emoji-gebruik: ' + cfg.emoji_usage + '\n';
+  if (cfg.persona_background) out += 'Achtergrond: ' + cfg.persona_background + '\n';
+  if (cfg.persona_writing_style) out += 'Schrijfstijl: ' + cfg.persona_writing_style + '\n';
+
+  if (cfg.dos.filter(Boolean).length) out += '\nDO\'S:\n' + cfg.dos.filter(Boolean).map(d => '- ' + d).join('\n') + '\n';
+  if (cfg.donts.filter(Boolean).length) out += '\nDON\'TS:\n' + cfg.donts.filter(Boolean).map(d => '- ' + d).join('\n') + '\n';
+
+  FASES.forEach(f => {
+    const p = cfg.phases[f];
+    if (!p.system && !p.transition && !p.examples.filter(Boolean).length) return;
+    out += '\n=== FASE: ' + FASE_LABELS[f].toUpperCase() + ' ===\n';
+    if (p.system) out += p.system + '\n';
+    if (p.transition) out += 'Overgang → volgende fase: ' + p.transition + '\n';
+    const exs = p.examples.filter(Boolean);
+    if (exs.length) out += 'Voorbeelden:\n' + exs.map(e => '  • ' + e).join('\n') + '\n';
+  });
+
+  if (activeCfg && activeCfg.guardrails_text) out += '\nGUARDRAILS (vast, niet bewerkbaar):\n' + activeCfg.guardrails_text + '\n';
+
+  document.getElementById('cfgPreview').textContent = out.trim() || '—';
+}
+
+// ── Opslaan / publiceren (snapshot: nieuwe versie-rij) ───────────────────────
+async function saveConfig(publish) {
+  const btn = document.getElementById(publish ? 'cfgPublishBtn' : 'cfgSaveDraftBtn');
+  const origTxt = btn.textContent;
+  btn.disabled = true; btn.textContent = publish ? 'Publiceren…' : 'Opslaan…';
+  try {
+    // Volgende versienummer
+    const { data: vRow } = await window.supabase.from('lisa_config').select('version').order('version', { ascending: false }).limit(1).maybeSingle();
+    const nextVersion = (vRow?.version || 0) + 1;
+
+    // Snapshot: behoud alle niet-bewerkte velden uit de actieve config
+    const base = { ...(activeCfg || {}) };
+    delete base.id; delete base.created_at;
+
+    const payload = {
+      ...base,
+      version: nextVersion,
+      is_active: !!publish,                         // trigger zet andere versies inactief
+      persona_name: cfg.persona_name,
+      persona_age: cfg.persona_age,
+      persona_background: cfg.persona_background,
+      persona_tone: cfg.persona_tone,
+      persona_writing_style: cfg.persona_writing_style,
+      emoji_usage: cfg.emoji_usage,
+      dos: cfg.dos.filter(Boolean),
+      donts: cfg.donts.filter(Boolean),
+      phase_intro: cfg.phases.intro,
+      phase_doel: cfg.phases.doel,
+      phase_situatie: cfg.phases.situatie,
+      phase_band: cfg.phases.band,
+      phase_call: cfg.phases.call,
+      created_by: currentProfile?.id || null,
+      notes: publish ? 'Gepubliceerd via config-editor' : 'Draft opgeslagen via config-editor',
+    };
+
+    const { error } = await window.supabase.from('lisa_config').insert(payload);
+    if (error) throw error;
+    window.AgentShared?.showToast(publish ? ('Gepubliceerd als v' + nextVersion + ' (nu actief)') : ('Draft opgeslagen als v' + nextVersion), 'success');
+    await loadConfig();
+  } catch (e) {
+    window.AgentShared?.showToast((publish ? 'Publiceren' : 'Opslaan') + ' mislukt: ' + e.message, 'error');
+  } finally {
+    btn.disabled = false; btn.textContent = origTxt;
+  }
+}
+
+init();
+</script>
+<script>
+// RBAC frontend-gating (fail-open) — Lisa. super_admin = alles.
+(function () {
+  var RULES = [
+    ['.tab[data-tab="config"]', 'lisa.config.view'],
+    ['.tab[data-tab="sandbox"]', 'lisa.sandbox.use'],
+    ['.tab[data-tab="stats"]', 'lisa.stats.view'],
+    ['#cfgSaveDraftBtn', 'lisa.config.edit'],
+    ['#cfgPublishBtn', 'lisa.config.publish']
+  ];
+  async function applyRbacGating() {
+    try { if (window._authSharedReady) await window._authSharedReady; } catch (e) {}
+    if (!window.RBAC || typeof window.RBAC.ensurePermissionsLoaded !== 'function') return;
+    var perms;
+    try { perms = await window.RBAC.ensurePermissionsLoaded(); } catch (e) { return; }
+    var roles = (typeof window.RBAC.getUserRoles === 'function' && window.RBAC.getUserRoles()) || [];
+    if (!roles.length) return;
+    if (perms.has('*')) return;
+    var css = RULES.filter(function (r) { return !perms.has(r[1]); })
+      .map(function (r) { return r[0] + '{display:none !important;}'; }).join('\n');
+    if (css) { var st = document.createElement('style'); st.id = 'rbac-gating'; st.textContent = css; document.head.appendChild(st); }
+  }
+  applyRbacGating();
+})();
+</script>
+<script src="/modules/shared/permissions.js"></script>
+<script src="/modules/shared/sidebar.js"></script>
+</body>
+</html>
