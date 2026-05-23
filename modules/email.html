@@ -133,6 +133,35 @@
       font-size: 12px; margin-top: 6px; padding: 0; text-decoration: underline;
     }
     .btn-read-more:hover { opacity: 0.8; }
+
+    /* ── 2-paneel (Outlook-stijl) layout ── */
+    .email-split-layout { display: grid; grid-template-columns: 380px 1fr; gap: 12px; align-items: start; }
+    .email-list-pane { background: var(--bg-elev); border: 1px solid var(--border); border-radius: 12px; overflow-y: auto; max-height: calc(100vh - 230px); }
+    .email-body-pane { overflow-y: auto; max-height: calc(100vh - 230px); min-width: 0; }
+    .mail-list-date-header {
+      position: sticky; top: 0; z-index: 1; padding: 7px 14px;
+      background: var(--bg-elev-2); font-size: 11px; font-weight: 600; color: var(--text-dim);
+      border-bottom: 1px solid var(--border);
+    }
+    .mail-row {
+      display: grid; grid-template-columns: 14px 1fr auto; gap: 8px; align-items: start;
+      padding: 9px 12px; border-bottom: 1px solid var(--border); cursor: pointer; transition: background 0.12s;
+    }
+    .mail-row:hover { background: var(--bg-elev-2); }
+    .mail-row.is-selected { background: rgba(168,85,247,0.12); box-shadow: inset 3px 0 0 var(--accent-violet, #a855f7); }
+    .mail-row:not(.is-unread) { opacity: 0.78; }
+    .mail-row.is-unread .mail-row-from, .mail-row.is-unread .mail-row-subject { font-weight: 700; }
+    .mail-row-indicator { display: flex; justify-content: center; padding-top: 5px; }
+    .mail-row-content { min-width: 0; }
+    .mail-row-meta { display: flex; align-items: center; gap: 6px; }
+    .mail-row-from { font-size: 12.5px; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .mail-row-flag { color: #ef4444; font-size: 12px; flex-shrink: 0; }
+    .mail-row-subject { font-size: 12px; color: var(--text-dim); margin: 2px 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .mail-row-snippet { font-size: 11px; color: var(--text-faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .mail-row-tags { margin-top: 4px; }
+    .mail-row-cat { font-size: 10px; padding: 1px 6px; border-radius: 4px; }
+    .mail-row-time { font-size: 10px; color: var(--text-faint); white-space: nowrap; padding-top: 2px; }
+    @media (max-width: 900px) { .email-split-layout { grid-template-columns: 1fr; } .email-list-pane { max-height: 320px; } }
     .body-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
     .info-row.body-open, .reclame-row.body-open { border-color: rgba(83,74,183,0.35); }
     .info-meta-click { cursor: pointer; flex: 1; min-width: 0; }
@@ -1320,8 +1349,9 @@
     alle:      null,
     verzonden: null,
   };
-  // Tabs die de actie-card layout gebruiken (voor surgical card-updates ipv full render)
-  function isActieStyleTab() { return TAB_RENDER[state.activeTab] === 'actie'; }
+  // Tabs die de actie-card in het 2-paneel tonen (voor surgical card-updates ipv full render).
+  // Alle inhoudelijke tabs gebruiken nu het 2-paneel; 'alle' en 'verzonden' houden eigen layout.
+  function isActieStyleTab() { return state.activeTab !== 'alle' && state.activeTab !== 'verzonden'; }
 
   // Render-stijl-sets (welke categorieën via welke engine renderen).
   // INFO_CATS = lead-rij stijl (sales + overig); ACTIE_CATS = actie-card stijl (klanten + finance).
@@ -1339,7 +1369,7 @@
   const AI_REQACTION_KEY      = 'email_ai_requires_action'; // uid -> boolean
   const CONFIRMED_EMAILS_KEY  = 'emailConfirmedBanners'; // Set van bevestigde uids
   const CACHE_VER_KEY         = 'email_cache_version';
-  const CACHE_VERSION         = '8.0'; // bump: fix isActieStyleTab (VT-knop + toggles op Te beantwoorden tab)
+  const CACHE_VERSION         = '9.0'; // bump: Outlook 2-paneel layout (lijst + body-paneel)
   const OVERRIDE_CACHE_KEY    = 'email_override_by_sender'; // senderEmail -> category
   const SNOOZE_KEY            = 'email_snooze_map';
   const ACTION_FLAGS_KEY      = 'email_action_flags'; // uid -> true | false
@@ -1410,6 +1440,7 @@
   const state = {
     emails: [],
     activeTab: 'sales',
+    selectedMailUid: null,  // 2-paneel: geselecteerde mail (rechter body-paneel)
     infoPage: 1,
     allePage: 1,
     addressFilter: 'Alle',
@@ -3644,7 +3675,7 @@
       if (isSnoozed(e.uid)) return false;
       if (state.actionFlags[e.uid] === false) return false; // explicitly excluded
       if (state.actionFlags[e.uid] === true)  return true;  // explicitly included
-      return ACTIE_CATS.has(e.category) && e.unread;
+      return ACTIE_CATS.has(e.category); // Outlook-stijl: gelezen mails blijven in de lijst (was: && e.unread)
     });
   }
 
@@ -4663,6 +4694,95 @@
     return '<div class="actie-list">' + emails.map(renderActieCard).join('') + '</div>';
   }
 
+  // ── 2-paneel (Outlook-stijl): compacte lijst links + volledige mail rechts ──
+  function groupEmailsByDate(emails) {
+    const sorted = [...emails].sort((a, b) => new Date(b.date) - new Date(a.date));
+    const now = new Date();
+    const startToday     = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+    const startYesterday = startToday - 86400000;
+    const startWeek      = startToday - 6 * 86400000; // afgelopen 7 dagen incl. vandaag
+    const b = { vandaag: [], gisteren: [], week: [], ouder: [] };
+    for (const e of sorted) {
+      const t = new Date(e.date).getTime();
+      if (isNaN(t))            b.ouder.push(e);
+      else if (t >= startToday)     b.vandaag.push(e);
+      else if (t >= startYesterday) b.gisteren.push(e);
+      else if (t >= startWeek)      b.week.push(e);
+      else                          b.ouder.push(e);
+    }
+    const out = [];
+    if (b.vandaag.length)  out.push({ label: 'Vandaag',    emails: b.vandaag });
+    if (b.gisteren.length) out.push({ label: 'Gisteren',   emails: b.gisteren });
+    if (b.week.length)     out.push({ label: 'Deze week',  emails: b.week });
+    if (b.ouder.length)    out.push({ label: 'Ouder',      emails: b.ouder });
+    return out;
+  }
+
+  function renderMailRow(e) {
+    const uid      = e.uid;
+    const isSel    = uid === state.selectedMailUid;
+    const isUnread = e.unread === true;
+    const actie    = getEffectiveRequiresAction(e);
+    const fromName = e.fromName || e.from || 'Onbekend';
+    const cat      = e.category || 'Overig';
+    const col      = CAT_COLORS[cat] || '#64748b';
+    const cached   = state.bodyCache[uid];
+    const snip     = (cached && !cached.loading && !cached.error) ? (cached.text || '') : '';
+    return '<div class="mail-row' + (isSel ? ' is-selected' : '') + (isUnread ? ' is-unread' : '') + '" data-mail-uid="' + escapeHtml(uid) + '">' +
+      '<span class="mail-row-indicator">' + (isUnread ? '<span class="unread-dot"></span>' : '') + '</span>' +
+      '<div class="mail-row-content">' +
+        '<div class="mail-row-meta">' +
+          '<span class="mail-row-from">' + escapeHtml(fromName) + '</span>' +
+          (actie ? '<i class="ti ti-flag-filled mail-row-flag" aria-hidden="true" title="Actie vereist"></i>' : '') +
+        '</div>' +
+        '<div class="mail-row-subject">' + escapeHtml(e.subject || '(geen onderwerp)') + '</div>' +
+        (snip ? '<div class="mail-row-snippet">' + escapeHtml(snip.slice(0, 140)) + '</div>' : '') +
+        '<div class="mail-row-tags"><span class="mail-row-cat" style="background:' + col + '22;color:' + col + '">' + escapeHtml(cat) + '</span></div>' +
+      '</div>' +
+      '<span class="mail-row-time">' + escapeHtml(relativeTime(e.date)) + '</span>' +
+    '</div>';
+  }
+
+  function renderMailList(emails) {
+    if (!emails.length) {
+      return '<div class="state" style="padding:40px 16px"><h3>Geen mails</h3><p>Geen berichten in deze categorie.</p></div>';
+    }
+    return groupEmailsByDate(emails).map((g) =>
+      '<div class="mail-list-date-header">' + escapeHtml(g.label) + '</div>' +
+      g.emails.map(renderMailRow).join('')
+    ).join('');
+  }
+
+  function renderMailBodyPane(uid) {
+    if (!uid) return '<div class="state" style="padding:48px 16px"><h3>Selecteer een mail</h3><p>Kies links een bericht om te lezen.</p></div>';
+    const e = findEmail(uid);
+    if (!e) return '<div class="state" style="padding:48px 16px"><h3>Mail niet gevonden</h3></div>';
+    return renderActieCard(e); // hergebruik: bevat alle acties (AI, Verplaats & Train, KB, Taak, factuur, toggle, dropdown)
+  }
+
+  function renderSplitLayout(emails, selUid) {
+    return '<div class="email-split-layout">' +
+      '<div class="email-list-pane">' + renderMailList(emails) + '</div>' +
+      '<div class="email-body-pane">' + renderMailBodyPane(selUid) + '</div>' +
+    '</div>';
+  }
+
+  function attachMailListHandlers() {
+    const pane = document.querySelector('.email-list-pane');
+    if (!pane) return;
+    pane.addEventListener('click', (ev) => {
+      const row = ev.target.closest('[data-mail-uid]');
+      if (row) selectMail(row.dataset.mailUid);
+    });
+  }
+
+  function selectMail(uid) {
+    const e = findEmail(uid);
+    if (state.selectedMailUid !== uid) state.selectedMailUid = uid;
+    if (e && e.unread) markAsRead(uid); // markeert gelezen (DB+IMAP via bestaande flow) + render()
+    else render();
+  }
+
   const _draftTimers = {};
 
   function attachActieCardHandlers(uid) {
@@ -5231,45 +5351,29 @@
 
     // Tab content
     const content = document.getElementById('tabContent');
-    // Helper: actie-card engine (klanten/finance)
-    const renderActieStyle = (list) => {
-      content.innerHTML = renderActieTab(list);
-      list.forEach((e) => {
-        attachActieCardHandlers(e.uid);
-        if (!state.bodyCache[e.uid]) fetchEmailBody(e);
-      });
-    };
-    // Helper: lead-rij engine (sales/overig)
-    const renderInfoStyle = (list) => {
-      content.innerHTML = renderInfoTab(list);
-      attachInfoRowHandlers();
-      if (list.length > PAGE_SIZE) {
-        const totalPages = Math.max(1, Math.ceil(list.length / PAGE_SIZE));
-        attachPaginationHandlers(totalPages, 'infoPage');
+    // 2-paneel (Outlook-stijl): compacte lijst links + volledige mail (actie-card) rechts.
+    // Auto-select eerste mail als de huidige selectie niet (meer) in de lijst zit.
+    const renderSplit = (list) => {
+      const ids = new Set(list.map((e) => e.uid));
+      if (!state.selectedMailUid || !ids.has(state.selectedMailUid)) {
+        state.selectedMailUid = list.length ? list[0].uid : null;
       }
-      if (state.openBodyUid) { const _em = findEmail(state.openBodyUid); if (_em && !state.bodyCache[state.openBodyUid]) fetchEmailBody(_em); }
+      content.innerHTML = renderSplitLayout(list, state.selectedMailUid);
+      attachMailListHandlers();
+      const sel = state.selectedMailUid;
+      if (sel) {
+        attachActieCardHandlers(sel);
+        const em = findEmail(sel);
+        if (em && !state.bodyCache[sel]) fetchEmailBody(em);
+      }
     };
     switch (state.activeTab) {
-      case 'tebeantwoorden':
-        renderActieStyle(teBeantwoordenEmails);
-        break;
-      case 'sales':
-        renderInfoStyle(salesEmails);
-        break;
-      case 'overig':
-        renderInfoStyle(overigEmails);
-        break;
-      case 'klanten':
-        renderActieStyle(klantenEmails);
-        break;
-      case 'finance':
-        renderActieStyle(financeEmails);
-        break;
-      case 'reclame':
-        content.innerHTML = renderReclameTab(reclameEmails, suspectEmails);
-        attachReclameHandlers();
-        if (state.openBodyUid) { const _em = findEmail(state.openBodyUid); if (_em && !state.bodyCache[state.openBodyUid]) fetchEmailBody(_em); }
-        break;
+      case 'tebeantwoorden': renderSplit(teBeantwoordenEmails); break;
+      case 'sales':          renderSplit(salesEmails);          break;
+      case 'overig':         renderSplit(overigEmails);         break;
+      case 'klanten':        renderSplit(klantenEmails);        break;
+      case 'finance':        renderSplit(financeEmails);        break;
+      case 'reclame':        renderSplit([...reclameEmails, ...suspectEmails]); break;
       case 'alle': {
         const alleEmails = filtered.filter(passesCatFilter).filter(passesSearchFilter);
         content.innerHTML = renderAlleTab(alleEmails);
