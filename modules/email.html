@@ -173,6 +173,15 @@
     }
     .forward-panel textarea { resize: vertical; }
     .forward-actions { display: flex; gap: 8px; margin-top: 12px; }
+
+    /* ── 'Aan welk postvak'-badge in body-paneel header ── */
+    .card-to-badge {
+      display: inline-flex; align-items: center; gap: 4px; margin-left: 10px;
+      padding: 1px 9px; border-radius: 999px; vertical-align: middle;
+      background: var(--bg-elev-2); border: 1px solid var(--border);
+      font-size: 11px; font-weight: 500; color: var(--text-dim); white-space: nowrap;
+    }
+    .card-to-badge .ti { font-size: 12px; }
     .body-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
     .info-row.body-open, .reclame-row.body-open { border-color: rgba(83,74,183,0.35); }
     .info-meta-click { cursor: pointer; flex: 1; min-width: 0; }
@@ -1380,7 +1389,7 @@
   const AI_REQACTION_KEY      = 'email_ai_requires_action'; // uid -> boolean
   const CONFIRMED_EMAILS_KEY  = 'emailConfirmedBanners'; // Set van bevestigde uids
   const CACHE_VER_KEY         = 'email_cache_version';
-  const CACHE_VERSION         = '10.0'; // bump: hero op ongelezen + Markeer ongelezen + Doorsturen
+  const CACHE_VERSION         = '10.1'; // bump: 'aan postvak'-badge in body-paneel header
   const OVERRIDE_CACHE_KEY    = 'email_override_by_sender'; // senderEmail -> category
   const SNOOZE_KEY            = 'email_snooze_map';
   const ACTION_FLAGS_KEY      = 'email_action_flags'; // uid -> true | false
@@ -4614,6 +4623,7 @@
       '<div class="card-sender">' +
         '<strong>' + highlightMatch(e.fromName || e.from || 'Onbekend', q) + '</strong>' +
         (e.fromAddress ? '<span class="sender-addr">&lt;' + highlightMatch(e.fromAddress, q) + '&gt;</span>' : '') +
+        (e.mailbox ? '<span class="card-to-badge" title="Postvak dat deze mail ontving"><i class="ti ti-inbox" aria-hidden="true"></i> aan ' + escapeHtml(e.mailbox) + '</span>' : '') +
       '</div>' +
       '<div class="card-subject">' + highlightMatch(e.subject || '(geen onderwerp)', q) +
         (getEffectiveRequiresAction(e) ? '<span class="badge-actie-vereist"><i class="ti ti-flag" aria-hidden="true"></i> Actie</span>' : '') +
