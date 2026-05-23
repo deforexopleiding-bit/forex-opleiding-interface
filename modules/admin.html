@@ -145,6 +145,7 @@
         <button class="rbac-btn-sm" type="button" onclick="setAllInCurrentModule(true)" title="Alle functies aanvinken voor alle rollen in deze module"><i class="ti ti-checks"></i> Alles aan</button>
         <button class="rbac-btn-sm" type="button" onclick="setAllInCurrentModule(false)" title="Alle functies uitvinken voor alle rollen in deze module"><i class="ti ti-x"></i> Alles uit</button>
         <span class="rbac-dirty" id="rbacDirty"></span>
+        <button class="rbac-btn-sm" type="button" id="rbacBackfillBtn" onclick="runRoleBackfill()" title="Zet voor alle gebruikers profiles.role gelijk aan hun hoogste rol uit user_roles"><i class="ti ti-refresh"></i> Role-sync backfill</button>
         <button class="btn btn-primary" id="rbacSaveBtn" onclick="savePermissions()" disabled>Opslaan</button>
       </div>
       <div class="rbac-hint">
@@ -457,6 +458,24 @@ async function savePermissions() {
 }
 
 window.addEventListener('beforeunload', (e) => { if (rbacDirty) { e.preventDefault(); e.returnValue = ''; } });
+
+// Eenmalige sync: profiles.role = hoogste user_role voor alle gebruikers.
+async function runRoleBackfill() {
+  if (!confirm('profiles.role voor ALLE gebruikers gelijkzetten aan hun hoogste rol uit user_roles?')) return;
+  const btn = document.getElementById('rbacBackfillBtn');
+  const orig = btn ? btn.innerHTML : '';
+  if (btn) { btn.disabled = true; btn.textContent = 'Bezig…'; }
+  try {
+    const data = await apiRequest('POST', '/api/admin-rbac-backfill-roles');
+    if (data.error) throw new Error(data.error);
+    window.AgentShared?.showToast(`Backfill klaar: ${data.changed} van ${data.total} gewijzigd`, 'success');
+    loadUsers();
+  } catch (e) {
+    window.AgentShared?.showToast('Backfill mislukt: ' + e.message, 'error');
+  } finally {
+    if (btn) { btn.disabled = false; btn.innerHTML = orig; }
+  }
+}
 
 async function init() {
   await window._authSharedReady;

@@ -8,6 +8,17 @@ import { supabaseAdmin, verifyAdmin } from './supabase.js';
 const VALID_ROLES = ['super_admin', 'admin', 'manager', 'sales', 'mentor', 'marketing', 'administratie', 'viewer'];
 const SITE_URL    = 'https://forex-opleiding-interface.vercel.app';
 
+// Rol-hiërarchie (hoog → laag). Gebruikt om profiles.role (primair, voor legacy
+// requireAuth) te syncen met de hoogste rol uit user_roles. Houd identiek aan
+// api/admin-rbac-backfill-roles.js.
+const ROLE_PRIORITY = ['super_admin', 'admin', 'manager', 'sales', 'mentor', 'administratie', 'marketing', 'viewer'];
+
+function computeHighestRole(roles) {
+  if (!roles || roles.length === 0) return 'viewer';
+  for (const r of ROLE_PRIORITY) if (roles.includes(r)) return r;
+  return 'viewer';
+}
+
 // ── Audit helper ──────────────────────────────────────────────────────────────
 
 async function logAudit({ action, payload = {}, status = 'success', error_message = null, triggered_by = 'system' }) {
@@ -349,7 +360,12 @@ export default async function handler(req, res) {
       }
 
       const { data: updated } = await supabaseAdmin.from('user_roles').select('role').eq('user_id', userId);
-      return res.status(200).json({ message: 'Rollen bijgewerkt.', roles: (updated || []).map((r) => r.role) });
+      const roleNames = (updated || []).map((r) => r.role);
+      // Sync profiles.role (primair, voor legacy requireAuth) = hoogste rol. Soft-fail.
+      const primary = computeHighestRole(roleNames);
+      const { error: syncErr } = await supabaseAdmin.from('profiles').update({ role: primary }).eq('id', userId);
+      if (syncErr) console.error('[admin-users] profiles.role sync mislukt (soft):', syncErr.message);
+      return res.status(200).json({ message: 'Rollen bijgewerkt.', roles: roleNames, primary_role: primary });
     }
 
     const updates = {};
@@ -361,6 +377,8 @@ export default async function handler(req, res) {
       if (role === 'super_admin' && admin.profile.role !== 'super_admin') {
         return res.status(403).json({ error: 'Alleen super_admin kan de super_admin-rol toekennen.' });
       }
+      // LEGACY: directe primaire-rol set. Wordt overschreven zodra user_roles
+      // wijzigt (add/remove → profiles.role = hoogste rol).
       updates.role = role;
     }
     if (is_active !== undefined) updates.is_active = is_active;
