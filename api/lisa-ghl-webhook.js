@@ -90,6 +90,17 @@ export default async function handler(req, res) {
       conv = newConv;
     }
 
+    // 7b. Mens heeft overgenomen → Lisa zwijgt; bericht wel loggen.
+    if (conv.human_takeover) {
+      await supabaseAdmin.from('lisa_messages').insert({
+        conversation_id: conv.id, direction: 'in', content: message, ai_generated: false, ghl_message_id: messageId || null,
+      });
+      await supabaseAdmin.from('lisa_settings').update({
+        live_messages_received_total: (settings.live_messages_received_total || 0) + 1,
+      }).eq('id', 1);
+      return res.status(200).json({ ok: true, skipped: 'human_takeover', conv_id: conv.id });
+    }
+
     // 8. AI genereren (geen persistentie binnen helper)
     const result = await generateLisaResponse({ config, conversation: conv, userMessage: message });
     if (!result.ok) { await logWebhookError('AI: ' + result.error); return res.status(200).json({ ok: false, ai_failed: true, error: result.error }); }
