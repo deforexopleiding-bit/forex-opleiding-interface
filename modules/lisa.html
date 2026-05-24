@@ -135,6 +135,24 @@
     .kb-prev-type { font-size:10px; color:var(--text-faint); }
     .kb-prev-content { font-size:11px; color:var(--text-dim); line-height:1.45; max-height:48px; overflow:hidden; }
     .kb-prev-chip { display:inline-flex; padding:1px 7px; border-radius:10px; font-size:10px; font-weight:600; color:#fff; }
+    /* Live mode (F5.3) */
+    .lisa-live-bar { display:flex; justify-content:space-between; align-items:center; padding:14px 18px; background:var(--bg-elev); border:1px solid var(--border); border-radius:12px; margin-bottom:14px; gap:16px; flex-wrap:wrap; }
+    .live-status { display:flex; align-items:center; gap:12px; }
+    .status-dot { width:12px; height:12px; border-radius:50%; flex-shrink:0; }
+    .status-dot.status-off { background:#6B7280; }
+    .status-dot.status-live { background:#10B981; box-shadow:0 0 0 4px rgba(16,185,129,.2); animation:pulse-live 2s infinite; }
+    @keyframes pulse-live { 0%,100% { box-shadow:0 0 0 4px rgba(16,185,129,.2); } 50% { box-shadow:0 0 0 8px rgba(16,185,129,.1); } }
+    .status-label { font-weight:600; font-size:14px; }
+    .status-sub { font-size:12px; color:var(--text-dim); }
+    .btn-toggle-live { padding:8px 18px; border-radius:8px; font-weight:600; font-size:13px; cursor:pointer; border:1px solid #10B981; background:#10B981; color:#fff; font-family:inherit; transition:background .2s; }
+    .btn-toggle-live:hover { background:#059669; }
+    .btn-toggle-live:disabled { opacity:.6; cursor:default; }
+    .btn-toggle-live.is-live { background:var(--bg-elev); color:#EF4444; border-color:#EF4444; }
+    .btn-toggle-live.is-live:hover { background:rgba(239,68,68,.1); }
+    .lisa-live-details { display:flex; flex-wrap:wrap; gap:18px; padding:12px 18px; background:rgba(16,185,129,.05); border:1px solid rgba(16,185,129,.2); border-radius:10px; margin-bottom:14px; }
+    .live-stat { display:flex; align-items:center; gap:6px; font-size:13px; }
+    .live-stat .stat-label { color:var(--text-dim); }
+    .live-stat .stat-val { font-weight:600; }
   </style>
 </head>
 <body>
@@ -150,6 +168,30 @@
         <p class="page-sub">Instagram-DM kwalificatie &amp; call-booking</p>
       </div>
       <span class="cfg-version-badge" id="activeVersionBadge">Actieve config: —</span>
+    </div>
+
+    <!-- Live mode (F5.3) -->
+    <div class="lisa-live-bar">
+      <div class="live-status">
+        <span class="status-dot status-off" id="liveStatusDot"></span>
+        <div>
+          <div class="status-label" id="liveStatusLabel">Lisa is OFFLINE</div>
+          <div class="status-sub" id="liveStatusSub">Niet actief op Instagram</div>
+        </div>
+      </div>
+      <div class="live-controls">
+        <button id="liveModeToggleBtn" class="btn-toggle-live" type="button" onclick="toggleLiveMode()">
+          <span class="toggle-text">Activeer Live mode</span>
+        </button>
+      </div>
+    </div>
+
+    <div class="lisa-live-details" id="liveDetailsRow" style="display:none">
+      <div class="live-stat"><span class="stat-label">Berichten ontvangen:</span><span class="stat-val" id="liveReceivedTotal">0</span></div>
+      <div class="live-stat"><span class="stat-label">Berichten verstuurd:</span><span class="stat-val" id="liveSentTotal">0</span></div>
+      <div class="live-stat"><span class="stat-label">Delayed in queue:</span><span class="stat-val" id="delayedPending">0</span></div>
+      <div class="live-stat"><span class="stat-label">Kantooruren:</span><span class="stat-val" id="officeHoursDisplay">07:00 - 23:30</span></div>
+      <div class="live-stat"><span class="stat-label">Laatste webhook:</span><span class="stat-val" id="lastWebhookAt">—</span></div>
     </div>
 
     <div class="tabs">
@@ -375,7 +417,76 @@ async function init() {
   if (window.AgentShared) await window.AgentShared.renderUserSection(currentProfile);
   await loadConfig();
   loadKbMeta(); // F4.3 — tags/links/items voor de Knowledge-tab (async, re-rendert zelf)
+  startLiveRefresh(); // F5.3 — live-mode status + stats (auto-refresh 30s)
 }
+
+// ── Live mode (F5.3) ─────────────────────────────────────────────────────────
+let liveRefreshInterval = null;
+
+async function loadLiveSettings() {
+  try {
+    const res = await window.AgentShared.apiFetch('/api/lisa-settings');
+    if (!res.ok) return;
+    const { settings } = await res.json();
+    if (settings) updateLiveModeUI(settings);
+  } catch (err) { console.error('[lisa] loadLiveSettings:', err.message); }
+}
+
+function updateLiveModeUI(s) {
+  const dot = document.getElementById('liveStatusDot');
+  const label = document.getElementById('liveStatusLabel');
+  const sub = document.getElementById('liveStatusSub');
+  const btn = document.getElementById('liveModeToggleBtn');
+  const details = document.getElementById('liveDetailsRow');
+  const btnText = btn?.querySelector('.toggle-text');
+  if (s.live_mode_enabled) {
+    dot.classList.remove('status-off'); dot.classList.add('status-live');
+    label.textContent = 'Lisa is LIVE'; sub.textContent = 'Actief op Instagram';
+    btn.classList.add('is-live'); if (btnText) btnText.textContent = 'Deactiveer Live mode';
+    details.style.display = 'flex';
+  } else {
+    dot.classList.add('status-off'); dot.classList.remove('status-live');
+    label.textContent = 'Lisa is OFFLINE'; sub.textContent = 'Niet actief op Instagram';
+    btn.classList.remove('is-live'); if (btnText) btnText.textContent = 'Activeer Live mode';
+    details.style.display = 'none';
+  }
+  document.getElementById('liveReceivedTotal').textContent = s.live_messages_received_total || 0;
+  document.getElementById('liveSentTotal').textContent = s.live_messages_sent_total || 0;
+  document.getElementById('delayedPending').textContent = s.delayed_messages_pending || 0;
+  document.getElementById('officeHoursDisplay').textContent =
+    (s.office_hours_start || '').slice(0, 5) + ' - ' + (s.office_hours_end || '').slice(0, 5);
+  document.getElementById('lastWebhookAt').textContent =
+    s.ghl_webhook_last_received_at ? new Date(s.ghl_webhook_last_received_at).toLocaleString('nl-NL') : '—';
+}
+
+async function toggleLiveMode() {
+  const currentlyLive = document.getElementById('liveStatusDot').classList.contains('status-live');
+  const confirmMsg = currentlyLive
+    ? 'Lisa OFFLINE zetten? Ze stopt met antwoorden op Instagram.'
+    : '⚠️ Lisa wordt LIVE op Instagram!\n\nVanaf nu antwoordt Lisa automatisch op nieuwe Instagram-DM\'s tijdens kantooruren.\n\nWeet je het zeker?';
+  if (!confirm(confirmMsg)) return;
+  const btn = document.getElementById('liveModeToggleBtn');
+  btn.disabled = true;
+  try {
+    const res = await window.AgentShared.apiFetch('/api/lisa-settings', {
+      method: 'PATCH', body: JSON.stringify({ live_mode_enabled: !currentlyLive }),
+    });
+    if (res.status === 403) { window.AgentShared?.showToast('Geen rechten voor deze actie', 'error'); return; }
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || 'HTTP ' + res.status);
+    updateLiveModeUI(data.settings);
+    window.AgentShared?.showToast(data.settings.live_mode_enabled ? 'Lisa is nu LIVE op Instagram' : 'Lisa is offline', 'success');
+  } catch (err) {
+    window.AgentShared?.showToast('Fout: ' + err.message, 'error');
+  } finally { btn.disabled = false; }
+}
+
+function startLiveRefresh() {
+  loadLiveSettings();
+  if (liveRefreshInterval) clearInterval(liveRefreshInterval);
+  liveRefreshInterval = setInterval(loadLiveSettings, 30000);
+}
+window.addEventListener('beforeunload', () => { if (liveRefreshInterval) clearInterval(liveRefreshInterval); });
 
 // ── Tabs ──────────────────────────────────────────────────────────────────
 function switchTab(name) {
@@ -991,7 +1102,8 @@ init();
     ['.tab[data-tab="sandbox"]', 'lisa.sandbox.use'],
     ['.tab[data-tab="stats"]', 'lisa.stats.view'],
     ['#cfgSaveDraftBtn', 'lisa.config.edit'],
-    ['#cfgPublishBtn', 'lisa.config.publish']
+    ['#cfgPublishBtn', 'lisa.config.publish'],
+    ['#liveModeToggleBtn', 'lisa.config.publish']
   ];
   async function applyRbacGating() {
     try { if (window._authSharedReady) await window._authSharedReady; } catch (e) {}
