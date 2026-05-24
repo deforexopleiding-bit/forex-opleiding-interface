@@ -104,6 +104,36 @@
     @keyframes sbxblink { 0%,80%,100%{ opacity:.2; } 40%{ opacity:1; } }
     .sbx-input-bar { display:flex; gap:8px; padding:12px 14px; border-top:1px solid var(--border); align-items:flex-end; }
     .sbx-input-bar .field-textarea { min-height:42px; max-height:140px; }
+    /* Knowledge sub-tab (F4.3) */
+    .kb-section { display:flex; flex-direction:column; gap:10px; }
+    .kb-section + .kb-section { margin-top:18px; padding-top:18px; border-top:1px solid var(--border); }
+    .kb-section-head { display:flex; align-items:center; gap:8px; }
+    .kb-section-head h4 { margin:0; font-size:13px; font-weight:700; color:var(--text); }
+    .kb-section-head .spacer { flex:1; }
+    .kb-card { border:1px solid var(--border); border-radius:10px; padding:12px; background:var(--bg-elev-2); display:flex; flex-direction:column; gap:8px; position:relative; }
+    .kb-card .kb-card-del { position:absolute; top:8px; right:8px; background:none; border:1px solid var(--border); border-radius:6px; color:var(--text-faint); cursor:pointer; padding:3px 7px; font-size:13px; }
+    .kb-card .kb-card-del:hover { color:var(--color-danger,#dc2626); border-color:var(--color-danger,#dc2626); }
+    .kb-card .kb-2col { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+    @media (max-width:560px){ .kb-card .kb-2col { grid-template-columns:1fr; } }
+    .kb-empty { padding:16px; text-align:center; color:var(--text-faint); font-size:12px; border:1px dashed var(--border); border-radius:10px; }
+    .kb-kw-chips { display:flex; flex-wrap:wrap; gap:5px; align-items:center; }
+    .kb-kw-chip { display:inline-flex; align-items:center; gap:4px; background:var(--bg-elev); border:1px solid var(--border); border-radius:10px; padding:2px 8px; font-size:11px; color:var(--text-dim); }
+    .kb-kw-chip .x { cursor:pointer; opacity:.7; } .kb-kw-chip .x:hover { opacity:1; color:var(--color-danger,#dc2626); }
+    .kb-kw-input { border:none; background:none; outline:none; font-family:inherit; font-size:12px; color:var(--text); min-width:120px; flex:1; padding:2px; }
+    .kb-toggle-row { display:flex; align-items:center; gap:10px; }
+    .kb-tf-chips { display:flex; flex-wrap:wrap; gap:6px; }
+    .kb-tf-chip { display:inline-flex; align-items:center; gap:5px; padding:4px 10px; border-radius:12px; font-size:11px; font-weight:600; color:#fff; cursor:pointer; opacity:.4; }
+    .kb-tf-chip.active { opacity:1; box-shadow:0 0 0 2px var(--bg-elev), 0 0 0 4px currentColor; }
+    .kb-tf-chip .tf-count { background:rgba(0,0,0,.22); border-radius:8px; padding:0 5px; font-size:10px; }
+    .kb-count-line { font-size:12px; color:var(--text-dim); display:flex; align-items:center; gap:8px; }
+    .kb-count-line a { color:var(--brand-primary,#093d54); cursor:pointer; text-decoration:underline; }
+    .kb-prev-item { border-bottom:0.5px solid var(--border); padding:8px 0; }
+    .kb-prev-item:last-child { border-bottom:none; }
+    .kb-prev-top { display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:3px; }
+    .kb-prev-title { font-size:12px; font-weight:600; color:var(--text); }
+    .kb-prev-type { font-size:10px; color:var(--text-faint); }
+    .kb-prev-content { font-size:11px; color:var(--text-dim); line-height:1.45; max-height:48px; overflow:hidden; }
+    .kb-prev-chip { display:inline-flex; padding:1px 7px; border-radius:10px; font-size:10px; font-weight:600; color:#fff; }
   </style>
 </head>
 <body>
@@ -154,6 +184,7 @@
         <button class="cfg-subtab active" data-sub="persona" onclick="switchCfgSub('persona')">Persona</button>
         <button class="cfg-subtab" data-sub="dos" onclick="switchCfgSub('dos')">Do's &amp; Don'ts</button>
         <button class="cfg-subtab" data-sub="fases" onclick="switchCfgSub('fases')">Fases</button>
+        <button class="cfg-subtab" data-sub="knowledge" onclick="switchCfgSub('knowledge')">Knowledge</button>
       </div>
 
       <div class="cfg-grid">
@@ -199,6 +230,52 @@
               <button class="fase-tab" data-fase="call" onclick="switchFase('call')">Call</button>
             </div>
             <div id="fasePanels"></div>
+          </div>
+
+          <!-- Knowledge (F4.3) -->
+          <div class="cfg-sub-panel" id="sub-knowledge">
+            <!-- Sectie 1: Producten -->
+            <div class="kb-section">
+              <div class="kb-section-head">
+                <h4>🛍 Producten</h4>
+                <div class="spacer"></div>
+                <button class="list-add" onclick="addProduct()">+ Product toevoegen</button>
+              </div>
+              <div id="kbProductsList"></div>
+            </div>
+
+            <!-- Sectie 2: FAQ -->
+            <div class="kb-section">
+              <div class="kb-section-head">
+                <h4>❓ Veelgestelde vragen</h4>
+                <div class="spacer"></div>
+                <button class="list-add" onclick="addFaq()">+ FAQ toevoegen</button>
+              </div>
+              <div id="kbFaqList"></div>
+            </div>
+
+            <!-- Sectie 3: Kennisbank tag filter -->
+            <div class="kb-section">
+              <div class="kb-section-head"><h4>🏷 Kennisbank tag-filter</h4></div>
+              <label class="kb-toggle-row">
+                <input type="checkbox" id="f_kb_use_general" onchange="onKbToggle()" />
+                <span class="field-label" style="margin:0">Gebruik algemene Kennisbank-items</span>
+              </label>
+              <div id="kbTagFilterWrap" style="display:none; flex-direction:column; gap:10px;">
+                <label class="field-label" style="margin:0">Selecteer welke tags Lisa mag gebruiken:</label>
+                <div class="kb-tf-chips" id="kbTagFilterChips"></div>
+                <div class="kb-count-line" id="kbCountLine"></div>
+              </div>
+            </div>
+
+            <!-- Sectie 4: Extra info -->
+            <div class="kb-section">
+              <div class="kb-section-head"><h4>ℹ️ Extra info</h4></div>
+              <div><label class="field-label">Prijzen <span class="field-hint">(vrije tekst)</span></label>
+                <textarea class="field-textarea" id="f_kb_pricing" oninput="onKbText()"></textarea></div>
+              <div><label class="field-label">USP's <span class="field-hint">(unique selling points)</span></label>
+                <textarea class="field-textarea" id="f_kb_usps" oninput="onKbText()"></textarea></div>
+            </div>
           </div>
         </div>
 
@@ -270,6 +347,13 @@
   </div>
 </div>
 
+<div class="lisa-modal hidden" id="kbPreviewModal">
+  <div class="lisa-modal-card">
+    <div class="lisa-modal-head"><span>Kennisbank-items voor Lisa</span><button class="lisa-modal-close" onclick="closeKbPreview()">&times;</button></div>
+    <div class="lisa-modal-body" id="kbPreviewBody"></div>
+  </div>
+</div>
+
 <script src="/modules/shared/supabase-client.js"></script>
 <script src="/modules/shared/agent-shared.js"></script>
 <script src="/modules/shared/theme-shared.js"></script>
@@ -289,6 +373,7 @@ async function init() {
   if (!currentProfile) return;
   if (window.AgentShared) await window.AgentShared.renderUserSection(currentProfile);
   await loadConfig();
+  loadKbMeta(); // F4.3 — tags/links/items voor de Knowledge-tab (async, re-rendert zelf)
 }
 
 // ── Tabs ──────────────────────────────────────────────────────────────────
@@ -325,6 +410,13 @@ async function loadConfig() {
       dos: Array.isArray(activeCfg.dos) ? activeCfg.dos.slice() : [],
       donts: Array.isArray(activeCfg.donts) ? activeCfg.donts.slice() : [],
       phases: {},
+      // Knowledge (F4.3)
+      kb_products: Array.isArray(activeCfg.kb_products) ? activeCfg.kb_products.map(p => ({ ...p })) : [],
+      kb_faq: Array.isArray(activeCfg.kb_faq) ? activeCfg.kb_faq.map(q => ({ ...q, keywords: Array.isArray(q.keywords) ? q.keywords.slice() : [] })) : [],
+      kb_pricing: activeCfg.kb_pricing || '',
+      kb_usps: activeCfg.kb_usps || '',
+      kb_tag_filter: Array.isArray(activeCfg.kb_tag_filter) ? activeCfg.kb_tag_filter.slice() : [],
+      kb_use_general_kb: activeCfg.kb_use_general_kb !== false,
     };
     FASES.forEach(f => {
       const key = f === 'intro' ? 'phase_intro' : 'phase_' + f;
@@ -350,6 +442,7 @@ function renderConfig() {
   document.getElementById('f_emoji_usage').value = cfg.emoji_usage;
   renderList('dos'); renderList('donts');
   renderFasePanels();
+  renderKnowledge();
   updatePreview();
 }
 
@@ -401,6 +494,155 @@ function addFaseExample(f){ cfg.phases[f].examples.push(''); renderFasePanels();
 function updateFaseExample(f, i, val){ cfg.phases[f].examples[i] = val; updatePreview(); }
 function removeFaseExample(f, i){ cfg.phases[f].examples.splice(i, 1); renderFasePanels(); updatePreview(); }
 
+// ── Knowledge (F4.3) ─────────────────────────────────────────────────────────
+let kbTags = [];   // [{id,name,color}] uit kb_tags
+let kbLinks = [];  // [{item_id, tag_id}] alle koppelingen
+let kbItems = [];  // kennisbank-items (zonder bedrijfsprofiel)
+
+async function loadKbMeta() {
+  try {
+    const [tg, lk, it] = await Promise.all([
+      window.AgentShared.apiFetch('/api/kb-tags?action=list').then(r => r.json()).catch(() => ({})),
+      window.AgentShared.apiFetch('/api/kb-item-tags?action=all_with_tags').then(r => r.json()).catch(() => ({})),
+      window.AgentShared.apiFetch('/api/kennisbank-sync').then(r => r.json()).catch(() => ({})),
+    ]);
+    kbTags = tg.tags || [];
+    kbLinks = lk.links || [];
+    kbItems = (it.items || []).filter(i => i.type !== 'bedrijfsprofiel' && i.label !== '_profile');
+    if (cfg) renderKnowledge();
+  } catch (e) { console.error('[lisa] loadKbMeta:', e.message); }
+}
+
+function kbTagByName(name) { return kbTags.find(t => t.name === name) || null; }
+function kbCountByTagId(tagId) { return kbLinks.filter(l => l.tag_id === tagId).length; }
+function kbAvailableCount() {
+  const ids = new Set(cfg.kb_tag_filter.map(n => (kbTagByName(n) || {}).id).filter(Boolean));
+  if (!ids.size) return 0;
+  const items = new Set();
+  kbLinks.forEach(l => { if (ids.has(l.tag_id)) items.add(l.item_id); });
+  return items.size;
+}
+
+function renderKnowledge() {
+  document.getElementById('f_kb_pricing').value = cfg.kb_pricing || '';
+  document.getElementById('f_kb_usps').value = cfg.kb_usps || '';
+  document.getElementById('f_kb_use_general').checked = !!cfg.kb_use_general_kb;
+  document.getElementById('kbTagFilterWrap').style.display = cfg.kb_use_general_kb ? 'flex' : 'none';
+  renderProducts();
+  renderFaqs();
+  renderTagFilter();
+}
+
+// Producten
+function renderProducts() {
+  const host = document.getElementById('kbProductsList');
+  if (!cfg.kb_products.length) { host.innerHTML = '<div class="kb-empty">Nog geen producten. Voeg toe wat Lisa kan aanbieden.</div>'; return; }
+  host.innerHTML = cfg.kb_products.map((p, i) =>
+    '<div class="kb-card" style="margin-bottom:10px">' +
+      '<button class="kb-card-del" onclick="removeProduct(' + i + ')" title="Verwijderen">&times;</button>' +
+      '<div><label class="field-label">Naam</label><input class="field-input" value="' + esc(p.naam) + '" oninput="updateProduct(' + i + ',\'naam\',this.value)" /></div>' +
+      '<div><label class="field-label">Beschrijving</label><textarea class="field-textarea" style="min-height:60px" oninput="updateProduct(' + i + ',\'beschrijving\',this.value)">' + esc(p.beschrijving) + '</textarea></div>' +
+      '<div class="kb-2col">' +
+        '<div><label class="field-label">Prijs</label><input class="field-input" value="' + esc(p.prijs) + '" oninput="updateProduct(' + i + ',\'prijs\',this.value)" /></div>' +
+        '<div><label class="field-label">Doelgroep</label><input class="field-input" value="' + esc(p.doelgroep) + '" placeholder="Beginners" oninput="updateProduct(' + i + ',\'doelgroep\',this.value)" /></div>' +
+      '</div>' +
+      '<div><label class="field-label">Duur</label><input class="field-input" value="' + esc(p.duur) + '" placeholder="3-6 maanden" oninput="updateProduct(' + i + ',\'duur\',this.value)" /></div>' +
+    '</div>').join('');
+}
+function addProduct(){ cfg.kb_products.push({ naam:'', beschrijving:'', prijs:'', doelgroep:'', duur:'' }); renderProducts(); updatePreview(); }
+function updateProduct(i, f, v){ if (cfg.kb_products[i]) { cfg.kb_products[i][f] = v; updatePreview(); } }
+function removeProduct(i){ cfg.kb_products.splice(i, 1); renderProducts(); updatePreview(); }
+
+// FAQ
+function renderFaqs() {
+  const host = document.getElementById('kbFaqList');
+  if (!cfg.kb_faq.length) { host.innerHTML = '<div class="kb-empty">Nog geen FAQ. Lisa weet nog niets te beantwoorden.</div>'; return; }
+  host.innerHTML = cfg.kb_faq.map((q, i) =>
+    '<div class="kb-card" style="margin-bottom:10px">' +
+      '<button class="kb-card-del" onclick="removeFaq(' + i + ')" title="Verwijderen">&times;</button>' +
+      '<div><label class="field-label">Vraag</label><input class="field-input" value="' + esc(q.vraag) + '" oninput="updateFaq(' + i + ',\'vraag\',this.value)" /></div>' +
+      '<div><label class="field-label">Antwoord</label><textarea class="field-textarea" style="min-height:80px" oninput="updateFaq(' + i + ',\'antwoord\',this.value)">' + esc(q.antwoord) + '</textarea></div>' +
+      '<div><label class="field-label">Trigger-keywords <span class="field-hint">— typ + Enter</span></label>' +
+        '<div class="kb-kw-chips"><span id="faqKw-' + i + '">' + faqKwHtml(i) + '</span>' +
+        '<input class="kb-kw-input" placeholder="Bv: prijs, kosten, tarief" onkeydown="onFaqKwKey(event,' + i + ')" /></div>' +
+      '</div>' +
+    '</div>').join('');
+}
+function faqKwHtml(i) {
+  return (cfg.kb_faq[i].keywords || []).map((k, ki) =>
+    '<span class="kb-kw-chip">' + esc(k) + '<span class="x" onclick="removeFaqKw(' + i + ',' + ki + ')">&times;</span></span>').join('');
+}
+function renderFaqKw(i){ const el = document.getElementById('faqKw-' + i); if (el) el.innerHTML = faqKwHtml(i); }
+function addFaq(){ cfg.kb_faq.push({ vraag:'', antwoord:'', keywords:[] }); renderFaqs(); updatePreview(); }
+function updateFaq(i, f, v){ if (cfg.kb_faq[i]) { cfg.kb_faq[i][f] = v; updatePreview(); } }
+function removeFaq(i){ cfg.kb_faq.splice(i, 1); renderFaqs(); updatePreview(); }
+function onFaqKwKey(e, i) {
+  if (e.key !== 'Enter') return;
+  e.preventDefault();
+  const v = e.target.value.trim().toLowerCase();
+  if (!v) return;
+  cfg.kb_faq[i].keywords = cfg.kb_faq[i].keywords || [];
+  if (!cfg.kb_faq[i].keywords.includes(v)) cfg.kb_faq[i].keywords.push(v);
+  e.target.value = '';
+  renderFaqKw(i); updatePreview();
+}
+function removeFaqKw(i, ki){ cfg.kb_faq[i].keywords.splice(ki, 1); renderFaqKw(i); updatePreview(); }
+
+// Tag-filter
+function renderTagFilter() {
+  const host = document.getElementById('kbTagFilterChips');
+  const countLine = document.getElementById('kbCountLine');
+  if (!kbTags.length) {
+    host.innerHTML = '<span style="font-size:12px;color:var(--text-faint)">Geen tags — maak ze aan in de Kennisbank-module.</span>';
+    countLine.innerHTML = ''; return;
+  }
+  const sel = new Set(cfg.kb_tag_filter);
+  host.innerHTML = kbTags.map(t =>
+    '<span class="kb-tf-chip ' + (sel.has(t.name) ? 'active' : '') + '" style="background:' + esc(t.color) + '" data-tf="' + esc(t.name) + '">' +
+      esc(t.name) + '<span class="tf-count">' + kbCountByTagId(t.id) + '</span></span>').join('');
+  host.querySelectorAll('[data-tf]').forEach(el => el.addEventListener('click', () => toggleTagFilter(el.dataset.tf)));
+  const n = kbAvailableCount();
+  countLine.innerHTML = '<span><strong>' + n + '</strong> item' + (n === 1 ? '' : 's') + ' uit Kennisbank beschikbaar voor Lisa</span>' +
+    (n ? ' · <a onclick="openKbPreview()">Bekijk items</a>' : '');
+}
+function toggleTagFilter(name) {
+  const i = cfg.kb_tag_filter.indexOf(name);
+  if (i >= 0) cfg.kb_tag_filter.splice(i, 1); else cfg.kb_tag_filter.push(name);
+  renderTagFilter(); updatePreview();
+}
+function onKbToggle() {
+  cfg.kb_use_general_kb = document.getElementById('f_kb_use_general').checked;
+  document.getElementById('kbTagFilterWrap').style.display = cfg.kb_use_general_kb ? 'flex' : 'none';
+  updatePreview();
+}
+function onKbText() {
+  cfg.kb_pricing = document.getElementById('f_kb_pricing').value;
+  cfg.kb_usps = document.getElementById('f_kb_usps').value;
+  updatePreview();
+}
+
+// Item-preview modal
+function itemTagObjs(itemId) {
+  const ids = kbLinks.filter(l => l.item_id === itemId).map(l => l.tag_id);
+  return kbTags.filter(t => ids.includes(t.id));
+}
+function openKbPreview() {
+  const ids = new Set(cfg.kb_tag_filter.map(n => (kbTagByName(n) || {}).id).filter(Boolean));
+  const itemIds = new Set();
+  kbLinks.forEach(l => { if (ids.has(l.tag_id)) itemIds.add(l.item_id); });
+  const items = kbItems.filter(it => itemIds.has(it.id));
+  const body = document.getElementById('kbPreviewBody');
+  body.innerHTML = items.length ? items.map(it => {
+    const tags = itemTagObjs(it.id).map(t => '<span class="kb-prev-chip" style="background:' + esc(t.color) + '">' + esc(t.name) + '</span>').join(' ');
+    const title = esc(it.title || (it.content || '').slice(0, 60) || 'Item');
+    return '<div class="kb-prev-item"><div class="kb-prev-top"><span class="kb-prev-title">' + title + '</span>' +
+      '<span class="kb-prev-type">' + esc(it.type || '') + '</span> ' + tags + '</div>' +
+      '<div class="kb-prev-content">' + esc((it.content || '').slice(0, 160)) + '</div></div>';
+  }).join('') : '<div style="color:var(--text-faint);padding:16px">Geen items met de geselecteerde tags.</div>';
+  document.getElementById('kbPreviewModal').classList.remove('hidden');
+}
+function closeKbPreview(){ document.getElementById('kbPreviewModal').classList.add('hidden'); }
+
 // ── Live preview ────────────────────────────────────────────────────────────
 function updatePreview() {
   let out = '';
@@ -450,6 +692,12 @@ async function saveConfig(publish) {
       phase_situatie: cfg.phases.situatie,
       phase_band: cfg.phases.band,
       phase_call: cfg.phases.call,
+      kb_products: cfg.kb_products,
+      kb_faq: cfg.kb_faq,
+      kb_pricing: cfg.kb_pricing,
+      kb_usps: cfg.kb_usps,
+      kb_tag_filter: cfg.kb_tag_filter,
+      kb_use_general_kb: cfg.kb_use_general_kb,
     };
     const res = await window.AgentShared.apiFetch('/api/lisa-config?action=' + (publish ? 'publish' : 'save_draft'), {
       method: 'POST', body: JSON.stringify(editPayload),
