@@ -33,6 +33,13 @@ async function logWebhookError(message) {
 
 export default async function handler(req, res) {
   res.setHeader('Content-Type', 'application/json');
+
+  // ── TIJDELIJKE DEBUG-LOGGING (verwijderen zodra GHL-payload mapping gefixt is) ──
+  console.log('[GHL Webhook] payload:', JSON.stringify(req.body));
+  console.log('[GHL Webhook] method:', req.method);
+  console.log('[GHL Webhook] content-type:', req.headers['content-type']);
+  console.log('[GHL Webhook] user-agent:', req.headers['user-agent']);
+
   if (req.method !== 'POST') {
     res.setHeader('Allow', 'POST');
     return res.status(405).json({ error: 'Method not allowed' });
