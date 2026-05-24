@@ -135,6 +135,16 @@
     .kb-prev-type { font-size:10px; color:var(--text-faint); }
     .kb-prev-content { font-size:11px; color:var(--text-dim); line-height:1.45; max-height:48px; overflow:hidden; }
     .kb-prev-chip { display:inline-flex; padding:1px 7px; border-radius:10px; font-size:10px; font-weight:600; color:#fff; }
+    /* Follow-up (F7.4) */
+    .fu-step { border:1px solid var(--border); border-radius:10px; padding:12px; background:var(--bg-elev-2); display:flex; flex-direction:column; gap:8px; margin-bottom:10px; position:relative; }
+    .fu-step-head { display:flex; align-items:center; justify-content:space-between; }
+    .fu-step-head strong { font-size:12px; }
+    .fu-step-del { background:none; border:1px solid var(--border); border-radius:6px; color:var(--text-faint); cursor:pointer; padding:2px 8px; font-size:13px; }
+    .fu-step-del:hover { color:var(--color-danger,#dc2626); border-color:var(--color-danger,#dc2626); }
+    .fu-phases { display:flex; flex-wrap:wrap; gap:10px; }
+    .fu-phases label { display:inline-flex; align-items:center; gap:4px; font-size:12px; color:var(--text-dim); cursor:pointer; }
+    .fu-row-inline { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+    .fu-aiflag { font-size:11px; font-weight:600; padding:1px 8px; border-radius:999px; background:var(--bg-elev); border:1px solid var(--border); }
     /* Live mode (F5.3) */
     .lisa-live-bar { display:flex; justify-content:space-between; align-items:center; padding:14px 18px; background:var(--bg-elev); border:1px solid var(--border); border-radius:12px; margin-bottom:14px; gap:16px; flex-wrap:wrap; }
     .live-status { display:flex; align-items:center; gap:12px; }
@@ -305,6 +315,7 @@
         <button class="cfg-subtab" data-sub="dos" onclick="switchCfgSub('dos')">Do's &amp; Don'ts</button>
         <button class="cfg-subtab" data-sub="fases" onclick="switchCfgSub('fases')">Fases</button>
         <button class="cfg-subtab" data-sub="knowledge" onclick="switchCfgSub('knowledge')">Knowledge</button>
+        <button class="cfg-subtab" data-sub="followup" onclick="switchCfgSub('followup')">Follow-up</button>
       </div>
 
       <div class="cfg-grid">
@@ -395,6 +406,39 @@
                 <textarea class="field-textarea" id="f_kb_pricing" oninput="onKbText()"></textarea></div>
               <div><label class="field-label">USP's <span class="field-hint">(unique selling points)</span></label>
                 <textarea class="field-textarea" id="f_kb_usps" oninput="onKbText()"></textarea></div>
+            </div>
+          </div>
+
+          <!-- Follow-up (F7.4) -->
+          <div class="cfg-sub-panel" id="sub-followup">
+            <label class="kb-toggle-row">
+              <input type="checkbox" id="f_followup_enabled" onchange="onFuMaster()" />
+              <span class="field-label" style="margin:0">Follow-up systeem actief</span>
+            </label>
+            <p class="field-hint" style="margin:-6px 0 0">Bij UIT stuurt Lisa nooit follow-ups. Reeds geplande items in de queue worden niet automatisch geannuleerd.</p>
+
+            <div class="kb-section">
+              <div class="kb-section-head">
+                <h4>📋 Follow-up sequence <span class="field-hint">(max 5 stappen)</span></h4>
+                <div class="spacer"></div>
+                <button class="list-add" id="fuAddBtn" onclick="addFuStep()">+ Stap toevoegen</button>
+              </div>
+              <div id="fuStepsList"></div>
+              <p class="field-hint">Geen follow-up als de volger heeft geantwoord sinds Lisa's laatste bericht. Sequence stopt bij qualified/disqualified/stop-signaal.</p>
+            </div>
+
+            <div class="kb-section">
+              <div class="kb-section-head"><h4>🛑 Stop-keywords</h4></div>
+              <p class="field-hint" style="margin:0">Hardcoded NL-fallback altijd actief (stop, geen interesse, niet meer…). Extra keywords hier (case-insensitive, typ + Enter).</p>
+              <div class="kb-kw-chips"><span id="fuStopChips"></span>
+                <input class="kb-kw-input" id="fuStopInput" placeholder="Woord + Enter…" onkeydown="onFuStopKey(event)" /></div>
+            </div>
+
+            <div class="kb-section">
+              <div class="kb-section-head"><h4>🤖 AI-generatie drempel</h4></div>
+              <div><label class="field-label">Templates korter dan dit aantal tekens worden letterlijk verstuurd</label>
+                <input type="number" class="field-input" id="f_followup_threshold" min="0" max="2000" style="max-width:140px" oninput="onFuThreshold()" /></div>
+              <p class="field-hint" style="margin:0">Daarboven gebruikt Lisa de template als richtlijn en schrijft een persoonlijk antwoord (Sonnet).</p>
             </div>
           </div>
         </div>
@@ -839,6 +883,16 @@ async function loadConfig() {
       kb_usps: activeCfg.kb_usps || '',
       kb_tag_filter: Array.isArray(activeCfg.kb_tag_filter) ? activeCfg.kb_tag_filter.slice() : [],
       kb_use_general_kb: activeCfg.kb_use_general_kb !== false,
+      // Follow-up (F7.4) — werkvorm: {delay_hours, template, use_ai, phase_in:[]}
+      followup_enabled: activeCfg.followup_enabled !== false,
+      followup_ai_threshold_chars: Number.isFinite(activeCfg.followup_ai_threshold_chars) ? activeCfg.followup_ai_threshold_chars : 200,
+      stop_keywords: Array.isArray(activeCfg.stop_keywords) ? activeCfg.stop_keywords.slice() : [],
+      followup_sequence: Array.isArray(activeCfg.followup_sequence) ? activeCfg.followup_sequence.map(s => ({
+        delay_hours: s.delay_hours || 24,
+        template: s.template || '',
+        use_ai: !!s.use_ai,
+        phase_in: Array.isArray(s.conditions?.phase_in) ? s.conditions.phase_in.slice() : [],
+      })) : [],
     };
     FASES.forEach(f => {
       const key = f === 'intro' ? 'phase_intro' : 'phase_' + f;
@@ -865,6 +919,7 @@ function renderConfig() {
   renderList('dos'); renderList('donts');
   renderFasePanels();
   renderKnowledge();
+  renderFollowup();
   updatePreview();
 }
 
@@ -1065,6 +1120,99 @@ function openKbPreview() {
 }
 function closeKbPreview(){ document.getElementById('kbPreviewModal').classList.add('hidden'); }
 
+// ── Follow-up (F7.4) ──────────────────────────────────────────────────────────
+const FU_PHASES = ['intro', 'doel', 'situatie', 'band', 'call'];
+
+function renderFollowup() {
+  document.getElementById('f_followup_enabled').checked = !!cfg.followup_enabled;
+  document.getElementById('f_followup_threshold').value = cfg.followup_ai_threshold_chars;
+  renderFuSteps();
+  renderFuStops();
+}
+
+function fuWouldUseAi(i) {
+  const s = cfg.followup_sequence[i];
+  return s.use_ai || (s.template || '').length >= (cfg.followup_ai_threshold_chars || 200);
+}
+
+function renderFuSteps() {
+  const host = document.getElementById('fuStepsList');
+  host.innerHTML = cfg.followup_sequence.map((s, i) => {
+    const phases = FU_PHASES.map(p =>
+      '<label><input type="checkbox" ' + (s.phase_in.includes(p) ? 'checked' : '') +
+      ' onchange="toggleFuPhase(' + i + ',\'' + p + '\',this.checked)"> ' + FASE_LABELS[p] + '</label>').join('');
+    return '<div class="fu-step">' +
+      '<div class="fu-step-head"><strong>Stap ' + (i + 1) + '</strong>' +
+        '<button class="fu-step-del" onclick="removeFuStep(' + i + ')" title="Verwijderen">&times;</button></div>' +
+      '<div><label class="field-label">Wacht (uur na laatste Lisa-bericht) <span class="field-hint">— 1 t/m 720</span></label>' +
+        '<input type="number" class="field-input" style="max-width:140px" min="1" max="720" value="' + esc(s.delay_hours) + '" oninput="updateFuStep(' + i + ',\'delay_hours\',this.value)"></div>' +
+      '<div><label class="field-label">Template / instructie</label>' +
+        '<textarea class="field-textarea" oninput="onFuTemplate(' + i + ',this)">' + esc(s.template) + '</textarea>' +
+        '<div class="fu-row-inline" style="margin-top:4px"><span class="field-hint" id="fuChars-' + i + '">' + (s.template || '').length + ' tekens</span>' +
+        '<span class="fu-aiflag" id="fuAiFlag-' + i + '">' + (fuWouldUseAi(i) ? '🤖 AI' : '📝 Letterlijk') + '</span></div></div>' +
+      '<div><label class="field-label">Alleen bij deze fases <span class="field-hint">(leeg = altijd)</span></label>' +
+        '<div class="fu-phases">' + phases + '</div></div>' +
+      '<label class="fu-row-inline" style="cursor:pointer"><input type="checkbox" ' + (s.use_ai ? 'checked' : '') +
+        ' onchange="updateFuStep(' + i + ',\'use_ai\',this.checked)"> <span class="field-hint">AI-generatie forceren (auto-aan boven de drempel)</span></label>' +
+    '</div>';
+  }).join('');
+  const btn = document.getElementById('fuAddBtn');
+  const max = cfg.followup_sequence.length >= 5;
+  btn.disabled = max;
+  btn.textContent = max ? 'Max 5 stappen' : '+ Stap toevoegen';
+}
+
+function addFuStep() {
+  if (cfg.followup_sequence.length >= 5) return;
+  cfg.followup_sequence.push({ delay_hours: 24, template: '', use_ai: false, phase_in: [] });
+  renderFuSteps(); updatePreview();
+}
+function removeFuStep(i) { cfg.followup_sequence.splice(i, 1); renderFuSteps(); updatePreview(); }
+function updateFuStep(i, field, val) {
+  if (!cfg.followup_sequence[i]) return;
+  cfg.followup_sequence[i][field] = field === 'delay_hours' ? (parseInt(val, 10) || 0) : val;
+  updatePreview();
+}
+function onFuTemplate(i, el) {
+  cfg.followup_sequence[i].template = el.value;
+  const len = el.value.length;
+  const charEl = document.getElementById('fuChars-' + i);
+  const flagEl = document.getElementById('fuAiFlag-' + i);
+  if (charEl) charEl.textContent = len + ' tekens';
+  if (flagEl) flagEl.textContent = fuWouldUseAi(i) ? '🤖 AI' : '📝 Letterlijk';
+  updatePreview();
+}
+function toggleFuPhase(i, phase, checked) {
+  const arr = cfg.followup_sequence[i].phase_in;
+  const idx = arr.indexOf(phase);
+  if (checked && idx < 0) arr.push(phase);
+  else if (!checked && idx >= 0) arr.splice(idx, 1);
+  updatePreview();
+}
+function onFuMaster() { cfg.followup_enabled = document.getElementById('f_followup_enabled').checked; updatePreview(); }
+function onFuThreshold() {
+  const n = parseInt(document.getElementById('f_followup_threshold').value, 10);
+  cfg.followup_ai_threshold_chars = isNaN(n) ? 200 : Math.max(0, Math.min(2000, n));
+  renderFuSteps(); // AI-vlaggen herberekenen
+  updatePreview();
+}
+
+// Stop-keywords
+function renderFuStops() {
+  document.getElementById('fuStopChips').innerHTML = cfg.stop_keywords.map((k, i) =>
+    '<span class="kb-kw-chip">' + esc(k) + '<span class="x" onclick="removeFuStop(' + i + ')">&times;</span></span>').join('');
+}
+function onFuStopKey(e) {
+  if (e.key !== 'Enter') return;
+  e.preventDefault();
+  const v = e.target.value.trim().toLowerCase();
+  if (!v) return;
+  if (!cfg.stop_keywords.includes(v)) cfg.stop_keywords.push(v);
+  e.target.value = '';
+  renderFuStops(); updatePreview();
+}
+function removeFuStop(i) { cfg.stop_keywords.splice(i, 1); renderFuStops(); updatePreview(); }
+
 // ── Live preview ────────────────────────────────────────────────────────────
 function updatePreview() {
   let out = '';
@@ -1116,6 +1264,19 @@ function updatePreview() {
     }
   }
 
+  // Follow-up (F7.4)
+  if (cfg.followup_enabled && (cfg.followup_sequence.length || cfg.stop_keywords.length)) {
+    if (cfg.followup_sequence.length) {
+      out += '\n===== FOLLOW-UP SEQUENCE =====\n';
+      cfg.followup_sequence.forEach((s, i) => {
+        out += '\nStap ' + (i + 1) + ': na ' + s.delay_hours + 'u — ' + (fuWouldUseAi(i) ? '🤖 AI' : '📝 letterlijk') + '\n';
+        if (s.template) out += '  "' + s.template.slice(0, 80) + (s.template.length > 80 ? '…' : '') + '"\n';
+        if (s.phase_in && s.phase_in.length) out += '  Alleen bij: ' + s.phase_in.join(', ') + '\n';
+      });
+    }
+    if (cfg.stop_keywords.length) out += '\n🛑 Extra stop-keywords: ' + cfg.stop_keywords.join(', ') + '\n';
+  }
+
   if (activeCfg && activeCfg.guardrails_text) out += '\nGUARDRAILS (vast, niet bewerkbaar):\n' + activeCfg.guardrails_text + '\n';
 
   document.getElementById('cfgPreview').textContent = out.trim() || '—';
@@ -1148,6 +1309,15 @@ async function saveConfig(publish) {
       kb_usps: cfg.kb_usps,
       kb_tag_filter: cfg.kb_tag_filter,
       kb_use_general_kb: cfg.kb_use_general_kb,
+      followup_enabled: cfg.followup_enabled,
+      followup_ai_threshold_chars: cfg.followup_ai_threshold_chars,
+      stop_keywords: cfg.stop_keywords,
+      followup_sequence: cfg.followup_sequence.map(s => ({
+        delay_hours: s.delay_hours,
+        template: s.template,
+        use_ai: s.use_ai,
+        conditions: (s.phase_in && s.phase_in.length) ? { phase_in: s.phase_in } : null,
+      })),
     };
     const res = await window.AgentShared.apiFetch('/api/lisa-config?action=' + (publish ? 'publish' : 'save_draft'), {
       method: 'POST', body: JSON.stringify(editPayload),
