@@ -1,0 +1,120 @@
+// api/_lib/lisa-followup.js
+// Follow-up logica voor Lisa: stop-detectie, sequence-validatie, scheduling.
+// Gebruikt door lisa-config.js (validatie), lisa-ghl-webhook.js (stop + schedule) en de cron (F7.3).
+
+import { supabaseAdmin } from '../supabase.js';
+
+// Hardcoded NL stop-keywords (baseline; altijd actief naast configureerbare uitbreiding).
+const HARDCODED_STOP_KEYWORDS = [
+  'stop', 'geen interesse', 'niet meer', 'ophouden', 'kapt ermee',
+  'laat me met rust', 'mag je verwijderen', 'niet geinteresseerd', 'niet geïnteresseerd',
+  'spam', 'leave me alone', 'unsubscribe',
+];
+
+const VALID_PHASES = ['intro', 'doel', 'situatie', 'band', 'call', 'qualified', 'disqualified'];
+
+/**
+ * Detecteer een stop-signaal in een bericht (hardcoded + configureerbaar, langste match eerst).
+ * @returns {{keyword:string, matched_part:string}|null}
+ */
+export function detectStopSignal(message, configStopKeywords = []) {
+  if (!message) return null;
+  const text = String(message).toLowerCase().trim();
+  const all = [
+    ...HARDCODED_STOP_KEYWORDS,
+    ...(Array.isArray(configStopKeywords) ? configStopKeywords.map((k) => String(k).toLowerCase()) : []),
+  ].filter(Boolean);
+  all.sort((a, b) => b.length - a.length);
+  for (const kw of all) {
+    const i = text.indexOf(kw);
+    if (i !== -1) return { keyword: kw, matched_part: text.substring(i, i + kw.length) };
+  }
+  return null;
+}
+
+/**
+ * Valideer + normaliseer een follow-up sequence. Max 5 stappen, delay 1-720u, template verplicht.
+ * @returns {{valid:Array, errors:Array}}
+ */
+export function validateFollowupSequence(sequence) {
+  if (!Array.isArray(sequence)) return { valid: [], errors: ['sequence is geen array'] };
+  const valid = [];
+  const errors = [];
+
+  sequence.forEach((step, idx) => {
+    const n = idx + 1;
+    if (!step || typeof step !== 'object') { errors.push(`Stap ${n}: geen object`); return; }
+    const delay = parseInt(step.delay_hours, 10);
+    if (isNaN(delay) || delay < 1 || delay > 720) { errors.push(`Stap ${n}: delay_hours moet 1-720 zijn`); return; }
+    if (!step.template || typeof step.template !== 'string' || !step.template.trim()) { errors.push(`Stap ${n}: template ontbreekt`); return; }
+
+    const conditions = {};
+    if (step.conditions && typeof step.conditions === 'object') {
+      if (Array.isArray(step.conditions.phase_in)) conditions.phase_in = step.conditions.phase_in.filter((p) => VALID_PHASES.includes(p));
+      if (Array.isArray(step.conditions.phase_not_in)) conditions.phase_not_in = step.conditions.phase_not_in.filter((p) => VALID_PHASES.includes(p));
+    }
+
+    valid.push({
+      step: valid.length + 1,
+      delay_hours: delay,
+      template: step.template.trim(),
+      conditions: Object.keys(conditions).length ? conditions : null,
+      use_ai: step.use_ai === true || step.template.trim().length >= 200,
+    });
+  });
+
+  if (valid.length > 5) return { valid: valid.slice(0, 5), errors: [...errors, 'Max 5 stappen, overige verwijderd'] };
+  return { valid, errors };
+}
+
+/** scheduled_for = nu + delay_hours. */
+export function computeScheduledFor(delayHours) {
+  return new Date(Date.now() + delayHours * 3600 * 1000).toISOString();
+}
+
+/** Evalueer fase-condities tegen de huidige conversatie-state. */
+export function evaluateConditions(conditions, conversation) {
+  if (!conditions) return true;
+  const phase = conversation?.phase || 'intro';
+  if (Array.isArray(conditions.phase_in) && conditions.phase_in.length && !conditions.phase_in.includes(phase)) return false;
+  if (Array.isArray(conditions.phase_not_in) && conditions.phase_not_in.includes(phase)) return false;
+  return true;
+}
+
+/**
+ * Plan de volgende follow-up (fail-safe — gooit nooit). currentStep is 0-based (0 = sequence[0]).
+ * @returns {Promise<{scheduled:boolean, reason?:string, followup_id?:string, scheduled_for?:string, error?:string}>}
+ */
+export async function scheduleNextFollowup({ conversationId, currentStep, config, conversation }) {
+  try {
+    if (!config?.followup_enabled) return { scheduled: false, reason: 'followup_disabled' };
+    const sequence = Array.isArray(config.followup_sequence) ? config.followup_sequence : [];
+    if (!sequence.length) return { scheduled: false, reason: 'no_sequence' };
+    if (conversation?.followup_paused) return { scheduled: false, reason: 'paused' };
+    if (conversation?.qualified || conversation?.call_booked) return { scheduled: false, reason: 'qualified_or_booked' };
+    if (conversation?.stop_detected_at) return { scheduled: false, reason: 'stop_detected' };
+
+    const idx = currentStep;
+    if (idx >= sequence.length) return { scheduled: false, reason: 'sequence_completed' };
+    const step = sequence[idx];
+    if (!evaluateConditions(step.conditions, conversation)) return { scheduled: false, reason: 'conditions_not_met' };
+
+    const scheduledFor = computeScheduledFor(step.delay_hours);
+    const { data, error } = await supabaseAdmin.from('lisa_followups').insert({
+      conversation_id: conversationId,
+      followup_step: step.step,
+      scheduled_for: scheduledFor,
+      status: 'scheduled',
+      is_regular_followup: true,
+      is_delayed_response: false,
+      template_at_schedule: step.template,
+      conditions_snapshot: step.conditions,
+      used_ai: step.use_ai,
+    }).select('id').single();
+    if (error) { console.error('[lisa-followup] schedule error:', error.message); return { scheduled: false, error: error.message }; }
+    return { scheduled: true, followup_id: data.id, scheduled_for: scheduledFor };
+  } catch (err) {
+    console.error('[lisa-followup] scheduleNextFollowup exception:', err?.message || err);
+    return { scheduled: false, error: err?.message || 'onbekende fout' };
+  }
+}

@@ -12,6 +12,7 @@
 
 import { supabaseAdmin, verifyAdmin } from './supabase.js';
 import { requirePermissionFailOpen } from './_lib/requirePermission.js';
+import { validateFollowupSequence } from './_lib/lisa-followup.js';
 
 // Velden die via de config-editor bewerkt worden (rest van de rij blijft een snapshot).
 const EDIT_FIELDS = [
@@ -20,6 +21,8 @@ const EDIT_FIELDS = [
   'phase_intro', 'phase_doel', 'phase_situatie', 'phase_band', 'phase_call',
   // Knowledge (F4.3) — structured producten/FAQ + KB-tagfilter
   'kb_products', 'kb_faq', 'kb_pricing', 'kb_usps', 'kb_tag_filter', 'kb_use_general_kb',
+  // Follow-up (F7.2) — sequence + stop-keywords
+  'followup_sequence', 'stop_keywords', 'followup_ai_threshold_chars', 'followup_enabled',
 ];
 
 function pick(obj, keys) {
@@ -61,6 +64,23 @@ function normalizeKbFields(updates) {
       ? updates.kb_tag_filter.map((t) => String(t).trim()).filter(Boolean) : [];
   }
   if (updates.kb_use_general_kb !== undefined) updates.kb_use_general_kb = !!updates.kb_use_general_kb;
+  return updates;
+}
+
+// Normaliseer follow-up-velden in-place (F7.2).
+function normalizeFollowupFields(updates) {
+  if (updates.followup_sequence !== undefined) {
+    updates.followup_sequence = validateFollowupSequence(updates.followup_sequence).valid;
+  }
+  if (updates.stop_keywords !== undefined) {
+    updates.stop_keywords = Array.isArray(updates.stop_keywords)
+      ? updates.stop_keywords.map((k) => String(k).trim().toLowerCase()).filter(Boolean) : [];
+  }
+  if (updates.followup_ai_threshold_chars !== undefined) {
+    const n = parseInt(updates.followup_ai_threshold_chars, 10);
+    updates.followup_ai_threshold_chars = isNaN(n) ? 200 : Math.max(0, Math.min(2000, n));
+  }
+  if (updates.followup_enabled !== undefined) updates.followup_enabled = !!updates.followup_enabled;
   return updates;
 }
 
@@ -126,7 +146,7 @@ export default async function handler(req, res) {
       if (!(await requirePermissionFailOpen(req, 'lisa.config.edit'))) {
         return res.status(403).json({ error: 'Insufficient permissions', feature: 'lisa.config.edit' });
       }
-      const updates = normalizeKbFields(pick(body, EDIT_FIELDS));
+      const updates = normalizeFollowupFields(normalizeKbFields(pick(body, EDIT_FIELDS)));
       if (Object.keys(updates).length === 0) return res.status(400).json({ error: 'Geen velden om bij te werken.' });
       const latest = await latestConfig('*');
       if (latest && latest.is_active === false) {
@@ -149,7 +169,7 @@ export default async function handler(req, res) {
       if (!(await requirePermissionFailOpen(req, 'lisa.config.publish'))) {
         return res.status(403).json({ error: 'Insufficient permissions', feature: 'lisa.config.publish' });
       }
-      const updates = normalizeKbFields(pick(body, EDIT_FIELDS));
+      const updates = normalizeFollowupFields(normalizeKbFields(pick(body, EDIT_FIELDS)));
       const latest = await latestConfig('*');
       if (latest && latest.is_active === false) {
         // Bestaande draft live zetten (trigger deactiveert de vorige actieve versie).

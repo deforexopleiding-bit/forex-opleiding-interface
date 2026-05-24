@@ -11,6 +11,7 @@
 import { supabaseAdmin } from './supabase.js';
 import { sendToGhl } from './_lib/lisa-ghl-send.js';
 import { generateLisaResponse } from './lisa-respond.js';
+import { detectStopSignal, scheduleNextFollowup } from './_lib/lisa-followup.js';
 import dayjs from 'dayjs';
 import utc from 'dayjs/plugin/utc.js';
 import timezone from 'dayjs/plugin/timezone.js';
@@ -101,6 +102,26 @@ export default async function handler(req, res) {
       return res.status(200).json({ ok: true, skipped: 'human_takeover', conv_id: conv.id });
     }
 
+    // 7c. Stop-signaal → afmelden: pauzeer follow-ups, geen AI-antwoord.
+    const stop = detectStopSignal(message, config.stop_keywords || []);
+    if (stop) {
+      await supabaseAdmin.from('lisa_messages').insert({
+        conversation_id: conv.id, direction: 'in', content: message, ai_generated: false, ghl_message_id: messageId || null,
+      });
+      await supabaseAdmin.from('lisa_conversations').update({
+        stop_detected_at: new Date().toISOString(), stop_detected_keyword: stop.keyword,
+        followup_paused: true, followup_paused_at: new Date().toISOString(),
+        followup_paused_reason: `stop_signal: ${stop.keyword}`,
+      }).eq('id', conv.id);
+      await supabaseAdmin.from('lisa_followups').update({
+        status: 'cancelled', cancelled_reason: `stop_signal: ${stop.keyword}`.slice(0, 300),
+      }).eq('conversation_id', conv.id).eq('status', 'scheduled');
+      await supabaseAdmin.from('lisa_settings').update({
+        live_messages_received_total: (settings.live_messages_received_total || 0) + 1,
+      }).eq('id', 1);
+      return res.status(200).json({ ok: true, skipped: 'stop_signal_detected', keyword: stop.keyword, conv_id: conv.id });
+    }
+
     // 8. AI genereren (geen persistentie binnen helper)
     const result = await generateLisaResponse({ config, conversation: conv, userMessage: message });
     if (!result.ok) { await logWebhookError('AI: ' + result.error); return res.status(200).json({ ok: false, ai_failed: true, error: result.error }); }
@@ -129,6 +150,14 @@ export default async function handler(req, res) {
         live_messages_sent_total: (settings.live_messages_sent_total || 0) + 1,
       }).eq('id', 1);
       if (!sendResult.ok) await logWebhookError('GHL-verzenden: ' + sendResult.error);
+      // Plan de volgende reguliere follow-up (fail-safe).
+      const { count: regCount } = await supabaseAdmin.from('lisa_followups')
+        .select('id', { count: 'exact', head: true })
+        .eq('conversation_id', conv.id).eq('is_regular_followup', true);
+      await scheduleNextFollowup({
+        conversationId: conv.id, currentStep: regCount || 0, config,
+        conversation: { ...conv, phase: result.detected_phase || conv.phase, qualified: conv.qualified || result.detected_phase === 'qualified' },
+      });
       return res.status(200).json({ ok: true, sent: true, conv_id: conv.id, ghl_send_ok: sendResult.ok });
     }
 
