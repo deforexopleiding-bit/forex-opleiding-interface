@@ -666,6 +666,34 @@ function updatePreview() {
     if (exs.length) out += 'Voorbeelden:\n' + exs.map(e => '  • ' + e).join('\n') + '\n';
   });
 
+  // Knowledge (F4.3c)
+  const prods = (cfg.kb_products || []).filter(p => p && (p.naam || p.beschrijving));
+  const faqs = (cfg.kb_faq || []).filter(q => q && (q.vraag || q.antwoord));
+  const useTags = cfg.kb_use_general_kb && cfg.kb_tag_filter.length;
+  if (prods.length || faqs.length || cfg.kb_pricing || cfg.kb_usps || useTags) {
+    out += '\n===== KNOWLEDGE =====\n';
+    if (prods.length) {
+      out += '\n📦 PRODUCTEN\n';
+      prods.forEach(p => {
+        const extra = [p.prijs, p.doelgroep, p.duur].filter(Boolean).join(' | ');
+        out += '- ' + (p.naam || '—') + (p.beschrijving ? ': ' + p.beschrijving : '') + (extra ? ' (' + extra + ')' : '') + '\n';
+      });
+    }
+    if (faqs.length) {
+      out += '\n❓ FAQ\n';
+      faqs.forEach(q => {
+        out += '- V: ' + (q.vraag || '') + '\n  A: ' + (q.antwoord || '') + '\n';
+        if (q.keywords && q.keywords.length) out += '  Keywords: ' + q.keywords.join(', ') + '\n';
+      });
+    }
+    if (cfg.kb_pricing) out += '\n💰 PRIJZEN\n' + cfg.kb_pricing + '\n';
+    if (cfg.kb_usps) out += '\n⭐ USPS\n' + cfg.kb_usps + '\n';
+    if (useTags) {
+      out += '\n🏷 KENNISBANK TAGS\nGeselecteerd: ' + cfg.kb_tag_filter.join(', ') +
+             '\nBeschikbaar voor RAG: ' + kbAvailableCount() + ' items\n';
+    }
+  }
+
   if (activeCfg && activeCfg.guardrails_text) out += '\nGUARDRAILS (vast, niet bewerkbaar):\n' + activeCfg.guardrails_text + '\n';
 
   document.getElementById('cfgPreview').textContent = out.trim() || '—';
