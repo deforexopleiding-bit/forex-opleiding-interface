@@ -1731,8 +1731,74 @@
       document.querySelectorAll('[data-tag-modal-close]').forEach((b) => b.addEventListener('click', closeTagModal));
       $('tagModal').addEventListener('click', (e) => { if (e.target.id === 'tagModal') closeTagModal(); });
       $('tagSearch').addEventListener('input', (e) => { state.tagSearch = e.target.value; renderTags(); });
+      $('aiTagModal').addEventListener('click', (e) => { if (e.target.id === 'aiTagModal') closeAiTagModal(); });
+      $('aiTagModal').querySelector('.kb-modal-close').addEventListener('click', closeAiTagModal);
       loadTags();
       loadItemTagLinks();
+    }
+
+    /* ─────────────────────────────────────────────────────────────
+       Tags — AI-suggesties (F4.2d)
+       ───────────────────────────────────────────────────────────── */
+    async function aiSuggestTags(itemId, btn) {
+      const item = state.items.find((i) => i.id === itemId);
+      if (!item) return;
+      const orig = btn.innerHTML;
+      btn.disabled = true; btn.innerHTML = '<span class="ai-spin"></span> AI…';
+      try {
+        const res = await window.AgentShared.apiFetch('/api/kb-auto-tag', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ item_id: itemId, content: item.content || '' }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (res.status === 403) { showToast('Geen rechten voor AI-suggestie'); return; }
+        if (!res.ok) throw new Error(data.error || 'HTTP ' + res.status);
+        openAiTagModal(itemId, data);
+      } catch (err) {
+        showToast('AI-suggestie mislukt'); console.error('[kennisbank] aiSuggestTags:', err.message);
+      } finally { btn.disabled = false; btn.innerHTML = orig; }
+    }
+
+    function closeAiTagModal() { $('aiTagModal').classList.add('hidden'); }
+
+    function openAiTagModal(itemId, data) {
+      const have = new Set(itemTagIds(itemId));
+      const sugg = data.suggested_tags || [];
+      const body = $('aiTagBody');
+      const foot = $('aiTagFoot');
+      if (!sugg.length) {
+        body.innerHTML = `<div class="kb-ai-reason">Geen relevante tags gevonden.${data.reasoning ? '<br>' + escapeHtml(data.reasoning) : ''}</div>`;
+        foot.innerHTML = '<button class="btn" data-aitag-close>Sluiten</button>';
+      } else {
+        const rows = sugg.map((name) => {
+          const t = state.tags.find((x) => x.name === name);
+          if (!t) return '';
+          return `<div class="kb-ai-tag-row">
+            <span class="kb-tag-chip" style="background:${escapeHtml(t.color)}">${escapeHtml(t.name)}</span>
+            <span class="spacer"></span>
+            ${have.has(t.id)
+              ? '<span style="font-size:12px;color:var(--green)">✓ al toegevoegd</span>'
+              : `<button class="btn" data-add-sugg="${escapeHtml(t.id)}">Toevoegen</button>`}
+          </div>`;
+        }).join('');
+        body.innerHTML = `${rows}${data.reasoning ? `<div class="kb-ai-reason">${escapeHtml(data.reasoning)}</div>` : ''}`;
+        const addable = sugg.map((n) => state.tags.find((x) => x.name === n)).filter((t) => t && !have.has(t.id));
+        foot.innerHTML = `<button class="btn" data-aitag-close>Annuleren</button>${addable.length ? '<button class="btn btn-primary" data-add-all-sugg>Alle toevoegen</button>' : ''}`;
+      }
+      $('aiTagModal').classList.remove('hidden');
+      body.querySelectorAll('[data-add-sugg]').forEach((b) => {
+        b.addEventListener('click', async () => {
+          await addTagToItem(itemId, b.dataset.addSugg);
+          b.outerHTML = '<span style="font-size:12px;color:var(--green)">✓ toegevoegd</span>';
+        });
+      });
+      const allBtn = foot.querySelector('[data-add-all-sugg]');
+      if (allBtn) allBtn.addEventListener('click', async () => {
+        const addable = sugg.map((n) => state.tags.find((x) => x.name === n)).filter((t) => t && !itemTagIds(itemId).includes(t.id));
+        for (const t of addable) await addTagToItem(itemId, t.id);
+        closeAiTagModal();
+      });
+      foot.querySelectorAll('[data-aitag-close]').forEach((b) => b.addEventListener('click', closeAiTagModal));
     }
 
     /* ─────────────────────────────────────────────────────────────
@@ -1795,6 +1861,7 @@
       return `<div class="item-tags" data-tags-for="${escapeHtml(itemId)}">
         ${chips}
         <button class="it-add" data-add-tag title="Tag toevoegen">+ tag</button>
+        <button class="it-ai" data-ai-tag title="AI tag-suggestie">✨ AI</button>
       </div>`;
     }
 
@@ -1806,6 +1873,8 @@
       });
       const addBtn = row.querySelector('[data-add-tag]');
       if (addBtn) addBtn.addEventListener('click', (e) => { e.stopPropagation(); openTagPicker(itemId, row); });
+      const aiBtn = row.querySelector('[data-ai-tag]');
+      if (aiBtn) aiBtn.addEventListener('click', (e) => { e.stopPropagation(); aiSuggestTags(itemId, aiBtn); });
     }
 
     let openPickerEl = null;
@@ -1876,7 +1945,12 @@
     ['#useTextBtn', 'kennisbank.material.upload'],
     ['#activeToggle', 'kennisbank.bots.activate'],
     ['[data-item-action="edit"]', 'kennisbank.item.edit'],
-    ['[data-item-action="delete"]', 'kennisbank.item.delete']
+    ['[data-item-action="delete"]', 'kennisbank.item.delete'],
+    ['#newTagBtn', 'kennisbank.item.edit'],
+    ['[data-add-tag]', 'kennisbank.item.edit'],
+    ['[data-ai-tag]', 'kennisbank.item.edit'],
+    ['[data-untag]', 'kennisbank.item.edit'],
+    ['[data-tag-del]', 'kennisbank.item.delete']
   ];
   async function applyRbacGating() {
     try { if (window._authSharedReady) await window._authSharedReady; } catch (e) {}
