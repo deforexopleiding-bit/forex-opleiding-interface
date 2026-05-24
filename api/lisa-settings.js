@@ -15,7 +15,16 @@ const ALLOWED_FIELDS = [
   'office_hours_end',
   'office_hours_timezone',
   'ghl_webhook_active',
+  // Response-delay (F10.2)
+  'response_delay_mode',
+  'response_delay_fixed_seconds',
+  'response_delay_min_seconds',
+  'response_delay_max_seconds',
+  'response_delay_per_phase',
+  'typing_indicator_enabled',
 ];
+
+const DELAY_SECONDS_FIELDS = ['response_delay_fixed_seconds', 'response_delay_min_seconds', 'response_delay_max_seconds'];
 
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
@@ -43,6 +52,36 @@ export default async function handler(req, res) {
       if ('live_mode_enabled' in updates) {
         updates.live_mode_enabled = !!updates.live_mode_enabled;
         updates.live_mode_changed_by = auth.user.id;
+      }
+
+      // ── Validatie response-delay (F10.2) ──
+      if (updates.response_delay_mode !== undefined && !['fixed', 'random', 'per_phase'].includes(updates.response_delay_mode)) {
+        return res.status(400).json({ error: 'Ongeldige response_delay_mode' });
+      }
+      for (const f of DELAY_SECONDS_FIELDS) {
+        if (updates[f] !== undefined) {
+          const n = parseInt(updates[f], 10);
+          if (isNaN(n)) return res.status(400).json({ error: f + ' moet een getal zijn' });
+          updates[f] = Math.max(0, Math.min(600, n));
+        }
+      }
+      if (updates.response_delay_per_phase !== undefined) {
+        const obj = updates.response_delay_per_phase;
+        if (typeof obj !== 'object' || obj === null || Array.isArray(obj)) {
+          return res.status(400).json({ error: 'response_delay_per_phase moet een object zijn' });
+        }
+        const clamped = {};
+        for (const [k, v] of Object.entries(obj)) {
+          const n = parseInt(v, 10);
+          clamped[k] = isNaN(n) ? 45 : Math.max(0, Math.min(600, n));
+        }
+        updates.response_delay_per_phase = clamped;
+      }
+      if (updates.typing_indicator_enabled !== undefined) updates.typing_indicator_enabled = updates.typing_indicator_enabled === true;
+      // Consistentie: min ≤ max
+      if (updates.response_delay_min_seconds !== undefined && updates.response_delay_max_seconds !== undefined
+          && updates.response_delay_min_seconds > updates.response_delay_max_seconds) {
+        const t = updates.response_delay_min_seconds; updates.response_delay_min_seconds = updates.response_delay_max_seconds; updates.response_delay_max_seconds = t;
       }
 
       const { data, error } = await supabaseAdmin.from('lisa_settings').update(updates).eq('id', 1).select().single();
