@@ -35,6 +35,10 @@
     {
       "path": "/api/follow-up-admin-weekly",
       "schedule": "0 8 * * 0"
+    },
+    {
+      "path": "/api/cron-lisa-delayed",
+      "schedule": "*/5 * * * *"
     }
   ],
   "headers": [
