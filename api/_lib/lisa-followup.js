@@ -3,6 +3,9 @@
 // Gebruikt door lisa-config.js (validatie), lisa-ghl-webhook.js (stop + schedule) en de cron (F7.3).
 
 import { supabaseAdmin } from '../supabase.js';
+import Anthropic from '@anthropic-ai/sdk';
+
+const FOLLOWUP_MODEL = 'claude-sonnet-4-6'; // sneller/goedkoper dan Opus voor follow-ups
 
 // Hardcoded NL stop-keywords (baseline; altijd actief naast configureerbare uitbreiding).
 const HARDCODED_STOP_KEYWORDS = [
@@ -116,5 +119,56 @@ export async function scheduleNextFollowup({ conversationId, currentStep, config
   } catch (err) {
     console.error('[lisa-followup] scheduleNextFollowup exception:', err?.message || err);
     return { scheduled: false, error: err?.message || 'onbekende fout' };
+  }
+}
+
+/**
+ * Genereer een AI-follow-up o.b.v. een template als guidance (Sonnet). Fail-safe.
+ * @returns {Promise<{ok:boolean, response?:string, tokens_used?:number, error?:string}>}
+ */
+export async function generateFollowupResponse({ conversation, template, followupStep }) {
+  try {
+    const apiKey = process.env.ANTHROPIC_API_KEY;
+    if (!apiKey) return { ok: false, error: 'no_api_key' };
+
+    const { data: config } = await supabaseAdmin.from('lisa_config').select('*')
+      .eq('is_active', true).order('version', { ascending: false }).limit(1).maybeSingle();
+    if (!config) return { ok: false, error: 'no_active_config' };
+
+    const { data: recent } = await supabaseAdmin.from('lisa_messages')
+      .select('direction, content, sent_at').eq('conversation_id', conversation.id)
+      .order('sent_at', { ascending: false }).limit(6);
+    const history = (recent || []).reverse()
+      .map((m) => `${m.direction === 'in' ? 'Volger' : 'Lisa'}: ${m.content}`).join('\n');
+
+    const systemPrompt = `Je bent ${config.persona_name || 'Lisa'}${config.persona_age ? ', ' + config.persona_age + ' jaar oud' : ''}.
+${config.persona_tone || 'Casual en vriendelijk'}
+
+Je stuurt een FOLLOW-UP bericht naar een volger die niet meer heeft geantwoord.
+
+Template als richtlijn (volg de intentie, maak persoonlijk):
+"${template}"
+
+Recent gesprek:
+${history || '(geen eerdere berichten)'}
+
+Huidige fase: ${conversation.phase || 'intro'}
+Follow-up nummer: ${followupStep}
+
+Schrijf een natuurlijk follow-up bericht dat de intentie van de template volgt, persoonlijk klinkt,
+niet pushy/zeurig is, kort blijft (1-2 zinnen) en geen marketingtaal gebruikt.
+Antwoord ALLEEN met het bericht zelf (geen "Lisa:" prefix, geen JSON).`;
+
+    const client = new Anthropic({ apiKey });
+    const resp = await client.messages.create({
+      model: FOLLOWUP_MODEL, max_tokens: 200, system: systemPrompt,
+      messages: [{ role: 'user', content: 'Genereer de follow-up.' }],
+    });
+    const text = resp.content?.[0]?.text?.trim() || '';
+    if (!text) return { ok: false, error: 'empty_response' };
+    return { ok: true, response: text, tokens_used: (resp.usage?.input_tokens || 0) + (resp.usage?.output_tokens || 0) };
+  } catch (err) {
+    console.error('[lisa-followup] generateFollowupResponse error:', err?.message || err);
+    return { ok: false, error: err?.message || 'onbekende fout' };
   }
 }
