@@ -9,7 +9,7 @@
 //       → in kantooruren: direct sturen; daarbuiten: pre-genereren + plannen in lisa_followups.
 
 import { supabaseAdmin } from './supabase.js';
-import { sendToGhl } from './_lib/lisa-ghl-send.js';
+import { sendToGhl, computeResponseDelay, sendTypingIndicator, sleep } from './_lib/lisa-ghl-send.js';
 import { generateLisaResponse } from './lisa-respond.js';
 import { detectStopSignal, scheduleNextFollowup } from './_lib/lisa-followup.js';
 import dayjs from 'dayjs';
@@ -17,6 +17,10 @@ import utc from 'dayjs/plugin/utc.js';
 import timezone from 'dayjs/plugin/timezone.js';
 dayjs.extend(utc);
 dayjs.extend(timezone);
+
+// De webhook wacht (await sleep) de menselijke response-delay vóór verzenden.
+// Verhoog de Vercel-functielimiet zodat de delay niet afgekapt wordt (Pro-plan).
+export const config = { maxDuration: 300 };
 
 function computeNextOfficeStart(startTime, tz) {
   const zone = tz || 'Europe/Amsterdam';
@@ -63,6 +67,11 @@ export default async function handler(req, res) {
       message: customData.message || body.message?.body || (typeof body.message === 'string' ? body.message : null),
       type: customData.type || body.type,
       direction: customData.direction || body.direction,
+      // Naam/IG (GHL standaard-data, niet customData):
+      first_name: body.first_name || null,
+      last_name: body.last_name || null,
+      full_name: body.full_name || null,
+      ig_sid: body.contact?.attributionSource?.igSid || body.contact?.lastAttributionSource?.igSid || null,
     };
     console.log('[GHL Webhook] parsed payload:', JSON.stringify(payload));
     const { contactId, conversationId, locationId, message, type, direction, messageId } = payload;
@@ -71,7 +80,7 @@ export default async function handler(req, res) {
 
     // 3. Settings + webhook-tracking
     const { data: settings } = await supabaseAdmin.from('lisa_settings')
-      .select('live_mode_enabled, office_hours_start, office_hours_end, office_hours_timezone, ghl_webhook_total_received, live_messages_received_total, live_messages_sent_total, delayed_messages_pending')
+      .select('*')
       .eq('id', 1).maybeSingle();
     if (!settings) { await logWebhookError('lisa_settings ontbreekt (migratie 005?)'); return res.status(200).json({ ok: false, error: 'no_settings' }); }
 
@@ -99,15 +108,23 @@ export default async function handler(req, res) {
     if (!config) { await logWebhookError('Geen actieve Lisa-config'); return res.status(200).json({ ok: false, error: 'no_active_config' }); }
 
     // 7. Conversatie (per ghl_contact_id, live)
+    const computedName = payload.full_name || [payload.first_name, payload.last_name].filter(Boolean).join(' ').trim() || null;
     let { data: conv } = await supabaseAdmin.from('lisa_conversations').select('*')
       .eq('ghl_contact_id', contactId).eq('is_sandbox', false).maybeSingle();
     if (!conv) {
       const { data: newConv, error: convErr } = await supabaseAdmin.from('lisa_conversations').insert({
         ghl_contact_id: contactId, ghl_conversation_id: conversationId || null, ghl_location_id: locationId || null,
+        first_name: payload.first_name, last_name: payload.last_name, contact_name: computedName, ig_sid: payload.ig_sid,
         source: 'instagram', is_sandbox: false, phase: 'intro', first_message_at: new Date().toISOString(),
       }).select('*').single();
       if (convErr) { await logWebhookError('Conversatie aanmaken: ' + convErr.message); return res.status(200).json({ ok: false, error: convErr.message }); }
       conv = newConv;
+    } else if (!conv.contact_name && computedName) {
+      // Naam nu pas beschikbaar → invullen (geen overschrijf van bestaande naam).
+      await supabaseAdmin.from('lisa_conversations').update({
+        first_name: payload.first_name, last_name: payload.last_name, contact_name: computedName, ig_sid: payload.ig_sid || conv.ig_sid,
+      }).eq('id', conv.id);
+      conv.contact_name = computedName;
     }
 
     // 7b. Mens heeft overgenomen → Lisa zwijgt; bericht wel loggen.
@@ -152,6 +169,14 @@ export default async function handler(req, res) {
 
     // 10. Versturen (kantooruren) of plannen (daarbuiten)
     if (isInOfficeHours) {
+      // Menselijke response-delay (fixed/random/per_phase) + optionele typing-indicator.
+      const delayMs = computeResponseDelay(settings, result.detected_phase);
+      console.log(`[Lisa] delay ${delayMs}ms (mode=${settings.response_delay_mode}, phase=${result.detected_phase})`);
+      if (settings.typing_indicator_enabled && delayMs >= 2000) {
+        sendTypingIndicator(contactId, { conversationId, locationId }).catch((e) => console.log('[lisa-typing] bg fail:', e?.message || e));
+      }
+      if (delayMs > 0) await sleep(delayMs);
+
       const sendResult = await sendToGhl(contactId, result.response, { conversationId, locationId });
       await supabaseAdmin.from('lisa_messages').insert({
         conversation_id: conv.id, direction: 'out', content: result.response, ai_generated: true,
