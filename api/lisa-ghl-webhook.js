@@ -9,18 +9,14 @@
 //       → in kantooruren: direct sturen; daarbuiten: pre-genereren + plannen in lisa_followups.
 
 import { supabaseAdmin } from './supabase.js';
-import { sendToGhl, computeResponseDelay, sendTypingIndicator, sleep } from './_lib/lisa-ghl-send.js';
+import { computeResponseDelay, sendTypingIndicator } from './_lib/lisa-ghl-send.js';
 import { generateLisaResponse } from './lisa-respond.js';
-import { detectStopSignal, scheduleNextFollowup } from './_lib/lisa-followup.js';
+import { detectStopSignal } from './_lib/lisa-followup.js';
 import dayjs from 'dayjs';
 import utc from 'dayjs/plugin/utc.js';
 import timezone from 'dayjs/plugin/timezone.js';
 dayjs.extend(utc);
 dayjs.extend(timezone);
-
-// De webhook wacht (await sleep) de menselijke response-delay vóór verzenden.
-// Verhoog de Vercel-functielimiet zodat de delay niet afgekapt wordt (Pro-plan).
-export const config = { maxDuration: 300 };
 
 function computeNextOfficeStart(startTime, tz) {
   const zone = tz || 'Europe/Amsterdam';
@@ -167,42 +163,34 @@ export default async function handler(req, res) {
       conversation_id: conv.id, direction: 'in', content: message, ai_generated: false, ghl_message_id: messageId || null,
     });
 
-    // 10. Versturen (kantooruren) of plannen (daarbuiten)
+    // 10. Versturen: binnen kantooruren → response-delay QUEUE (geen blocking sleep; cron verstuurt).
     if (isInOfficeHours) {
-      // Menselijke response-delay (fixed/random/per_phase) + optionele typing-indicator.
       const delayMs = computeResponseDelay(settings, result.detected_phase);
-      console.log(`[Lisa] delay ${delayMs}ms (mode=${settings.response_delay_mode}, phase=${result.detected_phase})`);
-      if (settings.typing_indicator_enabled && delayMs >= 2000) {
-        sendTypingIndicator(contactId, { conversationId, locationId }).catch((e) => console.log('[lisa-typing] bg fail:', e?.message || e));
-      }
-      if (delayMs > 0) await sleep(delayMs);
+      const scheduledFor = new Date(Date.now() + delayMs).toISOString();
+      console.log(`[Lisa] response queued, delay ${delayMs}ms (mode=${settings.response_delay_mode}, phase=${result.detected_phase})`);
 
-      const sendResult = await sendToGhl(contactId, result.response, { conversationId, locationId });
-      await supabaseAdmin.from('lisa_messages').insert({
-        conversation_id: conv.id, direction: 'out', content: result.response, ai_generated: true,
-        config_version_id: result.config_version_id, model_used: result.model_used,
-        tokens_used: result.tokens_used, generation_time_ms: result.generation_time_ms,
-        detected_phase: result.detected_phase, ghl_message_id: sendResult.message_id || null,
-      });
+      // Fase bijwerken (detected_phase is alleen hier bekend; het bericht wordt later door de cron verstuurd).
       if (result.detected_phase && result.detected_phase !== conv.phase) {
         const patch = { phase: result.detected_phase };
         if (result.detected_phase === 'qualified') { patch.qualified = true; patch.qualified_at = new Date().toISOString(); }
         await supabaseAdmin.from('lisa_conversations').update(patch).eq('id', conv.id);
       }
+
+      await supabaseAdmin.from('lisa_followups').insert({
+        conversation_id: conv.id, followup_step: 0, scheduled_for: scheduledFor, status: 'scheduled',
+        is_response_delay: true, is_delayed_response: false, is_regular_followup: false,
+        pre_generated_response: result.response, pre_generated_at: new Date().toISOString(), template_used: 'response_delay',
+      });
+
+      // Typing-indicator (fire-and-forget) zodat de volger Lisa ziet "typen" tijdens de delay.
+      if (settings.typing_indicator_enabled && delayMs >= 2000) {
+        sendTypingIndicator(contactId, { conversationId, locationId }).catch((e) => console.log('[lisa-typing] bg fail:', e?.message || e));
+      }
+
       await supabaseAdmin.from('lisa_settings').update({
         live_messages_received_total: (settings.live_messages_received_total || 0) + 1,
-        live_messages_sent_total: (settings.live_messages_sent_total || 0) + 1,
       }).eq('id', 1);
-      if (!sendResult.ok) await logWebhookError('GHL-verzenden: ' + sendResult.error);
-      // Plan de volgende reguliere follow-up (fail-safe).
-      const { count: regCount } = await supabaseAdmin.from('lisa_followups')
-        .select('id', { count: 'exact', head: true })
-        .eq('conversation_id', conv.id).eq('is_regular_followup', true);
-      await scheduleNextFollowup({
-        conversationId: conv.id, currentStep: regCount || 0, config,
-        conversation: { ...conv, phase: result.detected_phase || conv.phase, qualified: conv.qualified || result.detected_phase === 'qualified' },
-      });
-      return res.status(200).json({ ok: true, sent: true, conv_id: conv.id, ghl_send_ok: sendResult.ok });
+      return res.status(200).json({ ok: true, queued: true, scheduled_for: scheduledFor, delay_ms: delayMs, conv_id: conv.id });
     }
 
     // Buiten kantooruren → plannen voor eerstvolgende start
