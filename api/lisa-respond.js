@@ -32,7 +32,75 @@ async function loadConfig(which) {
 
 function asArray(v) { return Array.isArray(v) ? v : []; }
 
-function buildSystemPrompt(config, currentPhase) {
+// kb_products is sinds migratie 004 een jsonb-array [{naam,beschrijving,prijs,doelgroep,duur}].
+function renderProducts(products) {
+  const arr = asArray(products).filter((p) => p && (p.naam || p.beschrijving));
+  if (!arr.length) return '';
+  return '📦 PRODUCTEN:\n' + arr.map((p) => {
+    const extra = [p.prijs && ('Prijs: ' + p.prijs), p.doelgroep && ('Voor: ' + p.doelgroep), p.duur && ('Duur: ' + p.duur)].filter(Boolean).join(' | ');
+    return `- ${p.naam || '—'}${p.beschrijving ? ': ' + p.beschrijving : ''}${extra ? ' | ' + extra : ''}`;
+  }).join('\n');
+}
+
+// ── RAG (keyword-based) ───────────────────────────────────────────────────────
+const RAG_STOPWORDS = new Set([
+  'de','het','een','en','of','maar','dat','dit','die','deze',
+  'is','ben','bent','zijn','was','waren','wordt','worden',
+  'wat','wie','waar','wanneer','hoe','waarom','welke',
+  'ik','jij','je','hij','zij','we','wij','jullie','ze',
+  'op','in','aan','bij','met','van','voor','door','om','te',
+  'niet','geen','wel','ook','nog','al','dus','dan','als',
+  'heb','heeft','hebben','had','hadden','kan','kun','kunt','kunnen',
+  'mij','me','jou','hem','haar','ons','hen',
+]);
+
+function extractKeywords(message) {
+  return (message || '')
+    .toLowerCase()
+    .replace(/[^\w\sàâäéèêëïîôöûüç]/g, ' ')
+    .split(/\s+/)
+    .filter((w) => w.length >= 3 && !RAG_STOPWORDS.has(w));
+}
+
+function matchFaqByKeywords(faqList, userKeywords, maxResults = 3) {
+  if (!Array.isArray(faqList) || !faqList.length || !userKeywords.length) return [];
+  const userKwSet = new Set(userKeywords);
+  return faqList
+    .map((faq) => ({ faq, score: asArray(faq.keywords).filter((k) => userKwSet.has(String(k).toLowerCase())).length }))
+    .filter((s) => s.score > 0)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, maxResults)
+    .map((s) => s.faq);
+}
+
+// 3 queries: tags resolve → item-links → items zelf.
+async function getKbItemsByTags(tagNames, maxResults = 5) {
+  if (!Array.isArray(tagNames) || !tagNames.length) return [];
+  const { data: tags } = await supabaseAdmin.from('kb_tags').select('id, name').in('name', tagNames);
+  const tagIds = (tags || []).map((t) => t.id);
+  if (!tagIds.length) return [];
+  const { data: links } = await supabaseAdmin.from('kb_item_tags').select('item_id').in('tag_id', tagIds);
+  const itemIds = [...new Set((links || []).map((l) => l.item_id))];
+  if (!itemIds.length) return [];
+  const { data: items } = await supabaseAdmin.from('kennisbank_items').select('id, title, type, content').in('id', itemIds).limit(maxResults);
+  return items || [];
+}
+
+function buildRagSection(matchedFaq, kbItems) {
+  if (!matchedFaq.length && !kbItems.length) return '';
+  let out = '\n\n==== RELEVANTE CONTEXT ====\n';
+  if (matchedFaq.length) {
+    out += '\n📋 RELEVANTE FAQ:\n';
+    matchedFaq.forEach((faq) => { out += `\nV: ${faq.vraag}\nA: ${faq.antwoord}\n`; });
+  }
+  if (kbItems.length) {
+    out += '\n📚 KENNISBANK:\n';
+    kbItems.forEach((item) => { out += `\n[${item.type || 'item'}] ${item.title || ''}\n${String(item.content || '').substring(0, 300)}\n`; });
+  }
+  return out;
+}
+
+function buildSystemPrompt(config, currentPhase, ragSection = '') {
   const phaseKey = 'phase_' + currentPhase;
   const phaseData = (config && config[phaseKey]) || {};
   const dos = asArray(config.dos).filter(Boolean);
@@ -56,10 +124,13 @@ function buildSystemPrompt(config, currentPhase) {
   if (examples.length) lines.push('\n==== VOORBEELDEN ====\n' + examples.map((e) => '- ' + e).join('\n'));
 
   const kb = [];
-  if (config.kb_products) kb.push(`Producten: ${config.kb_products}`);
+  const prodStr = renderProducts(config.kb_products);
+  if (prodStr) kb.push(prodStr);
   if (config.kb_usps) kb.push(`USP's: ${config.kb_usps}`);
   if (config.kb_pricing) kb.push(`Prijzen: ${config.kb_pricing}`);
   if (kb.length) lines.push('\n==== KENNIS ====\n' + kb.join('\n'));
+
+  if (ragSection) lines.push(ragSection);
 
   lines.push('\n==== GUARDRAILS (NOOIT OVERTREDEN) ====');
   lines.push(config.guardrails_text || 'Geen rendementen/garanties/druktactieken. Geen specifieke prijzen tenzij expliciet gevraagd.');
@@ -159,23 +230,43 @@ export default async function handler(req, res) {
   }));
 
   // ── Nieuw inkomend bericht ────────────────────────────────────────────────────
+  let incomingText = '';
   if (botStarts && apiMessages.length === 0) {
     // Lisa opent: synthetische user-turn (wordt NIET opgeslagen) zodat de API een user-bericht heeft.
     apiMessages.push({ role: 'user', content: '[Het gesprek begint — de volger heeft je zojuist gevolgd of gereageerd. Stuur een natuurlijk openingsbericht passend bij de intro-fase.]' });
   } else if (user_message && String(user_message).trim()) {
-    const text = String(user_message).trim();
+    incomingText = String(user_message).trim();
     const { error: inErr } = await supabaseAdmin.from('lisa_messages')
-      .insert({ conversation_id: conversation.id, direction: 'in', content: text, ai_generated: false });
+      .insert({ conversation_id: conversation.id, direction: 'in', content: incomingText, ai_generated: false });
     if (inErr) return res.status(500).json({ error: inErr.message });
-    apiMessages.push({ role: 'user', content: text });
+    apiMessages.push({ role: 'user', content: incomingText });
   }
 
   if (apiMessages.length === 0 || apiMessages[apiMessages.length - 1].role !== 'user') {
     return res.status(400).json({ error: 'Geen geldig inkomend bericht om op te reageren.' });
   }
 
+  // ── RAG-context (keyword-based) — alleen voor echte user-berichten (niet bot-start) ──
+  let userKeywords = [];
+  let matchedFaq = [];
+  let kbItems = [];
+  if (incomingText) {
+    try {
+      userKeywords = extractKeywords(incomingText);
+      matchedFaq = matchFaqByKeywords(config.kb_faq, userKeywords, 3);
+      const tagFilter = asArray(config.kb_tag_filter);
+      if (config.kb_use_general_kb !== false && tagFilter.length) {
+        kbItems = await getKbItemsByTags(tagFilter, 5);
+      }
+    } catch (ragErr) {
+      console.error('[lisa-respond] RAG-fout (genegeerd):', ragErr?.message || ragErr);
+      matchedFaq = []; kbItems = [];
+    }
+  }
+  const ragSection = buildRagSection(matchedFaq, kbItems);
+
   // ── Claude aanroepen ──────────────────────────────────────────────────────────
-  const systemPrompt = buildSystemPrompt(config, currentPhase);
+  const systemPrompt = buildSystemPrompt(config, currentPhase, ragSection);
   const t0 = Date.now();
   let aiText = '';
   let tokensUsed = 0;
@@ -232,5 +323,10 @@ export default async function handler(req, res) {
     config_version_used: config.version,
     tokens_used: tokensUsed,
     generation_time_ms: genMs,
+    // RAG-metadata (debug + Sandbox-badge)
+    rag_used: matchedFaq.length > 0 || kbItems.length > 0,
+    rag_faq_count: matchedFaq.length,
+    rag_kb_items_count: kbItems.length,
+    rag_keywords_extracted: userKeywords.slice(0, 10),
   });
 }
