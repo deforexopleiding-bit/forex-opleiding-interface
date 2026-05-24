@@ -168,6 +168,22 @@
     .disq-row, .fu-stat-row, .msg-stat-row { display:flex; justify-content:space-between; padding:7px 0; border-bottom:1px solid var(--border); font-size:13px; }
     .disq-row:last-child, .fu-stat-row:last-child, .msg-stat-row:last-child { border-bottom:none; }
     .stats-empty { color:var(--text-faint); font-size:12px; padding:8px 0; }
+    /* Delay settings (F10.3) */
+    .lisa-settings-panel { margin-bottom:14px; background:var(--bg-elev); border:1px solid var(--border); border-radius:10px; overflow:hidden; }
+    .lisa-settings-panel > summary { padding:11px 16px; cursor:pointer; font-weight:600; font-size:13px; list-style:none; display:flex; align-items:center; gap:8px; }
+    .lisa-settings-panel > summary::-webkit-details-marker { display:none; }
+    .lisa-settings-panel > summary:hover { background:var(--bg-elev-2); }
+    .settings-content { padding:14px 16px; border-top:1px solid var(--border); display:flex; flex-direction:column; gap:4px; }
+    .settings-content .form-row { margin-bottom:10px; }
+    .settings-content .form-label { display:block; font-size:12px; font-weight:600; color:var(--text-dim); margin-bottom:6px; }
+    .radio-group { display:flex; gap:16px; flex-wrap:wrap; }
+    .radio-group label { display:flex; align-items:center; gap:5px; cursor:pointer; font-size:13px; }
+    .perphase-grid { display:grid; grid-template-columns:repeat(2,1fr); gap:8px; }
+    @media (max-width:700px){ .perphase-grid { grid-template-columns:1fr; } }
+    .perphase-grid label { display:flex; align-items:center; justify-content:space-between; gap:8px; font-size:13px; color:var(--text-dim); }
+    .perphase-grid input { max-width:90px; }
+    .settings-actions { display:flex; gap:8px; flex-wrap:wrap; }
+    .lv-conv-id { font-size:10px; color:var(--text-faint); }
     /* Logs (F9) */
     .logs-header { display:flex; justify-content:flex-end; margin-bottom:14px; }
     .logs-section { margin-bottom:16px; padding:14px; background:var(--bg-elev); border:1px solid var(--border); border-radius:10px; }
@@ -299,6 +315,56 @@
       <div class="live-stat"><span class="stat-label">Kantooruren:</span><span class="stat-val" id="officeHoursDisplay">07:00 - 23:30</span></div>
       <div class="live-stat"><span class="stat-label">Laatste webhook:</span><span class="stat-val" id="lastWebhookAt">—</span></div>
     </div>
+
+    <!-- Delay/typing settings (F10.3) -->
+    <details class="lisa-settings-panel" id="lisaSettingsPanel">
+      <summary class="settings-summary"><i class="ti ti-adjustments"></i> Instellingen — response-delay &amp; typing</summary>
+      <div class="settings-content">
+        <div class="form-row">
+          <label class="form-label">Response-delay modus</label>
+          <div class="radio-group">
+            <label><input type="radio" name="delayMode" value="fixed" onchange="showDelayModeFields('fixed')" /> Vaste tijd</label>
+            <label><input type="radio" name="delayMode" value="random" onchange="showDelayModeFields('random')" /> Random (min-max)</label>
+            <label><input type="radio" name="delayMode" value="per_phase" onchange="showDelayModeFields('per_phase')" /> Per fase</label>
+          </div>
+        </div>
+
+        <div class="form-row delay-fixed-row" style="display:none">
+          <label class="form-label">Seconden wachten voor antwoord</label>
+          <input type="number" class="field-input" id="delayFixedSec" min="0" max="600" style="max-width:120px" />
+        </div>
+
+        <div class="form-row delay-random-row" style="display:none">
+          <label class="form-label">Random tussen min en max (seconden)</label>
+          <div class="fu-row-inline">
+            <input type="number" class="field-input" id="delayMinSec" min="0" max="600" style="max-width:100px" placeholder="min" />
+            <span class="field-hint">tot</span>
+            <input type="number" class="field-input" id="delayMaxSec" min="0" max="600" style="max-width:100px" placeholder="max" />
+          </div>
+        </div>
+
+        <div class="form-row delay-perphase-row" style="display:none">
+          <label class="form-label">Delay per fase (seconden)</label>
+          <div class="perphase-grid">
+            <label>Intro <input type="number" class="field-input" id="delayPhaseIntro" min="0" max="600" /></label>
+            <label>Doel <input type="number" class="field-input" id="delayPhaseDoel" min="0" max="600" /></label>
+            <label>Situatie <input type="number" class="field-input" id="delayPhaseSituatie" min="0" max="600" /></label>
+            <label>Band <input type="number" class="field-input" id="delayPhaseBand" min="0" max="600" /></label>
+            <label>Call <input type="number" class="field-input" id="delayPhaseCall" min="0" max="600" /></label>
+          </div>
+        </div>
+
+        <div class="form-row">
+          <label class="kb-toggle-row"><input type="checkbox" id="typingIndicatorToggle" /> <span class="field-label" style="margin:0">"Lisa is aan het typen…"-indicator versturen</span></label>
+        </div>
+
+        <div class="form-row settings-actions">
+          <button class="btn btn-primary" id="saveDelaySettingsBtn" onclick="saveDelaySettings()">Instellingen opslaan</button>
+          <button class="btn" id="backfillNamesBtn" onclick="runBackfillNames()">🔄 Backfill conversatie-namen</button>
+        </div>
+        <p class="field-hint">Lag-info: een antwoord wordt na de delay verstuurd door de cron (elke minuut), dus reken op de delay + tot ~60s.</p>
+      </div>
+    </details>
 
     <div class="tabs">
       <button class="tab active" data-tab="live"    onclick="switchTab('live')"><i class="ti ti-messages"></i> Live</button>
@@ -658,6 +724,76 @@ function updateLiveModeUI(s) {
     (s.office_hours_start || '').slice(0, 5) + ' - ' + (s.office_hours_end || '').slice(0, 5);
   document.getElementById('lastWebhookAt').textContent =
     s.ghl_webhook_last_received_at ? new Date(s.ghl_webhook_last_received_at).toLocaleString('nl-NL') : '—';
+  renderDelaySettings(s);
+}
+
+// ── Delay-instellingen (F10.3) ────────────────────────────────────────────────
+function showDelayModeFields(mode) {
+  document.querySelector('.delay-fixed-row').style.display = mode === 'fixed' ? '' : 'none';
+  document.querySelector('.delay-random-row').style.display = mode === 'random' ? '' : 'none';
+  document.querySelector('.delay-perphase-row').style.display = mode === 'per_phase' ? '' : 'none';
+}
+
+function renderDelaySettings(s) {
+  if (!s) return;
+  const mode = s.response_delay_mode || 'random';
+  const radio = document.querySelector('input[name="delayMode"][value="' + mode + '"]');
+  if (radio) radio.checked = true;
+  showDelayModeFields(mode);
+  document.getElementById('delayFixedSec').value = s.response_delay_fixed_seconds ?? 45;
+  document.getElementById('delayMinSec').value = s.response_delay_min_seconds ?? 30;
+  document.getElementById('delayMaxSec').value = s.response_delay_max_seconds ?? 90;
+  const pp = s.response_delay_per_phase || {};
+  document.getElementById('delayPhaseIntro').value = pp.intro ?? 30;
+  document.getElementById('delayPhaseDoel').value = pp.doel ?? 60;
+  document.getElementById('delayPhaseSituatie').value = pp.situatie ?? 75;
+  document.getElementById('delayPhaseBand').value = pp.band ?? 60;
+  document.getElementById('delayPhaseCall').value = pp.call ?? 45;
+  document.getElementById('typingIndicatorToggle').checked = s.typing_indicator_enabled !== false;
+}
+
+async function saveDelaySettings() {
+  const btn = document.getElementById('saveDelaySettingsBtn');
+  const orig = btn.textContent; btn.disabled = true; btn.textContent = 'Opslaan…';
+  try {
+    const mode = document.querySelector('input[name="delayMode"]:checked')?.value || 'random';
+    const num = (id, d) => parseInt(document.getElementById(id).value, 10) || d;
+    const payload = {
+      response_delay_mode: mode,
+      response_delay_fixed_seconds: num('delayFixedSec', 45),
+      response_delay_min_seconds: num('delayMinSec', 30),
+      response_delay_max_seconds: num('delayMaxSec', 90),
+      response_delay_per_phase: {
+        intro: num('delayPhaseIntro', 30), doel: num('delayPhaseDoel', 60), situatie: num('delayPhaseSituatie', 75),
+        band: num('delayPhaseBand', 60), call: num('delayPhaseCall', 45),
+      },
+      typing_indicator_enabled: document.getElementById('typingIndicatorToggle').checked,
+    };
+    const res = await window.AgentShared.apiFetch('/api/lisa-settings', { method: 'PATCH', body: JSON.stringify(payload) });
+    if (res.status === 403) { window.AgentShared?.showToast('Geen rechten voor deze actie', 'error'); return; }
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || 'HTTP ' + res.status);
+    renderDelaySettings(data.settings);
+    window.AgentShared?.showToast('Instellingen opgeslagen', 'success');
+  } catch (err) {
+    window.AgentShared?.showToast('Fout: ' + err.message, 'error');
+  } finally { btn.disabled = false; btn.textContent = orig; }
+}
+
+async function runBackfillNames() {
+  if (!confirm('Bestaande conversatie-namen ophalen via GHL? Dit kan even duren.')) return;
+  const btn = document.getElementById('backfillNamesBtn');
+  const orig = btn.textContent; btn.disabled = true; btn.textContent = '⏳ Backfilling…';
+  try {
+    const res = await window.AgentShared.apiFetch('/api/admin-lisa-backfill-names', { method: 'POST' });
+    if (res.status === 403) { window.AgentShared?.showToast('Geen rechten voor deze actie', 'error'); return; }
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || 'HTTP ' + res.status);
+    window.AgentShared?.showToast('Backfill: ' + (data.updated || 0) + ' bijgewerkt van ' + (data.processed || 0) + ' (' + (data.failed || 0) + ' mislukt)', 'success');
+    if (typeof lvLoadList === 'function' && lvLoaded) lvLoadList();
+  } catch (err) {
+    window.AgentShared?.showToast('Backfill fout: ' + err.message, 'error');
+  } finally { btn.disabled = false; btn.textContent = orig; }
 }
 
 async function toggleLiveMode() {
@@ -697,7 +833,12 @@ let lvKnownIds = null, lvBookedIds = new Set();
 let lvListTimer = null, lvMsgTimer = null;
 
 function lvIsActive() { return document.getElementById('panel-live')?.classList.contains('active'); }
-function lvName(c) { return c.contact_name || c.instagram_handle || (c.ghl_contact_id ? c.ghl_contact_id.slice(0, 10) : 'Onbekend'); }
+function lvName(c) {
+  return c.contact_name
+    || [c.first_name, c.last_name].filter(Boolean).join(' ').trim()
+    || c.instagram_handle
+    || (c.ghl_contact_id ? c.ghl_contact_id.slice(0, 10) : 'Onbekend');
+}
 function lvPhaseClass(p) { return ['qualified', 'disqualified', 'cold'].includes(p) ? ' ph-' + p : ''; }
 function lvRelTime(iso) {
   if (!iso) return '';
@@ -1804,7 +1945,9 @@ init();
     ['#liveModeToggleBtn', 'lisa.config.publish'],
     ['#lvModeWrap', 'lisa.config.publish'],
     ['#lvSendBtn', 'lisa.config.publish'],
-    ['#lvActions', 'lisa.config.publish']
+    ['#lvActions', 'lisa.config.publish'],
+    ['#saveDelaySettingsBtn', 'lisa.config.publish'],
+    ['#backfillNamesBtn', 'lisa.config.publish']
   ];
   async function applyRbacGating() {
     try { if (window._authSharedReady) await window._authSharedReady; } catch (e) {}
