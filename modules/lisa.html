@@ -145,6 +145,29 @@
     .fu-phases label { display:inline-flex; align-items:center; gap:4px; font-size:12px; color:var(--text-dim); cursor:pointer; }
     .fu-row-inline { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
     .fu-aiflag { font-size:11px; font-weight:600; padding:1px 8px; border-radius:999px; background:var(--bg-elev); border:1px solid var(--border); }
+    /* Stats (F8) */
+    .stats-header { display:flex; justify-content:flex-end; align-items:center; margin-bottom:16px; }
+    .period-selector { display:flex; gap:6px; }
+    .period-btn { padding:6px 13px; border-radius:8px; background:var(--bg-elev-2); border:1px solid var(--border); cursor:pointer; font-size:12px; font-weight:600; color:var(--text-dim); font-family:inherit; }
+    .period-btn.active { background:var(--brand-primary,#093d54); color:#fff; border-color:var(--brand-primary,#093d54); }
+    .stats-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:12px; margin-bottom:20px; }
+    @media (max-width:1100px){ .stats-grid { grid-template-columns:repeat(2,1fr); } }
+    .kpi-card { padding:14px; background:var(--bg-elev); border:1px solid var(--border); border-radius:10px; }
+    .kpi-label { font-size:11px; color:var(--text-faint); text-transform:uppercase; letter-spacing:.05em; }
+    .kpi-value { font-size:28px; font-weight:700; margin-top:4px; }
+    .kpi-sub { font-size:12px; color:var(--text-dim); margin-top:2px; }
+    .stats-2col { display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-bottom:16px; }
+    @media (max-width:1100px){ .stats-2col { grid-template-columns:1fr; } }
+    .stats-section { padding:14px; background:var(--bg-elev); border:1px solid var(--border); border-radius:10px; margin-bottom:16px; }
+    .stats-section h3 { margin:0 0 12px; font-size:14px; }
+    .funnel-bar, .phase-bar { display:flex; align-items:center; gap:8px; margin-bottom:8px; }
+    .funnel-label, .phase-label { width:104px; font-size:12px; color:var(--text-dim); flex-shrink:0; text-transform:capitalize; }
+    .funnel-track, .phase-track { flex:1; height:24px; background:var(--bg-elev-2); border-radius:6px; overflow:hidden; }
+    .funnel-fill, .phase-fill { height:100%; display:flex; align-items:center; padding:0 10px; font-size:12px; color:#fff; font-weight:600; transition:width .3s; white-space:nowrap; min-width:fit-content; }
+    .phase-fill { background:var(--brand-primary,#093d54); }
+    .disq-row, .fu-stat-row, .msg-stat-row { display:flex; justify-content:space-between; padding:7px 0; border-bottom:1px solid var(--border); font-size:13px; }
+    .disq-row:last-child, .fu-stat-row:last-child, .msg-stat-row:last-child { border-bottom:none; }
+    .stats-empty { color:var(--text-faint); font-size:12px; padding:8px 0; }
     /* Live mode (F5.3) */
     .lisa-live-bar { display:flex; justify-content:space-between; align-items:center; padding:14px 18px; background:var(--bg-elev); border:1px solid var(--border); border-radius:12px; margin-bottom:14px; gap:16px; flex-wrap:wrap; }
     .live-status { display:flex; align-items:center; gap:12px; }
@@ -294,9 +317,32 @@
       </div>
     </div>
 
-    <!-- STATS (placeholder) -->
+    <!-- STATS (F8) -->
     <div class="tab-panel" id="panel-stats">
-      <div class="placeholder"><i class="ti ti-chart-bar" style="font-size:28px"></i><p>Statistieken-dashboard — volgt in een latere fase.</p></div>
+      <div class="stats-header">
+        <div class="period-selector" id="statsPeriods">
+          <button class="period-btn" data-period="today" onclick="statsSetPeriod('today')">Vandaag</button>
+          <button class="period-btn active" data-period="week" onclick="statsSetPeriod('week')">Week</button>
+          <button class="period-btn" data-period="month" onclick="statsSetPeriod('month')">Maand</button>
+          <button class="period-btn" data-period="all" onclick="statsSetPeriod('all')">Alles</button>
+        </div>
+      </div>
+
+      <div class="stats-grid">
+        <div class="kpi-card"><div class="kpi-label">Nieuwe conversaties</div><div class="kpi-value" id="kpiNewConv">—</div></div>
+        <div class="kpi-card"><div class="kpi-label">Qualified</div><div class="kpi-value" id="kpiQualified">—</div><div class="kpi-sub" id="kpiQualifiedPct">—</div></div>
+        <div class="kpi-card"><div class="kpi-label">Calls geboekt</div><div class="kpi-value" id="kpiBooked">—</div><div class="kpi-sub" id="kpiBookedPct">—</div></div>
+        <div class="kpi-card"><div class="kpi-label">Kosten (EUR)</div><div class="kpi-value" id="kpiCost">—</div><div class="kpi-sub" id="kpiTokens">—</div></div>
+      </div>
+
+      <div class="stats-2col">
+        <section class="stats-section"><h3>🎯 Conversie-funnel</h3><div id="funnelChart"></div></section>
+        <section class="stats-section"><h3>📍 Conversaties per fase</h3><div id="phaseChart"></div></section>
+        <section class="stats-section"><h3>❌ Disqualificatie-redenen (top 5)</h3><div id="disqualifiedList"></div></section>
+        <section class="stats-section"><h3>📨 Follow-ups</h3><div id="followupStats"></div></section>
+      </div>
+
+      <section class="stats-section"><h3>💬 Berichten-flow</h3><div id="messagesStats"></div></section>
     </div>
 
     <!-- CONFIG (volledig) -->
@@ -841,12 +887,79 @@ async function lvResetPhase(phase) {
 
 window.addEventListener('beforeunload', () => { if (lvListTimer) clearInterval(lvListTimer); if (lvMsgTimer) clearInterval(lvMsgTimer); });
 
+// ── Stats dashboard (F8) ──────────────────────────────────────────────────────
+let statsLoaded = false;
+let statsPeriod = 'week';
+
+function statsInit() { if (statsLoaded) { loadStats(); return; } statsLoaded = true; loadStats(); }
+
+function statsSetPeriod(p) {
+  statsPeriod = p;
+  document.querySelectorAll('#statsPeriods .period-btn').forEach(b => b.classList.toggle('active', b.dataset.period === p));
+  loadStats();
+}
+
+async function loadStats() {
+  try {
+    const res = await window.AgentShared.apiFetch('/api/lisa-stats?period=' + encodeURIComponent(statsPeriod));
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'HTTP ' + res.status);
+    renderStats(data);
+  } catch (e) {
+    window.AgentShared?.showToast('Stats laden mislukt: ' + e.message, 'error');
+  }
+}
+
+function renderStats(data) {
+  const { totals, conversion_funnel: f, phase_distribution: ph, disqualified_top5: dq, followups: fu, cost } = data;
+
+  document.getElementById('kpiNewConv').textContent = totals.conversations;
+  document.getElementById('kpiQualified').textContent = totals.qualified;
+  document.getElementById('kpiQualifiedPct').textContent = f.qualified_pct + '% van nieuw';
+  document.getElementById('kpiBooked').textContent = totals.call_booked;
+  document.getElementById('kpiBookedPct').textContent = f.booked_pct + '% van nieuw';
+  document.getElementById('kpiCost').textContent = '€' + cost.total_cost_eur;
+  document.getElementById('kpiTokens').textContent = (cost.total_tokens / 1000).toFixed(1) + 'k tokens';
+
+  const maxF = Math.max(f.new, 1);
+  const bar = (label, val, pct, color, width) =>
+    '<div class="funnel-bar"><span class="funnel-label">' + label + '</span><div class="funnel-track">' +
+    '<div class="funnel-fill" style="width:' + width + '%;background:' + color + '">' + val + (pct != null ? ' (' + pct + '%)' : '') + '</div></div></div>';
+  document.getElementById('funnelChart').innerHTML =
+    bar('Nieuwe conv', f.new, null, '#3B82F6', 100) +
+    bar('Qualified', f.qualified, f.qualified_pct, '#10B981', (f.qualified / maxF * 100) || 0) +
+    bar('Call geboekt', f.booked, f.booked_pct, '#F59E0B', (f.booked / maxF * 100) || 0);
+
+  const phEntries = Object.entries(ph);
+  const maxP = Math.max(...phEntries.map(e => e[1]), 1);
+  document.getElementById('phaseChart').innerHTML = phEntries.map(([phase, count]) =>
+    '<div class="phase-bar"><span class="phase-label">' + esc(phase) + '</span><div class="phase-track">' +
+    '<div class="phase-fill" style="width:' + ((count / maxP * 100) || 0) + '%">' + count + '</div></div></div>').join('');
+
+  document.getElementById('disqualifiedList').innerHTML = dq.length
+    ? dq.map(d => '<div class="disq-row"><span>' + esc(d.reason) + '</span><strong>' + d.count + '</strong></div>').join('')
+    : '<div class="stats-empty">Geen disqualificaties in deze periode.</div>';
+
+  document.getElementById('followupStats').innerHTML =
+    '<div class="fu-stat-row"><span>Verstuurd</span><strong>' + fu.sent + '</strong></div>' +
+    '<div class="fu-stat-row"><span>Geannuleerd</span><strong>' + fu.cancelled + '</strong></div>' +
+    '<div class="fu-stat-row"><span>Regular / delayed</span><strong>' + fu.regular + ' / ' + fu.delayed + '</strong></div>' +
+    '<div class="fu-stat-row"><span>Success rate</span><strong>' + fu.success_rate + '%</strong></div>';
+
+  const avg = totals.conversations > 0 ? ((totals.messages_in + totals.messages_out) / totals.conversations).toFixed(1) : '0';
+  document.getElementById('messagesStats').innerHTML =
+    '<div class="msg-stat-row"><span>📥 Inkomend</span><strong>' + totals.messages_in + '</strong></div>' +
+    '<div class="msg-stat-row"><span>📤 Uitgaand</span><strong>' + totals.messages_out + '</strong></div>' +
+    '<div class="msg-stat-row"><span>Gemiddeld per conversatie</span><strong>' + avg + '</strong></div>';
+}
+
 // ── Tabs ──────────────────────────────────────────────────────────────────
 function switchTab(name) {
   document.querySelectorAll('.tab').forEach(b => b.classList.toggle('active', b.dataset.tab === name));
   document.querySelectorAll('.tab-panel').forEach(p => p.classList.toggle('active', p.id === 'panel-' + name));
   if (name === 'sandbox') sbxInit();
   if (name === 'live') lvInit();
+  if (name === 'stats') statsInit();
 }
 function switchCfgSub(name) {
   document.querySelectorAll('.cfg-subtab').forEach(b => b.classList.toggle('active', b.dataset.sub === name));
