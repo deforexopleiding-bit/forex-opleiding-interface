@@ -166,6 +166,74 @@ function parseLisaJson(text, fallbackPhase) {
   return { response, phase };
 }
 
+// Genereert Lisa's antwoord o.b.v. een al-geladen config + conversatie.
+// PERSISTEERT NIET — de caller (sandbox-handler of GHL-webhook) slaat in/uit op.
+// Return: { ok, response, detected_phase, config_version_id, config_version,
+//           model_used, tokens_used, generation_time_ms, rag_* } of { ok:false, status, error }.
+export async function generateLisaResponse({ config, conversation, userMessage, phaseOverride = null, botStarts = false }) {
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) return { ok: false, status: 500, error: 'ANTHROPIC_API_KEY niet geconfigureerd' };
+  if (!config) return { ok: false, status: 400, error: 'Geen Lisa-config gevonden.' };
+
+  const currentPhase = (phaseOverride && VALID_PHASES.includes(phaseOverride)) ? phaseOverride : (conversation.phase || 'intro');
+
+  const { data: history } = await supabaseAdmin.from('lisa_messages')
+    .select('direction, content, sent_at').eq('conversation_id', conversation.id)
+    .order('sent_at', { ascending: true });
+  const apiMessages = asArray(history).map((m) => ({ role: m.direction === 'in' ? 'user' : 'assistant', content: m.content }));
+
+  let incomingText = '';
+  if (botStarts && apiMessages.length === 0) {
+    apiMessages.push({ role: 'user', content: '[Het gesprek begint — de volger heeft je zojuist gevolgd of gereageerd. Stuur een natuurlijk openingsbericht passend bij de intro-fase.]' });
+  } else if (userMessage && String(userMessage).trim()) {
+    incomingText = String(userMessage).trim();
+    apiMessages.push({ role: 'user', content: incomingText });
+  }
+  if (apiMessages.length === 0 || apiMessages[apiMessages.length - 1].role !== 'user') {
+    return { ok: false, status: 400, error: 'Geen geldig inkomend bericht om op te reageren.' };
+  }
+
+  // RAG (keyword-based) — alleen voor echte user-berichten.
+  let userKeywords = [], matchedFaq = [], kbItems = [];
+  if (incomingText) {
+    try {
+      userKeywords = extractKeywords(incomingText);
+      matchedFaq = matchFaqByKeywords(config.kb_faq, userKeywords, 3);
+      const tagFilter = asArray(config.kb_tag_filter);
+      if (config.kb_use_general_kb !== false && tagFilter.length) kbItems = await getKbItemsByTags(tagFilter, 5);
+    } catch (ragErr) {
+      console.error('[lisa-respond] RAG-fout (genegeerd):', ragErr?.message || ragErr);
+      matchedFaq = []; kbItems = [];
+    }
+  }
+  const ragSection = buildRagSection(matchedFaq, kbItems);
+
+  const systemPrompt = buildSystemPrompt(config, currentPhase, ragSection);
+  const t0 = Date.now();
+  let aiText = '', tokensUsed = 0;
+  try {
+    const client = new Anthropic({ apiKey });
+    const resp = await client.messages.create({ model: LISA_MODEL, max_tokens: 1024, system: systemPrompt, messages: apiMessages });
+    aiText = resp.content?.[0]?.text?.trim() || '';
+    tokensUsed = (resp.usage?.input_tokens || 0) + (resp.usage?.output_tokens || 0);
+  } catch (err) {
+    console.error('[lisa-respond] Anthropic API error:', err?.message || err);
+    return { ok: false, status: 502, error: `AI-generatie mislukt: ${err?.message || 'onbekende fout'}` };
+  }
+  const genMs = Date.now() - t0;
+  const { response, phase: detectedPhase } = parseLisaJson(aiText, currentPhase);
+
+  return {
+    ok: true, response, detected_phase: detectedPhase,
+    config_version_id: config.id, config_version: config.version,
+    model_used: LISA_MODEL, tokens_used: tokensUsed, generation_time_ms: genMs,
+    rag_used: matchedFaq.length > 0 || kbItems.length > 0,
+    rag_faq_count: matchedFaq.length, rag_kb_items_count: kbItems.length,
+    rag_keywords_extracted: userKeywords.slice(0, 10),
+  };
+}
+
+// Sandbox-handler (POST) — wrapt generateLisaResponse en persisteert zelf.
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
   res.setHeader('Content-Type', 'application/json');
@@ -214,119 +282,47 @@ export default async function handler(req, res) {
     conversation = data;
   }
 
-  // ── Huidige fase bepalen ──────────────────────────────────────────────────────
-  const currentPhase = (phase_override && VALID_PHASES.includes(phase_override))
-    ? phase_override
-    : (conversation.phase || 'intro');
-
-  // ── Geschiedenis ophalen ──────────────────────────────────────────────────────
-  const { data: history } = await supabaseAdmin.from('lisa_messages')
-    .select('direction, content, sent_at').eq('conversation_id', conversation.id)
-    .order('sent_at', { ascending: true });
-
-  const apiMessages = asArray(history).map((m) => ({
-    role: m.direction === 'in' ? 'user' : 'assistant',
-    content: m.content,
-  }));
-
-  // ── Nieuw inkomend bericht ────────────────────────────────────────────────────
-  let incomingText = '';
-  if (botStarts && apiMessages.length === 0) {
-    // Lisa opent: synthetische user-turn (wordt NIET opgeslagen) zodat de API een user-bericht heeft.
-    apiMessages.push({ role: 'user', content: '[Het gesprek begint — de volger heeft je zojuist gevolgd of gereageerd. Stuur een natuurlijk openingsbericht passend bij de intro-fase.]' });
-  } else if (user_message && String(user_message).trim()) {
-    incomingText = String(user_message).trim();
-    const { error: inErr } = await supabaseAdmin.from('lisa_messages')
-      .insert({ conversation_id: conversation.id, direction: 'in', content: incomingText, ai_generated: false });
-    if (inErr) return res.status(500).json({ error: inErr.message });
-    apiMessages.push({ role: 'user', content: incomingText });
+  // ── Genereren (zonder persistentie) ───────────────────────────────────────────
+  const result = await generateLisaResponse({
+    config, conversation,
+    userMessage: botStarts ? null : user_message,
+    phaseOverride: phase_override,
+    botStarts,
+  });
+  if (!result.ok) {
+    return res.status(result.status || 500).json({ error: result.error, conversation_id: conversation.id, model: LISA_MODEL });
   }
 
-  if (apiMessages.length === 0 || apiMessages[apiMessages.length - 1].role !== 'user') {
-    return res.status(400).json({ error: 'Geen geldig inkomend bericht om op te reageren.' });
-  }
-
-  // ── RAG-context (keyword-based) — alleen voor echte user-berichten (niet bot-start) ──
-  let userKeywords = [];
-  let matchedFaq = [];
-  let kbItems = [];
-  if (incomingText) {
-    try {
-      userKeywords = extractKeywords(incomingText);
-      matchedFaq = matchFaqByKeywords(config.kb_faq, userKeywords, 3);
-      const tagFilter = asArray(config.kb_tag_filter);
-      if (config.kb_use_general_kb !== false && tagFilter.length) {
-        kbItems = await getKbItemsByTags(tagFilter, 5);
-      }
-    } catch (ragErr) {
-      console.error('[lisa-respond] RAG-fout (genegeerd):', ragErr?.message || ragErr);
-      matchedFaq = []; kbItems = [];
-    }
-  }
-  const ragSection = buildRagSection(matchedFaq, kbItems);
-
-  // ── Claude aanroepen ──────────────────────────────────────────────────────────
-  const systemPrompt = buildSystemPrompt(config, currentPhase, ragSection);
-  const t0 = Date.now();
-  let aiText = '';
-  let tokensUsed = 0;
-  try {
-    const client = new Anthropic({ apiKey });
-    const resp = await client.messages.create({
-      model: LISA_MODEL,
-      max_tokens: 1024,
-      system: systemPrompt,
-      messages: apiMessages,
-    });
-    aiText = resp.content?.[0]?.text?.trim() || '';
-    tokensUsed = (resp.usage?.input_tokens || 0) + (resp.usage?.output_tokens || 0);
-  } catch (err) {
-    console.error('[lisa-respond] Anthropic API error:', err?.message || err);
-    return res.status(502).json({
-      error: `AI-generatie mislukt: ${err?.message || 'onbekende fout'}`,
-      conversation_id: conversation.id,
-      model: LISA_MODEL,
+  // ── Persisteren: inkomend (echt user-bericht) + uitgaand ───────────────────────
+  if (!botStarts && user_message && String(user_message).trim()) {
+    await supabaseAdmin.from('lisa_messages').insert({
+      conversation_id: conversation.id, direction: 'in', content: String(user_message).trim(), ai_generated: false,
     });
   }
-  const genMs = Date.now() - t0;
-
-  const { response: lisaResponse, phase: detectedPhase } = parseLisaJson(aiText, currentPhase);
-
-  // ── Lisa-antwoord opslaan ─────────────────────────────────────────────────────
-  const { data: outMsg, error: outErr } = await supabaseAdmin.from('lisa_messages')
-    .insert({
-      conversation_id: conversation.id,
-      direction: 'out',
-      content: lisaResponse,
-      ai_generated: true,
-      config_version_id: config.id,
-      model_used: LISA_MODEL,
-      tokens_used: tokensUsed,
-      generation_time_ms: genMs,
-      detected_phase: detectedPhase,
-    })
-    .select('id').single();
+  const { data: outMsg, error: outErr } = await supabaseAdmin.from('lisa_messages').insert({
+    conversation_id: conversation.id, direction: 'out', content: result.response, ai_generated: true,
+    config_version_id: result.config_version_id, model_used: result.model_used,
+    tokens_used: result.tokens_used, generation_time_ms: result.generation_time_ms, detected_phase: result.detected_phase,
+  }).select('id').single();
   if (outErr) return res.status(500).json({ error: outErr.message });
 
-  // ── Conversatie-fase bijwerken indien gewijzigd ────────────────────────────────
-  if (detectedPhase && detectedPhase !== conversation.phase) {
-    const patch = { phase: detectedPhase };
-    if (detectedPhase === 'qualified') patch.qualified = true;
+  if (result.detected_phase && result.detected_phase !== conversation.phase) {
+    const patch = { phase: result.detected_phase };
+    if (result.detected_phase === 'qualified') patch.qualified = true;
     await supabaseAdmin.from('lisa_conversations').update(patch).eq('id', conversation.id);
   }
 
   return res.status(200).json({
     conversation_id: conversation.id,
     message_id: outMsg.id,
-    lisa_response: lisaResponse,
-    detected_phase: detectedPhase,
-    config_version_used: config.version,
-    tokens_used: tokensUsed,
-    generation_time_ms: genMs,
-    // RAG-metadata (debug + Sandbox-badge)
-    rag_used: matchedFaq.length > 0 || kbItems.length > 0,
-    rag_faq_count: matchedFaq.length,
-    rag_kb_items_count: kbItems.length,
-    rag_keywords_extracted: userKeywords.slice(0, 10),
+    lisa_response: result.response,
+    detected_phase: result.detected_phase,
+    config_version_used: result.config_version,
+    tokens_used: result.tokens_used,
+    generation_time_ms: result.generation_time_ms,
+    rag_used: result.rag_used,
+    rag_faq_count: result.rag_faq_count,
+    rag_kb_items_count: result.rag_kb_items_count,
+    rag_keywords_extracted: result.rag_keywords_extracted,
   });
 }
