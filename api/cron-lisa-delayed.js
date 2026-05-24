@@ -1,10 +1,12 @@
 // api/cron-lisa-delayed.js
-// Cron (elke 5 min, vercel.json). Auth: CRON_SECRET (checkCronAuth). Draait alleen bij
-// live_mode + binnen kantooruren. Verwerkt TWEE typen lisa_followups in één run:
+// Cron (elke minuut, vercel.json). Auth: CRON_SECRET (checkCronAuth). Draait alleen bij
+// live_mode + binnen kantooruren. Verwerkt DRIE typen lisa_followups in één run:
 //
-//   1) is_delayed_response  → vooraf gegenereerd antwoord (buiten kantooruren) nu versturen
+//   1) is_response_delay     → in-kantooruren direct antwoord (vooraf gegenereerd in de webhook),
+//                              met menselijke vertraging nu versturen + eerste follow-up plannen.
+//   2) is_delayed_response   → vooraf gegenereerd antwoord (buiten kantooruren) nu versturen
 //                              + daarna de eerste reguliere follow-up plannen.
-//   2) is_regular_followup   → sequence follow-up, met guards (volger geantwoord? fase/qualified
+//   3) is_regular_followup   → sequence follow-up, met guards (volger geantwoord? fase/qualified
 //                              veranderd? gepauzeerd/stop?) + AI of letterlijk (use_ai),
 //                              daarna de volgende stap plannen.
 //
@@ -54,9 +56,9 @@ export default async function handler(req, res) {
 
     // 4. Queue: delayed + regular, scheduled + verlopen
     const { data: followups, error: fuErr } = await supabaseAdmin.from('lisa_followups')
-      .select('id, conversation_id, followup_step, scheduled_for, pre_generated_response, is_delayed_response, is_regular_followup, template_at_schedule, conditions_snapshot, used_ai, lisa_conversations!inner(id, ghl_contact_id, ghl_conversation_id, ghl_location_id, phase, qualified, call_booked, stop_detected_at, followup_paused)')
+      .select('id, conversation_id, followup_step, scheduled_for, pre_generated_response, is_delayed_response, is_regular_followup, is_response_delay, template_at_schedule, conditions_snapshot, used_ai, lisa_conversations!inner(id, ghl_contact_id, ghl_conversation_id, ghl_location_id, phase, qualified, call_booked, stop_detected_at, followup_paused, human_takeover)')
       .eq('status', 'scheduled')
-      .or('is_delayed_response.eq.true,is_regular_followup.eq.true')
+      .or('is_delayed_response.eq.true,is_regular_followup.eq.true,is_response_delay.eq.true')
       .lte('scheduled_for', new Date().toISOString())
       .order('scheduled_for', { ascending: true })
       .limit(BATCH_LIMIT);
@@ -72,6 +74,28 @@ export default async function handler(req, res) {
         await cancelFollowup(fu.id, 'missing_contact');
         if (fu.is_delayed_response) delayedResolved++;
         results.push({ id: fu.id, status: 'cancelled', reason: 'missing_contact' });
+        continue;
+      }
+
+      // ── Response-delay (in-kantooruren direct antwoord, vooraf gegenereerd) ───
+      if (fu.is_response_delay) {
+        if (!fu.pre_generated_response) { await cancelFollowup(fu.id, 'missing_response'); results.push({ id: fu.id, status: 'cancelled', reason: 'missing_response' }); continue; }
+        // Mens heeft overgenomen tijdens de delay → niet meer namens Lisa sturen.
+        if (conv.human_takeover) { await cancelFollowup(fu.id, 'human_takeover'); results.push({ id: fu.id, status: 'cancelled', reason: 'human_takeover' }); continue; }
+        const sr = await sendToGhl(conv.ghl_contact_id, fu.pre_generated_response, { conversationId: conv.ghl_conversation_id, locationId: conv.ghl_location_id });
+        if (sr.ok) {
+          await supabaseAdmin.from('lisa_messages').insert({
+            conversation_id: conv.id, direction: 'out', content: fu.pre_generated_response,
+            ai_generated: true, is_followup: false, is_response_delay: true,
+            ghl_message_id: sr.message_id || null, sent_at: new Date().toISOString(),
+          });
+          await supabaseAdmin.from('lisa_followups').update({ status: 'sent', sent_at: new Date().toISOString() }).eq('id', fu.id);
+          // Na het directe antwoord: eerste reguliere follow-up plannen (vuurt alleen bij stilte).
+          await scheduleNextFollowup({ conversationId: conv.id, currentStep: 0, config, conversation: conv });
+          sentCount++; results.push({ id: fu.id, status: 'sent', type: 'response_delay' });
+        } else {
+          await cancelFollowup(fu.id, `send_failed: ${sr.error}`); results.push({ id: fu.id, status: 'failed', error: sr.error });
+        }
         continue;
       }
 

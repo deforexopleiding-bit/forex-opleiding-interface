@@ -38,7 +38,7 @@
     },
     {
       "path": "/api/cron-lisa-delayed",
-      "schedule": "*/5 * * * *"
+      "schedule": "* * * * *"
     }
   ],
   "headers": [
