@@ -38,7 +38,7 @@ export default async function handler(req, res) {
       if (!conv) return res.status(404).json({ error: 'Conversatie niet gevonden.' });
 
       const { data: messages } = await supabaseAdmin.from('lisa_messages')
-        .select('id, direction, content, sent_at, ai_generated, human_override, detected_phase, tokens_used, model_used, ghl_message_id, is_followup')
+        .select('id, direction, content, sent_at, ai_generated, human_override, is_system, detected_phase, tokens_used, model_used, ghl_message_id, is_followup')
         .eq('conversation_id', conv.id).order('sent_at', { ascending: true });
       const { data: feedback } = await supabaseAdmin.from('lisa_feedback')
         .select('message_id, rating').eq('conversation_id', conv.id);
