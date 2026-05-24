@@ -592,6 +592,58 @@
     .footer-user { display: flex; align-items: center; gap: 9px; padding: 9px 10px; border-radius: 8px; color: var(--text-dim); font-size: 13px; font-weight: 500; cursor: pointer; transition: background .15s; }
     .footer-user:hover { background: var(--nav-item-hover); color: var(--text); }
     .footer-avatar { width: 26px; height: 26px; flex-shrink: 0; border-radius: 50%; background: var(--accent-grad); display: grid; place-items: center; font-size: 10px; font-weight: 800; color: #fff; }
+    /* ── KB Tags (F4.2) ─────────────────────────────────────────── */
+    .kb-tag-chip { display:inline-flex; align-items:center; gap:5px; padding:3px 9px; border-radius:12px; font-size:11px; font-weight:600; color:#fff; line-height:1.3; white-space:nowrap; }
+    .kb-tag-chip .kb-tag-x { cursor:pointer; opacity:.85; font-size:13px; line-height:1; display:inline-flex; }
+    .kb-tag-chip .kb-tag-x:hover { opacity:1; }
+    .tags-toolbar { display:flex; gap:10px; align-items:center; margin-bottom:14px; flex-wrap:wrap; }
+    .tags-grid { display:flex; flex-wrap:wrap; gap:8px; }
+    .tag-manage { display:inline-flex; align-items:center; gap:8px; padding:6px 10px; border-radius:12px; border:1px solid var(--border); background:var(--bg-elev); }
+    .tag-manage .tag-dot { width:12px; height:12px; border-radius:50%; flex-shrink:0; }
+    .tag-manage .tag-name { font-size:12px; font-weight:600; color:var(--text); cursor:pointer; }
+    .tag-manage .tag-desc { font-size:11px; color:var(--text-faint); }
+    .tag-manage .tag-del { background:none; border:none; color:var(--text-faint); cursor:pointer; font-size:15px; line-height:1; padding:0 2px; }
+    .tag-manage .tag-del:hover { color:var(--red); }
+    /* Filter op tags */
+    .tag-filter-row { display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-top:12px; padding-top:12px; border-top:1px solid var(--border); }
+    .tag-filter-row .tf-label { font-size:12px; font-weight:600; color:var(--text-dim); }
+    .tag-filter-chip { cursor:pointer; opacity:.4; transition:opacity .12s; }
+    .tag-filter-chip.active { opacity:1; box-shadow:0 0 0 2px var(--bg), 0 0 0 4px currentColor; }
+    .tf-mode { display:inline-flex; border:1px solid var(--border); border-radius:8px; overflow:hidden; }
+    .tf-mode button { background:var(--bg-elev); border:none; padding:4px 10px; font-size:11px; font-weight:700; color:var(--text-faint); cursor:pointer; font-family:inherit; }
+    .tf-mode button.active { background:var(--text); color:var(--bg); }
+    .tf-clear { background:none; border:none; color:var(--accent-cyan); font-size:12px; cursor:pointer; font-family:inherit; }
+    /* Per-item tag rij */
+    .item-tags { display:flex; align-items:center; gap:6px; flex-wrap:wrap; margin-top:8px; position:relative; }
+    .item-tags .it-add, .item-tags .it-ai { background:none; border:1px dashed var(--border-strong,var(--border)); border-radius:12px; padding:3px 9px; font-size:11px; cursor:pointer; font-family:inherit; display:inline-flex; align-items:center; gap:3px; }
+    .item-tags .it-add { color:var(--text-dim); }
+    .item-tags .it-add:hover { color:var(--text); border-color:var(--text); }
+    .item-tags .it-ai { color:var(--accent-cyan); border-style:solid; border-color:var(--accent-cyan); }
+    .item-tags .it-ai:hover { background:rgba(34,211,238,0.10); }
+    .it-ai .spin, .ai-spin { width:11px; height:11px; border:2px solid currentColor; border-top-color:transparent; border-radius:50%; display:inline-block; animation:kbspin .7s linear infinite; }
+    @keyframes kbspin { to { transform:rotate(360deg); } }
+    /* Tag-picker dropdown */
+    .tag-pop { position:absolute; z-index:50; top:100%; left:0; margin-top:4px; background:var(--bg-elev); border:1px solid var(--border-strong,var(--border)); border-radius:10px; padding:8px; min-width:180px; max-height:240px; overflow-y:auto; box-shadow:0 8px 24px rgba(0,0,0,.18); display:flex; flex-direction:column; gap:3px; }
+    .tag-pop button { text-align:left; background:none; border:none; padding:4px 6px; border-radius:6px; cursor:pointer; font-family:inherit; display:flex; align-items:center; gap:6px; font-size:12px; color:var(--text); }
+    .tag-pop button:hover { background:var(--nav-item-hover); }
+    .tag-pop .tp-dot { width:10px; height:10px; border-radius:50%; flex-shrink:0; }
+    .tag-pop .tp-empty { font-size:11px; color:var(--text-faint); padding:4px 6px; }
+    /* Modal */
+    .kb-modal { position:fixed; inset:0; background:rgba(0,0,0,.55); z-index:500; display:flex; align-items:center; justify-content:center; padding:20px; }
+    .kb-modal.hidden { display:none; }
+    .kb-modal-card { background:var(--bg-elev); border:1px solid var(--border-strong,var(--border)); border-radius:14px; width:100%; max-width:440px; max-height:90vh; overflow-y:auto; }
+    .kb-modal-head { display:flex; align-items:center; justify-content:space-between; padding:14px 18px; border-bottom:1px solid var(--border); font-weight:700; font-size:15px; }
+    .kb-modal-close { background:none; border:none; color:var(--text-faint); font-size:22px; cursor:pointer; line-height:1; }
+    .kb-modal-body { padding:16px 18px; display:flex; flex-direction:column; gap:14px; }
+    .kb-modal-foot { display:flex; gap:8px; justify-content:flex-end; padding:0 18px 16px; }
+    .kb-color-row { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+    .kb-color-row input[type=color] { width:42px; height:34px; border:1px solid var(--border); border-radius:8px; background:none; cursor:pointer; padding:2px; }
+    .kb-swatches { display:flex; gap:6px; flex-wrap:wrap; }
+    .kb-swatch { width:22px; height:22px; border-radius:50%; cursor:pointer; border:2px solid transparent; }
+    .kb-swatch.sel { border-color:var(--text); }
+    .kb-ai-tag-row { display:flex; align-items:center; gap:8px; padding:8px 10px; border:1px solid var(--border); border-radius:10px; }
+    .kb-ai-tag-row .spacer { flex:1; }
+    .kb-ai-reason { font-size:12px; color:var(--text-dim); background:var(--bg); border-radius:8px; padding:10px; line-height:1.5; }
   </style>
 </head>
 <body>
@@ -736,6 +788,29 @@
       <div id="staging"></div>
     </section>
 
+    <!-- Tags (F4.2) -->
+    <section class="section" id="tagsSection">
+      <div class="section-head">
+        <div class="section-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"></path><line x1="7" y1="7" x2="7.01" y2="7"></line></svg>
+        </div>
+        <div class="section-title">
+          <h3>Tags <span id="tagsCount" style="color:var(--text-faint); font-weight:500;"></span></h3>
+          <div class="sub">Label kennisbank-items zodat Lisa en filters de juiste kennis vinden</div>
+        </div>
+        <div class="section-actions">
+          <button class="btn btn-primary" id="newTagBtn">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+            Nieuwe tag
+          </button>
+        </div>
+      </div>
+      <div class="tags-toolbar">
+        <input type="search" id="tagSearch" class="search-input" placeholder="Zoek tags…" style="max-width:260px" />
+      </div>
+      <div class="tags-grid" id="tagsList"></div>
+    </section>
+
     <!-- Overzicht -->
     <section class="section">
       <div class="section-head">
@@ -786,6 +861,43 @@
         </label>
       </div>
     </section>
+  </div>
+
+  <!-- Tag modal (F4.2) -->
+  <div class="kb-modal hidden" id="tagModal">
+    <div class="kb-modal-card">
+      <div class="kb-modal-head"><span id="tagModalTitle">Nieuwe tag</span><button class="kb-modal-close" data-tag-modal-close>&times;</button></div>
+      <div class="kb-modal-body">
+        <div class="field">
+          <label class="field-label" for="tagNameInput">Naam</label>
+          <input class="field-input" id="tagNameInput" maxlength="60" placeholder="bv. lisa-product" />
+        </div>
+        <div class="field">
+          <label class="field-label">Kleur</label>
+          <div class="kb-color-row">
+            <input type="color" id="tagColorInput" value="#6B7280" />
+            <div class="kb-swatches" id="tagSwatches"></div>
+          </div>
+        </div>
+        <div class="field">
+          <label class="field-label" for="tagDescInput">Omschrijving <span style="color:var(--text-faint);font-weight:400">(optioneel)</span></label>
+          <textarea class="field-textarea" id="tagDescInput" style="min-height:60px" placeholder="Waar gaat deze tag over?"></textarea>
+        </div>
+      </div>
+      <div class="kb-modal-foot">
+        <button class="btn" data-tag-modal-close>Annuleren</button>
+        <button class="btn btn-primary" id="tagSaveBtn">Opslaan</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- AI tag-suggestie modal (F4.2d) -->
+  <div class="kb-modal hidden" id="aiTagModal">
+    <div class="kb-modal-card">
+      <div class="kb-modal-head"><span>✨ AI tag-suggesties</span><button class="kb-modal-close" data-aitag-close>&times;</button></div>
+      <div class="kb-modal-body" id="aiTagBody"></div>
+      <div class="kb-modal-foot" id="aiTagFoot"></div>
+    </div>
   </div>
 
   <script src="/modules/shared/supabase-client.js"></script>
@@ -1426,6 +1538,7 @@
       // adminNavLink wordt nu centraal door sidebar.js gegate (RBAC-voorbereiding)
       renderToggle();
       loadFromSupabase(); // Supabase is de enige bron — toont loading state + rendert alles na load
+      setupTags();        // F4.2 — tag-beheer + (in F4.2c) per-item chips/filter
 
       // Profile field listeners
       ['overOns', 'nooitZeggen', 'contactgegevens'].forEach((id) => {
@@ -1487,6 +1600,122 @@
           : 'Kennisbank inactief'
         );
       });
+    }
+
+    /* ─────────────────────────────────────────────────────────────
+       Tags — beheer (F4.2b)
+       ───────────────────────────────────────────────────────────── */
+    const TAG_SWATCHES = ['#6B7280','#3B82F6','#10B981','#8B5CF6','#F59E0B','#EF4444','#06B6D4','#EC4899','#84CC16','#F97316'];
+    state.tags = [];
+    state.tagSearch = '';
+    let editingTagId = null;
+
+    async function loadTags() {
+      try {
+        const res = await window.AgentShared.apiFetch('/api/kb-tags?action=list');
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'HTTP ' + res.status);
+        state.tags = data.tags || [];
+        renderTags();
+      } catch (err) {
+        console.error('[kennisbank] loadTags fout:', err.message);
+        $('tagsList').innerHTML = `<div class="item-empty" style="color:var(--red)">Tags laden mislukt — ${escapeHtml(err.message)}</div>`;
+      }
+    }
+
+    function tagById(id) { return state.tags.find((t) => t.id === id) || null; }
+
+    function renderTags() {
+      $('tagsCount').textContent = state.tags.length ? `· ${state.tags.length}` : '';
+      const q = state.tagSearch.trim().toLowerCase();
+      const list = q
+        ? state.tags.filter((t) => t.name.toLowerCase().includes(q) || (t.description || '').toLowerCase().includes(q))
+        : state.tags;
+      const host = $('tagsList');
+      if (!state.tags.length) { host.innerHTML = '<div class="item-empty">Nog geen tags. Maak je eerste tag aan.</div>'; return; }
+      if (!list.length) { host.innerHTML = '<div class="item-empty">Geen tags gevonden.</div>'; return; }
+      host.innerHTML = list.map((t) => `
+        <div class="tag-manage" data-tag-id="${escapeHtml(t.id)}">
+          <span class="tag-dot" style="background:${escapeHtml(t.color)}"></span>
+          <span class="tag-name" data-tag-edit>${escapeHtml(t.name)}</span>
+          ${t.description ? `<span class="tag-desc">${escapeHtml(t.description)}</span>` : ''}
+          <button class="tag-del" data-tag-del title="Verwijderen">&times;</button>
+        </div>`).join('');
+      host.querySelectorAll('[data-tag-id]').forEach((el) => {
+        const id = el.dataset.tagId;
+        el.querySelector('[data-tag-edit]').addEventListener('click', () => openTagModal(tagById(id)));
+        el.querySelector('[data-tag-del]').addEventListener('click', () => deleteTag(id));
+      });
+    }
+
+    function renderSwatches(selected) {
+      $('tagSwatches').innerHTML = TAG_SWATCHES.map((c) =>
+        `<span class="kb-swatch ${c.toLowerCase() === String(selected).toLowerCase() ? 'sel' : ''}" style="background:${c}" data-swatch="${c}"></span>`).join('');
+      $('tagSwatches').querySelectorAll('[data-swatch]').forEach((s) => {
+        s.addEventListener('click', () => { $('tagColorInput').value = s.dataset.swatch; renderSwatches(s.dataset.swatch); });
+      });
+    }
+
+    function openTagModal(tag) {
+      editingTagId = tag ? tag.id : null;
+      $('tagModalTitle').textContent = tag ? 'Tag bewerken' : 'Nieuwe tag';
+      $('tagNameInput').value = tag ? tag.name : '';
+      $('tagDescInput').value = tag ? (tag.description || '') : '';
+      const color = tag ? tag.color : '#6B7280';
+      $('tagColorInput').value = color;
+      renderSwatches(color);
+      $('tagModal').classList.remove('hidden');
+      $('tagNameInput').focus();
+    }
+    function closeTagModal() { $('tagModal').classList.add('hidden'); editingTagId = null; }
+
+    async function saveTag() {
+      const name = $('tagNameInput').value.trim();
+      if (!name) { showToast('Naam is verplicht'); return; }
+      const payload = { name, color: $('tagColorInput').value, description: $('tagDescInput').value.trim() || null };
+      const btn = $('tagSaveBtn'); const o = btn.textContent; btn.disabled = true; btn.textContent = 'Opslaan…';
+      try {
+        const url = editingTagId ? '/api/kb-tags?id=' + encodeURIComponent(editingTagId) : '/api/kb-tags';
+        const res = await window.AgentShared.apiFetch(url, {
+          method: editingTagId ? 'PATCH' : 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (res.status === 403) { showToast('Geen rechten voor tags'); return; }
+        if (res.status === 409) { showToast('Tag bestaat al'); return; }
+        if (!res.ok) throw new Error(data.error || 'HTTP ' + res.status);
+        showToast(editingTagId ? 'Tag bijgewerkt' : 'Tag aangemaakt');
+        closeTagModal();
+        await loadTags();
+        renderItems();
+      } catch (err) {
+        showToast('Opslaan mislukt'); console.error('[kennisbank] saveTag:', err.message);
+      } finally { btn.disabled = false; btn.textContent = o; }
+    }
+
+    async function deleteTag(id) {
+      const t = tagById(id); if (!t) return;
+      if (!confirm(`Tag '${t.name}' verwijderen? Items verliezen deze tag ook.`)) return;
+      try {
+        const res = await window.AgentShared.apiFetch('/api/kb-tags?id=' + encodeURIComponent(id), { method: 'DELETE' });
+        const data = await res.json().catch(() => ({}));
+        if (res.status === 403) { showToast('Geen rechten voor verwijderen'); return; }
+        if (!res.ok) throw new Error(data.error || 'HTTP ' + res.status);
+        showToast('Tag verwijderd');
+        await loadTags();
+        if (typeof loadItemTagLinks === 'function') await loadItemTagLinks();
+        renderItems();
+      } catch (err) { showToast('Verwijderen mislukt'); console.error('[kennisbank] deleteTag:', err.message); }
+    }
+
+    function setupTags() {
+      $('newTagBtn').addEventListener('click', () => openTagModal(null));
+      $('tagSaveBtn').addEventListener('click', saveTag);
+      document.querySelectorAll('[data-tag-modal-close]').forEach((b) => b.addEventListener('click', closeTagModal));
+      $('tagModal').addEventListener('click', (e) => { if (e.target.id === 'tagModal') closeTagModal(); });
+      $('tagSearch').addEventListener('input', (e) => { state.tagSearch = e.target.value; renderTags(); });
+      loadTags();
     }
 
     init();
