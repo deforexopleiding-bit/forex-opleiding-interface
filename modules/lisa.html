@@ -64,6 +64,46 @@
     .hist-table th { text-align:left; padding:7px 8px; color:var(--text-faint); font-size:10px; text-transform:uppercase; border-bottom:1px solid var(--border); }
     .hist-table td { padding:8px; border-bottom:0.5px solid var(--border); vertical-align:middle; }
     .hist-active { font-size:10px; font-weight:700; color:var(--color-success-text,#15803d); background:var(--color-success-soft,rgba(34,197,94,.12)); padding:1px 6px; border-radius:6px; }
+    /* Sandbox */
+    .sbx-layout { display:grid; grid-template-columns:240px 1fr; gap:16px; align-items:start; }
+    @media (max-width:900px){ .sbx-layout { grid-template-columns:1fr; } }
+    .sbx-side { border:1px solid var(--border); border-radius:12px; background:var(--bg-elev); overflow:hidden; }
+    .sbx-side-head { display:flex; align-items:center; justify-content:space-between; padding:10px 12px; border-bottom:1px solid var(--border); font-size:12px; font-weight:700; color:var(--text-dim); }
+    .sbx-conv-list { max-height:64vh; overflow-y:auto; }
+    .sbx-conv { display:block; width:100%; text-align:left; background:none; border:none; border-bottom:0.5px solid var(--border); padding:9px 12px; cursor:pointer; font-family:inherit; }
+    .sbx-conv:hover { background:var(--bg-elev-2); }
+    .sbx-conv.active { background:var(--brand-primary-soft,rgba(9,61,84,.1)); }
+    .sbx-conv-top { display:flex; align-items:center; justify-content:space-between; margin-bottom:3px; }
+    .sbx-conv-date { font-size:10px; color:var(--text-faint); }
+    .sbx-conv-prev { font-size:12px; color:var(--text-dim); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .sbx-empty, .sbx-empty-chat { padding:20px; text-align:center; color:var(--text-faint); font-size:12px; }
+    .sbx-phase-badge { font-size:10px; font-weight:700; padding:1px 7px; border-radius:999px; background:var(--brand-primary-soft,rgba(9,61,84,.1)); color:var(--brand-primary,#093d54); text-transform:capitalize; }
+    .sbx-main { border:1px solid var(--border); border-radius:12px; background:var(--bg-elev); display:flex; flex-direction:column; min-height:60vh; }
+    .sbx-settings { display:flex; align-items:flex-end; gap:12px; padding:12px 14px; border-bottom:1px solid var(--border); flex-wrap:wrap; }
+    .sbx-ctl { display:flex; flex-direction:column; gap:3px; font-size:11px; font-weight:600; color:var(--text-faint); }
+    .sbx-ctl .field-select { min-width:130px; }
+    .sbx-ctl-check { flex-direction:row; align-items:center; gap:6px; font-size:12px; color:var(--text-dim); cursor:pointer; }
+    .sbx-settings .spacer { flex:1; }
+    .sbx-chat { flex:1; overflow-y:auto; padding:16px; display:flex; flex-direction:column; gap:12px; max-height:60vh; }
+    .sbx-empty-chat { margin:auto; }
+    .sbx-row { display:flex; flex-direction:column; max-width:78%; }
+    .sbx-row-lisa { align-self:flex-start; align-items:flex-start; }
+    .sbx-row-user { align-self:flex-end; align-items:flex-end; }
+    .sbx-bubble { padding:9px 13px; border-radius:14px; font-size:13px; line-height:1.5; word-break:break-word; }
+    .sbx-row-lisa .sbx-bubble { background:var(--bg-elev-2); color:var(--text); border-bottom-left-radius:4px; }
+    .sbx-row-user .sbx-bubble { background:var(--brand-primary,#093d54); color:#fff; border-bottom-right-radius:4px; }
+    .sbx-meta { display:flex; align-items:center; gap:8px; margin-top:4px; font-size:10px; color:var(--text-faint); }
+    .sbx-fb { display:inline-flex; gap:2px; }
+    .sbx-fb-btn { background:none; border:none; cursor:pointer; font-size:13px; padding:0 2px; opacity:.5; }
+    .sbx-fb-btn:hover { opacity:1; }
+    .sbx-fb-done { color:var(--color-success-text,#15803d); font-weight:600; }
+    .sbx-fbform:empty { display:none; }
+    .sbx-fb-card { margin-top:6px; display:flex; flex-direction:column; gap:6px; background:var(--bg-elev-2); border:1px solid var(--border); border-radius:10px; padding:10px; width:320px; max-width:100%; }
+    .sbx-typing span { display:inline-block; width:6px; height:6px; margin:0 1px; border-radius:50%; background:var(--text-faint); animation:sbxblink 1.2s infinite both; }
+    .sbx-typing span:nth-child(2){ animation-delay:.2s; } .sbx-typing span:nth-child(3){ animation-delay:.4s; }
+    @keyframes sbxblink { 0%,80%,100%{ opacity:.2; } 40%{ opacity:1; } }
+    .sbx-input-bar { display:flex; gap:8px; padding:12px 14px; border-top:1px solid var(--border); align-items:flex-end; }
+    .sbx-input-bar .field-textarea { min-height:42px; max-height:140px; }
   </style>
 </head>
 <body>
@@ -172,9 +212,47 @@
       </div>
     </div>
 
-    <!-- SANDBOX (placeholder, F9) -->
+    <!-- SANDBOX (F3) -->
     <div class="tab-panel" id="panel-sandbox">
-      <div class="placeholder"><i class="ti ti-flask" style="font-size:28px"></i><p>Sandbox-chat tegen Lisa — volgt in een latere fase.</p></div>
+      <div class="sbx-layout">
+        <aside class="sbx-side">
+          <div class="sbx-side-head"><span>Eerdere tests</span>
+            <button class="btn btn-sm" onclick="sbxNew()" title="Nieuwe conversatie"><i class="ti ti-plus"></i></button>
+          </div>
+          <div class="sbx-conv-list" id="sbxConvList"><div class="sbx-empty">Laden…</div></div>
+        </aside>
+
+        <section class="sbx-main">
+          <div class="sbx-settings">
+            <label class="sbx-ctl"><span>Config</span>
+              <select class="field-select" id="sbxConfig">
+                <option value="active">Actief (live)</option>
+                <option value="latest">Laatste (incl. draft)</option>
+              </select>
+            </label>
+            <label class="sbx-ctl"><span>Fase</span>
+              <select class="field-select" id="sbxPhase">
+                <option value="">Auto</option>
+                <option value="intro">Intro</option>
+                <option value="doel">Doel</option>
+                <option value="situatie">Situatie</option>
+                <option value="band">Band</option>
+                <option value="call">Call</option>
+              </select>
+            </label>
+            <label class="sbx-ctl-check"><input type="checkbox" id="sbxBotStarts" /> <span>Lisa start</span></label>
+            <div class="spacer"></div>
+            <button class="btn btn-sm" onclick="sbxNew()"><i class="ti ti-refresh"></i> Reset</button>
+          </div>
+
+          <div class="sbx-chat" id="sbxChat"></div>
+
+          <div class="sbx-input-bar">
+            <textarea class="field-textarea" id="sbxInput" placeholder="Type een bericht als de volger…" rows="1"></textarea>
+            <button class="btn btn-primary" id="sbxSendBtn" onclick="sbxSend()"><i class="ti ti-send"></i></button>
+          </div>
+        </section>
+      </div>
     </div>
 
     <!-- LOGS (placeholder) -->
@@ -217,6 +295,7 @@ async function init() {
 function switchTab(name) {
   document.querySelectorAll('.tab').forEach(b => b.classList.toggle('active', b.dataset.tab === name));
   document.querySelectorAll('.tab-panel').forEach(p => p.classList.toggle('active', p.id === 'panel-' + name));
+  if (name === 'sandbox') sbxInit();
 }
 function switchCfgSub(name) {
   document.querySelectorAll('.cfg-subtab').forEach(b => b.classList.toggle('active', b.dataset.sub === name));
@@ -430,6 +509,191 @@ async function rollbackVersion(id, version) {
   } catch (e) {
     window.AgentShared?.showToast('Rollback mislukt: ' + e.message, 'error');
   }
+}
+
+// ── Sandbox-chat ──────────────────────────────────────────────────────────────
+let sbxConvId = null;
+let sbxMessages = [];     // {id, direction, content, sent_at, detected_phase}
+let sbxFeedback = {};     // message_id -> rating
+let sbxSending = false;
+let sbxLoaded = false;
+
+async function sbxInit() {
+  if (sbxLoaded) return;
+  sbxLoaded = true;
+  const inp = document.getElementById('sbxInput');
+  if (inp) inp.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sbxSend(); }
+  });
+  sbxRenderChat();
+  await sbxLoadList();
+}
+
+async function sbxLoadList() {
+  const host = document.getElementById('sbxConvList');
+  try {
+    const res = await window.AgentShared.apiFetch('/api/lisa-conversations?is_sandbox=true&limit=20');
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'HTTP ' + res.status);
+    const rows = data.conversations || [];
+    if (!rows.length) { host.innerHTML = '<div class="sbx-empty">Nog geen tests</div>'; return; }
+    host.innerHTML = rows.map((c) => {
+      const dt = c.last_message_at || c.created_at;
+      const when = dt ? new Date(dt).toLocaleDateString('nl-NL', { day: '2-digit', month: 'short' }) : '';
+      const act = c.id === sbxConvId ? ' active' : '';
+      return '<button class="sbx-conv' + act + '" onclick="sbxOpen(\'' + c.id + '\')">' +
+        '<div class="sbx-conv-top"><span class="sbx-phase-badge">' + esc(c.phase || 'intro') + '</span><span class="sbx-conv-date">' + esc(when) + '</span></div>' +
+        '<div class="sbx-conv-prev">' + esc(c.preview || '(leeg)') + '</div></button>';
+    }).join('');
+  } catch (e) {
+    host.innerHTML = '<div class="sbx-empty">Fout: ' + esc(e.message) + '</div>';
+  }
+}
+
+async function sbxOpen(id) {
+  try {
+    const res = await window.AgentShared.apiFetch('/api/lisa-conversations?id=' + encodeURIComponent(id));
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'HTTP ' + res.status);
+    sbxConvId = id;
+    sbxMessages = data.messages || [];
+    sbxFeedback = {};
+    (data.feedback || []).forEach((f) => { if (f.message_id) sbxFeedback[f.message_id] = f.rating; });
+    sbxRenderChat();
+    sbxLoadList();
+  } catch (e) { window.AgentShared?.showToast('Laden mislukt: ' + e.message, 'error'); }
+}
+
+function sbxNew() {
+  sbxConvId = null;
+  sbxMessages = [];
+  sbxFeedback = {};
+  sbxRenderChat();
+  sbxLoadList();
+  if (document.getElementById('sbxBotStarts')?.checked) sbxRequest({ bot_starts: true });
+}
+
+async function sbxSend() {
+  const input = document.getElementById('sbxInput');
+  const text = (input.value || '').trim();
+  if (!text || sbxSending) return;
+  input.value = '';
+  sbxMessages.push({ id: '_tmp' + Date.now(), direction: 'in', content: text, sent_at: new Date().toISOString() });
+  sbxRenderChat();
+  await sbxRequest({ user_message: text });
+}
+
+async function sbxRequest(extra) {
+  if (sbxSending) return;
+  sbxSending = true;
+  sbxSetTyping(true);
+  const btn = document.getElementById('sbxSendBtn'); if (btn) btn.disabled = true;
+  try {
+    const payload = Object.assign({
+      conversation_id: sbxConvId,
+      is_sandbox: true,
+      config_version: document.getElementById('sbxConfig').value,
+      phase_override: document.getElementById('sbxPhase').value || null,
+    }, extra);
+    const res = await window.AgentShared.apiFetch('/api/lisa-respond', { method: 'POST', body: JSON.stringify(payload) });
+    const data = await res.json().catch(() => ({}));
+    if (res.status === 403) { window.AgentShared?.showToast('Geen rechten voor sandbox', 'error'); return; }
+    if (!res.ok) throw new Error(data.error || 'HTTP ' + res.status);
+    sbxConvId = data.conversation_id;
+    sbxMessages.push({
+      id: data.message_id, direction: 'out', content: data.lisa_response,
+      sent_at: new Date().toISOString(), detected_phase: data.detected_phase, tokens_used: data.tokens_used,
+    });
+    sbxRenderChat();
+    sbxLoadList();
+  } catch (e) {
+    window.AgentShared?.showToast('Lisa antwoorden mislukt: ' + e.message, 'error');
+  } finally {
+    sbxSending = false; sbxSetTyping(false);
+    const b = document.getElementById('sbxSendBtn'); if (b) b.disabled = false;
+  }
+}
+
+function sbxRenderChat() {
+  const host = document.getElementById('sbxChat');
+  if (!host) return;
+  if (!sbxMessages.length) {
+    host.innerHTML = '<div class="sbx-empty-chat"><i class="ti ti-flask" style="font-size:26px"></i>' +
+      '<p>Nieuwe test. Type een bericht als de volger — of vink "Lisa start" aan en klik Reset.</p></div>';
+    return;
+  }
+  host.innerHTML = sbxMessages.map(sbxMsgHtml).join('');
+  host.scrollTop = host.scrollHeight;
+}
+
+function sbxMsgHtml(m) {
+  const out = m.direction === 'out';
+  const time = m.sent_at ? new Date(m.sent_at).toLocaleTimeString('nl-NL', { hour: '2-digit', minute: '2-digit' }) : '';
+  const phase = (out && m.detected_phase) ? '<span class="sbx-phase-badge">' + esc(m.detected_phase) + '</span>' : '';
+  const persistent = m.id && !String(m.id).startsWith('_tmp');
+  let fb = '';
+  if (out && persistent) {
+    const given = sbxFeedback[m.id];
+    if (given) fb = '<span class="sbx-fb-done">' + (given === 'good' ? '👍' : given === 'bad' ? '👎' : '•') + ' ✓</span>';
+    else fb = '<span class="sbx-fb">' +
+      '<button class="sbx-fb-btn" onclick="sbxFb(\'' + m.id + '\',\'good\')" title="Goed">👍</button>' +
+      '<button class="sbx-fb-btn" onclick="sbxFbBad(\'' + m.id + '\')" title="Kan beter">👎</button></span>';
+  }
+  return '<div class="sbx-row ' + (out ? 'sbx-row-lisa' : 'sbx-row-user') + '">' +
+    '<div class="sbx-bubble">' + esc(m.content).replace(/\n/g, '<br>') + '</div>' +
+    '<div class="sbx-meta">' + phase + '<span class="sbx-time">' + esc(time) + '</span>' + fb + '</div>' +
+    '<div class="sbx-fbform" id="fbform-' + esc(m.id) + '"></div>' +
+  '</div>';
+}
+
+function sbxSetTyping(on) {
+  const host = document.getElementById('sbxChat');
+  if (!host) return;
+  let el = document.getElementById('sbxTyping');
+  if (on) {
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'sbxTyping';
+      el.className = 'sbx-row sbx-row-lisa';
+      el.innerHTML = '<div class="sbx-bubble sbx-typing"><span></span><span></span><span></span></div>';
+      host.appendChild(el);
+      host.scrollTop = host.scrollHeight;
+    }
+  } else if (el) { el.remove(); }
+}
+
+async function sbxFb(messageId, rating) { await sbxPostFb({ message_id: messageId, rating }); }
+
+function sbxFbBad(messageId) {
+  const host = document.getElementById('fbform-' + messageId);
+  if (!host) return;
+  if (host.innerHTML) { host.innerHTML = ''; return; }
+  host.innerHTML = '<div class="sbx-fb-card">' +
+    '<textarea class="field-textarea" id="fbreason-' + esc(messageId) + '" placeholder="Wat ging er fout?" style="min-height:48px"></textarea>' +
+    '<textarea class="field-textarea" id="fbsugg-' + esc(messageId) + '" placeholder="Hoe had Lisa moeten antwoorden? (optioneel)" style="min-height:48px"></textarea>' +
+    '<label class="sbx-ctl-check"><input type="checkbox" id="fbex-' + esc(messageId) + '" /> <span>Gebruik als slecht voorbeeld</span></label>' +
+    '<div style="display:flex;gap:8px;justify-content:flex-end"><button class="btn btn-sm" onclick="sbxFbBadSave(\'' + messageId + '\')">Opslaan</button></div>' +
+  '</div>';
+}
+
+async function sbxFbBadSave(messageId) {
+  const reason = document.getElementById('fbreason-' + messageId)?.value || '';
+  const sugg = document.getElementById('fbsugg-' + messageId)?.value || '';
+  const ex = document.getElementById('fbex-' + messageId)?.checked || false;
+  await sbxPostFb({ message_id: messageId, rating: 'bad', reason, suggested_response: sugg, use_as_example: ex });
+}
+
+async function sbxPostFb(payload) {
+  try {
+    const res = await window.AgentShared.apiFetch('/api/lisa-feedback', {
+      method: 'POST', body: JSON.stringify(Object.assign({ conversation_id: sbxConvId }, payload)),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || 'HTTP ' + res.status);
+    sbxFeedback[payload.message_id] = payload.rating;
+    sbxRenderChat();
+    window.AgentShared?.showToast('Feedback opgeslagen', 'success');
+  } catch (e) { window.AgentShared?.showToast('Feedback mislukt: ' + e.message, 'error'); }
 }
 
 init();
