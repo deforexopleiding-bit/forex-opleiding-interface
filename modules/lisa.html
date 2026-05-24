@@ -168,6 +168,32 @@
     .disq-row, .fu-stat-row, .msg-stat-row { display:flex; justify-content:space-between; padding:7px 0; border-bottom:1px solid var(--border); font-size:13px; }
     .disq-row:last-child, .fu-stat-row:last-child, .msg-stat-row:last-child { border-bottom:none; }
     .stats-empty { color:var(--text-faint); font-size:12px; padding:8px 0; }
+    /* Logs (F9) */
+    .logs-header { display:flex; justify-content:flex-end; margin-bottom:14px; }
+    .logs-section { margin-bottom:16px; padding:14px; background:var(--bg-elev); border:1px solid var(--border); border-radius:10px; }
+    .logs-section h3 { margin:0 0 12px; font-size:14px; }
+    .status-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:10px; }
+    @media (max-width:900px){ .status-grid { grid-template-columns:1fr 1fr; } }
+    .status-card { padding:10px 12px; background:var(--bg-elev-2); border:1px solid var(--border); border-radius:8px; display:flex; flex-direction:column; }
+    .status-card.status-on { border-color:#10B981; }
+    .status-card span { font-size:10px; color:var(--text-faint); text-transform:uppercase; letter-spacing:.04em; }
+    .status-card strong { font-size:18px; margin-top:2px; }
+    .version-row, .log-row, .error-row { display:flex; align-items:center; gap:12px; padding:8px 0; border-bottom:1px solid var(--border); font-size:13px; }
+    .version-row:last-child, .log-row:last-child, .error-row:last-child { border-bottom:none; }
+    .version-row.is-active { background:rgba(16,185,129,.06); padding:8px 10px; border-radius:6px; }
+    .version-num { font-weight:700; width:46px; flex-shrink:0; }
+    .version-info { flex:1; display:flex; flex-direction:column; min-width:0; }
+    .version-info .hint { font-size:11px; color:var(--text-faint); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .version-date, .log-time { color:var(--text-faint); font-size:12px; min-width:64px; flex-shrink:0; }
+    .version-tag { font-size:10px; font-weight:700; color:#10B981; }
+    .log-source, .log-type, .log-status { font-size:11px; font-weight:600; color:var(--text-dim); flex-shrink:0; }
+    .log-content, .log-reason { flex:1; color:var(--text-dim); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; min-width:0; }
+    .log-row.log-warn { background:rgba(245,158,11,.06); border-radius:6px; padding:8px 10px; }
+    .error-row { background:rgba(239,68,68,.06); padding:8px 10px; border-radius:6px; }
+    .error-type { font-weight:700; color:#EF4444; min-width:84px; flex-shrink:0; }
+    .error-msg { flex:1; color:var(--text-dim); word-break:break-word; }
+    .logs-empty { color:var(--text-faint); font-style:italic; text-align:center; padding:16px; font-size:12px; }
+    .logs-empty.ok { color:#10B981; font-style:normal; }
     /* Live mode (F5.3) */
     .lisa-live-bar { display:flex; justify-content:space-between; align-items:center; padding:14px 18px; background:var(--bg-elev); border:1px solid var(--border); border-radius:12px; margin-bottom:14px; gap:16px; flex-wrap:wrap; }
     .live-status { display:flex; align-items:center; gap:12px; }
@@ -542,9 +568,16 @@
       </div>
     </div>
 
-    <!-- LOGS (placeholder) -->
+    <!-- LOGS (F9) -->
     <div class="tab-panel" id="panel-logs">
-      <div class="placeholder"><i class="ti ti-history" style="font-size:28px"></i><p>Audit &amp; versiegeschiedenis — volgt in een latere fase.</p></div>
+      <div class="logs-header">
+        <button class="btn btn-sm" id="logsRefresh" onclick="loadLogs()"><i class="ti ti-refresh"></i> Vernieuwen</button>
+      </div>
+      <section class="logs-section"><h3>⚙️ Systeemstatus</h3><div id="systemStatus" class="status-grid"></div></section>
+      <section class="logs-section"><h3>📚 Versiegeschiedenis</h3><div id="configVersionsList"></div></section>
+      <section class="logs-section"><h3>📥 Recente inkomende berichten</h3><div id="webhookLog"></div></section>
+      <section class="logs-section"><h3>⏰ Cron-events (delayed + follow-ups)</h3><div id="cronLog"></div></section>
+      <section class="logs-section" id="errorsSection"><h3>⚠️ Errors</h3><div id="errorsList"></div></section>
     </div>
 
   </div>
@@ -953,6 +986,77 @@ function renderStats(data) {
     '<div class="msg-stat-row"><span>Gemiddeld per conversatie</span><strong>' + avg + '</strong></div>';
 }
 
+// ── Logs / audit (F9) ─────────────────────────────────────────────────────────
+let logsLoaded = false;
+function logsInit() { if (logsLoaded) { loadLogs(); return; } logsLoaded = true; loadLogs(); }
+
+function logsFmtDate(iso) {
+  if (!iso) return '—';
+  return new Date(iso).toLocaleString('nl-NL', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+}
+function logsRel(iso) {
+  if (!iso) return '—';
+  const ms = Date.now() - new Date(iso).getTime();
+  const m = Math.floor(ms / 60000), h = Math.floor(ms / 3600000), d = Math.floor(ms / 86400000);
+  if (m < 1) return 'net'; if (m < 60) return m + 'm'; if (h < 24) return h + 'u'; if (d < 7) return d + 'd';
+  return new Date(iso).toLocaleDateString('nl-NL');
+}
+
+async function loadLogs() {
+  try {
+    const res = await window.AgentShared.apiFetch('/api/lisa-logs?action=summary');
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'HTTP ' + res.status);
+    renderLogs(data);
+    const errRes = await window.AgentShared.apiFetch('/api/lisa-logs?action=errors');
+    if (errRes.ok) renderErrors(await errRes.json());
+  } catch (e) { window.AgentShared?.showToast('Logs laden mislukt: ' + e.message, 'error'); }
+}
+
+function renderLogs({ versions, webhook_events, cron_events, settings }) {
+  const s = settings || {};
+  document.getElementById('systemStatus').innerHTML =
+    '<div class="status-card ' + (s.live_mode_enabled ? 'status-on' : '') + '"><span>Live mode</span><strong>' + (s.live_mode_enabled ? 'AAN' : 'UIT') + '</strong></div>' +
+    '<div class="status-card"><span>Kantooruren</span><strong>' + ((s.office_hours_start || '').slice(0, 5) + ' - ' + (s.office_hours_end || '').slice(0, 5)) + '</strong></div>' +
+    '<div class="status-card"><span>Ontvangen totaal</span><strong>' + (s.live_messages_received_total || 0) + '</strong></div>' +
+    '<div class="status-card"><span>Verstuurd totaal</span><strong>' + (s.live_messages_sent_total || 0) + '</strong></div>' +
+    '<div class="status-card"><span>Delayed in queue</span><strong>' + (s.delayed_messages_pending || 0) + '</strong></div>' +
+    '<div class="status-card"><span>Webhooks ontvangen</span><strong>' + (s.ghl_webhook_total_received || 0) + '</strong></div>';
+
+  document.getElementById('configVersionsList').innerHTML = (versions && versions.length)
+    ? versions.map(v => '<div class="version-row' + (v.is_active ? ' is-active' : '') + '">' +
+        '<div class="version-num">v' + v.version + '</div>' +
+        '<div class="version-info"><strong>' + esc(v.persona_name || 'Lisa') + '</strong><span class="hint">' + esc(v.notes || '') + '</span></div>' +
+        '<div class="version-date">' + esc(logsFmtDate(v.created_at)) + '</div>' +
+        '<div class="version-tag">' + (v.is_active ? '✅ ACTIEF' : '') + '</div></div>').join('')
+    : '<div class="logs-empty">Geen versies</div>';
+
+  document.getElementById('webhookLog').innerHTML = (webhook_events && webhook_events.length)
+    ? webhook_events.map(e => '<div class="log-row"><span class="log-time">' + esc(logsRel(e.sent_at)) + '</span>' +
+        '<span class="log-source">' + esc(e.lisa_conversations?.source || 'instagram') + '</span>' +
+        '<span class="log-content">' + esc((e.content || '').slice(0, 80)) + '</span></div>').join('')
+    : '<div class="logs-empty">Geen recente inkomende berichten (live mode wellicht UIT).</div>';
+
+  document.getElementById('cronLog').innerHTML = (cron_events && cron_events.length)
+    ? cron_events.map(e => '<div class="log-row ' + (e.status === 'cancelled' ? 'log-warn' : '') + '">' +
+        '<span class="log-time">' + esc(logsRel(e.sent_at)) + '</span>' +
+        '<span class="log-type">' + (e.is_delayed_response ? 'delayed' : 'follow-up') + '</span>' +
+        '<span class="log-status">' + esc(e.status) + '</span>' +
+        '<span class="log-reason">' + esc(e.cancelled_reason || '') + '</span></div>').join('')
+    : '<div class="logs-empty">Geen cron-events</div>';
+}
+
+function renderErrors({ webhook_error, send_failures }) {
+  const el = document.getElementById('errorsList');
+  if (!webhook_error && !(send_failures && send_failures.length)) { el.innerHTML = '<div class="logs-empty ok">Geen recente errors ✓</div>'; return; }
+  let html = '';
+  if (webhook_error) html += '<div class="error-row"><span class="error-type">Webhook</span><span class="error-msg">' + esc(webhook_error) + '</span></div>';
+  (send_failures || []).forEach(f => {
+    html += '<div class="error-row"><span class="error-type">Send failed</span><span class="log-time">' + esc(logsRel(f.scheduled_for || f.sent_at)) + '</span><span class="error-msg">' + esc(f.cancelled_reason || '') + '</span></div>';
+  });
+  el.innerHTML = html;
+}
+
 // ── Tabs ──────────────────────────────────────────────────────────────────
 function switchTab(name) {
   document.querySelectorAll('.tab').forEach(b => b.classList.toggle('active', b.dataset.tab === name));
@@ -960,6 +1064,7 @@ function switchTab(name) {
   if (name === 'sandbox') sbxInit();
   if (name === 'live') lvInit();
   if (name === 'stats') statsInit();
+  if (name === 'logs') logsInit();
 }
 function switchCfgSub(name) {
   document.querySelectorAll('.cfg-subtab').forEach(b => b.classList.toggle('active', b.dataset.sub === name));
