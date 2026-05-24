@@ -831,6 +831,8 @@
         <div class="type-pills" id="typePills"></div>
       </div>
 
+      <div class="tag-filter-row" id="tagFilterRow" style="display:none"></div>
+
       <div class="item-list" id="itemList"></div>
     </section>
 
@@ -1423,10 +1425,21 @@
           (i.fileName || '').toLowerCase().includes(q)
         );
       }
+      // Tag-filter (F4.2c) — client-side, AND/OR
+      const sel = [...state.tagFilter.selected];
+      if (sel.length) {
+        items = items.filter((i) => {
+          const ids = itemTagIds(i.id);
+          return state.tagFilter.mode === 'AND'
+            ? sel.every((t) => ids.includes(t))
+            : sel.some((t) => ids.includes(t));
+        });
+      }
       return items;
     }
 
     function renderItems() {
+      renderTagFilter();
       // Type pills
       const counts = TYPES.reduce((acc, t) => {
         acc[t] = state.items.filter((i) => i.type === t).length;
@@ -1467,6 +1480,7 @@
           </div>
           <div class="item-content" data-content="${escapeHtml(item.id)}">${escapeHtml(item.content)}</div>
           ${item.note ? `<div class="item-note">${escapeHtml(item.note)}</div>` : ''}
+          ${renderItemTagsHtml(item.id)}
           <div class="item-actions">
             <button class="btn" data-item-action="expand">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
@@ -1518,6 +1532,7 @@
           // Scroll naar de uploader sectie
           document.querySelector('.uploader').scrollIntoView({ behavior: 'smooth', block: 'start' });
         });
+        wireItemTags(card, id);
       });
     }
 
@@ -1617,6 +1632,7 @@
         if (!res.ok) throw new Error(data.error || 'HTTP ' + res.status);
         state.tags = data.tags || [];
         renderTags();
+        renderItems(); // chips/filter resolveren zodra tags geladen zijn
       } catch (err) {
         console.error('[kennisbank] loadTags fout:', err.message);
         $('tagsList').innerHTML = `<div class="item-empty" style="color:var(--red)">Tags laden mislukt — ${escapeHtml(err.message)}</div>`;
@@ -1716,6 +1732,130 @@
       $('tagModal').addEventListener('click', (e) => { if (e.target.id === 'tagModal') closeTagModal(); });
       $('tagSearch').addEventListener('input', (e) => { state.tagSearch = e.target.value; renderTags(); });
       loadTags();
+      loadItemTagLinks();
+    }
+
+    /* ─────────────────────────────────────────────────────────────
+       Tags — per item + filter (F4.2c)
+       ───────────────────────────────────────────────────────────── */
+    state.itemTags = {};   // item_id -> [tag_id]
+    state.tagFilter = { selected: new Set(), mode: 'AND' };
+
+    async function loadItemTagLinks() {
+      try {
+        const res = await window.AgentShared.apiFetch('/api/kb-item-tags?action=all_with_tags');
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'HTTP ' + res.status);
+        const map = {};
+        (data.links || []).forEach((l) => { (map[l.item_id] = map[l.item_id] || []).push(l.tag_id); });
+        state.itemTags = map;
+        renderItems();
+      } catch (err) {
+        console.error('[kennisbank] loadItemTagLinks fout:', err.message);
+      }
+    }
+
+    function itemTagIds(itemId) { return state.itemTags[itemId] || []; }
+
+    function renderTagFilter() {
+      const row = $('tagFilterRow');
+      if (!row) return;
+      if (!state.tags.length) { row.style.display = 'none'; return; }
+      row.style.display = 'flex';
+      const sel = state.tagFilter.selected;
+      const chips = state.tags.map((t) =>
+        `<span class="kb-tag-chip tag-filter-chip ${sel.has(t.id) ? 'active' : ''}" style="background:${escapeHtml(t.color)}" data-filter-tag="${escapeHtml(t.id)}">${escapeHtml(t.name)}</span>`).join('');
+      row.innerHTML = `
+        <span class="tf-label">Filter op tags:</span>
+        ${chips}
+        <span class="tf-mode">
+          <button data-tf-mode="AND" class="${state.tagFilter.mode === 'AND' ? 'active' : ''}">EN</button>
+          <button data-tf-mode="OR" class="${state.tagFilter.mode === 'OR' ? 'active' : ''}">OF</button>
+        </span>
+        ${sel.size ? '<button class="tf-clear" data-tf-clear>Wis filter</button>' : ''}`;
+      row.querySelectorAll('[data-filter-tag]').forEach((el) => {
+        el.addEventListener('click', () => {
+          const id = el.dataset.filterTag;
+          if (sel.has(id)) sel.delete(id); else sel.add(id);
+          renderItems();
+        });
+      });
+      row.querySelectorAll('[data-tf-mode]').forEach((b) => {
+        b.addEventListener('click', () => { state.tagFilter.mode = b.dataset.tfMode; renderItems(); });
+      });
+      const clr = row.querySelector('[data-tf-clear]');
+      if (clr) clr.addEventListener('click', () => { sel.clear(); renderItems(); });
+    }
+
+    function renderItemTagsHtml(itemId) {
+      const chips = itemTagIds(itemId).map((tid) => {
+        const t = tagById(tid); if (!t) return '';
+        return `<span class="kb-tag-chip" style="background:${escapeHtml(t.color)}">${escapeHtml(t.name)}<span class="kb-tag-x" data-untag="${escapeHtml(tid)}" title="Verwijderen">&times;</span></span>`;
+      }).join('');
+      return `<div class="item-tags" data-tags-for="${escapeHtml(itemId)}">
+        ${chips}
+        <button class="it-add" data-add-tag title="Tag toevoegen">+ tag</button>
+      </div>`;
+    }
+
+    function wireItemTags(card, itemId) {
+      const row = card.querySelector('.item-tags');
+      if (!row) return;
+      row.querySelectorAll('[data-untag]').forEach((x) => {
+        x.addEventListener('click', (e) => { e.stopPropagation(); removeTagFromItem(itemId, x.dataset.untag); });
+      });
+      const addBtn = row.querySelector('[data-add-tag]');
+      if (addBtn) addBtn.addEventListener('click', (e) => { e.stopPropagation(); openTagPicker(itemId, row); });
+    }
+
+    let openPickerEl = null;
+    function closeTagPicker() {
+      if (openPickerEl) { openPickerEl.remove(); openPickerEl = null; document.removeEventListener('click', closeTagPicker); }
+    }
+    function openTagPicker(itemId, anchorRow) {
+      closeTagPicker();
+      const have = new Set(itemTagIds(itemId));
+      const avail = state.tags.filter((t) => !have.has(t.id));
+      const pop = document.createElement('div');
+      pop.className = 'tag-pop';
+      pop.innerHTML = avail.length
+        ? avail.map((t) => `<button data-pick="${escapeHtml(t.id)}"><span class="tp-dot" style="background:${escapeHtml(t.color)}"></span>${escapeHtml(t.name)}</button>`).join('')
+        : '<div class="tp-empty">Alle tags al toegevoegd</div>';
+      pop.addEventListener('click', (e) => e.stopPropagation());
+      pop.querySelectorAll('[data-pick]').forEach((b) => {
+        b.addEventListener('click', () => { closeTagPicker(); addTagToItem(itemId, b.dataset.pick); });
+      });
+      anchorRow.appendChild(pop);
+      openPickerEl = pop;
+      setTimeout(() => document.addEventListener('click', closeTagPicker), 0);
+    }
+
+    async function addTagToItem(itemId, tagId) {
+      try {
+        const res = await window.AgentShared.apiFetch('/api/kb-item-tags', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ item_id: itemId, tag_id: tagId }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (res.status === 403) { showToast('Geen rechten om te taggen'); return; }
+        if (!res.ok) throw new Error(data.error || 'HTTP ' + res.status);
+        if (!itemTagIds(itemId).includes(tagId)) (state.itemTags[itemId] = state.itemTags[itemId] || []).push(tagId);
+        renderItems();
+      } catch (err) { showToast('Taggen mislukt'); console.error('[kennisbank] addTagToItem:', err.message); }
+    }
+
+    async function removeTagFromItem(itemId, tagId) {
+      try {
+        const res = await window.AgentShared.apiFetch('/api/kb-item-tags', {
+          method: 'DELETE', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ item_id: itemId, tag_id: tagId }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (res.status === 403) { showToast('Geen rechten om te ontkoppelen'); return; }
+        if (!res.ok) throw new Error(data.error || 'HTTP ' + res.status);
+        state.itemTags[itemId] = itemTagIds(itemId).filter((t) => t !== tagId);
+        renderItems();
+      } catch (err) { showToast('Ontkoppelen mislukt'); console.error('[kennisbank] removeTagFromItem:', err.message); }
     }
 
     init();
