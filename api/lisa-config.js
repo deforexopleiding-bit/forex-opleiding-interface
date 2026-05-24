@@ -18,12 +18,50 @@ const EDIT_FIELDS = [
   'persona_name', 'persona_age', 'persona_background', 'persona_tone',
   'persona_writing_style', 'emoji_usage', 'dos', 'donts',
   'phase_intro', 'phase_doel', 'phase_situatie', 'phase_band', 'phase_call',
+  // Knowledge (F4.3) — structured producten/FAQ + KB-tagfilter
+  'kb_products', 'kb_faq', 'kb_pricing', 'kb_usps', 'kb_tag_filter', 'kb_use_general_kb',
 ];
 
 function pick(obj, keys) {
   const out = {};
   for (const k of keys) if (obj[k] !== undefined) out[k] = obj[k];
   return out;
+}
+
+// ── Knowledge-veld validatie (alleen toegepast op aanwezige velden) ───────────
+function validateProducts(products) {
+  if (!Array.isArray(products)) return [];
+  return products.filter((p) => p && typeof p === 'object').map((p) => ({
+    naam: String(p.naam || '').trim(),
+    beschrijving: String(p.beschrijving || '').trim(),
+    prijs: String(p.prijs || '').trim(),
+    doelgroep: String(p.doelgroep || '').trim(),
+    duur: String(p.duur || '').trim(),
+  }));
+}
+
+function validateFaq(faq) {
+  if (!Array.isArray(faq)) return [];
+  return faq.filter((q) => q && typeof q === 'object').map((q) => ({
+    vraag: String(q.vraag || '').trim(),
+    antwoord: String(q.antwoord || '').trim(),
+    // keywords lowercase-genormaliseerd voor case-insensitive RAG-match (F4.4)
+    keywords: Array.isArray(q.keywords)
+      ? q.keywords.map((k) => String(k).trim().toLowerCase()).filter(Boolean)
+      : [],
+  }));
+}
+
+// Normaliseer KB-velden in-place — alleen velden die in de update zitten.
+function normalizeKbFields(updates) {
+  if (updates.kb_products !== undefined) updates.kb_products = validateProducts(updates.kb_products);
+  if (updates.kb_faq !== undefined) updates.kb_faq = validateFaq(updates.kb_faq);
+  if (updates.kb_tag_filter !== undefined) {
+    updates.kb_tag_filter = Array.isArray(updates.kb_tag_filter)
+      ? updates.kb_tag_filter.map((t) => String(t).trim()).filter(Boolean) : [];
+  }
+  if (updates.kb_use_general_kb !== undefined) updates.kb_use_general_kb = !!updates.kb_use_general_kb;
+  return updates;
 }
 
 async function activeConfig(select = '*') {
@@ -88,7 +126,7 @@ export default async function handler(req, res) {
       if (!(await requirePermissionFailOpen(req, 'lisa.config.edit'))) {
         return res.status(403).json({ error: 'Insufficient permissions', feature: 'lisa.config.edit' });
       }
-      const updates = pick(body, EDIT_FIELDS);
+      const updates = normalizeKbFields(pick(body, EDIT_FIELDS));
       if (Object.keys(updates).length === 0) return res.status(400).json({ error: 'Geen velden om bij te werken.' });
       const latest = await latestConfig('*');
       if (latest && latest.is_active === false) {
@@ -111,7 +149,7 @@ export default async function handler(req, res) {
       if (!(await requirePermissionFailOpen(req, 'lisa.config.publish'))) {
         return res.status(403).json({ error: 'Insufficient permissions', feature: 'lisa.config.publish' });
       }
-      const updates = pick(body, EDIT_FIELDS);
+      const updates = normalizeKbFields(pick(body, EDIT_FIELDS));
       const latest = await latestConfig('*');
       if (latest && latest.is_active === false) {
         // Bestaande draft live zetten (trigger deactiveert de vorige actieve versie).
