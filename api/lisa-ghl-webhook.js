@@ -51,9 +51,21 @@ export default async function handler(req, res) {
   if (req.query.secret !== expectedSecret) { console.warn('[lisa-ghl-webhook] ongeldig secret'); return res.status(401).json({ error: 'Unauthorized' }); }
 
   try {
-    // 2. Payload
+    // 2. Payload — GHL nest onze data onder customData; val terug op GHL-standaardvelden
+    //    (snake_case / geneste objecten) en dan op flat top-level (test-fetch).
     const body = req.body || {};
-    const { contactId, conversationId, locationId, message, type, direction, messageId } = body;
+    const customData = body.customData || {};
+    const payload = {
+      contactId: customData.contactId || body.contact_id || body.contactId,
+      conversationId: customData.conversationId || body.conversation_id || body.conversationId,
+      locationId: customData.locationId || body.location?.id || body.locationId,
+      messageId: customData.messageId || body.message?.id || body.messageId,
+      message: customData.message || body.message?.body || (typeof body.message === 'string' ? body.message : null),
+      type: customData.type || body.type,
+      direction: customData.direction || body.direction,
+    };
+    console.log('[GHL Webhook] parsed payload:', JSON.stringify(payload));
+    const { contactId, conversationId, locationId, message, type, direction, messageId } = payload;
     if (type !== 'IG' || direction !== 'inbound') return res.status(200).json({ skipped: 'not_ig_inbound' });
     if (!contactId || !message) return res.status(200).json({ skipped: 'missing_fields' });
 
