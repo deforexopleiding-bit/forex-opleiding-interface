@@ -11,7 +11,7 @@
 import { supabaseAdmin } from './supabase.js';
 import { computeResponseDelay, sendTypingIndicator, matchBookingByEmail } from './_lib/lisa-ghl-send.js';
 import { generateLisaResponse } from './lisa-respond.js';
-import { detectStopSignal } from './_lib/lisa-followup.js';
+import { detectStopSignal, containsAgendaLink, schedulePostLinkFollowups } from './_lib/lisa-followup.js';
 import dayjs from 'dayjs';
 import utc from 'dayjs/plugin/utc.js';
 import timezone from 'dayjs/plugin/timezone.js';
@@ -168,6 +168,15 @@ export default async function handler(req, res) {
     }
     if (dd.email && conv.booking_match_status !== 'matched') {
       matchBookingByEmail(conv.id, dd.email, conv.ghl_location_id).catch((e) => console.error('[booking-match] bg fail:', e?.message || e));
+    }
+
+    // 9c. Agenda-link gedetecteerd in Lisa's antwoord → plan post-link follow-ups (eenmalig).
+    if (settings.post_link_followup_enabled !== false && containsAgendaLink(result.response) && !conv.post_link_followups_scheduled) {
+      await schedulePostLinkFollowups(conv.id, settings);
+      await supabaseAdmin.from('lisa_conversations').update({
+        agenda_link_sent_at: new Date().toISOString(), post_link_followups_scheduled: true,
+      }).eq('id', conv.id);
+      conv.post_link_followups_scheduled = true;
     }
 
     // 10. Versturen: binnen kantooruren → response-delay QUEUE (geen blocking sleep; cron verstuurt).

@@ -172,3 +172,59 @@ Antwoord ALLEEN met het bericht zelf (geen "Lisa:" prefix, geen JSON).`;
     return { ok: false, error: err?.message || 'onbekende fout' };
   }
 }
+
+// ── Post-link follow-ups (F13) ────────────────────────────────────────────────
+// Detecteer de agenda-link in een (uitgaand) bericht.
+export function containsAgendaLink(text) {
+  if (!text) return false;
+  return /dfocrm\.nl\/agenda/i.test(text) || /agenda-lisa/i.test(text) || /agenda\.deforexopleiding\.nl/i.test(text);
+}
+
+// Plan 3 post-link checks (4u/24u/3d, configureerbaar) na het sturen van de agenda-link.
+export async function schedulePostLinkFollowups(conversationId, settings) {
+  const now = Date.now();
+  const h = (v, d) => (Number.isFinite(v) ? v : d);
+  const steps = [
+    [1, h(settings?.post_link_step1_hours, 4)],
+    [2, h(settings?.post_link_step2_hours, 24)],
+    [3, h(settings?.post_link_step3_hours, 72)],
+  ];
+  const rows = steps.map(([step, hours]) => ({
+    conversation_id: conversationId, followup_step: 0, post_link_step: step,
+    scheduled_for: new Date(now + hours * 3600 * 1000).toISOString(), status: 'scheduled',
+    is_post_link_followup: true, is_response_delay: false, is_delayed_response: false, is_regular_followup: false,
+    template_used: 'post_link_check_' + step,
+  }));
+  const { error } = await supabaseAdmin.from('lisa_followups').insert(rows);
+  if (error) console.error('[post-link] schedule error:', error.message);
+  return !error;
+}
+
+// Genereer een korte, oplopend-warmere post-link check (Sonnet). Fail-safe.
+export async function generatePostLinkMessage(step, conv, config) {
+  try {
+    const apiKey = process.env.ANTHROPIC_API_KEY;
+    if (!apiKey) return { ok: false, error: 'no_api_key' };
+    const naam = conv.contact_name || conv.first_name || 'de volger';
+    const persona = `Je bent ${config?.persona_name || 'Lisa'}${config?.persona_age ? ', ' + config.persona_age + ' jaar oud' : ''}. Toon: ${config?.persona_tone || 'vriendelijk en professioneel'}.`;
+    const guidance = {
+      1: 'STAP 1 (vriendelijke check): kort bericht (max 20 woorden) dat checkt of het lukte om een tijd te kiezen. Niet pushy.',
+      2: 'STAP 2 (warmer, ruimte gevend): kort bericht (max 25 woorden), drukvrij, bied hulp aan bij vragen.',
+      3: 'STAP 3 (afsluitend, geen druk): kort bericht (max 25 woorden), open uitnodiging om later terug te komen.',
+    }[step] || 'Kort, vriendelijk, drukvrij check-bericht (max 25 woorden).';
+    const prompt = `${persona}
+
+CONTEXT: je stuurde eerder de agenda-link naar ${naam}, maar die heeft sindsdien niet gereageerd. Dit is post-link follow-up stap ${step} van 3.
+
+${guidance}
+
+Schrijf ALLEEN het bericht zelf — platte tekst zoals een Instagram-DM, geen begroeting, geen handtekening, geen JSON.`;
+    const client = new Anthropic({ apiKey });
+    const resp = await client.messages.create({ model: FOLLOWUP_MODEL, max_tokens: 150, messages: [{ role: 'user', content: prompt }] });
+    const text = resp.content?.[0]?.text?.trim() || '';
+    return text ? { ok: true, response: text } : { ok: false, error: 'empty_response' };
+  } catch (err) {
+    console.error('[post-link] gen error:', err?.message || err);
+    return { ok: false, error: err?.message || 'onbekende fout' };
+  }
+}

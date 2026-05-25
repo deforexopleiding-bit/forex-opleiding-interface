@@ -14,7 +14,7 @@
 
 import { supabaseAdmin, checkCronAuth } from './supabase.js';
 import { sendToGhl } from './_lib/lisa-ghl-send.js';
-import { scheduleNextFollowup, generateFollowupResponse, evaluateConditions } from './_lib/lisa-followup.js';
+import { scheduleNextFollowup, generateFollowupResponse, evaluateConditions, generatePostLinkMessage } from './_lib/lisa-followup.js';
 import dayjs from 'dayjs';
 import utc from 'dayjs/plugin/utc.js';
 import timezone from 'dayjs/plugin/timezone.js';
@@ -56,9 +56,9 @@ export default async function handler(req, res) {
 
     // 4. Queue: delayed + regular, scheduled + verlopen
     const { data: followups, error: fuErr } = await supabaseAdmin.from('lisa_followups')
-      .select('id, conversation_id, followup_step, scheduled_for, pre_generated_response, is_delayed_response, is_regular_followup, is_response_delay, template_at_schedule, conditions_snapshot, used_ai, lisa_conversations!inner(id, ghl_contact_id, ghl_conversation_id, ghl_location_id, phase, qualified, call_booked, stop_detected_at, followup_paused, human_takeover)')
+      .select('id, conversation_id, followup_step, scheduled_for, pre_generated_response, is_delayed_response, is_regular_followup, is_response_delay, is_post_link_followup, post_link_step, template_at_schedule, conditions_snapshot, used_ai, lisa_conversations!inner(id, ghl_contact_id, ghl_conversation_id, ghl_location_id, phase, qualified, call_booked, stop_detected_at, followup_paused, human_takeover, agenda_link_sent_at)')
       .eq('status', 'scheduled')
-      .or('is_delayed_response.eq.true,is_regular_followup.eq.true,is_response_delay.eq.true')
+      .or('is_delayed_response.eq.true,is_regular_followup.eq.true,is_response_delay.eq.true,is_post_link_followup.eq.true')
       .lte('scheduled_for', new Date().toISOString())
       .order('scheduled_for', { ascending: true })
       .limit(BATCH_LIMIT);
@@ -114,6 +114,42 @@ export default async function handler(req, res) {
           sentCount++; delayedResolved++; results.push({ id: fu.id, status: 'sent', type: 'delayed' });
         } else {
           await cancelFollowup(fu.id, `send_failed: ${sr.error}`); delayedResolved++; results.push({ id: fu.id, status: 'failed', error: sr.error });
+        }
+        continue;
+      }
+
+      // ── Post-link follow-up (booking-bevestiging na agenda-link) ──────────────
+      if (fu.is_post_link_followup) {
+        const stops = [];
+        if (conv.call_booked) stops.push('already_booked');
+        if (conv.phase === 'disqualified') stops.push('disqualified');
+        if (conv.human_takeover) stops.push('human_takeover');
+        if (conv.stop_detected_at) stops.push('stop_signal');
+        if (conv.agenda_link_sent_at) {
+          const { data: later } = await supabaseAdmin.from('lisa_messages').select('id')
+            .eq('conversation_id', conv.id).eq('direction', 'in').gte('sent_at', conv.agenda_link_sent_at).limit(1);
+          if (later && later.length) stops.push('user_responded');
+        }
+        if (stops.length) {
+          // Annuleer DEZE + alle resterende post-link follow-ups van deze conversatie.
+          await supabaseAdmin.from('lisa_followups')
+            .update({ status: 'cancelled', cancelled_reason: stops.join(',').slice(0, 300) })
+            .eq('conversation_id', conv.id).eq('is_post_link_followup', true).eq('status', 'scheduled');
+          results.push({ id: fu.id, status: 'cancelled', reason: stops[0] });
+          continue;
+        }
+        const gen = await generatePostLinkMessage(fu.post_link_step || 1, conv, config);
+        if (!gen.ok || !gen.response) { await cancelFollowup(fu.id, 'ai_failed: ' + (gen.error || '')); results.push({ id: fu.id, status: 'failed', reason: 'ai' }); continue; }
+        const sr = await sendToGhl(conv.ghl_contact_id, gen.response, { conversationId: conv.ghl_conversation_id, locationId: conv.ghl_location_id });
+        if (sr.ok) {
+          await supabaseAdmin.from('lisa_messages').insert({
+            conversation_id: conv.id, direction: 'out', content: gen.response, ai_generated: true,
+            is_followup: true, is_post_link_followup: true, ghl_message_id: sr.message_id || null, sent_at: new Date().toISOString(),
+          });
+          await supabaseAdmin.from('lisa_followups').update({ status: 'sent', sent_at: new Date().toISOString() }).eq('id', fu.id);
+          sentCount++; results.push({ id: fu.id, status: 'sent', type: 'post_link', step: fu.post_link_step });
+        } else {
+          await cancelFollowup(fu.id, `send_failed: ${sr.error}`); results.push({ id: fu.id, status: 'failed', error: sr.error });
         }
         continue;
       }
