@@ -137,19 +137,30 @@ function buildSystemPrompt(config, currentPhase, ragSection = '') {
 
   lines.push(`
 ==== INSTRUCTIES ====
-1. Antwoord UITSLUITEND met geldige JSON met exact 2 keys:
-   {"response": "je bericht hier", "detected_phase": "intro|doel|situatie|band|call|qualified|disqualified"}
+1. Antwoord UITSLUITEND met geldige JSON:
+   {"response": "je bericht hier", "detected_phase": "intro|doel|situatie|band|call|qualified|disqualified",
+    "detected_data": {"name": null, "email": null, "phone": null}}
 2. detected_phase = in welke fase het gesprek zit ná dit antwoord.
-3. Geen markdown in "response" — alleen platte tekst zoals in een Instagram-DM.
-4. Hou berichten kort: meestal 1-3 zinnen, maximaal 5.
-5. Stel maximaal 1 vraag per bericht.`);
+3. detected_data = gegevens die de volger ZELF EXPLICIET heeft genoemd in zijn laatste berichten.
+   - NOOIT raden of aanvullen. Geen voor-/achternaam afleiden uit een losse voornaam.
+   - Vul een veld alleen als het er letterlijk staat; anders null.
+   - email lowercase; phone zoals opgegeven.
+4. Geen markdown in "response" — alleen platte tekst zoals in een Instagram-DM.
+5. Hou berichten kort: meestal 1-3 zinnen, maximaal 5. Stel maximaal 1 vraag per bericht.`);
 
   return lines.join('\n').trim();
+}
+
+function cleanField(v) {
+  if (v == null) return null;
+  const s = String(v).trim();
+  return s ? s : null;
 }
 
 function parseLisaJson(text, fallbackPhase) {
   let response = (text || '').trim();
   let phase = fallbackPhase;
+  let detectedData = null;
   try {
     let t = (text || '').trim();
     const fence = t.match(/```(?:json)?\s*([\s\S]*?)```/i);
@@ -160,10 +171,17 @@ function parseLisaJson(text, fallbackPhase) {
       const obj = JSON.parse(t.slice(s, e + 1));
       if (obj.response != null) response = String(obj.response).trim();
       if (obj.detected_phase) phase = String(obj.detected_phase).trim().toLowerCase();
+      if (obj.detected_data && typeof obj.detected_data === 'object') {
+        const d = obj.detected_data;
+        const name = cleanField(d.name);
+        const email = cleanField(d.email);
+        const phone = cleanField(d.phone);
+        if (name || email || phone) detectedData = { name, email: email ? email.toLowerCase() : null, phone };
+      }
     }
   } catch (_) { /* fallback: hele tekst als response, fase = fallback */ }
   if (!VALID_PHASES.includes(phase)) phase = fallbackPhase;
-  return { response, phase };
+  return { response, phase, detectedData };
 }
 
 // Genereert Lisa's antwoord o.b.v. een al-geladen config + conversatie.
@@ -221,10 +239,10 @@ export async function generateLisaResponse({ config, conversation, userMessage, 
     return { ok: false, status: 502, error: `AI-generatie mislukt: ${err?.message || 'onbekende fout'}` };
   }
   const genMs = Date.now() - t0;
-  const { response, phase: detectedPhase } = parseLisaJson(aiText, currentPhase);
+  const { response, phase: detectedPhase, detectedData } = parseLisaJson(aiText, currentPhase);
 
   return {
-    ok: true, response, detected_phase: detectedPhase,
+    ok: true, response, detected_phase: detectedPhase, detected_data: detectedData,
     config_version_id: config.id, config_version: config.version,
     model_used: LISA_MODEL, tokens_used: tokensUsed, generation_time_ms: genMs,
     rag_used: matchedFaq.length > 0 || kbItems.length > 0,
