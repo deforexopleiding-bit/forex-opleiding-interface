@@ -11,7 +11,7 @@
 
 ### ✅ Afgerond Fase 1 (fundament)
 - [x] Migratie 012 — 10 tabellen + RLS + herbruikbare updated_at-trigger
-- [x] 25 RBAC feature_keys in FEATURE_REGISTRY (Klanten/WhatsApp/Brieven)
+- [x] 24 RBAC feature_keys in FEATURE_REGISTRY (Klanten/WhatsApp/Brieven)
 - [x] Placeholder modules/klanten.html + sidebar-entry (gating: customer.module.access)
 - [x] Documentatie (overview + CLAUDE.md + deze sectie)
 
@@ -24,7 +24,7 @@
 - [ ] Duplicate-check endpoint (POST /api/customer-check-duplicate)
 - [ ] AVG-functionaliteit (export Art. 15 + anonimiseren Art. 17)
 - [ ] WhatsApp send-laag (Twilio-integratie, eind Fase 2)
-- [ ] Admin-matrix: manager-keys aanzetten voor de 25 nieuwe keys
+- [ ] Admin-matrix: manager-keys aanzetten voor de 24 nieuwe keys
 
 ---
 

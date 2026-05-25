@@ -21,7 +21,7 @@ Finance (wanbetalers), Follow-up en Lisa. Berichten dragen `source_module` +
   herbruikbare `public.set_updated_at()`-trigger, en FK-beleid:
   CASCADE (tags), SET NULL (whatsapp_messages), **RESTRICT** (letters + avg_data_requests —
   incasso-/AVG-bewijs, dwingt anonimiseren i.p.v. hard delete).
-- **25 RBAC feature-keys** in `modules/admin.html` FEATURE_REGISTRY (groepen Klanten/WhatsApp/Brieven).
+- **24 RBAC feature-keys** in `modules/admin.html` FEATURE_REGISTRY (groepen Klanten/WhatsApp/Brieven).
 - **Placeholder** `modules/klanten.html` + sidebar-entry (gegate op `customer.module.access`).
 
 ## Fase 2 — vervolg (open)
@@ -33,5 +33,5 @@ OAuth, duplicate-check, AVG-functionaliteit (export + anonymize), en de WhatsApp
 - **RLS = authenticated-read-all** op `customers` (PII): bewust consistent met migratie 003.
   Fijnmazige toegang (eigen vs alle klanten, AVG-acties) wordt in Fase 2 op de **API-laag**
   afgedwongen via `requirePermissionFailOpen` (zie CLAUDE.md → Bekende Beperkingen).
-- **Manager-rechten** staan na Fase 1 nog UIT — Jeffrey zet de 25 keys aan in de admin-matrix
+- **Manager-rechten** staan na Fase 1 nog UIT — Jeffrey zet de 24 keys aan in de admin-matrix
   (lockout-safe, geen SQL-seed). super_admin heeft alles via `is_super_admin()`.
