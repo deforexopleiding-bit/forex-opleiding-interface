@@ -6,6 +6,28 @@
 
 ---
 
+## Klanten-module
+> Spec: `docs/specs/01-klanten-module-spec.md` · Overzicht: `docs/klanten-module-overview.md`
+
+### ✅ Afgerond Fase 1 (fundament)
+- [x] Migratie 012 — 10 tabellen + RLS + herbruikbare updated_at-trigger
+- [x] 25 RBAC feature_keys in FEATURE_REGISTRY (Klanten/WhatsApp/Brieven)
+- [x] Placeholder modules/klanten.html + sidebar-entry (gating: customer.module.access)
+- [x] Documentatie (overview + CLAUDE.md + deze sectie)
+
+### ⏳ Open Fase 2
+- [ ] Klant-overzicht UI (lijst, filters, search)
+- [ ] Klant-detailpagina basis (header + tabs)
+- [ ] CRUD-endpoints (POST/PATCH/DELETE customer)
+- [ ] Tag-toekenning UI
+- [ ] TradersLeague OAuth setup
+- [ ] Duplicate-check endpoint (POST /api/customer-check-duplicate)
+- [ ] AVG-functionaliteit (export Art. 15 + anonimiseren Art. 17)
+- [ ] WhatsApp send-laag (Twilio-integratie, eind Fase 2)
+- [ ] Admin-matrix: manager-keys aanzetten voor de 25 nieuwe keys
+
+---
+
 ## ✅ Gerealiseerd 2026-05-14 — Fase C + Role-architectuur + RLS + Auth-gate
 
 - [x] Fase C admin panel (commit 1cdf138): api/admin-users.js GET/POST/PATCH/DELETE, verifyAdmin, logAudit, recovery link via Strato SMTP; modules/admin.html user-management UI

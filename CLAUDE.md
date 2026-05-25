@@ -40,6 +40,11 @@ Lokaal: C:/Users/jeffr/forex-opleiding-interface
 - Pattern: alle module init() doen await window._authSharedReady + requireAuth()
 - dashboard-stats.js gebruikt createUserClient(req) — RLS-aware
 
+## Bekende Beperkingen
+- Klanten-module RLS: authenticated-read-all op customers (PII) — pattern consistent met
+  migratie 003. Fijnmazige toegangscontrole (eigen vs alle klanten, AVG-acties) wordt
+  afgedwongen op API-laag via requirePermissionFailOpen in Fase 2.
+
 ## Architectuur — Role-Based Access Control
 - ADMIN_ROLES = ['super_admin', 'admin', 'manager'] — in api/supabase.js
 - createUserClient(req): per-request JWT-aware Supabase client (api/supabase.js)
@@ -60,6 +65,7 @@ Lokaal: C:/Users/jeffr/forex-opleiding-interface
 
 ## Module-architectuur
 - /index.html — Dashboard
+- /modules/klanten.html — Klantenbeheer (🚧 Fase 1 fundament: DB + RBAC + placeholder)
 - /modules/email.html — E-mail beheer
 - /modules/taken.html — Takenbeheer
 - /modules/kennisbank.html — Kennisbank
