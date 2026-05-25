@@ -9,7 +9,7 @@
 //       → in kantooruren: direct sturen; daarbuiten: pre-genereren + plannen in lisa_followups.
 
 import { supabaseAdmin } from './supabase.js';
-import { computeResponseDelay, sendTypingIndicator } from './_lib/lisa-ghl-send.js';
+import { computeResponseDelay, sendTypingIndicator, matchBookingByEmail } from './_lib/lisa-ghl-send.js';
 import { generateLisaResponse } from './lisa-respond.js';
 import { detectStopSignal } from './_lib/lisa-followup.js';
 import dayjs from 'dayjs';
@@ -155,6 +155,20 @@ export default async function handler(req, res) {
     await supabaseAdmin.from('lisa_messages').insert({
       conversation_id: conv.id, direction: 'in', content: message, ai_generated: false, ghl_message_id: messageId || null,
     });
+
+    // 9b. Door de volger opgegeven gegevens opslaan + (fire-and-forget) GHL-contact-match.
+    const dd = result.detected_data || {};
+    const convUpd = {};
+    if (dd.email && !conv.confirmed_email) convUpd.confirmed_email = dd.email;
+    if (dd.phone && !conv.confirmed_phone) convUpd.confirmed_phone = dd.phone;
+    if (dd.name && dd.name !== conv.contact_name) convUpd.contact_name = dd.name;
+    if (Object.keys(convUpd).length) {
+      await supabaseAdmin.from('lisa_conversations').update(convUpd).eq('id', conv.id);
+      Object.assign(conv, convUpd);
+    }
+    if (dd.email && conv.booking_match_status !== 'matched') {
+      matchBookingByEmail(conv.id, dd.email, conv.ghl_location_id).catch((e) => console.error('[booking-match] bg fail:', e?.message || e));
+    }
 
     // 10. Versturen: binnen kantooruren → response-delay QUEUE (geen blocking sleep; cron verstuurt).
     if (isInOfficeHours) {

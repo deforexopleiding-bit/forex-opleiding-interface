@@ -2,6 +2,8 @@
 // Helper om Lisa-berichten naar GoHighLevel (Instagram) te sturen via de Conversations API.
 // Native fetch (Node 18+, ESM). Token: GHL_PIT_TOKEN of GHL_API_KEY (zelfde als follow-up-modules).
 
+import { supabaseAdmin } from '../supabase.js';
+
 const GHL_API = 'https://services.leadconnectorhq.com';
 const GHL_VERSION = '2021-04-15';
 
@@ -113,6 +115,81 @@ export async function sendTypingIndicator(contactId, options = {}) {
     return { ok: true };
   } catch (err) {
     console.log('[lisa-typing] exception:', err?.message || err);
+    return { ok: false, error: err?.message || 'onbekende fout' };
+  }
+}
+
+// ── Booking-match (F12) ───────────────────────────────────────────────────────
+async function logSystemMessage(conversationId, content) {
+  try {
+    await supabaseAdmin.from('lisa_messages').insert({
+      conversation_id: conversationId, direction: 'out', content, ai_generated: false, is_system: true, sent_at: new Date().toISOString(),
+    });
+  } catch (_) { /* niet kritiek */ }
+}
+
+/**
+ * Match een conversatie tegen een GHL-contact via e-mail; bij 1 match + actieve afspraak
+ * wordt de booking automatisch gekoppeld. Fail-safe (gooit nooit). Max 2 GHL-calls.
+ * @returns {Promise<{ok:boolean, status?:string, contactId?:string, hasAppointment?:boolean, error?:string}>}
+ */
+export async function matchBookingByEmail(conversationId, email, locationId) {
+  const token = ghlToken();
+  if (!token) return { ok: false, error: 'no_token' };
+  const target = String(email || '').toLowerCase().trim();
+  if (!target) return { ok: false, error: 'no_email' };
+
+  const setStatus = async (status, extra = {}) => {
+    await supabaseAdmin.from('lisa_conversations')
+      .update({ booking_match_status: status, booking_match_at: new Date().toISOString(), ...extra })
+      .eq('id', conversationId);
+  };
+
+  try {
+    // 1. Contact-zoekopdracht (exacte e-mail-match client-side; query kan fuzzy zijn).
+    const url = new URL(`${GHL_API}/contacts/`);
+    if (locationId) url.searchParams.set('locationId', locationId);
+    url.searchParams.set('query', target);
+    const resp = await fetch(url, { headers: { Authorization: `Bearer ${token}`, Version: '2021-07-28', Accept: 'application/json' } });
+    if (!resp.ok) { console.log('[booking-match] search failed', resp.status); return { ok: false, error: String(resp.status) }; }
+    const data = await resp.json().catch(() => ({}));
+    const matches = (data.contacts || []).filter((c) => String(c.email || '').toLowerCase() === target);
+
+    if (matches.length === 0) { await setStatus('no_match'); await logSystemMessage(conversationId, `🔍 Booking-match: geen GHL-contact gevonden voor ${target}`); return { ok: true, status: 'no_match' }; }
+    if (matches.length > 1) { await setStatus('multiple_matches'); await logSystemMessage(conversationId, `🔍 Booking-match: meerdere GHL-contacten met ${target} — handmatig controleren`); return { ok: true, status: 'multiple_matches' }; }
+
+    const c = matches[0];
+    const naam = [c.firstName, c.lastName].filter(Boolean).join(' ').trim() || c.contactName || target;
+
+    // 2. Heeft dit contact een actieve afspraak?
+    let hasAppointment = false;
+    try {
+      const ar = await fetch(`${GHL_API}/contacts/${c.id}/appointments`, { headers: { Authorization: `Bearer ${token}`, Version: GHL_VERSION, Accept: 'application/json' } });
+      if (ar.ok) {
+        const ad = await ar.json().catch(() => ({}));
+        hasAppointment = (ad.events || ad.appointments || []).some((a) =>
+          ['confirmed', 'booked', 'new'].includes(String(a.appointmentStatus || a.status || '').toLowerCase()));
+      }
+    } catch (_) { /* appointment-check is best-effort */ }
+
+    const extra = { booking_matched_contact_id: c.id };
+    if (hasAppointment) {
+      const now = new Date().toISOString();
+      Object.assign(extra, {
+        call_booked: true, call_booked_at: now, qualified: true, qualified_at: now,
+        phase: 'qualified', followup_paused: true, followup_paused_at: now, followup_paused_reason: 'booking_matched',
+      });
+      await supabaseAdmin.from('lisa_followups')
+        .update({ status: 'cancelled', cancelled_reason: 'booking_matched' })
+        .eq('conversation_id', conversationId).eq('status', 'scheduled');
+    }
+    await setStatus('matched', extra);
+    await logSystemMessage(conversationId, hasAppointment
+      ? `✅ Booking gematched: ${naam} — afspraak gekoppeld`
+      : `🔍 Booking gematched: ${naam} — nog geen actieve afspraak`);
+    return { ok: true, status: 'matched', contactId: c.id, hasAppointment };
+  } catch (err) {
+    console.error('[booking-match] error:', err?.message || err);
     return { ok: false, error: err?.message || 'onbekende fout' };
   }
 }
