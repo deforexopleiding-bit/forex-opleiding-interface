@@ -250,6 +250,11 @@
     .lv-badge.ph-qualified { background:rgba(16,185,129,.15); color:#10B981; }
     .lv-badge.ph-disqualified { background:rgba(239,68,68,.15); color:#EF4444; }
     .lv-badge.ph-cold { background:rgba(107,114,128,.18); color:#6B7280; }
+    .lv-badge-success { background:rgba(16,185,129,.15)!important; color:#10B981!important; }
+    .lv-badge-warning { background:rgba(251,191,36,.15)!important; color:#d97706!important; }
+    .lv-badge-info { background:rgba(59,130,246,.15)!important; color:#3B82F6!important; }
+    .lv-badge-dim { background:rgba(168,162,158,.18)!important; color:#a8a29e!important; }
+    .lv-confirmed-details { margin-top:8px; padding:8px 10px; background:var(--bg-elev-2); border-radius:6px; font-size:12px; color:var(--text-dim); line-height:1.6; }
     .lv-chat-col { border:1px solid var(--border); border-radius:12px; background:var(--bg-elev); display:flex; flex-direction:column; min-height:60vh; }
     .lv-chat-head { padding:10px 14px; border-bottom:1px solid var(--border); display:flex; align-items:center; gap:10px; flex-wrap:wrap; font-size:13px; font-weight:600; }
     .lv-chat { flex:1; overflow-y:auto; padding:14px; display:flex; flex-direction:column; gap:10px; max-height:55vh; }
@@ -1096,6 +1101,23 @@ function lvRenderChat(scroll) {
   if (scroll || nearBottom) chat.scrollTop = chat.scrollHeight;
 }
 
+function lvBookingBadge(c) {
+  const m = {
+    matched: ['lv-badge-success', '✅ Booking gematched'],
+    no_match: ['lv-badge-warning', '⚠ E-mail niet in GHL'],
+    multiple_matches: ['lv-badge-info', '🔍 Meerdere matches'],
+    pending: ['lv-badge-dim', '⏳ Wacht op data'],
+  };
+  const x = m[c.booking_match_status];
+  return x ? '<span class="lv-badge ' + x[0] + '" style="display:inline-block;margin-top:6px">' + x[1] + '</span>' : '';
+}
+function lvConfirmedDetails(c) {
+  const p = [];
+  if (c.confirmed_email) p.push('📧 ' + esc(c.confirmed_email));
+  if (c.confirmed_phone) p.push('📞 ' + esc(c.confirmed_phone));
+  return p.length ? '<div class="lv-confirmed-details">' + p.join('<br>') + '</div>' : '';
+}
+
 function lvRenderDetail() {
   const host = document.getElementById('lvDetail');
   if (!lvDetail) return;
@@ -1106,7 +1128,7 @@ function lvRenderDetail() {
     row('Fase', c.phase || '—') + row('Bron', c.source || '—') + row('Gestart', dt(c.first_message_at || c.created_at)) +
     row('Qualified', c.qualified ? 'ja' : 'nee') + row('Call geboekt', c.call_booked ? 'ja' : 'nee') +
     row('Mens actief', c.human_takeover ? 'ja' : 'nee') + row('Follow-up', c.followup_paused ? 'gepauzeerd' : 'actief') +
-  '</div></div>';
+  '</div>' + lvBookingBadge(c) + lvConfirmedDetails(c) + '</div>';
   if (q) {
     html += '<div><h4>Kwalificatie</h4><div class="lv-dl">' +
       (q.doel ? row('Doel', q.doel) : '') + (q.tijd_beschikbaar ? row('Tijd', q.tijd_beschikbaar) : '') +
