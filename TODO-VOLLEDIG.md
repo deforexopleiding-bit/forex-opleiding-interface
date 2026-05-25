@@ -26,6 +26,25 @@
 - [ ] WhatsApp send-laag (Twilio-integratie, eind Fase 2)
 - [ ] Admin-matrix: manager-keys aanzetten voor de 24 nieuwe keys
 
+### 🎓 Leerpunten Supabase Branching merge (Fase 1)
+
+1. **Seeds in een migratie-file worden GESKIPT bij merge naar production branch**
+   ("Skipping seed data for protected branch"). Voor Fase 2A en verder: seeds in
+   `supabase/seed.sql` plaatsen, NIET in de migratie-file. Of: handmatige seed-stap
+   onderdeel van merge-runbook houden.
+
+2. **Branch-merge UI kan vasthangen op "Waiting for run to start"** als een follow-up
+   step (functions listing) faalt met 502. De DB-migratie kan dan TOCH succesvol zijn —
+   altijd via read-only queries verifiëren in plaats van op UI vertrouwen.
+
+3. **`workflow_run_id`** zichtbaar in branches → View Logs → geeft precies aan welke
+   stappen draaiden. Eerste plek om te kijken bij stuck merges.
+
+4. **Handmatige data-fixes op productie main na een gefaalde merge zijn veilig**, MITS:
+   - Idempotente queries (ON CONFLICT DO NOTHING)
+   - Geen UPDATE/DELETE op bestaande rijen
+   - Eerst read-only validatie van staat
+
 ---
 
 ## ✅ Gerealiseerd 2026-05-14 — Fase C + Role-architectuur + RLS + Auth-gate
