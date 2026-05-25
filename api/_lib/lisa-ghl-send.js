@@ -128,6 +128,52 @@ async function logSystemMessage(conversationId, content) {
   } catch (_) { /* niet kritiek */ }
 }
 
+// Zoek een GHL-contact op e-mail via een fallback-keten (de exacte endpoint-variant
+// verschilt per GHL-account). Probeert 3 endpoints tot een exacte e-mail-match.
+// Returnt altijd { contacts: [...] } (leeg = geen match) — nooit een throw.
+async function searchGhlContactByEmail(email, locationId, token) {
+  const target = String(email).toLowerCase().trim();
+  const hdr = { Authorization: `Bearer ${token}`, Version: '2021-07-28', Accept: 'application/json' };
+  const exact = (arr) => (arr || []).filter((c) => String(c.email || '').toLowerCase().trim() === target);
+
+  // Poging 1: GET /contacts/?locationId=&query= (moderne API; query kan fuzzy zijn)
+  try {
+    const u = `${GHL_API}/contacts/?locationId=${encodeURIComponent(locationId)}&query=${encodeURIComponent(target)}`;
+    const r = await fetch(u, { headers: hdr });
+    if (r.ok) {
+      const d = await r.json().catch(() => ({}));
+      const m = exact(d.contacts || d.results);
+      if (m.length) { console.log('[booking-match] via /contacts/?query'); return { contacts: m, source: 'query' }; }
+    } else { console.log('[booking-match] /contacts/?query failed:', r.status); }
+  } catch (e) { console.log('[booking-match] /contacts/?query exception:', e?.message || e); }
+
+  // Poging 2: GET /contacts/search/duplicate?locationId=&email= (geeft één duplicate-contact)
+  try {
+    const u = `${GHL_API}/contacts/search/duplicate?locationId=${encodeURIComponent(locationId)}&email=${encodeURIComponent(target)}`;
+    const r = await fetch(u, { headers: hdr });
+    if (r.ok) {
+      const d = await r.json().catch(() => ({}));
+      const c = d.contact || (Array.isArray(d.contacts) ? d.contacts[0] : null);
+      if (c && String(c.email || '').toLowerCase().trim() === target) { console.log('[booking-match] via /search/duplicate'); return { contacts: [c], source: 'duplicate' }; }
+    } else { console.log('[booking-match] /search/duplicate failed:', r.status); }
+  } catch (e) { console.log('[booking-match] /search/duplicate exception:', e?.message || e); }
+
+  // Poging 3: POST /contacts/search (nieuwste API)
+  try {
+    const r = await fetch(`${GHL_API}/contacts/search`, {
+      method: 'POST', headers: { ...hdr, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ locationId, filters: [{ field: 'email', operator: 'eq', value: target }] }),
+    });
+    if (r.ok) {
+      const d = await r.json().catch(() => ({}));
+      const m = exact(d.contacts);
+      if (m.length) { console.log('[booking-match] via POST /contacts/search'); return { contacts: m, source: 'post_search' }; }
+    } else { console.log('[booking-match] POST /contacts/search failed:', r.status); }
+  } catch (e) { console.log('[booking-match] POST /contacts/search exception:', e?.message || e); }
+
+  return { contacts: [], source: 'none' };
+}
+
 /**
  * Match een conversatie tegen een GHL-contact via e-mail; bij 1 match + actieve afspraak
  * wordt de booking automatisch gekoppeld. Fail-safe (gooit nooit). Max 2 GHL-calls.
@@ -146,14 +192,16 @@ export async function matchBookingByEmail(conversationId, email, locationId) {
   };
 
   try {
-    // 1. Contact-zoekopdracht (exacte e-mail-match client-side; query kan fuzzy zijn).
-    const url = new URL(`${GHL_API}/contacts/`);
-    if (locationId) url.searchParams.set('locationId', locationId);
-    url.searchParams.set('query', target);
-    const resp = await fetch(url, { headers: { Authorization: `Bearer ${token}`, Version: '2021-07-28', Accept: 'application/json' } });
-    if (!resp.ok) { console.log('[booking-match] search failed', resp.status); return { ok: false, error: String(resp.status) }; }
-    const data = await resp.json().catch(() => ({}));
-    const matches = (data.contacts || []).filter((c) => String(c.email || '').toLowerCase() === target);
+    // 1. locationId bepalen (param → conv → env-fallback).
+    let loc = locationId;
+    if (!loc) {
+      const { data: conv } = await supabaseAdmin.from('lisa_conversations').select('ghl_location_id').eq('id', conversationId).maybeSingle();
+      loc = conv?.ghl_location_id || process.env.GHL_DEFAULT_LOCATION_ID || null;
+    }
+    if (!loc) { console.log('[booking-match] geen locationId'); return { ok: false, error: 'no_location_id' }; }
+
+    // 2. Contact zoeken via fallback-keten (exacte e-mail-match binnenin).
+    const { contacts: matches } = await searchGhlContactByEmail(target, loc, token);
 
     if (matches.length === 0) { await setStatus('no_match'); await logSystemMessage(conversationId, `🔍 Booking-match: geen GHL-contact gevonden voor ${target}`); return { ok: true, status: 'no_match' }; }
     if (matches.length > 1) { await setStatus('multiple_matches'); await logSystemMessage(conversationId, `🔍 Booking-match: meerdere GHL-contacten met ${target} — handmatig controleren`); return { ok: true, status: 'multiple_matches' }; }
