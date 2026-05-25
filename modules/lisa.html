@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Lisa AI · De Forex Opleiding</title>
+  <title>AI Agents · De Forex Opleiding</title>
   <link rel="preconnect" href="https://fonts.googleapis.com"/>
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
@@ -278,6 +278,26 @@
     .lv-actions { display:flex; flex-direction:column; gap:6px; }
     .lv-actions .btn, .lv-actions .field-select { width:100%; justify-content:center; }
     .lv-muted { color:var(--text-faint); font-size:12px; }
+    /* AI Agents restructure */
+    .module-kpi-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:12px; margin-bottom:18px; }
+    @media (max-width:1100px){ .module-kpi-grid { grid-template-columns:repeat(2,1fr); } }
+    .agent-tabs-main { display:flex; gap:8px; border-bottom:2px solid var(--border); margin-bottom:18px; flex-wrap:wrap; }
+    .agent-tab-main { display:flex; align-items:center; gap:10px; padding:12px 18px; background:transparent; border:none; border-bottom:3px solid transparent; color:var(--text-dim); cursor:pointer; font-size:14px; font-weight:600; font-family:inherit; margin-bottom:-2px; transition:color .15s, border-color .15s; }
+    .agent-tab-main:hover { color:var(--text); }
+    .agent-tab-main.active { color:var(--text); border-bottom-color:var(--brand-primary,#093d54); }
+    .agent-icon { font-size:18px; }
+    .agent-status { font-size:10px; padding:2px 8px; border-radius:10px; font-weight:700; text-transform:uppercase; letter-spacing:.5px; }
+    .agent-status-active { background:rgba(16,185,129,.15); color:#10B981; }
+    .agent-status-soon { background:rgba(168,162,158,.18); color:#a8a29e; }
+    .wa-coming-soon { padding:56px 30px; text-align:center; background:var(--bg-elev); border:1px dashed var(--border); border-radius:12px; margin-top:16px; }
+    .wa-icon { font-size:60px; opacity:.5; margin-bottom:14px; }
+    .wa-coming-soon h2 { font-size:22px; margin:0 0 10px; }
+    .wa-coming-soon p { color:var(--text-dim); max-width:520px; margin:0 auto 10px; font-size:13px; line-height:1.5; }
+    .wa-features-preview { margin:28px auto; max-width:320px; text-align:left; background:var(--bg-elev-2); padding:18px; border-radius:10px; }
+    .wa-features-preview h3 { font-size:13px; margin:0 0 10px; color:var(--text); }
+    .wa-features-preview ul { list-style:none; padding:0; margin:0; }
+    .wa-features-preview li { padding:4px 0; color:var(--text-dim); font-size:13px; }
+    .wa-eta { font-size:12px; color:var(--text-faint); }
   </style>
 </head>
 <body>
@@ -289,85 +309,34 @@
 
     <div class="page-header">
       <div>
-        <h1 class="page-title"><i class="ti ti-robot" style="color:var(--brand-primary,#093d54)"></i> Lisa AI Appointmentsetter</h1>
-        <p class="page-sub">Instagram-DM kwalificatie &amp; call-booking</p>
+        <h1 class="page-title"><i class="ti ti-robot" style="color:var(--brand-primary,#093d54)"></i> AI Agents</h1>
+        <p class="page-sub">Multi-channel AI-agents voor lead-kwalificatie</p>
       </div>
       <span class="cfg-version-badge" id="activeVersionBadge">Actieve config: —</span>
     </div>
 
-    <!-- Live mode (F5.3) -->
-    <div class="lisa-live-bar">
-      <div class="live-status">
-        <span class="status-dot status-off" id="liveStatusDot"></span>
-        <div>
-          <div class="status-label" id="liveStatusLabel">Lisa is OFFLINE</div>
-          <div class="status-sub" id="liveStatusSub">Niet actief op Instagram</div>
-        </div>
-      </div>
-      <div class="live-controls">
-        <button id="liveModeToggleBtn" class="btn-toggle-live" type="button" onclick="toggleLiveMode()">
-          <span class="toggle-text">Activeer Live mode</span>
-        </button>
-      </div>
+    <!-- KPI's -->
+    <div class="module-kpi-grid">
+      <div class="kpi-card"><div class="kpi-label">Nieuwe conv (week)</div><div class="kpi-value" id="aiKpiNewConv">—</div><div class="kpi-sub" id="aiKpiNewConvSub">&nbsp;</div></div>
+      <div class="kpi-card"><div class="kpi-label">Qualified</div><div class="kpi-value" id="aiKpiQualified">—</div><div class="kpi-sub" id="aiKpiQualifiedRate">—</div></div>
+      <div class="kpi-card"><div class="kpi-label">Calls geboekt</div><div class="kpi-value" id="aiKpiBooked">—</div><div class="kpi-sub" id="aiKpiBookedRate">—</div></div>
+      <div class="kpi-card"><div class="kpi-label">Kosten (week)</div><div class="kpi-value" id="aiKpiCost">—</div><div class="kpi-sub" id="aiKpiTokens">—</div></div>
     </div>
 
-    <div class="lisa-live-details" id="liveDetailsRow" style="display:none">
-      <div class="live-stat"><span class="stat-label">Berichten ontvangen:</span><span class="stat-val" id="liveReceivedTotal">0</span></div>
-      <div class="live-stat"><span class="stat-label">Berichten verstuurd:</span><span class="stat-val" id="liveSentTotal">0</span></div>
-      <div class="live-stat"><span class="stat-label">Delayed in queue:</span><span class="stat-val" id="delayedPending">0</span></div>
-      <div class="live-stat"><span class="stat-label">Kantooruren:</span><span class="stat-val" id="officeHoursDisplay">07:00 - 23:30</span></div>
-      <div class="live-stat"><span class="stat-label">Laatste webhook:</span><span class="stat-val" id="lastWebhookAt">—</span></div>
+    <!-- Hoofd-agent-tabs -->
+    <div class="agent-tabs-main">
+      <button class="agent-tab-main active" data-agent="instagram" onclick="switchAgent('instagram')">
+        <span class="agent-icon">📷</span><span class="agent-name">Instagram Agent</span>
+        <span class="agent-status agent-status-active">Actief</span>
+      </button>
+      <button class="agent-tab-main" data-agent="whatsapp" onclick="switchAgent('whatsapp')">
+        <span class="agent-icon">💬</span><span class="agent-name">WhatsApp Agent</span>
+        <span class="agent-status agent-status-soon">Binnenkort</span>
+      </button>
     </div>
 
-    <!-- Delay/typing settings (F10.3) -->
-    <details class="lisa-settings-panel" id="lisaSettingsPanel">
-      <summary class="settings-summary"><i class="ti ti-adjustments"></i> Instellingen — response-delay &amp; typing</summary>
-      <div class="settings-content">
-        <div class="form-row">
-          <label class="form-label">Response-delay modus</label>
-          <div class="radio-group">
-            <label><input type="radio" name="delayMode" value="fixed" onchange="showDelayModeFields('fixed')" /> Vaste tijd</label>
-            <label><input type="radio" name="delayMode" value="random" onchange="showDelayModeFields('random')" /> Random (min-max)</label>
-            <label><input type="radio" name="delayMode" value="per_phase" onchange="showDelayModeFields('per_phase')" /> Per fase</label>
-          </div>
-        </div>
-
-        <div class="form-row delay-fixed-row" style="display:none">
-          <label class="form-label">Seconden wachten voor antwoord</label>
-          <input type="number" class="field-input" id="delayFixedSec" min="0" max="600" style="max-width:120px" />
-        </div>
-
-        <div class="form-row delay-random-row" style="display:none">
-          <label class="form-label">Random tussen min en max (seconden)</label>
-          <div class="fu-row-inline">
-            <input type="number" class="field-input" id="delayMinSec" min="0" max="600" style="max-width:100px" placeholder="min" />
-            <span class="field-hint">tot</span>
-            <input type="number" class="field-input" id="delayMaxSec" min="0" max="600" style="max-width:100px" placeholder="max" />
-          </div>
-        </div>
-
-        <div class="form-row delay-perphase-row" style="display:none">
-          <label class="form-label">Delay per fase (seconden)</label>
-          <div class="perphase-grid">
-            <label>Intro <input type="number" class="field-input" id="delayPhaseIntro" min="0" max="600" /></label>
-            <label>Doel <input type="number" class="field-input" id="delayPhaseDoel" min="0" max="600" /></label>
-            <label>Situatie <input type="number" class="field-input" id="delayPhaseSituatie" min="0" max="600" /></label>
-            <label>Band <input type="number" class="field-input" id="delayPhaseBand" min="0" max="600" /></label>
-            <label>Call <input type="number" class="field-input" id="delayPhaseCall" min="0" max="600" /></label>
-          </div>
-        </div>
-
-        <div class="form-row">
-          <label class="kb-toggle-row"><input type="checkbox" id="typingIndicatorToggle" /> <span class="field-label" style="margin:0">"Lisa is aan het typen…"-indicator versturen</span></label>
-        </div>
-
-        <div class="form-row settings-actions">
-          <button class="btn btn-primary" id="saveDelaySettingsBtn" onclick="saveDelaySettings()">Instellingen opslaan</button>
-          <button class="btn" id="backfillNamesBtn" onclick="runBackfillNames()">🔄 Backfill conversatie-namen</button>
-        </div>
-        <p class="field-hint">Lag-info: een antwoord wordt na de delay verstuurd door de cron (elke minuut), dus reken op de delay + tot ~60s.</p>
-      </div>
-    </details>
+    <!-- Instagram Agent -->
+    <div class="agent-container" data-agent="instagram">
 
     <div class="tabs">
       <button class="tab active" data-tab="live"    onclick="switchTab('live')"><i class="ti ti-messages"></i> Live</button>
@@ -452,7 +421,8 @@
       </div>
 
       <div class="cfg-subtabs">
-        <button class="cfg-subtab active" data-sub="persona" onclick="switchCfgSub('persona')">Persona</button>
+        <button class="cfg-subtab active" data-sub="algemeen" onclick="switchCfgSub('algemeen')">Algemeen</button>
+        <button class="cfg-subtab" data-sub="persona" onclick="switchCfgSub('persona')">Persona</button>
         <button class="cfg-subtab" data-sub="dos" onclick="switchCfgSub('dos')">Do's &amp; Don'ts</button>
         <button class="cfg-subtab" data-sub="fases" onclick="switchCfgSub('fases')">Fases</button>
         <button class="cfg-subtab" data-sub="knowledge" onclick="switchCfgSub('knowledge')">Knowledge</button>
@@ -461,8 +431,78 @@
 
       <div class="cfg-grid">
         <div class="cfg-editor">
+          <!-- Algemeen: live mode + response-delay -->
+          <div class="cfg-sub-panel active" id="sub-algemeen">
+            <div class="lisa-live-bar">
+              <div class="live-status">
+                <span class="status-dot status-off" id="liveStatusDot"></span>
+                <div>
+                  <div class="status-label" id="liveStatusLabel">Lisa is OFFLINE</div>
+                  <div class="status-sub" id="liveStatusSub">Niet actief op Instagram</div>
+                </div>
+              </div>
+              <div class="live-controls">
+                <button id="liveModeToggleBtn" class="btn-toggle-live" type="button" onclick="toggleLiveMode()">
+                  <span class="toggle-text">Activeer Live mode</span>
+                </button>
+              </div>
+            </div>
+
+            <div class="lisa-live-details" id="liveDetailsRow" style="display:none">
+              <div class="live-stat"><span class="stat-label">Berichten ontvangen:</span><span class="stat-val" id="liveReceivedTotal">0</span></div>
+              <div class="live-stat"><span class="stat-label">Berichten verstuurd:</span><span class="stat-val" id="liveSentTotal">0</span></div>
+              <div class="live-stat"><span class="stat-label">Delayed in queue:</span><span class="stat-val" id="delayedPending">0</span></div>
+              <div class="live-stat"><span class="stat-label">Kantooruren:</span><span class="stat-val" id="officeHoursDisplay">07:00 - 23:30</span></div>
+              <div class="live-stat"><span class="stat-label">Laatste webhook:</span><span class="stat-val" id="lastWebhookAt">—</span></div>
+            </div>
+
+            <details class="lisa-settings-panel" id="lisaSettingsPanel">
+              <summary class="settings-summary"><i class="ti ti-adjustments"></i> Response-delay &amp; typing</summary>
+              <div class="settings-content">
+                <div class="form-row">
+                  <label class="form-label">Response-delay modus</label>
+                  <div class="radio-group">
+                    <label><input type="radio" name="delayMode" value="fixed" onchange="showDelayModeFields('fixed')" /> Vaste tijd</label>
+                    <label><input type="radio" name="delayMode" value="random" onchange="showDelayModeFields('random')" /> Random (min-max)</label>
+                    <label><input type="radio" name="delayMode" value="per_phase" onchange="showDelayModeFields('per_phase')" /> Per fase</label>
+                  </div>
+                </div>
+                <div class="form-row delay-fixed-row" style="display:none">
+                  <label class="form-label">Seconden wachten voor antwoord</label>
+                  <input type="number" class="field-input" id="delayFixedSec" min="0" max="600" style="max-width:120px" />
+                </div>
+                <div class="form-row delay-random-row" style="display:none">
+                  <label class="form-label">Random tussen min en max (seconden)</label>
+                  <div class="fu-row-inline">
+                    <input type="number" class="field-input" id="delayMinSec" min="0" max="600" style="max-width:100px" placeholder="min" />
+                    <span class="field-hint">tot</span>
+                    <input type="number" class="field-input" id="delayMaxSec" min="0" max="600" style="max-width:100px" placeholder="max" />
+                  </div>
+                </div>
+                <div class="form-row delay-perphase-row" style="display:none">
+                  <label class="form-label">Delay per fase (seconden)</label>
+                  <div class="perphase-grid">
+                    <label>Intro <input type="number" class="field-input" id="delayPhaseIntro" min="0" max="600" /></label>
+                    <label>Doel <input type="number" class="field-input" id="delayPhaseDoel" min="0" max="600" /></label>
+                    <label>Situatie <input type="number" class="field-input" id="delayPhaseSituatie" min="0" max="600" /></label>
+                    <label>Band <input type="number" class="field-input" id="delayPhaseBand" min="0" max="600" /></label>
+                    <label>Call <input type="number" class="field-input" id="delayPhaseCall" min="0" max="600" /></label>
+                  </div>
+                </div>
+                <div class="form-row">
+                  <label class="kb-toggle-row"><input type="checkbox" id="typingIndicatorToggle" /> <span class="field-label" style="margin:0">"Lisa is aan het typen…"-indicator versturen</span></label>
+                </div>
+                <div class="form-row settings-actions">
+                  <button class="btn btn-primary" id="saveDelaySettingsBtn" onclick="saveDelaySettings()">Instellingen opslaan</button>
+                  <button class="btn" id="backfillNamesBtn" onclick="runBackfillNames()">🔄 Backfill conversatie-namen</button>
+                </div>
+                <p class="field-hint">Lag-info: een antwoord wordt na de delay verstuurd door de cron (elke minuut), dus reken op de delay + tot ~60s.</p>
+              </div>
+            </details>
+          </div>
+
           <!-- Persona -->
-          <div class="cfg-sub-panel active" id="sub-persona">
+          <div class="cfg-sub-panel" id="sub-persona">
             <div><label class="field-label">Naam</label><input class="field-input" id="f_persona_name" oninput="onCfgInput()" /></div>
             <div><label class="field-label">Leeftijd</label><input class="field-input" id="f_persona_age" oninput="onCfgInput()" /></div>
             <div><label class="field-label">Achtergrondverhaal</label><textarea class="field-textarea" id="f_persona_background" style="min-height:120px" oninput="onCfgInput()"></textarea></div>
@@ -649,6 +689,37 @@
       <section class="logs-section" id="errorsSection"><h3>⚠️ Errors</h3><div id="errorsList"></div></section>
     </div>
 
+    </div><!-- /agent-container instagram -->
+
+    <!-- WhatsApp Agent (skeleton) -->
+    <div class="agent-container" data-agent="whatsapp" style="display:none">
+      <div class="tabs" id="waTabsNav">
+        <button class="tab active" data-wa-tab="live" onclick="waSwitchTab(this)">Live</button>
+        <button class="tab" data-wa-tab="stats" onclick="waSwitchTab(this)">Stats</button>
+        <button class="tab" data-wa-tab="config" onclick="waSwitchTab(this)">Config</button>
+        <button class="tab" data-wa-tab="sandbox" onclick="waSwitchTab(this)">Sandbox</button>
+        <button class="tab" data-wa-tab="logs" onclick="waSwitchTab(this)">Logs</button>
+      </div>
+      <div class="wa-coming-soon">
+        <div class="wa-icon">💬</div>
+        <h2>WhatsApp Agent</h2>
+        <p>De WhatsApp AI-agent wordt binnenkort uitgerold.</p>
+        <p class="lv-muted">Deze agent beantwoordt inkomende WhatsApp-berichten, kwalificeert leads en plant afspraken — vergelijkbaar met de Instagram Agent.</p>
+        <div class="wa-features-preview">
+          <h3>Geplande features</h3>
+          <ul>
+            <li>✓ Multi-step conversation flow</li>
+            <li>✓ Knowledge base met RAG</li>
+            <li>✓ Configureerbare persona</li>
+            <li>✓ Automatische follow-ups</li>
+            <li>✓ GHL appointment-sync</li>
+            <li>✓ Stats &amp; logs</li>
+          </ul>
+        </div>
+        <p class="wa-eta">ETA: nog te bepalen</p>
+      </div>
+    </div>
+
   </div>
 </div>
 
@@ -688,6 +759,36 @@ async function init() {
   loadKbMeta(); // F4.3 — tags/links/items voor de Knowledge-tab (async, re-rendert zelf)
   startLiveRefresh(); // F5.3 — live-mode status + stats (auto-refresh 30s)
   lvInit();           // F6 — live-conversaties monitoring (Live is de default tab)
+  loadAiAgentsKpis();
+  setInterval(loadAiAgentsKpis, 60000);
+}
+
+// ── AI Agents: hoofdtabs + KPI's ──────────────────────────────────────────────
+function switchAgent(agent) {
+  document.querySelectorAll('.agent-tab-main').forEach(t => t.classList.toggle('active', t.dataset.agent === agent));
+  document.querySelectorAll('.agent-container').forEach(c => { c.style.display = c.dataset.agent === agent ? '' : 'none'; });
+}
+
+function waSwitchTab(btn) {
+  // Dummy: WhatsApp-agent toont enkel "binnenkort"; sub-tabs zijn cosmetisch.
+  document.querySelectorAll('#waTabsNav .tab').forEach(t => t.classList.toggle('active', t === btn));
+}
+
+async function loadAiAgentsKpis() {
+  try {
+    const res = await window.AgentShared.apiFetch('/api/lisa-stats?period=week');
+    if (!res.ok) return;
+    const d = await res.json();
+    const t = d.totals || {}, f = d.conversion_funnel || {}, cost = d.cost || {};
+    const set = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
+    set('aiKpiNewConv', t.conversations ?? 0);
+    set('aiKpiQualified', t.qualified ?? 0);
+    set('aiKpiQualifiedRate', (f.qualified_pct ?? 0) + '% van nieuw');
+    set('aiKpiBooked', t.call_booked ?? 0);
+    set('aiKpiBookedRate', (f.booked_pct ?? 0) + '% van nieuw');
+    set('aiKpiCost', '€' + (cost.total_cost_eur ?? '0.00'));
+    set('aiKpiTokens', ((cost.total_tokens ?? 0) / 1000).toFixed(1) + 'k tokens');
+  } catch (e) { /* stil — KPI's zijn niet kritiek */ }
 }
 
 // ── Live mode (F5.3) ─────────────────────────────────────────────────────────

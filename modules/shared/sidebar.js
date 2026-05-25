@@ -57,7 +57,7 @@
         '<div class="sidebar-nav">' +
           navLink('dashboard', '/index.html', 'Dashboard') +
           '<a class="nav-item" data-module="email" href="/modules/email.html">' + svg('email') + 'E-mail<span class="nav-badge" id="navEmailBadge"></span></a>' +
-          navLink('lisa', '/modules/lisa.html', 'Lisa AI') +
+          navLink('lisa', '/modules/lisa.html', 'AI Agents') +
           '<a class="nav-item" data-module="taken" href="/modules/taken.html">' + svg('taken') + 'Takenbeheer<span class="nav-badge" id="navTakenBadge"></span></a>' +
           navLink('kennisbank', '/modules/kennisbank.html', 'Kennisbank') +
           navLink('agents', '/modules/agents.html', 'AI Agents') +
