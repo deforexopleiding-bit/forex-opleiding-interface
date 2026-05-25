@@ -508,6 +508,24 @@
                 <p class="field-hint">Lag-info: een antwoord wordt na de delay verstuurd door de cron (elke minuut), dus reken op de delay + tot ~60s.</p>
               </div>
             </details>
+
+            <details class="lisa-settings-panel">
+              <summary class="settings-summary"><i class="ti ti-calendar-check"></i> Post-link follow-up (na agenda-link)</summary>
+              <div class="settings-content">
+                <div class="form-row">
+                  <label class="kb-toggle-row"><input type="checkbox" id="postLinkEnabled" /> <span class="field-label" style="margin:0">Post-link follow-ups actief</span></label>
+                  <p class="field-hint" style="margin:4px 0 0">Lisa vraagt automatisch om bevestiging als de volger na de agenda-link niet reageert (3 checks).</p>
+                </div>
+                <div class="form-row perphase-grid">
+                  <label>1e check (uren) <input type="number" class="field-input" id="postLinkStep1" min="1" max="168" /></label>
+                  <label>2e check (uren) <input type="number" class="field-input" id="postLinkStep2" min="1" max="168" /></label>
+                  <label>3e check (uren) <input type="number" class="field-input" id="postLinkStep3" min="1" max="168" /></label>
+                </div>
+                <div class="form-row settings-actions">
+                  <button class="btn btn-primary" id="savePostLinkBtn" onclick="savePostLinkSettings()">Opslaan</button>
+                </div>
+              </div>
+            </details>
           </div>
 
           <!-- Persona -->
@@ -872,6 +890,39 @@ function updateLiveModeUI(s) {
   document.getElementById('lastWebhookAt').textContent =
     s.ghl_webhook_last_received_at ? new Date(s.ghl_webhook_last_received_at).toLocaleString('nl-NL') : '—';
   renderDelaySettings(s);
+  renderPostLinkSettings(s);
+}
+
+// ── Post-link follow-up settings (F13) ────────────────────────────────────────
+function renderPostLinkSettings(s) {
+  if (!s) return;
+  const el = document.getElementById('postLinkEnabled'); if (!el) return;
+  el.checked = s.post_link_followup_enabled !== false;
+  document.getElementById('postLinkStep1').value = s.post_link_step1_hours ?? 4;
+  document.getElementById('postLinkStep2').value = s.post_link_step2_hours ?? 24;
+  document.getElementById('postLinkStep3').value = s.post_link_step3_hours ?? 72;
+}
+
+async function savePostLinkSettings() {
+  const btn = document.getElementById('savePostLinkBtn');
+  const orig = btn.textContent; btn.disabled = true; btn.textContent = 'Opslaan…';
+  try {
+    const num = (id, d) => parseInt(document.getElementById(id).value, 10) || d;
+    const payload = {
+      post_link_followup_enabled: document.getElementById('postLinkEnabled').checked,
+      post_link_step1_hours: num('postLinkStep1', 4),
+      post_link_step2_hours: num('postLinkStep2', 24),
+      post_link_step3_hours: num('postLinkStep3', 72),
+    };
+    const res = await window.AgentShared.apiFetch('/api/lisa-settings', { method: 'PATCH', body: JSON.stringify(payload) });
+    if (res.status === 403) { window.AgentShared?.showToast('Geen rechten voor deze actie', 'error'); return; }
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || 'HTTP ' + res.status);
+    renderPostLinkSettings(data.settings);
+    window.AgentShared?.showToast('Post-link instellingen opgeslagen', 'success');
+  } catch (err) {
+    window.AgentShared?.showToast('Fout: ' + err.message, 'error');
+  } finally { btn.disabled = false; btn.textContent = orig; }
 }
 
 // ── Delay-instellingen (F10.3) ────────────────────────────────────────────────
@@ -2115,7 +2166,8 @@ init();
     ['#lvSendBtn', 'lisa.config.publish'],
     ['#lvActions', 'lisa.config.publish'],
     ['#saveDelaySettingsBtn', 'lisa.config.publish'],
-    ['#backfillNamesBtn', 'lisa.config.publish']
+    ['#backfillNamesBtn', 'lisa.config.publish'],
+    ['#savePostLinkBtn', 'lisa.config.publish']
   ];
   async function applyRbacGating() {
     try { if (window._authSharedReady) await window._authSharedReady; } catch (e) {}

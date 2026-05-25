@@ -22,7 +22,14 @@ const ALLOWED_FIELDS = [
   'response_delay_max_seconds',
   'response_delay_per_phase',
   'typing_indicator_enabled',
+  // Post-link follow-up (F13)
+  'post_link_followup_enabled',
+  'post_link_step1_hours',
+  'post_link_step2_hours',
+  'post_link_step3_hours',
 ];
+
+const POST_LINK_HOUR_FIELDS = ['post_link_step1_hours', 'post_link_step2_hours', 'post_link_step3_hours'];
 
 const DELAY_SECONDS_FIELDS = ['response_delay_fixed_seconds', 'response_delay_min_seconds', 'response_delay_max_seconds'];
 
@@ -78,6 +85,15 @@ export default async function handler(req, res) {
         updates.response_delay_per_phase = clamped;
       }
       if (updates.typing_indicator_enabled !== undefined) updates.typing_indicator_enabled = updates.typing_indicator_enabled === true;
+      // Post-link (F13): uren 1-168, boolean.
+      for (const f of POST_LINK_HOUR_FIELDS) {
+        if (updates[f] !== undefined) {
+          const n = parseInt(updates[f], 10);
+          if (isNaN(n)) return res.status(400).json({ error: f + ' moet een getal zijn' });
+          updates[f] = Math.max(1, Math.min(168, n));
+        }
+      }
+      if (updates.post_link_followup_enabled !== undefined) updates.post_link_followup_enabled = updates.post_link_followup_enabled === true;
       // Consistentie: min ≤ max
       if (updates.response_delay_min_seconds !== undefined && updates.response_delay_max_seconds !== undefined
           && updates.response_delay_min_seconds > updates.response_delay_max_seconds) {
