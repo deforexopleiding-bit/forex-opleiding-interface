@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Klanten · De Forex Opleiding</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com"/>
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
+  <link rel="stylesheet" href="/modules/shared/agent-shared.css"/>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/dist/tabler-icons.min.css" />
+  <style>
+    .page-header { margin-bottom:18px; }
+    .page-title { font-size:22px; font-weight:700; letter-spacing:-.3px; display:flex; align-items:center; gap:10px; }
+    .page-sub { font-size:12px; color:var(--text-faint); margin-top:3px; }
+    .wip-card { margin-top:8px; padding:42px 28px; text-align:center; background:var(--bg-elev); border:1px dashed var(--border); border-radius:14px; max-width:640px; }
+    .wip-icon { font-size:48px; }
+    .wip-card h2 { font-size:20px; margin:12px 0 8px; }
+    .wip-card p { color:var(--text-dim); font-size:13px; line-height:1.6; max-width:480px; margin:0 auto 8px; }
+    .wip-card a { display:inline-block; margin-top:14px; color:var(--brand-primary,#093d54); text-decoration:underline; font-size:13px; }
+  </style>
+</head>
+<body>
+
+<div id="sidebar-mount"></div>
+
+<div class="main">
+  <div class="main-inner">
+    <div class="page-header">
+      <h1 class="page-title"><i class="ti ti-users-group" style="color:var(--brand-primary,#093d54)"></i> Klanten</h1>
+      <p class="page-sub">Centrale klantendatabase</p>
+    </div>
+
+    <div class="wip-card">
+      <div class="wip-icon">🚧</div>
+      <h2>In ontwikkeling</h2>
+      <p>Het fundament van de Klanten-module is gelegd: het database-schema (klanten, tags, WhatsApp-infra, brieven, AVG-verzoeken, audit-log) en de rechten (RBAC-keys).</p>
+      <p>Volgende stap (Fase 2): klant-overzicht + klant-detailpagina, CRUD-acties en koppelingen (TradersLeague, WhatsApp, PostNL).</p>
+      <a href="/index.html">← Terug naar dashboard</a>
+    </div>
+  </div>
+</div>
+
+<script src="/modules/shared/supabase-client.js"></script>
+<script src="/modules/shared/agent-shared.js"></script>
+<script src="/modules/shared/theme-shared.js"></script>
+<script>
+async function init() {
+  await window._authSharedReady;
+  const profile = await window.AuthShared.requireAuth();
+  if (!profile) return;
+  if (window.AgentShared) await window.AgentShared.renderUserSection(profile);
+}
+init();
+</script>
+<script src="/modules/shared/permissions.js"></script>
+<script src="/modules/shared/sidebar.js"></script>
+</body>
+</html>
