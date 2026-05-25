@@ -1105,6 +1105,7 @@ function lvRenderList() {
       '<div class="lv-conv-top"><span class="lv-conv-name">' + esc(lvName(c)) + '</span>' +
         '<span class="lv-conv-time">' + esc(lvRelTime(c.last_message_at || c.created_at)) + '</span></div>' +
       '<div class="lv-conv-top"><span class="lv-badge' + lvPhaseClass(c.phase) + '">' + esc(c.phase || 'intro') + '</span>' +
+        (c.qualified && c.phase !== 'qualified' ? '<span class="lv-badge lv-badge-success">✓</span>' : '') +
         (c.human_takeover ? '<span class="lv-badge" style="background:rgba(245,158,11,.15);color:#f59e0b">mens</span>' : '') + '</div>' +
       '<div class="lv-conv-prev">' + (c.last_direction === 'out' ? '↩ ' : '') + esc(c.preview || '—') + '</div>' +
     '</button>').join('');

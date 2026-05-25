@@ -228,3 +228,30 @@ Schrijf ALLEEN het bericht zelf — platte tekst zoals een Instagram-DM, geen be
     return { ok: false, error: err?.message || 'onbekende fout' };
   }
 }
+
+// ── Auto-qualify (F14) ────────────────────────────────────────────────────────
+// Markeer een conversatie automatisch als qualified bij een trigger:
+//   - Lisa stuurt de agenda-link, of
+//   - de AI detecteert phase = 'call'.
+// Idempotent (skip als al qualified) en respecteert handmatige disqualify.
+// Raakt call_booked NIET aan (dat doet alleen de appointment-webhook).
+export async function autoQualifyIfTriggered({ conv, aiResponseText, detectedPhase }) {
+  if (conv.qualified) return { triggered: false, reason: 'already_qualified' };
+  if (conv.phase === 'disqualified') return { triggered: false, reason: 'disqualified' };
+
+  const triggers = [];
+  if (containsAgendaLink(aiResponseText)) triggers.push('agenda_link_sent');
+  if (detectedPhase === 'call') triggers.push('phase_call_reached');
+  if (!triggers.length) return { triggered: false, reason: 'no_trigger' };
+
+  const now = new Date().toISOString();
+  await supabaseAdmin.from('lisa_conversations').update({ qualified: true, qualified_at: now }).eq('id', conv.id);
+
+  const labels = { agenda_link_sent: 'agenda-link verstuurd', phase_call_reached: 'Call-fase bereikt' };
+  const reasonText = triggers.map((t) => labels[t]).join(' + ');
+  await supabaseAdmin.from('lisa_messages').insert({
+    conversation_id: conv.id, direction: 'out', content: `✨ AI markeerde als qualified (${reasonText})`,
+    ai_generated: false, is_system: true, sent_at: now,
+  });
+  return { triggered: true, reasons: triggers };
+}

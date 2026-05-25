@@ -11,7 +11,7 @@
 import { supabaseAdmin } from './supabase.js';
 import { computeResponseDelay, sendTypingIndicator, matchBookingByEmail } from './_lib/lisa-ghl-send.js';
 import { generateLisaResponse } from './lisa-respond.js';
-import { detectStopSignal, containsAgendaLink, schedulePostLinkFollowups } from './_lib/lisa-followup.js';
+import { detectStopSignal, containsAgendaLink, schedulePostLinkFollowups, autoQualifyIfTriggered } from './_lib/lisa-followup.js';
 import dayjs from 'dayjs';
 import utc from 'dayjs/plugin/utc.js';
 import timezone from 'dayjs/plugin/timezone.js';
@@ -178,6 +178,10 @@ export default async function handler(req, res) {
       }).eq('id', conv.id);
       conv.post_link_followups_scheduled = true;
     }
+
+    // 9d. Auto-qualify (F14): agenda-link verstuurd of phase=call → qualified.
+    const aq = await autoQualifyIfTriggered({ conv, aiResponseText: result.response, detectedPhase: result.detected_phase });
+    if (aq.triggered) { conv.qualified = true; console.log('[auto-qualify] conv', conv.id, aq.reasons.join(',')); }
 
     // 10. Versturen: binnen kantooruren → response-delay QUEUE (geen blocking sleep; cron verstuurt).
     if (isInOfficeHours) {
