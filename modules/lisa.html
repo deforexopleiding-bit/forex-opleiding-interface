@@ -333,6 +333,10 @@
         <span class="agent-icon">💬</span><span class="agent-name">WhatsApp Agent</span>
         <span class="agent-status agent-status-soon">Binnenkort</span>
       </button>
+      <button class="agent-tab-main" data-agent="recovery" onclick="switchAgent('recovery')">
+        <span class="agent-icon">🔁</span><span class="agent-name">No-show &amp; Annulering Agent</span>
+        <span class="agent-status agent-status-soon">Binnenkort</span>
+      </button>
     </div>
 
     <!-- Instagram Agent -->
@@ -720,6 +724,35 @@
       </div>
     </div>
 
+    <!-- No-show & Annulering Agent (skeleton) -->
+    <div class="agent-container" data-agent="recovery" style="display:none">
+      <div class="tabs" id="recoveryTabsNav">
+        <button class="tab active" data-recovery-tab="live" onclick="recoverySwitchTab(this)">Live</button>
+        <button class="tab" data-recovery-tab="stats" onclick="recoverySwitchTab(this)">Stats</button>
+        <button class="tab" data-recovery-tab="config" onclick="recoverySwitchTab(this)">Config</button>
+        <button class="tab" data-recovery-tab="sandbox" onclick="recoverySwitchTab(this)">Sandbox</button>
+        <button class="tab" data-recovery-tab="logs" onclick="recoverySwitchTab(this)">Logs</button>
+      </div>
+      <div class="wa-coming-soon">
+        <div class="wa-icon">🔁</div>
+        <h2>No-show &amp; Annulering Agent</h2>
+        <p>Deze AI-agent zet straks gemiste afspraken en annuleringen om in nieuwe boekingen.</p>
+        <p class="lv-muted">Komt een lead een afspraak niet na of annuleert die, dan neemt deze agent automatisch contact op om te herplannen of de interesse te verifiëren.</p>
+        <div class="wa-features-preview">
+          <h3>Geplande features</h3>
+          <ul>
+            <li>✓ Automatische no-show-detectie via GHL</li>
+            <li>✓ Reschedule-conversatieflow</li>
+            <li>✓ Annulering-retentiepogingen</li>
+            <li>✓ Persoonlijke benadering per annuleringsreden</li>
+            <li>✓ Multi-channel: IG, WhatsApp, e-mail</li>
+            <li>✓ Stats: recovery-rate &amp; retentie-%</li>
+          </ul>
+        </div>
+        <p class="wa-eta">ETA: nog te bepalen</p>
+      </div>
+    </div>
+
   </div>
 </div>
 
@@ -772,6 +805,11 @@ function switchAgent(agent) {
 function waSwitchTab(btn) {
   // Dummy: WhatsApp-agent toont enkel "binnenkort"; sub-tabs zijn cosmetisch.
   document.querySelectorAll('#waTabsNav .tab').forEach(t => t.classList.toggle('active', t === btn));
+}
+
+function recoverySwitchTab(btn) {
+  // Dummy: No-show & Annulering-agent toont enkel "binnenkort"; sub-tabs zijn cosmetisch.
+  document.querySelectorAll('#recoveryTabsNav .tab').forEach(t => t.classList.toggle('active', t === btn));
 }
 
 async function loadAiAgentsKpis() {
