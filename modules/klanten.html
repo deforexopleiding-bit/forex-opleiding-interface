@@ -10,14 +10,274 @@
   <link rel="stylesheet" href="/modules/shared/agent-shared.css"/>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/dist/tabler-icons.min.css" />
   <style>
-    .page-header { margin-bottom:18px; }
+    .page-header { display:flex; align-items:flex-start; gap:16px; margin-bottom:18px; }
+    .page-header .page-titlewrap { flex:1; }
     .page-title { font-size:22px; font-weight:700; letter-spacing:-.3px; display:flex; align-items:center; gap:10px; }
     .page-sub { font-size:12px; color:var(--text-faint); margin-top:3px; }
-    .wip-card { margin-top:8px; padding:42px 28px; text-align:center; background:var(--bg-elev); border:1px dashed var(--border); border-radius:14px; max-width:640px; }
+
+    /* KPI mini-bar */
+    .kpi-grid { display:grid; grid-template-columns:repeat(4, minmax(140px,1fr)); gap:12px; margin-bottom:18px; }
+    .kpi-tile { padding:14px 16px; background:var(--bg-elev); border:1px solid var(--border); border-radius:12px; }
+    .kpi-tile .kpi-label { font-size:11px; text-transform:uppercase; letter-spacing:.5px; color:var(--text-faint); margin-bottom:6px; display:flex; align-items:center; gap:6px; }
+    .kpi-tile .kpi-value { font-size:24px; font-weight:700; letter-spacing:-.3px; }
+    .kpi-tile .kpi-pending { font-size:11px; color:var(--text-faint); font-style:italic; }
+    .kpi-tile.kpi-placeholder .kpi-value { color:var(--text-faint); }
+
+    /* Filters */
+    .filters-bar { display:flex; flex-wrap:wrap; gap:10px; align-items:center; margin-bottom:14px; padding:12px; background:var(--bg-elev); border:1px solid var(--border); border-radius:12px; }
+    .filter-search { flex:1 1 240px; min-width:200px; padding:8px 10px; background:var(--bg); border:1px solid var(--border); border-radius:8px; color:var(--text); font-size:13px; }
+    .filter-search:focus { outline:none; border-color:var(--accent-cyan,#06b6d4); }
+    .filter-select { padding:8px 10px; background:var(--bg); border:1px solid var(--border); border-radius:8px; color:var(--text); font-size:13px; min-width:130px; }
+    .filter-select:focus { outline:none; border-color:var(--accent-cyan,#06b6d4); }
+    .filter-select:disabled { opacity:.5; cursor:not-allowed; }
+    .filter-date { padding:8px 10px; background:var(--bg); border:1px solid var(--border); border-radius:8px; color:var(--text); font-size:13px; }
+    .filter-label { font-size:11px; color:var(--text-faint); margin-right:4px; }
+    .filters-bar .spacer { flex:1; }
+
+    /* Status pills (multi-select via checkboxes) */
+    .status-pills { display:flex; gap:6px; }
+    .status-pill { display:inline-flex; align-items:center; gap:5px; padding:6px 10px; background:var(--bg); border:1px solid var(--border); border-radius:999px; font-size:12px; cursor:pointer; user-select:none; }
+    .status-pill input { margin:0; cursor:pointer; }
+    .status-pill[data-checked="true"] { background:var(--accent-cyan,#06b6d4); color:#fff; border-color:transparent; }
+    .status-pill[data-checked="true"] .status-pill-dot { background:#fff; }
+    .status-hint { font-size:11px; color:var(--text-faint); font-style:italic; margin-left:6px; }
+
+    /* Tag-multiselect dropdown (custom checkbox-list in popover) */
+    .tag-multi { position:relative; }
+    .tag-multi-trigger { padding:8px 10px; background:var(--bg); border:1px solid var(--border); border-radius:8px; color:var(--text); font-size:13px; cursor:pointer; min-width:150px; text-align:left; display:flex; align-items:center; gap:6px; }
+    .tag-multi-trigger .ti { font-size:14px; }
+    .tag-multi-trigger .tag-count { font-weight:600; color:var(--accent-cyan,#06b6d4); }
+    .tag-multi-pop { position:absolute; top:calc(100% + 4px); left:0; min-width:200px; max-height:240px; overflow-y:auto; background:var(--bg-elev); border:1px solid var(--border); border-radius:10px; padding:6px; box-shadow:0 6px 18px rgba(0,0,0,.18); z-index:40; display:none; }
+    .tag-multi.open .tag-multi-pop { display:block; }
+    .tag-multi-item { display:flex; align-items:center; gap:8px; padding:6px 8px; border-radius:6px; cursor:pointer; font-size:13px; }
+    .tag-multi-item:hover { background:var(--bg); }
+    .tag-multi-item input { margin:0; }
+    .tag-swatch { display:inline-block; width:10px; height:10px; border-radius:50%; }
+
+    /* Table */
+    .table-wrap { background:var(--bg-elev); border:1px solid var(--border); border-radius:12px; overflow:hidden; }
+    .customers-table { width:100%; border-collapse:collapse; font-size:13px; }
+    .customers-table th, .customers-table td { padding:10px 12px; text-align:left; border-bottom:1px solid var(--border); }
+    .customers-table th { font-weight:600; font-size:11px; text-transform:uppercase; letter-spacing:.4px; color:var(--text-faint); background:var(--bg); user-select:none; }
+    .customers-table th[data-sort-key] { cursor:pointer; white-space:nowrap; }
+    .customers-table th[data-sort-key]:hover { color:var(--text); }
+    .customers-table th[aria-sort="ascending"]::after { content:" ▲"; font-size:9px; opacity:.7; }
+    .customers-table th[aria-sort="descending"]::after { content:" ▼"; font-size:9px; opacity:.7; }
+    .customers-table tbody tr { cursor:pointer; transition:background .12s; }
+    .customers-table tbody tr:hover { background:var(--bg); }
+    .customers-table tbody tr:last-child td { border-bottom:none; }
+    .cust-name { font-weight:600; }
+    .cust-empty { color:var(--text-faint); font-style:italic; font-size:12px; }
+
+    .tag-badge { display:inline-block; padding:2px 8px; border-radius:999px; font-size:11px; font-weight:500; margin-right:4px; color:#fff; }
+    .status-badge { display:inline-block; padding:2px 8px; border-radius:999px; font-size:11px; font-weight:500; }
+    .status-badge.active     { background:#10B98122; color:#10B981; }
+    .status-badge.archived   { background:#9CA3AF22; color:#9CA3AF; }
+    .status-badge.anonymized { background:#EF444422; color:#EF4444; }
+
+    /* Empty / loading / error states */
+    .state-cell { text-align:center; padding:40px 20px; color:var(--text-faint); font-size:13px; }
+    .skeleton-row td { padding:14px 12px; }
+    .skeleton-row .skel { display:block; height:12px; background:linear-gradient(90deg,var(--bg) 0%, var(--border) 50%, var(--bg) 100%); background-size:200% 100%; animation:skel 1.2s infinite; border-radius:4px; }
+    @keyframes skel { 0%{background-position:200% 0;} 100%{background-position:-200% 0;} }
+
+    /* Pagination */
+    .pagination { display:flex; align-items:center; gap:10px; margin-top:12px; font-size:13px; flex-wrap:wrap; }
+    .pagination .page-info { color:var(--text-faint); }
+    .pagination .spacer { flex:1; }
+    .pagination button { padding:6px 12px; background:var(--bg-elev); border:1px solid var(--border); border-radius:8px; color:var(--text); font-size:13px; cursor:pointer; }
+    .pagination button:hover:not(:disabled) { background:var(--bg); }
+    .pagination button:disabled { opacity:.4; cursor:not-allowed; }
+    .pagination input[type="number"] { width:60px; padding:6px 8px; background:var(--bg); border:1px solid var(--border); border-radius:8px; color:var(--text); font-size:13px; text-align:center; }
+    .pagination select { padding:6px 10px; background:var(--bg); border:1px solid var(--border); border-radius:8px; color:var(--text); font-size:13px; }
+
+    /* Detail-placeholder (?id=) */
+    .back-link { display:inline-flex; align-items:center; gap:6px; color:var(--brand-primary,#093d54); text-decoration:none; font-size:13px; margin-bottom:14px; }
+    .back-link:hover { text-decoration:underline; }
+    .wip-card { padding:42px 28px; text-align:center; background:var(--bg-elev); border:1px dashed var(--border); border-radius:14px; max-width:640px; }
     .wip-icon { font-size:48px; }
     .wip-card h2 { font-size:20px; margin:12px 0 8px; }
     .wip-card p { color:var(--text-dim); font-size:13px; line-height:1.6; max-width:480px; margin:0 auto 8px; }
-    .wip-card a { display:inline-block; margin-top:14px; color:var(--brand-primary,#093d54); text-decoration:underline; font-size:13px; }
+    .wip-card code { background:var(--bg); padding:2px 8px; border-radius:6px; font-family:monospace; font-size:12px; }
+
+    /* Detail-view (Fase 2A.2) */
+    .detail-header { display:flex; align-items:center; gap:16px; margin-bottom:14px; flex-wrap:wrap; }
+    .detail-header-info { flex:1; display:flex; align-items:center; gap:12px; flex-wrap:wrap; min-width:240px; }
+    .detail-name { font-size:24px; font-weight:700; margin:0; letter-spacing:-.3px; }
+    .detail-header-actions { display:flex; gap:8px; }
+    .detail-header-actions .btn:disabled { opacity:.4; cursor:not-allowed; }
+
+    .detail-tabs { display:flex; border-bottom:1px solid var(--border); margin-bottom:14px; gap:0; flex-wrap:wrap; }
+    .tab-btn { padding:10px 16px; background:transparent; border:none; border-bottom:2px solid transparent; color:var(--text-faint); font-size:13px; cursor:pointer; font-family:inherit; display:flex; align-items:center; gap:6px; transition:color .15s, border-color .15s; }
+    .tab-btn:hover:not(.active) { color:var(--text); }
+    .tab-btn.active { color:var(--text); font-weight:600; border-bottom-color:var(--accent-cyan,#06b6d4); }
+    .tab-count { background:var(--bg); color:var(--text-faint); padding:1px 7px; border-radius:10px; font-size:11px; font-weight:600; min-width:18px; text-align:center; }
+    .tab-btn.active .tab-count { background:var(--accent-cyan,#06b6d4); color:#fff; }
+    .tab-content { padding:4px 0; }
+    .tab-content[hidden] { display:none; }
+
+    .detail-cards-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(280px, 1fr)); gap:12px; }
+    .detail-card { padding:16px; background:var(--bg-elev); border:1px solid var(--border); border-radius:12px; }
+    .detail-card h3 { font-size:12px; font-weight:600; margin:0 0 10px; color:var(--text-faint); text-transform:uppercase; letter-spacing:.5px; display:flex; align-items:center; gap:6px; }
+    .detail-row { display:flex; justify-content:space-between; align-items:baseline; padding:6px 0; gap:12px; font-size:13px; border-bottom:1px solid var(--border); }
+    .detail-row:last-child { border-bottom:none; }
+    .detail-row .detail-label { color:var(--text-faint); font-size:12px; flex-shrink:0; }
+    .detail-row > span:last-child, .detail-row > a:last-child { text-align:right; word-break:break-word; }
+    .detail-row a { color:var(--brand-primary,#093d54); text-decoration:none; }
+    .detail-row a:hover { text-decoration:underline; }
+
+    .detail-section { margin-bottom:14px; background:var(--bg-elev); border:1px solid var(--border); border-radius:12px; padding:14px; }
+    .detail-section-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; gap:10px; flex-wrap:wrap; }
+    .detail-section h3 { font-size:14px; font-weight:600; margin:0; display:flex; align-items:center; gap:6px; }
+
+    .note-item { padding:12px 0; border-bottom:1px solid var(--border); }
+    .note-item:last-child { border-bottom:none; }
+    .note-body { font-size:13px; line-height:1.5; white-space:pre-wrap; word-break:break-word; }
+    .note-meta { font-size:11px; color:var(--text-faint); margin-top:6px; }
+
+    .placeholder-card { padding:18px; background:var(--bg); border:1px dashed var(--border); border-radius:8px; color:var(--text-faint); font-size:13px; font-style:italic; text-align:center; }
+    .detail-not-found { text-align:center; padding:60px 20px; }
+    .detail-not-found .ti { font-size:48px; }
+    .detail-not-found h2 { font-size:20px; margin:12px 0 8px; }
+    .detail-not-found p { color:var(--text-dim); font-size:13px; }
+
+    /* Modals (Fase 2A.3) — pattern uit modules/admin.html */
+    .modal-overlay { position:fixed; inset:0; background:rgba(0,0,0,0.6); z-index:500; display:flex; align-items:center; justify-content:center; backdrop-filter:blur(4px); padding:20px; }
+    .modal-overlay.hidden { display:none!important; }
+    .modal-card { background:var(--bg-elev); border:1px solid var(--border); border-radius:14px; width:100%; max-width:600px; max-height:calc(100vh - 40px); display:flex; flex-direction:column; }
+    .modal-card.modal-sm { max-width:440px; }
+    .modal-header { display:flex; align-items:center; justify-content:space-between; padding:16px 20px; border-bottom:1px solid var(--border); }
+    .modal-title { font-size:15px; font-weight:600; }
+    .modal-close { background:transparent; border:none; color:var(--text-faint); font-size:18px; cursor:pointer; padding:4px; line-height:1; }
+    .modal-close:hover { color:var(--text); }
+    .modal-body { padding:20px; overflow-y:auto; }
+    .modal-footer { display:flex; justify-content:flex-end; gap:8px; padding:14px 20px; border-top:1px solid var(--border); }
+
+    /* Form-fields (create/edit modals) */
+    .form-grid { display:grid; grid-template-columns:repeat(2, 1fr); gap:12px 16px; }
+    .form-field { display:flex; flex-direction:column; gap:4px; }
+    .form-field.form-field-full { grid-column:1 / -1; }
+    .form-field label { font-size:12px; font-weight:500; color:var(--text-faint); }
+    .form-field label .req { color:#EF4444; }
+    .form-field input, .form-field textarea { padding:8px 10px; background:var(--bg); border:1px solid var(--border); border-radius:8px; color:var(--text); font-size:13px; font-family:inherit; }
+    .form-field input:focus, .form-field textarea:focus { outline:none; border-color:var(--accent-cyan,#06b6d4); }
+    .form-field textarea { resize:vertical; min-height:60px; }
+    .form-field.has-error input, .form-field.has-error textarea { border-color:#EF4444; }
+    .field-error { font-size:11px; color:#EF4444; margin-top:2px; min-height:14px; }
+
+    .modal-banner { padding:10px 12px; margin-bottom:12px; background:#EF444415; border:1px solid #EF4444; border-radius:8px; color:#EF4444; font-size:13px; display:none; }
+    .modal-banner.visible { display:block; }
+
+    /* Audit-tab entries */
+    .audit-entry { padding:14px 0; border-bottom:1px solid var(--border); }
+    .audit-entry:last-child { border-bottom:none; }
+    .audit-entry-header { display:flex; align-items:center; gap:8px; flex-wrap:wrap; font-size:13px; margin-bottom:4px; }
+    .audit-action { display:inline-flex; align-items:center; padding:2px 8px; border-radius:999px; font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:.3px; }
+    .audit-action.created    { background:#10B98122; color:#10B981; }
+    .audit-action.updated    { background:#3B82F622; color:#3B82F6; }
+    .audit-action.archived   { background:#F59E0B22; color:#F59E0B; }
+    .audit-action.unarchived { background:#10B98122; color:#10B981; }
+    .audit-action.anonymized { background:#EF444422; color:#EF4444; }
+    .audit-meta { font-size:11px; color:var(--text-faint); }
+    .audit-reason { font-size:12px; color:var(--text-dim); margin-top:4px; font-style:italic; padding:6px 8px; background:var(--bg); border-radius:6px; }
+    .audit-diff-list { margin-top:6px; padding-left:14px; }
+    .audit-diff-item { font-size:12px; padding:3px 0; line-height:1.5; }
+    .audit-diff-item .field-name { font-weight:600; color:var(--text); }
+    .audit-diff-item .val-before { color:#EF4444; text-decoration:line-through; word-break:break-word; }
+    .audit-diff-item .val-after  { color:#10B981; word-break:break-word; }
+    .audit-diff-item .val-arrow  { color:var(--text-faint); margin:0 4px; }
+    .audit-raw-toggle { background:transparent; border:none; color:var(--text-faint); font-size:11px; cursor:pointer; text-decoration:underline; padding:4px 0; margin-top:4px; font-family:inherit; }
+    .audit-raw-toggle:hover { color:var(--text); }
+    .audit-raw { display:none; margin-top:6px; padding:10px; background:var(--bg); border:1px solid var(--border); border-radius:6px; font-family:monospace; font-size:11px; white-space:pre-wrap; word-break:break-word; max-height:280px; overflow-y:auto; color:var(--text-dim); }
+    .audit-raw.visible { display:block; }
+
+    /* Heractiveren-knop (alleen zichtbaar bij archived) */
+    .btn-unarchive { background:#10B981; color:#fff; border:none; }
+    .btn-unarchive:hover { background:#0EA371; }
+
+    /* Tag-edit in Profiel-tab (Fase 2A.4) */
+    .tag-edit-toggle { background:transparent; border:none; color:var(--text-faint); cursor:pointer; padding:2px 6px; font-size:12px; border-radius:6px; display:inline-flex; align-items:center; gap:4px; font-family:inherit; }
+    .tag-edit-toggle:hover { color:var(--text); background:var(--bg); }
+    .detail-card h3 .tag-edit-toggle { margin-left:auto; }
+    .detail-card h3.with-action { display:flex; align-items:center; }
+    .tag-list-wrap { display:flex; flex-wrap:wrap; gap:6px; align-items:center; }
+    .tag-badge.editable { padding-right:4px; display:inline-flex; align-items:center; gap:4px; }
+    .tag-x { background:rgba(0,0,0,.25); border:none; color:#fff; cursor:pointer; width:16px; height:16px; border-radius:50%; font-size:11px; line-height:1; display:inline-flex; align-items:center; justify-content:center; padding:0; font-family:inherit; }
+    .tag-x:hover { background:rgba(0,0,0,.5); }
+    .tag-add-wrap { position:relative; display:inline-block; }
+    .tag-add-button { padding:2px 10px; border-radius:999px; font-size:11px; font-weight:500; background:var(--bg); border:1px dashed var(--border); color:var(--text-faint); cursor:pointer; font-family:inherit; }
+    .tag-add-button:hover { color:var(--text); border-color:var(--accent-cyan,#06b6d4); }
+    .tag-add-popover { position:absolute; top:calc(100% + 4px); left:0; min-width:180px; max-height:220px; overflow-y:auto; background:var(--bg-elev); border:1px solid var(--border); border-radius:10px; padding:6px; box-shadow:0 6px 18px rgba(0,0,0,.18); z-index:40; display:none; }
+    .tag-add-wrap.open .tag-add-popover { display:block; }
+    .tag-add-option { display:flex; align-items:center; gap:8px; padding:6px 8px; border-radius:6px; cursor:pointer; font-size:13px; background:transparent; border:none; width:100%; text-align:left; color:var(--text); font-family:inherit; }
+    .tag-add-option:hover { background:var(--bg); }
+    .tag-add-option .swatch { width:10px; height:10px; border-radius:50%; display:inline-block; }
+    .tag-add-empty { font-size:12px; color:var(--text-faint); padding:8px; text-align:center; font-style:italic; }
+    .tag-edit-error { font-size:11px; color:#EF4444; margin-top:6px; min-height:14px; }
+
+    /* New-note editor + per-note actions (Fase 2A.4) */
+    .note-editor { padding:12px; background:var(--bg); border:1px solid var(--border); border-radius:10px; margin-bottom:14px; }
+    .note-editor textarea { width:100%; padding:8px 10px; background:var(--bg-elev); border:1px solid var(--border); border-radius:8px; color:var(--text); font-size:13px; font-family:inherit; resize:vertical; min-height:60px; box-sizing:border-box; }
+    .note-editor textarea:focus { outline:none; border-color:var(--accent-cyan,#06b6d4); }
+    .note-editor-footer { display:flex; justify-content:space-between; align-items:center; margin-top:8px; gap:10px; }
+    .note-editor-error { font-size:11px; color:#EF4444; min-height:14px; flex:1; }
+    .note-item { position:relative; }
+    .note-item-actions { position:absolute; top:8px; right:0; display:none; gap:4px; }
+    .note-item:hover .note-item-actions { display:flex; }
+    .note-icon-btn { background:transparent; border:none; color:var(--text-faint); cursor:pointer; padding:4px; border-radius:4px; font-family:inherit; font-size:14px; line-height:1; }
+    .note-icon-btn:hover { color:var(--text); background:var(--bg); }
+    .note-edit-form textarea { width:100%; padding:8px 10px; background:var(--bg); border:1px solid var(--border); border-radius:8px; color:var(--text); font-size:13px; font-family:inherit; resize:vertical; min-height:60px; box-sizing:border-box; }
+    .note-edit-form-footer { display:flex; gap:6px; margin-top:6px; }
+    .note-edit-error { font-size:11px; color:#EF4444; margin-top:4px; min-height:14px; }
+
+    /* Duplicate-warning modal (Fase 2A.4) */
+    .duplicate-match-list { display:flex; flex-direction:column; gap:6px; margin-top:8px; max-height:300px; overflow-y:auto; padding-right:4px; }
+    .duplicate-match-item { display:flex; justify-content:space-between; align-items:center; padding:10px 12px; background:var(--bg); border:1px solid var(--border); border-radius:8px; text-decoration:none; color:var(--text); font-size:13px; gap:8px; }
+    .duplicate-match-item:hover { border-color:var(--accent-cyan,#06b6d4); background:var(--bg-elev); }
+    .duplicate-match-info { flex:1; min-width:0; }
+    .duplicate-match-name { font-weight:600; }
+    .duplicate-match-contact { font-size:11px; color:var(--text-faint); margin-top:2px; word-break:break-word; }
+    .duplicate-match-reason { font-size:10px; padding:2px 6px; background:#F59E0B22; color:#F59E0B; border-radius:999px; text-transform:uppercase; letter-spacing:.3px; font-weight:600; flex-shrink:0; }
+    .duplicate-match-reason.both { background:#EF444422; color:#EF4444; }
+
+    /* Bulk-selection (Fase 2A.4 commit 6) */
+    .btn-selection-toggle { padding:6px 12px; background:transparent; border:1px solid var(--border); color:var(--text-faint); font-size:12px; border-radius:8px; cursor:pointer; font-family:inherit; display:inline-flex; align-items:center; gap:6px; }
+    .btn-selection-toggle:hover { color:var(--text); border-color:var(--text-faint); }
+    .btn-selection-toggle.active { background:var(--accent-cyan,#06b6d4); color:#fff; border-color:transparent; }
+
+    /* Checkbox-column: alleen zichtbaar in selection-mode */
+    .col-select { width:36px; padding:6px 10px !important; text-align:center !important; }
+    .customers-table .col-select { display:none; }
+    .customers-table.selection-mode .col-select { display:table-cell; }
+    .col-select input[type="checkbox"] { width:14px; height:14px; cursor:pointer; margin:0; }
+    .customers-table.selection-mode tbody tr { cursor:default; }
+    .customers-table.selection-mode tbody tr.selected { background:#06b6d418; }
+    .customers-table.selection-mode tbody tr.selected:hover { background:#06b6d422; }
+
+    /* Floating action-bar boven lijst-tabel */
+    .bulk-action-bar { display:none; align-items:center; gap:10px; padding:10px 14px; margin-bottom:10px; background:var(--bg-elev); border:1px solid var(--accent-cyan,#06b6d4); border-radius:10px; box-shadow:0 2px 8px rgba(0,0,0,.1); font-size:13px; }
+    .bulk-action-bar.visible { display:flex; }
+    .bulk-action-bar .bulk-count { font-weight:600; color:var(--accent-cyan,#06b6d4); }
+    .bulk-action-bar .spacer { flex:1; }
+    .bulk-action-bar .btn { padding:6px 12px; font-size:12px; }
+    .bulk-action-bar .btn-bulk-archive { background:#F59E0B; color:#fff; border:none; }
+    .bulk-action-bar .btn-bulk-archive:hover { background:#D88509; }
+    .bulk-action-bar .btn-bulk-tag { background:var(--accent-cyan,#06b6d4); color:#fff; border:none; }
+    .bulk-action-bar .btn-bulk-tag:hover { background:#0590B0; }
+
+    /* Bulk-tag modal extra styling */
+    .bulk-tag-mode { display:flex; gap:12px; margin-bottom:12px; }
+    .bulk-tag-mode label { display:inline-flex; align-items:center; gap:6px; font-size:13px; cursor:pointer; }
+    .bulk-tag-mode input[type="radio"] { margin:0; cursor:pointer; }
+    .bulk-tag-select { width:100%; padding:8px 10px; background:var(--bg); border:1px solid var(--border); border-radius:8px; color:var(--text); font-size:13px; font-family:inherit; }
+    .bulk-tag-select:focus { outline:none; border-color:var(--accent-cyan,#06b6d4); }
+
+    /* Bulk-result banner (na 207 Multi-Status of 200) */
+    .bulk-result-banner { padding:10px 12px; margin-bottom:12px; border-radius:8px; font-size:13px; display:none; }
+    .bulk-result-banner.visible { display:block; }
+    .bulk-result-banner.success { background:#10B98122; border:1px solid #10B981; color:#10B981; }
+    .bulk-result-banner.mixed   { background:#F59E0B22; border:1px solid #F59E0B; color:#F59E0B; }
+    .bulk-result-banner .bulk-result-fails { font-size:11px; margin-top:4px; opacity:.85; }
   </style>
 </head>
 <body>
@@ -26,17 +286,409 @@
 
 <div class="main">
   <div class="main-inner">
-    <div class="page-header">
-      <h1 class="page-title"><i class="ti ti-users-group" style="color:var(--brand-primary,#093d54)"></i> Klanten</h1>
-      <p class="page-sub">Centrale klantendatabase</p>
+
+    <!-- ────────────────────────────────────────────────────────────────────
+         Lijst-view (default, getoond zonder ?id= in URL)
+    ──────────────────────────────────────────────────────────────────────── -->
+    <div id="view-list" style="display:none;">
+      <div class="page-header">
+        <div class="page-titlewrap">
+          <h1 class="page-title"><i class="ti ti-users-group" style="color:var(--brand-primary,#093d54)"></i> Klanten</h1>
+          <p class="page-sub">Centrale klantendatabase</p>
+        </div>
+        <button id="btn-selection-toggle" class="btn-selection-toggle" type="button" aria-pressed="false" onclick="toggleSelectionMode()">
+          <i class="ti ti-checks"></i> <span id="selection-toggle-label">Selecteren</span>
+        </button>
+        <button id="btn-new-customer" class="btn btn-primary btn-sm">
+          <i class="ti ti-plus"></i> Nieuwe klant
+        </button>
+      </div>
+
+      <!-- Bulk-result banner (Fase 2A.4): toont N gelukt / M mislukt na bulk-actie. -->
+      <div class="bulk-result-banner" id="bulk-result-banner" role="status" aria-live="polite"></div>
+
+      <!-- KPI mini-bar -->
+      <div class="kpi-grid" id="kpi-grid">
+        <div class="kpi-tile">
+          <div class="kpi-label"><i class="ti ti-users"></i> Actieve klanten</div>
+          <div class="kpi-value" id="kpi-active">—</div>
+        </div>
+        <div class="kpi-tile">
+          <div class="kpi-label"><i class="ti ti-user-plus"></i> Nieuw deze maand</div>
+          <div class="kpi-value" id="kpi-new">—</div>
+        </div>
+        <div class="kpi-tile">
+          <div class="kpi-label"><i class="ti ti-alert-triangle"></i> Risico</div>
+          <div class="kpi-value" id="kpi-risico">—</div>
+        </div>
+        <div class="kpi-tile kpi-placeholder">
+          <div class="kpi-label"><i class="ti ti-cash-off"></i> Wanbetalers</div>
+          <div class="kpi-value">—</div>
+          <div class="kpi-pending">Komt later (Finance)</div>
+        </div>
+      </div>
+
+      <!-- Filters -->
+      <div class="filters-bar">
+        <input id="filter-search" class="filter-search" type="search" placeholder="🔍 Zoek op naam, email of telefoon…" autocomplete="off"/>
+
+        <!-- Tag multi-select -->
+        <div class="tag-multi" id="filter-tags">
+          <button type="button" class="tag-multi-trigger" id="filter-tags-trigger">
+            <i class="ti ti-tag"></i>
+            <span id="filter-tags-label">Tags</span>
+          </button>
+          <div class="tag-multi-pop" id="filter-tags-pop">
+            <div class="state-cell" id="filter-tags-loading" style="padding:14px 8px; font-size:12px;">Tags laden…</div>
+          </div>
+        </div>
+
+        <!-- Status pills (multi-select) — default 'active' AAN -->
+        <div class="status-pills" id="filter-status">
+          <label class="status-pill" data-checked="true">
+            <input type="checkbox" name="status" value="active" checked/> Actief
+          </label>
+          <label class="status-pill" data-checked="false">
+            <input type="checkbox" name="status" value="archived"/> Gearchiveerd
+          </label>
+          <label class="status-pill" data-checked="false">
+            <input type="checkbox" name="status" value="anonymized"/> Geanonimiseerd
+          </label>
+          <span class="status-hint" id="status-hint">Verbergt gearchiveerd & geanonimiseerd</span>
+        </div>
+
+        <span class="filter-label">Sinds:</span>
+        <input id="filter-from" class="filter-date" type="date" title="Klant sinds vanaf"/>
+        <span class="filter-label">tot:</span>
+        <input id="filter-to" class="filter-date" type="date" title="Klant sinds tot"/>
+
+        <select id="filter-sales" class="filter-select" disabled title="Beschikbaar wanneer Sales-module live is">
+          <option>Sales · Binnenkort</option>
+        </select>
+
+        <div class="spacer"></div>
+        <button id="btn-reset-filters" class="btn btn-sm" type="button">
+          <i class="ti ti-rotate-clockwise"></i> Reset filters
+        </button>
+      </div>
+
+      <!-- Bulk-action bar (Fase 2A.4): zichtbaar wanneer selectedIds.size > 0 -->
+      <div class="bulk-action-bar" id="bulk-action-bar">
+        <span><span class="bulk-count" id="bulk-count">0</span> geselecteerd</span>
+        <div class="spacer"></div>
+        <button class="btn btn-bulk-archive btn-sm" type="button" onclick="openBulkArchiveModal()">
+          <i class="ti ti-archive"></i> Archiveren
+        </button>
+        <button class="btn btn-bulk-tag btn-sm" type="button" onclick="openBulkTagModal()">
+          <i class="ti ti-tag"></i> Tag-actie
+        </button>
+        <button class="btn btn-sm" type="button" onclick="toggleSelectionMode()">
+          Annuleren
+        </button>
+      </div>
+
+      <!-- Lijst-tabel -->
+      <div class="table-wrap">
+        <table class="customers-table" id="customers-table">
+          <thead>
+            <tr>
+              <th class="col-select"><input type="checkbox" id="select-all-checkbox" aria-label="Selecteer alle zichtbare klanten" onchange="toggleSelectAll()"/></th>
+              <th data-sort-key="last_name" aria-sort="none">Naam</th>
+              <th>Email</th>
+              <th>Telefoon</th>
+              <th>Tags</th>
+              <th data-sort-key="created_at" aria-sort="descending">Klant sinds</th>
+              <th>Status</th>
+              <th>Laatste contact</th>
+            </tr>
+          </thead>
+          <tbody id="customers-tbody">
+            <!-- skeleton initieel -->
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Pagination -->
+      <div class="pagination">
+        <span class="page-info" id="page-info">—</span>
+        <span class="filter-label">Per pagina:</span>
+        <select id="page-size">
+          <option value="25" selected>25</option>
+          <option value="50">50</option>
+          <option value="100">100</option>
+        </select>
+        <div class="spacer"></div>
+        <button id="btn-prev" type="button">‹ Vorige</button>
+        <input id="page-input" type="number" min="1" value="1" aria-label="Paginanummer"/>
+        <button id="btn-next" type="button">Volgende ›</button>
+      </div>
     </div>
 
-    <div class="wip-card">
-      <div class="wip-icon">🚧</div>
-      <h2>In ontwikkeling</h2>
-      <p>Het fundament van de Klanten-module is gelegd: het database-schema (klanten, tags, WhatsApp-infra, brieven, AVG-verzoeken, audit-log) en de rechten (RBAC-keys).</p>
-      <p>Volgende stap (Fase 2): klant-overzicht + klant-detailpagina, CRUD-acties en koppelingen (TradersLeague, WhatsApp, PostNL).</p>
-      <a href="/index.html">← Terug naar dashboard</a>
+    <!-- ────────────────────────────────────────────────────────────────────
+         Detail-view (Fase 2A.2): getoond bij ?id=<uuid> in URL.
+         Read-only — Edit/Archive/AddNote knoppen tonen "Beschikbaar in 2A.3/2A.4".
+    ──────────────────────────────────────────────────────────────────────── -->
+    <div id="view-detail" style="display:none;">
+
+      <!-- Error / Not-found container (alternatief voor #detail-content) -->
+      <div id="detail-error" style="display:none;"></div>
+
+      <!-- Hoofdcontent (verborgen tot /api/customer geslaagd is) -->
+      <div id="detail-content" style="display:none;">
+        <a href="/modules/klanten.html" class="back-link">
+          <i class="ti ti-arrow-left"></i> Terug naar klant-overzicht
+        </a>
+
+        <div class="detail-header">
+          <div class="detail-header-info">
+            <h1 class="detail-name" id="detail-name">—</h1>
+            <span class="status-badge" id="detail-status">—</span>
+          </div>
+          <div class="detail-header-actions">
+            <button id="btn-edit-customer" class="btn btn-sm" type="button">
+              <i class="ti ti-edit"></i> Bewerken
+            </button>
+            <button id="btn-archive-customer" class="btn btn-sm" type="button">
+              <i class="ti ti-archive"></i> Archiveren
+            </button>
+            <button id="btn-unarchive-customer" class="btn btn-sm btn-unarchive" type="button" style="display:none;">
+              <i class="ti ti-rotate-clockwise"></i> Heractiveren
+            </button>
+          </div>
+        </div>
+
+        <div class="detail-tabs" role="tablist">
+          <button class="tab-btn active" data-tab="profiel" role="tab" aria-selected="true" aria-controls="tab-panel-profiel" id="tab-btn-profiel">
+            <i class="ti ti-user"></i> Profiel
+          </button>
+          <button class="tab-btn" data-tab="communicatie" role="tab" aria-selected="false" aria-controls="tab-panel-communicatie" id="tab-btn-communicatie">
+            <i class="ti ti-message-circle"></i> Communicatie <span class="tab-count" id="tab-count-communicatie">0</span>
+          </button>
+          <button class="tab-btn" data-tab="audit" role="tab" aria-selected="false" aria-controls="tab-panel-audit" id="tab-btn-audit">
+            <i class="ti ti-history"></i> Audit <span class="tab-count" id="tab-count-audit">0</span>
+          </button>
+        </div>
+
+        <!-- Tab: Profiel -->
+        <div class="tab-content" id="tab-panel-profiel" role="tabpanel" aria-labelledby="tab-btn-profiel">
+          <div class="detail-cards-grid">
+            <div class="detail-card">
+              <h3><i class="ti ti-user"></i> Persoonlijk</h3>
+              <div class="detail-row"><span class="detail-label">Voornaam</span><span id="prof-first-name">—</span></div>
+              <div class="detail-row"><span class="detail-label">Achternaam</span><span id="prof-last-name">—</span></div>
+              <div class="detail-row"><span class="detail-label">Geboortedatum</span><span id="prof-dob">—</span></div>
+            </div>
+
+            <div class="detail-card">
+              <h3><i class="ti ti-address-book"></i> Contact</h3>
+              <div class="detail-row"><span class="detail-label">Email</span><span id="prof-email">—</span></div>
+              <div class="detail-row"><span class="detail-label">Telefoon</span><span id="prof-phone">—</span></div>
+            </div>
+
+            <div class="detail-card">
+              <h3><i class="ti ti-map-pin"></i> Adres</h3>
+              <div class="detail-row"><span class="detail-label">Straat + nr.</span><span id="prof-address-line1">—</span></div>
+              <div class="detail-row"><span class="detail-label">Postcode + plaats</span><span id="prof-address-line2">—</span></div>
+            </div>
+
+            <div class="detail-card">
+              <h3 class="with-action">
+                <i class="ti ti-tag"></i> Tags
+                <button id="prof-tags-edit-toggle" class="tag-edit-toggle" type="button" style="display:none;" onclick="toggleTagEditMode()">
+                  <i class="ti ti-edit"></i> <span id="prof-tags-edit-label">Bewerken</span>
+                </button>
+              </h3>
+              <div id="prof-tags"><span class="cust-empty">Geen tags</span></div>
+              <div class="tag-edit-error" id="prof-tags-error"></div>
+            </div>
+
+            <div class="detail-card">
+              <h3><i class="ti ti-info-circle"></i> Metadata</h3>
+              <div class="detail-row"><span class="detail-label">Klant sinds</span><span id="prof-created-at">—</span></div>
+              <div class="detail-row"><span class="detail-label">Laatst bijgewerkt</span><span id="prof-updated-at">—</span></div>
+              <div class="detail-row"><span class="detail-label">TradersLeague ID</span><span id="prof-tl-id">—</span></div>
+              <div class="detail-row"><span class="detail-label">GoHighLevel ID</span><span id="prof-ghl-id">—</span></div>
+              <div class="detail-row"><span class="detail-label">Privacy geaccepteerd</span><span id="prof-privacy">—</span></div>
+              <div class="detail-row"><span class="detail-label">Risico-tag automatisch</span><span id="prof-risk-auto">—</span></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Tab: Communicatie -->
+        <div class="tab-content" id="tab-panel-communicatie" role="tabpanel" aria-labelledby="tab-btn-communicatie" hidden>
+          <div class="detail-section">
+            <h3><i class="ti ti-notes"></i> Notities</h3>
+
+            <!-- Inline new-note editor (Fase 2A.4) -->
+            <div class="note-editor" id="new-note-editor">
+              <textarea id="new-note-body" maxlength="10000" placeholder="Nieuwe notitie toevoegen…"></textarea>
+              <div class="note-editor-footer">
+                <div class="note-editor-error" id="new-note-error"></div>
+                <button class="btn btn-primary btn-sm" type="button" id="new-note-submit" onclick="submitNewNote()">
+                  <i class="ti ti-plus"></i> Opslaan
+                </button>
+              </div>
+            </div>
+
+            <div id="notes-list">
+              <div class="placeholder-card">Notities laden…</div>
+            </div>
+          </div>
+
+          <div class="detail-section">
+            <h3><i class="ti ti-brand-whatsapp"></i> WhatsApp gesprekken</h3>
+            <div class="placeholder-card">Beschikbaar in Fase 2C (WhatsApp infrastructuur)</div>
+          </div>
+
+          <div class="detail-section">
+            <h3><i class="ti ti-mail"></i> Email correspondentie</h3>
+            <div class="placeholder-card">Beschikbaar in latere fase (post-MVP)</div>
+          </div>
+        </div>
+
+        <!-- Tab: Audit -->
+        <div class="tab-content" id="tab-panel-audit" role="tabpanel" aria-labelledby="tab-btn-audit" hidden>
+          <div class="detail-section">
+            <h3><i class="ti ti-history"></i> Audit-history</h3>
+            <div id="audit-list">
+              <div class="placeholder-card">Audit-history laden…</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ────────────────────────────────────────────────────────────────────────
+     Modals (Fase 2A.3)
+──────────────────────────────────────────────────────────────────────────── -->
+
+<!-- Customer create/edit modal (shared form, mode via dataset.mode) -->
+<div class="modal-overlay hidden" id="customerFormModal" role="dialog" aria-modal="true" aria-labelledby="customerFormTitle">
+  <div class="modal-card">
+    <div class="modal-header">
+      <div class="modal-title" id="customerFormTitle">Nieuwe klant</div>
+      <button class="modal-close" type="button" onclick="closeCustomerModal()" aria-label="Sluiten">&#x2715;</button>
+    </div>
+    <div class="modal-body">
+      <div class="modal-banner" id="customerFormBanner"></div>
+      <form id="customerForm" onsubmit="return false;" autocomplete="off">
+        <div class="form-grid">
+          <div class="form-field"><label for="cf-first-name">Voornaam <span class="req">*</span></label><input id="cf-first-name" name="first_name" type="text" maxlength="100" required/><div class="field-error" id="cf-err-first_name"></div></div>
+          <div class="form-field"><label for="cf-last-name">Achternaam <span class="req">*</span></label><input id="cf-last-name" name="last_name" type="text" maxlength="100" required/><div class="field-error" id="cf-err-last_name"></div></div>
+          <div class="form-field"><label for="cf-email">Email</label><input id="cf-email" name="email" type="email" maxlength="200"/><div class="field-error" id="cf-err-email"></div></div>
+          <div class="form-field"><label for="cf-phone">Telefoon</label><input id="cf-phone" name="phone" type="tel" maxlength="40"/><div class="field-error" id="cf-err-phone"></div></div>
+          <div class="form-field"><label for="cf-dob">Geboortedatum</label><input id="cf-dob" name="date_of_birth" type="date"/><div class="field-error" id="cf-err-date_of_birth"></div></div>
+          <div class="form-field"></div>
+          <div class="form-field"><label for="cf-street">Straat</label><input id="cf-street" name="address_street" type="text" maxlength="200"/><div class="field-error" id="cf-err-address_street"></div></div>
+          <div class="form-field"><label for="cf-number">Huisnummer</label><input id="cf-number" name="address_number" type="text" maxlength="20"/><div class="field-error" id="cf-err-address_number"></div></div>
+          <div class="form-field"><label for="cf-postal">Postcode</label><input id="cf-postal" name="address_postal" type="text" maxlength="20"/><div class="field-error" id="cf-err-address_postal"></div></div>
+          <div class="form-field"><label for="cf-city">Plaats</label><input id="cf-city" name="address_city" type="text" maxlength="100"/><div class="field-error" id="cf-err-address_city"></div></div>
+          <div class="form-field"><label for="cf-tl">TradersLeague ID</label><input id="cf-tl" name="tl_contact_id" type="text" maxlength="100"/><div class="field-error" id="cf-err-tl_contact_id"></div></div>
+          <div class="form-field"><label for="cf-ghl">GoHighLevel ID</label><input id="cf-ghl" name="ghl_contact_id" type="text" maxlength="100"/><div class="field-error" id="cf-err-ghl_contact_id"></div></div>
+        </div>
+      </form>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-sm" type="button" onclick="closeCustomerModal()">Annuleren</button>
+      <button class="btn btn-primary btn-sm" type="button" id="customerFormSubmit" onclick="submitCustomerForm()">Opslaan</button>
+    </div>
+  </div>
+</div>
+
+<!-- Archive-confirm modal -->
+<div class="modal-overlay hidden" id="archiveModal" role="dialog" aria-modal="true" aria-labelledby="archiveModalTitle">
+  <div class="modal-card modal-sm">
+    <div class="modal-header">
+      <div class="modal-title" id="archiveModalTitle">Klant archiveren</div>
+      <button class="modal-close" type="button" onclick="closeArchiveModal()" aria-label="Sluiten">&#x2715;</button>
+    </div>
+    <div class="modal-body">
+      <div class="modal-banner" id="archiveBanner"></div>
+      <p style="font-size:13px; margin:0 0 8px;">Weet je zeker dat je <strong id="archive-customer-name">deze klant</strong> wilt archiveren?</p>
+      <p style="font-size:12px; color:var(--text-faint); margin:0 0 12px;">Gearchiveerde klanten zijn read-only en worden standaard verborgen in het overzicht. Je kunt ze later heractiveren.</p>
+      <div class="form-field form-field-full">
+        <label for="archive-reason">Reden (optioneel)</label>
+        <textarea id="archive-reason" maxlength="500" placeholder="Bijv. 'Klant heeft schriftelijk opgezegd op 20 mei 2026'"></textarea>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-sm" type="button" onclick="closeArchiveModal()">Annuleren</button>
+      <button class="btn btn-primary btn-sm" type="button" id="archiveConfirmBtn" onclick="submitArchive()">Archiveren</button>
+    </div>
+  </div>
+</div>
+
+<!-- Duplicate-warning modal (Fase 2A.4) — stackt bovenop customerFormModal bij create-flow -->
+<div class="modal-overlay hidden" id="duplicateConfirmModal" role="dialog" aria-modal="true" aria-labelledby="duplicateModalTitle">
+  <div class="modal-card modal-sm">
+    <div class="modal-header">
+      <div class="modal-title" id="duplicateModalTitle">Vergelijkbare klanten gevonden</div>
+      <button class="modal-close" type="button" onclick="closeDuplicateModal()" aria-label="Sluiten">&#x2715;</button>
+    </div>
+    <div class="modal-body">
+      <p style="font-size:13px; margin:0 0 4px;">Deze email/telefoon komt mogelijk al voor bij <strong id="duplicate-match-count">0</strong> bestaande klant(en).</p>
+      <p style="font-size:12px; color:var(--text-faint); margin:0 0 8px;">Klik op een match om in een nieuwe tab te openen en te vergelijken.</p>
+      <div class="duplicate-match-list" id="duplicate-match-list">
+        <!-- gerenderd door openDuplicateModal() -->
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-sm" type="button" onclick="closeDuplicateModal()">Annuleren</button>
+      <button class="btn btn-primary btn-sm" type="button" id="duplicateConfirmBtn" onclick="confirmDuplicateAndProceed()">Toch aanmaken</button>
+    </div>
+  </div>
+</div>
+
+<!-- Bulk-archive modal (Fase 2A.4) -->
+<div class="modal-overlay hidden" id="bulkArchiveModal" role="dialog" aria-modal="true" aria-labelledby="bulkArchiveModalTitle">
+  <div class="modal-card modal-sm">
+    <div class="modal-header">
+      <div class="modal-title" id="bulkArchiveModalTitle">Klanten archiveren</div>
+      <button class="modal-close" type="button" onclick="closeBulkArchiveModal()" aria-label="Sluiten">&#x2715;</button>
+    </div>
+    <div class="modal-body">
+      <div class="modal-banner" id="bulkArchiveBanner"></div>
+      <p style="font-size:13px; margin:0 0 8px;">Archiveer <strong id="bulk-archive-count">0</strong> geselecteerde klanten?</p>
+      <p style="font-size:12px; color:var(--text-faint); margin:0 0 12px;">Al gearchiveerde klanten worden overgeslagen. Geanonimiseerde klanten kunnen niet meer worden gearchiveerd.</p>
+      <div class="form-field form-field-full">
+        <label for="bulk-archive-reason">Reden (optioneel — gebruikt voor alle klanten)</label>
+        <textarea id="bulk-archive-reason" maxlength="500" placeholder="Bijv. 'Jaarlijkse opschoning van inactieve klanten'"></textarea>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-sm" type="button" onclick="closeBulkArchiveModal()">Annuleren</button>
+      <button class="btn btn-primary btn-sm" type="button" id="bulkArchiveConfirmBtn" onclick="submitBulkArchive()">Archiveren</button>
+    </div>
+  </div>
+</div>
+
+<!-- Bulk-tag modal (Fase 2A.4) -->
+<div class="modal-overlay hidden" id="bulkTagModal" role="dialog" aria-modal="true" aria-labelledby="bulkTagModalTitle">
+  <div class="modal-card modal-sm">
+    <div class="modal-header">
+      <div class="modal-title" id="bulkTagModalTitle">Tag-actie voor <span id="bulk-tag-count">0</span> klanten</div>
+      <button class="modal-close" type="button" onclick="closeBulkTagModal()" aria-label="Sluiten">&#x2715;</button>
+    </div>
+    <div class="modal-body">
+      <div class="modal-banner" id="bulkTagBanner"></div>
+      <div class="bulk-tag-mode" role="radiogroup" aria-label="Tag-actie">
+        <label><input type="radio" name="bulk-tag-action" value="tag-add" checked/> Tag toevoegen</label>
+        <label><input type="radio" name="bulk-tag-action" value="tag-remove"/> Tag verwijderen</label>
+      </div>
+      <div class="form-field form-field-full">
+        <label for="bulk-tag-slug">Tag</label>
+        <select id="bulk-tag-slug" class="bulk-tag-select" aria-label="Selecteer tag">
+          <option value="">— Tag laden… —</option>
+        </select>
+      </div>
+      <p style="font-size:11px; color:var(--text-faint); margin:8px 0 0;">Gearchiveerde / geanonimiseerde klanten worden overgeslagen.</p>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-sm" type="button" onclick="closeBulkTagModal()">Annuleren</button>
+      <button class="btn btn-primary btn-sm" type="button" id="bulkTagConfirmBtn" onclick="submitBulkTag()">Toepassen</button>
     </div>
   </div>
 </div>
@@ -45,12 +697,1745 @@
 <script src="/modules/shared/agent-shared.js"></script>
 <script src="/modules/shared/theme-shared.js"></script>
 <script>
+// ============================================================================
+// State + helpers
+// ============================================================================
+const state = {
+  search:        '',
+  tags:          [],                // tag-slugs
+  status:        ['active'],        // multi-select; default toont alleen actieve klanten
+  createdFrom:   '',
+  createdTo:     '',
+  sortBy:        'created_at',
+  sortDir:       'desc',
+  page:          1,
+  pageSize:      25,
+  // Fase 2A.4 commit 6:
+  selectionMode: false,             // bulk-select toggle aan/uit
+  selectedIds:   new Set(),         // set van customer-id's die gekruist zijn
+};
+let tagDefinitions = [];            // gevuld bij init
+let searchDebounceTimer = null;
+
+// Module-scope tag-definitions cache (Fase 2A.4 commit 6) — gedeeld tussen
+// detail-view (Profiel Tags-edit) en lijst-view (bulk-tag modal). Voorheen zat
+// dit in detailState.allTagDefs; verplaatst zodat lijst-view het ook kan gebruiken
+// zonder via detail-view-state te omwegen.
+let _allTagDefs = null;
+let _allTagDefsPromise = null;       // race-safe: caches in-flight promise voor concurrent callers
+
+async function getTagDefinitions() {
+  if (_allTagDefs !== null) return _allTagDefs;
+  if (_allTagDefsPromise) return _allTagDefsPromise;
+  _allTagDefsPromise = (async () => {
+    const res = await window.AgentShared.apiFetch('/api/customer-tag-definitions');
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const { tags } = await res.json();
+    _allTagDefs = tags || [];
+    return _allTagDefs;
+  })();
+  return _allTagDefsPromise;
+}
+
+const $ = (sel) => document.querySelector(sel);
+const $$ = (sel) => document.querySelectorAll(sel);
+
+const fmtDate = (iso) => {
+  if (!iso) return '—';
+  try {
+    return new Intl.DateTimeFormat('nl-NL', { day:'2-digit', month:'short', year:'numeric' }).format(new Date(iso));
+  } catch { return iso; }
+};
+const escapeHtml = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+// ============================================================================
+// Init — auth + RBAC + mode-detectie
+// ============================================================================
 async function init() {
   await window._authSharedReady;
   const profile = await window.AuthShared.requireAuth();
   if (!profile) return;
   if (window.AgentShared) await window.AgentShared.renderUserSection(profile);
+
+  // Page-level access check (customer.module.access)
+  // Fixt punt 3 uit Chrome's PR #1-review: zonder deze key geen toegang tot module.
+  await window.RBAC.ensurePermissionsLoaded();
+  if (!(await window.RBAC.can('customer.module.access'))) {
+    window.location.href = '/index.html?error=forbidden';
+    return;
+  }
+
+  // Mode-detectie: ?id=<uuid> → detail-view (Fase 2A.2), anders lijst-view.
+  const params = new URLSearchParams(window.location.search);
+  const customerId = params.get('id');
+  if (customerId) {
+    await showDetailView(customerId);
+    return;
+  }
+  await initListView();
 }
+
+// ============================================================================
+// Detail-view (Fase 2A.2) — 3 tabs: Profiel / Communicatie / Audit
+// ============================================================================
+const detailState = {
+  customerId: null,
+  customer: null,
+  notes: null,            // null = nog niet geladen; [] = geladen, leeg
+  audit: null,            // idem, voor audit-tab lazy-load
+  activeTab: 'profiel',
+  // Fase 2A.4:
+  tagEditMode: false,     // toggle voor Tags-kaart edit-controls
+  // (allTagDefs gemigreerd naar module-scope _allTagDefs + getTagDefinitions() helper —
+  //  gedeeld met lijst-view bulk-tag modal in commit 6)
+  editingNoteId: null,    // id van note in inline-edit modus (null = geen)
+};
+const VALID_TABS = new Set(['profiel', 'communicatie', 'audit']);
+const UUID_RE_CLIENT = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+const fmtDateTime = (iso) => {
+  if (!iso) return '—';
+  try {
+    return new Intl.DateTimeFormat('nl-NL', { day:'2-digit', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit' }).format(new Date(iso));
+  } catch { return iso; }
+};
+const fmtDateLong = (iso) => {
+  if (!iso) return '—';
+  try {
+    return new Intl.DateTimeFormat('nl-NL', { day:'numeric', month:'long', year:'numeric' }).format(new Date(iso));
+  } catch { return iso; }
+};
+
+async function showDetailView(customerId) {
+  $('#view-detail').style.display = '';
+  bindDetailTabEvents();
+  bindDetailActionButtons();
+
+  // Client-side UUID-validatie — server doet ook 400 maar dit voorkomt round-trip
+  if (!UUID_RE_CLIENT.test(customerId)) {
+    renderDetailError('Ongeldig klant-ID in URL.');
+    return;
+  }
+  detailState.customerId = customerId;
+
+  // Active tab uit URL (?tab=…), default 'profiel'
+  const params = new URLSearchParams(window.location.search);
+  const tabParam = params.get('tab');
+  detailState.activeTab = (tabParam && VALID_TABS.has(tabParam)) ? tabParam : 'profiel';
+
+  try {
+    const res = await window.AgentShared.apiFetch('/api/customer?id=' + encodeURIComponent(customerId));
+    if (res.status === 404) { renderDetailNotFound(); return; }
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.error || ('HTTP ' + res.status));
+    }
+    const data = await res.json();
+    detailState.customer = data.customer;
+    renderDetail();
+  } catch (err) {
+    console.error('[klanten] detail load failed:', err);
+    renderDetailError(err.message);
+  }
+}
+
+function renderDetail() {
+  const c = detailState.customer;
+  $('#detail-error').style.display = 'none';
+  $('#detail-content').style.display = '';
+
+  // Header — naam via textContent (XSS-safe), status-badge class wisselt
+  const name = `${(c.first_name || '').trim()} ${(c.last_name || '').trim()}`.trim() || '(geen naam)';
+  $('#detail-name').textContent = name;
+  const statusEl = $('#detail-status');
+  // Verwijder oude status-klasse, voeg nieuwe toe (status is whitelist: active/archived/anonymized)
+  statusEl.className = 'status-badge ' + (['active','archived','anonymized'].includes(c.status) ? c.status : 'active');
+  statusEl.textContent = labelForStatus(c.status);
+
+  // Edit alleen bij active; Archive alleen bij active; Heractiveren alleen bij archived;
+  // bij anonymized zijn alle 3 verborgen (eindstaat).
+  const isActive   = c.status === 'active';
+  const isArchived = c.status === 'archived';
+  $('#btn-edit-customer').disabled = !isActive;
+  $('#btn-archive-customer').style.display   = isActive   ? '' : 'none';
+  $('#btn-unarchive-customer').style.display = isArchived ? '' : 'none';
+
+  // Tab-counts
+  $('#tab-count-communicatie').textContent = c.notes_count || 0;
+  $('#tab-count-audit').textContent = c.audit_count || 0;
+
+  // Activate tab (geen URL-push — bestaande URL is al juist)
+  activateDetailTab(detailState.activeTab, /*updateUrl=*/ false);
+}
+
+function activateDetailTab(tabName, updateUrl) {
+  if (!VALID_TABS.has(tabName)) tabName = 'profiel';
+  detailState.activeTab = tabName;
+
+  $$('.detail-tabs .tab-btn').forEach((btn) => {
+    const active = btn.dataset.tab === tabName;
+    btn.classList.toggle('active', active);
+    btn.setAttribute('aria-selected', String(active));
+  });
+  $$('.tab-content').forEach((panel) => {
+    panel.hidden = (panel.id !== 'tab-panel-' + tabName);
+  });
+
+  if (tabName === 'profiel')           renderProfielTab();
+  else if (tabName === 'communicatie') renderCommunicatieTab();
+  else if (tabName === 'audit')        renderAuditTab();
+
+  if (updateUrl) {
+    const url = new URL(window.location.href);
+    url.searchParams.set('id', detailState.customerId);
+    url.searchParams.set('tab', tabName);
+    history.pushState({ tab: tabName }, '', url.toString());
+  }
+}
+
+function renderProfielTab() {
+  const c = detailState.customer;
+
+  $('#prof-first-name').textContent = c.first_name || '—';
+  $('#prof-last-name').textContent  = c.last_name  || '—';
+  $('#prof-dob').textContent        = c.date_of_birth ? fmtDateLong(c.date_of_birth) : '—';
+
+  // Contact: mailto:/tel: links (encodeURIComponent op user-input)
+  const emailEl = $('#prof-email');
+  if (c.email) emailEl.innerHTML = `<a href="mailto:${encodeURIComponent(c.email)}">${escapeHtml(c.email)}</a>`;
+  else emailEl.innerHTML = '<span class="cust-empty">—</span>';
+  const phoneEl = $('#prof-phone');
+  if (c.phone) phoneEl.innerHTML = `<a href="tel:${encodeURIComponent(c.phone)}">${escapeHtml(c.phone)}</a>`;
+  else phoneEl.innerHTML = '<span class="cust-empty">—</span>';
+
+  // Adres — 2 regels: street+number / postal+city
+  const streetNumber = [c.address_street, c.address_number].filter(Boolean).join(' ');
+  $('#prof-address-line1').textContent = streetNumber || '—';
+  const postalCity = [c.address_postal, c.address_city].filter(Boolean).join(' ');
+  $('#prof-address-line2').textContent = postalCity || '—';
+
+  // Tags — mode-aware render (Fase 2A.4)
+  // Edit-toggle alleen zichtbaar op actieve klanten (matched 'Bewerken' button-policy).
+  const tagToggle = $('#prof-tags-edit-toggle');
+  tagToggle.style.display = (c.status === 'active') ? '' : 'none';
+  if (c.status !== 'active' && detailState.tagEditMode) detailState.tagEditMode = false;
+  renderTagsSection();
+
+  // Metadata
+  $('#prof-created-at').textContent = fmtDate(c.created_at);
+  $('#prof-updated-at').textContent = fmtDate(c.updated_at);
+  $('#prof-tl-id').textContent       = c.tl_contact_id  || 'Nog niet gekoppeld';
+  $('#prof-ghl-id').textContent      = c.ghl_contact_id || 'Nog niet gekoppeld';
+  $('#prof-privacy').textContent     = c.privacy_accepted_at ? fmtDate(c.privacy_accepted_at) : 'Nog niet';
+  $('#prof-risk-auto').textContent   = c.risk_tag_auto ? 'Ja' : 'Nee';
+}
+
+async function renderCommunicatieTab() {
+  // New-note editor visibility: alleen op actieve klanten (consistent met edit-button policy).
+  // Bij archived/anonymized: vervang editor met info-text (server blokkeert al, voorkomt UI-frictie).
+  renderNewNoteEditor();
+
+  // Notities lazy-load (1x, gecached in detailState.notes)
+  if (detailState.notes === null) {
+    $('#notes-list').innerHTML = '<div class="placeholder-card">Notities laden…</div>';
+    try {
+      const res = await window.AgentShared.apiFetch('/api/customer-notes?customer_id=' + encodeURIComponent(detailState.customerId));
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error || ('HTTP ' + res.status));
+      }
+      const { notes } = await res.json();
+      detailState.notes = notes || [];
+    } catch (err) {
+      console.error('[klanten] notes load failed:', err);
+      $('#notes-list').innerHTML = `<div class="placeholder-card" style="color:#EF4444;">Kon notities niet laden: ${escapeHtml(err.message)}</div>`;
+      return;
+    }
+  }
+
+  renderNotesList();
+}
+
+/**
+ * Render de new-note-editor mode-aware:
+ * - active customer  → editor zichtbaar, textarea + Opslaan-knop
+ * - archived/anonymized → info-card "Notitie toevoegen niet beschikbaar"
+ */
+function renderNewNoteEditor() {
+  const c = detailState.customer;
+  const editorEl = $('#new-note-editor');
+  if (!editorEl) return;
+  if (c.status === 'active') {
+    editorEl.innerHTML = `
+      <textarea id="new-note-body" maxlength="10000" placeholder="Nieuwe notitie toevoegen…"></textarea>
+      <div class="note-editor-footer">
+        <div class="note-editor-error" id="new-note-error"></div>
+        <button class="btn btn-primary btn-sm" type="button" id="new-note-submit" onclick="submitNewNote()">
+          <i class="ti ti-plus"></i> Opslaan
+        </button>
+      </div>`;
+  } else {
+    const reason = c.status === 'archived'
+      ? 'Klant is gearchiveerd; eerst heractiveren om notities toe te voegen.'
+      : 'Klant is geanonimiseerd; notitie-mutaties niet beschikbaar.';
+    editorEl.innerHTML = `<div class="placeholder-card">${escapeHtml(reason)}</div>`;
+  }
+}
+
+/**
+ * Render de notes-lijst (read-mode + inline edit-mode per note).
+ * editingNoteId steers welke note in edit-form-state staat.
+ */
+function renderNotesList() {
+  const list = $('#notes-list');
+  const notes = detailState.notes;
+  if (!notes || !notes.length) {
+    list.innerHTML = '<div class="placeholder-card">Nog geen notities voor deze klant.</div>';
+    return;
+  }
+  const isActive = detailState.customer.status === 'active';
+
+  list.innerHTML = notes.map((n) => {
+    const author = (n.created_by && n.created_by.name) ? escapeHtml(n.created_by.name) : 'Onbekend';
+    const editedMarker = n.edited_at ? ` · bewerkt ${escapeHtml(fmtDateTime(n.edited_at))}` : '';
+
+    // Inline-edit modus voor deze note
+    if (detailState.editingNoteId === n.id && isActive) {
+      return `
+        <div class="note-item" data-note-id="${escapeHtml(n.id)}">
+          <div class="note-edit-form">
+            <textarea data-edit-note-body="${escapeHtml(n.id)}" maxlength="10000"></textarea>
+            <div class="note-edit-error" data-edit-note-error="${escapeHtml(n.id)}"></div>
+            <div class="note-edit-form-footer">
+              <button class="btn btn-primary btn-sm" type="button" data-save-note="${escapeHtml(n.id)}">Opslaan</button>
+              <button class="btn btn-sm" type="button" data-cancel-note="${escapeHtml(n.id)}">Annuleren</button>
+            </div>
+          </div>
+          <div class="note-meta">${escapeHtml(fmtDateTime(n.created_at))} · door ${author}${editedMarker}</div>
+        </div>`;
+    }
+
+    // Read-mode: body + hover-actions (alleen voor active customer en non-archived notes)
+    const actionsHtml = (isActive && !n.archived_at) ? `
+        <div class="note-item-actions">
+          <button class="note-icon-btn" type="button" data-edit-note="${escapeHtml(n.id)}" title="Bewerken"><i class="ti ti-edit"></i></button>
+          <button class="note-icon-btn" type="button" data-archive-note="${escapeHtml(n.id)}" title="Archiveren"><i class="ti ti-archive"></i></button>
+        </div>` : '';
+
+    return `
+      <div class="note-item" data-note-id="${escapeHtml(n.id)}">
+        ${actionsHtml}
+        <div class="note-body">${escapeHtml(n.body)}</div>
+        <div class="note-meta">${escapeHtml(fmtDateTime(n.created_at))} · door ${author}${editedMarker}</div>
+      </div>`;
+  }).join('');
+
+  // Pre-fill edit-textarea (XSS-safe via .value)
+  if (detailState.editingNoteId && isActive) {
+    const note = notes.find((x) => x.id === detailState.editingNoteId);
+    const ta = list.querySelector(`[data-edit-note-body="${detailState.editingNoteId}"]`);
+    if (note && ta) {
+      ta.value = note.body;
+      setTimeout(() => ta.focus(), 0);
+    }
+  }
+
+  // Bind action-buttons
+  list.querySelectorAll('[data-edit-note]').forEach((btn) =>
+    btn.addEventListener('click', () => editNote(btn.dataset.editNote)));
+  list.querySelectorAll('[data-archive-note]').forEach((btn) =>
+    btn.addEventListener('click', () => archiveNote(btn.dataset.archiveNote)));
+  list.querySelectorAll('[data-save-note]').forEach((btn) =>
+    btn.addEventListener('click', () => saveNoteEdit(btn.dataset.saveNote)));
+  list.querySelectorAll('[data-cancel-note]').forEach((btn) =>
+    btn.addEventListener('click', () => cancelNoteEdit(btn.dataset.cancelNote)));
+}
+
+async function renderAuditTab() {
+  const el = $('#audit-list');
+  if (detailState.audit === null) {
+    el.innerHTML = '<div class="placeholder-card">Audit-history laden…</div>';
+    try {
+      const res = await window.AgentShared.apiFetch('/api/customer-audit?customer_id=' + encodeURIComponent(detailState.customerId));
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error || ('HTTP ' + res.status));
+      }
+      const { entries } = await res.json();
+      detailState.audit = entries || [];
+    } catch (err) {
+      console.error('[klanten] audit load failed:', err);
+      el.innerHTML = `<div class="placeholder-card" style="color:#EF4444;">Kon audit-history niet laden: ${escapeHtml(err.message)}</div>`;
+      return;
+    }
+  }
+
+  if (!detailState.audit.length) {
+    el.innerHTML = '<div class="placeholder-card">Nog geen wijzigingen geregistreerd voor deze klant.</div>';
+    return;
+  }
+
+  el.innerHTML = detailState.audit.map(renderAuditEntry).join('');
+  el.querySelectorAll('.audit-raw-toggle').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const target = document.getElementById(btn.dataset.target);
+      if (!target) return;
+      const visible = target.classList.toggle('visible');
+      btn.textContent = visible ? 'Volledige JSON verbergen' : 'Volledige JSON tonen';
+    });
+  });
+}
+
+const AUDIT_ACTION_LABELS = {
+  created:     'Aangemaakt',
+  updated:     'Bewerkt',
+  archived:    'Gearchiveerd',
+  unarchived:  'Heractiveerd',
+  anonymized:  'Geanonimiseerd',
+};
+
+function renderAuditEntry(e) {
+  const actionShort = String(e.action || '').replace(/^customer\./, '');
+  const actionLabel = AUDIT_ACTION_LABELS[actionShort] || actionShort;
+  const actor = (e.actor && e.actor.name) ? escapeHtml(e.actor.name) : 'Onbekend';
+  const reason = e.reason_text
+    ? `<div class="audit-reason">Reden: ${escapeHtml(e.reason_text)}</div>`
+    : '';
+  const diffHtml = (e.diff && e.diff.length)
+    ? `<div class="audit-diff-list">${e.diff.map(renderDiffItem).join('')}</div>`
+    : '';
+  const rawId = 'audit-raw-' + e.id;
+  const rawJson = JSON.stringify({ before: e.raw_before, after: e.raw_after }, null, 2);
+  return `
+    <div class="audit-entry">
+      <div class="audit-entry-header">
+        <span class="audit-action ${escapeHtml(actionShort)}">${escapeHtml(actionLabel)}</span>
+        <span class="audit-meta">${escapeHtml(fmtDateTime(e.created_at))} · door ${actor}</span>
+      </div>
+      ${reason}
+      ${diffHtml}
+      <button class="audit-raw-toggle" data-target="${escapeHtml(rawId)}" type="button">Volledige JSON tonen</button>
+      <div class="audit-raw" id="${escapeHtml(rawId)}">${escapeHtml(rawJson)}</div>
+    </div>`;
+}
+
+function renderDiffItem(d) {
+  return `<div class="audit-diff-item">
+    <span class="field-name">${escapeHtml(d.field)}</span>:
+    <span class="val-before">${escapeHtml(formatDiffValue(d.before))}</span>
+    <span class="val-arrow">→</span>
+    <span class="val-after">${escapeHtml(formatDiffValue(d.after))}</span>
+  </div>`;
+}
+
+function formatDiffValue(v) {
+  if (v == null || v === '') return '(leeg)';
+  if (typeof v === 'object') return JSON.stringify(v);
+  let s = String(v);
+  if (s.length > 80) s = s.slice(0, 77) + '…';
+  return s;
+}
+
+function renderDetailError(msg) {
+  $('#detail-content').style.display = 'none';
+  const errEl = $('#detail-error');
+  errEl.style.display = '';
+  errEl.innerHTML = `
+    <a href="/modules/klanten.html" class="back-link">
+      <i class="ti ti-arrow-left"></i> Terug naar klant-overzicht
+    </a>
+    <div class="detail-not-found">
+      <i class="ti ti-alert-circle" style="color:#EF4444;"></i>
+      <h2>Kon klant niet laden</h2>
+      <p>${escapeHtml(msg || 'Onbekende fout')}</p>
+      <br><button class="btn btn-sm" onclick="reloadDetail()"><i class="ti ti-refresh"></i> Opnieuw proberen</button>
+    </div>`;
+}
+
+function renderDetailNotFound() {
+  $('#detail-content').style.display = 'none';
+  const errEl = $('#detail-error');
+  errEl.style.display = '';
+  errEl.innerHTML = `
+    <a href="/modules/klanten.html" class="back-link">
+      <i class="ti ti-arrow-left"></i> Terug naar klant-overzicht
+    </a>
+    <div class="detail-not-found">
+      <i class="ti ti-user-off" style="color:var(--text-faint);"></i>
+      <h2>Klant niet gevonden</h2>
+      <p>De klant met dit ID bestaat niet (meer).</p>
+    </div>`;
+}
+
+function reloadDetail() {
+  detailState.customer = null;
+  detailState.notes = null;
+  showDetailView(detailState.customerId);
+}
+window.reloadDetail = reloadDetail;
+
+function bindDetailTabEvents() {
+  if (bindDetailTabEvents._bound) return;
+  bindDetailTabEvents._bound = true;
+
+  $$('.detail-tabs .tab-btn').forEach((btn) => {
+    btn.addEventListener('click', () => activateDetailTab(btn.dataset.tab, /*updateUrl=*/ true));
+  });
+
+  // Browser back/forward: rerender bij ?tab=-wijziging, of reload bij verlaten detail-view.
+  window.addEventListener('popstate', () => {
+    const p = new URLSearchParams(window.location.search);
+    const id = p.get('id');
+    if (!id) { window.location.reload(); return; }
+    activateDetailTab(p.get('tab') || 'profiel', /*updateUrl=*/ false);
+  });
+}
+
+function bindDetailActionButtons() {
+  if (bindDetailActionButtons._bound) return;
+  bindDetailActionButtons._bound = true;
+  $('#btn-edit-customer').addEventListener('click',      () => openCustomerModal('edit', detailState.customer));
+  $('#btn-archive-customer').addEventListener('click',   () => openArchiveModal());
+  $('#btn-unarchive-customer').addEventListener('click', () => unarchiveCustomer());
+  // btn-add-note verwijderd in Fase 2A.4 — inline note-editor neemt rol over (zie renderNewNoteEditor).
+}
+
+// ============================================================================
+// Lijst-view setup
+// ============================================================================
+async function initListView() {
+  $('#view-list').style.display = '';
+
+  bindFilterEvents();
+  bindSortEvents();
+  bindPaginationEvents();
+
+  $('#btn-new-customer').addEventListener('click', () => openCustomerModal('create', {}));
+
+  // Parallel: tags-catalogus + stats + eerste lijst-fetch
+  await Promise.all([
+    loadTagDefinitions(),
+    loadStats(),
+    loadCustomers(),
+  ]);
+}
+
+// ── Tag-definitions (filter-dropdown) ───────────────────────────────────────
+async function loadTagDefinitions() {
+  try {
+    const res = await window.AgentShared.apiFetch('/api/customer-tag-definitions');
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const json = await res.json();
+    tagDefinitions = json.tags || [];
+    renderTagFilterOptions();
+  } catch (err) {
+    console.error('[klanten] tag-definitions load failed:', err);
+    $('#filter-tags-pop').innerHTML = '<div class="state-cell" style="padding:14px 8px; font-size:12px; color:#EF4444;">Tags niet geladen</div>';
+  }
+}
+
+function renderTagFilterOptions() {
+  const pop = $('#filter-tags-pop');
+  if (!tagDefinitions.length) {
+    pop.innerHTML = '<div class="state-cell" style="padding:14px 8px; font-size:12px;">Geen tags</div>';
+    return;
+  }
+  pop.innerHTML = tagDefinitions.map((t) => `
+    <label class="tag-multi-item">
+      <input type="checkbox" value="${escapeHtml(t.slug)}" data-tag-slug/>
+      <span class="tag-swatch" style="background:${escapeHtml(t.color || '#6B7280')}"></span>
+      <span>${escapeHtml(t.label)}</span>
+    </label>`).join('');
+  pop.querySelectorAll('input[data-tag-slug]').forEach((cb) => {
+    cb.addEventListener('change', () => {
+      state.tags = Array.from(pop.querySelectorAll('input[data-tag-slug]:checked')).map((x) => x.value);
+      updateTagsLabel();
+      state.page = 1;
+      loadCustomers();
+    });
+  });
+}
+
+function updateTagsLabel() {
+  const lbl = $('#filter-tags-label');
+  lbl.innerHTML = state.tags.length
+    ? `Tags <span class="tag-count">(${state.tags.length})</span>`
+    : 'Tags';
+}
+
+// ── Stats (KPI mini-bar) ────────────────────────────────────────────────────
+async function loadStats() {
+  try {
+    const res = await window.AgentShared.apiFetch('/api/customers?stats=true');
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const { stats } = await res.json();
+    $('#kpi-active').textContent = stats.active ?? 0;
+    $('#kpi-new').textContent = stats.new_this_month ?? 0;
+    $('#kpi-risico').textContent = stats.risico ?? 0;
+  } catch (err) {
+    console.error('[klanten] stats load failed:', err);
+    $('#kpi-active').textContent = '!';
+    $('#kpi-new').textContent = '!';
+    $('#kpi-risico').textContent = '!';
+  }
+}
+
+// ── Customers lijst ─────────────────────────────────────────────────────────
+function renderSkeletonRows(n = 5) {
+  const tbody = $('#customers-tbody');
+  tbody.innerHTML = '';
+  for (let i = 0; i < n; i++) {
+    const tr = document.createElement('tr');
+    tr.className = 'skeleton-row';
+    tr.innerHTML = '<td><span class="skel" style="width:60%"></span></td>'
+                 + '<td><span class="skel" style="width:80%"></span></td>'
+                 + '<td><span class="skel" style="width:50%"></span></td>'
+                 + '<td><span class="skel" style="width:40%"></span></td>'
+                 + '<td><span class="skel" style="width:50%"></span></td>'
+                 + '<td><span class="skel" style="width:40%"></span></td>'
+                 + '<td><span class="skel" style="width:40%"></span></td>';
+    tbody.appendChild(tr);
+  }
+}
+
+async function loadCustomers() {
+  // Filter/sort/page-change clears selectie (anders zou pagina 2 geen visuele
+  // selection-cue tonen voor IDs die op pagina 1 stonden — verwarrende UX).
+  // No-op als geen selectie actief is.
+  clearSelectionOnContextChange();
+  renderSkeletonRows();
+  try {
+    const qs = buildQueryString();
+    const res = await window.AgentShared.apiFetch('/api/customers?' + qs);
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.error || ('HTTP ' + res.status));
+    }
+    const data = await res.json();
+    renderCustomers(data);
+  } catch (err) {
+    console.error('[klanten] customers load failed:', err);
+    renderErrorState(err.message);
+  }
+}
+
+function buildQueryString() {
+  const p = new URLSearchParams();
+  if (state.search) p.set('search', state.search);
+  if (state.tags.length) p.set('tags', state.tags.join(','));
+  if (state.status.length) p.set('status', state.status.join(','));
+  if (state.createdFrom) p.set('created_from', state.createdFrom);
+  if (state.createdTo)   p.set('created_to', state.createdTo);
+  p.set('sort_by', state.sortBy);
+  p.set('sort_dir', state.sortDir);
+  p.set('page', String(state.page));
+  p.set('page_size', String(state.pageSize));
+  return p.toString();
+}
+
+function renderCustomers({ customers, total, page, page_size, total_pages }) {
+  const tbody = $('#customers-tbody');
+  tbody.innerHTML = '';
+
+  if (!customers || customers.length === 0) {
+    // colspan: 8 (incl. col-select); col-select hidden via CSS bij niet-selection-mode is OK
+    tbody.innerHTML = `
+      <tr><td colspan="8" class="state-cell">
+        Geen klanten gevonden met huidige filters.
+        <br><br>
+        <button class="btn btn-sm" onclick="resetFilters()"><i class="ti ti-rotate-clockwise"></i> Filters resetten</button>
+      </td></tr>`;
+    updatePagination(total, page, page_size, total_pages);
+    syncSelectAllCheckbox();
+    return;
+  }
+
+  for (const c of customers) {
+    const tr = document.createElement('tr');
+    tr.dataset.customerId = c.id;
+    if (state.selectedIds.has(c.id)) tr.classList.add('selected');
+
+    // Row-click: in selection-mode toggle, anders navigate naar detail.
+    tr.addEventListener('click', (e) => {
+      // Clicks op de checkbox zelf afhandelen via change-listener — voorkom dubbel-toggle
+      if (e.target && e.target.matches('input[type="checkbox"][data-row-select]')) return;
+      if (state.selectionMode) {
+        toggleRowSelection(c.id);
+      } else {
+        window.location.href = '/modules/klanten.html?id=' + encodeURIComponent(c.id);
+      }
+    });
+
+    const tags = (c.tags || []).map((t) =>
+      `<span class="tag-badge" style="background:${escapeHtml(t.color || '#6B7280')}">${escapeHtml(t.label)}</span>`
+    ).join('');
+    const name = `${escapeHtml(c.first_name || '')} ${escapeHtml(c.last_name || '')}`.trim() || '—';
+    const checked = state.selectedIds.has(c.id) ? 'checked' : '';
+    tr.innerHTML = `
+      <td class="col-select"><input type="checkbox" data-row-select="${escapeHtml(c.id)}" aria-label="Selecteer ${name}" ${checked}/></td>
+      <td><span class="cust-name">${name}</span></td>
+      <td>${c.email ? escapeHtml(c.email) : '<span class="cust-empty">—</span>'}</td>
+      <td>${c.phone ? escapeHtml(c.phone) : '<span class="cust-empty">—</span>'}</td>
+      <td>${tags || '<span class="cust-empty">—</span>'}</td>
+      <td>${fmtDate(c.created_at)}</td>
+      <td><span class="status-badge ${escapeHtml(c.status)}">${labelForStatus(c.status)}</span></td>
+      <td><span class="cust-empty">—</span></td>
+    `;
+    // Bind change-listener op de row-checkbox (na innerHTML)
+    const cb = tr.querySelector('input[data-row-select]');
+    if (cb) cb.addEventListener('change', () => toggleRowSelection(c.id));
+    tbody.appendChild(tr);
+  }
+
+  updatePagination(total, page, page_size, total_pages);
+  syncSelectAllCheckbox();
+}
+
+function labelForStatus(s) {
+  return { active:'Actief', archived:'Gearchiveerd', anonymized:'Geanonimiseerd' }[s] || s;
+}
+
+function renderErrorState(msg) {
+  $('#customers-tbody').innerHTML = `
+    <tr><td colspan="8" class="state-cell" style="color:#EF4444;">
+      <i class="ti ti-alert-circle"></i> Kon klanten niet laden: ${escapeHtml(msg || 'onbekende fout')}
+      <br><br><button class="btn btn-sm" onclick="loadCustomers()">Opnieuw proberen</button>
+    </td></tr>`;
+}
+
+function updatePagination(total, page, pageSize, totalPages) {
+  if (total === 0) {
+    $('#page-info').textContent = 'Geen resultaten';
+  } else {
+    const from = (page - 1) * pageSize + 1;
+    const to = Math.min(page * pageSize, total);
+    $('#page-info').textContent = `${from}–${to} van ${total}`;
+  }
+  $('#btn-prev').disabled = page <= 1;
+  $('#btn-next').disabled = page >= (totalPages || 1);
+  $('#page-input').value = page;
+  $('#page-input').max = Math.max(totalPages || 1, 1);
+}
+
+// ── Filter / sort / pagination event-binding ────────────────────────────────
+function bindFilterEvents() {
+  $('#filter-search').addEventListener('input', (e) => {
+    clearTimeout(searchDebounceTimer);
+    searchDebounceTimer = setTimeout(() => {
+      state.search = e.target.value.trim();
+      state.page = 1;
+      loadCustomers();
+    }, 300);
+  });
+
+  // Tag-multi-select popover toggle (clickoutside om te sluiten)
+  $('#filter-tags-trigger').addEventListener('click', (e) => {
+    e.stopPropagation();
+    $('#filter-tags').classList.toggle('open');
+  });
+  document.addEventListener('click', (e) => {
+    if (!$('#filter-tags').contains(e.target)) $('#filter-tags').classList.remove('open');
+  });
+  // (ESC-handling voor tag-popover zit in centrale bindModalGlobals IIFE
+  //  onderaan dit script — capture-phase, modal > popover > niets prioriteit.)
+
+  // Status pills
+  $$('#filter-status input[name="status"]').forEach((cb) => {
+    cb.addEventListener('change', () => {
+      const checked = Array.from($$('#filter-status input[name="status"]:checked')).map((x) => x.value);
+      // Disallow lege selectie — forceer minimaal 'active'
+      if (checked.length === 0) {
+        cb.checked = true;
+        return;
+      }
+      state.status = checked;
+      $$('#filter-status .status-pill').forEach((pill) => {
+        const input = pill.querySelector('input');
+        pill.dataset.checked = String(input.checked);
+      });
+      $('#status-hint').style.display = checked.includes('archived') || checked.includes('anonymized') ? 'none' : '';
+      state.page = 1;
+      loadCustomers();
+    });
+  });
+
+  $('#filter-from').addEventListener('change', (e) => { state.createdFrom = e.target.value; state.page = 1; loadCustomers(); });
+  $('#filter-to').addEventListener('change',   (e) => { state.createdTo   = e.target.value; state.page = 1; loadCustomers(); });
+
+  $('#btn-reset-filters').addEventListener('click', resetFilters);
+}
+
+function resetFilters() {
+  state.search = '';
+  state.tags = [];
+  state.status = ['active'];
+  state.createdFrom = '';
+  state.createdTo = '';
+  state.sortBy = 'created_at';
+  state.sortDir = 'desc';
+  state.page = 1;
+
+  $('#filter-search').value = '';
+  $('#filter-from').value = '';
+  $('#filter-to').value = '';
+  $$('#filter-tags-pop input[data-tag-slug]').forEach((cb) => { cb.checked = false; });
+  updateTagsLabel();
+  $$('#filter-status input[name="status"]').forEach((cb) => { cb.checked = cb.value === 'active'; });
+  $$('#filter-status .status-pill').forEach((pill) => {
+    pill.dataset.checked = String(pill.querySelector('input').checked);
+  });
+  $('#status-hint').style.display = '';
+
+  $$('.customers-table th[data-sort-key]').forEach((th) => {
+    th.setAttribute('aria-sort', th.dataset.sortKey === 'created_at' ? 'descending' : 'none');
+  });
+
+  loadCustomers();
+}
+window.resetFilters = resetFilters; // toegankelijk vanaf empty-state knop
+window.loadCustomers = loadCustomers; // symmetrisch — toegankelijk vanaf error-state retry-knop
+
+function bindSortEvents() {
+  $$('.customers-table th[data-sort-key]').forEach((th) => {
+    th.addEventListener('click', () => {
+      const key = th.dataset.sortKey;
+      if (state.sortBy === key) {
+        state.sortDir = state.sortDir === 'asc' ? 'desc' : 'asc';
+      } else {
+        state.sortBy = key;
+        state.sortDir = 'asc';
+      }
+      $$('.customers-table th[data-sort-key]').forEach((other) => {
+        other.setAttribute('aria-sort', other === th ? (state.sortDir === 'asc' ? 'ascending' : 'descending') : 'none');
+      });
+      state.page = 1;
+      loadCustomers();
+    });
+  });
+}
+
+function bindPaginationEvents() {
+  $('#btn-prev').addEventListener('click', () => {
+    if (state.page > 1) { state.page--; loadCustomers(); }
+  });
+  $('#btn-next').addEventListener('click', () => {
+    state.page++; loadCustomers();
+  });
+  $('#page-input').addEventListener('change', (e) => {
+    const n = parseInt(e.target.value, 10);
+    if (Number.isFinite(n) && n >= 1) { state.page = n; loadCustomers(); }
+  });
+  $('#page-size').addEventListener('change', (e) => {
+    state.pageSize = parseInt(e.target.value, 10) || 25;
+    state.page = 1;
+    loadCustomers();
+  });
+}
+
+// ============================================================================
+// Bulk-selection mechanics (lijst-view) — Fase 2A.4 commit 6
+// ============================================================================
+//
+// Selection-state: state.selectionMode (boolean) + state.selectedIds (Set<uuid>).
+// Visuele weergave: <table class="customers-table selection-mode">  → CSS toont
+// col-select-column + row.selected highlight. Action-bar toont count + acties.
+//
+// Cache-flush punten (selectedIds clear): filter-wijziging, page-change,
+// pageSize-change, search, sort, reset-filters, selection-mode-toggle-off.
+// (Behoud van selecties tussen pagina's = onverwacht UX-pad zonder visuele cue.)
+//
+// Bulk-result-banner clear-strategie: bij selection-mode-toggle ON (start
+// nieuwe sessie schoon). Bij volgende bulk-actie wordt content overschreven.
+
+function toggleSelectionMode() {
+  const enabling = !state.selectionMode;
+  state.selectionMode = enabling;
+
+  // Bij toggle ON: clear vorige selectie + result-banner. Bij OFF: clear selectie
+  // maar laat banner staan (geeft feedback van net-afgeronde bulk-actie).
+  state.selectedIds = new Set();
+  if (enabling) clearBulkResultBanner();
+
+  const btn = $('#btn-selection-toggle');
+  const lbl = $('#selection-toggle-label');
+  btn.classList.toggle('active', enabling);
+  btn.setAttribute('aria-pressed', String(enabling));
+  if (lbl) lbl.textContent = enabling ? 'Klaar' : 'Selecteren';
+
+  const table = $('#customers-table');
+  if (table) table.classList.toggle('selection-mode', enabling);
+
+  // Reset master + alle row-checkboxen visueel
+  const master = $('#select-all-checkbox');
+  if (master) { master.checked = false; master.indeterminate = false; }
+  document.querySelectorAll('input[data-row-select]').forEach((cb) => { cb.checked = false; });
+  document.querySelectorAll('#customers-tbody tr.selected').forEach((tr) => tr.classList.remove('selected'));
+
+  updateActionBar();
+}
+
+function toggleRowSelection(id) {
+  if (state.selectedIds.has(id)) state.selectedIds.delete(id);
+  else state.selectedIds.add(id);
+
+  // Update DOM voor deze rij
+  const tr = document.querySelector(`#customers-tbody tr[data-customer-id="${cssEscape(id)}"]`);
+  if (tr) tr.classList.toggle('selected', state.selectedIds.has(id));
+  const cb = document.querySelector(`input[data-row-select="${cssEscape(id)}"]`);
+  if (cb) cb.checked = state.selectedIds.has(id);
+
+  updateActionBar();
+  syncSelectAllCheckbox();
+}
+
+function toggleSelectAll() {
+  const master = $('#select-all-checkbox');
+  if (!master) return;
+  const checkAll = master.checked;
+  const visibleCheckboxes = document.querySelectorAll('input[data-row-select]');
+  visibleCheckboxes.forEach((cb) => {
+    const id = cb.dataset.rowSelect;
+    cb.checked = checkAll;
+    if (checkAll) state.selectedIds.add(id);
+    else state.selectedIds.delete(id);
+    const tr = cb.closest('tr');
+    if (tr) tr.classList.toggle('selected', checkAll);
+  });
+  updateActionBar();
+}
+
+/**
+ * Sync master-checkbox state met huidige page:
+ *   - all visible IDs in selectedIds → master checked
+ *   - none in selectedIds            → master unchecked
+ *   - partial                        → master unchecked (indeterminate niet in MVP)
+ *
+ * TODO 2A-cleanup: setIndeterminate(true) wanneer 0 < count < pageSize voor
+ * cleaner UX-signaal van partiële selectie.
+ */
+function syncSelectAllCheckbox() {
+  const master = $('#select-all-checkbox');
+  if (!master) return;
+  const visibleCheckboxes = document.querySelectorAll('input[data-row-select]');
+  if (visibleCheckboxes.length === 0) {
+    master.checked = false;
+    master.indeterminate = false;
+    return;
+  }
+  let allSelected = true;
+  for (const cb of visibleCheckboxes) {
+    if (!state.selectedIds.has(cb.dataset.rowSelect)) { allSelected = false; break; }
+  }
+  master.checked = allSelected;
+  master.indeterminate = false;  // MVP: geen partial-state visual
+}
+
+function updateActionBar() {
+  const bar = $('#bulk-action-bar');
+  if (!bar) return;
+  const count = state.selectedIds.size;
+  $('#bulk-count').textContent = count;
+  bar.classList.toggle('visible', count > 0 && state.selectionMode);
+}
+
+/** Clear selectie + UI bij filter/sort/page-change. Behoud selection-mode-toggle-state. */
+function clearSelectionOnContextChange() {
+  if (state.selectedIds.size === 0) return;
+  state.selectedIds.clear();
+  updateActionBar();
+  // Master + row-checkboxen worden bij volgende renderCustomers() opnieuw correct gerendert.
+}
+
+function clearBulkResultBanner() {
+  const banner = $('#bulk-result-banner');
+  if (!banner) return;
+  banner.className = 'bulk-result-banner';
+  banner.textContent = '';
+}
+
+/**
+ * CSS.escape() wrapper met fallback voor oudere browsers — voor data-attribute
+ * selectors met UUIDs (UUIDs zijn safe maar defensief).
+ */
+function cssEscape(s) {
+  return (window.CSS && CSS.escape) ? CSS.escape(s) : String(s).replace(/[^\w-]/g, '\\$&');
+}
+
+// ============================================================================
+// Bulk-action handlers (archive + tag) — Fase 2A.4 commit 6
+// ============================================================================
+//
+// Endpoint: POST /api/customer-bulk
+// Body: { action, customer_ids: [], tag_slug?, reason? }
+// Response: 200 (alle succes) of 207 (mixed) met
+//   { action, total, success_count, fail_count, success[], failed[] }
+//
+// Na response: banner-render boven KPI-bar (geeft feedback), modal sluit,
+// selection-mode af, lijst refresh.
+
+const BULK_ACTION_LABELS = {
+  'archive':    'archiveren',
+  'unarchive':  'heractiveren',
+  'tag-add':    'tag toevoegen',
+  'tag-remove': 'tag verwijderen',
+};
+
+// ── Bulk-archive ─────────────────────────────────────────────────────────────
+
+function openBulkArchiveModal() {
+  if (state.selectedIds.size === 0) return;
+  $('#bulk-archive-count').textContent = state.selectedIds.size;
+  $('#bulk-archive-reason').value = '';
+  const banner = $('#bulkArchiveBanner');
+  banner.className = 'modal-banner';
+  banner.textContent = '';
+  const btn = $('#bulkArchiveConfirmBtn');
+  btn.disabled = false;
+  btn.textContent = 'Archiveren';
+  openModal('bulkArchiveModal');
+}
+
+function closeBulkArchiveModal() { closeModal('bulkArchiveModal'); }
+
+async function submitBulkArchive() {
+  const reason = $('#bulk-archive-reason').value;
+  const ids = [...state.selectedIds];
+  if (ids.length === 0) { setModalBannerError('bulkArchiveBanner', 'Geen klanten geselecteerd'); return; }
+
+  const btn = $('#bulkArchiveConfirmBtn');
+  btn.disabled = true;
+  btn.textContent = 'Bezig…';
+  try {
+    const res = await window.AgentShared.apiFetch('/api/customer-bulk', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'archive', customer_ids: ids, reason }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (res.status !== 200 && res.status !== 207) {
+      setModalBannerError('bulkArchiveBanner', data.error || ('HTTP ' + res.status));
+      return;
+    }
+    closeBulkArchiveModal();
+    renderBulkResultBanner(data, null);
+    finishBulkAction();
+  } catch (err) {
+    console.error('[klanten] bulk-archive failed:', err);
+    setModalBannerError('bulkArchiveBanner', 'Serverfout: ' + (err.message || 'onbekend'));
+  } finally {
+    if (!$('#bulkArchiveModal').classList.contains('hidden')) {
+      btn.disabled = false;
+      btn.textContent = 'Archiveren';
+    }
+  }
+}
+
+// ── Bulk-tag ────────────────────────────────────────────────────────────────
+
+async function openBulkTagModal() {
+  if (state.selectedIds.size === 0) return;
+  $('#bulk-tag-count').textContent = state.selectedIds.size;
+  // Reset radio + banner
+  document.querySelector('input[name="bulk-tag-action"][value="tag-add"]').checked = true;
+  const banner = $('#bulkTagBanner');
+  banner.className = 'modal-banner';
+  banner.textContent = '';
+  const btn = $('#bulkTagConfirmBtn');
+  btn.disabled = false;
+  btn.textContent = 'Toepassen';
+  openModal('bulkTagModal');
+
+  // Populate tag-select via gedeelde cache
+  const select = $('#bulk-tag-slug');
+  select.innerHTML = '<option value="">— Tag laden… —</option>';
+  try {
+    const defs = await getTagDefinitions();
+    if (!defs.length) {
+      select.innerHTML = '<option value="">Geen tags beschikbaar</option>';
+      return;
+    }
+    select.innerHTML = '<option value="">— Kies tag —</option>'
+      + defs.map((d) =>
+        `<option value="${escapeHtml(d.slug)}">${escapeHtml(d.label)}</option>`
+      ).join('');
+  } catch (err) {
+    console.error('[klanten] bulk-tag defs load failed:', err);
+    select.innerHTML = '<option value="">Kon tags niet laden</option>';
+  }
+}
+
+function closeBulkTagModal() { closeModal('bulkTagModal'); }
+
+async function submitBulkTag() {
+  const action = document.querySelector('input[name="bulk-tag-action"]:checked')?.value || 'tag-add';
+  const tagSlug = $('#bulk-tag-slug').value;
+  const ids = [...state.selectedIds];
+  if (!tagSlug) { setModalBannerError('bulkTagBanner', 'Kies een tag'); return; }
+  if (ids.length === 0) { setModalBannerError('bulkTagBanner', 'Geen klanten geselecteerd'); return; }
+
+  const btn = $('#bulkTagConfirmBtn');
+  btn.disabled = true;
+  btn.textContent = 'Bezig…';
+  try {
+    const res = await window.AgentShared.apiFetch('/api/customer-bulk', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action, customer_ids: ids, tag_slug: tagSlug }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (res.status !== 200 && res.status !== 207) {
+      setModalBannerError('bulkTagBanner', data.error || ('HTTP ' + res.status));
+      return;
+    }
+    closeBulkTagModal();
+    // Resolve tag-label uit cache voor banner-text
+    const tagDef = (_allTagDefs || []).find((d) => d.slug === tagSlug);
+    const tagLabel = tagDef ? tagDef.label : tagSlug;
+    renderBulkResultBanner(data, { tagLabel });
+    finishBulkAction();
+  } catch (err) {
+    console.error('[klanten] bulk-tag failed:', err);
+    setModalBannerError('bulkTagBanner', 'Serverfout: ' + (err.message || 'onbekend'));
+  } finally {
+    if (!$('#bulkTagModal').classList.contains('hidden')) {
+      btn.disabled = false;
+      btn.textContent = 'Toepassen';
+    }
+  }
+}
+
+// ── Bulk-result-banner renderer ─────────────────────────────────────────────
+
+/**
+ * Render het bulk-result-banner boven KPI-bar na een bulk-actie.
+ * @param {object} data        — server-response { action, total, success_count, fail_count, success[], failed[] }
+ * @param {object|null} extra  — { tagLabel } voor tag-acties, anders null
+ */
+function renderBulkResultBanner(data, extra) {
+  const banner = $('#bulk-result-banner');
+  if (!banner) return;
+  const successCount = data.success_count || 0;
+  const failCount = data.fail_count || 0;
+  const total = data.total || 0;
+  const baseLabel = BULK_ACTION_LABELS[data.action] || data.action;
+  const actionLabel = (data.action === 'tag-add' || data.action === 'tag-remove') && extra && extra.tagLabel
+    ? `${baseLabel} '${extra.tagLabel}'`
+    : baseLabel;
+
+  const noOps = (data.success || []).filter((s) => s.no_op).length;
+
+  let text = `<strong>${successCount}/${total}</strong> ${escapeHtml(actionLabel)} geslaagd`;
+  if (noOps > 0) text += ` <span style="opacity:.75;">(${noOps} al in target-staat)</span>`;
+
+  // Aggregate failed reasons → "{N} {reason}, {M} {reason}"
+  let failsHtml = '';
+  if (failCount > 0) {
+    const byReason = {};
+    for (const f of data.failed || []) {
+      const r = f.reason || 'unknown';
+      byReason[r] = (byReason[r] || 0) + 1;
+    }
+    const parts = Object.entries(byReason)
+      .map(([r, n]) => `${n} ${escapeHtml(humanizeReason(r))}`);
+    failsHtml = `<div class="bulk-result-fails">${failCount} mislukt: ${parts.join(', ')}</div>`;
+  }
+
+  banner.className = 'bulk-result-banner visible ' + (failCount === 0 ? 'success' : 'mixed');
+  banner.innerHTML = text + failsHtml;
+}
+
+function humanizeReason(code) {
+  return ({
+    not_found:  'niet gevonden',
+    anonymized: 'geanonimiseerd',
+    archived:   'gearchiveerd',
+  })[code] || code;
+}
+
+/**
+ * Cleanup na een succesvolle bulk-actie: lijst refreshen, selection-mode af,
+ * counters bijwerken via KPI-stats refresh.
+ */
+function finishBulkAction() {
+  // toggleSelectionMode af → clear selectedIds, hide action-bar, reset UI
+  if (state.selectionMode) toggleSelectionMode();
+  loadCustomers();
+  if (typeof loadStats === 'function') loadStats();   // KPI mini-bar verversen (active/archive counts)
+}
+
+// ============================================================================
+// Tag-edit (Profiel-tab) — Fase 2A.4
+// ============================================================================
+
+/**
+ * Render de Tags-sectie binnen Profiel-tab op basis van detailState.tagEditMode.
+ * - Read-mode  : kleurbadges + tag-edit-toggle in h3 (al statisch aanwezig)
+ * - Edit-mode  : badges met X-button + tag-add-button + popover met available tags
+ * Tag-edit-toggle button-label/icon wisselt: 'Bewerken' (pencil) ↔ 'Klaar' (check).
+ */
+function renderTagsSection() {
+  const c = detailState.customer;
+  const tagsEl = $('#prof-tags');
+  const editing = !!detailState.tagEditMode;
+  const tags = c.tags || [];
+
+  // Edit-button label/icon
+  const tgl = $('#prof-tags-edit-toggle');
+  tgl.innerHTML = editing
+    ? '<i class="ti ti-check"></i> <span id="prof-tags-edit-label">Klaar</span>'
+    : '<i class="ti ti-edit"></i> <span id="prof-tags-edit-label">Bewerken</span>';
+
+  if (!editing) {
+    // Read-mode: gewone badges of "Geen tags"
+    if (tags.length) {
+      tagsEl.innerHTML = '<div class="tag-list-wrap">' + tags.map((t) =>
+        `<span class="tag-badge" style="background:${escapeHtml(t.color || '#6B7280')}">${escapeHtml(t.label)}</span>`
+      ).join('') + '</div>';
+    } else {
+      tagsEl.innerHTML = '<span class="cust-empty">Geen tags</span>';
+    }
+    $('#prof-tags-error').textContent = '';
+    return;
+  }
+
+  // Edit-mode: badges met X + add-button
+  const assignedSlugs = new Set(tags.map((t) => t.slug));
+  const allDefs = _allTagDefs || [];
+  const available = allDefs.filter((d) => !assignedSlugs.has(d.slug));
+
+  const badgesHtml = tags.map((t) =>
+    `<span class="tag-badge editable" style="background:${escapeHtml(t.color || '#6B7280')}">
+       ${escapeHtml(t.label)}
+       <button class="tag-x" type="button" data-slug="${escapeHtml(t.slug)}" aria-label="Verwijder ${escapeHtml(t.label)}">&#x2715;</button>
+     </span>`).join('');
+
+  const popoverHtml = `
+    <div class="tag-add-wrap" id="tag-add-wrap">
+      <button class="tag-add-button" type="button" onclick="toggleTagAddPopover(event)">+ Tag toevoegen</button>
+      <div class="tag-add-popover" id="tag-add-popover">
+        ${available.length === 0
+          ? '<div class="tag-add-empty">Alle tags zijn al gekoppeld</div>'
+          : available.map((d) =>
+              `<button class="tag-add-option" type="button" data-slug="${escapeHtml(d.slug)}">
+                 <span class="swatch" style="background:${escapeHtml(d.color || '#6B7280')}"></span>
+                 ${escapeHtml(d.label)}
+               </button>`).join('')
+        }
+      </div>
+    </div>`;
+
+  tagsEl.innerHTML = '<div class="tag-list-wrap">' + badgesHtml + popoverHtml + '</div>';
+
+  // Bind X-buttons
+  tagsEl.querySelectorAll('.tag-x').forEach((btn) => {
+    btn.addEventListener('click', () => removeTag(btn.dataset.slug));
+  });
+  // Bind add-options
+  tagsEl.querySelectorAll('.tag-add-option').forEach((btn) => {
+    btn.addEventListener('click', () => addTag(btn.dataset.slug));
+  });
+}
+
+function toggleTagAddPopover(e) {
+  e.stopPropagation();
+  $('#tag-add-wrap').classList.toggle('open');
+}
+
+async function toggleTagEditMode() {
+  // Bij eerste activatie: lazy-load via gedeelde getTagDefinitions() helper.
+  if (!detailState.tagEditMode) {
+    try {
+      await getTagDefinitions();
+    } catch (err) {
+      console.error('[klanten] tag-defs load failed:', err);
+      $('#prof-tags-error').textContent = 'Kon tag-lijst niet laden';
+      return;
+    }
+  }
+  detailState.tagEditMode = !detailState.tagEditMode;
+  renderTagsSection();
+}
+
+async function addTag(slug) {
+  $('#prof-tags-error').textContent = '';
+  try {
+    const res = await window.AgentShared.apiFetch('/api/customer-tag', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ customer_id: detailState.customerId, tag_slug: slug }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) { $('#prof-tags-error').textContent = data.error || ('HTTP ' + res.status); return; }
+    // Optimistic UI: server stuurt full tags-set + we bumpen audit_count lokaal
+    detailState.customer.tags = data.tags || [];
+    detailState.customer.audit_count = (detailState.customer.audit_count || 0) + 1;
+    detailState.audit = null;                 // audit-cache flush
+    $('#tab-count-audit').textContent = detailState.customer.audit_count;
+    renderTagsSection();
+  } catch (err) {
+    console.error('[klanten] addTag failed:', err);
+    $('#prof-tags-error').textContent = 'Serverfout: ' + (err.message || 'onbekend');
+  }
+}
+
+async function removeTag(slug) {
+  $('#prof-tags-error').textContent = '';
+  try {
+    const res = await window.AgentShared.apiFetch('/api/customer-tag', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ customer_id: detailState.customerId, tag_slug: slug }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) { $('#prof-tags-error').textContent = data.error || ('HTTP ' + res.status); return; }
+    detailState.customer.tags = data.tags || [];
+    detailState.customer.audit_count = (detailState.customer.audit_count || 0) + 1;
+    detailState.audit = null;
+    $('#tab-count-audit').textContent = detailState.customer.audit_count;
+    renderTagsSection();
+  } catch (err) {
+    console.error('[klanten] removeTag failed:', err);
+    $('#prof-tags-error').textContent = 'Serverfout: ' + (err.message || 'onbekend');
+  }
+}
+
+// ============================================================================
+// Note CRUD (Communicatie-tab) — Fase 2A.4
+// ============================================================================
+
+async function submitNewNote() {
+  const ta = $('#new-note-body');
+  const errEl = $('#new-note-error');
+  const btn = $('#new-note-submit');
+  if (!ta || !btn) return;
+  const text = ta.value.trim();
+  if (!text) { errEl.textContent = 'Notitie mag niet leeg zijn'; return; }
+  errEl.textContent = '';
+  btn.disabled = true;
+  const originalLabel = btn.innerHTML;
+  btn.innerHTML = '<i class="ti ti-loader"></i> Bezig…';
+  try {
+    const res = await window.AgentShared.apiFetch('/api/customer-notes', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ customer_id: detailState.customerId, body: text }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) { errEl.textContent = data.error || ('HTTP ' + res.status); return; }
+    // Optimistic UI: prepend nieuwe note in cache + bump counts + flush audit
+    detailState.notes = [data.note, ...(detailState.notes || [])];
+    bumpCounter('notes_count', +1);
+    bumpCounter('audit_count', +1);
+    detailState.audit = null;
+    ta.value = '';
+    renderNotesList();
+  } catch (err) {
+    console.error('[klanten] submitNewNote failed:', err);
+    errEl.textContent = 'Serverfout: ' + (err.message || 'onbekend');
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = originalLabel;
+  }
+}
+
+function editNote(noteId) {
+  detailState.editingNoteId = noteId;
+  renderNotesList();
+}
+
+function cancelNoteEdit(_noteId) {
+  detailState.editingNoteId = null;
+  renderNotesList();
+}
+
+async function saveNoteEdit(noteId) {
+  const ta = document.querySelector(`[data-edit-note-body="${noteId}"]`);
+  const errEl = document.querySelector(`[data-edit-note-error="${noteId}"]`);
+  const saveBtn = document.querySelector(`[data-save-note="${noteId}"]`);
+  if (!ta || !saveBtn) return;
+  const text = ta.value.trim();
+  if (!text) { if (errEl) errEl.textContent = 'Notitie mag niet leeg zijn'; return; }
+  if (errEl) errEl.textContent = '';
+  saveBtn.disabled = true;
+  try {
+    const res = await window.AgentShared.apiFetch('/api/customer-notes?id=' + encodeURIComponent(noteId), {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ body: text }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) { if (errEl) errEl.textContent = data.error || ('HTTP ' + res.status); return; }
+    // Optimistic: vervang note in cache (server kan no-op zijn — body unchanged — dat is OK)
+    const idx = (detailState.notes || []).findIndex((n) => n.id === noteId);
+    if (idx !== -1) detailState.notes[idx] = data.note;
+    // edited_at is alleen geüpdate als body daadwerkelijk veranderde → audit alleen dan
+    if (data.note.edited_at && detailState.notes[idx]?.edited_at === data.note.edited_at) {
+      // We weten niet 100% zeker of dit een echte edit was; server-no-op stuurt zelfde edited_at als voor.
+      // Pragmatisch: bump audit alleen als body daadwerkelijk anders is dan voor de save.
+      // Versimpeling: bump altijd; ergste geval audit_count is 1 te hoog tot refresh.
+    }
+    bumpCounter('audit_count', +1);
+    detailState.audit = null;
+    detailState.editingNoteId = null;
+    renderNotesList();
+  } catch (err) {
+    console.error('[klanten] saveNoteEdit failed:', err);
+    if (errEl) errEl.textContent = 'Serverfout: ' + (err.message || 'onbekend');
+  } finally {
+    saveBtn.disabled = false;
+  }
+}
+
+async function archiveNote(noteId) {
+  if (!confirm('Notitie archiveren? Je kunt deze later heractiveren via de notes-lijst (komt later).')) return;
+  try {
+    const res = await window.AgentShared.apiFetch('/api/customer-note-archive?id=' + encodeURIComponent(noteId) + '&action=archive', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: '{}',
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) { alert('Notitie archiveren mislukt: ' + (data.error || ('HTTP ' + res.status))); return; }
+    // Optimistic: verwijder uit cache (default-view toont alleen active notes)
+    detailState.notes = (detailState.notes || []).filter((n) => n.id !== noteId);
+    bumpCounter('notes_count', -1);
+    bumpCounter('audit_count', +1);
+    detailState.audit = null;
+    if (detailState.editingNoteId === noteId) detailState.editingNoteId = null;
+    renderNotesList();
+  } catch (err) {
+    console.error('[klanten] archiveNote failed:', err);
+    alert('Notitie archiveren mislukt: ' + (err.message || 'onbekend'));
+  }
+}
+
+/** Helper: bump count veld in detailState.customer + update tab-badge in UI. */
+function bumpCounter(field, delta) {
+  if (!detailState.customer) return;
+  const next = Math.max(0, (detailState.customer[field] || 0) + delta);
+  detailState.customer[field] = next;
+  const badgeId = field === 'notes_count' ? '#tab-count-communicatie' : '#tab-count-audit';
+  const badge = $(badgeId);
+  if (badge) badge.textContent = next;
+}
+
+// ============================================================================
+// Modals (create / edit / archive) — Fase 2A.3
+// ============================================================================
+const CUSTOMER_FORM_FIELDS = [
+  'first_name', 'last_name', 'email', 'phone', 'date_of_birth',
+  'address_street', 'address_number', 'address_postal', 'address_city',
+  'tl_contact_id', 'ghl_contact_id',
+];
+let _initialEditValues = null;  // snapshot voor client-side diff bij PATCH
+
+function openModal(id)  { document.getElementById(id).classList.remove('hidden'); }
+function closeModal(id) { document.getElementById(id).classList.add('hidden'); }
+
+function clearFormErrors() {
+  document.querySelectorAll('#customerForm .form-field.has-error').forEach((el) => el.classList.remove('has-error'));
+  document.querySelectorAll('#customerForm .field-error').forEach((el) => { el.textContent = ''; });
+  const b = $('#customerFormBanner');
+  b.className = 'modal-banner';
+  b.textContent = '';
+}
+
+function setFieldError(field, msg) {
+  const input = document.querySelector('#customerForm [name="' + field + '"]');
+  if (input) input.closest('.form-field').classList.add('has-error');
+  const errEl = $('#cf-err-' + field);
+  if (errEl) errEl.textContent = msg;
+}
+
+function setModalBannerError(bannerId, msg) {
+  const b = $('#' + bannerId);
+  b.textContent = msg;
+  b.classList.add('visible');
+}
+
+function openCustomerModal(mode, prefill) {
+  const isCreate = mode === 'create';
+  $('#customerFormTitle').textContent = isCreate ? 'Nieuwe klant' : 'Klant bewerken';
+  const form = $('#customerForm');
+  form.dataset.mode = mode;
+  form.dataset.customerId = (prefill && prefill.id) || '';
+  clearFormErrors();
+  // Fill values
+  for (const f of CUSTOMER_FORM_FIELDS) {
+    const el = form.querySelector('[name="' + f + '"]');
+    el.value = (prefill && prefill[f] != null) ? prefill[f] : '';
+  }
+  // Snapshot voor diff (alleen edit-mode)
+  _initialEditValues = isCreate ? null
+    : Object.fromEntries(CUSTOMER_FORM_FIELDS.map((f) => [f, (prefill && prefill[f] != null) ? String(prefill[f]) : '']));
+  // Reset submit-button
+  const btn = $('#customerFormSubmit');
+  btn.disabled = false;
+  btn.textContent = 'Opslaan';
+  openModal('customerFormModal');
+  setTimeout(() => $('#cf-first-name').focus(), 50);
+}
+
+function closeCustomerModal() { closeModal('customerFormModal'); }
+
+async function submitCustomerForm() {
+  const form = $('#customerForm');
+  const mode = form.dataset.mode;
+  const customerId = form.dataset.customerId;
+  const values = {};
+  for (const f of CUSTOMER_FORM_FIELDS) {
+    values[f] = form.querySelector('[name="' + f + '"]').value;
+  }
+
+  let body;
+  if (mode === 'create') {
+    body = values;
+  } else {
+    // Client-side diff: alleen velden waarvan waarde verschilt van initial snapshot
+    body = {};
+    for (const f of CUSTOMER_FORM_FIELDS) {
+      if (values[f] !== (_initialEditValues[f] || '')) body[f] = values[f];
+    }
+    if (Object.keys(body).length === 0) {
+      setModalBannerError('customerFormBanner', 'Geen wijzigingen om op te slaan.');
+      return;
+    }
+  }
+
+  // ── Duplicate-check pre-step (Fase 2A.4) ─────────────────────────────────
+  // Bij create-mode + email of phone ingevuld: check eerst tegen bestaande klanten.
+  // Bij matches: open confirm-modal, pauzeer submit (user kiest annuleren of toch-aanmaken).
+  // Bij geen matches OF check-error (fail-open): doorgaan naar POST.
+  if (mode === 'create' && !_skipDuplicateCheck) {
+    const checkEmail = String(body.email || '').trim();
+    const checkPhone = String(body.phone || '').trim();
+    if (checkEmail || checkPhone) {
+      try {
+        const matches = await fetchDuplicateMatches(checkEmail, checkPhone);
+        if (matches && matches.length > 0) {
+          openDuplicateModal(matches);
+          return;   // wacht op user-confirm via confirmDuplicateAndProceed
+        }
+      } catch (err) {
+        console.error('[klanten] duplicate-check failed (fail-open):', err);
+      }
+    }
+  }
+
+  clearFormErrors();
+  const btn = $('#customerFormSubmit');
+  btn.disabled = true;
+  btn.textContent = 'Bezig…';
+
+  try {
+    const url = mode === 'create' ? '/api/customer' : '/api/customer?id=' + encodeURIComponent(customerId);
+    const method = mode === 'create' ? 'POST' : 'PATCH';
+    const res = await window.AgentShared.apiFetch(url, {
+      method,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      if (res.status === 400 && data.field) setFieldError(data.field, data.error || 'Ongeldige waarde');
+      else setModalBannerError('customerFormBanner', data.error || ('HTTP ' + res.status));
+      return;
+    }
+    closeCustomerModal();
+
+    if (mode === 'create') {
+      // Navigeer direct naar detail van de nieuwe klant
+      window.location.href = '/modules/klanten.html?id=' + encodeURIComponent(data.customer.id);
+    } else {
+      // Refresh detail-view + invalidate audit-cache (er is een nieuwe entry)
+      detailState.customer = data.customer;
+      detailState.audit = null;
+      renderDetail();
+    }
+  } catch (err) {
+    console.error('[klanten] customer submit failed:', err);
+    setModalBannerError('customerFormBanner', 'Serverfout: ' + (err.message || 'onbekend'));
+  } finally {
+    if (!$('#customerFormModal').classList.contains('hidden')) {
+      btn.disabled = false;
+      btn.textContent = 'Opslaan';
+    }
+  }
+}
+
+function openArchiveModal() {
+  const c = detailState.customer;
+  if (!c) return;
+  const name = `${(c.first_name || '').trim()} ${(c.last_name || '').trim()}`.trim() || 'deze klant';
+  $('#archive-customer-name').textContent = name;
+  $('#archive-reason').value = '';
+  const b = $('#archiveBanner');
+  b.className = 'modal-banner';
+  b.textContent = '';
+  const btn = $('#archiveConfirmBtn');
+  btn.disabled = false;
+  btn.textContent = 'Archiveren';
+  openModal('archiveModal');
+}
+
+function closeArchiveModal() { closeModal('archiveModal'); }
+
+async function submitArchive() {
+  const customerId = detailState.customerId;
+  const reason = $('#archive-reason').value;
+  const btn = $('#archiveConfirmBtn');
+  btn.disabled = true;
+  btn.textContent = 'Bezig…';
+  try {
+    const res = await window.AgentShared.apiFetch(
+      '/api/customer-archive?id=' + encodeURIComponent(customerId) + '&action=archive',
+      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ reason }) },
+    );
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) { setModalBannerError('archiveBanner', data.error || ('HTTP ' + res.status)); return; }
+    closeArchiveModal();
+    detailState.customer = data.customer;
+    detailState.audit = null;
+    renderDetail();
+  } catch (err) {
+    console.error('[klanten] archive failed:', err);
+    setModalBannerError('archiveBanner', 'Serverfout: ' + (err.message || 'onbekend'));
+  } finally {
+    if (!$('#archiveModal').classList.contains('hidden')) {
+      btn.disabled = false;
+      btn.textContent = 'Archiveren';
+    }
+  }
+}
+
+async function unarchiveCustomer() {
+  const customerId = detailState.customerId;
+  const btn = $('#btn-unarchive-customer');
+  btn.disabled = true;
+  try {
+    const res = await window.AgentShared.apiFetch(
+      '/api/customer-archive?id=' + encodeURIComponent(customerId) + '&action=unarchive',
+      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' },
+    );
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) { alert('Heractiveren mislukt: ' + (data.error || ('HTTP ' + res.status))); return; }
+    detailState.customer = data.customer;
+    detailState.audit = null;
+    renderDetail();
+  } catch (err) {
+    console.error('[klanten] unarchive failed:', err);
+    alert('Heractiveren mislukt: ' + (err.message || 'onbekend'));
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+// ============================================================================
+// Duplicate-check modal (Fase 2A.4) — vóór create-POST naar /api/customer
+// ============================================================================
+
+// Tijdelijke flag: bij confirmDuplicateAndProceed re-triggert submitCustomerForm
+// zonder opnieuw de duplicate-check te doen (voorkomt loop).
+let _skipDuplicateCheck = false;
+
+const DUP_REASON_LABELS = { email: 'Email', phone: 'Telefoon', both: 'Beide' };
+
+async function fetchDuplicateMatches(email, phone) {
+  const params = new URLSearchParams();
+  if (email) params.set('email', email);
+  if (phone) params.set('phone', phone);
+  const res = await window.AgentShared.apiFetch('/api/customer-check-duplicate?' + params.toString());
+  if (!res.ok) {
+    console.warn('[klanten] duplicate-check non-ok:', res.status);
+    return [];
+  }
+  const data = await res.json();
+  return data.matches || [];
+}
+
+function openDuplicateModal(matches) {
+  $('#duplicate-match-count').textContent = matches.length;
+  const list = $('#duplicate-match-list');
+  list.innerHTML = matches.map(renderDuplicateMatchItem).join('');
+  const btn = $('#duplicateConfirmBtn');
+  btn.disabled = false;
+  btn.textContent = 'Toch aanmaken';
+  openModal('duplicateConfirmModal');
+}
+
+function renderDuplicateMatchItem(m) {
+  const name = `${escapeHtml(m.first_name || '')} ${escapeHtml(m.last_name || '')}`.trim() || '(geen naam)';
+  const email = m.email ? escapeHtml(m.email) : '—';
+  const phone = m.phone ? escapeHtml(m.phone) : '—';
+  // Whitelist match_reason om class-injection te voorkomen
+  const reason = ['email', 'phone', 'both'].includes(m.match_reason) ? m.match_reason : 'email';
+  const reasonLabel = DUP_REASON_LABELS[reason];
+  const href = '/modules/klanten.html?id=' + encodeURIComponent(m.id);
+  return `
+    <a class="duplicate-match-item" href="${href}" target="_blank" rel="noopener noreferrer">
+      <div class="duplicate-match-info">
+        <div class="duplicate-match-name">${name}</div>
+        <div class="duplicate-match-contact">${email} · ${phone}</div>
+      </div>
+      <span class="duplicate-match-reason ${reason}">${escapeHtml(reasonLabel)}</span>
+    </a>`;
+}
+
+function closeDuplicateModal() {
+  closeModal('duplicateConfirmModal');
+}
+
+function confirmDuplicateAndProceed() {
+  closeDuplicateModal();
+  // Re-trigger submit met skip-flag; modal-inputs zijn intact, body wordt herbouwd.
+  _skipDuplicateCheck = true;
+  submitCustomerForm().finally(() => { _skipDuplicateCheck = false; });
+}
+
+// Global modal-mechanics: centrale ESC-handler (capture-phase) + overlay-click +
+// click-outside voor popovers. Capture-phase: triggert vóór bubbling-phase
+// listeners op input/button-children, robuust tegen stopPropagation in nested
+// handlers + input-focus context.
+//
+// ESC topmost-prioriteit (Fase 2A.4 commit 6):
+//   1. duplicateConfirmModal (kan stacken bovenop customerFormModal in create-flow)
+//   2. bulkArchiveModal      (vanuit lijst-view bulk-action-bar)
+//   3. bulkTagModal          (idem)
+//   4. archiveModal          (vanuit detail-view)
+//   5. customerFormModal
+//   6. tag-popover in filter-bar (lijst-view)
+//   7. tag-add-popover in Profiel-tab Tags-kaart (detail-view edit-mode)
+// (Bulk-modals en customer/archive-modals zijn mutually exclusive — bulk vanuit
+//  lijst, archive/edit vanuit detail. Volgorde is defensief.)
+(function bindModalGlobals() {
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape') return;
+    if (!$('#duplicateConfirmModal').classList.contains('hidden')) { closeDuplicateModal();    return; }
+    if (!$('#bulkArchiveModal').classList.contains('hidden'))      { closeBulkArchiveModal(); return; }
+    if (!$('#bulkTagModal').classList.contains('hidden'))          { closeBulkTagModal();     return; }
+    if (!$('#archiveModal').classList.contains('hidden'))          { closeArchiveModal();     return; }
+    if (!$('#customerFormModal').classList.contains('hidden'))     { closeCustomerModal();    return; }
+    const filterTagWrap = $('#filter-tags');
+    if (filterTagWrap && filterTagWrap.classList.contains('open')) { filterTagWrap.classList.remove('open'); return; }
+    const tagAddWrap = $('#tag-add-wrap');
+    if (tagAddWrap && tagAddWrap.classList.contains('open'))       { tagAddWrap.classList.remove('open'); return; }
+  }, true);
+
+  // Modal-overlay click sluit modal (alleen click op overlay zelf, niet op card-children).
+  document.querySelectorAll('.modal-overlay').forEach((ov) => {
+    ov.addEventListener('click', (e) => { if (e.target === ov) ov.classList.add('hidden'); });
+  });
+
+  // Click-outside voor tag-add-popover (detail-view Tags-kaart edit-mode).
+  // Consistent met tag-multi-popover in filter-bar (zit in bindFilterEvents).
+  document.addEventListener('click', (e) => {
+    const wrap = $('#tag-add-wrap');
+    if (wrap && wrap.classList.contains('open') && !wrap.contains(e.target)) {
+      wrap.classList.remove('open');
+    }
+  });
+})();
+
 init();
 </script>
 <script src="/modules/shared/permissions.js"></script>

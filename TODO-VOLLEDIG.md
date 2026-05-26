@@ -15,16 +15,118 @@
 - [x] Placeholder modules/klanten.html + sidebar-entry (gating: customer.module.access)
 - [x] Documentatie (overview + CLAUDE.md + deze sectie)
 
-### ⏳ Open Fase 2
-- [ ] Klant-overzicht UI (lijst, filters, search)
-- [ ] Klant-detailpagina basis (header + tabs)
-- [ ] CRUD-endpoints (POST/PATCH/DELETE customer)
-- [ ] Tag-toekenning UI
-- [ ] TradersLeague OAuth setup
-- [ ] Duplicate-check endpoint (POST /api/customer-check-duplicate)
-- [ ] AVG-functionaliteit (export Art. 15 + anonimiseren Art. 17)
-- [ ] WhatsApp send-laag (Twilio-integratie, eind Fase 2)
-- [ ] Admin-matrix: manager-keys aanzetten voor de 24 nieuwe keys
+### ✅ Afgerond Fase 2A (klanten-module compleet)
+- [x] Klant-overzicht UI (lijst, filters, search) — Fase 2A.1 (preview + prod smoke-test)
+- [x] Klant-detailpagina basis (Profiel/Communicatie/Audit) — Fase 2A.2 (preview + prod smoke-test)
+- [x] CRUD-endpoints klanten (POST/PATCH + archive/unarchive) — Fase 2A.3 (preview + prod smoke-test)
+      (hard delete bewust uitgesteld naar 2C, gekoppeld aan AVG-erasure)
+- [x] Tag-toekenning UI (inline edit-mode in Profiel-tab) — Fase 2A.4
+- [x] Notitie CRUD UI (inline editor + edit/archive per note) — Fase 2A.4
+- [x] Duplicate-check endpoint + confirm-modal in create-flow — Fase 2A.4
+- [x] Bulk-acties (archive/unarchive/tag-add/tag-remove) met checkbox-selectie — Fase 2A.4
+
+### 🚀 Klanten-module Fase 2A klaar voor merge naar main
+
+**19 commits totaal** (Fase 1 fundament + Fase 2A.1–2A.4 features):
+- 5 commits Fase 1 (DB-schema, RBAC, placeholder) — al gemerged
+- 14 commits Fase 2A.1–2A.4 op feature/klanten-module-fase2a (nog open)
+
+**Schema-status productie:**
+- Migratie 012 (Fase 1 schema): al op productie via PR #1 ✓
+- Migratie 013 (customer_notes): handmatig via SQL Editor op productie ✓
+  (PR #3 stuck-merge — zie leerpunt #6)
+
+**Smoke-test plan na push final 2A bundel-PR:**
+1. Insert tijdelijke test-klant via Vercel preview UI (create-flow)
+2. Tag-toekenning UI test (add/remove)
+3. Notitie CRUD test (create/edit/archive)
+4. Duplicate-warning test (create met overlap)
+5. Bulk-acties test (selecteer 3 klanten → archive + tag)
+6. Regressie 2A.1/2A.2/2A.3 (lijst-filters/detail-tabs/CRUD)
+7. Cleanup test-data via SQL Editor
+8. Bestaande modules ongebroken (Dashboard/Taken/E-mail/etc.)
+9. Console + Network check (geen errors)
+
+**Risico bij merge** (Fase 1 leerpunt #6):
+- Branch protection rules op main → PR kan stuck-merge geven
+- VÓÓR merge: check GitHub Settings → Branches op rules
+- Fallback bij stuck: handmatige merge na groen smoke-test (alleen code, 
+  geen DB-migratie nodig — schema al op productie)
+
+### ⏳ Open Fase 2B+
+- [ ] TradersLeague OAuth setup (Fase 2B)
+- [ ] AVG-functionaliteit (export Art. 15 + anonimiseren Art. 17) (Fase 2C)
+- [ ] WhatsApp send-laag (Twilio-integratie, Fase 2C)
+- [ ] Admin-matrix: manager-keys aanzetten voor de 24 nieuwe keys (Jeffrey-actie post-merge)
+
+### 🔧 Technical debt
+
+**API-laag granulaire RBAC nog niet wired (Fase 2A.1+)**
+- `api/customers.js`, `api/customer-tag-definitions.js`, `api/customer.js`,
+  `api/customer-notes.js`, `api/customer-archive.js`, `api/customer-audit.js`
+  gebruiken allemaal `verifyAdmin()` = ADMIN_ROLES gate
+- `role_permissions`-matrix nog niet afgedwongen op API-laag
+- Werkt voor super_admin + manager (huidige usecase)
+- Volgt bij role-introductie (sales/mentor/marketing/viewer)
+- **Update Fase 2A.3**: `api/_lib/requirePermission.js` BESTAAT (4857 bytes,
+  met `requirePermission` / `requirePermissionFailOpen` / `checkPermissionOrDeny`).
+  Helper is alleen gewired op 3 email-endpoints. Cleanup-PR na 2A.4 om alle
+  customer-endpoints te migreren naar granulaire keys (customer.view, customer.create,
+  customer.edit, customer.archive, customer.audit.view).
+
+**Validatie-duplicatie POST vs PATCH in `api/customer.js`** (Fase 2A.3)
+- ~30 regels validatie-logica zit in zowel `handlePost` als `handlePatch`
+  (required-check, email-regex, ISO-date, empty-string-handling).
+- Bewust niet gedeeld omdat POST en PATCH iets andere semantiek hebben rond
+  empty-strings (POST: skip, PATCH: NULL).
+- Cleanup: extract `cleanAndValidateBody(body, { isCreate })` helper, in 2A.4
+  cleanup-commit. Risico bij divergentie: bug-fix vergeten op 1 plek.
+
+**`respondShape()` gedupliceerd in 3 customer-endpoints** (Fase 2A.3)
+- Identieke tags+notes-count+audit-count fetch in `api/customer.js` GET/POST/PATCH
+  en `api/customer-archive.js`.
+- Kandidaat voor extractie naar `api/_lib/customer-shape.js` in 2A.4 cleanup.
+
+**Search op customer-list zoekt per-veld, geen fullname-concat** (Fase 2A.3 smoke-test bevinding)
+- `/api/customers?search=X` doet `.or(first_name.ilike, last_name.ilike, email.ilike, phone.ilike)`.
+- Zoek-string "Jan Jansen" (met spatie) matched geen rij — geen enkel veld bevat
+  de complete string. Werkt wel voor single-word: "Jan", "Jansen", "jansen@", "+316".
+- Niet-blokkerend; gebruikers zoeken in praktijk vrijwel altijd single-word.
+- Cleanup-opties (2A.4 of later):
+  * Frontend splits search op spaties → AND tussen woorden, OR tussen velden;
+    vereist API-wijziging om meervoudige terms te accepteren.
+  * DB generated column `search_text` (first_name || ' ' || last_name) met
+    trigger-onderhoud → single ILIKE. Cleanste oplossing maar migratie nodig.
+
+**AVG-impact: PII in `audit_log` JSONB** (Fase 2A.3 → 2C)
+- `audit_log.before_json` en `after_json` bevatten volledige customer-rows
+  (email, phone, address). Bij `customer.anonymized` (Art. 17 GDPR) moet
+  óók de PII in eerdere audit-entries gehasht of geredigeerd worden — anders
+  blijft erasure incompleet.
+- Beslissing 2C: scrub-on-anonymize (UPDATE audit_log SET before_json/after_json
+  met PII-velden → '\<redacted\>') of separate anonymized_audit_log met
+  hash-trail. Niet in scope 2A.
+
+**Master-checkbox indeterminate-state niet geïmplementeerd** (Fase 2A.4 commit 6)
+- Bij partiële selectie (0 < selectedIds.size < pageSize) toont master-checkbox
+  unchecked i.p.v. indeterminate. Functioneel correct, alleen visueel signaal
+  ontbreekt.
+- Cleanup: `master.indeterminate = true` wanneer partial in `syncSelectAllCheckbox()`.
+- Trivial fix, MVP-OK.
+
+**Contextuele bulk-action-bar (optioneel)** (Fase 2A.4 commit 6)
+- Action-bar toont altijd Archiveren + Tag-actie ongeacht selectie-mix
+  (active + archived klanten samen).
+- Server doet juiste no-ops (archive op already-archived = success no_op).
+- Cleaner UX zou: bij alleen-archived selectie → "Heractiveren"-knop ipv
+  "Archiveren". Vereist per-row status-check tijdens render of state-tracking.
+- Niet kritiek; user ziet bulk-result banner met no-op count.
+
+**Counter-bump inconsistentie** (Fase 2A.4 commit 5)
+- `addTag/removeTag` (CHUNK C) updaten counter+badge inline.
+- Notes-handlers (CHUNK D) gebruiken `bumpCounter()` helper.
+- Functioneel identiek; cleanup: refactor addTag/removeTag → `bumpCounter`
+  voor consistentie.
 
 ### 🎓 Leerpunten Supabase Branching merge (Fase 1)
 
@@ -44,6 +146,54 @@
    - Idempotente queries (ON CONFLICT DO NOTHING)
    - Geen UPDATE/DELETE op bestaande rijen
    - Eerst read-only validatie van staat
+
+5. **Branch-creation kopieert SCHEMA, niet DATA**
+   - Supabase branching maakt schema-consolidatie snapshot
+   - INSERT-statements uit migraties gaan NIET mee bij branch-creation
+   - Daarom moet `supabase/seed.sql` self-contained zijn voor ALLE data die
+     preview branches nodig hebben — ook tag-definities die eigenlijk in
+     migratie 012 staan
+   - Verifieerd via `schema_migrations` table die alleen 'remote_schema' +
+     'branch_merge' entries toont
+   - Implicatie: bij elke nieuwe DB-tabel met seed-data, plaats die seed in
+     `seed.sql`, NIET alleen in migratie
+
+6. **Branch protection op main kan onverwacht onmergebaar zijn**
+   - PR #3 (mini-migratie 013) bleef hangen op "Checking for the ability to merge
+     automatically..."
+   - Tooltip toonde "failing merge requirements" maar UI gaf geen details
+   - Workaround Fase 2A.2: migratie handmatig via Supabase SQL Editor op productie
+     + PR gesloten met comment
+   - Actie voor Fase 2A.4: VÓÓR final 2A PR-merge eerst branch protection rules op
+     main investigeren in Settings → Branches
+   - Vermijd opnieuw stuck-merge op grotere PR
+
+### 🔍 Leerpunten Fase 2A.4 smoke-test diagnose
+
+1. **Static code-review heeft fundamentele limieten zonder live DevTools**
+   - BUG 1 (silent-fail first-click) + BUG 2 (ESC bulk-modal) diagnose toonde dat
+     pure code-trace zonder Chrome DevTools-data (console-logs, network-tab,
+     breakpoint-stepping) geen 100%-zekere root-cause kan aanwijzen.
+   - Voor toekomstige UI-bugs: **debug-logging-commit als first response**,
+     niet vermoedens. Eén deploy-cycle is goedkoper dan 5 hypothesen.
+   - Patroon: tijdelijke `console.log` op kritieke event-paden + push → reproduceer
+     in browser → log-trace toont root-cause → echte fix in volgende commit.
+
+2. **Hard-refresh test eerst bij UI-bug-rapport op preview-deploy**
+   - Vercel preview-builds cachen aggressively in browser.
+   - BUG 2 (ESC bulk-modals niet werkend) bleek false-positive: code-structuur
+     was correct, oorzaak waarschijnlijk stale browser-cache van eerdere build.
+   - Standaard eerste actie bij elke smoke-test-bevinding: Ctrl+Shift+R + verifieer
+     commit-hash in Vercel deploy-info matched verwachte SHA.
+   - Vermijd debug-cycles op valse-positieven.
+
+3. **Capture-phase event-handlers als default voor modal-mechanics**
+   - ESC-fix in Fase 2A.3 (capture: true op document keydown) loste een hele
+     klasse "ESC werkt niet wanneer focus in input zit" bugs op.
+   - Generieke regel: voor modal close-via-ESC altijd capture-phase op document,
+     niet bubbling-phase op modal-element. Robuust tegen browser-native input
+     handling + nested stopPropagation in form-elementen.
+   - Eenmaal correct geïmplementeerd, geen herhaling van issue in latere modals.
 
 ---
 
