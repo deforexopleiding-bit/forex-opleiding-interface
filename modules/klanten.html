@@ -194,6 +194,51 @@
     /* Heractiveren-knop (alleen zichtbaar bij archived) */
     .btn-unarchive { background:#10B981; color:#fff; border:none; }
     .btn-unarchive:hover { background:#0EA371; }
+
+    /* Tag-edit in Profiel-tab (Fase 2A.4) */
+    .tag-edit-toggle { background:transparent; border:none; color:var(--text-faint); cursor:pointer; padding:2px 6px; font-size:12px; border-radius:6px; display:inline-flex; align-items:center; gap:4px; font-family:inherit; }
+    .tag-edit-toggle:hover { color:var(--text); background:var(--bg); }
+    .detail-card h3 .tag-edit-toggle { margin-left:auto; }
+    .detail-card h3.with-action { display:flex; align-items:center; }
+    .tag-list-wrap { display:flex; flex-wrap:wrap; gap:6px; align-items:center; }
+    .tag-badge.editable { padding-right:4px; display:inline-flex; align-items:center; gap:4px; }
+    .tag-x { background:rgba(0,0,0,.25); border:none; color:#fff; cursor:pointer; width:16px; height:16px; border-radius:50%; font-size:11px; line-height:1; display:inline-flex; align-items:center; justify-content:center; padding:0; font-family:inherit; }
+    .tag-x:hover { background:rgba(0,0,0,.5); }
+    .tag-add-wrap { position:relative; display:inline-block; }
+    .tag-add-button { padding:2px 10px; border-radius:999px; font-size:11px; font-weight:500; background:var(--bg); border:1px dashed var(--border); color:var(--text-faint); cursor:pointer; font-family:inherit; }
+    .tag-add-button:hover { color:var(--text); border-color:var(--accent-cyan,#06b6d4); }
+    .tag-add-popover { position:absolute; top:calc(100% + 4px); left:0; min-width:180px; max-height:220px; overflow-y:auto; background:var(--bg-elev); border:1px solid var(--border); border-radius:10px; padding:6px; box-shadow:0 6px 18px rgba(0,0,0,.18); z-index:40; display:none; }
+    .tag-add-wrap.open .tag-add-popover { display:block; }
+    .tag-add-option { display:flex; align-items:center; gap:8px; padding:6px 8px; border-radius:6px; cursor:pointer; font-size:13px; background:transparent; border:none; width:100%; text-align:left; color:var(--text); font-family:inherit; }
+    .tag-add-option:hover { background:var(--bg); }
+    .tag-add-option .swatch { width:10px; height:10px; border-radius:50%; display:inline-block; }
+    .tag-add-empty { font-size:12px; color:var(--text-faint); padding:8px; text-align:center; font-style:italic; }
+    .tag-edit-error { font-size:11px; color:#EF4444; margin-top:6px; min-height:14px; }
+
+    /* New-note editor + per-note actions (Fase 2A.4) */
+    .note-editor { padding:12px; background:var(--bg); border:1px solid var(--border); border-radius:10px; margin-bottom:14px; }
+    .note-editor textarea { width:100%; padding:8px 10px; background:var(--bg-elev); border:1px solid var(--border); border-radius:8px; color:var(--text); font-size:13px; font-family:inherit; resize:vertical; min-height:60px; box-sizing:border-box; }
+    .note-editor textarea:focus { outline:none; border-color:var(--accent-cyan,#06b6d4); }
+    .note-editor-footer { display:flex; justify-content:space-between; align-items:center; margin-top:8px; gap:10px; }
+    .note-editor-error { font-size:11px; color:#EF4444; min-height:14px; flex:1; }
+    .note-item { position:relative; }
+    .note-item-actions { position:absolute; top:8px; right:0; display:none; gap:4px; }
+    .note-item:hover .note-item-actions { display:flex; }
+    .note-icon-btn { background:transparent; border:none; color:var(--text-faint); cursor:pointer; padding:4px; border-radius:4px; font-family:inherit; font-size:14px; line-height:1; }
+    .note-icon-btn:hover { color:var(--text); background:var(--bg); }
+    .note-edit-form textarea { width:100%; padding:8px 10px; background:var(--bg); border:1px solid var(--border); border-radius:8px; color:var(--text); font-size:13px; font-family:inherit; resize:vertical; min-height:60px; box-sizing:border-box; }
+    .note-edit-form-footer { display:flex; gap:6px; margin-top:6px; }
+    .note-edit-error { font-size:11px; color:#EF4444; margin-top:4px; min-height:14px; }
+
+    /* Duplicate-warning modal (Fase 2A.4) */
+    .duplicate-match-list { display:flex; flex-direction:column; gap:6px; margin-top:8px; max-height:300px; overflow-y:auto; padding-right:4px; }
+    .duplicate-match-item { display:flex; justify-content:space-between; align-items:center; padding:10px 12px; background:var(--bg); border:1px solid var(--border); border-radius:8px; text-decoration:none; color:var(--text); font-size:13px; gap:8px; }
+    .duplicate-match-item:hover { border-color:var(--accent-cyan,#06b6d4); background:var(--bg-elev); }
+    .duplicate-match-info { flex:1; min-width:0; }
+    .duplicate-match-name { font-weight:600; }
+    .duplicate-match-contact { font-size:11px; color:var(--text-faint); margin-top:2px; word-break:break-word; }
+    .duplicate-match-reason { font-size:10px; padding:2px 6px; background:#F59E0B22; color:#F59E0B; border-radius:999px; text-transform:uppercase; letter-spacing:.3px; font-weight:600; flex-shrink:0; }
+    .duplicate-match-reason.both { background:#EF444422; color:#EF4444; }
   </style>
 </head>
 <body>
@@ -386,8 +431,14 @@
             </div>
 
             <div class="detail-card">
-              <h3><i class="ti ti-tag"></i> Tags</h3>
+              <h3 class="with-action">
+                <i class="ti ti-tag"></i> Tags
+                <button id="prof-tags-edit-toggle" class="tag-edit-toggle" type="button" style="display:none;" onclick="toggleTagEditMode()">
+                  <i class="ti ti-edit"></i> <span id="prof-tags-edit-label">Bewerken</span>
+                </button>
+              </h3>
               <div id="prof-tags"><span class="cust-empty">Geen tags</span></div>
+              <div class="tag-edit-error" id="prof-tags-error"></div>
             </div>
 
             <div class="detail-card">
@@ -405,12 +456,19 @@
         <!-- Tab: Communicatie -->
         <div class="tab-content" id="tab-panel-communicatie" role="tabpanel" aria-labelledby="tab-btn-communicatie" hidden>
           <div class="detail-section">
-            <div class="detail-section-header">
-              <h3><i class="ti ti-notes"></i> Notities</h3>
-              <button id="btn-add-note" class="btn btn-sm" type="button" title="Beschikbaar in 2A.4">
-                <i class="ti ti-plus"></i> Notitie toevoegen
-              </button>
+            <h3><i class="ti ti-notes"></i> Notities</h3>
+
+            <!-- Inline new-note editor (Fase 2A.4) -->
+            <div class="note-editor" id="new-note-editor">
+              <textarea id="new-note-body" maxlength="10000" placeholder="Nieuwe notitie toevoegen…"></textarea>
+              <div class="note-editor-footer">
+                <div class="note-editor-error" id="new-note-error"></div>
+                <button class="btn btn-primary btn-sm" type="button" id="new-note-submit" onclick="submitNewNote()">
+                  <i class="ti ti-plus"></i> Opslaan
+                </button>
+              </div>
             </div>
+
             <div id="notes-list">
               <div class="placeholder-card">Notities laden…</div>
             </div>
@@ -502,6 +560,27 @@
   </div>
 </div>
 
+<!-- Duplicate-warning modal (Fase 2A.4) — stackt bovenop customerFormModal bij create-flow -->
+<div class="modal-overlay hidden" id="duplicateConfirmModal" role="dialog" aria-modal="true" aria-labelledby="duplicateModalTitle">
+  <div class="modal-card modal-sm">
+    <div class="modal-header">
+      <div class="modal-title" id="duplicateModalTitle">Vergelijkbare klanten gevonden</div>
+      <button class="modal-close" type="button" onclick="closeDuplicateModal()" aria-label="Sluiten">&#x2715;</button>
+    </div>
+    <div class="modal-body">
+      <p style="font-size:13px; margin:0 0 4px;">Deze email/telefoon komt mogelijk al voor bij <strong id="duplicate-match-count">0</strong> bestaande klant(en).</p>
+      <p style="font-size:12px; color:var(--text-faint); margin:0 0 8px;">Klik op een match om in een nieuwe tab te openen en te vergelijken.</p>
+      <div class="duplicate-match-list" id="duplicate-match-list">
+        <!-- gerenderd door openDuplicateModal() -->
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-sm" type="button" onclick="closeDuplicateModal()">Annuleren</button>
+      <button class="btn btn-primary btn-sm" type="button" id="duplicateConfirmBtn" onclick="confirmDuplicateAndProceed()">Toch aanmaken</button>
+    </div>
+  </div>
+</div>
+
 <script src="/modules/shared/supabase-client.js"></script>
 <script src="/modules/shared/agent-shared.js"></script>
 <script src="/modules/shared/theme-shared.js"></script>
@@ -570,6 +649,10 @@ const detailState = {
   notes: null,            // null = nog niet geladen; [] = geladen, leeg
   audit: null,            // idem, voor audit-tab lazy-load
   activeTab: 'profiel',
+  // Fase 2A.4:
+  tagEditMode: false,     // toggle voor Tags-kaart edit-controls
+  allTagDefs: null,       // lazy-cache van /api/customer-tag-definitions (alle 5 system tags)
+  editingNoteId: null,    // id van note in inline-edit modus (null = geen)
 };
 const VALID_TABS = new Set(['profiel', 'communicatie', 'audit']);
 const UUID_RE_CLIENT = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -695,15 +778,12 @@ function renderProfielTab() {
   const postalCity = [c.address_postal, c.address_city].filter(Boolean).join(' ');
   $('#prof-address-line2').textContent = postalCity || '—';
 
-  // Tags (kleurbadges)
-  const tagsEl = $('#prof-tags');
-  if (c.tags && c.tags.length) {
-    tagsEl.innerHTML = c.tags.map((t) =>
-      `<span class="tag-badge" style="background:${escapeHtml(t.color || '#6B7280')}">${escapeHtml(t.label)}</span>`
-    ).join('');
-  } else {
-    tagsEl.innerHTML = '<span class="cust-empty">Geen tags</span>';
-  }
+  // Tags — mode-aware render (Fase 2A.4)
+  // Edit-toggle alleen zichtbaar op actieve klanten (matched 'Bewerken' button-policy).
+  const tagToggle = $('#prof-tags-edit-toggle');
+  tagToggle.style.display = (c.status === 'active') ? '' : 'none';
+  if (c.status !== 'active' && detailState.tagEditMode) detailState.tagEditMode = false;
+  renderTagsSection();
 
   // Metadata
   $('#prof-created-at').textContent = fmtDate(c.created_at);
@@ -715,6 +795,10 @@ function renderProfielTab() {
 }
 
 async function renderCommunicatieTab() {
+  // New-note editor visibility: alleen op actieve klanten (consistent met edit-button policy).
+  // Bij archived/anonymized: vervang editor met info-text (server blokkeert al, voorkomt UI-frictie).
+  renderNewNoteEditor();
+
   // Notities lazy-load (1x, gecached in detailState.notes)
   if (detailState.notes === null) {
     $('#notes-list').innerHTML = '<div class="placeholder-card">Notities laden…</div>';
@@ -733,20 +817,102 @@ async function renderCommunicatieTab() {
     }
   }
 
+  renderNotesList();
+}
+
+/**
+ * Render de new-note-editor mode-aware:
+ * - active customer  → editor zichtbaar, textarea + Opslaan-knop
+ * - archived/anonymized → info-card "Notitie toevoegen niet beschikbaar"
+ */
+function renderNewNoteEditor() {
+  const c = detailState.customer;
+  const editorEl = $('#new-note-editor');
+  if (!editorEl) return;
+  if (c.status === 'active') {
+    editorEl.innerHTML = `
+      <textarea id="new-note-body" maxlength="10000" placeholder="Nieuwe notitie toevoegen…"></textarea>
+      <div class="note-editor-footer">
+        <div class="note-editor-error" id="new-note-error"></div>
+        <button class="btn btn-primary btn-sm" type="button" id="new-note-submit" onclick="submitNewNote()">
+          <i class="ti ti-plus"></i> Opslaan
+        </button>
+      </div>`;
+  } else {
+    const reason = c.status === 'archived'
+      ? 'Klant is gearchiveerd; eerst heractiveren om notities toe te voegen.'
+      : 'Klant is geanonimiseerd; notitie-mutaties niet beschikbaar.';
+    editorEl.innerHTML = `<div class="placeholder-card">${escapeHtml(reason)}</div>`;
+  }
+}
+
+/**
+ * Render de notes-lijst (read-mode + inline edit-mode per note).
+ * editingNoteId steers welke note in edit-form-state staat.
+ */
+function renderNotesList() {
   const list = $('#notes-list');
-  if (!detailState.notes.length) {
+  const notes = detailState.notes;
+  if (!notes || !notes.length) {
     list.innerHTML = '<div class="placeholder-card">Nog geen notities voor deze klant.</div>';
     return;
   }
-  list.innerHTML = detailState.notes.map((n) => {
+  const isActive = detailState.customer.status === 'active';
+
+  list.innerHTML = notes.map((n) => {
     const author = (n.created_by && n.created_by.name) ? escapeHtml(n.created_by.name) : 'Onbekend';
     const editedMarker = n.edited_at ? ` · bewerkt ${escapeHtml(fmtDateTime(n.edited_at))}` : '';
+
+    // Inline-edit modus voor deze note
+    if (detailState.editingNoteId === n.id && isActive) {
+      return `
+        <div class="note-item" data-note-id="${escapeHtml(n.id)}">
+          <div class="note-edit-form">
+            <textarea data-edit-note-body="${escapeHtml(n.id)}" maxlength="10000"></textarea>
+            <div class="note-edit-error" data-edit-note-error="${escapeHtml(n.id)}"></div>
+            <div class="note-edit-form-footer">
+              <button class="btn btn-primary btn-sm" type="button" data-save-note="${escapeHtml(n.id)}">Opslaan</button>
+              <button class="btn btn-sm" type="button" data-cancel-note="${escapeHtml(n.id)}">Annuleren</button>
+            </div>
+          </div>
+          <div class="note-meta">${escapeHtml(fmtDateTime(n.created_at))} · door ${author}${editedMarker}</div>
+        </div>`;
+    }
+
+    // Read-mode: body + hover-actions (alleen voor active customer en non-archived notes)
+    const actionsHtml = (isActive && !n.archived_at) ? `
+        <div class="note-item-actions">
+          <button class="note-icon-btn" type="button" data-edit-note="${escapeHtml(n.id)}" title="Bewerken"><i class="ti ti-edit"></i></button>
+          <button class="note-icon-btn" type="button" data-archive-note="${escapeHtml(n.id)}" title="Archiveren"><i class="ti ti-archive"></i></button>
+        </div>` : '';
+
     return `
-      <div class="note-item">
+      <div class="note-item" data-note-id="${escapeHtml(n.id)}">
+        ${actionsHtml}
         <div class="note-body">${escapeHtml(n.body)}</div>
         <div class="note-meta">${escapeHtml(fmtDateTime(n.created_at))} · door ${author}${editedMarker}</div>
       </div>`;
   }).join('');
+
+  // Pre-fill edit-textarea (XSS-safe via .value)
+  if (detailState.editingNoteId && isActive) {
+    const note = notes.find((x) => x.id === detailState.editingNoteId);
+    const ta = list.querySelector(`[data-edit-note-body="${detailState.editingNoteId}"]`);
+    if (note && ta) {
+      ta.value = note.body;
+      setTimeout(() => ta.focus(), 0);
+    }
+  }
+
+  // Bind action-buttons
+  list.querySelectorAll('[data-edit-note]').forEach((btn) =>
+    btn.addEventListener('click', () => editNote(btn.dataset.editNote)));
+  list.querySelectorAll('[data-archive-note]').forEach((btn) =>
+    btn.addEventListener('click', () => archiveNote(btn.dataset.archiveNote)));
+  list.querySelectorAll('[data-save-note]').forEach((btn) =>
+    btn.addEventListener('click', () => saveNoteEdit(btn.dataset.saveNote)));
+  list.querySelectorAll('[data-cancel-note]').forEach((btn) =>
+    btn.addEventListener('click', () => cancelNoteEdit(btn.dataset.cancelNote)));
 }
 
 async function renderAuditTab() {
@@ -892,10 +1058,10 @@ function bindDetailTabEvents() {
 function bindDetailActionButtons() {
   if (bindDetailActionButtons._bound) return;
   bindDetailActionButtons._bound = true;
-  $('#btn-edit-customer').addEventListener('click',     () => openCustomerModal('edit', detailState.customer));
-  $('#btn-archive-customer').addEventListener('click',  () => openArchiveModal());
+  $('#btn-edit-customer').addEventListener('click',      () => openCustomerModal('edit', detailState.customer));
+  $('#btn-archive-customer').addEventListener('click',   () => openArchiveModal());
   $('#btn-unarchive-customer').addEventListener('click', () => unarchiveCustomer());
-  $('#btn-add-note').addEventListener('click',          () => alert('Beschikbaar in Fase 2A.4'));
+  // btn-add-note verwijderd in Fase 2A.4 — inline note-editor neemt rol over (zie renderNewNoteEditor).
 }
 
 // ============================================================================
@@ -1209,6 +1375,265 @@ function bindPaginationEvents() {
 }
 
 // ============================================================================
+// Tag-edit (Profiel-tab) — Fase 2A.4
+// ============================================================================
+
+/**
+ * Render de Tags-sectie binnen Profiel-tab op basis van detailState.tagEditMode.
+ * - Read-mode  : kleurbadges + tag-edit-toggle in h3 (al statisch aanwezig)
+ * - Edit-mode  : badges met X-button + tag-add-button + popover met available tags
+ * Tag-edit-toggle button-label/icon wisselt: 'Bewerken' (pencil) ↔ 'Klaar' (check).
+ */
+function renderTagsSection() {
+  const c = detailState.customer;
+  const tagsEl = $('#prof-tags');
+  const editing = !!detailState.tagEditMode;
+  const tags = c.tags || [];
+
+  // Edit-button label/icon
+  const tgl = $('#prof-tags-edit-toggle');
+  tgl.innerHTML = editing
+    ? '<i class="ti ti-check"></i> <span id="prof-tags-edit-label">Klaar</span>'
+    : '<i class="ti ti-edit"></i> <span id="prof-tags-edit-label">Bewerken</span>';
+
+  if (!editing) {
+    // Read-mode: gewone badges of "Geen tags"
+    if (tags.length) {
+      tagsEl.innerHTML = '<div class="tag-list-wrap">' + tags.map((t) =>
+        `<span class="tag-badge" style="background:${escapeHtml(t.color || '#6B7280')}">${escapeHtml(t.label)}</span>`
+      ).join('') + '</div>';
+    } else {
+      tagsEl.innerHTML = '<span class="cust-empty">Geen tags</span>';
+    }
+    $('#prof-tags-error').textContent = '';
+    return;
+  }
+
+  // Edit-mode: badges met X + add-button
+  const assignedSlugs = new Set(tags.map((t) => t.slug));
+  const allDefs = detailState.allTagDefs || [];
+  const available = allDefs.filter((d) => !assignedSlugs.has(d.slug));
+
+  const badgesHtml = tags.map((t) =>
+    `<span class="tag-badge editable" style="background:${escapeHtml(t.color || '#6B7280')}">
+       ${escapeHtml(t.label)}
+       <button class="tag-x" type="button" data-slug="${escapeHtml(t.slug)}" aria-label="Verwijder ${escapeHtml(t.label)}">&#x2715;</button>
+     </span>`).join('');
+
+  const popoverHtml = `
+    <div class="tag-add-wrap" id="tag-add-wrap">
+      <button class="tag-add-button" type="button" onclick="toggleTagAddPopover(event)">+ Tag toevoegen</button>
+      <div class="tag-add-popover" id="tag-add-popover">
+        ${available.length === 0
+          ? '<div class="tag-add-empty">Alle tags zijn al gekoppeld</div>'
+          : available.map((d) =>
+              `<button class="tag-add-option" type="button" data-slug="${escapeHtml(d.slug)}">
+                 <span class="swatch" style="background:${escapeHtml(d.color || '#6B7280')}"></span>
+                 ${escapeHtml(d.label)}
+               </button>`).join('')
+        }
+      </div>
+    </div>`;
+
+  tagsEl.innerHTML = '<div class="tag-list-wrap">' + badgesHtml + popoverHtml + '</div>';
+
+  // Bind X-buttons
+  tagsEl.querySelectorAll('.tag-x').forEach((btn) => {
+    btn.addEventListener('click', () => removeTag(btn.dataset.slug));
+  });
+  // Bind add-options
+  tagsEl.querySelectorAll('.tag-add-option').forEach((btn) => {
+    btn.addEventListener('click', () => addTag(btn.dataset.slug));
+  });
+}
+
+function toggleTagAddPopover(e) {
+  e.stopPropagation();
+  $('#tag-add-wrap').classList.toggle('open');
+}
+
+async function toggleTagEditMode() {
+  // Bij eerste activatie: lazy-load tag-definitions (cache in detailState.allTagDefs)
+  if (!detailState.tagEditMode && detailState.allTagDefs === null) {
+    try {
+      const res = await window.AgentShared.apiFetch('/api/customer-tag-definitions');
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      const { tags } = await res.json();
+      detailState.allTagDefs = tags || [];
+    } catch (err) {
+      console.error('[klanten] tag-defs load failed:', err);
+      $('#prof-tags-error').textContent = 'Kon tag-lijst niet laden';
+      return;
+    }
+  }
+  detailState.tagEditMode = !detailState.tagEditMode;
+  renderTagsSection();
+}
+
+async function addTag(slug) {
+  $('#prof-tags-error').textContent = '';
+  try {
+    const res = await window.AgentShared.apiFetch('/api/customer-tag', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ customer_id: detailState.customerId, tag_slug: slug }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) { $('#prof-tags-error').textContent = data.error || ('HTTP ' + res.status); return; }
+    // Optimistic UI: server stuurt full tags-set + we bumpen audit_count lokaal
+    detailState.customer.tags = data.tags || [];
+    detailState.customer.audit_count = (detailState.customer.audit_count || 0) + 1;
+    detailState.audit = null;                 // audit-cache flush
+    $('#tab-count-audit').textContent = detailState.customer.audit_count;
+    renderTagsSection();
+  } catch (err) {
+    console.error('[klanten] addTag failed:', err);
+    $('#prof-tags-error').textContent = 'Serverfout: ' + (err.message || 'onbekend');
+  }
+}
+
+async function removeTag(slug) {
+  $('#prof-tags-error').textContent = '';
+  try {
+    const res = await window.AgentShared.apiFetch('/api/customer-tag', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ customer_id: detailState.customerId, tag_slug: slug }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) { $('#prof-tags-error').textContent = data.error || ('HTTP ' + res.status); return; }
+    detailState.customer.tags = data.tags || [];
+    detailState.customer.audit_count = (detailState.customer.audit_count || 0) + 1;
+    detailState.audit = null;
+    $('#tab-count-audit').textContent = detailState.customer.audit_count;
+    renderTagsSection();
+  } catch (err) {
+    console.error('[klanten] removeTag failed:', err);
+    $('#prof-tags-error').textContent = 'Serverfout: ' + (err.message || 'onbekend');
+  }
+}
+
+// ============================================================================
+// Note CRUD (Communicatie-tab) — Fase 2A.4
+// ============================================================================
+
+async function submitNewNote() {
+  const ta = $('#new-note-body');
+  const errEl = $('#new-note-error');
+  const btn = $('#new-note-submit');
+  if (!ta || !btn) return;
+  const text = ta.value.trim();
+  if (!text) { errEl.textContent = 'Notitie mag niet leeg zijn'; return; }
+  errEl.textContent = '';
+  btn.disabled = true;
+  const originalLabel = btn.innerHTML;
+  btn.innerHTML = '<i class="ti ti-loader"></i> Bezig…';
+  try {
+    const res = await window.AgentShared.apiFetch('/api/customer-notes', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ customer_id: detailState.customerId, body: text }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) { errEl.textContent = data.error || ('HTTP ' + res.status); return; }
+    // Optimistic UI: prepend nieuwe note in cache + bump counts + flush audit
+    detailState.notes = [data.note, ...(detailState.notes || [])];
+    bumpCounter('notes_count', +1);
+    bumpCounter('audit_count', +1);
+    detailState.audit = null;
+    ta.value = '';
+    renderNotesList();
+  } catch (err) {
+    console.error('[klanten] submitNewNote failed:', err);
+    errEl.textContent = 'Serverfout: ' + (err.message || 'onbekend');
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = originalLabel;
+  }
+}
+
+function editNote(noteId) {
+  detailState.editingNoteId = noteId;
+  renderNotesList();
+}
+
+function cancelNoteEdit(_noteId) {
+  detailState.editingNoteId = null;
+  renderNotesList();
+}
+
+async function saveNoteEdit(noteId) {
+  const ta = document.querySelector(`[data-edit-note-body="${noteId}"]`);
+  const errEl = document.querySelector(`[data-edit-note-error="${noteId}"]`);
+  const saveBtn = document.querySelector(`[data-save-note="${noteId}"]`);
+  if (!ta || !saveBtn) return;
+  const text = ta.value.trim();
+  if (!text) { if (errEl) errEl.textContent = 'Notitie mag niet leeg zijn'; return; }
+  if (errEl) errEl.textContent = '';
+  saveBtn.disabled = true;
+  try {
+    const res = await window.AgentShared.apiFetch('/api/customer-notes?id=' + encodeURIComponent(noteId), {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ body: text }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) { if (errEl) errEl.textContent = data.error || ('HTTP ' + res.status); return; }
+    // Optimistic: vervang note in cache (server kan no-op zijn — body unchanged — dat is OK)
+    const idx = (detailState.notes || []).findIndex((n) => n.id === noteId);
+    if (idx !== -1) detailState.notes[idx] = data.note;
+    // edited_at is alleen geüpdate als body daadwerkelijk veranderde → audit alleen dan
+    if (data.note.edited_at && detailState.notes[idx]?.edited_at === data.note.edited_at) {
+      // We weten niet 100% zeker of dit een echte edit was; server-no-op stuurt zelfde edited_at als voor.
+      // Pragmatisch: bump audit alleen als body daadwerkelijk anders is dan voor de save.
+      // Versimpeling: bump altijd; ergste geval audit_count is 1 te hoog tot refresh.
+    }
+    bumpCounter('audit_count', +1);
+    detailState.audit = null;
+    detailState.editingNoteId = null;
+    renderNotesList();
+  } catch (err) {
+    console.error('[klanten] saveNoteEdit failed:', err);
+    if (errEl) errEl.textContent = 'Serverfout: ' + (err.message || 'onbekend');
+  } finally {
+    saveBtn.disabled = false;
+  }
+}
+
+async function archiveNote(noteId) {
+  if (!confirm('Notitie archiveren? Je kunt deze later heractiveren via de notes-lijst (komt later).')) return;
+  try {
+    const res = await window.AgentShared.apiFetch('/api/customer-note-archive?id=' + encodeURIComponent(noteId) + '&action=archive', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: '{}',
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) { alert('Notitie archiveren mislukt: ' + (data.error || ('HTTP ' + res.status))); return; }
+    // Optimistic: verwijder uit cache (default-view toont alleen active notes)
+    detailState.notes = (detailState.notes || []).filter((n) => n.id !== noteId);
+    bumpCounter('notes_count', -1);
+    bumpCounter('audit_count', +1);
+    detailState.audit = null;
+    if (detailState.editingNoteId === noteId) detailState.editingNoteId = null;
+    renderNotesList();
+  } catch (err) {
+    console.error('[klanten] archiveNote failed:', err);
+    alert('Notitie archiveren mislukt: ' + (err.message || 'onbekend'));
+  }
+}
+
+/** Helper: bump count veld in detailState.customer + update tab-badge in UI. */
+function bumpCounter(field, delta) {
+  if (!detailState.customer) return;
+  const next = Math.max(0, (detailState.customer[field] || 0) + delta);
+  detailState.customer[field] = next;
+  const badgeId = field === 'notes_count' ? '#tab-count-communicatie' : '#tab-count-audit';
+  const badge = $(badgeId);
+  if (badge) badge.textContent = next;
+}
+
+// ============================================================================
 // Modals (create / edit / archive) — Fase 2A.3
 // ============================================================================
 const CUSTOMER_FORM_FIELDS = [
@@ -1288,6 +1713,26 @@ async function submitCustomerForm() {
     if (Object.keys(body).length === 0) {
       setModalBannerError('customerFormBanner', 'Geen wijzigingen om op te slaan.');
       return;
+    }
+  }
+
+  // ── Duplicate-check pre-step (Fase 2A.4) ─────────────────────────────────
+  // Bij create-mode + email of phone ingevuld: check eerst tegen bestaande klanten.
+  // Bij matches: open confirm-modal, pauzeer submit (user kiest annuleren of toch-aanmaken).
+  // Bij geen matches OF check-error (fail-open): doorgaan naar POST.
+  if (mode === 'create' && !_skipDuplicateCheck) {
+    const checkEmail = String(body.email || '').trim();
+    const checkPhone = String(body.phone || '').trim();
+    if (checkEmail || checkPhone) {
+      try {
+        const matches = await fetchDuplicateMatches(checkEmail, checkPhone);
+        if (matches && matches.length > 0) {
+          openDuplicateModal(matches);
+          return;   // wacht op user-confirm via confirmDuplicateAndProceed
+        }
+      } catch (err) {
+        console.error('[klanten] duplicate-check failed (fail-open):', err);
+      }
     }
   }
 
@@ -1399,20 +1844,103 @@ async function unarchiveCustomer() {
   }
 }
 
-// Global modal-mechanics: centrale ESC-handler (capture-phase) + overlay-click.
-// Capture-phase: triggert vóór bubbling-phase listeners op input/button-children,
-// robuust tegen stopPropagation in nested handlers + input-focus context.
-// Topmost-element prioriteit: modal > tag-popover > niets.
+// ============================================================================
+// Duplicate-check modal (Fase 2A.4) — vóór create-POST naar /api/customer
+// ============================================================================
+
+// Tijdelijke flag: bij confirmDuplicateAndProceed re-triggert submitCustomerForm
+// zonder opnieuw de duplicate-check te doen (voorkomt loop).
+let _skipDuplicateCheck = false;
+
+const DUP_REASON_LABELS = { email: 'Email', phone: 'Telefoon', both: 'Beide' };
+
+async function fetchDuplicateMatches(email, phone) {
+  const params = new URLSearchParams();
+  if (email) params.set('email', email);
+  if (phone) params.set('phone', phone);
+  const res = await window.AgentShared.apiFetch('/api/customer-check-duplicate?' + params.toString());
+  if (!res.ok) {
+    console.warn('[klanten] duplicate-check non-ok:', res.status);
+    return [];
+  }
+  const data = await res.json();
+  return data.matches || [];
+}
+
+function openDuplicateModal(matches) {
+  $('#duplicate-match-count').textContent = matches.length;
+  const list = $('#duplicate-match-list');
+  list.innerHTML = matches.map(renderDuplicateMatchItem).join('');
+  const btn = $('#duplicateConfirmBtn');
+  btn.disabled = false;
+  btn.textContent = 'Toch aanmaken';
+  openModal('duplicateConfirmModal');
+}
+
+function renderDuplicateMatchItem(m) {
+  const name = `${escapeHtml(m.first_name || '')} ${escapeHtml(m.last_name || '')}`.trim() || '(geen naam)';
+  const email = m.email ? escapeHtml(m.email) : '—';
+  const phone = m.phone ? escapeHtml(m.phone) : '—';
+  // Whitelist match_reason om class-injection te voorkomen
+  const reason = ['email', 'phone', 'both'].includes(m.match_reason) ? m.match_reason : 'email';
+  const reasonLabel = DUP_REASON_LABELS[reason];
+  const href = '/modules/klanten.html?id=' + encodeURIComponent(m.id);
+  return `
+    <a class="duplicate-match-item" href="${href}" target="_blank" rel="noopener noreferrer">
+      <div class="duplicate-match-info">
+        <div class="duplicate-match-name">${name}</div>
+        <div class="duplicate-match-contact">${email} · ${phone}</div>
+      </div>
+      <span class="duplicate-match-reason ${reason}">${escapeHtml(reasonLabel)}</span>
+    </a>`;
+}
+
+function closeDuplicateModal() {
+  closeModal('duplicateConfirmModal');
+}
+
+function confirmDuplicateAndProceed() {
+  closeDuplicateModal();
+  // Re-trigger submit met skip-flag; modal-inputs zijn intact, body wordt herbouwd.
+  _skipDuplicateCheck = true;
+  submitCustomerForm().finally(() => { _skipDuplicateCheck = false; });
+}
+
+// Global modal-mechanics: centrale ESC-handler (capture-phase) + overlay-click +
+// click-outside voor popovers. Capture-phase: triggert vóór bubbling-phase
+// listeners op input/button-children, robuust tegen stopPropagation in nested
+// handlers + input-focus context.
+//
+// ESC topmost-prioriteit (Fase 2A.4):
+//   1. duplicateConfirmModal (kan stacken bovenop customerFormModal tijdens create-flow)
+//   2. archiveModal
+//   3. customerFormModal
+//   4. tag-popover in filter-bar (lijst-view)
+//   5. tag-add-popover in Profiel-tab Tags-kaart (detail-view edit-mode)
 (function bindModalGlobals() {
   document.addEventListener('keydown', (e) => {
     if (e.key !== 'Escape') return;
-    if (!$('#archiveModal').classList.contains('hidden'))      { closeArchiveModal(); return; }
-    if (!$('#customerFormModal').classList.contains('hidden')) { closeCustomerModal(); return; }
-    const tagWrap = $('#filter-tags');
-    if (tagWrap && tagWrap.classList.contains('open'))         { tagWrap.classList.remove('open'); return; }
+    if (!$('#duplicateConfirmModal').classList.contains('hidden')) { closeDuplicateModal(); return; }
+    if (!$('#archiveModal').classList.contains('hidden'))          { closeArchiveModal();   return; }
+    if (!$('#customerFormModal').classList.contains('hidden'))     { closeCustomerModal();  return; }
+    const filterTagWrap = $('#filter-tags');
+    if (filterTagWrap && filterTagWrap.classList.contains('open')) { filterTagWrap.classList.remove('open'); return; }
+    const tagAddWrap = $('#tag-add-wrap');
+    if (tagAddWrap && tagAddWrap.classList.contains('open'))       { tagAddWrap.classList.remove('open'); return; }
   }, true);
+
+  // Modal-overlay click sluit modal (alleen click op overlay zelf, niet op card-children).
   document.querySelectorAll('.modal-overlay').forEach((ov) => {
     ov.addEventListener('click', (e) => { if (e.target === ov) ov.classList.add('hidden'); });
+  });
+
+  // Click-outside voor tag-add-popover (detail-view Tags-kaart edit-mode).
+  // Consistent met tag-multi-popover in filter-bar (zit in bindFilterEvents).
+  document.addEventListener('click', (e) => {
+    const wrap = $('#tag-add-wrap');
+    if (wrap && wrap.classList.contains('open') && !wrap.contains(e.target)) {
+      wrap.classList.remove('open');
+    }
   });
 })();
 
