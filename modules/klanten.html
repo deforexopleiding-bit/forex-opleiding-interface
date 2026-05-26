@@ -239,6 +239,45 @@
     .duplicate-match-contact { font-size:11px; color:var(--text-faint); margin-top:2px; word-break:break-word; }
     .duplicate-match-reason { font-size:10px; padding:2px 6px; background:#F59E0B22; color:#F59E0B; border-radius:999px; text-transform:uppercase; letter-spacing:.3px; font-weight:600; flex-shrink:0; }
     .duplicate-match-reason.both { background:#EF444422; color:#EF4444; }
+
+    /* Bulk-selection (Fase 2A.4 commit 6) */
+    .btn-selection-toggle { padding:6px 12px; background:transparent; border:1px solid var(--border); color:var(--text-faint); font-size:12px; border-radius:8px; cursor:pointer; font-family:inherit; display:inline-flex; align-items:center; gap:6px; }
+    .btn-selection-toggle:hover { color:var(--text); border-color:var(--text-faint); }
+    .btn-selection-toggle.active { background:var(--accent-cyan,#06b6d4); color:#fff; border-color:transparent; }
+
+    /* Checkbox-column: alleen zichtbaar in selection-mode */
+    .col-select { width:36px; padding:6px 10px !important; text-align:center !important; }
+    .customers-table .col-select { display:none; }
+    .customers-table.selection-mode .col-select { display:table-cell; }
+    .col-select input[type="checkbox"] { width:14px; height:14px; cursor:pointer; margin:0; }
+    .customers-table.selection-mode tbody tr { cursor:default; }
+    .customers-table.selection-mode tbody tr.selected { background:#06b6d418; }
+    .customers-table.selection-mode tbody tr.selected:hover { background:#06b6d422; }
+
+    /* Floating action-bar boven lijst-tabel */
+    .bulk-action-bar { display:none; align-items:center; gap:10px; padding:10px 14px; margin-bottom:10px; background:var(--bg-elev); border:1px solid var(--accent-cyan,#06b6d4); border-radius:10px; box-shadow:0 2px 8px rgba(0,0,0,.1); font-size:13px; }
+    .bulk-action-bar.visible { display:flex; }
+    .bulk-action-bar .bulk-count { font-weight:600; color:var(--accent-cyan,#06b6d4); }
+    .bulk-action-bar .spacer { flex:1; }
+    .bulk-action-bar .btn { padding:6px 12px; font-size:12px; }
+    .bulk-action-bar .btn-bulk-archive { background:#F59E0B; color:#fff; border:none; }
+    .bulk-action-bar .btn-bulk-archive:hover { background:#D88509; }
+    .bulk-action-bar .btn-bulk-tag { background:var(--accent-cyan,#06b6d4); color:#fff; border:none; }
+    .bulk-action-bar .btn-bulk-tag:hover { background:#0590B0; }
+
+    /* Bulk-tag modal extra styling */
+    .bulk-tag-mode { display:flex; gap:12px; margin-bottom:12px; }
+    .bulk-tag-mode label { display:inline-flex; align-items:center; gap:6px; font-size:13px; cursor:pointer; }
+    .bulk-tag-mode input[type="radio"] { margin:0; cursor:pointer; }
+    .bulk-tag-select { width:100%; padding:8px 10px; background:var(--bg); border:1px solid var(--border); border-radius:8px; color:var(--text); font-size:13px; font-family:inherit; }
+    .bulk-tag-select:focus { outline:none; border-color:var(--accent-cyan,#06b6d4); }
+
+    /* Bulk-result banner (na 207 Multi-Status of 200) */
+    .bulk-result-banner { padding:10px 12px; margin-bottom:12px; border-radius:8px; font-size:13px; display:none; }
+    .bulk-result-banner.visible { display:block; }
+    .bulk-result-banner.success { background:#10B98122; border:1px solid #10B981; color:#10B981; }
+    .bulk-result-banner.mixed   { background:#F59E0B22; border:1px solid #F59E0B; color:#F59E0B; }
+    .bulk-result-banner .bulk-result-fails { font-size:11px; margin-top:4px; opacity:.85; }
   </style>
 </head>
 <body>
@@ -257,10 +296,16 @@
           <h1 class="page-title"><i class="ti ti-users-group" style="color:var(--brand-primary,#093d54)"></i> Klanten</h1>
           <p class="page-sub">Centrale klantendatabase</p>
         </div>
-        <button id="btn-new-customer" class="btn btn-primary btn-sm" title="Beschikbaar in Fase 2A.3">
+        <button id="btn-selection-toggle" class="btn-selection-toggle" type="button" aria-pressed="false" onclick="toggleSelectionMode()">
+          <i class="ti ti-checks"></i> <span id="selection-toggle-label">Selecteren</span>
+        </button>
+        <button id="btn-new-customer" class="btn btn-primary btn-sm">
           <i class="ti ti-plus"></i> Nieuwe klant
         </button>
       </div>
+
+      <!-- Bulk-result banner (Fase 2A.4): toont N gelukt / M mislukt na bulk-actie. -->
+      <div class="bulk-result-banner" id="bulk-result-banner" role="status" aria-live="polite"></div>
 
       <!-- KPI mini-bar -->
       <div class="kpi-grid" id="kpi-grid">
@@ -327,11 +372,27 @@
         </button>
       </div>
 
+      <!-- Bulk-action bar (Fase 2A.4): zichtbaar wanneer selectedIds.size > 0 -->
+      <div class="bulk-action-bar" id="bulk-action-bar">
+        <span><span class="bulk-count" id="bulk-count">0</span> geselecteerd</span>
+        <div class="spacer"></div>
+        <button class="btn btn-bulk-archive btn-sm" type="button" onclick="openBulkArchiveModal()">
+          <i class="ti ti-archive"></i> Archiveren
+        </button>
+        <button class="btn btn-bulk-tag btn-sm" type="button" onclick="openBulkTagModal()">
+          <i class="ti ti-tag"></i> Tag-actie
+        </button>
+        <button class="btn btn-sm" type="button" onclick="toggleSelectionMode()">
+          Annuleren
+        </button>
+      </div>
+
       <!-- Lijst-tabel -->
       <div class="table-wrap">
-        <table class="customers-table">
+        <table class="customers-table" id="customers-table">
           <thead>
             <tr>
+              <th class="col-select"><input type="checkbox" id="select-all-checkbox" aria-label="Selecteer alle zichtbare klanten" onchange="toggleSelectAll()"/></th>
               <th data-sort-key="last_name" aria-sort="none">Naam</th>
               <th>Email</th>
               <th>Telefoon</th>
@@ -581,6 +642,57 @@
   </div>
 </div>
 
+<!-- Bulk-archive modal (Fase 2A.4) -->
+<div class="modal-overlay hidden" id="bulkArchiveModal" role="dialog" aria-modal="true" aria-labelledby="bulkArchiveModalTitle">
+  <div class="modal-card modal-sm">
+    <div class="modal-header">
+      <div class="modal-title" id="bulkArchiveModalTitle">Klanten archiveren</div>
+      <button class="modal-close" type="button" onclick="closeBulkArchiveModal()" aria-label="Sluiten">&#x2715;</button>
+    </div>
+    <div class="modal-body">
+      <div class="modal-banner" id="bulkArchiveBanner"></div>
+      <p style="font-size:13px; margin:0 0 8px;">Archiveer <strong id="bulk-archive-count">0</strong> geselecteerde klanten?</p>
+      <p style="font-size:12px; color:var(--text-faint); margin:0 0 12px;">Al gearchiveerde klanten worden overgeslagen. Geanonimiseerde klanten kunnen niet meer worden gearchiveerd.</p>
+      <div class="form-field form-field-full">
+        <label for="bulk-archive-reason">Reden (optioneel — gebruikt voor alle klanten)</label>
+        <textarea id="bulk-archive-reason" maxlength="500" placeholder="Bijv. 'Jaarlijkse opschoning van inactieve klanten'"></textarea>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-sm" type="button" onclick="closeBulkArchiveModal()">Annuleren</button>
+      <button class="btn btn-primary btn-sm" type="button" id="bulkArchiveConfirmBtn" onclick="submitBulkArchive()">Archiveren</button>
+    </div>
+  </div>
+</div>
+
+<!-- Bulk-tag modal (Fase 2A.4) -->
+<div class="modal-overlay hidden" id="bulkTagModal" role="dialog" aria-modal="true" aria-labelledby="bulkTagModalTitle">
+  <div class="modal-card modal-sm">
+    <div class="modal-header">
+      <div class="modal-title" id="bulkTagModalTitle">Tag-actie voor <span id="bulk-tag-count">0</span> klanten</div>
+      <button class="modal-close" type="button" onclick="closeBulkTagModal()" aria-label="Sluiten">&#x2715;</button>
+    </div>
+    <div class="modal-body">
+      <div class="modal-banner" id="bulkTagBanner"></div>
+      <div class="bulk-tag-mode" role="radiogroup" aria-label="Tag-actie">
+        <label><input type="radio" name="bulk-tag-action" value="tag-add" checked/> Tag toevoegen</label>
+        <label><input type="radio" name="bulk-tag-action" value="tag-remove"/> Tag verwijderen</label>
+      </div>
+      <div class="form-field form-field-full">
+        <label for="bulk-tag-slug">Tag</label>
+        <select id="bulk-tag-slug" class="bulk-tag-select" aria-label="Selecteer tag">
+          <option value="">— Tag laden… —</option>
+        </select>
+      </div>
+      <p style="font-size:11px; color:var(--text-faint); margin:8px 0 0;">Gearchiveerde / geanonimiseerde klanten worden overgeslagen.</p>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-sm" type="button" onclick="closeBulkTagModal()">Annuleren</button>
+      <button class="btn btn-primary btn-sm" type="button" id="bulkTagConfirmBtn" onclick="submitBulkTag()">Toepassen</button>
+    </div>
+  </div>
+</div>
+
 <script src="/modules/shared/supabase-client.js"></script>
 <script src="/modules/shared/agent-shared.js"></script>
 <script src="/modules/shared/theme-shared.js"></script>
@@ -598,9 +710,32 @@ const state = {
   sortDir:       'desc',
   page:          1,
   pageSize:      25,
+  // Fase 2A.4 commit 6:
+  selectionMode: false,             // bulk-select toggle aan/uit
+  selectedIds:   new Set(),         // set van customer-id's die gekruist zijn
 };
 let tagDefinitions = [];            // gevuld bij init
 let searchDebounceTimer = null;
+
+// Module-scope tag-definitions cache (Fase 2A.4 commit 6) — gedeeld tussen
+// detail-view (Profiel Tags-edit) en lijst-view (bulk-tag modal). Voorheen zat
+// dit in detailState.allTagDefs; verplaatst zodat lijst-view het ook kan gebruiken
+// zonder via detail-view-state te omwegen.
+let _allTagDefs = null;
+let _allTagDefsPromise = null;       // race-safe: caches in-flight promise voor concurrent callers
+
+async function getTagDefinitions() {
+  if (_allTagDefs !== null) return _allTagDefs;
+  if (_allTagDefsPromise) return _allTagDefsPromise;
+  _allTagDefsPromise = (async () => {
+    const res = await window.AgentShared.apiFetch('/api/customer-tag-definitions');
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const { tags } = await res.json();
+    _allTagDefs = tags || [];
+    return _allTagDefs;
+  })();
+  return _allTagDefsPromise;
+}
 
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => document.querySelectorAll(sel);
@@ -651,7 +786,8 @@ const detailState = {
   activeTab: 'profiel',
   // Fase 2A.4:
   tagEditMode: false,     // toggle voor Tags-kaart edit-controls
-  allTagDefs: null,       // lazy-cache van /api/customer-tag-definitions (alle 5 system tags)
+  // (allTagDefs gemigreerd naar module-scope _allTagDefs + getTagDefinitions() helper —
+  //  gedeeld met lijst-view bulk-tag modal in commit 6)
   editingNoteId: null,    // id van note in inline-edit modus (null = geen)
 };
 const VALID_TABS = new Set(['profiel', 'communicatie', 'audit']);
@@ -1163,6 +1299,10 @@ function renderSkeletonRows(n = 5) {
 }
 
 async function loadCustomers() {
+  // Filter/sort/page-change clears selectie (anders zou pagina 2 geen visuele
+  // selection-cue tonen voor IDs die op pagina 1 stonden — verwarrende UX).
+  // No-op als geen selectie actief is.
+  clearSelectionOnContextChange();
   renderSkeletonRows();
   try {
     const qs = buildQueryString();
@@ -1198,27 +1338,41 @@ function renderCustomers({ customers, total, page, page_size, total_pages }) {
   tbody.innerHTML = '';
 
   if (!customers || customers.length === 0) {
+    // colspan: 8 (incl. col-select); col-select hidden via CSS bij niet-selection-mode is OK
     tbody.innerHTML = `
-      <tr><td colspan="7" class="state-cell">
+      <tr><td colspan="8" class="state-cell">
         Geen klanten gevonden met huidige filters.
         <br><br>
         <button class="btn btn-sm" onclick="resetFilters()"><i class="ti ti-rotate-clockwise"></i> Filters resetten</button>
       </td></tr>`;
     updatePagination(total, page, page_size, total_pages);
+    syncSelectAllCheckbox();
     return;
   }
 
   for (const c of customers) {
     const tr = document.createElement('tr');
     tr.dataset.customerId = c.id;
-    tr.addEventListener('click', () => {
-      window.location.href = '/modules/klanten.html?id=' + encodeURIComponent(c.id);
+    if (state.selectedIds.has(c.id)) tr.classList.add('selected');
+
+    // Row-click: in selection-mode toggle, anders navigate naar detail.
+    tr.addEventListener('click', (e) => {
+      // Clicks op de checkbox zelf afhandelen via change-listener — voorkom dubbel-toggle
+      if (e.target && e.target.matches('input[type="checkbox"][data-row-select]')) return;
+      if (state.selectionMode) {
+        toggleRowSelection(c.id);
+      } else {
+        window.location.href = '/modules/klanten.html?id=' + encodeURIComponent(c.id);
+      }
     });
+
     const tags = (c.tags || []).map((t) =>
       `<span class="tag-badge" style="background:${escapeHtml(t.color || '#6B7280')}">${escapeHtml(t.label)}</span>`
     ).join('');
     const name = `${escapeHtml(c.first_name || '')} ${escapeHtml(c.last_name || '')}`.trim() || '—';
+    const checked = state.selectedIds.has(c.id) ? 'checked' : '';
     tr.innerHTML = `
+      <td class="col-select"><input type="checkbox" data-row-select="${escapeHtml(c.id)}" aria-label="Selecteer ${name}" ${checked}/></td>
       <td><span class="cust-name">${name}</span></td>
       <td>${c.email ? escapeHtml(c.email) : '<span class="cust-empty">—</span>'}</td>
       <td>${c.phone ? escapeHtml(c.phone) : '<span class="cust-empty">—</span>'}</td>
@@ -1227,10 +1381,14 @@ function renderCustomers({ customers, total, page, page_size, total_pages }) {
       <td><span class="status-badge ${escapeHtml(c.status)}">${labelForStatus(c.status)}</span></td>
       <td><span class="cust-empty">—</span></td>
     `;
+    // Bind change-listener op de row-checkbox (na innerHTML)
+    const cb = tr.querySelector('input[data-row-select]');
+    if (cb) cb.addEventListener('change', () => toggleRowSelection(c.id));
     tbody.appendChild(tr);
   }
 
   updatePagination(total, page, page_size, total_pages);
+  syncSelectAllCheckbox();
 }
 
 function labelForStatus(s) {
@@ -1239,7 +1397,7 @@ function labelForStatus(s) {
 
 function renderErrorState(msg) {
   $('#customers-tbody').innerHTML = `
-    <tr><td colspan="7" class="state-cell" style="color:#EF4444;">
+    <tr><td colspan="8" class="state-cell" style="color:#EF4444;">
       <i class="ti ti-alert-circle"></i> Kon klanten niet laden: ${escapeHtml(msg || 'onbekende fout')}
       <br><br><button class="btn btn-sm" onclick="loadCustomers()">Opnieuw proberen</button>
     </td></tr>`;
@@ -1375,6 +1533,337 @@ function bindPaginationEvents() {
 }
 
 // ============================================================================
+// Bulk-selection mechanics (lijst-view) — Fase 2A.4 commit 6
+// ============================================================================
+//
+// Selection-state: state.selectionMode (boolean) + state.selectedIds (Set<uuid>).
+// Visuele weergave: <table class="customers-table selection-mode">  → CSS toont
+// col-select-column + row.selected highlight. Action-bar toont count + acties.
+//
+// Cache-flush punten (selectedIds clear): filter-wijziging, page-change,
+// pageSize-change, search, sort, reset-filters, selection-mode-toggle-off.
+// (Behoud van selecties tussen pagina's = onverwacht UX-pad zonder visuele cue.)
+//
+// Bulk-result-banner clear-strategie: bij selection-mode-toggle ON (start
+// nieuwe sessie schoon). Bij volgende bulk-actie wordt content overschreven.
+
+function toggleSelectionMode() {
+  const enabling = !state.selectionMode;
+  state.selectionMode = enabling;
+
+  // Bij toggle ON: clear vorige selectie + result-banner. Bij OFF: clear selectie
+  // maar laat banner staan (geeft feedback van net-afgeronde bulk-actie).
+  state.selectedIds = new Set();
+  if (enabling) clearBulkResultBanner();
+
+  const btn = $('#btn-selection-toggle');
+  const lbl = $('#selection-toggle-label');
+  btn.classList.toggle('active', enabling);
+  btn.setAttribute('aria-pressed', String(enabling));
+  if (lbl) lbl.textContent = enabling ? 'Klaar' : 'Selecteren';
+
+  const table = $('#customers-table');
+  if (table) table.classList.toggle('selection-mode', enabling);
+
+  // Reset master + alle row-checkboxen visueel
+  const master = $('#select-all-checkbox');
+  if (master) { master.checked = false; master.indeterminate = false; }
+  document.querySelectorAll('input[data-row-select]').forEach((cb) => { cb.checked = false; });
+  document.querySelectorAll('#customers-tbody tr.selected').forEach((tr) => tr.classList.remove('selected'));
+
+  updateActionBar();
+}
+
+function toggleRowSelection(id) {
+  if (state.selectedIds.has(id)) state.selectedIds.delete(id);
+  else state.selectedIds.add(id);
+
+  // Update DOM voor deze rij
+  const tr = document.querySelector(`#customers-tbody tr[data-customer-id="${cssEscape(id)}"]`);
+  if (tr) tr.classList.toggle('selected', state.selectedIds.has(id));
+  const cb = document.querySelector(`input[data-row-select="${cssEscape(id)}"]`);
+  if (cb) cb.checked = state.selectedIds.has(id);
+
+  updateActionBar();
+  syncSelectAllCheckbox();
+}
+
+function toggleSelectAll() {
+  const master = $('#select-all-checkbox');
+  if (!master) return;
+  const checkAll = master.checked;
+  const visibleCheckboxes = document.querySelectorAll('input[data-row-select]');
+  visibleCheckboxes.forEach((cb) => {
+    const id = cb.dataset.rowSelect;
+    cb.checked = checkAll;
+    if (checkAll) state.selectedIds.add(id);
+    else state.selectedIds.delete(id);
+    const tr = cb.closest('tr');
+    if (tr) tr.classList.toggle('selected', checkAll);
+  });
+  updateActionBar();
+}
+
+/**
+ * Sync master-checkbox state met huidige page:
+ *   - all visible IDs in selectedIds → master checked
+ *   - none in selectedIds            → master unchecked
+ *   - partial                        → master unchecked (indeterminate niet in MVP)
+ *
+ * TODO 2A-cleanup: setIndeterminate(true) wanneer 0 < count < pageSize voor
+ * cleaner UX-signaal van partiële selectie.
+ */
+function syncSelectAllCheckbox() {
+  const master = $('#select-all-checkbox');
+  if (!master) return;
+  const visibleCheckboxes = document.querySelectorAll('input[data-row-select]');
+  if (visibleCheckboxes.length === 0) {
+    master.checked = false;
+    master.indeterminate = false;
+    return;
+  }
+  let allSelected = true;
+  for (const cb of visibleCheckboxes) {
+    if (!state.selectedIds.has(cb.dataset.rowSelect)) { allSelected = false; break; }
+  }
+  master.checked = allSelected;
+  master.indeterminate = false;  // MVP: geen partial-state visual
+}
+
+function updateActionBar() {
+  const bar = $('#bulk-action-bar');
+  if (!bar) return;
+  const count = state.selectedIds.size;
+  $('#bulk-count').textContent = count;
+  bar.classList.toggle('visible', count > 0 && state.selectionMode);
+}
+
+/** Clear selectie + UI bij filter/sort/page-change. Behoud selection-mode-toggle-state. */
+function clearSelectionOnContextChange() {
+  if (state.selectedIds.size === 0) return;
+  state.selectedIds.clear();
+  updateActionBar();
+  // Master + row-checkboxen worden bij volgende renderCustomers() opnieuw correct gerendert.
+}
+
+function clearBulkResultBanner() {
+  const banner = $('#bulk-result-banner');
+  if (!banner) return;
+  banner.className = 'bulk-result-banner';
+  banner.textContent = '';
+}
+
+/**
+ * CSS.escape() wrapper met fallback voor oudere browsers — voor data-attribute
+ * selectors met UUIDs (UUIDs zijn safe maar defensief).
+ */
+function cssEscape(s) {
+  return (window.CSS && CSS.escape) ? CSS.escape(s) : String(s).replace(/[^\w-]/g, '\\$&');
+}
+
+// ============================================================================
+// Bulk-action handlers (archive + tag) — Fase 2A.4 commit 6
+// ============================================================================
+//
+// Endpoint: POST /api/customer-bulk
+// Body: { action, customer_ids: [], tag_slug?, reason? }
+// Response: 200 (alle succes) of 207 (mixed) met
+//   { action, total, success_count, fail_count, success[], failed[] }
+//
+// Na response: banner-render boven KPI-bar (geeft feedback), modal sluit,
+// selection-mode af, lijst refresh.
+
+const BULK_ACTION_LABELS = {
+  'archive':    'archiveren',
+  'unarchive':  'heractiveren',
+  'tag-add':    'tag toevoegen',
+  'tag-remove': 'tag verwijderen',
+};
+
+// ── Bulk-archive ─────────────────────────────────────────────────────────────
+
+function openBulkArchiveModal() {
+  if (state.selectedIds.size === 0) return;
+  $('#bulk-archive-count').textContent = state.selectedIds.size;
+  $('#bulk-archive-reason').value = '';
+  const banner = $('#bulkArchiveBanner');
+  banner.className = 'modal-banner';
+  banner.textContent = '';
+  const btn = $('#bulkArchiveConfirmBtn');
+  btn.disabled = false;
+  btn.textContent = 'Archiveren';
+  openModal('bulkArchiveModal');
+}
+
+function closeBulkArchiveModal() { closeModal('bulkArchiveModal'); }
+
+async function submitBulkArchive() {
+  const reason = $('#bulk-archive-reason').value;
+  const ids = [...state.selectedIds];
+  if (ids.length === 0) { setModalBannerError('bulkArchiveBanner', 'Geen klanten geselecteerd'); return; }
+
+  const btn = $('#bulkArchiveConfirmBtn');
+  btn.disabled = true;
+  btn.textContent = 'Bezig…';
+  try {
+    const res = await window.AgentShared.apiFetch('/api/customer-bulk', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'archive', customer_ids: ids, reason }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (res.status !== 200 && res.status !== 207) {
+      setModalBannerError('bulkArchiveBanner', data.error || ('HTTP ' + res.status));
+      return;
+    }
+    closeBulkArchiveModal();
+    renderBulkResultBanner(data, null);
+    finishBulkAction();
+  } catch (err) {
+    console.error('[klanten] bulk-archive failed:', err);
+    setModalBannerError('bulkArchiveBanner', 'Serverfout: ' + (err.message || 'onbekend'));
+  } finally {
+    if (!$('#bulkArchiveModal').classList.contains('hidden')) {
+      btn.disabled = false;
+      btn.textContent = 'Archiveren';
+    }
+  }
+}
+
+// ── Bulk-tag ────────────────────────────────────────────────────────────────
+
+async function openBulkTagModal() {
+  if (state.selectedIds.size === 0) return;
+  $('#bulk-tag-count').textContent = state.selectedIds.size;
+  // Reset radio + banner
+  document.querySelector('input[name="bulk-tag-action"][value="tag-add"]').checked = true;
+  const banner = $('#bulkTagBanner');
+  banner.className = 'modal-banner';
+  banner.textContent = '';
+  const btn = $('#bulkTagConfirmBtn');
+  btn.disabled = false;
+  btn.textContent = 'Toepassen';
+  openModal('bulkTagModal');
+
+  // Populate tag-select via gedeelde cache
+  const select = $('#bulk-tag-slug');
+  select.innerHTML = '<option value="">— Tag laden… —</option>';
+  try {
+    const defs = await getTagDefinitions();
+    if (!defs.length) {
+      select.innerHTML = '<option value="">Geen tags beschikbaar</option>';
+      return;
+    }
+    select.innerHTML = '<option value="">— Kies tag —</option>'
+      + defs.map((d) =>
+        `<option value="${escapeHtml(d.slug)}">${escapeHtml(d.label)}</option>`
+      ).join('');
+  } catch (err) {
+    console.error('[klanten] bulk-tag defs load failed:', err);
+    select.innerHTML = '<option value="">Kon tags niet laden</option>';
+  }
+}
+
+function closeBulkTagModal() { closeModal('bulkTagModal'); }
+
+async function submitBulkTag() {
+  const action = document.querySelector('input[name="bulk-tag-action"]:checked')?.value || 'tag-add';
+  const tagSlug = $('#bulk-tag-slug').value;
+  const ids = [...state.selectedIds];
+  if (!tagSlug) { setModalBannerError('bulkTagBanner', 'Kies een tag'); return; }
+  if (ids.length === 0) { setModalBannerError('bulkTagBanner', 'Geen klanten geselecteerd'); return; }
+
+  const btn = $('#bulkTagConfirmBtn');
+  btn.disabled = true;
+  btn.textContent = 'Bezig…';
+  try {
+    const res = await window.AgentShared.apiFetch('/api/customer-bulk', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action, customer_ids: ids, tag_slug: tagSlug }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (res.status !== 200 && res.status !== 207) {
+      setModalBannerError('bulkTagBanner', data.error || ('HTTP ' + res.status));
+      return;
+    }
+    closeBulkTagModal();
+    // Resolve tag-label uit cache voor banner-text
+    const tagDef = (_allTagDefs || []).find((d) => d.slug === tagSlug);
+    const tagLabel = tagDef ? tagDef.label : tagSlug;
+    renderBulkResultBanner(data, { tagLabel });
+    finishBulkAction();
+  } catch (err) {
+    console.error('[klanten] bulk-tag failed:', err);
+    setModalBannerError('bulkTagBanner', 'Serverfout: ' + (err.message || 'onbekend'));
+  } finally {
+    if (!$('#bulkTagModal').classList.contains('hidden')) {
+      btn.disabled = false;
+      btn.textContent = 'Toepassen';
+    }
+  }
+}
+
+// ── Bulk-result-banner renderer ─────────────────────────────────────────────
+
+/**
+ * Render het bulk-result-banner boven KPI-bar na een bulk-actie.
+ * @param {object} data        — server-response { action, total, success_count, fail_count, success[], failed[] }
+ * @param {object|null} extra  — { tagLabel } voor tag-acties, anders null
+ */
+function renderBulkResultBanner(data, extra) {
+  const banner = $('#bulk-result-banner');
+  if (!banner) return;
+  const successCount = data.success_count || 0;
+  const failCount = data.fail_count || 0;
+  const total = data.total || 0;
+  const baseLabel = BULK_ACTION_LABELS[data.action] || data.action;
+  const actionLabel = (data.action === 'tag-add' || data.action === 'tag-remove') && extra && extra.tagLabel
+    ? `${baseLabel} '${extra.tagLabel}'`
+    : baseLabel;
+
+  const noOps = (data.success || []).filter((s) => s.no_op).length;
+
+  let text = `<strong>${successCount}/${total}</strong> ${escapeHtml(actionLabel)} geslaagd`;
+  if (noOps > 0) text += ` <span style="opacity:.75;">(${noOps} al in target-staat)</span>`;
+
+  // Aggregate failed reasons → "{N} {reason}, {M} {reason}"
+  let failsHtml = '';
+  if (failCount > 0) {
+    const byReason = {};
+    for (const f of data.failed || []) {
+      const r = f.reason || 'unknown';
+      byReason[r] = (byReason[r] || 0) + 1;
+    }
+    const parts = Object.entries(byReason)
+      .map(([r, n]) => `${n} ${escapeHtml(humanizeReason(r))}`);
+    failsHtml = `<div class="bulk-result-fails">${failCount} mislukt: ${parts.join(', ')}</div>`;
+  }
+
+  banner.className = 'bulk-result-banner visible ' + (failCount === 0 ? 'success' : 'mixed');
+  banner.innerHTML = text + failsHtml;
+}
+
+function humanizeReason(code) {
+  return ({
+    not_found:  'niet gevonden',
+    anonymized: 'geanonimiseerd',
+    archived:   'gearchiveerd',
+  })[code] || code;
+}
+
+/**
+ * Cleanup na een succesvolle bulk-actie: lijst refreshen, selection-mode af,
+ * counters bijwerken via KPI-stats refresh.
+ */
+function finishBulkAction() {
+  // toggleSelectionMode af → clear selectedIds, hide action-bar, reset UI
+  if (state.selectionMode) toggleSelectionMode();
+  loadCustomers();
+  if (typeof loadStats === 'function') loadStats();   // KPI mini-bar verversen (active/archive counts)
+}
+
+// ============================================================================
 // Tag-edit (Profiel-tab) — Fase 2A.4
 // ============================================================================
 
@@ -1411,7 +1900,7 @@ function renderTagsSection() {
 
   // Edit-mode: badges met X + add-button
   const assignedSlugs = new Set(tags.map((t) => t.slug));
-  const allDefs = detailState.allTagDefs || [];
+  const allDefs = _allTagDefs || [];
   const available = allDefs.filter((d) => !assignedSlugs.has(d.slug));
 
   const badgesHtml = tags.map((t) =>
@@ -1453,13 +1942,10 @@ function toggleTagAddPopover(e) {
 }
 
 async function toggleTagEditMode() {
-  // Bij eerste activatie: lazy-load tag-definitions (cache in detailState.allTagDefs)
-  if (!detailState.tagEditMode && detailState.allTagDefs === null) {
+  // Bij eerste activatie: lazy-load via gedeelde getTagDefinitions() helper.
+  if (!detailState.tagEditMode) {
     try {
-      const res = await window.AgentShared.apiFetch('/api/customer-tag-definitions');
-      if (!res.ok) throw new Error('HTTP ' + res.status);
-      const { tags } = await res.json();
-      detailState.allTagDefs = tags || [];
+      await getTagDefinitions();
     } catch (err) {
       console.error('[klanten] tag-defs load failed:', err);
       $('#prof-tags-error').textContent = 'Kon tag-lijst niet laden';
@@ -1911,18 +2397,24 @@ function confirmDuplicateAndProceed() {
 // listeners op input/button-children, robuust tegen stopPropagation in nested
 // handlers + input-focus context.
 //
-// ESC topmost-prioriteit (Fase 2A.4):
-//   1. duplicateConfirmModal (kan stacken bovenop customerFormModal tijdens create-flow)
-//   2. archiveModal
-//   3. customerFormModal
-//   4. tag-popover in filter-bar (lijst-view)
-//   5. tag-add-popover in Profiel-tab Tags-kaart (detail-view edit-mode)
+// ESC topmost-prioriteit (Fase 2A.4 commit 6):
+//   1. duplicateConfirmModal (kan stacken bovenop customerFormModal in create-flow)
+//   2. bulkArchiveModal      (vanuit lijst-view bulk-action-bar)
+//   3. bulkTagModal          (idem)
+//   4. archiveModal          (vanuit detail-view)
+//   5. customerFormModal
+//   6. tag-popover in filter-bar (lijst-view)
+//   7. tag-add-popover in Profiel-tab Tags-kaart (detail-view edit-mode)
+// (Bulk-modals en customer/archive-modals zijn mutually exclusive — bulk vanuit
+//  lijst, archive/edit vanuit detail. Volgorde is defensief.)
 (function bindModalGlobals() {
   document.addEventListener('keydown', (e) => {
     if (e.key !== 'Escape') return;
-    if (!$('#duplicateConfirmModal').classList.contains('hidden')) { closeDuplicateModal(); return; }
-    if (!$('#archiveModal').classList.contains('hidden'))          { closeArchiveModal();   return; }
-    if (!$('#customerFormModal').classList.contains('hidden'))     { closeCustomerModal();  return; }
+    if (!$('#duplicateConfirmModal').classList.contains('hidden')) { closeDuplicateModal();    return; }
+    if (!$('#bulkArchiveModal').classList.contains('hidden'))      { closeBulkArchiveModal(); return; }
+    if (!$('#bulkTagModal').classList.contains('hidden'))          { closeBulkTagModal();     return; }
+    if (!$('#archiveModal').classList.contains('hidden'))          { closeArchiveModal();     return; }
+    if (!$('#customerFormModal').classList.contains('hidden'))     { closeCustomerModal();    return; }
     const filterTagWrap = $('#filter-tags');
     if (filterTagWrap && filterTagWrap.classList.contains('open')) { filterTagWrap.classList.remove('open'); return; }
     const tagAddWrap = $('#tag-add-wrap');
