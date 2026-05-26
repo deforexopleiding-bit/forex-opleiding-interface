@@ -1112,10 +1112,8 @@ function bindFilterEvents() {
   document.addEventListener('click', (e) => {
     if (!$('#filter-tags').contains(e.target)) $('#filter-tags').classList.remove('open');
   });
-  // Esc sluit tag-popover (WCAG 2.1 / toetsenbord-UX)
-  document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') $('#filter-tags').classList.remove('open');
-  });
+  // (ESC-handling voor tag-popover zit in centrale bindModalGlobals IIFE
+  //  onderaan dit script — capture-phase, modal > popover > niets prioriteit.)
 
   // Status pills
   $$('#filter-status input[name="status"]').forEach((cb) => {
@@ -1401,13 +1399,18 @@ async function unarchiveCustomer() {
   }
 }
 
-// Global modal-mechanics: ESC sluit topmost open modal; click op overlay (niet card) sluit ook.
+// Global modal-mechanics: centrale ESC-handler (capture-phase) + overlay-click.
+// Capture-phase: triggert vóór bubbling-phase listeners op input/button-children,
+// robuust tegen stopPropagation in nested handlers + input-focus context.
+// Topmost-element prioriteit: modal > tag-popover > niets.
 (function bindModalGlobals() {
   document.addEventListener('keydown', (e) => {
     if (e.key !== 'Escape') return;
     if (!$('#archiveModal').classList.contains('hidden'))      { closeArchiveModal(); return; }
     if (!$('#customerFormModal').classList.contains('hidden')) { closeCustomerModal(); return; }
-  });
+    const tagWrap = $('#filter-tags');
+    if (tagWrap && tagWrap.classList.contains('open'))         { tagWrap.classList.remove('open'); return; }
+  }, true);
   document.querySelectorAll('.modal-overlay').forEach((ov) => {
     ov.addEventListener('click', (e) => { if (e.target === ov) ov.classList.add('hidden'); });
   });

@@ -55,12 +55,16 @@
   en `api/customer-archive.js`.
 - Kandidaat voor extractie naar `api/_lib/customer-shape.js` in 2A.4 cleanup.
 
-**Multiple ESC-handlers in `modules/klanten.html`** (Fase 2A.3)
-- Eén ESC-listener op `bindFilterEvents()` sluit tag-popover (lijst-view).
-- Eén ESC-listener in `bindModalGlobals()` IIFE sluit topmost open modal.
-- Beide draaien onafhankelijk; theoretisch dubbel-effect bij gelijktijdig open.
-- In praktijk geen probleem: popover is meestal dicht bij modal-open.
-- Cleanup: één centrale ESC-handler met topmost-element detectie (modal > popover > niets).
+**Search op customer-list zoekt per-veld, geen fullname-concat** (Fase 2A.3 smoke-test bevinding)
+- `/api/customers?search=X` doet `.or(first_name.ilike, last_name.ilike, email.ilike, phone.ilike)`.
+- Zoek-string "Jan Jansen" (met spatie) matched geen rij — geen enkel veld bevat
+  de complete string. Werkt wel voor single-word: "Jan", "Jansen", "jansen@", "+316".
+- Niet-blokkerend; gebruikers zoeken in praktijk vrijwel altijd single-word.
+- Cleanup-opties (2A.4 of later):
+  * Frontend splits search op spaties → AND tussen woorden, OR tussen velden;
+    vereist API-wijziging om meervoudige terms te accepteren.
+  * DB generated column `search_text` (first_name || ' ' || last_name) met
+    trigger-onderhoud → single ILIKE. Cleanste oplossing maar migratie nodig.
 
 **AVG-impact: PII in `audit_log` JSONB** (Fase 2A.3 → 2C)
 - `audit_log.before_json` en `after_json` bevatten volledige customer-rows
