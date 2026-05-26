@@ -54,6 +54,17 @@
    - Geen UPDATE/DELETE op bestaande rijen
    - Eerst read-only validatie van staat
 
+5. **Branch-creation kopieert SCHEMA, niet DATA**
+   - Supabase branching maakt schema-consolidatie snapshot
+   - INSERT-statements uit migraties gaan NIET mee bij branch-creation
+   - Daarom moet `supabase/seed.sql` self-contained zijn voor ALLE data die
+     preview branches nodig hebben — ook tag-definities die eigenlijk in
+     migratie 012 staan
+   - Verifieerd via `schema_migrations` table die alleen 'remote_schema' +
+     'branch_merge' entries toont
+   - Implicatie: bij elke nieuwe DB-tabel met seed-data, plaats die seed in
+     `seed.sql`, NIET alleen in migratie
+
 ---
 
 ## ✅ Gerealiseerd 2026-05-14 — Fase C + Role-architectuur + RLS + Auth-gate

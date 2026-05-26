@@ -15,6 +15,22 @@
 BEGIN;
 
 -- ============================================================================
+-- 0) customer_tag_definitions (5 system tags)
+--    NOTE: Hoewel deze óók in migratie 012 INSERT staan, kopieert Supabase
+--    Branching alleen schema (DDL) bij branch-creation — niet data.
+--    Op productie zijn deze handmatig geseed na de Fase 1 merge.
+--    Voor reproduceerbare preview-branches moet seed.sql self-contained zijn.
+--    Idempotent via ON CONFLICT (slug) DO NOTHING.
+-- ============================================================================
+INSERT INTO customer_tag_definitions (slug, label, color, is_system, display_order) VALUES
+  ('vip',         'VIP',         '#F59E0B', true, 1),
+  ('risico',      'Risico',      '#EF4444', true, 2),
+  ('ambassadeur', 'Ambassadeur', '#10B981', true, 3),
+  ('pilot',       'Pilot',       '#3B82F6', true, 4),
+  ('oud-lead',    'Oud-lead',    '#9CA3AF', true, 5)
+ON CONFLICT (slug) DO NOTHING;
+
+-- ============================================================================
 -- 1) Customers (9 stuks)
 --    Mix:
 --    - klant 1-5,7,8: volledig contact-data
