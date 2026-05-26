@@ -99,6 +99,47 @@
     .wip-card h2 { font-size:20px; margin:12px 0 8px; }
     .wip-card p { color:var(--text-dim); font-size:13px; line-height:1.6; max-width:480px; margin:0 auto 8px; }
     .wip-card code { background:var(--bg); padding:2px 8px; border-radius:6px; font-family:monospace; font-size:12px; }
+
+    /* Detail-view (Fase 2A.2) */
+    .detail-header { display:flex; align-items:center; gap:16px; margin-bottom:14px; flex-wrap:wrap; }
+    .detail-header-info { flex:1; display:flex; align-items:center; gap:12px; flex-wrap:wrap; min-width:240px; }
+    .detail-name { font-size:24px; font-weight:700; margin:0; letter-spacing:-.3px; }
+    .detail-header-actions { display:flex; gap:8px; }
+    .detail-header-actions .btn:disabled { opacity:.4; cursor:not-allowed; }
+
+    .detail-tabs { display:flex; border-bottom:1px solid var(--border); margin-bottom:14px; gap:0; flex-wrap:wrap; }
+    .tab-btn { padding:10px 16px; background:transparent; border:none; border-bottom:2px solid transparent; color:var(--text-faint); font-size:13px; cursor:pointer; font-family:inherit; display:flex; align-items:center; gap:6px; transition:color .15s, border-color .15s; }
+    .tab-btn:hover:not(.active) { color:var(--text); }
+    .tab-btn.active { color:var(--text); font-weight:600; border-bottom-color:var(--accent-cyan,#06b6d4); }
+    .tab-count { background:var(--bg); color:var(--text-faint); padding:1px 7px; border-radius:10px; font-size:11px; font-weight:600; min-width:18px; text-align:center; }
+    .tab-btn.active .tab-count { background:var(--accent-cyan,#06b6d4); color:#fff; }
+    .tab-content { padding:4px 0; }
+    .tab-content[hidden] { display:none; }
+
+    .detail-cards-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(280px, 1fr)); gap:12px; }
+    .detail-card { padding:16px; background:var(--bg-elev); border:1px solid var(--border); border-radius:12px; }
+    .detail-card h3 { font-size:12px; font-weight:600; margin:0 0 10px; color:var(--text-faint); text-transform:uppercase; letter-spacing:.5px; display:flex; align-items:center; gap:6px; }
+    .detail-row { display:flex; justify-content:space-between; align-items:baseline; padding:6px 0; gap:12px; font-size:13px; border-bottom:1px solid var(--border); }
+    .detail-row:last-child { border-bottom:none; }
+    .detail-row .detail-label { color:var(--text-faint); font-size:12px; flex-shrink:0; }
+    .detail-row > span:last-child, .detail-row > a:last-child { text-align:right; word-break:break-word; }
+    .detail-row a { color:var(--brand-primary,#093d54); text-decoration:none; }
+    .detail-row a:hover { text-decoration:underline; }
+
+    .detail-section { margin-bottom:14px; background:var(--bg-elev); border:1px solid var(--border); border-radius:12px; padding:14px; }
+    .detail-section-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; gap:10px; flex-wrap:wrap; }
+    .detail-section h3 { font-size:14px; font-weight:600; margin:0; display:flex; align-items:center; gap:6px; }
+
+    .note-item { padding:12px 0; border-bottom:1px solid var(--border); }
+    .note-item:last-child { border-bottom:none; }
+    .note-body { font-size:13px; line-height:1.5; white-space:pre-wrap; word-break:break-word; }
+    .note-meta { font-size:11px; color:var(--text-faint); margin-top:6px; }
+
+    .placeholder-card { padding:18px; background:var(--bg); border:1px dashed var(--border); border-radius:8px; color:var(--text-faint); font-size:13px; font-style:italic; text-align:center; }
+    .detail-not-found { text-align:center; padding:60px 20px; }
+    .detail-not-found .ti { font-size:48px; }
+    .detail-not-found h2 { font-size:20px; margin:12px 0 8px; }
+    .detail-not-found p { color:var(--text-dim); font-size:13px; }
   </style>
 </head>
 <body>
@@ -224,18 +265,115 @@
     </div>
 
     <!-- ────────────────────────────────────────────────────────────────────
-         Detail-placeholder (getoond bij ?id=<uuid> in URL)
-         Vervangen door echte detail-pagina in Fase 2A.2.
+         Detail-view (Fase 2A.2): getoond bij ?id=<uuid> in URL.
+         Read-only — Edit/Archive/AddNote knoppen tonen "Beschikbaar in 2A.3/2A.4".
     ──────────────────────────────────────────────────────────────────────── -->
     <div id="view-detail" style="display:none;">
-      <a href="/modules/klanten.html" class="back-link">
-        <i class="ti ti-arrow-left"></i> Terug naar klant-overzicht
-      </a>
-      <div class="wip-card">
-        <div class="wip-icon">🚧</div>
-        <h2>Klant-detail komt in Fase 2A.2</h2>
-        <p>De detailpagina voor deze klant wordt in de volgende sub-fase opgeleverd (NAW-bewerken, tags, notities, AVG-acties, WhatsApp-historie).</p>
-        <p>Klant ID: <code id="debug-customer-id"></code></p>
+
+      <!-- Error / Not-found container (alternatief voor #detail-content) -->
+      <div id="detail-error" style="display:none;"></div>
+
+      <!-- Hoofdcontent (verborgen tot /api/customer geslaagd is) -->
+      <div id="detail-content" style="display:none;">
+        <a href="/modules/klanten.html" class="back-link">
+          <i class="ti ti-arrow-left"></i> Terug naar klant-overzicht
+        </a>
+
+        <div class="detail-header">
+          <div class="detail-header-info">
+            <h1 class="detail-name" id="detail-name">—</h1>
+            <span class="status-badge" id="detail-status">—</span>
+          </div>
+          <div class="detail-header-actions">
+            <button id="btn-edit-customer" class="btn btn-sm" type="button" title="Beschikbaar in 2A.3">
+              <i class="ti ti-edit"></i> Bewerken
+            </button>
+            <button id="btn-archive-customer" class="btn btn-sm" type="button" title="Beschikbaar in 2A.3">
+              <i class="ti ti-archive"></i> Archiveren
+            </button>
+          </div>
+        </div>
+
+        <div class="detail-tabs" role="tablist">
+          <button class="tab-btn active" data-tab="profiel" role="tab" aria-selected="true" aria-controls="tab-panel-profiel" id="tab-btn-profiel">
+            <i class="ti ti-user"></i> Profiel
+          </button>
+          <button class="tab-btn" data-tab="communicatie" role="tab" aria-selected="false" aria-controls="tab-panel-communicatie" id="tab-btn-communicatie">
+            <i class="ti ti-message-circle"></i> Communicatie <span class="tab-count" id="tab-count-communicatie">0</span>
+          </button>
+          <button class="tab-btn" data-tab="audit" role="tab" aria-selected="false" aria-controls="tab-panel-audit" id="tab-btn-audit">
+            <i class="ti ti-history"></i> Audit <span class="tab-count" id="tab-count-audit">0</span>
+          </button>
+        </div>
+
+        <!-- Tab: Profiel -->
+        <div class="tab-content" id="tab-panel-profiel" role="tabpanel" aria-labelledby="tab-btn-profiel">
+          <div class="detail-cards-grid">
+            <div class="detail-card">
+              <h3><i class="ti ti-user"></i> Persoonlijk</h3>
+              <div class="detail-row"><span class="detail-label">Voornaam</span><span id="prof-first-name">—</span></div>
+              <div class="detail-row"><span class="detail-label">Achternaam</span><span id="prof-last-name">—</span></div>
+              <div class="detail-row"><span class="detail-label">Geboortedatum</span><span id="prof-dob">—</span></div>
+            </div>
+
+            <div class="detail-card">
+              <h3><i class="ti ti-address-book"></i> Contact</h3>
+              <div class="detail-row"><span class="detail-label">Email</span><span id="prof-email">—</span></div>
+              <div class="detail-row"><span class="detail-label">Telefoon</span><span id="prof-phone">—</span></div>
+            </div>
+
+            <div class="detail-card">
+              <h3><i class="ti ti-map-pin"></i> Adres</h3>
+              <div class="detail-row"><span class="detail-label">Straat + nr.</span><span id="prof-address-line1">—</span></div>
+              <div class="detail-row"><span class="detail-label">Postcode + plaats</span><span id="prof-address-line2">—</span></div>
+            </div>
+
+            <div class="detail-card">
+              <h3><i class="ti ti-tag"></i> Tags</h3>
+              <div id="prof-tags"><span class="cust-empty">Geen tags</span></div>
+            </div>
+
+            <div class="detail-card">
+              <h3><i class="ti ti-info-circle"></i> Metadata</h3>
+              <div class="detail-row"><span class="detail-label">Klant sinds</span><span id="prof-created-at">—</span></div>
+              <div class="detail-row"><span class="detail-label">Laatst bijgewerkt</span><span id="prof-updated-at">—</span></div>
+              <div class="detail-row"><span class="detail-label">TradersLeague ID</span><span id="prof-tl-id">—</span></div>
+              <div class="detail-row"><span class="detail-label">GoHighLevel ID</span><span id="prof-ghl-id">—</span></div>
+              <div class="detail-row"><span class="detail-label">Privacy geaccepteerd</span><span id="prof-privacy">—</span></div>
+              <div class="detail-row"><span class="detail-label">Risico-tag automatisch</span><span id="prof-risk-auto">—</span></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Tab: Communicatie -->
+        <div class="tab-content" id="tab-panel-communicatie" role="tabpanel" aria-labelledby="tab-btn-communicatie" hidden>
+          <div class="detail-section">
+            <div class="detail-section-header">
+              <h3><i class="ti ti-notes"></i> Notities</h3>
+              <button id="btn-add-note" class="btn btn-sm" type="button" title="Beschikbaar in 2A.4">
+                <i class="ti ti-plus"></i> Notitie toevoegen
+              </button>
+            </div>
+            <div id="notes-list">
+              <div class="placeholder-card">Notities laden…</div>
+            </div>
+          </div>
+
+          <div class="detail-section">
+            <h3><i class="ti ti-brand-whatsapp"></i> WhatsApp gesprekken</h3>
+            <div class="placeholder-card">Beschikbaar in Fase 2C (WhatsApp infrastructuur)</div>
+          </div>
+
+          <div class="detail-section">
+            <h3><i class="ti ti-mail"></i> Email correspondentie</h3>
+            <div class="placeholder-card">Beschikbaar in latere fase (post-MVP)</div>
+          </div>
+        </div>
+
+        <!-- Tab: Audit -->
+        <div class="tab-content" id="tab-panel-audit" role="tabpanel" aria-labelledby="tab-btn-audit" hidden>
+          <div id="audit-placeholder" class="placeholder-card">Nog geen wijzigingen geregistreerd voor deze klant.</div>
+        </div>
       </div>
     </div>
 
@@ -291,19 +429,271 @@ async function init() {
     return;
   }
 
-  // Mode-detectie: ?id=<uuid> → detail-placeholder, anders lijst-view.
+  // Mode-detectie: ?id=<uuid> → detail-view (Fase 2A.2), anders lijst-view.
   const params = new URLSearchParams(window.location.search);
   const customerId = params.get('id');
   if (customerId) {
-    renderDetailPlaceholder(customerId);
+    await showDetailView(customerId);
     return;
   }
   await initListView();
 }
 
-function renderDetailPlaceholder(id) {
+// ============================================================================
+// Detail-view (Fase 2A.2) — 3 tabs: Profiel / Communicatie / Audit
+// ============================================================================
+const detailState = {
+  customerId: null,
+  customer: null,
+  notes: null,            // null = nog niet geladen; [] = geladen, leeg
+  activeTab: 'profiel',
+};
+const VALID_TABS = new Set(['profiel', 'communicatie', 'audit']);
+const UUID_RE_CLIENT = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+const fmtDateTime = (iso) => {
+  if (!iso) return '—';
+  try {
+    return new Intl.DateTimeFormat('nl-NL', { day:'2-digit', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit' }).format(new Date(iso));
+  } catch { return iso; }
+};
+const fmtDateLong = (iso) => {
+  if (!iso) return '—';
+  try {
+    return new Intl.DateTimeFormat('nl-NL', { day:'numeric', month:'long', year:'numeric' }).format(new Date(iso));
+  } catch { return iso; }
+};
+
+async function showDetailView(customerId) {
   $('#view-detail').style.display = '';
-  $('#debug-customer-id').textContent = id;
+  bindDetailTabEvents();
+  bindDetailActionButtons();
+
+  // Client-side UUID-validatie — server doet ook 400 maar dit voorkomt round-trip
+  if (!UUID_RE_CLIENT.test(customerId)) {
+    renderDetailError('Ongeldig klant-ID in URL.');
+    return;
+  }
+  detailState.customerId = customerId;
+
+  // Active tab uit URL (?tab=…), default 'profiel'
+  const params = new URLSearchParams(window.location.search);
+  const tabParam = params.get('tab');
+  detailState.activeTab = (tabParam && VALID_TABS.has(tabParam)) ? tabParam : 'profiel';
+
+  try {
+    const res = await window.AgentShared.apiFetch('/api/customer?id=' + encodeURIComponent(customerId));
+    if (res.status === 404) { renderDetailNotFound(); return; }
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.error || ('HTTP ' + res.status));
+    }
+    const data = await res.json();
+    detailState.customer = data.customer;
+    renderDetail();
+  } catch (err) {
+    console.error('[klanten] detail load failed:', err);
+    renderDetailError(err.message);
+  }
+}
+
+function renderDetail() {
+  const c = detailState.customer;
+  $('#detail-error').style.display = 'none';
+  $('#detail-content').style.display = '';
+
+  // Header — naam via textContent (XSS-safe), status-badge class wisselt
+  const name = `${(c.first_name || '').trim()} ${(c.last_name || '').trim()}`.trim() || '(geen naam)';
+  $('#detail-name').textContent = name;
+  const statusEl = $('#detail-status');
+  // Verwijder oude status-klasse, voeg nieuwe toe (status is whitelist: active/archived/anonymized)
+  statusEl.className = 'status-badge ' + (['active','archived','anonymized'].includes(c.status) ? c.status : 'active');
+  statusEl.textContent = labelForStatus(c.status);
+
+  // Edit/Archive disabled bij archived/anonymized (al irreversible)
+  const isLocked = c.status !== 'active';
+  $('#btn-edit-customer').disabled = isLocked;
+  $('#btn-archive-customer').disabled = isLocked;
+
+  // Tab-counts
+  $('#tab-count-communicatie').textContent = c.notes_count || 0;
+  $('#tab-count-audit').textContent = c.audit_count || 0;
+
+  // Activate tab (geen URL-push — bestaande URL is al juist)
+  activateDetailTab(detailState.activeTab, /*updateUrl=*/ false);
+}
+
+function activateDetailTab(tabName, updateUrl) {
+  if (!VALID_TABS.has(tabName)) tabName = 'profiel';
+  detailState.activeTab = tabName;
+
+  $$('.detail-tabs .tab-btn').forEach((btn) => {
+    const active = btn.dataset.tab === tabName;
+    btn.classList.toggle('active', active);
+    btn.setAttribute('aria-selected', String(active));
+  });
+  $$('.tab-content').forEach((panel) => {
+    panel.hidden = (panel.id !== 'tab-panel-' + tabName);
+  });
+
+  if (tabName === 'profiel')           renderProfielTab();
+  else if (tabName === 'communicatie') renderCommunicatieTab();
+  else if (tabName === 'audit')        renderAuditTab();
+
+  if (updateUrl) {
+    const url = new URL(window.location.href);
+    url.searchParams.set('id', detailState.customerId);
+    url.searchParams.set('tab', tabName);
+    history.pushState({ tab: tabName }, '', url.toString());
+  }
+}
+
+function renderProfielTab() {
+  const c = detailState.customer;
+
+  $('#prof-first-name').textContent = c.first_name || '—';
+  $('#prof-last-name').textContent  = c.last_name  || '—';
+  $('#prof-dob').textContent        = c.date_of_birth ? fmtDateLong(c.date_of_birth) : '—';
+
+  // Contact: mailto:/tel: links (encodeURIComponent op user-input)
+  const emailEl = $('#prof-email');
+  if (c.email) emailEl.innerHTML = `<a href="mailto:${encodeURIComponent(c.email)}">${escapeHtml(c.email)}</a>`;
+  else emailEl.innerHTML = '<span class="cust-empty">—</span>';
+  const phoneEl = $('#prof-phone');
+  if (c.phone) phoneEl.innerHTML = `<a href="tel:${encodeURIComponent(c.phone)}">${escapeHtml(c.phone)}</a>`;
+  else phoneEl.innerHTML = '<span class="cust-empty">—</span>';
+
+  // Adres — 2 regels: street+number / postal+city
+  const streetNumber = [c.address_street, c.address_number].filter(Boolean).join(' ');
+  $('#prof-address-line1').textContent = streetNumber || '—';
+  const postalCity = [c.address_postal, c.address_city].filter(Boolean).join(' ');
+  $('#prof-address-line2').textContent = postalCity || '—';
+
+  // Tags (kleurbadges)
+  const tagsEl = $('#prof-tags');
+  if (c.tags && c.tags.length) {
+    tagsEl.innerHTML = c.tags.map((t) =>
+      `<span class="tag-badge" style="background:${escapeHtml(t.color || '#6B7280')}">${escapeHtml(t.label)}</span>`
+    ).join('');
+  } else {
+    tagsEl.innerHTML = '<span class="cust-empty">Geen tags</span>';
+  }
+
+  // Metadata
+  $('#prof-created-at').textContent = fmtDate(c.created_at);
+  $('#prof-updated-at').textContent = fmtDate(c.updated_at);
+  $('#prof-tl-id').textContent       = c.tl_contact_id  || 'Nog niet gekoppeld';
+  $('#prof-ghl-id').textContent      = c.ghl_contact_id || 'Nog niet gekoppeld';
+  $('#prof-privacy').textContent     = c.privacy_accepted_at ? fmtDate(c.privacy_accepted_at) : 'Nog niet';
+  $('#prof-risk-auto').textContent   = c.risk_tag_auto ? 'Ja' : 'Nee';
+}
+
+async function renderCommunicatieTab() {
+  // Notities lazy-load (1x, gecached in detailState.notes)
+  if (detailState.notes === null) {
+    $('#notes-list').innerHTML = '<div class="placeholder-card">Notities laden…</div>';
+    try {
+      const res = await window.AgentShared.apiFetch('/api/customer-notes?customer_id=' + encodeURIComponent(detailState.customerId));
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error || ('HTTP ' + res.status));
+      }
+      const { notes } = await res.json();
+      detailState.notes = notes || [];
+    } catch (err) {
+      console.error('[klanten] notes load failed:', err);
+      $('#notes-list').innerHTML = `<div class="placeholder-card" style="color:#EF4444;">Kon notities niet laden: ${escapeHtml(err.message)}</div>`;
+      return;
+    }
+  }
+
+  const list = $('#notes-list');
+  if (!detailState.notes.length) {
+    list.innerHTML = '<div class="placeholder-card">Nog geen notities voor deze klant.</div>';
+    return;
+  }
+  list.innerHTML = detailState.notes.map((n) => {
+    const author = (n.created_by && n.created_by.name) ? escapeHtml(n.created_by.name) : 'Onbekend';
+    const editedMarker = n.edited_at ? ` · bewerkt ${escapeHtml(fmtDateTime(n.edited_at))}` : '';
+    return `
+      <div class="note-item">
+        <div class="note-body">${escapeHtml(n.body)}</div>
+        <div class="note-meta">${escapeHtml(fmtDateTime(n.created_at))} · door ${author}${editedMarker}</div>
+      </div>`;
+  }).join('');
+}
+
+function renderAuditTab() {
+  const c = detailState.customer;
+  const el = $('#audit-placeholder');
+  if ((c.audit_count || 0) === 0) {
+    el.textContent = 'Nog geen wijzigingen geregistreerd voor deze klant.';
+  } else {
+    el.textContent = `Audit-history (${c.audit_count} ${c.audit_count === 1 ? 'entry' : 'entries'}) wordt geladen in Fase 2A.3.`;
+  }
+}
+
+function renderDetailError(msg) {
+  $('#detail-content').style.display = 'none';
+  const errEl = $('#detail-error');
+  errEl.style.display = '';
+  errEl.innerHTML = `
+    <a href="/modules/klanten.html" class="back-link">
+      <i class="ti ti-arrow-left"></i> Terug naar klant-overzicht
+    </a>
+    <div class="detail-not-found">
+      <i class="ti ti-alert-circle" style="color:#EF4444;"></i>
+      <h2>Kon klant niet laden</h2>
+      <p>${escapeHtml(msg || 'Onbekende fout')}</p>
+      <br><button class="btn btn-sm" onclick="reloadDetail()"><i class="ti ti-refresh"></i> Opnieuw proberen</button>
+    </div>`;
+}
+
+function renderDetailNotFound() {
+  $('#detail-content').style.display = 'none';
+  const errEl = $('#detail-error');
+  errEl.style.display = '';
+  errEl.innerHTML = `
+    <a href="/modules/klanten.html" class="back-link">
+      <i class="ti ti-arrow-left"></i> Terug naar klant-overzicht
+    </a>
+    <div class="detail-not-found">
+      <i class="ti ti-user-off" style="color:var(--text-faint);"></i>
+      <h2>Klant niet gevonden</h2>
+      <p>De klant met dit ID bestaat niet (meer).</p>
+    </div>`;
+}
+
+function reloadDetail() {
+  detailState.customer = null;
+  detailState.notes = null;
+  showDetailView(detailState.customerId);
+}
+window.reloadDetail = reloadDetail;
+
+function bindDetailTabEvents() {
+  if (bindDetailTabEvents._bound) return;
+  bindDetailTabEvents._bound = true;
+
+  $$('.detail-tabs .tab-btn').forEach((btn) => {
+    btn.addEventListener('click', () => activateDetailTab(btn.dataset.tab, /*updateUrl=*/ true));
+  });
+
+  // Browser back/forward: rerender bij ?tab=-wijziging, of reload bij verlaten detail-view.
+  window.addEventListener('popstate', () => {
+    const p = new URLSearchParams(window.location.search);
+    const id = p.get('id');
+    if (!id) { window.location.reload(); return; }
+    activateDetailTab(p.get('tab') || 'profiel', /*updateUrl=*/ false);
+  });
+}
+
+function bindDetailActionButtons() {
+  if (bindDetailActionButtons._bound) return;
+  bindDetailActionButtons._bound = true;
+  $('#btn-edit-customer').addEventListener('click', () => alert('Beschikbaar in Fase 2A.3'));
+  $('#btn-archive-customer').addEventListener('click', () => alert('Beschikbaar in Fase 2A.3'));
+  $('#btn-add-note').addEventListener('click', () => alert('Beschikbaar in Fase 2A.4'));
 }
 
 // ============================================================================

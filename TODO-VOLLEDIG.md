@@ -17,7 +17,7 @@
 
 ### ⏳ Open Fase 2
 - [ ] Klant-overzicht UI (lijst, filters, search)
-- [ ] Klant-detailpagina basis (header + tabs)
+- [x] Klant-detailpagina basis (header + tabs Profiel/Communicatie/Audit) — Fase 2A.2
 - [ ] CRUD-endpoints (POST/PATCH/DELETE customer)
 - [ ] Tag-toekenning UI
 - [ ] TradersLeague OAuth setup
