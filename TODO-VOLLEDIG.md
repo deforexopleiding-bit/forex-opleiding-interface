@@ -197,6 +197,78 @@
 
 ---
 
+## ✉️ Email-classifier fix (2026-05-26)
+
+### ✅ Afgerond
+- [x] Reclassify-tool slaat geen leerdata op → opgelost via gedeelde
+      `applyLearning()` helper in `api/_lib/email-learn.js` (commit 1+3)
+- [x] sync-emails geeft lege bodySnippet aan classifier → 3-pass refactor:
+      body-fetch vóór categorize (commit 2)
+- [x] Backfill-endpoint voor ~2100 historische reclassify-correcties
+      (`api/email-reclassify-backfill-learnings.js`, commit 4)
+
+### ⏳ Open punten
+- [ ] Backfill draaien op productie (GATE 4 na PR-merge) — POST execute
+      in chunks van 50 tot done=true. Verifieer eerst preview-aggregatie.
+- [ ] Monitoring 1-2 weken: foutpercentage classifier meten na backfill.
+      Welke senders blijven verkeerd geclassificeerd = TODO data voor
+      Niveau 2 evaluatie (Train Agent UI heroverwegen?).
+- [ ] Train Agent UI evalueren: nog nodig na fix? Als reclassify-tool
+      hetzelfde leereffect heeft, is de "Verplaats & Train"-knop in
+      modules/email.html mogelijk redundant.
+
+### 🔍 Leerpunten
+
+1. **Refactor naar `_lib` helper-pattern als single source of truth**
+   - Wanneer 2+ endpoints dezelfde business-logica gebruiken: extract
+     naar `api/_lib/<feature>-<concern>.js` met dependency-injection
+     (supabase als parameter, niet module-import).
+   - Voorkomt drift tussen callers; bug-fixes raken alle callers tegelijk.
+   - Voorbeeld: `api/_lib/email-learn.js` (Train Agent + Reclassify +
+     Backfill gebruiken nu dezelfde flow).
+
+2. **Sync-emails volgorde-bug: body-fetch hoort vóór classify**
+   - Classifier-input moet altijd compleet zijn bij eerste call.
+   - 3-pass aanpak (envelope → body → classify) maakt afhankelijkheden
+     expliciet zichtbaar.
+   - Try/catch resilience per pass: body-fetch-fail → snippet=null →
+     classifier krijgt '' (fallback gedrag, geen crash).
+
+3. **Marker-pattern in `category_reason` voor backfill-detectie**
+   - Originele reclassify-tool schreef `[bron: reclassify-2026-05-22] …`
+     in `email_messages.category_reason`. Achteraf perfect identificeerbaar
+     voor backfill: `WHERE category_reason ILIKE '%reclassify-2026-05-22%'`.
+   - Pattern voor toekomstige bulk-operations: altijd een unieke
+     timestamp-marker meeschrijven, ook bij no-op writes.
+
+4. **`VALID_CATEGORIES` mogelijk duplicate source**
+   - Nu gedefinieerd in `api/_lib/email-learn.js`.
+   - Mogelijk ook gehardcoded in `api/email-agent.js` en/of frontend.
+   - Cleanup-kandidaat: single-source-of-truth via export/import (later).
+
+5. **Silent-catch in `applyLearning` regel 235-237 maskeert constraint-violations**
+   - Bij DB-failure (FK/RLS) blijft `learn_example_id = null`, maar caller
+     krijgt `ok: true` ongedaan. Niet kritisch voor productie (DB werkt
+     normaal), maar verstorend voor diagnose tijdens smoke-tests met
+     fake payloads.
+   - Cleanup-optie: throw met `.statusCode = 500`, of return `error_flag`
+     in response zodat callers kunnen onderscheiden tussen "geleerd" en
+     "leerdata-fail maar mutation OK". Niet voor commit 5 fix.
+
+6. **Smoke-test methodologie: endpoints met FK/RLS niet testen met fake payloads**
+   - Endpoints die naar tabellen met foreign-key-constraints of RLS-policies
+     schrijven, kunnen NIET getest worden met volledig fictieve payloads
+     (bv. random email_id). Silent-catch op DB-errors maskeert dan de
+     constraint-violation → test lijkt OK terwijl niets is opgeslagen.
+   - Best practice: smoke-test met read-only DB-verifie van recente
+     productie-records (`SELECT … ORDER BY corrected_at DESC LIMIT 5`),
+     OF realistische payload met bestaande email_id uit dezelfde DB.
+   - Bevinding tijdens GATE 1 smoke-test (commit 1 refactor): Chrome
+     gebruikte fake email-id, FK-violation werd gevangen door silent-catch,
+     `learn_example_id` was null. Bewees dat refactor zelf OK was.
+
+---
+
 ## ✅ Gerealiseerd 2026-05-14 — Fase C + Role-architectuur + RLS + Auth-gate
 
 - [x] Fase C admin panel (commit 1cdf138): api/admin-users.js GET/POST/PATCH/DELETE, verifyAdmin, logAudit, recovery link via Strato SMTP; modules/admin.html user-management UI
