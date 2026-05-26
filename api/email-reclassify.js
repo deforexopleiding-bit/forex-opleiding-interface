@@ -16,6 +16,7 @@
 
 import { supabaseAdmin } from './supabase.js';
 import { categorize } from './email-agent.js';
+import { applyLearning } from './_lib/email-learn.js';
 import { requirePermissionFailOpen } from './_lib/requirePermission.js';
 
 const MARKER          = 'reclassify-2026-05-22';
@@ -80,6 +81,11 @@ export default async function handler(req, res) {
     }
 
     const results = [];
+    // Learn-call counters (commit 3): bij elke succesvolle UPDATE met changed=true
+    // roept reclassify nu applyLearning aan, zodat reclassify-output net als
+    // Train Agent leerdata produceert (learn_examples + email_patterns).
+    let learnSucceeded = 0;
+    let learnFailed    = 0;
 
     // Sequentieel: 1 mail tegelijk (rate-limit-vriendelijk)
     for (const email of emails) {
@@ -110,6 +116,34 @@ export default async function handler(req, res) {
             })
             .eq('id', email.id);
           if (updErr) throw new Error(updErr.message);
+
+          // Bij daadwerkelijke wijziging: schrijf ook leerdata via gedeelde
+          // applyLearning helper (gelijkschakeling met Train Agent flow).
+          // Try/catch: learn-fail mag reclassify niet blokkeren — wordt
+          // gerapporteerd in summary.learn_results.
+          if (changed) {
+            try {
+              await applyLearning({
+                supabase:        supabaseAdmin,
+                email_id:        String(email.id),
+                sender:          email.from_address || '',
+                subject:         email.subject      || '',
+                body_snippet:    email.snippet      || '',
+                old_category:    email.category,
+                new_category:    newCategory,
+                corrected_by:    'reclassify',
+                correction_type: 'bulk_reclassify',
+                old_requires_action: email.requires_action,
+                new_requires_action: newRequiresAction,
+                reason:          `[bron: ${MARKER}]`,
+                email_list:      [], // bulk = geen propagatie nodig (elke mail individueel)
+              });
+              learnSucceeded++;
+            } catch (learnErr) {
+              console.warn(`[reclassify] applyLearning fout voor email ${email.id}:`, learnErr.message);
+              learnFailed++;
+            }
+          }
         }
 
         results.push({
@@ -147,6 +181,12 @@ export default async function handler(req, res) {
           acc[r.newCategory] = (acc[r.newCategory] || 0) + 1;
           return acc;
         }, {}),
+        // Leerdata-counters (commit 3): toont hoeveel changes naar
+        // learn_examples + email_patterns zijn geschreven.
+        learn_results: {
+          succeeded: learnSucceeded,
+          failed:    learnFailed,
+        },
       },
     });
   } catch (err) {
