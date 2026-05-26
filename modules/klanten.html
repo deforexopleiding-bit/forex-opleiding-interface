@@ -140,6 +140,60 @@
     .detail-not-found .ti { font-size:48px; }
     .detail-not-found h2 { font-size:20px; margin:12px 0 8px; }
     .detail-not-found p { color:var(--text-dim); font-size:13px; }
+
+    /* Modals (Fase 2A.3) — pattern uit modules/admin.html */
+    .modal-overlay { position:fixed; inset:0; background:rgba(0,0,0,0.6); z-index:500; display:flex; align-items:center; justify-content:center; backdrop-filter:blur(4px); padding:20px; }
+    .modal-overlay.hidden { display:none!important; }
+    .modal-card { background:var(--bg-elev); border:1px solid var(--border); border-radius:14px; width:100%; max-width:600px; max-height:calc(100vh - 40px); display:flex; flex-direction:column; }
+    .modal-card.modal-sm { max-width:440px; }
+    .modal-header { display:flex; align-items:center; justify-content:space-between; padding:16px 20px; border-bottom:1px solid var(--border); }
+    .modal-title { font-size:15px; font-weight:600; }
+    .modal-close { background:transparent; border:none; color:var(--text-faint); font-size:18px; cursor:pointer; padding:4px; line-height:1; }
+    .modal-close:hover { color:var(--text); }
+    .modal-body { padding:20px; overflow-y:auto; }
+    .modal-footer { display:flex; justify-content:flex-end; gap:8px; padding:14px 20px; border-top:1px solid var(--border); }
+
+    /* Form-fields (create/edit modals) */
+    .form-grid { display:grid; grid-template-columns:repeat(2, 1fr); gap:12px 16px; }
+    .form-field { display:flex; flex-direction:column; gap:4px; }
+    .form-field.form-field-full { grid-column:1 / -1; }
+    .form-field label { font-size:12px; font-weight:500; color:var(--text-faint); }
+    .form-field label .req { color:#EF4444; }
+    .form-field input, .form-field textarea { padding:8px 10px; background:var(--bg); border:1px solid var(--border); border-radius:8px; color:var(--text); font-size:13px; font-family:inherit; }
+    .form-field input:focus, .form-field textarea:focus { outline:none; border-color:var(--accent-cyan,#06b6d4); }
+    .form-field textarea { resize:vertical; min-height:60px; }
+    .form-field.has-error input, .form-field.has-error textarea { border-color:#EF4444; }
+    .field-error { font-size:11px; color:#EF4444; margin-top:2px; min-height:14px; }
+
+    .modal-banner { padding:10px 12px; margin-bottom:12px; background:#EF444415; border:1px solid #EF4444; border-radius:8px; color:#EF4444; font-size:13px; display:none; }
+    .modal-banner.visible { display:block; }
+
+    /* Audit-tab entries */
+    .audit-entry { padding:14px 0; border-bottom:1px solid var(--border); }
+    .audit-entry:last-child { border-bottom:none; }
+    .audit-entry-header { display:flex; align-items:center; gap:8px; flex-wrap:wrap; font-size:13px; margin-bottom:4px; }
+    .audit-action { display:inline-flex; align-items:center; padding:2px 8px; border-radius:999px; font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:.3px; }
+    .audit-action.created    { background:#10B98122; color:#10B981; }
+    .audit-action.updated    { background:#3B82F622; color:#3B82F6; }
+    .audit-action.archived   { background:#F59E0B22; color:#F59E0B; }
+    .audit-action.unarchived { background:#10B98122; color:#10B981; }
+    .audit-action.anonymized { background:#EF444422; color:#EF4444; }
+    .audit-meta { font-size:11px; color:var(--text-faint); }
+    .audit-reason { font-size:12px; color:var(--text-dim); margin-top:4px; font-style:italic; padding:6px 8px; background:var(--bg); border-radius:6px; }
+    .audit-diff-list { margin-top:6px; padding-left:14px; }
+    .audit-diff-item { font-size:12px; padding:3px 0; line-height:1.5; }
+    .audit-diff-item .field-name { font-weight:600; color:var(--text); }
+    .audit-diff-item .val-before { color:#EF4444; text-decoration:line-through; word-break:break-word; }
+    .audit-diff-item .val-after  { color:#10B981; word-break:break-word; }
+    .audit-diff-item .val-arrow  { color:var(--text-faint); margin:0 4px; }
+    .audit-raw-toggle { background:transparent; border:none; color:var(--text-faint); font-size:11px; cursor:pointer; text-decoration:underline; padding:4px 0; margin-top:4px; font-family:inherit; }
+    .audit-raw-toggle:hover { color:var(--text); }
+    .audit-raw { display:none; margin-top:6px; padding:10px; background:var(--bg); border:1px solid var(--border); border-radius:6px; font-family:monospace; font-size:11px; white-space:pre-wrap; word-break:break-word; max-height:280px; overflow-y:auto; color:var(--text-dim); }
+    .audit-raw.visible { display:block; }
+
+    /* Heractiveren-knop (alleen zichtbaar bij archived) */
+    .btn-unarchive { background:#10B981; color:#fff; border:none; }
+    .btn-unarchive:hover { background:#0EA371; }
   </style>
 </head>
 <body>
@@ -285,11 +339,14 @@
             <span class="status-badge" id="detail-status">—</span>
           </div>
           <div class="detail-header-actions">
-            <button id="btn-edit-customer" class="btn btn-sm" type="button" title="Beschikbaar in 2A.3">
+            <button id="btn-edit-customer" class="btn btn-sm" type="button">
               <i class="ti ti-edit"></i> Bewerken
             </button>
-            <button id="btn-archive-customer" class="btn btn-sm" type="button" title="Beschikbaar in 2A.3">
+            <button id="btn-archive-customer" class="btn btn-sm" type="button">
               <i class="ti ti-archive"></i> Archiveren
+            </button>
+            <button id="btn-unarchive-customer" class="btn btn-sm btn-unarchive" type="button" style="display:none;">
+              <i class="ti ti-rotate-clockwise"></i> Heractiveren
             </button>
           </div>
         </div>
@@ -372,11 +429,76 @@
 
         <!-- Tab: Audit -->
         <div class="tab-content" id="tab-panel-audit" role="tabpanel" aria-labelledby="tab-btn-audit" hidden>
-          <div id="audit-placeholder" class="placeholder-card">Nog geen wijzigingen geregistreerd voor deze klant.</div>
+          <div class="detail-section">
+            <h3><i class="ti ti-history"></i> Audit-history</h3>
+            <div id="audit-list">
+              <div class="placeholder-card">Audit-history laden…</div>
+            </div>
+          </div>
         </div>
       </div>
     </div>
 
+  </div>
+</div>
+
+<!-- ────────────────────────────────────────────────────────────────────────
+     Modals (Fase 2A.3)
+──────────────────────────────────────────────────────────────────────────── -->
+
+<!-- Customer create/edit modal (shared form, mode via dataset.mode) -->
+<div class="modal-overlay hidden" id="customerFormModal" role="dialog" aria-modal="true" aria-labelledby="customerFormTitle">
+  <div class="modal-card">
+    <div class="modal-header">
+      <div class="modal-title" id="customerFormTitle">Nieuwe klant</div>
+      <button class="modal-close" type="button" onclick="closeCustomerModal()" aria-label="Sluiten">&#x2715;</button>
+    </div>
+    <div class="modal-body">
+      <div class="modal-banner" id="customerFormBanner"></div>
+      <form id="customerForm" onsubmit="return false;" autocomplete="off">
+        <div class="form-grid">
+          <div class="form-field"><label for="cf-first-name">Voornaam <span class="req">*</span></label><input id="cf-first-name" name="first_name" type="text" maxlength="100" required/><div class="field-error" id="cf-err-first_name"></div></div>
+          <div class="form-field"><label for="cf-last-name">Achternaam <span class="req">*</span></label><input id="cf-last-name" name="last_name" type="text" maxlength="100" required/><div class="field-error" id="cf-err-last_name"></div></div>
+          <div class="form-field"><label for="cf-email">Email</label><input id="cf-email" name="email" type="email" maxlength="200"/><div class="field-error" id="cf-err-email"></div></div>
+          <div class="form-field"><label for="cf-phone">Telefoon</label><input id="cf-phone" name="phone" type="tel" maxlength="40"/><div class="field-error" id="cf-err-phone"></div></div>
+          <div class="form-field"><label for="cf-dob">Geboortedatum</label><input id="cf-dob" name="date_of_birth" type="date"/><div class="field-error" id="cf-err-date_of_birth"></div></div>
+          <div class="form-field"></div>
+          <div class="form-field"><label for="cf-street">Straat</label><input id="cf-street" name="address_street" type="text" maxlength="200"/><div class="field-error" id="cf-err-address_street"></div></div>
+          <div class="form-field"><label for="cf-number">Huisnummer</label><input id="cf-number" name="address_number" type="text" maxlength="20"/><div class="field-error" id="cf-err-address_number"></div></div>
+          <div class="form-field"><label for="cf-postal">Postcode</label><input id="cf-postal" name="address_postal" type="text" maxlength="20"/><div class="field-error" id="cf-err-address_postal"></div></div>
+          <div class="form-field"><label for="cf-city">Plaats</label><input id="cf-city" name="address_city" type="text" maxlength="100"/><div class="field-error" id="cf-err-address_city"></div></div>
+          <div class="form-field"><label for="cf-tl">TradersLeague ID</label><input id="cf-tl" name="tl_contact_id" type="text" maxlength="100"/><div class="field-error" id="cf-err-tl_contact_id"></div></div>
+          <div class="form-field"><label for="cf-ghl">GoHighLevel ID</label><input id="cf-ghl" name="ghl_contact_id" type="text" maxlength="100"/><div class="field-error" id="cf-err-ghl_contact_id"></div></div>
+        </div>
+      </form>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-sm" type="button" onclick="closeCustomerModal()">Annuleren</button>
+      <button class="btn btn-primary btn-sm" type="button" id="customerFormSubmit" onclick="submitCustomerForm()">Opslaan</button>
+    </div>
+  </div>
+</div>
+
+<!-- Archive-confirm modal -->
+<div class="modal-overlay hidden" id="archiveModal" role="dialog" aria-modal="true" aria-labelledby="archiveModalTitle">
+  <div class="modal-card modal-sm">
+    <div class="modal-header">
+      <div class="modal-title" id="archiveModalTitle">Klant archiveren</div>
+      <button class="modal-close" type="button" onclick="closeArchiveModal()" aria-label="Sluiten">&#x2715;</button>
+    </div>
+    <div class="modal-body">
+      <div class="modal-banner" id="archiveBanner"></div>
+      <p style="font-size:13px; margin:0 0 8px;">Weet je zeker dat je <strong id="archive-customer-name">deze klant</strong> wilt archiveren?</p>
+      <p style="font-size:12px; color:var(--text-faint); margin:0 0 12px;">Gearchiveerde klanten zijn read-only en worden standaard verborgen in het overzicht. Je kunt ze later heractiveren.</p>
+      <div class="form-field form-field-full">
+        <label for="archive-reason">Reden (optioneel)</label>
+        <textarea id="archive-reason" maxlength="500" placeholder="Bijv. 'Klant heeft schriftelijk opgezegd op 20 mei 2026'"></textarea>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-sm" type="button" onclick="closeArchiveModal()">Annuleren</button>
+      <button class="btn btn-primary btn-sm" type="button" id="archiveConfirmBtn" onclick="submitArchive()">Archiveren</button>
+    </div>
   </div>
 </div>
 
@@ -446,6 +568,7 @@ const detailState = {
   customerId: null,
   customer: null,
   notes: null,            // null = nog niet geladen; [] = geladen, leeg
+  audit: null,            // idem, voor audit-tab lazy-load
   activeTab: 'profiel',
 };
 const VALID_TABS = new Set(['profiel', 'communicatie', 'audit']);
@@ -510,10 +633,13 @@ function renderDetail() {
   statusEl.className = 'status-badge ' + (['active','archived','anonymized'].includes(c.status) ? c.status : 'active');
   statusEl.textContent = labelForStatus(c.status);
 
-  // Edit/Archive disabled bij archived/anonymized (al irreversible)
-  const isLocked = c.status !== 'active';
-  $('#btn-edit-customer').disabled = isLocked;
-  $('#btn-archive-customer').disabled = isLocked;
+  // Edit alleen bij active; Archive alleen bij active; Heractiveren alleen bij archived;
+  // bij anonymized zijn alle 3 verborgen (eindstaat).
+  const isActive   = c.status === 'active';
+  const isArchived = c.status === 'archived';
+  $('#btn-edit-customer').disabled = !isActive;
+  $('#btn-archive-customer').style.display   = isActive   ? '' : 'none';
+  $('#btn-unarchive-customer').style.display = isArchived ? '' : 'none';
 
   // Tab-counts
   $('#tab-count-communicatie').textContent = c.notes_count || 0;
@@ -623,14 +749,89 @@ async function renderCommunicatieTab() {
   }).join('');
 }
 
-function renderAuditTab() {
-  const c = detailState.customer;
-  const el = $('#audit-placeholder');
-  if ((c.audit_count || 0) === 0) {
-    el.textContent = 'Nog geen wijzigingen geregistreerd voor deze klant.';
-  } else {
-    el.textContent = `Audit-history (${c.audit_count} ${c.audit_count === 1 ? 'entry' : 'entries'}) wordt geladen in Fase 2A.3.`;
+async function renderAuditTab() {
+  const el = $('#audit-list');
+  if (detailState.audit === null) {
+    el.innerHTML = '<div class="placeholder-card">Audit-history laden…</div>';
+    try {
+      const res = await window.AgentShared.apiFetch('/api/customer-audit?customer_id=' + encodeURIComponent(detailState.customerId));
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error || ('HTTP ' + res.status));
+      }
+      const { entries } = await res.json();
+      detailState.audit = entries || [];
+    } catch (err) {
+      console.error('[klanten] audit load failed:', err);
+      el.innerHTML = `<div class="placeholder-card" style="color:#EF4444;">Kon audit-history niet laden: ${escapeHtml(err.message)}</div>`;
+      return;
+    }
   }
+
+  if (!detailState.audit.length) {
+    el.innerHTML = '<div class="placeholder-card">Nog geen wijzigingen geregistreerd voor deze klant.</div>';
+    return;
+  }
+
+  el.innerHTML = detailState.audit.map(renderAuditEntry).join('');
+  el.querySelectorAll('.audit-raw-toggle').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const target = document.getElementById(btn.dataset.target);
+      if (!target) return;
+      const visible = target.classList.toggle('visible');
+      btn.textContent = visible ? 'Volledige JSON verbergen' : 'Volledige JSON tonen';
+    });
+  });
+}
+
+const AUDIT_ACTION_LABELS = {
+  created:     'Aangemaakt',
+  updated:     'Bewerkt',
+  archived:    'Gearchiveerd',
+  unarchived:  'Heractiveerd',
+  anonymized:  'Geanonimiseerd',
+};
+
+function renderAuditEntry(e) {
+  const actionShort = String(e.action || '').replace(/^customer\./, '');
+  const actionLabel = AUDIT_ACTION_LABELS[actionShort] || actionShort;
+  const actor = (e.actor && e.actor.name) ? escapeHtml(e.actor.name) : 'Onbekend';
+  const reason = e.reason_text
+    ? `<div class="audit-reason">Reden: ${escapeHtml(e.reason_text)}</div>`
+    : '';
+  const diffHtml = (e.diff && e.diff.length)
+    ? `<div class="audit-diff-list">${e.diff.map(renderDiffItem).join('')}</div>`
+    : '';
+  const rawId = 'audit-raw-' + e.id;
+  const rawJson = JSON.stringify({ before: e.raw_before, after: e.raw_after }, null, 2);
+  return `
+    <div class="audit-entry">
+      <div class="audit-entry-header">
+        <span class="audit-action ${escapeHtml(actionShort)}">${escapeHtml(actionLabel)}</span>
+        <span class="audit-meta">${escapeHtml(fmtDateTime(e.created_at))} · door ${actor}</span>
+      </div>
+      ${reason}
+      ${diffHtml}
+      <button class="audit-raw-toggle" data-target="${escapeHtml(rawId)}" type="button">Volledige JSON tonen</button>
+      <div class="audit-raw" id="${escapeHtml(rawId)}">${escapeHtml(rawJson)}</div>
+    </div>`;
+}
+
+function renderDiffItem(d) {
+  return `<div class="audit-diff-item">
+    <span class="field-name">${escapeHtml(d.field)}</span>:
+    <span class="val-before">${escapeHtml(formatDiffValue(d.before))}</span>
+    <span class="val-arrow">→</span>
+    <span class="val-after">${escapeHtml(formatDiffValue(d.after))}</span>
+  </div>`;
+}
+
+function formatDiffValue(v) {
+  if (v == null || v === '') return '(leeg)';
+  if (typeof v === 'object') return JSON.stringify(v);
+  let s = String(v);
+  if (s.length > 80) s = s.slice(0, 77) + '…';
+  return s;
 }
 
 function renderDetailError(msg) {
@@ -691,9 +892,10 @@ function bindDetailTabEvents() {
 function bindDetailActionButtons() {
   if (bindDetailActionButtons._bound) return;
   bindDetailActionButtons._bound = true;
-  $('#btn-edit-customer').addEventListener('click', () => alert('Beschikbaar in Fase 2A.3'));
-  $('#btn-archive-customer').addEventListener('click', () => alert('Beschikbaar in Fase 2A.3'));
-  $('#btn-add-note').addEventListener('click', () => alert('Beschikbaar in Fase 2A.4'));
+  $('#btn-edit-customer').addEventListener('click',     () => openCustomerModal('edit', detailState.customer));
+  $('#btn-archive-customer').addEventListener('click',  () => openArchiveModal());
+  $('#btn-unarchive-customer').addEventListener('click', () => unarchiveCustomer());
+  $('#btn-add-note').addEventListener('click',          () => alert('Beschikbaar in Fase 2A.4'));
 }
 
 // ============================================================================
@@ -706,10 +908,7 @@ async function initListView() {
   bindSortEvents();
   bindPaginationEvents();
 
-  $('#btn-new-customer').addEventListener('click', () => {
-    // TODO Fase 2A.3: open klant-aanmaken-modal
-    alert('Beschikbaar in Fase 2A.3');
-  });
+  $('#btn-new-customer').addEventListener('click', () => openCustomerModal('create', {}));
 
   // Parallel: tags-catalogus + stats + eerste lijst-fetch
   await Promise.all([
@@ -1010,6 +1209,209 @@ function bindPaginationEvents() {
     loadCustomers();
   });
 }
+
+// ============================================================================
+// Modals (create / edit / archive) — Fase 2A.3
+// ============================================================================
+const CUSTOMER_FORM_FIELDS = [
+  'first_name', 'last_name', 'email', 'phone', 'date_of_birth',
+  'address_street', 'address_number', 'address_postal', 'address_city',
+  'tl_contact_id', 'ghl_contact_id',
+];
+let _initialEditValues = null;  // snapshot voor client-side diff bij PATCH
+
+function openModal(id)  { document.getElementById(id).classList.remove('hidden'); }
+function closeModal(id) { document.getElementById(id).classList.add('hidden'); }
+
+function clearFormErrors() {
+  document.querySelectorAll('#customerForm .form-field.has-error').forEach((el) => el.classList.remove('has-error'));
+  document.querySelectorAll('#customerForm .field-error').forEach((el) => { el.textContent = ''; });
+  const b = $('#customerFormBanner');
+  b.className = 'modal-banner';
+  b.textContent = '';
+}
+
+function setFieldError(field, msg) {
+  const input = document.querySelector('#customerForm [name="' + field + '"]');
+  if (input) input.closest('.form-field').classList.add('has-error');
+  const errEl = $('#cf-err-' + field);
+  if (errEl) errEl.textContent = msg;
+}
+
+function setModalBannerError(bannerId, msg) {
+  const b = $('#' + bannerId);
+  b.textContent = msg;
+  b.classList.add('visible');
+}
+
+function openCustomerModal(mode, prefill) {
+  const isCreate = mode === 'create';
+  $('#customerFormTitle').textContent = isCreate ? 'Nieuwe klant' : 'Klant bewerken';
+  const form = $('#customerForm');
+  form.dataset.mode = mode;
+  form.dataset.customerId = (prefill && prefill.id) || '';
+  clearFormErrors();
+  // Fill values
+  for (const f of CUSTOMER_FORM_FIELDS) {
+    const el = form.querySelector('[name="' + f + '"]');
+    el.value = (prefill && prefill[f] != null) ? prefill[f] : '';
+  }
+  // Snapshot voor diff (alleen edit-mode)
+  _initialEditValues = isCreate ? null
+    : Object.fromEntries(CUSTOMER_FORM_FIELDS.map((f) => [f, (prefill && prefill[f] != null) ? String(prefill[f]) : '']));
+  // Reset submit-button
+  const btn = $('#customerFormSubmit');
+  btn.disabled = false;
+  btn.textContent = 'Opslaan';
+  openModal('customerFormModal');
+  setTimeout(() => $('#cf-first-name').focus(), 50);
+}
+
+function closeCustomerModal() { closeModal('customerFormModal'); }
+
+async function submitCustomerForm() {
+  const form = $('#customerForm');
+  const mode = form.dataset.mode;
+  const customerId = form.dataset.customerId;
+  const values = {};
+  for (const f of CUSTOMER_FORM_FIELDS) {
+    values[f] = form.querySelector('[name="' + f + '"]').value;
+  }
+
+  let body;
+  if (mode === 'create') {
+    body = values;
+  } else {
+    // Client-side diff: alleen velden waarvan waarde verschilt van initial snapshot
+    body = {};
+    for (const f of CUSTOMER_FORM_FIELDS) {
+      if (values[f] !== (_initialEditValues[f] || '')) body[f] = values[f];
+    }
+    if (Object.keys(body).length === 0) {
+      setModalBannerError('customerFormBanner', 'Geen wijzigingen om op te slaan.');
+      return;
+    }
+  }
+
+  clearFormErrors();
+  const btn = $('#customerFormSubmit');
+  btn.disabled = true;
+  btn.textContent = 'Bezig…';
+
+  try {
+    const url = mode === 'create' ? '/api/customer' : '/api/customer?id=' + encodeURIComponent(customerId);
+    const method = mode === 'create' ? 'POST' : 'PATCH';
+    const res = await window.AgentShared.apiFetch(url, {
+      method,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      if (res.status === 400 && data.field) setFieldError(data.field, data.error || 'Ongeldige waarde');
+      else setModalBannerError('customerFormBanner', data.error || ('HTTP ' + res.status));
+      return;
+    }
+    closeCustomerModal();
+
+    if (mode === 'create') {
+      // Navigeer direct naar detail van de nieuwe klant
+      window.location.href = '/modules/klanten.html?id=' + encodeURIComponent(data.customer.id);
+    } else {
+      // Refresh detail-view + invalidate audit-cache (er is een nieuwe entry)
+      detailState.customer = data.customer;
+      detailState.audit = null;
+      renderDetail();
+    }
+  } catch (err) {
+    console.error('[klanten] customer submit failed:', err);
+    setModalBannerError('customerFormBanner', 'Serverfout: ' + (err.message || 'onbekend'));
+  } finally {
+    if (!$('#customerFormModal').classList.contains('hidden')) {
+      btn.disabled = false;
+      btn.textContent = 'Opslaan';
+    }
+  }
+}
+
+function openArchiveModal() {
+  const c = detailState.customer;
+  if (!c) return;
+  const name = `${(c.first_name || '').trim()} ${(c.last_name || '').trim()}`.trim() || 'deze klant';
+  $('#archive-customer-name').textContent = name;
+  $('#archive-reason').value = '';
+  const b = $('#archiveBanner');
+  b.className = 'modal-banner';
+  b.textContent = '';
+  const btn = $('#archiveConfirmBtn');
+  btn.disabled = false;
+  btn.textContent = 'Archiveren';
+  openModal('archiveModal');
+}
+
+function closeArchiveModal() { closeModal('archiveModal'); }
+
+async function submitArchive() {
+  const customerId = detailState.customerId;
+  const reason = $('#archive-reason').value;
+  const btn = $('#archiveConfirmBtn');
+  btn.disabled = true;
+  btn.textContent = 'Bezig…';
+  try {
+    const res = await window.AgentShared.apiFetch(
+      '/api/customer-archive?id=' + encodeURIComponent(customerId) + '&action=archive',
+      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ reason }) },
+    );
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) { setModalBannerError('archiveBanner', data.error || ('HTTP ' + res.status)); return; }
+    closeArchiveModal();
+    detailState.customer = data.customer;
+    detailState.audit = null;
+    renderDetail();
+  } catch (err) {
+    console.error('[klanten] archive failed:', err);
+    setModalBannerError('archiveBanner', 'Serverfout: ' + (err.message || 'onbekend'));
+  } finally {
+    if (!$('#archiveModal').classList.contains('hidden')) {
+      btn.disabled = false;
+      btn.textContent = 'Archiveren';
+    }
+  }
+}
+
+async function unarchiveCustomer() {
+  const customerId = detailState.customerId;
+  const btn = $('#btn-unarchive-customer');
+  btn.disabled = true;
+  try {
+    const res = await window.AgentShared.apiFetch(
+      '/api/customer-archive?id=' + encodeURIComponent(customerId) + '&action=unarchive',
+      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' },
+    );
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) { alert('Heractiveren mislukt: ' + (data.error || ('HTTP ' + res.status))); return; }
+    detailState.customer = data.customer;
+    detailState.audit = null;
+    renderDetail();
+  } catch (err) {
+    console.error('[klanten] unarchive failed:', err);
+    alert('Heractiveren mislukt: ' + (err.message || 'onbekend'));
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+// Global modal-mechanics: ESC sluit topmost open modal; click op overlay (niet card) sluit ook.
+(function bindModalGlobals() {
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape') return;
+    if (!$('#archiveModal').classList.contains('hidden'))      { closeArchiveModal(); return; }
+    if (!$('#customerFormModal').classList.contains('hidden')) { closeCustomerModal(); return; }
+  });
+  document.querySelectorAll('.modal-overlay').forEach((ov) => {
+    ov.addEventListener('click', (e) => { if (e.target === ov) ov.classList.add('hidden'); });
+  });
+})();
 
 init();
 </script>
