@@ -16,9 +16,10 @@
 - [x] Documentatie (overview + CLAUDE.md + deze sectie)
 
 ### ⏳ Open Fase 2
-- [ ] Klant-overzicht UI (lijst, filters, search)
-- [x] Klant-detailpagina basis (header + tabs Profiel/Communicatie/Audit) — Fase 2A.2
-- [ ] CRUD-endpoints (POST/PATCH/DELETE customer)
+- [x] Klant-overzicht UI (lijst, filters, search) — Fase 2A.1 (bewezen via preview + productie smoke-test)
+- [x] Klant-detailpagina basis (header + tabs Profiel/Communicatie/Audit) — Fase 2A.2 (bewezen via preview + productie smoke-test)
+- [x] CRUD-endpoints klanten (POST/PATCH + archive/unarchive) — Fase 2A.3
+      (hard delete bewust uitgesteld naar 2C, gekoppeld aan AVG-erasure)
 - [ ] Tag-toekenning UI
 - [ ] TradersLeague OAuth setup
 - [ ] Duplicate-check endpoint (POST /api/customer-check-duplicate)
@@ -29,11 +30,50 @@
 ### 🔧 Technical debt
 
 **API-laag granulaire RBAC nog niet wired (Fase 2A.1+)**
-- `api/customers.js` + `api/customer-tag-definitions.js` gebruiken `verifyAdmin()` = ADMIN_ROLES gate
+- `api/customers.js`, `api/customer-tag-definitions.js`, `api/customer.js`,
+  `api/customer-notes.js`, `api/customer-archive.js`, `api/customer-audit.js`
+  gebruiken allemaal `verifyAdmin()` = ADMIN_ROLES gate
 - `role_permissions`-matrix nog niet afgedwongen op API-laag
 - Werkt voor super_admin + manager (huidige usecase)
 - Volgt bij role-introductie (sales/mentor/marketing/viewer)
-- Patroon: `requirePermission`-helper bouwen wanneer eerste niet-ADMIN_ROLE toegang nodig heeft
+- **Update Fase 2A.3**: `api/_lib/requirePermission.js` BESTAAT (4857 bytes,
+  met `requirePermission` / `requirePermissionFailOpen` / `checkPermissionOrDeny`).
+  Helper is alleen gewired op 3 email-endpoints. Cleanup-PR na 2A.4 om alle
+  customer-endpoints te migreren naar granulaire keys (customer.view, customer.create,
+  customer.edit, customer.archive, customer.audit.view).
+
+**Validatie-duplicatie POST vs PATCH in `api/customer.js`** (Fase 2A.3)
+- ~30 regels validatie-logica zit in zowel `handlePost` als `handlePatch`
+  (required-check, email-regex, ISO-date, empty-string-handling).
+- Bewust niet gedeeld omdat POST en PATCH iets andere semantiek hebben rond
+  empty-strings (POST: skip, PATCH: NULL).
+- Cleanup: extract `cleanAndValidateBody(body, { isCreate })` helper, in 2A.4
+  cleanup-commit. Risico bij divergentie: bug-fix vergeten op 1 plek.
+
+**`respondShape()` gedupliceerd in 3 customer-endpoints** (Fase 2A.3)
+- Identieke tags+notes-count+audit-count fetch in `api/customer.js` GET/POST/PATCH
+  en `api/customer-archive.js`.
+- Kandidaat voor extractie naar `api/_lib/customer-shape.js` in 2A.4 cleanup.
+
+**Search op customer-list zoekt per-veld, geen fullname-concat** (Fase 2A.3 smoke-test bevinding)
+- `/api/customers?search=X` doet `.or(first_name.ilike, last_name.ilike, email.ilike, phone.ilike)`.
+- Zoek-string "Jan Jansen" (met spatie) matched geen rij — geen enkel veld bevat
+  de complete string. Werkt wel voor single-word: "Jan", "Jansen", "jansen@", "+316".
+- Niet-blokkerend; gebruikers zoeken in praktijk vrijwel altijd single-word.
+- Cleanup-opties (2A.4 of later):
+  * Frontend splits search op spaties → AND tussen woorden, OR tussen velden;
+    vereist API-wijziging om meervoudige terms te accepteren.
+  * DB generated column `search_text` (first_name || ' ' || last_name) met
+    trigger-onderhoud → single ILIKE. Cleanste oplossing maar migratie nodig.
+
+**AVG-impact: PII in `audit_log` JSONB** (Fase 2A.3 → 2C)
+- `audit_log.before_json` en `after_json` bevatten volledige customer-rows
+  (email, phone, address). Bij `customer.anonymized` (Art. 17 GDPR) moet
+  óók de PII in eerdere audit-entries gehasht of geredigeerd worden — anders
+  blijft erasure incompleet.
+- Beslissing 2C: scrub-on-anonymize (UPDATE audit_log SET before_json/after_json
+  met PII-velden → '\<redacted\>') of separate anonymized_audit_log met
+  hash-trail. Niet in scope 2A.
 
 ### 🎓 Leerpunten Supabase Branching merge (Fase 1)
 
@@ -64,6 +104,16 @@
      'branch_merge' entries toont
    - Implicatie: bij elke nieuwe DB-tabel met seed-data, plaats die seed in
      `seed.sql`, NIET alleen in migratie
+
+6. **Branch protection op main kan onverwacht onmergebaar zijn**
+   - PR #3 (mini-migratie 013) bleef hangen op "Checking for the ability to merge
+     automatically..."
+   - Tooltip toonde "failing merge requirements" maar UI gaf geen details
+   - Workaround Fase 2A.2: migratie handmatig via Supabase SQL Editor op productie
+     + PR gesloten met comment
+   - Actie voor Fase 2A.4: VÓÓR final 2A PR-merge eerst branch protection rules op
+     main investigeren in Settings → Branches
+   - Vermijd opnieuw stuck-merge op grotere PR
 
 ---
 
