@@ -15,17 +15,49 @@
 - [x] Placeholder modules/klanten.html + sidebar-entry (gating: customer.module.access)
 - [x] Documentatie (overview + CLAUDE.md + deze sectie)
 
-### ⏳ Open Fase 2
-- [x] Klant-overzicht UI (lijst, filters, search) — Fase 2A.1 (bewezen via preview + productie smoke-test)
-- [x] Klant-detailpagina basis (header + tabs Profiel/Communicatie/Audit) — Fase 2A.2 (bewezen via preview + productie smoke-test)
-- [x] CRUD-endpoints klanten (POST/PATCH + archive/unarchive) — Fase 2A.3
+### ✅ Afgerond Fase 2A (klanten-module compleet)
+- [x] Klant-overzicht UI (lijst, filters, search) — Fase 2A.1 (preview + prod smoke-test)
+- [x] Klant-detailpagina basis (Profiel/Communicatie/Audit) — Fase 2A.2 (preview + prod smoke-test)
+- [x] CRUD-endpoints klanten (POST/PATCH + archive/unarchive) — Fase 2A.3 (preview + prod smoke-test)
       (hard delete bewust uitgesteld naar 2C, gekoppeld aan AVG-erasure)
-- [ ] Tag-toekenning UI
-- [ ] TradersLeague OAuth setup
-- [ ] Duplicate-check endpoint (POST /api/customer-check-duplicate)
-- [ ] AVG-functionaliteit (export Art. 15 + anonimiseren Art. 17)
-- [ ] WhatsApp send-laag (Twilio-integratie, eind Fase 2)
-- [ ] Admin-matrix: manager-keys aanzetten voor de 24 nieuwe keys
+- [x] Tag-toekenning UI (inline edit-mode in Profiel-tab) — Fase 2A.4
+- [x] Notitie CRUD UI (inline editor + edit/archive per note) — Fase 2A.4
+- [x] Duplicate-check endpoint + confirm-modal in create-flow — Fase 2A.4
+- [x] Bulk-acties (archive/unarchive/tag-add/tag-remove) met checkbox-selectie — Fase 2A.4
+
+### 🚀 Klanten-module Fase 2A klaar voor merge naar main
+
+**19 commits totaal** (Fase 1 fundament + Fase 2A.1–2A.4 features):
+- 5 commits Fase 1 (DB-schema, RBAC, placeholder) — al gemerged
+- 14 commits Fase 2A.1–2A.4 op feature/klanten-module-fase2a (nog open)
+
+**Schema-status productie:**
+- Migratie 012 (Fase 1 schema): al op productie via PR #1 ✓
+- Migratie 013 (customer_notes): handmatig via SQL Editor op productie ✓
+  (PR #3 stuck-merge — zie leerpunt #6)
+
+**Smoke-test plan na push final 2A bundel-PR:**
+1. Insert tijdelijke test-klant via Vercel preview UI (create-flow)
+2. Tag-toekenning UI test (add/remove)
+3. Notitie CRUD test (create/edit/archive)
+4. Duplicate-warning test (create met overlap)
+5. Bulk-acties test (selecteer 3 klanten → archive + tag)
+6. Regressie 2A.1/2A.2/2A.3 (lijst-filters/detail-tabs/CRUD)
+7. Cleanup test-data via SQL Editor
+8. Bestaande modules ongebroken (Dashboard/Taken/E-mail/etc.)
+9. Console + Network check (geen errors)
+
+**Risico bij merge** (Fase 1 leerpunt #6):
+- Branch protection rules op main → PR kan stuck-merge geven
+- VÓÓR merge: check GitHub Settings → Branches op rules
+- Fallback bij stuck: handmatige merge na groen smoke-test (alleen code, 
+  geen DB-migratie nodig — schema al op productie)
+
+### ⏳ Open Fase 2B+
+- [ ] TradersLeague OAuth setup (Fase 2B)
+- [ ] AVG-functionaliteit (export Art. 15 + anonimiseren Art. 17) (Fase 2C)
+- [ ] WhatsApp send-laag (Twilio-integratie, Fase 2C)
+- [ ] Admin-matrix: manager-keys aanzetten voor de 24 nieuwe keys (Jeffrey-actie post-merge)
 
 ### 🔧 Technical debt
 
@@ -74,6 +106,27 @@
 - Beslissing 2C: scrub-on-anonymize (UPDATE audit_log SET before_json/after_json
   met PII-velden → '\<redacted\>') of separate anonymized_audit_log met
   hash-trail. Niet in scope 2A.
+
+**Master-checkbox indeterminate-state niet geïmplementeerd** (Fase 2A.4 commit 6)
+- Bij partiële selectie (0 < selectedIds.size < pageSize) toont master-checkbox
+  unchecked i.p.v. indeterminate. Functioneel correct, alleen visueel signaal
+  ontbreekt.
+- Cleanup: `master.indeterminate = true` wanneer partial in `syncSelectAllCheckbox()`.
+- Trivial fix, MVP-OK.
+
+**Contextuele bulk-action-bar (optioneel)** (Fase 2A.4 commit 6)
+- Action-bar toont altijd Archiveren + Tag-actie ongeacht selectie-mix
+  (active + archived klanten samen).
+- Server doet juiste no-ops (archive op already-archived = success no_op).
+- Cleaner UX zou: bij alleen-archived selectie → "Heractiveren"-knop ipv
+  "Archiveren". Vereist per-row status-check tijdens render of state-tracking.
+- Niet kritiek; user ziet bulk-result banner met no-op count.
+
+**Counter-bump inconsistentie** (Fase 2A.4 commit 5)
+- `addTag/removeTag` (CHUNK C) updaten counter+badge inline.
+- Notes-handlers (CHUNK D) gebruiken `bumpCounter()` helper.
+- Functioneel identiek; cleanup: refactor addTag/removeTag → `bumpCounter`
+  voor consistentie.
 
 ### 🎓 Leerpunten Supabase Branching merge (Fase 1)
 
