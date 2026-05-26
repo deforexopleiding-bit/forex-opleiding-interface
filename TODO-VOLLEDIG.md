@@ -26,6 +26,15 @@
 - [ ] WhatsApp send-laag (Twilio-integratie, eind Fase 2)
 - [ ] Admin-matrix: manager-keys aanzetten voor de 24 nieuwe keys
 
+### 🔧 Technical debt
+
+**API-laag granulaire RBAC nog niet wired (Fase 2A.1+)**
+- `api/customers.js` + `api/customer-tag-definitions.js` gebruiken `verifyAdmin()` = ADMIN_ROLES gate
+- `role_permissions`-matrix nog niet afgedwongen op API-laag
+- Werkt voor super_admin + manager (huidige usecase)
+- Volgt bij role-introductie (sales/mentor/marketing/viewer)
+- Patroon: `requirePermission`-helper bouwen wanneer eerste niet-ADMIN_ROLE toegang nodig heeft
+
 ### 🎓 Leerpunten Supabase Branching merge (Fase 1)
 
 1. **Seeds in een migratie-file worden GESKIPT bij merge naar production branch**
