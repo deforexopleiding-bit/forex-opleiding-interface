@@ -3,7 +3,7 @@
 // Methods:
 //   GET    ?id=<uuid>         → detail (single row + tags + counts)  [2A.2]
 //   POST   (body)             → nieuwe klant aanmaken                [2A.3 commit 1]
-//   PATCH  ?id=<uuid> (body)  → klant bijwerken                      [2A.3 commit 2 — komt later]
+//   PATCH  ?id=<uuid> (body)  → klant bijwerken                      [2A.3 commit 2]
 //
 // Auth: verifyAdmin(req) op ALLE methods (ADMIN_ROLES gate — consistent met
 // /api/customers; granulaire customer.* check volgt bij matrix-wide rollout).
@@ -38,10 +38,11 @@ export default async function handler(req, res) {
     return res.status(403).json({ error: 'Toegang geweigerd. Admin-rol vereist.' });
   }
 
-  if (req.method === 'GET')  return handleGet(req, res);
-  if (req.method === 'POST') return handlePost(req, res, admin);
+  if (req.method === 'GET')   return handleGet(req, res);
+  if (req.method === 'POST')  return handlePost(req, res, admin);
+  if (req.method === 'PATCH') return handlePatch(req, res, admin);
 
-  res.setHeader('Allow', 'GET, POST');
+  res.setHeader('Allow', 'GET, POST, PATCH');
   return res.status(405).json({ error: `Method ${req.method} not allowed` });
 }
 
@@ -179,6 +180,128 @@ async function handlePost(req, res, admin) {
     });
   } catch (err) {
     console.error('[customer POST] handler error:', err);
+    return res.status(500).json({ error: err.message || 'Interne serverfout' });
+  }
+}
+
+// ── PATCH — update ───────────────────────────────────────────────────────────
+//
+// Query: ?id=<uuid>  (verplicht)
+// Body : partial customer (WRITABLE_FIELDS); alleen aanwezige velden worden geüpdatet.
+//
+// PATCH-semantiek (vs POST):
+//   - field niet in body   → NIET aangeraakt
+//   - field = ''  in body  → DB-NULL (clear het veld) — voor optionele velden
+//   - first_name/last_name in body met empty trim → 400 (kan niet leegmaken)
+//
+// Status-gate: archived/anonymized → 403 (geen edits toegestaan; eerst heractiveren).
+// Geen optimistic-concurrency check (last-write-wins; 2A.3 MVP).
+//
+// Audit: customer.updated — before=oude row, after=nieuwe row.
+//   Server slaat full before/after op; UI berekent diff bij audit-rendering.
+//
+// Response 200: { customer: <volledige nieuwe row + status/tags/counts> }
+// Errors: 400 (validatie / geen geldige velden) / 403 (auth of locked-state)
+//         / 404 (customer bestaat niet) / 500.
+
+async function handlePatch(req, res, admin) {
+  const id = String(req.query.id || '').trim();
+  if (!id) return res.status(400).json({ error: 'Missing customer id' });
+  if (!UUID_RE.test(id)) return res.status(400).json({ error: 'Invalid customer ID format' });
+
+  const body = req.body || {};
+  const cleaned = pickWritable(body);
+
+  // first_name / last_name: als in body, mogen NIET leeg worden
+  if (Object.prototype.hasOwnProperty.call(cleaned, 'first_name')) {
+    const v = String(cleaned.first_name || '').trim();
+    if (!v) return res.status(400).json({ error: 'Voornaam mag niet leeg zijn', field: 'first_name' });
+    cleaned.first_name = v;
+  }
+  if (Object.prototype.hasOwnProperty.call(cleaned, 'last_name')) {
+    const v = String(cleaned.last_name || '').trim();
+    if (!v) return res.status(400).json({ error: 'Achternaam mag niet leeg zijn', field: 'last_name' });
+    cleaned.last_name = v;
+  }
+
+  // Email — empty string clear (=NULL); niet-empty → format-check
+  if (Object.prototype.hasOwnProperty.call(cleaned, 'email')) {
+    const e = String(cleaned.email || '').trim();
+    if (e === '') cleaned.email = null;
+    else if (!EMAIL_RE.test(e)) return res.status(400).json({ error: 'Ongeldig email-formaat', field: 'email' });
+    else cleaned.email = e;
+  }
+
+  // Geboortedatum — empty string clear (=NULL); niet-empty → ISO-check
+  if (Object.prototype.hasOwnProperty.call(cleaned, 'date_of_birth')) {
+    const d = String(cleaned.date_of_birth || '').trim();
+    if (d === '') cleaned.date_of_birth = null;
+    else if (!ISO_DATE_RE.test(d)) return res.status(400).json({ error: 'Geboortedatum moet ISO-formaat zijn (YYYY-MM-DD)', field: 'date_of_birth' });
+    else cleaned.date_of_birth = d;
+  }
+
+  // Overige optionele strings: trim → empty wordt NULL (clear)
+  for (const k of Object.keys(cleaned)) {
+    if (typeof cleaned[k] === 'string'
+        && !['first_name','last_name','email','date_of_birth'].includes(k)) {
+      const t = cleaned[k].trim();
+      cleaned[k] = t === '' ? null : t;
+    }
+  }
+
+  if (Object.keys(cleaned).length === 0) {
+    return res.status(400).json({ error: 'Geen geldige velden om te updaten' });
+  }
+
+  try {
+    // 1) Lees oude staat (voor audit-before + status-gate)
+    const { data: before, error: bErr } = await supabaseAdmin
+      .from('customers').select('*').eq('id', id).maybeSingle();
+    if (bErr) throw new Error('customer pre-fetch: ' + bErr.message);
+    if (!before) return res.status(404).json({ error: 'Klant niet gevonden' });
+
+    // 2) Status-gate
+    if (before.archived_at)   return res.status(403).json({ error: 'Klant is gearchiveerd; eerst heractiveren.' });
+    if (before.anonymized_at) return res.status(403).json({ error: 'Klant is geanonimiseerd; niet bewerkbaar.' });
+
+    // 3) UPDATE (trg_customers_updated zet updated_at = now())
+    const { data: after, error: uErr } = await supabaseAdmin
+      .from('customers').update(cleaned).eq('id', id).select('*').single();
+    if (uErr) {
+      console.error('[customer PATCH] update error:', uErr.message);
+      return res.status(500).json({ error: uErr.message });
+    }
+
+    // 4) Audit (fail-soft) — full before/after; UI rendert diff client-side
+    await logCustomerAudit({
+      req, action: 'customer.updated',
+      customerId: id, before, after,
+      userId: admin.user.id,
+    });
+
+    // 5) Response met tags + counts (consistent met GET/POST shape)
+    const { data: tagRows } = await supabaseAdmin
+      .from('customer_tags').select('customer_tag_definitions(slug, label, color)').eq('customer_id', id);
+    const tags = (tagRows || []).map((r) => r.customer_tag_definitions).filter(Boolean)
+      .map((d) => ({ slug: d.slug, label: d.label, color: d.color }));
+    const { count: notesCount } = await supabaseAdmin
+      .from('customer_notes').select('id', { count: 'exact', head: true })
+      .eq('customer_id', id).is('archived_at', null);
+    const { count: auditCount } = await supabaseAdmin
+      .from('audit_log').select('id', { count: 'exact', head: true })
+      .eq('entity_type', 'customer').eq('entity_id', id);
+
+    return res.status(200).json({
+      customer: {
+        ...after,
+        status: deriveStatus(after),
+        tags,
+        notes_count: notesCount || 0,
+        audit_count: auditCount || 0,
+      },
+    });
+  } catch (err) {
+    console.error('[customer PATCH] handler error:', err);
     return res.status(500).json({ error: err.message || 'Interne serverfout' });
   }
 }
