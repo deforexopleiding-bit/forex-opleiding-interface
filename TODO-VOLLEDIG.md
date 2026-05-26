@@ -168,6 +168,33 @@
      main investigeren in Settings → Branches
    - Vermijd opnieuw stuck-merge op grotere PR
 
+### 🔍 Leerpunten Fase 2A.4 smoke-test diagnose
+
+1. **Static code-review heeft fundamentele limieten zonder live DevTools**
+   - BUG 1 (silent-fail first-click) + BUG 2 (ESC bulk-modal) diagnose toonde dat
+     pure code-trace zonder Chrome DevTools-data (console-logs, network-tab,
+     breakpoint-stepping) geen 100%-zekere root-cause kan aanwijzen.
+   - Voor toekomstige UI-bugs: **debug-logging-commit als first response**,
+     niet vermoedens. Eén deploy-cycle is goedkoper dan 5 hypothesen.
+   - Patroon: tijdelijke `console.log` op kritieke event-paden + push → reproduceer
+     in browser → log-trace toont root-cause → echte fix in volgende commit.
+
+2. **Hard-refresh test eerst bij UI-bug-rapport op preview-deploy**
+   - Vercel preview-builds cachen aggressively in browser.
+   - BUG 2 (ESC bulk-modals niet werkend) bleek false-positive: code-structuur
+     was correct, oorzaak waarschijnlijk stale browser-cache van eerdere build.
+   - Standaard eerste actie bij elke smoke-test-bevinding: Ctrl+Shift+R + verifieer
+     commit-hash in Vercel deploy-info matched verwachte SHA.
+   - Vermijd debug-cycles op valse-positieven.
+
+3. **Capture-phase event-handlers als default voor modal-mechanics**
+   - ESC-fix in Fase 2A.3 (capture: true op document keydown) loste een hele
+     klasse "ESC werkt niet wanneer focus in input zit" bugs op.
+   - Generieke regel: voor modal close-via-ESC altijd capture-phase op document,
+     niet bubbling-phase op modal-element. Robuust tegen browser-native input
+     handling + nested stopPropagation in form-elementen.
+   - Eenmaal correct geïmplementeerd, geen herhaling van issue in latere modals.
+
 ---
 
 ## ✅ Gerealiseerd 2026-05-14 — Fase C + Role-architectuur + RLS + Auth-gate
