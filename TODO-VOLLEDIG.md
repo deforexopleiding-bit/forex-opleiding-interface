@@ -26,6 +26,15 @@
 - [ ] WhatsApp send-laag (Twilio-integratie, eind Fase 2)
 - [ ] Admin-matrix: manager-keys aanzetten voor de 24 nieuwe keys
 
+### 🔧 Technical debt
+
+**API-laag granulaire RBAC nog niet wired (Fase 2A.1+)**
+- `api/customers.js` + `api/customer-tag-definitions.js` gebruiken `verifyAdmin()` = ADMIN_ROLES gate
+- `role_permissions`-matrix nog niet afgedwongen op API-laag
+- Werkt voor super_admin + manager (huidige usecase)
+- Volgt bij role-introductie (sales/mentor/marketing/viewer)
+- Patroon: `requirePermission`-helper bouwen wanneer eerste niet-ADMIN_ROLE toegang nodig heeft
+
 ### 🎓 Leerpunten Supabase Branching merge (Fase 1)
 
 1. **Seeds in een migratie-file worden GESKIPT bij merge naar production branch**
@@ -44,6 +53,17 @@
    - Idempotente queries (ON CONFLICT DO NOTHING)
    - Geen UPDATE/DELETE op bestaande rijen
    - Eerst read-only validatie van staat
+
+5. **Branch-creation kopieert SCHEMA, niet DATA**
+   - Supabase branching maakt schema-consolidatie snapshot
+   - INSERT-statements uit migraties gaan NIET mee bij branch-creation
+   - Daarom moet `supabase/seed.sql` self-contained zijn voor ALLE data die
+     preview branches nodig hebben — ook tag-definities die eigenlijk in
+     migratie 012 staan
+   - Verifieerd via `schema_migrations` table die alleen 'remote_schema' +
+     'branch_merge' entries toont
+   - Implicatie: bij elke nieuwe DB-tabel met seed-data, plaats die seed in
+     `seed.sql`, NIET alleen in migratie
 
 ---
 

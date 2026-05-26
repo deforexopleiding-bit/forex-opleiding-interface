@@ -10,14 +10,95 @@
   <link rel="stylesheet" href="/modules/shared/agent-shared.css"/>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/dist/tabler-icons.min.css" />
   <style>
-    .page-header { margin-bottom:18px; }
+    .page-header { display:flex; align-items:flex-start; gap:16px; margin-bottom:18px; }
+    .page-header .page-titlewrap { flex:1; }
     .page-title { font-size:22px; font-weight:700; letter-spacing:-.3px; display:flex; align-items:center; gap:10px; }
     .page-sub { font-size:12px; color:var(--text-faint); margin-top:3px; }
-    .wip-card { margin-top:8px; padding:42px 28px; text-align:center; background:var(--bg-elev); border:1px dashed var(--border); border-radius:14px; max-width:640px; }
+
+    /* KPI mini-bar */
+    .kpi-grid { display:grid; grid-template-columns:repeat(4, minmax(140px,1fr)); gap:12px; margin-bottom:18px; }
+    .kpi-tile { padding:14px 16px; background:var(--bg-elev); border:1px solid var(--border); border-radius:12px; }
+    .kpi-tile .kpi-label { font-size:11px; text-transform:uppercase; letter-spacing:.5px; color:var(--text-faint); margin-bottom:6px; display:flex; align-items:center; gap:6px; }
+    .kpi-tile .kpi-value { font-size:24px; font-weight:700; letter-spacing:-.3px; }
+    .kpi-tile .kpi-pending { font-size:11px; color:var(--text-faint); font-style:italic; }
+    .kpi-tile.kpi-placeholder .kpi-value { color:var(--text-faint); }
+
+    /* Filters */
+    .filters-bar { display:flex; flex-wrap:wrap; gap:10px; align-items:center; margin-bottom:14px; padding:12px; background:var(--bg-elev); border:1px solid var(--border); border-radius:12px; }
+    .filter-search { flex:1 1 240px; min-width:200px; padding:8px 10px; background:var(--bg); border:1px solid var(--border); border-radius:8px; color:var(--text); font-size:13px; }
+    .filter-search:focus { outline:none; border-color:var(--accent-cyan,#06b6d4); }
+    .filter-select { padding:8px 10px; background:var(--bg); border:1px solid var(--border); border-radius:8px; color:var(--text); font-size:13px; min-width:130px; }
+    .filter-select:focus { outline:none; border-color:var(--accent-cyan,#06b6d4); }
+    .filter-select:disabled { opacity:.5; cursor:not-allowed; }
+    .filter-date { padding:8px 10px; background:var(--bg); border:1px solid var(--border); border-radius:8px; color:var(--text); font-size:13px; }
+    .filter-label { font-size:11px; color:var(--text-faint); margin-right:4px; }
+    .filters-bar .spacer { flex:1; }
+
+    /* Status pills (multi-select via checkboxes) */
+    .status-pills { display:flex; gap:6px; }
+    .status-pill { display:inline-flex; align-items:center; gap:5px; padding:6px 10px; background:var(--bg); border:1px solid var(--border); border-radius:999px; font-size:12px; cursor:pointer; user-select:none; }
+    .status-pill input { margin:0; cursor:pointer; }
+    .status-pill[data-checked="true"] { background:var(--accent-cyan,#06b6d4); color:#fff; border-color:transparent; }
+    .status-pill[data-checked="true"] .status-pill-dot { background:#fff; }
+    .status-hint { font-size:11px; color:var(--text-faint); font-style:italic; margin-left:6px; }
+
+    /* Tag-multiselect dropdown (custom checkbox-list in popover) */
+    .tag-multi { position:relative; }
+    .tag-multi-trigger { padding:8px 10px; background:var(--bg); border:1px solid var(--border); border-radius:8px; color:var(--text); font-size:13px; cursor:pointer; min-width:150px; text-align:left; display:flex; align-items:center; gap:6px; }
+    .tag-multi-trigger .ti { font-size:14px; }
+    .tag-multi-trigger .tag-count { font-weight:600; color:var(--accent-cyan,#06b6d4); }
+    .tag-multi-pop { position:absolute; top:calc(100% + 4px); left:0; min-width:200px; max-height:240px; overflow-y:auto; background:var(--bg-elev); border:1px solid var(--border); border-radius:10px; padding:6px; box-shadow:0 6px 18px rgba(0,0,0,.18); z-index:40; display:none; }
+    .tag-multi.open .tag-multi-pop { display:block; }
+    .tag-multi-item { display:flex; align-items:center; gap:8px; padding:6px 8px; border-radius:6px; cursor:pointer; font-size:13px; }
+    .tag-multi-item:hover { background:var(--bg); }
+    .tag-multi-item input { margin:0; }
+    .tag-swatch { display:inline-block; width:10px; height:10px; border-radius:50%; }
+
+    /* Table */
+    .table-wrap { background:var(--bg-elev); border:1px solid var(--border); border-radius:12px; overflow:hidden; }
+    .customers-table { width:100%; border-collapse:collapse; font-size:13px; }
+    .customers-table th, .customers-table td { padding:10px 12px; text-align:left; border-bottom:1px solid var(--border); }
+    .customers-table th { font-weight:600; font-size:11px; text-transform:uppercase; letter-spacing:.4px; color:var(--text-faint); background:var(--bg); user-select:none; }
+    .customers-table th[data-sort-key] { cursor:pointer; white-space:nowrap; }
+    .customers-table th[data-sort-key]:hover { color:var(--text); }
+    .customers-table th[aria-sort="ascending"]::after { content:" ▲"; font-size:9px; opacity:.7; }
+    .customers-table th[aria-sort="descending"]::after { content:" ▼"; font-size:9px; opacity:.7; }
+    .customers-table tbody tr { cursor:pointer; transition:background .12s; }
+    .customers-table tbody tr:hover { background:var(--bg); }
+    .customers-table tbody tr:last-child td { border-bottom:none; }
+    .cust-name { font-weight:600; }
+    .cust-empty { color:var(--text-faint); font-style:italic; font-size:12px; }
+
+    .tag-badge { display:inline-block; padding:2px 8px; border-radius:999px; font-size:11px; font-weight:500; margin-right:4px; color:#fff; }
+    .status-badge { display:inline-block; padding:2px 8px; border-radius:999px; font-size:11px; font-weight:500; }
+    .status-badge.active     { background:#10B98122; color:#10B981; }
+    .status-badge.archived   { background:#9CA3AF22; color:#9CA3AF; }
+    .status-badge.anonymized { background:#EF444422; color:#EF4444; }
+
+    /* Empty / loading / error states */
+    .state-cell { text-align:center; padding:40px 20px; color:var(--text-faint); font-size:13px; }
+    .skeleton-row td { padding:14px 12px; }
+    .skeleton-row .skel { display:block; height:12px; background:linear-gradient(90deg,var(--bg) 0%, var(--border) 50%, var(--bg) 100%); background-size:200% 100%; animation:skel 1.2s infinite; border-radius:4px; }
+    @keyframes skel { 0%{background-position:200% 0;} 100%{background-position:-200% 0;} }
+
+    /* Pagination */
+    .pagination { display:flex; align-items:center; gap:10px; margin-top:12px; font-size:13px; flex-wrap:wrap; }
+    .pagination .page-info { color:var(--text-faint); }
+    .pagination .spacer { flex:1; }
+    .pagination button { padding:6px 12px; background:var(--bg-elev); border:1px solid var(--border); border-radius:8px; color:var(--text); font-size:13px; cursor:pointer; }
+    .pagination button:hover:not(:disabled) { background:var(--bg); }
+    .pagination button:disabled { opacity:.4; cursor:not-allowed; }
+    .pagination input[type="number"] { width:60px; padding:6px 8px; background:var(--bg); border:1px solid var(--border); border-radius:8px; color:var(--text); font-size:13px; text-align:center; }
+    .pagination select { padding:6px 10px; background:var(--bg); border:1px solid var(--border); border-radius:8px; color:var(--text); font-size:13px; }
+
+    /* Detail-placeholder (?id=) */
+    .back-link { display:inline-flex; align-items:center; gap:6px; color:var(--brand-primary,#093d54); text-decoration:none; font-size:13px; margin-bottom:14px; }
+    .back-link:hover { text-decoration:underline; }
+    .wip-card { padding:42px 28px; text-align:center; background:var(--bg-elev); border:1px dashed var(--border); border-radius:14px; max-width:640px; }
     .wip-icon { font-size:48px; }
     .wip-card h2 { font-size:20px; margin:12px 0 8px; }
     .wip-card p { color:var(--text-dim); font-size:13px; line-height:1.6; max-width:480px; margin:0 auto 8px; }
-    .wip-card a { display:inline-block; margin-top:14px; color:var(--brand-primary,#093d54); text-decoration:underline; font-size:13px; }
+    .wip-card code { background:var(--bg); padding:2px 8px; border-radius:6px; font-family:monospace; font-size:12px; }
   </style>
 </head>
 <body>
@@ -26,18 +107,138 @@
 
 <div class="main">
   <div class="main-inner">
-    <div class="page-header">
-      <h1 class="page-title"><i class="ti ti-users-group" style="color:var(--brand-primary,#093d54)"></i> Klanten</h1>
-      <p class="page-sub">Centrale klantendatabase</p>
+
+    <!-- ────────────────────────────────────────────────────────────────────
+         Lijst-view (default, getoond zonder ?id= in URL)
+    ──────────────────────────────────────────────────────────────────────── -->
+    <div id="view-list" style="display:none;">
+      <div class="page-header">
+        <div class="page-titlewrap">
+          <h1 class="page-title"><i class="ti ti-users-group" style="color:var(--brand-primary,#093d54)"></i> Klanten</h1>
+          <p class="page-sub">Centrale klantendatabase</p>
+        </div>
+        <button id="btn-new-customer" class="btn btn-primary btn-sm" title="Beschikbaar in Fase 2A.3">
+          <i class="ti ti-plus"></i> Nieuwe klant
+        </button>
+      </div>
+
+      <!-- KPI mini-bar -->
+      <div class="kpi-grid" id="kpi-grid">
+        <div class="kpi-tile">
+          <div class="kpi-label"><i class="ti ti-users"></i> Actieve klanten</div>
+          <div class="kpi-value" id="kpi-active">—</div>
+        </div>
+        <div class="kpi-tile">
+          <div class="kpi-label"><i class="ti ti-user-plus"></i> Nieuw deze maand</div>
+          <div class="kpi-value" id="kpi-new">—</div>
+        </div>
+        <div class="kpi-tile">
+          <div class="kpi-label"><i class="ti ti-alert-triangle"></i> Risico</div>
+          <div class="kpi-value" id="kpi-risico">—</div>
+        </div>
+        <div class="kpi-tile kpi-placeholder">
+          <div class="kpi-label"><i class="ti ti-cash-off"></i> Wanbetalers</div>
+          <div class="kpi-value">—</div>
+          <div class="kpi-pending">Komt later (Finance)</div>
+        </div>
+      </div>
+
+      <!-- Filters -->
+      <div class="filters-bar">
+        <input id="filter-search" class="filter-search" type="search" placeholder="🔍 Zoek op naam, email of telefoon…" autocomplete="off"/>
+
+        <!-- Tag multi-select -->
+        <div class="tag-multi" id="filter-tags">
+          <button type="button" class="tag-multi-trigger" id="filter-tags-trigger">
+            <i class="ti ti-tag"></i>
+            <span id="filter-tags-label">Tags</span>
+          </button>
+          <div class="tag-multi-pop" id="filter-tags-pop">
+            <div class="state-cell" id="filter-tags-loading" style="padding:14px 8px; font-size:12px;">Tags laden…</div>
+          </div>
+        </div>
+
+        <!-- Status pills (multi-select) — default 'active' AAN -->
+        <div class="status-pills" id="filter-status">
+          <label class="status-pill" data-checked="true">
+            <input type="checkbox" name="status" value="active" checked/> Actief
+          </label>
+          <label class="status-pill" data-checked="false">
+            <input type="checkbox" name="status" value="archived"/> Gearchiveerd
+          </label>
+          <label class="status-pill" data-checked="false">
+            <input type="checkbox" name="status" value="anonymized"/> Geanonimiseerd
+          </label>
+          <span class="status-hint" id="status-hint">Verbergt gearchiveerd & geanonimiseerd</span>
+        </div>
+
+        <span class="filter-label">Sinds:</span>
+        <input id="filter-from" class="filter-date" type="date" title="Klant sinds vanaf"/>
+        <span class="filter-label">tot:</span>
+        <input id="filter-to" class="filter-date" type="date" title="Klant sinds tot"/>
+
+        <select id="filter-sales" class="filter-select" disabled title="Beschikbaar wanneer Sales-module live is">
+          <option>Sales · Binnenkort</option>
+        </select>
+
+        <div class="spacer"></div>
+        <button id="btn-reset-filters" class="btn btn-sm" type="button">
+          <i class="ti ti-rotate-clockwise"></i> Reset filters
+        </button>
+      </div>
+
+      <!-- Lijst-tabel -->
+      <div class="table-wrap">
+        <table class="customers-table">
+          <thead>
+            <tr>
+              <th data-sort-key="last_name" aria-sort="none">Naam</th>
+              <th>Email</th>
+              <th>Telefoon</th>
+              <th>Tags</th>
+              <th data-sort-key="created_at" aria-sort="descending">Klant sinds</th>
+              <th>Status</th>
+              <th>Laatste contact</th>
+            </tr>
+          </thead>
+          <tbody id="customers-tbody">
+            <!-- skeleton initieel -->
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Pagination -->
+      <div class="pagination">
+        <span class="page-info" id="page-info">—</span>
+        <span class="filter-label">Per pagina:</span>
+        <select id="page-size">
+          <option value="25" selected>25</option>
+          <option value="50">50</option>
+          <option value="100">100</option>
+        </select>
+        <div class="spacer"></div>
+        <button id="btn-prev" type="button">‹ Vorige</button>
+        <input id="page-input" type="number" min="1" value="1" aria-label="Paginanummer"/>
+        <button id="btn-next" type="button">Volgende ›</button>
+      </div>
     </div>
 
-    <div class="wip-card">
-      <div class="wip-icon">🚧</div>
-      <h2>In ontwikkeling</h2>
-      <p>Het fundament van de Klanten-module is gelegd: het database-schema (klanten, tags, WhatsApp-infra, brieven, AVG-verzoeken, audit-log) en de rechten (RBAC-keys).</p>
-      <p>Volgende stap (Fase 2): klant-overzicht + klant-detailpagina, CRUD-acties en koppelingen (TradersLeague, WhatsApp, PostNL).</p>
-      <a href="/index.html">← Terug naar dashboard</a>
+    <!-- ────────────────────────────────────────────────────────────────────
+         Detail-placeholder (getoond bij ?id=<uuid> in URL)
+         Vervangen door echte detail-pagina in Fase 2A.2.
+    ──────────────────────────────────────────────────────────────────────── -->
+    <div id="view-detail" style="display:none;">
+      <a href="/modules/klanten.html" class="back-link">
+        <i class="ti ti-arrow-left"></i> Terug naar klant-overzicht
+      </a>
+      <div class="wip-card">
+        <div class="wip-icon">🚧</div>
+        <h2>Klant-detail komt in Fase 2A.2</h2>
+        <p>De detailpagina voor deze klant wordt in de volgende sub-fase opgeleverd (NAW-bewerken, tags, notities, AVG-acties, WhatsApp-historie).</p>
+        <p>Klant ID: <code id="debug-customer-id"></code></p>
+      </div>
     </div>
+
   </div>
 </div>
 
@@ -45,12 +246,381 @@
 <script src="/modules/shared/agent-shared.js"></script>
 <script src="/modules/shared/theme-shared.js"></script>
 <script>
+// ============================================================================
+// State + helpers
+// ============================================================================
+const state = {
+  search:        '',
+  tags:          [],                // tag-slugs
+  status:        ['active'],        // multi-select; default toont alleen actieve klanten
+  createdFrom:   '',
+  createdTo:     '',
+  sortBy:        'created_at',
+  sortDir:       'desc',
+  page:          1,
+  pageSize:      25,
+};
+let tagDefinitions = [];            // gevuld bij init
+let searchDebounceTimer = null;
+
+const $ = (sel) => document.querySelector(sel);
+const $$ = (sel) => document.querySelectorAll(sel);
+
+const fmtDate = (iso) => {
+  if (!iso) return '—';
+  try {
+    return new Intl.DateTimeFormat('nl-NL', { day:'2-digit', month:'short', year:'numeric' }).format(new Date(iso));
+  } catch { return iso; }
+};
+const escapeHtml = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+// ============================================================================
+// Init — auth + RBAC + mode-detectie
+// ============================================================================
 async function init() {
   await window._authSharedReady;
   const profile = await window.AuthShared.requireAuth();
   if (!profile) return;
   if (window.AgentShared) await window.AgentShared.renderUserSection(profile);
+
+  // Page-level access check (customer.module.access)
+  // Fixt punt 3 uit Chrome's PR #1-review: zonder deze key geen toegang tot module.
+  await window.RBAC.ensurePermissionsLoaded();
+  if (!(await window.RBAC.can('customer.module.access'))) {
+    window.location.href = '/index.html?error=forbidden';
+    return;
+  }
+
+  // Mode-detectie: ?id=<uuid> → detail-placeholder, anders lijst-view.
+  const params = new URLSearchParams(window.location.search);
+  const customerId = params.get('id');
+  if (customerId) {
+    renderDetailPlaceholder(customerId);
+    return;
+  }
+  await initListView();
 }
+
+function renderDetailPlaceholder(id) {
+  $('#view-detail').style.display = '';
+  $('#debug-customer-id').textContent = id;
+}
+
+// ============================================================================
+// Lijst-view setup
+// ============================================================================
+async function initListView() {
+  $('#view-list').style.display = '';
+
+  bindFilterEvents();
+  bindSortEvents();
+  bindPaginationEvents();
+
+  $('#btn-new-customer').addEventListener('click', () => {
+    // TODO Fase 2A.3: open klant-aanmaken-modal
+    alert('Beschikbaar in Fase 2A.3');
+  });
+
+  // Parallel: tags-catalogus + stats + eerste lijst-fetch
+  await Promise.all([
+    loadTagDefinitions(),
+    loadStats(),
+    loadCustomers(),
+  ]);
+}
+
+// ── Tag-definitions (filter-dropdown) ───────────────────────────────────────
+async function loadTagDefinitions() {
+  try {
+    const res = await window.AgentShared.apiFetch('/api/customer-tag-definitions');
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const json = await res.json();
+    tagDefinitions = json.tags || [];
+    renderTagFilterOptions();
+  } catch (err) {
+    console.error('[klanten] tag-definitions load failed:', err);
+    $('#filter-tags-pop').innerHTML = '<div class="state-cell" style="padding:14px 8px; font-size:12px; color:#EF4444;">Tags niet geladen</div>';
+  }
+}
+
+function renderTagFilterOptions() {
+  const pop = $('#filter-tags-pop');
+  if (!tagDefinitions.length) {
+    pop.innerHTML = '<div class="state-cell" style="padding:14px 8px; font-size:12px;">Geen tags</div>';
+    return;
+  }
+  pop.innerHTML = tagDefinitions.map((t) => `
+    <label class="tag-multi-item">
+      <input type="checkbox" value="${escapeHtml(t.slug)}" data-tag-slug/>
+      <span class="tag-swatch" style="background:${escapeHtml(t.color || '#6B7280')}"></span>
+      <span>${escapeHtml(t.label)}</span>
+    </label>`).join('');
+  pop.querySelectorAll('input[data-tag-slug]').forEach((cb) => {
+    cb.addEventListener('change', () => {
+      state.tags = Array.from(pop.querySelectorAll('input[data-tag-slug]:checked')).map((x) => x.value);
+      updateTagsLabel();
+      state.page = 1;
+      loadCustomers();
+    });
+  });
+}
+
+function updateTagsLabel() {
+  const lbl = $('#filter-tags-label');
+  lbl.innerHTML = state.tags.length
+    ? `Tags <span class="tag-count">(${state.tags.length})</span>`
+    : 'Tags';
+}
+
+// ── Stats (KPI mini-bar) ────────────────────────────────────────────────────
+async function loadStats() {
+  try {
+    const res = await window.AgentShared.apiFetch('/api/customers?stats=true');
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const { stats } = await res.json();
+    $('#kpi-active').textContent = stats.active ?? 0;
+    $('#kpi-new').textContent = stats.new_this_month ?? 0;
+    $('#kpi-risico').textContent = stats.risico ?? 0;
+  } catch (err) {
+    console.error('[klanten] stats load failed:', err);
+    $('#kpi-active').textContent = '!';
+    $('#kpi-new').textContent = '!';
+    $('#kpi-risico').textContent = '!';
+  }
+}
+
+// ── Customers lijst ─────────────────────────────────────────────────────────
+function renderSkeletonRows(n = 5) {
+  const tbody = $('#customers-tbody');
+  tbody.innerHTML = '';
+  for (let i = 0; i < n; i++) {
+    const tr = document.createElement('tr');
+    tr.className = 'skeleton-row';
+    tr.innerHTML = '<td><span class="skel" style="width:60%"></span></td>'
+                 + '<td><span class="skel" style="width:80%"></span></td>'
+                 + '<td><span class="skel" style="width:50%"></span></td>'
+                 + '<td><span class="skel" style="width:40%"></span></td>'
+                 + '<td><span class="skel" style="width:50%"></span></td>'
+                 + '<td><span class="skel" style="width:40%"></span></td>'
+                 + '<td><span class="skel" style="width:40%"></span></td>';
+    tbody.appendChild(tr);
+  }
+}
+
+async function loadCustomers() {
+  renderSkeletonRows();
+  try {
+    const qs = buildQueryString();
+    const res = await window.AgentShared.apiFetch('/api/customers?' + qs);
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.error || ('HTTP ' + res.status));
+    }
+    const data = await res.json();
+    renderCustomers(data);
+  } catch (err) {
+    console.error('[klanten] customers load failed:', err);
+    renderErrorState(err.message);
+  }
+}
+
+function buildQueryString() {
+  const p = new URLSearchParams();
+  if (state.search) p.set('search', state.search);
+  if (state.tags.length) p.set('tags', state.tags.join(','));
+  if (state.status.length) p.set('status', state.status.join(','));
+  if (state.createdFrom) p.set('created_from', state.createdFrom);
+  if (state.createdTo)   p.set('created_to', state.createdTo);
+  p.set('sort_by', state.sortBy);
+  p.set('sort_dir', state.sortDir);
+  p.set('page', String(state.page));
+  p.set('page_size', String(state.pageSize));
+  return p.toString();
+}
+
+function renderCustomers({ customers, total, page, page_size, total_pages }) {
+  const tbody = $('#customers-tbody');
+  tbody.innerHTML = '';
+
+  if (!customers || customers.length === 0) {
+    tbody.innerHTML = `
+      <tr><td colspan="7" class="state-cell">
+        Geen klanten gevonden met huidige filters.
+        <br><br>
+        <button class="btn btn-sm" onclick="resetFilters()"><i class="ti ti-rotate-clockwise"></i> Filters resetten</button>
+      </td></tr>`;
+    updatePagination(total, page, page_size, total_pages);
+    return;
+  }
+
+  for (const c of customers) {
+    const tr = document.createElement('tr');
+    tr.dataset.customerId = c.id;
+    tr.addEventListener('click', () => {
+      window.location.href = '/modules/klanten.html?id=' + encodeURIComponent(c.id);
+    });
+    const tags = (c.tags || []).map((t) =>
+      `<span class="tag-badge" style="background:${escapeHtml(t.color || '#6B7280')}">${escapeHtml(t.label)}</span>`
+    ).join('');
+    const name = `${escapeHtml(c.first_name || '')} ${escapeHtml(c.last_name || '')}`.trim() || '—';
+    tr.innerHTML = `
+      <td><span class="cust-name">${name}</span></td>
+      <td>${c.email ? escapeHtml(c.email) : '<span class="cust-empty">—</span>'}</td>
+      <td>${c.phone ? escapeHtml(c.phone) : '<span class="cust-empty">—</span>'}</td>
+      <td>${tags || '<span class="cust-empty">—</span>'}</td>
+      <td>${fmtDate(c.created_at)}</td>
+      <td><span class="status-badge ${escapeHtml(c.status)}">${labelForStatus(c.status)}</span></td>
+      <td><span class="cust-empty">—</span></td>
+    `;
+    tbody.appendChild(tr);
+  }
+
+  updatePagination(total, page, page_size, total_pages);
+}
+
+function labelForStatus(s) {
+  return { active:'Actief', archived:'Gearchiveerd', anonymized:'Geanonimiseerd' }[s] || s;
+}
+
+function renderErrorState(msg) {
+  $('#customers-tbody').innerHTML = `
+    <tr><td colspan="7" class="state-cell" style="color:#EF4444;">
+      <i class="ti ti-alert-circle"></i> Kon klanten niet laden: ${escapeHtml(msg || 'onbekende fout')}
+      <br><br><button class="btn btn-sm" onclick="loadCustomers()">Opnieuw proberen</button>
+    </td></tr>`;
+}
+
+function updatePagination(total, page, pageSize, totalPages) {
+  if (total === 0) {
+    $('#page-info').textContent = 'Geen resultaten';
+  } else {
+    const from = (page - 1) * pageSize + 1;
+    const to = Math.min(page * pageSize, total);
+    $('#page-info').textContent = `${from}–${to} van ${total}`;
+  }
+  $('#btn-prev').disabled = page <= 1;
+  $('#btn-next').disabled = page >= (totalPages || 1);
+  $('#page-input').value = page;
+  $('#page-input').max = Math.max(totalPages || 1, 1);
+}
+
+// ── Filter / sort / pagination event-binding ────────────────────────────────
+function bindFilterEvents() {
+  $('#filter-search').addEventListener('input', (e) => {
+    clearTimeout(searchDebounceTimer);
+    searchDebounceTimer = setTimeout(() => {
+      state.search = e.target.value.trim();
+      state.page = 1;
+      loadCustomers();
+    }, 300);
+  });
+
+  // Tag-multi-select popover toggle (clickoutside om te sluiten)
+  $('#filter-tags-trigger').addEventListener('click', (e) => {
+    e.stopPropagation();
+    $('#filter-tags').classList.toggle('open');
+  });
+  document.addEventListener('click', (e) => {
+    if (!$('#filter-tags').contains(e.target)) $('#filter-tags').classList.remove('open');
+  });
+  // Esc sluit tag-popover (WCAG 2.1 / toetsenbord-UX)
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') $('#filter-tags').classList.remove('open');
+  });
+
+  // Status pills
+  $$('#filter-status input[name="status"]').forEach((cb) => {
+    cb.addEventListener('change', () => {
+      const checked = Array.from($$('#filter-status input[name="status"]:checked')).map((x) => x.value);
+      // Disallow lege selectie — forceer minimaal 'active'
+      if (checked.length === 0) {
+        cb.checked = true;
+        return;
+      }
+      state.status = checked;
+      $$('#filter-status .status-pill').forEach((pill) => {
+        const input = pill.querySelector('input');
+        pill.dataset.checked = String(input.checked);
+      });
+      $('#status-hint').style.display = checked.includes('archived') || checked.includes('anonymized') ? 'none' : '';
+      state.page = 1;
+      loadCustomers();
+    });
+  });
+
+  $('#filter-from').addEventListener('change', (e) => { state.createdFrom = e.target.value; state.page = 1; loadCustomers(); });
+  $('#filter-to').addEventListener('change',   (e) => { state.createdTo   = e.target.value; state.page = 1; loadCustomers(); });
+
+  $('#btn-reset-filters').addEventListener('click', resetFilters);
+}
+
+function resetFilters() {
+  state.search = '';
+  state.tags = [];
+  state.status = ['active'];
+  state.createdFrom = '';
+  state.createdTo = '';
+  state.sortBy = 'created_at';
+  state.sortDir = 'desc';
+  state.page = 1;
+
+  $('#filter-search').value = '';
+  $('#filter-from').value = '';
+  $('#filter-to').value = '';
+  $$('#filter-tags-pop input[data-tag-slug]').forEach((cb) => { cb.checked = false; });
+  updateTagsLabel();
+  $$('#filter-status input[name="status"]').forEach((cb) => { cb.checked = cb.value === 'active'; });
+  $$('#filter-status .status-pill').forEach((pill) => {
+    pill.dataset.checked = String(pill.querySelector('input').checked);
+  });
+  $('#status-hint').style.display = '';
+
+  $$('.customers-table th[data-sort-key]').forEach((th) => {
+    th.setAttribute('aria-sort', th.dataset.sortKey === 'created_at' ? 'descending' : 'none');
+  });
+
+  loadCustomers();
+}
+window.resetFilters = resetFilters; // toegankelijk vanaf empty-state knop
+window.loadCustomers = loadCustomers; // symmetrisch — toegankelijk vanaf error-state retry-knop
+
+function bindSortEvents() {
+  $$('.customers-table th[data-sort-key]').forEach((th) => {
+    th.addEventListener('click', () => {
+      const key = th.dataset.sortKey;
+      if (state.sortBy === key) {
+        state.sortDir = state.sortDir === 'asc' ? 'desc' : 'asc';
+      } else {
+        state.sortBy = key;
+        state.sortDir = 'asc';
+      }
+      $$('.customers-table th[data-sort-key]').forEach((other) => {
+        other.setAttribute('aria-sort', other === th ? (state.sortDir === 'asc' ? 'ascending' : 'descending') : 'none');
+      });
+      state.page = 1;
+      loadCustomers();
+    });
+  });
+}
+
+function bindPaginationEvents() {
+  $('#btn-prev').addEventListener('click', () => {
+    if (state.page > 1) { state.page--; loadCustomers(); }
+  });
+  $('#btn-next').addEventListener('click', () => {
+    state.page++; loadCustomers();
+  });
+  $('#page-input').addEventListener('change', (e) => {
+    const n = parseInt(e.target.value, 10);
+    if (Number.isFinite(n) && n >= 1) { state.page = n; loadCustomers(); }
+  });
+  $('#page-size').addEventListener('change', (e) => {
+    state.pageSize = parseInt(e.target.value, 10) || 25;
+    state.page = 1;
+    loadCustomers();
+  });
+}
+
 init();
 </script>
 <script src="/modules/shared/permissions.js"></script>
