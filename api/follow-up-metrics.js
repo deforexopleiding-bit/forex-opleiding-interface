@@ -7,11 +7,27 @@
  * Bereken metrics voor een periode.
  *
  * @param {Object} supabaseAdmin - service-role client (bypass RLS)
- * @param {{ period: 'today'|'week'|'month' }} opts
+ * @param {Object} opts
+ * @param {'today'|'week'|'month'} [opts.period='today']
+ * @param {string|null} [opts.ownerScope=null] - user.id om appointments
+ *        + outcomes te scopen op één owner (sales-rol). null = globaal.
+ * @param {'strict'|'broad'} [opts.overdueMode='strict'] - definitie van
+ *        achterstallig_outcomes / achterstallig_voicememos:
+ *        - 'strict' (default): scheduled_at < today AND status IN
+ *          ('completed','no_show'). Boekhoudkundige definitie — gebruikt
+ *          door email-rapporten (daily/weekly) en follow-up topbar.
+ *        - 'broad': scheduled_at < now()-30min AND status IN ('scheduled',
+ *          'in_progress','completed','no_show'). Pragmatische definitie —
+ *          synchroon met /api/follow-up-appointments?period=open_acties
+ *          en de "Open acties" tab in follow-up.html. Gebruikt door
+ *          sales-dashboard om past-due scheduled appts mee te tellen.
+ *        achterstallig_opvolgingen verandert NIET — die heeft eigen
+ *        parent-active filter en is mode-onafhankelijk.
+ *        achterstallig_totaal wordt gededupliceerd over de bredere sets.
  * @returns {Promise<Object>}
  */
 export async function computeMetrics(supabaseAdmin, opts = {}) {
-  const { period = 'today', ownerScope = null } = opts;
+  const { period = 'today', ownerScope = null, overdueMode = 'strict' } = opts;
   const ranges = getRanges();
   const range = ranges[period] || ranges.today;
 
@@ -129,13 +145,23 @@ export async function computeMetrics(supabaseAdmin, opts = {}) {
   metrics.opvolgingen_overdue = activeOverdueCount;
   metrics.achterstallig_opvolgingen = activeOverdueCount;
 
-  // Outcomes achterstallig: completed/no_show van vóór vandaag zonder outcome
+  // Outcomes achterstallig: appointments vóór de cutoff zonder outcome.
+  // overdueMode bepaalt cutoff + status-filter — zie JSDoc op computeMetrics.
+  // 'strict': scheduled_at < today (00:00) AND completed/no_show.
+  // 'broad' : scheduled_at < now()-30min AND scheduled/in_progress/completed/no_show.
+  const overdueCutoff = overdueMode === 'broad'
+    ? new Date(Date.now() - 30 * 60 * 1000).toISOString()
+    : today.toISOString();
+  const overdueStatuses = overdueMode === 'broad'
+    ? ['scheduled', 'in_progress', 'completed', 'no_show']
+    : ['completed', 'no_show'];
+
   const { data: oldDone } = await apptQ(
     supabaseAdmin
       .from('follow_up_appointments')
       .select('id')
-      .lt('scheduled_at', today.toISOString())
-      .in('status', ['completed', 'no_show'])
+      .lt('scheduled_at', overdueCutoff)
+      .in('status', overdueStatuses)
   );
 
   const oldDoneIds = (oldDone || []).map(a => a.id);
@@ -150,15 +176,16 @@ export async function computeMetrics(supabaseAdmin, opts = {}) {
   }
   metrics.achterstallig_outcomes = noOutcomeIds.size;
 
-  // Voicememos achterstallig: alleen voor appointments waar de call
-  // daadwerkelijk plaatsvond. Cancelled telt niet mee.
+  // Voicememos achterstallig: zelfde cutoff + status-filter als outcomes
+  // (mode-afhankelijk). In 'broad' tellen ook past-due scheduled appts mee
+  // waar de voicememo nog niet verstuurd is.
   const { data: oldPending } = await apptQ(
     supabaseAdmin
       .from('follow_up_appointments')
       .select('id')
-      .lt('scheduled_at', today.toISOString())
+      .lt('scheduled_at', overdueCutoff)
       .eq('voicememo_status', 'pending')
-      .in('status', ['completed', 'no_show'])
+      .in('status', overdueStatuses)
   );
 
   const pendingMemoIds = new Set((oldPending || []).map(a => a.id));

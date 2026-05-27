@@ -45,16 +45,21 @@
     .sd-next .sd-next-when { font-size: 12px; color: var(--muted); }
     .sd-next .sd-empty { font-size: 13px; color: var(--muted); font-style: italic; }
 
-    /* Achterstallig-panel — totaal-getal + 3 sub-counts (zoals follow-up topbar). */
-    .sd-overdue { display: block; color: inherit; text-decoration: none; }
-    .sd-overdue:hover { background: var(--surface-subtle, rgba(0,0,0,0.02)); }
-    .sd-overdue-total { font-size: 28px; font-weight: 700; color: var(--fg); line-height: 1.1; margin: 0 0 6px; }
-    .sd-overdue-total.is-zero { color: var(--muted); }
-    .sd-overdue-sub { display: flex; flex-direction: column; gap: 4px; }
-    .sd-overdue-sub-item { display: flex; justify-content: space-between; align-items: baseline; font-size: 13px; color: var(--fg); }
-    .sd-overdue-sub-item .sd-overdue-sub-label { color: var(--muted); }
-    .sd-overdue-sub-item .sd-overdue-sub-value { font-weight: 600; }
-    .sd-overdue-hint { font-size: 11px; color: var(--muted); margin: 10px 0 0; font-style: italic; }
+    /* Open-acties-panel — totaal-getal + 4 sub-counts (zoals follow-up "ACTIE NODIG"). */
+    .sd-oa-total-link { display: block; color: inherit; text-decoration: none; margin: 0 0 8px; }
+    .sd-oa-total { font-size: 28px; font-weight: 700; color: var(--fg); line-height: 1.1; }
+    .sd-oa-total.is-zero { color: var(--muted); }
+    .sd-oa-total-link:hover .sd-oa-total { text-decoration: underline; }
+    .sd-oa-sub { display: flex; flex-direction: column; gap: 2px; }
+    .sd-oa-sub-link {
+      display: flex; justify-content: space-between; align-items: baseline;
+      font-size: 13px; color: var(--fg); text-decoration: none;
+      padding: 6px 8px; margin: 0 -8px; border-radius: 6px;
+    }
+    .sd-oa-sub-link:hover { background: var(--surface-subtle, rgba(0,0,0,0.04)); }
+    .sd-oa-sub-link .sd-oa-sub-label { color: var(--muted); }
+    .sd-oa-sub-link .sd-oa-sub-value { font-weight: 600; }
+    .sd-oa-hint { font-size: 11px; color: var(--muted); margin: 8px 0 0; font-style: italic; }
 
     .sd-row-extra { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
     @media (max-width: 560px) { .sd-row-extra { grid-template-columns: 1fr; } }
@@ -105,16 +110,19 @@
           <div class="sd-panel-head"><h3>Volgende afspraak</h3></div>
           <div id="sd-next" class="sd-next"><span class="sd-empty">Geen geplande afspraken.</span></div>
         </div>
-        <a class="sd-panel sd-overdue" href="/modules/follow-up.html?tab=open-acties" id="sd-overdue-link">
-          <div class="sd-panel-head"><h3>Achterstallig</h3></div>
-          <div class="sd-overdue-total" id="sd-overdue-total">0</div>
-          <div class="sd-overdue-sub">
-            <div class="sd-overdue-sub-item"><span class="sd-overdue-sub-label">Opvolgingen</span><span class="sd-overdue-sub-value" id="sd-overdue-opvolgingen">0</span></div>
-            <div class="sd-overdue-sub-item"><span class="sd-overdue-sub-label">Outcomes</span><span class="sd-overdue-sub-value" id="sd-overdue-outcomes">0</span></div>
-            <div class="sd-overdue-sub-item"><span class="sd-overdue-sub-label">Voicememos</span><span class="sd-overdue-sub-value" id="sd-overdue-voicememos">0</span></div>
+        <div class="sd-panel">
+          <div class="sd-panel-head"><h3>Open acties</h3></div>
+          <a class="sd-oa-total-link" href="/modules/follow-up.html">
+            <span class="sd-oa-total" id="sd-oa-total">0</span>
+          </a>
+          <div class="sd-oa-sub">
+            <a class="sd-oa-sub-link" href="/modules/follow-up.html?tab=opvolging"><span class="sd-oa-sub-label">Opvolgingen</span><span class="sd-oa-sub-value" id="sd-oa-opvolgingen">0</span></a>
+            <a class="sd-oa-sub-link" href="/modules/follow-up.html?tab=open-acties"><span class="sd-oa-sub-label">Outcomes</span><span class="sd-oa-sub-value" id="sd-oa-outcomes">0</span></a>
+            <a class="sd-oa-sub-link" href="/modules/follow-up.html?tab=opvolging&subtab=wacht"><span class="sd-oa-sub-label">Wacht reschedule</span><span class="sd-oa-sub-value" id="sd-oa-wacht">0</span></a>
+            <a class="sd-oa-sub-link" href="/modules/follow-up.html?tab=open-acties"><span class="sd-oa-sub-label">Voicememos</span><span class="sd-oa-sub-value" id="sd-oa-voicememos">0</span></a>
           </div>
-          <p class="sd-overdue-hint">Klik om naar Open acties te gaan →</p>
-        </a>
+          <p class="sd-oa-hint">Klik een categorie om naar Follow-up te gaan →</p>
+        </div>
       </div>
     </div>
   </main>
@@ -169,15 +177,16 @@
         '<div class="sd-next-when">' + escapeHtml(when) + '</div>';
     }
 
-    function renderOverdue(overdue) {
-      const o = overdue || {};
+    function renderOpenActies(openActies) {
+      const o = openActies || {};
       const total = o.total || 0;
-      const totalEl = document.getElementById('sd-overdue-total');
+      const totalEl = document.getElementById('sd-oa-total');
       totalEl.textContent = total;
       totalEl.classList.toggle('is-zero', total === 0);
-      setVal('sd-overdue-opvolgingen', o.opvolgingen);
-      setVal('sd-overdue-outcomes',    o.outcomes);
-      setVal('sd-overdue-voicememos',  o.voicememos);
+      setVal('sd-oa-opvolgingen', o.opvolgingen);
+      setVal('sd-oa-outcomes',    o.outcomes);
+      setVal('sd-oa-wacht',       o.wacht_reschedule);
+      setVal('sd-oa-voicememos',  o.voicememos);
     }
 
     function showError(msg) {
@@ -205,7 +214,7 @@
         setVal('sd-open-followups',data.open_follow_ups);
 
         renderNext(data.next_appointment);
-        renderOverdue(data.overdue);
+        renderOpenActies(data.open_acties);
 
         document.getElementById('sd-loading').style.display = 'none';
         document.getElementById('sd-content').style.display = '';
