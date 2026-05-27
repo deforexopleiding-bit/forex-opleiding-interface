@@ -144,7 +144,12 @@ async function syncMailbox({ account, host, port, boxStart }) {
 
       console.log(`[sync-emails] ${account.mailbox}: ${rawMsgs.length} berichten te verwerken`);
 
-      // ── Categoriseer en bouw insert-rows ─────────────────────────────
+      // 3-pass aanpak (Fase email-classifier-fix commit 2):
+      // 1) Bouw base-rows uit envelopes
+      // 2) Fetch body's via IMAP — VÓÓR categorize zodat snippet beschikbaar is
+      // 3) Categorize met bodySnippet ingevuld → body_keywords pattern werkt nu
+
+      // ── Pass 1: base rows uit envelopes ───────────────────────────────
       const rows = [];
       for (const msg of rawMsgs) {
         const uid = msg.uid;
@@ -158,23 +163,6 @@ async function syncMailbox({ account, host, port, boxStart }) {
         const receivedAt  = env.date ? new Date(env.date).toISOString() : new Date().toISOString();
         const isRead      = msg.flags?.has('\\Seen') ?? false;
 
-        // AI-categorisatie (envelope-only; snippet toegevoegd in Fase 2)
-        let category       = 'Onbekend';
-        let requiresAction = false;
-        let confidence     = 0;
-        let aiSource       = 'none';
-        let catReason      = '';
-        try {
-          const cat  = await categorize({ from: fromAddress, subject, bodySnippet: '', date: receivedAt });
-          category       = cat.category        || 'Onbekend';
-          requiresAction = cat.requires_action  ?? false;
-          confidence     = cat.confidence       ?? 0;
-          aiSource       = cat.source           || 'ai';
-          catReason      = cat.reason           || '';
-        } catch (catErr) {
-          console.warn(`[sync-emails] categorize fout ${account.mailbox}/${uid}:`, catErr.message);
-        }
-
         if (uid > maxUid) maxUid = uid;
 
         rows.push({
@@ -185,18 +173,22 @@ async function syncMailbox({ account, host, port, boxStart }) {
           from_name:           fromName,
           subject,
           date_received:       receivedAt,
-          snippet:             null, // Fase 2: partial IMAP fetch voor tekst-preview
-          category,
-          requires_action:     requiresAction,
-          category_confidence: confidence,
-          category_reason:     `[bron: ${aiSource}] ${catReason}`.trim(),
+          snippet:             null, // gevuld in Pass 2
+          // categorize-velden in Pass 3:
+          category:            'Onbekend',
+          requires_action:     false,
+          category_confidence: 0,
+          category_reason:     '',
           is_read:             isRead,
         });
       }
 
-      // ── Body ophalen voor nieuwe mails (Fase 2) ─────────────────────────
+      // ── Pass 2: Body ophalen voor nieuwe mails ────────────────────────
       // Zelfde IMAP-sessie is al open — geen extra verbinding nodig.
       // Try/catch per mail: body-fout mag metadata-sync nooit breken.
+      // Body wordt nu vóór categorize gefetched zodat de classifier de
+      // body_keywords kan matchen tegen email_patterns (eerder werkte dat
+      // niet omdat bodySnippet='' werd doorgegeven).
       const BODY_LIMIT = 100_000;
       for (const row of rows) {
         try {
@@ -215,6 +207,27 @@ async function syncMailbox({ account, host, port, boxStart }) {
           console.warn(`[sync-emails] body-fetch fout ${account.mailbox}/${row.imap_uid}:`, bodyErr.message);
           row.body_fetch_error = bodyErr.message.slice(0, 200);
           // Geen body_fetched_at gezet → backfill kan later opnieuw proberen
+          // row.snippet blijft null → categorize krijgt '' (fallback gedrag, geen crash)
+        }
+      }
+
+      // ── Pass 3: Categorize met bodySnippet beschikbaar ────────────────
+      for (const row of rows) {
+        try {
+          const cat = await categorize({
+            from:        row.from_address,
+            subject:     row.subject,
+            bodySnippet: row.snippet || '',
+            date:        row.date_received,
+          });
+          row.category            = cat.category         || 'Onbekend';
+          row.requires_action     = cat.requires_action   ?? false;
+          row.category_confidence = cat.confidence        ?? 0;
+          const aiSource          = cat.source            || 'ai';
+          row.category_reason     = `[bron: ${aiSource}] ${cat.reason || ''}`.trim();
+        } catch (catErr) {
+          console.warn(`[sync-emails] categorize fout ${account.mailbox}/${row.imap_uid}:`, catErr.message);
+          // row.category blijft 'Onbekend' (default uit Pass 1)
         }
       }
 
