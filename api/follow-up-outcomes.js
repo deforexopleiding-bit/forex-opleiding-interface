@@ -9,12 +9,14 @@
 //              follow_up_duration_minutes: integer (default 30) }
 //      → UPSERT (onConflict: appointment_id); side-effect: update appointment status.
 //        Als follow_up_type='agenda'/'intern': maak child appointment row aan.
-//        type='agenda': update ook GHL + Zoom naar nieuwe tijd (validate-first).
+//        type='agenda': maak NIEUWE GHL appointment voor de vervolg-call
+//        (validate-first, blocking). Parent's GHL appointment blijft intact.
+//        Zoom-velden komen uit GHL response (defensief); null → poll-cron vult later.
+//        type='agenda' zonder lead_ghl_contact_id: fallback naar intern-gedrag.
 
 import { createUserClient } from './supabase.js';
 import { addGhlTags, tagsFromOutcome } from './ghl-tag-helper.js';
-import { updateZoomMeetingTime } from './_lib/zoom-meeting.js';
-import { updateGhlAppointmentTime } from './_lib/ghl-appointment.js';
+import { createGhlAppointment } from './_lib/ghl-appointment.js';
 import dayjs from 'dayjs';
 import utc from 'dayjs/plugin/utc.js';
 import timezone from 'dayjs/plugin/timezone.js';
@@ -141,38 +143,41 @@ export default async function handler(req, res) {
     }
   }
 
-  // ── Validate-first: GHL update — blocking (faal → 422, geen DB-mutaties) ──
-  let ghlResult = null;
-  if (!skipFollowUp && followUpType === 'agenda' && parentAppt.ghl_appointment_id) {
-    try {
-      ghlResult = await updateGhlAppointmentTime(
-        parentAppt.ghl_appointment_id,
-        followUpStartISO,
-        followUpEndISO
-      );
-    } catch (ghlErr) {
-      console.error('[outcomes-post] GHL update failed:', ghlErr?.message, ghlErr);
-      const ghlStatus = ghlErr?.ghlStatus || 500;
-      const ghlBody = ghlErr?.ghlBody || '';
-      return res.status(422).json({
-        error: mapGhlError(ghlStatus, ghlBody),
-        ghl_status: ghlStatus,
-      });
-    }
-  }
-
-  // ── Zoom update — best-effort (faal blokkeert niet) ──────────────────────
-  let zoomResult = null;
-  if (!skipFollowUp && followUpType === 'agenda' && parentAppt.zoom_meeting_id) {
-    try {
-      zoomResult = await updateZoomMeetingTime(
-        parentAppt.zoom_meeting_id,
-        followUpStartISO,
-        followUpDurationMin
-      );
-    } catch (zoomErr) {
-      console.error('[outcomes-post] Zoom update failed (best-effort):', zoomErr?.message, zoomErr);
-      // Niet blokkerend
+  // ── Validate-first: NIEUWE GHL appointment voor vervolg-call (blocking) ───
+  // Parent's GHL appointment blijft intact (Jeffrey's keuze) — lead heeft dus
+  // tijdelijk 2 appointments in GHL tot Dave de oude handmatig afhandelt.
+  // Bij agenda zonder lead_ghl_contact_id: fallback naar intern-gedrag
+  // (geen GHL/Zoom IDs op child, gewone DB-only follow-up row).
+  let ghlNew = null;
+  if (!skipFollowUp && followUpType === 'agenda') {
+    if (!parentAppt.lead_ghl_contact_id) {
+      console.warn('[outcomes-post] agenda flow zonder lead_ghl_contact_id, fallback naar intern voor appointment:', appointment_id);
+    } else {
+      const calendarId = process.env.GHL_CALENDAR_ID;
+      const locationId = process.env.GHL_LOCATION_ID;
+      if (!calendarId || !locationId) {
+        console.error('[outcomes-post] GHL env-vars ontbreken: GHL_CALENDAR_ID / GHL_LOCATION_ID');
+        return res.status(500).json({ error: 'GHL configuratie ontbreekt op de server.' });
+      }
+      try {
+        ghlNew = await createGhlAppointment({
+          calendarId,
+          locationId,
+          contactId:      parentAppt.lead_ghl_contact_id,
+          assignedUserId: process.env.GHL_DAVE_USER_ID || undefined,
+          startTime:      followUpStartISO,
+          endTime:        followUpEndISO,
+          title:          parentAppt.lead_name,
+        });
+      } catch (ghlErr) {
+        console.error('[outcomes-post] GHL create failed:', ghlErr?.message, ghlErr);
+        const ghlStatus = ghlErr?.ghlStatus || 500;
+        const ghlBody   = ghlErr?.ghlBody   || '';
+        return res.status(422).json({
+          error: mapGhlError(ghlStatus, ghlBody),
+          ghl_status: ghlStatus,
+        });
+      }
     }
   }
 
@@ -233,10 +238,12 @@ export default async function handler(req, res) {
       status:               'scheduled',
       voicememo_status:     'pending',
       owner_id:             parentAppt.owner_id,
-      // Agenda: hergebruik GHL + Zoom van parent; intern: null
-      ghl_appointment_id: followUpType === 'agenda' ? parentAppt.ghl_appointment_id : null,
-      zoom_meeting_id:    followUpType === 'agenda' ? parentAppt.zoom_meeting_id : null,
-      zoom_join_url:      followUpType === 'agenda' ? parentAppt.zoom_join_url : null,
+      // Agenda: gebruik IDs van de NIEUWE GHL appointment (createGhlAppointment).
+      // Intern of agenda-fallback (geen contactId): null. Zoom-velden kunnen
+      // ook null zijn als GHL ze niet meegaf — poll-cron vult dan later (15min).
+      ghl_appointment_id: ghlNew?.id              ?? null,
+      zoom_meeting_id:    ghlNew?.zoom_meeting_id ?? null,
+      zoom_join_url:      ghlNew?.zoom_join_url   ?? null,
     };
 
     const { data: insertedAppt, error: insertErr } = await supabase
@@ -247,10 +254,14 @@ export default async function handler(req, res) {
 
     if (insertErr) {
       console.error('[outcomes-post] child insert error:', insertErr.message, 'appointment:', appointment_id);
-      // Outcome is al opgeslagen — niet aborteren voor child-insert failure
-    } else {
-      newAppt = insertedAppt;
+      return res.status(500).json({
+        error: 'Vervolg-call kon niet worden aangemaakt in database. Outcome is wel opgeslagen. Neem contact op met support.',
+        child_insert_failed: true,
+        outcome_saved: true,
+        db_error: insertErr.message,
+      });
     }
+    newAppt = insertedAppt;
   }
 
   // ── GHL tags (best-effort) ────────────────────────────────────────────────
@@ -281,8 +292,8 @@ export default async function handler(req, res) {
     appointment_id,
     new_status: newStatus,
     follow_up_appointment: newAppt ? { id: newAppt.id, scheduled_at: newAppt.scheduled_at } : null,
-    zoom_updated: !!zoomResult,
-    ghl_updated: !!ghlResult,
+    ghl_created:        !!ghlNew,
+    ghl_appointment_id: ghlNew?.id || null,
     tags: tagResult ? { added: tagResult.tagsAdded, errors: tagResult.errors } : null,
   });
 }

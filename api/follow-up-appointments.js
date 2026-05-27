@@ -93,7 +93,7 @@ async function handleGet(req, res, supabase) {
 
     const { data, error } = await supabase
       .from('follow_up_appointments')
-      .select('id, lead_name, lead_email, lead_phone, scheduled_at, status, voicememo_status, zoom_meeting_id, zoom_join_url, owner_id')
+      .select('id, lead_name, lead_email, lead_phone, scheduled_at, status, voicememo_status, zoom_meeting_id, zoom_join_url, ghl_appointment_id, owner_id')
       .in('id', ids)
       .in('status', ['scheduled', 'in_progress', 'completed', 'no_show']);
 
@@ -153,7 +153,7 @@ async function handleGet(req, res, supabase) {
   } else if (period === 'wacht_op_reschedule') {
     const { data, error } = await supabase
       .from('follow_up_appointments')
-      .select('id, lead_name, lead_email, lead_phone, scheduled_at, updated_at, status, voicememo_status, zoom_meeting_id, zoom_join_url, owner_id, parent_appointment_id, snelle_notitie')
+      .select('id, lead_name, lead_email, lead_phone, scheduled_at, updated_at, status, voicememo_status, zoom_meeting_id, zoom_join_url, ghl_appointment_id, owner_id, parent_appointment_id, snelle_notitie')
       .eq('status', 'wacht_op_reschedule')
       .order('updated_at', { ascending: false });
 
@@ -174,7 +174,7 @@ async function handleGet(req, res, supabase) {
 
     const { data, error } = await supabase
       .from('follow_up_appointments')
-      .select('id, lead_name, lead_email, scheduled_at, status, voicememo_status, zoom_meeting_id, zoom_join_url, owner_id, parent_appointment_id')
+      .select('id, lead_name, lead_email, scheduled_at, status, voicememo_status, zoom_meeting_id, zoom_join_url, ghl_appointment_id, owner_id, parent_appointment_id')
       .in('status', ['completed', 'no_show', 'cancelled', 'verplaatst'])
       .gte('scheduled_at', yesterday.toISOString())
       .lt('scheduled_at', tomorrow.toISOString())
@@ -208,7 +208,7 @@ async function handleGet(req, res, supabase) {
 
     const { data: appts, error: apptErr } = await supabase
       .from('follow_up_appointments')
-      .select('id, lead_name, lead_email, scheduled_at, status, voicememo_status, zoom_meeting_id, zoom_join_url, owner_id, parent_appointment_id')
+      .select('id, lead_name, lead_email, scheduled_at, status, voicememo_status, zoom_meeting_id, zoom_join_url, ghl_appointment_id, owner_id, parent_appointment_id')
       .lt('scheduled_at', cutoff.toISOString())
       .in('status', ['scheduled', 'in_progress', 'completed', 'no_show'])
       .order('scheduled_at', { ascending: false })
@@ -264,7 +264,7 @@ async function handleGet(req, res, supabase) {
 
   let query = supabase
     .from('follow_up_appointments')
-    .select('id, lead_name, lead_email, lead_phone, scheduled_at, duration_minutes, status, voicememo_status, voicememo_sent_at, requires_screenshot, screenshot_url, snelle_notitie, zoom_meeting_id, zoom_join_url, owner_id, created_at, parent_appointment_id')
+    .select('id, lead_name, lead_email, lead_phone, scheduled_at, duration_minutes, status, voicememo_status, voicememo_sent_at, requires_screenshot, screenshot_url, snelle_notitie, zoom_meeting_id, zoom_join_url, ghl_appointment_id, owner_id, created_at, parent_appointment_id')
     .gte('scheduled_at', startDate.toISOString())
     .lt('scheduled_at', endDate.toISOString())
     .order('scheduled_at', { ascending: true });
@@ -501,7 +501,7 @@ async function fetchOpvolgingRange(supabase, startDate, endDate, period, res) {
 
   const { data, error } = await supabase
     .from('follow_up_appointments')
-    .select('id, lead_name, lead_email, lead_phone, scheduled_at, status, voicememo_status, zoom_meeting_id, zoom_join_url, owner_id')
+    .select('id, lead_name, lead_email, lead_phone, scheduled_at, status, voicememo_status, zoom_meeting_id, zoom_join_url, ghl_appointment_id, owner_id')
     .in('id', ids)
     .in('status', ['scheduled', 'in_progress', 'completed', 'no_show']);
 

@@ -197,6 +197,74 @@
 
 ---
 
+## 📞 Follow-up vervolg-call fix (2026-05-27)
+
+> Branch: `feature/follow-up-vervolg-call-fix` (3 feature-commits, push pending).
+>
+> Probleem: bij outcome-save met `follow_up_type='agenda'` werd parent's
+> GHL appointment verplaatst en kreeg child-row dezelfde `ghl_appointment_id`.
+> UNIQUE constraint violation → child-insert faalde stil → vervolg-call
+> niet zichtbaar in Vandaag-tab > "alle komende calls". Outcome wél in DB,
+> opvolgingen-tab toonde Cees correct (uit outcome-rij).
+
+### ✅ Afgerond (lokaal, nog geen push)
+- [x] `createGhlAppointment()` helper in `api/_lib/ghl-appointment.js` (commit b4e64cc)
+      - POST /calendars/events/appointments, hergebruikt token-lookup-patroon
+      - Defensieve zoom-veld extractie (4 fallback paths)
+      - Diagnose-log van response keys voor latere verfijning
+- [x] `api/follow-up-outcomes.js` agenda-flow herschreven (commit cff250f)
+      - createGhlAppointment ipv updateGhlAppointmentTime — parent intact
+      - Geen aparte Zoom API call meer (response levert zoom-velden)
+      - Fallback naar intern-flow bij agenda+missing lead_ghl_contact_id
+      - Child-insert error wordt nu geescaleerd naar 500 (was stille fail)
+      - Response: `zoom_updated`/`ghl_updated` → `ghl_created` + `ghl_appointment_id`
+- [x] UI-melding bij gedeeltelijke save (commit 32bffd0)
+      - "Gedeeltelijk opgeslagen" bericht bij child_insert_failed
+      - Voorkomt re-submit waar outcome al staat
+- [x] **GATE Vercel env-var**: `GHL_CALENDAR_ID = Zk3jC3eSyQHPOD9BtvXx`
+      toegevoegd aan Vercel (Production + Preview, Sensitive). Geverifieerd
+      door Jeffrey 27 mei.
+
+### ⏳ Open punten (vóór push naar main)
+- [ ] **Smoke-test**: Vercel preview deployment van branch
+      `feature/follow-up-vervolg-call-fix`. Plan testlead via outcome-modal
+      → outcome=interesse_overleg + follow_up_type=agenda + datum=morgen.
+      Verifieer: 2 rows in `follow_up_appointments` (parent + child met eigen
+      `ghl_appointment_id`), nieuwe appointment in GHL Dave's kalender,
+      child verschijnt in Vandaag > "alle komende".
+- [ ] **Vercel logs check**: na 1e succesvolle agenda-create kijken naar
+      `[ghl-create-appt] response keys` log. Daarna fallback-paths in
+      `createGhlAppointment` versmallen tot werkelijke key-paths
+      (zoomMeetingId vs meetingLocation.zoomLink etc.).
+- [ ] **Optioneel later**: parent's GHL appointment cancellen na succesvolle
+      vervolg-call create. Nu blijft oude appointment staan — Dave moet
+      handmatig in GHL afhandelen. Beslissing: laat staan (Jeffrey).
+
+### 🔍 Leerpunten
+
+1. **Stille catch op DB-insert is anti-pattern bij sync-kritieke flows.**
+   `follow-up-outcomes.js` had bewust een `console.error` + continue voor
+   child-insert failures (regel 248-253 in oude versie). Resultaat: outcome
+   in DB, geen child-row, gebruiker ziet 200 response. Jeffrey ontdekte het
+   pas toen hij Cees miste in Vandaag-tab. Lesson: bij paired writes (outcome
+   + child) is ofwel een transactie nodig, ofwel een 500-escalatie zoals nu.
+
+2. **UNIQUE constraint + update-in-place pattern raakt botsing zodra je**
+   **de child wilt linken aan dezelfde externe ID.** Het oude design
+   "GHL-appointment verhuist door de tijd" botst met "parent + child rows
+   in onze DB die beide refereren". Cleanere oplossing: 1 appointment in
+   externe systeem = 1 row in onze DB. Vervolg-call = nieuwe externe + nieuwe row.
+
+3. **GHL API response-shape voor zoom-velden is niet 1-eenduidig**
+   gedocumenteerd. Defensieve extractie met meerdere fallback-paths +
+   diagnose-log was de juiste investering — versmallen kan na 1e prod-call.
+
+4. **Validate-first patroon werkt nog steeds**: GHL create-call vóór
+   DB-writes, faal → 422 abort, geen halve state. Hergebruikt mapGhlError
+   ongewijzigd (gedeelde err.ghlStatus/ghlBody shape op throw).
+
+---
+
 ## 📊 Sales-dashboard (2026-05-27)
 
 > Eigen dashboard-variant voor role=sales (Dave Heylen — enige sales-user).
