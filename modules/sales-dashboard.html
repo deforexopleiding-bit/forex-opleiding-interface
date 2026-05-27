@@ -105,24 +105,12 @@
         <div class="sd-card"><div class="sd-label"><i class="ti ti-list-check"></i>Open follow-ups</div><div class="sd-value" id="sd-open-followups">–</div></div>
       </div>
 
-      <div class="sd-row-3">
-        <div class="sd-panel">
-          <div class="sd-panel-head"><h3>Volgende afspraak</h3></div>
-          <div id="sd-next" class="sd-next"><span class="sd-empty">Geen geplande afspraken.</span></div>
-        </div>
-        <div class="sd-panel">
-          <div class="sd-panel-head"><h3>Open acties</h3></div>
-          <a class="sd-oa-total-link" href="/modules/follow-up.html">
-            <span class="sd-oa-total" id="sd-oa-total">0</span>
-          </a>
-          <div class="sd-oa-sub">
-            <a class="sd-oa-sub-link" href="/modules/follow-up.html?tab=opvolging"><span class="sd-oa-sub-label">Opvolgingen</span><span class="sd-oa-sub-value" id="sd-oa-opvolgingen">0</span></a>
-            <a class="sd-oa-sub-link" href="/modules/follow-up.html?tab=open-acties"><span class="sd-oa-sub-label">Outcomes</span><span class="sd-oa-sub-value" id="sd-oa-outcomes">0</span></a>
-            <a class="sd-oa-sub-link" href="/modules/follow-up.html?tab=opvolging&subtab=wacht"><span class="sd-oa-sub-label">Wacht reschedule</span><span class="sd-oa-sub-value" id="sd-oa-wacht">0</span></a>
-            <a class="sd-oa-sub-link" href="/modules/follow-up.html?tab=open-acties"><span class="sd-oa-sub-label">Voicememos</span><span class="sd-oa-sub-value" id="sd-oa-voicememos">0</span></a>
-          </div>
-          <p class="sd-oa-hint">Klik een categorie om naar Follow-up te gaan →</p>
-        </div>
+      <!-- Open acties widget tijdelijk verborgen — definitie nog niet correct,
+           zie commit historie sales-open-acties. Render-code in JS blijft staan
+           zodat re-enable straks alleen het tweede sd-panel terugzet. -->
+      <div class="sd-panel">
+        <div class="sd-panel-head"><h3>Volgende afspraak</h3></div>
+        <div id="sd-next" class="sd-next"><span class="sd-empty">Geen geplande afspraken.</span></div>
       </div>
     </div>
   </main>
@@ -178,9 +166,10 @@
     }
 
     function renderOpenActies(openActies) {
+      const totalEl = document.getElementById('sd-oa-total');
+      if (!totalEl) return; // widget tijdelijk verborgen — niets te renderen
       const o = openActies || {};
       const total = o.total || 0;
-      const totalEl = document.getElementById('sd-oa-total');
       totalEl.textContent = total;
       totalEl.classList.toggle('is-zero', total === 0);
       setVal('sd-oa-opvolgingen', o.opvolgingen);
