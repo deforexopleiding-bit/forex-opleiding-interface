@@ -2381,7 +2381,17 @@
         });
         if (!res.ok) {
           const err = await res.json().catch(() => ({}));
-          errDiv.textContent = err.error || `Fout bij opslaan (HTTP ${res.status})`;
+          // Onderscheid: child-insert-fail betekent outcome WEL opgeslagen,
+          // alleen de vervolg-call-row niet. Toon dat expliciet zodat de
+          // gebruiker niet opnieuw indient (zou outcome upserten op bestaande).
+          if (err.child_insert_failed && err.outcome_saved) {
+            errDiv.innerHTML =
+              '<strong>Gedeeltelijk opgeslagen.</strong> Outcome staat in de database, ' +
+              'maar de vervolg-call kon niet worden aangemaakt.<br>' +
+              '<small>' + (err.error || 'Onbekende DB-fout') + '</small>';
+          } else {
+            errDiv.textContent = err.error || `Fout bij opslaan (HTTP ${res.status})`;
+          }
           errDiv.style.display = 'block';
           submitBtn.disabled = false;
           submitBtn.textContent = 'Opslaan';
