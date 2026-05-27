@@ -818,6 +818,12 @@ function scheduleRefresh() {
   await window._authSharedReady;
   const profile = await window.AuthShared?.requireAuth();
   if (!profile) return;
+  // Sales-rol heeft eigen dashboard-variant. Redirect vóór loadDashboard()
+  // zodat geen onnodige queries voor admin-dashboard worden afgevuurd.
+  if (profile.role === 'sales') {
+    window.location.replace('/modules/sales-dashboard.html');
+    return;
+  }
   // adminNavLink wordt nu centraal door sidebar.js gegate (RBAC-voorbereiding)
   loadDashboard();
 })();

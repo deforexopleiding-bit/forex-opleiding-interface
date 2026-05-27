@@ -92,6 +92,8 @@
 
   function highlightActive() {
     var cur = currentModule();
+    // sales-dashboard.html highlight valt onder Dashboard-link in de sidebar
+    if (cur === 'sales-dashboard') cur = 'dashboard';
     document.querySelectorAll('#sidebar-mount [data-module]').forEach(function (el) {
       el.classList.toggle('active', el.getAttribute('data-module') === cur);
     });
@@ -104,6 +106,19 @@
       var link = document.getElementById('adminNavLink');
       if (link) link.style.display = (profile && ADMIN_ROLES.indexOf(profile.role) !== -1) ? '' : 'none';
     } catch (e) { /* niet ingelogd → admin-link blijft verborgen */ }
+  }
+
+  // Sales-rol krijgt eigen dashboard-variant. Past de Dashboard-link href aan
+  // zodat klikken in sidebar naar /modules/sales-dashboard.html navigeert.
+  // De index.html zelf doet ook een redirect (defense-in-depth bij directe URL).
+  async function applyDashboardRouting() {
+    try {
+      if (window._authSharedReady) await window._authSharedReady;
+      var profile = window.AuthShared ? await window.AuthShared.getProfile() : null;
+      if (!profile || profile.role !== 'sales') return;
+      var link = document.querySelector('#sidebar-mount [data-module="dashboard"]');
+      if (link) link.setAttribute('href', '/modules/sales-dashboard.html');
+    } catch (e) { /* fail-open: laat default dashboard-link staan */ }
   }
 
   function updateTakenBadge() {
@@ -120,6 +135,7 @@
   // niet (controlcenter./followup.) — daarom een expliciete mapping.
   var MODULE_FEATURE_MAP = {
     'dashboard': 'dashboard.module.access',
+    'sales-dashboard': 'dashboard.sales.view',
     'klanten': 'customer.module.access',
     'email': 'email.module.access',
     'lisa': 'lisa.module.access',
@@ -179,6 +195,7 @@
     highlightActive();
     updateTakenBadge();
     applyAdminGating();
+    applyDashboardRouting();
     // Footer (gebruiker + theme-toggle) via bestaande gedeelde helper.
     if (window.AgentShared && typeof window.AgentShared.renderUserSection === 'function') {
       window.AgentShared.renderUserSection();
