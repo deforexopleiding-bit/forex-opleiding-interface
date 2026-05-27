@@ -197,6 +197,58 @@
 
 ---
 
+## 📊 Sales-dashboard (2026-05-27)
+
+> Eigen dashboard-variant voor role=sales (Dave Heylen — enige sales-user).
+> Branch: `feature/sales-dashboard` (3 feature-commits, smoke-test pending).
+
+### ✅ Afgerond (lokaal, nog geen push)
+- [x] `/api/sales-dashboard-stats` aggregator-endpoint (commit ea8c2cf)
+      - 8 parallel queries via Promise.all
+      - Hergebruikt `computeMetrics()` uit follow-up-metrics voor
+        appointments + voicememos (today/week)
+      - Eigen queries: leads/events (global, email-categorie),
+        open follow-ups, tomorrow appts, overdue top-5, next appointment
+      - Auth: ALLOWED_ROLES = super_admin/admin/manager/sales
+      - Scoping: sales → owner-scoped (Dave's user_id),
+        anderen → globaal (MVP — geen lead-ownership op leads/events)
+      - Week = maandag deze week → vandaag-eind (NL-conventie)
+- [x] Sidebar redirect + RBAC feature_keys (commit 6224edf)
+      - `index.html` redirect role=sales naar /modules/sales-dashboard.html
+        (vóór loadDashboard() — voorkomt onnodige queries)
+      - `sidebar.js`: applyDashboardRouting() past Dashboard-link href aan
+        voor sales-users; highlightActive() laat sales-dashboard onder
+        Dashboard-link vallen; MODULE_FEATURE_MAP['sales-dashboard']
+      - `admin.html` FEATURE_REGISTRY: dashboard.sales.view toegevoegd
+- [x] `modules/sales-dashboard.html` (commit da7bbac)
+      - 9-widget layout in 3 blokken: Vandaag (4) / Deze week (4) /
+        Werkvoorraad (tomorrow + open follow-ups + Volgende afspraak
+        panel met countdown + Achterstallig top-5 panel met deep-link)
+      - 5-level countdown: nu / over X min / over Xu / morgen HH:MM /
+        weekdag HH:MM / DD MMM HH:MM
+      - Page-level RBAC check op dashboard.sales.view (defense-in-depth)
+      - XSS-safety: escapeHtml + encodeURIComponent op deep-link param
+
+### ⏳ Open punten (vóór push naar main)
+- [ ] **GATE smoke-test**: Vercel preview deployment van branch
+      `feature/sales-dashboard`. Loop alle 9 widgets door als Dave
+      (role=sales). Verifieer: redirect werkt, KPI's vullen,
+      countdown rendert, overdue deep-link opent follow-up tab.
+- [ ] role_permissions seeding voor `dashboard.sales.view`:
+      één keer "Opslaan" in admin RBAC-tab nadat PR live is →
+      upsert maakt rij voor sales=true / overige rollen=false aan.
+- [ ] Optioneel: deep-link support in follow-up.html voor
+      `?tab=opvolging&appointment=<id>` (3 regels JS in init()).
+      Nu valt link plain op /modules/follow-up.html zonder tab-state.
+
+### 📌 Notities
+- Dave's profile geverifieerd: role='sales', is_active=true,
+  partners@deforexopleiding.nl. Geen DB-aanpassing nodig.
+- Geen migraties. Geen schema-wijzigingen. Alleen 3 nieuwe files
+  (1 endpoint + 1 module-page) + 3 file-edits (index/sidebar/admin).
+
+---
+
 ## ✉️ Email-classifier fix (2026-05-26)
 
 ### ✅ Afgerond
