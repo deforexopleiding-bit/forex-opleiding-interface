@@ -2591,8 +2591,9 @@
         tab.addEventListener('click', () => switchTab(tab.dataset.tab));
       });
       // Deep-link support: ?tab=<id> uit URL (bv. vanuit sales-dashboard
-      // achterstallig-card). Alleen activeren als de tab daadwerkelijk bestaat.
-      const deepLinkTab = new URLSearchParams(window.location.search).get('tab');
+      // open-acties-card). Alleen activeren als de tab daadwerkelijk bestaat.
+      const params = new URLSearchParams(window.location.search);
+      const deepLinkTab = params.get('tab');
       if (deepLinkTab && document.querySelector(`.fu-tab[data-tab="${deepLinkTab}"]`)) {
         switchTab(deepLinkTab);
       }
@@ -2608,6 +2609,14 @@
           });
         });
       });
+      // Deep-link subtab: ?subtab=<id> — alleen relevant binnen opvolging-tab.
+      // Trigger .click() op de subtab-knop zodat bestaande handler de
+      // active-state + panel-display in één keer correct zet.
+      const deepLinkSubtab = params.get('subtab');
+      if (deepLinkSubtab) {
+        const subBtn = document.querySelector(`.fu-subtab[data-subtab="${deepLinkSubtab}"]`);
+        if (subBtn) subBtn.click();
+      }
       bindTimeToggle();
       initOpvolgingSearch();  // zoek-input in opvolging-tab activeren
 

@@ -14,12 +14,14 @@
 //
 // Response: { meta, today, week, open_follow_ups, appointments_today_count,
 //             appointments_tomorrow_count,
-//             overdue: { total, opvolgingen, outcomes, voicememos },
+//             open_acties: { total, opvolgingen, outcomes, wacht_reschedule, voicememos },
 //             next_appointment }
 //
-// Achterstallig-velden komen gratis uit todayMetrics (computeMetrics levert
-// achterstallig_opvolgingen/outcomes/voicememos/totaal). Definitie identiek
-// aan follow-up.html topbar — dedup tussen outcome-missing en voicememo-pending.
+// Open-acties-velden komen gratis uit todayMetrics (computeMetrics levert
+// achterstallig_opvolgingen/outcomes/voicememos/totaal + wacht_op_reschedule_count).
+// Definitie identiek aan follow-up.html "ACTIE NODIG" card. Total = achterstallig
+// (dedup tussen outcome-missing en voicememo-pending) + wacht_op_reschedule
+// (geen overlap mogelijk: wacht-status sluit completed/no_show uit).
 //
 // Errors: 401 (geen token) / 403 (verkeerde rol) / 405 / 500.
 
@@ -104,11 +106,13 @@ export default async function handler(req, res) {
       open_follow_ups:             openFollowUpsCount,
       appointments_today_count:    todayMetrics.appointments_total,
       appointments_tomorrow_count: tomorrowApptCount,
-      overdue: {
-        total:       todayMetrics.achterstallig_totaal       || 0,
-        opvolgingen: todayMetrics.achterstallig_opvolgingen  || 0,
-        outcomes:    todayMetrics.achterstallig_outcomes     || 0,
-        voicememos:  todayMetrics.achterstallig_voicememos   || 0,
+      open_acties: {
+        total:            (todayMetrics.achterstallig_totaal      || 0)
+                        + (todayMetrics.wacht_op_reschedule_count || 0),
+        opvolgingen:      todayMetrics.achterstallig_opvolgingen  || 0,
+        outcomes:         todayMetrics.achterstallig_outcomes     || 0,
+        wacht_reschedule: todayMetrics.wacht_op_reschedule_count  || 0,
+        voicememos:       todayMetrics.achterstallig_voicememos   || 0,
       },
       next_appointment: nextAppt,   // null als geen
     });
