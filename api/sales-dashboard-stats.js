@@ -13,8 +13,13 @@
 //     spec-beslissing: Dave is enige sales nu).
 //
 // Response: { meta, today, week, open_follow_ups, appointments_today_count,
-//             appointments_tomorrow_count, overdue: { total, top_5 },
+//             appointments_tomorrow_count,
+//             overdue: { total, opvolgingen, outcomes, voicememos },
 //             next_appointment }
+//
+// Achterstallig-velden komen gratis uit todayMetrics (computeMetrics levert
+// achterstallig_opvolgingen/outcomes/voicememos/totaal). Definitie identiek
+// aan follow-up.html topbar — dedup tussen outcome-missing en voicememo-pending.
 //
 // Errors: 401 (geen token) / 403 (verkeerde rol) / 405 / 500.
 
@@ -58,13 +63,14 @@ export default async function handler(req, res) {
   const ownerScope = profile.role === 'sales' ? user.id : null;
 
   try {
-    // Parallel fetch alle widget-data (8 queries, geen volgorde-afhankelijkheid)
+    // Parallel fetch alle widget-data (7 queries, geen volgorde-afhankelijkheid).
+    // Achterstallig-counts komen uit todayMetrics (computeMetrics) — geen
+    // aparte query meer nodig, definitie blijft synchroon met follow-up.html.
     const [
       todayMetrics,
       weekMetrics,
       tomorrowApptCount,
       openFollowUpsCount,
-      overdueData,
       nextAppt,
       leadsCounts,
       eventsCounts,
@@ -73,7 +79,6 @@ export default async function handler(req, res) {
       computeMetrics(supabaseAdmin, { period: 'week',  ownerScope }),
       fetchTomorrowAppointmentsCount(ownerScope),
       fetchOpenFollowUpsCount(ownerScope),
-      fetchOverdueTop5(ownerScope),
       fetchNextAppointment(ownerScope),
       fetchLeadsCounts(),    // global, geen ownerScope
       fetchEventsCounts(),   // global
@@ -87,23 +92,23 @@ export default async function handler(req, res) {
         generated_at:  new Date().toISOString(),
       },
       today: {
-        leads:           leadsCounts.today,
-        events:          eventsCounts.today,
-        appointments:    todayMetrics.appointments_total,
-        voicememos_sent: todayMetrics.voicememos_sent,
+        leads:        leadsCounts.today,
+        events:       eventsCounts.today,
+        appointments: todayMetrics.appointments_total,
       },
       week: {
-        leads:           leadsCounts.week,
-        events:          eventsCounts.week,
-        appointments:    weekMetrics.appointments_total,
-        voicememos_sent: weekMetrics.voicememos_sent,
+        leads:        leadsCounts.week,
+        events:       eventsCounts.week,
+        appointments: weekMetrics.appointments_total,
       },
       open_follow_ups:             openFollowUpsCount,
       appointments_today_count:    todayMetrics.appointments_total,
       appointments_tomorrow_count: tomorrowApptCount,
       overdue: {
-        total: overdueData.total,
-        top_5: overdueData.items,
+        total:       todayMetrics.achterstallig_totaal       || 0,
+        opvolgingen: todayMetrics.achterstallig_opvolgingen  || 0,
+        outcomes:    todayMetrics.achterstallig_outcomes     || 0,
+        voicememos:  todayMetrics.achterstallig_voicememos   || 0,
       },
       next_appointment: nextAppt,   // null als geen
     });
@@ -157,64 +162,6 @@ async function fetchOpenFollowUpsCount(ownerScope) {
   const { count, error } = await q;
   if (error) throw new Error('open follow-ups: ' + error.message);
   return count || 0;
-}
-
-/**
- * Achterstallig werk: total count + top-5 oudste overdue items met lead_name.
- * Overdue = opvolging_status 'gepland'/'verzet' AND terugkom_datum < today.
- */
-async function fetchOverdueTop5(ownerScope) {
-  const today = new Date(); today.setHours(0, 0, 0, 0);
-  const todayIso = today.toISOString().slice(0, 10);
-
-  const apptIds = await fetchOwnerApptIds(ownerScope);
-  if (apptIds && apptIds.length === 0) return { total: 0, items: [] };
-
-  // Total count
-  let countQ = supabaseAdmin.from('follow_up_outcomes')
-    .select('id', { count: 'exact', head: true })
-    .in('opvolging_status', ['gepland', 'verzet'])
-    .not('terugkom_datum', 'is', null)
-    .lt('terugkom_datum', todayIso);
-  if (apptIds) countQ = countQ.in('appointment_id', apptIds);
-  const { count: total, error: cErr } = await countQ;
-  if (cErr) throw new Error('overdue count: ' + cErr.message);
-
-  // Top-5 oudste
-  let listQ = supabaseAdmin.from('follow_up_outcomes')
-    .select('appointment_id, terugkom_datum')
-    .in('opvolging_status', ['gepland', 'verzet'])
-    .not('terugkom_datum', 'is', null)
-    .lt('terugkom_datum', todayIso)
-    .order('terugkom_datum', { ascending: true })
-    .limit(5);
-  if (apptIds) listQ = listQ.in('appointment_id', apptIds);
-  const { data: outcomes, error: lErr } = await listQ;
-  if (lErr) throw new Error('overdue list: ' + lErr.message);
-
-  // Join met follow_up_appointments voor lead_name (denormalized field)
-  const ids = (outcomes || []).map((o) => o.appointment_id);
-  const nameMap = {};
-  if (ids.length) {
-    const { data: appts, error: nErr } = await supabaseAdmin
-      .from('follow_up_appointments').select('id, lead_name').in('id', ids);
-    if (nErr) throw new Error('overdue lead_names: ' + nErr.message);
-    for (const a of appts || []) nameMap[a.id] = a.lead_name;
-  }
-
-  const items = (outcomes || []).map((o) => {
-    const dateMs   = new Date(o.terugkom_datum + 'T00:00:00').getTime();
-    const todayMs  = today.getTime();
-    const daysOverdue = Math.floor((todayMs - dateMs) / (24 * 60 * 60 * 1000));
-    return {
-      appointment_id: o.appointment_id,
-      lead_name:      nameMap[o.appointment_id] || 'Onbekend',
-      terugkom_datum: o.terugkom_datum,
-      days_overdue:   daysOverdue,
-    };
-  });
-
-  return { total: total || 0, items };
 }
 
 /**

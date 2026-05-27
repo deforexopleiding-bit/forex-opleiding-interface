@@ -2590,6 +2590,12 @@
       document.querySelectorAll('.fu-tab').forEach(tab => {
         tab.addEventListener('click', () => switchTab(tab.dataset.tab));
       });
+      // Deep-link support: ?tab=<id> uit URL (bv. vanuit sales-dashboard
+      // achterstallig-card). Alleen activeren als de tab daadwerkelijk bestaat.
+      const deepLinkTab = new URLSearchParams(window.location.search).get('tab');
+      if (deepLinkTab && document.querySelector(`.fu-tab[data-tab="${deepLinkTab}"]`)) {
+        switchTab(deepLinkTab);
+      }
       document.querySelectorAll('.fu-subtab').forEach(btn => {
         btn.addEventListener('click', () => {
           const target = btn.dataset.subtab;
