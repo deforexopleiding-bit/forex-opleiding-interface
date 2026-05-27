@@ -17,9 +17,13 @@
 
 // ── Constants (1-op-1 uit learn.js) ─────────────────────────────────────────
 
+// Sync met api/email-agent.js VALID_CATEGORIES (regel 4-6).
+// Wijzig DAAR ook bij category-update — totdat we naar gedeelde
+// constants-file refactoren (zie TODO).
 export const VALID_CATEGORIES = [
-  'Nieuwe Lead','Appointment','Event Aanmelding',
-  'Klantvraag','Factuurvraag','Reclame','Overig'
+  'Nieuwe Lead', 'Appointment', 'Event Aanmelding',
+  'Klantvragen', 'Partners', 'Betaalbevestigingen', 'Openstaande facturen', 'Aankopen/betalingen',
+  'Reclame', 'Overig'
 ];
 
 const STOPWORDS = new Set([
