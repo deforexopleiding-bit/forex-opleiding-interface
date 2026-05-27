@@ -24,7 +24,7 @@ export default async function handler(req, res) {
 
   const { data, error } = await supabase
     .from('follow_up_appointments')
-    .select('id, lead_name, lead_email, lead_phone, scheduled_at, status, voicememo_status, owner_id, snelle_notitie, parent_appointment_id')
+    .select('id, lead_name, lead_email, lead_phone, scheduled_at, status, voicememo_status, ghl_appointment_id, owner_id, snelle_notitie, parent_appointment_id')
     .gte('scheduled_at', today.toISOString())
     .in('status', ['scheduled', 'in_progress'])
     .order('scheduled_at', { ascending: true })

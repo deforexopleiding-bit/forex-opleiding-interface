@@ -41,7 +41,7 @@ export default async function handler(req, res) {
   let query = supabase
     .from('follow_up_appointments')
     .select(
-      'id, lead_name, lead_email, lead_phone, scheduled_at, status, voicememo_status, owner_id, snelle_notitie',
+      'id, lead_name, lead_email, lead_phone, scheduled_at, status, voicememo_status, ghl_appointment_id, owner_id, snelle_notitie',
       { count: 'exact' }
     )
     .order('scheduled_at', { ascending: false })
