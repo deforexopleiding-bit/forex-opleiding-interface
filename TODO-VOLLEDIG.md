@@ -267,6 +267,23 @@
      gebruikte fake email-id, FK-violation werd gevangen door silent-catch,
      `learn_example_id` was null. Bewees dat refactor zelf OK was.
 
+7. **Category-naming mismatch in `applyLearning` (FIX 2026-05-27)**
+   - Symptoom: backfill skipt 5 cats (325 unique pairs), Train Agent
+     silent 400-fails op nieuwe categorienamen.
+   - Root cause: `VALID_CATEGORIES` in `api/_lib/email-learn.js` was
+     verouderd (7 cats) vs `api/email-agent.js` regel 4-6 (10 cats).
+   - Impact: Train Agent werkte maanden niet voor 5 hoofd-categorieën
+     (Klantvragen, Partners, Betaalbevestigingen, Openstaande facturen,
+     Aankopen/betalingen) zonder zichtbare error (UI `.catch` swallowed).
+   - Bevinding tijdens GATE 4 backfill (PR #5 merged): Chrome rapporteerde
+     472 unique pairs in preview, maar slechts 147 verwerkt → 325 silent
+     gefaald op categorie-validatie.
+   - Fix: `VALID_CATEGORIES` gesynchroniseerd met `email-agent.js`
+     (10-items lijst). Sync-comment toegevoegd voor toekomstige consistency.
+   - **Cleanup TODO**: gedeelde constants-file om dual-source te elimineren
+     (bv. `api/_lib/email-categories.js` met `export const CATEGORIES`,
+     import in zowel `email-agent.js` als `email-learn.js`).
+
 ---
 
 ## ✅ Gerealiseerd 2026-05-14 — Fase C + Role-architectuur + RLS + Auth-gate
