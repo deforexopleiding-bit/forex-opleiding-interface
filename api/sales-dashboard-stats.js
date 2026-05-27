@@ -66,8 +66,9 @@ export default async function handler(req, res) {
 
   try {
     // Parallel fetch alle widget-data (7 queries, geen volgorde-afhankelijkheid).
-    // Achterstallig-counts komen uit todayMetrics (computeMetrics) — geen
-    // aparte query meer nodig, definitie blijft synchroon met follow-up.html.
+    // overdueMode='broad': sales-dashboard sync met /api/follow-up-appointments
+    // ?period=open_acties (status IN scheduled/in_progress/completed/no_show,
+    // cutoff = now-30min). Email-rapporten + follow-up topbar blijven 'strict'.
     const [
       todayMetrics,
       weekMetrics,
@@ -77,8 +78,8 @@ export default async function handler(req, res) {
       leadsCounts,
       eventsCounts,
     ] = await Promise.all([
-      computeMetrics(supabaseAdmin, { period: 'today', ownerScope }),
-      computeMetrics(supabaseAdmin, { period: 'week',  ownerScope }),
+      computeMetrics(supabaseAdmin, { period: 'today', ownerScope, overdueMode: 'broad' }),
+      computeMetrics(supabaseAdmin, { period: 'week',  ownerScope, overdueMode: 'broad' }),
       fetchTomorrowAppointmentsCount(ownerScope),
       fetchOpenFollowUpsCount(ownerScope),
       fetchNextAppointment(ownerScope),
