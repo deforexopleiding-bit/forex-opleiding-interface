@@ -4,11 +4,13 @@
 // POST body: { appointment_id, outcome, bezwaren: string[], warmte_score: 1-10,
 //              terugkom_datum: 'YYYY-MM-DD', terugkom_datetime: ISO8601,
 //              volgende_actie: string, notitie: string,
-//              follow_up_type: 'geen'|'intern'|'agenda',
+//              follow_up_type: 'geen'|'intern'|'agenda'|'open',
 //              follow_up_datetime: 'YYYY-MM-DDTHH:MM:SS' (Amsterdam local, geen Z),
 //              follow_up_duration_minutes: integer (default 30) }
 //      → UPSERT (onConflict: appointment_id); side-effect: update appointment status.
 //        Als follow_up_type='agenda'/'intern': maak child appointment row aan.
+//        Als follow_up_type='open': sla alleen terugkom_datum op outcome-rij
+//        (opvolging_status='gepland'); geen child appointment of GHL-create.
 //        type='agenda': maak NIEUWE GHL appointment voor de vervolg-call
 //        (validate-first, blocking). Parent's GHL appointment blijft intact.
 //        Zoom-velden komen uit GHL response (defensief); null → poll-cron vult later.
@@ -39,8 +41,8 @@ const VALID_OUTCOMES = [
   'niet_bereikt', 'interesse_uitstel', 'interesse_overleg',
   'geen_interesse', 'niet_geschikt', 'wil_niet_meer',
 ];
-const VALID_VOLGENDE_ACTIES = ['bellen', 'email', 'event', 'sluiten', 'niet_meer_opvolgen', 'onboarding_starten'];
-const VALID_FOLLOW_UP_TYPES = ['geen', 'intern', 'agenda'];
+const VALID_VOLGENDE_ACTIES = ['bellen', 'email', 'event', 'sluiten', 'niet_meer_opvolgen', 'onboarding_starten', 'zoom_gesprek'];
+const VALID_FOLLOW_UP_TYPES = ['geen', 'intern', 'agenda', 'open'];
 
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
@@ -72,7 +74,47 @@ export default async function handler(req, res) {
       return res.status(500).json({ error: error.message });
     }
     // 200 + null bij geen rij — voorkomt console-noise op "new outcome" flows
-    return res.status(200).json(data || null);
+    if (!data) return res.status(200).json(null);
+
+    // Pre-fill helpers voor modal: bepaal afgeleid follow_up_type + datum.
+    //   - klant_geworden: forceer 'geen' (modal toont geen afspraak-blok voor deze flow)
+    //   - child met ghl_appointment_id NOT NULL → 'agenda', datum uit child.scheduled_at
+    //   - child met ghl_appointment_id NULL    → 'intern', datum uit child.scheduled_at
+    //   - geen child + terugkom_datum gevuld   → 'open',   datum uit terugkom_datetime
+    //   - geen child + geen terugkom           → 'geen',   datum = null
+    //
+    // Client-side filter ipv .not('status','in',...): PostgREST-array-not.in is
+    // brittle (zie comment in api/sales-dashboard-stats.js:139). N is klein
+    // (max 1-2 children per outcome), dus fetch-en-filteren is veilig en goedkoop.
+    let afgeleid_follow_up_type = 'geen';
+    let afspraak_datetime       = null;
+
+    if (data.outcome !== 'klant_geworden') {
+      const { data: children, error: childErr } = await supabase
+        .from('follow_up_appointments')
+        .select('id, scheduled_at, status, ghl_appointment_id, created_at')
+        .eq('parent_appointment_id', appointment_id)
+        .order('created_at', { ascending: false });
+      if (childErr) {
+        console.warn('[outcomes-get] child lookup failed:', childErr.message);
+      }
+      const child = (children || []).find(c =>
+        !['cancelled', 'verplaatst', 'verwijderd'].includes(c.status)
+      );
+      if (child) {
+        afgeleid_follow_up_type = child.ghl_appointment_id ? 'agenda' : 'intern';
+        afspraak_datetime       = child.scheduled_at;
+      } else if (data.terugkom_datum) {
+        afgeleid_follow_up_type = 'open';
+        afspraak_datetime       = data.terugkom_datetime || null;
+      }
+    }
+
+    return res.status(200).json({
+      ...data,
+      afgeleid_follow_up_type,
+      afspraak_datetime,
+    });
   }
 
   const body = req.body || {};
@@ -92,16 +134,23 @@ export default async function handler(req, res) {
     : 30;
 
   if (followUpType && !VALID_FOLLOW_UP_TYPES.includes(followUpType)) {
-    return res.status(400).json({ error: 'follow_up_type moet geen, intern of agenda zijn.' });
+    return res.status(400).json({ error: 'follow_up_type moet geen, intern, agenda of open zijn.' });
   }
-  if (followUpType && followUpType !== 'geen' && !body.follow_up_datetime) {
+  if ((followUpType === 'intern' || followUpType === 'agenda') && !body.follow_up_datetime) {
     return res.status(400).json({ error: 'follow_up_datetime vereist bij follow_up_type intern of agenda.' });
   }
+  // type='open' gebruikt terugkom_datum + terugkom_datetime (op outcome-rij);
+  // valideer dat die zijn meegegeven, anders geen opvolgings-signaal in DB.
+  if (followUpType === 'open' && !body.terugkom_datum && !body.terugkom_datetime) {
+    return res.status(400).json({ error: 'terugkom_datum vereist bij follow_up_type open.' });
+  }
 
-  // Parse follow_up_datetime: Amsterdam-local → UTC (zelfde patroon als verplaats-call)
+  // Parse follow_up_datetime: Amsterdam-local → UTC (zelfde patroon als verplaats-call).
+  // Alleen relevant voor intern/agenda — 'open' gebruikt terugkom_datum/_datetime
+  // op outcome-rij en maakt geen child appointment aan.
   let followUpStartISO = null;
   let followUpEndISO = null;
-  if (followUpType && followUpType !== 'geen' && body.follow_up_datetime) {
+  if ((followUpType === 'intern' || followUpType === 'agenda') && body.follow_up_datetime) {
     const followUpDt = dayjs.tz(body.follow_up_datetime, 'Europe/Amsterdam').utc();
     followUpStartISO = followUpDt.toISOString();
     followUpEndISO = followUpDt.add(followUpDurationMin, 'minute').toISOString();
@@ -127,9 +176,11 @@ export default async function handler(req, res) {
     return res.status(404).json({ error: 'Appointment niet gevonden.' });
   }
 
-  // ── Guard: sla follow-up aanmaken over als al een scheduled child bestaat (A1 edit-gedrag) ──
+  // ── Guard: sla child-insert + GHL create over als al een scheduled child
+  //          bestaat (A1 edit-gedrag). Alleen relevant voor intern/agenda;
+  //          'open' en 'geen' maken sowieso geen child. ──
   let skipFollowUp = false;
-  if (followUpType && followUpType !== 'geen') {
+  if (followUpType === 'intern' || followUpType === 'agenda') {
     const { data: existingChild } = await supabase
       .from('follow_up_appointments')
       .select('id')
@@ -225,8 +276,11 @@ export default async function handler(req, res) {
   }
 
   // ── Child appointment INSERT (follow-up row) ──────────────────────────────
+  // Alleen voor 'intern' / 'agenda'. Bij 'open' is de opvolging gemarkeerd
+  // op outcome-rij (terugkom_datum + opvolging_status='gepland') — geen
+  // appointment-row nodig. Bij 'geen' geen werk.
   let newAppt = null;
-  if (!skipFollowUp && followUpType && followUpType !== 'geen') {
+  if (!skipFollowUp && (followUpType === 'intern' || followUpType === 'agenda')) {
     const childRow = {
       parent_appointment_id: appointment_id,
       lead_name:            parentAppt.lead_name,

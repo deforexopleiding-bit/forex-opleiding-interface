@@ -1348,6 +1348,7 @@
           <select class="fu-select" id="volgende-actie-select">
             <option value="">— Kies —</option>
             <option value="bellen">Bellen</option>
+            <option value="zoom_gesprek">Zoom gesprek</option>
             <option value="email">Email</option>
             <option value="event">Event uitnodigen</option>
             <option value="sluiten">Sluiten (klant wordt)</option>
@@ -1355,19 +1356,13 @@
             <option value="onboarding_starten" id="volgende-optie-onboarding" hidden>Onboarding starten</option>
           </select>
         </div>
-        <div class="fu-field fu-terugkom-field" style="display:none;">
-          <label class="fu-label">Terugkom moment</label>
-          <div class="fu-terugkom-row">
-            <input type="date" class="fu-input fu-terugkom-date-input" id="terugkom-date">
-            <input type="time" class="fu-input fu-terugkom-time-input" id="terugkom-time" value="10:00">
-          </div>
-        </div>
-        <div class="fu-field">
-          <label class="fu-label">Vervolg-call inplannen</label>
+        <div class="fu-field fu-followup-field" style="display:none;">
+          <label class="fu-label">Nieuwe afspraak inplannen</label>
           <div class="fu-outcome-options fu-outcome-grid">
-            <button type="button" class="fu-outcome-btn" data-followup="geen">⛔ Niet inplannen</button>
-            <button type="button" class="fu-outcome-btn" data-followup="intern">📋 Intern (zonder Zoom/GHL)</button>
+            <button type="button" class="fu-outcome-btn" data-followup="geen">⛔ Geen afspraak inplannen</button>
             <button type="button" class="fu-outcome-btn" data-followup="agenda">📅 Agenda (Zoom + GHL)</button>
+            <button type="button" class="fu-outcome-btn" data-followup="intern">📋 Intern inplannen</button>
+            <button type="button" class="fu-outcome-btn" data-followup="open">🔔 Open afspraak</button>
           </div>
           <div id="followup-datetime-row" style="display:none; margin-top:10px;">
             <div class="fu-terugkom-row">
@@ -2148,10 +2143,26 @@
 
     // Outcomes die bezwaren tonen
     const OUTCOME_SHOW_BEZWAREN = new Set(['interesse_uitstel', 'interesse_overleg', 'geen_interesse']);
-    // Outcomes die terugkom tonen
-    const OUTCOME_SHOW_TERUGKOM = new Set(['interesse_uitstel', 'interesse_overleg']);
-    // Outcomes die volgende actie tonen
-    const OUTCOME_SHOW_VOLGENDE = new Set(['klant_geworden', 'interesse_uitstel', 'interesse_overleg']);
+    // Outcomes die het "nieuwe afspraak"-blok (4 follow-up buttons) tonen.
+    // klant_geworden zit hier NIET in — die toont de volgende-actie dropdown direct
+    // (incl. 'onboarding_starten') zonder afspraak-type keuze.
+    const OUTCOME_SHOW_FOLLOWUP = new Set(['interesse_uitstel', 'interesse_overleg']);
+
+    // Outcomes waarvoor de submit-handler 'volgende_actie' in payload meegeeft.
+    // Bevat klant_geworden (onboarding dropdown) + uitstel/overleg (dropdown
+    // sub-conditioneel op type-keuze). OUTCOME_SHOW_FOLLOWUP zou hier
+    // onvolledig zijn want die mist klant_geworden — die heeft een eigen flow.
+    const OUTCOME_SUBMITS_VOLGENDE_ACTIE = new Set([
+      'interesse_uitstel', 'interesse_overleg', 'klant_geworden'
+    ]);
+
+    // Submit-enable logica gecentraliseerd: een follow-up-type-keuze is alleen
+    // verplicht bij outcomes die de afspraak-buttons tonen.
+    function updateOutcomeSubmitState() {
+      const needsFollowUpType = OUTCOME_SHOW_FOLLOWUP.has(currentOutcomeChoice);
+      const disabled = !currentOutcomeChoice || (needsFollowUpType && !currentFollowUpType);
+      document.getElementById('outcome-submit').disabled = disabled;
+    }
 
     async function openOutcomeModal(appt) {
       currentOutcomeAppt = appt;
@@ -2164,13 +2175,11 @@
       document.querySelectorAll('.fu-outcome-btn').forEach(b => b.classList.remove('active'));
       document.querySelector('.fu-bezwaren-field').style.display = 'none';
       document.querySelector('.fu-volgende-field').style.display = 'none';
-      document.querySelector('.fu-terugkom-field').style.display = 'none';
+      document.querySelector('.fu-followup-field').style.display = 'none';
       document.getElementById('outcome-notitie').value = '';
       document.getElementById('warmte-slider').value = '5';
       document.getElementById('warmte-value').textContent = '5';
       document.getElementById('volgende-actie-select').value = '';
-      document.getElementById('terugkom-date').value = '';
-      document.getElementById('terugkom-time').value = '10:00';
       // Reset follow-up planning sectie
       currentFollowUpType = null;
       document.getElementById('followup-datetime-row').style.display = 'none';
@@ -2242,15 +2251,23 @@
             });
           }
 
-          // Terugkom datum + tijd
-          if (existing.terugkom_datetime) {
-            const dt = new Date(existing.terugkom_datetime);
-            document.getElementById('terugkom-date').value = dt.toISOString().slice(0, 10);
-            document.getElementById('terugkom-time').value = dt.toLocaleTimeString('nl-NL', {
-              hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Amsterdam',
-            }).slice(0, 5);
-          } else if (existing.terugkom_datum) {
-            document.getElementById('terugkom-date').value = existing.terugkom_datum;
+          // Afgeleid follow-up type uit backend (zie GET /api/follow-up-outcomes):
+          //   'agenda' | 'intern' | 'open' | 'geen'
+          // Bij re-open activeert de juiste knop programmatisch (triggert
+          // cascade) en vult het datum-veld vanuit afspraak_datetime
+          // (= terugkom_datetime bij 'open', child.scheduled_at bij intern/agenda).
+          const prefillType = existing.afgeleid_follow_up_type || 'geen';
+          if (OUTCOME_SHOW_FOLLOWUP.has(existing.outcome)) {
+            const followUpBtn = document.querySelector(`.fu-outcome-btn[data-followup="${prefillType}"]`);
+            if (followUpBtn) followUpBtn.click();
+
+            if (prefillType !== 'geen' && existing.afspraak_datetime) {
+              const dt = new Date(existing.afspraak_datetime);
+              document.getElementById('followup-date').value = dt.toISOString().slice(0, 10);
+              document.getElementById('followup-time').value = dt.toLocaleTimeString('nl-NL', {
+                hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Amsterdam',
+              }).slice(0, 5);
+            }
           }
         } catch (err) {
           console.warn('[outcome-prefill] kon bestaande outcome niet ophalen:', err.message);
@@ -2275,19 +2292,39 @@
         outcomeBtn.classList.add('active');
         currentOutcomeChoice = outcomeBtn.dataset.value;
 
+        // Wisselen van outcome reset evt. eerder gekozen follow-up type +
+        // verbergt de sub-velden (datum + dropdown). Worden hieronder weer
+        // getoond per outcome-tak.
+        currentFollowUpType = null;
+        document.querySelectorAll('.fu-outcome-btn[data-followup]').forEach(b => b.classList.remove('active'));
+        document.getElementById('followup-datetime-row').style.display = 'none';
+        document.getElementById('followup-error').style.display = 'none';
+
         document.querySelector('.fu-bezwaren-field').style.display =
           OUTCOME_SHOW_BEZWAREN.has(currentOutcomeChoice) ? 'block' : 'none';
+
+        const isKlantGeworden = currentOutcomeChoice === 'klant_geworden';
+        const showsFollowupButtons = OUTCOME_SHOW_FOLLOWUP.has(currentOutcomeChoice);
+
+        // Afspraak-buttons-blok zichtbaar bij uitstel/overleg; verborgen bij
+        // klant_geworden (heeft eigen flow) en bij overige outcomes.
+        document.querySelector('.fu-followup-field').style.display =
+          showsFollowupButtons ? 'block' : 'none';
+
+        // Dropdown 'Volgende actie':
+        //   - klant_geworden       : direct zichtbaar (met onboarding-optie)
+        //   - uitstel/overleg      : sub-conditioneel op type-keuze (verborgen tot type !== geen)
+        //   - andere outcomes      : verborgen
         document.querySelector('.fu-volgende-field').style.display =
-          OUTCOME_SHOW_VOLGENDE.has(currentOutcomeChoice) ? 'block' : 'none';
-        // 'Onboarding starten' alleen tonen bij Klant geworden
+          isKlantGeworden ? 'block' : 'none';
+
+        // 'Onboarding starten' alleen tonen + selecteerbaar bij Klant geworden
         const onboardingOpt = document.getElementById('volgende-optie-onboarding');
-        const showOnboarding = currentOutcomeChoice === 'klant_geworden';
-        onboardingOpt.hidden = !showOnboarding;
+        onboardingOpt.hidden = !isKlantGeworden;
         const vaSel = document.getElementById('volgende-actie-select');
-        if (!showOnboarding && vaSel.value === 'onboarding_starten') vaSel.value = '';
-        document.querySelector('.fu-terugkom-field').style.display =
-          OUTCOME_SHOW_TERUGKOM.has(currentOutcomeChoice) ? 'block' : 'none';
-        document.getElementById('outcome-submit').disabled = !(currentOutcomeChoice && currentFollowUpType);
+        if (!isKlantGeworden && vaSel.value === 'onboarding_starten') vaSel.value = '';
+
+        updateOutcomeSubmitState();
       }
 
       const followUpBtn = e.target.closest('.fu-outcome-btn[data-followup]');
@@ -2295,10 +2332,14 @@
         document.querySelectorAll('.fu-outcome-btn[data-followup]').forEach(b => b.classList.remove('active'));
         followUpBtn.classList.add('active');
         currentFollowUpType = followUpBtn.dataset.followup;
-        document.getElementById('followup-datetime-row').style.display =
-          currentFollowUpType !== 'geen' ? 'block' : 'none';
+        // Datum-veld + volgende-actie dropdown zichtbaar bij elk type behalve 'geen'.
+        // Bij klant_geworden zijn deze buttons niet bereikbaar (fu-followup-field
+        // verborgen) — alleen relevant voor uitstel/overleg flow.
+        const showSub = currentFollowUpType !== 'geen';
+        document.getElementById('followup-datetime-row').style.display = showSub ? 'block' : 'none';
+        document.querySelector('.fu-volgende-field').style.display      = showSub ? 'block' : 'none';
         document.getElementById('followup-error').style.display = 'none';
-        document.getElementById('outcome-submit').disabled = !(currentOutcomeChoice && currentFollowUpType);
+        updateOutcomeSubmitState();
       }
     });
 
@@ -2313,7 +2354,8 @@
     });
 
     document.getElementById('outcome-submit')?.addEventListener('click', async () => {
-      if (!currentOutcomeAppt || !currentOutcomeChoice || !currentFollowUpType) return;
+      if (!currentOutcomeAppt || !currentOutcomeChoice) return;
+      if (OUTCOME_SHOW_FOLLOWUP.has(currentOutcomeChoice) && !currentFollowUpType) return;
 
       const submitBtn = document.getElementById('outcome-submit');
       const errDiv = document.getElementById('followup-error');
@@ -2325,45 +2367,45 @@
         appointment_id: currentOutcomeAppt.id,
         outcome: currentOutcomeChoice,
         warmte_score: parseInt(document.getElementById('warmte-slider').value, 10),
-        follow_up_type: currentFollowUpType,
       };
+      if (currentFollowUpType) payload.follow_up_type = currentFollowUpType;
 
       if (OUTCOME_SHOW_BEZWAREN.has(currentOutcomeChoice)) {
         payload.bezwaren = Array.from(currentBezwaren);
       }
 
-      if (OUTCOME_SHOW_VOLGENDE.has(currentOutcomeChoice)) {
+      if (OUTCOME_SUBMITS_VOLGENDE_ACTIE.has(currentOutcomeChoice)) {
         const va = document.getElementById('volgende-actie-select').value;
         if (va) payload.volgende_actie = va;
       }
 
-      if (OUTCOME_SHOW_TERUGKOM.has(currentOutcomeChoice)) {
-        const td = document.getElementById('terugkom-date').value;
-        const tt = document.getElementById('terugkom-time').value || '10:00';
-        if (td) {
-          payload.terugkom_datum = td;
-          // Sla ook terugkom_datetime op als ISO (Amsterdam-tijd)
-          const dtStr = `${td}T${tt}:00`;
-          const dtLocal = new Date(dtStr);
-          if (!isNaN(dtLocal.getTime())) {
-            payload.terugkom_datetime = dtLocal.toISOString();
-          }
-        }
-      }
-
-      // Follow-up datum + tijd (Amsterdam local, server doet dayjs.tz conversie)
-      if (currentFollowUpType !== 'geen') {
+      // Datum-routing per follow-up type (alleen relevant bij uitstel/overleg —
+      // klant_geworden en overige outcomes tonen het buttons-blok niet):
+      //   'open'           → terugkom_datum + terugkom_datetime op outcome-rij
+      //                      (geen child appointment)
+      //   'intern'/'agenda'→ follow_up_datetime → child appointment scheduled_at
+      //   'geen'           → geen datum
+      if (currentFollowUpType && currentFollowUpType !== 'geen') {
         const fd = document.getElementById('followup-date').value;
         const ft = document.getElementById('followup-time').value || '10:00';
         if (!fd) {
-          errDiv.textContent = 'Vul een datum in voor de vervolg-call.';
+          errDiv.textContent = 'Vul een datum in voor de afspraak.';
           errDiv.style.display = 'block';
           submitBtn.disabled = false;
           submitBtn.textContent = 'Opslaan';
           return;
         }
-        payload.follow_up_datetime = `${fd}T${ft}:00`;
-        payload.follow_up_duration_minutes = currentOutcomeAppt.duration_minutes || 30;
+        if (currentFollowUpType === 'open') {
+          payload.terugkom_datum = fd;
+          const dtLocal = new Date(`${fd}T${ft}:00`);
+          if (!isNaN(dtLocal.getTime())) {
+            payload.terugkom_datetime = dtLocal.toISOString();
+          }
+        } else {
+          // intern / agenda → child-appointment flow (Amsterdam local; server doet dayjs.tz conversie)
+          payload.follow_up_datetime = `${fd}T${ft}:00`;
+          payload.follow_up_duration_minutes = currentOutcomeAppt.duration_minutes || 30;
+        }
       }
 
       const notitie = document.getElementById('outcome-notitie').value.trim();
