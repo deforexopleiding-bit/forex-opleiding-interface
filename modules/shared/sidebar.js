@@ -68,7 +68,7 @@
           navLink('meetings', '/modules/meetings.html', 'Vergaderruimte') +
           navLink('control-center', '/modules/control-center.html', 'Control Center') +
           navLink('follow-up', '/modules/follow-up.html', 'Follow-up') +
-          navLink('tickets', '/modules/tickets.html', 'Tickets') +
+          '<a class="nav-item" data-module="tickets" href="/modules/tickets.html">' + svg('tickets') + 'Tickets<span class="nav-badge" id="navTicketsBadge"></span></a>' +
           navLink('admin', '/modules/admin.html', 'Admin', ' id="adminNavLink" style="display:none"') +
           '<div class="nav-section">Binnenkort</div>' +
           concept('whatsapp', 'WhatsApp Bot') +
@@ -130,6 +130,32 @@
       var b = document.getElementById('navTakenBadge');
       if (b && u.length) { b.textContent = u.length; b.classList.add('show'); }
     } catch (e) { /* geen taken in cache */ }
+  }
+
+  // Tickets-badge: telt open + in_progress tickets toegewezen aan ingelogde user.
+  // Async, silent fail (badge update is niet kritiek), idempotent toggle.
+  async function updateTicketsBadge() {
+    var b = document.getElementById('navTicketsBadge');
+    if (!b) return;
+    try {
+      if (!window.AgentShared || typeof window.AgentShared.apiFetch !== 'function') return;
+      var res = await window.AgentShared.apiFetch('/api/tickets-badge');
+      if (!res.ok) {
+        b.classList.remove('show');
+        return;
+      }
+      var data = await res.json();
+      var n = data.count || 0;
+      if (n > 0) {
+        b.textContent = n;
+        b.classList.add('show');
+      } else {
+        b.textContent = '';
+        b.classList.remove('show');
+      }
+    } catch (e) {
+      b.classList.remove('show');
+    }
   }
 
   // ── RBAC module-gating (fail-open, consistent met email-enforcement) ────────
@@ -197,6 +223,7 @@
 
     highlightActive();
     updateTakenBadge();
+    updateTicketsBadge();
     applyAdminGating();
     applyDashboardRouting();
     // Footer (gebruiker + theme-toggle) via bestaande gedeelde helper.
@@ -209,6 +236,12 @@
     // Laat pagina-scripts weten dat de sidebar-DOM klaar is (bv. nav-badge updates
     // die anders kunnen racen met de mount).
     window.dispatchEvent(new CustomEvent('sidebar:mounted'));
+  }
+
+  // Expose refresh-trigger voor externe modules (tickets-detail.html na PATCH).
+  // window.AgentShared bestaat al — agent-shared.js wordt eerder geladen.
+  if (window.AgentShared) {
+    window.AgentShared.refreshTicketsBadge = updateTicketsBadge;
   }
 
   if (document.readyState === 'loading') {

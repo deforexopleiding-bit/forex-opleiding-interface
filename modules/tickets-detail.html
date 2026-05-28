@@ -1,0 +1,1110 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Ticket · De Forex Opleiding</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com"/>
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
+  <link rel="stylesheet" href="/modules/shared/agent-shared.css"/>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/dist/tabler-icons.min.css"/>
+  <style>
+    /* Top-bar nav */
+    .topbar { display:flex; align-items:center; gap:8px; margin-bottom:14px; }
+    .topbar a { color:var(--text-faint); text-decoration:none; font-size:13px; display:inline-flex; align-items:center; gap:4px; }
+    .topbar a:hover { color:var(--text); }
+
+    /* Ticket header card */
+    .ticket-header { background:var(--bg-elev); border:1px solid var(--border); border-radius:12px; padding:18px 20px; margin-bottom:14px; }
+    .ticket-title-row { display:flex; align-items:flex-start; gap:10px; margin-bottom:12px; }
+    .ticket-title { font-size:18px; font-weight:700; line-height:1.3; flex:1; }
+    .ticket-title-input { flex:1; padding:6px 10px; background:var(--bg); border:1px solid var(--border-strong); border-radius:8px; color:var(--text); font-size:18px; font-weight:700; font-family:inherit; }
+    .icon-btn { background:transparent; border:1px solid var(--border); padding:4px 8px; border-radius:6px; cursor:pointer; color:var(--text-faint); font-family:inherit; font-size:12px; display:inline-flex; align-items:center; gap:4px; }
+    .icon-btn:hover { color:var(--text); background:var(--bg-elev-2); }
+    .ticket-badges { display:flex; flex-wrap:wrap; gap:6px; margin-bottom:10px; }
+
+    /* Badges (zelfde palette als lijst-pagina) */
+    .badge { font-size:10px; font-weight:600; padding:2px 7px; border-radius:6px; text-transform:uppercase; letter-spacing:.3px; }
+    .badge-type-bug      { background:var(--color-danger-soft); color:var(--color-danger-text); }
+    .badge-type-feature  { background:var(--color-info-soft); color:var(--color-info-text); }
+    .badge-type-question { background:var(--color-success-soft); color:var(--color-success-text); }
+    .badge-priority-laag   { background:var(--color-neutral-soft); color:var(--color-neutral-text); }
+    .badge-priority-middel { background:var(--color-warning-soft); color:var(--color-warning-text); }
+    .badge-priority-hoog   { background:var(--color-danger-soft); color:var(--color-danger-text); }
+    .badge-module { background:var(--brand-primary-soft); color:var(--brand-primary); }
+
+    /* Controls (status + assignee) */
+    .controls-row { display:flex; flex-wrap:wrap; gap:10px; align-items:center; margin-top:4px; }
+    .control { display:flex; align-items:center; gap:6px; }
+    .control label { font-size:11px; color:var(--text-faint); }
+    .control select { padding:5px 8px; background:var(--bg); border:1px solid var(--border); border-radius:6px; color:var(--text); font-size:12px; font-family:inherit; min-width:130px; }
+    .control select:focus { outline:none; border-color:var(--brand-primary); }
+    .control .readonly { padding:5px 8px; font-size:12px; color:var(--text-dim); }
+
+    /* Description card */
+    .description-card { background:var(--bg-elev); border:1px solid var(--border); border-radius:12px; padding:16px 18px; margin-bottom:14px; }
+    .description-header { display:flex; align-items:center; gap:8px; margin-bottom:10px; font-size:12px; color:var(--text-faint); font-weight:500; text-transform:uppercase; letter-spacing:.4px; }
+    .description-header .spacer { flex:1; }
+    .description-body { font-size:13px; line-height:1.55; color:var(--text); }
+    .description-body em { font-style:italic; }
+    .description-body code { background:var(--bg-elev-2); padding:1px 5px; border-radius:3px; font-family:monospace; font-size:12px; }
+    .description-body a { color:var(--brand-secondary-light); text-decoration:none; }
+    .description-body a:hover { text-decoration:underline; }
+    .description-body .empty { color:var(--text-faint); font-style:italic; }
+    .description-textarea { width:100%; padding:8px 10px; background:var(--bg); border:1px solid var(--border); border-radius:8px; color:var(--text); font-size:13px; font-family:inherit; min-height:120px; resize:vertical; }
+    .edit-actions { display:flex; gap:6px; margin-top:8px; }
+
+    /* Meta-row */
+    .meta-row { font-size:11px; color:var(--text-faint); display:flex; flex-wrap:wrap; gap:14px; padding:0 2px; margin-bottom:18px; }
+    .meta-item { display:inline-flex; align-items:center; gap:4px; }
+
+    /* Comments */
+    .comments-section h3 { font-size:13px; font-weight:600; color:var(--text-dim); margin-bottom:12px; text-transform:uppercase; letter-spacing:.5px; }
+    .comments-feed { display:flex; flex-direction:column; gap:10px; margin-bottom:18px; }
+    .comment-card { background:var(--bg-elev); border:1px solid var(--border); border-radius:10px; padding:12px 14px; }
+    .comment-head { display:flex; align-items:center; gap:8px; margin-bottom:6px; font-size:12px; }
+    .comment-author { font-weight:600; color:var(--text); }
+    .comment-time { color:var(--text-faint); font-size:11px; }
+    .comment-delete { margin-left:auto; background:transparent; border:none; color:var(--text-faint); cursor:pointer; padding:2px 4px; font-size:13px; }
+    .comment-delete:hover { color:var(--color-danger); }
+    .comment-body { font-size:13px; line-height:1.55; color:var(--text); }
+    .comment-body em { font-style:italic; }
+    .comment-body code { background:var(--bg-elev-2); padding:1px 5px; border-radius:3px; font-family:monospace; font-size:12px; }
+    .comment-body a { color:var(--brand-secondary-light); text-decoration:none; }
+    .comment-body a:hover { text-decoration:underline; }
+    .comments-empty { padding:20px; text-align:center; color:var(--text-faint); font-size:13px; font-style:italic; }
+
+    /* Comment input */
+    .comment-input-card { background:var(--bg-elev); border:1px solid var(--border); border-radius:10px; padding:12px 14px; }
+    .comment-textarea { width:100%; padding:8px 10px; background:var(--bg); border:1px solid var(--border); border-radius:8px; color:var(--text); font-size:13px; font-family:inherit; min-height:90px; resize:vertical; }
+    .comment-textarea:focus { outline:none; border-color:var(--brand-primary); }
+    .comment-preview { padding:10px; background:var(--bg); border:1px solid var(--border); border-radius:8px; min-height:90px; font-size:13px; line-height:1.55; color:var(--text); }
+    .comment-preview em { font-style:italic; }
+    .comment-preview code { background:var(--bg-elev-2); padding:1px 5px; border-radius:3px; font-family:monospace; font-size:12px; }
+    .comment-preview a { color:var(--brand-secondary-light); text-decoration:none; }
+    .comment-input-footer { display:flex; align-items:center; gap:8px; margin-top:8px; }
+    .markdown-hint { font-size:11px; color:var(--text-faint); flex:1; }
+    .markdown-hint code { background:var(--bg-elev-2); padding:1px 4px; border-radius:3px; font-family:monospace; font-size:10px; }
+
+    /* Buttons */
+    .btn-primary { background:var(--brand-primary); color:#fff; border:none; padding:7px 14px; border-radius:8px; font-size:13px; font-weight:500; cursor:pointer; font-family:inherit; }
+    .btn-primary:hover { background:var(--brand-primary-hover); }
+    .btn-primary:disabled { opacity:.5; cursor:not-allowed; }
+    .btn-secondary { background:transparent; color:var(--text-dim); border:1px solid var(--border); padding:7px 14px; border-radius:8px; font-size:13px; font-weight:500; cursor:pointer; font-family:inherit; }
+    .btn-secondary:hover { background:var(--bg-elev-2); color:var(--text); }
+
+    /* ── Attachments-section ────────────────────────────────────────────── */
+    .attachments-section { margin-top:18px; }
+    .attachments-head { font-size:13px; font-weight:600; color:var(--text-dim); margin-bottom:12px; text-transform:uppercase; letter-spacing:.5px; display:flex; align-items:center; gap:8px; }
+    .attachments-empty { padding:16px; text-align:center; color:var(--text-faint); font-size:12px; font-style:italic; }
+
+    /* Image-thumbnails grid */
+    .attachments-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(180px, 1fr)); gap:10px; margin-bottom:14px; }
+    .attachment-card { position:relative; background:var(--bg-elev); border:1px solid var(--border); border-radius:8px; overflow:hidden; cursor:pointer; }
+    .attachment-card:hover { border-color:var(--border-strong); }
+    .attachment-img { width:100%; aspect-ratio:1/1; object-fit:cover; display:block; background:var(--bg-elev-2); }
+    .attachment-img.is-loading { background:var(--bg-elev-2) linear-gradient(90deg, var(--bg-elev-2) 0%, var(--bg) 50%, var(--bg-elev-2) 100%); background-size:200% 100%; animation:shimmer 1.4s linear infinite; }
+    @keyframes shimmer { 0%{background-position:200% 0;} 100%{background-position:-200% 0;} }
+    .attachment-img.is-error { background:var(--color-danger-soft); display:flex; align-items:center; justify-content:center; color:var(--color-danger-text); font-size:11px; }
+    .attachment-meta { padding:6px 8px; font-size:11px; color:var(--text-faint); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .attachment-delete { position:absolute; top:6px; right:6px; background:rgba(0,0,0,0.6); color:#fff; border:none; padding:4px 6px; cursor:pointer; border-radius:4px; opacity:0; transition:opacity .15s; font-size:11px; line-height:1; }
+    .attachment-card:hover .attachment-delete { opacity:1; }
+
+    /* Embed-cards (Loom/YouTube/Drive) + non-image file fallback */
+    .embeds-list { display:flex; flex-direction:column; gap:10px; margin-bottom:14px; }
+    .embed-wrap { position:relative; }
+    .embed-card { width:100%; max-width:640px; aspect-ratio:16/9; background:var(--bg); border:1px solid var(--border); border-radius:8px; overflow:hidden; }
+    .embed-card iframe { width:100%; height:100%; border:none; display:block; }
+    .embed-link { padding:10px 14px; background:var(--bg-elev); border:1px solid var(--border); border-radius:8px; display:inline-flex; align-items:center; gap:8px; text-decoration:none; color:var(--text); font-size:13px; max-width:480px; }
+    .embed-link:hover { border-color:var(--border-strong); }
+    .embed-link-domain { color:var(--text-faint); font-size:11px; margin-left:auto; }
+    .embed-delete { position:absolute; top:6px; right:6px; background:rgba(0,0,0,0.6); color:#fff; border:none; padding:4px 6px; cursor:pointer; border-radius:4px; opacity:0; transition:opacity .15s; font-size:11px; }
+    .embed-wrap:hover .embed-delete { opacity:1; }
+    .file-link { padding:10px 14px; background:var(--bg-elev); border:1px solid var(--border); border-radius:8px; display:inline-flex; align-items:center; gap:8px; text-decoration:none; color:var(--text); font-size:13px; }
+    .file-link:hover { border-color:var(--border-strong); }
+
+    /* Upload-controls */
+    .upload-controls { display:flex; flex-wrap:wrap; gap:10px; margin-top:6px; align-items:center; }
+    .upload-controls input[type="file"] { display:none; }
+    .url-input-group { display:flex; gap:6px; flex:1; min-width:240px; max-width:480px; }
+    .url-input-group input { flex:1; padding:7px 10px; background:var(--bg); border:1px solid var(--border); border-radius:8px; color:var(--text); font-size:12px; font-family:inherit; }
+    .url-input-group input:focus { outline:none; border-color:var(--brand-primary); }
+
+    /* Lightbox (z-index 9999) */
+    .lightbox-overlay { position:fixed; inset:0; background:rgba(0,0,0,0.92); z-index:9999; display:flex; align-items:center; justify-content:center; padding:40px; }
+    .lightbox-overlay.hidden { display:none; }
+    .lightbox-img { max-width:100%; max-height:100%; object-fit:contain; border-radius:8px; }
+    .lightbox-btn { position:absolute; background:rgba(255,255,255,0.1); border:none; color:#fff; cursor:pointer; padding:12px 14px; border-radius:50%; font-size:16px; backdrop-filter:blur(4px); transition:background .15s; }
+    .lightbox-btn:hover { background:rgba(255,255,255,0.2); }
+    .lightbox-close { top:20px; right:20px; }
+    .lightbox-prev { left:20px; top:50%; transform:translateY(-50%); }
+    .lightbox-next { right:20px; top:50%; transform:translateY(-50%); }
+    .lightbox-counter { position:absolute; bottom:20px; left:50%; transform:translateX(-50%); color:rgba(255,255,255,0.6); font-size:12px; pointer-events:none; }
+
+    /* Drag-drop overlay (z-index 8000 — onder lightbox, boven content) */
+    .dropzone-overlay { position:fixed; inset:0; background:rgba(9,61,84,0.85); z-index:8000; display:flex; align-items:center; justify-content:center; pointer-events:none; backdrop-filter:blur(2px); }
+    .dropzone-overlay.hidden { display:none; }
+    .dropzone-message { background:#fff; color:var(--brand-primary); border:2px dashed var(--brand-primary); border-radius:16px; padding:36px 56px; font-size:18px; font-weight:600; display:flex; flex-direction:column; align-items:center; gap:10px; box-shadow:0 8px 24px rgba(0,0,0,0.2); }
+    .dropzone-message i { font-size:40px; }
+
+    /* States: forbidden + 404 */
+    .state-card { background:var(--bg-elev); border:1px solid var(--border); border-radius:12px; padding:32px 28px; max-width:480px; margin:40px auto; text-align:center; }
+    .state-card h2 { font-size:16px; font-weight:700; margin-bottom:6px; }
+    .state-card p { font-size:13px; color:var(--text-dim); margin-bottom:16px; }
+    .state-card a { color:var(--brand-secondary-light); text-decoration:none; font-size:13px; font-weight:500; }
+    .state-card a:hover { text-decoration:underline; }
+
+    .loading-state { padding:40px 20px; text-align:center; color:var(--text-faint); font-size:13px; }
+  </style>
+</head>
+<body>
+
+<div id="sidebar-mount"></div>
+
+<div class="main">
+  <div class="main-inner" id="page-content">
+    <div class="loading-state">Laden…</div>
+  </div>
+</div>
+
+<!-- Lightbox overlay (eenmalig in DOM, openLightbox(idx) maakt zichtbaar) -->
+<div class="lightbox-overlay hidden" id="lightboxOverlay" onclick="onLightboxOverlayClick(event)">
+  <img id="lightboxImg" class="lightbox-img" src="" alt=""/>
+  <button class="lightbox-btn lightbox-close" type="button" onclick="closeLightbox()" data-tooltip="Sluiten (Esc)">&#x2715;</button>
+  <button class="lightbox-btn lightbox-prev" type="button" onclick="navLightbox(-1)" data-tooltip="Vorige (←)">&#x2039;</button>
+  <button class="lightbox-btn lightbox-next" type="button" onclick="navLightbox(1)" data-tooltip="Volgende (→)">&#x203A;</button>
+  <div class="lightbox-counter" id="lightboxCounter"></div>
+</div>
+
+<!-- Drag-drop overlay (zichtbaar tijdens dragover) -->
+<div class="dropzone-overlay hidden" id="dropzoneOverlay">
+  <div class="dropzone-message">
+    <i class="ti ti-cloud-upload"></i>
+    Drop hier om te uploaden
+  </div>
+</div>
+
+<script src="/modules/shared/supabase-client.js"></script>
+<script src="/modules/shared/agent-shared.js"></script>
+<script src="/modules/shared/theme-shared.js"></script>
+<script src="/modules/shared/permissions.js"></script>
+<script src="/modules/shared/sidebar.js"></script>
+
+<script>
+// ── State ────────────────────────────────────────────────────────────────────
+const STATUS_LABELS = { open:'Open', in_progress:'In behandeling', resolved:'Opgelost', closed:'Gesloten' };
+const TYPE_LABELS   = { bug:'Bug', feature:'Feature', question:'Vraag' };
+const VALID_STATUSES = ['open', 'in_progress', 'resolved', 'closed'];
+
+const state = {
+  ticketId: null,
+  ticket: null,
+  comments: [],
+  attachments: [],
+  assignees: [],
+  profile: null,
+  canAssign: false,
+  // Inline-edit state
+  editingTitle: false,
+  editingDescription: false,
+  commentPreviewOn: false,
+  // Tijdelijke draft-buffer voor comment preview toggle (behoudt tekst bij DOM-rerender)
+  _commentDraft: '',
+  // Lightbox-state
+  lightboxImages: [],
+  lightboxIdx: null,
+  // Drag-drop counter (voorkomt flicker bij dragover op kind-elements)
+  _dragDepth: 0,
+  // Upload-lock voor race-condition protection
+  _uploading: false,
+};
+
+// ── Helpers ──────────────────────────────────────────────────────────────────
+
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+// Markdown render voor tickets: gebruikt formatMd (bold/h2/h3/bullet/br) +
+// lokale uitbreidingen voor italic, inline-code en links. Caller moet eerst
+// esc() doen — formatMd voegt HTML toe, dus escape voor extensions zijn safe.
+function formatTicketMd(text) {
+  if (!text) return '';
+  let out = esc(text);
+  if (window.AgentShared?.formatMd) {
+    out = window.AgentShared.formatMd(out);
+  }
+  out = out
+    .replace(/\*([^*\n]+)\*/g, '<em>$1</em>')                                    // italic
+    .replace(/`([^`\n]+)`/g, '<code>$1</code>')                                  // inline code
+    .replace(/\[([^\]\n]+)\]\(([^\s)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');  // links
+  return out;
+}
+
+function relTime(iso) {
+  return window.AgentShared?.relTime?.(iso) || '';
+}
+
+// ── Render ───────────────────────────────────────────────────────────────────
+
+function renderForbidden() {
+  document.getElementById('page-content').innerHTML = `
+    <div class="state-card">
+      <h2>Geen toegang</h2>
+      <p>Je hebt geen rechten om de Tickets-module te bekijken.</p>
+      <a href="/index.html">← Terug naar dashboard</a>
+    </div>
+  `;
+}
+
+function renderNotFound() {
+  document.getElementById('page-content').innerHTML = `
+    <div class="state-card">
+      <h2>Ticket niet gevonden</h2>
+      <p>Dit ticket bestaat niet meer of je hebt er geen toegang toe.</p>
+      <a href="/modules/tickets.html">← Terug naar tickets</a>
+    </div>
+  `;
+}
+
+function renderPage() {
+  document.getElementById('page-content').innerHTML = `
+    <div class="topbar">
+      <a href="/modules/tickets.html"><i class="ti ti-arrow-left"></i> Terug naar tickets</a>
+    </div>
+    <div id="ticketHeader"></div>
+    <div id="ticketDescription"></div>
+    <div id="ticketMeta"></div>
+
+    <div class="comments-section">
+      <h3>Comments</h3>
+      <div id="commentsFeed" class="comments-feed"></div>
+      <div id="commentInput"></div>
+    </div>
+
+    <div class="attachments-section">
+      <div class="attachments-head">
+        <i class="ti ti-paperclip"></i> Bijlagen
+      </div>
+      <div id="attachmentsContainer"></div>
+      <div class="upload-controls">
+        <button class="btn-secondary" type="button" onclick="document.getElementById('fileUploadInput').click()">
+          <i class="ti ti-upload"></i> Bestand uploaden
+        </button>
+        <input type="file" id="fileUploadInput" accept="image/*" multiple onchange="onFilePickerChange(this)"/>
+        <div class="url-input-group">
+          <input type="url" id="externalUrlInput" placeholder="Loom / YouTube / Drive video-link…" onkeydown="onUrlInputKey(event)"/>
+          <button class="btn-secondary" type="button" onclick="submitExternalUrl()">
+            <i class="ti ti-link"></i> Toevoegen
+          </button>
+        </div>
+      </div>
+    </div>
+  `;
+  renderHeader();
+  renderDescription();
+  renderMeta();
+  renderComments();
+  renderCommentInput();
+  renderAttachments();
+}
+
+function renderHeader() {
+  const t = state.ticket;
+  const titleHtml = state.editingTitle
+    ? `
+      <input type="text" id="titleEditInput" class="ticket-title-input" value="${esc(t.title)}" maxlength="200" onkeydown="onTitleKey(event)"/>
+      <button class="btn-primary" onclick="saveTitleEdit()">Opslaan</button>
+      <button class="btn-secondary" onclick="cancelTitleEdit()">Annuleren</button>
+    `
+    : `
+      <div class="ticket-title">${esc(t.title)}</div>
+      <button class="icon-btn" onclick="startTitleEdit()" data-tooltip="Titel bewerken" data-tooltip-pos="left">
+        <i class="ti ti-pencil"></i>
+      </button>
+    `;
+
+  const assigneeControl = state.canAssign
+    ? `
+      <select onchange="onAssigneeChange(this.value)">
+        <option value="">— Niet toegewezen —</option>
+        ${state.assignees.map((a) => `
+          <option value="${esc(a.id)}" ${t.assigned_to === a.id ? 'selected' : ''}>${esc(a.name)}</option>
+        `).join('')}
+      </select>
+    `
+    : `<span class="readonly">${t.assigned_to_name ? esc(t.assigned_to_name) : '— Niet toegewezen —'}</span>`;
+
+  document.getElementById('ticketHeader').innerHTML = `
+    <div class="ticket-header">
+      <div class="ticket-title-row">${titleHtml}</div>
+      <div class="ticket-badges">
+        <span class="badge badge-type-${t.type}">${esc(TYPE_LABELS[t.type] || t.type)}</span>
+        <span class="badge badge-priority-${t.priority}">${esc(t.priority)}</span>
+        ${t.module ? `<span class="badge badge-module">${esc(t.module)}</span>` : ''}
+      </div>
+      <div class="controls-row">
+        <div class="control">
+          <label>Status</label>
+          <select onchange="onStatusChange(this.value)">
+            ${VALID_STATUSES.map((s) => `
+              <option value="${s}" ${t.status === s ? 'selected' : ''}>${esc(STATUS_LABELS[s])}</option>
+            `).join('')}
+          </select>
+        </div>
+        <div class="control">
+          <label>Toegewezen aan</label>
+          ${assigneeControl}
+        </div>
+      </div>
+    </div>
+  `;
+  if (state.editingTitle) setTimeout(() => document.getElementById('titleEditInput')?.focus(), 30);
+}
+
+function renderDescription() {
+  const t = state.ticket;
+  const content = state.editingDescription
+    ? `
+      <textarea id="descEditInput" class="description-textarea" onkeydown="onDescKey(event)">${esc(t.description || '')}</textarea>
+      <div class="edit-actions">
+        <button class="btn-primary" onclick="saveDescriptionEdit()">Opslaan</button>
+        <button class="btn-secondary" onclick="cancelDescriptionEdit()">Annuleren</button>
+      </div>
+    `
+    : `
+      <div class="description-body">
+        ${t.description ? formatTicketMd(t.description) : '<span class="empty">Geen beschrijving.</span>'}
+      </div>
+    `;
+
+  document.getElementById('ticketDescription').innerHTML = `
+    <div class="description-card">
+      <div class="description-header">
+        <span>Beschrijving</span>
+        <div class="spacer"></div>
+        ${state.editingDescription ? '' : `
+          <button class="icon-btn" onclick="startDescriptionEdit()" data-tooltip="Beschrijving bewerken" data-tooltip-pos="left">
+            <i class="ti ti-pencil"></i>
+          </button>
+        `}
+      </div>
+      ${content}
+    </div>
+  `;
+  if (state.editingDescription) setTimeout(() => document.getElementById('descEditInput')?.focus(), 30);
+}
+
+function renderMeta() {
+  const t = state.ticket;
+  const created = `${esc(t.created_by_name || 'Onbekend')} · ${relTime(t.created_at)}`;
+  const updated = t.updated_at !== t.created_at ? `Bijgewerkt ${relTime(t.updated_at)}` : '';
+  const resolved = t.resolved_at ? `Opgelost ${relTime(t.resolved_at)}` : '';
+
+  document.getElementById('ticketMeta').innerHTML = `
+    <div class="meta-row">
+      <span class="meta-item"><i class="ti ti-user-plus"></i> Aangemaakt door ${created}</span>
+      ${updated ? `<span class="meta-item"><i class="ti ti-clock"></i> ${esc(updated)}</span>` : ''}
+      ${resolved ? `<span class="meta-item"><i class="ti ti-check"></i> ${esc(resolved)}</span>` : ''}
+    </div>
+  `;
+}
+
+function renderComments() {
+  const feed = document.getElementById('commentsFeed');
+  if (!feed) return;
+  if (!state.comments.length) {
+    feed.innerHTML = `<div class="comments-empty">Nog geen reacties. Plaats de eerste hieronder.</div>`;
+    return;
+  }
+  feed.innerHTML = state.comments.map((c) => {
+    const isOwn = state.profile && c.author_id === state.profile.id;
+    return `
+      <div class="comment-card">
+        <div class="comment-head">
+          <span class="comment-author">${esc(c.author_name || 'Onbekend')}</span>
+          <span class="comment-time">${esc(relTime(c.created_at))}</span>
+          ${isOwn ? `
+            <button class="comment-delete" onclick="onCommentDelete('${esc(c.id)}')" data-tooltip="Verwijderen" data-tooltip-pos="left">
+              <i class="ti ti-trash"></i>
+            </button>
+          ` : ''}
+        </div>
+        <div class="comment-body">${formatTicketMd(c.body)}</div>
+      </div>
+    `;
+  }).join('');
+}
+
+function renderCommentInput() {
+  const wrap = document.getElementById('commentInput');
+  if (!wrap) return;
+  wrap.innerHTML = `
+    <div class="comment-input-card">
+      <div id="commentEditArea">
+        <textarea id="commentTextarea" class="comment-textarea" placeholder="Schrijf een reactie…">${esc(state._commentDraft || '')}</textarea>
+      </div>
+      <div class="comment-input-footer">
+        <div class="markdown-hint">
+          Markdown: <code>**vet**</code> <code>*cursief*</code> <code>\`code\`</code> <code>[link](url)</code>
+        </div>
+        <button class="btn-secondary" onclick="togglePreview()" id="previewToggle">
+          <i class="ti ti-eye"></i> Preview
+        </button>
+        <button class="btn-primary" onclick="submitComment()" id="commentSubmitBtn">Verstuur</button>
+      </div>
+    </div>
+  `;
+}
+
+// ── Event handlers — inline-edit titel ───────────────────────────────────────
+
+function startTitleEdit() { state.editingTitle = true; renderHeader(); }
+function cancelTitleEdit() { state.editingTitle = false; renderHeader(); }
+function onTitleKey(e) {
+  if (e.key === 'Escape') cancelTitleEdit();
+  else if (e.key === 'Enter') { e.preventDefault(); saveTitleEdit(); }
+}
+async function saveTitleEdit() {
+  const newTitle = document.getElementById('titleEditInput').value.trim();
+  if (newTitle.length < 3) {
+    window.AgentShared?.showToast?.('Titel moet minimaal 3 tekens zijn', 'error');
+    return;
+  }
+  if (newTitle === state.ticket.title) { cancelTitleEdit(); return; }
+  await patchTicket({ title: newTitle });
+  state.editingTitle = false;
+  renderHeader();
+}
+
+// ── Event handlers — inline-edit description ────────────────────────────────
+
+function startDescriptionEdit() { state.editingDescription = true; renderDescription(); }
+function cancelDescriptionEdit() { state.editingDescription = false; renderDescription(); }
+function onDescKey(e) {
+  if (e.key === 'Escape') cancelDescriptionEdit();
+  // Ctrl+Enter / Cmd+Enter saves (Enter alleen behoudt newlines in textarea)
+  if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); saveDescriptionEdit(); }
+}
+async function saveDescriptionEdit() {
+  const newDesc = document.getElementById('descEditInput').value;
+  await patchTicket({ description: newDesc });
+  state.editingDescription = false;
+  renderDescription();
+}
+
+// ── Event handlers — status + assignee ──────────────────────────────────────
+
+async function onStatusChange(newStatus) {
+  if (!VALID_STATUSES.includes(newStatus) || newStatus === state.ticket.status) return;
+  const prev = state.ticket.status;
+  state.ticket.status = newStatus; // optimistic
+  renderHeader();
+  const ok = await patchTicket({ status: newStatus }, { silent: true });
+  if (!ok) {
+    state.ticket.status = prev;     // revert
+    renderHeader();
+  }
+}
+
+async function onAssigneeChange(newId) {
+  if (!state.canAssign) return;
+  const value = newId === '' ? null : newId;
+  if (value === state.ticket.assigned_to) return;
+  const prev = state.ticket.assigned_to;
+  state.ticket.assigned_to = value; // optimistic
+  const ok = await patchTicket({ assigned_to: value });
+  if (!ok) {
+    state.ticket.assigned_to = prev;
+    renderHeader();
+  }
+}
+
+// ── PATCH helper ────────────────────────────────────────────────────────────
+
+async function patchTicket(updates, opts = {}) {
+  try {
+    const res = await window.AgentShared.apiFetch(`/api/ticket-detail?id=${encodeURIComponent(state.ticketId)}`, {
+      method: 'PATCH',
+      body: JSON.stringify(updates),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      window.AgentShared?.showToast?.(err.error || `Wijziging mislukt (HTTP ${res.status})`, 'error');
+      return false;
+    }
+    const data = await res.json();
+    state.ticket = data.ticket;
+    if (!opts.silent) window.AgentShared?.showToast?.('Opgeslagen', 'success');
+    renderHeader();
+    renderDescription();
+    renderMeta();
+    // Sidebar-badge bijwerken — relevant bij status- of assignee-change
+    window.AgentShared?.refreshTicketsBadge?.();
+    return true;
+  } catch (err) {
+    window.AgentShared?.showToast?.('Netwerkfout: ' + (err.message || 'onbekend'), 'error');
+    return false;
+  }
+}
+
+// ── Comment preview-toggle ──────────────────────────────────────────────────
+
+function togglePreview() {
+  const area = document.getElementById('commentEditArea');
+  const btn = document.getElementById('previewToggle');
+  if (!state.commentPreviewOn) {
+    // Edit → Preview: bewaar tekst, render markdown
+    state._commentDraft = document.getElementById('commentTextarea').value;
+    state.commentPreviewOn = true;
+    area.innerHTML = `<div class="comment-preview">${state._commentDraft.trim() ? formatTicketMd(state._commentDraft) : '<em>(leeg)</em>'}</div>`;
+    btn.innerHTML = '<i class="ti ti-pencil"></i> Bewerken';
+  } else {
+    // Preview → Edit: herstel textarea met bewaarde tekst
+    state.commentPreviewOn = false;
+    area.innerHTML = `<textarea id="commentTextarea" class="comment-textarea" placeholder="Schrijf een reactie…">${esc(state._commentDraft || '')}</textarea>`;
+    btn.innerHTML = '<i class="ti ti-eye"></i> Preview';
+    setTimeout(() => document.getElementById('commentTextarea')?.focus(), 30);
+  }
+}
+
+// ── Comment submit + delete ─────────────────────────────────────────────────
+
+async function submitComment() {
+  let text = state.commentPreviewOn
+    ? (state._commentDraft || '')
+    : document.getElementById('commentTextarea').value;
+  text = text.trim();
+  if (!text) {
+    window.AgentShared?.showToast?.('Reactie kan niet leeg zijn', 'error');
+    return;
+  }
+  const btn = document.getElementById('commentSubmitBtn');
+  btn.disabled = true; btn.textContent = 'Versturen…';
+  try {
+    const res = await window.AgentShared.apiFetch('/api/ticket-comments', {
+      method: 'POST',
+      body: JSON.stringify({ ticket_id: state.ticketId, body: text }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      window.AgentShared?.showToast?.(err.error || 'Reactie plaatsen mislukt', 'error');
+      btn.disabled = false; btn.textContent = 'Verstuur';
+      return;
+    }
+    const data = await res.json();
+    state.comments.push(data.comment);
+    state._commentDraft = '';
+    state.commentPreviewOn = false;
+    renderComments();
+    renderCommentInput();
+    window.AgentShared?.showToast?.('Reactie geplaatst', 'success');
+  } catch (err) {
+    window.AgentShared?.showToast?.('Netwerkfout: ' + (err.message || 'onbekend'), 'error');
+    btn.disabled = false; btn.textContent = 'Verstuur';
+  }
+}
+
+async function onCommentDelete(commentId) {
+  if (!confirm('Weet je zeker dat je deze reactie wilt verwijderen?')) return;
+  try {
+    const res = await window.AgentShared.apiFetch(`/api/ticket-comments?id=${encodeURIComponent(commentId)}`, {
+      method: 'DELETE',
+    });
+    if (!res.ok && res.status !== 204) {
+      const err = await res.json().catch(() => ({}));
+      window.AgentShared?.showToast?.(err.error || 'Verwijderen mislukt', 'error');
+      return;
+    }
+    state.comments = state.comments.filter((c) => c.id !== commentId);
+    renderComments();
+    window.AgentShared?.showToast?.('Reactie verwijderd', 'success');
+  } catch (err) {
+    window.AgentShared?.showToast?.('Netwerkfout: ' + (err.message || 'onbekend'), 'error');
+  }
+}
+
+// ── Attachments: constants + helpers ─────────────────────────────────────────
+
+const ATTACHMENT_BUCKET = 'tickets-attachments';
+const SIGNED_URL_TTL = 3600;  // 1 uur
+const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;  // 10 MB
+
+function isImageMime(mime) {
+  return typeof mime === 'string' && mime.startsWith('image/');
+}
+
+// Embed-detector: returnt { kind: 'iframe'|'link', src, label?, domain }
+function detectEmbed(url) {
+  if (!url) return null;
+  let m;
+  if ((m = url.match(/loom\.com\/share\/([a-f0-9]+)/i))) {
+    return { kind: 'iframe', src: `https://www.loom.com/embed/${m[1]}`, label: 'Loom video', domain: 'loom.com' };
+  }
+  if ((m = url.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/)([\w-]+)/i))) {
+    return { kind: 'iframe', src: `https://www.youtube.com/embed/${m[1]}`, label: 'YouTube video', domain: 'youtube.com' };
+  }
+  if ((m = url.match(/drive\.google\.com\/file\/d\/([\w-]+)/i))) {
+    return { kind: 'iframe', src: `https://drive.google.com/file/d/${m[1]}/preview`, label: 'Drive bestand', domain: 'drive.google.com' };
+  }
+  let domain = '';
+  try { domain = new URL(url).hostname.replace(/^www\./, ''); } catch {}
+  return { kind: 'link', src: url, label: domain || url, domain };
+}
+
+// Signed-URL cache + fetcher (TTL 1u)
+const _signedUrls = new Map();
+async function getSignedUrl(path) {
+  if (!path) return null;
+  if (_signedUrls.has(path)) return _signedUrls.get(path);
+  const { data, error } = await window.supabase.storage
+    .from(ATTACHMENT_BUCKET)
+    .createSignedUrl(path, SIGNED_URL_TTL);
+  if (error || !data?.signedUrl) {
+    console.warn('[ticket-detail] signed URL fail:', path, error?.message);
+    return null;
+  }
+  _signedUrls.set(path, data.signedUrl);
+  return data.signedUrl;
+}
+
+// Sanitize filename: lowercase + strip diacritics + non-alphanumeric → '-'
+function cleanFilename(name) {
+  const dot = name.lastIndexOf('.');
+  const base = dot > 0 ? name.slice(0, dot) : name;
+  const ext  = dot > 0 ? name.slice(dot) : '';
+  const cleaned = base
+    .normalize('NFD').replace(/[̀-ͯ]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 80) || 'file';
+  return cleaned + ext.toLowerCase();
+}
+
+// ── Render attachments ──────────────────────────────────────────────────────
+
+function renderAttachments() {
+  const wrap = document.getElementById('attachmentsContainer');
+  if (!wrap) return;
+  if (!state.attachments.length) {
+    wrap.innerHTML = `<div class="attachments-empty">Nog geen bijlagen.</div>`;
+    return;
+  }
+
+  // Splits in 3 buckets: images (storage), niet-image files (storage), externe URLs
+  const images = state.attachments.filter((a) => a.storage_path && isImageMime(a.mime_type));
+  const files  = state.attachments.filter((a) => a.storage_path && !isImageMime(a.mime_type));
+  const urls   = state.attachments.filter((a) => a.external_url);
+
+  state.lightboxImages = images.map((a) => ({ id: a.id, path: a.storage_path, filename: a.filename || 'bijlage' }));
+
+  const imageGrid = images.length ? `
+    <div class="attachments-grid">
+      ${images.map((a, idx) => {
+        const isOwn = state.profile && a.created_by === state.profile.id;
+        return `
+          <div class="attachment-card" onclick="openLightbox(${idx})">
+            <img class="attachment-img is-loading" data-storage="${esc(a.storage_path)}" alt="${esc(a.filename || 'bijlage')}"/>
+            <div class="attachment-meta">${esc(a.filename || a.storage_path.split('/').pop() || '')}</div>
+            ${isOwn ? `<button class="attachment-delete" type="button" onclick="event.stopPropagation(); onAttachmentDelete('${esc(a.id)}')" data-tooltip="Verwijderen"><i class="ti ti-trash"></i></button>` : ''}
+          </div>
+        `;
+      }).join('')}
+    </div>
+  ` : '';
+
+  const fileList = files.length ? `
+    <div class="embeds-list">
+      ${files.map((a) => {
+        const isOwn = state.profile && a.created_by === state.profile.id;
+        return `
+          <div class="embed-wrap">
+            <a class="file-link" href="#" onclick="event.preventDefault(); downloadAttachment('${esc(a.storage_path)}')">
+              <i class="ti ti-paperclip"></i>
+              <span>${esc(a.filename || a.storage_path.split('/').pop() || '')}</span>
+            </a>
+            ${isOwn ? `<button class="embed-delete" type="button" onclick="onAttachmentDelete('${esc(a.id)}')" data-tooltip="Verwijderen"><i class="ti ti-trash"></i></button>` : ''}
+          </div>
+        `;
+      }).join('')}
+    </div>
+  ` : '';
+
+  const urlList = urls.length ? `
+    <div class="embeds-list">
+      ${urls.map((a) => {
+        const isOwn = state.profile && a.created_by === state.profile.id;
+        const e = detectEmbed(a.external_url);
+        const body = e?.kind === 'iframe'
+          ? `<div class="embed-card"><iframe src="${esc(e.src)}" allowfullscreen loading="lazy"></iframe></div>`
+          : `<a class="embed-link" href="${esc(a.external_url)}" target="_blank" rel="noopener">
+               <i class="ti ti-external-link"></i>
+               <span>${esc(a.filename || e?.label || a.external_url)}</span>
+               <span class="embed-link-domain">${esc(e?.domain || '')}</span>
+             </a>`;
+        return `
+          <div class="embed-wrap">
+            ${body}
+            ${isOwn ? `<button class="embed-delete" type="button" onclick="onAttachmentDelete('${esc(a.id)}')" data-tooltip="Verwijderen"><i class="ti ti-trash"></i></button>` : ''}
+          </div>
+        `;
+      }).join('')}
+    </div>
+  ` : '';
+
+  wrap.innerHTML = imageGrid + fileList + urlList;
+
+  // Async signed URLs vullen
+  wrap.querySelectorAll('img.attachment-img[data-storage]').forEach(async (imgEl) => {
+    const path = imgEl.dataset.storage;
+    const url = await getSignedUrl(path);
+    if (url) {
+      imgEl.src = url;
+      imgEl.classList.remove('is-loading');
+    } else {
+      imgEl.classList.remove('is-loading');
+      imgEl.classList.add('is-error');
+      imgEl.alt = 'Kan niet laden';
+    }
+  });
+}
+
+async function downloadAttachment(path) {
+  const url = await getSignedUrl(path);
+  if (url) window.open(url, '_blank', 'noopener');
+}
+
+// ── Lightbox ────────────────────────────────────────────────────────────────
+
+async function openLightbox(idx) {
+  if (!state.lightboxImages || idx < 0 || idx >= state.lightboxImages.length) return;
+  state.lightboxIdx = idx;
+  const item = state.lightboxImages[idx];
+  const url = await getSignedUrl(item.path);
+  if (!url) {
+    window.AgentShared?.showToast?.('Kan afbeelding niet laden', 'error');
+    return;
+  }
+  const imgEl = document.getElementById('lightboxImg');
+  imgEl.src = url;
+  imgEl.alt = item.filename;
+  document.getElementById('lightboxCounter').textContent = `${idx + 1} / ${state.lightboxImages.length}`;
+  document.getElementById('lightboxOverlay').classList.remove('hidden');
+}
+
+function closeLightbox() {
+  document.getElementById('lightboxOverlay').classList.add('hidden');
+  document.getElementById('lightboxImg').src = '';
+  state.lightboxIdx = null;
+}
+
+function navLightbox(delta) {
+  if (state.lightboxIdx === null || !state.lightboxImages.length) return;
+  const next = (state.lightboxIdx + delta + state.lightboxImages.length) % state.lightboxImages.length;
+  openLightbox(next);
+}
+
+function onLightboxOverlayClick(e) {
+  // Sluit bij klik op overlay, img, of counter. Knoppen behouden eigen actie.
+  // Werkt universeel ongeacht image-grootte (bij grote images bleef nauwelijks
+  // zwarte rand over voor strict overlay-id check).
+  if (e.target.closest('.lightbox-btn')) return;
+  closeLightbox();
+}
+
+function onLightboxKey(e) {
+  if (document.getElementById('lightboxOverlay').classList.contains('hidden')) return;
+  if (e.key === 'Escape')     { e.preventDefault(); closeLightbox(); }
+  else if (e.key === 'ArrowLeft')  { e.preventDefault(); navLightbox(-1); }
+  else if (e.key === 'ArrowRight') { e.preventDefault(); navLightbox(1); }
+}
+
+// ── Attachment delete ───────────────────────────────────────────────────────
+
+async function onAttachmentDelete(attachmentId) {
+  if (!confirm('Weet je zeker dat je deze bijlage wilt verwijderen?')) return;
+  try {
+    const res = await window.AgentShared.apiFetch(`/api/ticket-attachments?id=${encodeURIComponent(attachmentId)}`, {
+      method: 'DELETE',
+    });
+    if (!res.ok && res.status !== 204) {
+      const err = await res.json().catch(() => ({}));
+      window.AgentShared?.showToast?.(err.error || 'Verwijderen mislukt', 'error');
+      return;
+    }
+    state.attachments = state.attachments.filter((a) => a.id !== attachmentId);
+    renderAttachments();
+    window.AgentShared?.showToast?.('Bijlage verwijderd', 'success');
+  } catch (err) {
+    window.AgentShared?.showToast?.('Netwerkfout: ' + (err.message || 'onbekend'), 'error');
+  }
+}
+
+// ── Upload-flow ─────────────────────────────────────────────────────────────
+
+// Centrale upload-functie. Gebruikt door file-picker, drag-drop én paste.
+async function uploadImageFile(file) {
+  if (!file) return false;
+
+  if (!file.type || !file.type.startsWith('image/')) {
+    window.AgentShared?.showToast?.('Alleen afbeeldingen worden ondersteund', 'error');
+    return false;
+  }
+  if (file.size > MAX_UPLOAD_BYTES) {
+    window.AgentShared?.showToast?.(`Bestand te groot (max ${(MAX_UPLOAD_BYTES / 1024 / 1024).toFixed(0)} MB)`, 'error');
+    return false;
+  }
+
+  if (state._uploading) {
+    window.AgentShared?.showToast?.('Andere upload bezig — probeer zo opnieuw', 'error');
+    return false;
+  }
+  state._uploading = true;
+
+  try {
+    const { data: { user }, error: userErr } = await window.supabase.auth.getUser();
+    if (userErr || !user) {
+      window.AgentShared?.showToast?.('Auth-fout bij upload', 'error');
+      return false;
+    }
+
+    const path = `${user.id}/${state.ticketId}/${Date.now()}-${cleanFilename(file.name || 'bijlage.png')}`;
+
+    // Stap 1: Storage upload (direct via supabase-js, bucket RLS valideert prefix)
+    const { error: upErr } = await window.supabase.storage
+      .from(ATTACHMENT_BUCKET)
+      .upload(path, file, { contentType: file.type, upsert: false });
+    if (upErr) {
+      console.error('[ticket-detail] storage upload error:', upErr.message);
+      window.AgentShared?.showToast?.('Upload mislukt: ' + upErr.message, 'error');
+      return false;
+    }
+
+    // Stap 2: DB-row via API
+    const apiRes = await window.AgentShared.apiFetch('/api/ticket-attachments', {
+      method: 'POST',
+      body: JSON.stringify({
+        ticket_id: state.ticketId,
+        storage_path: path,
+        filename: file.name || null,
+        mime_type: file.type || null,
+      }),
+    });
+    if (!apiRes.ok) {
+      const err = await apiRes.json().catch(() => ({}));
+      window.AgentShared?.showToast?.(err.error || 'Bijlage-record aanmaken mislukt', 'error');
+      // Rollback: storage cleanup
+      await window.supabase.storage.from(ATTACHMENT_BUCKET).remove([path]).catch(() => {});
+      return false;
+    }
+    const data = await apiRes.json();
+    state.attachments.push(data.attachment);
+    renderAttachments();
+    window.AgentShared?.showToast?.('Bijlage toegevoegd', 'success');
+    return true;
+  } catch (err) {
+    console.error('[ticket-detail] upload exception:', err);
+    window.AgentShared?.showToast?.('Netwerkfout: ' + (err.message || 'onbekend'), 'error');
+    return false;
+  } finally {
+    state._uploading = false;
+  }
+}
+
+async function onFilePickerChange(input) {
+  const files = Array.from(input.files || []);
+  for (const f of files) {
+    await uploadImageFile(f);
+  }
+  input.value = '';
+}
+
+async function submitExternalUrl() {
+  const input = document.getElementById('externalUrlInput');
+  const url = (input?.value || '').trim();
+  if (!url) {
+    window.AgentShared?.showToast?.('Vul een URL in', 'error');
+    return;
+  }
+  try {
+    const u = new URL(url);
+    if (u.protocol !== 'http:' && u.protocol !== 'https:') {
+      window.AgentShared?.showToast?.('Alleen http(s) URLs worden ondersteund', 'error');
+      return;
+    }
+  } catch {
+    window.AgentShared?.showToast?.('Ongeldige URL', 'error');
+    return;
+  }
+
+  try {
+    const res = await window.AgentShared.apiFetch('/api/ticket-attachments', {
+      method: 'POST',
+      body: JSON.stringify({ ticket_id: state.ticketId, external_url: url }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      window.AgentShared?.showToast?.(err.error || 'Link toevoegen mislukt', 'error');
+      return;
+    }
+    const data = await res.json();
+    state.attachments.push(data.attachment);
+    if (input) input.value = '';
+    renderAttachments();
+    window.AgentShared?.showToast?.('Link toegevoegd', 'success');
+  } catch (err) {
+    window.AgentShared?.showToast?.('Netwerkfout: ' + (err.message || 'onbekend'), 'error');
+  }
+}
+
+function onUrlInputKey(e) {
+  if (e.key === 'Enter') { e.preventDefault(); submitExternalUrl(); }
+}
+
+// ── Drag-drop (counter pattern voorkomt flicker) ─────────────────────────────
+
+function onDragEnter(e) {
+  if (!e.dataTransfer || !Array.from(e.dataTransfer.types).includes('Files')) return;
+  e.preventDefault();
+  state._dragDepth++;
+  if (state._dragDepth === 1) {
+    document.getElementById('dropzoneOverlay')?.classList.remove('hidden');
+  }
+}
+
+function onDragOver(e) {
+  if (e.dataTransfer && Array.from(e.dataTransfer.types).includes('Files')) {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'copy';
+  }
+}
+
+function onDragLeave(e) {
+  if (!e.dataTransfer || !Array.from(e.dataTransfer.types).includes('Files')) return;
+  e.preventDefault();
+  state._dragDepth = Math.max(0, state._dragDepth - 1);
+  if (state._dragDepth === 0) {
+    document.getElementById('dropzoneOverlay')?.classList.add('hidden');
+  }
+}
+
+async function onDrop(e) {
+  if (!e.dataTransfer) return;
+  e.preventDefault();
+  state._dragDepth = 0;
+  document.getElementById('dropzoneOverlay')?.classList.add('hidden');
+
+  const files = Array.from(e.dataTransfer.files || []);
+  const imageFiles = files.filter((f) => f.type && f.type.startsWith('image/'));
+  if (!imageFiles.length) {
+    if (files.length) {
+      window.AgentShared?.showToast?.('Alleen afbeeldingen worden geüpload', 'error');
+    }
+    return;
+  }
+  for (const f of imageFiles) {
+    await uploadImageFile(f);
+  }
+}
+
+// ── Paste-handler (clipboard images, respecteert text-input focus) ───────────
+
+function isTextInputFocused() {
+  const ae = document.activeElement;
+  if (!ae) return false;
+  const tag = ae.tagName;
+  if (tag === 'INPUT') return ae.type !== 'file';
+  if (tag === 'TEXTAREA') return true;
+  if (ae.isContentEditable) return true;
+  return false;
+}
+
+async function onPaste(e) {
+  if (isTextInputFocused()) return;  // native paste behouden in textarea/input
+  const items = e.clipboardData?.items;
+  if (!items) return;
+  const files = [];
+  for (const item of items) {
+    if (item.kind === 'file' && item.type && item.type.startsWith('image/')) {
+      const f = item.getAsFile();
+      if (f) files.push(f);
+    }
+  }
+  if (!files.length) return;
+  e.preventDefault();
+  for (const f of files) {
+    await uploadImageFile(f);
+  }
+}
+
+// ── Init ─────────────────────────────────────────────────────────────────────
+
+async function init() {
+  await window._authSharedReady;
+  const profile = await window.AuthShared.requireAuth();
+  if (!profile) return;
+  state.profile = profile;
+  if (window.AgentShared) await window.AgentShared.renderUserSection(profile);
+
+  await window.RBAC.ensurePermissionsLoaded();
+  if (!window.RBAC.canSync('tickets.module.access')) {
+    renderForbidden();
+    return;
+  }
+  state.canAssign = window.RBAC.canSync('tickets.ticket.assign');
+
+  const id = new URLSearchParams(window.location.search).get('id');
+  if (!id) {
+    renderNotFound();
+    return;
+  }
+  state.ticketId = id;
+
+  try {
+    const res = await window.AgentShared.apiFetch(`/api/ticket-detail?id=${encodeURIComponent(id)}`);
+    if (res.status === 404) { renderNotFound(); return; }
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      document.getElementById('page-content').innerHTML = `
+        <div class="state-card">
+          <h2>Fout bij laden</h2>
+          <p>${esc(err.error || `HTTP ${res.status}`)}</p>
+          <a href="/modules/tickets.html">← Terug naar tickets</a>
+        </div>
+      `;
+      return;
+    }
+    const data = await res.json();
+    state.ticket      = data.ticket;
+    state.comments    = data.comments || [];
+    state.attachments = data.attachments || [];
+    state.assignees   = data.assignees || [];
+    renderPage();
+
+    // Document-level listeners (eenmalig — voorkomt event-listener accumulatie):
+    // - keydown: lightbox ESC + arrow-key navigatie
+    // - dragenter/over/leave/drop: drag-drop overlay + file-upload
+    // - paste: clipboard-image upload (respecteert text-input focus)
+    document.addEventListener('keydown',   onLightboxKey);
+    document.addEventListener('dragenter', onDragEnter);
+    document.addEventListener('dragover',  onDragOver);
+    document.addEventListener('dragleave', onDragLeave);
+    document.addEventListener('drop',      onDrop);
+    document.addEventListener('paste',     onPaste);
+  } catch (err) {
+    console.error('[ticket-detail] init error:', err);
+    document.getElementById('page-content').innerHTML = `
+      <div class="state-card">
+        <h2>Netwerkfout</h2>
+        <p>${esc(err.message || 'Onbekende fout')}</p>
+        <a href="/modules/tickets.html">← Terug naar tickets</a>
+      </div>
+    `;
+  }
+}
+
+init();
+</script>
+
+</body>
+</html>
