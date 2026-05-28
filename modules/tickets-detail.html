@@ -1,0 +1,592 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Ticket · De Forex Opleiding</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com"/>
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
+  <link rel="stylesheet" href="/modules/shared/agent-shared.css"/>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/dist/tabler-icons.min.css"/>
+  <style>
+    /* Top-bar nav */
+    .topbar { display:flex; align-items:center; gap:8px; margin-bottom:14px; }
+    .topbar a { color:var(--text-faint); text-decoration:none; font-size:13px; display:inline-flex; align-items:center; gap:4px; }
+    .topbar a:hover { color:var(--text); }
+
+    /* Ticket header card */
+    .ticket-header { background:var(--bg-elev); border:1px solid var(--border); border-radius:12px; padding:18px 20px; margin-bottom:14px; }
+    .ticket-title-row { display:flex; align-items:flex-start; gap:10px; margin-bottom:12px; }
+    .ticket-title { font-size:18px; font-weight:700; line-height:1.3; flex:1; }
+    .ticket-title-input { flex:1; padding:6px 10px; background:var(--bg); border:1px solid var(--border-strong); border-radius:8px; color:var(--text); font-size:18px; font-weight:700; font-family:inherit; }
+    .icon-btn { background:transparent; border:1px solid var(--border); padding:4px 8px; border-radius:6px; cursor:pointer; color:var(--text-faint); font-family:inherit; font-size:12px; display:inline-flex; align-items:center; gap:4px; }
+    .icon-btn:hover { color:var(--text); background:var(--bg-elev-2); }
+    .ticket-badges { display:flex; flex-wrap:wrap; gap:6px; margin-bottom:10px; }
+
+    /* Badges (zelfde palette als lijst-pagina) */
+    .badge { font-size:10px; font-weight:600; padding:2px 7px; border-radius:6px; text-transform:uppercase; letter-spacing:.3px; }
+    .badge-type-bug      { background:var(--color-danger-soft); color:var(--color-danger-text); }
+    .badge-type-feature  { background:var(--color-info-soft); color:var(--color-info-text); }
+    .badge-type-question { background:var(--color-success-soft); color:var(--color-success-text); }
+    .badge-priority-laag   { background:var(--color-neutral-soft); color:var(--color-neutral-text); }
+    .badge-priority-middel { background:var(--color-warning-soft); color:var(--color-warning-text); }
+    .badge-priority-hoog   { background:var(--color-danger-soft); color:var(--color-danger-text); }
+    .badge-module { background:var(--brand-primary-soft); color:var(--brand-primary); }
+
+    /* Controls (status + assignee) */
+    .controls-row { display:flex; flex-wrap:wrap; gap:10px; align-items:center; margin-top:4px; }
+    .control { display:flex; align-items:center; gap:6px; }
+    .control label { font-size:11px; color:var(--text-faint); }
+    .control select { padding:5px 8px; background:var(--bg); border:1px solid var(--border); border-radius:6px; color:var(--text); font-size:12px; font-family:inherit; min-width:130px; }
+    .control select:focus { outline:none; border-color:var(--brand-primary); }
+    .control .readonly { padding:5px 8px; font-size:12px; color:var(--text-dim); }
+
+    /* Description card */
+    .description-card { background:var(--bg-elev); border:1px solid var(--border); border-radius:12px; padding:16px 18px; margin-bottom:14px; }
+    .description-header { display:flex; align-items:center; gap:8px; margin-bottom:10px; font-size:12px; color:var(--text-faint); font-weight:500; text-transform:uppercase; letter-spacing:.4px; }
+    .description-header .spacer { flex:1; }
+    .description-body { font-size:13px; line-height:1.55; color:var(--text); }
+    .description-body em { font-style:italic; }
+    .description-body code { background:var(--bg-elev-2); padding:1px 5px; border-radius:3px; font-family:monospace; font-size:12px; }
+    .description-body a { color:var(--brand-secondary-light); text-decoration:none; }
+    .description-body a:hover { text-decoration:underline; }
+    .description-body .empty { color:var(--text-faint); font-style:italic; }
+    .description-textarea { width:100%; padding:8px 10px; background:var(--bg); border:1px solid var(--border); border-radius:8px; color:var(--text); font-size:13px; font-family:inherit; min-height:120px; resize:vertical; }
+    .edit-actions { display:flex; gap:6px; margin-top:8px; }
+
+    /* Meta-row */
+    .meta-row { font-size:11px; color:var(--text-faint); display:flex; flex-wrap:wrap; gap:14px; padding:0 2px; margin-bottom:18px; }
+    .meta-item { display:inline-flex; align-items:center; gap:4px; }
+
+    /* Comments */
+    .comments-section h3 { font-size:13px; font-weight:600; color:var(--text-dim); margin-bottom:12px; text-transform:uppercase; letter-spacing:.5px; }
+    .comments-feed { display:flex; flex-direction:column; gap:10px; margin-bottom:18px; }
+    .comment-card { background:var(--bg-elev); border:1px solid var(--border); border-radius:10px; padding:12px 14px; }
+    .comment-head { display:flex; align-items:center; gap:8px; margin-bottom:6px; font-size:12px; }
+    .comment-author { font-weight:600; color:var(--text); }
+    .comment-time { color:var(--text-faint); font-size:11px; }
+    .comment-delete { margin-left:auto; background:transparent; border:none; color:var(--text-faint); cursor:pointer; padding:2px 4px; font-size:13px; }
+    .comment-delete:hover { color:var(--color-danger); }
+    .comment-body { font-size:13px; line-height:1.55; color:var(--text); }
+    .comment-body em { font-style:italic; }
+    .comment-body code { background:var(--bg-elev-2); padding:1px 5px; border-radius:3px; font-family:monospace; font-size:12px; }
+    .comment-body a { color:var(--brand-secondary-light); text-decoration:none; }
+    .comment-body a:hover { text-decoration:underline; }
+    .comments-empty { padding:20px; text-align:center; color:var(--text-faint); font-size:13px; font-style:italic; }
+
+    /* Comment input */
+    .comment-input-card { background:var(--bg-elev); border:1px solid var(--border); border-radius:10px; padding:12px 14px; }
+    .comment-textarea { width:100%; padding:8px 10px; background:var(--bg); border:1px solid var(--border); border-radius:8px; color:var(--text); font-size:13px; font-family:inherit; min-height:90px; resize:vertical; }
+    .comment-textarea:focus { outline:none; border-color:var(--brand-primary); }
+    .comment-preview { padding:10px; background:var(--bg); border:1px solid var(--border); border-radius:8px; min-height:90px; font-size:13px; line-height:1.55; color:var(--text); }
+    .comment-preview em { font-style:italic; }
+    .comment-preview code { background:var(--bg-elev-2); padding:1px 5px; border-radius:3px; font-family:monospace; font-size:12px; }
+    .comment-preview a { color:var(--brand-secondary-light); text-decoration:none; }
+    .comment-input-footer { display:flex; align-items:center; gap:8px; margin-top:8px; }
+    .markdown-hint { font-size:11px; color:var(--text-faint); flex:1; }
+    .markdown-hint code { background:var(--bg-elev-2); padding:1px 4px; border-radius:3px; font-family:monospace; font-size:10px; }
+
+    /* Buttons */
+    .btn-primary { background:var(--brand-primary); color:#fff; border:none; padding:7px 14px; border-radius:8px; font-size:13px; font-weight:500; cursor:pointer; font-family:inherit; }
+    .btn-primary:hover { background:var(--brand-primary-hover); }
+    .btn-primary:disabled { opacity:.5; cursor:not-allowed; }
+    .btn-secondary { background:transparent; color:var(--text-dim); border:1px solid var(--border); padding:7px 14px; border-radius:8px; font-size:13px; font-weight:500; cursor:pointer; font-family:inherit; }
+    .btn-secondary:hover { background:var(--bg-elev-2); color:var(--text); }
+
+    /* Attachments placeholder (Commit 3 vult dit in) */
+    .attachments-placeholder { padding:20px; text-align:center; color:var(--text-faint); font-size:12px; font-style:italic; background:var(--bg-elev); border:1px dashed var(--border); border-radius:10px; margin-top:18px; }
+
+    /* States: forbidden + 404 */
+    .state-card { background:var(--bg-elev); border:1px solid var(--border); border-radius:12px; padding:32px 28px; max-width:480px; margin:40px auto; text-align:center; }
+    .state-card h2 { font-size:16px; font-weight:700; margin-bottom:6px; }
+    .state-card p { font-size:13px; color:var(--text-dim); margin-bottom:16px; }
+    .state-card a { color:var(--brand-secondary-light); text-decoration:none; font-size:13px; font-weight:500; }
+    .state-card a:hover { text-decoration:underline; }
+
+    .loading-state { padding:40px 20px; text-align:center; color:var(--text-faint); font-size:13px; }
+  </style>
+</head>
+<body>
+
+<div id="sidebar-mount"></div>
+
+<div class="main">
+  <div class="main-inner" id="page-content">
+    <div class="loading-state">Laden…</div>
+  </div>
+</div>
+
+<script src="/modules/shared/supabase-client.js"></script>
+<script src="/modules/shared/agent-shared.js"></script>
+<script src="/modules/shared/theme-shared.js"></script>
+<script src="/modules/shared/permissions.js"></script>
+<script src="/modules/shared/sidebar.js"></script>
+
+<script>
+// ── State ────────────────────────────────────────────────────────────────────
+const STATUS_LABELS = { open:'Open', in_progress:'In behandeling', resolved:'Opgelost', closed:'Gesloten' };
+const TYPE_LABELS   = { bug:'Bug', feature:'Feature', question:'Vraag' };
+const VALID_STATUSES = ['open', 'in_progress', 'resolved', 'closed'];
+
+const state = {
+  ticketId: null,
+  ticket: null,
+  comments: [],
+  attachments: [],
+  assignees: [],
+  profile: null,
+  canAssign: false,
+  // Inline-edit state
+  editingTitle: false,
+  editingDescription: false,
+  commentPreviewOn: false,
+  // Tijdelijke draft-buffer voor comment preview toggle (behoudt tekst bij DOM-rerender)
+  _commentDraft: '',
+};
+
+// ── Helpers ──────────────────────────────────────────────────────────────────
+
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+// Markdown render voor tickets: gebruikt formatMd (bold/h2/h3/bullet/br) +
+// lokale uitbreidingen voor italic, inline-code en links. Caller moet eerst
+// esc() doen — formatMd voegt HTML toe, dus escape voor extensions zijn safe.
+function formatTicketMd(text) {
+  if (!text) return '';
+  let out = esc(text);
+  if (window.AgentShared?.formatMd) {
+    out = window.AgentShared.formatMd(out);
+  }
+  out = out
+    .replace(/\*([^*\n]+)\*/g, '<em>$1</em>')                                    // italic
+    .replace(/`([^`\n]+)`/g, '<code>$1</code>')                                  // inline code
+    .replace(/\[([^\]\n]+)\]\(([^\s)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');  // links
+  return out;
+}
+
+function relTime(iso) {
+  return window.AgentShared?.relTime?.(iso) || '';
+}
+
+// ── Render ───────────────────────────────────────────────────────────────────
+
+function renderForbidden() {
+  document.getElementById('page-content').innerHTML = `
+    <div class="state-card">
+      <h2>Geen toegang</h2>
+      <p>Je hebt geen rechten om de Tickets-module te bekijken.</p>
+      <a href="/index.html">← Terug naar dashboard</a>
+    </div>
+  `;
+}
+
+function renderNotFound() {
+  document.getElementById('page-content').innerHTML = `
+    <div class="state-card">
+      <h2>Ticket niet gevonden</h2>
+      <p>Dit ticket bestaat niet meer of je hebt er geen toegang toe.</p>
+      <a href="/modules/tickets.html">← Terug naar tickets</a>
+    </div>
+  `;
+}
+
+function renderPage() {
+  document.getElementById('page-content').innerHTML = `
+    <div class="topbar">
+      <a href="/modules/tickets.html"><i class="ti ti-arrow-left"></i> Terug naar tickets</a>
+    </div>
+    <div id="ticketHeader"></div>
+    <div id="ticketDescription"></div>
+    <div id="ticketMeta"></div>
+
+    <div class="comments-section">
+      <h3>Comments</h3>
+      <div id="commentsFeed" class="comments-feed"></div>
+      <div id="commentInput"></div>
+    </div>
+
+    <div class="attachments-placeholder">
+      <i class="ti ti-paperclip"></i> Bijlagen + video-links komen in Fase 3 commit 3.
+    </div>
+  `;
+  renderHeader();
+  renderDescription();
+  renderMeta();
+  renderComments();
+  renderCommentInput();
+}
+
+function renderHeader() {
+  const t = state.ticket;
+  const titleHtml = state.editingTitle
+    ? `
+      <input type="text" id="titleEditInput" class="ticket-title-input" value="${esc(t.title)}" maxlength="200" onkeydown="onTitleKey(event)"/>
+      <button class="btn-primary" onclick="saveTitleEdit()">Opslaan</button>
+      <button class="btn-secondary" onclick="cancelTitleEdit()">Annuleren</button>
+    `
+    : `
+      <div class="ticket-title">${esc(t.title)}</div>
+      <button class="icon-btn" onclick="startTitleEdit()" data-tooltip="Titel bewerken" data-tooltip-pos="left">
+        <i class="ti ti-pencil"></i>
+      </button>
+    `;
+
+  const assigneeControl = state.canAssign
+    ? `
+      <select onchange="onAssigneeChange(this.value)">
+        <option value="">— Niet toegewezen —</option>
+        ${state.assignees.map((a) => `
+          <option value="${esc(a.id)}" ${t.assigned_to === a.id ? 'selected' : ''}>${esc(a.name)}</option>
+        `).join('')}
+      </select>
+    `
+    : `<span class="readonly">${t.assigned_to_name ? esc(t.assigned_to_name) : '— Niet toegewezen —'}</span>`;
+
+  document.getElementById('ticketHeader').innerHTML = `
+    <div class="ticket-header">
+      <div class="ticket-title-row">${titleHtml}</div>
+      <div class="ticket-badges">
+        <span class="badge badge-type-${t.type}">${esc(TYPE_LABELS[t.type] || t.type)}</span>
+        <span class="badge badge-priority-${t.priority}">${esc(t.priority)}</span>
+        ${t.module ? `<span class="badge badge-module">${esc(t.module)}</span>` : ''}
+      </div>
+      <div class="controls-row">
+        <div class="control">
+          <label>Status</label>
+          <select onchange="onStatusChange(this.value)">
+            ${VALID_STATUSES.map((s) => `
+              <option value="${s}" ${t.status === s ? 'selected' : ''}>${esc(STATUS_LABELS[s])}</option>
+            `).join('')}
+          </select>
+        </div>
+        <div class="control">
+          <label>Toegewezen aan</label>
+          ${assigneeControl}
+        </div>
+      </div>
+    </div>
+  `;
+  if (state.editingTitle) setTimeout(() => document.getElementById('titleEditInput')?.focus(), 30);
+}
+
+function renderDescription() {
+  const t = state.ticket;
+  const content = state.editingDescription
+    ? `
+      <textarea id="descEditInput" class="description-textarea" onkeydown="onDescKey(event)">${esc(t.description || '')}</textarea>
+      <div class="edit-actions">
+        <button class="btn-primary" onclick="saveDescriptionEdit()">Opslaan</button>
+        <button class="btn-secondary" onclick="cancelDescriptionEdit()">Annuleren</button>
+      </div>
+    `
+    : `
+      <div class="description-body">
+        ${t.description ? formatTicketMd(t.description) : '<span class="empty">Geen beschrijving.</span>'}
+      </div>
+    `;
+
+  document.getElementById('ticketDescription').innerHTML = `
+    <div class="description-card">
+      <div class="description-header">
+        <span>Beschrijving</span>
+        <div class="spacer"></div>
+        ${state.editingDescription ? '' : `
+          <button class="icon-btn" onclick="startDescriptionEdit()" data-tooltip="Beschrijving bewerken" data-tooltip-pos="left">
+            <i class="ti ti-pencil"></i>
+          </button>
+        `}
+      </div>
+      ${content}
+    </div>
+  `;
+  if (state.editingDescription) setTimeout(() => document.getElementById('descEditInput')?.focus(), 30);
+}
+
+function renderMeta() {
+  const t = state.ticket;
+  const created = `${esc(t.created_by_name || 'Onbekend')} · ${relTime(t.created_at)}`;
+  const updated = t.updated_at !== t.created_at ? `Bijgewerkt ${relTime(t.updated_at)}` : '';
+  const resolved = t.resolved_at ? `Opgelost ${relTime(t.resolved_at)}` : '';
+
+  document.getElementById('ticketMeta').innerHTML = `
+    <div class="meta-row">
+      <span class="meta-item"><i class="ti ti-user-plus"></i> Aangemaakt door ${created}</span>
+      ${updated ? `<span class="meta-item"><i class="ti ti-clock"></i> ${esc(updated)}</span>` : ''}
+      ${resolved ? `<span class="meta-item"><i class="ti ti-check"></i> ${esc(resolved)}</span>` : ''}
+    </div>
+  `;
+}
+
+function renderComments() {
+  const feed = document.getElementById('commentsFeed');
+  if (!feed) return;
+  if (!state.comments.length) {
+    feed.innerHTML = `<div class="comments-empty">Nog geen reacties. Plaats de eerste hieronder.</div>`;
+    return;
+  }
+  feed.innerHTML = state.comments.map((c) => {
+    const isOwn = state.profile && c.author_id === state.profile.id;
+    return `
+      <div class="comment-card">
+        <div class="comment-head">
+          <span class="comment-author">${esc(c.author_name || 'Onbekend')}</span>
+          <span class="comment-time">${esc(relTime(c.created_at))}</span>
+          ${isOwn ? `
+            <button class="comment-delete" onclick="onCommentDelete('${esc(c.id)}')" data-tooltip="Verwijderen" data-tooltip-pos="left">
+              <i class="ti ti-trash"></i>
+            </button>
+          ` : ''}
+        </div>
+        <div class="comment-body">${formatTicketMd(c.body)}</div>
+      </div>
+    `;
+  }).join('');
+}
+
+function renderCommentInput() {
+  const wrap = document.getElementById('commentInput');
+  if (!wrap) return;
+  wrap.innerHTML = `
+    <div class="comment-input-card">
+      <div id="commentEditArea">
+        <textarea id="commentTextarea" class="comment-textarea" placeholder="Schrijf een reactie…">${esc(state._commentDraft || '')}</textarea>
+      </div>
+      <div class="comment-input-footer">
+        <div class="markdown-hint">
+          Markdown: <code>**vet**</code> <code>*cursief*</code> <code>\`code\`</code> <code>[link](url)</code>
+        </div>
+        <button class="btn-secondary" onclick="togglePreview()" id="previewToggle">
+          <i class="ti ti-eye"></i> Preview
+        </button>
+        <button class="btn-primary" onclick="submitComment()" id="commentSubmitBtn">Verstuur</button>
+      </div>
+    </div>
+  `;
+}
+
+// ── Event handlers — inline-edit titel ───────────────────────────────────────
+
+function startTitleEdit() { state.editingTitle = true; renderHeader(); }
+function cancelTitleEdit() { state.editingTitle = false; renderHeader(); }
+function onTitleKey(e) {
+  if (e.key === 'Escape') cancelTitleEdit();
+  else if (e.key === 'Enter') { e.preventDefault(); saveTitleEdit(); }
+}
+async function saveTitleEdit() {
+  const newTitle = document.getElementById('titleEditInput').value.trim();
+  if (newTitle.length < 3) {
+    window.AgentShared?.showToast?.('Titel moet minimaal 3 tekens zijn', 'error');
+    return;
+  }
+  if (newTitle === state.ticket.title) { cancelTitleEdit(); return; }
+  await patchTicket({ title: newTitle });
+  state.editingTitle = false;
+  renderHeader();
+}
+
+// ── Event handlers — inline-edit description ────────────────────────────────
+
+function startDescriptionEdit() { state.editingDescription = true; renderDescription(); }
+function cancelDescriptionEdit() { state.editingDescription = false; renderDescription(); }
+function onDescKey(e) {
+  if (e.key === 'Escape') cancelDescriptionEdit();
+  // Ctrl+Enter / Cmd+Enter saves (Enter alleen behoudt newlines in textarea)
+  if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); saveDescriptionEdit(); }
+}
+async function saveDescriptionEdit() {
+  const newDesc = document.getElementById('descEditInput').value;
+  await patchTicket({ description: newDesc });
+  state.editingDescription = false;
+  renderDescription();
+}
+
+// ── Event handlers — status + assignee ──────────────────────────────────────
+
+async function onStatusChange(newStatus) {
+  if (!VALID_STATUSES.includes(newStatus) || newStatus === state.ticket.status) return;
+  const prev = state.ticket.status;
+  state.ticket.status = newStatus; // optimistic
+  renderHeader();
+  const ok = await patchTicket({ status: newStatus }, { silent: true });
+  if (!ok) {
+    state.ticket.status = prev;     // revert
+    renderHeader();
+  }
+}
+
+async function onAssigneeChange(newId) {
+  if (!state.canAssign) return;
+  const value = newId === '' ? null : newId;
+  if (value === state.ticket.assigned_to) return;
+  const prev = state.ticket.assigned_to;
+  state.ticket.assigned_to = value; // optimistic
+  const ok = await patchTicket({ assigned_to: value });
+  if (!ok) {
+    state.ticket.assigned_to = prev;
+    renderHeader();
+  }
+}
+
+// ── PATCH helper ────────────────────────────────────────────────────────────
+
+async function patchTicket(updates, opts = {}) {
+  try {
+    const res = await window.AgentShared.apiFetch(`/api/ticket-detail?id=${encodeURIComponent(state.ticketId)}`, {
+      method: 'PATCH',
+      body: JSON.stringify(updates),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      window.AgentShared?.showToast?.(err.error || `Wijziging mislukt (HTTP ${res.status})`, 'error');
+      return false;
+    }
+    const data = await res.json();
+    state.ticket = data.ticket;
+    if (!opts.silent) window.AgentShared?.showToast?.('Opgeslagen', 'success');
+    renderHeader();
+    renderDescription();
+    renderMeta();
+    return true;
+  } catch (err) {
+    window.AgentShared?.showToast?.('Netwerkfout: ' + (err.message || 'onbekend'), 'error');
+    return false;
+  }
+}
+
+// ── Comment preview-toggle ──────────────────────────────────────────────────
+
+function togglePreview() {
+  const area = document.getElementById('commentEditArea');
+  const btn = document.getElementById('previewToggle');
+  if (!state.commentPreviewOn) {
+    // Edit → Preview: bewaar tekst, render markdown
+    state._commentDraft = document.getElementById('commentTextarea').value;
+    state.commentPreviewOn = true;
+    area.innerHTML = `<div class="comment-preview">${state._commentDraft.trim() ? formatTicketMd(state._commentDraft) : '<em>(leeg)</em>'}</div>`;
+    btn.innerHTML = '<i class="ti ti-pencil"></i> Bewerken';
+  } else {
+    // Preview → Edit: herstel textarea met bewaarde tekst
+    state.commentPreviewOn = false;
+    area.innerHTML = `<textarea id="commentTextarea" class="comment-textarea" placeholder="Schrijf een reactie…">${esc(state._commentDraft || '')}</textarea>`;
+    btn.innerHTML = '<i class="ti ti-eye"></i> Preview';
+    setTimeout(() => document.getElementById('commentTextarea')?.focus(), 30);
+  }
+}
+
+// ── Comment submit + delete ─────────────────────────────────────────────────
+
+async function submitComment() {
+  let text = state.commentPreviewOn
+    ? (state._commentDraft || '')
+    : document.getElementById('commentTextarea').value;
+  text = text.trim();
+  if (!text) {
+    window.AgentShared?.showToast?.('Reactie kan niet leeg zijn', 'error');
+    return;
+  }
+  const btn = document.getElementById('commentSubmitBtn');
+  btn.disabled = true; btn.textContent = 'Versturen…';
+  try {
+    const res = await window.AgentShared.apiFetch('/api/ticket-comments', {
+      method: 'POST',
+      body: JSON.stringify({ ticket_id: state.ticketId, body: text }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      window.AgentShared?.showToast?.(err.error || 'Reactie plaatsen mislukt', 'error');
+      btn.disabled = false; btn.textContent = 'Verstuur';
+      return;
+    }
+    const data = await res.json();
+    state.comments.push(data.comment);
+    state._commentDraft = '';
+    state.commentPreviewOn = false;
+    renderComments();
+    renderCommentInput();
+    window.AgentShared?.showToast?.('Reactie geplaatst', 'success');
+  } catch (err) {
+    window.AgentShared?.showToast?.('Netwerkfout: ' + (err.message || 'onbekend'), 'error');
+    btn.disabled = false; btn.textContent = 'Verstuur';
+  }
+}
+
+async function onCommentDelete(commentId) {
+  if (!confirm('Weet je zeker dat je deze reactie wilt verwijderen?')) return;
+  try {
+    const res = await window.AgentShared.apiFetch(`/api/ticket-comments?id=${encodeURIComponent(commentId)}`, {
+      method: 'DELETE',
+    });
+    if (!res.ok && res.status !== 204) {
+      const err = await res.json().catch(() => ({}));
+      window.AgentShared?.showToast?.(err.error || 'Verwijderen mislukt', 'error');
+      return;
+    }
+    state.comments = state.comments.filter((c) => c.id !== commentId);
+    renderComments();
+    window.AgentShared?.showToast?.('Reactie verwijderd', 'success');
+  } catch (err) {
+    window.AgentShared?.showToast?.('Netwerkfout: ' + (err.message || 'onbekend'), 'error');
+  }
+}
+
+// ── Init ─────────────────────────────────────────────────────────────────────
+
+async function init() {
+  await window._authSharedReady;
+  const profile = await window.AuthShared.requireAuth();
+  if (!profile) return;
+  state.profile = profile;
+  if (window.AgentShared) await window.AgentShared.renderUserSection(profile);
+
+  await window.RBAC.ensurePermissionsLoaded();
+  if (!window.RBAC.canSync('tickets.module.access')) {
+    renderForbidden();
+    return;
+  }
+  state.canAssign = window.RBAC.canSync('tickets.ticket.assign');
+
+  const id = new URLSearchParams(window.location.search).get('id');
+  if (!id) {
+    renderNotFound();
+    return;
+  }
+  state.ticketId = id;
+
+  try {
+    const res = await window.AgentShared.apiFetch(`/api/ticket-detail?id=${encodeURIComponent(id)}`);
+    if (res.status === 404) { renderNotFound(); return; }
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      document.getElementById('page-content').innerHTML = `
+        <div class="state-card">
+          <h2>Fout bij laden</h2>
+          <p>${esc(err.error || `HTTP ${res.status}`)}</p>
+          <a href="/modules/tickets.html">← Terug naar tickets</a>
+        </div>
+      `;
+      return;
+    }
+    const data = await res.json();
+    state.ticket      = data.ticket;
+    state.comments    = data.comments || [];
+    state.attachments = data.attachments || [];
+    state.assignees   = data.assignees || [];
+    renderPage();
+  } catch (err) {
+    console.error('[ticket-detail] init error:', err);
+    document.getElementById('page-content').innerHTML = `
+      <div class="state-card">
+        <h2>Netwerkfout</h2>
+        <p>${esc(err.message || 'Onbekende fout')}</p>
+        <a href="/modules/tickets.html">← Terug naar tickets</a>
+      </div>
+    `;
+  }
+}
+
+init();
+</script>
+
+</body>
+</html>
