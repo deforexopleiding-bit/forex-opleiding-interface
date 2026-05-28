@@ -362,6 +362,16 @@ const FEATURE_REGISTRY = [
     { key:'admin.role.assign_super_admin', label:'super_admin toekennen (kritiek)' },
     { key:'admin.permissions.edit', label:'Rechten matrix bewerken (super only)' },
   ]},
+  { moduleKey:'tickets', moduleLabel:'Tickets', moduleIcon:'ti-ticket', features:[
+    { key:'tickets.module.access', label:'Module zichtbaar' },
+    { key:'tickets.ticket.create', label:'Ticket aanmaken' },
+    { key:'tickets.ticket.edit', label:'Ticket bewerken (eigen of admin)' },
+    { key:'tickets.ticket.assign', label:'Ticket toewijzen (admin only)' },
+    { key:'tickets.ticket.resolve', label:'Ticket sluiten (eigen of admin)' },
+    { key:'tickets.ticket.delete', label:'Ticket verwijderen (admin only)' },
+    { key:'tickets.comment.create', label:'Comment plaatsen' },
+    { key:'tickets.admin.view_all', label:'Alle tickets zien (admin)' },
+  ]},
 ];
 
 // super_admin = auto (impliciet alles, geen vinkjes). Overige rollen wel.
