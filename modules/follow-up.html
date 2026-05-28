@@ -2148,6 +2148,14 @@
     // (incl. 'onboarding_starten') zonder afspraak-type keuze.
     const OUTCOME_SHOW_FOLLOWUP = new Set(['interesse_uitstel', 'interesse_overleg']);
 
+    // Outcomes waarvoor de submit-handler 'volgende_actie' in payload meegeeft.
+    // Bevat klant_geworden (onboarding dropdown) + uitstel/overleg (dropdown
+    // sub-conditioneel op type-keuze). OUTCOME_SHOW_FOLLOWUP zou hier
+    // onvolledig zijn want die mist klant_geworden — die heeft een eigen flow.
+    const OUTCOME_SUBMITS_VOLGENDE_ACTIE = new Set([
+      'interesse_uitstel', 'interesse_overleg', 'klant_geworden'
+    ]);
+
     // Submit-enable logica gecentraliseerd: een follow-up-type-keuze is alleen
     // verplicht bij outcomes die de afspraak-buttons tonen.
     function updateOutcomeSubmitState() {
@@ -2365,7 +2373,7 @@
         payload.bezwaren = Array.from(currentBezwaren);
       }
 
-      if (OUTCOME_SHOW_VOLGENDE.has(currentOutcomeChoice)) {
+      if (OUTCOME_SUBMITS_VOLGENDE_ACTIE.has(currentOutcomeChoice)) {
         const va = document.getElementById('volgende-actie-select').value;
         if (va) payload.volgende_actie = va;
       }
