@@ -239,3 +239,113 @@ body::before {
   .sidebar { transform:translateX(-100%); }
   .main { margin-left:0; }
 }
+
+/* ── Tooltips (CSS-only via data-tooltip="...") ──────────────────────────
+   Voeg data-tooltip="tekst" toe aan een element voor een hover-tooltip.
+   Standaard positioneert boven; data-tooltip-pos="bottom|left|right" voor variant.
+   Theme-aware via bestaande custom properties (auto licht/donker).
+   Multiline: gebruik &#10; (LF) in attribuut + white-space pre-line werkt.
+   Opt-out: voeg class .no-tooltip toe — voor elementen waar position:relative
+   layout breekt of waar je tijdelijk een tooltip wilt onderdrukken. */
+[data-tooltip] {
+  position: relative;
+}
+
+[data-tooltip]::before,
+[data-tooltip]::after {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s ease-in 0.2s;
+  z-index: 10000;
+}
+
+[data-tooltip]::after {
+  content: attr(data-tooltip);
+  background: var(--surface-card);
+  color: var(--text-primary);
+  border: 1px solid var(--border-default);
+  border-radius: 6px;
+  padding: 6px 10px;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.4;
+  white-space: pre-line;
+  max-width: 240px;
+  width: max-content;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+  text-align: center;
+}
+
+[data-tooltip]::before {
+  content: '';
+  border: 5px solid transparent;
+}
+
+/* Standaard: BOVEN */
+[data-tooltip]::after {
+  bottom: calc(100% + 8px);
+  left: 50%;
+  transform: translateX(-50%);
+}
+[data-tooltip]::before {
+  bottom: calc(100% + 3px);
+  left: 50%;
+  transform: translateX(-50%);
+  border-top-color: var(--border-default);
+}
+
+/* Variant: ONDER */
+[data-tooltip][data-tooltip-pos="bottom"]::after {
+  bottom: auto;
+  top: calc(100% + 8px);
+}
+[data-tooltip][data-tooltip-pos="bottom"]::before {
+  bottom: auto;
+  top: calc(100% + 3px);
+  border-top-color: transparent;
+  border-bottom-color: var(--border-default);
+}
+
+/* Variant: LINKS */
+[data-tooltip][data-tooltip-pos="left"]::after {
+  bottom: 50%;
+  left: auto;
+  right: calc(100% + 8px);
+  transform: translateY(50%);
+}
+[data-tooltip][data-tooltip-pos="left"]::before {
+  bottom: 50%;
+  left: auto;
+  right: calc(100% + 3px);
+  transform: translateY(50%);
+  border-top-color: transparent;
+  border-left-color: var(--border-default);
+}
+
+/* Variant: RECHTS */
+[data-tooltip][data-tooltip-pos="right"]::after {
+  bottom: 50%;
+  left: calc(100% + 8px);
+  transform: translateY(50%);
+}
+[data-tooltip][data-tooltip-pos="right"]::before {
+  bottom: 50%;
+  left: calc(100% + 3px);
+  transform: translateY(50%);
+  border-top-color: transparent;
+  border-right-color: var(--border-default);
+}
+
+/* Toon op hover én keyboard-focus (a11y) */
+[data-tooltip]:hover::before,
+[data-tooltip]:hover::after,
+[data-tooltip]:focus-visible::before,
+[data-tooltip]:focus-visible::after {
+  opacity: 1;
+}
+
+/* Opt-out: voor elementen waar position:relative layout breekt */
+[data-tooltip].no-tooltip { position: static; }
+[data-tooltip].no-tooltip::before,
+[data-tooltip].no-tooltip::after { display: none; }
