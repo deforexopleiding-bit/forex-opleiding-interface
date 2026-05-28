@@ -1644,7 +1644,7 @@
         if (displayStatusKey === 'beoordelen') {
           redenen.push('Beoordelen — outcome ontbreekt');
         }
-        if (rawStatus === 'scheduled' && appt.voicememo_status === 'pending'
+        if (['scheduled', 'completed', 'no_show'].includes(rawStatus) && appt.voicememo_status === 'pending'
             && appt.scheduled_at && new Date(appt.scheduled_at) < new Date()) {
           redenen.push('Voicememo achterstallig');
         }
