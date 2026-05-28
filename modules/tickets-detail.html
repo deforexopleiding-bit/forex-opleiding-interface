@@ -805,7 +805,11 @@ function navLightbox(delta) {
 }
 
 function onLightboxOverlayClick(e) {
-  if (e.target.id === 'lightboxOverlay') closeLightbox();
+  // Sluit bij klik op overlay, img, of counter. Knoppen behouden eigen actie.
+  // Werkt universeel ongeacht image-grootte (bij grote images bleef nauwelijks
+  // zwarte rand over voor strict overlay-id check).
+  if (e.target.closest('.lightbox-btn')) return;
+  closeLightbox();
 }
 
 function onLightboxKey(e) {

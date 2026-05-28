@@ -60,6 +60,11 @@ async function handleGet(res, supabase, id) {
   ]);
 
   if (ticketRes.error) {
+    // Invalid uuid format → 404 ipv 500 met raw Postgres-error
+    if (ticketRes.error.code === '22P02' ||
+        (ticketRes.error.message || '').includes('invalid input syntax for type uuid')) {
+      return res.status(404).json({ error: 'Ticket niet gevonden of geen toegang' });
+    }
     console.error('[ticket-detail] ticket error:', ticketRes.error.message);
     return res.status(500).json({ error: ticketRes.error.message });
   }
@@ -147,6 +152,10 @@ async function handlePatch(req, res, supabase, id) {
 
   if (error) {
     console.error('[ticket-detail] update error:', error.code, error.message);
+    if (error.code === '22P02' ||
+        (error.message || '').includes('invalid input syntax for type uuid')) {
+      return res.status(404).json({ error: 'Ticket niet gevonden of geen toegang' });
+    }
     if (error.code === '42501') {
       return res.status(403).json({ error: 'Geen rechten om dit ticket te wijzigen' });
     }
