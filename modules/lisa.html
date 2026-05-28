@@ -423,7 +423,7 @@
       <div class="cfg-toolbar">
         <span class="cfg-version-badge" id="cfgVersionBadge">Versie —</span>
         <div class="spacer"></div>
-        <button class="btn" id="cfgHistoryBtn" onclick="openHistory()"><i class="ti ti-history"></i> Versie geschiedenis</button>
+        <button class="btn" id="cfgHistoryBtn" onclick="openHistory()" data-tooltip="Bekijk vorige config-versies en rollback." data-tooltip-pos="bottom"><i class="ti ti-history"></i> Versie geschiedenis</button>
         <button class="btn" id="cfgResetBtn" onclick="loadConfig()">Reset</button>
         <button class="btn" id="cfgSaveDraftBtn" onclick="saveConfig(false)">Opslaan als draft</button>
         <button class="btn btn-primary" id="cfgPublishBtn" onclick="saveConfig(true)">Publiceren</button>
@@ -503,7 +503,7 @@
                 </div>
                 <div class="form-row settings-actions">
                   <button class="btn btn-primary" id="saveDelaySettingsBtn" onclick="saveDelaySettings()">Instellingen opslaan</button>
-                  <button class="btn" id="backfillNamesBtn" onclick="runBackfillNames()">🔄 Backfill conversatie-namen</button>
+                  <button class="btn" id="backfillNamesBtn" onclick="runBackfillNames()" data-tooltip="Haal conversatie-namen op uit GHL (kan minuten duren)." data-tooltip-pos="bottom">🔄 Backfill conversatie-namen</button>
                 </div>
                 <p class="field-hint">Lag-info: een antwoord wordt na de delay verstuurd door de cron (elke minuut), dus reken op de delay + tot ~60s.</p>
               </div>
@@ -654,7 +654,7 @@
         <!-- Live preview -->
         <div class="cfg-preview">
           <div class="cfg-preview-head"><i class="ti ti-eye"></i> Live preview — samengestelde system prompt
-            <button class="btn btn-sm" style="margin-left:auto" onclick="kopieerPrompt()"><i class="ti ti-copy"></i> Kopieer prompt</button>
+            <button class="btn btn-sm" style="margin-left:auto" onclick="kopieerPrompt()" data-tooltip="Kopieer de volledige system-prompt naar klembord." data-tooltip-pos="left"><i class="ti ti-copy"></i> Kopieer prompt</button>
           </div>
           <pre id="cfgPreview">—</pre>
         </div>
@@ -666,7 +666,7 @@
       <div class="sbx-layout">
         <aside class="sbx-side">
           <div class="sbx-side-head"><span>Eerdere tests</span>
-            <button class="btn btn-sm" onclick="sbxNew()" title="Nieuwe conversatie"><i class="ti ti-plus"></i></button>
+            <button class="btn btn-sm" onclick="sbxNew()" data-tooltip="Nieuwe conversatie"><i class="ti ti-plus"></i></button>
           </div>
           <div class="sbx-conv-list" id="sbxConvList"><div class="sbx-empty">Laden…</div></div>
         </aside>
@@ -691,7 +691,7 @@
             </label>
             <label class="sbx-ctl-check"><input type="checkbox" id="sbxBotStarts" /> <span>Lisa start</span></label>
             <div class="spacer"></div>
-            <button class="btn btn-sm" onclick="sbxNew()"><i class="ti ti-refresh"></i> Reset</button>
+            <button class="btn btn-sm" onclick="sbxNew()" data-tooltip="Start een nieuwe sandbox-test (huidige conversatie wordt gewist)." data-tooltip-pos="bottom"><i class="ti ti-refresh"></i> Reset</button>
           </div>
 
           <div class="sbx-chat" id="sbxChat"></div>
@@ -707,7 +707,7 @@
     <!-- LOGS (F9) -->
     <div class="tab-panel" id="panel-logs">
       <div class="logs-header">
-        <button class="btn btn-sm" id="logsRefresh" onclick="loadLogs()"><i class="ti ti-refresh"></i> Vernieuwen</button>
+        <button class="btn btn-sm" id="logsRefresh" onclick="loadLogs()" data-tooltip="Laad de nieuwste logs opnieuw." data-tooltip-pos="bottom"><i class="ti ti-refresh"></i> Vernieuwen</button>
       </div>
       <section class="logs-section"><h3>⚙️ Systeemstatus</h3><div id="systemStatus" class="status-grid"></div></section>
       <section class="logs-section"><h3>📚 Versiegeschiedenis</h3><div id="configVersionsList"></div></section>
@@ -1106,7 +1106,7 @@ function lvRenderList() {
         '<span class="lv-conv-time">' + esc(lvRelTime(c.last_message_at || c.created_at)) + '</span></div>' +
       '<div class="lv-conv-top"><span class="lv-badge' + lvPhaseClass(c.phase) + '">' + esc(c.phase || 'intro') + '</span>' +
         (c.qualified && c.phase !== 'qualified' ? '<span class="lv-badge lv-badge-success">✓</span>' : '') +
-        (c.human_takeover ? '<span class="lv-badge" style="background:rgba(245,158,11,.15);color:#f59e0b">mens</span>' : '') + '</div>' +
+        (c.human_takeover ? '<span class="lv-badge" data-tooltip="Mens neemt over — Lisa is gepauzeerd voor deze conversatie." style="background:rgba(245,158,11,.15);color:#f59e0b">mens</span>' : '') + '</div>' +
       '<div class="lv-conv-prev">' + (c.last_direction === 'out' ? '↩ ' : '') + esc(c.preview || '—') + '</div>' +
     '</button>').join('');
 }
@@ -1188,10 +1188,10 @@ function lvRenderDetail() {
       (q.werkstatus ? row('Werk', q.werkstatus) : '') + '</div></div>';
   }
   html += '<div><h4>Acties</h4><div class="lv-actions" id="lvActions">' +
-    '<button class="btn" onclick="lvAction(\'qualified\')">Mark qualified</button>' +
+    '<button class="btn" onclick="lvAction(\'qualified\')" data-tooltip="Markeer conversatie als gekwalificeerde lead.">Mark qualified</button>' +
     '<button class="btn" onclick="lvAction(\'call_booked\')">Call geboekt</button>' +
     '<button class="btn" onclick="lvAction(\'disqualify\')">Disqualify</button>' +
-    '<button class="btn" onclick="lvAction(\'pause\')">' + (c.followup_paused ? 'Hervat follow-up' : 'Pauzeer follow-up') + '</button>' +
+    '<button class="btn" onclick="lvAction(\'pause\')" data-tooltip="' + (c.followup_paused ? 'Hervat Lisa-vervolgberichten.' : 'Pauzeer Lisa-automatische vervolgberichten.') + '">' + (c.followup_paused ? 'Hervat follow-up' : 'Pauzeer follow-up') + '</button>' +
     '<select class="field-select" onchange="lvResetPhase(this.value); this.value=\'\'"><option value="">Zet fase op…</option>' +
       FASES.map(f => '<option value="' + f + '">' + FASE_LABELS[f] + '</option>').join('') + '</select>' +
     '<button class="btn" onclick="lvAction(\'archive\')">Archiveren</button>' +
@@ -1519,7 +1519,7 @@ function renderList(which) {
   const host = document.getElementById(which === 'dos' ? 'dosList' : 'dontsList');
   host.innerHTML = arr.map((v, i) =>
     '<div class="list-row"><input class="field-input" value="' + esc(v) + '" oninput="updateListItem(\'' + which + '\',' + i + ',this.value)" />' +
-    '<button class="list-del" onclick="removeListItem(\'' + which + '\',' + i + ')" title="Verwijderen">&times;</button></div>'
+    '<button class="list-del" onclick="removeListItem(\'' + which + '\',' + i + ')" data-tooltip="Verwijderen">&times;</button></div>'
   ).join('');
 }
 function addListItem(which){ cfg[which].push(''); renderList(which); updatePreview(); }
@@ -1533,7 +1533,7 @@ function renderFasePanels() {
     const p = cfg.phases[f];
     const ex = p.examples.map((v, i) =>
       '<div class="list-row"><textarea class="field-textarea" style="min-height:50px" oninput="updateFaseExample(\'' + f + '\',' + i + ',this.value)">' + esc(v) + '</textarea>' +
-      '<button class="list-del" onclick="removeFaseExample(\'' + f + '\',' + i + ')" title="Verwijderen">&times;</button></div>'
+      '<button class="list-del" onclick="removeFaseExample(\'' + f + '\',' + i + ')" data-tooltip="Verwijderen">&times;</button></div>'
     ).join('');
     return '<div class="fase-panel' + (f === curFase ? ' active' : '') + '" data-fase="' + f + '">' +
       '<div><label class="field-label">System prompt — fase ' + FASE_LABELS[f] + '</label>' +
@@ -1595,7 +1595,7 @@ function renderProducts() {
   if (!cfg.kb_products.length) { host.innerHTML = '<div class="kb-empty">Nog geen producten. Voeg toe wat Lisa kan aanbieden.</div>'; return; }
   host.innerHTML = cfg.kb_products.map((p, i) =>
     '<div class="kb-card" style="margin-bottom:10px">' +
-      '<button class="kb-card-del" onclick="removeProduct(' + i + ')" title="Verwijderen">&times;</button>' +
+      '<button class="kb-card-del" onclick="removeProduct(' + i + ')" data-tooltip="Verwijderen">&times;</button>' +
       '<div><label class="field-label">Naam</label><input class="field-input" value="' + esc(p.naam) + '" oninput="updateProduct(' + i + ',\'naam\',this.value)" /></div>' +
       '<div><label class="field-label">Beschrijving</label><textarea class="field-textarea" style="min-height:60px" oninput="updateProduct(' + i + ',\'beschrijving\',this.value)">' + esc(p.beschrijving) + '</textarea></div>' +
       '<div class="kb-2col">' +
@@ -1615,7 +1615,7 @@ function renderFaqs() {
   if (!cfg.kb_faq.length) { host.innerHTML = '<div class="kb-empty">Nog geen FAQ. Lisa weet nog niets te beantwoorden.</div>'; return; }
   host.innerHTML = cfg.kb_faq.map((q, i) =>
     '<div class="kb-card" style="margin-bottom:10px">' +
-      '<button class="kb-card-del" onclick="removeFaq(' + i + ')" title="Verwijderen">&times;</button>' +
+      '<button class="kb-card-del" onclick="removeFaq(' + i + ')" data-tooltip="Verwijderen">&times;</button>' +
       '<div><label class="field-label">Vraag</label><input class="field-input" value="' + esc(q.vraag) + '" oninput="updateFaq(' + i + ',\'vraag\',this.value)" /></div>' +
       '<div><label class="field-label">Antwoord</label><textarea class="field-textarea" style="min-height:80px" oninput="updateFaq(' + i + ',\'antwoord\',this.value)">' + esc(q.antwoord) + '</textarea></div>' +
       '<div><label class="field-label">Trigger-keywords <span class="field-hint">— typ + Enter</span></label>' +
@@ -1722,7 +1722,7 @@ function renderFuSteps() {
       ' onchange="toggleFuPhase(' + i + ',\'' + p + '\',this.checked)"> ' + FASE_LABELS[p] + '</label>').join('');
     return '<div class="fu-step">' +
       '<div class="fu-step-head"><strong>Stap ' + (i + 1) + '</strong>' +
-        '<button class="fu-step-del" onclick="removeFuStep(' + i + ')" title="Verwijderen">&times;</button></div>' +
+        '<button class="fu-step-del" onclick="removeFuStep(' + i + ')" data-tooltip="Verwijderen">&times;</button></div>' +
       '<div><label class="field-label">Wacht (uur na laatste Lisa-bericht) <span class="field-hint">— 1 t/m 720</span></label>' +
         '<input type="number" class="field-input" style="max-width:140px" min="1" max="720" value="' + esc(s.delay_hours) + '" oninput="updateFuStep(' + i + ',\'delay_hours\',this.value)"></div>' +
       '<div><label class="field-label">Template / instructie</label>' +
@@ -2083,7 +2083,7 @@ function sbxMsgHtml(m) {
   if (out && m.rag_used) {
     const n = (m.rag_faq_count || 0) + (m.rag_kb_items_count || 0);
     const tip = 'Keywords: ' + (m.rag_keywords_extracted || []).join(', ') + ' — ' + (m.rag_faq_count || 0) + ' FAQ, ' + (m.rag_kb_items_count || 0) + ' KB';
-    rag = '<span class="msg-rag-badge" title="' + esc(tip) + '">📚 ' + n + ' items</span>';
+    rag = '<span class="msg-rag-badge" data-tooltip="' + esc(tip) + '">📚 ' + n + ' items</span>';
   }
   const persistent = m.id && !String(m.id).startsWith('_tmp');
   let fb = '';
@@ -2091,8 +2091,8 @@ function sbxMsgHtml(m) {
     const given = sbxFeedback[m.id];
     if (given) fb = '<span class="sbx-fb-done">' + (given === 'good' ? '👍' : given === 'bad' ? '👎' : '•') + ' ✓</span>';
     else fb = '<span class="sbx-fb">' +
-      '<button class="sbx-fb-btn" onclick="sbxFb(\'' + m.id + '\',\'good\')" title="Goed">👍</button>' +
-      '<button class="sbx-fb-btn" onclick="sbxFbBad(\'' + m.id + '\')" title="Kan beter">👎</button></span>';
+      '<button class="sbx-fb-btn" onclick="sbxFb(\'' + m.id + '\',\'good\')" data-tooltip="Goed">👍</button>' +
+      '<button class="sbx-fb-btn" onclick="sbxFbBad(\'' + m.id + '\')" data-tooltip="Kan beter">👎</button></span>';
   }
   return '<div class="sbx-row ' + (out ? 'sbx-row-lisa' : 'sbx-row-user') + '">' +
     '<div class="sbx-bubble">' + esc(m.content).replace(/\n/g, '<br>') + '</div>' +

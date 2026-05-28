@@ -980,7 +980,7 @@
         <i class="ti ti-alert-triangle" aria-hidden="true"></i>
         <span class="fu-overdue-text"></span>
       </div>
-      <button class="fu-overdue-action" type="button">Bekijken</button>
+      <button class="fu-overdue-action" type="button" data-tooltip="Open de 'Open acties' tab om achterstand af te handelen." data-tooltip-pos="bottom">Bekijken</button>
     </div>
 
     <div id="fu-metrics-container" style="display:none;">
@@ -988,26 +988,26 @@
     </div>
 
     <nav class="fu-tabs" role="tablist">
-      <button class="fu-tab active" data-tab="vandaag" role="tab" aria-selected="true">
+      <button class="fu-tab active" data-tab="vandaag" role="tab" aria-selected="true" data-tooltip="Afspraken van vandaag — voicememos, no-shows, opvolging." data-tooltip-pos="bottom">
         <i class="ti ti-calendar-event" aria-hidden="true"></i>
         <span>Vandaag</span>
         <span class="fu-tab-count" id="tab-count-vandaag">—</span>
       </button>
-      <button class="fu-tab" data-tab="open-acties" role="tab" aria-selected="false">
+      <button class="fu-tab" data-tab="open-acties" role="tab" aria-selected="false" data-tooltip="Calls met ontbrekende outcome, voicememo of opvolging." data-tooltip-pos="bottom">
         <i class="ti ti-list-check" aria-hidden="true"></i>
         <span>Open acties</span>
         <span class="fu-tab-count" id="tab-count-open-acties">—</span>
       </button>
-      <button class="fu-tab" data-tab="opvolging" role="tab" aria-selected="false">
+      <button class="fu-tab" data-tab="opvolging" role="tab" aria-selected="false" data-tooltip="Vervolg-calls en wacht-op-reschedule overzicht." data-tooltip-pos="bottom">
         <i class="ti ti-arrow-loop-right" aria-hidden="true"></i>
         <span>Opvolging</span>
         <span class="fu-tab-count" id="tab-count-opvolging">—</span><span class="fu-tab-dot" id="tab-dot-opvolging" style="display:none;"></span>
       </button>
-      <button class="fu-tab" data-tab="archief" role="tab" aria-selected="false">
+      <button class="fu-tab" data-tab="archief" role="tab" aria-selected="false" data-tooltip="Afgehandelde afspraken (search + filter)." data-tooltip-pos="bottom">
         <i class="ti ti-checks" aria-hidden="true"></i>
         <span>Afgehandelde afspraken</span>
       </button>
-      <button class="fu-tab" data-tab="kalender" role="tab" aria-selected="false">
+      <button class="fu-tab" data-tab="kalender" role="tab" aria-selected="false" data-tooltip="Maandweergave met alle afspraken." data-tooltip-pos="bottom">
         <i class="ti ti-calendar" aria-hidden="true"></i>
         <span>Kalender</span>
       </button>
@@ -1700,6 +1700,7 @@
           const geregeldBtn = document.createElement('button');
           geregeldBtn.className = 'fu-card-action-btn';
           geregeldBtn.innerHTML = '<i class="ti ti-check" aria-hidden="true"></i> Geregeld';
+          geregeldBtn.setAttribute('data-tooltip', 'Markeer deze opvolging als afgehandeld.');
           geregeldBtn.addEventListener('click', async (e) => {
             e.stopPropagation();
             if (!confirm('Markeer opvolging als geregeld?')) return;
@@ -1720,6 +1721,7 @@
           const verzetBtn = document.createElement('button');
           verzetBtn.className = 'fu-card-action-btn';
           verzetBtn.innerHTML = '<i class="ti ti-calendar" aria-hidden="true"></i> Verzet';
+          verzetBtn.setAttribute('data-tooltip', 'Verzet vervolg-datum naar nieuwe datum.');
           verzetBtn.addEventListener('click', async (e) => {
             e.stopPropagation();
             const newDate = prompt('Nieuwe terugkom-datum (YYYY-MM-DD):', appt.terugkom_datum);
@@ -1871,6 +1873,8 @@
         const moreBtn = document.createElement('button');
         moreBtn.className = 'fu-card-action-btn fu-action-more';
         moreBtn.setAttribute('aria-label', 'Meer acties');
+        moreBtn.setAttribute('data-tooltip', 'Meer opties: notitie, verplaatsen, annuleren, verwijderen.');
+        moreBtn.setAttribute('data-tooltip-pos', 'left');
         moreBtn.textContent = '⋯';
         moreBtn.addEventListener('click', (e) => {
           e.stopPropagation();
@@ -2811,7 +2815,7 @@
             segments.push(`<div class="fu-hero-segment ${i < c.doneCount ? 'is-done' : ''}"></div>`);
           }
           return `
-            <div class="fu-metric-card fu-metric-card-hero">
+            <div class="fu-metric-card fu-metric-card-hero" data-tooltip="Voortgang vandaag — afspraken te gaan / totaal / morgen-preview." data-tooltip-pos="bottom">
               <div class="fu-hero-content">
                 <div class="fu-hero-label">${c.label}</div>
                 <div class="fu-hero-value-row">
@@ -2829,7 +2833,7 @@
 
         if (c.type === 'actions') {
           return `
-            <div class="fu-metric-card fu-metric-card-actions">
+            <div class="fu-metric-card fu-metric-card-actions" data-tooltip="Achterstallige opvolgingen + calls wachtend op reschedule." data-tooltip-pos="bottom">
               <div class="fu-metric-actions-header">
                 <i class="ti ti-bell" aria-hidden="true"></i>
                 <span>${c.label}</span>
@@ -2846,7 +2850,7 @@
 
         // standard
         return `
-          <div class="fu-metric-card">
+          <div class="fu-metric-card" data-tooltip="Percentage uit gesprekken dat klant werd, met aantal klant/geen-klant." data-tooltip-pos="bottom">
             <div class="fu-metric-icon fu-metric-icon-${c.iconClass || 'neutral'}">
               <i class="ti ${c.icon || ''}" aria-hidden="true"></i>
             </div>
