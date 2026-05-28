@@ -1605,9 +1605,10 @@
         }
       });
 
-      // Sluit dropdown bij klik buiten component of bij scrollen
-      document.addEventListener('click', () => memoDropdown.classList.remove('open'), { capture: true, once: false });
-
+      // Sluit-bij-buitenklik wordt globaal afgehandeld (zie listener naast
+      // de scroll-handler hieronder). Eerder werd hier per card een
+      // document-listener gebonden zonder cleanup → accumuleerde bij elke
+      // refreshFollowUpData() en blokkeerde de event-loop bij browser-clicks.
       memoWrap.appendChild(memoToggle);
       memoWrap.appendChild(memoDropdown);
       right.appendChild(memoWrap);
@@ -2627,6 +2628,17 @@
     document.addEventListener('scroll', () => {
       document.querySelectorAll('.fu-memo-dropdown.open').forEach(d => d.classList.remove('open'));
     }, { passive: true, capture: true });
+
+    // Globale click-sluiter voor memo-dropdowns. Vervangt per-card listener
+    // die in renderCard() accumuleerde bij elke refresh (één per card, geen
+    // cleanup) en de event-loop blokkeerde.
+    document.addEventListener('click', (e) => {
+      document.querySelectorAll('.fu-memo-dropdown.open').forEach(d => {
+        if (d.contains(e.target)) return;
+        if (d.previousElementSibling?.contains(e.target)) return;
+        d.classList.remove('open');
+      });
+    }, { capture: true });
 
     async function init() {
       await window._authSharedReady;
