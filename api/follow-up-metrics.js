@@ -68,8 +68,9 @@ export async function computeMetrics(supabaseAdmin, opts = {}) {
       .lt('scheduled_at', range.end.toISOString())
   );
 
-  // Exclude cancelled/verplaatst from totals — die tellen niet mee als echte afspraken
-  const activeAppts = (appts || []).filter(a => !['cancelled', 'verplaatst'].includes(a.status));
+  // Exclude cancelled/verplaatst/verwijderd from totals — die tellen niet mee
+  // als echte afspraken. Consistent met today-tab lijst-filter in follow-up-appointments.js
+  const activeAppts = (appts || []).filter(a => !['cancelled', 'verplaatst', 'verwijderd'].includes(a.status));
 
   metrics.appointments_total = activeAppts.length;
   metrics.appointments_scheduled = activeAppts.filter(a => a.status === 'scheduled').length;
