@@ -285,36 +285,36 @@
     <!-- ══ SECTIE 2: 4 GROTE KPI CARDS ══ -->
     <div class="kpi-groot-grid" id="kpiGrootGrid">
       <!-- Skeleton -->
-      <div class="kpi-groot-card"><div class="kpi-label">NIEUWE LEADS</div><div class="kpi-value sk" style="width:50px;height:34px"></div><div class="kpi-sub sk" style="width:90px;height:12px;margin-top:6px"></div></div>
-      <div class="kpi-groot-card"><div class="kpi-label">SESSIES</div><div class="kpi-value sk" style="width:40px;height:34px"></div><div class="kpi-sub sk" style="width:80px;height:12px;margin-top:6px"></div></div>
-      <div class="kpi-groot-card"><div class="kpi-label">GENT AANMELDINGEN</div><div class="kpi-value sk" style="width:40px;height:34px"></div><div class="kpi-sub sk" style="width:80px;height:12px;margin-top:6px"></div></div>
-      <div class="kpi-groot-card"><div class="kpi-label">ONBEANTWOORD</div><div class="kpi-value sk" style="width:50px;height:34px"></div><div class="kpi-sub sk" style="width:90px;height:12px;margin-top:6px"></div></div>
+      <div class="kpi-groot-card" data-tooltip="Nieuwe leads die binnenkwamen in de gekozen periode (mails met categorie 'Nieuwe Lead')." data-tooltip-pos="bottom"><div class="kpi-label">NIEUWE LEADS</div><div class="kpi-value sk" style="width:50px;height:34px"></div><div class="kpi-sub sk" style="width:90px;height:12px;margin-top:6px"></div></div>
+      <div class="kpi-groot-card" data-tooltip="Aantal sessies/sales-gesprekken in de gekozen periode. Sub-tekst toont conversie naar klant." data-tooltip-pos="bottom"><div class="kpi-label">SESSIES</div><div class="kpi-value sk" style="width:40px;height:34px"></div><div class="kpi-sub sk" style="width:80px;height:12px;margin-top:6px"></div></div>
+      <div class="kpi-groot-card" data-tooltip="Aanmeldingen voor het fysieke event in Gent in de gekozen periode." data-tooltip-pos="bottom"><div class="kpi-label">GENT AANMELDINGEN</div><div class="kpi-value sk" style="width:40px;height:34px"></div><div class="kpi-sub sk" style="width:80px;height:12px;margin-top:6px"></div></div>
+      <div class="kpi-groot-card" data-tooltip="Inkomende mails die nog beantwoord moeten worden. > 100 = rood, > 50 = oranje." data-tooltip-pos="bottom"><div class="kpi-label">ONBEANTWOORD</div><div class="kpi-value sk" style="width:50px;height:34px"></div><div class="kpi-sub sk" style="width:90px;height:12px;margin-top:6px"></div></div>
     </div>
 
     <!-- ══ SECTIE 3: 4 KLEINE STAT CARDS ══ -->
     <div class="kpi-klein-grid" id="kpiKleinGrid">
-      <a href="modules/email.html" class="kpi-klein-card">
+      <a href="modules/email.html" class="kpi-klein-card" data-tooltip="Totaal mails over alle 4 mailboxen (leads/info/partners/administratie). Klik om mail-module te openen.">
         <div class="kpi-klein-icon">📧</div>
         <div class="kpi-klein-body">
           <div class="kpi-klein-label">Mails</div>
           <div class="kpi-klein-value sk" id="kleinMails" style="width:40px;height:20px"></div>
         </div>
       </a>
-      <a href="modules/taken.html" class="kpi-klein-card">
+      <a href="modules/taken.html" class="kpi-klein-card" data-tooltip="Openstaande taken die actie vereisen. Klik om naar takenbeheer te gaan.">
         <div class="kpi-klein-icon">✅</div>
         <div class="kpi-klein-body">
           <div class="kpi-klein-label">Open taken</div>
           <div class="kpi-klein-value sk" id="kleinTaken" style="width:30px;height:20px"></div>
         </div>
       </a>
-      <a href="modules/meetings.html" class="kpi-klein-card">
+      <a href="modules/meetings.html" class="kpi-klein-card" data-tooltip="Aankomende vergaderingen. Klik om de vergaderruimte te openen.">
         <div class="kpi-klein-icon">🏛️</div>
         <div class="kpi-klein-body">
           <div class="kpi-klein-label">Vergaderingen</div>
           <div class="kpi-klein-value sk" id="kleinMeetings" style="width:30px;height:20px"></div>
         </div>
       </a>
-      <a href="modules/control-center.html" class="kpi-klein-card">
+      <a href="modules/control-center.html" class="kpi-klein-card" data-tooltip="Agent-acties die wachten op goedkeuring. Klik om naar Control Center te gaan.">
         <div class="kpi-klein-icon">🔔</div>
         <div class="kpi-klein-body">
           <div class="kpi-klein-label">Pending approvals</div>
@@ -327,14 +327,14 @@
     <div class="charts-row">
       <!-- Linkerkant: Lead & mail trend -->
       <div class="chart-card">
-        <div class="chart-title">📈 Lead &amp; mail trend (14 dagen)</div>
+        <div class="chart-title" data-tooltip="Dagelijkse nieuwe leads en binnenkomende mails over de laatste 14 dagen." data-tooltip-pos="bottom">📈 Lead &amp; mail trend (14 dagen)</div>
         <div class="chart-wrap">
           <canvas id="chartLeadMail"></canvas>
         </div>
       </div>
       <!-- Rechterkant: Inbox donut -->
       <div class="chart-card">
-        <div class="chart-title">📬 Inbox mix (7 dagen)</div>
+        <div class="chart-title" data-tooltip="Verdeling van mail-categorieën in inkomende mail over de laatste 7 dagen." data-tooltip-pos="bottom">📬 Inbox mix (7 dagen)</div>
         <div class="donut-wrap">
           <div class="donut-canvas-wrap">
             <canvas id="chartDonut" width="150" height="150"></canvas>
@@ -350,7 +350,7 @@
       <!-- Recente activiteit -->
       <div class="side-card">
         <div class="side-title">
-          Recente activiteit
+          <span data-tooltip="Laatste mutaties: mails, taken, agent-acties. 'Bekijk alles' opent volledige feed.">Recente activiteit</span>
           <a class="side-link" href="modules/email.html">Bekijk alles →</a>
         </div>
         <div id="activityList"><div style="color:var(--text-faint);font-size:12px">Laden…</div></div>
@@ -358,7 +358,7 @@
 
       <!-- Agent status -->
       <div class="side-card">
-        <div class="side-title">Agents (7d)</div>
+        <div class="side-title" data-tooltip="Activiteit per AI-agent (Simon/Leon/Aron) over laatste 7 dagen — aantal acties + onderaan totaal.">Agents (7d)</div>
         <div id="agentList"><div style="color:var(--text-faint);font-size:12px">Laden…</div></div>
         <div class="agent-aggregate" id="agentAggregate"></div>
       </div>
