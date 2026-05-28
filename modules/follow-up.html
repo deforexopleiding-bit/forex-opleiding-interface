@@ -1563,7 +1563,7 @@
             if (result.requires_screenshot) {
               alert('📸 Steekproef: upload een screenshot van de WhatsApp-voicememo als bewijs. Ga naar de detailpagina om te uploaden.');
             }
-            location.reload();
+            await refreshFollowUpData();
           } catch (err) {
             alert('Fout: ' + err.message);
             optEl.disabled = false;
@@ -1605,9 +1605,10 @@
         }
       });
 
-      // Sluit dropdown bij klik buiten component of bij scrollen
-      document.addEventListener('click', () => memoDropdown.classList.remove('open'), { capture: true, once: false });
-
+      // Sluit-bij-buitenklik wordt globaal afgehandeld (zie listener naast
+      // de scroll-handler hieronder). Eerder werd hier per card een
+      // document-listener gebonden zonder cleanup → accumuleerde bij elke
+      // refreshFollowUpData() en blokkeerde de event-loop bij browser-clicks.
       memoWrap.appendChild(memoToggle);
       memoWrap.appendChild(memoDropdown);
       right.appendChild(memoWrap);
@@ -1710,7 +1711,7 @@
                 body: JSON.stringify({ appointment_id: appt.id, action: 'geregeld' }),
               });
               if (!res.ok) { const e2 = await res.json().catch(() => ({})); throw new Error(e2.error || `HTTP ${res.status}`); }
-              location.reload();
+              await refreshFollowUpData();
             } catch (err) { alert('Fout: ' + err.message); }
           });
           actions.appendChild(geregeldBtn);
@@ -1734,7 +1735,7 @@
                 body: JSON.stringify({ appointment_id: appt.id, action: 'verzet', new_terugkom_datum: newDate }),
               });
               if (!res.ok) { const e2 = await res.json().catch(() => ({})); throw new Error(e2.error || `HTTP ${res.status}`); }
-              location.reload();
+              await refreshFollowUpData();
             } catch (err) { alert('Fout: ' + err.message); }
           });
           actions.appendChild(verzetBtn);
@@ -2440,7 +2441,7 @@
           return;
         }
         closeOutcomeModal();
-        location.reload();
+        await refreshFollowUpData();
       } catch (err) {
         errDiv.textContent = 'Fout bij opslaan: ' + err.message;
         errDiv.style.display = 'block';
@@ -2628,6 +2629,17 @@
       document.querySelectorAll('.fu-memo-dropdown.open').forEach(d => d.classList.remove('open'));
     }, { passive: true, capture: true });
 
+    // Globale click-sluiter voor memo-dropdowns. Vervangt per-card listener
+    // die in renderCard() accumuleerde bij elke refresh (één per card, geen
+    // cleanup) en de event-loop blokkeerde.
+    document.addEventListener('click', (e) => {
+      document.querySelectorAll('.fu-memo-dropdown.open').forEach(d => {
+        if (d.contains(e.target)) return;
+        if (d.previousElementSibling?.contains(e.target)) return;
+        d.classList.remove('open');
+      });
+    }, { capture: true });
+
     async function init() {
       await window._authSharedReady;
       const profile = await window.AuthShared.requireAuth(ALLOWED_ROLES);
@@ -2672,20 +2684,7 @@
       bindTimeToggle();
       initOpvolgingSearch();  // zoek-input in opvolging-tab activeren
 
-      loadDashboardMetrics(); // parallel, niet-blokkerend
-
-      await Promise.all([
-        loadWachtReschedule(),
-        renderSection('opvolging_overdue', 'list-opvolging-overdue', 'count-opvolging-overdue', false),
-        renderSection('opvolging_today', 'list-opvolging-today', 'count-opvolging-today', false),
-        renderSection('opvolging_week', 'list-opvolging-week', 'count-opvolging-week', false),
-        renderSection('opvolging_30d', 'list-opvolging-30d', 'count-opvolging-30d', false),
-        renderSection('opvolging_verder', 'list-opvolging-verder', 'count-opvolging-verder', false),
-        renderSection('open_acties', 'list-open-acties', 'count-open-acties', true),
-        renderSection('today', 'list-today', 'count-today', false),
-        renderSection('week', 'list-komende', 'count-komende', true),
-        renderSection('recent_completed', 'list-recent-completed', 'count-recent-completed', true),
-      ]);
+      await refreshFollowUpData();
     }
 
     async function loadDashboardMetrics() {
@@ -2701,6 +2700,39 @@
         loadMorgenCount();
       } catch (err) {
         console.warn('[follow-up] metrics fetch error:', err.message);
+      }
+    }
+
+    // ── Gerichte data-refresh — vervangt location.reload() na mutaties zoals
+    //    outcome-submit, voicememo-update, verplaats/annuleer/verwijder, etc.
+    //    Behoudt scroll-positie, actieve tab, search-input, time-range-keuze,
+    //    en sluit geen modals (caller doet dat zelf vóór de aanroep). ──
+    async function refreshFollowUpData() {
+      try {
+        loadDashboardMetrics(); // niet-blokkerend; vult topbar + badges async
+        await Promise.all([
+          loadWachtReschedule(),
+          renderSection('opvolging_overdue',  'list-opvolging-overdue',  'count-opvolging-overdue', false),
+          renderSection('opvolging_today',    'list-opvolging-today',    'count-opvolging-today',   false),
+          renderSection('opvolging_week',     'list-opvolging-week',     'count-opvolging-week',    false),
+          renderSection('opvolging_30d',      'list-opvolging-30d',      'count-opvolging-30d',     false),
+          renderSection('opvolging_verder',   'list-opvolging-verder',   'count-opvolging-verder',  false),
+          renderSection('open_acties',        'list-open-acties',        'count-open-acties',       true),
+          renderSection('today',              'list-today',              'count-today',             false),
+          renderSection('week',               'list-komende',            'count-komende',           true),
+          renderSection('recent_completed',   'list-recent-completed',   'count-recent-completed',  true),
+        ]);
+        // Lazy-geladen tabs: alleen vernieuwen als ze al actief zijn ingeladen.
+        if (allKomendeLoaded) {
+          await loadAlleKomende();
+        }
+        if (archiefLoaded) {
+          archiefPage = 1;
+          await loadArchief();
+        }
+      } catch (err) {
+        console.error('[refreshFollowUpData] refresh faalde:', err);
+        window.AgentShared?.showToast?.('Verversen mislukt, ververs handmatig (F5)');
       }
     }
 
@@ -2867,7 +2899,7 @@
         });
         if (!r.ok) { const e2 = await r.json().catch(() => ({})); throw new Error(e2.error || `HTTP ${r.status}`); }
         closeSnelleNotitieModal();
-        location.reload();
+        await refreshFollowUpData();
       } catch (err) {
         alert('Fout bij opslaan: ' + err.message);
         submitBtn.disabled = false;
@@ -2987,7 +3019,7 @@
         const zoomWarn = !data.zoom_updated && currentVerplaatsAppt.zoom_meeting_id;
         window.AgentShared?.showToast('Call verplaatst' + (zoomWarn ? ' (Zoom-update faalde)' : ''));
         closeVerplaatsModal();
-        location.reload();
+        await refreshFollowUpData();
       } catch (err) {
         const errDiv = document.getElementById('verplaats-error');
         errDiv.textContent = 'Fout: ' + err.message;
@@ -3061,7 +3093,7 @@
 
         window.AgentShared?.showToast(mode === 'wacht_reschedule' ? 'Gemarkeerd: wacht op reschedule' : 'Call geannuleerd');
         closeAnnuleerModal();
-        location.reload();
+        await refreshFollowUpData();
       } catch (err) {
         const errDiv = document.getElementById('annuleer-error');
         errDiv.textContent = 'Fout: ' + err.message;
@@ -3131,7 +3163,7 @@
 
         window.AgentShared?.showToast('Afspraak verwijderd');
         closeVerwijderModal();
-        location.reload();
+        await refreshFollowUpData();
       } catch (err) {
         const errDiv = document.getElementById('verwijder-error');
         errDiv.textContent = 'Fout: ' + err.message;
