@@ -2354,7 +2354,8 @@
     });
 
     document.getElementById('outcome-submit')?.addEventListener('click', async () => {
-      if (!currentOutcomeAppt || !currentOutcomeChoice || !currentFollowUpType) return;
+      if (!currentOutcomeAppt || !currentOutcomeChoice) return;
+      if (OUTCOME_SHOW_FOLLOWUP.has(currentOutcomeChoice) && !currentFollowUpType) return;
 
       const submitBtn = document.getElementById('outcome-submit');
       const errDiv = document.getElementById('followup-error');
@@ -2366,8 +2367,8 @@
         appointment_id: currentOutcomeAppt.id,
         outcome: currentOutcomeChoice,
         warmte_score: parseInt(document.getElementById('warmte-slider').value, 10),
-        follow_up_type: currentFollowUpType,
       };
+      if (currentFollowUpType) payload.follow_up_type = currentFollowUpType;
 
       if (OUTCOME_SHOW_BEZWAREN.has(currentOutcomeChoice)) {
         payload.bezwaren = Array.from(currentBezwaren);
