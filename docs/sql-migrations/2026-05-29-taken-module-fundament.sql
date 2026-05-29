@@ -1,3 +1,7 @@
+-- LET OP: policies gebruiken SECURITY DEFINER helper-functies om
+-- RLS-recursie te voorkomen. Zie 2026-05-29-taken-rls-recursion-fix.sql
+-- voor de hotfix-context.
+--
 -- ============================================================================
 -- Taken-module Fase 1 — Fundament
 -- Datum: 2026-05-29
@@ -192,7 +196,37 @@ CREATE TRIGGER trg_taken_items_status_change
   FOR EACH ROW
   EXECUTE FUNCTION public.taken_handle_status_change();
 
--- ── 6. RLS taken_items ──────────────────────────────────────────────────────
+-- ── 6. RLS helpers (SECURITY DEFINER, breken mutual recursion) ──────────────
+-- taken_items_select en taken_assignees_select kunnen elkaar niet rechtstreeks
+-- bevragen via EXISTS — Postgres detecteert dat als infinite recursion.
+-- Oplossing: SECURITY DEFINER helpers die buiten RLS-context query'en.
+
+CREATE OR REPLACE FUNCTION public.is_task_assignee(p_task_id uuid, p_user_id uuid)
+RETURNS boolean
+LANGUAGE sql
+SECURITY DEFINER
+STABLE
+AS $$
+  SELECT EXISTS (
+    SELECT 1 FROM public.taken_assignees
+    WHERE task_id = p_task_id AND assignee_id = p_user_id
+  );
+$$;
+
+CREATE OR REPLACE FUNCTION public.can_access_task(p_task_id uuid, p_user_id uuid)
+RETURNS boolean
+LANGUAGE sql
+SECURITY DEFINER
+STABLE
+AS $$
+  SELECT EXISTS (
+    SELECT 1 FROM public.taken_items
+    WHERE id = p_task_id
+      AND (created_by = p_user_id OR assigned_to_id = p_user_id)
+  );
+$$;
+
+-- ── 6b. RLS taken_items ─────────────────────────────────────────────────────
 ALTER TABLE public.taken_items ENABLE ROW LEVEL SECURITY;
 
 DROP POLICY IF EXISTS taken_items_select ON public.taken_items;
@@ -205,10 +239,7 @@ CREATE POLICY taken_items_select ON public.taken_items
   USING (
     created_by = auth.uid()
     OR assigned_to_id = auth.uid()
-    OR EXISTS (
-      SELECT 1 FROM public.taken_assignees ta
-      WHERE ta.task_id = taken_items.id AND ta.assignee_id = auth.uid()
-    )
+    OR public.is_task_assignee(taken_items.id, auth.uid())
     OR public.has_any_role(ARRAY['super_admin','admin','manager'])
   );
 
@@ -224,19 +255,13 @@ CREATE POLICY taken_items_update ON public.taken_items
   USING (
     created_by = auth.uid()
     OR assigned_to_id = auth.uid()
-    OR EXISTS (
-      SELECT 1 FROM public.taken_assignees ta
-      WHERE ta.task_id = taken_items.id AND ta.assignee_id = auth.uid()
-    )
+    OR public.is_task_assignee(taken_items.id, auth.uid())
     OR public.has_any_role(ARRAY['super_admin','admin','manager'])
   )
   WITH CHECK (
     created_by = auth.uid()
     OR assigned_to_id = auth.uid()
-    OR EXISTS (
-      SELECT 1 FROM public.taken_assignees ta
-      WHERE ta.task_id = taken_items.id AND ta.assignee_id = auth.uid()
-    )
+    OR public.is_task_assignee(taken_items.id, auth.uid())
     OR public.has_any_role(ARRAY['super_admin','admin','manager'])
   );
 
@@ -258,22 +283,14 @@ CREATE POLICY taken_assignees_select ON public.taken_assignees
   FOR SELECT
   USING (
     assignee_id = auth.uid()
-    OR EXISTS (
-      SELECT 1 FROM public.taken_items t
-      WHERE t.id = taken_assignees.task_id
-        AND (t.created_by = auth.uid() OR t.assigned_to_id = auth.uid())
-    )
+    OR public.can_access_task(taken_assignees.task_id, auth.uid())
     OR public.has_any_role(ARRAY['super_admin','admin','manager'])
   );
 
 CREATE POLICY taken_assignees_insert ON public.taken_assignees
   FOR INSERT
   WITH CHECK (
-    EXISTS (
-      SELECT 1 FROM public.taken_items t
-      WHERE t.id = taken_assignees.task_id
-        AND t.created_by = auth.uid()
-    )
+    public.can_access_task(taken_assignees.task_id, auth.uid())
     OR public.has_any_role(ARRAY['super_admin','admin','manager'])
   );
 
@@ -281,11 +298,7 @@ CREATE POLICY taken_assignees_delete ON public.taken_assignees
   FOR DELETE
   USING (
     assignee_id = auth.uid()
-    OR EXISTS (
-      SELECT 1 FROM public.taken_items t
-      WHERE t.id = taken_assignees.task_id
-        AND t.created_by = auth.uid()
-    )
+    OR public.can_access_task(taken_assignees.task_id, auth.uid())
     OR public.has_any_role(ARRAY['super_admin','admin','manager'])
   );
 
