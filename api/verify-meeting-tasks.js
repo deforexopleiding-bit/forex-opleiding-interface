@@ -1,4 +1,4 @@
-import { supabase } from './supabase.js';
+import { supabaseAdmin as supabase } from './supabase.js';
 
 // Tijdelijk verificatie-endpoint — kan na verificatie worden verwijderd
 export default async function handler(req, res) {
@@ -17,7 +17,7 @@ export default async function handler(req, res) {
     // Stap 1: taken_items met source_meeting_id
     const { data: tasks, error: tasksErr } = await supabase
       .from('taken_items')
-      .select('id, titel, toegewezen_aan, assigned_to_type, source_meeting_id, aangemaakt')
+      .select('id, titel, assigned_to_id, source_meeting_id, aangemaakt')
       .not('source_meeting_id', 'is', null)
       .order('aangemaakt', { ascending: false })
       .limit(10);
@@ -37,24 +37,34 @@ export default async function handler(req, res) {
     const taskIds = tasks.map(t => t.id);
     const { data: assignees, error: asgErr } = await supabase
       .from('taken_assignees')
-      .select('task_id, assignee_name, assignee_type')
-      .in('task_id', taskIds)
-      .order('assignee_name');
+      .select('task_id, assignee_id')
+      .in('task_id', taskIds);
 
     if (asgErr) throw asgErr;
+
+    // Name-enrich profiles (assignees + assigned_to_id)
+    const profileIds = new Set();
+    for (const t of tasks) if (t.assigned_to_id) profileIds.add(t.assigned_to_id);
+    for (const a of (assignees || [])) if (a.assignee_id) profileIds.add(a.assignee_id);
+    const nameMap = {};
+    if (profileIds.size) {
+      const { data: profiles } = await supabase
+        .from('profiles').select('id, full_name, email').in('id', Array.from(profileIds));
+      for (const p of profiles || []) nameMap[p.id] = p.full_name || p.email || null;
+    }
 
     // Groepeer assignees per taak
     const assigneesByTask = {};
     for (const a of (assignees || [])) {
-      (assigneesByTask[a.task_id] ||= []).push(`${a.assignee_name} (${a.assignee_type})`);
+      (assigneesByTask[a.task_id] ||= []).push(nameMap[a.assignee_id] || `(profile ${a.assignee_id})`);
     }
 
     // Combineer
     const result = tasks.map(t => ({
       id:                t.id,
       titel:             t.titel,
-      toegewezen_aan:    t.toegewezen_aan,       // backwards compat kolom
-      assigned_to_type:  t.assigned_to_type,
+      assigned_to_id:    t.assigned_to_id,
+      assigned_to_name:  t.assigned_to_id ? (nameMap[t.assigned_to_id] || null) : null,
       source_meeting_id: t.source_meeting_id,
       aangemaakt:        t.aangemaakt,
       assignees_namen:   assigneesByTask[t.id] || [],

@@ -120,24 +120,56 @@ function toUuidOrNull(id) {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id) ? id : null;
 }
 
-// Maak één taak aan + taken_assignees rijen
-async function createTask({ titel, beschrijving, assignees, deadline, prioriteit, source_meeting_id, categorie = 'Vergadering' }) {
+// Resolveer team_member.id → profiles.id via profiles.team_member_id.
+// Returnt null bij geen match (agents, onbekende employees, leden zonder profile).
+// TODO Fase 2: dedup met api/agent-tool-executor.js naar api/_lib/profile-resolver.js
+async function resolveTeamMemberToProfileId(teamMemberId) {
+  if (!teamMemberId) return null;
+  const uuid = toUuidOrNull(teamMemberId);
+  if (!uuid) return null;
+  const { data, error } = await supabaseAdmin
+    .from('profiles').select('id').eq('team_member_id', uuid).maybeSingle();
+  if (error) {
+    console.warn('[resolveTeamMemberToProfileId] lookup fout:', error.message);
+    return null;
+  }
+  return data?.id || null;
+}
+
+// Maak één taak aan + taken_assignees rijen.
+// creator: { type: 'user'|'agent', id: uuid|'simon'|'leon'|'aron' } — XOR-bron voor created_by/created_by_agent.
+async function createTask({ titel, beschrijving, assignees, deadline, prioriteit, source_meeting_id, categorie = 'Vergadering', creator }) {
+  if (!creator || !creator.type || !creator.id) {
+    throw new Error('createTask: creator { type, id } is verplicht');
+  }
+  if (creator.type !== 'user' && creator.type !== 'agent') {
+    throw new Error(`createTask: creator.type ongeldig (${creator.type})`);
+  }
+  if (creator.type === 'agent' && !['simon','leon','aron'].includes(creator.id)) {
+    throw new Error(`createTask: creator.id voor agent moet 'simon'|'leon'|'aron' zijn (kreeg ${creator.id})`);
+  }
+
   const taskId = crypto.randomUUID();
   const now = new Date().toISOString();
 
-  // Eerste assignee voor backwards compat kolommen
-  const first = assignees?.[0] || null;
+  // assigned_to_id: eerste niet-agent assignee → resolve naar profile.
+  const firstNonAgent = (assignees || []).find(a => a.type !== 'agent') || null;
+  const assignedToProfileId = firstNonAgent
+    ? await resolveTeamMemberToProfileId(firstNonAgent.id)
+    : null;
+
   const taskRow = {
     id:                taskId,
     titel:             titel || '(naamloos)',
     omschrijving:      beschrijving || null,
     prioriteit:        prioriteit || 'Normaal',
     status:            'todo',
-    // assigned_to_id is uuid — agents hebben naam-strings (geen UUID), bewaar null voor hen
-    assigned_to_id:    toUuidOrNull(first?.id),
+    assigned_to_id:    assignedToProfileId,
     source_meeting_id: toUuidOrNull(source_meeting_id),
     deadline:          deadline   || null,
     categorie,
+    created_by:        creator.type === 'user'  ? creator.id : null,
+    created_by_agent:  creator.type === 'agent' ? creator.id : null,
     aangemaakt:        now,
     updated_at:        now,
   };
@@ -146,16 +178,22 @@ async function createTask({ titel, beschrijving, assignees, deadline, prioriteit
   const { error: taskErr } = await supabaseAdmin.from('taken_items').insert(taskRow);
   if (taskErr) throw new Error(`taken_items insert fout: ${taskErr.message}`);
 
-  // taken_assignees voor ALLE assignees
+  // taken_assignees: alleen niet-agent leden met profile-koppeling.
   if (assignees?.length > 0) {
-    const assigneeRows = assignees.map(a => ({
-      task_id:       taskId,
-      assignee_type: a.type,
-      assignee_id:   a.id,
-      assignee_name: a.name,
-    }));
-    const { error: asgErr } = await supabaseAdmin.from('taken_assignees').insert(assigneeRows);
-    if (asgErr) console.error('[agent-meeting] taken_assignees insert fout:', asgErr.message);
+    const assigneeRows = [];
+    for (const a of assignees) {
+      if (a.type === 'agent') continue;
+      const profileId = await resolveTeamMemberToProfileId(a.id);
+      if (!profileId) {
+        console.warn(`[agent-meeting] team_member ${a.id} (${a.name}) heeft geen gekoppeld profile — assignee overgeslagen`);
+        continue;
+      }
+      assigneeRows.push({ task_id: taskId, assignee_id: profileId });
+    }
+    if (assigneeRows.length > 0) {
+      const { error: asgErr } = await supabaseAdmin.from('taken_assignees').insert(assigneeRows);
+      if (asgErr) console.error('[agent-meeting] taken_assignees insert fout:', asgErr.message);
+    }
   }
 
   return taskId;
@@ -196,7 +234,6 @@ export default async function handler(req, res) {
           .select('id, titel, status, prioriteit, deadline, source_meeting_id')
           .not('source_meeting_id', 'is', null)
           .neq('status', 'done')
-          .neq('status', 'afgerond')
           .order('deadline', { ascending: true, nullsFirst: false })
           .limit(15);
         if (tasksErr) throw tasksErr;
@@ -208,15 +245,25 @@ export default async function handler(req, res) {
         const { data: meetings } = await userClient.from('agent_meetings').select('id, title').in('id', meetingIds);
         const meetingMap = Object.fromEntries((meetings || []).map(m => [m.id, m.title]));
 
-        // Assignees ophalen
+        // Assignees: taken_assignees → profiles (name-enrich).
         const taskIds = tasks.map(t => t.id);
-        const { data: assignees } = await supabase
+        const { data: assigneeRows } = await supabaseAdmin
           .from('taken_assignees')
-          .select('task_id, assignee_name, assignee_type')
+          .select('task_id, assignee_id')
           .in('task_id', taskIds);
+        const profileIds = [...new Set((assigneeRows || []).map(a => a.assignee_id))];
+        const nameMap = {};
+        if (profileIds.length) {
+          const { data: profiles } = await supabaseAdmin
+            .from('profiles').select('id, full_name, email').in('id', profileIds);
+          for (const p of profiles || []) nameMap[p.id] = p.full_name || p.email || null;
+        }
         const assigneesByTask = {};
-        for (const a of (assignees || [])) {
-          (assigneesByTask[a.task_id] ||= []).push(a);
+        for (const a of (assigneeRows || [])) {
+          (assigneesByTask[a.task_id] ||= []).push({
+            assignee_id:   a.assignee_id,
+            assignee_name: nameMap[a.assignee_id] || null,
+          });
         }
 
         const result = tasks.map(t => ({
@@ -270,48 +317,11 @@ export default async function handler(req, res) {
 
       const transcript = [];
 
-      // ── B5 (Fase 4 fix): Open-taken terugkoppeling via taken_assignees ─────
-      const agentParticipants = (participants || []).filter(n => AGENT_NAMES.includes(n));
-      if (agentParticipants.length > 0) {
-        try {
-          // Haal open taken op voor agent-deelnemers via taken_assignees
-          const { data: agentAssignees, error: asgErr } = await supabase
-            .from('taken_assignees')
-            .select('task_id, assignee_name')
-            .eq('assignee_type', 'agent')
-            .in('assignee_name', agentParticipants);
-          if (asgErr) console.error('[agent-meeting] taken_assignees query fout:', asgErr.message);
-
-          if (agentAssignees?.length > 0) {
-            const taskIds = [...new Set(agentAssignees.map(a => a.task_id))];
-            const { data: openTasks, error: tasksErr } = await supabase
-              .from('taken_items')
-              .select('id, titel, deadline, status')
-              .in('id', taskIds)
-              .not('source_meeting_id', 'is', null)
-              .neq('status', 'done')
-              .neq('status', 'afgerond')
-              .order('deadline', { ascending: true, nullsFirst: false })
-              .limit(20);
-            if (tasksErr) console.error('[agent-meeting] open tasks fout:', tasksErr.message);
-
-            if (openTasks?.length > 0) {
-              // Groepeer per agent, max 5 per agent
-              const tasksByAgent = {};
-              for (const a of agentAssignees) {
-                const task = openTasks.find(t => t.id === a.task_id);
-                if (task && !tasksByAgent[a.assignee_name]?.some(t => t.id === task.id)) {
-                  (tasksByAgent[a.assignee_name] ||= []).push(task);
-                }
-              }
-
-              // Taken beschikbaar als context — geen statusberichten genereren bij start
-            }
-          }
-        } catch (b5Err) {
-          console.error('[agent-meeting] B5 status update fout:', b5Err.message);
-        }
-      }
+      // ── B5: open-taken terugkoppeling voor agents ──────────────────────────
+      // In nieuw datamodel (PR 2) zijn agents géén assignees meer; alleen creators
+      // (created_by_agent). Open-taken-per-agent kan via created_by_agent worden
+      // berekend. Voor MVP overgeslagen — frontend/agent-context gebruikt 'm niet.
+      // TODO Fase 3: implementeer agent-open-tasks via created_by_agent lookup.
 
       // Transcript starten zonder forced introducties — agents reageren op eerste bericht
       await supabase.from('agent_meetings').update({ transcript }).eq('id', meeting.id);
@@ -535,6 +545,7 @@ export default async function handler(req, res) {
             deadline:          ap.deadline || null,
             prioriteit:        ap.prioriteit || 'Normaal',
             source_meeting_id: meeting_id || null,
+            creator:           { type: 'agent', id: 'leon' },
           });
           tasksCreated++;
           assigneesSet += validAssignees.length;
@@ -562,6 +573,11 @@ export default async function handler(req, res) {
     if (action === 'add_instant_task') {
       if (!titel) return res.status(400).json({ error: 'titel is verplicht' });
 
+      const userClient = createUserClient(req);
+      const { data: { user: authUser } } = await userClient.auth.getUser();
+      const userId = authUser?.id || null;
+      if (!userId) return res.status(401).json({ error: 'Niet geauthenticeerd' });
+
       // Resolve assignees (array van namen of objecten)
       const resolvedAssignees = await Promise.all(
         (instantAssignees || []).map(a => {
@@ -577,6 +593,7 @@ export default async function handler(req, res) {
         deadline:          instantDeadline || null,
         prioriteit:        instantPrioriteit || 'Normaal',
         source_meeting_id: meeting_id || null,
+        creator:           { type: 'user', id: userId },
       });
 
       const names = resolvedAssignees.filter(Boolean).map(a => a.name).join(', ') || 'niemand';

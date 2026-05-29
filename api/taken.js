@@ -1,9 +1,11 @@
-import { createUserClient } from './supabase.js';
+import { createUserClient, supabaseAdmin } from './supabase.js';
 
 function toUuidOrNull(id) {
   if (!id) return null;
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(id)) ? String(id) : null;
 }
+
+const VALID_TASK_STATUSES = ['todo', 'progress', 'done'];
 
 function toRow(task) {
   return {
@@ -24,6 +26,22 @@ function toRow(task) {
   };
 }
 
+// Batch-lookup van profile-namen (zelfde pattern als ticket-detail.js).
+async function fetchProfileNames(ids) {
+  if (!ids.length) return {};
+  const { data, error } = await supabaseAdmin
+    .from('profiles')
+    .select('id, full_name, email')
+    .in('id', ids);
+  if (error) {
+    console.warn('[taken] profile-names lookup failed:', error.message);
+    return {};
+  }
+  const map = {};
+  for (const p of data || []) map[p.id] = p.full_name || p.email || null;
+  return map;
+}
+
 export default async function handler(req, res) {
   const supabase = createUserClient(req);
   res.setHeader('Cache-Control', 'no-store');
@@ -32,11 +50,25 @@ export default async function handler(req, res) {
     try {
       const { data, error } = await supabase
         .from('taken_items')
-        .select('id,titel,omschrijving,prioriteit,categorie,toegewezen_aan,deadline,email_id,email_subject,status,notities,aangemaakt,afgerond_op,updated_at')
+        .select('id,titel,omschrijving,prioriteit,categorie,assigned_to_id,deadline,email_id,email_subject,status,notities,aangemaakt,afgerond_op,updated_at,created_by,created_by_agent')
         .order('aangemaakt', { ascending: false })
         .limit(500);
       if (error) throw error;
-      return res.status(200).json({ taken: data || [] });
+
+      const rows = data || [];
+      const ids = new Set();
+      for (const r of rows) {
+        if (r.assigned_to_id) ids.add(r.assigned_to_id);
+        if (r.created_by)     ids.add(r.created_by);
+      }
+      const nameMap = await fetchProfileNames(Array.from(ids));
+
+      const enriched = rows.map(r => ({
+        ...r,
+        assigned_to_name: r.assigned_to_id ? (nameMap[r.assigned_to_id] || null) : null,
+        created_by_name:  r.created_by    ? (nameMap[r.created_by]    || null) : null,
+      }));
+      return res.status(200).json({ taken: enriched });
     } catch (err) {
       console.error('[taken] GET fout:', err.message);
       return res.status(200).json({ taken: [], error: err.message });
@@ -47,6 +79,14 @@ export default async function handler(req, res) {
     const { task, action, id, tasks } = req.body || {};
     const { data: { user: authUser } } = await supabase.auth.getUser();
     const userId = authUser?.id || null;
+    if (!userId) return res.status(401).json({ error: 'Niet geauthenticeerd' });
+
+    const checkStatus = (row) => {
+      if (row.status && !VALID_TASK_STATUSES.includes(row.status)) {
+        return `Ongeldige status "${row.status}". Toegestaan: ${VALID_TASK_STATUSES.join(', ')}`;
+      }
+      return null;
+    };
 
     // Bulk upsert — migratie vanuit localStorage
     if (action === 'bulk_upsert' && Array.isArray(tasks)) {
@@ -54,13 +94,17 @@ export default async function handler(req, res) {
         const rows = tasks.filter(t => t.id).map(toRow);
         if (!rows.length) return res.status(200).json({ ok: true, count: 0 });
 
-        // Existence-check: welke IDs bestaan al?
+        for (const r of rows) {
+          const statusErr = checkStatus(r);
+          if (statusErr) return res.status(400).json({ error: statusErr });
+        }
+
         const ids = rows.map(r => r.id);
         const { data: existing } = await supabase.from('taken_items').select('id').in('id', ids);
         const existingIds = new Set((existing || []).map(r => r.id));
 
-        // Split: nieuw (owner_id erbij) vs bestaand (geen owner-velden overschrijven)
-        const newRows    = rows.filter(r => !existingIds.has(r.id)).map(r => ({ ...r, owner_id: userId, created_by_id: userId }));
+        // Split: nieuw (creator-velden erbij) vs bestaand (geen creator-velden overschrijven)
+        const newRows    = rows.filter(r => !existingIds.has(r.id)).map(r => ({ ...r, created_by: userId, owner_id: userId, created_by_id: userId }));
         const updateRows = rows.filter(r =>  existingIds.has(r.id));
 
         if (newRows.length)    { const { error: e1 } = await supabase.from('taken_items').insert(newRows);                          if (e1) throw e1; }
@@ -90,18 +134,18 @@ export default async function handler(req, res) {
       if (!task.id) return res.status(400).json({ error: 'task.id vereist' });
       try {
         const row = toRow(task);
-        // Existence-check voor split: owner alleen bij INSERT, niet bij UPDATE
+        const statusErr = checkStatus(row);
+        if (statusErr) return res.status(400).json({ error: statusErr });
+
         const { data: existing } = await supabase.from('taken_items').select('id').eq('id', row.id).maybeSingle();
         if (existing) {
-          // UPDATE: geen owner-velden overschrijven
           const { error } = await supabase.from('taken_items').upsert(row, { onConflict: 'id' });
           if (error) throw error;
         } else {
-          // INSERT: owner_id meegeven; bij race-condition (duplicate key) log en fall through
-          const { error } = await supabase.from('taken_items').insert({ ...row, owner_id: userId, created_by_id: userId });
+          // INSERT: created_by=user.id (XOR met created_by_agent — user-pad, agent blijft NULL)
+          const { error } = await supabase.from('taken_items').insert({ ...row, created_by: userId, owner_id: userId, created_by_id: userId });
           if (error) {
             if (error.code === '23505') {
-              // Duplicate key na race-condition — fallback naar update
               console.warn('[taken] race-condition duplicate key, fallback naar update');
               const { error: upErr } = await supabase.from('taken_items').upsert(row, { onConflict: 'id' });
               if (upErr) throw upErr;
