@@ -342,9 +342,9 @@
         <div class="card-title">E-mail — laatste 14 dagen</div>
       </div>
       <div class="email-kpis">
-        <div class="ek"><div class="v" id="emTeBeant">—</div><div class="k">Te beantw.</div></div>
+        <div class="ek" data-tooltip="Verstuurd door jou en Simon AI samen"><div class="v" id="emTeBeant">—</div><div class="k">Verstuurd vandaag</div></div>
         <div class="ek"><div class="v placeholder-val" data-tooltip="Komt binnenkort (Fase B)">—</div><div class="k">Avg reply</div></div>
-        <div class="ek"><div class="v" id="emToday">—</div><div class="k">Vandaag</div></div>
+        <div class="ek"><div class="v" id="emToday">—</div><div class="k">Ontvangen vandaag</div></div>
       </div>
       <div class="chart-wrap"><canvas id="chartTrend"></canvas></div>
     </div>
@@ -491,6 +491,7 @@ const state = {
   loading: false,
   refreshTimer: null,
   data: { dash: null, fu: null, lisa: null, tix: null, verplaatst: 0 },
+  emailCounts: { teBeantwoorden: null, verstuurdVandaag: null },
 };
 
 function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]); }
@@ -588,7 +589,8 @@ function renderGreeting(profile, dash) {
   const name = profile?.full_name?.split(/\s+/)[0] || '';
   document.getElementById('greetTitle').innerHTML = `${esc(t)} ${esc(name)} <span style="font-size:18px">👋</span>`;
 
-  const mails = dash?.kpis_groot?.onbeantwoord?.value ?? 0;
+  // Subtitle gebruikt dezelfde DB-consistente count als hero-KPI.
+  const mails = state.emailCounts.teBeantwoorden ?? dash?.kpis_groot?.onbeantwoord?.value ?? 0;
   const subParts = [fmtDateLong()];
   if (mails) subParts.push(`${mails} mails wachten`);
   document.getElementById('greetSub').textContent = subParts.join(' · ');
@@ -606,10 +608,10 @@ function renderBinnenkomsten(dash) {
 function renderTeBeantwoorden(dash) {
   if (!dash || dash.__error) { setCardError('cardTeBeantwoorden', 'Laden mislukt'); return; }
   clearCardError('cardTeBeantwoorden');
-  const v = dash.kpis_groot?.onbeantwoord?.value ?? 0;
+  // Gebruik DB-consistente count (match met email-module 'Te beantwoorden'-tab).
+  // Fallback op dashboard-stats raw count alleen als Supabase-query faalt.
+  const v = state.emailCounts.teBeantwoorden ?? dash.kpis_groot?.onbeantwoord?.value ?? 0;
   document.getElementById('teBeantValue').textContent = v;
-  // Delta "+X vs gisteren": geen historische snapshot beschikbaar — gebruik
-  // mails-binnen-vandaag als proxy-context. Toont "X vandaag binnen" ipv echte delta.
   const today = dash.kpis_klein?.mails_period ?? 0;
   document.getElementById('teBeantSub').textContent =
     today > 0 ? `${today} vandaag binnen` : 'e-mails wachten op reactie';
@@ -636,7 +638,9 @@ function renderOpenActies(metrics, approvals, verplaatst) {
 function renderEmailTrend(dash) {
   if (!dash?.chart_lead_mail) { setCardError('cardEmailTrend', 'Trend-data niet beschikbaar'); return; }
   clearCardError('cardEmailTrend');
-  document.getElementById('emTeBeant').textContent = dash.kpis_groot?.onbeantwoord?.value ?? 0;
+  // Eerste KPI is nu "Verstuurd vandaag" ipv "Te beantw." (was duplicate van top-KPI).
+  const verst = state.emailCounts.verstuurdVandaag;
+  document.getElementById('emTeBeant').textContent = verst == null ? '—' : verst;
   document.getElementById('emToday').textContent   = dash.kpis_klein?.mails_period ?? 0;
 
   const data = dash.chart_lead_mail;
@@ -798,11 +802,15 @@ async function renderTop5Unread() {
   const root = document.getElementById('top5List');
   try {
     if (!window.supabase) throw new Error('supabase niet beschikbaar');
+    // Sort nieuwste eerst — consistent met email-module "Te beantwoorden"-tab.
+    // Match daar ook op is_read=false + category != Reclame voor consistentie.
     const { data, error } = await window.supabase
       .from('email_messages')
       .select('id, subject, from_address, from_name, date_received, category')
       .eq('requires_action', true)
-      .order('date_received', { ascending: true })
+      .eq('is_read', false)
+      .neq('category', 'Reclame')
+      .order('date_received', { ascending: false })
       .limit(5);
     if (error) throw error;
     if (!data || !data.length) {
@@ -840,6 +848,48 @@ async function fetchVerplaatstCount() {
   }
 }
 
+// ── Te beantwoorden count: DB-level match met email-module filter ──
+// email.html:5289-5291 filtert op (unread=true AND category!='Reclame' AND
+// getEffectiveRequiresAction). Frontend overrides kunnen we niet zien;
+// requires_action+is_read+category zijn DB-velden → match die drie.
+// Vervangt de "raw requires_action over 14d"-telling uit dashboard-stats
+// die te ruim is (telt ook gelezen + reclame).
+async function fetchTeBeantwoordenCount() {
+  try {
+    if (!window.supabase) return null;
+    const { count, error } = await window.supabase
+      .from('email_messages')
+      .select('id', { count: 'exact', head: true })
+      .eq('requires_action', true)
+      .eq('is_read', false)
+      .neq('category', 'Reclame');
+    if (error) throw error;
+    return count ?? 0;
+  } catch (err) {
+    console.warn('[dashboard] teBeantwoorden count fail:', err.message);
+    return null;
+  }
+}
+
+// ── Verstuurd vandaag: tel email_replies sinds 00:00 lokale tijd ──
+// Geen onderscheid op sent_by_id — agent-replies (sent_by_id=null) tellen mee.
+// Cumulatief totaal Jeffrey-handmatig + Simon AI.
+async function fetchVerstuurdVandaag() {
+  try {
+    if (!window.supabase) return null;
+    const start = new Date(); start.setHours(0,0,0,0);
+    const { count, error } = await window.supabase
+      .from('email_replies')
+      .select('id', { count: 'exact', head: true })
+      .gte('sent_at', start.toISOString());
+    if (error) throw error;
+    return count ?? 0;
+  } catch (err) {
+    console.warn('[dashboard] verstuurd-vandaag count fail:', err.message);
+    return null;
+  }
+}
+
 /* ── Loader ──────────────────────────────────────────────────────── */
 async function loadDashboard() {
   if (state.loading) return;
@@ -850,15 +900,18 @@ async function loadDashboard() {
   const profile = state.profile || (window.AuthShared ? await window.AuthShared.getProfile() : null);
   state.profile = profile;
 
-  const [dash, fu, lisa, tix, verplaatst] = await Promise.all([
+  const [dash, fu, lisa, tix, verplaatst, teBeantCount, verstuurd] = await Promise.all([
     safeJson('/api/dashboard-stats?period=' + state.period),
     safeJson('/api/follow-up-dashboard-metrics?period=' + state.period),
     safeJson('/api/lisa-stats?period=' + (state.period === 'today' ? 'today' : state.period)),
     safeJson('/api/tickets'),
     fetchVerplaatstCount(),
+    fetchTeBeantwoordenCount(),
+    fetchVerstuurdVandaag(),
   ]);
 
   state.data = { dash, fu, lisa, tix, verplaatst };
+  state.emailCounts = { teBeantwoorden: teBeantCount, verstuurdVandaag: verstuurd };
 
   renderGreeting(profile, dash);
   renderBinnenkomsten(dash);
