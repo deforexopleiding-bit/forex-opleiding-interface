@@ -123,13 +123,20 @@
     } catch (e) { /* fail-open: laat default dashboard-link staan */ }
   }
 
-  function updateTakenBadge() {
+  // Taken-badge: telt open taken (status != 'done') waar user assignee is.
+  // Async, silent fail, idempotent toggle. Identiek patroon als tickets-badge.
+  async function updateTakenBadge() {
+    var b = document.getElementById('navTakenBadge');
+    if (!b) return;
     try {
-      var t = JSON.parse(localStorage.getItem('taken_lijst') || '[]');
-      var u = t.filter(function (x) { return x.status !== 'done' && (x.prioriteit === 'Urgent' || x.prioriteit === 'Hoog'); });
-      var b = document.getElementById('navTakenBadge');
-      if (b && u.length) { b.textContent = u.length; b.classList.add('show'); }
-    } catch (e) { /* geen taken in cache */ }
+      if (!window.AgentShared || typeof window.AgentShared.apiFetch !== 'function') return;
+      var res = await window.AgentShared.apiFetch('/api/taken-badge');
+      if (!res.ok) { b.classList.remove('show'); return; }
+      var data = await res.json();
+      var n = data.count || 0;
+      if (n > 0) { b.textContent = n; b.classList.add('show'); }
+      else       { b.textContent = ''; b.classList.remove('show'); }
+    } catch (e) { b.classList.remove('show'); }
   }
 
   // Tickets-badge: telt open + in_progress tickets toegewezen aan ingelogde user.
@@ -242,6 +249,7 @@
   // window.AgentShared bestaat al — agent-shared.js wordt eerder geladen.
   if (window.AgentShared) {
     window.AgentShared.refreshTicketsBadge = updateTicketsBadge;
+    window.AgentShared.refreshTakenBadge   = updateTakenBadge;
   }
 
   if (document.readyState === 'loading') {
