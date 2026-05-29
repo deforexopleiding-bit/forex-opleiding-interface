@@ -503,18 +503,9 @@
 <!-- Sidebar -->
 <div id="sidebar-mount"></div>
 
-<script>
-(function() {
-  var taken = JSON.parse(localStorage.getItem('taken_lijst') || '[]');
-  var urgent = taken.filter(function(t) {
-    return t.status !== 'done' && (t.prioriteit === 'Urgent' || t.prioriteit === 'Hoog');
-  }).length;
-  if (urgent > 0) {
-    var el = document.getElementById('sidebarTaakBadge');
-    if (el) { el.textContent = urgent; el.style.display = ''; }
-  }
-})();
-</script>
+<!-- Sidebar badge wordt nu DB-driven gevuld door sidebar.js (updateTakenBadge → /api/taken-badge). -->
+<!-- Geen localStorage-pre-render meer; voorkomt stale-cache misleading counts. -->
+
 
 <div class="app">
 
@@ -528,15 +519,11 @@
       </div>
     </div>
     <div class="header-actions">
-      <div class="user-badge">
+      <div class="user-badge" data-tooltip="Filter op één collega (mijn taken)">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg>
         <select id="userSelect" onchange="setHuidigeGebruiker(this.value)"></select>
       </div>
-      <button class="btn btn-ghost" id="takenCollegaBtn" onclick="openCollega()">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
-        Collega's
-      </button>
-      <button class="btn" id="takenNieuwBtn" onclick="openNieuweTaak()">
+      <button class="btn" id="takenNieuwBtn" onclick="openNieuweTaak()" data-tooltip="Nieuwe taak aanmaken">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
         Nieuwe taak
       </button>
@@ -698,9 +685,9 @@
     </div>
 
     <div class="detail-status-bar">
-      <button class="status-btn" data-s="todo"     onclick="setDetailStatus('todo')">Te doen</button>
-      <button class="status-btn" data-s="progress" onclick="setDetailStatus('progress')">In behandeling</button>
-      <button class="status-btn" data-s="done"     onclick="setDetailStatus('done')">Afgerond</button>
+      <button class="status-btn" data-s="todo"     onclick="setDetailStatus('todo')"     data-tooltip="Zet status op Te doen">Te doen</button>
+      <button class="status-btn" data-s="progress" onclick="setDetailStatus('progress')" data-tooltip="Zet status op In behandeling">In behandeling</button>
+      <button class="status-btn" data-s="done"     onclick="setDetailStatus('done')"     data-tooltip="Markeer als afgerond">Afgerond</button>
     </div>
 
     <div id="detailEmailRef"></div>
@@ -713,35 +700,21 @@
     <textarea class="form-textarea" id="detailNotities" placeholder="Voeg notities toe…" style="margin-bottom:0"></textarea>
 
     <div class="detail-actions">
-      <button class="btn btn-ghost" id="takenEditBtn" onclick="editTaakFromDetail()">
+      <button class="btn btn-ghost" id="takenEditBtn" onclick="editTaakFromDetail()" data-tooltip="Taak bewerken">
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
         Bewerken
       </button>
       <div style="flex:1"></div>
-      <button class="btn btn-ghost btn-danger" id="takenDeleteBtn" onclick="deleteTaak()">
+      <button class="btn btn-ghost btn-danger" id="takenDeleteBtn" onclick="deleteTaak()" data-tooltip="Taak verwijderen">
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>
         Verwijderen
       </button>
-      <button class="btn" id="takenSaveDetailBtn" onclick="saveDetail()">Opslaan</button>
+      <button class="btn" id="takenSaveDetailBtn" onclick="saveDetail()" data-tooltip="Notities opslaan">Opslaan</button>
     </div>
   </div>
 </div>
 
-<!-- ══ Modal: Collega-beheer ══ -->
-<div class="overlay" id="overlayCollega" onclick="overlayClick(event,'overlayCollega')">
-  <div class="modal" onclick="event.stopPropagation()">
-    <div class="modal-header">
-      <div class="modal-title">Collega's beheren</div>
-      <button class="modal-close" onclick="closeCollega()">×</button>
-    </div>
-    <div class="collega-list" id="collegaList"></div>
-    <button class="btn btn-ghost" style="width:100%" onclick="addCollega()">+ Collega toevoegen</button>
-    <div class="form-actions">
-      <button class="btn btn-ghost" onclick="closeCollega()">Annuleren</button>
-      <button class="btn" onclick="saveCollegas()">Opslaan</button>
-    </div>
-  </div>
-</div>
+<!-- Collega-beheer modal verwijderd: profiles worden centraal beheerd via /modules/admin.html -->
 
 <script src="/modules/shared/supabase-client.js"></script>
 <script src="/modules/shared/agent-shared.js"></script>
@@ -753,77 +726,89 @@
 
 const PRIO_ORDER = { Urgent: 4, Hoog: 3, Normaal: 2, Laag: 1 };
 const CAT_ICONS  = { 'E-mail': '✉', Factuur: '🧾', Klant: '🤝', Intern: '⚙', Overige: '📌' };
+const AGENT_COLORS = { simon: '#22d3ee', leon: '#a855f7', aron: '#f59e0b' };
+const AGENT_LABELS = { simon: 'Simon', leon: 'Leon', aron: 'Aron' };
 
-let taken     = load('taken_lijst') || [];
-let collegas  = load('taken_collegas') || defaultCollegas();
-let huidig    = load('taken_huidige_gebruiker') || (collegas[0]?.id || '');
+// State: DB is autoritatief, localStorage alleen als snelle cache.
+let taken     = load('taken_lijst_v2') || []; // _v2 om oude legacy-cache te negeren
+let profiles  = [];                            // profiles uit /api/profiles-list
+let huidig    = load('taken_huidige_gebruiker') || ''; // profile-uuid van de "ik"
 let dragId    = null;
 let detailId  = null;
-let editMode  = false; // true = modal is editing existing task
+let editMode  = false;
 
 function load(key) {
   try { return JSON.parse(localStorage.getItem(key)); } catch { return null; }
 }
 function save(key, val) { localStorage.setItem(key, JSON.stringify(val)); }
 
-// ── Supabase sync ────────────────────────────────────────────────────────────
+// ── Profiles fetcher ────────────────────────────────────────────────────────
+async function loadProfiles() {
+  try {
+    const res = await window.AgentShared.apiFetch('/api/profiles-list');
+    if (!res.ok) return;
+    const data = await res.json();
+    profiles = data.members || [];
+  } catch (e) {
+    console.warn('[taken] profiles-list fetch fout:', e.message);
+    profiles = [];
+  }
+}
+
+// ── DB-driven taken-fetch: vervangt cache, niet andersom ────────────────────
 async function loadTakenFromSupabase() {
   try {
     const res = await window.AgentShared.apiFetch('/api/taken');
     if (!res.ok) return;
     const { taken: rows } = await res.json();
-
-    // Éénmalige migratie: push localStorage-taken die niet in Supabase staan
-    if (taken.length > 0 && Array.isArray(rows)) {
-      const inSupabase = new Set(rows.map(r => r.id));
-      const toMigrate  = taken.filter(t => !inSupabase.has(t.id));
-      if (toMigrate.length > 0) {
-        window.AgentShared.apiFetch('/api/taken', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ action: 'bulk_upsert', tasks: toMigrate })
-        }).catch(() => {});
-      }
-      // Voeg Supabase-taken toe die ontbreken in localStorage (bv. via ander apparaat)
-      const inLocal = new Set(taken.map(t => t.id));
-      const fromSupabase = (rows || []).filter(r => !inLocal.has(r.id)).map(fromRow);
-      if (fromSupabase.length > 0) {
-        taken = [...taken, ...fromSupabase];
-        save('taken_lijst', taken);
-        render();
-      }
-      return;
-    }
-
-    // localStorage leeg: laad alles vanuit Supabase
-    if (!Array.isArray(rows) || rows.length === 0) return;
+    if (!Array.isArray(rows)) return;
     taken = rows.map(fromRow);
-    save('taken_lijst', taken);
+    save('taken_lijst_v2', taken);
     render();
-  } catch {}
+  } catch (e) {
+    console.warn('[taken] /api/taken fetch fout:', e.message);
+  }
 }
 
 function fromRow(r) {
+  // Bepaal creator-label: mens (full_name) of agent ('Simon'/'Leon'/'Aron').
+  let creator = '—';
+  if (r.created_by_name)     creator = r.created_by_name;
+  else if (r.created_by_agent) creator = AGENT_LABELS[r.created_by_agent] || r.created_by_agent;
+
   return {
-    id:            r.id,
-    titel:         r.titel          || '',
-    omschrijving:  r.omschrijving   || '',
-    prioriteit:    r.prioriteit     || 'Normaal',
-    categorie:     r.categorie      || 'Overige',
-    toegewezenAan: r.toegewezen_aan || '',
-    deadline:      r.deadline       || '',
-    emailId:       r.email_id       || '',
-    emailSubject:  r.email_subject  || '',
-    status:        r.status         || 'todo',
-    notities:      r.notities       || '',
-    aangemaakt:    r.aangemaakt     || r.updated_at,
-    afgerondOp:    r.afgerond_op    || null
+    id:               r.id,
+    titel:            r.titel            || '',
+    omschrijving:     r.omschrijving     || '',
+    prioriteit:       r.prioriteit       || 'Normaal',
+    categorie:        r.categorie        || 'Overige',
+    assignedToId:     r.assigned_to_id   || '',
+    assignedToName:   r.assigned_to_name || '',
+    createdBy:        r.created_by       || null,
+    createdByName:    r.created_by_name  || null,
+    createdByAgent:   r.created_by_agent || null,
+    creatorLabel:     creator,
+    deadline:         r.deadline         || '',
+    emailId:          r.email_id         || '',
+    emailSubject:     r.email_subject    || '',
+    status:           r.status           || 'todo',
+    notities:         r.notities         || '',
+    aangemaakt:       r.aangemaakt       || r.updated_at,
+    afgerondOp:       r.afgerond_op      || null
   };
 }
 
 function syncTaakToSupabase(taak) {
+  // Frontend stuurt assignedToId (uuid) — api/taken.toRow leest dit.
   window.AgentShared.apiFetch('/api/taken', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ task: taak })
+  }).then(async (r) => {
+    if (!r.ok) {
+      const err = await r.json().catch(() => ({}));
+      console.warn('[taken] sync POST fail:', err.error || r.status);
+    }
+    if (window.AgentShared?.refreshTakenBadge) window.AgentShared.refreshTakenBadge();
   }).catch(() => {});
 }
 
@@ -831,18 +816,24 @@ function deleteTaakFromSupabase(id) {
   window.AgentShared.apiFetch('/api/taken', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ action: 'delete', id })
+  }).then(() => {
+    if (window.AgentShared?.refreshTakenBadge) window.AgentShared.refreshTakenBadge();
   }).catch(() => {});
 }
 
-function defaultCollegas() {
-  return [
-    { id: crypto.randomUUID(), naam: 'Jeffrey', kleur: '#22d3ee' },
-    { id: crypto.randomUUID(), naam: '',        kleur: '#a855f7' },
-    { id: crypto.randomUUID(), naam: '',        kleur: '#f59e0b' }
-  ];
+function profileById(id) { return profiles.find(p => p.id === id); }
+function profileName(id) {
+  const p = profileById(id);
+  return p ? (p.full_name || p.email || '(naamloos)') : '';
 }
-
-function collegaById(id) { return collegas.find(c => c.id === id); }
+function profileColor(id) {
+  // Stabiele kleur op basis van uuid hash — geen DB-veld, puur visueel.
+  if (!id) return '#94a3b8';
+  let h = 0;
+  for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) | 0;
+  const palette = ['#22d3ee','#a855f7','#f59e0b','#059669','#dc2626','#2563eb','#688b9b','#6d28d9'];
+  return palette[Math.abs(h) % palette.length];
+}
 function taakById(id)     { return taken.find(t => t.id === id); }
 
 function initials(naam) {
@@ -880,11 +871,11 @@ function setHuidigeGebruiker(id) {
 
 function populeerUserSelect() {
   const sel = document.getElementById('userSelect');
-  sel.innerHTML = '';
-  collegas.filter(c => c.naam).forEach(c => {
+  sel.innerHTML = '<option value="">— Iedereen —</option>';
+  profiles.forEach(p => {
     const o = document.createElement('option');
-    o.value = c.id; o.textContent = c.naam;
-    if (c.id === huidig) o.selected = true;
+    o.value = p.id; o.textContent = p.full_name || p.email || '(naamloos)';
+    if (p.id === huidig) o.selected = true;
     sel.appendChild(o);
   });
 }
@@ -892,9 +883,9 @@ function populeerUserSelect() {
 function populeerToegewezenDropdown() {
   const sel = document.getElementById('fToegewezen');
   sel.innerHTML = '<option value="">— Niemand —</option>';
-  collegas.filter(c => c.naam).forEach(c => {
+  profiles.forEach(p => {
     const o = document.createElement('option');
-    o.value = c.id; o.textContent = c.naam;
+    o.value = p.id; o.textContent = p.full_name || p.email || '(naamloos)';
     sel.appendChild(o);
   });
 }
@@ -903,10 +894,10 @@ function populeerFilterCollega() {
   const sel = document.getElementById('filterCollega');
   const cur = sel.value;
   sel.innerHTML = '<option value="">Alle collega\'s</option>';
-  collegas.filter(c => c.naam).forEach(c => {
+  profiles.forEach(p => {
     const o = document.createElement('option');
-    o.value = c.naam; o.textContent = c.naam;
-    if (c.naam === cur) o.selected = true;
+    o.value = p.id; o.textContent = p.full_name || p.email || '(naamloos)';
+    if (p.id === cur) o.selected = true;
     sel.appendChild(o);
   });
 }
@@ -922,7 +913,7 @@ function filteredTaken() {
   const sort = document.getElementById('sortBy').value;
 
   let list = taken.filter(t => {
-    if (fc && (collegaById(t.toegewezenAan)?.naam || t.toegewezenAan) !== fc) return false;
+    if (fc && t.assignedToId !== fc) return false;
     if (fp && t.prioriteit !== fp) return false;
     if (fcat && t.categorie !== fcat) return false;
     return true;
@@ -970,7 +961,6 @@ function render() {
 }
 
 function taskCard(t) {
-  const c = collegaById(t.toegewezenAan);
   const od = isOverdue(t);
   const prioClass = t.prioriteit ? t.prioriteit.toLowerCase() : 'normaal';
 
@@ -979,15 +969,19 @@ function taskCard(t) {
     emailRef = `<div class="task-email-ref">✉ ${escHtml(t.emailSubject || t.emailId)}</div>`;
   }
 
-  const avatar = c
-    ? `<div class="collega-avatar" style="background:${c.kleur}">${initials(c.naam)}</div>`
-    : '';
+  // Avatar voor assignee — gebruik server-name + stabiele uuid-kleur.
+  let avatar = '';
+  if (t.assignedToId) {
+    const naam = t.assignedToName || profileName(t.assignedToId) || '?';
+    const kleur = profileColor(t.assignedToId);
+    avatar = `<div class="collega-avatar" style="background:${kleur}" data-tooltip="Toegewezen: ${escHtml(naam)}">${initials(naam)}</div>`;
+  }
 
-  const overdueBadge = od ? '<span class="overdue-badge">VERLOPEN</span>' : '';
+  const overdueBadge = od ? '<span class="overdue-badge" data-tooltip="Deadline verlopen">VERLOPEN</span>' : '';
   const deadline = t.deadline ? `<span class="task-deadline">📅 ${fmtDate(t.deadline)}</span>` : '';
 
   return `
-    <div class="task-card prio-${prioClass}${od ? ' overdue' : ''}" id="card-${t.id}" draggable="true">
+    <div class="task-card prio-${prioClass}${od ? ' overdue' : ''}" id="card-${t.id}" draggable="true" data-tooltip="Sleep om status te wijzigen, klik voor details">
       <div class="task-top">
         <div class="task-titel">${escHtml(t.titel)}</div>
         <span class="prio-badge ${prioClass}">${t.prioriteit}</span>
@@ -1005,13 +999,12 @@ function taskCard(t) {
 }
 
 function updateStats() {
-  const nu = new Date();
   const bow = startOfWeek();
   let totaal = 0, mijn = 0, vervallen = 0, afgerond = 0;
   taken.forEach(t => {
     if (t.status !== 'done') {
       totaal++;
-      if (t.toegewezenAan === huidig) mijn++;
+      if (huidig && t.assignedToId === huidig) mijn++;
       if (isOverdue(t)) vervallen++;
     } else {
       if (t.afgerondOp && new Date(t.afgerondOp) >= bow) afgerond++;
@@ -1043,7 +1036,7 @@ function onDrop(e, newStatus) {
   if (newStatus === 'done' && !t.afgerondOp) t.afgerondOp = new Date().toISOString();
   if (newStatus !== 'done') t.afgerondOp = null;
   dragId = null;
-  save('taken_lijst', taken);
+  save('taken_lijst_v2', taken);
   syncTaakToSupabase(t);
   render();
 }
@@ -1066,7 +1059,7 @@ function openNieuweTaak(prefill = {}) {
   const selC = document.getElementById('fCategorie');
   selC.value = prefill.categorie || 'Overige';
   const selT = document.getElementById('fToegewezen');
-  selT.value = prefill.toegewezenAan || huidig || '';
+  selT.value = prefill.assignedToId || huidig || '';
 
   const emailGroup = document.getElementById('emailRefGroup');
   if (prefill.emailId) {
@@ -1098,7 +1091,7 @@ function openEditTaak(id) {
   populeerToegewezenDropdown();
   document.getElementById('fPrioriteit').value  = t.prioriteit || 'Normaal';
   document.getElementById('fCategorie').value   = t.categorie || 'Overige';
-  document.getElementById('fToegewezen').value  = t.toegewezenAan || '';
+  document.getElementById('fToegewezen').value  = t.assignedToId || '';
 
   const emailGroup = document.getElementById('emailRefGroup');
   if (t.emailId) {
@@ -1132,28 +1125,31 @@ function saveNieuweTaak() {
       t.omschrijving  = document.getElementById('fOmschrijving').value.trim();
       t.prioriteit    = document.getElementById('fPrioriteit').value;
       t.categorie     = document.getElementById('fCategorie').value;
-      t.toegewezenAan = document.getElementById('fToegewezen').value;
+      t.assignedToId  = document.getElementById('fToegewezen').value || '';
+      t.assignedToName = t.assignedToId ? profileName(t.assignedToId) : '';
       t.deadline      = document.getElementById('fDeadline').value;
     }
   } else {
+    const assigneeId = document.getElementById('fToegewezen').value || '';
     taken.push({
-      id:            crypto.randomUUID(),
+      id:             crypto.randomUUID(),
       titel,
-      omschrijving:  document.getElementById('fOmschrijving').value.trim(),
-      prioriteit:    document.getElementById('fPrioriteit').value,
-      categorie:     document.getElementById('fCategorie').value,
-      toegewezenAan: document.getElementById('fToegewezen').value,
-      deadline:      document.getElementById('fDeadline').value,
+      omschrijving:   document.getElementById('fOmschrijving').value.trim(),
+      prioriteit:     document.getElementById('fPrioriteit').value,
+      categorie:      document.getElementById('fCategorie').value,
+      assignedToId:   assigneeId,
+      assignedToName: assigneeId ? profileName(assigneeId) : '',
+      deadline:       document.getElementById('fDeadline').value,
       emailId,
       emailSubject,
-      status:        'todo',
-      notities:      '',
-      aangemaakt:    new Date().toISOString(),
-      afgerondOp:    null
+      status:         'todo',
+      notities:       '',
+      aangemaakt:     new Date().toISOString(),
+      afgerondOp:     null
     });
   }
 
-  save('taken_lijst', taken);
+  save('taken_lijst_v2', taken);
   const savedTaak = editMode ? taakById(detailId) : taken[taken.length - 1];
   if (savedTaak) syncTaakToSupabase(savedTaak);
   closeNieuweTaak();
@@ -1186,11 +1182,12 @@ function openDetail(id) {
   document.getElementById('detailOmschrijving').textContent = t.omschrijving || '';
 
   // meta
-  const c = collegaById(t.toegewezenAan);
+  const assigneeName = t.assignedToName || (t.assignedToId ? profileName(t.assignedToId) : '') || '—';
   document.getElementById('detailMeta').innerHTML = `
     <div class="detail-meta-item"><div class="detail-meta-label">Prioriteit</div><div class="detail-meta-val">${t.prioriteit}</div></div>
     <div class="detail-meta-item"><div class="detail-meta-label">Categorie</div><div class="detail-meta-val">${CAT_ICONS[t.categorie]||''} ${t.categorie}</div></div>
-    <div class="detail-meta-item"><div class="detail-meta-label">Toegewezen aan</div><div class="detail-meta-val">${c ? c.naam : '—'}</div></div>
+    <div class="detail-meta-item"><div class="detail-meta-label">Toegewezen aan</div><div class="detail-meta-val">${escHtml(assigneeName)}</div></div>
+    <div class="detail-meta-item"><div class="detail-meta-label">Aangemaakt door</div><div class="detail-meta-val">${escHtml(t.creatorLabel || '—')}</div></div>
     <div class="detail-meta-item"><div class="detail-meta-label">Deadline</div><div class="detail-meta-val"${isOverdue(t) ? ' style="color:var(--red)"' : ''}>${fmtDate(t.deadline)}</div></div>
     <div class="detail-meta-item"><div class="detail-meta-label">Aangemaakt</div><div class="detail-meta-val">${fmtDate(t.aangemaakt)}</div></div>
     ${t.afgerondOp ? `<div class="detail-meta-item"><div class="detail-meta-label">Afgerond</div><div class="detail-meta-val" style="color:var(--green)">${fmtDate(t.afgerondOp)}</div></div>` : ''}
@@ -1213,7 +1210,7 @@ function setDetailStatus(st) {
   if (st === 'done' && !t.afgerondOp) t.afgerondOp = new Date().toISOString();
   if (st !== 'done') t.afgerondOp = null;
   document.querySelectorAll('.status-btn').forEach(b => b.classList.toggle('active', b.dataset.s === st));
-  save('taken_lijst', taken);
+  save('taken_lijst_v2', taken);
   syncTaakToSupabase(t);
   render();
 }
@@ -1223,7 +1220,7 @@ function saveDetail() {
   const t = taakById(detailId);
   if (!t) return;
   t.notities = document.getElementById('detailNotities').value;
-  save('taken_lijst', taken);
+  save('taken_lijst_v2', taken);
   syncTaakToSupabase(t);
   closeDetail();
   render();
@@ -1240,62 +1237,13 @@ function deleteTaak() {
   if (!confirm('Taak verwijderen?')) return;
   const id = detailId;
   taken = taken.filter(t => t.id !== id);
-  save('taken_lijst', taken);
+  save('taken_lijst_v2', taken);
   deleteTaakFromSupabase(id);
   closeDetail();
   render();
 }
 
-// ════════════════════════════════════════════════════
-// Modal: Collega-beheer
-// ════════════════════════════════════════════════════
-
-let tempCollegas = [];
-
-function openCollega() {
-  tempCollegas = collegas.map(c => ({ ...c }));
-  renderCollegaList();
-  document.getElementById('overlayCollega').classList.add('open');
-}
-
-function closeCollega() {
-  document.getElementById('overlayCollega').classList.remove('open');
-}
-
-function renderCollegaList() {
-  const list = document.getElementById('collegaList');
-  list.innerHTML = tempCollegas.map((c, i) => `
-    <div class="collega-row" id="crow-${i}">
-      <div class="collega-avatar" style="background:${c.kleur}" id="cavatar-${i}">${initials(c.naam)}</div>
-      <input class="collega-name-input" type="text" value="${escHtml(c.naam)}" placeholder="Naam collega"
-             oninput="tempCollegas[${i}].naam=this.value; document.getElementById('cavatar-${i}').textContent=initials(this.value)" />
-      <input class="color-picker" type="color" value="${c.kleur}"
-             oninput="tempCollegas[${i}].kleur=this.value; document.getElementById('cavatar-${i}').style.background=this.value" />
-      <button class="collega-del" onclick="removeCollega(${i})">×</button>
-    </div>
-  `).join('');
-}
-
-function addCollega() {
-  tempCollegas.push({ id: crypto.randomUUID(), naam: '', kleur: '#22d3ee' });
-  renderCollegaList();
-}
-
-function removeCollega(i) {
-  tempCollegas.splice(i, 1);
-  renderCollegaList();
-}
-
-function saveCollegas() {
-  collegas = tempCollegas.filter(c => c.naam.trim());
-  save('taken_collegas', collegas);
-  if (!collegas.find(c => c.id === huidig)) {
-    huidig = collegas[0]?.id || '';
-    save('taken_huidige_gebruiker', huidig);
-  }
-  closeCollega();
-  render();
-}
+// Collega-beheer UI verwijderd in Fase 4 — profiles worden centraal beheerd via /modules/admin.html.
 
 // ════════════════════════════════════════════════════
 // Overlay click-outside
@@ -1305,7 +1253,6 @@ function overlayClick(e, overlayId) {
   if (e.target.id === overlayId) {
     if (overlayId === 'overlayNieuw') closeNieuweTaak();
     else if (overlayId === 'overlayDetail') closeDetail();
-    else if (overlayId === 'overlayCollega') closeCollega();
   }
 }
 
@@ -1340,7 +1287,8 @@ function handleUrlParams() {
       titel:        p.get('titel') || '',
       categorie:    p.get('categorie') || 'E-mail',
       prioriteit:   p.get('prioriteit') || 'Normaal',
-      omschrijving: p.get('omschrijving') || ''
+      omschrijving: p.get('omschrijving') || '',
+      assignedToId: p.get('assigned_to_id') || ''
     });
     window.history.replaceState({}, '', window.location.pathname);
   }
@@ -1354,17 +1302,22 @@ async function init() {
   await window._authSharedReady;
   const profile = await window.AuthShared.requireAuth();
   if (!profile) return;
-  // adminNavLink wordt nu centraal door sidebar.js gegate (RBAC-voorbereiding)
-  // Ensure all collegas have ids
-  collegas = collegas.map(c => ({ id: c.id || crypto.randomUUID(), naam: c.naam || '', kleur: c.kleur || '#22d3ee' }));
-  if (!huidig && collegas.length) huidig = collegas[0].id;
+
+  // Default "ik" = ingelogde user, tenzij user expliciet iemand anders koos.
+  if (!huidig) huidig = profile.id;
+
   window.AgentShared?.renderUserSection(profile);
+
+  // Stap 1: snelle eerste render vanuit cache (geen DB-wachttijd).
   render();
   handleUrlParams();
-  if (!localStorage.getItem('db_migrated_v1')) {
-    fetch('/api/db-migrate').then(r => { if (r.ok) localStorage.setItem('db_migrated_v1', '1'); }).catch(() => {});
-  }
-  loadTakenFromSupabase(); // herstel vanuit Supabase als localStorage leeg is
+
+  // Stap 2: profiles + taken parallel ophalen. DB is autoritatief.
+  await Promise.all([loadProfiles(), loadTakenFromSupabase()]);
+  render();
+
+  // Refetch bij window-focus → realtime-friendly polling.
+  window.addEventListener('focus', () => { loadTakenFromSupabase(); });
 }
 
 init();
@@ -1375,7 +1328,6 @@ init();
   var RULES = [
     ['#takenNieuwBtn', 'taken.task.create'],
     ['#takenSaveNieuwBtn', 'taken.task.create'],
-    ['#takenCollegaBtn', 'taken.collega.manage'],
     ['#takenEditBtn', 'taken.task.edit'],
     ['#takenSaveDetailBtn', 'taken.task.edit'],
     ['#takenDeleteBtn', 'taken.task.delete'],
