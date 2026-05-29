@@ -4,6 +4,7 @@
 
 import nodemailer from 'nodemailer';
 import { supabaseAdmin, verifyAdmin } from './supabase.js';
+import { requirePermissionFailOpen } from './_lib/requirePermission.js';
 
 const VALID_ROLES = ['super_admin', 'admin', 'manager', 'sales', 'mentor', 'marketing', 'administratie', 'viewer'];
 const SITE_URL    = 'https://forex-opleiding-interface.vercel.app';
@@ -377,8 +378,12 @@ export default async function handler(req, res) {
       if (role === 'super_admin' && admin.profile.role !== 'super_admin') {
         return res.status(403).json({ error: 'Alleen super_admin kan de super_admin-rol toekennen.' });
       }
-      // LEGACY: directe primaire-rol set. Wordt overschreven zodra user_roles
-      // wijzigt (add/remove → profiles.role = hoogste rol).
+      // Defense-in-depth: nu nog fail-open (admin.users.edit niet in registry),
+      // wordt strict zodra de feature-key wordt toegekend aan admin-rollen.
+      const editAllowed = await requirePermissionFailOpen(req, 'admin.users.edit');
+      if (!editAllowed) {
+        return res.status(403).json({ error: 'Geen rechten om gebruikers te bewerken.' });
+      }
       updates.role = role;
     }
     if (is_active !== undefined) updates.is_active = is_active;
@@ -406,6 +411,46 @@ export default async function handler(req, res) {
         triggered_by:  admin.profile.email,
       });
       return res.status(500).json({ error: error.message });
+    }
+
+    // ── Sync user_roles bij primary-role-wijziging (drift-fix) ──────────────
+    // Probleem vóór fix: profiles.role veranderde maar user_roles bleef stale,
+    // waardoor permissions (UNION over user_roles) verkeerde rol bleven geven.
+    // Pattern: UPSERT nieuwe rol eerst, daarna DELETE alle andere rollen — zo
+    // houdt user altijd ≥1 rol ook bij gedeeltelijke failure.
+    if (role !== undefined) {
+      const { error: upErr } = await supabaseAdmin
+        .from('user_roles')
+        .upsert({ user_id: userId, role, assigned_by: admin.user.id }, { onConflict: 'user_id,role' });
+      if (upErr) {
+        console.error('[admin-users] user_roles upsert mislukt:', upErr.message);
+        await logAudit({
+          action:        'update_user_roles_sync',
+          payload:       { target_id: userId, role, admin_email: admin.profile.email },
+          status:        'error',
+          error_message: 'upsert: ' + upErr.message,
+          triggered_by:  admin.profile.email,
+        });
+        return res.status(500).json({ error: 'profiles geüpdatet maar user_roles sync mislukte: ' + upErr.message });
+      }
+      const { error: delErr } = await supabaseAdmin
+        .from('user_roles')
+        .delete()
+        .eq('user_id', userId)
+        .neq('role', role);
+      if (delErr) {
+        console.error('[admin-users] user_roles cleanup mislukt:', delErr.message);
+        await logAudit({
+          action:        'update_user_roles_sync',
+          payload:       { target_id: userId, role, admin_email: admin.profile.email },
+          status:        'error',
+          error_message: 'delete-other: ' + delErr.message,
+          triggered_by:  admin.profile.email,
+        });
+        // Niet fataal: nieuwe rol staat erin, oude rollen zijn (deels) er nog.
+        // RBAC-UNION zou nog steeds een te ruime permissie kunnen geven — log,
+        // maar laat de happy-path response landen zodat admin niet vastloopt.
+      }
     }
 
     // Detecteer reactivate_user vs update_user
