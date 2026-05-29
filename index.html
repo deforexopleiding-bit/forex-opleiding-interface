@@ -491,7 +491,7 @@ const state = {
   loading: false,
   refreshTimer: null,
   data: { dash: null, fu: null, lisa: null, tix: null, verplaatst: 0 },
-  emailCounts: { teBeantwoorden: null, verstuurdVandaag: null },
+  emailCounts: { teBeantwoorden: null, verstuurdVandaag: null, leads: null },
 };
 
 function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]); }
@@ -600,7 +600,9 @@ function renderGreeting(profile, dash) {
 function renderBinnenkomsten(dash) {
   if (!dash || dash.__error) { setCardError('cardBinnenkomsten', 'Laden mislukt'); return; }
   clearCardError('cardBinnenkomsten');
-  document.getElementById('binLeads').textContent  = dash.kpis_groot?.nieuwe_leads?.value ?? 0;
+  // Leads via /api/emails-bron (consistent met email-module) — fallback op dashboard-stats.
+  const leads = state.emailCounts.leads ?? dash.kpis_groot?.nieuwe_leads?.value ?? 0;
+  document.getElementById('binLeads').textContent  = leads;
   document.getElementById('binAppt').textContent   = dash.kpis_groot?.sessies?.value ?? 0;
   document.getElementById('binEvents').textContent = dash.kpis_groot?.gent_aanmeldingen?.value ?? 0;
 }
@@ -848,6 +850,57 @@ async function fetchVerplaatstCount() {
   }
 }
 
+// ── Shared /api/emails fetch — cache binnen één loadDashboard()-cyclus ──
+// Zowel te-beantwoorden als binnenkomsten (leads/appoints/events) leunen op
+// dezelfde IMAP-bron als email-module. Eén roundtrip per refresh in plaats van
+// dubbel fetchen.
+let _emailsPromise = null;
+async function getEmailsOnce() {
+  if (_emailsPromise) return _emailsPromise;
+  _emailsPromise = (async () => {
+    try {
+      const res = await fetch('/api/emails', { cache: 'no-store' });
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      const data = await res.json();
+      return data.emails || [];
+    } catch (err) {
+      console.warn('[dashboard] /api/emails fail:', err.message);
+      return null;
+    }
+  })();
+  return _emailsPromise;
+}
+function resetEmailsCache() { _emailsPromise = null; }
+
+// Period-boundaries voor IMAP-mails (gebruikt 'date' veld, niet date_received).
+function periodBoundaries(period) {
+  const now = new Date();
+  const startOfToday = new Date(now); startOfToday.setHours(0,0,0,0);
+  if (period === 'week') {
+    const dow = now.getDay(); const offset = dow === 0 ? 6 : dow - 1;
+    const start = new Date(startOfToday); start.setDate(start.getDate() - offset);
+    return { start, end: now };
+  }
+  if (period === 'month') {
+    return { start: new Date(now.getFullYear(), now.getMonth(), 1), end: now };
+  }
+  return { start: startOfToday, end: now };
+}
+
+// ── Leads count via /api/emails (consistent met email-module) ──
+// Vorige bron (dashboard-stats.kpis_groot.nieuwe_leads) gebruikt DB-category;
+// email-module heeft rijker beeld via AI-classifier + lokale overrides.
+async function fetchLeadsCount(period) {
+  const emails = await getEmailsOnce();
+  if (!emails) return null;
+  const { start, end } = periodBoundaries(period);
+  return emails.filter(e => {
+    if (e.category !== 'Nieuwe Lead') return false;
+    const d = new Date(e.date);
+    return d >= start && d <= end;
+  }).length;
+}
+
 // ── Te beantwoorden count: gebruikt /api/emails (zelfde bron als email-module) ──
 // Vorige fix met directe Supabase op email_messages gaf drift (80 ipv 14) door:
 //   - is_read in DB stale t.o.v. IMAP \Seen flag
@@ -857,22 +910,14 @@ async function fetchVerplaatstCount() {
 // onzichtbaar voor dashboard (acceptabele edge — voor zero-drift moeten die
 // naar DB in een vervolg-project).
 async function fetchTeBeantwoordenCount() {
-  try {
-    const res = await fetch('/api/emails', { cache: 'no-store' });
-    if (!res.ok) throw new Error('HTTP ' + res.status);
-    const data = await res.json();
-    const emails = data.emails || [];
-    // Match exact email.html:5289-5291 filter (excl. actionFlags-override-laag).
-    const count = emails.filter(e =>
-      e.unread === true &&
-      e.category !== 'Reclame' &&
-      e.requires_action === true
-    ).length;
-    return count;
-  } catch (err) {
-    console.warn('[dashboard] teBeantwoorden /api/emails fail:', err.message);
-    return null;
-  }
+  const emails = await getEmailsOnce();
+  if (!emails) return null;
+  // Match exact email.html:5289-5291 filter (excl. actionFlags-override-laag).
+  return emails.filter(e =>
+    e.unread === true &&
+    e.category !== 'Reclame' &&
+    e.requires_action === true
+  ).length;
 }
 
 // ── Verstuurd vandaag: tel email_replies sinds 00:00 lokale tijd ──
@@ -904,7 +949,10 @@ async function loadDashboard() {
   const profile = state.profile || (window.AuthShared ? await window.AuthShared.getProfile() : null);
   state.profile = profile;
 
-  const [dash, fu, lisa, tix, verplaatst, teBeantCount, verstuurd] = await Promise.all([
+  // Reset shared /api/emails-cache zodat refresh ook leads opnieuw telt.
+  resetEmailsCache();
+
+  const [dash, fu, lisa, tix, verplaatst, teBeantCount, verstuurd, leadsCount] = await Promise.all([
     safeJson('/api/dashboard-stats?period=' + state.period),
     safeJson('/api/follow-up-dashboard-metrics?period=' + state.period),
     safeJson('/api/lisa-stats?period=' + (state.period === 'today' ? 'today' : state.period)),
@@ -912,10 +960,11 @@ async function loadDashboard() {
     fetchVerplaatstCount(),
     fetchTeBeantwoordenCount(),
     fetchVerstuurdVandaag(),
+    fetchLeadsCount(state.period),
   ]);
 
   state.data = { dash, fu, lisa, tix, verplaatst };
-  state.emailCounts = { teBeantwoorden: teBeantCount, verstuurdVandaag: verstuurd };
+  state.emailCounts = { teBeantwoorden: teBeantCount, verstuurdVandaag: verstuurd, leads: leadsCount };
 
   renderGreeting(profile, dash);
   renderBinnenkomsten(dash);
