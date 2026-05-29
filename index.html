@@ -848,25 +848,29 @@ async function fetchVerplaatstCount() {
   }
 }
 
-// ── Te beantwoorden count: DB-level match met email-module filter ──
-// email.html:5289-5291 filtert op (unread=true AND category!='Reclame' AND
-// getEffectiveRequiresAction). Frontend overrides kunnen we niet zien;
-// requires_action+is_read+category zijn DB-velden → match die drie.
-// Vervangt de "raw requires_action over 14d"-telling uit dashboard-stats
-// die te ruim is (telt ook gelezen + reclame).
+// ── Te beantwoorden count: gebruikt /api/emails (zelfde bron als email-module) ──
+// Vorige fix met directe Supabase op email_messages gaf drift (80 ipv 14) door:
+//   - is_read in DB stale t.o.v. IMAP \Seen flag
+//   - actionFlags-overrides die alleen in localStorage van email-module bestaan
+// Door /api/emails te call'en + zelfde client-side filter, krijgt dashboard
+// dezelfde data-bron als email-module. Frontend actionFlags-overrides blijven
+// onzichtbaar voor dashboard (acceptabele edge — voor zero-drift moeten die
+// naar DB in een vervolg-project).
 async function fetchTeBeantwoordenCount() {
   try {
-    if (!window.supabase) return null;
-    const { count, error } = await window.supabase
-      .from('email_messages')
-      .select('id', { count: 'exact', head: true })
-      .eq('requires_action', true)
-      .eq('is_read', false)
-      .neq('category', 'Reclame');
-    if (error) throw error;
-    return count ?? 0;
+    const res = await fetch('/api/emails', { cache: 'no-store' });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+    const emails = data.emails || [];
+    // Match exact email.html:5289-5291 filter (excl. actionFlags-override-laag).
+    const count = emails.filter(e =>
+      e.unread === true &&
+      e.category !== 'Reclame' &&
+      e.requires_action === true
+    ).length;
+    return count;
   } catch (err) {
-    console.warn('[dashboard] teBeantwoorden count fail:', err.message);
+    console.warn('[dashboard] teBeantwoorden /api/emails fail:', err.message);
     return null;
   }
 }
