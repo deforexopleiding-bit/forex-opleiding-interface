@@ -1,4 +1,4 @@
-import { supabase } from './supabase.js';
+import { supabase, supabaseAdmin } from './supabase.js';
 import { executeIdentifyPaymentConcerns } from './agent-tool-executor.js';
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -1095,11 +1095,10 @@ async function executeGetEmailBody({ email_id } = {}) {
 }
 
 async function executeGetOpenTasks({ priority = 'all', limit = 10 }) {
-  let query = supabase
+  let query = supabaseAdmin
     .from('taken_items')
-    .select('titel, omschrijving, notities, prioriteit, status, deadline, toegewezen_aan, categorie')
-    .neq('status', 'done')
-    .neq('status', 'afgerond')
+    .select('titel, omschrijving, notities, prioriteit, status, deadline, assigned_to_id, categorie')
+    .eq('status', 'todo')
     .limit(Math.min(Math.max(parseInt(limit) || 10, 1), 50));
 
   if (priority !== 'all') {
@@ -1110,6 +1109,15 @@ async function executeGetOpenTasks({ priority = 'all', limit = 10 }) {
   // (geen priority-sort via Supabase JS in één call — doe in JS)
   const { data, error } = await query;
   if (error) throw new Error('taken_items query fout: ' + error.message);
+
+  // Name-enrich assignees voor LLM-context.
+  const ids = [...new Set((data || []).map(t => t.assigned_to_id).filter(Boolean))];
+  let nameMap = {};
+  if (ids.length) {
+    const { data: profiles } = await supabaseAdmin
+      .from('profiles').select('id, full_name, email').in('id', ids);
+    for (const p of profiles || []) nameMap[p.id] = p.full_name || p.email || null;
+  }
 
   const PRIO_ORDER = { Urgent: 0, Hoog: 1, Normaal: 2, Laag: 3 };
   const tasks = (data || [])
@@ -1128,7 +1136,7 @@ async function executeGetOpenTasks({ priority = 'all', limit = 10 }) {
       prioriteit:     t.prioriteit,
       status:         t.status,
       deadline:       t.deadline      || null,
-      toegewezen_aan: t.toegewezen_aan || 'Jeffrey',
+      toegewezen_aan: t.assigned_to_id ? (nameMap[t.assigned_to_id] || 'Onbekend') : 'Niemand',
       categorie:      t.categorie     || null,
     }));
 

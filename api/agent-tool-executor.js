@@ -34,6 +34,24 @@ async function resolveAssigneeLocal(name) {
   return { name, type: 'employee', id: name };
 }
 
+// Resolveer team_member.id → profiles.id via profiles.team_member_id.
+// Returnt null bij geen match (agents, onbekende employees, leden zonder profile).
+// TODO Fase 2: dedup met api/agent-meeting.js naar api/_lib/profile-resolver.js
+async function resolveTeamMemberToProfileId(teamMemberId) {
+  if (!teamMemberId) return null;
+  const uuid = toUuidOrNull(teamMemberId);
+  if (!uuid) return null;
+  const { data, error } = await supabaseAdmin
+    .from('profiles').select('id').eq('team_member_id', uuid).maybeSingle();
+  if (error) {
+    console.warn('[resolveTeamMemberToProfileId] lookup fout:', error.message);
+    return null;
+  }
+  return data?.id || null;
+}
+
+const VALID_TASK_STATUSES = ['todo', 'progress', 'done'];
+
 // ── Centrale dispatcher ────────────────────────────────────────────────────
 
 export async function executeAgentTool(toolName, toolPayload, approvedBy, approvalId = null) {
@@ -166,6 +184,7 @@ async function executeScheduleEmailFollowup({ email_id, delay_hours = 24, remind
     source_meeting_id: null,
     categorie:        'Mail follow-up',
     deadline,
+    created_by_agent: 'simon',
     aangemaakt:       new Date().toISOString(),
     updated_at:       new Date().toISOString(),
   });
@@ -257,6 +276,7 @@ async function executeMarkInvoiceFollowup({ email_id, followup_date, notes } = {
     source_meeting_id: null,
     categorie:        'Factuur follow-up',
     deadline:         followup_date || null,
+    created_by_agent: 'aron',
     aangemaakt:       new Date().toISOString(),
     updated_at:       new Date().toISOString(),
   });
@@ -272,29 +292,36 @@ async function executeCreateTaskForContract({ contract_subject, related_email_id
   const taskId   = crypto.randomUUID();
   const now      = new Date().toISOString();
 
+  // Resolve team_member → profile (agents en niet-gekoppelde leden krijgen NULL).
+  const assigneeProfileId = (assignee && assignee.type !== 'agent')
+    ? await resolveTeamMemberToProfileId(assignee.id)
+    : null;
+
   const { error: taskErr } = await supabaseAdmin.from('taken_items').insert({
     id:                taskId,
     titel:             task_title,
     omschrijving:      notes || contract_subject || null,
     prioriteit:        'Normaal',
     status:            'todo',
-    assigned_to_id:    toUuidOrNull(assignee?.id),
+    assigned_to_id:    assigneeProfileId,
     source_meeting_id: null,
     categorie:         'Contract',
     deadline:          deadline || null,
+    created_by_agent:  'leon',
     aangemaakt:        now,
     updated_at:        now,
   });
   if (taskErr) throw new Error(`taken_items insert fout: ${taskErr.message}`);
 
-  if (assignee && assignee.type !== 'agent') {
+  // taken_assignees: alleen leden met profile-koppeling. Agents → skip.
+  if (assigneeProfileId) {
     const { error: asgErr } = await supabaseAdmin.from('taken_assignees').insert({
-      task_id:       taskId,
-      assignee_type: assignee.type,
-      assignee_id:   String(assignee.id),
-      assignee_name: assignee.name,
+      task_id:     taskId,
+      assignee_id: assigneeProfileId,
     });
     if (asgErr) console.error('[create_task_for_contract] taken_assignees fout:', asgErr.message);
+  } else if (assignee && assignee.type !== 'agent') {
+    console.warn(`[create_task_for_contract] team_member ${assignee.id} (${assignee.name}) heeft geen gekoppeld profile — assignee-insert overgeslagen`);
   }
 
   return { ok: true, task_id: taskId, task_title, assignee: assignee?.name || null };
@@ -302,6 +329,9 @@ async function executeCreateTaskForContract({ contract_subject, related_email_id
 
 async function executeUpdateTaskStatus({ task_id, new_status, notes } = {}) {
   if (!task_id || !new_status) throw new Error('task_id en new_status zijn verplicht voor update_task_status');
+  if (!VALID_TASK_STATUSES.includes(new_status)) {
+    throw new Error(`Ongeldige status "${new_status}". Toegestaan: ${VALID_TASK_STATUSES.join(', ')}`);
+  }
   const { error } = await supabaseAdmin.from('taken_items')
     .update({ status: new_status, updated_at: new Date().toISOString() })
     .eq('id', task_id);

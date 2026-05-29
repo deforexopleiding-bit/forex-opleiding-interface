@@ -26,9 +26,8 @@ export default async function handler(req, res) {
     // ── Stap 1: Data verzamelen ───────────────────────────────────────────────
     const [tasksResult, actionsResult, decisionsResult] = await Promise.allSettled([
       supabase.from('taken_items')
-        .select('id, titel, prioriteit, toegewezen_aan, deadline, status')
-        .neq('status', 'done')
-        .neq('status', 'afgerond')
+        .select('id, titel, prioriteit, assigned_to_id, deadline, status')
+        .eq('status', 'todo')
         .order('deadline', { ascending: true })
         .limit(30),
       supabase.from('email_actions')
@@ -47,11 +46,20 @@ export default async function handler(req, res) {
     const recentActions   = actionsResult.status     === 'fulfilled' ? (actionsResult.value.data     || []) : [];
     const recentDecisions = decisionsResult.status   === 'fulfilled' ? (decisionsResult.value.data   || []) : [];
 
+    // Name-enrich assignees voor digest-text.
+    const assigneeIds = [...new Set(openTasks.map(t => t.assigned_to_id).filter(Boolean))];
+    const nameMap = {};
+    if (assigneeIds.length) {
+      const { data: profiles } = await supabase
+        .from('profiles').select('id, full_name, email').in('id', assigneeIds);
+      for (const p of profiles || []) nameMap[p.id] = p.full_name || p.email || null;
+    }
+
     // ── Stap 2: Context strings per agent ─────────────────────────────────────
     const urgentTasks = openTasks.filter(t => t.prioriteit === 'Hoog' || t.prioriteit === 'Urgent');
 
     const tasksSummary = `Totaal open taken: ${openTasks.length}\nUrgente taken:\n${
-      urgentTasks.map(t => `- ${t.titel} (${t.toegewezen_aan}, deadline: ${t.deadline || 'geen'})`).join('\n') || 'Geen'
+      urgentTasks.map(t => `- ${t.titel} (${t.assigned_to_id ? (nameMap[t.assigned_to_id] || 'Onbekend') : 'Niemand'}, deadline: ${t.deadline || 'geen'})`).join('\n') || 'Geen'
     }`;
     const emailSummary = `E-mail acties verwerkt afgelopen 7 dagen: ${recentActions.length}`;
     const decisionsSummary = recentDecisions.length > 0
