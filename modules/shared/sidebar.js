@@ -110,16 +110,23 @@
     } catch (e) { /* niet ingelogd → admin-link blijft verborgen */ }
   }
 
-  // Sales-rol krijgt eigen dashboard-variant. Past de Dashboard-link href aan
-  // zodat klikken in sidebar naar /modules/sales-dashboard.html navigeert.
-  // De index.html zelf doet ook een redirect (defense-in-depth bij directe URL).
+  // Dashboard-link href op basis van permissions (niet langer hardcoded op rol).
+  // - dashboard.module.access  → /index.html (default voor admin/manager/etc)
+  // - alleen dashboard.sales.view → /modules/sales-dashboard.html (sales-rol)
+  // - geen van beide → applyModuleGating verbergt de link
+  // index.html doet zelf óók een redirect bij role==='sales' (defense-in-depth).
   async function applyDashboardRouting() {
     try {
-      if (window._authSharedReady) await window._authSharedReady;
-      var profile = window.AuthShared ? await window.AuthShared.getProfile() : null;
-      if (!profile || profile.role !== 'sales') return;
+      if (!window.RBAC || typeof window.RBAC.ensurePermissionsLoaded !== 'function') return;
+      var perms = await window.RBAC.ensurePermissionsLoaded();
+      if (perms.has('*')) return; // super_admin → laat default /index.html staan
       var link = document.querySelector('#sidebar-mount [data-module="dashboard"]');
-      if (link) link.setAttribute('href', '/modules/sales-dashboard.html');
+      if (!link) return;
+      if (perms.has('dashboard.module.access')) {
+        link.setAttribute('href', '/index.html');
+      } else if (perms.has('dashboard.sales.view')) {
+        link.setAttribute('href', '/modules/sales-dashboard.html');
+      }
     } catch (e) { /* fail-open: laat default dashboard-link staan */ }
   }
 
@@ -208,16 +215,30 @@
     if (!roles.length) return;   // geen rollen / laadfout → fail-open (niets verbergen)
     if (perms.has('*')) return;  // super_admin → alles zichtbaar
 
-    // 1) Sidebar-links verbergen zonder <module>.module.access
+    // 1) Sidebar-links verbergen zonder <module>.module.access.
+    //    Dashboard speciaal: zichtbaar als user OFWEL module.access OF sales.view
+    //    heeft (sales-rol heeft alleen die laatste).
     Object.keys(MODULE_FEATURE_MAP).forEach(function (modKey) {
       var link = document.querySelector('#sidebar-mount [data-module="' + modKey + '"]');
-      if (link && !perms.has(MODULE_FEATURE_MAP[modKey])) link.style.display = 'none';
+      if (!link) return;
+      if (modKey === 'dashboard') {
+        var ok = perms.has('dashboard.module.access') || perms.has('dashboard.sales.view');
+        if (!ok) link.style.display = 'none';
+      } else if (!perms.has(MODULE_FEATURE_MAP[modKey])) {
+        link.style.display = 'none';
+      }
     });
 
     // 2) Pagina-content blokkeren bij directe URL (defense-in-depth).
     //    email.html regelt dit zelf → hier overslaan om dubbele melding te voorkomen.
     var cur = currentModule();
     if (cur === 'email') return;
+    // Dashboard speciaal: niet blokkeren als user dashboard.sales.view heeft;
+    // index.html doet zelf een redirect naar /modules/sales-dashboard.html.
+    if (cur === 'dashboard') {
+      if (!perms.has('dashboard.module.access') && !perms.has('dashboard.sales.view')) blockPageAccess();
+      return;
+    }
     var fk = MODULE_FEATURE_MAP[cur];
     if (fk && !perms.has(fk)) blockPageAccess();
   }
