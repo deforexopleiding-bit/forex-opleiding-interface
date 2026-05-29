@@ -132,6 +132,10 @@
           <textarea name="description" id="tcf-description" rows="4" placeholder="Stappen om te reproduceren, verwacht gedrag, etc."></textarea>
           <div class="field-error" id="tcf-err-description"></div>
         </div>
+        <div class="form-hint" style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text-dim);margin:-4px 0 12px;padding:8px 10px;background:var(--bg-elev-2);border-radius:6px;border:1px solid var(--border)">
+          <i class="ti ti-info-circle" style="font-size:14px;color:var(--accent-cyan)"></i>
+          <span>Nadat je de ticket hebt aangemaakt krijg je de mogelijkheid om afbeeldingen en/of video's toe te voegen.</span>
+        </div>
         <div class="form-row-2">
           <div class="form-field">
             <label for="tcf-type">Type <span class="req">*</span></label>
@@ -447,7 +451,17 @@ async function submitCreate() {
       btn.disabled = false; btn.textContent = 'Opslaan';
       return;
     }
+    // Direct doorsturen naar detail-pagina: user wil meteen attachments toevoegen.
+    // Toast wordt op detail-pagina getoond via sessionStorage-flag.
+    const data = await res.json().catch(() => ({}));
+    const newId = data?.ticket?.id;
     closeCreateModal();
+    if (newId) {
+      try { sessionStorage.setItem('ticketCreatedFlash', '1'); } catch (e) { /* private mode → toast skip */ }
+      window.location.href = '/modules/tickets-detail.html?id=' + encodeURIComponent(newId);
+      return;
+    }
+    // Fallback als response geen id bevat (zou niet moeten): blijf op lijst.
     window.AgentShared?.showToast?.('Ticket aangemaakt', 'success');
     await loadTickets();
   } catch (err) {
