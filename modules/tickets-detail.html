@@ -1046,6 +1046,15 @@ async function init() {
   state.profile = profile;
   if (window.AgentShared) await window.AgentShared.renderUserSection(profile);
 
+  // Flash-toast vanaf tickets.html create-flow (redirect na succesvolle POST).
+  try {
+    if (sessionStorage.getItem('ticketCreatedFlash')) {
+      sessionStorage.removeItem('ticketCreatedFlash');
+      // Vertraging zodat toast niet wegklapt tijdens initial-render flicker.
+      setTimeout(() => window.AgentShared?.showToast?.('Ticket aangemaakt', 'success'), 200);
+    }
+  } catch (e) { /* private mode / disabled storage → toast skip */ }
+
   await window.RBAC.ensurePermissionsLoaded();
   if (!window.RBAC.canSync('tickets.module.access')) {
     renderForbidden();
