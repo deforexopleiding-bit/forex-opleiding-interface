@@ -1,4 +1,4 @@
-import { supabase } from './supabase.js';
+import { supabase, supabaseAdmin } from './supabase.js';
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -157,13 +157,11 @@ async function executeScheduleEmailFollowup({ email_id, delay_hours = 24, remind
   const deadline = new Date(Date.now() + (Number(delay_hours) || 24) * 3600000)
     .toISOString().split('T')[0];
   const taskId = crypto.randomUUID();
-  const { error } = await supabase.from('taken_items').insert({
+  const { error } = await supabaseAdmin.from('taken_items').insert({
     id:               taskId,
     titel:            reminder_text || `Follow-up email #${email_id}`,
     prioriteit:       'Normaal',
     status:           'todo',
-    toegewezen_aan:   'Simon',
-    assigned_to_type: 'agent',
     assigned_to_id:   null,
     source_meeting_id: null,
     categorie:        'Mail follow-up',
@@ -250,13 +248,11 @@ async function executeDraftPaymentReminder({ email_ids = [], tone = 'friendly', 
 async function executeMarkInvoiceFollowup({ email_id, followup_date, notes } = {}) {
   if (!email_id) throw new Error('email_id is verplicht voor mark_invoice_followup');
   const taskId = crypto.randomUUID();
-  const { error } = await supabase.from('taken_items').insert({
+  const { error } = await supabaseAdmin.from('taken_items').insert({
     id:               taskId,
     titel:            `Factuur follow-up #${email_id}${notes ? ': ' + notes.slice(0, 100) : ''}`,
     prioriteit:       'Hoog',
     status:           'todo',
-    toegewezen_aan:   'Aron',
-    assigned_to_type: 'agent',
     assigned_to_id:   null,
     source_meeting_id: null,
     categorie:        'Factuur follow-up',
@@ -276,14 +272,12 @@ async function executeCreateTaskForContract({ contract_subject, related_email_id
   const taskId   = crypto.randomUUID();
   const now      = new Date().toISOString();
 
-  const { error: taskErr } = await supabase.from('taken_items').insert({
+  const { error: taskErr } = await supabaseAdmin.from('taken_items').insert({
     id:                taskId,
     titel:             task_title,
     omschrijving:      notes || contract_subject || null,
     prioriteit:        'Normaal',
     status:            'todo',
-    toegewezen_aan:    assignee?.name || assignee_name || null,
-    assigned_to_type:  assignee?.type || 'employee',
     assigned_to_id:    toUuidOrNull(assignee?.id),
     source_meeting_id: null,
     categorie:         'Contract',
@@ -294,7 +288,7 @@ async function executeCreateTaskForContract({ contract_subject, related_email_id
   if (taskErr) throw new Error(`taken_items insert fout: ${taskErr.message}`);
 
   if (assignee && assignee.type !== 'agent') {
-    const { error: asgErr } = await supabase.from('taken_assignees').insert({
+    const { error: asgErr } = await supabaseAdmin.from('taken_assignees').insert({
       task_id:       taskId,
       assignee_type: assignee.type,
       assignee_id:   String(assignee.id),
@@ -308,7 +302,7 @@ async function executeCreateTaskForContract({ contract_subject, related_email_id
 
 async function executeUpdateTaskStatus({ task_id, new_status, notes } = {}) {
   if (!task_id || !new_status) throw new Error('task_id en new_status zijn verplicht voor update_task_status');
-  const { error } = await supabase.from('taken_items')
+  const { error } = await supabaseAdmin.from('taken_items')
     .update({ status: new_status, updated_at: new Date().toISOString() })
     .eq('id', task_id);
   if (error) throw new Error(`taken_items update fout: ${error.message}`);

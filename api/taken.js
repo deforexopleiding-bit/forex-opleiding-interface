@@ -1,5 +1,10 @@
 import { createUserClient } from './supabase.js';
 
+function toUuidOrNull(id) {
+  if (!id) return null;
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(id)) ? String(id) : null;
+}
+
 function toRow(task) {
   return {
     id:             task.id,
@@ -7,7 +12,7 @@ function toRow(task) {
     omschrijving:   task.omschrijving  || '',
     prioriteit:     task.prioriteit    || 'Normaal',
     categorie:      task.categorie     || 'Overige',
-    toegewezen_aan: task.toegewezenAan || null,
+    assigned_to_id: toUuidOrNull(task.assignedToId),
     deadline:       task.deadline      || null,
     email_id:       task.emailId       || null,
     email_subject:  task.emailSubject  || null,

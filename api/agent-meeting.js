@@ -1,4 +1,4 @@
-import { supabase, createUserClient } from './supabase.js';
+import { supabase, supabaseAdmin, createUserClient } from './supabase.js';
 
 const AGENT_NAMES = ['Simon', 'Leon', 'Aron'];
 
@@ -133,8 +133,6 @@ async function createTask({ titel, beschrijving, assignees, deadline, prioriteit
     omschrijving:      beschrijving || null,
     prioriteit:        prioriteit || 'Normaal',
     status:            'todo',
-    toegewezen_aan:    first?.name || null,
-    assigned_to_type:  first?.type || null,
     // assigned_to_id is uuid — agents hebben naam-strings (geen UUID), bewaar null voor hen
     assigned_to_id:    toUuidOrNull(first?.id),
     source_meeting_id: toUuidOrNull(source_meeting_id),
@@ -144,8 +142,8 @@ async function createTask({ titel, beschrijving, assignees, deadline, prioriteit
     updated_at:        now,
   };
 
-  console.log(`[createTask] INSERT taken_items: "${taskRow.titel}", assigned_to_type=${taskRow.assigned_to_type}, source_meeting_id=${taskRow.source_meeting_id}`);
-  const { error: taskErr } = await supabase.from('taken_items').insert(taskRow);
+  console.log(`[createTask] INSERT taken_items: "${taskRow.titel}", source_meeting_id=${taskRow.source_meeting_id}`);
+  const { error: taskErr } = await supabaseAdmin.from('taken_items').insert(taskRow);
   if (taskErr) throw new Error(`taken_items insert fout: ${taskErr.message}`);
 
   // taken_assignees voor ALLE assignees
@@ -156,7 +154,7 @@ async function createTask({ titel, beschrijving, assignees, deadline, prioriteit
       assignee_id:   a.id,
       assignee_name: a.name,
     }));
-    const { error: asgErr } = await supabase.from('taken_assignees').insert(assigneeRows);
+    const { error: asgErr } = await supabaseAdmin.from('taken_assignees').insert(assigneeRows);
     if (asgErr) console.error('[agent-meeting] taken_assignees insert fout:', asgErr.message);
   }
 
