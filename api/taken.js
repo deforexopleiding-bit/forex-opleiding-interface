@@ -1,4 +1,5 @@
 import { createUserClient, supabaseAdmin } from './supabase.js';
+import { requirePermission } from './_lib/requirePermission.js';
 
 function toUuidOrNull(id) {
   if (!id) return null;
@@ -56,10 +57,28 @@ export default async function handler(req, res) {
       if (error) throw error;
 
       const rows = data || [];
+
+      // Assignees-array per taak via taken_assignees.
+      const taskIds = rows.map(r => r.id);
+      let assigneesByTask = {};
+      if (taskIds.length) {
+        const { data: asgRows } = await supabaseAdmin
+          .from('taken_assignees')
+          .select('task_id, assignee_id')
+          .in('task_id', taskIds);
+        for (const a of asgRows || []) {
+          (assigneesByTask[a.task_id] ||= []).push(a.assignee_id);
+        }
+      }
+
+      // Name-enrich (assignee + creator + alle assignees uit join).
       const ids = new Set();
       for (const r of rows) {
         if (r.assigned_to_id) ids.add(r.assigned_to_id);
         if (r.created_by)     ids.add(r.created_by);
+      }
+      for (const arr of Object.values(assigneesByTask)) {
+        for (const id of arr) ids.add(id);
       }
       const nameMap = await fetchProfileNames(Array.from(ids));
 
@@ -67,6 +86,10 @@ export default async function handler(req, res) {
         ...r,
         assigned_to_name: r.assigned_to_id ? (nameMap[r.assigned_to_id] || null) : null,
         created_by_name:  r.created_by    ? (nameMap[r.created_by]    || null) : null,
+        assignees: (assigneesByTask[r.id] || []).map(pid => ({
+          assignee_id:   pid,
+          assignee_name: nameMap[pid] || null,
+        })),
       }));
       return res.status(200).json({ taken: enriched });
     } catch (err) {
@@ -80,6 +103,11 @@ export default async function handler(req, res) {
     const { data: { user: authUser } } = await supabase.auth.getUser();
     const userId = authUser?.id || null;
     if (!userId) return res.status(401).json({ error: 'Niet geauthenticeerd' });
+
+    // Permission-gate per action.
+    const needed = action === 'delete' ? 'taken.task.delete' : 'taken.task.create';
+    const allowed = await requirePermission(req, needed);
+    if (!allowed) return res.status(403).json({ error: `Geen rechten voor ${needed}` });
 
     const checkStatus = (row) => {
       if (row.status && !VALID_TASK_STATUSES.includes(row.status)) {
