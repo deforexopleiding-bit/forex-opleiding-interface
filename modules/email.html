@@ -3044,6 +3044,10 @@
       state.sentReplies[uid] = { sentAt, to: toAddr, from: fromMailbox };
       saveJson(SENT_REPLIES_KEY, state.sentReplies);
 
+      // Reply verstuurd → automatisch markeren als gelezen (idempotent: skipt
+      // mails die al gelezen zijn). Update DB+IMAP+UI in één keer.
+      if (email.unread) markAsRead(uid);
+
       // Thread bijwerken: badge ophogen + cache invalideren zodat het nieuwe antwoord verschijnt
       state.threadCounts[uid] = (state.threadCounts[uid] || 0) + 1;
       delete state.threadCache[uid];
@@ -3910,7 +3914,9 @@
         '</button>' +
         '<div class="act-divider"></div>' +
         '<div class="act-sub-header">Acties</div>' +
-        (e.unread ? '<button class="act-item" data-act="mark-read" data-uid="' + escapeHtml(uid) + '">' + ICON_READ + ' Markeer als gelezen</button>' : '') +
+        (e.unread
+          ? '<button class="act-item" data-act="mark-read"   data-uid="' + escapeHtml(uid) + '">' + ICON_READ + ' Markeer als gelezen</button>'
+          : '<button class="act-item" data-act="mark-unread" data-uid="' + escapeHtml(uid) + '">' + ICON_READ + ' Markeer als ongelezen</button>') +
         '<button class="act-item" data-act="create-task" data-uid="' + escapeHtml(uid) + '">' + ICON_TASK + ' Maak taak aan</button>' +
         '<button class="act-item" data-act="kb-open" data-uid="' + escapeHtml(uid) + '">📚 Toevoegen aan kennisbank</button>' +
         '<div class="act-divider"></div>' +
@@ -4911,10 +4917,10 @@
   }
 
   function selectMail(uid) {
-    const e = findEmail(uid);
     if (state.selectedMailUid !== uid) state.selectedMailUid = uid;
-    if (e && e.unread) markAsRead(uid); // markeert gelezen (DB+IMAP via bestaande flow) + render()
-    else render();
+    // Geen auto-mark-as-read bij openen — gebruiker bepaalt zelf (toolbar/actie-menu),
+    // of het gebeurt automatisch bij reply-success (zie sendAiProposal).
+    render();
     if (!state.threadCache[uid]) fetchEmailThread(uid).then(render); // gesprek lazy laden
   }
 
@@ -4977,7 +4983,8 @@
           render();
           undoManager.push('no_action', { email_id: u, old_flag: oldFlag },
             current ? 'Geen actie markering verwijderd' : 'Geen actie nodig gemarkeerd');
-        } else if (act === 'mark-read')  { markAsRead(u); }
+        } else if (act === 'mark-read')   { markAsRead(u); }
+        else if (act === 'mark-unread')  { markAsUnread(u); }
         else if (act === 'create-task')  { openTaakVanEmail(u); }
         else if (act === 'snooze-day')   { snoozeEmail(u, 1); }
         else if (act === 'snooze-week')  { snoozeEmail(u, 7); }
