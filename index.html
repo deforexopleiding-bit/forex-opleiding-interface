@@ -491,7 +491,7 @@ const state = {
   loading: false,
   refreshTimer: null,
   data: { dash: null, fu: null, lisa: null, tix: null, verplaatst: 0 },
-  emailCounts: { teBeantwoorden: null, verstuurdVandaag: null },
+  emailCounts: { teBeantwoorden: null, verstuurdVandaag: null, leads: null },
 };
 
 function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]); }
@@ -600,7 +600,9 @@ function renderGreeting(profile, dash) {
 function renderBinnenkomsten(dash) {
   if (!dash || dash.__error) { setCardError('cardBinnenkomsten', 'Laden mislukt'); return; }
   clearCardError('cardBinnenkomsten');
-  document.getElementById('binLeads').textContent  = dash.kpis_groot?.nieuwe_leads?.value ?? 0;
+  // Fase 4: leads via /api/emails (DB-effective state) — fallback op dashboard-stats.
+  const leads = state.emailCounts.leads ?? dash.kpis_groot?.nieuwe_leads?.value ?? 0;
+  document.getElementById('binLeads').textContent  = leads;
   document.getElementById('binAppt').textContent   = dash.kpis_groot?.sessies?.value ?? 0;
   document.getElementById('binEvents').textContent = dash.kpis_groot?.gent_aanmeldingen?.value ?? 0;
 }
@@ -801,30 +803,26 @@ function renderActivity(dash) {
 async function renderTop5Unread() {
   const root = document.getElementById('top5List');
   try {
-    if (!window.supabase) throw new Error('supabase niet beschikbaar');
-    // Sort nieuwste eerst — consistent met email-module "Te beantwoorden"-tab.
-    // Match daar ook op is_read=false + category != Reclame voor consistentie.
-    const { data, error } = await window.supabase
-      .from('email_messages')
-      .select('id, subject, from_address, from_name, date_received, category')
-      .eq('requires_action', true)
-      .eq('is_read', false)
-      .neq('category', 'Reclame')
-      .order('date_received', { ascending: false })
-      .limit(5);
-    if (error) throw error;
-    if (!data || !data.length) {
+    // Fase 4: switch van directe Supabase op email_messages naar /api/emails
+    // (zelfde bron als email-module + zelfde DB-classifications via Fase 3 join).
+    const emails = await getEmailsOnce();
+    if (!emails) throw new Error('emails niet beschikbaar');
+    const filtered = emails
+      .filter(e => e.unread === true && e.category !== 'Reclame' && e.requires_action === true)
+      .sort((a, b) => new Date(b.date) - new Date(a.date))
+      .slice(0, 5);
+    if (!filtered.length) {
       root.innerHTML = '<div class="list-empty">Geen openstaande mails — alles bijgewerkt.</div>';
       return;
     }
-    root.innerHTML = data.map(e => {
-      const [badgeCls, badgeLabel] = classifyMailType(e.category);
-      const sender = e.from_name || (e.from_address ? e.from_address.split('@')[0] : '—');
+    root.innerHTML = filtered.map(e => {
+      const [, badgeLabel] = classifyMailType(e.category);
+      const sender = e.fromName || (e.fromAddress ? e.fromAddress.split('@')[0] : '—');
       return `
         <div class="list-row">
           <span class="dot" style="background:#0891b2"></span>
           <span class="row-text"><span class="row-strong">${esc(sender)}</span> — ${esc(e.subject || '(geen onderwerp)')}</span>
-          <span class="row-meta">${fmtRelTime(e.date_received)} · ${esc(badgeLabel)}</span>
+          <span class="row-meta">${fmtRelTime(e.date)} · ${esc(badgeLabel)}</span>
         </div>`;
     }).join('');
   } catch (err) {
@@ -848,31 +846,66 @@ async function fetchVerplaatstCount() {
   }
 }
 
-// ── Te beantwoorden count: gebruikt /api/emails (zelfde bron als email-module) ──
-// Vorige fix met directe Supabase op email_messages gaf drift (80 ipv 14) door:
-//   - is_read in DB stale t.o.v. IMAP \Seen flag
-//   - actionFlags-overrides die alleen in localStorage van email-module bestaan
-// Door /api/emails te call'en + zelfde client-side filter, krijgt dashboard
-// dezelfde data-bron als email-module. Frontend actionFlags-overrides blijven
-// onzichtbaar voor dashboard (acceptabele edge — voor zero-drift moeten die
-// naar DB in een vervolg-project).
-async function fetchTeBeantwoordenCount() {
-  try {
-    const res = await fetch('/api/emails', { cache: 'no-store' });
-    if (!res.ok) throw new Error('HTTP ' + res.status);
-    const data = await res.json();
-    const emails = data.emails || [];
-    // Match exact email.html:5289-5291 filter (excl. actionFlags-override-laag).
-    const count = emails.filter(e =>
-      e.unread === true &&
-      e.category !== 'Reclame' &&
-      e.requires_action === true
-    ).length;
-    return count;
-  } catch (err) {
-    console.warn('[dashboard] teBeantwoorden /api/emails fail:', err.message);
-    return null;
+// ── Shared /api/emails cache binnen één loadDashboard()-cyclus ──────────────
+// Voorkomt dubbele IMAP-fetches: te-beantwoorden + leads + top-5 delen dezelfde
+// response. Reset bij refresh (resetEmailsCache).
+let _emailsPromise = null;
+async function getEmailsOnce() {
+  if (_emailsPromise) return _emailsPromise;
+  _emailsPromise = (async () => {
+    try {
+      const res = await fetch('/api/emails', { cache: 'no-store' });
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      const data = await res.json();
+      return data.emails || [];
+    } catch (err) {
+      console.warn('[dashboard] /api/emails fail:', err.message);
+      return null;
+    }
+  })();
+  return _emailsPromise;
+}
+function resetEmailsCache() { _emailsPromise = null; }
+
+// Period boundaries op IMAP 'date' veld (lokale tijd, 00:00 start-of-day).
+function periodBoundaries(period) {
+  const now = new Date();
+  const startOfToday = new Date(now); startOfToday.setHours(0, 0, 0, 0);
+  if (period === 'week') {
+    const dow = now.getDay(); const offset = dow === 0 ? 6 : dow - 1;
+    const start = new Date(startOfToday); start.setDate(start.getDate() - offset);
+    return { start, end: now };
   }
+  if (period === 'month') {
+    return { start: new Date(now.getFullYear(), now.getMonth(), 1), end: now };
+  }
+  return { start: startOfToday, end: now };
+}
+
+// ── Te beantwoorden count: /api/emails + Fase 3 DB-effective state ──────────
+// requires_action wordt door api/emails.js gevuld via JOIN met email_classifications.
+// Mails zonder DB-classification → requires_action=false → niet in te-beantwoorden.
+// Klik "Reanalyze" in email-module om de DB te vullen voor bestaande mails.
+async function fetchTeBeantwoordenCount() {
+  const emails = await getEmailsOnce();
+  if (!emails) return null;
+  return emails.filter(e =>
+    e.unread === true &&
+    e.category !== 'Reclame' &&
+    e.requires_action === true
+  ).length;
+}
+
+// ── Nieuwe leads count: /api/emails + period-filter ─────────────────────────
+async function fetchLeadsCount(period) {
+  const emails = await getEmailsOnce();
+  if (!emails) return null;
+  const { start, end } = periodBoundaries(period);
+  return emails.filter(e => {
+    if (e.category !== 'Nieuwe Lead') return false;
+    const d = new Date(e.date);
+    return d >= start && d <= end;
+  }).length;
 }
 
 // ── Verstuurd vandaag: tel email_replies sinds 00:00 lokale tijd ──
@@ -904,7 +937,10 @@ async function loadDashboard() {
   const profile = state.profile || (window.AuthShared ? await window.AuthShared.getProfile() : null);
   state.profile = profile;
 
-  const [dash, fu, lisa, tix, verplaatst, teBeantCount, verstuurd] = await Promise.all([
+  // Reset shared /api/emails cache zodat refresh-knop alles opnieuw fetcht.
+  resetEmailsCache();
+
+  const [dash, fu, lisa, tix, verplaatst, teBeantCount, verstuurd, leadsCount] = await Promise.all([
     safeJson('/api/dashboard-stats?period=' + state.period),
     safeJson('/api/follow-up-dashboard-metrics?period=' + state.period),
     safeJson('/api/lisa-stats?period=' + (state.period === 'today' ? 'today' : state.period)),
@@ -912,10 +948,11 @@ async function loadDashboard() {
     fetchVerplaatstCount(),
     fetchTeBeantwoordenCount(),
     fetchVerstuurdVandaag(),
+    fetchLeadsCount(state.period),
   ]);
 
   state.data = { dash, fu, lisa, tix, verplaatst };
-  state.emailCounts = { teBeantwoorden: teBeantCount, verstuurdVandaag: verstuurd };
+  state.emailCounts = { teBeantwoorden: teBeantCount, verstuurdVandaag: verstuurd, leads: leadsCount };
 
   renderGreeting(profile, dash);
   renderBinnenkomsten(dash);

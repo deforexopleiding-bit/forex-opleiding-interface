@@ -2201,7 +2201,15 @@
       const res = await fetch('/api/email-agent', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ from: email.from || '', subject: email.subject || '', bodySnippet, date: email.date || '' })
+        // uid+mailbox: backend persisteert resultaat in email_classifications (Fase 2).
+        body: JSON.stringify({
+          uid:         email.uid,
+          mailbox:     email.mailbox,
+          from:        email.from || '',
+          subject:     email.subject || '',
+          bodySnippet,
+          date:        email.date || ''
+        })
       });
       if (!res.ok) return;
       const data = await res.json();
@@ -2262,6 +2270,8 @@
     try {
       const emailList = todo.map((e) => ({
         uid:          e.uid,
+        // mailbox: backend persisteert classification in email_classifications (Fase 2).
+        mailbox:      e.mailbox,
         from:         e.from || '',
         sender_email: e.fromAddress || getFromAddress(e),
         sender_domain: getDomain(e.fromAddress || getFromAddress(e)),
