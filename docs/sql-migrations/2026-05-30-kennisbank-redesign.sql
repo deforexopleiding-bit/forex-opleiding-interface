@@ -218,20 +218,23 @@ BEGIN
       source_email_id, created_at, updated_at
     )
     SELECT
-      id,
+      COALESCE(id, gen_random_uuid()) AS id,
+      -- NOT NULL guarantee: NULLIF strips empty strings, dan fallback-keten.
       COALESCE(NULLIF(title, ''), NULLIF(question, ''), 'Untitled') AS title,
-      COALESCE(NULLIF(content, ''), answer) AS content,
-      NULLIF(question, '') AS question,
-      NULLIF(answer, '') AS answer,
-      (label = '_profile' OR type = 'bedrijfsprofiel') AS is_profile,
-      ARRAY['shared']::text[] AS agents,
+      NULLIF(content, '') AS content,         -- nullable, leeg → NULL
+      NULLIF(question, '') AS question,        -- nullable
+      NULLIF(answer, '') AS answer,            -- nullable
+      -- NOT NULL: wrap beide branches in COALESCE; NULL-input op een branch
+      -- mag niet doorlekken naar OR-resultaat.
+      (COALESCE(label = '_profile', false) OR COALESCE(type = 'bedrijfsprofiel', false)) AS is_profile,
+      ARRAY['shared']::text[] AS agents,       -- NOT NULL, expliciete array
       COALESCE(times_used, 0),
       COALESCE(times_helpful, 0),
       COALESCE(helpfulness_score, 0),
       COALESCE(auto_generated, false),
-      source_email_id,
-      COALESCE(created_at, now()),
-      COALESCE(updated_at, now())
+      NULLIF(source_email_id, '') AS source_email_id,   -- nullable
+      COALESCE(created_at, now()),             -- NOT NULL
+      COALESCE(updated_at, created_at, now())  -- NOT NULL, met dubbele fallback
     FROM public.kennisbank_items;
 
     RAISE NOTICE 'Data-migratie kennisbank_items → kb_items voltooid.';
