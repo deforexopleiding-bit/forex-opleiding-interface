@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Finance · De Forex Opleiding</title>
+  <title>Sales · De Forex Opleiding</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
@@ -88,12 +88,12 @@
 <div class="app" id="appContent">
   <div class="hero">
     <span class="badge-soon">Binnenkort beschikbaar</span>
-    <h1>Finance</h1>
+    <h1>Sales</h1>
     <p class="lead">
-      Financieel beheer: facturen, abonnementen, bank-feed, wanbetaler-flow,
-      bonus-configs, cashflow-forecasts en rapportage. Operationele sales-acties
-      (klanten/deals aanmaken) staan in de aparte <a href="/modules/sales.html" style="color:var(--accent-cyan)">Sales-module</a>.
-      Beide delen dezelfde DB-fundament (Fase 1).
+      Operationele module voor Dave en het sales-team: klanten aanmaken, deals
+      registreren, productcatalogus, retentie-pipeline en eigen bonus-overzicht.
+      Gedeelde data-laag met Finance (klanten, deals, bonussen) maar gescheiden
+      UI + RBAC. DB-fundament is gelegd (Fase 1, gedeeld). UI volgt fase-voor-fase.
     </p>
   </div>
 
@@ -101,49 +101,31 @@
     <div class="phase-card done">
       <div class="phase-num">1</div>
       <div class="phase-title">DB-fundament (gedeeld)</div>
-      <div class="phase-desc">17 tabellen, RLS, indexes, RBAC-keys. Gedeeld met Sales-module.</div>
+      <div class="phase-desc">17 tabellen, RLS, indexes, RBAC-keys. Gedeeld met Finance.</div>
       <span class="phase-tag">AFGEROND</span>
     </div>
     <div class="phase-card">
       <div class="phase-num">2</div>
-      <div class="phase-title">Facturen + offertes</div>
-      <div class="phase-desc">Concept → open → betaald flow, manuele factuur, Teamleader-push.</div>
+      <div class="phase-title">Productcatalogus + Dave's wizard</div>
+      <div class="phase-desc">Klant-aanmaak-wizard met deal-koppeling, lead-source dropdown, downpayment-tracking.</div>
       <span class="phase-tag">PLANNED</span>
     </div>
     <div class="phase-card">
       <div class="phase-num">3</div>
-      <div class="phase-title">ING bankfeed + match-vangnet</div>
-      <div class="phase-desc">GoCardless-koppeling, auto-match payments, handmatig match-UI.</div>
+      <div class="phase-title">Klant-overzicht voor Dave</div>
+      <div class="phase-desc">Lijst eigen klanten, search/filter, tag-management, snelle deal-CRUD.</div>
       <span class="phase-tag">PLANNED</span>
     </div>
     <div class="phase-card">
       <div class="phase-num">4</div>
-      <div class="phase-title">Wanbetaler-flow + WhatsApp</div>
-      <div class="phase-desc">Trajecten, fasen, payment promises, escalatie, deal pause.</div>
+      <div class="phase-title">Sales dashboard + bonus widget</div>
+      <div class="phase-desc">KPIs (deals deze maand, conversie, MRR-contributie), eigen bonus-stand, threshold-progress.</div>
       <span class="phase-tag">PLANNED</span>
     </div>
     <div class="phase-card">
       <div class="phase-num">5</div>
-      <div class="phase-title">Brieven + incasso (PostNL)</div>
-      <div class="phase-desc">Letter-templates, formele escalatie, RESTRICT-FK behoud.</div>
-      <span class="phase-tag">PLANNED</span>
-    </div>
-    <div class="phase-card">
-      <div class="phase-num">6</div>
-      <div class="phase-title">Bonus-configs + executive dashboard</div>
-      <div class="phase-desc">Sales-bonus-configs beheren, all-bonus-view, KPI-banner.</div>
-      <span class="phase-tag">PLANNED</span>
-    </div>
-    <div class="phase-card">
-      <div class="phase-num">7</div>
-      <div class="phase-title">Cashflow + forecast</div>
-      <div class="phase-desc">Scenario's, what-if, banksaldo voorspelling, alerts.</div>
-      <span class="phase-tag">PLANNED</span>
-    </div>
-    <div class="phase-card">
-      <div class="phase-num">8</div>
-      <div class="phase-title">Rapportage + audit + go-live</div>
-      <div class="phase-desc">Maandrapport-PDF + distributie, finance-audit log, polish.</div>
+      <div class="phase-title">Retentie pipeline + 1e call check</div>
+      <div class="phase-desc">Welke klanten zijn klaar voor 1e call (downpayment binnen, geen pause), retentie-view per cohort.</div>
       <span class="phase-tag">PLANNED</span>
     </div>
   </div>
@@ -151,7 +133,7 @@
 
 <div class="app err-noaccess" id="noAccess" style="display:none">
   <h2>Geen toegang</h2>
-  <p>Je hebt geen rechten om de Finance-module te bekijken.</p>
+  <p>Je hebt geen rechten om de Sales-module te bekijken.</p>
   <p style="margin-top:14px"><a href="/index.html" style="color:var(--accent-cyan)">Terug naar dashboard</a></p>
 </div>
 
@@ -165,11 +147,10 @@
   if (!profile) return;
   if (window.AgentShared) await window.AgentShared.renderUserSection(profile);
 
-  // RBAC: gate op finance.module.access. Fail-open consistent met andere modules.
   try {
     if (window.RBAC && typeof window.RBAC.ensurePermissionsLoaded === 'function') {
       const perms = await window.RBAC.ensurePermissionsLoaded();
-      if (!perms.has('*') && !perms.has('finance.module.access')) {
+      if (!perms.has('*') && !perms.has('sales.module.access')) {
         document.getElementById('appContent').style.display = 'none';
         document.getElementById('noAccess').style.display = 'block';
       }
@@ -179,6 +160,6 @@
 </script>
 <script src="/modules/shared/permissions.js"></script>
 <script src="/modules/shared/sidebar.js"></script>
-<script src="/modules/shared/quick-task-button.js" data-module="Finance" defer></script>
+<script src="/modules/shared/quick-task-button.js" data-module="Sales" defer></script>
 </body>
 </html>
