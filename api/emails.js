@@ -1,4 +1,5 @@
 import { ImapFlow } from 'imapflow';
+import { supabaseAdmin } from './supabase.js';
 
 // Mapping mailbox → env variable that holds its IMAP password.
 // To add another mailbox: add an entry here, set the password env var
@@ -67,6 +68,48 @@ export default async function handler(req, res) {
   }
 
   allMessages.sort((a, b) => new Date(b.date) - new Date(a.date));
+
+  // Fase 3: JOIN met email_classifications voor effective category + requires_action.
+  // Eén batch SELECT op alle uids; geen N+1. Bij DB-fout: response gaat door met
+  // alleen IMAP-hardrule categorie + requires_action=false fallback.
+  try {
+    const uids = allMessages.map(m => m.uid).slice(0, 1000); // cap matches slice hieronder
+    if (uids.length) {
+      const { data: classifications, error: classErr } = await supabaseAdmin
+        .from('email_classifications')
+        .select('email_uid, category, requires_action, confidence, source, priority, reasoning, classified_at')
+        .in('email_uid', uids);
+      if (classErr) {
+        console.warn('[emails.js] classifications batch select fout:', classErr.message);
+      } else {
+        const classMap = new Map((classifications || []).map(c => [c.email_uid, c]));
+        for (const msg of allMessages) {
+          const c = classMap.get(msg.uid);
+          if (c) {
+            // DB overschrijft IMAP-hardrule indien category bekend.
+            if (c.category) msg.category = c.category;
+            // requires_action: null/undefined in DB → false (geen actie tenzij gemarkeerd).
+            msg.requires_action = c.requires_action === true;
+            // Metadata voor frontend (debugging / confidence-dots / sentiment etc).
+            msg.classification = {
+              confidence:    c.confidence,
+              source:        c.source,
+              priority:      c.priority,
+              reasoning:     c.reasoning,
+              classified_at: c.classified_at,
+            };
+          } else {
+            // Geen classifier-resultaat → consumer mag IMAP-category gebruiken,
+            // requires_action defaultt op false (niet undefined; dashboard filter
+            // matched exact === true).
+            msg.requires_action = false;
+          }
+        }
+      }
+    }
+  } catch (e) {
+    console.warn('[emails.js] classifications join exception:', e.message);
+  }
 
   const startOfToday = new Date();
   startOfToday.setHours(0, 0, 0, 0);

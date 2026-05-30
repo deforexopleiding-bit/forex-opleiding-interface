@@ -1,5 +1,31 @@
 import Anthropic from '@anthropic-ai/sdk';
-import { supabase } from './supabase.js';
+import { supabase, supabaseAdmin } from './supabase.js';
+
+const CLASSIFIER_VERSION = 'v1';
+
+// Fase 2: persist classification naar email_classifications (gedeelde DB-cache).
+// Fire-and-forget — geen blocking voor /api/email-agent response.
+async function persistClassification(email_uid, mailbox, result) {
+  if (!email_uid || !mailbox || !result) return;
+  try {
+    const { error } = await supabaseAdmin.from('email_classifications').upsert({
+      email_uid,
+      mailbox,
+      category:           result.category || null,
+      requires_action:    typeof result.requires_action === 'boolean' ? result.requires_action : null,
+      confidence:         typeof result.confidence === 'number' ? Math.round(result.confidence) : null,
+      source:             result.source || null,
+      priority:           result.priority || null,
+      reasoning:          result.reasoning || null,
+      key_signals:        Array.isArray(result.key_signals) && result.key_signals.length ? result.key_signals : null,
+      classified_at:      new Date().toISOString(),
+      classifier_version: CLASSIFIER_VERSION,
+    }, { onConflict: 'email_uid' });
+    if (error) console.warn('[email-agent] persist mislukt:', error.message);
+  } catch (err) {
+    console.warn('[email-agent] persist exception:', err.message);
+  }
+}
 
 const VALID_CATEGORIES = [
   'Nieuwe Lead', 'Appointment', 'Event Aanmelding',
@@ -794,10 +820,18 @@ export default async function handler(req, res) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
-  const { from, subject, bodySnippet, date } = req.body || {};
+  const { from, subject, bodySnippet, date, uid, mailbox } = req.body || {};
   if (!from && !subject) {
     return res.status(400).json({ error: 'from of subject vereist' });
   }
   const result = await categorize({ from, subject, bodySnippet, date });
+
+  // Fase 2: schrijf naar email_classifications zodra uid+mailbox bekend zijn.
+  // Geen await — geen response-blocking. Backwards compat: oudere clients die
+  // geen uid sturen krijgen alleen de response, geen DB-write.
+  if (uid && mailbox) {
+    persistClassification(uid, mailbox, result).catch(() => {});
+  }
+
   return res.status(200).json(result);
 }

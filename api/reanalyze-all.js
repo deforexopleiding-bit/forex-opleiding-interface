@@ -1,5 +1,8 @@
 import { categorize } from './email-agent.js';
 import { requirePermissionFailOpen } from './_lib/requirePermission.js';
+import { supabaseAdmin } from './supabase.js';
+
+const CLASSIFIER_VERSION = 'v1';
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
@@ -78,6 +81,32 @@ export default async function handler(req, res) {
   }
 
   console.log(`[reanalyze-all] ${emails.length} mails, ${groups.size} groepen, ${analyzed} AI-aanroepen, ${changed} gewijzigd, ${errors} fouten`);
+
+  // Fase 2: bulk-persist classifications. Mailbox per uid uit input.
+  const mailboxByUid = new Map(emails.filter(e => e.uid && e.mailbox).map(e => [e.uid, e.mailbox]));
+  const upsertRows = results
+    .filter(r => mailboxByUid.has(r.uid))
+    .map(r => ({
+      email_uid:          r.uid,
+      mailbox:            mailboxByUid.get(r.uid),
+      category:           r.category || null,
+      requires_action:    typeof r.requires_action === 'boolean' ? r.requires_action : null,
+      confidence:         typeof r.confidence === 'number' ? Math.round(r.confidence) : null,
+      source:             r.source || null,
+      priority:           r.priority || null,
+      reasoning:          r.reasoning || null,
+      key_signals:        Array.isArray(r.key_signals) && r.key_signals.length ? r.key_signals : null,
+      classified_at:      new Date().toISOString(),
+      classifier_version: CLASSIFIER_VERSION,
+    }));
+  if (upsertRows.length) {
+    // Fire-and-forget. Bij fout: gelogd, response niet geblokkeerd.
+    supabaseAdmin.from('email_classifications').upsert(upsertRows, { onConflict: 'email_uid' })
+      .then(({ error }) => {
+        if (error) console.warn('[reanalyze-all] bulk classification upsert fout:', error.message);
+        else console.log(`[reanalyze-all] ${upsertRows.length} classifications persisted`);
+      });
+  }
 
   return res.status(200).json({
     results,
