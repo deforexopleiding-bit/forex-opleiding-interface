@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Finance · De Forex Opleiding</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/modules/shared/agent-shared.css" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; }
+    body {
+      font-family: 'Inter', system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      -webkit-font-smoothing: antialiased;
+    }
+    .app { margin-left: 220px; padding: 32px 28px; max-width: 1100px; }
+    .hero {
+      background: var(--bg-elev);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 42px 36px;
+      margin-bottom: 22px;
+    }
+    .badge-soon {
+      display: inline-block;
+      padding: 3px 10px;
+      background: rgba(245,158,11,0.15);
+      color: #a16207;
+      border: 1px solid rgba(245,158,11,0.3);
+      border-radius: 12px;
+      font-size: 11px; font-weight: 700; letter-spacing: .04em;
+      margin-bottom: 14px;
+    }
+    [data-theme="dark"] .badge-soon { color: #fbbf24; }
+    h1 { font-size: 28px; font-weight: 800; letter-spacing: -.5px; margin-bottom: 10px; }
+    .lead { font-size: 14px; color: var(--text-dim); line-height: 1.6; max-width: 720px; }
+    .phases-grid {
+      display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 14px;
+      margin-top: 28px;
+    }
+    .phase-card {
+      background: var(--bg-elev);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 18px 20px;
+    }
+    .phase-num {
+      display: inline-flex; align-items: center; justify-content: center;
+      width: 30px; height: 30px;
+      border-radius: 50%;
+      background: var(--bg-elev-2);
+      font-weight: 700; font-size: 13px;
+      color: var(--text-dim);
+      margin-bottom: 10px;
+    }
+    .phase-card.done .phase-num {
+      background: rgba(5,150,105,0.15);
+      color: var(--green);
+    }
+    .phase-title { font-size: 14px; font-weight: 700; margin-bottom: 5px; }
+    .phase-desc { font-size: 12.5px; color: var(--text-dim); line-height: 1.5; }
+    .phase-tag {
+      display: inline-block; margin-top: 8px;
+      font-size: 10px; font-weight: 700; letter-spacing: .05em;
+      padding: 2px 8px; border-radius: 8px;
+      background: var(--bg-elev-2); color: var(--text-faint);
+    }
+    .phase-card.done .phase-tag { background: rgba(5,150,105,0.15); color: var(--green); }
+
+    .err-noaccess {
+      margin: 64px auto;
+      max-width: 480px;
+      text-align: center;
+      color: var(--text-dim);
+    }
+    .err-noaccess h2 { font-size: 18px; font-weight: 700; margin-bottom: 6px; color: var(--text); }
+  </style>
+</head>
+<body>
+
+<div id="sidebar-mount"></div>
+
+<div class="app" id="appContent">
+  <div class="hero">
+    <span class="badge-soon">Binnenkort beschikbaar</span>
+    <h1>Finance</h1>
+    <p class="lead">
+      Centrale module voor klant-financiën: deals, abonnementen, facturen, bank-feed,
+      wanbetaler-flow, bonussen en cashflow-forecasts. DB-fundament is gelegd (Fase 1).
+      UI volgt fase-voor-fase.
+    </p>
+  </div>
+
+  <div class="phases-grid">
+    <div class="phase-card done">
+      <div class="phase-num">1</div>
+      <div class="phase-title">DB-fundament</div>
+      <div class="phase-desc">17 tabellen, RLS, indexes, RBAC-keys, placeholder-route.</div>
+      <span class="phase-tag">AFGEROND</span>
+    </div>
+    <div class="phase-card">
+      <div class="phase-num">2</div>
+      <div class="phase-title">Productcatalogus + klant-koppeling</div>
+      <div class="phase-desc">Dave's klant-wizard, deal-CRUD, Teamleader-pushflow.</div>
+      <span class="phase-tag">PLANNED</span>
+    </div>
+    <div class="phase-card">
+      <div class="phase-num">3</div>
+      <div class="phase-title">Facturen + offertes</div>
+      <div class="phase-desc">Concept → open → betaald flow, manuele factuur, TL-push.</div>
+      <span class="phase-tag">PLANNED</span>
+    </div>
+    <div class="phase-card">
+      <div class="phase-num">4</div>
+      <div class="phase-title">ING bankfeed + match</div>
+      <div class="phase-desc">GoCardless-koppeling, auto-match payments, vangnet UI.</div>
+      <span class="phase-tag">PLANNED</span>
+    </div>
+    <div class="phase-card">
+      <div class="phase-num">5</div>
+      <div class="phase-title">Wanbetaler-flow + WhatsApp</div>
+      <div class="phase-desc">Trajecten, fasen, payment promises, escalatie.</div>
+      <span class="phase-tag">PLANNED</span>
+    </div>
+    <div class="phase-card">
+      <div class="phase-num">6</div>
+      <div class="phase-title">Brieven + incasso</div>
+      <div class="phase-desc">PostNL-koppeling, letter-templates, formele escalatie.</div>
+      <span class="phase-tag">PLANNED</span>
+    </div>
+    <div class="phase-card">
+      <div class="phase-num">7</div>
+      <div class="phase-title">Bonus + dashboards</div>
+      <div class="phase-desc">Sales-bonus-configs, executive + sales dashboards.</div>
+      <span class="phase-tag">PLANNED</span>
+    </div>
+    <div class="phase-card">
+      <div class="phase-num">8</div>
+      <div class="phase-title">Cashflow + forecast</div>
+      <div class="phase-desc">Scenario's, what-if, banksaldo voorspelling.</div>
+      <span class="phase-tag">PLANNED</span>
+    </div>
+    <div class="phase-card">
+      <div class="phase-num">9</div>
+      <div class="phase-title">Rapporten + retentie + go-live</div>
+      <div class="phase-desc">Maandrapport-PDF, retentie-analyse, polish-iteraties.</div>
+      <span class="phase-tag">PLANNED</span>
+    </div>
+  </div>
+</div>
+
+<div class="app err-noaccess" id="noAccess" style="display:none">
+  <h2>Geen toegang</h2>
+  <p>Je hebt geen rechten om de Finance-module te bekijken.</p>
+  <p style="margin-top:14px"><a href="/index.html" style="color:var(--accent-cyan)">Terug naar dashboard</a></p>
+</div>
+
+<script src="/modules/shared/supabase-client.js"></script>
+<script src="/modules/shared/agent-shared.js"></script>
+<script src="/modules/shared/theme-shared.js"></script>
+<script>
+(async () => {
+  await window._authSharedReady;
+  const profile = await window.AuthShared?.requireAuth();
+  if (!profile) return;
+  if (window.AgentShared) await window.AgentShared.renderUserSection(profile);
+
+  // RBAC: gate op finance.module.access. Fail-open consistent met andere modules.
+  try {
+    if (window.RBAC && typeof window.RBAC.ensurePermissionsLoaded === 'function') {
+      const perms = await window.RBAC.ensurePermissionsLoaded();
+      if (!perms.has('*') && !perms.has('finance.module.access')) {
+        document.getElementById('appContent').style.display = 'none';
+        document.getElementById('noAccess').style.display = 'block';
+      }
+    }
+  } catch (e) { /* fail-open */ }
+})();
+</script>
+<script src="/modules/shared/permissions.js"></script>
+<script src="/modules/shared/sidebar.js"></script>
+<script src="/modules/shared/quick-task-button.js" data-module="Finance" defer></script>
+</body>
+</html>
