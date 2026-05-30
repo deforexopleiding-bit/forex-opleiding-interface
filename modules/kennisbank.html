@@ -196,40 +196,57 @@
     .agent-toggle.on { background: var(--accent); color: #fff; border-color: var(--accent); }
     .agent-toggle.disabled { opacity: .5; cursor: not-allowed; }
 
-    /* ── Edit-mode (split-view) ── */
-    .kb-edit-grid {
-      display: grid; grid-template-columns: 1fr 1fr; gap: 14px;
-      height: calc(100vh - 200px);
-    }
-    .kb-edit-pane {
+    /* ── Edit-mode (single-pane met preview-toggle) ── */
+    .kb-edit-wrap {
       display: flex; flex-direction: column;
       border: 1px solid var(--border);
       border-radius: 8px;
       overflow: hidden;
+      min-height: 420px;
+      height: calc(100vh - 240px);
     }
-    .kb-edit-pane-head {
-      padding: 6px 10px;
-      font-size: 10px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase;
-      color: var(--text-faint);
+    .kb-edit-tabs {
+      display: flex; gap: 2px;
+      padding: 4px;
       background: var(--bg-elev-2);
       border-bottom: 1px solid var(--border);
     }
+    .kb-edit-tab {
+      padding: 5px 14px;
+      font: inherit; font-size: 11.5px; font-weight: 600;
+      color: var(--text-dim); cursor: pointer;
+      background: transparent; border: none;
+      border-radius: 5px;
+      transition: background .12s, color .12s;
+    }
+    .kb-edit-tab:hover { color: var(--text); }
+    .kb-edit-tab.active {
+      background: var(--bg-elev);
+      color: var(--text);
+      box-shadow: 0 1px 2px rgba(0,0,0,.06);
+    }
+    .kb-edit-body { flex: 1; display: flex; min-height: 0; }
     .kb-edit-textarea {
       flex: 1; width: 100%;
-      padding: 12px;
+      padding: 14px 16px;
       border: none; outline: none;
       background: var(--bg-elev);
       color: var(--text);
       font-family: 'Menlo', monospace; font-size: 13px;
-      line-height: 1.5;
+      line-height: 1.55;
       resize: none;
     }
     .kb-edit-preview {
-      flex: 1; padding: 14px;
+      flex: 1; padding: 18px 20px;
       overflow-y: auto;
       background: var(--bg-elev);
-      font-size: 13.5px; line-height: 1.6;
+      font-size: 13.5px; line-height: 1.65;
     }
+    .kb-edit-preview:empty::before {
+      content: 'Niets om te previewen — schrijf eerst markdown.';
+      color: var(--text-faint); font-style: italic;
+    }
+    .hidden { display: none !important; }
     .kb-edit-title-input {
       width: 100%; padding: 10px 12px;
       border: 1px solid var(--border); border-radius: 8px;
@@ -967,14 +984,18 @@ function renderEditMode() {
         ${d.is_profile ? '<div style="margin-top:6px;font-size:11px;color:var(--text-faint)">Dit is het bedrijfsprofiel — altijd actief voor alle agents.</div>' : ''}
       </div>
 
-      <div class="kb-edit-grid">
-        <div class="kb-edit-pane">
-          <div class="kb-edit-pane-head">Markdown</div>
-          <textarea class="kb-edit-textarea" id="contentInput" placeholder="Schrijf hier in markdown...\n\n# Kop\n- Lijst\n**vet**, *cursief*">${esc(d.content)}</textarea>
+      <div class="kb-edit-wrap">
+        <div class="kb-edit-tabs" role="tablist">
+          <button type="button" class="kb-edit-tab active" data-edit-tab="write" role="tab">Bewerken</button>
+          <button type="button" class="kb-edit-tab" data-edit-tab="preview" role="tab">Preview</button>
         </div>
-        <div class="kb-edit-pane">
-          <div class="kb-edit-pane-head">Voorbeeld</div>
-          <div class="kb-edit-preview kb-detail-content" id="previewPane">${renderMarkdown(d.content)}</div>
+        <div class="kb-edit-body">
+          <textarea class="kb-edit-textarea" id="contentInput" placeholder="Schrijf hier in markdown...
+
+# Kop
+- Lijst
+**vet**, *cursief*">${esc(d.content)}</textarea>
+          <div class="kb-edit-preview kb-detail-content hidden" id="previewPane">${renderMarkdown(d.content)}</div>
         </div>
       </div>
     </div>
@@ -984,7 +1005,28 @@ function renderEditMode() {
   document.getElementById('titleInput').addEventListener('input', e => { d.title = e.target.value; });
   document.getElementById('contentInput').addEventListener('input', e => {
     d.content = e.target.value;
+    // Preview wordt bij elke input gerenderd; visible/hidden toggle bepaalt UI.
     document.getElementById('previewPane').innerHTML = renderMarkdown(e.target.value);
+  });
+  // Edit/preview tab-toggle. Textarea-content blijft in DOM, alleen zichtbaarheid wisselt.
+  mount.querySelectorAll('[data-edit-tab]').forEach(tab => {
+    tab.addEventListener('click', () => {
+      const mode = tab.dataset.editTab;
+      mount.querySelectorAll('[data-edit-tab]').forEach(t => t.classList.toggle('active', t === tab));
+      const ta = document.getElementById('contentInput');
+      const pv = document.getElementById('previewPane');
+      if (mode === 'preview') {
+        // Re-render bij switch (in case ergens niet getriggerd door input-listener).
+        pv.innerHTML = renderMarkdown(d.content || '');
+        ta.classList.add('hidden');
+        pv.classList.remove('hidden');
+      } else {
+        pv.classList.add('hidden');
+        ta.classList.remove('hidden');
+        // Focus textarea voor snelle voortgang.
+        setTimeout(() => ta.focus(), 0);
+      }
+    });
   });
   mount.querySelectorAll('[data-toggle]').forEach(el => {
     el.addEventListener('click', () => {
