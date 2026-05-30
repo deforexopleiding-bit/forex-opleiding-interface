@@ -971,6 +971,10 @@ function startEdit(item) {
 }
 
 function renderEditMode() {
+  // Sync body-class bij élke entry naar edit-mode (startEdit komt hier
+  // rechtstreeks binnen, niet via renderDetail). CSS body.kb-editing .app
+  // schakelt grid-template-columns voor bredere detail-pane.
+  document.body.classList.add('kb-editing');
   const mount = document.getElementById('detailMount');
   const d = state.draft;
   if (!d) return;
@@ -1010,7 +1014,11 @@ function renderEditMode() {
       </div>
     </div>
   `;
-  document.getElementById('cancelEditBtn').addEventListener('click', () => { state.editing = false; state.draft = null; renderDetail(); });
+  document.getElementById('cancelEditBtn').addEventListener('click', () => {
+    state.editing = false; state.draft = null;
+    document.body.classList.remove('kb-editing');
+    renderDetail();
+  });
   document.getElementById('saveBtn').addEventListener('click', saveDraft);
   document.getElementById('titleInput').addEventListener('input', e => { d.title = e.target.value; });
   document.getElementById('contentInput').addEventListener('input', e => {
