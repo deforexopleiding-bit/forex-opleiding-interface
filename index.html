@@ -803,12 +803,21 @@ function renderActivity(dash) {
 async function renderTop5Unread() {
   const root = document.getElementById('top5List');
   try {
-    // Fase 4: switch van directe Supabase op email_messages naar /api/emails
-    // (zelfde bron als email-module + zelfde DB-classifications via Fase 3 join).
+    // Gebruikt zelfde override-keten als fetchTeBeantwoordenCount voor consistentie.
     const emails = await getEmailsOnce();
     if (!emails) throw new Error('emails niet beschikbaar');
+    const { actionFlags, aiReqActionCache, aiCatCache, overrides } = readEmailModuleCaches();
+    const catOverride = overrides.category || {};
+    const readOverride = overrides.read || {};
+    const effCat = e => catOverride[e.uid] || aiCatCache[e.uid] || e.category;
+    const effUnread = e => readOverride[e.uid] ? false : e.unread === true;
+    const effReqAct = e => {
+      if (actionFlags[e.uid] !== undefined) return actionFlags[e.uid] === true;
+      if (aiReqActionCache[e.uid] !== undefined) return aiReqActionCache[e.uid] === true;
+      return e.requires_action === true;
+    };
     const filtered = emails
-      .filter(e => e.unread === true && e.category !== 'Reclame' && e.requires_action === true)
+      .filter(e => effUnread(e) && effCat(e) !== 'Reclame' && effReqAct(e))
       .sort((a, b) => new Date(b.date) - new Date(a.date))
       .slice(0, 5);
     if (!filtered.length) {
@@ -816,7 +825,7 @@ async function renderTop5Unread() {
       return;
     }
     root.innerHTML = filtered.map(e => {
-      const [, badgeLabel] = classifyMailType(e.category);
+      const [, badgeLabel] = classifyMailType(effCat(e));
       const sender = e.fromName || (e.fromAddress ? e.fromAddress.split('@')[0] : '—');
       return `
         <div class="list-row">
@@ -882,17 +891,52 @@ function periodBoundaries(period) {
   return { start: startOfToday, end: now };
 }
 
-// ── Te beantwoorden count: /api/emails + Fase 3 DB-effective state ──────────
-// requires_action wordt door api/emails.js gevuld via JOIN met email_classifications.
-// Mails zonder DB-classification → requires_action=false → niet in te-beantwoorden.
-// Klik "Reanalyze" in email-module om de DB te vullen voor bestaande mails.
+// ── Te beantwoorden count: LETTERLIJK email-module filter copy ──────────────
+// Pragmatisch: in plaats van DB-route te debuggen, lees we dezelfde localStorage
+// caches die email-module gebruikt en passen de exacte filter-keten toe.
+// Bron: modules/email.html regel 5299-5301 + 4003-4010 (getEffectiveRequiresAction)
+// + 1520-1549 (applyOverrides) + 1902-1907 (applyAiCategories).
+// Edge: andere browser zonder email-module-history → telt lager (geen AI-cache).
+function readEmailModuleCaches() {
+  const safe = (k, fallback) => {
+    try { return JSON.parse(localStorage.getItem(k) || JSON.stringify(fallback)); }
+    catch { return fallback; }
+  };
+  return {
+    actionFlags:        safe('email_action_flags', {}),
+    aiReqActionCache:   safe('email_ai_requires_action', {}),
+    aiCatCache:         safe('email_ai_categories', {}),
+    overrides:          safe('forex-opleiding-email-overrides', { category: {}, read: {} }),
+  };
+}
+
 async function fetchTeBeantwoordenCount() {
   const emails = await getEmailsOnce();
   if (!emails) return null;
+  const { actionFlags, aiReqActionCache, aiCatCache, overrides } = readEmailModuleCaches();
+  const catOverride = overrides.category || {};
+  const readOverride = overrides.read || {};
+
+  // Per-mail override-keten, identiek aan email-module.
+  function effCategory(e) {
+    if (catOverride[e.uid]) return catOverride[e.uid];
+    if (aiCatCache[e.uid]) return aiCatCache[e.uid];
+    return e.category;
+  }
+  function effUnread(e) {
+    if (readOverride[e.uid]) return false;
+    return e.unread === true;
+  }
+  function effRequiresAction(e) {
+    if (actionFlags[e.uid] !== undefined) return actionFlags[e.uid] === true;
+    if (aiReqActionCache[e.uid] !== undefined) return aiReqActionCache[e.uid] === true;
+    return e.requires_action === true;
+  }
+
   return emails.filter(e =>
-    e.unread === true &&
-    e.category !== 'Reclame' &&
-    e.requires_action === true
+    effUnread(e) &&
+    effCategory(e) !== 'Reclame' &&
+    effRequiresAction(e)
   ).length;
 }
 
