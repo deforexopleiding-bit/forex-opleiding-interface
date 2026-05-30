@@ -3,26 +3,23 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Kennisbank · Agency Command Center</title>
+  <title>Kennisbank · De Forex Opleiding</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/modules/shared/agent-shared.css" />
+  <!-- marked.js (markdown → HTML, lichtgewicht) -->
+  <script src="https://cdn.jsdelivr.net/npm/marked@9.1.6/marked.min.js"></script>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-
     :root {
-      /* === LIGHT THEME (default) === */
       --bg: #fafafa; --bg-elev: #ffffff; --bg-elev-2: #f8fafc;
       --text: #0f172a; --text-dim: #475569; --text-faint: #94a3b8;
       --border: #e5e7eb; --border-strong: #d1d5db;
-      --brand-secondary: #688b9b; --brand-secondary-light: #8aa5b3;
+      --accent: #093d54; --accent-2: #688b9b;
       --accent-cyan: #2563eb; --accent-violet: #6d28d9;
-      --accent-grad: linear-gradient(135deg, #093d54 0%, #688b9b 100%);
       --green: #059669; --amber: #d97706; --red: #dc2626;
       --nav-item-hover: rgba(0,0,0,0.04);
-      --nav-item-active: rgba(9,61,84,0.10);
-      --nav-item-active-text: #093d54;
     }
     [data-theme="dark"] {
       --bg: #0a0b10; --bg-elev: #13151c; --bg-elev-2: #181b25;
@@ -31,1949 +28,735 @@
       --accent-cyan: #22d3ee; --accent-violet: #c4b5fd;
       --green: #10b981; --amber: #f59e0b; --red: #ef4444;
       --nav-item-hover: rgba(255,255,255,0.05);
-      --nav-item-active: rgba(168,85,247,0.14);
-      --nav-item-active-text: #a855f7;
     }
     html, body { height: 100%; }
     body {
-      font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      font-family: 'Inter', system-ui, sans-serif;
       background: var(--bg);
       color: var(--text);
       min-height: 100vh;
-      overflow-x: hidden;
-      position: relative;
-      line-height: 1.5;
       -webkit-font-smoothing: antialiased;
-      -moz-osx-font-smoothing: grayscale;
     }
-    body::before {
-      content: ''; position: fixed; inset: 0;
-      background-image:
-        radial-gradient(circle at 15% 10%, rgba(34, 211, 238, 0.10), transparent 45%),
-        radial-gradient(circle at 85% 90%, rgba(168, 85, 247, 0.10), transparent 50%);
-      pointer-events: none; z-index: 0;
-    }
-    body::after {
-      content: ''; position: fixed; inset: 0;
-      background-image:
-        linear-gradient(rgba(255, 255, 255, 0.025) 1px, transparent 1px),
-        linear-gradient(90deg, rgba(255, 255, 255, 0.025) 1px, transparent 1px);
-      background-size: 48px 48px;
-      mask-image: radial-gradient(circle at center, black 30%, transparent 75%);
-      -webkit-mask-image: radial-gradient(circle at center, black 30%, transparent 75%);
-      pointer-events: none; z-index: 0;
-    }
-
     .app {
-      position: relative; z-index: 1;
       margin-left: 220px;
-      padding: 32px 28px 64px;
-    }
-
-    header {
-      display: flex; align-items: center; justify-content: space-between;
-      gap: 24px; flex-wrap: wrap;
-      padding-bottom: 24px;
-      border-bottom: 1px solid var(--border);
-      margin-bottom: 28px;
-    }
-    .brand { display: flex; align-items: center; gap: 14px; }
-    .logo-mark {
-      width: 44px; height: 44px;
-      border-radius: 12px;
-      background: var(--accent-grad);
-      display: grid; place-items: center;
-      font-weight: 800; font-size: 16px;
-      letter-spacing: -0.5px; color: #fff;
-      box-shadow: 0 6px 24px rgba(168, 85, 247, 0.35);
-    }
-    .brand h1 { font-size: 18px; font-weight: 700; letter-spacing: -0.3px; }
-    .brand .crumb { font-size: 12px; color: var(--text-dim); margin-top: 2px; }
-    .brand .crumb a { color: var(--text-dim); text-decoration: none; transition: color 0.2s; }
-    .brand .crumb a:hover { color: var(--accent-cyan); }
-    .brand .crumb .sep { margin: 0 6px; color: var(--text-faint); }
-
-    .header-actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
-
-    .btn {
-      font-family: inherit;
-      font-size: 13px; font-weight: 500;
-      color: var(--text);
-      background: transparent;
-      border: 1px solid var(--border-strong);
-      border-radius: 8px;
-      padding: 8px 14px;
-      cursor: pointer;
-      display: inline-flex; align-items: center; gap: 8px;
-      text-decoration: none;
-      transition: all 0.18s ease;
-    }
-    .btn:hover:not(:disabled) { background: var(--bg-elev-2); border-color: var(--border-strong); }
-    .btn:disabled { opacity: 0.5; cursor: not-allowed; }
-    .btn svg { width: 14px; height: 14px; }
-    .btn-primary {
-      background: var(--accent-grad);
-      border-color: transparent;
-      color: #fff;
-      font-weight: 600;
-    }
-    .btn-primary:hover:not(:disabled) { filter: brightness(1.1); background: var(--accent-grad); }
-    .btn-danger {
-      background: rgba(239, 68, 68, 0.08);
-      border-color: rgba(239, 68, 68, 0.25);
-      color: var(--red);
-    }
-    .btn-danger:hover { background: rgba(239, 68, 68, 0.16); }
-    .btn-ghost { border-color: transparent; }
-
-    /* Page-head */
-    .page-head { margin-bottom: 24px; }
-    .page-head h2 { font-size: 28px; font-weight: 700; letter-spacing: -0.5px; margin-bottom: 6px; }
-    .page-head .desc { font-size: 14px; color: var(--text-dim); }
-    .dirty-indicator {
-      display: inline-flex; align-items: center; gap: 6px;
-      font-size: 11.5px;
-      color: var(--amber);
-      margin-left: 10px;
-    }
-    .dirty-indicator::before {
-      content: ''; width: 6px; height: 6px;
-      background: var(--amber); border-radius: 50%;
-    }
-
-    /* Stats */
-    .stats {
+      height: 100vh;
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-      gap: 14px;
-      margin-bottom: 28px;
+      grid-template-columns: 260px 1fr 460px;
+      gap: 0;
+      overflow: hidden;
     }
-    .stat {
-      background: var(--bg-elev);
-      border: 1px solid var(--border);
-      border-radius: 12px;
-      padding: 18px 20px;
-    }
-    .stat-label {
-      font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em;
-      color: var(--text-faint); font-weight: 600;
-    }
-    .stat-value {
-      font-size: 28px; font-weight: 700; letter-spacing: -1px;
-      margin: 8px 0 4px;
-      font-variant-numeric: tabular-nums;
-    }
-    .stat-sub { font-size: 12px; color: var(--text-dim); }
-    .stat-breakdown {
-      display: flex; gap: 4px; flex-wrap: wrap;
-      margin-top: 10px;
-    }
-    .stat-breakdown .bd-item {
-      font-size: 11px; color: var(--text-dim);
-      padding: 2px 8px;
-      background: var(--bg);
-      border: 1px solid var(--border);
-      border-radius: 999px;
-    }
+    .kb-col { overflow-y: auto; border-right: 1px solid var(--border); }
+    .kb-col:last-child { border-right: none; }
+    .kb-col-pad { padding: 18px 16px; }
 
-    /* Section card */
-    .section {
-      background: var(--bg-elev);
-      border: 1px solid var(--border);
-      border-radius: 16px;
-      padding: 26px 28px;
-      margin-bottom: 22px;
+    /* ── Sidebar (col 1) ── */
+    .kb-side h2 { font-size: 16px; font-weight: 700; margin-bottom: 14px; }
+    .kb-side-section {
+      font-size: 10px; font-weight: 700; letter-spacing: .08em;
+      text-transform: uppercase; color: var(--text-faint);
+      margin: 16px 0 6px;
     }
-    .section-head {
-      display: flex; align-items: center; gap: 12px;
-      margin-bottom: 18px;
+    .kb-bucket {
+      display: flex; align-items: center; gap: 8px;
+      padding: 8px 10px; border-radius: 8px;
+      cursor: pointer; font-size: 13px;
+      color: var(--text-dim);
+      transition: background .15s;
+    }
+    .kb-bucket:hover { background: var(--nav-item-hover); color: var(--text); }
+    .kb-bucket.active { background: var(--bg-elev-2); color: var(--text); font-weight: 600; }
+    .kb-bucket .name { flex: 1; }
+    .kb-bucket .count {
+      background: var(--bg-elev-2);
+      color: var(--text-faint);
+      font-size: 11px; font-weight: 600;
+      padding: 1px 7px; border-radius: 10px;
+    }
+    .kb-bucket.active .count { background: var(--accent); color: #fff; }
+
+    /* ── List (col 2) ── */
+    .kb-list { background: var(--bg-elev); }
+    .kb-list-toolbar {
+      position: sticky; top: 0; z-index: 5;
+      padding: 14px 16px;
+      background: var(--bg-elev);
+      border-bottom: 1px solid var(--border);
+      display: flex; align-items: center; gap: 10px;
       flex-wrap: wrap;
     }
-    .section-icon {
-      width: 36px; height: 36px;
-      border-radius: 10px;
-      background: linear-gradient(135deg, rgba(34, 211, 238, 0.10), rgba(168, 85, 247, 0.10));
+    .kb-search {
+      flex: 1; min-width: 200px;
+      padding: 8px 12px;
       border: 1px solid var(--border);
-      display: grid; place-items: center;
-      color: var(--accent-cyan);
-      flex-shrink: 0;
-    }
-    .section-icon svg { width: 18px; height: 18px; }
-    .section-title h3 { font-size: 16px; font-weight: 600; }
-    .section-title .sub { font-size: 12px; color: var(--text-faint); margin-top: 2px; }
-    .section-actions { margin-left: auto; display: flex; gap: 8px; }
-
-    /* Form fields */
-    .field { margin-bottom: 14px; }
-    .field-label {
-      display: block;
-      font-size: 11px;
-      text-transform: uppercase;
-      letter-spacing: 0.06em;
-      font-weight: 600;
-      color: var(--text-faint);
-      margin-bottom: 6px;
-    }
-    .field-input,
-    .field-textarea,
-    .field-select {
-      width: 100%;
-      background: var(--bg);
-      border: 1px solid var(--border);
-      color: var(--text);
-      padding: 10px 12px;
       border-radius: 8px;
-      font-family: inherit;
-      font-size: 13.5px;
-      outline: none;
-      transition: border-color 0.18s ease;
-      color-scheme: dark;
-    }
-    .field-input:focus, .field-textarea:focus, .field-select:focus {
-      border-color: var(--accent-cyan);
-    }
-    .field-textarea { resize: vertical; min-height: 84px; line-height: 1.55; }
-    .field-readonly {
-      background: var(--bg-elev-2);
-      color: var(--text-dim);
-    }
-    .field-grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-    @media (max-width: 600px) { .field-grid-2 { grid-template-columns: 1fr; } }
-
-    /* FAQ list */
-    .faq-list { display: flex; flex-direction: column; gap: 10px; }
-    .faq-item {
       background: var(--bg);
-      border: 1px solid var(--border);
-      border-radius: 10px;
-      padding: 12px 14px;
-      display: flex; flex-direction: column; gap: 8px;
-    }
-    .faq-item .faq-row {
-      display: flex; gap: 8px; align-items: flex-start;
-    }
-    .faq-item input,
-    .faq-item textarea {
-      flex: 1;
-      background: var(--bg-elev-2);
-      border: 1px solid var(--border);
       color: var(--text);
-      padding: 8px 10px;
-      border-radius: 6px;
-      font-family: inherit;
-      font-size: 13px;
+      font: inherit; font-size: 13px;
       outline: none;
     }
-    .faq-item input:focus, .faq-item textarea:focus { border-color: var(--accent-cyan); }
-    .faq-item textarea { resize: vertical; min-height: 56px; }
-    .faq-empty {
-      font-size: 12.5px; color: var(--text-faint);
-      text-align: center;
-      padding: 18px 0;
+    .kb-search:focus { border-color: var(--accent-2); }
+    .btn {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 7px 14px;
+      background: var(--accent); color: #fff; border: none;
+      border-radius: 8px; cursor: pointer; font: inherit;
+      font-size: 12px; font-weight: 600;
     }
+    .btn:hover { opacity: .9; }
+    .btn-ghost {
+      background: var(--bg-elev); color: var(--text-dim);
+      border: 1px solid var(--border);
+    }
+    .btn-ghost:hover { background: var(--bg-elev-2); color: var(--text); }
+    .btn-danger { background: var(--red); }
+    .btn-sm { padding: 5px 10px; font-size: 11px; }
 
-    /* Drag & drop */
-    .uploader {
-      display: grid;
-      grid-template-columns: 1.4fr 1fr;
-      gap: 16px;
-    }
-    @media (max-width: 800px) { .uploader { grid-template-columns: 1fr; } }
-    .dropzone {
-      border: 2px dashed var(--border-strong);
-      border-radius: 12px;
-      padding: 28px 20px;
-      text-align: center;
+    .kb-item-card {
+      padding: 14px 16px;
+      border-bottom: 1px solid var(--border);
       cursor: pointer;
-      transition: all 0.2s ease;
-      background: rgba(255, 255, 255, 0.01);
-      display: flex; flex-direction: column;
-      align-items: center; justify-content: center;
-      gap: 10px;
-      min-height: 200px;
+      transition: background .12s;
     }
-    .dropzone:hover { border-color: var(--accent-cyan); background: rgba(34, 211, 238, 0.04); }
-    .dropzone.dragover { border-color: var(--accent-cyan); background: rgba(34, 211, 238, 0.08); }
-    .dropzone svg { width: 36px; height: 36px; color: var(--text-faint); }
-    .dropzone strong { font-size: 14px; color: var(--text); }
-    .dropzone span { font-size: 12px; color: var(--text-dim); }
-    .dropzone input[type="file"] { display: none; }
-    .dropzone .or {
-      margin-top: 12px;
-      font-size: 11px;
-      color: var(--text-faint);
-      text-transform: uppercase;
-      letter-spacing: 0.08em;
-    }
-
-    .text-paste textarea {
-      min-height: 200px;
-      width: 100%;
-      background: var(--bg);
+    .kb-item-card:hover { background: var(--bg-elev-2); }
+    .kb-item-card.selected { background: var(--bg-elev-2); border-left: 3px solid var(--accent); }
+    .kb-item-title { font-size: 13.5px; font-weight: 600; line-height: 1.3; margin-bottom: 4px; color: var(--text); }
+    .kb-item-meta { font-size: 11px; color: var(--text-faint); display: flex; gap: 10px; align-items: center; }
+    .kb-item-preview { font-size: 12px; color: var(--text-dim); margin-top: 5px; line-height: 1.4;
+      display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+    .agent-pill {
+      display: inline-block;
+      padding: 1px 7px; border-radius: 8px;
+      font-size: 10px; font-weight: 600;
+      background: var(--bg-elev-2); color: var(--text-dim);
       border: 1px solid var(--border);
-      color: var(--text);
-      padding: 12px;
-      border-radius: 12px;
-      font-family: inherit;
-      font-size: 13.5px;
-      line-height: 1.55;
-      resize: vertical;
-      outline: none;
     }
-    .text-paste textarea:focus { border-color: var(--accent-cyan); }
+    .agent-pill.simon  { background: rgba(34,211,238,0.12); color: #0891b2; border-color: rgba(34,211,238,0.3); }
+    .agent-pill.lisa   { background: rgba(244,114,182,0.12); color: #be185d; border-color: rgba(244,114,182,0.3); }
+    .agent-pill.leon   { background: rgba(168,85,247,0.12); color: #6d28d9; border-color: rgba(168,85,247,0.3); }
+    .agent-pill.aron   { background: rgba(245,158,11,0.12); color: #a16207; border-color: rgba(245,158,11,0.3); }
+    .agent-pill.shared { background: rgba(5,150,105,0.12); color: #059669; border-color: rgba(5,150,105,0.3); }
+    .agent-pill.profile { background: var(--accent); color: #fff; border-color: var(--accent); }
 
-    .staging {
-      margin-top: 20px;
-      padding: 18px;
-      background: var(--bg);
-      border: 1px solid var(--accent-cyan);
-      border-radius: 12px;
+    .kb-empty { padding: 40px 16px; text-align: center; color: var(--text-faint); font-size: 13px; }
+
+    /* ── Detail (col 3) ── */
+    .kb-detail { background: var(--bg); }
+    .kb-detail-empty {
+      height: 100%;
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      color: var(--text-faint); font-size: 13px; padding: 40px;
+      text-align: center;
     }
-    .staging-head {
-      display: flex; justify-content: space-between; align-items: center;
-      margin-bottom: 12px;
-    }
-    .staging-head .title {
-      font-size: 13px; font-weight: 600;
+    .kb-detail-head {
+      padding: 16px 20px;
+      border-bottom: 1px solid var(--border);
+      background: var(--bg-elev);
       display: flex; align-items: center; gap: 8px;
     }
-    .staging-source {
-      font-size: 11px; color: var(--text-faint);
-      padding: 3px 9px;
-      background: var(--bg-elev-2);
-      border: 1px solid var(--border);
-      border-radius: 999px;
+    .kb-detail-head .title { flex: 1; font-size: 15px; font-weight: 700; }
+    .kb-detail-body { padding: 20px; }
+    .kb-detail-content {
+      font-size: 13.5px; line-height: 1.6; color: var(--text);
     }
-    .staging-status {
-      font-size: 12px; color: var(--text-dim);
-    }
-    .staging-loading {
-      display: inline-flex; align-items: center; gap: 8px;
-      color: var(--accent-cyan);
-      font-size: 12px;
-    }
-    .staging-loading::before {
-      content: '';
-      width: 14px; height: 14px;
-      border: 2px solid var(--border);
-      border-top-color: var(--accent-cyan);
-      border-radius: 50%;
-      animation: spin 0.8s linear infinite;
-    }
-    @keyframes spin { to { transform: rotate(360deg); } }
-    .staging-actions {
-      display: flex; gap: 8px;
-      margin-top: 12px;
-      flex-wrap: wrap;
-    }
+    .kb-detail-content h1, .kb-detail-content h2, .kb-detail-content h3 { font-weight: 700; margin: 1em 0 .4em; }
+    .kb-detail-content h1 { font-size: 18px; }
+    .kb-detail-content h2 { font-size: 16px; }
+    .kb-detail-content h3 { font-size: 14px; }
+    .kb-detail-content p { margin-bottom: .6em; }
+    .kb-detail-content ul, .kb-detail-content ol { padding-left: 22px; margin-bottom: .6em; }
+    .kb-detail-content code { background: var(--bg-elev-2); padding: 1px 5px; border-radius: 4px; font-family: 'Menlo', monospace; font-size: 12px; }
+    .kb-detail-content pre { background: var(--bg-elev-2); padding: 10px 12px; border-radius: 6px; overflow-x: auto; margin-bottom: .6em; }
+    .kb-detail-content pre code { background: transparent; padding: 0; }
+    .kb-detail-content blockquote { border-left: 3px solid var(--border-strong); padding-left: 10px; color: var(--text-dim); margin-bottom: .6em; }
+    .kb-detail-content a { color: var(--accent-cyan); text-decoration: underline; }
 
-    /* Items list */
-    .filter-row {
-      display: flex; gap: 12px; align-items: center;
-      flex-wrap: wrap;
-      margin-bottom: 16px;
+    .kb-meta-row {
+      display: grid; grid-template-columns: 1fr 1fr; gap: 14px 18px;
+      padding: 12px 0;
+      border-top: 1px solid var(--border);
+      margin-top: 18px;
     }
-    .search-input {
-      flex: 1;
-      min-width: 220px;
-      background: var(--bg);
+    .kb-meta-cell .label { font-size: 10px; color: var(--text-faint); text-transform: uppercase; letter-spacing: .06em; font-weight: 600; }
+    .kb-meta-cell .value { font-size: 13px; margin-top: 3px; color: var(--text); }
+
+    .kb-agent-toggles {
+      display: flex; flex-wrap: wrap; gap: 6px;
+      margin-top: 4px;
+    }
+    .agent-toggle {
+      cursor: pointer; user-select: none;
+      padding: 4px 10px; border-radius: 14px;
+      font-size: 11px; font-weight: 600;
+      background: var(--bg-elev-2); color: var(--text-faint);
       border: 1px solid var(--border);
-      color: var(--text);
-      padding: 9px 12px;
+      transition: all .12s;
+    }
+    .agent-toggle:hover { color: var(--text); }
+    .agent-toggle.on { background: var(--accent); color: #fff; border-color: var(--accent); }
+    .agent-toggle.disabled { opacity: .5; cursor: not-allowed; }
+
+    /* ── Edit-mode (split-view) ── */
+    .kb-edit-grid {
+      display: grid; grid-template-columns: 1fr 1fr; gap: 14px;
+      height: calc(100vh - 200px);
+    }
+    .kb-edit-pane {
+      display: flex; flex-direction: column;
+      border: 1px solid var(--border);
       border-radius: 8px;
-      font-family: inherit;
-      font-size: 13px;
-      outline: none;
-    }
-    .search-input:focus { border-color: var(--accent-cyan); }
-    .type-pills { display: flex; gap: 6px; flex-wrap: wrap; }
-    .pill {
-      font-family: inherit;
-      font-size: 12.5px; font-weight: 500;
-      padding: 7px 12px;
-      border-radius: 999px;
-      background: var(--bg);
-      border: 1px solid var(--border);
-      color: var(--text-dim);
-      cursor: pointer;
-      transition: all 0.18s ease;
-      display: inline-flex; align-items: center; gap: 6px;
-    }
-    .pill:hover { border-color: var(--border-strong); color: var(--text); }
-    .pill.active { background: var(--text); color: var(--bg); border-color: var(--text); }
-    .pill .pill-count {
-      font-size: 11px;
-      padding: 1px 6px;
-      border-radius: 999px;
-      background: rgba(255,255,255,0.08);
-      font-weight: 600;
-      font-variant-numeric: tabular-nums;
-    }
-    .pill.active .pill-count { background: rgba(0,0,0,0.15); }
-
-    .item-list { display: flex; flex-direction: column; gap: 10px; }
-    .item-empty {
-      padding: 32px 16px;
-      text-align: center;
-      font-size: 13px;
-      color: var(--text-faint);
-      background: var(--bg);
-      border: 1px dashed var(--border);
-      border-radius: 10px;
-    }
-    .item-card {
-      background: var(--bg);
-      border: 1px solid var(--border);
-      border-radius: 10px;
-      padding: 14px 16px;
-    }
-    .item-meta {
-      display: flex;
-      gap: 8px;
-      align-items: center;
-      margin-bottom: 8px;
-      flex-wrap: wrap;
-      font-size: 11px;
-    }
-    .item-meta .badge {
-      font-weight: 600;
-      padding: 3px 9px;
-      border-radius: 6px;
-      letter-spacing: 0.02em;
-      border: 1px solid;
-    }
-    .badge-Klantvraag   { color: var(--amber);         background: rgba(245, 158, 11, 0.10); border-color: rgba(245, 158, 11, 0.25); }
-    .badge-Factuurvraag { color: var(--red);           background: rgba(239, 68, 68, 0.10);  border-color: rgba(239, 68, 68, 0.25); }
-    .badge-Klacht       { color: #f97316;              background: rgba(249, 115, 22, 0.10); border-color: rgba(249, 115, 22, 0.25); }
-    .badge-Algemeen     { color: var(--accent-cyan);   background: rgba(34, 211, 238, 0.10); border-color: rgba(34, 211, 238, 0.25); }
-    .badge-Overige      { color: var(--text-dim);      background: rgba(148, 163, 184, 0.08); border-color: rgba(148, 163, 184, 0.20); }
-    .item-meta .arrow {
-      font-weight: 600;
-      color: var(--text-faint);
-      padding: 3px 8px;
-      background: var(--bg-elev-2);
-      border-radius: 6px;
-    }
-    .item-meta .date { color: var(--text-faint); margin-left: auto; }
-    .item-content {
-      font-size: 13px;
-      color: var(--text-dim);
-      line-height: 1.55;
-      white-space: pre-wrap;
-      word-break: break-word;
-      max-height: 90px;
       overflow: hidden;
-      position: relative;
     }
-    .item-content.expanded { max-height: none; }
-    .item-content::after {
-      content: '';
-      position: absolute;
-      bottom: 0; left: 0; right: 0;
-      height: 28px;
-      background: linear-gradient(to bottom, transparent, var(--bg));
-      pointer-events: none;
-    }
-    .item-content.expanded::after { display: none; }
-    .item-note {
-      font-size: 12px;
+    .kb-edit-pane-head {
+      padding: 6px 10px;
+      font-size: 10px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase;
       color: var(--text-faint);
-      font-style: italic;
-      margin-top: 8px;
-      padding-top: 8px;
-      border-top: 1px dashed var(--border);
+      background: var(--bg-elev-2);
+      border-bottom: 1px solid var(--border);
     }
-    .item-actions {
-      display: flex; gap: 6px;
+    .kb-edit-textarea {
+      flex: 1; width: 100%;
+      padding: 12px;
+      border: none; outline: none;
+      background: var(--bg-elev);
+      color: var(--text);
+      font-family: 'Menlo', monospace; font-size: 13px;
+      line-height: 1.5;
+      resize: none;
+    }
+    .kb-edit-preview {
+      flex: 1; padding: 14px;
+      overflow-y: auto;
+      background: var(--bg-elev);
+      font-size: 13.5px; line-height: 1.6;
+    }
+    .kb-edit-title-input {
+      width: 100%; padding: 10px 12px;
+      border: 1px solid var(--border); border-radius: 8px;
+      background: var(--bg-elev);
+      color: var(--text);
+      font: inherit; font-size: 15px; font-weight: 600;
+      outline: none; margin-bottom: 14px;
+    }
+    .kb-edit-title-input:focus { border-color: var(--accent-2); }
+    .kb-edit-actions {
+      display: flex; gap: 8px; justify-content: flex-end;
+      padding: 12px 0 0;
+      border-top: 1px solid var(--border);
       margin-top: 12px;
-      flex-wrap: wrap;
     }
-    .item-actions .btn { padding: 5px 10px; font-size: 12px; }
 
-    /* Activate toggle */
-    .toggle-row {
-      display: flex;
-      align-items: center;
-      gap: 14px;
-      padding: 16px 18px;
-      background: var(--bg);
+    /* ── Versie-modal ── */
+    .modal-overlay {
+      position: fixed; inset: 0;
+      background: rgba(0,0,0,0.5);
+      display: none; z-index: 1000;
+      align-items: center; justify-content: center;
+      padding: 16px;
+    }
+    .modal-overlay.show { display: flex; }
+    .modal-card {
+      background: var(--bg-elev);
       border: 1px solid var(--border);
       border-radius: 12px;
+      width: 100%; max-width: 720px;
+      max-height: 80vh;
+      display: flex; flex-direction: column;
+      overflow: hidden;
     }
-    .toggle-info { flex: 1; }
-    .toggle-info h4 { font-size: 14px; font-weight: 600; margin-bottom: 4px; }
-    .toggle-info p { font-size: 12.5px; color: var(--text-dim); line-height: 1.45; }
-    .toggle-switch {
-      position: relative;
-      width: 46px;
-      height: 26px;
-      flex-shrink: 0;
+    .modal-head {
+      padding: 14px 20px;
+      border-bottom: 1px solid var(--border);
+      display: flex; align-items: center; justify-content: space-between;
     }
-    .toggle-switch input {
-      opacity: 0;
-      position: absolute;
-      width: 100%; height: 100%;
-      cursor: pointer;
-      z-index: 1;
+    .modal-head .title { font-size: 15px; font-weight: 700; }
+    .modal-close {
+      background: none; border: none;
+      font-size: 22px; line-height: 1; color: var(--text-faint);
+      cursor: pointer; padding: 0 4px;
     }
-    .toggle-track {
-      position: absolute;
-      inset: 0;
-      background: var(--bg-elev-2);
-      border: 1px solid var(--border-strong);
-      border-radius: 999px;
-      transition: all 0.2s;
+    .modal-close:hover { color: var(--text); }
+    .modal-body { padding: 16px 20px; overflow-y: auto; flex: 1; }
+    .version-row {
+      padding: 10px 12px;
+      border: 1px solid var(--border); border-radius: 8px;
+      margin-bottom: 8px;
     }
-    .toggle-knob {
-      position: absolute;
-      top: 2px;
-      left: 2px;
-      width: 20px;
-      height: 20px;
-      background: var(--text-dim);
-      border-radius: 50%;
-      transition: all 0.2s;
+    .version-row .row-head {
+      display: flex; justify-content: space-between; align-items: center;
+      font-size: 11px; color: var(--text-faint); margin-bottom: 5px;
     }
-    .toggle-switch input:checked ~ .toggle-track {
-      background: var(--accent-grad);
-      border-color: transparent;
+    .version-row .row-title { font-size: 13px; font-weight: 600; }
+    .version-row .row-preview {
+      font-size: 12px; color: var(--text-dim);
+      max-height: 40px; overflow: hidden;
+      margin-top: 4px;
     }
-    .toggle-switch input:checked ~ .toggle-track .toggle-knob {
-      left: 22px;
-      background: white;
-    }
+    .version-actions { margin-top: 8px; display: flex; gap: 6px; }
 
-    /* Toast */
+    /* ── Toast ── */
     .toast {
-      position: fixed;
-      bottom: 28px;
-      left: 50%;
-      transform: translate(-50%, 20px);
-      background: var(--bg-elev-2);
-      border: 1px solid var(--border-strong);
-      color: var(--text);
-      padding: 11px 20px;
-      border-radius: 999px;
-      font-size: 13px;
-      font-weight: 500;
-      opacity: 0;
-      transition: opacity 0.25s ease, transform 0.25s ease;
-      z-index: 1000;
-      box-shadow: 0 14px 50px rgba(0, 0, 0, 0.5);
-      pointer-events: none;
-      max-width: calc(100vw - 40px);
-      text-align: center;
+      position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
+      padding: 10px 18px; border-radius: 8px;
+      background: var(--accent); color: #fff;
+      font-size: 13px; font-weight: 500;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.18);
+      z-index: 2000;
+      opacity: 0; pointer-events: none;
+      transition: opacity .2s;
     }
-    .toast.show { opacity: 1; transform: translate(-50%, 0); }
+    .toast.show { opacity: 1; }
+    .toast.error { background: var(--red); }
+    .toast.success { background: var(--green); }
 
-    @media (max-width: 600px) {
-      .app { padding: 20px 16px 48px; }
-      .section { padding: 20px; }
+    @media (max-width: 1280px) {
+      .app { grid-template-columns: 220px 1fr 400px; }
     }
-
-    /* ══ Sidebar ══ */
-    .sidebar { position: fixed; top: 0; left: 0; bottom: 0; width: 220px; background: var(--bg-elev); border-right: 1px solid var(--border); display: flex; flex-direction: column; z-index: 200; overflow-y: auto; overflow-x: hidden; }
-    .sidebar-logo { display: flex; align-items: center; justify-content: center; padding: 14px 16px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
-    .sidebar-logo img { max-height: 40px; width: auto; max-width: 160px; object-fit: contain; display: block; }
-    .sidebar-logo .logo-dark  { display: block; }
-    .sidebar-logo .logo-light { display: none; }
-    [data-theme="dark"] .sidebar-logo .logo-dark  { display: none; }
-    [data-theme="dark"] .sidebar-logo .logo-light { display: block; }
-    .sidebar-nav { flex: 1; padding: 10px 8px; overflow-y: auto; }
-    .nav-section { font-size: 10px; text-transform: uppercase; letter-spacing: .7px; color: var(--text-faint); font-weight: 600; padding: 14px 10px 5px; }
-    .nav-item { display: flex; align-items: center; gap: 9px; padding: 8px 10px; border-radius: 8px; color: var(--text-dim); font-size: 13px; font-weight: 500; text-decoration: none; cursor: pointer; transition: background .15s, color .15s; margin-bottom: 1px; }
-    .nav-item:hover:not(.nav-concept) { background: var(--nav-item-hover); color: var(--text); }
-    .nav-item.active { background: var(--nav-item-active); color: var(--nav-item-active-text); }
-    .nav-item.nav-concept { color: var(--text-faint); cursor: default; opacity: .65; }
-    .nav-icon { width: 15px; height: 15px; flex-shrink: 0; }
-    .nav-badge { margin-left: auto; background: var(--red); color: #fff; font-size: 10px; font-weight: 700; border-radius: 10px; padding: 1px 6px; display: none; }
-    .nav-badge.show { display: inline-block; }
-    .nav-soon { margin-left: auto; font-size: 9px; font-weight: 600; color: var(--text-faint); background: var(--bg-elev-2); border-radius: 4px; padding: 1px 5px; }
-    .sidebar-footer { flex-shrink: 0; padding: 8px 8px 14px; border-top: 1px solid var(--border); }
-    .footer-user { display: flex; align-items: center; gap: 9px; padding: 9px 10px; border-radius: 8px; color: var(--text-dim); font-size: 13px; font-weight: 500; cursor: pointer; transition: background .15s; }
-    .footer-user:hover { background: var(--nav-item-hover); color: var(--text); }
-    .footer-avatar { width: 26px; height: 26px; flex-shrink: 0; border-radius: 50%; background: var(--accent-grad); display: grid; place-items: center; font-size: 10px; font-weight: 800; color: #fff; }
-    /* ── KB Tags (F4.2) ─────────────────────────────────────────── */
-    .kb-tag-chip { display:inline-flex; align-items:center; gap:5px; padding:3px 9px; border-radius:12px; font-size:11px; font-weight:600; color:#fff; line-height:1.3; white-space:nowrap; }
-    .kb-tag-chip .kb-tag-x { cursor:pointer; opacity:.85; font-size:13px; line-height:1; display:inline-flex; }
-    .kb-tag-chip .kb-tag-x:hover { opacity:1; }
-    .tags-toolbar { display:flex; gap:10px; align-items:center; margin-bottom:14px; flex-wrap:wrap; }
-    .tags-grid { display:flex; flex-wrap:wrap; gap:8px; }
-    .tag-manage { display:inline-flex; align-items:center; gap:8px; padding:6px 10px; border-radius:12px; border:1px solid var(--border); background:var(--bg-elev); }
-    .tag-manage .tag-dot { width:12px; height:12px; border-radius:50%; flex-shrink:0; }
-    .tag-manage .tag-name { font-size:12px; font-weight:600; color:var(--text); cursor:pointer; }
-    .tag-manage .tag-desc { font-size:11px; color:var(--text-faint); }
-    .tag-manage .tag-del { background:none; border:none; color:var(--text-faint); cursor:pointer; font-size:15px; line-height:1; padding:0 2px; }
-    .tag-manage .tag-del:hover { color:var(--red); }
-    /* Filter op tags */
-    .tag-filter-row { display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-top:12px; padding-top:12px; border-top:1px solid var(--border); }
-    .tag-filter-row .tf-label { font-size:12px; font-weight:600; color:var(--text-dim); }
-    .tag-filter-chip { cursor:pointer; opacity:.4; transition:opacity .12s; }
-    .tag-filter-chip.active { opacity:1; box-shadow:0 0 0 2px var(--bg), 0 0 0 4px currentColor; }
-    .tf-mode { display:inline-flex; border:1px solid var(--border); border-radius:8px; overflow:hidden; }
-    .tf-mode button { background:var(--bg-elev); border:none; padding:4px 10px; font-size:11px; font-weight:700; color:var(--text-faint); cursor:pointer; font-family:inherit; }
-    .tf-mode button.active { background:var(--text); color:var(--bg); }
-    .tf-clear { background:none; border:none; color:var(--accent-cyan); font-size:12px; cursor:pointer; font-family:inherit; }
-    /* Per-item tag rij */
-    .item-tags { display:flex; align-items:center; gap:6px; flex-wrap:wrap; margin-top:8px; position:relative; }
-    .item-tags .it-add, .item-tags .it-ai { background:none; border:1px dashed var(--border-strong,var(--border)); border-radius:12px; padding:3px 9px; font-size:11px; cursor:pointer; font-family:inherit; display:inline-flex; align-items:center; gap:3px; }
-    .item-tags .it-add { color:var(--text-dim); }
-    .item-tags .it-add:hover { color:var(--text); border-color:var(--text); }
-    .item-tags .it-ai { color:var(--accent-cyan); border-style:solid; border-color:var(--accent-cyan); }
-    .item-tags .it-ai:hover { background:rgba(34,211,238,0.10); }
-    .it-ai .spin, .ai-spin { width:11px; height:11px; border:2px solid currentColor; border-top-color:transparent; border-radius:50%; display:inline-block; animation:kbspin .7s linear infinite; }
-    @keyframes kbspin { to { transform:rotate(360deg); } }
-    /* Tag-picker dropdown */
-    .tag-pop { position:absolute; z-index:50; top:100%; left:0; margin-top:4px; background:var(--bg-elev); border:1px solid var(--border-strong,var(--border)); border-radius:10px; padding:8px; min-width:180px; max-height:240px; overflow-y:auto; box-shadow:0 8px 24px rgba(0,0,0,.18); display:flex; flex-direction:column; gap:3px; }
-    .tag-pop button { text-align:left; background:none; border:none; padding:4px 6px; border-radius:6px; cursor:pointer; font-family:inherit; display:flex; align-items:center; gap:6px; font-size:12px; color:var(--text); }
-    .tag-pop button:hover { background:var(--nav-item-hover); }
-    .tag-pop .tp-dot { width:10px; height:10px; border-radius:50%; flex-shrink:0; }
-    .tag-pop .tp-empty { font-size:11px; color:var(--text-faint); padding:4px 6px; }
-    /* Modal */
-    .kb-modal { position:fixed; inset:0; background:rgba(0,0,0,.55); z-index:500; display:flex; align-items:center; justify-content:center; padding:20px; }
-    .kb-modal.hidden { display:none; }
-    .kb-modal-card { background:var(--bg-elev); border:1px solid var(--border-strong,var(--border)); border-radius:14px; width:100%; max-width:440px; max-height:90vh; overflow-y:auto; }
-    .kb-modal-head { display:flex; align-items:center; justify-content:space-between; padding:14px 18px; border-bottom:1px solid var(--border); font-weight:700; font-size:15px; }
-    .kb-modal-close { background:none; border:none; color:var(--text-faint); font-size:22px; cursor:pointer; line-height:1; }
-    .kb-modal-body { padding:16px 18px; display:flex; flex-direction:column; gap:14px; }
-    .kb-modal-foot { display:flex; gap:8px; justify-content:flex-end; padding:0 18px 16px; }
-    .kb-color-row { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
-    .kb-color-row input[type=color] { width:42px; height:34px; border:1px solid var(--border); border-radius:8px; background:none; cursor:pointer; padding:2px; }
-    .kb-swatches { display:flex; gap:6px; flex-wrap:wrap; }
-    .kb-swatch { width:22px; height:22px; border-radius:50%; cursor:pointer; border:2px solid transparent; }
-    .kb-swatch.sel { border-color:var(--text); }
-    .kb-ai-tag-row { display:flex; align-items:center; gap:8px; padding:8px 10px; border:1px solid var(--border); border-radius:10px; }
-    .kb-ai-tag-row .spacer { flex:1; }
-    .kb-ai-reason { font-size:12px; color:var(--text-dim); background:var(--bg); border-radius:8px; padding:10px; line-height:1.5; }
+    @media (max-width: 1024px) {
+      .app { grid-template-columns: 1fr; grid-template-rows: auto auto 1fr; height: auto; overflow: visible; }
+      .kb-col { border-right: none; border-bottom: 1px solid var(--border); max-height: 400px; }
+    }
   </style>
 </head>
 <body>
 <div id="sidebar-mount"></div>
-<script>(function(){try{const t=JSON.parse(localStorage.getItem('taken_lijst')||'[]');const u=t.filter(x=>x.status!=='done'&&(x.prioriteit==='Urgent'||x.prioriteit==='Hoog'));if(u.length){const b=document.getElementById('navTakenBadge');if(b){b.textContent=u.length;b.classList.add('show');}}}catch(e){}})();</script>
-  <div class="app">
-    <header>
-      <div class="brand">
-        <a href="../index.html" style="text-decoration:none;"><div class="logo-mark">AC</div></a>
-        <div>
-          <h1>Kennisbank</h1>
-          <div class="crumb">
-            <a href="../index.html">Command Center</a>
-            <span class="sep">/</span>
-            Modules
-            <span class="sep">/</span>
-            Kennisbank
-          </div>
-        </div>
-      </div>
-      <div class="header-actions">
-        <a href="email.html" class="btn">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <rect x="3" y="5" width="18" height="14" rx="2"></rect>
-            <path d="m3 7 9 6 9-6"></path>
-          </svg>
-          E-mail module
-        </a>
-        <a href="../index.html" class="btn">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <line x1="19" y1="12" x2="5" y2="12"></line>
-            <polyline points="12 19 5 12 12 5"></polyline>
-          </svg>
-          Terug
-        </a>
-      </div>
-    </header>
 
-    <div class="page-head">
-      <h2>Kennisbank</h2>
-      <div class="desc">Centrale leermodule — alle AI-bots gebruiken dit profiel + leermateriaal als context bij het opstellen van antwoorden.</div>
+<div class="app">
+  <!-- COL 1: agent-buckets -->
+  <aside class="kb-col kb-side kb-col-pad" id="sideCol">
+    <h2>Kennisbank</h2>
+    <div class="kb-side-section">Per agent</div>
+    <div id="bucketList">
+      <div class="kb-bucket active" data-bucket="all"><span class="name">Alle items</span><span class="count" id="cnt-all">—</span></div>
+      <div class="kb-bucket" data-bucket="profile"><span class="name">Bedrijfsprofiel</span><span class="count" id="cnt-profile">—</span></div>
+      <div class="kb-bucket" data-bucket="simon"><span class="name">Simon (e-mail)</span><span class="count" id="cnt-simon">—</span></div>
+      <div class="kb-bucket" data-bucket="lisa"><span class="name">Lisa (Instagram)</span><span class="count" id="cnt-lisa">—</span></div>
+      <div class="kb-bucket" data-bucket="leon"><span class="name">Leon (admin)</span><span class="count" id="cnt-leon">—</span></div>
+      <div class="kb-bucket" data-bucket="aron"><span class="name">Aron (finance)</span><span class="count" id="cnt-aron">—</span></div>
+      <div class="kb-bucket" data-bucket="shared"><span class="name">Gedeeld</span><span class="count" id="cnt-shared">—</span></div>
     </div>
+  </aside>
 
-    <!-- Stats -->
-    <section class="stats" id="stats"></section>
+  <!-- COL 2: item-list -->
+  <section class="kb-col kb-list">
+    <div class="kb-list-toolbar">
+      <input class="kb-search" id="searchInput" type="search" placeholder="Zoek titel of inhoud…" />
+      <button class="btn" id="newItemBtn">+ Nieuw item</button>
+    </div>
+    <div id="itemList"></div>
+  </section>
 
-    <!-- Bedrijfsprofiel -->
-    <section class="section">
-      <div class="section-head">
-        <div class="section-icon">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M3 9.5L12 3l9 6.5V21H3V9.5z"></path>
-            <path d="M9 21V12h6v9"></path>
-          </svg>
-        </div>
-        <div class="section-title">
-          <h3>Bedrijfsprofiel <span id="profileDirty" class="dirty-indicator" style="display:none;">niet opgeslagen</span></h3>
-          <div class="sub">Vaste informatie die alle AI-bots altijd meekrijgen als context</div>
-        </div>
-        <div class="section-actions">
-          <button class="btn btn-primary" id="saveProfileBtn">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
-            Profiel opslaan
-          </button>
-        </div>
-      </div>
-
-      <div class="field-grid-2">
-        <div class="field">
-          <label class="field-label">Bedrijfsnaam</label>
-          <input class="field-input field-readonly" id="bedrijfsnaam" readonly />
-        </div>
-        <div class="field">
-          <label class="field-label">Tone of voice</label>
-          <input class="field-input field-readonly" id="toneOfVoice" readonly />
-        </div>
-      </div>
-
-      <div class="field">
-        <label class="field-label" for="overOns">Over ons</label>
-        <textarea class="field-textarea" id="overOns" placeholder="Korte beschrijving van het bedrijf — wie zijn jullie, wat doen jullie, voor wie?"></textarea>
-      </div>
-
-      <div class="field">
-        <label class="field-label" for="nooitZeggen">Wat we NOOIT zeggen in communicatie</label>
-        <textarea class="field-textarea" id="nooitZeggen" placeholder="Verboden formuleringen, claims of toon. Bijv: 'gegarandeerde winst', 'risico-vrij', overdreven verkooppraat..."></textarea>
-      </div>
-
-      <div class="field">
-        <label class="field-label">Veelgestelde vragen + standaardantwoorden</label>
-        <div class="faq-list" id="faqList"></div>
-        <button class="btn" id="addFaqBtn" style="margin-top: 10px;">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
-          Vraag toevoegen
-        </button>
-      </div>
-
-      <div class="field">
-        <label class="field-label" for="contactgegevens">Contactgegevens (mogen in antwoorden gebruikt worden)</label>
-        <textarea class="field-textarea" id="contactgegevens" placeholder="E-mail, telefoonnummer, openingstijden, adres — wat de bot mag delen in antwoorden."></textarea>
-      </div>
-    </section>
-
-    <!-- Upload -->
-    <section class="section">
-      <div class="section-head">
-        <div class="section-icon">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-            <polyline points="17 8 12 3 7 8"></polyline>
-            <line x1="12" y1="3" x2="12" y2="15"></line>
-          </svg>
-        </div>
-        <div class="section-title">
-          <h3>Leermateriaal toevoegen</h3>
-          <div class="sub">Sleep een bestand of plak tekst — screenshots worden automatisch via Vision API uitgelezen</div>
-        </div>
-      </div>
-
-      <div class="uploader">
-        <div class="dropzone" id="dropzone" tabindex="0" role="button" aria-label="Bestand kiezen of slepen">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-            <polyline points="17 8 12 3 7 8"></polyline>
-            <line x1="12" y1="3" x2="12" y2="15"></line>
-          </svg>
-          <strong>Sleep een bestand hierheen</strong>
-          <span>.txt, .pdf, .png, .jpg — of klik om te kiezen</span>
-          <input type="file" id="fileInput" accept=".txt,.pdf,.png,.jpg,.jpeg,image/png,image/jpeg,application/pdf,text/plain" />
-          <span class="or">of plak tekst rechts ↗</span>
-        </div>
-
-        <div class="text-paste">
-          <textarea id="textPaste" placeholder="Plak hier directe tekst in (bijv. een mailantwoord, een procedure, een kennisartikel)…"></textarea>
-          <button class="btn" id="useTextBtn" style="margin-top: 10px;">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 11 12 14 22 4"></polyline><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path></svg>
-            Tekst gebruiken
-          </button>
-        </div>
-      </div>
-
-      <div id="staging"></div>
-    </section>
-
-    <!-- Tags (F4.2) -->
-    <section class="section" id="tagsSection">
-      <div class="section-head">
-        <div class="section-icon">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"></path><line x1="7" y1="7" x2="7.01" y2="7"></line></svg>
-        </div>
-        <div class="section-title">
-          <h3>Tags <span id="tagsCount" style="color:var(--text-faint); font-weight:500;"></span></h3>
-          <div class="sub">Label kennisbank-items zodat Lisa en filters de juiste kennis vinden</div>
-        </div>
-        <div class="section-actions">
-          <button class="btn btn-primary" id="newTagBtn">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
-            Nieuwe tag
-          </button>
-        </div>
-      </div>
-      <div class="tags-toolbar">
-        <input type="search" id="tagSearch" class="search-input" placeholder="Zoek tags…" style="max-width:260px" />
-      </div>
-      <div class="tags-grid" id="tagsList"></div>
-    </section>
-
-    <!-- Overzicht -->
-    <section class="section">
-      <div class="section-head">
-        <div class="section-icon">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <line x1="8" y1="6" x2="21" y2="6"></line><line x1="8" y1="12" x2="21" y2="12"></line><line x1="8" y1="18" x2="21" y2="18"></line>
-            <line x1="3" y1="6" x2="3.01" y2="6"></line><line x1="3" y1="12" x2="3.01" y2="12"></line><line x1="3" y1="18" x2="3.01" y2="18"></line>
-          </svg>
-        </div>
-        <div class="section-title">
-          <h3>Overzicht <span id="overviewCount" style="color:var(--text-faint); font-weight:500;"></span></h3>
-          <div class="sub">Alle opgeslagen leermateriaal — zoek, filter en beheer</div>
-        </div>
-      </div>
-
-      <div class="filter-row">
-        <input type="search" id="searchInput" class="search-input" placeholder="Zoek in inhoud of notities…" />
-        <div class="type-pills" id="typePills"></div>
-      </div>
-
-      <div class="tag-filter-row" id="tagFilterRow" style="display:none"></div>
-
-      <div class="item-list" id="itemList"></div>
-    </section>
-
-    <!-- Activeer toggle -->
-    <section class="section">
-      <div class="section-head">
-        <div class="section-icon">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <polyline points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polyline>
-          </svg>
-        </div>
-        <div class="section-title">
-          <h3>Activeren voor AI-bots</h3>
-          <div class="sub">Wanneer aan: e-mail bot gebruikt automatisch profiel + alle leermateriaal als context</div>
-        </div>
-      </div>
-
-      <div class="toggle-row">
-        <div class="toggle-info">
-          <h4>Kennisbank activeren voor e-mail bot</h4>
-          <p>Bij elke "Genereer antwoord" actie in de e-mail module wordt het volledige bedrijfsprofiel + alle relevante kennisbank-items meegestuurd als context naar het AI-model.</p>
-        </div>
-        <label class="toggle-switch">
-          <input type="checkbox" id="activeToggle" />
-          <div class="toggle-track">
-            <div class="toggle-knob"></div>
-          </div>
-        </label>
-      </div>
-    </section>
-  </div>
-
-  <!-- Tag modal (F4.2) -->
-  <div class="kb-modal hidden" id="tagModal">
-    <div class="kb-modal-card">
-      <div class="kb-modal-head"><span id="tagModalTitle">Nieuwe tag</span><button class="kb-modal-close" data-tag-modal-close>&times;</button></div>
-      <div class="kb-modal-body">
-        <div class="field">
-          <label class="field-label" for="tagNameInput">Naam</label>
-          <input class="field-input" id="tagNameInput" maxlength="60" placeholder="bv. lisa-product" />
-        </div>
-        <div class="field">
-          <label class="field-label">Kleur</label>
-          <div class="kb-color-row">
-            <input type="color" id="tagColorInput" value="#6B7280" />
-            <div class="kb-swatches" id="tagSwatches"></div>
-          </div>
-        </div>
-        <div class="field">
-          <label class="field-label" for="tagDescInput">Omschrijving <span style="color:var(--text-faint);font-weight:400">(optioneel)</span></label>
-          <textarea class="field-textarea" id="tagDescInput" style="min-height:60px" placeholder="Waar gaat deze tag over?"></textarea>
-        </div>
-      </div>
-      <div class="kb-modal-foot">
-        <button class="btn" data-tag-modal-close>Annuleren</button>
-        <button class="btn btn-primary" id="tagSaveBtn">Opslaan</button>
+  <!-- COL 3: detail -->
+  <aside class="kb-col kb-detail">
+    <div id="detailMount">
+      <div class="kb-detail-empty">
+        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" style="opacity:.5;margin-bottom:14px"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>
+        <p>Selecteer een item links om de details te zien.</p>
+        <p style="margin-top:6px;font-size:11px">Of klik <strong>+ Nieuw item</strong>.</p>
       </div>
     </div>
-  </div>
+  </aside>
+</div>
 
-  <!-- AI tag-suggestie modal (F4.2d) -->
-  <div class="kb-modal hidden" id="aiTagModal">
-    <div class="kb-modal-card">
-      <div class="kb-modal-head"><span>✨ AI tag-suggesties</span><button class="kb-modal-close" data-aitag-close>&times;</button></div>
-      <div class="kb-modal-body" id="aiTagBody"></div>
-      <div class="kb-modal-foot" id="aiTagFoot"></div>
+<!-- Version history modal -->
+<div class="modal-overlay" id="versionModal">
+  <div class="modal-card">
+    <div class="modal-head">
+      <span class="title">Versie-historie</span>
+      <button class="modal-close" id="closeVersionsBtn">&times;</button>
     </div>
+    <div class="modal-body" id="versionList"></div>
   </div>
+</div>
 
-  <script src="/modules/shared/supabase-client.js"></script>
-  <script src="/modules/shared/agent-shared.js"></script>
-  <script src="/modules/shared/theme-shared.js"></script>
-  <script>
-    /* ─────────────────────────────────────────────────────────────
-       Constants & state
-       ───────────────────────────────────────────────────────────── */
-    const ACTIVE_KEY         = 'kennisbank_active';
-    const REPLY_STATS_KEY    = 'email_reply_stats';
-    const LEARNING_KEY       = 'email_learning_examples';
+<div class="toast" id="toast"></div>
 
-    // Eenmalige localStorage cleanup — kennisbank is nu volledig Supabase-first
-    if (!sessionStorage.getItem('kb_migrated_v2')) {
-      try { localStorage.removeItem('kennisbank_items');  } catch {}
-      try { localStorage.removeItem('kennisbank_profile'); } catch {}
-      sessionStorage.setItem('kb_migrated_v2', '1');
-    }
-
-    const TYPES = ['Klantvraag', 'Factuurvraag', 'Klacht', 'Algemeen', 'Overige'];
-
-    function loadJson(key, fallback) {
-      try {
-        const raw = localStorage.getItem(key);
-        if (!raw) return fallback;
-        const parsed = JSON.parse(raw);
-        return parsed ?? fallback;
-      } catch { return fallback; }
-    }
-    function saveJson(key, value) {
-      try { localStorage.setItem(key, JSON.stringify(value)); return true; } catch { return false; }
-    }
-
-    // ── Supabase — single source of truth ─────────────────────────────────
-    async function loadFromSupabase() {
-      $('itemList').innerHTML = '<div class="item-empty" style="opacity:0.6">Kennisbank laden…</div>';
-      try {
-        const res = await window.AgentShared.apiFetch('/api/kennisbank-sync');
-        if (!res.ok) throw new Error('HTTP ' + res.status);
-        const { items, error: apiErr } = await res.json();
-        if (apiErr) throw new Error(apiErr);
-        if (!Array.isArray(items)) throw new Error('Onverwacht antwoord van server');
-
-        // Profiel (rij met label '_profile' of type 'bedrijfsprofiel')
-        const profileRow = items.find((i) => i.label === '_profile' || i.type === 'bedrijfsprofiel');
-        state.profile = profileRow
-          ? (() => { try { return { ...defaultProfile(), ...JSON.parse(profileRow.content || '{}') }; } catch { return defaultProfile(); } })()
-          : defaultProfile();
-
-        // Items (profiel-rij uitsluiten) — id is de Supabase uuid
-        state.items = items
-          .filter((i) => i.type !== 'bedrijfsprofiel' && i.label !== '_profile')
-          .map((i) => ({
-            id:        String(i.id),
-            type:      i.type      || 'Algemeen',
-            richting:  i.direction || null,
-            note:      i.note      || '',
-            content:   i.content   || '',
-            fileName:  i.category  || null,
-            createdAt: i.created_at || new Date().toISOString()
-          }));
-
-        renderStats();
-        renderProfile();
-        renderItems();
-      } catch (err) {
-        console.error('[kennisbank] loadFromSupabase fout:', err.message);
-        $('itemList').innerHTML = `<div class="item-empty" style="color:var(--red)">Kennisbank kon niet geladen worden — refresh de pagina of probeer later opnieuw.<br><small style="color:var(--text-faint); font-weight:400">${escapeHtml(err.message)}</small></div>`;
-      }
-    }
-
-    // CREATE — POST upsert_item + re-fetch
-    async function createItemInSupabase(item) {
-      const res = await window.AgentShared.apiFetch('/api/kennisbank-sync', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'upsert_item', item })
-      });
-      const data = await res.json();
-      if (!res.ok || data.error) throw new Error(data.error || 'HTTP ' + res.status);
-      await loadFromSupabase();
-    }
-
-    // UPDATE — PUT op Supabase uuid + re-fetch
-    async function updateItemInSupabase(id, item) {
-      const res = await window.AgentShared.apiFetch('/api/kennisbank-sync?id=' + encodeURIComponent(id), {
-        method: 'PUT', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(item)
-      });
-      const data = await res.json();
-      if (!res.ok || data.error) throw new Error(data.error || 'HTTP ' + res.status);
-      await loadFromSupabase();
-    }
-
-    // DELETE — DELETE op Supabase uuid + re-fetch
-    async function deleteItemFromSupabase(id) {
-      const res = await window.AgentShared.apiFetch('/api/kennisbank-sync?id=' + encodeURIComponent(id), {
-        method: 'DELETE'
-      });
-      const data = await res.json();
-      if (!res.ok || data.error) throw new Error(data.error || 'HTTP ' + res.status);
-      await loadFromSupabase();
-    }
-
-    // SYNC PROFILE — POST sync_profile (geen re-fetch nodig, state is al bijgewerkt)
-    async function syncProfileToSupabase() {
-      const res = await window.AgentShared.apiFetch('/api/kennisbank-sync', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'sync_profile', profile: state.profile })
-      });
-      const data = await res.json();
-      if (!res.ok || data.error) throw new Error(data.error || 'HTTP ' + res.status);
-    }
-
-    function defaultProfile() {
-      return {
-        bedrijfsnaam: 'De Forex Opleiding',
-        toneOfVoice: 'Vriendelijk & persoonlijk, altijd in het Nederlands',
-        overOns: '',
-        nooitZeggen: '',
-        faqs: [],
-        contactgegevens: '',
-        updatedAt: null
-      };
-    }
-
-    const state = {
-      profile: defaultProfile(),
-      items:   [],
-      active:  loadJson(ACTIVE_KEY, false),
-      filter:  'Alle',
-      search:  '',
-      staging: null,        // { content, source, fileName, type, richting, note, status }
-      profileDirty: false
-    };
-
-    const $ = (id) => document.getElementById(id);
-
-    /* ─────────────────────────────────────────────────────────────
-       Toast
-       ───────────────────────────────────────────────────────────── */
-    let toastTimer;
-    function showToast(message) {
-      let toast = document.getElementById('toast');
-      if (!toast) {
-        toast = document.createElement('div');
-        toast.id = 'toast';
-        toast.className = 'toast';
-        document.body.appendChild(toast);
-      }
-      toast.textContent = message;
-      void toast.offsetWidth;
-      toast.classList.add('show');
-      clearTimeout(toastTimer);
-      toastTimer = setTimeout(() => toast.classList.remove('show'), 2400);
-    }
-
-    function escapeHtml(s) {
-      return String(s ?? '').replace(/[&<>"']/g, (c) =>
-        ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c])
-      );
-    }
-
-    function formatDateTime(iso) {
-      if (!iso) return '—';
-      const d = new Date(iso);
-      if (isNaN(d.getTime())) return '—';
-      return d.toLocaleString('nl-NL', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
-    }
-
-    function uniqueId(prefix = 'k') {
-      return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`;
-    }
-
-    /* ─────────────────────────────────────────────────────────────
-       Stats
-       ───────────────────────────────────────────────────────────── */
-    function renderStats() {
-      const total = state.items.length;
-      const byType = TYPES.reduce((acc, t) => {
-        acc[t] = state.items.filter((i) => i.type === t).length;
-        return acc;
-      }, {});
-      const lastUpdate = state.items.length
-        ? state.items.map((i) => new Date(i.createdAt)).sort((a, b) => b - a)[0].toISOString()
-        : (state.profile.updatedAt || null);
-
-      // AI quality (uit email_reply_stats — incrementeel bijgehouden door email.html)
-      const replyStats = loadJson(REPLY_STATS_KEY, { approved: 0, edited: 0, rejected: 0 });
-      const totalReplies = (replyStats.approved || 0) + (replyStats.edited || 0) + (replyStats.rejected || 0);
-      const approvedPct = totalReplies > 0
-        ? Math.round(((replyStats.approved || 0) / totalReplies) * 100)
-        : null;
-
-      $('stats').innerHTML = `
-        <div class="stat">
-          <div class="stat-label">Totaal items</div>
-          <div class="stat-value">${total}</div>
-          <div class="stat-sub">In de kennisbank opgeslagen</div>
-        </div>
-        <div class="stat">
-          <div class="stat-label">Per categorie</div>
-          <div class="stat-value">${TYPES.length}</div>
-          <div class="stat-breakdown">
-            ${TYPES.map((t) => `<span class="bd-item">${escapeHtml(t)} · ${byType[t] || 0}</span>`).join('')}
-          </div>
-        </div>
-        <div class="stat">
-          <div class="stat-label">Laatste update</div>
-          <div class="stat-value" style="font-size: 18px;">${escapeHtml(formatDateTime(lastUpdate))}</div>
-          <div class="stat-sub">Profiel of leermateriaal</div>
-        </div>
-        <div class="stat">
-          <div class="stat-label">AI kwaliteitsscore</div>
-          <div class="stat-value">${approvedPct !== null ? approvedPct + '%' : '—'}</div>
-          <div class="stat-breakdown">
-            <span class="bd-item" style="color: var(--green);">✓ ${replyStats.approved || 0} goedgekeurd</span>
-            <span class="bd-item" style="color: var(--amber);">✎ ${replyStats.edited || 0} aangepast</span>
-            <span class="bd-item" style="color: var(--red);">✕ ${replyStats.rejected || 0} afgewezen</span>
-          </div>
-        </div>`;
-    }
-
-    /* ─────────────────────────────────────────────────────────────
-       Profiel
-       ───────────────────────────────────────────────────────────── */
-    function renderProfile() {
-      $('bedrijfsnaam').value = state.profile.bedrijfsnaam || 'De Forex Opleiding';
-      $('toneOfVoice').value  = state.profile.toneOfVoice  || 'Vriendelijk & persoonlijk, altijd in het Nederlands';
-      $('overOns').value       = state.profile.overOns       || '';
-      $('nooitZeggen').value   = state.profile.nooitZeggen   || '';
-      $('contactgegevens').value = state.profile.contactgegevens || '';
-      renderFaqs();
-      $('profileDirty').style.display = state.profileDirty ? 'inline-flex' : 'none';
-    }
-
-    function renderFaqs() {
-      const list = $('faqList');
-      const faqs = state.profile.faqs || [];
-      if (faqs.length === 0) {
-        list.innerHTML = `<div class="faq-empty">Nog geen veelgestelde vragen toegevoegd.</div>`;
-        return;
-      }
-      list.innerHTML = faqs.map((faq) => `
-        <div class="faq-item" data-faq-id="${escapeHtml(faq.id)}">
-          <div class="faq-row">
-            <input type="text" placeholder="Vraag…" value="${escapeHtml(faq.question || '')}" data-faq-field="question" />
-            <button class="btn btn-danger" data-faq-action="delete" title="Vraag verwijderen">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
-            </button>
-          </div>
-          <textarea placeholder="Standaardantwoord…" data-faq-field="answer">${escapeHtml(faq.answer || '')}</textarea>
-        </div>`).join('');
-
-      list.querySelectorAll('[data-faq-id]').forEach((el) => {
-        const id = el.dataset.faqId;
-        el.querySelectorAll('[data-faq-field]').forEach((field) => {
-          field.addEventListener('input', () => {
-            const faq = state.profile.faqs.find((f) => f.id === id);
-            if (faq) {
-              faq[field.dataset.faqField] = field.value;
-              markProfileDirty();
-            }
-          });
-        });
-        el.querySelector('[data-faq-action="delete"]').addEventListener('click', () => {
-          state.profile.faqs = state.profile.faqs.filter((f) => f.id !== id);
-          markProfileDirty();
-          renderFaqs();
-        });
-      });
-    }
-
-    function markProfileDirty() {
-      state.profileDirty = true;
-      $('profileDirty').style.display = 'inline-flex';
-    }
-
-    async function saveProfile() {
-      state.profile.overOns = $('overOns').value;
-      state.profile.nooitZeggen = $('nooitZeggen').value;
-      state.profile.contactgegevens = $('contactgegevens').value;
-      state.profile.updatedAt = new Date().toISOString();
-      state.profileDirty = false;
-      $('profileDirty').style.display = 'none';
-      renderStats();
-      try {
-        await syncProfileToSupabase();
-        showToast('Profiel opgeslagen');
-      } catch (err) {
-        state.profileDirty = true;
-        $('profileDirty').style.display = 'inline-flex';
-        showToast('Profiel niet opgeslagen — probeer opnieuw');
-        console.error('[kennisbank] saveProfile fout:', err.message);
-      }
-    }
-
-    /* ─────────────────────────────────────────────────────────────
-       Upload — file processing → staging
-       ───────────────────────────────────────────────────────────── */
-    function readFileAsText(file) {
-      return new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(reader.result);
-        reader.onerror = () => reject(reader.error);
-        reader.readAsText(file);
-      });
-    }
-    function readFileAsBase64(file) {
-      return new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => {
-          const result = reader.result || '';
-          const idx = result.indexOf(',');
-          resolve(idx >= 0 ? result.slice(idx + 1) : result);
-        };
-        reader.onerror = () => reject(reader.error);
-        reader.readAsDataURL(file);
-      });
-    }
-
-    async function processFile(file) {
-      const ext = (file.name.split('.').pop() || '').toLowerCase();
-      const mime = file.type || '';
-
-      // Init staging immediately so user gets feedback
-      state.staging = {
-        content: '',
-        source: ext === 'pdf' ? 'pdf'
-              : ext === 'txt' ? 'txt'
-              : (mime.startsWith('image/') || ext === 'png' || ext === 'jpg' || ext === 'jpeg') ? 'image'
-              : 'text',
-        fileName: file.name,
-        type: 'Algemeen',
-        richting: 'Inkomend',
-        note: '',
-        status: 'loading'
-      };
-      renderStaging();
-
-      try {
-        if (ext === 'txt' || mime === 'text/plain') {
-          state.staging.source = 'txt';
-          state.staging.content = await readFileAsText(file);
-        } else if (ext === 'pdf' || mime === 'application/pdf') {
-          state.staging.source = 'pdf';
-          const base64 = await readFileAsBase64(file);
-          const res = await fetch('/api/pdf-extract', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ data: base64 })
-          });
-          const data = await res.json();
-          if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
-          state.staging.content = data.text || '';
-        } else if (mime.startsWith('image/') || ['png','jpg','jpeg'].includes(ext)) {
-          state.staging.source = 'image';
-          const base64 = await readFileAsBase64(file);
-          const res = await fetch('/api/vision-extract', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ image: base64, mimeType: mime || `image/${ext === 'jpg' ? 'jpeg' : ext}` })
-          });
-          const data = await res.json();
-          if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
-          state.staging.content = data.text || '';
-        } else {
-          throw new Error(`Bestandstype "${ext}" niet ondersteund. Gebruik .txt, .pdf, .png of .jpg.`);
-        }
-        state.staging.status = 'ready';
-      } catch (err) {
-        state.staging.status = 'error';
-        state.staging.error = err.message;
-      }
-      renderStaging();
-    }
-
-    function startTextStaging(text) {
-      state.staging = {
-        content: text,
-        source: 'text',
-        fileName: null,
-        type: 'Algemeen',
-        richting: 'Inkomend',
-        note: '',
-        status: 'ready'
-      };
-      renderStaging();
-    }
-
-    function clearStaging() {
-      state.staging = null;
-      renderStaging();
-    }
-
-    async function commitStaging() {
-      if (!state.staging || state.staging.status !== 'ready') return;
-      if (!state.staging.content || !state.staging.content.trim()) {
-        showToast('Geen inhoud om op te slaan');
-        return;
-      }
-
-      const saveBtn = $('stagingSaveBtn');
-      if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = 'Opslaan…'; }
-
-      const editingId = state.staging.editingId;
-      const item = {
-        type:     state.staging.type,
-        richting: state.staging.richting,
-        note:     state.staging.note     || '',
-        content:  state.staging.content.trim(),
-        source:   state.staging.source,
-        fileName: state.staging.fileName,
-      };
-
-      try {
-        if (editingId) {
-          await updateItemInSupabase(editingId, item);
-        } else {
-          await createItemInSupabase(item);
-        }
-        clearStaging();
-        $('textPaste').value = '';
-        $('fileInput').value = '';
-        showToast(editingId ? 'Item bijgewerkt' : 'Toegevoegd aan kennisbank');
-      } catch (err) {
-        if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = 'Toevoegen aan kennisbank'; }
-        showToast('Item niet opgeslagen — probeer opnieuw');
-        console.error('[kennisbank] commitStaging fout:', err.message);
-      }
-    }
-
-    function renderStaging() {
-      const el = $('staging');
-      if (!state.staging) { el.innerHTML = ''; return; }
-      const s = state.staging;
-
-      const sourceBadge = {
-        text:  '📝 Direct getypte tekst',
-        txt:   '📄 Tekstbestand',
-        pdf:   '📑 PDF',
-        image: '🖼️ Screenshot (Vision API)'
-      }[s.source] || s.source;
-
-      let bodyHtml;
-      if (s.status === 'loading') {
-        bodyHtml = `<div class="staging-loading">Inhoud wordt uitgelezen…</div>`;
-      } else if (s.status === 'error') {
-        bodyHtml = `<div style="color: var(--red); font-size: 13px; padding: 10px 0;">Fout: ${escapeHtml(s.error || 'Onbekend')}</div>`;
-      } else {
-        bodyHtml = `
-          <div class="field">
-            <label class="field-label">Inhoud</label>
-            <textarea class="field-textarea" id="stagingContent" style="min-height: 140px;">${escapeHtml(s.content)}</textarea>
-          </div>
-          <div class="field-grid-2">
-            <div class="field">
-              <label class="field-label" for="stagingType">Type</label>
-              <select class="field-select" id="stagingType">
-                ${TYPES.map((t) => `<option value="${escapeHtml(t)}"${s.type === t ? ' selected' : ''}>${escapeHtml(t)}</option>`).join('')}
-              </select>
-            </div>
-            <div class="field">
-              <label class="field-label" for="stagingRichting">Richting</label>
-              <select class="field-select" id="stagingRichting">
-                <option value="Inkomend"${s.richting === 'Inkomend' ? ' selected' : ''}>Inkomend (van klant)</option>
-                <option value="Uitgaand"${s.richting === 'Uitgaand' ? ' selected' : ''}>Uitgaand (jouw antwoord)</option>
-              </select>
-            </div>
-          </div>
-          <div class="field">
-            <label class="field-label" for="stagingNote">Optionele notitie — waarom is dit een goed voorbeeld?</label>
-            <textarea class="field-textarea" id="stagingNote" placeholder="Bijv: 'Goed antwoord op een bezwaar over prijs'…">${escapeHtml(s.note || '')}</textarea>
-          </div>`;
-      }
-
-      el.innerHTML = `
-        <div class="staging">
-          <div class="staging-head">
-            <div class="title">
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--accent-cyan)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 11 12 14 22 4"></polyline><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path></svg>
-              Klaar om toe te voegen ${s.fileName ? `· <span style="color:var(--text-faint);">${escapeHtml(s.fileName)}</span>` : ''}
-            </div>
-            <span class="staging-source">${sourceBadge}</span>
-          </div>
-          ${bodyHtml}
-          <div class="staging-actions">
-            <button class="btn btn-primary" id="stagingSaveBtn" ${s.status !== 'ready' ? 'disabled' : ''}>
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
-              Toevoegen aan kennisbank
-            </button>
-            <button class="btn" id="stagingCancelBtn">Annuleren</button>
-          </div>
-        </div>`;
-
-      // Wire up listeners
-      const cancelBtn = $('stagingCancelBtn');
-      if (cancelBtn) cancelBtn.addEventListener('click', clearStaging);
-      const saveBtn = $('stagingSaveBtn');
-      if (saveBtn) saveBtn.addEventListener('click', commitStaging);
-
-      if (s.status === 'ready') {
-        $('stagingContent').addEventListener('input', (ev) => { state.staging.content = ev.target.value; });
-        $('stagingType').addEventListener('change', (ev) => { state.staging.type = ev.target.value; });
-        $('stagingRichting').addEventListener('change', (ev) => { state.staging.richting = ev.target.value; });
-        $('stagingNote').addEventListener('input', (ev) => { state.staging.note = ev.target.value; });
-      }
-    }
-
-    /* ─────────────────────────────────────────────────────────────
-       Overzicht
-       ───────────────────────────────────────────────────────────── */
-    function getFilteredItems() {
-      let items = state.items;
-      if (state.filter !== 'Alle') {
-        items = items.filter((i) => i.type === state.filter);
-      }
-      const q = state.search.trim().toLowerCase();
-      if (q) {
-        items = items.filter((i) =>
-          (i.content || '').toLowerCase().includes(q) ||
-          (i.note || '').toLowerCase().includes(q) ||
-          (i.fileName || '').toLowerCase().includes(q)
-        );
-      }
-      // Tag-filter (F4.2c) — client-side, AND/OR
-      const sel = [...state.tagFilter.selected];
-      if (sel.length) {
-        items = items.filter((i) => {
-          const ids = itemTagIds(i.id);
-          return state.tagFilter.mode === 'AND'
-            ? sel.every((t) => ids.includes(t))
-            : sel.some((t) => ids.includes(t));
-        });
-      }
-      return items;
-    }
-
-    function renderItems() {
-      renderTagFilter();
-      // Type pills
-      const counts = TYPES.reduce((acc, t) => {
-        acc[t] = state.items.filter((i) => i.type === t).length;
-        return acc;
-      }, { Alle: state.items.length });
-      const pillKeys = ['Alle', ...TYPES];
-      $('typePills').innerHTML = pillKeys.map((k) => `
-        <button class="pill ${state.filter === k ? 'active' : ''}" data-type-filter="${escapeHtml(k)}">
-          ${escapeHtml(k)}<span class="pill-count">${counts[k] || 0}</span>
-        </button>`).join('');
-      $('typePills').querySelectorAll('[data-type-filter]').forEach((btn) => {
-        btn.addEventListener('click', () => {
-          state.filter = btn.dataset.typeFilter;
-          renderItems();
-        });
-      });
-
-      const filtered = getFilteredItems();
-      $('overviewCount').textContent = filtered.length === state.items.length
-        ? `· ${state.items.length} ${state.items.length === 1 ? 'item' : 'items'}`
-        : `· ${filtered.length} van ${state.items.length}`;
-
-      const list = $('itemList');
-      if (filtered.length === 0) {
-        list.innerHTML = `<div class="item-empty">${state.items.length === 0
-          ? 'Nog geen leermateriaal — voeg je eerste item toe via de uploader hierboven.'
-          : 'Geen items gevonden voor deze filter/zoekterm.'}</div>`;
-        return;
-      }
-
-      list.innerHTML = filtered.map((item) => `
-        <article class="item-card" data-item-id="${escapeHtml(item.id)}">
-          <div class="item-meta">
-            <span class="badge badge-${escapeHtml(item.type)}">${escapeHtml(item.type)}</span>
-            <span class="arrow">${item.richting === 'Inkomend' ? '↓ Inkomend' : '↑ Uitgaand'}</span>
-            ${item.fileName ? `<span style="color:var(--text-faint); font-size:11px;">${escapeHtml(item.fileName)}</span>` : ''}
-            <span class="date">${escapeHtml(formatDateTime(item.createdAt))}</span>
-          </div>
-          <div class="item-content" data-content="${escapeHtml(item.id)}">${escapeHtml(item.content)}</div>
-          ${item.note ? `<div class="item-note">${escapeHtml(item.note)}</div>` : ''}
-          ${renderItemTagsHtml(item.id)}
-          <div class="item-actions">
-            <button class="btn" data-item-action="expand">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
-              Volledig tonen
-            </button>
-            <button class="btn" data-item-action="edit">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
-              Bewerken
-            </button>
-            <button class="btn btn-danger" data-item-action="delete">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 6"></path></svg>
-              Verwijderen
-            </button>
-          </div>
-        </article>`).join('');
-
-      list.querySelectorAll('[data-item-id]').forEach((card) => {
-        const id = card.dataset.itemId;
-        card.querySelector('[data-item-action="expand"]').addEventListener('click', () => {
-          const c = card.querySelector(`[data-content="${id}"]`);
-          c.classList.toggle('expanded');
-        });
-        card.querySelector('[data-item-action="delete"]').addEventListener('click', async () => {
-          if (!confirm('Dit item verwijderen uit de kennisbank?')) return;
-          try {
-            await deleteItemFromSupabase(id);
-            showToast('Item verwijderd');
-          } catch (err) {
-            showToast('Item niet verwijderd — probeer opnieuw');
-            console.error('[kennisbank] delete fout:', err.message);
-          }
-        });
-        card.querySelector('[data-item-action="edit"]').addEventListener('click', () => {
-          const item = state.items.find((i) => i.id === id);
-          if (!item) return;
-          // Prefill staging with this item for editing — original wordt verwijderd
-          // bij commit zodat we niet dupliceren.
-          state.staging = {
-            content: item.content,
-            source: item.source,
-            fileName: item.fileName,
-            type: item.type,
-            richting: item.richting,
-            note: item.note || '',
-            status: 'ready',
-            editingId: id
-          };
-          renderStaging();
-          // Scroll naar de uploader sectie
-          document.querySelector('.uploader').scrollIntoView({ behavior: 'smooth', block: 'start' });
-        });
-        wireItemTags(card, id);
-      });
-    }
-
-    /* ─────────────────────────────────────────────────────────────
-       Activeer toggle
-       ───────────────────────────────────────────────────────────── */
-    function renderToggle() {
-      $('activeToggle').checked = !!state.active;
-    }
-
-    /* ─────────────────────────────────────────────────────────────
-       Wire-up
-       ───────────────────────────────────────────────────────────── */
-    async function init() {
-      await window._authSharedReady;
-      const profile = await window.AuthShared.requireAuth();
-      if (!profile) return;
-      // adminNavLink wordt nu centraal door sidebar.js gegate (RBAC-voorbereiding)
-      renderToggle();
-      loadFromSupabase(); // Supabase is de enige bron — toont loading state + rendert alles na load
-      setupTags();        // F4.2 — tag-beheer + (in F4.2c) per-item chips/filter
-
-      // Profile field listeners
-      ['overOns', 'nooitZeggen', 'contactgegevens'].forEach((id) => {
-        $(id).addEventListener('input', (ev) => {
-          state.profile[id] = ev.target.value;
-          markProfileDirty();
-        });
-      });
-
-      $('saveProfileBtn').addEventListener('click', saveProfile);
-      $('addFaqBtn').addEventListener('click', () => {
-        state.profile.faqs = state.profile.faqs || [];
-        state.profile.faqs.push({ id: uniqueId('faq'), question: '', answer: '' });
-        markProfileDirty();
-        renderFaqs();
-      });
-
-      // File input
-      const dropzone = $('dropzone');
-      const fileInput = $('fileInput');
-      dropzone.addEventListener('click', () => fileInput.click());
-      dropzone.addEventListener('keydown', (ev) => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); fileInput.click(); } });
-      fileInput.addEventListener('change', (ev) => {
-        const file = ev.target.files?.[0];
-        if (file) processFile(file);
-      });
-
-      // Drag & drop
-      ['dragenter', 'dragover'].forEach((ev) => {
-        dropzone.addEventListener(ev, (e) => { e.preventDefault(); e.stopPropagation(); dropzone.classList.add('dragover'); });
-      });
-      ['dragleave', 'drop'].forEach((ev) => {
-        dropzone.addEventListener(ev, (e) => { e.preventDefault(); e.stopPropagation(); dropzone.classList.remove('dragover'); });
-      });
-      dropzone.addEventListener('drop', (e) => {
-        const file = e.dataTransfer?.files?.[0];
-        if (file) processFile(file);
-      });
-
-      // Direct text input
-      $('useTextBtn').addEventListener('click', () => {
-        const text = $('textPaste').value.trim();
-        if (!text) { showToast('Plak eerst tekst in'); return; }
-        startTextStaging(text);
-      });
-
-      // Search
-      $('searchInput').addEventListener('input', (ev) => {
-        state.search = ev.target.value;
-        renderItems();
-      });
-
-      // Activate toggle
-      $('activeToggle').addEventListener('change', (ev) => {
-        state.active = ev.target.checked;
-        saveJson(ACTIVE_KEY, state.active);
-        showToast(state.active
-          ? 'Kennisbank actief — e-mail bot gebruikt deze data'
-          : 'Kennisbank inactief'
-        );
-      });
-    }
-
-    /* ─────────────────────────────────────────────────────────────
-       Tags — beheer (F4.2b)
-       ───────────────────────────────────────────────────────────── */
-    const TAG_SWATCHES = ['#6B7280','#3B82F6','#10B981','#8B5CF6','#F59E0B','#EF4444','#06B6D4','#EC4899','#84CC16','#F97316'];
-    state.tags = [];
-    state.tagSearch = '';
-    let editingTagId = null;
-
-    async function loadTags() {
-      try {
-        const res = await window.AgentShared.apiFetch('/api/kb-tags?action=list');
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error || 'HTTP ' + res.status);
-        state.tags = data.tags || [];
-        renderTags();
-        renderItems(); // chips/filter resolveren zodra tags geladen zijn
-      } catch (err) {
-        console.error('[kennisbank] loadTags fout:', err.message);
-        $('tagsList').innerHTML = `<div class="item-empty" style="color:var(--red)">Tags laden mislukt — ${escapeHtml(err.message)}</div>`;
-      }
-    }
-
-    function tagById(id) { return state.tags.find((t) => t.id === id) || null; }
-
-    function renderTags() {
-      $('tagsCount').textContent = state.tags.length ? `· ${state.tags.length}` : '';
-      const q = state.tagSearch.trim().toLowerCase();
-      const list = q
-        ? state.tags.filter((t) => t.name.toLowerCase().includes(q) || (t.description || '').toLowerCase().includes(q))
-        : state.tags;
-      const host = $('tagsList');
-      if (!state.tags.length) { host.innerHTML = '<div class="item-empty">Nog geen tags. Maak je eerste tag aan.</div>'; return; }
-      if (!list.length) { host.innerHTML = '<div class="item-empty">Geen tags gevonden.</div>'; return; }
-      host.innerHTML = list.map((t) => `
-        <div class="tag-manage" data-tag-id="${escapeHtml(t.id)}">
-          <span class="tag-dot" style="background:${escapeHtml(t.color)}"></span>
-          <span class="tag-name" data-tag-edit>${escapeHtml(t.name)}</span>
-          ${t.description ? `<span class="tag-desc">${escapeHtml(t.description)}</span>` : ''}
-          <button class="tag-del" data-tag-del title="Verwijderen">&times;</button>
-        </div>`).join('');
-      host.querySelectorAll('[data-tag-id]').forEach((el) => {
-        const id = el.dataset.tagId;
-        el.querySelector('[data-tag-edit]').addEventListener('click', () => openTagModal(tagById(id)));
-        el.querySelector('[data-tag-del]').addEventListener('click', () => deleteTag(id));
-      });
-    }
-
-    function renderSwatches(selected) {
-      $('tagSwatches').innerHTML = TAG_SWATCHES.map((c) =>
-        `<span class="kb-swatch ${c.toLowerCase() === String(selected).toLowerCase() ? 'sel' : ''}" style="background:${c}" data-swatch="${c}"></span>`).join('');
-      $('tagSwatches').querySelectorAll('[data-swatch]').forEach((s) => {
-        s.addEventListener('click', () => { $('tagColorInput').value = s.dataset.swatch; renderSwatches(s.dataset.swatch); });
-      });
-    }
-
-    function openTagModal(tag) {
-      editingTagId = tag ? tag.id : null;
-      $('tagModalTitle').textContent = tag ? 'Tag bewerken' : 'Nieuwe tag';
-      $('tagNameInput').value = tag ? tag.name : '';
-      $('tagDescInput').value = tag ? (tag.description || '') : '';
-      const color = tag ? tag.color : '#6B7280';
-      $('tagColorInput').value = color;
-      renderSwatches(color);
-      $('tagModal').classList.remove('hidden');
-      $('tagNameInput').focus();
-    }
-    function closeTagModal() { $('tagModal').classList.add('hidden'); editingTagId = null; }
-
-    async function saveTag() {
-      const name = $('tagNameInput').value.trim();
-      if (!name) { showToast('Naam is verplicht'); return; }
-      const payload = { name, color: $('tagColorInput').value, description: $('tagDescInput').value.trim() || null };
-      const btn = $('tagSaveBtn'); const o = btn.textContent; btn.disabled = true; btn.textContent = 'Opslaan…';
-      try {
-        const url = editingTagId ? '/api/kb-tags?id=' + encodeURIComponent(editingTagId) : '/api/kb-tags';
-        const res = await window.AgentShared.apiFetch(url, {
-          method: editingTagId ? 'PATCH' : 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload),
-        });
-        const data = await res.json().catch(() => ({}));
-        if (res.status === 403) { showToast('Geen rechten voor tags'); return; }
-        if (res.status === 409) { showToast('Tag bestaat al'); return; }
-        if (!res.ok) throw new Error(data.error || 'HTTP ' + res.status);
-        showToast(editingTagId ? 'Tag bijgewerkt' : 'Tag aangemaakt');
-        closeTagModal();
-        await loadTags();
-        renderItems();
-      } catch (err) {
-        showToast('Opslaan mislukt'); console.error('[kennisbank] saveTag:', err.message);
-      } finally { btn.disabled = false; btn.textContent = o; }
-    }
-
-    async function deleteTag(id) {
-      const t = tagById(id); if (!t) return;
-      if (!confirm(`Tag '${t.name}' verwijderen? Items verliezen deze tag ook.`)) return;
-      try {
-        const res = await window.AgentShared.apiFetch('/api/kb-tags?id=' + encodeURIComponent(id), { method: 'DELETE' });
-        const data = await res.json().catch(() => ({}));
-        if (res.status === 403) { showToast('Geen rechten voor verwijderen'); return; }
-        if (!res.ok) throw new Error(data.error || 'HTTP ' + res.status);
-        showToast('Tag verwijderd');
-        await loadTags();
-        if (typeof loadItemTagLinks === 'function') await loadItemTagLinks();
-        renderItems();
-      } catch (err) { showToast('Verwijderen mislukt'); console.error('[kennisbank] deleteTag:', err.message); }
-    }
-
-    function setupTags() {
-      $('newTagBtn').addEventListener('click', () => openTagModal(null));
-      $('tagSaveBtn').addEventListener('click', saveTag);
-      document.querySelectorAll('[data-tag-modal-close]').forEach((b) => b.addEventListener('click', closeTagModal));
-      $('tagModal').addEventListener('click', (e) => { if (e.target.id === 'tagModal') closeTagModal(); });
-      $('tagSearch').addEventListener('input', (e) => { state.tagSearch = e.target.value; renderTags(); });
-      $('aiTagModal').addEventListener('click', (e) => { if (e.target.id === 'aiTagModal') closeAiTagModal(); });
-      $('aiTagModal').querySelector('.kb-modal-close').addEventListener('click', closeAiTagModal);
-      loadTags();
-      loadItemTagLinks();
-    }
-
-    /* ─────────────────────────────────────────────────────────────
-       Tags — AI-suggesties (F4.2d)
-       ───────────────────────────────────────────────────────────── */
-    async function aiSuggestTags(itemId, btn) {
-      const item = state.items.find((i) => i.id === itemId);
-      if (!item) return;
-      const orig = btn.innerHTML;
-      btn.disabled = true; btn.innerHTML = '<span class="ai-spin"></span> AI…';
-      try {
-        const res = await window.AgentShared.apiFetch('/api/kb-auto-tag', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ item_id: itemId, content: item.content || '' }),
-        });
-        const data = await res.json().catch(() => ({}));
-        if (res.status === 403) { showToast('Geen rechten voor AI-suggestie'); return; }
-        if (!res.ok) throw new Error(data.error || 'HTTP ' + res.status);
-        openAiTagModal(itemId, data);
-      } catch (err) {
-        showToast('AI-suggestie mislukt'); console.error('[kennisbank] aiSuggestTags:', err.message);
-      } finally { btn.disabled = false; btn.innerHTML = orig; }
-    }
-
-    function closeAiTagModal() { $('aiTagModal').classList.add('hidden'); }
-
-    function openAiTagModal(itemId, data) {
-      const have = new Set(itemTagIds(itemId));
-      const sugg = data.suggested_tags || [];
-      const body = $('aiTagBody');
-      const foot = $('aiTagFoot');
-      if (!sugg.length) {
-        body.innerHTML = `<div class="kb-ai-reason">Geen relevante tags gevonden.${data.reasoning ? '<br>' + escapeHtml(data.reasoning) : ''}</div>`;
-        foot.innerHTML = '<button class="btn" data-aitag-close>Sluiten</button>';
-      } else {
-        const rows = sugg.map((name) => {
-          const t = state.tags.find((x) => x.name === name);
-          if (!t) return '';
-          return `<div class="kb-ai-tag-row">
-            <span class="kb-tag-chip" style="background:${escapeHtml(t.color)}">${escapeHtml(t.name)}</span>
-            <span class="spacer"></span>
-            ${have.has(t.id)
-              ? '<span style="font-size:12px;color:var(--green)">✓ al toegevoegd</span>'
-              : `<button class="btn" data-add-sugg="${escapeHtml(t.id)}">Toevoegen</button>`}
-          </div>`;
-        }).join('');
-        body.innerHTML = `${rows}${data.reasoning ? `<div class="kb-ai-reason">${escapeHtml(data.reasoning)}</div>` : ''}`;
-        const addable = sugg.map((n) => state.tags.find((x) => x.name === n)).filter((t) => t && !have.has(t.id));
-        foot.innerHTML = `<button class="btn" data-aitag-close>Annuleren</button>${addable.length ? '<button class="btn btn-primary" data-add-all-sugg>Alle toevoegen</button>' : ''}`;
-      }
-      $('aiTagModal').classList.remove('hidden');
-      body.querySelectorAll('[data-add-sugg]').forEach((b) => {
-        b.addEventListener('click', async () => {
-          await addTagToItem(itemId, b.dataset.addSugg);
-          b.outerHTML = '<span style="font-size:12px;color:var(--green)">✓ toegevoegd</span>';
-        });
-      });
-      const allBtn = foot.querySelector('[data-add-all-sugg]');
-      if (allBtn) allBtn.addEventListener('click', async () => {
-        const addable = sugg.map((n) => state.tags.find((x) => x.name === n)).filter((t) => t && !itemTagIds(itemId).includes(t.id));
-        for (const t of addable) await addTagToItem(itemId, t.id);
-        closeAiTagModal();
-      });
-      foot.querySelectorAll('[data-aitag-close]').forEach((b) => b.addEventListener('click', closeAiTagModal));
-    }
-
-    /* ─────────────────────────────────────────────────────────────
-       Tags — per item + filter (F4.2c)
-       ───────────────────────────────────────────────────────────── */
-    state.itemTags = {};   // item_id -> [tag_id]
-    state.tagFilter = { selected: new Set(), mode: 'AND' };
-
-    async function loadItemTagLinks() {
-      try {
-        const res = await window.AgentShared.apiFetch('/api/kb-item-tags?action=all_with_tags');
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error || 'HTTP ' + res.status);
-        const map = {};
-        (data.links || []).forEach((l) => { (map[l.item_id] = map[l.item_id] || []).push(l.tag_id); });
-        state.itemTags = map;
-        renderItems();
-      } catch (err) {
-        console.error('[kennisbank] loadItemTagLinks fout:', err.message);
-      }
-    }
-
-    function itemTagIds(itemId) { return state.itemTags[itemId] || []; }
-
-    function renderTagFilter() {
-      const row = $('tagFilterRow');
-      if (!row) return;
-      if (!state.tags.length) { row.style.display = 'none'; return; }
-      row.style.display = 'flex';
-      const sel = state.tagFilter.selected;
-      const chips = state.tags.map((t) =>
-        `<span class="kb-tag-chip tag-filter-chip ${sel.has(t.id) ? 'active' : ''}" style="background:${escapeHtml(t.color)}" data-filter-tag="${escapeHtml(t.id)}">${escapeHtml(t.name)}</span>`).join('');
-      row.innerHTML = `
-        <span class="tf-label">Filter op tags:</span>
-        ${chips}
-        <span class="tf-mode">
-          <button data-tf-mode="AND" class="${state.tagFilter.mode === 'AND' ? 'active' : ''}">EN</button>
-          <button data-tf-mode="OR" class="${state.tagFilter.mode === 'OR' ? 'active' : ''}">OF</button>
-        </span>
-        ${sel.size ? '<button class="tf-clear" data-tf-clear>Wis filter</button>' : ''}`;
-      row.querySelectorAll('[data-filter-tag]').forEach((el) => {
-        el.addEventListener('click', () => {
-          const id = el.dataset.filterTag;
-          if (sel.has(id)) sel.delete(id); else sel.add(id);
-          renderItems();
-        });
-      });
-      row.querySelectorAll('[data-tf-mode]').forEach((b) => {
-        b.addEventListener('click', () => { state.tagFilter.mode = b.dataset.tfMode; renderItems(); });
-      });
-      const clr = row.querySelector('[data-tf-clear]');
-      if (clr) clr.addEventListener('click', () => { sel.clear(); renderItems(); });
-    }
-
-    function renderItemTagsHtml(itemId) {
-      const chips = itemTagIds(itemId).map((tid) => {
-        const t = tagById(tid); if (!t) return '';
-        return `<span class="kb-tag-chip" style="background:${escapeHtml(t.color)}">${escapeHtml(t.name)}<span class="kb-tag-x" data-untag="${escapeHtml(tid)}" title="Verwijderen">&times;</span></span>`;
-      }).join('');
-      return `<div class="item-tags" data-tags-for="${escapeHtml(itemId)}">
-        ${chips}
-        <button class="it-add" data-add-tag title="Tag toevoegen">+ tag</button>
-        <button class="it-ai" data-ai-tag title="AI tag-suggestie">✨ AI</button>
-      </div>`;
-    }
-
-    function wireItemTags(card, itemId) {
-      const row = card.querySelector('.item-tags');
-      if (!row) return;
-      row.querySelectorAll('[data-untag]').forEach((x) => {
-        x.addEventListener('click', (e) => { e.stopPropagation(); removeTagFromItem(itemId, x.dataset.untag); });
-      });
-      const addBtn = row.querySelector('[data-add-tag]');
-      if (addBtn) addBtn.addEventListener('click', (e) => { e.stopPropagation(); openTagPicker(itemId, row); });
-      const aiBtn = row.querySelector('[data-ai-tag]');
-      if (aiBtn) aiBtn.addEventListener('click', (e) => { e.stopPropagation(); aiSuggestTags(itemId, aiBtn); });
-    }
-
-    let openPickerEl = null;
-    function closeTagPicker() {
-      if (openPickerEl) { openPickerEl.remove(); openPickerEl = null; document.removeEventListener('click', closeTagPicker); }
-    }
-    function openTagPicker(itemId, anchorRow) {
-      closeTagPicker();
-      const have = new Set(itemTagIds(itemId));
-      const avail = state.tags.filter((t) => !have.has(t.id));
-      const pop = document.createElement('div');
-      pop.className = 'tag-pop';
-      pop.innerHTML = avail.length
-        ? avail.map((t) => `<button data-pick="${escapeHtml(t.id)}"><span class="tp-dot" style="background:${escapeHtml(t.color)}"></span>${escapeHtml(t.name)}</button>`).join('')
-        : '<div class="tp-empty">Alle tags al toegevoegd</div>';
-      pop.addEventListener('click', (e) => e.stopPropagation());
-      pop.querySelectorAll('[data-pick]').forEach((b) => {
-        b.addEventListener('click', () => { closeTagPicker(); addTagToItem(itemId, b.dataset.pick); });
-      });
-      anchorRow.appendChild(pop);
-      openPickerEl = pop;
-      setTimeout(() => document.addEventListener('click', closeTagPicker), 0);
-    }
-
-    async function addTagToItem(itemId, tagId) {
-      try {
-        const res = await window.AgentShared.apiFetch('/api/kb-item-tags', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ item_id: itemId, tag_id: tagId }),
-        });
-        const data = await res.json().catch(() => ({}));
-        if (res.status === 403) { showToast('Geen rechten om te taggen'); return; }
-        if (!res.ok) throw new Error(data.error || 'HTTP ' + res.status);
-        if (!itemTagIds(itemId).includes(tagId)) (state.itemTags[itemId] = state.itemTags[itemId] || []).push(tagId);
-        renderItems();
-      } catch (err) { showToast('Taggen mislukt'); console.error('[kennisbank] addTagToItem:', err.message); }
-    }
-
-    async function removeTagFromItem(itemId, tagId) {
-      try {
-        const res = await window.AgentShared.apiFetch('/api/kb-item-tags', {
-          method: 'DELETE', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ item_id: itemId, tag_id: tagId }),
-        });
-        const data = await res.json().catch(() => ({}));
-        if (res.status === 403) { showToast('Geen rechten om te ontkoppelen'); return; }
-        if (!res.ok) throw new Error(data.error || 'HTTP ' + res.status);
-        state.itemTags[itemId] = itemTagIds(itemId).filter((t) => t !== tagId);
-        renderItems();
-      } catch (err) { showToast('Ontkoppelen mislukt'); console.error('[kennisbank] removeTagFromItem:', err.message); }
-    }
-
-    init();
-    if (window._authSharedReady) {
-      window._authSharedReady.then(() => window.AgentShared?.renderUserSection());
-    }
-  </script>
+<script src="/modules/shared/supabase-client.js"></script>
+<script src="/modules/shared/agent-shared.js"></script>
+<script src="/modules/shared/theme-shared.js"></script>
 <script>
-// RBAC frontend-gating (fail-open) — Kennisbank. Verbergt knoppen zonder permission
-// via CSS-injectie (werkt ook op dynamisch gerenderde items). super_admin = alles.
-(function () {
-  var RULES = [
-    ['#saveProfileBtn', 'kennisbank.profile.edit'],
-    ['#addFaqBtn', 'kennisbank.faq.add'],
-    ['[data-faq-action="delete"]', 'kennisbank.faq.add'],
-    ['#dropzone', 'kennisbank.material.upload'],
-    ['#textPaste', 'kennisbank.material.upload'],
-    ['#useTextBtn', 'kennisbank.material.upload'],
-    ['#activeToggle', 'kennisbank.bots.activate'],
-    ['[data-item-action="edit"]', 'kennisbank.item.edit'],
-    ['[data-item-action="delete"]', 'kennisbank.item.delete'],
-    ['#newTagBtn', 'kennisbank.item.edit'],
-    ['[data-add-tag]', 'kennisbank.item.edit'],
-    ['[data-ai-tag]', 'kennisbank.item.edit'],
-    ['[data-untag]', 'kennisbank.item.edit'],
-    ['[data-tag-del]', 'kennisbank.item.delete']
-  ];
-  async function applyRbacGating() {
-    try { if (window._authSharedReady) await window._authSharedReady; } catch (e) {}
-    if (!window.RBAC || typeof window.RBAC.ensurePermissionsLoaded !== 'function') return; // fail-open
-    var perms;
-    try { perms = await window.RBAC.ensurePermissionsLoaded(); } catch (e) { return; }      // fail-open
-    var roles = (typeof window.RBAC.getUserRoles === 'function' && window.RBAC.getUserRoles()) || [];
-    if (!roles.length) return;   // geen rollen / laadfout → fail-open
-    if (perms.has('*')) return;  // super_admin → alles
-    var css = RULES.filter(function (r) { return !perms.has(r[1]); })
-      .map(function (r) { return r[0] + '{display:none !important;}'; }).join('\n');
-    if (css) {
-      var st = document.createElement('style');
-      st.id = 'rbac-gating';
-      st.textContent = css;
-      document.head.appendChild(st);
+/* ═══════════════════════════════════════════════════════════════════
+   Kennisbank Redesign v2 — notion-style 3-col layout.
+   Backend: /api/kb-items (CRUD + versions + search).
+   Markdown: marked.js (CDN).
+   ═══════════════════════════════════════════════════════════════════ */
+
+const AGENT_LABELS = { simon:'Simon', lisa:'Lisa', leon:'Leon', aron:'Aron', shared:'Gedeeld' };
+
+const state = {
+  items: [],
+  bucket: 'all',
+  search: '',
+  selectedId: null,
+  editing: false,
+  draft: null,   // { id?, title, content, agents:[], is_profile }
+  perms: null,
+};
+
+function esc(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]);
+}
+
+function toast(msg, kind) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.className = 'toast show ' + (kind || '');
+  setTimeout(() => { el.classList.remove('show'); }, 2200);
+}
+
+function can(key) {
+  if (!state.perms) return true; // fail-open vóór load
+  if (state.perms.has('*')) return true;
+  return state.perms.has(key);
+}
+
+function renderMarkdown(text) {
+  if (!text) return '<em style="color:var(--text-faint)">Geen inhoud</em>';
+  try {
+    if (window.marked) {
+      window.marked.setOptions({ breaks: true, gfm: true });
+      return window.marked.parse(text);
     }
+  } catch {}
+  return '<pre>' + esc(text) + '</pre>';
+}
+
+// ── Data fetching ─────────────────────────────────────────────────────
+async function loadItems() {
+  try {
+    const res = await window.AgentShared.apiFetch('/api/kb-items');
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+    state.items = data.items || [];
+    renderBucketCounts();
+    renderItemList();
+  } catch (e) {
+    toast('Laden mislukt: ' + e.message, 'error');
+    document.getElementById('itemList').innerHTML = '<div class="kb-empty">Laden mislukt.</div>';
   }
-  applyRbacGating();
+}
+
+// ── Bucket counts ─────────────────────────────────────────────────────
+function renderBucketCounts() {
+  const c = { all: state.items.length, profile: 0, simon: 0, lisa: 0, leon: 0, aron: 0, shared: 0 };
+  for (const it of state.items) {
+    if (it.is_profile) c.profile++;
+    const ags = it.agents || [];
+    for (const a of ags) if (c[a] !== undefined) c[a]++;
+  }
+  for (const k of Object.keys(c)) {
+    const el = document.getElementById('cnt-' + k);
+    if (el) el.textContent = c[k];
+  }
+}
+
+// ── List rendering ────────────────────────────────────────────────────
+function filteredItems() {
+  let arr = state.items.slice();
+  if (state.bucket === 'profile') arr = arr.filter(i => i.is_profile);
+  else if (state.bucket !== 'all') arr = arr.filter(i => (i.agents || []).includes(state.bucket));
+  if (state.search) {
+    const q = state.search.toLowerCase();
+    arr = arr.filter(i =>
+      (i.title || '').toLowerCase().includes(q) ||
+      (i.content || '').toLowerCase().includes(q) ||
+      (i.question || '').toLowerCase().includes(q) ||
+      (i.answer || '').toLowerCase().includes(q)
+    );
+  }
+  return arr;
+}
+
+function renderItemList() {
+  const root = document.getElementById('itemList');
+  const arr = filteredItems();
+  if (!arr.length) {
+    root.innerHTML = '<div class="kb-empty">Geen items in deze selectie.</div>';
+    return;
+  }
+  root.innerHTML = arr.map(i => {
+    const pills = i.is_profile
+      ? '<span class="agent-pill profile">PROFIEL</span>'
+      : (i.agents || []).map(a => `<span class="agent-pill ${esc(a)}">${esc(AGENT_LABELS[a] || a)}</span>`).join(' ');
+    const preview = (i.content || i.answer || '').slice(0, 140);
+    return `
+      <div class="kb-item-card${state.selectedId === i.id ? ' selected' : ''}" data-id="${esc(i.id)}">
+        <div class="kb-item-title">${esc(i.title || '(geen titel)')}</div>
+        <div class="kb-item-meta">${pills}<span>${i.helpfulness_score ?? 0} pts</span></div>
+        ${preview ? `<div class="kb-item-preview">${esc(preview)}</div>` : ''}
+      </div>`;
+  }).join('');
+  root.querySelectorAll('.kb-item-card').forEach(el => {
+    el.addEventListener('click', () => selectItem(el.dataset.id));
+  });
+}
+
+// ── Detail rendering ──────────────────────────────────────────────────
+function selectItem(id) {
+  state.selectedId = id;
+  state.editing = false;
+  renderItemList(); // update .selected highlight
+  renderDetail();
+}
+
+function renderDetail() {
+  const mount = document.getElementById('detailMount');
+  if (!state.selectedId && !state.editing) {
+    mount.innerHTML = `
+      <div class="kb-detail-empty">
+        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" style="opacity:.5;margin-bottom:14px"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>
+        <p>Selecteer een item links om de details te zien.</p>
+      </div>`;
+    return;
+  }
+  if (state.editing) { renderEditMode(); return; }
+  const it = state.items.find(x => x.id === state.selectedId);
+  if (!it) { mount.innerHTML = '<div class="kb-empty">Item niet gevonden.</div>'; return; }
+
+  const editKey = it.is_profile ? 'kennisbank.profile.edit' : 'kennisbank.item.edit';
+  const canEdit = can(editKey);
+  const canDelete = can('kennisbank.item.delete');
+  const agentPills = it.is_profile
+    ? '<span class="agent-pill profile">PROFIEL — altijd actief</span>'
+    : (it.agents || []).map(a => `<span class="agent-pill ${esc(a)}">${esc(AGENT_LABELS[a] || a)}</span>`).join(' ');
+
+  mount.innerHTML = `
+    <div class="kb-detail-head">
+      <div class="title">${esc(it.title || '(geen titel)')}</div>
+      <button class="btn btn-sm btn-ghost" id="historyBtn" data-tooltip="Versie-historie">⟲</button>
+      ${canEdit ? '<button class="btn btn-sm" id="editBtn">Bewerken</button>' : ''}
+      ${canDelete && !it.is_profile ? '<button class="btn btn-sm btn-danger" id="deleteBtn">Verwijderen</button>' : ''}
+    </div>
+    <div class="kb-detail-body">
+      <div style="margin-bottom:14px">${agentPills}</div>
+      ${it.question ? `<div style="font-weight:600;font-size:14px;margin-bottom:6px">${esc(it.question)}</div>` : ''}
+      <div class="kb-detail-content">${it.answer ? renderMarkdown(it.answer) : renderMarkdown(it.content)}</div>
+      <div class="kb-meta-row">
+        <div class="kb-meta-cell"><div class="label">Helpfulness</div><div class="value">${it.helpfulness_score ?? 0}</div></div>
+        <div class="kb-meta-cell"><div class="label">Gebruikt</div><div class="value">${it.times_used ?? 0}×</div></div>
+        <div class="kb-meta-cell"><div class="label">Aangemaakt</div><div class="value">${fmtDate(it.created_at)}</div></div>
+        <div class="kb-meta-cell"><div class="label">Bijgewerkt</div><div class="value">${fmtDate(it.updated_at)}</div></div>
+      </div>
+    </div>
+  `;
+  document.getElementById('historyBtn')?.addEventListener('click', () => openVersionModal(it.id));
+  document.getElementById('editBtn')?.addEventListener('click', () => startEdit(it));
+  document.getElementById('deleteBtn')?.addEventListener('click', () => deleteItem(it));
+}
+
+function fmtDate(iso) {
+  if (!iso) return '—';
+  return new Date(iso).toLocaleDateString('nl-NL', { day: '2-digit', month: 'short', year: 'numeric' });
+}
+
+// ── Edit-mode ─────────────────────────────────────────────────────────
+function startEdit(item) {
+  state.draft = {
+    id:         item?.id || null,
+    title:      item?.title || '',
+    content:    item?.content || '',
+    question:   item?.question || '',
+    answer:     item?.answer || '',
+    is_profile: !!item?.is_profile,
+    agents:     [...(item?.agents || ['shared'])],
+  };
+  state.editing = true;
+  renderEditMode();
+}
+
+function renderEditMode() {
+  const mount = document.getElementById('detailMount');
+  const d = state.draft;
+  if (!d) return;
+  const isNew = !d.id;
+  const agentChecks = ['simon','lisa','leon','aron','shared']
+    .map(a => `<span class="agent-toggle ${d.agents.includes(a) ? 'on' : ''}" data-toggle="${a}">${esc(AGENT_LABELS[a])}</span>`)
+    .join('');
+
+  mount.innerHTML = `
+    <div class="kb-detail-head">
+      <div class="title">${isNew ? 'Nieuw item' : 'Bewerken'}</div>
+      <button class="btn btn-sm btn-ghost" id="cancelEditBtn">Annuleren</button>
+      <button class="btn btn-sm" id="saveBtn">Opslaan</button>
+    </div>
+    <div class="kb-detail-body">
+      <input class="kb-edit-title-input" id="titleInput" value="${esc(d.title)}" maxlength="200" placeholder="Titel (verplicht)" />
+
+      <div style="margin-bottom:14px">
+        <div class="label" style="font-size:10px;color:var(--text-faint);text-transform:uppercase;letter-spacing:.06em;font-weight:600;margin-bottom:6px">Zichtbaar voor agents</div>
+        <div class="kb-agent-toggles">${agentChecks}</div>
+        ${d.is_profile ? '<div style="margin-top:6px;font-size:11px;color:var(--text-faint)">Dit is het bedrijfsprofiel — altijd actief voor alle agents.</div>' : ''}
+      </div>
+
+      <div class="kb-edit-grid">
+        <div class="kb-edit-pane">
+          <div class="kb-edit-pane-head">Markdown</div>
+          <textarea class="kb-edit-textarea" id="contentInput" placeholder="Schrijf hier in markdown...\n\n# Kop\n- Lijst\n**vet**, *cursief*">${esc(d.content)}</textarea>
+        </div>
+        <div class="kb-edit-pane">
+          <div class="kb-edit-pane-head">Voorbeeld</div>
+          <div class="kb-edit-preview kb-detail-content" id="previewPane">${renderMarkdown(d.content)}</div>
+        </div>
+      </div>
+    </div>
+  `;
+  document.getElementById('cancelEditBtn').addEventListener('click', () => { state.editing = false; state.draft = null; renderDetail(); });
+  document.getElementById('saveBtn').addEventListener('click', saveDraft);
+  document.getElementById('titleInput').addEventListener('input', e => { d.title = e.target.value; });
+  document.getElementById('contentInput').addEventListener('input', e => {
+    d.content = e.target.value;
+    document.getElementById('previewPane').innerHTML = renderMarkdown(e.target.value);
+  });
+  mount.querySelectorAll('[data-toggle]').forEach(el => {
+    el.addEventListener('click', () => {
+      const a = el.dataset.toggle;
+      const i = d.agents.indexOf(a);
+      if (i >= 0) d.agents.splice(i, 1); else d.agents.push(a);
+      if (d.agents.length === 0) d.agents.push('shared'); // mag niet leeg zijn
+      el.classList.toggle('on');
+    });
+  });
+}
+
+async function saveDraft() {
+  const d = state.draft;
+  if (!d) return;
+  const titleClean = (d.title || '').trim();
+  if (!titleClean) { toast('Titel is verplicht', 'error'); return; }
+  const body = JSON.stringify({
+    title:      titleClean,
+    content:    d.content || '',
+    is_profile: d.is_profile,
+    agents:     d.agents,
+  });
+  const url = d.id ? '/api/kb-items?id=' + encodeURIComponent(d.id) : '/api/kb-items';
+  const method = d.id ? 'PUT' : 'POST';
+  try {
+    const res = await window.AgentShared.apiFetch(url, { method, headers: { 'Content-Type': 'application/json' }, body });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || ('HTTP ' + res.status));
+    }
+    const data = await res.json();
+    toast(d.id ? 'Opgeslagen' : 'Aangemaakt', 'success');
+    state.editing = false;
+    state.draft = null;
+    state.selectedId = data.item?.id || state.selectedId;
+    await loadItems();
+    renderDetail();
+  } catch (e) {
+    toast('Opslaan mislukt: ' + e.message, 'error');
+  }
+}
+
+async function deleteItem(item) {
+  if (!confirm(`Verwijder "${item.title}"?`)) return;
+  try {
+    const res = await window.AgentShared.apiFetch('/api/kb-items?id=' + encodeURIComponent(item.id), { method: 'DELETE' });
+    if (!res.ok && res.status !== 204) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || ('HTTP ' + res.status));
+    }
+    toast('Verwijderd', 'success');
+    state.selectedId = null;
+    await loadItems();
+    renderDetail();
+  } catch (e) {
+    toast('Verwijderen mislukt: ' + e.message, 'error');
+  }
+}
+
+// ── Version modal ─────────────────────────────────────────────────────
+async function openVersionModal(itemId) {
+  const overlay = document.getElementById('versionModal');
+  const list = document.getElementById('versionList');
+  list.innerHTML = '<div class="kb-empty">Laden…</div>';
+  overlay.classList.add('show');
+  try {
+    const res = await window.AgentShared.apiFetch('/api/kb-items?action=versions&id=' + encodeURIComponent(itemId));
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+    const versions = data.versions || [];
+    if (!versions.length) {
+      list.innerHTML = '<div class="kb-empty">Nog geen versies — eerste bewerking maakt versie 1 aan.</div>';
+      return;
+    }
+    list.innerHTML = versions.map(v => `
+      <div class="version-row">
+        <div class="row-head">
+          <span>Versie ${v.version_number} · ${fmtDate(v.created_at)}${v.changed_by_name ? ' · ' + esc(v.changed_by_name) : ''}</span>
+        </div>
+        <div class="row-title">${esc(v.title || '(geen titel)')}</div>
+        <div class="row-preview">${esc((v.content || '').slice(0, 200))}</div>
+        ${can('kennisbank.item.edit') ? `<div class="version-actions"><button class="btn btn-sm" data-restore="${v.version_number}">Terugzetten naar deze versie</button></div>` : ''}
+      </div>
+    `).join('');
+    list.querySelectorAll('[data-restore]').forEach(btn => {
+      btn.addEventListener('click', () => restoreVersion(itemId, btn.dataset.restore));
+    });
+  } catch (e) {
+    list.innerHTML = '<div class="kb-empty">Versies laden mislukt: ' + esc(e.message) + '</div>';
+  }
+}
+
+async function restoreVersion(itemId, version) {
+  if (!confirm(`Terugzetten naar versie ${version}? Huidige inhoud wordt versie ${parseInt(version) + 1}.`)) return;
+  try {
+    const res = await window.AgentShared.apiFetch(`/api/kb-items?action=restore&id=${encodeURIComponent(itemId)}&version=${encodeURIComponent(version)}`, { method: 'POST' });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || ('HTTP ' + res.status));
+    }
+    toast('Versie hersteld', 'success');
+    document.getElementById('versionModal').classList.remove('show');
+    await loadItems();
+    renderDetail();
+  } catch (e) {
+    toast('Herstel mislukt: ' + e.message, 'error');
+  }
+}
+
+// ── Init / wiring ─────────────────────────────────────────────────────
+document.getElementById('searchInput').addEventListener('input', e => {
+  state.search = e.target.value;
+  renderItemList();
+});
+document.getElementById('newItemBtn').addEventListener('click', () => {
+  if (!can('kennisbank.item.create')) { toast('Geen rechten om item aan te maken', 'error'); return; }
+  startEdit(null);
+});
+document.querySelectorAll('[data-bucket]').forEach(el => {
+  el.addEventListener('click', () => {
+    document.querySelectorAll('.kb-bucket').forEach(b => b.classList.remove('active'));
+    el.classList.add('active');
+    state.bucket = el.dataset.bucket;
+    renderItemList();
+  });
+});
+document.getElementById('closeVersionsBtn').addEventListener('click', () => {
+  document.getElementById('versionModal').classList.remove('show');
+});
+document.getElementById('versionModal').addEventListener('click', (e) => {
+  if (e.target.id === 'versionModal') e.currentTarget.classList.remove('show');
+});
+
+(async () => {
+  await window._authSharedReady;
+  const profile = await window.AuthShared?.requireAuth();
+  if (!profile) return;
+  if (window.AgentShared) await window.AgentShared.renderUserSection(profile);
+
+  // RBAC: laad permissions voor edit/delete-gating in UI.
+  try {
+    if (window.RBAC && typeof window.RBAC.ensurePermissionsLoaded === 'function') {
+      state.perms = await window.RBAC.ensurePermissionsLoaded();
+    }
+  } catch (e) { /* fail-open */ }
+
+  await loadItems();
 })();
 </script>
 <script src="/modules/shared/permissions.js"></script>
 <script src="/modules/shared/sidebar.js"></script>
+<script src="/modules/shared/quick-task-button.js" data-module="Kennisbank" defer></script>
 </body>
 </html>

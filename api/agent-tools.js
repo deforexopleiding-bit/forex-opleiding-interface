@@ -908,25 +908,31 @@ async function executeGetRecentCorrections({ limit = 10 }) {
   };
 }
 
-async function executeQueryKnowledgeBase({ topic }) {
+async function executeQueryKnowledgeBase({ topic, agent }) {
+  // Nieuwe kb_items tabel. Scope optioneel per agent.
   const term = `%${topic}%`;
-  const { data, error } = await supabase
-    .from('kennisbank_items')
-    .select('type, title, category, content, helpfulness_score, times_used')
-    .or(`title.ilike.${term},content.ilike.${term}`)
+  const agentClause = (agent && ['simon','lisa','leon','aron'].includes(agent))
+    ? `agents.cs.{${agent}}` : null;
+  let q = supabase
+    .from('kb_items')
+    .select('title, content, question, answer, agents, is_profile, helpfulness_score, times_used')
+    .or(`title.ilike.${term},content.ilike.${term},question.ilike.${term},answer.ilike.${term}`)
     .order('helpfulness_score', { ascending: false, nullsFirst: false })
     .limit(5);
+  if (agentClause) q = q.or(`${agentClause},agents.cs.{shared},is_profile.eq.true`);
 
-  if (error) throw new Error('kennisbank_items query fout: ' + error.message);
+  const { data, error } = await q;
+  if (error) throw new Error('kb_items query fout: ' + error.message);
 
   return {
     topic,
+    agent: agent || null,
     count: (data || []).length,
     results: (data || []).map(item => ({
       title:             item.title,
-      type:              item.type,
-      category:          item.category,
-      content:           item.content?.slice(0, 300) || '',
+      agents:            item.agents,
+      is_profile:        item.is_profile,
+      content:           (item.content || item.answer || '')?.slice(0, 300),
       helpfulness_score: item.helpfulness_score,
     })),
   };
@@ -940,17 +946,15 @@ async function executeAddKnowledgeBaseItem({ title, content, category, direction
   if (c.length < 20)  return { ok: false, error: 'Inhoud moet minimaal 20 tekens bevatten.' };
   if (c.length > 5000) return { ok: false, error: 'Inhoud mag maximaal 5000 tekens bevatten.' };
 
+  // Nieuwe kb_items tabel. Default: gedeeld met alle agents ('shared').
   const { data, error } = await supabase
-    .from('kennisbank_items')
+    .from('kb_items')
     .insert({
-      type:              'item',
       title:             t,
       content:           c,
-      category:          category || 'Algemeen',
-      direction:         direction || 'beide',
+      agents:            ['shared'],
       helpfulness_score: 50,
       auto_generated:    true,
-      note:              'Aangemaakt door AI agent Simon',
     })
     .select('id')
     .single();
