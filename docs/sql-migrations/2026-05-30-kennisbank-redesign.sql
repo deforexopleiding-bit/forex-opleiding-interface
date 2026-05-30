@@ -240,6 +240,33 @@ BEGIN
   END IF;
 END$$;
 
+-- ── 5b. TAG-FK FIX ──────────────────────────────────────────────────────────
+-- kb_item_tags.item_id wees naar kennisbank_items.id. Na rename naar
+-- kennisbank_items_archive (sectie 6) klopt die FK niet meer voor nieuwe items.
+-- Re-point FK naar kb_items.id. Bestaande tag-links blijven geldig omdat
+-- data-migratie de id-waardes behoudt.
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.tables
+             WHERE table_schema='public' AND table_name='kb_item_tags') THEN
+    -- Drop alle bestaande FKs op item_id (naam kan variëren).
+    EXECUTE (
+      SELECT string_agg(
+        format('ALTER TABLE public.kb_item_tags DROP CONSTRAINT %I;', conname),
+        ' '
+      )
+      FROM pg_constraint
+      WHERE conrelid = 'public.kb_item_tags'::regclass
+        AND contype = 'f'
+    );
+    -- Voeg nieuwe FK toe op kb_items.
+    EXECUTE 'ALTER TABLE public.kb_item_tags
+             ADD CONSTRAINT kb_item_tags_item_id_fkey
+             FOREIGN KEY (item_id) REFERENCES public.kb_items(id) ON DELETE CASCADE';
+    RAISE NOTICE 'kb_item_tags.item_id FK herpunt naar kb_items.';
+  END IF;
+END$$;
+
 -- ── 6. ARCHIVE-RENAME ───────────────────────────────────────────────────────
 -- Rename oude tabel → kennisbank_items_archive (1 week rollback-window).
 -- Defensief: alleen renamen als bron bestaat én archive-target nog niet bestaat.

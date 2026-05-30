@@ -136,6 +136,7 @@
     .agent-pill.aron   { background: rgba(245,158,11,0.12); color: #a16207; border-color: rgba(245,158,11,0.3); }
     .agent-pill.shared { background: rgba(5,150,105,0.12); color: #059669; border-color: rgba(5,150,105,0.3); }
     .agent-pill.profile { background: var(--accent); color: #fff; border-color: var(--accent); }
+    .tag-pill { display:inline-block; padding:1px 7px; border-radius:8px; font-size:10px; font-weight:600; }
 
     .kb-empty { padding: 40px 16px; text-align: center; color: var(--text-faint); font-size: 13px; }
 
@@ -334,12 +335,19 @@
       <div class="kb-bucket" data-bucket="aron"><span class="name">Aron (finance)</span><span class="count" id="cnt-aron">—</span></div>
       <div class="kb-bucket" data-bucket="shared"><span class="name">Gedeeld</span><span class="count" id="cnt-shared">—</span></div>
     </div>
+
+    <div class="kb-side-section" style="display:flex;align-items:center;justify-content:space-between">
+      Filter op tag
+      <button class="btn btn-sm btn-ghost" id="manageTagsBtn" data-tooltip="Tags beheren" style="padding:2px 8px;font-size:10px">Beheren</button>
+    </div>
+    <div id="tagFilterList"></div>
   </aside>
 
   <!-- COL 2: item-list -->
   <section class="kb-col kb-list">
     <div class="kb-list-toolbar">
       <input class="kb-search" id="searchInput" type="search" placeholder="Zoek titel of inhoud…" />
+      <button class="btn btn-ghost" id="importBtn" data-tooltip="Bestand of tekst importeren">⇪ Importeer</button>
       <button class="btn" id="newItemBtn">+ Nieuw item</button>
     </div>
     <div id="itemList"></div>
@@ -368,6 +376,69 @@
   </div>
 </div>
 
+<!-- Tag CRUD modal -->
+<div class="modal-overlay" id="tagModal">
+  <div class="modal-card">
+    <div class="modal-head">
+      <span class="title">Tags beheren</span>
+      <button class="modal-close" id="closeTagModalBtn">&times;</button>
+    </div>
+    <div class="modal-body">
+      <div style="display:flex;gap:8px;margin-bottom:14px">
+        <input id="tagNameInput" placeholder="Tag-naam" maxlength="60" style="flex:1;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text)" />
+        <input id="tagColorInput" type="color" value="#6d28d9" style="width:40px;border:1px solid var(--border);border-radius:6px;cursor:pointer" />
+        <button class="btn" id="saveTagBtn">Toevoegen</button>
+      </div>
+      <div id="tagCrudList"></div>
+    </div>
+  </div>
+</div>
+
+<!-- Import modal -->
+<div class="modal-overlay" id="importModal">
+  <div class="modal-card" style="max-width:780px">
+    <div class="modal-head">
+      <span class="title">Importeer kennisbron</span>
+      <button class="modal-close" id="closeImportBtn">&times;</button>
+    </div>
+    <div class="modal-body">
+      <div id="importStepUpload" style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px">
+        <div id="dropzone" style="border:2px dashed var(--border-strong);border-radius:8px;padding:24px;text-align:center;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:8px">
+          <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" style="color:var(--text-faint)"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+          <strong style="font-size:13px">Sleep een bestand</strong>
+          <span style="font-size:11px;color:var(--text-faint)">.txt, .pdf, .png, .jpg</span>
+          <input type="file" id="importFileInput" accept=".txt,.pdf,.png,.jpg,.jpeg,image/png,image/jpeg,application/pdf,text/plain" style="display:none" />
+        </div>
+        <div style="display:flex;flex-direction:column">
+          <label style="font-size:11px;color:var(--text-faint);text-transform:uppercase;letter-spacing:.06em;font-weight:600;margin-bottom:6px">Of plak tekst</label>
+          <textarea id="importTextInput" placeholder="Plak hier de inhoud…" style="flex:1;min-height:140px;padding:10px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-family:inherit;font-size:12.5px;resize:vertical"></textarea>
+          <button class="btn btn-ghost btn-sm" id="useImportTextBtn" style="margin-top:8px">Tekst gebruiken</button>
+        </div>
+      </div>
+
+      <div id="importStepPreview" style="display:none">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">
+          <div>
+            <label style="font-size:11px;color:var(--text-faint);text-transform:uppercase;letter-spacing:.06em;font-weight:600">Titel</label>
+            <input id="importTitleInput" maxlength="200" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);margin-top:4px" />
+          </div>
+          <div>
+            <label style="font-size:11px;color:var(--text-faint);text-transform:uppercase;letter-spacing:.06em;font-weight:600">Voor agents</label>
+            <div class="kb-agent-toggles" id="importAgentToggles" style="margin-top:4px"></div>
+          </div>
+        </div>
+        <label style="font-size:11px;color:var(--text-faint);text-transform:uppercase;letter-spacing:.06em;font-weight:600">Inhoud (bewerkbaar)</label>
+        <textarea id="importContentInput" style="width:100%;min-height:200px;padding:10px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-family:Menlo,monospace;font-size:12.5px;line-height:1.5;margin-top:4px;resize:vertical"></textarea>
+        <div id="importStatus" style="font-size:11px;color:var(--text-faint);margin-top:8px"></div>
+      </div>
+    </div>
+    <div style="padding:12px 20px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:8px">
+      <button class="btn btn-ghost btn-sm" id="cancelImportBtn">Annuleren</button>
+      <button class="btn btn-sm" id="saveImportBtn" disabled>Opslaan als item</button>
+    </div>
+  </div>
+</div>
+
 <div class="toast" id="toast"></div>
 
 <script src="/modules/shared/supabase-client.js"></script>
@@ -390,6 +461,13 @@ const state = {
   editing: false,
   draft: null,   // { id?, title, content, agents:[], is_profile }
   perms: null,
+  // Tags state
+  tags: [],                // [{ id, name, color }]
+  itemTagsMap: {},         // { itemId: [tagId] }
+  tagFilter: null,         // tagId or null
+  // Import state
+  importing: false,
+  importDraft: null,       // { source, content, fileName, agents:[], tags:[], status, error }
 };
 
 function esc(s) {
@@ -423,16 +501,65 @@ function renderMarkdown(text) {
 // ── Data fetching ─────────────────────────────────────────────────────
 async function loadItems() {
   try {
-    const res = await window.AgentShared.apiFetch('/api/kb-items');
-    if (!res.ok) throw new Error('HTTP ' + res.status);
-    const data = await res.json();
-    state.items = data.items || [];
+    const [itemsRes, tagsRes, mapRes] = await Promise.all([
+      window.AgentShared.apiFetch('/api/kb-items'),
+      window.AgentShared.apiFetch('/api/kb-tags?action=list'),
+      window.AgentShared.apiFetch('/api/kb-item-tags?action=all_with_tags'),
+    ]);
+    if (!itemsRes.ok) throw new Error('items HTTP ' + itemsRes.status);
+    const itemsData = await itemsRes.json();
+    state.items = itemsData.items || [];
+
+    if (tagsRes.ok) {
+      const tagsData = await tagsRes.json();
+      state.tags = tagsData.tags || tagsData.items || [];
+    }
+    if (mapRes.ok) {
+      const mapData = await mapRes.json();
+      state.itemTagsMap = {};
+      // Endpoint kan ofwel { rows: [{item_id, tag_id}] } ofwel { items: [{item_id, tags:[...]}] } returnen.
+      if (Array.isArray(mapData.rows)) {
+        for (const r of mapData.rows) {
+          (state.itemTagsMap[r.item_id] ||= []).push(r.tag_id);
+        }
+      } else if (Array.isArray(mapData.items)) {
+        for (const r of mapData.items) {
+          state.itemTagsMap[r.item_id] = (r.tags || []).map(t => t.id || t);
+        }
+      }
+    }
+
     renderBucketCounts();
+    renderTagFilters();
     renderItemList();
+    if (state.selectedId) renderDetail();
   } catch (e) {
     toast('Laden mislukt: ' + e.message, 'error');
     document.getElementById('itemList').innerHTML = '<div class="kb-empty">Laden mislukt.</div>';
   }
+}
+
+function tagsForItem(itemId) {
+  const tagIds = state.itemTagsMap[itemId] || [];
+  return tagIds.map(id => state.tags.find(t => t.id === id)).filter(Boolean);
+}
+
+function renderTagFilters() {
+  const root = document.getElementById('tagFilterList');
+  if (!root) return;
+  if (!state.tags.length) { root.innerHTML = '<div style="font-size:11px;color:var(--text-faint);padding:6px 10px">Geen tags</div>'; return; }
+  root.innerHTML = state.tags.slice(0, 30).map(t => `
+    <div class="kb-bucket ${state.tagFilter === t.id ? 'active' : ''}" data-tag-id="${esc(t.id)}">
+      <span class="dot-mini" style="background:${esc(t.color || '#94a3b8')};width:8px;height:8px;border-radius:50%;display:inline-block"></span>
+      <span class="name">${esc(t.name)}</span>
+    </div>`).join('');
+  root.querySelectorAll('[data-tag-id]').forEach(el => {
+    el.addEventListener('click', () => {
+      state.tagFilter = state.tagFilter === el.dataset.tagId ? null : el.dataset.tagId;
+      renderTagFilters();
+      renderItemList();
+    });
+  });
 }
 
 // ── Bucket counts ─────────────────────────────────────────────────────
@@ -454,6 +581,9 @@ function filteredItems() {
   let arr = state.items.slice();
   if (state.bucket === 'profile') arr = arr.filter(i => i.is_profile);
   else if (state.bucket !== 'all') arr = arr.filter(i => (i.agents || []).includes(state.bucket));
+  if (state.tagFilter) {
+    arr = arr.filter(i => (state.itemTagsMap[i.id] || []).includes(state.tagFilter));
+  }
   if (state.search) {
     const q = state.search.toLowerCase();
     arr = arr.filter(i =>
@@ -474,14 +604,17 @@ function renderItemList() {
     return;
   }
   root.innerHTML = arr.map(i => {
-    const pills = i.is_profile
+    const agentPills = i.is_profile
       ? '<span class="agent-pill profile">PROFIEL</span>'
       : (i.agents || []).map(a => `<span class="agent-pill ${esc(a)}">${esc(AGENT_LABELS[a] || a)}</span>`).join(' ');
+    const tagPills = tagsForItem(i.id).slice(0, 4)
+      .map(t => `<span class="tag-pill" style="background:${esc(t.color || '#94a3b8')}22;color:${esc(t.color || '#94a3b8')};border:1px solid ${esc(t.color || '#94a3b8')}55">${esc(t.name)}</span>`).join(' ');
     const preview = (i.content || i.answer || '').slice(0, 140);
     return `
       <div class="kb-item-card${state.selectedId === i.id ? ' selected' : ''}" data-id="${esc(i.id)}">
         <div class="kb-item-title">${esc(i.title || '(geen titel)')}</div>
-        <div class="kb-item-meta">${pills}<span>${i.helpfulness_score ?? 0} pts</span></div>
+        <div class="kb-item-meta">${agentPills}<span>${i.helpfulness_score ?? 0} pts</span></div>
+        ${tagPills ? `<div style="display:flex;gap:4px;flex-wrap:wrap;margin-top:5px">${tagPills}</div>` : ''}
         ${preview ? `<div class="kb-item-preview">${esc(preview)}</div>` : ''}
       </div>`;
   }).join('');
@@ -519,6 +652,11 @@ function renderDetail() {
     ? '<span class="agent-pill profile">PROFIEL — altijd actief</span>'
     : (it.agents || []).map(a => `<span class="agent-pill ${esc(a)}">${esc(AGENT_LABELS[a] || a)}</span>`).join(' ');
 
+  const tagPills = tagsForItem(it.id)
+    .map(t => `<span class="tag-pill" style="background:${esc(t.color || '#94a3b8')}22;color:${esc(t.color || '#94a3b8')};border:1px solid ${esc(t.color || '#94a3b8')}55;padding:2px 8px;margin-right:4px" data-tag-id="${esc(t.id)}">${esc(t.name)} ${canEdit ? '<button data-remove-tag="' + esc(t.id) + '" style="background:none;border:none;color:inherit;cursor:pointer;padding:0 0 0 4px;font-size:12px">×</button>' : ''}</span>`)
+    .join('');
+  const tagAddBtn = canEdit ? '<button class="btn btn-sm btn-ghost" id="addTagBtn" style="padding:2px 8px;font-size:11px">+ Tag</button>' : '';
+
   mount.innerHTML = `
     <div class="kb-detail-head">
       <div class="title">${esc(it.title || '(geen titel)')}</div>
@@ -528,6 +666,9 @@ function renderDetail() {
     </div>
     <div class="kb-detail-body">
       <div style="margin-bottom:14px">${agentPills}</div>
+      <div style="margin-bottom:14px;display:flex;flex-wrap:wrap;gap:4px;align-items:center" id="tagsRow">
+        ${tagPills}${tagAddBtn}
+      </div>
       ${it.question ? `<div style="font-weight:600;font-size:14px;margin-bottom:6px">${esc(it.question)}</div>` : ''}
       <div class="kb-detail-content">${it.answer ? renderMarkdown(it.answer) : renderMarkdown(it.content)}</div>
       <div class="kb-meta-row">
@@ -541,6 +682,245 @@ function renderDetail() {
   document.getElementById('historyBtn')?.addEventListener('click', () => openVersionModal(it.id));
   document.getElementById('editBtn')?.addEventListener('click', () => startEdit(it));
   document.getElementById('deleteBtn')?.addEventListener('click', () => deleteItem(it));
+
+  // Tag-knoppen
+  document.getElementById('addTagBtn')?.addEventListener('click', (ev) => showTagPicker(ev.target, it.id));
+  mount.querySelectorAll('[data-remove-tag]').forEach(btn => {
+    btn.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      removeTag(it.id, btn.dataset.removeTag);
+    });
+  });
+}
+
+// ── Tag-helpers: picker + add/remove + CRUD ──────────────────────────
+function showTagPicker(anchor, itemId) {
+  // Simpele inline-picker via prompt+select. Light-weight; vermijd extra modal.
+  const existingTags = state.tags.filter(t => !(state.itemTagsMap[itemId] || []).includes(t.id));
+  if (!existingTags.length) {
+    if (confirm('Geen ongebruikte tags beschikbaar. Tags-beheer openen?')) openTagModal();
+    return;
+  }
+  const options = existingTags.map((t, i) => `${i + 1}. ${t.name}`).join('\n');
+  const pick = prompt('Kies tag (nummer):\n\n' + options);
+  if (!pick) return;
+  const idx = parseInt(pick, 10) - 1;
+  const tag = existingTags[idx];
+  if (!tag) { toast('Ongeldige keuze', 'error'); return; }
+  addTagToItem(itemId, tag.id);
+}
+
+async function addTagToItem(itemId, tagId) {
+  try {
+    const res = await window.AgentShared.apiFetch('/api/kb-item-tags', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ item_id: itemId, tag_id: tagId })
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || 'HTTP ' + res.status);
+    }
+    (state.itemTagsMap[itemId] ||= []).push(tagId);
+    renderItemList();
+    renderDetail();
+    toast('Tag toegevoegd', 'success');
+  } catch (e) { toast('Tag toevoegen mislukt: ' + e.message, 'error'); }
+}
+
+async function removeTag(itemId, tagId) {
+  try {
+    const res = await window.AgentShared.apiFetch('/api/kb-item-tags', {
+      method: 'DELETE', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ item_id: itemId, tag_id: tagId })
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || 'HTTP ' + res.status);
+    }
+    state.itemTagsMap[itemId] = (state.itemTagsMap[itemId] || []).filter(id => id !== tagId);
+    renderItemList();
+    renderDetail();
+  } catch (e) { toast('Tag verwijderen mislukt: ' + e.message, 'error'); }
+}
+
+function openTagModal() {
+  document.getElementById('tagModal').classList.add('show');
+  renderTagCrudList();
+}
+
+function renderTagCrudList() {
+  const root = document.getElementById('tagCrudList');
+  if (!state.tags.length) {
+    root.innerHTML = '<div class="kb-empty" style="font-size:12px">Nog geen tags. Voeg de eerste toe hierboven.</div>';
+    return;
+  }
+  root.innerHTML = state.tags.map(t => `
+    <div style="display:flex;align-items:center;gap:10px;padding:8px;border:1px solid var(--border);border-radius:6px;margin-bottom:6px">
+      <span style="width:14px;height:14px;border-radius:50%;background:${esc(t.color || '#94a3b8')};flex-shrink:0"></span>
+      <span style="flex:1;font-size:13px">${esc(t.name)}</span>
+      <button class="btn btn-sm btn-danger" data-del-tag="${esc(t.id)}">Verwijderen</button>
+    </div>
+  `).join('');
+  root.querySelectorAll('[data-del-tag]').forEach(btn => {
+    btn.addEventListener('click', () => deleteTag(btn.dataset.delTag));
+  });
+}
+
+async function createTag() {
+  const name = (document.getElementById('tagNameInput').value || '').trim();
+  const color = document.getElementById('tagColorInput').value || '#6d28d9';
+  if (!name) { toast('Tag-naam verplicht', 'error'); return; }
+  try {
+    const res = await window.AgentShared.apiFetch('/api/kb-tags', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, color })
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || 'HTTP ' + res.status);
+    }
+    const data = await res.json();
+    state.tags.push(data.tag || data);
+    document.getElementById('tagNameInput').value = '';
+    renderTagCrudList();
+    renderTagFilters();
+    renderItemList();
+    toast('Tag aangemaakt', 'success');
+  } catch (e) { toast('Aanmaken mislukt: ' + e.message, 'error'); }
+}
+
+async function deleteTag(tagId) {
+  if (!confirm('Tag verwijderen? Wordt overal losgekoppeld.')) return;
+  try {
+    const res = await window.AgentShared.apiFetch('/api/kb-tags?id=' + encodeURIComponent(tagId), { method: 'DELETE' });
+    if (!res.ok && res.status !== 204) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || 'HTTP ' + res.status);
+    }
+    state.tags = state.tags.filter(t => t.id !== tagId);
+    for (const itemId of Object.keys(state.itemTagsMap)) {
+      state.itemTagsMap[itemId] = (state.itemTagsMap[itemId] || []).filter(id => id !== tagId);
+    }
+    renderTagCrudList();
+    renderTagFilters();
+    renderItemList();
+    renderDetail();
+    toast('Tag verwijderd', 'success');
+  } catch (e) { toast('Verwijderen mislukt: ' + e.message, 'error'); }
+}
+
+// ── Import-modal (upload + vision + paste) ────────────────────────────
+function openImportModal() {
+  if (!can('kennisbank.item.create')) { toast('Geen rechten om te importeren', 'error'); return; }
+  state.importDraft = null;
+  document.getElementById('importStepUpload').style.display = 'grid';
+  document.getElementById('importStepPreview').style.display = 'none';
+  document.getElementById('saveImportBtn').disabled = true;
+  document.getElementById('importTextInput').value = '';
+  document.getElementById('importStatus').textContent = '';
+  document.getElementById('importModal').classList.add('show');
+}
+
+function closeImportModal() {
+  document.getElementById('importModal').classList.remove('show');
+  state.importDraft = null;
+}
+
+function readFileAsText(file) {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(r.result);
+    r.onerror = () => reject(new Error('Lezen mislukt'));
+    r.readAsText(file);
+  });
+}
+function readFileAsBase64(file) {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(String(r.result).split(',')[1] || '');
+    r.onerror = () => reject(new Error('Lezen mislukt'));
+    r.readAsDataURL(file);
+  });
+}
+
+async function handleImportFile(file) {
+  if (!file) return;
+  const ext = (file.name.split('.').pop() || '').toLowerCase();
+  const mime = file.type || '';
+  document.getElementById('importStatus').textContent = `Verwerken ${file.name}…`;
+  try {
+    let content = '';
+    if (ext === 'txt' || mime === 'text/plain') {
+      content = await readFileAsText(file);
+    } else if (ext === 'pdf' || mime === 'application/pdf') {
+      const base64 = await readFileAsBase64(file);
+      const r = await fetch('/api/pdf-extract', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ data: base64 }) });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || ('HTTP ' + r.status));
+      content = d.text || '';
+    } else if (mime.startsWith('image/') || ['png','jpg','jpeg'].includes(ext)) {
+      const base64 = await readFileAsBase64(file);
+      const r = await fetch('/api/vision-extract', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ image: base64, mimeType: mime || `image/${ext === 'jpg' ? 'jpeg' : ext}` }) });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || ('HTTP ' + r.status));
+      content = d.text || '';
+    } else {
+      throw new Error(`Bestandstype ${ext} niet ondersteund`);
+    }
+    showImportPreview({ title: file.name.replace(/\.[^.]+$/, ''), content, source: ext });
+  } catch (e) {
+    document.getElementById('importStatus').textContent = 'Fout: ' + e.message;
+    toast('Import mislukt: ' + e.message, 'error');
+  }
+}
+
+function showImportPreview(draft) {
+  state.importDraft = { agents: ['shared'], ...draft };
+  document.getElementById('importStepUpload').style.display = 'none';
+  document.getElementById('importStepPreview').style.display = 'block';
+  document.getElementById('importTitleInput').value = state.importDraft.title;
+  document.getElementById('importContentInput').value = state.importDraft.content;
+  document.getElementById('saveImportBtn').disabled = false;
+  document.getElementById('importStatus').textContent = `Bron: ${draft.source || 'tekst'} · ${state.importDraft.content.length} tekens`;
+  // Render agent-toggles
+  const root = document.getElementById('importAgentToggles');
+  root.innerHTML = ['simon','lisa','leon','aron','shared']
+    .map(a => `<span class="agent-toggle ${state.importDraft.agents.includes(a) ? 'on' : ''}" data-import-toggle="${a}">${esc(AGENT_LABELS[a])}</span>`).join('');
+  root.querySelectorAll('[data-import-toggle]').forEach(el => {
+    el.addEventListener('click', () => {
+      const a = el.dataset.importToggle;
+      const i = state.importDraft.agents.indexOf(a);
+      if (i >= 0) state.importDraft.agents.splice(i, 1); else state.importDraft.agents.push(a);
+      if (state.importDraft.agents.length === 0) state.importDraft.agents.push('shared');
+      el.classList.toggle('on');
+    });
+  });
+}
+
+async function saveImport() {
+  const d = state.importDraft;
+  if (!d) return;
+  const title = (document.getElementById('importTitleInput').value || '').trim();
+  const content = document.getElementById('importContentInput').value || '';
+  if (!title) { toast('Titel verplicht', 'error'); return; }
+  try {
+    const res = await window.AgentShared.apiFetch('/api/kb-items', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title, content, agents: d.agents })
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || ('HTTP ' + res.status));
+    }
+    const data = await res.json();
+    toast('Item aangemaakt', 'success');
+    closeImportModal();
+    state.selectedId = data.item?.id;
+    await loadItems();
+    renderDetail();
+  } catch (e) {
+    toast('Opslaan mislukt: ' + e.message, 'error');
+  }
 }
 
 function fmtDate(iso) {
@@ -737,6 +1117,41 @@ document.getElementById('closeVersionsBtn').addEventListener('click', () => {
 });
 document.getElementById('versionModal').addEventListener('click', (e) => {
   if (e.target.id === 'versionModal') e.currentTarget.classList.remove('show');
+});
+
+// Tags
+document.getElementById('manageTagsBtn').addEventListener('click', () => {
+  if (!can('kennisbank.tag.manage')) { toast('Geen rechten om tags te beheren', 'error'); return; }
+  openTagModal();
+});
+document.getElementById('closeTagModalBtn').addEventListener('click', () => document.getElementById('tagModal').classList.remove('show'));
+document.getElementById('tagModal').addEventListener('click', (e) => {
+  if (e.target.id === 'tagModal') e.currentTarget.classList.remove('show');
+});
+document.getElementById('saveTagBtn').addEventListener('click', createTag);
+
+// Import
+document.getElementById('importBtn').addEventListener('click', openImportModal);
+document.getElementById('closeImportBtn').addEventListener('click', closeImportModal);
+document.getElementById('cancelImportBtn').addEventListener('click', closeImportModal);
+document.getElementById('importModal').addEventListener('click', (e) => {
+  if (e.target.id === 'importModal') closeImportModal();
+});
+document.getElementById('saveImportBtn').addEventListener('click', saveImport);
+document.getElementById('useImportTextBtn').addEventListener('click', () => {
+  const text = (document.getElementById('importTextInput').value || '').trim();
+  if (!text) { toast('Plak eerst tekst', 'error'); return; }
+  showImportPreview({ title: 'Geplakte tekst', content: text, source: 'paste' });
+});
+const dz = document.getElementById('dropzone');
+const fileInput = document.getElementById('importFileInput');
+dz.addEventListener('click', () => fileInput.click());
+fileInput.addEventListener('change', (e) => { if (e.target.files[0]) handleImportFile(e.target.files[0]); });
+['dragenter','dragover'].forEach(ev => dz.addEventListener(ev, (e) => { e.preventDefault(); dz.style.borderColor = 'var(--accent-cyan)'; }));
+['dragleave','drop'].forEach(ev => dz.addEventListener(ev, (e) => { e.preventDefault(); dz.style.borderColor = 'var(--border-strong)'; }));
+dz.addEventListener('drop', (e) => {
+  e.preventDefault();
+  if (e.dataTransfer.files[0]) handleImportFile(e.dataTransfer.files[0]);
 });
 
 (async () => {
