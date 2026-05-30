@@ -345,23 +345,45 @@ async function buildAiContext(senderEmail, senderDomain) {
   let patternContext     = 'Geen bekende patronen.';
   let kennisbankVoorbeelden = '';
 
+  // Nieuwe kb_items tabel (redesign 2026-05-30). Scope op simon + shared.
+  // Backwards-compat: bij DB-fout / lege tabel valt 'ie terug op
+  // kennisbank_items_archive (oude tabel-naam na rename).
   try {
-    const { data: kbItems } = await supabase.from('kennisbank_items')
-      .select('type, category, title, content, helpfulness_score')
+    let { data: kbItems } = await supabase.from('kb_items')
+      .select('is_profile, title, content, helpfulness_score, agents')
+      .or('agents.cs.{simon},agents.cs.{shared},is_profile.eq.true')
       .order('helpfulness_score', { ascending: false })
       .limit(15);
 
+    if (!kbItems || kbItems.length === 0) {
+      // Fallback: oude tabel (archive) — kan tijdens migratie-window leeg zijn.
+      const { data: legacy } = await supabase.from('kennisbank_items_archive')
+        .select('type, category, title, content, helpfulness_score')
+        .order('helpfulness_score', { ascending: false })
+        .limit(15);
+      if (legacy?.length) {
+        kbItems = legacy.map(k => ({
+          is_profile:        k.type === 'bedrijfsprofiel',
+          title:             k.title,
+          content:           k.content,
+          helpfulness_score: k.helpfulness_score,
+        }));
+      }
+    }
+
     if (kbItems?.length) {
-      const profiel = kbItems.find((k) => k.type === 'bedrijfsprofiel');
+      const profiel = kbItems.find((k) => k.is_profile);
       if (profiel) bedrijfsprofiel = profiel.content || FALLBACK_BEDRIJFSPROFIEL;
 
       const examples = kbItems
-        .filter((k) => k.type !== 'bedrijfsprofiel')
-        .map((k) => `- [${k.category || k.type}] ${k.title || (k.content || '').slice(0, 80)}`)
+        .filter((k) => !k.is_profile)
+        .map((k) => `- ${k.title || (k.content || '').slice(0, 80)}`)
         .join('\n');
       if (examples) kennisbankVoorbeelden = examples;
     }
-  } catch {}
+  } catch (e) {
+    console.warn('[email-agent] kb_items fetch fout:', e.message);
+  }
 
   try {
     let corrQuery = supabase.from('learn_examples')

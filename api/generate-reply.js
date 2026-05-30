@@ -40,12 +40,22 @@ export default async function handler(req, res) {
   let learningExamplesUsed = 0;
 
   try {
-    // Haal meest helpfulle kennisbank-items op (gesorteerd op helpfulness_score)
-    const { data: kbItems } = await supabase
-      .from('kennisbank_items')
-      .select('title, category, content, question, answer, helpfulness_score, times_helpful')
+    // Nieuwe kb_items tabel (redesign 2026-05-30). Scope op simon + shared.
+    // Fallback op kennisbank_items_archive tijdens migratie-window.
+    let { data: kbItems } = await supabase
+      .from('kb_items')
+      .select('title, content, question, answer, helpfulness_score, times_helpful, agents')
+      .or('agents.cs.{simon},agents.cs.{shared},is_profile.eq.true')
       .order('helpfulness_score', { ascending: false })
       .limit(10);
+    if (!kbItems || kbItems.length === 0) {
+      const { data: legacy } = await supabase
+        .from('kennisbank_items_archive')
+        .select('title, category, content, question, answer, helpfulness_score, times_helpful')
+        .order('helpfulness_score', { ascending: false })
+        .limit(10);
+      kbItems = legacy || [];
+    }
     serverKbItems = kbItems || [];
     kennisbankUsed = serverKbItems.length;
     console.log(`[generate-reply] kennisbank: ${kennisbankUsed} items geladen`);
@@ -134,20 +144,20 @@ export default async function handler(req, res) {
 
     const reply = response.content[0]?.text?.trim() || '';
 
-    // ── Auto-save goede replies naar kennisbank ───────────────────────────
+    // ── Auto-save goede replies naar kennisbank (nieuwe kb_items tabel) ──
     if (auto_save_reply && reply && email?.subject) {
-      supabase.from('kennisbank_items').insert({
+      supabase.from('kb_items').insert({
         title:           `Auto: ${String(email.subject).slice(0, 60)}`,
-        category:        email.category || 'Overig',
         content:         reply,
+        agents:          ['simon', 'shared'],
         auto_generated:  true,
         source_email_id: email.uid || null,
         times_used:      1,
         helpfulness_score: 50,
       })
         .then(({ error }) => {
-          if (error) console.warn('[generate-reply] auto-save kennisbank fout:', error.message);
-          else console.log('[generate-reply] Reply auto-opgeslagen in kennisbank');
+          if (error) console.warn('[generate-reply] auto-save kb_items fout:', error.message);
+          else console.log('[generate-reply] Reply auto-opgeslagen in kb_items');
         });
     }
 
