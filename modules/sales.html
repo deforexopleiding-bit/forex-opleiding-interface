@@ -11,151 +11,364 @@
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     html, body { height: 100%; }
-    body {
-      font-family: 'Inter', system-ui, sans-serif;
-      background: var(--bg);
-      color: var(--text);
-      min-height: 100vh;
-      -webkit-font-smoothing: antialiased;
+    body { font-family: 'Inter', system-ui, sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; -webkit-font-smoothing: antialiased; }
+    .app { margin-left: 220px; padding: 24px 28px 60px; max-width: 1400px; }
+    .page-head { display:flex; align-items:center; justify-content: space-between; padding-bottom: 14px; border-bottom: 1px solid var(--border); margin-bottom: 18px; }
+    h1 { font-size: 22px; font-weight: 800; letter-spacing: -.3px; }
+    .sub { font-size: 12.5px; color: var(--text-dim); margin-top: 2px; }
+    .tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border); margin-bottom: 18px; }
+    .tab {
+      padding: 9px 16px; font: inherit; font-size: 13px; font-weight: 600;
+      background: transparent; border: none; cursor: pointer;
+      color: var(--text-faint); border-bottom: 2px solid transparent;
     }
-    .app { margin-left: 220px; padding: 32px 28px; max-width: 1100px; }
-    .hero {
-      background: var(--bg-elev);
-      border: 1px solid var(--border);
-      border-radius: 14px;
-      padding: 42px 36px;
-      margin-bottom: 22px;
-    }
-    .badge-soon {
-      display: inline-block;
-      padding: 3px 10px;
-      background: rgba(245,158,11,0.15);
-      color: #a16207;
-      border: 1px solid rgba(245,158,11,0.3);
-      border-radius: 12px;
-      font-size: 11px; font-weight: 700; letter-spacing: .04em;
-      margin-bottom: 14px;
-    }
-    [data-theme="dark"] .badge-soon { color: #fbbf24; }
-    h1 { font-size: 28px; font-weight: 800; letter-spacing: -.5px; margin-bottom: 10px; }
-    .lead { font-size: 14px; color: var(--text-dim); line-height: 1.6; max-width: 720px; }
-    .phases-grid {
-      display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 14px;
-      margin-top: 28px;
-    }
-    .phase-card {
-      background: var(--bg-elev);
-      border: 1px solid var(--border);
-      border-radius: 12px;
-      padding: 18px 20px;
-    }
-    .phase-num {
-      display: inline-flex; align-items: center; justify-content: center;
-      width: 30px; height: 30px;
-      border-radius: 50%;
-      background: var(--bg-elev-2);
-      font-weight: 700; font-size: 13px;
-      color: var(--text-dim);
-      margin-bottom: 10px;
-    }
-    .phase-card.done .phase-num {
-      background: rgba(5,150,105,0.15);
-      color: var(--green);
-    }
-    .phase-title { font-size: 14px; font-weight: 700; margin-bottom: 5px; }
-    .phase-desc { font-size: 12.5px; color: var(--text-dim); line-height: 1.5; }
-    .phase-tag {
-      display: inline-block; margin-top: 8px;
-      font-size: 10px; font-weight: 700; letter-spacing: .05em;
-      padding: 2px 8px; border-radius: 8px;
-      background: var(--bg-elev-2); color: var(--text-faint);
-    }
-    .phase-card.done .phase-tag { background: rgba(5,150,105,0.15); color: var(--green); }
-
-    .err-noaccess {
-      margin: 64px auto;
-      max-width: 480px;
-      text-align: center;
-      color: var(--text-dim);
-    }
-    .err-noaccess h2 { font-size: 18px; font-weight: 700; margin-bottom: 6px; color: var(--text); }
+    .tab:hover { color: var(--text); }
+    .tab.active { color: var(--text); border-bottom-color: var(--accent, #093d54); }
+    .tab-content { display: none; }
+    .tab-content.active { display: block; }
+    .toolbar { display: flex; gap: 10px; align-items: center; margin-bottom: 14px; flex-wrap: wrap; }
+    .search { flex: 1; min-width: 240px; padding: 8px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-elev); color: var(--text); font: inherit; font-size: 13px; outline: none; }
+    .search:focus { border-color: var(--brand-secondary, #688b9b); }
+    .btn { display: inline-flex; align-items: center; gap: 6px; padding: 7px 14px; border-radius: 8px; cursor: pointer; font: inherit; font-size: 12.5px; font-weight: 600; background: var(--accent, #093d54); color: #fff; border: none; }
+    .btn:hover { opacity: .9; }
+    .btn-ghost { background: var(--bg-elev); color: var(--text-dim); border: 1px solid var(--border); }
+    .btn-ghost:hover { background: var(--bg-elev-2); color: var(--text); }
+    .btn-danger { background: var(--red, #dc2626); }
+    .btn-sm { padding: 4px 10px; font-size: 11px; }
+    table { width: 100%; border-collapse: collapse; background: var(--bg-elev); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+    th { text-align: left; padding: 10px 12px; font-size: 10px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--text-faint); border-bottom: 1px solid var(--border); }
+    td { padding: 11px 12px; font-size: 12.5px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+    tr:last-child td { border-bottom: none; }
+    tr:hover td { background: var(--bg-elev-2); }
+    .badge { display: inline-block; padding: 2px 8px; border-radius: 8px; font-size: 10px; font-weight: 700; }
+    .badge.vat-0  { background: rgba(5,150,105,0.15); color: #059669; }
+    .badge.vat-9  { background: rgba(34,211,238,0.15); color: #0891b2; }
+    .badge.vat-21 { background: rgba(168,85,247,0.15); color: #6d28d9; }
+    .badge.active { background: rgba(5,150,105,0.15); color: #059669; }
+    .badge.archived { background: rgba(148,163,184,0.2); color: var(--text-faint); }
+    .badge.cat { background: var(--bg-elev-2); color: var(--text-dim); border: 1px solid var(--border); }
+    .badge.risk { background: rgba(220,38,38,0.15); color: #b91c1c; }
+    .mono { font-family: 'Menlo', monospace; font-size: 11px; color: var(--text-dim); }
+    .action-btn { background: transparent; border: none; cursor: pointer; padding: 4px 6px; color: var(--text-faint); border-radius: 4px; }
+    .action-btn:hover { background: var(--bg-elev-2); color: var(--text); }
+    .filter-toggle { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-dim); cursor: pointer; user-select: none; }
+    .filter-toggle input { cursor: pointer; }
+    .empty { text-align: center; padding: 40px 16px; color: var(--text-faint); font-size: 13px; }
+    /* Modal */
+    .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.5); display: none; align-items: center; justify-content: center; z-index: 1000; padding: 16px; }
+    .modal-overlay.show { display: flex; }
+    .modal { background: var(--bg-elev); border: 1px solid var(--border); border-radius: 12px; width: 100%; max-width: 560px; max-height: 90vh; overflow: hidden; display: flex; flex-direction: column; }
+    .modal-head { padding: 14px 18px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; }
+    .modal-title { font-size: 15px; font-weight: 700; }
+    .modal-close { background: none; border: none; font-size: 22px; line-height: 1; color: var(--text-faint); cursor: pointer; padding: 0 4px; }
+    .modal-body { padding: 18px; overflow-y: auto; flex: 1; }
+    .modal-foot { padding: 12px 18px; border-top: 1px solid var(--border); display: flex; justify-content: flex-end; gap: 8px; }
+    .field { margin-bottom: 14px; }
+    .field label { display: block; font-size: 11px; color: var(--text-dim); font-weight: 600; margin-bottom: 5px; text-transform: uppercase; letter-spacing: .05em; }
+    .field input, .field textarea, .field select { width: 100%; padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--text); font: inherit; font-size: 13px; outline: none; }
+    .field textarea { min-height: 80px; resize: vertical; }
+    .field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .vat-radios { display: flex; gap: 14px; padding-top: 4px; }
+    .vat-radios label { display: flex; align-items: center; gap: 4px; font-size: 12px; cursor: pointer; text-transform: none; letter-spacing: 0; }
+    .err { color: var(--red, #dc2626); font-size: 11.5px; margin-top: 6px; min-height: 14px; }
+    .toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); padding: 9px 18px; border-radius: 8px; background: var(--accent, #093d54); color: #fff; font-size: 13px; font-weight: 500; box-shadow: 0 6px 18px rgba(0,0,0,.18); z-index: 2000; opacity: 0; pointer-events: none; transition: opacity .2s; }
+    .toast.show { opacity: 1; }
+    .toast.error { background: var(--red, #dc2626); }
+    .toast.success { background: var(--green, #059669); }
+    @media (max-width: 880px) { .app { margin-left: 0; padding: 14px; } .field-row { grid-template-columns: 1fr; } }
   </style>
 </head>
 <body>
-
 <div id="sidebar-mount"></div>
 
-<div class="app" id="appContent">
-  <div class="hero">
-    <span class="badge-soon">Binnenkort beschikbaar</span>
-    <h1>Sales</h1>
-    <p class="lead">
-      Operationele module voor Dave en het sales-team: klanten aanmaken, deals
-      registreren, productcatalogus, retentie-pipeline en eigen bonus-overzicht.
-      Gedeelde data-laag met Finance (klanten, deals, bonussen) maar gescheiden
-      UI + RBAC. DB-fundament is gelegd (Fase 1, gedeeld). UI volgt fase-voor-fase.
-    </p>
+<div class="app">
+  <div class="page-head">
+    <div>
+      <h1>Sales</h1>
+      <div class="sub">Operationele klant-aanmaak + productcatalogus voor Dave's deals.</div>
+    </div>
+    <button class="btn" id="newDealBtn">+ Nieuwe klant + deal</button>
   </div>
 
-  <div class="phases-grid">
-    <div class="phase-card done">
-      <div class="phase-num">1</div>
-      <div class="phase-title">DB-fundament (gedeeld)</div>
-      <div class="phase-desc">17 tabellen, RLS, indexes, RBAC-keys. Gedeeld met Finance.</div>
-      <span class="phase-tag">AFGEROND</span>
+  <div class="tabs" role="tablist">
+    <button class="tab active" data-tab="customers" role="tab">Mijn klanten</button>
+    <button class="tab" data-tab="products" role="tab">Producten</button>
+  </div>
+
+  <!-- ── Tab: Klanten ── -->
+  <section class="tab-content active" id="tab-customers">
+    <div class="toolbar">
+      <input class="search" id="custSearch" type="search" placeholder="Zoek naam, email of telefoon..." />
+      <label class="filter-toggle"><input type="checkbox" id="custAllToggle"> Alle klanten</label>
+      <select class="search" id="custStatus" style="max-width:160px">
+        <option value="active">Actief</option>
+        <option value="archived">Gearchiveerd</option>
+      </select>
     </div>
-    <div class="phase-card">
-      <div class="phase-num">2</div>
-      <div class="phase-title">Productcatalogus + Dave's wizard</div>
-      <div class="phase-desc">Klant-aanmaak-wizard met deal-koppeling, lead-source dropdown, downpayment-tracking.</div>
-      <span class="phase-tag">PLANNED</span>
+    <div id="customersList"><div class="empty">Laden…</div></div>
+  </section>
+
+  <!-- ── Tab: Producten ── -->
+  <section class="tab-content" id="tab-products">
+    <div class="toolbar">
+      <input class="search" id="prodSearch" type="search" placeholder="Zoek product..." />
+      <select class="search" id="prodCategory" style="max-width:200px"><option value="">Alle categorieën</option></select>
+      <label class="filter-toggle"><input type="checkbox" id="prodArchivedToggle"> Toon gearchiveerd</label>
+      <button class="btn" id="newProductBtn">+ Nieuw product</button>
     </div>
-    <div class="phase-card">
-      <div class="phase-num">3</div>
-      <div class="phase-title">Klant-overzicht voor Dave</div>
-      <div class="phase-desc">Lijst eigen klanten, search/filter, tag-management, snelle deal-CRUD.</div>
-      <span class="phase-tag">PLANNED</span>
+    <div id="productsList"><div class="empty">Laden…</div></div>
+  </section>
+</div>
+
+<!-- Product modal -->
+<div class="modal-overlay" id="productModal">
+  <div class="modal">
+    <div class="modal-head">
+      <span class="modal-title" id="prodModalTitle">Nieuw product</span>
+      <button class="modal-close" id="prodModalClose">&times;</button>
     </div>
-    <div class="phase-card">
-      <div class="phase-num">4</div>
-      <div class="phase-title">Sales dashboard + bonus widget</div>
-      <div class="phase-desc">KPIs (deals deze maand, conversie, MRR-contributie), eigen bonus-stand, threshold-progress.</div>
-      <span class="phase-tag">PLANNED</span>
+    <div class="modal-body">
+      <div class="field"><label>Naam *</label><input id="pmName" maxlength="200" /></div>
+      <div class="field"><label>Beschrijving</label><textarea id="pmDesc"></textarea></div>
+      <div class="field-row">
+        <div class="field"><label>BTW *</label>
+          <div class="vat-radios">
+            <label><input type="radio" name="vat" value="0"> 0%</label>
+            <label><input type="radio" name="vat" value="9"> 9%</label>
+            <label><input type="radio" name="vat" value="21" checked> 21%</label>
+          </div>
+        </div>
+        <div class="field"><label>Standaardprijs (€)</label><input id="pmPrice" type="number" step="0.01" min="0" /></div>
+      </div>
+      <div class="field-row">
+        <div class="field"><label>Looptijd (mnd)</label><input id="pmDuration" type="number" min="1" /></div>
+        <div class="field"><label>Categorie</label><input id="pmCat" list="catSuggest" placeholder="bv. Cursus" /><datalist id="catSuggest"></datalist></div>
+      </div>
+      <div class="field"><label>Teamleader Product-ID</label><input id="pmTlId" placeholder="Optioneel - vereist voor TL-push" /></div>
+      <div class="err" id="pmErr"></div>
     </div>
-    <div class="phase-card">
-      <div class="phase-num">5</div>
-      <div class="phase-title">Retentie pipeline + 1e call check</div>
-      <div class="phase-desc">Welke klanten zijn klaar voor 1e call (downpayment binnen, geen pause), retentie-view per cohort.</div>
-      <span class="phase-tag">PLANNED</span>
+    <div class="modal-foot">
+      <button class="btn btn-ghost" id="pmCancel">Annuleer</button>
+      <button class="btn" id="pmSave">Opslaan</button>
     </div>
   </div>
 </div>
 
-<div class="app err-noaccess" id="noAccess" style="display:none">
-  <h2>Geen toegang</h2>
-  <p>Je hebt geen rechten om de Sales-module te bekijken.</p>
-  <p style="margin-top:14px"><a href="/index.html" style="color:var(--accent-cyan)">Terug naar dashboard</a></p>
-</div>
+<div class="toast" id="toast"></div>
 
 <script src="/modules/shared/supabase-client.js"></script>
 <script src="/modules/shared/agent-shared.js"></script>
 <script src="/modules/shared/theme-shared.js"></script>
 <script>
+const state = { tab: 'customers', perms: null, products: [], customers: [], editingId: null };
+
+function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]); }
+function fmtEuro(v) { if (v == null) return '—'; return '€' + Number(v).toLocaleString('nl-NL', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+function fmtRel(iso) {
+  if (!iso) return '—';
+  const diff = (Date.now() - new Date(iso).getTime()) / 1000;
+  if (diff < 60) return 'net nu';
+  if (diff < 3600) return Math.floor(diff/60) + ' min';
+  if (diff < 86400) return Math.floor(diff/3600) + 'u';
+  if (diff < 604800) return Math.floor(diff/86400) + ' d';
+  return new Date(iso).toLocaleDateString('nl-NL', { day: '2-digit', month: 'short' });
+}
+function toast(msg, kind) {
+  const el = document.getElementById('toast');
+  el.textContent = msg; el.className = 'toast show ' + (kind || '');
+  setTimeout(() => el.classList.remove('show'), 2200);
+}
+function can(key) { if (!state.perms) return true; if (state.perms.has('*')) return true; return state.perms.has(key); }
+
+// ── Tab switching ──
+document.querySelectorAll('.tab').forEach(t => {
+  t.addEventListener('click', () => {
+    document.querySelectorAll('.tab').forEach(x => x.classList.remove('active'));
+    t.classList.add('active');
+    state.tab = t.dataset.tab;
+    document.querySelectorAll('.tab-content').forEach(s => s.classList.remove('active'));
+    document.getElementById('tab-' + state.tab).classList.add('active');
+    if (state.tab === 'products') loadProducts();
+    else loadCustomers();
+  });
+});
+
+// ── Products ──
+async function loadProducts() {
+  const archived = document.getElementById('prodArchivedToggle').checked;
+  const url = archived ? '/api/sales-products' : '/api/sales-products?active=true';
+  try {
+    const res = await window.AgentShared.apiFetch(url);
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+    state.products = data.products || [];
+    // Categorie-dropdown auto-fill
+    const cats = [...new Set(state.products.map(p => p.category).filter(Boolean))];
+    const sel = document.getElementById('prodCategory');
+    const cur = sel.value;
+    sel.innerHTML = '<option value="">Alle categorieën</option>' + cats.map(c => `<option value="${esc(c)}">${esc(c)}</option>`).join('');
+    sel.value = cur;
+    document.getElementById('catSuggest').innerHTML = cats.map(c => `<option value="${esc(c)}">`).join('');
+    renderProducts();
+  } catch (e) {
+    document.getElementById('productsList').innerHTML = '<div class="empty">Laden mislukt: ' + esc(e.message) + '</div>';
+  }
+}
+function renderProducts() {
+  const search = (document.getElementById('prodSearch').value || '').toLowerCase();
+  const cat = document.getElementById('prodCategory').value;
+  let arr = state.products.slice();
+  if (search) arr = arr.filter(p => (p.name || '').toLowerCase().includes(search) || (p.description || '').toLowerCase().includes(search));
+  if (cat) arr = arr.filter(p => p.category === cat);
+  if (!arr.length) {
+    document.getElementById('productsList').innerHTML = '<div class="empty">Geen producten.</div>';
+    return;
+  }
+  const canManage = can('sales.product.manage');
+  document.getElementById('productsList').innerHTML = `
+    <table>
+      <thead><tr>
+        <th>Naam</th><th>Beschrijving</th><th>BTW</th><th>Prijs</th><th>Looptijd</th>
+        <th>Categorie</th><th>TL-ID</th><th>Status</th>${canManage ? '<th></th>' : ''}
+      </tr></thead>
+      <tbody>${arr.map(p => `
+        <tr>
+          <td><strong>${esc(p.name)}</strong></td>
+          <td title="${esc(p.description || '')}">${esc((p.description || '').slice(0, 60))}${(p.description || '').length > 60 ? '…' : ''}</td>
+          <td><span class="badge vat-${p.vat_percentage}">${p.vat_percentage}%</span></td>
+          <td>${fmtEuro(p.default_price)}</td>
+          <td>${p.default_duration_months ? p.default_duration_months + ' mnd' : '—'}</td>
+          <td>${p.category ? '<span class="badge cat">' + esc(p.category) + '</span>' : '—'}</td>
+          <td><span class="mono" title="Vereist voor TL-push">${esc(p.tl_product_id || '—')}</span></td>
+          <td><span class="badge ${p.archived_at ? 'archived' : 'active'}">${p.archived_at ? 'Gearchiveerd' : 'Actief'}</span></td>
+          ${canManage ? `<td>
+            <button class="action-btn" data-edit="${p.id}" title="Bewerken">✎</button>
+            ${!p.archived_at ? `<button class="action-btn" data-archive="${p.id}" title="Archiveren">🗄</button>` : ''}
+          </td>` : ''}
+        </tr>`).join('')}</tbody>
+    </table>`;
+  document.querySelectorAll('[data-edit]').forEach(b => b.addEventListener('click', () => openProductModal(b.dataset.edit)));
+  document.querySelectorAll('[data-archive]').forEach(b => b.addEventListener('click', () => archiveProduct(b.dataset.archive)));
+}
+function openProductModal(id = null) {
+  if (!can('sales.product.manage')) { toast('Geen rechten', 'error'); return; }
+  state.editingId = id;
+  const p = id ? state.products.find(x => x.id === id) : null;
+  document.getElementById('prodModalTitle').textContent = id ? 'Product bewerken' : 'Nieuw product';
+  document.getElementById('pmName').value = p?.name || '';
+  document.getElementById('pmDesc').value = p?.description || '';
+  document.querySelectorAll('input[name=vat]').forEach(r => r.checked = Number(r.value) === (p?.vat_percentage ?? 21));
+  document.getElementById('pmPrice').value = p?.default_price ?? '';
+  document.getElementById('pmDuration').value = p?.default_duration_months ?? '';
+  document.getElementById('pmCat').value = p?.category || '';
+  document.getElementById('pmTlId').value = p?.tl_product_id || '';
+  document.getElementById('pmErr').textContent = '';
+  document.getElementById('productModal').classList.add('show');
+}
+async function saveProduct() {
+  const payload = {
+    name: document.getElementById('pmName').value.trim(),
+    description: document.getElementById('pmDesc').value.trim(),
+    vat_percentage: Number(document.querySelector('input[name=vat]:checked').value),
+    default_price: document.getElementById('pmPrice').value ? Number(document.getElementById('pmPrice').value) : null,
+    default_duration_months: document.getElementById('pmDuration').value ? Number(document.getElementById('pmDuration').value) : null,
+    category: document.getElementById('pmCat').value.trim() || null,
+    tl_product_id: document.getElementById('pmTlId').value.trim() || null,
+    is_active: true,
+  };
+  if (!payload.name) { document.getElementById('pmErr').textContent = 'Naam verplicht'; return; }
+  try {
+    const url = state.editingId ? '/api/sales-products?id=' + state.editingId : '/api/sales-products';
+    const method = state.editingId ? 'PUT' : 'POST';
+    const res = await window.AgentShared.apiFetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+    if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e.error || 'HTTP ' + res.status); }
+    document.getElementById('productModal').classList.remove('show');
+    toast(state.editingId ? 'Bijgewerkt' : 'Aangemaakt', 'success');
+    await loadProducts();
+  } catch (e) { document.getElementById('pmErr').textContent = e.message; }
+}
+async function archiveProduct(id) {
+  const p = state.products.find(x => x.id === id);
+  if (!confirm(`Product "${p?.name}" archiveren? Bestaande deals blijven intact. Product is daarna niet meer kiesbaar in wizard.`)) return;
+  try {
+    const res = await window.AgentShared.apiFetch('/api/sales-products?id=' + id, { method: 'DELETE' });
+    if (!res.ok && res.status !== 204) throw new Error('HTTP ' + res.status);
+    toast('Gearchiveerd', 'success');
+    await loadProducts();
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+// ── Customers ──
+async function loadCustomers() {
+  const params = new URLSearchParams();
+  if (!document.getElementById('custAllToggle').checked) params.set('owned_by_me', 'true');
+  params.set('status', document.getElementById('custStatus').value);
+  const s = document.getElementById('custSearch').value.trim();
+  if (s) params.set('search', s);
+  try {
+    const res = await window.AgentShared.apiFetch('/api/sales-customers?' + params);
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+    state.customers = data.customers || [];
+    renderCustomers();
+  } catch (e) {
+    document.getElementById('customersList').innerHTML = '<div class="empty">Laden mislukt: ' + esc(e.message) + '</div>';
+  }
+}
+function renderCustomers() {
+  if (!state.customers.length) {
+    document.getElementById('customersList').innerHTML = '<div class="empty">Geen klanten gevonden.</div>';
+    return;
+  }
+  document.getElementById('customersList').innerHTML = `
+    <table>
+      <thead><tr>
+        <th>Naam</th><th>Email</th><th>Telefoon</th><th>Deals</th>
+        <th>Laatste deal</th><th>Status</th><th></th>
+      </tr></thead>
+      <tbody>${state.customers.map(c => `
+        <tr>
+          <td>
+            <a href="/modules/klanten.html?id=${esc(c.id)}" style="color:var(--text);font-weight:600;text-decoration:none">${esc(c.name || '—')}</a>
+            ${c.risk_tag_auto ? ' <span class="badge risk">RISICO</span>' : ''}
+          </td>
+          <td>${esc(c.email || '—')}</td>
+          <td>${esc(c.phone || '—')}</td>
+          <td>${c.deals_count}</td>
+          <td>${fmtRel(c.last_deal_at)}</td>
+          <td>${c.last_deal_status ? '<span class="badge cat">' + esc(c.last_deal_status) + '</span>' : '—'}</td>
+          <td>
+            <a class="action-btn" href="/modules/klanten.html?id=${esc(c.id)}" title="Open detail">👁</a>
+            <a class="action-btn" href="/modules/sales-wizard.html?customer_id=${esc(c.id)}" title="Nieuwe deal toevoegen">€</a>
+          </td>
+        </tr>`).join('')}</tbody>
+    </table>`;
+}
+
+// ── Wiring ──
+document.getElementById('newDealBtn').addEventListener('click', () => { window.location.href = '/modules/sales-wizard.html'; });
+document.getElementById('newProductBtn').addEventListener('click', () => openProductModal());
+document.getElementById('prodModalClose').addEventListener('click', () => document.getElementById('productModal').classList.remove('show'));
+document.getElementById('pmCancel').addEventListener('click', () => document.getElementById('productModal').classList.remove('show'));
+document.getElementById('pmSave').addEventListener('click', saveProduct);
+document.getElementById('productModal').addEventListener('click', e => { if (e.target.id === 'productModal') e.currentTarget.classList.remove('show'); });
+
+document.getElementById('prodSearch').addEventListener('input', () => renderProducts());
+document.getElementById('prodCategory').addEventListener('change', () => renderProducts());
+document.getElementById('prodArchivedToggle').addEventListener('change', () => loadProducts());
+document.getElementById('custSearch').addEventListener('input', () => { clearTimeout(window._cs); window._cs = setTimeout(loadCustomers, 250); });
+document.getElementById('custAllToggle').addEventListener('change', () => loadCustomers());
+document.getElementById('custStatus').addEventListener('change', () => loadCustomers());
+
 (async () => {
   await window._authSharedReady;
   const profile = await window.AuthShared?.requireAuth();
   if (!profile) return;
   if (window.AgentShared) await window.AgentShared.renderUserSection(profile);
-
   try {
-    if (window.RBAC && typeof window.RBAC.ensurePermissionsLoaded === 'function') {
-      const perms = await window.RBAC.ensurePermissionsLoaded();
-      if (!perms.has('*') && !perms.has('sales.module.access')) {
-        document.getElementById('appContent').style.display = 'none';
-        document.getElementById('noAccess').style.display = 'block';
-      }
-    }
-  } catch (e) { /* fail-open */ }
+    if (window.RBAC?.ensurePermissionsLoaded) state.perms = await window.RBAC.ensurePermissionsLoaded();
+  } catch {}
+  loadCustomers();
 })();
 </script>
 <script src="/modules/shared/permissions.js"></script>
