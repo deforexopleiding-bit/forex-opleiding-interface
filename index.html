@@ -308,7 +308,7 @@
 
     <div class="card span-2 accent-sky" id="cardBinnenkomsten">
       <div class="card-head">
-        <div class="card-title">Binnenkomsten vandaag</div>
+        <div class="card-title">Binnenkomsten</div>
       </div>
       <div class="kpi-trio">
         <div class="one"><div class="v" id="binLeads"><span class="skel big"></span></div><div class="k">Leads</div></div>
@@ -342,9 +342,9 @@
         <div class="card-title">E-mail — laatste 14 dagen</div>
       </div>
       <div class="email-kpis">
-        <div class="ek" data-tooltip="Verstuurd door jou en Simon AI samen"><div class="v" id="emTeBeant">—</div><div class="k">Verstuurd vandaag</div></div>
+        <div class="ek" data-tooltip="Verstuurd door jou en Simon AI samen"><div class="v" id="emTeBeant">—</div><div class="k">Verstuurd</div></div>
         <div class="ek"><div class="v placeholder-val" data-tooltip="Komt binnenkort (Fase B)">—</div><div class="k">Avg reply</div></div>
-        <div class="ek"><div class="v" id="emToday">—</div><div class="k">Ontvangen vandaag</div></div>
+        <div class="ek"><div class="v" id="emToday">—</div><div class="k">Ontvangen</div></div>
       </div>
       <div class="chart-wrap"><canvas id="chartTrend"></canvas></div>
     </div>
@@ -614,9 +614,7 @@ function renderTeBeantwoorden(dash) {
   // Fallback op dashboard-stats raw count alleen als Supabase-query faalt.
   const v = state.emailCounts.teBeantwoorden ?? dash.kpis_groot?.onbeantwoord?.value ?? 0;
   document.getElementById('teBeantValue').textContent = v;
-  const today = dash.kpis_klein?.mails_period ?? 0;
-  document.getElementById('teBeantSub').textContent =
-    today > 0 ? `${today} vandaag binnen` : 'e-mails wachten op reactie';
+  document.getElementById('teBeantSub').textContent = 'e-mails wachten op reactie';
 }
 
 function renderOpenActies(metrics, approvals, verplaatst) {
