@@ -85,9 +85,9 @@
   <div class="page-head">
     <div>
       <h1>Sales</h1>
-      <div class="sub">Operationele klant-aanmaak + productcatalogus voor Dave's deals.</div>
+      <div class="sub">Operationele klant-aanmaak + productcatalogus voor Dave's offertes.</div>
     </div>
-    <button class="btn" id="newDealBtn">+ Nieuwe klant + deal</button>
+    <button class="btn" id="newDealBtn">+ Nieuwe klant + offerte</button>
   </div>
 
   <div class="tabs" role="tablist">
@@ -363,7 +363,7 @@ function renderCustomers() {
           <td>${quotationBadge(c.quotation_status)}</td>
           <td>
             <a class="action-btn" href="/modules/klanten.html?id=${esc(c.id)}" title="Open detail">👁</a>
-            <a class="action-btn" href="/modules/sales-wizard.html?customer_id=${esc(c.id)}" title="Nieuwe deal toevoegen">€</a>
+            <a class="action-btn" href="/modules/sales-wizard.html?customer_id=${esc(c.id)}" title="Nieuwe offerte toevoegen">€</a>
             ${c.quotation_status === 'signed' ? `<button class="btn btn-sm" title="Subscription invoeren (Wizard 2 — binnenkort)" onclick="alert('Subscription invoeren komt in Wizard 2.')">Subscription invoeren</button>` : ''}
           </td>
         </tr>`).join('')}</tbody>
