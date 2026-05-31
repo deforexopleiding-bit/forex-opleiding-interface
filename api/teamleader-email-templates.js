@@ -24,8 +24,9 @@ export default async function handler(req, res) {
     return res.status(403).json({ error: 'Geen rechten (sales.deal.view)' });
   }
 
-  const type = (req.query?.type || '').trim() || null; // bv. 'quotation'
-  const cacheKey = type || '_all';
+  // filter.type is VERPLICHT bij mailTemplates.list → default 'quotation'.
+  const type = (req.query?.type || '').trim() || 'quotation';
+  const cacheKey = type;
   const hit = _cache.get(cacheKey);
   if (hit && Date.now() - hit.at < TTL_MS) {
     return res.status(200).json({ templates: hit.data, cached: true });
@@ -35,8 +36,7 @@ export default async function handler(req, res) {
     const tok = await getActiveToken();
     if (!tok) return res.status(200).json({ templates: [], reason: 'no_token' });
 
-    const listBody = type ? { filter: { type } } : {};
-    const r = await tlFetch('/mailTemplates.list', { method: 'POST', body: JSON.stringify(listBody) });
+    const r = await tlFetch('/mailTemplates.list', { method: 'POST', body: JSON.stringify({ filter: { type } }) });
     if (!r.ok) {
       const txt = await r.text();
       return res.status(200).json({ templates: [], reason: 'api_error', status: r.status, body: txt.slice(0, 200) });

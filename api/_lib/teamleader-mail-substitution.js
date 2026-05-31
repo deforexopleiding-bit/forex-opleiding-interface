@@ -23,7 +23,8 @@ function substitute(str, ctx) {
 // Haalt de template op (id-match uit mailTemplates.list) en substitueert.
 // Returnt { subject, content } of throwt bij niet gevonden / fout.
 export async function fetchAndSubstituteTemplate(templateId, ctx) {
-  const r = await tlFetch('/mailTemplates.list', { method: 'POST', body: JSON.stringify({}) });
+  // filter.type is VERPLICHT bij mailTemplates.list (anders TL 400).
+  const r = await tlFetch('/mailTemplates.list', { method: 'POST', body: JSON.stringify({ filter: { type: 'quotation' } }) });
   if (!r.ok) {
     const txt = await r.text();
     throw new Error(`TL mailTemplates.list HTTP ${r.status}: ${txt.slice(0, 200)}`);
