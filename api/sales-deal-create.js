@@ -1,11 +1,15 @@
 // api/sales-deal-create.js
-// POST { customer_data, deal_data, subscriptions[], products[], matched_customer_id?, tl_imported_contact_id?, sync_to_tl }
-// → { customer_id, deal_id, subscription_ids[], tl_push_status, tl_deal_id?, tl_contact_id?, tl_error? }
+// POST { customer_data, deal_data, products[], matched_customer_id?, tl_imported_contact_id?, sync_to_tl }
+// → { customer_id, deal_id, tl_quotation_status, tl_quotation_id?, tl_deal_id?, tl_contact_id?, tl_error? }
+//
+// Wizard 1 (offerte-flow): maakt klant + deal + offerte-regels, en pusht een
+// OFFERTE (quotation) naar TL. Subscriptions worden hier NIET meer aangemaakt;
+// die volgen in Wizard 2 nadat de offerte is getekend.
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
 import { getActiveToken } from './_lib/teamleader-token.js';
-import { pushDealToTl } from './teamleader-push-deal.js';
+import { pushQuotationToTl } from './_lib/teamleader-quotation.js';
 
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
@@ -20,7 +24,7 @@ export default async function handler(req, res) {
   }
 
   const body = req.body || {};
-  const { customer_data = {}, deal_data = {}, subscriptions = [], products = [],
+  const { customer_data = {}, deal_data = {}, products = [],
           matched_customer_id, tl_imported_contact_id, sync_to_tl = false } = body;
 
   if (!deal_data.source_lead_id) return res.status(400).json({ error: 'source_lead_id vereist' });
@@ -69,55 +73,56 @@ export default async function handler(req, res) {
       first_call_at:      deal_data.first_call_at || null,
       quote_reference:    deal_data.quote_reference || null,
       tl_push_status:     'not_pushed',
+      tl_quotation_status: 'draft',
     };
     const { data: deal, error: dErr } = await supabaseAdmin.from('deals').insert(dealPayload).select('id').single();
     if (dErr) throw dErr;
     const dealId = deal.id;
 
-    // 4. Subscriptions aanmaken.
-    const subscriptionIds = [];
-    for (const s of subscriptions) {
-      const { data: sub } = await supabaseAdmin.from('subscriptions').insert({
-        deal_id:        dealId,
-        amount:         s.amount,
-        vat_percentage: s.vat_percentage ?? 21,
-        term_count:     s.term_count || 1,
-        start_date:     s.start_date,
-        status:         'active',
-      }).select('id').single();
-      if (sub) subscriptionIds.push(sub.id);
+    // 4. Offerte-regels (producten) persisteren voor de quotation-push.
+    const lineRows = products.map((p, idx) => ({
+      deal_id:        dealId,
+      product_id:     p.product_id || null,
+      product_name:   p.product_name || 'Product',
+      quantity:       Number(p.quantity) || 1,
+      unit_price:     Number(p.price_per_unit) || 0,
+      vat_percentage: p.vat_percentage ?? 21,
+      position:       idx,
+    }));
+    if (lineRows.length) {
+      const { error: liErr } = await supabaseAdmin.from('deal_line_items').insert(lineRows);
+      if (liErr) throw liErr;
     }
 
-    // 5. Optionele TL-push — synchroon via directe module-call (geen interne
-    //    HTTP-roundtrip; die forwardde een lege auth-header → 401).
+    // 5. Optionele TL-offerte-push — synchroon via directe module-call.
     let tlResult = { success: false };
     const tokenExists = sync_to_tl ? !!(await getActiveToken()) : false;
     if (sync_to_tl && tokenExists) {
       try {
-        tlResult = await pushDealToTl(dealId);
+        tlResult = await pushQuotationToTl(dealId);
       } catch (err) {
-        console.error('[sales-deal-create] TL push exception:', err.message);
+        console.error('[sales-deal-create] TL quotation push exception:', err.message);
         tlResult = { success: false, error: err.message };
-        // pushDealToTl update DB zelf bij fout, maar extra safety bij unexpected throw.
+        // pushQuotationToTl update DB zelf bij fout, maar extra safety bij unexpected throw.
         await supabaseAdmin.from('deals').update({
-          tl_push_status: 'failed',
-          tl_push_error:  err.message.slice(0, 500),
+          tl_quotation_status: 'draft',
+          tl_push_error:       err.message.slice(0, 500),
         }).eq('id', dealId);
       }
     }
 
-    const tlPushStatus = tlResult.success
-      ? 'synced'
+    const quotationStatus = tlResult.success
+      ? (tlResult.tl_quotation_status || 'sent')
       : (sync_to_tl && tokenExists ? 'failed' : 'not_pushed');
 
     return res.status(200).json({
-      customer_id:      customerId,
-      deal_id:          dealId,
-      subscription_ids: subscriptionIds,
-      tl_push_status:   tlPushStatus,
-      tl_contact_id:    tlResult.tl_contact_id || null,
-      tl_deal_id:       tlResult.tl_deal_id || null,
-      tl_error:         tlResult.error || null,
+      customer_id:         customerId,
+      deal_id:             dealId,
+      tl_quotation_status: quotationStatus,
+      tl_quotation_id:     tlResult.tl_quotation_id || null,
+      tl_contact_id:       tlResult.tl_contact_id || null,
+      tl_deal_id:          tlResult.tl_deal_id || null,
+      tl_error:            tlResult.error || null,
     });
   } catch (err) {
     console.error('[sales-deal-create]', err.message);

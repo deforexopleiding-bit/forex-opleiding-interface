@@ -104,6 +104,14 @@
         <option value="active">Actief</option>
         <option value="archived">Gearchiveerd</option>
       </select>
+      <select class="search" id="custQuotation" style="max-width:180px">
+        <option value="">Alle offerte-statussen</option>
+        <option value="sent">Verzonden</option>
+        <option value="signed">Getekend</option>
+        <option value="declined">Afgewezen</option>
+        <option value="expired">Verlopen</option>
+        <option value="draft">Concept</option>
+      </select>
     </div>
     <div id="customersList"><div class="empty">Laden…</div></div>
   </section>
@@ -315,8 +323,23 @@ async function loadCustomers() {
     document.getElementById('customersList').innerHTML = '<div class="empty">Laden mislukt: ' + esc(e.message) + '</div>';
   }
 }
+const QUOTATION_BADGE = {
+  sent:     { label: 'Verzonden', cls: 'cat' },
+  signed:   { label: 'Getekend',  cls: 'active' },
+  declined: { label: 'Afgewezen', cls: 'risk' },
+  expired:  { label: 'Verlopen',  cls: 'archived' },
+  draft:    { label: 'Concept',   cls: 'archived' },
+};
+function quotationBadge(status) {
+  if (!status || status === 'not_pushed') return '—';
+  const b = QUOTATION_BADGE[status] || { label: status, cls: 'cat' };
+  return `<span class="badge ${b.cls}">${esc(b.label)}</span>`;
+}
+
 function renderCustomers() {
-  if (!state.customers.length) {
+  const qf = document.getElementById('custQuotation').value;
+  const rows = qf ? state.customers.filter(c => c.quotation_status === qf) : state.customers;
+  if (!rows.length) {
     document.getElementById('customersList').innerHTML = '<div class="empty">Geen klanten gevonden.</div>';
     return;
   }
@@ -324,9 +347,9 @@ function renderCustomers() {
     <table>
       <thead><tr>
         <th>Naam</th><th>Email</th><th>Telefoon</th><th>Deals</th>
-        <th>Laatste deal</th><th>Status</th><th></th>
+        <th>Laatste deal</th><th>Status</th><th>Offerte-status</th><th></th>
       </tr></thead>
-      <tbody>${state.customers.map(c => `
+      <tbody>${rows.map(c => `
         <tr>
           <td>
             <a href="/modules/klanten.html?id=${esc(c.id)}" style="color:var(--text);font-weight:600;text-decoration:none">${esc(c.name || '—')}</a>
@@ -337,9 +360,11 @@ function renderCustomers() {
           <td>${c.deals_count}</td>
           <td>${fmtRel(c.last_deal_at)}</td>
           <td>${c.last_deal_status ? '<span class="badge cat">' + esc(c.last_deal_status) + '</span>' : '—'}</td>
+          <td>${quotationBadge(c.quotation_status)}</td>
           <td>
             <a class="action-btn" href="/modules/klanten.html?id=${esc(c.id)}" title="Open detail">👁</a>
             <a class="action-btn" href="/modules/sales-wizard.html?customer_id=${esc(c.id)}" title="Nieuwe deal toevoegen">€</a>
+            ${c.quotation_status === 'signed' ? `<button class="btn btn-sm" title="Subscription invoeren (Wizard 2 — binnenkort)" onclick="alert('Subscription invoeren komt in Wizard 2.')">Subscription invoeren</button>` : ''}
           </td>
         </tr>`).join('')}</tbody>
     </table>`;
@@ -359,6 +384,7 @@ document.getElementById('prodArchivedToggle').addEventListener('change', () => l
 document.getElementById('custSearch').addEventListener('input', () => { clearTimeout(window._cs); window._cs = setTimeout(loadCustomers, 250); });
 document.getElementById('custAllToggle').addEventListener('change', () => loadCustomers());
 document.getElementById('custStatus').addEventListener('change', () => loadCustomers());
+document.getElementById('custQuotation').addEventListener('change', () => renderCustomers());
 
 (async () => {
   await window._authSharedReady;
