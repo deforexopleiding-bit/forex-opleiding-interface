@@ -116,7 +116,7 @@ export async function pushDealToTl(dealId) {
                                                                           tax: { type: 'taxRate', id: taxRateId },
                                                         }],
                                         }],
-                                        invoice_generation: { action: 'book' },
+                                        currency: 'EUR',          invoice_generation: { action: 'book' },
                           };
 
                           const tlSubRes = await tlFetch('/subscriptions.create', {
