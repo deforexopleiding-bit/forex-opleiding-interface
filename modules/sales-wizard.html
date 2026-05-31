@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Nieuwe deal · Sales</title>
+  <title>Nieuwe offerte · Sales</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
@@ -138,7 +138,7 @@
 
 <div class="app">
   <div class="wiz-head">
-    <h1>Nieuwe klant + deal</h1>
+    <h1>Nieuwe klant + offerte</h1>
     <div class="save-indicator" id="saveInd">Klaar voor invoer</div>
     <button class="btn btn-ghost btn-sm" id="exitBtn">Annuleer & verlaat</button>
   </div>
@@ -198,7 +198,7 @@
       <div class="field"><label>Lead-bron <span class="req">*</span></label><select id="leadSource"><option value="">Selecteer een bron…</option></select></div>
     </div>
     <div class="row2">
-      <div class="field"><label>Start-datum deal <span class="req">*</span></label><input id="startDate" type="date" /></div>
+      <div class="field"><label>Start-datum offerte <span class="req">*</span></label><input id="startDate" type="date" /></div>
       <div class="field">
         <label>Looptijd <span class="req">*</span></label>
         <div style="display:flex;gap:8px;align-items:center">
@@ -213,7 +213,7 @@
     </div>
 
     <div style="display:flex;align-items:center;justify-content:space-between;margin-top:18px;margin-bottom:10px">
-      <h3 style="font-size:13px;font-weight:700">Producten in deze deal <span style="font-weight:400;color:var(--text-faint);font-size:11.5px" id="prodCount"></span></h3>
+      <h3 style="font-size:13px;font-weight:700">Producten in deze offerte <span style="font-weight:400;color:var(--text-faint);font-size:11.5px" id="prodCount"></span></h3>
       <button class="btn btn-success btn-sm" id="addProductBtn">+ Product toevoegen</button>
     </div>
     <div id="dealProducts"></div>
@@ -255,7 +255,7 @@
 <!-- Product picker modal -->
 <div class="overlay" id="prodPicker">
   <div class="modal">
-    <div class="modal-head"><span class="modal-title">Product toevoegen aan deal</span><button class="modal-close" id="prodPickerClose">&times;</button></div>
+    <div class="modal-head"><span class="modal-title">Product toevoegen aan offerte</span><button class="modal-close" id="prodPickerClose">&times;</button></div>
     <div class="modal-body">
       <div style="display:flex;gap:10px;margin-bottom:12px">
         <input id="ppSearch" placeholder="Zoek product…" style="flex:1;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font:inherit;font-size:13px" />
@@ -272,7 +272,7 @@
   <div class="modal" style="max-width:440px">
     <div class="modal-head"><span class="modal-title">Concept gevonden</span></div>
     <div class="modal-body">
-      <p style="font-size:13px;color:var(--text-dim);line-height:1.55">Je hebt een concept-deal van <strong id="resumeDate"></strong> die niet is afgerond.</p>
+      <p style="font-size:13px;color:var(--text-dim);line-height:1.55">Je hebt een concept-offerte van <strong id="resumeDate"></strong> die niet is afgerond.</p>
       <p style="font-size:12px;color:var(--text-faint);margin-top:8px">Wil je hiermee doorgaan of opnieuw beginnen?</p>
     </div>
     <div class="modal-foot">
@@ -833,7 +833,7 @@ async function submitDeal(syncToTl) {
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'HTTP ' + res.status);
-    toast(`Klant aangemaakt: ${w.first_name} ${w.last_name}`, 'success');
+    toast(`Offerte aangemaakt voor ${w.first_name} ${w.last_name}`, 'success');
     if (data.tl_quotation_status === 'sent') {
       setTimeout(() => toast(`Offerte verzonden naar ${w.email} via Teamleader`, 'success'), 1200);
     } else if (data.tl_quotation_status === 'draft' && syncToTl) {
