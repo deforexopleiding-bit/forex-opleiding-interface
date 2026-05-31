@@ -9,7 +9,7 @@ import { createUserClient } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
 import { tlFetch, getActiveToken } from './_lib/teamleader-token.js';
 
-let _cache = { at: 0, data: null };
+const _cache = new Map(); // type → { at, data }
 const TTL_MS = 60 * 60 * 1000;
 
 export default async function handler(req, res) {
@@ -24,15 +24,19 @@ export default async function handler(req, res) {
     return res.status(403).json({ error: 'Geen rechten (sales.deal.view)' });
   }
 
-  if (_cache.data && Date.now() - _cache.at < TTL_MS) {
-    return res.status(200).json({ templates: _cache.data, cached: true });
+  const type = (req.query?.type || '').trim() || null; // bv. 'quotation'
+  const cacheKey = type || '_all';
+  const hit = _cache.get(cacheKey);
+  if (hit && Date.now() - hit.at < TTL_MS) {
+    return res.status(200).json({ templates: hit.data, cached: true });
   }
 
   try {
     const tok = await getActiveToken();
     if (!tok) return res.status(200).json({ templates: [], reason: 'no_token' });
 
-    const r = await tlFetch('/mailTemplates.list', { method: 'POST', body: JSON.stringify({}) });
+    const listBody = type ? { filter: { type } } : {};
+    const r = await tlFetch('/mailTemplates.list', { method: 'POST', body: JSON.stringify(listBody) });
     if (!r.ok) {
       const txt = await r.text();
       return res.status(200).json({ templates: [], reason: 'api_error', status: r.status, body: txt.slice(0, 200) });
@@ -44,7 +48,7 @@ export default async function handler(req, res) {
       type: t.type || null,
       language: t.language || null,
     }));
-    _cache = { at: Date.now(), data: templates };
+    _cache.set(cacheKey, { at: Date.now(), data: templates });
     return res.status(200).json({ templates });
   } catch (e) {
     console.error('[tl-email-templates]', e.message);

@@ -43,21 +43,53 @@ export default async function handler(req, res) {
     const recipientEmail = customer?.email;
     if (!recipientEmail) return res.status(409).json({ error: 'Klant heeft geen e-mailadres — offerte kan niet verstuurd worden' });
 
-    // quotations.send body volgens TL-spec:
-    //   quotations: string[] van UUIDs
-    //   recipients: { to: [{ email_address }] }
-    //   subject / content / language: verplicht
-    // TL kent GEEN mail_template_id voor quotations.send → subject/content inline.
-    // TODO: subject/content configureerbaar maken via teamleader_settings, en
-    //       eventueel onze eigen template-substitutie (TL heeft geen native id).
-    const sendBody = {
+    // Template-keuze: expliciete param, anders default uit settings.
+    let templateId = email_template_id || null;
+    if (!templateId) {
+      const { data: setting } = await supabaseAdmin.from('teamleader_settings')
+        .select('value').eq('key', 'default_email_template_id').maybeSingle();
+      templateId = setting?.value || null;
+    }
+
+    // Gemeenschappelijke verplichte velden.
+    const base = {
       quotations: [deal.tl_quotation_id],
       recipients: { to: [{ email_address: recipientEmail }] },
-      subject: 'Uw offerte van De Forex Opleiding',
-      content: 'Beste,\n\nBekijk en onderteken uw offerte via de onderstaande link:\n\n#LINK\n\nMet vriendelijke groet,\nDe Forex Opleiding',
       language: 'nl',
     };
-    const r = await tlFetch('/quotations.send', { method: 'POST', body: JSON.stringify(sendBody) });
+    // Vaste inline-tekst (fallback). #LINK wordt door TL gerenderd.
+    const inlineContent = {
+      subject: 'Uw offerte van De Forex Opleiding',
+      content: 'Beste,\n\nBekijk en onderteken uw offerte via de onderstaande link:\n\n#LINK\n\nMet vriendelijke groet,\nDe Forex Opleiding',
+    };
+
+    // Zelf-aanpassend: probeer eerst mail_template_id (officieel niet
+    // gedocumenteerd, mogelijk wel ondersteund). Bij 400 → val terug op de
+    // bewezen inline subject/content. Een 400 betekent dat er NIETS verstuurd
+    // is, dus er volgt geen dubbele mail.
+    let usedTemplate = false;
+    let r;
+    if (templateId) {
+      r = await tlFetch('/quotations.send', {
+        method: 'POST',
+        body: JSON.stringify({ ...base, mail_template_id: templateId }),
+      });
+      if (r.ok) {
+        usedTemplate = true;
+      } else if (r.status === 400) {
+        const txt = await r.text();
+        console.warn('[tl-send-quotation] mail_template_id geweigerd (400), fallback naar inline tekst:', txt.slice(0, 200));
+        r = await tlFetch('/quotations.send', {
+          method: 'POST',
+          body: JSON.stringify({ ...base, ...inlineContent }),
+        });
+      }
+    } else {
+      r = await tlFetch('/quotations.send', {
+        method: 'POST',
+        body: JSON.stringify({ ...base, ...inlineContent }),
+      });
+    }
     if (!r.ok) {
       const txt = await r.text();
       throw new Error(`TL quotations.send HTTP ${r.status}: ${txt.slice(0, 200)}`);
@@ -69,7 +101,7 @@ export default async function handler(req, res) {
       tl_quotation_sent_at:       deal.tl_quotation_sent_at || new Date().toISOString(),
     }).eq('id', deal_id);
 
-    return res.status(200).json({ success: true, tl_quotation_status: 'sent' });
+    return res.status(200).json({ success: true, tl_quotation_status: 'sent', used_template: usedTemplate });
   } catch (e) {
     console.error('[tl-send-quotation]', e.message);
     return res.status(500).json({ error: e.message });

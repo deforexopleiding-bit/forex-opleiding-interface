@@ -838,7 +838,7 @@ async function loadTemplateSetting() {
   hint.textContent = 'Laden…';
   let templates = [];
   try {
-    const t = await apiRequest('GET', '/api/teamleader-email-templates');
+    const t = await apiRequest('GET', '/api/teamleader-email-templates?type=quotation');
     templates = (t && t.templates) || [];
     if (t && t.reason) hint.textContent = 'Templates niet beschikbaar (' + t.reason + ')';
     else hint.textContent = '';
