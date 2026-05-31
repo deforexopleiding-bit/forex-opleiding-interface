@@ -5,10 +5,11 @@
 // Kern-logica zit in pushDealToTl(dealId) — exporteerbaar zodat
 // sales-deal-create.js die direct kan aanroepen (geen interne HTTP-roundtrip).
 
-import { tlFetch, getActiveToken } from './_lib/teamleader-token.js';
+import { getActiveToken } from './_lib/teamleader-token.js';
 import { supabaseAdmin } from './supabase.js';
 import { createUserClient } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
+import { getOrCreateContact, createDeal } from './_lib/teamleader-contact.js';
 
 // Pure push-logica, GEEN req/res, GEEN auth-check (caller is verantwoordelijk).
 // Returnt { success, tl_contact_id?, tl_deal_id?, subscriptions_count?, error? }.
@@ -37,40 +38,11 @@ export async function pushDealToTl(dealId) {
 
     const { data: subs } = await supabaseAdmin.from('subscriptions').select('*').eq('deal_id', dealId);
 
-    // 2. POST /contacts.add (TL minimal contact) — skip indien customer.tl_contact_id reeds gezet.
-    let tlContactId = customer?.tl_contact_id || null;
-    if (!tlContactId) {
-      const contactBody = {
-        first_name: customer.first_name || '',
-        last_name:  customer.last_name || '',
-        emails:     customer.email ? [{ type: 'primary', email: customer.email }] : [],
-        telephones: customer.phone ? [{ type: 'phone', number: customer.phone }] : [],
-      };
-      const cr = await tlFetch('/contacts.add', { method: 'POST', body: JSON.stringify(contactBody) });
-      if (!cr.ok) {
-        const txt = await cr.text();
-        throw new Error(`TL contacts.add HTTP ${cr.status}: ${txt.slice(0, 200)}`);
-      }
-      const cData = await cr.json();
-      tlContactId = cData.data?.id || cData.data?.type === 'contact' ? cData.data?.id : null;
-      if (tlContactId) {
-        await supabaseAdmin.from('customers').update({ tl_contact_id: tlContactId }).eq('id', customer.id);
-      }
-    }
+    // 2. TL-contact (hergebruik bestaande of maak aan).
+    const tlContactId = await getOrCreateContact(customer);
 
-    // 3. POST /deals.create — minimal payload.
-    const dealBody = {
-      lead: { customer: { type: 'contact', id: tlContactId } },
-      title: `Deal ${deal.id.slice(0, 8)}`,
-      estimated_value: deal.total_amount ? { amount: Number(deal.total_amount), currency: 'EUR' } : undefined,
-    };
-    const dr = await tlFetch('/deals.create', { method: 'POST', body: JSON.stringify(dealBody) });
-    if (!dr.ok) {
-      const txt = await dr.text();
-      throw new Error(`TL deals.create HTTP ${dr.status}: ${txt.slice(0, 200)}`);
-    }
-    const dData = await dr.json();
-    const tlDealId = dData.data?.id;
+    // 3. TL-deal (opportunity).
+    const tlDealId = await createDeal(deal, tlContactId);
 
     // 4. Subscriptions — minimal best-effort. TL subscriptions.add bestaat maar
     //    is in-stappenwerk; voor MVP loggen we wat we zouden pushen en zetten

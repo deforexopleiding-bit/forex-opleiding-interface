@@ -192,7 +192,7 @@
 
   <!-- STAP 2 -->
   <section class="panel" id="panel2">
-    <h2>2. Deal & producten</h2>
+    <h2>2. Offerte & producten</h2>
     <div class="row2">
       <div class="field"><label>Offerte-referentie</label><input id="quoteRef" placeholder="bv. Q2026-0123" /><div class="hint">TL offerte-nummer indien al opgesteld</div></div>
       <div class="field"><label>Lead-bron <span class="req">*</span></label><select id="leadSource"><option value="">Selecteer een bron…</option></select></div>
@@ -222,48 +222,8 @@
 
   <!-- STAP 3 -->
   <section class="panel" id="panel3">
-    <h2>3. Betaling & termijnen</h2>
-    <div class="field" style="padding:14px;background:var(--bg-elev-2);border-radius:8px">
-      <label style="display:flex;align-items:center;gap:8px;text-transform:none;letter-spacing:0;font-size:13px;color:var(--text)">
-        <input type="checkbox" id="hasDownpayment" checked /> <strong>Aanbetaling vereist?</strong>
-      </label>
-      <div id="downpaymentFields" style="margin-top:12px">
-        <div class="row2">
-          <div class="field"><label>Aanbetaling (€) <span class="req">*</span></label><input id="downAmount" type="number" step="0.01" /></div>
-          <div class="field"><label>Datum 1e sub</label><input id="downDate" type="date" /><div class="hint">Wanneer wordt de aanbetalings-factuur verstuurd?</div></div>
-        </div>
-      </div>
-      <div id="noDownBanner" style="display:none;font-size:11.5px;color:var(--text-dim);margin-top:8px">Klant betaalt het hele bedrag via termijnen (geen aanbetaling)</div>
-    </div>
-
-    <div class="field" style="margin-top:18px;padding:14px;background:var(--bg-elev-2);border-radius:8px">
-      <h3 style="font-size:13px;font-weight:700;margin-bottom:10px">Termijnen</h3>
-      <div class="row2">
-        <div class="field"><label>Aantal termijnen <span class="req">*</span></label><input id="termCount" type="number" min="1" max="60" value="12" /></div>
-        <div class="field"><label>Datum 1e termijn <span class="req">*</span></label><input id="termStartDate" type="date" /></div>
-      </div>
-      <div class="field"><label>Maandbedrag</label><input id="monthlyAmount" readonly style="background:var(--bg);color:var(--text-dim)" /><div class="hint">Auto-berekend: (totaal − aanbetaling) / termijnen</div></div>
-    </div>
-
-    <div class="field" style="margin-top:18px;padding:14px;background:var(--bg-elev-2);border-radius:8px">
-      <h3 style="font-size:13px;font-weight:700">Eerste call (optioneel)</h3>
-      <div class="sub">Voor 'ready voor 1e call'-check op klant-detail. Mag later toegevoegd worden.</div>
-      <div style="display:flex;gap:8px;align-items:center">
-        <input id="firstCallAt" type="datetime-local" style="flex:1;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font:inherit;font-size:13px" />
-        <button class="btn btn-ghost btn-sm" id="clearFirstCall">Wissen</button>
-      </div>
-    </div>
-
-    <div class="field" style="margin-top:18px">
-      <label>Wat wordt er in Teamleader aangemaakt?</label>
-      <div class="sub-preview" id="subPreview">—</div>
-    </div>
-  </section>
-
-  <!-- STAP 4 -->
-  <section class="panel" id="panel4">
-    <h2>4. Controleer en versturen</h2>
-    <div class="sub">Bekijk alle gegevens, daarna verstuur je de deal.</div>
+    <h2>3. Bevestiging & versturen</h2>
+    <div class="sub">Bekijk alle gegevens, daarna verstuur je de offerte.</div>
     <div id="reviewMount"></div>
     <div id="tlBanner"></div>
     <div id="submitBlock" style="margin-top:18px;display:flex;flex-direction:column;gap:8px"></div>
@@ -358,13 +318,6 @@ const state = {
     source_lead_id: '',
     start_date: '', duration_months: 12,
     products: [],   // [{ product_id, product_name, quantity, price_per_unit, vat_percentage }]
-    // Stap 3
-    has_downpayment: true,
-    downpayment_amount: null,
-    downpayment_date: '',
-    term_count: 12,
-    term_start_date: '',
-    first_call_at: '',
   },
 };
 
@@ -376,21 +329,19 @@ function addMonths(date, m) { const d = new Date(date); d.setMonth(d.getMonth() 
 
 // ── Progress bar ──
 function renderProgress() {
-  const labels = ['Klantgegevens', 'Deal & producten', 'Betaling & termijnen', 'Bevestiging'];
+  const labels = ['Klantgegevens', 'Offerte & producten', 'Bevestiging & versturen'];
   let h = '';
-  for (let i = 1; i <= 4; i++) {
+  for (let i = 1; i <= 3; i++) {
     const cls = i === state.step ? 'active' : (i < state.step ? 'done' : '');
     h += `<div class="step ${cls}"><div class="circle">${i < state.step ? '✓' : i}</div><div class="label">${labels[i-1]}</div></div>`;
-    if (i < 4) h += `<div class="line ${i < state.step ? 'done' : ''}"></div>`;
+    if (i < 3) h += `<div class="line ${i < state.step ? 'done' : ''}"></div>`;
   }
   document.getElementById('progressBar').innerHTML = h;
   document.querySelectorAll('.panel').forEach((p, idx) => p.classList.toggle('active', idx + 1 === state.step));
   document.getElementById('prevBtn').disabled = state.step === 1;
-  document.getElementById('nextBtn').textContent = state.step === 4 ? 'Bevestigen' : 'Volgende →';
-  document.getElementById('nextBtn').style.display = state.step === 4 ? 'none' : '';
+  document.getElementById('nextBtn').style.display = state.step === 3 ? 'none' : '';
   updateNextEnabled();
-  if (state.step === 3) renderSubPreview();
-  if (state.step === 4) renderReview();
+  if (state.step === 3) renderReview();
 }
 
 // ── Auto-save ──
@@ -444,8 +395,6 @@ async function init() {
 
   // Default dates
   state.wizard.start_date = state.wizard.start_date || new Date().toISOString().slice(0, 10);
-  state.wizard.downpayment_date = state.wizard.downpayment_date || state.wizard.start_date;
-  state.wizard.term_start_date = state.wizard.term_start_date || addMonths(state.wizard.downpayment_date, 1).toISOString().slice(0, 10);
 
   // URL-param: customer_id → load + lock stap 1
   const params = new URLSearchParams(location.search);
@@ -501,7 +450,7 @@ function showResumeModal(draft) {
     if (dj.duplicate_check_status) state.duplicate_check_status = dj.duplicate_check_status;
     state.step = draft.last_step || 1;
     document.getElementById('resumeModal').classList.remove('show');
-    syncStep1Fields(); syncStep2Fields(); syncStep3Fields();
+    syncStep1Fields(); syncStep2Fields();
     renderProgress(); renderTags(); renderDealProducts();
   };
   document.getElementById('resumeNew').onclick = async () => {
@@ -557,17 +506,6 @@ function syncStep2Fields() {
   document.getElementById('startDate').value = state.wizard.start_date || '';
   document.getElementById('durationMonths').value = state.wizard.duration_months || 12;
   document.querySelectorAll('[data-dur]').forEach(c => c.classList.toggle('on', Number(c.dataset.dur) === Number(state.wizard.duration_months)));
-}
-function syncStep3Fields() {
-  document.getElementById('hasDownpayment').checked = state.wizard.has_downpayment;
-  document.getElementById('downpaymentFields').style.display = state.wizard.has_downpayment ? '' : 'none';
-  document.getElementById('noDownBanner').style.display = state.wizard.has_downpayment ? 'none' : '';
-  document.getElementById('downAmount').value = state.wizard.downpayment_amount ?? '';
-  document.getElementById('downDate').value = state.wizard.downpayment_date || '';
-  document.getElementById('termCount').value = state.wizard.term_count || 12;
-  document.getElementById('termStartDate').value = state.wizard.term_start_date || '';
-  document.getElementById('firstCallAt').value = state.wizard.first_call_at || '';
-  recomputeMonthly();
 }
 
 ['f_first','f_last','f_email','f_phone','f_street','f_number','f_postal','f_city','f_dob'].forEach(id => {
@@ -739,7 +677,7 @@ function addProductToDeal(productId) {
     quantity: 1, price_per_unit: Number(p.default_price) || 0, vat_percentage: p.vat_percentage,
   });
   document.getElementById('prodPicker').classList.remove('show');
-  renderDealProducts(); markDirty(); updateNextEnabled(); recomputeMonthly();
+  renderDealProducts(); markDirty(); updateNextEnabled();
 }
 function renderDealProducts() {
   const root = document.getElementById('dealProducts');
@@ -758,9 +696,9 @@ function renderDealProducts() {
       <div style="text-align:right;font-weight:700">${fmtEuro(p.quantity * p.price_per_unit)}</div>
       <button class="action-btn" style="background:transparent;border:none;color:#dc2626;cursor:pointer;font-size:16px" data-rm="${i}">×</button>
     </div>`).join('');
-  root.querySelectorAll('[data-qty]').forEach(inp => inp.addEventListener('input', e => { state.wizard.products[e.target.dataset.qty].quantity = Number(e.target.value) || 1; renderDealProducts(); markDirty(); updateNextEnabled(); recomputeMonthly(); }));
-  root.querySelectorAll('[data-price]').forEach(inp => inp.addEventListener('input', e => { state.wizard.products[e.target.dataset.price].price_per_unit = Number(e.target.value) || 0; renderDealProducts(); markDirty(); updateNextEnabled(); recomputeMonthly(); }));
-  root.querySelectorAll('[data-rm]').forEach(b => b.addEventListener('click', () => { state.wizard.products.splice(Number(b.dataset.rm), 1); renderDealProducts(); markDirty(); updateNextEnabled(); recomputeMonthly(); }));
+  root.querySelectorAll('[data-qty]').forEach(inp => inp.addEventListener('input', e => { state.wizard.products[e.target.dataset.qty].quantity = Number(e.target.value) || 1; renderDealProducts(); markDirty(); updateNextEnabled(); }));
+  root.querySelectorAll('[data-price]').forEach(inp => inp.addEventListener('input', e => { state.wizard.products[e.target.dataset.price].price_per_unit = Number(e.target.value) || 0; renderDealProducts(); markDirty(); updateNextEnabled(); }));
+  root.querySelectorAll('[data-rm]').forEach(b => b.addEventListener('click', () => { state.wizard.products.splice(Number(b.dataset.rm), 1); renderDealProducts(); markDirty(); updateNextEnabled(); }));
 
   // Totals
   let subtotal = 0;
@@ -787,74 +725,11 @@ function totalInclBtw() {
   return total;
 }
 
-// Cents-precisie: maandbedrag naar beneden afgerond op €0,01, laatste
-// termijn vangt het centen-verschil op zodat de som exact rest is.
-function computePayment() {
-  const total = totalInclBtw();
-  const down = state.wizard.has_downpayment ? (Number(state.wizard.downpayment_amount) || 0) : 0;
-  const rest = total - down;
-  const tc = Math.max(1, Number(state.wizard.term_count) || 1);
-  const monthlyFloored = Math.floor((rest / tc) * 100) / 100;
-  const lastTerm = Math.round((rest - monthlyFloored * (tc - 1)) * 100) / 100;
-  return { total, down, rest, tc, monthlyFloored, lastTerm, hasRemainder: lastTerm !== monthlyFloored };
-}
-
-// ── Stap 3 wiring ──
-document.getElementById('hasDownpayment').addEventListener('change', e => {
-  state.wizard.has_downpayment = e.target.checked;
-  document.getElementById('downpaymentFields').style.display = e.target.checked ? '' : 'none';
-  document.getElementById('noDownBanner').style.display = e.target.checked ? 'none' : '';
-  if (e.target.checked && !state.wizard.downpayment_amount) {
-    state.wizard.downpayment_amount = Math.ceil(totalInclBtw() * 0.3 / 10) * 10;
-    document.getElementById('downAmount').value = state.wizard.downpayment_amount;
-  }
-  markDirty(); recomputeMonthly(); renderSubPreview();
-});
-document.getElementById('downAmount').addEventListener('input', e => { state.wizard.downpayment_amount = Number(e.target.value); markDirty(); recomputeMonthly(); renderSubPreview(); });
-document.getElementById('downDate').addEventListener('change', e => { state.wizard.downpayment_date = e.target.value; markDirty(); renderSubPreview(); });
-document.getElementById('termCount').addEventListener('input', e => { state.wizard.term_count = Number(e.target.value); markDirty(); recomputeMonthly(); renderSubPreview(); });
-document.getElementById('termStartDate').addEventListener('change', e => { state.wizard.term_start_date = e.target.value; markDirty(); renderSubPreview(); });
-document.getElementById('firstCallAt').addEventListener('change', e => { state.wizard.first_call_at = e.target.value; markDirty(); });
-document.getElementById('clearFirstCall').addEventListener('click', () => { state.wizard.first_call_at = ''; document.getElementById('firstCallAt').value = ''; markDirty(); });
-
-function recomputeMonthly() {
-  const { monthlyFloored } = computePayment();
-  document.getElementById('monthlyAmount').value = monthlyFloored > 0 ? '€' + monthlyFloored.toFixed(2) : '';
-}
-function renderSubPreview() {
-  const w = state.wizard;
-  let lines = ['Bij Teamleader worden de volgende subscriptions aangemaakt:', ''];
-  let i = 1;
-  if (w.has_downpayment && w.downpayment_amount > 0) {
-    lines.push(`${i++}. Aanbetaling`);
-    lines.push(`   Bedrag: ${fmtEuro(w.downpayment_amount)}`);
-    lines.push(`   Eerste factuur: ${fmtDateLong(w.downpayment_date)}`);
-    lines.push(`   Aantal termijnen: 1`);
-    lines.push('');
-  }
-  const { tc, monthlyFloored, lastTerm, hasRemainder } = computePayment();
-  lines.push(`${i}. Maandelijkse termijnen`);
-  if (tc === 1 && w.has_downpayment) {
-    lines.push(`   Bedrag: ${fmtEuro(monthlyFloored)} (eenmalig)`);
-  } else {
-    lines.push(`   Bedrag: ${fmtEuro(monthlyFloored)}/mnd`);
-  }
-  lines.push(`   Eerste factuur: ${fmtDateLong(w.term_start_date)}`);
-  lines.push(`   Aantal termijnen: ${tc}`);
-  const lastDate = w.term_start_date ? addMonths(w.term_start_date, tc - 1) : null;
-  lines.push(`   Laatste factuur: ${lastDate ? fmtDateLong(lastDate.toISOString().slice(0,10)) : '—'}`);
-  if (hasRemainder) {
-    lines.push('');
-    lines.push(`* laatste termijn ${fmtEuro(lastTerm)} om af te ronden`);
-  }
-  document.getElementById('subPreview').textContent = lines.join('\n');
-}
-
 // ── Stap 4 review ──
 function renderReview() {
   const w = state.wizard;
   const ls = state.leadSources.find(s => s.id === w.source_lead_id);
-  const { total, down, tc, monthlyFloored: monthly, lastTerm, hasRemainder } = computePayment();
+  const total = totalInclBtw();
 
   // BTW-breakdown per tarief.
   const btwByRate = {};
@@ -872,22 +747,6 @@ function renderReview() {
   if (state.matched_customer_id) custBadge = '<span class="section-badge existing">Bestaande klant</span>';
   else if (state.tl_imported_contact_id) custBadge = '<span class="section-badge tl">Geïmporteerd uit Teamleader</span>';
 
-  let bonusBlock = '';
-  if (down >= 1000) {
-    const bonus = (down * 0.03).toFixed(2);
-    bonusBlock = `<div class="bonus-block green">
-      <strong>Bonus berekening:</strong><br>
-      Aanbetaling ${fmtEuro(down)} ≥ drempel €1.000<br>
-      3% × ${fmtEuro(down)} = ${fmtEuro(bonus)} incl. BTW<br>
-      Status: ⏳ Wacht op aanbetaling binnen<br>
-      <small style="color:var(--text-dim)">Bonus wordt automatisch geactiveerd zodra aanbetaling in TL/ING zichtbaar is.</small>
-    </div>`;
-  } else if (down > 0) {
-    bonusBlock = `<div class="bonus-block gray">Geen bonus: aanbetaling ${fmtEuro(down)} is onder drempel €1.000</div>`;
-  } else {
-    bonusBlock = `<div class="bonus-block gray">Geen bonus: geen aanbetaling ingesteld</div>`;
-  }
-
   document.getElementById('reviewMount').innerHTML = `
     <div class="section-block">
       <div class="section-head"><span class="chev">▾</span><span class="title">Klant ${custBadge}</span><a href="#" data-back="1" style="font-size:11px;color:var(--accent-cyan,#0891b2)">Bewerken</a></div>
@@ -903,7 +762,7 @@ function renderReview() {
       </div>
     </div>
     <div class="section-block">
-      <div class="section-head"><span class="chev">▾</span><span class="title">Deal</span><a href="#" data-back="2" style="font-size:11px;color:var(--accent-cyan,#0891b2)">Bewerken</a></div>
+      <div class="section-head"><span class="chev">▾</span><span class="title">Offerte</span><a href="#" data-back="2" style="font-size:11px;color:var(--accent-cyan,#0891b2)">Bewerken</a></div>
       <div class="section-body">
         Lead-bron: ${esc(ls?.name || '—')}<br>
         Offerte-referentie: ${esc(w.quote_reference || '—')}<br>
@@ -918,42 +777,29 @@ function renderReview() {
         </table>
       </div>
     </div>
-    <div class="section-block">
-      <div class="section-head"><span class="chev">▾</span><span class="title">Betaling</span><a href="#" data-back="3" style="font-size:11px;color:var(--accent-cyan,#0891b2)">Bewerken</a></div>
-      <div class="section-body">
-        ${w.has_downpayment ? `Aanbetaling: ${fmtEuro(down)} op ${fmtDateLong(w.downpayment_date)}` : 'Geen aanbetaling'}<br>
-        Termijnen: ${tc} × ${fmtEuro(monthly)}/mnd vanaf ${fmtDateLong(w.term_start_date)}<br>
-        ${hasRemainder ? `<span style="font-size:11px;color:var(--text-faint)">* laatste termijn ${fmtEuro(lastTerm)} om af te ronden</span><br>` : ''}
-        1e call: ${w.first_call_at ? new Date(w.first_call_at).toLocaleString('nl-NL') : 'Niet gepland'}
-      </div>
-    </div>
-    <div class="section-block">
-      <div class="section-head"><span class="chev">▾</span><span class="title">Bonus-preview</span></div>
-      <div class="section-body">${bonusBlock}</div>
-    </div>
   `;
   document.querySelectorAll('.section-head').forEach(h => h.addEventListener('click', e => {
     if (e.target.closest('[data-back]')) return;
     h.parentElement.classList.toggle('collapsed');
   }));
-  document.querySelectorAll('[data-back]').forEach(a => a.addEventListener('click', e => { e.preventDefault(); state.step = Number(a.dataset.back); renderProgress(); syncStep1Fields(); syncStep2Fields(); syncStep3Fields(); renderTags(); renderDealProducts(); }));
+  document.querySelectorAll('[data-back]').forEach(a => a.addEventListener('click', e => { e.preventDefault(); state.step = Number(a.dataset.back); renderProgress(); syncStep1Fields(); syncStep2Fields(); renderTags(); renderDealProducts(); }));
 
   // TL banner + submit knoppen
   const tlBanner = document.getElementById('tlBanner');
   const submitBlock = document.getElementById('submitBlock');
   if (state.tlConnected) {
     const tlWho = state.tlUserInfo?.email ? ` als ${esc(state.tlUserInfo.email)}` : '';
-    tlBanner.innerHTML = `<div class="tl-banner ok">✓ Verbonden met Teamleader${tlWho} — deal wordt automatisch gesynchroniseerd.</div>`;
+    tlBanner.innerHTML = `<div class="tl-banner ok">✓ Verbonden met Teamleader${tlWho} — de offerte wordt aangemaakt in Teamleader.</div>`;
     submitBlock.innerHTML = `
-      <button class="btn btn-success" id="submitWithTl" style="width:100%;padding:12px">Opslaan + sync naar Teamleader</button>
-      <a href="#" id="submitLocalOnly" style="text-align:center;font-size:11.5px;color:var(--text-dim);text-decoration:underline">Alleen lokaal opslaan (zonder TL-sync)</a>`;
+      <button class="btn btn-success" id="submitWithTl" style="width:100%;padding:12px">Verstuur offerte via Teamleader</button>
+      <a href="#" id="submitLocalOnly" style="text-align:center;font-size:11.5px;color:var(--text-dim);text-decoration:underline">Alleen lokaal opslaan (geen offerte versturen)</a>`;
     document.getElementById('submitWithTl').addEventListener('click', () => submitDeal(true));
     document.getElementById('submitLocalOnly').addEventListener('click', e => { e.preventDefault(); submitDeal(false); });
   } else {
-    tlBanner.innerHTML = `<div class="tl-banner warn">⚠️ Teamleader niet verbonden. Deal wordt alleen lokaal opgeslagen. Manager kan TL verbinden via Admin > Integraties.</div>`;
+    tlBanner.innerHTML = `<div class="tl-banner warn">⚠️ Teamleader niet verbonden. Klant + offerte worden alleen lokaal opgeslagen. Manager kan TL verbinden via Admin > Integraties.</div>`;
     submitBlock.innerHTML = `
       <button class="btn btn-ghost" id="submitLocal" style="width:100%;padding:12px;color:var(--text)">Sla op (lokaal)</button>
-      <div style="text-align:center;font-size:11px;color:var(--text-faint)">TL-sync kan later vanuit deal-detail.</div>`;
+      <div style="text-align:center;font-size:11px;color:var(--text-faint)">Offerte versturen kan later vanuit klant-detail.</div>`;
     document.getElementById('submitLocal').addEventListener('click', () => submitDeal(false));
   }
 }
@@ -963,11 +809,6 @@ async function submitDeal(syncToTl) {
   if (btn) { btn.disabled = true; btn.textContent = 'Verzenden…'; }
   try {
     const w = state.wizard;
-    const { total, down, tc, monthlyFloored } = computePayment();
-    const subs = [];
-    if (w.has_downpayment && down > 0) subs.push({ amount: down, vat_percentage: 21, term_count: 1, start_date: w.downpayment_date });
-    subs.push({ amount: monthlyFloored, vat_percentage: 21, term_count: tc, start_date: w.term_start_date });
-
     const payload = {
       customer_data: {
         first_name: w.first_name, last_name: w.last_name, email: w.email, phone: w.phone,
@@ -980,12 +821,9 @@ async function submitDeal(syncToTl) {
         quote_reference: w.quote_reference || null,
         start_date: w.start_date,
         duration_months: w.duration_months,
-        total_amount: total,
-        downpayment_amount: down || null,
-        first_call_at: w.first_call_at || null,
+        total_amount: totalInclBtw(),
       },
       products: w.products,
-      subscriptions: subs,
       matched_customer_id: state.matched_customer_id,
       tl_imported_contact_id: state.tl_imported_contact_id,
       sync_to_tl: !!syncToTl,
@@ -995,17 +833,19 @@ async function submitDeal(syncToTl) {
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'HTTP ' + res.status);
-    toast(`Deal aangemaakt voor ${w.first_name} ${w.last_name}`, 'success');
-    if (data.tl_push_status === 'synced') {
-      setTimeout(() => toast(`Gesynchroniseerd met Teamleader (contact #${data.tl_contact_id || '?'})`, 'success'), 1200);
-    } else if (data.tl_push_status === 'failed') {
-      setTimeout(() => toast(`TL-sync mislukt: ${data.tl_error || ''}. Retry vanuit deal-detail.`, 'error'), 1200);
+    toast(`Klant aangemaakt: ${w.first_name} ${w.last_name}`, 'success');
+    if (data.tl_quotation_status === 'sent') {
+      setTimeout(() => toast(`Offerte verzonden naar ${w.email} via Teamleader`, 'success'), 1200);
+    } else if (data.tl_quotation_status === 'draft' && syncToTl) {
+      setTimeout(() => toast('Offerte als concept aangemaakt in Teamleader — verstuur vanuit TL', 'success'), 1200);
+    } else if (data.tl_quotation_status === 'failed') {
+      setTimeout(() => toast(`Klant opgeslagen lokaal, offerte sturen mislukt: ${data.tl_error || ''}`, 'error'), 1200);
     }
     await window.AgentShared.apiFetch('/api/sales-wizard-drafts', { method: 'DELETE' });
     setTimeout(() => { window.location.href = `/modules/klanten.html?id=${data.customer_id}`; }, 800);
   } catch (e) {
     toast('Verzenden mislukt: ' + e.message, 'error');
-    if (btn) { btn.disabled = false; btn.textContent = btn.id === 'submitWithTl' ? 'Opslaan + sync naar Teamleader' : 'Sla op (lokaal)'; }
+    if (btn) { btn.disabled = false; btn.textContent = btn.id === 'submitWithTl' ? 'Verstuur offerte via Teamleader' : 'Sla op (lokaal)'; }
   }
 }
 
@@ -1017,11 +857,8 @@ function updateNextEnabled() {
     valid = w.first_name && w.last_name && w.email && w.phone && w.avg_ok && (state.duplicate_check_status === 'completed' || state.matched_customer_id);
   } else if (state.step === 2) {
     valid = w.source_lead_id && w.start_date && Number(w.duration_months) >= 1 && w.products.length > 0 && w.products.every(p => p.quantity >= 1 && p.price_per_unit > 0);
-  } else if (state.step === 3) {
-    if (w.has_downpayment) valid = Number(w.downpayment_amount) > 0 && w.downpayment_date && w.term_start_date && Number(w.term_count) >= 1;
-    else valid = w.term_start_date && Number(w.term_count) >= 1;
   } else {
-    valid = true;
+    valid = true; // stap 3 = bevestiging
   }
   document.getElementById('nextBtn').disabled = !valid;
 }
@@ -1029,8 +866,7 @@ function updateNextEnabled() {
 document.getElementById('prevBtn').addEventListener('click', () => { if (state.step > 1) { state.step--; renderProgress(); } });
 document.getElementById('nextBtn').addEventListener('click', async () => {
   if (state.step === 1) syncStep2Fields();
-  if (state.step === 2) syncStep3Fields();
-  if (state.step < 4) { state.step++; renderProgress(); markDirty(); }
+  if (state.step < 3) { state.step++; renderProgress(); markDirty(); }
 });
 
 // Exit

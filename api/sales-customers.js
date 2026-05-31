@@ -47,7 +47,7 @@ export default async function handler(req, res) {
     let dealsByCustomer = {};
     if (ids.length) {
       const { data: deals } = await supabaseAdmin
-        .from('deals').select('customer_id, status, total_amount, created_at')
+        .from('deals').select('customer_id, status, total_amount, created_at, tl_quotation_status')
         .in('customer_id', ids)
         .order('created_at', { ascending: false });
       for (const d of deals || []) {
@@ -63,6 +63,7 @@ export default async function handler(req, res) {
         deals_count:       deals.length,
         last_deal_at:      deals[0]?.created_at || null,
         last_deal_status:  deals[0]?.status || null,
+        quotation_status:  deals[0]?.tl_quotation_status || null,
       };
     });
 
