@@ -105,15 +105,15 @@ export async function pushDealToTl(dealId) {
                                         },
                                         payment_term: { type: 'after_invoice_date', days: 14 },
                                         grouped_lines: [{
-                                                        section: { title: null },
+                                                        
                                                         line_items: [{
                                                                           quantity: sub.term_count || 1,
                                                                           description: `Termijn — deal ${deal.id.slice(0, 8)}`,
                                                                           unit_price: {
                                                                                               amount: Math.round(unitPriceExcl * 100) / 100,
-                                                                                              tax: 'excluding',
+                                                                                              tax: 'excluding', currency: 'EUR',
                                                                           },
-                                                                          tax: { type: 'taxRate', id: taxRateId },
+                                                                          tax_rate_id: taxRateId,
                                                         }],
                                         }],
                                                   invoice_generation: { action: 'book' },
