@@ -4,10 +4,8 @@
 // substitueren we de placeholders server-side, om die als inline subject/content
 // mee te sturen.
 //
-// #LINK wordt BEWUST niet vervangen: dat is TL's eigen placeholder die TL bij
-// het verzenden zelf rendert naar de juiste onderteken-link. (Niet door ons live
-// te verifiëren — TL nog niet verbonden; als blijkt dat TL #LINK in inline content
-// niet rendert, moet hier een expliciete URL gegenereerd worden.)
+// #LINK wordt BEWUST niet vervangen: TL-docs bevestigen dat #LINK de officiële
+// shortcode is die quotations.send vervangt door de CloudSign onderteken-URL.
 
 import { tlFetch } from './teamleader-token.js';
 
@@ -33,11 +31,22 @@ export async function fetchAndSubstituteTemplate(templateId, ctx) {
   const tpl = (data.data || []).find(t => t.id === templateId);
   if (!tpl) throw new Error('Mail-template niet gevonden: ' + templateId);
 
-  // Veldnamen defensief (content-veld niet hard geverifieerd).
-  const rawSubject = tpl.subject || tpl.name || '';
-  const rawBody = tpl.content || tpl.body || tpl.html || tpl.text || '';
-  return {
-    subject: substitute(rawSubject, ctx),
-    content: substitute(rawBody, ctx),
-  };
+  // TL-shape is genest: { id, name, content: { subject, body } }.
+  // subject/body kunnen string of taal-object ({ nl, en }) zijn.
+  const subject = tpl?.content?.subject;
+  const body = tpl?.content?.body;
+  if (!subject || !body) {
+    console.warn('[mail-substitution] template content ontbreekt:', JSON.stringify(tpl).slice(0, 300));
+    return null;
+  }
+  const pick = v => (typeof v === 'string' ? v : (v.nl || v.en || Object.values(v)[0] || ''));
+  const outSubject = substitute(pick(subject), ctx);
+  const outContent = substitute(pick(body), ctx);
+
+  // Defensief: corrupte extractie (gestringificeerd object) → inline fallback.
+  if (!outContent || /\[object/i.test(outContent) || outContent.trim().startsWith('{')) {
+    console.warn('[mail-substitution] verdachte content na substitutie, fallback inline');
+    return null;
+  }
+  return { subject: outSubject, content: outContent };
 }
