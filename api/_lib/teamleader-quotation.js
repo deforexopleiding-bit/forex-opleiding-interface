@@ -17,8 +17,9 @@ import { getOrCreateContact, createDeal } from './teamleader-contact.js';
 
 const CURRENCY = 'EUR';
 
-// Resolve department: env-override, anders eerste actieve uit departments.list.
-async function resolveDepartmentId() {
+// Resolve department: gekozen entiteit (deal) → env-override → eerste actieve.
+async function resolveDepartmentId(preferred) {
+  if (preferred) return preferred;
   if (process.env.TEAMLEADER_DEPARTMENT_ID) return process.env.TEAMLEADER_DEPARTMENT_ID;
   const r = await tlFetch('/departments.list', { method: 'POST', body: JSON.stringify({}) });
   if (!r.ok) throw new Error(`TL departments.list HTTP ${r.status}`);
@@ -62,13 +63,15 @@ export async function pushQuotationToTl(dealId) {
     const { data: lines } = await supabaseAdmin.from('deal_line_items').select('*').eq('deal_id', dealId).order('position', { ascending: true });
     if (!lines || lines.length === 0) throw new Error('Geen offerte-regels (deal_line_items) gevonden');
 
+    // Bedrijfsentiteit: gekozen department (deal) → env → eerste actieve.
+    const departmentId = await resolveDepartmentId(deal.tl_department_id);
+
     // 1. Contact + 2. Deal (quotation vereist deal_id).
     const tlContactId = await getOrCreateContact(customer);
     let tlDealId = deal.tl_deal_id;
-    if (!tlDealId) tlDealId = await createDeal(deal, tlContactId);
+    if (!tlDealId) tlDealId = await createDeal(deal, tlContactId, departmentId);
 
     // 3. Quotation samenstellen.
-    const departmentId = await resolveDepartmentId();
     const lineItems = lines.map(l => ({
       quantity:    Number(l.quantity),
       description: l.product_name,

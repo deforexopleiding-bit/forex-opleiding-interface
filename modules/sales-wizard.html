@@ -145,9 +145,18 @@
 
   <div class="progress" id="progressBar"></div>
 
-  <!-- STAP 1 -->
-  <section class="panel active" id="panel1">
-    <h2>1. Klantgegevens</h2>
+  <!-- STAP 1: Bedrijf -->
+  <section class="panel active" id="panel0">
+    <h2>1. Voor welk bedrijf is deze offerte?</h2>
+    <div class="sub">Selecteer de juiste entiteit — dit bepaalt onder welke bedrijfsnaam de offerte wordt verzonden.</div>
+    <div id="entityCards" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-top:16px">
+      <div class="sub" style="grid-column:1/-1;color:var(--text-faint)">Bedrijven laden…</div>
+    </div>
+  </section>
+
+  <!-- STAP 2: Klant -->
+  <section class="panel" id="panel1">
+    <h2>2. Klantgegevens</h2>
     <div id="existingCustBanner" style="display:none; padding: 10px 14px; background: rgba(34,211,238,.1); border: 1px solid rgba(34,211,238,.3); border-radius: 6px; margin-bottom: 14px; font-size: 12.5px;">
       <strong>Bestaande klant geselecteerd: <span id="existingCustName"></span></strong>
       <a href="#" id="swapCustLink" style="margin-left:12px;color:var(--accent-cyan,#0891b2);">Wissel klant</a>
@@ -192,7 +201,7 @@
 
   <!-- STAP 2 -->
   <section class="panel" id="panel2">
-    <h2>2. Offerte & producten</h2>
+    <h2>3. Offerte & producten</h2>
     <div class="row2">
       <div class="field"><label>Offerte-referentie</label><input id="quoteRef" placeholder="bv. Q2026-0123" /><div class="hint">TL offerte-nummer indien al opgesteld</div></div>
       <div class="field"><label>Lead-bron <span class="req">*</span></label><select id="leadSource"><option value="">Selecteer een bron…</option></select></div>
@@ -222,7 +231,7 @@
 
   <!-- STAP 3 -->
   <section class="panel" id="panel3">
-    <h2>3. Bevestiging & versturen</h2>
+    <h2>4. Bevestiging & versturen</h2>
     <div class="sub">Bekijk alle gegevens, daarna verstuur je de offerte.</div>
     <div id="reviewMount"></div>
     <div id="tlBanner"></div>
@@ -306,8 +315,11 @@ const state = {
   matched_customer_id: null,
   tl_imported_contact_id: null,
   duplicate_check_status: 'pending', // 'pending' | 'completed'
+  entities: [],
   wizard: {
-    // Stap 1
+    // Stap 1: bedrijf
+    tl_department_id: '',
+    // Stap 2: klant
     first_name: '', last_name: '', email: '', phone: '',
     address_street: '', address_number: '', address_postal: '', address_city: '',
     date_of_birth: '',
@@ -329,19 +341,44 @@ function addMonths(date, m) { const d = new Date(date); d.setMonth(d.getMonth() 
 
 // ── Progress bar ──
 function renderProgress() {
-  const labels = ['Klantgegevens', 'Offerte & producten', 'Bevestiging & versturen'];
+  const labels = ['Bedrijf', 'Klantgegevens', 'Offerte & producten', 'Bevestiging & versturen'];
   let h = '';
-  for (let i = 1; i <= 3; i++) {
+  for (let i = 1; i <= 4; i++) {
     const cls = i === state.step ? 'active' : (i < state.step ? 'done' : '');
     h += `<div class="step ${cls}"><div class="circle">${i < state.step ? '✓' : i}</div><div class="label">${labels[i-1]}</div></div>`;
-    if (i < 3) h += `<div class="line ${i < state.step ? 'done' : ''}"></div>`;
+    if (i < 4) h += `<div class="line ${i < state.step ? 'done' : ''}"></div>`;
   }
   document.getElementById('progressBar').innerHTML = h;
   document.querySelectorAll('.panel').forEach((p, idx) => p.classList.toggle('active', idx + 1 === state.step));
   document.getElementById('prevBtn').disabled = state.step === 1;
-  document.getElementById('nextBtn').style.display = state.step === 3 ? 'none' : '';
+  document.getElementById('nextBtn').style.display = state.step === 4 ? 'none' : '';
   updateNextEnabled();
-  if (state.step === 3) renderReview();
+  if (state.step === 4) renderReview();
+}
+
+// ── Bedrijfsentiteit (stap 1) ──
+function renderEntityCards() {
+  const wrap = document.getElementById('entityCards');
+  if (!wrap) return;
+  if (!state.entities.length) {
+    wrap.innerHTML = '<div class="sub" style="grid-column:1/-1;color:var(--text-faint)">Geen bedrijven beschikbaar.</div>';
+    return;
+  }
+  wrap.innerHTML = state.entities.map(e => {
+    const sel = state.wizard.tl_department_id === e.tl_department_id;
+    return `<div class="entity-card${sel ? ' selected' : ''}" data-dept="${esc(e.tl_department_id)}"
+      style="border:2px solid ${sel ? 'var(--accent-cyan,#0891b2)' : 'var(--border)'};border-radius:10px;padding:16px;cursor:pointer;background:${sel ? 'rgba(8,145,178,.08)' : 'var(--bg-elev)'};position:relative">
+      ${sel ? '<div style="position:absolute;top:10px;right:12px;color:var(--accent-cyan,#0891b2);font-weight:700">✓</div>' : ''}
+      <div style="font-weight:700;font-size:13.5px;margin-bottom:4px">${esc(e.label)}</div>
+      <div style="font-size:11.5px;color:var(--text-dim);line-height:1.4">${esc(e.description || '')}</div>
+    </div>`;
+  }).join('');
+  wrap.querySelectorAll('[data-dept]').forEach(c => c.addEventListener('click', () => {
+    state.wizard.tl_department_id = c.dataset.dept;
+    renderEntityCards();
+    markDirty();
+    updateNextEnabled();
+  }));
 }
 
 // ── Auto-save ──
@@ -380,18 +417,21 @@ async function init() {
   if (!profile) return;
   if (window.AgentShared) await window.AgentShared.renderUserSection(profile);
 
-  // Load lead-sources + products in parallel
-  const [lsRes, prodRes, tlRes] = await Promise.all([
+  // Load lead-sources + products + entities + TL-status in parallel
+  const [lsRes, prodRes, tlRes, entRes] = await Promise.all([
     window.AgentShared.apiFetch('/api/lead-sources').then(r => r.json()).catch(() => ({})),
     window.AgentShared.apiFetch('/api/sales-products?active=true').then(r => r.json()).catch(() => ({})),
     window.AgentShared.apiFetch('/api/teamleader-test-connection').then(r => r.json()).catch(() => ({ connected: false })),
+    window.AgentShared.apiFetch('/api/company-entities').then(r => r.json()).catch(() => ({})),
   ]);
   state.leadSources = lsRes.sources || [];
   state.products = prodRes.products || [];
   state.tlConnected = !!tlRes.connected;
   state.tlUserInfo = tlRes.user_info || null;
+  state.entities = entRes.entities || [];
   populateLeadSources();
   populateProductPicker();
+  renderEntityCards();
 
   // Default dates
   state.wizard.start_date = state.wizard.start_date || new Date().toISOString().slice(0, 10);
@@ -450,7 +490,7 @@ function showResumeModal(draft) {
     if (dj.duplicate_check_status) state.duplicate_check_status = dj.duplicate_check_status;
     state.step = draft.last_step || 1;
     document.getElementById('resumeModal').classList.remove('show');
-    syncStep1Fields(); syncStep2Fields();
+    syncStep1Fields(); syncStep2Fields(); renderEntityCards();
     renderProgress(); renderTags(); renderDealProducts();
   };
   document.getElementById('resumeNew').onclick = async () => {
@@ -729,6 +769,7 @@ function totalInclBtw() {
 function renderReview() {
   const w = state.wizard;
   const ls = state.leadSources.find(s => s.id === w.source_lead_id);
+  const entityLabel = (state.entities.find(e => e.tl_department_id === w.tl_department_id) || {}).label || '';
   const total = totalInclBtw();
 
   // BTW-breakdown per tarief.
@@ -749,8 +790,9 @@ function renderReview() {
 
   document.getElementById('reviewMount').innerHTML = `
     <div class="section-block">
-      <div class="section-head"><span class="chev">▾</span><span class="title">Klant ${custBadge}</span><a href="#" data-back="1" style="font-size:11px;color:var(--accent-cyan,#0891b2)">Bewerken</a></div>
+      <div class="section-head"><span class="chev">▾</span><span class="title">Klant ${custBadge}</span><a href="#" data-back="2" style="font-size:11px;color:var(--accent-cyan,#0891b2)">Bewerken</a></div>
       <div class="section-body">
+        ${entityLabel ? `<div style="margin-bottom:6px"><span class="section-badge tl">Bedrijf: ${esc(entityLabel)}</span></div>` : ''}
         <strong>${esc(w.first_name)} ${esc(w.last_name)}</strong><br>
         ${esc(w.email)} · ${esc(w.phone)}<br>
         ${[w.address_street, w.address_number, w.address_postal, w.address_city].filter(Boolean).join(' ') || '—'}<br>
@@ -762,7 +804,7 @@ function renderReview() {
       </div>
     </div>
     <div class="section-block">
-      <div class="section-head"><span class="chev">▾</span><span class="title">Offerte</span><a href="#" data-back="2" style="font-size:11px;color:var(--accent-cyan,#0891b2)">Bewerken</a></div>
+      <div class="section-head"><span class="chev">▾</span><span class="title">Offerte</span><a href="#" data-back="3" style="font-size:11px;color:var(--accent-cyan,#0891b2)">Bewerken</a></div>
       <div class="section-body">
         Lead-bron: ${esc(ls?.name || '—')}<br>
         Offerte-referentie: ${esc(w.quote_reference || '—')}<br>
@@ -822,6 +864,7 @@ async function submitDeal(syncToTl) {
         start_date: w.start_date,
         duration_months: w.duration_months,
         total_amount: totalInclBtw(),
+        tl_department_id: w.tl_department_id || null,
       },
       products: w.products,
       matched_customer_id: state.matched_customer_id,
@@ -854,19 +897,21 @@ function updateNextEnabled() {
   const w = state.wizard;
   let valid = false;
   if (state.step === 1) {
-    valid = w.first_name && w.last_name && w.email && w.phone && w.avg_ok && (state.duplicate_check_status === 'completed' || state.matched_customer_id);
+    valid = !!w.tl_department_id; // bedrijf gekozen
   } else if (state.step === 2) {
+    valid = w.first_name && w.last_name && w.email && w.phone && w.avg_ok && (state.duplicate_check_status === 'completed' || state.matched_customer_id);
+  } else if (state.step === 3) {
     valid = w.source_lead_id && w.start_date && Number(w.duration_months) >= 1 && w.products.length > 0 && w.products.every(p => p.quantity >= 1 && p.price_per_unit > 0);
   } else {
-    valid = true; // stap 3 = bevestiging
+    valid = true; // stap 4 = bevestiging
   }
   document.getElementById('nextBtn').disabled = !valid;
 }
 
 document.getElementById('prevBtn').addEventListener('click', () => { if (state.step > 1) { state.step--; renderProgress(); } });
 document.getElementById('nextBtn').addEventListener('click', async () => {
-  if (state.step === 1) syncStep2Fields();
-  if (state.step < 3) { state.step++; renderProgress(); markDirty(); }
+  if (state.step === 2) syncStep2Fields();
+  if (state.step < 4) { state.step++; renderProgress(); markDirty(); }
 });
 
 // Exit

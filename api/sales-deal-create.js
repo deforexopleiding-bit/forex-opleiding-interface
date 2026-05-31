@@ -31,6 +31,14 @@ export default async function handler(req, res) {
   if (!Array.isArray(products) || products.length === 0) return res.status(400).json({ error: 'minimaal 1 product vereist' });
 
   try {
+    // 0. Bedrijfsentiteit valideren (indien meegegeven) tegen company_entities.
+    let departmentId = deal_data.tl_department_id || null;
+    if (departmentId) {
+      const { data: ent } = await supabaseAdmin.from('company_entities')
+        .select('tl_department_id').eq('tl_department_id', departmentId).eq('is_active', true).maybeSingle();
+      if (!ent) return res.status(400).json({ error: 'Ongeldige bedrijfsentiteit (tl_department_id)' });
+    }
+
     // 1. Customer: reuse OF create.
     let customerId = matched_customer_id || null;
     if (!customerId) {
@@ -72,6 +80,7 @@ export default async function handler(req, res) {
       downpayment_amount: deal_data.downpayment_amount || null,
       first_call_at:      deal_data.first_call_at || null,
       quote_reference:    deal_data.quote_reference || null,
+      tl_department_id:   departmentId,
       tl_push_status:     'not_pushed',
       tl_quotation_status: 'draft',
     };

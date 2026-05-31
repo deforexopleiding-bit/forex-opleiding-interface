@@ -9,6 +9,7 @@
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
 import { tlFetch, getActiveToken } from './_lib/teamleader-token.js';
+import { fetchAndSubstituteTemplate } from './_lib/teamleader-mail-substitution.js';
 
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
@@ -30,7 +31,8 @@ export default async function handler(req, res) {
     if (!tok) return res.status(503).json({ error: 'Geen TL-token actief' });
 
     const { data: deal } = await supabaseAdmin.from('deals')
-      .select('id, customer_id, tl_quotation_id, tl_quotation_status, tl_quotation_sent_at').eq('id', deal_id).maybeSingle();
+      .select('id, customer_id, tl_quotation_id, tl_quotation_status, tl_quotation_sent_at, tl_department_id, quote_reference')
+      .eq('id', deal_id).maybeSingle();
     if (!deal) return res.status(404).json({ error: 'Deal niet gevonden' });
     if (!deal.tl_quotation_id) return res.status(409).json({ error: 'Deal heeft nog geen TL-offerte (eerst pushen)' });
     if (!['draft', 'sent'].includes(deal.tl_quotation_status)) {
@@ -39,7 +41,7 @@ export default async function handler(req, res) {
 
     // Ontvanger-email (verplicht voor quotations.send).
     const { data: customer } = await supabaseAdmin.from('customers')
-      .select('email').eq('id', deal.customer_id).maybeSingle();
+      .select('email, first_name, last_name').eq('id', deal.customer_id).maybeSingle();
     const recipientEmail = customer?.email;
     if (!recipientEmail) return res.status(409).json({ error: 'Klant heeft geen e-mailadres — offerte kan niet verstuurd worden' });
 
@@ -51,45 +53,47 @@ export default async function handler(req, res) {
       templateId = setting?.value || null;
     }
 
-    // Gemeenschappelijke verplichte velden.
+    // Verplichte velden.
     const base = {
       quotations: [deal.tl_quotation_id],
       recipients: { to: [{ email_address: recipientEmail }] },
       language: 'nl',
     };
     // Vaste inline-tekst (fallback). #LINK wordt door TL gerenderd.
-    const inlineContent = {
-      subject: 'Uw offerte van De Forex Opleiding',
-      content: 'Beste,\n\nBekijk en onderteken uw offerte via de onderstaande link:\n\n#LINK\n\nMet vriendelijke groet,\nDe Forex Opleiding',
-    };
+    let subject = 'Uw offerte van De Forex Opleiding';
+    let content = 'Beste,\n\nBekijk en onderteken uw offerte via de onderstaande link:\n\n#LINK\n\nMet vriendelijke groet,\nDe Forex Opleiding';
 
-    // Zelf-aanpassend: probeer eerst mail_template_id (officieel niet
-    // gedocumenteerd, mogelijk wel ondersteund). Bij 400 → val terug op de
-    // bewezen inline subject/content. Een 400 betekent dat er NIETS verstuurd
-    // is, dus er volgt geen dubbele mail.
+    // PAD 2B: TL kent geen mail_template_id voor quotations.send. We halen de
+    // gekozen template-content zelf op en substitueren placeholders server-side.
     let usedTemplate = false;
-    let r;
     if (templateId) {
-      r = await tlFetch('/quotations.send', {
-        method: 'POST',
-        body: JSON.stringify({ ...base, mail_template_id: templateId }),
-      });
-      if (r.ok) {
-        usedTemplate = true;
-      } else if (r.status === 400) {
-        const txt = await r.text();
-        console.warn('[tl-send-quotation] mail_template_id geweigerd (400), fallback naar inline tekst:', txt.slice(0, 200));
-        r = await tlFetch('/quotations.send', {
-          method: 'POST',
-          body: JSON.stringify({ ...base, ...inlineContent }),
-        });
+      try {
+        // Context voor placeholder-substitutie.
+        const { data: profile } = await supabaseAdmin.from('profiles')
+          .select('full_name').eq('id', user.id).maybeSingle();
+        let departmentName = 'De Forex Opleiding';
+        if (deal.tl_department_id) {
+          const { data: ent } = await supabaseAdmin.from('company_entities')
+            .select('label').eq('tl_department_id', deal.tl_department_id).maybeSingle();
+          if (ent?.label) departmentName = ent.label;
+        }
+        const ctx = {
+          contact_name:    `${customer.first_name || ''} ${customer.last_name || ''}`.trim(),
+          my_name:         profile?.full_name || '',
+          department_name: departmentName,
+          deal_title:      deal.quote_reference || 'Offerte',
+        };
+        const sub = await fetchAndSubstituteTemplate(templateId, ctx);
+        if (sub?.content) { subject = sub.subject || subject; content = sub.content; usedTemplate = true; }
+      } catch (e) {
+        console.warn('[tl-send-quotation] template-substitutie mislukt, fallback inline:', e.message);
       }
-    } else {
-      r = await tlFetch('/quotations.send', {
-        method: 'POST',
-        body: JSON.stringify({ ...base, ...inlineContent }),
-      });
     }
+
+    const r = await tlFetch('/quotations.send', {
+      method: 'POST',
+      body: JSON.stringify({ ...base, subject, content }),
+    });
     if (!r.ok) {
       const txt = await r.text();
       throw new Error(`TL quotations.send HTTP ${r.status}: ${txt.slice(0, 200)}`);
