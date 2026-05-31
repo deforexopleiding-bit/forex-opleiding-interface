@@ -43,20 +43,20 @@ export default async function handler(req, res) {
     const recipientEmail = customer?.email;
     if (!recipientEmail) return res.status(409).json({ error: 'Klant heeft geen e-mailadres — offerte kan niet verstuurd worden' });
 
-    // Default template uit settings indien geen meegegeven.
-    let templateId = email_template_id || null;
-    if (!templateId) {
-      const { data: setting } = await supabaseAdmin.from('teamleader_settings')
-        .select('value').eq('key', 'default_email_template_id').maybeSingle();
-      templateId = setting?.value || null;
-    }
-
-    // quotations.send verwacht arrays: quotations[] + recipients[] (verplicht).
+    // quotations.send body volgens TL-spec:
+    //   quotations: string[] van UUIDs
+    //   recipients: { to: [{ email_address }] }
+    //   subject / content / language: verplicht
+    // TL kent GEEN mail_template_id voor quotations.send → subject/content inline.
+    // TODO: subject/content configureerbaar maken via teamleader_settings, en
+    //       eventueel onze eigen template-substitutie (TL heeft geen native id).
     const sendBody = {
-      quotations: [{ type: 'quotation', id: deal.tl_quotation_id }],
-      recipients: [{ email: recipientEmail }],
+      quotations: [deal.tl_quotation_id],
+      recipients: { to: [{ email_address: recipientEmail }] },
+      subject: 'Uw offerte van De Forex Opleiding',
+      content: 'Beste,\n\nBekijk en onderteken uw offerte via de onderstaande link:\n\n#LINK\n\nMet vriendelijke groet,\nDe Forex Opleiding',
+      language: 'nl',
     };
-    if (templateId) sendBody.mail_template_id = templateId;
     const r = await tlFetch('/quotations.send', { method: 'POST', body: JSON.stringify(sendBody) });
     if (!r.ok) {
       const txt = await r.text();

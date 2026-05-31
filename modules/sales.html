@@ -156,8 +156,8 @@
     <div class="modal-body">
       <div class="field"><label>Ontvanger</label><input id="sendRecipient" readonly style="background:var(--bg-elev-2)" /></div>
       <div class="field"><label>Email-template</label>
-        <select class="search" id="sendTemplate" style="width:100%"><option value="">Standaard template</option></select>
-        <div style="font-size:11px;color:var(--text-faint);margin-top:4px" id="sendTemplateHint"></div>
+        <select class="search" id="sendTemplate" style="width:100%;opacity:.6" disabled title="Geïmplementeerd in toekomstige update"><option value="">Standaard tekst (NL)</option></select>
+        <div style="font-size:11px;color:var(--text-faint);margin-top:4px" id="sendTemplateHint">Onderwerp + tekst zijn voorlopig vast. Email-template selectie volgt in een latere update.</div>
       </div>
       <div class="form-error" id="sendErr" style="display:none;color:var(--red,#dc2626);font-size:12px"></div>
     </div>
@@ -496,26 +496,9 @@ async function openSendModal(dealId) {
   document.getElementById('sendModalTitle').textContent = `Offerte versturen naar ${q.customer_name}`;
   document.getElementById('sendRecipient').value = q.customer_email || '(geen email bekend)';
   document.getElementById('sendErr').style.display = 'none';
-  const sel = document.getElementById('sendTemplate');
-  const hint = document.getElementById('sendTemplateHint');
-  sel.innerHTML = '<option value="">Standaard template</option>';
-  hint.textContent = 'Templates laden…';
+  // Email-template dropdown is (voorlopig) disabled: TL quotations.send kent geen
+  // mail_template_id; we sturen een vaste NL subject/content mee.
   document.getElementById('sendModal').classList.add('show');
-  // Templates lazy laden + cachen.
-  try {
-    if (!state.emailTemplates) {
-      const r = await window.AgentShared.apiFetch('/api/teamleader-email-templates');
-      const d = await r.json();
-      state.emailTemplates = d.templates || [];
-      if (d.reason) hint.textContent = 'Templates niet beschikbaar (' + d.reason + ') — standaard wordt gebruikt.';
-      else hint.textContent = '';
-    } else { hint.textContent = ''; }
-    for (const t of state.emailTemplates) {
-      const o = document.createElement('option');
-      o.value = t.id; o.textContent = t.name + (t.language ? ' (' + t.language + ')' : '');
-      sel.appendChild(o);
-    }
-  } catch { hint.textContent = 'Templates laden mislukt — standaard wordt gebruikt.'; }
 }
 async function doSendQuotation() {
   const btn = document.getElementById('sendConfirm');
@@ -524,8 +507,6 @@ async function doSendQuotation() {
   err.style.display = 'none';
   try {
     const body = { deal_id: state.sendDealId };
-    const tpl = document.getElementById('sendTemplate').value;
-    if (tpl) body.email_template_id = tpl;
     const res = await window.AgentShared.apiFetch('/api/teamleader-send-quotation', {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
     });
