@@ -108,6 +108,8 @@
 <div class="main">
   <div class="main-inner">
 
+    <div id="adminBanner"></div>
+
     <div class="page-header">
       <div>
         <h1 class="page-title">Gebruikersbeheer</h1>
@@ -119,6 +121,7 @@
     <div class="admin-tabs">
       <button class="admin-tab active" data-tab="gebruikers" onclick="switchAdminTab('gebruikers')">Gebruikers</button>
       <button class="admin-tab" data-tab="rechten" id="rechtenTabBtn" onclick="switchAdminTab('rechten')" style="display:none">Rechten</button>
+      <button class="admin-tab" data-tab="integraties" onclick="switchAdminTab('integraties')">Integraties</button>
     </div>
 
     <div id="tab-gebruikers" class="admin-tab-panel">
@@ -155,6 +158,28 @@
       <div class="rbac-layout">
         <div class="rbac-modules" id="rbacModules"></div>
         <div class="rbac-matrix-wrap" id="rbacMatrixWrap"><div style="color:var(--text-faint);padding:20px">Laden&hellip;</div></div>
+      </div>
+    </div>
+
+    <div id="tab-integraties" class="admin-tab-panel" style="display:none">
+      <div class="section-card" style="max-width:560px">
+        <div class="section-header"><span>Integraties</span></div>
+        <div id="integrationCards" style="padding:8px 4px">
+          <div class="integration-card" id="card-teamleader" style="border:1px solid var(--border);border-radius:10px;padding:18px">
+            <div style="display:flex;align-items:flex-start;gap:14px">
+              <div style="font-size:26px;color:var(--text-dim);line-height:1"><i class="ti ti-plug"></i></div>
+              <div style="flex:1;min-width:0">
+                <div style="font-size:15px;font-weight:700">Teamleader Focus</div>
+                <div style="font-size:12.5px;color:var(--text-dim);margin-bottom:10px">Klanten, deals, facturen sync</div>
+                <div id="tlStatus" style="font-size:13px;display:flex;align-items:center;gap:8px;margin-bottom:14px">
+                  <span class="tl-dot" style="width:9px;height:9px;border-radius:50%;background:var(--text-faint);display:inline-block"></span>
+                  <span>Status laden&hellip;</span>
+                </div>
+                <div id="tlActions" style="display:flex;gap:8px;flex-wrap:wrap"></div>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -414,6 +439,7 @@ const FEATURE_REGISTRY = [
     { key:'admin.invite.resend', label:'Uitnodiging herhalen' },
     { key:'admin.role.assign_super_admin', label:'super_admin toekennen (kritiek)' },
     { key:'admin.permissions.edit', label:'Rechten matrix bewerken (super only)' },
+    { key:'admin.integrations.manage', label:"Integraties beheren (Teamleader-koppeling, etc.)" },
   ]},
   { moduleKey:'tickets', moduleLabel:'Tickets', moduleIcon:'ti-ticket', features:[
     { key:'tickets.module.access', label:'Module zichtbaar' },
@@ -448,11 +474,13 @@ function switchAdminTab(name) {
     rbacDirty = false; updateRbacSaveState();
   }
   document.querySelectorAll('.admin-tab').forEach(b => b.classList.toggle('active', b.dataset.tab === name));
-  document.getElementById('tab-gebruikers').style.display = name === 'gebruikers' ? '' : 'none';
-  document.getElementById('tab-rechten').style.display    = name === 'rechten'    ? '' : 'none';
+  document.getElementById('tab-gebruikers').style.display  = name === 'gebruikers'  ? '' : 'none';
+  document.getElementById('tab-rechten').style.display     = name === 'rechten'     ? '' : 'none';
+  document.getElementById('tab-integraties').style.display = name === 'integraties' ? '' : 'none';
   const inviteBtn = document.querySelector('.page-header .btn-primary');
   if (inviteBtn) inviteBtn.style.display = name === 'gebruikers' ? '' : 'none';
   if (name === 'rechten' && !rbacLoaded) loadPermissionsMatrix();
+  if (name === 'integraties') loadTlStatus();
 }
 
 async function loadPermissionsMatrix() {
@@ -611,6 +639,9 @@ async function init() {
   }
 
   loadUsers();
+
+  // Toon TL-koppeling resultaat-banner na OAuth-redirect (en open de tab).
+  handleTlReturnBanner();
 }
 
 async function apiRequest(method, path, body) {
@@ -624,6 +655,144 @@ async function apiRequest(method, path, body) {
   if (body) opts.body = JSON.stringify(body);
   const res = await fetch(path, opts);
   return res.json();
+}
+
+// ── Integraties: Teamleader ─────────────────────────────────────────────
+function setTlStatus(color, text) {
+  const wrap = document.getElementById('tlStatus');
+  if (!wrap) return;
+  wrap.innerHTML = `<span class="tl-dot" style="width:9px;height:9px;border-radius:50%;background:${color};display:inline-block"></span><span>${text}</span>`;
+}
+function setTlActions(buttons) {
+  const wrap = document.getElementById('tlActions');
+  if (wrap) wrap.innerHTML = buttons;
+}
+function tlHoursLeftLabel(expiresAt) {
+  const ms = new Date(expiresAt).getTime() - Date.now();
+  if (!isFinite(ms)) return '';
+  if (ms <= 0) return '';
+  const hours = Math.floor(ms / 3600000);
+  if (hours >= 1) return `Verloopt over ${hours} uur`;
+  return `Verloopt over ${Math.max(1, Math.round(ms / 60000))} min`;
+}
+
+async function loadTlStatus() {
+  setTlStatus('var(--text-faint)', 'Status laden…');
+  setTlActions('');
+  let data;
+  try {
+    data = await apiRequest('GET', '/api/teamleader-test-connection');
+  } catch (e) {
+    setTlStatus('var(--red,#dc2626)', 'Fout bij ophalen status');
+    setTlActions(`<button class="btn btn-sm" style="background:#059669;color:#fff" onclick="tlConnect(this)">Verbind met Teamleader</button>`);
+    return;
+  }
+
+  const actionsConnected =
+    `<button class="btn btn-sm" onclick="tlTest()">Test connection</button>` +
+    `<button class="btn btn-sm" onclick="tlReconnect(this)">Herverbind</button>` +
+    `<button class="btn btn-sm" style="background:var(--red,#dc2626);color:#fff" onclick="tlDisconnect()">Verbreek verbinding</button>`;
+  const actionConnect =
+    `<button class="btn btn-sm" style="background:#059669;color:#fff" onclick="tlConnect(this)">Verbind met Teamleader</button>`;
+
+  if (data && data.connected) {
+    const email = (data.user_info && (data.user_info.email || data.user_info.account_email)) || 'onbekend';
+    const expired = data.expires_at && (new Date(data.expires_at).getTime() - Date.now() <= 0);
+    if (expired) {
+      setTlStatus('var(--orange,#f59e0b)', 'Token verlopen, herverbind');
+    } else {
+      const left = data.expires_at ? ` · ${tlHoursLeftLabel(data.expires_at)}` : '';
+      setTlStatus('var(--green,#059669)', `Verbonden als ${esc(email)}${left}`);
+    }
+    setTlActions(actionsConnected);
+  } else if (data && data.reason === 'no_token') {
+    setTlStatus('var(--red,#dc2626)', 'Niet verbonden');
+    setTlActions(actionConnect);
+  } else {
+    setTlStatus('var(--red,#dc2626)', 'Fout bij ophalen status');
+    setTlActions(actionConnect);
+  }
+}
+
+async function tlConnect(btn) {
+  if (btn) { btn.disabled = true; btn.textContent = 'Doorsturen…'; }
+  try {
+    const data = await apiRequest('GET', '/api/teamleader-oauth-init');
+    if (data && data.oauth_url) { window.location = data.oauth_url; return; }
+    throw new Error(data && data.error ? data.error : 'Geen oauth_url ontvangen');
+  } catch (e) {
+    window.AgentShared?.showToast('Verbinden mislukt: ' + e.message, 'error');
+    if (btn) { btn.disabled = false; btn.textContent = 'Verbind met Teamleader'; }
+  }
+}
+
+async function tlTest() {
+  try {
+    const data = await apiRequest('GET', '/api/teamleader-test-connection');
+    if (data && data.connected) {
+      const email = (data.user_info && (data.user_info.email || data.user_info.account_email)) || 'onbekend';
+      window.AgentShared?.showToast('TL verbinding actief, user: ' + email, 'success');
+    } else {
+      window.AgentShared?.showToast('TL niet verbonden: ' + (data.reason || 'onbekend'), 'error');
+    }
+    loadTlStatus();
+  } catch (e) {
+    window.AgentShared?.showToast('Test mislukt: ' + e.message, 'error');
+  }
+}
+
+function tlReconnect(btn) {
+  if (!confirm('Bestaande verbinding wordt overschreven. Doorgaan?')) return;
+  tlConnect(btn);
+}
+
+async function tlDisconnect() {
+  if (!confirm('Verbinding met TL verbreken? Wizard kan deals dan alleen lokaal opslaan.')) return;
+  try {
+    const data = await apiRequest('DELETE', '/api/teamleader-disconnect');
+    if (data && data.success) {
+      window.AgentShared?.showToast('Teamleader-verbinding verbroken', 'success');
+    } else {
+      window.AgentShared?.showToast('Verbreken mislukt: ' + (data.error || 'onbekend'), 'error');
+    }
+    loadTlStatus();
+  } catch (e) {
+    window.AgentShared?.showToast('Verbreken mislukt: ' + e.message, 'error');
+  }
+}
+
+function showAdminBanner(kind, text, autoMs) {
+  const mount = document.getElementById('adminBanner');
+  if (!mount) return;
+  const bg = kind === 'success' ? 'rgba(5,150,105,0.12)' : 'rgba(220,38,38,0.12)';
+  const fg = kind === 'success' ? '#059669' : '#b91c1c';
+  const icon = kind === 'success' ? 'ti-circle-check' : 'ti-alert-circle';
+  mount.innerHTML =
+    `<div style="display:flex;align-items:center;gap:10px;background:${bg};color:${fg};border:1px solid ${fg}33;border-radius:8px;padding:10px 14px;margin-bottom:16px;font-size:13px;font-weight:600">` +
+    `<i class="ti ${icon}"></i><span style="flex:1">${esc(text)}</span>` +
+    `<button onclick="document.getElementById('adminBanner').innerHTML=''" style="background:none;border:none;color:inherit;cursor:pointer;font-size:16px;line-height:1">&times;</button></div>`;
+  if (autoMs) setTimeout(() => { const m = document.getElementById('adminBanner'); if (m) m.innerHTML = ''; }, autoMs);
+}
+
+function handleTlReturnBanner() {
+  const params = new URLSearchParams(location.search);
+  if (params.get('tl_connected') === '1') {
+    showAdminBanner('success', 'Teamleader succesvol verbonden!', 5000);
+    switchAdminTab('integraties');
+  } else if (params.get('tl_error')) {
+    const code = params.get('tl_error');
+    const map = {
+      invalid_state: 'Beveiligings-state ongeldig of verlopen, probeer opnieuw',
+      token_exchange_failed: 'TL token-uitwisseling mislukt, controleer OAuth-app instellingen',
+      missing_code_or_state: 'Geen code/state ontvangen van Teamleader',
+    };
+    showAdminBanner('error', map[code] || ('Teamleader-fout: ' + code), 10000);
+    switchAdminTab('integraties');
+  } else {
+    return;
+  }
+  // Schoon de query-params op zodat refresh de banner niet herhaalt.
+  history.replaceState(null, '', location.pathname);
 }
 
 async function loadUsers() {
