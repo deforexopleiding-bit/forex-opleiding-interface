@@ -34,12 +34,13 @@ export async function getOrCreateContact(customer) {
 // Maakt een TL-deal (opportunity) aan voor een contact. Returnt tl_deal_id.
 // Quotations vereisen een deal_id, dus zowel offerte- als subscription-flow
 // hangen onder een TL-deal.
-export async function createDeal(deal, tlContactId) {
+export async function createDeal(deal, tlContactId, departmentId) {
   const dealBody = {
     lead: { customer: { type: 'contact', id: tlContactId } },
     title: `Deal ${String(deal.id).slice(0, 8)}`,
     estimated_value: deal.total_amount ? { amount: Number(deal.total_amount), currency: 'EUR' } : undefined,
   };
+  if (departmentId) dealBody.department_id = departmentId;
   const dr = await tlFetch('/deals.create', { method: 'POST', body: JSON.stringify(dealBody) });
   if (!dr.ok) {
     const txt = await dr.text();
