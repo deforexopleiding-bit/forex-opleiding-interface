@@ -10,7 +10,7 @@
 // TAX_RATE_21 = c21432be-3447-0c1c-824c-0f0e7ea9c381
 // TAX_RATE_6 = cfa50e79-496a-06cc-a944-ba1d9a70bbb6
 
-import { tlFetch, getActiveToken } from './_lib/teamleader-token.js';
+import { tlFetch, getActiveToken } from './_lib/teamleader-token.js';h
 import { supabaseAdmin } from './supabase.js';
 import { createUserClient } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
@@ -113,7 +113,7 @@ export async function pushDealToTl(dealId) {
                                                                                               amount: Math.round(unitPriceExcl * 100) / 100,
                                                                                               tax: 'excluding',
                                                                           },
-                                                                          tax_rate_id: taxRateId,
+                                                                          tax: { type: 'taxRate', id: taxRateId },
                                                         }],
                                         }],
                                         invoice_generation: { action: 'book' },
