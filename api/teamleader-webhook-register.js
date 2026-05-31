@@ -45,12 +45,18 @@ export default async function handler(req, res) {
         throw new Error(`TL webhooks.register HTTP ${r.status}: ${txt.slice(0, 200)}`);
       }
 
-      // TL geeft geen webhook-id terug; we tracken per event_type een rij.
+      // Response-shape kan variëren; parse defensief. (Vaak 204/leeg → geen id.)
+      let tlData = {};
+      try { tlData = await r.json(); } catch { tlData = {}; }
+      console.log('[webhook-register] TL response:', JSON.stringify(tlData));
+      const tlWebhookId = tlData?.data?.id || tlData?.id || null;
+
+      // We tracken per event_type een rij.
       for (const ev of EVENT_TYPES) {
         await supabaseAdmin.from('teamleader_webhooks')
           .delete().eq('event_type', ev).eq('url', WEBHOOK_URL);
         await supabaseAdmin.from('teamleader_webhooks').insert({
-          event_type: ev, url: WEBHOOK_URL, active: true, registered_at: new Date().toISOString(),
+          tl_webhook_id: tlWebhookId, event_type: ev, url: WEBHOOK_URL, active: true, registered_at: new Date().toISOString(),
         });
       }
       const { data } = await supabaseAdmin.from('teamleader_webhooks').select('*');

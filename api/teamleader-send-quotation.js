@@ -30,12 +30,18 @@ export default async function handler(req, res) {
     if (!tok) return res.status(503).json({ error: 'Geen TL-token actief' });
 
     const { data: deal } = await supabaseAdmin.from('deals')
-      .select('id, tl_quotation_id, tl_quotation_status, tl_quotation_sent_at').eq('id', deal_id).maybeSingle();
+      .select('id, customer_id, tl_quotation_id, tl_quotation_status, tl_quotation_sent_at').eq('id', deal_id).maybeSingle();
     if (!deal) return res.status(404).json({ error: 'Deal niet gevonden' });
     if (!deal.tl_quotation_id) return res.status(409).json({ error: 'Deal heeft nog geen TL-offerte (eerst pushen)' });
     if (!['draft', 'sent'].includes(deal.tl_quotation_status)) {
       return res.status(409).json({ error: `Offerte-status '${deal.tl_quotation_status}' kan niet (her)verstuurd worden` });
     }
+
+    // Ontvanger-email (verplicht voor quotations.send).
+    const { data: customer } = await supabaseAdmin.from('customers')
+      .select('email').eq('id', deal.customer_id).maybeSingle();
+    const recipientEmail = customer?.email;
+    if (!recipientEmail) return res.status(409).json({ error: 'Klant heeft geen e-mailadres — offerte kan niet verstuurd worden' });
 
     // Default template uit settings indien geen meegegeven.
     let templateId = email_template_id || null;
@@ -45,8 +51,11 @@ export default async function handler(req, res) {
       templateId = setting?.value || null;
     }
 
-    // quotations.send — body minimaal { id }; template-veld is best-effort.
-    const sendBody = { id: deal.tl_quotation_id };
+    // quotations.send verwacht arrays: quotations[] + recipients[] (verplicht).
+    const sendBody = {
+      quotations: [{ type: 'quotation', id: deal.tl_quotation_id }],
+      recipients: [{ email: recipientEmail }],
+    };
     if (templateId) sendBody.mail_template_id = templateId;
     const r = await tlFetch('/quotations.send', { method: 'POST', body: JSON.stringify(sendBody) });
     if (!r.ok) {
