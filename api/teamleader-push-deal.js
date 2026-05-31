@@ -1,36 +1,28 @@
 // api/teamleader-push-deal.js
 // POST { deal_id } → push deal + contact + subscriptions naar TL.
 // Update deal.tl_deal_id / tl_pushed_at / tl_push_status / tl_push_error.
+//
+// Kern-logica zit in pushDealToTl(dealId) — exporteerbaar zodat
+// sales-deal-create.js die direct kan aanroepen (geen interne HTTP-roundtrip).
 
 import { tlFetch, getActiveToken } from './_lib/teamleader-token.js';
 import { supabaseAdmin } from './supabase.js';
 import { createUserClient } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
 
-export default async function handler(req, res) {
-  res.setHeader('Cache-Control', 'no-store');
-  res.setHeader('Content-Type', 'application/json');
-  if (req.method !== 'POST') return res.status(405).json({ error: 'POST only' });
-
-  const supabase = createUserClient(req);
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return res.status(401).json({ error: 'Niet geauthenticeerd' });
-  if (!(await requirePermission(req, 'finance.subscription.push'))) {
-    return res.status(403).json({ error: 'Geen rechten (finance.subscription.push)' });
-  }
-
-  const { deal_id } = req.body || {};
-  if (!deal_id) return res.status(400).json({ error: 'deal_id verplicht' });
-
-  const tok = await getActiveToken();
-  if (!tok) return res.status(503).json({ error: 'Geen TL-token actief', tl_push_status: 'failed' });
-
+// Pure push-logica, GEEN req/res, GEEN auth-check (caller is verantwoordelijk).
+// Returnt { success, tl_contact_id?, tl_deal_id?, subscriptions_count?, error? }.
+// Update de deals-rij zelf op 'synced' (success) of 'failed' (fout) — nooit stuck.
+export async function pushDealToTl(dealId) {
   try {
+    const tok = await getActiveToken();
+    if (!tok) throw new Error('Geen TL-token actief');
+
     // 1. Load deal + customer + subscriptions.
-    const { data: deal, error: dErr } = await supabaseAdmin.from('deals').select('*').eq('id', deal_id).maybeSingle();
+    const { data: deal, error: dErr } = await supabaseAdmin.from('deals').select('*').eq('id', dealId).maybeSingle();
     if (dErr || !deal) throw new Error('Deal niet gevonden');
     const { data: customer } = await supabaseAdmin.from('customers').select('*').eq('id', deal.customer_id).maybeSingle();
-    const { data: subs } = await supabaseAdmin.from('subscriptions').select('*').eq('deal_id', deal_id);
+    const { data: subs } = await supabaseAdmin.from('subscriptions').select('*').eq('deal_id', dealId);
 
     // 2. POST /contacts.add (TL minimal contact) — skip indien customer.tl_contact_id reeds gezet.
     let tlContactId = customer?.tl_contact_id || null;
@@ -74,24 +66,43 @@ export default async function handler(req, res) {
     console.log(`[tl-push] ${subs?.length || 0} subscriptions: deferred push (Fase 3)`);
 
     await supabaseAdmin.from('deals').update({
-      tl_deal_id:       tlDealId,
-      tl_pushed_at:     new Date().toISOString(),
-      tl_push_status:   'synced',
-      tl_push_error:    null,
-    }).eq('id', deal_id);
+      tl_deal_id:     tlDealId,
+      tl_pushed_at:   new Date().toISOString(),
+      tl_push_status: 'synced',
+      tl_push_error:  null,
+    }).eq('id', dealId);
 
-    return res.status(200).json({
-      ok:               true,
-      tl_contact_id:    tlContactId,
-      tl_deal_id:       tlDealId,
+    return {
+      success:             true,
+      tl_contact_id:       tlContactId,
+      tl_deal_id:          tlDealId,
       subscriptions_count: subs?.length || 0,
-      tl_push_status:   'synced',
-    });
+    };
   } catch (e) {
     await supabaseAdmin.from('deals').update({
       tl_push_status: 'failed',
       tl_push_error:  e.message.slice(0, 500),
-    }).eq('id', deal_id);
-    return res.status(500).json({ error: e.message, tl_push_status: 'failed' });
+    }).eq('id', dealId);
+    return { success: false, error: e.message };
   }
+}
+
+// Default handler voor handmatige retry (admin / deal-detail).
+export default async function handler(req, res) {
+  res.setHeader('Cache-Control', 'no-store');
+  res.setHeader('Content-Type', 'application/json');
+  if (req.method !== 'POST') return res.status(405).json({ error: 'POST only' });
+
+  const supabase = createUserClient(req);
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return res.status(401).json({ error: 'Niet geauthenticeerd' });
+  if (!(await requirePermission(req, 'finance.subscription.push'))) {
+    return res.status(403).json({ error: 'Geen rechten (finance.subscription.push)' });
+  }
+
+  const { deal_id } = req.body || {};
+  if (!deal_id) return res.status(400).json({ error: 'deal_id verplicht' });
+
+  const result = await pushDealToTl(deal_id);
+  return res.status(result.success ? 200 : 500).json(result);
 }

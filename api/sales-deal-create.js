@@ -4,6 +4,8 @@
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
+import { getActiveToken } from './_lib/teamleader-token.js';
+import { pushDealToTl } from './teamleader-push-deal.js';
 
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
@@ -86,40 +88,36 @@ export default async function handler(req, res) {
       if (sub) subscriptionIds.push(sub.id);
     }
 
-    // 5. Optionele TL-push (fire-and-forget door later separate endpoint te triggeren).
-    let tlResult = { tl_push_status: 'not_pushed' };
-    if (sync_to_tl) {
-      // Mark als pending; daadwerkelijke push gebeurt door teamleader-push-deal.js
-      await supabaseAdmin.from('deals').update({ tl_push_status: 'pending' }).eq('id', dealId);
-      tlResult.tl_push_status = 'pending';
-      // Backend doet hier geen wait; frontend kan polling-of-trigger doen.
-      // Voor sync ervaring: roep direct intern push aan.
+    // 5. Optionele TL-push — synchroon via directe module-call (geen interne
+    //    HTTP-roundtrip; die forwardde een lege auth-header → 401).
+    let tlResult = { success: false };
+    const tokenExists = sync_to_tl ? !!(await getActiveToken()) : false;
+    if (sync_to_tl && tokenExists) {
       try {
-        const baseUrl = process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3000';
-        const pushRes = await fetch(`${baseUrl}/api/teamleader-push-deal`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': req.headers.authorization || '',
-          },
-          body: JSON.stringify({ deal_id: dealId }),
-        });
-        if (pushRes.ok) {
-          tlResult = await pushRes.json();
-        } else {
-          const err = await pushRes.json().catch(() => ({}));
-          tlResult = { tl_push_status: 'failed', tl_error: err.error || 'TL-push HTTP ' + pushRes.status };
-        }
-      } catch (e) {
-        tlResult = { tl_push_status: 'failed', tl_error: e.message };
+        tlResult = await pushDealToTl(dealId);
+      } catch (err) {
+        console.error('[sales-deal-create] TL push exception:', err.message);
+        tlResult = { success: false, error: err.message };
+        // pushDealToTl update DB zelf bij fout, maar extra safety bij unexpected throw.
+        await supabaseAdmin.from('deals').update({
+          tl_push_status: 'failed',
+          tl_push_error:  err.message.slice(0, 500),
+        }).eq('id', dealId);
       }
     }
 
+    const tlPushStatus = tlResult.success
+      ? 'synced'
+      : (sync_to_tl && tokenExists ? 'failed' : 'not_pushed');
+
     return res.status(200).json({
-      customer_id:        customerId,
-      deal_id:            dealId,
-      subscription_ids:   subscriptionIds,
-      ...tlResult,
+      customer_id:      customerId,
+      deal_id:          dealId,
+      subscription_ids: subscriptionIds,
+      tl_push_status:   tlPushStatus,
+      tl_contact_id:    tlResult.tl_contact_id || null,
+      tl_deal_id:       tlResult.tl_deal_id || null,
+      tl_error:         tlResult.error || null,
     });
   } catch (err) {
     console.error('[sales-deal-create]', err.message);
