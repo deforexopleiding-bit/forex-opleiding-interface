@@ -179,6 +179,34 @@
               </div>
             </div>
           </div>
+
+          <div class="integration-card" id="card-webhooks" style="border:1px solid var(--border);border-radius:10px;padding:18px;margin-top:12px">
+            <div style="display:flex;align-items:flex-start;gap:14px">
+              <div style="font-size:26px;color:var(--text-dim);line-height:1"><i class="ti ti-webhook"></i></div>
+              <div style="flex:1;min-width:0">
+                <div style="font-size:15px;font-weight:700">Webhooks</div>
+                <div style="font-size:12.5px;color:var(--text-dim);margin-bottom:6px">Realtime offerte-status via TL deal-pipeline transitie naar 'won'</div>
+                <div style="font-size:11px;color:var(--text-faint);margin-bottom:10px">TL kent geen losse offerte-events; we monitoren <strong>deal.won</strong> + <strong>deal.moved</strong>.</div>
+                <div id="webhookStatus" style="font-size:13px;margin-bottom:12px">Status laden&hellip;</div>
+                <div id="webhookActions" style="display:flex;gap:8px;flex-wrap:wrap"></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="integration-card" id="card-email-template" style="border:1px solid var(--border);border-radius:10px;padding:18px;margin-top:12px">
+            <div style="display:flex;align-items:flex-start;gap:14px">
+              <div style="font-size:26px;color:var(--text-dim);line-height:1"><i class="ti ti-mail"></i></div>
+              <div style="flex:1;min-width:0">
+                <div style="font-size:15px;font-weight:700">Offerte e-mail template</div>
+                <div style="font-size:12.5px;color:var(--text-dim);margin-bottom:10px">Standaard-template waarmee offertes verstuurd worden</div>
+                <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+                  <select id="defaultTemplateSelect" class="form-input" style="max-width:280px"><option value="">Standaard template</option></select>
+                  <button class="btn btn-sm" id="saveTemplateBtn" onclick="saveTemplateSetting()">Opslaan</button>
+                </div>
+                <div id="templateHint" style="font-size:11px;color:var(--text-faint);margin-top:6px"></div>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -480,7 +508,7 @@ function switchAdminTab(name) {
   const inviteBtn = document.querySelector('.page-header .btn-primary');
   if (inviteBtn) inviteBtn.style.display = name === 'gebruikers' ? '' : 'none';
   if (name === 'rechten' && !rbacLoaded) loadPermissionsMatrix();
-  if (name === 'integraties') loadTlStatus();
+  if (name === 'integraties') { loadTlStatus(); loadWebhooks(); loadTemplateSetting(); }
 }
 
 async function loadPermissionsMatrix() {
@@ -759,6 +787,80 @@ async function tlDisconnect() {
   } catch (e) {
     window.AgentShared?.showToast('Verbreken mislukt: ' + e.message, 'error');
   }
+}
+
+// ── Webhooks ──
+async function loadWebhooks() {
+  const statusEl = document.getElementById('webhookStatus');
+  const actionsEl = document.getElementById('webhookActions');
+  if (!statusEl) return;
+  statusEl.textContent = 'Status laden…';
+  actionsEl.innerHTML = '';
+  let data;
+  try { data = await apiRequest('GET', '/api/teamleader-webhook-register'); }
+  catch { statusEl.textContent = 'Status ophalen mislukt'; return; }
+  const hooks = (data && data.webhooks) || [];
+  if (hooks.length) {
+    statusEl.innerHTML = '<span style="color:var(--green,#059669);font-weight:600">● Geregistreerd</span><div style="margin-top:6px">' +
+      hooks.map(h => `<div style="font-size:12px;color:var(--text-dim);display:flex;gap:8px;align-items:center">
+        <code style="background:var(--bg-elev-2);padding:1px 5px;border-radius:4px">${esc(h.event_type)}</code>
+        <button class="btn btn-sm btn-danger" onclick="deleteWebhook('${esc(h.event_type)}')">Verwijder</button></div>`).join('') + '</div>';
+    actionsEl.innerHTML = `<button class="btn btn-sm" onclick="registerWebhooks()">Opnieuw registreren</button>`;
+  } else {
+    statusEl.innerHTML = '<span style="color:var(--text-faint);font-weight:600">○ Niet geregistreerd</span>';
+    actionsEl.innerHTML = `<button class="btn btn-sm" style="background:#059669;color:#fff" onclick="registerWebhooks()">Registreer webhooks</button>`;
+  }
+}
+async function registerWebhooks() {
+  try {
+    const data = await apiRequest('POST', '/api/teamleader-webhook-register');
+    if (data && data.success) window.AgentShared?.showToast('Webhooks geregistreerd (deal.won + deal.moved)', 'success');
+    else window.AgentShared?.showToast('Registreren mislukt: ' + (data.error || 'onbekend'), 'error');
+    loadWebhooks();
+  } catch (e) { window.AgentShared?.showToast('Registreren mislukt: ' + e.message, 'error'); }
+}
+async function deleteWebhook(eventType) {
+  if (!confirm(`Webhook '${eventType}' verwijderen?`)) return;
+  try {
+    const data = await apiRequest('DELETE', '/api/teamleader-webhook-register?event_type=' + encodeURIComponent(eventType));
+    if (data && data.success) window.AgentShared?.showToast('Webhook verwijderd', 'success');
+    else window.AgentShared?.showToast('Verwijderen mislukt: ' + (data.error || 'onbekend'), 'error');
+    loadWebhooks();
+  } catch (e) { window.AgentShared?.showToast('Verwijderen mislukt: ' + e.message, 'error'); }
+}
+
+// ── Default email-template setting ──
+async function loadTemplateSetting() {
+  const sel = document.getElementById('defaultTemplateSelect');
+  const hint = document.getElementById('templateHint');
+  if (!sel) return;
+  sel.innerHTML = '<option value="">Standaard template</option>';
+  hint.textContent = 'Laden…';
+  let templates = [];
+  try {
+    const t = await apiRequest('GET', '/api/teamleader-email-templates');
+    templates = (t && t.templates) || [];
+    if (t && t.reason) hint.textContent = 'Templates niet beschikbaar (' + t.reason + ')';
+    else hint.textContent = '';
+  } catch { hint.textContent = 'Templates laden mislukt'; }
+  for (const tpl of templates) {
+    const o = document.createElement('option');
+    o.value = tpl.id; o.textContent = tpl.name + (tpl.language ? ' (' + tpl.language + ')' : '');
+    sel.appendChild(o);
+  }
+  try {
+    const s = await apiRequest('GET', '/api/teamleader-settings');
+    const cur = s?.settings?.default_email_template_id;
+    if (cur) sel.value = cur;
+  } catch { /* geen settings */ }
+}
+async function saveTemplateSetting() {
+  const val = document.getElementById('defaultTemplateSelect').value;
+  try {
+    const data = await apiRequest('PUT', '/api/teamleader-settings', { key: 'default_email_template_id', value: val });
+    if (data && data.success) window.AgentShared?.showToast('Standaard-template opgeslagen', 'success');
+    else window.AgentShared?.showToast('Opslaan mislukt: ' + (data.error || 'onbekend'), 'error');
+  } catch (e) { window.AgentShared?.showToast('Opslaan mislukt: ' + e.message, 'error'); }
 }
 
 function showAdminBanner(kind, text, autoMs) {
