@@ -22,6 +22,19 @@ export async function pushDealToTl(dealId) {
     const { data: deal, error: dErr } = await supabaseAdmin.from('deals').select('*').eq('id', dealId).maybeSingle();
     if (dErr || !deal) throw new Error('Deal niet gevonden');
     const { data: customer } = await supabaseAdmin.from('customers').select('*').eq('id', deal.customer_id).maybeSingle();
+
+    // Idempotency: al-gesyncte deal niet opnieuw pushen (voorkomt duplicate
+    // contact + deal in TL bij handmatige retry).
+    if (deal.tl_push_status === 'synced' && deal.tl_deal_id) {
+      return {
+        success:       true,
+        already_synced: true,
+        tl_contact_id: customer?.tl_contact_id || null,
+        tl_deal_id:    deal.tl_deal_id,
+        message:       'Deal was already synced to Teamleader, skipped duplicate push',
+      };
+    }
+
     const { data: subs } = await supabaseAdmin.from('subscriptions').select('*').eq('deal_id', dealId);
 
     // 2. POST /contacts.add (TL minimal contact) — skip indien customer.tl_contact_id reeds gezet.
