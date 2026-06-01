@@ -78,17 +78,13 @@ export default async function handler(req, res) {
       let tlContactId = null;
       try { tlContactId = await getOrCreateContact(customer); } catch (e) { console.error('[sub-create] contact:', e.message); }
 
-      // billing_cycle-shape is per TL-account/versie niet eenduidig. We proberen
-      // kandidaat-vormen op volgorde tot er één geaccepteerd wordt (een 400 betekent
-      // dat er NIETS is aangemaakt, dus geen dubbele subscription). payment_term is
-      // verplicht → standaard 14 dagen na factuurdatum.
-      const BILLING_CYCLE_CANDIDATES = [
-        { periodicity: { unit: 'monthly', quantity: 1 } },
-        { unit: 'monthly', quantity: 1 },
-        { type: 'monthly' },
-        { periodicity: 'monthly' },
-        'monthly',
-      ];
+      // Definitieve billing_cycle-shape (uit live discovery + TL-docs):
+      //   periodicity.unit = 'month' (NIET 'monthly'); period (NIET quantity).
+      // days_in_advance: factuur X dagen vóór de termijndatum aanmaken (default 7).
+      // payment_term verplicht: 14 dagen na factuurdatum.
+      const DAYS_IN_ADVANCE = Number(process.env.TEAMLEADER_SUB_DAYS_IN_ADVANCE) || 7;
+      const billing_cycle = { periodicity: { unit: 'month', period: 1 }, days_in_advance: DAYS_IN_ADVANCE };
+      // invoice_generation: book_and_send → book fallback (niet elk account kent send).
       const INVOICE_GEN = [{ action: 'book_and_send' }, { action: 'book' }];
 
       for (const row of subRows) {
@@ -99,6 +95,7 @@ export default async function handler(req, res) {
           department_id: departmentId,
           starts_on: row.start_date,
           title: row.description || 'Abonnement',
+          billing_cycle,
           payment_term: { type: 'after_invoice_date', days: 14 },
           grouped_lines: [{ line_items: [{
             quantity: 1, description: row.description || 'Abonnement',
@@ -106,28 +103,26 @@ export default async function handler(req, res) {
             tax_rate_id: taxRateId,
           }] }],
         };
-        if ((Number(row.term_count) || 1) === 1) baseBody.ends_on = row.start_date;
-        else if (row.end_date) baseBody.ends_on = row.end_date;
+        // ends_on uit frontend (start + (term-1) mnd + 2 dagen buffer); ook voor
+        // eenmalige subs (term_count=1 → start + 2 dagen).
+        if (row.end_date) baseBody.ends_on = row.end_date;
 
         let done = false, lastErr = null;
-        for (const billing_cycle of BILLING_CYCLE_CANDIDATES) {
-          for (const invoice_generation of INVOICE_GEN) {
-            try {
-              const r = await tlFetch('/subscriptions.create', {
-                method: 'POST', body: JSON.stringify({ ...baseBody, billing_cycle, invoice_generation }),
-              });
-              if (r.ok) {
-                const d = await r.json();
-                const tlSubId = d.data?.id;
-                if (tlSubId) await supabaseAdmin.from('subscriptions').update({ teamleader_subscription_id: tlSubId }).eq('id', row.id);
-                tlResults.push({ sub_id: row.id, tl_sub_id: tlSubId, success: true, billing_cycle, invoice_generation: invoice_generation.action });
-                done = true; break;
-              }
-              lastErr = `HTTP ${r.status}: ${(await r.text()).slice(0, 150)}`;
-              console.warn('[sub-create] poging mislukt', JSON.stringify(billing_cycle), invoice_generation.action, lastErr);
-            } catch (e) { lastErr = e.message; }
-          }
-          if (done) break;
+        for (const invoice_generation of INVOICE_GEN) {
+          try {
+            const r = await tlFetch('/subscriptions.create', {
+              method: 'POST', body: JSON.stringify({ ...baseBody, invoice_generation }),
+            });
+            if (r.ok) {
+              const d = await r.json();
+              const tlSubId = d.data?.id;
+              if (tlSubId) await supabaseAdmin.from('subscriptions').update({ teamleader_subscription_id: tlSubId }).eq('id', row.id);
+              tlResults.push({ sub_id: row.id, tl_sub_id: tlSubId, success: true, invoice_generation: invoice_generation.action });
+              done = true; break;
+            }
+            lastErr = `HTTP ${r.status}: ${(await r.text()).slice(0, 180)}`;
+            console.warn('[sub-create] poging mislukt', invoice_generation.action, lastErr);
+          } catch (e) { lastErr = e.message; }
         }
         if (!done) tlResults.push({ sub_id: row.id, success: false, error: lastErr || 'onbekend' });
       }
