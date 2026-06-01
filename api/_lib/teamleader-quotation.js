@@ -98,7 +98,7 @@ export async function pushQuotationToTl(dealId) {
     const lineItems = lines.map(l => ({
       quantity:    Number(l.quantity),
       description: l.product_name,
-      unit_price:  { amount: Number(l.unit_price), currency: CURRENCY, tax: 'excluding' },
+      unit_price:  { amount: Number(l.unit_price), currency: CURRENCY, tax: l.price_includes_vat ? 'including' : 'excluding' },
       tax_rate_id: taxRateIdFor(l.vat_percentage),
     }));
     const quotationBody = {

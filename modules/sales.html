@@ -188,6 +188,12 @@
         </div>
         <div class="field"><label>Standaardprijs (€)</label><input id="pmPrice" type="number" step="0.01" min="0" /></div>
       </div>
+      <div class="field"><label>Prijs is</label>
+        <div class="vat-radios">
+          <label><input type="radio" name="priceVat" value="excl" checked> Excl. BTW</label>
+          <label><input type="radio" name="priceVat" value="incl"> Incl. BTW</label>
+        </div>
+      </div>
       <div class="field-row">
         <div class="field"><label>Looptijd (mnd)</label><input id="pmDuration" type="number" min="1" /></div>
         <div class="field"><label>Categorie</label><input id="pmCat" list="catSuggest" placeholder="bv. Cursus" /><datalist id="catSuggest"></datalist></div>
@@ -291,7 +297,7 @@ function renderProducts() {
           <td><strong>${esc(p.name)}</strong></td>
           <td title="${esc(p.description || '')}">${esc((p.description || '').slice(0, 60))}${(p.description || '').length > 60 ? '…' : ''}</td>
           <td><span class="badge vat-${p.vat_percentage}">${p.vat_percentage}%</span></td>
-          <td>${fmtEuro(p.default_price)}</td>
+          <td>${fmtEuro(p.default_price)}<span style="font-size:10px;color:var(--text-faint)"> ${p.price_includes_vat ? 'incl' : 'excl'}</span></td>
           <td>${p.default_duration_months ? p.default_duration_months + ' mnd' : '—'}</td>
           <td>${p.category ? '<span class="badge cat">' + esc(p.category) + '</span>' : '—'}</td>
           <td><span class="mono" title="Vereist voor TL-push">${esc(p.tl_product_id || '—')}</span></td>
@@ -313,6 +319,7 @@ function openProductModal(id = null) {
   document.getElementById('pmName').value = p?.name || '';
   document.getElementById('pmDesc').value = p?.description || '';
   document.querySelectorAll('input[name=vat]').forEach(r => r.checked = Number(r.value) === (p?.vat_percentage ?? 21));
+  document.querySelectorAll('input[name=priceVat]').forEach(r => r.checked = (r.value === 'incl') === !!p?.price_includes_vat);
   document.getElementById('pmPrice').value = p?.default_price ?? '';
   document.getElementById('pmDuration').value = p?.default_duration_months ?? '';
   document.getElementById('pmCat').value = p?.category || '';
@@ -325,6 +332,7 @@ async function saveProduct() {
     name: document.getElementById('pmName').value.trim(),
     description: document.getElementById('pmDesc').value.trim(),
     vat_percentage: Number(document.querySelector('input[name=vat]:checked').value),
+    price_includes_vat: document.querySelector('input[name=priceVat]:checked').value === 'incl',
     default_price: document.getElementById('pmPrice').value ? Number(document.getElementById('pmPrice').value) : null,
     default_duration_months: document.getElementById('pmDuration').value ? Number(document.getElementById('pmDuration').value) : null,
     category: document.getElementById('pmCat').value.trim() || null,
@@ -459,14 +467,16 @@ function renderQuotations() {
   document.getElementById('quotationsList').innerHTML = `
     <table>
       <thead><tr>
-        <th>Klant</th><th>Aangemaakt</th><th>Bedrag</th><th>Status</th><th>Verzonden</th><th></th>
+        <th>Klant</th><th>Aangemaakt</th><th>Bedrag</th><th>Bedrag incl. BTW</th><th>Status</th><th>Verzonden</th><th></th>
       </tr></thead>
       <tbody>${state.quotations.map(q => {
         const eur = q.total_amount != null ? '€' + Number(q.total_amount).toLocaleString('nl-NL', { minimumFractionDigits: 2 }) : '—';
+        const eurIncl = q.total_amount_incl != null ? '€' + Number(q.total_amount_incl).toLocaleString('nl-NL', { minimumFractionDigits: 2 }) : '—';
         return `<tr>
           <td><a href="/modules/klanten.html?id=${esc(q.customer_id)}" style="color:var(--text);font-weight:600;text-decoration:none">${esc(q.customer_name)}</a></td>
           <td>${fmtRel(q.created_at)}</td>
           <td>${eur}</td>
+          <td>${eurIncl}</td>
           <td>${quotationBadge(q.tl_quotation_status)}</td>
           <td>${q.sent_at ? fmtRel(q.sent_at) : '—'}</td>
           <td style="white-space:nowrap">${quotationActions(q)}</td>
@@ -474,19 +484,51 @@ function renderQuotations() {
       }).join('')}</tbody>
     </table>`;
   document.querySelectorAll('[data-send]').forEach(b => b.addEventListener('click', () => openSendModal(b.dataset.send)));
+  document.querySelectorAll('[data-push]').forEach(b => b.addEventListener('click', () => retryPush(b.dataset.push)));
+  document.querySelectorAll('[data-cancel]').forEach(b => b.addEventListener('click', () => cancelQuotation(b.dataset.cancel)));
 }
 function quotationActions(q) {
   const tlLink = q.tl_quotation_id ? `<a class="action-btn" href="https://focus.teamleader.eu/quotation_detail.php?id=${esc(q.tl_quotation_id)}" target="_blank" title="Open in Teamleader">↗ TL</a>` : '';
+  const cancelBtn = `<button class="btn btn-sm btn-danger" data-cancel="${esc(q.deal_id)}">Annuleren</button>`;
   if (q.tl_quotation_status === 'accepted') {
     return `<button class="btn btn-sm btn-success" title="Subscription invoeren (Wizard 2 — binnenkort)" onclick="alert('Subscription invoeren komt in Wizard 2.')">Subscription invoeren</button> ${tlLink}`;
   }
   if (q.tl_quotation_status === 'sent') {
-    return `<button class="btn btn-sm btn-ghost" data-send="${esc(q.deal_id)}">Opnieuw versturen</button> ${tlLink}`;
+    return `<button class="btn btn-sm btn-ghost" data-send="${esc(q.deal_id)}">Opnieuw versturen</button> ${tlLink} ${cancelBtn}`;
+  }
+  if (q.tl_quotation_status === 'failed') {
+    return `<button class="btn btn-sm btn-ghost" data-push="${esc(q.deal_id)}">Retry push</button> ${cancelBtn}`;
   }
   if (q.tl_quotation_status === 'draft' && q.tl_quotation_id) {
-    return `<button class="btn btn-sm btn-success" data-send="${esc(q.deal_id)}">Versturen</button> ${tlLink}`;
+    return `<button class="btn btn-sm btn-success" data-send="${esc(q.deal_id)}">Versturen</button> ${tlLink} ${cancelBtn}`;
+  }
+  if (q.tl_quotation_status === 'draft' && !q.tl_quotation_id) {
+    return `<button class="btn btn-sm" data-push="${esc(q.deal_id)}">Push naar TL</button> ${cancelBtn}`;
   }
   return tlLink || '—';
+}
+async function retryPush(dealId) {
+  try {
+    const res = await window.AgentShared.apiFetch('/api/sales-deal-retry-push', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ deal_id: dealId }),
+    });
+    const data = await res.json();
+    if (!res.ok || data.success === false) throw new Error(data.error || 'HTTP ' + res.status);
+    toast('Offerte naar Teamleader gepusht', 'success');
+    loadQuotations();
+  } catch (e) { toast('Push mislukt: ' + e.message, 'error'); }
+}
+async function cancelQuotation(dealId) {
+  if (!confirm('Offerte annuleren? Klant kan deze niet meer ondertekenen.')) return;
+  try {
+    const res = await window.AgentShared.apiFetch('/api/teamleader-cancel-quotation', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ deal_id: dealId }),
+    });
+    const data = await res.json();
+    if (!res.ok || data.success === false) throw new Error(data.error || 'HTTP ' + res.status);
+    toast('Offerte geannuleerd', 'success');
+    loadQuotations();
+  } catch (e) { toast('Annuleren mislukt: ' + e.message, 'error'); }
 }
 
 async function openSendModal(dealId) {
