@@ -171,7 +171,7 @@
     </div>
     <div class="row3">
       <div class="field"><label>Straat <span class="req">*</span></label><input id="f_street" /></div>
-      <div class="field"><label>Nr</label><input id="f_number" /></div>
+      <div class="field"><label>Huisnr <span class="req">*</span></label><input id="f_number" /></div>
       <div class="field"><label>Postcode <span class="req">*</span></label><input id="f_postal" placeholder="1234 AB" /></div>
     </div>
     <div class="row2">
@@ -212,15 +212,15 @@
       <div class="hint">Kies een traject-variant om de producten automatisch in te vullen. Je kunt daarna nog aanpassen.</div>
       <label style="margin-top:10px">Type verkoop (BTW-regeling)</label>
       <select id="saleType" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font:inherit;font-size:13px">
-        <option value="domestic">Binnenlands NL</option>
-        <option value="intracommunautair">Intracommunautair (EU)</option>
+        <option value="domestic">Normaal NL/BE</option>
+        <option value="intracommunautair">Zakelijk België - Intracommunautair</option>
         <option value="outside_eu">Buiten EU</option>
       </select>
       <div class="hint" id="saleTypeHint"></div>
     </div>
     <div class="row2">
       <div class="field"><label>Offerte-referentie</label><input id="quoteRef" placeholder="bv. Q2026-0123" /><div class="hint">TL offerte-nummer indien al opgesteld</div></div>
-      <div class="field"><label>Lead-bron <span class="req">*</span></label><select id="leadSource"><option value="">Selecteer een bron…</option></select></div>
+      <div class="field"><label>Lead-bron</label><select id="leadSource"><option value="">Binnenkort beschikbaar</option></select></div>
     </div>
     <div class="row2">
       <div class="field"><label>Datum offerte <span class="req">*</span></label><input id="startDate" type="date" /></div>
@@ -645,7 +645,7 @@ function showResumeModal(draft) {
 
 function populateLeadSources() {
   const sel = document.getElementById('leadSource');
-  sel.innerHTML = '<option value="">Selecteer een bron…</option>' + state.leadSources.map(s => `<option value="${esc(s.id)}">${esc(s.name)}</option>`).join('');
+  sel.innerHTML = '<option value="">Binnenkort beschikbaar</option>' + state.leadSources.map(s => `<option value="${esc(s.id)}">${esc(s.name)}</option>`).join('');
   sel.value = state.wizard.source_lead_id || '';
 }
 function trajectVariantLabel(variantId) {
@@ -1052,7 +1052,7 @@ function renderReview() {
         Start-datum: ${fmtDateLong(w.start_date)}<br>
         Looptijd: ${w.duration_months} mnd<br>
         ${w.traject_variant_id ? `Traject: ${esc(trajectVariantLabel(w.traject_variant_id) || '—')}<br>` : ''}
-        Type verkoop: ${w.sale_type === 'intracommunautair' ? 'Intracommunautair (EU)' : w.sale_type === 'outside_eu' ? 'Buiten EU' : 'Binnenlands NL'}<br>
+        Type verkoop: ${w.sale_type === 'intracommunautair' ? 'Zakelijk België - Intracommunautair' : w.sale_type === 'outside_eu' ? 'Buiten EU' : 'Normaal NL/BE'}<br>
         <strong>Producten (${w.products.length}):</strong>
         <table style="width:100%;margin-top:6px;font-size:11.5px">
           ${w.products.map(p => `<tr><td>${esc(p.product_name)}</td><td>${p.quantity}×</td><td>${fmtEuro(p.price_per_unit)} ${p.price_includes_vat ? 'incl' : 'excl'}</td><td style="text-align:right">${fmtEuro(lineAmounts(p).incl)}</td></tr>`).join('')}
@@ -1180,6 +1180,7 @@ function updateNextEnabled() {
     if (!w.email) missing.push('E-mail');
     if (!w.phone) missing.push('Telefoon');
     if (!w.address_street) missing.push('Straat');
+    if (!w.address_number) missing.push('Huisnr');
     if (!w.address_postal) missing.push('Postcode');
     if (!w.address_city) missing.push('Plaats');
     if (!w.avg_ok) missing.push('Privacy-bevestiging');
@@ -1188,7 +1189,7 @@ function updateNextEnabled() {
     if (sum) sum.innerHTML = missing.length ? `Ontbrekende velden: <strong>${missing.join(', ')}</strong>` : (dupOk ? '' : 'Doe eerst de duplicate-check.');
     valid = missing.length === 0 && dupOk;
   } else if (state.step === 3) {
-    valid = w.source_lead_id && w.start_date && Number(w.duration_months) >= 1 && w.products.length > 0 && w.products.every(p => p.quantity >= 1 && p.price_per_unit > 0);
+    valid = w.start_date && Number(w.duration_months) >= 1 && w.products.length > 0 && w.products.every(p => p.quantity >= 1 && p.price_per_unit > 0);
   } else {
     valid = true; // stap 4 = bevestiging
   }

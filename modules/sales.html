@@ -506,32 +506,30 @@ function renderQuotations() {
   document.getElementById('quotationsList').innerHTML = `
     <table>
       <thead><tr>
-        <th>Klant</th><th>Aangemaakt</th><th>Bedrag</th><th>Bedrag incl. BTW</th><th>Status</th><th>Verzonden</th><th></th>
+        <th>Klant</th><th>Aangemaakt</th><th>Type traject</th><th>Bedrag incl. BTW</th><th>Status</th><th></th>
       </tr></thead>
       <tbody>${state.quotations.map(q => {
-        const eur = q.total_amount != null ? '€' + Number(q.total_amount).toLocaleString('nl-NL', { minimumFractionDigits: 2 }) : '—';
         const eurIncl = q.total_amount_incl != null ? '€' + Number(q.total_amount_incl).toLocaleString('nl-NL', { minimumFractionDigits: 2 }) : '—';
         return `<tr>
           <td><a href="/modules/klanten.html?id=${esc(q.customer_id)}" style="color:var(--text);font-weight:600;text-decoration:none">${esc(q.customer_name)}</a></td>
           <td>${fmtRel(q.created_at)}</td>
-          <td>${eur}</td>
+          <td>${esc(q.traject_label || '—')}</td>
           <td>${eurIncl}</td>
           <td>${quotationBadge(q.tl_quotation_status)}</td>
-          <td>${q.sent_at ? fmtRel(q.sent_at) : '—'}</td>
           <td style="white-space:nowrap">${quotationActions(q)}</td>
         </tr>`;
       }).join('')}</tbody>
     </table>`;
   document.querySelectorAll('[data-send]').forEach(b => b.addEventListener('click', () => openSendModal(b.dataset.send)));
   document.querySelectorAll('[data-push]').forEach(b => b.addEventListener('click', () => retryPush(b.dataset.push)));
-  document.querySelectorAll('[data-cancel]').forEach(b => b.addEventListener('click', () => cancelQuotation(b.dataset.cancel)));
+  document.querySelectorAll('[data-delete]').forEach(b => b.addEventListener('click', () => deleteQuotation(b.dataset.delete)));
 }
 function quotationActions(q) {
   const tlLink = q.tl_quotation_id ? `<a class="action-btn" href="https://focus.teamleader.eu/quotations/${esc(q.tl_quotation_id)}" target="_blank" title="Open in Teamleader">↗ TL</a>` : '';
   const detail = `<a class="action-btn" href="/modules/offerte-detail.html?id=${esc(q.deal_id)}" title="Offerte-detail">👁</a>`;
   const editBtn = `<button class="btn btn-sm btn-ghost" onclick="editQuotation('${esc(q.deal_id)}', false)">Bewerken</button>`;
   const editBtnConfirm = `<button class="btn btn-sm btn-ghost" onclick="editQuotation('${esc(q.deal_id)}', true)">Bewerken</button>`;
-  const cancelBtn = `<button class="btn btn-sm btn-danger" data-cancel="${esc(q.deal_id)}">Annuleren</button>`;
+  const cancelBtn = `<button class="btn btn-sm btn-danger" data-delete="${esc(q.deal_id)}">Verwijderen</button>`;
   if (q.tl_quotation_status === 'accepted' || q.tl_quotation_status === 'signed') {
     return `${detail} <button class="btn btn-sm btn-success" title="Subscription invoeren (Wizard 2 — binnenkort)" onclick="alert('Subscription invoeren komt in Wizard 2.')">Subscription invoeren</button> ${editBtnConfirm} ${tlLink}`;
   }
@@ -564,17 +562,18 @@ async function retryPush(dealId) {
     loadQuotations();
   } catch (e) { toast('Push mislukt: ' + e.message, 'error'); }
 }
-async function cancelQuotation(dealId) {
-  if (!confirm('Offerte annuleren? Klant kan deze niet meer ondertekenen.')) return;
+async function deleteQuotation(dealId) {
+  if (!confirm('Weet je zeker dat je deze offerte wilt verwijderen?')) return;
+  if (!confirm('Dit kan NIET ongedaan worden. Offerte wordt zowel hier als in Teamleader verwijderd. Doorgaan?')) return;
   try {
-    const res = await window.AgentShared.apiFetch('/api/teamleader-cancel-quotation', {
+    const res = await window.AgentShared.apiFetch('/api/teamleader-delete-quotation', {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ deal_id: dealId }),
     });
     const data = await res.json();
     if (!res.ok || data.success === false) throw new Error(data.error || 'HTTP ' + res.status);
-    toast('Offerte geannuleerd', 'success');
+    toast('Offerte verwijderd', 'success');
     loadQuotations();
-  } catch (e) { toast('Annuleren mislukt: ' + e.message, 'error'); }
+  } catch (e) { toast('Verwijderen mislukt: ' + e.message, 'error'); }
 }
 
 async function openSendModal(dealId) {

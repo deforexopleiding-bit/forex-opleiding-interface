@@ -27,7 +27,7 @@ export default async function handler(req, res) {
   const { customer_data = {}, deal_data = {}, products = [],
           matched_customer_id, tl_imported_contact_id, sync_to_tl = false } = body;
 
-  if (!deal_data.source_lead_id) return res.status(400).json({ error: 'source_lead_id vereist' });
+  // Lead-bron is optioneel geworden (P2): geen verplichting meer.
   if (!Array.isArray(products) || products.length === 0) return res.status(400).json({ error: 'minimaal 1 product vereist' });
 
   try {
