@@ -567,7 +567,7 @@
         <div class="tab-content" id="tab-panel-abonnementen" role="tabpanel" aria-labelledby="tab-btn-abonnementen" hidden>
           <div class="detail-section">
             <h3><i class="ti ti-repeat"></i> Abonnementen</h3>
-            <div class="placeholder-card">Abonnementen komen na Wizard 2 (subscription-creatie na ondertekening van de offerte).</div>
+            <div id="abonnementen-list"><div class="placeholder-card">Abonnementen laden…</div></div>
           </div>
         </div>
 
@@ -918,8 +918,9 @@ function activateDetailTab(tabName, updateUrl) {
   if (tabName === 'profiel')           renderProfielTab();
   else if (tabName === 'communicatie') renderCommunicatieTab();
   else if (tabName === 'offertes')     renderOffertesTab();
+  else if (tabName === 'abonnementen') renderAbonnementenTab();
   else if (tabName === 'audit')        renderAuditTab();
-  // abonnementen + facturen: statische placeholders, geen render nodig
+  // facturen: statische placeholder, geen render nodig
 
   if (updateUrl) {
     const url = new URL(window.location.href);
@@ -957,6 +958,33 @@ async function renderOffertesTab() {
     }).join('');
     wrap.innerHTML = `<div class="table-wrap"><table>
       <thead><tr><th>Datum</th><th>Bedrag incl. BTW</th><th>Status</th><th>Acties</th></tr></thead>
+      <tbody>${rows}</tbody></table></div>`;
+  } catch (e) {
+    wrap.innerHTML = '<div class="placeholder-card">Laden mislukt: ' + escapeHtml(e.message) + '</div>';
+  }
+}
+
+async function renderAbonnementenTab() {
+  const wrap = $('#abonnementen-list');
+  wrap.innerHTML = '<div class="placeholder-card">Abonnementen laden…</div>';
+  try {
+    const res = await window.AgentShared.apiFetch('/api/sales-customer-subscriptions?customer_id=' + encodeURIComponent(detailState.customerId));
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const d = await res.json();
+    const subs = d.subscriptions || [];
+    const wizardBtn = d.pending_deal_id
+      ? `<div style="margin-bottom:10px"><a class="btn btn-primary btn-sm" href="/modules/subscription-wizard.html?deal_id=${encodeURIComponent(d.pending_deal_id)}">Subscription invoeren</a></div>` : '';
+    if (!subs.length) { wrap.innerHTML = wizardBtn + '<div class="placeholder-card">Nog geen abonnementen voor deze klant.</div>'; return; }
+    const rows = subs.map(s => `<tr>
+      <td>${escapeHtml(s.description || '—')}</td>
+      <td>€${Number(s.amount).toLocaleString('nl-NL', { minimumFractionDigits: 2 })}</td>
+      <td>${s.term_count || '—'}×</td>
+      <td>${s.start_date ? fmtDate(s.start_date) : '—'} – ${s.end_date ? fmtDate(s.end_date) : '—'}</td>
+      <td>${s.teamleader_subscription_id ? '✓ TL' : '—'}</td>
+      <td>${escapeHtml(s.status || '—')}</td>
+    </tr>`).join('');
+    wrap.innerHTML = wizardBtn + `<div class="table-wrap"><table>
+      <thead><tr><th>Omschrijving</th><th>Bedrag</th><th>Termijnen</th><th>Periode</th><th>TL</th><th>Status</th></tr></thead>
       <tbody>${rows}</tbody></table></div>`;
   } catch (e) {
     wrap.innerHTML = '<div class="placeholder-card">Laden mislukt: ' + escapeHtml(e.message) + '</div>';

@@ -62,7 +62,7 @@ const DEPT_NAME = {
 //     TEAMLEADER_TAX_RATE_ID_OUTSIDE_EU_{DEPT} / _OUTSIDE_EU
 // - Binnenlands → per BTW%-tarief, met per-department override:
 //     TEAMLEADER_TAX_RATE_ID_21_{DEPT} / TEAMLEADER_TAX_RATE_ID_21
-function taxRateIdFor(vatPercentage, departmentId, saleType) {
+export function taxRateIdFor(vatPercentage, departmentId, saleType) {
   const dept = DEPT_NAME[departmentId];
   const pickEnv = (...keys) => { for (const k of keys) if (process.env[k]) return process.env[k]; return null; };
 

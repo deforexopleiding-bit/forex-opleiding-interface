@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Abonnement invoeren · De Forex Opleiding</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/modules/shared/agent-shared.css" />
+  <style>
+    *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+    body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--text);min-height:100vh}
+    .app{margin-left:220px;padding:24px 28px 60px;max-width:920px}
+    h1{font-size:20px;font-weight:800;margin-bottom:2px}
+    .sub{font-size:12.5px;color:var(--text-dim)}
+    .progress{display:flex;gap:8px;margin:18px 0}
+    .progress .st{flex:1;text-align:center;font-size:11.5px;padding:6px;border-radius:6px;background:var(--bg-elev);border:1px solid var(--border);color:var(--text-faint)}
+    .progress .st.active{background:var(--accent-cyan,#0891b2);color:#fff;border-color:transparent}
+    .panel{display:none}.panel.active{display:block}
+    .card{background:var(--bg-elev);border:1px solid var(--border);border-radius:10px;padding:16px;margin-bottom:12px}
+    .field{margin-bottom:12px}
+    label{display:block;font-size:11.5px;font-weight:600;color:var(--text-dim);margin-bottom:4px}
+    input,select{width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font:inherit;font-size:13px}
+    .row{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+    .row3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px}
+    .sub-card{border:1px solid var(--border);border-radius:8px;padding:12px;margin-bottom:10px;position:relative}
+    .btn{display:inline-flex;align-items:center;gap:6px;padding:8px 14px;border-radius:8px;cursor:pointer;font:inherit;font-size:13px;font-weight:600;background:var(--accent,#093d54);color:#fff;border:none}
+    .btn-ghost{background:var(--bg-elev);color:var(--text-dim);border:1px solid var(--border)}
+    .btn-success{background:#059669;color:#fff}
+    .btn-danger{background:var(--red,#dc2626);color:#fff}
+    .btn-sm{padding:4px 10px;font-size:11.5px}
+    .footer{display:flex;justify-content:space-between;margin-top:18px}
+    .bonus{padding:14px;border-radius:8px;font-size:13px;line-height:1.5}
+    .bonus.green{background:rgba(5,150,105,.12);color:#059669}
+    .bonus.gray{background:var(--bg-elev-2);color:var(--text-dim)}
+    .preview{background:var(--bg-elev-2);border:1px solid var(--border);border-radius:6px;padding:14px;font-family:'Menlo',monospace;font-size:12px;white-space:pre-wrap;line-height:1.6}
+  </style>
+</head>
+<body>
+<div id="sidebar-mount"></div>
+<div class="app">
+  <a href="/modules/sales.html?tab=offertes" style="font-size:12px;color:var(--text-dim);text-decoration:none">← Terug naar Sales</a>
+  <h1>Abonnement invoeren</h1>
+  <div class="sub" id="topSub">Laden…</div>
+
+  <div class="progress">
+    <div class="st active" data-st="1">1. Klant & offerte</div>
+    <div class="st" data-st="2">2. Abonnementen</div>
+    <div class="st" data-st="3">3. Bonus & bevestigen</div>
+  </div>
+
+  <!-- Stap 1 -->
+  <section class="panel active" id="p1">
+    <div class="card" id="reviewCard">Laden…</div>
+  </section>
+
+  <!-- Stap 2 -->
+  <section class="panel" id="p2">
+    <div class="card">
+      <div class="row">
+        <div class="field"><label>Bedrijfsentiteit</label><select id="deptSelect"></select></div>
+        <div class="field"><label>Eerste call <span style="color:var(--red,#dc2626)">*</span></label><input id="firstCall" type="datetime-local" /></div>
+      </div>
+    </div>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+      <strong style="font-size:14px">Abonnementen</strong>
+      <button class="btn btn-success btn-sm" id="addSub">+ Abonnement toevoegen</button>
+    </div>
+    <div id="subList"></div>
+    <div class="card" style="text-align:right;font-weight:700" id="subTotal"></div>
+    <div id="p2err" style="color:var(--red,#dc2626);font-size:12px;margin-top:6px"></div>
+  </section>
+
+  <!-- Stap 3 -->
+  <section class="panel" id="p3">
+    <div class="card"><div id="bonusBlock"></div></div>
+    <div class="card"><div class="preview" id="subPreview"></div></div>
+    <div id="submitBlock" style="display:flex;flex-direction:column;gap:8px"></div>
+  </section>
+
+  <div class="footer">
+    <button class="btn btn-ghost" id="prevBtn" disabled>← Vorige</button>
+    <button class="btn" id="nextBtn">Volgende →</button>
+  </div>
+</div>
+<div class="toast" id="toast"></div>
+
+<script src="/modules/shared/supabase-client.js"></script>
+<script src="/modules/shared/agent-shared.js"></script>
+<script src="/modules/shared/theme-shared.js"></script>
+<script>
+const dealId = new URLSearchParams(location.search).get('deal_id');
+const state = { step: 1, deal: null, customer: null, totals: {}, entities: [], subs: [] };
+function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
+function toast(m,k){const e=document.getElementById('toast');e.textContent=m;e.className='toast show '+(k||'');setTimeout(()=>e.classList.remove('show'),2400)}
+function eur(v){return v==null?'—':'€'+Number(v).toLocaleString('nl-NL',{minimumFractionDigits:2,maximumFractionDigits:2})}
+function fmtDate(iso){return iso?new Date(iso).toLocaleDateString('nl-NL',{day:'numeric',month:'long',year:'numeric'}):'—'}
+function calcEnd(start, tc){ if(!start||!(tc>0))return ''; const d=new Date(start); d.setMonth(d.getMonth()+(Number(tc)-1)); d.setDate(d.getDate()+2); return d.toISOString().slice(0,10); }
+
+async function init(){
+  await window._authSharedReady;
+  const profile = await window.AuthShared?.requireAuth();
+  if(!profile) return;
+  if(window.AgentShared) await window.AgentShared.renderUserSection(profile);
+  if(!dealId){ document.getElementById('topSub').textContent='Geen deal-id.'; return; }
+  try{
+    const [dRes, eRes] = await Promise.all([
+      window.AgentShared.apiFetch('/api/sales-deal-detail?id='+encodeURIComponent(dealId)).then(r=>r.json()),
+      window.AgentShared.apiFetch('/api/company-entities').then(r=>r.json()).catch(()=>({})),
+    ]);
+    state.deal=dRes.deal||{}; state.customer=dRes.customer||{}; state.totals=dRes.totals||{};
+    state.entities=eRes.entities||[];
+    buildReview(); buildDept(); prefillSubs(); renderSubs();
+    document.getElementById('firstCall').value = defaultFirstCall();
+  }catch(e){ document.getElementById('topSub').textContent='Laden mislukt: '+e.message; }
+}
+function defaultFirstCall(){
+  const base = state.subs[0]?.start_date || state.deal.start_date || new Date().toISOString().slice(0,10);
+  const d=new Date(base); d.setDate(d.getDate()+7); return d.toISOString().slice(0,16);
+}
+function buildReview(){
+  const c=state.customer, d=state.deal;
+  document.getElementById('topSub').textContent = `${c.first_name||''} ${c.last_name||''}`.trim();
+  document.getElementById('reviewCard').innerHTML = `
+    <div style="font-size:11px;text-transform:uppercase;color:var(--text-faint);margin-bottom:8px">Klant & offerte</div>
+    <div><strong>${esc((c.first_name||'')+' '+(c.last_name||''))}</strong> · ${esc(c.email||'—')}</div>
+    <div style="margin-top:8px;font-size:13px">Totaal incl. BTW: <strong>${eur(state.totals.incl)}</strong></div>
+    <div style="font-size:12px;color:var(--text-dim)">Getekend op: ${fmtDate(d.tl_quotation_accepted_at||d.tl_quotation_signed_at)}</div>`;
+}
+function buildDept(){
+  const sel=document.getElementById('deptSelect');
+  sel.innerHTML = state.entities.map(e=>`<option value="${esc(e.tl_department_id)}">${esc(e.label)}</option>`).join('') || '<option value="">—</option>';
+  if(state.deal.tl_department_id) sel.value=state.deal.tl_department_id;
+}
+function prefillSubs(){
+  const d=state.deal;
+  const down=Number(d.payment_downpayment_amount)||0;
+  if(down>0) state.subs.push({description:'Aanbetaling',amount:down,term_count:1,start_date:d.payment_downpayment_date||d.start_date||'',vat_percentage:21});
+  const tc=Number(d.payment_term_count)||0;
+  if(tc>0){
+    const monthly = d.payment_term_amount!=null ? Number(d.payment_term_amount) : Math.floor(((Number(state.totals.incl)||0)-down)/tc*100)/100;
+    state.subs.push({description:'Maandelijkse termijnen',amount:monthly,term_count:tc,start_date:d.payment_term_start_date||'',vat_percentage:21});
+  }
+  if(!state.subs.length) state.subs.push({description:'',amount:'',term_count:1,start_date:d.start_date||'',vat_percentage:21});
+}
+function renderSubs(){
+  const root=document.getElementById('subList');
+  root.innerHTML = state.subs.map((s,i)=>`
+    <div class="sub-card">
+      ${state.subs.length>1?`<button class="btn btn-danger btn-sm" data-rm="${i}" style="position:absolute;top:10px;right:10px">×</button>`:''}
+      <div class="field"><label>Omschrijving</label><input data-f="description" data-i="${i}" value="${esc(s.description)}" list="descSug" /></div>
+      <div class="row3">
+        <div class="field"><label>Bedrag/termijn (€)</label><input type="number" step="0.01" min="0" data-f="amount" data-i="${i}" value="${s.amount}" /></div>
+        <div class="field"><label>Aantal termijnen</label><input type="number" min="1" data-f="term_count" data-i="${i}" value="${s.term_count}" /></div>
+        <div class="field"><label>BTW</label><select data-f="vat_percentage" data-i="${i}"><option value="21"${s.vat_percentage==21?' selected':''}>21%</option><option value="9"${s.vat_percentage==9?' selected':''}>9%</option><option value="0"${s.vat_percentage==0?' selected':''}>0%</option></select></div>
+      </div>
+      <div class="row">
+        <div class="field"><label>Startdatum</label><input type="date" data-f="start_date" data-i="${i}" value="${s.start_date}" /></div>
+        <div class="field"><label>Einddatum (auto)</label><input type="date" readonly style="background:var(--bg-elev-2)" value="${calcEnd(s.start_date,s.term_count)}" /></div>
+      </div>
+    </div>`).join('') + `<datalist id="descSug"><option>Aanbetaling</option><option>Maandelijkse termijnen</option><option>Membership</option><option>E-book</option></datalist>`;
+  root.querySelectorAll('[data-f]').forEach(inp=>inp.addEventListener('input',e=>{
+    const i=e.target.dataset.i, f=e.target.dataset.f;
+    state.subs[i][f] = (f==='amount'||f==='term_count'||f==='vat_percentage') ? e.target.value : e.target.value;
+    if(f==='start_date'||f==='term_count') renderSubs();
+    renderSubTotal();
+  }));
+  root.querySelectorAll('[data-rm]').forEach(b=>b.addEventListener('click',()=>{state.subs.splice(Number(b.dataset.rm),1);renderSubs();renderSubTotal();}));
+  renderSubTotal();
+}
+function renderSubTotal(){
+  const total = state.subs.reduce((sum,s)=>sum+(Number(s.amount)||0)*(Number(s.term_count)||0),0);
+  document.getElementById('subTotal').textContent = 'Totale waarde abonnement: '+eur(total);
+}
+document.getElementById('addSub').addEventListener('click',()=>{state.subs.push({description:'',amount:'',term_count:1,start_date:'',vat_percentage:21});renderSubs();});
+
+function validateSubs(){
+  if(!state.subs.length) return 'Minimaal 1 abonnement vereist';
+  if(!document.getElementById('firstCall').value) return 'Eerste call is verplicht';
+  for(const s of state.subs){
+    if(!(Number(s.amount)>0)) return 'Elk abonnement heeft een bedrag > 0';
+    if(!(Number(s.term_count)>=1)) return 'Aantal termijnen minimaal 1';
+    if(!s.start_date) return 'Startdatum verplicht bij elk abonnement';
+  }
+  return null;
+}
+function renderStep3(){
+  // Bonus-preview op eerste 1-termijn sub.
+  const down = state.subs.find(s=>(Number(s.term_count)||1)===1 && Number(s.amount)>0);
+  const bb=document.getElementById('bonusBlock');
+  if(down && Number(down.amount)>=1000){
+    const bonus=(Number(down.amount)*0.03).toFixed(2);
+    bb.className='bonus green';
+    bb.innerHTML=`<strong>Bonus (indicatief 3%):</strong> ${eur(bonus)} over aanbetaling ${eur(down.amount)}<br><small>Status: pending — wordt 'paid' wanneer de factuur betaald is. Exacte % / drempel volgen uit sales_bonus_configs.</small>`;
+  } else {
+    bb.className='bonus gray';
+    bb.innerHTML='Geen bonus: geen aanbetaling-termijn ≥ €1.000.';
+  }
+  // Preview
+  let lines=['Bij Teamleader worden de volgende subscriptions aangemaakt:',''];
+  state.subs.forEach((s,i)=>{
+    lines.push(`${i+1}. ${s.description||'Abonnement'}: ${eur(s.amount)} × ${s.term_count} termijnen`);
+    lines.push(`   ${fmtDate(s.start_date)} t/m ${fmtDate(calcEnd(s.start_date,s.term_count))} · BTW ${s.vat_percentage}%`);
+  });
+  document.getElementById('subPreview').textContent = lines.join('\n');
+  // Submit knoppen
+  document.getElementById('submitBlock').innerHTML = `
+    <button class="btn btn-success" id="submitTl" style="padding:12px">Activeer abonnementen + push naar Teamleader</button>
+    <a href="#" id="submitLocal" style="text-align:center;font-size:11.5px;color:var(--text-dim)">Alleen lokaal opslaan</a>`;
+  document.getElementById('submitTl').addEventListener('click',()=>submit(true));
+  document.getElementById('submitLocal').addEventListener('click',e=>{e.preventDefault();submit(false);});
+}
+
+function showStep(n){
+  state.step=n;
+  document.querySelectorAll('.panel').forEach((p,idx)=>p.classList.toggle('active',idx+1===n));
+  document.querySelectorAll('.progress .st').forEach(s=>s.classList.toggle('active',Number(s.dataset.st)===n));
+  document.getElementById('prevBtn').disabled = n===1;
+  document.getElementById('nextBtn').style.display = n===3?'none':'';
+  if(n===3) renderStep3();
+}
+document.getElementById('prevBtn').addEventListener('click',()=>{if(state.step>1)showStep(state.step-1);});
+document.getElementById('nextBtn').addEventListener('click',()=>{
+  if(state.step===2){ const err=validateSubs(); if(err){document.getElementById('p2err').textContent=err;return;} document.getElementById('p2err').textContent=''; }
+  if(state.step<3) showStep(state.step+1);
+});
+
+async function submit(syncToTl){
+  const btn=document.querySelector('#submitBlock .btn'); if(btn){btn.disabled=true;btn.textContent='Bezig…';}
+  try{
+    const payload={
+      deal_id:dealId,
+      tl_department_id:document.getElementById('deptSelect').value||null,
+      first_call_at:document.getElementById('firstCall').value||null,
+      sync_to_tl:!!syncToTl,
+      subscriptions:state.subs.map(s=>({description:s.description||null,amount:Number(s.amount)||0,term_count:Number(s.term_count)||1,start_date:s.start_date||null,end_date:calcEnd(s.start_date,s.term_count)||null,vat_percentage:Number(s.vat_percentage)||21})),
+    };
+    const res=await window.AgentShared.apiFetch('/api/sales-subscription-create',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+    const data=await res.json();
+    if(!res.ok||data.success===false) throw new Error(data.error||'HTTP '+res.status);
+    toast('Abonnementen aangemaakt','success');
+    if(syncToTl) setTimeout(()=>toast(`TL: ${data.tl_pushed} gepusht, ${data.tl_failed} mislukt`, data.tl_failed?'error':'success'),1200);
+    setTimeout(()=>{window.location.href='/modules/klanten.html?id='+state.deal.customer_id;},1000);
+  }catch(e){ toast('Mislukt: '+e.message,'error'); if(btn){btn.disabled=false;btn.textContent='Activeer abonnementen + push naar Teamleader';} }
+}
+
+init();
+</script>
+<script src="/modules/shared/permissions.js"></script>
+<script src="/modules/shared/sidebar.js"></script>
+</body>
+</html>
