@@ -323,6 +323,18 @@
   </div>
 </div>
 
+<!-- Korting modal -->
+<div class="overlay" id="discountModal">
+  <div class="modal" style="max-width:360px">
+    <div class="modal-head"><span class="modal-title">Korting</span><button class="modal-close" id="discountClose">&times;</button></div>
+    <div class="modal-body">
+      <div class="field"><label>Korting (%)</label><input id="discountInput" type="number" min="0" max="100" step="0.01" placeholder="bv. 10" /></div>
+      <div class="hint">Wordt toegepast op het subtotaal (excl. BTW). 0 = geen korting.</div>
+    </div>
+    <div class="modal-foot"><button class="btn btn-ghost btn-sm" id="discountCancel">Annuleer</button><button class="btn btn-sm" id="discountApply">Toepassen</button></div>
+  </div>
+</div>
+
 <div class="toast" id="toast"></div>
 
 <script src="/modules/shared/supabase-client.js"></script>
@@ -365,6 +377,7 @@ const state = {
     source_lead_id: '',
     start_date: '', duration_months: 12,
     products: [],   // [{ product_id, product_name, quantity, price_per_unit, vat_percentage }]
+    discount_percentage: 0,
     // Stap 4: betalingsvoorwaarden (optioneel)
     payment_start_date: '',
     payment_downpayment_amount: '',
@@ -546,6 +559,7 @@ async function init() {
           first_name: c.first_name || '', last_name: c.last_name || '', email: c.email || '', phone: c.phone || '',
           address_street: c.address_street || '', address_number: c.address_number || '', address_postal: c.address_postal || '', address_city: c.address_city || '',
           tl_department_id: deal.tl_department_id || '', traject_variant_id: deal.traject_variant_id || '',
+          discount_percentage: deal.discount_percentage || 0,
           quote_reference: deal.quote_reference || '', source_lead_id: deal.source_lead_id || '',
           start_date: deal.start_date || state.wizard.start_date, duration_months: deal.duration_months || 12,
           payment_start_date: deal.payment_start_date || '', payment_downpayment_amount: deal.payment_downpayment_amount || '',
@@ -832,6 +846,15 @@ document.getElementById('swapCustLink').addEventListener('click', e => { e.preve
 // ── Stap 2 wiring ──
 document.getElementById('quoteRef').addEventListener('input', e => { state.wizard.quote_reference = e.target.value; markDirty(); });
 document.getElementById('leadSource').addEventListener('change', e => { state.wizard.source_lead_id = e.target.value; markDirty(); updateNextEnabled(); });
+document.getElementById('discountClose').addEventListener('click', () => document.getElementById('discountModal').classList.remove('show'));
+document.getElementById('discountCancel').addEventListener('click', () => document.getElementById('discountModal').classList.remove('show'));
+document.getElementById('discountApply').addEventListener('click', () => {
+  let v = Number(document.getElementById('discountInput').value) || 0;
+  v = Math.max(0, Math.min(100, v));
+  state.wizard.discount_percentage = v;
+  document.getElementById('discountModal').classList.remove('show');
+  renderDealProducts(); markDirty();
+});
 document.getElementById('trajectSelect').addEventListener('change', e => applyTrajectVariant(e.target.value));
 document.getElementById('trajectReset').addEventListener('click', () => { document.getElementById('trajectSelect').value = ''; state.wizard.traject_variant_id = ''; markDirty(); });
 document.getElementById('startDate').addEventListener('change', e => { state.wizard.start_date = e.target.value; markDirty(); updateNextEnabled(); });
@@ -913,27 +936,50 @@ function renderDealProducts() {
   root.querySelectorAll('[data-rm]').forEach(b => b.addEventListener('click', () => { state.wizard.products.splice(Number(b.dataset.rm), 1); renderDealProducts(); markDirty(); updateNextEnabled(); }));
   root.querySelectorAll('[data-toggle]').forEach(a => a.addEventListener('click', () => { const p = state.wizard.products[a.dataset.toggle]; p.price_includes_vat = !p.price_includes_vat; renderDealProducts(); markDirty(); }));
 
-  // Totals (mix-safe via lineAmounts)
+  // Totals (mix-safe via lineAmounts) + deal-niveau korting.
+  const disc = Number(state.wizard.discount_percentage) || 0;
+  const factor = 1 - disc / 100;
   let subtotal = 0;
   const vatGrouped = {};
   for (const p of state.wizard.products) {
     const a = lineAmounts(p);
     subtotal += a.excl;
-    vatGrouped[p.vat_percentage] = (vatGrouped[p.vat_percentage] || 0) + a.btw;
+    vatGrouped[p.vat_percentage] = (vatGrouped[p.vat_percentage] || 0) + a.btw * factor;
   }
+  const discountAmount = subtotal * disc / 100;
+  const subtotalAfter = subtotal - discountAmount;
   const vatTotal = Object.values(vatGrouped).reduce((a, b) => a + b, 0);
-  const total = subtotal + vatTotal;
+  const total = subtotalAfter + vatTotal;
   totals.style.display = 'block';
+  const discCtrl = disc > 0
+    ? `<a id="discountEdit" style="cursor:pointer;color:var(--accent-cyan,#0891b2)">Korting (${disc}%) wijzigen</a> · <a id="discountRemove" style="cursor:pointer;color:#dc2626">verwijderen</a>`
+    : `<a id="discountEdit" style="cursor:pointer;color:#059669">+ Korting</a>`;
   totals.innerHTML = `
     <div class="row"><span>Subtotaal excl. BTW</span><span>${fmtEuro(subtotal)}</span></div>
+    ${disc > 0 ? `<div class="row" style="color:#dc2626"><span>Korting (${disc}%)</span><span>-${fmtEuro(discountAmount)}</span></div><div class="row"><span>Subtotaal na korting</span><span>${fmtEuro(subtotalAfter)}</span></div>` : ''}
     ${Object.entries(vatGrouped).map(([pct, amt]) => `<div class="row"><span>BTW ${pct}%</span><span>${fmtEuro(amt)}</span></div>`).join('')}
-    <div class="row big"><span>Totaal incl. BTW</span><span>${fmtEuro(total)}</span></div>`;
+    <div class="row big"><span>Totaal incl. BTW</span><span>${fmtEuro(total)}</span></div>
+    <div class="row" style="border-top:1px solid var(--border);padding-top:6px;font-size:11.5px">${discCtrl}</div>`;
+  const dEdit = document.getElementById('discountEdit');
+  if (dEdit) dEdit.addEventListener('click', openDiscountModal);
+  const dRm = document.getElementById('discountRemove');
+  if (dRm) dRm.addEventListener('click', () => { state.wizard.discount_percentage = 0; renderDealProducts(); markDirty(); });
   document.getElementById('prodCount').textContent = `· ${state.wizard.products.length} producten, totaal ${fmtEuro(total)}`;
 }
 
+function openDiscountModal() {
+  document.getElementById('discountInput').value = state.wizard.discount_percentage || '';
+  document.getElementById('discountModal').classList.add('show');
+}
+
+// Totaal incl. BTW na deal-niveau korting (gebruikt in payload + review).
 function totalInclBtw() {
+  const factor = 1 - (Number(state.wizard.discount_percentage) || 0) / 100;
   let total = 0;
-  for (const p of state.wizard.products) total += lineAmounts(p).incl;
+  for (const p of state.wizard.products) {
+    const a = lineAmounts(p);
+    total += a.excl * factor + a.btw * factor;
+  }
   return total;
 }
 
@@ -947,12 +993,19 @@ function renderReview() {
   // BTW-breakdown per tarief.
   const btwByRate = {};
   let subtotalExcl = 0;
+  const disc = Number(w.discount_percentage) || 0;
+  const factor = 1 - disc / 100;
   for (const p of w.products) {
     const a = lineAmounts(p);
     subtotalExcl += a.excl;
-    btwByRate[p.vat_percentage] = (btwByRate[p.vat_percentage] || 0) + a.btw;
+    btwByRate[p.vat_percentage] = (btwByRate[p.vat_percentage] || 0) + a.btw * factor;
   }
-  const btwRows = Object.keys(btwByRate).sort((a, b) => a - b)
+  const discountAmount = subtotalExcl * disc / 100;
+  const discRows = disc > 0
+    ? `<tr style="color:#dc2626"><td colspan="3">Korting (${disc}%)</td><td style="text-align:right">-${fmtEuro(discountAmount)}</td></tr>`
+      + `<tr><td colspan="3" style="color:var(--text-dim)">Subtotaal na korting</td><td style="text-align:right">${fmtEuro(subtotalExcl - discountAmount)}</td></tr>`
+    : '';
+  const btwRows = discRows + Object.keys(btwByRate).sort((a, b) => a - b)
     .map(r => `<tr><td colspan="3" style="color:var(--text-dim)">BTW ${r}%</td><td style="text-align:right">${fmtEuro(btwByRate[r])}</td></tr>`).join('');
 
   let custBadge = '';
@@ -1048,6 +1101,7 @@ async function submitDeal(syncToTl) {
         total_amount: totalInclBtw(),
         tl_department_id: w.tl_department_id || null,
         traject_variant_id: w.traject_variant_id || null,
+        discount_percentage: Number(w.discount_percentage) || 0,
         payment_start_date: w.payment_start_date || null,
         payment_downpayment_amount: Number(w.payment_downpayment_amount) || null,
         payment_downpayment_date: w.payment_downpayment_date || null,

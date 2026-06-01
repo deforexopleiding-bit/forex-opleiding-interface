@@ -435,7 +435,7 @@
 
       <!-- Hoofdcontent (verborgen tot /api/customer geslaagd is) -->
       <div id="detail-content" style="display:none;">
-        <a href="/modules/klanten.html" class="back-link">
+        <a href="/modules/sales.html?tab=klanten" class="back-link">
           <i class="ti ti-arrow-left"></i> Terug naar klant-overzicht
         </a>
 
@@ -805,7 +805,8 @@ async function init() {
     await showDetailView(customerId);
     return;
   }
-  await initListView();
+  // Overzicht zonder id → klantenlijst leeft nu in Sales > tab Klanten.
+  window.location.replace('/modules/sales.html?tab=klanten');
 }
 
 // ============================================================================
@@ -1210,7 +1211,7 @@ function renderDetailError(msg) {
   const errEl = $('#detail-error');
   errEl.style.display = '';
   errEl.innerHTML = `
-    <a href="/modules/klanten.html" class="back-link">
+    <a href="/modules/sales.html?tab=klanten" class="back-link">
       <i class="ti ti-arrow-left"></i> Terug naar klant-overzicht
     </a>
     <div class="detail-not-found">
@@ -1226,7 +1227,7 @@ function renderDetailNotFound() {
   const errEl = $('#detail-error');
   errEl.style.display = '';
   errEl.innerHTML = `
-    <a href="/modules/klanten.html" class="back-link">
+    <a href="/modules/sales.html?tab=klanten" class="back-link">
       <i class="ti ti-arrow-left"></i> Terug naar klant-overzicht
     </a>
     <div class="detail-not-found">

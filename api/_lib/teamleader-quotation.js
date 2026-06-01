@@ -128,10 +128,15 @@ export async function pushQuotationToTl(dealId) {
     }
 
     // 3. Quotation samenstellen.
+    // Deal-niveau korting: TL quotations.create kent geen deal-level discount.
+    // We verlagen per-regel de unit_price met het kortingspercentage. Dit houdt
+    // de BTW-uitsplitsing correct bij gemengde tarieven (een enkele negatieve
+    // korting-regel kan dat niet). De klant ziet dus lagere stukprijzen.
+    const discFactor = 1 - (Number(deal.discount_percentage) || 0) / 100;
     const lineItems = lines.map(l => ({
       quantity:    Number(l.quantity),
       description: l.product_name,
-      unit_price:  { amount: Number(l.unit_price), currency: CURRENCY, tax: l.price_includes_vat ? 'including' : 'excluding' },
+      unit_price:  { amount: Math.round(Number(l.unit_price) * discFactor * 100) / 100, currency: CURRENCY, tax: l.price_includes_vat ? 'including' : 'excluding' },
       tax_rate_id: taxRateIdFor(l.vat_percentage, departmentId),
     }));
     const quotationBody = {
