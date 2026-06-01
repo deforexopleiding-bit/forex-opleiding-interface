@@ -44,6 +44,8 @@ export default async function handler(req, res) {
     for (const k of map) if (deal_data[k] !== undefined) patch[k] = deal_data[k] || null;
     // discount_percentage is NOT NULL → 0 i.p.v. null.
     if (deal_data.discount_percentage !== undefined) patch.discount_percentage = Number(deal_data.discount_percentage) || 0;
+    // sale_type is NOT NULL → 'domestic' als fallback.
+    if (deal_data.sale_type !== undefined) patch.sale_type = deal_data.sale_type || 'domestic';
     if (products.length) patch.total_amount = totalAmount;
 
     const { error: dErr } = await supabaseAdmin.from('deals').update(patch).eq('id', deal_id);

@@ -123,8 +123,8 @@ function render(d){
   const A=document.getElementById('detailActions');
   const tlBtn = deal.tl_quotation_id ? `<a class="btn btn-ghost" href="https://focus.teamleader.eu/quotations/${esc(deal.tl_quotation_id)}" target="_blank">↗ Open in TL</a>` : '';
   let btns='';
-  if (st==='accepted'){
-    btns = `<button class="btn btn-success" onclick="alert('Wizard 2 (Omzetten naar abonnement) komt eraan.')">Omzetten naar abonnement</button> ${tlBtn}`;
+  if (st==='accepted' || st==='signed'){
+    btns = `<button class="btn btn-success" onclick="alert('Wizard 2 (Omzetten naar abonnement) komt eraan.')">Omzetten naar abonnement</button> <button class="btn btn-ghost" onclick="editConfirm('${esc(deal.id)}')">Bewerken</button> ${tlBtn}`;
   } else if (st==='sent'){
     btns = `<button class="btn" onclick="doSend()">Opnieuw versturen</button> <button class="btn btn-danger" onclick="doCancel()">Annuleren</button> ${tlBtn}`;
   } else if (st==='draft'){
@@ -136,6 +136,10 @@ function render(d){
   A.innerHTML = btns;
 }
 
+function editConfirm(id){
+  if (!confirm('Weet je zeker dat je de offerte wilt bewerken? Deze is al getekend en zal niet meer geldig zijn.')) return;
+  window.location.href = '/modules/sales-wizard.html?edit_deal_id=' + id;
+}
 async function doSend(){
   try { const r=await window.AgentShared.apiFetch('/api/teamleader-send-quotation',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({deal_id:dealId})}); const d=await r.json(); if(!r.ok)throw new Error(d.error||'HTTP '+r.status); toast('Offerte verzonden','success'); load(); }
   catch(e){ toast('Versturen mislukt: '+e.message,'error'); }

@@ -91,7 +91,7 @@
   </div>
 
   <div class="tabs" role="tablist">
-    <button class="tab active" data-tab="customers" role="tab">Mijn klanten</button>
+    <button class="tab active" data-tab="customers" role="tab">Klanten</button>
     <button class="tab" data-tab="quotations" role="tab">Offertes</button>
     <button class="tab" data-tab="trajecten" role="tab">Trajecten</button>
     <button class="tab" data-tab="products" role="tab">Producten</button>
@@ -105,14 +105,6 @@
       <select class="search" id="custStatus" style="max-width:160px">
         <option value="active">Actief</option>
         <option value="archived">Gearchiveerd</option>
-      </select>
-      <select class="search" id="custQuotation" style="max-width:180px">
-        <option value="">Alle offerte-statussen</option>
-        <option value="sent">Verzonden</option>
-        <option value="signed">Getekend</option>
-        <option value="declined">Afgewezen</option>
-        <option value="expired">Verlopen</option>
-        <option value="draft">Concept</option>
       </select>
     </div>
     <div id="customersList"><div class="empty">Laden…</div></div>
@@ -437,9 +429,13 @@ function quotationBadge(status) {
   return `<span class="badge ${b.cls}">${esc(b.label)}</span>`;
 }
 
+function fmtDateNL(iso) {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  return `${String(d.getDate()).padStart(2,'0')}-${String(d.getMonth()+1).padStart(2,'0')}-${d.getFullYear()}`;
+}
 function renderCustomers() {
-  const qf = document.getElementById('custQuotation').value;
-  const rows = qf ? state.customers.filter(c => c.quotation_status === qf) : state.customers;
+  const rows = state.customers;
   if (!rows.length) {
     document.getElementById('customersList').innerHTML = '<div class="empty">Geen klanten gevonden.</div>';
     return;
@@ -448,7 +444,7 @@ function renderCustomers() {
     <table>
       <thead><tr>
         <th>Naam</th><th>Email</th><th>Telefoon</th><th>Deals</th>
-        <th>Laatste deal</th><th>Status</th><th>Offerte-status</th><th></th>
+        <th>Laatste deal</th><th>Einddatum abonnement</th><th></th>
       </tr></thead>
       <tbody>${rows.map(c => `
         <tr>
@@ -459,13 +455,11 @@ function renderCustomers() {
           <td>${esc(c.email || '—')}</td>
           <td>${esc(c.phone || '—')}</td>
           <td>${c.deals_count}</td>
-          <td>${fmtRel(c.last_deal_at)}</td>
-          <td>${c.last_deal_status ? '<span class="badge cat">' + esc(c.last_deal_status) + '</span>' : '—'}</td>
-          <td>${quotationBadge(c.quotation_status)}</td>
+          <td>${fmtDateNL(c.last_deal_at)}</td>
+          <td>${fmtDateNL(c.subscription_end_date)}</td>
           <td>
             <a class="action-btn" href="/modules/klanten.html?id=${esc(c.id)}" title="Open detail">👁</a>
             <a class="action-btn" href="/modules/sales-wizard.html?customer_id=${esc(c.id)}" title="Nieuwe offerte toevoegen">€</a>
-            ${c.quotation_status === 'signed' ? `<button class="btn btn-sm" title="Subscription invoeren (Wizard 2 — binnenkort)" onclick="alert('Subscription invoeren komt in Wizard 2.')">Subscription invoeren</button>` : ''}
           </td>
         </tr>`).join('')}</tbody>
     </table>`;
@@ -485,7 +479,6 @@ document.getElementById('prodArchivedToggle').addEventListener('change', () => l
 document.getElementById('custSearch').addEventListener('input', () => { clearTimeout(window._cs); window._cs = setTimeout(loadCustomers, 250); });
 document.getElementById('custAllToggle').addEventListener('change', () => loadCustomers());
 document.getElementById('custStatus').addEventListener('change', () => loadCustomers());
-document.getElementById('custQuotation').addEventListener('change', () => renderCustomers());
 
 // ── Offertes ──
 async function loadQuotations() {
@@ -536,10 +529,11 @@ function renderQuotations() {
 function quotationActions(q) {
   const tlLink = q.tl_quotation_id ? `<a class="action-btn" href="https://focus.teamleader.eu/quotations/${esc(q.tl_quotation_id)}" target="_blank" title="Open in Teamleader">↗ TL</a>` : '';
   const detail = `<a class="action-btn" href="/modules/offerte-detail.html?id=${esc(q.deal_id)}" title="Offerte-detail">👁</a>`;
-  const editBtn = `<a class="btn btn-sm btn-ghost" href="/modules/sales-wizard.html?edit_deal_id=${esc(q.deal_id)}">Bewerken</a>`;
+  const editBtn = `<button class="btn btn-sm btn-ghost" onclick="editQuotation('${esc(q.deal_id)}', false)">Bewerken</button>`;
+  const editBtnConfirm = `<button class="btn btn-sm btn-ghost" onclick="editQuotation('${esc(q.deal_id)}', true)">Bewerken</button>`;
   const cancelBtn = `<button class="btn btn-sm btn-danger" data-cancel="${esc(q.deal_id)}">Annuleren</button>`;
-  if (q.tl_quotation_status === 'accepted') {
-    return `${detail} <button class="btn btn-sm btn-success" title="Subscription invoeren (Wizard 2 — binnenkort)" onclick="alert('Subscription invoeren komt in Wizard 2.')">Subscription invoeren</button> ${tlLink}`;
+  if (q.tl_quotation_status === 'accepted' || q.tl_quotation_status === 'signed') {
+    return `${detail} <button class="btn btn-sm btn-success" title="Subscription invoeren (Wizard 2 — binnenkort)" onclick="alert('Subscription invoeren komt in Wizard 2.')">Subscription invoeren</button> ${editBtnConfirm} ${tlLink}`;
   }
   if (q.tl_quotation_status === 'sent') {
     return `${detail} <button class="btn btn-sm btn-ghost" data-send="${esc(q.deal_id)}">Opnieuw versturen</button> ${tlLink} ${cancelBtn}`;
@@ -554,6 +548,10 @@ function quotationActions(q) {
     return `${detail} <button class="btn btn-sm" data-push="${esc(q.deal_id)}">Push naar TL</button> ${editBtn} ${cancelBtn}`;
   }
   return `${detail} ${tlLink}` || '—';
+}
+function editQuotation(dealId, needConfirm) {
+  if (needConfirm && !confirm('Weet je zeker dat je de offerte wilt bewerken? Deze is al getekend en zal niet meer geldig zijn.')) return;
+  window.location.href = '/modules/sales-wizard.html?edit_deal_id=' + dealId;
 }
 async function retryPush(dealId) {
   try {

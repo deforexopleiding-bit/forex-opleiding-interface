@@ -48,13 +48,15 @@ export default async function handler(req, res) {
       entity = ent?.label || null;
     }
 
-    // Totalen (mix-safe per regel) + deal-niveau korting.
+    // Totalen (mix-safe per regel) + deal-niveau korting + type verkoop.
     const factor = 1 - (Number(deal.discount_percentage) || 0) / 100;
+    const zeroVat = deal.sale_type && deal.sale_type !== 'domestic';
     let excl = 0, incl = 0;
     for (const l of lineItems || []) {
+      const rate = zeroVat ? 0 : Number(l.vat_percentage) / 100;
       const base = Number(l.quantity) * Number(l.unit_price);
-      const lineExcl = (l.price_includes_vat ? base / (1 + Number(l.vat_percentage) / 100) : base) * factor;
-      const lineIncl = lineExcl * (1 + Number(l.vat_percentage) / 100);
+      const lineExcl = (l.price_includes_vat ? base / (1 + rate) : base) * factor;
+      const lineIncl = lineExcl * (1 + rate);
       excl += lineExcl; incl += lineIncl;
     }
 

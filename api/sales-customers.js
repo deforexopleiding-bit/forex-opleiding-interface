@@ -31,7 +31,7 @@ export default async function handler(req, res) {
     }
 
     let q = supabaseAdmin.from('customers')
-      .select('id, first_name, last_name, email, phone, created_at, archived_at, risk_tag_auto')
+      .select('id, first_name, last_name, email, phone, created_at, archived_at, risk_tag_auto, subscription_end_date')
       .order('updated_at', { ascending: false }).limit(200);
     if (customerIds) q = q.in('id', customerIds);
     if (status === 'archived') q = q.not('archived_at', 'is', null);

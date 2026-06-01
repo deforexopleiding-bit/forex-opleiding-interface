@@ -56,13 +56,27 @@ const DEPT_NAME = {
   '9adca043-0ebc-09da-a45e-f21798841cb2': 'RETENTIE',
 };
 
-// Map vat_percentage (+ optioneel department) → TL tax_rate_id.
-// Tax rates kunnen per department verschillen: probeer eerst de
-// per-department env-var, val terug op de generieke.
-//   TEAMLEADER_TAX_RATE_ID_21_RETENTIE  (specifiek)
-//   TEAMLEADER_TAX_RATE_ID_21           (fallback)
-function taxRateIdFor(vatPercentage, departmentId) {
+// Map vat_percentage (+ department + type verkoop) → TL tax_rate_id.
+// - Type verkoop intracommunautair/buiten-EU → eigen 0%/verlegd tarief:
+//     TEAMLEADER_TAX_RATE_ID_INTRA_{DEPT} / _INTRA   (fallback)
+//     TEAMLEADER_TAX_RATE_ID_OUTSIDE_EU_{DEPT} / _OUTSIDE_EU
+// - Binnenlands → per BTW%-tarief, met per-department override:
+//     TEAMLEADER_TAX_RATE_ID_21_{DEPT} / TEAMLEADER_TAX_RATE_ID_21
+function taxRateIdFor(vatPercentage, departmentId, saleType) {
   const dept = DEPT_NAME[departmentId];
+  const pickEnv = (...keys) => { for (const k of keys) if (process.env[k]) return process.env[k]; return null; };
+
+  if (saleType === 'intracommunautair') {
+    const id = pickEnv(dept ? `TEAMLEADER_TAX_RATE_ID_INTRA_${dept}` : null, 'TEAMLEADER_TAX_RATE_ID_INTRA');
+    if (!id) throw new Error('Geen TEAMLEADER_TAX_RATE_ID_INTRA geconfigureerd');
+    return id;
+  }
+  if (saleType === 'outside_eu') {
+    const id = pickEnv(dept ? `TEAMLEADER_TAX_RATE_ID_OUTSIDE_EU_${dept}` : null, 'TEAMLEADER_TAX_RATE_ID_OUTSIDE_EU');
+    if (!id) throw new Error('Geen TEAMLEADER_TAX_RATE_ID_OUTSIDE_EU geconfigureerd (bv. Retentie heeft mogelijk geen buiten-EU tarief)');
+    return id;
+  }
+  // domestic
   if (dept) {
     const specific = process.env[`TEAMLEADER_TAX_RATE_ID_${vatPercentage}_${dept}`];
     if (specific) return specific;
@@ -137,7 +151,7 @@ export async function pushQuotationToTl(dealId) {
       quantity:    Number(l.quantity),
       description: l.product_name,
       unit_price:  { amount: Math.round(Number(l.unit_price) * discFactor * 100) / 100, currency: CURRENCY, tax: l.price_includes_vat ? 'including' : 'excluding' },
-      tax_rate_id: taxRateIdFor(l.vat_percentage, departmentId),
+      tax_rate_id: taxRateIdFor(l.vat_percentage, departmentId, deal.sale_type),
     }));
     const quotationBody = {
       deal_id:       tlDealId,
