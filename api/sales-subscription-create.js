@@ -84,19 +84,25 @@ export default async function handler(req, res) {
       // payment_term verplicht: 14 dagen na factuurdatum.
       const DAYS_IN_ADVANCE = Number(process.env.TEAMLEADER_SUB_DAYS_IN_ADVANCE) || 7;
       const billing_cycle = { periodicity: { unit: 'month', period: 1 }, days_in_advance: DAYS_IN_ADVANCE };
-      // invoice_generation: book_and_send → book fallback (niet elk account kent send).
-      const INVOICE_GEN = [{ action: 'book_and_send' }, { action: 'book' }];
+      // invoice_generation correcte oneOf-shape (uit live discovery): book_and_send
+      // VEREIST sending_methods. Default factuur automatisch per e-mail versturen
+      // (Jeffrey's eis). Zet TEAMLEADER_SUB_AUTOSEND='false' voor enkel boeken.
+      const autosend = process.env.TEAMLEADER_SUB_AUTOSEND !== 'false';
+      const invoice_generation = autosend
+        ? { action: 'book_and_send', sending_methods: [{ method: 'email' }] }
+        : { action: 'book' };
 
       for (const row of subRows) {
         let taxRateId = null;
         try { taxRateId = taxRateIdFor(row.vat_percentage, departmentId, deal.sale_type); } catch (e) { console.warn('[sub-create] tax_rate:', e.message); }
-        const baseBody = {
+        const body = {
           invoicee: { customer: { type: 'contact', id: tlContactId } },
           department_id: departmentId,
           starts_on: row.start_date,
           title: row.description || 'Abonnement',
           billing_cycle,
           payment_term: { type: 'after_invoice_date', days: 14 },
+          invoice_generation,
           grouped_lines: [{ line_items: [{
             quantity: 1, description: row.description || 'Abonnement',
             unit_price: { amount: Number(row.amount), currency: 'EUR', tax: 'excluding' },
@@ -105,26 +111,24 @@ export default async function handler(req, res) {
         };
         // ends_on uit frontend (start + (term-1) mnd + 2 dagen buffer); ook voor
         // eenmalige subs (term_count=1 → start + 2 dagen).
-        if (row.end_date) baseBody.ends_on = row.end_date;
+        if (row.end_date) body.ends_on = row.end_date;
 
-        let done = false, lastErr = null;
-        for (const invoice_generation of INVOICE_GEN) {
-          try {
-            const r = await tlFetch('/subscriptions.create', {
-              method: 'POST', body: JSON.stringify({ ...baseBody, invoice_generation }),
-            });
-            if (r.ok) {
-              const d = await r.json();
-              const tlSubId = d.data?.id;
-              if (tlSubId) await supabaseAdmin.from('subscriptions').update({ teamleader_subscription_id: tlSubId }).eq('id', row.id);
-              tlResults.push({ sub_id: row.id, tl_sub_id: tlSubId, success: true, invoice_generation: invoice_generation.action });
-              done = true; break;
-            }
-            lastErr = `HTTP ${r.status}: ${(await r.text()).slice(0, 180)}`;
-            console.warn('[sub-create] poging mislukt', invoice_generation.action, lastErr);
-          } catch (e) { lastErr = e.message; }
+        try {
+          const r = await tlFetch('/subscriptions.create', { method: 'POST', body: JSON.stringify(body) });
+          if (r.ok) {
+            const d = await r.json();
+            const tlSubId = d.data?.id;
+            if (tlSubId) await supabaseAdmin.from('subscriptions').update({ teamleader_subscription_id: tlSubId }).eq('id', row.id);
+            tlResults.push({ sub_id: row.id, tl_sub_id: tlSubId, success: true });
+          } else {
+            const err = `HTTP ${r.status}: ${(await r.text()).slice(0, 200)}`;
+            console.error('[sub-create] subscriptions.create mislukt:', err);
+            tlResults.push({ sub_id: row.id, success: false, error: err });
+          }
+        } catch (e) {
+          console.error('[sub-create] exception:', e.message);
+          tlResults.push({ sub_id: row.id, success: false, error: e.message });
         }
-        if (!done) tlResults.push({ sub_id: row.id, success: false, error: lastErr || 'onbekend' });
       }
     }
 
