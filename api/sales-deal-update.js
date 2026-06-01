@@ -36,7 +36,9 @@ export default async function handler(req, res) {
 
     const totalAmount = products.reduce((s, p) => s + (Number(p.price_per_unit) * Number(p.quantity)), 0);
     const patch = { updated_at: new Date().toISOString() };
-    const map = ['start_date', 'duration_months', 'source_lead_id', 'quote_reference', 'tl_department_id',
+    // LET OP: 'duration_months' bestaat NIET als kolom op deals (create slaat
+    // het ook niet op — het is alleen wizard-UI). Niet meeschrijven, anders 500.
+    const map = ['start_date', 'source_lead_id', 'quote_reference', 'tl_department_id',
                  'traject_variant_id', 'discount_percentage', 'payment_start_date', 'payment_downpayment_amount', 'payment_downpayment_date',
                  'payment_term_count', 'payment_term_start_date', 'payment_term_amount'];
     for (const k of map) if (deal_data[k] !== undefined) patch[k] = deal_data[k] || null;
