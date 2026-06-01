@@ -124,9 +124,9 @@ function render(d){
   const tlBtn = deal.tl_quotation_id ? `<a class="btn btn-ghost" href="https://focus.teamleader.eu/quotations/${esc(deal.tl_quotation_id)}" target="_blank">↗ Open in TL</a>` : '';
   let btns='';
   if (st==='accepted' || st==='signed'){
-    btns = `<button class="btn btn-success" onclick="alert('Wizard 2 (Omzetten naar abonnement) komt eraan.')">Omzetten naar abonnement</button> <button class="btn btn-ghost" onclick="editConfirm('${esc(deal.id)}')">Bewerken</button> ${tlBtn}`;
+    btns = `<a class="btn btn-success" href="/modules/subscription-wizard.html?deal_id=${esc(deal.id)}">Omzetten naar abonnement</a> <button class="btn btn-ghost" onclick="editConfirm('${esc(deal.id)}')">Bewerken</button> ${tlBtn}`;
   } else if (st==='sent'){
-    btns = `<button class="btn" onclick="doSend()">Opnieuw versturen</button> <button class="btn btn-danger" onclick="doDelete()">Verwijderen</button> ${tlBtn}`;
+    btns = `<button class="btn" onclick="doSend()">Opnieuw versturen</button> <button class="btn" style="background:#f59e0b;color:#fff" onclick="doMarkAccepted()">Markeer als getekend</button> <button class="btn btn-danger" onclick="doDelete()">Verwijderen</button> ${tlBtn}`;
   } else if (st==='draft'){
     const sendOrPush = deal.tl_quotation_id ? `<button class="btn btn-success" onclick="doSend()">Versturen</button>` : `<button class="btn" onclick="doPush()">Push naar TL</button>`;
     btns = `${sendOrPush} <a class="btn btn-ghost" href="/modules/sales-wizard.html?edit_deal_id=${esc(deal.id)}">Bewerken</a> <button class="btn btn-danger" onclick="doDelete()">Verwijderen</button> ${tlBtn}`;
@@ -136,6 +136,11 @@ function render(d){
   A.innerHTML = btns;
 }
 
+async function doMarkAccepted(){
+  if(!confirm('Markeert deze offerte handmatig als getekend (gebruik vóór de TL-webhook actief is). Doorgaan?')) return;
+  try { const r=await window.AgentShared.apiFetch('/api/sales-quotation-mark-accepted',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({deal_id:dealId})}); const d=await r.json(); if(!r.ok||d.success===false)throw new Error(d.error||'HTTP '+r.status); toast('Gemarkeerd als getekend','success'); load(); }
+  catch(e){ toast('Mislukt: '+e.message,'error'); }
+}
 function editConfirm(id){
   if (!confirm('Weet je zeker dat je de offerte wilt bewerken? Deze is al getekend en zal niet meer geldig zijn.')) return;
   window.location.href = '/modules/sales-wizard.html?edit_deal_id=' + id;

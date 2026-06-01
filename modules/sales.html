@@ -531,7 +531,7 @@ function quotationActions(q) {
   const editBtnConfirm = `<button class="btn btn-sm btn-ghost" onclick="editQuotation('${esc(q.deal_id)}', true)">Bewerken</button>`;
   const cancelBtn = `<button class="btn btn-sm btn-danger" data-delete="${esc(q.deal_id)}">Verwijderen</button>`;
   if (q.tl_quotation_status === 'accepted' || q.tl_quotation_status === 'signed') {
-    return `${detail} <button class="btn btn-sm btn-success" title="Subscription invoeren (Wizard 2 — binnenkort)" onclick="alert('Subscription invoeren komt in Wizard 2.')">Subscription invoeren</button> ${editBtnConfirm} ${tlLink}`;
+    return `${detail} <a class="btn btn-sm btn-success" href="/modules/subscription-wizard.html?deal_id=${esc(q.deal_id)}">Subscription invoeren</a> ${editBtnConfirm} ${tlLink}`;
   }
   if (q.tl_quotation_status === 'sent') {
     return `${detail} <button class="btn btn-sm btn-ghost" data-send="${esc(q.deal_id)}">Opnieuw versturen</button> ${tlLink} ${cancelBtn}`;
