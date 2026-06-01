@@ -81,6 +81,12 @@ export default async function handler(req, res) {
       first_call_at:      deal_data.first_call_at || null,
       quote_reference:    deal_data.quote_reference || null,
       tl_department_id:   departmentId,
+      payment_start_date:         deal_data.payment_start_date || null,
+      payment_downpayment_amount: deal_data.payment_downpayment_amount || null,
+      payment_downpayment_date:   deal_data.payment_downpayment_date || null,
+      payment_term_count:         deal_data.payment_term_count || null,
+      payment_term_start_date:    deal_data.payment_term_start_date || null,
+      payment_term_amount:        deal_data.payment_term_amount || null,
       tl_push_status:     'not_pushed',
       tl_quotation_status: 'draft',
     };
