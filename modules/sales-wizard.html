@@ -189,8 +189,8 @@
     </div>
 
     <div class="field" style="margin-top:18px;padding:10px 12px;background:var(--bg-elev-2);border-radius:6px">
-      <label style="display:flex;align-items:center;gap:8px;text-transform:none;letter-spacing:0;font-size:12.5px;color:var(--text)">
-        <input type="checkbox" id="avgCheck" /> <span>Klant is geïnformeerd over <a href="/privacy" target="_blank" style="color:var(--accent-cyan,#0891b2);text-decoration:underline">privacyverklaring</a> <span class="req">*</span></span>
+      <label style="display:flex;align-items:flex-start;gap:10px;text-transform:none;letter-spacing:0;font-size:12.5px;color:var(--text);line-height:1.45;cursor:pointer">
+        <input type="checkbox" id="avgCheck" style="flex:0 0 auto;width:16px;height:16px;margin-top:1px" /> <span style="flex:1">Klant is geïnformeerd over <a href="/privacy" target="_blank" style="color:var(--accent-cyan,#0891b2);text-decoration:underline">privacyverklaring</a> <span class="req">*</span></span>
       </label>
     </div>
 
@@ -207,7 +207,7 @@
       <div class="field"><label>Lead-bron <span class="req">*</span></label><select id="leadSource"><option value="">Selecteer een bron…</option></select></div>
     </div>
     <div class="row2">
-      <div class="field"><label>Start-datum offerte <span class="req">*</span></label><input id="startDate" type="date" /></div>
+      <div class="field"><label>Datum offerte <span class="req">*</span></label><input id="startDate" type="date" /></div>
       <div class="field">
         <label>Looptijd <span class="req">*</span></label>
         <div style="display:flex;gap:8px;align-items:center">
@@ -792,10 +792,24 @@ function addProductToDeal(productId) {
   state.wizard.products.push({
     product_id: p.id, product_name: p.name,
     quantity: 1, price_per_unit: Number(p.default_price) || 0, vat_percentage: p.vat_percentage,
+    price_includes_vat: !!p.price_includes_vat,
   });
   document.getElementById('prodPicker').classList.remove('show');
   renderDealProducts(); markDirty(); updateNextEnabled();
 }
+
+// Regelbedragen op basis van price_includes_vat. Prijs blijft hetzelfde nummer;
+// alleen de interpretatie (incl/excl) bepaalt de uitsplitsing.
+function lineAmounts(p) {
+  const base = (Number(p.quantity) || 0) * (Number(p.price_per_unit) || 0);
+  const rate = (Number(p.vat_percentage) || 0) / 100;
+  if (p.price_includes_vat) {
+    const excl = base / (1 + rate);
+    return { excl, incl: base, btw: base - excl };
+  }
+  return { excl: base, incl: base * (1 + rate), btw: base * rate };
+}
+
 function renderDealProducts() {
   const root = document.getElementById('dealProducts');
   const totals = document.getElementById('dealTotals');
@@ -807,24 +821,24 @@ function renderDealProducts() {
   }
   root.innerHTML = state.wizard.products.map((p, i) => `
     <div class="dp-row" data-i="${i}">
-      <div class="name"><strong>${esc(p.product_name)}</strong><small>BTW ${p.vat_percentage}%</small></div>
+      <div class="name"><strong>${esc(p.product_name)}</strong><small>BTW ${p.vat_percentage}% · <a data-toggle="${i}" style="cursor:pointer;color:var(--accent-cyan,#0891b2)">${p.price_includes_vat ? 'incl' : 'excl'} BTW ⇄</a></small></div>
       <input type="number" min="1" value="${p.quantity}" data-qty="${i}" />
       <input type="number" step="0.01" min="0" value="${p.price_per_unit}" data-price="${i}" />
-      <div style="text-align:right;font-weight:700">${fmtEuro(p.quantity * p.price_per_unit)}</div>
+      <div style="text-align:right;font-weight:700">${fmtEuro(lineAmounts(p).incl)}</div>
       <button class="action-btn" style="background:transparent;border:none;color:#dc2626;cursor:pointer;font-size:16px" data-rm="${i}">×</button>
     </div>`).join('');
   root.querySelectorAll('[data-qty]').forEach(inp => inp.addEventListener('input', e => { state.wizard.products[e.target.dataset.qty].quantity = Number(e.target.value) || 1; renderDealProducts(); markDirty(); updateNextEnabled(); }));
   root.querySelectorAll('[data-price]').forEach(inp => inp.addEventListener('input', e => { state.wizard.products[e.target.dataset.price].price_per_unit = Number(e.target.value) || 0; renderDealProducts(); markDirty(); updateNextEnabled(); }));
   root.querySelectorAll('[data-rm]').forEach(b => b.addEventListener('click', () => { state.wizard.products.splice(Number(b.dataset.rm), 1); renderDealProducts(); markDirty(); updateNextEnabled(); }));
+  root.querySelectorAll('[data-toggle]').forEach(a => a.addEventListener('click', () => { const p = state.wizard.products[a.dataset.toggle]; p.price_includes_vat = !p.price_includes_vat; renderDealProducts(); markDirty(); }));
 
-  // Totals
+  // Totals (mix-safe via lineAmounts)
   let subtotal = 0;
   const vatGrouped = {};
   for (const p of state.wizard.products) {
-    const line = p.quantity * p.price_per_unit;
-    // Prijzen zijn ex BTW per convention.
-    subtotal += line;
-    vatGrouped[p.vat_percentage] = (vatGrouped[p.vat_percentage] || 0) + line * (p.vat_percentage / 100);
+    const a = lineAmounts(p);
+    subtotal += a.excl;
+    vatGrouped[p.vat_percentage] = (vatGrouped[p.vat_percentage] || 0) + a.btw;
   }
   const vatTotal = Object.values(vatGrouped).reduce((a, b) => a + b, 0);
   const total = subtotal + vatTotal;
@@ -838,7 +852,7 @@ function renderDealProducts() {
 
 function totalInclBtw() {
   let total = 0;
-  for (const p of state.wizard.products) total += p.quantity * p.price_per_unit * (1 + p.vat_percentage / 100);
+  for (const p of state.wizard.products) total += lineAmounts(p).incl;
   return total;
 }
 
@@ -853,10 +867,9 @@ function renderReview() {
   const btwByRate = {};
   let subtotalExcl = 0;
   for (const p of w.products) {
-    const lineExcl = p.quantity * p.price_per_unit;
-    const btw = lineExcl * (p.vat_percentage / 100);
-    subtotalExcl += lineExcl;
-    btwByRate[p.vat_percentage] = (btwByRate[p.vat_percentage] || 0) + btw;
+    const a = lineAmounts(p);
+    subtotalExcl += a.excl;
+    btwByRate[p.vat_percentage] = (btwByRate[p.vat_percentage] || 0) + a.btw;
   }
   const btwRows = Object.keys(btwByRate).sort((a, b) => a - b)
     .map(r => `<tr><td colspan="3" style="color:var(--text-dim)">BTW ${r}%</td><td style="text-align:right">${fmtEuro(btwByRate[r])}</td></tr>`).join('');
@@ -889,7 +902,7 @@ function renderReview() {
         Looptijd: ${w.duration_months} mnd<br>
         <strong>Producten (${w.products.length}):</strong>
         <table style="width:100%;margin-top:6px;font-size:11.5px">
-          ${w.products.map(p => `<tr><td>${esc(p.product_name)}</td><td>${p.quantity}×</td><td>${fmtEuro(p.price_per_unit)}</td><td style="text-align:right">${fmtEuro(p.quantity * p.price_per_unit * (1 + p.vat_percentage/100))}</td></tr>`).join('')}
+          ${w.products.map(p => `<tr><td>${esc(p.product_name)}</td><td>${p.quantity}×</td><td>${fmtEuro(p.price_per_unit)} ${p.price_includes_vat ? 'incl' : 'excl'}</td><td style="text-align:right">${fmtEuro(lineAmounts(p).incl)}</td></tr>`).join('')}
           <tr><td colspan="3" style="border-top:1px solid var(--border);padding-top:4px;color:var(--text-dim)">Subtotaal excl. BTW</td><td style="text-align:right;border-top:1px solid var(--border);padding-top:4px">${fmtEuro(subtotalExcl)}</td></tr>
           ${btwRows}
           <tr style="font-weight:700"><td colspan="3">Totaal incl. BTW</td><td style="text-align:right">${fmtEuro(total)}</td></tr>

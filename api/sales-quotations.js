@@ -17,7 +17,7 @@ export default async function handler(req, res) {
     return res.status(403).json({ error: 'Geen rechten (sales.deal.view)' });
   }
 
-  const { status, search, owned_by_me } = req.query || {};
+  const { status, search, owned_by_me, customer_id } = req.query || {};
 
   try {
     let q = supabaseAdmin.from('deals')
@@ -25,9 +25,23 @@ export default async function handler(req, res) {
       .order('created_at', { ascending: false })
       .limit(300);
     if (owned_by_me === 'true') q = q.eq('sales_user_id', user.id);
+    if (customer_id) q = q.eq('customer_id', customer_id);
     if (status) q = q.eq('tl_quotation_status', status);
     const { data: deals, error } = await q;
     if (error) throw error;
+
+    // Incl-BTW totaal per deal uit deal_line_items (per regel, mix-safe).
+    const dealIds = (deals || []).map(d => d.id);
+    const inclByDeal = {};
+    if (dealIds.length) {
+      const { data: lines } = await supabaseAdmin.from('deal_line_items')
+        .select('deal_id, quantity, unit_price, vat_percentage, price_includes_vat').in('deal_id', dealIds);
+      for (const l of lines || []) {
+        const lineBase = Number(l.quantity) * Number(l.unit_price);
+        const incl = l.price_includes_vat ? lineBase : lineBase * (1 + Number(l.vat_percentage) / 100);
+        inclByDeal[l.deal_id] = (inclByDeal[l.deal_id] || 0) + incl;
+      }
+    }
 
     const custIds = [...new Set((deals || []).map(d => d.customer_id).filter(Boolean))];
     let custById = {};
@@ -46,6 +60,7 @@ export default async function handler(req, res) {
         customer_name:       `${c.first_name || ''} ${c.last_name || ''}`.trim() || '—',
         customer_email:      c.email || null,
         total_amount:        d.total_amount,
+        total_amount_incl:   inclByDeal[d.id] != null ? Math.round(inclByDeal[d.id] * 100) / 100 : null,
         created_at:          d.created_at,
         tl_quotation_id:     d.tl_quotation_id,
         tl_quotation_status: d.tl_quotation_status || 'draft',

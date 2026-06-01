@@ -464,6 +464,15 @@
           <button class="tab-btn" data-tab="communicatie" role="tab" aria-selected="false" aria-controls="tab-panel-communicatie" id="tab-btn-communicatie">
             <i class="ti ti-message-circle"></i> Communicatie <span class="tab-count" id="tab-count-communicatie">0</span>
           </button>
+          <button class="tab-btn" data-tab="offertes" role="tab" aria-selected="false" aria-controls="tab-panel-offertes" id="tab-btn-offertes">
+            <i class="ti ti-file-invoice"></i> Offertes <span class="tab-count" id="tab-count-offertes">0</span>
+          </button>
+          <button class="tab-btn" data-tab="abonnementen" role="tab" aria-selected="false" aria-controls="tab-panel-abonnementen" id="tab-btn-abonnementen">
+            <i class="ti ti-repeat"></i> Abonnementen
+          </button>
+          <button class="tab-btn" data-tab="facturen" role="tab" aria-selected="false" aria-controls="tab-panel-facturen" id="tab-btn-facturen">
+            <i class="ti ti-receipt"></i> Facturen
+          </button>
           <button class="tab-btn" data-tab="audit" role="tab" aria-selected="false" aria-controls="tab-panel-audit" id="tab-btn-audit">
             <i class="ti ti-history"></i> Audit <span class="tab-count" id="tab-count-audit">0</span>
           </button>
@@ -543,6 +552,30 @@
           <div class="detail-section">
             <h3><i class="ti ti-mail"></i> Email correspondentie</h3>
             <div class="placeholder-card">Beschikbaar in latere fase (post-MVP)</div>
+          </div>
+        </div>
+
+        <!-- Tab: Offertes -->
+        <div class="tab-content" id="tab-panel-offertes" role="tabpanel" aria-labelledby="tab-btn-offertes" hidden>
+          <div class="detail-section">
+            <h3><i class="ti ti-file-invoice"></i> Offertes</h3>
+            <div id="offertes-list"><div class="placeholder-card">Offertes laden…</div></div>
+          </div>
+        </div>
+
+        <!-- Tab: Abonnementen -->
+        <div class="tab-content" id="tab-panel-abonnementen" role="tabpanel" aria-labelledby="tab-btn-abonnementen" hidden>
+          <div class="detail-section">
+            <h3><i class="ti ti-repeat"></i> Abonnementen</h3>
+            <div class="placeholder-card">Abonnementen komen na Wizard 2 (subscription-creatie na ondertekening van de offerte).</div>
+          </div>
+        </div>
+
+        <!-- Tab: Facturen -->
+        <div class="tab-content" id="tab-panel-facturen" role="tabpanel" aria-labelledby="tab-btn-facturen" hidden>
+          <div class="detail-section">
+            <h3><i class="ti ti-receipt"></i> Facturen</h3>
+            <div class="placeholder-card">Facturen worden zichtbaar na Finance Fase 2 (TL-spiegel).</div>
           </div>
         </div>
 
@@ -790,7 +823,7 @@ const detailState = {
   //  gedeeld met lijst-view bulk-tag modal in commit 6)
   editingNoteId: null,    // id van note in inline-edit modus (null = geen)
 };
-const VALID_TABS = new Set(['profiel', 'communicatie', 'audit']);
+const VALID_TABS = new Set(['profiel', 'communicatie', 'offertes', 'abonnementen', 'facturen', 'audit']);
 const UUID_RE_CLIENT = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 const fmtDateTime = (iso) => {
@@ -883,13 +916,45 @@ function activateDetailTab(tabName, updateUrl) {
 
   if (tabName === 'profiel')           renderProfielTab();
   else if (tabName === 'communicatie') renderCommunicatieTab();
+  else if (tabName === 'offertes')     renderOffertesTab();
   else if (tabName === 'audit')        renderAuditTab();
+  // abonnementen + facturen: statische placeholders, geen render nodig
 
   if (updateUrl) {
     const url = new URL(window.location.href);
     url.searchParams.set('id', detailState.customerId);
     url.searchParams.set('tab', tabName);
     history.pushState({ tab: tabName }, '', url.toString());
+  }
+}
+
+const QUOTATION_STATUS_LABEL = { draft: 'Concept', sent: 'Verzonden', accepted: 'Bevestigd', declined: 'Afgewezen', expired: 'Verlopen' };
+async function renderOffertesTab() {
+  const wrap = $('#offertes-list');
+  wrap.innerHTML = '<div class="placeholder-card">Offertes laden…</div>';
+  try {
+    const res = await window.AgentShared.apiFetch('/api/sales-quotations?customer_id=' + encodeURIComponent(detailState.customerId));
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+    const qs = data.quotations || [];
+    const cnt = $('#tab-count-offertes'); if (cnt) cnt.textContent = qs.length;
+    if (!qs.length) { wrap.innerHTML = '<div class="placeholder-card">Nog geen offertes voor deze klant</div>'; return; }
+    const rows = qs.map((q) => {
+      const eur = q.total_amount_incl != null ? '€' + Number(q.total_amount_incl).toLocaleString('nl-NL', { minimumFractionDigits: 2 })
+        : (q.total_amount != null ? '€' + Number(q.total_amount).toLocaleString('nl-NL', { minimumFractionDigits: 2 }) : '—');
+      const tlLink = q.tl_quotation_id ? `<a href="https://focus.teamleader.eu/quotation_detail.php?id=${encodeURIComponent(q.tl_quotation_id)}" target="_blank">↗ TL</a>` : '—';
+      return `<tr>
+        <td>${q.created_at ? fmtDateLong(q.created_at) : '—'}</td>
+        <td>${eur}</td>
+        <td>${escapeHtml(QUOTATION_STATUS_LABEL[q.tl_quotation_status] || q.tl_quotation_status || '—')}</td>
+        <td>${tlLink}</td>
+      </tr>`;
+    }).join('');
+    wrap.innerHTML = `<div class="table-wrap"><table>
+      <thead><tr><th>Datum</th><th>Bedrag incl. BTW</th><th>Status</th><th>TL</th></tr></thead>
+      <tbody>${rows}</tbody></table></div>`;
+  } catch (e) {
+    wrap.innerHTML = '<div class="placeholder-card">Laden mislukt: ' + escapeHtml(e.message) + '</div>';
   }
 }
 

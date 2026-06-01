@@ -96,13 +96,14 @@ export default async function handler(req, res) {
 
     // 4. Offerte-regels (producten) persisteren voor de quotation-push.
     const lineRows = products.map((p, idx) => ({
-      deal_id:        dealId,
-      product_id:     p.product_id || null,
-      product_name:   p.product_name || 'Product',
-      quantity:       Number(p.quantity) || 1,
-      unit_price:     Number(p.price_per_unit) || 0,
-      vat_percentage: p.vat_percentage ?? 21,
-      position:       idx,
+      deal_id:            dealId,
+      product_id:         p.product_id || null,
+      product_name:       p.product_name || 'Product',
+      quantity:           Number(p.quantity) || 1,
+      unit_price:         Number(p.price_per_unit) || 0,
+      vat_percentage:     p.vat_percentage ?? 21,
+      price_includes_vat: !!p.price_includes_vat,
+      position:           idx,
     }));
     if (lineRows.length) {
       const { error: liErr } = await supabaseAdmin.from('deal_line_items').insert(lineRows);

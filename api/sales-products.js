@@ -19,6 +19,7 @@ function clean(input = {}) {
   if (input.category !== undefined)         out.category = input.category ? String(input.category).trim() : null;
   if (input.tl_product_id !== undefined)    out.tl_product_id = input.tl_product_id ? String(input.tl_product_id).trim() : null;
   if (input.is_active !== undefined)        out.is_active = Boolean(input.is_active);
+  if (input.price_includes_vat !== undefined) out.price_includes_vat = Boolean(input.price_includes_vat);
   return out;
 }
 

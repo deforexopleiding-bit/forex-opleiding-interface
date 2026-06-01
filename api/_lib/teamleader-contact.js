@@ -18,6 +18,19 @@ export async function getOrCreateContact(customer) {
     emails:     customer.email ? [{ type: 'primary', email: customer.email }] : [],
     telephones: customer.phone ? [{ type: 'phone', number: customer.phone }] : [],
   };
+  // Adres meesturen indien aanwezig (TL contacts.add addresses[]).
+  const line1 = [customer.address_street, customer.address_number].filter(Boolean).join(' ').trim();
+  if (line1 || customer.address_postal || customer.address_city) {
+    contactBody.addresses = [{
+      type: 'primary',
+      address: {
+        line_1:      line1 || null,
+        postal_code: customer.address_postal || null,
+        city:        customer.address_city || null,
+        country:     'NL',
+      },
+    }];
+  }
   const cr = await tlFetch('/contacts.add', { method: 'POST', body: JSON.stringify(contactBody) });
   if (!cr.ok) {
     const txt = await cr.text();
