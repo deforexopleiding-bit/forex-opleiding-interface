@@ -512,7 +512,7 @@ function renderQuotations() {
         const eurIncl = q.total_amount_incl != null ? '€' + Number(q.total_amount_incl).toLocaleString('nl-NL', { minimumFractionDigits: 2 }) : '—';
         return `<tr>
           <td><a href="/modules/klanten.html?id=${esc(q.customer_id)}" style="color:var(--text);font-weight:600;text-decoration:none">${esc(q.customer_name)}</a></td>
-          <td>${fmtRel(q.created_at)}</td>
+          <td>${fmtDateNL(q.created_at)}</td>
           <td>${esc(q.traject_label || '—')}</td>
           <td>${eurIncl}</td>
           <td>${quotationBadge(q.tl_quotation_status)}</td>

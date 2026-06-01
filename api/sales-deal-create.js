@@ -11,6 +11,9 @@ import { requirePermission } from './_lib/requirePermission.js';
 import { getActiveToken } from './_lib/teamleader-token.js';
 import { pushQuotationToTl } from './_lib/teamleader-quotation.js';
 
+// Lege string / undefined → null (voorkomt 'invalid input syntax for type uuid').
+const emptyToNull = (v) => (v === '' || v === undefined ? null : v);
+
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
   res.setHeader('Content-Type', 'application/json');
@@ -76,12 +79,12 @@ export default async function handler(req, res) {
       status:             'active',
       sales_user_id:      user.id,
       source:             deal_data.source || null,
-      source_lead_id:     deal_data.source_lead_id,
+      source_lead_id:     emptyToNull(deal_data.source_lead_id),
       downpayment_amount: deal_data.downpayment_amount || null,
       first_call_at:      deal_data.first_call_at || null,
       quote_reference:    deal_data.quote_reference || null,
       tl_department_id:   departmentId,
-      traject_variant_id: deal_data.traject_variant_id || null,
+      traject_variant_id: emptyToNull(deal_data.traject_variant_id),
       discount_percentage: Number(deal_data.discount_percentage) || 0,
       sale_type:          deal_data.sale_type || 'domestic',
       payment_start_date:         deal_data.payment_start_date || null,

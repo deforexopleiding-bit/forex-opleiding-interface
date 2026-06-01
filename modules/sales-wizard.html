@@ -644,9 +644,10 @@ function showResumeModal(draft) {
 }
 
 function populateLeadSources() {
+  // Lead-bron-feature nog niet actief: toon alleen 'Binnenkort beschikbaar'.
+  // (DB-lead_sources tijdelijk verborgen; bestaande deals blijven intact.)
   const sel = document.getElementById('leadSource');
-  sel.innerHTML = '<option value="">Binnenkort beschikbaar</option>' + state.leadSources.map(s => `<option value="${esc(s.id)}">${esc(s.name)}</option>`).join('');
-  sel.value = state.wizard.source_lead_id || '';
+  sel.innerHTML = '<option value="">Binnenkort beschikbaar</option>';
 }
 function trajectVariantLabel(variantId) {
   for (const t of state.trajects) for (const v of (t.variants || [])) if (v.id === variantId) return `${t.name} > ${v.name}`;
@@ -1112,7 +1113,7 @@ async function submitDeal(syncToTl) {
         date_of_birth: w.date_of_birth || null,
       },
       deal_data: {
-        source_lead_id: w.source_lead_id,
+        source_lead_id: w.source_lead_id || null,
         quote_reference: w.quote_reference || null,
         start_date: w.start_date,
         duration_months: w.duration_months,
