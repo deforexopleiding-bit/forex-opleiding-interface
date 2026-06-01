@@ -83,6 +83,7 @@ export default async function handler(req, res) {
       tl_department_id:   departmentId,
       traject_variant_id: deal_data.traject_variant_id || null,
       discount_percentage: Number(deal_data.discount_percentage) || 0,
+      sale_type:          deal_data.sale_type || 'domestic',
       payment_start_date:         deal_data.payment_start_date || null,
       payment_downpayment_amount: deal_data.payment_downpayment_amount || null,
       payment_downpayment_date:   deal_data.payment_downpayment_date || null,

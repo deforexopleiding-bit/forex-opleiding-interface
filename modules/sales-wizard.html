@@ -210,6 +210,13 @@
         <button class="btn btn-ghost btn-sm" id="trajectReset" type="button">Reset</button>
       </div>
       <div class="hint">Kies een traject-variant om de producten automatisch in te vullen. Je kunt daarna nog aanpassen.</div>
+      <label style="margin-top:10px">Type verkoop (BTW-regeling)</label>
+      <select id="saleType" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font:inherit;font-size:13px">
+        <option value="domestic">Binnenlands NL</option>
+        <option value="intracommunautair">Intracommunautair (EU)</option>
+        <option value="outside_eu">Buiten EU</option>
+      </select>
+      <div class="hint" id="saleTypeHint"></div>
     </div>
     <div class="row2">
       <div class="field"><label>Offerte-referentie</label><input id="quoteRef" placeholder="bv. Q2026-0123" /><div class="hint">TL offerte-nummer indien al opgesteld</div></div>
@@ -378,6 +385,7 @@ const state = {
     start_date: '', duration_months: 12,
     products: [],   // [{ product_id, product_name, quantity, price_per_unit, vat_percentage }]
     discount_percentage: 0,
+    sale_type: 'domestic',
     // Stap 4: betalingsvoorwaarden (optioneel)
     payment_start_date: '',
     payment_downpayment_amount: '',
@@ -559,7 +567,7 @@ async function init() {
           first_name: c.first_name || '', last_name: c.last_name || '', email: c.email || '', phone: c.phone || '',
           address_street: c.address_street || '', address_number: c.address_number || '', address_postal: c.address_postal || '', address_city: c.address_city || '',
           tl_department_id: deal.tl_department_id || '', traject_variant_id: deal.traject_variant_id || '',
-          discount_percentage: deal.discount_percentage || 0,
+          discount_percentage: deal.discount_percentage || 0, sale_type: deal.sale_type || 'domestic',
           quote_reference: deal.quote_reference || '', source_lead_id: deal.source_lead_id || '',
           start_date: deal.start_date || state.wizard.start_date, duration_months: deal.duration_months || 12,
           payment_start_date: deal.payment_start_date || '', payment_downpayment_amount: deal.payment_downpayment_amount || '',
@@ -716,6 +724,13 @@ function syncStep2Fields() {
   document.getElementById('startDate').value = state.wizard.start_date || '';
   document.getElementById('durationMonths').value = state.wizard.duration_months || 12;
   document.querySelectorAll('[data-dur]').forEach(c => c.classList.toggle('on', Number(c.dataset.dur) === Number(state.wizard.duration_months)));
+  document.getElementById('trajectSelect').value = state.wizard.traject_variant_id || '';
+  document.getElementById('saleType').value = state.wizard.sale_type || 'domestic';
+  updateSaleTypeHint();
+}
+function updateSaleTypeHint() {
+  const hint = document.getElementById('saleTypeHint');
+  if (hint) hint.textContent = (state.wizard.sale_type && state.wizard.sale_type !== 'domestic') ? 'Alle regels 0% BTW (verlegd / vrijgesteld).' : '';
 }
 
 ['f_first','f_last','f_email','f_phone','f_street','f_number','f_postal','f_city','f_dob'].forEach(id => {
@@ -857,6 +872,7 @@ document.getElementById('discountApply').addEventListener('click', () => {
 });
 document.getElementById('trajectSelect').addEventListener('change', e => applyTrajectVariant(e.target.value));
 document.getElementById('trajectReset').addEventListener('click', () => { document.getElementById('trajectSelect').value = ''; state.wizard.traject_variant_id = ''; markDirty(); });
+document.getElementById('saleType').addEventListener('change', e => { state.wizard.sale_type = e.target.value; updateSaleTypeHint(); renderDealProducts(); markDirty(); });
 document.getElementById('startDate').addEventListener('change', e => { state.wizard.start_date = e.target.value; markDirty(); updateNextEnabled(); });
 document.getElementById('durationMonths').addEventListener('input', e => { state.wizard.duration_months = Number(e.target.value); document.querySelectorAll('[data-dur]').forEach(c => c.classList.toggle('on', Number(c.dataset.dur) === Number(e.target.value))); markDirty(); updateNextEnabled(); });
 document.querySelectorAll('[data-dur]').forEach(c => c.addEventListener('click', () => {
@@ -906,7 +922,8 @@ function addProductToDeal(productId) {
 // alleen de interpretatie (incl/excl) bepaalt de uitsplitsing.
 function lineAmounts(p) {
   const base = (Number(p.quantity) || 0) * (Number(p.price_per_unit) || 0);
-  const rate = (Number(p.vat_percentage) || 0) / 100;
+  // Intracommunautair / buiten-EU: 0% BTW (verlegd / vrijgesteld).
+  const rate = (state.wizard.sale_type && state.wizard.sale_type !== 'domestic') ? 0 : (Number(p.vat_percentage) || 0) / 100;
   if (p.price_includes_vat) {
     const excl = base / (1 + rate);
     return { excl, incl: base, btw: base - excl };
@@ -1035,6 +1052,7 @@ function renderReview() {
         Start-datum: ${fmtDateLong(w.start_date)}<br>
         Looptijd: ${w.duration_months} mnd<br>
         ${w.traject_variant_id ? `Traject: ${esc(trajectVariantLabel(w.traject_variant_id) || '—')}<br>` : ''}
+        Type verkoop: ${w.sale_type === 'intracommunautair' ? 'Intracommunautair (EU)' : w.sale_type === 'outside_eu' ? 'Buiten EU' : 'Binnenlands NL'}<br>
         <strong>Producten (${w.products.length}):</strong>
         <table style="width:100%;margin-top:6px;font-size:11.5px">
           ${w.products.map(p => `<tr><td>${esc(p.product_name)}</td><td>${p.quantity}×</td><td>${fmtEuro(p.price_per_unit)} ${p.price_includes_vat ? 'incl' : 'excl'}</td><td style="text-align:right">${fmtEuro(lineAmounts(p).incl)}</td></tr>`).join('')}
@@ -1102,6 +1120,7 @@ async function submitDeal(syncToTl) {
         tl_department_id: w.tl_department_id || null,
         traject_variant_id: w.traject_variant_id || null,
         discount_percentage: Number(w.discount_percentage) || 0,
+        sale_type: w.sale_type || 'domestic',
         payment_start_date: w.payment_start_date || null,
         payment_downpayment_amount: Number(w.payment_downpayment_amount) || null,
         payment_downpayment_date: w.payment_downpayment_date || null,
