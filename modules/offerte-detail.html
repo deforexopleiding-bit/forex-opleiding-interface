@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Offerte · De Forex Opleiding</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/modules/shared/agent-shared.css" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Inter', system-ui, sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; }
+    .app { margin-left: 220px; padding: 24px 28px 60px; max-width: 1000px; }
+    .page-head { display:flex; align-items:flex-start; justify-content:space-between; gap:16px; padding-bottom:14px; border-bottom:1px solid var(--border); margin-bottom:18px; flex-wrap:wrap; }
+    h1 { font-size: 20px; font-weight: 800; }
+    .sub { font-size: 12.5px; color: var(--text-dim); margin-top: 2px; }
+    .badge { display:inline-block; padding:3px 10px; border-radius:10px; font-size:11px; font-weight:700; }
+    .grid { display:grid; grid-template-columns: repeat(auto-fit,minmax(200px,1fr)); gap:14px; margin-bottom:20px; }
+    .card { background: var(--bg-elev); border:1px solid var(--border); border-radius:10px; padding:14px 16px; }
+    .card h3 { font-size:11px; text-transform:uppercase; letter-spacing:.05em; color:var(--text-faint); margin-bottom:8px; }
+    .row { display:flex; justify-content:space-between; font-size:12.5px; padding:3px 0; }
+    .row .lbl { color:var(--text-dim); }
+    table { width:100%; border-collapse:collapse; background:var(--bg-elev); border:1px solid var(--border); border-radius:10px; overflow:hidden; }
+    th { text-align:left; padding:9px 12px; font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:.05em; color:var(--text-faint); border-bottom:1px solid var(--border); }
+    td { padding:10px 12px; font-size:12.5px; border-bottom:1px solid var(--border); }
+    tr:last-child td { border-bottom:none; }
+    .actions { display:flex; gap:8px; flex-wrap:wrap; }
+    .totals { margin-top:14px; max-width:320px; margin-left:auto; }
+    .totals .row.big { font-weight:800; font-size:14px; border-top:1px solid var(--border); padding-top:6px; margin-top:4px; }
+    .btn-danger { background: var(--red,#dc2626); color:#fff; }
+    .btn-success { background:#059669; color:#fff; }
+  </style>
+</head>
+<body>
+<div id="sidebar-mount"></div>
+
+<div class="app">
+  <div class="page-head">
+    <div>
+      <a href="/modules/sales.html" style="font-size:12px;color:var(--text-dim);text-decoration:none">← Terug naar Sales</a>
+      <h1 id="detailTitle">Offerte laden…</h1>
+      <div class="sub" id="detailSub"></div>
+    </div>
+    <div class="actions" id="detailActions"></div>
+  </div>
+
+  <div id="detailBody"><div class="sub">Laden…</div></div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script src="/modules/shared/supabase-client.js"></script>
+<script src="/modules/shared/agent-shared.js"></script>
+<script src="/modules/shared/theme-shared.js"></script>
+<script>
+const STATUS = { draft:{l:'Concept',c:'#64748b'}, sent:{l:'Verzonden',c:'#0891b2'}, accepted:{l:'Bevestigd',c:'#059669'}, declined:{l:'Afgewezen',c:'#b91c1c'}, expired:{l:'Verlopen',c:'#94a3b8'} };
+function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function toast(msg,kind){ const el=document.getElementById('toast'); el.textContent=msg; el.className='toast show '+(kind||''); setTimeout(()=>el.classList.remove('show'),2400); }
+function eur(v){ return v==null?'—':'€'+Number(v).toLocaleString('nl-NL',{minimumFractionDigits:2,maximumFractionDigits:2}); }
+function fmtDate(iso){ return iso?new Date(iso).toLocaleDateString('nl-NL',{day:'numeric',month:'long',year:'numeric'}):'—'; }
+const dealId = new URLSearchParams(location.search).get('id');
+
+async function init(){
+  await window._authSharedReady;
+  const profile = await window.AuthShared?.requireAuth();
+  if (!profile) return;
+  if (window.AgentShared) await window.AgentShared.renderUserSection(profile);
+  if (!dealId){ document.getElementById('detailBody').innerHTML='<div class="sub">Geen offerte-id.</div>'; return; }
+  load();
+}
+
+async function load(){
+  try {
+    const res = await window.AgentShared.apiFetch('/api/sales-deal-detail?id='+encodeURIComponent(dealId));
+    if (!res.ok) throw new Error('HTTP '+res.status);
+    const d = await res.json();
+    render(d);
+  } catch(e){ document.getElementById('detailBody').innerHTML='<div class="sub">Laden mislukt: '+esc(e.message)+'</div>'; }
+}
+
+function render(d){
+  const deal=d.deal||{}, c=d.customer||{}, lines=d.line_items||[], t=d.totals||{};
+  const st=deal.tl_quotation_status||'draft';
+  const sb=STATUS[st]||STATUS.draft;
+  document.getElementById('detailTitle').textContent = (d.traject?.label) || `Offerte ${String(deal.id).slice(0,8)}`;
+  document.getElementById('detailSub').innerHTML = `<span class="badge" style="background:${sb.c}22;color:${sb.c}">${sb.l}</span>`
+    + (deal.tl_quotation_id?` · TL-offerte gekoppeld`:'');
+
+  document.getElementById('detailBody').innerHTML = `
+    <div class="grid">
+      <div class="card"><h3>Klant</h3>
+        <div class="row"><span class="lbl">Naam</span><span>${esc((c.first_name||'')+' '+(c.last_name||''))}</span></div>
+        <div class="row"><span class="lbl">E-mail</span><span>${esc(c.email||'—')}</span></div>
+        <div class="row"><span class="lbl">Telefoon</span><span>${esc(c.phone||'—')}</span></div>
+        <div style="margin-top:8px"><a href="/modules/klanten.html?id=${esc(c.id)}" style="font-size:11.5px;color:var(--accent-cyan,#0891b2)">Klant-detail →</a></div>
+      </div>
+      <div class="card"><h3>Offerte</h3>
+        <div class="row"><span class="lbl">Bedrijf</span><span>${esc(d.entity||'—')}</span></div>
+        <div class="row"><span class="lbl">Traject</span><span>${esc(d.traject?.label||'—')}</span></div>
+        <div class="row"><span class="lbl">Referentie</span><span>${esc(deal.quote_reference||'—')}</span></div>
+        <div class="row"><span class="lbl">Datum</span><span>${fmtDate(deal.start_date)}</span></div>
+      </div>
+      <div class="card"><h3>Bedragen</h3>
+        <div class="row"><span class="lbl">Excl. BTW</span><span>${eur(t.excl)}</span></div>
+        <div class="row"><span class="lbl">Incl. BTW</span><span><strong>${eur(t.incl)}</strong></span></div>
+      </div>
+    </div>
+
+    <table>
+      <thead><tr><th>Product</th><th>Aantal</th><th>Prijs</th><th>BTW</th><th style="text-align:right">Totaal incl.</th></tr></thead>
+      <tbody>${lines.map(l=>{
+        const base=Number(l.quantity)*Number(l.unit_price);
+        const incl=l.price_includes_vat?base:base*(1+Number(l.vat_percentage)/100);
+        return `<tr><td>${esc(l.product_name)}</td><td>${l.quantity}×</td><td>${eur(l.unit_price)} ${l.price_includes_vat?'incl':'excl'}</td><td>${l.vat_percentage}%</td><td style="text-align:right">${eur(incl)}</td></tr>`;
+      }).join('') || '<tr><td colspan="5" class="sub">Geen regels</td></tr>'}</tbody>
+    </table>
+
+    <div class="totals card" style="margin-top:14px">
+      <div class="row"><span class="lbl">Subtotaal excl. BTW</span><span>${eur(t.excl)}</span></div>
+      <div class="row big"><span>Totaal incl. BTW</span><span>${eur(t.incl)}</span></div>
+    </div>`;
+
+  // Acties op basis van status.
+  const A=document.getElementById('detailActions');
+  const tlBtn = deal.tl_quotation_id ? `<a class="btn btn-ghost" href="https://focus.teamleader.eu/quotations/${esc(deal.tl_quotation_id)}" target="_blank">↗ Open in TL</a>` : '';
+  let btns='';
+  if (st==='accepted'){
+    btns = `<button class="btn btn-success" onclick="alert('Wizard 2 (Omzetten naar abonnement) komt eraan.')">Omzetten naar abonnement</button> ${tlBtn}`;
+  } else if (st==='sent'){
+    btns = `<button class="btn" onclick="doSend()">Opnieuw versturen</button> <button class="btn btn-danger" onclick="doCancel()">Annuleren</button> ${tlBtn}`;
+  } else if (st==='draft'){
+    const sendOrPush = deal.tl_quotation_id ? `<button class="btn btn-success" onclick="doSend()">Versturen</button>` : `<button class="btn" onclick="doPush()">Push naar TL</button>`;
+    btns = `${sendOrPush} <a class="btn btn-ghost" href="/modules/sales-wizard.html?edit_deal_id=${esc(deal.id)}">Bewerken</a> <button class="btn btn-danger" onclick="doCancel()">Annuleren</button> ${tlBtn}`;
+  } else {
+    btns = tlBtn;
+  }
+  A.innerHTML = btns;
+}
+
+async function doSend(){
+  try { const r=await window.AgentShared.apiFetch('/api/teamleader-send-quotation',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({deal_id:dealId})}); const d=await r.json(); if(!r.ok)throw new Error(d.error||'HTTP '+r.status); toast('Offerte verzonden','success'); load(); }
+  catch(e){ toast('Versturen mislukt: '+e.message,'error'); }
+}
+async function doPush(){
+  try { const r=await window.AgentShared.apiFetch('/api/sales-deal-retry-push',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({deal_id:dealId})}); const d=await r.json(); if(!r.ok||d.success===false)throw new Error(d.error||'HTTP '+r.status); toast('Naar Teamleader gepusht','success'); load(); }
+  catch(e){ toast('Push mislukt: '+e.message,'error'); }
+}
+async function doCancel(){
+  if(!confirm('Offerte annuleren? Klant kan deze niet meer ondertekenen.'))return;
+  try { const r=await window.AgentShared.apiFetch('/api/teamleader-cancel-quotation',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({deal_id:dealId})}); const d=await r.json(); if(!r.ok||d.success===false)throw new Error(d.error||'HTTP '+r.status); toast('Offerte geannuleerd','success'); load(); }
+  catch(e){ toast('Annuleren mislukt: '+e.message,'error'); }
+}
+
+init();
+</script>
+<script src="/modules/shared/permissions.js"></script>
+<script src="/modules/shared/sidebar.js"></script>
+</body>
+</html>

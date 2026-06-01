@@ -939,19 +939,23 @@ async function renderOffertesTab() {
     const qs = data.quotations || [];
     const cnt = $('#tab-count-offertes'); if (cnt) cnt.textContent = qs.length;
     if (!qs.length) { wrap.innerHTML = '<div class="placeholder-card">Nog geen offertes voor deze klant</div>'; return; }
+    const BADGE_COLOR = { draft:'#64748b', sent:'#0891b2', accepted:'#059669', declined:'#b91c1c', expired:'#94a3b8' };
     const rows = qs.map((q) => {
       const eur = q.total_amount_incl != null ? '€' + Number(q.total_amount_incl).toLocaleString('nl-NL', { minimumFractionDigits: 2 })
         : (q.total_amount != null ? '€' + Number(q.total_amount).toLocaleString('nl-NL', { minimumFractionDigits: 2 }) : '—');
-      const tlLink = q.tl_quotation_id ? `<a href="https://focus.teamleader.eu/quotation_detail.php?id=${encodeURIComponent(q.tl_quotation_id)}" target="_blank">↗ TL</a>` : '—';
+      const st = q.tl_quotation_status || 'draft';
+      const badge = `<span style="display:inline-block;padding:2px 8px;border-radius:8px;font-size:10px;font-weight:700;background:${BADGE_COLOR[st] || '#64748b'}22;color:${BADGE_COLOR[st] || '#64748b'}">${escapeHtml(QUOTATION_STATUS_LABEL[st] || st)}</span>`;
+      const detail = `<a class="btn btn-sm" href="/modules/offerte-detail.html?id=${encodeURIComponent(q.deal_id)}">Detail →</a>`;
+      const tlLink = q.tl_quotation_id ? `<a href="https://focus.teamleader.eu/quotations/${encodeURIComponent(q.tl_quotation_id)}" target="_blank" title="Open in Teamleader">↗ TL</a>` : '';
       return `<tr>
         <td>${q.created_at ? fmtDateLong(q.created_at) : '—'}</td>
         <td>${eur}</td>
-        <td>${escapeHtml(QUOTATION_STATUS_LABEL[q.tl_quotation_status] || q.tl_quotation_status || '—')}</td>
-        <td>${tlLink}</td>
+        <td>${badge}</td>
+        <td style="white-space:nowrap">${detail} ${tlLink}</td>
       </tr>`;
     }).join('');
     wrap.innerHTML = `<div class="table-wrap"><table>
-      <thead><tr><th>Datum</th><th>Bedrag incl. BTW</th><th>Status</th><th>TL</th></tr></thead>
+      <thead><tr><th>Datum</th><th>Bedrag incl. BTW</th><th>Status</th><th>Acties</th></tr></thead>
       <tbody>${rows}</tbody></table></div>`;
   } catch (e) {
     wrap.innerHTML = '<div class="placeholder-card">Laden mislukt: ' + escapeHtml(e.message) + '</div>';

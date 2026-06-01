@@ -30,10 +30,11 @@ async function resolveDepartmentId(preferred) {
   return active.id;
 }
 
-// Bouwt een leesbare titel-string uit de optionele betalingsvoorwaarden.
+// Bouwt een leesbare titel-string uit traject + optionele betalingsvoorwaarden.
 // Returnt null als er niets is ingevuld (caller gebruikt dan een fallback).
-function buildQuotationTitle(deal) {
+function buildQuotationTitle(deal, trajectLabel) {
   const seg = [];
+  if (trajectLabel) seg.push(trajectLabel);
   if (deal.payment_start_date) {
     const d = new Date(deal.payment_start_date);
     seg.push(`Start: ${String(d.getDate()).padStart(2, '0')}-${String(d.getMonth() + 1).padStart(2, '0')}-${d.getFullYear()}`);
@@ -100,8 +101,19 @@ export async function pushQuotationToTl(dealId) {
     // Bedrijfsentiteit: gekozen department (deal) → env → eerste actieve.
     const departmentId = await resolveDepartmentId(deal.tl_department_id);
 
-    // Leesbare titel uit betalingsvoorwaarden, anders klantnaam.
-    const title = buildQuotationTitle(deal)
+    // Traject-label (optioneel): "Traject > Variant".
+    let trajectLabel = null;
+    if (deal.traject_variant_id) {
+      const { data: variant } = await supabaseAdmin.from('traject_variants')
+        .select('name, traject_id').eq('id', deal.traject_variant_id).maybeSingle();
+      if (variant) {
+        const { data: traject } = await supabaseAdmin.from('trajects').select('name').eq('id', variant.traject_id).maybeSingle();
+        trajectLabel = [traject?.name, variant.name].filter(Boolean).join(' > ');
+      }
+    }
+
+    // Leesbare titel uit traject + betalingsvoorwaarden, anders klantnaam.
+    const title = buildQuotationTitle(deal, trajectLabel)
       || `${customer?.first_name || ''} ${customer?.last_name || ''}`.trim()
       || `Offerte ${String(dealId).slice(0, 8)}`;
 

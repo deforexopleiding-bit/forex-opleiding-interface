@@ -170,12 +170,12 @@
       <div class="field"><label>Telefoon <span class="req">*</span></label><input id="f_phone" /></div>
     </div>
     <div class="row3">
-      <div class="field"><label>Straat</label><input id="f_street" /></div>
+      <div class="field"><label>Straat <span class="req">*</span></label><input id="f_street" /></div>
       <div class="field"><label>Nr</label><input id="f_number" /></div>
-      <div class="field"><label>Postcode</label><input id="f_postal" placeholder="1234 AB" /></div>
+      <div class="field"><label>Postcode <span class="req">*</span></label><input id="f_postal" placeholder="1234 AB" /></div>
     </div>
     <div class="row2">
-      <div class="field"><label>Plaats</label><input id="f_city" /></div>
+      <div class="field"><label>Plaats <span class="req">*</span></label><input id="f_city" /></div>
       <div class="field"><label>Geboortedatum</label><input id="f_dob" type="date" /></div>
     </div>
 
@@ -193,6 +193,7 @@
         <input type="checkbox" id="avgCheck" style="flex:0 0 auto;width:16px;height:16px;margin-top:1px" /> <span style="flex:1">Klant is geïnformeerd over <a href="/privacy" target="_blank" style="color:var(--accent-cyan,#0891b2);text-decoration:underline">privacyverklaring</a> <span class="req">*</span></span>
       </label>
     </div>
+    <div id="step2Missing" style="font-size:11.5px;color:#dc2626;margin-top:8px"></div>
 
     <div style="margin-top:16px;display:flex;justify-content:center">
       <button class="btn btn-warn" id="dupCheckBtn">Check duplicates</button>
@@ -202,6 +203,14 @@
   <!-- STAP 2 -->
   <section class="panel" id="panel2">
     <h2>3. Offerte & producten</h2>
+    <div class="field" style="padding:12px;background:var(--bg-elev-2);border-radius:8px;margin-bottom:14px">
+      <label>Traject (optioneel)</label>
+      <div style="display:flex;gap:8px;align-items:center">
+        <select id="trajectSelect" style="flex:1;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font:inherit;font-size:13px"><option value="">Geen traject</option></select>
+        <button class="btn btn-ghost btn-sm" id="trajectReset" type="button">Reset</button>
+      </div>
+      <div class="hint">Kies een traject-variant om de producten automatisch in te vullen. Je kunt daarna nog aanpassen.</div>
+    </div>
     <div class="row2">
       <div class="field"><label>Offerte-referentie</label><input id="quoteRef" placeholder="bv. Q2026-0123" /><div class="hint">TL offerte-nummer indien al opgesteld</div></div>
       <div class="field"><label>Lead-bron <span class="req">*</span></label><select id="leadSource"><option value="">Selecteer een bron…</option></select></div>
@@ -339,9 +348,12 @@ const state = {
   tl_imported_contact_id: null,
   duplicate_check_status: 'pending', // 'pending' | 'completed'
   entities: [],
+  trajects: [],
+  editDealId: null,
   wizard: {
     // Stap 1: bedrijf
     tl_department_id: '',
+    traject_variant_id: '',
     // Stap 2: klant
     first_name: '', last_name: '', email: '', phone: '',
     address_street: '', address_number: '', address_postal: '', address_city: '',
@@ -495,19 +507,22 @@ async function init() {
   if (window.AgentShared) await window.AgentShared.renderUserSection(profile);
 
   // Load lead-sources + products + entities + TL-status in parallel
-  const [lsRes, prodRes, tlRes, entRes] = await Promise.all([
+  const [lsRes, prodRes, tlRes, entRes, trajRes] = await Promise.all([
     window.AgentShared.apiFetch('/api/lead-sources').then(r => r.json()).catch(() => ({})),
     window.AgentShared.apiFetch('/api/sales-products?active=true').then(r => r.json()).catch(() => ({})),
     window.AgentShared.apiFetch('/api/teamleader-test-connection').then(r => r.json()).catch(() => ({ connected: false })),
     window.AgentShared.apiFetch('/api/company-entities').then(r => r.json()).catch(() => ({})),
+    window.AgentShared.apiFetch('/api/trajecten').then(r => r.json()).catch(() => ({})),
   ]);
   state.leadSources = lsRes.sources || [];
   state.products = prodRes.products || [];
   state.tlConnected = !!tlRes.connected;
   state.tlUserInfo = tlRes.user_info || null;
   state.entities = entRes.entities || [];
+  state.trajects = trajRes.trajects || [];
   populateLeadSources();
   populateProductPicker();
+  populateTrajectSelect();
   renderEntityCards();
 
   // Default dates
@@ -515,6 +530,35 @@ async function init() {
 
   // URL-param: customer_id → load + lock stap 1
   const params = new URLSearchParams(location.search);
+
+  // URL-param: edit_deal_id → bestaande offerte heropenen voor bewerken.
+  const editDealId = params.get('edit_deal_id');
+  if (editDealId) {
+    state.editDealId = editDealId;
+    state.duplicate_check_status = 'completed';
+    try {
+      const r = await window.AgentShared.apiFetch('/api/sales-deal-detail?id=' + encodeURIComponent(editDealId));
+      if (r.ok) {
+        const d = await r.json();
+        const deal = d.deal || {}; const c = d.customer || {};
+        if (c.id) { state.matched_customer_id = c.id; showExistingBanner(`${c.first_name || ''} ${c.last_name || ''}`.trim()); }
+        Object.assign(state.wizard, {
+          first_name: c.first_name || '', last_name: c.last_name || '', email: c.email || '', phone: c.phone || '',
+          address_street: c.address_street || '', address_number: c.address_number || '', address_postal: c.address_postal || '', address_city: c.address_city || '',
+          tl_department_id: deal.tl_department_id || '', traject_variant_id: deal.traject_variant_id || '',
+          quote_reference: deal.quote_reference || '', source_lead_id: deal.source_lead_id || '',
+          start_date: deal.start_date || state.wizard.start_date, duration_months: deal.duration_months || 12,
+          payment_start_date: deal.payment_start_date || '', payment_downpayment_amount: deal.payment_downpayment_amount || '',
+          payment_downpayment_date: deal.payment_downpayment_date || '', payment_term_count: deal.payment_term_count || '',
+          payment_term_start_date: deal.payment_term_start_date || '', payment_term_amount: deal.payment_term_amount || '',
+          products: (d.line_items || []).map(l => ({ product_id: l.product_id, product_name: l.product_name, quantity: Number(l.quantity), price_per_unit: Number(l.unit_price), vat_percentage: l.vat_percentage, price_includes_vat: !!l.price_includes_vat })),
+        });
+      }
+    } catch {}
+    renderProgress(); syncStep1Fields(); syncStep2Fields(); renderEntityCards(); populateTrajectSelect(); renderTags(); renderDealProducts();
+    return;
+  }
+
   const preCustId = params.get('customer_id');
   if (preCustId) {
     state.matched_customer_id = preCustId;
@@ -581,6 +625,41 @@ function populateLeadSources() {
   const sel = document.getElementById('leadSource');
   sel.innerHTML = '<option value="">Selecteer een bron…</option>' + state.leadSources.map(s => `<option value="${esc(s.id)}">${esc(s.name)}</option>`).join('');
   sel.value = state.wizard.source_lead_id || '';
+}
+function trajectVariantLabel(variantId) {
+  for (const t of state.trajects) for (const v of (t.variants || [])) if (v.id === variantId) return `${t.name} > ${v.name}`;
+  return null;
+}
+function populateTrajectSelect() {
+  const sel = document.getElementById('trajectSelect');
+  if (!sel) return;
+  let html = '<option value="">Geen traject</option>';
+  for (const t of state.trajects) {
+    const vs = (t.variants || []).filter(v => v.is_active);
+    if (!vs.length) continue;
+    html += `<optgroup label="${esc(t.name)}">` + vs.map(v => `<option value="${esc(v.id)}">${esc(t.name)} > ${esc(v.name)}</option>`).join('') + '</optgroup>';
+  }
+  sel.innerHTML = html;
+  sel.value = state.wizard.traject_variant_id || '';
+}
+async function applyTrajectVariant(variantId) {
+  state.wizard.traject_variant_id = variantId || '';
+  if (!variantId) { markDirty(); return; }
+  try {
+    const r = await window.AgentShared.apiFetch('/api/traject-variants?variant_id=' + encodeURIComponent(variantId));
+    const d = await r.json();
+    const vps = d.products || [];
+    // Auto-fill producten uit variant (vervangt huidige lijst).
+    state.wizard.products = vps.map(vp => {
+      const p = state.products.find(x => x.id === vp.product_id) || {};
+      return { product_id: vp.product_id, product_name: p.name || 'Product',
+        quantity: Number(vp.quantity) || 1, price_per_unit: Number(p.default_price) || 0,
+        vat_percentage: p.vat_percentage ?? 21, price_includes_vat: !!p.price_includes_vat };
+    });
+    // Looptijd uit variant indien beschikbaar.
+    if (d.variant?.default_duration_months) state.wizard.duration_months = d.variant.default_duration_months;
+    renderDealProducts(); syncStep2Fields(); markDirty(); updateNextEnabled();
+  } catch (e) { toast('Traject laden mislukt: ' + e.message, 'error'); }
 }
 function populateProductPicker() {
   const cats = [...new Set(state.products.map(p => p.category).filter(Boolean))];
@@ -753,6 +832,8 @@ document.getElementById('swapCustLink').addEventListener('click', e => { e.preve
 // ── Stap 2 wiring ──
 document.getElementById('quoteRef').addEventListener('input', e => { state.wizard.quote_reference = e.target.value; markDirty(); });
 document.getElementById('leadSource').addEventListener('change', e => { state.wizard.source_lead_id = e.target.value; markDirty(); updateNextEnabled(); });
+document.getElementById('trajectSelect').addEventListener('change', e => applyTrajectVariant(e.target.value));
+document.getElementById('trajectReset').addEventListener('click', () => { document.getElementById('trajectSelect').value = ''; state.wizard.traject_variant_id = ''; markDirty(); });
 document.getElementById('startDate').addEventListener('change', e => { state.wizard.start_date = e.target.value; markDirty(); updateNextEnabled(); });
 document.getElementById('durationMonths').addEventListener('input', e => { state.wizard.duration_months = Number(e.target.value); document.querySelectorAll('[data-dur]').forEach(c => c.classList.toggle('on', Number(c.dataset.dur) === Number(e.target.value))); markDirty(); updateNextEnabled(); });
 document.querySelectorAll('[data-dur]').forEach(c => c.addEventListener('click', () => {
@@ -900,6 +981,7 @@ function renderReview() {
         Offerte-referentie: ${esc(w.quote_reference || '—')}<br>
         Start-datum: ${fmtDateLong(w.start_date)}<br>
         Looptijd: ${w.duration_months} mnd<br>
+        ${w.traject_variant_id ? `Traject: ${esc(trajectVariantLabel(w.traject_variant_id) || '—')}<br>` : ''}
         <strong>Producten (${w.products.length}):</strong>
         <table style="width:100%;margin-top:6px;font-size:11.5px">
           ${w.products.map(p => `<tr><td>${esc(p.product_name)}</td><td>${p.quantity}×</td><td>${fmtEuro(p.price_per_unit)} ${p.price_includes_vat ? 'incl' : 'excl'}</td><td style="text-align:right">${fmtEuro(lineAmounts(p).incl)}</td></tr>`).join('')}
@@ -933,7 +1015,7 @@ function renderReview() {
     const tlWho = state.tlUserInfo?.email ? ` als ${esc(state.tlUserInfo.email)}` : '';
     tlBanner.innerHTML = `<div class="tl-banner ok">✓ Verbonden met Teamleader${tlWho} — de offerte wordt aangemaakt in Teamleader.</div>`;
     submitBlock.innerHTML = `
-      <button class="btn btn-success" id="submitWithTl" style="width:100%;padding:12px">Verstuur offerte via Teamleader</button>
+      <button class="btn btn-success" id="submitWithTl" style="width:100%;padding:12px">Push naar Teamleader (concept, zonder versturen)</button>
       <a href="#" id="submitLocalOnly" style="text-align:center;font-size:11.5px;color:var(--text-dim);text-decoration:underline">Alleen lokaal opslaan (geen offerte versturen)</a>`;
     document.getElementById('submitWithTl').addEventListener('click', () => submitDeal(true));
     document.getElementById('submitLocalOnly').addEventListener('click', e => { e.preventDefault(); submitDeal(false); });
@@ -965,6 +1047,7 @@ async function submitDeal(syncToTl) {
         duration_months: w.duration_months,
         total_amount: totalInclBtw(),
         tl_department_id: w.tl_department_id || null,
+        traject_variant_id: w.traject_variant_id || null,
         payment_start_date: w.payment_start_date || null,
         payment_downpayment_amount: Number(w.payment_downpayment_amount) || null,
         payment_downpayment_date: w.payment_downpayment_date || null,
@@ -977,12 +1060,25 @@ async function submitDeal(syncToTl) {
       tl_imported_contact_id: state.tl_imported_contact_id,
       sync_to_tl: !!syncToTl,
     };
-    const res = await window.AgentShared.apiFetch('/api/sales-deal-create', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || 'HTTP ' + res.status);
-    toast(`Offerte aangemaakt voor ${w.first_name} ${w.last_name}`, 'success');
+    let res, data;
+    if (state.editDealId) {
+      // Bestaande offerte bijwerken (lokaal; TL-update volgt later).
+      res = await window.AgentShared.apiFetch('/api/sales-deal-update', {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ deal_id: state.editDealId, deal_data: payload.deal_data, products: w.products }),
+      });
+      data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'HTTP ' + res.status);
+      data.customer_id = state.matched_customer_id;
+      data.deal_id = state.editDealId;
+    } else {
+      res = await window.AgentShared.apiFetch('/api/sales-deal-create', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
+      });
+      data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'HTTP ' + res.status);
+    }
+    toast(state.editDealId ? `Offerte bijgewerkt voor ${w.first_name} ${w.last_name}` : `Offerte aangemaakt voor ${w.first_name} ${w.last_name}`, 'success');
     if (data.tl_quotation_status === 'sent') {
       setTimeout(() => toast(`Offerte verzonden naar ${w.email} via Teamleader`, 'success'), 1200);
     } else if (data.tl_quotation_status === 'draft' && syncToTl) {
@@ -991,10 +1087,10 @@ async function submitDeal(syncToTl) {
       setTimeout(() => toast(`Klant opgeslagen lokaal, offerte sturen mislukt: ${data.tl_error || ''}`, 'error'), 1200);
     }
     await window.AgentShared.apiFetch('/api/sales-wizard-drafts', { method: 'DELETE' });
-    setTimeout(() => { window.location.href = `/modules/klanten.html?id=${data.customer_id}`; }, 800);
+    setTimeout(() => { window.location.href = `/modules/offerte-detail.html?id=${data.deal_id}`; }, 800);
   } catch (e) {
     toast('Verzenden mislukt: ' + e.message, 'error');
-    if (btn) { btn.disabled = false; btn.textContent = btn.id === 'submitWithTl' ? 'Verstuur offerte via Teamleader' : 'Sla op (lokaal)'; }
+    if (btn) { btn.disabled = false; btn.textContent = btn.id === 'submitWithTl' ? 'Push naar Teamleader (concept, zonder versturen)' : 'Sla op (lokaal)'; }
   }
 }
 
@@ -1005,7 +1101,19 @@ function updateNextEnabled() {
   if (state.step === 1) {
     valid = !!w.tl_department_id; // bedrijf gekozen
   } else if (state.step === 2) {
-    valid = w.first_name && w.last_name && w.email && w.phone && w.avg_ok && (state.duplicate_check_status === 'completed' || state.matched_customer_id);
+    const missing = [];
+    if (!w.first_name) missing.push('Voornaam');
+    if (!w.last_name) missing.push('Achternaam');
+    if (!w.email) missing.push('E-mail');
+    if (!w.phone) missing.push('Telefoon');
+    if (!w.address_street) missing.push('Straat');
+    if (!w.address_postal) missing.push('Postcode');
+    if (!w.address_city) missing.push('Plaats');
+    if (!w.avg_ok) missing.push('Privacy-bevestiging');
+    const dupOk = state.duplicate_check_status === 'completed' || state.matched_customer_id;
+    const sum = document.getElementById('step2Missing');
+    if (sum) sum.innerHTML = missing.length ? `Ontbrekende velden: <strong>${missing.join(', ')}</strong>` : (dupOk ? '' : 'Doe eerst de duplicate-check.');
+    valid = missing.length === 0 && dupOk;
   } else if (state.step === 3) {
     valid = w.source_lead_id && w.start_date && Number(w.duration_months) >= 1 && w.products.length > 0 && w.products.every(p => p.quantity >= 1 && p.price_per_unit > 0);
   } else {
