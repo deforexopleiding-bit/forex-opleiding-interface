@@ -126,10 +126,10 @@ function render(d){
   if (st==='accepted' || st==='signed'){
     btns = `<button class="btn btn-success" onclick="alert('Wizard 2 (Omzetten naar abonnement) komt eraan.')">Omzetten naar abonnement</button> <button class="btn btn-ghost" onclick="editConfirm('${esc(deal.id)}')">Bewerken</button> ${tlBtn}`;
   } else if (st==='sent'){
-    btns = `<button class="btn" onclick="doSend()">Opnieuw versturen</button> <button class="btn btn-danger" onclick="doCancel()">Annuleren</button> ${tlBtn}`;
+    btns = `<button class="btn" onclick="doSend()">Opnieuw versturen</button> <button class="btn btn-danger" onclick="doDelete()">Verwijderen</button> ${tlBtn}`;
   } else if (st==='draft'){
     const sendOrPush = deal.tl_quotation_id ? `<button class="btn btn-success" onclick="doSend()">Versturen</button>` : `<button class="btn" onclick="doPush()">Push naar TL</button>`;
-    btns = `${sendOrPush} <a class="btn btn-ghost" href="/modules/sales-wizard.html?edit_deal_id=${esc(deal.id)}">Bewerken</a> <button class="btn btn-danger" onclick="doCancel()">Annuleren</button> ${tlBtn}`;
+    btns = `${sendOrPush} <a class="btn btn-ghost" href="/modules/sales-wizard.html?edit_deal_id=${esc(deal.id)}">Bewerken</a> <button class="btn btn-danger" onclick="doDelete()">Verwijderen</button> ${tlBtn}`;
   } else {
     btns = tlBtn;
   }
@@ -148,10 +148,11 @@ async function doPush(){
   try { const r=await window.AgentShared.apiFetch('/api/sales-deal-retry-push',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({deal_id:dealId})}); const d=await r.json(); if(!r.ok||d.success===false)throw new Error(d.error||'HTTP '+r.status); toast('Naar Teamleader gepusht','success'); load(); }
   catch(e){ toast('Push mislukt: '+e.message,'error'); }
 }
-async function doCancel(){
-  if(!confirm('Offerte annuleren? Klant kan deze niet meer ondertekenen.'))return;
-  try { const r=await window.AgentShared.apiFetch('/api/teamleader-cancel-quotation',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({deal_id:dealId})}); const d=await r.json(); if(!r.ok||d.success===false)throw new Error(d.error||'HTTP '+r.status); toast('Offerte geannuleerd','success'); load(); }
-  catch(e){ toast('Annuleren mislukt: '+e.message,'error'); }
+async function doDelete(){
+  if(!confirm('Weet je zeker dat je deze offerte wilt verwijderen?'))return;
+  if(!confirm('Dit kan NIET ongedaan worden. Offerte wordt zowel hier als in Teamleader verwijderd. Doorgaan?'))return;
+  try { const r=await window.AgentShared.apiFetch('/api/teamleader-delete-quotation',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({deal_id:dealId})}); const d=await r.json(); if(!r.ok||d.success===false)throw new Error(d.error||'HTTP '+r.status); toast('Offerte verwijderd','success'); setTimeout(()=>{window.location.href='/modules/sales.html?tab=offertes';},700); }
+  catch(e){ toast('Verwijderen mislukt: '+e.message,'error'); }
 }
 
 init();

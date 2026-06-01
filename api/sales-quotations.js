@@ -21,7 +21,8 @@ export default async function handler(req, res) {
 
   try {
     let q = supabaseAdmin.from('deals')
-      .select('id, customer_id, total_amount, created_at, sales_user_id, tl_quotation_id, tl_quotation_status, tl_quotation_sent_at, tl_quotation_email_sent_at, tl_quotation_accepted_at, tl_quotation_declined_at')
+      .select('id, customer_id, total_amount, created_at, sales_user_id, traject_variant_id, tl_quotation_id, tl_quotation_status, tl_quotation_sent_at, tl_quotation_email_sent_at, tl_quotation_accepted_at, tl_quotation_declined_at')
+      .is('archived_at', null)  // verwijderde offertes (soft-delete) niet tonen
       .order('created_at', { ascending: false })
       .limit(300);
     if (owned_by_me === 'true') q = q.eq('sales_user_id', user.id);
@@ -29,6 +30,20 @@ export default async function handler(req, res) {
     if (status) q = q.eq('tl_quotation_status', status);
     const { data: deals, error } = await q;
     if (error) throw error;
+
+    // Traject-label per deal (traject > variant).
+    const variantIds = [...new Set((deals || []).map(d => d.traject_variant_id).filter(Boolean))];
+    const trajectByVariant = {};
+    if (variantIds.length) {
+      const { data: variants } = await supabaseAdmin.from('traject_variants').select('id, name, traject_id').in('id', variantIds);
+      const trajectIds = [...new Set((variants || []).map(v => v.traject_id))];
+      const trajectName = {};
+      if (trajectIds.length) {
+        const { data: trajects } = await supabaseAdmin.from('trajects').select('id, name').in('id', trajectIds);
+        for (const t of trajects || []) trajectName[t.id] = t.name;
+      }
+      for (const v of variants || []) trajectByVariant[v.id] = [trajectName[v.traject_id], v.name].filter(Boolean).join(' > ');
+    }
 
     // Incl-BTW totaal per deal uit deal_line_items (per regel, mix-safe).
     const dealIds = (deals || []).map(d => d.id);
@@ -61,6 +76,7 @@ export default async function handler(req, res) {
         customer_email:      c.email || null,
         total_amount:        d.total_amount,
         total_amount_incl:   inclByDeal[d.id] != null ? Math.round(inclByDeal[d.id] * 100) / 100 : null,
+        traject_label:       d.traject_variant_id ? (trajectByVariant[d.traject_variant_id] || null) : null,
         created_at:          d.created_at,
         tl_quotation_id:     d.tl_quotation_id,
         tl_quotation_status: d.tl_quotation_status || 'draft',
