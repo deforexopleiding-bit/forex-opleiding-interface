@@ -93,6 +93,7 @@
   <div class="tabs" role="tablist">
     <button class="tab active" data-tab="customers" role="tab">Mijn klanten</button>
     <button class="tab" data-tab="quotations" role="tab">Offertes</button>
+    <button class="tab" data-tab="trajecten" role="tab">Trajecten</button>
     <button class="tab" data-tab="products" role="tab">Producten</button>
   </div>
 
@@ -130,6 +131,7 @@
         <option value="declined">Afgewezen</option>
         <option value="expired">Verlopen</option>
       </select>
+      <button class="btn btn-ghost" id="quotRefresh" title="Vernieuwen" style="margin-left:auto">🔄 Vernieuwen</button>
     </div>
     <div id="quotationsList"><div class="empty">Laden…</div></div>
   </section>
@@ -144,6 +146,48 @@
     </div>
     <div id="productsList"><div class="empty">Laden…</div></div>
   </section>
+
+  <!-- ── Tab: Trajecten ── -->
+  <section class="tab-content" id="tab-trajecten">
+    <div class="toolbar">
+      <span style="font-size:12.5px;color:var(--text-dim)">Bundels van producten met varianten (bv. "Membership &gt; Premium 36 mnd").</span>
+      <button class="btn" id="newTrajectBtn" style="margin-left:auto">+ Nieuw traject</button>
+    </div>
+    <div id="trajectenList"><div class="empty">Laden…</div></div>
+  </section>
+</div>
+
+<!-- Traject modal -->
+<div class="modal-overlay" id="trajectModal">
+  <div class="modal">
+    <div class="modal-head"><span class="modal-title" id="trajectModalTitle">Nieuw traject</span><button class="modal-close" id="trajectModalClose">&times;</button></div>
+    <div class="modal-body">
+      <div class="field"><label>Naam *</label><input id="tmName" maxlength="200" /></div>
+      <div class="field"><label>Beschrijving</label><textarea id="tmDesc"></textarea></div>
+      <div class="err" id="tmErr"></div>
+    </div>
+    <div class="modal-foot"><button class="btn btn-ghost" id="tmCancel">Annuleer</button><button class="btn" id="tmSave">Opslaan</button></div>
+  </div>
+</div>
+
+<!-- Variant modal -->
+<div class="modal-overlay" id="variantModal">
+  <div class="modal">
+    <div class="modal-head"><span class="modal-title" id="variantModalTitle">Nieuwe variant</span><button class="modal-close" id="vmClose">&times;</button></div>
+    <div class="modal-body">
+      <div class="field"><label>Naam * <span style="font-weight:400;color:var(--text-faint)">(bv. "Premium 36 mnd")</span></label><input id="vmName" maxlength="200" /></div>
+      <div class="field-row">
+        <div class="field"><label>Looptijd (mnd)</label><input id="vmDuration" type="number" min="1" /></div>
+        <div class="field"><label style="display:flex;align-items:center;gap:6px;margin-top:22px"><input type="checkbox" id="vmDefault" /> Standaard-variant</label></div>
+      </div>
+      <div class="field"><label>Producten in deze variant</label>
+        <div id="vmProducts" style="border:1px solid var(--border);border-radius:8px;padding:8px;min-height:40px"></div>
+        <select class="search" id="vmProductPicker" style="width:100%;margin-top:6px"><option value="">+ Product toevoegen…</option></select>
+      </div>
+      <div class="err" id="vmErr"></div>
+    </div>
+    <div class="modal-foot"><button class="btn btn-ghost" id="vmCancel">Annuleer</button><button class="btn" id="vmSave">Opslaan</button></div>
+  </div>
 </div>
 
 <!-- Offerte versturen modal -->
@@ -214,7 +258,7 @@
 <script src="/modules/shared/agent-shared.js"></script>
 <script src="/modules/shared/theme-shared.js"></script>
 <script>
-const state = { tab: 'customers', perms: null, products: [], customers: [], quotations: [], emailTemplates: null, sendDealId: null, editingId: null };
+const state = { tab: 'customers', perms: null, products: [], customers: [], quotations: [], emailTemplates: null, sendDealId: null, editingId: null, trajects: [], editingTrajectId: null, variantCtx: null, variantProducts: [] };
 
 function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]); }
 function fmtEuro(v) { if (v == null) return '—'; return '€' + Number(v).toLocaleString('nl-NL', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
@@ -245,6 +289,7 @@ document.querySelectorAll('.tab').forEach(t => {
     stopQuotationsPolling();
     if (state.tab === 'products') loadProducts();
     else if (state.tab === 'quotations') { loadQuotations(); startQuotationsPolling(); }
+    else if (state.tab === 'trajecten') loadTrajecten();
     else loadCustomers();
   });
 });
@@ -488,24 +533,26 @@ function renderQuotations() {
   document.querySelectorAll('[data-cancel]').forEach(b => b.addEventListener('click', () => cancelQuotation(b.dataset.cancel)));
 }
 function quotationActions(q) {
-  const tlLink = q.tl_quotation_id ? `<a class="action-btn" href="https://focus.teamleader.eu/quotation_detail.php?id=${esc(q.tl_quotation_id)}" target="_blank" title="Open in Teamleader">↗ TL</a>` : '';
+  const tlLink = q.tl_quotation_id ? `<a class="action-btn" href="https://focus.teamleader.eu/quotations/${esc(q.tl_quotation_id)}" target="_blank" title="Open in Teamleader">↗ TL</a>` : '';
+  const detail = `<a class="action-btn" href="/modules/offerte-detail.html?id=${esc(q.deal_id)}" title="Offerte-detail">👁</a>`;
+  const editBtn = `<a class="btn btn-sm btn-ghost" href="/modules/sales-wizard.html?edit_deal_id=${esc(q.deal_id)}">Bewerken</a>`;
   const cancelBtn = `<button class="btn btn-sm btn-danger" data-cancel="${esc(q.deal_id)}">Annuleren</button>`;
   if (q.tl_quotation_status === 'accepted') {
-    return `<button class="btn btn-sm btn-success" title="Subscription invoeren (Wizard 2 — binnenkort)" onclick="alert('Subscription invoeren komt in Wizard 2.')">Subscription invoeren</button> ${tlLink}`;
+    return `${detail} <button class="btn btn-sm btn-success" title="Subscription invoeren (Wizard 2 — binnenkort)" onclick="alert('Subscription invoeren komt in Wizard 2.')">Subscription invoeren</button> ${tlLink}`;
   }
   if (q.tl_quotation_status === 'sent') {
-    return `<button class="btn btn-sm btn-ghost" data-send="${esc(q.deal_id)}">Opnieuw versturen</button> ${tlLink} ${cancelBtn}`;
+    return `${detail} <button class="btn btn-sm btn-ghost" data-send="${esc(q.deal_id)}">Opnieuw versturen</button> ${tlLink} ${cancelBtn}`;
   }
   if (q.tl_quotation_status === 'failed') {
-    return `<button class="btn btn-sm btn-ghost" data-push="${esc(q.deal_id)}">Retry push</button> ${cancelBtn}`;
+    return `${detail} <button class="btn btn-sm btn-ghost" data-push="${esc(q.deal_id)}">Retry push</button> ${editBtn} ${cancelBtn}`;
   }
   if (q.tl_quotation_status === 'draft' && q.tl_quotation_id) {
-    return `<button class="btn btn-sm btn-success" data-send="${esc(q.deal_id)}">Versturen</button> ${tlLink} ${cancelBtn}`;
+    return `${detail} <button class="btn btn-sm btn-success" data-send="${esc(q.deal_id)}">Versturen</button> ${editBtn} ${tlLink} ${cancelBtn}`;
   }
   if (q.tl_quotation_status === 'draft' && !q.tl_quotation_id) {
-    return `<button class="btn btn-sm" data-push="${esc(q.deal_id)}">Push naar TL</button> ${cancelBtn}`;
+    return `${detail} <button class="btn btn-sm" data-push="${esc(q.deal_id)}">Push naar TL</button> ${editBtn} ${cancelBtn}`;
   }
-  return tlLink || '—';
+  return `${detail} ${tlLink}` || '—';
 }
 async function retryPush(dealId) {
   try {
@@ -588,6 +635,132 @@ document.getElementById('sendConfirm').addEventListener('click', doSendQuotation
 document.getElementById('quotSearch').addEventListener('input', () => { clearTimeout(window._qs); window._qs = setTimeout(loadQuotations, 250); });
 document.getElementById('quotAllToggle').addEventListener('change', () => loadQuotations());
 document.getElementById('quotStatus').addEventListener('change', () => loadQuotations());
+document.getElementById('quotRefresh').addEventListener('click', () => loadQuotations());
+
+// ── Trajecten ──
+async function loadTrajecten() {
+  const wrap = document.getElementById('trajectenList');
+  wrap.innerHTML = '<div class="empty">Laden…</div>';
+  try {
+    const res = await window.AgentShared.apiFetch('/api/trajecten');
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+    state.trajects = data.trajects || [];
+    renderTrajecten();
+  } catch (e) { wrap.innerHTML = '<div class="empty">Laden mislukt: ' + esc(e.message) + '</div>'; }
+}
+function renderTrajecten() {
+  if (!state.trajects.length) { document.getElementById('trajectenList').innerHTML = '<div class="empty">Nog geen trajecten. Maak er een aan.</div>'; return; }
+  document.getElementById('trajectenList').innerHTML = state.trajects.map(t => `
+    <div class="section-card" style="margin-bottom:12px">
+      <div class="section-header">
+        <span><strong>${esc(t.name)}</strong> <span style="font-size:11px;color:var(--text-faint)">${t.variant_count} varianten</span></span>
+        <span style="display:flex;gap:6px">
+          <button class="btn btn-sm" data-addvar="${t.id}">+ Variant</button>
+          <button class="action-btn" data-edittraject="${t.id}" title="Bewerken">✎</button>
+          <button class="action-btn" data-deltraject="${t.id}" title="Archiveren">🗄</button>
+        </span>
+      </div>
+      <div style="font-size:12px;color:var(--text-dim);padding:0 4px 8px">${esc(t.description || '')}</div>
+      ${(t.variants || []).map(v => `
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 4px;border-top:1px solid var(--border);font-size:12.5px">
+          <span>${esc(v.name)} ${v.is_default ? '<span class="badge active">standaard</span>' : ''} <span style="color:var(--text-faint)">· ${v.product_count} producten${v.default_duration_months ? ' · ' + v.default_duration_months + ' mnd' : ''}</span></span>
+          <span style="display:flex;gap:6px">
+            <button class="action-btn" data-editvar="${v.id}" data-vartraject="${t.id}" title="Bewerken">✎</button>
+            <button class="action-btn" data-delvar="${v.id}" title="Verwijderen">×</button>
+          </span>
+        </div>`).join('')}
+    </div>`).join('');
+  document.querySelectorAll('[data-edittraject]').forEach(b => b.addEventListener('click', () => openTrajectModal(b.dataset.edittraject)));
+  document.querySelectorAll('[data-deltraject]').forEach(b => b.addEventListener('click', () => deleteTraject(b.dataset.deltraject)));
+  document.querySelectorAll('[data-addvar]').forEach(b => b.addEventListener('click', () => openVariantModal(b.dataset.addvar, null)));
+  document.querySelectorAll('[data-editvar]').forEach(b => b.addEventListener('click', () => openVariantModal(b.dataset.vartraject, b.dataset.editvar)));
+  document.querySelectorAll('[data-delvar]').forEach(b => b.addEventListener('click', () => deleteVariant(b.dataset.delvar)));
+}
+function openTrajectModal(id) {
+  state.editingTrajectId = id || null;
+  const t = id ? state.trajects.find(x => x.id === id) : null;
+  document.getElementById('trajectModalTitle').textContent = id ? 'Traject bewerken' : 'Nieuw traject';
+  document.getElementById('tmName').value = t?.name || '';
+  document.getElementById('tmDesc').value = t?.description || '';
+  document.getElementById('tmErr').textContent = '';
+  document.getElementById('trajectModal').classList.add('show');
+}
+async function saveTraject() {
+  const payload = { name: document.getElementById('tmName').value.trim(), description: document.getElementById('tmDesc').value.trim() || null };
+  if (!payload.name) { document.getElementById('tmErr').textContent = 'Naam verplicht'; return; }
+  try {
+    const url = state.editingTrajectId ? '/api/trajecten?id=' + state.editingTrajectId : '/api/trajecten';
+    const res = await window.AgentShared.apiFetch(url, { method: state.editingTrajectId ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+    if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e.error || 'HTTP ' + res.status); }
+    document.getElementById('trajectModal').classList.remove('show');
+    toast('Opgeslagen', 'success'); loadTrajecten();
+  } catch (e) { document.getElementById('tmErr').textContent = e.message; }
+}
+async function deleteTraject(id) {
+  if (!confirm('Traject archiveren?')) return;
+  try { await window.AgentShared.apiFetch('/api/trajecten?id=' + id, { method: 'DELETE' }); toast('Gearchiveerd', 'success'); loadTrajecten(); }
+  catch (e) { toast(e.message, 'error'); }
+}
+async function openVariantModal(trajectId, variantId) {
+  state.variantCtx = { trajectId, variantId: variantId || null };
+  state.variantProducts = [];
+  document.getElementById('variantModalTitle').textContent = variantId ? 'Variant bewerken' : 'Nieuwe variant';
+  document.getElementById('vmErr').textContent = '';
+  // Product-picker vullen.
+  if (!state.products.length) { try { const r = await window.AgentShared.apiFetch('/api/sales-products?active=true'); const d = await r.json(); state.products = d.products || []; } catch {} }
+  const pick = document.getElementById('vmProductPicker');
+  pick.innerHTML = '<option value="">+ Product toevoegen…</option>' + state.products.map(p => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('');
+  let v = null;
+  if (variantId) {
+    try { const r = await window.AgentShared.apiFetch('/api/traject-variants?variant_id=' + variantId); const d = await r.json(); v = d.variant; state.variantProducts = (d.products || []).map(x => ({ product_id: x.product_id, quantity: x.quantity })); } catch {}
+  }
+  document.getElementById('vmName').value = v?.name || '';
+  document.getElementById('vmDuration').value = v?.default_duration_months || '';
+  document.getElementById('vmDefault').checked = !!v?.is_default;
+  renderVariantProducts();
+  document.getElementById('variantModal').classList.add('show');
+}
+function renderVariantProducts() {
+  const wrap = document.getElementById('vmProducts');
+  if (!state.variantProducts.length) { wrap.innerHTML = '<span style="font-size:11.5px;color:var(--text-faint)">Nog geen producten</span>'; return; }
+  wrap.innerHTML = state.variantProducts.map((vp, i) => {
+    const p = state.products.find(x => x.id === vp.product_id);
+    return `<div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;font-size:12.5px"><span>${esc(p?.name || vp.product_id)} <input type="number" min="1" value="${vp.quantity}" data-vq="${i}" style="width:54px;margin-left:6px" /></span><button class="action-btn" data-vrm="${i}" style="color:#dc2626">×</button></div>`;
+  }).join('');
+  wrap.querySelectorAll('[data-vq]').forEach(inp => inp.addEventListener('input', e => { state.variantProducts[e.target.dataset.vq].quantity = Number(e.target.value) || 1; }));
+  wrap.querySelectorAll('[data-vrm]').forEach(b => b.addEventListener('click', () => { state.variantProducts.splice(Number(b.dataset.vrm), 1); renderVariantProducts(); }));
+}
+document.getElementById('vmProductPicker').addEventListener('change', e => { if (e.target.value) { state.variantProducts.push({ product_id: e.target.value, quantity: 1 }); e.target.value = ''; renderVariantProducts(); } });
+async function saveVariant() {
+  const name = document.getElementById('vmName').value.trim();
+  if (!name) { document.getElementById('vmErr').textContent = 'Naam verplicht'; return; }
+  const payload = {
+    traject_id: state.variantCtx.trajectId, name,
+    default_duration_months: document.getElementById('vmDuration').value ? Number(document.getElementById('vmDuration').value) : null,
+    is_default: document.getElementById('vmDefault').checked,
+    products: state.variantProducts,
+  };
+  try {
+    const url = state.variantCtx.variantId ? '/api/traject-variants?id=' + state.variantCtx.variantId : '/api/traject-variants';
+    const res = await window.AgentShared.apiFetch(url, { method: state.variantCtx.variantId ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+    if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e.error || 'HTTP ' + res.status); }
+    document.getElementById('variantModal').classList.remove('show');
+    toast('Variant opgeslagen', 'success'); loadTrajecten();
+  } catch (e) { document.getElementById('vmErr').textContent = e.message; }
+}
+async function deleteVariant(id) {
+  if (!confirm('Variant verwijderen?')) return;
+  try { await window.AgentShared.apiFetch('/api/traject-variants?id=' + id, { method: 'DELETE' }); toast('Verwijderd', 'success'); loadTrajecten(); }
+  catch (e) { toast(e.message, 'error'); }
+}
+document.getElementById('newTrajectBtn').addEventListener('click', () => openTrajectModal(null));
+document.getElementById('trajectModalClose').addEventListener('click', () => document.getElementById('trajectModal').classList.remove('show'));
+document.getElementById('tmCancel').addEventListener('click', () => document.getElementById('trajectModal').classList.remove('show'));
+document.getElementById('tmSave').addEventListener('click', saveTraject);
+document.getElementById('vmClose').addEventListener('click', () => document.getElementById('variantModal').classList.remove('show'));
+document.getElementById('vmCancel').addEventListener('click', () => document.getElementById('variantModal').classList.remove('show'));
+document.getElementById('vmSave').addEventListener('click', saveVariant);
 
 (async () => {
   await window._authSharedReady;

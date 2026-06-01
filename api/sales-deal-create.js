@@ -81,6 +81,7 @@ export default async function handler(req, res) {
       first_call_at:      deal_data.first_call_at || null,
       quote_reference:    deal_data.quote_reference || null,
       tl_department_id:   departmentId,
+      traject_variant_id: deal_data.traject_variant_id || null,
       payment_start_date:         deal_data.payment_start_date || null,
       payment_downpayment_amount: deal_data.payment_downpayment_amount || null,
       payment_downpayment_date:   deal_data.payment_downpayment_date || null,
