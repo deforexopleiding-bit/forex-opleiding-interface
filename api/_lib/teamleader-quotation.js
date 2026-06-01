@@ -147,12 +147,23 @@ export async function pushQuotationToTl(dealId) {
     // de BTW-uitsplitsing correct bij gemengde tarieven (een enkele negatieve
     // korting-regel kan dat niet). De klant ziet dus lagere stukprijzen.
     const discFactor = 1 - (Number(deal.discount_percentage) || 0) / 100;
-    const lineItems = lines.map(l => ({
-      quantity:    Number(l.quantity),
-      description: l.product_name,
-      unit_price:  { amount: Math.round(Number(l.unit_price) * discFactor * 100) / 100, currency: CURRENCY, tax: l.price_includes_vat ? 'including' : 'excluding' },
-      tax_rate_id: taxRateIdFor(l.vat_percentage, departmentId, deal.sale_type),
-    }));
+    // TL accepteert ALLEEN unit_price.tax = 'excluding'. Incl-BTW regels worden
+    // omgerekend naar excl (incl / (1 + vat%)). Bij intra/buiten-EU is het tarief
+    // 0% → excl = incl (geen omrekening). TL berekent de BTW zelf uit excl +
+    // tax_rate_id, dus de eindbedragen blijven identiek.
+    const zeroVat = deal.sale_type && deal.sale_type !== 'domestic';
+    const lineItems = lines.map(l => {
+      const rate = zeroVat ? 0 : (Number(l.vat_percentage) || 0) / 100;
+      let amount = Number(l.unit_price);
+      if (l.price_includes_vat && rate > 0) amount = amount / (1 + rate);
+      amount = Math.round(amount * discFactor * 100) / 100;
+      return {
+        quantity:    Number(l.quantity),
+        description: l.product_name,
+        unit_price:  { amount, currency: CURRENCY, tax: 'excluding' },
+        tax_rate_id: taxRateIdFor(l.vat_percentage, departmentId, deal.sale_type),
+      };
+    });
     const quotationBody = {
       deal_id:       tlDealId,
       department_id: departmentId,
