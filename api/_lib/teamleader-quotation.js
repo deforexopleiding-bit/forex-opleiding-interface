@@ -48,8 +48,24 @@ function buildQuotationTitle(deal) {
   return seg.length ? seg.join(' | ') : null;
 }
 
-// Map onze vat_percentage → geconfigureerde TL tax_rate_id (env).
-function taxRateIdFor(vatPercentage) {
+// TL department-UUID → korte naam voor per-department env-vars.
+const DEPT_NAME = {
+  '09d67371-6947-03f6-bd5e-410dd8636344': 'ONLINE',
+  '0da396bf-1074-0425-ac5c-fa1141b41cb1': 'FYSIEK',
+  '9adca043-0ebc-09da-a45e-f21798841cb2': 'RETENTIE',
+};
+
+// Map vat_percentage (+ optioneel department) → TL tax_rate_id.
+// Tax rates kunnen per department verschillen: probeer eerst de
+// per-department env-var, val terug op de generieke.
+//   TEAMLEADER_TAX_RATE_ID_21_RETENTIE  (specifiek)
+//   TEAMLEADER_TAX_RATE_ID_21           (fallback)
+function taxRateIdFor(vatPercentage, departmentId) {
+  const dept = DEPT_NAME[departmentId];
+  if (dept) {
+    const specific = process.env[`TEAMLEADER_TAX_RATE_ID_${vatPercentage}_${dept}`];
+    if (specific) return specific;
+  }
   const id = process.env[`TEAMLEADER_TAX_RATE_ID_${vatPercentage}`];
   if (!id) throw new Error(`Geen TEAMLEADER_TAX_RATE_ID_${vatPercentage} geconfigureerd`);
   return id;
@@ -92,14 +108,19 @@ export async function pushQuotationToTl(dealId) {
     // 1. Contact + 2. Deal (quotation vereist deal_id).
     const tlContactId = await getOrCreateContact(customer);
     let tlDealId = deal.tl_deal_id;
-    if (!tlDealId) tlDealId = await createDeal(deal, tlContactId, departmentId, title);
+    if (!tlDealId) {
+      tlDealId = await createDeal(deal, tlContactId, departmentId, title);
+      // KRITIEK: tl_deal_id direct persisteren. Als quotations.create hierna
+      // faalt, pakt een retry deze deal op i.p.v. een duplicate aan te maken.
+      await supabaseAdmin.from('deals').update({ tl_deal_id: tlDealId }).eq('id', dealId);
+    }
 
     // 3. Quotation samenstellen.
     const lineItems = lines.map(l => ({
       quantity:    Number(l.quantity),
       description: l.product_name,
       unit_price:  { amount: Number(l.unit_price), currency: CURRENCY, tax: l.price_includes_vat ? 'including' : 'excluding' },
-      tax_rate_id: taxRateIdFor(l.vat_percentage),
+      tax_rate_id: taxRateIdFor(l.vat_percentage, departmentId),
     }));
     const quotationBody = {
       deal_id:       tlDealId,
@@ -146,7 +167,11 @@ export async function pushQuotationToTl(dealId) {
       tl_quotation_status: quotationStatus,
     };
   } catch (e) {
+    // Poging is gedaan maar gefaald → tl_push_status='failed' (retry mogelijk).
+    // tl_quotation_status blijft 'draft' (constraint kent geen 'failed').
+    // tl_deal_id is hierboven al persistent bij een gedeeltelijke push.
     await supabaseAdmin.from('deals').update({
+      tl_push_status:      'failed',
       tl_quotation_status: 'draft',
       tl_push_error:       e.message.slice(0, 500),
     }).eq('id', dealId);
