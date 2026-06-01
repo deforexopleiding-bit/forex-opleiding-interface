@@ -61,7 +61,7 @@
         '</div>' +
         '<div class="sidebar-nav">' +
           navLink('dashboard', '/index.html', 'Dashboard') +
-          navLink('klanten', '/modules/klanten.html', 'Klanten') +
+          // 'Klanten' verwijderd: klantenlijst leeft nu in Sales > tab Klanten.
           '<a class="nav-item" data-module="email" href="/modules/email.html">' + svg('email') + 'E-mail<span class="nav-badge" id="navEmailBadge"></span></a>' +
           navLink('lisa', '/modules/lisa.html', 'AI Agents') +
           '<a class="nav-item" data-module="taken" href="/modules/taken.html">' + svg('taken') + 'Takenbeheer<span class="nav-badge" id="navTakenBadge"></span></a>' +

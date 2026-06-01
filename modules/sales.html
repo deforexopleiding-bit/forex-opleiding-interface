@@ -101,7 +101,7 @@
   <section class="tab-content active" id="tab-customers">
     <div class="toolbar">
       <input class="search" id="custSearch" type="search" placeholder="Zoek naam, email of telefoon..." />
-      <label class="filter-toggle"><input type="checkbox" id="custAllToggle"> Alle klanten</label>
+      <label class="filter-toggle"><input type="checkbox" id="custAllToggle"> Alleen mijn klanten</label>
       <select class="search" id="custStatus" style="max-width:160px">
         <option value="active">Actief</option>
         <option value="archived">Gearchiveerd</option>
@@ -409,7 +409,8 @@ async function archiveProduct(id) {
 // ── Customers ──
 async function loadCustomers() {
   const params = new URLSearchParams();
-  if (!document.getElementById('custAllToggle').checked) params.set('owned_by_me', 'true');
+  // Default: alle klanten. Vinkje "Alleen mijn klanten" → owned_by_me.
+  if (document.getElementById('custAllToggle').checked) params.set('owned_by_me', 'true');
   params.set('status', document.getElementById('custStatus').value);
   const s = document.getElementById('custSearch').value.trim();
   if (s) params.set('search', s);
@@ -770,6 +771,14 @@ document.getElementById('vmSave').addEventListener('click', saveVariant);
   try {
     if (window.RBAC?.ensurePermissionsLoaded) state.perms = await window.RBAC.ensurePermissionsLoaded();
   } catch {}
+  // ?tab=klanten|quotations|trajecten|products → direct juiste tab openen.
+  const wantTab = new URLSearchParams(location.search).get('tab');
+  const tabMap = { klanten: 'customers', customers: 'customers', offertes: 'quotations', quotations: 'quotations', trajecten: 'trajecten', producten: 'products', products: 'products' };
+  const target = tabMap[wantTab];
+  if (target && target !== 'customers') {
+    const btn = document.querySelector(`.tab[data-tab="${target}"]`);
+    if (btn) { btn.click(); return; }
+  }
   loadCustomers();
 })();
 </script>

@@ -48,17 +48,19 @@ export default async function handler(req, res) {
       entity = ent?.label || null;
     }
 
-    // Totalen (mix-safe per regel).
+    // Totalen (mix-safe per regel) + deal-niveau korting.
+    const factor = 1 - (Number(deal.discount_percentage) || 0) / 100;
     let excl = 0, incl = 0;
     for (const l of lineItems || []) {
       const base = Number(l.quantity) * Number(l.unit_price);
-      const lineExcl = l.price_includes_vat ? base / (1 + Number(l.vat_percentage) / 100) : base;
-      const lineIncl = l.price_includes_vat ? base : base * (1 + Number(l.vat_percentage) / 100);
+      const lineExcl = (l.price_includes_vat ? base / (1 + Number(l.vat_percentage) / 100) : base) * factor;
+      const lineIncl = lineExcl * (1 + Number(l.vat_percentage) / 100);
       excl += lineExcl; incl += lineIncl;
     }
 
     return res.status(200).json({
       deal, customer, line_items: lineItems || [], traject, entity,
+      discount_percentage: Number(deal.discount_percentage) || 0,
       totals: { excl: Math.round(excl * 100) / 100, incl: Math.round(incl * 100) / 100 },
     });
   } catch (e) {
