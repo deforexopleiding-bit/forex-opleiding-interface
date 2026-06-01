@@ -229,9 +229,32 @@
     <div class="dp-totals" id="dealTotals" style="display:none"></div>
   </section>
 
-  <!-- STAP 3 -->
+  <!-- STAP 4: Betalingsvoorwaarden (optioneel) -->
+  <section class="panel" id="panelPay">
+    <h2>4. Betalingsvoorwaarden (optioneel)</h2>
+    <div class="sub">Vul in als je een betalingsschema op de offerte wilt tonen. Alles overslaan kan ook — dan toont de offerte alleen het totaalbedrag.</div>
+    <div class="row2" style="margin-top:14px">
+      <div class="field"><label>Startdatum cursus</label><input id="payStartDate" type="date" /></div>
+      <div class="field"></div>
+    </div>
+    <div class="row2">
+      <div class="field"><label>Aanbetaling (€)</label><input id="payDownAmount" type="number" step="0.01" min="0" placeholder="bv. 1500" /></div>
+      <div class="field"><label>Aanbetaling-datum</label><input id="payDownDate" type="date" /></div>
+    </div>
+    <div class="row2">
+      <div class="field"><label>Aantal termijnen</label><input id="payTermCount" type="number" min="1" max="60" placeholder="bv. 12" /></div>
+      <div class="field"><label>Datum 1e termijn</label><input id="payTermStartDate" type="date" /></div>
+    </div>
+    <div class="field"><label>Termijnbedrag</label><input id="payTermAmount" readonly style="background:var(--bg);color:var(--text-dim)" /><div class="hint">Auto-berekend: (totaal − aanbetaling) / aantal termijnen</div></div>
+    <div class="field" style="margin-top:16px">
+      <label>Wat komt er op de offerte?</label>
+      <div class="sub-preview" id="payPreview">—</div>
+    </div>
+  </section>
+
+  <!-- STAP 5 -->
   <section class="panel" id="panel3">
-    <h2>4. Bevestiging & versturen</h2>
+    <h2>5. Bevestiging & versturen</h2>
     <div class="sub">Bekijk alle gegevens, daarna verstuur je de offerte.</div>
     <div id="reviewMount"></div>
     <div id="tlBanner"></div>
@@ -330,6 +353,13 @@ const state = {
     source_lead_id: '',
     start_date: '', duration_months: 12,
     products: [],   // [{ product_id, product_name, quantity, price_per_unit, vat_percentage }]
+    // Stap 4: betalingsvoorwaarden (optioneel)
+    payment_start_date: '',
+    payment_downpayment_amount: '',
+    payment_downpayment_date: '',
+    payment_term_count: '',
+    payment_term_start_date: '',
+    payment_term_amount: '',
   },
 };
 
@@ -341,20 +371,67 @@ function addMonths(date, m) { const d = new Date(date); d.setMonth(d.getMonth() 
 
 // ── Progress bar ──
 function renderProgress() {
-  const labels = ['Bedrijf', 'Klantgegevens', 'Offerte & producten', 'Bevestiging & versturen'];
+  const labels = ['Bedrijf', 'Klantgegevens', 'Offerte & producten', 'Betalingsvoorwaarden', 'Bevestiging & versturen'];
   let h = '';
-  for (let i = 1; i <= 4; i++) {
+  for (let i = 1; i <= 5; i++) {
     const cls = i === state.step ? 'active' : (i < state.step ? 'done' : '');
     h += `<div class="step ${cls}"><div class="circle">${i < state.step ? '✓' : i}</div><div class="label">${labels[i-1]}</div></div>`;
-    if (i < 4) h += `<div class="line ${i < state.step ? 'done' : ''}"></div>`;
+    if (i < 5) h += `<div class="line ${i < state.step ? 'done' : ''}"></div>`;
   }
   document.getElementById('progressBar').innerHTML = h;
   document.querySelectorAll('.panel').forEach((p, idx) => p.classList.toggle('active', idx + 1 === state.step));
   document.getElementById('prevBtn').disabled = state.step === 1;
-  document.getElementById('nextBtn').style.display = state.step === 4 ? 'none' : '';
+  document.getElementById('nextBtn').style.display = state.step === 5 ? 'none' : '';
   updateNextEnabled();
-  if (state.step === 4) renderReview();
+  if (state.step === 4) renderPaymentStep();
+  if (state.step === 5) renderReview();
 }
+
+// ── Betalingsvoorwaarden (stap 4, optioneel) ──
+function buildQuotationTitleFE() {
+  const w = state.wizard;
+  const seg = [];
+  if (w.payment_start_date) {
+    const d = new Date(w.payment_start_date);
+    seg.push(`Start: ${String(d.getDate()).padStart(2,'0')}-${String(d.getMonth()+1).padStart(2,'0')}-${d.getFullYear()}`);
+  }
+  if (Number(w.payment_downpayment_amount) > 0) seg.push(`Aanbetaling €${Number(w.payment_downpayment_amount).toLocaleString('nl-NL')}`);
+  if (Number(w.payment_term_count) > 0) {
+    const amt = Number(w.payment_term_amount) > 0 ? ` van €${Number(w.payment_term_amount).toLocaleString('nl-NL')}` : '';
+    seg.push(`${w.payment_term_count} termijnen${amt}`);
+  }
+  return seg.length ? seg.join(' | ') : null;
+}
+function recomputeTermAmount() {
+  const w = state.wizard;
+  const total = totalInclBtw();
+  const down = Number(w.payment_downpayment_amount) || 0;
+  const tc = Number(w.payment_term_count) || 0;
+  w.payment_term_amount = tc > 0 ? Math.floor((total - down) / tc * 100) / 100 : '';
+  const el = document.getElementById('payTermAmount');
+  if (el) el.value = w.payment_term_amount ? '€' + Number(w.payment_term_amount).toFixed(2) : '';
+}
+function renderPaymentPreview() {
+  const t = buildQuotationTitleFE();
+  document.getElementById('payPreview').textContent = t
+    ? `Op offerte komt: '${t}'`
+    : 'Op offerte komt: geen extra info (alleen totaalbedrag)';
+}
+function renderPaymentStep() {
+  const w = state.wizard;
+  document.getElementById('payStartDate').value = w.payment_start_date || '';
+  document.getElementById('payDownAmount').value = w.payment_downpayment_amount || '';
+  document.getElementById('payDownDate').value = w.payment_downpayment_date || '';
+  document.getElementById('payTermCount').value = w.payment_term_count || '';
+  document.getElementById('payTermStartDate').value = w.payment_term_start_date || '';
+  recomputeTermAmount();
+  renderPaymentPreview();
+}
+document.getElementById('payStartDate').addEventListener('change', e => { state.wizard.payment_start_date = e.target.value; markDirty(); renderPaymentPreview(); });
+document.getElementById('payDownAmount').addEventListener('input', e => { state.wizard.payment_downpayment_amount = e.target.value; markDirty(); recomputeTermAmount(); renderPaymentPreview(); });
+document.getElementById('payDownDate').addEventListener('change', e => { state.wizard.payment_downpayment_date = e.target.value; markDirty(); });
+document.getElementById('payTermCount').addEventListener('input', e => { state.wizard.payment_term_count = e.target.value; markDirty(); recomputeTermAmount(); renderPaymentPreview(); });
+document.getElementById('payTermStartDate').addEventListener('change', e => { state.wizard.payment_term_start_date = e.target.value; markDirty(); });
 
 // ── Bedrijfsentiteit (stap 1) ──
 function renderEntityCards() {
@@ -819,6 +896,16 @@ function renderReview() {
         </table>
       </div>
     </div>
+    ${(w.payment_start_date || Number(w.payment_downpayment_amount) > 0 || Number(w.payment_term_count) > 0) ? `
+    <div class="section-block">
+      <div class="section-head"><span class="chev">▾</span><span class="title">Betalingsvoorwaarden</span><a href="#" data-back="4" style="font-size:11px;color:var(--accent-cyan,#0891b2)">Bewerken</a></div>
+      <div class="section-body">
+        ${w.payment_start_date ? `Startdatum cursus: ${fmtDateLong(w.payment_start_date)}<br>` : ''}
+        ${Number(w.payment_downpayment_amount) > 0 ? `Aanbetaling: ${fmtEuro(w.payment_downpayment_amount)}${w.payment_downpayment_date ? ' op ' + fmtDateLong(w.payment_downpayment_date) : ''}<br>` : ''}
+        ${Number(w.payment_term_count) > 0 ? `Termijnen: ${w.payment_term_count} × ${fmtEuro(w.payment_term_amount)}${w.payment_term_start_date ? ' vanaf ' + fmtDateLong(w.payment_term_start_date) : ''}<br>` : ''}
+        <div style="margin-top:6px;font-size:11px;color:var(--text-faint)">Op offerte: '${esc(buildQuotationTitleFE() || '')}'</div>
+      </div>
+    </div>` : ''}
   `;
   document.querySelectorAll('.section-head').forEach(h => h.addEventListener('click', e => {
     if (e.target.closest('[data-back]')) return;
@@ -865,6 +952,12 @@ async function submitDeal(syncToTl) {
         duration_months: w.duration_months,
         total_amount: totalInclBtw(),
         tl_department_id: w.tl_department_id || null,
+        payment_start_date: w.payment_start_date || null,
+        payment_downpayment_amount: Number(w.payment_downpayment_amount) || null,
+        payment_downpayment_date: w.payment_downpayment_date || null,
+        payment_term_count: Number(w.payment_term_count) || null,
+        payment_term_start_date: w.payment_term_start_date || null,
+        payment_term_amount: Number(w.payment_term_amount) || null,
       },
       products: w.products,
       matched_customer_id: state.matched_customer_id,
@@ -911,7 +1004,7 @@ function updateNextEnabled() {
 document.getElementById('prevBtn').addEventListener('click', () => { if (state.step > 1) { state.step--; renderProgress(); } });
 document.getElementById('nextBtn').addEventListener('click', async () => {
   if (state.step === 2) syncStep2Fields();
-  if (state.step < 4) { state.step++; renderProgress(); markDirty(); }
+  if (state.step < 5) { state.step++; renderProgress(); markDirty(); }
 });
 
 // Exit

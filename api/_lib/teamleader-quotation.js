@@ -30,6 +30,24 @@ async function resolveDepartmentId(preferred) {
   return active.id;
 }
 
+// Bouwt een leesbare titel-string uit de optionele betalingsvoorwaarden.
+// Returnt null als er niets is ingevuld (caller gebruikt dan een fallback).
+function buildQuotationTitle(deal) {
+  const seg = [];
+  if (deal.payment_start_date) {
+    const d = new Date(deal.payment_start_date);
+    seg.push(`Start: ${String(d.getDate()).padStart(2, '0')}-${String(d.getMonth() + 1).padStart(2, '0')}-${d.getFullYear()}`);
+  }
+  if (deal.payment_downpayment_amount) {
+    seg.push(`Aanbetaling €${Number(deal.payment_downpayment_amount).toLocaleString('nl-NL')}`);
+  }
+  if (deal.payment_term_count) {
+    const amt = deal.payment_term_amount ? ` van €${Number(deal.payment_term_amount).toLocaleString('nl-NL')}` : '';
+    seg.push(`${deal.payment_term_count} termijnen${amt}`);
+  }
+  return seg.length ? seg.join(' | ') : null;
+}
+
 // Map onze vat_percentage → geconfigureerde TL tax_rate_id (env).
 function taxRateIdFor(vatPercentage) {
   const id = process.env[`TEAMLEADER_TAX_RATE_ID_${vatPercentage}`];
@@ -66,10 +84,15 @@ export async function pushQuotationToTl(dealId) {
     // Bedrijfsentiteit: gekozen department (deal) → env → eerste actieve.
     const departmentId = await resolveDepartmentId(deal.tl_department_id);
 
+    // Leesbare titel uit betalingsvoorwaarden, anders klantnaam.
+    const title = buildQuotationTitle(deal)
+      || `${customer?.first_name || ''} ${customer?.last_name || ''}`.trim()
+      || `Offerte ${String(dealId).slice(0, 8)}`;
+
     // 1. Contact + 2. Deal (quotation vereist deal_id).
     const tlContactId = await getOrCreateContact(customer);
     let tlDealId = deal.tl_deal_id;
-    if (!tlDealId) tlDealId = await createDeal(deal, tlContactId, departmentId);
+    if (!tlDealId) tlDealId = await createDeal(deal, tlContactId, departmentId, title);
 
     // 3. Quotation samenstellen.
     const lineItems = lines.map(l => ({
