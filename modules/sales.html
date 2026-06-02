@@ -94,6 +94,7 @@
     <button class="tab active" data-tab="customers" role="tab">Klanten</button>
     <button class="tab" data-tab="quotations" role="tab">Offertes</button>
     <button class="tab" data-tab="onboardings" role="tab">Onboardings</button>
+    <button class="tab" data-tab="subscriptions" role="tab">Abonnementen</button>
     <button class="tab" data-tab="retentie" role="tab">Retentie</button>
     <button class="tab" data-tab="trajecten" role="tab">Trajecten</button>
     <button class="tab" data-tab="products" role="tab">Producten</button>
@@ -136,6 +137,20 @@
       <label class="filter-toggle"><input type="checkbox" id="onbMineToggle"> Alleen mijn klanten</label>
     </div>
     <div id="onboardingsList"><div class="empty">Laden…</div></div>
+  </section>
+
+  <!-- ── Tab: Abonnementen ── -->
+  <section class="tab-content" id="tab-subscriptions">
+    <div class="toolbar">
+      <label class="filter-toggle"><input type="checkbox" id="subMineToggle"> Alleen mijn klanten</label>
+      <select class="search" id="subStatus" style="max-width:180px">
+        <option value="all">Alle statussen</option>
+        <option value="active">Actief</option>
+        <option value="cancelled">Geannuleerd</option>
+      </select>
+      <button class="btn btn-ghost" id="subRefresh" title="Vernieuwen" style="margin-left:auto">🔄 Vernieuwen</button>
+    </div>
+    <div id="subscriptionsList"><div class="empty">Laden…</div></div>
   </section>
 
   <!-- ── Tab: Retentie ── -->
@@ -302,6 +317,7 @@ document.querySelectorAll('.tab').forEach(t => {
     else if (state.tab === 'quotations') { loadQuotations(); startQuotationsPolling(); }
     else if (state.tab === 'trajecten') loadTrajecten();
     else if (state.tab === 'onboardings') loadOnboardings();
+    else if (state.tab === 'subscriptions') loadSubscriptions();
     else if (state.tab === 'retentie') loadRetentie();
     else loadCustomers();
   });
@@ -715,6 +731,44 @@ async function loadRetentie() {
   } catch (e) { wrap.innerHTML = '<div class="empty">Laden mislukt: ' + esc(e.message) + '</div>'; }
 }
 document.getElementById('retMineToggle').addEventListener('change', () => loadRetentie());
+
+// ── Abonnementen ──
+const SUB_STATUS = { active: { l: 'Actief', c: 'active' }, cancelled: { l: 'Geannuleerd', c: 'archived' }, paused: { l: 'Gepauzeerd', c: 'cat' } };
+async function loadSubscriptions() {
+  const wrap = document.getElementById('subscriptionsList');
+  wrap.innerHTML = '<div class="empty">Laden…</div>';
+  const params = new URLSearchParams();
+  if (document.getElementById('subMineToggle').checked) params.set('owned_by_me', 'true');
+  params.set('status', document.getElementById('subStatus').value || 'all');
+  try {
+    const res = await window.AgentShared.apiFetch('/api/sales-subscriptions-list?' + params);
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+    const items = data.items || [];
+    if (!items.length) { wrap.innerHTML = '<div class="empty">Geen abonnementen gevonden.</div>'; return; }
+    wrap.innerHTML = `<table><thead><tr>
+      <th>Klant</th><th>Bedrijf</th><th>Type</th><th>Bedrag incl. BTW</th><th>Termijnen</th><th>Startdatum</th><th>Einddatum</th><th>Status</th><th></th>
+    </tr></thead><tbody>${items.map(it => {
+      const st = SUB_STATUS[it.status] || { l: it.status || '—', c: 'archived' };
+      const tl = it.teamleader_subscription_id ? '<span class="badge active" title="Gesynct met Teamleader">✓ TL</span>' : '<span style="color:var(--text-faint)">—</span>';
+      return `<tr>
+        <td><a href="/modules/klanten.html?id=${esc(it.customer_id)}" style="color:var(--text);font-weight:600;text-decoration:none">${esc(it.customer_name)}</a></td>
+        <td>${esc(it.entity || '—')}</td>
+        <td>${esc(it.description || '—')}</td>
+        <td>${fmtEuro(it.amount_incl)}</td>
+        <td>${it.term_count || '—'}×</td>
+        <td>${it.start_date ? fmtDateNL(it.start_date) : '—'}</td>
+        <td>${it.end_date ? fmtDateNL(it.end_date) : '—'}</td>
+        <td><span class="badge ${st.c}">${st.l}</span></td>
+        <td style="white-space:nowrap"><a class="btn btn-sm btn-ghost" href="/modules/klanten.html?id=${esc(it.customer_id)}&tab=abonnementen">Detail</a> ${tl}</td>
+      </tr>`;
+    }).join('')}</tbody></table>`;
+  } catch (e) { wrap.innerHTML = '<div class="empty">Laden mislukt: ' + esc(e.message) + '</div>'; }
+}
+document.getElementById('subMineToggle').addEventListener('change', () => loadSubscriptions());
+document.getElementById('subStatus').addEventListener('change', () => loadSubscriptions());
+document.getElementById('subRefresh').addEventListener('click', () => loadSubscriptions());
+
 document.getElementById('quotStatus').addEventListener('change', () => loadQuotations());
 document.getElementById('quotRefresh').addEventListener('click', () => loadQuotations());
 
@@ -853,7 +907,7 @@ document.getElementById('vmSave').addEventListener('click', saveVariant);
   } catch {}
   // ?tab=klanten|quotations|trajecten|products → direct juiste tab openen.
   const wantTab = new URLSearchParams(location.search).get('tab');
-  const tabMap = { klanten: 'customers', customers: 'customers', offertes: 'quotations', quotations: 'quotations', trajecten: 'trajecten', producten: 'products', products: 'products' };
+  const tabMap = { klanten: 'customers', customers: 'customers', offertes: 'quotations', quotations: 'quotations', onboardings: 'onboardings', abonnementen: 'subscriptions', subscriptions: 'subscriptions', retentie: 'retentie', trajecten: 'trajecten', producten: 'products', products: 'products' };
   const target = tabMap[wantTab];
   if (target && target !== 'customers') {
     const btn = document.querySelector(`.tab[data-tab="${target}"]`);

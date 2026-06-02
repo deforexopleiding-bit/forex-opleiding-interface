@@ -214,7 +214,6 @@
       <select id="saleType" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font:inherit;font-size:13px">
         <option value="domestic">Normaal NL/BE</option>
         <option value="intracommunautair">Zakelijk België - Intracommunautair</option>
-        <option value="outside_eu">Buiten EU</option>
       </select>
       <div class="hint" id="saleTypeHint"></div>
     </div>
@@ -247,10 +246,10 @@
 
   <!-- STAP 4: Betalingsvoorwaarden (optioneel) -->
   <section class="panel" id="panelPay">
-    <h2>4. Betalingsvoorwaarden (optioneel)</h2>
-    <div class="sub">Vul in als je een betalingsschema op de offerte wilt tonen. Alles overslaan kan ook — dan toont de offerte alleen het totaalbedrag.</div>
+    <h2>4. Betalingsvoorwaarden</h2>
+    <div class="sub">Startdatum cursus is verplicht. Aanbetaling en termijnen zijn optioneel — vul je ze in, dan is de bijbehorende datum verplicht.</div>
     <div class="row2" style="margin-top:14px">
-      <div class="field"><label>Startdatum cursus</label><input id="payStartDate" type="date" /></div>
+      <div class="field"><label>Startdatum cursus <span class="req">*</span></label><input id="payStartDate" type="date" /></div>
       <div class="field"></div>
     </div>
     <div class="row2">
@@ -266,6 +265,7 @@
       <label>Wat komt er op de offerte?</label>
       <div class="sub-preview" id="payPreview">—</div>
     </div>
+    <div id="payMissing" style="font-size:11.5px;color:#dc2626;margin-top:8px"></div>
   </section>
 
   <!-- STAP 5 -->
@@ -460,11 +460,11 @@ function renderPaymentStep() {
   recomputeTermAmount();
   renderPaymentPreview();
 }
-document.getElementById('payStartDate').addEventListener('change', e => { state.wizard.payment_start_date = e.target.value; markDirty(); renderPaymentPreview(); });
-document.getElementById('payDownAmount').addEventListener('input', e => { state.wizard.payment_downpayment_amount = e.target.value; markDirty(); recomputeTermAmount(); renderPaymentPreview(); });
-document.getElementById('payDownDate').addEventListener('change', e => { state.wizard.payment_downpayment_date = e.target.value; markDirty(); });
-document.getElementById('payTermCount').addEventListener('input', e => { state.wizard.payment_term_count = e.target.value; markDirty(); recomputeTermAmount(); renderPaymentPreview(); });
-document.getElementById('payTermStartDate').addEventListener('change', e => { state.wizard.payment_term_start_date = e.target.value; markDirty(); });
+document.getElementById('payStartDate').addEventListener('change', e => { state.wizard.payment_start_date = e.target.value; markDirty(); renderPaymentPreview(); updateNextEnabled(); });
+document.getElementById('payDownAmount').addEventListener('input', e => { state.wizard.payment_downpayment_amount = e.target.value; markDirty(); recomputeTermAmount(); renderPaymentPreview(); updateNextEnabled(); });
+document.getElementById('payDownDate').addEventListener('change', e => { state.wizard.payment_downpayment_date = e.target.value; markDirty(); updateNextEnabled(); });
+document.getElementById('payTermCount').addEventListener('input', e => { state.wizard.payment_term_count = e.target.value; markDirty(); recomputeTermAmount(); renderPaymentPreview(); updateNextEnabled(); });
+document.getElementById('payTermStartDate').addEventListener('change', e => { state.wizard.payment_term_start_date = e.target.value; markDirty(); updateNextEnabled(); });
 
 // ── Bedrijfsentiteit (stap 1) ──
 function renderEntityCards() {
@@ -1191,8 +1191,16 @@ function updateNextEnabled() {
     valid = missing.length === 0 && dupOk;
   } else if (state.step === 3) {
     valid = w.start_date && Number(w.duration_months) >= 1 && w.products.length > 0 && w.products.every(p => p.quantity >= 1 && p.price_per_unit > 0);
+  } else if (state.step === 4) {
+    const miss = [];
+    if (!w.payment_start_date) miss.push('Startdatum cursus');
+    if (Number(w.payment_downpayment_amount) > 0 && !w.payment_downpayment_date) miss.push('Aanbetaling-datum');
+    if (Number(w.payment_term_count) > 0 && !w.payment_term_start_date) miss.push('Datum 1e termijn');
+    const pm = document.getElementById('payMissing');
+    if (pm) pm.innerHTML = miss.length ? `Ontbrekende velden: <strong>${miss.join(', ')}</strong>` : '';
+    valid = miss.length === 0;
   } else {
-    valid = true; // stap 4 = bevestiging
+    valid = true; // stap 5 = bevestiging
   }
   document.getElementById('nextBtn').disabled = !valid;
 }
