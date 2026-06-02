@@ -8,7 +8,7 @@
 //    basisvelden intact (geen harde fout).
 //
 // TL kent geen signature; deze endpoint is auth-gated (sales.customer.create).
-// Bij geen token / API-fout → lege tl_matches + reason, zodat de wizard-flow
+// Bij geen token / API-fout → lege tl_matches + reason, zodat de wizard-flowh
 // gewoon doorgaat zonder match.
 
 import { tlFetch, getActiveToken } from './_lib/teamleader-token.js';
@@ -68,7 +68,7 @@ export default async function handler(req, res) {
   try {
     // 1. TL contacts.list met email/term-filter — endpoint: POST /contacts.list
     const body = { filter: {}, page: { size: 10, number: 1 } };
-    if (email) body.filter.email = String(email).trim().toLowerCase();
+    if (email) body.filter.email = { type: 'primary', email: String(email).trim().toLowerCase() };
     if (phone) body.filter.term = String(phone).trim();
 
     const r = await tlFetch('/contacts.list', { method: 'POST', body: JSON.stringify(body) });
