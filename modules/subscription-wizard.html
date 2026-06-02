@@ -33,24 +33,29 @@
     .bonus.green{background:rgba(5,150,105,.12);color:#059669}
     .bonus.gray{background:var(--bg-elev-2);color:var(--text-dim)}
     .preview{background:var(--bg-elev-2);border:1px solid var(--border);border-radius:6px;padding:14px;font-family:'Menlo',monospace;font-size:12px;white-space:pre-wrap;line-height:1.6}
+    .cust-result{padding:8px 10px;border:1px solid var(--border);border-radius:6px;margin-bottom:5px;cursor:pointer;font-size:12.5px}
+    .cust-result:hover{background:var(--bg-elev-2)}
+    .li-head{display:grid;grid-template-columns:1fr 1.1fr 92px 92px 68px 24px;gap:5px;font-size:10px;color:var(--text-faint);margin-bottom:3px;text-transform:uppercase}
+    .li-row{display:grid;grid-template-columns:1fr 1.1fr 92px 92px 68px 24px;gap:5px;align-items:center;margin-bottom:6px}
+    .li-row input,.li-row select{padding:6px 7px;font-size:12px}
   </style>
 </head>
 <body>
 <div id="sidebar-mount"></div>
 <div class="app">
-  <a href="/modules/sales.html?tab=offertes" style="font-size:12px;color:var(--text-dim);text-decoration:none">← Terug naar Sales</a>
+  <a href="/modules/sales.html?tab=abonnementen" style="font-size:12px;color:var(--text-dim);text-decoration:none">← Terug naar Sales</a>
   <h1>Abonnement invoeren</h1>
   <div class="sub" id="topSub">Laden…</div>
 
   <div class="progress">
-    <div class="st active" data-st="1">1. Klant & offerte</div>
+    <div class="st active" data-st="1">1. Klant &amp; offerte</div>
     <div class="st" data-st="2">2. Abonnementen</div>
-    <div class="st" data-st="3">3. Bonus & bevestigen</div>
+    <div class="st" data-st="3">3. Bonus &amp; bevestigen</div>
   </div>
 
   <!-- Stap 1 -->
   <section class="panel active" id="p1">
-    <div class="card" id="reviewCard">Laden…</div>
+    <div id="step1Body"><div class="card" id="reviewCard">Laden…</div></div>
   </section>
 
   <!-- Stap 2 -->
@@ -88,54 +93,187 @@
 <script src="/modules/shared/agent-shared.js"></script>
 <script src="/modules/shared/theme-shared.js"></script>
 <script>
-const dealId = new URLSearchParams(location.search).get('deal_id');
-const state = { step: 1, deal: null, customer: null, totals: {}, entities: [], subs: [], lineItems: [] };
+const _params = new URLSearchParams(location.search);
+const dealId = _params.get('deal_id');
+const MODE = _params.get('mode') === 'standalone' ? 'standalone' : 'deal';
+const state = {
+  step: 1, mode: MODE, deal: null, customer: null, totals: {}, entities: [], subs: [], lineItems: [],
+  products: [], descPresets: [],
+  // standalone klant-selectie:
+  customerMode: 'search', matched_customer_id: null, tl_imported_contact_id: null,
+  newCustomer: { first_name:'', last_name:'', email:'', phone:'', address_street:'', address_number:'', address_postal:'', address_city:'', date_of_birth:'' },
+  avg: false,
+};
 function round2(v){ return Math.round((Number(v)||0)*100)/100; }
-function isZeroVat(){ return state.deal && state.deal.sale_type && state.deal.sale_type !== 'domestic'; }
+function saleType(){ return state.mode==='standalone' ? 'domestic' : (state.deal && state.deal.sale_type) || 'domestic'; }
+function isZeroVat(){ return saleType() !== 'domestic'; }
 function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
 function toast(m,k){const e=document.getElementById('toast');e.textContent=m;e.className='toast show '+(k||'');setTimeout(()=>e.classList.remove('show'),2400)}
-function eur(v){return v==null?'—':'€'+Number(v).toLocaleString('nl-NL',{minimumFractionDigits:2,maximumFractionDigits:2})}
+function eur(v){return v==null||v===''?'—':'€'+Number(v).toLocaleString('nl-NL',{minimumFractionDigits:2,maximumFractionDigits:2})}
 function fmtDate(iso){return iso?new Date(iso).toLocaleDateString('nl-NL',{day:'numeric',month:'long',year:'numeric'}):'—'}
 function calcEnd(start, tc){ if(!start||!(tc>0))return ''; const d=new Date(start); d.setMonth(d.getMonth()+(Number(tc)-1)); d.setDate(d.getDate()+2); return d.toISOString().slice(0,10); }
+function addMonths(iso,n){ if(!iso) return ''; const d=new Date(iso); d.setMonth(d.getMonth()+n); return d.toISOString().slice(0,10); }
+function today(){ return new Date().toISOString().slice(0,10); }
+function apiFetch(u,o){ return window.AgentShared.apiFetch(u,o); }
 
 async function init(){
   await window._authSharedReady;
   const profile = await window.AuthShared?.requireAuth();
   if(!profile) return;
   if(window.AgentShared) await window.AgentShared.renderUserSection(profile);
-  if(!dealId){ document.getElementById('topSub').textContent='Geen deal-id.'; return; }
   try{
-    const [dRes, eRes] = await Promise.all([
-      window.AgentShared.apiFetch('/api/sales-deal-detail?id='+encodeURIComponent(dealId)).then(r=>r.json()),
-      window.AgentShared.apiFetch('/api/company-entities').then(r=>r.json()).catch(()=>({})),
+    // Gedeelde data (beide modes): entiteiten, producten (PUNT 5), trajecten (PUNT 6).
+    const [eRes,pRes,tRes] = await Promise.all([
+      apiFetch('/api/company-entities').then(r=>r.json()).catch(()=>({})),
+      apiFetch('/api/sales-products?active=true').then(r=>r.json()).catch(()=>({})),
+      apiFetch('/api/trajecten').then(r=>r.json()).catch(()=>({})),
     ]);
-    state.deal=dRes.deal||{}; state.customer=dRes.customer||{}; state.totals=dRes.totals||{};
-    state.lineItems=dRes.line_items||[];
-    state.entities=eRes.entities||[];
-    buildReview(); buildDept(); prefillSubs(); renderSubs();
+    state.entities = eRes.entities||[];
+    state.products = pRes.products||[];
+    buildDescPresets(tRes.trajects||[]);
+    buildDept();
+
+    if(state.mode==='deal'){
+      if(!dealId){ document.getElementById('topSub').textContent='Geen deal-id.'; return; }
+      const dRes = await apiFetch('/api/sales-deal-detail?id='+encodeURIComponent(dealId)).then(r=>r.json());
+      state.deal=dRes.deal||{}; state.customer=dRes.customer||{}; state.totals=dRes.totals||{};
+      state.lineItems=dRes.line_items||[];
+      buildReview(); prefillSubs();
+    } else {
+      const lbl=document.querySelector('.progress .st[data-st="1"]'); if(lbl) lbl.textContent='1. Klant';
+      document.getElementById('topSub').textContent='Nieuw abonnement (zonder offerte)';
+      state.subs.push(newEmptySub());
+      renderCustomerStep();
+    }
+    if(state.deal && state.deal.tl_department_id) document.getElementById('deptSelect').value=state.deal.tl_department_id;
+    renderSubs();
     document.getElementById('firstCall').value = defaultFirstCall();
   }catch(e){ document.getElementById('topSub').textContent='Laden mislukt: '+e.message; }
 }
+function buildDescPresets(trajects){
+  const labels=['Aanbetaling','Maandelijkse termijnen'];
+  for(const t of trajects||[]){ for(const v of (t.variants||[]).filter(x=>x.is_active)){ labels.push(`${t.name} > ${v.name}`); } }
+  state.descPresets=labels;
+}
 function defaultFirstCall(){
-  const base = state.deal.payment_start_date || state.subs[0]?.start_date || state.deal.start_date || new Date().toISOString().slice(0,10);
+  const base = (state.deal && state.deal.payment_start_date) || state.subs[0]?.start_date || (state.deal && state.deal.start_date) || today();
   const d=new Date(base); d.setDate(d.getDate()+7); return d.toISOString().slice(0,16);
 }
 function buildReview(){
   const c=state.customer, d=state.deal;
   document.getElementById('topSub').textContent = `${c.first_name||''} ${c.last_name||''}`.trim();
-  document.getElementById('reviewCard').innerHTML = `
-    <div style="font-size:11px;text-transform:uppercase;color:var(--text-faint);margin-bottom:8px">Klant & offerte</div>
+  document.getElementById('step1Body').innerHTML = `<div class="card">
+    <div style="font-size:11px;text-transform:uppercase;color:var(--text-faint);margin-bottom:8px">Klant &amp; offerte</div>
     <div><strong>${esc((c.first_name||'')+' '+(c.last_name||''))}</strong> · ${esc(c.email||'—')}</div>
     <div style="margin-top:8px;font-size:13px">Totaal incl. BTW: <strong>${eur(state.totals.incl)}</strong></div>
-    <div style="font-size:12px;color:var(--text-dim)">Getekend op: ${fmtDate(d.tl_quotation_accepted_at||d.tl_quotation_signed_at)}</div>`;
+    <div style="font-size:12px;color:var(--text-dim)">Getekend op: ${fmtDate(d.tl_quotation_accepted_at||d.tl_quotation_signed_at)}</div></div>`;
 }
 function buildDept(){
   const sel=document.getElementById('deptSelect');
   sel.innerHTML = state.entities.map(e=>`<option value="${esc(e.tl_department_id)}">${esc(e.label)}</option>`).join('') || '<option value="">—</option>';
-  if(state.deal.tl_department_id) sel.value=state.deal.tl_department_id;
 }
+
+// ── PUNT 1: standalone klant-selectie ──
+function renderCustomerStep(){
+  const nc=state.newCustomer;
+  const body=document.getElementById('step1Body');
+  body.innerHTML = `<div class="card">
+    <div style="font-size:11px;text-transform:uppercase;color:var(--text-faint);margin-bottom:8px">Klant kiezen</div>
+    <div id="custChosen"></div>
+    <div class="field" id="custSearchWrap"><label>Zoek bestaande klant (naam of email)</label><input id="custSearch" placeholder="Begin met typen…" /><div id="custResults" style="margin-top:6px"></div></div>
+    <div style="margin:6px 0 12px"><a href="#" id="toggleNewCust" style="font-size:12px;color:var(--accent-cyan,#0891b2)">${state.customerMode==='new'?'↩ Toch een bestaande klant zoeken':'+ Nieuwe klant aanmaken'}</a></div>
+    <div id="newCustForm" style="display:${state.customerMode==='new'?'block':'none'}">
+      <div class="row">
+        <div class="field"><label>Voornaam <span style="color:var(--red,#dc2626)">*</span></label><input id="nc_first" value="${esc(nc.first_name)}" /></div>
+        <div class="field"><label>Achternaam <span style="color:var(--red,#dc2626)">*</span></label><input id="nc_last" value="${esc(nc.last_name)}" /></div>
+      </div>
+      <div class="row">
+        <div class="field"><label>Email <span style="color:var(--red,#dc2626)">*</span></label><input id="nc_email" type="email" value="${esc(nc.email)}" /></div>
+        <div class="field"><label>Telefoon</label><input id="nc_phone" value="${esc(nc.phone)}" /></div>
+      </div>
+      <div style="margin-bottom:8px"><button class="btn btn-ghost btn-sm" id="tlSearchBtn" type="button">🔍 Zoek dit contact in Teamleader</button><div id="tlResults" style="margin-top:6px"></div></div>
+      <div class="row3">
+        <div class="field"><label>Straat</label><input id="nc_street" value="${esc(nc.address_street)}" /></div>
+        <div class="field"><label>Huisnr</label><input id="nc_number" value="${esc(nc.address_number)}" /></div>
+        <div class="field"><label>Postcode</label><input id="nc_postal" value="${esc(nc.address_postal)}" /></div>
+      </div>
+      <div class="row">
+        <div class="field"><label>Plaats</label><input id="nc_city" value="${esc(nc.address_city)}" /></div>
+        <div class="field"><label>Geboortedatum</label><input id="nc_dob" type="date" value="${esc(nc.date_of_birth)}" /></div>
+      </div>
+      <div class="field" style="padding:10px 12px;background:var(--bg-elev-2);border-radius:6px">
+        <label style="display:flex;gap:8px;text-transform:none;font-size:12px;cursor:pointer"><input type="checkbox" id="nc_avg" style="width:16px;height:16px" ${state.avg?'checked':''}/> <span>Klant is geïnformeerd over de privacyverklaring <span style="color:var(--red,#dc2626)">*</span></span></label>
+      </div>
+    </div>
+    <div id="custErr" style="color:var(--red,#dc2626);font-size:12px;margin-top:4px"></div>
+  </div>`;
+  renderChosen();
+  bindCustomerStep();
+}
+function renderChosen(){
+  const el=document.getElementById('custChosen'); if(!el) return;
+  if(state.matched_customer_id && state.customerMode==='search' && state._chosenName){
+    el.innerHTML=`<div style="padding:8px 10px;background:rgba(5,150,105,.12);border-radius:6px;font-size:12.5px;margin-bottom:8px">✓ Gekozen klant: <strong>${esc(state._chosenName)}</strong> <a href="#" id="clearChosen" style="margin-left:8px;font-size:11px;color:var(--accent-cyan,#0891b2)">wijzig</a></div>`;
+    document.getElementById('clearChosen').addEventListener('click',e=>{e.preventDefault();state.matched_customer_id=null;state._chosenName=null;renderCustomerStep();updateNext();});
+  } else el.innerHTML='';
+}
+function bindCustomerStep(){
+  const search=document.getElementById('custSearch');
+  if(search) search.addEventListener('input',e=>{ clearTimeout(window._cs); const q=e.target.value.trim(); window._cs=setTimeout(()=>doCustomerSearch(q),250); });
+  const toggle=document.getElementById('toggleNewCust');
+  if(toggle) toggle.addEventListener('click',e=>{e.preventDefault();state.customerMode=state.customerMode==='new'?'search':'new';if(state.customerMode==='new'){state.matched_customer_id=null;state._chosenName=null;}renderCustomerStep();updateNext();});
+  // Nieuwe-klant velden binden.
+  const bind=(id,key)=>{ const el=document.getElementById(id); if(el) el.addEventListener('input',ev=>{ state.newCustomer[key]=ev.target.value; updateNext(); }); };
+  bind('nc_first','first_name'); bind('nc_last','last_name'); bind('nc_email','email'); bind('nc_phone','phone');
+  bind('nc_street','address_street'); bind('nc_number','address_number'); bind('nc_postal','address_postal'); bind('nc_city','address_city'); bind('nc_dob','date_of_birth');
+  const avg=document.getElementById('nc_avg'); if(avg) avg.addEventListener('change',e=>{ state.avg=e.target.checked; updateNext(); });
+  const tlBtn=document.getElementById('tlSearchBtn'); if(tlBtn) tlBtn.addEventListener('click',doTlSearch);
+  updateNext();
+}
+async function doCustomerSearch(q){
+  const box=document.getElementById('custResults'); if(!box) return;
+  if(!q){ box.innerHTML=''; return; }
+  try{
+    const d=await apiFetch('/api/sales-customers?search='+encodeURIComponent(q)).then(r=>r.json());
+    const cs=(d.customers||[]).slice(0,8);
+    box.innerHTML = cs.length ? cs.map(c=>`<div class="cust-result" data-cust='${esc(JSON.stringify({id:c.id,name:`${c.first_name||''} ${c.last_name||''}`.trim(),email:c.email}))}'>${esc(`${c.first_name||''} ${c.last_name||''}`.trim()||'—')} · ${esc(c.email||'')}</div>`).join('') : '<div style="font-size:12px;color:var(--text-faint)">Geen klant gevonden.</div>';
+    box.querySelectorAll('[data-cust]').forEach(el=>el.addEventListener('click',()=>{ const c=JSON.parse(el.dataset.cust); state.matched_customer_id=c.id; state._chosenName=c.name||c.email; box.innerHTML=''; document.getElementById('custSearch').value=''; renderChosen(); updateNext(); }));
+  }catch(e){ box.innerHTML='<div style="font-size:12px;color:var(--red,#dc2626)">Zoeken mislukt</div>'; }
+}
+async function doTlSearch(){
+  const box=document.getElementById('tlResults');
+  const email=state.newCustomer.email.trim(), phone=state.newCustomer.phone.trim();
+  if(!email && !phone){ box.innerHTML='<div style="font-size:12px;color:var(--text-faint)">Vul eerst email of telefoon in.</div>'; return; }
+  box.innerHTML='<div style="font-size:12px;color:var(--text-faint)">Zoeken in Teamleader…</div>';
+  try{
+    const d=await apiFetch('/api/teamleader-search-contacts',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email,phone})}).then(r=>r.json());
+    const ms=d.tl_matches||[];
+    if(!ms.length){ box.innerHTML='<div style="font-size:12px;color:var(--text-faint)">Geen TL-contact gevonden.</div>'; return; }
+    box.innerHTML=ms.map(m=>`<div class="cust-result" data-tl='${esc(JSON.stringify(m))}'><strong>${esc(m.name)}</strong> · ${esc(m.email||'—')} · ${esc(m.phone||'—')}${m.address?`<br><span style="color:var(--text-faint)">${esc(m.address)}</span>`:''}<div style="margin-top:4px"><span class="btn btn-sm">Gebruik dit contact</span></div></div>`).join('');
+    box.querySelectorAll('[data-tl]').forEach(el=>el.addEventListener('click',()=>{ const m=JSON.parse(el.dataset.tl); importTlContact(m); }));
+  }catch(e){ box.innerHTML='<div style="font-size:12px;color:var(--red,#dc2626)">TL-zoeken mislukt</div>'; }
+}
+function importTlContact(m){
+  state.tl_imported_contact_id=m.tl_id;
+  const nc=state.newCustomer;
+  if(m.first_name||m.last_name){ nc.first_name=m.first_name||''; nc.last_name=m.last_name||''; }
+  else if(m.name){ const p=m.name.split(' '); nc.first_name=p[0]||''; nc.last_name=p.slice(1).join(' '); }
+  if(m.email) nc.email=m.email; if(m.phone) nc.phone=m.phone;
+  if(m.address_street) nc.address_street=m.address_street; if(m.address_number) nc.address_number=m.address_number;
+  if(m.address_postal) nc.address_postal=m.address_postal; if(m.address_city) nc.address_city=m.address_city;
+  toast('Geïmporteerd uit Teamleader','success');
+  renderCustomerStep();
+}
+function validateCustomer(){
+  if(state.customerMode==='search'){ if(!state.matched_customer_id) return 'Kies een bestaande klant of maak een nieuwe aan'; return null; }
+  const nc=state.newCustomer;
+  if(!nc.first_name||!nc.last_name) return 'Voor- en achternaam verplicht';
+  if(!nc.email) return 'Email verplicht';
+  if(!state.avg) return 'Bevestig dat de klant is geïnformeerd over de privacyverklaring';
+  return null;
+}
+
 // ── Auto-split uit de offerte-regels (proportioneel per BTW-tarief) ──
-function addMonths(iso,n){ if(!iso) return ''; const d=new Date(iso); d.setMonth(d.getMonth()+n); return d.toISOString().slice(0,10); }
 function splitGroups(){
   const map={}; let total=0;
   for(const l of state.lineItems){
@@ -149,84 +287,136 @@ function splitGroups(){
   }
   return {map,total};
 }
-// Verdeel een doelbedrag (target) proportioneel over de BTW-groepen van de
-// offerte. Laatste groep krijgt het afrond-restant zodat de som exact klopt.
 function splitFromOffer(target){
   target=Number(target)||0;
   const {map,total}=splitGroups();
   const vats=Object.keys(map).map(Number);
-  if(!total||!vats.length) return [{description:'',amount:round2(target),vat_percentage:21}];
+  if(!total||!vats.length) return [newLine({amount:round2(target)})];
   let acc=0; const items=[];
   vats.forEach((v,idx)=>{
     let amt = idx===vats.length-1 ? round2(target-acc) : round2(target*map[v].excl/total);
     acc+=amt;
-    items.push({description: map[v].names.join(' + ')||'Regel', amount: amt, vat_percentage: v});
+    items.push(newLine({description: map[v].names.join(' + ')||'Regel', amount: amt, vat_percentage: v}));
   });
   return items;
 }
+function newLine(o){ const li={product_id:'',description:'',amount:'',amount_incl:'',vat_percentage:isZeroVat()?0:21,_lead:'excl',...(o||{})}; recalcLine(li); return li; }
+function newEmptySub(){ return {description:'',term_count:1,start_date:today(),_descCustom:false,line_items:[newLine()]}; }
+// excl<->incl herberekening op basis van _lead (laatst bewerkte veld).
+function recalcLine(li){
+  const rate = isZeroVat()?0:(Number(li.vat_percentage)||0)/100;
+  if(li._lead==='incl'){
+    li.amount = (li.amount_incl===''||li.amount_incl==null)?'':round2(Number(li.amount_incl)/(1+rate));
+  } else {
+    li.amount_incl = (li.amount===''||li.amount==null)?'':round2(Number(li.amount)*(1+rate));
+  }
+}
 function subExcl(s){ return (s.line_items||[]).reduce((sum,li)=>sum+(Number(li.amount)||0),0); }
 function subInclPerTerm(s){
-  if(isZeroVat()) return subExcl(s); // intra/buiten-EU: effectief 0% BTW
+  if(isZeroVat()) return subExcl(s);
   return (s.line_items||[]).reduce((sum,li)=>sum+(Number(li.amount)||0)*(1+(Number(li.vat_percentage)||0)/100),0);
 }
 
 function prefillSubs(){
   const d=state.deal;
   const down=Number(d.payment_downpayment_amount)||0;
-  const startBase=d.payment_start_date||d.start_date||new Date().toISOString().slice(0,10);
-  if(down>0) state.subs.push({description:'Aanbetaling',term_count:1,start_date:d.payment_downpayment_date||startBase,line_items:splitFromOffer(down)});
+  const startBase=d.payment_start_date||d.start_date||today();
+  if(down>0) state.subs.push({description:'Aanbetaling',term_count:1,start_date:d.payment_downpayment_date||startBase,_descCustom:false,line_items:splitFromOffer(down)});
   const tc=Number(d.payment_term_count)||0;
   if(tc>0){
     const monthly = d.payment_term_amount!=null ? Number(d.payment_term_amount) : round2(((Number(state.totals.incl)||0)-down)/tc);
-    state.subs.push({description:'Maandelijkse termijnen',term_count:tc,start_date:d.payment_term_start_date||addMonths(startBase,1),line_items:splitFromOffer(monthly)});
+    state.subs.push({description:'Maandelijkse termijnen',term_count:tc,start_date:d.payment_term_start_date||addMonths(startBase,1),_descCustom:false,line_items:splitFromOffer(monthly)});
   }
-  if(!state.subs.length) state.subs.push({description:'',term_count:1,start_date:startBase,line_items:[{description:'',amount:'',vat_percentage:21}]});
+  if(!state.subs.length) state.subs.push(newEmptySub());
 }
 function vatOptions(v){ return [21,9,0].map(x=>`<option value="${x}"${Number(v)===x?' selected':''}>${x}%</option>`).join(''); }
+function productOptions(sel){ return '<option value="">Vrije invoer</option>'+state.products.map(p=>`<option value="${esc(p.id)}"${String(p.id)===String(sel)?' selected':''}>${esc(p.name)}</option>`).join(''); }
+function descSelect(s,i){
+  const isCustom = !!s._descCustom;
+  const placeholder = (!s.description && !isCustom) ? '<option value="" selected>— Kies omschrijving —</option>' : '';
+  const opts = state.descPresets.map(x=>`<option value="${esc(x)}"${(!isCustom&&s.description===x)?' selected':''}>${esc(x)}</option>`).join('');
+  const customOpt = `<option value="__custom__"${isCustom?' selected':''}>Andere omschrijving…</option>`;
+  return `<select data-descsel="${i}">${placeholder}${opts}${customOpt}</select>`
+    + (isCustom?`<input data-desccustom="${i}" placeholder="Eigen omschrijving" value="${esc(s.description)}" style="margin-top:6px" />`:'');
+}
 function renderSubs(){
   const root=document.getElementById('subList');
   const zero=isZeroVat();
-  const warn = zero ? `<div class="bonus" style="background:rgba(245,158,11,.14);color:#b45309;margin-bottom:10px;padding:10px;border-radius:8px;font-size:12.5px">⚠️ ${esc(state.deal.sale_type==='intracommunautair'?'Intracommunautair':'Buiten EU')}: alle regels worden met <strong>0% BTW</strong> gefactureerd. Het BTW-tarief blijft zichtbaar voor de administratie, maar Teamleader rekent 0%.</div>` : '';
+  const warn = zero ? `<div class="bonus" style="background:rgba(245,158,11,.14);color:#b45309;margin-bottom:10px;padding:10px;border-radius:8px;font-size:12.5px">⚠️ ${esc(state.deal && state.deal.sale_type==='intracommunautair'?'Intracommunautair':'Buiten EU')}: alle regels worden met <strong>0% BTW</strong> gefactureerd. Het BTW-tarief blijft zichtbaar voor de administratie, maar Teamleader rekent 0%.</div>` : '';
   root.innerHTML = warn + state.subs.map((s,i)=>`
     <div class="sub-card">
       ${state.subs.length>1?`<button class="btn btn-danger btn-sm" data-rm="${i}" style="position:absolute;top:10px;right:10px">×</button>`:''}
-      <div class="field"><label>Omschrijving abonnement</label><input data-f="description" data-i="${i}" value="${esc(s.description)}" list="descSug" /></div>
+      <div class="field"><label>Omschrijving abonnement</label>${descSelect(s,i)}</div>
       <div class="row3">
         <div class="field"><label>Startdatum</label><input type="date" data-f="start_date" data-i="${i}" value="${esc(s.start_date)}" /></div>
         <div class="field"><label>Aantal termijnen</label><input type="number" min="1" data-f="term_count" data-i="${i}" value="${esc(s.term_count)}" /></div>
         <div class="field"><label>Einddatum (auto)</label><input type="date" readonly data-end="${i}" style="background:var(--bg-elev-2)" value="${calcEnd(s.start_date,s.term_count)}" /></div>
       </div>
-      <label style="display:block;font-size:11.5px;font-weight:600;color:var(--text-dim);margin:6px 0 4px">Regels (per termijn, bedrag excl. BTW)</label>
+      <label style="display:block;font-size:11.5px;font-weight:600;color:var(--text-dim);margin:6px 0 4px">Regels (per termijn)</label>
+      <div class="li-head"><span>Product</span><span>Omschrijving</span><span>Excl. BTW</span><span>Incl. BTW</span><span>BTW</span><span></span></div>
       <div data-lilist="${i}">
         ${(s.line_items||[]).map((li,j)=>`
-          <div style="display:grid;grid-template-columns:1fr 110px 92px 30px;gap:6px;align-items:center;margin-bottom:6px">
+          <div class="li-row">
+            <select data-prod data-sub="${i}" data-li="${j}">${productOptions(li.product_id)}</select>
             <input data-lf="description" data-sub="${i}" data-li="${j}" placeholder="Beschrijving" value="${esc(li.description)}" />
-            <input type="number" step="0.01" min="0" data-lf="amount" data-sub="${i}" data-li="${j}" placeholder="0,00" value="${esc(li.amount)}" />
+            <input type="number" step="0.01" min="0" data-amt="excl" data-sub="${i}" data-li="${j}" placeholder="0,00" value="${esc(li.amount)}" />
+            <input type="number" step="0.01" min="0" data-amt="incl" data-sub="${i}" data-li="${j}" placeholder="0,00" value="${esc(li.amount_incl)}" />
             <select data-lf="vat_percentage" data-sub="${i}" data-li="${j}"${zero?' disabled title="0% bij intra/buiten-EU"':''}>${vatOptions(li.vat_percentage)}</select>
-            ${(s.line_items||[]).length>1?`<button class="btn btn-danger btn-sm" data-rmli data-sub="${i}" data-li="${j}" style="padding:4px 8px">×</button>`:'<span></span>'}
+            ${(s.line_items||[]).length>1?`<button class="btn btn-danger btn-sm" data-rmli data-sub="${i}" data-li="${j}" style="padding:3px 6px">×</button>`:'<span></span>'}
           </div>`).join('')}
       </div>
       <button class="btn btn-ghost btn-sm" data-addli="${i}">+ Regel toevoegen</button>
       <div style="text-align:right;font-size:12px;color:var(--text-dim);margin-top:8px" data-subtot="${i}">Totaal/termijn incl. BTW: ${eur(subInclPerTerm(s))}</div>
-    </div>`).join('') + `<datalist id="descSug"><option>Aanbetaling</option><option>Maandelijkse termijnen</option><option>Membership</option><option>Begeleidingstraject</option><option>E-book</option></datalist>`;
-  // Sub-velden: alleen herberekenen (geen full re-render → geen focus-verlies).
-  root.querySelectorAll('[data-f]').forEach(inp=>inp.addEventListener('input',e=>{
-    const i=Number(e.target.dataset.i), f=e.target.dataset.f;
-    state.subs[i][f]=e.target.value;
-    updateComputed();
+    </div>`).join('');
+  // Sub omschrijving dropdown (PUNT 6).
+  root.querySelectorAll('[data-descsel]').forEach(sel=>sel.addEventListener('change',e=>{
+    const i=Number(e.target.dataset.descsel), v=e.target.value;
+    if(v==='__custom__'){ state.subs[i]._descCustom=true; if(state.descPresets.includes(state.subs[i].description)) state.subs[i].description=''; }
+    else { state.subs[i]._descCustom=false; state.subs[i].description=v; }
+    renderSubs();
   }));
-  // Regel-velden.
-  root.querySelectorAll('[data-lf]').forEach(inp=>inp.addEventListener('input',e=>{
-    const i=Number(e.target.dataset.sub), j=Number(e.target.dataset.li), f=e.target.dataset.lf;
-    state.subs[i].line_items[j][f]=e.target.value;
-    updateComputed();
-  }));
+  root.querySelectorAll('[data-desccustom]').forEach(inp=>inp.addEventListener('input',e=>{ state.subs[Number(e.target.dataset.desccustom)].description=e.target.value; }));
+  // Sub-velden (start/term): targeted herberekening.
+  root.querySelectorAll('[data-f]').forEach(inp=>inp.addEventListener('input',e=>{ state.subs[Number(e.target.dataset.i)][e.target.dataset.f]=e.target.value; updateComputed(); }));
+  // Product dropdown (PUNT 5): autofill → re-render.
+  root.querySelectorAll('[data-prod]').forEach(sel=>sel.addEventListener('change',e=>onProduct(Number(e.target.dataset.sub),Number(e.target.dataset.li),e.target.value)));
+  // Beschrijving regel (targeted).
+  root.querySelectorAll('[data-lf="description"]').forEach(inp=>inp.addEventListener('input',e=>{ state.subs[Number(e.target.dataset.sub)].line_items[Number(e.target.dataset.li)].description=e.target.value; }));
+  // BTW (PUNT 4 trigger): re-render zodat beide bedragvelden kloppen.
+  root.querySelectorAll('[data-lf="vat_percentage"]').forEach(sel=>sel.addEventListener('change',e=>{ const i=Number(e.target.dataset.sub),j=Number(e.target.dataset.li); state.subs[i].line_items[j].vat_percentage=Number(e.target.value); recalcLine(state.subs[i].line_items[j]); renderSubs(); }));
+  // Excl/Incl vakjes (PUNT 4): targeted, vul tegenoverliggend veld.
+  root.querySelectorAll('[data-amt]').forEach(inp=>inp.addEventListener('input',e=>onAmt(Number(e.target.dataset.sub),Number(e.target.dataset.li),e.target.dataset.amt,e.target.value)));
   root.querySelectorAll('[data-rm]').forEach(b=>b.addEventListener('click',()=>{state.subs.splice(Number(b.dataset.rm),1);renderSubs();}));
   root.querySelectorAll('[data-rmli]').forEach(b=>b.addEventListener('click',()=>{state.subs[Number(b.dataset.sub)].line_items.splice(Number(b.dataset.li),1);renderSubs();}));
-  root.querySelectorAll('[data-addli]').forEach(b=>b.addEventListener('click',()=>{state.subs[Number(b.dataset.addli)].line_items.push({description:'',amount:'',vat_percentage:isZeroVat()?0:21});renderSubs();}));
+  root.querySelectorAll('[data-addli]').forEach(b=>b.addEventListener('click',()=>{state.subs[Number(b.dataset.addli)].line_items.push(newLine());renderSubs();}));
   updateComputed();
 }
-// Herbereken einddatums + sub-totalen + grand total zonder inputs te hertekenen.
+function onAmt(i,j,which,val){
+  const li=state.subs[i].line_items[j];
+  if(which==='excl'){ li.amount=val; li._lead='excl'; } else { li.amount_incl=val; li._lead='incl'; }
+  recalcLine(li);
+  const other = which==='excl'?'incl':'excl';
+  const el=document.querySelector(`[data-amt="${other}"][data-sub="${i}"][data-li="${j}"]`);
+  if(el) el.value = other==='incl'?li.amount_incl:li.amount;
+  updateComputed();
+}
+function onProduct(i,j,pid){
+  const li=state.subs[i].line_items[j];
+  li.product_id=pid;
+  if(pid){
+    const p=state.products.find(x=>String(x.id)===String(pid));
+    if(p){
+      li.description=p.name||'';
+      li.vat_percentage=isZeroVat()?0:(p.vat_percentage??21);
+      const price=Number(p.default_price)||0;
+      const rate=isZeroVat()?0:(Number(li.vat_percentage)||0)/100;
+      if(p.price_includes_vat){ li.amount_incl=price?round2(price):''; li._lead='incl'; }
+      else { li.amount=price?round2(price):''; li._lead='excl'; }
+      recalcLine(li);
+    }
+  }
+  renderSubs();
+}
 function updateComputed(){
   state.subs.forEach((s,i)=>{
     const endEl=document.querySelector(`[data-end="${i}"]`); if(endEl) endEl.value=calcEnd(s.start_date,s.term_count);
@@ -238,7 +428,7 @@ function renderSubTotal(){
   const total = state.subs.reduce((sum,s)=>sum+subInclPerTerm(s)*(Number(s.term_count)||0),0);
   document.getElementById('subTotal').textContent = 'Totale waarde abonnementen (incl. BTW): '+eur(total);
 }
-document.getElementById('addSub').addEventListener('click',()=>{state.subs.push({description:'',term_count:1,start_date:'',line_items:[{description:'',amount:'',vat_percentage:isZeroVat()?0:21}]});renderSubs();});
+document.getElementById('addSub').addEventListener('click',()=>{state.subs.push(newEmptySub());renderSubs();});
 
 function validateSubs(){
   if(!state.subs.length) return 'Minimaal 1 abonnement vereist';
@@ -252,7 +442,6 @@ function validateSubs(){
   return null;
 }
 function renderStep3(){
-  // Bonus-preview op eerste 1-termijn sub (over totaalbedrag excl, = TL-grondslag).
   const down = state.subs.find(s=>(Number(s.term_count)||1)===1 && subExcl(s)>0);
   const downAmt = down ? subExcl(down) : 0;
   const bb=document.getElementById('bonusBlock');
@@ -260,24 +449,16 @@ function renderStep3(){
     const bonus=(downAmt*0.03).toFixed(2);
     bb.className='bonus green';
     bb.innerHTML=`<strong>Bonus (indicatief 3%):</strong> ${eur(bonus)} over aanbetaling ${eur(downAmt)}<br><small>Status: pending — wordt 'paid' wanneer de factuur betaald is. Exacte % / drempel volgen uit sales_bonus_configs.</small>`;
-  } else {
-    bb.className='bonus gray';
-    bb.innerHTML='Geen bonus: geen aanbetaling-termijn ≥ €1.000.';
-  }
-  // Preview met line_items per sub.
+  } else { bb.className='bonus gray'; bb.innerHTML='Geen bonus: geen aanbetaling-termijn ≥ €1.000.'; }
   const zero=isZeroVat();
   let lines=['Bij Teamleader worden de volgende subscriptions aangemaakt:',''];
   state.subs.forEach((s,i)=>{
     lines.push(`${i+1}. ${s.description||'Abonnement'} · ${s.term_count} termijn(en) · ${fmtDate(s.start_date)} t/m ${fmtDate(calcEnd(s.start_date,s.term_count))}`);
-    (s.line_items||[]).forEach(li=>{
-      const v = zero ? 0 : (Number(li.vat_percentage)||0);
-      lines.push(`     • ${li.description||'Regel'}: ${eur(li.amount)} excl. · BTW ${v}%`);
-    });
+    (s.line_items||[]).forEach(li=>{ const v=zero?0:(Number(li.vat_percentage)||0); lines.push(`     • ${li.description||'Regel'}: ${eur(li.amount)} excl. · BTW ${v}%`); });
     lines.push(`     = ${eur(subInclPerTerm(s))} incl./termijn`);
   });
-  if(zero) lines.push('', '⚠️ '+(state.deal.sale_type==='intracommunautair'?'Intracommunautair':'Buiten EU')+': TL factureert 0% BTW.');
+  if(zero) lines.push('', '⚠️ '+(state.deal && state.deal.sale_type==='intracommunautair'?'Intracommunautair':'Buiten EU')+': TL factureert 0% BTW.');
   document.getElementById('subPreview').textContent = lines.join('\n');
-  // Submit knoppen
   document.getElementById('submitBlock').innerHTML = `
     <button class="btn btn-success" id="submitTl" style="padding:12px">Activeer abonnementen + push naar Teamleader</button>
     <a href="#" id="submitLocal" style="text-align:center;font-size:11.5px;color:var(--text-dim)">Alleen lokaal opslaan</a>`;
@@ -293,8 +474,10 @@ function showStep(n){
   document.getElementById('nextBtn').style.display = n===3?'none':'';
   if(n===3) renderStep3();
 }
+function updateNext(){ /* placeholder: Next is altijd klikbaar, validatie gebeurt on-click */ }
 document.getElementById('prevBtn').addEventListener('click',()=>{if(state.step>1)showStep(state.step-1);});
 document.getElementById('nextBtn').addEventListener('click',()=>{
+  if(state.step===1 && state.mode==='standalone'){ const err=validateCustomer(); const ce=document.getElementById('custErr'); if(err){ if(ce) ce.textContent=err; return; } if(ce) ce.textContent=''; }
   if(state.step===2){ const err=validateSubs(); if(err){document.getElementById('p2err').textContent=err;return;} document.getElementById('p2err').textContent=''; }
   if(state.step<3) showStep(state.step+1);
 });
@@ -302,25 +485,34 @@ document.getElementById('nextBtn').addEventListener('click',()=>{
 async function submit(syncToTl){
   const btn=document.querySelector('#submitBlock .btn'); if(btn){btn.disabled=true;btn.textContent='Bezig…';}
   try{
+    const subsPayload=state.subs.map(s=>({
+      description:s.description||null,
+      term_count:Number(s.term_count)||1,
+      start_date:s.start_date||null,
+      end_date:calcEnd(s.start_date,s.term_count)||null,
+      line_items:(s.line_items||[]).filter(li=>Number(li.amount)>0).map(li=>({product_id:li.product_id||null,description:li.description||null,amount:Number(li.amount)||0,vat_percentage:Number(li.vat_percentage)||0})),
+    }));
     const payload={
-      deal_id:dealId,
       tl_department_id:document.getElementById('deptSelect').value||null,
       first_call_at:document.getElementById('firstCall').value||null,
       sync_to_tl:!!syncToTl,
-      subscriptions:state.subs.map(s=>({
-        description:s.description||null,
-        term_count:Number(s.term_count)||1,
-        start_date:s.start_date||null,
-        end_date:calcEnd(s.start_date,s.term_count)||null,
-        line_items:(s.line_items||[]).filter(li=>Number(li.amount)>0).map(li=>({description:li.description||null,amount:Number(li.amount)||0,vat_percentage:Number(li.vat_percentage)||0})),
-      })),
+      subscriptions:subsPayload,
     };
-    const res=await window.AgentShared.apiFetch('/api/sales-subscription-create',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+    if(state.mode==='standalone'){
+      payload.mode='standalone';
+      payload.sale_type='domestic';
+      if(state.matched_customer_id) payload.matched_customer_id=state.matched_customer_id;
+      else { payload.customer_data=state.newCustomer; payload.tl_imported_contact_id=state.tl_imported_contact_id||null; }
+    } else {
+      payload.deal_id=dealId;
+    }
+    const res=await apiFetch('/api/sales-subscription-create',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
     const data=await res.json();
     if(!res.ok||data.success===false) throw new Error(data.error||'HTTP '+res.status);
     toast('Abonnementen aangemaakt','success');
     if(syncToTl) setTimeout(()=>toast(`TL: ${data.tl_pushed} gepusht, ${data.tl_failed} mislukt`, data.tl_failed?'error':'success'),1200);
-    setTimeout(()=>{window.location.href='/modules/klanten.html?id='+state.deal.customer_id;},1000);
+    const custId = data.customer_id || (state.deal && state.deal.customer_id);
+    setTimeout(()=>{window.location.href='/modules/klanten.html?id='+custId+'&tab=abonnementen';},1000);
   }catch(e){ toast('Mislukt: '+e.message,'error'); if(btn){btn.disabled=false;btn.textContent='Activeer abonnementen + push naar Teamleader';} }
 }
 

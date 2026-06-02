@@ -23,6 +23,7 @@ export default async function handler(req, res) {
     let q = supabaseAdmin.from('deals')
       .select('id, customer_id, total_amount, created_at, sales_user_id, traject_variant_id, tl_quotation_id, tl_quotation_status, tl_quotation_sent_at, tl_quotation_email_sent_at, tl_quotation_accepted_at, tl_quotation_declined_at')
       .is('archived_at', null)  // verwijderde offertes (soft-delete) niet tonen
+      .neq('tl_quotation_status', 'no_quotation')  // ghost-deals (abo zonder offerte) niet als offerte tonen
       .order('created_at', { ascending: false })
       .limit(300);
     if (owned_by_me === 'true') q = q.eq('sales_user_id', user.id);

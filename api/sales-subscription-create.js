@@ -25,12 +25,13 @@ function normalizeLineItems(s) {
         description: li.description || s.description || 'Abonnement',
         amount: Number(li.amount) || 0,
         vat_percentage: li.vat_percentage ?? 21,
+        product_id: li.product_id || null,
       }))
       .filter(li => li.amount > 0);
   }
   // Legacy: één regel uit amount + vat_percentage.
   const amt = Number(s.amount) || 0;
-  return amt > 0 ? [{ description: s.description || 'Abonnement', amount: amt, vat_percentage: s.vat_percentage ?? 21 }] : [];
+  return amt > 0 ? [{ description: s.description || 'Abonnement', amount: amt, vat_percentage: s.vat_percentage ?? 21, product_id: null }] : [];
 }
 
 export default async function handler(req, res) {
@@ -45,20 +46,62 @@ export default async function handler(req, res) {
     return res.status(403).json({ error: 'Geen rechten (sales.deal.create)' });
   }
 
-  const { deal_id, tl_department_id, first_call_at, subscriptions = [], sync_to_tl = false } = req.body || {};
-  if (!deal_id) return res.status(400).json({ error: 'deal_id vereist' });
+  const { deal_id, mode, customer_data = {}, matched_customer_id, tl_imported_contact_id,
+          sale_type, tl_department_id, first_call_at, subscriptions = [], sync_to_tl = false } = req.body || {};
+  const standalone = mode === 'standalone' || !deal_id;
   if (!Array.isArray(subscriptions) || subscriptions.length === 0) return res.status(400).json({ error: 'minimaal 1 abonnement vereist' });
 
   try {
-    const { data: deal } = await supabaseAdmin.from('deals').select('*').eq('id', deal_id).maybeSingle();
-    if (!deal) return res.status(404).json({ error: 'Deal niet gevonden' });
-    const departmentId = tl_department_id || deal.tl_department_id || null;
-
     // Elke sub naar regels normaliseren + valideren dat er een bedrag in zit.
     const subsNorm = subscriptions.map(s => ({ ...s, _lines: normalizeLineItems(s) }));
     for (const s of subsNorm) {
       if (!s._lines.length) return res.status(400).json({ error: `Abonnement "${s.description || ''}" heeft geen regel met bedrag > 0` });
     }
+
+    // ── Deal resolven: bestaande deal (uit Wizard 1) OF ghost-deal (standalone) ──
+    let deal, dealId;
+    if (!standalone) {
+      const { data: d } = await supabaseAdmin.from('deals').select('*').eq('id', deal_id).maybeSingle();
+      if (!d) return res.status(404).json({ error: 'Deal niet gevonden' });
+      deal = d; dealId = d.id;
+    } else {
+      // Bedrijfsentiteit valideren.
+      if (tl_department_id) {
+        const { data: ent } = await supabaseAdmin.from('company_entities')
+          .select('tl_department_id').eq('tl_department_id', tl_department_id).eq('is_active', true).maybeSingle();
+        if (!ent) return res.status(400).json({ error: 'Ongeldige bedrijfsentiteit (tl_department_id)' });
+      }
+      // Klant: hergebruik OF aanmaken.
+      let customerId = matched_customer_id || null;
+      if (!customerId) {
+        const custPayload = {
+          first_name: customer_data.first_name || null, last_name: customer_data.last_name || null,
+          email: customer_data.email || null, phone: customer_data.phone || null,
+          date_of_birth: customer_data.date_of_birth || null,
+          address_street: customer_data.address_street || null, address_number: customer_data.address_number || null,
+          address_postal: customer_data.address_postal || null, address_city: customer_data.address_city || null,
+          tl_contact_id: tl_imported_contact_id || null, created_by_user_id: user.id,
+        };
+        const { data: cust, error: cErr } = await supabaseAdmin.from('customers').insert(custPayload).select('id').single();
+        if (cErr) {
+          if (cErr.code === '23505') return res.status(409).json({ error: 'Email reeds in gebruik' });
+          throw cErr;
+        }
+        customerId = cust.id;
+      }
+      // Ghost-deal (geen offerte): subs hangen altijd onder een deal.
+      const totalExcl = subsNorm.reduce((sum, s) => sum + s._lines.reduce((a, li) => a + (Number(li.amount) || 0) * (Number(s.term_count) || 1), 0), 0);
+      const earliestStart = subsNorm.map(s => s.start_date).filter(Boolean).sort()[0] || new Date().toISOString().slice(0, 10);
+      const { data: gd, error: gdErr } = await supabaseAdmin.from('deals').insert({
+        customer_id: customerId, total_amount: Math.round(totalExcl * 100) / 100,
+        start_date: earliestStart, status: 'active', sales_user_id: user.id,
+        source: 'subscription_only', tl_department_id: tl_department_id || null,
+        sale_type: sale_type || 'domestic', tl_push_status: 'not_pushed', tl_quotation_status: 'no_quotation',
+      }).select('*').single();
+      if (gdErr) throw gdErr;
+      deal = gd; dealId = gd.id;
+    }
+    const departmentId = tl_department_id || deal.tl_department_id || null;
 
     // Pre-flight: bij TL-sync de tax_rate_id's per regel vóóraf valideren, zodat
     // een ontbrekende env-var een duidelijke 422 geeft VÓÓR er lokaal subs worden
@@ -72,7 +115,7 @@ export default async function handler(req, res) {
     }
 
     // 1. Deal bijwerken (1e call).
-    await supabaseAdmin.from('deals').update({ first_call_at: first_call_at || null }).eq('id', deal_id);
+    await supabaseAdmin.from('deals').update({ first_call_at: first_call_at || null }).eq('id', dealId);
 
     // 2. Subscriptions lokaal aanmaken. amount = som regels (EXCL); vat_percentage
     //    = tarief van de eerste regel (legacy-kolommen, behouden voor compat).
@@ -80,7 +123,7 @@ export default async function handler(req, res) {
     for (const s of subsNorm) {
       const totalExcl = s._lines.reduce((sum, li) => sum + (Number(li.amount) || 0), 0);
       const { data: row } = await supabaseAdmin.from('subscriptions').insert({
-        deal_id,
+        deal_id:           dealId,
         description:        s.description || null,
         amount:            Math.round(totalExcl * 100) / 100,
         vat_percentage:    s._lines[0].vat_percentage ?? 21,
@@ -88,7 +131,7 @@ export default async function handler(req, res) {
         start_date:        s.start_date || null,
         end_date:          s.end_date || null,
         tl_department_id:  departmentId,
-        line_items:        s._lines.map(li => ({ description: li.description, amount: li.amount, vat_percentage: li.vat_percentage })),
+        line_items:        s._lines.map(li => ({ description: li.description, amount: li.amount, vat_percentage: li.vat_percentage, product_id: li.product_id || null })),
         status:            'active',
       }).select('*').single();
       if (row) subRows.push(row);
@@ -107,7 +150,7 @@ export default async function handler(req, res) {
       if (downAmount >= Number(threshold)) {
         const bonusAmount = Math.round(downAmount * Number(pct)) / 100;
         const { data: b } = await supabaseAdmin.from('bonuses').insert({
-          deal_id, sales_user_id: deal.sales_user_id, amount: bonusAmount, status: 'pending',
+          deal_id: dealId, sales_user_id: deal.sales_user_id, amount: bonusAmount, status: 'pending',
         }).select('*').single();
         bonus = b || { amount: bonusAmount, status: 'pending' };
       }
@@ -183,6 +226,8 @@ export default async function handler(req, res) {
 
     return res.status(200).json({
       success: true,
+      deal_id: dealId,
+      customer_id: deal.customer_id,
       subscription_ids: subRows.map(r => r.id),
       bonus,
       tl_pushed: tlResults.filter(r => r.success).length,
