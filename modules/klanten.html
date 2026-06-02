@@ -987,6 +987,9 @@ async function renderAbonnementenTab() {
       return (Number(s.amount) || 0) * (1 + (Number(s.vat_percentage) || 0) / 100);
     };
     const eur2 = (v) => '€' + Number(v || 0).toLocaleString('nl-NL', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const todayStr = new Date().toISOString().slice(0, 10);
+    const isRunning = (s) => !!(s.start_date && s.start_date < todayStr); // al gestart = looptijd-verlenging
+    const isExtended = (s) => (Number(s.postponed_months) > 0) && !s.original_start_date; // verlengd (start onveranderd)
     const rows = subs.map((s, i) => {
       const lis = Array.isArray(s.line_items) ? s.line_items : [];
       const detail = lis.length
@@ -1000,19 +1003,24 @@ async function renderAbonnementenTab() {
       const caret = lis.length ? `<button class="btn btn-sm btn-ghost" data-sub-toggle="${i}" style="padding:2px 6px;margin-right:6px">▸</button>` : '';
       const cancelled = s.status === 'cancelled';
       const actions = cancelled ? '<span style="color:var(--text-faint,#999);font-size:11px">—</span>' : `
-        <button class="btn btn-sm" data-sub-postpone="${escapeHtml(s.id)}" style="background:#f59e0b;color:#fff;padding:3px 8px">Uitstellen</button>
+        <button class="btn btn-sm" data-sub-postpone="${escapeHtml(s.id)}" data-sub-running="${isRunning(s) ? '1' : '0'}" style="background:#f59e0b;color:#fff;padding:3px 8px">Uitstellen</button>
         <button class="btn btn-sm" data-sub-delete="${escapeHtml(s.id)}" style="background:#dc2626;color:#fff;padding:3px 8px">Verwijderen</button>`;
+      const ppBadge = s.postponed_months ? ` <span title="uitgesteld" style="color:#f59e0b;font-size:11px">+${s.postponed_months}m${isExtended(s) ? ' verlengd' : ''}</span>` : '';
       return `<tr>
         <td>${caret}${escapeHtml(s.description || '—')}</td>
         <td>${eur2(subInclPerTerm(s))}${lis.length > 1 ? ` <span style="color:var(--text-faint,#999);font-size:11px">(${lis.length} regels)</span>` : ''}</td>
         <td>${s.term_count || '—'}×</td>
-        <td>${s.start_date ? fmtDate(s.start_date) : '—'} – ${s.end_date ? fmtDate(s.end_date) : '—'}${s.postponed_months ? ` <span title="uitgesteld" style="color:#f59e0b;font-size:11px">+${s.postponed_months}m</span>` : ''}</td>
+        <td>${s.start_date ? fmtDate(s.start_date) : '—'} – ${s.end_date ? fmtDate(s.end_date) : '—'}${ppBadge}</td>
         <td>${s.teamleader_subscription_id ? '✓ TL' : '—'}</td>
         <td>${escapeHtml(s.status || '—')}</td>
         <td style="white-space:nowrap">${actions}</td>
       </tr>${detail}`;
     }).join('');
-    wrap.innerHTML = wizardBtn + `<div class="table-wrap"><table>
+    // PUNT 4: bulk-uitstel knop als er ≥1 actief abonnement is.
+    const activeCount = subs.filter(s => s.status === 'active').length;
+    const bulkBtn = activeCount > 1
+      ? `<div style="margin-bottom:10px;text-align:right"><button class="btn btn-sm" id="postpone-all-btn" style="background:#f59e0b;color:#fff">Stel alle abo's uit (${activeCount})</button></div>` : '';
+    wrap.innerHTML = wizardBtn + bulkBtn + `<div class="table-wrap"><table>
       <thead><tr><th>Omschrijving</th><th>Bedrag incl. BTW</th><th>Termijnen</th><th>Periode</th><th>TL</th><th>Status</th><th>Acties</th></tr></thead>
       <tbody>${rows}</tbody></table></div>`;
     wrap.querySelectorAll('[data-sub-toggle]').forEach(btn => btn.addEventListener('click', () => {
@@ -1021,32 +1029,39 @@ async function renderAbonnementenTab() {
       row.hidden = !row.hidden;
       btn.textContent = row.hidden ? '▸' : '▾';
     }));
-    wrap.querySelectorAll('[data-sub-postpone]').forEach(btn => btn.addEventListener('click', () => openPostponeModal(btn.dataset.subPostpone)));
+    wrap.querySelectorAll('[data-sub-postpone]').forEach(btn => btn.addEventListener('click', () => openPostponeModal(btn.dataset.subPostpone, btn.dataset.subRunning === '1')));
     wrap.querySelectorAll('[data-sub-delete]').forEach(btn => btn.addEventListener('click', () => deleteSubscription(btn.dataset.subDelete)));
+    const pab = document.getElementById('postpone-all-btn');
+    if (pab) pab.addEventListener('click', () => openPostponeAllModal(detailState.customerId, activeCount));
   } catch (e) {
     wrap.innerHTML = '<div class="placeholder-card">Laden mislukt: ' + escapeHtml(e.message) + '</div>';
   }
 }
 
-// PUNT 2 — Abonnement uitstellen (X maanden vooruit).
-function openPostponeModal(subId) {
+// PUNT 2/5 — Abonnement uitstellen (verschuiven) of verlengen (lopend).
+function openPostponeModal(subId, running) {
   const existing = document.getElementById('postpone-overlay');
   if (existing) existing.remove();
+  const title = running ? 'Looptijd verlengen' : 'Abonnement uitstellen';
+  const intro = running
+    ? 'Dit abonnement loopt al. De einddatum schuift vooruit en er komen extra termijnen bij — de klant betaalt dus X termijnen extra. De startdatum blijft gelijk.'
+    : 'Het abonnement is nog niet gestart. Start- én einddatum schuiven beide vooruit; de looptijd blijft hetzelfde.';
   const ov = document.createElement('div');
   ov.id = 'postpone-overlay';
   ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;z-index:9999';
   ov.innerHTML = `<div style="background:var(--bg-elev,#fff);border:1px solid var(--border,#ddd);border-radius:12px;padding:20px;max-width:360px;width:90%">
-    <h3 style="margin:0 0 8px;font-size:15px">Abonnement uitstellen</h3>
-    <p style="font-size:12.5px;color:var(--text-dim,#666);margin:0 0 12px">Verplaats het abonnement vooruit. De looptijd blijft hetzelfde — start- én einddatum schuiven mee.</p>
-    <label style="font-size:11.5px;font-weight:600;color:var(--text-dim,#666)">Aantal maanden uitstel (1–12)</label>
+    <h3 style="margin:0 0 8px;font-size:15px">${title}</h3>
+    <p style="font-size:12.5px;color:var(--text-dim,#666);margin:0 0 12px">${intro}</p>
+    <label style="font-size:11.5px;font-weight:600;color:var(--text-dim,#666)">Aantal maanden (1–12)</label>
     <input id="postpone-months" type="number" min="1" max="12" value="1" style="width:100%;padding:8px 10px;border:1px solid var(--border,#ddd);border-radius:6px;margin-top:4px;background:var(--bg,#fff);color:var(--text,#000)" />
     <div id="postpone-err" style="color:#dc2626;font-size:11.5px;margin-top:6px"></div>
     <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:14px">
       <button class="btn btn-sm btn-ghost" id="postpone-cancel">Annuleren</button>
-      <button class="btn btn-sm" id="postpone-ok" style="background:#f59e0b;color:#fff">Uitstellen</button>
+      <button class="btn btn-sm" id="postpone-ok" style="background:#f59e0b;color:#fff">${running ? 'Verlengen' : 'Uitstellen'}</button>
     </div>
   </div>`;
   document.body.appendChild(ov);
+  const okLabel = running ? 'Verlengen' : 'Uitstellen';
   const close = () => ov.remove();
   ov.addEventListener('click', e => { if (e.target === ov) close(); });
   document.getElementById('postpone-cancel').addEventListener('click', close);
@@ -1059,9 +1074,47 @@ function openPostponeModal(subId) {
       const d = await res.json();
       if (!res.ok || d.success === false) throw new Error(d.error || 'HTTP ' + res.status);
       close();
-      window.AgentShared?.showToast(d.tl?.pushed ? 'Uitgesteld + TL bijgewerkt' : 'Uitgesteld (TL niet gesynct)', d.tl?.pushed === false && d.tl?.error ? 'error' : 'success');
+      const verb = d.extended ? 'Looptijd verlengd' : 'Uitgesteld';
+      window.AgentShared?.showToast(d.tl?.pushed ? `${verb} + TL bijgewerkt` : `${verb} (TL niet gesynct)`, d.tl?.pushed === false && d.tl?.error ? 'error' : 'success');
       renderAbonnementenTab();
-    } catch (e) { document.getElementById('postpone-err').textContent = e.message; okBtn.disabled = false; okBtn.textContent = 'Uitstellen'; }
+    } catch (e) { document.getElementById('postpone-err').textContent = e.message; okBtn.disabled = false; okBtn.textContent = okLabel; }
+  });
+}
+
+// PUNT 4 — Alle actieve abonnementen van een klant tegelijk uitstellen/verlengen.
+function openPostponeAllModal(customerId, count) {
+  const existing = document.getElementById('postpone-overlay');
+  if (existing) existing.remove();
+  const ov = document.createElement('div');
+  ov.id = 'postpone-overlay';
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;z-index:9999';
+  ov.innerHTML = `<div style="background:var(--bg-elev,#fff);border:1px solid var(--border,#ddd);border-radius:12px;padding:20px;max-width:380px;width:90%">
+    <h3 style="margin:0 0 8px;font-size:15px">Alle abonnementen uitstellen</h3>
+    <p style="font-size:12.5px;color:var(--text-dim,#666);margin:0 0 12px">Dit verschuift ALLE ${count} actieve abonnementen van deze klant. Reeds lopende abo's worden in looptijd verlengd; nog-niet-gestarte abo's schuiven volledig vooruit.</p>
+    <label style="font-size:11.5px;font-weight:600;color:var(--text-dim,#666)">Aantal maanden (1–12)</label>
+    <input id="postpone-months" type="number" min="1" max="12" value="1" style="width:100%;padding:8px 10px;border:1px solid var(--border,#ddd);border-radius:6px;margin-top:4px;background:var(--bg,#fff);color:var(--text,#000)" />
+    <div id="postpone-err" style="color:#dc2626;font-size:11.5px;margin-top:6px"></div>
+    <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:14px">
+      <button class="btn btn-sm btn-ghost" id="postpone-cancel">Annuleren</button>
+      <button class="btn btn-sm" id="postpone-ok" style="background:#f59e0b;color:#fff">Alle uitstellen</button>
+    </div>
+  </div>`;
+  document.body.appendChild(ov);
+  const close = () => ov.remove();
+  ov.addEventListener('click', e => { if (e.target === ov) close(); });
+  document.getElementById('postpone-cancel').addEventListener('click', close);
+  document.getElementById('postpone-ok').addEventListener('click', async () => {
+    const months = Number(document.getElementById('postpone-months').value);
+    if (!Number.isInteger(months) || months < 1 || months > 12) { document.getElementById('postpone-err').textContent = 'Vul 1 t/m 12 maanden in.'; return; }
+    const okBtn = document.getElementById('postpone-ok'); okBtn.disabled = true; okBtn.textContent = 'Bezig…';
+    try {
+      const res = await window.AgentShared.apiFetch('/api/sales-customer-postpone-all', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ customer_id: customerId, months }) });
+      const d = await res.json();
+      if (!res.ok || d.success === false) throw new Error(d.error || 'HTTP ' + res.status);
+      close();
+      window.AgentShared?.showToast(`${d.ok} van ${d.total} abo's uitgesteld${d.failed ? ` (${d.failed} mislukt)` : ''}`, d.failed ? 'error' : 'success');
+      renderAbonnementenTab();
+    } catch (e) { document.getElementById('postpone-err').textContent = e.message; okBtn.disabled = false; okBtn.textContent = 'Alle uitstellen'; }
   });
 }
 

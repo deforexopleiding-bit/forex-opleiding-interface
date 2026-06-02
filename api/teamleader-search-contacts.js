@@ -42,6 +42,7 @@ function mapContact(c) {
     address_postal:  a.postal_code || null,
     address_city:    a.city || null,
     address:         parts.join(', ') || null,
+    date_of_birth:   c.birthdate || null,
     created_at:      c.added_at || null,
   };
 }
