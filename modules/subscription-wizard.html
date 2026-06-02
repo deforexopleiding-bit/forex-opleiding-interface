@@ -65,6 +65,9 @@
         <div class="field"><label>Bedrijfsentiteit</label><select id="deptSelect"></select></div>
         <div class="field"><label>Eerste call <span style="color:var(--red,#dc2626)">*</span></label><input id="firstCall" type="datetime-local" /></div>
       </div>
+      <div class="field" id="saleTypeWrap" style="display:none"><label>Type verkoop (BTW-regeling)</label>
+        <select id="saleTypeSel"><option value="domestic">Normaal NL/BE</option><option value="intracommunautair">Zakelijk België - Intracommunautair</option></select>
+      </div>
     </div>
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
       <strong style="font-size:14px">Abonnementen</strong>
@@ -102,10 +105,10 @@ const state = {
   // standalone klant-selectie:
   customerMode: 'search', matched_customer_id: null, tl_imported_contact_id: null,
   newCustomer: { first_name:'', last_name:'', email:'', phone:'', address_street:'', address_number:'', address_postal:'', address_city:'', date_of_birth:'' },
-  avg: false,
+  avg: false, saleType: 'domestic',
 };
 function round2(v){ return Math.round((Number(v)||0)*100)/100; }
-function saleType(){ return state.mode==='standalone' ? 'domestic' : (state.deal && state.deal.sale_type) || 'domestic'; }
+function saleType(){ return state.mode==='standalone' ? (state.saleType || 'domestic') : (state.deal && state.deal.sale_type) || 'domestic'; }
 function isZeroVat(){ return saleType() !== 'domestic'; }
 function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
 function toast(m,k){const e=document.getElementById('toast');e.textContent=m;e.className='toast show '+(k||'');setTimeout(()=>e.classList.remove('show'),2400)}
@@ -142,6 +145,10 @@ async function init(){
     } else {
       const lbl=document.querySelector('.progress .st[data-st="1"]'); if(lbl) lbl.textContent='1. Klant';
       document.getElementById('topSub').textContent='Nieuw abonnement (zonder offerte)';
+      // PUNT 2: type verkoop (BTW-regeling) tonen in standalone.
+      const stWrap=document.getElementById('saleTypeWrap'); if(stWrap) stWrap.style.display='block';
+      const stSel=document.getElementById('saleTypeSel');
+      if(stSel) stSel.addEventListener('change',e=>{ state.saleType=e.target.value; renderSubs(); });
       state.subs.push(newEmptySub());
       renderCustomerStep();
     }
@@ -228,6 +235,8 @@ function bindCustomerStep(){
   bind('nc_street','address_street'); bind('nc_number','address_number'); bind('nc_postal','address_postal'); bind('nc_city','address_city'); bind('nc_dob','date_of_birth');
   const avg=document.getElementById('nc_avg'); if(avg) avg.addEventListener('change',e=>{ state.avg=e.target.checked; updateNext(); });
   const tlBtn=document.getElementById('tlSearchBtn'); if(tlBtn) tlBtn.addEventListener('click',doTlSearch);
+  // PUNT 1B: auto-trigger TL-zoeken bij verlaten van het email-veld.
+  const emailEl=document.getElementById('nc_email'); if(emailEl) emailEl.addEventListener('blur',()=>{ if(state.newCustomer.email.trim()) doTlSearch(); });
   updateNext();
 }
 async function doCustomerSearch(q){
@@ -261,6 +270,7 @@ function importTlContact(m){
   if(m.email) nc.email=m.email; if(m.phone) nc.phone=m.phone;
   if(m.address_street) nc.address_street=m.address_street; if(m.address_number) nc.address_number=m.address_number;
   if(m.address_postal) nc.address_postal=m.address_postal; if(m.address_city) nc.address_city=m.address_city;
+  if(m.date_of_birth) nc.date_of_birth=String(m.date_of_birth).slice(0,10);
   toast('Geïmporteerd uit Teamleader','success');
   renderCustomerStep();
 }
@@ -342,7 +352,7 @@ function descSelect(s,i){
 function renderSubs(){
   const root=document.getElementById('subList');
   const zero=isZeroVat();
-  const warn = zero ? `<div class="bonus" style="background:rgba(245,158,11,.14);color:#b45309;margin-bottom:10px;padding:10px;border-radius:8px;font-size:12.5px">⚠️ ${esc(state.deal && state.deal.sale_type==='intracommunautair'?'Intracommunautair':'Buiten EU')}: alle regels worden met <strong>0% BTW</strong> gefactureerd. Het BTW-tarief blijft zichtbaar voor de administratie, maar Teamleader rekent 0%.</div>` : '';
+  const warn = zero ? `<div class="bonus" style="background:rgba(245,158,11,.14);color:#b45309;margin-bottom:10px;padding:10px;border-radius:8px;font-size:12.5px">⚠️ ${esc(saleType()==='intracommunautair'?'Intracommunautair':'Buiten EU')}: alle regels worden met <strong>0% BTW</strong> gefactureerd. Het BTW-tarief blijft zichtbaar voor de administratie, maar Teamleader rekent 0%.</div>` : '';
   root.innerHTML = warn + state.subs.map((s,i)=>`
     <div class="sub-card">
       ${state.subs.length>1?`<button class="btn btn-danger btn-sm" data-rm="${i}" style="position:absolute;top:10px;right:10px">×</button>`:''}
@@ -457,7 +467,7 @@ function renderStep3(){
     (s.line_items||[]).forEach(li=>{ const v=zero?0:(Number(li.vat_percentage)||0); lines.push(`     • ${li.description||'Regel'}: ${eur(li.amount)} excl. · BTW ${v}%`); });
     lines.push(`     = ${eur(subInclPerTerm(s))} incl./termijn`);
   });
-  if(zero) lines.push('', '⚠️ '+(state.deal && state.deal.sale_type==='intracommunautair'?'Intracommunautair':'Buiten EU')+': TL factureert 0% BTW.');
+  if(zero) lines.push('', '⚠️ '+(saleType()==='intracommunautair'?'Intracommunautair':'Buiten EU')+': TL factureert 0% BTW.');
   document.getElementById('subPreview').textContent = lines.join('\n');
   document.getElementById('submitBlock').innerHTML = `
     <button class="btn btn-success" id="submitTl" style="padding:12px">Activeer abonnementen + push naar Teamleader</button>
@@ -500,7 +510,7 @@ async function submit(syncToTl){
     };
     if(state.mode==='standalone'){
       payload.mode='standalone';
-      payload.sale_type='domestic';
+      payload.sale_type=state.saleType||'domestic';
       if(state.matched_customer_id) payload.matched_customer_id=state.matched_customer_id;
       else { payload.customer_data=state.newCustomer; payload.tl_imported_contact_id=state.tl_imported_contact_id||null; }
     } else {

@@ -18,6 +18,8 @@ export async function getOrCreateContact(customer) {
     emails:     customer.email ? [{ type: 'primary', email: customer.email }] : [],
     telephones: customer.phone ? [{ type: 'phone', number: customer.phone }] : [],
   };
+  // Geboortedatum (TL: top-level 'birthdate', formaat YYYY-MM-DD).
+  if (customer.date_of_birth) contactBody.birthdate = String(customer.date_of_birth).slice(0, 10);
   // Adres meesturen indien aanwezig (TL contacts.add addresses[]).
   const line1 = [customer.address_street, customer.address_number].filter(Boolean).join(' ').trim();
   if (line1 || customer.address_postal || customer.address_city) {

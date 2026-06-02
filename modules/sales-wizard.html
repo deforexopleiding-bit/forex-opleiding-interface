@@ -169,6 +169,10 @@
       <div class="field"><label>Email <span class="req">*</span></label><input id="f_email" type="email" /></div>
       <div class="field"><label>Telefoon <span class="req">*</span></label><input id="f_phone" /></div>
     </div>
+    <div style="margin:2px 0 14px">
+      <button class="btn btn-warn" id="dupCheckBtn" style="width:100%;padding:11px;font-size:13.5px" title="Vul minimaal email of telefoon in">🔍 Zoek in onze DB + Teamleader</button>
+      <div style="font-size:11px;color:var(--text-faint);margin-top:4px">Controleert of deze klant al bestaat (lokaal én in Teamleader) — vul je een email in, dan zoeken we automatisch.</div>
+    </div>
     <div class="row3">
       <div class="field"><label>Straat <span class="req">*</span></label><input id="f_street" /></div>
       <div class="field"><label>Huisnr <span class="req">*</span></label><input id="f_number" /></div>
@@ -194,10 +198,6 @@
       </label>
     </div>
     <div id="step2Missing" style="font-size:11.5px;color:#dc2626;margin-top:8px"></div>
-
-    <div style="margin-top:16px;display:flex;justify-content:center">
-      <button class="btn btn-warn" id="dupCheckBtn">Check duplicates</button>
-    </div>
   </section>
 
   <!-- STAP 2 -->
@@ -776,8 +776,17 @@ document.getElementById('dupCheckBtn').addEventListener('click', async () => {
     const tlMatches = tl.tl_matches || [];
     showDupModal(dbMatches, tlMatches);
   } catch (e) { toast('Check mislukt: ' + e.message, 'error'); }
-  btn.disabled = false; btn.textContent = 'Check duplicates';
+  btn.disabled = false; btn.textContent = '🔍 Zoek in onze DB + Teamleader';
 });
+// PUNT 1A: auto-trigger duplicate/TL-zoeken bij verlaten van het email-veld.
+(() => {
+  const em = document.getElementById('f_email');
+  if (em) em.addEventListener('blur', () => {
+    if (state.wizard.email && state.wizard.email.trim() && state.duplicate_check_status !== 'completed') {
+      document.getElementById('dupCheckBtn').click();
+    }
+  });
+})();
 
 function showDupModal(dbMatches, tlMatches) {
   const overlay = document.getElementById('dupModal');
@@ -853,6 +862,7 @@ function showDupModal(dbMatches, tlMatches) {
     if (m.address_number) state.wizard.address_number = m.address_number;
     if (m.address_postal) state.wizard.address_postal = m.address_postal;
     if (m.address_city)   state.wizard.address_city   = m.address_city;
+    if (m.date_of_birth)  state.wizard.date_of_birth  = String(m.date_of_birth).slice(0, 10);
     syncStep1Fields();
     state.duplicate_check_status = 'completed';
     overlay.classList.remove('show');
