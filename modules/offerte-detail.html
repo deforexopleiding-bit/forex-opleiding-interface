@@ -124,7 +124,9 @@ function render(d){
   const tlBtn = deal.tl_quotation_id ? `<a class="btn btn-ghost" href="https://focus.teamleader.eu/quotations/${esc(deal.tl_quotation_id)}" target="_blank">↗ Open in TL</a>` : '';
   let btns='';
   if (st==='accepted' || st==='signed'){
-    btns = `<a class="btn btn-success" href="/modules/subscription-wizard.html?deal_id=${esc(deal.id)}">Omzetten naar abonnement</a> <button class="btn btn-ghost" onclick="editConfirm('${esc(deal.id)}')">Bewerken</button> ${tlBtn}`;
+    const isRetentie = (d.entity || '').toLowerCase().includes('retentie');
+    const onbBtn = isRetentie ? '' : `<button class="btn" style="background:#0891b2;color:#fff" onclick="doOnboarding('${esc(c.id)}')">Aanmelden onboarding</button>`;
+    btns = `<a class="btn btn-success" href="/modules/subscription-wizard.html?deal_id=${esc(deal.id)}">Omzetten naar abonnement</a> ${onbBtn} <button class="btn btn-ghost" onclick="editConfirm('${esc(deal.id)}')">Bewerken</button> ${tlBtn}`;
   } else if (st==='sent'){
     btns = `<button class="btn" onclick="doSend()">Opnieuw versturen</button> <button class="btn" style="background:#f59e0b;color:#fff" onclick="doMarkAccepted()">Markeer als getekend</button> <button class="btn btn-danger" onclick="doDelete()">Verwijderen</button> ${tlBtn}`;
   } else if (st==='draft'){
@@ -136,6 +138,11 @@ function render(d){
   A.innerHTML = btns;
 }
 
+async function doOnboarding(customerId){
+  if(!confirm('Welkomstmail + onboarding-link naar de klant sturen?')) return;
+  try { const r=await window.AgentShared.apiFetch('/api/sales-onboarding-send',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({customer_id:customerId})}); const d=await r.json(); if(!r.ok||d.success===false)throw new Error(d.error||'HTTP '+r.status); toast(d.mail_sent?'Onboarding verzonden':'Onboarding gemarkeerd (mail mislukt: '+(d.mail_error||'')+')', d.mail_sent?'success':'error'); }
+  catch(e){ toast('Mislukt: '+e.message,'error'); }
+}
 async function doMarkAccepted(){
   if(!confirm('Markeert deze offerte handmatig als getekend (gebruik vóór de TL-webhook actief is). Doorgaan?')) return;
   try { const r=await window.AgentShared.apiFetch('/api/sales-quotation-mark-accepted',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({deal_id:dealId})}); const d=await r.json(); if(!r.ok||d.success===false)throw new Error(d.error||'HTTP '+r.status); toast('Gemarkeerd als getekend','success'); load(); }

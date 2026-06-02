@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Onboarding · De Forex Opleiding</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <style>
+    *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+    body{font-family:'Inter',system-ui,sans-serif;background:#0b1220;color:#e7ecf3;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px}
+    .card{background:#121a2b;border:1px solid #243049;border-radius:16px;padding:36px;max-width:480px;width:100%;text-align:center}
+    h1{font-size:22px;font-weight:800;margin-bottom:10px}
+    p{font-size:14px;color:#9fb0c9;line-height:1.6;margin-bottom:14px}
+    .btn{display:inline-block;margin-top:10px;padding:12px 22px;background:#0891b2;color:#fff;border:none;border-radius:10px;font:inherit;font-weight:600;cursor:pointer}
+    .ok{color:#34d399;font-weight:700}
+  </style>
+</head>
+<body>
+  <div class="card" id="card"><p>Laden…</p></div>
+<script>
+const token = new URLSearchParams(location.search).get('token');
+const card = document.getElementById('card');
+async function load(){
+  if(!token){ card.innerHTML='<h1>Onboarding</h1><p>Ongeldige link.</p>'; return; }
+  try{
+    const r = await fetch('/api/onboarding?token='+encodeURIComponent(token));
+    const d = await r.json();
+    if(!r.ok) throw new Error(d.error||'Niet gevonden');
+    if(d.status==='completed'){ card.innerHTML='<h1>Bedankt!</h1><p class="ok">Je onboarding is al afgerond.</p>'; return; }
+    card.innerHTML = `<h1>Welkom${d.first_name?(', '+d.first_name):''}!</h1>
+      <p>Fijn dat je erbij bent bij De Forex Opleiding. Het onboarding-formulier komt binnenkort beschikbaar.</p>
+      <p>Klik hieronder om je aanmelding te bevestigen, dan plannen we je eerste call in.</p>
+      <button class="btn" id="done">Markeer als afgerond</button>`;
+    document.getElementById('done').addEventListener('click', complete);
+  }catch(e){ card.innerHTML='<h1>Onboarding</h1><p>'+(e.message||'Er ging iets mis')+'</p>'; }
+}
+async function complete(){
+  const btn=document.getElementById('done'); btn.disabled=true; btn.textContent='Bezig…';
+  try{
+    const r = await fetch('/api/onboarding',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token})});
+    const d = await r.json(); if(!r.ok||d.success===false) throw new Error(d.error||'Mislukt');
+    card.innerHTML='<h1>Bedankt!</h1><p class="ok">Je onboarding is afgerond. We nemen snel contact op voor je eerste call.</p>';
+  }catch(e){ btn.disabled=false; btn.textContent='Markeer als afgerond'; alert('Mislukt: '+e.message); }
+}
+load();
+</script>
+</body>
+</html>

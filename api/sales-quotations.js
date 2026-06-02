@@ -66,6 +66,14 @@ export default async function handler(req, res) {
       for (const c of customers || []) custById[c.id] = c;
     }
 
+    // Verkoper-namen (E).
+    const userIds = [...new Set((deals || []).map(d => d.sales_user_id).filter(Boolean))];
+    const userById = {};
+    if (userIds.length) {
+      const { data: profs } = await supabaseAdmin.from('profiles').select('id, full_name').in('id', userIds);
+      for (const u of profs || []) userById[u.id] = u.full_name;
+    }
+
     const s = (search || '').trim().toLowerCase();
     const quotations = (deals || []).map(d => {
       const c = custById[d.customer_id] || {};
@@ -77,6 +85,7 @@ export default async function handler(req, res) {
         total_amount:        d.total_amount,
         total_amount_incl:   inclByDeal[d.id] != null ? Math.round(inclByDeal[d.id] * 100) / 100 : null,
         traject_label:       d.traject_variant_id ? (trajectByVariant[d.traject_variant_id] || null) : null,
+        sales_user:          d.sales_user_id ? (userById[d.sales_user_id] || null) : null,
         created_at:          d.created_at,
         tl_quotation_id:     d.tl_quotation_id,
         tl_quotation_status: d.tl_quotation_status || 'draft',
