@@ -814,9 +814,10 @@ function showDupModal(dbMatches, tlMatches) {
     html += tlMatches.map(m => `
       <div class="match-card">
         <div class="name">${esc(m.name)}</div>
-        <div class="meta">${esc(m.email || 'Email niet in TL')} · ${esc(m.phone || '')}</div>
+        <div class="meta">${esc(m.email || 'Email niet in TL')} · ${esc(m.phone || '—')}</div>
+        ${m.address ? `<div class="meta" style="color:var(--text-faint)">${esc(m.address)}</div>` : ''}
         <div class="actions">
-          <button class="btn btn-sm" data-use-tl='${esc(JSON.stringify(m))}'>Gebruik & importeer</button>
+          <button class="btn btn-sm" data-use-tl='${esc(JSON.stringify(m))}'>Gebruik dit contact</button>
           <button class="btn btn-ghost btn-sm">Negeer</button>
         </div>
       </div>`).join('');
@@ -835,14 +836,23 @@ function showDupModal(dbMatches, tlMatches) {
   overlay.querySelectorAll('[data-use-tl]').forEach(b => b.addEventListener('click', () => {
     const m = JSON.parse(b.dataset.useTl);
     state.tl_imported_contact_id = m.tl_id;
-    // Pre-fill velden uit TL-data
-    if (m.name) {
+    // Pre-fill velden uit TL-data (Dave kan na sluiten nog aanpassen).
+    // Naam: prefereer expliciete first/last uit TL, val terug op naam-split.
+    if (m.first_name || m.last_name) {
+      state.wizard.first_name = m.first_name || '';
+      state.wizard.last_name = m.last_name || '';
+    } else if (m.name) {
       const parts = m.name.split(' ');
       state.wizard.first_name = parts[0] || '';
       state.wizard.last_name = parts.slice(1).join(' ');
     }
     if (m.email) state.wizard.email = m.email;
     if (m.phone) state.wizard.phone = m.phone;
+    // Adres autofill (alleen overschrijven als TL een waarde heeft).
+    if (m.address_street) state.wizard.address_street = m.address_street;
+    if (m.address_number) state.wizard.address_number = m.address_number;
+    if (m.address_postal) state.wizard.address_postal = m.address_postal;
+    if (m.address_city)   state.wizard.address_city   = m.address_city;
     syncStep1Fields();
     state.duplicate_check_status = 'completed';
     overlay.classList.remove('show');
