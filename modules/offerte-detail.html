@@ -40,7 +40,10 @@
       <h1 id="detailTitle">Offerte laden…</h1>
       <div class="sub" id="detailSub"></div>
     </div>
-    <div class="actions" id="detailActions"></div>
+    <div class="actions">
+      <button class="btn btn-ghost" id="refreshBtn" title="Ververs status">🔄 Vernieuwen</button>
+      <span class="actions" id="detailActions"></span>
+    </div>
   </div>
 
   <div id="detailBody"><div class="sub">Laden…</div></div>
@@ -64,6 +67,7 @@ async function init(){
   const profile = await window.AuthShared?.requireAuth();
   if (!profile) return;
   if (window.AgentShared) await window.AgentShared.renderUserSection(profile);
+  document.getElementById('refreshBtn').addEventListener('click', () => { toast('Verversen…'); load(); });
   if (!dealId){ document.getElementById('detailBody').innerHTML='<div class="sub">Geen offerte-id.</div>'; return; }
   load();
 }

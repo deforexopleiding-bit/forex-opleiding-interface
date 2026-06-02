@@ -32,6 +32,17 @@ export default async function handler(req, res) {
     if (!deal) return res.status(404).json({ error: 'Deal niet gevonden' });
     const departmentId = tl_department_id || deal.tl_department_id || null;
 
+    // Pre-flight: bij TL-sync de tax_rate_id's vóóraf valideren, zodat een
+    // ontbrekende env-var een duidelijke 422 geeft VÓÓR er lokaal subs worden
+    // aangemaakt (consistent met Wizard 1, geen partial state).
+    if (sync_to_tl) {
+      try {
+        for (const s of subscriptions) taxRateIdFor(s.vat_percentage ?? 21, departmentId, deal.sale_type);
+      } catch (e) {
+        return res.status(422).json({ error: e.message });
+      }
+    }
+
     // 1. Deal bijwerken (1e call).
     await supabaseAdmin.from('deals').update({ first_call_at: first_call_at || null }).eq('id', deal_id);
 
@@ -93,8 +104,8 @@ export default async function handler(req, res) {
         : { action: 'book' };
 
       for (const row of subRows) {
-        let taxRateId = null;
-        try { taxRateId = taxRateIdFor(row.vat_percentage, departmentId, deal.sale_type); } catch (e) { console.warn('[sub-create] tax_rate:', e.message); }
+        // Tax-rate is in de pre-flight al gevalideerd → hier veilig.
+        const taxRateId = taxRateIdFor(row.vat_percentage, departmentId, deal.sale_type);
         const body = {
           invoicee: { customer: { type: 'contact', id: tlContactId } },
           department_id: departmentId,
