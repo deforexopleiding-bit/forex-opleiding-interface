@@ -113,6 +113,13 @@
         <div id="sd-next" class="sd-next"><span class="sd-empty">Geen geplande afspraken.</span></div>
       </div>
 
+      <div class="sd-grid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:16px">
+        <a class="sd-card" href="/modules/sales.html?tab=offertes" style="text-decoration:none;color:inherit"><div class="sd-label"><i class="ti ti-file-invoice"></i>Mijn open offertes</div><div class="sd-value" id="sd-my-quotes">–</div></a>
+        <div class="sd-card"><div class="sd-label"><i class="ti ti-coin"></i>Mijn bonus deze maand</div><div class="sd-value" id="sd-my-bonus">–</div></div>
+        <a class="sd-card" href="/modules/sales.html?tab=onboardings" style="text-decoration:none;color:inherit"><div class="sd-label"><i class="ti ti-user-check"></i>Klanten in onboarding</div><div class="sd-value" id="sd-onboarding">–</div></a>
+        <a class="sd-card" href="/modules/sales.html?tab=retentie" style="text-decoration:none;color:inherit"><div class="sd-label"><i class="ti ti-clock-exclamation"></i>Retentie deze maand</div><div class="sd-value" id="sd-retention">–</div></a>
+      </div>
+
       <div class="sd-panel">
         <div class="sd-panel-head"><h3>Wachten op subscription <span id="sd-pending-count" style="font-size:12px;color:var(--text-faint)"></span></h3></div>
         <div id="sd-pending"><span class="sd-empty">Laden…</span></div>
@@ -246,6 +253,20 @@
 
       await loadStats();
       loadPendingSubscriptions();
+      loadDashboardMetrics();
+    }
+
+    async function loadDashboardMetrics() {
+      try {
+        const res = await window.AgentShared.apiFetch('/api/sales-dashboard-metrics');
+        if (!res.ok) return;
+        const d = await res.json();
+        const set = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
+        set('sd-my-quotes', d.my_open_quotations ?? '–');
+        set('sd-my-bonus', '€' + Number(d.my_bonus_month || 0).toLocaleString('nl-NL', { minimumFractionDigits: 2 }));
+        set('sd-onboarding', d.onboarding_count ?? '–');
+        set('sd-retention', d.retention_count ?? '–');
+      } catch { /* stil */ }
     }
 
     async function loadPendingSubscriptions() {
