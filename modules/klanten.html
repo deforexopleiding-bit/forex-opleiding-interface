@@ -520,6 +520,11 @@
               <div class="detail-row"><span class="detail-label">Privacy geaccepteerd</span><span id="prof-privacy">—</span></div>
               <div class="detail-row"><span class="detail-label">Risico-tag automatisch</span><span id="prof-risk-auto">—</span></div>
             </div>
+
+            <div class="detail-card" id="prof-onboarding-card">
+              <h3><i class="ti ti-user-check"></i> Onboarding</h3>
+              <div id="prof-onboarding"><span class="cust-empty">Laden…</span></div>
+            </div>
           </div>
         </div>
 
@@ -1026,6 +1031,48 @@ function renderProfielTab() {
   $('#prof-ghl-id').textContent      = c.ghl_contact_id || 'Nog niet gekoppeld';
   $('#prof-privacy').textContent     = c.privacy_accepted_at ? fmtDate(c.privacy_accepted_at) : 'Nog niet';
   $('#prof-risk-auto').textContent   = c.risk_tag_auto ? 'Ja' : 'Nee';
+  renderOnboardingCard();
+}
+
+async function renderOnboardingCard() {
+  const wrap = $('#prof-onboarding');
+  if (!wrap) return;
+  const c = detailState.customer;
+  const status = c.onboarding_status || 'not_sent';
+  // Status uit de klant-rij is leidend. De knop alleen tonen na een
+  // getekende offerte (en niet voor Retentie).
+  if (status === 'completed') {
+    wrap.innerHTML = `<div class="detail-row"><span class="detail-label">Status</span><span class="ok">Afgerond ✓ ${c.onboarding_completed_at ? '· ' + fmtDate(c.onboarding_completed_at) : ''}</span></div>`;
+    return;
+  }
+  if (status === 'sent') {
+    wrap.innerHTML = `<div class="detail-row"><span class="detail-label">Status</span><span>Verzonden ✓ ${c.onboarding_sent_at ? '· ' + fmtDate(c.onboarding_sent_at) : ''}</span></div>`;
+    return;
+  }
+  wrap.innerHTML = '<span class="cust-empty">Laden…</span>';
+  // not_sent: alleen knop tonen als er een getekende, niet-Retentie offerte is.
+  try {
+    const r = await window.AgentShared.apiFetch('/api/sales-quotations?customer_id=' + encodeURIComponent(detailState.customerId));
+    const d = await r.json();
+    const accepted = (d.quotations || []).find(q => q.tl_quotation_status === 'accepted' || q.tl_quotation_status === 'signed');
+    const isRetentie = accepted && (accepted.traject_label || '').toLowerCase().includes('retentie');
+    if (accepted && !isRetentie) {
+      wrap.innerHTML = `<button class="btn btn-primary btn-sm" onclick="sendOnboarding()">Aanmelden onboarding</button>`;
+    } else {
+      wrap.innerHTML = '<span class="cust-empty">Wordt zichtbaar na offerte-ondertekening.</span>';
+    }
+  } catch { wrap.innerHTML = '<span class="cust-empty">Wordt zichtbaar na offerte-ondertekening.</span>'; }
+}
+async function sendOnboarding() {
+  if (!confirm('Welkomstmail + onboarding-link naar de klant sturen?')) return;
+  try {
+    const r = await window.AgentShared.apiFetch('/api/sales-onboarding-send', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ customer_id: detailState.customerId }) });
+    const d = await r.json();
+    if (!r.ok || d.success === false) throw new Error(d.error || 'HTTP ' + r.status);
+    if (detailState.customer) { detailState.customer.onboarding_status = 'sent'; detailState.customer.onboarding_sent_at = new Date().toISOString(); }
+    window.AgentShared?.showToast(d.mail_sent ? 'Onboarding verzonden' : 'Onboarding gemarkeerd (mail mislukt)', d.mail_sent ? 'success' : 'error');
+    renderOnboardingCard();
+  } catch (e) { window.AgentShared?.showToast('Mislukt: ' + e.message, 'error'); }
 }
 
 async function renderCommunicatieTab() {
