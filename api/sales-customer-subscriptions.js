@@ -29,7 +29,7 @@ export default async function handler(req, res) {
     const dealsWithSubs = new Set();
     if (dealIds.length) {
       const { data: subs } = await supabaseAdmin.from('subscriptions')
-        .select('id, deal_id, description, amount, vat_percentage, term_count, start_date, end_date, teamleader_subscription_id, status')
+        .select('id, deal_id, description, amount, vat_percentage, term_count, start_date, end_date, teamleader_subscription_id, status, line_items')
         .in('deal_id', dealIds).order('start_date', { ascending: true });
       subscriptions = subs || [];
       for (const s of subscriptions) dealsWithSubs.add(s.deal_id);

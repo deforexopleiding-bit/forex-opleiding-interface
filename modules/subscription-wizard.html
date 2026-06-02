@@ -89,7 +89,9 @@
 <script src="/modules/shared/theme-shared.js"></script>
 <script>
 const dealId = new URLSearchParams(location.search).get('deal_id');
-const state = { step: 1, deal: null, customer: null, totals: {}, entities: [], subs: [] };
+const state = { step: 1, deal: null, customer: null, totals: {}, entities: [], subs: [], lineItems: [] };
+function round2(v){ return Math.round((Number(v)||0)*100)/100; }
+function isZeroVat(){ return state.deal && state.deal.sale_type && state.deal.sale_type !== 'domestic'; }
 function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
 function toast(m,k){const e=document.getElementById('toast');e.textContent=m;e.className='toast show '+(k||'');setTimeout(()=>e.classList.remove('show'),2400)}
 function eur(v){return v==null?'—':'€'+Number(v).toLocaleString('nl-NL',{minimumFractionDigits:2,maximumFractionDigits:2})}
@@ -108,13 +110,14 @@ async function init(){
       window.AgentShared.apiFetch('/api/company-entities').then(r=>r.json()).catch(()=>({})),
     ]);
     state.deal=dRes.deal||{}; state.customer=dRes.customer||{}; state.totals=dRes.totals||{};
+    state.lineItems=dRes.line_items||[];
     state.entities=eRes.entities||[];
     buildReview(); buildDept(); prefillSubs(); renderSubs();
     document.getElementById('firstCall').value = defaultFirstCall();
   }catch(e){ document.getElementById('topSub').textContent='Laden mislukt: '+e.message; }
 }
 function defaultFirstCall(){
-  const base = state.subs[0]?.start_date || state.deal.start_date || new Date().toISOString().slice(0,10);
+  const base = state.deal.payment_start_date || state.subs[0]?.start_date || state.deal.start_date || new Date().toISOString().slice(0,10);
   const d=new Date(base); d.setDate(d.getDate()+7); return d.toISOString().slice(0,16);
 }
 function buildReview(){
@@ -131,76 +134,148 @@ function buildDept(){
   sel.innerHTML = state.entities.map(e=>`<option value="${esc(e.tl_department_id)}">${esc(e.label)}</option>`).join('') || '<option value="">—</option>';
   if(state.deal.tl_department_id) sel.value=state.deal.tl_department_id;
 }
+// ── Auto-split uit de offerte-regels (proportioneel per BTW-tarief) ──
+function addMonths(iso,n){ if(!iso) return ''; const d=new Date(iso); d.setMonth(d.getMonth()+n); return d.toISOString().slice(0,10); }
+function splitGroups(){
+  const map={}; let total=0;
+  for(const l of state.lineItems){
+    const rate=(Number(l.vat_percentage)||0)/100;
+    const base=Number(l.quantity||1)*Number(l.unit_price||0);
+    const excl=l.price_includes_vat&&rate>0 ? base/(1+rate) : base;
+    const v=Number(l.vat_percentage)||0;
+    if(!map[v]) map[v]={excl:0,names:[]};
+    map[v].excl+=excl; if(l.product_name) map[v].names.push(l.product_name);
+    total+=excl;
+  }
+  return {map,total};
+}
+// Verdeel een doelbedrag (target) proportioneel over de BTW-groepen van de
+// offerte. Laatste groep krijgt het afrond-restant zodat de som exact klopt.
+function splitFromOffer(target){
+  target=Number(target)||0;
+  const {map,total}=splitGroups();
+  const vats=Object.keys(map).map(Number);
+  if(!total||!vats.length) return [{description:'',amount:round2(target),vat_percentage:21}];
+  let acc=0; const items=[];
+  vats.forEach((v,idx)=>{
+    let amt = idx===vats.length-1 ? round2(target-acc) : round2(target*map[v].excl/total);
+    acc+=amt;
+    items.push({description: map[v].names.join(' + ')||'Regel', amount: amt, vat_percentage: v});
+  });
+  return items;
+}
+function subExcl(s){ return (s.line_items||[]).reduce((sum,li)=>sum+(Number(li.amount)||0),0); }
+function subInclPerTerm(s){
+  if(isZeroVat()) return subExcl(s); // intra/buiten-EU: effectief 0% BTW
+  return (s.line_items||[]).reduce((sum,li)=>sum+(Number(li.amount)||0)*(1+(Number(li.vat_percentage)||0)/100),0);
+}
+
 function prefillSubs(){
   const d=state.deal;
   const down=Number(d.payment_downpayment_amount)||0;
-  if(down>0) state.subs.push({description:'Aanbetaling',amount:down,term_count:1,start_date:d.payment_downpayment_date||d.start_date||'',vat_percentage:21});
+  const startBase=d.payment_start_date||d.start_date||new Date().toISOString().slice(0,10);
+  if(down>0) state.subs.push({description:'Aanbetaling',term_count:1,start_date:d.payment_downpayment_date||startBase,line_items:splitFromOffer(down)});
   const tc=Number(d.payment_term_count)||0;
   if(tc>0){
-    const monthly = d.payment_term_amount!=null ? Number(d.payment_term_amount) : Math.floor(((Number(state.totals.incl)||0)-down)/tc*100)/100;
-    state.subs.push({description:'Maandelijkse termijnen',amount:monthly,term_count:tc,start_date:d.payment_term_start_date||'',vat_percentage:21});
+    const monthly = d.payment_term_amount!=null ? Number(d.payment_term_amount) : round2(((Number(state.totals.incl)||0)-down)/tc);
+    state.subs.push({description:'Maandelijkse termijnen',term_count:tc,start_date:d.payment_term_start_date||addMonths(startBase,1),line_items:splitFromOffer(monthly)});
   }
-  if(!state.subs.length) state.subs.push({description:'',amount:'',term_count:1,start_date:d.start_date||'',vat_percentage:21});
+  if(!state.subs.length) state.subs.push({description:'',term_count:1,start_date:startBase,line_items:[{description:'',amount:'',vat_percentage:21}]});
 }
+function vatOptions(v){ return [21,9,0].map(x=>`<option value="${x}"${Number(v)===x?' selected':''}>${x}%</option>`).join(''); }
 function renderSubs(){
   const root=document.getElementById('subList');
-  root.innerHTML = state.subs.map((s,i)=>`
+  const zero=isZeroVat();
+  const warn = zero ? `<div class="bonus" style="background:rgba(245,158,11,.14);color:#b45309;margin-bottom:10px;padding:10px;border-radius:8px;font-size:12.5px">⚠️ ${esc(state.deal.sale_type==='intracommunautair'?'Intracommunautair':'Buiten EU')}: alle regels worden met <strong>0% BTW</strong> gefactureerd. Het BTW-tarief blijft zichtbaar voor de administratie, maar Teamleader rekent 0%.</div>` : '';
+  root.innerHTML = warn + state.subs.map((s,i)=>`
     <div class="sub-card">
       ${state.subs.length>1?`<button class="btn btn-danger btn-sm" data-rm="${i}" style="position:absolute;top:10px;right:10px">×</button>`:''}
-      <div class="field"><label>Omschrijving</label><input data-f="description" data-i="${i}" value="${esc(s.description)}" list="descSug" /></div>
+      <div class="field"><label>Omschrijving abonnement</label><input data-f="description" data-i="${i}" value="${esc(s.description)}" list="descSug" /></div>
       <div class="row3">
-        <div class="field"><label>Bedrag/termijn (€)</label><input type="number" step="0.01" min="0" data-f="amount" data-i="${i}" value="${s.amount}" /></div>
-        <div class="field"><label>Aantal termijnen</label><input type="number" min="1" data-f="term_count" data-i="${i}" value="${s.term_count}" /></div>
-        <div class="field"><label>BTW</label><select data-f="vat_percentage" data-i="${i}"><option value="21"${s.vat_percentage==21?' selected':''}>21%</option><option value="9"${s.vat_percentage==9?' selected':''}>9%</option><option value="0"${s.vat_percentage==0?' selected':''}>0%</option></select></div>
+        <div class="field"><label>Startdatum</label><input type="date" data-f="start_date" data-i="${i}" value="${esc(s.start_date)}" /></div>
+        <div class="field"><label>Aantal termijnen</label><input type="number" min="1" data-f="term_count" data-i="${i}" value="${esc(s.term_count)}" /></div>
+        <div class="field"><label>Einddatum (auto)</label><input type="date" readonly data-end="${i}" style="background:var(--bg-elev-2)" value="${calcEnd(s.start_date,s.term_count)}" /></div>
       </div>
-      <div class="row">
-        <div class="field"><label>Startdatum</label><input type="date" data-f="start_date" data-i="${i}" value="${s.start_date}" /></div>
-        <div class="field"><label>Einddatum (auto)</label><input type="date" readonly style="background:var(--bg-elev-2)" value="${calcEnd(s.start_date,s.term_count)}" /></div>
+      <label style="display:block;font-size:11.5px;font-weight:600;color:var(--text-dim);margin:6px 0 4px">Regels (per termijn, bedrag excl. BTW)</label>
+      <div data-lilist="${i}">
+        ${(s.line_items||[]).map((li,j)=>`
+          <div style="display:grid;grid-template-columns:1fr 110px 92px 30px;gap:6px;align-items:center;margin-bottom:6px">
+            <input data-lf="description" data-sub="${i}" data-li="${j}" placeholder="Beschrijving" value="${esc(li.description)}" />
+            <input type="number" step="0.01" min="0" data-lf="amount" data-sub="${i}" data-li="${j}" placeholder="0,00" value="${esc(li.amount)}" />
+            <select data-lf="vat_percentage" data-sub="${i}" data-li="${j}"${zero?' disabled title="0% bij intra/buiten-EU"':''}>${vatOptions(li.vat_percentage)}</select>
+            ${(s.line_items||[]).length>1?`<button class="btn btn-danger btn-sm" data-rmli data-sub="${i}" data-li="${j}" style="padding:4px 8px">×</button>`:'<span></span>'}
+          </div>`).join('')}
       </div>
-    </div>`).join('') + `<datalist id="descSug"><option>Aanbetaling</option><option>Maandelijkse termijnen</option><option>Membership</option><option>E-book</option></datalist>`;
+      <button class="btn btn-ghost btn-sm" data-addli="${i}">+ Regel toevoegen</button>
+      <div style="text-align:right;font-size:12px;color:var(--text-dim);margin-top:8px" data-subtot="${i}">Totaal/termijn incl. BTW: ${eur(subInclPerTerm(s))}</div>
+    </div>`).join('') + `<datalist id="descSug"><option>Aanbetaling</option><option>Maandelijkse termijnen</option><option>Membership</option><option>Begeleidingstraject</option><option>E-book</option></datalist>`;
+  // Sub-velden: alleen herberekenen (geen full re-render → geen focus-verlies).
   root.querySelectorAll('[data-f]').forEach(inp=>inp.addEventListener('input',e=>{
-    const i=e.target.dataset.i, f=e.target.dataset.f;
-    state.subs[i][f] = (f==='amount'||f==='term_count'||f==='vat_percentage') ? e.target.value : e.target.value;
-    if(f==='start_date'||f==='term_count') renderSubs();
-    renderSubTotal();
+    const i=Number(e.target.dataset.i), f=e.target.dataset.f;
+    state.subs[i][f]=e.target.value;
+    updateComputed();
   }));
-  root.querySelectorAll('[data-rm]').forEach(b=>b.addEventListener('click',()=>{state.subs.splice(Number(b.dataset.rm),1);renderSubs();renderSubTotal();}));
+  // Regel-velden.
+  root.querySelectorAll('[data-lf]').forEach(inp=>inp.addEventListener('input',e=>{
+    const i=Number(e.target.dataset.sub), j=Number(e.target.dataset.li), f=e.target.dataset.lf;
+    state.subs[i].line_items[j][f]=e.target.value;
+    updateComputed();
+  }));
+  root.querySelectorAll('[data-rm]').forEach(b=>b.addEventListener('click',()=>{state.subs.splice(Number(b.dataset.rm),1);renderSubs();}));
+  root.querySelectorAll('[data-rmli]').forEach(b=>b.addEventListener('click',()=>{state.subs[Number(b.dataset.sub)].line_items.splice(Number(b.dataset.li),1);renderSubs();}));
+  root.querySelectorAll('[data-addli]').forEach(b=>b.addEventListener('click',()=>{state.subs[Number(b.dataset.addli)].line_items.push({description:'',amount:'',vat_percentage:isZeroVat()?0:21});renderSubs();}));
+  updateComputed();
+}
+// Herbereken einddatums + sub-totalen + grand total zonder inputs te hertekenen.
+function updateComputed(){
+  state.subs.forEach((s,i)=>{
+    const endEl=document.querySelector(`[data-end="${i}"]`); if(endEl) endEl.value=calcEnd(s.start_date,s.term_count);
+    const totEl=document.querySelector(`[data-subtot="${i}"]`); if(totEl) totEl.textContent='Totaal/termijn incl. BTW: '+eur(subInclPerTerm(s));
+  });
   renderSubTotal();
 }
 function renderSubTotal(){
-  const total = state.subs.reduce((sum,s)=>sum+(Number(s.amount)||0)*(Number(s.term_count)||0),0);
-  document.getElementById('subTotal').textContent = 'Totale waarde abonnement: '+eur(total);
+  const total = state.subs.reduce((sum,s)=>sum+subInclPerTerm(s)*(Number(s.term_count)||0),0);
+  document.getElementById('subTotal').textContent = 'Totale waarde abonnementen (incl. BTW): '+eur(total);
 }
-document.getElementById('addSub').addEventListener('click',()=>{state.subs.push({description:'',amount:'',term_count:1,start_date:'',vat_percentage:21});renderSubs();});
+document.getElementById('addSub').addEventListener('click',()=>{state.subs.push({description:'',term_count:1,start_date:'',line_items:[{description:'',amount:'',vat_percentage:isZeroVat()?0:21}]});renderSubs();});
 
 function validateSubs(){
   if(!state.subs.length) return 'Minimaal 1 abonnement vereist';
   if(!document.getElementById('firstCall').value) return 'Eerste call is verplicht';
   for(const s of state.subs){
-    if(!(Number(s.amount)>0)) return 'Elk abonnement heeft een bedrag > 0';
     if(!(Number(s.term_count)>=1)) return 'Aantal termijnen minimaal 1';
     if(!s.start_date) return 'Startdatum verplicht bij elk abonnement';
+    const lines=(s.line_items||[]).filter(li=>Number(li.amount)>0);
+    if(!lines.length) return `Abonnement "${s.description||'(naamloos)'}" heeft minstens 1 regel met bedrag > 0 nodig`;
   }
   return null;
 }
 function renderStep3(){
-  // Bonus-preview op eerste 1-termijn sub.
-  const down = state.subs.find(s=>(Number(s.term_count)||1)===1 && Number(s.amount)>0);
+  // Bonus-preview op eerste 1-termijn sub (over totaalbedrag excl, = TL-grondslag).
+  const down = state.subs.find(s=>(Number(s.term_count)||1)===1 && subExcl(s)>0);
+  const downAmt = down ? subExcl(down) : 0;
   const bb=document.getElementById('bonusBlock');
-  if(down && Number(down.amount)>=1000){
-    const bonus=(Number(down.amount)*0.03).toFixed(2);
+  if(downAmt>=1000){
+    const bonus=(downAmt*0.03).toFixed(2);
     bb.className='bonus green';
-    bb.innerHTML=`<strong>Bonus (indicatief 3%):</strong> ${eur(bonus)} over aanbetaling ${eur(down.amount)}<br><small>Status: pending — wordt 'paid' wanneer de factuur betaald is. Exacte % / drempel volgen uit sales_bonus_configs.</small>`;
+    bb.innerHTML=`<strong>Bonus (indicatief 3%):</strong> ${eur(bonus)} over aanbetaling ${eur(downAmt)}<br><small>Status: pending — wordt 'paid' wanneer de factuur betaald is. Exacte % / drempel volgen uit sales_bonus_configs.</small>`;
   } else {
     bb.className='bonus gray';
     bb.innerHTML='Geen bonus: geen aanbetaling-termijn ≥ €1.000.';
   }
-  // Preview
+  // Preview met line_items per sub.
+  const zero=isZeroVat();
   let lines=['Bij Teamleader worden de volgende subscriptions aangemaakt:',''];
   state.subs.forEach((s,i)=>{
-    lines.push(`${i+1}. ${s.description||'Abonnement'}: ${eur(s.amount)} × ${s.term_count} termijnen`);
-    lines.push(`   ${fmtDate(s.start_date)} t/m ${fmtDate(calcEnd(s.start_date,s.term_count))} · BTW ${s.vat_percentage}%`);
+    lines.push(`${i+1}. ${s.description||'Abonnement'} · ${s.term_count} termijn(en) · ${fmtDate(s.start_date)} t/m ${fmtDate(calcEnd(s.start_date,s.term_count))}`);
+    (s.line_items||[]).forEach(li=>{
+      const v = zero ? 0 : (Number(li.vat_percentage)||0);
+      lines.push(`     • ${li.description||'Regel'}: ${eur(li.amount)} excl. · BTW ${v}%`);
+    });
+    lines.push(`     = ${eur(subInclPerTerm(s))} incl./termijn`);
   });
+  if(zero) lines.push('', '⚠️ '+(state.deal.sale_type==='intracommunautair'?'Intracommunautair':'Buiten EU')+': TL factureert 0% BTW.');
   document.getElementById('subPreview').textContent = lines.join('\n');
   // Submit knoppen
   document.getElementById('submitBlock').innerHTML = `
@@ -232,7 +307,13 @@ async function submit(syncToTl){
       tl_department_id:document.getElementById('deptSelect').value||null,
       first_call_at:document.getElementById('firstCall').value||null,
       sync_to_tl:!!syncToTl,
-      subscriptions:state.subs.map(s=>({description:s.description||null,amount:Number(s.amount)||0,term_count:Number(s.term_count)||1,start_date:s.start_date||null,end_date:calcEnd(s.start_date,s.term_count)||null,vat_percentage:Number(s.vat_percentage)||21})),
+      subscriptions:state.subs.map(s=>({
+        description:s.description||null,
+        term_count:Number(s.term_count)||1,
+        start_date:s.start_date||null,
+        end_date:calcEnd(s.start_date,s.term_count)||null,
+        line_items:(s.line_items||[]).filter(li=>Number(li.amount)>0).map(li=>({description:li.description||null,amount:Number(li.amount)||0,vat_percentage:Number(li.vat_percentage)||0})),
+      })),
     };
     const res=await window.AgentShared.apiFetch('/api/sales-subscription-create',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
     const data=await res.json();

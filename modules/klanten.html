@@ -980,17 +980,42 @@ async function renderAbonnementenTab() {
     const wizardBtn = d.pending_deal_id
       ? `<div style="margin-bottom:10px"><a class="btn btn-primary btn-sm" href="/modules/subscription-wizard.html?deal_id=${encodeURIComponent(d.pending_deal_id)}">Subscription invoeren</a></div>` : '';
     if (!subs.length) { wrap.innerHTML = wizardBtn + '<div class="placeholder-card">Nog geen abonnementen voor deze klant.</div>'; return; }
-    const rows = subs.map(s => `<tr>
-      <td>${escapeHtml(s.description || '—')}</td>
-      <td>€${Number(s.amount).toLocaleString('nl-NL', { minimumFractionDigits: 2 })}</td>
-      <td>${s.term_count || '—'}×</td>
-      <td>${s.start_date ? fmtDate(s.start_date) : '—'} – ${s.end_date ? fmtDate(s.end_date) : '—'}</td>
-      <td>${s.teamleader_subscription_id ? '✓ TL' : '—'}</td>
-      <td>${escapeHtml(s.status || '—')}</td>
-    </tr>`).join('');
+    // Bedrag incl. BTW per termijn — prefereer line_items (mix-safe), val terug op amount.
+    const subInclPerTerm = (s) => {
+      const lis = Array.isArray(s.line_items) ? s.line_items : [];
+      if (lis.length) return lis.reduce((sum, li) => sum + (Number(li.amount) || 0) * (1 + (Number(li.vat_percentage) || 0) / 100), 0);
+      return (Number(s.amount) || 0) * (1 + (Number(s.vat_percentage) || 0) / 100);
+    };
+    const eur2 = (v) => '€' + Number(v || 0).toLocaleString('nl-NL', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const rows = subs.map((s, i) => {
+      const lis = Array.isArray(s.line_items) ? s.line_items : [];
+      const detail = lis.length
+        ? `<tr class="sub-detail" id="sub-detail-${i}" hidden><td colspan="6" style="background:var(--bg-elev-2,#f8f8f8)">
+            <table style="width:100%;font-size:12.5px"><thead><tr><th style="text-align:left">Regel</th><th style="text-align:right">Bedrag excl.</th><th style="text-align:right">BTW</th><th style="text-align:right">Incl.</th></tr></thead>
+            <tbody>${lis.map(li => {
+              const rate = (Number(li.vat_percentage) || 0) / 100;
+              return `<tr><td>${escapeHtml(li.description || '—')}</td><td style="text-align:right">${eur2(li.amount)}</td><td style="text-align:right">${Number(li.vat_percentage) || 0}%</td><td style="text-align:right">${eur2((Number(li.amount) || 0) * (1 + rate))}</td></tr>`;
+            }).join('')}</tbody></table></td></tr>`
+        : '';
+      const caret = lis.length ? `<button class="btn btn-sm btn-ghost" data-sub-toggle="${i}" style="padding:2px 6px;margin-right:6px">▸</button>` : '';
+      return `<tr>
+        <td>${caret}${escapeHtml(s.description || '—')}</td>
+        <td>${eur2(subInclPerTerm(s))}${lis.length > 1 ? ` <span style="color:var(--text-faint,#999);font-size:11px">(${lis.length} regels)</span>` : ''}</td>
+        <td>${s.term_count || '—'}×</td>
+        <td>${s.start_date ? fmtDate(s.start_date) : '—'} – ${s.end_date ? fmtDate(s.end_date) : '—'}</td>
+        <td>${s.teamleader_subscription_id ? '✓ TL' : '—'}</td>
+        <td>${escapeHtml(s.status || '—')}</td>
+      </tr>${detail}`;
+    }).join('');
     wrap.innerHTML = wizardBtn + `<div class="table-wrap"><table>
-      <thead><tr><th>Omschrijving</th><th>Bedrag</th><th>Termijnen</th><th>Periode</th><th>TL</th><th>Status</th></tr></thead>
+      <thead><tr><th>Omschrijving</th><th>Bedrag incl. BTW</th><th>Termijnen</th><th>Periode</th><th>TL</th><th>Status</th></tr></thead>
       <tbody>${rows}</tbody></table></div>`;
+    wrap.querySelectorAll('[data-sub-toggle]').forEach(btn => btn.addEventListener('click', () => {
+      const row = document.getElementById('sub-detail-' + btn.dataset.subToggle);
+      if (!row) return;
+      row.hidden = !row.hidden;
+      btn.textContent = row.hidden ? '▸' : '▾';
+    }));
   } catch (e) {
     wrap.innerHTML = '<div class="placeholder-card">Laden mislukt: ' + escapeHtml(e.message) + '</div>';
   }

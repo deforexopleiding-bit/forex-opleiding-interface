@@ -3,13 +3,35 @@
 // Wizard 2: maakt meerdere subscriptions (+ optionele bonus) lokaal aan en
 // pusht ze best-effort naar TL. Permission: sales.deal.create.
 //
-// subscriptions[]: { description, amount, term_count, start_date, end_date, vat_percentage }
+// subscriptions[]: {
+//   description, start_date, end_date, term_count,
+//   line_items: [{ description, amount, vat_percentage }]   // amount = EXCL BTW
+// }
+// Backwards-compat: een sub zonder line_items mag nog { amount, vat_percentage }
+// aanleveren — dat wordt één synthetische regel.
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
 import { tlFetch, getActiveToken } from './_lib/teamleader-token.js';
 import { getOrCreateContact } from './_lib/teamleader-contact.js';
 import { taxRateIdFor } from './_lib/teamleader-quotation.js';
+
+// Normaliseer een sub naar een line_items-array (backwards-compat met oude
+// single-amount payloads). Returnt altijd een array (mogelijk leeg na filter).
+function normalizeLineItems(s) {
+  if (Array.isArray(s.line_items) && s.line_items.length) {
+    return s.line_items
+      .map(li => ({
+        description: li.description || s.description || 'Abonnement',
+        amount: Number(li.amount) || 0,
+        vat_percentage: li.vat_percentage ?? 21,
+      }))
+      .filter(li => li.amount > 0);
+  }
+  // Legacy: één regel uit amount + vat_percentage.
+  const amt = Number(s.amount) || 0;
+  return amt > 0 ? [{ description: s.description || 'Abonnement', amount: amt, vat_percentage: s.vat_percentage ?? 21 }] : [];
+}
 
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
@@ -32,12 +54,18 @@ export default async function handler(req, res) {
     if (!deal) return res.status(404).json({ error: 'Deal niet gevonden' });
     const departmentId = tl_department_id || deal.tl_department_id || null;
 
-    // Pre-flight: bij TL-sync de tax_rate_id's vóóraf valideren, zodat een
-    // ontbrekende env-var een duidelijke 422 geeft VÓÓR er lokaal subs worden
+    // Elke sub naar regels normaliseren + valideren dat er een bedrag in zit.
+    const subsNorm = subscriptions.map(s => ({ ...s, _lines: normalizeLineItems(s) }));
+    for (const s of subsNorm) {
+      if (!s._lines.length) return res.status(400).json({ error: `Abonnement "${s.description || ''}" heeft geen regel met bedrag > 0` });
+    }
+
+    // Pre-flight: bij TL-sync de tax_rate_id's per regel vóóraf valideren, zodat
+    // een ontbrekende env-var een duidelijke 422 geeft VÓÓR er lokaal subs worden
     // aangemaakt (consistent met Wizard 1, geen partial state).
     if (sync_to_tl) {
       try {
-        for (const s of subscriptions) taxRateIdFor(s.vat_percentage ?? 21, departmentId, deal.sale_type);
+        for (const s of subsNorm) for (const li of s._lines) taxRateIdFor(li.vat_percentage, departmentId, deal.sale_type);
       } catch (e) {
         return res.status(422).json({ error: e.message });
       }
@@ -46,34 +74,38 @@ export default async function handler(req, res) {
     // 1. Deal bijwerken (1e call).
     await supabaseAdmin.from('deals').update({ first_call_at: first_call_at || null }).eq('id', deal_id);
 
-    // 2. Subscriptions lokaal aanmaken.
+    // 2. Subscriptions lokaal aanmaken. amount = som regels (EXCL); vat_percentage
+    //    = tarief van de eerste regel (legacy-kolommen, behouden voor compat).
     const subRows = [];
-    for (const s of subscriptions) {
+    for (const s of subsNorm) {
+      const totalExcl = s._lines.reduce((sum, li) => sum + (Number(li.amount) || 0), 0);
       const { data: row } = await supabaseAdmin.from('subscriptions').insert({
         deal_id,
         description:        s.description || null,
-        amount:            Number(s.amount) || 0,
-        vat_percentage:    s.vat_percentage ?? 21,
+        amount:            Math.round(totalExcl * 100) / 100,
+        vat_percentage:    s._lines[0].vat_percentage ?? 21,
         term_count:        Number(s.term_count) || 1,
         start_date:        s.start_date || null,
         end_date:          s.end_date || null,
         tl_department_id:  departmentId,
+        line_items:        s._lines.map(li => ({ description: li.description, amount: li.amount, vat_percentage: li.vat_percentage })),
         status:            'active',
       }).select('*').single();
       if (row) subRows.push(row);
     }
 
-    // 3. Bonus op de eerste 1-termijn-sub (aanbetaling).
+    // 3. Bonus op de eerste 1-termijn-sub (aanbetaling): over het totaalbedrag.
     let bonus = null;
-    const downSub = subscriptions.find(s => (Number(s.term_count) || 1) === 1 && Number(s.amount) > 0);
-    if (downSub && deal.sales_user_id) {
+    const downSub = subsNorm.find(s => (Number(s.term_count) || 1) === 1);
+    const downAmount = downSub ? downSub._lines.reduce((sum, li) => sum + (Number(li.amount) || 0), 0) : 0;
+    if (downAmount > 0 && deal.sales_user_id) {
       const { data: cfg } = await supabaseAdmin.from('sales_bonus_configs')
         .select('percentage, threshold_amount').eq('user_id', deal.sales_user_id)
         .order('active_from', { ascending: false }).limit(1).maybeSingle();
       const pct = cfg?.percentage ?? 3;
       const threshold = cfg?.threshold_amount ?? 1000;
-      if (Number(downSub.amount) >= Number(threshold)) {
-        const bonusAmount = Math.round(Number(downSub.amount) * Number(pct)) / 100;
+      if (downAmount >= Number(threshold)) {
+        const bonusAmount = Math.round(downAmount * Number(pct)) / 100;
         const { data: b } = await supabaseAdmin.from('bonuses').insert({
           deal_id, sales_user_id: deal.sales_user_id, amount: bonusAmount, status: 'pending',
         }).select('*').single();
@@ -103,9 +135,19 @@ export default async function handler(req, res) {
         ? { action: 'book_and_send', sending_methods: [{ method: 'email' }] }
         : { action: 'book' };
 
-      for (const row of subRows) {
+      for (let i = 0; i < subRows.length; i++) {
+        const row = subRows[i];
+        const lines = subsNorm[i]._lines;
         // Tax-rate is in de pre-flight al gevalideerd → hier veilig.
-        const taxRateId = taxRateIdFor(row.vat_percentage, departmentId, deal.sale_type);
+        // LET OP intracommunautair: vat_percentage in DB blijft het echte tarief
+        // (bv. 21) voor administratie-helderheid; taxRateIdFor(.., sale_type)
+        // mapt naar het INTRA-tarief (0%) zodat TL géén BTW berekent.
+        const tlLineItems = lines.map(li => ({
+          quantity: 1,
+          description: li.description || row.description || 'Abonnement',
+          unit_price: { amount: Number(li.amount), currency: 'EUR', tax: 'excluding' },
+          tax_rate_id: taxRateIdFor(li.vat_percentage, departmentId, deal.sale_type),
+        }));
         const body = {
           invoicee: { customer: { type: 'contact', id: tlContactId } },
           department_id: departmentId,
@@ -114,11 +156,7 @@ export default async function handler(req, res) {
           billing_cycle,
           payment_term: { type: 'after_invoice_date', days: 14 },
           invoice_generation,
-          grouped_lines: [{ line_items: [{
-            quantity: 1, description: row.description || 'Abonnement',
-            unit_price: { amount: Number(row.amount), currency: 'EUR', tax: 'excluding' },
-            tax_rate_id: taxRateId,
-          }] }],
+          grouped_lines: [{ line_items: tlLineItems }],
         };
         // ends_on uit frontend (start + (term-1) mnd + 2 dagen buffer); ook voor
         // eenmalige subs (term_count=1 → start + 2 dagen).
