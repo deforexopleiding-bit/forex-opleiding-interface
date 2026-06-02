@@ -988,10 +988,10 @@ function renderReports(d) {
       ${repCard('Retentie', repPct(k.retention_rate))}
     </div>
     ${chartsOk ? `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:14px;margin-bottom:18px">
-      <div class="card"><div style="font-size:12px;font-weight:700;margin-bottom:6px">Conversie funnel</div><canvas id="repFunnel" height="180"></canvas></div>
-      <div class="card"><div style="font-size:12px;font-weight:700;margin-bottom:6px">Omzet trend</div><canvas id="repTrend" height="180"></canvas></div>
-      <div class="card"><div style="font-size:12px;font-weight:700;margin-bottom:6px">Omzet per entiteit</div><canvas id="repEntity" height="180"></canvas></div>
-      <div class="card"><div style="font-size:12px;font-weight:700;margin-bottom:6px">Top trajecten (omzet)</div><canvas id="repTraj" height="180"></canvas></div>
+      <div class="card"><div style="font-size:12px;font-weight:700;margin-bottom:6px">Conversie funnel</div><div style="position:relative;height:280px"><canvas id="repFunnel"></canvas></div></div>
+      <div class="card"><div style="font-size:12px;font-weight:700;margin-bottom:6px">Omzet trend</div><div style="position:relative;height:280px"><canvas id="repTrend"></canvas></div></div>
+      <div class="card"><div style="font-size:12px;font-weight:700;margin-bottom:6px">Omzet per entiteit</div><div style="position:relative;height:280px"><canvas id="repEntity"></canvas></div></div>
+      <div class="card"><div style="font-size:12px;font-weight:700;margin-bottom:6px">Top trajecten (omzet)</div><div style="position:relative;height:280px"><canvas id="repTraj"></canvas></div></div>
     </div>` : '<div class="empty">Grafieken konden niet laden (CDN geblokkeerd). Cijfers + export werken wel.</div>'}
     <h3 style="font-size:14px;margin:6px 0 8px">Per sales-medewerker</h3>
     <div class="table-wrap-x" style="overflow-x:auto"><table><thead><tr><th>Medewerker</th><th>Offertes</th><th>Conversie</th><th>Omzet</th><th>Bonus pending</th><th>Bonus paid</th></tr></thead><tbody>
