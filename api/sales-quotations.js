@@ -21,7 +21,7 @@ export default async function handler(req, res) {
 
   try {
     let q = supabaseAdmin.from('deals')
-      .select('id, customer_id, total_amount, created_at, sales_user_id, traject_variant_id, tl_quotation_id, tl_quotation_status, tl_quotation_sent_at, tl_quotation_email_sent_at, tl_quotation_accepted_at, tl_quotation_declined_at')
+      .select('id, customer_id, total_amount, created_at, sales_user_id, traject_variant_id, tl_department_id, quote_reference, tl_quotation_id, tl_quotation_status, tl_quotation_sent_at, tl_quotation_email_sent_at, tl_quotation_accepted_at, tl_quotation_declined_at')
       .is('archived_at', null)  // verwijderde offertes (soft-delete) niet tonen
       .neq('tl_quotation_status', 'no_quotation')  // ghost-deals (abo zonder offerte) niet als offerte tonen
       .order('created_at', { ascending: false })
@@ -59,6 +59,14 @@ export default async function handler(req, res) {
       }
     }
 
+    // Entiteit-labels per tl_department_id.
+    const deptIds = [...new Set((deals || []).map(d => d.tl_department_id).filter(Boolean))];
+    const entByTl = {};
+    if (deptIds.length) {
+      const { data: ents } = await supabaseAdmin.from('company_entities').select('tl_department_id, label').in('tl_department_id', deptIds);
+      for (const e of ents || []) entByTl[e.tl_department_id] = e.label;
+    }
+
     const custIds = [...new Set((deals || []).map(d => d.customer_id).filter(Boolean))];
     let custById = {};
     if (custIds.length) {
@@ -86,6 +94,8 @@ export default async function handler(req, res) {
         total_amount:        d.total_amount,
         total_amount_incl:   inclByDeal[d.id] != null ? Math.round(inclByDeal[d.id] * 100) / 100 : null,
         traject_label:       d.traject_variant_id ? (trajectByVariant[d.traject_variant_id] || null) : null,
+        entity:              d.tl_department_id ? (entByTl[d.tl_department_id] || null) : null,
+        quote_reference:     d.quote_reference || null,
         sales_user:          d.sales_user_id ? (userById[d.sales_user_id] || null) : null,
         created_at:          d.created_at,
         tl_quotation_id:     d.tl_quotation_id,
