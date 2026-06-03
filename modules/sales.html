@@ -7,7 +7,9 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/dist/tabler-icons.min.css" />
   <link rel="stylesheet" href="/modules/shared/agent-shared.css" />
+  <link rel="stylesheet" href="/styles/sales-redesign.css" />
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     html, body { height: 100%; }
@@ -91,7 +93,8 @@
   </div>
 
   <div class="tabs" role="tablist">
-    <button class="tab active" data-tab="customers" role="tab">Klanten</button>
+    <button class="tab active" data-tab="dashboard" role="tab">Dashboard</button>
+    <button class="tab" data-tab="customers" role="tab">Klanten</button>
     <button class="tab" data-tab="quotations" role="tab">Offertes</button>
     <button class="tab" data-tab="onboardings" role="tab">Onboardings</button>
     <button class="tab" data-tab="subscriptions" role="tab">Abonnementen</button>
@@ -101,8 +104,40 @@
     <button class="tab" data-tab="reports" role="tab" id="tab-btn-reports" style="display:none">Rapporten</button>
   </div>
 
+  <!-- ── Tab: Dashboard (default landing — absorbeert sales-dashboard.html) ── -->
+  <section class="tab-content active" id="tab-dashboard">
+    <div id="dashNextBanner"></div>
+    <h2 class="sr-sectionlabel">Vandaag</h2>
+    <div class="sr-grid sr-grid-3" style="margin-bottom:18px">
+      <div class="sr-stat sr-i-blue"><div class="sr-stat-l"><i class="ti ti-user-plus"></i>Nieuwe leads</div><div class="sr-stat-v" id="dashTodayLeads">–</div></div>
+      <div class="sr-stat sr-i-blue"><div class="sr-stat-l"><i class="ti ti-calendar-event"></i>Event-aanmeldingen</div><div class="sr-stat-v" id="dashTodayEvents">–</div></div>
+      <div class="sr-stat sr-i-blue"><div class="sr-stat-l"><i class="ti ti-clock"></i>Afspraken</div><div class="sr-stat-v" id="dashTodayAppts">–</div></div>
+    </div>
+    <h2 class="sr-sectionlabel">Deze week</h2>
+    <div class="sr-grid sr-grid-3" style="margin-bottom:18px">
+      <div class="sr-stat"><div class="sr-stat-l"><i class="ti ti-user-plus"></i>Nieuwe leads</div><div class="sr-stat-v" id="dashWeekLeads">–</div></div>
+      <div class="sr-stat"><div class="sr-stat-l"><i class="ti ti-calendar-event"></i>Event-aanmeldingen</div><div class="sr-stat-v" id="dashWeekEvents">–</div></div>
+      <div class="sr-stat"><div class="sr-stat-l"><i class="ti ti-clock"></i>Afspraken</div><div class="sr-stat-v" id="dashWeekAppts">–</div></div>
+    </div>
+    <h2 class="sr-sectionlabel">Werkvoorraad</h2>
+    <div class="sr-grid sr-grid-2" style="margin-bottom:18px">
+      <div class="sr-stat"><div class="sr-stat-l"><i class="ti ti-calendar-due"></i>Afspraken morgen</div><div class="sr-stat-v" id="dashTomorrowAppts">–</div></div>
+      <div class="sr-stat"><div class="sr-stat-l"><i class="ti ti-list-check"></i>Open follow-ups</div><div class="sr-stat-v" id="dashOpenFollowups">–</div></div>
+    </div>
+    <div class="sr-grid sr-grid-4" style="margin-bottom:18px">
+      <a class="sr-stat sr-i-blue" href="/modules/sales.html?tab=offertes"><div class="sr-stat-l"><i class="ti ti-file-text"></i>Mijn open offertes</div><div class="sr-stat-v" id="dashMyQuotes">–</div><div class="sr-stat-d" id="dashMyQuotesD"></div></a>
+      <div class="sr-stat sr-i-amber"><div class="sr-stat-l"><i class="ti ti-coin"></i>Mijn bonus deze maand</div><div class="sr-stat-v" id="dashMyBonus">–</div><div class="sr-stat-d">pending</div></div>
+      <a class="sr-stat sr-i-purple" href="/modules/sales.html?tab=onboardings"><div class="sr-stat-l"><i class="ti ti-rocket"></i>Klanten in onboarding</div><div class="sr-stat-v" id="dashOnboarding">–</div></a>
+      <a class="sr-stat sr-i-pink" href="/modules/sales.html?tab=retentie"><div class="sr-stat-l"><i class="ti ti-refresh"></i>Retentie deze maand</div><div class="sr-stat-v" id="dashRetention">–</div></a>
+    </div>
+    <div class="sr-card">
+      <div class="sr-card-h"><i class="ti ti-clock-pause"></i> Wachten op subscription <span id="dashPendingCount" style="color:var(--text-faint)"></span></div>
+      <div id="dashPending"><div class="sr-empty">Laden…</div></div>
+    </div>
+  </section>
+
   <!-- ── Tab: Klanten ── -->
-  <section class="tab-content active" id="tab-customers">
+  <section class="tab-content" id="tab-customers">
     <div class="toolbar">
       <input class="search" id="custSearch" type="search" placeholder="Zoek naam, email of telefoon..." />
       <label class="filter-toggle"><input type="checkbox" id="custAllToggle"> Alleen mijn klanten</label>
@@ -308,7 +343,7 @@
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <script src="https://cdn.sheetjs.com/xlsx-0.20.0/package/dist/xlsx.full.min.js"></script>
 <script>
-const state = { tab: 'customers', perms: null, products: [], customers: [], quotations: [], emailTemplates: null, sendDealId: null, editingId: null, trajects: [], editingTrajectId: null, variantCtx: null, variantProducts: [] };
+const state = { tab: 'dashboard', perms: null, products: [], customers: [], quotations: [], emailTemplates: null, sendDealId: null, editingId: null, trajects: [], editingTrajectId: null, variantCtx: null, variantProducts: [], dashLoaded: false };
 
 function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]); }
 function fmtEuro(v) { if (v == null) return '—'; return '€' + Number(v).toLocaleString('nl-NL', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
@@ -337,7 +372,8 @@ document.querySelectorAll('.tab').forEach(t => {
     document.querySelectorAll('.tab-content').forEach(s => s.classList.remove('active'));
     document.getElementById('tab-' + state.tab).classList.add('active');
     stopQuotationsPolling();
-    if (state.tab === 'products') loadProducts();
+    if (state.tab === 'dashboard') loadDashboard();
+    else if (state.tab === 'products') loadProducts();
     else if (state.tab === 'quotations') { loadQuotations(); startQuotationsPolling(); }
     else if (state.tab === 'trajecten') loadTrajecten();
     else if (state.tab === 'onboardings') loadOnboardings();
@@ -1056,6 +1092,69 @@ function repExport() {
   XLSX.writeFile(wb, `sales-rapport-${d.period?.from || ''}_${d.period?.to || ''}.xlsx`);
 }
 
+// ════════════════════════════════════════════════════════════════════════
+// Dashboard-tab (absorbeert sales-dashboard.html)
+// ════════════════════════════════════════════════════════════════════════
+function dashCountdown(iso) {
+  const target = new Date(iso), now = new Date();
+  const diffMin = Math.round((target - now) / 60000);
+  if (diffMin < 5) return 'nu';
+  if (diffMin < 60) return `over ${diffMin} min`;
+  const diffHr = Math.floor(diffMin / 60);
+  if (target.toDateString() === now.toDateString()) return `over ${diffHr}u`;
+  const tom = new Date(now); tom.setDate(tom.getDate() + 1);
+  const hhmm = target.toLocaleTimeString('nl-NL', { hour: '2-digit', minute: '2-digit' });
+  if (target.toDateString() === tom.toDateString()) return `morgen ${hhmm}`;
+  const daysDiff = Math.floor((target - new Date(now.getFullYear(), now.getMonth(), now.getDate())) / 86400000);
+  if (daysDiff < 7) return `${target.toLocaleDateString('nl-NL', { weekday: 'long' })} ${hhmm}`;
+  return `${target.toLocaleDateString('nl-NL', { day: '2-digit', month: 'short' })} ${hhmm}`;
+}
+function dashSet(id, v) { const el = document.getElementById(id); if (el) el.textContent = (v ?? 0); }
+async function loadDashboard() {
+  // 1. stats
+  try {
+    const res = await window.AgentShared.apiFetch('/api/sales-dashboard-stats');
+    if (res.ok) {
+      const d = await res.json();
+      dashSet('dashTodayLeads', d.today?.leads); dashSet('dashTodayEvents', d.today?.events); dashSet('dashTodayAppts', d.today?.appointments);
+      dashSet('dashWeekLeads', d.week?.leads); dashSet('dashWeekEvents', d.week?.events); dashSet('dashWeekAppts', d.week?.appointments);
+      dashSet('dashTomorrowAppts', d.appointments_tomorrow_count); dashSet('dashOpenFollowups', d.open_follow_ups);
+      const banner = document.getElementById('dashNextBanner'); const n = d.next_appointment;
+      if (n) {
+        const when = new Date(n.scheduled_at).toLocaleString('nl-NL', { weekday: 'short', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
+        banner.innerHTML = `<div class="sr-next-banner"><div class="sr-next-icon"><i class="ti ti-clock"></i></div>
+          <div class="sr-next-body"><div class="sr-next-label">Volgende afspraak</div><div class="sr-next-name">${esc(n.lead_name || '—')}</div>
+          <div class="sr-next-when">${esc(dashCountdown(n.scheduled_at))} · ${esc(when)}</div></div></div>`;
+      } else { banner.innerHTML = `<div class="sr-next-banner" style="background:var(--bg-elev);color:var(--text)"><div class="sr-next-icon" style="background:var(--bg-elev-2)"><i class="ti ti-calendar-off"></i></div><div class="sr-next-body"><div class="sr-next-label" style="opacity:.7">Volgende afspraak</div><span class="sr-next-empty">Geen geplande afspraken.</span></div></div>`; }
+    }
+  } catch {}
+  // 2. metrics
+  try {
+    const res = await window.AgentShared.apiFetch('/api/sales-dashboard-metrics');
+    if (res.ok) { const d = await res.json();
+      dashSet('dashMyQuotes', d.my_open_quotations); dashSet('dashOnboarding', d.onboarding_count); dashSet('dashRetention', d.retention_count);
+      const b = document.getElementById('dashMyBonus'); if (b) b.textContent = '€' + Number(d.my_bonus_month || 0).toLocaleString('nl-NL', { minimumFractionDigits: 2 });
+    }
+  } catch {}
+  // 3. wachten op subscription
+  const wrap = document.getElementById('dashPending'), cnt = document.getElementById('dashPendingCount');
+  try {
+    const res = await window.AgentShared.apiFetch('/api/sales-pending-subscriptions');
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const d = await res.json();
+    if (cnt) cnt.textContent = d.count ? `(${d.count})` : '';
+    const items = (d.items || []).slice(0, 5);
+    if (!items.length) { wrap.innerHTML = '<div class="sr-empty">Geen openstaande subscriptions.</div>'; return; }
+    wrap.innerHTML = items.map(it => `<div class="sr-userline" style="justify-content:space-between;padding:8px 0;border-bottom:.5px solid var(--border)">
+      <span class="sr-userline">${avatarHtml(it.customer_name)}<span>${esc(it.customer_name || '—')}</span></span>
+      <a class="sr-abtn success" href="/modules/subscription-wizard.html?deal_id=${encodeURIComponent(it.deal_id)}">Omzetten naar abonnement</a></div>`).join('');
+  } catch (e) { wrap.innerHTML = '<div class="sr-empty">Laden mislukt.</div>'; }
+}
+// Avatar-helper (kleur op naam-hash) — gedeeld door alle tabs in latere fases.
+function avatarHash(name) { let h = 0; const s = String(name || ''); for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0; return h % 6; }
+function avatarInitials(name) { const p = String(name || '').trim().split(/\s+/).filter(Boolean); return ((p[0]?.[0] || '') + (p[1]?.[0] || '')).toUpperCase() || '?'; }
+function avatarHtml(name, size) { return `<span class="sr-avatar sr-av-${avatarHash(name)}${size ? ' ' + size : ''}">${esc(avatarInitials(name))}</span>`; }
+
 (async () => {
   await window._authSharedReady;
   const profile = await window.AuthShared?.requireAuth();
@@ -1068,13 +1167,13 @@ function repExport() {
   if (can('sales.reports.view')) { const rb = document.getElementById('tab-btn-reports'); if (rb) rb.style.display = ''; }
   // ?tab=klanten|quotations|trajecten|products → direct juiste tab openen.
   const wantTab = new URLSearchParams(location.search).get('tab');
-  const tabMap = { klanten: 'customers', customers: 'customers', offertes: 'quotations', quotations: 'quotations', onboardings: 'onboardings', abonnementen: 'subscriptions', subscriptions: 'subscriptions', retentie: 'retentie', trajecten: 'trajecten', producten: 'products', products: 'products', rapporten: 'reports', reports: 'reports' };
+  const tabMap = { dashboard: 'dashboard', klanten: 'customers', customers: 'customers', offertes: 'quotations', quotations: 'quotations', onboardings: 'onboardings', abonnementen: 'subscriptions', subscriptions: 'subscriptions', retentie: 'retentie', trajecten: 'trajecten', producten: 'products', products: 'products', rapporten: 'reports', reports: 'reports' };
   const target = tabMap[wantTab];
-  if (target && target !== 'customers') {
+  if (target && target !== 'dashboard') {
     const btn = document.querySelector(`.tab[data-tab="${target}"]`);
     if (btn) { btn.click(); return; }
   }
-  loadCustomers();
+  loadDashboard();
 })();
 </script>
 <script src="/modules/shared/permissions.js"></script>
