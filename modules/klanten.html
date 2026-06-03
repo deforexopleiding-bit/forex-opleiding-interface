@@ -486,55 +486,62 @@
 
         <!-- Tab: Profiel -->
         <div class="tab-content" id="tab-panel-profiel" role="tabpanel" aria-labelledby="tab-btn-profiel">
-          <div class="detail-cards-grid">
-            <div class="detail-card">
-              <h3><i class="ti ti-user"></i> Persoonlijk</h3>
-              <div class="detail-row"><span class="detail-label">Voornaam</span><span id="prof-first-name">—</span></div>
-              <div class="detail-row"><span class="detail-label">Achternaam</span><span id="prof-last-name">—</span></div>
-              <div class="detail-row"><span class="detail-label">Geboortedatum</span><span id="prof-dob">—</span></div>
+          <div class="dash-grid">
+            <!-- Sidebar -->
+            <div>
+              <div class="sidebar-card center">
+                <span class="sr-avatar lg" id="prof-avatar" style="width:64px;height:64px;font-size:22px;margin:0 auto 10px">?</span>
+                <h2 id="prof-sidebar-name" style="font-size:16px;margin:0">—</h2>
+                <div id="prof-sidebar-badges" style="margin:6px 0"></div>
+                <div class="sr-cellsub" id="prof-sidebar-since">—</div>
+              </div>
+              <div class="sidebar-card">
+                <div class="prop-section-h" style="margin-top:0">Contact</div>
+                <a class="contact-link" id="prof-link-email" href="#"><i class="ti ti-mail" style="color:#0891b2"></i><span>—</span></a>
+                <a class="contact-link" id="prof-link-phone" href="#"><i class="ti ti-phone" style="color:#0891b2"></i><span>—</span></a>
+                <a class="contact-link" id="prof-link-wa" href="#" target="_blank" rel="noopener"><i class="ti ti-brand-whatsapp" style="color:#059669"></i><span>WhatsApp</span></a>
+              </div>
+              <div class="sidebar-card">
+                <div class="prop-section-h" style="margin-top:0;display:flex;justify-content:space-between;align-items:center">Tags
+                  <button id="prof-tags-edit-toggle" class="tag-edit-toggle" type="button" style="display:none;" onclick="toggleTagEditMode()"><i class="ti ti-edit"></i> <span id="prof-tags-edit-label">Bewerken</span></button>
+                </div>
+                <div id="prof-tags"><span class="cust-empty">Geen tags</span></div>
+                <div class="tag-edit-error" id="prof-tags-error"></div>
+              </div>
             </div>
-
-            <div class="detail-card">
-              <h3><i class="ti ti-address-book"></i> Contact</h3>
-              <div class="detail-row"><span class="detail-label">Email</span><span id="prof-email">—</span></div>
-              <div class="detail-row"><span class="detail-label">Telefoon</span><span id="prof-phone">—</span></div>
-            </div>
-
-            <div class="detail-card">
-              <h3><i class="ti ti-map-pin"></i> Adres</h3>
-              <div class="detail-row"><span class="detail-label">Straat + nr.</span><span id="prof-address-line1">—</span></div>
-              <div class="detail-row"><span class="detail-label">Postcode + plaats</span><span id="prof-address-line2">—</span></div>
-            </div>
-
-            <div class="detail-card">
-              <h3 class="with-action">
-                <i class="ti ti-tag"></i> Tags
-                <button id="prof-tags-edit-toggle" class="tag-edit-toggle" type="button" style="display:none;" onclick="toggleTagEditMode()">
-                  <i class="ti ti-edit"></i> <span id="prof-tags-edit-label">Bewerken</span>
-                </button>
-              </h3>
-              <div id="prof-tags"><span class="cust-empty">Geen tags</span></div>
-              <div class="tag-edit-error" id="prof-tags-error"></div>
-            </div>
-
-            <div class="detail-card">
-              <h3><i class="ti ti-info-circle"></i> Metadata</h3>
-              <div class="detail-row"><span class="detail-label">Klant sinds</span><span id="prof-created-at">—</span></div>
-              <div class="detail-row"><span class="detail-label">Laatst bijgewerkt</span><span id="prof-updated-at">—</span></div>
-              <div class="detail-row"><span class="detail-label">TradersLeague ID</span><span id="prof-tl-id">—</span></div>
-              <div class="detail-row"><span class="detail-label">GoHighLevel ID</span><span id="prof-ghl-id">—</span></div>
-              <div class="detail-row"><span class="detail-label">Privacy geaccepteerd</span><span id="prof-privacy">—</span></div>
-              <div class="detail-row"><span class="detail-label">Risico-tag automatisch</span><span id="prof-risk-auto">—</span></div>
-            </div>
-
-            <div class="detail-card" id="prof-onboarding-card">
-              <h3><i class="ti ti-user-check"></i> Onboarding</h3>
-              <div id="prof-onboarding"><span class="cust-empty">Laden…</span></div>
-            </div>
-
-            <div class="detail-card" id="prof-abo-card" style="cursor:pointer" title="Naar abonnementen" onclick="activateDetailTab('abonnementen', true)">
-              <h3 class="with-action"><i class="ti ti-credit-card"></i> Abonnement <span id="prof-abo-status"></span></h3>
-              <div id="prof-abo"><span class="cust-empty">Laden…</span></div>
+            <!-- Main -->
+            <div>
+              <div class="sr-card" style="margin-bottom:12px">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px"><h3 style="font-size:14px;margin:0">Klantgegevens</h3><button class="sr-abtn" id="prof-edit-btn" onclick="document.getElementById('btn-edit-customer').click()"><i class="ti ti-edit"></i> Bewerken</button></div>
+                <div class="prop-section-h">Persoonlijk</div>
+                <div class="prop-row"><span class="prop-lbl">Voornaam</span><span class="prop-val" id="prof-first-name">—</span></div>
+                <div class="prop-row"><span class="prop-lbl">Achternaam</span><span class="prop-val" id="prof-last-name">—</span></div>
+                <div class="prop-row"><span class="prop-lbl">Geboortedatum</span><span class="prop-val" id="prof-dob">—</span></div>
+                <div class="prop-divider"></div>
+                <div class="prop-section-h">Contact</div>
+                <div class="prop-row"><span class="prop-lbl">Email</span><span class="prop-val" id="prof-email">—</span></div>
+                <div class="prop-row"><span class="prop-lbl">Telefoon</span><span class="prop-val" id="prof-phone">—</span></div>
+                <div class="prop-divider"></div>
+                <div class="prop-section-h">Adres</div>
+                <div class="prop-row"><span class="prop-lbl">Straat + nr.</span><span class="prop-val" id="prof-address-line1">—</span></div>
+                <div class="prop-row"><span class="prop-lbl">Postcode + plaats</span><span class="prop-val" id="prof-address-line2">—</span></div>
+              </div>
+              <div class="sr-grid sr-grid-2" style="margin-bottom:12px">
+                <div class="detail-card" id="prof-onboarding-card"><h3><i class="ti ti-user-check"></i> Onboarding</h3><div id="prof-onboarding"><span class="cust-empty">Laden…</span></div></div>
+                <div class="detail-card" id="prof-abo-card" style="cursor:pointer" title="Naar abonnementen" onclick="activateDetailTab('abonnementen', true)"><h3 class="with-action"><i class="ti ti-credit-card"></i> Abonnement <span id="prof-abo-status"></span></h3><div id="prof-abo"><span class="cust-empty">Laden…</span></div></div>
+              </div>
+              <div class="sr-card" style="padding:10px 14px">
+                <div class="prop-section-h" style="margin-top:0">Metadata</div>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:0 16px">
+                  <div class="prop-row" style="font-size:11px"><span class="prop-lbl" style="min-width:92px;font-size:11px">Verkoper</span><span class="prop-val" id="prof-verkoper">—</span></div>
+                  <div class="prop-row" style="font-size:11px"><span class="prop-lbl" style="min-width:92px;font-size:11px">Laatst bijgewerkt</span><span class="prop-val" id="prof-updated-at">—</span></div>
+                  <div class="prop-row" style="font-size:11px"><span class="prop-lbl" style="min-width:92px;font-size:11px">Teamleader ID</span><span class="prop-val" id="prof-tl-id">—</span></div>
+                  <div class="prop-row" style="font-size:11px"><span class="prop-lbl" style="min-width:92px;font-size:11px">AVG</span><span class="prop-val" id="prof-privacy">—</span></div>
+                  <div class="prop-row" style="font-size:11px"><span class="prop-lbl" style="min-width:92px;font-size:11px">Klant sinds</span><span class="prop-val" id="prof-created-at">—</span></div>
+                  <div class="prop-row" style="font-size:11px"><span class="prop-lbl" style="min-width:92px;font-size:11px">GoHighLevel</span><span class="prop-val" id="prof-ghl-id">—</span></div>
+                  <div class="prop-row" style="font-size:11px"><span class="prop-lbl" style="min-width:92px;font-size:11px">Risico-tag</span><span class="prop-val" id="prof-risk-auto">—</span></div>
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -1201,6 +1208,17 @@ async function deleteSubscription(subId) {
 
 function renderProfielTab() {
   const c = detailState.customer;
+
+  // Sidebar (V2): avatar + naam + badges + contact-quick-links.
+  const fullName = `${(c.first_name || '').trim()} ${(c.last_name || '').trim()}`.trim() || '(geen naam)';
+  const avEl = $('#prof-avatar');
+  if (avEl) { let h = 0; for (let i = 0; i < fullName.length; i++) h = (h * 31 + fullName.charCodeAt(i)) >>> 0; avEl.className = 'sr-avatar lg sr-av-' + (h % 6); const p = fullName.split(/\s+/); avEl.textContent = ((p[0]?.[0] || '') + (p[1]?.[0] || '')).toUpperCase() || '?'; }
+  if ($('#prof-sidebar-name')) $('#prof-sidebar-name').textContent = fullName;
+  if ($('#prof-sidebar-badges')) $('#prof-sidebar-badges').innerHTML = (c.status === 'active' ? '<span class="sr-tag green">Actief</span>' : `<span class="sr-tag gray">${escapeHtml(labelForStatus(c.status))}</span>`) + (c.risk_tag_auto ? ' <span class="sr-tag danger">Risico</span>' : '');
+  if ($('#prof-sidebar-since')) $('#prof-sidebar-since').textContent = c.created_at ? 'Klant sinds ' + fmtDate(c.created_at) : '';
+  const le = $('#prof-link-email'); if (le) { if (c.email) { le.href = 'mailto:' + c.email; le.querySelector('span').textContent = c.email; le.style.display = ''; } else le.style.display = 'none'; }
+  const lp = $('#prof-link-phone'); if (lp) { if (c.phone) { lp.href = 'tel:' + c.phone; lp.querySelector('span').textContent = c.phone; lp.style.display = ''; } else lp.style.display = 'none'; }
+  const lw = $('#prof-link-wa'); if (lw) { if (c.phone) { lw.href = 'https://wa.me/' + String(c.phone).replace(/[^0-9]/g, ''); lw.style.display = ''; } else lw.style.display = 'none'; }
 
   $('#prof-first-name').textContent = c.first_name || '—';
   $('#prof-last-name').textContent  = c.last_name  || '—';
