@@ -1012,6 +1012,8 @@ if (!window._koMenuInit) {
   window.addEventListener('scroll', close, true);
   window.addEventListener('resize', close);
 }
+const KO_STATUS_COLOR = { draft: '#64748b', sent: '#0891b2', accepted: '#059669', signed: '#059669', declined: '#b91c1c', expired: '#94a3b8', failed: '#b91c1c' };
+let koQuots = [], koOffSeg = 'alle';
 async function renderOffertesTab() {
   const wrap = $('#offertes-list');
   wrap.innerHTML = '<div class="placeholder-card">Offertes laden…</div>';
@@ -1019,30 +1021,63 @@ async function renderOffertesTab() {
     const res = await window.AgentShared.apiFetch('/api/sales-quotations?customer_id=' + encodeURIComponent(detailState.customerId));
     if (!res.ok) throw new Error('HTTP ' + res.status);
     const data = await res.json();
-    const qs = data.quotations || [];
-    const cnt = $('#tab-count-offertes'); if (cnt) cnt.textContent = qs.length;
-    const newBtn = `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px"><strong style="font-size:13px">Offertes voor deze klant (${qs.length})</strong><a class="sr-abtn primary" href="/modules/sales-wizard.html?customer_id=${encodeURIComponent(detailState.customerId)}"><i class="ti ti-file-plus"></i> Nieuwe offerte</a></div>`;
-    if (!qs.length) { wrap.innerHTML = newBtn + '<div class="placeholder-card">Nog geen offertes voor deze klant</div>'; return; }
-    const rows = qs.map((q) => {
-      const eur = q.total_amount_incl != null ? '€' + Number(q.total_amount_incl).toLocaleString('nl-NL', { minimumFractionDigits: 2 }) : (q.total_amount != null ? '€' + Number(q.total_amount).toLocaleString('nl-NL', { minimumFractionDigits: 2 }) : '—');
-      const st = q.tl_quotation_status || 'draft';
-      const offNr = q.quote_reference || ('#' + String(q.deal_id).slice(0, 8));
-      return `<tr>
-        <td><span class="sr-uname">${escapeHtml(offNr)}</span><br><span class="sr-cellsub">${escapeHtml(q.traject_label || '—')}</span></td>
-        <td>${koEntityTag(q.entity)}</td>
-        <td class="num">${eur}</td>
-        <td><span class="sr-tag ${KO_QBADGE[st] || 'gray'}">${escapeHtml(QUOTATION_STATUS_LABEL[st] || st)}</span></td>
-        <td>${q.created_at ? fmtDateLong(q.created_at) : '—'}</td>
-        <td>${escapeHtml(q.sales_user || '—')}</td>
-        <td>${koQuotActions(q)}</td>
-      </tr>`;
-    }).join('');
-    wrap.innerHTML = newBtn + `<div class="sr-tablewrap"><table class="sr-table">
-      <thead><tr><th>Nummer</th><th>Entiteit</th><th class="num">Bedrag incl.</th><th>Status</th><th>Datum</th><th>Verkoper</th><th></th></tr></thead>
-      <tbody>${rows}</tbody></table></div>`;
-  } catch (e) {
-    wrap.innerHTML = '<div class="placeholder-card">Laden mislukt: ' + escapeHtml(e.message) + '</div>';
-  }
+    koQuots = data.quotations || [];
+    const cnt = $('#tab-count-offertes'); if (cnt) cnt.textContent = koQuots.length;
+    renderKoOffertes();
+  } catch (e) { wrap.innerHTML = '<div class="placeholder-card">Laden mislukt: ' + escapeHtml(e.message) + '</div>'; }
+}
+function koSegMatch(q) {
+  const st = q.tl_quotation_status || 'draft';
+  if (koOffSeg === 'alle') return true;
+  if (koOffSeg === 'accepted') return st === 'accepted' || st === 'signed';
+  return st === koOffSeg;
+}
+function renderKoOffertes() {
+  const wrap = $('#offertes-list');
+  const eur2 = (v) => '€' + Number(v || 0).toLocaleString('nl-NL', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const all = koQuots;
+  // KPI's (over ALLE offertes).
+  const total = all.length;
+  const value = all.reduce((a, q) => a + (Number(q.total_amount_incl) || 0), 0);
+  const signed = all.filter(q => ['accepted', 'signed'].includes(q.tl_quotation_status)).length;
+  const conv = total ? Math.round((signed / total) * 100) : 0;
+  const last = all.map(q => q.created_at).filter(Boolean).sort().pop();
+  const kpi = `<div class="kpi-strip" style="grid-template-columns:repeat(4,1fr)">
+    <div class="kpi-cell"><div class="kpi-lbl">Totaal offertes</div><div class="kpi-val">${total}</div></div>
+    <div class="kpi-cell"><div class="kpi-lbl">Totaalwaarde</div><div class="kpi-val">${eur2(value)}</div></div>
+    <div class="kpi-cell"><div class="kpi-lbl">Conversie</div><div class="kpi-val" style="${conv > 0 ? 'color:#059669' : ''}">${conv}%</div></div>
+    <div class="kpi-cell"><div class="kpi-lbl">Laatste offerte</div><div class="kpi-val">${last ? fmtDate(last) : '—'}</div></div>
+  </div>`;
+  const segCount = (s) => s === 'alle' ? total : all.filter(q => { const st = q.tl_quotation_status || 'draft'; return s === 'accepted' ? ['accepted', 'signed'].includes(st) : st === s; }).length;
+  const SEGS = [['alle', 'Alle'], ['draft', 'Concept'], ['sent', 'Verzonden'], ['accepted', 'Bevestigd'], ['declined', 'Afgewezen']];
+  const pills = `<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:12px">
+    <div class="sr-segments" id="koOffSegments" style="margin-bottom:0">${SEGS.map(([k, l]) => `<button class="sr-seg${koOffSeg === k ? ' active' : ''}" data-seg="${k}">${l} <span class="sr-seg-n">${segCount(k)}</span></button>`).join('')}</div>
+    <a class="sr-abtn primary" href="/modules/sales-wizard.html?customer_id=${encodeURIComponent(detailState.customerId)}"><i class="ti ti-file-plus"></i> Nieuwe offerte</a></div>`;
+  const rows = all.filter(koSegMatch);
+  if (!rows.length) { wrap.innerHTML = kpi + pills + '<div class="placeholder-card">Geen offertes in deze selectie.</div>'; bindKoOffSegs(); return; }
+  const body = rows.map((q) => {
+    const st = q.tl_quotation_status || 'draft';
+    const eur = q.total_amount_incl != null ? eur2(q.total_amount_incl) : (q.total_amount != null ? eur2(q.total_amount) : '—');
+    const offNr = q.quote_reference || ('#' + String(q.deal_id).slice(0, 8));
+    const dim = ['declined', 'expired'].includes(st) ? ' style="opacity:.6"' : '';
+    return `<tr${dim}>
+      <td class="statusstrip"><span class="statusstrip-bar" style="background:${KO_STATUS_COLOR[st] || '#64748b'}"></span></td>
+      <td><span class="sr-uname">${escapeHtml(offNr)}</span><br><span class="sr-cellsub">${escapeHtml(q.traject_label || '—')}</span></td>
+      <td>${koEntityTag(q.entity)}</td>
+      <td class="num"><span style="font-weight:600">${eur}</span><br><span class="sr-cellsub">incl. BTW</span></td>
+      <td><span class="sr-tag ${KO_QBADGE[st] || 'gray'}">${escapeHtml(QUOTATION_STATUS_LABEL[st] || st)}</span></td>
+      <td>${q.created_at ? fmtDateLong(q.created_at) : '—'}</td>
+      <td>${q.tl_quotation_id ? '<span class="sr-tag green">✓</span>' : '<span class="sr-cellsub">—</span>'}</td>
+      <td>${koQuotActions(q)}</td>
+    </tr>`;
+  }).join('');
+  wrap.innerHTML = kpi + pills + `<div class="sr-tablewrap"><table class="sr-table">
+    <thead><tr><th class="statusstrip"></th><th>Nummer</th><th>Entiteit</th><th class="num">Bedrag</th><th>Status</th><th>Datum</th><th class="center">TL</th><th></th></tr></thead>
+    <tbody>${body}</tbody></table></div>`;
+  bindKoOffSegs();
+}
+function bindKoOffSegs() {
+  document.querySelectorAll('#koOffSegments .sr-seg').forEach(b => b.addEventListener('click', () => { koOffSeg = b.dataset.seg; renderKoOffertes(); }));
 }
 
 async function renderAbonnementenTab() {
