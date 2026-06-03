@@ -32,11 +32,12 @@ export default async function handler(req, res) {
     const { count: onboardingCount } = await supabaseAdmin.from('customers')
       .select('id', { count: 'exact', head: true }).eq('onboarding_status', 'sent');
 
-    // Retentie deze maand: subscriptions met einddatum binnen 30 dagen.
+    // Retentie deze maand: ALLEEN ACTIEVE subscriptions die binnen 30 dagen aflopen
+    // (eerder telde dit ook cancelled/paused/completed mee → te hoog, bv. '6' i.p.v. '0').
     const today = new Date().toISOString().slice(0, 10);
     const in30 = new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10);
     const { data: endingSubs } = await supabaseAdmin.from('subscriptions')
-      .select('deal_id, end_date').gte('end_date', today).lte('end_date', in30);
+      .select('deal_id, end_date').eq('status', 'active').gte('end_date', today).lte('end_date', in30);
     const retentionCount = new Set((endingSubs || []).map(s => s.deal_id)).size;
 
     return res.status(200).json({

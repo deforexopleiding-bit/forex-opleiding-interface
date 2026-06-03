@@ -1247,13 +1247,17 @@ function openPostponeAllModal(customerId, count) {
 }
 
 // PUNT 3 — Abonnement verwijderen (lokaal cancelled + TL deactivate).
-async function deleteSubscription(subId) {
-  if (!confirm('Weet je zeker dat je dit abonnement wilt verwijderen? Dit wordt ook in Teamleader uitgeschakeld.')) return;
+async function deleteSubscription(subId, force) {
+  if (!force && !confirm('Weet je zeker dat je dit abonnement wilt verwijderen? Dit wordt ook in Teamleader gedeactiveerd.')) return;
   try {
-    const res = await window.AgentShared.apiFetch('/api/sales-subscription-delete', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ subscription_id: subId }) });
+    const res = await window.AgentShared.apiFetch('/api/sales-subscription-delete', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ subscription_id: subId, force: !!force }) });
     const d = await res.json();
+    if (res.status === 502 && d.tl_failed) {
+      if (confirm('Teamleader-deactivatie mislukt: ' + (d.tl?.error || 'onbekend') + '\n\nAlleen lokaal stopzetten (TL handmatig afhandelen)?')) return deleteSubscription(subId, true);
+      return;
+    }
     if (!res.ok || d.success === false) throw new Error(d.error || 'HTTP ' + res.status);
-    window.AgentShared?.showToast(d.tl?.deactivated ? 'Verwijderd + TL gedeactiveerd' : 'Verwijderd (TL niet gesynct)', 'success');
+    window.AgentShared?.showToast(d.tl?.deactivated ? 'Verwijderd + TL gedeactiveerd' : 'Lokaal stopgezet (TL niet gesynct)', 'success');
     renderAbonnementenTab();
   } catch (e) { window.AgentShared?.showToast('Mislukt: ' + e.message, 'error'); }
 }
