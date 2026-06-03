@@ -71,13 +71,13 @@
           navLink('control-center', '/modules/control-center.html', 'Control Center') +
           navLink('follow-up', '/modules/follow-up.html', 'Follow-up') +
           navLink('sales', '/modules/sales.html', 'Sales') +
+          navLink('onboarding', '/modules/onboarding-overzicht.html', 'Onboarding') +
           navLink('finance', '/modules/finance.html', 'Finance') +
           '<a class="nav-item" data-module="tickets" href="/modules/tickets.html">' + svg('tickets') + 'Tickets<span class="nav-badge" id="navTicketsBadge"></span></a>' +
           navLink('admin', '/modules/admin.html', 'Admin', ' id="adminNavLink" style="display:none"') +
           '<div class="nav-section">Binnenkort</div>' +
           concept('whatsapp', 'WhatsApp Bot') +
           concept('contracten', 'Contracten') +
-          concept('onboarding', 'Onboarding') +
         '</div>' +
         '<div class="sidebar-footer">' +
           '<div class="footer-user"></div>' +
@@ -100,6 +100,7 @@
     var cur = currentModule();
     // sales-dashboard.html highlight valt onder Dashboard-link in de sidebar
     if (cur === 'sales-dashboard') cur = 'dashboard';
+    if (cur === 'onboarding-overzicht') cur = 'onboarding';
     document.querySelectorAll('#sidebar-mount [data-module]').forEach(function (el) {
       el.classList.toggle('active', el.getAttribute('data-module') === cur);
     });

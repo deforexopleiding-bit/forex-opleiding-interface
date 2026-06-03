@@ -5,7 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Abonnement invoeren · De Forex Opleiding</title>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/dist/tabler-icons.min.css" />
   <link rel="stylesheet" href="/modules/shared/agent-shared.css" />
+  <link rel="stylesheet" href="/styles/sales-redesign.css" />
   <style>
     *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
     body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--text);min-height:100vh}
@@ -47,10 +49,10 @@
   <h1>Abonnement invoeren</h1>
   <div class="sub" id="topSub">Laden…</div>
 
-  <div class="progress">
-    <div class="st active" data-st="1">1. Klant &amp; offerte</div>
-    <div class="st" data-st="2">2. Abonnementen</div>
-    <div class="st" data-st="3">3. Bonus &amp; bevestigen</div>
+  <div class="sr-steps" id="subSteps">
+    <div class="sr-step active" data-st="1"><div class="sr-step-c">1</div><div class="sr-step-l">Klant &amp; offerte</div></div>
+    <div class="sr-step" data-st="2"><div class="sr-step-c">2</div><div class="sr-step-l">Abonnementen</div></div>
+    <div class="sr-step" data-st="3"><div class="sr-step-c">3</div><div class="sr-step-l">Bonus &amp; bevestigen</div></div>
   </div>
 
   <!-- Stap 1 -->
@@ -143,7 +145,7 @@ async function init(){
       state.lineItems=dRes.line_items||[];
       buildReview(); prefillSubs();
     } else {
-      const lbl=document.querySelector('.progress .st[data-st="1"]'); if(lbl) lbl.textContent='1. Klant';
+      const lbl=document.querySelector('#subSteps [data-st="1"] .sr-step-l'); if(lbl) lbl.textContent='Klant';
       document.getElementById('topSub').textContent='Nieuw abonnement (zonder offerte)';
       // PUNT 2: type verkoop (BTW-regeling) tonen in standalone.
       const stWrap=document.getElementById('saleTypeWrap'); if(stWrap) stWrap.style.display='block';
@@ -479,7 +481,7 @@ function renderStep3(){
 function showStep(n){
   state.step=n;
   document.querySelectorAll('.panel').forEach((p,idx)=>p.classList.toggle('active',idx+1===n));
-  document.querySelectorAll('.progress .st').forEach(s=>s.classList.toggle('active',Number(s.dataset.st)===n));
+  document.querySelectorAll('#subSteps .sr-step').forEach(s=>{ const sn=Number(s.dataset.st); s.classList.toggle('active',sn===n); s.classList.toggle('done',sn<n); const c=s.querySelector('.sr-step-c'); if(c) c.innerHTML = sn<n ? '<i class="ti ti-check"></i>' : sn; });
   document.getElementById('prevBtn').disabled = n===1;
   document.getElementById('nextBtn').style.display = n===3?'none':'';
   if(n===3) renderStep3();

@@ -7,7 +7,9 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/dist/tabler-icons.min.css" />
   <link rel="stylesheet" href="/modules/shared/agent-shared.css" />
+  <link rel="stylesheet" href="/styles/sales-redesign.css" />
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     html, body { height: 100%; }
@@ -91,116 +93,178 @@
   </div>
 
   <div class="tabs" role="tablist">
-    <button class="tab active" data-tab="customers" role="tab">Klanten</button>
+    <button class="tab active" data-tab="dashboard" role="tab">Dashboard</button>
+    <button class="tab" data-tab="customers" role="tab">Klanten</button>
     <button class="tab" data-tab="quotations" role="tab">Offertes</button>
-    <button class="tab" data-tab="onboardings" role="tab">Onboardings</button>
     <button class="tab" data-tab="subscriptions" role="tab">Abonnementen</button>
     <button class="tab" data-tab="retentie" role="tab">Retentie</button>
-    <button class="tab" data-tab="trajecten" role="tab">Trajecten</button>
-    <button class="tab" data-tab="products" role="tab">Producten</button>
+    <button class="tab" data-tab="aanbod" role="tab">Aanbod</button>
     <button class="tab" data-tab="reports" role="tab" id="tab-btn-reports" style="display:none">Rapporten</button>
   </div>
 
-  <!-- ── Tab: Klanten ── -->
-  <section class="tab-content active" id="tab-customers">
-    <div class="toolbar">
-      <input class="search" id="custSearch" type="search" placeholder="Zoek naam, email of telefoon..." />
-      <label class="filter-toggle"><input type="checkbox" id="custAllToggle"> Alleen mijn klanten</label>
-      <select class="search" id="custStatus" style="max-width:160px">
-        <option value="active">Actief</option>
-        <option value="archived">Gearchiveerd</option>
-      </select>
+  <!-- ── Tab: Dashboard (default landing — absorbeert sales-dashboard.html) ── -->
+  <section class="tab-content active" id="tab-dashboard">
+    <div class="dash-grid">
+      <!-- LINKER KOLOM -->
+      <div>
+        <div id="dashNextBanner"></div>
+        <div class="sr-card">
+          <div class="sr-card-h"><i class="ti ti-activity"></i> Activiteit</div>
+          <div id="dashFeed"><div class="sr-empty">—</div></div>
+        </div>
+      </div>
+      <!-- RECHTER KOLOM -->
+      <div>
+        <div class="sr-grid sr-grid-4" style="margin-bottom:12px">
+          <a class="sr-stat sr-i-blue" href="/modules/sales.html?tab=offertes"><div class="sr-stat-l"><i class="ti ti-file-text"></i>Mijn open offertes</div><div class="sr-stat-v" id="dashMyQuotes">–</div><div class="sr-stat-d" id="dashMyQuotesD"></div></a>
+          <a class="sr-stat sr-i-amber" href="/modules/sales.html?tab=rapporten"><div class="sr-stat-l"><i class="ti ti-coin"></i>Bonus deze maand</div><div class="sr-stat-v" id="dashMyBonus">–</div><div class="sr-stat-d">pending · uitkering 1e v/d maand</div></a>
+          <a class="sr-stat sr-i-purple" href="/modules/onboarding-overzicht.html"><div class="sr-stat-l"><i class="ti ti-rocket"></i>Onboarding</div><div class="sr-stat-v" id="dashOnboarding">–</div><div class="sr-stat-d">wachten op call</div></a>
+          <a class="sr-stat sr-i-pink" href="/modules/sales.html?tab=retentie"><div class="sr-stat-l"><i class="ti ti-refresh"></i>Retentie</div><div class="sr-stat-v" id="dashRetention">–</div><div class="sr-stat-d" id="dashRetentionD"></div></a>
+        </div>
+        <div class="sr-grid sr-grid-2" style="margin-bottom:12px">
+          <div class="sr-card"><div class="sr-card-h">Vandaag</div>
+            <div class="prop-row"><span class="prop-lbl"><i class="ti ti-user-plus"></i> Nieuwe leads</span><span class="prop-val" id="dashTodayLeads">–</span></div>
+            <div class="prop-row"><span class="prop-lbl"><i class="ti ti-calendar-event"></i> Event-aanmeldingen</span><span class="prop-val" id="dashTodayEvents">–</span></div>
+            <div class="prop-row"><span class="prop-lbl"><i class="ti ti-clock"></i> Afspraken</span><span class="prop-val" id="dashTodayAppts">–</span></div>
+          </div>
+          <div class="sr-card"><div class="sr-card-h">Deze week</div>
+            <div class="prop-row"><span class="prop-lbl"><i class="ti ti-user-plus"></i> Nieuwe leads</span><span class="prop-val" id="dashWeekLeads">–</span></div>
+            <div class="prop-row"><span class="prop-lbl"><i class="ti ti-calendar-event"></i> Event-aanmeldingen</span><span class="prop-val" id="dashWeekEvents">–</span></div>
+            <div class="prop-row"><span class="prop-lbl"><i class="ti ti-clock"></i> Afspraken</span><span class="prop-val" id="dashWeekAppts">–</span></div>
+            <div class="prop-divider"></div>
+            <div class="prop-row"><span class="prop-lbl"><i class="ti ti-calendar-due"></i> Afspraken morgen</span><span class="prop-val" id="dashTomorrowAppts">–</span></div>
+            <div class="prop-row"><span class="prop-lbl"><i class="ti ti-list-check"></i> Open follow-ups</span><span class="prop-val" id="dashOpenFollowups">–</span></div>
+          </div>
+        </div>
+        <div class="sr-card">
+          <div class="sr-card-h"><i class="ti ti-clock-pause"></i> Wachten op subscription <span id="dashPendingCount" style="color:var(--text-faint)"></span></div>
+          <div id="dashPending"><div class="sr-empty">Laden…</div></div>
+        </div>
+      </div>
     </div>
-    <div id="customersList"><div class="empty">Laden…</div></div>
+  </section>
+
+  <!-- ── Tab: Klanten ── -->
+  <section class="tab-content" id="tab-customers">
+    <div class="sr-filterstrip">
+      <div class="sr-search"><input id="custSearch" type="search" placeholder="Zoek naam, email of telefoon…" /></div>
+      <select class="sr-select" id="custEntity"><option value="">Alle entiteiten</option></select>
+      <label class="sr-toggle"><input type="checkbox" id="custAllToggle"> Alleen mijne</label>
+      <button class="sr-iconbtn sr-spacer" id="custRefresh" title="Vernieuwen"><i class="ti ti-refresh"></i></button>
+    </div>
+    <div class="sr-segments" id="custSegments">
+      <button class="sr-seg active" data-seg="alle">Alle</button>
+      <button class="sr-seg" data-seg="actief">Actief</button>
+      <button class="sr-seg warning" data-seg="onboarding">In onboarding</button>
+      <button class="sr-seg danger" data-seg="loopt_af">Loopt af</button>
+      <button class="sr-seg" data-seg="inactief">Inactief</button>
+    </div>
+    <div id="customersList"><div class="sr-empty">Laden…</div></div>
   </section>
 
   <!-- ── Tab: Offertes ── -->
   <section class="tab-content" id="tab-quotations">
-    <div class="toolbar">
-      <input class="search" id="quotSearch" type="search" placeholder="Zoek klantnaam of email..." />
-      <select class="search" id="quotStatus" style="max-width:180px">
-        <option value="">Alle statussen</option>
-        <option value="draft">Concept</option>
-        <option value="sent">Verzonden</option>
-        <option value="accepted">Bevestigd</option>
-        <option value="declined">Afgewezen</option>
-        <option value="expired">Verlopen</option>
-      </select>
-      <label class="filter-toggle"><input type="checkbox" id="quotMineToggle"> Alleen mijn offertes</label>
-      <button class="btn btn-ghost" id="quotRefresh" title="Vernieuwen" style="margin-left:auto">🔄 Vernieuwen</button>
+    <div class="sr-filterstrip">
+      <div class="sr-search"><input id="quotSearch" type="search" placeholder="Zoek klantnaam of email…" /></div>
+      <select class="sr-select" id="quotEntity"><option value="">Alle entiteiten</option></select>
+      <select class="sr-select" id="quotSeller"><option value="">Alle verkopers</option></select>
+      <label class="sr-toggle"><input type="checkbox" id="quotMineToggle"> Alleen mijne</label>
+      <button class="sr-iconbtn sr-spacer" id="quotRefresh" title="Vernieuwen"><i class="ti ti-refresh"></i></button>
     </div>
-    <div id="quotationsList"><div class="empty">Laden…</div></div>
-  </section>
-
-  <!-- ── Tab: Onboardings ── -->
-  <section class="tab-content" id="tab-onboardings">
-    <div class="toolbar">
-      <label class="filter-toggle"><input type="checkbox" id="onbMineToggle"> Alleen mijn klanten</label>
+    <div class="sr-segments" id="quotSegments">
+      <button class="sr-seg active" data-status="">Alle</button>
+      <button class="sr-seg" data-status="draft">Concept</button>
+      <button class="sr-seg" data-status="sent">Verzonden</button>
+      <button class="sr-seg" data-status="accepted">Bevestigd</button>
+      <button class="sr-seg" data-status="declined">Afgewezen</button>
+      <button class="sr-seg" data-status="expired">Verlopen</button>
     </div>
-    <div id="onboardingsList"><div class="empty">Laden…</div></div>
+    <div id="quotationsList"><div class="sr-empty">Laden…</div></div>
   </section>
 
   <!-- ── Tab: Abonnementen ── -->
   <section class="tab-content" id="tab-subscriptions">
-    <div class="toolbar">
-      <label class="filter-toggle"><input type="checkbox" id="subMineToggle"> Alleen mijn klanten</label>
-      <select class="search" id="subStatus" style="max-width:180px">
-        <option value="all">Alle statussen</option>
-        <option value="active">Actief</option>
-        <option value="cancelled">Geannuleerd</option>
-      </select>
-      <a class="btn btn-success" href="/modules/subscription-wizard.html?mode=standalone" style="margin-left:auto">+ Nieuw abonnement (zonder offerte)</a>
-      <button class="btn btn-ghost" id="subRefresh" title="Vernieuwen">🔄 Vernieuwen</button>
+    <div class="sr-filterstrip">
+      <div class="sr-search"><input id="subSearch" type="search" placeholder="Zoek klant of omschrijving…" /></div>
+      <label class="sr-toggle"><input type="checkbox" id="subMineToggle"> Alleen mijne</label>
+      <a class="sr-abtn success sr-spacer" href="/modules/subscription-wizard.html?mode=standalone">+ Nieuw abonnement (zonder offerte)</a>
+      <button class="sr-iconbtn" id="subRefresh" title="Vernieuwen"><i class="ti ti-refresh"></i></button>
     </div>
-    <div id="subscriptionsList"><div class="empty">Laden…</div></div>
+    <div class="sr-segments" id="subSegments">
+      <button class="sr-seg active" data-status="all">Alle</button>
+      <button class="sr-seg" data-status="active">Actief</button>
+      <button class="sr-seg" data-status="paused">Gepauzeerd</button>
+      <button class="sr-seg" data-status="cancelled">Geannuleerd</button>
+    </div>
+    <div id="subscriptionsList"><div class="sr-empty">Laden…</div></div>
   </section>
 
   <!-- ── Tab: Retentie ── -->
   <section class="tab-content" id="tab-retentie">
-    <div class="toolbar">
-      <label class="filter-toggle"><input type="checkbox" id="retMineToggle"> Alleen mijn klanten</label>
-      <span style="font-size:12px;color:var(--text-dim)">Trajecten die binnen 30 dagen aflopen.</span>
+    <div class="sub" id="retSubtitle" style="margin-bottom:12px">Trajecten die binnen 30 dagen aflopen.</div>
+    <div class="sr-filterstrip">
+      <div class="sr-search"><input id="retSearch" type="search" placeholder="Zoek klant…" /></div>
+      <label class="sr-toggle"><input type="checkbox" id="retMineToggle"> Alleen mijne</label>
+      <button class="sr-iconbtn sr-spacer" id="retRefresh" title="Vernieuwen"><i class="ti ti-refresh"></i></button>
     </div>
-    <div id="retentieList"><div class="empty">Laden…</div></div>
+    <div class="sr-segments" id="retSegments">
+      <button class="sr-seg active" data-seg="alle">Alle</button>
+      <button class="sr-seg danger" data-seg="urgent">Urgent &lt;14d</button>
+      <button class="sr-seg warning" data-seg="soon">15-30 dgn</button>
+      <button class="sr-seg danger" data-seg="verlopen">Verlopen</button>
+    </div>
+    <div id="retentieList"><div class="sr-empty">Laden…</div></div>
   </section>
 
-  <!-- ── Tab: Producten ── -->
-  <section class="tab-content" id="tab-products">
-    <div class="toolbar">
-      <input class="search" id="prodSearch" type="search" placeholder="Zoek product..." />
-      <select class="search" id="prodCategory" style="max-width:200px"><option value="">Alle categorieën</option></select>
-      <label class="filter-toggle"><input type="checkbox" id="prodArchivedToggle"> Toon gearchiveerd</label>
-      <button class="btn" id="newProductBtn">+ Nieuw product</button>
+  <!-- ── Tab: Aanbod (Trajecten + Producten samengevoegd) ── -->
+  <section class="tab-content" id="tab-aanbod">
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
+      <div class="sr-subtabs">
+        <button class="sr-subtab active" data-sub="trajecten"><i class="ti ti-package"></i> Trajecten <span class="sr-seg-n" id="aanbodTrajCount"></span></button>
+        <button class="sr-subtab" data-sub="producten"><i class="ti ti-box"></i> Producten <span class="sr-seg-n" id="aanbodProdCount"></span></button>
+      </div>
+      <label class="sr-toggle" title="Toon prijzen incl. of excl. BTW (geldt voor beide sub-tabs)"><input type="checkbox" id="btwToggle"> Incl. BTW</label>
     </div>
-    <div id="productsList"><div class="empty">Laden…</div></div>
-  </section>
 
-  <!-- ── Tab: Trajecten ── -->
-  <section class="tab-content" id="tab-trajecten">
-    <div class="toolbar">
-      <span style="font-size:12.5px;color:var(--text-dim)">Bundels van producten met varianten (bv. "Membership &gt; Premium 36 mnd").</span>
-      <button class="btn" id="newTrajectBtn" style="margin-left:auto">+ Nieuw traject</button>
+    <!-- Sub-tab Trajecten -->
+    <div id="aanbod-trajecten" style="margin-top:14px">
+      <div class="sr-filterstrip">
+        <span class="sr-cellsub">Bundels van producten met varianten (bv. "Membership &gt; Premium 36 mnd").</span>
+        <button class="sr-abtn primary sr-spacer" id="newTrajectBtn">+ Nieuw traject</button>
+      </div>
+      <div id="trajectenList"><div class="sr-empty">Laden…</div></div>
     </div>
-    <div id="trajectenList"><div class="empty">Laden…</div></div>
+
+    <!-- Sub-tab Producten -->
+    <div id="aanbod-producten" style="margin-top:14px;display:none">
+      <div class="sr-filterstrip">
+        <div class="sr-search"><input id="prodSearch" type="search" placeholder="Zoek product…" /></div>
+        <select class="sr-select" id="prodCategory"><option value="">Alle categorieën</option></select>
+        <label class="sr-toggle"><input type="checkbox" id="prodArchivedToggle"> Toon gearchiveerd</label>
+        <button class="sr-abtn primary sr-spacer" id="newProductBtn">+ Nieuw product</button>
+      </div>
+      <div id="productsList"><div class="sr-empty">Laden…</div></div>
+    </div>
   </section>
 
   <!-- ── Tab: Rapporten (Fase 4) ── -->
   <section class="tab-content" id="tab-reports">
-    <div class="toolbar" style="flex-wrap:wrap;gap:8px">
-      <div class="rep-quick" style="display:flex;gap:4px">
-        <button class="btn btn-ghost btn-sm" data-range="today">Vandaag</button>
-        <button class="btn btn-ghost btn-sm" data-range="week">Week</button>
-        <button class="btn btn-ghost btn-sm" data-range="month">Maand</button>
-        <button class="btn btn-ghost btn-sm" data-range="quarter">Kwartaal</button>
-        <button class="btn btn-ghost btn-sm" data-range="year">Jaar</button>
+    <div class="sr-filterstrip" style="align-items:center">
+      <div class="sr-segments" id="repSegments" style="margin-bottom:0">
+        <button class="sr-seg" data-range="today">Vandaag</button>
+        <button class="sr-seg" data-range="week">Week</button>
+        <button class="sr-seg active" data-range="month">Maand</button>
+        <button class="sr-seg" data-range="quarter">Kwartaal</button>
+        <button class="sr-seg" data-range="year">Jaar</button>
       </div>
-      <input class="search" id="repFrom" type="date" style="max-width:150px" />
-      <input class="search" id="repTo" type="date" style="max-width:150px" />
-      <select class="search" id="repGroupBy" style="max-width:130px"><option value="day">Per dag</option><option value="week">Per week</option><option value="month" selected>Per maand</option></select>
-      <button class="btn" id="repApply">Toepassen</button>
-      <button class="btn btn-ghost" id="repExport" style="margin-left:auto">⬇ Export Excel</button>
+      <input class="sr-select" id="repFrom" type="date" style="max-width:150px" />
+      <input class="sr-select" id="repTo" type="date" style="max-width:150px" />
+      <select class="sr-select" id="repGroupBy"><option value="day">Per dag</option><option value="week">Per week</option><option value="month" selected>Per maand</option></select>
+      <button class="sr-abtn primary" id="repApply">Toepassen</button>
+      <button class="sr-abtn sr-spacer" id="repExport"><i class="ti ti-download"></i> Export Excel</button>
+      <button class="sr-iconbtn" id="repRefresh" title="Vernieuwen"><i class="ti ti-refresh"></i></button>
     </div>
-    <div id="repBody"><div class="empty">Kies een periode en klik Toepassen.</div></div>
+    <div id="repBody"><div class="sr-empty">Kies een periode en klik Toepassen.</div></div>
   </section>
 </div>
 
@@ -308,7 +372,7 @@
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <script src="https://cdn.sheetjs.com/xlsx-0.20.0/package/dist/xlsx.full.min.js"></script>
 <script>
-const state = { tab: 'customers', perms: null, products: [], customers: [], quotations: [], emailTemplates: null, sendDealId: null, editingId: null, trajects: [], editingTrajectId: null, variantCtx: null, variantProducts: [] };
+const state = { tab: 'dashboard', perms: null, products: [], customers: [], quotations: [], emailTemplates: null, sendDealId: null, editingId: null, trajects: [], editingTrajectId: null, variantCtx: null, variantProducts: [], dashLoaded: false };
 
 function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]); }
 function fmtEuro(v) { if (v == null) return '—'; return '€' + Number(v).toLocaleString('nl-NL', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
@@ -337,10 +401,9 @@ document.querySelectorAll('.tab').forEach(t => {
     document.querySelectorAll('.tab-content').forEach(s => s.classList.remove('active'));
     document.getElementById('tab-' + state.tab).classList.add('active');
     stopQuotationsPolling();
-    if (state.tab === 'products') loadProducts();
+    if (state.tab === 'dashboard') loadDashboard();
+    else if (state.tab === 'aanbod') loadAanbod();
     else if (state.tab === 'quotations') { loadQuotations(); startQuotationsPolling(); }
-    else if (state.tab === 'trajecten') loadTrajecten();
-    else if (state.tab === 'onboardings') loadOnboardings();
     else if (state.tab === 'subscriptions') loadSubscriptions();
     else if (state.tab === 'retentie') loadRetentie();
     else if (state.tab === 'reports') initReportsTab();
@@ -374,41 +437,54 @@ async function loadProducts() {
     document.getElementById('productsList').innerHTML = '<div class="empty">Laden mislukt: ' + esc(e.message) + '</div>';
   }
 }
+let prodSort = { key: 'name', dir: 'asc' };
+const VAT_TAG = { 0: 'green', 9: 'teal', 21: 'purple' };
 function renderProducts() {
+  // Categorie-dropdown vullen.
+  const catSel = document.getElementById('prodCategory');
+  if (catSel) { const cur = catSel.value; catSel.innerHTML = '<option value="">Alle categorieën</option>' + [...new Set(state.products.map(p => p.category).filter(Boolean))].sort().map(c => `<option value="${esc(c)}">${esc(c)}</option>`).join(''); catSel.value = cur; }
   const search = (document.getElementById('prodSearch').value || '').toLowerCase();
-  const cat = document.getElementById('prodCategory').value;
+  const cat = catSel?.value || '';
   let arr = state.products.slice();
   if (search) arr = arr.filter(p => (p.name || '').toLowerCase().includes(search) || (p.description || '').toLowerCase().includes(search));
   if (cat) arr = arr.filter(p => p.category === cat);
-  if (!arr.length) {
-    document.getElementById('productsList').innerHTML = '<div class="empty">Geen producten.</div>';
-    return;
-  }
+  const pc = document.getElementById('aanbodProdCount'); if (pc) pc.textContent = arr.length;
+  arr.sort((a, b) => {
+    const dir = prodSort.dir === 'asc' ? 1 : -1;
+    if (prodSort.key === 'price') return ((displayPrice(a.default_price, a.price_includes_vat, a.vat_percentage) || 0) - (displayPrice(b.default_price, b.price_includes_vat, b.vat_percentage) || 0)) * dir;
+    return String(a.name || '').localeCompare(String(b.name || '')) * dir;
+  });
+  if (!arr.length) { document.getElementById('productsList').innerHTML = '<div class="sr-empty">Geen producten.</div>'; return; }
   const canManage = can('sales.product.manage');
+  const sc = prodSort.key === 'price' ? (prodSort.dir === 'asc' ? 'sortable asc' : 'sortable desc') : 'sortable';
   document.getElementById('productsList').innerHTML = `
-    <table>
-      <thead><tr>
-        <th>Naam</th><th>Beschrijving</th><th>BTW</th><th>Prijs</th><th>Looptijd</th>
-        <th>Categorie</th><th>TL-ID</th><th>Status</th>${canManage ? '<th></th>' : ''}
-      </tr></thead>
-      <tbody>${arr.map(p => `
-        <tr>
-          <td><strong>${esc(p.name)}</strong></td>
-          <td title="${esc(p.description || '')}">${esc((p.description || '').slice(0, 60))}${(p.description || '').length > 60 ? '…' : ''}</td>
-          <td><span class="badge vat-${p.vat_percentage}">${p.vat_percentage}%</span></td>
-          <td>${fmtEuro(p.default_price)}<span style="font-size:10px;color:var(--text-faint)"> ${p.price_includes_vat ? 'incl' : 'excl'}</span></td>
-          <td>${p.default_duration_months ? p.default_duration_months + ' mnd' : '—'}</td>
-          <td>${p.category ? '<span class="badge cat">' + esc(p.category) + '</span>' : '—'}</td>
-          <td><span class="mono" title="Vereist voor TL-push">${esc(p.tl_product_id || '—')}</span></td>
-          <td><span class="badge ${p.archived_at ? 'archived' : 'active'}">${p.archived_at ? 'Gearchiveerd' : 'Actief'}</span></td>
-          ${canManage ? `<td>
-            <button class="action-btn" data-edit="${p.id}" title="Bewerken">✎</button>
-            ${!p.archived_at ? `<button class="action-btn" data-archive="${p.id}" title="Archiveren">🗄</button>` : ''}
-          </td>` : ''}
-        </tr>`).join('')}</tbody>
-    </table>`;
-  document.querySelectorAll('[data-edit]').forEach(b => b.addEventListener('click', () => openProductModal(b.dataset.edit)));
-  document.querySelectorAll('[data-archive]').forEach(b => b.addEventListener('click', () => archiveProduct(b.dataset.archive)));
+    <div class="sr-tablewrap"><table class="sr-table">
+      <thead><tr><th>Product</th><th>Categorie</th><th>BTW</th><th class="center">Looptijd</th>
+        <th class="num ${sc}" data-sort="price">Prijs ${btwIncl ? 'incl.' : 'excl.'}</th><th class="center">Teamleader</th><th>Status</th>${canManage ? '<th></th>' : ''}</tr></thead>
+      <tbody>${arr.map(p => {
+        const dp = displayPrice(p.default_price, p.price_includes_vat, p.vat_percentage);
+        const menu = [];
+        if (canManage) {
+          menu.push(`<button class="sr-menu-item" onclick="toast('Binnenkort beschikbaar')"><i class="ti ti-copy"></i> Dupliceren</button>`);
+          if (!p.archived_at) menu.push(`<button class="sr-menu-item danger" data-archive="${p.id}"><i class="ti ti-archive"></i> Archiveren</button>`);
+        }
+        if (p.tl_product_id) menu.push(`<a class="sr-menu-item" href="https://focus.teamleader.eu/products/${esc(p.tl_product_id)}" target="_blank"><i class="ti ti-external-link"></i> Open in Teamleader</a>`);
+        const dots = menu.length ? `<div class="sr-menu"><button class="sr-ibtn sr-menu-toggle"><i class="ti ti-dots"></i></button><div class="sr-menu-pop">${menu.join('')}</div></div>` : '';
+        return `<tr${p.archived_at ? ' style="opacity:.6"' : ''}>
+          <td><span class="sr-userline"><i class="ti ti-box" style="font-size:18px;color:var(--text-faint)"></i><span><span class="sr-uname">${esc(p.name)}</span><br><span class="sr-cellsub">${esc((p.description || '').slice(0, 50))}${(p.description || '').length > 50 ? '…' : ''}</span></span></span></td>
+          <td>${p.category ? '<span class="sr-tag gray">' + esc(p.category) + '</span>' : '—'}</td>
+          <td><span class="sr-tag ${VAT_TAG[p.vat_percentage] || 'gray'}">${p.vat_percentage}%</span></td>
+          <td class="center">${p.default_duration_months ? p.default_duration_months + ' mnd' : '—'}</td>
+          <td class="num">${fmtEuro(dp)}</td>
+          <td class="center">${p.tl_product_id ? '<span class="sr-tag green">✓ TL</span>' : '<span class="sr-cellsub">—</span>'}</td>
+          <td><span class="sr-tag ${p.archived_at ? 'gray' : 'green'}">${p.archived_at ? 'Gearchiveerd' : 'Actief'}</span></td>
+          ${canManage ? `<td class="sr-actions"><button class="sr-ibtn" data-edit="${p.id}" title="Bewerken"><i class="ti ti-edit"></i></button>${dots}</td>` : ''}
+        </tr>`;
+      }).join('')}</tbody>
+    </table></div>`;
+  document.querySelectorAll('#productsList [data-sort]').forEach(th => th.addEventListener('click', () => { if (prodSort.key === 'price') prodSort.dir = prodSort.dir === 'asc' ? 'desc' : 'asc'; else { prodSort.key = 'price'; prodSort.dir = 'asc'; } renderProducts(); }));
+  document.querySelectorAll('#productsList [data-edit]').forEach(b => b.addEventListener('click', () => openProductModal(b.dataset.edit)));
+  document.querySelectorAll('#productsList [data-archive]').forEach(b => b.addEventListener('click', () => archiveProduct(b.dataset.archive)));
 }
 function openProductModal(id = null) {
   if (!can('sales.product.manage')) { toast('Geen rechten', 'error'); return; }
@@ -461,11 +537,32 @@ async function archiveProduct(id) {
 }
 
 // ── Customers ──
+let custSeg = 'alle';
+function custDerivedStatus(c) {
+  if (c.archived_at) return 'inactief';
+  if (c.onboarding_status === 'sent') return 'onboarding';
+  if (c.subscription_end_date) {
+    const days = Math.ceil((new Date(c.subscription_end_date).getTime() - Date.now()) / 86400000);
+    if (days >= 0 && days <= 30) return 'loopt_af';
+  }
+  return 'actief';
+}
+const CUST_STATUS = { actief: { l: 'Actief', c: 'green' }, onboarding: { l: 'Onboarding', c: 'warning' }, loopt_af: { l: 'Loopt af', c: 'danger' }, inactief: { l: 'Inactief', c: 'gray' } };
+function custStatusTag(s) { const b = CUST_STATUS[s] || CUST_STATUS.actief; return `<span class="sr-tag ${b.c}">${b.l}</span>`; }
+function relTime(iso) {
+  if (!iso) return '—';
+  const diff = (Date.now() - new Date(iso).getTime()) / 1000;
+  if (diff < 60) return 'net nu';
+  if (diff < 3600) return Math.floor(diff / 60) + ' min geleden';
+  if (diff < 86400) return Math.floor(diff / 3600) + ' uur geleden';
+  if (diff < 604800) return Math.floor(diff / 86400) + ' dgn geleden';
+  return new Date(iso).toLocaleDateString('nl-NL', { day: '2-digit', month: 'short' });
+}
 async function loadCustomers() {
   const params = new URLSearchParams();
-  // Default: alle klanten. Vinkje "Alleen mijn klanten" → owned_by_me.
   if (document.getElementById('custAllToggle').checked) params.set('owned_by_me', 'true');
-  params.set('status', document.getElementById('custStatus').value);
+  // 'Inactief' segment → gearchiveerde klanten (server); overige → actieve set.
+  params.set('status', custSeg === 'inactief' ? 'archived' : 'active');
   const s = document.getElementById('custSearch').value.trim();
   if (s) params.set('search', s);
   try {
@@ -478,18 +575,30 @@ async function loadCustomers() {
     document.getElementById('customersList').innerHTML = '<div class="empty">Laden mislukt: ' + esc(e.message) + '</div>';
   }
 }
+// BUG FIX 2: 'accepted' was geen key → rauwe weergave. Nu alias van 'signed'.
 const QUOTATION_BADGE = {
-  sent:     { label: 'Verzonden', cls: 'cat' },
-  signed:   { label: 'Getekend',  cls: 'active' },
-  declined: { label: 'Afgewezen', cls: 'risk' },
-  expired:  { label: 'Verlopen',  cls: 'archived' },
-  draft:    { label: 'Concept',   cls: 'archived' },
+  sent:     { label: 'Verzonden', cls: 'blue' },
+  signed:   { label: 'Bevestigd', cls: 'green' },
+  accepted: { label: 'Bevestigd', cls: 'green' },
+  declined: { label: 'Afgewezen', cls: 'danger' },
+  expired:  { label: 'Verlopen',  cls: 'gray' },
+  failed:   { label: 'Mislukt',   cls: 'danger' },
+  draft:    { label: 'Concept',   cls: 'gray' },
 };
 function quotationBadge(status) {
-  if (!status || status === 'not_pushed') return '—';
-  const b = QUOTATION_BADGE[status] || { label: status, cls: 'cat' };
-  return `<span class="badge ${b.cls}">${esc(b.label)}</span>`;
+  if (!status || status === 'not_pushed') return '<span class="sr-tag gray">—</span>';
+  const b = QUOTATION_BADGE[status] || { label: status, cls: 'gray' };
+  return `<span class="sr-tag ${b.cls}">${esc(b.label)}</span>`;
 }
+// Entiteit-tag met kleur-ramp (Online=blauw / Fysiek=teal / Retentie=pink).
+function entityTag(label) {
+  if (!label) return '<span class="sr-cellsub">—</span>';
+  const l = label.toLowerCase();
+  const cls = l.includes('online') ? 'blue' : l.includes('fysiek') ? 'teal' : l.includes('retentie') ? 'pink' : 'gray';
+  return `<span class="sr-tag ${cls}">${esc(label)}</span>`;
+}
+// #OFF-nummer subtitle: gebruik quote_reference, anders korte deal-id.
+function offNumber(q) { return q.quote_reference || ('#' + String(q.deal_id).slice(0, 8)); }
 
 function fmtDateNL(iso) {
   if (!iso) return '—';
@@ -497,34 +606,34 @@ function fmtDateNL(iso) {
   return `${String(d.getDate()).padStart(2,'0')}-${String(d.getMonth()+1).padStart(2,'0')}-${d.getFullYear()}`;
 }
 function renderCustomers() {
-  const rows = state.customers;
-  if (!rows.length) {
-    document.getElementById('customersList').innerHTML = '<div class="empty">Geen klanten gevonden.</div>';
-    return;
-  }
+  // Entiteit-dropdown vullen (client-side filter).
+  const entSel = document.getElementById('custEntity');
+  if (entSel) { const cur = entSel.value; entSel.innerHTML = '<option value="">Alle entiteiten</option>' + [...new Set(state.customers.map(c => c.entity).filter(Boolean))].sort().map(v => `<option value="${esc(v)}">${esc(v)}</option>`).join(''); entSel.value = cur; }
+  const entF = entSel?.value || '';
+  // Segment-counts (op de geladen set; 'inactief' wordt server-side geladen).
+  const withStatus = state.customers.map(c => ({ ...c, _st: custDerivedStatus(c) }));
+  const segCount = (seg) => seg === 'alle' ? withStatus.length : withStatus.filter(c => c._st === seg).length;
+  document.querySelectorAll('#custSegments .sr-seg').forEach(b => {
+    const seg = b.dataset.seg; const base = { alle: 'Alle', actief: 'Actief', onboarding: 'In onboarding', loopt_af: 'Loopt af', inactief: 'Inactief' }[seg];
+    b.innerHTML = `${base}${seg === 'inactief' ? '' : ` <span class="sr-seg-n">${segCount(seg)}</span>`}`;
+  });
+  let rows = withStatus.filter(c => !entF || c.entity === entF);
+  if (custSeg !== 'alle' && custSeg !== 'inactief') rows = rows.filter(c => c._st === custSeg);
+  if (!rows.length) { document.getElementById('customersList').innerHTML = '<div class="sr-empty">Geen klanten gevonden.</div>'; return; }
   document.getElementById('customersList').innerHTML = `
-    <table>
-      <thead><tr>
-        <th>Naam</th><th>Email</th><th>Telefoon</th><th>Deals</th>
-        <th>Laatste deal</th><th>Einddatum abonnement</th><th></th>
-      </tr></thead>
+    <div class="sr-tablewrap"><table class="sr-table">
+      <thead><tr><th>Klant</th><th>Entiteit</th><th class="center">Offertes</th><th>Status</th><th>Laatste activiteit</th><th>Verkoper</th><th></th></tr></thead>
       <tbody>${rows.map(c => `
         <tr>
-          <td>
-            <a href="/modules/klanten.html?id=${esc(c.id)}" style="color:var(--text);font-weight:600;text-decoration:none">${esc(c.name || '—')}</a>
-            ${c.risk_tag_auto ? ' <span class="badge risk">RISICO</span>' : ''}
-          </td>
-          <td>${esc(c.email || '—')}</td>
-          <td>${esc(c.phone || '—')}</td>
-          <td>${c.deals_count}</td>
-          <td>${fmtDateNL(c.last_deal_at)}</td>
-          <td>${fmtDateNL(c.subscription_end_date)}</td>
-          <td>
-            <a class="action-btn" href="/modules/klanten.html?id=${esc(c.id)}" title="Open detail">👁</a>
-            <a class="action-btn" href="/modules/sales-wizard.html?customer_id=${esc(c.id)}" title="Nieuwe offerte toevoegen">€</a>
-          </td>
+          <td><a class="sr-userline" href="/modules/klanten.html?id=${esc(c.id)}" style="text-decoration:none;color:inherit">${avatarHtml(c.name)}<span><span class="sr-uname">${esc(c.name || '—')}</span>${c.risk_tag_auto ? ' <span class="sr-tag danger">Risico</span>' : ''}<br><span class="sr-cellsub">${esc(c.email || '—')}</span></span></a></td>
+          <td>${entityTag(c.entity)}</td>
+          <td class="center">${c.deals_count || 0}</td>
+          <td>${custStatusTag(c._st)}</td>
+          <td>${relTime(c.last_deal_at)}</td>
+          <td>${esc(c.sales_user || '—')}</td>
+          <td class="sr-actions"><a class="sr-ibtn" href="/modules/klanten.html?id=${esc(c.id)}" title="Open klant-detail"><i class="ti ti-arrow-right"></i></a></td>
         </tr>`).join('')}</tbody>
-    </table>`;
+    </table></div>`;
 }
 
 // ── Wiring ──
@@ -540,14 +649,22 @@ document.getElementById('prodCategory').addEventListener('change', () => renderP
 document.getElementById('prodArchivedToggle').addEventListener('change', () => loadProducts());
 document.getElementById('custSearch').addEventListener('input', () => { clearTimeout(window._cs); window._cs = setTimeout(loadCustomers, 250); });
 document.getElementById('custAllToggle').addEventListener('change', () => loadCustomers());
-document.getElementById('custStatus').addEventListener('change', () => loadCustomers());
+document.getElementById('custEntity').addEventListener('change', () => renderCustomers());
+document.getElementById('custRefresh').addEventListener('click', () => loadCustomers());
+document.querySelectorAll('#custSegments .sr-seg').forEach(seg => seg.addEventListener('click', () => {
+  document.querySelectorAll('#custSegments .sr-seg').forEach(x => x.classList.remove('active'));
+  seg.classList.add('active'); const prev = custSeg; custSeg = seg.dataset.seg;
+  // wisselen van/naar 'inactief' vereist een server-reload (active vs archived set).
+  if (prev === 'inactief' || custSeg === 'inactief') loadCustomers(); else renderCustomers();
+}));
 
 // ── Offertes ──
+let quotStatus = '';
+let quotSort = { key: 'date', dir: 'desc' };
 async function loadQuotations() {
   const params = new URLSearchParams();
   if (document.getElementById('quotMineToggle').checked) params.set('owned_by_me', 'true');
-  const st = document.getElementById('quotStatus').value;
-  if (st) params.set('status', st);
+  if (quotStatus) params.set('status', quotStatus);
   const s = document.getElementById('quotSearch').value.trim();
   if (s) params.set('search', s);
   try {
@@ -555,60 +672,78 @@ async function loadQuotations() {
     if (!res.ok) throw new Error('HTTP ' + res.status);
     const data = await res.json();
     state.quotations = data.quotations || [];
+    populateQuotFilters();
     renderQuotations();
   } catch (e) {
-    document.getElementById('quotationsList').innerHTML = '<div class="empty">Laden mislukt: ' + esc(e.message) + '</div>';
+    document.getElementById('quotationsList').innerHTML = '<div class="sr-empty">Laden mislukt: ' + esc(e.message) + '</div>';
   }
+}
+function populateQuotFilters() {
+  const fill = (id, vals) => { const sel = document.getElementById(id); if (!sel) return; const cur = sel.value; const first = sel.options[0].outerHTML; sel.innerHTML = first + [...new Set(vals.filter(Boolean))].sort().map(v => `<option value="${esc(v)}">${esc(v)}</option>`).join(''); sel.value = cur; };
+  fill('quotEntity', state.quotations.map(q => q.entity));
+  fill('quotSeller', state.quotations.map(q => q.sales_user));
 }
 function renderQuotations() {
-  if (!state.quotations.length) {
-    document.getElementById('quotationsList').innerHTML = '<div class="empty">Geen offertes gevonden.</div>';
-    return;
-  }
+  const entF = document.getElementById('quotEntity')?.value || '';
+  const selF = document.getElementById('quotSeller')?.value || '';
+  let rows = state.quotations.filter(q => (!entF || q.entity === entF) && (!selF || q.sales_user === selF));
+  rows = rows.slice().sort((a, b) => {
+    const dir = quotSort.dir === 'asc' ? 1 : -1;
+    if (quotSort.key === 'amount') return ((a.total_amount_incl || 0) - (b.total_amount_incl || 0)) * dir;
+    return (String(a.created_at || '').localeCompare(String(b.created_at || ''))) * dir;
+  });
+  if (!rows.length) { document.getElementById('quotationsList').innerHTML = '<div class="sr-empty">Geen offertes gevonden.</div>'; return; }
+  const sortCls = (k) => quotSort.key === k ? (quotSort.dir === 'asc' ? 'sortable asc' : 'sortable desc') : 'sortable';
   document.getElementById('quotationsList').innerHTML = `
-    <table>
+    <div class="sr-tablewrap"><table class="sr-table">
       <thead><tr>
-        <th>Klant</th><th>Verkoper</th><th>Aangemaakt</th><th>Type traject</th><th>Bedrag incl. BTW</th><th>Status</th><th></th>
+        <th>Klant</th><th>Traject</th><th>Entiteit</th>
+        <th class="num ${sortCls('amount')}" data-sort="amount">Bedrag incl.</th>
+        <th>Status</th><th class="${sortCls('date')}" data-sort="date">Datum</th><th>Verkoper</th><th></th>
       </tr></thead>
-      <tbody>${state.quotations.map(q => {
+      <tbody>${rows.map(q => {
         const eurIncl = q.total_amount_incl != null ? '€' + Number(q.total_amount_incl).toLocaleString('nl-NL', { minimumFractionDigits: 2 }) : '—';
         return `<tr>
-          <td><a href="/modules/klanten.html?id=${esc(q.customer_id)}" style="color:var(--text);font-weight:600;text-decoration:none">${esc(q.customer_name)}</a></td>
-          <td>${esc(q.sales_user || '—')}</td>
-          <td>${fmtDateNL(q.created_at)}</td>
+          <td><a class="sr-userline" href="/modules/offerte-detail.html?id=${esc(q.deal_id)}" style="text-decoration:none;color:inherit">${avatarHtml(q.customer_name)}<span><span class="sr-uname">${esc(q.customer_name)}</span><br><span class="sr-cellsub">${esc(offNumber(q))}</span></span></a></td>
           <td>${esc(q.traject_label || '—')}</td>
-          <td>${eurIncl}</td>
+          <td>${entityTag(q.entity)}</td>
+          <td class="num">${eurIncl}</td>
           <td>${quotationBadge(q.tl_quotation_status)}</td>
-          <td style="white-space:nowrap">${quotationActions(q)}</td>
+          <td>${fmtDateNL(q.created_at)}</td>
+          <td>${esc(q.sales_user || '—')}</td>
+          <td>${quotationActions(q)}</td>
         </tr>`;
       }).join('')}</tbody>
-    </table>`;
-  document.querySelectorAll('[data-send]').forEach(b => b.addEventListener('click', () => openSendModal(b.dataset.send)));
-  document.querySelectorAll('[data-push]').forEach(b => b.addEventListener('click', () => retryPush(b.dataset.push)));
-  document.querySelectorAll('[data-delete]').forEach(b => b.addEventListener('click', () => deleteQuotation(b.dataset.delete)));
+    </table></div>`;
+  document.querySelectorAll('#quotationsList [data-sort]').forEach(th => th.addEventListener('click', () => {
+    const k = th.dataset.sort;
+    if (quotSort.key === k) quotSort.dir = quotSort.dir === 'asc' ? 'desc' : 'asc'; else { quotSort.key = k; quotSort.dir = 'desc'; }
+    renderQuotations();
+  }));
+  document.querySelectorAll('#quotationsList [data-send]').forEach(b => b.addEventListener('click', () => openSendModal(b.dataset.send)));
+  document.querySelectorAll('#quotationsList [data-push]').forEach(b => b.addEventListener('click', () => retryPush(b.dataset.push)));
+  document.querySelectorAll('#quotationsList [data-delete]').forEach(b => b.addEventListener('click', () => deleteQuotation(b.dataset.delete)));
 }
 function quotationActions(q) {
-  const tlLink = q.tl_quotation_id ? `<a class="action-btn" href="https://focus.teamleader.eu/quotations/${esc(q.tl_quotation_id)}" target="_blank" title="Open in Teamleader">↗ TL</a>` : '';
-  const detail = `<a class="action-btn" href="/modules/offerte-detail.html?id=${esc(q.deal_id)}" title="Offerte-detail">👁</a>`;
-  const editBtn = `<button class="btn btn-sm btn-ghost" onclick="editQuotation('${esc(q.deal_id)}', false)">Bewerken</button>`;
-  const editBtnConfirm = `<button class="btn btn-sm btn-ghost" onclick="editQuotation('${esc(q.deal_id)}', true)">Bewerken</button>`;
-  const cancelBtn = `<button class="btn btn-sm btn-danger" data-delete="${esc(q.deal_id)}">Verwijderen</button>`;
-  if (q.tl_quotation_status === 'accepted' || q.tl_quotation_status === 'signed') {
-    return `${detail} <a class="btn btn-sm btn-success" href="/modules/subscription-wizard.html?deal_id=${esc(q.deal_id)}">Subscription invoeren</a> ${editBtnConfirm} ${tlLink}`;
-  }
-  if (q.tl_quotation_status === 'sent') {
-    return `${detail} <button class="btn btn-sm btn-ghost" data-send="${esc(q.deal_id)}">Opnieuw versturen</button> ${tlLink} ${cancelBtn}`;
-  }
-  if (q.tl_quotation_status === 'failed') {
-    return `${detail} <button class="btn btn-sm btn-ghost" data-push="${esc(q.deal_id)}">Retry push</button> ${editBtn} ${cancelBtn}`;
-  }
-  if (q.tl_quotation_status === 'draft' && q.tl_quotation_id) {
-    return `${detail} <button class="btn btn-sm btn-success" data-send="${esc(q.deal_id)}">Versturen</button> ${editBtn} ${tlLink} ${cancelBtn}`;
-  }
-  if (q.tl_quotation_status === 'draft' && !q.tl_quotation_id) {
-    return `${detail} <button class="btn btn-sm" data-push="${esc(q.deal_id)}">Push naar TL</button> ${editBtn} ${cancelBtn}`;
-  }
-  return `${detail} ${tlLink}` || '—';
+  const st = q.tl_quotation_status;
+  const eye = `<a class="sr-ibtn" href="/modules/offerte-detail.html?id=${esc(q.deal_id)}" title="Offerte-detail"><i class="ti ti-eye"></i></a>`;
+  const tl = q.tl_quotation_id ? `<a class="sr-ibtn" href="https://focus.teamleader.eu/quotations/${esc(q.tl_quotation_id)}" target="_blank" title="Open in Teamleader"><i class="ti ti-external-link"></i></a>` : '';
+  // 3-dots (status-afhankelijk)
+  const items = [];
+  if (st !== 'sent') items.push(`<button class="sr-menu-item" onclick="editQuotation('${esc(q.deal_id)}', ${st === 'accepted' || st === 'signed'})"><i class="ti ti-edit"></i> Bewerken</button>`);
+  if (['draft', 'sent', 'failed'].includes(st)) items.push(`<button class="sr-menu-item danger" data-delete="${esc(q.deal_id)}"><i class="ti ti-trash"></i> Verwijderen</button>`);
+  items.push(`<button class="sr-menu-item" onclick="loadQuotations()"><i class="ti ti-refresh"></i> Status vernieuwen</button>`);
+  if (q.tl_quotation_id) items.push(`<a class="sr-menu-item" href="https://focus.teamleader.eu/quotations/${esc(q.tl_quotation_id)}" target="_blank"><i class="ti ti-external-link"></i> Open in Teamleader</a>`);
+  const dots = `<div class="sr-menu"><button class="sr-ibtn sr-menu-toggle" title="Meer acties"><i class="ti ti-dots"></i></button><div class="sr-menu-pop">${items.join('')}</div></div>`;
+  // primary actie per status
+  let primary = '', showEye = false;
+  if (st === 'accepted' || st === 'signed') primary = `<a class="sr-abtn success" href="/modules/subscription-wizard.html?deal_id=${esc(q.deal_id)}">Omzetten naar abonnement</a>`;
+  else if (st === 'sent') primary = `<button class="sr-abtn primary" data-send="${esc(q.deal_id)}">Opnieuw versturen</button>`;
+  else if (st === 'failed') { primary = `<button class="sr-abtn warning" data-push="${esc(q.deal_id)}">Retry push</button>`; showEye = true; }
+  else if (st === 'draft' && q.tl_quotation_id) { primary = `<button class="sr-abtn primary" data-send="${esc(q.deal_id)}">Versturen</button>`; showEye = true; }
+  else if (st === 'draft') { primary = `<button class="sr-abtn primary" data-push="${esc(q.deal_id)}">Push naar TL</button>`; showEye = true; }
+  else showEye = true; // declined/expired/overig
+  return `<div class="sr-actions">${primary}${showEye ? eye : ''}${tl}${dots}</div>`;
 }
 function editQuotation(dealId, needConfirm) {
   if (needConfirm && !confirm('Weet je zeker dat je de offerte wilt bewerken? Deze is al getekend en zal niet meer geldig zijn.')) return;
@@ -697,117 +832,218 @@ document.getElementById('quotSearch').addEventListener('input', () => { clearTim
 document.getElementById('quotMineToggle').addEventListener('change', () => loadQuotations());
 
 // ── Onboardings ──
-const ONB_STATUS = { not_sent: { l: 'Niet verzonden', c: 'archived' }, sent: { l: 'Verzonden', c: 'cat' }, completed: { l: 'Afgerond', c: 'active' } };
-async function loadOnboardings() {
-  const wrap = document.getElementById('onboardingsList');
-  wrap.innerHTML = '<div class="empty">Laden…</div>';
-  const params = new URLSearchParams();
-  if (document.getElementById('onbMineToggle').checked) params.set('owned_by_me', 'true');
-  try {
-    const res = await window.AgentShared.apiFetch('/api/sales-onboardings?' + params);
-    if (!res.ok) throw new Error('HTTP ' + res.status);
-    const data = await res.json();
-    const items = data.items || [];
-    if (!items.length) { wrap.innerHTML = '<div class="empty">Geen klanten met getekende offerte.</div>'; return; }
-    wrap.innerHTML = `<table><thead><tr>
-      <th>Naam</th><th>Verkoper</th><th>Traject</th><th>Entiteit</th><th>Onboarding</th><th>Eerste call</th><th>Mentor</th><th></th>
-    </tr></thead><tbody>${items.map(it => {
-      const b = ONB_STATUS[it.onboarding_status] || ONB_STATUS.not_sent;
-      return `<tr>
-        <td><a href="/modules/klanten.html?id=${esc(it.customer_id)}" style="color:var(--text);font-weight:600;text-decoration:none">${esc(it.customer_name)}</a></td>
-        <td>${esc(it.sales_user || '—')}</td>
-        <td>${esc(it.traject_label || '—')}</td>
-        <td>${esc(it.entity || '—')}</td>
-        <td><span class="badge ${b.c}">${b.l}</span></td>
-        <td>${it.first_call_at ? fmtDateNL(it.first_call_at) : '<span style="color:var(--text-faint)">wachten</span>'}</td>
-        <td><span class="badge archived">Binnenkort</span></td>
-        <td><button class="btn btn-sm" disabled title="Binnenkort beschikbaar">Mentor toewijzen</button></td>
-      </tr>`;
-    }).join('')}</tbody></table>`;
-  } catch (e) { wrap.innerHTML = '<div class="empty">Laden mislukt: ' + esc(e.message) + '</div>'; }
-}
-document.getElementById('onbMineToggle').addEventListener('change', () => loadOnboardings());
+// (Onboardings is een eigen module geworden: modules/onboarding-overzicht.html.
+//  De tab + loader zijn hier verwijderd; ?tab=onboardings redirect staat in init.)
 
 // ── Retentie ──
+let retSeg = 'alle', retSort = { key: 'end', dir: 'asc' }, retItems = [];
 async function loadRetentie() {
   const wrap = document.getElementById('retentieList');
-  wrap.innerHTML = '<div class="empty">Laden…</div>';
+  wrap.innerHTML = '<div class="sr-empty">Laden…</div>';
   const params = new URLSearchParams();
   if (document.getElementById('retMineToggle').checked) params.set('owned_by_me', 'true');
   try {
     const res = await window.AgentShared.apiFetch('/api/sales-retention?' + params);
     if (!res.ok) throw new Error('HTTP ' + res.status);
     const data = await res.json();
-    const items = data.items || [];
-    if (!items.length) { wrap.innerHTML = '<div class="empty">Geen trajecten die binnen 30 dagen aflopen.</div>'; return; }
-    wrap.innerHTML = `<table><thead><tr>
-      <th>Naam</th><th>Traject</th><th>Einddatum</th><th>Dagen tot einde</th><th>Laatste contact</th><th></th>
-    </tr></thead><tbody>${items.map(it => {
-      const col = it.days_left < 14 ? '#dc2626' : (it.days_left < 30 ? '#f59e0b' : 'var(--text-dim)');
-      return `<tr>
-        <td><a href="/modules/klanten.html?id=${esc(it.customer_id)}" style="color:var(--text);font-weight:600;text-decoration:none">${esc(it.customer_name)}</a></td>
+    retItems = data.items || [];
+    const urgent = retItems.filter(i => i.days_left >= 0 && i.days_left < 14).length;
+    const sub = document.getElementById('retSubtitle');
+    if (sub) sub.textContent = `${retItems.length} traject(en) lopen binnen 30 dagen af · ${urgent} urgent (<14 dgn)`;
+    renderRetentie();
+  } catch (e) { wrap.innerHTML = '<div class="sr-empty">Laden mislukt: ' + esc(e.message) + '</div>'; }
+}
+function retBucket(d) { return d.days_left < 0 ? 'verlopen' : (d.days_left < 14 ? 'urgent' : (d.days_left <= 30 ? 'soon' : 'soon')); }
+function totEindeBadge(d) {
+  if (d.days_left < 0) return `<span class="sr-tag danger"><i class="ti ti-x"></i> Verl. ${Math.abs(d.days_left)}d</span>`;
+  if (d.days_left < 14) return `<span class="sr-tag danger"><i class="ti ti-alert-triangle"></i> ${d.days_left} dagen</span>`;
+  return `<span class="sr-tag warning"><i class="ti ti-clock"></i> ${d.days_left} dagen</span>`;
+}
+function renderRetentie() {
+  const wrap = document.getElementById('retentieList');
+  const q = (document.getElementById('retSearch').value || '').trim().toLowerCase();
+  let rows = retItems.filter(it => (!q || (it.customer_name || '').toLowerCase().includes(q)) && (retSeg === 'alle' || retBucket(it) === retSeg));
+  rows = rows.slice().sort((a, b) => String(a.end_date || '').localeCompare(String(b.end_date || '')) * (retSort.dir === 'asc' ? 1 : -1));
+  if (!rows.length) { wrap.innerHTML = '<div class="sr-empty">Geen trajecten in deze selectie.</div>'; return; }
+  const sc = retSort.dir === 'asc' ? 'sortable asc' : 'sortable desc';
+  wrap.innerHTML = `<div class="sr-tablewrap"><table class="sr-table">
+    <thead><tr><th>Klant</th><th>Bedrijf</th><th>Traject</th><th>Mentor</th>
+      <th class="${sc}" data-sort="end">Einddatum</th><th>Tot einde</th><th>Laatste contact</th><th></th></tr></thead>
+    <tbody>${rows.map(it => {
+      const urgent = it.days_left < 14;
+      const mentor = it.mentor_name ? `<span class="sr-userline">${avatarHtml(it.mentor_name, 'sm')}<span>${esc(it.mentor_name)}</span></span>` : '<span style="color:var(--text-faint);font-style:italic">Niet toegewezen</span>';
+      const menu = [
+        `<a class="sr-menu-item" href="/modules/klanten.html?id=${esc(it.customer_id)}"><i class="ti ti-user"></i> Klant-detail bekijken</a>`,
+        `<button class="sr-menu-item" onclick="toast('Binnenkort beschikbaar')"><i class="ti ti-circle-x"></i> Markeer 'Niet verlengen'</button>`,
+        `<button class="sr-menu-item" onclick="toast('Binnenkort beschikbaar')"><i class="ti ti-bell"></i> Aanmelden voor opvolging</button>`,
+      ];
+      const dots = `<div class="sr-menu"><button class="sr-ibtn sr-menu-toggle" title="Meer acties"><i class="ti ti-dots"></i></button><div class="sr-menu-pop">${menu.join('')}</div></div>`;
+      return `<tr${urgent ? ' style="background:rgba(220,38,38,.05)"' : ''}>
+        <td><a class="sr-userline" href="/modules/klanten.html?id=${esc(it.customer_id)}" style="text-decoration:none;color:inherit">${avatarHtml(it.customer_name)}<span><span class="sr-uname">${esc(it.customer_name)}</span><br><span class="sr-cellsub">${esc(it.customer_email || '—')}</span></span></a></td>
+        <td>${entityTag(it.entity)}</td>
         <td>${esc(it.traject_label || '—')}</td>
+        <td>${mentor}</td>
         <td>${fmtDateNL(it.end_date)}</td>
-        <td><span style="font-weight:700;color:${col}">${it.days_left}d</span></td>
-        <td>—</td>
-        <td><a class="btn btn-sm btn-success" href="/modules/sales-wizard.html?customer_id=${esc(it.customer_id)}">Nieuwe offerte</a></td>
+        <td>${totEindeBadge(it)}</td>
+        <td><span class="sr-cellsub">—</span></td>
+        <td class="sr-actions"><a class="sr-abtn primary" href="/modules/sales-wizard.html?customer_id=${esc(it.customer_id)}"><i class="ti ti-file-plus"></i> Nieuwe offerte</a>${dots}</td>
       </tr>`;
-    }).join('')}</tbody></table>`;
-  } catch (e) { wrap.innerHTML = '<div class="empty">Laden mislukt: ' + esc(e.message) + '</div>'; }
+    }).join('')}</tbody></table></div>`;
+  wrap.querySelectorAll('[data-sort]').forEach(th => th.addEventListener('click', () => { retSort.dir = retSort.dir === 'asc' ? 'desc' : 'asc'; renderRetentie(); }));
 }
 document.getElementById('retMineToggle').addEventListener('change', () => loadRetentie());
+document.getElementById('retSearch').addEventListener('input', () => renderRetentie());
+document.getElementById('retRefresh').addEventListener('click', () => loadRetentie());
+document.querySelectorAll('#retSegments .sr-seg').forEach(seg => seg.addEventListener('click', () => {
+  document.querySelectorAll('#retSegments .sr-seg').forEach(x => x.classList.remove('active'));
+  seg.classList.add('active'); retSeg = seg.dataset.seg; renderRetentie();
+}));
 
 // ── Abonnementen ──
-const SUB_STATUS = { active: { l: 'Actief', c: 'active' }, cancelled: { l: 'Geannuleerd', c: 'archived' }, paused: { l: 'Gepauzeerd', c: 'cat' } };
+const SUB_STATUS = { active: { l: 'Actief', c: 'green' }, cancelled: { l: 'Geannuleerd', c: 'gray' }, paused: { l: 'Gepauzeerd', c: 'warning' } };
+let subSeg = 'all', subSort = { key: 'start', dir: 'desc' }, subItems = [];
 async function loadSubscriptions() {
   const wrap = document.getElementById('subscriptionsList');
-  wrap.innerHTML = '<div class="empty">Laden…</div>';
+  wrap.innerHTML = '<div class="sr-empty">Laden…</div>';
   const params = new URLSearchParams();
   if (document.getElementById('subMineToggle').checked) params.set('owned_by_me', 'true');
-  params.set('status', document.getElementById('subStatus').value || 'all');
+  params.set('status', subSeg || 'all');
   try {
     const res = await window.AgentShared.apiFetch('/api/sales-subscriptions-list?' + params);
     if (!res.ok) throw new Error('HTTP ' + res.status);
     const data = await res.json();
-    const items = data.items || [];
-    if (!items.length) { wrap.innerHTML = '<div class="empty">Geen abonnementen gevonden.</div>'; return; }
-    wrap.innerHTML = `<table><thead><tr>
-      <th>Klant</th><th>Bedrijf</th><th>Type</th><th>Bedrag incl. BTW</th><th>Termijnen</th><th>Startdatum</th><th>Einddatum</th><th>Status</th><th></th>
-    </tr></thead><tbody>${items.map(it => {
-      const st = SUB_STATUS[it.status] || { l: it.status || '—', c: 'archived' };
-      const tl = it.teamleader_subscription_id ? '<span class="badge active" title="Gesynct met Teamleader">✓ TL</span>' : '<span style="color:var(--text-faint)">—</span>';
+    subItems = data.items || [];
+    renderSubscriptions();
+  } catch (e) { wrap.innerHTML = '<div class="sr-empty">Laden mislukt: ' + esc(e.message) + '</div>'; }
+}
+function renderSubscriptions() {
+  const wrap = document.getElementById('subscriptionsList');
+  const q = (document.getElementById('subSearch').value || '').trim().toLowerCase();
+  let rows = subItems.filter(it => !q || (it.customer_name || '').toLowerCase().includes(q) || (it.description || '').toLowerCase().includes(q));
+  rows = rows.slice().sort((a, b) => {
+    const dir = subSort.dir === 'asc' ? 1 : -1;
+    if (subSort.key === 'amount') return ((a.amount_incl || 0) - (b.amount_incl || 0)) * dir;
+    return String(a.start_date || '').localeCompare(String(b.start_date || '')) * dir;
+  });
+  if (!rows.length) { wrap.innerHTML = '<div class="sr-empty">Geen abonnementen gevonden.</div>'; return; }
+  const sc = (k) => subSort.key === k ? (subSort.dir === 'asc' ? 'sortable asc' : 'sortable desc') : 'sortable';
+  wrap.innerHTML = `<div class="sr-tablewrap"><table class="sr-table">
+    <thead><tr><th>Klant</th><th>Bedrijf</th><th>Omschrijving</th>
+      <th class="num ${sc('amount')}" data-sort="amount">Bedrag incl.</th><th class="center">Termijnen</th>
+      <th class="${sc('start')}" data-sort="start">Start</th><th>Eind</th><th>Status</th><th></th></tr></thead>
+    <tbody>${rows.map(it => {
+      const st = SUB_STATUS[it.status] || { l: it.status || '—', c: 'gray' };
+      const cancelled = it.status === 'cancelled';
+      const tlSub = it.teamleader_subscription_id ? `TL gekoppeld` : 'Lokaal — geen TL';
+      const detailHref = `/modules/klanten.html?id=${esc(it.customer_id)}&tab=abonnementen`;
+      const menu = [];
+      menu.push(`<a class="sr-menu-item" href="${detailHref}"><i class="ti ti-clock-pause"></i> Uitstellen</a>`);
+      menu.push(`<a class="sr-menu-item" href="${detailHref}"><i class="ti ti-arrow-bar-to-right"></i> Looptijd verlengen</a>`);
+      menu.push(`<button class="sr-menu-item" onclick="loadSubscriptions()"><i class="ti ti-refresh"></i> Status vernieuwen</button>`);
+      if (it.teamleader_subscription_id) menu.push(`<a class="sr-menu-item" href="https://focus.teamleader.eu/subscriptions/${esc(it.teamleader_subscription_id)}" target="_blank"><i class="ti ti-external-link"></i> Open in Teamleader</a>`);
+      if (!cancelled) menu.push(`<button class="sr-menu-item danger" data-subdel="${esc(it.id)}"><i class="ti ti-trash"></i> Verwijderen</button>`);
+      const dots = `<div class="sr-menu"><button class="sr-ibtn sr-menu-toggle" title="Meer acties"><i class="ti ti-dots"></i></button><div class="sr-menu-pop">${menu.join('')}</div></div>`;
       return `<tr>
-        <td><a href="/modules/klanten.html?id=${esc(it.customer_id)}" style="color:var(--text);font-weight:600;text-decoration:none">${esc(it.customer_name)}</a></td>
-        <td>${esc(it.entity || '—')}</td>
-        <td>${esc(it.description || '—')}</td>
-        <td>${fmtEuro(it.amount_incl)}</td>
-        <td>${it.term_count || '—'}×</td>
+        <td><a class="sr-userline" href="${detailHref}" style="text-decoration:none;color:inherit">${avatarHtml(it.customer_name)}<span><span class="sr-uname">${esc(it.customer_name)}</span><br><span class="sr-cellsub">${esc(it.customer_email || '—')}</span></span></a></td>
+        <td>${entityTag(it.entity)}</td>
+        <td>${esc(it.description || '—')}<br><span class="sr-cellsub">${tlSub}</span></td>
+        <td class="num">${fmtEuro(it.amount_incl)}</td>
+        <td class="center">${it.term_count || '—'}×</td>
         <td>${it.start_date ? fmtDateNL(it.start_date) : '—'}</td>
         <td>${it.end_date ? fmtDateNL(it.end_date) : '—'}</td>
-        <td><span class="badge ${st.c}">${st.l}</span></td>
-        <td style="white-space:nowrap"><a class="btn btn-sm btn-ghost" href="/modules/klanten.html?id=${esc(it.customer_id)}&tab=abonnementen">Detail</a> ${tl}</td>
+        <td><span class="sr-tag ${st.c}">${st.l}</span></td>
+        <td class="sr-actions"><a class="sr-abtn primary" href="${detailHref}">Detail</a>${dots}</td>
       </tr>`;
-    }).join('')}</tbody></table>`;
-  } catch (e) { wrap.innerHTML = '<div class="empty">Laden mislukt: ' + esc(e.message) + '</div>'; }
+    }).join('')}</tbody></table></div>`;
+  wrap.querySelectorAll('[data-sort]').forEach(th => th.addEventListener('click', () => {
+    const k = th.dataset.sort; if (subSort.key === k) subSort.dir = subSort.dir === 'asc' ? 'desc' : 'asc'; else { subSort.key = k; subSort.dir = 'desc'; } renderSubscriptions();
+  }));
+  wrap.querySelectorAll('[data-subdel]').forEach(b => b.addEventListener('click', () => subListDelete(b.dataset.subdel)));
+}
+async function subListDelete(id) {
+  if (!confirm('Weet je zeker dat je dit abonnement wilt verwijderen? Dit wordt ook in Teamleader uitgeschakeld.')) return;
+  try {
+    const res = await window.AgentShared.apiFetch('/api/sales-subscription-delete', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ subscription_id: id }) });
+    const d = await res.json(); if (!res.ok || d.success === false) throw new Error(d.error || 'HTTP ' + res.status);
+    toast('Abonnement verwijderd', 'success'); loadSubscriptions();
+  } catch (e) { toast('Mislukt: ' + e.message, 'error'); }
 }
 document.getElementById('subMineToggle').addEventListener('change', () => loadSubscriptions());
-document.getElementById('subStatus').addEventListener('change', () => loadSubscriptions());
+document.getElementById('subSearch').addEventListener('input', () => renderSubscriptions());
 document.getElementById('subRefresh').addEventListener('click', () => loadSubscriptions());
+document.querySelectorAll('#subSegments .sr-seg').forEach(seg => seg.addEventListener('click', () => {
+  document.querySelectorAll('#subSegments .sr-seg').forEach(x => x.classList.remove('active'));
+  seg.classList.add('active'); subSeg = seg.dataset.status; loadSubscriptions();
+}));
 
-document.getElementById('quotStatus').addEventListener('change', () => loadQuotations());
+// Segment-pills (status) → server-side filter; entity/seller → client-side.
+document.querySelectorAll('#quotSegments .sr-seg').forEach(seg => seg.addEventListener('click', () => {
+  document.querySelectorAll('#quotSegments .sr-seg').forEach(x => x.classList.remove('active'));
+  seg.classList.add('active'); quotStatus = seg.dataset.status; loadQuotations();
+}));
+document.getElementById('quotEntity').addEventListener('change', () => renderQuotations());
+document.getElementById('quotSeller').addEventListener('change', () => renderQuotations());
 document.getElementById('quotRefresh').addEventListener('click', () => loadQuotations());
 
+// Globale 3-dots menu-controller. Positioneert de pop via position:fixed
+// (getBoundingClientRect) zodat overflow:hidden van de tabel niet afsnijdt;
+// klapt omhoog bij weinig ruimte onderaan; sluit op scroll/resize/outside-click.
+function srCloseMenus() { document.querySelectorAll('.sr-menu.open').forEach(m => m.classList.remove('open')); }
+function srPositionMenu(menu, toggle) {
+  const pop = menu.querySelector('.sr-menu-pop'); if (!pop) return;
+  const r = toggle.getBoundingClientRect();
+  pop.style.top = ''; pop.style.left = '';
+  const ph = pop.offsetHeight, pw = pop.offsetWidth;
+  const spaceBelow = window.innerHeight - r.bottom;
+  pop.style.top = (spaceBelow < ph + 12 && r.top > ph + 12 ? r.top - ph - 4 : r.bottom + 4) + 'px';
+  pop.style.left = Math.max(8, Math.min(r.right - pw, window.innerWidth - pw - 8)) + 'px';
+}
+document.addEventListener('click', (e) => {
+  const toggle = e.target.closest('.sr-menu-toggle');
+  document.querySelectorAll('.sr-menu.open').forEach(m => { if (!toggle || m !== toggle.closest('.sr-menu')) m.classList.remove('open'); });
+  if (toggle) {
+    e.preventDefault();
+    const menu = toggle.closest('.sr-menu');
+    const opening = !menu.classList.contains('open');
+    menu.classList.toggle('open');
+    if (opening) srPositionMenu(menu, toggle);
+  }
+});
+window.addEventListener('scroll', srCloseMenus, true);
+window.addEventListener('resize', srCloseMenus);
+
 // ── Trajecten ──
+// ── Aanbod (Trajecten + Producten samengevoegd) ──
+let aanbodSub = 'trajecten';
+let btwIncl = localStorage.getItem('sales_btw_incl') === '1';
+// Prijs in de huidige BTW-modus (incl/excl), gegeven of de opgeslagen prijs al incl is.
+function displayPrice(amount, inclVat, vat) {
+  if (amount == null || amount === '') return null;
+  const a = Number(amount); if (!isFinite(a)) return null;
+  const r = (Number(vat) || 0) / 100;
+  if (btwIncl) return inclVat ? a : a * (1 + r);
+  return inclVat ? a / (1 + r) : a;
+}
+function loadAanbod() {
+  document.querySelectorAll('#tab-aanbod .sr-subtab[data-sub]').forEach(b => b.classList.toggle('active', b.dataset.sub === aanbodSub));
+  document.getElementById('aanbod-trajecten').style.display = aanbodSub === 'trajecten' ? '' : 'none';
+  document.getElementById('aanbod-producten').style.display = aanbodSub === 'producten' ? '' : 'none';
+  if (aanbodSub === 'producten') loadProducts(); else loadTrajecten();
+}
+document.querySelectorAll('#tab-aanbod .sr-subtab[data-sub]').forEach(b => b.addEventListener('click', () => { aanbodSub = b.dataset.sub; loadAanbod(); }));
+(() => { const t = document.getElementById('btwToggle'); if (!t) return; t.checked = btwIncl; t.addEventListener('change', () => { btwIncl = t.checked; localStorage.setItem('sales_btw_incl', btwIncl ? '1' : '0'); if (aanbodSub === 'producten') renderProducts(); else renderTrajecten(); }); })();
+
 async function loadTrajecten() {
   const wrap = document.getElementById('trajectenList');
-  wrap.innerHTML = '<div class="empty">Laden…</div>';
+  wrap.innerHTML = '<div class="sr-empty">Laden…</div>';
   try {
     const res = await window.AgentShared.apiFetch('/api/trajecten');
     if (!res.ok) throw new Error('HTTP ' + res.status);
     const data = await res.json();
     state.trajects = data.trajects || [];
+    const tc = document.getElementById('aanbodTrajCount'); if (tc) tc.textContent = state.trajects.length;
     renderTrajecten();
-  } catch (e) { wrap.innerHTML = '<div class="empty">Laden mislukt: ' + esc(e.message) + '</div>'; }
+  } catch (e) { wrap.innerHTML = '<div class="sr-empty">Laden mislukt: ' + esc(e.message) + '</div>'; }
 }
 function renderTrajecten() {
   if (!state.trajects.length) { document.getElementById('trajectenList').innerHTML = '<div class="empty">Nog geen trajecten. Maak er een aan.</div>'; return; }
@@ -935,9 +1171,13 @@ const repLocalDate = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padSt
 function initReportsTab() {
   if (!_repInit) {
     _repInit = true;
-    document.querySelectorAll('#tab-reports [data-range]').forEach(b => b.addEventListener('click', () => repSetRange(b.dataset.range)));
+    document.querySelectorAll('#tab-reports [data-range]').forEach(b => b.addEventListener('click', () => {
+      document.querySelectorAll('#repSegments .sr-seg').forEach(x => x.classList.remove('active'));
+      b.classList.add('active'); repSetRange(b.dataset.range);
+    }));
     document.getElementById('repApply').addEventListener('click', loadReports);
     document.getElementById('repExport').addEventListener('click', repExport);
+    document.getElementById('repRefresh').addEventListener('click', loadReports);
     if (!document.getElementById('repFrom').value) repSetRange('month');
     else loadReports();
   } else {
@@ -970,10 +1210,10 @@ async function loadReports() {
     renderReports(_repData);
   } catch (e) { body.innerHTML = '<div class="empty">Laden mislukt: ' + esc(e.message) + '</div>'; }
 }
-function repCard(label, value) {
-  return `<div style="background:var(--bg-elev);border:1px solid var(--border);border-radius:12px;padding:14px 16px">
-    <div style="font-size:10.5px;text-transform:uppercase;letter-spacing:.5px;color:var(--text-faint)">${label}</div>
-    <div style="font-size:22px;font-weight:800;margin-top:4px">${value}</div></div>`;
+function repCard(label, value, icon, iconColorClass, sub) {
+  return `<div class="sr-stat ${iconColorClass || ''}">
+    <div class="sr-stat-l">${icon ? `<i class="ti ${icon}"></i>` : ''}${label}</div>
+    <div class="sr-stat-v">${value}</div>${sub ? `<div class="sr-stat-d">${sub}</div>` : ''}</div>`;
 }
 function renderReports(d) {
   Object.values(_repCharts).forEach(c => { try { c.destroy(); } catch {} }); _repCharts = {};
@@ -981,11 +1221,11 @@ function renderReports(d) {
   const chartsOk = typeof Chart !== 'undefined';
   const body = document.getElementById('repBody');
   body.innerHTML = `
-    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin-bottom:16px">
-      ${repCard('Pipeline (open)', fmtEuro(k.pipeline_value))}
-      ${repCard('Omzet periode', fmtEuro(k.revenue_period))}
-      ${repCard('Bonus pending', fmtEuro(k.bonus_pending))}
-      ${repCard('Retentie', repPct(k.retention_rate))}
+    <div class="sr-grid sr-grid-4" style="margin-bottom:16px">
+      ${repCard('Pipeline (open)', fmtEuro(k.pipeline_value), 'ti-target', 'sr-i-blue')}
+      ${repCard('Omzet periode', fmtEuro(k.revenue_period), 'ti-cash', 'sr-i-green')}
+      ${repCard('Bonus pending', fmtEuro(k.bonus_pending), 'ti-coin', 'sr-i-amber')}
+      ${repCard('Retentie', repPct(k.retention_rate), 'ti-refresh', 'sr-i-pink')}
     </div>
     ${chartsOk ? `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:14px;margin-bottom:18px">
       <div class="card"><div style="font-size:12px;font-weight:700;margin-bottom:6px">Conversie funnel</div><div style="position:relative;height:280px"><canvas id="repFunnel"></canvas></div></div>
@@ -995,7 +1235,7 @@ function renderReports(d) {
     </div>` : '<div class="empty">Grafieken konden niet laden (CDN geblokkeerd). Cijfers + export werken wel.</div>'}
     <h3 style="font-size:14px;margin:6px 0 8px">Per sales-medewerker</h3>
     <div class="table-wrap-x" style="overflow-x:auto"><table><thead><tr><th>Medewerker</th><th>Offertes</th><th>Conversie</th><th>Omzet</th><th>Bonus pending</th><th>Bonus paid</th></tr></thead><tbody>
-      ${(d.by_sales_user || []).length ? (d.by_sales_user || []).map(u => `<tr><td>${esc(u.user_name)}</td><td>${u.quotations_count}</td><td>${repPct(u.conversion_rate)}</td><td>${fmtEuro(u.revenue)}</td><td>${fmtEuro(u.bonus_pending)}</td><td>${fmtEuro(u.bonus_paid)}</td></tr>`).join('') : '<tr><td colspan="6" class="empty">Geen data in deze periode.</td></tr>'}
+      ${(d.by_sales_user || []).length ? (d.by_sales_user || []).map(u => `<tr><td><span class="sr-userline">${avatarHtml(u.user_name)}<span class="sr-uname">${esc(u.user_name)}</span></span></td><td>${u.quotations_count}</td><td>${repPct(u.conversion_rate)}</td><td class="num">${fmtEuro(u.revenue)}</td><td class="num" style="color:#b45309">${fmtEuro(u.bonus_pending)}</td><td class="num" style="color:#059669">${fmtEuro(u.bonus_paid)}</td></tr>`).join('') : '<tr><td colspan="6" class="sr-empty">Geen data in deze periode.</td></tr>'}
     </tbody></table></div>
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:14px;margin-top:16px">
       <div><h3 style="font-size:14px;margin:0 0 8px">Retentie</h3><table><tbody>
@@ -1056,6 +1296,84 @@ function repExport() {
   XLSX.writeFile(wb, `sales-rapport-${d.period?.from || ''}_${d.period?.to || ''}.xlsx`);
 }
 
+// ════════════════════════════════════════════════════════════════════════
+// Dashboard-tab (absorbeert sales-dashboard.html)
+// ════════════════════════════════════════════════════════════════════════
+function dashCountdown(iso) {
+  const target = new Date(iso), now = new Date();
+  const diffMin = Math.round((target - now) / 60000);
+  if (diffMin < 5) return 'nu';
+  if (diffMin < 60) return `over ${diffMin} min`;
+  const diffHr = Math.floor(diffMin / 60);
+  if (target.toDateString() === now.toDateString()) return `over ${diffHr}u`;
+  const tom = new Date(now); tom.setDate(tom.getDate() + 1);
+  const hhmm = target.toLocaleTimeString('nl-NL', { hour: '2-digit', minute: '2-digit' });
+  if (target.toDateString() === tom.toDateString()) return `morgen ${hhmm}`;
+  const daysDiff = Math.floor((target - new Date(now.getFullYear(), now.getMonth(), now.getDate())) / 86400000);
+  if (daysDiff < 7) return `${target.toLocaleDateString('nl-NL', { weekday: 'long' })} ${hhmm}`;
+  return `${target.toLocaleDateString('nl-NL', { day: '2-digit', month: 'short' })} ${hhmm}`;
+}
+function dashSet(id, v) { const el = document.getElementById(id); if (el) el.textContent = (v ?? 0); }
+async function loadDashboard() {
+  // 1. stats
+  try {
+    const res = await window.AgentShared.apiFetch('/api/sales-dashboard-stats');
+    if (res.ok) {
+      const d = await res.json();
+      dashSet('dashTodayLeads', d.today?.leads); dashSet('dashTodayEvents', d.today?.events); dashSet('dashTodayAppts', d.today?.appointments);
+      dashSet('dashWeekLeads', d.week?.leads); dashSet('dashWeekEvents', d.week?.events); dashSet('dashWeekAppts', d.week?.appointments);
+      dashSet('dashTomorrowAppts', d.appointments_tomorrow_count); dashSet('dashOpenFollowups', d.open_follow_ups);
+      const banner = document.getElementById('dashNextBanner'); const n = d.next_appointment;
+      if (n) {
+        const hhmm = new Date(n.scheduled_at).toLocaleTimeString('nl-NL', { hour: '2-digit', minute: '2-digit' });
+        banner.innerHTML = `<div class="dash-hero">
+          <div class="dash-hero-lbl"><i class="ti ti-clock"></i> Volgende afspraak</div>
+          <div class="dash-hero-name">${esc(n.lead_name || '—')}</div>
+          <div class="sr-cellsub" style="margin:2px 0 8px">Intake-gesprek</div>
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;font-size:12.5px"><span><i class="ti ti-calendar"></i> ${esc(hhmm)}</span><span class="sr-tag blue"><i class="ti ti-alarm"></i> ${esc(dashCountdown(n.scheduled_at))}</span></div>
+          <div style="display:flex;gap:6px"><button class="sr-abtn" style="background:#fff;color:var(--accent-cyan);border-color:transparent" onclick="toast('Start call — binnenkort')"><i class="ti ti-phone-call"></i> Start call</button>${n.customer_id ? `<a class="sr-ibtn" href="/modules/klanten.html?id=${esc(n.customer_id)}" title="Klant openen"><i class="ti ti-user"></i></a>` : ''}</div>
+        </div>`;
+      } else { banner.innerHTML = `<div class="dash-hero"><div class="dash-hero-lbl"><i class="ti ti-clock"></i> Volgende afspraak</div><div class="sr-next-empty" style="margin-top:6px">Geen geplande afspraken.</div></div>`; }
+      // Activiteit-feed (afgeleid uit de stats — geen aparte events-endpoint).
+      const feed = document.getElementById('dashFeed');
+      if (feed) {
+        const items = [
+          { c: '#059669', t: `${d.today?.leads ?? 0} nieuwe leads`, w: 'vandaag' },
+          { c: '#0891b2', t: `${d.today?.appointments ?? 0} afspraken`, w: 'vandaag' },
+          { c: '#f59e0b', t: `${d.open_follow_ups ?? 0} open follow-ups`, w: 'nu' },
+          { c: '#0891b2', t: `${d.week?.events ?? 0} event-aanmeldingen`, w: 'deze week' },
+        ];
+        feed.innerHTML = items.map(i => `<div class="feed-item"><span class="feed-dot" style="background:${i.c}"></span><span>${esc(i.t)}</span><span class="feed-time">${i.w}</span></div>`).join('');
+      }
+    }
+  } catch {}
+  // 2. metrics
+  try {
+    const res = await window.AgentShared.apiFetch('/api/sales-dashboard-metrics');
+    if (res.ok) { const d = await res.json();
+      dashSet('dashMyQuotes', d.my_open_quotations); dashSet('dashOnboarding', d.onboarding_count); dashSet('dashRetention', d.retention_count);
+      const b = document.getElementById('dashMyBonus'); if (b) b.textContent = '€' + Number(d.my_bonus_month || 0).toLocaleString('nl-NL', { minimumFractionDigits: 2 });
+    }
+  } catch {}
+  // 3. wachten op subscription
+  const wrap = document.getElementById('dashPending'), cnt = document.getElementById('dashPendingCount');
+  try {
+    const res = await window.AgentShared.apiFetch('/api/sales-pending-subscriptions');
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const d = await res.json();
+    if (cnt) cnt.textContent = d.count ? `(${d.count})` : '';
+    const items = (d.items || []).slice(0, 5);
+    if (!items.length) { wrap.innerHTML = '<div class="sr-empty">Geen openstaande subscriptions.</div>'; return; }
+    wrap.innerHTML = items.map(it => `<div class="sr-userline" style="justify-content:space-between;padding:8px 0;border-bottom:.5px solid var(--border)">
+      <span class="sr-userline">${avatarHtml(it.customer_name)}<span>${esc(it.customer_name || '—')}</span></span>
+      <a class="sr-abtn success" href="/modules/subscription-wizard.html?deal_id=${encodeURIComponent(it.deal_id)}">Omzetten naar abonnement</a></div>`).join('');
+  } catch (e) { wrap.innerHTML = '<div class="sr-empty">Laden mislukt.</div>'; }
+}
+// Avatar-helper (kleur op naam-hash) — gedeeld door alle tabs in latere fases.
+function avatarHash(name) { let h = 0; const s = String(name || ''); for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0; return h % 6; }
+function avatarInitials(name) { const p = String(name || '').trim().split(/\s+/).filter(Boolean); return ((p[0]?.[0] || '') + (p[1]?.[0] || '')).toUpperCase() || '?'; }
+function avatarHtml(name, size) { return `<span class="sr-avatar sr-av-${avatarHash(name)}${size ? ' ' + size : ''}">${esc(avatarInitials(name))}</span>`; }
+
 (async () => {
   await window._authSharedReady;
   const profile = await window.AuthShared?.requireAuth();
@@ -1068,13 +1386,18 @@ function repExport() {
   if (can('sales.reports.view')) { const rb = document.getElementById('tab-btn-reports'); if (rb) rb.style.display = ''; }
   // ?tab=klanten|quotations|trajecten|products → direct juiste tab openen.
   const wantTab = new URLSearchParams(location.search).get('tab');
-  const tabMap = { klanten: 'customers', customers: 'customers', offertes: 'quotations', quotations: 'quotations', onboardings: 'onboardings', abonnementen: 'subscriptions', subscriptions: 'subscriptions', retentie: 'retentie', trajecten: 'trajecten', producten: 'products', products: 'products', rapporten: 'reports', reports: 'reports' };
+  // Onboardings is een eigen module → oude ?tab=onboardings redirect.
+  if (wantTab === 'onboardings') { location.replace('/modules/onboarding-overzicht.html'); return; }
+  // ?sub= voor Aanbod (trajecten|producten); oude ?tab=trajecten/producten → aanbod.
+  const wantSub = new URLSearchParams(location.search).get('sub');
+  if (wantTab === 'producten' || wantTab === 'products' || wantSub === 'producten') aanbodSub = 'producten';
+  const tabMap = { dashboard: 'dashboard', klanten: 'customers', customers: 'customers', offertes: 'quotations', quotations: 'quotations', onboardings: 'onboardings', abonnementen: 'subscriptions', subscriptions: 'subscriptions', retentie: 'retentie', aanbod: 'aanbod', trajecten: 'aanbod', producten: 'aanbod', products: 'aanbod', rapporten: 'reports', reports: 'reports' };
   const target = tabMap[wantTab];
-  if (target && target !== 'customers') {
+  if (target && target !== 'dashboard') {
     const btn = document.querySelector(`.tab[data-tab="${target}"]`);
     if (btn) { btn.click(); return; }
   }
-  loadCustomers();
+  loadDashboard();
 })();
 </script>
 <script src="/modules/shared/permissions.js"></script>

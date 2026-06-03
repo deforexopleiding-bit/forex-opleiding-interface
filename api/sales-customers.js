@@ -31,7 +31,7 @@ export default async function handler(req, res) {
     }
 
     let q = supabaseAdmin.from('customers')
-      .select('id, first_name, last_name, email, phone, created_at, archived_at, risk_tag_auto, subscription_end_date')
+      .select('id, first_name, last_name, email, phone, created_at, archived_at, risk_tag_auto, subscription_end_date, onboarding_status')
       .order('updated_at', { ascending: false }).limit(200);
     if (customerIds) q = q.in('id', customerIds);
     if (status === 'archived') q = q.not('archived_at', 'is', null);
@@ -47,7 +47,7 @@ export default async function handler(req, res) {
     let dealsByCustomer = {};
     if (ids.length) {
       const { data: deals } = await supabaseAdmin
-        .from('deals').select('customer_id, status, total_amount, created_at, tl_quotation_status')
+        .from('deals').select('customer_id, status, total_amount, created_at, tl_quotation_status, tl_department_id, sales_user_id')
         .in('customer_id', ids)
         .order('created_at', { ascending: false });
       for (const d of deals || []) {
@@ -55,8 +55,17 @@ export default async function handler(req, res) {
       }
     }
 
+    // Entiteit- + verkoper-namen voor de laatste deal per klant.
+    const allDeals = Object.values(dealsByCustomer).flat();
+    const deptIds = [...new Set(allDeals.map(d => d.tl_department_id).filter(Boolean))];
+    const userIds = [...new Set(allDeals.map(d => d.sales_user_id).filter(Boolean))];
+    const entByTl = {}, userById = {};
+    if (deptIds.length) { const { data } = await supabaseAdmin.from('company_entities').select('tl_department_id, label').in('tl_department_id', deptIds); for (const e of data || []) entByTl[e.tl_department_id] = e.label; }
+    if (userIds.length) { const { data } = await supabaseAdmin.from('profiles').select('id, full_name').in('id', userIds); for (const u of data || []) userById[u.id] = u.full_name; }
+
     const enriched = (customers || []).map(c => {
       const deals = dealsByCustomer[c.id] || [];
+      const latest = deals[0] || {};
       return {
         ...c,
         name:              `${c.first_name || ''} ${c.last_name || ''}`.trim(),
@@ -64,6 +73,8 @@ export default async function handler(req, res) {
         last_deal_at:      deals[0]?.created_at || null,
         last_deal_status:  deals[0]?.status || null,
         quotation_status:  deals[0]?.tl_quotation_status || null,
+        entity:            latest.tl_department_id ? (entByTl[latest.tl_department_id] || null) : null,
+        sales_user:        latest.sales_user_id ? (userById[latest.sales_user_id] || null) : null,
       };
     });
 

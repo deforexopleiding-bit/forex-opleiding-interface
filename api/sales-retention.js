@@ -18,7 +18,7 @@ export default async function handler(req, res) {
 
   try {
     let q = supabaseAdmin.from('deals')
-      .select('id, customer_id, sales_user_id, traject_variant_id, created_at')
+      .select('id, customer_id, sales_user_id, traject_variant_id, tl_department_id, created_at')
       .is('archived_at', null).order('created_at', { ascending: false }).limit(500);
     if (req.query?.owned_by_me === 'true') q = q.eq('sales_user_id', user.id);
     const { data: deals } = await q;
@@ -57,14 +57,29 @@ export default async function handler(req, res) {
       const endMs = new Date(endDate).getTime();
       if (endMs > horizon) continue; // > 30 dagen weg
       rows.push({ deal_id: d.id, customer_id: d.customer_id, traject_variant_id: d.traject_variant_id,
+        tl_department_id: d.tl_department_id || null,
         traject_label: variant?.label || null, end_date: endDate,
         days_left: Math.ceil((endMs - now) / 86400000) });
     }
 
     const custIds = [...new Set(rows.map(r => r.customer_id).filter(Boolean))];
     const custById = {};
-    if (custIds.length) { const { data } = await supabaseAdmin.from('customers').select('id, first_name, last_name').in('id', custIds); for (const c of data || []) custById[c.id] = c; }
-    for (const r of rows) { const c = custById[r.customer_id] || {}; r.customer_name = `${c.first_name || ''} ${c.last_name || ''}`.trim() || '—'; }
+    if (custIds.length) { const { data } = await supabaseAdmin.from('customers').select('id, first_name, last_name, email, mentor_user_id').in('id', custIds); for (const c of data || []) custById[c.id] = c; }
+    // Entiteit-labels.
+    const deptIds = [...new Set(rows.map(r => r.tl_department_id).filter(Boolean))];
+    const entByTl = {};
+    if (deptIds.length) { const { data } = await supabaseAdmin.from('company_entities').select('tl_department_id, label').in('tl_department_id', deptIds); for (const e of data || []) entByTl[e.tl_department_id] = e.label; }
+    // Mentor-namen (customers.mentor_user_id → profiles.full_name).
+    const mentorIds = [...new Set(Object.values(custById).map(c => c.mentor_user_id).filter(Boolean))];
+    const mentorById = {};
+    if (mentorIds.length) { const { data } = await supabaseAdmin.from('profiles').select('id, full_name').in('id', mentorIds); for (const p of data || []) mentorById[p.id] = p.full_name; }
+    for (const r of rows) {
+      const c = custById[r.customer_id] || {};
+      r.customer_name = `${c.first_name || ''} ${c.last_name || ''}`.trim() || '—';
+      r.customer_email = c.email || null;
+      r.entity = r.tl_department_id ? (entByTl[r.tl_department_id] || null) : null;
+      r.mentor_name = c.mentor_user_id ? (mentorById[c.mentor_user_id] || null) : null;
+    }
     rows.sort((a, b) => a.days_left - b.days_left);
 
     return res.status(200).json({ items: rows });
