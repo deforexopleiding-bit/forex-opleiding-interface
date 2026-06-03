@@ -40,6 +40,46 @@ function lineVat(li, taxMap) {
   if (li.tax && typeof li.tax.rate === 'number') return Math.round(li.tax.rate * 100);
   return 21;
 }
+// Bedrag EXCL BTW per regel (qty meegerekend), defensief over read/create-shapes.
+function lineExclTotal(li, vat) {
+  const up = li.unit_price;
+  let unit = null;
+  if (up && typeof up === 'object') unit = Number(up.amount);
+  else if (up != null && up !== '') unit = Number(up);
+  if (!Number.isFinite(unit)) unit = Number(li.total?.tax_exclusive?.amount ?? li.total?.tax_exclusive ?? li.total?.amount ?? li.amount);
+  if (!Number.isFinite(unit)) unit = 0;
+  const rate = (Number(vat) || 0) / 100;
+  // unit_price.tax === 'including' → bedrag is incl → naar excl.
+  if (up && typeof up === 'object' && up.tax === 'including' && rate > 0) unit = unit / (1 + rate);
+  const qty = Number(li.quantity) || 1;
+  return Math.round(unit * qty * 100) / 100;
+}
+// billing_cycle → maanden per termijn.
+function cycleMonths(bc) {
+  const p = bc?.periodicity; if (!p) return null;
+  const period = Number(p.period) || 1;
+  if (p.unit === 'month') return period;
+  if (p.unit === 'year') return period * 12;
+  if (p.unit === 'week') return period / 4.345;
+  return period;
+}
+function billingLabel(bc) {
+  const m = cycleMonths(bc); if (m == null) return null;
+  const near = (x) => Math.abs(m - x) < 0.35;
+  if (near(1)) return 'per_month'; if (near(2)) return 'per_2_months'; if (near(3)) return 'per_quarter';
+  if (near(6)) return 'per_6_months'; if (near(12)) return 'per_year';
+  return `per_${Math.round(m)}_months`;
+}
+// term_count uit duur (starts→ends) / cyclus. Open-ended (geen ends) → null.
+function computeTermCount(starts, ends, bc) {
+  if (!ends) return null;
+  if (!starts || starts === ends) return 1;
+  const d1 = new Date(starts), d2 = new Date(ends);
+  const durMonths = (d2.getFullYear() - d1.getFullYear()) * 12 + (d2.getMonth() - d1.getMonth()) + (d2.getDate() - d1.getDate()) / 30;
+  const cm = cycleMonths(bc) || 1;
+  if (durMonths <= 0) return 1;
+  return Math.max(1, Math.ceil(durMonths / cm));
+}
 
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
@@ -122,9 +162,15 @@ export default async function handler(req, res) {
         // d/e. Line items uit grouped_lines + ghost-deal + subscription.
         const liRows = [];
         for (const g of (sub.grouped_lines || [])) for (const li of (g.line_items || [])) {
-          liRows.push({ product_id: (li.product?.id && prodByTl[li.product.id]) || null, description: li.description || 'Regel', amount: Number(li.unit_price?.amount) || 0, vat_percentage: lineVat(li, taxMap) });
+          const vat = lineVat(li, taxMap);
+          liRows.push({ product_id: (li.product?.id && prodByTl[li.product.id]) || null, description: li.description || 'Regel', amount: lineExclTotal(li, vat), vat_percentage: vat });
         }
-        const totalExcl = liRows.reduce((s, l) => s + l.amount, 0);
+        const totalExcl = Math.round(liRows.reduce((s, l) => s + l.amount, 0) * 100) / 100;
+        const termCount = computeTermCount(sub.starts_on, sub.ends_on, sub.billing_cycle);
+        const billing = billingLabel(sub.billing_cycle);
+        // Debug-info per sub (helpt verificatie zonder DB-schrijf bij dry-run).
+        detail.debug = { total_excl: totalExcl, vats: liRows.map(l => l.vat_percentage), term_count: termCount, billing_cycle: billing, starts_on: sub.starts_on, ends_on: sub.ends_on };
+        console.log('[tl-import] sub', sub.id, JSON.stringify(detail.debug));
         if (!dry_run) {
           const { data: gd, error: gdErr } = await supabaseAdmin.from('deals').insert({
             customer_id: customerId, sales_user_id: admin.user.id, source: 'tl_import',
@@ -135,8 +181,8 @@ export default async function handler(req, res) {
           const { error: subErr } = await supabaseAdmin.from('subscriptions').insert({
             deal_id: gd.id, teamleader_subscription_id: sub.id, description: sub.title || 'Geïmporteerd uit TL',
             status: 'active', start_date: sub.starts_on || null, end_date: sub.ends_on || null,
-            term_count: 1, amount: Math.round(totalExcl * 100) / 100, vat_percentage: liRows[0]?.vat_percentage ?? 21,
-            line_items: liRows, tl_department_id: sub.department_id || department_id || null,
+            term_count: termCount, amount: totalExcl, vat_percentage: liRows[0]?.vat_percentage ?? 21,
+            billing_cycle: billing, line_items: liRows, tl_department_id: sub.department_id || department_id || null,
             imported_from_tl_at: new Date().toISOString(),
           });
           if (subErr) throw new Error('subscription insert: ' + subErr.message);
