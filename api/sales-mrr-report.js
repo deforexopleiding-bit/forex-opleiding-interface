@@ -81,6 +81,19 @@ export default async function handler(req, res) {
       return { period: m.key, mrr: r2(mrr), count, new_mrr: r2(added), churned_mrr: r2(churned) };
     });
 
+    // Inkomende omzet: som van de maand-MRR over ELKE kalendermaand in [periode].
+    // (Onafhankelijk van de 12+12 trend-window — werkt ook voor custom/historische ranges.)
+    let inflow = 0;
+    const pe = new Date(periodEnd + 'T00:00:00');
+    const lastM = new Date(pe.getFullYear(), pe.getMonth(), 1);
+    for (let cur = new Date(Number(periodStart.slice(0, 4)), Number(periodStart.slice(5, 7)) - 1, 1); cur <= lastM; cur = new Date(cur.getFullYear(), cur.getMonth() + 1, 1)) {
+      const mStart = `${cur.getFullYear()}-${String(cur.getMonth() + 1).padStart(2, '0')}-01`;
+      const nx = new Date(cur.getFullYear(), cur.getMonth() + 1, 1);
+      const mNext = `${nx.getFullYear()}-${String(nx.getMonth() + 1).padStart(2, '0')}-01`;
+      for (const s of list) { if (!s.start_date) continue; if (s.start_date < mNext && (!s.end_date || s.end_date >= mStart)) inflow += mrrOf(s); }
+    }
+    const totalInflow = r2(inflow);
+
     // Joins (deal → traject/customer; entiteit-labels).
     const dealIds = [...new Set(active.map(s => s.deal_id).filter(Boolean))];
     const dealById = {};
@@ -123,7 +136,7 @@ export default async function handler(req, res) {
     return res.status(200).json({
       entity_id: entityId,
       period: { start: periodStart, end: periodEnd },
-      kpis: { current_mrr: r2(currentMrr), active_count: activeInPeriod.length, avg_mrr: r2(avgMrr), cancellation_rate: r2(cancellationRate) },
+      kpis: { current_mrr: r2(currentMrr), active_count: activeInPeriod.length, avg_mrr: r2(avgMrr), cancellation_rate: r2(cancellationRate), total_inflow: totalInflow },
       trend, by_traject, top_subs: drilldown.slice(0, 10), drilldown,
     });
   } catch (e) {

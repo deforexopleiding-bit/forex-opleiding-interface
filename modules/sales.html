@@ -1226,7 +1226,7 @@ async function loadMrr() {
         ${mrrCard}
         ${repCard("Actieve abo's", k.active_count, 'ti-repeat', 'sr-i-blue')}
         ${repCard('Gem. MRR/abo', fmtEuro(k.avg_mrr), 'ti-chart-line', 'sr-i-blue')}
-        ${repCard('Cancellation rate', repPct(k.cancellation_rate), 'ti-trending-down', 'sr-i-pink')}
+        <div class="sr-stat sr-i-green" title="Totale recurring omzet binnen de geselecteerde periode (som van de maand-MRR over alle maanden in de periode)"><div class="sr-stat-l"><i class="ti ti-cash"></i>Inkomende omzet</div><div class="sr-stat-v">${fmtEuro(k.total_inflow)}</div><div class="sr-stat-d">recurring in periode</div></div>
       </div>
       ${chartsOk ? `<div class="sr-grid sr-grid-2" style="margin-bottom:14px">
         <div class="card"><div style="font-size:12px;font-weight:700;margin-bottom:6px">MRR per maand <span class="sr-cellsub">(stippellijn = projectie)</span></div><div style="position:relative;height:260px"><canvas id="mrrTrend"></canvas></div></div>
