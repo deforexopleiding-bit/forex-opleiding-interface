@@ -1180,41 +1180,83 @@ const PALETTE = ['#0891b2', '#059669', '#f59e0b', '#dc2626', '#7c3aed', '#0ea5e9
 let _repCharts = {};
 let _repData = null;
 let _repInit = false;
-let _mrrLoaded = false, _mrrCharts = {};
+let _mrrLoaded = false, _mrrCharts = {}, _mrrEntity = localStorage.getItem('mrr_entity') || '', _mrrEntities = null, _mrrData = null;
 async function loadMrr() {
   const wrap = document.getElementById('repMrrView');
   wrap.innerHTML = '<div class="sr-empty">Laden…</div>';
   try {
-    const res = await window.AgentShared.apiFetch('/api/sales-mrr-report');
+    if (!_mrrEntities) { try { const er = await window.AgentShared.apiFetch('/api/company-entities'); _mrrEntities = (await er.json()).entities || []; } catch { _mrrEntities = []; } }
+    const res = await window.AgentShared.apiFetch('/api/sales-mrr-report' + (_mrrEntity ? '?entity_id=' + encodeURIComponent(_mrrEntity) : ''));
     if (!res.ok) throw new Error('HTTP ' + res.status);
-    const d = await res.json();
-    _mrrLoaded = true;
+    const d = await res.json(); _mrrData = d; _mrrLoaded = true;
     Object.values(_mrrCharts).forEach(c => { try { c.destroy(); } catch {} }); _mrrCharts = {};
     const k = d.kpis || {};
     const chartsOk = typeof Chart !== 'undefined';
+    const entOpts = '<option value="">Alle entiteiten</option>' + _mrrEntities.map(e => `<option value="${esc(e.tl_department_id)}"${_mrrEntity === e.tl_department_id ? ' selected' : ''}>${esc(e.label)}</option>`).join('');
+    const mrrCard = `<div class="sr-stat sr-i-green" id="mrrKpiCard" style="cursor:pointer" title="Maandelijks Recurring Revenue = som van (bedrag/termijn ÷ billing-cycle in maanden) voor alle actieve subs"><div class="sr-stat-l"><i class="ti ti-credit-card"></i>Huidige MRR <i class="ti ti-info-circle" style="font-size:13px;opacity:.6"></i></div><div class="sr-stat-v">${fmtEuro(k.current_mrr)}</div><div class="sr-stat-d">klik voor drilldown</div></div>`;
     wrap.innerHTML = `
+      <div class="sr-filterstrip"><label class="cfg" style="font-size:11.5px;color:var(--text-dim)">Entiteit</label><select class="sr-select" id="mrrEntity">${entOpts}</select></div>
       <div class="sr-grid sr-grid-4" style="margin-bottom:16px">
-        ${repCard('Huidige MRR', fmtEuro(k.current_mrr), 'ti-credit-card', 'sr-i-green')}
+        ${mrrCard}
         ${repCard("Actieve abo's", k.active_count, 'ti-repeat', 'sr-i-blue')}
         ${repCard('Gem. MRR/abo', fmtEuro(k.avg_mrr), 'ti-chart-line', 'sr-i-blue')}
         ${repCard('Cancellation rate', repPct(k.cancellation_rate), 'ti-trending-down', 'sr-i-pink')}
       </div>
-      ${chartsOk ? `<div class="sr-grid" style="grid-template-columns:2fr 1fr;gap:14px;margin-bottom:16px">
-        <div class="card"><div style="font-size:12px;font-weight:700;margin-bottom:6px">MRR-trend (12 mnd terug + 12 vooruit)</div><div style="position:relative;height:280px"><canvas id="mrrTrend"></canvas></div></div>
-        <div class="card"><div style="font-size:12px;font-weight:700;margin-bottom:6px">MRR per traject</div><div style="position:relative;height:280px"><canvas id="mrrTraj"></canvas></div></div>
+      ${chartsOk ? `<div class="sr-grid sr-grid-2" style="margin-bottom:14px">
+        <div class="card"><div style="font-size:12px;font-weight:700;margin-bottom:6px">MRR per maand <span class="sr-cellsub">(stippellijn = projectie)</span></div><div style="position:relative;height:260px"><canvas id="mrrTrend"></canvas></div></div>
+        <div class="card"><div style="font-size:12px;font-weight:700;margin-bottom:6px">Aantal actieve abonnementen</div><div style="position:relative;height:260px"><canvas id="mrrCount"></canvas></div></div>
       </div>
-      <div class="card" style="margin-bottom:16px"><div style="font-size:12px;font-weight:700;margin-bottom:6px">New vs Churned MRR per maand</div><div style="position:relative;height:240px"><canvas id="mrrFlow"></canvas></div></div>` : '<div class="sr-empty">Grafieken niet geladen (CDN).</div>'}
+      <div class="sr-grid sr-grid-2" style="margin-bottom:16px">
+        <div class="card"><div style="font-size:12px;font-weight:700;margin-bottom:6px">New vs Churned MRR per maand</div><div style="position:relative;height:240px"><canvas id="mrrFlow"></canvas></div></div>
+        <div class="card"><div style="font-size:12px;font-weight:700;margin-bottom:6px">MRR per traject</div><div style="position:relative;height:240px"><canvas id="mrrTraj"></canvas></div></div>
+      </div>` : '<div class="sr-empty">Grafieken niet geladen (CDN).</div>'}
       <h3 style="font-size:14px;margin:6px 0 8px">Top 10 grootste actieve abonnementen</h3>
-      <div class="sr-tablewrap"><table class="sr-table"><thead><tr><th>Klant</th><th>Omschrijving</th><th class="num">MRR (incl.)</th></tr></thead>
-      <tbody>${(d.top_subs || []).length ? (d.top_subs || []).map(s => `<tr><td><a href="/modules/klanten.html?id=${esc(s.customer_id)}" style="color:inherit;text-decoration:none">${esc(s.customer_name)}</a></td><td>${esc(s.description)}</td><td class="num">${fmtEuro(s.mrr)}</td></tr>`).join('') : '<tr><td colspan="3" class="sr-empty">Geen actieve abonnementen.</td></tr>'}</tbody></table></div>`;
+      <div class="sr-tablewrap"><table class="sr-table"><thead><tr><th>Klant</th><th>Omschrijving</th><th>Cyclus</th><th class="num">MRR (incl.)</th></tr></thead>
+      <tbody>${(d.top_subs || []).length ? (d.top_subs || []).map(s => `<tr><td><a href="/modules/klanten.html?id=${esc(s.customer_id)}" style="color:inherit;text-decoration:none">${esc(s.customer_name)}</a></td><td>${esc(s.description)}</td><td><span class="sr-cellsub">${esc(s.billing_cycle)}</span></td><td class="num">${fmtEuro(s.mrr)}</td></tr>`).join('') : '<tr><td colspan="4" class="sr-empty">Geen actieve abonnementen.</td></tr>'}</tbody></table></div>`;
+    document.getElementById('mrrEntity').addEventListener('change', (e) => { _mrrEntity = e.target.value; localStorage.setItem('mrr_entity', _mrrEntity); loadMrr(); });
+    document.getElementById('mrrKpiCard').addEventListener('click', openMrrDrilldown);
     if (chartsOk) {
       const tr = d.trend || [];
-      _mrrCharts.trend = new Chart(document.getElementById('mrrTrend'), { type: 'line', data: { labels: tr.map(t => t.period), datasets: [{ label: 'MRR', data: tr.map(t => t.mrr), borderColor: PALETTE[1], backgroundColor: 'rgba(5,150,105,.15)', fill: true, tension: .25 }, { label: 'Actieve subs', data: tr.map(t => t.count), borderColor: PALETTE[0], yAxisID: 'y1', tension: .25 }] }, options: { responsive: true, maintainAspectRatio: false, scales: { y1: { position: 'right', grid: { drawOnChartArea: false } } } } });
+      const todayKey = new Date().toISOString().slice(0, 7);
+      const ti = tr.findIndex(t => t.period === todayKey);
+      const dashSeg = { borderDash: ctx => (ti >= 0 && ctx.p0DataIndex >= ti) ? [5, 4] : undefined };
+      const ptR = tr.map(t => t.period === todayKey ? 4 : 0);
+      _mrrCharts.trend = new Chart(document.getElementById('mrrTrend'), { type: 'line', data: { labels: tr.map(t => t.period), datasets: [{ label: 'MRR', data: tr.map(t => t.mrr), borderColor: PALETTE[1], backgroundColor: 'rgba(5,150,105,.12)', fill: true, tension: .25, pointRadius: ptR, pointBackgroundColor: PALETTE[3], segment: dashSeg }] }, options: { plugins: { legend: { display: false } }, responsive: true, maintainAspectRatio: false } });
+      _mrrCharts.count = new Chart(document.getElementById('mrrCount'), { type: 'line', data: { labels: tr.map(t => t.period), datasets: [{ label: 'Actieve subs', data: tr.map(t => t.count), borderColor: PALETTE[0], backgroundColor: 'rgba(8,145,178,.12)', fill: true, tension: .25, pointRadius: ptR, pointBackgroundColor: PALETTE[3], segment: dashSeg }] }, options: { plugins: { legend: { display: false } }, responsive: true, maintainAspectRatio: false, scales: { y: { ticks: { precision: 0 } } } } });
       const tj = (d.by_traject || []).slice(0, 8);
       _mrrCharts.traj = new Chart(document.getElementById('mrrTraj'), { type: 'doughnut', data: { labels: tj.map(t => t.traject), datasets: [{ data: tj.map(t => t.mrr), backgroundColor: PALETTE }] }, options: { responsive: true, maintainAspectRatio: false } });
       _mrrCharts.flow = new Chart(document.getElementById('mrrFlow'), { type: 'bar', data: { labels: tr.map(t => t.period), datasets: [{ label: 'New MRR', data: tr.map(t => t.new_mrr), backgroundColor: PALETTE[1] }, { label: 'Churned MRR', data: tr.map(t => -t.churned_mrr), backgroundColor: PALETTE[3] }] }, options: { responsive: true, maintainAspectRatio: false, scales: { x: { stacked: true }, y: { stacked: true } } } });
     }
   } catch (e) { wrap.innerHTML = '<div class="sr-empty">Laden mislukt: ' + esc(e.message) + '</div>'; }
+}
+let _mrrDrillEntity = '';
+function openMrrDrilldown() {
+  if (!_mrrData) return;
+  const ex = document.getElementById('mrr-drill-ov'); if (ex) ex.remove();
+  _mrrDrillEntity = '';
+  const ov = document.createElement('div');
+  ov.id = 'mrr-drill-ov';
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;z-index:9999;padding:24px';
+  ov.innerHTML = `<div class="sr-card" style="max-width:860px;width:100%;max-height:88vh;overflow:auto">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px"><h3 style="font-size:15px;margin:0">MRR Drilldown</h3><button class="sr-ibtn" id="mrrDrillClose"><i class="ti ti-x"></i></button></div>
+    <div class="sr-segments" id="mrrDrillPills" style="margin-bottom:10px"></div>
+    <div id="mrrDrillTable"></div>
+  </div>`;
+  document.body.appendChild(ov);
+  ov.addEventListener('click', e => { if (e.target === ov) ov.remove(); });
+  document.getElementById('mrrDrillClose').addEventListener('click', () => ov.remove());
+  const ents = [...new Set((_mrrData.drilldown || []).map(s => s.entity).filter(Boolean))];
+  document.getElementById('mrrDrillPills').innerHTML = `<button class="sr-seg active" data-e="">Alle</button>` + ents.map(e => `<button class="sr-seg" data-e="${esc(e)}">${esc(e)}</button>`).join('');
+  const renderDrill = () => {
+    const rows = (_mrrData.drilldown || []).filter(s => !_mrrDrillEntity || s.entity === _mrrDrillEntity);
+    const total = rows.reduce((a, s) => a + (Number(s.mrr) || 0), 0);
+    document.getElementById('mrrDrillTable').innerHTML = `<div class="sr-tablewrap"><table class="sr-table">
+      <thead><tr><th>Klant</th><th>Omschrijving</th><th class="num">Bedrag/termijn</th><th>Billing cycle</th><th class="num">MRR-bijdrage</th></tr></thead>
+      <tbody>${rows.map(s => `<tr><td><a href="/modules/klanten.html?id=${esc(s.customer_id)}" style="color:inherit;text-decoration:none">${esc(s.customer_name)}</a></td><td>${esc(s.description)}</td><td class="num">${fmtEuro(s.per_term_incl)}</td><td><span class="sr-tag gray">${esc(s.billing_cycle)}</span></td><td class="num">${fmtEuro(s.mrr)}</td></tr>`).join('') || '<tr><td colspan="5" class="sr-empty">Geen subs.</td></tr>'}
+      <tr style="background:var(--bg-elev-2);font-weight:700"><td colspan="4">Totaal MRR (${rows.length} subs)</td><td class="num">${fmtEuro(total)}</td></tr></tbody></table></div>`;
+  };
+  document.querySelectorAll('#mrrDrillPills .sr-seg').forEach(b => b.addEventListener('click', () => { _mrrDrillEntity = b.dataset.e; document.querySelectorAll('#mrrDrillPills .sr-seg').forEach(x => x.classList.remove('active')); b.classList.add('active'); renderDrill(); }));
+  renderDrill();
 }
 const repPct = (v) => (Math.round((Number(v) || 0) * 100)) + '%';
 const repLocalDate = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;

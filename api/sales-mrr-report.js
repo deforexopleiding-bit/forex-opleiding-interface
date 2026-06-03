@@ -1,20 +1,30 @@
 // api/sales-mrr-report.js
-// GET → MRR-overzicht (maandelijkse abonnementen-omzet). Permission: sales.reports.view.
+// GET ?entity_id=<tl_department_id> → MRR-overzicht. Permission: sales.reports.view.
 // Pure DB-aggregatie over subscriptions (geen TL-calls).
 //
-// MRR per sub = incl-BTW bedrag per termijn (line_items mix-safe, anders amount).
-// Trend: 12 maanden terug t/m 12 vooruit — een sub telt mee in maand M als
-// start_date <= eind-M EN (end_date null OF end_date >= begin-M).
+// MRR-bijdrage per actieve sub = (incl-BTW bedrag per termijn) / (billing_cycle in maanden).
+//   per_month/1, per_2_months/2, per_quarter/3, per_6_months/6, per_year/12 (default 1).
+// (BUGFIX: eerder werd het volledige termijnbedrag als MRR geteld — per_year/per_quarter
+//  subs telden veel te zwaar → enorm opgeblazen totaal.)
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
 
+const CYCLE_M = { per_month: 1, per_2_months: 2, per_quarter: 3, per_6_months: 6, per_year: 12 };
+function cycleMonths(label) {
+  if (!label) return 1; // wizard-subs zonder label = maandelijks per termijn
+  if (CYCLE_M[label] != null) return CYCLE_M[label];
+  const m = String(label).match(/per_(\d+)_months/);
+  return m ? Number(m[1]) : 1;
+}
 function inclPerTerm(s) {
   const lis = Array.isArray(s.line_items) ? s.line_items : [];
   if (lis.length) return lis.reduce((a, li) => a + (Number(li.amount) || 0) * (1 + (Number(li.vat_percentage) || 0) / 100), 0);
   return (Number(s.amount) || 0) * (1 + (Number(s.vat_percentage) || 0) / 100);
 }
+function mrrOf(s) { return inclPerTerm(s) / cycleMonths(s.billing_cycle); }
 function ymKey(d) { return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`; }
+const r2 = (v) => Math.round((Number(v) || 0) * 100) / 100;
 
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
@@ -28,19 +38,22 @@ export default async function handler(req, res) {
     return res.status(403).json({ error: 'Geen rechten (sales.reports.view)' });
   }
 
+  const entityId = req.query?.entity_id || null;
+
   try {
-    const { data: subs } = await supabaseAdmin.from('subscriptions')
-      .select('id, deal_id, status, amount, vat_percentage, term_count, start_date, end_date, line_items, description').limit(5000);
+    let sq = supabaseAdmin.from('subscriptions')
+      .select('id, deal_id, status, amount, vat_percentage, term_count, start_date, end_date, line_items, description, billing_cycle, tl_department_id').limit(5000);
+    if (entityId) sq = sq.eq('tl_department_id', entityId);
+    const { data: subs } = await sq;
     const list = subs || [];
     const active = list.filter(s => s.status === 'active');
     const cancelled = list.filter(s => s.status === 'cancelled');
 
-    // KPI's.
-    const currentMrr = active.reduce((a, s) => a + inclPerTerm(s), 0);
+    const currentMrr = active.reduce((a, s) => a + mrrOf(s), 0);
     const avgMrr = active.length ? currentMrr / active.length : 0;
     const cancellationRate = (active.length + cancelled.length) ? cancelled.length / (active.length + cancelled.length) : 0;
 
-    // Maand-reeks: -12 .. +12.
+    // Maand-reeks -12..+12 (MRR-bijdrage gedeeld door cyclus).
     const now = new Date();
     const months = [];
     for (let i = -12; i <= 12; i++) {
@@ -52,15 +65,15 @@ export default async function handler(req, res) {
       let mrr = 0, count = 0, added = 0, churned = 0;
       for (const s of list) {
         if (!s.start_date) continue;
-        const activeInMonth = s.start_date < m.nextStart && (!s.end_date || s.end_date >= m.start);
-        if (activeInMonth) { mrr += inclPerTerm(s); count++; }
-        if (s.start_date >= m.start && s.start_date < m.nextStart) added += inclPerTerm(s);
-        if (s.end_date && s.end_date >= m.start && s.end_date < m.nextStart) churned += inclPerTerm(s);
+        const contrib = mrrOf(s);
+        if (s.start_date < m.nextStart && (!s.end_date || s.end_date >= m.start)) { mrr += contrib; count++; }
+        if (s.start_date >= m.start && s.start_date < m.nextStart) added += contrib;
+        if (s.end_date && s.end_date >= m.start && s.end_date < m.nextStart) churned += contrib;
       }
-      return { period: m.key, mrr: Math.round(mrr * 100) / 100, count, new_mrr: Math.round(added * 100) / 100, churned_mrr: Math.round(churned * 100) / 100 };
+      return { period: m.key, mrr: r2(mrr), count, new_mrr: r2(added), churned_mrr: r2(churned) };
     });
 
-    // Per traject (actieve subs → deal.traject_variant_id → variant/traject label).
+    // Joins (deal → traject/customer; entiteit-labels).
     const dealIds = [...new Set(active.map(s => s.deal_id).filter(Boolean))];
     const dealById = {};
     if (dealIds.length) { const { data } = await supabaseAdmin.from('deals').select('id, customer_id, traject_variant_id').in('id', dealIds); for (const d of data || []) dealById[d.id] = d; }
@@ -72,32 +85,37 @@ export default async function handler(req, res) {
       const tName = {}; if (tIds.length) { const { data: ts } = await supabaseAdmin.from('trajects').select('id, name').in('id', tIds); for (const t of ts || []) tName[t.id] = t.name; }
       for (const v of vs || []) variantLabel[v.id] = [tName[v.traject_id], v.name].filter(Boolean).join(' > ');
     }
+    const deptIds = [...new Set(active.map(s => s.tl_department_id).filter(Boolean))];
+    const entLabel = {};
+    if (deptIds.length) { const { data } = await supabaseAdmin.from('company_entities').select('tl_department_id, label').in('tl_department_id', deptIds); for (const e of data || []) entLabel[e.tl_department_id] = e.label; }
+    const custIds = [...new Set(Object.values(dealById).map(d => d.customer_id).filter(Boolean))];
+    const custName = {};
+    if (custIds.length) { const { data } = await supabaseAdmin.from('customers').select('id, first_name, last_name').in('id', custIds); for (const c of data || []) custName[c.id] = `${c.first_name || ''} ${c.last_name || ''}`.trim(); }
+
+    // Per traject.
     const trajAgg = {};
     for (const s of active) {
       const deal = dealById[s.deal_id] || {};
       const label = deal.traject_variant_id ? (variantLabel[deal.traject_variant_id] || 'Onbekend traject') : 'Geen traject';
       (trajAgg[label] ||= { traject: label, mrr: 0, count: 0 });
-      trajAgg[label].mrr += inclPerTerm(s); trajAgg[label].count++;
+      trajAgg[label].mrr += mrrOf(s); trajAgg[label].count++;
     }
-    const by_traject = Object.values(trajAgg).map(t => ({ ...t, mrr: Math.round(t.mrr * 100) / 100 })).sort((a, b) => b.mrr - a.mrr);
+    const by_traject = Object.values(trajAgg).map(t => ({ ...t, mrr: r2(t.mrr) })).sort((a, b) => b.mrr - a.mrr);
 
-    // Top 10 grootste actieve subs (+ klantnaam).
-    const custIds = [...new Set(active.map(s => (dealById[s.deal_id] || {}).customer_id).filter(Boolean))];
-    const custName = {};
-    if (custIds.length) { const { data } = await supabaseAdmin.from('customers').select('id, first_name, last_name').in('id', custIds); for (const c of data || []) custName[c.id] = `${c.first_name || ''} ${c.last_name || ''}`.trim(); }
-    const top_subs = active.map(s => {
+    // Drilldown: ALLE actieve subs met bijdrage (voor modal + top-10).
+    const drilldown = active.map(s => {
       const deal = dealById[s.deal_id] || {};
-      return { id: s.id, customer_id: deal.customer_id || null, customer_name: custName[deal.customer_id] || '—', description: s.description || '—', mrr: Math.round(inclPerTerm(s) * 100) / 100 };
-    }).sort((a, b) => b.mrr - a.mrr).slice(0, 10);
+      return {
+        id: s.id, customer_id: deal.customer_id || null, customer_name: custName[deal.customer_id] || '—',
+        description: s.description || '—', per_term_incl: r2(inclPerTerm(s)), billing_cycle: s.billing_cycle || 'per_month',
+        entity: s.tl_department_id ? (entLabel[s.tl_department_id] || null) : null, mrr: r2(mrrOf(s)),
+      };
+    }).sort((a, b) => b.mrr - a.mrr);
 
     return res.status(200).json({
-      kpis: {
-        current_mrr: Math.round(currentMrr * 100) / 100,
-        active_count: active.length,
-        avg_mrr: Math.round(avgMrr * 100) / 100,
-        cancellation_rate: Math.round(cancellationRate * 100) / 100,
-      },
-      trend, by_traject, top_subs,
+      entity_id: entityId,
+      kpis: { current_mrr: r2(currentMrr), active_count: active.length, avg_mrr: r2(avgMrr), cancellation_rate: r2(cancellationRate) },
+      trend, by_traject, top_subs: drilldown.slice(0, 10), drilldown,
     });
   } catch (e) {
     console.error('[sales-mrr-report]', e.message);
