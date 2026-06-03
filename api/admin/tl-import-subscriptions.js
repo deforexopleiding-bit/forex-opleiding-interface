@@ -90,8 +90,10 @@ export default async function handler(req, res) {
   if (!admin) return res.status(403).json({ error: 'Admin only' });
   if (admin.profile.role !== 'super_admin') return res.status(403).json({ error: 'Alleen super_admin mag importeren' });
 
-  const { dry_run = true, department_id = null, limit = 100, skip_existing = true } = req.body || {};
-  const maxSubs = Math.min(Number(limit) || 100, 500);
+  // 3 TL-calls/sub (list-batch + subscriptions.info + contacts.info) à 200ms throttle
+  // → ~60s bij ~80 subs. Default 80 (Vercel 60s-limit); idempotent → draai meerdere runs.
+  const { dry_run = true, department_id = null, limit = 80, skip_existing = true } = req.body || {};
+  const maxSubs = Math.min(Number(limit) || 80, 500);
 
   const tok = await getActiveToken();
   if (!tok) return res.status(400).json({ error: 'Geen actief Teamleader-token' });
@@ -159,30 +161,38 @@ export default async function handler(req, res) {
           totals.customers_imported++; detail.customer_action = 'created';
         } else { totals.errors++; detail.action = 'error'; detail.error = 'contacts.info faalde'; details.push(detail); continue; }
 
-        // d/e. Line items uit grouped_lines + ghost-deal + subscription.
+        // d/e. Line items zitten ALLEEN in subscriptions.info (list geeft lege
+        // grouped_lines — standaard TL-pattern). Haal de volledige sub op.
+        let full = sub;
+        try { const ir = await tlCall('/subscriptions.info', { id: sub.id }); if (ir.ok) { const idata = await ir.json(); if (idata.data) full = idata.data; } else console.warn('[tl-import] subscriptions.info', ir.status, sub.id); }
+        catch (e) { console.warn('[tl-import] subscriptions.info exception', sub.id, e.message); }
         const liRows = [];
-        for (const g of (sub.grouped_lines || [])) for (const li of (g.line_items || [])) {
+        for (const g of (full.grouped_lines || [])) for (const li of (g.line_items || [])) {
           const vat = lineVat(li, taxMap);
           liRows.push({ product_id: (li.product?.id && prodByTl[li.product.id]) || null, description: li.description || 'Regel', amount: lineExclTotal(li, vat), vat_percentage: vat });
         }
         const totalExcl = Math.round(liRows.reduce((s, l) => s + l.amount, 0) * 100) / 100;
-        const termCount = computeTermCount(sub.starts_on, sub.ends_on, sub.billing_cycle);
-        const billing = billingLabel(sub.billing_cycle);
+        const termCount = computeTermCount(full.starts_on || sub.starts_on, full.ends_on || sub.ends_on, full.billing_cycle || sub.billing_cycle);
+        const billing = billingLabel(full.billing_cycle || sub.billing_cycle);
         // Debug-info per sub (helpt verificatie zonder DB-schrijf bij dry-run).
-        detail.debug = { total_excl: totalExcl, vats: liRows.map(l => l.vat_percentage), term_count: termCount, billing_cycle: billing, starts_on: sub.starts_on, ends_on: sub.ends_on };
-        console.log('[tl-import] sub', sub.id, JSON.stringify(detail.debug));
+        detail.debug = { total_excl: totalExcl, vats: liRows.map(l => l.vat_percentage), term_count: termCount, billing_cycle: billing, starts_on: full.starts_on || sub.starts_on, ends_on: full.ends_on || sub.ends_on };
+        // Eénmalig de ruwe grouped_lines-structuur loggen (verificatie veldnamen).
+        if (!globalThis.__tlImportLoggedShape) { globalThis.__tlImportLoggedShape = true; detail.debug.raw_grouped_lines = full.grouped_lines; console.log('[tl-import] sample grouped_lines', JSON.stringify(full.grouped_lines)); }
+        console.log('[tl-import] sub', sub.id, JSON.stringify({ ...detail.debug, raw_grouped_lines: undefined }));
         if (!dry_run) {
+          const dept = full.department_id || sub.department_id || department_id || null;
+          const starts = full.starts_on || sub.starts_on;
           const { data: gd, error: gdErr } = await supabaseAdmin.from('deals').insert({
             customer_id: customerId, sales_user_id: admin.user.id, source: 'tl_import',
-            tl_quotation_status: 'no_quotation', tl_department_id: sub.department_id || department_id || null,
-            status: 'active', start_date: sub.starts_on || new Date().toISOString().slice(0, 10), total_amount: Math.round(totalExcl * 100) / 100,
+            tl_quotation_status: 'no_quotation', tl_department_id: dept,
+            status: 'active', start_date: starts || new Date().toISOString().slice(0, 10), total_amount: totalExcl,
           }).select('id').single();
           if (gdErr) throw new Error('ghost-deal insert: ' + gdErr.message);
           const { error: subErr } = await supabaseAdmin.from('subscriptions').insert({
-            deal_id: gd.id, teamleader_subscription_id: sub.id, description: sub.title || 'Geïmporteerd uit TL',
-            status: 'active', start_date: sub.starts_on || null, end_date: sub.ends_on || null,
+            deal_id: gd.id, teamleader_subscription_id: sub.id, description: full.title || sub.title || 'Geïmporteerd uit TL',
+            status: 'active', start_date: starts || null, end_date: full.ends_on || sub.ends_on || null,
             term_count: termCount, amount: totalExcl, vat_percentage: liRows[0]?.vat_percentage ?? 21,
-            billing_cycle: billing, line_items: liRows, tl_department_id: sub.department_id || department_id || null,
+            billing_cycle: billing, line_items: liRows, tl_department_id: dept,
             imported_from_tl_at: new Date().toISOString(),
           });
           if (subErr) throw new Error('subscription insert: ' + subErr.message);
