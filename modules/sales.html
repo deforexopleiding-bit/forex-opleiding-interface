@@ -191,10 +191,10 @@
       <button class="sr-iconbtn" id="subRefresh" title="Vernieuwen"><i class="ti ti-refresh"></i></button>
     </div>
     <div class="sr-segments" id="subSegments">
-      <button class="sr-seg active" data-status="all">Alle</button>
-      <button class="sr-seg" data-status="active">Actief</button>
+      <button class="sr-seg active" data-status="active">Actief</button>
       <button class="sr-seg" data-status="paused">Gepauzeerd</button>
       <button class="sr-seg" data-status="cancelled">Geannuleerd</button>
+      <button class="sr-seg" data-status="all">Alle</button>
     </div>
     <div id="subscriptionsList"><div class="sr-empty">Laden…</div></div>
   </section>
@@ -908,7 +908,7 @@ document.querySelectorAll('#retSegments .sr-seg').forEach(seg => seg.addEventLis
 
 // ── Abonnementen ──
 const SUB_STATUS = { active: { l: 'Actief', c: 'green' }, cancelled: { l: 'Geannuleerd', c: 'gray' }, paused: { l: 'Gepauzeerd', c: 'warning' } };
-let subSeg = 'all', subSort = { key: 'start', dir: 'desc' }, subItems = [];
+let subSeg = 'active', subSort = { key: 'start', dir: 'desc' }, subItems = [];
 async function loadSubscriptions() {
   const wrap = document.getElementById('subscriptionsList');
   wrap.innerHTML = '<div class="sr-empty">Laden…</div>';

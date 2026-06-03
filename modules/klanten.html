@@ -1082,7 +1082,7 @@ function bindKoOffSegs() {
 
 const KO_SUB_COLOR = { active: '#059669', paused: '#f59e0b', cancelled: '#94a3b8' };
 const KO_SUB_BADGE = { active: 'green', paused: 'warning', cancelled: 'gray' };
-let koSubs = [], koAboPending = null, koAboSeg = 'alle';
+let koSubs = [], koAboPending = null, koAboSeg = 'active';
 function koSubInclPerTerm(s) { const lis = Array.isArray(s.line_items) ? s.line_items : []; return lis.length ? lis.reduce((a, li) => a + (Number(li.amount) || 0) * (1 + (Number(li.vat_percentage) || 0) / 100), 0) : (Number(s.amount) || 0) * (1 + (Number(s.vat_percentage) || 0) / 100); }
 async function renderAbonnementenTab() {
   const wrap = $('#abonnementen-list');
@@ -1115,7 +1115,7 @@ function renderKoAbos() {
     <div class="kpi-cell"><div class="kpi-lbl">Loopt t/m</div><div class="kpi-val">${loptTm ? fmtDate(loptTm) : '—'}</div></div>
   </div>`;
   const segCount = (k) => k === 'alle' ? subs.length : subs.filter(s => (s.status || 'active') === k).length;
-  const SEGS = [['alle', 'Alle'], ['active', 'Actief'], ['paused', 'Gepauzeerd'], ['cancelled', 'Geannuleerd']];
+  const SEGS = [['active', 'Actief'], ['paused', 'Gepauzeerd'], ['cancelled', 'Geannuleerd'], ['alle', 'Alle']];
   const bulkBtn = active.length > 1 ? `<button class="sr-abtn warning" id="postpone-all-btn">Stel alle abo's uit (${active.length})</button>` : '';
   const newBtn = koAboPending ? `<a class="sr-abtn primary" href="/modules/subscription-wizard.html?deal_id=${encodeURIComponent(koAboPending)}"><i class="ti ti-plus"></i> Nieuw abonnement</a>` : '';
   const pills = `<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:12px">
