@@ -96,7 +96,6 @@
     <button class="tab active" data-tab="dashboard" role="tab">Dashboard</button>
     <button class="tab" data-tab="customers" role="tab">Klanten</button>
     <button class="tab" data-tab="quotations" role="tab">Offertes</button>
-    <button class="tab" data-tab="onboardings" role="tab">Onboardings</button>
     <button class="tab" data-tab="subscriptions" role="tab">Abonnementen</button>
     <button class="tab" data-tab="retentie" role="tab">Retentie</button>
     <button class="tab" data-tab="aanbod" role="tab">Aanbod</button>
@@ -126,7 +125,7 @@
     <div class="sr-grid sr-grid-4" style="margin-bottom:18px">
       <a class="sr-stat sr-i-blue" href="/modules/sales.html?tab=offertes"><div class="sr-stat-l"><i class="ti ti-file-text"></i>Mijn open offertes</div><div class="sr-stat-v" id="dashMyQuotes">–</div><div class="sr-stat-d" id="dashMyQuotesD"></div></a>
       <div class="sr-stat sr-i-amber"><div class="sr-stat-l"><i class="ti ti-coin"></i>Mijn bonus deze maand</div><div class="sr-stat-v" id="dashMyBonus">–</div><div class="sr-stat-d">pending</div></div>
-      <a class="sr-stat sr-i-purple" href="/modules/sales.html?tab=onboardings"><div class="sr-stat-l"><i class="ti ti-rocket"></i>Klanten in onboarding</div><div class="sr-stat-v" id="dashOnboarding">–</div></a>
+      <a class="sr-stat sr-i-purple" href="/modules/onboarding-overzicht.html"><div class="sr-stat-l"><i class="ti ti-rocket"></i>Klanten in onboarding</div><div class="sr-stat-v" id="dashOnboarding">–</div></a>
       <a class="sr-stat sr-i-pink" href="/modules/sales.html?tab=retentie"><div class="sr-stat-l"><i class="ti ti-refresh"></i>Retentie deze maand</div><div class="sr-stat-v" id="dashRetention">–</div></a>
     </div>
     <div class="sr-card">
@@ -171,14 +170,6 @@
       <button class="sr-seg" data-status="expired">Verlopen</button>
     </div>
     <div id="quotationsList"><div class="sr-empty">Laden…</div></div>
-  </section>
-
-  <!-- ── Tab: Onboardings ── -->
-  <section class="tab-content" id="tab-onboardings">
-    <div class="toolbar">
-      <label class="filter-toggle"><input type="checkbox" id="onbMineToggle"> Alleen mijn klanten</label>
-    </div>
-    <div id="onboardingsList"><div class="empty">Laden…</div></div>
   </section>
 
   <!-- ── Tab: Abonnementen ── -->
@@ -404,7 +395,6 @@ document.querySelectorAll('.tab').forEach(t => {
     if (state.tab === 'dashboard') loadDashboard();
     else if (state.tab === 'aanbod') loadAanbod();
     else if (state.tab === 'quotations') { loadQuotations(); startQuotationsPolling(); }
-    else if (state.tab === 'onboardings') loadOnboardings();
     else if (state.tab === 'subscriptions') loadSubscriptions();
     else if (state.tab === 'retentie') loadRetentie();
     else if (state.tab === 'reports') initReportsTab();
@@ -833,36 +823,8 @@ document.getElementById('quotSearch').addEventListener('input', () => { clearTim
 document.getElementById('quotMineToggle').addEventListener('change', () => loadQuotations());
 
 // ── Onboardings ──
-const ONB_STATUS = { not_sent: { l: 'Niet verzonden', c: 'archived' }, sent: { l: 'Verzonden', c: 'cat' }, completed: { l: 'Afgerond', c: 'active' } };
-async function loadOnboardings() {
-  const wrap = document.getElementById('onboardingsList');
-  wrap.innerHTML = '<div class="empty">Laden…</div>';
-  const params = new URLSearchParams();
-  if (document.getElementById('onbMineToggle').checked) params.set('owned_by_me', 'true');
-  try {
-    const res = await window.AgentShared.apiFetch('/api/sales-onboardings?' + params);
-    if (!res.ok) throw new Error('HTTP ' + res.status);
-    const data = await res.json();
-    const items = data.items || [];
-    if (!items.length) { wrap.innerHTML = '<div class="empty">Geen klanten met getekende offerte.</div>'; return; }
-    wrap.innerHTML = `<table><thead><tr>
-      <th>Naam</th><th>Verkoper</th><th>Traject</th><th>Entiteit</th><th>Onboarding</th><th>Eerste call</th><th>Mentor</th><th></th>
-    </tr></thead><tbody>${items.map(it => {
-      const b = ONB_STATUS[it.onboarding_status] || ONB_STATUS.not_sent;
-      return `<tr>
-        <td><a href="/modules/klanten.html?id=${esc(it.customer_id)}" style="color:var(--text);font-weight:600;text-decoration:none">${esc(it.customer_name)}</a></td>
-        <td>${esc(it.sales_user || '—')}</td>
-        <td>${esc(it.traject_label || '—')}</td>
-        <td>${esc(it.entity || '—')}</td>
-        <td><span class="badge ${b.c}">${b.l}</span></td>
-        <td>${it.first_call_at ? fmtDateNL(it.first_call_at) : '<span style="color:var(--text-faint)">wachten</span>'}</td>
-        <td><span class="badge archived">Binnenkort</span></td>
-        <td><button class="btn btn-sm" disabled title="Binnenkort beschikbaar">Mentor toewijzen</button></td>
-      </tr>`;
-    }).join('')}</tbody></table>`;
-  } catch (e) { wrap.innerHTML = '<div class="empty">Laden mislukt: ' + esc(e.message) + '</div>'; }
-}
-document.getElementById('onbMineToggle').addEventListener('change', () => loadOnboardings());
+// (Onboardings is een eigen module geworden: modules/onboarding-overzicht.html.
+//  De tab + loader zijn hier verwijderd; ?tab=onboardings redirect staat in init.)
 
 // ── Retentie ──
 let retSeg = 'alle', retSort = { key: 'end', dir: 'asc' }, retItems = [];
@@ -1380,6 +1342,8 @@ function avatarHtml(name, size) { return `<span class="sr-avatar sr-av-${avatarH
   if (can('sales.reports.view')) { const rb = document.getElementById('tab-btn-reports'); if (rb) rb.style.display = ''; }
   // ?tab=klanten|quotations|trajecten|products → direct juiste tab openen.
   const wantTab = new URLSearchParams(location.search).get('tab');
+  // Onboardings is een eigen module → oude ?tab=onboardings redirect.
+  if (wantTab === 'onboardings') { location.replace('/modules/onboarding-overzicht.html'); return; }
   // ?sub= voor Aanbod (trajecten|producten); oude ?tab=trajecten/producten → aanbod.
   const wantSub = new URLSearchParams(location.search).get('sub');
   if (wantTab === 'producten' || wantTab === 'products' || wantSub === 'producten') aanbodSub = 'producten';
