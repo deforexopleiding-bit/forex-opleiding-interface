@@ -5,7 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Offerte · De Forex Opleiding</title>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/dist/tabler-icons.min.css" />
   <link rel="stylesheet" href="/modules/shared/agent-shared.css" />
+  <link rel="stylesheet" href="/styles/sales-redesign.css" />
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: 'Inter', system-ui, sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; }
@@ -60,6 +62,9 @@ function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;'
 function toast(msg,kind){ const el=document.getElementById('toast'); el.textContent=msg; el.className='toast show '+(kind||''); setTimeout(()=>el.classList.remove('show'),2400); }
 function eur(v){ return v==null?'—':'€'+Number(v).toLocaleString('nl-NL',{minimumFractionDigits:2,maximumFractionDigits:2}); }
 function fmtDate(iso){ return iso?new Date(iso).toLocaleDateString('nl-NL',{day:'numeric',month:'long',year:'numeric'}):'—'; }
+function avatarHash(n){ let h=0; const s=String(n||''); for(let i=0;i<s.length;i++) h=(h*31+s.charCodeAt(i))>>>0; return h%6; }
+function avatarInitials(n){ const p=String(n||'').trim().split(/\s+/).filter(Boolean); return ((p[0]?.[0]||'')+(p[1]?.[0]||'')).toUpperCase()||'?'; }
+function avatarHtml(n){ return `<span class="sr-avatar sr-av-${avatarHash(n)}">${esc(avatarInitials(n))}</span>`; }
 const dealId = new URLSearchParams(location.search).get('id');
 
 async function init(){
@@ -86,41 +91,71 @@ function render(d){
   const st=deal.tl_quotation_status||'draft';
   const sb=STATUS[st]||STATUS.draft;
   document.getElementById('detailTitle').textContent = (d.traject?.label) || `Offerte ${String(deal.id).slice(0,8)}`;
-  document.getElementById('detailSub').innerHTML = `<span class="badge" style="background:${sb.c}22;color:${sb.c}">${sb.l}</span>`
-    + (deal.tl_quotation_id?` · TL-offerte gekoppeld`:'');
+  const stCls = { draft:'gray', sent:'blue', accepted:'green', signed:'green', declined:'danger', expired:'gray' }[st] || 'gray';
+  const offNr = deal.quote_reference || ('#' + String(deal.id).slice(0,8));
+  const metaParts = [offNr, 'Aangemaakt ' + fmtDate(deal.created_at)];
+  if (deal.tl_quotation_accepted_at) metaParts.push('Getekend ' + fmtDate(deal.tl_quotation_accepted_at));
+  document.getElementById('detailSub').innerHTML = `<span class="sr-tag ${stCls}">${sb.l}</span>`
+    + (deal.tl_quotation_id?` <span class="sr-tag blue">TL gekoppeld</span>`:'')
+    + `<span style="color:var(--text-faint);margin-left:8px">${metaParts.map(esc).join(' · ')}</span>`;
+
+  // BTW per tarief (zeroVat + korting-aware, identiek aan de detail-endpoint).
+  const factor = 1 - (Number(deal.discount_percentage)||0)/100;
+  const zeroVat = deal.sale_type && deal.sale_type !== 'domestic';
+  const btwByRate = {};
+  for (const l of lines) {
+    const rate = zeroVat ? 0 : (Number(l.vat_percentage)||0);
+    const base = Number(l.quantity)*Number(l.unit_price);
+    const lineExcl = (l.price_includes_vat && rate>0 ? base/(1+rate/100) : base) * factor;
+    if (rate>0) btwByRate[rate] = (btwByRate[rate]||0) + lineExcl*rate/100;
+  }
+  const btwRows = Object.keys(btwByRate).sort((a,b)=>b-a).map(r => `<div class="row"><span class="lbl">BTW ${r}%</span><span>${eur(btwByRate[r])}</span></div>`).join('');
+  const disc = Number(deal.discount_percentage)||0;
+
+  // Betalingsvoorwaarden (optioneel).
+  const pay = [];
+  if (deal.payment_downpayment_amount) pay.push(['Aanbetaling', `${eur(deal.payment_downpayment_amount)}${deal.payment_downpayment_date?' op '+fmtDate(deal.payment_downpayment_date):''}`]);
+  if (deal.payment_term_count) pay.push(['Termijnen', `${deal.payment_term_count}× ${deal.payment_term_amount?eur(deal.payment_term_amount)+' incl.':''}`]);
+  if (deal.payment_term_start_date) pay.push(['1e termijn', fmtDate(deal.payment_term_start_date)]);
+  if (deal.payment_start_date) pay.push(['Startdatum cursus', fmtDate(deal.payment_start_date)]);
 
   document.getElementById('detailBody').innerHTML = `
     <div class="grid">
-      <div class="card"><h3>Klant</h3>
-        <div class="row"><span class="lbl">Naam</span><span>${esc((c.first_name||'')+' '+(c.last_name||''))}</span></div>
-        <div class="row"><span class="lbl">E-mail</span><span>${esc(c.email||'—')}</span></div>
-        <div class="row"><span class="lbl">Telefoon</span><span>${esc(c.phone||'—')}</span></div>
-        <div style="margin-top:8px"><a href="/modules/klanten.html?id=${esc(c.id)}" style="font-size:11.5px;color:var(--accent-cyan,#0891b2)">Klant-detail →</a></div>
+      <div class="sr-card"><div class="sr-card-h">Klant</div>
+        <div class="sr-userline" style="margin-bottom:8px">${typeof avatarHtml==='function'?avatarHtml((c.first_name||'')+' '+(c.last_name||'')):''}<span><span class="sr-uname">${esc((c.first_name||'')+' '+(c.last_name||''))}</span>${c.risk_tag_auto?' <span class="sr-tag danger">Risico</span>':''}<br><span class="sr-cellsub">${esc(d.entity||'—')}</span></span></div>
+        <div class="row"><span class="lbl">E-mail</span><span>${c.email?`<a href="mailto:${encodeURIComponent(c.email)}">${esc(c.email)}</a>`:'—'}</span></div>
+        <div class="row"><span class="lbl">Telefoon</span><span>${c.phone?`<a href="tel:${encodeURIComponent(c.phone)}">${esc(c.phone)}</a>`:'—'}</span></div>
+        <div style="margin-top:8px"><a class="sr-abtn" href="/modules/klanten.html?id=${esc(c.id)}"><i class="ti ti-user"></i> Klant-detail</a></div>
       </div>
-      <div class="card"><h3>Offerte</h3>
-        <div class="row"><span class="lbl">Bedrijf</span><span>${esc(d.entity||'—')}</span></div>
-        <div class="row"><span class="lbl">Traject</span><span>${esc(d.traject?.label||'—')}</span></div>
-        <div class="row"><span class="lbl">Referentie</span><span>${esc(deal.quote_reference||'—')}</span></div>
-        <div class="row"><span class="lbl">Datum</span><span>${fmtDate(deal.start_date)}</span></div>
-      </div>
-      <div class="card"><h3>Bedragen</h3>
-        <div class="row"><span class="lbl">Excl. BTW</span><span>${eur(t.excl)}</span></div>
-        <div class="row"><span class="lbl">Incl. BTW</span><span><strong>${eur(t.incl)}</strong></span></div>
+      <div class="sr-card"><div class="sr-card-h">Offerte-info</div>
+        <div class="row"><span class="lbl">Entiteit</span><span>${esc(d.entity||'—')}</span></div>
+        <div class="row"><span class="lbl">Type verkoop</span><span>${esc(deal.sale_type==='intracommunautair'?'Intracommunautair':(deal.sale_type==='outside_eu'?'Buiten EU':'Normaal NL/BE'))}</span></div>
+        <div class="row"><span class="lbl">Looptijd</span><span>${deal.duration_months?deal.duration_months+' mnd':'—'}</span></div>
+        <div class="row"><span class="lbl">Startdatum cursus</span><span>${fmtDate(deal.payment_start_date||deal.start_date)}</span></div>
       </div>
     </div>
 
-    <table>
-      <thead><tr><th>Product</th><th>Aantal</th><th>Prijs</th><th>BTW</th><th style="text-align:right">Totaal incl.</th></tr></thead>
+    <div class="sr-card" style="padding:0;margin-bottom:14px"><div style="padding:12px 16px;font-size:13px;font-weight:600">Producten (${lines.length} regel${lines.length===1?'':'s'})</div>
+    <div class="sr-tablewrap" style="border:none;border-radius:0"><table class="sr-table">
+      <thead><tr><th>Product</th><th class="center">Aantal</th><th class="num">Prijs/stuk excl.</th><th class="center">BTW</th><th class="num">Subtotaal excl.</th><th class="num">Incl. BTW</th></tr></thead>
       <tbody>${lines.map(l=>{
+        const rate=zeroVat?0:(Number(l.vat_percentage)||0);
         const base=Number(l.quantity)*Number(l.unit_price);
-        const incl=l.price_includes_vat?base:base*(1+Number(l.vat_percentage)/100);
-        return `<tr><td>${esc(l.product_name)}</td><td>${l.quantity}×</td><td>${eur(l.unit_price)} ${l.price_includes_vat?'incl':'excl'}</td><td>${l.vat_percentage}%</td><td style="text-align:right">${eur(incl)}</td></tr>`;
-      }).join('') || '<tr><td colspan="5" class="sub">Geen regels</td></tr>'}</tbody>
-    </table>
+        const unitExcl=l.price_includes_vat&&rate>0?Number(l.unit_price)/(1+rate/100):Number(l.unit_price);
+        const subExcl=(l.price_includes_vat&&rate>0?base/(1+rate/100):base);
+        const incl=subExcl*(1+rate/100);
+        return `<tr><td>${esc(l.product_name)}</td><td class="center">${l.quantity}×</td><td class="num">${eur(unitExcl)}</td><td class="center"><span class="sr-tag ${({0:'green',9:'teal',21:'purple'})[l.vat_percentage]||'gray'}">${zeroVat?0:l.vat_percentage}%</span></td><td class="num">${eur(subExcl)}</td><td class="num">${eur(incl)}</td></tr>`;
+      }).join('') || '<tr><td colspan="6" class="sr-empty">Geen regels</td></tr>'}</tbody>
+    </table></div></div>
 
-    <div class="totals card" style="margin-top:14px">
-      <div class="row"><span class="lbl">Subtotaal excl. BTW</span><span>${eur(t.excl)}</span></div>
-      <div class="row big"><span>Totaal incl. BTW</span><span>${eur(t.incl)}</span></div>
+    <div class="grid" style="grid-template-columns:1fr 1fr">
+      <div class="sr-card"><div class="sr-card-h">Totalen</div>
+        <div class="row"><span class="lbl">Subtotaal excl. BTW</span><span>${eur(t.excl)}</span></div>
+        ${disc>0?`<div class="row"><span class="lbl">Korting</span><span>−${disc}%</span></div>`:''}
+        ${btwRows}
+        <div style="background:var(--bg-elev-2);border-radius:8px;padding:8px 10px;margin-top:8px;display:flex;justify-content:space-between;font-weight:600;font-size:15px"><span>Totaal incl. BTW</span><span>${eur(t.incl)}</span></div>
+      </div>
+      ${pay.length?`<div class="sr-card"><div class="sr-card-h">Betalingsvoorwaarden</div>${pay.map(p=>`<div class="row"><span class="lbl">${esc(p[0])}</span><span>${esc(p[1])}</span></div>`).join('')}</div>`:'<div class="sr-card"><div class="sr-card-h">Betalingsvoorwaarden</div><div class="sr-cellsub">Geen betalingsschema — alleen totaalbedrag.</div></div>'}
     </div>`;
 
   // Acties op basis van status.
