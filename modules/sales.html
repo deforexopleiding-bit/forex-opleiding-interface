@@ -967,12 +967,14 @@ function renderSubscriptions() {
   }));
   wrap.querySelectorAll('[data-subdel]').forEach(b => b.addEventListener('click', () => subListDelete(b.dataset.subdel)));
 }
-async function subListDelete(id) {
-  if (!confirm('Weet je zeker dat je dit abonnement wilt verwijderen? Dit wordt ook in Teamleader uitgeschakeld.')) return;
+async function subListDelete(id, force) {
+  if (!force && !confirm('Weet je zeker dat je dit abonnement wilt verwijderen? Dit wordt ook in Teamleader gedeactiveerd.')) return;
   try {
-    const res = await window.AgentShared.apiFetch('/api/sales-subscription-delete', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ subscription_id: id }) });
-    const d = await res.json(); if (!res.ok || d.success === false) throw new Error(d.error || 'HTTP ' + res.status);
-    toast('Abonnement verwijderd', 'success'); loadSubscriptions();
+    const res = await window.AgentShared.apiFetch('/api/sales-subscription-delete', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ subscription_id: id, force: !!force }) });
+    const d = await res.json();
+    if (res.status === 502 && d.tl_failed) { if (confirm('Teamleader-deactivatie mislukt: ' + (d.tl?.error || 'onbekend') + '\n\nAlleen lokaal stopzetten?')) return subListDelete(id, true); return; }
+    if (!res.ok || d.success === false) throw new Error(d.error || 'HTTP ' + res.status);
+    toast(d.tl?.deactivated ? 'Verwijderd + TL gedeactiveerd' : 'Lokaal stopgezet', 'success'); loadSubscriptions();
   } catch (e) { toast('Mislukt: ' + e.message, 'error'); }
 }
 document.getElementById('subMineToggle').addEventListener('change', () => loadSubscriptions());

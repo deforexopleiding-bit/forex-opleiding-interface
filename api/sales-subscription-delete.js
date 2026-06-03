@@ -27,23 +27,32 @@ export default async function handler(req, res) {
   }
 
   const subscriptionId = req.body?.subscription_id || req.query?.id;
+  const force = req.body?.force === true; // 'Alleen lokaal stopzetten' bij TL-fout
   if (!subscriptionId) return res.status(400).json({ error: 'subscription_id vereist' });
 
   try {
     const { data: sub } = await supabaseAdmin.from('subscriptions').select('*').eq('id', subscriptionId).maybeSingle();
     if (!sub) return res.status(404).json({ error: 'Abonnement niet gevonden' });
 
-    // TL best-effort: deactivate (geen delete-endpoint beschikbaar).
+    // TL-FIRST (Issue 2): deactiveer eerst in TL. Faalt dat én geen force →
+    // 502 zonder lokale wijziging (geen out-of-sync state). Met force=true of
+    // zonder TL-koppeling → lokaal stopzetten.
     let tl = { deactivated: false };
     if (sub.teamleader_subscription_id) {
       try {
         const tok = await getActiveToken();
-        if (tok) {
+        if (!tok) { tl = { deactivated: false, error: 'Geen TL-token actief' }; }
+        else {
           const r = await tlFetch('/subscriptions.deactivate', { method: 'POST', body: JSON.stringify({ id: sub.teamleader_subscription_id }) });
           if (r.ok) tl = { deactivated: true };
           else { tl = { deactivated: false, error: `HTTP ${r.status}: ${(await r.text()).slice(0, 200)}` }; console.warn('[sub-delete] TL deactivate', tl.error); }
         }
       } catch (e) { tl = { deactivated: false, error: e.message }; console.warn('[sub-delete] TL exception:', e.message); }
+      // Audit de TL-poging (traceability).
+      try { await supabaseAdmin.from('audit_log').insert({ user_id: user.id, action: 'subscription.tl_deactivate_attempt', entity_type: 'subscription', entity_id: subscriptionId, after_json: tl, ip_address: getClientIp(req) }); } catch {}
+      if (!tl.deactivated && !force) {
+        return res.status(502).json({ error: 'Teamleader-deactivatie mislukt: ' + (tl.error || 'onbekend') + '. Probeer opnieuw of kies \'Alleen lokaal stopzetten\'.', tl_failed: true, tl });
+      }
     }
 
     // Lokaal soft-delete: status='cancelled' (historie blijft).
