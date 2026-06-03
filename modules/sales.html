@@ -99,8 +99,7 @@
     <button class="tab" data-tab="onboardings" role="tab">Onboardings</button>
     <button class="tab" data-tab="subscriptions" role="tab">Abonnementen</button>
     <button class="tab" data-tab="retentie" role="tab">Retentie</button>
-    <button class="tab" data-tab="trajecten" role="tab">Trajecten</button>
-    <button class="tab" data-tab="products" role="tab">Producten</button>
+    <button class="tab" data-tab="aanbod" role="tab">Aanbod</button>
     <button class="tab" data-tab="reports" role="tab" id="tab-btn-reports" style="display:none">Rapporten</button>
   </div>
 
@@ -216,43 +215,56 @@
     <div id="retentieList"><div class="sr-empty">Laden…</div></div>
   </section>
 
-  <!-- ── Tab: Producten ── -->
-  <section class="tab-content" id="tab-products">
-    <div class="toolbar">
-      <input class="search" id="prodSearch" type="search" placeholder="Zoek product..." />
-      <select class="search" id="prodCategory" style="max-width:200px"><option value="">Alle categorieën</option></select>
-      <label class="filter-toggle"><input type="checkbox" id="prodArchivedToggle"> Toon gearchiveerd</label>
-      <button class="btn" id="newProductBtn">+ Nieuw product</button>
+  <!-- ── Tab: Aanbod (Trajecten + Producten samengevoegd) ── -->
+  <section class="tab-content" id="tab-aanbod">
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
+      <div class="sr-subtabs">
+        <button class="sr-subtab active" data-sub="trajecten"><i class="ti ti-package"></i> Trajecten <span class="sr-seg-n" id="aanbodTrajCount"></span></button>
+        <button class="sr-subtab" data-sub="producten"><i class="ti ti-box"></i> Producten <span class="sr-seg-n" id="aanbodProdCount"></span></button>
+        <button class="sr-subtab" disabled><i class="ti ti-coin"></i> Bonussen <span class="sr-tag warning">Binnenkort</span></button>
+      </div>
+      <label class="sr-toggle" title="Toon prijzen incl. of excl. BTW (geldt voor beide sub-tabs)"><input type="checkbox" id="btwToggle"> Incl. BTW</label>
     </div>
-    <div id="productsList"><div class="empty">Laden…</div></div>
-  </section>
 
-  <!-- ── Tab: Trajecten ── -->
-  <section class="tab-content" id="tab-trajecten">
-    <div class="toolbar">
-      <span style="font-size:12.5px;color:var(--text-dim)">Bundels van producten met varianten (bv. "Membership &gt; Premium 36 mnd").</span>
-      <button class="btn" id="newTrajectBtn" style="margin-left:auto">+ Nieuw traject</button>
+    <!-- Sub-tab Trajecten -->
+    <div id="aanbod-trajecten" style="margin-top:14px">
+      <div class="sr-filterstrip">
+        <span class="sr-cellsub">Bundels van producten met varianten (bv. "Membership &gt; Premium 36 mnd").</span>
+        <button class="sr-abtn primary sr-spacer" id="newTrajectBtn">+ Nieuw traject</button>
+      </div>
+      <div id="trajectenList"><div class="sr-empty">Laden…</div></div>
     </div>
-    <div id="trajectenList"><div class="empty">Laden…</div></div>
+
+    <!-- Sub-tab Producten -->
+    <div id="aanbod-producten" style="margin-top:14px;display:none">
+      <div class="sr-filterstrip">
+        <div class="sr-search"><input id="prodSearch" type="search" placeholder="Zoek product…" /></div>
+        <select class="sr-select" id="prodCategory"><option value="">Alle categorieën</option></select>
+        <label class="sr-toggle"><input type="checkbox" id="prodArchivedToggle"> Toon gearchiveerd</label>
+        <button class="sr-abtn primary sr-spacer" id="newProductBtn">+ Nieuw product</button>
+      </div>
+      <div id="productsList"><div class="sr-empty">Laden…</div></div>
+    </div>
   </section>
 
   <!-- ── Tab: Rapporten (Fase 4) ── -->
   <section class="tab-content" id="tab-reports">
-    <div class="toolbar" style="flex-wrap:wrap;gap:8px">
-      <div class="rep-quick" style="display:flex;gap:4px">
-        <button class="btn btn-ghost btn-sm" data-range="today">Vandaag</button>
-        <button class="btn btn-ghost btn-sm" data-range="week">Week</button>
-        <button class="btn btn-ghost btn-sm" data-range="month">Maand</button>
-        <button class="btn btn-ghost btn-sm" data-range="quarter">Kwartaal</button>
-        <button class="btn btn-ghost btn-sm" data-range="year">Jaar</button>
+    <div class="sr-filterstrip" style="align-items:center">
+      <div class="sr-segments" id="repSegments" style="margin-bottom:0">
+        <button class="sr-seg" data-range="today">Vandaag</button>
+        <button class="sr-seg" data-range="week">Week</button>
+        <button class="sr-seg active" data-range="month">Maand</button>
+        <button class="sr-seg" data-range="quarter">Kwartaal</button>
+        <button class="sr-seg" data-range="year">Jaar</button>
       </div>
-      <input class="search" id="repFrom" type="date" style="max-width:150px" />
-      <input class="search" id="repTo" type="date" style="max-width:150px" />
-      <select class="search" id="repGroupBy" style="max-width:130px"><option value="day">Per dag</option><option value="week">Per week</option><option value="month" selected>Per maand</option></select>
-      <button class="btn" id="repApply">Toepassen</button>
-      <button class="btn btn-ghost" id="repExport" style="margin-left:auto">⬇ Export Excel</button>
+      <input class="sr-select" id="repFrom" type="date" style="max-width:150px" />
+      <input class="sr-select" id="repTo" type="date" style="max-width:150px" />
+      <select class="sr-select" id="repGroupBy"><option value="day">Per dag</option><option value="week">Per week</option><option value="month" selected>Per maand</option></select>
+      <button class="sr-abtn primary" id="repApply">Toepassen</button>
+      <button class="sr-abtn sr-spacer" id="repExport"><i class="ti ti-download"></i> Export Excel</button>
+      <button class="sr-iconbtn" id="repRefresh" title="Vernieuwen"><i class="ti ti-refresh"></i></button>
     </div>
-    <div id="repBody"><div class="empty">Kies een periode en klik Toepassen.</div></div>
+    <div id="repBody"><div class="sr-empty">Kies een periode en klik Toepassen.</div></div>
   </section>
 </div>
 
@@ -390,9 +402,8 @@ document.querySelectorAll('.tab').forEach(t => {
     document.getElementById('tab-' + state.tab).classList.add('active');
     stopQuotationsPolling();
     if (state.tab === 'dashboard') loadDashboard();
-    else if (state.tab === 'products') loadProducts();
+    else if (state.tab === 'aanbod') loadAanbod();
     else if (state.tab === 'quotations') { loadQuotations(); startQuotationsPolling(); }
-    else if (state.tab === 'trajecten') loadTrajecten();
     else if (state.tab === 'onboardings') loadOnboardings();
     else if (state.tab === 'subscriptions') loadSubscriptions();
     else if (state.tab === 'retentie') loadRetentie();
@@ -427,41 +438,54 @@ async function loadProducts() {
     document.getElementById('productsList').innerHTML = '<div class="empty">Laden mislukt: ' + esc(e.message) + '</div>';
   }
 }
+let prodSort = { key: 'name', dir: 'asc' };
+const VAT_TAG = { 0: 'green', 9: 'teal', 21: 'purple' };
 function renderProducts() {
+  // Categorie-dropdown vullen.
+  const catSel = document.getElementById('prodCategory');
+  if (catSel) { const cur = catSel.value; catSel.innerHTML = '<option value="">Alle categorieën</option>' + [...new Set(state.products.map(p => p.category).filter(Boolean))].sort().map(c => `<option value="${esc(c)}">${esc(c)}</option>`).join(''); catSel.value = cur; }
   const search = (document.getElementById('prodSearch').value || '').toLowerCase();
-  const cat = document.getElementById('prodCategory').value;
+  const cat = catSel?.value || '';
   let arr = state.products.slice();
   if (search) arr = arr.filter(p => (p.name || '').toLowerCase().includes(search) || (p.description || '').toLowerCase().includes(search));
   if (cat) arr = arr.filter(p => p.category === cat);
-  if (!arr.length) {
-    document.getElementById('productsList').innerHTML = '<div class="empty">Geen producten.</div>';
-    return;
-  }
+  const pc = document.getElementById('aanbodProdCount'); if (pc) pc.textContent = arr.length;
+  arr.sort((a, b) => {
+    const dir = prodSort.dir === 'asc' ? 1 : -1;
+    if (prodSort.key === 'price') return ((displayPrice(a.default_price, a.price_includes_vat, a.vat_percentage) || 0) - (displayPrice(b.default_price, b.price_includes_vat, b.vat_percentage) || 0)) * dir;
+    return String(a.name || '').localeCompare(String(b.name || '')) * dir;
+  });
+  if (!arr.length) { document.getElementById('productsList').innerHTML = '<div class="sr-empty">Geen producten.</div>'; return; }
   const canManage = can('sales.product.manage');
+  const sc = prodSort.key === 'price' ? (prodSort.dir === 'asc' ? 'sortable asc' : 'sortable desc') : 'sortable';
   document.getElementById('productsList').innerHTML = `
-    <table>
-      <thead><tr>
-        <th>Naam</th><th>Beschrijving</th><th>BTW</th><th>Prijs</th><th>Looptijd</th>
-        <th>Categorie</th><th>TL-ID</th><th>Status</th>${canManage ? '<th></th>' : ''}
-      </tr></thead>
-      <tbody>${arr.map(p => `
-        <tr>
-          <td><strong>${esc(p.name)}</strong></td>
-          <td title="${esc(p.description || '')}">${esc((p.description || '').slice(0, 60))}${(p.description || '').length > 60 ? '…' : ''}</td>
-          <td><span class="badge vat-${p.vat_percentage}">${p.vat_percentage}%</span></td>
-          <td>${fmtEuro(p.default_price)}<span style="font-size:10px;color:var(--text-faint)"> ${p.price_includes_vat ? 'incl' : 'excl'}</span></td>
-          <td>${p.default_duration_months ? p.default_duration_months + ' mnd' : '—'}</td>
-          <td>${p.category ? '<span class="badge cat">' + esc(p.category) + '</span>' : '—'}</td>
-          <td><span class="mono" title="Vereist voor TL-push">${esc(p.tl_product_id || '—')}</span></td>
-          <td><span class="badge ${p.archived_at ? 'archived' : 'active'}">${p.archived_at ? 'Gearchiveerd' : 'Actief'}</span></td>
-          ${canManage ? `<td>
-            <button class="action-btn" data-edit="${p.id}" title="Bewerken">✎</button>
-            ${!p.archived_at ? `<button class="action-btn" data-archive="${p.id}" title="Archiveren">🗄</button>` : ''}
-          </td>` : ''}
-        </tr>`).join('')}</tbody>
-    </table>`;
-  document.querySelectorAll('[data-edit]').forEach(b => b.addEventListener('click', () => openProductModal(b.dataset.edit)));
-  document.querySelectorAll('[data-archive]').forEach(b => b.addEventListener('click', () => archiveProduct(b.dataset.archive)));
+    <div class="sr-tablewrap"><table class="sr-table">
+      <thead><tr><th>Product</th><th>Categorie</th><th>BTW</th><th class="center">Looptijd</th>
+        <th class="num ${sc}" data-sort="price">Prijs ${btwIncl ? 'incl.' : 'excl.'}</th><th class="center">Teamleader</th><th>Status</th>${canManage ? '<th></th>' : ''}</tr></thead>
+      <tbody>${arr.map(p => {
+        const dp = displayPrice(p.default_price, p.price_includes_vat, p.vat_percentage);
+        const menu = [];
+        if (canManage) {
+          menu.push(`<button class="sr-menu-item" onclick="toast('Binnenkort beschikbaar')"><i class="ti ti-copy"></i> Dupliceren</button>`);
+          if (!p.archived_at) menu.push(`<button class="sr-menu-item danger" data-archive="${p.id}"><i class="ti ti-archive"></i> Archiveren</button>`);
+        }
+        if (p.tl_product_id) menu.push(`<a class="sr-menu-item" href="https://focus.teamleader.eu/products/${esc(p.tl_product_id)}" target="_blank"><i class="ti ti-external-link"></i> Open in Teamleader</a>`);
+        const dots = menu.length ? `<div class="sr-menu"><button class="sr-ibtn sr-menu-toggle"><i class="ti ti-dots"></i></button><div class="sr-menu-pop">${menu.join('')}</div></div>` : '';
+        return `<tr${p.archived_at ? ' style="opacity:.6"' : ''}>
+          <td><span class="sr-userline"><i class="ti ti-box" style="font-size:18px;color:var(--text-faint)"></i><span><span class="sr-uname">${esc(p.name)}</span><br><span class="sr-cellsub">${esc((p.description || '').slice(0, 50))}${(p.description || '').length > 50 ? '…' : ''}</span></span></span></td>
+          <td>${p.category ? '<span class="sr-tag gray">' + esc(p.category) + '</span>' : '—'}</td>
+          <td><span class="sr-tag ${VAT_TAG[p.vat_percentage] || 'gray'}">${p.vat_percentage}%</span></td>
+          <td class="center">${p.default_duration_months ? p.default_duration_months + ' mnd' : '—'}</td>
+          <td class="num">${fmtEuro(dp)}</td>
+          <td class="center">${p.tl_product_id ? '<span class="sr-tag green">✓ TL</span>' : '<span class="sr-cellsub">—</span>'}</td>
+          <td><span class="sr-tag ${p.archived_at ? 'gray' : 'green'}">${p.archived_at ? 'Gearchiveerd' : 'Actief'}</span></td>
+          ${canManage ? `<td class="sr-actions"><button class="sr-ibtn" data-edit="${p.id}" title="Bewerken"><i class="ti ti-edit"></i></button>${dots}</td>` : ''}
+        </tr>`;
+      }).join('')}</tbody>
+    </table></div>`;
+  document.querySelectorAll('#productsList [data-sort]').forEach(th => th.addEventListener('click', () => { if (prodSort.key === 'price') prodSort.dir = prodSort.dir === 'asc' ? 'desc' : 'asc'; else { prodSort.key = 'price'; prodSort.dir = 'asc'; } renderProducts(); }));
+  document.querySelectorAll('#productsList [data-edit]').forEach(b => b.addEventListener('click', () => openProductModal(b.dataset.edit)));
+  document.querySelectorAll('#productsList [data-archive]').forEach(b => b.addEventListener('click', () => archiveProduct(b.dataset.archive)));
 }
 function openProductModal(id = null) {
   if (!can('sales.product.manage')) { toast('Geen rechten', 'error'); return; }
@@ -998,16 +1022,37 @@ document.addEventListener('click', (e) => {
 });
 
 // ── Trajecten ──
+// ── Aanbod (Trajecten + Producten samengevoegd) ──
+let aanbodSub = 'trajecten';
+let btwIncl = localStorage.getItem('sales_btw_incl') === '1';
+// Prijs in de huidige BTW-modus (incl/excl), gegeven of de opgeslagen prijs al incl is.
+function displayPrice(amount, inclVat, vat) {
+  if (amount == null || amount === '') return null;
+  const a = Number(amount); if (!isFinite(a)) return null;
+  const r = (Number(vat) || 0) / 100;
+  if (btwIncl) return inclVat ? a : a * (1 + r);
+  return inclVat ? a / (1 + r) : a;
+}
+function loadAanbod() {
+  document.querySelectorAll('#tab-aanbod .sr-subtab[data-sub]').forEach(b => b.classList.toggle('active', b.dataset.sub === aanbodSub));
+  document.getElementById('aanbod-trajecten').style.display = aanbodSub === 'trajecten' ? '' : 'none';
+  document.getElementById('aanbod-producten').style.display = aanbodSub === 'producten' ? '' : 'none';
+  if (aanbodSub === 'producten') loadProducts(); else loadTrajecten();
+}
+document.querySelectorAll('#tab-aanbod .sr-subtab[data-sub]').forEach(b => b.addEventListener('click', () => { aanbodSub = b.dataset.sub; loadAanbod(); }));
+(() => { const t = document.getElementById('btwToggle'); if (!t) return; t.checked = btwIncl; t.addEventListener('change', () => { btwIncl = t.checked; localStorage.setItem('sales_btw_incl', btwIncl ? '1' : '0'); if (aanbodSub === 'producten') renderProducts(); else renderTrajecten(); }); })();
+
 async function loadTrajecten() {
   const wrap = document.getElementById('trajectenList');
-  wrap.innerHTML = '<div class="empty">Laden…</div>';
+  wrap.innerHTML = '<div class="sr-empty">Laden…</div>';
   try {
     const res = await window.AgentShared.apiFetch('/api/trajecten');
     if (!res.ok) throw new Error('HTTP ' + res.status);
     const data = await res.json();
     state.trajects = data.trajects || [];
+    const tc = document.getElementById('aanbodTrajCount'); if (tc) tc.textContent = state.trajects.length;
     renderTrajecten();
-  } catch (e) { wrap.innerHTML = '<div class="empty">Laden mislukt: ' + esc(e.message) + '</div>'; }
+  } catch (e) { wrap.innerHTML = '<div class="sr-empty">Laden mislukt: ' + esc(e.message) + '</div>'; }
 }
 function renderTrajecten() {
   if (!state.trajects.length) { document.getElementById('trajectenList').innerHTML = '<div class="empty">Nog geen trajecten. Maak er een aan.</div>'; return; }
@@ -1135,9 +1180,13 @@ const repLocalDate = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padSt
 function initReportsTab() {
   if (!_repInit) {
     _repInit = true;
-    document.querySelectorAll('#tab-reports [data-range]').forEach(b => b.addEventListener('click', () => repSetRange(b.dataset.range)));
+    document.querySelectorAll('#tab-reports [data-range]').forEach(b => b.addEventListener('click', () => {
+      document.querySelectorAll('#repSegments .sr-seg').forEach(x => x.classList.remove('active'));
+      b.classList.add('active'); repSetRange(b.dataset.range);
+    }));
     document.getElementById('repApply').addEventListener('click', loadReports);
     document.getElementById('repExport').addEventListener('click', repExport);
+    document.getElementById('repRefresh').addEventListener('click', loadReports);
     if (!document.getElementById('repFrom').value) repSetRange('month');
     else loadReports();
   } else {
@@ -1170,10 +1219,10 @@ async function loadReports() {
     renderReports(_repData);
   } catch (e) { body.innerHTML = '<div class="empty">Laden mislukt: ' + esc(e.message) + '</div>'; }
 }
-function repCard(label, value) {
-  return `<div style="background:var(--bg-elev);border:1px solid var(--border);border-radius:12px;padding:14px 16px">
-    <div style="font-size:10.5px;text-transform:uppercase;letter-spacing:.5px;color:var(--text-faint)">${label}</div>
-    <div style="font-size:22px;font-weight:800;margin-top:4px">${value}</div></div>`;
+function repCard(label, value, icon, iconColorClass, sub) {
+  return `<div class="sr-stat ${iconColorClass || ''}">
+    <div class="sr-stat-l">${icon ? `<i class="ti ${icon}"></i>` : ''}${label}</div>
+    <div class="sr-stat-v">${value}</div>${sub ? `<div class="sr-stat-d">${sub}</div>` : ''}</div>`;
 }
 function renderReports(d) {
   Object.values(_repCharts).forEach(c => { try { c.destroy(); } catch {} }); _repCharts = {};
@@ -1181,11 +1230,11 @@ function renderReports(d) {
   const chartsOk = typeof Chart !== 'undefined';
   const body = document.getElementById('repBody');
   body.innerHTML = `
-    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin-bottom:16px">
-      ${repCard('Pipeline (open)', fmtEuro(k.pipeline_value))}
-      ${repCard('Omzet periode', fmtEuro(k.revenue_period))}
-      ${repCard('Bonus pending', fmtEuro(k.bonus_pending))}
-      ${repCard('Retentie', repPct(k.retention_rate))}
+    <div class="sr-grid sr-grid-4" style="margin-bottom:16px">
+      ${repCard('Pipeline (open)', fmtEuro(k.pipeline_value), 'ti-target', 'sr-i-blue')}
+      ${repCard('Omzet periode', fmtEuro(k.revenue_period), 'ti-cash', 'sr-i-green')}
+      ${repCard('Bonus pending', fmtEuro(k.bonus_pending), 'ti-coin', 'sr-i-amber')}
+      ${repCard('Retentie', repPct(k.retention_rate), 'ti-refresh', 'sr-i-pink')}
     </div>
     ${chartsOk ? `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:14px;margin-bottom:18px">
       <div class="card"><div style="font-size:12px;font-weight:700;margin-bottom:6px">Conversie funnel</div><div style="position:relative;height:280px"><canvas id="repFunnel"></canvas></div></div>
@@ -1195,7 +1244,7 @@ function renderReports(d) {
     </div>` : '<div class="empty">Grafieken konden niet laden (CDN geblokkeerd). Cijfers + export werken wel.</div>'}
     <h3 style="font-size:14px;margin:6px 0 8px">Per sales-medewerker</h3>
     <div class="table-wrap-x" style="overflow-x:auto"><table><thead><tr><th>Medewerker</th><th>Offertes</th><th>Conversie</th><th>Omzet</th><th>Bonus pending</th><th>Bonus paid</th></tr></thead><tbody>
-      ${(d.by_sales_user || []).length ? (d.by_sales_user || []).map(u => `<tr><td>${esc(u.user_name)}</td><td>${u.quotations_count}</td><td>${repPct(u.conversion_rate)}</td><td>${fmtEuro(u.revenue)}</td><td>${fmtEuro(u.bonus_pending)}</td><td>${fmtEuro(u.bonus_paid)}</td></tr>`).join('') : '<tr><td colspan="6" class="empty">Geen data in deze periode.</td></tr>'}
+      ${(d.by_sales_user || []).length ? (d.by_sales_user || []).map(u => `<tr><td><span class="sr-userline">${avatarHtml(u.user_name)}<span class="sr-uname">${esc(u.user_name)}</span></span></td><td>${u.quotations_count}</td><td>${repPct(u.conversion_rate)}</td><td class="num">${fmtEuro(u.revenue)}</td><td class="num" style="color:#b45309">${fmtEuro(u.bonus_pending)}</td><td class="num" style="color:#059669">${fmtEuro(u.bonus_paid)}</td></tr>`).join('') : '<tr><td colspan="6" class="sr-empty">Geen data in deze periode.</td></tr>'}
     </tbody></table></div>
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:14px;margin-top:16px">
       <div><h3 style="font-size:14px;margin:0 0 8px">Retentie</h3><table><tbody>
@@ -1331,7 +1380,10 @@ function avatarHtml(name, size) { return `<span class="sr-avatar sr-av-${avatarH
   if (can('sales.reports.view')) { const rb = document.getElementById('tab-btn-reports'); if (rb) rb.style.display = ''; }
   // ?tab=klanten|quotations|trajecten|products → direct juiste tab openen.
   const wantTab = new URLSearchParams(location.search).get('tab');
-  const tabMap = { dashboard: 'dashboard', klanten: 'customers', customers: 'customers', offertes: 'quotations', quotations: 'quotations', onboardings: 'onboardings', abonnementen: 'subscriptions', subscriptions: 'subscriptions', retentie: 'retentie', trajecten: 'trajecten', producten: 'products', products: 'products', rapporten: 'reports', reports: 'reports' };
+  // ?sub= voor Aanbod (trajecten|producten); oude ?tab=trajecten/producten → aanbod.
+  const wantSub = new URLSearchParams(location.search).get('sub');
+  if (wantTab === 'producten' || wantTab === 'products' || wantSub === 'producten') aanbodSub = 'producten';
+  const tabMap = { dashboard: 'dashboard', klanten: 'customers', customers: 'customers', offertes: 'quotations', quotations: 'quotations', onboardings: 'onboardings', abonnementen: 'subscriptions', subscriptions: 'subscriptions', retentie: 'retentie', aanbod: 'aanbod', trajecten: 'aanbod', producten: 'aanbod', products: 'aanbod', rapporten: 'reports', reports: 'reports' };
   const target = tabMap[wantTab];
   if (target && target !== 'dashboard') {
     const btn = document.querySelector(`.tab[data-tab="${target}"]`);
