@@ -1,7 +1,7 @@
 // api/sales-retention.js
-// GET ?owned_by_me= → klanten waarvan het traject binnen 30 dagen afloopt.
-// Einddatum: MAX(subscription.end_date) per deal, anders deal.created_at +
-// variant.default_duration_months maanden. Permission: sales.customer.view.
+// GET ?owned_by_me= → klanten waarvan het LAATSTE actieve abonnement binnen 30 dagen
+// afloopt. Aggregatie PER KLANT op MAX(end_date) van alle actieve subs: een klant met
+// een opvolgende sub (latere end_date) valt dus weg uit de lijst. Permission: sales.customer.view.
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
@@ -17,72 +17,75 @@ export default async function handler(req, res) {
   if (!(await requirePermission(req, 'sales.customer.view'))) return res.status(403).json({ error: 'Geen rechten' });
 
   try {
-    let q = supabaseAdmin.from('deals')
-      .select('id, customer_id, sales_user_id, traject_variant_id, tl_department_id, created_at')
-      .is('archived_at', null).order('created_at', { ascending: false }).limit(500);
-    if (req.query?.owned_by_me === 'true') q = q.eq('sales_user_id', user.id);
-    const { data: deals } = await q;
-    const dealIds = (deals || []).map(d => d.id);
+    let dq = supabaseAdmin.from('deals')
+      .select('id, customer_id, sales_user_id, traject_variant_id, tl_department_id')
+      .is('archived_at', null).limit(2000);
+    if (req.query?.owned_by_me === 'true') dq = dq.eq('sales_user_id', user.id);
+    const { data: deals } = await dq;
+    const dealById = {}; for (const d of deals || []) dealById[d.id] = d;
+    const dealIds = Object.keys(dealById);
+    if (!dealIds.length) return res.status(200).json({ items: [] });
 
-    // Sub-einddatums per deal.
-    const subEndByDeal = {};
-    if (dealIds.length) {
-      const { data: subs } = await supabaseAdmin.from('subscriptions').select('deal_id, end_date').in('deal_id', dealIds);
-      for (const s of subs || []) {
-        if (!s.end_date) continue;
-        if (!subEndByDeal[s.deal_id] || s.end_date > subEndByDeal[s.deal_id]) subEndByDeal[s.deal_id] = s.end_date;
-      }
-    }
-    // Variant-duur voor fallback.
-    const variantIds = [...new Set((deals || []).map(d => d.traject_variant_id).filter(Boolean))];
-    const variantById = {};
-    if (variantIds.length) {
-      const { data: vs } = await supabaseAdmin.from('traject_variants').select('id, name, traject_id, default_duration_months').in('id', variantIds);
-      const tIds = [...new Set((vs || []).map(v => v.traject_id))];
-      const tName = {}; if (tIds.length) { const { data: ts } = await supabaseAdmin.from('trajects').select('id, name').in('id', tIds); for (const t of ts || []) tName[t.id] = t.name; }
-      for (const v of vs || []) variantById[v.id] = { ...v, label: [tName[v.traject_id], v.name].filter(Boolean).join(' > ') };
+    // Actieve subs onder deze deals.
+    const { data: subs } = await supabaseAdmin.from('subscriptions')
+      .select('id, deal_id, end_date, start_date, description, status').eq('status', 'active').in('deal_id', dealIds);
+
+    // Groepeer per klant; bepaal MAX(end_date) + verzamel subs.
+    const byCust = {};
+    for (const s of subs || []) {
+      if (!s.end_date) continue;
+      const deal = dealById[s.deal_id]; if (!deal?.customer_id) continue;
+      const cid = deal.customer_id;
+      const g = (byCust[cid] ||= { customer_id: cid, subs: [], maxEnd: null, maxDeal: null });
+      g.subs.push({ description: s.description || '—', start_date: s.start_date, end_date: s.end_date });
+      if (!g.maxEnd || s.end_date > g.maxEnd) { g.maxEnd = s.end_date; g.maxDeal = deal; }
     }
 
     const now = Date.now();
     const horizon = now + 30 * 86400000;
-    const rows = [];
-    for (const d of deals || []) {
-      let endDate = subEndByDeal[d.id] || null;
-      const variant = d.traject_variant_id ? variantById[d.traject_variant_id] : null;
-      if (!endDate && variant?.default_duration_months && d.created_at) {
-        const dt = new Date(d.created_at); dt.setMonth(dt.getMonth() + Number(variant.default_duration_months));
-        endDate = dt.toISOString().slice(0, 10);
-      }
-      if (!endDate) continue; // niet te bepalen
-      const endMs = new Date(endDate).getTime();
-      if (endMs > horizon) continue; // > 30 dagen weg
-      rows.push({ deal_id: d.id, customer_id: d.customer_id, traject_variant_id: d.traject_variant_id,
-        tl_department_id: d.tl_department_id || null,
-        traject_label: variant?.label || null, end_date: endDate,
-        days_left: Math.ceil((endMs - now) / 86400000) });
-    }
+    // Alleen klanten waarvan de LAATSTE actieve sub <= 30 dagen weg is (incl. reeds
+    // verlopen, voor de 'Verlopen'-pill). Klant met latere sub valt hier vanzelf weg.
+    const groups = Object.values(byCust).filter(g => g.maxEnd && new Date(g.maxEnd).getTime() <= horizon);
+    if (!groups.length) return res.status(200).json({ items: [] });
 
-    const custIds = [...new Set(rows.map(r => r.customer_id).filter(Boolean))];
+    // Joins: klant + entiteit + mentor + traject (van de laatst-aflopende sub).
+    const custIds = [...new Set(groups.map(g => g.customer_id))];
     const custById = {};
     if (custIds.length) { const { data } = await supabaseAdmin.from('customers').select('id, first_name, last_name, email, mentor_user_id').in('id', custIds); for (const c of data || []) custById[c.id] = c; }
-    // Entiteit-labels.
-    const deptIds = [...new Set(rows.map(r => r.tl_department_id).filter(Boolean))];
+    const deptIds = [...new Set(groups.map(g => g.maxDeal?.tl_department_id).filter(Boolean))];
     const entByTl = {};
     if (deptIds.length) { const { data } = await supabaseAdmin.from('company_entities').select('tl_department_id, label').in('tl_department_id', deptIds); for (const e of data || []) entByTl[e.tl_department_id] = e.label; }
-    // Mentor-namen (customers.mentor_user_id → profiles.full_name).
+    const variantIds = [...new Set(groups.map(g => g.maxDeal?.traject_variant_id).filter(Boolean))];
+    const variantLabel = {};
+    if (variantIds.length) {
+      const { data: vs } = await supabaseAdmin.from('traject_variants').select('id, name, traject_id').in('id', variantIds);
+      const tIds = [...new Set((vs || []).map(v => v.traject_id).filter(Boolean))];
+      const tName = {}; if (tIds.length) { const { data: ts } = await supabaseAdmin.from('trajects').select('id, name').in('id', tIds); for (const t of ts || []) tName[t.id] = t.name; }
+      for (const v of vs || []) variantLabel[v.id] = [tName[v.traject_id], v.name].filter(Boolean).join(' > ');
+    }
     const mentorIds = [...new Set(Object.values(custById).map(c => c.mentor_user_id).filter(Boolean))];
     const mentorById = {};
     if (mentorIds.length) { const { data } = await supabaseAdmin.from('profiles').select('id, full_name').in('id', mentorIds); for (const p of data || []) mentorById[p.id] = p.full_name; }
-    for (const r of rows) {
-      const c = custById[r.customer_id] || {};
-      r.customer_name = `${c.first_name || ''} ${c.last_name || ''}`.trim() || '—';
-      r.customer_email = c.email || null;
-      r.entity = r.tl_department_id ? (entByTl[r.tl_department_id] || null) : null;
-      r.mentor_name = c.mentor_user_id ? (mentorById[c.mentor_user_id] || null) : null;
-    }
-    rows.sort((a, b) => a.days_left - b.days_left);
 
-    return res.status(200).json({ items: rows });
+    const items = groups.map(g => {
+      const c = custById[g.customer_id] || {};
+      const dept = g.maxDeal?.tl_department_id || null;
+      const vId = g.maxDeal?.traject_variant_id || null;
+      return {
+        customer_id: g.customer_id,
+        customer_name: `${c.first_name || ''} ${c.last_name || ''}`.trim() || '—',
+        customer_email: c.email || null,
+        entity: dept ? (entByTl[dept] || null) : null,
+        mentor_name: c.mentor_user_id ? (mentorById[c.mentor_user_id] || null) : null,
+        traject_label: vId ? (variantLabel[vId] || null) : null,
+        end_date: g.maxEnd,
+        days_left: Math.ceil((new Date(g.maxEnd).getTime() - now) / 86400000),
+        active_subs_count: g.subs.length,
+        subs: g.subs.sort((a, b) => String(a.end_date).localeCompare(String(b.end_date))),
+      };
+    }).sort((a, b) => a.days_left - b.days_left);
+
+    return res.status(200).json({ items });
   } catch (e) {
     console.error('[sales-retention]', e.message);
     return res.status(500).json({ error: e.message });

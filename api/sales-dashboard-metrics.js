@@ -32,13 +32,18 @@ export default async function handler(req, res) {
     const { count: onboardingCount } = await supabaseAdmin.from('customers')
       .select('id', { count: 'exact', head: true }).eq('onboarding_status', 'sent');
 
-    // Retentie deze maand: ALLEEN ACTIEVE subscriptions die binnen 30 dagen aflopen
-    // (eerder telde dit ook cancelled/paused/completed mee → te hoog, bv. '6' i.p.v. '0').
+    // Retentie deze maand: aantal UNIEKE KLANTEN waarvan de LAATSTE actieve sub
+    // (MAX(end_date)) binnen 30 dagen afloopt. Per-klant aggregatie → een klant met
+    // een opvolgende sub (latere end_date) telt NIET mee.
     const today = new Date().toISOString().slice(0, 10);
     const in30 = new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10);
-    const { data: endingSubs } = await supabaseAdmin.from('subscriptions')
-      .select('deal_id, end_date').eq('status', 'active').gte('end_date', today).lte('end_date', in30);
-    const retentionCount = new Set((endingSubs || []).map(s => s.deal_id)).size;
+    const { data: actSubs } = await supabaseAdmin.from('subscriptions').select('deal_id, end_date').eq('status', 'active').not('end_date', 'is', null);
+    const relDealIds = [...new Set((actSubs || []).map(s => s.deal_id).filter(Boolean))];
+    const custByDeal = {};
+    if (relDealIds.length) { const { data: ds } = await supabaseAdmin.from('deals').select('id, customer_id').in('id', relDealIds); for (const d of ds || []) custByDeal[d.id] = d.customer_id; }
+    const maxEndByCust = {};
+    for (const s of actSubs || []) { const cid = custByDeal[s.deal_id]; if (!cid) continue; if (!maxEndByCust[cid] || s.end_date > maxEndByCust[cid]) maxEndByCust[cid] = s.end_date; }
+    const retentionCount = Object.values(maxEndByCust).filter(e => e >= today && e <= in30).length;
 
     return res.status(200).json({
       my_open_quotations: myOpenQuotations,

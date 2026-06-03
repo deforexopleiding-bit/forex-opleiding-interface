@@ -856,7 +856,7 @@ async function loadRetentie() {
     retItems = data.items || [];
     const urgent = retItems.filter(i => i.days_left >= 0 && i.days_left < 14).length;
     const sub = document.getElementById('retSubtitle');
-    if (sub) sub.textContent = `${retItems.length} traject(en) lopen binnen 30 dagen af · ${urgent} urgent (<14 dgn)`;
+    if (sub) sub.textContent = `${retItems.length} klant(en) waarvan het laatste abonnement binnen 30 dagen afloopt · ${urgent} urgent (<14 dgn)`;
     renderRetentie();
   } catch (e) { wrap.innerHTML = '<div class="sr-empty">Laden mislukt: ' + esc(e.message) + '</div>'; }
 }
@@ -875,9 +875,10 @@ function renderRetentie() {
   const sc = retSort.dir === 'asc' ? 'sortable asc' : 'sortable desc';
   wrap.innerHTML = `<div class="sr-tablewrap"><table class="sr-table">
     <thead><tr><th>Klant</th><th>Bedrijf</th><th>Traject</th><th>Mentor</th>
-      <th class="${sc}" data-sort="end">Einddatum</th><th>Tot einde</th><th>Laatste contact</th><th></th></tr></thead>
-    <tbody>${rows.map(it => {
+      <th class="${sc}" data-sort="end">Laatste eind</th><th>Tot einde</th><th class="center">Abo's</th><th></th></tr></thead>
+    <tbody>${rows.map((it, i) => {
       const urgent = it.days_left < 14;
+      const n = it.active_subs_count || (it.subs ? it.subs.length : 0);
       const mentor = it.mentor_name ? `<span class="sr-userline">${avatarHtml(it.mentor_name, 'sm')}<span>${esc(it.mentor_name)}</span></span>` : '<span style="color:var(--text-faint);font-style:italic">Niet toegewezen</span>';
       const menu = [
         `<a class="sr-menu-item" href="/modules/klanten.html?id=${esc(it.customer_id)}"><i class="ti ti-user"></i> Klant-detail bekijken</a>`,
@@ -885,18 +886,23 @@ function renderRetentie() {
         `<button class="sr-menu-item" onclick="toast('Binnenkort beschikbaar')"><i class="ti ti-bell"></i> Aanmelden voor opvolging</button>`,
       ];
       const dots = `<div class="sr-menu"><button class="sr-ibtn sr-menu-toggle" title="Meer acties"><i class="ti ti-dots"></i></button><div class="sr-menu-pop">${menu.join('')}</div></div>`;
+      const caret = (n > 1) ? `<button class="sr-ibtn" data-ret-toggle="${i}" style="width:24px;height:24px;margin-right:4px"><i class="ti ti-chevron-right"></i></button>` : '<span style="display:inline-block;width:28px"></span>';
+      const detail = (n && it.subs) ? `<tr class="ret-detail" id="ret-detail-${i}" hidden><td colspan="8" style="background:var(--bg-elev-2);padding-left:40px">
+        <table style="width:100%;font-size:12px"><thead><tr><th style="text-align:left">Abonnement</th><th style="text-align:left">Start</th><th style="text-align:left">Eind</th></tr></thead>
+        <tbody>${it.subs.map(s => `<tr><td>${esc(s.description || '—')}</td><td>${s.start_date ? fmtDateNL(s.start_date) : '—'}</td><td>${s.end_date ? fmtDateNL(s.end_date) : '—'}</td></tr>`).join('')}</tbody></table></td></tr>` : '';
       return `<tr${urgent ? ' style="background:rgba(220,38,38,.05)"' : ''}>
-        <td><a class="sr-userline" href="/modules/klanten.html?id=${esc(it.customer_id)}" style="text-decoration:none;color:inherit">${avatarHtml(it.customer_name)}<span><span class="sr-uname">${esc(it.customer_name)}</span><br><span class="sr-cellsub">${esc(it.customer_email || '—')}</span></span></a></td>
+        <td><span style="display:flex;align-items:center">${caret}<a class="sr-userline" href="/modules/klanten.html?id=${esc(it.customer_id)}" style="text-decoration:none;color:inherit">${avatarHtml(it.customer_name)}<span><span class="sr-uname">${esc(it.customer_name)}</span><br><span class="sr-cellsub">${esc(it.customer_email || '—')}</span></span></a></span></td>
         <td>${entityTag(it.entity)}</td>
         <td>${esc(it.traject_label || '—')}</td>
         <td>${mentor}</td>
         <td>${fmtDateNL(it.end_date)}</td>
         <td>${totEindeBadge(it)}</td>
-        <td><span class="sr-cellsub">—</span></td>
+        <td class="center"><span class="sr-tag ${n > 1 ? 'blue' : 'gray'}">${n} abo${n === 1 ? '' : "'s"}</span></td>
         <td class="sr-actions"><a class="sr-abtn primary" href="/modules/sales-wizard.html?customer_id=${esc(it.customer_id)}"><i class="ti ti-file-plus"></i> Nieuwe offerte</a>${dots}</td>
-      </tr>`;
+      </tr>${detail}`;
     }).join('')}</tbody></table></div>`;
   wrap.querySelectorAll('[data-sort]').forEach(th => th.addEventListener('click', () => { retSort.dir = retSort.dir === 'asc' ? 'desc' : 'asc'; renderRetentie(); }));
+  wrap.querySelectorAll('[data-ret-toggle]').forEach(btn => btn.addEventListener('click', () => { const r = document.getElementById('ret-detail-' + btn.dataset.retToggle); if (!r) return; r.hidden = !r.hidden; btn.querySelector('i').className = r.hidden ? 'ti ti-chevron-right' : 'ti ti-chevron-down'; }));
 }
 document.getElementById('retMineToggle').addEventListener('change', () => loadRetentie());
 document.getElementById('retSearch').addEventListener('input', () => renderRetentie());
