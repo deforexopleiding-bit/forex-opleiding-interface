@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Teamleader Import · De Forex Opleiding</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/dist/tabler-icons.min.css" />
+  <link rel="stylesheet" href="/modules/shared/agent-shared.css" />
+  <link rel="stylesheet" href="/styles/sales-redesign.css" />
+  <style>
+    *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+    body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--text);min-height:100vh}
+    .app{margin-left:220px;padding:24px 28px 60px;max-width:1100px}
+    .page-head{padding-bottom:14px;border-bottom:1px solid var(--border);margin-bottom:18px}
+    h1{font-size:22px;font-weight:800}
+    .sub{font-size:12.5px;color:var(--text-dim);margin-top:2px}
+    label.cfg{display:block;font-size:11.5px;font-weight:600;color:var(--text-dim);margin-bottom:4px}
+    .ov{position:fixed;inset:0;background:rgba(0,0,0,.45);display:none;align-items:center;justify-content:center;z-index:9999}
+    .ov.show{display:flex}
+  </style>
+</head>
+<body>
+<div id="sidebar-mount"></div>
+<div class="app">
+  <div class="page-head">
+    <h1>Teamleader Import</h1>
+    <div class="sub">Importeer actieve abonnementen + klanten uit Teamleader naar dit systeem.</div>
+  </div>
+  <div id="gate" style="display:none"><div class="sr-empty">Geen toegang — alleen super_admin.</div></div>
+  <div id="main" style="display:none">
+    <!-- Config -->
+    <div class="sr-card" style="margin-bottom:14px">
+      <div class="sr-card-h">Configuratie</div>
+      <div class="sr-grid sr-grid-2" style="gap:12px">
+        <div><label class="cfg">Entiteit</label><select class="sr-select" id="cfgEntity" style="width:100%"><option value="">Alle entiteiten</option></select></div>
+        <div><label class="cfg">Max aantal subs per run (max 500)</label><input class="sr-select" id="cfgLimit" type="number" min="1" max="500" value="5" style="width:100%" /></div>
+      </div>
+      <label class="sr-toggle" style="margin-top:10px"><input type="checkbox" id="cfgSkip" checked> Skip bestaande (idempotent)</label>
+      <label class="sr-toggle" style="margin-top:6px"><input type="checkbox" id="cfgDry" checked> Dry-run (alleen tellen, niet schrijven)</label>
+      <div style="margin-top:14px"><button class="sr-abtn primary" id="startBtn" style="padding:8px 16px"><i class="ti ti-download"></i> Start import</button></div>
+      <div id="cfgErr" style="color:#dc2626;font-size:12px;margin-top:8px"></div>
+    </div>
+    <!-- Resultaat -->
+    <div id="resultBox" style="display:none"></div>
+    <!-- Geschiedenis (in-sessie) -->
+    <div class="sr-card" style="margin-top:14px"><div class="sr-card-h">Geschiedenis (deze sessie)</div><div id="historyBox"><div class="sr-empty">Nog geen runs.</div></div></div>
+  </div>
+</div>
+
+<div class="ov" id="confirmOv">
+  <div class="sr-card" style="max-width:380px;width:90%">
+    <h3 style="font-size:15px;margin-bottom:8px">⚠️ Live import bevestigen</h3>
+    <p style="font-size:12.5px;color:var(--text-dim);margin-bottom:14px">Dit importeert ECHT data naar productie (klanten + abonnementen). Weet je het zeker?</p>
+    <div style="display:flex;justify-content:flex-end;gap:8px"><button class="sr-abtn" id="cfgCancel">Annuleren</button><button class="sr-abtn warning" id="cfgConfirm">Ja, importeer</button></div>
+  </div>
+</div>
+
+<script src="/modules/shared/supabase-client.js"></script>
+<script src="/modules/shared/agent-shared.js"></script>
+<script src="/modules/shared/theme-shared.js"></script>
+<script>
+function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
+const history = [];
+let resultFilter = 'alle', lastDetails = [];
+
+async function runImport() {
+  const dry = document.getElementById('cfgDry').checked;
+  const payload = {
+    dry_run: dry,
+    department_id: document.getElementById('cfgEntity').value || null,
+    limit: Number(document.getElementById('cfgLimit').value) || 5,
+    skip_existing: document.getElementById('cfgSkip').checked,
+  };
+  const btn = document.getElementById('startBtn'); btn.disabled = true; btn.innerHTML = '<i class="ti ti-loader"></i> Bezig…';
+  document.getElementById('cfgErr').textContent = '';
+  try {
+    const res = await window.AgentShared.apiFetch('/api/admin/tl-import-subscriptions', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+    const d = await res.json();
+    if (!res.ok) throw new Error(d.error || 'HTTP ' + res.status);
+    history.unshift({ at: new Date(), dry: d.dry_run, totals: d.totals });
+    lastDetails = d.details || [];
+    renderResult(d); renderHistory();
+  } catch (e) { document.getElementById('cfgErr').textContent = e.message; }
+  btn.disabled = false; btn.innerHTML = '<i class="ti ti-download"></i> Start import';
+}
+function renderResult(d) {
+  const box = document.getElementById('resultBox'); box.style.display = '';
+  const t = d.totals || {};
+  const kpi = (l, v, c) => `<div class="sr-stat"><div class="sr-stat-l">${l}</div><div class="sr-stat-v"${c ? ` style="color:${c}"` : ''}>${v}</div></div>`;
+  box.innerHTML = `<div class="sr-card">
+    <div class="sr-card-h">Resultaat ${d.dry_run ? '<span class="sr-tag warning">Dry-run</span>' : '<span class="sr-tag green">Live</span>'}</div>
+    <div class="sr-grid sr-grid-4" style="margin-bottom:14px">
+      ${kpi('Subs verwerkt', t.subs_processed || 0)}
+      ${kpi('Subs geïmporteerd', t.subs_imported || 0, '#059669')}
+      ${kpi('Klanten geïmporteerd', t.customers_imported || 0, '#0891b2')}
+      ${kpi('Errors', t.errors || 0, (t.errors > 0) ? '#dc2626' : '')}
+    </div>
+    <div class="sr-segments" id="resFilter" style="margin-bottom:10px">
+      ${[['alle', 'Alle'], ['imported', 'Geïmporteerd'], ['skipped', 'Skipped'], ['error', 'Errors']].map(([k, l]) => `<button class="sr-seg${resultFilter === k ? ' active' : ''}" data-f="${k}">${l}</button>`).join('')}
+    </div>
+    <div id="resTable"></div>
+  </div>`;
+  renderResTable();
+  document.querySelectorAll('#resFilter .sr-seg').forEach(b => b.addEventListener('click', () => { resultFilter = b.dataset.f; document.querySelectorAll('#resFilter .sr-seg').forEach(x => x.classList.remove('active')); b.classList.add('active'); renderResTable(); }));
+}
+function renderResTable() {
+  const rows = lastDetails.filter(r => resultFilter === 'alle' || r.action === resultFilter);
+  const BADGE = { imported: 'green', skipped: 'gray', error: 'danger' };
+  document.getElementById('resTable').innerHTML = rows.length ? `<div class="sr-tablewrap"><table class="sr-table">
+    <thead><tr><th>TL Sub ID</th><th>Klant</th><th>Actie</th><th>Klant-actie</th><th>Fout</th></tr></thead>
+    <tbody>${rows.map(r => `<tr><td><span class="sr-cellsub">${esc(String(r.tl_sub_id).slice(0, 12))}</span></td><td>${esc(r.customer_name || '—')}</td><td><span class="sr-tag ${BADGE[r.action] || 'gray'}">${esc(r.action)}</span></td><td>${esc(r.customer_action || '—')}</td><td><span style="color:#dc2626;font-size:11px">${esc(r.error || '')}</span></td></tr>`).join('')}</tbody></table></div>` : '<div class="sr-empty">Geen rijen.</div>';
+}
+function renderHistory() {
+  document.getElementById('historyBox').innerHTML = history.length ? history.map(h => `<div class="feed-item"><span>${h.dry ? '<span class="sr-tag warning">dry</span>' : '<span class="sr-tag green">live</span>'} ${h.totals.subs_imported} subs · ${h.totals.customers_imported} klanten · ${h.totals.errors} errors</span><span class="feed-time">${h.at.toLocaleTimeString('nl-NL', { hour: '2-digit', minute: '2-digit' })}</span></div>`).join('') : '<div class="sr-empty">Nog geen runs.</div>';
+}
+
+(async () => {
+  await window._authSharedReady;
+  const profile = await window.AuthShared?.requireAuth(['super_admin']);
+  if (!profile) return;
+  if (window.AgentShared) await window.AgentShared.renderUserSection(profile);
+  if (profile.role !== 'super_admin') { document.getElementById('gate').style.display = ''; return; }
+  document.getElementById('main').style.display = '';
+  // Entiteiten laden.
+  try { const r = await window.AgentShared.apiFetch('/api/company-entities'); const d = await r.json(); const sel = document.getElementById('cfgEntity'); for (const e of d.entities || []) { const o = document.createElement('option'); o.value = e.tl_department_id; o.textContent = e.label; sel.appendChild(o); } } catch {}
+  // Start-knop kleurt warning bij live.
+  const dry = document.getElementById('cfgDry'), btn = document.getElementById('startBtn');
+  const syncBtn = () => { btn.className = 'sr-abtn ' + (dry.checked ? 'primary' : 'warning'); };
+  dry.addEventListener('change', syncBtn); syncBtn();
+  btn.addEventListener('click', () => { if (dry.checked) runImport(); else document.getElementById('confirmOv').classList.add('show'); });
+  document.getElementById('cfgCancel').addEventListener('click', () => document.getElementById('confirmOv').classList.remove('show'));
+  document.getElementById('cfgConfirm').addEventListener('click', () => { document.getElementById('confirmOv').classList.remove('show'); runImport(); });
+})();
+</script>
+<script src="/modules/shared/permissions.js"></script>
+<script src="/modules/shared/sidebar.js"></script>
+</body>
+</html>
