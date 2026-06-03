@@ -249,6 +249,11 @@
 
   <!-- ── Tab: Rapporten (Fase 4) ── -->
   <section class="tab-content" id="tab-reports">
+    <div class="sr-subtabs" id="repViewTabs">
+      <button class="sr-subtab active" data-view="sales"><i class="ti ti-chart-bar"></i> Sales-rapport</button>
+      <button class="sr-subtab" data-view="mrr"><i class="ti ti-credit-card"></i> Abonnementen MRR</button>
+    </div>
+    <div id="repSalesView">
     <div class="sr-filterstrip" style="align-items:center">
       <div class="sr-segments" id="repSegments" style="margin-bottom:0">
         <button class="sr-seg" data-range="today">Vandaag</button>
@@ -265,6 +270,8 @@
       <button class="sr-iconbtn" id="repRefresh" title="Vernieuwen"><i class="ti ti-refresh"></i></button>
     </div>
     <div id="repBody"><div class="sr-empty">Kies een periode en klik Toepassen.</div></div>
+    </div>
+    <div id="repMrrView" style="display:none"><div class="sr-empty">Laden…</div></div>
   </section>
 </div>
 
@@ -1165,6 +1172,42 @@ const PALETTE = ['#0891b2', '#059669', '#f59e0b', '#dc2626', '#7c3aed', '#0ea5e9
 let _repCharts = {};
 let _repData = null;
 let _repInit = false;
+let _mrrLoaded = false, _mrrCharts = {};
+async function loadMrr() {
+  const wrap = document.getElementById('repMrrView');
+  wrap.innerHTML = '<div class="sr-empty">Laden…</div>';
+  try {
+    const res = await window.AgentShared.apiFetch('/api/sales-mrr-report');
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const d = await res.json();
+    _mrrLoaded = true;
+    Object.values(_mrrCharts).forEach(c => { try { c.destroy(); } catch {} }); _mrrCharts = {};
+    const k = d.kpis || {};
+    const chartsOk = typeof Chart !== 'undefined';
+    wrap.innerHTML = `
+      <div class="sr-grid sr-grid-4" style="margin-bottom:16px">
+        ${repCard('Huidige MRR', fmtEuro(k.current_mrr), 'ti-credit-card', 'sr-i-green')}
+        ${repCard("Actieve abo's", k.active_count, 'ti-repeat', 'sr-i-blue')}
+        ${repCard('Gem. MRR/abo', fmtEuro(k.avg_mrr), 'ti-chart-line', 'sr-i-blue')}
+        ${repCard('Cancellation rate', repPct(k.cancellation_rate), 'ti-trending-down', 'sr-i-pink')}
+      </div>
+      ${chartsOk ? `<div class="sr-grid" style="grid-template-columns:2fr 1fr;gap:14px;margin-bottom:16px">
+        <div class="card"><div style="font-size:12px;font-weight:700;margin-bottom:6px">MRR-trend (12 mnd terug + 12 vooruit)</div><div style="position:relative;height:280px"><canvas id="mrrTrend"></canvas></div></div>
+        <div class="card"><div style="font-size:12px;font-weight:700;margin-bottom:6px">MRR per traject</div><div style="position:relative;height:280px"><canvas id="mrrTraj"></canvas></div></div>
+      </div>
+      <div class="card" style="margin-bottom:16px"><div style="font-size:12px;font-weight:700;margin-bottom:6px">New vs Churned MRR per maand</div><div style="position:relative;height:240px"><canvas id="mrrFlow"></canvas></div></div>` : '<div class="sr-empty">Grafieken niet geladen (CDN).</div>'}
+      <h3 style="font-size:14px;margin:6px 0 8px">Top 10 grootste actieve abonnementen</h3>
+      <div class="sr-tablewrap"><table class="sr-table"><thead><tr><th>Klant</th><th>Omschrijving</th><th class="num">MRR (incl.)</th></tr></thead>
+      <tbody>${(d.top_subs || []).length ? (d.top_subs || []).map(s => `<tr><td><a href="/modules/klanten.html?id=${esc(s.customer_id)}" style="color:inherit;text-decoration:none">${esc(s.customer_name)}</a></td><td>${esc(s.description)}</td><td class="num">${fmtEuro(s.mrr)}</td></tr>`).join('') : '<tr><td colspan="3" class="sr-empty">Geen actieve abonnementen.</td></tr>'}</tbody></table></div>`;
+    if (chartsOk) {
+      const tr = d.trend || [];
+      _mrrCharts.trend = new Chart(document.getElementById('mrrTrend'), { type: 'line', data: { labels: tr.map(t => t.period), datasets: [{ label: 'MRR', data: tr.map(t => t.mrr), borderColor: PALETTE[1], backgroundColor: 'rgba(5,150,105,.15)', fill: true, tension: .25 }, { label: 'Actieve subs', data: tr.map(t => t.count), borderColor: PALETTE[0], yAxisID: 'y1', tension: .25 }] }, options: { responsive: true, maintainAspectRatio: false, scales: { y1: { position: 'right', grid: { drawOnChartArea: false } } } } });
+      const tj = (d.by_traject || []).slice(0, 8);
+      _mrrCharts.traj = new Chart(document.getElementById('mrrTraj'), { type: 'doughnut', data: { labels: tj.map(t => t.traject), datasets: [{ data: tj.map(t => t.mrr), backgroundColor: PALETTE }] }, options: { responsive: true, maintainAspectRatio: false } });
+      _mrrCharts.flow = new Chart(document.getElementById('mrrFlow'), { type: 'bar', data: { labels: tr.map(t => t.period), datasets: [{ label: 'New MRR', data: tr.map(t => t.new_mrr), backgroundColor: PALETTE[1] }, { label: 'Churned MRR', data: tr.map(t => -t.churned_mrr), backgroundColor: PALETTE[3] }] }, options: { responsive: true, maintainAspectRatio: false, scales: { x: { stacked: true }, y: { stacked: true } } } });
+    }
+  } catch (e) { wrap.innerHTML = '<div class="sr-empty">Laden mislukt: ' + esc(e.message) + '</div>'; }
+}
 const repPct = (v) => (Math.round((Number(v) || 0) * 100)) + '%';
 const repLocalDate = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 
@@ -1178,6 +1221,15 @@ function initReportsTab() {
     document.getElementById('repApply').addEventListener('click', loadReports);
     document.getElementById('repExport').addEventListener('click', repExport);
     document.getElementById('repRefresh').addEventListener('click', loadReports);
+    // View-toggle: Sales-rapport / Abonnementen MRR.
+    document.querySelectorAll('#repViewTabs .sr-subtab').forEach(b => b.addEventListener('click', () => {
+      document.querySelectorAll('#repViewTabs .sr-subtab').forEach(x => x.classList.remove('active'));
+      b.classList.add('active');
+      const mrr = b.dataset.view === 'mrr';
+      document.getElementById('repSalesView').style.display = mrr ? 'none' : '';
+      document.getElementById('repMrrView').style.display = mrr ? '' : 'none';
+      if (mrr && !_mrrLoaded) loadMrr();
+    }));
     if (!document.getElementById('repFrom').value) repSetRange('month');
     else loadReports();
   } else {
