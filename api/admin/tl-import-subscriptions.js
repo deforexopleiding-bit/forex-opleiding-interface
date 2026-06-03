@@ -35,7 +35,7 @@ function buildReverseTaxMap() {
   console.log('[tl-import] taxMap built:', JSON.stringify(map));
   return map;
 }
-function lineTaxId(li) { return li.tax_rate?.id || li.tax_rate_id || null; }
+function lineTaxId(li) { return li.tax_rate?.id || li.tax_rate_id || (li.tax?.type === 'taxRate' ? li.tax.id : null) || null; }
 function lineVat(li, taxMap) {
   const id = lineTaxId(li);
   const found = !!(id && taxMap[id] != null);
