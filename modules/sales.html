@@ -1181,21 +1181,47 @@ let _repCharts = {};
 let _repData = null;
 let _repInit = false;
 let _mrrLoaded = false, _mrrCharts = {}, _mrrEntity = localStorage.getItem('mrr_entity') || '', _mrrEntities = null, _mrrData = null;
+let _mrrPeriod = localStorage.getItem('mrr_period') || 'deze_maand';
+let _mrrCustom = (() => { try { return JSON.parse(localStorage.getItem('mrr_custom') || '{}'); } catch { return {}; } })();
+const MRR_PERIODS = [['deze_maand', 'Deze maand'], ['vorige_maand', 'Vorige maand'], ['dit_kwartaal', 'Dit kwartaal'], ['vorig_kwartaal', 'Vorig kwartaal'], ['dit_jaar', 'Dit jaar'], ['vorig_jaar', 'Vorig jaar'], ['custom', 'Custom range…']];
+function mrrPeriodRange(key) {
+  const n = new Date(), y = n.getFullYear(), m = n.getMonth(), q = Math.floor(m / 3);
+  const fmt = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  switch (key) {
+    case 'vorige_maand': return [fmt(new Date(y, m - 1, 1)), fmt(new Date(y, m, 0))];
+    case 'dit_kwartaal': return [fmt(new Date(y, q * 3, 1)), fmt(new Date(y, q * 3 + 3, 0))];
+    case 'vorig_kwartaal': return [fmt(new Date(y, q * 3 - 3, 1)), fmt(new Date(y, q * 3, 0))];
+    case 'dit_jaar': return [fmt(new Date(y, 0, 1)), fmt(new Date(y, 11, 31))];
+    case 'vorig_jaar': return [fmt(new Date(y - 1, 0, 1)), fmt(new Date(y - 1, 11, 31))];
+    case 'custom': return [_mrrCustom.start || fmt(new Date(y, m, 1)), _mrrCustom.end || fmt(new Date(y, m + 1, 0))];
+    default: return [fmt(new Date(y, m, 1)), fmt(new Date(y, m + 1, 0))]; // deze_maand
+  }
+}
 async function loadMrr() {
   const wrap = document.getElementById('repMrrView');
   wrap.innerHTML = '<div class="sr-empty">Laden…</div>';
   try {
     if (!_mrrEntities) { try { const er = await window.AgentShared.apiFetch('/api/company-entities'); _mrrEntities = (await er.json()).entities || []; } catch { _mrrEntities = []; } }
-    const res = await window.AgentShared.apiFetch('/api/sales-mrr-report' + (_mrrEntity ? '?entity_id=' + encodeURIComponent(_mrrEntity) : ''));
+    const [pStart, pEnd] = mrrPeriodRange(_mrrPeriod);
+    const qp = new URLSearchParams({ period_start: pStart, period_end: pEnd });
+    if (_mrrEntity) qp.set('entity_id', _mrrEntity);
+    const res = await window.AgentShared.apiFetch('/api/sales-mrr-report?' + qp);
     if (!res.ok) throw new Error('HTTP ' + res.status);
     const d = await res.json(); _mrrData = d; _mrrLoaded = true;
     Object.values(_mrrCharts).forEach(c => { try { c.destroy(); } catch {} }); _mrrCharts = {};
     const k = d.kpis || {};
     const chartsOk = typeof Chart !== 'undefined';
     const entOpts = '<option value="">Alle entiteiten</option>' + _mrrEntities.map(e => `<option value="${esc(e.tl_department_id)}"${_mrrEntity === e.tl_department_id ? ' selected' : ''}>${esc(e.label)}</option>`).join('');
-    const mrrCard = `<div class="sr-stat sr-i-green" id="mrrKpiCard" style="cursor:pointer" title="Maandelijks Recurring Revenue = som van (bedrag/termijn ÷ billing-cycle in maanden) voor alle actieve subs"><div class="sr-stat-l"><i class="ti ti-credit-card"></i>Huidige MRR <i class="ti ti-info-circle" style="font-size:13px;opacity:.6"></i></div><div class="sr-stat-v">${fmtEuro(k.current_mrr)}</div><div class="sr-stat-d">klik voor drilldown</div></div>`;
+    const mrrCard = `<div class="sr-stat sr-i-green" id="mrrKpiCard" style="cursor:pointer" title="MRR aan eind van de periode = som van (bedrag/termijn ÷ billing-cycle in maanden) voor alle subs die op de periode-einddatum liepen"><div class="sr-stat-l"><i class="ti ti-credit-card"></i>MRR eind periode <i class="ti ti-info-circle" style="font-size:13px;opacity:.6"></i></div><div class="sr-stat-v">${fmtEuro(k.current_mrr)}</div><div class="sr-stat-d">klik voor drilldown</div></div>`;
+    const perOpts = MRR_PERIODS.map(([v, l]) => `<option value="${v}"${_mrrPeriod === v ? ' selected' : ''}>${l}</option>`).join('');
+    const customWrap = `<span id="mrrCustomWrap" style="display:${_mrrPeriod === 'custom' ? 'inline-flex' : 'none'};gap:6px;align-items:center"><input class="sr-select" id="mrrCustStart" type="date" style="max-width:150px" value="${esc(_mrrCustom.start || pStart)}" /><span class="sr-cellsub">t/m</span><input class="sr-select" id="mrrCustEnd" type="date" style="max-width:150px" value="${esc(_mrrCustom.end || pEnd)}" /></span>`;
     wrap.innerHTML = `
-      <div class="sr-filterstrip"><label class="cfg" style="font-size:11.5px;color:var(--text-dim)">Entiteit</label><select class="sr-select" id="mrrEntity">${entOpts}</select></div>
+      <div class="sr-filterstrip">
+        <label class="cfg" style="font-size:11.5px;color:var(--text-dim)">Periode</label><select class="sr-select" id="mrrPeriod">${perOpts}</select>
+        ${customWrap}
+        <label class="cfg" style="font-size:11.5px;color:var(--text-dim);margin-left:8px">Entiteit</label><select class="sr-select" id="mrrEntity">${entOpts}</select>
+        <span class="sr-cellsub sr-spacer">${esc(pStart)} t/m ${esc(pEnd)}</span>
+      </div>
       <div class="sr-grid sr-grid-4" style="margin-bottom:16px">
         ${mrrCard}
         ${repCard("Actieve abo's", k.active_count, 'ti-repeat', 'sr-i-blue')}
@@ -1214,6 +1240,15 @@ async function loadMrr() {
       <div class="sr-tablewrap"><table class="sr-table"><thead><tr><th>Klant</th><th>Omschrijving</th><th>Cyclus</th><th class="num">MRR (incl.)</th></tr></thead>
       <tbody>${(d.top_subs || []).length ? (d.top_subs || []).map(s => `<tr><td><a href="/modules/klanten.html?id=${esc(s.customer_id)}" style="color:inherit;text-decoration:none">${esc(s.customer_name)}</a></td><td>${esc(s.description)}</td><td><span class="sr-cellsub">${esc(s.billing_cycle)}</span></td><td class="num">${fmtEuro(s.mrr)}</td></tr>`).join('') : '<tr><td colspan="4" class="sr-empty">Geen actieve abonnementen.</td></tr>'}</tbody></table></div>`;
     document.getElementById('mrrEntity').addEventListener('change', (e) => { _mrrEntity = e.target.value; localStorage.setItem('mrr_entity', _mrrEntity); loadMrr(); });
+    document.getElementById('mrrPeriod').addEventListener('change', (e) => {
+      _mrrPeriod = e.target.value; localStorage.setItem('mrr_period', _mrrPeriod);
+      if (_mrrPeriod === 'custom') { document.getElementById('mrrCustomWrap').style.display = 'inline-flex'; } // wacht op datumkeuze
+      else loadMrr();
+    });
+    const cs = document.getElementById('mrrCustStart'), ce = document.getElementById('mrrCustEnd');
+    const applyCustom = () => { _mrrCustom = { start: cs.value, end: ce.value }; localStorage.setItem('mrr_custom', JSON.stringify(_mrrCustom)); if (cs.value && ce.value) loadMrr(); };
+    if (cs) cs.addEventListener('change', applyCustom);
+    if (ce) ce.addEventListener('change', applyCustom);
     document.getElementById('mrrKpiCard').addEventListener('click', openMrrDrilldown);
     if (chartsOk) {
       const tr = d.trend || [];

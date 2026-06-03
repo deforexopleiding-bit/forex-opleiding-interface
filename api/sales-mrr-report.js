@@ -39,6 +39,12 @@ export default async function handler(req, res) {
   }
 
   const entityId = req.query?.entity_id || null;
+  const now = new Date();
+  // Periode (default: huidige maand). Snapshot-KPI's op periode-eind; tellingen
+  // over de periode; trend blijft altijd 12+12 (lange-termijn view).
+  const defEndD = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+  const periodStart = String(req.query?.period_start || `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`).slice(0, 10);
+  const periodEnd = String(req.query?.period_end || `${defEndD.getFullYear()}-${String(defEndD.getMonth() + 1).padStart(2, '0')}-${String(defEndD.getDate()).padStart(2, '0')}`).slice(0, 10);
 
   try {
     let sq = supabaseAdmin.from('subscriptions')
@@ -46,15 +52,17 @@ export default async function handler(req, res) {
     if (entityId) sq = sq.eq('tl_department_id', entityId);
     const { data: subs } = await sq;
     const list = subs || [];
-    const active = list.filter(s => s.status === 'active');
-    const cancelled = list.filter(s => s.status === 'cancelled');
+    // Snapshot: subs die op periode-eind liepen (datumvenster, status-onafhankelijk
+    // voor historische correctheid). 'active' = snapshot-set → voedt KPI/traject/drilldown.
+    const active = list.filter(s => s.start_date && s.start_date <= periodEnd && (!s.end_date || s.end_date >= periodEnd));
+    const activeInPeriod = list.filter(s => s.start_date && s.start_date <= periodEnd && (!s.end_date || s.end_date >= periodStart));
+    const churnedInPeriod = list.filter(s => s.end_date && s.end_date >= periodStart && s.end_date <= periodEnd);
 
     const currentMrr = active.reduce((a, s) => a + mrrOf(s), 0);
     const avgMrr = active.length ? currentMrr / active.length : 0;
-    const cancellationRate = (active.length + cancelled.length) ? cancelled.length / (active.length + cancelled.length) : 0;
+    const cancellationRate = activeInPeriod.length ? churnedInPeriod.length / activeInPeriod.length : 0;
 
-    // Maand-reeks -12..+12 (MRR-bijdrage gedeeld door cyclus).
-    const now = new Date();
+    // Maand-reeks -12..+12 (MRR-bijdrage gedeeld door cyclus). Altijd 12+12, ongeacht periode.
     const months = [];
     for (let i = -12; i <= 12; i++) {
       const d = new Date(now.getFullYear(), now.getMonth() + i, 1);
@@ -114,7 +122,8 @@ export default async function handler(req, res) {
 
     return res.status(200).json({
       entity_id: entityId,
-      kpis: { current_mrr: r2(currentMrr), active_count: active.length, avg_mrr: r2(avgMrr), cancellation_rate: r2(cancellationRate) },
+      period: { start: periodStart, end: periodEnd },
+      kpis: { current_mrr: r2(currentMrr), active_count: activeInPeriod.length, avg_mrr: r2(avgMrr), cancellation_rate: r2(cancellationRate) },
       trend, by_traject, top_subs: drilldown.slice(0, 10), drilldown,
     });
   } catch (e) {
