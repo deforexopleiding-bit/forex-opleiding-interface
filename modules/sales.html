@@ -212,7 +212,6 @@
       <div class="sr-subtabs">
         <button class="sr-subtab active" data-sub="trajecten"><i class="ti ti-package"></i> Trajecten <span class="sr-seg-n" id="aanbodTrajCount"></span></button>
         <button class="sr-subtab" data-sub="producten"><i class="ti ti-box"></i> Producten <span class="sr-seg-n" id="aanbodProdCount"></span></button>
-        <button class="sr-subtab" disabled><i class="ti ti-coin"></i> Bonussen <span class="sr-tag warning">Binnenkort</span></button>
       </div>
       <label class="sr-toggle" title="Toon prijzen incl. of excl. BTW (geldt voor beide sub-tabs)"><input type="checkbox" id="btwToggle"> Incl. BTW</label>
     </div>
@@ -976,12 +975,32 @@ document.getElementById('quotEntity').addEventListener('change', () => renderQuo
 document.getElementById('quotSeller').addEventListener('change', () => renderQuotations());
 document.getElementById('quotRefresh').addEventListener('click', () => loadQuotations());
 
-// Globale 3-dots menu-controller (sluit op outside-click / andere toggle).
+// Globale 3-dots menu-controller. Positioneert de pop via position:fixed
+// (getBoundingClientRect) zodat overflow:hidden van de tabel niet afsnijdt;
+// klapt omhoog bij weinig ruimte onderaan; sluit op scroll/resize/outside-click.
+function srCloseMenus() { document.querySelectorAll('.sr-menu.open').forEach(m => m.classList.remove('open')); }
+function srPositionMenu(menu, toggle) {
+  const pop = menu.querySelector('.sr-menu-pop'); if (!pop) return;
+  const r = toggle.getBoundingClientRect();
+  pop.style.top = ''; pop.style.left = '';
+  const ph = pop.offsetHeight, pw = pop.offsetWidth;
+  const spaceBelow = window.innerHeight - r.bottom;
+  pop.style.top = (spaceBelow < ph + 12 && r.top > ph + 12 ? r.top - ph - 4 : r.bottom + 4) + 'px';
+  pop.style.left = Math.max(8, Math.min(r.right - pw, window.innerWidth - pw - 8)) + 'px';
+}
 document.addEventListener('click', (e) => {
   const toggle = e.target.closest('.sr-menu-toggle');
   document.querySelectorAll('.sr-menu.open').forEach(m => { if (!toggle || m !== toggle.closest('.sr-menu')) m.classList.remove('open'); });
-  if (toggle) { e.preventDefault(); toggle.closest('.sr-menu').classList.toggle('open'); }
+  if (toggle) {
+    e.preventDefault();
+    const menu = toggle.closest('.sr-menu');
+    const opening = !menu.classList.contains('open');
+    menu.classList.toggle('open');
+    if (opening) srPositionMenu(menu, toggle);
+  }
 });
+window.addEventListener('scroll', srCloseMenus, true);
+window.addEventListener('resize', srCloseMenus);
 
 // ── Trajecten ──
 // ── Aanbod (Trajecten + Producten samengevoegd) ──

@@ -993,7 +993,18 @@ async function koPush(id) { try { const r = await window.AgentShared.apiFetch('/
 function koEdit(id, needConfirm) { if (needConfirm && !confirm('Weet je zeker dat je de offerte wilt bewerken? Deze is al getekend en zal niet meer geldig zijn.')) return; window.location.href = '/modules/sales-wizard.html?edit_deal_id=' + id; }
 async function koDelete(id) { if (!confirm('Weet je zeker dat je deze offerte wilt verwijderen?')) return; if (!confirm('Dit kan NIET ongedaan worden. Offerte wordt zowel hier als in Teamleader verwijderd. Doorgaan?')) return; try { const r = await window.AgentShared.apiFetch('/api/teamleader-delete-quotation', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ deal_id: id }) }); const d = await r.json(); if (!r.ok || d.success === false) throw new Error(d.error || 'HTTP ' + r.status); window.AgentShared?.showToast('Offerte verwijderd', 'success'); renderOffertesTab(); } catch (e) { window.AgentShared?.showToast('Mislukt: ' + e.message, 'error'); } }
 // 3-dots controller (één keer).
-if (!window._koMenuInit) { window._koMenuInit = true; document.addEventListener('click', (e) => { const t = e.target.closest('.sr-menu-toggle'); document.querySelectorAll('.sr-menu.open').forEach(m => { if (!t || m !== t.closest('.sr-menu')) m.classList.remove('open'); }); if (t) { e.preventDefault(); t.closest('.sr-menu').classList.toggle('open'); } }); }
+if (!window._koMenuInit) {
+  window._koMenuInit = true;
+  const close = () => document.querySelectorAll('.sr-menu.open').forEach(m => m.classList.remove('open'));
+  const place = (menu, t) => { const pop = menu.querySelector('.sr-menu-pop'); if (!pop) return; const r = t.getBoundingClientRect(); const ph = pop.offsetHeight, pw = pop.offsetWidth; const below = window.innerHeight - r.bottom; pop.style.top = (below < ph + 12 && r.top > ph + 12 ? r.top - ph - 4 : r.bottom + 4) + 'px'; pop.style.left = Math.max(8, Math.min(r.right - pw, window.innerWidth - pw - 8)) + 'px'; };
+  document.addEventListener('click', (e) => {
+    const t = e.target.closest('.sr-menu-toggle');
+    document.querySelectorAll('.sr-menu.open').forEach(m => { if (!t || m !== t.closest('.sr-menu')) m.classList.remove('open'); });
+    if (t) { e.preventDefault(); const menu = t.closest('.sr-menu'); const opening = !menu.classList.contains('open'); menu.classList.toggle('open'); if (opening) place(menu, t); }
+  });
+  window.addEventListener('scroll', close, true);
+  window.addEventListener('resize', close);
+}
 async function renderOffertesTab() {
   const wrap = $('#offertes-list');
   wrap.innerHTML = '<div class="placeholder-card">Offertes laden…</div>';
