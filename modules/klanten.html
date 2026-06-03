@@ -1080,6 +1080,10 @@ function bindKoOffSegs() {
   document.querySelectorAll('#koOffSegments .sr-seg').forEach(b => b.addEventListener('click', () => { koOffSeg = b.dataset.seg; renderKoOffertes(); }));
 }
 
+const KO_SUB_COLOR = { active: '#059669', paused: '#f59e0b', cancelled: '#94a3b8' };
+const KO_SUB_BADGE = { active: 'green', paused: 'warning', cancelled: 'gray' };
+let koSubs = [], koAboPending = null, koAboSeg = 'alle';
+function koSubInclPerTerm(s) { const lis = Array.isArray(s.line_items) ? s.line_items : []; return lis.length ? lis.reduce((a, li) => a + (Number(li.amount) || 0) * (1 + (Number(li.vat_percentage) || 0) / 100), 0) : (Number(s.amount) || 0) * (1 + (Number(s.vat_percentage) || 0) / 100); }
 async function renderAbonnementenTab() {
   const wrap = $('#abonnementen-list');
   wrap.innerHTML = '<div class="placeholder-card">Abonnementen laden…</div>';
@@ -1087,66 +1091,79 @@ async function renderAbonnementenTab() {
     const res = await window.AgentShared.apiFetch('/api/sales-customer-subscriptions?customer_id=' + encodeURIComponent(detailState.customerId));
     if (!res.ok) throw new Error('HTTP ' + res.status);
     const d = await res.json();
-    const subs = d.subscriptions || [];
-    const wizardBtn = d.pending_deal_id
-      ? `<div style="margin-bottom:10px"><a class="btn btn-primary btn-sm" href="/modules/subscription-wizard.html?deal_id=${encodeURIComponent(d.pending_deal_id)}">Subscription invoeren</a></div>` : '';
-    if (!subs.length) { wrap.innerHTML = wizardBtn + '<div class="placeholder-card">Nog geen abonnementen voor deze klant.</div>'; return; }
-    // Bedrag incl. BTW per termijn — prefereer line_items (mix-safe), val terug op amount.
-    const subInclPerTerm = (s) => {
-      const lis = Array.isArray(s.line_items) ? s.line_items : [];
-      if (lis.length) return lis.reduce((sum, li) => sum + (Number(li.amount) || 0) * (1 + (Number(li.vat_percentage) || 0) / 100), 0);
-      return (Number(s.amount) || 0) * (1 + (Number(s.vat_percentage) || 0) / 100);
-    };
-    const eur2 = (v) => '€' + Number(v || 0).toLocaleString('nl-NL', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-    const todayStr = new Date().toISOString().slice(0, 10);
-    const isRunning = (s) => !!(s.start_date && s.start_date < todayStr); // al gestart = looptijd-verlenging
-    const isExtended = (s) => (Number(s.postponed_months) > 0) && !s.original_start_date; // verlengd (start onveranderd)
-    const rows = subs.map((s, i) => {
-      const lis = Array.isArray(s.line_items) ? s.line_items : [];
-      const detail = lis.length
-        ? `<tr class="sub-detail" id="sub-detail-${i}" hidden><td colspan="7" style="background:var(--bg-elev-2,#f8f8f8)">
-            <table style="width:100%;font-size:12.5px"><thead><tr><th style="text-align:left">Regel</th><th style="text-align:right">Bedrag excl.</th><th style="text-align:right">BTW</th><th style="text-align:right">Incl.</th></tr></thead>
-            <tbody>${lis.map(li => {
-              const rate = (Number(li.vat_percentage) || 0) / 100;
-              return `<tr><td>${escapeHtml(li.description || '—')}</td><td style="text-align:right">${eur2(li.amount)}</td><td style="text-align:right">${Number(li.vat_percentage) || 0}%</td><td style="text-align:right">${eur2((Number(li.amount) || 0) * (1 + rate))}</td></tr>`;
-            }).join('')}</tbody></table></td></tr>`
-        : '';
-      const caret = lis.length ? `<button class="btn btn-sm btn-ghost" data-sub-toggle="${i}" style="padding:2px 6px;margin-right:6px">▸</button>` : '';
-      const cancelled = s.status === 'cancelled';
-      const actions = cancelled ? '<span style="color:var(--text-faint,#999);font-size:11px">—</span>' : `
-        <button class="btn btn-sm" data-sub-postpone="${escapeHtml(s.id)}" data-sub-running="${isRunning(s) ? '1' : '0'}" style="background:#f59e0b;color:#fff;padding:3px 8px">Uitstellen</button>
-        <button class="btn btn-sm" data-sub-delete="${escapeHtml(s.id)}" style="background:#dc2626;color:#fff;padding:3px 8px">Verwijderen</button>`;
-      const ppBadge = s.postponed_months ? ` <span title="uitgesteld" style="color:#f59e0b;font-size:11px">+${s.postponed_months}m${isExtended(s) ? ' verlengd' : ''}</span>` : '';
-      return `<tr>
-        <td>${caret}${escapeHtml(s.description || '—')}</td>
-        <td>${eur2(subInclPerTerm(s))}${lis.length > 1 ? ` <span style="color:var(--text-faint,#999);font-size:11px">(${lis.length} regels)</span>` : ''}</td>
-        <td>${s.term_count || '—'}×</td>
-        <td>${s.start_date ? fmtDate(s.start_date) : '—'} – ${s.end_date ? fmtDate(s.end_date) : '—'}${ppBadge}</td>
-        <td>${s.teamleader_subscription_id ? '✓ TL' : '—'}</td>
-        <td>${escapeHtml(s.status || '—')}</td>
-        <td style="white-space:nowrap">${actions}</td>
-      </tr>${detail}`;
-    }).join('');
-    // PUNT 4: bulk-uitstel knop als er ≥1 actief abonnement is.
-    const activeCount = subs.filter(s => s.status === 'active').length;
-    const bulkBtn = activeCount > 1
-      ? `<div style="margin-bottom:10px;text-align:right"><button class="btn btn-sm" id="postpone-all-btn" style="background:#f59e0b;color:#fff">Stel alle abo's uit (${activeCount})</button></div>` : '';
-    wrap.innerHTML = wizardBtn + bulkBtn + `<div class="table-wrap"><table>
-      <thead><tr><th>Omschrijving</th><th>Bedrag incl. BTW</th><th>Termijnen</th><th>Periode</th><th>TL</th><th>Status</th><th>Acties</th></tr></thead>
-      <tbody>${rows}</tbody></table></div>`;
-    wrap.querySelectorAll('[data-sub-toggle]').forEach(btn => btn.addEventListener('click', () => {
-      const row = document.getElementById('sub-detail-' + btn.dataset.subToggle);
-      if (!row) return;
-      row.hidden = !row.hidden;
-      btn.textContent = row.hidden ? '▸' : '▾';
-    }));
-    wrap.querySelectorAll('[data-sub-postpone]').forEach(btn => btn.addEventListener('click', () => openPostponeModal(btn.dataset.subPostpone, btn.dataset.subRunning === '1')));
-    wrap.querySelectorAll('[data-sub-delete]').forEach(btn => btn.addEventListener('click', () => deleteSubscription(btn.dataset.subDelete)));
-    const pab = document.getElementById('postpone-all-btn');
-    if (pab) pab.addEventListener('click', () => openPostponeAllModal(detailState.customerId, activeCount));
-  } catch (e) {
-    wrap.innerHTML = '<div class="placeholder-card">Laden mislukt: ' + escapeHtml(e.message) + '</div>';
-  }
+    koSubs = d.subscriptions || [];
+    koAboPending = d.pending_deal_id || null;
+    renderKoAbos();
+  } catch (e) { wrap.innerHTML = '<div class="placeholder-card">Laden mislukt: ' + escapeHtml(e.message) + '</div>'; }
+}
+function renderKoAbos() {
+  const wrap = $('#abonnementen-list');
+  const eur2 = (v) => '€' + Number(v || 0).toLocaleString('nl-NL', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const todayStr = new Date().toISOString().slice(0, 10);
+  const isRunning = (s) => !!(s.start_date && s.start_date < todayStr);
+  const isExtended = (s) => (Number(s.postponed_months) > 0) && !s.original_start_date;
+  const subs = koSubs;
+  const active = subs.filter(s => s.status === 'active');
+  // KPI's.
+  const mrr = active.reduce((a, s) => a + koSubInclPerTerm(s), 0);
+  const ltv = subs.reduce((a, s) => a + koSubInclPerTerm(s) * (Number(s.term_count) || 1), 0);
+  const loptTm = active.map(s => s.end_date).filter(Boolean).sort().pop();
+  const kpi = `<div class="kpi-strip" style="grid-template-columns:repeat(4,1fr)">
+    <div class="kpi-cell"><div class="kpi-lbl">Actieve abo's</div><div class="kpi-val">${active.length}</div></div>
+    <div class="kpi-cell"><div class="kpi-lbl">MRR (incl.)</div><div class="kpi-val">${eur2(mrr)}</div></div>
+    <div class="kpi-cell"><div class="kpi-lbl">Lifetime value</div><div class="kpi-val">${eur2(ltv)}</div></div>
+    <div class="kpi-cell"><div class="kpi-lbl">Loopt t/m</div><div class="kpi-val">${loptTm ? fmtDate(loptTm) : '—'}</div></div>
+  </div>`;
+  const segCount = (k) => k === 'alle' ? subs.length : subs.filter(s => (s.status || 'active') === k).length;
+  const SEGS = [['alle', 'Alle'], ['active', 'Actief'], ['paused', 'Gepauzeerd'], ['cancelled', 'Geannuleerd']];
+  const bulkBtn = active.length > 1 ? `<button class="sr-abtn warning" id="postpone-all-btn">Stel alle abo's uit (${active.length})</button>` : '';
+  const newBtn = koAboPending ? `<a class="sr-abtn primary" href="/modules/subscription-wizard.html?deal_id=${encodeURIComponent(koAboPending)}"><i class="ti ti-plus"></i> Nieuw abonnement</a>` : '';
+  const pills = `<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:12px">
+    <div class="sr-segments" id="koAboSegments" style="margin-bottom:0">${SEGS.map(([k, l]) => `<button class="sr-seg${koAboSeg === k ? ' active' : ''}" data-seg="${k}">${l} <span class="sr-seg-n">${segCount(k)}</span></button>`).join('')}</div>
+    <div style="display:flex;gap:8px">${bulkBtn}${newBtn}</div></div>`;
+  const list = subs.filter(s => koAboSeg === 'alle' || (s.status || 'active') === koAboSeg);
+  if (!list.length) { wrap.innerHTML = kpi + pills + '<div class="placeholder-card">Geen abonnementen in deze selectie.</div>'; bindKoAbo(); return; }
+  const rows = list.map((s, i) => {
+    const st = s.status || 'active';
+    const lis = Array.isArray(s.line_items) ? s.line_items : [];
+    const detail = lis.length ? `<tr class="sub-detail" id="sub-detail-${i}" hidden><td colspan="9" style="background:var(--bg-elev-2);padding-left:38px">
+        <table style="width:100%;font-size:12px"><thead><tr><th style="text-align:left">Regel</th><th style="text-align:right">Excl. BTW</th><th style="text-align:center">BTW</th><th style="text-align:right">Incl. BTW</th></tr></thead>
+        <tbody>${lis.map(li => { const rate = (Number(li.vat_percentage) || 0) / 100; return `<tr><td>${escapeHtml(li.description || '—')}</td><td style="text-align:right">${eur2(li.amount)}</td><td style="text-align:center"><span class="sr-tag ${({ 0: 'green', 9: 'teal', 21: 'purple' })[li.vat_percentage] || 'gray'}">${Number(li.vat_percentage) || 0}%</span></td><td style="text-align:right">${eur2((Number(li.amount) || 0) * (1 + rate))}</td></tr>`; }).join('')}
+        <tr style="background:var(--bg-elev);font-weight:600"><td>Totaal/termijn</td><td></td><td></td><td style="text-align:right">${eur2(koSubInclPerTerm(s))}</td></tr></tbody></table></td></tr>` : '';
+    const caret = lis.length ? `<button class="sr-ibtn" data-sub-toggle="${i}" style="width:24px;height:24px"><i class="ti ti-chevron-right"></i></button>` : '';
+    const cancelled = st === 'cancelled';
+    const menu = cancelled ? '' : `<div class="sr-menu"><button class="sr-ibtn sr-menu-toggle"><i class="ti ti-dots"></i></button><div class="sr-menu-pop">
+      <button class="sr-menu-item" onclick="renderAbonnementenTab()"><i class="ti ti-refresh"></i> Status vernieuwen</button>
+      ${s.teamleader_subscription_id ? `<a class="sr-menu-item" href="https://focus.teamleader.eu/subscriptions/${escapeHtml(s.teamleader_subscription_id)}" target="_blank"><i class="ti ti-external-link"></i> Open in Teamleader</a>` : ''}
+      <button class="sr-menu-item danger" data-sub-delete="${escapeHtml(s.id)}"><i class="ti ti-trash"></i> Verwijderen</button></div></div>`;
+    const actions = cancelled ? '<span class="sr-cellsub">—</span>' : `<div class="sr-actions"><button class="sr-abtn warning" data-sub-postpone="${escapeHtml(s.id)}" data-sub-running="${isRunning(s) ? '1' : '0'}">Uitstellen</button>${menu}</div>`;
+    const ppBadge = s.postponed_months ? ` <span class="sr-tag warning" title="uitgesteld">+${s.postponed_months}m${isExtended(s) ? ' verlengd' : ''}</span>` : '';
+    const perTerm = (Number(s.term_count) || 1) === 1 ? 'eenmalig' : 'incl. /termijn';
+    return `<tr>
+      <td class="statusstrip"><span class="statusstrip-bar" style="background:${KO_SUB_COLOR[st] || '#94a3b8'}"></span></td>
+      <td style="width:30px">${caret}</td>
+      <td><span class="sr-uname">${escapeHtml(s.description || '—')}</span>${ppBadge}<br><span class="sr-cellsub">${lis.length ? lis.length + ' regels' : 'enkel bedrag'}</span></td>
+      <td class="num"><span style="font-weight:600">${eur2(koSubInclPerTerm(s))}</span><br><span class="sr-cellsub">${perTerm}</span></td>
+      <td class="center">${s.term_count || '—'}×</td>
+      <td style="font-size:12px">${s.start_date ? fmtDate(s.start_date) : '—'} → ${s.end_date ? fmtDate(s.end_date) : '—'}</td>
+      <td class="center">${s.teamleader_subscription_id ? '<span class="sr-tag green">✓</span>' : '<span class="sr-cellsub">—</span>'}</td>
+      <td><span class="sr-tag ${KO_SUB_BADGE[st] || 'gray'}">${escapeHtml(st)}</span></td>
+      <td>${actions}</td>
+    </tr>${detail}`;
+  }).join('');
+  wrap.innerHTML = kpi + pills + `<div class="sr-tablewrap"><table class="sr-table">
+    <thead><tr><th class="statusstrip"></th><th></th><th>Omschrijving</th><th class="num">Bedrag</th><th class="center">Termijnen</th><th>Periode</th><th class="center">TL</th><th>Status</th><th></th></tr></thead>
+    <tbody>${rows}</tbody></table></div>`;
+  bindKoAbo();
+}
+function bindKoAbo() {
+  const wrap = $('#abonnementen-list');
+  wrap.querySelectorAll('#koAboSegments .sr-seg').forEach(b => b.addEventListener('click', () => { koAboSeg = b.dataset.seg; renderKoAbos(); }));
+  wrap.querySelectorAll('[data-sub-toggle]').forEach(btn => btn.addEventListener('click', () => { const row = document.getElementById('sub-detail-' + btn.dataset.subToggle); if (!row) return; row.hidden = !row.hidden; btn.querySelector('i').className = row.hidden ? 'ti ti-chevron-right' : 'ti ti-chevron-down'; }));
+  wrap.querySelectorAll('[data-sub-postpone]').forEach(btn => btn.addEventListener('click', () => openPostponeModal(btn.dataset.subPostpone, btn.dataset.subRunning === '1')));
+  wrap.querySelectorAll('[data-sub-delete]').forEach(btn => btn.addEventListener('click', () => deleteSubscription(btn.dataset.subDelete)));
+  const pab = document.getElementById('postpone-all-btn');
+  if (pab) pab.addEventListener('click', () => openPostponeAllModal(detailState.customerId, koSubs.filter(s => s.status === 'active').length));
 }
 
 // PUNT 2/5 — Abonnement uitstellen (verschuiven) of verlengen (lopend).
