@@ -9,6 +9,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
   <link rel="stylesheet" href="/modules/shared/agent-shared.css"/>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/dist/tabler-icons.min.css" />
+  <link rel="stylesheet" href="/styles/sales-redesign.css" />
   <style>
     .page-header { display:flex; align-items:flex-start; gap:16px; margin-bottom:18px; }
     .page-header .page-titlewrap { flex:1; }
@@ -441,8 +442,13 @@
 
         <div class="detail-header">
           <div class="detail-header-info">
-            <h1 class="detail-name" id="detail-name">—</h1>
-            <span class="status-badge" id="detail-status">—</span>
+            <span class="sr-avatar lg" id="detail-avatar"></span>
+            <div>
+              <h1 class="detail-name" id="detail-name" style="display:inline-block;margin-right:8px">—</h1>
+              <span class="status-badge" id="detail-status">—</span>
+              <span id="detail-risk"></span>
+              <div class="sr-cellsub" id="detail-meta" style="margin-top:4px"></div>
+            </div>
           </div>
           <div class="detail-header-actions">
             <button id="btn-edit-customer" class="btn btn-sm" type="button">
@@ -525,6 +531,11 @@
               <h3><i class="ti ti-user-check"></i> Onboarding</h3>
               <div id="prof-onboarding"><span class="cust-empty">Laden…</span></div>
             </div>
+
+            <div class="detail-card" id="prof-abo-card" style="cursor:pointer" title="Naar abonnementen" onclick="activateDetailTab('abonnementen', true)">
+              <h3 class="with-action"><i class="ti ti-credit-card"></i> Abonnement <span id="prof-abo-status"></span></h3>
+              <div id="prof-abo"><span class="cust-empty">Laden…</span></div>
+            </div>
           </div>
         </div>
 
@@ -578,9 +589,15 @@
 
         <!-- Tab: Facturen -->
         <div class="tab-content" id="tab-panel-facturen" role="tabpanel" aria-labelledby="tab-btn-facturen" hidden>
-          <div class="detail-section">
-            <h3><i class="ti ti-receipt"></i> Facturen</h3>
-            <div class="placeholder-card">Facturen worden zichtbaar na Finance Fase 2 (TL-spiegel).</div>
+          <div class="sr-card" style="text-align:center;padding:36px 20px">
+            <div style="width:64px;height:64px;border-radius:50%;background:rgba(245,158,11,.16);color:#b45309;display:grid;place-items:center;margin:0 auto 14px"><i class="ti ti-receipt" style="font-size:30px"></i></div>
+            <div style="font-size:16px;font-weight:700;margin-bottom:6px">Facturen-overzicht komt eraan</div>
+            <div class="sr-cellsub" style="max-width:440px;margin:0 auto 4px;font-size:12.5px">Hier verschijnen alle facturen van deze klant — gespiegeld vanuit Teamleader. Inclusief betaalstatus, vervaldatum en directe download.</div>
+            <div class="sr-cellsub" style="margin-bottom:14px">Beschikbaar na Finance Fase 2</div>
+            <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap">
+              <a class="sr-abtn" href="https://focus.teamleader.eu/invoices" target="_blank"><i class="ti ti-external-link"></i> Bekijk in Teamleader</a>
+              <button class="sr-abtn" onclick="window.AgentShared?.showToast('Genoteerd — je krijgt bericht bij release','success')"><i class="ti ti-bell"></i> Informeer mij bij release</button>
+            </div>
           </div>
         </div>
 
@@ -886,6 +903,18 @@ function renderDetail() {
   // Header — naam via textContent (XSS-safe), status-badge class wisselt
   const name = `${(c.first_name || '').trim()} ${(c.last_name || '').trim()}`.trim() || '(geen naam)';
   $('#detail-name').textContent = name;
+  // Avatar (naam-hash) + meta-strip + risico-badge.
+  const av = $('#detail-avatar');
+  if (av) { let h = 0; for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0; av.className = 'sr-avatar lg sr-av-' + (h % 6); const parts = name.trim().split(/\s+/); av.textContent = ((parts[0]?.[0] || '') + (parts[1]?.[0] || '')).toUpperCase() || '?'; }
+  const riskEl = $('#detail-risk'); if (riskEl) riskEl.innerHTML = c.risk_tag_auto ? '<span class="sr-tag danger">Risico</span>' : '';
+  const metaEl = $('#detail-meta');
+  if (metaEl) {
+    const bits = [];
+    if (c.email) bits.push(`<i class="ti ti-mail"></i> <a href="mailto:${encodeURIComponent(c.email)}" style="color:inherit">${escapeHtml(c.email)}</a>`);
+    if (c.phone) bits.push(`<i class="ti ti-phone"></i> <a href="tel:${encodeURIComponent(c.phone)}" style="color:inherit">${escapeHtml(c.phone)}</a>`);
+    if (c.created_at) bits.push(`<i class="ti ti-calendar"></i> Klant sinds ${fmtDate(c.created_at)}`);
+    metaEl.innerHTML = bits.join('  ·  ');
+  }
   const statusEl = $('#detail-status');
   // Verwijder oude status-klasse, voeg nieuwe toe (status is whitelist: active/archived/anonymized)
   statusEl.className = 'status-badge ' + (['active','archived','anonymized'].includes(c.status) ? c.status : 'active');
@@ -936,6 +965,35 @@ function activateDetailTab(tabName, updateUrl) {
 }
 
 const QUOTATION_STATUS_LABEL = { draft: 'Concept', sent: 'Verzonden', accepted: 'Bevestigd', declined: 'Afgewezen', expired: 'Verlopen' };
+const KO_QBADGE = { draft: 'gray', sent: 'blue', accepted: 'green', signed: 'green', declined: 'danger', expired: 'gray', failed: 'danger' };
+function koEntityTag(l) { if (!l) return '<span class="cust-empty">—</span>'; const x = l.toLowerCase(); const c = x.includes('online') ? 'blue' : x.includes('fysiek') ? 'teal' : x.includes('retentie') ? 'pink' : 'gray'; return `<span class="sr-tag ${c}">${escapeHtml(l)}</span>`; }
+// Status-conditionele acties — identiek aan de hoofd-offertes-tab (gap dichtgetrokken).
+function koQuotActions(q) {
+  const st = q.tl_quotation_status || 'draft';
+  const id = encodeURIComponent(q.deal_id);
+  const eye = `<a class="sr-ibtn" href="/modules/offerte-detail.html?id=${id}" title="Offerte-detail"><i class="ti ti-eye"></i></a>`;
+  const tl = q.tl_quotation_id ? `<a class="sr-ibtn" href="https://focus.teamleader.eu/quotations/${encodeURIComponent(q.tl_quotation_id)}" target="_blank" title="Open in Teamleader"><i class="ti ti-external-link"></i></a>` : '';
+  const items = [];
+  if (st !== 'sent') items.push(`<button class="sr-menu-item" onclick="koEdit('${escapeHtml(q.deal_id)}', ${st === 'accepted' || st === 'signed'})"><i class="ti ti-edit"></i> Bewerken</button>`);
+  if (['draft', 'sent', 'failed'].includes(st)) items.push(`<button class="sr-menu-item danger" onclick="koDelete('${escapeHtml(q.deal_id)}')"><i class="ti ti-trash"></i> Verwijderen</button>`);
+  items.push(`<button class="sr-menu-item" onclick="renderOffertesTab()"><i class="ti ti-refresh"></i> Status vernieuwen</button>`);
+  if (q.tl_quotation_id) items.push(`<a class="sr-menu-item" href="https://focus.teamleader.eu/quotations/${encodeURIComponent(q.tl_quotation_id)}" target="_blank"><i class="ti ti-external-link"></i> Open in Teamleader</a>`);
+  const dots = `<div class="sr-menu"><button class="sr-ibtn sr-menu-toggle" title="Meer"><i class="ti ti-dots"></i></button><div class="sr-menu-pop">${items.join('')}</div></div>`;
+  let primary = '', showEye = false;
+  if (st === 'accepted' || st === 'signed') primary = `<a class="sr-abtn success" href="/modules/subscription-wizard.html?deal_id=${id}">Omzetten naar abonnement</a>`;
+  else if (st === 'sent') primary = `<button class="sr-abtn primary" onclick="koSend('${escapeHtml(q.deal_id)}')">Opnieuw versturen</button>`;
+  else if (st === 'failed') { primary = `<button class="sr-abtn warning" onclick="koPush('${escapeHtml(q.deal_id)}')">Retry push</button>`; showEye = true; }
+  else if (st === 'draft' && q.tl_quotation_id) { primary = `<button class="sr-abtn primary" onclick="koSend('${escapeHtml(q.deal_id)}')">Versturen</button>`; showEye = true; }
+  else if (st === 'draft') { primary = `<button class="sr-abtn primary" onclick="koPush('${escapeHtml(q.deal_id)}')">Push naar TL</button>`; showEye = true; }
+  else showEye = true;
+  return `<div class="sr-actions">${primary}${showEye ? eye : ''}${tl}${dots}</div>`;
+}
+async function koSend(id) { try { const r = await window.AgentShared.apiFetch('/api/teamleader-send-quotation', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ deal_id: id }) }); const d = await r.json(); if (!r.ok || d.success === false) throw new Error(d.error || 'HTTP ' + r.status); window.AgentShared?.showToast('Offerte verzonden', 'success'); renderOffertesTab(); } catch (e) { window.AgentShared?.showToast('Mislukt: ' + e.message, 'error'); } }
+async function koPush(id) { try { const r = await window.AgentShared.apiFetch('/api/sales-deal-retry-push', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ deal_id: id }) }); const d = await r.json(); if (!r.ok || d.success === false) throw new Error(d.error || 'HTTP ' + r.status); window.AgentShared?.showToast('Naar Teamleader gepusht', 'success'); renderOffertesTab(); } catch (e) { window.AgentShared?.showToast('Mislukt: ' + e.message, 'error'); } }
+function koEdit(id, needConfirm) { if (needConfirm && !confirm('Weet je zeker dat je de offerte wilt bewerken? Deze is al getekend en zal niet meer geldig zijn.')) return; window.location.href = '/modules/sales-wizard.html?edit_deal_id=' + id; }
+async function koDelete(id) { if (!confirm('Weet je zeker dat je deze offerte wilt verwijderen?')) return; if (!confirm('Dit kan NIET ongedaan worden. Offerte wordt zowel hier als in Teamleader verwijderd. Doorgaan?')) return; try { const r = await window.AgentShared.apiFetch('/api/teamleader-delete-quotation', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ deal_id: id }) }); const d = await r.json(); if (!r.ok || d.success === false) throw new Error(d.error || 'HTTP ' + r.status); window.AgentShared?.showToast('Offerte verwijderd', 'success'); renderOffertesTab(); } catch (e) { window.AgentShared?.showToast('Mislukt: ' + e.message, 'error'); } }
+// 3-dots controller (één keer).
+if (!window._koMenuInit) { window._koMenuInit = true; document.addEventListener('click', (e) => { const t = e.target.closest('.sr-menu-toggle'); document.querySelectorAll('.sr-menu.open').forEach(m => { if (!t || m !== t.closest('.sr-menu')) m.classList.remove('open'); }); if (t) { e.preventDefault(); t.closest('.sr-menu').classList.toggle('open'); } }); }
 async function renderOffertesTab() {
   const wrap = $('#offertes-list');
   wrap.innerHTML = '<div class="placeholder-card">Offertes laden…</div>';
@@ -945,24 +1003,24 @@ async function renderOffertesTab() {
     const data = await res.json();
     const qs = data.quotations || [];
     const cnt = $('#tab-count-offertes'); if (cnt) cnt.textContent = qs.length;
-    if (!qs.length) { wrap.innerHTML = '<div class="placeholder-card">Nog geen offertes voor deze klant</div>'; return; }
-    const BADGE_COLOR = { draft:'#64748b', sent:'#0891b2', accepted:'#059669', declined:'#b91c1c', expired:'#94a3b8' };
+    const newBtn = `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px"><strong style="font-size:13px">Offertes voor deze klant (${qs.length})</strong><a class="sr-abtn primary" href="/modules/sales-wizard.html?customer_id=${encodeURIComponent(detailState.customerId)}"><i class="ti ti-file-plus"></i> Nieuwe offerte</a></div>`;
+    if (!qs.length) { wrap.innerHTML = newBtn + '<div class="placeholder-card">Nog geen offertes voor deze klant</div>'; return; }
     const rows = qs.map((q) => {
-      const eur = q.total_amount_incl != null ? '€' + Number(q.total_amount_incl).toLocaleString('nl-NL', { minimumFractionDigits: 2 })
-        : (q.total_amount != null ? '€' + Number(q.total_amount).toLocaleString('nl-NL', { minimumFractionDigits: 2 }) : '—');
+      const eur = q.total_amount_incl != null ? '€' + Number(q.total_amount_incl).toLocaleString('nl-NL', { minimumFractionDigits: 2 }) : (q.total_amount != null ? '€' + Number(q.total_amount).toLocaleString('nl-NL', { minimumFractionDigits: 2 }) : '—');
       const st = q.tl_quotation_status || 'draft';
-      const badge = `<span style="display:inline-block;padding:2px 8px;border-radius:8px;font-size:10px;font-weight:700;background:${BADGE_COLOR[st] || '#64748b'}22;color:${BADGE_COLOR[st] || '#64748b'}">${escapeHtml(QUOTATION_STATUS_LABEL[st] || st)}</span>`;
-      const detail = `<a class="btn btn-sm" href="/modules/offerte-detail.html?id=${encodeURIComponent(q.deal_id)}">Detail →</a>`;
-      const tlLink = q.tl_quotation_id ? `<a href="https://focus.teamleader.eu/quotations/${encodeURIComponent(q.tl_quotation_id)}" target="_blank" title="Open in Teamleader">↗ TL</a>` : '';
+      const offNr = q.quote_reference || ('#' + String(q.deal_id).slice(0, 8));
       return `<tr>
+        <td><span class="sr-uname">${escapeHtml(offNr)}</span><br><span class="sr-cellsub">${escapeHtml(q.traject_label || '—')}</span></td>
+        <td>${koEntityTag(q.entity)}</td>
+        <td class="num">${eur}</td>
+        <td><span class="sr-tag ${KO_QBADGE[st] || 'gray'}">${escapeHtml(QUOTATION_STATUS_LABEL[st] || st)}</span></td>
         <td>${q.created_at ? fmtDateLong(q.created_at) : '—'}</td>
-        <td>${eur}</td>
-        <td>${badge}</td>
-        <td style="white-space:nowrap">${detail} ${tlLink}</td>
+        <td>${escapeHtml(q.sales_user || '—')}</td>
+        <td>${koQuotActions(q)}</td>
       </tr>`;
     }).join('');
-    wrap.innerHTML = `<div class="table-wrap"><table>
-      <thead><tr><th>Datum</th><th>Bedrag incl. BTW</th><th>Status</th><th>Acties</th></tr></thead>
+    wrap.innerHTML = newBtn + `<div class="sr-tablewrap"><table class="sr-table">
+      <thead><tr><th>Nummer</th><th>Entiteit</th><th class="num">Bedrag incl.</th><th>Status</th><th>Datum</th><th>Verkoper</th><th></th></tr></thead>
       <tbody>${rows}</tbody></table></div>`;
   } catch (e) {
     wrap.innerHTML = '<div class="placeholder-card">Laden mislukt: ' + escapeHtml(e.message) + '</div>';
@@ -1166,6 +1224,39 @@ function renderProfielTab() {
   $('#prof-privacy').textContent     = c.privacy_accepted_at ? fmtDate(c.privacy_accepted_at) : 'Nog niet';
   $('#prof-risk-auto').textContent   = c.risk_tag_auto ? 'Ja' : 'Nee';
   renderOnboardingCard();
+  renderProfielAboCard();
+}
+
+// NIEUW (C.1): Abonnement-samenvatting in de Profiel-tab.
+async function renderProfielAboCard() {
+  const box = $('#prof-abo'); const stEl = $('#prof-abo-status');
+  if (!box) return;
+  if (stEl) stEl.innerHTML = '';
+  try {
+    const res = await window.AgentShared.apiFetch('/api/sales-customer-subscriptions?customer_id=' + encodeURIComponent(detailState.customerId));
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const d = await res.json();
+    const active = (d.subscriptions || []).filter(s => s.status === 'active');
+    const inclPerTerm = (s) => { const lis = Array.isArray(s.line_items) ? s.line_items : []; return lis.length ? lis.reduce((a, li) => a + (Number(li.amount) || 0) * (1 + (Number(li.vat_percentage) || 0) / 100), 0) : (Number(s.amount) || 0) * (1 + (Number(s.vat_percentage) || 0) / 100); };
+    const eur2 = (v) => '€' + Number(v || 0).toLocaleString('nl-NL', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    if (!active.length) {
+      if (stEl) stEl.innerHTML = '<span class="sr-tag gray">Geen actief</span>';
+      box.innerHTML = d.pending_deal_id
+        ? `<div class="cust-empty">Geen actief abonnement.</div><a class="sr-abtn primary" style="margin-top:6px" href="/modules/subscription-wizard.html?deal_id=${encodeURIComponent(d.pending_deal_id)}">Aanmaken</a>`
+        : '<div class="cust-empty">Geen actief abonnement.</div>';
+      return;
+    }
+    const monthly = active.reduce((a, s) => a + inclPerTerm(s), 0);
+    const endDate = active.map(s => s.end_date).filter(Boolean).sort().pop();
+    const days = endDate ? Math.ceil((new Date(endDate).getTime() - Date.now()) / 86400000) : null;
+    const loptAf = days != null && days >= 0 && days <= 30;
+    if (stEl) stEl.innerHTML = loptAf ? '<span class="sr-tag warning">Loopt af</span>' : '<span class="sr-tag green">Actief</span>';
+    const rester = days != null ? (days > 365 ? `${Math.floor(days / 365)} jaar resterend` : `${days} dagen resterend`) : '';
+    box.innerHTML = `
+      <div class="detail-row"><span class="detail-label">Type</span><span>${escapeHtml(active[0].description || '—')}${active.length > 1 ? ` +${active.length - 1}` : ''}</span></div>
+      <div class="detail-row"><span class="detail-label">Bedrag</span><span>${eur2(monthly)} /termijn incl.</span></div>
+      <div class="detail-row"><span class="detail-label">Loopt t/m</span><span>${endDate ? fmtDate(endDate) : '—'}${rester ? ` <span class="cust-empty">(${rester})</span>` : ''}</span></div>`;
+  } catch (e) { box.innerHTML = '<div class="cust-empty">Laden mislukt.</div>'; }
 }
 
 async function renderOnboardingCard() {
