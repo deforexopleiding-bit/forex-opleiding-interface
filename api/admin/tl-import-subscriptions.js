@@ -32,13 +32,19 @@ function buildReverseTaxMap() {
     if (m) { map[v] = Number(m[1]); continue; }
     if (/^TEAMLEADER_TAX_RATE_ID_(INTRA|OUTSIDE_EU)/.test(k)) map[v] = 0; // verlegd/vrijgesteld
   }
+  console.log('[tl-import] taxMap built:', JSON.stringify(map));
   return map;
 }
+function lineTaxId(li) { return li.tax_rate?.id || li.tax_rate_id || null; }
 function lineVat(li, taxMap) {
-  const id = li.tax_rate?.id || li.tax_rate_id || null;
-  if (id && taxMap[id] != null) return taxMap[id];
-  if (li.tax && typeof li.tax.rate === 'number') return Math.round(li.tax.rate * 100);
-  return 21;
+  const id = lineTaxId(li);
+  const found = !!(id && taxMap[id] != null);
+  let mapped;
+  if (found) mapped = taxMap[id];
+  else if (li.tax && typeof li.tax.rate === 'number') mapped = Math.round(li.tax.rate * 100);
+  else mapped = 21;
+  console.log('[tl-import] lineVat lookup', JSON.stringify({ taxId: id, foundIn: found, mapped: found ? mapped : 'FALLBACK_' + mapped }));
+  return mapped;
 }
 // Bedrag EXCL BTW per regel (qty meegerekend), defensief over read/create-shapes.
 function lineExclTotal(li, vat) {
@@ -167,15 +173,18 @@ export default async function handler(req, res) {
         try { const ir = await tlCall('/subscriptions.info', { id: sub.id }); if (ir.ok) { const idata = await ir.json(); if (idata.data) full = idata.data; } else console.warn('[tl-import] subscriptions.info', ir.status, sub.id); }
         catch (e) { console.warn('[tl-import] subscriptions.info exception', sub.id, e.message); }
         const liRows = [];
+        const taxLookups = [];
         for (const g of (full.grouped_lines || [])) for (const li of (g.line_items || [])) {
+          const taxId = lineTaxId(li);
           const vat = lineVat(li, taxMap);
+          taxLookups.push({ description: li.description || 'Regel', tax_id: taxId, found: !!(taxId && taxMap[taxId] != null), mapped: vat });
           liRows.push({ product_id: (li.product?.id && prodByTl[li.product.id]) || null, description: li.description || 'Regel', amount: lineExclTotal(li, vat), vat_percentage: vat });
         }
         const totalExcl = Math.round(liRows.reduce((s, l) => s + l.amount, 0) * 100) / 100;
         const termCount = computeTermCount(full.starts_on || sub.starts_on, full.ends_on || sub.ends_on, full.billing_cycle || sub.billing_cycle);
         const billing = billingLabel(full.billing_cycle || sub.billing_cycle);
         // Debug-info per sub (helpt verificatie zonder DB-schrijf bij dry-run).
-        detail.debug = { total_excl: totalExcl, vats: liRows.map(l => l.vat_percentage), term_count: termCount, billing_cycle: billing, starts_on: full.starts_on || sub.starts_on, ends_on: full.ends_on || sub.ends_on };
+        detail.debug = { total_excl: totalExcl, vats: liRows.map(l => l.vat_percentage), term_count: termCount, billing_cycle: billing, starts_on: full.starts_on || sub.starts_on, ends_on: full.ends_on || sub.ends_on, taxMap_size: Object.keys(taxMap).length, tax_lookups: taxLookups };
         // Eénmalig de ruwe grouped_lines-structuur loggen (verificatie veldnamen).
         if (!globalThis.__tlImportLoggedShape) { globalThis.__tlImportLoggedShape = true; detail.debug.raw_grouped_lines = full.grouped_lines; console.log('[tl-import] sample grouped_lines', JSON.stringify(full.grouped_lines)); }
         console.log('[tl-import] sub', sub.id, JSON.stringify({ ...detail.debug, raw_grouped_lines: undefined }));
