@@ -138,15 +138,20 @@
 
   <!-- ── Tab: Klanten ── -->
   <section class="tab-content" id="tab-customers">
-    <div class="toolbar">
-      <input class="search" id="custSearch" type="search" placeholder="Zoek naam, email of telefoon..." />
-      <label class="filter-toggle"><input type="checkbox" id="custAllToggle"> Alleen mijn klanten</label>
-      <select class="search" id="custStatus" style="max-width:160px">
-        <option value="active">Actief</option>
-        <option value="archived">Gearchiveerd</option>
-      </select>
+    <div class="sr-filterstrip">
+      <div class="sr-search"><input id="custSearch" type="search" placeholder="Zoek naam, email of telefoon…" /></div>
+      <select class="sr-select" id="custEntity"><option value="">Alle entiteiten</option></select>
+      <label class="sr-toggle"><input type="checkbox" id="custAllToggle"> Alleen mijne</label>
+      <button class="sr-iconbtn sr-spacer" id="custRefresh" title="Vernieuwen"><i class="ti ti-refresh"></i></button>
     </div>
-    <div id="customersList"><div class="empty">Laden…</div></div>
+    <div class="sr-segments" id="custSegments">
+      <button class="sr-seg active" data-seg="alle">Alle</button>
+      <button class="sr-seg" data-seg="actief">Actief</button>
+      <button class="sr-seg warning" data-seg="onboarding">In onboarding</button>
+      <button class="sr-seg danger" data-seg="loopt_af">Loopt af</button>
+      <button class="sr-seg" data-seg="inactief">Inactief</button>
+    </div>
+    <div id="customersList"><div class="sr-empty">Laden…</div></div>
   </section>
 
   <!-- ── Tab: Offertes ── -->
@@ -179,26 +184,36 @@
 
   <!-- ── Tab: Abonnementen ── -->
   <section class="tab-content" id="tab-subscriptions">
-    <div class="toolbar">
-      <label class="filter-toggle"><input type="checkbox" id="subMineToggle"> Alleen mijn klanten</label>
-      <select class="search" id="subStatus" style="max-width:180px">
-        <option value="all">Alle statussen</option>
-        <option value="active">Actief</option>
-        <option value="cancelled">Geannuleerd</option>
-      </select>
-      <a class="btn btn-success" href="/modules/subscription-wizard.html?mode=standalone" style="margin-left:auto">+ Nieuw abonnement (zonder offerte)</a>
-      <button class="btn btn-ghost" id="subRefresh" title="Vernieuwen">🔄 Vernieuwen</button>
+    <div class="sr-filterstrip">
+      <div class="sr-search"><input id="subSearch" type="search" placeholder="Zoek klant of omschrijving…" /></div>
+      <label class="sr-toggle"><input type="checkbox" id="subMineToggle"> Alleen mijne</label>
+      <a class="sr-abtn success sr-spacer" href="/modules/subscription-wizard.html?mode=standalone">+ Nieuw abonnement (zonder offerte)</a>
+      <button class="sr-iconbtn" id="subRefresh" title="Vernieuwen"><i class="ti ti-refresh"></i></button>
     </div>
-    <div id="subscriptionsList"><div class="empty">Laden…</div></div>
+    <div class="sr-segments" id="subSegments">
+      <button class="sr-seg active" data-status="all">Alle</button>
+      <button class="sr-seg" data-status="active">Actief</button>
+      <button class="sr-seg" data-status="paused">Gepauzeerd</button>
+      <button class="sr-seg" data-status="cancelled">Geannuleerd</button>
+    </div>
+    <div id="subscriptionsList"><div class="sr-empty">Laden…</div></div>
   </section>
 
   <!-- ── Tab: Retentie ── -->
   <section class="tab-content" id="tab-retentie">
-    <div class="toolbar">
-      <label class="filter-toggle"><input type="checkbox" id="retMineToggle"> Alleen mijn klanten</label>
-      <span style="font-size:12px;color:var(--text-dim)">Trajecten die binnen 30 dagen aflopen.</span>
+    <div class="sub" id="retSubtitle" style="margin-bottom:12px">Trajecten die binnen 30 dagen aflopen.</div>
+    <div class="sr-filterstrip">
+      <div class="sr-search"><input id="retSearch" type="search" placeholder="Zoek klant…" /></div>
+      <label class="sr-toggle"><input type="checkbox" id="retMineToggle"> Alleen mijne</label>
+      <button class="sr-iconbtn sr-spacer" id="retRefresh" title="Vernieuwen"><i class="ti ti-refresh"></i></button>
     </div>
-    <div id="retentieList"><div class="empty">Laden…</div></div>
+    <div class="sr-segments" id="retSegments">
+      <button class="sr-seg active" data-seg="alle">Alle</button>
+      <button class="sr-seg danger" data-seg="urgent">Urgent &lt;14d</button>
+      <button class="sr-seg warning" data-seg="soon">15-30 dgn</button>
+      <button class="sr-seg danger" data-seg="verlopen">Verlopen</button>
+    </div>
+    <div id="retentieList"><div class="sr-empty">Laden…</div></div>
   </section>
 
   <!-- ── Tab: Producten ── -->
@@ -499,11 +514,32 @@ async function archiveProduct(id) {
 }
 
 // ── Customers ──
+let custSeg = 'alle';
+function custDerivedStatus(c) {
+  if (c.archived_at) return 'inactief';
+  if (c.onboarding_status === 'sent') return 'onboarding';
+  if (c.subscription_end_date) {
+    const days = Math.ceil((new Date(c.subscription_end_date).getTime() - Date.now()) / 86400000);
+    if (days >= 0 && days <= 30) return 'loopt_af';
+  }
+  return 'actief';
+}
+const CUST_STATUS = { actief: { l: 'Actief', c: 'green' }, onboarding: { l: 'Onboarding', c: 'warning' }, loopt_af: { l: 'Loopt af', c: 'danger' }, inactief: { l: 'Inactief', c: 'gray' } };
+function custStatusTag(s) { const b = CUST_STATUS[s] || CUST_STATUS.actief; return `<span class="sr-tag ${b.c}">${b.l}</span>`; }
+function relTime(iso) {
+  if (!iso) return '—';
+  const diff = (Date.now() - new Date(iso).getTime()) / 1000;
+  if (diff < 60) return 'net nu';
+  if (diff < 3600) return Math.floor(diff / 60) + ' min geleden';
+  if (diff < 86400) return Math.floor(diff / 3600) + ' uur geleden';
+  if (diff < 604800) return Math.floor(diff / 86400) + ' dgn geleden';
+  return new Date(iso).toLocaleDateString('nl-NL', { day: '2-digit', month: 'short' });
+}
 async function loadCustomers() {
   const params = new URLSearchParams();
-  // Default: alle klanten. Vinkje "Alleen mijn klanten" → owned_by_me.
   if (document.getElementById('custAllToggle').checked) params.set('owned_by_me', 'true');
-  params.set('status', document.getElementById('custStatus').value);
+  // 'Inactief' segment → gearchiveerde klanten (server); overige → actieve set.
+  params.set('status', custSeg === 'inactief' ? 'archived' : 'active');
   const s = document.getElementById('custSearch').value.trim();
   if (s) params.set('search', s);
   try {
@@ -547,34 +583,34 @@ function fmtDateNL(iso) {
   return `${String(d.getDate()).padStart(2,'0')}-${String(d.getMonth()+1).padStart(2,'0')}-${d.getFullYear()}`;
 }
 function renderCustomers() {
-  const rows = state.customers;
-  if (!rows.length) {
-    document.getElementById('customersList').innerHTML = '<div class="empty">Geen klanten gevonden.</div>';
-    return;
-  }
+  // Entiteit-dropdown vullen (client-side filter).
+  const entSel = document.getElementById('custEntity');
+  if (entSel) { const cur = entSel.value; entSel.innerHTML = '<option value="">Alle entiteiten</option>' + [...new Set(state.customers.map(c => c.entity).filter(Boolean))].sort().map(v => `<option value="${esc(v)}">${esc(v)}</option>`).join(''); entSel.value = cur; }
+  const entF = entSel?.value || '';
+  // Segment-counts (op de geladen set; 'inactief' wordt server-side geladen).
+  const withStatus = state.customers.map(c => ({ ...c, _st: custDerivedStatus(c) }));
+  const segCount = (seg) => seg === 'alle' ? withStatus.length : withStatus.filter(c => c._st === seg).length;
+  document.querySelectorAll('#custSegments .sr-seg').forEach(b => {
+    const seg = b.dataset.seg; const base = { alle: 'Alle', actief: 'Actief', onboarding: 'In onboarding', loopt_af: 'Loopt af', inactief: 'Inactief' }[seg];
+    b.innerHTML = `${base}${seg === 'inactief' ? '' : ` <span class="sr-seg-n">${segCount(seg)}</span>`}`;
+  });
+  let rows = withStatus.filter(c => !entF || c.entity === entF);
+  if (custSeg !== 'alle' && custSeg !== 'inactief') rows = rows.filter(c => c._st === custSeg);
+  if (!rows.length) { document.getElementById('customersList').innerHTML = '<div class="sr-empty">Geen klanten gevonden.</div>'; return; }
   document.getElementById('customersList').innerHTML = `
-    <table>
-      <thead><tr>
-        <th>Naam</th><th>Email</th><th>Telefoon</th><th>Deals</th>
-        <th>Laatste deal</th><th>Einddatum abonnement</th><th></th>
-      </tr></thead>
+    <div class="sr-tablewrap"><table class="sr-table">
+      <thead><tr><th>Klant</th><th>Entiteit</th><th class="center">Offertes</th><th>Status</th><th>Laatste activiteit</th><th>Verkoper</th><th></th></tr></thead>
       <tbody>${rows.map(c => `
         <tr>
-          <td>
-            <a href="/modules/klanten.html?id=${esc(c.id)}" style="color:var(--text);font-weight:600;text-decoration:none">${esc(c.name || '—')}</a>
-            ${c.risk_tag_auto ? ' <span class="badge risk">RISICO</span>' : ''}
-          </td>
-          <td>${esc(c.email || '—')}</td>
-          <td>${esc(c.phone || '—')}</td>
-          <td>${c.deals_count}</td>
-          <td>${fmtDateNL(c.last_deal_at)}</td>
-          <td>${fmtDateNL(c.subscription_end_date)}</td>
-          <td>
-            <a class="action-btn" href="/modules/klanten.html?id=${esc(c.id)}" title="Open detail">👁</a>
-            <a class="action-btn" href="/modules/sales-wizard.html?customer_id=${esc(c.id)}" title="Nieuwe offerte toevoegen">€</a>
-          </td>
+          <td><a class="sr-userline" href="/modules/klanten.html?id=${esc(c.id)}" style="text-decoration:none;color:inherit">${avatarHtml(c.name)}<span><span class="sr-uname">${esc(c.name || '—')}</span>${c.risk_tag_auto ? ' <span class="sr-tag danger">Risico</span>' : ''}<br><span class="sr-cellsub">${esc(c.email || '—')}</span></span></a></td>
+          <td>${entityTag(c.entity)}</td>
+          <td class="center">${c.deals_count || 0}</td>
+          <td>${custStatusTag(c._st)}</td>
+          <td>${relTime(c.last_deal_at)}</td>
+          <td>${esc(c.sales_user || '—')}</td>
+          <td class="sr-actions"><a class="sr-ibtn" href="/modules/klanten.html?id=${esc(c.id)}" title="Open klant-detail"><i class="ti ti-arrow-right"></i></a></td>
         </tr>`).join('')}</tbody>
-    </table>`;
+    </table></div>`;
 }
 
 // ── Wiring ──
@@ -590,7 +626,14 @@ document.getElementById('prodCategory').addEventListener('change', () => renderP
 document.getElementById('prodArchivedToggle').addEventListener('change', () => loadProducts());
 document.getElementById('custSearch').addEventListener('input', () => { clearTimeout(window._cs); window._cs = setTimeout(loadCustomers, 250); });
 document.getElementById('custAllToggle').addEventListener('change', () => loadCustomers());
-document.getElementById('custStatus').addEventListener('change', () => loadCustomers());
+document.getElementById('custEntity').addEventListener('change', () => renderCustomers());
+document.getElementById('custRefresh').addEventListener('click', () => loadCustomers());
+document.querySelectorAll('#custSegments .sr-seg').forEach(seg => seg.addEventListener('click', () => {
+  document.querySelectorAll('#custSegments .sr-seg').forEach(x => x.classList.remove('active'));
+  seg.classList.add('active'); const prev = custSeg; custSeg = seg.dataset.seg;
+  // wisselen van/naar 'inactief' vereist een server-reload (active vs archived set).
+  if (prev === 'inactief' || custSeg === 'inactief') loadCustomers(); else renderCustomers();
+}));
 
 // ── Offertes ──
 let quotStatus = '';
@@ -798,70 +841,145 @@ async function loadOnboardings() {
 document.getElementById('onbMineToggle').addEventListener('change', () => loadOnboardings());
 
 // ── Retentie ──
+let retSeg = 'alle', retSort = { key: 'end', dir: 'asc' }, retItems = [];
 async function loadRetentie() {
   const wrap = document.getElementById('retentieList');
-  wrap.innerHTML = '<div class="empty">Laden…</div>';
+  wrap.innerHTML = '<div class="sr-empty">Laden…</div>';
   const params = new URLSearchParams();
   if (document.getElementById('retMineToggle').checked) params.set('owned_by_me', 'true');
   try {
     const res = await window.AgentShared.apiFetch('/api/sales-retention?' + params);
     if (!res.ok) throw new Error('HTTP ' + res.status);
     const data = await res.json();
-    const items = data.items || [];
-    if (!items.length) { wrap.innerHTML = '<div class="empty">Geen trajecten die binnen 30 dagen aflopen.</div>'; return; }
-    wrap.innerHTML = `<table><thead><tr>
-      <th>Naam</th><th>Traject</th><th>Einddatum</th><th>Dagen tot einde</th><th>Laatste contact</th><th></th>
-    </tr></thead><tbody>${items.map(it => {
-      const col = it.days_left < 14 ? '#dc2626' : (it.days_left < 30 ? '#f59e0b' : 'var(--text-dim)');
-      return `<tr>
-        <td><a href="/modules/klanten.html?id=${esc(it.customer_id)}" style="color:var(--text);font-weight:600;text-decoration:none">${esc(it.customer_name)}</a></td>
+    retItems = data.items || [];
+    const urgent = retItems.filter(i => i.days_left >= 0 && i.days_left < 14).length;
+    const sub = document.getElementById('retSubtitle');
+    if (sub) sub.textContent = `${retItems.length} traject(en) lopen binnen 30 dagen af · ${urgent} urgent (<14 dgn)`;
+    renderRetentie();
+  } catch (e) { wrap.innerHTML = '<div class="sr-empty">Laden mislukt: ' + esc(e.message) + '</div>'; }
+}
+function retBucket(d) { return d.days_left < 0 ? 'verlopen' : (d.days_left < 14 ? 'urgent' : (d.days_left <= 30 ? 'soon' : 'soon')); }
+function totEindeBadge(d) {
+  if (d.days_left < 0) return `<span class="sr-tag danger"><i class="ti ti-x"></i> Verl. ${Math.abs(d.days_left)}d</span>`;
+  if (d.days_left < 14) return `<span class="sr-tag danger"><i class="ti ti-alert-triangle"></i> ${d.days_left} dagen</span>`;
+  return `<span class="sr-tag warning"><i class="ti ti-clock"></i> ${d.days_left} dagen</span>`;
+}
+function renderRetentie() {
+  const wrap = document.getElementById('retentieList');
+  const q = (document.getElementById('retSearch').value || '').trim().toLowerCase();
+  let rows = retItems.filter(it => (!q || (it.customer_name || '').toLowerCase().includes(q)) && (retSeg === 'alle' || retBucket(it) === retSeg));
+  rows = rows.slice().sort((a, b) => String(a.end_date || '').localeCompare(String(b.end_date || '')) * (retSort.dir === 'asc' ? 1 : -1));
+  if (!rows.length) { wrap.innerHTML = '<div class="sr-empty">Geen trajecten in deze selectie.</div>'; return; }
+  const sc = retSort.dir === 'asc' ? 'sortable asc' : 'sortable desc';
+  wrap.innerHTML = `<div class="sr-tablewrap"><table class="sr-table">
+    <thead><tr><th>Klant</th><th>Bedrijf</th><th>Traject</th><th>Mentor</th>
+      <th class="${sc}" data-sort="end">Einddatum</th><th>Tot einde</th><th>Laatste contact</th><th></th></tr></thead>
+    <tbody>${rows.map(it => {
+      const urgent = it.days_left < 14;
+      const mentor = it.mentor_name ? `<span class="sr-userline">${avatarHtml(it.mentor_name, 'sm')}<span>${esc(it.mentor_name)}</span></span>` : '<span style="color:var(--text-faint);font-style:italic">Niet toegewezen</span>';
+      const menu = [
+        `<a class="sr-menu-item" href="/modules/klanten.html?id=${esc(it.customer_id)}"><i class="ti ti-user"></i> Klant-detail bekijken</a>`,
+        `<button class="sr-menu-item" onclick="toast('Binnenkort beschikbaar')"><i class="ti ti-circle-x"></i> Markeer 'Niet verlengen'</button>`,
+        `<button class="sr-menu-item" onclick="toast('Binnenkort beschikbaar')"><i class="ti ti-bell"></i> Aanmelden voor opvolging</button>`,
+      ];
+      const dots = `<div class="sr-menu"><button class="sr-ibtn sr-menu-toggle" title="Meer acties"><i class="ti ti-dots"></i></button><div class="sr-menu-pop">${menu.join('')}</div></div>`;
+      return `<tr${urgent ? ' style="background:rgba(220,38,38,.05)"' : ''}>
+        <td><a class="sr-userline" href="/modules/klanten.html?id=${esc(it.customer_id)}" style="text-decoration:none;color:inherit">${avatarHtml(it.customer_name)}<span><span class="sr-uname">${esc(it.customer_name)}</span><br><span class="sr-cellsub">${esc(it.customer_email || '—')}</span></span></a></td>
+        <td>${entityTag(it.entity)}</td>
         <td>${esc(it.traject_label || '—')}</td>
+        <td>${mentor}</td>
         <td>${fmtDateNL(it.end_date)}</td>
-        <td><span style="font-weight:700;color:${col}">${it.days_left}d</span></td>
-        <td>—</td>
-        <td><a class="btn btn-sm btn-success" href="/modules/sales-wizard.html?customer_id=${esc(it.customer_id)}">Nieuwe offerte</a></td>
+        <td>${totEindeBadge(it)}</td>
+        <td><span class="sr-cellsub">—</span></td>
+        <td class="sr-actions"><a class="sr-abtn primary" href="/modules/sales-wizard.html?customer_id=${esc(it.customer_id)}"><i class="ti ti-file-plus"></i> Nieuwe offerte</a>${dots}</td>
       </tr>`;
-    }).join('')}</tbody></table>`;
-  } catch (e) { wrap.innerHTML = '<div class="empty">Laden mislukt: ' + esc(e.message) + '</div>'; }
+    }).join('')}</tbody></table></div>`;
+  wrap.querySelectorAll('[data-sort]').forEach(th => th.addEventListener('click', () => { retSort.dir = retSort.dir === 'asc' ? 'desc' : 'asc'; renderRetentie(); }));
 }
 document.getElementById('retMineToggle').addEventListener('change', () => loadRetentie());
+document.getElementById('retSearch').addEventListener('input', () => renderRetentie());
+document.getElementById('retRefresh').addEventListener('click', () => loadRetentie());
+document.querySelectorAll('#retSegments .sr-seg').forEach(seg => seg.addEventListener('click', () => {
+  document.querySelectorAll('#retSegments .sr-seg').forEach(x => x.classList.remove('active'));
+  seg.classList.add('active'); retSeg = seg.dataset.seg; renderRetentie();
+}));
 
 // ── Abonnementen ──
-const SUB_STATUS = { active: { l: 'Actief', c: 'active' }, cancelled: { l: 'Geannuleerd', c: 'archived' }, paused: { l: 'Gepauzeerd', c: 'cat' } };
+const SUB_STATUS = { active: { l: 'Actief', c: 'green' }, cancelled: { l: 'Geannuleerd', c: 'gray' }, paused: { l: 'Gepauzeerd', c: 'warning' } };
+let subSeg = 'all', subSort = { key: 'start', dir: 'desc' }, subItems = [];
 async function loadSubscriptions() {
   const wrap = document.getElementById('subscriptionsList');
-  wrap.innerHTML = '<div class="empty">Laden…</div>';
+  wrap.innerHTML = '<div class="sr-empty">Laden…</div>';
   const params = new URLSearchParams();
   if (document.getElementById('subMineToggle').checked) params.set('owned_by_me', 'true');
-  params.set('status', document.getElementById('subStatus').value || 'all');
+  params.set('status', subSeg || 'all');
   try {
     const res = await window.AgentShared.apiFetch('/api/sales-subscriptions-list?' + params);
     if (!res.ok) throw new Error('HTTP ' + res.status);
     const data = await res.json();
-    const items = data.items || [];
-    if (!items.length) { wrap.innerHTML = '<div class="empty">Geen abonnementen gevonden.</div>'; return; }
-    wrap.innerHTML = `<table><thead><tr>
-      <th>Klant</th><th>Bedrijf</th><th>Type</th><th>Bedrag incl. BTW</th><th>Termijnen</th><th>Startdatum</th><th>Einddatum</th><th>Status</th><th></th>
-    </tr></thead><tbody>${items.map(it => {
-      const st = SUB_STATUS[it.status] || { l: it.status || '—', c: 'archived' };
-      const tl = it.teamleader_subscription_id ? '<span class="badge active" title="Gesynct met Teamleader">✓ TL</span>' : '<span style="color:var(--text-faint)">—</span>';
+    subItems = data.items || [];
+    renderSubscriptions();
+  } catch (e) { wrap.innerHTML = '<div class="sr-empty">Laden mislukt: ' + esc(e.message) + '</div>'; }
+}
+function renderSubscriptions() {
+  const wrap = document.getElementById('subscriptionsList');
+  const q = (document.getElementById('subSearch').value || '').trim().toLowerCase();
+  let rows = subItems.filter(it => !q || (it.customer_name || '').toLowerCase().includes(q) || (it.description || '').toLowerCase().includes(q));
+  rows = rows.slice().sort((a, b) => {
+    const dir = subSort.dir === 'asc' ? 1 : -1;
+    if (subSort.key === 'amount') return ((a.amount_incl || 0) - (b.amount_incl || 0)) * dir;
+    return String(a.start_date || '').localeCompare(String(b.start_date || '')) * dir;
+  });
+  if (!rows.length) { wrap.innerHTML = '<div class="sr-empty">Geen abonnementen gevonden.</div>'; return; }
+  const sc = (k) => subSort.key === k ? (subSort.dir === 'asc' ? 'sortable asc' : 'sortable desc') : 'sortable';
+  wrap.innerHTML = `<div class="sr-tablewrap"><table class="sr-table">
+    <thead><tr><th>Klant</th><th>Bedrijf</th><th>Omschrijving</th>
+      <th class="num ${sc('amount')}" data-sort="amount">Bedrag incl.</th><th class="center">Termijnen</th>
+      <th class="${sc('start')}" data-sort="start">Start</th><th>Eind</th><th>Status</th><th></th></tr></thead>
+    <tbody>${rows.map(it => {
+      const st = SUB_STATUS[it.status] || { l: it.status || '—', c: 'gray' };
+      const cancelled = it.status === 'cancelled';
+      const tlSub = it.teamleader_subscription_id ? `TL gekoppeld` : 'Lokaal — geen TL';
+      const detailHref = `/modules/klanten.html?id=${esc(it.customer_id)}&tab=abonnementen`;
+      const menu = [];
+      menu.push(`<a class="sr-menu-item" href="${detailHref}"><i class="ti ti-clock-pause"></i> Uitstellen</a>`);
+      menu.push(`<a class="sr-menu-item" href="${detailHref}"><i class="ti ti-arrow-bar-to-right"></i> Looptijd verlengen</a>`);
+      menu.push(`<button class="sr-menu-item" onclick="loadSubscriptions()"><i class="ti ti-refresh"></i> Status vernieuwen</button>`);
+      if (it.teamleader_subscription_id) menu.push(`<a class="sr-menu-item" href="https://focus.teamleader.eu/subscriptions/${esc(it.teamleader_subscription_id)}" target="_blank"><i class="ti ti-external-link"></i> Open in Teamleader</a>`);
+      if (!cancelled) menu.push(`<button class="sr-menu-item danger" data-subdel="${esc(it.id)}"><i class="ti ti-trash"></i> Verwijderen</button>`);
+      const dots = `<div class="sr-menu"><button class="sr-ibtn sr-menu-toggle" title="Meer acties"><i class="ti ti-dots"></i></button><div class="sr-menu-pop">${menu.join('')}</div></div>`;
       return `<tr>
-        <td><a href="/modules/klanten.html?id=${esc(it.customer_id)}" style="color:var(--text);font-weight:600;text-decoration:none">${esc(it.customer_name)}</a></td>
-        <td>${esc(it.entity || '—')}</td>
-        <td>${esc(it.description || '—')}</td>
-        <td>${fmtEuro(it.amount_incl)}</td>
-        <td>${it.term_count || '—'}×</td>
+        <td><a class="sr-userline" href="${detailHref}" style="text-decoration:none;color:inherit">${avatarHtml(it.customer_name)}<span><span class="sr-uname">${esc(it.customer_name)}</span><br><span class="sr-cellsub">${esc(it.customer_email || '—')}</span></span></a></td>
+        <td>${entityTag(it.entity)}</td>
+        <td>${esc(it.description || '—')}<br><span class="sr-cellsub">${tlSub}</span></td>
+        <td class="num">${fmtEuro(it.amount_incl)}</td>
+        <td class="center">${it.term_count || '—'}×</td>
         <td>${it.start_date ? fmtDateNL(it.start_date) : '—'}</td>
         <td>${it.end_date ? fmtDateNL(it.end_date) : '—'}</td>
-        <td><span class="badge ${st.c}">${st.l}</span></td>
-        <td style="white-space:nowrap"><a class="btn btn-sm btn-ghost" href="/modules/klanten.html?id=${esc(it.customer_id)}&tab=abonnementen">Detail</a> ${tl}</td>
+        <td><span class="sr-tag ${st.c}">${st.l}</span></td>
+        <td class="sr-actions"><a class="sr-abtn primary" href="${detailHref}">Detail</a>${dots}</td>
       </tr>`;
-    }).join('')}</tbody></table>`;
-  } catch (e) { wrap.innerHTML = '<div class="empty">Laden mislukt: ' + esc(e.message) + '</div>'; }
+    }).join('')}</tbody></table></div>`;
+  wrap.querySelectorAll('[data-sort]').forEach(th => th.addEventListener('click', () => {
+    const k = th.dataset.sort; if (subSort.key === k) subSort.dir = subSort.dir === 'asc' ? 'desc' : 'asc'; else { subSort.key = k; subSort.dir = 'desc'; } renderSubscriptions();
+  }));
+  wrap.querySelectorAll('[data-subdel]').forEach(b => b.addEventListener('click', () => subListDelete(b.dataset.subdel)));
+}
+async function subListDelete(id) {
+  if (!confirm('Weet je zeker dat je dit abonnement wilt verwijderen? Dit wordt ook in Teamleader uitgeschakeld.')) return;
+  try {
+    const res = await window.AgentShared.apiFetch('/api/sales-subscription-delete', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ subscription_id: id }) });
+    const d = await res.json(); if (!res.ok || d.success === false) throw new Error(d.error || 'HTTP ' + res.status);
+    toast('Abonnement verwijderd', 'success'); loadSubscriptions();
+  } catch (e) { toast('Mislukt: ' + e.message, 'error'); }
 }
 document.getElementById('subMineToggle').addEventListener('change', () => loadSubscriptions());
-document.getElementById('subStatus').addEventListener('change', () => loadSubscriptions());
+document.getElementById('subSearch').addEventListener('input', () => renderSubscriptions());
 document.getElementById('subRefresh').addEventListener('click', () => loadSubscriptions());
+document.querySelectorAll('#subSegments .sr-seg').forEach(seg => seg.addEventListener('click', () => {
+  document.querySelectorAll('#subSegments .sr-seg').forEach(x => x.classList.remove('active'));
+  seg.classList.add('active'); subSeg = seg.dataset.status; loadSubscriptions();
+}));
 
 // Segment-pills (status) → server-side filter; entity/seller → client-side.
 document.querySelectorAll('#quotSegments .sr-seg').forEach(seg => seg.addEventListener('click', () => {
