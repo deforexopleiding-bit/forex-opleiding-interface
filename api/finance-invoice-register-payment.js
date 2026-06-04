@@ -69,15 +69,27 @@ export default async function handler(req, res) {
     try { paidIso = new Date(paid_at || Date.now()).toISOString(); } catch { paidIso = new Date().toISOString(); }
 
     // 1. TL-FIRST: registreer de betaling. Faal → GEEN DB-mutatie.
-    const payBody = { id: inv.tl_invoice_id, payment: { amount: { amount: r2(amtNum), currency: 'EUR' }, paid_at: paidIso } };
+    // TL verwacht een PLATTE amount (euro-float) MET currency als sibling + paid_at (ISO 8601).
+    // Bevestigd door TL 400-fouten "amount must be a number" + "currency must be present" op
+    // de geneste money-vorm. Bedragen zijn euro's (floats), GEEN centen → 0.01 blijft 0.01.
+    const payBody = { id: inv.tl_invoice_id, payment: { amount: r2(amtNum), currency: 'EUR', paid_at: paidIso } };
     if (payment_method_id) payBody.payment.payment_method_id = String(payment_method_id);
-    console.log('[finance-register-payment] registerPayment body', JSON.stringify(payBody));
-    const pr = await tlCall('/invoices.registerPayment', payBody);
-    if (!pr.ok) {
-      const txt = await pr.text().catch(() => '');
-      console.error('[finance-register-payment] registerPayment HTTP', pr.status, txt.slice(0, 300));
-      return res.status(502).json({ error: `TL registerPayment HTTP ${pr.status}: ${txt.slice(0, 200)}` });
+    console.log('[finance-register-payment] registerPayment payload', JSON.stringify(payBody));
+
+    let pr, prText = '';
+    try {
+      pr = await tlCall('/invoices.registerPayment', payBody);
+      prText = await pr.text().catch(() => '');
+    } catch (netErr) {
+      console.error('[finance-register-payment] registerPayment netwerk-fout', netErr.message, '| payload=', JSON.stringify(payBody));
+      return res.status(502).json({ error: 'Kon Teamleader niet bereiken: ' + netErr.message });
     }
+    if (!pr.ok) {
+      // GEEN DB-mutatie — we keren hier terug vóór enige write. Volledige TL-fouttekst meegeven.
+      console.error('[finance-register-payment] registerPayment GEWEIGERD | HTTP', pr.status, '| payload=', JSON.stringify(payBody), '| response=', prText);
+      return res.status(422).json({ error: `Teamleader weigerde de betaling (HTTP ${pr.status}).`, tl_status: pr.status, tl_response: prText });
+    }
+    console.log('[finance-register-payment] registerPayment OK | HTTP', pr.status);
 
     // 2. Her-sync via invoices.info → werkelijke amount_paid + status.
     let newPaid = Math.min(r2((Number(inv.amount_paid) || 0) + amtNum), Number(inv.amount_total) || Infinity);
