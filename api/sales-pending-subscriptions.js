@@ -4,6 +4,7 @@
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
+import { customerDisplayName } from './_lib/customer-name.js';
 
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
@@ -34,7 +35,7 @@ export default async function handler(req, res) {
     const custIds = [...new Set(pending.map(d => d.customer_id).filter(Boolean))];
     const custById = {};
     if (custIds.length) {
-      const { data: customers } = await supabaseAdmin.from('customers').select('id, first_name, last_name').in('id', custIds);
+      const { data: customers } = await supabaseAdmin.from('customers').select('id, is_company, company_name, first_name, last_name').in('id', custIds);
       for (const c of customers || []) custById[c.id] = c;
     }
 
@@ -43,7 +44,7 @@ export default async function handler(req, res) {
       return {
         deal_id:      d.id,
         customer_id:  d.customer_id,
-        customer_name: `${c.first_name || ''} ${c.last_name || ''}`.trim() || '—',
+        customer_name: customerDisplayName(c, '—'),
         total_amount: d.total_amount,
         accepted_at:  d.tl_quotation_accepted_at,
       };

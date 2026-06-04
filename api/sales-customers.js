@@ -4,6 +4,7 @@
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
+import { customerDisplayName } from './_lib/customer-name.js';
 
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
@@ -31,14 +32,14 @@ export default async function handler(req, res) {
     }
 
     let q = supabaseAdmin.from('customers')
-      .select('id, first_name, last_name, email, phone, created_at, archived_at, risk_tag_auto, subscription_end_date, onboarding_status')
+      .select('id, is_company, company_name, first_name, last_name, email, phone, created_at, archived_at, risk_tag_auto, subscription_end_date, onboarding_status')
       .order('updated_at', { ascending: false }).limit(200);
     if (customerIds) q = q.in('id', customerIds);
     if (status === 'archived') q = q.not('archived_at', 'is', null);
     else q = q.is('archived_at', null);
     if (search) {
       const s = String(search).trim();
-      q = q.or(`first_name.ilike.%${s}%,last_name.ilike.%${s}%,email.ilike.%${s}%,phone.ilike.%${s}%`);
+      q = q.or(`first_name.ilike.%${s}%,last_name.ilike.%${s}%,company_name.ilike.%${s}%,email.ilike.%${s}%,phone.ilike.%${s}%`);
     }
     const { data: customers, error } = await q;
     if (error) throw error;
@@ -68,7 +69,7 @@ export default async function handler(req, res) {
       const latest = deals[0] || {};
       return {
         ...c,
-        name:              `${c.first_name || ''} ${c.last_name || ''}`.trim(),
+        name:              customerDisplayName(c),
         deals_count:       deals.length,
         last_deal_at:      deals[0]?.created_at || null,
         last_deal_status:  deals[0]?.status || null,

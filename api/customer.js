@@ -24,6 +24,7 @@ const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 // 'notes' bewust NIET hierin — gedeprecateerd via migratie 013 COMMENT;
 // notities lopen via customer_notes-tabel (Fase 2A.4).
 const WRITABLE_FIELDS = [
+  'is_company', 'company_name', 'kvk_number', 'vat_number',
   'first_name', 'last_name', 'email', 'phone', 'date_of_birth',
   'address_street', 'address_number', 'address_postal', 'address_city',
   'tl_contact_id', 'ghl_contact_id',
@@ -114,13 +115,24 @@ async function handlePost(req, res, admin) {
   const body = req.body || {};
   const cleaned = pickWritable(body);
 
-  // Required-fields
-  const firstName = (cleaned.first_name || '').trim();
-  const lastName  = (cleaned.last_name  || '').trim();
-  if (!firstName) return res.status(400).json({ error: 'Voornaam is verplicht', field: 'first_name' });
-  if (!lastName)  return res.status(400).json({ error: 'Achternaam is verplicht', field: 'last_name' });
-  cleaned.first_name = firstName;
-  cleaned.last_name  = lastName;
+  // Type: bedrijf (B2B) of particulier (B2C). Backwards-compatible default = B2C.
+  const isCompany = cleaned.is_company === true || cleaned.is_company === 'true';
+  cleaned.is_company = isCompany;
+  if (isCompany) {
+    const cn = (cleaned.company_name || '').trim();
+    if (!cn) return res.status(400).json({ error: 'Bedrijfsnaam is verplicht', field: 'company_name' });
+    cleaned.company_name = cn;
+    // Contactpersoon (voor-/achternaam) optioneel bij een bedrijf.
+    cleaned.first_name = (cleaned.first_name || '').trim() || null;
+    cleaned.last_name  = (cleaned.last_name  || '').trim() || null;
+  } else {
+    const firstName = (cleaned.first_name || '').trim();
+    const lastName  = (cleaned.last_name  || '').trim();
+    if (!firstName) return res.status(400).json({ error: 'Voornaam is verplicht', field: 'first_name' });
+    if (!lastName)  return res.status(400).json({ error: 'Achternaam is verplicht', field: 'last_name' });
+    cleaned.first_name = firstName;
+    cleaned.last_name  = lastName;
+  }
 
   // Format-validatie (alleen niet-leeg veld checken)
   if (cleaned.email != null && String(cleaned.email).trim() !== '') {
@@ -212,16 +224,11 @@ async function handlePatch(req, res, admin) {
   const body = req.body || {};
   const cleaned = pickWritable(body);
 
-  // first_name / last_name: als in body, mogen NIET leeg worden
-  if (Object.prototype.hasOwnProperty.call(cleaned, 'first_name')) {
-    const v = String(cleaned.first_name || '').trim();
-    if (!v) return res.status(400).json({ error: 'Voornaam mag niet leeg zijn', field: 'first_name' });
-    cleaned.first_name = v;
-  }
-  if (Object.prototype.hasOwnProperty.call(cleaned, 'last_name')) {
-    const v = String(cleaned.last_name || '').trim();
-    if (!v) return res.status(400).json({ error: 'Achternaam mag niet leeg zijn', field: 'last_name' });
-    cleaned.last_name = v;
+  // is_company: coerce naar boolean indien meegegeven. Identiteits-validatie
+  // (company_name vs first+last) gebeurt na de pre-fetch op de samengevoegde staat,
+  // zodat first_name/last_name leegmaken is toegestaan zodra het een bedrijf is.
+  if (Object.prototype.hasOwnProperty.call(cleaned, 'is_company')) {
+    cleaned.is_company = cleaned.is_company === true || cleaned.is_company === 'true';
   }
 
   // Email — empty string clear (=NULL); niet-empty → format-check
@@ -243,7 +250,7 @@ async function handlePatch(req, res, admin) {
   // Overige optionele strings: trim → empty wordt NULL (clear)
   for (const k of Object.keys(cleaned)) {
     if (typeof cleaned[k] === 'string'
-        && !['first_name','last_name','email','date_of_birth'].includes(k)) {
+        && !['email','date_of_birth'].includes(k)) {
       const t = cleaned[k].trim();
       cleaned[k] = t === '' ? null : t;
     }
@@ -263,6 +270,15 @@ async function handlePatch(req, res, admin) {
     // 2) Status-gate
     if (before.archived_at)   return res.status(403).json({ error: 'Klant is gearchiveerd; eerst heractiveren.' });
     if (before.anonymized_at) return res.status(403).json({ error: 'Klant is geanonimiseerd; niet bewerkbaar.' });
+
+    // 2b) Identiteit valideren op de samengevoegde staat (B2B: bedrijfsnaam; B2C: voor+achternaam).
+    const merged = { ...before, ...cleaned };
+    if (merged.is_company) {
+      if (!String(merged.company_name || '').trim()) return res.status(400).json({ error: 'Bedrijfsnaam is verplicht', field: 'company_name' });
+    } else {
+      if (!String(merged.first_name || '').trim()) return res.status(400).json({ error: 'Voornaam is verplicht', field: 'first_name' });
+      if (!String(merged.last_name || '').trim())  return res.status(400).json({ error: 'Achternaam is verplicht', field: 'last_name' });
+    }
 
     // 3) UPDATE (trg_customers_updated zet updated_at = now())
     const { data: after, error: uErr } = await supabaseAdmin

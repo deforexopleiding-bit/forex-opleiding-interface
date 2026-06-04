@@ -9,6 +9,7 @@
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
+import { customerDisplayName } from './_lib/customer-name.js';
 
 const CYCLE_M = { per_month: 1, per_2_months: 2, per_quarter: 3, per_6_months: 6, per_year: 12 };
 function cycleMonths(label) {
@@ -111,7 +112,7 @@ export default async function handler(req, res) {
     if (deptIds.length) { const { data } = await supabaseAdmin.from('company_entities').select('tl_department_id, label').in('tl_department_id', deptIds); for (const e of data || []) entLabel[e.tl_department_id] = e.label; }
     const custIds = [...new Set(Object.values(dealById).map(d => d.customer_id).filter(Boolean))];
     const custName = {};
-    if (custIds.length) { const { data } = await supabaseAdmin.from('customers').select('id, first_name, last_name').in('id', custIds); for (const c of data || []) custName[c.id] = `${c.first_name || ''} ${c.last_name || ''}`.trim(); }
+    if (custIds.length) { const { data } = await supabaseAdmin.from('customers').select('id, is_company, company_name, first_name, last_name').in('id', custIds); for (const c of data || []) custName[c.id] = customerDisplayName(c); }
 
     // Per traject.
     const trajAgg = {};

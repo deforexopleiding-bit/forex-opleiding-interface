@@ -5,6 +5,7 @@
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
+import { customerDisplayName } from './_lib/customer-name.js';
 
 // Bedrag incl. BTW per termijn. Prefereer line_items (mix-safe per regel);
 // val terug op amount + vat_percentage voor oude subs zonder line_items.
@@ -55,7 +56,7 @@ export default async function handler(req, res) {
     const custIds = [...new Set((deals || []).filter(d => d.customer_id).map(d => d.customer_id))];
     const deptIds = [...new Set((deals || []).filter(d => d.tl_department_id).map(d => d.tl_department_id))];
     const custById = {}, deptByTl = {};
-    if (custIds.length) { const { data } = await supabaseAdmin.from('customers').select('id, first_name, last_name, email').in('id', custIds); for (const c of data || []) custById[c.id] = c; }
+    if (custIds.length) { const { data } = await supabaseAdmin.from('customers').select('id, is_company, company_name, first_name, last_name, email').in('id', custIds); for (const c of data || []) custById[c.id] = c; }
     if (deptIds.length) { const { data } = await supabaseAdmin.from('company_entities').select('tl_department_id, label').in('tl_department_id', deptIds); for (const e of data || []) deptByTl[e.tl_department_id] = e.label; }
 
     const items = subs.map(s => {
@@ -65,7 +66,7 @@ export default async function handler(req, res) {
         id: s.id,
         deal_id: s.deal_id,
         customer_id: deal.customer_id || null,
-        customer_name: `${c.first_name || ''} ${c.last_name || ''}`.trim() || '—',
+        customer_name: customerDisplayName(c, '—'),
         customer_email: c.email || null,
         entity: deal.tl_department_id ? (deptByTl[deal.tl_department_id] || null) : null,
         description: s.description || null,

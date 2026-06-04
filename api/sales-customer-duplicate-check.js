@@ -4,6 +4,7 @@
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
+import { customerDisplayName } from './_lib/customer-name.js';
 
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
@@ -31,7 +32,7 @@ export default async function handler(req, res) {
   try {
     const { data, error } = await supabaseAdmin
       .from('customers')
-      .select('id, first_name, last_name, email, phone, created_at, archived_at')
+      .select('id, is_company, company_name, first_name, last_name, email, phone, created_at, archived_at')
       .or(filters.join(','))
       .is('archived_at', null)
       .limit(20);
@@ -54,7 +55,7 @@ export default async function handler(req, res) {
       const deals = dealsByCustomer[c.id] || [];
       return {
         id: c.id,
-        name: `${c.first_name || ''} ${c.last_name || ''}`.trim(),
+        name: customerDisplayName(c),
         email: c.email,
         phone: c.phone,
         deals_count: deals.length,

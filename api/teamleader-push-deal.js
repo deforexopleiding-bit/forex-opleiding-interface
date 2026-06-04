@@ -10,11 +10,11 @@
 // TAX_RATE_21 = c21432be-3447-0c1c-824c-0f0e7ea9c381
 // TAX_RATE_6 = cfa50e79-496a-06cc-a944-ba1d9a70bbb6
 
-import { getActiveToken } from './_lib/teamleader-token.js';
+import { getActiveToken, tlFetch } from './_lib/teamleader-token.js';
 import { supabaseAdmin } from './supabase.js';
 import { createUserClient } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
-import { getOrCreateContact, createDeal } from './_lib/teamleader-contact.js';
+import { getOrCreateTlCustomer } from './_lib/teamleader-contact.js';
 
 const TL_DEPARTMENT_ID = '09d67371-6947-03f6-bd5e-410dd8636344';
 const TL_TAX_RATE_21 = 'c21432be-3447-0c1c-824c-0f0e7ea9c381';
@@ -42,30 +42,13 @@ export async function pushDealToTl(dealId) {
               const { data: customer } = await supabaseAdmin.from('customers').select('*').eq('id', deal.customer_id).maybeSingle();
               const { data: subs } = await supabaseAdmin.from('subscriptions').select('*').eq('deal_id', dealId);
 
-        // 2. POST /contacts.add — skip indien customer.tl_contact_id reeds gezet.
-        let tlContactId = customer?.tl_contact_id || null;
-              if (!tlContactId) {
-                        const contactBody = {
-                                    first_name: customer.first_name || '',
-                                    last_name: customer.last_name || '',
-                                    emails: customer.email ? [{ type: 'primary', email: customer.email }] : [],
-                                    telephones: customer.phone ? [{ type: 'phone', number: customer.phone }] : [],
-                        };
-                        const cr = await tlFetch('/contacts.add', { method: 'POST', body: JSON.stringify(contactBody) });
-                        if (!cr.ok) {
-                                    const txt = await cr.text();
-                                    throw new Error(`TL contacts.add HTTP ${cr.status}: ${txt.slice(0, 200)}`);
-                        }
-                        const cData = await cr.json();
-                        tlContactId = cData.data?.id || (cData.data?.type === 'contact' ? cData.data?.id : null);
-                        if (tlContactId) {
-                                    await supabaseAdmin.from('customers').update({ tl_contact_id: tlContactId }).eq('id', customer.id);
-                        }
-              }
+        // 2. TL customer-referentie (B2C contact of B2B company) — idempotent in de lib.
+        const tlCustomerRef = await getOrCreateTlCustomer(customer);
+        const tlContactId = tlCustomerRef.type === 'contact' ? tlCustomerRef.id : null;
 
         // 3. POST /deals.create.
         const dealBody = {
-                  lead: { customer: { type: 'contact', id: tlContactId } },
+                  lead: { customer: tlCustomerRef },
                   title: `Deal ${deal.id.slice(0, 8)}`,
                   estimated_value: deal.total_amount ? { amount: Number(deal.total_amount), currency: 'EUR' } : undefined,
         };
@@ -96,7 +79,7 @@ export async function pushDealToTl(dealId) {
                           // unit_price does NOT include currency — currency is set at department level.
                           // tax is specified via tax_rate_id (flat string), not nested tax object.
                           const tlSubBody = {
-                                        invoicee: { customer: { type: 'contact', id: tlContactId } },
+                                        invoicee: { customer: tlCustomerRef },
                                         department_id: TL_DEPARTMENT_ID,
                                         starts_on: sub.start_date || new Date().toISOString().slice(0, 10),
                                         title: `Deal ${deal.id.slice(0, 8)} — termijnen`,

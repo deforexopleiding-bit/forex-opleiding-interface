@@ -13,7 +13,7 @@
 
 import { tlFetch, getActiveToken } from './teamleader-token.js';
 import { supabaseAdmin } from '../supabase.js';
-import { getOrCreateContact, createDeal } from './teamleader-contact.js';
+import { getOrCreateContact, getOrCreateTlCustomer, createDeal } from './teamleader-contact.js';
 
 const CURRENCY = 'EUR';
 
@@ -131,11 +131,12 @@ export async function pushQuotationToTl(dealId) {
       || `${customer?.first_name || ''} ${customer?.last_name || ''}`.trim()
       || `Offerte ${String(dealId).slice(0, 8)}`;
 
-    // 1. Contact + 2. Deal (quotation vereist deal_id).
-    const tlContactId = await getOrCreateContact(customer);
+    // 1. Customer (B2C contact of B2B company) + 2. Deal (quotation vereist deal_id).
+    const tlCustomerRef = await getOrCreateTlCustomer(customer);
+    const tlContactId = tlCustomerRef.type === 'contact' ? tlCustomerRef.id : null;
     let tlDealId = deal.tl_deal_id;
     if (!tlDealId) {
-      tlDealId = await createDeal(deal, tlContactId, departmentId, title);
+      tlDealId = await createDeal(deal, tlCustomerRef, departmentId, title);
       // KRITIEK: tl_deal_id direct persisteren. Als quotations.create hierna
       // faalt, pakt een retry deze deal op i.p.v. een duplicate aan te maken.
       await supabaseAdmin.from('deals').update({ tl_deal_id: tlDealId }).eq('id', dealId);

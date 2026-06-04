@@ -46,6 +46,10 @@ export default async function handler(req, res) {
     let customerId = matched_customer_id || null;
     if (!customerId) {
       const custPayload = {
+        is_company:      customer_data.is_company === true || customer_data.is_company === 'true',
+        company_name:    customer_data.company_name || null,
+        kvk_number:      customer_data.kvk_number || null,
+        vat_number:      customer_data.vat_number || null,
         first_name:      customer_data.first_name || null,
         last_name:       customer_data.last_name || null,
         email:           customer_data.email || null,

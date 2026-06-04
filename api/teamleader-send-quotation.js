@@ -41,7 +41,7 @@ export default async function handler(req, res) {
 
     // Ontvanger-email (verplicht voor quotations.send).
     const { data: customer } = await supabaseAdmin.from('customers')
-      .select('email, first_name, last_name').eq('id', deal.customer_id).maybeSingle();
+      .select('email, is_company, company_name, first_name, last_name').eq('id', deal.customer_id).maybeSingle();
     const recipientEmail = customer?.email;
     if (!recipientEmail) return res.status(409).json({ error: 'Klant heeft geen e-mailadres — offerte kan niet verstuurd worden' });
 
@@ -78,7 +78,7 @@ export default async function handler(req, res) {
           if (ent?.label) departmentName = ent.label;
         }
         const ctx = {
-          contact_name:    `${customer.first_name || ''} ${customer.last_name || ''}`.trim(),
+          contact_name:    customerDisplayName(customer),
           my_name:         profile?.full_name || '',
           department_name: departmentName,
           deal_title:      deal.quote_reference || 'Offerte',
