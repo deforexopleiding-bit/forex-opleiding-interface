@@ -8,6 +8,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/modules/shared/agent-shared.css" />
+  <link rel="stylesheet" href="/styles/sales-redesign.css" />
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     html, body { height: 100%; }
@@ -79,6 +80,18 @@
       color: var(--text-dim);
     }
     .err-noaccess h2 { font-size: 18px; font-weight: 700; margin-bottom: 6px; color: var(--text); }
+
+    /* Finance Fase 2A — Facturen-view */
+    .fin-input { background: var(--bg-elev-2); border: 1px solid var(--border); color: var(--text); border-radius: 8px; padding: 6px 10px; font-size: 12.5px; font-family: inherit; }
+    .fin-input:focus { outline: none; border-color: var(--accent-cyan); }
+    .inv-locked { background: var(--bg-elev); border: 1px solid var(--border); border-radius: 12px; padding: 36px 20px; text-align: center; color: var(--text-dim); }
+    .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.6); z-index: 600; display: flex; align-items: center; justify-content: center; backdrop-filter: blur(4px); padding: 20px; }
+    .modal-overlay.hidden { display: none !important; }
+    .modal-card { background: var(--bg-elev); border: 1px solid var(--border); border-radius: 14px; max-width: 520px; width: 100%; padding: 22px 24px; }
+    .modal-card h3 { font-size: 16px; font-weight: 700; margin-bottom: 14px; }
+    .inv-drow { display: flex; justify-content: space-between; gap: 12px; padding: 7px 0; border-bottom: 1px solid var(--border); font-size: 13px; }
+    .inv-drow:last-child { border-bottom: none; }
+    .inv-drow .lbl { color: var(--text-dim); }
   </style>
 </head>
 <body>
@@ -97,6 +110,51 @@
     </p>
   </div>
 
+  <div class="sr-segments" id="financeNav" style="margin-bottom:18px">
+    <button class="sr-seg active" data-view="facturen" type="button">Facturen</button>
+    <button class="sr-seg" data-view="roadmap" type="button">Roadmap</button>
+  </div>
+
+  <!-- ===== Facturen-view (read-only TL-spiegel, Fase 2A) ===== -->
+  <div id="view-facturen">
+    <div class="inv-locked" id="invLocked" hidden>
+      <div style="font-size:15px;font-weight:700;margin-bottom:6px">Geen toegang tot facturen</div>
+      <div style="font-size:12.5px">Je hebt de Finance-module open, maar mist het recht <code>finance.invoice.view</code>. Vraag een beheerder dit aan te zetten.</div>
+    </div>
+    <div id="invMain">
+      <div class="kpi-strip" id="invKpis" style="grid-template-columns:repeat(4,1fr);margin-bottom:16px"></div>
+      <div class="sr-filterstrip" id="invFilters" style="margin-bottom:12px;flex-wrap:wrap;gap:8px;align-items:center">
+        <div class="sr-segments" id="invStatusSeg">
+          <button class="sr-seg active" data-status="open" type="button">Open</button>
+          <button class="sr-seg" data-status="overdue" type="button">Te laat</button>
+          <button class="sr-seg" data-status="paid" type="button">Betaald</button>
+          <button class="sr-seg" data-status="concept" type="button">Concept</button>
+          <button class="sr-seg" data-status="" type="button">Alle</button>
+        </div>
+        <select id="invEntity" class="fin-input"><option value="">Alle entiteiten</option></select>
+        <input id="invPeriodStart" type="date" class="fin-input" title="Vanaf factuurdatum" />
+        <input id="invPeriodEnd" type="date" class="fin-input" title="T/m factuurdatum" />
+        <input id="invSearch" type="search" placeholder="Zoek factuurnr…" class="fin-input" style="min-width:150px" />
+        <span style="flex:1"></span>
+        <button class="sr-ibtn" id="invRefresh" title="Vernieuwen" type="button"><i class="ti ti-refresh"></i></button>
+      </div>
+      <div class="sr-tablewrap">
+        <table class="sr-table" id="invTable">
+          <thead><tr>
+            <th style="width:4px;padding:0"></th>
+            <th>Factuurnr</th><th>Klant</th>
+            <th class="num">Totaal</th><th class="num">Betaald</th><th class="num">Open</th>
+            <th>Vervaldag</th><th>Status</th><th style="width:36px"></th>
+          </tr></thead>
+          <tbody id="invTbody"><tr><td colspan="9" style="text-align:center;padding:24px;color:var(--text-faint)">Laden…</td></tr></tbody>
+        </table>
+      </div>
+      <div id="invPager" style="display:flex;justify-content:space-between;align-items:center;margin-top:12px;font-size:12.5px;color:var(--text-dim)"></div>
+    </div>
+  </div>
+
+  <!-- ===== Roadmap-view ===== -->
+  <div id="view-roadmap" hidden>
   <div class="phases-grid">
     <div class="phase-card done">
       <div class="phase-num">1</div>
@@ -147,6 +205,20 @@
       <span class="phase-tag">PLANNED</span>
     </div>
   </div>
+  </div>
+</div>
+
+<!-- Factuur-detail modal -->
+<div class="modal-overlay hidden" id="invModal" role="dialog" aria-modal="true">
+  <div class="modal-card">
+    <h3 id="invModalTitle">Factuur</h3>
+    <div id="invModalBody"></div>
+    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:18px;flex-wrap:wrap">
+      <button class="sr-abtn" id="invModalPdf" type="button"><i class="ti ti-file-type-pdf"></i> Open PDF</button>
+      <a class="sr-abtn" id="invModalTl" href="https://focus.teamleader.eu/invoices" target="_blank"><i class="ti ti-external-link"></i> Open in Teamleader</a>
+      <button class="sr-abtn primary" id="invModalClose" type="button">Sluiten</button>
+    </div>
+  </div>
 </div>
 
 <div class="app err-noaccess" id="noAccess" style="display:none">
@@ -180,5 +252,204 @@
 <script src="/modules/shared/permissions.js"></script>
 <script src="/modules/shared/sidebar.js"></script>
 <script src="/modules/shared/quick-task-button.js" data-module="Finance" defer></script>
+
+<!-- ===== Finance Fase 2A — Facturen-view logica ===== -->
+<script>
+(function () {
+  const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const eur = (n) => new Intl.NumberFormat('nl-NL', { style: 'currency', currency: 'EUR' }).format(Number(n) || 0);
+  const fmtDate = (d) => { if (!d) return '—'; const x = new Date(d + 'T00:00:00'); return isNaN(x) ? '—' : x.toLocaleDateString('nl-NL', { day: '2-digit', month: 'short', year: 'numeric' }); };
+
+  const ENTITIES = [
+    { id: '09d67371-6947-03f6-bd5e-410dd8636344', label: 'Online' },
+    { id: '0da396bf-1074-0425-ac5c-fa1141b41cb1', label: 'Fysiek' },
+    { id: '9adca043-0ebc-09da-a45e-f21798841cb2', label: 'Retentie' },
+  ];
+  const ENT_LABEL = Object.fromEntries(ENTITIES.map(e => [e.id, e.label]));
+  const ST = {
+    concept:        { tag: 'gray',    bar: '#9ca3af', label: 'Concept' },
+    open:           { tag: 'blue',    bar: '#3b82f6', label: 'Open' },
+    partially_paid: { tag: 'warning', bar: '#f59e0b', label: 'Deels betaald' },
+    paid:           { tag: 'green',   bar: '#059669', label: 'Betaald' },
+    overdue:        { tag: 'danger',  bar: '#ef4444', label: 'Te laat' },
+    credited:       { tag: 'purple',  bar: '#8b5cf6', label: 'Gecrediteerd' },
+    writeoff:       { tag: 'gray',    bar: '#9ca3af', label: 'Afgeschreven' },
+  };
+  const stMeta = (s) => ST[s] || { tag: 'gray', bar: '#9ca3af', label: s || '—' };
+
+  const state = { status: 'open', entity: '', from: '', to: '', q: '', page: 1, pageSize: 50, total: 0, rows: [] };
+  let searchTimer = null;
+
+  function setView(view) {
+    document.getElementById('view-facturen').hidden = (view !== 'facturen');
+    document.getElementById('view-roadmap').hidden = (view !== 'roadmap');
+    document.querySelectorAll('#financeNav .sr-seg').forEach(b => b.classList.toggle('active', b.dataset.view === view));
+  }
+
+  function renderKpis(k) {
+    const cell = (lbl, val, sub) => `<div class="kpi-cell"><div class="kpi-lbl">${lbl}</div><div class="kpi-val">${val}</div>${sub ? `<div class="kpi-lbl" style="margin-top:2px">${sub}</div>` : ''}</div>`;
+    document.getElementById('invKpis').innerHTML =
+      cell('Openstaand', eur(k.open_total), `${k.open_count} facturen`) +
+      cell('Te laat', eur(k.overdue_total), `${k.overdue_count} facturen`) +
+      cell('Gem. betaaltijd', k.avg_pay_days != null ? `${k.avg_pay_days} dgn` : '—', 'laatste 90 dagen') +
+      cell('Deze maand binnen', eur(k.month_in_total), `${k.month_in_count} betaald`);
+  }
+
+  function renderRows(items) {
+    const tb = document.getElementById('invTbody');
+    if (!items.length) { tb.innerHTML = '<tr><td colspan="9" style="text-align:center;padding:24px;color:var(--text-faint)">Geen facturen gevonden.</td></tr>'; return; }
+    tb.innerHTML = items.map((inv, i) => {
+      const m = stMeta(inv.display_status);
+      const ent = inv.tl_department_id ? (ENT_LABEL[inv.tl_department_id] || '') : '';
+      const tlItem = inv.tl_invoice_id ? `<a class="sr-menu-item" href="https://focus.teamleader.eu/invoice_detail.php?id=${esc(inv.tl_invoice_id)}" target="_blank"><i class="ti ti-external-link"></i> Open in Teamleader</a>` : '';
+      return `<tr>
+        <td style="padding:0"><div class="statusstrip-bar" style="background:${m.bar}"></div></td>
+        <td><span class="sr-uname">${esc(inv.invoice_number)}</span>${ent ? `<br><span class="sr-cellsub">${esc(ent)}</span>` : ''}</td>
+        <td><span class="sr-uname">${esc(inv.customer_name)}</span></td>
+        <td class="num">${eur(inv.amount_total)}</td>
+        <td class="num">${eur(inv.amount_paid)}</td>
+        <td class="num">${eur(inv.amount_open)}</td>
+        <td>${fmtDate(inv.due_date)}</td>
+        <td><span class="sr-tag ${m.tag}">${esc(m.label)}</span></td>
+        <td><div class="sr-menu"><button class="sr-ibtn sr-menu-toggle" title="Meer" type="button"><i class="ti ti-dots"></i></button><div class="sr-menu-pop">
+          <button class="sr-menu-item" type="button" data-inv-detail="${i}"><i class="ti ti-eye"></i> Bekijk details</button>
+          ${tlItem}
+        </div></div></td>
+      </tr>`;
+    }).join('');
+    tb.querySelectorAll('[data-inv-detail]').forEach(b => b.addEventListener('click', () => openDetail(items[Number(b.dataset.invDetail)])));
+  }
+
+  function renderPager() {
+    const pages = Math.max(1, Math.ceil(state.total / state.pageSize));
+    document.getElementById('invPager').innerHTML =
+      `<span>${state.total} facturen · pagina ${state.page}/${pages}</span>
+       <span style="display:flex;gap:6px">
+         <button class="sr-abtn" id="invPrev" type="button" ${state.page <= 1 ? 'disabled' : ''}>Vorige</button>
+         <button class="sr-abtn" id="invNext" type="button" ${state.page >= pages ? 'disabled' : ''}>Volgende</button>
+       </span>`;
+    const prev = document.getElementById('invPrev'), next = document.getElementById('invNext');
+    if (prev) prev.addEventListener('click', () => { if (state.page > 1) { state.page--; load(); } });
+    if (next) next.addEventListener('click', () => { if (state.page < pages) { state.page++; load(); } });
+  }
+
+  async function load() {
+    const tb = document.getElementById('invTbody');
+    tb.innerHTML = '<tr><td colspan="9" style="text-align:center;padding:24px;color:var(--text-faint)">Laden…</td></tr>';
+    const p = new URLSearchParams();
+    if (state.status) p.set('status', state.status);
+    if (state.entity) p.set('entity', state.entity);
+    if (state.from) p.set('period_start', state.from);
+    if (state.to) p.set('period_end', state.to);
+    if (state.q) p.set('q', state.q);
+    p.set('page', state.page); p.set('page_size', state.pageSize);
+    try {
+      const res = await window.AgentShared.apiFetch('/api/finance-invoices?' + p.toString());
+      if (res.status === 403) { document.getElementById('invMain').hidden = true; document.getElementById('invLocked').hidden = false; return; }
+      const d = await res.json();
+      if (!res.ok) throw new Error(d.error || 'HTTP ' + res.status);
+      state.rows = d.items || []; state.total = d.total || 0;
+      renderKpis(d.kpis || {}); renderRows(state.rows); renderPager();
+    } catch (e) {
+      tb.innerHTML = `<tr><td colspan="9" style="text-align:center;padding:24px;color:#ef4444">Laden mislukt: ${esc(e.message)}</td></tr>`;
+    }
+  }
+
+  function openDetail(inv) {
+    if (!inv) return;
+    const m = stMeta(inv.display_status);
+    const row = (l, v) => `<div class="inv-drow"><span class="lbl">${l}</span><span>${v}</span></div>`;
+    document.getElementById('invModalTitle').textContent = 'Factuur ' + inv.invoice_number;
+    document.getElementById('invModalBody').innerHTML =
+      row('Klant', esc(inv.customer_name) + (inv.customer_email ? ` <span class="sr-cellsub">${esc(inv.customer_email)}</span>` : '')) +
+      row('Entiteit', esc(inv.tl_department_id ? (ENT_LABEL[inv.tl_department_id] || '—') : '—')) +
+      row('Status', `<span class="sr-tag ${m.tag}">${esc(m.label)}</span>`) +
+      row('Totaal (incl. btw)', eur(inv.amount_total)) +
+      row('Waarvan btw', inv.vat_amount != null ? eur(inv.vat_amount) : '—') +
+      row('Betaald', eur(inv.amount_paid)) +
+      row('Openstaand', eur(inv.amount_open)) +
+      row('Factuurdatum', fmtDate(inv.issue_date)) +
+      row('Vervaldag', fmtDate(inv.due_date)) +
+      row('Betaald op', fmtDate(inv.paid_date));
+    const tl = document.getElementById('invModalTl');
+    tl.href = inv.tl_invoice_id ? `https://focus.teamleader.eu/invoice_detail.php?id=${inv.tl_invoice_id}` : 'https://focus.teamleader.eu/invoices';
+    const pdfBtn = document.getElementById('invModalPdf');
+    pdfBtn.disabled = !inv.tl_invoice_id;
+    pdfBtn.onclick = async () => {
+      if (!inv.tl_invoice_id) return;
+      pdfBtn.disabled = true; const orig = pdfBtn.innerHTML; pdfBtn.innerHTML = '<i class="ti ti-loader"></i> Ophalen…';
+      try {
+        const r = await window.AgentShared.apiFetch('/api/finance-invoice-pdf?tl_invoice_id=' + encodeURIComponent(inv.tl_invoice_id));
+        const d = await r.json();
+        if (!r.ok || !d.url) throw new Error(d.error || 'Geen PDF');
+        window.open(d.url, '_blank');
+      } catch (e) { window.AgentShared?.showToast('PDF mislukt: ' + e.message + ' — open in Teamleader', 'error'); }
+      finally { pdfBtn.disabled = false; pdfBtn.innerHTML = orig; }
+    };
+    document.getElementById('invModal').classList.remove('hidden');
+  }
+
+  // 3-dots menu: position:fixed + flip-up + close-on-scroll (klanten-patroon).
+  function initMenus() {
+    const place = (menu) => {
+      const t = menu.querySelector('.sr-menu-toggle'); const pop = menu.querySelector('.sr-menu-pop');
+      if (!t || !pop) return; const r = t.getBoundingClientRect(); const ph = pop.offsetHeight, pw = pop.offsetWidth;
+      const below = window.innerHeight - r.bottom;
+      pop.style.top = (below < ph + 12 && r.top > ph + 12 ? r.top - ph - 4 : r.bottom + 4) + 'px';
+      pop.style.left = Math.max(8, Math.min(r.right - pw, window.innerWidth - pw - 8)) + 'px';
+    };
+    const closeAll = () => document.querySelectorAll('.sr-menu.open').forEach(m => m.classList.remove('open'));
+    document.addEventListener('click', (e) => {
+      const toggle = e.target.closest('.sr-menu-toggle');
+      if (toggle) {
+        e.stopPropagation(); const menu = toggle.closest('.sr-menu'); const wasOpen = menu.classList.contains('open');
+        closeAll(); if (!wasOpen) { menu.classList.add('open'); place(menu); } return;
+      }
+      if (!e.target.closest('.sr-menu-pop')) closeAll();
+    });
+    window.addEventListener('scroll', closeAll, true);
+  }
+
+  async function init() {
+    try {
+      await window._authSharedReady;
+      const profile = await window.AuthShared?.requireAuth();
+      if (!profile) return;
+      let perms = null;
+      if (window.RBAC?.ensurePermissionsLoaded) { try { perms = await window.RBAC.ensurePermissionsLoaded(); } catch (e) {} }
+      if (perms && !perms.has('*') && !perms.has('finance.module.access')) return; // noAccess al afgehandeld door auth-IIFE
+
+      // Entiteit-dropdown vullen.
+      const sel = document.getElementById('invEntity');
+      ENTITIES.forEach(e => { const o = document.createElement('option'); o.value = e.id; o.textContent = e.label; sel.appendChild(o); });
+
+      // Nav.
+      document.querySelectorAll('#financeNav .sr-seg').forEach(b => b.addEventListener('click', () => setView(b.dataset.view)));
+      // Status-pills.
+      document.querySelectorAll('#invStatusSeg .sr-seg').forEach(b => b.addEventListener('click', () => {
+        document.querySelectorAll('#invStatusSeg .sr-seg').forEach(x => x.classList.remove('active'));
+        b.classList.add('active'); state.status = b.dataset.status; state.page = 1; load();
+      }));
+      sel.addEventListener('change', () => { state.entity = sel.value; state.page = 1; load(); });
+      document.getElementById('invPeriodStart').addEventListener('change', (e) => { state.from = e.target.value; state.page = 1; load(); });
+      document.getElementById('invPeriodEnd').addEventListener('change', (e) => { state.to = e.target.value; state.page = 1; load(); });
+      document.getElementById('invSearch').addEventListener('input', (e) => { clearTimeout(searchTimer); searchTimer = setTimeout(() => { state.q = e.target.value.trim(); state.page = 1; load(); }, 350); });
+      document.getElementById('invRefresh').addEventListener('click', load);
+
+      // Modal sluiten.
+      const modal = document.getElementById('invModal');
+      document.getElementById('invModalClose').addEventListener('click', () => modal.classList.add('hidden'));
+      modal.addEventListener('click', (e) => { if (e.target === modal) modal.classList.add('hidden'); });
+      document.addEventListener('keydown', (e) => { if (e.key === 'Escape') modal.classList.add('hidden'); }, true);
+
+      initMenus();
+      load();
+    } catch (e) { console.error('[finance-facturen] init', e); }
+  }
+
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
+  else init();
+})();
+</script>
 </body>
 </html>
