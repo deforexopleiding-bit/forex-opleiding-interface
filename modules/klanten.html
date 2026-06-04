@@ -599,15 +599,8 @@
 
         <!-- Tab: Facturen -->
         <div class="tab-content" id="tab-panel-facturen" role="tabpanel" aria-labelledby="tab-btn-facturen" hidden>
-          <div class="sr-card" style="text-align:center;padding:36px 20px">
-            <div style="width:64px;height:64px;border-radius:50%;background:rgba(245,158,11,.16);color:#b45309;display:grid;place-items:center;margin:0 auto 14px"><i class="ti ti-receipt" style="font-size:30px"></i></div>
-            <div style="font-size:16px;font-weight:700;margin-bottom:6px">Facturen-overzicht komt eraan</div>
-            <div class="sr-cellsub" style="max-width:440px;margin:0 auto 4px;font-size:12.5px">Hier verschijnen alle facturen van deze klant — gespiegeld vanuit Teamleader. Inclusief betaalstatus, vervaldatum en directe download.</div>
-            <div class="sr-cellsub" style="margin-bottom:14px">Beschikbaar na Finance Fase 2</div>
-            <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap">
-              <a class="sr-abtn" href="https://focus.teamleader.eu/invoices" target="_blank"><i class="ti ti-external-link"></i> Bekijk in Teamleader</a>
-              <button class="sr-abtn" onclick="window.AgentShared?.showToast('Genoteerd — je krijgt bericht bij release','success')"><i class="ti ti-bell"></i> Informeer mij bij release</button>
-            </div>
+          <div id="facturen-wrap">
+            <div class="placeholder-card">Facturen laden…</div>
           </div>
         </div>
 
@@ -993,8 +986,8 @@ function activateDetailTab(tabName, updateUrl) {
   else if (tabName === 'communicatie') renderCommunicatieTab();
   else if (tabName === 'offertes')     renderOffertesTab();
   else if (tabName === 'abonnementen') renderAbonnementenTab();
+  else if (tabName === 'facturen')     renderFacturenTab();
   else if (tabName === 'audit')        renderAuditTab();
-  // facturen: statische placeholder, geen render nodig
 
   if (updateUrl) {
     const url = new URL(window.location.href);
@@ -1117,6 +1110,65 @@ const KO_SUB_COLOR = { active: '#059669', paused: '#f59e0b', cancelled: '#94a3b8
 const KO_SUB_BADGE = { active: 'green', paused: 'warning', cancelled: 'gray' };
 let koSubs = [], koAboPending = null, koAboSeg = 'active';
 function koSubInclPerTerm(s) { const lis = Array.isArray(s.line_items) ? s.line_items : []; return lis.length ? lis.reduce((a, li) => a + (Number(li.amount) || 0) * (1 + (Number(li.vat_percentage) || 0) / 100), 0) : (Number(s.amount) || 0) * (1 + (Number(s.vat_percentage) || 0) / 100); }
+// === Facturen sub-tab (read-only TL-spiegel, Finance Fase 2A) ===
+const KO_INV_TAG = { concept: 'gray', open: 'blue', partially_paid: 'warning', paid: 'green', overdue: 'danger', credited: 'purple', writeoff: 'gray' };
+const KO_INV_LABEL = { concept: 'Concept', open: 'Open', partially_paid: 'Deels betaald', paid: 'Betaald', overdue: 'Te laat', credited: 'Gecrediteerd', writeoff: 'Afgeschreven' };
+const KO_INV_BAR = { concept: '#9ca3af', open: '#3b82f6', partially_paid: '#f59e0b', paid: '#059669', overdue: '#ef4444', credited: '#8b5cf6', writeoff: '#9ca3af' };
+
+window.koInvoicePdf = async function (tlId) {
+  try {
+    const r = await window.AgentShared.apiFetch('/api/finance-invoice-pdf?tl_invoice_id=' + encodeURIComponent(tlId));
+    const d = await r.json();
+    if (!r.ok || !d.url) throw new Error(d.error || 'Geen PDF');
+    window.open(d.url, '_blank');
+  } catch (e) { window.AgentShared?.showToast('PDF mislukt: ' + e.message, 'error'); }
+};
+
+async function renderFacturenTab() {
+  const wrap = $('#facturen-wrap');
+  if (!wrap) return;
+  wrap.innerHTML = '<div class="placeholder-card">Facturen laden…</div>';
+  const dd = (d) => { if (!d) return '—'; const x = new Date(d + 'T00:00:00'); return isNaN(x) ? '—' : x.toLocaleDateString('nl-NL', { day: '2-digit', month: 'short', year: 'numeric' }); };
+  try {
+    const res = await window.AgentShared.apiFetch('/api/finance-invoices?page_size=200&customer_id=' + encodeURIComponent(detailState.customerId));
+    if (res.status === 403) { wrap.innerHTML = '<div class="detail-section"><h3><i class="ti ti-receipt"></i> Facturen</h3><div class="placeholder-card">Geen recht om facturen te zien (finance.invoice.view).</div></div>'; return; }
+    const d = await res.json();
+    if (!res.ok) throw new Error(d.error || 'HTTP ' + res.status);
+    const items = d.items || [];
+    const open = (d.kpis && d.kpis.open_total) || 0;
+    if (!items.length) {
+      wrap.innerHTML = `<div class="detail-section"><h3><i class="ti ti-receipt"></i> Facturen</h3>
+        <div class="placeholder-card">Nog geen facturen gespiegeld voor deze klant. <a href="https://focus.teamleader.eu/invoices" target="_blank" style="color:var(--accent-cyan)">Open in Teamleader</a></div></div>`;
+      return;
+    }
+    const rows = items.map(inv => {
+      const tag = KO_INV_TAG[inv.display_status] || 'gray';
+      const label = KO_INV_LABEL[inv.display_status] || (inv.display_status || '—');
+      const bar = KO_INV_BAR[inv.display_status] || '#9ca3af';
+      const tlItem = inv.tl_invoice_id ? `<a class="sr-menu-item" href="https://focus.teamleader.eu/invoices/${escapeHtml(inv.tl_invoice_id)}" target="_blank"><i class="ti ti-external-link"></i> Open in Teamleader</a>` : '';
+      const pdfItem = inv.tl_invoice_id ? `<button class="sr-menu-item" onclick="koInvoicePdf('${escapeHtml(inv.tl_invoice_id)}')"><i class="ti ti-file-type-pdf"></i> Open PDF</button>` : '';
+      const menu = (tlItem || pdfItem) ? `<div class="sr-menu"><button class="sr-ibtn sr-menu-toggle" title="Meer"><i class="ti ti-dots"></i></button><div class="sr-menu-pop">${pdfItem}${tlItem}</div></div>` : '';
+      return `<tr>
+        <td style="padding:0"><div class="statusstrip-bar" style="background:${bar}"></div></td>
+        <td><span class="sr-uname">${escapeHtml(inv.invoice_number)}</span></td>
+        <td style="text-align:right">${eur2(inv.amount_total)}</td>
+        <td style="text-align:right">${eur2(inv.amount_open)}</td>
+        <td>${dd(inv.due_date)}</td>
+        <td><span class="sr-tag ${tag}">${escapeHtml(label)}</span></td>
+        <td>${menu}</td>
+      </tr>`;
+    }).join('');
+    wrap.innerHTML = `<div class="detail-section">
+      <h3><i class="ti ti-receipt"></i> Facturen <span class="sr-cellsub" style="font-weight:500">· openstaand ${eur2(open)}</span></h3>
+      <div class="sr-tablewrap"><table class="sr-table"><thead><tr>
+        <th style="width:4px;padding:0"></th><th>Factuurnr</th>
+        <th style="text-align:right">Totaal</th><th style="text-align:right">Open</th>
+        <th>Vervaldag</th><th>Status</th><th style="width:36px"></th>
+      </tr></thead><tbody>${rows}</tbody></table></div>
+    </div>`;
+  } catch (e) { wrap.innerHTML = '<div class="placeholder-card">Laden mislukt: ' + escapeHtml(e.message) + '</div>'; }
+}
+
 async function renderAbonnementenTab() {
   const wrap = $('#abonnementen-list');
   wrap.innerHTML = '<div class="placeholder-card">Abonnementen laden…</div>';
