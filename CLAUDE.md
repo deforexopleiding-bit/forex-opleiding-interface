@@ -348,3 +348,54 @@ Lopend op Vercel:
 - Productie-testing vereist data-prep voorzichtigheid: geen outcomes registreren op toekomstige
   scheduled calls van echte leads. Gebruik leads die al test-rommel hebben of prep test-data via
   SQL eerst.
+
+## Sessie 3 juni 2026 — Sales-redesign + TL-integratie + Finance prep
+
+### Wat is gebouwd vandaag
+- PR #79 sales-redesign LIVE (commit ef773ee): Dashboard / Klanten / Offertes /
+  Abonnementen / Retentie / Aanbod / Rapporten + klant-detail 6 sub-tabs + Wizards +
+  Onboarding eigen module
+- PR #80 TL-integratie LIVE (commit 8b6c6f2): retentie-fix + TL-sync delete/cancel +
+  TL-import (bulk import endpoint + admin UI) + MRR-overzicht
+- Direct-op-main updates: filter defaults / retentie per klant / MRR bug-fix /
+  entity-filter / periode-filter / inkomende omzet KPI / admin import-link
+
+### Architectuur patronen (geleerd in deze sessie)
+- Sales = modules/sales.html met 7 tabs (geen sub-modules)
+- Klant-detail = modules/klanten.html?id=X&tab=Y met 6 sub-tabs
+- Tabel-patroon: status-strip kolom 4px links + caret-expand + 3-dots met
+  position:fixed + getBoundingClientRect + flip-up + close-on-scroll
+- Filter pills bovenaan tabs met meest-gebruikte status als default
+  (bv. Abonnementen → Actief)
+- KPI-strip met 4 cells (grid template repeat(4, 1fr))
+- Status-conditionele acties per row (Bevestigd→Omzetten, Verzonden→Opnieuw, etc)
+
+### TL API findings
+- quotations.delete BESTAAT (gebruikt door offerte-delete TL-sync)
+- subscriptions.deactivate met {id} — geen .delete
+- subscriptions.list returnt grouped_lines LEEG → call subscriptions.info per sub
+  voor line_items
+- tax_id zit in li.tax.id met type='taxRate' (NIET li.tax_rate.id of li.tax_rate_id)
+- Rate-limit: 100 req/min → throttle 200ms + 429 exp-backoff
+- Ghost-deals voor TL-imports (source='tl_import') om NOT NULL deal_id constraint te
+  omzeilen, uitgefilterd in Offertes-tab
+
+### Vercel context
+- 60s function timeout = max ~80 subs per TL-import run (3 calls/sub × throttle)
+- Geen aparte staging Supabase — preview frontend schrijft naar productie DB
+
+### Conventies bevestigd
+- TL-sync TL-first met rollback bij fout + force-option voor lokale override
+- Audit log per actie (subscription_audit_log etc)
+- Imports idempotent (skip_existing op TL-ID match)
+- super_admin gate via verifyAdmin() + profile.role==='super_admin'
+- MRR formule: amount_per_termijn ÷ billing_cycle_in_months
+  (per_month/1, per_quarter/3, per_year/12)
+
+### Bekende risico's vandaag ontdekt
+- Activity-feed dashboard is afgeleid van stats (geen events-endpoint)
+- Sub-subtitle "vanuit #OFF-XX" niet beschikbaar voor TL-imports
+- Wizard-subs zetten billing_cycle niet → behandeld als per_month
+- MRR-trend telt subs op start/eind-window (indicatief, niet 100% historisch correct)
+- Retentie "Verlopen"-pill toont alle historische cases zonder tijdsvenster
+  (kan later begrensd)

@@ -6,6 +6,70 @@
 
 ---
 
+## ✅ Sessie 3 juni 2026 — Sales-redesign + TL-integratie
+
+### Voltooid (LIVE op main)
+- [x] **Sales-redesign fases A–G** (PR #79, commit ef773ee): Dashboard / Klanten /
+      Offertes / Abonnementen / Retentie / Aanbod / Rapporten + klant-detail 6 sub-tabs
+      + Sales-wizard + Subscription-wizard + Onboarding eigen module
+- [x] **TL-integratie — alle 4 issues** (PR #80, commit 8b6c6f2):
+  - [x] Retentie-fix (per klant ipv per sub, MAX(end_date))
+  - [x] TL-sync delete/cancel (quotations.delete + subscriptions.deactivate)
+  - [x] TL-import (bulk import endpoint api/admin/tl-import-subscriptions.js + admin UI
+        modules/admin-tl-import.html)
+  - [x] MRR-overzicht (api/sales-mrr-report.js + entity-filter + periode-filter +
+        inkomende omzet KPI + split trend charts)
+- [x] **Sales handleiding PDF voor Dave**
+
+### 🆕 Backlog (nieuw ontdekt deze sessie)
+- [ ] **[Klein]** Wizard zet `billing_cycle` niet bij nieuwe subs (default valt nu op
+      per_month) — bij MRR-berekening worden deze als maandelijks behandeld
+- [ ] **[Klein]** Retentie "Verlopen"-pill tijdsvenster (bv. laatste 90 dagen, anders
+      toont 'ie alle historische cases)
+- [ ] **[Niet-tech]** TL handtekening verkoper instellen (Jeffrey handmatig in TL)
+- [ ] **[Niet-tech]** TL Focus cleanup ~56 oude test-contacts (Jeffrey handmatig in TL)
+
+---
+
+## 💶 FINANCE FASE 2 — in scope
+
+> Fundament (Fase 1) is af: 17 tabellen + RLS + indexes (migratie 2026-05-30) +
+> ~32 finance.* RBAC-keys + placeholder modules/finance.html. **Nul endpoints, nul
+> UI-functionaliteit** — Fase 2 bouwt de eerste werkende Finance-features.
+
+### Scope (overgenomen van Code's research)
+**2A — TL-factuurspiegel (read-only, laag risico)**
+- [ ] `api/finance-tl-invoice-sync.js` (cron + manual): `invoices.list` per department →
+      upsert in `invoices`-tabel. Status-mapping draft/outstanding/matched. Pattern
+      hergebruiken van tl-import-subscriptions.js (throttle + 429-backoff + ghost-deal-vrij).
+- [ ] `api/finance-invoices.js` (GET): lijst + filters (status / entiteit / periode /
+      klant), join naar customers + company_entities. Gate: finance.invoice.view.
+- [ ] UI: finance.html **Facturen-tab** met KPI-strip (openstaand / verlopen / deze maand
+      geboekt) + filterstrip + sr-table (hergebruik sales-redesign componenten).
+
+**2B — Factuur-acties (write, achter approval-queue)**
+- [ ] `invoices.draft` → `invoices.book` → `invoices.send` (validate-first: TL blocking,
+      faal → geen DB-mutatie)
+- [ ] Handmatige factuur-creatie (gate: finance.invoice.create_manual + invoice.push_to_tl)
+- [ ] Approval workflow Aron → Jeffrey (bestaande agent_approval_queue)
+
+**Plus uit Jeffrey's request**
+- [ ] `invoices.registerPayment` → TL-payments sync (payments-tabel vullen + afletter-UI)
+- [ ] Bonus 'paid' status (los van facturen-logica)
+
+### Bewust UITGESTELD naar latere fase
+- Bankfeed/ING (Fase 3) — vereist GoCardless
+- Wanbetaler-flow (Fase 4) — WhatsApp werkt niet voor EU-nummers (lesson #13)
+- Cashflow/forecast (Fase 7)
+
+### Aandachtspunten
+- Pre-flight schema-check op `invoices`/`payments` kolomnamen (Claude in Chrome) vóór
+  queries
+- `console.error` in elke fail-branch van de sync (lesson 19 mei: silent errors++ = blind)
+- ~32 finance.* RBAC-keys seeden in admin-matrix bij eerste live endpoint
+
+---
+
 ## Klanten-module
 > Spec: `docs/specs/01-klanten-module-spec.md` · Overzicht: `docs/klanten-module-overview.md`
 
