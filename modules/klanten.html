@@ -657,6 +657,13 @@
           <div class="form-field"><label for="cf-city">Plaats</label><input id="cf-city" name="address_city" type="text" maxlength="100"/><div class="field-error" id="cf-err-address_city"></div></div>
           <div class="form-field"><label for="cf-tl">TradersLeague ID</label><input id="cf-tl" name="tl_contact_id" type="text" maxlength="100"/><div class="field-error" id="cf-err-tl_contact_id"></div></div>
           <div class="form-field"><label for="cf-ghl">GoHighLevel ID</label><input id="cf-ghl" name="ghl_contact_id" type="text" maxlength="100"/><div class="field-error" id="cf-err-ghl_contact_id"></div></div>
+          <div class="form-field" style="grid-column:1/-1;margin-top:4px;padding:10px 12px;background:var(--bg-elev-2);border-radius:6px">
+            <label for="cf-privacy" style="display:flex;align-items:flex-start;gap:10px;cursor:pointer;font-weight:500">
+              <input type="checkbox" id="cf-privacy" style="width:auto;margin-top:2px"/>
+              <span>Klant is geïnformeerd over de <a href="/privacy" target="_blank" style="color:var(--accent-cyan,#0891b2);text-decoration:underline">privacyverklaring</a> <span class="req" id="cf-req-privacy">*</span></span>
+            </label>
+            <div class="field-error" id="cf-err-privacy"></div>
+          </div>
         </div>
       </form>
     </div>
@@ -2665,6 +2672,11 @@ function openCustomerModal(mode, prefill) {
   $('#cf-is-company').checked = prefillIsCompany;
   _initialIsCompany = isCreate ? false : prefillIsCompany;
   onCustTypeChange();
+  // AVG-checkbox: create → leeg + verplicht; edit → reeds geaccepteerd = checked + disabled.
+  const _privacyAccepted = !!(prefill && prefill.privacy_accepted_at);
+  const _pc = $('#cf-privacy');
+  if (_pc) { _pc.checked = _privacyAccepted; _pc.disabled = _privacyAccepted; }
+  if ($('#cf-req-privacy')) $('#cf-req-privacy').style.display = (isCreate || !_privacyAccepted) ? '' : 'none';
   // Snapshot voor diff (alleen edit-mode)
   _initialEditValues = isCreate ? null
     : Object.fromEntries(CUSTOMER_FORM_FIELDS.map((f) => [f, (prefill && prefill[f] != null) ? String(prefill[f]) : '']));
@@ -2699,9 +2711,18 @@ async function submitCustomerForm() {
     return;
   }
 
+  // AVG: create → verplicht; edit → alleen meesturen als checkbox bewerkbaar (nog niet
+  // eerder geaccepteerd) en aangevinkt. Server zet de stempel (privacy_accepted_at/by).
+  const privacyEl = $('#cf-privacy');
+  const privacyOk = !!(privacyEl && privacyEl.checked);
+  if (mode === 'create' && !privacyOk) {
+    setModalBannerError('customerFormBanner', 'Bevestig dat de klant is geïnformeerd over de privacyverklaring.');
+    return;
+  }
+
   let body;
   if (mode === 'create') {
-    body = { ...values, is_company: isCompany };
+    body = { ...values, is_company: isCompany, privacy_accepted: privacyOk };
   } else {
     // Client-side diff: alleen velden waarvan waarde verschilt van initial snapshot
     body = {};
@@ -2709,6 +2730,7 @@ async function submitCustomerForm() {
       if (values[f] !== (_initialEditValues[f] || '')) body[f] = values[f];
     }
     if (isCompany !== _initialIsCompany) body.is_company = isCompany;
+    if (privacyEl && !privacyEl.disabled && privacyOk) body.privacy_accepted = true;
     if (Object.keys(body).length === 0) {
       setModalBannerError('customerFormBanner', 'Geen wijzigingen om op te slaan.');
       return;

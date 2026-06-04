@@ -162,6 +162,12 @@ async function handlePost(req, res, admin) {
   // Server-managed velden
   cleaned.created_by_user_id = admin.user.id;
 
+  // AVG-privacy: acceptatie-stempel server-side zetten (niet client-controlled).
+  if (body.privacy_accepted === true || body.privacy_accepted === 'true') {
+    cleaned.privacy_accepted_at = new Date().toISOString();
+    cleaned.privacy_accepted_by_user_id = admin.user.id;
+  }
+
   try {
     const { data: customer, error: insErr } = await supabaseAdmin
       .from('customers').insert(cleaned).select('*').single();
@@ -254,6 +260,12 @@ async function handlePatch(req, res, admin) {
       const t = cleaned[k].trim();
       cleaned[k] = t === '' ? null : t;
     }
+  }
+
+  // AVG-privacy: acceptatie-stempel server-side (UI stuurt dit enkel als nog niet eerder gezet).
+  if (body.privacy_accepted === true || body.privacy_accepted === 'true') {
+    cleaned.privacy_accepted_at = new Date().toISOString();
+    cleaned.privacy_accepted_by_user_id = admin.user.id;
   }
 
   if (Object.keys(cleaned).length === 0) {
