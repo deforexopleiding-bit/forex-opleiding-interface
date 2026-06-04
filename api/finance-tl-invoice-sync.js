@@ -138,10 +138,13 @@ export default async function handler(req, res) {
           const issue = isoDate(inv.invoice_date) || isoDate(inv.booked_on);
           if (issue && issue < SYNC_FROM) { totals.skipped_old++; continue; }
 
-          // Contact → customer (verplicht; invoices.customer_id NOT NULL).
-          const contactId = inv.invoicee?.customer?.id || null;
-          if (!contactId) { totals.skipped_no_customer++; pushSkip(inv, incl); continue; }
-          const { data: cust } = await supabaseAdmin.from('customers').select('id').eq('tl_contact_id', contactId).maybeSingle();
+          // Invoicee → customer (verplicht; invoices.customer_id NOT NULL).
+          // B2B: TL-invoicee is een company → match op tl_company_id; anders tl_contact_id.
+          const invoiceeId = inv.invoicee?.customer?.id || null;
+          const invoiceeType = inv.invoicee?.customer?.type || 'contact';
+          if (!invoiceeId) { totals.skipped_no_customer++; pushSkip(inv, incl); continue; }
+          const matchCol = invoiceeType === 'company' ? 'tl_company_id' : 'tl_contact_id';
+          const { data: cust } = await supabaseAdmin.from('customers').select('id').eq(matchCol, invoiceeId).maybeSingle();
           if (!cust) { totals.skipped_no_customer++; pushSkip(inv, incl); continue; }
 
           const rawNumber = (inv.invoice_number && String(inv.invoice_number).trim()) || null;

@@ -10,6 +10,7 @@
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
+import { customerDisplayName } from './_lib/customer-name.js';
 
 const today = () => new Date().toISOString().slice(0, 10);
 const r2 = (v) => Math.round((Number(v) || 0) * 100) / 100;
@@ -79,7 +80,7 @@ export default async function handler(req, res) {
 
     // --- Lijst-query met filters.
     let lq = supabaseAdmin.from('invoices')
-      .select('id, customer_id, tl_invoice_id, tl_department_id, invoice_number, amount_total, amount_paid, vat_amount, issue_date, due_date, paid_date, status, is_manual, customer:customers(first_name, last_name, email)', { count: 'exact' });
+      .select('id, customer_id, tl_invoice_id, tl_department_id, invoice_number, amount_total, amount_paid, vat_amount, issue_date, due_date, paid_date, status, is_manual, customer:customers(is_company, company_name, first_name, last_name, email)', { count: 'exact' });
     if (entity) lq = lq.eq('tl_department_id', entity);
     if (customerId) lq = lq.eq('customer_id', customerId);
     if (periodStart) lq = lq.gte('issue_date', periodStart);
@@ -97,7 +98,7 @@ export default async function handler(req, res) {
       tl_invoice_id: inv.tl_invoice_id,
       invoice_number: inv.invoice_number,
       customer_id: inv.customer_id,
-      customer_name: inv.customer ? `${inv.customer.first_name || ''} ${inv.customer.last_name || ''}`.trim() || '—' : '—',
+      customer_name: inv.customer ? (customerDisplayName(inv.customer, '—')) : '—',
       customer_email: inv.customer?.email || null,
       amount_total: Number(inv.amount_total) || 0,
       amount_paid: Number(inv.amount_paid) || 0,
