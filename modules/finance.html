@@ -216,7 +216,26 @@
     <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:18px;flex-wrap:wrap">
       <button class="sr-abtn" id="invModalPdf" type="button"><i class="ti ti-file-type-pdf"></i> Open PDF</button>
       <a class="sr-abtn" id="invModalTl" href="https://focus.teamleader.eu/invoices" target="_blank"><i class="ti ti-external-link"></i> Open in Teamleader</a>
+      <button class="sr-abtn success" id="invModalPay" type="button" style="display:none"><i class="ti ti-cash"></i> Betaling registreren</button>
       <button class="sr-abtn primary" id="invModalClose" type="button">Sluiten</button>
+    </div>
+  </div>
+</div>
+
+<!-- Betaling registreren modal (Fase 2B) -->
+<div class="modal-overlay hidden" id="payModal" role="dialog" aria-modal="true">
+  <div class="modal-card">
+    <h3>Betaling registreren</h3>
+    <div id="payModalSub" class="sr-cellsub" style="margin-bottom:12px"></div>
+    <div style="display:flex;flex-direction:column;gap:10px">
+      <label style="font-size:12.5px">Bedrag (€)<input id="payAmount" type="number" step="0.01" min="0" class="fin-input" style="width:100%;margin-top:4px"/></label>
+      <label style="font-size:12.5px">Betaaldatum<input id="payDate" type="date" class="fin-input" style="width:100%;margin-top:4px"/></label>
+      <label style="font-size:12.5px">Betaalmethode-id (optioneel)<input id="payMethod" type="text" class="fin-input" style="width:100%;margin-top:4px" placeholder="TL payment_method_id"/></label>
+    </div>
+    <div id="payModalErr" style="color:#ef4444;font-size:12px;margin-top:8px"></div>
+    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:18px">
+      <button class="sr-abtn" id="payCancel" type="button">Annuleren</button>
+      <button class="sr-abtn success" id="paySubmit" type="button"><i class="ti ti-cash"></i> Registreren</button>
     </div>
   </div>
 </div>
@@ -302,6 +321,7 @@
       const m = stMeta(inv.display_status);
       const ent = inv.tl_department_id ? (ENT_LABEL[inv.tl_department_id] || '') : '';
       const tlItem = inv.tl_invoice_id ? `<a class="sr-menu-item" href="https://focus.teamleader.eu/invoice_detail.php?id=${esc(inv.tl_invoice_id)}" target="_blank"><i class="ti ti-external-link"></i> Open in Teamleader</a>` : '';
+      const payItem = (inv.tl_invoice_id && ['open', 'partially_paid', 'overdue'].includes(inv.display_status)) ? `<button class="sr-menu-item" type="button" data-inv-pay="${i}"><i class="ti ti-cash"></i> Betaling registreren</button>` : '';
       return `<tr>
         <td style="padding:0"><div class="statusstrip-bar" style="background:${m.bar}"></div></td>
         <td><span class="sr-uname">${esc(inv.invoice_number)}</span>${ent ? `<br><span class="sr-cellsub">${esc(ent)}</span>` : ''}</td>
@@ -313,11 +333,13 @@
         <td><span class="sr-tag ${m.tag}">${esc(m.label)}</span></td>
         <td><div class="sr-menu"><button class="sr-ibtn sr-menu-toggle" title="Meer" type="button"><i class="ti ti-dots"></i></button><div class="sr-menu-pop">
           <button class="sr-menu-item" type="button" data-inv-detail="${i}"><i class="ti ti-eye"></i> Bekijk details</button>
+          ${payItem}
           ${tlItem}
         </div></div></td>
       </tr>`;
     }).join('');
     tb.querySelectorAll('[data-inv-detail]').forEach(b => b.addEventListener('click', () => openDetail(items[Number(b.dataset.invDetail)])));
+    tb.querySelectorAll('[data-inv-pay]').forEach(b => b.addEventListener('click', () => openPayModal(items[Number(b.dataset.invPay)])));
   }
 
   function renderPager() {
@@ -386,7 +408,42 @@
       } catch (e) { window.AgentShared?.showToast('PDF mislukt: ' + e.message + ' — open in Teamleader', 'error'); }
       finally { pdfBtn.disabled = false; pdfBtn.innerHTML = orig; }
     };
+    const payBtn = document.getElementById('invModalPay');
+    const payable = !!inv.tl_invoice_id && ['open', 'partially_paid', 'overdue'].includes(inv.display_status);
+    payBtn.style.display = payable ? '' : 'none';
+    payBtn.onclick = () => { document.getElementById('invModal').classList.add('hidden'); openPayModal(inv); };
     document.getElementById('invModal').classList.remove('hidden');
+  }
+
+  // ── Betaling registreren (Fase 2B, super_admin) ──
+  let _payInv = null;
+  function openPayModal(inv) {
+    if (!inv || !inv.tl_invoice_id) { window.AgentShared?.showToast('Geen Teamleader-factuur — afletteren niet mogelijk', 'error'); return; }
+    _payInv = inv;
+    document.getElementById('payModalSub').textContent = `${inv.invoice_number} · ${inv.customer_name} · openstaand ${eur(inv.amount_open)}`;
+    document.getElementById('payAmount').value = (Number(inv.amount_open) || 0).toFixed(2);
+    document.getElementById('payDate').value = new Date().toISOString().slice(0, 10);
+    document.getElementById('payMethod').value = '';
+    document.getElementById('payModalErr').textContent = '';
+    document.getElementById('payModal').classList.remove('hidden');
+  }
+  async function submitPay() {
+    if (!_payInv) return;
+    const amount = Number(document.getElementById('payAmount').value);
+    const paid_at = document.getElementById('payDate').value;
+    const payment_method_id = document.getElementById('payMethod').value.trim() || undefined;
+    const errEl = document.getElementById('payModalErr');
+    if (!(amount > 0)) { errEl.textContent = 'Vul een geldig bedrag in (> 0).'; return; }
+    const btn = document.getElementById('paySubmit'); btn.disabled = true; const orig = btn.innerHTML; btn.innerHTML = '<i class="ti ti-loader"></i> Bezig…';
+    try {
+      const r = await window.AgentShared.apiFetch('/api/finance-invoice-register-payment', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ invoice_id: _payInv.id, amount, paid_at, payment_method_id }) });
+      const d = await r.json();
+      if (!r.ok || !d.success) throw new Error(d.error || 'HTTP ' + r.status);
+      window.AgentShared?.showToast('Betaling geregistreerd', 'success');
+      document.getElementById('payModal').classList.add('hidden');
+      load();
+    } catch (e) { errEl.textContent = 'Mislukt: ' + e.message; }
+    finally { btn.disabled = false; btn.innerHTML = orig; }
   }
 
   // 3-dots menu: position:fixed + flip-up + close-on-scroll (klanten-patroon).
@@ -440,7 +497,12 @@
       const modal = document.getElementById('invModal');
       document.getElementById('invModalClose').addEventListener('click', () => modal.classList.add('hidden'));
       modal.addEventListener('click', (e) => { if (e.target === modal) modal.classList.add('hidden'); });
-      document.addEventListener('keydown', (e) => { if (e.key === 'Escape') modal.classList.add('hidden'); }, true);
+      // Betaling-modal sluiten + submit.
+      const payModal = document.getElementById('payModal');
+      document.getElementById('payCancel').addEventListener('click', () => payModal.classList.add('hidden'));
+      document.getElementById('paySubmit').addEventListener('click', submitPay);
+      payModal.addEventListener('click', (e) => { if (e.target === payModal) payModal.classList.add('hidden'); });
+      document.addEventListener('keydown', (e) => { if (e.key === 'Escape') { modal.classList.add('hidden'); payModal.classList.add('hidden'); } }, true);
 
       initMenus();
       load();
