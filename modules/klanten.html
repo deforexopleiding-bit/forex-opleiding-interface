@@ -1128,6 +1128,7 @@ async function renderFacturenTab() {
   const wrap = $('#facturen-wrap');
   if (!wrap) return;
   wrap.innerHTML = '<div class="placeholder-card">Facturen laden…</div>';
+  const eur2 = (v) => '€' + Number(v || 0).toLocaleString('nl-NL', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const dd = (d) => { if (!d) return '—'; const x = new Date(d + 'T00:00:00'); return isNaN(x) ? '—' : x.toLocaleDateString('nl-NL', { day: '2-digit', month: 'short', year: 'numeric' }); };
   try {
     const res = await window.AgentShared.apiFetch('/api/finance-invoices?page_size=200&customer_id=' + encodeURIComponent(detailState.customerId));
