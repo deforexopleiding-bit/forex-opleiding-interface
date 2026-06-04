@@ -517,6 +517,9 @@
                 <div class="prop-row"><span class="prop-lbl">Voornaam</span><span class="prop-val" id="prof-first-name">—</span></div>
                 <div class="prop-row"><span class="prop-lbl">Achternaam</span><span class="prop-val" id="prof-last-name">—</span></div>
                 <div class="prop-row"><span class="prop-lbl">Geboortedatum</span><span class="prop-val" id="prof-dob">—</span></div>
+                <div class="prop-row" id="prof-row-company" style="display:none"><span class="prop-lbl">Bedrijfsnaam</span><span class="prop-val" id="prof-company-name">—</span></div>
+                <div class="prop-row" id="prof-row-kvk" style="display:none"><span class="prop-lbl">KvK-nummer</span><span class="prop-val" id="prof-kvk">—</span></div>
+                <div class="prop-row" id="prof-row-vat" style="display:none"><span class="prop-lbl">BTW-nummer</span><span class="prop-val" id="prof-vat">—</span></div>
                 <div class="prop-divider"></div>
                 <div class="prop-section-h">Contact</div>
                 <div class="prop-row"><span class="prop-lbl">Email</span><span class="prop-val" id="prof-email">—</span></div>
@@ -638,8 +641,12 @@
       <div class="modal-banner" id="customerFormBanner"></div>
       <form id="customerForm" onsubmit="return false;" autocomplete="off">
         <div class="form-grid">
-          <div class="form-field"><label for="cf-first-name">Voornaam <span class="req">*</span></label><input id="cf-first-name" name="first_name" type="text" maxlength="100" required/><div class="field-error" id="cf-err-first_name"></div></div>
-          <div class="form-field"><label for="cf-last-name">Achternaam <span class="req">*</span></label><input id="cf-last-name" name="last_name" type="text" maxlength="100" required/><div class="field-error" id="cf-err-last_name"></div></div>
+          <div class="form-field" style="grid-column:1/-1"><label for="cf-is-company" style="display:flex;align-items:center;gap:8px;cursor:pointer;font-weight:600"><input type="checkbox" id="cf-is-company" name="is_company" style="width:auto" onchange="onCustTypeChange()"/> Dit is een bedrijf (B2B)</label></div>
+          <div class="form-field cf-company-only" style="display:none;grid-column:1/-1"><label for="cf-company-name">Bedrijfsnaam <span class="req">*</span></label><input id="cf-company-name" name="company_name" type="text" maxlength="200"/><div class="field-error" id="cf-err-company_name"></div></div>
+          <div class="form-field cf-company-only" style="display:none"><label for="cf-kvk">KvK-nummer</label><input id="cf-kvk" name="kvk_number" type="text" maxlength="20"/><div class="field-error" id="cf-err-kvk_number"></div></div>
+          <div class="form-field cf-company-only" style="display:none"><label for="cf-vat">BTW-nummer</label><input id="cf-vat" name="vat_number" type="text" maxlength="40"/><div class="field-error" id="cf-err-vat_number"></div></div>
+          <div class="form-field"><label for="cf-first-name">Voornaam <span class="req" id="cf-req-first">*</span></label><input id="cf-first-name" name="first_name" type="text" maxlength="100"/><div class="field-error" id="cf-err-first_name"></div></div>
+          <div class="form-field"><label for="cf-last-name">Achternaam <span class="req" id="cf-req-last">*</span></label><input id="cf-last-name" name="last_name" type="text" maxlength="100"/><div class="field-error" id="cf-err-last_name"></div></div>
           <div class="form-field"><label for="cf-email">Email</label><input id="cf-email" name="email" type="email" maxlength="200"/><div class="field-error" id="cf-err-email"></div></div>
           <div class="form-field"><label for="cf-phone">Telefoon</label><input id="cf-phone" name="phone" type="tel" maxlength="40"/><div class="field-error" id="cf-err-phone"></div></div>
           <div class="form-field"><label for="cf-dob">Geboortedatum</label><input id="cf-dob" name="date_of_birth" type="date"/><div class="field-error" id="cf-err-date_of_birth"></div></div>
@@ -650,6 +657,13 @@
           <div class="form-field"><label for="cf-city">Plaats</label><input id="cf-city" name="address_city" type="text" maxlength="100"/><div class="field-error" id="cf-err-address_city"></div></div>
           <div class="form-field"><label for="cf-tl">TradersLeague ID</label><input id="cf-tl" name="tl_contact_id" type="text" maxlength="100"/><div class="field-error" id="cf-err-tl_contact_id"></div></div>
           <div class="form-field"><label for="cf-ghl">GoHighLevel ID</label><input id="cf-ghl" name="ghl_contact_id" type="text" maxlength="100"/><div class="field-error" id="cf-err-ghl_contact_id"></div></div>
+          <div class="form-field" style="grid-column:1/-1;margin-top:4px;padding:10px 12px;background:var(--bg-elev-2);border-radius:6px">
+            <label for="cf-privacy" style="display:flex;align-items:flex-start;gap:10px;cursor:pointer;font-weight:500">
+              <input type="checkbox" id="cf-privacy" style="width:auto;margin-top:2px"/>
+              <span>Klant is geïnformeerd over de <a href="/privacy" target="_blank" style="color:var(--accent-cyan,#0891b2);text-decoration:underline">privacyverklaring</a> <span class="req" id="cf-req-privacy">*</span></span>
+            </label>
+            <div class="field-error" id="cf-err-privacy"></div>
+          </div>
         </div>
       </form>
     </div>
@@ -810,6 +824,23 @@ const fmtDate = (iso) => {
 };
 const escapeHtml = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 
+// Weergavenaam: bedrijf → company_name, particulier → "voornaam achternaam".
+const customerDisplayName = (c, fallback = '') => {
+  if (!c) return fallback;
+  if (c.is_company) return (c.company_name || '').trim() || fallback;
+  const n = `${(c.first_name || '').trim()} ${(c.last_name || '').trim()}`.trim();
+  return n || fallback;
+};
+// Avatar: bedrijf → building-icoon; particulier → 2-letter initialen (naam-hash kleur).
+function applyCustomerAvatar(el, c, name) {
+  if (!el) return;
+  if (c && c.is_company) { el.className = 'sr-avatar lg'; el.innerHTML = '<i class="ti ti-building"></i>'; return; }
+  let h = 0; const s = String(name || ''); for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+  el.className = 'sr-avatar lg sr-av-' + (h % 6);
+  const p = String(name || '').trim().split(/\s+/);
+  el.textContent = ((p[0]?.[0] || '') + (p[1]?.[0] || '')).toUpperCase() || '?';
+}
+
 // ============================================================================
 // Init — auth + RBAC + mode-detectie
 // ============================================================================
@@ -908,17 +939,19 @@ function renderDetail() {
   $('#detail-content').style.display = '';
 
   // Header — naam via textContent (XSS-safe), status-badge class wisselt
-  const name = `${(c.first_name || '').trim()} ${(c.last_name || '').trim()}`.trim() || '(geen naam)';
+  const name = customerDisplayName(c, '(geen naam)');
   $('#detail-name').textContent = name;
-  // Avatar (naam-hash) + meta-strip + risico-badge.
-  const av = $('#detail-avatar');
-  if (av) { let h = 0; for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0; av.className = 'sr-avatar lg sr-av-' + (h % 6); const parts = name.trim().split(/\s+/); av.textContent = ((parts[0]?.[0] || '') + (parts[1]?.[0] || '')).toUpperCase() || '?'; }
-  const riskEl = $('#detail-risk'); if (riskEl) riskEl.innerHTML = c.risk_tag_auto ? '<span class="sr-tag danger">Risico</span>' : '';
+  // Avatar (bedrijf → building-icoon, particulier → initialen) + type-/risico-badge.
+  applyCustomerAvatar($('#detail-avatar'), c, name);
+  const riskEl = $('#detail-risk'); if (riskEl) riskEl.innerHTML = `<span class="sr-tag ${c.is_company ? 'blue' : 'gray'}">${c.is_company ? 'Bedrijf' : 'Particulier'}</span>` + (c.risk_tag_auto ? ' <span class="sr-tag danger">Risico</span>' : '');
   const metaEl = $('#detail-meta');
   if (metaEl) {
     const bits = [];
+    if (c.is_company && (c.first_name || c.last_name)) bits.push(`<i class="ti ti-user"></i> ${escapeHtml(`${(c.first_name || '').trim()} ${(c.last_name || '').trim()}`.trim())}`);
     if (c.email) bits.push(`<i class="ti ti-mail"></i> <a href="mailto:${encodeURIComponent(c.email)}" style="color:inherit">${escapeHtml(c.email)}</a>`);
     if (c.phone) bits.push(`<i class="ti ti-phone"></i> <a href="tel:${encodeURIComponent(c.phone)}" style="color:inherit">${escapeHtml(c.phone)}</a>`);
+    if (c.kvk_number) bits.push(`<i class="ti ti-building"></i> KvK ${escapeHtml(c.kvk_number)}`);
+    if (c.vat_number) bits.push(`<i class="ti ti-receipt-tax"></i> ${escapeHtml(c.vat_number)}`);
     if (c.created_at) bits.push(`<i class="ti ti-calendar"></i> Klant sinds ${fmtDate(c.created_at)}`);
     metaEl.innerHTML = bits.join('  ·  ');
   }
@@ -1266,11 +1299,10 @@ function renderProfielTab() {
   const c = detailState.customer;
 
   // Sidebar (V2): avatar + naam + badges + contact-quick-links.
-  const fullName = `${(c.first_name || '').trim()} ${(c.last_name || '').trim()}`.trim() || '(geen naam)';
-  const avEl = $('#prof-avatar');
-  if (avEl) { let h = 0; for (let i = 0; i < fullName.length; i++) h = (h * 31 + fullName.charCodeAt(i)) >>> 0; avEl.className = 'sr-avatar lg sr-av-' + (h % 6); const p = fullName.split(/\s+/); avEl.textContent = ((p[0]?.[0] || '') + (p[1]?.[0] || '')).toUpperCase() || '?'; }
+  const fullName = customerDisplayName(c, '(geen naam)');
+  applyCustomerAvatar($('#prof-avatar'), c, fullName);
   if ($('#prof-sidebar-name')) $('#prof-sidebar-name').textContent = fullName;
-  if ($('#prof-sidebar-badges')) $('#prof-sidebar-badges').innerHTML = (c.status === 'active' ? '<span class="sr-tag green">Actief</span>' : `<span class="sr-tag gray">${escapeHtml(labelForStatus(c.status))}</span>`) + (c.risk_tag_auto ? ' <span class="sr-tag danger">Risico</span>' : '');
+  if ($('#prof-sidebar-badges')) $('#prof-sidebar-badges').innerHTML = `<span class="sr-tag ${c.is_company ? 'blue' : 'gray'}">${c.is_company ? 'Bedrijf' : 'Particulier'}</span> ` + (c.status === 'active' ? '<span class="sr-tag green">Actief</span>' : `<span class="sr-tag gray">${escapeHtml(labelForStatus(c.status))}</span>`) + (c.risk_tag_auto ? ' <span class="sr-tag danger">Risico</span>' : '');
   if ($('#prof-sidebar-since')) $('#prof-sidebar-since').textContent = c.created_at ? 'Klant sinds ' + fmtDate(c.created_at) : '';
   const le = $('#prof-link-email'); if (le) { if (c.email) { le.href = 'mailto:' + c.email; le.querySelector('span').textContent = c.email; le.style.display = ''; } else le.style.display = 'none'; }
   const lp = $('#prof-link-phone'); if (lp) { if (c.phone) { lp.href = 'tel:' + c.phone; lp.querySelector('span').textContent = c.phone; lp.style.display = ''; } else lp.style.display = 'none'; }
@@ -1279,6 +1311,10 @@ function renderProfielTab() {
   $('#prof-first-name').textContent = c.first_name || '—';
   $('#prof-last-name').textContent  = c.last_name  || '—';
   $('#prof-dob').textContent        = c.date_of_birth ? fmtDateLong(c.date_of_birth) : '—';
+  if ($('#prof-company-name')) $('#prof-company-name').textContent = c.company_name || '—';
+  if ($('#prof-kvk')) $('#prof-kvk').textContent = c.kvk_number || '—';
+  if ($('#prof-vat')) $('#prof-vat').textContent = c.vat_number || '—';
+  ['prof-row-company', 'prof-row-kvk', 'prof-row-vat'].forEach((id) => { const el = document.getElementById(id); if (el) el.style.display = c.is_company ? '' : 'none'; });
 
   // Contact: mailto:/tel: links (encodeURIComponent op user-input)
   const emailEl = $('#prof-email');
@@ -1824,7 +1860,7 @@ function renderCustomers({ customers, total, page, page_size, total_pages }) {
     const tags = (c.tags || []).map((t) =>
       `<span class="tag-badge" style="background:${escapeHtml(t.color || '#6B7280')}">${escapeHtml(t.label)}</span>`
     ).join('');
-    const name = `${escapeHtml(c.first_name || '')} ${escapeHtml(c.last_name || '')}`.trim() || '—';
+    const name = escapeHtml(customerDisplayName(c, '—'));
     const checked = state.selectedIds.has(c.id) ? 'checked' : '';
     tr.innerHTML = `
       <td class="col-select"><input type="checkbox" data-row-select="${escapeHtml(c.id)}" aria-label="Selecteer ${name}" ${checked}/></td>
@@ -2578,11 +2614,22 @@ function bumpCounter(field, delta) {
 // Modals (create / edit / archive) — Fase 2A.3
 // ============================================================================
 const CUSTOMER_FORM_FIELDS = [
+  'company_name', 'kvk_number', 'vat_number',
   'first_name', 'last_name', 'email', 'phone', 'date_of_birth',
   'address_street', 'address_number', 'address_postal', 'address_city',
   'tl_contact_id', 'ghl_contact_id',
 ];
 let _initialEditValues = null;  // snapshot voor client-side diff bij PATCH
+let _initialIsCompany = null;   // snapshot van is_company (checkbox buiten generieke loop)
+
+// Toon/verberg bedrijfsvelden + verplicht-markers o.b.v. de type-checkbox.
+function onCustTypeChange() {
+  const isCo = $('#cf-is-company') ? $('#cf-is-company').checked : false;
+  document.querySelectorAll('#customerForm .cf-company-only').forEach((el) => { el.style.display = isCo ? '' : 'none'; });
+  const rf = $('#cf-req-first'), rl = $('#cf-req-last');
+  if (rf) rf.style.display = isCo ? 'none' : '';
+  if (rl) rl.style.display = isCo ? 'none' : '';
+}
 
 function openModal(id)  { document.getElementById(id).classList.remove('hidden'); }
 function closeModal(id) { document.getElementById(id).classList.add('hidden'); }
@@ -2620,6 +2667,16 @@ function openCustomerModal(mode, prefill) {
     const el = form.querySelector('[name="' + f + '"]');
     el.value = (prefill && prefill[f] != null) ? prefill[f] : '';
   }
+  // Type (bedrijf/particulier) — checkbox staat buiten de generieke .value-loop.
+  const prefillIsCompany = !!(prefill && prefill.is_company);
+  $('#cf-is-company').checked = prefillIsCompany;
+  _initialIsCompany = isCreate ? false : prefillIsCompany;
+  onCustTypeChange();
+  // AVG-checkbox: create → leeg + verplicht; edit → reeds geaccepteerd = checked + disabled.
+  const _privacyAccepted = !!(prefill && prefill.privacy_accepted_at);
+  const _pc = $('#cf-privacy');
+  if (_pc) { _pc.checked = _privacyAccepted; _pc.disabled = _privacyAccepted; }
+  if ($('#cf-req-privacy')) $('#cf-req-privacy').style.display = (isCreate || !_privacyAccepted) ? '' : 'none';
   // Snapshot voor diff (alleen edit-mode)
   _initialEditValues = isCreate ? null
     : Object.fromEntries(CUSTOMER_FORM_FIELDS.map((f) => [f, (prefill && prefill[f] != null) ? String(prefill[f]) : '']));
@@ -2641,16 +2698,39 @@ async function submitCustomerForm() {
   for (const f of CUSTOMER_FORM_FIELDS) {
     values[f] = form.querySelector('[name="' + f + '"]').value;
   }
+  const isCompany = $('#cf-is-company').checked;
+
+  // Client-side identiteits-validatie (server valideert ook).
+  clearFormErrors();
+  if (isCompany && !String(values.company_name || '').trim()) {
+    setModalBannerError('customerFormBanner', 'Bedrijfsnaam is verplicht.');
+    return;
+  }
+  if (!isCompany && (!String(values.first_name || '').trim() || !String(values.last_name || '').trim())) {
+    setModalBannerError('customerFormBanner', 'Voor- en achternaam zijn verplicht.');
+    return;
+  }
+
+  // AVG: create → verplicht; edit → alleen meesturen als checkbox bewerkbaar (nog niet
+  // eerder geaccepteerd) en aangevinkt. Server zet de stempel (privacy_accepted_at/by).
+  const privacyEl = $('#cf-privacy');
+  const privacyOk = !!(privacyEl && privacyEl.checked);
+  if (mode === 'create' && !privacyOk) {
+    setModalBannerError('customerFormBanner', 'Bevestig dat de klant is geïnformeerd over de privacyverklaring.');
+    return;
+  }
 
   let body;
   if (mode === 'create') {
-    body = values;
+    body = { ...values, is_company: isCompany, privacy_accepted: privacyOk };
   } else {
     // Client-side diff: alleen velden waarvan waarde verschilt van initial snapshot
     body = {};
     for (const f of CUSTOMER_FORM_FIELDS) {
       if (values[f] !== (_initialEditValues[f] || '')) body[f] = values[f];
     }
+    if (isCompany !== _initialIsCompany) body.is_company = isCompany;
+    if (privacyEl && !privacyEl.disabled && privacyOk) body.privacy_accepted = true;
     if (Object.keys(body).length === 0) {
       setModalBannerError('customerFormBanner', 'Geen wijzigingen om op te slaan.');
       return;
@@ -2721,7 +2801,7 @@ async function submitCustomerForm() {
 function openArchiveModal() {
   const c = detailState.customer;
   if (!c) return;
-  const name = `${(c.first_name || '').trim()} ${(c.last_name || '').trim()}`.trim() || 'deze klant';
+  const name = customerDisplayName(c, 'deze klant');
   $('#archive-customer-name').textContent = name;
   $('#archive-reason').value = '';
   const b = $('#archiveBanner');
@@ -2819,7 +2899,7 @@ function openDuplicateModal(matches) {
 }
 
 function renderDuplicateMatchItem(m) {
-  const name = `${escapeHtml(m.first_name || '')} ${escapeHtml(m.last_name || '')}`.trim() || '(geen naam)';
+  const name = m.name ? escapeHtml(m.name) : '(geen naam)';
   const email = m.email ? escapeHtml(m.email) : '—';
   const phone = m.phone ? escapeHtml(m.phone) : '—';
   // Whitelist match_reason om class-injection te voorkomen

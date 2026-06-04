@@ -114,7 +114,7 @@ async function respondList(req, res) {
     const esc = search.replace(/[,()]/g, ' ');
     const pat = `%${esc}%`;
     query = query.or(
-      `first_name.ilike.${pat},last_name.ilike.${pat},email.ilike.${pat},phone.ilike.${pat}`
+      `first_name.ilike.${pat},last_name.ilike.${pat},company_name.ilike.${pat},email.ilike.${pat},phone.ilike.${pat}`
     );
   }
 
@@ -149,6 +149,8 @@ async function respondList(req, res) {
   return res.status(200).json({
     customers: (customers || []).map((c) => ({
       id: c.id,
+      is_company: c.is_company,
+      company_name: c.company_name,
       first_name: c.first_name,
       last_name: c.last_name,
       email: c.email,

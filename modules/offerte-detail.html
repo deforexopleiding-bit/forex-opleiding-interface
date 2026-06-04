@@ -122,7 +122,7 @@ function render(d){
   document.getElementById('detailBody').innerHTML = `
     <div class="grid">
       <div class="sr-card"><div class="sr-card-h">Klant</div>
-        <div class="sr-userline" style="margin-bottom:8px">${typeof avatarHtml==='function'?avatarHtml((c.first_name||'')+' '+(c.last_name||'')):''}<span><span class="sr-uname">${esc((c.first_name||'')+' '+(c.last_name||''))}</span>${c.risk_tag_auto?' <span class="sr-tag danger">Risico</span>':''}<br><span class="sr-cellsub">${esc(d.entity||'—')}</span></span></div>
+        <div class="sr-userline" style="margin-bottom:8px">${typeof avatarHtml==='function'?avatarHtml(c.is_company?(c.company_name||''):(c.first_name||'')+' '+(c.last_name||'')):''}<span><span class="sr-uname">${esc(c.is_company?(c.company_name||''):((c.first_name||'')+' '+(c.last_name||'')).trim())}</span>${c.is_company?' <span class="sr-tag blue">Bedrijf</span>':''}${c.risk_tag_auto?' <span class="sr-tag danger">Risico</span>':''}<br><span class="sr-cellsub">${esc(d.entity||'—')}</span></span></div>
         <div class="row"><span class="lbl">E-mail</span><span>${c.email?`<a href="mailto:${encodeURIComponent(c.email)}">${esc(c.email)}</a>`:'—'}</span></div>
         <div class="row"><span class="lbl">Telefoon</span><span>${c.phone?`<a href="tel:${encodeURIComponent(c.phone)}">${esc(c.phone)}</a>`:'—'}</span></div>
         <div style="margin-top:8px"><a class="sr-abtn" href="/modules/klanten.html?id=${esc(c.id)}"><i class="ti ti-user"></i> Klant-detail</a></div>

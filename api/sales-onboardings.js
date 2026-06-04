@@ -4,6 +4,7 @@
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
+import { customerDisplayName } from './_lib/customer-name.js';
 
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
@@ -29,7 +30,7 @@ export default async function handler(req, res) {
     const userIds = [...new Set((deals || []).map(d => d.sales_user_id).filter(Boolean))];
 
     const custById = {}, trajectByVariant = {}, deptByTl = {}, userById = {};
-    if (custIds.length) { const { data } = await supabaseAdmin.from('customers').select('id, first_name, last_name, onboarding_status').in('id', custIds); for (const c of data || []) custById[c.id] = c; }
+    if (custIds.length) { const { data } = await supabaseAdmin.from('customers').select('id, is_company, company_name, first_name, last_name, onboarding_status').in('id', custIds); for (const c of data || []) custById[c.id] = c; }
     if (variantIds.length) {
       const { data: vs } = await supabaseAdmin.from('traject_variants').select('id, name, traject_id').in('id', variantIds);
       const tIds = [...new Set((vs || []).map(v => v.traject_id))];
@@ -43,7 +44,7 @@ export default async function handler(req, res) {
       const c = custById[d.customer_id] || {};
       return {
         deal_id: d.id, customer_id: d.customer_id,
-        customer_name: `${c.first_name || ''} ${c.last_name || ''}`.trim() || '—',
+        customer_name: customerDisplayName(c, '—'),
         traject_label: d.traject_variant_id ? (trajectByVariant[d.traject_variant_id] || null) : null,
         entity: d.tl_department_id ? (deptByTl[d.tl_department_id] || null) : null,
         onboarding_status: c.onboarding_status || 'not_sent',

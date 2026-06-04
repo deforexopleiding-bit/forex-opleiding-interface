@@ -5,6 +5,7 @@
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
+import { customerDisplayName } from './_lib/customer-name.js';
 
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
@@ -51,7 +52,7 @@ export default async function handler(req, res) {
     // Joins: klant + entiteit + mentor + traject (van de laatst-aflopende sub).
     const custIds = [...new Set(groups.map(g => g.customer_id))];
     const custById = {};
-    if (custIds.length) { const { data } = await supabaseAdmin.from('customers').select('id, first_name, last_name, email, mentor_user_id').in('id', custIds); for (const c of data || []) custById[c.id] = c; }
+    if (custIds.length) { const { data } = await supabaseAdmin.from('customers').select('id, is_company, company_name, first_name, last_name, email, mentor_user_id').in('id', custIds); for (const c of data || []) custById[c.id] = c; }
     const deptIds = [...new Set(groups.map(g => g.maxDeal?.tl_department_id).filter(Boolean))];
     const entByTl = {};
     if (deptIds.length) { const { data } = await supabaseAdmin.from('company_entities').select('tl_department_id, label').in('tl_department_id', deptIds); for (const e of data || []) entByTl[e.tl_department_id] = e.label; }
@@ -73,7 +74,7 @@ export default async function handler(req, res) {
       const vId = g.maxDeal?.traject_variant_id || null;
       return {
         customer_id: g.customer_id,
-        customer_name: `${c.first_name || ''} ${c.last_name || ''}`.trim() || '—',
+        customer_name: customerDisplayName(c, '—'),
         customer_email: c.email || null,
         entity: dept ? (entByTl[dept] || null) : null,
         mentor_name: c.mentor_user_id ? (mentorById[c.mentor_user_id] || null) : null,
