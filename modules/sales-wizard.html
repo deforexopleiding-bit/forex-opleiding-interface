@@ -163,9 +163,22 @@
       <strong>Bestaande klant geselecteerd: <span id="existingCustName"></span></strong>
       <a href="#" id="swapCustLink" style="margin-left:12px;color:var(--accent-cyan,#0891b2);">Wissel klant</a>
     </div>
+    <div class="field" style="margin-bottom:10px">
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer;text-transform:none;letter-spacing:0">
+        <input type="checkbox" id="f_is_company" style="width:auto"/> Dit is een bedrijf (B2B)
+      </label>
+    </div>
+    <div class="row2 sw-company-only" style="display:none">
+      <div class="field"><label>Bedrijfsnaam <span class="req">*</span></label><input id="f_company_name" /></div>
+      <div class="field"><label>KvK-nummer</label><input id="f_kvk" /></div>
+    </div>
+    <div class="row2 sw-company-only" style="display:none">
+      <div class="field"><label>BTW-nummer</label><input id="f_vat" /></div>
+      <div class="field"></div>
+    </div>
     <div class="row2">
-      <div class="field"><label>Voornaam <span class="req">*</span></label><input id="f_first" /></div>
-      <div class="field"><label>Achternaam <span class="req">*</span></label><input id="f_last" /></div>
+      <div class="field"><label>Voornaam <span class="req" id="sw-req-first">*</span></label><input id="f_first" /></div>
+      <div class="field"><label>Achternaam <span class="req" id="sw-req-last">*</span></label><input id="f_last" /></div>
     </div>
     <div class="row2">
       <div class="field"><label>Email <span class="req">*</span></label><input id="f_email" type="email" /></div>
@@ -376,6 +389,7 @@ const state = {
     tl_department_id: '',
     traject_variant_id: '',
     // Stap 2: klant
+    is_company: false, company_name: '', kvk_number: '', vat_number: '',
     first_name: '', last_name: '', email: '', phone: '',
     address_street: '', address_number: '', address_postal: '', address_city: '',
     date_of_birth: '',
@@ -564,8 +578,9 @@ async function init() {
       if (r.ok) {
         const d = await r.json();
         const deal = d.deal || {}; const c = d.customer || {};
-        if (c.id) { state.matched_customer_id = c.id; showExistingBanner(`${c.first_name || ''} ${c.last_name || ''}`.trim()); }
+        if (c.id) { state.matched_customer_id = c.id; showExistingBanner(custName(c)); }
         Object.assign(state.wizard, {
+          is_company: !!c.is_company, company_name: c.company_name || '', kvk_number: c.kvk_number || '', vat_number: c.vat_number || '',
           first_name: c.first_name || '', last_name: c.last_name || '', email: c.email || '', phone: c.phone || '',
           address_street: c.address_street || '', address_number: c.address_number || '', address_postal: c.address_postal || '', address_city: c.address_city || '',
           tl_department_id: deal.tl_department_id || '', traject_variant_id: deal.traject_variant_id || '',
@@ -595,12 +610,13 @@ async function init() {
         const c = d.customer || d;
         if (c) {
           Object.assign(state.wizard, {
+            is_company: !!c.is_company, company_name: c.company_name || '', kvk_number: c.kvk_number || '', vat_number: c.vat_number || '',
             first_name: c.first_name, last_name: c.last_name, email: c.email, phone: c.phone,
             address_street: c.address_street, address_number: c.address_number,
             address_postal: c.address_postal, address_city: c.address_city,
             date_of_birth: c.date_of_birth,
           });
-          showExistingBanner(`${c.first_name || ''} ${c.last_name || ''}`.trim());
+          showExistingBanner(custName(c));
         }
       }
     } catch {}
@@ -720,6 +736,11 @@ function syncStep1Fields() {
   document.getElementById('f_city').value = w.address_city || '';
   document.getElementById('f_dob').value = w.date_of_birth || '';
   document.getElementById('avgCheck').checked = !!w.avg_ok;
+  document.getElementById('f_company_name').value = w.company_name || '';
+  document.getElementById('f_kvk').value = w.kvk_number || '';
+  document.getElementById('f_vat').value = w.vat_number || '';
+  document.getElementById('f_is_company').checked = !!w.is_company;
+  onWizCompanyToggle();
 }
 function syncStep2Fields() {
   document.getElementById('quoteRef').value = state.wizard.quote_reference || '';
@@ -744,6 +765,22 @@ function updateSaleTypeHint() {
   });
 });
 document.getElementById('avgCheck').addEventListener('change', e => { state.wizard.avg_ok = e.target.checked; markDirty(); updateNextEnabled(); });
+// B2B: type-toggle + bedrijfsvelden.
+function custName(o) { if (!o) return ''; return o.is_company ? (o.company_name || '').trim() : `${o.first_name || ''} ${o.last_name || ''}`.trim(); }
+function onWizCompanyToggle() {
+  const isCo = !!state.wizard.is_company;
+  document.querySelectorAll('#panel1 .sw-company-only').forEach(el => { el.style.display = isCo ? '' : 'none'; });
+  const rf = document.getElementById('sw-req-first'), rl = document.getElementById('sw-req-last');
+  if (rf) rf.style.display = isCo ? 'none' : '';
+  if (rl) rl.style.display = isCo ? 'none' : '';
+}
+['f_company_name','f_kvk','f_vat'].forEach(id => {
+  document.getElementById(id).addEventListener('input', e => {
+    const map = { f_company_name: 'company_name', f_kvk: 'kvk_number', f_vat: 'vat_number' };
+    state.wizard[map[id]] = e.target.value; markDirty(); updateNextEnabled();
+  });
+});
+document.getElementById('f_is_company').addEventListener('change', e => { state.wizard.is_company = e.target.checked; onWizCompanyToggle(); markDirty(); updateNextEnabled(); });
 
 // ── Tags ──
 function renderTags() {
@@ -1057,7 +1094,9 @@ function renderReview() {
       <div class="section-head"><span class="chev">▾</span><span class="title">Klant ${custBadge}</span><a href="#" data-back="2" style="font-size:11px;color:var(--accent-cyan,#0891b2)">Bewerken</a></div>
       <div class="section-body">
         ${entityLabel ? `<div style="margin-bottom:6px"><span class="section-badge tl">Bedrijf: ${esc(entityLabel)}</span></div>` : ''}
-        <strong>${esc(w.first_name)} ${esc(w.last_name)}</strong><br>
+        <strong>${esc(custName(w))}</strong>${w.is_company ? ' <span class="section-badge tl">Bedrijf</span>' : ''}<br>
+        ${w.is_company && (w.first_name || w.last_name) ? 'Contact: ' + esc(`${w.first_name || ''} ${w.last_name || ''}`.trim()) + '<br>' : ''}
+        ${w.is_company && w.kvk_number ? 'KvK: ' + esc(w.kvk_number) + '<br>' : ''}${w.is_company && w.vat_number ? 'BTW: ' + esc(w.vat_number) + '<br>' : ''}
         ${esc(w.email)} · ${esc(w.phone)}<br>
         ${[w.address_street, w.address_number, w.address_postal, w.address_city].filter(Boolean).join(' ') || '—'}<br>
         ${w.date_of_birth ? 'Geboortedatum: ' + fmtDateLong(w.date_of_birth) : ''}<br>
@@ -1129,6 +1168,8 @@ async function submitDeal(syncToTl) {
     const w = state.wizard;
     const payload = {
       customer_data: {
+        is_company: !!w.is_company, company_name: w.company_name || null,
+        kvk_number: w.kvk_number || null, vat_number: w.vat_number || null,
         first_name: w.first_name, last_name: w.last_name, email: w.email, phone: w.phone,
         address_street: w.address_street, address_number: w.address_number,
         address_postal: w.address_postal, address_city: w.address_city,
@@ -1174,7 +1215,7 @@ async function submitDeal(syncToTl) {
       data = await res.json();
       if (!res.ok) throw new Error(data.error || 'HTTP ' + res.status);
     }
-    toast(state.editDealId ? `Offerte bijgewerkt voor ${w.first_name} ${w.last_name}` : `Offerte aangemaakt voor ${w.first_name} ${w.last_name}`, 'success');
+    toast(state.editDealId ? `Offerte bijgewerkt voor ${custName(w)}` : `Offerte aangemaakt voor ${custName(w)}`, 'success');
     if (data.tl_quotation_status === 'sent') {
       setTimeout(() => toast(`Offerte verzonden naar ${w.email} via Teamleader`, 'success'), 1200);
     } else if (data.tl_quotation_status === 'draft' && syncToTl) {
@@ -1198,8 +1239,8 @@ function updateNextEnabled() {
     valid = !!w.tl_department_id; // bedrijf gekozen
   } else if (state.step === 2) {
     const missing = [];
-    if (!w.first_name) missing.push('Voornaam');
-    if (!w.last_name) missing.push('Achternaam');
+    if (w.is_company) { if (!w.company_name) missing.push('Bedrijfsnaam'); }
+    else { if (!w.first_name) missing.push('Voornaam'); if (!w.last_name) missing.push('Achternaam'); }
     if (!w.email) missing.push('E-mail');
     if (!w.phone) missing.push('Telefoon');
     if (!w.address_street) missing.push('Straat');

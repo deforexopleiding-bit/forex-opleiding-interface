@@ -168,12 +168,13 @@ function defaultFirstCall(){
   const base = (state.deal && state.deal.payment_start_date) || state.subs[0]?.start_date || (state.deal && state.deal.start_date) || today();
   const d=new Date(base); d.setDate(d.getDate()+7); return d.toISOString().slice(0,16);
 }
+function scName(o){ if(!o) return ''; return o.is_company ? (o.company_name||'').trim() : `${o.first_name||''} ${o.last_name||''}`.trim(); }
 function buildReview(){
   const c=state.customer, d=state.deal;
-  document.getElementById('topSub').textContent = `${c.first_name||''} ${c.last_name||''}`.trim();
+  document.getElementById('topSub').textContent = scName(c);
   document.getElementById('step1Body').innerHTML = `<div class="card">
     <div style="font-size:11px;text-transform:uppercase;color:var(--text-faint);margin-bottom:8px">Klant &amp; offerte</div>
-    <div><strong>${esc((c.first_name||'')+' '+(c.last_name||''))}</strong> · ${esc(c.email||'—')}</div>
+    <div><strong>${esc(scName(c))}</strong> · ${esc(c.email||'—')}</div>
     <div style="margin-top:8px;font-size:13px">Totaal incl. BTW: <strong>${eur(state.totals.incl)}</strong></div>
     <div style="font-size:12px;color:var(--text-dim)">Getekend op: ${fmtDate(d.tl_quotation_accepted_at||d.tl_quotation_signed_at)}</div></div>`;
 }
@@ -247,7 +248,7 @@ async function doCustomerSearch(q){
   try{
     const d=await apiFetch('/api/sales-customers?search='+encodeURIComponent(q)).then(r=>r.json());
     const cs=(d.customers||[]).slice(0,8);
-    box.innerHTML = cs.length ? cs.map(c=>`<div class="cust-result" data-cust='${esc(JSON.stringify({id:c.id,name:`${c.first_name||''} ${c.last_name||''}`.trim(),email:c.email}))}'>${esc(`${c.first_name||''} ${c.last_name||''}`.trim()||'—')} · ${esc(c.email||'')}</div>`).join('') : '<div style="font-size:12px;color:var(--text-faint)">Geen klant gevonden.</div>';
+    box.innerHTML = cs.length ? cs.map(c=>`<div class="cust-result" data-cust='${esc(JSON.stringify({id:c.id,name:c.name||'',email:c.email}))}'>${esc(c.name||'—')} · ${esc(c.email||'')}</div>`).join('') : '<div style="font-size:12px;color:var(--text-faint)">Geen klant gevonden.</div>';
     box.querySelectorAll('[data-cust]').forEach(el=>el.addEventListener('click',()=>{ const c=JSON.parse(el.dataset.cust); state.matched_customer_id=c.id; state._chosenName=c.name||c.email; box.innerHTML=''; document.getElementById('custSearch').value=''; renderChosen(); updateNext(); }));
   }catch(e){ box.innerHTML='<div style="font-size:12px;color:var(--red,#dc2626)">Zoeken mislukt</div>'; }
 }
