@@ -68,36 +68,51 @@ export default async function handler(req, res) {
     if (!inv) return res.status(404).json({ error: 'Factuur niet gevonden' });
     if (!inv.tl_invoice_id) return res.status(400).json({ error: 'Factuur heeft geen Teamleader-id (handmatige factuur — volgt in 2B)' });
 
-    // paid_at → ISO 8601 datetime (TL vereist datetime).
-    let paidIso;
-    try { paidIso = new Date(paid_at || Date.now()).toISOString(); } catch { paidIso = new Date().toISOString(); }
+    // paid_at: valideer als plain ISO-date "YYYY-MM-DD". Leeg/ongeldig → 400 (niet doorsturen).
+    const dateOnly = String(paid_at || '').trim().slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(dateOnly) || isNaN(new Date(dateOnly + 'T00:00:00Z').getTime())) {
+      return res.status(400).json({ error: 'Ongeldige of ontbrekende betaaldatum (YYYY-MM-DD vereist)' });
+    }
+    const paidDateTime = new Date(dateOnly + 'T00:00:00Z').toISOString(); // fallback-formaat
 
     // 1. TL-FIRST: registreer de betaling. Faal → GEEN DB-mutatie.
     // TL verwacht: amount (euro-float, GEEN centen → 0.01 blijft 0.01) + currency IN payment;
-    // paid_at op TOP-NIVEAU (sibling van payment). Bevestigd via opeenvolgende TL 400-fouten
-    // ("amount must be a number" / "currency must be present" / "paid_at must be present").
-    const payBody = { id: inv.tl_invoice_id, payment: { amount: r2(amtNum), currency: 'EUR' }, paid_at: paidIso };
-    if (payment_method_id) payBody.payment.payment_method_id = String(payment_method_id);
-    console.log('[finance-register-payment] registerPayment payload', JSON.stringify(payBody));
+    // paid_at op TOP-NIVEAU (sibling van payment). We sturen eerst plain "YYYY-MM-DD"; valt TL
+    // alsnog op paid_at ("must be valid") → retry met volledige ISO 8601 datetime.
+    const buildBody = (paidVal) => {
+      const b = { id: inv.tl_invoice_id, payment: { amount: r2(amtNum), currency: 'EUR' }, paid_at: paidVal };
+      if (payment_method_id) b.payment.payment_method_id = String(payment_method_id);
+      return b;
+    };
+    const tryRegister = async (paidVal) => {
+      const body = buildBody(paidVal);
+      console.log('[finance-register-payment] registerPayment payload', JSON.stringify(body));
+      const r = await tlCall('/invoices.registerPayment', body);
+      const text = await r.text().catch(() => '');
+      return { r, text, body };
+    };
 
-    let pr, prText = '';
+    let pr, prText = '', usedBody;
     try {
-      pr = await tlCall('/invoices.registerPayment', payBody);
-      prText = await pr.text().catch(() => '');
+      ({ r: pr, text: prText, body: usedBody } = await tryRegister(dateOnly));
+      if (!pr.ok && /paid_at/i.test(prText)) {
+        console.warn('[finance-register-payment] paid_at geweigerd op date-only → retry met ISO 8601 datetime');
+        ({ r: pr, text: prText, body: usedBody } = await tryRegister(paidDateTime));
+      }
     } catch (netErr) {
-      console.error('[finance-register-payment] registerPayment netwerk-fout', netErr.message, '| payload=', JSON.stringify(payBody));
+      console.error('[finance-register-payment] registerPayment netwerk-fout', netErr.message);
       return res.status(502).json({ error: 'Kon Teamleader niet bereiken: ' + netErr.message });
     }
     if (!pr.ok) {
       // GEEN DB-mutatie — we keren hier terug vóór enige write. Volledige TL-fouttekst meegeven.
-      console.error('[finance-register-payment] registerPayment GEWEIGERD | HTTP', pr.status, '| payload=', JSON.stringify(payBody), '| response=', prText);
+      console.error('[finance-register-payment] registerPayment GEWEIGERD | HTTP', pr.status, '| payload=', JSON.stringify(usedBody), '| response=', prText);
       return res.status(422).json({ error: `Teamleader weigerde de betaling (HTTP ${pr.status}).`, tl_status: pr.status, tl_response: prText });
     }
     console.log('[finance-register-payment] registerPayment OK | HTTP', pr.status);
 
     // 2. Her-sync via invoices.info → werkelijke amount_paid + status.
     let newPaid = Math.min(r2((Number(inv.amount_paid) || 0) + amtNum), Number(inv.amount_total) || Infinity);
-    let newStatus = inv.status, paidDate = isoDate(paidIso);
+    let newStatus = inv.status, paidDate = dateOnly;
     try {
       const ir = await tlCall('/invoices.info', { id: inv.tl_invoice_id });
       if (ir.ok) {
@@ -114,7 +129,7 @@ export default async function handler(req, res) {
     // 3. payments-rij (na succesvolle TL-registratie).
     const { error: payErr } = await supabaseAdmin.from('payments').insert({
       customer_id: inv.customer_id, invoice_id: inv.id, amount: r2(amtNum),
-      payment_date: isoDate(paidIso), payment_method: payment_method_id ? String(payment_method_id) : null,
+      payment_date: dateOnly, payment_method: payment_method_id ? String(payment_method_id) : null,
       source: 'manual', matched_by: admin.user.id,
     });
     if (payErr) console.error('[finance-register-payment] payments insert', payErr.message);
@@ -122,7 +137,7 @@ export default async function handler(req, res) {
     // 4. Factuur bijwerken.
     const { error: upErr } = await supabaseAdmin.from('invoices').update({
       amount_paid: newPaid, status: newStatus,
-      paid_date: newStatus === 'paid' ? (paidDate || isoDate(paidIso)) : null,
+      paid_date: newStatus === 'paid' ? (paidDate || dateOnly) : null,
       updated_at: new Date().toISOString(),
     }).eq('id', inv.id);
     if (upErr) { console.error('[finance-register-payment] invoice update', upErr.message); return res.status(500).json({ error: 'Betaling in TL geregistreerd, maar DB-update faalde: ' + upErr.message }); }
@@ -132,7 +147,7 @@ export default async function handler(req, res) {
       await supabaseAdmin.from('audit_log').insert({
         user_id: admin.user.id, action: 'finance_invoice.register_payment',
         entity_type: 'invoice', entity_id: inv.id,
-        after_json: { amount: r2(amtNum), paid_at: paidIso, payment_method_id: payment_method_id || null, new_status: newStatus, new_amount_paid: newPaid },
+        after_json: { amount: r2(amtNum), paid_at: dateOnly, payment_method_id: payment_method_id || null, new_status: newStatus, new_amount_paid: newPaid },
         reason_text: `Betaling €${r2(amtNum)} geregistreerd op factuur ${inv.id} (status → ${newStatus})`,
         ip_address: getClientIp(req),
       });

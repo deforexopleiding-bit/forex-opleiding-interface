@@ -430,10 +430,12 @@
   async function submitPay() {
     if (!_payInv) return;
     const amount = Number(document.getElementById('payAmount').value);
-    const paid_at = document.getElementById('payDate').value;
+    let paid_at = document.getElementById('payDate').value;
+    if (!paid_at) { paid_at = new Date().toISOString().slice(0, 10); document.getElementById('payDate').value = paid_at; }
     const payment_method_id = document.getElementById('payMethod').value.trim() || undefined;
     const errEl = document.getElementById('payModalErr');
     if (!(amount > 0)) { errEl.textContent = 'Vul een geldig bedrag in (> 0).'; return; }
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(paid_at)) { errEl.textContent = 'Vul een geldige betaaldatum in.'; return; }
     const btn = document.getElementById('paySubmit'); btn.disabled = true; const orig = btn.innerHTML; btn.innerHTML = '<i class="ti ti-loader"></i> Bezig…';
     try {
       const r = await window.AgentShared.apiFetch('/api/finance-invoice-register-payment', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ invoice_id: _payInv.id, amount, paid_at, payment_method_id }) });
