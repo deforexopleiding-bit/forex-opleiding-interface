@@ -1145,7 +1145,7 @@ async function renderFacturenTab() {
       const tag = KO_INV_TAG[inv.display_status] || 'gray';
       const label = KO_INV_LABEL[inv.display_status] || (inv.display_status || '—');
       const bar = KO_INV_BAR[inv.display_status] || '#9ca3af';
-      const tlItem = inv.tl_invoice_id ? `<a class="sr-menu-item" href="https://focus.teamleader.eu/invoices/${escapeHtml(inv.tl_invoice_id)}" target="_blank"><i class="ti ti-external-link"></i> Open in Teamleader</a>` : '';
+      const tlItem = inv.tl_invoice_id ? `<a class="sr-menu-item" href="https://focus.teamleader.eu/invoice_detail.php?id=${escapeHtml(inv.tl_invoice_id)}" target="_blank"><i class="ti ti-external-link"></i> Open in Teamleader</a>` : '';
       const pdfItem = inv.tl_invoice_id ? `<button class="sr-menu-item" onclick="koInvoicePdf('${escapeHtml(inv.tl_invoice_id)}')"><i class="ti ti-file-type-pdf"></i> Open PDF</button>` : '';
       const menu = (tlItem || pdfItem) ? `<div class="sr-menu"><button class="sr-ibtn sr-menu-toggle" title="Meer"><i class="ti ti-dots"></i></button><div class="sr-menu-pop">${pdfItem}${tlItem}</div></div>` : '';
       return `<tr>

@@ -13,6 +13,11 @@
 ALTER TABLE public.invoices
   ADD COLUMN IF NOT EXISTS tl_department_id text;
 
+-- 1b) TL subscription-id op invoices (factuur draagt subscription.id mee) — voor
+--     latere factuur↔abonnement-reconciliatie (Fase 2B). Nu enkel meegeschreven.
+ALTER TABLE public.invoices
+  ADD COLUMN IF NOT EXISTS tl_subscription_id text;
+
 -- 2) Idempotente sync-sleutel: unieke TL-factuur-id waar aanwezig.
 --    Handmatige facturen (2B) hebben tl_invoice_id NULL → vallen buiten de index.
 --    NB: partial unique index kan NIET als ON CONFLICT-arbiter dienen in

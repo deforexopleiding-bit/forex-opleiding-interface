@@ -301,7 +301,7 @@
     tb.innerHTML = items.map((inv, i) => {
       const m = stMeta(inv.display_status);
       const ent = inv.tl_department_id ? (ENT_LABEL[inv.tl_department_id] || '') : '';
-      const tlItem = inv.tl_invoice_id ? `<a class="sr-menu-item" href="https://focus.teamleader.eu/invoices/${esc(inv.tl_invoice_id)}" target="_blank"><i class="ti ti-external-link"></i> Open in Teamleader</a>` : '';
+      const tlItem = inv.tl_invoice_id ? `<a class="sr-menu-item" href="https://focus.teamleader.eu/invoice_detail.php?id=${esc(inv.tl_invoice_id)}" target="_blank"><i class="ti ti-external-link"></i> Open in Teamleader</a>` : '';
       return `<tr>
         <td style="padding:0"><div class="statusstrip-bar" style="background:${m.bar}"></div></td>
         <td><span class="sr-uname">${esc(inv.invoice_number)}</span>${ent ? `<br><span class="sr-cellsub">${esc(ent)}</span>` : ''}</td>
@@ -372,7 +372,7 @@
       row('Vervaldag', fmtDate(inv.due_date)) +
       row('Betaald op', fmtDate(inv.paid_date));
     const tl = document.getElementById('invModalTl');
-    tl.href = inv.tl_invoice_id ? `https://focus.teamleader.eu/invoices/${inv.tl_invoice_id}` : 'https://focus.teamleader.eu/invoices';
+    tl.href = inv.tl_invoice_id ? `https://focus.teamleader.eu/invoice_detail.php?id=${inv.tl_invoice_id}` : 'https://focus.teamleader.eu/invoices';
     const pdfBtn = document.getElementById('invModalPdf');
     pdfBtn.disabled = !inv.tl_invoice_id;
     pdfBtn.onclick = async () => {
