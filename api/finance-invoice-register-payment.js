@@ -6,12 +6,13 @@
 //
 // Body: { invoice_id (onze uuid), amount (number > 0), paid_at (datum/ISO), payment_method_id? }
 //
-// TL invoices.registerPayment body (bevestigd via live 400-fouten):
-//   { id: <tl_invoice_id>, payment: { amount: <euro-float>, currency: 'EUR' },
-//     paid_at: <ISO8601 datetime> }
-//   - amount + currency staan IN payment; paid_at staat op TOP-NIVEAU (sibling van payment).
-//     (TL gaf "amount must be a number" + "currency must be present" op de geneste money-vorm,
-//      en daarna "paid_at must be present" toen paid_at nog binnen payment zat.)
+// TL invoices.registerPayment body (canonieke shape — werkende MCP-referentie):
+//   { id: <tl_invoice_id>, payment: {
+//       amount: { amount: <number>, currency: 'EUR' },   // genest money-object
+//       paid_at: '<ISO 8601 datetime met offset, bv 2026-06-04T00:00:00+00:00>',  // BINNEN payment
+//       payment_method_id?: '<uuid>'                       // optioneel; weglaten indien leeg
+//   } }
+// Bedragen in euro's (floats), GEEN centen → 0.01 blijft 0.01.
 // Partial payments worden ondersteund (meerdere calls tellen op). Terugdraaien:
 // invoices.removePayments { id, payment_ids[] }.
 
@@ -73,39 +74,33 @@ export default async function handler(req, res) {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(dateOnly) || isNaN(new Date(dateOnly + 'T00:00:00Z').getTime())) {
       return res.status(400).json({ error: 'Ongeldige of ontbrekende betaaldatum (YYYY-MM-DD vereist)' });
     }
-    const paidDateTime = new Date(dateOnly + 'T00:00:00Z').toISOString(); // fallback-formaat
 
     // 1. TL-FIRST: registreer de betaling. Faal → GEEN DB-mutatie.
-    // TL verwacht: amount (euro-float, GEEN centen → 0.01 blijft 0.01) + currency IN payment;
-    // paid_at op TOP-NIVEAU (sibling van payment). We sturen eerst plain "YYYY-MM-DD"; valt TL
-    // alsnog op paid_at ("must be valid") → retry met volledige ISO 8601 datetime.
-    const buildBody = (paidVal) => {
-      const b = { id: inv.tl_invoice_id, payment: { amount: r2(amtNum), currency: 'EUR' }, paid_at: paidVal };
-      if (payment_method_id) b.payment.payment_method_id = String(payment_method_id);
-      return b;
+    // Canonieke TL Focus-shape (werkende MCP-referentie + TL money-conventie):
+    //   payment.amount = genest money-object { amount:<number>, currency }
+    //   payment.paid_at = volledige ISO 8601 datetime MET offset (...+00:00), BINNEN payment
+    //   payment.payment_method_id alleen meesturen indien gekozen (niet als lege string).
+    const payBody = {
+      id: inv.tl_invoice_id,
+      payment: {
+        amount: { amount: r2(amtNum), currency: 'EUR' },
+        paid_at: `${dateOnly}T00:00:00+00:00`,
+      },
     };
-    const tryRegister = async (paidVal) => {
-      const body = buildBody(paidVal);
-      console.log('[finance-register-payment] registerPayment payload', JSON.stringify(body));
-      const r = await tlCall('/invoices.registerPayment', body);
-      const text = await r.text().catch(() => '');
-      return { r, text, body };
-    };
+    if (payment_method_id) payBody.payment.payment_method_id = String(payment_method_id);
+    console.log('[finance-register-payment] registerPayment payload', JSON.stringify(payBody));
 
-    let pr, prText = '', usedBody;
+    let pr, prText = '';
     try {
-      ({ r: pr, text: prText, body: usedBody } = await tryRegister(dateOnly));
-      if (!pr.ok && /paid_at/i.test(prText)) {
-        console.warn('[finance-register-payment] paid_at geweigerd op date-only → retry met ISO 8601 datetime');
-        ({ r: pr, text: prText, body: usedBody } = await tryRegister(paidDateTime));
-      }
+      pr = await tlCall('/invoices.registerPayment', payBody);
+      prText = await pr.text().catch(() => '');
     } catch (netErr) {
       console.error('[finance-register-payment] registerPayment netwerk-fout', netErr.message);
       return res.status(502).json({ error: 'Kon Teamleader niet bereiken: ' + netErr.message });
     }
     if (!pr.ok) {
       // GEEN DB-mutatie — we keren hier terug vóór enige write. Volledige TL-fouttekst meegeven.
-      console.error('[finance-register-payment] registerPayment GEWEIGERD | HTTP', pr.status, '| payload=', JSON.stringify(usedBody), '| response=', prText);
+      console.error('[finance-register-payment] registerPayment GEWEIGERD | HTTP', pr.status, '| payload=', JSON.stringify(payBody), '| response=', prText);
       return res.status(422).json({ error: `Teamleader weigerde de betaling (HTTP ${pr.status}).`, tl_status: pr.status, tl_response: prText });
     }
     console.log('[finance-register-payment] registerPayment OK | HTTP', pr.status);
