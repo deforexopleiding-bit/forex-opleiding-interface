@@ -6,8 +6,12 @@
 //
 // Body: { invoice_id (onze uuid), amount (number > 0), paid_at (datum/ISO), payment_method_id? }
 //
-// TL invoices.registerPayment body (apiary; verifieer met testplan vóór productie):
-//   { id: <tl_invoice_id>, payment: { amount: { amount, currency:'EUR' }, paid_at: <ISO8601>, payment_method_id? } }
+// TL invoices.registerPayment body (bevestigd via live 400-fouten):
+//   { id: <tl_invoice_id>, payment: { amount: <euro-float>, currency: 'EUR' },
+//     paid_at: <ISO8601 datetime> }
+//   - amount + currency staan IN payment; paid_at staat op TOP-NIVEAU (sibling van payment).
+//     (TL gaf "amount must be a number" + "currency must be present" op de geneste money-vorm,
+//      en daarna "paid_at must be present" toen paid_at nog binnen payment zat.)
 // Partial payments worden ondersteund (meerdere calls tellen op). Terugdraaien:
 // invoices.removePayments { id, payment_ids[] }.
 
@@ -69,10 +73,10 @@ export default async function handler(req, res) {
     try { paidIso = new Date(paid_at || Date.now()).toISOString(); } catch { paidIso = new Date().toISOString(); }
 
     // 1. TL-FIRST: registreer de betaling. Faal → GEEN DB-mutatie.
-    // TL verwacht een PLATTE amount (euro-float) MET currency als sibling + paid_at (ISO 8601).
-    // Bevestigd door TL 400-fouten "amount must be a number" + "currency must be present" op
-    // de geneste money-vorm. Bedragen zijn euro's (floats), GEEN centen → 0.01 blijft 0.01.
-    const payBody = { id: inv.tl_invoice_id, payment: { amount: r2(amtNum), currency: 'EUR', paid_at: paidIso } };
+    // TL verwacht: amount (euro-float, GEEN centen → 0.01 blijft 0.01) + currency IN payment;
+    // paid_at op TOP-NIVEAU (sibling van payment). Bevestigd via opeenvolgende TL 400-fouten
+    // ("amount must be a number" / "currency must be present" / "paid_at must be present").
+    const payBody = { id: inv.tl_invoice_id, payment: { amount: r2(amtNum), currency: 'EUR' }, paid_at: paidIso };
     if (payment_method_id) payBody.payment.payment_method_id = String(payment_method_id);
     console.log('[finance-register-payment] registerPayment payload', JSON.stringify(payBody));
 
