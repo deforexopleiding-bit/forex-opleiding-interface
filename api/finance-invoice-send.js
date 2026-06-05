@@ -4,9 +4,10 @@
 //
 // Body (onze): { invoice_id, to?, subject?, content?, language? }
 //
-// TL invoices.send shape (bevestigd via TL 400 "to must be present" / "content must be present";
-// zelfde patroon als de werkende quotations.send in teamleader-send-quotation.js):
-//   { id, recipients: { to: [{ email_address }] }, subject, content, language }
+// TL invoices.send shape (bevestigd via TL 400 "subject must be present" + "body must be
+// present" + "email must be present" — PLAT, niet recipients/content zoals quotations.send):
+//   { id, email, subject, body, language }
+// Fallback endpoint /invoices.sendEmail bij 404 op /invoices.send.
 //
 // Default-ontvanger: customers.email → fallback invoices.info → invoicee.email.
 // Default-tekst: nette NL begeleidende mail met klantnaam + factuurnummer.
@@ -61,24 +62,41 @@ export default async function handler(req, res) {
     const defaultSubject = `Factuur ${inv.invoice_number} van De Forex Opleiding`;
     const defaultContent = `${aanhef},\n\nHierbij doen wij u factuur ${inv.invoice_number} toekomen. U vindt deze in de bijlage.\n\nMet vriendelijke groet,\nDe Forex Opleiding`;
 
-    // 3. TL invoices.send body (bewezen shape, alligned met quotations.send).
-    const body = {
+    // 3. TL body — platte shape (bevestigd via TL 400 op de quotations-style):
+    //    { id, email, subject, body, language }.
+    const payload = {
       id: inv.tl_invoice_id,
-      recipients: { to: [{ email_address: recipientEmail }] },
+      email: recipientEmail,
       subject: subject && String(subject).trim() ? String(subject) : defaultSubject,
-      content: content && String(content).trim() ? String(content) : defaultContent,
+      body: content && String(content).trim() ? String(content) : defaultContent,
       language: String(language || 'nl'),
     };
-    console.log('[finance-invoice-send] payload', JSON.stringify(body));
 
-    let pr, prText = '';
-    try { pr = await tlFetch('/invoices.send', { method: 'POST', body: JSON.stringify(body) }); prText = await pr.text().catch(() => ''); }
-    catch (netErr) { console.error('[finance-invoice-send] netwerk', netErr.message); return res.status(502).json({ error: 'Kon Teamleader niet bereiken: ' + netErr.message }); }
-    if (!pr.ok) {
-      console.error('[finance-invoice-send] GEWEIGERD | HTTP', pr.status, '| payload=', JSON.stringify(body), '| response=', prText);
-      return res.status(422).json({ error: `Teamleader weigerde verzending (HTTP ${pr.status}).`, tl_status: pr.status, tl_response: prText });
+    const tryEndpoint = async (path) => {
+      console.log('[finance-invoice-send]', path, 'payload', JSON.stringify(payload));
+      const r = await tlFetch(path, { method: 'POST', body: JSON.stringify(payload) });
+      const t = await r.text().catch(() => '');
+      return { r, t };
+    };
+
+    let pr, prText = '', usedEndpoint = '/invoices.send';
+    try {
+      ({ r: pr, t: prText } = await tryEndpoint('/invoices.send'));
+      // Fallback naar invoices.sendEmail bij 404 (endpoint-rename in TL-versie).
+      if (pr.status === 404) {
+        console.warn('[finance-invoice-send] /invoices.send 404 → retry /invoices.sendEmail');
+        usedEndpoint = '/invoices.sendEmail';
+        ({ r: pr, t: prText } = await tryEndpoint('/invoices.sendEmail'));
+      }
+    } catch (netErr) {
+      console.error('[finance-invoice-send] netwerk', netErr.message);
+      return res.status(502).json({ error: 'Kon Teamleader niet bereiken: ' + netErr.message });
     }
-    console.log('[finance-invoice-send] OK | HTTP', pr.status);
+    if (!pr.ok) {
+      console.error('[finance-invoice-send] GEWEIGERD |', usedEndpoint, '| HTTP', pr.status, '| payload=', JSON.stringify(payload), '| response=', prText);
+      return res.status(422).json({ error: `Teamleader weigerde verzending (HTTP ${pr.status}).`, tl_status: pr.status, tl_response: prText, tl_endpoint: usedEndpoint });
+    }
+    console.log('[finance-invoice-send] OK |', usedEndpoint, '| HTTP', pr.status);
 
     // Post-write sync-back: status kan na 'send' wijzigen (bv. draft → outstanding bij eerste send).
     let syncErr = null;
@@ -88,12 +106,12 @@ export default async function handler(req, res) {
     try {
       await supabaseAdmin.from('audit_log').insert({
         user_id: user.id, action: 'invoice.send', entity_type: 'invoice', entity_id: inv.id,
-        after_json: { to: recipientEmail, subject: body.subject, language: body.language },
+        after_json: { email: recipientEmail, subject: payload.subject, language: payload.language, tl_endpoint: usedEndpoint },
         reason_text: `Factuur ${inv.invoice_number} verzonden via Teamleader naar ${recipientEmail}`, ip_address: getClientIp(req),
       });
     } catch (e) { console.error('[finance-invoice-send] audit', e.message); }
 
-    return res.status(200).json({ success: true, invoice_id: inv.id, to: recipientEmail, sync_err: syncErr });
+    return res.status(200).json({ success: true, invoice_id: inv.id, to: recipientEmail, tl_endpoint: usedEndpoint, sync_err: syncErr });
   } catch (e) {
     console.error('[finance-invoice-send]', e.message);
     return res.status(500).json({ error: e.message });
