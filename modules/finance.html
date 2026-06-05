@@ -396,7 +396,8 @@
       row('Openstaand', eur(inv.amount_open)) +
       row('Factuurdatum', fmtDate(inv.issue_date)) +
       row('Vervaldag', fmtDate(inv.due_date)) +
-      row('Betaald op', fmtDate(inv.paid_date));
+      row('Betaald op', fmtDate(inv.paid_date)) +
+      '<div id="invLateFeeRow"></div>';
     const tl = document.getElementById('invModalTl');
     tl.href = inv.tl_invoice_id ? `https://focus.teamleader.eu/invoice_detail.php?id=${inv.tl_invoice_id}` : 'https://focus.teamleader.eu/invoices';
     const pdfBtn = document.getElementById('invModalPdf');
@@ -420,6 +421,20 @@
     const removable = canRemove && !!inv.tl_invoice_id && (Number(inv.amount_paid) || 0) > 0;
     remBtn.style.display = removable ? '' : 'none';
     remBtn.onclick = () => removePayment(inv);
+    // Lazy: incassokosten (Schadebeding/WIK) uit de PDF voor te-late facturen.
+    const lateRow = document.getElementById('invLateFeeRow');
+    if (lateRow && inv.display_status === 'overdue' && inv.tl_invoice_id) {
+      lateRow.innerHTML = `<div class="inv-drow"><span class="lbl">Incassokosten</span><span><i class="ti ti-loader"></i> laden…</span></div>`;
+      window.AgentShared.apiFetch('/api/finance-invoice-late-fee?invoice_id=' + encodeURIComponent(inv.id))
+        .then(r => r.json())
+        .then(d => {
+          if (d && Number(d.fee_amount) > 0) {
+            const totaal = d.total_payable != null ? d.total_payable : ((Number(inv.amount_open) || 0) + Number(d.fee_amount));
+            lateRow.innerHTML = row('Incassokosten', eur(d.fee_amount)) + row('Totaal te betalen', eur(totaal));
+          } else { lateRow.innerHTML = ''; }
+        })
+        .catch(() => { lateRow.innerHTML = ''; });
+    } else if (lateRow) { lateRow.innerHTML = ''; }
     document.getElementById('invModal').classList.remove('hidden');
   }
 
