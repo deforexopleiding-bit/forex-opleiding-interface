@@ -95,23 +95,25 @@ export default async function handler(req, res) {
     const subjectFinal = (typeof subject_override === 'string' && subject_override.trim())
       ? subject_override.trim()
       : tplSubject;
-    const contentFinal = (typeof content_override === 'string' && content_override.trim())
+    const bodyFinal = (typeof content_override === 'string' && content_override.trim())
       ? content_override.trim()
       : tplBody;
     const langFinal = tplLang || 'nl';
 
-    // 3. Platte TL payload (bevestigd: TL wil plat email + content, geen recipients-object).
+    // 3. Platte TL payload — TL eist 'body' letterlijk ("body must be present" op vorige try).
+    //    'content' óók meesturen (zelfde waarde) als paranoia; TL negeert extra velden silently.
     const payload = {
       id: inv.tl_invoice_id,
       email: recEmail,
       subject: subjectFinal,
-      content: contentFinal,
+      body: bodyFinal,                // ← rename: TL eist 'body' i.p.v. 'content'
+      content: bodyFinal,             // paranoia: ook content sturen met zelfde waarde
       language: langFinal,
       mail_template_id: tplId,
     };
 
-    // Sanity vóór TL-call.
-    for (const k of ['id', 'email', 'subject', 'content', 'language', 'mail_template_id']) {
+    // Sanity vóór TL-call (6 verplichte velden — content is paranoia, geen sanity nodig).
+    for (const k of ['id', 'email', 'subject', 'body', 'language', 'mail_template_id']) {
       if (!payload[k] || !String(payload[k]).trim()) {
         return res.status(400).json({
           error: `Veld '${k}' is leeg (zou niet kunnen na template-resolve).`,
