@@ -259,24 +259,32 @@
   </div>
 </div>
 
-<!-- Verzenden (Fase 2C) -->
+<!-- Verzenden (Fase 2C — pivot: TL mail-template) -->
 <div class="modal-overlay hidden" id="sendModal" role="dialog" aria-modal="true">
   <div class="modal-card" style="max-width:520px">
     <h3>Factuur verzenden</h3>
     <div id="sendSub" class="sr-cellsub" style="margin-bottom:10px"></div>
     <div style="display:flex;flex-direction:column;gap:10px">
+      <label style="font-size:12.5px">Teamleader mail-template <span class="sr-cellsub" style="font-weight:400">(verplicht)</span>
+        <select id="sendTpl" class="fin-input" style="width:100%;margin-top:4px"><option value="">— laden…</option></select>
+      </label>
       <label style="font-size:12.5px">Ontvanger (e-mail)<input id="sendTo" type="email" class="fin-input" style="width:100%;margin-top:4px" placeholder="naam@voorbeeld.nl"/></label>
-      <label style="font-size:12.5px">Onderwerp <span class="sr-cellsub" style="font-weight:400">(leeg = default)</span><input id="sendSubject" type="text" class="fin-input" style="width:100%;margin-top:4px" placeholder="Factuur … van De Forex Opleiding"/></label>
-      <label style="font-size:12.5px">Taal<select id="sendLang" class="fin-input" style="width:100%;margin-top:4px"><option value="nl">Nederlands</option><option value="en">Engels</option><option value="fr">Frans</option><option value="de">Duits</option></select></label>
-      <div class="sr-cellsub" style="background:var(--bg-elev-2);border:1px solid var(--border);border-radius:6px;padding:8px 10px">
-        <div style="font-weight:600;color:var(--text);margin-bottom:3px">Begeleidende tekst (default)</div>
-        <div id="sendBodyPreview" style="white-space:pre-line;font-size:12px"></div>
+      <div>
+        <a href="#" id="sendAdvToggle" style="font-size:12px;color:var(--accent-cyan);text-decoration:none">Geavanceerd: onderwerp / inhoud overschrijven ▾</a>
+        <div id="sendAdv" hidden style="margin-top:8px;display:flex;flex-direction:column;gap:8px">
+          <label style="font-size:12.5px">Onderwerp overschrijven <span class="sr-cellsub" style="font-weight:400">(leeg = template-default)</span>
+            <input id="sendSubject" type="text" class="fin-input" style="width:100%;margin-top:4px"/>
+          </label>
+          <label style="font-size:12.5px">Inhoud overschrijven <span class="sr-cellsub" style="font-weight:400">(leeg = template-default)</span>
+            <textarea id="sendContent" class="fin-input" style="width:100%;margin-top:4px;min-height:90px;font-family:inherit"></textarea>
+          </label>
+        </div>
       </div>
     </div>
-    <div id="sendErr" style="color:#ef4444;font-size:12px;margin-top:8px"></div>
+    <div id="sendErr" style="color:#ef4444;font-size:12px;margin-top:8px;white-space:pre-wrap"></div>
     <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:18px">
       <button class="sr-abtn" id="sendCancel" type="button">Annuleren</button>
-      <button class="sr-abtn primary" id="sendOk" type="button"><i class="ti ti-send"></i> Verzenden</button>
+      <button class="sr-abtn primary" id="sendOk" type="button" disabled><i class="ti ti-send"></i> Verzenden</button>
     </div>
   </div>
 </div>
@@ -673,45 +681,74 @@
     finally { busyRelease('pay'); btn.disabled = false; btn.innerHTML = orig; }
   }
 
-  // ── DEEL A: Verzenden ──
-  let _sendInv = null;
-  function openSendModal(inv) {
+  // ── DEEL A: Verzenden (PIVOT: TL mail-template) ──
+  let _sendInv = null, _sendTpls = null;
+  function syncSendOk() {
+    const tpl = document.getElementById('sendTpl').value;
+    const to = document.getElementById('sendTo').value.trim();
+    document.getElementById('sendOk').disabled = !(tpl && to && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(to));
+  }
+  async function openSendModal(inv) {
     _sendInv = inv;
     document.getElementById('sendSub').textContent = `${inv.invoice_number} · ${inv.customer_name}`;
     document.getElementById('sendTo').value = inv.customer_email || '';
     document.getElementById('sendSubject').value = '';
-    document.getElementById('sendLang').value = 'nl';
-    // Preview van de default-body (zelfde tekst als de backend stuurt als er geen 'content' is).
-    const name = inv.customer_name || '';
-    const aanhef = name ? `Beste ${name}` : 'Beste';
-    document.getElementById('sendBodyPreview').textContent =
-      `${aanhef},\n\nHierbij doen wij u factuur ${inv.invoice_number} toekomen. U vindt deze in de bijlage.\n\nMet vriendelijke groet,\nDe Forex Opleiding`;
+    document.getElementById('sendContent').value = '';
     document.getElementById('sendErr').textContent = '';
+    document.getElementById('sendAdv').hidden = true;
+    document.getElementById('sendAdvToggle').textContent = 'Geavanceerd: onderwerp / inhoud overschrijven ▾';
+    const sel = document.getElementById('sendTpl');
+    sel.innerHTML = '<option value="">— laden…</option>';
+    document.getElementById('sendOk').disabled = true;
     document.getElementById('sendModal').classList.remove('hidden');
+    try {
+      if (!_sendTpls) {
+        const r = await window.AgentShared.apiFetch('/api/finance-mail-templates');
+        const d = await r.json();
+        if (!r.ok) throw new Error(d.error || 'HTTP ' + r.status);
+        _sendTpls = d.templates || [];
+      }
+      if (!_sendTpls.length) {
+        sel.innerHTML = '<option value="">(geen templates gevonden in TL)</option>';
+        document.getElementById('sendErr').textContent = 'Geen mail-templates beschikbaar — maak er één in Teamleader.';
+        return;
+      }
+      sel.innerHTML = _sendTpls.map(t => `<option value="${esc(t.id)}" ${t.is_default ? 'selected' : ''}>${esc(t.name)}${t.language ? ' (' + esc(t.language) + ')' : ''}${t.is_default ? ' · default' : ''}</option>`).join('');
+      if (!sel.value && _sendTpls[0]) sel.value = _sendTpls[0].id;
+      syncSendOk();
+    } catch (e) {
+      sel.innerHTML = '<option value="">(laden mislukt)</option>';
+      document.getElementById('sendErr').textContent = 'Templates laden mislukt: ' + e.message;
+    }
   }
   async function submitSend() {
     if (!_sendInv) return;
     if (!busyGuard('send')) return;
     const errEl = document.getElementById('sendErr'); errEl.textContent = '';
     const toVal = document.getElementById('sendTo').value.trim();
+    const tplId = document.getElementById('sendTpl').value;
+    if (!tplId) { errEl.textContent = 'Kies een TL mail-template.'; busyRelease('send'); return; }
     if (!toVal || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(toVal)) { errEl.textContent = 'Vul een geldig e-mailadres voor de ontvanger in.'; busyRelease('send'); return; }
+    const subjVal = document.getElementById('sendSubject').value.trim();
+    const contVal = document.getElementById('sendContent').value.trim();
     const btn = document.getElementById('sendOk'); btn.disabled = true; const o = btn.innerHTML; btn.innerHTML = '<i class="ti ti-loader"></i> Bezig…';
     try {
-      const r = await window.AgentShared.apiFetch('/api/finance-invoice-send', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ invoice_id: _sendInv.id, to: toVal, subject: document.getElementById('sendSubject').value || undefined, language: document.getElementById('sendLang').value }) });
+      const r = await window.AgentShared.apiFetch('/api/finance-invoice-send', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({
+        invoice_id: _sendInv.id, mail_template_id: tplId, recipient_email: toVal,
+        subject_override: subjVal || undefined, content_override: contVal || undefined,
+      }) });
       const d = await r.json();
       if (!r.ok || !d.success) {
-        // Bij TL-fout: zowel tl_response (wat TL terugzei) als tl_request_payload (wat we
-        // stuurden) zichtbaar maken — geen Vercel-logs nodig.
         if (d.tl_request_payload) console.log('[send] tl_request_payload', d.tl_request_payload, '| keys', d.tl_request_keys);
         if (d.tl_response) console.log('[send] tl_response', d.tl_response);
-        const extra = d.tl_response ? ' — ' + d.tl_response : '';
-        const sentKeys = d.tl_request_keys ? ' · velden gestuurd: ' + d.tl_request_keys.join(', ') : '';
+        const extra = d.tl_response ? '\n\nTL-respons: ' + d.tl_response : '';
+        const sentKeys = d.tl_request_keys ? '\nvelden gestuurd: ' + d.tl_request_keys.join(', ') : '';
         throw new Error((d.error || 'HTTP ' + r.status) + extra + sentKeys);
       }
-      window.AgentShared?.showToast('Factuur verzonden naar ' + (d.to || toVal), 'success');
+      window.AgentShared?.showToast('Factuur verzonden via Teamleader', 'success');
       document.getElementById('sendModal').classList.add('hidden'); document.getElementById('invModal').classList.add('hidden'); load();
     } catch (e) { errEl.textContent = 'Mislukt: ' + e.message; }
-    finally { busyRelease('send'); btn.disabled = false; btn.innerHTML = o; }
+    finally { busyRelease('send'); btn.disabled = false; btn.innerHTML = o; syncSendOk(); }
   }
 
   // ── DEEL C: Crediteren ──
@@ -955,6 +992,9 @@
       // 2C-modals wiring (send/credit/update/new).
       const wire = (id, btn, ok) => { const m = document.getElementById(id); document.getElementById(btn).addEventListener('click', () => m.classList.add('hidden')); m.addEventListener('click', (e) => { if (e.target === m) m.classList.add('hidden'); }); if (ok) document.getElementById(ok).addEventListener('click', () => {}); };
       wire('sendModal', 'sendCancel'); document.getElementById('sendOk').addEventListener('click', submitSend);
+      document.getElementById('sendTpl').addEventListener('change', syncSendOk);
+      document.getElementById('sendTo').addEventListener('input', syncSendOk);
+      document.getElementById('sendAdvToggle').addEventListener('click', (e) => { e.preventDefault(); const a = document.getElementById('sendAdv'); a.hidden = !a.hidden; document.getElementById('sendAdvToggle').textContent = a.hidden ? 'Geavanceerd: onderwerp / inhoud overschrijven ▾' : 'Geavanceerd ▴'; });
       wire('creditModal', 'creditCancel'); document.getElementById('creditOk').addEventListener('click', submitCredit);
       wire('updModal', 'updCancel'); document.getElementById('updOk').addEventListener('click', submitUpdate);
       document.getElementById('updAddLine').addEventListener('click', () => { _updLines.push({ description: '', quantity: 1, unit_price_excl: 0 }); renderUpdLines(); });
