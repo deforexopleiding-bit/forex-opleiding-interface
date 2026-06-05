@@ -92,6 +92,9 @@
     .inv-drow { display: flex; justify-content: space-between; gap: 12px; padding: 7px 0; border-bottom: 1px solid var(--border); font-size: 13px; }
     .inv-drow:last-child { border-bottom: none; }
     .inv-drow .lbl { color: var(--text-dim); }
+    /* Fase 2C: duidelijk zichtbaar kebab-menu in factuurrijen */
+    #invTable .sr-menu-toggle { border: 1px solid var(--border); background: var(--bg-elev-2); color: var(--text); width: 30px; height: 30px; border-radius: 7px; display: inline-flex; align-items: center; justify-content: center; }
+    #invTable .sr-menu-toggle:hover { border-color: var(--accent-cyan); color: var(--accent-cyan); }
   </style>
 </head>
 <body>
@@ -135,7 +138,7 @@
         <select id="invEntity" class="fin-input"><option value="">Alle entiteiten</option></select>
         <input id="invPeriodStart" type="date" class="fin-input" title="Vanaf factuurdatum" />
         <input id="invPeriodEnd" type="date" class="fin-input" title="T/m factuurdatum" />
-        <input id="invSearch" type="search" placeholder="Zoek factuurnr…" class="fin-input" style="min-width:150px" />
+        <input id="invSearch" type="search" placeholder="Zoek op nr of klantnaam…" class="fin-input" style="min-width:210px" />
         <span style="flex:1"></span>
         <button class="sr-ibtn" id="invRefresh" title="Vernieuwen" type="button"><i class="ti ti-refresh"></i></button>
       </div>
@@ -301,6 +304,19 @@
 
   const state = { status: 'open', entity: '', from: '', to: '', q: '', page: 1, pageSize: 50, total: 0, rows: [] };
   let searchTimer = null;
+  let _pendingScroll = null;
+
+  // Lijst-state bewaren (pill/zoek/pagina/scroll) zodat openen/sluiten/actie niet reset.
+  const STORE_KEY = 'finInvState';
+  function persistState() { try { sessionStorage.setItem(STORE_KEY, JSON.stringify({ status: state.status, entity: state.entity, from: state.from, to: state.to, q: state.q, page: state.page, pageSize: state.pageSize, scrollY: window.scrollY })); } catch (e) {} }
+  function restoreState() { try { const s = JSON.parse(sessionStorage.getItem(STORE_KEY) || 'null'); if (s) { state.status = s.status ?? state.status; state.entity = s.entity || ''; state.from = s.from || ''; state.to = s.to || ''; state.q = s.q || ''; state.page = s.page || 1; state.pageSize = [20, 50, 100, 500].includes(s.pageSize) ? s.pageSize : 50; return s; } } catch (e) {} return null; }
+  function syncControls() {
+    document.querySelectorAll('#invStatusSeg .sr-seg').forEach(x => x.classList.toggle('active', (x.dataset.status || '') === (state.status || '')));
+    const e = document.getElementById('invEntity'); if (e) e.value = state.entity || '';
+    const ps = document.getElementById('invPeriodStart'); if (ps) ps.value = state.from || '';
+    const pe = document.getElementById('invPeriodEnd'); if (pe) pe.value = state.to || '';
+    const sr = document.getElementById('invSearch'); if (sr) sr.value = state.q || '';
+  }
 
   function setView(view) {
     document.getElementById('view-facturen').hidden = (view !== 'facturen');
@@ -350,18 +366,25 @@
 
   function renderPager() {
     const pages = Math.max(1, Math.ceil(state.total / state.pageSize));
+    const opts = [20, 50, 100, 500].map(n => `<option value="${n}" ${state.pageSize === n ? 'selected' : ''}>${n}</option>`).join('');
     document.getElementById('invPager').innerHTML =
       `<span>${state.total} facturen · pagina ${state.page}/${pages}</span>
-       <span style="display:flex;gap:6px">
+       <span style="display:flex;gap:8px;align-items:center">
+         <label style="display:flex;gap:5px;align-items:center;color:var(--text-dim)">Per pagina
+           <select id="invPageSize" class="fin-input" style="padding:4px 6px">${opts}</select></label>
          <button class="sr-abtn" id="invPrev" type="button" ${state.page <= 1 ? 'disabled' : ''}>Vorige</button>
          <button class="sr-abtn" id="invNext" type="button" ${state.page >= pages ? 'disabled' : ''}>Volgende</button>
        </span>`;
     const prev = document.getElementById('invPrev'), next = document.getElementById('invNext');
     if (prev) prev.addEventListener('click', () => { if (state.page > 1) { state.page--; load(); } });
     if (next) next.addEventListener('click', () => { if (state.page < pages) { state.page++; load(); } });
+    const psSel = document.getElementById('invPageSize');
+    if (psSel) psSel.addEventListener('change', () => { state.pageSize = Number(psSel.value) || 50; state.page = 1; load(); });
   }
 
   async function load() {
+    const sy = _pendingScroll != null ? _pendingScroll : window.scrollY;
+    _pendingScroll = null;
     const tb = document.getElementById('invTbody');
     tb.innerHTML = '<tr><td colspan="9" style="text-align:center;padding:24px;color:var(--text-faint)">Laden…</td></tr>';
     const p = new URLSearchParams();
@@ -378,6 +401,8 @@
       if (!res.ok) throw new Error(d.error || 'HTTP ' + res.status);
       state.rows = d.items || []; state.total = d.total || 0;
       renderKpis(d.kpis || {}); renderRows(state.rows); renderPager();
+      persistState();
+      requestAnimationFrame(() => window.scrollTo(0, sy));
     } catch (e) {
       tb.innerHTML = `<tr><td colspan="9" style="text-align:center;padding:24px;color:#ef4444">Laden mislukt: ${esc(e.message)}</td></tr>`;
     }
@@ -561,6 +586,11 @@
       document.getElementById('paySubmit').addEventListener('click', submitPay);
       payModal.addEventListener('click', (e) => { if (e.target === payModal) payModal.classList.add('hidden'); });
       document.addEventListener('keydown', (e) => { if (e.key === 'Escape') { modal.classList.add('hidden'); payModal.classList.add('hidden'); } }, true);
+
+      // Lijst-state herstellen (pill/zoek/periode/pagina/scroll) → geen reset bij terugkeer.
+      const restored = restoreState();
+      syncControls();
+      if (restored && restored.scrollY) _pendingScroll = restored.scrollY;
 
       initMenus();
       load();
