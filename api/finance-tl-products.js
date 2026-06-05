@@ -51,14 +51,24 @@ export default async function handler(req, res) {
     if (q) body.filter = { term: q };
     const r = await tlCall('/products.list', body);
     const text = await r.text().catch(() => '');
+    // Headers naar object (TL stuurt soms X-Api-Version, RateLimit, etc).
+    const respHeaders = {};
+    try { r.headers.forEach((v, k) => { respHeaders[k] = v; }); } catch {}
     if (!r.ok) {
-      console.error('[finance-tl-products] products.list HTTP', r.status, text.slice(0, 300));
-      debugInfo.products_list = { http: r.status, raw_head: text.slice(0, 500) };
+      console.error('[finance-tl-products] products.list HTTP', r.status, '| headers=', JSON.stringify(respHeaders), '| body=', text.slice(0, 1000));
+      debugInfo.products_list = { http: r.status, headers: respHeaders, raw: text, request_body: body };
     } else {
       let parsed = null; try { parsed = JSON.parse(text); } catch {}
       const data = parsed?.data || [];
-      console.log('[finance-tl-products] products.list returned', data.length, 'items');
-      debugInfo.products_list = { http: r.status, count: data.length, sample: data[0] ? { id: data[0].id, name: data[0].name } : null };
+      const meta = parsed?.meta || null;
+      console.log('[finance-tl-products] products.list HTTP 200 | count=', data.length, '| meta=', JSON.stringify(meta), '| headers=', JSON.stringify(respHeaders));
+      // Bij debug óf bij lege respons: stuur de volledige raw body + meta + headers + request mee.
+      debugInfo.products_list = {
+        http: r.status, count: data.length, meta, headers: respHeaders,
+        request_body: body,
+        raw_full: text,                                                    // VOLLEDIG, niet afgekapt
+        sample: data[0] ? { id: data[0].id, name: data[0].name, keys: Object.keys(data[0]) } : null,
+      };
       if (data.length) {
         const items = data.map(normalize).filter(Boolean);
         return res.status(200).json({ items, source: 'products.list', ...(debug ? { debug: debugInfo } : {}) });

@@ -1,22 +1,26 @@
 // api/finance-invoice-create.js
 // POST → handmatig factuur aanmaken: draft → (optioneel) book → (optioneel) send.
 // Permission: finance.invoice.create. TL-first + validate-first.
+// DFO werkt met VRIJE regels (geen product_id) → tax_rate_id via percentage uit env
+// (TEAMLEADER_TAX_RATE_ID_21/9/6/0 + per-department overrides), zelfde helper als de
+// offerte-push (_lib/teamleader-quotation.js taxRateIdFor).
 //
 // Body: {
 //   customer_id (onze uuid),
 //   department_id (TL),
-//   lines: [{ product_id (TL), description?, quantity, unit_price_excl }],   // grootboek/BTW via product_id (TL leidt af)
+//   lines: [{ description, quantity, unit_price_excl, vat_percentage,
+//             product_id? }],                    // product_id optioneel (toekomst)
 //   purchase_order_number?, payment_term_id?, language?,
 //   action: 'draft' | 'book' | 'book_and_send',
-//   send?: { recipients?, subject?, content? }                                 // alleen bij book_and_send
+//   send?: { recipients?, subject?, content? }
 // }
-// Bij elke fout → 422 + volledige tl_response, geen verdere acties; geen DB-mutatie bij draft-fout.
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { tlFetch } from './_lib/teamleader-token.js';
 import { getClientIp } from './_lib/audit-customer.js';
 import { requirePermission } from './_lib/requirePermission.js';
 import { getOrCreateTlCustomer } from './_lib/teamleader-contact.js';
+import { taxRateIdFor } from './_lib/teamleader-quotation.js';
 
 const r2 = (v) => Math.round((Number(v) || 0) * 100) / 100;
 
@@ -47,17 +51,29 @@ export default async function handler(req, res) {
     try { customerRef = await getOrCreateTlCustomer(cust); }
     catch (e) { return res.status(422).json({ error: 'Kon klant niet aan Teamleader koppelen: ' + e.message }); }
 
-    // 2. Draft.
-    const lineItems = lines.map(l => {
-      const li = {
-        description: l.description || '',
-        quantity: Number(l.quantity) || 1,
-      };
-      if (l.product_id) li.product_id = String(l.product_id);
-      // unit_price minimaal als excl-bedrag (TL accepteert 'excluding'); BTW/grootboek volgt het TL-product.
-      if (l.unit_price_excl != null) li.unit_price = { amount: r2(l.unit_price_excl), currency: 'EUR', tax: 'excluding' };
-      return li;
-    });
+    // 2. Draft — vrije regels: tax_rate_id wordt afgeleid van vat_percentage via de
+    //    bestaande env-mapping (hergebruikt taxRateIdFor uit _lib/teamleader-quotation.js).
+    //    Voor handmatige facturen gaan we uit van domestic (verlegd/buiten-EU = later).
+    let lineItems;
+    try {
+      lineItems = lines.map((l, idx) => {
+        const desc = String(l.description || '').trim();
+        const qty = Number(l.quantity) || 1;
+        const unit = Number(l.unit_price_excl);
+        const vat = Number(l.vat_percentage);
+        if (!desc) throw new Error(`Regel ${idx + 1}: omschrijving ontbreekt`);
+        if (!Number.isFinite(unit) || unit < 0) throw new Error(`Regel ${idx + 1}: ongeldige eenheidsprijs`);
+        if (![0, 6, 9, 21].includes(vat)) throw new Error(`Regel ${idx + 1}: ongeldig BTW-percentage (${vat})`);
+        const li = {
+          description: desc,
+          quantity: qty,
+          unit_price: { amount: r2(unit), currency: 'EUR', tax: 'excluding' },
+          tax_rate_id: taxRateIdFor(vat, department_id, 'domestic'),
+        };
+        if (l.product_id) li.product_id = String(l.product_id);
+        return li;
+      });
+    } catch (valErr) { return res.status(400).json({ error: valErr.message }); }
     const draftBody = {
       invoicee: { customer: customerRef },
       department_id: String(department_id),

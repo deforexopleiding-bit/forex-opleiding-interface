@@ -739,16 +739,14 @@
   }
 
   // ── DEEL D: Nieuwe factuur ──
-  let _newCust = null, _newLines = [], _newProducts = [];
+  let _newCust = null, _newLines = [];
   function openNewInvoiceModal() {
-    _newCust = null; _newLines = [{ product_id: null, product_name: '', quantity: 1, unit_price_excl: 0, description: '' }];
+    _newCust = null; _newLines = [{ description: '', quantity: 1, unit_price_excl: 0, vat_percentage: 21 }];
     document.getElementById('newCustSearch').value = ''; document.getElementById('newCustSel').textContent = ''; document.getElementById('newCustList').style.display = 'none';
     document.getElementById('newPO').value = ''; document.getElementById('newLang').value = 'nl'; document.getElementById('newErr').textContent = '';
     const dept = document.getElementById('newDept'); dept.innerHTML = ENTITIES.map(e => `<option value="${e.id}">${e.label}</option>`).join('');
     renderNewLines();
     document.getElementById('newInvModal').classList.remove('hidden');
-    // Laad TL-products een keer.
-    if (!_newProducts.length) window.AgentShared.apiFetch('/api/finance-tl-products?limit=200').then(r => r.json()).then(d => { _newProducts = d.items || []; renderNewLines(); }).catch(() => {});
   }
   let _newCustTimer = null;
   function onNewCustSearch(v) {
@@ -766,31 +764,49 @@
     }, 250);
   }
   function renderNewLines() {
-    const opts = '<option value="">— kies artikel —</option>' + _newProducts.map(p => `<option value="${p.id}">${esc(p.name)}${p.unit_price != null ? ' · €' + p.unit_price.toFixed(2) : ''}</option>`).join('');
-    document.getElementById('newLines').innerHTML = _newLines.map((l, i) => `
-      <div style="display:grid;grid-template-columns:1fr 1fr 70px 100px 30px;gap:6px;align-items:center">
-        <select class="fin-input" data-new-p="${i}">${opts}</select>
-        <input class="fin-input" data-new-d="${i}" placeholder="Omschrijving (override)" value="${esc(l.description || '')}"/>
-        <input class="fin-input" type="number" step="1" min="1" data-new-q="${i}" value="${l.quantity}"/>
-        <input class="fin-input" type="number" step="0.01" min="0" data-new-pr="${i}" value="${(Number(l.unit_price_excl) || 0).toFixed(2)}" placeholder="excl. €"/>
-        <button class="sr-ibtn" type="button" data-new-x="${i}" title="Verwijder"><i class="ti ti-x"></i></button>
-      </div>`).join('');
-    document.querySelectorAll('[data-new-p]').forEach(el => { el.value = _newLines[+el.dataset.newP].product_id || ''; el.onchange = () => { const i = +el.dataset.newP; const p = _newProducts.find(x => x.id === el.value); _newLines[i].product_id = el.value || null; if (p) { _newLines[i].product_name = p.name; if (p.unit_price != null) _newLines[i].unit_price_excl = p.unit_price; if (!_newLines[i].description) _newLines[i].description = p.name; renderNewLines(); } }; });
-    document.querySelectorAll('[data-new-d]').forEach(el => el.oninput = () => _newLines[+el.dataset.newD].description = el.value);
-    document.querySelectorAll('[data-new-q]').forEach(el => el.oninput = () => _newLines[+el.dataset.newQ].quantity = Number(el.value) || 1);
-    document.querySelectorAll('[data-new-pr]').forEach(el => el.oninput = () => _newLines[+el.dataset.newPr].unit_price_excl = Number(el.value) || 0);
-    document.querySelectorAll('[data-new-x]').forEach(el => el.onclick = () => { _newLines.splice(+el.dataset.newX, 1); if (!_newLines.length) _newLines.push({ product_id: null, product_name: '', quantity: 1, unit_price_excl: 0, description: '' }); renderNewLines(); });
+    const vatOpts = (cur) => [0, 6, 9, 21].map(v => `<option value="${v}" ${Number(cur) === v ? 'selected' : ''}>${v}%</option>`).join('');
+    document.getElementById('newLines').innerHTML = `
+      <div style="display:grid;grid-template-columns:1fr 70px 110px 80px 30px;gap:6px;align-items:center;font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--text-faint);padding:0 2px">
+        <div>Omschrijving</div><div style="text-align:right">Aantal</div><div style="text-align:right">Eenheidsprijs excl.</div><div>BTW</div><div></div>
+      </div>` + _newLines.map((l, i) => `
+      <div style="display:grid;grid-template-columns:1fr 70px 110px 80px 30px;gap:6px;align-items:center">
+        <input class="fin-input" data-new-d="${i}" placeholder="Beschrijving van de regel" value="${esc(l.description || '')}"/>
+        <input class="fin-input" type="number" step="1" min="1" data-new-q="${i}" value="${l.quantity}" style="text-align:right"/>
+        <input class="fin-input" type="number" step="0.01" min="0" data-new-pr="${i}" value="${(Number(l.unit_price_excl) || 0).toFixed(2)}" placeholder="excl. €" style="text-align:right"/>
+        <select class="fin-input" data-new-v="${i}">${vatOpts(l.vat_percentage)}</select>
+        <button class="sr-ibtn" type="button" data-new-x="${i}" title="Verwijder regel"><i class="ti ti-x"></i></button>
+      </div>`).join('') + '<div id="newTotals" style="margin-top:10px"></div>';
+    document.querySelectorAll('[data-new-d]').forEach(el => el.oninput = () => { _newLines[+el.dataset.newD].description = el.value; renderNewTotals(); });
+    document.querySelectorAll('[data-new-q]').forEach(el => el.oninput = () => { _newLines[+el.dataset.newQ].quantity = Number(el.value) || 1; renderNewTotals(); });
+    document.querySelectorAll('[data-new-pr]').forEach(el => el.oninput = () => { _newLines[+el.dataset.newPr].unit_price_excl = Number(el.value) || 0; renderNewTotals(); });
+    document.querySelectorAll('[data-new-v]').forEach(el => el.onchange = () => { _newLines[+el.dataset.newV].vat_percentage = Number(el.value); renderNewTotals(); });
+    document.querySelectorAll('[data-new-x]').forEach(el => el.onclick = () => { _newLines.splice(+el.dataset.newX, 1); if (!_newLines.length) _newLines.push({ description: '', quantity: 1, unit_price_excl: 0, vat_percentage: 21 }); renderNewLines(); });
+    renderNewTotals();
+  }
+  function renderNewTotals() {
+    let excl = 0; const byRate = {};
+    for (const l of _newLines) {
+      const sub = (Number(l.unit_price_excl) || 0) * (Number(l.quantity) || 0);
+      excl += sub;
+      const rate = Number(l.vat_percentage) || 0;
+      const tax = sub * rate / 100;
+      byRate[rate] = (byRate[rate] || 0) + tax;
+    }
+    const totalTax = Object.values(byRate).reduce((a, b) => a + b, 0);
+    const incl = excl + totalTax;
+    const taxRows = Object.keys(byRate).sort((a, b) => Number(a) - Number(b)).map(r => `<div class="inv-drow"><span class="lbl">Btw ${r}%</span><span>${eur(byRate[r])}</span></div>`).join('');
+    document.getElementById('newTotals').innerHTML = `<div class="inv-drow"><span class="lbl">Subtotaal excl. btw</span><span>${eur(excl)}</span></div>${taxRows}<div class="inv-drow"><span class="lbl"><strong>Totaal incl. btw</strong></span><span><strong>${eur(incl)}</strong></span></div>`;
   }
   async function submitNew(action) {
     const errEl = document.getElementById('newErr'); errEl.textContent = '';
     if (!_newCust) { errEl.textContent = 'Kies eerst een klant.'; return; }
     const dept = document.getElementById('newDept').value;
-    const goodLines = _newLines.filter(l => l.product_id && l.quantity > 0);
-    if (!goodLines.length) { errEl.textContent = 'Minimaal 1 regel met TL-artikel vereist.'; return; }
+    const goodLines = _newLines.filter(l => String(l.description || '').trim() && Number(l.quantity) > 0);
+    if (!goodLines.length) { errEl.textContent = 'Minimaal 1 regel met omschrijving + aantal vereist.'; return; }
     if (action !== 'draft' && !confirm(action === 'book' ? 'Factuur DEFINITIEF boeken in Teamleader. Doorgaan?' : 'Factuur boeken én verzenden naar de klant. Doorgaan?')) return;
     const payload = {
       customer_id: _newCust.id, department_id: dept,
-      lines: goodLines.map(l => ({ product_id: l.product_id, description: l.description || undefined, quantity: l.quantity, unit_price_excl: l.unit_price_excl })),
+      lines: goodLines.map(l => ({ description: String(l.description).trim(), quantity: Number(l.quantity), unit_price_excl: Number(l.unit_price_excl) || 0, vat_percentage: Number(l.vat_percentage) })),
       purchase_order_number: document.getElementById('newPO').value || undefined, language: document.getElementById('newLang').value, action,
     };
     const btnId = action === 'draft' ? 'newDraft' : (action === 'book' ? 'newBook' : 'newBookSend');
@@ -882,7 +898,7 @@
       document.getElementById('newDraft').addEventListener('click', () => submitNew('draft'));
       document.getElementById('newBook').addEventListener('click', () => submitNew('book'));
       document.getElementById('newBookSend').addEventListener('click', () => submitNew('book_and_send'));
-      document.getElementById('newAddLine').addEventListener('click', () => { _newLines.push({ product_id: null, product_name: '', quantity: 1, unit_price_excl: 0, description: '' }); renderNewLines(); });
+      document.getElementById('newAddLine').addEventListener('click', () => { _newLines.push({ description: '', quantity: 1, unit_price_excl: 0, vat_percentage: 21 }); renderNewLines(); });
       document.getElementById('newCustSearch').addEventListener('input', (e) => onNewCustSearch(e.target.value));
       if (canCreate) { const nb = document.getElementById('invNewBtn'); nb.style.display = ''; nb.addEventListener('click', openNewInvoiceModal); }
       document.addEventListener('keydown', (e) => { if (e.key === 'Escape') { ['invModal', 'payModal', 'sendModal', 'creditModal', 'updModal', 'newInvModal'].forEach(id => document.getElementById(id)?.classList.add('hidden')); } }, true);
