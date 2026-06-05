@@ -57,23 +57,35 @@ export default async function handler(req, res) {
     }
     if (!recipientEmail) return res.status(400).json({ error: 'Geen ontvanger-e-mail beschikbaar (klant heeft geen e-mail; vul "to" expliciet in).' });
 
-    // 2. Default-tekst (vaste fallback, zelfde patroon als quotations.send).
+    // 2. Default-tekst — defensief: nooit lege strings naar TL. Helpers garanderen
+    //    minstens een vaste fallback-string als bv. invoice_number onverwacht null is.
+    const nonEmpty = (v, fb) => { const s = (v == null ? '' : String(v)).trim(); return s || fb; };
     const custName = customerDisplayName(inv.customer || {}, '');
     const aanhef = custName ? `Beste ${custName}` : 'Beste';
-    const defaultSubject = `Factuur ${inv.invoice_number} van De Forex Opleiding`;
-    const defaultContent = `${aanhef},\n\nHierbij doen wij u factuur ${inv.invoice_number} toekomen. U vindt deze in de bijlage.\n\nMet vriendelijke groet,\nDe Forex Opleiding`;
+    const invNr = nonEmpty(inv.invoice_number, inv.tl_invoice_id);
+    const defaultSubject = nonEmpty(`Factuur ${invNr} van De Forex Opleiding`, 'Uw factuur van De Forex Opleiding');
+    const defaultContent = nonEmpty(
+      `${aanhef},\n\nHierbij doen wij u factuur ${invNr} toekomen. U vindt deze in de bijlage.\n\nMet vriendelijke groet,\nDe Forex Opleiding`,
+      'Beste,\n\nHierbij doen wij u onze factuur toekomen. U vindt deze in de bijlage.\n\nMet vriendelijke groet,\nDe Forex Opleiding'
+    );
 
-    // 3. TL body — platte shape (bevestigd via TL 400 op de quotations-style):
-    //    { id, email, subject, body, language }.
-    const bodyText = content && String(content).trim() ? String(content) : defaultContent;
+    // 3. TL body — platte shape. Garandeer NON-EMPTY voor alle verplichte velden.
+    const subjectFinal = nonEmpty(subject, defaultSubject);
+    const bodyTextFinal = nonEmpty(content, defaultContent);
     const payload = {
       id: inv.tl_invoice_id,
       email: recipientEmail,
-      subject: subject && String(subject).trim() ? String(subject) : defaultSubject,
-      body: bodyText,        // plain begeleidende tekst
-      content: bodyText,     // TL wil óók 'content' (zelfde tekst — pas aan als TL onderscheid maakt)
+      subject: subjectFinal,
+      body: bodyTextFinal,         // plain begeleidende tekst
+      content: bodyTextFinal,      // TL wil óók 'content' (zelfde tekst — splits als TL HTML vereist)
       language: String(language || 'nl'),
     };
+    // Sanity-check: weiger lokaal als ook maar één verplicht veld leeg is (zou niet kunnen).
+    for (const k of ['id', 'email', 'subject', 'body', 'content', 'language']) {
+      if (!payload[k] || !String(payload[k]).trim()) {
+        return res.status(500).json({ error: `Interne fout: payload.${k} leeg`, tl_request_payload: payload });
+      }
+    }
 
     const tryEndpoint = async (path) => {
       console.log('[finance-invoice-send]', path, 'payload', JSON.stringify(payload));
@@ -97,7 +109,15 @@ export default async function handler(req, res) {
     }
     if (!pr.ok) {
       console.error('[finance-invoice-send] GEWEIGERD |', usedEndpoint, '| HTTP', pr.status, '| payload=', JSON.stringify(payload), '| response=', prText);
-      return res.status(422).json({ error: `Teamleader weigerde verzending (HTTP ${pr.status}).`, tl_status: pr.status, tl_response: prText, tl_endpoint: usedEndpoint });
+      // ECHO de exacte payload terug in de response zodat we in Chrome direct zien wat de
+      // wire-format was — geen Vercel-logs hoeven spitten.
+      return res.status(422).json({
+        error: `Teamleader weigerde verzending (HTTP ${pr.status}).`,
+        tl_status: pr.status, tl_endpoint: usedEndpoint,
+        tl_request_payload: payload,
+        tl_request_keys: Object.keys(payload),
+        tl_response: prText,
+      });
     }
     console.log('[finance-invoice-send] OK |', usedEndpoint, '| HTTP', pr.status);
 

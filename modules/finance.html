@@ -698,7 +698,16 @@
     const btn = document.getElementById('sendOk'); btn.disabled = true; const o = btn.innerHTML; btn.innerHTML = '<i class="ti ti-loader"></i> Bezig…';
     try {
       const r = await window.AgentShared.apiFetch('/api/finance-invoice-send', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ invoice_id: _sendInv.id, to: toVal, subject: document.getElementById('sendSubject').value || undefined, language: document.getElementById('sendLang').value }) });
-      const d = await r.json(); if (!r.ok || !d.success) throw new Error((d.error || 'HTTP ' + r.status) + (d.tl_response ? ' — ' + d.tl_response : ''));
+      const d = await r.json();
+      if (!r.ok || !d.success) {
+        // Bij TL-fout: zowel tl_response (wat TL terugzei) als tl_request_payload (wat we
+        // stuurden) zichtbaar maken — geen Vercel-logs nodig.
+        if (d.tl_request_payload) console.log('[send] tl_request_payload', d.tl_request_payload, '| keys', d.tl_request_keys);
+        if (d.tl_response) console.log('[send] tl_response', d.tl_response);
+        const extra = d.tl_response ? ' — ' + d.tl_response : '';
+        const sentKeys = d.tl_request_keys ? ' · velden gestuurd: ' + d.tl_request_keys.join(', ') : '';
+        throw new Error((d.error || 'HTTP ' + r.status) + extra + sentKeys);
+      }
       window.AgentShared?.showToast('Factuur verzonden naar ' + (d.to || toVal), 'success');
       document.getElementById('sendModal').classList.add('hidden'); document.getElementById('invModal').classList.add('hidden'); load();
     } catch (e) { errEl.textContent = 'Mislukt: ' + e.message; }
