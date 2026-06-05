@@ -129,6 +129,7 @@
           <button class="sr-seg" data-status="overdue" type="button">Te laat</button>
           <button class="sr-seg" data-status="paid" type="button">Betaald</button>
           <button class="sr-seg" data-status="concept" type="button">Concept</button>
+          <button class="sr-seg" data-status="credited" type="button">Gecrediteerd</button>
           <button class="sr-seg" data-status="" type="button">Alle</button>
         </div>
         <select id="invEntity" class="fin-input"><option value="">Alle entiteiten</option></select>
@@ -292,8 +293,9 @@
     partially_paid: { tag: 'warning', bar: '#f59e0b', label: 'Deels betaald' },
     paid:           { tag: 'green',   bar: '#059669', label: 'Betaald' },
     overdue:        { tag: 'danger',  bar: '#ef4444', label: 'Te laat' },
-    credited:       { tag: 'purple',  bar: '#8b5cf6', label: 'Gecrediteerd' },
-    writeoff:       { tag: 'gray',    bar: '#9ca3af', label: 'Afgeschreven' },
+    credited:           { tag: 'purple',  bar: '#8b5cf6', label: 'Gecrediteerd' },
+    partially_credited: { tag: 'purple',  bar: '#a78bfa', label: 'Deels gecrediteerd' },
+    writeoff:           { tag: 'gray',    bar: '#9ca3af', label: 'Afgeschreven' },
   };
   const stMeta = (s) => ST[s] || { tag: 'gray', bar: '#9ca3af', label: s || '—' };
 
@@ -397,6 +399,7 @@
       row('Factuurdatum', fmtDate(inv.issue_date)) +
       row('Vervaldag', fmtDate(inv.due_date)) +
       row('Betaald op', fmtDate(inv.paid_date)) +
+      '<div id="invCreditRow"></div>' +
       '<div id="invLateFeeRow"></div>';
     const tl = document.getElementById('invModalTl');
     tl.href = inv.tl_invoice_id ? `https://focus.teamleader.eu/invoice_detail.php?id=${inv.tl_invoice_id}` : 'https://focus.teamleader.eu/invoices';
@@ -435,6 +438,20 @@
         })
         .catch(() => { lateRow.innerHTML = ''; });
     } else if (lateRow) { lateRow.innerHTML = ''; }
+    // Gekoppelde creditnota's + netto (lazy) wanneer er gecrediteerd is.
+    const creditRow = document.getElementById('invCreditRow');
+    if (creditRow && Number(inv.credited_amount) > 0) {
+      creditRow.innerHTML = `<div class="inv-drow"><span class="lbl">Gecrediteerd</span><span><i class="ti ti-loader"></i> laden…</span></div>`;
+      window.AgentShared.apiFetch('/api/finance-invoice-creditnotes?invoice_id=' + encodeURIComponent(inv.id))
+        .then(r => r.json())
+        .then(d => {
+          if (d && Number(d.credited_amount) > 0) {
+            const lines = (d.credit_notes || []).map(c => `<div class="inv-drow"><span class="lbl" style="padding-left:12px;opacity:.85">${esc(c.number)} · ${fmtDate(c.date)}</span><span>− ${eur(c.amount_total)}</span></div>`).join('');
+            creditRow.innerHTML = row('Gecrediteerd', '− ' + eur(d.credited_amount)) + lines + row('Netto', eur(d.amount_net));
+          } else { creditRow.innerHTML = ''; }
+        })
+        .catch(() => { creditRow.innerHTML = ''; });
+    } else if (creditRow) { creditRow.innerHTML = ''; }
     document.getElementById('invModal').classList.remove('hidden');
   }
 
