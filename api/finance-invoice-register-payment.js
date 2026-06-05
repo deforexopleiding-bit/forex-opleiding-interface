@@ -15,9 +15,10 @@
 // Partial payments worden ondersteund (meerdere calls tellen op). Terugdraaien:
 // invoices.removePayments { id, payment_ids[] }.
 
-import { verifyAdmin, supabaseAdmin } from './supabase.js';
+import { createUserClient, supabaseAdmin } from './supabase.js';
 import { tlFetch } from './_lib/teamleader-token.js';
 import { getClientIp } from './_lib/audit-customer.js';
+import { requirePermission } from './_lib/requirePermission.js';
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 async function tlCall(path, body, attempt = 0) {
@@ -53,9 +54,12 @@ export default async function handler(req, res) {
   res.setHeader('Content-Type', 'application/json');
   if (req.method !== 'POST') return res.status(405).json({ error: 'POST only' });
 
-  const admin = await verifyAdmin(req);
-  if (!admin) return res.status(403).json({ error: 'Admin only' });
-  if (admin.profile.role !== 'super_admin') return res.status(403).json({ error: 'Alleen super_admin mag betalingen registreren' });
+  const supabase = createUserClient(req);
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return res.status(401).json({ error: 'Niet geauthenticeerd' });
+  if (!(await requirePermission(req, 'finance.invoice.payment.register'))) {
+    return res.status(403).json({ error: 'Geen rechten (finance.invoice.payment.register)' });
+  }
 
   const { invoice_id, amount, paid_at, payment_method_id } = req.body || {};
   if (!invoice_id) return res.status(400).json({ error: 'invoice_id vereist' });
@@ -145,7 +149,7 @@ export default async function handler(req, res) {
     const { error: payErr } = await supabaseAdmin.from('payments').insert({
       customer_id: inv.customer_id, invoice_id: inv.id, amount: r2(amtNum),
       payment_date: dateOnly, payment_method: payment_method_id ? String(payment_method_id) : null,
-      source: 'manual', matched_by: admin.user.id,
+      source: 'manual', matched_by: user.id,
     });
     if (payErr) console.error('[finance-register-payment] payments insert', payErr.message);
 
@@ -160,7 +164,7 @@ export default async function handler(req, res) {
     // 5. Audit.
     try {
       await supabaseAdmin.from('audit_log').insert({
-        user_id: admin.user.id, action: 'finance_invoice.register_payment',
+        user_id: user.id, action: 'finance_invoice.register_payment',
         entity_type: 'invoice', entity_id: inv.id,
         after_json: { amount: r2(amtNum), paid_at: dateOnly, payment_method_id: payment_method_id || null, new_status: newStatus, new_amount_paid: newPaid },
         reason_text: `Betaling €${r2(amtNum)} geregistreerd op factuur ${inv.id} (status → ${newStatus})`,

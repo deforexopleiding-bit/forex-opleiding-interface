@@ -217,6 +217,7 @@
       <button class="sr-abtn" id="invModalPdf" type="button"><i class="ti ti-file-type-pdf"></i> Open PDF</button>
       <a class="sr-abtn" id="invModalTl" href="https://focus.teamleader.eu/invoices" target="_blank"><i class="ti ti-external-link"></i> Open in Teamleader</a>
       <button class="sr-abtn success" id="invModalPay" type="button" style="display:none"><i class="ti ti-cash"></i> Betaling registreren</button>
+      <button class="sr-abtn danger" id="invModalRemove" type="button" style="display:none"><i class="ti ti-arrow-back-up"></i> Betaling terugdraaien</button>
       <button class="sr-abtn primary" id="invModalClose" type="button">Sluiten</button>
     </div>
   </div>
@@ -321,7 +322,8 @@
       const m = stMeta(inv.display_status);
       const ent = inv.tl_department_id ? (ENT_LABEL[inv.tl_department_id] || '') : '';
       const tlItem = inv.tl_invoice_id ? `<a class="sr-menu-item" href="https://focus.teamleader.eu/invoice_detail.php?id=${esc(inv.tl_invoice_id)}" target="_blank"><i class="ti ti-external-link"></i> Open in Teamleader</a>` : '';
-      const payItem = (inv.tl_invoice_id && ['open', 'partially_paid', 'overdue'].includes(inv.display_status)) ? `<button class="sr-menu-item" type="button" data-inv-pay="${i}"><i class="ti ti-cash"></i> Betaling registreren</button>` : '';
+      const payItem = (canRegister && inv.tl_invoice_id && ['open', 'partially_paid', 'overdue'].includes(inv.display_status)) ? `<button class="sr-menu-item" type="button" data-inv-pay="${i}"><i class="ti ti-cash"></i> Betaling registreren</button>` : '';
+      const removeItem = (canRemove && inv.tl_invoice_id && (Number(inv.amount_paid) || 0) > 0) ? `<button class="sr-menu-item danger" type="button" data-inv-remove="${i}"><i class="ti ti-arrow-back-up"></i> Betaling terugdraaien</button>` : '';
       return `<tr>
         <td style="padding:0"><div class="statusstrip-bar" style="background:${m.bar}"></div></td>
         <td><span class="sr-uname">${esc(inv.invoice_number)}</span>${ent ? `<br><span class="sr-cellsub">${esc(ent)}</span>` : ''}</td>
@@ -334,12 +336,14 @@
         <td><div class="sr-menu"><button class="sr-ibtn sr-menu-toggle" title="Meer" type="button"><i class="ti ti-dots"></i></button><div class="sr-menu-pop">
           <button class="sr-menu-item" type="button" data-inv-detail="${i}"><i class="ti ti-eye"></i> Bekijk details</button>
           ${payItem}
+          ${removeItem}
           ${tlItem}
         </div></div></td>
       </tr>`;
     }).join('');
     tb.querySelectorAll('[data-inv-detail]').forEach(b => b.addEventListener('click', () => openDetail(items[Number(b.dataset.invDetail)])));
     tb.querySelectorAll('[data-inv-pay]').forEach(b => b.addEventListener('click', () => openPayModal(items[Number(b.dataset.invPay)])));
+    tb.querySelectorAll('[data-inv-remove]').forEach(b => b.addEventListener('click', () => removePayment(items[Number(b.dataset.invRemove)])));
   }
 
   function renderPager() {
@@ -409,9 +413,13 @@
       finally { pdfBtn.disabled = false; pdfBtn.innerHTML = orig; }
     };
     const payBtn = document.getElementById('invModalPay');
-    const payable = !!inv.tl_invoice_id && ['open', 'partially_paid', 'overdue'].includes(inv.display_status);
+    const payable = canRegister && !!inv.tl_invoice_id && ['open', 'partially_paid', 'overdue'].includes(inv.display_status);
     payBtn.style.display = payable ? '' : 'none';
     payBtn.onclick = () => { document.getElementById('invModal').classList.add('hidden'); openPayModal(inv); };
+    const remBtn = document.getElementById('invModalRemove');
+    const removable = canRemove && !!inv.tl_invoice_id && (Number(inv.amount_paid) || 0) > 0;
+    remBtn.style.display = removable ? '' : 'none';
+    remBtn.onclick = () => removePayment(inv);
     document.getElementById('invModal').classList.remove('hidden');
   }
 
@@ -426,6 +434,18 @@
     document.getElementById('payMethod').value = '';
     document.getElementById('payModalErr').textContent = '';
     document.getElementById('payModal').classList.remove('hidden');
+  }
+  async function removePayment(inv) {
+    if (!inv || !inv.tl_invoice_id) return;
+    if (!confirm('Dit verwijdert ALLE geregistreerde betalingen van deze factuur in Teamleader. Je kunt daarna opnieuw afletteren.\n\nDoorgaan?')) return;
+    try {
+      const r = await window.AgentShared.apiFetch('/api/finance-invoice-remove-payment', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ invoice_id: inv.id }) });
+      const d = await r.json();
+      if (!r.ok || !d.success) throw new Error((d.error || 'HTTP ' + r.status) + (d.tl_response ? ' — ' + d.tl_response : ''));
+      window.AgentShared?.showToast('Betalingen teruggedraaid', 'success');
+      document.getElementById('invModal').classList.add('hidden');
+      load();
+    } catch (e) { window.AgentShared?.showToast('Mislukt: ' + e.message, 'error'); }
   }
   async function submitPay() {
     if (!_payInv) return;
@@ -469,6 +489,7 @@
     window.addEventListener('scroll', closeAll, true);
   }
 
+  let canRegister = false, canRemove = false;
   async function init() {
     try {
       await window._authSharedReady;
@@ -477,6 +498,9 @@
       let perms = null;
       if (window.RBAC?.ensurePermissionsLoaded) { try { perms = await window.RBAC.ensurePermissionsLoaded(); } catch (e) {} }
       if (perms && !perms.has('*') && !perms.has('finance.module.access')) return; // noAccess al afgehandeld door auth-IIFE
+      const can = (k) => !!perms && (perms.has('*') || perms.has(k));
+      canRegister = can('finance.invoice.payment.register');
+      canRemove = can('finance.invoice.payment.remove');
 
       // Entiteit-dropdown vullen.
       const sel = document.getElementById('invEntity');
