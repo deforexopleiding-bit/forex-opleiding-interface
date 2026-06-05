@@ -711,35 +711,42 @@
     _updLines = [];
     renderUpdLines();
     window.AgentShared.apiFetch('/api/finance-invoice-lines?invoice_id=' + encodeURIComponent(inv.id)).then(r => r.json()).then(d => {
-      _updLines = (d.lines || []).map(l => ({ description: l.description, quantity: l.quantity, unit_price_excl: l.unit_price_excl }));
-      if (!_updLines.length) _updLines.push({ description: '', quantity: 1, unit_price_excl: 0 });
+      _updLines = (d.lines || []).map(l => ({ description: l.description, quantity: l.quantity, unit_price_excl: l.unit_price_excl, vat_percentage: [0, 6, 9, 21].includes(Number(l.tax_rate)) ? Number(l.tax_rate) : 21 }));
+      if (!_updLines.length) _updLines.push({ description: '', quantity: 1, unit_price_excl: 0, vat_percentage: 21 });
       renderUpdLines();
-    }).catch(() => { _updLines.push({ description: '', quantity: 1, unit_price_excl: 0 }); renderUpdLines(); });
+    }).catch(() => { _updLines.push({ description: '', quantity: 1, unit_price_excl: 0, vat_percentage: 21 }); renderUpdLines(); });
     document.getElementById('updModal').classList.remove('hidden');
   }
   function renderUpdLines() {
-    document.getElementById('updLines').innerHTML = _updLines.map((l, i) => `
-      <div style="display:grid;grid-template-columns:1fr 80px 110px 30px;gap:6px;align-items:center">
+    const vatOpts = (cur) => [0, 6, 9, 21].map(v => `<option value="${v}" ${Number(cur) === v ? 'selected' : ''}>${v}%</option>`).join('');
+    document.getElementById('updLines').innerHTML = `
+      <div style="display:grid;grid-template-columns:1fr 70px 110px 80px 30px;gap:6px;align-items:center;font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--text-faint);padding:0 2px">
+        <div>Omschrijving</div><div style="text-align:right">Aantal</div><div style="text-align:right">Eenheidsprijs excl.</div><div>BTW</div><div></div>
+      </div>` + _updLines.map((l, i) => `
+      <div style="display:grid;grid-template-columns:1fr 70px 110px 80px 30px;gap:6px;align-items:center">
         <input class="fin-input" data-upd-d="${i}" placeholder="Beschrijving" value="${esc(l.description || '')}"/>
-        <input class="fin-input" type="number" step="1" min="1" data-upd-q="${i}" value="${l.quantity || 1}"/>
-        <input class="fin-input" type="number" step="0.01" min="0" data-upd-p="${i}" value="${(Number(l.unit_price_excl) || 0).toFixed(2)}" placeholder="excl. €"/>
-        <button class="sr-ibtn" type="button" data-upd-x="${i}" title="Verwijder"><i class="ti ti-x"></i></button>
+        <input class="fin-input" type="number" step="1" min="1" data-upd-q="${i}" value="${l.quantity || 1}" style="text-align:right"/>
+        <input class="fin-input" type="number" step="0.01" min="0" data-upd-p="${i}" value="${(Number(l.unit_price_excl) || 0).toFixed(2)}" placeholder="excl. €" style="text-align:right"/>
+        <select class="fin-input" data-upd-v="${i}">${vatOpts(l.vat_percentage)}</select>
+        <button class="sr-ibtn" type="button" data-upd-x="${i}" title="Verwijder regel"><i class="ti ti-x"></i></button>
       </div>`).join('');
     document.querySelectorAll('[data-upd-d]').forEach(el => el.oninput = () => _updLines[+el.dataset.updD].description = el.value);
     document.querySelectorAll('[data-upd-q]').forEach(el => el.oninput = () => _updLines[+el.dataset.updQ].quantity = Number(el.value) || 1);
     document.querySelectorAll('[data-upd-p]').forEach(el => el.oninput = () => _updLines[+el.dataset.updP].unit_price_excl = Number(el.value) || 0);
+    document.querySelectorAll('[data-upd-v]').forEach(el => el.onchange = () => _updLines[+el.dataset.updV].vat_percentage = Number(el.value));
     document.querySelectorAll('[data-upd-x]').forEach(el => el.onclick = () => { _updLines.splice(+el.dataset.updX, 1); renderUpdLines(); });
   }
   async function submitUpdate() {
     if (!_updInv) return;
     if (!busyGuard('update')) return;
     const errEl = document.getElementById('updErr'); errEl.textContent = '';
-    const goodLines = _updLines.filter(l => l.description && l.quantity > 0 && l.unit_price_excl >= 0);
-    if (!goodLines.length) { errEl.textContent = 'Minimaal 1 geldige regel vereist.'; busyRelease('update'); return; }
-    const grouped = [{ line_items: goodLines.map(l => ({ description: l.description, quantity: l.quantity, unit_price: { amount: Number(l.unit_price_excl), currency: 'EUR', tax: 'excluding' } })) }];
+    const goodLines = _updLines.filter(l => l.description && l.quantity > 0 && l.unit_price_excl >= 0 && [0, 6, 9, 21].includes(Number(l.vat_percentage)));
+    if (!goodLines.length) { errEl.textContent = 'Minimaal 1 geldige regel vereist (incl. BTW%).'; busyRelease('update'); return; }
+    // Verstuur 'lines' (shorthand): backend bouwt grouped_lines + tax_rate_id via taxRateIdFor.
+    const lines = goodLines.map(l => ({ description: l.description, quantity: l.quantity, unit_price_excl: Number(l.unit_price_excl) || 0, vat_percentage: Number(l.vat_percentage) }));
     const btn = document.getElementById('updOk'); btn.disabled = true; const o = btn.innerHTML; btn.innerHTML = '<i class="ti ti-loader"></i> Bezig…';
     try {
-      const r = await window.AgentShared.apiFetch('/api/finance-invoice-update', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ invoice_id: _updInv.id, grouped_lines: grouped }) });
+      const r = await window.AgentShared.apiFetch('/api/finance-invoice-update', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ invoice_id: _updInv.id, lines }) });
       const d = await r.json(); if (!r.ok || !d.success) throw new Error((d.error || 'HTTP ' + r.status) + (d.tl_response ? ' — ' + d.tl_response : ''));
       window.AgentShared?.showToast('Concept bijgewerkt', 'success');
       document.getElementById('updModal').classList.add('hidden'); document.getElementById('invModal').classList.add('hidden'); load();
@@ -833,9 +840,18 @@
       if (d.sync_err) msg += ' · sync-back faalde: ' + d.sync_err;
       window.AgentShared?.showToast(msg, (d.bookErr || d.sendErr) ? 'error' : 'success');
       document.getElementById('newInvModal').classList.add('hidden');
-      // Open de nieuwe factuur direct als sync-back lukte; anders refresh.
-      if (d.invoice_id) { await load(); const found = state.rows.find(x => x.id === d.invoice_id); if (found) openDetail(found); }
-      else load();
+      // Open de nieuwe factuur direct: schakel eerst de pill naar de status van de net-
+      // aangemaakte factuur (anders valt 'ie buiten de huidige filter), reload, vind, open.
+      if (d.invoice_id) {
+        const target = d.local_status || (action === 'draft' ? 'concept' : 'open');
+        if (state.status !== target) {
+          state.status = target; state.page = 1;
+          document.querySelectorAll('#invStatusSeg .sr-seg').forEach(x => x.classList.toggle('active', (x.dataset.status || '') === (target || '')));
+        }
+        await load();
+        const found = state.rows.find(x => x.id === d.invoice_id);
+        if (found) openDetail(found);
+      } else { await load(); }
     } catch (e) { errEl.textContent = 'Mislukt: ' + e.message; }
     finally { busyRelease('new'); ['newDraft', 'newBook', 'newBookSend'].forEach(id => { const b = document.getElementById(id); if (b) b.disabled = false; }); btn.innerHTML = o; }
   }

@@ -13,6 +13,9 @@ import { tlFetch } from './_lib/teamleader-token.js';
 import { getClientIp } from './_lib/audit-customer.js';
 import { requirePermission } from './_lib/requirePermission.js';
 import { upsertInvoiceFromTl } from './_lib/invoice-upsert.js';
+import { taxRateIdFor } from './_lib/teamleader-quotation.js';
+
+const r2 = (v) => Math.round((Number(v) || 0) * 100) / 100;
 
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
@@ -28,15 +31,41 @@ export default async function handler(req, res) {
   if (!invoice_id) return res.status(400).json({ error: 'invoice_id vereist' });
 
   try {
+    // tl_department_id nodig voor taxRateIdFor — laad mee met de invoice.
     const { data: inv } = await supabaseAdmin.from('invoices')
-      .select('id, tl_invoice_id, invoice_number, status').eq('id', invoice_id).maybeSingle();
+      .select('id, tl_invoice_id, tl_department_id, invoice_number, status').eq('id', invoice_id).maybeSingle();
     if (!inv) return res.status(404).json({ error: 'Factuur niet gevonden' });
     if (!inv.tl_invoice_id) return res.status(400).json({ error: 'Factuur heeft geen Teamleader-id' });
     if (inv.status !== 'concept') return res.status(409).json({ error: 'Alleen conceptfacturen kunnen worden aangepast — crediteer en maak opnieuw.' });
 
     const body = { id: inv.tl_invoice_id };
     if (patch.invoicee && patch.invoicee.customer && patch.invoicee.customer.id) body.invoicee = { customer: { type: patch.invoicee.customer.type || 'contact', id: patch.invoicee.customer.id } };
-    if (Array.isArray(patch.grouped_lines) && patch.grouped_lines.length) body.grouped_lines = patch.grouped_lines;
+
+    // Twee shapes voor regels: `lines` (shorthand, mapper bouwt grouped_lines + tax_rate_id —
+    // zelfde mapping als create) of `grouped_lines` (rauw, voor backwards-compat).
+    if (Array.isArray(patch.lines) && patch.lines.length) {
+      try {
+        const lineItems = patch.lines.map((l, idx) => {
+          const desc = String(l.description || '').trim();
+          const qty = Number(l.quantity) || 1;
+          const unit = Number(l.unit_price_excl);
+          const vat = Number(l.vat_percentage);
+          if (!desc) throw new Error(`Regel ${idx + 1}: omschrijving ontbreekt`);
+          if (!Number.isFinite(unit) || unit < 0) throw new Error(`Regel ${idx + 1}: ongeldige eenheidsprijs`);
+          if (![0, 6, 9, 21].includes(vat)) throw new Error(`Regel ${idx + 1}: ongeldig BTW-percentage (${vat})`);
+          return {
+            description: desc,
+            quantity: qty,
+            unit_price: { amount: r2(unit), currency: 'EUR', tax: 'excluding' },
+            tax_rate_id: taxRateIdFor(vat, inv.tl_department_id, 'domestic'),
+          };
+        });
+        body.grouped_lines = [{ line_items: lineItems }];
+      } catch (valErr) { return res.status(400).json({ error: valErr.message }); }
+    } else if (Array.isArray(patch.grouped_lines) && patch.grouped_lines.length) {
+      body.grouped_lines = patch.grouped_lines;
+    }
+
     if (patch.purchase_order_number != null) body.purchase_order_number = String(patch.purchase_order_number);
     if (patch.payment_term_id) body.payment_term_id = String(patch.payment_term_id);
     if (patch.language) body.language = String(patch.language);
