@@ -4,9 +4,10 @@
 //
 // Body (onze): { invoice_id, to?, subject?, content?, language? }
 //
-// TL invoices.send shape (bevestigd via TL 400 "subject must be present" + "body must be
-// present" + "email must be present" — PLAT, niet recipients/content zoals quotations.send):
-//   { id, email, subject, body, language }
+// TL invoices.send shape (iteratief vastgesteld via TL 400-fouten):
+//   { id, email, subject, body, content, language }
+// Body en content krijgen dezelfde plain-tekst (TL accepteert eerste try; pas aan als TL
+// onderscheid maakt — log toont 'm dan).
 // Fallback endpoint /invoices.sendEmail bij 404 op /invoices.send.
 //
 // Default-ontvanger: customers.email → fallback invoices.info → invoicee.email.
@@ -64,11 +65,13 @@ export default async function handler(req, res) {
 
     // 3. TL body — platte shape (bevestigd via TL 400 op de quotations-style):
     //    { id, email, subject, body, language }.
+    const bodyText = content && String(content).trim() ? String(content) : defaultContent;
     const payload = {
       id: inv.tl_invoice_id,
       email: recipientEmail,
       subject: subject && String(subject).trim() ? String(subject) : defaultSubject,
-      body: content && String(content).trim() ? String(content) : defaultContent,
+      body: bodyText,        // plain begeleidende tekst
+      content: bodyText,     // TL wil óók 'content' (zelfde tekst — pas aan als TL onderscheid maakt)
       language: String(language || 'nl'),
     };
 
