@@ -96,6 +96,22 @@
     /* Fase 2C: duidelijk zichtbaar kebab-menu in factuurrijen */
     #invTable .sr-menu-toggle { border: 1px solid var(--border); background: var(--bg-elev-2); color: var(--text); width: 30px; height: 30px; border-radius: 7px; display: inline-flex; align-items: center; justify-content: center; }
     #invTable .sr-menu-toggle:hover { border-color: var(--accent-cyan); color: var(--accent-cyan); }
+    /* Fase 2C variant A: gestapelde detail-kaarten (TL-stijl) */
+    #invModal .modal-card { max-width: 680px; max-height: 88vh; overflow-y: auto; }
+    .fin-card { background: var(--bg-elev-2); border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; margin-bottom: 12px; }
+    .fin-card h4 { font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--text-faint); margin: 0 0 8px; font-weight: 700; }
+    .fin-kv { display: grid; grid-template-columns: 1fr 1fr; gap: 5px 16px; font-size: 13px; }
+    .fin-kv .k { color: var(--text-dim); }
+    .fin-sub { font-size: 11.5px; color: var(--text-faint); margin-top: 8px; }
+    .fin-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 12px; }
+    .fin-actions .spacer { flex: 1 1 auto; }
+    .sr-abtn.dim { opacity: .5; cursor: not-allowed; }
+    .fin-abtn-note { font-size: 9px; font-weight: 700; letter-spacing: .03em; opacity: .8; margin-left: 3px; }
+    .fin-tl { list-style: none; margin: 0; padding: 0; }
+    .fin-tl li { display: flex; gap: 9px; padding: 6px 0; font-size: 12.5px; border-bottom: 1px solid var(--border); }
+    .fin-tl li:last-child { border-bottom: none; }
+    .fin-tl .ic { width: 20px; text-align: center; color: var(--text-dim); flex: 0 0 auto; }
+    .fin-tl .dt { color: var(--text-faint); margin-left: auto; flex: 0 0 auto; }
   </style>
 </head>
 <body>
@@ -218,11 +234,7 @@
   <div class="modal-card">
     <h3 id="invModalTitle">Factuur</h3>
     <div id="invModalBody"></div>
-    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:18px;flex-wrap:wrap">
-      <button class="sr-abtn" id="invModalPdf" type="button"><i class="ti ti-file-type-pdf"></i> Open PDF</button>
-      <a class="sr-abtn" id="invModalTl" href="https://focus.teamleader.eu/invoices" target="_blank"><i class="ti ti-external-link"></i> Open in Teamleader</a>
-      <button class="sr-abtn success" id="invModalPay" type="button" style="display:none"><i class="ti ti-cash"></i> Betaling registreren</button>
-      <button class="sr-abtn danger" id="invModalRemove" type="button" style="display:none"><i class="ti ti-arrow-back-up"></i> Betaling terugdraaien</button>
+    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:6px">
       <button class="sr-abtn primary" id="invModalClose" type="button">Sluiten</button>
     </div>
   </div>
@@ -414,25 +426,39 @@
     const m = stMeta(inv.display_status);
     const row = (l, v) => `<div class="inv-drow"><span class="lbl">${l}</span><span>${v}</span></div>`;
     document.getElementById('invModalTitle').textContent = 'Factuur ' + inv.invoice_number;
-    document.getElementById('invModalBody').innerHTML =
-      row('Klant', esc(inv.customer_name) + (inv.customer_email ? ` <span class="sr-cellsub">${esc(inv.customer_email)}</span>` : '')) +
-      row('Entiteit', esc(inv.tl_department_id ? (ENT_LABEL[inv.tl_department_id] || '—') : '—')) +
-      row('Status', `<span class="sr-tag ${m.tag}">${esc(m.label)}</span>`) +
-      row('Totaal (incl. btw)', eur(inv.amount_total)) +
-      row('Waarvan btw', inv.vat_amount != null ? eur(inv.vat_amount) : '—') +
-      row('Betaald', eur(inv.amount_paid)) +
-      row('Openstaand', eur(inv.amount_open)) +
-      row('Factuurdatum', fmtDate(inv.issue_date)) +
-      row('Vervaldag', fmtDate(inv.due_date)) +
-      row('Betaald op', fmtDate(inv.paid_date)) +
-      '<div id="invLinesRow"></div>' +
-      '<div id="invCreditRow"></div>' +
-      '<div id="invLateFeeRow"></div>';
-    const tl = document.getElementById('invModalTl');
-    tl.href = inv.tl_invoice_id ? `https://focus.teamleader.eu/invoice_detail.php?id=${inv.tl_invoice_id}` : 'https://focus.teamleader.eu/invoices';
-    const pdfBtn = document.getElementById('invModalPdf');
-    pdfBtn.disabled = !inv.tl_invoice_id;
-    pdfBtn.onclick = async () => {
+    const ent = inv.tl_department_id ? (ENT_LABEL[inv.tl_department_id] || '—') : '—';
+    const kv = (k, v) => `<div class="k">${k}</div><div>${v}</div>`;
+    const custLink = inv.customer_id ? `<a href="/modules/klanten.html?id=${esc(inv.customer_id)}&tab=facturen" style="color:var(--accent-cyan)">${esc(inv.customer_name)}</a>` : esc(inv.customer_name);
+    const payable = canRegister && !!inv.tl_invoice_id && ['open', 'partially_paid', 'overdue'].includes(inv.display_status);
+    const tlUrl = inv.tl_invoice_id ? `https://focus.teamleader.eu/invoice_detail.php?id=${esc(inv.tl_invoice_id)}` : 'https://focus.teamleader.eu/invoices';
+    const dimBtn = (icon, label, note) => `<button class="sr-abtn dim" type="button" disabled title="Nog niet beschikbaar"><i class="ti ${icon}"></i> ${label}<span class="fin-abtn-note">${note}</span></button>`;
+    document.getElementById('invModalBody').innerHTML = `
+      <div class="fin-card">
+        <h4>Info</h4>
+        <div style="margin-bottom:8px"><span class="sr-tag ${m.tag}">${esc(m.label)}</span></div>
+        <div class="fin-kv">
+          ${kv('Bedrijfsentiteit', esc(ent))}
+          ${kv('Klant', custLink)}
+          ${kv('E-mail', inv.customer_email ? esc(inv.customer_email) : '—')}
+          ${kv('Telefoon', '—')}
+          ${kv('Factuurdatum', fmtDate(inv.issue_date))}
+          ${kv('Vervaldag', fmtDate(inv.due_date))}
+        </div>
+        <div class="fin-actions">
+          ${payable ? `<button class="sr-abtn success" id="invBtnPay" type="button"><i class="ti ti-cash"></i> Markeer betaald</button>` : ''}
+          ${dimBtn('ti-send', 'Verzenden', 'binnenkort')}
+          ${dimBtn('ti-alert-triangle', 'Incasso', 'via TL')}
+          ${dimBtn('ti-file-minus', 'Creditnota', 'binnenkort')}
+          <span class="spacer"></span>
+          <button class="sr-abtn" id="invBtnPdf" type="button" ${inv.tl_invoice_id ? '' : 'disabled'}><i class="ti ti-file-type-pdf"></i> PDF</button>
+          <a class="sr-abtn" href="${tlUrl}" target="_blank"><i class="ti ti-external-link"></i> Teamleader</a>
+        </div>
+      </div>
+      <div class="fin-card"><h4>Inhoud</h4><div id="invLinesCard"><div style="color:var(--text-dim);font-size:12px"><i class="ti ti-loader"></i> Laden…</div></div><div id="invCreditCard"></div><div id="invFeeCard"></div></div>
+      <div class="fin-card"><h4>Betalingen</h4><div id="invPayCard"></div></div>
+      <div class="fin-card"><h4>Activiteit</h4><ul class="fin-tl" id="invActCard"></ul><div class="fin-sub">Afgeleide tijdlijn — Teamleader biedt geen factuur-activiteit via de API.</div></div>`;
+    const pdfBtn = document.getElementById('invBtnPdf');
+    if (pdfBtn) pdfBtn.onclick = async () => {
       if (!inv.tl_invoice_id) return;
       pdfBtn.disabled = true; const orig = pdfBtn.innerHTML; pdfBtn.innerHTML = '<i class="ti ti-loader"></i> Ophalen…';
       try {
@@ -443,65 +469,70 @@
       } catch (e) { window.AgentShared?.showToast('PDF mislukt: ' + e.message + ' — open in Teamleader', 'error'); }
       finally { pdfBtn.disabled = false; pdfBtn.innerHTML = orig; }
     };
-    const payBtn = document.getElementById('invModalPay');
-    const payable = canRegister && !!inv.tl_invoice_id && ['open', 'partially_paid', 'overdue'].includes(inv.display_status);
-    payBtn.style.display = payable ? '' : 'none';
-    payBtn.onclick = () => { document.getElementById('invModal').classList.add('hidden'); openPayModal(inv); };
-    const remBtn = document.getElementById('invModalRemove');
-    const removable = canRemove && !!inv.tl_invoice_id && (Number(inv.amount_paid) || 0) > 0;
-    remBtn.style.display = removable ? '' : 'none';
-    remBtn.onclick = () => removePayment(inv);
-    // Lazy: incassokosten (Schadebeding/WIK) uit de PDF voor te-late facturen.
-    const lateRow = document.getElementById('invLateFeeRow');
-    if (lateRow && inv.display_status === 'overdue' && inv.tl_invoice_id) {
-      lateRow.innerHTML = `<div class="inv-drow"><span class="lbl">Incassokosten</span><span><i class="ti ti-loader"></i> laden…</span></div>`;
-      window.AgentShared.apiFetch('/api/finance-invoice-late-fee?invoice_id=' + encodeURIComponent(inv.id))
-        .then(r => r.json())
-        .then(d => {
-          if (d && Number(d.fee_amount) > 0) {
-            const totaal = d.total_payable != null ? d.total_payable : ((Number(inv.amount_open) || 0) + Number(d.fee_amount));
-            lateRow.innerHTML = row('Incassokosten', eur(d.fee_amount)) + row('Totaal te betalen', eur(totaal));
-          } else { lateRow.innerHTML = ''; }
-        })
-        .catch(() => { lateRow.innerHTML = ''; });
-    } else if (lateRow) { lateRow.innerHTML = ''; }
-    // Gekoppelde creditnota's + netto (lazy) wanneer er gecrediteerd is.
-    const creditRow = document.getElementById('invCreditRow');
-    if (creditRow && Number(inv.credited_amount) > 0) {
-      creditRow.innerHTML = `<div class="inv-drow"><span class="lbl">Gecrediteerd</span><span><i class="ti ti-loader"></i> laden…</span></div>`;
-      window.AgentShared.apiFetch('/api/finance-invoice-creditnotes?invoice_id=' + encodeURIComponent(inv.id))
-        .then(r => r.json())
-        .then(d => {
-          if (d && Number(d.credited_amount) > 0) {
-            const lines = (d.credit_notes || []).map(c => `<div class="inv-drow"><span class="lbl" style="padding-left:12px;opacity:.85">${esc(c.number)} · ${fmtDate(c.date)}</span><span>− ${eur(c.amount_total)}</span></div>`).join('');
-            creditRow.innerHTML = row('Gecrediteerd', '− ' + eur(d.credited_amount)) + lines + row('Netto', eur(d.amount_net));
-          } else { creditRow.innerHTML = ''; }
-        })
-        .catch(() => { creditRow.innerHTML = ''; });
-    } else if (creditRow) { creditRow.innerHTML = ''; }
-    // Factuurregels + totalen (lazy uit invoices.info).
-    const linesRow = document.getElementById('invLinesRow');
-    if (linesRow) {
-      linesRow.innerHTML = `<div style="margin-top:10px;color:var(--text-dim);font-size:12px"><i class="ti ti-loader"></i> Regels laden…</div>`;
-      window.AgentShared.apiFetch('/api/finance-invoice-lines?invoice_id=' + encodeURIComponent(inv.id))
-        .then(r => r.json())
-        .then(d => {
-          const lines = (d && d.lines) || [];
-          const t = (d && d.totals) || null;
-          if (!lines.length && !t) { linesRow.innerHTML = ''; return; }
-          const rowsHtml = lines.map(l => `<tr><td>${esc(l.description)}</td><td class="num">${l.quantity}</td><td class="num">${eur(l.unit_price_excl)}</td><td class="num">${l.tax_rate != null ? l.tax_rate + '%' : '—'}</td><td class="num">${eur(l.line_total_excl)}</td></tr>`).join('');
-          const totHtml = t ? (
-            (t.excl != null ? `<div class="inv-drow"><span class="lbl">Subtotaal excl. btw</span><span>${eur(t.excl)}</span></div>` : '') +
-            (t.tax != null ? `<div class="inv-drow"><span class="lbl">BTW</span><span>${eur(t.tax)}</span></div>` : '') +
-            (t.incl != null ? `<div class="inv-drow"><span class="lbl">Totaal incl. btw</span><span>${eur(t.incl)}</span></div>` : '') +
-            (t.due != null ? `<div class="inv-drow"><span class="lbl">Openstaand</span><span>${eur(t.due)}</span></div>` : '')
-          ) : '';
-          linesRow.innerHTML = (lines.length ? `<div style="margin-top:12px;font-weight:600;font-size:13px">Regels</div>
-            <table class="sr-table" style="margin-top:6px"><thead><tr><th>Omschrijving</th><th class="num">Aantal</th><th class="num">Stukprijs</th><th>BTW%</th><th class="num">Regeltotaal</th></tr></thead><tbody>${rowsHtml}</tbody></table>` : '') + totHtml;
-        })
-        .catch(() => { linesRow.innerHTML = ''; });
+    const payBtn = document.getElementById('invBtnPay');
+    if (payBtn) payBtn.onclick = () => { document.getElementById('invModal').classList.add('hidden'); openPayModal(inv); };
+
+    // Betalingen-kaart.
+    const payCard = document.getElementById('invPayCard');
+    if (payCard) {
+      const remLink = (canRemove && inv.tl_invoice_id && (Number(inv.amount_paid) || 0) > 0) ? ` · <a href="#" id="invRemoveLink" style="color:var(--red,#dc2626)">terugdraaien</a>` : '';
+      payCard.innerHTML = (Number(inv.amount_paid) || 0) > 0
+        ? `<div class="inv-drow"><span class="lbl">Betaald${inv.paid_date ? ' op ' + fmtDate(inv.paid_date) : ''}</span><span>${eur(inv.amount_paid)}${remLink}</span></div><div class="inv-drow"><span class="lbl">Openstaand</span><span>${eur(inv.amount_open)}</span></div>`
+        : `<div style="font-size:13px;color:var(--text-dim)">Nog geen betalingen · openstaand <strong>${eur(inv.amount_open)}</strong></div>`;
+      const rl = document.getElementById('invRemoveLink'); if (rl) rl.onclick = (e) => { e.preventDefault(); removePayment(inv); };
     }
+
+    // Activiteit (afgeleide tijdlijn).
+    const acts = [];
+    if (inv.issue_date) acts.push({ d: inv.issue_date, ic: 'ti-file-plus', t: 'Factuur aangemaakt' });
+    if (inv.due_date) acts.push({ d: inv.due_date, ic: 'ti-calendar-due', t: 'Vervaldatum' });
+    if ((Number(inv.amount_paid) || 0) > 0 && inv.paid_date) acts.push({ d: inv.paid_date, ic: 'ti-cash', t: `Betaling geregistreerd · ${eur(inv.amount_paid)}` });
+    renderActivity(acts);
+    // Lazy: regels + totalen (met BTW per tarief).
+    const linesCard = document.getElementById('invLinesCard');
+    window.AgentShared.apiFetch('/api/finance-invoice-lines?invoice_id=' + encodeURIComponent(inv.id)).then(r => r.json()).then(d => {
+      if (!linesCard) return;
+      const lines = (d && d.lines) || [], t = (d && d.totals) || null;
+      if (!lines.length && !t) { linesCard.innerHTML = '<div style="color:var(--text-faint);font-size:12px">Geen regels beschikbaar.</div>'; return; }
+      const rowsHtml = lines.map(l => `<tr><td>${esc(l.description)}</td><td class="num">${eur(l.unit_price_excl)}</td><td class="num">${l.quantity}</td><td class="num">${eur(l.line_total_excl)}</td><td class="num">${l.tax_rate != null ? l.tax_rate + '%' : '—'}</td></tr>`).join('');
+      let taxRows = '';
+      if (t) {
+        if (Array.isArray(t.tax_rates) && t.tax_rates.length) taxRows = t.tax_rates.map(x => `<div class="inv-drow"><span class="lbl">Btw ${x.rate != null ? x.rate + '%' : ''}</span><span>${eur(x.amount)}</span></div>`).join('');
+        else if (t.tax != null) taxRows = `<div class="inv-drow"><span class="lbl">Btw</span><span>${eur(t.tax)}</span></div>`;
+      }
+      const totHtml = t ? ((t.excl != null ? `<div class="inv-drow"><span class="lbl">Totaal excl. btw</span><span>${eur(t.excl)}</span></div>` : '') + taxRows + (t.incl != null ? `<div class="inv-drow"><span class="lbl"><strong>Totaal incl. btw</strong></span><span><strong>${eur(t.incl)}</strong></span></div>` : '')) : '';
+      linesCard.innerHTML = (lines.length ? `<div class="sr-tablewrap"><table class="sr-table"><thead><tr><th>Beschrijving</th><th class="num">Eenheidsprijs</th><th class="num">Aantal</th><th class="num">Subtotaal</th><th class="num">Btw</th></tr></thead><tbody>${rowsHtml}</tbody></table></div>` : '') + `<div style="margin-top:8px">${totHtml}</div>`;
+    }).catch(() => { if (linesCard) linesCard.innerHTML = '<div style="color:var(--text-faint);font-size:12px">Regels laden mislukt.</div>'; });
+
+    // Lazy: creditnota's + netto.
+    const creditCard = document.getElementById('invCreditCard');
+    if (creditCard && Number(inv.credited_amount) > 0) {
+      window.AgentShared.apiFetch('/api/finance-invoice-creditnotes?invoice_id=' + encodeURIComponent(inv.id)).then(r => r.json()).then(d => {
+        if (!(Number(d.credited_amount) > 0)) { creditCard.innerHTML = ''; return; }
+        const cl = (d.credit_notes || []).map(c => `<div class="inv-drow"><span class="lbl" style="padding-left:10px;opacity:.85">${esc(c.number)} · ${fmtDate(c.date)}</span><span>− ${eur(c.amount_total)}</span></div>`).join('');
+        creditCard.innerHTML = `<div style="margin-top:8px"><div class="inv-drow"><span class="lbl">Gecrediteerd</span><span>− ${eur(d.credited_amount)}</span></div>${cl}<div class="inv-drow"><span class="lbl"><strong>Netto</strong></span><span><strong>${eur(d.amount_net)}</strong></span></div></div>`;
+        (d.credit_notes || []).forEach(c => acts.push({ d: c.date, ic: 'ti-file-minus', t: `Creditnota ${c.number} · − ${eur(c.amount_total)}` }));
+        renderActivity(acts);
+      }).catch(() => { creditCard.innerHTML = ''; });
+    }
+
+    // Lazy: incassokosten (te-laat).
+    const feeCard = document.getElementById('invFeeCard');
+    if (feeCard && inv.display_status === 'overdue' && inv.tl_invoice_id) {
+      window.AgentShared.apiFetch('/api/finance-invoice-late-fee?invoice_id=' + encodeURIComponent(inv.id)).then(r => r.json()).then(d => {
+        if (!(Number(d.fee_amount) > 0)) { feeCard.innerHTML = ''; return; }
+        const tot = d.total_payable != null ? d.total_payable : ((Number(inv.amount_open) || 0) + Number(d.fee_amount));
+        feeCard.innerHTML = `<div style="margin-top:8px"><div class="inv-drow"><span class="lbl">Incassokosten</span><span>${eur(d.fee_amount)}</span></div><div class="inv-drow"><span class="lbl"><strong>Totaal te betalen</strong></span><span><strong>${eur(tot)}</strong></span></div></div>`;
+      }).catch(() => { feeCard.innerHTML = ''; });
+    }
+
     document.getElementById('invModal').classList.remove('hidden');
+  }
+
+  function renderActivity(acts) {
+    const el = document.getElementById('invActCard'); if (!el) return;
+    const sorted = [...acts].filter(a => a.d).sort((a, b) => String(a.d).localeCompare(String(b.d)));
+    el.innerHTML = sorted.length ? sorted.map(a => `<li><span class="ic"><i class="ti ${a.ic}"></i></span><span>${esc(a.t)}</span><span class="dt">${fmtDate(a.d)}</span></li>`).join('') : '<li style="color:var(--text-faint)">Geen activiteit.</li>';
   }
 
   // ── Betaling registreren (Fase 2B, super_admin) ──

@@ -1114,7 +1114,7 @@ function koSubInclPerTerm(s) { const lis = Array.isArray(s.line_items) ? s.line_
 const KO_INV_TAG = { concept: 'gray', open: 'blue', partially_paid: 'warning', paid: 'green', overdue: 'danger', credited: 'purple', partially_credited: 'purple', writeoff: 'gray' };
 const KO_INV_LABEL = { concept: 'Concept', open: 'Open', partially_paid: 'Deels betaald', paid: 'Betaald', overdue: 'Te laat', credited: 'Gecrediteerd', partially_credited: 'Deels gecrediteerd', writeoff: 'Afgeschreven' };
 const KO_INV_BAR = { concept: '#9ca3af', open: '#3b82f6', partially_paid: '#f59e0b', paid: '#059669', overdue: '#ef4444', credited: '#8b5cf6', partially_credited: '#a78bfa', writeoff: '#9ca3af' };
-let koInvoices = [], _koPayInv = null;
+let koInvoices = [], _koPayInv = null, koInvCanReg = false, koInvCanRem = false;
 const koCan = async (k) => { try { return window.RBAC?.can ? await window.RBAC.can(k) : false; } catch (e) { return false; } };
 
 window.koInvoicePdf = async function (tlId) {
@@ -1145,8 +1145,8 @@ async function renderFacturenTab() {
       return;
     }
     koInvoices = items;
-    const canReg = await koCan('finance.invoice.payment.register');
-    const canRem = await koCan('finance.invoice.payment.remove');
+    const canReg = koInvCanReg = await koCan('finance.invoice.payment.register');
+    const canRem = koInvCanRem = await koCan('finance.invoice.payment.remove');
     const rows = items.map((inv, i) => {
       const tag = KO_INV_TAG[inv.display_status] || 'gray';
       const label = KO_INV_LABEL[inv.display_status] || (inv.display_status || '—');
@@ -1224,22 +1224,38 @@ function koOpenInvoice(inv) {
     drow('Openstaand', eur2(inv.amount_open)) +
     drow('Vervaldag', dd(inv.due_date)) +
     '<div id="koInvLines"></div><div id="koInvCredit"></div><div id="koInvFee"></div>' +
-    `<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px;flex-wrap:wrap">
-       ${inv.tl_invoice_id ? `<button class="btn btn-sm" type="button" onclick="koInvoicePdf('${escapeHtml(inv.tl_invoice_id)}')"><i class="ti ti-file-type-pdf"></i> Bekijk PDF</button>` : ''}
-       <a class="btn btn-sm" href="${tlUrl}" target="_blank"><i class="ti ti-external-link"></i> Open in Teamleader</a>
+    '<div style="margin-top:12px;font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--text-faint)">Activiteit</div><ul id="koInvAct" style="list-style:none;margin:4px 0 0;padding:0;font-size:12.5px"></ul>' +
+    `<div style="display:flex;gap:8px;align-items:center;margin-top:14px;flex-wrap:wrap">
+       ${(koInvCanReg && inv.tl_invoice_id && ['open', 'partially_paid', 'overdue'].includes(inv.display_status)) ? `<button class="btn btn-primary btn-sm" type="button" id="koMarkPaid"><i class="ti ti-cash"></i> Markeer betaald</button>` : ''}
+       <button class="btn btn-sm" type="button" disabled style="opacity:.5" title="Nog niet beschikbaar"><i class="ti ti-send"></i> Verzenden</button>
+       <button class="btn btn-sm" type="button" disabled style="opacity:.5" title="Via Teamleader"><i class="ti ti-alert-triangle"></i> Incasso</button>
+       <button class="btn btn-sm" type="button" disabled style="opacity:.5" title="Nog niet beschikbaar"><i class="ti ti-file-minus"></i> Creditnota</button>
+       <span style="flex:1"></span>
+       ${inv.tl_invoice_id ? `<button class="btn btn-sm" type="button" onclick="koInvoicePdf('${escapeHtml(inv.tl_invoice_id)}')"><i class="ti ti-file-type-pdf"></i> PDF</button>` : ''}
+       <a class="btn btn-sm" href="${tlUrl}" target="_blank"><i class="ti ti-external-link"></i> Teamleader</a>
      </div>`;
   document.getElementById('koInvModal').classList.remove('hidden');
+  const mk = document.getElementById('koMarkPaid'); if (mk) mk.onclick = () => { document.getElementById('koInvModal').classList.add('hidden'); koPayModal(inv); };
+  const koActs = [];
+  if (inv.issue_date) koActs.push({ d: inv.issue_date, ic: 'ti-file-plus', t: 'Factuur aangemaakt' });
+  if (inv.due_date) koActs.push({ d: inv.due_date, ic: 'ti-calendar-due', t: 'Vervaldatum' });
+  if ((Number(inv.amount_paid) || 0) > 0 && inv.paid_date) koActs.push({ d: inv.paid_date, ic: 'ti-cash', t: `Betaling geregistreerd · ${eur2(inv.amount_paid)}` });
+  const koRenderAct = () => { const el = document.getElementById('koInvAct'); if (!el) return; const s = [...koActs].filter(a => a.d).sort((a, b) => String(a.d).localeCompare(String(b.d))); el.innerHTML = s.length ? s.map(a => `<li style="display:flex;gap:8px;padding:5px 0;border-bottom:1px solid var(--border)"><i class="ti ${a.ic}" style="color:var(--text-dim)"></i><span>${escapeHtml(a.t)}</span><span style="margin-left:auto;color:var(--text-faint)">${dd(a.d)}</span></li>`).join('') : '<li style="color:var(--text-faint)">Geen activiteit.</li>'; };
+  koRenderAct();
   window.AgentShared.apiFetch('/api/finance-invoice-lines?invoice_id=' + encodeURIComponent(inv.id)).then(r => r.json()).then(d => {
     const el = document.getElementById('koInvLines'); if (!el) return;
     const lines = (d && d.lines) || [], t = (d && d.totals) || null;
     if (!lines.length) { el.innerHTML = ''; return; }
     const rh = lines.map(l => `<tr><td>${escapeHtml(l.description)}</td><td style="text-align:right">${l.quantity}</td><td style="text-align:right">${eur2(l.unit_price_excl)}</td><td style="text-align:center">${l.tax_rate != null ? l.tax_rate + '%' : '—'}</td><td style="text-align:right">${eur2(l.line_total_excl)}</td></tr>`).join('');
-    el.innerHTML = `<div style="margin-top:10px;font-weight:600;font-size:13px">Regels</div><div class="sr-tablewrap"><table class="sr-table"><thead><tr><th>Omschrijving</th><th style="text-align:right">Aantal</th><th style="text-align:right">Stukprijs</th><th style="text-align:center">BTW%</th><th style="text-align:right">Regeltotaal</th></tr></thead><tbody>${rh}</tbody></table></div>` + (t ? `<div style="margin-top:6px">${t.excl != null ? drow('Subtotaal excl.', eur2(t.excl)) : ''}${t.tax != null ? drow('BTW', eur2(t.tax)) : ''}${t.incl != null ? drow('Totaal incl.', eur2(t.incl)) : ''}</div>` : '');
+    const taxRows = t ? ((Array.isArray(t.tax_rates) && t.tax_rates.length) ? t.tax_rates.map(x => drow('Btw ' + (x.rate != null ? x.rate + '%' : ''), eur2(x.amount))).join('') : (t.tax != null ? drow('BTW', eur2(t.tax)) : '')) : '';
+    el.innerHTML = `<div style="margin-top:10px;font-weight:600;font-size:13px">Regels</div><div class="sr-tablewrap"><table class="sr-table"><thead><tr><th>Beschrijving</th><th style="text-align:right">Eenheidsprijs</th><th style="text-align:right">Aantal</th><th style="text-align:right">Subtotaal</th><th style="text-align:center">Btw</th></tr></thead><tbody>${rh}</tbody></table></div>` + (t ? `<div style="margin-top:6px">${t.excl != null ? drow('Totaal excl. btw', eur2(t.excl)) : ''}${taxRows}${t.incl != null ? drow('Totaal incl. btw', eur2(t.incl)) : ''}</div>` : '');
   }).catch(() => {});
   if (Number(inv.credited_amount) > 0) window.AgentShared.apiFetch('/api/finance-invoice-creditnotes?invoice_id=' + encodeURIComponent(inv.id)).then(r => r.json()).then(d => {
     const el = document.getElementById('koInvCredit'); if (!el || !(Number(d.credited_amount) > 0)) { if (el) el.innerHTML = ''; return; }
     const cl = (d.credit_notes || []).map(c => `<div class="prop-row"><span class="prop-lbl" style="padding-left:10px">${escapeHtml(c.number)} · ${dd(c.date)}</span><span class="prop-val">− ${eur2(c.amount_total)}</span></div>`).join('');
     el.innerHTML = drow('Gecrediteerd', '− ' + eur2(d.credited_amount)) + cl + drow('Netto', eur2(d.amount_net));
+    (d.credit_notes || []).forEach(c => koActs.push({ d: c.date, ic: 'ti-file-minus', t: `Creditnota ${c.number} · − ${eur2(c.amount_total)}` }));
+    koRenderAct();
   }).catch(() => {});
   if (inv.display_status === 'overdue') window.AgentShared.apiFetch('/api/finance-invoice-late-fee?invoice_id=' + encodeURIComponent(inv.id)).then(r => r.json()).then(d => {
     const el = document.getElementById('koInvFee'); if (!el || !(Number(d.fee_amount) > 0)) { if (el) el.innerHTML = ''; return; }

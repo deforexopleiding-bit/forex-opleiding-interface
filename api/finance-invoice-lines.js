@@ -82,9 +82,16 @@ export default async function handler(req, res) {
     const excl = amt(t.tax_exclusive);
     const incl = amt(t.tax_inclusive) ?? amt(t.payable);
     const due = amt(t.due);
+    // BTW per tarief (TL: total.taxes of total.tax = lijst per tarief).
+    const taxList = Array.isArray(t.taxes) ? t.taxes : (Array.isArray(t.tax) ? t.tax : []);
+    const tax_rates = taxList.map(x => ({
+      rate: (typeof x.rate === 'number') ? Math.round(x.rate * 100) : null,
+      amount: r2(amt(x.tax) ?? amt(x.total) ?? amt(x.amount) ?? 0),
+    })).filter(x => x.amount != null);
     const totals = {
       excl: excl != null ? r2(excl) : null,
       tax: (incl != null && excl != null) ? r2(incl - excl) : null,
+      tax_rates,                                  // [] → UI valt terug op één Btw-regel
       incl: incl != null ? r2(incl) : null,
       due: due != null ? r2(due) : null,
     };
