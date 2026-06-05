@@ -1111,9 +1111,11 @@ const KO_SUB_BADGE = { active: 'green', paused: 'warning', cancelled: 'gray' };
 let koSubs = [], koAboPending = null, koAboSeg = 'active';
 function koSubInclPerTerm(s) { const lis = Array.isArray(s.line_items) ? s.line_items : []; return lis.length ? lis.reduce((a, li) => a + (Number(li.amount) || 0) * (1 + (Number(li.vat_percentage) || 0) / 100), 0) : (Number(s.amount) || 0) * (1 + (Number(s.vat_percentage) || 0) / 100); }
 // === Facturen sub-tab (read-only TL-spiegel, Finance Fase 2A) ===
-const KO_INV_TAG = { concept: 'gray', open: 'blue', partially_paid: 'warning', paid: 'green', overdue: 'danger', credited: 'purple', writeoff: 'gray' };
-const KO_INV_LABEL = { concept: 'Concept', open: 'Open', partially_paid: 'Deels betaald', paid: 'Betaald', overdue: 'Te laat', credited: 'Gecrediteerd', writeoff: 'Afgeschreven' };
-const KO_INV_BAR = { concept: '#9ca3af', open: '#3b82f6', partially_paid: '#f59e0b', paid: '#059669', overdue: '#ef4444', credited: '#8b5cf6', writeoff: '#9ca3af' };
+const KO_INV_TAG = { concept: 'gray', open: 'blue', partially_paid: 'warning', paid: 'green', overdue: 'danger', credited: 'purple', partially_credited: 'purple', writeoff: 'gray' };
+const KO_INV_LABEL = { concept: 'Concept', open: 'Open', partially_paid: 'Deels betaald', paid: 'Betaald', overdue: 'Te laat', credited: 'Gecrediteerd', partially_credited: 'Deels gecrediteerd', writeoff: 'Afgeschreven' };
+const KO_INV_BAR = { concept: '#9ca3af', open: '#3b82f6', partially_paid: '#f59e0b', paid: '#059669', overdue: '#ef4444', credited: '#8b5cf6', partially_credited: '#a78bfa', writeoff: '#9ca3af' };
+let koInvoices = [], _koPayInv = null;
+const koCan = async (k) => { try { return window.RBAC?.can ? await window.RBAC.can(k) : false; } catch (e) { return false; } };
 
 window.koInvoicePdf = async function (tlId) {
   try {
@@ -1142,17 +1144,25 @@ async function renderFacturenTab() {
         <div class="placeholder-card">Nog geen facturen gespiegeld voor deze klant. <a href="https://focus.teamleader.eu/invoices" target="_blank" style="color:var(--accent-cyan)">Open in Teamleader</a></div></div>`;
       return;
     }
-    const rows = items.map(inv => {
+    koInvoices = items;
+    const canReg = await koCan('finance.invoice.payment.register');
+    const canRem = await koCan('finance.invoice.payment.remove');
+    const rows = items.map((inv, i) => {
       const tag = KO_INV_TAG[inv.display_status] || 'gray';
       const label = KO_INV_LABEL[inv.display_status] || (inv.display_status || '—');
       const bar = KO_INV_BAR[inv.display_status] || '#9ca3af';
+      const credited = Number(inv.credited_amount) || 0;
+      const detItem = `<button class="sr-menu-item" data-ko-inv="${i}"><i class="ti ti-eye"></i> Bekijk details</button>`;
+      const payItem = (canReg && inv.tl_invoice_id && ['open', 'partially_paid', 'overdue'].includes(inv.display_status)) ? `<button class="sr-menu-item" data-ko-pay="${i}"><i class="ti ti-cash"></i> Betaling registreren</button>` : '';
+      const remItem = (canRem && inv.tl_invoice_id && (Number(inv.amount_paid) || 0) > 0) ? `<button class="sr-menu-item danger" data-ko-remove="${i}"><i class="ti ti-arrow-back-up"></i> Betaling terugdraaien</button>` : '';
       const tlItem = inv.tl_invoice_id ? `<a class="sr-menu-item" href="https://focus.teamleader.eu/invoice_detail.php?id=${escapeHtml(inv.tl_invoice_id)}" target="_blank"><i class="ti ti-external-link"></i> Open in Teamleader</a>` : '';
       const pdfItem = inv.tl_invoice_id ? `<button class="sr-menu-item" onclick="koInvoicePdf('${escapeHtml(inv.tl_invoice_id)}')"><i class="ti ti-file-type-pdf"></i> Open PDF</button>` : '';
-      const menu = (tlItem || pdfItem) ? `<div class="sr-menu"><button class="sr-ibtn sr-menu-toggle" title="Meer"><i class="ti ti-dots"></i></button><div class="sr-menu-pop">${pdfItem}${tlItem}</div></div>` : '';
+      const menu = `<div class="sr-menu"><button class="sr-ibtn sr-menu-toggle" title="Meer"><i class="ti ti-dots"></i></button><div class="sr-menu-pop">${detItem}${payItem}${remItem}${pdfItem}${tlItem}</div></div>`;
       return `<tr>
         <td style="padding:0"><div class="statusstrip-bar" style="background:${bar}"></div></td>
         <td><span class="sr-uname">${escapeHtml(inv.invoice_number)}</span></td>
         <td style="text-align:right">${eur2(inv.amount_total)}</td>
+        <td style="text-align:right">${credited > 0 ? '− ' + eur2(credited) : '<span class="cust-empty">—</span>'}</td>
         <td style="text-align:right">${eur2(inv.amount_open)}</td>
         <td>${dd(inv.due_date)}</td>
         <td><span class="sr-tag ${tag}">${escapeHtml(label)}</span></td>
@@ -1163,11 +1173,115 @@ async function renderFacturenTab() {
       <h3><i class="ti ti-receipt"></i> Facturen <span class="sr-cellsub" style="font-weight:500">· openstaand ${eur2(open)}</span></h3>
       <div class="sr-tablewrap"><table class="sr-table"><thead><tr>
         <th style="width:4px;padding:0"></th><th>Factuurnr</th>
-        <th style="text-align:right">Totaal</th><th style="text-align:right">Open</th>
+        <th style="text-align:right">Totaal</th><th style="text-align:right">Gecrediteerd</th><th style="text-align:right">Open</th>
         <th>Vervaldag</th><th>Status</th><th style="width:36px"></th>
       </tr></thead><tbody>${rows}</tbody></table></div>
     </div>`;
+    wrap.querySelectorAll('[data-ko-inv]').forEach(b => b.addEventListener('click', () => koOpenInvoice(koInvoices[Number(b.dataset.koInv)])));
+    wrap.querySelectorAll('[data-ko-pay]').forEach(b => b.addEventListener('click', () => koPayModal(koInvoices[Number(b.dataset.koPay)])));
+    wrap.querySelectorAll('[data-ko-remove]').forEach(b => b.addEventListener('click', () => koRemovePayment(koInvoices[Number(b.dataset.koRemove)])));
   } catch (e) { wrap.innerHTML = '<div class="placeholder-card">Laden mislukt: ' + escapeHtml(e.message) + '</div>'; }
+}
+
+// Klant-context: factuurdetail-modal (regels/totalen/creditnota/incasso/PDF) + betaal-acties.
+function koEnsureInvModal() {
+  if (document.getElementById('koInvModal')) return;
+  const wrap = document.createElement('div');
+  wrap.innerHTML = `
+    <div class="modal-overlay hidden" id="koInvModal" role="dialog" aria-modal="true">
+      <div class="modal-card" style="max-width:580px">
+        <div class="modal-header"><div class="modal-title" id="koInvTitle">Factuur</div><button class="modal-close" type="button" onclick="document.getElementById('koInvModal').classList.add('hidden')">&#x2715;</button></div>
+        <div class="modal-body" id="koInvBody"></div>
+      </div>
+    </div>
+    <div class="modal-overlay hidden" id="koPay" role="dialog" aria-modal="true">
+      <div class="modal-card" style="max-width:420px">
+        <div class="modal-header"><div class="modal-title">Betaling registreren</div><button class="modal-close" type="button" onclick="document.getElementById('koPay').classList.add('hidden')">&#x2715;</button></div>
+        <div class="modal-body">
+          <div id="koPaySub" class="sr-cellsub" style="margin-bottom:10px"></div>
+          <label style="font-size:12.5px;display:block;margin-bottom:8px">Bedrag (€)<input id="koPayAmount" type="number" step="0.01" min="0" style="width:100%;margin-top:3px;padding:6px 9px;border:1px solid var(--border);border-radius:7px;background:var(--bg);color:var(--text)"/></label>
+          <label style="font-size:12.5px;display:block;margin-bottom:8px">Betaaldatum<input id="koPayDate" type="date" style="width:100%;margin-top:3px;padding:6px 9px;border:1px solid var(--border);border-radius:7px;background:var(--bg);color:var(--text)"/></label>
+          <div id="koPayErr" style="color:#ef4444;font-size:12px"></div>
+        </div>
+        <div class="modal-footer"><button class="btn btn-sm" type="button" onclick="document.getElementById('koPay').classList.add('hidden')">Annuleren</button><button class="btn btn-primary btn-sm" type="button" id="koPayOk">Registreren</button></div>
+      </div>
+    </div>`;
+  document.body.appendChild(wrap);
+}
+function koOpenInvoice(inv) {
+  if (!inv) return;
+  koEnsureInvModal();
+  const eur2 = (v) => '€' + Number(v || 0).toLocaleString('nl-NL', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const dd = (d) => { if (!d) return '—'; const x = new Date(d + 'T00:00:00'); return isNaN(x) ? '—' : x.toLocaleDateString('nl-NL', { day: '2-digit', month: 'short', year: 'numeric' }); };
+  const drow = (l, v) => `<div class="prop-row"><span class="prop-lbl">${l}</span><span class="prop-val">${v}</span></div>`;
+  const tag = KO_INV_TAG[inv.display_status] || 'gray', label = KO_INV_LABEL[inv.display_status] || (inv.display_status || '—');
+  const tlUrl = inv.tl_invoice_id ? `https://focus.teamleader.eu/invoice_detail.php?id=${escapeHtml(inv.tl_invoice_id)}` : 'https://focus.teamleader.eu/invoices';
+  document.getElementById('koInvTitle').textContent = 'Factuur ' + inv.invoice_number;
+  document.getElementById('koInvBody').innerHTML =
+    drow('Status', `<span class="sr-tag ${tag}">${escapeHtml(label)}</span>`) +
+    drow('Totaal (incl. btw)', eur2(inv.amount_total)) +
+    drow('Betaald', eur2(inv.amount_paid)) +
+    drow('Openstaand', eur2(inv.amount_open)) +
+    drow('Vervaldag', dd(inv.due_date)) +
+    '<div id="koInvLines"></div><div id="koInvCredit"></div><div id="koInvFee"></div>' +
+    `<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px;flex-wrap:wrap">
+       ${inv.tl_invoice_id ? `<button class="btn btn-sm" type="button" onclick="koInvoicePdf('${escapeHtml(inv.tl_invoice_id)}')"><i class="ti ti-file-type-pdf"></i> Bekijk PDF</button>` : ''}
+       <a class="btn btn-sm" href="${tlUrl}" target="_blank"><i class="ti ti-external-link"></i> Open in Teamleader</a>
+     </div>`;
+  document.getElementById('koInvModal').classList.remove('hidden');
+  window.AgentShared.apiFetch('/api/finance-invoice-lines?invoice_id=' + encodeURIComponent(inv.id)).then(r => r.json()).then(d => {
+    const el = document.getElementById('koInvLines'); if (!el) return;
+    const lines = (d && d.lines) || [], t = (d && d.totals) || null;
+    if (!lines.length) { el.innerHTML = ''; return; }
+    const rh = lines.map(l => `<tr><td>${escapeHtml(l.description)}</td><td style="text-align:right">${l.quantity}</td><td style="text-align:right">${eur2(l.unit_price_excl)}</td><td style="text-align:center">${l.tax_rate != null ? l.tax_rate + '%' : '—'}</td><td style="text-align:right">${eur2(l.line_total_excl)}</td></tr>`).join('');
+    el.innerHTML = `<div style="margin-top:10px;font-weight:600;font-size:13px">Regels</div><div class="sr-tablewrap"><table class="sr-table"><thead><tr><th>Omschrijving</th><th style="text-align:right">Aantal</th><th style="text-align:right">Stukprijs</th><th style="text-align:center">BTW%</th><th style="text-align:right">Regeltotaal</th></tr></thead><tbody>${rh}</tbody></table></div>` + (t ? `<div style="margin-top:6px">${t.excl != null ? drow('Subtotaal excl.', eur2(t.excl)) : ''}${t.tax != null ? drow('BTW', eur2(t.tax)) : ''}${t.incl != null ? drow('Totaal incl.', eur2(t.incl)) : ''}</div>` : '');
+  }).catch(() => {});
+  if (Number(inv.credited_amount) > 0) window.AgentShared.apiFetch('/api/finance-invoice-creditnotes?invoice_id=' + encodeURIComponent(inv.id)).then(r => r.json()).then(d => {
+    const el = document.getElementById('koInvCredit'); if (!el || !(Number(d.credited_amount) > 0)) { if (el) el.innerHTML = ''; return; }
+    const cl = (d.credit_notes || []).map(c => `<div class="prop-row"><span class="prop-lbl" style="padding-left:10px">${escapeHtml(c.number)} · ${dd(c.date)}</span><span class="prop-val">− ${eur2(c.amount_total)}</span></div>`).join('');
+    el.innerHTML = drow('Gecrediteerd', '− ' + eur2(d.credited_amount)) + cl + drow('Netto', eur2(d.amount_net));
+  }).catch(() => {});
+  if (inv.display_status === 'overdue') window.AgentShared.apiFetch('/api/finance-invoice-late-fee?invoice_id=' + encodeURIComponent(inv.id)).then(r => r.json()).then(d => {
+    const el = document.getElementById('koInvFee'); if (!el || !(Number(d.fee_amount) > 0)) { if (el) el.innerHTML = ''; return; }
+    const tot = d.total_payable != null ? d.total_payable : ((Number(inv.amount_open) || 0) + Number(d.fee_amount));
+    el.innerHTML = drow('Incassokosten', eur2(d.fee_amount)) + drow('Totaal te betalen', eur2(tot));
+  }).catch(() => {});
+}
+function koPayModal(inv) {
+  if (!inv || !inv.tl_invoice_id) return;
+  koEnsureInvModal();
+  _koPayInv = inv;
+  document.getElementById('koPaySub').textContent = `${inv.invoice_number} · openstaand €${Number(inv.amount_open || 0).toLocaleString('nl-NL', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  document.getElementById('koPayAmount').value = (Number(inv.amount_open) || 0).toFixed(2);
+  document.getElementById('koPayDate').value = new Date().toISOString().slice(0, 10);
+  document.getElementById('koPayErr').textContent = '';
+  document.getElementById('koPayOk').onclick = koPaySubmit;
+  document.getElementById('koPay').classList.remove('hidden');
+}
+async function koPaySubmit() {
+  const inv = _koPayInv; if (!inv) return;
+  const amount = Number(document.getElementById('koPayAmount').value);
+  let paid_at = document.getElementById('koPayDate').value; if (!paid_at) paid_at = new Date().toISOString().slice(0, 10);
+  const err = document.getElementById('koPayErr');
+  if (!(amount > 0)) { err.textContent = 'Vul een geldig bedrag in (> 0).'; return; }
+  const btn = document.getElementById('koPayOk'); btn.disabled = true; const o = btn.textContent; btn.textContent = 'Bezig…';
+  try {
+    const r = await window.AgentShared.apiFetch('/api/finance-invoice-register-payment', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ invoice_id: inv.id, amount, paid_at }) });
+    const d = await r.json(); if (!r.ok || !d.success) throw new Error((d.error || 'HTTP ' + r.status) + (d.tl_response ? ' — ' + d.tl_response : ''));
+    window.AgentShared?.showToast('Betaling geregistreerd', 'success');
+    document.getElementById('koPay').classList.add('hidden');
+    renderFacturenTab();
+  } catch (e) { err.textContent = 'Mislukt: ' + e.message; }
+  finally { btn.disabled = false; btn.textContent = o; }
+}
+async function koRemovePayment(inv) {
+  if (!inv || !inv.tl_invoice_id) return;
+  if (!confirm('Dit verwijdert ALLE geregistreerde betalingen van deze factuur in Teamleader. Je kunt daarna opnieuw afletteren.\n\nDoorgaan?')) return;
+  try {
+    const r = await window.AgentShared.apiFetch('/api/finance-invoice-remove-payment', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ invoice_id: inv.id }) });
+    const d = await r.json(); if (!r.ok || !d.success) throw new Error((d.error || 'HTTP ' + r.status) + (d.tl_response ? ' — ' + d.tl_response : ''));
+    window.AgentShared?.showToast('Betalingen teruggedraaid', 'success'); renderFacturenTab();
+  } catch (e) { window.AgentShared?.showToast('Mislukt: ' + e.message, 'error'); }
 }
 
 async function renderAbonnementenTab() {
