@@ -1,28 +1,40 @@
 // api/finance-invoice-send.js
-// POST → factuur (her)verzenden via TL invoices.send met een TL mail-template.
-// Permission: finance.invoice.send. TL-first + validate-first.
+// POST → factuur (her)verzenden via TL invoices.send met server-side template-resolve.
+// Permission: finance.invoice.send.
 //
-// PIVOT: geen zelf-gegenereerde NL standaardtekst meer. TL's template wint; UI kiest 'm.
+// Flow:
+// 1. mail_template_id verplicht. Server haalt template op (mailTemplates.info, fallback list).
+// 2. template.content.{subject, body} + template.language → platte payload velden.
+// 3. UI overrides (recipient_email / subject_override / content_override) prevaleren.
+// 4. Platte TL-shape: { id, email, subject, content, language, mail_template_id }
+//    (GEEN recipients-object, GEEN body — TL viel daar op met "must be present").
 //
-// Body (onze): {
-//   invoice_id, mail_template_id,
-//   recipient_email?, subject_override?, content_override?
-// }
-//
-// TL invoices.send payload (minimal):
-//   { id, mail_template_id }
-// Overrides ALLEEN als de UI ze expliciet meegeeft:
-//   recipient_email → recipients: { to: [{ email_address }] }
-//   subject_override → subject
-//   content_override → content
-//
-// Bij elke TL-fout: 422 met tl_request_payload + tl_response in de respons (geen Vercel-logs).
+// Bij elke TL-fout: 422 + tl_request_payload + tl_request_keys + tl_response.
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { tlFetch } from './_lib/teamleader-token.js';
 import { getClientIp } from './_lib/audit-customer.js';
 import { requirePermission } from './_lib/requirePermission.js';
 import { upsertInvoiceFromTl } from './_lib/invoice-upsert.js';
+
+// Haal de TL mail-template op (info → fallback list met filter.ids).
+async function fetchTemplate(id) {
+  // Poging 1: mailTemplates.info
+  try {
+    const r = await tlFetch('/mailTemplates.info', { method: 'POST', body: JSON.stringify({ id }) });
+    const text = await r.text().catch(() => '');
+    if (r.ok) { const j = JSON.parse(text); if (j?.data) return { tpl: j.data, source: 'info' }; }
+    else if (r.status !== 404) console.warn('[finance-invoice-send] mailTemplates.info HTTP', r.status, text.slice(0, 200));
+  } catch (e) { console.warn('[finance-invoice-send] mailTemplates.info exception', e.message); }
+  // Poging 2: mailTemplates.list met filter.ids
+  try {
+    const r = await tlFetch('/mailTemplates.list', { method: 'POST', body: JSON.stringify({ filter: { ids: [id] }, page: { size: 1, number: 1 } }) });
+    const text = await r.text().catch(() => '');
+    if (r.ok) { const j = JSON.parse(text); const arr = j?.data || []; if (arr[0]) return { tpl: arr[0], source: 'list+filter.ids' }; }
+    else console.warn('[finance-invoice-send] mailTemplates.list HTTP', r.status, text.slice(0, 200));
+  } catch (e) { console.warn('[finance-invoice-send] mailTemplates.list exception', e.message); }
+  return { tpl: null, source: null };
+}
 
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
@@ -40,31 +52,58 @@ export default async function handler(req, res) {
 
   try {
     const { data: inv } = await supabaseAdmin.from('invoices')
-      .select('id, customer_id, tl_invoice_id, invoice_number, status').eq('id', invoice_id).maybeSingle();
+      .select('id, customer_id, tl_invoice_id, invoice_number, status, customer:customers(email)').eq('id', invoice_id).maybeSingle();
     if (!inv) return res.status(404).json({ error: 'Factuur niet gevonden' });
     if (!inv.tl_invoice_id) return res.status(400).json({ error: 'Factuur heeft geen Teamleader-id' });
 
-    // Minimal payload — TL's template doet de rest.
+    // 1. Template ophalen + resolven.
+    const tplId = String(mail_template_id).trim();
+    const { tpl, source } = await fetchTemplate(tplId);
+    if (!tpl) return res.status(400).json({ error: 'Kon mail-template niet ophalen uit Teamleader' });
+    const tplSubject = (tpl.content?.subject || tpl.subject || '').trim();
+    const tplBody    = (tpl.content?.body    || tpl.body    || tpl.content?.html || '').trim();
+    const tplLang    = tpl.language || null;
+    const tplName    = tpl.name || tpl.title || null;
+    console.log('[finance-invoice-send] template resolved | source:', source, '| name:', tplName, '| lang:', tplLang, '| has_subject:', !!tplSubject, '| body_chars:', tplBody.length);
+
+    // 2. Resolve velden (UI overrides prevaleren).
+    const recEmail = (typeof recipient_email === 'string' && recipient_email.trim())
+      ? recipient_email.trim()
+      : (inv.customer?.email || '').trim();
+    const subjectFinal = (typeof subject_override === 'string' && subject_override.trim())
+      ? subject_override.trim()
+      : tplSubject;
+    const contentFinal = (typeof content_override === 'string' && content_override.trim())
+      ? content_override.trim()
+      : tplBody;
+    const langFinal = tplLang || 'nl';
+
+    // 3. Platte TL payload (bevestigd: TL wil plat email + content, geen recipients-object).
     const payload = {
       id: inv.tl_invoice_id,
-      mail_template_id: String(mail_template_id).trim(),
+      email: recEmail,
+      subject: subjectFinal,
+      content: contentFinal,
+      language: langFinal,
+      mail_template_id: tplId,
     };
-    // Optionele overrides — alleen toevoegen als de UI ze expliciet stuurde.
-    const recEmail = (typeof recipient_email === 'string' && recipient_email.trim()) ? recipient_email.trim() : null;
-    if (recEmail) payload.recipients = { to: [{ email_address: recEmail }] };
-    if (typeof subject_override === 'string' && subject_override.trim()) payload.subject = subject_override.trim();
-    if (typeof content_override === 'string' && content_override.trim()) payload.content = content_override.trim();
 
-    // Sanity: id + mail_template_id moeten non-empty zijn (zou hier nooit lege strings hebben).
-    for (const k of ['id', 'mail_template_id']) {
-      if (!payload[k] || !String(payload[k]).trim()) return res.status(500).json({ error: `Interne fout: payload.${k} leeg`, tl_request_payload: payload });
+    // Sanity vóór TL-call.
+    for (const k of ['id', 'email', 'subject', 'content', 'language', 'mail_template_id']) {
+      if (!payload[k] || !String(payload[k]).trim()) {
+        return res.status(400).json({
+          error: `Veld '${k}' is leeg (zou niet kunnen na template-resolve).`,
+          tl_request_payload: payload,
+          template_source: source, template_name: tplName,
+        });
+      }
     }
 
     console.log('[finance-invoice-send] payload', JSON.stringify(payload));
 
     let pr, prText = '', usedEndpoint = '/invoices.send';
     const tryEndpoint = async (path) => {
-      console.log('[finance-invoice-send]', path);
+      console.log('[finance-invoice-send] try', path);
       const r = await tlFetch(path, { method: 'POST', body: JSON.stringify(payload) });
       const t = await r.text().catch(() => '');
       return { r, t };
@@ -88,11 +127,12 @@ export default async function handler(req, res) {
         tl_request_payload: payload,
         tl_request_keys: Object.keys(payload),
         tl_response: prText,
+        template_source: source, template_name: tplName,
       });
     }
     console.log('[finance-invoice-send] OK |', usedEndpoint, '| HTTP', pr.status);
 
-    // Post-write sync-back: status kan na 'send' wijzigen (bv. draft → outstanding).
+    // Post-write sync-back: status kan na 'send' wijzigen (draft → outstanding).
     let syncErr = null;
     try { await upsertInvoiceFromTl(inv.tl_invoice_id); }
     catch (e) { syncErr = e.message; console.error('[finance-invoice-send] post-sync', e.message); }
@@ -100,12 +140,12 @@ export default async function handler(req, res) {
     try {
       await supabaseAdmin.from('audit_log').insert({
         user_id: user.id, action: 'invoice.send', entity_type: 'invoice', entity_id: inv.id,
-        after_json: { mail_template_id: payload.mail_template_id, recipient_override: recEmail, tl_endpoint: usedEndpoint },
-        reason_text: `Factuur ${inv.invoice_number} verzonden via Teamleader (template ${payload.mail_template_id})`, ip_address: getClientIp(req),
+        after_json: { mail_template_id: tplId, template_name: tplName, recipient_override: (recipient_email && recipient_email !== inv.customer?.email) ? recEmail : null, tl_endpoint: usedEndpoint },
+        reason_text: `Factuur ${inv.invoice_number} verzonden via Teamleader (template ${tplName || tplId})`, ip_address: getClientIp(req),
       });
     } catch (e) { console.error('[finance-invoice-send] audit', e.message); }
 
-    return res.status(200).json({ success: true, invoice_id: inv.id, tl_endpoint: usedEndpoint, sync_err: syncErr });
+    return res.status(200).json({ success: true, invoice_id: inv.id, tl_endpoint: usedEndpoint, template_name: tplName, sync_err: syncErr });
   } catch (e) {
     console.error('[finance-invoice-send]', e.message);
     return res.status(500).json({ error: e.message });

@@ -713,8 +713,40 @@
         document.getElementById('sendErr').textContent = 'Geen mail-templates beschikbaar — maak er één in Teamleader.';
         return;
       }
-      sel.innerHTML = _sendTpls.map(t => `<option value="${esc(t.id)}" ${t.is_default ? 'selected' : ''}>${esc(t.name)}${t.language ? ' (' + esc(t.language) + ')' : ''}${t.is_default ? ' · default' : ''}</option>`).join('');
-      if (!sel.value && _sendTpls[0]) sel.value = _sendTpls[0].id;
+      // Slimme sortering: niet-herinneringen eerst (verzendmail-templates), dan
+      // herinneringen (visueel gemarkeerd met 🕐). Sort-key is stabiel — input-volgorde
+      // binnen een groep blijft.
+      const reminderRe = /herinner|reminder/i;
+      const sendKeywordRe = /factuur.*verzend|verzend.*factuur|standaard|standard/i;
+      const targetLang = (inv.customer_language || 'nl').toLowerCase();
+      const list = _sendTpls.slice().sort((a, b) => {
+        const ar = reminderRe.test(a.name || ''), br = reminderRe.test(b.name || '');
+        if (ar !== br) return ar ? 1 : -1;     // niet-herinneringen eerst
+        return String(a.name || '').localeCompare(String(b.name || ''));
+      });
+      sel.innerHTML = list.map(t => {
+        const isRem = reminderRe.test(t.name || '');
+        const label = (isRem ? '🕐 ' : '') + (t.name || '(zonder naam)') + (t.language ? ' (' + t.language + ')' : '');
+        return `<option value="${esc(t.id)}">${esc(label)}</option>`;
+      }).join('');
+
+      // Slimme preselect: verzend-template in klanttaal > verzend-template in NL >
+      // is_default-flag > eerste niet-herinnering > eerste algemeen.
+      const nonRem = list.filter(t => !reminderRe.test(t.name || ''));
+      const pick = (arr) => arr[0]?.id || null;
+      const langMatch = (t) => (t.language || '').toLowerCase() === targetLang;
+      const chosen =
+        pick(nonRem.filter(t => sendKeywordRe.test(t.name || '') && langMatch(t)))
+        || pick(nonRem.filter(t => sendKeywordRe.test(t.name || '')))
+        || pick(list.filter(t => t.is_default && !reminderRe.test(t.name || '')))
+        || pick(nonRem)
+        || pick(list);
+      if (chosen) sel.value = chosen;
+      if (!nonRem.length) {
+        // Alleen herinneringen → forceer actieve keuze.
+        sel.insertAdjacentHTML('afterbegin', '<option value="" selected disabled>Kies een template…</option>');
+        document.getElementById('sendErr').textContent = 'Alleen herinnering-templates beschikbaar — kies bewust.';
+      }
       syncSendOk();
     } catch (e) {
       sel.innerHTML = '<option value="">(laden mislukt)</option>';
