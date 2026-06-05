@@ -9,6 +9,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/modules/shared/agent-shared.css" />
   <link rel="stylesheet" href="/styles/sales-redesign.css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/dist/tabler-icons.min.css" />
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     html, body { height: 100%; }
@@ -351,7 +352,7 @@
         <td class="num">${eur(inv.amount_open)}</td>
         <td>${fmtDate(inv.due_date)}</td>
         <td><span class="sr-tag ${m.tag}">${esc(m.label)}</span></td>
-        <td><div class="sr-menu"><button class="sr-ibtn sr-menu-toggle" title="Meer" type="button"><i class="ti ti-dots"></i></button><div class="sr-menu-pop">
+        <td><div class="sr-menu"><button class="sr-ibtn sr-menu-toggle" title="Meer" type="button" aria-label="Acties"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="12" cy="5" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="12" cy="19" r="2"/></svg></button><div class="sr-menu-pop">
           <button class="sr-menu-item" type="button" data-inv-detail="${i}"><i class="ti ti-eye"></i> Bekijk details</button>
           ${payItem}
           ${removeItem}
