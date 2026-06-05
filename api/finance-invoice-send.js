@@ -17,23 +17,38 @@ import { getClientIp } from './_lib/audit-customer.js';
 import { requirePermission } from './_lib/requirePermission.js';
 import { upsertInvoiceFromTl } from './_lib/invoice-upsert.js';
 
-// Haal de TL mail-template op (info → fallback list met filter.ids).
+// Haal de TL mail-template op via dezelfde bekend-werkende call als finance-mail-templates.js:
+// /mailTemplates.list { filter: { type: 'invoice' }, page: { size: 200 } } + lokaal filteren op id.
+// .info en filter.ids zijn nooit empirisch bewezen → niet meer proberen.
 async function fetchTemplate(id) {
-  // Poging 1: mailTemplates.info
+  const endpoint = '/mailTemplates.list';
+  const filterUsed = { type: 'invoice' };
+  const reqBody = { filter: filterUsed, page: { size: 200, number: 1 } };
+  let r, text = '';
   try {
-    const r = await tlFetch('/mailTemplates.info', { method: 'POST', body: JSON.stringify({ id }) });
-    const text = await r.text().catch(() => '');
-    if (r.ok) { const j = JSON.parse(text); if (j?.data) return { tpl: j.data, source: 'info' }; }
-    else if (r.status !== 404) console.warn('[finance-invoice-send] mailTemplates.info HTTP', r.status, text.slice(0, 200));
-  } catch (e) { console.warn('[finance-invoice-send] mailTemplates.info exception', e.message); }
-  // Poging 2: mailTemplates.list met filter.ids
-  try {
-    const r = await tlFetch('/mailTemplates.list', { method: 'POST', body: JSON.stringify({ filter: { ids: [id] }, page: { size: 1, number: 1 } }) });
-    const text = await r.text().catch(() => '');
-    if (r.ok) { const j = JSON.parse(text); const arr = j?.data || []; if (arr[0]) return { tpl: arr[0], source: 'list+filter.ids' }; }
-    else console.warn('[finance-invoice-send] mailTemplates.list HTTP', r.status, text.slice(0, 200));
-  } catch (e) { console.warn('[finance-invoice-send] mailTemplates.list exception', e.message); }
-  return { tpl: null, source: null };
+    r = await tlFetch(endpoint, { method: 'POST', body: JSON.stringify(reqBody) });
+    text = await r.text().catch(() => '');
+  } catch (netErr) {
+    console.error('[finance-invoice-send] fetchTemplate netwerk', netErr.message);
+    return { tpl: null, source: endpoint, diag: { endpoint, filter_used: filterUsed, http_status: 0, count_returned: 0, ids_seen_sample: [], tl_response_truncated: 'NETWERK: ' + netErr.message } };
+  }
+  if (!r.ok) {
+    return { tpl: null, source: endpoint, diag: { endpoint, filter_used: filterUsed, http_status: r.status, count_returned: 0, ids_seen_sample: [], tl_response_truncated: text.slice(0, 2000) } };
+  }
+  let data = [];
+  try { data = JSON.parse(text)?.data || []; } catch {}
+  const tpl = data.find(t => t.id === id) || null;
+  if (tpl) return { tpl, source: 'list+local-filter' };
+  return {
+    tpl: null,
+    source: endpoint,
+    diag: {
+      endpoint, filter_used: filterUsed, http_status: r.status,
+      count_returned: data.length,
+      ids_seen_sample: data.slice(0, 5).map(t => t.id),
+      tl_response_truncated: text.slice(0, 500),
+    },
+  };
 }
 
 export default async function handler(req, res) {
@@ -58,8 +73,15 @@ export default async function handler(req, res) {
 
     // 1. Template ophalen + resolven.
     const tplId = String(mail_template_id).trim();
-    const { tpl, source } = await fetchTemplate(tplId);
-    if (!tpl) return res.status(400).json({ error: 'Kon mail-template niet ophalen uit Teamleader' });
+    const { tpl, source, diag } = await fetchTemplate(tplId);
+    if (!tpl) {
+      console.error('[finance-invoice-send] template niet gevonden', tplId, JSON.stringify(diag));
+      return res.status(400).json({
+        error: 'Kon mail-template niet vinden in Teamleader',
+        template_id: tplId,
+        template_fetch_diag: diag,
+      });
+    }
     const tplSubject = (tpl.content?.subject || tpl.subject || '').trim();
     const tplBody    = (tpl.content?.body    || tpl.body    || tpl.content?.html || '').trim();
     const tplLang    = tpl.language || null;
