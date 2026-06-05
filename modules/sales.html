@@ -545,6 +545,7 @@ async function archiveProduct(id) {
 
 // ── Customers ──
 let custSeg = 'alle';
+let custPage = 1, custPageSize = 50;
 function custDerivedStatus(c) {
   if (c.archived_at) return 'inactief';
   if (c.onboarding_status === 'sent') return 'onboarding';
@@ -627,10 +628,25 @@ function renderCustomers() {
   let rows = withStatus.filter(c => !entF || c.entity === entF);
   if (custSeg !== 'alle' && custSeg !== 'inactief') rows = rows.filter(c => c._st === custSeg);
   if (!rows.length) { document.getElementById('customersList').innerHTML = '<div class="sr-empty">Geen klanten gevonden.</div>'; return; }
+
+  // Client-side paginering (server levert max 200 in één GET — geen extra calls).
+  const total = rows.length, pages = Math.max(1, Math.ceil(total / custPageSize));
+  if (custPage > pages) custPage = pages;
+  const slice = rows.slice((custPage - 1) * custPageSize, custPage * custPageSize);
+  const psOpts = [20, 50, 100, 500].map(n => `<option value="${n}" ${custPageSize === n ? 'selected' : ''}>${n}</option>`).join('');
+  const kebabSvg = '<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="12" cy="5" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="12" cy="19" r="2"/></svg>';
+  const kebab = (c) => {
+    let tlUrl = null;
+    if (c.is_company && c.tl_company_id) tlUrl = `https://focus.teamleader.eu/company.php?id=${esc(c.tl_company_id)}`;
+    else if (c.tl_contact_id) tlUrl = `https://focus.teamleader.eu/contact.php?id=${esc(c.tl_contact_id)}`;
+    const tlItem = tlUrl ? `<a class="sr-menu-item" href="${tlUrl}" target="_blank"><i class="ti ti-external-link"></i> Open in Teamleader</a>` : '';
+    return `<div class="sr-menu"><button class="sr-ibtn sr-menu-toggle" title="Acties" aria-label="Acties" style="border:1px solid var(--border);background:var(--bg-elev-2)">${kebabSvg}</button><div class="sr-menu-pop">
+      <a class="sr-menu-item" href="/modules/klanten.html?id=${esc(c.id)}"><i class="ti ti-user"></i> Bekijk klant</a>${tlItem}</div></div>`;
+  };
   document.getElementById('customersList').innerHTML = `
     <div class="sr-tablewrap"><table class="sr-table">
       <thead><tr><th>Klant</th><th>Entiteit</th><th class="center">Offertes</th><th>Status</th><th>Laatste activiteit</th><th>Verkoper</th><th></th></tr></thead>
-      <tbody>${rows.map(c => `
+      <tbody>${slice.map(c => `
         <tr>
           <td><a class="sr-userline" href="/modules/klanten.html?id=${esc(c.id)}" style="text-decoration:none;color:inherit">${avatarHtml(c.name)}<span><span class="sr-uname">${esc(c.name || '—')}</span>${c.risk_tag_auto ? ' <span class="sr-tag danger">Risico</span>' : ''}<br><span class="sr-cellsub">${esc(c.email || '—')}</span></span></a></td>
           <td>${entityTag(c.entity)}</td>
@@ -638,9 +654,21 @@ function renderCustomers() {
           <td>${custStatusTag(c._st)}</td>
           <td>${relTime(c.last_deal_at)}</td>
           <td>${esc(c.sales_user || '—')}</td>
-          <td class="sr-actions"><a class="sr-ibtn" href="/modules/klanten.html?id=${esc(c.id)}" title="Open klant-detail"><i class="ti ti-arrow-right"></i></a></td>
+          <td class="sr-actions">${kebab(c)}</td>
         </tr>`).join('')}</tbody>
-    </table></div>`;
+    </table></div>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-top:12px;font-size:12.5px;color:var(--text-dim)">
+      <span>${total} klanten · pagina ${custPage}/${pages}</span>
+      <span style="display:flex;gap:8px;align-items:center">
+        <label style="display:flex;gap:5px;align-items:center;color:var(--text-dim)">Per pagina
+          <select id="custPageSize" class="fin-input" style="padding:4px 6px;background:var(--bg-elev-2);border:1px solid var(--border);color:var(--text);border-radius:6px;font-size:12.5px">${psOpts}</select></label>
+        <button class="sr-abtn" id="custPrev" type="button" ${custPage <= 1 ? 'disabled' : ''}>Vorige</button>
+        <button class="sr-abtn" id="custNext" type="button" ${custPage >= pages ? 'disabled' : ''}>Volgende</button>
+      </span>
+    </div>`;
+  document.getElementById('custPageSize').addEventListener('change', (e) => { custPageSize = Number(e.target.value) || 50; custPage = 1; renderCustomers(); });
+  document.getElementById('custPrev').addEventListener('click', () => { if (custPage > 1) { custPage--; renderCustomers(); } });
+  document.getElementById('custNext').addEventListener('click', () => { if (custPage < pages) { custPage++; renderCustomers(); } });
 }
 
 // ── Wiring ──
@@ -656,11 +684,11 @@ document.getElementById('prodCategory').addEventListener('change', () => renderP
 document.getElementById('prodArchivedToggle').addEventListener('change', () => loadProducts());
 document.getElementById('custSearch').addEventListener('input', () => { clearTimeout(window._cs); window._cs = setTimeout(loadCustomers, 250); });
 document.getElementById('custAllToggle').addEventListener('change', () => loadCustomers());
-document.getElementById('custEntity').addEventListener('change', () => renderCustomers());
+document.getElementById('custEntity').addEventListener('change', () => { custPage = 1; renderCustomers(); });
 document.getElementById('custRefresh').addEventListener('click', () => loadCustomers());
 document.querySelectorAll('#custSegments .sr-seg').forEach(seg => seg.addEventListener('click', () => {
   document.querySelectorAll('#custSegments .sr-seg').forEach(x => x.classList.remove('active'));
-  seg.classList.add('active'); const prev = custSeg; custSeg = seg.dataset.seg;
+  seg.classList.add('active'); const prev = custSeg; custSeg = seg.dataset.seg; custPage = 1;
   // wisselen van/naar 'inactief' vereist een server-reload (active vs archived set).
   if (prev === 'inactief' || custSeg === 'inactief') loadCustomers(); else renderCustomers();
 }));
