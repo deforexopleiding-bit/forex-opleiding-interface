@@ -401,6 +401,7 @@
               <th data-sort-key="created_at" aria-sort="descending">Klant sinds</th>
               <th>Status</th>
               <th>Laatste contact</th>
+              <th aria-label="Acties"></th>
             </tr>
           </thead>
           <tbody id="customers-tbody">
@@ -414,9 +415,10 @@
         <span class="page-info" id="page-info">—</span>
         <span class="filter-label">Per pagina:</span>
         <select id="page-size">
-          <option value="25" selected>25</option>
-          <option value="50">50</option>
+          <option value="20">20</option>
+          <option value="50" selected>50</option>
           <option value="100">100</option>
+          <option value="500">500</option>
         </select>
         <div class="spacer"></div>
         <button id="btn-prev" type="button">‹ Vorige</button>
@@ -778,7 +780,7 @@ const state = {
   sortBy:        'created_at',
   sortDir:       'desc',
   page:          1,
-  pageSize:      25,
+  pageSize:      50,
   // Fase 2A.4 commit 6:
   selectionMode: false,             // bulk-select toggle aan/uit
   selectedIds:   new Set(),         // set van customer-id's die gekruist zijn
@@ -2033,6 +2035,7 @@ function renderCustomers({ customers, total, page, page_size, total_pages }) {
     tr.addEventListener('click', (e) => {
       // Clicks op de checkbox zelf afhandelen via change-listener — voorkom dubbel-toggle
       if (e.target && e.target.matches('input[type="checkbox"][data-row-select]')) return;
+      if (e.target && e.target.closest('.sr-menu')) return; // kebab-acties niet als rij-klik behandelen
       if (state.selectionMode) {
         toggleRowSelection(c.id);
       } else {
@@ -2054,6 +2057,7 @@ function renderCustomers({ customers, total, page, page_size, total_pages }) {
       <td>${fmtDate(c.created_at)}</td>
       <td><span class="status-badge ${escapeHtml(c.status)}">${labelForStatus(c.status)}</span></td>
       <td><span class="cust-empty">—</span></td>
+      <td>${koCustKebab(c)}</td>
     `;
     // Bind change-listener op de row-checkbox (na innerHTML)
     const cb = tr.querySelector('input[data-row-select]');
@@ -2069,9 +2073,21 @@ function labelForStatus(s) {
   return { active:'Actief', archived:'Gearchiveerd', anonymized:'Geanonimiseerd' }[s] || s;
 }
 
+// Zichtbare SVG-kebab in de klantenlijst: Bekijk klant + Open in Teamleader.
+function koCustKebab(c) {
+  const svg = '<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="12" cy="5" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="12" cy="19" r="2"/></svg>';
+  let tlUrl = null;
+  if (c.is_company && c.tl_company_id) tlUrl = `https://focus.teamleader.eu/company.php?id=${escapeHtml(c.tl_company_id)}`;
+  else if (c.tl_contact_id) tlUrl = `https://focus.teamleader.eu/contact.php?id=${escapeHtml(c.tl_contact_id)}`;
+  const tlItem = tlUrl ? `<a class="sr-menu-item" href="${tlUrl}" target="_blank"><i class="ti ti-external-link"></i> Open in Teamleader</a>` : '';
+  return `<div class="sr-menu"><button class="sr-ibtn sr-menu-toggle" title="Acties" aria-label="Acties">${svg}</button><div class="sr-menu-pop">
+    <a class="sr-menu-item" href="/modules/klanten.html?id=${escapeHtml(c.id)}"><i class="ti ti-user"></i> Bekijk klant</a>
+    ${tlItem}</div></div>`;
+}
+
 function renderErrorState(msg) {
   $('#customers-tbody').innerHTML = `
-    <tr><td colspan="8" class="state-cell" style="color:#EF4444;">
+    <tr><td colspan="9" class="state-cell" style="color:#EF4444;">
       <i class="ti ti-alert-circle"></i> Kon klanten niet laden: ${escapeHtml(msg || 'onbekende fout')}
       <br><br><button class="btn btn-sm" onclick="loadCustomers()">Opnieuw proberen</button>
     </td></tr>`;

@@ -151,6 +151,8 @@ async function respondList(req, res) {
       id: c.id,
       is_company: c.is_company,
       company_name: c.company_name,
+      tl_contact_id: c.tl_contact_id,
+      tl_company_id: c.tl_company_id,
       first_name: c.first_name,
       last_name: c.last_name,
       email: c.email,
