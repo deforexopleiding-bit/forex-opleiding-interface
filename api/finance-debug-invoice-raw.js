@@ -22,6 +22,42 @@ async function callInfo(tlId, version) {
   return { ok: r.ok, status: r.status, version_header_resp: r.headers.get('x-api-version') || null, data, error: r.ok ? null : text.slice(0, 400) };
 }
 
+// Haal de factuur-PDF server-side op (zelfde flow als finance-invoice-pdf.js) en
+// extraheer de tekst — stabiel via onze OAuth-token (geen browser/CORS/30s-expiry).
+async function fetchPdfText(tlId) {
+  const dr = await tlFetch('/invoices.download', { method: 'POST', body: JSON.stringify({ id: tlId, format: 'pdf' }) });
+  const dtext = await dr.text().catch(() => '');
+  if (!dr.ok) return { ok: false, error: `invoices.download HTTP ${dr.status}: ${dtext.slice(0, 200)}` };
+  let url = null; try { const j = JSON.parse(dtext); url = j?.data?.location || j?.location || null; } catch {}
+  if (!url) return { ok: false, error: 'geen download-URL in TL-response', raw: dtext.slice(0, 200) };
+
+  let buf;
+  try {
+    const fr = await fetch(url);
+    if (!fr.ok) return { ok: false, error: `PDF-fetch HTTP ${fr.status}` };
+    buf = Buffer.from(await fr.arrayBuffer());
+  } catch (e) { return { ok: false, error: 'PDF-fetch fout: ' + e.message }; }
+
+  let text = '';
+  try {
+    const mod = await import('pdf-parse/lib/pdf-parse.js'); // lib-pad omzeilt index.js debug-code
+    const pdfParse = mod.default || mod;
+    const parsed = await pdfParse(buf);
+    text = parsed.text || '';
+  } catch (e) { return { ok: false, error: 'pdf-parse fout: ' + e.message, bytes: buf.length }; }
+
+  const lines = text.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+  return {
+    ok: true, bytes: buf.length, chars: text.length,
+    has_incasso: /incasso/i.test(text),
+    has_incassokosten: /incassokosten/i.test(text),
+    has_440: /\b440\b/.test(text) || /440[.,]00/.test(text),
+    has_40_00: /\b40[.,]00\b/.test(text),
+    tail_lines: lines.slice(-15),
+    head_snippet: text.slice(0, 2000),
+  };
+}
+
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
   res.setHeader('Content-Type', 'application/json');
@@ -65,9 +101,13 @@ export default async function handler(req, res) {
       else listErr = `HTTP ${lr.status}: ${ltext.slice(0, 300)}`;
     } catch (e) { listErr = e.message; }
 
+    // 4. PDF-document server-side ophalen + tekst extraheren (staat de €40 op de factuur zelf?).
+    const pdf = await fetchPdfText(tlId).catch(e => ({ ok: false, error: e.message }));
+
     return res.status(200).json({
       tl_invoice_id: tlId,
       db_row: dbRow,
+      pdf,
       requested_api_version: apiVersion,
       current_pinned_version: baseline.version_header_resp,   // versie die TL ZONDER header gebruikte
       baseline: { ok: baseline.ok, status: baseline.status, version_used: baseline.version_header_resp, summary: sumOf(baseline.data), error: baseline.error },
