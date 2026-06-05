@@ -261,13 +261,17 @@
 
 <!-- Verzenden (Fase 2C) -->
 <div class="modal-overlay hidden" id="sendModal" role="dialog" aria-modal="true">
-  <div class="modal-card" style="max-width:480px">
+  <div class="modal-card" style="max-width:520px">
     <h3>Factuur verzenden</h3>
     <div id="sendSub" class="sr-cellsub" style="margin-bottom:10px"></div>
     <div style="display:flex;flex-direction:column;gap:10px">
-      <label style="font-size:12.5px">Onderwerp (optioneel)<input id="sendSubject" type="text" class="fin-input" style="width:100%;margin-top:4px"/></label>
+      <label style="font-size:12.5px">Ontvanger (e-mail)<input id="sendTo" type="email" class="fin-input" style="width:100%;margin-top:4px" placeholder="naam@voorbeeld.nl"/></label>
+      <label style="font-size:12.5px">Onderwerp <span class="sr-cellsub" style="font-weight:400">(leeg = default)</span><input id="sendSubject" type="text" class="fin-input" style="width:100%;margin-top:4px" placeholder="Factuur … van De Forex Opleiding"/></label>
       <label style="font-size:12.5px">Taal<select id="sendLang" class="fin-input" style="width:100%;margin-top:4px"><option value="nl">Nederlands</option><option value="en">Engels</option><option value="fr">Frans</option><option value="de">Duits</option></select></label>
-      <div class="sr-cellsub">Ontvanger: <span id="sendRcpt">de gekoppelde TL-klant</span> (Teamleader gebruikt de standaard-template).</div>
+      <div class="sr-cellsub" style="background:var(--bg-elev-2);border:1px solid var(--border);border-radius:6px;padding:8px 10px">
+        <div style="font-weight:600;color:var(--text);margin-bottom:3px">Begeleidende tekst (default)</div>
+        <div id="sendBodyPreview" style="white-space:pre-line;font-size:12px"></div>
+      </div>
     </div>
     <div id="sendErr" style="color:#ef4444;font-size:12px;margin-top:8px"></div>
     <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:18px">
@@ -671,17 +675,33 @@
 
   // ── DEEL A: Verzenden ──
   let _sendInv = null;
-  function openSendModal(inv) { _sendInv = inv; document.getElementById('sendSub').textContent = `${inv.invoice_number} · ${inv.customer_name}`; document.getElementById('sendSubject').value = ''; document.getElementById('sendLang').value = 'nl'; document.getElementById('sendRcpt').textContent = inv.customer_name || 'de gekoppelde TL-klant'; document.getElementById('sendErr').textContent = ''; document.getElementById('sendModal').classList.remove('hidden'); }
+  function openSendModal(inv) {
+    _sendInv = inv;
+    document.getElementById('sendSub').textContent = `${inv.invoice_number} · ${inv.customer_name}`;
+    document.getElementById('sendTo').value = inv.customer_email || '';
+    document.getElementById('sendSubject').value = '';
+    document.getElementById('sendLang').value = 'nl';
+    // Preview van de default-body (zelfde tekst als de backend stuurt als er geen 'content' is).
+    const name = inv.customer_name || '';
+    const aanhef = name ? `Beste ${name}` : 'Beste';
+    document.getElementById('sendBodyPreview').textContent =
+      `${aanhef},\n\nHierbij doen wij u factuur ${inv.invoice_number} toekomen. U vindt deze in de bijlage.\n\nMet vriendelijke groet,\nDe Forex Opleiding`;
+    document.getElementById('sendErr').textContent = '';
+    document.getElementById('sendModal').classList.remove('hidden');
+  }
   async function submitSend() {
     if (!_sendInv) return;
     if (!busyGuard('send')) return;
+    const errEl = document.getElementById('sendErr'); errEl.textContent = '';
+    const toVal = document.getElementById('sendTo').value.trim();
+    if (!toVal || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(toVal)) { errEl.textContent = 'Vul een geldig e-mailadres voor de ontvanger in.'; busyRelease('send'); return; }
     const btn = document.getElementById('sendOk'); btn.disabled = true; const o = btn.innerHTML; btn.innerHTML = '<i class="ti ti-loader"></i> Bezig…';
     try {
-      const r = await window.AgentShared.apiFetch('/api/finance-invoice-send', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ invoice_id: _sendInv.id, subject: document.getElementById('sendSubject').value || undefined, language: document.getElementById('sendLang').value }) });
+      const r = await window.AgentShared.apiFetch('/api/finance-invoice-send', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ invoice_id: _sendInv.id, to: toVal, subject: document.getElementById('sendSubject').value || undefined, language: document.getElementById('sendLang').value }) });
       const d = await r.json(); if (!r.ok || !d.success) throw new Error((d.error || 'HTTP ' + r.status) + (d.tl_response ? ' — ' + d.tl_response : ''));
-      window.AgentShared?.showToast('Factuur verzonden', 'success');
+      window.AgentShared?.showToast('Factuur verzonden naar ' + (d.to || toVal), 'success');
       document.getElementById('sendModal').classList.add('hidden'); document.getElementById('invModal').classList.add('hidden'); load();
-    } catch (e) { document.getElementById('sendErr').textContent = 'Mislukt: ' + e.message; }
+    } catch (e) { errEl.textContent = 'Mislukt: ' + e.message; }
     finally { busyRelease('send'); btn.disabled = false; btn.innerHTML = o; }
   }
 
