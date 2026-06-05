@@ -12,6 +12,7 @@ import { createUserClient, supabaseAdmin } from './supabase.js';
 import { tlFetch } from './_lib/teamleader-token.js';
 import { getClientIp } from './_lib/audit-customer.js';
 import { requirePermission } from './_lib/requirePermission.js';
+import { upsertInvoiceFromTl } from './_lib/invoice-upsert.js';
 
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
@@ -57,6 +58,11 @@ export default async function handler(req, res) {
     }
     console.log('[finance-invoice-send] OK | HTTP', pr.status);
 
+    // Post-write sync-back: status kan na 'send' wijzigen (bv. draft → outstanding bij eerste send).
+    let syncErr = null;
+    try { await upsertInvoiceFromTl(inv.tl_invoice_id); }
+    catch (e) { syncErr = e.message; console.error('[finance-invoice-send] post-sync', e.message); }
+
     // Audit (geen DB-mutatie op factuurstatus — TL beheert 'sent').
     try {
       await supabaseAdmin.from('audit_log').insert({
@@ -66,7 +72,7 @@ export default async function handler(req, res) {
       });
     } catch (e) { console.error('[finance-invoice-send] audit', e.message); }
 
-    return res.status(200).json({ success: true, invoice_id: inv.id });
+    return res.status(200).json({ success: true, invoice_id: inv.id, sync_err: syncErr });
   } catch (e) {
     console.error('[finance-invoice-send]', e.message);
     return res.status(500).json({ error: e.message });

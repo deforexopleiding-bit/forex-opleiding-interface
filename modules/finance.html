@@ -642,8 +642,14 @@
       load();
     } catch (e) { window.AgentShared?.showToast('Mislukt: ' + e.message, 'error'); }
   }
+  // In-flight guards: voorkomt dubbele submits (een snelle dubbelklik vóór de await disable).
+  const _busy = {};
+  function busyGuard(key) { if (_busy[key]) return false; _busy[key] = true; return true; }
+  function busyRelease(key) { _busy[key] = false; }
+
   async function submitPay() {
     if (!_payInv) return;
+    if (!busyGuard('pay')) return;
     const amount = Number(document.getElementById('payAmount').value);
     let paid_at = document.getElementById('payDate').value;
     if (!paid_at) { paid_at = new Date().toISOString().slice(0, 10); document.getElementById('payDate').value = paid_at; }
@@ -660,7 +666,7 @@
       document.getElementById('payModal').classList.add('hidden');
       load();
     } catch (e) { errEl.textContent = 'Mislukt: ' + e.message; }
-    finally { btn.disabled = false; btn.innerHTML = orig; }
+    finally { busyRelease('pay'); btn.disabled = false; btn.innerHTML = orig; }
   }
 
   // ── DEEL A: Verzenden ──
@@ -668,6 +674,7 @@
   function openSendModal(inv) { _sendInv = inv; document.getElementById('sendSub').textContent = `${inv.invoice_number} · ${inv.customer_name}`; document.getElementById('sendSubject').value = ''; document.getElementById('sendLang').value = 'nl'; document.getElementById('sendRcpt').textContent = inv.customer_name || 'de gekoppelde TL-klant'; document.getElementById('sendErr').textContent = ''; document.getElementById('sendModal').classList.remove('hidden'); }
   async function submitSend() {
     if (!_sendInv) return;
+    if (!busyGuard('send')) return;
     const btn = document.getElementById('sendOk'); btn.disabled = true; const o = btn.innerHTML; btn.innerHTML = '<i class="ti ti-loader"></i> Bezig…';
     try {
       const r = await window.AgentShared.apiFetch('/api/finance-invoice-send', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ invoice_id: _sendInv.id, subject: document.getElementById('sendSubject').value || undefined, language: document.getElementById('sendLang').value }) });
@@ -675,7 +682,7 @@
       window.AgentShared?.showToast('Factuur verzonden', 'success');
       document.getElementById('sendModal').classList.add('hidden'); document.getElementById('invModal').classList.add('hidden'); load();
     } catch (e) { document.getElementById('sendErr').textContent = 'Mislukt: ' + e.message; }
-    finally { btn.disabled = false; btn.innerHTML = o; }
+    finally { busyRelease('send'); btn.disabled = false; btn.innerHTML = o; }
   }
 
   // ── DEEL C: Crediteren ──
@@ -683,6 +690,7 @@
   function openCreditModal(inv) { _credInv = inv; document.getElementById('creditSub').textContent = `${inv.invoice_number} · ${eur(inv.amount_total)}`; document.getElementById('creditDesc').value = ''; document.getElementById('creditErr').textContent = ''; document.getElementById('creditModal').classList.remove('hidden'); }
   async function submitCredit() {
     if (!_credInv) return;
+    if (!busyGuard('credit')) return;
     const btn = document.getElementById('creditOk'); btn.disabled = true; const o = btn.innerHTML; btn.innerHTML = '<i class="ti ti-loader"></i> Bezig…';
     try {
       const r = await window.AgentShared.apiFetch('/api/finance-invoice-credit', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ invoice_id: _credInv.id, description: document.getElementById('creditDesc').value || undefined }) });
@@ -690,7 +698,7 @@
       window.AgentShared?.showToast('Creditnota aangemaakt' + (d.synced ? ' + gesynchroniseerd' : ''), 'success');
       document.getElementById('creditModal').classList.add('hidden'); document.getElementById('invModal').classList.add('hidden'); load();
     } catch (e) { document.getElementById('creditErr').textContent = 'Mislukt: ' + e.message; }
-    finally { btn.disabled = false; btn.innerHTML = o; }
+    finally { busyRelease('credit'); btn.disabled = false; btn.innerHTML = o; }
   }
 
   // ── DEEL B: Aanpassen (concept) ──
@@ -724,9 +732,10 @@
   }
   async function submitUpdate() {
     if (!_updInv) return;
+    if (!busyGuard('update')) return;
     const errEl = document.getElementById('updErr'); errEl.textContent = '';
     const goodLines = _updLines.filter(l => l.description && l.quantity > 0 && l.unit_price_excl >= 0);
-    if (!goodLines.length) { errEl.textContent = 'Minimaal 1 geldige regel vereist.'; return; }
+    if (!goodLines.length) { errEl.textContent = 'Minimaal 1 geldige regel vereist.'; busyRelease('update'); return; }
     const grouped = [{ line_items: goodLines.map(l => ({ description: l.description, quantity: l.quantity, unit_price: { amount: Number(l.unit_price_excl), currency: 'EUR', tax: 'excluding' } })) }];
     const btn = document.getElementById('updOk'); btn.disabled = true; const o = btn.innerHTML; btn.innerHTML = '<i class="ti ti-loader"></i> Bezig…';
     try {
@@ -735,7 +744,7 @@
       window.AgentShared?.showToast('Concept bijgewerkt', 'success');
       document.getElementById('updModal').classList.add('hidden'); document.getElementById('invModal').classList.add('hidden'); load();
     } catch (e) { errEl.textContent = 'Mislukt: ' + e.message; }
-    finally { btn.disabled = false; btn.innerHTML = o; }
+    finally { busyRelease('update'); btn.disabled = false; btn.innerHTML = o; }
   }
 
   // ── DEEL D: Nieuwe factuur ──
@@ -804,24 +813,31 @@
     const goodLines = _newLines.filter(l => String(l.description || '').trim() && Number(l.quantity) > 0);
     if (!goodLines.length) { errEl.textContent = 'Minimaal 1 regel met omschrijving + aantal vereist.'; return; }
     if (action !== 'draft' && !confirm(action === 'book' ? 'Factuur DEFINITIEF boeken in Teamleader. Doorgaan?' : 'Factuur boeken én verzenden naar de klant. Doorgaan?')) return;
+    if (!busyGuard('new')) return;  // in-flight: voorkomt dubbele factuur in TL bij dubbele klik
+    // ALLE drie save-knoppen disabled tijdens de call.
+    ['newDraft', 'newBook', 'newBookSend'].forEach(id => { const b = document.getElementById(id); if (b) b.disabled = true; });
+    const btn = document.getElementById(action === 'draft' ? 'newDraft' : (action === 'book' ? 'newBook' : 'newBookSend'));
+    const o = btn.innerHTML; btn.innerHTML = '<i class="ti ti-loader"></i> Bezig…';
     const payload = {
       customer_id: _newCust.id, department_id: dept,
       lines: goodLines.map(l => ({ description: String(l.description).trim(), quantity: Number(l.quantity), unit_price_excl: Number(l.unit_price_excl) || 0, vat_percentage: Number(l.vat_percentage) })),
       purchase_order_number: document.getElementById('newPO').value || undefined, language: document.getElementById('newLang').value, action,
     };
-    const btnId = action === 'draft' ? 'newDraft' : (action === 'book' ? 'newBook' : 'newBookSend');
-    const btn = document.getElementById(btnId); btn.disabled = true; const o = btn.innerHTML; btn.innerHTML = '<i class="ti ti-loader"></i> Bezig…';
     try {
       const r = await window.AgentShared.apiFetch('/api/finance-invoice-create', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
       const d = await r.json(); if (!r.ok || !d.success) throw new Error((d.error || 'HTTP ' + r.status) + (d.tl_response ? ' — ' + d.tl_response : ''));
       let msg = 'Concept aangemaakt';
       if (d.booked) msg = d.sent ? 'Factuur geboekt + verzonden' : 'Factuur geboekt';
-      if (d.bookErr) msg = 'Concept aangemaakt; boeken faalde (' + (d.bookErr.response || d.bookErr.error || 'fout') + ')';
-      if (d.sendErr) msg += ' · verzenden faalde (' + (d.sendErr.response || d.sendErr.error || 'fout') + ')';
-      window.AgentShared?.showToast(msg, d.bookErr || d.sendErr ? 'error' : 'success');
-      document.getElementById('newInvModal').classList.add('hidden'); load();
+      if (d.bookErr) msg = 'Concept aangemaakt; boeken faalde — open in TL voor details';
+      if (d.sendErr) msg += ' · verzenden faalde';
+      if (d.sync_err) msg += ' · sync-back faalde: ' + d.sync_err;
+      window.AgentShared?.showToast(msg, (d.bookErr || d.sendErr) ? 'error' : 'success');
+      document.getElementById('newInvModal').classList.add('hidden');
+      // Open de nieuwe factuur direct als sync-back lukte; anders refresh.
+      if (d.invoice_id) { await load(); const found = state.rows.find(x => x.id === d.invoice_id); if (found) openDetail(found); }
+      else load();
     } catch (e) { errEl.textContent = 'Mislukt: ' + e.message; }
-    finally { btn.disabled = false; btn.innerHTML = o; }
+    finally { busyRelease('new'); ['newDraft', 'newBook', 'newBookSend'].forEach(id => { const b = document.getElementById(id); if (b) b.disabled = false; }); btn.innerHTML = o; }
   }
 
   // 3-dots menu: position:fixed + flip-up + close-on-scroll (klanten-patroon).

@@ -21,6 +21,7 @@ import { getClientIp } from './_lib/audit-customer.js';
 import { requirePermission } from './_lib/requirePermission.js';
 import { getOrCreateTlCustomer } from './_lib/teamleader-contact.js';
 import { taxRateIdFor } from './_lib/teamleader-quotation.js';
+import { upsertInvoiceFromTl } from './_lib/invoice-upsert.js';
 
 const r2 = (v) => Math.round((Number(v) || 0) * 100) / 100;
 
@@ -122,16 +123,20 @@ export default async function handler(req, res) {
       } catch (e) { sendErr = { error: e.message }; }
     }
 
-    // Audit (factuur landt in onze DB via de volgende factuur-sync; geen lokale insert hier).
+    // 5. Post-write sync-back: meteen invoices.info + upsert in onze DB → UI ziet 'm direct.
+    let local = null, syncErr = null;
+    try { local = await upsertInvoiceFromTl(tlInvoiceId, { is_manual: true, pushed_to_tl: true, fallback_department: department_id }); }
+    catch (e) { syncErr = e.message; console.error('[finance-invoice-create] post-sync', e.message); }
+
     try {
       await supabaseAdmin.from('audit_log').insert({
-        user_id: user.id, action: 'invoice.create', entity_type: 'invoice', entity_id: null,
-        after_json: { tl_invoice_id: tlInvoiceId, action, booked, sent, bookErr, sendErr, customer_id, department_id },
+        user_id: user.id, action: 'invoice.create', entity_type: 'invoice', entity_id: local?.id || null,
+        after_json: { tl_invoice_id: tlInvoiceId, action, booked, sent, bookErr, sendErr, customer_id, department_id, local_id: local?.id, sync_err: syncErr },
         reason_text: `Nieuwe factuur aangemaakt in Teamleader (${action}, booked=${booked}, sent=${sent})`, ip_address: getClientIp(req),
       });
     } catch (e) { console.error('[finance-invoice-create] audit', e.message); }
 
-    return res.status(200).json({ success: true, tl_invoice_id: tlInvoiceId, booked, sent, bookErr, sendErr });
+    return res.status(200).json({ success: true, tl_invoice_id: tlInvoiceId, invoice_id: local?.id || null, invoice_number: local?.invoice_number || null, local_status: local?.status || null, booked, sent, bookErr, sendErr, sync_err: syncErr });
   } catch (e) {
     console.error('[finance-invoice-create]', e.message);
     return res.status(500).json({ error: e.message });

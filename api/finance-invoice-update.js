@@ -12,6 +12,7 @@ import { createUserClient, supabaseAdmin } from './supabase.js';
 import { tlFetch } from './_lib/teamleader-token.js';
 import { getClientIp } from './_lib/audit-customer.js';
 import { requirePermission } from './_lib/requirePermission.js';
+import { upsertInvoiceFromTl } from './_lib/invoice-upsert.js';
 
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
@@ -50,21 +51,10 @@ export default async function handler(req, res) {
     }
     console.log('[finance-invoice-update] OK | HTTP', pr.status);
 
-    // Hersync deze factuur uit invoices.info (bedragen/btw/regels kunnen gewijzigd zijn).
-    try {
-      const ir = await tlFetch('/invoices.info', { method: 'POST', body: JSON.stringify({ id: inv.tl_invoice_id }) });
-      if (ir.ok) {
-        const info = (await ir.json()).data || {};
-        const t = info.total || {};
-        const incl = Number(t.tax_inclusive?.amount ?? t.payable?.amount ?? 0);
-        const excl = Number(t.tax_exclusive?.amount ?? 0);
-        await supabaseAdmin.from('invoices').update({
-          amount_total: Math.round(incl * 100) / 100,
-          vat_amount: incl && excl ? Math.round((incl - excl) * 100) / 100 : null,
-          updated_at: new Date().toISOString(),
-        }).eq('id', inv.id);
-      }
-    } catch (e) { console.error('[finance-invoice-update] resync', e.message); }
+    // Post-write sync-back via gedeelde upsertInvoiceFromTl (bedragen/btw/regels kunnen gewijzigd zijn).
+    let syncErr = null;
+    try { await upsertInvoiceFromTl(inv.tl_invoice_id); }
+    catch (e) { syncErr = e.message; console.error('[finance-invoice-update] post-sync', e.message); }
 
     try {
       await supabaseAdmin.from('audit_log').insert({
@@ -73,7 +63,7 @@ export default async function handler(req, res) {
       });
     } catch (e) { console.error('[finance-invoice-update] audit', e.message); }
 
-    return res.status(200).json({ success: true, invoice_id: inv.id });
+    return res.status(200).json({ success: true, invoice_id: inv.id, sync_err: syncErr });
   } catch (e) {
     console.error('[finance-invoice-update]', e.message);
     return res.status(500).json({ error: e.message });

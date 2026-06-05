@@ -12,6 +12,7 @@ import { createUserClient, supabaseAdmin } from './supabase.js';
 import { tlFetch, getActiveToken } from './_lib/teamleader-token.js';
 import { getClientIp } from './_lib/audit-customer.js';
 import { requirePermission } from './_lib/requirePermission.js';
+import { upsertInvoiceFromTl } from './_lib/invoice-upsert.js';
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 async function tlCall(path, body, attempt = 0) {
@@ -92,6 +93,10 @@ export default async function handler(req, res) {
         } else { console.error('[finance-invoice-credit] creditNotes.info HTTP', cr.status); }
       }
     } catch (e) { console.error('[finance-invoice-credit] sync', e.message); }
+
+    // Re-upsert de originele factuur — status/payable kan na credit gewijzigd zijn.
+    try { await upsertInvoiceFromTl(inv.tl_invoice_id); }
+    catch (e) { console.error('[finance-invoice-credit] invoice resync', e.message); }
 
     try {
       await supabaseAdmin.from('audit_log').insert({
