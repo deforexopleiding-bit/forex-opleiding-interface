@@ -47,12 +47,40 @@ async function fetchPdfText(tlId) {
   } catch (e) { return { ok: false, error: 'pdf-parse fout: ' + e.message, bytes: buf.length }; }
 
   const lines = text.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+
+  // NL-bedragformaat: punt = duizendtal, komma = decimaal (bv 1.234,56).
+  const amtRe = /(\d{1,3}(?:[.  ]\d{3})*,\d{2})/;
+  const nlToNumber = (s) => s ? Number(String(s).replace(/[.  ]/g, '').replace(',', '.')) : null;
+  const firstAmountAfter = (idx) => (idx >= 0 ? (text.slice(idx).match(amtRe)?.[1] || null) : null);
+
+  // 1. Incassokosten-sectie: ~300 tekens ervoor + erna + eerste bedrag erna.
+  const ciIdx = text.search(/incassokosten/i);
+  const incasso_section = ciIdx >= 0 ? text.slice(Math.max(0, ciIdx - 300), ciIdx + 300).replace(/\s+/g, ' ').trim() : null;
+  const incasso_amount_raw = firstAmountAfter(ciIdx);
+
+  // 2. Alle 'Totaal'-voorkomens met snippet + bedrag; eindtotaal = match met 'betalen', anders laatste.
+  const totaalMatches = [];
+  const reTot = /totaal/gi; let mm;
+  while ((mm = reTot.exec(text)) && totaalMatches.length < 15) {
+    const at = mm.index;
+    totaalMatches.push({ snippet: text.slice(at, at + 140).replace(/\s+/g, ' ').trim(), amount_raw: firstAmountAfter(at) });
+  }
+  const payableMatch = totaalMatches.find(t => /betalen/i.test(t.snippet) && t.amount_raw) || [...totaalMatches].reverse().find(t => t.amount_raw) || null;
+  const total_payable_raw = payableMatch?.amount_raw || null;
+
   return {
     ok: true, bytes: buf.length, chars: text.length,
     has_incasso: /incasso/i.test(text),
     has_incassokosten: /incassokosten/i.test(text),
     has_440: /\b440\b/.test(text) || /440[.,]00/.test(text),
     has_40_00: /\b40[.,]00\b/.test(text),
+    // Gerichte totalen-parse (ter verificatie naast de ruwe sectie).
+    incasso_section,
+    incasso_amount_raw, incasso_amount: nlToNumber(incasso_amount_raw),     // verwacht 40
+    total_payable_raw, total_payable: nlToNumber(total_payable_raw),        // verwacht 440
+    totaal_matches: totaalMatches,
+    currency: /€|EUR/.test(text) ? 'EUR' : null,
+    format_note: 'NL-formaat: punt=duizendtal, komma=decimaal (1.234,56). Euroteken doorgaans vóór het bedrag.',
     tail_lines: lines.slice(-15),
     head_snippet: text.slice(0, 2000),
   };
