@@ -425,6 +425,7 @@
       row('Factuurdatum', fmtDate(inv.issue_date)) +
       row('Vervaldag', fmtDate(inv.due_date)) +
       row('Betaald op', fmtDate(inv.paid_date)) +
+      '<div id="invLinesRow"></div>' +
       '<div id="invCreditRow"></div>' +
       '<div id="invLateFeeRow"></div>';
     const tl = document.getElementById('invModalTl');
@@ -478,6 +479,28 @@
         })
         .catch(() => { creditRow.innerHTML = ''; });
     } else if (creditRow) { creditRow.innerHTML = ''; }
+    // Factuurregels + totalen (lazy uit invoices.info).
+    const linesRow = document.getElementById('invLinesRow');
+    if (linesRow) {
+      linesRow.innerHTML = `<div style="margin-top:10px;color:var(--text-dim);font-size:12px"><i class="ti ti-loader"></i> Regels laden…</div>`;
+      window.AgentShared.apiFetch('/api/finance-invoice-lines?invoice_id=' + encodeURIComponent(inv.id))
+        .then(r => r.json())
+        .then(d => {
+          const lines = (d && d.lines) || [];
+          const t = (d && d.totals) || null;
+          if (!lines.length && !t) { linesRow.innerHTML = ''; return; }
+          const rowsHtml = lines.map(l => `<tr><td>${esc(l.description)}</td><td class="num">${l.quantity}</td><td class="num">${eur(l.unit_price_excl)}</td><td class="num">${l.tax_rate != null ? l.tax_rate + '%' : '—'}</td><td class="num">${eur(l.line_total_excl)}</td></tr>`).join('');
+          const totHtml = t ? (
+            (t.excl != null ? `<div class="inv-drow"><span class="lbl">Subtotaal excl. btw</span><span>${eur(t.excl)}</span></div>` : '') +
+            (t.tax != null ? `<div class="inv-drow"><span class="lbl">BTW</span><span>${eur(t.tax)}</span></div>` : '') +
+            (t.incl != null ? `<div class="inv-drow"><span class="lbl">Totaal incl. btw</span><span>${eur(t.incl)}</span></div>` : '') +
+            (t.due != null ? `<div class="inv-drow"><span class="lbl">Openstaand</span><span>${eur(t.due)}</span></div>` : '')
+          ) : '';
+          linesRow.innerHTML = (lines.length ? `<div style="margin-top:12px;font-weight:600;font-size:13px">Regels</div>
+            <table class="sr-table" style="margin-top:6px"><thead><tr><th>Omschrijving</th><th class="num">Aantal</th><th class="num">Stukprijs</th><th>BTW%</th><th class="num">Regeltotaal</th></tr></thead><tbody>${rowsHtml}</tbody></table>` : '') + totHtml;
+        })
+        .catch(() => { linesRow.innerHTML = ''; });
+    }
     document.getElementById('invModal').classList.remove('hidden');
   }
 
