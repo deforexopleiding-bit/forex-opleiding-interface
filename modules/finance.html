@@ -711,7 +711,10 @@
     _updLines = [];
     renderUpdLines();
     window.AgentShared.apiFetch('/api/finance-invoice-lines?invoice_id=' + encodeURIComponent(inv.id)).then(r => r.json()).then(d => {
-      _updLines = (d.lines || []).map(l => ({ description: l.description, quantity: l.quantity, unit_price_excl: l.unit_price_excl, vat_percentage: [0, 6, 9, 21].includes(Number(l.tax_rate)) ? Number(l.tax_rate) : 21 }));
+      // tax_rate uit endpoint is integer (21) of null (onbekend). Number(null) === 0 zou
+      // foutief op de '0%'-optie vallen → expliciet null-check vóór de includes.
+      const pickVat = (v) => (v != null && [0, 6, 9, 21].includes(Number(v))) ? Number(v) : 21;
+      _updLines = (d.lines || []).map(l => ({ description: l.description, quantity: l.quantity, unit_price_excl: l.unit_price_excl, vat_percentage: pickVat(l.tax_rate) }));
       if (!_updLines.length) _updLines.push({ description: '', quantity: 1, unit_price_excl: 0, vat_percentage: 21 });
       renderUpdLines();
     }).catch(() => { _updLines.push({ description: '', quantity: 1, unit_price_excl: 0, vat_percentage: 21 }); renderUpdLines(); });

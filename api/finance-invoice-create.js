@@ -98,13 +98,20 @@ export default async function handler(req, res) {
 
     let booked = false, sent = false, bookErr = null, sendErr = null;
 
-    // 3. Optioneel boeken.
+    // 3. Optioneel boeken. TL eist `on` (boekdatum, YYYY-MM-DD).
+    //    Bevestigd via TL 400 "on must be present". Default = vandaag; in body als
+    //    override via book_date kan worden meegestuurd.
     if (action === 'book' || action === 'book_and_send') {
+      const onDate = (typeof req.body?.book_date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(req.body.book_date))
+        ? req.body.book_date
+        : new Date().toISOString().slice(0, 10);
+      const bookBody = { id: tlInvoiceId, on: onDate };
+      console.log('[finance-invoice-create] book payload', JSON.stringify(bookBody));
       try {
-        const br = await tlFetch('/invoices.book', { method: 'POST', body: JSON.stringify({ id: tlInvoiceId }) });
+        const br = await tlFetch('/invoices.book', { method: 'POST', body: JSON.stringify(bookBody) });
         const bText = await br.text().catch(() => '');
         if (!br.ok) { bookErr = { http: br.status, response: bText }; console.error('[finance-invoice-create] book GEWEIGERD', br.status, bText.slice(0, 300)); }
-        else { booked = true; console.log('[finance-invoice-create] book OK'); }
+        else { booked = true; console.log('[finance-invoice-create] book OK on', onDate); }
       } catch (e) { bookErr = { error: e.message }; }
     }
 

@@ -17,21 +17,36 @@ function amt(o) {
   if (typeof o === 'object') { const n = Number(o.amount); return Number.isFinite(n) ? n : null; }
   const n = Number(o); return Number.isFinite(n) ? n : null;
 }
-// BTW-tarief als fractie (0.21). TL: li.tax.rate of li.tax_rate.
-function rateOf(li) {
+// Reverse env-map: TL tax_rate_id → integer BTW% (zelfde envs als taxRateIdFor:
+// TEAMLEADER_TAX_RATE_ID_<n>[_DEPT] + INTRA/OUTSIDE_EU → 0). Eén keer per request opbouwen.
+function buildReverseTaxMap() {
+  const map = {};
+  for (const [k, v] of Object.entries(process.env)) {
+    if (!v) continue;
+    const m = k.match(/^TEAMLEADER_TAX_RATE_ID_(\d+)(?:_[A-Z]+)?$/);
+    if (m) { map[v] = Number(m[1]); continue; }
+    if (/^TEAMLEADER_TAX_RATE_ID_(INTRA|OUTSIDE_EU)/.test(k)) map[v] = 0;
+  }
+  return map;
+}
+// BTW-tarief als fractie (0.21). TL line_item: li.tax.rate, li.tax_rate, of bij draft
+// vaak alleen tax_rate_id zonder rate → fallback via env reverse-map.
+function rateOf(li, taxMap) {
   if (li.tax && typeof li.tax.rate === 'number') return li.tax.rate;
   if (typeof li.tax_rate === 'number') return li.tax_rate;
+  const id = li.tax_rate_id || (li.tax?.type === 'taxRate' ? li.tax?.id : null);
+  if (id && taxMap[id] != null) return taxMap[id] / 100;  // env-map is percentage → fractie
   return null;
 }
 // Stukprijs EXCL btw, defensief over unit_price-shapes (object {amount,tax} of plat getal).
-function unitExcl(li) {
+function unitExcl(li, taxMap) {
   const up = li.unit_price;
   let unit = null, incl = false;
   if (up && typeof up === 'object') { unit = Number(up.amount); incl = up.tax === 'including'; }
   else if (up != null && up !== '') unit = Number(up);
   if (!Number.isFinite(unit)) unit = Number(amt(li.total?.tax_exclusive) ?? amt(li.total) ?? 0);
   if (!Number.isFinite(unit)) unit = 0;
-  const rt = rateOf(li);
+  const rt = rateOf(li, taxMap);
   if (incl && rt > 0) unit = unit / (1 + rt);
   return unit;
 }
@@ -62,12 +77,13 @@ export default async function handler(req, res) {
     if (!r.ok) { console.error('[finance-invoice-lines] invoices.info HTTP', r.status, text.slice(0, 200)); return res.status(502).json({ error: `TL invoices.info HTTP ${r.status}` }); }
     let inv = null; try { inv = JSON.parse(text).data; } catch { return res.status(502).json({ error: 'TL-respons niet parsebaar' }); }
 
+    const taxMap = buildReverseTaxMap();
     const lines = [];
     for (const g of (inv.grouped_lines || [])) {
       for (const li of (g.line_items || [])) {
         const qty = Number(li.quantity) || 0;
-        const ue = r2(unitExcl(li));
-        const rt = rateOf(li);
+        const ue = r2(unitExcl(li, taxMap));
+        const rt = rateOf(li, taxMap);
         lines.push({
           description: li.description || '—',
           quantity: qty,
