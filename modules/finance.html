@@ -771,13 +771,20 @@
       }) });
       const d = await r.json();
       if (!r.ok || !d.success) {
+        if (Array.isArray(d.attempts)) {
+          console.log('[send] cascade attempts (volledig):', d.attempts);
+          const lines = d.attempts.map(a => `shape ${a.shape} → HTTP ${a.tl_status}: ${(a.tl_response || '').slice(0, 200)}`);
+          throw new Error((d.error || 'HTTP ' + r.status) + '\n\n' + lines.join('\n'));
+        }
         if (d.tl_request_payload) console.log('[send] tl_request_payload', d.tl_request_payload, '| keys', d.tl_request_keys);
+        if (d.template_fetch_diag) console.log('[send] template_fetch_diag', d.template_fetch_diag);
         if (d.tl_response) console.log('[send] tl_response', d.tl_response);
         const extra = d.tl_response ? '\n\nTL-respons: ' + d.tl_response : '';
         const sentKeys = d.tl_request_keys ? '\nvelden gestuurd: ' + d.tl_request_keys.join(', ') : '';
         throw new Error((d.error || 'HTTP ' + r.status) + extra + sentKeys);
       }
-      window.AgentShared?.showToast('Factuur verzonden via Teamleader', 'success');
+      console.log('[send] werkende shape:', d.shape_used, '| tl_request_payload', d.tl_request_payload);
+      window.AgentShared?.showToast('Factuur verzonden via Teamleader (shape ' + d.shape_used + ')', 'success');
       document.getElementById('sendModal').classList.add('hidden'); document.getElementById('invModal').classList.add('hidden'); load();
     } catch (e) { errEl.textContent = 'Mislukt: ' + e.message; }
     finally { busyRelease('send'); btn.disabled = false; btn.innerHTML = o; syncSendOk(); }

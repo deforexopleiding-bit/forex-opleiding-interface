@@ -100,61 +100,77 @@ export default async function handler(req, res) {
       : tplBody;
     const langFinal = tplLang || 'nl';
 
-    // 3. Platte TL payload — TL eist 'body' letterlijk ("body must be present" op vorige try).
-    //    'content' óók meesturen (zelfde waarde) als paranoia; TL negeert extra velden silently.
-    const payload = {
-      id: inv.tl_invoice_id,
-      email: recEmail,
-      subject: subjectFinal,
-      body: bodyFinal,                // ← rename: TL eist 'body' i.p.v. 'content'
-      content: bodyFinal,             // paranoia: ook content sturen met zelfde waarde
-      language: langFinal,
-      mail_template_id: tplId,
-    };
-
-    // Sanity vóór TL-call (6 verplichte velden — content is paranoia, geen sanity nodig).
-    for (const k of ['id', 'email', 'subject', 'body', 'language', 'mail_template_id']) {
-      if (!payload[k] || !String(payload[k]).trim()) {
+    // 3. Sanity (op de waarden die in beide shapes terechtkomen).
+    const sanityValues = { id: inv.tl_invoice_id, email: recEmail, subject: subjectFinal, body: bodyFinal, language: langFinal, mail_template_id: tplId };
+    for (const k of Object.keys(sanityValues)) {
+      if (!sanityValues[k] || !String(sanityValues[k]).trim()) {
         return res.status(400).json({
           error: `Veld '${k}' is leeg (zou niet kunnen na template-resolve).`,
-          tl_request_payload: payload,
           template_source: source, template_name: tplName,
         });
       }
     }
 
-    console.log('[finance-invoice-send] payload', JSON.stringify(payload));
-
-    let pr, prText = '', usedEndpoint = '/invoices.send';
-    const tryEndpoint = async (path) => {
-      console.log('[finance-invoice-send] try', path);
-      const r = await tlFetch(path, { method: 'POST', body: JSON.stringify(payload) });
-      const t = await r.text().catch(() => '');
-      return { r, t };
+    // 4. Cascade A/B over nesting van subject+body. TL is consistent met content:{subject,body}
+    //    in mailTemplates, dus A is sterkste kandidaat. B (customer_message) als fallback.
+    const usedEndpoint = '/invoices.send';
+    const buildShape = (which) => {
+      const base = { id: inv.tl_invoice_id, email: recEmail, language: langFinal, mail_template_id: tplId };
+      const block = { subject: subjectFinal, body: bodyFinal };
+      if (which === 'A') return { ...base, content: block };
+      if (which === 'B') return { ...base, customer_message: block };
+      throw new Error('Unknown shape ' + which);
     };
+
+    const tryShape = async (which) => {
+      const payload = buildShape(which);
+      console.log(`[finance-invoice-send] try shape ${which}`, JSON.stringify(payload));
+      const r = await tlFetch(usedEndpoint, { method: 'POST', body: JSON.stringify(payload) });
+      const t = await r.text().catch(() => '');
+      return { which, payload, http: r.status, ok: r.ok, response: t };
+    };
+
+    const attempts = [];
+    let success = null;
     try {
-      ({ r: pr, t: prText } = await tryEndpoint('/invoices.send'));
-      if (pr.status === 404) {
-        console.warn('[finance-invoice-send] /invoices.send 404 → retry /invoices.sendEmail');
-        usedEndpoint = '/invoices.sendEmail';
-        ({ r: pr, t: prText } = await tryEndpoint('/invoices.sendEmail'));
+      // Shape A
+      const a = await tryShape('A');
+      attempts.push({ shape: 'A', tl_request_payload: a.payload, tl_request_keys: Object.keys(a.payload), tl_status: a.http, tl_response: a.response });
+      if (a.ok) success = a;
+      // Bij 400/422 cascade naar B; andere statussen = hard error
+      else if (a.http === 400 || a.http === 422) {
+        console.warn('[finance-invoice-send] shape A geweigerd (HTTP', a.http, ') → cascade naar shape B');
+        const b = await tryShape('B');
+        attempts.push({ shape: 'B', tl_request_payload: b.payload, tl_request_keys: Object.keys(b.payload), tl_status: b.http, tl_response: b.response });
+        if (b.ok) success = b;
+      } else {
+        // Niet-validatie status (401/403/404/429/5xx): direct hard error met diagnostiek.
+        console.error('[finance-invoice-send] hard error shape A | HTTP', a.http, '| response=', a.response);
+        return res.status(422).json({
+          error: `Teamleader gaf onverwachte status (HTTP ${a.http}) op shape A — geen cascade.`,
+          tl_status: a.http, tl_endpoint: usedEndpoint,
+          tl_request_payload: a.payload, tl_request_keys: Object.keys(a.payload),
+          tl_response: a.response,
+          template_source: source, template_name: tplName,
+        });
       }
     } catch (netErr) {
       console.error('[finance-invoice-send] netwerk', netErr.message);
       return res.status(502).json({ error: 'Kon Teamleader niet bereiken: ' + netErr.message });
     }
-    if (!pr.ok) {
-      console.error('[finance-invoice-send] GEWEIGERD |', usedEndpoint, '| HTTP', pr.status, '| payload=', JSON.stringify(payload), '| response=', prText);
+
+    if (!success) {
+      console.error('[finance-invoice-send] BEIDE shapes geweigerd | attempts=', JSON.stringify(attempts));
       return res.status(422).json({
-        error: `Teamleader weigerde verzending (HTTP ${pr.status}).`,
-        tl_status: pr.status, tl_endpoint: usedEndpoint,
-        tl_request_payload: payload,
-        tl_request_keys: Object.keys(payload),
-        tl_response: prText,
+        error: 'Beide nesting-shapes geweigerd door Teamleader',
+        tl_endpoint: usedEndpoint,
         template_source: source, template_name: tplName,
+        attempts,
       });
     }
-    console.log('[finance-invoice-send] OK |', usedEndpoint, '| HTTP', pr.status);
+    console.log('[finance-invoice-send] OK | shape', success.which, '| HTTP', success.http);
+    const shapeUsed = success.which;
+    const payload = success.payload;
 
     // Post-write sync-back: status kan na 'send' wijzigen (draft → outstanding).
     let syncErr = null;
@@ -164,12 +180,12 @@ export default async function handler(req, res) {
     try {
       await supabaseAdmin.from('audit_log').insert({
         user_id: user.id, action: 'invoice.send', entity_type: 'invoice', entity_id: inv.id,
-        after_json: { mail_template_id: tplId, template_name: tplName, recipient_override: (recipient_email && recipient_email !== inv.customer?.email) ? recEmail : null, tl_endpoint: usedEndpoint },
-        reason_text: `Factuur ${inv.invoice_number} verzonden via Teamleader (template ${tplName || tplId})`, ip_address: getClientIp(req),
+        after_json: { mail_template_id: tplId, template_name: tplName, recipient_override: (recipient_email && recipient_email !== inv.customer?.email) ? recEmail : null, tl_endpoint: usedEndpoint, shape_used: shapeUsed },
+        reason_text: `Factuur ${inv.invoice_number} verzonden via Teamleader (template ${tplName || tplId}, shape ${shapeUsed})`, ip_address: getClientIp(req),
       });
     } catch (e) { console.error('[finance-invoice-send] audit', e.message); }
 
-    return res.status(200).json({ success: true, invoice_id: inv.id, tl_endpoint: usedEndpoint, template_name: tplName, sync_err: syncErr });
+    return res.status(200).json({ success: true, invoice_id: inv.id, tl_endpoint: usedEndpoint, template_name: tplName, shape_used: shapeUsed, tl_request_payload: payload, sync_err: syncErr });
   } catch (e) {
     console.error('[finance-invoice-send]', e.message);
     return res.status(500).json({ error: e.message });
