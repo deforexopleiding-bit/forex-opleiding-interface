@@ -1,0 +1,23 @@
+-- ============================================================================
+-- Finance Fase 3 — Bank-tab RBAC (NO-OP)
+-- Datum: 2026-06-06
+-- Branch: feat/finance-3-bank-overview
+--
+-- LET OP — DIT BESTAND IS EEN NO-OP IN PRODUCTIE.
+--
+-- Tijdens implementatie verzon ik (Claude) een umbrella-key `finance.bank.view`.
+-- In productie bestaan al de juiste, fijnmaziger keys via de seed in
+-- modules/admin.html (regels 458-462):
+--
+--   finance.bank.balance_view       — Banksaldo bekijken
+--   finance.bank.transactions_view  — Bank-transacties bekijken
+--   finance.bank.match_approve      — (v2) Match goedkeuren
+--   finance.bank.match_auto_toggle  — (v2) Auto-match aan/uit
+--   finance.bank.category_manage    — (v2) Categorieën beheren
+--
+-- Fase 3 (deze branch) gebruikt alleen balance_view + transactions_view —
+-- geen DB-migratie nodig. Bestand blijft staan als historisch artefact zodat
+-- de migratie-historie consistent is in commit-trail.
+--
+-- Geen statements uit te voeren.
+-- ============================================================================

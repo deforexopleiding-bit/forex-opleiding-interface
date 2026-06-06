@@ -135,6 +135,7 @@
 
   <div class="sr-segments" id="financeNav" style="margin-bottom:18px">
     <button class="sr-seg active" data-view="facturen" type="button">Facturen</button>
+    <button class="sr-seg" id="navBank" data-view="bank" type="button" style="display:none">Bank</button>
     <button class="sr-seg" data-view="roadmap" type="button">Roadmap</button>
   </div>
 
@@ -200,6 +201,63 @@
         </table>
       </div>
       <div id="invPager" style="display:flex;justify-content:space-between;align-items:center;margin-top:12px;font-size:12.5px;color:var(--text-dim)"></div>
+    </div>
+  </div>
+
+  <!-- ===== Bank-view (Fase 3 — read-only spiegel van e-Boekhouden) ===== -->
+  <div id="view-bank" hidden>
+    <div class="bank-locked" id="bankLocked" hidden style="background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.3);border-radius:8px;padding:14px 16px;margin-bottom:14px">
+      <div style="font-size:15px;font-weight:700;margin-bottom:6px">Geen toegang tot bankoverzicht</div>
+      <div style="font-size:12.5px">Je mist de rechten <code>finance.bank.balance_view</code> en <code>finance.bank.transactions_view</code>. Vraag een beheerder een van beide aan te zetten.</div>
+    </div>
+    <div id="bankMain">
+      <!-- Sync-banner (analoog aan Facturen-tab — Fase 3 cron `15 * * * *`) -->
+      <details id="bankSyncBanner" style="margin-bottom:10px" hidden>
+        <summary id="bankSyncSummary" style="cursor:pointer;display:inline-flex;align-items:center;gap:8px;font-size:12px;color:var(--text-dim);padding:5px 10px;border:1px solid var(--border-subtle,#2b2f3a);border-radius:999px;background:rgba(255,255,255,0.02);user-select:none;list-style:none">
+          <i class="ti ti-refresh" style="font-size:13px"></i>
+          <span id="bankSyncText">Sync e-Boekhouden → DB: laden…</span>
+        </summary>
+        <div style="margin-top:8px;padding:10px 12px;border:1px solid var(--border-subtle,#2b2f3a);border-radius:8px;font-size:12px;color:var(--text-dim);background:rgba(255,255,255,0.02);max-width:520px">
+          <div data-resource="bank_transactions"><div data-field="lines">—</div></div>
+        </div>
+      </details>
+      <!-- Saldo-kaart -->
+      <div class="bank-balance-card" style="background:linear-gradient(135deg, rgba(16,185,129,.12), rgba(16,185,129,.04));border:1px solid rgba(16,185,129,.3);border-radius:12px;padding:18px 22px;margin-bottom:18px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px">
+        <div>
+          <div style="font-size:12px;color:var(--text-dim);text-transform:uppercase;letter-spacing:.06em;font-weight:600">Actueel saldo · ING</div>
+          <div id="bankBalanceVal" style="font-size:32px;font-weight:700;color:#10b981;margin-top:4px;font-variant-numeric:tabular-nums">€ —</div>
+          <div id="bankBalanceMeta" style="font-size:11.5px;color:var(--text-faint);margin-top:2px"></div>
+        </div>
+        <button class="sr-ibtn" id="bankBalanceRefresh" type="button" title="Saldo vernieuwen"><i class="ti ti-refresh"></i></button>
+      </div>
+      <!-- Filter-strip -->
+      <div class="sr-filterstrip" id="bankFilters" style="margin-bottom:12px;flex-wrap:wrap;gap:8px;align-items:center">
+        <div class="sr-segments" id="bankDirSeg">
+          <button class="sr-seg active" data-dir="all" type="button">Alle</button>
+          <button class="sr-seg" data-dir="in" type="button">Inkomend</button>
+          <button class="sr-seg" data-dir="out" type="button">Uitgaand</button>
+        </div>
+        <input id="bankFrom" type="date" class="fin-input" title="Vanaf datum" />
+        <input id="bankTo" type="date" class="fin-input" title="T/m datum" />
+        <input id="bankSearch" type="search" placeholder="Zoek op omschrijving, IBAN, factuurnr…" class="fin-input" style="min-width:240px" />
+        <span style="flex:1"></span>
+        <button class="sr-ibtn" id="bankRefresh" title="Lijst vernieuwen" type="button"><i class="ti ti-refresh"></i></button>
+      </div>
+      <!-- Tabel -->
+      <div class="sr-tablewrap">
+        <table class="sr-table" id="bankTable">
+          <thead><tr>
+            <th style="width:90px">Datum</th>
+            <th>Omschrijving</th>
+            <th>Tegenpartij</th>
+            <th>IBAN</th>
+            <th>Factuur</th>
+            <th class="num" style="width:120px">Bedrag</th>
+          </tr></thead>
+          <tbody id="bankTbody"><tr><td colspan="6" style="text-align:center;padding:24px;color:var(--text-faint)">Laden…</td></tr></tbody>
+        </table>
+      </div>
+      <div id="bankPager" style="display:flex;justify-content:space-between;align-items:center;margin-top:12px;font-size:12.5px;color:var(--text-dim)"></div>
     </div>
   </div>
 
@@ -498,8 +556,15 @@
 
   function setView(view) {
     document.getElementById('view-facturen').hidden = (view !== 'facturen');
+    document.getElementById('view-bank').hidden = (view !== 'bank');
     document.getElementById('view-roadmap').hidden = (view !== 'roadmap');
     document.querySelectorAll('#financeNav .sr-seg').forEach(b => b.classList.toggle('active', b.dataset.view === view));
+    // Bij eerste keer Bank-tab openen: load per beschikbare permission.
+    if (view === 'bank' && !_bankLoadedOnce) {
+      _bankLoadedOnce = true;
+      if (canBankBalanceView) loadBankBalance();
+      if (canBankTxView) { loadBank(); loadBankSyncStatus(); }
+    }
   }
 
   function renderKpis(k) {
@@ -1306,7 +1371,135 @@
     }
   }
 
+  // ── Bank-tab (Fase 3) ──
+  // Read-only spiegel van e-Boekhouden mutaties. Lazy-load: fetch start pas
+  // bij eerste tab-open (_bankLoadedOnce gate).
+  let _bankLoadedOnce = false;
+  const bankState = { dir: 'all', from: '', to: '', q: '', page: 1, pageSize: 50, total: 0 };
+  let _bankSearchTimer = null;
+  function fmtEur2Cents(c) {
+    const n = Number(c) || 0;
+    return '€' + (n / 100).toLocaleString('nl-NL', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  }
+  function fmtDateNl(s) {
+    if (!s) return '—';
+    const d = new Date(String(s) + 'T00:00:00');
+    if (isNaN(d.getTime())) return '—';
+    return String(d.getDate()).padStart(2, '0') + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + d.getFullYear();
+  }
+  async function loadBankBalance() {
+    const valEl = document.getElementById('bankBalanceVal');
+    const metaEl = document.getElementById('bankBalanceMeta');
+    if (!valEl) return;
+    valEl.textContent = '€ —';
+    metaEl.textContent = 'Laden…';
+    try {
+      const r = await window.AgentShared.apiFetch('/api/finance-bank-balance');
+      if (r.status === 403) { metaEl.textContent = 'Geen rechten'; return; }
+      const d = await r.json();
+      if (!r.ok) {
+        metaEl.textContent = 'Fout: ' + (d.error || 'HTTP ' + r.status);
+        valEl.style.color = '#ef4444';
+        return;
+      }
+      valEl.textContent = fmtEur2Cents(d.balance_cents);
+      valEl.style.color = (Number(d.balance_cents) || 0) >= 0 ? '#10b981' : '#ef4444';
+      metaEl.textContent = 'Per ' + fmtDateNl(d.as_of_date) + ' · ledger ' + d.ledger_id + ' · live uit e-Boekhouden';
+    } catch (e) {
+      metaEl.textContent = 'Fout: ' + e.message;
+    }
+  }
+  async function loadBank() {
+    const tb = document.getElementById('bankTbody');
+    if (!tb) return;
+    tb.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:24px;color:var(--text-faint)">Laden…</td></tr>';
+    const p = new URLSearchParams();
+    if (bankState.dir && bankState.dir !== 'all') p.set('direction', bankState.dir);
+    if (bankState.from) p.set('from', bankState.from);
+    if (bankState.to)   p.set('to', bankState.to);
+    if (bankState.q)    p.set('q', bankState.q);
+    p.set('limit', String(bankState.pageSize));
+    p.set('offset', String((bankState.page - 1) * bankState.pageSize));
+    try {
+      const r = await window.AgentShared.apiFetch('/api/finance-bank-transactions?' + p.toString());
+      if (r.status === 403) {
+        document.getElementById('bankMain').hidden = true;
+        document.getElementById('bankLocked').hidden = false;
+        return;
+      }
+      const d = await r.json();
+      if (!r.ok) {
+        tb.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:24px;color:#ef4444">Fout: ' + esc(d.error || 'HTTP ' + r.status) + '</td></tr>';
+        return;
+      }
+      bankState.total = d.total || 0;
+      const items = d.items || [];
+      if (!items.length) {
+        tb.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:24px;color:var(--text-faint)">Geen transacties gevonden.</td></tr>';
+      } else {
+        tb.innerHTML = items.map(t => {
+          const cents = Number(t.amount_cents) || 0;
+          const amtColor = cents > 0 ? '#10b981' : (cents < 0 ? '#ef4444' : 'var(--text)');
+          const amtSign = cents > 0 ? '+' : '';
+          return `<tr>
+            <td>${esc(fmtDateNl(t.transaction_date))}</td>
+            <td>${esc((t.description || '').slice(0, 80))}</td>
+            <td>${esc(t.counterparty_name || '—')}</td>
+            <td style="font-family:monospace;font-size:11.5px">${esc(t.counterparty_iban || '—')}</td>
+            <td>${t.invoice_number ? `<span class="sr-tag blue">${esc(t.invoice_number)}</span>` : '<span class="sr-cellsub">—</span>'}</td>
+            <td class="num" style="color:${amtColor};font-weight:600;font-variant-numeric:tabular-nums">${amtSign}${fmtEur2Cents(Math.abs(cents))}</td>
+          </tr>`;
+        }).join('');
+      }
+      // Pager.
+      const pages = Math.max(1, Math.ceil(bankState.total / bankState.pageSize));
+      document.getElementById('bankPager').innerHTML =
+        `<span>${bankState.total} transacties · pagina ${bankState.page}/${pages}</span>` +
+        `<span><button class="sr-ibtn" id="bankPrev" type="button" ${bankState.page <= 1 ? 'disabled' : ''}><i class="ti ti-chevron-left"></i></button>` +
+        `<button class="sr-ibtn" id="bankNext" type="button" ${bankState.page >= pages ? 'disabled' : ''}><i class="ti ti-chevron-right"></i></button></span>`;
+      const prev = document.getElementById('bankPrev'), next = document.getElementById('bankNext');
+      if (prev) prev.addEventListener('click', () => { if (bankState.page > 1) { bankState.page--; loadBank(); } });
+      if (next) next.addEventListener('click', () => { if (bankState.page < pages) { bankState.page++; loadBank(); } });
+    } catch (e) {
+      tb.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:24px;color:#ef4444">Fout: ' + esc(e.message) + '</td></tr>';
+    }
+  }
+  async function loadBankSyncStatus() {
+    const banner = document.getElementById('bankSyncBanner');
+    const text = document.getElementById('bankSyncText');
+    if (!banner || !text) return;
+    try {
+      const r = await window.AgentShared.apiFetch('/api/finance-sync-status');
+      if (r.status === 403) { banner.hidden = true; return; }
+      const d = await r.json().catch(() => null);
+      banner.hidden = false;
+      // bank_transactions zit nog niet in /api/finance-sync-status response;
+      // pas zodra die endpoint uitgebreid wordt verschijnt 'ie hier. Fallback:
+      // toon generic message.
+      const row = d?.bank_transactions || null;
+      if (row && row.last_run_at) {
+        const ts = new Date(row.last_run_at);
+        const t = String(ts.getHours()).padStart(2, '0') + ':' + String(ts.getMinutes()).padStart(2, '0');
+        text.textContent = `Sync e-Boekhouden → DB: ${t} · ${row.last_run_processed ?? 0} verwerkt · ${row.last_run_errors ?? 0} errors`;
+        const lines = document.querySelector('#bankSyncBanner [data-resource="bank_transactions"] [data-field="lines"]');
+        if (lines) {
+          lines.textContent = `Laatste run om ${t} · cursor ${(row.last_updated_since || '—').slice(0,10)} · ${row.last_run_duration_ms ?? '—'}ms`;
+        }
+      } else {
+        text.textContent = 'Sync e-Boekhouden → DB: —';
+      }
+    } catch (e) {
+      banner.hidden = false;
+      text.textContent = 'Sync e-Boekhouden → DB: —';
+    }
+  }
+
   let canRegister = false, canRemove = false, canSend = false, canUpdate = false, canCredit = false, canCreate = false;
+  // Bank-tab heeft twee aparte permissions (geen umbrella):
+  //  - finance.bank.balance_view → saldo-kaart zichtbaar
+  //  - finance.bank.transactions_view → transactie-tabel + filters + sync-banner
+  // Tab-knop is zichtbaar als de gebruiker MINSTENS één van beide heeft.
+  let canBankBalanceView = false, canBankTxView = false;
   async function init() {
     try {
       await window._authSharedReady;
@@ -1322,6 +1515,36 @@
       canUpdate = can('finance.invoice.update');
       canCredit = can('finance.invoice.credit');
       canCreate = can('finance.invoice.create');
+      canBankBalanceView = can('finance.bank.balance_view');
+      canBankTxView = can('finance.bank.transactions_view');
+      // Bank-tab button zichtbaar zodra de gebruiker minimaal één van beide heeft.
+      if (canBankBalanceView || canBankTxView) {
+        const nb = document.getElementById('navBank'); if (nb) nb.style.display = '';
+      }
+      // Verberg saldo-kaart en/of transactie-blok per ontbrekende permission.
+      // Beide ontbreken → locked-banner tonen, main hide (zelfde patroon als
+      // invLocked); daar zorgt setView('bank') automatisch voor via deze guard.
+      const balanceCard = document.querySelector('.bank-balance-card');
+      if (balanceCard && !canBankBalanceView) balanceCard.style.display = 'none';
+      const bankFiltersEl = document.getElementById('bankFilters');
+      const bankTableEl = document.getElementById('bankTable');
+      const bankPagerEl = document.getElementById('bankPager');
+      const bankSyncBannerEl = document.getElementById('bankSyncBanner');
+      if (!canBankTxView) {
+        if (bankFiltersEl) bankFiltersEl.style.display = 'none';
+        if (bankTableEl && bankTableEl.parentElement) bankTableEl.parentElement.style.display = 'none';
+        if (bankPagerEl) bankPagerEl.style.display = 'none';
+        // Sync-banner hoort bij transactie-sync, dus alleen tonen met tx-view.
+        if (bankSyncBannerEl) bankSyncBannerEl.style.display = 'none';
+      }
+      if (!canBankBalanceView && !canBankTxView) {
+        // Beide ontbreken → bankLocked tonen (gebruiker zou hier sowieso niet
+        // moeten landen want tab-knop is verborgen, maar deep-link-bescherming).
+        const locked = document.getElementById('bankLocked');
+        const main = document.getElementById('bankMain');
+        if (locked) locked.hidden = false;
+        if (main)   main.hidden   = true;
+      }
 
       // Entiteit-dropdown vullen.
       const sel = document.getElementById('invEntity');
@@ -1386,6 +1609,21 @@
       load();
       // Sync-banner: lazy, niet-blocking voor de facturen-tabel.
       loadSyncStatus();
+
+      // Bank-tab filter wiring (filters wijzigen → bankState bijwerken + reload).
+      const bankDirSeg = document.getElementById('bankDirSeg');
+      if (bankDirSeg) bankDirSeg.querySelectorAll('.sr-seg').forEach(b => b.addEventListener('click', () => {
+        bankDirSeg.querySelectorAll('.sr-seg').forEach(x => x.classList.remove('active'));
+        b.classList.add('active');
+        bankState.dir = b.dataset.dir || 'all';
+        bankState.page = 1;
+        loadBank();
+      }));
+      const bf = document.getElementById('bankFrom'); if (bf) bf.addEventListener('change', e => { bankState.from = e.target.value; bankState.page = 1; loadBank(); });
+      const bt = document.getElementById('bankTo'); if (bt) bt.addEventListener('change', e => { bankState.to = e.target.value; bankState.page = 1; loadBank(); });
+      const bs = document.getElementById('bankSearch'); if (bs) bs.addEventListener('input', e => { clearTimeout(_bankSearchTimer); _bankSearchTimer = setTimeout(() => { bankState.q = e.target.value.trim(); bankState.page = 1; loadBank(); }, 350); });
+      const br = document.getElementById('bankRefresh'); if (br) br.addEventListener('click', () => { bankState.page = 1; loadBank(); });
+      const bbr = document.getElementById('bankBalanceRefresh'); if (bbr) bbr.addEventListener('click', loadBankBalance);
     } catch (e) { console.error('[finance-facturen] init', e); }
   }
 
