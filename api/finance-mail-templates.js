@@ -71,6 +71,15 @@ export default async function handler(req, res) {
       name: t.name || t.title || '(zonder naam)',
       language: t.language || null,
       is_default: !!(t.is_default || t.default),
+      // Additief (Fase 5 mail-preview): subject + body uit content-blok meegeven
+      // zodat de Verzenden-modal client-side een preview kan renderen zonder een
+      // extra TL-call per template-select. Bestaande consumers worden niet geraakt
+      // (extra response-velden zijn voorwaarts compatibel). Geen gedragswijziging
+      // op invoices.send-flow — die resolved nog steeds server-side in
+      // finance-invoice-send.js. Beide content-keys vallen terug op null als de
+      // template geen content heeft (defensief).
+      subject: (t.content?.subject || t.subject || null),
+      body: (t.content?.body || t.body || t.content?.html || null),
       // Diagnostisch: alle keys mee voor diag-mode zodat UI/onderzoeker het type-veld kan vinden.
       ...(diag ? { _keys: Object.keys(t), _sample: t } : {}),
     }));

@@ -1243,6 +1243,14 @@ function koEnsureInvModal() {
           </label>
           <label style="font-size:12.5px;display:block;margin-bottom:4px">Ontvanger (e-mail)<input id="koSendTo" type="email" style="width:100%;margin-top:3px;padding:6px 9px;border:1px solid var(--border);border-radius:7px;background:#f4f4f5;color:var(--text);cursor:not-allowed" readonly/></label>
           <div style="font-size:11px;color:var(--text-faint);font-style:italic;margin-bottom:8px">Teamleader stuurt naar het klant-mailadres uit TL. Wijzig dit in TL bij de klant zelf (of via Aanpassen-knop op de klantkaart als Fase 4 live is) vóór je verzendt.</div>
+          <!-- Mail-preview (Fase 5): rendert template + client-side variabelen-substitutie. -->
+          <div id="koSendPreview" style="display:none;margin-bottom:10px">
+            <div style="font-size:12.5px;font-weight:600;margin-bottom:4px">Voorbeeld van de mail</div>
+            <div style="background:var(--bg-elev-2, #f9fafb);border:1px solid var(--border-subtle, #e5e7eb);border-radius:8px;padding:10px 12px">
+              <div style="font-size:12.5px;margin-bottom:8px"><strong>Onderwerp:</strong> <span id="koSendPreviewSubject" style="color:var(--text)"></span></div>
+              <pre id="koSendPreviewBody" style="white-space:pre-wrap;font:inherit;margin:0;font-size:12.5px;color:var(--text);max-height:280px;overflow-y:auto"></pre>
+            </div>
+          </div>
           <a href="#" id="koSendAdvToggle" style="font-size:12px;color:var(--accent-cyan);text-decoration:none">Geavanceerd ▾</a>
           <div id="koSendAdv" style="margin-top:8px;display:none;flex-direction:column;gap:8px">
             <label style="font-size:12.5px">Onderwerp overschrijven <span class="sr-cellsub" style="font-weight:400">(leeg = template)</span>
@@ -1292,6 +1300,10 @@ function koEnsureInvModal() {
   const koSyncSendOk = () => { const tpl = document.getElementById('koSendTpl').value; const to = document.getElementById('koSendTo').value.trim(); document.getElementById('koSendOk').disabled = !(tpl && to && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(to)); };
   document.getElementById('koSendTpl').addEventListener('change', koSyncSendOk);
   document.getElementById('koSendTo').addEventListener('input', koSyncSendOk);
+  // Preview-bindings (Fase 5): re-render bij template-change en bij overrides typen.
+  document.getElementById('koSendTpl').addEventListener('change', () => _renderKoSendPreview());
+  document.getElementById('koSendSubject').addEventListener('input', () => _renderKoSendPreview());
+  document.getElementById('koSendContent').addEventListener('input', () => _renderKoSendPreview());
   window._koSyncSendOk = koSyncSendOk;
 }
 // Variant-A factuurdetail-modal in klant-context (DRY met finance.html: zelfde card-CSS).
@@ -1438,6 +1450,56 @@ async function koRemovePayment(inv) {
 
 // === Klant-context write-modals (parity met finance.html) ===
 
+// ── Mail-preview (Fase 5): client-side variabele-substitutie voor #koSend ──
+// Spiegel van de finance.html preview — content komt uit _koSendTpls cache
+// (mapper geeft subject+body mee sinds Fase 5; geen extra TL-call).
+function _koPreviewSubst(text, inv) {
+  const cust = (typeof detailState !== 'undefined' && detailState.customer) ? detailState.customer : {};
+  const customerName = String(cust.first_name || (cust.company_name || '').split(/\s+/)[0] || '').trim();
+  const fmtDate = (s) => {
+    if (!s) return null;
+    const d = new Date(String(s).slice(0, 10) + 'T00:00:00');
+    if (isNaN(d.getTime())) return null;
+    return String(d.getDate()).padStart(2, '0') + '/' + String(d.getMonth() + 1).padStart(2, '0') + '/' + d.getFullYear();
+  };
+  const dueStr = fmtDate(inv?.due_date || inv?.due_on);
+  const deptName = inv?.tl_department_id ? (KO_ENT_LABEL[inv.tl_department_id] || '') : '';
+  const knownVars = {
+    '#INVOICE_NR':      inv?.invoice_number || '',
+    '#NAME':            customerName,
+    '#DUE_DATE':        dueStr || '',
+    '#DEPARTMENT_NAME': deptName,
+  };
+  let out = String(text || '');
+  for (const [k, v] of Object.entries(knownVars)) {
+    if (v) out = out.split(k).join(v);
+  }
+  return out;
+}
+function _koPreviewToHtml(textAfterSubst) {
+  const escMap = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
+  let html = String(textAfterSubst).replace(/[&<>"']/g, c => escMap[c]);
+  html = html.replace(/#[A-Z_]{2,}/g, (m) =>
+    `<span style="background:#f4f4f5;color:var(--text-faint, #6b7280);padding:1px 6px;border-radius:3px;font-size:90%;white-space:nowrap">${m} <em style="font-style:italic">(door TL ingevuld)</em></span>`);
+  return html;
+}
+function _renderKoSendPreview() {
+  const preview = document.getElementById('koSendPreview');
+  if (!preview || !_koSendInv) return;
+  const tplId = document.getElementById('koSendTpl').value;
+  const tpl = (_koSendTpls || []).find(t => t.id === tplId);
+  if (!tpl) { preview.style.display = 'none'; return; }
+  const overSubj = document.getElementById('koSendSubject').value.trim();
+  const overBody = document.getElementById('koSendContent').value.trim();
+  const rawSubj = overSubj || tpl.subject || '';
+  const rawBody = overBody || tpl.body || '';
+  const subjOut = _koPreviewSubst(rawSubj, _koSendInv);
+  const bodyOut = _koPreviewSubst(rawBody, _koSendInv);
+  document.getElementById('koSendPreviewSubject').innerHTML = _koPreviewToHtml(subjOut);
+  document.getElementById('koSendPreviewBody').innerHTML = _koPreviewToHtml(bodyOut);
+  preview.style.display = '';
+}
+
 // Verzenden: TL mail-template dropdown + lazy load + recipient + Geavanceerd.
 async function openKoSendModal(inv) {
   koEnsureInvModal();
@@ -1449,6 +1511,9 @@ async function openKoSendModal(inv) {
   document.getElementById('koSendErr').textContent = '';
   document.getElementById('koSendAdv').style.display = 'none';
   document.getElementById('koSendAdvToggle').textContent = 'Geavanceerd ▾';
+  // Preview-reset (verschijnt weer zodra template gerendered is).
+  const previewEl = document.getElementById('koSendPreview');
+  if (previewEl) previewEl.style.display = 'none';
   const sel = document.getElementById('koSendTpl');
   sel.innerHTML = '<option value="">— laden…</option>';
   document.getElementById('koSendOk').disabled = true;
@@ -1465,6 +1530,7 @@ async function openKoSendModal(inv) {
     const chosen = pick(nonRem.filter(t => sendKeywordRe.test(t.name || ''))) || pick(list.filter(t => t.is_default && !reminderRe.test(t.name || ''))) || pick(nonRem) || pick(list);
     if (chosen) sel.value = chosen;
     if (window._koSyncSendOk) window._koSyncSendOk();
+    _renderKoSendPreview();
   } catch (e) { sel.innerHTML = '<option value="">(laden mislukt)</option>'; document.getElementById('koSendErr').textContent = 'Templates laden mislukt: ' + e.message; }
 }
 async function submitKoSend() {
