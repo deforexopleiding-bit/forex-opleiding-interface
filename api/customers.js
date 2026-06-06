@@ -6,7 +6,11 @@
 //   wordt geactiveerd. Zie TODO-VOLLEDIG.md → "API-laag granulaire RBAC".
 //
 // Query-params (lijst-mode):
-//   search          string  — case-insensitive ILIKE op first_name/last_name/email/phone
+//   search          string  — case-insensitive ILIKE op first_name/last_name/company_name/email/phone.
+//                             Multi-woord: elke spatie-gescheiden term moet ergens in één van
+//                             die kolommen voorkomen (AND tussen woorden, OR tussen kolommen).
+//                             "Test Standalone" matched dus zowel company_name="Test Standalone"
+//                             als first_name="Test"+last_name="Standalone".
 //   tags            CSV     — slugs uit customer_tag_definitions ("heeft tenminste 1 van")
 //   status          CSV     — active|archived|anonymized (default: active alleen)
 //   created_from    ISO     — ondergrens op customers.created_at (inclusief)
@@ -108,14 +112,32 @@ async function respondList(req, res) {
   if (statuses.includes('anonymized')) statusOr.push('anonymized_at.not.is.null');
   if (statusOr.length) query = query.or(statusOr.join(','));
 
-  // Search (ILIKE OR-combo over 4 velden)
+  // Search (ILIKE OR-combo over 5 velden, per-woord AND-gecombineerd).
+  //
+  // Bug vóór fix: enkele .or() met het volledige search-pattern matched "Test
+  // Standalone" alleen als één enkele kolom de complete string bevat (bv.
+  // company_name="Test Standalone"). Een B2C-klant met first_name="Test" en
+  // last_name="Standalone" werd gemist — geen kolom op zichzelf bevat de hele
+  // string. Side-note tijdens PR #90 visuele check.
+  //
+  // Fix: split de search op whitespace en chain meerdere .or()-calls. Elke .or()
+  // doet OR over alle kolommen voor één woord; chained .or()-calls worden door
+  // PostgREST/supabase-js AND-gecombineerd. Resultaat:
+  //   "Test Standalone" → AND( OR(*ilike%Test%), OR(*ilike%Standalone%) )
+  // Matched dus zowel:
+  //   - company_name="Test Standalone" (beide woorden in dezelfde kolom)
+  //   - first_name="Test" + last_name="Standalone" (woord per kolom)
+  // Voor single-word search blijft gedrag identiek aan vóór de fix.
   if (search) {
-    // Escape PostgREST OR-special chars (comma + parentheses); % en _ blijven SQL wildcards
-    const esc = search.replace(/[,()]/g, ' ');
-    const pat = `%${esc}%`;
-    query = query.or(
-      `first_name.ilike.${pat},last_name.ilike.${pat},company_name.ilike.${pat},email.ilike.${pat},phone.ilike.${pat}`
-    );
+    const words = search.split(/\s+/).filter(Boolean);
+    for (const w of words) {
+      // Escape PostgREST OR-special chars (comma + parentheses); % en _ blijven SQL wildcards
+      const esc = w.replace(/[,()]/g, ' ');
+      const pat = `%${esc}%`;
+      query = query.or(
+        `first_name.ilike.${pat},last_name.ilike.${pat},company_name.ilike.${pat},email.ilike.${pat},phone.ilike.${pat}`
+      );
+    }
   }
 
   if (tagFilteredIds) query = query.in('id', tagFilteredIds);
