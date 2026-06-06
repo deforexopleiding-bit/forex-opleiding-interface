@@ -1243,7 +1243,7 @@ function koEnsureInvModal() {
           </label>
           <label style="font-size:12.5px;display:block;margin-bottom:8px">Ontvanger (e-mail)<input id="koSendTo" type="email" style="width:100%;margin-top:3px;padding:6px 9px;border:1px solid var(--border);border-radius:7px;background:var(--bg);color:var(--text)"/></label>
           <a href="#" id="koSendAdvToggle" style="font-size:12px;color:var(--accent-cyan);text-decoration:none">Geavanceerd ▾</a>
-          <div id="koSendAdv" hidden style="margin-top:8px;display:flex;flex-direction:column;gap:8px">
+          <div id="koSendAdv" style="margin-top:8px;display:none;flex-direction:column;gap:8px">
             <label style="font-size:12.5px">Onderwerp overschrijven <span class="sr-cellsub" style="font-weight:400">(leeg = template)</span>
               <input id="koSendSubject" type="text" style="width:100%;margin-top:3px;padding:6px 9px;border:1px solid var(--border);border-radius:7px;background:var(--bg);color:var(--text)"/></label>
             <label style="font-size:12.5px">Inhoud overschrijven <span class="sr-cellsub" style="font-weight:400">(leeg = template)</span>
@@ -1287,7 +1287,7 @@ function koEnsureInvModal() {
   document.getElementById('koCredOk').addEventListener('click', submitKoCredit);
   document.getElementById('koUpdOk').addEventListener('click', submitKoUpdate);
   document.getElementById('koUpdAdd').addEventListener('click', () => { _koUpdLines.push({ description: '', quantity: 1, unit_price_excl: 0, vat_percentage: 21 }); renderKoUpdLines(); });
-  document.getElementById('koSendAdvToggle').addEventListener('click', (e) => { e.preventDefault(); const a = document.getElementById('koSendAdv'); a.hidden = !a.hidden; document.getElementById('koSendAdvToggle').textContent = a.hidden ? 'Geavanceerd ▾' : 'Geavanceerd ▴'; });
+  document.getElementById('koSendAdvToggle').addEventListener('click', (e) => { e.preventDefault(); const a = document.getElementById('koSendAdv'); const collapsed = a.style.display === 'none'; a.style.display = collapsed ? 'flex' : 'none'; document.getElementById('koSendAdvToggle').textContent = collapsed ? 'Geavanceerd ▴' : 'Geavanceerd ▾'; });
   const koSyncSendOk = () => { const tpl = document.getElementById('koSendTpl').value; const to = document.getElementById('koSendTo').value.trim(); document.getElementById('koSendOk').disabled = !(tpl && to && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(to)); };
   document.getElementById('koSendTpl').addEventListener('change', koSyncSendOk);
   document.getElementById('koSendTo').addEventListener('input', koSyncSendOk);
@@ -1446,7 +1446,7 @@ async function openKoSendModal(inv) {
   document.getElementById('koSendSubject').value = '';
   document.getElementById('koSendContent').value = '';
   document.getElementById('koSendErr').textContent = '';
-  document.getElementById('koSendAdv').hidden = true;
+  document.getElementById('koSendAdv').style.display = 'none';
   document.getElementById('koSendAdvToggle').textContent = 'Geavanceerd ▾';
   const sel = document.getElementById('koSendTpl');
   sel.innerHTML = '<option value="">— laden…</option>';
