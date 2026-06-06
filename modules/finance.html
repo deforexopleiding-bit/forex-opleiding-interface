@@ -271,7 +271,7 @@
       <label style="font-size:12.5px">Ontvanger (e-mail)<input id="sendTo" type="email" class="fin-input" style="width:100%;margin-top:4px" placeholder="naam@voorbeeld.nl"/></label>
       <div>
         <a href="#" id="sendAdvToggle" style="font-size:12px;color:var(--accent-cyan);text-decoration:none">Geavanceerd: onderwerp / inhoud overschrijven ▾</a>
-        <div id="sendAdv" hidden style="margin-top:8px;display:flex;flex-direction:column;gap:8px">
+        <div id="sendAdv" style="margin-top:8px;display:none;flex-direction:column;gap:8px">
           <label style="font-size:12.5px">Onderwerp overschrijven <span class="sr-cellsub" style="font-weight:400">(leeg = template-default)</span>
             <input id="sendSubject" type="text" class="fin-input" style="width:100%;margin-top:4px"/>
           </label>
@@ -695,7 +695,7 @@
     document.getElementById('sendSubject').value = '';
     document.getElementById('sendContent').value = '';
     document.getElementById('sendErr').textContent = '';
-    document.getElementById('sendAdv').hidden = true;
+    document.getElementById('sendAdv').style.display = 'none';
     document.getElementById('sendAdvToggle').textContent = 'Geavanceerd: onderwerp / inhoud overschrijven ▾';
     const sel = document.getElementById('sendTpl');
     sel.innerHTML = '<option value="">— laden…</option>';
@@ -1051,7 +1051,7 @@
       wire('sendModal', 'sendCancel'); document.getElementById('sendOk').addEventListener('click', submitSend);
       document.getElementById('sendTpl').addEventListener('change', syncSendOk);
       document.getElementById('sendTo').addEventListener('input', syncSendOk);
-      document.getElementById('sendAdvToggle').addEventListener('click', (e) => { e.preventDefault(); const a = document.getElementById('sendAdv'); a.hidden = !a.hidden; document.getElementById('sendAdvToggle').textContent = a.hidden ? 'Geavanceerd: onderwerp / inhoud overschrijven ▾' : 'Geavanceerd ▴'; });
+      document.getElementById('sendAdvToggle').addEventListener('click', (e) => { e.preventDefault(); const a = document.getElementById('sendAdv'); const collapsed = a.style.display === 'none'; a.style.display = collapsed ? 'flex' : 'none'; document.getElementById('sendAdvToggle').textContent = collapsed ? 'Geavanceerd ▴' : 'Geavanceerd: onderwerp / inhoud overschrijven ▾'; });
       wire('creditModal', 'creditCancel'); document.getElementById('creditOk').addEventListener('click', submitCredit);
       wire('updModal', 'updCancel'); document.getElementById('updOk').addEventListener('click', submitUpdate);
       document.getElementById('updAddLine').addEventListener('click', () => { _updLines.push({ description: '', quantity: 1, unit_price_excl: 0 }); renderUpdLines(); });
