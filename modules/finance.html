@@ -363,7 +363,7 @@
   <div class="modal-card" style="max-width:780px">
     <h3>Nieuwe factuur</h3>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">
-      <label style="font-size:12.5px">Klant<input id="newCustSearch" type="search" class="fin-input" placeholder="Zoek klant…" style="width:100%;margin-top:4px"/><div id="newCustList" style="background:var(--bg-elev);border:1px solid var(--border);border-radius:6px;max-height:120px;overflow:auto;margin-top:2px;display:none"></div><div id="newCustSel" style="font-size:12px;color:var(--accent-cyan);margin-top:4px"></div></label>
+      <label style="font-size:12.5px">Klant<input id="newCustSearch" type="search" class="fin-input" placeholder="Zoek klant…" style="width:100%;margin-top:4px"/><div id="newCustList" style="background:var(--bg-elev);border:1px solid var(--border);border-radius:6px;max-height:120px;overflow:auto;margin-top:2px;display:none"></div><div style="display:flex;justify-content:space-between;align-items:center;margin-top:4px;gap:8px;flex-wrap:wrap"><div id="newCustSel" style="font-size:12px;color:var(--accent-cyan);flex:1"></div><a href="#" id="newCustCreateLink" style="font-size:12px;color:var(--accent-cyan);text-decoration:none;white-space:nowrap"><i class="ti ti-user-plus"></i> Nieuwe klant aanmaken</a></div></label>
       <label style="font-size:12.5px">Entiteit<select id="newDept" class="fin-input" style="width:100%;margin-top:4px"></select></label>
     </div>
     <div style="margin-bottom:6px;font-size:12.5px;color:var(--text-dim)">Regels (artikel uit TL → grootboek & BTW automatisch)</div>
@@ -379,6 +379,46 @@
       <button class="sr-abtn" id="newDraft" type="button">Opslaan als concept</button>
       <button class="sr-abtn primary" id="newBook" type="button"><i class="ti ti-book"></i> Boeken</button>
       <button class="sr-abtn success" id="newBookSend" type="button"><i class="ti ti-send"></i> Boeken &amp; Verzenden</button>
+    </div>
+  </div>
+</div>
+
+<!-- Inline klant-aanmaak (Fase 5) — sub-modal binnen newInvModal-flow; hogere z-index dan parent. -->
+<div class="modal-overlay hidden" id="newCustCreateModal" role="dialog" aria-modal="true" style="z-index:1100">
+  <div class="modal-card" style="max-width:560px">
+    <h3 style="margin-top:0">Nieuwe klant aanmaken</h3>
+    <div style="display:flex;flex-direction:column;gap:10px">
+      <label style="font-size:12.5px;display:flex;align-items:center;gap:8px;cursor:pointer;font-weight:600">
+        <input type="checkbox" id="newCustIsCompany" style="width:auto"/> Dit is een bedrijf (B2B)
+      </label>
+      <div id="newCustB2bFields" style="display:none;grid-template-columns:1fr 1fr;gap:10px">
+        <label style="font-size:12.5px;grid-column:1/-1">Bedrijfsnaam <span style="color:#ef4444">*</span><input id="newCustCompanyName" type="text" class="fin-input" style="width:100%;margin-top:4px" maxlength="200"/></label>
+        <label style="font-size:12.5px">KvK-nummer<input id="newCustKvk" type="text" class="fin-input" style="width:100%;margin-top:4px" maxlength="20"/></label>
+        <label style="font-size:12.5px">BTW-nummer<input id="newCustVat" type="text" class="fin-input" style="width:100%;margin-top:4px" maxlength="40"/></label>
+      </div>
+      <div id="newCustB2cFields" style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <label style="font-size:12.5px">Voornaam <span style="color:#ef4444">*</span><input id="newCustFirstName" type="text" class="fin-input" style="width:100%;margin-top:4px" maxlength="100"/></label>
+        <label style="font-size:12.5px">Achternaam <span style="color:#ef4444">*</span><input id="newCustLastName" type="text" class="fin-input" style="width:100%;margin-top:4px" maxlength="100"/></label>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <label style="font-size:12.5px">Email<input id="newCustEmail" type="email" class="fin-input" style="width:100%;margin-top:4px" maxlength="200"/></label>
+        <label style="font-size:12.5px">Telefoon<input id="newCustPhone" type="tel" class="fin-input" style="width:100%;margin-top:4px" maxlength="40"/></label>
+      </div>
+      <div style="display:grid;grid-template-columns:2fr 1fr 1fr 2fr;gap:10px">
+        <label style="font-size:12.5px">Straat<input id="newCustStreet" type="text" class="fin-input" style="width:100%;margin-top:4px" maxlength="200"/></label>
+        <label style="font-size:12.5px">Huisnr.<input id="newCustNumber" type="text" class="fin-input" style="width:100%;margin-top:4px" maxlength="20"/></label>
+        <label style="font-size:12.5px">Postcode<input id="newCustPostal" type="text" class="fin-input" style="width:100%;margin-top:4px" maxlength="20"/></label>
+        <label style="font-size:12.5px">Plaats<input id="newCustCity" type="text" class="fin-input" style="width:100%;margin-top:4px" maxlength="100"/></label>
+      </div>
+      <label style="font-size:12.5px;display:flex;align-items:flex-start;gap:10px;cursor:pointer;background:var(--bg-elev-2,#f4f4f5);padding:10px 12px;border-radius:6px">
+        <input type="checkbox" id="newCustPrivacy" style="width:auto;margin-top:2px"/>
+        <span>Klant is geïnformeerd over de <a href="/privacy" target="_blank" style="color:var(--accent-cyan)">privacyverklaring</a> <span style="color:#ef4444">*</span></span>
+      </label>
+    </div>
+    <div id="newCustCreateErr" style="color:#ef4444;font-size:12px;margin-top:8px;white-space:pre-wrap"></div>
+    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">
+      <button class="sr-abtn" id="newCustCreateCancel" type="button">Annuleren</button>
+      <button class="sr-abtn primary" id="newCustCreateOk" type="button"><i class="ti ti-check"></i> Aanmaken</button>
     </div>
   </div>
 </div>
@@ -962,6 +1002,97 @@
     finally { busyRelease('update'); btn.disabled = false; btn.innerHTML = o; }
   }
 
+  // ── Inline klant-aanmaak (Fase 5): sub-modal vanuit Nieuwe-factuur ──
+  // Bestaande /api/customer POST endpoint hergebruiken (zelfde als sales-wizard +
+  // klanten.html customerFormModal). Gebruik is_company-toggle voor B2C/B2B.
+  // Op success: zet _newCust met de nieuwe customer (id + name) → auto-select in
+  // factuur-modal, sub-modal sluit, factuur-flow gaat door waar gebruiker was.
+  function openNewCustCreateModal() {
+    document.getElementById('newCustIsCompany').checked = false;
+    document.getElementById('newCustB2bFields').style.display = 'none';
+    document.getElementById('newCustB2cFields').style.display = 'grid';
+    ['newCustCompanyName','newCustKvk','newCustVat','newCustFirstName','newCustLastName','newCustEmail','newCustPhone','newCustStreet','newCustNumber','newCustPostal','newCustCity'].forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
+    document.getElementById('newCustPrivacy').checked = false;
+    document.getElementById('newCustCreateErr').textContent = '';
+    document.getElementById('newCustCreateModal').classList.remove('hidden');
+    setTimeout(() => document.getElementById('newCustFirstName')?.focus(), 50);
+  }
+  function onNewCustTypeChange() {
+    const isCo = document.getElementById('newCustIsCompany').checked;
+    document.getElementById('newCustB2bFields').style.display = isCo ? 'grid' : 'none';
+    document.getElementById('newCustB2cFields').style.display = isCo ? 'none' : 'grid';
+    // Focus shift naar het eerste relevante veld voor snel typen.
+    setTimeout(() => document.getElementById(isCo ? 'newCustCompanyName' : 'newCustFirstName')?.focus(), 50);
+  }
+  async function submitNewCustCreate() {
+    const errEl = document.getElementById('newCustCreateErr'); errEl.textContent = '';
+    const isCo = document.getElementById('newCustIsCompany').checked;
+    const privacy = document.getElementById('newCustPrivacy').checked;
+    if (!privacy) { errEl.textContent = 'Bevestig dat de klant is geïnformeerd over de privacyverklaring.'; return; }
+    // Bouw body: alleen gevulde velden meesturen (PATCH-vriendelijk; backend
+    // accepteert ontbrekende optionele velden).
+    const v = (id) => (document.getElementById(id).value || '').trim();
+    const body = {
+      is_company: isCo,
+      privacy_accepted: true,
+    };
+    if (isCo) {
+      const cn = v('newCustCompanyName');
+      if (!cn) { errEl.textContent = 'Bedrijfsnaam is verplicht.'; return; }
+      body.company_name = cn;
+      if (v('newCustKvk')) body.kvk_number = v('newCustKvk');
+      if (v('newCustVat')) body.vat_number = v('newCustVat');
+      // Bij B2B mogen first/last leeg blijven — backend accepteert dat.
+    } else {
+      const fn = v('newCustFirstName'), ln = v('newCustLastName');
+      if (!fn) { errEl.textContent = 'Voornaam is verplicht.'; return; }
+      if (!ln) { errEl.textContent = 'Achternaam is verplicht.'; return; }
+      body.first_name = fn;
+      body.last_name  = ln;
+    }
+    if (v('newCustEmail'))  body.email  = v('newCustEmail');
+    if (v('newCustPhone'))  body.phone  = v('newCustPhone');
+    if (v('newCustStreet')) body.address_street = v('newCustStreet');
+    if (v('newCustNumber')) body.address_number = v('newCustNumber');
+    if (v('newCustPostal')) body.address_postal = v('newCustPostal');
+    if (v('newCustCity'))   body.address_city   = v('newCustCity');
+
+    const btn = document.getElementById('newCustCreateOk');
+    btn.disabled = true; const oh = btn.innerHTML; btn.innerHTML = '<i class="ti ti-loader"></i> Bezig…';
+    try {
+      const r = await window.AgentShared.apiFetch('/api/customer', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        // 422 met TL-echo zou kunnen voorkomen als customer.js PATCH-style
+        // TL-push hier ook draait. POST doet (per huidige customer.js) géén
+        // TL-push, dus alleen DB-errors (400/500). Toon wat de server geeft.
+        const msg = d.error || ('HTTP ' + r.status);
+        errEl.textContent = 'Aanmaken mislukt: ' + msg;
+        return;
+      }
+      // Success — sluit sub-modal en zet de nieuwe klant als geselecteerd in de
+      // factuur-modal. _newCust shape moet matchen wat onNewCustSearch zet:
+      // { id, name }.
+      const c = d.customer;
+      const display = c.is_company
+        ? (c.company_name || '(zonder bedrijfsnaam)')
+        : ([c.first_name, c.last_name].filter(Boolean).join(' ') || c.email || '(zonder naam)');
+      _newCust = { id: c.id, name: display };
+      document.getElementById('newCustSel').textContent = '✓ ' + display + ' (nieuw)';
+      document.getElementById('newCustSearch').value = display;
+      document.getElementById('newCustList').style.display = 'none';
+      document.getElementById('newCustCreateModal').classList.add('hidden');
+      window.AgentShared?.showToast?.('Klant aangemaakt — geselecteerd in factuur-flow', 'success');
+    } catch (e) {
+      errEl.textContent = 'Mislukt: ' + (e?.message || 'onbekend');
+    } finally {
+      btn.disabled = false; btn.innerHTML = oh;
+    }
+  }
+
   // ── DEEL D: Nieuwe factuur ──
   let _newCust = null, _newLines = [];
   function openNewInvoiceModal() {
@@ -1238,7 +1369,13 @@
       document.getElementById('newAddLine').addEventListener('click', () => { _newLines.push({ description: '', quantity: 1, unit_price_excl: 0, vat_percentage: 21 }); renderNewLines(); });
       document.getElementById('newCustSearch').addEventListener('input', (e) => onNewCustSearch(e.target.value));
       if (canCreate) { const nb = document.getElementById('invNewBtn'); nb.style.display = ''; nb.addEventListener('click', openNewInvoiceModal); }
-      document.addEventListener('keydown', (e) => { if (e.key === 'Escape') { ['invModal', 'payModal', 'sendModal', 'creditModal', 'updModal', 'newInvModal'].forEach(id => document.getElementById(id)?.classList.add('hidden')); } }, true);
+      // Inline klant-aanmaak (Fase 5): trigger vanuit factuur-modal + sub-modal wiring.
+      document.getElementById('newCustCreateLink').addEventListener('click', (e) => { e.preventDefault(); openNewCustCreateModal(); });
+      document.getElementById('newCustIsCompany').addEventListener('change', onNewCustTypeChange);
+      document.getElementById('newCustCreateCancel').addEventListener('click', () => document.getElementById('newCustCreateModal').classList.add('hidden'));
+      document.getElementById('newCustCreateOk').addEventListener('click', submitNewCustCreate);
+      document.getElementById('newCustCreateModal').addEventListener('click', (e) => { if (e.target.id === 'newCustCreateModal') document.getElementById('newCustCreateModal').classList.add('hidden'); });
+      document.addEventListener('keydown', (e) => { if (e.key === 'Escape') { ['invModal', 'payModal', 'sendModal', 'creditModal', 'updModal', 'newInvModal', 'newCustCreateModal'].forEach(id => document.getElementById(id)?.classList.add('hidden')); } }, true);
 
       // Lijst-state herstellen (pill/zoek/periode/pagina/scroll) → geen reset bij terugkeer.
       const restored = restoreState();
