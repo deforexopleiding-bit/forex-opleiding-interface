@@ -296,6 +296,9 @@
     .bulk-result-banner.success { background:#10B98122; border:1px solid #10B981; color:#10B981; }
     .bulk-result-banner.mixed   { background:#F59E0B22; border:1px solid #F59E0B; color:#F59E0B; }
     .bulk-result-banner .bulk-result-fails { font-size:11px; margin-top:4px; opacity:.85; }
+    /* Row-click factuur-detail in Facturen-tab (Fase 5): hover-feedback */
+    .sr-table tbody tr.clickable-row { cursor: pointer; }
+    .sr-table tbody tr.clickable-row:hover { background: var(--bg-elev-2, #f9fafb); }
   </style>
 </head>
 <body>
@@ -1185,7 +1188,7 @@ async function renderFacturenTab() {
       const tlItem = inv.tl_invoice_id ? `<a class="sr-menu-item" href="https://focus.teamleader.eu/invoice_detail.php?id=${escapeHtml(inv.tl_invoice_id)}" target="_blank"><i class="ti ti-external-link"></i> Open in Teamleader</a>` : '';
       const pdfItem = inv.tl_invoice_id ? `<button class="sr-menu-item" onclick="koInvoicePdf('${escapeHtml(inv.tl_invoice_id)}')"><i class="ti ti-file-type-pdf"></i> Open PDF</button>` : '';
       const menu = `<div class="sr-menu"><button class="sr-ibtn sr-menu-toggle" title="Meer"><i class="ti ti-dots"></i></button><div class="sr-menu-pop">${detItem}${payItem}${remItem}${pdfItem}${tlItem}</div></div>`;
-      return `<tr>
+      return `<tr class="clickable-row" data-ko-row="${i}">
         <td style="padding:0"><div class="statusstrip-bar" style="background:${bar}"></div></td>
         <td><span class="sr-uname">${escapeHtml(inv.invoice_number)}</span></td>
         <td style="text-align:right">${eur2(inv.amount_total)}</td>
@@ -1207,6 +1210,12 @@ async function renderFacturenTab() {
     wrap.querySelectorAll('[data-ko-inv]').forEach(b => b.addEventListener('click', () => koOpenInvoice(koInvoices[Number(b.dataset.koInv)])));
     wrap.querySelectorAll('[data-ko-pay]').forEach(b => b.addEventListener('click', () => koPayModal(koInvoices[Number(b.dataset.koPay)])));
     wrap.querySelectorAll('[data-ko-remove]').forEach(b => b.addEventListener('click', () => koRemovePayment(koInvoices[Number(b.dataset.koRemove)])));
+    // Row-click (Fase 5): klik op rij opent factuur-detail; klikken binnen
+    // kebab/menu/buttons/links worden uitgesloten zodat ze niet bubbelen.
+    wrap.querySelectorAll('[data-ko-row]').forEach(tr => tr.addEventListener('click', (e) => {
+      if (e.target.closest('.sr-menu, button, a')) return;
+      koOpenInvoice(koInvoices[Number(tr.dataset.koRow)]);
+    }));
   } catch (e) { wrap.innerHTML = '<div class="placeholder-card">Laden mislukt: ' + escapeHtml(e.message) + '</div>'; }
 }
 

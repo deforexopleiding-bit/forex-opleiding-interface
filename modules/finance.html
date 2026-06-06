@@ -112,6 +112,9 @@
     .fin-tl li:last-child { border-bottom: none; }
     .fin-tl .ic { width: 20px; text-align: center; color: var(--text-dim); flex: 0 0 auto; }
     .fin-tl .dt { color: var(--text-faint); margin-left: auto; flex: 0 0 auto; }
+    /* Row-click factuur-detail (Fase 5): hover-feedback */
+    .sr-table tbody tr.clickable-row { cursor: pointer; }
+    .sr-table tbody tr.clickable-row:hover { background: var(--bg-elev-2, #f9fafb); }
   </style>
 </head>
 <body>
@@ -477,7 +480,7 @@
       const tlItem = inv.tl_invoice_id ? `<a class="sr-menu-item" href="https://focus.teamleader.eu/invoice_detail.php?id=${esc(inv.tl_invoice_id)}" target="_blank"><i class="ti ti-external-link"></i> Open in Teamleader</a>` : '';
       const payItem = (canRegister && inv.tl_invoice_id && ['open', 'partially_paid', 'overdue'].includes(inv.display_status)) ? `<button class="sr-menu-item" type="button" data-inv-pay="${i}"><i class="ti ti-cash"></i> Betaling registreren</button>` : '';
       const removeItem = (canRemove && inv.tl_invoice_id && (Number(inv.amount_paid) || 0) > 0) ? `<button class="sr-menu-item danger" type="button" data-inv-remove="${i}"><i class="ti ti-arrow-back-up"></i> Betaling terugdraaien</button>` : '';
-      return `<tr>
+      return `<tr class="clickable-row" data-inv-row="${i}">
         <td style="padding:0"><div class="statusstrip-bar" style="background:${m.bar}"></div></td>
         <td><span class="sr-uname">${esc(inv.invoice_number)}</span>${ent ? `<br><span class="sr-cellsub">${esc(ent)}</span>` : ''}</td>
         <td><span class="sr-uname">${esc(inv.customer_name)}</span></td>
@@ -497,6 +500,14 @@
     tb.querySelectorAll('[data-inv-detail]').forEach(b => b.addEventListener('click', () => openDetail(items[Number(b.dataset.invDetail)])));
     tb.querySelectorAll('[data-inv-pay]').forEach(b => b.addEventListener('click', () => openPayModal(items[Number(b.dataset.invPay)])));
     tb.querySelectorAll('[data-inv-remove]').forEach(b => b.addEventListener('click', () => removePayment(items[Number(b.dataset.invRemove)])));
+    // Row-click (Fase 5): klik op de rij opent het factuur-detail. Klikken binnen
+    // de kebab/menu/buttons/links worden uitgesloten via target.closest — zo
+    // bubbelen die niet naar de rij-handler. Geen extra stopPropagation per knop
+    // nodig (single source of truth).
+    tb.querySelectorAll('[data-inv-row]').forEach(tr => tr.addEventListener('click', (e) => {
+      if (e.target.closest('.sr-menu, button, a')) return;
+      openDetail(items[Number(tr.dataset.invRow)]);
+    }));
   }
 
   function renderPager() {
