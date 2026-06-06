@@ -1,6 +1,6 @@
 // api/finance-bank-transactions.js
 // GET → gepagineerde lijst bank-transacties uit onze DB voor de Bank-tab.
-// Permission: finance.bank.view.
+// Permission: finance.bank.transactions_view.
 //
 // Query-params (alle optioneel):
 //   from        ISO YYYY-MM-DD — transaction_date >= from
@@ -29,8 +29,8 @@ export default async function handler(req, res) {
   const supabase = createUserClient(req);
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return res.status(401).json({ error: 'Niet geauthenticeerd' });
-  if (!(await requirePermission(req, 'finance.bank.view'))) {
-    return res.status(403).json({ error: 'Geen rechten (finance.bank.view)' });
+  if (!(await requirePermission(req, 'finance.bank.transactions_view'))) {
+    return res.status(403).json({ error: 'Geen rechten (finance.bank.transactions_view)' });
   }
 
   const q = req.query || {};

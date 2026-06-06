@@ -1,6 +1,6 @@
 // api/finance-bank-balance.js
 // GET → actueel saldo van de bank-rekening (default ING ledger 1010).
-// Permission: finance.bank.view.
+// Permission: finance.bank.balance_view.
 //
 // Implementatie: live-call naar /v1/ledger/{id}/balance van e-Boekhouden
 // (bestaat in REST, bevestigd via Mantix Client.php getLedgerBalance).
@@ -25,8 +25,8 @@ export default async function handler(req, res) {
   const supabase = createUserClient(req);
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return res.status(401).json({ error: 'Niet geauthenticeerd' });
-  if (!(await requirePermission(req, 'finance.bank.view'))) {
-    return res.status(403).json({ error: 'Geen rechten (finance.bank.view)' });
+  if (!(await requirePermission(req, 'finance.bank.balance_view'))) {
+    return res.status(403).json({ error: 'Geen rechten (finance.bank.balance_view)' });
   }
 
   const ledgerId = Number(process.env.EBH_BANK_LEDGER_ID) || DEFAULT_BANK_LEDGER;

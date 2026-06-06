@@ -1,28 +1,23 @@
 -- ============================================================================
--- Finance Fase 3 — Bank-tab RBAC permission
+-- Finance Fase 3 — Bank-tab RBAC (NO-OP)
 -- Datum: 2026-06-06
 -- Branch: feat/finance-3-bank-overview
 --
--- Eén nieuwe permission: finance.bank.view (read-toegang Bank-tab).
--- Manager + admin krijgen 'm by default; super_admin auto via
--- user_has_permission RPC. Idempotent (NOT EXISTS).
+-- LET OP — DIT BESTAND IS EEN NO-OP IN PRODUCTIE.
+--
+-- Tijdens implementatie verzon ik (Claude) een umbrella-key `finance.bank.view`.
+-- In productie bestaan al de juiste, fijnmaziger keys via de seed in
+-- modules/admin.html (regels 458-462):
+--
+--   finance.bank.balance_view       — Banksaldo bekijken
+--   finance.bank.transactions_view  — Bank-transacties bekijken
+--   finance.bank.match_approve      — (v2) Match goedkeuren
+--   finance.bank.match_auto_toggle  — (v2) Auto-match aan/uit
+--   finance.bank.category_manage    — (v2) Categorieën beheren
+--
+-- Fase 3 (deze branch) gebruikt alleen balance_view + transactions_view —
+-- geen DB-migratie nodig. Bestand blijft staan als historisch artefact zodat
+-- de migratie-historie consistent is in commit-trail.
+--
+-- Geen statements uit te voeren.
 -- ============================================================================
-
-BEGIN;
-
-INSERT INTO public.role_permissions (role, feature_key, allowed)
-SELECT r, k, true
-FROM (VALUES ('manager'), ('admin')) AS roles(r)
-CROSS JOIN (VALUES
-  ('finance.bank.view')
-) AS keys(k)
-WHERE NOT EXISTS (
-  SELECT 1 FROM public.role_permissions rp
-  WHERE rp.role = roles.r AND rp.feature_key = keys.k
-);
-
-COMMIT;
-
--- Verificatie:
---   SELECT role, feature_key, allowed FROM role_permissions
---   WHERE feature_key = 'finance.bank.view' ORDER BY role;

@@ -208,7 +208,7 @@
   <div id="view-bank" hidden>
     <div class="bank-locked" id="bankLocked" hidden style="background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.3);border-radius:8px;padding:14px 16px;margin-bottom:14px">
       <div style="font-size:15px;font-weight:700;margin-bottom:6px">Geen toegang tot bankoverzicht</div>
-      <div style="font-size:12.5px">Je mist het recht <code>finance.bank.view</code>. Vraag een beheerder dit aan te zetten.</div>
+      <div style="font-size:12.5px">Je mist de rechten <code>finance.bank.balance_view</code> en <code>finance.bank.transactions_view</code>. Vraag een beheerder een van beide aan te zetten.</div>
     </div>
     <div id="bankMain">
       <!-- Sync-banner (analoog aan Facturen-tab — Fase 3 cron `15 * * * *`) -->
@@ -559,8 +559,12 @@
     document.getElementById('view-bank').hidden = (view !== 'bank');
     document.getElementById('view-roadmap').hidden = (view !== 'roadmap');
     document.querySelectorAll('#financeNav .sr-seg').forEach(b => b.classList.toggle('active', b.dataset.view === view));
-    // Bij eerste keer Bank-tab openen: load lijst + balans.
-    if (view === 'bank' && !_bankLoadedOnce) { _bankLoadedOnce = true; loadBank(); loadBankBalance(); loadBankSyncStatus(); }
+    // Bij eerste keer Bank-tab openen: load per beschikbare permission.
+    if (view === 'bank' && !_bankLoadedOnce) {
+      _bankLoadedOnce = true;
+      if (canBankBalanceView) loadBankBalance();
+      if (canBankTxView) { loadBank(); loadBankSyncStatus(); }
+    }
   }
 
   function renderKpis(k) {
@@ -1491,7 +1495,11 @@
   }
 
   let canRegister = false, canRemove = false, canSend = false, canUpdate = false, canCredit = false, canCreate = false;
-  let canBankView = false;
+  // Bank-tab heeft twee aparte permissions (geen umbrella):
+  //  - finance.bank.balance_view → saldo-kaart zichtbaar
+  //  - finance.bank.transactions_view → transactie-tabel + filters + sync-banner
+  // Tab-knop is zichtbaar als de gebruiker MINSTENS één van beide heeft.
+  let canBankBalanceView = false, canBankTxView = false;
   async function init() {
     try {
       await window._authSharedReady;
@@ -1507,9 +1515,36 @@
       canUpdate = can('finance.invoice.update');
       canCredit = can('finance.invoice.credit');
       canCreate = can('finance.invoice.create');
-      canBankView = can('finance.bank.view');
-      // Bank-tab button alleen tonen bij permission.
-      if (canBankView) { const nb = document.getElementById('navBank'); if (nb) nb.style.display = ''; }
+      canBankBalanceView = can('finance.bank.balance_view');
+      canBankTxView = can('finance.bank.transactions_view');
+      // Bank-tab button zichtbaar zodra de gebruiker minimaal één van beide heeft.
+      if (canBankBalanceView || canBankTxView) {
+        const nb = document.getElementById('navBank'); if (nb) nb.style.display = '';
+      }
+      // Verberg saldo-kaart en/of transactie-blok per ontbrekende permission.
+      // Beide ontbreken → locked-banner tonen, main hide (zelfde patroon als
+      // invLocked); daar zorgt setView('bank') automatisch voor via deze guard.
+      const balanceCard = document.querySelector('.bank-balance-card');
+      if (balanceCard && !canBankBalanceView) balanceCard.style.display = 'none';
+      const bankFiltersEl = document.getElementById('bankFilters');
+      const bankTableEl = document.getElementById('bankTable');
+      const bankPagerEl = document.getElementById('bankPager');
+      const bankSyncBannerEl = document.getElementById('bankSyncBanner');
+      if (!canBankTxView) {
+        if (bankFiltersEl) bankFiltersEl.style.display = 'none';
+        if (bankTableEl && bankTableEl.parentElement) bankTableEl.parentElement.style.display = 'none';
+        if (bankPagerEl) bankPagerEl.style.display = 'none';
+        // Sync-banner hoort bij transactie-sync, dus alleen tonen met tx-view.
+        if (bankSyncBannerEl) bankSyncBannerEl.style.display = 'none';
+      }
+      if (!canBankBalanceView && !canBankTxView) {
+        // Beide ontbreken → bankLocked tonen (gebruiker zou hier sowieso niet
+        // moeten landen want tab-knop is verborgen, maar deep-link-bescherming).
+        const locked = document.getElementById('bankLocked');
+        const main = document.getElementById('bankMain');
+        if (locked) locked.hidden = false;
+        if (main)   main.hidden   = true;
+      }
 
       // Entiteit-dropdown vullen.
       const sel = document.getElementById('invEntity');
