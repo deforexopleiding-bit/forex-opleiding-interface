@@ -341,7 +341,7 @@
       <button class="sr-abtn" id="newCancel" type="button">Annuleren</button>
       <button class="sr-abtn" id="newDraft" type="button">Opslaan als concept</button>
       <button class="sr-abtn primary" id="newBook" type="button"><i class="ti ti-book"></i> Boeken</button>
-      <button class="sr-abtn success" id="newBookSend" type="button"><i class="ti ti-send"></i> Boeken + Verzenden</button>
+      <button class="sr-abtn success" id="newBookSend" type="button"><i class="ti ti-send"></i> Boeken &amp; Verzenden</button>
     </div>
   </div>
 </div>
@@ -921,17 +921,24 @@
     const taxRows = Object.keys(byRate).sort((a, b) => Number(a) - Number(b)).map(r => `<div class="inv-drow"><span class="lbl">Btw ${r}%</span><span>${eur(byRate[r])}</span></div>`).join('');
     document.getElementById('newTotals').innerHTML = `<div class="inv-drow"><span class="lbl">Subtotaal excl. btw</span><span>${eur(excl)}</span></div>${taxRows}<div class="inv-drow"><span class="lbl"><strong>Totaal incl. btw</strong></span><span><strong>${eur(incl)}</strong></span></div>`;
   }
-  async function submitNew(action) {
+  async function submitNew(action, opts) {
+    opts = opts || {};
+    const autoOpenSend = !!opts.autoOpenSend;          // 'Boeken & Verzenden': na boeken → Verzenden-modal
+    const btnId = autoOpenSend ? 'newBookSend' : (action === 'draft' ? 'newDraft' : 'newBook');
     const errEl = document.getElementById('newErr'); errEl.textContent = '';
     if (!_newCust) { errEl.textContent = 'Kies eerst een klant.'; return; }
     const dept = document.getElementById('newDept').value;
     const goodLines = _newLines.filter(l => String(l.description || '').trim() && Number(l.quantity) > 0);
     if (!goodLines.length) { errEl.textContent = 'Minimaal 1 regel met omschrijving + aantal vereist.'; return; }
-    if (action !== 'draft' && !confirm(action === 'book' ? 'Factuur DEFINITIEF boeken in Teamleader. Doorgaan?' : 'Factuur boeken én verzenden naar de klant. Doorgaan?')) return;
-    if (!busyGuard('new')) return;  // in-flight: voorkomt dubbele factuur in TL bij dubbele klik
-    // ALLE drie save-knoppen disabled tijdens de call.
+    if (action !== 'draft') {
+      const cMsg = autoOpenSend
+        ? 'Factuur DEFINITIEF boeken in Teamleader; daarna opent de Verzenden-dialoog. Doorgaan?'
+        : 'Factuur DEFINITIEF boeken in Teamleader. Doorgaan?';
+      if (!confirm(cMsg)) return;
+    }
+    if (!busyGuard('new')) return;
     ['newDraft', 'newBook', 'newBookSend'].forEach(id => { const b = document.getElementById(id); if (b) b.disabled = true; });
-    const btn = document.getElementById(action === 'draft' ? 'newDraft' : (action === 'book' ? 'newBook' : 'newBookSend'));
+    const btn = document.getElementById(btnId);
     const o = btn.innerHTML; btn.innerHTML = '<i class="ti ti-loader"></i> Bezig…';
     const payload = {
       customer_id: _newCust.id, department_id: dept,
@@ -941,15 +948,18 @@
     try {
       const r = await window.AgentShared.apiFetch('/api/finance-invoice-create', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
       const d = await r.json(); if (!r.ok || !d.success) throw new Error((d.error || 'HTTP ' + r.status) + (d.tl_response ? ' — ' + d.tl_response : ''));
+      // Boek-fout = harde error: laat Nieuwe-factuur-modal open, geen autoOpenSend.
+      if (d.bookErr) {
+        errEl.textContent = 'Concept aangemaakt; boeken faalde — open in TL voor details. Verzenden niet uitgevoerd.';
+        return;
+      }
       let msg = 'Concept aangemaakt';
-      if (d.booked) msg = d.sent ? 'Factuur geboekt + verzonden' : 'Factuur geboekt';
-      if (d.bookErr) msg = 'Concept aangemaakt; boeken faalde — open in TL voor details';
-      if (d.sendErr) msg += ' · verzenden faalde';
+      if (d.booked) msg = 'Factuur geboekt';
       if (d.sync_err) msg += ' · sync-back faalde: ' + d.sync_err;
-      window.AgentShared?.showToast(msg, (d.bookErr || d.sendErr) ? 'error' : 'success');
+      window.AgentShared?.showToast(msg, 'success');
       document.getElementById('newInvModal').classList.add('hidden');
-      // Open de nieuwe factuur direct: schakel eerst de pill naar de status van de net-
-      // aangemaakte factuur (anders valt 'ie buiten de huidige filter), reload, vind, open.
+
+      // Lijst bijwerken naar juiste status + nieuwe rij vinden.
       if (d.invoice_id) {
         const target = d.local_status || (action === 'draft' ? 'concept' : 'open');
         if (state.status !== target) {
@@ -958,7 +968,15 @@
         }
         await load();
         const found = state.rows.find(x => x.id === d.invoice_id);
-        if (found) openDetail(found);
+        if (found) {
+          if (autoOpenSend) {
+            // Sluit detail-modal indien open + open meteen Verzenden-modal voor de net-geboekte factuur.
+            document.getElementById('invModal').classList.add('hidden');
+            openSendModal(found);
+          } else {
+            openDetail(found);
+          }
+        }
       } else { await load(); }
     } catch (e) { errEl.textContent = 'Mislukt: ' + e.message; }
     finally { busyRelease('new'); ['newDraft', 'newBook', 'newBookSend'].forEach(id => { const b = document.getElementById(id); if (b) b.disabled = false; }); btn.innerHTML = o; }
@@ -1040,7 +1058,7 @@
       wire('newInvModal', 'newCancel');
       document.getElementById('newDraft').addEventListener('click', () => submitNew('draft'));
       document.getElementById('newBook').addEventListener('click', () => submitNew('book'));
-      document.getElementById('newBookSend').addEventListener('click', () => submitNew('book_and_send'));
+      document.getElementById('newBookSend').addEventListener('click', () => submitNew('book', { autoOpenSend: true }));
       document.getElementById('newAddLine').addEventListener('click', () => { _newLines.push({ description: '', quantity: 1, unit_price_excl: 0, vat_percentage: 21 }); renderNewLines(); });
       document.getElementById('newCustSearch').addEventListener('input', (e) => onNewCustSearch(e.target.value));
       if (canCreate) { const nb = document.getElementById('invNewBtn'); nb.style.display = ''; nb.addEventListener('click', openNewInvoiceModal); }
