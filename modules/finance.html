@@ -316,6 +316,38 @@
   </div>
 </div>
 
+<!-- Bank-transactie detail modal (Fase 3 — toont volledige omschrijving + raw_payload) -->
+<div class="modal-overlay hidden" id="bankTxModal" role="dialog" aria-modal="true">
+  <div class="modal-card" style="max-width:680px">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px">
+      <h3 id="bankTxTitle" style="margin:0">Transactie</h3>
+      <button class="sr-ibtn" id="bankTxClose" type="button" title="Sluiten" style="margin-top:-4px"><i class="ti ti-x"></i></button>
+    </div>
+    <div id="bankTxAmount" style="font-size:28px;font-weight:700;margin:14px 0 16px;font-variant-numeric:tabular-nums">€ —</div>
+    <div style="display:grid;grid-template-columns:120px 1fr;gap:8px 14px;font-size:12.5px">
+      <div style="color:var(--text-dim);text-transform:uppercase;letter-spacing:.04em;font-weight:600">Omschrijving</div>
+      <div id="bankTxDescription" style="font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px;line-height:1.5;white-space:pre-wrap;word-break:break-all">—</div>
+      <div style="color:var(--text-dim);text-transform:uppercase;letter-spacing:.04em;font-weight:600">Tegenpartij</div>
+      <div id="bankTxCounterparty">—</div>
+      <div style="color:var(--text-dim);text-transform:uppercase;letter-spacing:.04em;font-weight:600">IBAN</div>
+      <div id="bankTxIban" style="font-family:ui-monospace,Menlo,Consolas,monospace">—</div>
+      <div style="color:var(--text-dim);text-transform:uppercase;letter-spacing:.04em;font-weight:600">Factuurnr.</div>
+      <div id="bankTxInvoiceNumber">—</div>
+      <div style="color:var(--text-dim);text-transform:uppercase;letter-spacing:.04em;font-weight:600">e-Boekhouden ID</div>
+      <div id="bankTxEbId" style="font-family:ui-monospace,Menlo,Consolas,monospace">—</div>
+      <div style="color:var(--text-dim);text-transform:uppercase;letter-spacing:.04em;font-weight:600">Ledger</div>
+      <div id="bankTxLedger" style="font-family:ui-monospace,Menlo,Consolas,monospace">—</div>
+    </div>
+    <details style="margin-top:16px">
+      <summary style="cursor:pointer;font-size:12px;color:var(--text-dim);user-select:none">Ruwe data (raw_payload)</summary>
+      <pre id="bankTxRaw" style="margin-top:8px;padding:10px 12px;background:var(--bg-elev-2, #f4f4f5);border:1px solid var(--border, #e5e7eb);border-radius:6px;font-size:11px;font-family:ui-monospace,Menlo,Consolas,monospace;line-height:1.5;max-height:260px;overflow:auto;white-space:pre-wrap;word-break:break-all">—</pre>
+    </details>
+    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px">
+      <button class="sr-abtn primary" id="bankTxCloseBtn" type="button">Sluiten</button>
+    </div>
+  </div>
+</div>
+
 <!-- Factuur-detail modal -->
 <div class="modal-overlay hidden" id="invModal" role="dialog" aria-modal="true">
   <div class="modal-card">
@@ -1377,6 +1409,42 @@
   let _bankLoadedOnce = false;
   const bankState = { dir: 'all', from: '', to: '', q: '', page: 1, pageSize: 50, total: 0 };
   let _bankSearchTimer = null;
+  // Cache van de items van de huidige page — voor modal-lookup zonder extra API-call.
+  let _bankItems = [];
+  // Type-label voor modal-header. Spiegelt mutation_type enum uit e-Boekhouden.
+  const BANK_TYPE_LABEL = {
+    3: 'Inkoopfactuur betaling',
+    4: 'Verkoopfactuur betaling',
+    5: 'Geld ontvangen',
+    6: 'Geld uitgegeven',
+  };
+  function openBankTxModal(idx) {
+    const t = _bankItems[idx];
+    if (!t) return;
+    const cents = Number(t.amount_cents) || 0;
+    const amtColor = cents > 0 ? '#10b981' : (cents < 0 ? '#ef4444' : 'var(--text)');
+    const amtSign = cents > 0 ? '+' : (cents < 0 ? '−' : '');
+    document.getElementById('bankTxTitle').textContent = fmtDateNl(t.transaction_date) + ' · ' + (BANK_TYPE_LABEL[t.mutation_type] || ('type ' + t.mutation_type));
+    const amtEl = document.getElementById('bankTxAmount');
+    amtEl.textContent = amtSign + fmtEur2Cents(Math.abs(cents));
+    amtEl.style.color = amtColor;
+    document.getElementById('bankTxDescription').textContent = t.description || '—';
+    document.getElementById('bankTxCounterparty').textContent = t.counterparty_name || '—';
+    document.getElementById('bankTxIban').textContent = t.counterparty_iban || '—';
+    document.getElementById('bankTxInvoiceNumber').textContent = t.invoice_number || '—';
+    document.getElementById('bankTxEbId').textContent = t.eb_mutation_id || '—';
+    document.getElementById('bankTxLedger').textContent = t.ledger_id || '—';
+    // raw_payload: pretty-print als beschikbaar.
+    const rawEl = document.getElementById('bankTxRaw');
+    if (t.raw_payload) {
+      try { rawEl.textContent = JSON.stringify(t.raw_payload, null, 2); }
+      catch (e) { rawEl.textContent = String(t.raw_payload); }
+    } else {
+      rawEl.textContent = '(geen raw_payload)';
+    }
+    document.getElementById('bankTxModal').classList.remove('hidden');
+  }
+  function closeBankTxModal() { document.getElementById('bankTxModal').classList.add('hidden'); }
   function fmtEur2Cents(c) {
     const n = Number(c) || 0;
     return '€' + (n / 100).toLocaleString('nl-NL', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -1434,14 +1502,15 @@
       }
       bankState.total = d.total || 0;
       const items = d.items || [];
+      _bankItems = items;  // cache voor modal-lookup zonder extra API-call
       if (!items.length) {
         tb.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:24px;color:var(--text-faint)">Geen transacties gevonden.</td></tr>';
       } else {
-        tb.innerHTML = items.map(t => {
+        tb.innerHTML = items.map((t, i) => {
           const cents = Number(t.amount_cents) || 0;
           const amtColor = cents > 0 ? '#10b981' : (cents < 0 ? '#ef4444' : 'var(--text)');
           const amtSign = cents > 0 ? '+' : '';
-          return `<tr>
+          return `<tr class="clickable-row" data-bank-row="${i}">
             <td>${esc(fmtDateNl(t.transaction_date))}</td>
             <td>${esc((t.description || '').slice(0, 80))}</td>
             <td>${esc(t.counterparty_name || '—')}</td>
@@ -1450,6 +1519,12 @@
             <td class="num" style="color:${amtColor};font-weight:600;font-variant-numeric:tabular-nums">${amtSign}${fmtEur2Cents(Math.abs(cents))}</td>
           </tr>`;
         }).join('');
+        // Row-click: opent detail-modal met volledige omschrijving + raw_payload.
+        // closest-filter zodat klikken op interne buttons/links niet bubbelen.
+        tb.querySelectorAll('[data-bank-row]').forEach(tr => tr.addEventListener('click', (e) => {
+          if (e.target.closest('button, a')) return;
+          openBankTxModal(Number(tr.dataset.bankRow));
+        }));
       }
       // Pager.
       const pages = Math.max(1, Math.ceil(bankState.total / bankState.pageSize));
@@ -1598,7 +1673,7 @@
       document.getElementById('newCustCreateCancel').addEventListener('click', () => document.getElementById('newCustCreateModal').classList.add('hidden'));
       document.getElementById('newCustCreateOk').addEventListener('click', submitNewCustCreate);
       document.getElementById('newCustCreateModal').addEventListener('click', (e) => { if (e.target.id === 'newCustCreateModal') document.getElementById('newCustCreateModal').classList.add('hidden'); });
-      document.addEventListener('keydown', (e) => { if (e.key === 'Escape') { ['invModal', 'payModal', 'sendModal', 'creditModal', 'updModal', 'newInvModal', 'newCustCreateModal'].forEach(id => document.getElementById(id)?.classList.add('hidden')); } }, true);
+      document.addEventListener('keydown', (e) => { if (e.key === 'Escape') { ['invModal', 'payModal', 'sendModal', 'creditModal', 'updModal', 'newInvModal', 'newCustCreateModal', 'bankTxModal'].forEach(id => document.getElementById(id)?.classList.add('hidden')); } }, true);
 
       // Lijst-state herstellen (pill/zoek/periode/pagina/scroll) → geen reset bij terugkeer.
       const restored = restoreState();
@@ -1624,6 +1699,10 @@
       const bs = document.getElementById('bankSearch'); if (bs) bs.addEventListener('input', e => { clearTimeout(_bankSearchTimer); _bankSearchTimer = setTimeout(() => { bankState.q = e.target.value.trim(); bankState.page = 1; loadBank(); }, 350); });
       const br = document.getElementById('bankRefresh'); if (br) br.addEventListener('click', () => { bankState.page = 1; loadBank(); });
       const bbr = document.getElementById('bankBalanceRefresh'); if (bbr) bbr.addEventListener('click', loadBankBalance);
+      // Bank-tx detail-modal wiring (Fase 3 — row-click).
+      const bxc = document.getElementById('bankTxClose'); if (bxc) bxc.addEventListener('click', closeBankTxModal);
+      const bxc2 = document.getElementById('bankTxCloseBtn'); if (bxc2) bxc2.addEventListener('click', closeBankTxModal);
+      const bxm = document.getElementById('bankTxModal'); if (bxm) bxm.addEventListener('click', (e) => { if (e.target === bxm) closeBankTxModal(); });
     } catch (e) { console.error('[finance-facturen] init', e); }
   }
 

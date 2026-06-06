@@ -49,7 +49,7 @@ export default async function handler(req, res) {
   try {
     let query = supabaseAdmin
       .from('bank_transactions')
-      .select('id, eb_mutation_id, ledger_id, mutation_type, transaction_date, amount_cents, currency, description, counterparty_name, counterparty_iban, invoice_number, created_at', { count: 'exact' });
+      .select('id, eb_mutation_id, ledger_id, mutation_type, transaction_date, amount_cents, currency, description, counterparty_name, counterparty_iban, invoice_number, raw_payload, created_at', { count: 'exact' });
 
     if (from) query = query.gte('transaction_date', from);
     if (to)   query = query.lte('transaction_date', to);
