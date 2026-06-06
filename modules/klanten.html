@@ -1241,7 +1241,8 @@ function koEnsureInvModal() {
           <label style="font-size:12.5px;display:block;margin-bottom:8px">Teamleader mail-template <span class="sr-cellsub" style="font-weight:400">(verplicht)</span>
             <select id="koSendTpl" style="width:100%;margin-top:3px;padding:6px 9px;border:1px solid var(--border);border-radius:7px;background:var(--bg);color:var(--text)"><option value="">— laden…</option></select>
           </label>
-          <label style="font-size:12.5px;display:block;margin-bottom:8px">Ontvanger (e-mail)<input id="koSendTo" type="email" style="width:100%;margin-top:3px;padding:6px 9px;border:1px solid var(--border);border-radius:7px;background:var(--bg);color:var(--text)"/></label>
+          <label style="font-size:12.5px;display:block;margin-bottom:4px">Ontvanger (e-mail)<input id="koSendTo" type="email" style="width:100%;margin-top:3px;padding:6px 9px;border:1px solid var(--border);border-radius:7px;background:#f4f4f5;color:var(--text);cursor:not-allowed" readonly/></label>
+          <div style="font-size:11px;color:var(--text-faint);font-style:italic;margin-bottom:8px">Teamleader stuurt naar het klant-mailadres uit TL. Wijzig dit in TL bij de klant zelf (of via Aanpassen-knop op de klantkaart als Fase 4 live is) vóór je verzendt.</div>
           <a href="#" id="koSendAdvToggle" style="font-size:12px;color:var(--accent-cyan);text-decoration:none">Geavanceerd ▾</a>
           <div id="koSendAdv" style="margin-top:8px;display:none;flex-direction:column;gap:8px">
             <label style="font-size:12.5px">Onderwerp overschrijven <span class="sr-cellsub" style="font-weight:400">(leeg = template)</span>

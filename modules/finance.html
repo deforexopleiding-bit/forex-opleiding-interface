@@ -285,7 +285,8 @@
       <label style="font-size:12.5px">Teamleader mail-template <span class="sr-cellsub" style="font-weight:400">(verplicht)</span>
         <select id="sendTpl" class="fin-input" style="width:100%;margin-top:4px"><option value="">— laden…</option></select>
       </label>
-      <label style="font-size:12.5px">Ontvanger (e-mail)<input id="sendTo" type="email" class="fin-input" style="width:100%;margin-top:4px" placeholder="naam@voorbeeld.nl"/></label>
+      <label style="font-size:12.5px">Ontvanger (e-mail)<input id="sendTo" type="email" class="fin-input" style="width:100%;margin-top:4px;background:#f4f4f5;cursor:not-allowed" placeholder="naam@voorbeeld.nl" readonly/></label>
+      <div style="font-size:11px;color:var(--text-faint);font-style:italic;margin-top:-4px">Teamleader stuurt naar het klant-mailadres uit TL. Wijzig dit in TL bij de klant zelf (of via Aanpassen-knop op de klantkaart als Fase 4 live is) vóór je verzendt.</div>
       <div>
         <a href="#" id="sendAdvToggle" style="font-size:12px;color:var(--accent-cyan);text-decoration:none">Geavanceerd: onderwerp / inhoud overschrijven ▾</a>
         <div id="sendAdv" style="margin-top:8px;display:none;flex-direction:column;gap:8px">
