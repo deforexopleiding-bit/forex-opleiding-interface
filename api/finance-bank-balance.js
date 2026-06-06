@@ -5,8 +5,16 @@
 // Implementatie: live-call naar /v1/ledger/{id}/balance van e-Boekhouden
 // (bestaat in REST, bevestigd via Mantix Client.php getLedgerBalance).
 //
+// Optionele correctie via env-var EBH_BALANCE_OFFSET (integer in centen):
+//   eb_balance_cents - offset_cents = displayed balance
+//
+// Use case: e-Boekhouden's balance loopt soms achter op de werkelijke
+// bank-balans (Combidesk-lag, niet-geboekte transacties, etc.). De offset
+// laat de gebruiker dat verschil corrigeren zonder code-aanpassing.
+//
 // Response:
-//   { balance_cents, as_of_date, source: 'eboekhouden', ledger_id }
+//   { balance_cents, eb_balance_cents, offset_cents, as_of_date,
+//     source: 'eboekhouden', ledger_id }
 //
 // Bij fout: 502 met tl_response-style echo. Geen DB-fallback want saldo is
 // inherent realtime — een cached balans uit DB zou misleidend zijn.
@@ -62,15 +70,21 @@ export default async function handler(req, res) {
     }
     // Defensief: euros (decimaal) → centen. Als e-Boekhouden int-cents al levert,
     // detecteer aan ontbreken van decimalen + grote magnitude (zeldzaam).
-    const balanceCents = Math.round(rawNum * 100);
+    const ebBalanceCents = Math.round(rawNum * 100);
+
+    // Optionele correctie via env-var (integer cents). Default 0 = geen correctie.
+    const offsetCents = Number.parseInt(process.env.EBH_BALANCE_OFFSET || '0', 10) || 0;
+    const balanceCents = ebBalanceCents - offsetCents;
 
     const asOfDate = data.asOfDate || data.date || new Date().toISOString().slice(0, 10);
 
     return res.status(200).json({
-      balance_cents: balanceCents,
-      as_of_date:    asOfDate,
-      source:        'eboekhouden',
-      ledger_id:     ledgerId,
+      balance_cents:    balanceCents,
+      eb_balance_cents: ebBalanceCents,
+      offset_cents:     offsetCents,
+      as_of_date:       asOfDate,
+      source:           'eboekhouden',
+      ledger_id:        ledgerId,
     });
   } catch (e) {
     console.error('[finance-bank-balance]', e.message);

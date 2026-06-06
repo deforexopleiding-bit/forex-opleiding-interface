@@ -1404,7 +1404,14 @@
       }
       valEl.textContent = fmtEur2Cents(d.balance_cents);
       valEl.style.color = (Number(d.balance_cents) || 0) >= 0 ? '#10b981' : '#ef4444';
-      metaEl.textContent = 'Per ' + fmtDateNl(d.as_of_date) + ' · ledger ' + d.ledger_id + ' · live uit e-Boekhouden';
+      let metaText = 'Per ' + fmtDateNl(d.as_of_date) + ' · ledger ' + d.ledger_id + ' · live uit e-Boekhouden';
+      // Toon boekhoud-correctie als de env-var EBH_BALANCE_OFFSET ingesteld is.
+      const offC = Number(d.offset_cents) || 0;
+      if (offC !== 0) {
+        const offEur = (offC / 100).toLocaleString('nl-NL', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        metaText += ' · incl. boekhoud-correctie van €' + offEur;
+      }
+      metaEl.textContent = metaText;
     } catch (e) {
       metaEl.textContent = 'Fout: ' + e.message;
     }
