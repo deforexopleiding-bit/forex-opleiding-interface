@@ -50,7 +50,7 @@ export default async function handler(req, res) {
   const sortField = ['issue_date', 'due_date', 'amount_total', 'status', 'invoice_number'].includes(q.sort) ? q.sort : 'issue_date';
   const dir = q.dir === 'asc' ? 'asc' : 'desc';
   const page = Math.max(1, Number(q.page) || 1);
-  const pageSize = Math.min(Math.max(Number(q.page_size) || 50, 1), 200);
+  const pageSize = Math.min(Math.max(Number(q.page_size) || 50, 1), 500);
   const td = today();
   const monthStart = td.slice(0, 7) + '-01';
 
@@ -116,7 +116,20 @@ export default async function handler(req, res) {
     if (statusFilter === 'credited') lq = lq.gt('credited_amount', 0);
     else if (statusFilter === 'overdue') lq = lq.eq('status', 'open').lt('due_date', td).eq('credited_amount', 0);
     else if (statusFilter) lq = lq.eq('status', statusFilter).eq('credited_amount', 0);
-    if (search) lq = lq.ilike('invoice_number', `%${search}%`);
+    if (search) {
+      // Zoek op factuurnummer OF klantnaam (first/last/company_name). Klant-match via
+      // aparte id-lookup, daarna invoice_number.ilike OR customer_id.in.(...).
+      const s = search.replace(/[,()]/g, ' ').trim();
+      let custIds = [];
+      if (s) {
+        const { data: custMatch } = await supabaseAdmin.from('customers')
+          .select('id').or(`first_name.ilike.%${s}%,last_name.ilike.%${s}%,company_name.ilike.%${s}%`).limit(500);
+        custIds = (custMatch || []).map(c => c.id);
+      }
+      const ors = [`invoice_number.ilike.%${s}%`];
+      if (custIds.length) ors.push(`customer_id.in.(${custIds.join(',')})`);
+      lq = lq.or(ors.join(','));
+    }
 
     lq = lq.order(sortField, { ascending: dir === 'asc' }).range((page - 1) * pageSize, page * pageSize - 1);
     const { data: rows, count, error: listErr } = await lq;

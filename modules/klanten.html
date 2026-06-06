@@ -146,6 +146,23 @@
     .modal-overlay { position:fixed; inset:0; background:rgba(0,0,0,0.6); z-index:500; display:flex; align-items:center; justify-content:center; backdrop-filter:blur(4px); padding:20px; }
     .modal-overlay.hidden { display:none!important; }
     .modal-card { background:var(--bg-elev); border:1px solid var(--border); border-radius:14px; width:100%; max-width:600px; max-height:calc(100vh - 40px); display:flex; flex-direction:column; }
+    /* Fase 2C variant-A — gedeeld met finance.html */
+    #koInvModal .modal-card { max-width: 680px; }
+    .fin-card { background: var(--bg-elev-2); border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; margin-bottom: 12px; }
+    .fin-card h4 { font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--text-faint); margin: 0 0 8px; font-weight: 700; }
+    .fin-kv { display: grid; grid-template-columns: 1fr 1fr; gap: 5px 16px; font-size: 13px; }
+    .fin-kv .k { color: var(--text-dim); }
+    .fin-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 12px; }
+    .fin-actions .spacer { flex: 1 1 auto; }
+    .fin-abtn-note { font-size: 9px; font-weight: 700; letter-spacing: .03em; opacity: .8; margin-left: 3px; }
+    .fin-tl { list-style: none; margin: 0; padding: 0; }
+    .fin-tl li { display: flex; gap: 9px; padding: 6px 0; font-size: 12.5px; border-bottom: 1px solid var(--border); }
+    .fin-tl li:last-child { border-bottom: none; }
+    .fin-tl .ic { width: 20px; text-align: center; color: var(--text-dim); flex: 0 0 auto; }
+    .fin-tl .dt { color: var(--text-faint); margin-left: auto; flex: 0 0 auto; }
+    .inv-drow { display: flex; justify-content: space-between; gap: 12px; padding: 7px 0; border-bottom: 1px solid var(--border); font-size: 13px; }
+    .inv-drow:last-child { border-bottom: none; }
+    .inv-drow .lbl { color: var(--text-dim); }
     .modal-card.modal-sm { max-width:440px; }
     .modal-header { display:flex; align-items:center; justify-content:space-between; padding:16px 20px; border-bottom:1px solid var(--border); }
     .modal-title { font-size:15px; font-weight:600; }
@@ -401,6 +418,7 @@
               <th data-sort-key="created_at" aria-sort="descending">Klant sinds</th>
               <th>Status</th>
               <th>Laatste contact</th>
+              <th aria-label="Acties"></th>
             </tr>
           </thead>
           <tbody id="customers-tbody">
@@ -414,9 +432,10 @@
         <span class="page-info" id="page-info">—</span>
         <span class="filter-label">Per pagina:</span>
         <select id="page-size">
-          <option value="25" selected>25</option>
-          <option value="50">50</option>
+          <option value="20">20</option>
+          <option value="50" selected>50</option>
           <option value="100">100</option>
+          <option value="500">500</option>
         </select>
         <div class="spacer"></div>
         <button id="btn-prev" type="button">‹ Vorige</button>
@@ -778,7 +797,7 @@ const state = {
   sortBy:        'created_at',
   sortDir:       'desc',
   page:          1,
-  pageSize:      25,
+  pageSize:      50,
   // Fase 2A.4 commit 6:
   selectionMode: false,             // bulk-select toggle aan/uit
   selectedIds:   new Set(),         // set van customer-id's die gekruist zijn
@@ -1111,9 +1130,16 @@ const KO_SUB_BADGE = { active: 'green', paused: 'warning', cancelled: 'gray' };
 let koSubs = [], koAboPending = null, koAboSeg = 'active';
 function koSubInclPerTerm(s) { const lis = Array.isArray(s.line_items) ? s.line_items : []; return lis.length ? lis.reduce((a, li) => a + (Number(li.amount) || 0) * (1 + (Number(li.vat_percentage) || 0) / 100), 0) : (Number(s.amount) || 0) * (1 + (Number(s.vat_percentage) || 0) / 100); }
 // === Facturen sub-tab (read-only TL-spiegel, Finance Fase 2A) ===
-const KO_INV_TAG = { concept: 'gray', open: 'blue', partially_paid: 'warning', paid: 'green', overdue: 'danger', credited: 'purple', writeoff: 'gray' };
-const KO_INV_LABEL = { concept: 'Concept', open: 'Open', partially_paid: 'Deels betaald', paid: 'Betaald', overdue: 'Te laat', credited: 'Gecrediteerd', writeoff: 'Afgeschreven' };
-const KO_INV_BAR = { concept: '#9ca3af', open: '#3b82f6', partially_paid: '#f59e0b', paid: '#059669', overdue: '#ef4444', credited: '#8b5cf6', writeoff: '#9ca3af' };
+const KO_INV_TAG = { concept: 'gray', open: 'blue', partially_paid: 'warning', paid: 'green', overdue: 'danger', credited: 'purple', partially_credited: 'purple', writeoff: 'gray' };
+const KO_INV_LABEL = { concept: 'Concept', open: 'Open', partially_paid: 'Deels betaald', paid: 'Betaald', overdue: 'Te laat', credited: 'Gecrediteerd', partially_credited: 'Deels gecrediteerd', writeoff: 'Afgeschreven' };
+const KO_INV_BAR = { concept: '#9ca3af', open: '#3b82f6', partially_paid: '#f59e0b', paid: '#059669', overdue: '#ef4444', credited: '#8b5cf6', partially_credited: '#a78bfa', writeoff: '#9ca3af' };
+let koInvoices = [], _koPayInv = null, koInvCanReg = false, koInvCanRem = false;
+let koInvCanSend = false, koInvCanUpdate = false, koInvCanCredit = false;
+let _koSendInv = null, _koCredInv = null, _koUpdInv = null, _koUpdLines = [], _koSendTpls = null;
+const _koBusy = {};
+const koBusyGuard = (k) => { if (_koBusy[k]) return false; _koBusy[k] = true; return true; };
+const koBusyRelease = (k) => { _koBusy[k] = false; };
+const koCan = async (k) => { try { return window.RBAC?.can ? await window.RBAC.can(k) : false; } catch (e) { return false; } };
 
 window.koInvoicePdf = async function (tlId) {
   try {
@@ -1142,17 +1168,28 @@ async function renderFacturenTab() {
         <div class="placeholder-card">Nog geen facturen gespiegeld voor deze klant. <a href="https://focus.teamleader.eu/invoices" target="_blank" style="color:var(--accent-cyan)">Open in Teamleader</a></div></div>`;
       return;
     }
-    const rows = items.map(inv => {
+    koInvoices = items;
+    const canReg = koInvCanReg = await koCan('finance.invoice.payment.register');
+    const canRem = koInvCanRem = await koCan('finance.invoice.payment.remove');
+    koInvCanSend = await koCan('finance.invoice.send');
+    koInvCanUpdate = await koCan('finance.invoice.update');
+    koInvCanCredit = await koCan('finance.invoice.credit');
+    const rows = items.map((inv, i) => {
       const tag = KO_INV_TAG[inv.display_status] || 'gray';
       const label = KO_INV_LABEL[inv.display_status] || (inv.display_status || '—');
       const bar = KO_INV_BAR[inv.display_status] || '#9ca3af';
+      const credited = Number(inv.credited_amount) || 0;
+      const detItem = `<button class="sr-menu-item" data-ko-inv="${i}"><i class="ti ti-eye"></i> Bekijk details</button>`;
+      const payItem = (canReg && inv.tl_invoice_id && ['open', 'partially_paid', 'overdue'].includes(inv.display_status)) ? `<button class="sr-menu-item" data-ko-pay="${i}"><i class="ti ti-cash"></i> Betaling registreren</button>` : '';
+      const remItem = (canRem && inv.tl_invoice_id && (Number(inv.amount_paid) || 0) > 0) ? `<button class="sr-menu-item danger" data-ko-remove="${i}"><i class="ti ti-arrow-back-up"></i> Betaling terugdraaien</button>` : '';
       const tlItem = inv.tl_invoice_id ? `<a class="sr-menu-item" href="https://focus.teamleader.eu/invoice_detail.php?id=${escapeHtml(inv.tl_invoice_id)}" target="_blank"><i class="ti ti-external-link"></i> Open in Teamleader</a>` : '';
       const pdfItem = inv.tl_invoice_id ? `<button class="sr-menu-item" onclick="koInvoicePdf('${escapeHtml(inv.tl_invoice_id)}')"><i class="ti ti-file-type-pdf"></i> Open PDF</button>` : '';
-      const menu = (tlItem || pdfItem) ? `<div class="sr-menu"><button class="sr-ibtn sr-menu-toggle" title="Meer"><i class="ti ti-dots"></i></button><div class="sr-menu-pop">${pdfItem}${tlItem}</div></div>` : '';
+      const menu = `<div class="sr-menu"><button class="sr-ibtn sr-menu-toggle" title="Meer"><i class="ti ti-dots"></i></button><div class="sr-menu-pop">${detItem}${payItem}${remItem}${pdfItem}${tlItem}</div></div>`;
       return `<tr>
         <td style="padding:0"><div class="statusstrip-bar" style="background:${bar}"></div></td>
         <td><span class="sr-uname">${escapeHtml(inv.invoice_number)}</span></td>
         <td style="text-align:right">${eur2(inv.amount_total)}</td>
+        <td style="text-align:right">${credited > 0 ? '− ' + eur2(credited) : '<span class="cust-empty">—</span>'}</td>
         <td style="text-align:right">${eur2(inv.amount_open)}</td>
         <td>${dd(inv.due_date)}</td>
         <td><span class="sr-tag ${tag}">${escapeHtml(label)}</span></td>
@@ -1163,11 +1200,373 @@ async function renderFacturenTab() {
       <h3><i class="ti ti-receipt"></i> Facturen <span class="sr-cellsub" style="font-weight:500">· openstaand ${eur2(open)}</span></h3>
       <div class="sr-tablewrap"><table class="sr-table"><thead><tr>
         <th style="width:4px;padding:0"></th><th>Factuurnr</th>
-        <th style="text-align:right">Totaal</th><th style="text-align:right">Open</th>
+        <th style="text-align:right">Totaal</th><th style="text-align:right">Gecrediteerd</th><th style="text-align:right">Open</th>
         <th>Vervaldag</th><th>Status</th><th style="width:36px"></th>
       </tr></thead><tbody>${rows}</tbody></table></div>
     </div>`;
+    wrap.querySelectorAll('[data-ko-inv]').forEach(b => b.addEventListener('click', () => koOpenInvoice(koInvoices[Number(b.dataset.koInv)])));
+    wrap.querySelectorAll('[data-ko-pay]').forEach(b => b.addEventListener('click', () => koPayModal(koInvoices[Number(b.dataset.koPay)])));
+    wrap.querySelectorAll('[data-ko-remove]').forEach(b => b.addEventListener('click', () => koRemovePayment(koInvoices[Number(b.dataset.koRemove)])));
   } catch (e) { wrap.innerHTML = '<div class="placeholder-card">Laden mislukt: ' + escapeHtml(e.message) + '</div>'; }
+}
+
+// Klant-context: factuurdetail-modal (regels/totalen/creditnota/incasso/PDF) + betaal-acties.
+function koEnsureInvModal() {
+  if (document.getElementById('koInvModal')) return;
+  const wrap = document.createElement('div');
+  wrap.innerHTML = `
+    <div class="modal-overlay hidden" id="koInvModal" role="dialog" aria-modal="true">
+      <div class="modal-card" style="max-width:580px">
+        <div class="modal-header"><div class="modal-title" id="koInvTitle">Factuur</div><button class="modal-close" type="button" onclick="document.getElementById('koInvModal').classList.add('hidden')">&#x2715;</button></div>
+        <div class="modal-body" id="koInvBody"></div>
+      </div>
+    </div>
+    <div class="modal-overlay hidden" id="koPay" role="dialog" aria-modal="true">
+      <div class="modal-card" style="max-width:420px">
+        <div class="modal-header"><div class="modal-title">Betaling registreren</div><button class="modal-close" type="button" onclick="document.getElementById('koPay').classList.add('hidden')">&#x2715;</button></div>
+        <div class="modal-body">
+          <div id="koPaySub" class="sr-cellsub" style="margin-bottom:10px"></div>
+          <label style="font-size:12.5px;display:block;margin-bottom:8px">Bedrag (€)<input id="koPayAmount" type="number" step="0.01" min="0" style="width:100%;margin-top:3px;padding:6px 9px;border:1px solid var(--border);border-radius:7px;background:var(--bg);color:var(--text)"/></label>
+          <label style="font-size:12.5px;display:block;margin-bottom:8px">Betaaldatum<input id="koPayDate" type="date" style="width:100%;margin-top:3px;padding:6px 9px;border:1px solid var(--border);border-radius:7px;background:var(--bg);color:var(--text)"/></label>
+          <div id="koPayErr" style="color:#ef4444;font-size:12px"></div>
+        </div>
+        <div class="modal-footer"><button class="btn btn-sm" type="button" onclick="document.getElementById('koPay').classList.add('hidden')">Annuleren</button><button class="btn btn-primary btn-sm" type="button" id="koPayOk">Registreren</button></div>
+      </div>
+    </div>
+    <div class="modal-overlay hidden" id="koSend" role="dialog" aria-modal="true">
+      <div class="modal-card" style="max-width:520px">
+        <div class="modal-header"><div class="modal-title">Factuur verzenden</div><button class="modal-close" type="button" onclick="document.getElementById('koSend').classList.add('hidden')">&#x2715;</button></div>
+        <div class="modal-body">
+          <div id="koSendSub" class="sr-cellsub" style="margin-bottom:10px"></div>
+          <label style="font-size:12.5px;display:block;margin-bottom:8px">Teamleader mail-template <span class="sr-cellsub" style="font-weight:400">(verplicht)</span>
+            <select id="koSendTpl" style="width:100%;margin-top:3px;padding:6px 9px;border:1px solid var(--border);border-radius:7px;background:var(--bg);color:var(--text)"><option value="">— laden…</option></select>
+          </label>
+          <label style="font-size:12.5px;display:block;margin-bottom:8px">Ontvanger (e-mail)<input id="koSendTo" type="email" style="width:100%;margin-top:3px;padding:6px 9px;border:1px solid var(--border);border-radius:7px;background:var(--bg);color:var(--text)"/></label>
+          <a href="#" id="koSendAdvToggle" style="font-size:12px;color:var(--accent-cyan);text-decoration:none">Geavanceerd ▾</a>
+          <div id="koSendAdv" style="margin-top:8px;display:none;flex-direction:column;gap:8px">
+            <label style="font-size:12.5px">Onderwerp overschrijven <span class="sr-cellsub" style="font-weight:400">(leeg = template)</span>
+              <input id="koSendSubject" type="text" style="width:100%;margin-top:3px;padding:6px 9px;border:1px solid var(--border);border-radius:7px;background:var(--bg);color:var(--text)"/></label>
+            <label style="font-size:12.5px">Inhoud overschrijven <span class="sr-cellsub" style="font-weight:400">(leeg = template)</span>
+              <textarea id="koSendContent" style="width:100%;margin-top:3px;padding:6px 9px;border:1px solid var(--border);border-radius:7px;background:var(--bg);color:var(--text);min-height:90px;font-family:inherit"></textarea></label>
+          </div>
+          <div id="koSendErr" style="color:#ef4444;font-size:12px;margin-top:8px;white-space:pre-wrap"></div>
+        </div>
+        <div class="modal-footer"><button class="btn btn-sm" type="button" onclick="document.getElementById('koSend').classList.add('hidden')">Annuleren</button><button class="btn btn-primary btn-sm" type="button" id="koSendOk" disabled>Verzenden</button></div>
+      </div>
+    </div>
+    <div class="modal-overlay hidden" id="koCred" role="dialog" aria-modal="true">
+      <div class="modal-card" style="max-width:480px">
+        <div class="modal-header"><div class="modal-title">Creditnota aanmaken</div><button class="modal-close" type="button" onclick="document.getElementById('koCred').classList.add('hidden')">&#x2715;</button></div>
+        <div class="modal-body">
+          <div id="koCredSub" class="sr-cellsub" style="margin-bottom:10px"></div>
+          <div style="background:rgba(245,158,11,.12);border:1px solid rgba(245,158,11,.3);border-radius:8px;padding:10px;font-size:12.5px">
+            De creditnota wordt aangemaakt in Teamleader en synct via Combidesk naar e-boekhouden zoals altijd.
+          </div>
+          <label style="font-size:12.5px;display:block;margin-top:10px">Omschrijving (optioneel)<input id="koCredDesc" type="text" style="width:100%;margin-top:3px;padding:6px 9px;border:1px solid var(--border);border-radius:7px;background:var(--bg);color:var(--text)" placeholder="bv. annulering, retour, fout"/></label>
+          <div id="koCredErr" style="color:#ef4444;font-size:12px;margin-top:8px"></div>
+        </div>
+        <div class="modal-footer"><button class="btn btn-sm" type="button" onclick="document.getElementById('koCred').classList.add('hidden')">Annuleren</button><button class="btn btn-sm" style="background:#dc2626;border-color:#dc2626;color:#fff" type="button" id="koCredOk">Crediteren</button></div>
+      </div>
+    </div>
+    <div class="modal-overlay hidden" id="koUpd" role="dialog" aria-modal="true">
+      <div class="modal-card" style="max-width:700px">
+        <div class="modal-header"><div class="modal-title">Conceptfactuur aanpassen</div><button class="modal-close" type="button" onclick="document.getElementById('koUpd').classList.add('hidden')">&#x2715;</button></div>
+        <div class="modal-body">
+          <div id="koUpdSub" class="sr-cellsub" style="margin-bottom:10px"></div>
+          <div id="koUpdLines" style="display:flex;flex-direction:column;gap:8px"></div>
+          <div style="display:flex;gap:8px;margin-top:8px"><button class="btn btn-sm" type="button" id="koUpdAdd"><i class="ti ti-plus"></i> Regel toevoegen</button></div>
+          <div id="koUpdErr" style="color:#ef4444;font-size:12px;margin-top:8px"></div>
+        </div>
+        <div class="modal-footer"><button class="btn btn-sm" type="button" onclick="document.getElementById('koUpd').classList.add('hidden')">Annuleren</button><button class="btn btn-primary btn-sm" type="button" id="koUpdOk">Opslaan</button></div>
+      </div>
+    </div>`;
+  document.body.appendChild(wrap);
+
+  // Wiring (één keer; modals worden lazy gemaakt bij eerste open).
+  document.getElementById('koSendOk').addEventListener('click', submitKoSend);
+  document.getElementById('koCredOk').addEventListener('click', submitKoCredit);
+  document.getElementById('koUpdOk').addEventListener('click', submitKoUpdate);
+  document.getElementById('koUpdAdd').addEventListener('click', () => { _koUpdLines.push({ description: '', quantity: 1, unit_price_excl: 0, vat_percentage: 21 }); renderKoUpdLines(); });
+  document.getElementById('koSendAdvToggle').addEventListener('click', (e) => { e.preventDefault(); const a = document.getElementById('koSendAdv'); const collapsed = a.style.display === 'none'; a.style.display = collapsed ? 'flex' : 'none'; document.getElementById('koSendAdvToggle').textContent = collapsed ? 'Geavanceerd ▴' : 'Geavanceerd ▾'; });
+  const koSyncSendOk = () => { const tpl = document.getElementById('koSendTpl').value; const to = document.getElementById('koSendTo').value.trim(); document.getElementById('koSendOk').disabled = !(tpl && to && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(to)); };
+  document.getElementById('koSendTpl').addEventListener('change', koSyncSendOk);
+  document.getElementById('koSendTo').addEventListener('input', koSyncSendOk);
+  window._koSyncSendOk = koSyncSendOk;
+}
+// Variant-A factuurdetail-modal in klant-context (DRY met finance.html: zelfde card-CSS).
+const KO_ENT_LABEL = { '09d67371-6947-03f6-bd5e-410dd8636344': 'Online', '0da396bf-1074-0425-ac5c-fa1141b41cb1': 'Fysiek', '9adca043-0ebc-09da-a45e-f21798841cb2': 'Retentie' };
+function koOpenInvoice(inv) {
+  if (!inv) return;
+  koEnsureInvModal();
+  const eur2 = (v) => '€' + Number(v || 0).toLocaleString('nl-NL', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const dd = (d) => { if (!d) return '—'; const x = new Date(d + 'T00:00:00'); return isNaN(x) ? '—' : x.toLocaleDateString('nl-NL', { day: '2-digit', month: 'short', year: 'numeric' }); };
+  const tag = KO_INV_TAG[inv.display_status] || 'gray', label = KO_INV_LABEL[inv.display_status] || (inv.display_status || '—');
+  const tlUrl = inv.tl_invoice_id ? `https://focus.teamleader.eu/invoice_detail.php?id=${escapeHtml(inv.tl_invoice_id)}` : 'https://focus.teamleader.eu/invoices';
+  const ent = inv.tl_department_id ? (KO_ENT_LABEL[inv.tl_department_id] || '—') : '—';
+  const cust = detailState.customer || {};
+  const custName = customerDisplayName(cust, '—');
+  const kv = (k, v) => `<div class="k">${k}</div><div>${v}</div>`;
+  const dim = (icon, lbl, note) => `<button class="sr-abtn" type="button" disabled style="opacity:.5;cursor:not-allowed" title="Nog niet beschikbaar"><i class="ti ${icon}"></i> ${lbl}<span class="fin-abtn-note">${note}</span></button>`;
+  const payable = koInvCanReg && inv.tl_invoice_id && ['open', 'partially_paid', 'overdue'].includes(inv.display_status);
+  const sendEnabled = koInvCanSend && !!inv.tl_invoice_id;
+  const updateEnabled = koInvCanUpdate && !!inv.tl_invoice_id && inv.status === 'concept';
+  const creditEnabled = koInvCanCredit && !!inv.tl_invoice_id && inv.status !== 'concept' && Number(inv.credited_amount || 0) < Number(inv.amount_total || 0);
+
+  document.getElementById('koInvTitle').textContent = 'Factuur ' + inv.invoice_number;
+  document.getElementById('koInvBody').innerHTML = `
+    <div class="fin-card">
+      <h4>Info</h4>
+      <div style="margin-bottom:8px"><span class="sr-tag ${tag}">${escapeHtml(label)}</span></div>
+      <div class="fin-kv">
+        ${kv('Bedrijfsentiteit', escapeHtml(ent))}
+        ${kv('Klant', escapeHtml(custName))}
+        ${kv('E-mail', cust.email ? escapeHtml(cust.email) : '—')}
+        ${kv('Telefoon', cust.phone ? escapeHtml(cust.phone) : '—')}
+        ${kv('Factuurdatum', dd(inv.issue_date))}
+        ${kv('Vervaldag', dd(inv.due_date))}
+      </div>
+      <div class="fin-actions">
+        ${payable ? `<button class="sr-abtn success" id="koMarkPaid" type="button"><i class="ti ti-cash"></i> Markeer betaald</button>` : ''}
+        ${sendEnabled ? `<button class="sr-abtn" id="koBtnSend" type="button"><i class="ti ti-send"></i> Verzenden</button>` : dim('ti-send', 'Verzenden', 'geen rechten')}
+        ${updateEnabled ? `<button class="sr-abtn" id="koBtnUpdate" type="button"><i class="ti ti-edit"></i> Aanpassen</button>` : (inv.status === 'concept' ? dim('ti-edit', 'Aanpassen', 'geen rechten') : dim('ti-edit', 'Aanpassen', 'geboekt'))}
+        ${dim('ti-alert-triangle', 'Incasso', 'via TL')}
+        ${creditEnabled ? `<button class="sr-abtn" style="background:rgba(220,38,38,.12);border-color:rgba(220,38,38,.4);color:#dc2626" id="koBtnCredit" type="button"><i class="ti ti-file-minus"></i> Creditnota</button>` : dim('ti-file-minus', 'Creditnota', inv.status === 'concept' ? 'geboekt vereist' : 'geen rechten')}
+        <span class="spacer"></span>
+        ${inv.tl_invoice_id ? `<button class="sr-abtn" type="button" onclick="koInvoicePdf('${escapeHtml(inv.tl_invoice_id)}')"><i class="ti ti-file-type-pdf"></i> PDF</button>` : ''}
+        <a class="sr-abtn" href="${tlUrl}" target="_blank"><i class="ti ti-external-link"></i> Teamleader</a>
+      </div>
+    </div>
+    <div class="fin-card"><h4>Inhoud</h4><div id="koInvLines"><div style="color:var(--text-dim);font-size:12px"><i class="ti ti-loader"></i> Laden…</div></div><div id="koInvCredit"></div><div id="koInvFee"></div></div>
+    <div class="fin-card"><h4>Betalingen</h4><div id="koInvPay"></div></div>
+    <div class="fin-card"><h4>Activiteit</h4><ul class="fin-tl" id="koInvAct"></ul><div style="font-size:11.5px;color:var(--text-faint);margin-top:6px">Afgeleide tijdlijn — Teamleader biedt geen factuur-activiteit via de API.</div></div>`;
+  document.getElementById('koInvModal').classList.remove('hidden');
+  const mk = document.getElementById('koMarkPaid'); if (mk) mk.onclick = () => { document.getElementById('koInvModal').classList.add('hidden'); koPayModal(inv); };
+  const sbtn = document.getElementById('koBtnSend'); if (sbtn) sbtn.onclick = () => openKoSendModal(inv);
+  const ubtn = document.getElementById('koBtnUpdate'); if (ubtn) ubtn.onclick = () => openKoUpdateModal(inv);
+  const cbtn = document.getElementById('koBtnCredit'); if (cbtn) cbtn.onclick = () => openKoCreditModal(inv);
+
+  // Betalingen-kaart.
+  const payEl = document.getElementById('koInvPay');
+  if (payEl) {
+    const remLink = (koInvCanRem && inv.tl_invoice_id && (Number(inv.amount_paid) || 0) > 0) ? ` · <a href="#" id="koRemoveLink" style="color:var(--red,#dc2626)">terugdraaien</a>` : '';
+    payEl.innerHTML = (Number(inv.amount_paid) || 0) > 0
+      ? `<div class="inv-drow"><span class="lbl">Betaald${inv.paid_date ? ' op ' + dd(inv.paid_date) : ''}</span><span>${eur2(inv.amount_paid)}${remLink}</span></div><div class="inv-drow"><span class="lbl">Openstaand</span><span>${eur2(inv.amount_open)}</span></div>`
+      : `<div style="font-size:13px;color:var(--text-dim)">Nog geen betalingen · openstaand <strong>${eur2(inv.amount_open)}</strong></div>`;
+    const rl = document.getElementById('koRemoveLink'); if (rl) rl.onclick = (e) => { e.preventDefault(); koRemovePayment(inv); };
+  }
+
+  // Activiteit (afgeleid).
+  const koActs = [];
+  if (inv.issue_date) koActs.push({ d: inv.issue_date, ic: 'ti-file-plus', t: 'Factuur aangemaakt' });
+  if (inv.due_date) koActs.push({ d: inv.due_date, ic: 'ti-calendar-due', t: 'Vervaldatum' });
+  if ((Number(inv.amount_paid) || 0) > 0 && inv.paid_date) koActs.push({ d: inv.paid_date, ic: 'ti-cash', t: `Betaling geregistreerd · ${eur2(inv.amount_paid)}` });
+  const koRenderAct = () => {
+    const el = document.getElementById('koInvAct'); if (!el) return;
+    const s = [...koActs].filter(a => a.d).sort((a, b) => String(a.d).localeCompare(String(b.d)));
+    el.innerHTML = s.length ? s.map(a => `<li><span class="ic"><i class="ti ${a.ic}"></i></span><span>${escapeHtml(a.t)}</span><span class="dt">${dd(a.d)}</span></li>`).join('') : '<li style="color:var(--text-faint)">Geen activiteit.</li>';
+  };
+  koRenderAct();
+
+  // Lazy: regels + totalen (BTW per tarief).
+  window.AgentShared.apiFetch('/api/finance-invoice-lines?invoice_id=' + encodeURIComponent(inv.id)).then(r => r.json()).then(d => {
+    const el = document.getElementById('koInvLines'); if (!el) return;
+    const lines = (d && d.lines) || [], t = (d && d.totals) || null;
+    if (!lines.length && !t) { el.innerHTML = '<div style="color:var(--text-faint);font-size:12px">Geen regels beschikbaar.</div>'; return; }
+    const rh = lines.map(l => `<tr><td>${escapeHtml(l.description)}</td><td style="text-align:right">${eur2(l.unit_price_excl)}</td><td style="text-align:right">${l.quantity}</td><td style="text-align:right">${eur2(l.line_total_excl)}</td><td style="text-align:center">${l.tax_rate != null ? l.tax_rate + '%' : '—'}</td></tr>`).join('');
+    let taxRows = '';
+    if (t) {
+      if (Array.isArray(t.tax_rates) && t.tax_rates.length) taxRows = t.tax_rates.map(x => `<div class="inv-drow"><span class="lbl">Btw ${x.rate != null ? x.rate + '%' : ''}</span><span>${eur2(x.amount)}</span></div>`).join('');
+      else if (t.tax != null) taxRows = `<div class="inv-drow"><span class="lbl">Btw</span><span>${eur2(t.tax)}</span></div>`;
+    }
+    const totHtml = t ? ((t.excl != null ? `<div class="inv-drow"><span class="lbl">Totaal excl. btw</span><span>${eur2(t.excl)}</span></div>` : '') + taxRows + (t.incl != null ? `<div class="inv-drow"><span class="lbl"><strong>Totaal incl. btw</strong></span><span><strong>${eur2(t.incl)}</strong></span></div>` : '')) : '';
+    el.innerHTML = (lines.length ? `<div class="sr-tablewrap"><table class="sr-table"><thead><tr><th>Beschrijving</th><th style="text-align:right">Eenheidsprijs</th><th style="text-align:right">Aantal</th><th style="text-align:right">Subtotaal</th><th style="text-align:center">Btw</th></tr></thead><tbody>${rh}</tbody></table></div>` : '') + `<div style="margin-top:8px">${totHtml}</div>`;
+  }).catch(() => {});
+
+  // Lazy: creditnota's + netto.
+  if (Number(inv.credited_amount) > 0) window.AgentShared.apiFetch('/api/finance-invoice-creditnotes?invoice_id=' + encodeURIComponent(inv.id)).then(r => r.json()).then(d => {
+    const el = document.getElementById('koInvCredit'); if (!el || !(Number(d.credited_amount) > 0)) { if (el) el.innerHTML = ''; return; }
+    const cl = (d.credit_notes || []).map(c => `<div class="inv-drow"><span class="lbl" style="padding-left:10px;opacity:.85">${escapeHtml(c.number)} · ${dd(c.date)}</span><span>− ${eur2(c.amount_total)}</span></div>`).join('');
+    el.innerHTML = `<div style="margin-top:8px"><div class="inv-drow"><span class="lbl">Gecrediteerd</span><span>− ${eur2(d.credited_amount)}</span></div>${cl}<div class="inv-drow"><span class="lbl"><strong>Netto</strong></span><span><strong>${eur2(d.amount_net)}</strong></span></div></div>`;
+    (d.credit_notes || []).forEach(c => koActs.push({ d: c.date, ic: 'ti-file-minus', t: `Creditnota ${c.number} · − ${eur2(c.amount_total)}` }));
+    koRenderAct();
+  }).catch(() => {});
+
+  // Lazy: incassokosten (te-laat).
+  if (inv.display_status === 'overdue') window.AgentShared.apiFetch('/api/finance-invoice-late-fee?invoice_id=' + encodeURIComponent(inv.id)).then(r => r.json()).then(d => {
+    const el = document.getElementById('koInvFee'); if (!el || !(Number(d.fee_amount) > 0)) { if (el) el.innerHTML = ''; return; }
+    const tot = d.total_payable != null ? d.total_payable : ((Number(inv.amount_open) || 0) + Number(d.fee_amount));
+    el.innerHTML = `<div style="margin-top:8px"><div class="inv-drow"><span class="lbl">Incassokosten</span><span>${eur2(d.fee_amount)}</span></div><div class="inv-drow"><span class="lbl"><strong>Totaal te betalen</strong></span><span><strong>${eur2(tot)}</strong></span></div></div>`;
+  }).catch(() => {});
+}
+function koPayModal(inv) {
+  if (!inv || !inv.tl_invoice_id) return;
+  koEnsureInvModal();
+  _koPayInv = inv;
+  document.getElementById('koPaySub').textContent = `${inv.invoice_number} · openstaand €${Number(inv.amount_open || 0).toLocaleString('nl-NL', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  document.getElementById('koPayAmount').value = (Number(inv.amount_open) || 0).toFixed(2);
+  document.getElementById('koPayDate').value = new Date().toISOString().slice(0, 10);
+  document.getElementById('koPayErr').textContent = '';
+  document.getElementById('koPayOk').onclick = koPaySubmit;
+  document.getElementById('koPay').classList.remove('hidden');
+}
+async function koPaySubmit() {
+  const inv = _koPayInv; if (!inv) return;
+  const amount = Number(document.getElementById('koPayAmount').value);
+  let paid_at = document.getElementById('koPayDate').value; if (!paid_at) paid_at = new Date().toISOString().slice(0, 10);
+  const err = document.getElementById('koPayErr');
+  if (!(amount > 0)) { err.textContent = 'Vul een geldig bedrag in (> 0).'; return; }
+  const btn = document.getElementById('koPayOk'); btn.disabled = true; const o = btn.textContent; btn.textContent = 'Bezig…';
+  try {
+    const r = await window.AgentShared.apiFetch('/api/finance-invoice-register-payment', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ invoice_id: inv.id, amount, paid_at }) });
+    const d = await r.json(); if (!r.ok || !d.success) throw new Error((d.error || 'HTTP ' + r.status) + (d.tl_response ? ' — ' + d.tl_response : ''));
+    window.AgentShared?.showToast('Betaling geregistreerd', 'success');
+    document.getElementById('koPay').classList.add('hidden');
+    renderFacturenTab();
+  } catch (e) { err.textContent = 'Mislukt: ' + e.message; }
+  finally { btn.disabled = false; btn.textContent = o; }
+}
+async function koRemovePayment(inv) {
+  if (!inv || !inv.tl_invoice_id) return;
+  if (!confirm('Dit verwijdert ALLE geregistreerde betalingen van deze factuur in Teamleader. Je kunt daarna opnieuw afletteren.\n\nDoorgaan?')) return;
+  try {
+    const r = await window.AgentShared.apiFetch('/api/finance-invoice-remove-payment', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ invoice_id: inv.id }) });
+    const d = await r.json(); if (!r.ok || !d.success) throw new Error((d.error || 'HTTP ' + r.status) + (d.tl_response ? ' — ' + d.tl_response : ''));
+    window.AgentShared?.showToast('Betalingen teruggedraaid', 'success'); renderFacturenTab();
+  } catch (e) { window.AgentShared?.showToast('Mislukt: ' + e.message, 'error'); }
+}
+
+// === Klant-context write-modals (parity met finance.html) ===
+
+// Verzenden: TL mail-template dropdown + lazy load + recipient + Geavanceerd.
+async function openKoSendModal(inv) {
+  koEnsureInvModal();
+  _koSendInv = inv;
+  document.getElementById('koSendSub').textContent = `${inv.invoice_number} · ${customerDisplayName(detailState.customer || {}, '—')}`;
+  document.getElementById('koSendTo').value = (detailState.customer && detailState.customer.email) || '';
+  document.getElementById('koSendSubject').value = '';
+  document.getElementById('koSendContent').value = '';
+  document.getElementById('koSendErr').textContent = '';
+  document.getElementById('koSendAdv').style.display = 'none';
+  document.getElementById('koSendAdvToggle').textContent = 'Geavanceerd ▾';
+  const sel = document.getElementById('koSendTpl');
+  sel.innerHTML = '<option value="">— laden…</option>';
+  document.getElementById('koSendOk').disabled = true;
+  document.getElementById('koInvModal').classList.add('hidden');
+  document.getElementById('koSend').classList.remove('hidden');
+  try {
+    if (!_koSendTpls) { const r = await window.AgentShared.apiFetch('/api/finance-mail-templates'); const d = await r.json(); if (!r.ok) throw new Error(d.error || 'HTTP ' + r.status); _koSendTpls = d.templates || []; }
+    if (!_koSendTpls.length) { sel.innerHTML = '<option value="">(geen templates in TL)</option>'; document.getElementById('koSendErr').textContent = 'Geen mail-templates beschikbaar.'; return; }
+    const reminderRe = /herinner|reminder/i, sendKeywordRe = /factuur.*verzend|verzend.*factuur|standaard|standard/i;
+    const list = _koSendTpls.slice().sort((a, b) => { const ar = reminderRe.test(a.name || ''), br = reminderRe.test(b.name || ''); if (ar !== br) return ar ? 1 : -1; return String(a.name || '').localeCompare(String(b.name || '')); });
+    sel.innerHTML = list.map(t => { const isRem = reminderRe.test(t.name || ''); const label = (isRem ? '🕐 ' : '') + (t.name || '(zonder naam)') + (t.language ? ' (' + t.language + ')' : ''); return `<option value="${escapeHtml(t.id)}">${escapeHtml(label)}</option>`; }).join('');
+    const nonRem = list.filter(t => !reminderRe.test(t.name || ''));
+    const pick = (arr) => arr[0]?.id || null;
+    const chosen = pick(nonRem.filter(t => sendKeywordRe.test(t.name || ''))) || pick(list.filter(t => t.is_default && !reminderRe.test(t.name || ''))) || pick(nonRem) || pick(list);
+    if (chosen) sel.value = chosen;
+    if (window._koSyncSendOk) window._koSyncSendOk();
+  } catch (e) { sel.innerHTML = '<option value="">(laden mislukt)</option>'; document.getElementById('koSendErr').textContent = 'Templates laden mislukt: ' + e.message; }
+}
+async function submitKoSend() {
+  if (!_koSendInv) return;
+  if (!koBusyGuard('send')) return;
+  const errEl = document.getElementById('koSendErr'); errEl.textContent = '';
+  const toVal = document.getElementById('koSendTo').value.trim();
+  const tplId = document.getElementById('koSendTpl').value;
+  if (!tplId) { errEl.textContent = 'Kies een TL mail-template.'; koBusyRelease('send'); return; }
+  if (!toVal || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(toVal)) { errEl.textContent = 'Vul een geldig e-mailadres voor de ontvanger in.'; koBusyRelease('send'); return; }
+  const subjVal = document.getElementById('koSendSubject').value.trim();
+  const contVal = document.getElementById('koSendContent').value.trim();
+  const btn = document.getElementById('koSendOk'); btn.disabled = true; const orig = btn.textContent; btn.textContent = 'Bezig…';
+  try {
+    const r = await window.AgentShared.apiFetch('/api/finance-invoice-send', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ invoice_id: _koSendInv.id, mail_template_id: tplId, recipient_email: toVal, subject_override: subjVal || undefined, content_override: contVal || undefined }) });
+    const d = await r.json();
+    if (!r.ok || !d.success) {
+      if (Array.isArray(d.attempts)) { console.log('[koSend] cascade attempts', d.attempts); const lines = d.attempts.map(a => `shape ${a.shape} → HTTP ${a.tl_status}: ${(a.tl_response || '').slice(0, 200)}`); throw new Error((d.error || 'HTTP ' + r.status) + '\n\n' + lines.join('\n')); }
+      if (d.tl_request_payload) console.log('[koSend] tl_request_payload', d.tl_request_payload);
+      throw new Error((d.error || 'HTTP ' + r.status) + (d.tl_response ? '\n\nTL-respons: ' + d.tl_response : ''));
+    }
+    console.log('[koSend] werkende shape:', d.shape_used);
+    window.AgentShared?.showToast('Factuur verzonden via Teamleader' + (d.shape_used ? ' (shape ' + d.shape_used + ')' : ''), 'success');
+    document.getElementById('koSend').classList.add('hidden'); renderFacturenTab();
+  } catch (e) { errEl.textContent = 'Mislukt: ' + e.message; }
+  finally { koBusyRelease('send'); btn.disabled = false; btn.textContent = orig; if (window._koSyncSendOk) window._koSyncSendOk(); }
+}
+
+// Crediteren: bevestiging met optionele description.
+function openKoCreditModal(inv) {
+  koEnsureInvModal();
+  _koCredInv = inv;
+  const eur2 = (v) => '€' + Number(v || 0).toLocaleString('nl-NL', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  document.getElementById('koCredSub').textContent = `${inv.invoice_number} · ${eur2(inv.amount_total)}`;
+  document.getElementById('koCredDesc').value = '';
+  document.getElementById('koCredErr').textContent = '';
+  document.getElementById('koInvModal').classList.add('hidden');
+  document.getElementById('koCred').classList.remove('hidden');
+}
+async function submitKoCredit() {
+  if (!_koCredInv) return;
+  if (!koBusyGuard('credit')) return;
+  const errEl = document.getElementById('koCredErr'); errEl.textContent = '';
+  const btn = document.getElementById('koCredOk'); btn.disabled = true; const orig = btn.textContent; btn.textContent = 'Bezig…';
+  try {
+    const r = await window.AgentShared.apiFetch('/api/finance-invoice-credit', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ invoice_id: _koCredInv.id, description: document.getElementById('koCredDesc').value || undefined }) });
+    const d = await r.json(); if (!r.ok || !d.success) throw new Error((d.error || 'HTTP ' + r.status) + (d.tl_response ? '\n\nTL-respons: ' + d.tl_response : ''));
+    window.AgentShared?.showToast('Creditnota aangemaakt' + (d.synced ? ' + gesynchroniseerd' : ''), 'success');
+    document.getElementById('koCred').classList.add('hidden'); renderFacturenTab();
+  } catch (e) { errEl.textContent = 'Mislukt: ' + e.message; }
+  finally { koBusyRelease('credit'); btn.disabled = false; btn.textContent = orig; }
+}
+
+// Aanpassen: regel-editor preload uit finance-invoice-lines (vat_percentage met null-safe).
+function openKoUpdateModal(inv) {
+  koEnsureInvModal();
+  _koUpdInv = inv;
+  document.getElementById('koUpdSub').textContent = `${inv.invoice_number} (concept) · ${customerDisplayName(detailState.customer || {}, '—')}`;
+  document.getElementById('koUpdErr').textContent = '';
+  _koUpdLines = [];
+  renderKoUpdLines();
+  document.getElementById('koInvModal').classList.add('hidden');
+  document.getElementById('koUpd').classList.remove('hidden');
+  window.AgentShared.apiFetch('/api/finance-invoice-lines?invoice_id=' + encodeURIComponent(inv.id)).then(r => r.json()).then(d => {
+    const pickVat = (v) => (v != null && [0, 6, 9, 21].includes(Number(v))) ? Number(v) : 21;
+    _koUpdLines = (d.lines || []).map(l => ({ description: l.description, quantity: l.quantity, unit_price_excl: l.unit_price_excl, vat_percentage: pickVat(l.tax_rate) }));
+    if (!_koUpdLines.length) _koUpdLines.push({ description: '', quantity: 1, unit_price_excl: 0, vat_percentage: 21 });
+    renderKoUpdLines();
+  }).catch(() => { _koUpdLines.push({ description: '', quantity: 1, unit_price_excl: 0, vat_percentage: 21 }); renderKoUpdLines(); });
+}
+function renderKoUpdLines() {
+  const vatOpts = (cur) => [0, 6, 9, 21].map(v => `<option value="${v}" ${Number(cur) === v ? 'selected' : ''}>${v}%</option>`).join('');
+  const inputCss = 'padding:6px 9px;border:1px solid var(--border);border-radius:7px;background:var(--bg);color:var(--text);font:inherit;width:100%';
+  document.getElementById('koUpdLines').innerHTML = `<div style="display:grid;grid-template-columns:1fr 70px 110px 80px 30px;gap:6px;font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--text-faint);padding:0 2px">
+    <div>Omschrijving</div><div style="text-align:right">Aantal</div><div style="text-align:right">Eenheidsprijs excl.</div><div>BTW</div><div></div></div>` + _koUpdLines.map((l, i) => `
+    <div style="display:grid;grid-template-columns:1fr 70px 110px 80px 30px;gap:6px;align-items:center">
+      <input data-kupd-d="${i}" placeholder="Beschrijving" value="${escapeHtml(l.description || '')}" style="${inputCss}"/>
+      <input data-kupd-q="${i}" type="number" step="1" min="1" value="${l.quantity || 1}" style="${inputCss};text-align:right"/>
+      <input data-kupd-p="${i}" type="number" step="0.01" min="0" value="${(Number(l.unit_price_excl) || 0).toFixed(2)}" style="${inputCss};text-align:right"/>
+      <select data-kupd-v="${i}" style="${inputCss}">${vatOpts(l.vat_percentage)}</select>
+      <button class="btn btn-sm" type="button" data-kupd-x="${i}" title="Verwijder regel"><i class="ti ti-x"></i></button>
+    </div>`).join('');
+  document.querySelectorAll('[data-kupd-d]').forEach(el => el.oninput = () => _koUpdLines[+el.dataset.kupdD].description = el.value);
+  document.querySelectorAll('[data-kupd-q]').forEach(el => el.oninput = () => _koUpdLines[+el.dataset.kupdQ].quantity = Number(el.value) || 1);
+  document.querySelectorAll('[data-kupd-p]').forEach(el => el.oninput = () => _koUpdLines[+el.dataset.kupdP].unit_price_excl = Number(el.value) || 0);
+  document.querySelectorAll('[data-kupd-v]').forEach(el => el.onchange = () => _koUpdLines[+el.dataset.kupdV].vat_percentage = Number(el.value));
+  document.querySelectorAll('[data-kupd-x]').forEach(el => el.onclick = () => { _koUpdLines.splice(+el.dataset.kupdX, 1); renderKoUpdLines(); });
+}
+async function submitKoUpdate() {
+  if (!_koUpdInv) return;
+  if (!koBusyGuard('update')) return;
+  const errEl = document.getElementById('koUpdErr'); errEl.textContent = '';
+  const goodLines = _koUpdLines.filter(l => l.description && l.quantity > 0 && l.unit_price_excl >= 0 && [0, 6, 9, 21].includes(Number(l.vat_percentage)));
+  if (!goodLines.length) { errEl.textContent = 'Minimaal 1 geldige regel vereist (incl. BTW%).'; koBusyRelease('update'); return; }
+  const lines = goodLines.map(l => ({ description: l.description, quantity: l.quantity, unit_price_excl: Number(l.unit_price_excl) || 0, vat_percentage: Number(l.vat_percentage) }));
+  const btn = document.getElementById('koUpdOk'); btn.disabled = true; const orig = btn.textContent; btn.textContent = 'Bezig…';
+  try {
+    const r = await window.AgentShared.apiFetch('/api/finance-invoice-update', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ invoice_id: _koUpdInv.id, lines }) });
+    const d = await r.json(); if (!r.ok || !d.success) throw new Error((d.error || 'HTTP ' + r.status) + (d.tl_response ? '\n\nTL-respons: ' + d.tl_response : ''));
+    window.AgentShared?.showToast('Concept bijgewerkt', 'success');
+    document.getElementById('koUpd').classList.add('hidden'); renderFacturenTab();
+  } catch (e) { errEl.textContent = 'Mislukt: ' + e.message; }
+  finally { koBusyRelease('update'); btn.disabled = false; btn.textContent = orig; }
 }
 
 async function renderAbonnementenTab() {
@@ -1903,6 +2302,7 @@ function renderCustomers({ customers, total, page, page_size, total_pages }) {
     tr.addEventListener('click', (e) => {
       // Clicks op de checkbox zelf afhandelen via change-listener — voorkom dubbel-toggle
       if (e.target && e.target.matches('input[type="checkbox"][data-row-select]')) return;
+      if (e.target && e.target.closest('.sr-menu')) return; // kebab-acties niet als rij-klik behandelen
       if (state.selectionMode) {
         toggleRowSelection(c.id);
       } else {
@@ -1924,6 +2324,7 @@ function renderCustomers({ customers, total, page, page_size, total_pages }) {
       <td>${fmtDate(c.created_at)}</td>
       <td><span class="status-badge ${escapeHtml(c.status)}">${labelForStatus(c.status)}</span></td>
       <td><span class="cust-empty">—</span></td>
+      <td>${koCustKebab(c)}</td>
     `;
     // Bind change-listener op de row-checkbox (na innerHTML)
     const cb = tr.querySelector('input[data-row-select]');
@@ -1939,9 +2340,21 @@ function labelForStatus(s) {
   return { active:'Actief', archived:'Gearchiveerd', anonymized:'Geanonimiseerd' }[s] || s;
 }
 
+// Zichtbare SVG-kebab in de klantenlijst: Bekijk klant + Open in Teamleader.
+function koCustKebab(c) {
+  const svg = '<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="12" cy="5" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="12" cy="19" r="2"/></svg>';
+  let tlUrl = null;
+  if (c.is_company && c.tl_company_id) tlUrl = `https://focus.teamleader.eu/company.php?id=${escapeHtml(c.tl_company_id)}`;
+  else if (c.tl_contact_id) tlUrl = `https://focus.teamleader.eu/contact.php?id=${escapeHtml(c.tl_contact_id)}`;
+  const tlItem = tlUrl ? `<a class="sr-menu-item" href="${tlUrl}" target="_blank"><i class="ti ti-external-link"></i> Open in Teamleader</a>` : '';
+  return `<div class="sr-menu"><button class="sr-ibtn sr-menu-toggle" title="Acties" aria-label="Acties">${svg}</button><div class="sr-menu-pop">
+    <a class="sr-menu-item" href="/modules/klanten.html?id=${escapeHtml(c.id)}"><i class="ti ti-user"></i> Bekijk klant</a>
+    ${tlItem}</div></div>`;
+}
+
 function renderErrorState(msg) {
   $('#customers-tbody').innerHTML = `
-    <tr><td colspan="8" class="state-cell" style="color:#EF4444;">
+    <tr><td colspan="9" class="state-cell" style="color:#EF4444;">
       <i class="ti ti-alert-circle"></i> Kon klanten niet laden: ${escapeHtml(msg || 'onbekende fout')}
       <br><br><button class="btn btn-sm" onclick="loadCustomers()">Opnieuw proberen</button>
     </td></tr>`;

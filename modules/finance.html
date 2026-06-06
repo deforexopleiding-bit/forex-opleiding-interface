@@ -9,6 +9,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/modules/shared/agent-shared.css" />
   <link rel="stylesheet" href="/styles/sales-redesign.css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/dist/tabler-icons.min.css" />
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     html, body { height: 100%; }
@@ -92,6 +93,25 @@
     .inv-drow { display: flex; justify-content: space-between; gap: 12px; padding: 7px 0; border-bottom: 1px solid var(--border); font-size: 13px; }
     .inv-drow:last-child { border-bottom: none; }
     .inv-drow .lbl { color: var(--text-dim); }
+    /* Fase 2C: duidelijk zichtbaar kebab-menu in factuurrijen */
+    #invTable .sr-menu-toggle { border: 1px solid var(--border); background: var(--bg-elev-2); color: var(--text); width: 30px; height: 30px; border-radius: 7px; display: inline-flex; align-items: center; justify-content: center; }
+    #invTable .sr-menu-toggle:hover { border-color: var(--accent-cyan); color: var(--accent-cyan); }
+    /* Fase 2C variant A: gestapelde detail-kaarten (TL-stijl) */
+    #invModal .modal-card { max-width: 680px; max-height: 88vh; overflow-y: auto; }
+    .fin-card { background: var(--bg-elev-2); border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; margin-bottom: 12px; }
+    .fin-card h4 { font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--text-faint); margin: 0 0 8px; font-weight: 700; }
+    .fin-kv { display: grid; grid-template-columns: 1fr 1fr; gap: 5px 16px; font-size: 13px; }
+    .fin-kv .k { color: var(--text-dim); }
+    .fin-sub { font-size: 11.5px; color: var(--text-faint); margin-top: 8px; }
+    .fin-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 12px; }
+    .fin-actions .spacer { flex: 1 1 auto; }
+    .sr-abtn.dim { opacity: .5; cursor: not-allowed; }
+    .fin-abtn-note { font-size: 9px; font-weight: 700; letter-spacing: .03em; opacity: .8; margin-left: 3px; }
+    .fin-tl { list-style: none; margin: 0; padding: 0; }
+    .fin-tl li { display: flex; gap: 9px; padding: 6px 0; font-size: 12.5px; border-bottom: 1px solid var(--border); }
+    .fin-tl li:last-child { border-bottom: none; }
+    .fin-tl .ic { width: 20px; text-align: center; color: var(--text-dim); flex: 0 0 auto; }
+    .fin-tl .dt { color: var(--text-faint); margin-left: auto; flex: 0 0 auto; }
   </style>
 </head>
 <body>
@@ -135,9 +155,10 @@
         <select id="invEntity" class="fin-input"><option value="">Alle entiteiten</option></select>
         <input id="invPeriodStart" type="date" class="fin-input" title="Vanaf factuurdatum" />
         <input id="invPeriodEnd" type="date" class="fin-input" title="T/m factuurdatum" />
-        <input id="invSearch" type="search" placeholder="Zoek factuurnr…" class="fin-input" style="min-width:150px" />
+        <input id="invSearch" type="search" placeholder="Zoek op nr of klantnaam…" class="fin-input" style="min-width:210px" />
         <span style="flex:1"></span>
         <button class="sr-ibtn" id="invRefresh" title="Vernieuwen" type="button"><i class="ti ti-refresh"></i></button>
+        <button class="sr-abtn primary" id="invNewBtn" type="button" style="display:none"><i class="ti ti-plus"></i> Nieuwe factuur</button>
       </div>
       <div class="sr-tablewrap">
         <table class="sr-table" id="invTable">
@@ -214,11 +235,7 @@
   <div class="modal-card">
     <h3 id="invModalTitle">Factuur</h3>
     <div id="invModalBody"></div>
-    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:18px;flex-wrap:wrap">
-      <button class="sr-abtn" id="invModalPdf" type="button"><i class="ti ti-file-type-pdf"></i> Open PDF</button>
-      <a class="sr-abtn" id="invModalTl" href="https://focus.teamleader.eu/invoices" target="_blank"><i class="ti ti-external-link"></i> Open in Teamleader</a>
-      <button class="sr-abtn success" id="invModalPay" type="button" style="display:none"><i class="ti ti-cash"></i> Betaling registreren</button>
-      <button class="sr-abtn danger" id="invModalRemove" type="button" style="display:none"><i class="ti ti-arrow-back-up"></i> Betaling terugdraaien</button>
+    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:6px">
       <button class="sr-abtn primary" id="invModalClose" type="button">Sluiten</button>
     </div>
   </div>
@@ -238,6 +255,93 @@
     <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:18px">
       <button class="sr-abtn" id="payCancel" type="button">Annuleren</button>
       <button class="sr-abtn success" id="paySubmit" type="button"><i class="ti ti-cash"></i> Registreren</button>
+    </div>
+  </div>
+</div>
+
+<!-- Verzenden (Fase 2C — pivot: TL mail-template) -->
+<div class="modal-overlay hidden" id="sendModal" role="dialog" aria-modal="true">
+  <div class="modal-card" style="max-width:520px">
+    <h3>Factuur verzenden</h3>
+    <div id="sendSub" class="sr-cellsub" style="margin-bottom:10px"></div>
+    <div style="display:flex;flex-direction:column;gap:10px">
+      <label style="font-size:12.5px">Teamleader mail-template <span class="sr-cellsub" style="font-weight:400">(verplicht)</span>
+        <select id="sendTpl" class="fin-input" style="width:100%;margin-top:4px"><option value="">— laden…</option></select>
+      </label>
+      <label style="font-size:12.5px">Ontvanger (e-mail)<input id="sendTo" type="email" class="fin-input" style="width:100%;margin-top:4px" placeholder="naam@voorbeeld.nl"/></label>
+      <div>
+        <a href="#" id="sendAdvToggle" style="font-size:12px;color:var(--accent-cyan);text-decoration:none">Geavanceerd: onderwerp / inhoud overschrijven ▾</a>
+        <div id="sendAdv" style="margin-top:8px;display:none;flex-direction:column;gap:8px">
+          <label style="font-size:12.5px">Onderwerp overschrijven <span class="sr-cellsub" style="font-weight:400">(leeg = template-default)</span>
+            <input id="sendSubject" type="text" class="fin-input" style="width:100%;margin-top:4px"/>
+          </label>
+          <label style="font-size:12.5px">Inhoud overschrijven <span class="sr-cellsub" style="font-weight:400">(leeg = template-default)</span>
+            <textarea id="sendContent" class="fin-input" style="width:100%;margin-top:4px;min-height:90px;font-family:inherit"></textarea>
+          </label>
+        </div>
+      </div>
+    </div>
+    <div id="sendErr" style="color:#ef4444;font-size:12px;margin-top:8px;white-space:pre-wrap"></div>
+    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:18px">
+      <button class="sr-abtn" id="sendCancel" type="button">Annuleren</button>
+      <button class="sr-abtn primary" id="sendOk" type="button" disabled><i class="ti ti-send"></i> Verzenden</button>
+    </div>
+  </div>
+</div>
+
+<!-- Crediteren (Fase 2C) -->
+<div class="modal-overlay hidden" id="creditModal" role="dialog" aria-modal="true">
+  <div class="modal-card" style="max-width:480px">
+    <h3>Creditnota aanmaken</h3>
+    <div id="creditSub" class="sr-cellsub" style="margin-bottom:10px"></div>
+    <div style="background:rgba(245,158,11,.12);border:1px solid rgba(245,158,11,.3);border-radius:8px;padding:10px;font-size:12.5px;color:var(--text)">
+      De creditnota wordt aangemaakt in Teamleader en synct via Combidesk naar e-boekhouden zoals altijd. Geen eigen mapping-overrides.
+    </div>
+    <label style="font-size:12.5px;display:block;margin-top:10px">Omschrijving (optioneel)<input id="creditDesc" type="text" class="fin-input" style="width:100%;margin-top:4px" placeholder="bv. annulering, retour, fout"/></label>
+    <div id="creditErr" style="color:#ef4444;font-size:12px;margin-top:8px"></div>
+    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:18px">
+      <button class="sr-abtn" id="creditCancel" type="button">Annuleren</button>
+      <button class="sr-abtn danger" id="creditOk" type="button"><i class="ti ti-file-minus"></i> Crediteren</button>
+    </div>
+  </div>
+</div>
+
+<!-- Aanpassen concept (Fase 2C) -->
+<div class="modal-overlay hidden" id="updModal" role="dialog" aria-modal="true">
+  <div class="modal-card" style="max-width:700px">
+    <h3>Conceptfactuur aanpassen</h3>
+    <div id="updSub" class="sr-cellsub" style="margin-bottom:10px"></div>
+    <div id="updLines" style="display:flex;flex-direction:column;gap:8px"></div>
+    <div style="display:flex;gap:8px;margin-top:8px"><button class="sr-abtn" id="updAddLine" type="button"><i class="ti ti-plus"></i> Regel toevoegen</button></div>
+    <div id="updErr" style="color:#ef4444;font-size:12px;margin-top:8px"></div>
+    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:18px">
+      <button class="sr-abtn" id="updCancel" type="button">Annuleren</button>
+      <button class="sr-abtn primary" id="updOk" type="button"><i class="ti ti-check"></i> Opslaan</button>
+    </div>
+  </div>
+</div>
+
+<!-- Nieuwe factuur (Fase 2C) -->
+<div class="modal-overlay hidden" id="newInvModal" role="dialog" aria-modal="true">
+  <div class="modal-card" style="max-width:780px">
+    <h3>Nieuwe factuur</h3>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">
+      <label style="font-size:12.5px">Klant<input id="newCustSearch" type="search" class="fin-input" placeholder="Zoek klant…" style="width:100%;margin-top:4px"/><div id="newCustList" style="background:var(--bg-elev);border:1px solid var(--border);border-radius:6px;max-height:120px;overflow:auto;margin-top:2px;display:none"></div><div id="newCustSel" style="font-size:12px;color:var(--accent-cyan);margin-top:4px"></div></label>
+      <label style="font-size:12.5px">Entiteit<select id="newDept" class="fin-input" style="width:100%;margin-top:4px"></select></label>
+    </div>
+    <div style="margin-bottom:6px;font-size:12.5px;color:var(--text-dim)">Regels (artikel uit TL → grootboek & BTW automatisch)</div>
+    <div id="newLines" style="display:flex;flex-direction:column;gap:8px"></div>
+    <div style="display:flex;gap:8px;margin-top:8px"><button class="sr-abtn" id="newAddLine" type="button"><i class="ti ti-plus"></i> Regel toevoegen</button></div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px">
+      <label style="font-size:12.5px">Referentie/PO (optioneel)<input id="newPO" type="text" class="fin-input" style="width:100%;margin-top:4px"/></label>
+      <label style="font-size:12.5px">Taal<select id="newLang" class="fin-input" style="width:100%;margin-top:4px"><option value="nl">Nederlands</option><option value="en">Engels</option><option value="fr">Frans</option></select></label>
+    </div>
+    <div id="newErr" style="color:#ef4444;font-size:12px;margin-top:8px"></div>
+    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px;flex-wrap:wrap">
+      <button class="sr-abtn" id="newCancel" type="button">Annuleren</button>
+      <button class="sr-abtn" id="newDraft" type="button">Opslaan als concept</button>
+      <button class="sr-abtn primary" id="newBook" type="button"><i class="ti ti-book"></i> Boeken</button>
+      <button class="sr-abtn success" id="newBookSend" type="button"><i class="ti ti-send"></i> Boeken &amp; Verzenden</button>
     </div>
   </div>
 </div>
@@ -301,6 +405,19 @@
 
   const state = { status: 'open', entity: '', from: '', to: '', q: '', page: 1, pageSize: 50, total: 0, rows: [] };
   let searchTimer = null;
+  let _pendingScroll = null;
+
+  // Lijst-state bewaren (pill/zoek/pagina/scroll) zodat openen/sluiten/actie niet reset.
+  const STORE_KEY = 'finInvState';
+  function persistState() { try { sessionStorage.setItem(STORE_KEY, JSON.stringify({ status: state.status, entity: state.entity, from: state.from, to: state.to, q: state.q, page: state.page, pageSize: state.pageSize, scrollY: window.scrollY })); } catch (e) {} }
+  function restoreState() { try { const s = JSON.parse(sessionStorage.getItem(STORE_KEY) || 'null'); if (s) { state.status = s.status ?? state.status; state.entity = s.entity || ''; state.from = s.from || ''; state.to = s.to || ''; state.q = s.q || ''; state.page = s.page || 1; state.pageSize = [20, 50, 100, 500].includes(s.pageSize) ? s.pageSize : 50; return s; } } catch (e) {} return null; }
+  function syncControls() {
+    document.querySelectorAll('#invStatusSeg .sr-seg').forEach(x => x.classList.toggle('active', (x.dataset.status || '') === (state.status || '')));
+    const e = document.getElementById('invEntity'); if (e) e.value = state.entity || '';
+    const ps = document.getElementById('invPeriodStart'); if (ps) ps.value = state.from || '';
+    const pe = document.getElementById('invPeriodEnd'); if (pe) pe.value = state.to || '';
+    const sr = document.getElementById('invSearch'); if (sr) sr.value = state.q || '';
+  }
 
   function setView(view) {
     document.getElementById('view-facturen').hidden = (view !== 'facturen');
@@ -335,7 +452,7 @@
         <td class="num">${eur(inv.amount_open)}</td>
         <td>${fmtDate(inv.due_date)}</td>
         <td><span class="sr-tag ${m.tag}">${esc(m.label)}</span></td>
-        <td><div class="sr-menu"><button class="sr-ibtn sr-menu-toggle" title="Meer" type="button"><i class="ti ti-dots"></i></button><div class="sr-menu-pop">
+        <td><div class="sr-menu"><button class="sr-ibtn sr-menu-toggle" title="Meer" type="button" aria-label="Acties"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="12" cy="5" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="12" cy="19" r="2"/></svg></button><div class="sr-menu-pop">
           <button class="sr-menu-item" type="button" data-inv-detail="${i}"><i class="ti ti-eye"></i> Bekijk details</button>
           ${payItem}
           ${removeItem}
@@ -350,18 +467,25 @@
 
   function renderPager() {
     const pages = Math.max(1, Math.ceil(state.total / state.pageSize));
+    const opts = [20, 50, 100, 500].map(n => `<option value="${n}" ${state.pageSize === n ? 'selected' : ''}>${n}</option>`).join('');
     document.getElementById('invPager').innerHTML =
       `<span>${state.total} facturen · pagina ${state.page}/${pages}</span>
-       <span style="display:flex;gap:6px">
+       <span style="display:flex;gap:8px;align-items:center">
+         <label style="display:flex;gap:5px;align-items:center;color:var(--text-dim)">Per pagina
+           <select id="invPageSize" class="fin-input" style="padding:4px 6px">${opts}</select></label>
          <button class="sr-abtn" id="invPrev" type="button" ${state.page <= 1 ? 'disabled' : ''}>Vorige</button>
          <button class="sr-abtn" id="invNext" type="button" ${state.page >= pages ? 'disabled' : ''}>Volgende</button>
        </span>`;
     const prev = document.getElementById('invPrev'), next = document.getElementById('invNext');
     if (prev) prev.addEventListener('click', () => { if (state.page > 1) { state.page--; load(); } });
     if (next) next.addEventListener('click', () => { if (state.page < pages) { state.page++; load(); } });
+    const psSel = document.getElementById('invPageSize');
+    if (psSel) psSel.addEventListener('change', () => { state.pageSize = Number(psSel.value) || 50; state.page = 1; load(); });
   }
 
   async function load() {
+    const sy = _pendingScroll != null ? _pendingScroll : window.scrollY;
+    _pendingScroll = null;
     const tb = document.getElementById('invTbody');
     tb.innerHTML = '<tr><td colspan="9" style="text-align:center;padding:24px;color:var(--text-faint)">Laden…</td></tr>';
     const p = new URLSearchParams();
@@ -378,6 +502,8 @@
       if (!res.ok) throw new Error(d.error || 'HTTP ' + res.status);
       state.rows = d.items || []; state.total = d.total || 0;
       renderKpis(d.kpis || {}); renderRows(state.rows); renderPager();
+      persistState();
+      requestAnimationFrame(() => window.scrollTo(0, sy));
     } catch (e) {
       tb.innerHTML = `<tr><td colspan="9" style="text-align:center;padding:24px;color:#ef4444">Laden mislukt: ${esc(e.message)}</td></tr>`;
     }
@@ -388,24 +514,43 @@
     const m = stMeta(inv.display_status);
     const row = (l, v) => `<div class="inv-drow"><span class="lbl">${l}</span><span>${v}</span></div>`;
     document.getElementById('invModalTitle').textContent = 'Factuur ' + inv.invoice_number;
-    document.getElementById('invModalBody').innerHTML =
-      row('Klant', esc(inv.customer_name) + (inv.customer_email ? ` <span class="sr-cellsub">${esc(inv.customer_email)}</span>` : '')) +
-      row('Entiteit', esc(inv.tl_department_id ? (ENT_LABEL[inv.tl_department_id] || '—') : '—')) +
-      row('Status', `<span class="sr-tag ${m.tag}">${esc(m.label)}</span>`) +
-      row('Totaal (incl. btw)', eur(inv.amount_total)) +
-      row('Waarvan btw', inv.vat_amount != null ? eur(inv.vat_amount) : '—') +
-      row('Betaald', eur(inv.amount_paid)) +
-      row('Openstaand', eur(inv.amount_open)) +
-      row('Factuurdatum', fmtDate(inv.issue_date)) +
-      row('Vervaldag', fmtDate(inv.due_date)) +
-      row('Betaald op', fmtDate(inv.paid_date)) +
-      '<div id="invCreditRow"></div>' +
-      '<div id="invLateFeeRow"></div>';
-    const tl = document.getElementById('invModalTl');
-    tl.href = inv.tl_invoice_id ? `https://focus.teamleader.eu/invoice_detail.php?id=${inv.tl_invoice_id}` : 'https://focus.teamleader.eu/invoices';
-    const pdfBtn = document.getElementById('invModalPdf');
-    pdfBtn.disabled = !inv.tl_invoice_id;
-    pdfBtn.onclick = async () => {
+    const ent = inv.tl_department_id ? (ENT_LABEL[inv.tl_department_id] || '—') : '—';
+    const kv = (k, v) => `<div class="k">${k}</div><div>${v}</div>`;
+    const custLink = inv.customer_id ? `<a href="/modules/klanten.html?id=${esc(inv.customer_id)}&tab=facturen" style="color:var(--accent-cyan)">${esc(inv.customer_name)}</a>` : esc(inv.customer_name);
+    const payable = canRegister && !!inv.tl_invoice_id && ['open', 'partially_paid', 'overdue'].includes(inv.display_status);
+    const tlUrl = inv.tl_invoice_id ? `https://focus.teamleader.eu/invoice_detail.php?id=${esc(inv.tl_invoice_id)}` : 'https://focus.teamleader.eu/invoices';
+    const dimBtn = (icon, label, note) => `<button class="sr-abtn dim" type="button" disabled title="Nog niet beschikbaar"><i class="ti ${icon}"></i> ${label}<span class="fin-abtn-note">${note}</span></button>`;
+    const sendEnabled = canSend && !!inv.tl_invoice_id;
+    const updateEnabled = canUpdate && !!inv.tl_invoice_id && inv.status === 'concept';
+    const creditEnabled = canCredit && !!inv.tl_invoice_id && inv.status !== 'concept' && Number(inv.credited_amount || 0) < Number(inv.amount_total || 0);
+    document.getElementById('invModalBody').innerHTML = `
+      <div class="fin-card">
+        <h4>Info</h4>
+        <div style="margin-bottom:8px"><span class="sr-tag ${m.tag}">${esc(m.label)}</span></div>
+        <div class="fin-kv">
+          ${kv('Bedrijfsentiteit', esc(ent))}
+          ${kv('Klant', custLink)}
+          ${kv('E-mail', inv.customer_email ? esc(inv.customer_email) : '—')}
+          ${kv('Telefoon', '—')}
+          ${kv('Factuurdatum', fmtDate(inv.issue_date))}
+          ${kv('Vervaldag', fmtDate(inv.due_date))}
+        </div>
+        <div class="fin-actions">
+          ${payable ? `<button class="sr-abtn success" id="invBtnPay" type="button"><i class="ti ti-cash"></i> Markeer betaald</button>` : ''}
+          ${sendEnabled ? `<button class="sr-abtn" id="invBtnSend" type="button"><i class="ti ti-send"></i> Verzenden</button>` : dimBtn('ti-send', 'Verzenden', 'geen rechten')}
+          ${updateEnabled ? `<button class="sr-abtn" id="invBtnUpdate" type="button"><i class="ti ti-edit"></i> Aanpassen</button>` : (inv.status === 'concept' ? dimBtn('ti-edit', 'Aanpassen', 'geen rechten') : dimBtn('ti-edit', 'Aanpassen', 'geboekt'))}
+          ${dimBtn('ti-alert-triangle', 'Incasso', 'via TL')}
+          ${creditEnabled ? `<button class="sr-abtn danger" id="invBtnCredit" type="button"><i class="ti ti-file-minus"></i> Creditnota</button>` : dimBtn('ti-file-minus', 'Creditnota', inv.status === 'concept' ? 'geboekt vereist' : 'geen rechten')}
+          <span class="spacer"></span>
+          <button class="sr-abtn" id="invBtnPdf" type="button" ${inv.tl_invoice_id ? '' : 'disabled'}><i class="ti ti-file-type-pdf"></i> PDF</button>
+          <a class="sr-abtn" href="${tlUrl}" target="_blank"><i class="ti ti-external-link"></i> Teamleader</a>
+        </div>
+      </div>
+      <div class="fin-card"><h4>Inhoud</h4><div id="invLinesCard"><div style="color:var(--text-dim);font-size:12px"><i class="ti ti-loader"></i> Laden…</div></div><div id="invCreditCard"></div><div id="invFeeCard"></div></div>
+      <div class="fin-card"><h4>Betalingen</h4><div id="invPayCard"></div></div>
+      <div class="fin-card"><h4>Activiteit</h4><ul class="fin-tl" id="invActCard"></ul><div class="fin-sub">Afgeleide tijdlijn — Teamleader biedt geen factuur-activiteit via de API.</div></div>`;
+    const pdfBtn = document.getElementById('invBtnPdf');
+    if (pdfBtn) pdfBtn.onclick = async () => {
       if (!inv.tl_invoice_id) return;
       pdfBtn.disabled = true; const orig = pdfBtn.innerHTML; pdfBtn.innerHTML = '<i class="ti ti-loader"></i> Ophalen…';
       try {
@@ -416,43 +561,73 @@
       } catch (e) { window.AgentShared?.showToast('PDF mislukt: ' + e.message + ' — open in Teamleader', 'error'); }
       finally { pdfBtn.disabled = false; pdfBtn.innerHTML = orig; }
     };
-    const payBtn = document.getElementById('invModalPay');
-    const payable = canRegister && !!inv.tl_invoice_id && ['open', 'partially_paid', 'overdue'].includes(inv.display_status);
-    payBtn.style.display = payable ? '' : 'none';
-    payBtn.onclick = () => { document.getElementById('invModal').classList.add('hidden'); openPayModal(inv); };
-    const remBtn = document.getElementById('invModalRemove');
-    const removable = canRemove && !!inv.tl_invoice_id && (Number(inv.amount_paid) || 0) > 0;
-    remBtn.style.display = removable ? '' : 'none';
-    remBtn.onclick = () => removePayment(inv);
-    // Lazy: incassokosten (Schadebeding/WIK) uit de PDF voor te-late facturen.
-    const lateRow = document.getElementById('invLateFeeRow');
-    if (lateRow && inv.display_status === 'overdue' && inv.tl_invoice_id) {
-      lateRow.innerHTML = `<div class="inv-drow"><span class="lbl">Incassokosten</span><span><i class="ti ti-loader"></i> laden…</span></div>`;
-      window.AgentShared.apiFetch('/api/finance-invoice-late-fee?invoice_id=' + encodeURIComponent(inv.id))
-        .then(r => r.json())
-        .then(d => {
-          if (d && Number(d.fee_amount) > 0) {
-            const totaal = d.total_payable != null ? d.total_payable : ((Number(inv.amount_open) || 0) + Number(d.fee_amount));
-            lateRow.innerHTML = row('Incassokosten', eur(d.fee_amount)) + row('Totaal te betalen', eur(totaal));
-          } else { lateRow.innerHTML = ''; }
-        })
-        .catch(() => { lateRow.innerHTML = ''; });
-    } else if (lateRow) { lateRow.innerHTML = ''; }
-    // Gekoppelde creditnota's + netto (lazy) wanneer er gecrediteerd is.
-    const creditRow = document.getElementById('invCreditRow');
-    if (creditRow && Number(inv.credited_amount) > 0) {
-      creditRow.innerHTML = `<div class="inv-drow"><span class="lbl">Gecrediteerd</span><span><i class="ti ti-loader"></i> laden…</span></div>`;
-      window.AgentShared.apiFetch('/api/finance-invoice-creditnotes?invoice_id=' + encodeURIComponent(inv.id))
-        .then(r => r.json())
-        .then(d => {
-          if (d && Number(d.credited_amount) > 0) {
-            const lines = (d.credit_notes || []).map(c => `<div class="inv-drow"><span class="lbl" style="padding-left:12px;opacity:.85">${esc(c.number)} · ${fmtDate(c.date)}</span><span>− ${eur(c.amount_total)}</span></div>`).join('');
-            creditRow.innerHTML = row('Gecrediteerd', '− ' + eur(d.credited_amount)) + lines + row('Netto', eur(d.amount_net));
-          } else { creditRow.innerHTML = ''; }
-        })
-        .catch(() => { creditRow.innerHTML = ''; });
-    } else if (creditRow) { creditRow.innerHTML = ''; }
+    const payBtn = document.getElementById('invBtnPay');
+    if (payBtn) payBtn.onclick = () => { document.getElementById('invModal').classList.add('hidden'); openPayModal(inv); };
+    const sendBtn = document.getElementById('invBtnSend'); if (sendBtn) sendBtn.onclick = () => openSendModal(inv);
+    const updBtn = document.getElementById('invBtnUpdate'); if (updBtn) updBtn.onclick = () => openUpdateModal(inv);
+    const credBtn = document.getElementById('invBtnCredit'); if (credBtn) credBtn.onclick = () => openCreditModal(inv);
+
+    // Betalingen-kaart.
+    const payCard = document.getElementById('invPayCard');
+    if (payCard) {
+      const remLink = (canRemove && inv.tl_invoice_id && (Number(inv.amount_paid) || 0) > 0) ? ` · <a href="#" id="invRemoveLink" style="color:var(--red,#dc2626)">terugdraaien</a>` : '';
+      payCard.innerHTML = (Number(inv.amount_paid) || 0) > 0
+        ? `<div class="inv-drow"><span class="lbl">Betaald${inv.paid_date ? ' op ' + fmtDate(inv.paid_date) : ''}</span><span>${eur(inv.amount_paid)}${remLink}</span></div><div class="inv-drow"><span class="lbl">Openstaand</span><span>${eur(inv.amount_open)}</span></div>`
+        : `<div style="font-size:13px;color:var(--text-dim)">Nog geen betalingen · openstaand <strong>${eur(inv.amount_open)}</strong></div>`;
+      const rl = document.getElementById('invRemoveLink'); if (rl) rl.onclick = (e) => { e.preventDefault(); removePayment(inv); };
+    }
+
+    // Activiteit (afgeleide tijdlijn).
+    const acts = [];
+    if (inv.issue_date) acts.push({ d: inv.issue_date, ic: 'ti-file-plus', t: 'Factuur aangemaakt' });
+    if (inv.due_date) acts.push({ d: inv.due_date, ic: 'ti-calendar-due', t: 'Vervaldatum' });
+    if ((Number(inv.amount_paid) || 0) > 0 && inv.paid_date) acts.push({ d: inv.paid_date, ic: 'ti-cash', t: `Betaling geregistreerd · ${eur(inv.amount_paid)}` });
+    renderActivity(acts);
+    // Lazy: regels + totalen (met BTW per tarief).
+    const linesCard = document.getElementById('invLinesCard');
+    window.AgentShared.apiFetch('/api/finance-invoice-lines?invoice_id=' + encodeURIComponent(inv.id)).then(r => r.json()).then(d => {
+      if (!linesCard) return;
+      const lines = (d && d.lines) || [], t = (d && d.totals) || null;
+      if (!lines.length && !t) { linesCard.innerHTML = '<div style="color:var(--text-faint);font-size:12px">Geen regels beschikbaar.</div>'; return; }
+      const rowsHtml = lines.map(l => `<tr><td>${esc(l.description)}</td><td class="num">${eur(l.unit_price_excl)}</td><td class="num">${l.quantity}</td><td class="num">${eur(l.line_total_excl)}</td><td class="num">${l.tax_rate != null ? l.tax_rate + '%' : '—'}</td></tr>`).join('');
+      let taxRows = '';
+      if (t) {
+        if (Array.isArray(t.tax_rates) && t.tax_rates.length) taxRows = t.tax_rates.map(x => `<div class="inv-drow"><span class="lbl">Btw ${x.rate != null ? x.rate + '%' : ''}</span><span>${eur(x.amount)}</span></div>`).join('');
+        else if (t.tax != null) taxRows = `<div class="inv-drow"><span class="lbl">Btw</span><span>${eur(t.tax)}</span></div>`;
+      }
+      const totHtml = t ? ((t.excl != null ? `<div class="inv-drow"><span class="lbl">Totaal excl. btw</span><span>${eur(t.excl)}</span></div>` : '') + taxRows + (t.incl != null ? `<div class="inv-drow"><span class="lbl"><strong>Totaal incl. btw</strong></span><span><strong>${eur(t.incl)}</strong></span></div>` : '')) : '';
+      linesCard.innerHTML = (lines.length ? `<div class="sr-tablewrap"><table class="sr-table"><thead><tr><th>Beschrijving</th><th class="num">Eenheidsprijs</th><th class="num">Aantal</th><th class="num">Subtotaal</th><th class="num">Btw</th></tr></thead><tbody>${rowsHtml}</tbody></table></div>` : '') + `<div style="margin-top:8px">${totHtml}</div>`;
+    }).catch(() => { if (linesCard) linesCard.innerHTML = '<div style="color:var(--text-faint);font-size:12px">Regels laden mislukt.</div>'; });
+
+    // Lazy: creditnota's + netto.
+    const creditCard = document.getElementById('invCreditCard');
+    if (creditCard && Number(inv.credited_amount) > 0) {
+      window.AgentShared.apiFetch('/api/finance-invoice-creditnotes?invoice_id=' + encodeURIComponent(inv.id)).then(r => r.json()).then(d => {
+        if (!(Number(d.credited_amount) > 0)) { creditCard.innerHTML = ''; return; }
+        const cl = (d.credit_notes || []).map(c => `<div class="inv-drow"><span class="lbl" style="padding-left:10px;opacity:.85">${esc(c.number)} · ${fmtDate(c.date)}</span><span>− ${eur(c.amount_total)}</span></div>`).join('');
+        creditCard.innerHTML = `<div style="margin-top:8px"><div class="inv-drow"><span class="lbl">Gecrediteerd</span><span>− ${eur(d.credited_amount)}</span></div>${cl}<div class="inv-drow"><span class="lbl"><strong>Netto</strong></span><span><strong>${eur(d.amount_net)}</strong></span></div></div>`;
+        (d.credit_notes || []).forEach(c => acts.push({ d: c.date, ic: 'ti-file-minus', t: `Creditnota ${c.number} · − ${eur(c.amount_total)}` }));
+        renderActivity(acts);
+      }).catch(() => { creditCard.innerHTML = ''; });
+    }
+
+    // Lazy: incassokosten (te-laat).
+    const feeCard = document.getElementById('invFeeCard');
+    if (feeCard && inv.display_status === 'overdue' && inv.tl_invoice_id) {
+      window.AgentShared.apiFetch('/api/finance-invoice-late-fee?invoice_id=' + encodeURIComponent(inv.id)).then(r => r.json()).then(d => {
+        if (!(Number(d.fee_amount) > 0)) { feeCard.innerHTML = ''; return; }
+        const tot = d.total_payable != null ? d.total_payable : ((Number(inv.amount_open) || 0) + Number(d.fee_amount));
+        feeCard.innerHTML = `<div style="margin-top:8px"><div class="inv-drow"><span class="lbl">Incassokosten</span><span>${eur(d.fee_amount)}</span></div><div class="inv-drow"><span class="lbl"><strong>Totaal te betalen</strong></span><span><strong>${eur(tot)}</strong></span></div></div>`;
+      }).catch(() => { feeCard.innerHTML = ''; });
+    }
+
     document.getElementById('invModal').classList.remove('hidden');
+  }
+
+  function renderActivity(acts) {
+    const el = document.getElementById('invActCard'); if (!el) return;
+    const sorted = [...acts].filter(a => a.d).sort((a, b) => String(a.d).localeCompare(String(b.d)));
+    el.innerHTML = sorted.length ? sorted.map(a => `<li><span class="ic"><i class="ti ${a.ic}"></i></span><span>${esc(a.t)}</span><span class="dt">${fmtDate(a.d)}</span></li>`).join('') : '<li style="color:var(--text-faint)">Geen activiteit.</li>';
   }
 
   // ── Betaling registreren (Fase 2B, super_admin) ──
@@ -479,8 +654,14 @@
       load();
     } catch (e) { window.AgentShared?.showToast('Mislukt: ' + e.message, 'error'); }
   }
+  // In-flight guards: voorkomt dubbele submits (een snelle dubbelklik vóór de await disable).
+  const _busy = {};
+  function busyGuard(key) { if (_busy[key]) return false; _busy[key] = true; return true; }
+  function busyRelease(key) { _busy[key] = false; }
+
   async function submitPay() {
     if (!_payInv) return;
+    if (!busyGuard('pay')) return;
     const amount = Number(document.getElementById('payAmount').value);
     let paid_at = document.getElementById('payDate').value;
     if (!paid_at) { paid_at = new Date().toISOString().slice(0, 10); document.getElementById('payDate').value = paid_at; }
@@ -497,7 +678,308 @@
       document.getElementById('payModal').classList.add('hidden');
       load();
     } catch (e) { errEl.textContent = 'Mislukt: ' + e.message; }
-    finally { btn.disabled = false; btn.innerHTML = orig; }
+    finally { busyRelease('pay'); btn.disabled = false; btn.innerHTML = orig; }
+  }
+
+  // ── DEEL A: Verzenden (PIVOT: TL mail-template) ──
+  let _sendInv = null, _sendTpls = null;
+  function syncSendOk() {
+    const tpl = document.getElementById('sendTpl').value;
+    const to = document.getElementById('sendTo').value.trim();
+    document.getElementById('sendOk').disabled = !(tpl && to && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(to));
+  }
+  async function openSendModal(inv) {
+    _sendInv = inv;
+    document.getElementById('sendSub').textContent = `${inv.invoice_number} · ${inv.customer_name}`;
+    document.getElementById('sendTo').value = inv.customer_email || '';
+    document.getElementById('sendSubject').value = '';
+    document.getElementById('sendContent').value = '';
+    document.getElementById('sendErr').textContent = '';
+    document.getElementById('sendAdv').style.display = 'none';
+    document.getElementById('sendAdvToggle').textContent = 'Geavanceerd: onderwerp / inhoud overschrijven ▾';
+    const sel = document.getElementById('sendTpl');
+    sel.innerHTML = '<option value="">— laden…</option>';
+    document.getElementById('sendOk').disabled = true;
+    document.getElementById('sendModal').classList.remove('hidden');
+    try {
+      if (!_sendTpls) {
+        const r = await window.AgentShared.apiFetch('/api/finance-mail-templates');
+        const d = await r.json();
+        if (!r.ok) throw new Error(d.error || 'HTTP ' + r.status);
+        _sendTpls = d.templates || [];
+      }
+      if (!_sendTpls.length) {
+        sel.innerHTML = '<option value="">(geen templates gevonden in TL)</option>';
+        document.getElementById('sendErr').textContent = 'Geen mail-templates beschikbaar — maak er één in Teamleader.';
+        return;
+      }
+      // Slimme sortering: niet-herinneringen eerst (verzendmail-templates), dan
+      // herinneringen (visueel gemarkeerd met 🕐). Sort-key is stabiel — input-volgorde
+      // binnen een groep blijft.
+      const reminderRe = /herinner|reminder/i;
+      const sendKeywordRe = /factuur.*verzend|verzend.*factuur|standaard|standard/i;
+      const targetLang = (inv.customer_language || 'nl').toLowerCase();
+      const list = _sendTpls.slice().sort((a, b) => {
+        const ar = reminderRe.test(a.name || ''), br = reminderRe.test(b.name || '');
+        if (ar !== br) return ar ? 1 : -1;     // niet-herinneringen eerst
+        return String(a.name || '').localeCompare(String(b.name || ''));
+      });
+      sel.innerHTML = list.map(t => {
+        const isRem = reminderRe.test(t.name || '');
+        const label = (isRem ? '🕐 ' : '') + (t.name || '(zonder naam)') + (t.language ? ' (' + t.language + ')' : '');
+        return `<option value="${esc(t.id)}">${esc(label)}</option>`;
+      }).join('');
+
+      // Slimme preselect: verzend-template in klanttaal > verzend-template in NL >
+      // is_default-flag > eerste niet-herinnering > eerste algemeen.
+      const nonRem = list.filter(t => !reminderRe.test(t.name || ''));
+      const pick = (arr) => arr[0]?.id || null;
+      const langMatch = (t) => (t.language || '').toLowerCase() === targetLang;
+      const chosen =
+        pick(nonRem.filter(t => sendKeywordRe.test(t.name || '') && langMatch(t)))
+        || pick(nonRem.filter(t => sendKeywordRe.test(t.name || '')))
+        || pick(list.filter(t => t.is_default && !reminderRe.test(t.name || '')))
+        || pick(nonRem)
+        || pick(list);
+      if (chosen) sel.value = chosen;
+      if (!nonRem.length) {
+        // Alleen herinneringen → forceer actieve keuze.
+        sel.insertAdjacentHTML('afterbegin', '<option value="" selected disabled>Kies een template…</option>');
+        document.getElementById('sendErr').textContent = 'Alleen herinnering-templates beschikbaar — kies bewust.';
+      }
+      syncSendOk();
+    } catch (e) {
+      sel.innerHTML = '<option value="">(laden mislukt)</option>';
+      document.getElementById('sendErr').textContent = 'Templates laden mislukt: ' + e.message;
+    }
+  }
+  async function submitSend() {
+    if (!_sendInv) return;
+    if (!busyGuard('send')) return;
+    const errEl = document.getElementById('sendErr'); errEl.textContent = '';
+    const toVal = document.getElementById('sendTo').value.trim();
+    const tplId = document.getElementById('sendTpl').value;
+    if (!tplId) { errEl.textContent = 'Kies een TL mail-template.'; busyRelease('send'); return; }
+    if (!toVal || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(toVal)) { errEl.textContent = 'Vul een geldig e-mailadres voor de ontvanger in.'; busyRelease('send'); return; }
+    const subjVal = document.getElementById('sendSubject').value.trim();
+    const contVal = document.getElementById('sendContent').value.trim();
+    const btn = document.getElementById('sendOk'); btn.disabled = true; const o = btn.innerHTML; btn.innerHTML = '<i class="ti ti-loader"></i> Bezig…';
+    try {
+      const r = await window.AgentShared.apiFetch('/api/finance-invoice-send', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({
+        invoice_id: _sendInv.id, mail_template_id: tplId, recipient_email: toVal,
+        subject_override: subjVal || undefined, content_override: contVal || undefined,
+      }) });
+      const d = await r.json();
+      if (!r.ok || !d.success) {
+        if (Array.isArray(d.attempts)) {
+          console.log('[send] cascade attempts (volledig):', d.attempts);
+          const lines = d.attempts.map(a => `shape ${a.shape} → HTTP ${a.tl_status}: ${(a.tl_response || '').slice(0, 200)}`);
+          throw new Error((d.error || 'HTTP ' + r.status) + '\n\n' + lines.join('\n'));
+        }
+        if (d.tl_request_payload) console.log('[send] tl_request_payload', d.tl_request_payload, '| keys', d.tl_request_keys);
+        if (d.template_fetch_diag) console.log('[send] template_fetch_diag', d.template_fetch_diag);
+        if (d.tl_response) console.log('[send] tl_response', d.tl_response);
+        const extra = d.tl_response ? '\n\nTL-respons: ' + d.tl_response : '';
+        const sentKeys = d.tl_request_keys ? '\nvelden gestuurd: ' + d.tl_request_keys.join(', ') : '';
+        throw new Error((d.error || 'HTTP ' + r.status) + extra + sentKeys);
+      }
+      console.log('[send] werkende shape:', d.shape_used, '| tl_request_payload', d.tl_request_payload);
+      window.AgentShared?.showToast('Factuur verzonden via Teamleader (shape ' + d.shape_used + ')', 'success');
+      document.getElementById('sendModal').classList.add('hidden'); document.getElementById('invModal').classList.add('hidden'); load();
+    } catch (e) { errEl.textContent = 'Mislukt: ' + e.message; }
+    finally { busyRelease('send'); btn.disabled = false; btn.innerHTML = o; syncSendOk(); }
+  }
+
+  // ── DEEL C: Crediteren ──
+  let _credInv = null;
+  function openCreditModal(inv) { _credInv = inv; document.getElementById('creditSub').textContent = `${inv.invoice_number} · ${eur(inv.amount_total)}`; document.getElementById('creditDesc').value = ''; document.getElementById('creditErr').textContent = ''; document.getElementById('creditModal').classList.remove('hidden'); }
+  async function submitCredit() {
+    if (!_credInv) return;
+    if (!busyGuard('credit')) return;
+    const btn = document.getElementById('creditOk'); btn.disabled = true; const o = btn.innerHTML; btn.innerHTML = '<i class="ti ti-loader"></i> Bezig…';
+    try {
+      const r = await window.AgentShared.apiFetch('/api/finance-invoice-credit', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ invoice_id: _credInv.id, description: document.getElementById('creditDesc').value || undefined }) });
+      const d = await r.json(); if (!r.ok || !d.success) throw new Error((d.error || 'HTTP ' + r.status) + (d.tl_response ? ' — ' + d.tl_response : ''));
+      window.AgentShared?.showToast('Creditnota aangemaakt' + (d.synced ? ' + gesynchroniseerd' : ''), 'success');
+      document.getElementById('creditModal').classList.add('hidden'); document.getElementById('invModal').classList.add('hidden'); load();
+    } catch (e) { document.getElementById('creditErr').textContent = 'Mislukt: ' + e.message; }
+    finally { busyRelease('credit'); btn.disabled = false; btn.innerHTML = o; }
+  }
+
+  // ── DEEL B: Aanpassen (concept) ──
+  let _updInv = null, _updLines = [];
+  function openUpdateModal(inv) {
+    _updInv = inv;
+    document.getElementById('updSub').textContent = `${inv.invoice_number} (concept) · ${inv.customer_name}`;
+    document.getElementById('updErr').textContent = '';
+    // Laad bestaande regels uit invoices.info via ons lines-endpoint.
+    _updLines = [];
+    renderUpdLines();
+    window.AgentShared.apiFetch('/api/finance-invoice-lines?invoice_id=' + encodeURIComponent(inv.id)).then(r => r.json()).then(d => {
+      // tax_rate uit endpoint is integer (21) of null (onbekend). Number(null) === 0 zou
+      // foutief op de '0%'-optie vallen → expliciet null-check vóór de includes.
+      const pickVat = (v) => (v != null && [0, 6, 9, 21].includes(Number(v))) ? Number(v) : 21;
+      _updLines = (d.lines || []).map(l => ({ description: l.description, quantity: l.quantity, unit_price_excl: l.unit_price_excl, vat_percentage: pickVat(l.tax_rate) }));
+      if (!_updLines.length) _updLines.push({ description: '', quantity: 1, unit_price_excl: 0, vat_percentage: 21 });
+      renderUpdLines();
+    }).catch(() => { _updLines.push({ description: '', quantity: 1, unit_price_excl: 0, vat_percentage: 21 }); renderUpdLines(); });
+    document.getElementById('updModal').classList.remove('hidden');
+  }
+  function renderUpdLines() {
+    const vatOpts = (cur) => [0, 6, 9, 21].map(v => `<option value="${v}" ${Number(cur) === v ? 'selected' : ''}>${v}%</option>`).join('');
+    document.getElementById('updLines').innerHTML = `
+      <div style="display:grid;grid-template-columns:1fr 70px 110px 80px 30px;gap:6px;align-items:center;font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--text-faint);padding:0 2px">
+        <div>Omschrijving</div><div style="text-align:right">Aantal</div><div style="text-align:right">Eenheidsprijs excl.</div><div>BTW</div><div></div>
+      </div>` + _updLines.map((l, i) => `
+      <div style="display:grid;grid-template-columns:1fr 70px 110px 80px 30px;gap:6px;align-items:center">
+        <input class="fin-input" data-upd-d="${i}" placeholder="Beschrijving" value="${esc(l.description || '')}"/>
+        <input class="fin-input" type="number" step="1" min="1" data-upd-q="${i}" value="${l.quantity || 1}" style="text-align:right"/>
+        <input class="fin-input" type="number" step="0.01" min="0" data-upd-p="${i}" value="${(Number(l.unit_price_excl) || 0).toFixed(2)}" placeholder="excl. €" style="text-align:right"/>
+        <select class="fin-input" data-upd-v="${i}">${vatOpts(l.vat_percentage)}</select>
+        <button class="sr-ibtn" type="button" data-upd-x="${i}" title="Verwijder regel"><i class="ti ti-x"></i></button>
+      </div>`).join('');
+    document.querySelectorAll('[data-upd-d]').forEach(el => el.oninput = () => _updLines[+el.dataset.updD].description = el.value);
+    document.querySelectorAll('[data-upd-q]').forEach(el => el.oninput = () => _updLines[+el.dataset.updQ].quantity = Number(el.value) || 1);
+    document.querySelectorAll('[data-upd-p]').forEach(el => el.oninput = () => _updLines[+el.dataset.updP].unit_price_excl = Number(el.value) || 0);
+    document.querySelectorAll('[data-upd-v]').forEach(el => el.onchange = () => _updLines[+el.dataset.updV].vat_percentage = Number(el.value));
+    document.querySelectorAll('[data-upd-x]').forEach(el => el.onclick = () => { _updLines.splice(+el.dataset.updX, 1); renderUpdLines(); });
+  }
+  async function submitUpdate() {
+    if (!_updInv) return;
+    if (!busyGuard('update')) return;
+    const errEl = document.getElementById('updErr'); errEl.textContent = '';
+    const goodLines = _updLines.filter(l => l.description && l.quantity > 0 && l.unit_price_excl >= 0 && [0, 6, 9, 21].includes(Number(l.vat_percentage)));
+    if (!goodLines.length) { errEl.textContent = 'Minimaal 1 geldige regel vereist (incl. BTW%).'; busyRelease('update'); return; }
+    // Verstuur 'lines' (shorthand): backend bouwt grouped_lines + tax_rate_id via taxRateIdFor.
+    const lines = goodLines.map(l => ({ description: l.description, quantity: l.quantity, unit_price_excl: Number(l.unit_price_excl) || 0, vat_percentage: Number(l.vat_percentage) }));
+    const btn = document.getElementById('updOk'); btn.disabled = true; const o = btn.innerHTML; btn.innerHTML = '<i class="ti ti-loader"></i> Bezig…';
+    try {
+      const r = await window.AgentShared.apiFetch('/api/finance-invoice-update', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ invoice_id: _updInv.id, lines }) });
+      const d = await r.json(); if (!r.ok || !d.success) throw new Error((d.error || 'HTTP ' + r.status) + (d.tl_response ? ' — ' + d.tl_response : ''));
+      window.AgentShared?.showToast('Concept bijgewerkt', 'success');
+      document.getElementById('updModal').classList.add('hidden'); document.getElementById('invModal').classList.add('hidden'); load();
+    } catch (e) { errEl.textContent = 'Mislukt: ' + e.message; }
+    finally { busyRelease('update'); btn.disabled = false; btn.innerHTML = o; }
+  }
+
+  // ── DEEL D: Nieuwe factuur ──
+  let _newCust = null, _newLines = [];
+  function openNewInvoiceModal() {
+    _newCust = null; _newLines = [{ description: '', quantity: 1, unit_price_excl: 0, vat_percentage: 21 }];
+    document.getElementById('newCustSearch').value = ''; document.getElementById('newCustSel').textContent = ''; document.getElementById('newCustList').style.display = 'none';
+    document.getElementById('newPO').value = ''; document.getElementById('newLang').value = 'nl'; document.getElementById('newErr').textContent = '';
+    const dept = document.getElementById('newDept'); dept.innerHTML = ENTITIES.map(e => `<option value="${e.id}">${e.label}</option>`).join('');
+    renderNewLines();
+    document.getElementById('newInvModal').classList.remove('hidden');
+  }
+  let _newCustTimer = null;
+  function onNewCustSearch(v) {
+    clearTimeout(_newCustTimer);
+    _newCustTimer = setTimeout(async () => {
+      if (!v || v.length < 2) { document.getElementById('newCustList').style.display = 'none'; return; }
+      try {
+        const r = await window.AgentShared.apiFetch('/api/sales-customers?search=' + encodeURIComponent(v));
+        const d = await r.json(); const list = (d.customers || []).slice(0, 10);
+        const box = document.getElementById('newCustList');
+        box.innerHTML = list.map(c => `<div data-cust='${esc(JSON.stringify({ id: c.id, name: c.name }))}' style="padding:6px 10px;cursor:pointer;font-size:12.5px;border-bottom:1px solid var(--border)">${esc(c.name || '—')} <span class="sr-cellsub">${esc(c.email || '')}</span></div>`).join('') || '<div style="padding:6px 10px;color:var(--text-faint);font-size:12.5px">Geen klanten gevonden</div>';
+        box.style.display = list.length ? '' : '';
+        box.querySelectorAll('[data-cust]').forEach(el => el.onclick = () => { _newCust = JSON.parse(el.dataset.cust); document.getElementById('newCustSel').textContent = '✓ ' + _newCust.name; box.style.display = 'none'; document.getElementById('newCustSearch').value = _newCust.name; });
+      } catch (e) {}
+    }, 250);
+  }
+  function renderNewLines() {
+    const vatOpts = (cur) => [0, 6, 9, 21].map(v => `<option value="${v}" ${Number(cur) === v ? 'selected' : ''}>${v}%</option>`).join('');
+    document.getElementById('newLines').innerHTML = `
+      <div style="display:grid;grid-template-columns:1fr 70px 110px 80px 30px;gap:6px;align-items:center;font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--text-faint);padding:0 2px">
+        <div>Omschrijving</div><div style="text-align:right">Aantal</div><div style="text-align:right">Eenheidsprijs excl.</div><div>BTW</div><div></div>
+      </div>` + _newLines.map((l, i) => `
+      <div style="display:grid;grid-template-columns:1fr 70px 110px 80px 30px;gap:6px;align-items:center">
+        <input class="fin-input" data-new-d="${i}" placeholder="Beschrijving van de regel" value="${esc(l.description || '')}"/>
+        <input class="fin-input" type="number" step="1" min="1" data-new-q="${i}" value="${l.quantity}" style="text-align:right"/>
+        <input class="fin-input" type="number" step="0.01" min="0" data-new-pr="${i}" value="${(Number(l.unit_price_excl) || 0).toFixed(2)}" placeholder="excl. €" style="text-align:right"/>
+        <select class="fin-input" data-new-v="${i}">${vatOpts(l.vat_percentage)}</select>
+        <button class="sr-ibtn" type="button" data-new-x="${i}" title="Verwijder regel"><i class="ti ti-x"></i></button>
+      </div>`).join('') + '<div id="newTotals" style="margin-top:10px"></div>';
+    document.querySelectorAll('[data-new-d]').forEach(el => el.oninput = () => { _newLines[+el.dataset.newD].description = el.value; renderNewTotals(); });
+    document.querySelectorAll('[data-new-q]').forEach(el => el.oninput = () => { _newLines[+el.dataset.newQ].quantity = Number(el.value) || 1; renderNewTotals(); });
+    document.querySelectorAll('[data-new-pr]').forEach(el => el.oninput = () => { _newLines[+el.dataset.newPr].unit_price_excl = Number(el.value) || 0; renderNewTotals(); });
+    document.querySelectorAll('[data-new-v]').forEach(el => el.onchange = () => { _newLines[+el.dataset.newV].vat_percentage = Number(el.value); renderNewTotals(); });
+    document.querySelectorAll('[data-new-x]').forEach(el => el.onclick = () => { _newLines.splice(+el.dataset.newX, 1); if (!_newLines.length) _newLines.push({ description: '', quantity: 1, unit_price_excl: 0, vat_percentage: 21 }); renderNewLines(); });
+    renderNewTotals();
+  }
+  function renderNewTotals() {
+    let excl = 0; const byRate = {};
+    for (const l of _newLines) {
+      const sub = (Number(l.unit_price_excl) || 0) * (Number(l.quantity) || 0);
+      excl += sub;
+      const rate = Number(l.vat_percentage) || 0;
+      const tax = sub * rate / 100;
+      byRate[rate] = (byRate[rate] || 0) + tax;
+    }
+    const totalTax = Object.values(byRate).reduce((a, b) => a + b, 0);
+    const incl = excl + totalTax;
+    const taxRows = Object.keys(byRate).sort((a, b) => Number(a) - Number(b)).map(r => `<div class="inv-drow"><span class="lbl">Btw ${r}%</span><span>${eur(byRate[r])}</span></div>`).join('');
+    document.getElementById('newTotals').innerHTML = `<div class="inv-drow"><span class="lbl">Subtotaal excl. btw</span><span>${eur(excl)}</span></div>${taxRows}<div class="inv-drow"><span class="lbl"><strong>Totaal incl. btw</strong></span><span><strong>${eur(incl)}</strong></span></div>`;
+  }
+  async function submitNew(action, opts) {
+    opts = opts || {};
+    const autoOpenSend = !!opts.autoOpenSend;          // 'Boeken & Verzenden': na boeken → Verzenden-modal
+    const btnId = autoOpenSend ? 'newBookSend' : (action === 'draft' ? 'newDraft' : 'newBook');
+    const errEl = document.getElementById('newErr'); errEl.textContent = '';
+    if (!_newCust) { errEl.textContent = 'Kies eerst een klant.'; return; }
+    const dept = document.getElementById('newDept').value;
+    const goodLines = _newLines.filter(l => String(l.description || '').trim() && Number(l.quantity) > 0);
+    if (!goodLines.length) { errEl.textContent = 'Minimaal 1 regel met omschrijving + aantal vereist.'; return; }
+    if (action !== 'draft') {
+      const cMsg = autoOpenSend
+        ? 'Factuur DEFINITIEF boeken in Teamleader; daarna opent de Verzenden-dialoog. Doorgaan?'
+        : 'Factuur DEFINITIEF boeken in Teamleader. Doorgaan?';
+      if (!confirm(cMsg)) return;
+    }
+    if (!busyGuard('new')) return;
+    ['newDraft', 'newBook', 'newBookSend'].forEach(id => { const b = document.getElementById(id); if (b) b.disabled = true; });
+    const btn = document.getElementById(btnId);
+    const o = btn.innerHTML; btn.innerHTML = '<i class="ti ti-loader"></i> Bezig…';
+    const payload = {
+      customer_id: _newCust.id, department_id: dept,
+      lines: goodLines.map(l => ({ description: String(l.description).trim(), quantity: Number(l.quantity), unit_price_excl: Number(l.unit_price_excl) || 0, vat_percentage: Number(l.vat_percentage) })),
+      purchase_order_number: document.getElementById('newPO').value || undefined, language: document.getElementById('newLang').value, action,
+    };
+    try {
+      const r = await window.AgentShared.apiFetch('/api/finance-invoice-create', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+      const d = await r.json(); if (!r.ok || !d.success) throw new Error((d.error || 'HTTP ' + r.status) + (d.tl_response ? ' — ' + d.tl_response : ''));
+      // Boek-fout = harde error: laat Nieuwe-factuur-modal open, geen autoOpenSend.
+      if (d.bookErr) {
+        errEl.textContent = 'Concept aangemaakt; boeken faalde — open in TL voor details. Verzenden niet uitgevoerd.';
+        return;
+      }
+      let msg = 'Concept aangemaakt';
+      if (d.booked) msg = 'Factuur geboekt';
+      if (d.sync_err) msg += ' · sync-back faalde: ' + d.sync_err;
+      window.AgentShared?.showToast(msg, 'success');
+      document.getElementById('newInvModal').classList.add('hidden');
+
+      // Lijst bijwerken naar juiste status + nieuwe rij vinden.
+      if (d.invoice_id) {
+        const target = d.local_status || (action === 'draft' ? 'concept' : 'open');
+        if (state.status !== target) {
+          state.status = target; state.page = 1;
+          document.querySelectorAll('#invStatusSeg .sr-seg').forEach(x => x.classList.toggle('active', (x.dataset.status || '') === (target || '')));
+        }
+        await load();
+        const found = state.rows.find(x => x.id === d.invoice_id);
+        if (found) {
+          if (autoOpenSend) {
+            // Sluit detail-modal indien open + open meteen Verzenden-modal voor de net-geboekte factuur.
+            document.getElementById('invModal').classList.add('hidden');
+            openSendModal(found);
+          } else {
+            openDetail(found);
+          }
+        }
+      } else { await load(); }
+    } catch (e) { errEl.textContent = 'Mislukt: ' + e.message; }
+    finally { busyRelease('new'); ['newDraft', 'newBook', 'newBookSend'].forEach(id => { const b = document.getElementById(id); if (b) b.disabled = false; }); btn.innerHTML = o; }
   }
 
   // 3-dots menu: position:fixed + flip-up + close-on-scroll (klanten-patroon).
@@ -521,7 +1003,7 @@
     window.addEventListener('scroll', closeAll, true);
   }
 
-  let canRegister = false, canRemove = false;
+  let canRegister = false, canRemove = false, canSend = false, canUpdate = false, canCredit = false, canCreate = false;
   async function init() {
     try {
       await window._authSharedReady;
@@ -533,6 +1015,10 @@
       const can = (k) => !!perms && (perms.has('*') || perms.has(k));
       canRegister = can('finance.invoice.payment.register');
       canRemove = can('finance.invoice.payment.remove');
+      canSend = can('finance.invoice.send');
+      canUpdate = can('finance.invoice.update');
+      canCredit = can('finance.invoice.credit');
+      canCreate = can('finance.invoice.create');
 
       // Entiteit-dropdown vullen.
       const sel = document.getElementById('invEntity');
@@ -560,7 +1046,28 @@
       document.getElementById('payCancel').addEventListener('click', () => payModal.classList.add('hidden'));
       document.getElementById('paySubmit').addEventListener('click', submitPay);
       payModal.addEventListener('click', (e) => { if (e.target === payModal) payModal.classList.add('hidden'); });
-      document.addEventListener('keydown', (e) => { if (e.key === 'Escape') { modal.classList.add('hidden'); payModal.classList.add('hidden'); } }, true);
+      // 2C-modals wiring (send/credit/update/new).
+      const wire = (id, btn, ok) => { const m = document.getElementById(id); document.getElementById(btn).addEventListener('click', () => m.classList.add('hidden')); m.addEventListener('click', (e) => { if (e.target === m) m.classList.add('hidden'); }); if (ok) document.getElementById(ok).addEventListener('click', () => {}); };
+      wire('sendModal', 'sendCancel'); document.getElementById('sendOk').addEventListener('click', submitSend);
+      document.getElementById('sendTpl').addEventListener('change', syncSendOk);
+      document.getElementById('sendTo').addEventListener('input', syncSendOk);
+      document.getElementById('sendAdvToggle').addEventListener('click', (e) => { e.preventDefault(); const a = document.getElementById('sendAdv'); const collapsed = a.style.display === 'none'; a.style.display = collapsed ? 'flex' : 'none'; document.getElementById('sendAdvToggle').textContent = collapsed ? 'Geavanceerd ▴' : 'Geavanceerd: onderwerp / inhoud overschrijven ▾'; });
+      wire('creditModal', 'creditCancel'); document.getElementById('creditOk').addEventListener('click', submitCredit);
+      wire('updModal', 'updCancel'); document.getElementById('updOk').addEventListener('click', submitUpdate);
+      document.getElementById('updAddLine').addEventListener('click', () => { _updLines.push({ description: '', quantity: 1, unit_price_excl: 0 }); renderUpdLines(); });
+      wire('newInvModal', 'newCancel');
+      document.getElementById('newDraft').addEventListener('click', () => submitNew('draft'));
+      document.getElementById('newBook').addEventListener('click', () => submitNew('book'));
+      document.getElementById('newBookSend').addEventListener('click', () => submitNew('book', { autoOpenSend: true }));
+      document.getElementById('newAddLine').addEventListener('click', () => { _newLines.push({ description: '', quantity: 1, unit_price_excl: 0, vat_percentage: 21 }); renderNewLines(); });
+      document.getElementById('newCustSearch').addEventListener('input', (e) => onNewCustSearch(e.target.value));
+      if (canCreate) { const nb = document.getElementById('invNewBtn'); nb.style.display = ''; nb.addEventListener('click', openNewInvoiceModal); }
+      document.addEventListener('keydown', (e) => { if (e.key === 'Escape') { ['invModal', 'payModal', 'sendModal', 'creditModal', 'updModal', 'newInvModal'].forEach(id => document.getElementById(id)?.classList.add('hidden')); } }, true);
+
+      // Lijst-state herstellen (pill/zoek/periode/pagina/scroll) → geen reset bij terugkeer.
+      const restored = restoreState();
+      syncControls();
+      if (restored && restored.scrollY) _pendingScroll = restored.scrollY;
 
       initMenus();
       load();
