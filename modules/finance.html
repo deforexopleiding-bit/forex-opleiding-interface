@@ -142,6 +142,23 @@
       <div style="font-size:12.5px">Je hebt de Finance-module open, maar mist het recht <code>finance.invoice.view</code>. Vraag een beheerder dit aan te zetten.</div>
     </div>
     <div id="invMain">
+      <!-- Sync TL → DB banner (laatste cron-run; klikbaar voor detail) -->
+      <details id="invSyncBanner" style="margin-bottom:10px" hidden>
+        <summary id="invSyncSummary" style="cursor:pointer;display:inline-flex;align-items:center;gap:8px;font-size:12px;color:var(--text-dim);padding:5px 10px;border:1px solid var(--border-subtle, #2b2f3a);border-radius:999px;background:rgba(255,255,255,0.02);user-select:none;list-style:none">
+          <i class="ti ti-refresh" style="font-size:13px"></i>
+          <span id="invSyncText">Sync TL → DB: laden…</span>
+        </summary>
+        <div id="invSyncDetail" style="margin-top:8px;padding:10px 12px;border:1px solid var(--border-subtle, #2b2f3a);border-radius:8px;font-size:12px;color:var(--text-dim);background:rgba(255,255,255,0.02);display:grid;grid-template-columns:repeat(2,1fr);gap:12px;max-width:640px">
+          <div data-resource="invoices">
+            <div style="font-weight:600;color:var(--text);margin-bottom:4px">Facturen</div>
+            <div data-field="lines">—</div>
+          </div>
+          <div data-resource="creditnotes">
+            <div style="font-weight:600;color:var(--text);margin-bottom:4px">Creditnota's</div>
+            <div data-field="lines">—</div>
+          </div>
+        </div>
+      </details>
       <div class="kpi-strip" id="invKpis" style="grid-template-columns:repeat(4,1fr);margin-bottom:16px"></div>
       <div class="sr-filterstrip" id="invFilters" style="margin-bottom:12px;flex-wrap:wrap;gap:8px;align-items:center">
         <div class="sr-segments" id="invStatusSeg">
@@ -1003,6 +1020,74 @@
     window.addEventListener('scroll', closeAll, true);
   }
 
+  // ── Sync TL → DB banner ──────────────────────────────────────────────────
+  // Lazy-load /api/finance-sync-status na init(). Graceful degradation: bij
+  // fout / null-rij toont de pill "—" en blijft de tab gewoon werken.
+  function fmtSyncTime(iso) {
+    if (!iso) return '—';
+    try {
+      const d = new Date(iso);
+      if (isNaN(d.getTime())) return '—';
+      const hh = String(d.getHours()).padStart(2, '0');
+      const mm = String(d.getMinutes()).padStart(2, '0');
+      const today = new Date();
+      const isToday = d.getFullYear() === today.getFullYear()
+                   && d.getMonth() === today.getMonth()
+                   && d.getDate() === today.getDate();
+      if (isToday) return `${hh}:${mm}`;
+      const dd = String(d.getDate()).padStart(2, '0');
+      const mo = String(d.getMonth() + 1).padStart(2, '0');
+      return `${dd}-${mo} ${hh}:${mm}`;
+    } catch (e) { return '—'; }
+  }
+  function fmtSyncRow(row) {
+    if (!row) return 'Nog niet gedraaid.';
+    const time = fmtSyncTime(row.last_run_at);
+    const p = row.last_run_processed ?? 0;
+    const e = row.last_run_errors ?? 0;
+    const dur = row.last_run_duration_ms != null ? ` · ${row.last_run_duration_ms}ms` : '';
+    const cursor = row.last_updated_since ? ` · cursor ${fmtSyncTime(row.last_updated_since)}` : '';
+    return `Laatste run ${time} · ${p} verwerkt · ${e} errors${dur}${cursor}`;
+  }
+  async function loadSyncStatus() {
+    const banner = document.getElementById('invSyncBanner');
+    const text = document.getElementById('invSyncText');
+    if (!banner || !text) return;
+    try {
+      const r = await window.AgentShared.apiFetch('/api/finance-sync-status');
+      // 403 = geen finance.invoice.view; banner verbergen (zou hier nooit moeten gebeuren
+      // want de tab is dan ook al gegated, maar voor de zekerheid).
+      if (r.status === 403) { banner.hidden = true; return; }
+      const d = await r.json().catch(() => null);
+      banner.hidden = false;
+      if (!d || (!d.invoices && !d.creditnotes)) {
+        text.textContent = 'Sync TL → DB: —';
+      } else {
+        const ts = d.invoices?.last_run_at || d.creditnotes?.last_run_at;
+        const totP = (d.invoices?.last_run_processed ?? 0) + (d.creditnotes?.last_run_processed ?? 0);
+        const totE = (d.invoices?.last_run_errors ?? 0) + (d.creditnotes?.last_run_errors ?? 0);
+        text.textContent = ts
+          ? `Sync TL → DB: ${fmtSyncTime(ts)} · ${totP} verwerkt · ${totE} errors`
+          : 'Sync TL → DB: nog niet gedraaid';
+      }
+      // Detail-grid vullen.
+      const grid = document.getElementById('invSyncDetail');
+      if (grid) {
+        const fillLine = (resource, row) => {
+          const el = grid.querySelector(`[data-resource="${resource}"] [data-field="lines"]`);
+          if (el) el.textContent = fmtSyncRow(row);
+        };
+        fillLine('invoices', d?.invoices || null);
+        fillLine('creditnotes', d?.creditnotes || null);
+      }
+    } catch (e) {
+      // Graceful: laat banner staan met "—" of verbergen.
+      banner.hidden = false;
+      text.textContent = 'Sync TL → DB: —';
+      console.warn('[finance-sync-status]', e?.message || e);
+    }
+  }
+
   let canRegister = false, canRemove = false, canSend = false, canUpdate = false, canCredit = false, canCreate = false;
   async function init() {
     try {
@@ -1071,6 +1156,8 @@
 
       initMenus();
       load();
+      // Sync-banner: lazy, niet-blocking voor de facturen-tabel.
+      loadSyncStatus();
     } catch (e) { console.error('[finance-facturen] init', e); }
   }
 

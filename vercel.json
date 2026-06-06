@@ -39,6 +39,10 @@
     {
       "path": "/api/cron-lisa-delayed",
       "schedule": "* * * * *"
+    },
+    {
+      "path": "/api/cron-finance-sync",
+      "schedule": "0 * * * *"
     }
   ],
   "headers": [
