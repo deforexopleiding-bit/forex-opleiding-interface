@@ -43,6 +43,10 @@
     {
       "path": "/api/cron-finance-sync",
       "schedule": "0 * * * *"
+    },
+    {
+      "path": "/api/cron-bank-sync",
+      "schedule": "15 * * * *"
     }
   ],
   "headers": [
