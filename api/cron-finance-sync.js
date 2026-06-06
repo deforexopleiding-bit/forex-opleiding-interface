@@ -83,10 +83,20 @@ function maxIso(a, b) {
  *                                            geen department-loop, één plat call met alleen
  *                                            filter.updated_since (contacts/companies — CRM-
  *                                            endpoints kennen geen department_id filter).
+ * @param {string} [cfg.sortField]            Optioneel: TL sort-veld voor de list-call.
+ *                                            Default 'updated_at' (werkt voor creditnotes/
+ *                                            contacts/companies). Override naar
+ *                                            'invoice_date' voor /invoices.list — TL
+ *                                            accepteert daar 'updated_at' niet
+ *                                            (HTTP 400 "The sorting field is invalid",
+ *                                            zichtbaar in fase-3 cron-fires 17:00 UTC
+ *                                            6 juni 2026). Cursor-berekening blijft
+ *                                            max(updated_at) — onafhankelijk van sort.
  * @returns {Promise<{processed: number, errors: number, next_cursor: string, sampled_max_updated: string|null, affected_invoice_ids: Set<string>, aborted: boolean, sampled_actions: Record<string, number>}>}
  */
 async function syncResource(cfg) {
   const { resource, listEndpoint, updatedSinceIso, startedAt, upsertOne } = cfg;
+  const sortField = cfg.sortField || 'updated_at';
   // Bewust géén default-value op DEPARTMENTS: callers die deze loop niet willen,
   // moeten expliciet null/undefined passen. Voorkomt onbedoelde dept-filtering
   // op CRM-endpoints die er een 400 op geven.
@@ -114,7 +124,10 @@ async function syncResource(cfg) {
       const r = await tlCall(listEndpoint, {
         filter,
         page: { size: PAGE_SIZE, number: page },
-        sort: [{ field: 'updated_at', order: 'asc' }],   // oudste eerst → cursor monotoon
+        // Oudste eerst → cursor monotoon. sortField default 'updated_at' (werkt op
+        // creditNotes/contacts/companies); voor invoices override naar 'invoice_date'
+        // (TL invoices.list accepteert 'updated_at' niet).
+        sort: [{ field: sortField, order: 'asc' }],
       });
       if (!r.ok) {
         const txt = await r.text().catch(() => '');
@@ -214,6 +227,7 @@ export default async function handler(req, res) {
       updatedSinceIso: byResource.invoices.last_updated_since,
       startedAt,
       departments: DEPARTMENTS,
+      sortField: 'invoice_date',  // TL invoices.list accepteert 'updated_at' niet.
       upsertOne: (id) => upsertInvoiceFromTl(id),
     });
     const invDuration = Date.now() - invStart;
