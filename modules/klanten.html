@@ -3227,7 +3227,8 @@ async function submitCustomerForm() {
   clearFormErrors();
   const btn = $('#customerFormSubmit');
   btn.disabled = true;
-  btn.textContent = 'Bezig…';
+  // Edit-mode pusht synchroon naar TL (Fase 4) — label maakt de wachttijd transparant.
+  btn.textContent = mode === 'edit' ? 'Opslaan & synct naar TL…' : 'Bezig…';
 
   try {
     const url = mode === 'create' ? '/api/customer' : '/api/customer?id=' + encodeURIComponent(customerId);
@@ -3239,11 +3240,43 @@ async function submitCustomerForm() {
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
-      if (res.status === 400 && data.field) setFieldError(data.field, data.error || 'Ongeldige waarde');
-      else setModalBannerError('customerFormBanner', data.error || ('HTTP ' + res.status));
+      // Field-level (alleen 400 met data.field).
+      if (res.status === 400 && data.field) {
+        setFieldError(data.field, data.error || 'Ongeldige waarde');
+        return;
+      }
+      // 422 = TL weigerde update (Fase 4 synchronous push). Echo diagnostiek naar
+      // console + toon vriendelijke banner met TL-response snippet.
+      if (res.status === 422 && data.tl_response) {
+        const snippet = String(data.tl_response).slice(0, 200);
+        setModalBannerError('customerFormBanner', `Teamleader weigerde update: ${snippet}`);
+        console.error('[klanten] TL-422 echo:', {
+          tl_endpoint: data.tl_endpoint, tl_status: data.tl_status,
+          tl_request_payload: data.tl_request_payload, tl_request_keys: data.tl_request_keys,
+          tl_response: data.tl_response,
+        });
+        return;
+      }
+      // 502 = TL onbereikbaar. Vraag user opnieuw te proberen.
+      if (res.status === 502) {
+        setModalBannerError('customerFormBanner', 'Teamleader niet bereikbaar; probeer opnieuw.');
+        console.error('[klanten] TL-502:', data);
+        return;
+      }
+      // 409 = klant gearchiveerd/geanonimiseerd; niet bewerkbaar.
+      if (res.status === 409) {
+        setModalBannerError('customerFormBanner', data.error || 'Klant kan niet bewerkt worden.');
+        return;
+      }
+      setModalBannerError('customerFormBanner', data.error || ('HTTP ' + res.status));
       return;
     }
     closeCustomerModal();
+    if (mode === 'edit' && data.tl_synced) {
+      window.AgentShared?.showToast?.(`Klant bijgewerkt + gesynct naar Teamleader (${(data.tl_fields_updated || []).join(', ')})`, 'success');
+    } else if (mode === 'edit' && data.tl_skip_reason) {
+      window.AgentShared?.showToast?.(`Klant bijgewerkt (TL-skip: ${data.tl_skip_reason})`, 'info');
+    }
 
     if (mode === 'create') {
       // Navigeer direct naar detail van de nieuwe klant
