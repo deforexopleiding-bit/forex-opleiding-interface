@@ -25,8 +25,20 @@ const EB_THROTTLE_MS = 200;             // best-practice spacing tussen calls
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
 /**
- * Polleert /v1/mutation per type met cursor-filter en pagineert tot batch < limit.
- * Returnt verzamelde mutaties (gemerged uit beide types).
+ * Polleert /v1/mutation per type en pagineert tot batch < limit. Geen date-filter
+ * op de query — e-Boekhouden's mutation-endpoint accepteert `date` niet als
+ * filter-veld (HTTP 400 "Invalid argument(s) for filter", propertyName=date,
+ * empirisch bevestigd in productie cron-fire 19:48 UTC 6 juni 2026). Mantix's
+ * `'date' => Filter::gte(...)` werkt alleen op /v1/invoice, niet op /v1/mutation.
+ *
+ * Strategie: haal ALLE type 4+5 mutaties op binnen het tijdsbudget en filter
+ * client-side op cursor. Voor DFO-volume (paar honderd mutaties per resource)
+ * binnen 50s budget haalbaar. Bij grote back-fill kan abort_by_timeout = true;
+ * cursor schuift dan vooruit naar max(verwerkt) zodat volgende run vervolgt.
+ *
+ * Toekomstige verfijning na bevestiging echte mutation-shape: ofwel server-side
+ * filter via correcte veld-naam (mutationDate? bookingDate?) ofwel paginatie
+ * gesorteerd op datum descending zodat we vroeg kunnen stoppen.
  */
 async function fetchMutations({ ledgerId, sinceIso, startedAt }) {
   const all = [];
@@ -45,7 +57,8 @@ async function fetchMutations({ ledgerId, sinceIso, startedAt }) {
         query: {
           ledgerId,
           type,
-          date: `[gte]${sinceDate}`,        // bracket-prefix filter syntax (Mantix-confirmed)
+          // Geen date-filter — drop wegens propertyName="date" validation error.
+          // Client-side filtering op cursor gebeurt na de fetch.
           limit: PAGE_SIZE,
           offset,
         },
@@ -68,7 +81,20 @@ async function fetchMutations({ ledgerId, sinceIso, startedAt }) {
         break;
       }
 
-      for (const m of data) all.push(m);
+      // DEBUG (Fase 3 v1.1 — tijdelijk): log één sample mutation per cron-run
+      // zodat we counterparty veld-namen + datum-veld kunnen bevestigen uit
+      // echte response-shape. Weg te halen in volgende fix-PR zodra bevestigd.
+      if (all.length === 0 && data.length > 0) {
+        console.log('[debug] sample mutation keys:', JSON.stringify(Object.keys(data[0])));
+        console.log('[debug] sample mutation:', JSON.stringify(data[0], null, 2).substring(0, 1000));
+      }
+
+      // Client-side cursor-filter: hou alleen mutaties met date >= sinceDate.
+      // String-vergelijk werkt correct op YYYY-MM-DD ISO-format.
+      for (const m of data) {
+        const md = String(m.date || '').slice(0, 10);
+        if (md && md >= sinceDate) all.push(m);
+      }
       if (data.length < PAGE_SIZE) break;
       offset += PAGE_SIZE;
     }
