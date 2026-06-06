@@ -6,6 +6,9 @@
 //   from        ISO YYYY-MM-DD — transaction_date >= from
 //   to          ISO YYYY-MM-DD — transaction_date <= to
 //   direction   'in' | 'out' | 'all'  (default 'all')
+//               IN  = mutation_type IN (4, 5) — verkoopfactuur-betaling + geld ontvangen
+//               OUT = mutation_type IN (3, 6) — inkoopfactuur-betaling + geld uitgegeven
+//               Mapt op mutation_type (robuust); niet op amount_cents-teken.
 //   min         minimum bedrag in cents (signed; voor 'in' filter is min positief)
 //   max         maximum bedrag in cents
 //   q           ILIKE-zoek op description / counterparty_name / counterparty_iban /
@@ -50,10 +53,22 @@ export default async function handler(req, res) {
 
     if (from) query = query.gte('transaction_date', from);
     if (to)   query = query.lte('transaction_date', to);
-    if (direction === 'in')  query = query.gt('amount_cents', 0);
-    if (direction === 'out') query = query.lt('amount_cents', 0);
+    // Direction-filter mapt op mutation_type i.p.v. amount_cents-teken:
+    //   IN  = type 4 (verkoopfactuur-betaling ontvangen) + type 5 (geld ontvangen)
+    //   OUT = type 3 (inkoopfactuur-betaling) + type 6 (geld uitgegeven)
+    // Type-filter is robuuster dan sign-filter: bij een eventuele sign-bug in
+    // signedAmountCents (upsert) zou een sign-filter rijen verkeerd categoriseren,
+    // terwijl de type uit e-Boekhouden onveranderlijk is.
+    if (direction === 'in')  query = query.in('mutation_type', [4, 5]);
+    if (direction === 'out') query = query.in('mutation_type', [3, 6]);
     if (min != null) query = query.gte('amount_cents', min);
     if (max != null) query = query.lte('amount_cents', max);
+
+    // Debug-log (tijdelijk): logt actieve filters om empirisch te bevestigen
+    // dat de juiste records terugkomen. Weg te halen na bevestiging.
+    console.log('[finance-bank-transactions] filter:', JSON.stringify({
+      from, to, direction, min, max, search, limit, offset,
+    }));
 
     // Multi-woord search analoog aan customers.js fix (PR #91): split op
     // whitespace, chain .or() per woord. Elke .or() doet OR over 4 kolommen.
