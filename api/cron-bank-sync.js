@@ -8,9 +8,9 @@
 // console.log summary voor Vercel-logs-monitoring.
 //
 // Auth: Bearer CRON_SECRET (checkCronAuth uit ./supabase.js).
-// Filter: type=4 (verkoopfactuur-betaling) + type=5 (geld ontvangen) — alleen
-// inkomende klant-betalingen voor de read-only bankoverzicht. Type 3+6 (uit)
-// vallen buiten v1.
+// Filter: type 3 (inkoopfactuur-betaling), 4 (verkoopfactuur-betaling),
+// 5 (geld ontvangen), 6 (geld uitgegeven) — alle geld-bewegingen voor het
+// volledige bankoverzicht (in + uit).
 
 import { supabaseAdmin, checkCronAuth } from './supabase.js';
 import { ebFetch } from './_lib/eboekhouden-token.js';
@@ -19,7 +19,7 @@ import { upsertBankTransactionFromEb } from './_lib/bank-transaction-upsert.js';
 const ABORT_MS = 50_000;
 const PAGE_SIZE = 500;                  // limit-cap is 2000; 500 = veilig
 const DEFAULT_BANK_LEDGER = 1010;       // env EBH_BANK_LEDGER_ID override
-const TYPES_TO_SYNC = [4, 5];           // inkomende klant-betalingen
+const TYPES_TO_SYNC = [3, 4, 5, 6];     // alle geld-bewegingen (in + uit)
 const EB_THROTTLE_MS = 200;             // best-practice spacing tussen calls
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
