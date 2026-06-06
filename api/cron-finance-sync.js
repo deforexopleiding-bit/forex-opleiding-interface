@@ -24,6 +24,8 @@ import { supabaseAdmin, checkCronAuth } from './supabase.js';
 import { tlFetch, getActiveToken } from './_lib/teamleader-token.js';
 import { upsertInvoiceFromTl } from './_lib/invoice-upsert.js';
 import { upsertCreditNoteFromTl, recomputeCreditedAmount } from './_lib/creditnote-upsert.js';
+import { upsertContactFromTl } from './_lib/contact-upsert.js';
+import { upsertCompanyFromTl } from './_lib/company-upsert.js';
 
 // company_entities seed (Online/Fysiek/Retentie). Consistent met
 // finance-tl-invoice-sync.js en finance-creditnote-sync.js.
@@ -71,43 +73,61 @@ function maxIso(a, b) {
  * relevant voor creditnotes).
  *
  * @param {object} cfg
- * @param {string} cfg.resource         'invoices' | 'creditnotes'
- * @param {string} cfg.listEndpoint     '/invoices.list' | '/creditNotes.list'
+ * @param {string} cfg.resource         'invoices' | 'creditnotes' | 'contacts' | 'companies'
+ * @param {string} cfg.listEndpoint     '/invoices.list' | '/creditNotes.list' | '/contacts.list' | '/companies.list'
  * @param {string} cfg.updatedSinceIso  cursor
  * @param {number} cfg.startedAt        Date.now() bij start van de hele run
  * @param {(id: string) => Promise<any>} cfg.upsertOne
- * @returns {Promise<{processed: number, errors: number, next_cursor: string, sampled_max_updated: string|null, affected_invoice_ids: Set<string>, aborted: boolean}>}
+ * @param {string[]|null} [cfg.departments]  Optioneel: list van dept-uuids om over te
+ *                                            looppen (invoices/creditnotes). null/ontbreekt:
+ *                                            geen department-loop, één plat call met alleen
+ *                                            filter.updated_since (contacts/companies — CRM-
+ *                                            endpoints kennen geen department_id filter).
+ * @returns {Promise<{processed: number, errors: number, next_cursor: string, sampled_max_updated: string|null, affected_invoice_ids: Set<string>, aborted: boolean, sampled_actions: Record<string, number>}>}
  */
 async function syncResource(cfg) {
   const { resource, listEndpoint, updatedSinceIso, startedAt, upsertOne } = cfg;
+  // Bewust géén default-value op DEPARTMENTS: callers die deze loop niet willen,
+  // moeten expliciet null/undefined passen. Voorkomt onbedoelde dept-filtering
+  // op CRM-endpoints die er een 400 op geven.
+  const departments = Array.isArray(cfg.departments) ? cfg.departments : null;
   const affected_invoice_ids = new Set();
+  const sampled_actions = {};  // { inserted: n, updated: n, skipped: n } — voor diag
   let processed = 0, errors = 0;
   let sampled_max_updated = null;
   let aborted = false;
 
+  // departments=null → één virtueel pseudo-dept (null) zodat de buitenste loop
+  // exact één keer draait zonder department_id in het filter.
+  const deptLoop = departments && departments.length ? departments : [null];
+
   outer:
-  for (const dept of DEPARTMENTS) {
+  for (const dept of deptLoop) {
     let page = 1;
     while (true) {
       if (Date.now() - startedAt > ABORT_MS) { aborted = true; break outer; }
 
+      // Filter: updated_since altijd; department_id alleen als dept een echte uuid is.
+      const filter = { updated_since: updatedSinceIso };
+      if (dept) filter.department_id = dept;
+
       const r = await tlCall(listEndpoint, {
-        filter: { department_id: dept, updated_since: updatedSinceIso },
+        filter,
         page: { size: PAGE_SIZE, number: page },
         sort: [{ field: 'updated_at', order: 'asc' }],   // oudste eerst → cursor monotoon
       });
       if (!r.ok) {
         const txt = await r.text().catch(() => '');
-        console.error(`[cron-finance-sync] ${resource} ${listEndpoint} HTTP ${r.status} dept=${dept} page=${page}`, txt.slice(0, 300));
+        console.error(`[cron-finance-sync] ${resource} ${listEndpoint} HTTP ${r.status} dept=${dept ?? 'flat'} page=${page}`, txt.slice(0, 300));
         errors++;
-        // Niet de hele run aborten — volgende dept proberen.
+        // Niet de hele run aborten — volgende dept / iteratie proberen.
         break;
       }
 
       let batch = [];
       try { batch = (await r.json()).data || []; }
       catch (e) {
-        console.error(`[cron-finance-sync] ${resource} json-parse fout dept=${dept} page=${page}`, e.message);
+        console.error(`[cron-finance-sync] ${resource} json-parse fout dept=${dept ?? 'flat'} page=${page}`, e.message);
         errors++;
         break;
       }
@@ -119,6 +139,8 @@ async function syncResource(cfg) {
           const out = await upsertOne(lite.id);
           // Voor creditnotes: invoice_id verzamelen voor recompute.
           if (resource === 'creditnotes' && out?.invoice_id) affected_invoice_ids.add(out.invoice_id);
+          // Action tellen (inserted/updated/skipped) voor diag op contacts/companies.
+          if (out?.action) sampled_actions[out.action] = (sampled_actions[out.action] || 0) + 1;
           const ts = recordUpdatedAt(lite);
           if (ts) sampled_max_updated = maxIso(sampled_max_updated, ts);
         } catch (e) {
@@ -139,7 +161,7 @@ async function syncResource(cfg) {
   // records overslaan. Veilig: alleen vooruit als we echt records zagen.
   const next_cursor = sampled_max_updated || updatedSinceIso;
 
-  return { processed, errors, next_cursor, sampled_max_updated, affected_invoice_ids, aborted };
+  return { processed, errors, next_cursor, sampled_max_updated, affected_invoice_ids, aborted, sampled_actions };
 }
 
 export default async function handler(req, res) {
@@ -156,11 +178,11 @@ export default async function handler(req, res) {
   const startedAt = Date.now();
   const startedIso = new Date(startedAt).toISOString();
 
-  // 1. sync_state ophalen voor beide resources.
+  // 1. sync_state ophalen voor alle 4 resources.
   let stateRows = [];
   try {
     const { data, error } = await supabaseAdmin
-      .from('sync_state').select('*').in('resource', ['invoices', 'creditnotes']);
+      .from('sync_state').select('*').in('resource', ['invoices', 'creditnotes', 'contacts', 'companies']);
     if (error) throw new Error(error.message);
     stateRows = data || [];
   } catch (e) {
@@ -174,10 +196,16 @@ export default async function handler(req, res) {
       found: Object.keys(byResource),
     });
   }
+  // contacts/companies-rijen zijn optioneel: bij ontbreken slaan we die resources
+  // gewoon over (Fase 4 migratie moet nog gedraaid; cron blijft werken op finance-data).
 
-  const summary = { started_at: startedIso, invoices: null, creditnotes: null };
+  const summary = {
+    started_at: startedIso,
+    invoices: null, creditnotes: null,
+    contacts: null, companies: null,
+  };
 
-  // 2. Invoices syncen.
+  // 2. Invoices syncen (per-department).
   try {
     const invStart = Date.now();
     const invRes = await syncResource({
@@ -185,6 +213,7 @@ export default async function handler(req, res) {
       listEndpoint: '/invoices.list',
       updatedSinceIso: byResource.invoices.last_updated_since,
       startedAt,
+      departments: DEPARTMENTS,
       upsertOne: (id) => upsertInvoiceFromTl(id),
     });
     const invDuration = Date.now() - invStart;
@@ -211,7 +240,7 @@ export default async function handler(req, res) {
     summary.invoices = { error: e.message };
   }
 
-  // 3. Creditnotes syncen.
+  // 3. Creditnotes syncen (per-department).
   try {
     const cnStart = Date.now();
     const cnRes = await syncResource({
@@ -219,6 +248,7 @@ export default async function handler(req, res) {
       listEndpoint: '/creditNotes.list',
       updatedSinceIso: byResource.creditnotes.last_updated_since,
       startedAt,
+      departments: DEPARTMENTS,
       upsertOne: (id) => upsertCreditNoteFromTl(id),
     });
     // Recompute credited_amount voor de geraakte facturen.
@@ -250,6 +280,75 @@ export default async function handler(req, res) {
   } catch (e) {
     console.error('[cron-finance-sync] creditnotes fase', e.message);
     summary.creditnotes = { error: e.message };
+  }
+
+  // 4. Contacts syncen (flat, geen department-loop). Slaat de fase over als
+  //    sync_state.contacts-rij ontbreekt (Fase 4 migratie nog niet gedraaid).
+  if (byResource.contacts) {
+    try {
+      const ctStart = Date.now();
+      const ctRes = await syncResource({
+        resource: 'contacts',
+        listEndpoint: '/contacts.list',
+        updatedSinceIso: byResource.contacts.last_updated_since,
+        startedAt,
+        departments: null,
+        upsertOne: (id) => upsertContactFromTl(id),
+      });
+      const ctDuration = Date.now() - ctStart;
+      const { error: upErr } = await supabaseAdmin.from('sync_state').update({
+        last_updated_since:   ctRes.next_cursor,
+        last_run_at:          startedIso,
+        last_run_processed:   ctRes.processed,
+        last_run_errors:      ctRes.errors,
+        last_run_duration_ms: ctDuration,
+      }).eq('resource', 'contacts');
+      if (upErr) console.error('[cron-finance-sync] sync_state contacts UPDATE', upErr.message);
+      summary.contacts = {
+        processed: ctRes.processed, errors: ctRes.errors, duration_ms: ctDuration,
+        last_updated_since: ctRes.next_cursor, aborted_by_timeout: ctRes.aborted,
+        actions: ctRes.sampled_actions,
+      };
+    } catch (e) {
+      console.error('[cron-finance-sync] contacts fase', e.message);
+      summary.contacts = { error: e.message };
+    }
+  } else {
+    summary.contacts = { skipped: 'sync_state.contacts ontbreekt — draai migratie 2026-06-07-finance-sync-state-contacts-companies.sql' };
+  }
+
+  // 5. Companies syncen (flat). Idem skip-rule.
+  if (byResource.companies) {
+    try {
+      const coStart = Date.now();
+      const coRes = await syncResource({
+        resource: 'companies',
+        listEndpoint: '/companies.list',
+        updatedSinceIso: byResource.companies.last_updated_since,
+        startedAt,
+        departments: null,
+        upsertOne: (id) => upsertCompanyFromTl(id),
+      });
+      const coDuration = Date.now() - coStart;
+      const { error: upErr } = await supabaseAdmin.from('sync_state').update({
+        last_updated_since:   coRes.next_cursor,
+        last_run_at:          startedIso,
+        last_run_processed:   coRes.processed,
+        last_run_errors:      coRes.errors,
+        last_run_duration_ms: coDuration,
+      }).eq('resource', 'companies');
+      if (upErr) console.error('[cron-finance-sync] sync_state companies UPDATE', upErr.message);
+      summary.companies = {
+        processed: coRes.processed, errors: coRes.errors, duration_ms: coDuration,
+        last_updated_since: coRes.next_cursor, aborted_by_timeout: coRes.aborted,
+        actions: coRes.sampled_actions,
+      };
+    } catch (e) {
+      console.error('[cron-finance-sync] companies fase', e.message);
+      summary.companies = { error: e.message };
+    }
+  } else {
+    summary.companies = { skipped: 'sync_state.companies ontbreekt — draai migratie 2026-06-07-finance-sync-state-contacts-companies.sql' };
   }
 
   const totalMs = Date.now() - startedAt;

@@ -148,13 +148,21 @@
           <i class="ti ti-refresh" style="font-size:13px"></i>
           <span id="invSyncText">Sync TL → DB: laden…</span>
         </summary>
-        <div id="invSyncDetail" style="margin-top:8px;padding:10px 12px;border:1px solid var(--border-subtle, #2b2f3a);border-radius:8px;font-size:12px;color:var(--text-dim);background:rgba(255,255,255,0.02);display:grid;grid-template-columns:repeat(2,1fr);gap:12px;max-width:640px">
+        <div id="invSyncDetail" style="margin-top:8px;padding:10px 12px;border:1px solid var(--border-subtle, #2b2f3a);border-radius:8px;font-size:12px;color:var(--text-dim);background:rgba(255,255,255,0.02);display:grid;grid-template-columns:repeat(2,1fr);gap:12px;max-width:720px">
           <div data-resource="invoices">
             <div style="font-weight:600;color:var(--text);margin-bottom:4px">Facturen</div>
             <div data-field="lines">—</div>
           </div>
           <div data-resource="creditnotes">
             <div style="font-weight:600;color:var(--text);margin-bottom:4px">Creditnota's</div>
+            <div data-field="lines">—</div>
+          </div>
+          <div data-resource="contacts">
+            <div style="font-weight:600;color:var(--text);margin-bottom:4px">Contacten (B2C)</div>
+            <div data-field="lines">—</div>
+          </div>
+          <div data-resource="companies">
+            <div style="font-weight:600;color:var(--text);margin-bottom:4px">Bedrijven (B2B)</div>
             <div data-field="lines">—</div>
           </div>
         </div>
@@ -285,7 +293,8 @@
       <label style="font-size:12.5px">Teamleader mail-template <span class="sr-cellsub" style="font-weight:400">(verplicht)</span>
         <select id="sendTpl" class="fin-input" style="width:100%;margin-top:4px"><option value="">— laden…</option></select>
       </label>
-      <label style="font-size:12.5px">Ontvanger (e-mail)<input id="sendTo" type="email" class="fin-input" style="width:100%;margin-top:4px" placeholder="naam@voorbeeld.nl"/></label>
+      <label style="font-size:12.5px">Ontvanger (e-mail)<input id="sendTo" type="email" class="fin-input" style="width:100%;margin-top:4px;background:#f4f4f5;cursor:not-allowed" placeholder="naam@voorbeeld.nl" readonly/></label>
+      <div style="font-size:11px;color:var(--text-faint);font-style:italic;margin-top:-4px">Teamleader stuurt naar het klant-mailadres uit TL. Wijzig dit in TL bij de klant zelf (of via Aanpassen-knop op de klantkaart als Fase 4 live is) vóór je verzendt.</div>
       <div>
         <a href="#" id="sendAdvToggle" style="font-size:12px;color:var(--accent-cyan);text-decoration:none">Geavanceerd: onderwerp / inhoud overschrijven ▾</a>
         <div id="sendAdv" style="margin-top:8px;display:none;flex-direction:column;gap:8px">
@@ -1060,12 +1069,14 @@
       if (r.status === 403) { banner.hidden = true; return; }
       const d = await r.json().catch(() => null);
       banner.hidden = false;
-      if (!d || (!d.invoices && !d.creditnotes)) {
+      const allRows = [d?.invoices, d?.creditnotes, d?.contacts, d?.companies].filter(Boolean);
+      if (!allRows.length) {
         text.textContent = 'Sync TL → DB: —';
       } else {
-        const ts = d.invoices?.last_run_at || d.creditnotes?.last_run_at;
-        const totP = (d.invoices?.last_run_processed ?? 0) + (d.creditnotes?.last_run_processed ?? 0);
-        const totE = (d.invoices?.last_run_errors ?? 0) + (d.creditnotes?.last_run_errors ?? 0);
+        // Meest recente run-timestamp over alle 4 resources.
+        const ts = allRows.map(r => r.last_run_at).filter(Boolean).sort().pop();
+        const totP = allRows.reduce((a, r) => a + (r.last_run_processed ?? 0), 0);
+        const totE = allRows.reduce((a, r) => a + (r.last_run_errors ?? 0), 0);
         text.textContent = ts
           ? `Sync TL → DB: ${fmtSyncTime(ts)} · ${totP} verwerkt · ${totE} errors`
           : 'Sync TL → DB: nog niet gedraaid';
@@ -1077,8 +1088,10 @@
           const el = grid.querySelector(`[data-resource="${resource}"] [data-field="lines"]`);
           if (el) el.textContent = fmtSyncRow(row);
         };
-        fillLine('invoices', d?.invoices || null);
+        fillLine('invoices',    d?.invoices    || null);
         fillLine('creditnotes', d?.creditnotes || null);
+        fillLine('contacts',    d?.contacts    || null);
+        fillLine('companies',   d?.companies   || null);
       }
     } catch (e) {
       // Graceful: laat banner staan met "—" of verbergen.

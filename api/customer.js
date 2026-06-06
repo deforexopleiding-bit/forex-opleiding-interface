@@ -13,6 +13,7 @@
 
 import { supabaseAdmin, verifyAdmin } from './supabase.js';
 import { logCustomerAudit } from './_lib/audit-customer.js';
+import { tlFetch } from './_lib/teamleader-token.js';
 
 const UUID_RE  = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -279,9 +280,9 @@ async function handlePatch(req, res, admin) {
     if (bErr) throw new Error('customer pre-fetch: ' + bErr.message);
     if (!before) return res.status(404).json({ error: 'Klant niet gevonden' });
 
-    // 2) Status-gate
-    if (before.archived_at)   return res.status(403).json({ error: 'Klant is gearchiveerd; eerst heractiveren.' });
-    if (before.anonymized_at) return res.status(403).json({ error: 'Klant is geanonimiseerd; niet bewerkbaar.' });
+    // 2) Status-gate — 409 = "Conflict": klant is in locked-state, niet bewerkbaar.
+    if (before.archived_at)   return res.status(409).json({ error: 'Klant is gearchiveerd; eerst heractiveren.' });
+    if (before.anonymized_at) return res.status(409).json({ error: 'Klant is geanonimiseerd; niet bewerkbaar.' });
 
     // 2b) Identiteit valideren op de samengevoegde staat (B2B: bedrijfsnaam; B2C: voor+achternaam).
     const merged = { ...before, ...cleaned };
@@ -290,6 +291,19 @@ async function handlePatch(req, res, admin) {
     } else {
       if (!String(merged.first_name || '').trim()) return res.status(400).json({ error: 'Voornaam is verplicht', field: 'first_name' });
       if (!String(merged.last_name || '').trim())  return res.status(400).json({ error: 'Achternaam is verplicht', field: 'last_name' });
+    }
+
+    // 2c) Synchrone TL-push vóór DB-commit (Fase 4 bidirectionele sync).
+    //   - B2C met tl_contact_id → /contacts.update
+    //   - B2B met tl_company_id → /companies.update
+    //   - Zonder TL-id → skip TL-call, DB-update doorgaan (klant is nog niet
+    //     gekoppeld; eerst koppelen via offerte/factuur-flow).
+    //   - TL-4xx → 422 + tl_request_payload + tl_request_keys + tl_response echo,
+    //     DB-write wordt NIET uitgevoerd (TL = source of truth voor klantdata).
+    //   - TL-5xx of netwerk → 502 + tl_response, DB-write NIET uitgevoerd.
+    const tlSyncResult = await pushCustomerToTl({ before, cleaned, merged });
+    if (tlSyncResult.error) {
+      return res.status(tlSyncResult.httpStatus).json(tlSyncResult.body);
     }
 
     // 3) UPDATE (trg_customers_updated zet updated_at = now())
@@ -327,6 +341,10 @@ async function handlePatch(req, res, admin) {
         notes_count: notesCount || 0,
         audit_count: auditCount || 0,
       },
+      tl_synced:          tlSyncResult.synced,
+      tl_endpoint:        tlSyncResult.endpoint || null,
+      tl_fields_updated:  tlSyncResult.fieldsUpdated || [],
+      tl_skip_reason:     tlSyncResult.skipReason || null,
     });
   } catch (err) {
     console.error('[customer PATCH] handler error:', err);
@@ -335,6 +353,148 @@ async function handlePatch(req, res, admin) {
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
+
+/**
+ * Push customer-changes naar Teamleader (contacts.update of companies.update).
+ *
+ * Strategie:
+ *   - Bouw payload op basis van `cleaned` (de gewijzigde velden) gecombineerd met
+ *     `merged` (volledige nieuwe staat) — TL vervangt arrays (emails/telephones/
+ *     addresses) volledig, dus bij elke wijziging in die clusters sturen we de
+ *     gewenste eindstaat (primary entry).
+ *   - Geen TL-call als er na mapping geen TL-relevante velden in payload zitten
+ *     (alleen interne velden gewijzigd zoals tl_contact_id of ghl_contact_id).
+ *   - Geen TL-call als er geen tl_contact_id (B2C) of tl_company_id (B2B) is —
+ *     klant nog niet gekoppeld; lokale edit mag wel doorgaan.
+ *
+ * BEKEND RISICO (gedocumenteerd voor Fase 4 v1):
+ *   - Bij email-wijziging vervangen we de hele emails-array door één primary.
+ *     Als de klant in TL meerdere emails (cc, admin) had: die gaan verloren.
+ *     Mitigatie voor v2: eerst contacts.info ophalen, merge met huidige emails-
+ *     array. Voor v1 acceptabel omdat DFO klanten typisch één email hebben.
+ *   - Idem voor telephones en addresses.
+ *
+ * @returns {Promise<{
+ *   error: false, synced: boolean, endpoint?: string, fieldsUpdated?: string[], skipReason?: string,
+ * } | {
+ *   error: true, httpStatus: number, body: object,
+ * }>}
+ */
+async function pushCustomerToTl({ before, cleaned, merged }) {
+  const isCompany = merged.is_company === true;
+  const tlId = isCompany ? before.tl_company_id : before.tl_contact_id;
+  if (!tlId) {
+    return { error: false, synced: false, skipReason: isCompany ? 'geen tl_company_id' : 'geen tl_contact_id' };
+  }
+
+  // Bepaal of een cluster (email/phone/address) is gewijzigd. Bij ja: sturen we
+  // de complete primary-entry uit `merged` mee.
+  const has = (k) => Object.prototype.hasOwnProperty.call(cleaned, k);
+  const emailChanged   = has('email');
+  const phoneChanged   = has('phone');
+  const addrChanged    = has('address_street') || has('address_number') || has('address_postal') || has('address_city');
+
+  const payload = { id: tlId };
+  const fieldsUpdated = [];
+
+  if (isCompany) {
+    // /companies.update
+    if (has('company_name'))   { payload.name = (merged.company_name || '').trim(); fieldsUpdated.push('name'); }
+    if (has('vat_number'))     { payload.vat_number = (merged.vat_number || '').trim() || null; fieldsUpdated.push('vat_number'); }
+    if (has('kvk_number'))     { payload.national_identification_number = (merged.kvk_number || '').trim() || null; fieldsUpdated.push('national_identification_number'); }
+  } else {
+    // /contacts.update
+    if (has('first_name'))     { payload.first_name = (merged.first_name || '').trim(); fieldsUpdated.push('first_name'); }
+    if (has('last_name'))      { payload.last_name  = (merged.last_name  || '').trim(); fieldsUpdated.push('last_name'); }
+    if (has('date_of_birth'))  {
+      const dob = (merged.date_of_birth ? String(merged.date_of_birth).slice(0, 10) : null);
+      payload.birthdate = dob;  // null = clear (TL accepteert null voor optioneel veld)
+      fieldsUpdated.push('birthdate');
+    }
+  }
+
+  // Gedeeld voor B2B + B2C: emails/telephones/addresses.
+  if (emailChanged) {
+    const e = (merged.email || '').trim();
+    payload.emails = e ? [{ type: 'primary', email: e }] : [];
+    fieldsUpdated.push('emails');
+  }
+  if (phoneChanged) {
+    const p = (merged.phone || '').trim();
+    payload.telephones = p ? [{ type: 'phone', number: p }] : [];
+    fieldsUpdated.push('telephones');
+  }
+  if (addrChanged) {
+    const street = (merged.address_street || '').trim();
+    const number = (merged.address_number || '').trim();
+    const line1 = [street, number].filter(Boolean).join(' ').trim();
+    const postal = (merged.address_postal || '').trim();
+    const city   = (merged.address_city || '').trim();
+    if (line1 || postal || city) {
+      payload.addresses = [{
+        type: 'primary',
+        address: {
+          line_1:      line1 || null,
+          postal_code: postal || null,
+          city:        city || null,
+          country:     'NL',
+        },
+      }];
+    } else {
+      // Alle adres-velden zijn leeg → expliciet lege array (clear address in TL).
+      payload.addresses = [];
+    }
+    fieldsUpdated.push('addresses');
+  }
+
+  // Geen TL-relevante velden in payload? Alleen interne flags gewijzigd → skip TL-call.
+  if (fieldsUpdated.length === 0) {
+    return { error: false, synced: false, skipReason: 'geen TL-relevante velden in wijziging' };
+  }
+
+  const endpoint = isCompany ? '/companies.update' : '/contacts.update';
+  let r, tlText = '';
+  try {
+    r = await tlFetch(endpoint, { method: 'POST', body: JSON.stringify(payload) });
+    tlText = await r.text().catch(() => '');
+  } catch (netErr) {
+    console.error('[customer PATCH] TL netwerk', endpoint, netErr.message);
+    return {
+      error: true, httpStatus: 502,
+      body: {
+        error: 'Teamleader niet bereikbaar: ' + netErr.message,
+        tl_endpoint: endpoint,
+        tl_request_payload: payload,
+        tl_request_keys: Object.keys(payload),
+        tl_response: 'NETWERK: ' + netErr.message,
+      },
+    };
+  }
+
+  if (r.ok) {
+    console.log(`[customer PATCH] TL OK | ${endpoint} | tl_id=${tlId} | fields=${fieldsUpdated.join(',')}`);
+    return { error: false, synced: true, endpoint, fieldsUpdated };
+  }
+
+  // 4xx of 5xx — echo volledige payload + response voor diagnose.
+  const isClient = r.status >= 400 && r.status < 500;
+  console.error(`[customer PATCH] TL ${r.status} | ${endpoint} | response=`, tlText.slice(0, 500));
+  return {
+    error: true,
+    httpStatus: isClient ? 422 : 502,
+    body: {
+      error: isClient
+        ? `Teamleader weigerde update (HTTP ${r.status}). DB-wijziging niet uitgevoerd.`
+        : `Teamleader gaf serverfout (HTTP ${r.status}). DB-wijziging niet uitgevoerd.`,
+      tl_endpoint: endpoint,
+      tl_status: r.status,
+      tl_request_payload: payload,
+      tl_request_keys: Object.keys(payload),
+      tl_response: tlText.slice(0, 2000),
+    },
+  };
+}
+
 
 function deriveStatus(c) {
   if (c.anonymized_at) return 'anonymized';

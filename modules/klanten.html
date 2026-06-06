@@ -1241,7 +1241,8 @@ function koEnsureInvModal() {
           <label style="font-size:12.5px;display:block;margin-bottom:8px">Teamleader mail-template <span class="sr-cellsub" style="font-weight:400">(verplicht)</span>
             <select id="koSendTpl" style="width:100%;margin-top:3px;padding:6px 9px;border:1px solid var(--border);border-radius:7px;background:var(--bg);color:var(--text)"><option value="">— laden…</option></select>
           </label>
-          <label style="font-size:12.5px;display:block;margin-bottom:8px">Ontvanger (e-mail)<input id="koSendTo" type="email" style="width:100%;margin-top:3px;padding:6px 9px;border:1px solid var(--border);border-radius:7px;background:var(--bg);color:var(--text)"/></label>
+          <label style="font-size:12.5px;display:block;margin-bottom:4px">Ontvanger (e-mail)<input id="koSendTo" type="email" style="width:100%;margin-top:3px;padding:6px 9px;border:1px solid var(--border);border-radius:7px;background:#f4f4f5;color:var(--text);cursor:not-allowed" readonly/></label>
+          <div style="font-size:11px;color:var(--text-faint);font-style:italic;margin-bottom:8px">Teamleader stuurt naar het klant-mailadres uit TL. Wijzig dit in TL bij de klant zelf (of via Aanpassen-knop op de klantkaart als Fase 4 live is) vóór je verzendt.</div>
           <a href="#" id="koSendAdvToggle" style="font-size:12px;color:var(--accent-cyan);text-decoration:none">Geavanceerd ▾</a>
           <div id="koSendAdv" style="margin-top:8px;display:none;flex-direction:column;gap:8px">
             <label style="font-size:12.5px">Onderwerp overschrijven <span class="sr-cellsub" style="font-weight:400">(leeg = template)</span>
@@ -3226,7 +3227,8 @@ async function submitCustomerForm() {
   clearFormErrors();
   const btn = $('#customerFormSubmit');
   btn.disabled = true;
-  btn.textContent = 'Bezig…';
+  // Edit-mode pusht synchroon naar TL (Fase 4) — label maakt de wachttijd transparant.
+  btn.textContent = mode === 'edit' ? 'Opslaan & synct naar TL…' : 'Bezig…';
 
   try {
     const url = mode === 'create' ? '/api/customer' : '/api/customer?id=' + encodeURIComponent(customerId);
@@ -3238,11 +3240,43 @@ async function submitCustomerForm() {
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
-      if (res.status === 400 && data.field) setFieldError(data.field, data.error || 'Ongeldige waarde');
-      else setModalBannerError('customerFormBanner', data.error || ('HTTP ' + res.status));
+      // Field-level (alleen 400 met data.field).
+      if (res.status === 400 && data.field) {
+        setFieldError(data.field, data.error || 'Ongeldige waarde');
+        return;
+      }
+      // 422 = TL weigerde update (Fase 4 synchronous push). Echo diagnostiek naar
+      // console + toon vriendelijke banner met TL-response snippet.
+      if (res.status === 422 && data.tl_response) {
+        const snippet = String(data.tl_response).slice(0, 200);
+        setModalBannerError('customerFormBanner', `Teamleader weigerde update: ${snippet}`);
+        console.error('[klanten] TL-422 echo:', {
+          tl_endpoint: data.tl_endpoint, tl_status: data.tl_status,
+          tl_request_payload: data.tl_request_payload, tl_request_keys: data.tl_request_keys,
+          tl_response: data.tl_response,
+        });
+        return;
+      }
+      // 502 = TL onbereikbaar. Vraag user opnieuw te proberen.
+      if (res.status === 502) {
+        setModalBannerError('customerFormBanner', 'Teamleader niet bereikbaar; probeer opnieuw.');
+        console.error('[klanten] TL-502:', data);
+        return;
+      }
+      // 409 = klant gearchiveerd/geanonimiseerd; niet bewerkbaar.
+      if (res.status === 409) {
+        setModalBannerError('customerFormBanner', data.error || 'Klant kan niet bewerkt worden.');
+        return;
+      }
+      setModalBannerError('customerFormBanner', data.error || ('HTTP ' + res.status));
       return;
     }
     closeCustomerModal();
+    if (mode === 'edit' && data.tl_synced) {
+      window.AgentShared?.showToast?.(`Klant bijgewerkt + gesynct naar Teamleader (${(data.tl_fields_updated || []).join(', ')})`, 'success');
+    } else if (mode === 'edit' && data.tl_skip_reason) {
+      window.AgentShared?.showToast?.(`Klant bijgewerkt (TL-skip: ${data.tl_skip_reason})`, 'info');
+    }
 
     if (mode === 'create') {
       // Navigeer direct naar detail van de nieuwe klant
