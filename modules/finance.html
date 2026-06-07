@@ -298,6 +298,17 @@
           <div id="matchAutoStatus" style="display:none;margin-top:8px;font-size:12px"></div>
         </div>
 
+        <!-- Bulk-matcher: ééns draaien voor historische data zonder candidates -->
+        <div style="margin-bottom:14px;padding:12px 16px;border:1px dashed var(--border-subtle, #e5e7eb);border-radius:10px;background:rgba(255,255,255,0.02);display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
+          <div>
+            <div style="font-size:13px;font-weight:600">Bulk-matcher voor historische transacties</div>
+            <div style="font-size:11.5px;color:var(--text-faint);margin-top:2px">Genereert match-kandidaten voor camt-transacties die nog niet beoordeeld zijn. Autopilot-bevestiging wordt toegepast als die aanstaat.</div>
+          </div>
+          <button class="sr-abtn primary" id="matchBulkRunBtn" type="button" style="font-size:12.5px">
+            <i class="ti ti-player-play" style="margin-right:4px"></i>Match historische data
+          </button>
+        </div>
+
         <!-- Filter-strip -->
         <div class="sr-filterstrip" style="margin-bottom:12px;flex-wrap:wrap;gap:8px;align-items:center">
           <div class="sr-segments" id="matchStatusSeg">
@@ -2258,7 +2269,45 @@
       }));
       const mRef = document.getElementById('matchRefresh');
       if (mRef) mRef.addEventListener('click', () => { matchState.page = 1; loadMatches(); });
+      // Bulk-matcher knop.
+      const bulkBtn = document.getElementById('matchBulkRunBtn');
+      if (bulkBtn) bulkBtn.addEventListener('click', runBulkMatcher);
     } catch (e) { console.error('[finance-facturen] init', e); }
+  }
+
+  // Bulk-matcher trigger — draait engine over alle camt_transactions zonder candidate.
+  async function runBulkMatcher() {
+    const btn = document.getElementById('matchBulkRunBtn');
+    if (!btn) return;
+    if (!confirm('Match-engine draaien voor alle ongematchte transacties? Dit kan even duren bij veel historische data.')) return;
+    const origHtml = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = '<i class="ti ti-loader-2" style="margin-right:4px;animation:spin 1s linear infinite"></i>Bezig…';
+    try {
+      const r = await window.AgentShared.apiFetch('/api/finance-payment-matcher-run', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ scope: 'unmatched' }),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.error || ('HTTP ' + r.status));
+      const parts = [];
+      parts.push(`${j.processed || 0} verwerkt`);
+      parts.push(`${j.candidates_created || 0} kandidaten`);
+      if (j.auto_confirmed) parts.push(`${j.auto_confirmed} auto-bevestigd`);
+      if (j.auto_confirm_failed) parts.push(`${j.auto_confirm_failed} auto-faal`);
+      if (j.errors) parts.push(`${j.errors} fout`);
+      if (j.aborted_by_timeout) parts.push('⚠️ timeout — opnieuw draaien voor de rest');
+      window.AgentShared.showToast('✓ ' + parts.join(' · '), j.errors ? 'warning' : 'success');
+      matchState.page = 1;
+      loadMatches();
+    } catch (e) {
+      console.error('[bulk-matcher]', e);
+      window.AgentShared.showToast('Bulk-matcher mislukt: ' + e.message, 'error');
+    } finally {
+      btn.disabled = false;
+      btn.innerHTML = origHtml;
+    }
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
