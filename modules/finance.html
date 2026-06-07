@@ -212,6 +212,14 @@
       <div style="font-size:12.5px">Je mist het recht <code>finance.bank.transactions_view</code>. Vraag een beheerder dit aan te zetten.</div>
     </div>
     <div id="camtBankMain">
+      <!-- Sub-tabs (Fase 3 — Transacties default, Matches voor automatische factuurkoppeling) -->
+      <div class="sr-segments" id="camtSubNav" style="margin-bottom:14px">
+        <button class="sr-seg active" data-camt-sub="transactions" type="button">Transacties</button>
+        <button class="sr-seg" data-camt-sub="matches" type="button">Matches <span id="camtMatchesBadge" style="display:none;margin-left:6px;padding:2px 6px;background:#10b981;color:#fff;border-radius:999px;font-size:10px;font-weight:600"></span></button>
+      </div>
+
+      <!-- Sub-view: Transacties (default — saldo-card + upload + filter + tabel) -->
+      <div id="camtSubTransactions">
       <!-- Saldo-card uit nieuwste CAMT-statement -->
       <div style="background:linear-gradient(135deg, rgba(16,185,129,.12), rgba(16,185,129,.04));border:1px solid rgba(16,185,129,.3);border-radius:12px;padding:18px 22px;margin-bottom:18px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px">
         <div>
@@ -266,6 +274,60 @@
         </table>
       </div>
       <div id="camtBankPager" style="display:flex;justify-content:space-between;align-items:center;margin-top:12px;font-size:12.5px;color:var(--text-dim)"></div>
+      </div><!-- /camtSubTransactions -->
+
+      <!-- Sub-view: Matches (verborgen by default) -->
+      <div id="camtSubMatches" hidden>
+        <!-- Autopilot-block -->
+        <div style="margin-bottom:14px;padding:14px 16px;border:1px solid var(--border-subtle, #e5e7eb);border-radius:10px;background:rgba(255,255,255,0.02)">
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
+            <div>
+              <label style="display:flex;align-items:center;gap:10px;cursor:pointer;font-size:13px;font-weight:600">
+                <input type="checkbox" id="matchAutoToggle" style="width:auto;cursor:pointer"/>
+                <span>Automatisch matchen bij hoge zekerheid (autopilot)</span>
+              </label>
+              <div id="matchAutoMeta" style="font-size:11.5px;color:var(--text-faint);margin-top:4px">Laden…</div>
+            </div>
+            <div id="matchAutoThresholdBox" style="display:none;align-items:center;gap:8px">
+              <label style="font-size:12px;color:var(--text-dim)">Drempel</label>
+              <input id="matchAutoThreshold" type="range" min="50" max="100" step="5" value="95" style="width:140px"/>
+              <span id="matchAutoThresholdVal" style="font-size:12.5px;font-weight:600;min-width:32px">95</span>
+              <button class="sr-abtn primary" id="matchAutoSave" type="button" style="font-size:12px">Opslaan</button>
+            </div>
+          </div>
+          <div id="matchAutoStatus" style="display:none;margin-top:8px;font-size:12px"></div>
+        </div>
+
+        <!-- Filter-strip -->
+        <div class="sr-filterstrip" style="margin-bottom:12px;flex-wrap:wrap;gap:8px;align-items:center">
+          <div class="sr-segments" id="matchStatusSeg">
+            <button class="sr-seg active" data-status="open" type="button">Te beoordelen</button>
+            <button class="sr-seg" data-status="confirmed_all" type="button">Bevestigd</button>
+            <button class="sr-seg" data-status="rejected" type="button">Verworpen</button>
+            <button class="sr-seg" data-status="all" type="button">Alle</button>
+          </div>
+          <span style="flex:1"></span>
+          <button class="sr-ibtn" id="matchRefresh" title="Vernieuwen" type="button"><i class="ti ti-refresh"></i></button>
+        </div>
+
+        <!-- Tabel -->
+        <div class="sr-tablewrap">
+          <table class="sr-table" id="matchTable">
+            <thead><tr>
+              <th style="width:90px">Datum</th>
+              <th class="num" style="width:110px">Bedrag</th>
+              <th>Tegenpartij</th>
+              <th style="width:70px">Score</th>
+              <th>Redenen</th>
+              <th>Factuur</th>
+              <th style="width:140px">Status</th>
+              <th style="width:140px"></th>
+            </tr></thead>
+            <tbody id="matchTbody"><tr><td colspan="8" style="text-align:center;padding:24px;color:var(--text-faint)">Laden…</td></tr></tbody>
+          </table>
+        </div>
+        <div id="matchPager" style="display:flex;justify-content:space-between;align-items:center;margin-top:12px;font-size:12.5px;color:var(--text-dim)"></div>
+      </div>
     </div>
   </div>
 
@@ -1814,16 +1876,199 @@
         return;
       }
       status.style.color = '#10b981';
-      status.textContent = `✓ ${d.num_inserted} transacties geïmporteerd, ${d.num_skipped} duplicaten gefilterd · periode ${fmtDateNl(d.statement_from)} – ${fmtDateNl(d.statement_to)}`;
-      window.AgentShared?.showToast?.(`${d.num_inserted} transacties uit ${file.name}`, 'success');
-      // Refresh saldo + tabel + statements-lijst.
+      const matchesPart = d.matches_generated
+        ? ` · ${d.matches_generated} matches gegenereerd${d.auto_confirmed ? `, waarvan ${d.auto_confirmed} auto-bevestigd` : ''}`
+        : '';
+      status.textContent = `✓ ${d.num_inserted} transacties geïmporteerd, ${d.num_skipped} duplicaten gefilterd · periode ${fmtDateNl(d.statement_from)} – ${fmtDateNl(d.statement_to)}${matchesPart}`;
+      window.AgentShared?.showToast?.(`${d.num_inserted} transacties uit ${file.name}${d.matches_generated ? ` · ${d.matches_generated} matches` : ''}`, 'success');
+      // Refresh saldo + tabel + statements-lijst + matches-badge.
       loadCamtBalance();
       camtBankState.page = 1;
       loadCamtBank();
       loadCamtStatementsList();
+      // Trigger matches-load om badge bij te werken (zonder UI-tab-switch).
+      _camtMatchesLoadedOnce = true; loadMatches();
     } catch (e) {
       status.style.color = '#ef4444';
       status.textContent = 'Upload mislukt: ' + e.message;
+    }
+  }
+
+  // ── CAMT Matches sub-tab (Fase 3 — payment-matching engine) ──
+  let _camtMatchesLoadedOnce = false;
+  const matchState = { statusFilter: 'open', page: 1, pageSize: 50, total: 0 };
+  let _matchItems = [];
+  function setCamtSubView(sub) {
+    document.getElementById('camtSubTransactions').hidden = (sub !== 'transactions');
+    document.getElementById('camtSubMatches').hidden = (sub !== 'matches');
+    document.querySelectorAll('#camtSubNav .sr-seg').forEach(b => b.classList.toggle('active', b.dataset.camtSub === sub));
+    if (sub === 'matches' && !_camtMatchesLoadedOnce) {
+      _camtMatchesLoadedOnce = true;
+      loadMatchAutopilotSetting();
+      loadMatches();
+    }
+  }
+  async function loadMatchAutopilotSetting() {
+    const cb = document.getElementById('matchAutoToggle');
+    const meta = document.getElementById('matchAutoMeta');
+    const thrBox = document.getElementById('matchAutoThresholdBox');
+    const thrInput = document.getElementById('matchAutoThreshold');
+    const thrVal = document.getElementById('matchAutoThresholdVal');
+    if (!cb || !meta) return;
+    meta.textContent = 'Laden…';
+    try {
+      const r = await window.AgentShared.apiFetch('/api/app-settings?key=payment_match_autopilot');
+      const d = await r.json();
+      if (!r.ok) { meta.textContent = 'Setting niet gevonden — gebruik standaardwaarden.'; return; }
+      const v = d.value || { enabled: false, threshold: 95 };
+      cb.checked = !!v.enabled;
+      thrBox.style.display = cb.checked ? 'flex' : 'none';
+      thrInput.value = String(v.threshold || 95);
+      thrVal.textContent = String(v.threshold || 95);
+      meta.textContent = v.enabled
+        ? `Aan · facturen worden automatisch gemarkeerd als betaald bij match-score ≥ ${v.threshold || 95}`
+        : 'Uit · alle matches vereisen handmatige bevestiging';
+    } catch (e) { meta.textContent = 'Fout: ' + e.message; }
+  }
+  async function saveMatchAutopilotSetting() {
+    const status = document.getElementById('matchAutoStatus');
+    const cb = document.getElementById('matchAutoToggle');
+    const thrInput = document.getElementById('matchAutoThreshold');
+    const value = { enabled: !!cb.checked, threshold: Number(thrInput.value) || 95 };
+    status.style.display = '';
+    status.style.color = 'var(--text-dim)';
+    status.textContent = 'Opslaan…';
+    try {
+      const r = await window.AgentShared.apiFetch('/api/app-settings', {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ key: 'payment_match_autopilot', value }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        status.style.color = '#ef4444';
+        status.textContent = 'Mislukt: ' + (d.error || 'HTTP ' + r.status);
+        return;
+      }
+      status.style.color = '#10b981';
+      status.textContent = '✓ Opgeslagen.';
+      loadMatchAutopilotSetting();
+    } catch (e) {
+      status.style.color = '#ef4444';
+      status.textContent = 'Mislukt: ' + e.message;
+    }
+  }
+  async function loadMatches() {
+    const tb = document.getElementById('matchTbody');
+    if (!tb) return;
+    tb.innerHTML = '<tr><td colspan="8" style="text-align:center;padding:24px;color:var(--text-faint)">Laden…</td></tr>';
+    const p = new URLSearchParams();
+    // Status-mapping: 'open' = suggested+auto_confirmed (te beoordelen), confirmed_all = confirmed, etc.
+    if (matchState.statusFilter === 'open') p.set('status', 'suggested,auto_confirmed');
+    else if (matchState.statusFilter === 'confirmed_all') p.set('status', 'confirmed');
+    else if (matchState.statusFilter === 'rejected') p.set('status', 'rejected');
+    // 'all' → geen filter
+    p.set('limit', String(matchState.pageSize));
+    p.set('offset', String((matchState.page - 1) * matchState.pageSize));
+    try {
+      const r = await window.AgentShared.apiFetch('/api/finance-payment-matches?' + p.toString());
+      const d = await r.json();
+      if (!r.ok) {
+        tb.innerHTML = '<tr><td colspan="8" style="text-align:center;padding:24px;color:#ef4444">Fout: ' + esc(d.error || 'HTTP ' + r.status) + '</td></tr>';
+        return;
+      }
+      matchState.total = d.total || 0;
+      _matchItems = d.items || [];
+      // Badge: aantal open (suggested+auto_confirmed) op 'open'-filter.
+      const badge = document.getElementById('camtMatchesBadge');
+      if (badge && matchState.statusFilter === 'open') {
+        if (d.total > 0) { badge.style.display = ''; badge.textContent = String(d.total); }
+        else badge.style.display = 'none';
+      }
+      if (!_matchItems.length) {
+        tb.innerHTML = '<tr><td colspan="8" style="text-align:center;padding:24px;color:var(--text-faint)">Geen matches gevonden. Upload een CAMT-bestand om nieuwe te genereren.</td></tr>';
+        document.getElementById('matchPager').innerHTML = '';
+        return;
+      }
+      tb.innerHTML = _matchItems.map((m, i) => {
+        const cents = Number(m.camt?.amount_cents) || 0;
+        const score = Number(m.match_score) || 0;
+        const scoreColor = score >= 90 ? '#10b981' : (score >= 70 ? '#f59e0b' : '#eab308');
+        const reasonsLbl = { exact_amount: 'Bedrag', invoice_number_in_description: 'Factuurnr', customer_name_match: 'Naam', date_within_30_days: 'Datum' };
+        const reasonsHtml = (m.match_reasons || []).map(r => `<span style="color:#10b981">${esc(reasonsLbl[r] || r)} ✓</span>`).join(' · ');
+        const statusBadge = (() => {
+          if (m.status === 'suggested') return '<span class="sr-tag gray">Te beoordelen</span>';
+          if (m.status === 'auto_confirmed') return '<span class="sr-tag warning">Auto-bevestigd</span>';
+          if (m.status === 'confirmed') return '<span class="sr-tag green">Bevestigd</span>';
+          if (m.status === 'rejected') return '<span class="sr-tag danger">Verworpen</span>';
+          return esc(m.status);
+        })();
+        const actionable = (m.status === 'suggested');
+        const actionsHtml = actionable
+          ? `<button class="sr-abtn primary" data-match-confirm="${i}" type="button" style="font-size:11px;padding:4px 8px"><i class="ti ti-check"></i> Bevestig</button> <button class="sr-abtn" data-match-reject="${i}" type="button" style="font-size:11px;padding:4px 8px;background:transparent;border:1px solid var(--border);color:var(--text-dim)"><i class="ti ti-x"></i></button>`
+          : (m.status === 'auto_confirmed' ? `<button class="sr-abtn" data-match-reject="${i}" type="button" style="font-size:11px;padding:4px 8px;background:transparent;border:1px solid var(--border);color:var(--text-dim)" title="Verwerp deze automatische match (handmatige correctie)">Verwerp</button>` : '');
+        return `<tr>
+          <td>${esc(fmtDateNl(m.camt?.booking_date))}</td>
+          <td class="num" style="color:#10b981;font-weight:600;font-variant-numeric:tabular-nums">+${fmtEur2Cents(Math.abs(cents))}</td>
+          <td>${esc(m.camt?.counterparty_name || '—')}</td>
+          <td><span style="display:inline-block;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:700;color:#fff;background:${scoreColor}">${score}</span></td>
+          <td style="font-size:11.5px">${reasonsHtml}</td>
+          <td><span class="sr-tag blue">${esc(m.invoice?.invoice_number || '—')}</span> <span class="sr-cellsub">${esc(m.invoice?.customer_name || '')}</span></td>
+          <td>${statusBadge}</td>
+          <td>${actionsHtml}</td>
+        </tr>`;
+      }).join('');
+      tb.querySelectorAll('[data-match-confirm]').forEach(b => b.addEventListener('click', () => confirmMatch(Number(b.dataset.matchConfirm))));
+      tb.querySelectorAll('[data-match-reject]').forEach(b => b.addEventListener('click', () => rejectMatch(Number(b.dataset.matchReject))));
+      // Pager.
+      const pages = Math.max(1, Math.ceil(matchState.total / matchState.pageSize));
+      document.getElementById('matchPager').innerHTML =
+        `<span>${matchState.total} matches · pagina ${matchState.page}/${pages}</span>` +
+        `<span><button class="sr-ibtn" id="matchPrev" type="button" ${matchState.page <= 1 ? 'disabled' : ''}><i class="ti ti-chevron-left"></i></button>` +
+        `<button class="sr-ibtn" id="matchNext" type="button" ${matchState.page >= pages ? 'disabled' : ''}><i class="ti ti-chevron-right"></i></button></span>`;
+      const prev = document.getElementById('matchPrev'), next = document.getElementById('matchNext');
+      if (prev) prev.addEventListener('click', () => { if (matchState.page > 1) { matchState.page--; loadMatches(); } });
+      if (next) next.addEventListener('click', () => { if (matchState.page < pages) { matchState.page++; loadMatches(); } });
+    } catch (e) {
+      tb.innerHTML = '<tr><td colspan="8" style="text-align:center;padding:24px;color:#ef4444">Fout: ' + esc(e.message) + '</td></tr>';
+    }
+  }
+  async function confirmMatch(idx) {
+    const m = _matchItems[idx];
+    if (!m) return;
+    if (!confirm(`Bevestig dat €${fmtEur2Cents(Math.abs(Number(m.camt?.amount_cents) || 0))} op factuur ${m.invoice?.invoice_number} geboekt mag worden in Teamleader?`)) return;
+    try {
+      const r = await window.AgentShared.apiFetch('/api/finance-payment-match-confirm', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ match_id: m.id }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        const msg = (d.error || 'HTTP ' + r.status) + (d.tl_response ? ('\n\nTL: ' + String(d.tl_response).slice(0, 300)) : '');
+        window.AgentShared?.showToast?.('Match bevestigen mislukt: ' + msg.slice(0, 200), 'error');
+        return;
+      }
+      window.AgentShared?.showToast?.(`Factuur ${m.invoice?.invoice_number} → ${d.status} (${fmtEur2Cents(Number(d.amount_paid) * 100 || 0)})`, 'success');
+      loadMatches();
+    } catch (e) {
+      window.AgentShared?.showToast?.('Mislukt: ' + e.message, 'error');
+    }
+  }
+  async function rejectMatch(idx) {
+    const m = _matchItems[idx];
+    if (!m) return;
+    const reason = prompt('Optionele reden van afwijzen:', '');
+    if (reason === null) return;
+    try {
+      const r = await window.AgentShared.apiFetch('/api/finance-payment-match-reject', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ match_id: m.id, reason: reason || undefined }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) { window.AgentShared?.showToast?.('Afwijzen mislukt: ' + (d.error || 'HTTP ' + r.status), 'error'); return; }
+      window.AgentShared?.showToast?.('Match verworpen', 'success');
+      loadMatches();
+    } catch (e) {
+      window.AgentShared?.showToast?.('Mislukt: ' + e.message, 'error');
     }
   }
 
@@ -1990,6 +2235,29 @@
         ['dragleave','drop'].forEach(ev => dropZone.addEventListener(ev, (e) => { e.preventDefault(); e.stopPropagation(); dropZone.style.borderColor = ''; }));
         dropZone.addEventListener('drop', (e) => { const f = e.dataTransfer?.files?.[0]; if (f) uploadCamtFile(f); });
       }
+
+      // Sub-tabs wiring (Transacties / Matches).
+      document.querySelectorAll('#camtSubNav .sr-seg').forEach(b => b.addEventListener('click', () => setCamtSubView(b.dataset.camtSub)));
+      // Autopilot toggle + threshold wiring.
+      const autoCb = document.getElementById('matchAutoToggle');
+      const thrBox = document.getElementById('matchAutoThresholdBox');
+      const thrInput = document.getElementById('matchAutoThreshold');
+      const thrVal = document.getElementById('matchAutoThresholdVal');
+      const autoSave = document.getElementById('matchAutoSave');
+      if (autoCb) autoCb.addEventListener('change', () => { thrBox.style.display = autoCb.checked ? 'flex' : 'none'; });
+      if (thrInput) thrInput.addEventListener('input', () => { thrVal.textContent = thrInput.value; });
+      if (autoSave) autoSave.addEventListener('click', saveMatchAutopilotSetting);
+      // Match-filter strip + refresh.
+      const msSeg = document.getElementById('matchStatusSeg');
+      if (msSeg) msSeg.querySelectorAll('.sr-seg').forEach(b => b.addEventListener('click', () => {
+        msSeg.querySelectorAll('.sr-seg').forEach(x => x.classList.remove('active'));
+        b.classList.add('active');
+        matchState.statusFilter = b.dataset.status || 'open';
+        matchState.page = 1;
+        loadMatches();
+      }));
+      const mRef = document.getElementById('matchRefresh');
+      if (mRef) mRef.addEventListener('click', () => { matchState.page = 1; loadMatches(); });
     } catch (e) { console.error('[finance-facturen] init', e); }
   }
 
