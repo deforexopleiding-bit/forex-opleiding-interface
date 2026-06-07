@@ -138,6 +138,7 @@
     <button class="sr-seg" id="navCamtBank" data-view="camtbank" type="button" style="display:none">Bank</button>
     <button class="sr-seg" id="navBank" data-view="bank" type="button" style="display:none">Bank (oud)</button>
     <button class="sr-seg" id="navInbox" data-view="inbox" type="button" style="display:none">Inbox</button>
+    <button class="sr-seg" id="navDunning" data-view="dunning" type="button" style="display:none">Wanbetalers</button>
     <button class="sr-seg" data-view="roadmap" type="button">Roadmap</button>
   </div>
 
@@ -437,6 +438,64 @@
           <div id="inboxConfigStatus" style="margin-top:14px;font-size:11.5px;color:var(--text-faint)">
             Meta-config nog niet geverifieerd.
           </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== Wanbetalers-view (PR B1 scaffold — 5 sub-tabs placeholders) ===== -->
+  <div id="view-dunning" hidden>
+    <div class="dunning-locked" id="dunningLocked" hidden style="background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.3);border-radius:8px;padding:14px 16px;margin-bottom:14px">
+      <div style="font-size:15px;font-weight:700;margin-bottom:6px">Geen toegang tot Wanbetalers</div>
+      <div style="font-size:12.5px">Je mist de rechten <code>finance.dunning.view</code>. Vraag een beheerder.</div>
+    </div>
+    <div id="dunningMain">
+      <!-- Sub-tab strip -->
+      <div class="sr-segments" id="dunningSubNav" style="margin-bottom:18px">
+        <button class="sr-seg active" data-dunning-sub="overzicht" type="button">Overzicht</button>
+        <button class="sr-seg" data-dunning-sub="probleemklanten" type="button">Probleemklanten</button>
+        <button class="sr-seg" data-dunning-sub="workflows" type="button">Workflows</button>
+        <button class="sr-seg" data-dunning-sub="templates" type="button">Templates</button>
+        <button class="sr-seg" data-dunning-sub="geschiedenis" type="button">Geschiedenis</button>
+      </div>
+
+      <!-- Sub-view: Overzicht (default) -->
+      <div id="dunningSubOverzicht">
+        <div style="background:linear-gradient(135deg, rgba(245,158,11,.10), rgba(245,158,11,.03));border:1px solid rgba(245,158,11,.25);border-radius:12px;padding:22px 26px">
+          <h2 style="margin:0 0 8px;font-size:18px;font-weight:700">Overzicht wanbetalers</h2>
+          <p style="margin:0;font-size:13px;color:var(--text-dim);line-height:1.55">KPI-strip + actieve workflows + recente acties. <strong>Komt in PR B5.</strong></p>
+        </div>
+      </div>
+
+      <!-- Sub-view: Probleemklanten -->
+      <div id="dunningSubProbleemklanten" hidden>
+        <div style="background:rgba(255,255,255,0.02);border:1px solid var(--border-subtle, #e5e7eb);border-radius:12px;padding:22px 26px">
+          <h2 style="margin:0 0 8px;font-size:18px;font-weight:700">Probleemklanten</h2>
+          <p style="margin:0;font-size:13px;color:var(--text-dim);line-height:1.55">Lijst klanten met openstaande facturen + workflow-koppeling + escaleren. <strong>Komt in PR B5.</strong></p>
+        </div>
+      </div>
+
+      <!-- Sub-view: Workflows -->
+      <div id="dunningSubWorkflows" hidden>
+        <div style="background:rgba(255,255,255,0.02);border:1px solid var(--border-subtle, #e5e7eb);border-radius:12px;padding:22px 26px">
+          <h2 style="margin:0 0 8px;font-size:18px;font-weight:700">Workflows</h2>
+          <p style="margin:0;font-size:13px;color:var(--text-dim);line-height:1.55">Workflow-CRUD (definitie + steps + trigger_conditions). <strong>Komt in PR B3.</strong></p>
+        </div>
+      </div>
+
+      <!-- Sub-view: Templates -->
+      <div id="dunningSubTemplates" hidden>
+        <div style="background:rgba(255,255,255,0.02);border:1px solid var(--border-subtle, #e5e7eb);border-radius:12px;padding:22px 26px">
+          <h2 style="margin:0 0 8px;font-size:18px;font-weight:700">Templates</h2>
+          <p style="margin:0;font-size:13px;color:var(--text-dim);line-height:1.55">Email + WhatsApp templates CRUD met variabele-substitutie. <strong>Komt in PR B2.</strong></p>
+        </div>
+      </div>
+
+      <!-- Sub-view: Geschiedenis -->
+      <div id="dunningSubGeschiedenis" hidden>
+        <div style="background:rgba(255,255,255,0.02);border:1px solid var(--border-subtle, #e5e7eb);border-radius:12px;padding:22px 26px">
+          <h2 style="margin:0 0 8px;font-size:18px;font-weight:700">Geschiedenis</h2>
+          <p style="margin:0;font-size:13px;color:var(--text-dim);line-height:1.55">Volledig dunning_log lezen: alle events per workflow-run. <strong>Komt in PR B4.</strong></p>
         </div>
       </div>
     </div>
@@ -784,6 +843,7 @@
     document.getElementById('view-camtbank').hidden = (view !== 'camtbank');
     document.getElementById('view-bank').hidden = (view !== 'bank');
     document.getElementById('view-inbox').hidden = (view !== 'inbox');
+    document.getElementById('view-dunning').hidden = (view !== 'dunning');
     document.getElementById('view-roadmap').hidden = (view !== 'roadmap');
     document.querySelectorAll('#financeNav .sr-seg').forEach(b => b.classList.toggle('active', b.dataset.view === view));
     // Bij eerste keer Bank (oud) openen: load per beschikbare permission.
@@ -810,6 +870,27 @@
         // PR A1: alleen status-regel. PR A2: GET /api/finance-inbox-status
         // + conversation-lijst laden.
         loadInboxConfigStatus();
+      }
+    }
+    // Bij eerste keer Wanbetalers openen: RBAC-gate.
+    if (view === 'dunning' && !_dunningLoadedOnce) {
+      _dunningLoadedOnce = true;
+      const main = document.getElementById('dunningMain');
+      const locked = document.getElementById('dunningLocked');
+      if (!canDunningView) {
+        if (main)   main.hidden = true;
+        if (locked) locked.hidden = false;
+      } else {
+        // Sub-tab switcher wiring (PR B1 alleen view-toggle; CRUD in B2+).
+        const subs = ['overzicht','probleemklanten','workflows','templates','geschiedenis'];
+        document.querySelectorAll('#dunningSubNav .sr-seg').forEach(b => b.addEventListener('click', () => {
+          const target = b.dataset.dunningSub;
+          document.querySelectorAll('#dunningSubNav .sr-seg').forEach(x => x.classList.toggle('active', x === b));
+          for (const s of subs) {
+            const el = document.getElementById('dunningSub' + s.charAt(0).toUpperCase() + s.slice(1));
+            if (el) el.hidden = (s !== target);
+          }
+        }));
       }
     }
   }
@@ -2366,6 +2447,8 @@
   let canBankBalanceView = false, canBankTxView = false;
   let canInboxView = false, canInboxSend = false;
   let _inboxLoadedOnce = false;
+  let canDunningView = false, canDunningConfig = false, canDunningExecute = false;
+  let _dunningLoadedOnce = false;
   async function init() {
     try {
       await window._authSharedReady;
@@ -2385,6 +2468,9 @@
       canBankTxView = can('finance.bank.transactions_view');
       canInboxView = can('finance.inbox.view');
       canInboxSend = can('finance.inbox.send');
+      canDunningView    = can('finance.dunning.view');
+      canDunningConfig  = can('finance.dunning.config');
+      canDunningExecute = can('finance.dunning.execute');
       // Beide Bank-tab buttons zichtbaar zodra de gebruiker minimaal één van beide heeft.
       if (canBankBalanceView || canBankTxView) {
         const ncb = document.getElementById('navCamtBank'); if (ncb) ncb.style.display = '';
@@ -2393,6 +2479,9 @@
       // Inbox-tab zichtbaar bij finance.inbox.view permission.
       if (canInboxView) {
         const ni = document.getElementById('navInbox'); if (ni) ni.style.display = '';
+      }
+      if (canDunningView) {
+        const nd = document.getElementById('navDunning'); if (nd) nd.style.display = '';
       }
       // Verberg saldo-kaart en/of transactie-blok per ontbrekende permission.
       // Beide ontbreken → locked-banner tonen, main hide (zelfde patroon als
