@@ -16,6 +16,14 @@ import { requirePermission } from './_lib/requirePermission.js';
 const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const VALID_STATUSES = ['suggested', 'confirmed', 'rejected', 'auto_confirmed'];
 
+// Welke invoice-statussen zijn ZINVOL om nog te matchen?
+// Verbergen we 'paid' (al voldaan), 'credited' (factuur ongedaan) en 'writeoff'
+// (afgeschreven) — een match-candidate op zulke facturen is altijd een
+// historisch artefact. 'cancelled' bestaat niet voor invoices in onze CHECK
+// constraint (migratie 2026-05-30): concept/open/partially_paid/paid/overdue/
+// credited/writeoff. Dus blijven over voor weergave:
+const INVOICE_STATUSES_FOR_MATCH = ['concept', 'open', 'partially_paid', 'overdue'];
+
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
   res.setHeader('Content-Type', 'application/json');
@@ -39,6 +47,8 @@ export default async function handler(req, res) {
 
   try {
     // Embedded select voor camt_transactions + invoices + customer-naam join.
+    // `invoices!inner` zodat het status-filter op de embed ook de parent-row
+    // verbergt (anders krijg je candidate + invoices: null door PostgREST).
     let query = supabaseAdmin
       .from('payment_match_candidates')
       .select(`
@@ -47,9 +57,9 @@ export default async function handler(req, res) {
         rejected_reason, created_at,
         camt_transactions ( booking_date, amount_cents, description,
                             counterparty_name, counterparty_iban, end_to_end_id ),
-        invoices ( invoice_number, amount_total, amount_paid, status,
-                   issue_date, due_date,
-                   customers ( first_name, last_name, company_name ) )
+        invoices!inner ( invoice_number, amount_total, amount_paid, status,
+                         issue_date, due_date,
+                         customers ( first_name, last_name, company_name ) )
       `, { count: 'exact' });
 
     if (statuses.length) query = query.in('status', statuses);
@@ -57,6 +67,10 @@ export default async function handler(req, res) {
     // Filter on joined column needs an explicit `camt_transactions.booking_date`.
     if (from) query = query.gte('camt_transactions.booking_date', from);
     if (to)   query = query.lte('camt_transactions.booking_date', to);
+    // Verberg candidates voor facturen die al voldaan / gecrediteerd /
+    // afgeschreven zijn — historische artefacten waar geen actie meer op nodig
+    // is. !inner zorgt dat de parent rij ook gedropt wordt.
+    query = query.in('invoices.status', INVOICE_STATUSES_FOR_MATCH);
 
     query = query
       .order('match_score', { ascending: false })

@@ -328,13 +328,14 @@
               <th style="width:90px">Datum</th>
               <th class="num" style="width:110px">Bedrag</th>
               <th>Tegenpartij</th>
+              <th>Omschrijving</th>
               <th style="width:70px">Score</th>
               <th>Redenen</th>
               <th>Factuur</th>
               <th style="width:140px">Status</th>
               <th style="width:140px"></th>
             </tr></thead>
-            <tbody id="matchTbody"><tr><td colspan="8" style="text-align:center;padding:24px;color:var(--text-faint)">Laden…</td></tr></tbody>
+            <tbody id="matchTbody"><tr><td colspan="9" style="text-align:center;padding:24px;color:var(--text-faint)">Laden…</td></tr></tbody>
           </table>
         </div>
         <div id="matchPager" style="display:flex;justify-content:space-between;align-items:center;margin-top:12px;font-size:12.5px;color:var(--text-dim)"></div>
@@ -1819,8 +1820,11 @@
   // Voor de CAMT-detailmodal hergebruiken we bankTxModal — markeer veld-namen
   // anders en val terug op CAMT-specifieke velden waar e-Boekhouden-specifieke
   // velden ontbreken.
-  function openCamtBankTxModal(idx) {
-    const t = _camtBankItems[idx];
+  // Accepteert óf een numerieke index in _camtBankItems (Transacties-tab),
+  // óf een tx-object direct (Matches-tab geeft m.camt door — heeft niet alle
+  // velden, ontbrekende worden in UI als '—' getoond).
+  function openCamtBankTxModal(idxOrTx) {
+    const t = (typeof idxOrTx === 'number') ? _camtBankItems[idxOrTx] : idxOrTx;
     if (!t) return;
     const cents = Number(t.amount_cents) || 0;
     const amtColor = cents > 0 ? '#10b981' : (cents < 0 ? '#ef4444' : 'var(--text)');
@@ -1971,7 +1975,7 @@
   async function loadMatches() {
     const tb = document.getElementById('matchTbody');
     if (!tb) return;
-    tb.innerHTML = '<tr><td colspan="8" style="text-align:center;padding:24px;color:var(--text-faint)">Laden…</td></tr>';
+    tb.innerHTML = '<tr><td colspan="9" style="text-align:center;padding:24px;color:var(--text-faint)">Laden…</td></tr>';
     const p = new URLSearchParams();
     // Status-mapping: 'open' = suggested+auto_confirmed (te beoordelen), confirmed_all = confirmed, etc.
     if (matchState.statusFilter === 'open') p.set('status', 'suggested,auto_confirmed');
@@ -1984,7 +1988,7 @@
       const r = await window.AgentShared.apiFetch('/api/finance-payment-matches?' + p.toString());
       const d = await r.json();
       if (!r.ok) {
-        tb.innerHTML = '<tr><td colspan="8" style="text-align:center;padding:24px;color:#ef4444">Fout: ' + esc(d.error || 'HTTP ' + r.status) + '</td></tr>';
+        tb.innerHTML = '<tr><td colspan="9" style="text-align:center;padding:24px;color:#ef4444">Fout: ' + esc(d.error || 'HTTP ' + r.status) + '</td></tr>';
         return;
       }
       matchState.total = d.total || 0;
@@ -1996,7 +2000,7 @@
         else badge.style.display = 'none';
       }
       if (!_matchItems.length) {
-        tb.innerHTML = '<tr><td colspan="8" style="text-align:center;padding:24px;color:var(--text-faint)">Geen matches gevonden. Upload een CAMT-bestand om nieuwe te genereren.</td></tr>';
+        tb.innerHTML = '<tr><td colspan="9" style="text-align:center;padding:24px;color:var(--text-faint)">Geen matches gevonden. Upload een CAMT-bestand om nieuwe te genereren.</td></tr>';
         document.getElementById('matchPager').innerHTML = '';
         return;
       }
@@ -2017,10 +2021,13 @@
         const actionsHtml = actionable
           ? `<button class="sr-abtn primary" data-match-confirm="${i}" type="button" style="font-size:11px;padding:4px 8px"><i class="ti ti-check"></i> Bevestig</button> <button class="sr-abtn" data-match-reject="${i}" type="button" style="font-size:11px;padding:4px 8px;background:transparent;border:1px solid var(--border);color:var(--text-dim)"><i class="ti ti-x"></i></button>`
           : (m.status === 'auto_confirmed' ? `<button class="sr-abtn" data-match-reject="${i}" type="button" style="font-size:11px;padding:4px 8px;background:transparent;border:1px solid var(--border);color:var(--text-dim)" title="Verwerp deze automatische match (handmatige correctie)">Verwerp</button>` : '');
-        return `<tr>
+        const descRaw = (m.camt?.description || '').trim();
+        const descShort = descRaw.length > 60 ? (descRaw.slice(0, 57) + '…') : descRaw;
+        return `<tr class="clickable-row" data-match-row="${i}">
           <td>${esc(fmtDateNl(m.camt?.booking_date))}</td>
           <td class="num" style="color:#10b981;font-weight:600;font-variant-numeric:tabular-nums">+${fmtEur2Cents(Math.abs(cents))}</td>
           <td>${esc(m.camt?.counterparty_name || '—')}</td>
+          <td title="${esc(descRaw)}" style="font-size:11.5px;color:var(--text-dim)">${esc(descShort || '—')}</td>
           <td><span style="display:inline-block;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:700;color:#fff;background:${scoreColor}">${score}</span></td>
           <td style="font-size:11.5px">${reasonsHtml}</td>
           <td><span class="sr-tag blue">${esc(m.invoice?.invoice_number || '—')}</span> <span class="sr-cellsub">${esc(m.invoice?.customer_name || '')}</span></td>
@@ -2030,6 +2037,12 @@
       }).join('');
       tb.querySelectorAll('[data-match-confirm]').forEach(b => b.addEventListener('click', () => confirmMatch(Number(b.dataset.matchConfirm))));
       tb.querySelectorAll('[data-match-reject]').forEach(b => b.addEventListener('click', () => rejectMatch(Number(b.dataset.matchReject))));
+      // Row-click → open bank-tx detail-modal met de embedded camt-data.
+      tb.querySelectorAll('[data-match-row]').forEach(tr => tr.addEventListener('click', (e) => {
+        if (e.target.closest('button, a')) return;
+        const m = _matchItems[Number(tr.dataset.matchRow)];
+        if (m && m.camt) openCamtBankTxModal(m.camt);
+      }));
       // Pager.
       const pages = Math.max(1, Math.ceil(matchState.total / matchState.pageSize));
       document.getElementById('matchPager').innerHTML =
@@ -2040,7 +2053,7 @@
       if (prev) prev.addEventListener('click', () => { if (matchState.page > 1) { matchState.page--; loadMatches(); } });
       if (next) next.addEventListener('click', () => { if (matchState.page < pages) { matchState.page++; loadMatches(); } });
     } catch (e) {
-      tb.innerHTML = '<tr><td colspan="8" style="text-align:center;padding:24px;color:#ef4444">Fout: ' + esc(e.message) + '</td></tr>';
+      tb.innerHTML = '<tr><td colspan="9" style="text-align:center;padding:24px;color:#ef4444">Fout: ' + esc(e.message) + '</td></tr>';
     }
   }
   async function confirmMatch(idx) {
