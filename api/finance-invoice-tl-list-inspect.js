@@ -18,8 +18,12 @@
 // Defaults:
 //   updated_since = 2026-06-06T00:00:00+00:00
 //   target_tl_id  = 96eea3a4-c1b5-07d7-a079-4ee6e2248677 (Muno's invoice 2026/1027)
-//   page_size     = 200, page = 1
+//   page_size     = 100 (TL v2 max), page = 1
 //   department_id = vereist (anders 400) — TL invoices.list wil 'm in filter
+//
+// Fail-safe: AbortController op 45s. Bij upstream TL HTTP-error returnt
+// 502 met JSON-body (status + body-snippet). Bij timeout returnt 504 met
+// elapsed_ms zodat we kunnen zien of TL traag is.
 //
 // Response:
 //   {
@@ -70,7 +74,10 @@ export default async function handler(req, res) {
   const departmentId  = String(req.query?.department_id  || '').trim() || null;
   const updatedSince  = String(req.query?.updated_since  || '').trim() || DEFAULT_UPDATED_SINCE;
   const targetTlId    = String(req.query?.target_tl_id   || '').trim() || DEFAULT_TARGET_TL_ID;
-  const pageSize      = Math.max(1, Math.min(200, Number(req.query?.page_size) || 200));
+  // TL v2 max page.size is 100 — bij size=200 geeft TL óf 400 óf een grote
+  // trage response die Vercel's 60s function-timeout overschrijdt (502 zonder
+  // JSON). Cap op 100 zoals cron-finance-sync.js doet.
+  const pageSize      = Math.max(1, Math.min(100, Number(req.query?.page_size) || 100));
   const pageNumber    = Math.max(1, Number(req.query?.page) || 1);
 
   if (!departmentId) {
@@ -89,18 +96,50 @@ export default async function handler(req, res) {
       sort: [{ field: 'invoice_date', order: 'asc' }],
     };
 
-    const r = await tlFetch('/invoices.list', { method: 'POST', body: JSON.stringify(body) });
+    // AbortController met 45s — leaves headroom onder Vercel's 60s function-
+    // timeout zodat we nog steeds een JSON-respons kunnen returnen i.p.v.
+    // gateway-502. Cron heeft 50s ABORT_MS budget; wij 45s want we doen ook
+    // nog response-parsing + verifyAdmin overhead.
+    const startedAt = Date.now();
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 45_000);
+    let r;
+    try {
+      r = await tlFetch('/invoices.list', {
+        method: 'POST',
+        body: JSON.stringify(body),
+        signal: controller.signal,
+      });
+    } catch (e) {
+      clearTimeout(timeoutId);
+      const isAbort = e.name === 'AbortError' || /aborted/i.test(String(e.message));
+      return res.status(504).json({
+        error: isAbort ? 'TL invoices.list timeout (45s)' : `TL fetch error: ${e.message}`,
+        elapsed_ms: Date.now() - startedAt,
+        request_body: body,
+      });
+    }
+    clearTimeout(timeoutId);
+
     const text = await r.text().catch(() => '');
     if (!r.ok) {
       return res.status(502).json({
         error: `TL invoices.list HTTP ${r.status}`,
         body: text.slice(0, 800),
         request_body: body,
+        elapsed_ms: Date.now() - startedAt,
       });
     }
 
     let parsed = null;
-    try { parsed = JSON.parse(text); } catch { return res.status(502).json({ error: 'TL-respons niet parsebaar', body: text.slice(0, 500) }); }
+    try { parsed = JSON.parse(text); }
+    catch {
+      return res.status(502).json({
+        error: 'TL-respons niet parsebaar',
+        body: text.slice(0, 500),
+        elapsed_ms: Date.now() - startedAt,
+      });
+    }
     const rawItems = parsed?.data || [];
 
     // Verzamel relevante velden per item.
