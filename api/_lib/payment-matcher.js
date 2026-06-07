@@ -5,7 +5,13 @@
 // vier criteria. Returns candidates met score ≥ MIN_SCORE.
 //
 // Scoring:
-//   +50  exact_amount               — bedrag exact match (in cents)
+//   +50  exact_amount               — camt-bedrag == invoice.amount_total (in cents)
+//   +50  exact_amount_due           — camt-bedrag == openstaand restbedrag
+//                                      (amount_total − amount_paid − credited_amount)
+//                                      Mutually exclusive met exact_amount: bij verse
+//                                      factuur (paid=0, credited=0) telt alleen
+//                                      exact_amount; bij partially_paid/overdue telt
+//                                      exact_amount_due voor deelbetalingen.
 //   +30  invoice_number_in_text     — invoice_number voorkomt in description of end_to_end_id
 //   +15  customer_name_match        — counterparty_name ↔ customer-naam case-insensitive substring
 //    +5  date_within_30_days        — booking_date binnen 30 dagen van issue_date
@@ -72,16 +78,34 @@ export function scoreMatch(camtTx, invoice) {
   const reasons = [];
   let score = 0;
 
-  // 1. Exact bedrag — invoice openstaand bedrag vs camt amount.
-  //    amount_total - amount_paid = nog te ontvangen. amount_cents in camt
-  //    is in cents; invoice.amount_total + amount_paid zijn in euro's (floats)
+  // 1. Bedrag-match. Camt-bedrag in cents. Invoice-bedragen in euro's (floats)
   //    omdat invoices-tabel zo opgeslagen wordt (zie fase 2A-fundament).
+  //
+  //    Twee onafhankelijke checks die elkaar uitsluiten:
+  //    - exact_amount        : camt == volledige factuur-total (zonder af te
+  //                            trekken wat al betaald is). Eerst-betaling-
+  //                            in-één-keer of total-zonder-eerdere-payments.
+  //    - exact_amount_due    : camt == openstaand restbedrag (total − paid −
+  //                            credited). Voor deelbetalingen op een
+  //                            partially_paid factuur. Alleen waardevol als
+  //                            due > 0 én due ≠ total (anders dubbeltelt het
+  //                            exact_amount).
   const camtCents = Number(camtTx.amount_cents) || 0;
-  const invOpenEur = Math.max(0, (Number(invoice.amount_total) || 0) - (Number(invoice.amount_paid) || 0));
-  const invOpenCents = Math.round(invOpenEur * 100);
-  if (camtCents > 0 && camtCents === invOpenCents) {
+  const totalCents    = Math.round((Number(invoice.amount_total) || 0) * 100);
+  const paidCents     = Math.round((Number(invoice.amount_paid) || 0) * 100);
+  const creditedCents = Math.round((Number(invoice.credited_amount) || 0) * 100);
+  const dueCents      = Math.max(0, totalCents - paidCents - creditedCents);
+
+  const exactFull = camtCents > 0 && camtCents === totalCents;
+  const exactDue  = !exactFull && dueCents > 0 && camtCents === dueCents;
+
+  if (exactFull) {
     score += 50;
     reasons.push('exact_amount');
+  }
+  if (exactDue) {
+    score += 50;
+    reasons.push('exact_amount_due');
   }
 
   // 2. Factuurnummer in description of end_to_end_id.

@@ -46,7 +46,7 @@ export default async function handler(req, res) {
     // 1. Open invoices met customer-naam (eenmalig fetch, hergebruikt over alle batches).
     const { data: openInvoicesRaw } = await supabaseAdmin
       .from('invoices')
-      .select('id, invoice_number, amount_total, amount_paid, status, issue_date, customer_id, customers (first_name, last_name, company_name)')
+      .select('id, invoice_number, amount_total, amount_paid, credited_amount, status, issue_date, customer_id, customers (first_name, last_name, company_name)')
       .in('status', ['open', 'partially_paid', 'overdue']);
     const invForMatcher = (openInvoicesRaw || []).map(inv => ({
       ...inv,
