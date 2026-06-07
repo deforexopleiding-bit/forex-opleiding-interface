@@ -102,12 +102,29 @@ export default async function handler(req, res) {
     }
 
     // Filter + map naar insert-rows.
+    // Twee dedupe-passages:
+    //   1. Cross-batch: tx.entry_reference matched een existing row in DB
+    //      (pre-fetched via existingRefs).
+    //   2. In-batch: hetzelfde entry_reference komt 2× voor binnen dít CAMT-
+    //      bestand. Komt voor bij ING op summary-rows of multi-leg
+    //      transacties. Zonder deze filter botst de 2e INSERT op de UNIQUE
+    //      partial index uniq_camt_tx_entry_ref.
+    // NULL entry_reference passeert beide filters (NULL ≠ NULL in UNIQUE),
+    // dus wordt altijd geïnsert.
     const rowsToInsert = [];
+    const seenInBatch = new Set();
     let skipped = 0;
     for (const tx of txs) {
-      if (tx.entry_reference && existingRefs.has(tx.entry_reference)) {
-        skipped++;
-        continue;
+      if (tx.entry_reference) {
+        if (existingRefs.has(tx.entry_reference)) {       // cross-batch hit
+          skipped++;
+          continue;
+        }
+        if (seenInBatch.has(tx.entry_reference)) {        // in-batch hit
+          skipped++;
+          continue;
+        }
+        seenInBatch.add(tx.entry_reference);
       }
       rowsToInsert.push({
         statement_id:      statementId,
