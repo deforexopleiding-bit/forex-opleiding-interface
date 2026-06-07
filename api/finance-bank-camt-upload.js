@@ -90,16 +90,33 @@ export default async function handler(req, res) {
     const statementId = stmtRow.id;
 
     // Dedupe: pre-fetch alle entry_references die al in DB staan voor deze
-    // verzameling. Eén query met IN-list i.p.v. per-record SELECT.
+    // verzameling. CHUNKED query — Supabase PostgREST cap returnt max 1000
+    // rows per call (default 'max-rows' setting). Bij re-upload van een groot
+    // bestand (~2000+ records) zou een enkele .in()-call alleen de eerste
+    // 1000 bestaande matches opleveren; de overige worden als "nieuw" gezien
+    // en botsen op de UNIQUE partial index uniq_camt_tx_entry_ref.
+    //
+    // Fix: chunked SELECT in batches van 1000 refs. Range-explicit zodat we
+    // niet stilletjes geknipt worden bij latere PostgREST-config-changes.
     const refs = txs.map(t => t.entry_reference).filter(Boolean);
     const existingRefs = new Set();
     if (refs.length) {
-      const { data: existing } = await supabaseAdmin
-        .from('camt_transactions')
-        .select('entry_reference')
-        .in('entry_reference', refs);
-      for (const r of (existing || [])) {
-        if (r.entry_reference) existingRefs.add(r.entry_reference);
+      const CHUNK = 1000;
+      for (let i = 0; i < refs.length; i += CHUNK) {
+        const slice = refs.slice(i, i + CHUNK);
+        const { data: existing, error: selErr } = await supabaseAdmin
+          .from('camt_transactions')
+          .select('entry_reference')
+          .in('entry_reference', slice)
+          .range(0, CHUNK - 1);
+        if (selErr) {
+          console.error('[camt-upload] dedupe pre-SELECT chunk fout:', selErr.message);
+          // Niet aborten — caller weet via duplicate-constraint-error dat dedupe
+          // partial gefaald is, maar we doen al best-effort.
+        }
+        for (const r of (existing || [])) {
+          if (r.entry_reference) existingRefs.add(r.entry_reference);
+        }
       }
     }
 
