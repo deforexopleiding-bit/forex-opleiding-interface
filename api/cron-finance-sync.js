@@ -105,6 +105,12 @@ async function syncResource(cfg) {
   const sampled_actions = {};  // { inserted: n, updated: n, skipped: n } — voor diag
   let processed = 0, errors = 0;
   let sampled_max_updated = null;
+  // Cursor-overshoot fix (2026-06-07): track timestamps van GEFAALDE records
+  // zodat next_cursor niet voorbij hen schuift. Anders: één persistente fail
+  // (bv. customer-FK ontbreekt) + andere successes in dezelfde batch met
+  // latere updated_at → cursor voorbij failed, failed komt nooit meer in delta.
+  const failed_updated_ats = [];
+  const failed_id_samples = [];  // eerste 5 ids voor diag-logging
   let aborted = false;
 
   // departments=null → één virtueel pseudo-dept (null) zodat de buitenste loop
@@ -158,6 +164,15 @@ async function syncResource(cfg) {
           if (ts) sampled_max_updated = maxIso(sampled_max_updated, ts);
         } catch (e) {
           errors++;
+          // Cursor-overshoot fix: registreer updated_at van gefaalde records.
+          // De next_cursor-berekening hieronder blokkeert voorbij de oudste fail
+          // zodat de cron in een volgende fire dezelfde record opnieuw kan
+          // proberen. Bij persistente fail blijft cursor stilstaan — dat is
+          // intentioneel; los de fail op (bv. ontbrekende customer aanmaken)
+          // i.p.v. nieuwe data forever te missen.
+          const ts = recordUpdatedAt(lite);
+          if (ts) failed_updated_ats.push(ts);
+          if (failed_id_samples.length < 5) failed_id_samples.push({ id: lite.id, updated_at: ts, error: e.message.slice(0, 200) });
           if (errors <= 5) console.error(`[cron-finance-sync] ${resource} upsert id=${lite.id}`, e.message);
         }
       }
@@ -168,13 +183,37 @@ async function syncResource(cfg) {
     }
   }
 
-  // Nieuwe cursor: kleine veiligheidsmarge — gebruik max(gezien) en val terug op
-  // bestaande cursor als we niets verwerkten. Bij volledig lege run pushen we de
-  // cursor NIET naar NOW(), want bij abort vlak na een nieuwe TL-create zou dat
-  // records overslaan. Veilig: alleen vooruit als we echt records zagen.
-  const next_cursor = sampled_max_updated || updatedSinceIso;
+  // Cursor-berekening:
+  // 1. Basis: max(updated_at) van gezien-en-verwerkte records, val terug op
+  //    bestaande cursor bij lege run.
+  // 2. Cursor-overshoot fix: als er failed records zijn, blokkeer cursor op de
+  //    OUDSTE failed.updated_at zodat we die in volgende fires opnieuw zien.
+  //    next_cursor = min(sampled_max_updated, oldest_failed). Bij volledig lege
+  //    fail-set: gedrag onveranderd.
+  const baseCursor = sampled_max_updated || updatedSinceIso;
+  let oldest_failed = null;
+  for (const ts of failed_updated_ats) {
+    if (!oldest_failed || ts < oldest_failed) oldest_failed = ts;
+  }
+  // Veilig: ga 1ms eerder dan oldest_failed staan zodat de inclusieve
+  // updated_since-filter de failed record nog steeds returnt.
+  // (TL's updated_since is doorgaans >=; we kiezen voorzichtig de fail-ts zelf.)
+  const next_cursor = (oldest_failed && (!sampled_max_updated || oldest_failed < sampled_max_updated))
+    ? oldest_failed
+    : baseCursor;
 
-  return { processed, errors, next_cursor, sampled_max_updated, affected_invoice_ids, aborted, sampled_actions };
+  if (failed_updated_ats.length) {
+    console.warn(`[cron-finance-sync] ${resource} ${failed_updated_ats.length} failed, cursor blocked at ${next_cursor} (oldest_failed=${oldest_failed}, base=${baseCursor})`, JSON.stringify(failed_id_samples));
+  }
+
+  return {
+    processed, errors,
+    next_cursor, sampled_max_updated,
+    affected_invoice_ids, aborted, sampled_actions,
+    failed_count: failed_updated_ats.length,
+    failed_samples: failed_id_samples,
+    oldest_failed_updated_at: oldest_failed,
+  };
 }
 
 export default async function handler(req, res) {
@@ -243,11 +282,14 @@ export default async function handler(req, res) {
     if (upErr) console.error('[cron-finance-sync] sync_state invoices UPDATE', upErr.message);
 
     summary.invoices = {
-      processed:             invRes.processed,
-      errors:                invRes.errors,
-      duration_ms:           invDuration,
-      last_updated_since:    invRes.next_cursor,
-      aborted_by_timeout:    invRes.aborted,
+      processed:               invRes.processed,
+      errors:                  invRes.errors,
+      duration_ms:             invDuration,
+      last_updated_since:      invRes.next_cursor,
+      aborted_by_timeout:      invRes.aborted,
+      failed_count:            invRes.failed_count,
+      oldest_failed_updated_at: invRes.oldest_failed_updated_at,
+      failed_samples:          invRes.failed_samples,
     };
   } catch (e) {
     console.error('[cron-finance-sync] invoices fase', e.message);
@@ -282,14 +324,16 @@ export default async function handler(req, res) {
     if (upErr) console.error('[cron-finance-sync] sync_state creditnotes UPDATE', upErr.message);
 
     summary.creditnotes = {
-      processed:             cnRes.processed,
-      errors:                cnRes.errors,
-      duration_ms:           cnDuration,
-      last_updated_since:    cnRes.next_cursor,
-      affected_invoices:     cnRes.affected_invoice_ids.size,
-      recomputed:            recompute.updated,
-      recompute_errors:      recompute.errors,
-      aborted_by_timeout:    cnRes.aborted,
+      processed:               cnRes.processed,
+      errors:                  cnRes.errors,
+      duration_ms:             cnDuration,
+      last_updated_since:      cnRes.next_cursor,
+      affected_invoices:       cnRes.affected_invoice_ids.size,
+      recomputed:              recompute.updated,
+      recompute_errors:        recompute.errors,
+      aborted_by_timeout:      cnRes.aborted,
+      failed_count:            cnRes.failed_count,
+      oldest_failed_updated_at: cnRes.oldest_failed_updated_at,
     };
   } catch (e) {
     console.error('[cron-finance-sync] creditnotes fase', e.message);
