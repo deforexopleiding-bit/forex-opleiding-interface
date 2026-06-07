@@ -135,7 +135,8 @@
 
   <div class="sr-segments" id="financeNav" style="margin-bottom:18px">
     <button class="sr-seg active" data-view="facturen" type="button">Facturen</button>
-    <button class="sr-seg" id="navBank" data-view="bank" type="button" style="display:none">Bank</button>
+    <button class="sr-seg" id="navCamtBank" data-view="camtbank" type="button" style="display:none">Bank</button>
+    <button class="sr-seg" id="navBank" data-view="bank" type="button" style="display:none">Bank (oud)</button>
     <button class="sr-seg" data-view="roadmap" type="button">Roadmap</button>
   </div>
 
@@ -201,6 +202,70 @@
         </table>
       </div>
       <div id="invPager" style="display:flex;justify-content:space-between;align-items:center;margin-top:12px;font-size:12.5px;color:var(--text-dim)"></div>
+    </div>
+  </div>
+
+  <!-- ===== Bank-view CAMT (Fase 3 — upload + spiegel uit ISO 20022 CAMT.053) ===== -->
+  <div id="view-camtbank" hidden>
+    <div class="bank-locked" id="camtBankLocked" hidden style="background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.3);border-radius:8px;padding:14px 16px;margin-bottom:14px">
+      <div style="font-size:15px;font-weight:700;margin-bottom:6px">Geen toegang tot bankoverzicht</div>
+      <div style="font-size:12.5px">Je mist het recht <code>finance.bank.transactions_view</code>. Vraag een beheerder dit aan te zetten.</div>
+    </div>
+    <div id="camtBankMain">
+      <!-- Saldo-card uit nieuwste CAMT-statement -->
+      <div style="background:linear-gradient(135deg, rgba(16,185,129,.12), rgba(16,185,129,.04));border:1px solid rgba(16,185,129,.3);border-radius:12px;padding:18px 22px;margin-bottom:18px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px">
+        <div>
+          <div style="font-size:12px;color:var(--text-dim);text-transform:uppercase;letter-spacing:.06em;font-weight:600">Eindsaldo · uit laatste CAMT-bestand</div>
+          <div id="camtBalanceVal" style="font-size:32px;font-weight:700;color:#10b981;margin-top:4px;font-variant-numeric:tabular-nums">€ —</div>
+          <div id="camtBalanceMeta" style="font-size:11.5px;color:var(--text-faint);margin-top:2px"></div>
+        </div>
+        <button class="sr-ibtn" id="camtBalanceRefresh" type="button" title="Saldo vernieuwen"><i class="ti ti-refresh"></i></button>
+      </div>
+      <!-- Upload-sectie -->
+      <div style="margin-bottom:18px;padding:16px 18px;border:2px dashed var(--border-subtle, #d1d5db);border-radius:10px;background:rgba(255,255,255,0.02)">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap">
+          <div>
+            <div style="font-size:14px;font-weight:600;margin-bottom:4px">Importeer CAMT-bestand</div>
+            <div style="font-size:12px;color:var(--text-faint);line-height:1.5">Download van Mijn ING Zakelijk → Rekeningafschriften → CAMT (.xml). Sleep hier naartoe of klik om te kiezen.</div>
+          </div>
+          <div style="display:flex;gap:8px;align-items:center">
+            <input type="file" id="camtFileInput" accept=".xml,application/xml,text/xml" style="display:none"/>
+            <button class="sr-abtn primary" id="camtUploadBtn" type="button"><i class="ti ti-upload"></i> Kies bestand</button>
+          </div>
+        </div>
+        <div id="camtUploadStatus" style="margin-top:10px;font-size:12.5px;display:none"></div>
+        <div id="camtUploadDrop" style="margin-top:10px;padding:14px;text-align:center;border:1px dashed var(--border-subtle, #d1d5db);border-radius:8px;font-size:12px;color:var(--text-faint);background:rgba(0,0,0,0.02)">Of sleep een .xml-bestand op deze plek</div>
+      </div>
+      <!-- Lijst recente statements -->
+      <div id="camtStatementsList" style="margin-bottom:18px;font-size:12.5px"></div>
+      <!-- Filter-strip -->
+      <div class="sr-filterstrip" id="camtBankFilters" style="margin-bottom:12px;flex-wrap:wrap;gap:8px;align-items:center">
+        <div class="sr-segments" id="camtBankDirSeg">
+          <button class="sr-seg active" data-dir="all" type="button">Alle</button>
+          <button class="sr-seg" data-dir="in" type="button">Inkomend</button>
+          <button class="sr-seg" data-dir="out" type="button">Uitgaand</button>
+        </div>
+        <input id="camtBankFrom" type="date" class="fin-input" title="Vanaf datum"/>
+        <input id="camtBankTo" type="date" class="fin-input" title="T/m datum"/>
+        <input id="camtBankSearch" type="search" placeholder="Zoek op omschrijving, IBAN, factuurnr…" class="fin-input" style="min-width:240px"/>
+        <span style="flex:1"></span>
+        <button class="sr-ibtn" id="camtBankRefresh" title="Lijst vernieuwen" type="button"><i class="ti ti-refresh"></i></button>
+      </div>
+      <!-- Tabel -->
+      <div class="sr-tablewrap">
+        <table class="sr-table" id="camtBankTable">
+          <thead><tr>
+            <th style="width:90px">Datum</th>
+            <th>Omschrijving</th>
+            <th>Tegenpartij</th>
+            <th>IBAN</th>
+            <th>Referentie</th>
+            <th class="num" style="width:120px">Bedrag</th>
+          </tr></thead>
+          <tbody id="camtBankTbody"><tr><td colspan="6" style="text-align:center;padding:24px;color:var(--text-faint)">Laden…</td></tr></tbody>
+        </table>
+      </div>
+      <div id="camtBankPager" style="display:flex;justify-content:space-between;align-items:center;margin-top:12px;font-size:12.5px;color:var(--text-dim)"></div>
     </div>
   </div>
 
@@ -588,14 +653,21 @@
 
   function setView(view) {
     document.getElementById('view-facturen').hidden = (view !== 'facturen');
+    document.getElementById('view-camtbank').hidden = (view !== 'camtbank');
     document.getElementById('view-bank').hidden = (view !== 'bank');
     document.getElementById('view-roadmap').hidden = (view !== 'roadmap');
     document.querySelectorAll('#financeNav .sr-seg').forEach(b => b.classList.toggle('active', b.dataset.view === view));
-    // Bij eerste keer Bank-tab openen: load per beschikbare permission.
+    // Bij eerste keer Bank (oud) openen: load per beschikbare permission.
     if (view === 'bank' && !_bankLoadedOnce) {
       _bankLoadedOnce = true;
       if (canBankBalanceView) loadBankBalance();
       if (canBankTxView) { loadBank(); loadBankSyncStatus(); }
+    }
+    // Bij eerste keer nieuwe Bank (CAMT) openen: load per beschikbare permission.
+    if (view === 'camtbank' && !_camtBankLoadedOnce) {
+      _camtBankLoadedOnce = true;
+      if (canBankBalanceView) loadCamtBalance();
+      if (canBankTxView) { loadCamtBank(); loadCamtStatementsList(); }
     }
   }
 
@@ -1576,6 +1648,185 @@
     }
   }
 
+  // ── CAMT Bank-tab (Fase 3 — vervangt e-Boekhouden integration) ──
+  let _camtBankLoadedOnce = false;
+  const camtBankState = { dir: 'all', from: '', to: '', q: '', page: 1, pageSize: 50, total: 0 };
+  let _camtBankItems = [];
+  let _camtBankSearchTimer = null;
+
+  async function loadCamtBalance() {
+    const valEl = document.getElementById('camtBalanceVal');
+    const metaEl = document.getElementById('camtBalanceMeta');
+    if (!valEl) return;
+    valEl.textContent = '€ —';
+    metaEl.textContent = 'Laden…';
+    try {
+      const r = await window.AgentShared.apiFetch('/api/finance-bank-camt-balance');
+      if (r.status === 403) { metaEl.textContent = 'Geen rechten'; return; }
+      const d = await r.json();
+      if (!r.ok) {
+        metaEl.textContent = 'Fout: ' + (d.error || 'HTTP ' + r.status);
+        valEl.style.color = '#ef4444';
+        return;
+      }
+      if (d.balance_cents == null) {
+        valEl.textContent = '€ —';
+        valEl.style.color = 'var(--text-faint)';
+        metaEl.textContent = d.message || 'Geen statements';
+        return;
+      }
+      valEl.textContent = fmtEur2Cents(d.balance_cents);
+      valEl.style.color = (Number(d.balance_cents) || 0) >= 0 ? '#10b981' : '#ef4444';
+      metaEl.textContent = 'Per ' + fmtDateNl(d.as_of_date) + ' · ' + (d.account_iban || '—') + ' · uit ' + (d.file_name || 'CAMT');
+    } catch (e) {
+      metaEl.textContent = 'Fout: ' + e.message;
+    }
+  }
+
+  async function loadCamtBank() {
+    const tb = document.getElementById('camtBankTbody');
+    if (!tb) return;
+    tb.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:24px;color:var(--text-faint)">Laden…</td></tr>';
+    const p = new URLSearchParams();
+    if (camtBankState.dir && camtBankState.dir !== 'all') p.set('direction', camtBankState.dir);
+    if (camtBankState.from) p.set('from', camtBankState.from);
+    if (camtBankState.to)   p.set('to', camtBankState.to);
+    if (camtBankState.q)    p.set('q', camtBankState.q);
+    p.set('limit', String(camtBankState.pageSize));
+    p.set('offset', String((camtBankState.page - 1) * camtBankState.pageSize));
+    try {
+      const r = await window.AgentShared.apiFetch('/api/finance-bank-camt-transactions?' + p.toString());
+      if (r.status === 403) {
+        document.getElementById('camtBankMain').hidden = true;
+        document.getElementById('camtBankLocked').hidden = false;
+        return;
+      }
+      const d = await r.json();
+      if (!r.ok) {
+        tb.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:24px;color:#ef4444">Fout: ' + esc(d.error || 'HTTP ' + r.status) + '</td></tr>';
+        return;
+      }
+      camtBankState.total = d.total || 0;
+      const items = d.items || [];
+      _camtBankItems = items;
+      if (!items.length) {
+        tb.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:24px;color:var(--text-faint)">Geen transacties gevonden. Upload een CAMT-bestand om te beginnen.</td></tr>';
+      } else {
+        tb.innerHTML = items.map((t, i) => {
+          const cents = Number(t.amount_cents) || 0;
+          const amtColor = cents > 0 ? '#10b981' : (cents < 0 ? '#ef4444' : 'var(--text)');
+          const amtSign = cents > 0 ? '+' : '';
+          return `<tr class="clickable-row" data-camt-row="${i}">
+            <td>${esc(fmtDateNl(t.booking_date))}</td>
+            <td>${esc((t.description || '').slice(0, 80))}</td>
+            <td>${esc(t.counterparty_name || '—')}</td>
+            <td style="font-family:monospace;font-size:11.5px">${esc(t.counterparty_iban || '—')}</td>
+            <td>${t.end_to_end_id ? `<span class="sr-tag blue">${esc(t.end_to_end_id)}</span>` : '<span class="sr-cellsub">—</span>'}</td>
+            <td class="num" style="color:${amtColor};font-weight:600;font-variant-numeric:tabular-nums">${amtSign}${fmtEur2Cents(Math.abs(cents))}</td>
+          </tr>`;
+        }).join('');
+        tb.querySelectorAll('[data-camt-row]').forEach(tr => tr.addEventListener('click', (e) => {
+          if (e.target.closest('button, a')) return;
+          openCamtBankTxModal(Number(tr.dataset.camtRow));
+        }));
+      }
+      const pages = Math.max(1, Math.ceil(camtBankState.total / camtBankState.pageSize));
+      document.getElementById('camtBankPager').innerHTML =
+        `<span>${camtBankState.total} transacties · pagina ${camtBankState.page}/${pages}</span>` +
+        `<span><button class="sr-ibtn" id="camtBankPrev" type="button" ${camtBankState.page <= 1 ? 'disabled' : ''}><i class="ti ti-chevron-left"></i></button>` +
+        `<button class="sr-ibtn" id="camtBankNext" type="button" ${camtBankState.page >= pages ? 'disabled' : ''}><i class="ti ti-chevron-right"></i></button></span>`;
+      const prev = document.getElementById('camtBankPrev'), next = document.getElementById('camtBankNext');
+      if (prev) prev.addEventListener('click', () => { if (camtBankState.page > 1) { camtBankState.page--; loadCamtBank(); } });
+      if (next) next.addEventListener('click', () => { if (camtBankState.page < pages) { camtBankState.page++; loadCamtBank(); } });
+    } catch (e) {
+      tb.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:24px;color:#ef4444">Fout: ' + esc(e.message) + '</td></tr>';
+    }
+  }
+
+  // Voor de CAMT-detailmodal hergebruiken we bankTxModal — markeer veld-namen
+  // anders en val terug op CAMT-specifieke velden waar e-Boekhouden-specifieke
+  // velden ontbreken.
+  function openCamtBankTxModal(idx) {
+    const t = _camtBankItems[idx];
+    if (!t) return;
+    const cents = Number(t.amount_cents) || 0;
+    const amtColor = cents > 0 ? '#10b981' : (cents < 0 ? '#ef4444' : 'var(--text)');
+    const amtSign = cents > 0 ? '+' : (cents < 0 ? '−' : '');
+    document.getElementById('bankTxTitle').textContent = fmtDateNl(t.booking_date) + ' · ' + (cents > 0 ? 'Inkomend (Credit)' : 'Uitgaand (Debit)');
+    const amtEl = document.getElementById('bankTxAmount');
+    amtEl.textContent = amtSign + fmtEur2Cents(Math.abs(cents));
+    amtEl.style.color = amtColor;
+    document.getElementById('bankTxDescription').textContent = t.description || '—';
+    document.getElementById('bankTxCounterparty').textContent = t.counterparty_name || '—';
+    document.getElementById('bankTxIban').textContent = t.counterparty_iban || '—';
+    document.getElementById('bankTxInvoiceNumber').textContent = t.end_to_end_id || '—';
+    document.getElementById('bankTxEbId').textContent = t.entry_reference || '—';
+    document.getElementById('bankTxLedger').textContent = t.account_iban || '—';
+    document.getElementById('bankTxRaw').textContent = JSON.stringify(t, null, 2);
+    document.getElementById('bankTxModal').classList.remove('hidden');
+  }
+
+  async function loadCamtStatementsList() {
+    const el = document.getElementById('camtStatementsList');
+    if (!el) return;
+    el.innerHTML = '<span style="color:var(--text-faint)">Statements laden…</span>';
+    try {
+      // Hergebruik balance-endpoint om num_statements + nieuwste te krijgen,
+      // dan een aparte GET voor de volledige recente lijst is een v2-feature.
+      // Voor v1: korte info-regel.
+      const r = await window.AgentShared.apiFetch('/api/finance-bank-camt-balance');
+      const d = await r.json().catch(() => null);
+      if (!r.ok || !d) { el.innerHTML = ''; return; }
+      if (d.num_statements === 0) {
+        el.innerHTML = '<span style="color:var(--text-faint)">Nog geen statements geüpload.</span>';
+        return;
+      }
+      el.innerHTML = `<span style="color:var(--text-dim)">${d.num_statements} statement${d.num_statements === 1 ? '' : 's'} geüpload · laatste: <strong>${esc(d.file_name || '?')}</strong> per ${esc(fmtDateNl(d.as_of_date))}</span>`;
+    } catch (e) {
+      el.innerHTML = '';
+    }
+  }
+
+  async function uploadCamtFile(file) {
+    const status = document.getElementById('camtUploadStatus');
+    status.style.display = '';
+    status.style.color = 'var(--text-dim)';
+    status.textContent = 'Lezen + uploaden ' + file.name + '…';
+    try {
+      const arrayBuffer = await file.arrayBuffer();
+      // Convert naar base64 voor JSON-body. Voor large files: chunked encode.
+      const bytes = new Uint8Array(arrayBuffer);
+      let binary = '';
+      const chunk = 8192;
+      for (let i = 0; i < bytes.length; i += chunk) {
+        binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunk));
+      }
+      const base64 = btoa(binary);
+      const r = await window.AgentShared.apiFetch('/api/finance-bank-camt-upload', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ file_name: file.name, xml_content_base64: base64 }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        status.style.color = '#ef4444';
+        status.textContent = 'Upload mislukt: ' + (d.error || 'HTTP ' + r.status);
+        return;
+      }
+      status.style.color = '#10b981';
+      status.textContent = `✓ ${d.num_inserted} transacties geïmporteerd, ${d.num_skipped} duplicaten gefilterd · periode ${fmtDateNl(d.statement_from)} – ${fmtDateNl(d.statement_to)}`;
+      window.AgentShared?.showToast?.(`${d.num_inserted} transacties uit ${file.name}`, 'success');
+      // Refresh saldo + tabel + statements-lijst.
+      loadCamtBalance();
+      camtBankState.page = 1;
+      loadCamtBank();
+      loadCamtStatementsList();
+    } catch (e) {
+      status.style.color = '#ef4444';
+      status.textContent = 'Upload mislukt: ' + e.message;
+    }
+  }
+
   let canRegister = false, canRemove = false, canSend = false, canUpdate = false, canCredit = false, canCreate = false;
   // Bank-tab heeft twee aparte permissions (geen umbrella):
   //  - finance.bank.balance_view → saldo-kaart zichtbaar
@@ -1599,9 +1850,10 @@
       canCreate = can('finance.invoice.create');
       canBankBalanceView = can('finance.bank.balance_view');
       canBankTxView = can('finance.bank.transactions_view');
-      // Bank-tab button zichtbaar zodra de gebruiker minimaal één van beide heeft.
+      // Beide Bank-tab buttons zichtbaar zodra de gebruiker minimaal één van beide heeft.
       if (canBankBalanceView || canBankTxView) {
-        const nb = document.getElementById('navBank'); if (nb) nb.style.display = '';
+        const ncb = document.getElementById('navCamtBank'); if (ncb) ncb.style.display = '';
+        const nb = document.getElementById('navBank');     if (nb)  nb.style.display  = '';
       }
       // Verberg saldo-kaart en/of transactie-blok per ontbrekende permission.
       // Beide ontbreken → locked-banner tonen, main hide (zelfde patroon als
@@ -1710,6 +1962,34 @@
       const bxc = document.getElementById('bankTxClose'); if (bxc) bxc.addEventListener('click', closeBankTxModal);
       const bxc2 = document.getElementById('bankTxCloseBtn'); if (bxc2) bxc2.addEventListener('click', closeBankTxModal);
       const bxm = document.getElementById('bankTxModal'); if (bxm) bxm.addEventListener('click', (e) => { if (e.target === bxm) closeBankTxModal(); });
+
+      // CAMT Bank-tab wiring (filters + upload).
+      const camtDirSeg = document.getElementById('camtBankDirSeg');
+      if (camtDirSeg) camtDirSeg.querySelectorAll('.sr-seg').forEach(b => b.addEventListener('click', () => {
+        camtDirSeg.querySelectorAll('.sr-seg').forEach(x => x.classList.remove('active'));
+        b.classList.add('active');
+        camtBankState.dir = b.dataset.dir || 'all';
+        camtBankState.page = 1;
+        loadCamtBank();
+      }));
+      const cbf = document.getElementById('camtBankFrom'); if (cbf) cbf.addEventListener('change', e => { camtBankState.from = e.target.value; camtBankState.page = 1; loadCamtBank(); });
+      const cbt = document.getElementById('camtBankTo'); if (cbt) cbt.addEventListener('change', e => { camtBankState.to = e.target.value; camtBankState.page = 1; loadCamtBank(); });
+      const cbs = document.getElementById('camtBankSearch'); if (cbs) cbs.addEventListener('input', e => { clearTimeout(_camtBankSearchTimer); _camtBankSearchTimer = setTimeout(() => { camtBankState.q = e.target.value.trim(); camtBankState.page = 1; loadCamtBank(); }, 350); });
+      const cbr = document.getElementById('camtBankRefresh'); if (cbr) cbr.addEventListener('click', () => { camtBankState.page = 1; loadCamtBank(); });
+      const cbbr = document.getElementById('camtBalanceRefresh'); if (cbbr) cbbr.addEventListener('click', loadCamtBalance);
+      // Upload: click-knop opent file picker + drag-drop op de drop-zone.
+      const fileInput = document.getElementById('camtFileInput');
+      const uploadBtn = document.getElementById('camtUploadBtn');
+      const dropZone  = document.getElementById('camtUploadDrop');
+      if (uploadBtn && fileInput) {
+        uploadBtn.addEventListener('click', () => fileInput.click());
+        fileInput.addEventListener('change', (e) => { const f = e.target.files?.[0]; if (f) uploadCamtFile(f); fileInput.value = ''; });
+      }
+      if (dropZone) {
+        ['dragenter','dragover'].forEach(ev => dropZone.addEventListener(ev, (e) => { e.preventDefault(); e.stopPropagation(); dropZone.style.borderColor = 'var(--accent-cyan, #0891b2)'; }));
+        ['dragleave','drop'].forEach(ev => dropZone.addEventListener(ev, (e) => { e.preventDefault(); e.stopPropagation(); dropZone.style.borderColor = ''; }));
+        dropZone.addEventListener('drop', (e) => { const f = e.dataTransfer?.files?.[0]; if (f) uploadCamtFile(f); });
+      }
     } catch (e) { console.error('[finance-facturen] init', e); }
   }
 
