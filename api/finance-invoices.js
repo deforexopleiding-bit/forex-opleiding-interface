@@ -42,6 +42,7 @@ export default async function handler(req, res) {
 
   const q = req.query || {};
   const customerId = q.customer_id || null;
+  const invoiceIdFilter = q.invoice_id || null;
   const statusFilter = q.status || null;
   const entity = q.entity || null;
   const periodStart = q.period_start ? String(q.period_start).slice(0, 10) : null;
@@ -110,6 +111,8 @@ export default async function handler(req, res) {
       .select('id, customer_id, tl_invoice_id, tl_department_id, invoice_number, amount_total, amount_paid, credited_amount, vat_amount, issue_date, due_date, paid_date, status, is_manual, customer:customers(is_company, company_name, first_name, last_name, email)', { count: 'exact' });
     if (entity) lq = lq.eq('tl_department_id', entity);
     if (customerId) lq = lq.eq('customer_id', customerId);
+    // Direct id-lookup, voor o.a. bank-tx kolom → invoice-detail modal.
+    if (invoiceIdFilter) lq = lq.eq('id', invoiceIdFilter);
     if (periodStart) lq = lq.gte('issue_date', periodStart);
     if (periodEnd) lq = lq.lte('issue_date', periodEnd);
     // Status-filter (credited-aware; credited_amount is NOT NULL default 0).
