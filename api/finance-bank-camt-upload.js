@@ -18,6 +18,8 @@
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
 import { parseCamt053 } from './_lib/camt-parser.js';
+import { matchCamtTransaction } from './_lib/payment-matcher.js';
+import { registerPaymentInternal } from './_lib/register-payment-internal.js';
 
 // Vercel function body size-cap is 4.5MB. CAMT-bestanden van een week
 // ING Zakelijk zijn typisch 20-200KB — ruim binnen budget.
@@ -144,10 +146,15 @@ export default async function handler(req, res) {
     }
 
     let inserted = 0;
+    let insertedRows = [];
     if (rowsToInsert.length) {
-      const { error: insErr, count } = await supabaseAdmin
+      // .select() na insert geeft de net-aangemaakte rijen incl. UUID's terug.
+      // Dat hebben we nodig voor de match-engine in stap 6 (FK naar
+      // camt_transactions.id).
+      const { data, error: insErr } = await supabaseAdmin
         .from('camt_transactions')
-        .insert(rowsToInsert, { count: 'exact' });
+        .insert(rowsToInsert)
+        .select('id, booking_date, amount_cents, description, counterparty_name, end_to_end_id');
       if (insErr) {
         // Defensief: zou alleen kunnen falen bij race-condition op partial unique.
         // Statement-rij is al gemaakt — laat staan voor debug-trail.
@@ -157,7 +164,117 @@ export default async function handler(req, res) {
           statement_id: statementId,
         });
       }
-      inserted = count ?? rowsToInsert.length;
+      insertedRows = data || [];
+      inserted = insertedRows.length;
+    }
+
+    // ── 6. Match-engine + optionele autopilot-confirm ───────────────────────
+    // Alleen inkomende (amount_cents > 0) transacties matchen — uitgaande zijn
+    // betalingen vanuit ons, niet inkomende klant-betalingen.
+    let matchesGenerated = 0, autoConfirmed = 0, autoConfirmFailed = 0;
+    if (insertedRows.length) {
+      try {
+        const incoming = insertedRows.filter(r => Number(r.amount_cents) > 0);
+        if (incoming.length) {
+          // Open invoices met customer-naam (voor de matcher).
+          const { data: openInvoices } = await supabaseAdmin
+            .from('invoices')
+            .select('id, invoice_number, amount_total, amount_paid, status, issue_date, customer_id, customers (first_name, last_name, company_name)')
+            .in('status', ['open', 'partially_paid', 'overdue']);
+          const invForMatcher = (openInvoices || []).map(inv => ({
+            ...inv,
+            customer_name: (inv.customers?.company_name && inv.customers.company_name.trim())
+                        || [inv.customers?.first_name, inv.customers?.last_name].filter(Boolean).join(' ').trim()
+                        || '',
+          }));
+
+          // Autopilot-setting eenmalig lezen.
+          const { data: autopilotRow } = await supabaseAdmin
+            .from('app_settings').select('value').eq('key', 'payment_match_autopilot').maybeSingle();
+          const autopilot = autopilotRow?.value || { enabled: false, threshold: 95 };
+          const autoEnabled = autopilot.enabled === true;
+          const autoThreshold = Math.max(0, Math.min(100, Number(autopilot.threshold) || 95));
+
+          const candidateRows = [];
+          for (const tx of incoming) {
+            const candidates = matchCamtTransaction(tx, invForMatcher);
+            for (const c of candidates) {
+              candidateRows.push({
+                camt_transaction_id: tx.id,
+                invoice_id:          c.invoice_id,
+                match_score:         c.score,
+                match_reasons:       c.reasons,
+                status:              'suggested',
+              });
+            }
+            matchesGenerated += candidates.length;
+          }
+
+          // Bulk-insert candidates. Unique constraint (camt_tx, invoice) zou
+          // alleen botsen bij re-upload van zelfde periode — gebruikt
+          // ignoreDuplicates via upsert.
+          if (candidateRows.length) {
+            const { error: candErr } = await supabaseAdmin
+              .from('payment_match_candidates')
+              .upsert(candidateRows, { onConflict: 'camt_transaction_id,invoice_id', ignoreDuplicates: true });
+            if (candErr) console.error('[camt-upload] candidates upsert', candErr.message);
+          }
+
+          // Autopilot-pad: per inserted tx pak de hoogst-scorende candidate;
+          // als score ≥ threshold → confirm intern.
+          if (autoEnabled) {
+            // Re-fetch de net-inserted candidates met IDs zodat we ze kunnen
+            // updaten naar 'auto_confirmed'.
+            const txIds = incoming.map(t => t.id);
+            const { data: freshCandidates } = await supabaseAdmin
+              .from('payment_match_candidates')
+              .select('id, camt_transaction_id, invoice_id, match_score')
+              .in('camt_transaction_id', txIds)
+              .eq('status', 'suggested')
+              .order('match_score', { ascending: false });
+
+            // Groepeer per camt_tx (alleen highest-score per tx voor autopilot).
+            const bestPerTx = new Map();
+            for (const c of (freshCandidates || [])) {
+              if (!bestPerTx.has(c.camt_transaction_id)) bestPerTx.set(c.camt_transaction_id, c);
+            }
+
+            for (const [txId, c] of bestPerTx) {
+              if (c.match_score < autoThreshold) continue;
+              const tx = incoming.find(t => t.id === txId);
+              if (!tx) continue;
+              try {
+                const result = await registerPaymentInternal({
+                  invoiceId:       c.invoice_id,
+                  amount:          (Number(tx.amount_cents) || 0) / 100,
+                  paidAt:          String(tx.booking_date).slice(0, 10),
+                  paymentMethodId: null,
+                  source:          'camt_match_autopilot',
+                  userId:          user.id,
+                  ipAddress:       null,
+                });
+                await supabaseAdmin
+                  .from('payment_match_candidates')
+                  .update({
+                    status:                'auto_confirmed',
+                    confirmed_at:          new Date().toISOString(),
+                    confirmed_by_user_id:  user.id,
+                    registered_payment_id: result.payment_db_id,
+                  })
+                  .eq('id', c.id);
+                autoConfirmed++;
+              } catch (e) {
+                console.warn(`[camt-upload] autopilot confirm faalde voor match=${c.id}:`, e.message);
+                autoConfirmFailed++;
+                // Laat status 'suggested' — handmatige aandacht.
+              }
+            }
+          }
+        }
+      } catch (e) {
+        // Match-engine mag de upload NIET kapotmaken — upload-success blijft.
+        console.error('[camt-upload] match-engine fout:', e.message);
+      }
     }
 
     // Statement num_entries bijwerken naar werkelijk-ingeschreven aantal.
@@ -168,7 +285,7 @@ export default async function handler(req, res) {
         .eq('id', statementId);
     }
 
-    console.log(`[camt-upload] ${file_name} | ${stmt.account_iban} | parsed=${txs.length} inserted=${inserted} skipped=${skipped}`);
+    console.log(`[camt-upload] ${file_name} | ${stmt.account_iban} | parsed=${txs.length} inserted=${inserted} skipped=${skipped} matches=${matchesGenerated} auto_confirmed=${autoConfirmed} auto_failed=${autoConfirmFailed}`);
 
     return res.status(200).json({
       statement_id:           statementId,
@@ -180,6 +297,9 @@ export default async function handler(req, res) {
       statement_to:           stmt.statement_to,
       opening_balance_cents:  stmt.opening_balance_cents,
       closing_balance_cents:  stmt.closing_balance_cents,
+      matches_generated:      matchesGenerated,
+      auto_confirmed:         autoConfirmed,
+      auto_confirm_failed:    autoConfirmFailed,
     });
   } catch (e) {
     console.error('[camt-upload]', e.message);
