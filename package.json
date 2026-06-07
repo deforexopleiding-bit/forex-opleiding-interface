@@ -11,6 +11,7 @@
     "@anthropic-ai/sdk": "^0.32.0",
     "@supabase/supabase-js": "^2.105.4",
     "dayjs": "^1.11.20",
+    "fast-xml-parser": "^4.5.0",
     "imapflow": "^1.0.171",
     "mailparser": "^3.6.5",
     "nodemailer": "^6.10.1",
