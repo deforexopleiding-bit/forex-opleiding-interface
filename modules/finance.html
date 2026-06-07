@@ -137,6 +137,7 @@
     <button class="sr-seg active" data-view="facturen" type="button">Facturen</button>
     <button class="sr-seg" id="navCamtBank" data-view="camtbank" type="button" style="display:none">Bank</button>
     <button class="sr-seg" id="navBank" data-view="bank" type="button" style="display:none">Bank (oud)</button>
+    <button class="sr-seg" id="navInbox" data-view="inbox" type="button" style="display:none">Inbox</button>
     <button class="sr-seg" data-view="roadmap" type="button">Roadmap</button>
   </div>
 
@@ -409,6 +410,34 @@
         </table>
       </div>
       <div id="bankPager" style="display:flex;justify-content:space-between;align-items:center;margin-top:12px;font-size:12.5px;color:var(--text-dim)"></div>
+    </div>
+  </div>
+
+  <!-- ===== Inbox-view (Bird WhatsApp) — PR A1 placeholder ===== -->
+  <div id="view-inbox" hidden>
+    <div class="inbox-locked" id="inboxLocked" hidden style="background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.3);border-radius:8px;padding:14px 16px;margin-bottom:14px">
+      <div style="font-size:15px;font-weight:700;margin-bottom:6px">Geen toegang tot WhatsApp Inbox</div>
+      <div style="font-size:12.5px">Je mist de rechten <code>finance.inbox.view</code>. Vraag een beheerder om deze permissie te activeren.</div>
+    </div>
+    <div id="inboxMain">
+      <div style="background:linear-gradient(135deg, rgba(34,197,94,.10), rgba(34,197,94,.03));border:1px solid rgba(34,197,94,.25);border-radius:12px;padding:22px 26px;display:flex;gap:18px;align-items:flex-start;flex-wrap:wrap">
+        <div style="font-size:36px;line-height:1">💬</div>
+        <div style="flex:1;min-width:280px">
+          <h2 style="margin:0 0 8px;font-size:18px;font-weight:700">WhatsApp Inbox</h2>
+          <p style="margin:0;font-size:13px;color:var(--text-dim);line-height:1.55">
+            Bird-integratie wordt later geactiveerd. Zodra het finance-nummer live is, verschijnen
+            hier de gesprekken met klanten — inkomende vragen over facturen, betalingen en
+            herinneringen.
+          </p>
+          <div style="margin-top:14px;font-size:12px;color:var(--text-faint)">
+            <strong>Volgende stap (PR A2):</strong> webhook-receiver, conversation-lijst,
+            chat-pane met bericht-versturen, status-tracking (queued / sent / delivered / read).
+          </div>
+          <div id="inboxConfigStatus" style="margin-top:14px;font-size:11.5px;color:var(--text-faint)">
+            Bird-credentials nog niet gecontroleerd.
+          </div>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -753,6 +782,7 @@
     document.getElementById('view-facturen').hidden = (view !== 'facturen');
     document.getElementById('view-camtbank').hidden = (view !== 'camtbank');
     document.getElementById('view-bank').hidden = (view !== 'bank');
+    document.getElementById('view-inbox').hidden = (view !== 'inbox');
     document.getElementById('view-roadmap').hidden = (view !== 'roadmap');
     document.querySelectorAll('#financeNav .sr-seg').forEach(b => b.classList.toggle('active', b.dataset.view === view));
     // Bij eerste keer Bank (oud) openen: load per beschikbare permission.
@@ -767,6 +797,26 @@
       if (canBankBalanceView) loadCamtBalance();
       if (canBankTxView) { loadCamtBank(); loadCamtStatementsList(); }
     }
+    // Bij eerste keer Inbox openen: toon RBAC-banner + Bird-config status.
+    if (view === 'inbox' && !_inboxLoadedOnce) {
+      _inboxLoadedOnce = true;
+      const main = document.getElementById('inboxMain');
+      const locked = document.getElementById('inboxLocked');
+      if (!canInboxView) {
+        if (main)   main.hidden = true;
+        if (locked) locked.hidden = false;
+      } else {
+        // PR A1 placeholder: alleen status-regel ophalen. PR A2: conversaties laden.
+        loadInboxConfigStatus();
+      }
+    }
+  }
+  // Lichte poll naar /api/finance-inbox-status (komt in PR A2) — in A1 puur
+  // een UI-hint dat Bird nog niet geconfigureerd is.
+  async function loadInboxConfigStatus() {
+    const el = document.getElementById('inboxConfigStatus');
+    if (!el) return;
+    el.textContent = 'Bird-config: in afwachting van env-vars (PR A2 activeert de check).';
   }
 
   function renderKpis(k) {
@@ -2314,6 +2364,8 @@
   //  - finance.bank.transactions_view → transactie-tabel + filters + sync-banner
   // Tab-knop is zichtbaar als de gebruiker MINSTENS één van beide heeft.
   let canBankBalanceView = false, canBankTxView = false;
+  let canInboxView = false, canInboxSend = false;
+  let _inboxLoadedOnce = false;
   async function init() {
     try {
       await window._authSharedReady;
@@ -2331,10 +2383,16 @@
       canCreate = can('finance.invoice.create');
       canBankBalanceView = can('finance.bank.balance_view');
       canBankTxView = can('finance.bank.transactions_view');
+      canInboxView = can('finance.inbox.view');
+      canInboxSend = can('finance.inbox.send');
       // Beide Bank-tab buttons zichtbaar zodra de gebruiker minimaal één van beide heeft.
       if (canBankBalanceView || canBankTxView) {
         const ncb = document.getElementById('navCamtBank'); if (ncb) ncb.style.display = '';
         const nb = document.getElementById('navBank');     if (nb)  nb.style.display  = '';
+      }
+      // Inbox-tab zichtbaar bij finance.inbox.view permission.
+      if (canInboxView) {
+        const ni = document.getElementById('navInbox'); if (ni) ni.style.display = '';
       }
       // Verberg saldo-kaart en/of transactie-blok per ontbrekende permission.
       // Beide ontbreken → locked-banner tonen, main hide (zelfde patroon als
