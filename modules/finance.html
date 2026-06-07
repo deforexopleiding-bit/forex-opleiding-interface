@@ -268,9 +268,10 @@
             <th>Tegenpartij</th>
             <th>IBAN</th>
             <th>Referentie</th>
+            <th style="width:160px">Gekoppelde factuur</th>
             <th class="num" style="width:120px">Bedrag</th>
           </tr></thead>
-          <tbody id="camtBankTbody"><tr><td colspan="6" style="text-align:center;padding:24px;color:var(--text-faint)">Laden…</td></tr></tbody>
+          <tbody id="camtBankTbody"><tr><td colspan="7" style="text-align:center;padding:24px;color:var(--text-faint)">Laden…</td></tr></tbody>
         </table>
       </div>
       <div id="camtBankPager" style="display:flex;justify-content:space-between;align-items:center;margin-top:12px;font-size:12.5px;color:var(--text-dim)"></div>
@@ -1788,7 +1789,7 @@
   async function loadCamtBank() {
     const tb = document.getElementById('camtBankTbody');
     if (!tb) return;
-    tb.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:24px;color:var(--text-faint)">Laden…</td></tr>';
+    tb.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:24px;color:var(--text-faint)">Laden…</td></tr>';
     const p = new URLSearchParams();
     if (camtBankState.dir && camtBankState.dir !== 'all') p.set('direction', camtBankState.dir);
     if (camtBankState.from) p.set('from', camtBankState.from);
@@ -1805,31 +1806,43 @@
       }
       const d = await r.json();
       if (!r.ok) {
-        tb.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:24px;color:#ef4444">Fout: ' + esc(d.error || 'HTTP ' + r.status) + '</td></tr>';
+        tb.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:24px;color:#ef4444">Fout: ' + esc(d.error || 'HTTP ' + r.status) + '</td></tr>';
         return;
       }
       camtBankState.total = d.total || 0;
       const items = d.items || [];
       _camtBankItems = items;
       if (!items.length) {
-        tb.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:24px;color:var(--text-faint)">Geen transacties gevonden. Upload een CAMT-bestand om te beginnen.</td></tr>';
+        tb.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:24px;color:var(--text-faint)">Geen transacties gevonden. Upload een CAMT-bestand om te beginnen.</td></tr>';
       } else {
         tb.innerHTML = items.map((t, i) => {
           const cents = Number(t.amount_cents) || 0;
           const amtColor = cents > 0 ? '#10b981' : (cents < 0 ? '#ef4444' : 'var(--text)');
           const amtSign = cents > 0 ? '+' : '';
+          const li = t.linked_invoice || null;
+          const linkedCell = li
+            ? `<a href="#" data-open-invoice-id="${esc(li.id)}" class="sr-tag green" title="Open factuur (status: ${esc(li.match_status || '')})" style="display:inline-block;text-decoration:none">${esc(li.invoice_number || '—')}</a>`
+            : '<span class="sr-cellsub">—</span>';
           return `<tr class="clickable-row" data-camt-row="${i}">
             <td>${esc(fmtDateNl(t.booking_date))}</td>
             <td>${esc((t.description || '').slice(0, 80))}</td>
             <td>${esc(t.counterparty_name || '—')}</td>
             <td style="font-family:monospace;font-size:11.5px">${esc(t.counterparty_iban || '—')}</td>
             <td>${t.end_to_end_id ? `<span class="sr-tag blue">${esc(t.end_to_end_id)}</span>` : '<span class="sr-cellsub">—</span>'}</td>
+            <td>${linkedCell}</td>
             <td class="num" style="color:${amtColor};font-weight:600;font-variant-numeric:tabular-nums">${amtSign}${fmtEur2Cents(Math.abs(cents))}</td>
           </tr>`;
         }).join('');
         tb.querySelectorAll('[data-camt-row]').forEach(tr => tr.addEventListener('click', (e) => {
           if (e.target.closest('button, a')) return;
           openCamtBankTxModal(Number(tr.dataset.camtRow));
+        }));
+        // Klik op gekoppelde-factuur-tag → open factuur-detail modal zonder
+        // de row-click-handler (camt-modal) te triggeren.
+        tb.querySelectorAll('[data-open-invoice-id]').forEach(a => a.addEventListener('click', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          openInvoiceById(a.dataset.openInvoiceId);
         }));
       }
       const pages = Math.max(1, Math.ceil(camtBankState.total / camtBankState.pageSize));
@@ -1841,7 +1854,27 @@
       if (prev) prev.addEventListener('click', () => { if (camtBankState.page > 1) { camtBankState.page--; loadCamtBank(); } });
       if (next) next.addEventListener('click', () => { if (camtBankState.page < pages) { camtBankState.page++; loadCamtBank(); } });
     } catch (e) {
-      tb.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:24px;color:#ef4444">Fout: ' + esc(e.message) + '</td></tr>';
+      tb.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:24px;color:#ef4444">Fout: ' + esc(e.message) + '</td></tr>';
+    }
+  }
+
+  // Open de bestaande factuur-detail modal (openDetail) op basis van invoice
+  // id alleen — fetched de volledige row via /api/finance-invoices?invoice_id=<id>.
+  // Gebruikt o.a. door de "Gekoppelde factuur" kolom in Bank → Transacties.
+  async function openInvoiceById(invId) {
+    if (!invId) return;
+    try {
+      const r = await window.AgentShared.apiFetch('/api/finance-invoices?invoice_id=' + encodeURIComponent(invId) + '&page_size=1');
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.error || ('HTTP ' + r.status));
+      const inv = (d.items || [])[0];
+      if (!inv) throw new Error('Factuur niet gevonden');
+      if (typeof openDetail === 'function') openDetail(inv);
+    } catch (e) {
+      console.error('[openInvoiceById]', e);
+      if (window.AgentShared && window.AgentShared.showToast) {
+        window.AgentShared.showToast('Kon factuur niet openen: ' + e.message, 'error');
+      }
     }
   }
 
