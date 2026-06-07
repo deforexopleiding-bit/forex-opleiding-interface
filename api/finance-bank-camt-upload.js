@@ -196,7 +196,7 @@ export default async function handler(req, res) {
           // Open invoices met customer-naam (voor de matcher).
           const { data: openInvoices } = await supabaseAdmin
             .from('invoices')
-            .select('id, invoice_number, amount_total, amount_paid, status, issue_date, customer_id, customers (first_name, last_name, company_name)')
+            .select('id, invoice_number, amount_total, amount_paid, credited_amount, status, issue_date, customer_id, customers (first_name, last_name, company_name)')
             .in('status', ['open', 'partially_paid', 'overdue']);
           const invForMatcher = (openInvoices || []).map(inv => ({
             ...inv,

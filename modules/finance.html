@@ -2219,7 +2219,7 @@
         const cents = Number(m.camt?.amount_cents) || 0;
         const score = Number(m.match_score) || 0;
         const scoreColor = score >= 90 ? '#10b981' : (score >= 70 ? '#f59e0b' : '#eab308');
-        const reasonsLbl = { exact_amount: 'Bedrag', invoice_number_in_description: 'Factuurnr', customer_name_match: 'Naam', date_within_30_days: 'Datum' };
+        const reasonsLbl = { exact_amount: 'Bedrag', exact_amount_due: 'Bedrag (deel)', invoice_number_in_description: 'Factuurnr', customer_name_match: 'Naam', date_within_30_days: 'Datum', manual_link: 'Handmatig' };
         const reasonsHtml = (m.match_reasons || []).map(r => `<span style="color:#10b981">${esc(reasonsLbl[r] || r)} ✓</span>`).join(' · ');
         const statusBadge = (() => {
           if (m.status === 'suggested') return '<span class="sr-tag gray">Te beoordelen</span>';
