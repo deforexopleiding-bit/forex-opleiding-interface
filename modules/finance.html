@@ -492,6 +492,18 @@
       <summary style="cursor:pointer;font-size:12px;color:var(--text-dim);user-select:none">Ruwe data (raw_payload)</summary>
       <pre id="bankTxRaw" style="margin-top:8px;padding:10px 12px;background:var(--bg-elev-2, #f4f4f5);border:1px solid var(--border, #e5e7eb);border-radius:6px;font-size:11px;font-family:ui-monospace,Menlo,Consolas,monospace;line-height:1.5;max-height:260px;overflow:auto;white-space:pre-wrap;word-break:break-all">—</pre>
     </details>
+
+    <!-- Sectie: handmatige factuur-koppeling (alleen voor CAMT-tx — voor e-Boekhouden bank-tx wordt deze sectie verborgen) -->
+    <div id="bankTxLinkSection" hidden style="margin-top:18px;padding-top:14px;border-top:1px solid var(--border-subtle, #2b2f3a)">
+      <div style="font-size:13px;font-weight:600;margin-bottom:8px">Koppel handmatig aan factuur</div>
+      <div style="font-size:11.5px;color:var(--text-faint);margin-bottom:10px">Vind een factuur op klantnaam of factuurnummer. Bij selectie wordt de betaling in Teamleader geregistreerd en de factuur op betaald gezet.</div>
+      <div style="display:flex;gap:8px;align-items:center">
+        <input id="bankTxLinkSearch" type="search" placeholder="Zoek klant of factuurnummer…" class="fin-input" style="flex:1" autocomplete="off"/>
+        <span id="bankTxLinkSearchStatus" style="font-size:11.5px;color:var(--text-faint);min-width:80px;text-align:right">Min 2 tekens</span>
+      </div>
+      <div id="bankTxLinkResults" style="margin-top:10px;max-height:220px;overflow:auto;border:1px solid var(--border-subtle, #2b2f3a);border-radius:6px;display:none"></div>
+    </div>
+
     <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px">
       <button class="sr-abtn primary" id="bankTxCloseBtn" type="button">Sluiten</button>
     </div>
@@ -1599,6 +1611,11 @@
     } else {
       rawEl.textContent = '(geen raw_payload)';
     }
+    // Manual-link sectie verbergen voor e-Boekhouden bank-tx (oude tab; geen
+    // koppeling met camt_transactions).
+    const linkSection = document.getElementById('bankTxLinkSection');
+    if (linkSection) linkSection.hidden = true;
+    _bankTxLinkCurrent = null;
     document.getElementById('bankTxModal').classList.remove('hidden');
   }
   function closeBankTxModal() { document.getElementById('bankTxModal').classList.add('hidden'); }
@@ -1851,7 +1868,147 @@
     document.getElementById('bankTxEbId').textContent = t.entry_reference || '—';
     document.getElementById('bankTxLedger').textContent = t.account_iban || '—';
     document.getElementById('bankTxRaw').textContent = JSON.stringify(t, null, 2);
+    // Toon manual-link sectie alleen bij inkomende CAMT-tx (id is uuid).
+    const linkSection = document.getElementById('bankTxLinkSection');
+    if (linkSection) {
+      const isIncomingCamt = t && typeof t.id === 'string' && /^[0-9a-f-]{36}$/i.test(t.id) && (Number(t.amount_cents) || 0) > 0;
+      linkSection.hidden = !isIncomingCamt;
+      if (isIncomingCamt) {
+        _bankTxLinkCurrent = t;
+        const inp = document.getElementById('bankTxLinkSearch');
+        const stat = document.getElementById('bankTxLinkSearchStatus');
+        const list = document.getElementById('bankTxLinkResults');
+        if (inp) inp.value = '';
+        if (stat) { stat.textContent = 'Min 2 tekens'; stat.style.color = ''; }
+        if (list) { list.innerHTML = ''; list.style.display = 'none'; }
+      } else {
+        _bankTxLinkCurrent = null;
+      }
+    }
     document.getElementById('bankTxModal').classList.remove('hidden');
+  }
+
+  // ── Handmatige factuur-koppeling vanuit bank-tx modal ───────────────────
+  // Wordt actief zodra openCamtBankTxModal _bankTxLinkCurrent zet. Search
+  // gaat tegen /api/finance-invoices?q=...&status=open en client-side
+  // breiden we naar partially_paid/overdue zodat de gebruiker ze ook vindt.
+  let _bankTxLinkCurrent = null;       // huidige camt-tx (object) waaraan gekoppeld kan worden
+  let _bankTxLinkSearchTimer = null;
+  let _bankTxLinkResultsCache = [];    // cache laatste resultset voor click-dispatch
+
+  function bankTxLinkSetStatus(text, color) {
+    const el = document.getElementById('bankTxLinkSearchStatus');
+    if (!el) return;
+    el.textContent = text;
+    el.style.color = color || '';
+  }
+  function bankTxLinkRenderResults(items) {
+    const list = document.getElementById('bankTxLinkResults');
+    if (!list) return;
+    _bankTxLinkResultsCache = items;
+    if (!items.length) {
+      list.innerHTML = '<div style="padding:14px;text-align:center;color:var(--text-faint);font-size:12px">Geen openstaande facturen gevonden voor deze zoekterm.</div>';
+      list.style.display = 'block';
+      return;
+    }
+    list.innerHTML = items.map((inv, i) => {
+      const total = Number(inv.amount_total) || 0;
+      const open = Number(inv.amount_open) || total;
+      const statusBadge =
+          inv.display_status === 'overdue'        ? '<span class="sr-tag warning" style="margin-left:6px">Te laat</span>'
+        : inv.status === 'partially_paid'         ? '<span class="sr-tag warning" style="margin-left:6px">Deels betaald</span>'
+        :                                           '<span class="sr-tag gray" style="margin-left:6px">Open</span>';
+      return `<div data-link-pick="${i}" class="clickable-row" style="padding:10px 12px;border-bottom:1px solid var(--border-subtle, #2b2f3a);display:flex;justify-content:space-between;align-items:center;gap:10px">
+        <div style="flex:1;min-width:0">
+          <div style="font-size:12.5px;font-weight:600">
+            <span class="sr-tag blue">${esc(inv.invoice_number || '—')}</span>
+            <span style="margin-left:6px">${esc(inv.customer_name || '—')}</span>
+            ${statusBadge}
+          </div>
+          <div style="font-size:11px;color:var(--text-faint);margin-top:2px">${esc(fmtDateNl(inv.issue_date))}${inv.due_date ? ' · vervalt ' + esc(fmtDateNl(inv.due_date)) : ''}</div>
+        </div>
+        <div class="num" style="font-variant-numeric:tabular-nums;text-align:right">
+          <div style="font-size:13px;font-weight:600">${fmtEur2Cents(open * 100)}</div>
+          ${open !== total ? `<div style="font-size:10.5px;color:var(--text-faint)">van ${fmtEur2Cents(total * 100)}</div>` : ''}
+        </div>
+      </div>`;
+    }).join('');
+    list.style.display = 'block';
+    list.querySelectorAll('[data-link-pick]').forEach(el => el.addEventListener('click', () => {
+      const idx = Number(el.dataset.linkPick);
+      const inv = _bankTxLinkResultsCache[idx];
+      if (inv) bankTxLinkPickInvoice(inv);
+    }));
+  }
+  async function bankTxLinkRunSearch(query) {
+    const camt = _bankTxLinkCurrent;
+    if (!camt) return;
+    const q = String(query || '').trim();
+    if (q.length < 2) {
+      bankTxLinkSetStatus('Min 2 tekens');
+      const list = document.getElementById('bankTxLinkResults');
+      if (list) { list.innerHTML = ''; list.style.display = 'none'; }
+      return;
+    }
+    bankTxLinkSetStatus('Zoeken…');
+    try {
+      // Haal de drie open-statussen op door 3 parallelle calls (api/finance-invoices
+      // filtert single-status). Merge + sort by amount-match-affinity.
+      const p = ['open', 'partially_paid', 'overdue'].map(st => {
+        const params = new URLSearchParams({ q, status: st, page_size: '10', sort: 'issue_date', dir: 'desc' });
+        return window.AgentShared.apiFetch('/api/finance-invoices?' + params.toString())
+          .then(r => r.json().catch(() => ({})))
+          .then(j => Array.isArray(j.items) ? j.items : []);
+      });
+      const arrs = await Promise.all(p);
+      // Dedupe op id (overdue is een view van status='open'+due_date<vandaag, dus overlap mogelijk).
+      const seen = new Set();
+      const merged = [];
+      for (const arr of arrs) for (const inv of arr) {
+        if (seen.has(inv.id)) continue; seen.add(inv.id);
+        merged.push(inv);
+      }
+      // Sort: factuur-bedrag matches camt-amount → bovenaan, dan op issue_date desc.
+      const camtEuro = (Number(camt.amount_cents) || 0) / 100;
+      merged.sort((a, b) => {
+        const aMatch = Math.abs(Number(a.amount_open) - camtEuro) < 0.01 ? 0 : 1;
+        const bMatch = Math.abs(Number(b.amount_open) - camtEuro) < 0.01 ? 0 : 1;
+        if (aMatch !== bMatch) return aMatch - bMatch;
+        return (b.issue_date || '').localeCompare(a.issue_date || '');
+      });
+      const top = merged.slice(0, 10);
+      bankTxLinkSetStatus(`${top.length}/${merged.length} resultaten`);
+      bankTxLinkRenderResults(top);
+    } catch (e) {
+      console.error('[bank-tx-link search]', e);
+      bankTxLinkSetStatus('Fout: ' + e.message, '#ef4444');
+    }
+  }
+  async function bankTxLinkPickInvoice(inv) {
+    const camt = _bankTxLinkCurrent;
+    if (!camt || !inv) return;
+    const camtEuro = (Number(camt.amount_cents) || 0) / 100;
+    const msg = `Koppel betaling ${fmtEur2Cents(camtEuro * 100)} aan factuur ${inv.invoice_number} van ${inv.customer_name || '—'}?\n\nDe factuur wordt op betaald gezet in Teamleader.`;
+    if (!confirm(msg)) return;
+    bankTxLinkSetStatus('Koppelen…');
+    try {
+      const r = await window.AgentShared.apiFetch('/api/finance-payment-match-manual', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ camt_transaction_id: camt.id, invoice_id: inv.id }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.error || ('HTTP ' + r.status));
+      window.AgentShared.showToast('✓ ' + (d.message || 'Gekoppeld'), 'success');
+      document.getElementById('bankTxModal').classList.add('hidden');
+      // Refresh CAMT-tx tabel + Matches-tabel zodat de nieuwe link zichtbaar wordt.
+      if (typeof loadCamtBank === 'function') loadCamtBank();
+      if (typeof loadMatches === 'function') loadMatches();
+    } catch (e) {
+      console.error('[bank-tx-link pick]', e);
+      bankTxLinkSetStatus('');
+      window.AgentShared.showToast('Koppelen mislukt: ' + e.message, 'error');
+    }
   }
 
   async function loadCamtStatementsList() {
@@ -1990,7 +2147,7 @@
     const p = new URLSearchParams();
     // Status-mapping: 'open' = suggested+auto_confirmed (te beoordelen), confirmed_all = confirmed, etc.
     if (matchState.statusFilter === 'open') p.set('status', 'suggested,auto_confirmed');
-    else if (matchState.statusFilter === 'confirmed_all') p.set('status', 'confirmed');
+    else if (matchState.statusFilter === 'confirmed_all') p.set('status', 'confirmed,manual_confirmed');
     else if (matchState.statusFilter === 'rejected') p.set('status', 'rejected');
     // 'all' → geen filter
     p.set('limit', String(matchState.pageSize));
@@ -2025,6 +2182,7 @@
           if (m.status === 'suggested') return '<span class="sr-tag gray">Te beoordelen</span>';
           if (m.status === 'auto_confirmed') return '<span class="sr-tag warning">Auto-bevestigd</span>';
           if (m.status === 'confirmed') return '<span class="sr-tag green">Bevestigd</span>';
+          if (m.status === 'manual_confirmed') return '<span class="sr-tag green">Handmatig gekoppeld</span>';
           if (m.status === 'rejected') return '<span class="sr-tag danger">Verworpen</span>';
           return esc(m.status);
         })();
@@ -2242,6 +2400,13 @@
       const bxc = document.getElementById('bankTxClose'); if (bxc) bxc.addEventListener('click', closeBankTxModal);
       const bxc2 = document.getElementById('bankTxCloseBtn'); if (bxc2) bxc2.addEventListener('click', closeBankTxModal);
       const bxm = document.getElementById('bankTxModal'); if (bxm) bxm.addEventListener('click', (e) => { if (e.target === bxm) closeBankTxModal(); });
+      // Bank-tx → factuur koppel-search (debounced 300ms).
+      const linkInp = document.getElementById('bankTxLinkSearch');
+      if (linkInp) linkInp.addEventListener('input', (e) => {
+        const val = e.target.value;
+        if (_bankTxLinkSearchTimer) clearTimeout(_bankTxLinkSearchTimer);
+        _bankTxLinkSearchTimer = setTimeout(() => bankTxLinkRunSearch(val), 300);
+      });
 
       // CAMT Bank-tab wiring (filters + upload).
       const camtDirSeg = document.getElementById('camtBankDirSeg');

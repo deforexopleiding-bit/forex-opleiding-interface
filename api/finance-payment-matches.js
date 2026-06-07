@@ -14,7 +14,7 @@ import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
 
 const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
-const VALID_STATUSES = ['suggested', 'confirmed', 'rejected', 'auto_confirmed'];
+const VALID_STATUSES = ['suggested', 'confirmed', 'rejected', 'auto_confirmed', 'manual_confirmed'];
 
 // Welke invoice-statussen zijn ZINVOL om nog te matchen?
 // Verbergen we 'paid' (al voldaan), 'credited' (factuur ongedaan), 'writeoff'
