@@ -309,6 +309,17 @@
           </button>
         </div>
 
+        <!-- Bulk re-sync: invoices opnieuw spiegelen tegen TL (stale paid-mismatch fix) -->
+        <div style="margin-bottom:14px;padding:12px 16px;border:1px dashed var(--border-subtle, #e5e7eb);border-radius:10px;background:rgba(255,255,255,0.02);display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
+          <div>
+            <div style="font-size:13px;font-weight:600">Re-sync open facturen met TL</div>
+            <div style="font-size:11.5px;color:var(--text-faint);margin-top:2px">Haalt alle openstaande facturen opnieuw op uit Teamleader om stale paid-statussen te herstellen. Handig na de cursor-overshoot fix om historische misses op te ruimen.</div>
+          </div>
+          <button class="sr-abtn primary" id="invBulkResyncBtn" type="button" style="font-size:12.5px">
+            <i class="ti ti-refresh" style="margin-right:4px"></i>Re-sync open facturen met TL
+          </button>
+        </div>
+
         <!-- Filter-strip -->
         <div class="sr-filterstrip" style="margin-bottom:12px;flex-wrap:wrap;gap:8px;align-items:center">
           <div class="sr-segments" id="matchStatusSeg">
@@ -2285,7 +2296,47 @@
       // Bulk-matcher knop.
       const bulkBtn = document.getElementById('matchBulkRunBtn');
       if (bulkBtn) bulkBtn.addEventListener('click', runBulkMatcher);
+      // Bulk re-sync open facturen knop.
+      const resyncBtn = document.getElementById('invBulkResyncBtn');
+      if (resyncBtn) resyncBtn.addEventListener('click', runBulkInvoiceResync);
     } catch (e) { console.error('[finance-facturen] init', e); }
+  }
+
+  // Bulk re-sync trigger — pakt alle openstaande facturen en spiegelt ze
+  // opnieuw vanuit Teamleader. Voor stale paid-mismatches die de cron's
+  // cursor-overshoot bug stilletjes had laten liggen.
+  async function runBulkInvoiceResync() {
+    const btn = document.getElementById('invBulkResyncBtn');
+    if (!btn) return;
+    if (!confirm('Alle openstaande facturen opnieuw spiegelen vanuit TL? Dit kan 1-2 minuten duren bij ~200 facturen. Bij timeout: opnieuw klikken tot er geen openstaand meer is gewijzigd.')) return;
+    const origHtml = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = '<i class="ti ti-loader-2" style="margin-right:4px;animation:spin 1s linear infinite"></i>Bezig…';
+    try {
+      const r = await window.AgentShared.apiFetch('/api/finance-invoice-bulk-resync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ scope: 'all_open' }),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.error || ('HTTP ' + r.status));
+      const parts = [];
+      parts.push(`${j.processed || 0} facturen ge-resynct`);
+      parts.push(`${j.updated || 0} updated`);
+      if (j.inserted) parts.push(`${j.inserted} nieuw`);
+      if (j.errors) parts.push(`${j.errors} errors`);
+      if (j.aborted_by_timeout) parts.push('⚠️ timeout — opnieuw klikken voor de rest');
+      window.AgentShared.showToast('✓ ' + parts.join(' · '), j.errors ? 'warning' : 'success');
+      if (j.error_samples && j.error_samples.length) {
+        console.warn('[bulk-resync] error_samples:', j.error_samples);
+      }
+    } catch (e) {
+      console.error('[bulk-resync]', e);
+      window.AgentShared.showToast('Re-sync mislukt: ' + e.message, 'error');
+    } finally {
+      btn.disabled = false;
+      btn.innerHTML = origHtml;
+    }
   }
 
   // Bulk-matcher trigger — draait engine over alle camt_transactions zonder candidate.
