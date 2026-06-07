@@ -10,10 +10,15 @@
 //   +15  customer_name_match        — counterparty_name ↔ customer-naam case-insensitive substring
 //    +5  date_within_30_days        — booking_date binnen 30 dagen van issue_date
 //
-// MIN_SCORE = 50 (exact bedrag is minimum). Multi-candidate per camt_tx
-// mogelijk (eerder factuur kan ook hetzelfde bedrag hebben).
+// MIN_SCORE = 70: exact bedrag alleen is onvoldoende — moet gepaard gaan met
+// ofwel factuurnummer in tekst (+30 → 80) ofwel klantnaam-match + datum
+// binnen window (+15 +5 → 70). Verhoogd van 50 op 2026-06-07: eerste echte
+// bulk-run leverde 12189 candidates op met score 50-69 zonder factuurnr- of
+// naam-signaal — niet bruikbaar voor menselijke review of autopilot.
+// Multi-candidate per camt_tx blijft mogelijk (meerdere facturen kunnen
+// hetzelfde bedrag hebben).
 
-const MIN_SCORE = 50;
+const MIN_SCORE = 70;
 const DATE_WINDOW_DAYS = 30;
 
 /**

@@ -17,12 +17,14 @@ const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const VALID_STATUSES = ['suggested', 'confirmed', 'rejected', 'auto_confirmed'];
 
 // Welke invoice-statussen zijn ZINVOL om nog te matchen?
-// Verbergen we 'paid' (al voldaan), 'credited' (factuur ongedaan) en 'writeoff'
-// (afgeschreven) — een match-candidate op zulke facturen is altijd een
-// historisch artefact. 'cancelled' bestaat niet voor invoices in onze CHECK
-// constraint (migratie 2026-05-30): concept/open/partially_paid/paid/overdue/
-// credited/writeoff. Dus blijven over voor weergave:
-const INVOICE_STATUSES_FOR_MATCH = ['concept', 'open', 'partially_paid', 'overdue'];
+// Verbergen we 'paid' (al voldaan), 'credited' (factuur ongedaan), 'writeoff'
+// (afgeschreven) en 'concept' (draft — niet verstuurd dus klant heeft niets
+// om op te betalen). Een match-candidate op zulke facturen is altijd een
+// artefact. 'cancelled' bestaat niet voor invoices in onze CHECK constraint
+// (migratie 2026-05-30): concept/open/partially_paid/paid/overdue/credited/
+// writeoff. Consistent met api/finance-payment-matcher-run.js:50 en
+// api/finance-bank-camt-upload.js:200 (die filteren al op zelfde 3 statussen).
+const INVOICE_STATUSES_FOR_MATCH = ['open', 'partially_paid', 'overdue'];
 
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
