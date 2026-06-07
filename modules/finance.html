@@ -843,6 +843,7 @@
     document.getElementById('view-camtbank').hidden = (view !== 'camtbank');
     document.getElementById('view-bank').hidden = (view !== 'bank');
     document.getElementById('view-inbox').hidden = (view !== 'inbox');
+    document.getElementById('view-dunning').hidden = (view !== 'dunning');
     document.getElementById('view-roadmap').hidden = (view !== 'roadmap');
     document.querySelectorAll('#financeNav .sr-seg').forEach(b => b.classList.toggle('active', b.dataset.view === view));
     // Bij eerste keer Bank (oud) openen: load per beschikbare permission.
@@ -869,6 +870,27 @@
         // PR A1: alleen status-regel. PR A2: GET /api/finance-inbox-status
         // + conversation-lijst laden.
         loadInboxConfigStatus();
+      }
+    }
+    // Bij eerste keer Wanbetalers openen: RBAC-gate.
+    if (view === 'dunning' && !_dunningLoadedOnce) {
+      _dunningLoadedOnce = true;
+      const main = document.getElementById('dunningMain');
+      const locked = document.getElementById('dunningLocked');
+      if (!canDunningView) {
+        if (main)   main.hidden = true;
+        if (locked) locked.hidden = false;
+      } else {
+        // Sub-tab switcher wiring (PR B1 alleen view-toggle; CRUD in B2+).
+        const subs = ['overzicht','probleemklanten','workflows','templates','geschiedenis'];
+        document.querySelectorAll('#dunningSubNav .sr-seg').forEach(b => b.addEventListener('click', () => {
+          const target = b.dataset.dunningSub;
+          document.querySelectorAll('#dunningSubNav .sr-seg').forEach(x => x.classList.toggle('active', x === b));
+          for (const s of subs) {
+            const el = document.getElementById('dunningSub' + s.charAt(0).toUpperCase() + s.slice(1));
+            if (el) el.hidden = (s !== target);
+          }
+        }));
       }
     }
   }
@@ -2425,6 +2447,8 @@
   let canBankBalanceView = false, canBankTxView = false;
   let canInboxView = false, canInboxSend = false;
   let _inboxLoadedOnce = false;
+  let canDunningView = false, canDunningConfig = false, canDunningExecute = false;
+  let _dunningLoadedOnce = false;
   async function init() {
     try {
       await window._authSharedReady;
@@ -2444,6 +2468,9 @@
       canBankTxView = can('finance.bank.transactions_view');
       canInboxView = can('finance.inbox.view');
       canInboxSend = can('finance.inbox.send');
+      canDunningView    = can('finance.dunning.view');
+      canDunningConfig  = can('finance.dunning.config');
+      canDunningExecute = can('finance.dunning.execute');
       // Beide Bank-tab buttons zichtbaar zodra de gebruiker minimaal één van beide heeft.
       if (canBankBalanceView || canBankTxView) {
         const ncb = document.getElementById('navCamtBank'); if (ncb) ncb.style.display = '';
@@ -2452,6 +2479,9 @@
       // Inbox-tab zichtbaar bij finance.inbox.view permission.
       if (canInboxView) {
         const ni = document.getElementById('navInbox'); if (ni) ni.style.display = '';
+      }
+      if (canDunningView) {
+        const nd = document.getElementById('navDunning'); if (nd) nd.style.display = '';
       }
       // Verberg saldo-kaart en/of transactie-blok per ontbrekende permission.
       // Beide ontbreken → locked-banner tonen, main hide (zelfde patroon als
