@@ -485,9 +485,26 @@
 
       <!-- Sub-view: Templates -->
       <div id="dunningSubTemplates" hidden>
-        <div style="background:rgba(255,255,255,0.02);border:1px solid var(--border-subtle, #e5e7eb);border-radius:12px;padding:22px 26px">
-          <h2 style="margin:0 0 8px;font-size:18px;font-weight:700">Templates</h2>
-          <p style="margin:0;font-size:13px;color:var(--text-dim);line-height:1.55">Email + WhatsApp templates CRUD met variabele-substitutie. <strong>Komt in PR B2.</strong></p>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:10px">
+          <div>
+            <h2 style="margin:0;font-size:18px;font-weight:700">Templates</h2>
+            <div style="font-size:11.5px;color:var(--text-faint);margin-top:2px">Email- en WhatsApp-templates met {{VARIABELEN}} voor de workflow-engine.</div>
+          </div>
+          <button class="sr-abtn primary" id="dunTplNewBtn" type="button" style="font-size:12.5px">
+            <i class="ti ti-plus" style="margin-right:4px"></i>Nieuwe template
+          </button>
+        </div>
+        <div class="sr-tablewrap">
+          <table class="sr-table" id="dunTplTable">
+            <thead><tr>
+              <th>Naam</th>
+              <th style="width:100px">Type</th>
+              <th style="width:70px">Taal</th>
+              <th style="width:80px">Actief</th>
+              <th style="width:150px"></th>
+            </tr></thead>
+            <tbody id="dunTplTbody"><tr><td colspan="5" style="text-align:center;padding:24px;color:var(--text-faint)">Laden…</td></tr></tbody>
+          </table>
         </div>
       </div>
 
@@ -553,6 +570,80 @@
       <span class="phase-tag">PLANNED</span>
     </div>
   </div>
+  </div>
+</div>
+
+<!-- Dunning Template editor modal (PR B2) -->
+<div class="modal-overlay hidden" id="dunTplModal" role="dialog" aria-modal="true">
+  <div class="modal-card" style="max-width:780px">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px">
+      <h3 id="dunTplModalTitle" style="margin:0">Nieuwe template</h3>
+      <button class="sr-ibtn" id="dunTplClose" type="button" title="Sluiten" style="margin-top:-4px"><i class="ti ti-x"></i></button>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px 14px;margin-top:14px">
+      <label style="font-size:12px;color:var(--text-dim);grid-column:1/2">
+        <div style="margin-bottom:4px;font-weight:600">Naam<span style="color:#ef4444">*</span></div>
+        <input id="dunTplName" type="text" class="fin-input" maxlength="200" placeholder="bv. Eerste herinnering NL"/>
+      </label>
+      <label style="font-size:12px;color:var(--text-dim);grid-column:2/3">
+        <div style="margin-bottom:4px;font-weight:600">Type<span style="color:#ef4444">*</span></div>
+        <select id="dunTplKind" class="fin-input">
+          <option value="email">E-mail</option>
+          <option value="whatsapp">WhatsApp</option>
+        </select>
+      </label>
+      <label style="font-size:12px;color:var(--text-dim);grid-column:1/2">
+        <div style="margin-bottom:4px;font-weight:600">Taal</div>
+        <select id="dunTplLang" class="fin-input">
+          <option value="nl">NL — Nederlands</option>
+        </select>
+      </label>
+      <label style="font-size:12px;color:var(--text-dim);grid-column:2/3;display:flex;align-items:flex-end;gap:8px">
+        <input id="dunTplActive" type="checkbox" style="width:auto" checked/>
+        <span style="font-weight:600">Actief</span>
+      </label>
+    </div>
+
+    <div id="dunTplSubjectWrap" style="margin-top:12px">
+      <label style="font-size:12px;color:var(--text-dim)">
+        <div style="margin-bottom:4px;font-weight:600">Onderwerp<span style="color:#ef4444">*</span></div>
+        <input id="dunTplSubject" type="text" class="fin-input" maxlength="500" placeholder="bv. Herinnering openstaande factuur {{FACTUUR_NR}}"/>
+      </label>
+    </div>
+
+    <div id="dunTplMetaNameWrap" style="margin-top:12px;display:none">
+      <label style="font-size:12px;color:var(--text-dim)">
+        <div style="margin-bottom:4px;font-weight:600">Meta-template-naam</div>
+        <input id="dunTplMetaName" type="text" class="fin-input" maxlength="200" placeholder="bv. invoice_reminder_v1"/>
+        <div style="font-size:11px;color:var(--text-faint);margin-top:3px">Exacte naam van approved template in Meta Business Manager. Vereist voor verzending buiten 24h-window. Leeg laten als deze template alleen binnen 24h gebruikt wordt.</div>
+      </label>
+    </div>
+
+    <div style="margin-top:12px">
+      <div style="font-size:12px;color:var(--text-dim);margin-bottom:6px"><strong>Variabelen</strong> — klik om in te voegen op cursor-positie:</div>
+      <div id="dunTplVarBadges" style="display:flex;flex-wrap:wrap;gap:6px">
+        <button class="sr-tag blue" data-tplvar="{{NAAM}}" type="button" style="cursor:pointer;border:none">{{NAAM}} <span style="opacity:.7">Klantnaam</span></button>
+        <button class="sr-tag blue" data-tplvar="{{FACTUUR_LIJST}}" type="button" style="cursor:pointer;border:none">{{FACTUUR_LIJST}} <span style="opacity:.7">Openstaande facturen</span></button>
+        <button class="sr-tag blue" data-tplvar="{{FACTUUR_NR}}" type="button" style="cursor:pointer;border:none">{{FACTUUR_NR}} <span style="opacity:.7">Eén factuurnr</span></button>
+        <button class="sr-tag blue" data-tplvar="{{TOTAAL_BEDRAG}}" type="button" style="cursor:pointer;border:none">{{TOTAAL_BEDRAG}} <span style="opacity:.7">Som openstaand</span></button>
+        <button class="sr-tag blue" data-tplvar="{{DAGEN_OVERDUE}}" type="button" style="cursor:pointer;border:none">{{DAGEN_OVERDUE}} <span style="opacity:.7">Dagen te laat</span></button>
+        <button class="sr-tag blue" data-tplvar="{{VERVAL_DATUM}}" type="button" style="cursor:pointer;border:none">{{VERVAL_DATUM}} <span style="opacity:.7">Oudste vervaldatum</span></button>
+      </div>
+    </div>
+
+    <div style="margin-top:12px">
+      <label style="font-size:12px;color:var(--text-dim)">
+        <div style="margin-bottom:4px;font-weight:600">Bericht-inhoud<span style="color:#ef4444">*</span></div>
+        <textarea id="dunTplBody" class="fin-input" rows="10" style="font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12.5px;line-height:1.55;resize:vertical;min-height:180px" placeholder="Beste {{NAAM}},&#10;&#10;De factuur {{FACTUUR_NR}} met een totaalbedrag van {{TOTAAL_BEDRAG}} is {{DAGEN_OVERDUE}} dagen over de vervaldatum…"></textarea>
+      </label>
+    </div>
+
+    <div id="dunTplError" style="display:none;margin-top:10px;padding:8px 12px;background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.3);border-radius:6px;color:#ef4444;font-size:12px"></div>
+
+    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px">
+      <button class="sr-abtn" id="dunTplCancel" type="button">Annuleer</button>
+      <button class="sr-abtn primary" id="dunTplSave" type="button">Opslaan</button>
+    </div>
   </div>
 </div>
 
@@ -881,7 +972,7 @@
         if (main)   main.hidden = true;
         if (locked) locked.hidden = false;
       } else {
-        // Sub-tab switcher wiring (PR B1 alleen view-toggle; CRUD in B2+).
+        // Sub-tab switcher wiring + lazy-load van templates op switch.
         const subs = ['overzicht','probleemklanten','workflows','templates','geschiedenis'];
         document.querySelectorAll('#dunningSubNav .sr-seg').forEach(b => b.addEventListener('click', () => {
           const target = b.dataset.dunningSub;
@@ -890,10 +981,183 @@
             const el = document.getElementById('dunningSub' + s.charAt(0).toUpperCase() + s.slice(1));
             if (el) el.hidden = (s !== target);
           }
+          if (target === 'templates' && !_dunTplLoadedOnce) {
+            _dunTplLoadedOnce = true;
+            loadDunTpls();
+          }
         }));
+        // Wire de modal-knoppen (één keer).
+        wireDunTplModal();
       }
     }
   }
+
+  // ─── Dunning Templates CRUD (PR B2) ────────────────────────────────────────
+  let _dunTplLoadedOnce = false;
+  let _dunTplItems = [];
+  let _dunTplEditingId = null;          // null = create-modus, anders update
+  let _dunTplWired = false;
+
+  async function loadDunTpls() {
+    const tb = document.getElementById('dunTplTbody');
+    if (!tb) return;
+    tb.innerHTML = '<tr><td colspan="5" style="text-align:center;padding:24px;color:var(--text-faint)">Laden…</td></tr>';
+    try {
+      const r = await window.AgentShared.apiFetch('/api/finance-dunning-templates-list');
+      const d = await r.json();
+      if (!r.ok) {
+        tb.innerHTML = '<tr><td colspan="5" style="text-align:center;padding:24px;color:#ef4444">Fout: ' + esc(d.error || ('HTTP ' + r.status)) + '</td></tr>';
+        return;
+      }
+      _dunTplItems = d.items || [];
+      if (!_dunTplItems.length) {
+        tb.innerHTML = '<tr><td colspan="5" style="text-align:center;padding:24px;color:var(--text-faint)">Nog geen templates. Klik op <strong>+ Nieuwe template</strong> om te beginnen.</td></tr>';
+        return;
+      }
+      tb.innerHTML = _dunTplItems.map((t, i) => {
+        const kindBadge = t.kind === 'email'
+          ? '<span class="sr-tag blue">E-mail</span>'
+          : '<span class="sr-tag green">WhatsApp</span>';
+        const activeBadge = t.is_active
+          ? '<span class="sr-tag green">Ja</span>'
+          : '<span class="sr-tag gray">Nee</span>';
+        return `<tr>
+          <td><div style="font-weight:600">${esc(t.name)}</div>${t.subject ? `<div style="font-size:11px;color:var(--text-faint);margin-top:2px">${esc(t.subject)}</div>` : ''}</td>
+          <td>${kindBadge}</td>
+          <td style="text-transform:uppercase;font-family:monospace;font-size:11.5px">${esc(t.language || 'nl')}</td>
+          <td>${activeBadge}</td>
+          <td>
+            <button class="sr-abtn" data-duntpl-edit="${i}" type="button" style="font-size:11px;padding:4px 8px"><i class="ti ti-edit"></i> Bewerk</button>
+            <button class="sr-abtn danger" data-duntpl-del="${i}" type="button" style="font-size:11px;padding:4px 8px"><i class="ti ti-trash"></i></button>
+          </td>
+        </tr>`;
+      }).join('');
+      tb.querySelectorAll('[data-duntpl-edit]').forEach(b => b.addEventListener('click', () => openDunTplModal(_dunTplItems[Number(b.dataset.duntplEdit)])));
+      tb.querySelectorAll('[data-duntpl-del]').forEach(b => b.addEventListener('click', () => deleteDunTpl(_dunTplItems[Number(b.dataset.duntplDel)])));
+    } catch (e) {
+      console.error('[dunning-templates]', e);
+      tb.innerHTML = '<tr><td colspan="5" style="text-align:center;padding:24px;color:#ef4444">Fout: ' + esc(e.message) + '</td></tr>';
+    }
+  }
+
+  function openDunTplModal(tpl) {
+    _dunTplEditingId = tpl?.id || null;
+    document.getElementById('dunTplModalTitle').textContent = tpl ? `Bewerk template — ${tpl.name}` : 'Nieuwe template';
+    document.getElementById('dunTplName').value      = tpl?.name || '';
+    document.getElementById('dunTplKind').value      = tpl?.kind || 'email';
+    document.getElementById('dunTplLang').value      = tpl?.language || 'nl';
+    document.getElementById('dunTplActive').checked  = tpl?.is_active !== false;
+    document.getElementById('dunTplSubject').value   = tpl?.subject || '';
+    document.getElementById('dunTplMetaName').value  = tpl?.meta_template_name || '';
+    document.getElementById('dunTplBody').value      = tpl?.body || '';
+    setDunTplKindVisibility();
+    const errEl = document.getElementById('dunTplError');
+    errEl.style.display = 'none'; errEl.textContent = '';
+    document.getElementById('dunTplModal').classList.remove('hidden');
+    setTimeout(() => document.getElementById('dunTplName').focus(), 50);
+  }
+  function closeDunTplModal() {
+    document.getElementById('dunTplModal').classList.add('hidden');
+    _dunTplEditingId = null;
+  }
+  function setDunTplKindVisibility() {
+    const kind = document.getElementById('dunTplKind').value;
+    document.getElementById('dunTplSubjectWrap').style.display  = (kind === 'email')    ? '' : 'none';
+    document.getElementById('dunTplMetaNameWrap').style.display = (kind === 'whatsapp') ? '' : 'none';
+  }
+  function insertDunTplVar(varText) {
+    const ta = document.getElementById('dunTplBody');
+    if (!ta) return;
+    const start = ta.selectionStart || 0;
+    const end   = ta.selectionEnd   || 0;
+    const before = ta.value.slice(0, start);
+    const after  = ta.value.slice(end);
+    ta.value = before + varText + after;
+    const cursor = start + varText.length;
+    ta.focus();
+    ta.setSelectionRange(cursor, cursor);
+  }
+  async function saveDunTpl() {
+    const errEl = document.getElementById('dunTplError');
+    errEl.style.display = 'none'; errEl.textContent = '';
+    const payload = {
+      name:               document.getElementById('dunTplName').value.trim(),
+      kind:               document.getElementById('dunTplKind').value,
+      language:           document.getElementById('dunTplLang').value,
+      is_active:          document.getElementById('dunTplActive').checked,
+      subject:            document.getElementById('dunTplSubject').value.trim() || null,
+      meta_template_name: document.getElementById('dunTplMetaName').value.trim() || null,
+      body:               document.getElementById('dunTplBody').value,
+    };
+    if (!payload.name)                            return showDunTplErr('Naam vereist');
+    if (!payload.body || !payload.body.trim())    return showDunTplErr('Bericht-inhoud vereist');
+    if (payload.kind === 'email' && !payload.subject) return showDunTplErr('Onderwerp vereist voor e-mail templates');
+
+    const btn = document.getElementById('dunTplSave');
+    const orig = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = '<i class="ti ti-loader-2" style="animation:spin 1s linear infinite"></i> Opslaan…';
+    try {
+      const url = '/api/finance-dunning-templates-upsert' + (_dunTplEditingId ? `?id=${_dunTplEditingId}` : '');
+      const r = await window.AgentShared.apiFetch(url, {
+        method: _dunTplEditingId ? 'PATCH' : 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) return showDunTplErr(d.error || ('HTTP ' + r.status));
+      window.AgentShared.showToast(_dunTplEditingId ? 'Template bijgewerkt' : 'Template aangemaakt', 'success');
+      closeDunTplModal();
+      loadDunTpls();
+    } catch (e) {
+      showDunTplErr(e.message);
+    } finally {
+      btn.disabled = false;
+      btn.innerHTML = orig;
+    }
+  }
+  function showDunTplErr(msg) {
+    const el = document.getElementById('dunTplError');
+    el.textContent = msg;
+    el.style.display = '';
+  }
+  async function deleteDunTpl(tpl) {
+    if (!tpl) return;
+    if (!confirm(`Verwijder template "${tpl.name}"? Dit kan niet ongedaan worden gemaakt.`)) return;
+    try {
+      const r = await window.AgentShared.apiFetch(`/api/finance-dunning-templates-delete?id=${tpl.id}`, { method: 'DELETE' });
+      const d = await r.json().catch(() => ({}));
+      if (r.status === 409) {
+        const refs = (d.used_by || []).map(u => `stap ${u.step_order} van workflow ${u.workflow_id.slice(0, 8)}…`).join('\n - ');
+        alert(`Template kan niet verwijderd worden:\n${d.error}\n\nGebruikt door:\n - ${refs || '(onbekend)'}`);
+        return;
+      }
+      if (!r.ok) {
+        window.AgentShared.showToast('Verwijderen mislukt: ' + (d.error || ('HTTP ' + r.status)), 'error');
+        return;
+      }
+      window.AgentShared.showToast('Template verwijderd', 'success');
+      loadDunTpls();
+    } catch (e) {
+      console.error('[dunTpl delete]', e);
+      window.AgentShared.showToast('Verwijderen mislukt: ' + e.message, 'error');
+    }
+  }
+  function wireDunTplModal() {
+    if (_dunTplWired) return;
+    _dunTplWired = true;
+    document.getElementById('dunTplNewBtn')?.addEventListener('click', () => openDunTplModal(null));
+    document.getElementById('dunTplClose')?.addEventListener('click', closeDunTplModal);
+    document.getElementById('dunTplCancel')?.addEventListener('click', closeDunTplModal);
+    document.getElementById('dunTplSave')?.addEventListener('click', saveDunTpl);
+    document.getElementById('dunTplKind')?.addEventListener('change', setDunTplKindVisibility);
+    document.querySelectorAll('#dunTplVarBadges [data-tplvar]').forEach(b => b.addEventListener('click', () => insertDunTplVar(b.dataset.tplvar)));
+    // Close on backdrop click + Escape:
+    document.getElementById('dunTplModal')?.addEventListener('click', (e) => {
+      if (e.target.id === 'dunTplModal') closeDunTplModal();
+    });
+  }
+
   async function loadInboxConfigStatus() {
     const el = document.getElementById('inboxConfigStatus');
     if (!el) return;
