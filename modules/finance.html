@@ -477,9 +477,77 @@
 
       <!-- Sub-view: Workflows -->
       <div id="dunningSubWorkflows" hidden>
-        <div style="background:rgba(255,255,255,0.02);border:1px solid var(--border-subtle, #e5e7eb);border-radius:12px;padding:22px 26px">
-          <h2 style="margin:0 0 8px;font-size:18px;font-weight:700">Workflows</h2>
-          <p style="margin:0;font-size:13px;color:var(--text-dim);line-height:1.55">Workflow-CRUD (definitie + steps + trigger_conditions). <strong>Komt in PR B3.</strong></p>
+        <div style="display:grid;grid-template-columns:320px 1fr;gap:18px;align-items:start">
+          <!-- Links: workflows-lijst -->
+          <div style="background:rgba(255,255,255,0.02);border:1px solid var(--border-subtle, #e5e7eb);border-radius:10px;padding:14px">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+              <div style="font-size:13px;font-weight:700">Workflows</div>
+              <button class="sr-abtn primary" id="dunWfNewBtn" type="button" style="font-size:11px;padding:4px 8px"><i class="ti ti-plus"></i> Nieuw</button>
+            </div>
+            <div id="dunWfList" style="display:flex;flex-direction:column;gap:6px;min-height:200px">
+              <div style="font-size:11.5px;color:var(--text-faint);text-align:center;padding:20px 0">Laden...</div>
+            </div>
+          </div>
+          <!-- Rechts: detail/editor -->
+          <div id="dunWfEditor" style="background:rgba(255,255,255,0.02);border:1px solid var(--border-subtle, #e5e7eb);border-radius:10px;padding:18px;min-height:400px">
+            <div id="dunWfEmpty" style="text-align:center;padding:60px 20px;color:var(--text-faint);font-size:13px">
+              Selecteer een workflow links of klik <strong>+ Nieuw</strong>.
+            </div>
+            <div id="dunWfForm" hidden>
+              <!-- Header: naam + toggles + verwijder -->
+              <div style="display:grid;grid-template-columns:1fr auto auto;gap:12px;align-items:center;margin-bottom:14px">
+                <input id="dunWfName" type="text" class="fin-input" maxlength="200" placeholder="Workflow-naam"/>
+                <label style="display:flex;align-items:center;gap:6px;font-size:12px">
+                  <input id="dunWfActive" type="checkbox" style="width:auto"/> Actief
+                </label>
+                <button class="sr-abtn danger" id="dunWfDeleteBtn" type="button" style="font-size:11px;padding:4px 10px" hidden><i class="ti ti-trash"></i> Verwijder</button>
+              </div>
+              <div style="display:grid;grid-template-columns:1fr 120px;gap:12px;margin-bottom:14px">
+                <textarea id="dunWfDescription" class="fin-input" rows="2" placeholder="Beschrijving (optioneel)" style="resize:vertical"></textarea>
+                <label style="font-size:11px;color:var(--text-dim)">
+                  Priority
+                  <input id="dunWfPriority" type="number" class="fin-input" min="0" max="1000" value="100"/>
+                  <div style="font-size:10px;color:var(--text-faint);margin-top:2px">Lager = eerder</div>
+                </label>
+              </div>
+              <!-- Trigger-condities -->
+              <div style="background:rgba(255,255,255,0.02);border:1px dashed var(--border-subtle, #e5e7eb);border-radius:8px;padding:12px;margin-bottom:14px">
+                <div style="font-size:12px;font-weight:600;margin-bottom:8px">Trigger-condities</div>
+                <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
+                  <label style="font-size:11px;color:var(--text-dim)">
+                    Min dagen overdue
+                    <input id="dunWfTrgMinDays" type="number" class="fin-input" min="0" value="14"/>
+                  </label>
+                  <label style="font-size:11px;color:var(--text-dim)">
+                    Klant-type
+                    <select id="dunWfTrgCustomerType" class="fin-input">
+                      <option value="any">Iedereen</option>
+                      <option value="b2c">B2C particulier</option>
+                      <option value="b2b">B2B bedrijf</option>
+                    </select>
+                  </label>
+                  <label style="font-size:11px;color:var(--text-dim)">
+                    Min openstaand bedrag (EUR)
+                    <input id="dunWfTrgMinAmount" type="number" class="fin-input" min="0" value="0"/>
+                  </label>
+                </div>
+              </div>
+              <!-- Stappen -->
+              <div style="margin-bottom:14px">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+                  <div style="font-size:12px;font-weight:600">Stappen</div>
+                  <button class="sr-abtn" id="dunWfAddStepBtn" type="button" style="font-size:11px;padding:4px 8px"><i class="ti ti-plus"></i> Stap toevoegen</button>
+                </div>
+                <div id="dunWfSteps" style="display:flex;flex-direction:column;gap:8px"></div>
+              </div>
+              <!-- Error + actions -->
+              <div id="dunWfError" style="display:none;margin-bottom:10px;padding:8px 12px;background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.3);border-radius:6px;color:#ef4444;font-size:12px"></div>
+              <div style="display:flex;gap:8px;justify-content:flex-end">
+                <button class="sr-abtn" id="dunWfCancel" type="button">Annuleer</button>
+                <button class="sr-abtn primary" id="dunWfSave" type="button">Opslaan</button>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -985,6 +1053,11 @@
             _dunTplLoadedOnce = true;
             loadDunTpls();
           }
+          if (target === 'workflows' && !_dunWfLoadedOnce) {
+            _dunWfLoadedOnce = true;
+            loadDunWfList();
+            wireDunWfEditor();
+          }
         }));
         // Wire de modal-knoppen (één keer).
         wireDunTplModal();
@@ -1156,6 +1229,374 @@
     document.getElementById('dunTplModal')?.addEventListener('click', (e) => {
       if (e.target.id === 'dunTplModal') closeDunTplModal();
     });
+  }
+
+  // ─── Dunning Workflows CRUD (PR B3) ────────────────────────────────────────
+  let _dunWfLoadedOnce = false;
+  let _dunWfList_items = [];
+  let _dunWfCurrent = null;            // { workflow, steps } — null = empty state
+  let _dunWfEditingId = null;
+  let _dunWfTemplatesCache = null;     // cache van /api/finance-dunning-templates-list
+  let _dunWfWired = false;
+
+  async function loadDunWfTemplatesCache() {
+    if (_dunWfTemplatesCache) return _dunWfTemplatesCache;
+    try {
+      const r = await window.AgentShared.apiFetch('/api/finance-dunning-templates-list');
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        console.error('[dunWf templates cache]', d.error || r.status);
+        _dunWfTemplatesCache = [];
+      } else {
+        _dunWfTemplatesCache = d.items || [];
+      }
+    } catch (e) {
+      console.error('[dunWf templates cache]', e.message);
+      _dunWfTemplatesCache = [];
+    }
+    return _dunWfTemplatesCache;
+  }
+
+  async function loadDunWfList() {
+    const listEl = document.getElementById('dunWfList');
+    if (!listEl) return;
+    listEl.innerHTML = '<div style="font-size:11.5px;color:var(--text-faint);text-align:center;padding:20px 0">Laden…</div>';
+    try {
+      // Templates cache parallel met workflows ophalen.
+      await loadDunWfTemplatesCache();
+      const r = await window.AgentShared.apiFetch('/api/finance-dunning-workflows-list');
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        listEl.innerHTML = '<div style="font-size:11.5px;color:#ef4444;padding:12px 4px">Fout: ' + esc(d.error || ('HTTP ' + r.status)) + '</div>';
+        return;
+      }
+      _dunWfList_items = d.items || [];
+      if (!_dunWfList_items.length) {
+        listEl.innerHTML = '<div style="font-size:11.5px;color:var(--text-faint);text-align:center;padding:20px 0">Nog geen workflows.<br>Klik <strong>+ Nieuw</strong>.</div>';
+        return;
+      }
+      listEl.innerHTML = _dunWfList_items.map((w, i) => {
+        const activeBadge = w.is_active
+          ? '<span class="sr-tag green" style="font-size:9.5px;padding:1px 5px">Actief</span>'
+          : '<span class="sr-tag gray" style="font-size:9.5px;padding:1px 5px">Uit</span>';
+        const stepBadge   = `<span class="sr-tag" style="font-size:9.5px;padding:1px 5px;background:rgba(255,255,255,.05)">${Number(w.step_count) || 0} stap${(Number(w.step_count) || 0) === 1 ? '' : 'pen'}</span>`;
+        const isCurrent   = _dunWfEditingId === w.id;
+        const bg          = isCurrent ? 'background:rgba(99,102,241,.12);border-color:rgba(99,102,241,.4)' : 'background:rgba(255,255,255,0.02)';
+        return `<button class="dunwf-list-item" data-dunwf-row="${i}" type="button" style="text-align:left;${bg};border:1px solid var(--border-subtle,#e5e7eb);border-radius:8px;padding:8px 10px;cursor:pointer;display:flex;flex-direction:column;gap:4px">
+          <div style="font-size:12px;font-weight:600;line-height:1.2">${esc(w.name)}</div>
+          <div style="display:flex;gap:4px;flex-wrap:wrap">${activeBadge}${stepBadge}</div>
+        </button>`;
+      }).join('');
+      listEl.querySelectorAll('[data-dunwf-row]').forEach(b => b.addEventListener('click', () => {
+        const idx = Number(b.dataset.dunwfRow);
+        const w = _dunWfList_items[idx];
+        if (w) loadDunWfDetail(w.id);
+      }));
+    } catch (e) {
+      console.error('[dunWf list]', e);
+      listEl.innerHTML = '<div style="font-size:11.5px;color:#ef4444;padding:12px 4px">Fout: ' + esc(e.message) + '</div>';
+    }
+  }
+
+  async function loadDunWfDetail(id) {
+    try {
+      const r = await window.AgentShared.apiFetch(`/api/finance-dunning-workflows-detail?id=${encodeURIComponent(id)}`);
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        window.AgentShared.showToast('Workflow laden mislukt: ' + (d.error || ('HTTP ' + r.status)), 'error');
+        return;
+      }
+      _dunWfCurrent  = { workflow: d.workflow, steps: d.steps || [] };
+      _dunWfEditingId = d.workflow.id;
+      showDunWfForm();
+      fillDunWfForm(d.workflow, d.steps || []);
+      // Re-render lijst om actieve highlight te updaten.
+      loadDunWfList();
+    } catch (e) {
+      console.error('[dunWf detail]', e);
+      window.AgentShared.showToast('Workflow laden mislukt: ' + e.message, 'error');
+    }
+  }
+
+  function showDunWfEmptyState() {
+    document.getElementById('dunWfEmpty').hidden = false;
+    document.getElementById('dunWfForm').hidden  = true;
+    _dunWfEditingId = null;
+    _dunWfCurrent   = null;
+  }
+  function showDunWfForm() {
+    document.getElementById('dunWfEmpty').hidden = true;
+    document.getElementById('dunWfForm').hidden  = false;
+  }
+
+  function fillDunWfForm(workflow, steps) {
+    document.getElementById('dunWfName').value        = workflow?.name || '';
+    document.getElementById('dunWfActive').checked    = workflow?.is_active === true;
+    document.getElementById('dunWfDescription').value = workflow?.description || '';
+    document.getElementById('dunWfPriority').value    = (workflow?.priority != null) ? workflow.priority : 100;
+    const tc = workflow?.trigger_conditions || {};
+    document.getElementById('dunWfTrgMinDays').value      = (tc.min_days_overdue != null) ? tc.min_days_overdue : 14;
+    document.getElementById('dunWfTrgCustomerType').value = tc.customer_type || 'any';
+    document.getElementById('dunWfTrgMinAmount').value    = (tc.min_amount != null) ? tc.min_amount : 0;
+    const delBtn = document.getElementById('dunWfDeleteBtn');
+    if (delBtn) delBtn.hidden = !workflow?.id;
+    const errEl = document.getElementById('dunWfError');
+    errEl.style.display = 'none'; errEl.textContent = '';
+    renderDunWfSteps(Array.isArray(steps) ? steps : []);
+  }
+
+  function openDunWfNew() {
+    _dunWfEditingId = null;
+    _dunWfCurrent   = { workflow: null, steps: [] };
+    showDunWfForm();
+    fillDunWfForm(null, []);
+    setTimeout(() => document.getElementById('dunWfName')?.focus(), 50);
+    // Highlight reset in lijst.
+    loadDunWfList();
+  }
+
+  function renderDunWfSteps(steps) {
+    const wrap = document.getElementById('dunWfSteps');
+    if (!wrap) return;
+    if (!steps.length) {
+      wrap.innerHTML = '<div style="font-size:11.5px;color:var(--text-faint);text-align:center;padding:18px 0;border:1px dashed var(--border-subtle,#e5e7eb);border-radius:8px">Nog geen stappen. Klik <strong>+ Stap toevoegen</strong>.</div>';
+      return;
+    }
+    const templates = _dunWfTemplatesCache || [];
+    wrap.innerHTML = steps.map((s, idx) => {
+      const type = s.step_type || 'wait';
+      const cfg  = s.config || {};
+      const tplOptions = (kind) => {
+        const opts = templates.filter(t => t.kind === kind && t.is_active !== false)
+          .map(t => `<option value="${esc(t.id)}" ${cfg.template_id === t.id ? 'selected' : ''}>${esc(t.name)}</option>`)
+          .join('');
+        return `<option value="">— kies template —</option>${opts}`;
+      };
+      let cfgHtml = '';
+      if (type === 'email') {
+        cfgHtml = `<label style="font-size:11px;color:var(--text-dim);grid-column:1/-1">
+          E-mail template
+          <select class="fin-input" data-stepfield="template_id">${tplOptions('email')}</select>
+        </label>`;
+      } else if (type === 'whatsapp') {
+        cfgHtml = `<label style="font-size:11px;color:var(--text-dim);grid-column:1/-1">
+          WhatsApp template
+          <select class="fin-input" data-stepfield="template_id">${tplOptions('whatsapp')}</select>
+        </label>`;
+      } else if (type === 'wait') {
+        cfgHtml = `<label style="font-size:11px;color:var(--text-dim)">
+          Dagen wachten
+          <input type="number" class="fin-input" data-stepfield="days" min="0" value="${Number(cfg.days) || 0}"/>
+        </label>`;
+      } else if (type === 'task') {
+        cfgHtml = `<label style="font-size:11px;color:var(--text-dim);grid-column:1/-1">
+            Titel
+            <input type="text" class="fin-input" data-stepfield="title" maxlength="200" value="${esc(cfg.title || '')}"/>
+          </label>
+          <label style="font-size:11px;color:var(--text-dim);grid-column:1/-1">
+            Beschrijving
+            <textarea class="fin-input" data-stepfield="description" rows="2" style="resize:vertical">${esc(cfg.description || '')}</textarea>
+          </label>
+          <label style="font-size:11px;color:var(--text-faint);grid-column:1/-1">
+            Toegewezen aan: <em>(koppelen met gebruikers komt in PR B4)</em>
+            <input type="text" class="fin-input" disabled placeholder="Nog niet beschikbaar" value=""/>
+          </label>`;
+      } else if (type === 'stop') {
+        cfgHtml = `<div style="font-size:11px;color:var(--text-faint);grid-column:1/-1;padding:6px 0">Geen config nodig — workflow stopt hier.</div>`;
+      }
+      return `<div data-step-idx="${idx}" style="border:1px solid var(--border-subtle,#e5e7eb);border-radius:8px;padding:10px;background:rgba(255,255,255,0.015)">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;gap:8px">
+          <div style="display:flex;align-items:center;gap:8px">
+            <span style="font-size:11px;font-weight:700;background:rgba(99,102,241,.15);color:#a5b4fc;padding:2px 7px;border-radius:10px">Stap ${idx + 1}</span>
+            <select class="fin-input" data-stepfield="step_type" style="font-size:12px;padding:4px 6px;width:auto">
+              <option value="email"    ${type === 'email'    ? 'selected' : ''}>E-mail</option>
+              <option value="whatsapp" ${type === 'whatsapp' ? 'selected' : ''}>WhatsApp</option>
+              <option value="wait"     ${type === 'wait'     ? 'selected' : ''}>Wachten</option>
+              <option value="task"     ${type === 'task'     ? 'selected' : ''}>Taak</option>
+              <option value="stop"     ${type === 'stop'     ? 'selected' : ''}>Stop</option>
+            </select>
+          </div>
+          <div style="display:flex;gap:4px">
+            <button class="sr-ibtn" type="button" data-step-up="${idx}"   ${idx === 0 ? 'disabled' : ''} title="Omhoog"><i class="ti ti-arrow-up"></i></button>
+            <button class="sr-ibtn" type="button" data-step-down="${idx}" ${idx === steps.length - 1 ? 'disabled' : ''} title="Omlaag"><i class="ti ti-arrow-down"></i></button>
+            <button class="sr-ibtn" type="button" data-step-del="${idx}"  title="Verwijder"><i class="ti ti-trash"></i></button>
+          </div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">${cfgHtml}</div>
+      </div>`;
+    }).join('');
+    // Bind step-type change → re-render zodat cfg-UI mee verandert (huidige DOM-waarden collecten).
+    wrap.querySelectorAll('[data-step-idx]').forEach(row => {
+      const idx = Number(row.dataset.stepIdx);
+      row.querySelector('[data-stepfield="step_type"]')?.addEventListener('change', (e) => {
+        const cur = collectDunWfStepsFromDom();
+        const next = e.target.value;
+        if (cur[idx]) {
+          cur[idx].step_type = next;
+          // Reset config bij type-switch met sensible defaults.
+          if (next === 'wait') cur[idx].config = { days: 7 };
+          else if (next === 'task') cur[idx].config = { title: '', description: '' };
+          else if (next === 'email' || next === 'whatsapp') cur[idx].config = { template_id: '' };
+          else cur[idx].config = {};
+        }
+        renderDunWfSteps(cur);
+      });
+    });
+    wrap.querySelectorAll('[data-step-up]').forEach(b => b.addEventListener('click', () => moveDunWfStep(Number(b.dataset.stepUp), -1)));
+    wrap.querySelectorAll('[data-step-down]').forEach(b => b.addEventListener('click', () => moveDunWfStep(Number(b.dataset.stepDown), +1)));
+    wrap.querySelectorAll('[data-step-del]').forEach(b => b.addEventListener('click', () => deleteDunWfStep(Number(b.dataset.stepDel))));
+  }
+
+  function moveDunWfStep(idx, dir) {
+    const cur = collectDunWfStepsFromDom();
+    const target = idx + dir;
+    if (target < 0 || target >= cur.length) return;
+    const tmp = cur[idx]; cur[idx] = cur[target]; cur[target] = tmp;
+    renderDunWfSteps(cur);
+  }
+  function deleteDunWfStep(idx) {
+    const cur = collectDunWfStepsFromDom();
+    cur.splice(idx, 1);
+    renderDunWfSteps(cur);
+  }
+  function addDunWfStep() {
+    const cur = collectDunWfStepsFromDom();
+    cur.push({ step_order: cur.length, step_type: 'wait', config: { days: 7 } });
+    renderDunWfSteps(cur);
+  }
+
+  function collectDunWfStepsFromDom() {
+    const rows = Array.from(document.querySelectorAll('#dunWfSteps [data-step-idx]'));
+    return rows.map((row, i) => {
+      const typeSel = row.querySelector('[data-stepfield="step_type"]');
+      const type    = typeSel ? typeSel.value : 'wait';
+      const cfg     = {};
+      if (type === 'email' || type === 'whatsapp') {
+        const v = row.querySelector('[data-stepfield="template_id"]')?.value || '';
+        if (v) cfg.template_id = v;
+      } else if (type === 'wait') {
+        const v = row.querySelector('[data-stepfield="days"]')?.value;
+        cfg.days = Number.isFinite(Number(v)) ? Number(v) : 0;
+      } else if (type === 'task') {
+        const t = row.querySelector('[data-stepfield="title"]')?.value || '';
+        const d = row.querySelector('[data-stepfield="description"]')?.value || '';
+        cfg.title = t.trim();
+        if (d.trim()) cfg.description = d.trim();
+      }
+      return { step_order: i, step_type: type, config: cfg };
+    });
+  }
+
+  async function saveDunWf() {
+    const errEl = document.getElementById('dunWfError');
+    errEl.style.display = 'none'; errEl.textContent = '';
+
+    const name        = (document.getElementById('dunWfName').value || '').trim();
+    const description = (document.getElementById('dunWfDescription').value || '').trim();
+    const isActive    = document.getElementById('dunWfActive').checked;
+    const priority    = Number(document.getElementById('dunWfPriority').value);
+    const minDays     = Number(document.getElementById('dunWfTrgMinDays').value);
+    const custType    = document.getElementById('dunWfTrgCustomerType').value || 'any';
+    const minAmount   = Number(document.getElementById('dunWfTrgMinAmount').value);
+    const steps       = collectDunWfStepsFromDom();
+
+    if (!name) return showDunWfErr('Naam vereist');
+    if (!Number.isInteger(priority)) return showDunWfErr('Priority moet integer zijn');
+
+    const trigger_conditions = {};
+    if (Number.isFinite(minDays)   && minDays   >= 0) trigger_conditions.min_days_overdue = minDays;
+    if (custType && custType !== 'any')               trigger_conditions.customer_type   = custType;
+    if (Number.isFinite(minAmount) && minAmount > 0)  trigger_conditions.min_amount      = minAmount;
+
+    const payload = {
+      workflow: { name, description: description || null, is_active: isActive, priority, trigger_conditions },
+      steps,
+    };
+
+    const btn = document.getElementById('dunWfSave');
+    const orig = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = '<i class="ti ti-loader-2" style="animation:spin 1s linear infinite"></i> Opslaan…';
+    try {
+      const url = '/api/finance-dunning-workflows-upsert' + (_dunWfEditingId ? `?id=${encodeURIComponent(_dunWfEditingId)}` : '');
+      const r = await window.AgentShared.apiFetch(url, {
+        method: _dunWfEditingId ? 'PATCH' : 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) return showDunWfErr(d.error || ('HTTP ' + r.status));
+      window.AgentShared.showToast(_dunWfEditingId ? 'Workflow bijgewerkt' : 'Workflow aangemaakt', 'success');
+      const newId = d.workflow?.id || _dunWfEditingId;
+      await loadDunWfList();
+      if (newId) await loadDunWfDetail(newId);
+    } catch (e) {
+      showDunWfErr(e.message);
+    } finally {
+      btn.disabled = false;
+      btn.innerHTML = orig;
+    }
+  }
+
+  async function deleteDunWf() {
+    if (!_dunWfEditingId) return;
+    const cur = _dunWfList_items.find(w => w.id === _dunWfEditingId);
+    const naam = cur?.name || 'deze workflow';
+    if (!confirm(`Verwijder workflow "${naam}"? Stappen worden meegenomen, afgeronde runs worden opgeruimd.`)) return;
+    try {
+      const r = await window.AgentShared.apiFetch(`/api/finance-dunning-workflows-delete?id=${encodeURIComponent(_dunWfEditingId)}`, { method: 'DELETE' });
+      const d = await r.json().catch(() => ({}));
+      if (r.status === 409) {
+        alert(`Workflow kan niet verwijderd worden:\n${d.error || ''}\n\nActieve runs: ${d.active_run_count ?? '?'}`);
+        return;
+      }
+      if (!r.ok) {
+        window.AgentShared.showToast('Verwijderen mislukt: ' + (d.error || ('HTTP ' + r.status)), 'error');
+        return;
+      }
+      window.AgentShared.showToast('Workflow verwijderd', 'success');
+      showDunWfEmptyState();
+      loadDunWfList();
+    } catch (e) {
+      console.error('[dunWf delete]', e);
+      window.AgentShared.showToast('Verwijderen mislukt: ' + e.message, 'error');
+    }
+  }
+
+  async function toggleDunWfActive(id, val) {
+    try {
+      const r = await window.AgentShared.apiFetch(`/api/finance-dunning-workflows-toggle?id=${encodeURIComponent(id)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ is_active: !!val }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        window.AgentShared.showToast('Toggle mislukt: ' + (d.error || ('HTTP ' + r.status)), 'error');
+        return;
+      }
+      window.AgentShared.showToast(val ? 'Workflow geactiveerd' : 'Workflow gepauzeerd', 'success');
+      loadDunWfList();
+    } catch (e) {
+      console.error('[dunWf toggle]', e);
+      window.AgentShared.showToast('Toggle mislukt: ' + e.message, 'error');
+    }
+  }
+
+  function showDunWfErr(msg) {
+    const el = document.getElementById('dunWfError');
+    el.textContent = msg;
+    el.style.display = '';
+  }
+
+  function wireDunWfEditor() {
+    if (_dunWfWired) return;
+    _dunWfWired = true;
+    document.getElementById('dunWfNewBtn')?.addEventListener('click', openDunWfNew);
+    document.getElementById('dunWfDeleteBtn')?.addEventListener('click', deleteDunWf);
+    document.getElementById('dunWfAddStepBtn')?.addEventListener('click', addDunWfStep);
+    document.getElementById('dunWfSave')?.addEventListener('click', saveDunWf);
+    document.getElementById('dunWfCancel')?.addEventListener('click', showDunWfEmptyState);
   }
 
   async function loadInboxConfigStatus() {
