@@ -123,6 +123,7 @@
       <button class="admin-tab" data-tab="rechten" id="rechtenTabBtn" onclick="switchAdminTab('rechten')" style="display:none">Rechten</button>
       <button class="admin-tab" data-tab="integraties" onclick="switchAdminTab('integraties')">Integraties</button>
       <button class="admin-tab" data-tab="whatsapp-connection" id="waConnTabBtn" onclick="switchAdminTab('whatsapp-connection')" style="display:none">WhatsApp Connection</button>
+      <button class="admin-tab" data-tab="whatsapp-templates" data-view="whatsapp-templates" id="waTplTabBtn" onclick="switchAdminTab('whatsapp-templates')" style="display:none">WhatsApp Templates</button>
     </div>
 
     <div id="tab-gebruikers" class="admin-tab-panel">
@@ -261,6 +262,97 @@
       </div>
     </div>
 
+    <!-- ── WhatsApp Templates (Meta-templates + Quick replies) ───────────────── -->
+    <div id="tab-whatsapp-templates" class="admin-tab-panel" style="display:none">
+      <div id="view-whatsapp-templates" hidden>
+        <div class="section-card">
+          <div class="section-header" style="justify-content:space-between">
+            <div>
+              <div style="font-size:15px;font-weight:700">WhatsApp Templates</div>
+              <div style="font-size:12px;color:var(--text-faint);font-weight:400;margin-top:4px;max-width:720px">
+                Beheer Meta-goedgekeurde message templates (vereist voor 24u+ outbound)
+                &eacute;n interne &laquo;snelle antwoorden&raquo; (free-form, binnen 24u-window).
+                Selecteer eerst de WhatsApp Business Account.
+              </div>
+            </div>
+            <div style="display:flex;gap:8px">
+              <button class="btn btn-sm" id="waTplReloadBtn" title="Lijst opnieuw laden"><i class="ti ti-refresh"></i></button>
+            </div>
+          </div>
+
+          <!-- WABA-selector strip -->
+          <div style="display:flex;align-items:center;gap:10px;padding:8px 4px 14px 4px;flex-wrap:wrap">
+            <label for="waTplWabaSelect" style="font-size:12.5px;color:var(--text-dim);font-weight:600">WABA</label>
+            <select id="waTplWabaSelect" class="form-input" style="max-width:340px">
+              <option value="">Laden&hellip;</option>
+            </select>
+            <button class="btn btn-sm" id="waTplWabaRefreshBtn" title="WABA-lijst opnieuw laden"><i class="ti ti-refresh"></i></button>
+            <span id="waTplWabaHint" style="font-size:11px;color:var(--text-faint)"></span>
+          </div>
+
+          <!-- Sub-tab strip -->
+          <div class="sr-segments" id="waTplSubTabs" role="tablist" style="display:inline-flex;gap:4px;border:1px solid var(--border);border-radius:8px;padding:3px;margin-bottom:14px">
+            <button type="button" class="sr-segment active" data-wa-tpl-sub="meta" role="tab" aria-selected="true">Meta Templates</button>
+            <button type="button" class="sr-segment" data-wa-tpl-sub="quick" role="tab" aria-selected="false">Snelle antwoorden</button>
+          </div>
+
+          <!-- META TEMPLATES sub-view -->
+          <div id="waTplSubMeta">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;gap:8px;flex-wrap:wrap">
+              <div>
+                <div style="font-size:14px;font-weight:700">Meta Templates</div>
+                <div style="font-size:11.5px;color:var(--text-faint)">Server-side goedgekeurd door Meta. Status: APPROVED / PENDING / REJECTED.</div>
+              </div>
+              <button class="btn btn-sm btn-primary" id="waMetaNewBtn"><i class="ti ti-plus"></i> Nieuwe template</button>
+            </div>
+            <div style="overflow-x:auto">
+              <table class="users-table" id="waMetaTable">
+                <thead>
+                  <tr>
+                    <th>Naam</th>
+                    <th>Taal</th>
+                    <th>Categorie</th>
+                    <th>Status</th>
+                    <th>Acties</th>
+                  </tr>
+                </thead>
+                <tbody id="waMetaTbody">
+                  <tr><td colspan="5" style="color:var(--text-faint);padding:20px">Laden&hellip;</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- QUICK REPLIES sub-view -->
+          <div id="waTplSubQuick" hidden>
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;gap:8px;flex-wrap:wrap">
+              <div>
+                <div style="font-size:14px;font-weight:700">Snelle antwoorden</div>
+                <div style="font-size:11.5px;color:var(--text-faint)">Interne shortcuts voor agents binnen het 24-uurs antwoordvenster. Geen Meta-approval nodig.</div>
+              </div>
+              <button class="btn btn-sm btn-primary" id="waQrNewBtn"><i class="ti ti-plus"></i> Nieuwe snel antwoord</button>
+            </div>
+            <div style="overflow-x:auto">
+              <table class="users-table" id="waQrTable">
+                <thead>
+                  <tr>
+                    <th>Titel</th>
+                    <th>Body preview</th>
+                    <th>Sort</th>
+                    <th>Actief</th>
+                    <th>Acties</th>
+                  </tr>
+                </thead>
+                <tbody id="waQrTbody">
+                  <tr><td colspan="5" style="color:var(--text-faint);padding:20px">Laden&hellip;</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
   </div>
 </div>
 
@@ -297,6 +389,168 @@
     <div class="modal-footer">
       <button class="btn" onclick="closeWaConfEdit()">Annuleren</button>
       <button class="btn btn-primary" id="waConfSaveBtn" onclick="saveWaConfRow()">Opslaan</button>
+    </div>
+  </div>
+</div>
+
+<!-- WhatsApp Meta Template full editor modal -->
+<div class="modal-overlay hidden" id="waMetaEditModal">
+  <div class="modal-card" style="max-width:1100px;width:96vw">
+    <div class="modal-header">
+      <div class="modal-title" id="waMetaModalTitle">Nieuwe Meta template</div>
+      <button class="modal-close" onclick="closeWaMetaEdit()">&#x2715;</button>
+    </div>
+    <div class="modal-body">
+      <div style="display:grid;grid-template-columns:1fr 380px;gap:20px;align-items:start">
+
+        <!-- LINKS: form -->
+        <div>
+          <div class="form-group">
+            <label class="form-label" for="waMetaNameInput">Naam</label>
+            <input type="text" id="waMetaNameInput" class="form-input" placeholder="bv. order_confirmation_v1" maxlength="512" />
+            <div style="font-size:11px;color:var(--text-faint);margin-top:4px">lowercase_snake_case, alleen a-z 0-9 _</div>
+          </div>
+
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+            <div class="form-group">
+              <label class="form-label" for="waMetaLangSelect">Taal</label>
+              <select id="waMetaLangSelect" class="form-input">
+                <option value="nl">Nederlands (nl)</option>
+                <option value="en_US">English US (en_US)</option>
+                <option value="en">English (en)</option>
+                <option value="de">Deutsch (de)</option>
+                <option value="fr">Fran&ccedil;ais (fr)</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="waMetaCatSelect">Categorie</label>
+              <select id="waMetaCatSelect" class="form-input">
+                <option value="UTILITY">UTILITY</option>
+                <option value="MARKETING">MARKETING</option>
+                <option value="AUTHENTICATION">AUTHENTICATION</option>
+              </select>
+            </div>
+          </div>
+
+          <!-- HEADER -->
+          <details class="form-group" id="waMetaHeaderDetails" style="border:1px solid var(--border);border-radius:8px;padding:10px 12px">
+            <summary style="cursor:pointer;font-weight:600;font-size:13px">Header</summary>
+            <div style="margin-top:10px">
+              <div class="form-group">
+                <label class="form-label" for="waMetaHeaderType">Type</label>
+                <select id="waMetaHeaderType" class="form-input">
+                  <option value="NONE">Geen</option>
+                  <option value="TEXT">Tekst</option>
+                  <option value="IMAGE">Afbeelding</option>
+                  <option value="VIDEO">Video</option>
+                  <option value="DOCUMENT">Document</option>
+                </select>
+              </div>
+              <div class="form-group" id="waMetaHeaderTextGroup" hidden>
+                <label class="form-label" for="waMetaHeaderText">Header tekst</label>
+                <input type="text" id="waMetaHeaderText" class="form-input" maxlength="60" placeholder="Max 60 tekens" />
+                <div style="font-size:11px;color:var(--text-faint);margin-top:4px"><span id="waMetaHeaderTextCount">0</span> / 60</div>
+              </div>
+              <div class="form-group" id="waMetaHeaderUrlGroup" hidden>
+                <label class="form-label" for="waMetaHeaderUrl">Voorbeeld URL</label>
+                <input type="url" id="waMetaHeaderUrl" class="form-input" placeholder="https://&hellip;" />
+                <div style="font-size:11px;color:var(--text-faint);margin-top:4px">Wordt door Meta gebruikt als sample voor approval.</div>
+              </div>
+            </div>
+          </details>
+
+          <!-- BODY -->
+          <div class="form-group">
+            <label class="form-label" for="waMetaBodyText">Body</label>
+            <textarea id="waMetaBodyText" class="form-input" rows="6" maxlength="1024" placeholder="Hi {{1}}, je bestelling {{2}} is bevestigd."></textarea>
+            <div style="font-size:11px;color:var(--text-faint);margin-top:4px">
+              <span id="waMetaBodyCount">0</span> / 1024 &middot; gebruik <code>{{1}}</code>, <code>{{2}}</code> &hellip; voor placeholders.
+            </div>
+            <div id="waMetaVarsBlock" style="margin-top:10px;padding:10px;border:1px dashed var(--border);border-radius:8px;display:none">
+              <div style="font-size:12px;font-weight:600;margin-bottom:6px">Variabelen gevonden: <span id="waMetaVarsList"></span></div>
+              <div id="waMetaVarsInputs" style="display:grid;grid-template-columns:1fr 1fr;gap:8px"></div>
+              <div style="font-size:11px;color:var(--text-faint);margin-top:6px">Voorbeeldwaarden &mdash; gebruikt voor preview &eacute;n als Meta sample bij submit.</div>
+            </div>
+          </div>
+
+          <!-- FOOTER -->
+          <details class="form-group" id="waMetaFooterDetails" style="border:1px solid var(--border);border-radius:8px;padding:10px 12px">
+            <summary style="cursor:pointer;font-weight:600;font-size:13px">Footer</summary>
+            <div style="margin-top:10px">
+              <label class="form-label" for="waMetaFooterInput">Footer tekst</label>
+              <input type="text" id="waMetaFooterInput" class="form-input" maxlength="60" placeholder="bv. De Forex Opleiding" />
+              <div style="font-size:11px;color:var(--text-faint);margin-top:4px"><span id="waMetaFooterCount">0</span> / 60</div>
+            </div>
+          </details>
+
+          <!-- BUTTONS -->
+          <details class="form-group" id="waMetaButtonsDetails" style="border:1px solid var(--border);border-radius:8px;padding:10px 12px">
+            <summary style="cursor:pointer;font-weight:600;font-size:13px">Knoppen (max 3)</summary>
+            <div style="margin-top:10px">
+              <div id="waMetaButtonsList" style="display:flex;flex-direction:column;gap:8px"></div>
+              <button type="button" class="btn btn-sm" id="waMetaBtnAddBtn" style="margin-top:8px"><i class="ti ti-plus"></i> Knop toevoegen</button>
+            </div>
+          </details>
+        </div>
+
+        <!-- RECHTS: preview -->
+        <div>
+          <div id="waMetaPreviewCard" style="position:sticky;top:10px;border:1px solid var(--border);border-radius:10px;padding:14px;background:var(--bg-soft, #f7f7f5)">
+            <div style="font-size:11px;color:var(--text-faint);font-weight:600;margin-bottom:8px;text-transform:uppercase;letter-spacing:.5px">Preview</div>
+            <div id="waMetaPreviewWallpaper" style="background:#e5ddd5;background-image:repeating-linear-gradient(45deg, rgba(255,255,255,0.04) 0 2px, transparent 2px 6px);border-radius:8px;padding:14px;min-height:220px">
+              <div id="waMetaPreviewBubble" style="background:#d9fdd3;border-radius:8px;padding:10px 14px;max-width:280px;box-shadow:0 1px 1px rgba(0,0,0,0.08);font-size:13.5px;line-height:1.45;color:#111">
+                <div id="waMetaPreviewHeader" style="font-weight:700;margin-bottom:6px;display:none"></div>
+                <div id="waMetaPreviewBody" style="white-space:pre-wrap;word-break:break-word">Je bericht verschijnt hier&hellip;</div>
+                <div id="waMetaPreviewFooter" style="font-size:11px;color:#667781;margin-top:6px;display:none"></div>
+              </div>
+              <div id="waMetaPreviewButtons" style="margin-top:8px;display:flex;flex-direction:column;gap:4px;max-width:280px"></div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+      <div class="form-error hidden" id="waMetaError" style="margin-top:12px"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn" onclick="closeWaMetaEdit()">Annuleren</button>
+      <button class="btn btn-primary" id="waMetaSaveBtn" onclick="saveWaMetaTemplate()">Opslaan</button>
+    </div>
+  </div>
+</div>
+
+<!-- WhatsApp Quick Reply edit modal -->
+<div class="modal-overlay hidden" id="waQrEditModal">
+  <div class="modal-card" style="max-width:560px">
+    <div class="modal-header">
+      <div class="modal-title" id="waQrModalTitle">Nieuwe snel antwoord</div>
+      <button class="modal-close" onclick="closeWaQrEdit()">&#x2715;</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-group">
+        <label class="form-label" for="waQrTitleInput">Titel</label>
+        <input type="text" id="waQrTitleInput" class="form-input" maxlength="100" placeholder="bv. Bedankt voor je bericht" />
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="waQrBodyInput">Body</label>
+        <textarea id="waQrBodyInput" class="form-input" rows="5" maxlength="1024" placeholder="Tekst die ingevoegd wordt in het antwoordveld&hellip;"></textarea>
+        <div style="font-size:11px;color:var(--text-faint);margin-top:4px"><span id="waQrBodyCount">0</span> / 1024</div>
+      </div>
+      <div style="display:grid;grid-template-columns:140px 1fr;gap:14px;align-items:center">
+        <div class="form-group" style="margin-bottom:0">
+          <label class="form-label" for="waQrSortInput">Sorteervolgorde</label>
+          <input type="number" id="waQrSortInput" class="form-input" value="0" step="1" />
+        </div>
+        <div class="form-group" style="display:flex;align-items:center;gap:8px;margin-bottom:0">
+          <input type="checkbox" id="waQrActiveInput" checked style="width:16px;height:16px" />
+          <label for="waQrActiveInput" style="font-size:13px;cursor:pointer">Actief (zichtbaar voor agents)</label>
+        </div>
+      </div>
+      <div class="form-error hidden" id="waQrError" style="margin-top:12px"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn" onclick="closeWaQrEdit()">Annuleren</button>
+      <button class="btn btn-primary" id="waQrSaveBtn" onclick="saveWaQuickReply()">Opslaan</button>
     </div>
   </div>
 </div>
@@ -567,6 +821,7 @@ const FEATURE_REGISTRY = [
     { key:'admin.permissions.edit', label:'Rechten matrix bewerken (super only)' },
     { key:'admin.integrations.manage', label:"Integraties beheren (Teamleader-koppeling, etc.)" },
     { key:'admin.whatsapp_config', label:'WhatsApp Module Connections beheer' },
+    { key:'admin.whatsapp_templates', label:'WhatsApp Templates beheer' },
   ]},
   { moduleKey:'tickets', moduleLabel:'Tickets', moduleIcon:'ti-ticket', features:[
     { key:'tickets.module.access', label:'Module zichtbaar' },
@@ -606,11 +861,23 @@ function switchAdminTab(name) {
   document.getElementById('tab-integraties').style.display         = name === 'integraties'         ? '' : 'none';
   const waConnPanel = document.getElementById('tab-whatsapp-connection');
   if (waConnPanel) waConnPanel.style.display = name === 'whatsapp-connection' ? '' : 'none';
+  const waTplPanel = document.getElementById('tab-whatsapp-templates');
+  if (waTplPanel) waTplPanel.style.display = name === 'whatsapp-templates' ? '' : 'none';
+  const waTplView = document.getElementById('view-whatsapp-templates');
+  if (waTplView) waTplView.hidden = name !== 'whatsapp-templates';
   const inviteBtn = document.querySelector('.page-header .btn-primary');
   if (inviteBtn) inviteBtn.style.display = name === 'gebruikers' ? '' : 'none';
   if (name === 'rechten' && !rbacLoaded) loadPermissionsMatrix();
   if (name === 'integraties') { loadTlStatus(); loadWebhooks(); loadTemplateSetting(); }
   if (name === 'whatsapp-connection') { wireWaConfOnce(); loadWaConfList(); }
+  if (name === 'whatsapp-templates') {
+    if (typeof wireWaTplOnce === 'function') wireWaTplOnce();
+    if (typeof loadWaTplWabas === 'function') {
+      // Lazy-load: WABA-lijst eerst, daarna meta-templates list voor de actieve WABA.
+      // loadWaTplWabas() roept zelf loadWaMetaList() aan zodra een WABA actief is.
+      loadWaTplWabas();
+    }
+  }
 }
 
 async function loadPermissionsMatrix() {
@@ -770,6 +1037,18 @@ async function init() {
     if (allowWaConn) {
       const wb = document.getElementById('waConnTabBtn');
       if (wb) wb.style.display = '';
+    }
+  } catch (_) { /* RBAC niet geladen — tab blijft verborgen */ }
+
+  // WhatsApp Templates tab: super_admin OF can(admin.whatsapp_templates)
+  try {
+    let allowWaTpl = currentProfile.role === 'super_admin';
+    if (!allowWaTpl && window.RBAC && typeof window.RBAC.can === 'function') {
+      allowWaTpl = await window.RBAC.can('admin.whatsapp_templates');
+    }
+    if (allowWaTpl) {
+      const tb = document.getElementById('waTplTabBtn');
+      if (tb) tb.style.display = '';
     }
   } catch (_) { /* RBAC niet geladen — tab blijft verborgen */ }
 
@@ -1269,7 +1548,12 @@ async function submitInvite() {
 
 // Sluit modal bij ESC
 document.addEventListener('keydown', e => {
-  if (e.key === 'Escape') { closeInviteModal(); closeWaConfEdit(); }
+  if (e.key === 'Escape') {
+    closeInviteModal();
+    closeWaConfEdit();
+    if (typeof closeWaMetaEdit === 'function') closeWaMetaEdit();
+    if (typeof closeWaQrEdit === 'function') closeWaQrEdit();
+  }
 });
 
 // ── WhatsApp Module Connections ─────────────────────────────────────────────
@@ -1459,6 +1743,797 @@ function wireWaConfOnce() {
       if (item) openWaConfEdit(item);
     });
   }
+}
+
+// ── WhatsApp Templates (Meta + Quick Replies) ───────────────────────────────
+// State + UI-wiring voor de WhatsApp Templates sub-tab. WABA-aware: alle list-
+// en upsert-calls scope op _waTplActiveWaba (business_account_id). Sub-tabs
+// (meta vs quick) lazy-load bij eerste switch om onnodige requests te vermijden.
+let _waTplLoadedOnce  = false;
+let _waTplActiveSub   = 'meta';
+let _waTplWired       = false;
+let _waTplWabas       = [];
+let _waTplActiveWaba  = null;
+
+let _waMetaItems      = [];
+let _waMetaEditingId  = null;
+// Buttons-draft: array van { type, text, url?, phone_number? } die de UI muteert
+// terwijl de modal openstaat. Wordt pas bij saveWaMeta() in payload.buttons gezet.
+let _waMetaButtonsDraft = [];
+// Examples per variabele-index ({{1}}, {{2}}, ...) — losse state zodat de
+// preview live ververst zonder de form-velden te muteren.
+let _waMetaCurrentExamples = {};
+
+let _waQrItems        = [];
+let _waQrEditingId    = null;
+
+// Debounce helper voor body-typing → vars-detect + preview-refresh.
+function _waTplDebounce(fn, ms) {
+  let t = null;
+  return function (...args) {
+    if (t) clearTimeout(t);
+    t = setTimeout(() => { t = null; fn.apply(this, args); }, ms);
+  };
+}
+
+// ─── WABA-list ────────────────────────────────────────────────────────────
+async function loadWaTplWabas() {
+  const sel = document.getElementById('waTplWabaSelect');
+  const hint = document.getElementById('waTplWabaHint');
+  if (!sel) return;
+  if (hint) hint.textContent = 'Laden…';
+  try {
+    const data = await apiRequest('GET', '/api/admin-whatsapp-wabas-list');
+    if (data && data.error) throw new Error(data.error);
+    _waTplWabas = (data && data.items) || [];
+    if (!_waTplWabas.length) {
+      sel.innerHTML = '<option value="">(geen WABA gekoppeld)</option>';
+      if (hint) hint.textContent = 'Koppel eerst een module aan een phone_number_id met een business_account_id.';
+      _waTplActiveWaba = null;
+      // Lege staat ook door-renderen naar tabellen
+      _waMetaItems = []; renderWaMetaRows();
+      _waQrItems = [];   renderWaQrRows();
+      return;
+    }
+    sel.innerHTML = _waTplWabas.map(w => {
+      const id = esc(w.business_account_id);
+      const lbl = esc(w.display_label || w.module || w.business_account_id);
+      return `<option value="${id}">${lbl} &middot; ${id}</option>`;
+    }).join('');
+    // Auto-select eerste WABA als nog geen actieve gekozen is, of als de
+    // huidige niet meer in de lijst staat (na refresh).
+    const stillPresent = _waTplActiveWaba && _waTplWabas.some(w => w.business_account_id === _waTplActiveWaba);
+    if (!stillPresent) _waTplActiveWaba = _waTplWabas[0].business_account_id;
+    sel.value = _waTplActiveWaba;
+    if (hint) hint.textContent = '';
+    // Trigger initial sub-tab load. Active sub bepaalt welke endpoint we hitten.
+    if (_waTplActiveSub === 'meta') loadWaMetaList();
+    else loadWaQrList();
+    _waTplLoadedOnce = true;
+  } catch (e) {
+    sel.innerHTML = '<option value="">(fout bij laden)</option>';
+    if (hint) hint.textContent = 'Fout: ' + e.message;
+    console.warn('[waTpl] WABA-list laden mislukt:', e.message);
+  }
+}
+
+// ─── Meta Templates list ──────────────────────────────────────────────────
+async function loadWaMetaList() {
+  const tbody = document.getElementById('waMetaTbody');
+  if (!tbody) return;
+  if (!_waTplActiveWaba) {
+    tbody.innerHTML = '<tr><td colspan="5" style="color:var(--text-faint);padding:20px">Selecteer eerst een WABA.</td></tr>';
+    return;
+  }
+  tbody.innerHTML = '<tr><td colspan="5" style="color:var(--text-faint);padding:20px">Laden&hellip;</td></tr>';
+  try {
+    const data = await apiRequest('GET', '/api/admin-meta-templates-list?business_account_id=' + encodeURIComponent(_waTplActiveWaba));
+    if (data && data.error) throw new Error(data.error);
+    _waMetaItems = (data && data.items) || [];
+    renderWaMetaRows();
+  } catch (e) {
+    tbody.innerHTML = `<tr><td colspan="5" style="color:var(--red);padding:20px">Fout: ${esc(e.message)}</td></tr>`;
+  }
+}
+
+function waMetaStatusBadge(status) {
+  // Kleur-mapping conform Meta-lifecycle. LOCAL = nog niet ingediend (grijs).
+  const map = {
+    LOCAL:     { bg: '#e5e7eb', fg: '#374151' },
+    SUBMITTED: { bg: '#fef3c7', fg: '#92400e' },
+    APPROVED:  { bg: '#d1fae5', fg: '#065f46' },
+    REJECTED:  { bg: '#fee2e2', fg: '#991b1b' },
+  };
+  const c = map[status] || { bg: '#f3f4f6', fg: '#374151' };
+  return `<span style="display:inline-block;padding:2px 8px;border-radius:10px;font-size:11.5px;font-weight:600;background:${c.bg};color:${c.fg}">${esc(status || 'UNKNOWN')}</span>`;
+}
+
+function renderWaMetaRows() {
+  const tbody = document.getElementById('waMetaTbody');
+  if (!tbody) return;
+  if (!_waMetaItems.length) {
+    tbody.innerHTML = '<tr><td colspan="5" style="color:var(--text-faint);padding:20px">Nog geen templates. Klik op + Nieuwe template.</td></tr>';
+    return;
+  }
+  tbody.innerHTML = _waMetaItems.map(it => {
+    const id        = esc(it.id || '');
+    const name      = esc(it.name || '');
+    const lang      = esc(it.language || '');
+    const cat       = esc(it.category || '');
+    const status    = it.status || 'LOCAL';
+    const badge     = waMetaStatusBadge(status);
+    // Edit-gate: alleen LOCAL of REJECTED zijn muteerbaar (server enforced).
+    // Delete-gate: alleen LOCAL (in C1).
+    const canEdit   = status === 'LOCAL' || status === 'REJECTED';
+    const canDelete = status === 'LOCAL';
+    const editBtn   = `<button class="action-btn" data-wa-meta-edit="${id}"${canEdit ? '' : ' disabled style="opacity:0.5;cursor:not-allowed"'}><i class="ti ti-edit"></i> Bewerken</button>`;
+    const delBtn    = `<button class="action-btn" data-wa-meta-del="${id}"${canDelete ? '' : ' disabled style="opacity:0.5;cursor:not-allowed"'}><i class="ti ti-trash"></i> Verwijderen</button>`;
+    return `<tr>
+      <td><strong>${name}</strong></td>
+      <td>${lang}</td>
+      <td>${cat}</td>
+      <td>${badge}</td>
+      <td>${editBtn} ${delBtn}</td>
+    </tr>`;
+  }).join('');
+}
+
+// ─── Quick Replies list ───────────────────────────────────────────────────
+async function loadWaQrList() {
+  const tbody = document.getElementById('waQrTbody');
+  if (!tbody) return;
+  if (!_waTplActiveWaba) {
+    tbody.innerHTML = '<tr><td colspan="5" style="color:var(--text-faint);padding:20px">Selecteer eerst een WABA.</td></tr>';
+    return;
+  }
+  tbody.innerHTML = '<tr><td colspan="5" style="color:var(--text-faint);padding:20px">Laden&hellip;</td></tr>';
+  try {
+    const data = await apiRequest('GET', '/api/admin-quick-replies-list?business_account_id=' + encodeURIComponent(_waTplActiveWaba));
+    if (data && data.error) throw new Error(data.error);
+    _waQrItems = (data && data.items) || [];
+    renderWaQrRows();
+  } catch (e) {
+    tbody.innerHTML = `<tr><td colspan="5" style="color:var(--red);padding:20px">Fout: ${esc(e.message)}</td></tr>`;
+  }
+}
+
+function renderWaQrRows() {
+  const tbody = document.getElementById('waQrTbody');
+  if (!tbody) return;
+  if (!_waQrItems.length) {
+    tbody.innerHTML = '<tr><td colspan="5" style="color:var(--text-faint);padding:20px">Nog geen snelle antwoorden. Klik op + Nieuwe snel antwoord.</td></tr>';
+    return;
+  }
+  tbody.innerHTML = _waQrItems.map(it => {
+    const id      = esc(it.id || '');
+    const title   = esc(it.title || '');
+    const body    = String(it.body_text || '');
+    const trunc   = body.length > 80 ? body.slice(0, 80) + '…' : body;
+    const sort    = Number.isFinite(it.sort_order) ? it.sort_order : 0;
+    const active  = it.is_active !== false;
+    const dot     = active
+      ? '<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#22c55e;margin-right:6px"></span>Actief'
+      : '<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#9ca3af;margin-right:6px"></span>Inactief';
+    return `<tr>
+      <td><strong>${title}</strong></td>
+      <td style="color:var(--text-dim)">${esc(trunc)}</td>
+      <td>${sort}</td>
+      <td>${dot}</td>
+      <td>
+        <button class="action-btn" data-wa-qr-edit="${id}"><i class="ti ti-edit"></i> Bewerken</button>
+        <button class="action-btn" data-wa-qr-del="${id}"><i class="ti ti-trash"></i> Verwijderen</button>
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+// ─── Sub-tab switching ────────────────────────────────────────────────────
+function switchWaTplSub(sub) {
+  if (sub !== 'meta' && sub !== 'quick') return;
+  _waTplActiveSub = sub;
+  const metaPanel = document.getElementById('waTplSubMeta');
+  const quickPanel = document.getElementById('waTplSubQuick');
+  if (metaPanel)  metaPanel.hidden  = sub !== 'meta';
+  if (quickPanel) quickPanel.hidden = sub !== 'quick';
+  // Active state op de segment-knoppen
+  document.querySelectorAll('#waTplSubTabs [data-wa-tpl-sub]').forEach(btn => {
+    const isActive = btn.getAttribute('data-wa-tpl-sub') === sub;
+    btn.classList.toggle('active', isActive);
+    btn.setAttribute('aria-selected', isActive ? 'true' : 'false');
+  });
+  // Lazy-load list bij eerste switch naar deze sub-tab (of na WABA-wissel).
+  if (sub === 'meta')  loadWaMetaList();
+  else                 loadWaQrList();
+}
+
+// ─── Variable parsing + preview ────────────────────────────────────────────
+// {{N}} placeholders → unieke gesorteerde array van ints. Bv "Hi {{2}} en {{1}}"
+// returnt [1, 2]. Wordt zowel door de vars-block render als de preview gebruikt.
+function parseTemplateVariables(bodyText) {
+  if (!bodyText || typeof bodyText !== 'string') return [];
+  const re = /\{\{(\d+)\}\}/g;
+  const seen = new Set();
+  let m;
+  while ((m = re.exec(bodyText)) !== null) {
+    const n = parseInt(m[1], 10);
+    if (Number.isFinite(n) && n > 0) seen.add(n);
+  }
+  return [...seen].sort((a, b) => a - b);
+}
+
+function renderWaMetaVarsBlock() {
+  const bodyEl   = document.getElementById('waMetaBodyText');
+  const block    = document.getElementById('waMetaVarsBlock');
+  const listEl   = document.getElementById('waMetaVarsList');
+  const inputsEl = document.getElementById('waMetaVarsInputs');
+  if (!bodyEl || !block || !inputsEl) return;
+  const vars = parseTemplateVariables(bodyEl.value || '');
+  if (!vars.length) {
+    block.style.display = 'none';
+    inputsEl.innerHTML = '';
+    if (listEl) listEl.textContent = '';
+    return;
+  }
+  block.style.display = '';
+  if (listEl) listEl.textContent = vars.map(n => `{{${n}}}`).join(', ');
+  inputsEl.innerHTML = vars.map(n => {
+    const cur = esc(_waMetaCurrentExamples[String(n)] || '');
+    return `<div>
+      <label style="display:block;font-size:11.5px;font-weight:600;margin-bottom:3px">{{${n}}}</label>
+      <input type="text" class="form-input" data-wa-meta-var="${n}" value="${cur}" placeholder="Voorbeeldwaarde voor {{${n}}}" />
+    </div>`;
+  }).join('');
+  // Wire input-events: update examples + recompute preview live.
+  inputsEl.querySelectorAll('[data-wa-meta-var]').forEach(inp => {
+    inp.addEventListener('input', (e) => {
+      const k = inp.getAttribute('data-wa-meta-var');
+      _waMetaCurrentExamples[k] = inp.value;
+      computeWaMetaPreview();
+    });
+  });
+}
+
+function renderWaMetaButtons() {
+  const list = document.getElementById('waMetaButtonsList');
+  const addBtn = document.getElementById('waMetaBtnAddBtn');
+  if (!list) return;
+  if (addBtn) addBtn.disabled = _waMetaButtonsDraft.length >= 3;
+  if (!_waMetaButtonsDraft.length) {
+    list.innerHTML = '<div style="font-size:12px;color:var(--text-faint)">Nog geen knoppen. Klik op + Knop toevoegen (max 3).</div>';
+    return;
+  }
+  list.innerHTML = _waMetaButtonsDraft.map((b, idx) => {
+    const type     = b.type || 'URL';
+    const text     = esc(b.text || '');
+    const url      = esc(b.url || '');
+    const phone    = esc(b.phone_number || '');
+    const showUrl  = type === 'URL';
+    const showPh   = type === 'PHONE_NUMBER';
+    return `<div data-wa-meta-btn-row="${idx}" style="display:grid;grid-template-columns:140px 1fr 1fr auto;gap:6px;align-items:center;border:1px solid var(--border);border-radius:6px;padding:6px 8px">
+      <select class="form-input" data-wa-meta-btn-type="${idx}" style="font-size:12px">
+        <option value="URL"${type==='URL'?' selected':''}>URL</option>
+        <option value="PHONE_NUMBER"${type==='PHONE_NUMBER'?' selected':''}>Telefoon</option>
+        <option value="QUICK_REPLY"${type==='QUICK_REPLY'?' selected':''}>Snel antwoord</option>
+      </select>
+      <input type="text" class="form-input" data-wa-meta-btn-text="${idx}" value="${text}" placeholder="Knoptekst (max 25)" maxlength="25" style="font-size:12px" />
+      <input type="text" class="form-input" data-wa-meta-btn-extra="${idx}"
+        value="${showUrl ? url : (showPh ? phone : '')}"
+        placeholder="${showUrl ? 'https://…' : (showPh ? '+31612345678' : '(geen extra veld)')}"
+        ${type==='QUICK_REPLY' ? 'disabled' : ''}
+        style="font-size:12px" />
+      <button class="btn btn-sm" data-wa-meta-btn-del="${idx}" title="Knop verwijderen" style="padding:2px 8px"><i class="ti ti-trash"></i></button>
+    </div>`;
+  }).join('');
+  // Wire per-row events (delegation per element — eenvoudiger dan parent-delegation
+  // omdat we de draft-array per idx muteren en daarna re-renderen).
+  list.querySelectorAll('[data-wa-meta-btn-type]').forEach(el => {
+    el.addEventListener('change', (e) => {
+      const idx = parseInt(el.getAttribute('data-wa-meta-btn-type'), 10);
+      if (!_waMetaButtonsDraft[idx]) return;
+      _waMetaButtonsDraft[idx].type = el.value;
+      // Type-wissel: clear conditionele velden om validate-fouten te vermijden.
+      if (el.value === 'URL')      { _waMetaButtonsDraft[idx].phone_number = ''; }
+      if (el.value === 'PHONE_NUMBER') { _waMetaButtonsDraft[idx].url = ''; }
+      if (el.value === 'QUICK_REPLY')  { _waMetaButtonsDraft[idx].url = ''; _waMetaButtonsDraft[idx].phone_number = ''; }
+      renderWaMetaButtons();
+      computeWaMetaPreview();
+    });
+  });
+  list.querySelectorAll('[data-wa-meta-btn-text]').forEach(el => {
+    el.addEventListener('input', (e) => {
+      const idx = parseInt(el.getAttribute('data-wa-meta-btn-text'), 10);
+      if (!_waMetaButtonsDraft[idx]) return;
+      _waMetaButtonsDraft[idx].text = el.value;
+      _waTplPreviewDebounced();
+    });
+  });
+  list.querySelectorAll('[data-wa-meta-btn-extra]').forEach(el => {
+    el.addEventListener('input', (e) => {
+      const idx = parseInt(el.getAttribute('data-wa-meta-btn-extra'), 10);
+      if (!_waMetaButtonsDraft[idx]) return;
+      const type = _waMetaButtonsDraft[idx].type;
+      if (type === 'URL') _waMetaButtonsDraft[idx].url = el.value;
+      else if (type === 'PHONE_NUMBER') _waMetaButtonsDraft[idx].phone_number = el.value;
+      _waTplPreviewDebounced();
+    });
+  });
+  list.querySelectorAll('[data-wa-meta-btn-del]').forEach(el => {
+    el.addEventListener('click', (e) => {
+      const idx = parseInt(el.getAttribute('data-wa-meta-btn-del'), 10);
+      deleteWaMetaButton(idx);
+    });
+  });
+}
+
+function addWaMetaButton() {
+  if (_waMetaButtonsDraft.length >= 3) return;
+  _waMetaButtonsDraft.push({ type: 'URL', text: '', url: '' });
+  renderWaMetaButtons();
+  computeWaMetaPreview();
+}
+
+function deleteWaMetaButton(idx) {
+  if (idx < 0 || idx >= _waMetaButtonsDraft.length) return;
+  _waMetaButtonsDraft.splice(idx, 1);
+  renderWaMetaButtons();
+  computeWaMetaPreview();
+}
+
+// Render WhatsApp-bubble preview op basis van huidige form-staat. {{N}} placeholders
+// worden vervangen door _waMetaCurrentExamples; lege examples blijven {{N}} tonen.
+function computeWaMetaPreview() {
+  const headerType    = (document.getElementById('waMetaHeaderType')?.value || 'NONE');
+  const headerTextEl  = document.getElementById('waMetaHeaderText');
+  const footerInput   = document.getElementById('waMetaFooterInput');
+  const bodyEl        = document.getElementById('waMetaBodyText');
+  const previewHeader = document.getElementById('waMetaPreviewHeader');
+  const previewBody   = document.getElementById('waMetaPreviewBody');
+  const previewFooter = document.getElementById('waMetaPreviewFooter');
+  const previewBtns   = document.getElementById('waMetaPreviewButtons');
+  if (!previewBody) return;
+
+  // Header (alleen TEXT renderbaar in preview; IMAGE/VIDEO/DOC tonen we als label).
+  if (previewHeader) {
+    if (headerType === 'TEXT') {
+      const txt = (headerTextEl?.value || '').trim();
+      previewHeader.textContent = txt;
+      previewHeader.style.display = txt ? '' : 'none';
+    } else if (headerType === 'NONE') {
+      previewHeader.textContent = '';
+      previewHeader.style.display = 'none';
+    } else {
+      previewHeader.textContent = `[${headerType}]`;
+      previewHeader.style.display = '';
+    }
+  }
+
+  // Body: vervang {{N}} door examples; lege values laten placeholder staan zodat
+  // de gebruiker ziet welke vars nog ingevuld moeten worden.
+  const rawBody = bodyEl?.value || '';
+  const filled = rawBody.replace(/\{\{(\d+)\}\}/g, (m, n) => {
+    const v = _waMetaCurrentExamples[String(n)];
+    return (v && v.length) ? v : m;
+  });
+  previewBody.textContent = filled || 'Je bericht verschijnt hier…';
+
+  // Footer
+  if (previewFooter) {
+    const ft = (footerInput?.value || '').trim();
+    previewFooter.textContent = ft;
+    previewFooter.style.display = ft ? '' : 'none';
+  }
+
+  // Buttons: stack onder bubble. Blauwe link-styling typisch WhatsApp.
+  if (previewBtns) {
+    if (!_waMetaButtonsDraft.length) {
+      previewBtns.innerHTML = '';
+    } else {
+      previewBtns.innerHTML = _waMetaButtonsDraft.map(b => {
+        const lbl = esc((b.text || '').trim() || '(knop)');
+        const icon = b.type === 'URL' ? 'ti-external-link'
+                   : b.type === 'PHONE_NUMBER' ? 'ti-phone'
+                   : 'ti-message-circle';
+        return `<div style="background:#fff;border-radius:8px;padding:8px 10px;text-align:center;color:#0a7cff;font-weight:600;font-size:13px;box-shadow:0 1px 1px rgba(0,0,0,0.06)"><i class="ti ${icon}" style="margin-right:6px"></i>${lbl}</div>`;
+      }).join('');
+    }
+  }
+}
+// Gedeelde debounced preview voor input-events vanuit knoptekst/url-velden.
+const _waTplPreviewDebounced = _waTplDebounce(computeWaMetaPreview, 100);
+const _waTplVarsAndPreviewDebounced = _waTplDebounce(() => {
+  renderWaMetaVarsBlock();
+  computeWaMetaPreview();
+}, 200);
+
+// ─── Meta Templates modal: open / save / delete ───────────────────────────
+function openWaMetaNew() {
+  if (!_waTplActiveWaba) {
+    window.AgentShared?.showToast('Selecteer eerst een WABA', 'error');
+    return;
+  }
+  _waMetaEditingId = null;
+  _waMetaButtonsDraft = [];
+  _waMetaCurrentExamples = {};
+  document.getElementById('waMetaModalTitle').textContent = 'Nieuwe Meta template';
+  // Init form-velden
+  const nameEl   = document.getElementById('waMetaNameInput');
+  const langEl   = document.getElementById('waMetaLangSelect');
+  const catEl    = document.getElementById('waMetaCatSelect');
+  const htEl     = document.getElementById('waMetaHeaderType');
+  const htTxtEl  = document.getElementById('waMetaHeaderText');
+  const htUrlEl  = document.getElementById('waMetaHeaderUrl');
+  const bodyEl   = document.getElementById('waMetaBodyText');
+  const footerEl = document.getElementById('waMetaFooterInput');
+  if (nameEl)   { nameEl.value = ''; nameEl.disabled = false; }
+  if (langEl)   langEl.value = 'nl';
+  if (catEl)    catEl.value = 'UTILITY';
+  if (htEl)     htEl.value = 'NONE';
+  if (htTxtEl)  htTxtEl.value = '';
+  if (htUrlEl)  htUrlEl.value = '';
+  if (bodyEl)   bodyEl.value = '';
+  if (footerEl) footerEl.value = '';
+  _updateWaMetaHeaderVisibility();
+  renderWaMetaButtons();
+  renderWaMetaVarsBlock();
+  computeWaMetaPreview();
+  const err = document.getElementById('waMetaError');
+  if (err) { err.classList.add('hidden'); err.textContent = ''; }
+  document.getElementById('waMetaEditModal').classList.remove('hidden');
+}
+
+function openWaMetaEdit(item) {
+  if (!item) return;
+  _waMetaEditingId = item.id;
+  _waMetaButtonsDraft = Array.isArray(item.buttons) ? item.buttons.map(b => ({ ...b })) : [];
+  _waMetaCurrentExamples = (item.body_examples && typeof item.body_examples === 'object') ? { ...item.body_examples } : {};
+  document.getElementById('waMetaModalTitle').textContent = 'Template bewerken';
+  const nameEl   = document.getElementById('waMetaNameInput');
+  const langEl   = document.getElementById('waMetaLangSelect');
+  const catEl    = document.getElementById('waMetaCatSelect');
+  const htEl     = document.getElementById('waMetaHeaderType');
+  const htTxtEl  = document.getElementById('waMetaHeaderText');
+  const htUrlEl  = document.getElementById('waMetaHeaderUrl');
+  const bodyEl   = document.getElementById('waMetaBodyText');
+  const footerEl = document.getElementById('waMetaFooterInput');
+  if (nameEl)   { nameEl.value = item.name || ''; nameEl.disabled = false; }
+  if (langEl)   langEl.value = item.language || 'nl';
+  if (catEl)    catEl.value = item.category || 'UTILITY';
+  if (htEl)     htEl.value = item.header_type || 'NONE';
+  if (htTxtEl)  htTxtEl.value = (item.header_content && item.header_content.text) || '';
+  if (htUrlEl)  htUrlEl.value = (item.header_content && item.header_content.example_url) || '';
+  if (bodyEl)   bodyEl.value = item.body_text || '';
+  if (footerEl) footerEl.value = item.footer_text || '';
+  _updateWaMetaHeaderVisibility();
+  renderWaMetaButtons();
+  renderWaMetaVarsBlock();
+  computeWaMetaPreview();
+  const err = document.getElementById('waMetaError');
+  if (err) { err.classList.add('hidden'); err.textContent = ''; }
+  document.getElementById('waMetaEditModal').classList.remove('hidden');
+}
+
+function closeWaMetaEdit() {
+  const m = document.getElementById('waMetaEditModal');
+  if (m) m.classList.add('hidden');
+  _waMetaEditingId = null;
+  _waMetaButtonsDraft = [];
+  _waMetaCurrentExamples = {};
+}
+
+// Header-type → toon/verberg de juiste sub-inputs (TEXT → tekst-veld;
+// IMAGE/VIDEO/DOCUMENT → example_url-veld; NONE → niets).
+function _updateWaMetaHeaderVisibility() {
+  const ht       = (document.getElementById('waMetaHeaderType')?.value || 'NONE');
+  const txtGroup = document.getElementById('waMetaHeaderTextGroup');
+  const urlGroup = document.getElementById('waMetaHeaderUrlGroup');
+  if (txtGroup) txtGroup.hidden = ht !== 'TEXT';
+  if (urlGroup) urlGroup.hidden = !(ht === 'IMAGE' || ht === 'VIDEO' || ht === 'DOCUMENT');
+}
+
+async function saveWaMetaTemplate() {
+  const errEl = document.getElementById('waMetaError');
+  const btn   = document.getElementById('waMetaSaveBtn');
+  const showErr = (msg) => { if (errEl) { errEl.textContent = msg; errEl.classList.remove('hidden'); } };
+  const hideErr = () => { if (errEl) { errEl.classList.add('hidden'); errEl.textContent = ''; } };
+  hideErr();
+
+  if (!_waTplActiveWaba) { showErr('Geen actieve WABA — herlaad de pagina.'); return; }
+
+  const name      = (document.getElementById('waMetaNameInput')?.value || '').trim();
+  const language  = (document.getElementById('waMetaLangSelect')?.value || 'nl').trim();
+  const category  = (document.getElementById('waMetaCatSelect')?.value || 'UTILITY').trim();
+  const headerType = (document.getElementById('waMetaHeaderType')?.value || 'NONE').trim();
+  const headerTxt = (document.getElementById('waMetaHeaderText')?.value || '').trim();
+  const headerUrl = (document.getElementById('waMetaHeaderUrl')?.value || '').trim();
+  const bodyText  = (document.getElementById('waMetaBodyText')?.value || '').trim();
+  const footerTxt = (document.getElementById('waMetaFooterInput')?.value || '').trim();
+
+  // Validate naam client-side (server valideert ook).
+  if (!name) { showErr('Naam is verplicht'); return; }
+  if (!/^[a-z0-9_]+$/.test(name)) { showErr('Naam: alleen lowercase a-z, 0-9 en _'); return; }
+  if (!bodyText) { showErr('Body is verplicht'); return; }
+
+  // Header content payload op basis van type.
+  let headerContent = null;
+  if (headerType === 'TEXT') headerContent = { text: headerTxt };
+  else if (headerType === 'IMAGE' || headerType === 'VIDEO' || headerType === 'DOCUMENT') {
+    headerContent = headerUrl ? { example_url: headerUrl } : null;
+  }
+
+  // Body examples: alleen vars die nu in body voorkomen meesturen.
+  const vars = parseTemplateVariables(bodyText);
+  const examples = {};
+  vars.forEach(n => {
+    const v = _waMetaCurrentExamples[String(n)];
+    if (v != null && String(v).length) examples[String(n)] = String(v);
+  });
+
+  // Buttons: filter leeg-text rows uit (anders crashed server-side validate).
+  const buttons = _waMetaButtonsDraft
+    .filter(b => b && b.type && (b.text || '').trim())
+    .map(b => {
+      const out = { type: b.type, text: String(b.text).trim() };
+      if (b.type === 'URL') out.url = String(b.url || '').trim();
+      if (b.type === 'PHONE_NUMBER') out.phone_number = String(b.phone_number || '').trim();
+      return out;
+    });
+
+  const payload = {
+    business_account_id: _waTplActiveWaba,
+    name,
+    language,
+    category,
+    header_type:    headerType,
+    header_content: headerContent,
+    body_text:      bodyText,
+    body_examples:  Object.keys(examples).length ? examples : null,
+    footer_text:    footerTxt || null,
+    buttons:        buttons.length ? buttons : null,
+  };
+
+  if (btn) { btn.disabled = true; btn.textContent = 'Opslaan…'; }
+  try {
+    const method = _waMetaEditingId ? 'PATCH' : 'POST';
+    const path   = '/api/admin-meta-templates-upsert' + (_waMetaEditingId ? `?id=${encodeURIComponent(_waMetaEditingId)}` : '');
+    const data   = await apiRequest(method, path, payload);
+    if (data && data.error) {
+      // 409 conflicts (duplicate naam+lang of immutable status) gewoon tonen.
+      showErr(data.error);
+      return;
+    }
+    window.AgentShared?.showToast('Template opgeslagen', 'success');
+    closeWaMetaEdit();
+    loadWaMetaList();
+  } catch (e) {
+    showErr(e.message);
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = 'Opslaan'; }
+  }
+}
+
+async function deleteWaMetaTemplate(item) {
+  if (!item) return;
+  if (!confirm(`Template '${item.name}' verwijderen?`)) return;
+  try {
+    const data = await apiRequest('DELETE', '/api/admin-meta-templates-delete?id=' + encodeURIComponent(item.id));
+    if (data && data.error) {
+      // Server enforce: alleen LOCAL deletable. 409 hier verwacht voor andere statussen.
+      alert('Verwijderen mislukt: ' + data.error);
+      return;
+    }
+    window.AgentShared?.showToast('Template verwijderd', 'success');
+    loadWaMetaList();
+  } catch (e) {
+    alert('Verwijderen mislukt: ' + e.message);
+  }
+}
+
+// ─── Quick Replies modal: open / save / delete ────────────────────────────
+function openWaQrNew() {
+  if (!_waTplActiveWaba) {
+    window.AgentShared?.showToast('Selecteer eerst een WABA', 'error');
+    return;
+  }
+  _waQrEditingId = null;
+  document.getElementById('waQrModalTitle').textContent = 'Nieuwe snel antwoord';
+  const titleEl  = document.getElementById('waQrTitleInput');
+  const bodyEl   = document.getElementById('waQrBodyInput');
+  const sortEl   = document.getElementById('waQrSortInput');
+  const activeEl = document.getElementById('waQrActiveInput');
+  if (titleEl)  titleEl.value = '';
+  if (bodyEl)   bodyEl.value = '';
+  if (sortEl)   sortEl.value = '0';
+  if (activeEl) activeEl.checked = true;
+  const err = document.getElementById('waQrError');
+  if (err) { err.classList.add('hidden'); err.textContent = ''; }
+  document.getElementById('waQrEditModal').classList.remove('hidden');
+}
+
+function openWaQrEdit(item) {
+  if (!item) return;
+  _waQrEditingId = item.id;
+  document.getElementById('waQrModalTitle').textContent = 'Snel antwoord bewerken';
+  const titleEl  = document.getElementById('waQrTitleInput');
+  const bodyEl   = document.getElementById('waQrBodyInput');
+  const sortEl   = document.getElementById('waQrSortInput');
+  const activeEl = document.getElementById('waQrActiveInput');
+  if (titleEl)  titleEl.value = item.title || '';
+  if (bodyEl)   bodyEl.value = item.body_text || '';
+  if (sortEl)   sortEl.value = String(Number.isFinite(item.sort_order) ? item.sort_order : 0);
+  if (activeEl) activeEl.checked = item.is_active !== false;
+  const err = document.getElementById('waQrError');
+  if (err) { err.classList.add('hidden'); err.textContent = ''; }
+  document.getElementById('waQrEditModal').classList.remove('hidden');
+}
+
+function closeWaQrEdit() {
+  const m = document.getElementById('waQrEditModal');
+  if (m) m.classList.add('hidden');
+  _waQrEditingId = null;
+}
+
+async function saveWaQuickReply() {
+  const errEl = document.getElementById('waQrError');
+  const btn   = document.getElementById('waQrSaveBtn');
+  const showErr = (msg) => { if (errEl) { errEl.textContent = msg; errEl.classList.remove('hidden'); } };
+  const hideErr = () => { if (errEl) { errEl.classList.add('hidden'); errEl.textContent = ''; } };
+  hideErr();
+
+  if (!_waTplActiveWaba) { showErr('Geen actieve WABA — herlaad de pagina.'); return; }
+
+  const title    = (document.getElementById('waQrTitleInput')?.value || '').trim();
+  const bodyText = (document.getElementById('waQrBodyInput')?.value || '').trim();
+  const sortRaw  = (document.getElementById('waQrSortInput')?.value || '0').trim();
+  const isActive = !!document.getElementById('waQrActiveInput')?.checked;
+
+  if (!title)    { showErr('Titel is verplicht'); return; }
+  if (!bodyText) { showErr('Body is verplicht'); return; }
+  const sort = parseInt(sortRaw, 10);
+  if (!Number.isFinite(sort)) { showErr('Sorteervolgorde moet een geheel getal zijn'); return; }
+
+  const payload = {
+    business_account_id: _waTplActiveWaba,
+    title,
+    body_text:  bodyText,
+    sort_order: sort,
+    is_active:  isActive,
+  };
+
+  if (btn) { btn.disabled = true; btn.textContent = 'Opslaan…'; }
+  try {
+    const method = _waQrEditingId ? 'PATCH' : 'POST';
+    const path   = '/api/admin-quick-replies-upsert' + (_waQrEditingId ? `?id=${encodeURIComponent(_waQrEditingId)}` : '');
+    const data   = await apiRequest(method, path, payload);
+    if (data && data.error) { showErr(data.error); return; }
+    window.AgentShared?.showToast('Snel antwoord opgeslagen', 'success');
+    closeWaQrEdit();
+    loadWaQrList();
+  } catch (e) {
+    showErr(e.message);
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = 'Opslaan'; }
+  }
+}
+
+async function deleteWaQuickReply(item) {
+  if (!item) return;
+  if (!confirm(`Snel antwoord '${item.title}' verwijderen?`)) return;
+  try {
+    const data = await apiRequest('DELETE', '/api/admin-quick-replies-delete?id=' + encodeURIComponent(item.id));
+    if (data && data.error) { alert('Verwijderen mislukt: ' + data.error); return; }
+    window.AgentShared?.showToast('Snel antwoord verwijderd', 'success');
+    loadWaQrList();
+  } catch (e) {
+    alert('Verwijderen mislukt: ' + e.message);
+  }
+}
+
+// ─── Master wiring (one-time) ─────────────────────────────────────────────
+function wireWaTplOnce() {
+  if (_waTplWired) return;
+  _waTplWired = true;
+
+  // WABA selector
+  const wabaSel = document.getElementById('waTplWabaSelect');
+  if (wabaSel) {
+    wabaSel.addEventListener('change', () => {
+      _waTplActiveWaba = wabaSel.value || null;
+      // Reload current sub-tab's list — andere sub-tab herlaadt bij switch.
+      if (_waTplActiveSub === 'meta') loadWaMetaList();
+      else loadWaQrList();
+    });
+  }
+  const wabaRefreshBtn = document.getElementById('waTplWabaRefreshBtn');
+  if (wabaRefreshBtn) wabaRefreshBtn.addEventListener('click', () => loadWaTplWabas());
+
+  // Sub-tab buttons
+  document.querySelectorAll('#waTplSubTabs [data-wa-tpl-sub]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const sub = btn.getAttribute('data-wa-tpl-sub');
+      switchWaTplSub(sub);
+    });
+  });
+
+  // Master refresh — herlaadt huidige actieve sub-tab list.
+  const reloadBtn = document.getElementById('waTplReloadBtn');
+  if (reloadBtn) reloadBtn.addEventListener('click', () => {
+    if (_waTplActiveSub === 'meta') loadWaMetaList();
+    else loadWaQrList();
+  });
+
+  // + Nieuwe template / + Nieuwe snel antwoord
+  const metaNewBtn = document.getElementById('waMetaNewBtn');
+  if (metaNewBtn) metaNewBtn.addEventListener('click', () => openWaMetaNew());
+  const qrNewBtn = document.getElementById('waQrNewBtn');
+  if (qrNewBtn) qrNewBtn.addEventListener('click', () => openWaQrNew());
+
+  // Row-click delegation: bewerken/verwijderen knoppen in beide tables.
+  const metaTbody = document.getElementById('waMetaTbody');
+  if (metaTbody) {
+    metaTbody.addEventListener('click', (e) => {
+      const editBtn = e.target.closest('[data-wa-meta-edit]');
+      const delBtn  = e.target.closest('[data-wa-meta-del]');
+      if (editBtn && !editBtn.disabled) {
+        const id = editBtn.getAttribute('data-wa-meta-edit');
+        const item = _waMetaItems.find(it => String(it.id) === id);
+        if (item) openWaMetaEdit(item);
+      } else if (delBtn && !delBtn.disabled) {
+        const id = delBtn.getAttribute('data-wa-meta-del');
+        const item = _waMetaItems.find(it => String(it.id) === id);
+        if (item) deleteWaMetaTemplate(item);
+      }
+    });
+  }
+  const qrTbody = document.getElementById('waQrTbody');
+  if (qrTbody) {
+    qrTbody.addEventListener('click', (e) => {
+      const editBtn = e.target.closest('[data-wa-qr-edit]');
+      const delBtn  = e.target.closest('[data-wa-qr-del]');
+      if (editBtn) {
+        const id = editBtn.getAttribute('data-wa-qr-edit');
+        const item = _waQrItems.find(it => String(it.id) === id);
+        if (item) openWaQrEdit(item);
+      } else if (delBtn) {
+        const id = delBtn.getAttribute('data-wa-qr-del');
+        const item = _waQrItems.find(it => String(it.id) === id);
+        if (item) deleteWaQuickReply(item);
+      }
+    });
+  }
+
+  // Modal backdrop close (klik buiten card → sluit). Escape-handler op document.
+  const metaModal = document.getElementById('waMetaEditModal');
+  if (metaModal) {
+    metaModal.addEventListener('click', (e) => {
+      if (e.target === metaModal) closeWaMetaEdit();
+    });
+  }
+  const qrModal = document.getElementById('waQrEditModal');
+  if (qrModal) {
+    qrModal.addEventListener('click', (e) => {
+      if (e.target === qrModal) closeWaQrEdit();
+    });
+  }
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape') return;
+    if (metaModal && !metaModal.classList.contains('hidden')) closeWaMetaEdit();
+    else if (qrModal && !qrModal.classList.contains('hidden')) closeWaQrEdit();
+  });
+
+  // Meta modal form-events
+  const htEl = document.getElementById('waMetaHeaderType');
+  if (htEl) htEl.addEventListener('change', () => {
+    _updateWaMetaHeaderVisibility();
+    _waTplPreviewDebounced();
+  });
+  const htTxtEl = document.getElementById('waMetaHeaderText');
+  if (htTxtEl) htTxtEl.addEventListener('input', () => _waTplPreviewDebounced());
+  const bodyEl = document.getElementById('waMetaBodyText');
+  if (bodyEl) bodyEl.addEventListener('input', () => _waTplVarsAndPreviewDebounced());
+  const footerEl = document.getElementById('waMetaFooterInput');
+  if (footerEl) footerEl.addEventListener('input', () => _waTplPreviewDebounced());
+  const btnAdd = document.getElementById('waMetaBtnAddBtn');
+  if (btnAdd) btnAdd.addEventListener('click', () => addWaMetaButton());
 }
 
 init();
