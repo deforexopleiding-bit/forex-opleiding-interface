@@ -459,19 +459,87 @@
         <button class="sr-seg" data-dunning-sub="geschiedenis" type="button">Geschiedenis</button>
       </div>
 
-      <!-- Sub-view: Overzicht (default) -->
+      <!-- Sub-view: Overzicht (default) - PR B5 -->
       <div id="dunningSubOverzicht">
-        <div style="background:linear-gradient(135deg, rgba(245,158,11,.10), rgba(245,158,11,.03));border:1px solid rgba(245,158,11,.25);border-radius:12px;padding:22px 26px">
-          <h2 style="margin:0 0 8px;font-size:18px;font-weight:700">Overzicht wanbetalers</h2>
-          <p style="margin:0;font-size:13px;color:var(--text-dim);line-height:1.55">KPI-strip + actieve workflows + recente acties. <strong>Komt in PR B5.</strong></p>
+        <!-- KPI-strip: 5 cards -->
+        <div class="kpi-strip" id="dunOvKpis" style="grid-template-columns:repeat(5,1fr);margin-bottom:18px">
+          <div class="kpi-cell"><div class="kpi-lbl">Openstaand</div><div class="kpi-val">—</div></div>
+          <div class="kpi-cell"><div class="kpi-lbl">Wanbetalers</div><div class="kpi-val">—</div></div>
+          <div class="kpi-cell"><div class="kpi-lbl">Probleemklanten</div><div class="kpi-val">—</div></div>
+          <div class="kpi-cell"><div class="kpi-lbl">Actieve workflows</div><div class="kpi-val">—</div></div>
+          <div class="kpi-cell"><div class="kpi-lbl">Voltooid (30d)</div><div class="kpi-val">—</div></div>
+        </div>
+
+        <!-- Actieve workflows -->
+        <div style="background:rgba(255,255,255,0.02);border:1px solid var(--border-subtle, #e5e7eb);border-radius:12px;padding:18px 22px;margin-bottom:16px">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+            <div>
+              <h2 style="margin:0;font-size:16px;font-weight:700">Actieve workflows</h2>
+              <div style="font-size:11.5px;color:var(--text-faint);margin-top:2px">Lopende dunning-runs per klant + workflow.</div>
+            </div>
+            <button class="sr-abtn" id="dunOvRefreshBtn" type="button" style="font-size:11.5px;padding:5px 10px">
+              <i class="ti ti-refresh" style="margin-right:4px"></i>Vernieuw
+            </button>
+          </div>
+          <div class="sr-tablewrap">
+            <table class="sr-table" id="dunOvActiveTable">
+              <thead><tr>
+                <th>Klant</th>
+                <th>Workflow</th>
+                <th>Huidige stap</th>
+                <th>Volgende actie</th>
+                <th style="width:240px">Acties</th>
+              </tr></thead>
+              <tbody id="dunOvActiveTbody"><tr><td colspan="5" style="text-align:center;padding:24px;color:var(--text-faint)">Laden…</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Recente acties -->
+        <div style="background:rgba(255,255,255,0.02);border:1px solid var(--border-subtle, #e5e7eb);border-radius:12px;padding:18px 22px">
+          <div style="margin-bottom:12px">
+            <h2 style="margin:0;font-size:16px;font-weight:700">Recente acties</h2>
+            <div style="font-size:11.5px;color:var(--text-faint);margin-top:2px">Laatste 50 events uit dunning_log. Klik op een rij voor details.</div>
+          </div>
+          <div class="sr-tablewrap">
+            <table class="sr-table" id="dunOvRecentTable">
+              <thead><tr>
+                <th style="width:140px">Tijd</th>
+                <th>Klant</th>
+                <th style="width:160px">Event</th>
+                <th style="width:120px">Stap</th>
+                <th>Details</th>
+              </tr></thead>
+              <tbody id="dunOvRecentTbody"><tr><td colspan="5" style="text-align:center;padding:24px;color:var(--text-faint)">Laden…</td></tr></tbody>
+            </table>
+          </div>
         </div>
       </div>
 
-      <!-- Sub-view: Probleemklanten -->
+      <!-- Sub-view: Probleemklanten (PR B5) -->
       <div id="dunningSubProbleemklanten" hidden>
-        <div style="background:rgba(255,255,255,0.02);border:1px solid var(--border-subtle, #e5e7eb);border-radius:12px;padding:22px 26px">
-          <h2 style="margin:0 0 8px;font-size:18px;font-weight:700">Probleemklanten</h2>
-          <p style="margin:0;font-size:13px;color:var(--text-dim);line-height:1.55">Lijst klanten met openstaande facturen + workflow-koppeling + escaleren. <strong>Komt in PR B5.</strong></p>
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:14px;flex-wrap:wrap;gap:10px">
+          <div>
+            <h2 style="margin:0;font-size:18px;font-weight:700">Probleemklanten</h2>
+            <div style="font-size:11.5px;color:var(--text-faint);margin-top:2px">Klanten met 2 of meer openstaande facturen. Gesorteerd op oudste vervaldatum.</div>
+          </div>
+          <button class="sr-abtn" id="dunProbRefreshBtn" type="button" style="font-size:11.5px;padding:5px 10px">
+            <i class="ti ti-refresh" style="margin-right:4px"></i>Vernieuw
+          </button>
+        </div>
+        <div class="sr-tablewrap">
+          <table class="sr-table" id="dunProbTable">
+            <thead><tr>
+              <th>Klant</th>
+              <th style="width:110px"># Open facturen</th>
+              <th style="width:160px">Totaal openstaand</th>
+              <th style="width:140px">Oudste vervaldatum</th>
+              <th style="width:120px">Dagen overdue</th>
+              <th style="width:150px">Actieve workflow?</th>
+              <th style="width:120px">Acties</th>
+            </tr></thead>
+            <tbody id="dunProbTbody"><tr><td colspan="7" style="text-align:center;padding:24px;color:var(--text-faint)">Laden…</td></tr></tbody>
+          </table>
         </div>
       </div>
 
@@ -576,11 +644,66 @@
         </div>
       </div>
 
-      <!-- Sub-view: Geschiedenis -->
+      <!-- Sub-view: Geschiedenis (PR B5) -->
       <div id="dunningSubGeschiedenis" hidden>
-        <div style="background:rgba(255,255,255,0.02);border:1px solid var(--border-subtle, #e5e7eb);border-radius:12px;padding:22px 26px">
-          <h2 style="margin:0 0 8px;font-size:18px;font-weight:700">Geschiedenis</h2>
-          <p style="margin:0;font-size:13px;color:var(--text-dim);line-height:1.55">Volledig dunning_log lezen: alle events per workflow-run. <strong>Komt in PR B4.</strong></p>
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:14px;flex-wrap:wrap;gap:10px">
+          <div>
+            <h2 style="margin:0;font-size:18px;font-weight:700">Geschiedenis</h2>
+            <div style="font-size:11.5px;color:var(--text-faint);margin-top:2px">Alle events uit dunning_log. Filter op klant, event-type of datum.</div>
+          </div>
+        </div>
+        <!-- Filter-strip -->
+        <div style="display:grid;grid-template-columns:1fr 220px 180px auto;gap:10px;align-items:end;margin-bottom:14px;padding:12px 14px;background:rgba(255,255,255,0.02);border:1px solid var(--border-subtle, #e5e7eb);border-radius:10px">
+          <label style="font-size:11px;color:var(--text-dim)">
+            Zoek klant
+            <input id="dunHistSearch" type="search" class="fin-input" placeholder="Klantnaam…" autocomplete="off"/>
+          </label>
+          <label style="font-size:11px;color:var(--text-dim)">
+            Event-type
+            <select id="dunHistEventType" class="fin-input">
+              <option value="">Alle events</option>
+              <option value="started">started</option>
+              <option value="email_attempted">email_attempted</option>
+              <option value="email_skipped_no_infra">email_skipped_no_infra</option>
+              <option value="whatsapp_skipped_no_meta">whatsapp_skipped_no_meta</option>
+              <option value="wait">wait</option>
+              <option value="task_created">task_created</option>
+              <option value="completed">completed</option>
+              <option value="paused">paused</option>
+              <option value="resumed">resumed</option>
+              <option value="cancelled">cancelled</option>
+              <option value="run_control_pause">run_control_pause</option>
+              <option value="run_control_resume">run_control_resume</option>
+              <option value="run_control_cancel">run_control_cancel</option>
+              <option value="stop_step">stop_step</option>
+            </select>
+          </label>
+          <label style="font-size:11px;color:var(--text-dim)">
+            Vanaf datum
+            <input id="dunHistFromDate" type="date" class="fin-input"/>
+          </label>
+          <button class="sr-abtn" id="dunHistRefreshBtn" type="button" style="font-size:11.5px;padding:6px 12px">
+            <i class="ti ti-refresh" style="margin-right:4px"></i>Vernieuw
+          </button>
+        </div>
+        <div class="sr-tablewrap">
+          <table class="sr-table" id="dunHistTable">
+            <thead><tr>
+              <th style="width:140px">Tijd</th>
+              <th>Klant</th>
+              <th>Workflow</th>
+              <th style="width:170px">Event</th>
+              <th style="width:120px">Stap</th>
+              <th>Details</th>
+            </tr></thead>
+            <tbody id="dunHistTbody"><tr><td colspan="6" style="text-align:center;padding:24px;color:var(--text-faint)">Laden…</td></tr></tbody>
+          </table>
+        </div>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-top:12px;font-size:12px;color:var(--text-faint)">
+          <div id="dunHistPagerInfo">0 events geladen</div>
+          <button class="sr-abtn" id="dunHistMoreBtn" type="button" style="font-size:11.5px;padding:5px 12px" hidden>
+            <i class="ti ti-chevron-down" style="margin-right:4px"></i>Meer laden
+          </button>
         </div>
       </div>
     </div>
@@ -638,6 +761,45 @@
       <span class="phase-tag">PLANNED</span>
     </div>
   </div>
+  </div>
+</div>
+
+<!-- Dunning Run-details modal (PR B5) -->
+<div class="modal-overlay hidden" id="dunRunDetailsModal" role="dialog" aria-modal="true">
+  <div class="modal-card" style="max-width:740px">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px">
+      <div>
+        <h3 id="dunRunDetailsTitle" style="margin:0;font-size:17px">Workflow-run</h3>
+        <div id="dunRunDetailsSubtitle" style="font-size:12px;color:var(--text-faint);margin-top:3px">—</div>
+      </div>
+      <button class="sr-ibtn" id="dunRunDetailsClose" type="button" title="Sluiten" style="margin-top:-4px"><i class="ti ti-x"></i></button>
+    </div>
+
+    <div style="margin-top:16px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <div style="font-size:13px;font-weight:600">Stappen</div>
+        <div id="dunRunDetailsStatus" style="font-size:11.5px"></div>
+      </div>
+      <div id="dunRunDetailsSteps" style="display:flex;flex-direction:column;gap:6px;max-height:220px;overflow:auto;padding:4px 2px">
+        <div style="font-size:11.5px;color:var(--text-faint);text-align:center;padding:14px">Laden…</div>
+      </div>
+    </div>
+
+    <div style="margin-top:18px">
+      <div style="font-size:13px;font-weight:600;margin-bottom:8px">Events</div>
+      <div id="dunRunDetailsEvents" style="display:flex;flex-direction:column;gap:6px;max-height:260px;overflow:auto;padding:4px 2px">
+        <div style="font-size:11.5px;color:var(--text-faint);text-align:center;padding:14px">Laden…</div>
+      </div>
+    </div>
+
+    <div id="dunRunDetailsError" style="display:none;margin-top:12px;padding:8px 12px;background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.3);border-radius:6px;color:#ef4444;font-size:12px"></div>
+
+    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:18px">
+      <button class="sr-abtn" id="dunRunDetailsPauseBtn" type="button" hidden><i class="ti ti-player-pause"></i> Pauzeer</button>
+      <button class="sr-abtn primary" id="dunRunDetailsResumeBtn" type="button" hidden><i class="ti ti-player-play"></i> Hervat</button>
+      <button class="sr-abtn danger" id="dunRunDetailsCancelBtn" type="button" hidden><i class="ti ti-x"></i> Annuleer</button>
+      <button class="sr-abtn" id="dunRunDetailsCloseBtn" type="button">Sluiten</button>
+    </div>
   </div>
 </div>
 
@@ -1049,6 +1211,10 @@
             const el = document.getElementById('dunningSub' + s.charAt(0).toUpperCase() + s.slice(1));
             if (el) el.hidden = (s !== target);
           }
+          if (target === 'overzicht' && !_dunOvLoadedOnce) {
+            _dunOvLoadedOnce = true;
+            loadDunOverview();
+          }
           if (target === 'templates' && !_dunTplLoadedOnce) {
             _dunTplLoadedOnce = true;
             loadDunTpls();
@@ -1058,9 +1224,24 @@
             loadDunWfList();
             wireDunWfEditor();
           }
+          if (target === 'probleemklanten' && !_dunProbLoadedOnce) {
+            _dunProbLoadedOnce = true;
+            wireDunProb();
+            loadDunProblemCustomers();
+          }
+          if (target === 'geschiedenis' && !_dunHistLoadedOnce) {
+            _dunHistLoadedOnce = true;
+            wireDunHistory();
+            loadDunHistory({ reset: true });
+          }
         }));
         // Wire de modal-knoppen (één keer).
         wireDunTplModal();
+        // Overzicht is default sub-tab: laad direct bij eerste opening Wanbetalers.
+        if (!_dunOvLoadedOnce) {
+          _dunOvLoadedOnce = true;
+          loadDunOverview();
+        }
       }
     }
   }
@@ -1597,6 +1778,599 @@
     document.getElementById('dunWfAddStepBtn')?.addEventListener('click', addDunWfStep);
     document.getElementById('dunWfSave')?.addEventListener('click', saveDunWf);
     document.getElementById('dunWfCancel')?.addEventListener('click', showDunWfEmptyState);
+  }
+
+  // ─── Dunning Overzicht sub-tab (PR B5) ─────────────────────────────────────
+  let _dunOvLoadedOnce = false;
+  let _dunOvData = null;
+  let _dunOvRefreshWired = false;
+
+  async function loadDunOverview() {
+    const activeTb = document.getElementById('dunOvActiveTbody');
+    const recentTb = document.getElementById('dunOvRecentTbody');
+    if (activeTb) activeTb.innerHTML = '<tr><td colspan="5" style="text-align:center;padding:24px;color:var(--text-faint)">Laden…</td></tr>';
+    if (recentTb) recentTb.innerHTML = '<tr><td colspan="5" style="text-align:center;padding:24px;color:var(--text-faint)">Laden…</td></tr>';
+    // Wire refresh-knop eenmalig.
+    if (!_dunOvRefreshWired) {
+      _dunOvRefreshWired = true;
+      document.getElementById('dunOvRefreshBtn')?.addEventListener('click', () => loadDunOverview());
+    }
+    try {
+      const r = await window.AgentShared.apiFetch('/api/finance-dunning-overview');
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        const msg = esc(d.error || ('HTTP ' + r.status));
+        if (activeTb) activeTb.innerHTML = `<tr><td colspan="5" style="text-align:center;padding:24px;color:#ef4444">Fout: ${msg}</td></tr>`;
+        if (recentTb) recentTb.innerHTML = `<tr><td colspan="5" style="text-align:center;padding:24px;color:#ef4444">Fout: ${msg}</td></tr>`;
+        return;
+      }
+      _dunOvData = d;
+      renderDunOvKpis(d.kpis || {});
+      renderDunOvActiveRuns(d.active_runs || []);
+      renderDunOvRecentEvents(d.recent_events || []);
+    } catch (e) {
+      console.error('[dunning-overview]', e);
+      const msg = esc(e.message);
+      if (activeTb) activeTb.innerHTML = `<tr><td colspan="5" style="text-align:center;padding:24px;color:#ef4444">Fout: ${msg}</td></tr>`;
+      if (recentTb) recentTb.innerHTML = `<tr><td colspan="5" style="text-align:center;padding:24px;color:#ef4444">Fout: ${msg}</td></tr>`;
+    }
+  }
+
+  function renderDunOvKpis(k) {
+    const strip = document.getElementById('dunOvKpis');
+    if (!strip) return;
+    const cell = (lbl, val, sub, alert) => {
+      const bg = alert
+        ? 'background:linear-gradient(135deg, rgba(239,68,68,.10), rgba(239,68,68,.03));border:1px solid rgba(239,68,68,.30)'
+        : '';
+      return `<div class="kpi-cell" style="${bg}"><div class="kpi-lbl">${lbl}</div><div class="kpi-val">${val}</div>${sub ? `<div class="kpi-lbl" style="margin-top:2px">${sub}</div>` : ''}</div>`;
+    };
+    const openCents = Number(k.openstaand_cents || 0);
+    const wanbetalers = Number(k.wanbetalers_count || 0);
+    const probleem = Number(k.probleemklanten_count || 0);
+    const actief = Number(k.actieve_workflows_count || 0);
+    const voltooid30 = Number(k.voltooid_30d_count || 0);
+    strip.innerHTML =
+      cell('Openstaand', fmtEur2Cents(openCents), `${Number(k.openstaand_count || 0)} facturen`) +
+      cell('Wanbetalers', String(wanbetalers), 'klanten in dunning') +
+      cell('Probleemklanten', String(probleem), '> 60 dagen overdue', probleem > 0) +
+      cell('Actieve workflows', String(actief), 'lopende runs') +
+      cell('Voltooid (30d)', String(voltooid30), 'laatste 30 dagen');
+  }
+
+  function renderDunOvActiveRuns(runs) {
+    const tb = document.getElementById('dunOvActiveTbody');
+    if (!tb) return;
+    if (!runs.length) {
+      tb.innerHTML = '<tr><td colspan="5" style="text-align:center;padding:24px;color:var(--text-faint)">Geen actieve workflows.</td></tr>';
+      return;
+    }
+    tb.innerHTML = runs.map((run, i) => {
+      const status = String(run.status || 'active');
+      const statusBadge = status === 'paused'
+        ? '<span class="sr-tag" style="background:rgba(245,158,11,.15);color:#f59e0b">Gepauzeerd</span>'
+        : '<span class="sr-tag green">Actief</span>';
+      const customerCell = run.customer_id
+        ? `<a href="/modules/klanten.html?id=${esc(run.customer_id)}&tab=facturen" style="color:var(--accent-cyan);text-decoration:none">${esc(run.customer_name || '—')}</a>`
+        : esc(run.customer_name || '—');
+      const wfName = esc(run.workflow_name || '—');
+      const stepInfo = run.current_step_order != null
+        ? `Stap ${esc(run.current_step_order)}${run.current_step_kind ? ` · ${esc(run.current_step_kind)}` : ''}`
+        : '—';
+      const nextActionRaw = run.next_action_at || run.next_run_at;
+      const nextAction = nextActionRaw ? esc(formatDunOvDateTime(nextActionRaw)) : '—';
+      const pauseBtn = status === 'active'
+        ? `<button class="sr-abtn" data-run-action="pause" data-run-id="${esc(run.id)}" type="button" style="font-size:11px;padding:4px 8px;margin-right:4px"><i class="ti ti-player-pause"></i> Pauzeer</button>`
+        : '';
+      const resumeBtn = status === 'paused'
+        ? `<button class="sr-abtn primary" data-run-action="resume" data-run-id="${esc(run.id)}" type="button" style="font-size:11px;padding:4px 8px;margin-right:4px"><i class="ti ti-player-play"></i> Hervat</button>`
+        : '';
+      const cancelBtn = `<button class="sr-abtn danger" data-run-action="cancel" data-run-id="${esc(run.id)}" type="button" style="font-size:11px;padding:4px 8px"><i class="ti ti-x"></i> Annuleer</button>`;
+      return `<tr data-run-id="${esc(run.id)}">
+        <td><div style="font-weight:600">${customerCell}</div><div style="font-size:11px;color:var(--text-faint);margin-top:2px">${statusBadge}</div></td>
+        <td>${wfName}</td>
+        <td>${stepInfo}</td>
+        <td>${nextAction}</td>
+        <td>${pauseBtn}${resumeBtn}${cancelBtn}</td>
+      </tr>`;
+    }).join('');
+    tb.querySelectorAll('[data-run-action]').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const runId = btn.dataset.runId;
+        const action = btn.dataset.runAction;
+        callRunControl(runId, action);
+      });
+    });
+  }
+
+  function renderDunOvRecentEvents(events) {
+    const tb = document.getElementById('dunOvRecentTbody');
+    if (!tb) return;
+    if (!events.length) {
+      tb.innerHTML = '<tr><td colspan="5" style="text-align:center;padding:24px;color:var(--text-faint)">Nog geen recente acties.</td></tr>';
+      return;
+    }
+    tb.innerHTML = events.map((ev) => {
+      const ts = ev.created_at ? esc(formatDunOvDateTime(ev.created_at)) : '—';
+      const customerCell = ev.customer_id
+        ? `<a href="/modules/klanten.html?id=${esc(ev.customer_id)}&tab=facturen" style="color:var(--accent-cyan);text-decoration:none">${esc(ev.customer_name || '—')}</a>`
+        : esc(ev.customer_name || '—');
+      const eventLabel = esc(ev.event_type || ev.event || '—');
+      const stepInfo = ev.step_order != null
+        ? `Stap ${esc(ev.step_order)}${ev.step_kind ? ` · ${esc(ev.step_kind)}` : ''}`
+        : '—';
+      const details = summarizeDunOvPayload(ev.payload || ev.details);
+      const runIdAttr = ev.run_id ? ` data-run-id="${esc(ev.run_id)}"` : '';
+      const cursor = ev.run_id ? 'cursor:pointer' : '';
+      return `<tr class="clickable-row"${runIdAttr} style="${cursor}">
+        <td style="font-size:11.5px;color:var(--text-dim)">${ts}</td>
+        <td>${customerCell}</td>
+        <td><span class="sr-tag" style="font-size:10.5px">${eventLabel}</span></td>
+        <td>${stepInfo}</td>
+        <td style="font-size:11.5px;color:var(--text-dim)">${esc(details)}</td>
+      </tr>`;
+    }).join('');
+    tb.querySelectorAll('tr[data-run-id]').forEach(tr => {
+      tr.addEventListener('click', (e) => {
+        if (e.target.closest('a, button')) return;
+        const runId = tr.dataset.runId;
+        if (runId) openDunRunDetailsModal(runId);
+      });
+    });
+  }
+
+  function summarizeDunOvPayload(p) {
+    if (!p) return '—';
+    try {
+      const obj = typeof p === 'string' ? JSON.parse(p) : p;
+      if (!obj || typeof obj !== 'object') return String(p).slice(0, 80);
+      // Kies meest informatieve velden voor compacte preview.
+      const parts = [];
+      if (obj.template_name) parts.push(`tpl: ${obj.template_name}`);
+      if (obj.channel) parts.push(obj.channel);
+      if (obj.to) parts.push(`→ ${obj.to}`);
+      if (obj.amount_cents != null) parts.push(fmtEur2Cents(obj.amount_cents));
+      if (obj.reason) parts.push(obj.reason);
+      if (obj.error) parts.push(`err: ${obj.error}`);
+      if (parts.length) return parts.join(' · ');
+      // Fallback: eerste 2 keys.
+      const keys = Object.keys(obj).slice(0, 2);
+      return keys.map(k => `${k}: ${String(obj[k]).slice(0, 30)}`).join(' · ') || '—';
+    } catch (e) {
+      return String(p).slice(0, 80);
+    }
+  }
+
+  function formatDunOvDateTime(s) {
+    if (!s) return '—';
+    const d = new Date(s);
+    if (isNaN(d.getTime())) return String(s);
+    const dd = String(d.getDate()).padStart(2, '0');
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    const yy = d.getFullYear();
+    const hh = String(d.getHours()).padStart(2, '0');
+    const mi = String(d.getMinutes()).padStart(2, '0');
+    return `${dd}-${mm}-${yy} ${hh}:${mi}`;
+  }
+
+  async function callRunControl(runId, action) {
+    if (!runId || !action) return;
+    const labels = { pause: 'pauzeren', resume: 'hervatten', cancel: 'annuleren' };
+    const label = labels[action] || action;
+    if (action === 'cancel' && !confirm('Workflow-run annuleren? Dit kan niet ongedaan worden gemaakt.')) return;
+    try {
+      const r = await window.AgentShared.apiFetch('/api/finance-dunning-run-control', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ run_id: runId, action }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        window.AgentShared.showToast(`${label} mislukt: ${d.error || ('HTTP ' + r.status)}`, 'error');
+        return;
+      }
+      window.AgentShared.showToast(`Run ${label === 'pauzeren' ? 'gepauzeerd' : (label === 'hervatten' ? 'hervat' : 'geannuleerd')}`, 'success');
+      loadDunOverview();
+    } catch (e) {
+      console.error('[dunOv run-control]', e);
+      window.AgentShared.showToast(`${label} mislukt: ${e.message}`, 'error');
+    }
+  }
+
+  // ─── Dunning Probleemklanten sub-tab (PR B5) ───────────────────────────────
+  let _dunProbLoadedOnce = false;
+  let _dunProbItems = [];
+  let _dunProbWired = false;
+
+  function wireDunProb() {
+    if (_dunProbWired) return;
+    _dunProbWired = true;
+    document.getElementById('dunProbRefreshBtn')?.addEventListener('click', () => loadDunProblemCustomers());
+  }
+
+  async function loadDunProblemCustomers() {
+    const tb = document.getElementById('dunProbTbody');
+    if (!tb) return;
+    tb.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:24px;color:var(--text-faint)">Laden…</td></tr>';
+    try {
+      const r = await window.AgentShared.apiFetch('/api/finance-dunning-problem-customers');
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        tb.innerHTML = `<tr><td colspan="7" style="text-align:center;padding:24px;color:#ef4444">Fout: ${esc(d.error || ('HTTP ' + r.status))}</td></tr>`;
+        return;
+      }
+      _dunProbItems = d.items || [];
+      renderDunProbRows(_dunProbItems);
+    } catch (e) {
+      console.error('[dunProb]', e);
+      tb.innerHTML = `<tr><td colspan="7" style="text-align:center;padding:24px;color:#ef4444">Fout: ${esc(e.message)}</td></tr>`;
+    }
+  }
+
+  function renderDunProbRows(items) {
+    const tb = document.getElementById('dunProbTbody');
+    if (!tb) return;
+    if (!items.length) {
+      tb.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:24px;color:var(--text-faint)">Geen probleemklanten gevonden.</td></tr>';
+      return;
+    }
+    tb.innerHTML = items.map((p, i) => {
+      const customerCell = p.customer_id
+        ? `<a href="/modules/klanten.html?id=${esc(p.customer_id)}&tab=facturen" style="color:var(--accent-cyan);text-decoration:none;font-weight:600">${esc(p.name || '—')}</a>`
+        : `<span style="font-weight:600">${esc(p.name || '—')}</span>`;
+      const emailLine = p.email ? `<div style="font-size:11px;color:var(--text-faint);margin-top:2px">${esc(p.email)}</div>` : '';
+      const oldestDue = p.oldest_due_date ? esc(fmtDateNl(p.oldest_due_date)) : '—';
+      const daysOver = Number(p.days_overdue_oldest || 0);
+      const daysCell = daysOver > 0
+        ? `<span style="color:${daysOver > 60 ? '#ef4444' : (daysOver > 30 ? '#f59e0b' : 'var(--text-dim)')};font-weight:600">${daysOver} dgn</span>`
+        : '<span style="color:var(--text-faint)">—</span>';
+      const wfBadge = p.has_active_run
+        ? '<span class="sr-tag green">Ja</span>'
+        : '<span class="sr-tag gray">Nee</span>';
+      const viewBtn = p.customer_id
+        ? `<a href="/modules/klanten.html?id=${esc(p.customer_id)}&tab=facturen" class="sr-abtn" style="font-size:11px;padding:4px 8px;text-decoration:none"><i class="ti ti-eye"></i> Bekijk</a>`
+        : '—';
+      return `<tr>
+        <td>${customerCell}${emailLine}</td>
+        <td style="text-align:center">${esc(p.open_invoice_count)}</td>
+        <td style="font-variant-numeric:tabular-nums">${fmtEur2Cents(p.total_open_amount)}</td>
+        <td>${oldestDue}</td>
+        <td>${daysCell}</td>
+        <td>${wfBadge}</td>
+        <td>${viewBtn}</td>
+      </tr>`;
+    }).join('');
+  }
+
+  // ─── Dunning Geschiedenis sub-tab (PR B5) ──────────────────────────────────
+  let _dunHistLoadedOnce = false;
+  let _dunHistItems = [];
+  let _dunHistTotal = 0;
+  let _dunHistOffset = 0;
+  const DUN_HIST_LIMIT = 50;
+  let _dunHistWired = false;
+
+  function wireDunHistory() {
+    if (_dunHistWired) return;
+    _dunHistWired = true;
+    document.getElementById('dunHistRefreshBtn')?.addEventListener('click', () => loadDunHistory({ reset: true }));
+    document.getElementById('dunHistMoreBtn')?.addEventListener('click', () => loadDunHistory({ reset: false }));
+    // Filter-changes => reload met reset.
+    document.getElementById('dunHistEventType')?.addEventListener('change', () => loadDunHistory({ reset: true }));
+    document.getElementById('dunHistFromDate')?.addEventListener('change', () => loadDunHistory({ reset: true }));
+    // Search-debounce
+    let searchTimer = null;
+    document.getElementById('dunHistSearch')?.addEventListener('input', () => {
+      clearTimeout(searchTimer);
+      searchTimer = setTimeout(() => loadDunHistory({ reset: true }), 300);
+    });
+  }
+
+  async function loadDunHistory({ reset = false } = {}) {
+    const tb = document.getElementById('dunHistTbody');
+    const pagerInfo = document.getElementById('dunHistPagerInfo');
+    const moreBtn = document.getElementById('dunHistMoreBtn');
+    if (!tb) return;
+    if (reset) {
+      _dunHistItems = [];
+      _dunHistOffset = 0;
+      tb.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:24px;color:var(--text-faint)">Laden…</td></tr>';
+    } else {
+      // Append-modus: zet "Meer laden"-knop op laden-stand.
+      if (moreBtn) { moreBtn.disabled = true; moreBtn.innerHTML = 'Laden…'; }
+    }
+    const params = new URLSearchParams();
+    params.set('limit', String(DUN_HIST_LIMIT));
+    params.set('offset', String(_dunHistOffset));
+    const eventType = document.getElementById('dunHistEventType')?.value || '';
+    const fromDate  = document.getElementById('dunHistFromDate')?.value  || '';
+    if (eventType) params.set('event_type', eventType);
+    if (fromDate)  params.set('from_date', fromDate);
+    try {
+      const r = await window.AgentShared.apiFetch('/api/finance-dunning-history?' + params.toString());
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        tb.innerHTML = `<tr><td colspan="6" style="text-align:center;padding:24px;color:#ef4444">Fout: ${esc(d.error || ('HTTP ' + r.status))}</td></tr>`;
+        if (moreBtn) { moreBtn.disabled = false; moreBtn.innerHTML = '<i class="ti ti-chevron-down" style="margin-right:4px"></i>Meer laden'; moreBtn.hidden = true; }
+        return;
+      }
+      const newItems = d.items || [];
+      _dunHistTotal = Number(d.total || 0);
+      _dunHistItems = reset ? newItems : _dunHistItems.concat(newItems);
+      _dunHistOffset = _dunHistItems.length;
+      // Client-side filter op zoektekst (klantnaam).
+      const search = (document.getElementById('dunHistSearch')?.value || '').trim().toLowerCase();
+      const visible = search
+        ? _dunHistItems.filter(it => String(it.customer_name || '').toLowerCase().includes(search))
+        : _dunHistItems;
+      renderDunHistRows(visible);
+      if (pagerInfo) {
+        const filteredNote = search ? ` (gefilterd: ${visible.length})` : '';
+        pagerInfo.textContent = `${_dunHistItems.length} events geladen van ${_dunHistTotal} totaal${filteredNote}`;
+      }
+      if (moreBtn) {
+        moreBtn.disabled = false;
+        moreBtn.innerHTML = '<i class="ti ti-chevron-down" style="margin-right:4px"></i>Meer laden';
+        moreBtn.hidden = !(d.has_more === true);
+      }
+    } catch (e) {
+      console.error('[dunHist]', e);
+      tb.innerHTML = `<tr><td colspan="6" style="text-align:center;padding:24px;color:#ef4444">Fout: ${esc(e.message)}</td></tr>`;
+      if (moreBtn) { moreBtn.disabled = false; moreBtn.innerHTML = '<i class="ti ti-chevron-down" style="margin-right:4px"></i>Meer laden'; }
+    }
+  }
+
+  function renderDunHistRows(items) {
+    const tb = document.getElementById('dunHistTbody');
+    if (!tb) return;
+    if (!items.length) {
+      tb.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:24px;color:var(--text-faint)">Geen events gevonden voor deze filters.</td></tr>';
+      return;
+    }
+    tb.innerHTML = items.map((ev) => {
+      const ts = ev.created_at ? esc(formatDunOvDateTime(ev.created_at)) : '—';
+      const customerCell = ev.customer_id
+        ? `<a href="/modules/klanten.html?id=${esc(ev.customer_id)}&tab=facturen" style="color:var(--accent-cyan);text-decoration:none">${esc(ev.customer_name || '—')}</a>`
+        : esc(ev.customer_name || '—');
+      const eventLabel = esc(ev.event_type || '—');
+      const wfName = esc(ev.workflow_name || '—');
+      const stepInfo = ev.step_type ? `<span style="font-family:monospace;font-size:11px">${esc(ev.step_type)}</span>` : '—';
+      // Truncated JSON payload.
+      let payloadStr = '—';
+      if (ev.payload && typeof ev.payload === 'object' && Object.keys(ev.payload).length > 0) {
+        try {
+          const json = JSON.stringify(ev.payload);
+          payloadStr = json.length > 100 ? json.slice(0, 100) + '…' : json;
+        } catch (e) { payloadStr = '(payload)'; }
+      }
+      const runIdAttr = ev.run_id ? ` data-run-id="${esc(ev.run_id)}"` : '';
+      const cursor = ev.run_id ? 'cursor:pointer' : '';
+      return `<tr class="clickable-row"${runIdAttr} style="${cursor}">
+        <td style="font-size:11.5px;color:var(--text-dim)">${ts}</td>
+        <td>${customerCell}</td>
+        <td style="font-size:12px">${wfName}</td>
+        <td><span class="sr-tag" style="font-size:10.5px">${eventLabel}</span></td>
+        <td>${stepInfo}</td>
+        <td style="font-size:11px;color:var(--text-dim);font-family:ui-monospace,Menlo,Consolas,monospace;word-break:break-all">${esc(payloadStr)}</td>
+      </tr>`;
+    }).join('');
+    tb.querySelectorAll('tr[data-run-id]').forEach(tr => {
+      tr.addEventListener('click', (e) => {
+        if (e.target.closest('a, button')) return;
+        const runId = tr.dataset.runId;
+        if (runId) openDunRunDetailsModal(runId);
+      });
+    });
+  }
+
+  // ─── Dunning Run-details modal (PR B5) ─────────────────────────────────────
+  let _dunRunDetailsCurrent = null;   // { runId, status, workflowId }
+  let _dunRunDetailsWired = false;
+
+  function wireDunRunDetailsModal() {
+    if (_dunRunDetailsWired) return;
+    _dunRunDetailsWired = true;
+    document.getElementById('dunRunDetailsClose')?.addEventListener('click', closeDunRunDetailsModal);
+    document.getElementById('dunRunDetailsCloseBtn')?.addEventListener('click', closeDunRunDetailsModal);
+    document.getElementById('dunRunDetailsModal')?.addEventListener('click', (e) => {
+      if (e.target.id === 'dunRunDetailsModal') closeDunRunDetailsModal();
+    });
+    document.getElementById('dunRunDetailsPauseBtn')?.addEventListener('click', () => runDetailsAction('pause'));
+    document.getElementById('dunRunDetailsResumeBtn')?.addEventListener('click', () => runDetailsAction('resume'));
+    document.getElementById('dunRunDetailsCancelBtn')?.addEventListener('click', () => runDetailsAction('cancel'));
+  }
+
+  async function openDunRunDetailsModal(runId) {
+    if (!runId) return;
+    wireDunRunDetailsModal();
+    _dunRunDetailsCurrent = { runId, status: null, workflowId: null };
+    const modal = document.getElementById('dunRunDetailsModal');
+    const titleEl = document.getElementById('dunRunDetailsTitle');
+    const subEl   = document.getElementById('dunRunDetailsSubtitle');
+    const statusEl = document.getElementById('dunRunDetailsStatus');
+    const stepsEl = document.getElementById('dunRunDetailsSteps');
+    const eventsEl = document.getElementById('dunRunDetailsEvents');
+    const errEl = document.getElementById('dunRunDetailsError');
+    if (titleEl) titleEl.textContent = 'Workflow-run';
+    if (subEl)   subEl.textContent = 'Laden…';
+    if (statusEl) statusEl.textContent = '';
+    if (stepsEl) stepsEl.innerHTML = '<div style="font-size:11.5px;color:var(--text-faint);text-align:center;padding:14px">Laden…</div>';
+    if (eventsEl) eventsEl.innerHTML = '<div style="font-size:11.5px;color:var(--text-faint);text-align:center;padding:14px">Laden…</div>';
+    if (errEl) { errEl.style.display = 'none'; errEl.textContent = ''; }
+    // Verberg actie-knoppen tot we status weten.
+    ['Pause', 'Resume', 'Cancel'].forEach(s => {
+      const b = document.getElementById('dunRunDetails' + s + 'Btn');
+      if (b) b.hidden = true;
+    });
+    modal.classList.remove('hidden');
+
+    try {
+      // Stap 1: zoek run in active_runs van overview (heeft customer + workflow + step-info).
+      // Als niet gevonden: probeer via recent_events.
+      let run = null;
+      if (_dunOvData) {
+        run = (_dunOvData.active_runs || []).find(r => r.id === runId) || null;
+        if (!run) {
+          const ev = (_dunOvData.recent_events || []).find(e => e.run_id === runId);
+          if (ev) run = { id: runId, workflow_id: null, workflow_name: ev.workflow_name, customer_id: ev.customer_id, customer_name: ev.customer_name, current_step_id: null };
+        }
+      }
+      if (!run) {
+        // Fallback: overview refreshen (geeft up-to-date data).
+        try {
+          const r = await window.AgentShared.apiFetch('/api/finance-dunning-overview');
+          const d = await r.json().catch(() => ({}));
+          if (r.ok) {
+            _dunOvData = d;
+            run = (d.active_runs || []).find(x => x.id === runId) || null;
+            if (!run) {
+              const ev = (d.recent_events || []).find(e => e.run_id === runId);
+              if (ev) run = { id: runId, workflow_id: null, workflow_name: ev.workflow_name, customer_id: ev.customer_id, customer_name: ev.customer_name, current_step_id: null };
+            }
+          }
+        } catch (e) { /* ignore */ }
+      }
+      if (!run) {
+        if (errEl) { errEl.style.display = 'block'; errEl.textContent = 'Run niet gevonden in overview-cache.'; }
+        if (subEl) subEl.textContent = 'Run-ID: ' + runId;
+        return;
+      }
+      // Status: bij overview active_runs is status="active"; bij recent-event-only weten we niet zeker.
+      const runStatus = (_dunOvData?.active_runs || []).find(r => r.id === runId) ? 'active' : 'unknown';
+      _dunRunDetailsCurrent.status = runStatus;
+      _dunRunDetailsCurrent.workflowId = run.workflow_id || null;
+      const wfName = run.workflow_name || '—';
+      const custName = run.customer_name || '—';
+      if (titleEl) titleEl.textContent = wfName;
+      if (subEl)   subEl.textContent = 'Klant: ' + custName;
+      if (statusEl) {
+        statusEl.innerHTML = runStatus === 'active'
+          ? '<span class="sr-tag green">Actief</span>'
+          : (runStatus === 'paused' ? '<span class="sr-tag" style="background:rgba(245,158,11,.15);color:#f59e0b">Gepauzeerd</span>' : '<span class="sr-tag gray">—</span>');
+      }
+      // Stap 2: load steps (alleen als workflow_id bekend).
+      if (run.workflow_id) {
+        try {
+          const wfR = await window.AgentShared.apiFetch('/api/finance-dunning-workflows-detail?id=' + encodeURIComponent(run.workflow_id));
+          const wfD = await wfR.json().catch(() => ({}));
+          if (wfR.ok) {
+            renderDunRunDetailsSteps(wfD.steps || [], run.current_step_id);
+          } else {
+            stepsEl.innerHTML = `<div style="font-size:11.5px;color:#ef4444;padding:8px">Fout: ${esc(wfD.error || ('HTTP ' + wfR.status))}</div>`;
+          }
+        } catch (e) {
+          stepsEl.innerHTML = `<div style="font-size:11.5px;color:#ef4444;padding:8px">Fout: ${esc(e.message)}</div>`;
+        }
+      } else {
+        stepsEl.innerHTML = '<div style="font-size:11.5px;color:var(--text-faint);padding:8px">Workflow-ID niet beschikbaar voor deze run.</div>';
+      }
+      // Stap 3: load events voor deze run (history-endpoint, geen run_id-filter beschikbaar,
+      // dus halen 200 op en filteren client-side).
+      try {
+        const histR = await window.AgentShared.apiFetch('/api/finance-dunning-history?limit=200&offset=0');
+        const histD = await histR.json().catch(() => ({}));
+        if (histR.ok) {
+          const evs = (histD.items || []).filter(e => e.run_id === runId);
+          renderDunRunDetailsEvents(evs);
+        } else {
+          eventsEl.innerHTML = `<div style="font-size:11.5px;color:#ef4444;padding:8px">Fout: ${esc(histD.error || ('HTTP ' + histR.status))}</div>`;
+        }
+      } catch (e) {
+        eventsEl.innerHTML = `<div style="font-size:11.5px;color:#ef4444;padding:8px">Fout: ${esc(e.message)}</div>`;
+      }
+      // Actie-knoppen op basis van status.
+      const pauseBtn  = document.getElementById('dunRunDetailsPauseBtn');
+      const resumeBtn = document.getElementById('dunRunDetailsResumeBtn');
+      const cancelBtn = document.getElementById('dunRunDetailsCancelBtn');
+      if (pauseBtn)  pauseBtn.hidden  = (runStatus !== 'active');
+      if (resumeBtn) resumeBtn.hidden = (runStatus !== 'paused');
+      if (cancelBtn) cancelBtn.hidden = (runStatus !== 'active' && runStatus !== 'paused');
+    } catch (e) {
+      console.error('[dunRunDetails]', e);
+      if (errEl) { errEl.style.display = 'block'; errEl.textContent = e.message; }
+    }
+  }
+
+  function renderDunRunDetailsSteps(steps, currentStepId) {
+    const el = document.getElementById('dunRunDetailsSteps');
+    if (!el) return;
+    if (!steps.length) {
+      el.innerHTML = '<div style="font-size:11.5px;color:var(--text-faint);padding:8px">Geen stappen geconfigureerd.</div>';
+      return;
+    }
+    el.innerHTML = steps.map((s) => {
+      const isCurrent = currentStepId && s.id === currentStepId;
+      const bg = isCurrent
+        ? 'background:rgba(56,189,248,.10);border:1px solid rgba(56,189,248,.30)'
+        : 'background:rgba(255,255,255,0.02);border:1px solid var(--border-subtle, #2b2f3a)';
+      const marker = isCurrent
+        ? '<i class="ti ti-player-play" style="color:#38bdf8;margin-right:6px"></i>'
+        : '<span style="display:inline-block;width:18px;text-align:center;color:var(--text-faint);margin-right:6px">·</span>';
+      const cfgPreview = s.config && typeof s.config === 'object'
+        ? Object.entries(s.config).slice(0, 3).map(([k, v]) => `${k}=${String(v).slice(0, 30)}`).join(' · ')
+        : '';
+      return `<div style="${bg};border-radius:6px;padding:8px 10px;display:flex;align-items:center;gap:8px">
+        <div style="font-size:11.5px;color:var(--text-faint);min-width:32px">#${esc(s.step_order)}</div>
+        <div style="flex:1">
+          <div style="font-size:12.5px;font-weight:600">${marker}${esc(s.step_type)}</div>
+          ${cfgPreview ? `<div style="font-size:11px;color:var(--text-dim);margin-top:2px;font-family:ui-monospace,Menlo,Consolas,monospace">${esc(cfgPreview)}</div>` : ''}
+        </div>
+      </div>`;
+    }).join('');
+  }
+
+  function renderDunRunDetailsEvents(events) {
+    const el = document.getElementById('dunRunDetailsEvents');
+    if (!el) return;
+    if (!events.length) {
+      el.innerHTML = '<div style="font-size:11.5px;color:var(--text-faint);padding:8px">Nog geen events voor deze run.</div>';
+      return;
+    }
+    // Chronologisch oudste eerst.
+    const sorted = events.slice().sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)));
+    el.innerHTML = sorted.map(ev => {
+      const ts = ev.created_at ? esc(formatDunOvDateTime(ev.created_at)) : '—';
+      const payloadSummary = summarizeDunOvPayload(ev.payload);
+      return `<div style="background:rgba(255,255,255,0.02);border:1px solid var(--border-subtle, #2b2f3a);border-radius:6px;padding:8px 10px">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px">
+          <span class="sr-tag" style="font-size:10.5px">${esc(ev.event_type || '—')}</span>
+          <span style="font-size:11px;color:var(--text-faint)">${ts}</span>
+        </div>
+        <div style="font-size:11px;color:var(--text-dim);margin-top:4px">${esc(payloadSummary)}</div>
+      </div>`;
+    }).join('');
+  }
+
+  function closeDunRunDetailsModal() {
+    document.getElementById('dunRunDetailsModal')?.classList.add('hidden');
+    _dunRunDetailsCurrent = null;
+  }
+
+  async function runDetailsAction(action) {
+    if (!_dunRunDetailsCurrent?.runId) return;
+    const runId = _dunRunDetailsCurrent.runId;
+    if (action === 'cancel' && !confirm('Workflow-run annuleren? Dit kan niet ongedaan worden gemaakt.')) return;
+    const labels = { pause: 'pauzeren', resume: 'hervatten', cancel: 'annuleren' };
+    const label = labels[action] || action;
+    try {
+      const r = await window.AgentShared.apiFetch('/api/finance-dunning-run-control', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ run_id: runId, action }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        window.AgentShared.showToast(`${label} mislukt: ${d.error || ('HTTP ' + r.status)}`, 'error');
+        return;
+      }
+      window.AgentShared.showToast(`Run ${label === 'pauzeren' ? 'gepauzeerd' : (label === 'hervatten' ? 'hervat' : 'geannuleerd')}`, 'success');
+      closeDunRunDetailsModal();
+      loadDunOverview();
+    } catch (e) {
+      console.error('[dunRunDetails action]', e);
+      window.AgentShared.showToast(`${label} mislukt: ${e.message}`, 'error');
+    }
   }
 
   async function loadInboxConfigStatus() {
