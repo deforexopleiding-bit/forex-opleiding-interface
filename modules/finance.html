@@ -1089,6 +1089,10 @@
 
     <!-- Stap 1: lijst + zoek -->
     <div id="inboxTplStep1" style="flex:1;min-height:0;display:flex;flex-direction:column;gap:12px;overflow:hidden">
+      <div style="font-size:12px;line-height:1.5;color:var(--text-dim);background:rgba(245,158,11,.08);border:1px solid rgba(245,158,11,.25);border-radius:6px;padding:8px 10px;display:flex;align-items:flex-start;gap:8px">
+        <i class="ti ti-info-circle" style="font-size:14px;color:#f59e0b;margin-top:1px;flex:0 0 auto"></i>
+        <span>Buiten het 24-uurs venster moet je een door Meta goedgekeurde template gebruiken. Binnen het venster mag je gewoon vrij tekst sturen.</span>
+      </div>
       <input id="inboxTplSearchInput" type="search" class="fin-input" placeholder="Zoek op naam of inhoud…" autocomplete="off" style="font-size:13px"/>
       <div style="flex:1;min-height:0;overflow:auto;border:1px solid var(--border-subtle, rgba(255,255,255,.08));border-radius:8px">
         <ul id="inboxTplListUl" style="list-style:none;margin:0;padding:0">
@@ -2810,7 +2814,11 @@
     }
     wrap.innerHTML = _inboxMessages.map(m => {
       const out = (m.direction === 'out');
-      const body = m.body || (m.template_name ? ('[template] ' + m.template_name) : (m.media_type ? ('[' + m.media_type + ']') : ''));
+      // Detect template-message: ofwel expliciete type-kolom, ofwel template_name aanwezig,
+      // ofwel meta_template_name veld in payload. Toon "via template" badge bij outgoing.
+      const tplName = m.template_name || m.meta_template_name || null;
+      const isTpl = out && (m.type === 'template' || !!tplName);
+      const body = m.body || (tplName ? ('[template] ' + tplName) : (m.media_type ? ('[' + m.media_type + ']') : ''));
       const time = fmtRelTime(m.sent_at || m.created_at);
       const statusIcon = out ? _inboxStatusIcon(m.status) : '';
       const failed = (m.status === 'failed');
@@ -2822,8 +2830,12 @@
       const failedRow = (out && failed && m.failed_reason)
         ? `<div style="font-size:10.5px;color:#fca5a5;margin-top:3px">${esc(m.failed_reason)}</div>`
         : '';
+      const tplBadge = isTpl
+        ? `<div style="display:inline-flex;align-items:center;gap:3px;margin-bottom:4px;padding:1px 6px;border-radius:8px;background:rgba(245,158,11,.18);color:#fbbf24;font-size:10px;font-weight:600;letter-spacing:.02em" title="${esc(tplName || '')}"><i class="ti ti-template" style="font-size:11px"></i> via template</div>`
+        : '';
       return `<div style="display:flex;justify-content:${align};width:100%">
         <div style="max-width:72%;padding:8px 12px;border-radius:14px;${bg};font-size:13px;line-height:1.45;word-wrap:break-word;white-space:pre-wrap">
+          ${tplBadge}
           <div>${esc(body)}</div>
           ${failedRow}
           <div style="display:flex;gap:6px;justify-content:flex-end;align-items:center;margin-top:4px;font-size:10.5px;opacity:.85">
@@ -2925,7 +2937,10 @@
   }
 
   async function sendInboxText() {
-    if (!_inboxActiveConvId) return;
+    if (!_inboxActiveConvId) {
+      window.AgentShared.showToast('Eerst gesprek selecteren', 'error');
+      return;
+    }
     const ta = document.getElementById('inboxReplyTextArea');
     if (!ta) return;
     const body = (ta.value || '').trim();
@@ -2975,7 +2990,10 @@
   }
 
   async function sendInboxTemplate() {
-    if (!_inboxActiveConvId) return;
+    if (!_inboxActiveConvId) {
+      window.AgentShared.showToast('Eerst gesprek selecteren', 'error');
+      return;
+    }
     const inp = document.getElementById('inboxReplyTemplateName');
     if (!inp) return;
     const template_name = (inp.value || '').trim();
@@ -3228,10 +3246,41 @@
     if (modal) modal.classList.add('hidden');
   }
 
+  // Heeft de template een header met variabele placeholder ({{N}}) in header_content.text?
+  // C3 v1 ondersteunt geen header-variabelen — alleen body-vars.
+  function _inboxTplHeaderHasVars(tpl) {
+    if (!tpl) return false;
+    const ht = String(tpl.header_type || 'NONE').toUpperCase();
+    if (!ht || ht === 'NONE') return false;
+    // TEXT-header: kijk naar header_content.text
+    if (ht === 'TEXT') {
+      const txt = (tpl.header_content && (tpl.header_content.text || tpl.header_content.content)) || '';
+      return /\{\{\s*\d+\s*\}\}/.test(String(txt));
+    }
+    // Media-headers (IMAGE/VIDEO/DOCUMENT) vereisen altijd een variable-link → niet ondersteund in v1.
+    if (ht === 'IMAGE' || ht === 'VIDEO' || ht === 'DOCUMENT') return true;
+    return false;
+  }
+
   function selectInboxTpl(tpl) {
     if (!tpl) return;
     _inboxTplSelected = tpl;
     _inboxTplShowError('');
+
+    // Header-vars guard: disable Verstuur + toon waarschuwing als header variabelen heeft.
+    const sendBtnEl = document.getElementById('inboxTplSendBtn');
+    if (_inboxTplHeaderHasVars(tpl)) {
+      _inboxTplShowError('Header-variabelen worden in deze versie niet ondersteund — verstuur of pas template aan.');
+      if (sendBtnEl) {
+        sendBtnEl.disabled = true;
+        sendBtnEl.title = 'Header met variabele wordt niet ondersteund in deze versie';
+      }
+    } else {
+      if (sendBtnEl) {
+        sendBtnEl.disabled = false;
+        sendBtnEl.title = '';
+      }
+    }
 
     // Header-velden
     const nameEl = document.getElementById('inboxTplStep2Name');
@@ -3297,6 +3346,11 @@
     }
     if (!_inboxTplSelected) {
       _inboxTplShowError('Geen template geselecteerd');
+      return;
+    }
+    // Defense-in-depth: header met vars wordt niet ondersteund in C3 v1.
+    if (_inboxTplHeaderHasVars(_inboxTplSelected)) {
+      _inboxTplShowError('Header-variabelen worden in deze versie niet ondersteund — verstuur of pas template aan.');
       return;
     }
     // Validate: alle keys moeten bestaan (lege string toegestaan), geen lege keys.
@@ -3487,6 +3541,8 @@
       _inboxTplSelected = null;
       _inboxTplVars = {};
       _inboxTplShowError('');
+      const sb = document.getElementById('inboxTplSendBtn');
+      if (sb) { sb.disabled = false; sb.title = ''; }
       _inboxTplShowStep(1);
     });
     if (tplSendBtn)   tplSendBtn.addEventListener('click', () => sendInboxTpl());

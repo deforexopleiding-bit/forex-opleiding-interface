@@ -132,6 +132,29 @@ export default async function handler(req, res) {
       console.error('[inbox-send-template] template lookup exception:', e.message);
     }
 
+    // Harde status-guard: als template lokaal bestaat maar NIET APPROVED is,
+    // weiger met 409. Dit voorkomt Meta-rejections bij templates die nog in
+    // PENDING/REJECTED/DRAFT staan. Lokaal-onbekende templates worden NIET
+    // geblokkeerd (Meta blijft autoritatief — zie warn-tak hierboven).
+    try {
+      const { data: guardRow, error: guardErr } = await supabaseAdmin
+        .from('whatsapp_meta_templates')
+        .select('status')
+        .eq('name', templateName)
+        .eq('language', language)
+        .maybeSingle();
+      if (guardErr) {
+        console.error('[inbox-send-template] template status-guard lookup:', guardErr.message);
+      } else if (guardRow && guardRow.status && guardRow.status !== 'APPROVED') {
+        return res.status(409).json({
+          error: 'Template status is niet APPROVED — gebruik admin -> WhatsApp Templates -> Sync met Meta',
+          status: guardRow.status,
+        });
+      }
+    } catch (e) {
+      console.error('[inbox-send-template] template status-guard exception:', e.message);
+    }
+
     // Build Meta components-array uit variables object.
     // C3 v1: alleen body-placeholders {{1}}, {{2}}, ... worden ondersteund.
     // Sortering op numerieke key zodat parameters in juiste volgorde gaan.
