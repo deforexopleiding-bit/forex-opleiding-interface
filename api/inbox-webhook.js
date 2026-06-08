@@ -127,11 +127,11 @@ async function logInboxAudit(req, { action, entityType, entityId, afterJson }) {
  *
  * Returnt { id, created } — created=true bij nieuwe conversation (voor audit-log).
  */
-async function upsertConversation(req, { phoneE164Plus, displayName, inboundTimestamp, previewText }) {
+async function upsertConversation(req, { phoneE164Plus, displayName, inboundTimestamp, previewText, phoneNumberId }) {
   // 1. Bestaande conversation ophalen
   const { data: existing, error: selErr } = await supabaseAdmin
     .from('whatsapp_conversations')
-    .select('id, customer_id, unread_count')
+    .select('id, customer_id, unread_count, phone_number_id')
     .eq('phone_number', phoneE164Plus)
     .maybeSingle();
   if (selErr) {
@@ -152,6 +152,12 @@ async function upsertConversation(req, { phoneE164Plus, displayName, inboundTime
       last_inbound_at:      tsIso,
     };
     if (displayName) updatePayload.display_name = displayName;
+    // phone_number_id: preserve original mapping — alleen zetten als nog NULL.
+    // Bij multi-line setup is de eerst-binnenkomende lijn leidend; switchen
+    // zou outbound-routing breken (we sturen terug via dezelfde lijn).
+    if (phoneNumberId && !existing.phone_number_id) {
+      updatePayload.phone_number_id = phoneNumberId;
+    }
     const { error: updErr } = await supabaseAdmin
       .from('whatsapp_conversations')
       .update(updatePayload)
@@ -167,6 +173,7 @@ async function upsertConversation(req, { phoneE164Plus, displayName, inboundTime
   const customerId = await findCustomerByPhone(phoneE164Plus);
   const insertPayload = {
     phone_number:         phoneE164Plus,
+    phone_number_id:      phoneNumberId || null,
     display_name:         displayName || null,
     customer_id:          customerId,
     status:               'open',
@@ -199,7 +206,12 @@ async function upsertConversation(req, { phoneE164Plus, displayName, inboundTime
     action:     'whatsapp.conversation_created',
     entityType: 'whatsapp_conversation',
     entityId:   inserted.id,
-    afterJson:  { phone_number: phoneE164Plus, customer_id: customerId, display_name: displayName || null },
+    afterJson:  {
+      phone_number:    phoneE164Plus,
+      phone_number_id: phoneNumberId || null,
+      customer_id:     customerId,
+      display_name:    displayName || null,
+    },
   });
   if (customerId) {
     await logInboxAudit(req, {
@@ -406,6 +418,14 @@ export default async function handler(req, res) {
           const contacts = Array.isArray(value.contacts) ? value.contacts : [];
           const messages = Array.isArray(value.messages) ? value.messages : [];
           const statuses = Array.isArray(value.statuses) ? value.statuses : [];
+          // value.metadata levert phone_number_id van de WABA-lijn die het
+          // bericht ontving + display_phone_number (zonder +). We bewaren
+          // phone_number_id op de conversation zodat we outbound antwoorden
+          // via dezelfde lijn kunnen sturen (module-scoping).
+          const metadata = value.metadata || {};
+          const recvPhoneNumberId = metadata.phone_number_id
+            ? String(metadata.phone_number_id)
+            : null;
 
           // ── Inbound messages ─────────────────────────────────────────────
           for (const msg of messages) {
@@ -432,6 +452,7 @@ export default async function handler(req, res) {
                 displayName,
                 inboundTimestamp: tsDate,
                 previewText: preview,
+                phoneNumberId: recvPhoneNumberId,
               });
 
               // 2. Insert message
