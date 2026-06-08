@@ -218,6 +218,7 @@
       <div class="sr-segments" id="camtSubNav" style="margin-bottom:14px">
         <button class="sr-seg active" data-camt-sub="transactions" type="button">Transacties</button>
         <button class="sr-seg" data-camt-sub="matches" type="button">Matches <span id="camtMatchesBadge" style="display:none;margin-left:6px;padding:2px 6px;background:#10b981;color:#fff;border-radius:999px;font-size:10px;font-weight:600"></span></button>
+        <button class="sr-seg" data-camt-sub="config" type="button">Config</button>
       </div>
 
       <!-- Sub-view: Transacties (default — saldo-card + upload + filter + tabel) -->
@@ -231,23 +232,6 @@
         </div>
         <button class="sr-ibtn" id="camtBalanceRefresh" type="button" title="Saldo vernieuwen"><i class="ti ti-refresh"></i></button>
       </div>
-      <!-- Upload-sectie -->
-      <div style="margin-bottom:18px;padding:16px 18px;border:2px dashed var(--border-subtle, #d1d5db);border-radius:10px;background:rgba(255,255,255,0.02)">
-        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap">
-          <div>
-            <div style="font-size:14px;font-weight:600;margin-bottom:4px">Importeer CAMT-bestand</div>
-            <div style="font-size:12px;color:var(--text-faint);line-height:1.5">Download van Mijn ING Zakelijk → Rekeningafschriften → CAMT (.xml). Sleep hier naartoe of klik om te kiezen.</div>
-          </div>
-          <div style="display:flex;gap:8px;align-items:center">
-            <input type="file" id="camtFileInput" accept=".xml,application/xml,text/xml" style="display:none"/>
-            <button class="sr-abtn primary" id="camtUploadBtn" type="button"><i class="ti ti-upload"></i> Kies bestand</button>
-          </div>
-        </div>
-        <div id="camtUploadStatus" style="margin-top:10px;font-size:12.5px;display:none"></div>
-        <div id="camtUploadDrop" style="margin-top:10px;padding:14px;text-align:center;border:1px dashed var(--border-subtle, #d1d5db);border-radius:8px;font-size:12px;color:var(--text-faint);background:rgba(0,0,0,0.02)">Of sleep een .xml-bestand op deze plek</div>
-      </div>
-      <!-- Lijst recente statements -->
-      <div id="camtStatementsList" style="margin-bottom:18px;font-size:12.5px"></div>
       <!-- Filter-strip -->
       <div class="sr-filterstrip" id="camtBankFilters" style="margin-bottom:12px;flex-wrap:wrap;gap:8px;align-items:center">
         <div class="sr-segments" id="camtBankDirSeg">
@@ -281,48 +265,6 @@
 
       <!-- Sub-view: Matches (verborgen by default) -->
       <div id="camtSubMatches" hidden>
-        <!-- Autopilot-block -->
-        <div style="margin-bottom:14px;padding:14px 16px;border:1px solid var(--border-subtle, #e5e7eb);border-radius:10px;background:rgba(255,255,255,0.02)">
-          <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
-            <div>
-              <label style="display:flex;align-items:center;gap:10px;cursor:pointer;font-size:13px;font-weight:600">
-                <input type="checkbox" id="matchAutoToggle" style="width:auto;cursor:pointer"/>
-                <span>Automatisch matchen bij hoge zekerheid (autopilot)</span>
-              </label>
-              <div id="matchAutoMeta" style="font-size:11.5px;color:var(--text-faint);margin-top:4px">Laden…</div>
-            </div>
-            <div id="matchAutoThresholdBox" style="display:none;align-items:center;gap:8px">
-              <label style="font-size:12px;color:var(--text-dim)">Drempel</label>
-              <input id="matchAutoThreshold" type="range" min="50" max="100" step="5" value="95" style="width:140px"/>
-              <span id="matchAutoThresholdVal" style="font-size:12.5px;font-weight:600;min-width:32px">95</span>
-              <button class="sr-abtn primary" id="matchAutoSave" type="button" style="font-size:12px">Opslaan</button>
-            </div>
-          </div>
-          <div id="matchAutoStatus" style="display:none;margin-top:8px;font-size:12px"></div>
-        </div>
-
-        <!-- Bulk-matcher: ééns draaien voor historische data zonder candidates -->
-        <div style="margin-bottom:14px;padding:12px 16px;border:1px dashed var(--border-subtle, #e5e7eb);border-radius:10px;background:rgba(255,255,255,0.02);display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
-          <div>
-            <div style="font-size:13px;font-weight:600">Bulk-matcher voor historische transacties</div>
-            <div style="font-size:11.5px;color:var(--text-faint);margin-top:2px">Genereert match-kandidaten voor camt-transacties die nog niet beoordeeld zijn. Autopilot-bevestiging wordt toegepast als die aanstaat.</div>
-          </div>
-          <button class="sr-abtn primary" id="matchBulkRunBtn" type="button" style="font-size:12.5px">
-            <i class="ti ti-player-play" style="margin-right:4px"></i>Match historische data
-          </button>
-        </div>
-
-        <!-- Bulk re-sync: invoices opnieuw spiegelen tegen TL (stale paid-mismatch fix) -->
-        <div style="margin-bottom:14px;padding:12px 16px;border:1px dashed var(--border-subtle, #e5e7eb);border-radius:10px;background:rgba(255,255,255,0.02);display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
-          <div>
-            <div style="font-size:13px;font-weight:600">Re-sync open facturen met TL</div>
-            <div style="font-size:11.5px;color:var(--text-faint);margin-top:2px">Haalt alle openstaande facturen opnieuw op uit Teamleader om stale paid-statussen te herstellen. Handig na de cursor-overshoot fix om historische misses op te ruimen.</div>
-          </div>
-          <button class="sr-abtn primary" id="invBulkResyncBtn" type="button" style="font-size:12.5px">
-            <i class="ti ti-refresh" style="margin-right:4px"></i>Re-sync open facturen met TL
-          </button>
-        </div>
-
         <!-- Filter-strip -->
         <div class="sr-filterstrip" style="margin-bottom:12px;flex-wrap:wrap;gap:8px;align-items:center">
           <div class="sr-segments" id="matchStatusSeg">
@@ -353,6 +295,83 @@
           </table>
         </div>
         <div id="matchPager" style="display:flex;justify-content:space-between;align-items:center;margin-top:12px;font-size:12.5px;color:var(--text-dim)"></div>
+      </div>
+
+      <!-- Sub-view: Config (verborgen by default — CAMT-import + Matching + Onderhoud) -->
+      <div id="camtSubConfig" hidden>
+        <!-- Card: CAMT-import -->
+        <div style="margin-bottom:14px;padding:14px 16px;border:1px solid var(--border-subtle, #e5e7eb);border-radius:10px;background:rgba(255,255,255,0.02)">
+          <div style="font-size:14px;font-weight:700;margin-bottom:4px">CAMT-import</div>
+          <div style="font-size:12px;color:var(--text-faint);margin-bottom:12px;line-height:1.5">Upload een ISO 20022 CAMT.053 bestand (.xml) vanaf Mijn ING Zakelijk → Rekeningafschriften. Transacties worden automatisch gespiegeld naar de DB en getoond op de Transacties-tab.</div>
+          <!-- Upload-sectie -->
+          <div style="margin-bottom:14px;padding:16px 18px;border:2px dashed var(--border-subtle, #d1d5db);border-radius:10px;background:rgba(255,255,255,0.02)">
+            <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap">
+              <div>
+                <div style="font-size:14px;font-weight:600;margin-bottom:4px">Importeer CAMT-bestand</div>
+                <div style="font-size:12px;color:var(--text-faint);line-height:1.5">Download van Mijn ING Zakelijk → Rekeningafschriften → CAMT (.xml). Sleep hier naartoe of klik om te kiezen.</div>
+              </div>
+              <div style="display:flex;gap:8px;align-items:center">
+                <input type="file" id="camtFileInput" accept=".xml,application/xml,text/xml" style="display:none"/>
+                <button class="sr-abtn primary" id="camtUploadBtn" type="button"><i class="ti ti-upload"></i> Kies bestand</button>
+              </div>
+            </div>
+            <div id="camtUploadStatus" style="margin-top:10px;font-size:12.5px;display:none"></div>
+            <div id="camtUploadDrop" style="margin-top:10px;padding:14px;text-align:center;border:1px dashed var(--border-subtle, #d1d5db);border-radius:8px;font-size:12px;color:var(--text-faint);background:rgba(0,0,0,0.02)">Of sleep een .xml-bestand op deze plek</div>
+          </div>
+          <!-- Lijst recente statements -->
+          <div id="camtStatementsList" style="font-size:12.5px"></div>
+        </div>
+
+        <!-- Card: Matching -->
+        <div style="margin-bottom:14px;padding:14px 16px;border:1px solid var(--border-subtle, #e5e7eb);border-radius:10px;background:rgba(255,255,255,0.02)">
+          <div style="font-size:14px;font-weight:700;margin-bottom:4px">Matching</div>
+          <div style="font-size:12px;color:var(--text-faint);margin-bottom:12px;line-height:1.5">Stel autopilot in voor automatische factuurkoppeling bij hoge match-zekerheid, of draai eenmalig een bulk-matcher voor historische transacties zonder kandidaten.</div>
+          <!-- Autopilot-block -->
+          <div style="margin-bottom:12px;padding:14px 16px;border:1px solid var(--border-subtle, #e5e7eb);border-radius:10px;background:rgba(255,255,255,0.02)">
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
+              <div>
+                <label style="display:flex;align-items:center;gap:10px;cursor:pointer;font-size:13px;font-weight:600">
+                  <input type="checkbox" id="matchAutoToggle" style="width:auto;cursor:pointer"/>
+                  <span>Automatisch matchen bij hoge zekerheid (autopilot)</span>
+                </label>
+                <div id="matchAutoMeta" style="font-size:11.5px;color:var(--text-faint);margin-top:4px">Laden…</div>
+              </div>
+              <div id="matchAutoThresholdBox" style="display:none;align-items:center;gap:8px">
+                <label style="font-size:12px;color:var(--text-dim)">Drempel</label>
+                <input id="matchAutoThreshold" type="range" min="50" max="100" step="5" value="95" style="width:140px"/>
+                <span id="matchAutoThresholdVal" style="font-size:12.5px;font-weight:600;min-width:32px">95</span>
+                <button class="sr-abtn primary" id="matchAutoSave" type="button" style="font-size:12px">Opslaan</button>
+              </div>
+            </div>
+            <div id="matchAutoStatus" style="display:none;margin-top:8px;font-size:12px"></div>
+          </div>
+          <!-- Bulk-matcher -->
+          <div style="padding:12px 16px;border:1px dashed var(--border-subtle, #e5e7eb);border-radius:10px;background:rgba(255,255,255,0.02);display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
+            <div>
+              <div style="font-size:13px;font-weight:600">Bulk-matcher voor historische transacties</div>
+              <div style="font-size:11.5px;color:var(--text-faint);margin-top:2px">Genereert match-kandidaten voor camt-transacties die nog niet beoordeeld zijn. Autopilot-bevestiging wordt toegepast als die aanstaat.</div>
+            </div>
+            <button class="sr-abtn primary" id="matchBulkRunBtn" type="button" style="font-size:12.5px">
+              <i class="ti ti-player-play" style="margin-right:4px"></i>Match historische data
+            </button>
+          </div>
+        </div>
+
+        <!-- Card: Onderhoud -->
+        <div style="margin-bottom:14px;padding:14px 16px;border:1px solid var(--border-subtle, #e5e7eb);border-radius:10px;background:rgba(255,255,255,0.02)">
+          <div style="font-size:14px;font-weight:700;margin-bottom:4px">Onderhoud</div>
+          <div style="font-size:12px;color:var(--text-faint);margin-bottom:12px;line-height:1.5">Periodieke onderhoudsacties voor data-consistentie tussen Teamleader en de lokale spiegel.</div>
+          <!-- Bulk re-sync -->
+          <div style="padding:12px 16px;border:1px dashed var(--border-subtle, #e5e7eb);border-radius:10px;background:rgba(255,255,255,0.02);display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
+            <div>
+              <div style="font-size:13px;font-weight:600">Re-sync open facturen met TL</div>
+              <div style="font-size:11.5px;color:var(--text-faint);margin-top:2px">Haalt alle openstaande facturen opnieuw op uit Teamleader om stale paid-statussen te herstellen. Handig na de cursor-overshoot fix om historische misses op te ruimen.</div>
+            </div>
+            <button class="sr-abtn primary" id="invBulkResyncBtn" type="button" style="font-size:12.5px">
+              <i class="ti ti-refresh" style="margin-right:4px"></i>Re-sync open facturen met TL
+            </button>
+          </div>
+        </div>
       </div>
     </div>
   </div>
@@ -4287,11 +4306,17 @@
   function setCamtSubView(sub) {
     document.getElementById('camtSubTransactions').hidden = (sub !== 'transactions');
     document.getElementById('camtSubMatches').hidden = (sub !== 'matches');
+    const cfg = document.getElementById('camtSubConfig');
+    if (cfg) cfg.hidden = (sub !== 'config');
     document.querySelectorAll('#camtSubNav .sr-seg').forEach(b => b.classList.toggle('active', b.dataset.camtSub === sub));
     if (sub === 'matches' && !_camtMatchesLoadedOnce) {
       _camtMatchesLoadedOnce = true;
       loadMatchAutopilotSetting();
       loadMatches();
+    }
+    // Config sub-tab: load autopilot-setting (statisch UI, geen tabel-load nodig).
+    if (sub === 'config') {
+      loadMatchAutopilotSetting();
     }
   }
   async function loadMatchAutopilotSetting() {
