@@ -1139,6 +1139,28 @@
   </div>
 </div>
 
+<!-- Inbox Quick-reply-picker modal (C3) -->
+<div class="modal-overlay hidden" id="inboxQrPickerModal" role="dialog" aria-modal="true">
+  <div class="modal-card" style="max-width:560px;max-height:80vh;display:flex;flex-direction:column">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:14px">
+      <h3 style="margin:0;font-size:17px">Snel antwoord kiezen</h3>
+      <button class="sr-ibtn" id="inboxQrCloseX" type="button" title="Sluiten" style="margin-top:-4px"><i class="ti ti-x"></i></button>
+    </div>
+
+    <div style="flex:1;min-height:0;overflow:auto;border:1px solid var(--border-subtle, rgba(255,255,255,.08));border-radius:8px">
+      <ul id="inboxQrList" style="list-style:none;margin:0;padding:0">
+        <li style="padding:18px;text-align:center;color:var(--text-faint);font-size:12px">Laden…</li>
+      </ul>
+    </div>
+
+    <div id="inboxQrError" style="display:none;margin-top:10px;padding:8px 12px;background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.3);border-radius:6px;color:#ef4444;font-size:12px;white-space:pre-wrap"></div>
+
+    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">
+      <button class="sr-abtn" id="inboxQrCancelBtn" type="button">Annuleren</button>
+    </div>
+  </div>
+</div>
+
 <!-- Bank-transactie detail modal (Fase 3 — toont volledige omschrijving + raw_payload) -->
 <div class="modal-overlay hidden" id="bankTxModal" role="dialog" aria-modal="true">
   <div class="modal-card" style="max-width:680px">
@@ -3318,6 +3340,103 @@
     }
   }
 
+  // ──────────────────────────────────────────────────────────────────────────
+  //  Quick-reply-picker (C3)
+  // ──────────────────────────────────────────────────────────────────────────
+
+  let _inboxQrItems = [];
+
+  function _inboxQrShowError(msg) {
+    const el = document.getElementById('inboxQrError');
+    if (!el) return;
+    if (!msg) { el.style.display = 'none'; el.textContent = ''; return; }
+    el.textContent = msg;
+    el.style.display = 'block';
+  }
+
+  function _inboxQrRenderList() {
+    const ul = document.getElementById('inboxQrList');
+    if (!ul) return;
+    if (!_inboxQrItems.length) {
+      ul.innerHTML = '<li style="padding:18px;text-align:center;color:var(--text-faint);font-size:12px">Geen actieve snelle antwoorden gevonden voor deze afzendlijn.</li>';
+      return;
+    }
+    ul.innerHTML = _inboxQrItems.map((q, idx) => {
+      const body = q.body_text || '';
+      return ''
+        + '<li data-qr-idx="' + idx + '" style="padding:10px 12px;border-bottom:1px solid var(--border-subtle, rgba(255,255,255,.06));display:flex;align-items:center;gap:10px">'
+        +   '<div style="flex:1;min-width:0">'
+        +     '<div style="font-weight:600;font-size:13px;margin-bottom:3px">' + esc(q.title || '') + '</div>'
+        +     '<div style="font-size:12px;color:var(--text-dim);line-height:1.4;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;text-overflow:ellipsis;white-space:pre-wrap;word-break:break-word">' + esc(body) + '</div>'
+        +   '</div>'
+        +   '<button class="sr-abtn primary" type="button" data-qr-select="' + idx + '" style="flex:0 0 auto;font-size:12px;padding:6px 10px">Kies</button>'
+        + '</li>';
+    }).join('');
+  }
+
+  async function openInboxQrPicker() {
+    if (!_inboxActiveConvId || !_inboxActiveConv) {
+      window.AgentShared.showToast('Eerst gesprek selecteren', 'error');
+      return;
+    }
+    const modal = document.getElementById('inboxQrPickerModal');
+    if (!modal) return;
+    _inboxQrItems = [];
+    _inboxQrShowError('');
+    const ul = document.getElementById('inboxQrList');
+    if (ul) ul.innerHTML = '<li style="padding:18px;text-align:center;color:var(--text-faint);font-size:12px">Laden…</li>';
+    modal.classList.remove('hidden');
+
+    try {
+      const params = new URLSearchParams({ conversation_id: _inboxActiveConvId });
+      const r = await window.AgentShared.apiFetch('/api/inbox-quick-replies-list?' + params.toString());
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        const msg = d.error || ('HTTP ' + r.status);
+        if (ul) ul.innerHTML = '<li style="padding:18px;text-align:center;color:#ef4444;font-size:12px">' + esc(msg) + '</li>';
+        _inboxQrShowError(msg);
+        return;
+      }
+      _inboxQrItems = Array.isArray(d.items) ? d.items : [];
+      _inboxQrRenderList();
+    } catch (e) {
+      console.error('[openInboxQrPicker]', e);
+      if (ul) ul.innerHTML = '<li style="padding:18px;text-align:center;color:#ef4444;font-size:12px">Fout: ' + esc(e.message) + '</li>';
+      _inboxQrShowError(e.message);
+    }
+  }
+
+  function closeInboxQrPicker() {
+    const modal = document.getElementById('inboxQrPickerModal');
+    if (modal) modal.classList.add('hidden');
+  }
+
+  function selectInboxQr(item) {
+    if (!item) return;
+    const ta = document.getElementById('inboxReplyTextArea');
+    if (!ta) {
+      // Geen text-area beschikbaar (bv. 24h verlopen → template-modus).
+      window.AgentShared.showToast('Open eerst een gesprek met actief 24h-window', 'error');
+      closeInboxQrPicker();
+      return;
+    }
+    const body = String(item.body_text || '');
+    const current = ta.value || '';
+    if (current.trim().length > 0) {
+      ta.value = current + (current.endsWith('\n') ? '' : '\n') + body;
+    } else {
+      ta.value = body;
+    }
+    closeInboxQrPicker();
+    // Focus + cursor naar einde.
+    try {
+      ta.focus();
+      const len = ta.value.length;
+      ta.setSelectionRange(len, len);
+    } catch (_e) { /* defensief */ }
+    window.AgentShared.showToast('Snel antwoord ingevoegd (Bewerk + verstuur)', 'success');
+  }
+
   function wireInboxOnce() {
     if (_inboxWiredOnce) return;
     _inboxWiredOnce = true;
@@ -3349,12 +3468,10 @@
       const b = document.getElementById(id);
       if (b) b.addEventListener('click', () => openInboxTplPicker());
     });
-    // Snel-antwoord (quick-reply) — C3 v1: knop disabled-by-design, placeholder voor C4.
+    // Snel-antwoord (quick-reply) picker — opent inboxQrPickerModal.
     ['inboxQrBtn','inboxQrBtn2'].forEach(id => {
       const b = document.getElementById(id);
-      if (b) b.addEventListener('click', () => {
-        window.AgentShared.showToast('Snelle antwoorden komen in C4', 'success');
-      });
+      if (b) b.addEventListener('click', () => openInboxQrPicker());
     });
 
     // Template-picker modal wiring
@@ -3387,6 +3504,41 @@
     document.addEventListener('keydown', (e) => {
       if (e.key === 'Escape' && tplModal && !tplModal.classList.contains('hidden')) {
         closeInboxTplPicker();
+      }
+    });
+
+    // Quick-reply-picker modal wiring (C3)
+    const qrModal     = document.getElementById('inboxQrPickerModal');
+    const qrCloseX    = document.getElementById('inboxQrCloseX');
+    const qrCancelBtn = document.getElementById('inboxQrCancelBtn');
+    const qrListUl    = document.getElementById('inboxQrList');
+    if (qrCloseX)    qrCloseX.addEventListener('click', () => closeInboxQrPicker());
+    if (qrCancelBtn) qrCancelBtn.addEventListener('click', () => closeInboxQrPicker());
+    if (qrModal) {
+      qrModal.addEventListener('click', (e) => {
+        if (e.target === qrModal) closeInboxQrPicker();
+      });
+    }
+    if (qrListUl) {
+      // Delegated klik: zowel op de hele <li> (data-qr-idx) als op de Kies-knop (data-qr-select)
+      // routeren naar selectInboxQr(item).
+      qrListUl.addEventListener('click', (e) => {
+        const btn = e.target.closest('button[data-qr-select]');
+        const li  = e.target.closest('li[data-qr-idx]');
+        let idx = -1;
+        if (btn) {
+          idx = Number(btn.getAttribute('data-qr-select'));
+        } else if (li) {
+          idx = Number(li.getAttribute('data-qr-idx'));
+        }
+        if (Number.isFinite(idx) && idx >= 0 && _inboxQrItems[idx]) {
+          selectInboxQr(_inboxQrItems[idx]);
+        }
+      });
+    }
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && qrModal && !qrModal.classList.contains('hidden')) {
+        closeInboxQrPicker();
       }
     });
 
