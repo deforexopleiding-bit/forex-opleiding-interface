@@ -421,22 +421,71 @@
       <div style="font-size:12.5px">Je mist de rechten <code>finance.inbox.view</code>. Vraag een beheerder om deze permissie te activeren.</div>
     </div>
     <div id="inboxMain">
-      <div style="background:linear-gradient(135deg, rgba(34,197,94,.10), rgba(34,197,94,.03));border:1px solid rgba(34,197,94,.25);border-radius:12px;padding:22px 26px;display:flex;gap:18px;align-items:flex-start;flex-wrap:wrap">
-        <div style="font-size:36px;line-height:1">💬</div>
-        <div style="flex:1;min-width:280px">
-          <h2 style="margin:0 0 8px;font-size:18px;font-weight:700">WhatsApp Inbox</h2>
-          <p style="margin:0;font-size:13px;color:var(--text-dim);line-height:1.55">
-            Setup-status: Meta Cloud API integratie wordt geactiveerd zodra
-            <code>META_WHATSAPP_PHONE_NUMBER_ID</code> + <code>META_WHATSAPP_ACCESS_TOKEN</code>
-            + 3 andere env vars in Vercel staan. Acties voor jou: zie de PR-beschrijving of
-            vraag Claude voor de stappen.
-          </p>
-          <div style="margin-top:14px;font-size:12px;color:var(--text-faint)">
-            <strong>Volgende stap (PR A2):</strong> webhook receiver activeren, conversation-lijst,
-            chat-pane met bericht-versturen, status-tracking (sent / delivered / read), 24h-window guard.
+      <div id="inboxConfigStatus" style="margin-bottom:12px;font-size:11.5px;color:var(--text-faint)">
+        Meta-config nog niet geverifieerd.
+      </div>
+      <div style="display:grid;grid-template-columns:340px 1fr;gap:18px;min-height:520px">
+        <!-- LEFT pane: conversation list -->
+        <div style="background:var(--surface-1,#1a1d24);border:1px solid var(--border,rgba(255,255,255,.08));border-radius:12px;max-height:75vh;overflow:hidden;display:flex;flex-direction:column">
+          <div style="padding:12px 14px;border-bottom:1px solid var(--border,rgba(255,255,255,.08));display:flex;gap:8px;align-items:center">
+            <input id="inboxConvSearch" type="text" class="fin-input" placeholder="Zoeken op naam of nummer…" style="flex:1;font-size:12.5px"/>
+            <button class="sr-ibtn" id="inboxConvRefresh" type="button" title="Vernieuwen"><i class="ti ti-refresh"></i></button>
           </div>
-          <div id="inboxConfigStatus" style="margin-top:14px;font-size:11.5px;color:var(--text-faint)">
-            Meta-config nog niet geverifieerd.
+          <div id="inboxConvList" style="overflow:auto;flex:1;padding:6px 0">
+            <div style="padding:24px;text-align:center;color:var(--text-faint);font-size:12px">Laden…</div>
+          </div>
+        </div>
+
+        <!-- RIGHT pane: thread view -->
+        <div style="background:var(--surface-1,#1a1d24);border:1px solid var(--border,rgba(255,255,255,.08));border-radius:12px;max-height:75vh;display:flex;flex-direction:column">
+          <!-- Empty state -->
+          <div id="inboxThreadEmpty" style="padding:60px 30px;text-align:center;color:var(--text-faint);font-size:13px;flex:1;display:flex;align-items:center;justify-content:center">
+            Kies een gesprek links om de berichten te zien.
+          </div>
+
+          <!-- Thread block -->
+          <div id="inboxThread" hidden style="display:flex;flex-direction:column;flex:1;overflow:hidden">
+            <!-- Thread header -->
+            <div style="padding:12px 16px;border-bottom:1px solid var(--border,rgba(255,255,255,.08));display:flex;justify-content:space-between;align-items:center;gap:12px">
+              <div style="display:flex;flex-direction:column;gap:2px;min-width:0">
+                <div id="inboxThreadName" style="font-size:14px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">—</div>
+                <div id="inboxThreadPhone" style="font-size:11.5px;color:var(--text-faint)">—</div>
+              </div>
+              <div style="display:flex;gap:6px;align-items:center">
+                <span id="inboxThreadWindowBadge" style="font-size:11px;padding:3px 8px;border-radius:10px;background:rgba(34,197,94,.12);color:#22c55e">24h open</span>
+                <button class="sr-ibtn" id="inboxThreadCustomerBtn" type="button" title="Klant-info"><i class="ti ti-user"></i></button>
+              </div>
+            </div>
+
+            <!-- Messages container -->
+            <div id="inboxMessages" style="flex:1;overflow:auto;padding:14px 16px;display:flex;flex-direction:column;gap:8px">
+              <div style="text-align:center;color:var(--text-faint);font-size:12px;padding:20px">Laden…</div>
+            </div>
+
+            <!-- Reply footer -->
+            <div style="border-top:1px solid var(--border,rgba(255,255,255,.08));padding:12px 16px">
+              <!-- Free-text reply (binnen 24h-window) -->
+              <div id="inboxReplyText" hidden>
+                <textarea id="inboxReplyTextArea" class="fin-input" rows="3" placeholder="Typ een bericht…" style="resize:vertical;min-height:60px;font-size:13px"></textarea>
+                <div style="display:flex;justify-content:flex-end;margin-top:8px">
+                  <button class="sr-abtn primary" id="inboxReplyTextSend" type="button"><i class="ti ti-send"></i> Verstuur</button>
+                </div>
+              </div>
+
+              <!-- Template reply (buiten 24h-window) -->
+              <div id="inboxReplyTemplate" hidden>
+                <div style="background:rgba(245,158,11,.10);border:1px solid rgba(245,158,11,.3);border-radius:6px;padding:8px 12px;font-size:12px;color:#f59e0b;margin-bottom:10px">
+                  <i class="ti ti-clock-exclamation"></i> 24-uurs servicewindow verlopen — gebruik een goedgekeurde Meta-template.
+                </div>
+                <label style="font-size:12px;color:var(--text-dim);display:block">
+                  <div style="margin-bottom:4px;font-weight:600">Meta-template-naam</div>
+                  <input id="inboxReplyTemplateName" type="text" class="fin-input" placeholder="bv. invoice_reminder_v1"/>
+                </label>
+                <div style="display:flex;justify-content:flex-end;margin-top:8px">
+                  <button class="sr-abtn primary" id="inboxReplyTemplateSend" type="button"><i class="ti ti-send"></i> Verstuur template</button>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -873,6 +922,41 @@
     <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px">
       <button class="sr-abtn" id="dunTplCancel" type="button">Annuleer</button>
       <button class="sr-abtn primary" id="dunTplSave" type="button">Opslaan</button>
+    </div>
+  </div>
+</div>
+
+<!-- Inbox Customer-info modal (PR A2) -->
+<div class="modal-overlay hidden" id="inboxCustomerModal" role="dialog" aria-modal="true">
+  <div class="modal-card" style="max-width:520px">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px">
+      <h3 style="margin:0;font-size:17px">Klant-info</h3>
+      <button class="sr-ibtn" id="inboxCustomerClose" type="button" title="Sluiten" style="margin-top:-4px"><i class="ti ti-x"></i></button>
+    </div>
+
+    <div style="margin-top:16px;display:flex;flex-direction:column;gap:10px">
+      <div style="display:flex;gap:10px;align-items:baseline">
+        <div style="font-size:12px;color:var(--text-faint);min-width:90px">Naam</div>
+        <div id="inboxCustomerName" style="font-size:13.5px;font-weight:600">—</div>
+      </div>
+      <div style="display:flex;gap:10px;align-items:baseline">
+        <div style="font-size:12px;color:var(--text-faint);min-width:90px">Telefoon</div>
+        <div id="inboxCustomerPhone" style="font-size:13px">—</div>
+      </div>
+      <div style="display:flex;gap:10px;align-items:baseline">
+        <div style="font-size:12px;color:var(--text-faint);min-width:90px">E-mail</div>
+        <div id="inboxCustomerEmail" style="font-size:13px">—</div>
+      </div>
+    </div>
+
+    <div id="inboxCustomerUnmatched" hidden style="margin-top:14px;background:rgba(245,158,11,.10);border:1px solid rgba(245,158,11,.3);border-radius:6px;padding:8px 12px;font-size:12px;color:#f59e0b">
+      <i class="ti ti-link-off"></i> Nog geen klant gekoppeld aan dit nummer.
+    </div>
+
+    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:18px;flex-wrap:wrap">
+      <a id="inboxCustomerOpenLink" href="#" target="_blank" rel="noopener" class="sr-abtn" hidden><i class="ti ti-external-link"></i> Bekijk in Klanten</a>
+      <a id="inboxCustomerInvoicesLink" href="#" target="_blank" rel="noopener" class="sr-abtn" hidden><i class="ti ti-file-invoice"></i> Bekijk facturen</a>
+      <button class="sr-abtn primary" id="inboxCustomerCloseBtn" type="button">Sluit</button>
     </div>
   </div>
 </div>
