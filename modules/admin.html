@@ -1620,6 +1620,19 @@ function renderWaConfRows() {
     const active     = it.is_active !== false;
     const statusDot  = active ? '<span class="active-dot"></span> Actief' : '<span class="active-dot inactive-dot"></span> Inactief';
     const rowId      = esc(it.id || it.module || '');
+    // Webhook subscribe knop: alleen actief als business_account_id gezet is.
+    // Anders disabled met hint dat eerst Edit nodig is.
+    const wabaId       = it.business_account_id || '';
+    const moduleRaw    = it.module || it.module_key || '';
+    const subscribeDisabled = wabaId ? '' : ' disabled';
+    const subscribeTitle    = wabaId
+      ? 'Eenmalig per WABA: koppelt webhook events aan onze app. Idempotent.'
+      : 'Eerst business_account_id koppelen via Edit';
+    const subscribeBtn = `<button class="action-btn wa-conf-subscribe-btn"`
+      + ` data-waba-subscribe="${esc(wabaId)}"`
+      + ` data-module="${esc(moduleRaw)}"`
+      + ` title="${esc(subscribeTitle)}"${subscribeDisabled}>`
+      + `<i class="ti ti-webhook"></i> Webhook subscriben</button>`;
     return `<tr>
       <td><strong>${moduleKey}</strong></td>
       <td>${phone}</td>
@@ -1627,6 +1640,7 @@ function renderWaConfRows() {
       <td>${statusDot}</td>
       <td>
         <button class="action-btn" data-wa-edit="${rowId}"><i class="ti ti-edit"></i> Bewerken</button>
+        ${subscribeBtn}
       </td>
     </tr>`;
   }).join('');
@@ -1741,11 +1755,56 @@ function wireWaConfOnce() {
   if (tbody) {
     tbody.addEventListener('click', (e) => {
       const editBtn = e.target.closest('[data-wa-edit]');
-      if (!editBtn) return;
-      const rowId = editBtn.getAttribute('data-wa-edit');
-      const item = _waConfItems.find(it => String(it.id || it.module) === rowId);
-      if (item) openWaConfEdit(item);
+      if (editBtn) {
+        const rowId = editBtn.getAttribute('data-wa-edit');
+        const item = _waConfItems.find(it => String(it.id || it.module) === rowId);
+        if (item) openWaConfEdit(item);
+        return;
+      }
+      const subBtn = e.target.closest('.wa-conf-subscribe-btn');
+      if (subBtn) {
+        if (subBtn.disabled) return;
+        const wabaId = subBtn.getAttribute('data-waba-subscribe') || '';
+        const moduleKey = subBtn.getAttribute('data-module') || '';
+        doWaConfWebhookSubscribe(subBtn, wabaId, moduleKey);
+      }
     });
+  }
+}
+
+// ── C2: Webhook subscribe per WABA ─────────────────────────────────────────
+// Idempotente POST /api/admin-whatsapp-webhook-subscribe per row in de
+// WhatsApp Connection tab. Vervangt handmatige curl-call.
+async function doWaConfWebhookSubscribe(btn, wabaId, moduleKey) {
+  if (!wabaId) return;
+  const confirmMsg = `Webhook subscriben voor module ${moduleKey} (WABA ${wabaId})? Idempotent. OK om door te gaan.`;
+  if (!confirm(confirmMsg)) return;
+
+  const origHtml = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = '<i class="ti ti-loader"></i> Bezig...';
+  try {
+    const data = await apiRequest('POST', '/api/admin-whatsapp-webhook-subscribe', {
+      business_account_id: wabaId,
+    });
+    if (data && data.error) {
+      const msg = (typeof formatMetaError === 'function')
+        ? formatMetaError(data)
+        : (data.error || 'Onbekende fout');
+      window.AgentShared?.showToast('Subscribe mislukt: ' + msg, 'error');
+      btn.innerHTML = origHtml;
+      return;
+    }
+    window.AgentShared?.showToast(`Webhook subscribed voor ${moduleKey}`, 'success');
+    btn.innerHTML = '<i class="ti ti-refresh"></i> Subscribed (Hertrigger?)';
+  } catch (e) {
+    const msg = (typeof formatMetaError === 'function')
+      ? formatMetaError(e)
+      : (e?.message || e?.error || 'Onbekende fout');
+    window.AgentShared?.showToast('Subscribe mislukt: ' + msg, 'error');
+    btn.innerHTML = origHtml;
+  } finally {
+    btn.disabled = false;
   }
 }
 
