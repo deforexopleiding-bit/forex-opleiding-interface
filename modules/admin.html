@@ -2491,6 +2491,19 @@ async function deleteWaMetaTemplate(item) {
 
 // ─── C2: Meta sync / submit / resubmit / duplicate ────────────────────────
 
+// Helper: bouw gebruiksvriendelijke melding uit Meta-foutrespons.
+// Verwacht response shape: { error: "...", meta_error: { error_user_title, error_user_msg, fbtrace_id, ... } }
+function formatMetaError(err) {
+  const me = err?.meta_error || err?.data?.meta_error || null;
+  if (me && (me.error_user_title || me.error_user_msg)) {
+    const title = me.error_user_title || 'Meta-fout';
+    const msg = me.error_user_msg || '';
+    const trace = me.fbtrace_id ? ` (trace: ${me.fbtrace_id})` : '';
+    return msg ? `${title}\n${msg}${trace}` : `${title}${trace}`;
+  }
+  return err?.error || err?.message || 'Onbekende fout';
+}
+
 async function doWaMetaSync() {
   if (!_waTplActiveWaba) {
     window.AgentShared?.showToast('Selecteer eerst een WABA', 'error');
@@ -2501,7 +2514,10 @@ async function doWaMetaSync() {
   if (btn) { btn.disabled = true; btn.innerHTML = '<i class="ti ti-loader"></i> Bezig…'; }
   try {
     const data = await apiRequest('POST', '/api/admin-meta-templates-sync', { business_account_id: _waTplActiveWaba });
-    if (data && data.error) throw new Error(data.error);
+    if (data && data.error) {
+      window.AgentShared?.showToast('Sync mislukt: ' + formatMetaError(data), 'error');
+      return;
+    }
     const scanned = (data && (data.scanned ?? data.synced)) ?? 0;
     const updated = (data && data.updated) ?? 0;
     const created = (data && data.created) ?? 0;
@@ -2511,7 +2527,7 @@ async function doWaMetaSync() {
     window.AgentShared?.showToast(parts.join(', '), 'success');
     await loadWaMetaList();
   } catch (e) {
-    window.AgentShared?.showToast('Sync mislukt: ' + e.message, 'error');
+    window.AgentShared?.showToast('Sync mislukt: ' + (e?.message || 'Onbekende fout'), 'error');
   } finally {
     if (btn) { btn.disabled = false; btn.innerHTML = orig; }
   }
@@ -2523,14 +2539,13 @@ async function doWaMetaSubmit(item) {
   try {
     const data = await apiRequest('POST', '/api/admin-meta-templates-submit', { template_id: item.id });
     if (data && data.error) {
-      const metaMsg = data.meta_error?.message || data.error;
-      window.AgentShared?.showToast('Submit mislukt: ' + metaMsg, 'error');
+      window.AgentShared?.showToast('Submit mislukt: ' + formatMetaError(data), 'error');
       return;
     }
     window.AgentShared?.showToast('Template ingestuurd bij Meta', 'success');
     await loadWaMetaList();
   } catch (e) {
-    window.AgentShared?.showToast('Submit mislukt: ' + e.message, 'error');
+    window.AgentShared?.showToast('Submit mislukt: ' + (e?.message || 'Onbekende fout'), 'error');
   }
 }
 
@@ -2540,14 +2555,13 @@ async function doWaMetaResubmit(item) {
   try {
     const data = await apiRequest('POST', '/api/admin-meta-templates-submit', { template_id: item.id });
     if (data && data.error) {
-      const metaMsg = data.meta_error?.message || data.error;
-      window.AgentShared?.showToast('Opnieuw insturen mislukt: ' + metaMsg, 'error');
+      window.AgentShared?.showToast('Opnieuw insturen mislukt: ' + formatMetaError(data), 'error');
       return;
     }
     window.AgentShared?.showToast('Template opnieuw ingestuurd', 'success');
     await loadWaMetaList();
   } catch (e) {
-    window.AgentShared?.showToast('Opnieuw insturen mislukt: ' + e.message, 'error');
+    window.AgentShared?.showToast('Opnieuw insturen mislukt: ' + (e?.message || 'Onbekende fout'), 'error');
   }
 }
 
