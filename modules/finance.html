@@ -1251,6 +1251,8 @@
     document.getElementById('view-dunning').hidden = (view !== 'dunning');
     document.getElementById('view-roadmap').hidden = (view !== 'roadmap');
     document.querySelectorAll('#financeNav .sr-seg').forEach(b => b.classList.toggle('active', b.dataset.view === view));
+    // Stop inbox auto-poll wanneer we de inbox-tab verlaten — bespaart requests.
+    if (view !== 'inbox' && typeof stopInboxPolling === 'function') stopInboxPolling();
     // Bij eerste keer Bank (oud) openen: load per beschikbare permission.
     if (view === 'bank' && !_bankLoadedOnce) {
       _bankLoadedOnce = true;
@@ -1263,7 +1265,7 @@
       if (canBankBalanceView) loadCamtBalance();
       if (canBankTxView) { loadCamtBank(); loadCamtStatementsList(); }
     }
-    // Bij eerste keer Inbox openen: RBAC-gate + config-status placeholder.
+    // Bij eerste keer Inbox openen: RBAC-gate + lazy-load conv-lijst.
     if (view === 'inbox' && !_inboxLoadedOnce) {
       _inboxLoadedOnce = true;
       const main = document.getElementById('inboxMain');
@@ -1272,10 +1274,16 @@
         if (main)   main.hidden = true;
         if (locked) locked.hidden = false;
       } else {
-        // PR A1: alleen status-regel. PR A2: GET /api/finance-inbox-status
-        // + conversation-lijst laden.
+        // PR A2: conversation-list laden + auto-refresh + wire UI.
         loadInboxConfigStatus();
+        wireInboxOnce();
+        loadInboxConvList();
+        startInboxPolling();
       }
+    } else if (view === 'inbox' && _inboxLoadedOnce && canInboxView) {
+      // Re-entry: poll opnieuw starten + verse data.
+      loadInboxConvList();
+      startInboxPolling();
     }
     // Bij eerste keer Wanbetalers openen: RBAC-gate.
     if (view === 'dunning' && !_dunningLoadedOnce) {
@@ -2460,7 +2468,465 @@
   async function loadInboxConfigStatus() {
     const el = document.getElementById('inboxConfigStatus');
     if (!el) return;
-    el.textContent = 'Meta-config check komt in PR A2 (endpoint /api/finance-inbox-status).';
+    el.textContent = 'Meta-config check komt in PR A3 (endpoint /api/finance-inbox-status).';
+  }
+
+  // ─── Inbox (Meta WhatsApp Cloud API) — PR A2 UI ───────────────────────────
+  let _inboxConvs            = [];
+  let _inboxConvFilter       = '';
+  let _inboxActiveConvId     = null;
+  let _inboxPollTimer        = null;
+  let _inboxSearchTimer      = null;
+  let _inboxMessages         = [];
+  let _inboxConvCanSendText  = false;
+  let _inboxWiredOnce        = false;
+  let _inboxActiveConv       = null;  // hele conversation-object van laatst-geladen thread
+
+  // Relatieve tijd helper: ISO-string → "5m" / "2u" / "gisteren" / "3d" / "2w" / "3mnd" / "1j"
+  function fmtRelTime(iso) {
+    if (!iso) return '';
+    const t = new Date(iso).getTime();
+    if (!Number.isFinite(t)) return '';
+    const now = Date.now();
+    const diff = Math.max(0, now - t);
+    const sec = Math.floor(diff / 1000);
+    if (sec < 60) return 'nu';
+    const min = Math.floor(sec / 60);
+    if (min < 60) return min + 'm';
+    const hr = Math.floor(min / 60);
+    if (hr < 24) return hr + 'u';
+    // Day-grens: gebruik lokale-datum vergelijking, NIET toISOString (UTC bug).
+    const a = new Date(t), b = new Date(now);
+    const aDay = new Date(a.getFullYear(), a.getMonth(), a.getDate()).getTime();
+    const bDay = new Date(b.getFullYear(), b.getMonth(), b.getDate()).getTime();
+    const dayDiff = Math.round((bDay - aDay) / (24 * 60 * 60 * 1000));
+    if (dayDiff === 1) return 'gisteren';
+    if (dayDiff < 7) return dayDiff + 'd';
+    if (dayDiff < 30) return Math.floor(dayDiff / 7) + 'w';
+    if (dayDiff < 365) return Math.floor(dayDiff / 30) + 'mnd';
+    return Math.floor(dayDiff / 365) + 'j';
+  }
+
+  // Initialen uit naam of phone-nummer afleiden voor avatar-cirkel.
+  function _inboxInitials(name, phone) {
+    const n = String(name || '').trim();
+    if (n) {
+      const parts = n.split(/\s+/).filter(Boolean);
+      if (parts.length >= 2) return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+      return parts[0].slice(0, 2).toUpperCase();
+    }
+    const p = String(phone || '').replace(/\D/g, '');
+    return p ? p.slice(-2) : '?';
+  }
+
+  // Stabiele kleur per nummer (HSL hue) — zelfde nummer altijd dezelfde avatar.
+  function _inboxAvatarColor(phone) {
+    const s = String(phone || '');
+    let h = 0;
+    for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+    return 'hsl(' + (h % 360) + ', 55%, 42%)';
+  }
+
+  async function loadInboxConvList() {
+    const list = document.getElementById('inboxConvList');
+    if (!list) return;
+    try {
+      const params = new URLSearchParams();
+      params.set('limit', '50');
+      if (_inboxConvFilter) params.set('search', _inboxConvFilter);
+      const r = await window.AgentShared.apiFetch('/api/inbox-conversations-list?' + params.toString());
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        list.innerHTML = '<div style="padding:20px;text-align:center;color:#ef4444;font-size:12px">'
+          + esc(d.error || ('HTTP ' + r.status)) + '</div>';
+        return;
+      }
+      _inboxConvs = Array.isArray(d.items) ? d.items : [];
+      if (!_inboxConvs.length) {
+        list.innerHTML = '<div style="padding:30px 20px;text-align:center;color:var(--text-faint);font-size:12.5px">Nog geen gesprekken.</div>';
+        return;
+      }
+      list.innerHTML = _inboxConvs.map(c => {
+        const isActive = (c.id === _inboxActiveConvId);
+        const name = c.customer_name || c.display_name || c.phone_number || 'Onbekend';
+        const phone = c.phone_number || '';
+        const preview = (c.last_message_preview || '').slice(0, 80);
+        const rel = fmtRelTime(c.last_message_at);
+        const unread = Number(c.unread_count) || 0;
+        const initials = _inboxInitials(name, phone);
+        const avColor = _inboxAvatarColor(phone);
+        const bg = isActive ? 'background:rgba(59,130,246,.10);' : '';
+        const unreadBadge = unread > 0
+          ? `<span style="background:#22c55e;color:#fff;font-size:10px;font-weight:700;padding:2px 6px;border-radius:10px;min-width:18px;text-align:center">${unread}</span>`
+          : '';
+        return `<div class="inbox-conv-row" data-conv-id="${esc(c.id)}" style="${bg}display:flex;gap:10px;padding:10px 14px;cursor:pointer;border-bottom:1px solid rgba(255,255,255,.04);align-items:flex-start">
+          <div style="width:36px;height:36px;border-radius:50%;background:${avColor};color:#fff;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;flex-shrink:0">${esc(initials)}</div>
+          <div style="flex:1;min-width:0">
+            <div style="display:flex;justify-content:space-between;gap:6px;align-items:baseline">
+              <div style="font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1">${esc(name)}</div>
+              <div style="font-size:10.5px;color:var(--text-faint);flex-shrink:0">${esc(rel)}</div>
+            </div>
+            <div style="font-size:11px;color:var(--text-faint);margin-top:1px">${esc(phone)}</div>
+            <div style="display:flex;justify-content:space-between;gap:6px;align-items:center;margin-top:3px">
+              <div style="font-size:11.5px;color:var(--text-dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1">${esc(preview)}</div>
+              ${unreadBadge}
+            </div>
+          </div>
+        </div>`;
+      }).join('');
+      list.querySelectorAll('[data-conv-id]').forEach(row => {
+        row.addEventListener('click', () => openInboxConv(row.dataset.convId));
+      });
+    } catch (e) {
+      console.error('[loadInboxConvList]', e);
+      list.innerHTML = '<div style="padding:20px;text-align:center;color:#ef4444;font-size:12px">Fout: ' + esc(e.message) + '</div>';
+    }
+  }
+
+  function _inboxStatusIcon(status) {
+    // queued / sent / delivered / read / failed
+    switch (status) {
+      case 'queued':    return '<i class="ti ti-clock" style="color:var(--text-faint)" title="In wachtrij"></i>';
+      case 'sent':      return '<i class="ti ti-check" style="color:var(--text-faint)" title="Verstuurd"></i>';
+      case 'delivered': return '<i class="ti ti-checks" style="color:var(--text-faint)" title="Afgeleverd"></i>';
+      case 'read':      return '<i class="ti ti-checks" style="color:#3b82f6" title="Gelezen"></i>';
+      case 'failed':    return '<i class="ti ti-x" style="color:#ef4444" title="Mislukt"></i>';
+      default:          return '';
+    }
+  }
+
+  function _inboxRenderMessages() {
+    const wrap = document.getElementById('inboxMessages');
+    if (!wrap) return;
+    if (!_inboxMessages.length) {
+      wrap.innerHTML = '<div style="text-align:center;color:var(--text-faint);font-size:12px;padding:20px">Nog geen berichten.</div>';
+      return;
+    }
+    wrap.innerHTML = _inboxMessages.map(m => {
+      const out = (m.direction === 'out');
+      const body = m.body || (m.template_name ? ('[template] ' + m.template_name) : (m.media_type ? ('[' + m.media_type + ']') : ''));
+      const time = fmtRelTime(m.sent_at || m.created_at);
+      const statusIcon = out ? _inboxStatusIcon(m.status) : '';
+      const failed = (m.status === 'failed');
+      const align = out ? 'flex-end' : 'flex-start';
+      const bg = out
+        ? (failed ? 'background:rgba(239,68,68,.12);border:1px solid rgba(239,68,68,.3);color:#fecaca'
+                  : 'background:#3b82f6;color:#fff')
+        : 'background:rgba(255,255,255,.06);color:var(--text-strong, #e5e7eb)';
+      const failedRow = (out && failed && m.failed_reason)
+        ? `<div style="font-size:10.5px;color:#fca5a5;margin-top:3px">${esc(m.failed_reason)}</div>`
+        : '';
+      return `<div style="display:flex;justify-content:${align};width:100%">
+        <div style="max-width:72%;padding:8px 12px;border-radius:14px;${bg};font-size:13px;line-height:1.45;word-wrap:break-word;white-space:pre-wrap">
+          <div>${esc(body)}</div>
+          ${failedRow}
+          <div style="display:flex;gap:6px;justify-content:flex-end;align-items:center;margin-top:4px;font-size:10.5px;opacity:.85">
+            <span>${esc(time)}</span>${statusIcon ? ' ' + statusIcon : ''}
+          </div>
+        </div>
+      </div>`;
+    }).join('');
+    // Scroll naar laatste bericht
+    wrap.scrollTop = wrap.scrollHeight;
+  }
+
+  async function openInboxConv(convId) {
+    if (!convId) return;
+    _inboxActiveConvId = convId;
+    // Highlight active conv direct
+    document.querySelectorAll('#inboxConvList [data-conv-id]').forEach(r => {
+      r.style.background = (r.dataset.convId === convId) ? 'rgba(59,130,246,.10)' : '';
+    });
+    const threadEl = document.getElementById('inboxThread');
+    const emptyEl  = document.getElementById('inboxThreadEmpty');
+    const msgsWrap = document.getElementById('inboxMessages');
+    if (emptyEl) emptyEl.hidden = true;
+    if (threadEl) threadEl.hidden = false;
+    if (msgsWrap) msgsWrap.innerHTML = '<div style="text-align:center;color:var(--text-faint);font-size:12px;padding:20px">Laden…</div>';
+
+    // Pre-fill header alvast met data uit _inboxConvs zodat de naam direct zichtbaar is.
+    const preFromList = _inboxConvs.find(x => x.id === convId);
+    if (preFromList) {
+      const headerName  = document.getElementById('inboxThreadName');
+      const headerPhone = document.getElementById('inboxThreadPhone');
+      if (headerName)  headerName.textContent  = 'Klant: ' + (preFromList.customer_name || preFromList.display_name || preFromList.phone_number || 'Onbekend');
+      if (headerPhone) headerPhone.textContent = preFromList.phone_number || '—';
+    }
+
+    try {
+      const params = new URLSearchParams();
+      params.set('conversation_id', convId);
+      params.set('limit', '200');
+      params.set('mark_as_read', 'true');
+      const r = await window.AgentShared.apiFetch('/api/inbox-messages-list?' + params.toString());
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        if (msgsWrap) msgsWrap.innerHTML = '<div style="padding:20px;text-align:center;color:#ef4444;font-size:12px">' + esc(d.error || ('HTTP ' + r.status)) + '</div>';
+        return;
+      }
+      _inboxMessages        = Array.isArray(d.items) ? d.items : [];
+      _inboxActiveConv      = d.conversation || null;
+      _inboxConvCanSendText = !!(d.conversation && d.conversation.can_send_text);
+
+      // Thread-header invullen
+      const headerName  = document.getElementById('inboxThreadName');
+      const headerPhone = document.getElementById('inboxThreadPhone');
+      const badge       = document.getElementById('inboxThreadWindowBadge');
+      const conv = _inboxActiveConv || {};
+      const niceName = conv.customer_name || conv.display_name || conv.phone_number || 'Onbekend';
+      if (headerName) {
+        headerName.innerHTML = '';
+        const span = document.createElement('span');
+        span.textContent = 'Klant: ' + niceName;
+        span.style.cursor = 'pointer';
+        span.style.textDecoration = 'underline';
+        span.style.textDecorationStyle = 'dotted';
+        span.id = 'inboxThreadCustomerLink';
+        headerName.appendChild(span);
+      }
+      if (headerPhone) headerPhone.textContent = conv.phone_number || '—';
+      if (badge) {
+        if (_inboxConvCanSendText) {
+          badge.textContent = '24h open';
+          badge.style.background = 'rgba(34,197,94,.12)';
+          badge.style.color = '#22c55e';
+        } else {
+          badge.textContent = '24h verlopen';
+          badge.style.background = 'rgba(245,158,11,.12)';
+          badge.style.color = '#f59e0b';
+        }
+      }
+
+      // Reply-vorm tonen: text als 24h-open, anders template
+      const replyText = document.getElementById('inboxReplyText');
+      const replyTpl  = document.getElementById('inboxReplyTemplate');
+      if (replyText) replyText.hidden = !_inboxConvCanSendText;
+      if (replyTpl)  replyTpl.hidden  =  _inboxConvCanSendText;
+
+      _inboxRenderMessages();
+      // Conv-list opnieuw laden zodat unread_count visueel resetst.
+      loadInboxConvList();
+    } catch (e) {
+      console.error('[openInboxConv]', e);
+      if (msgsWrap) msgsWrap.innerHTML = '<div style="padding:20px;text-align:center;color:#ef4444;font-size:12px">Fout: ' + esc(e.message) + '</div>';
+    }
+  }
+
+  async function sendInboxText() {
+    if (!_inboxActiveConvId) return;
+    const ta = document.getElementById('inboxReplyTextArea');
+    if (!ta) return;
+    const body = (ta.value || '').trim();
+    if (!body) {
+      window.AgentShared.showToast('Bericht is leeg', 'error');
+      return;
+    }
+    const btn = document.getElementById('inboxReplyTextSend');
+    if (btn) btn.disabled = true;
+    try {
+      const r = await window.AgentShared.apiFetch('/api/inbox-send', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ conversation_id: _inboxActiveConvId, mode: 'text', body }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (r.status === 422 && d.error === '24h_window_expired') {
+        // Window net verlopen — switch UI naar template-form
+        _inboxConvCanSendText = false;
+        const replyText = document.getElementById('inboxReplyText');
+        const replyTpl  = document.getElementById('inboxReplyTemplate');
+        if (replyText) replyText.hidden = true;
+        if (replyTpl)  replyTpl.hidden  = false;
+        const badge = document.getElementById('inboxThreadWindowBadge');
+        if (badge) { badge.textContent = '24h verlopen'; badge.style.background = 'rgba(245,158,11,.12)'; badge.style.color = '#f59e0b'; }
+        window.AgentShared.showToast('24-uurs window verlopen — gebruik een template', 'error');
+        return;
+      }
+      if (r.status === 503) {
+        window.AgentShared.showToast('Meta WhatsApp niet geconfigureerd', 'error');
+        return;
+      }
+      if (!r.ok) {
+        window.AgentShared.showToast('Versturen mislukt: ' + (d.error || ('HTTP ' + r.status)), 'error');
+        return;
+      }
+      ta.value = '';
+      window.AgentShared.showToast('Bericht verstuurd', 'success');
+      // Direct thread herladen voor zichtbare update
+      await openInboxConv(_inboxActiveConvId);
+    } catch (e) {
+      console.error('[sendInboxText]', e);
+      window.AgentShared.showToast('Versturen mislukt: ' + e.message, 'error');
+    } finally {
+      if (btn) btn.disabled = false;
+    }
+  }
+
+  async function sendInboxTemplate() {
+    if (!_inboxActiveConvId) return;
+    const inp = document.getElementById('inboxReplyTemplateName');
+    if (!inp) return;
+    const template_name = (inp.value || '').trim();
+    if (!template_name) {
+      window.AgentShared.showToast('Template-naam vereist', 'error');
+      return;
+    }
+    const btn = document.getElementById('inboxReplyTemplateSend');
+    if (btn) btn.disabled = true;
+    try {
+      const r = await window.AgentShared.apiFetch('/api/inbox-send', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ conversation_id: _inboxActiveConvId, mode: 'template', template_name }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (r.status === 503) {
+        window.AgentShared.showToast('Meta WhatsApp niet geconfigureerd', 'error');
+        return;
+      }
+      if (!r.ok) {
+        window.AgentShared.showToast('Template versturen mislukt: ' + (d.error || ('HTTP ' + r.status)), 'error');
+        return;
+      }
+      inp.value = '';
+      window.AgentShared.showToast('Template verstuurd', 'success');
+      await openInboxConv(_inboxActiveConvId);
+    } catch (e) {
+      console.error('[sendInboxTemplate]', e);
+      window.AgentShared.showToast('Template versturen mislukt: ' + e.message, 'error');
+    } finally {
+      if (btn) btn.disabled = false;
+    }
+  }
+
+  async function refreshInboxConv() {
+    // Stille refresh — geen "Laden…" placeholder, geen toasts.
+    if (_inboxActiveConvId) {
+      try {
+        const params = new URLSearchParams();
+        params.set('conversation_id', _inboxActiveConvId);
+        params.set('limit', '200');
+        // Niet markeren als gelezen bij auto-poll — gebruiker heeft thread mogelijk niet in beeld.
+        params.set('mark_as_read', 'false');
+        const r = await window.AgentShared.apiFetch('/api/inbox-messages-list?' + params.toString());
+        if (r.ok) {
+          const d = await r.json().catch(() => ({}));
+          _inboxMessages        = Array.isArray(d.items) ? d.items : _inboxMessages;
+          _inboxActiveConv      = d.conversation || _inboxActiveConv;
+          _inboxConvCanSendText = !!(d.conversation && d.conversation.can_send_text);
+          _inboxRenderMessages();
+        }
+      } catch (e) {
+        console.error('[refreshInboxConv]', e);
+      }
+    }
+    // Conv-list ook stilletjes herladen voor unread-badges.
+    loadInboxConvList();
+  }
+
+  function startInboxPolling() {
+    stopInboxPolling();
+    _inboxPollTimer = setInterval(refreshInboxConv, 30000);
+  }
+  function stopInboxPolling() {
+    if (_inboxPollTimer) { clearInterval(_inboxPollTimer); _inboxPollTimer = null; }
+  }
+
+  function openInboxCustomerModal() {
+    const conv = _inboxActiveConv;
+    if (!conv) return;
+    const modal = document.getElementById('inboxCustomerModal');
+    if (!modal) return;
+    const nameEl  = document.getElementById('inboxCustomerName');
+    const phoneEl = document.getElementById('inboxCustomerPhone');
+    const mailEl  = document.getElementById('inboxCustomerEmail');
+    const unmatch = document.getElementById('inboxCustomerUnmatched');
+    const openLnk = document.getElementById('inboxCustomerOpenLink');
+    const invLnk  = document.getElementById('inboxCustomerInvoicesLink');
+    const niceName = conv.customer_name || conv.display_name || conv.phone_number || 'Onbekend';
+    if (nameEl)  nameEl.textContent  = niceName;
+    if (phoneEl) phoneEl.textContent = conv.phone_number || '—';
+    if (mailEl)  mailEl.textContent  = '—';
+    if (conv.customer_id) {
+      if (unmatch) unmatch.hidden = true;
+      if (openLnk) { openLnk.hidden = false; openLnk.href = '/modules/klanten.html?id=' + encodeURIComponent(conv.customer_id); }
+      if (invLnk)  { invLnk.hidden  = false; invLnk.href  = '/modules/klanten.html?id=' + encodeURIComponent(conv.customer_id) + '&tab=facturen'; }
+    } else {
+      if (unmatch) unmatch.hidden = false;
+      if (openLnk) openLnk.hidden = true;
+      if (invLnk)  invLnk.hidden  = true;
+    }
+    modal.classList.remove('hidden');
+  }
+  function closeInboxCustomerModal() {
+    const modal = document.getElementById('inboxCustomerModal');
+    if (modal) modal.classList.add('hidden');
+  }
+
+  function wireInboxOnce() {
+    if (_inboxWiredOnce) return;
+    _inboxWiredOnce = true;
+
+    // Zoek-input met 300ms debounce.
+    const search = document.getElementById('inboxConvSearch');
+    if (search) {
+      search.addEventListener('input', () => {
+        if (_inboxSearchTimer) clearTimeout(_inboxSearchTimer);
+        _inboxSearchTimer = setTimeout(() => {
+          _inboxConvFilter = (search.value || '').trim();
+          loadInboxConvList();
+        }, 300);
+      });
+    }
+
+    // Refresh-knop in conv-list.
+    const refreshBtn = document.getElementById('inboxConvRefresh');
+    if (refreshBtn) refreshBtn.addEventListener('click', () => loadInboxConvList());
+
+    // Send-knoppen.
+    const sendTextBtn = document.getElementById('inboxReplyTextSend');
+    if (sendTextBtn) sendTextBtn.addEventListener('click', () => sendInboxText());
+    const sendTplBtn  = document.getElementById('inboxReplyTemplateSend');
+    if (sendTplBtn)  sendTplBtn.addEventListener('click', () => sendInboxTemplate());
+
+    // Cmd/Ctrl+Enter in textarea → versturen.
+    const ta = document.getElementById('inboxReplyTextArea');
+    if (ta) {
+      ta.addEventListener('keydown', (e) => {
+        if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+          e.preventDefault();
+          sendInboxText();
+        }
+      });
+    }
+
+    // Klant-info knop in thread-header + delegated klik op customer-link in naam.
+    const custBtn = document.getElementById('inboxThreadCustomerBtn');
+    if (custBtn) custBtn.addEventListener('click', () => openInboxCustomerModal());
+    const headerName = document.getElementById('inboxThreadName');
+    if (headerName) {
+      headerName.addEventListener('click', (e) => {
+        const link = e.target.closest('#inboxThreadCustomerLink');
+        if (link) openInboxCustomerModal();
+      });
+    }
+
+    // Modal close-paden: kruis, sluit-knop, backdrop-click, Escape-toets.
+    const closeBtn1 = document.getElementById('inboxCustomerClose');
+    const closeBtn2 = document.getElementById('inboxCustomerCloseBtn');
+    if (closeBtn1) closeBtn1.addEventListener('click', () => closeInboxCustomerModal());
+    if (closeBtn2) closeBtn2.addEventListener('click', () => closeInboxCustomerModal());
+    const overlay = document.getElementById('inboxCustomerModal');
+    if (overlay) {
+      overlay.addEventListener('click', (e) => {
+        if (e.target === overlay) closeInboxCustomerModal();
+      });
+    }
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && overlay && !overlay.classList.contains('hidden')) {
+        closeInboxCustomerModal();
+      }
+    });
   }
 
   function renderKpis(k) {
