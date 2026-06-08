@@ -123,6 +123,7 @@
       <button class="admin-tab" data-tab="rechten" id="rechtenTabBtn" onclick="switchAdminTab('rechten')" style="display:none">Rechten</button>
       <button class="admin-tab" data-tab="integraties" onclick="switchAdminTab('integraties')">Integraties</button>
       <button class="admin-tab" data-tab="whatsapp-connection" id="waConnTabBtn" onclick="switchAdminTab('whatsapp-connection')" style="display:none">WhatsApp Connection</button>
+      <button class="admin-tab" data-tab="whatsapp-templates" data-view="whatsapp-templates" id="waTplTabBtn" onclick="switchAdminTab('whatsapp-templates')" style="display:none">WhatsApp Templates</button>
     </div>
 
     <div id="tab-gebruikers" class="admin-tab-panel">
@@ -261,6 +262,97 @@
       </div>
     </div>
 
+    <!-- ── WhatsApp Templates (Meta-templates + Quick replies) ───────────────── -->
+    <div id="tab-whatsapp-templates" class="admin-tab-panel" style="display:none">
+      <div id="view-whatsapp-templates" hidden>
+        <div class="section-card">
+          <div class="section-header" style="justify-content:space-between">
+            <div>
+              <div style="font-size:15px;font-weight:700">WhatsApp Templates</div>
+              <div style="font-size:12px;color:var(--text-faint);font-weight:400;margin-top:4px;max-width:720px">
+                Beheer Meta-goedgekeurde message templates (vereist voor 24u+ outbound)
+                &eacute;n interne &laquo;snelle antwoorden&raquo; (free-form, binnen 24u-window).
+                Selecteer eerst de WhatsApp Business Account.
+              </div>
+            </div>
+            <div style="display:flex;gap:8px">
+              <button class="btn btn-sm" id="waTplReloadBtn" title="Lijst opnieuw laden"><i class="ti ti-refresh"></i></button>
+            </div>
+          </div>
+
+          <!-- WABA-selector strip -->
+          <div style="display:flex;align-items:center;gap:10px;padding:8px 4px 14px 4px;flex-wrap:wrap">
+            <label for="waTplWabaSelect" style="font-size:12.5px;color:var(--text-dim);font-weight:600">WABA</label>
+            <select id="waTplWabaSelect" class="form-input" style="max-width:340px">
+              <option value="">Laden&hellip;</option>
+            </select>
+            <button class="btn btn-sm" id="waTplWabaRefreshBtn" title="WABA-lijst opnieuw laden"><i class="ti ti-refresh"></i></button>
+            <span id="waTplWabaHint" style="font-size:11px;color:var(--text-faint)"></span>
+          </div>
+
+          <!-- Sub-tab strip -->
+          <div class="sr-segments" id="waTplSubTabs" role="tablist" style="display:inline-flex;gap:4px;border:1px solid var(--border);border-radius:8px;padding:3px;margin-bottom:14px">
+            <button type="button" class="sr-segment active" data-wa-tpl-sub="meta" role="tab" aria-selected="true">Meta Templates</button>
+            <button type="button" class="sr-segment" data-wa-tpl-sub="quick" role="tab" aria-selected="false">Snelle antwoorden</button>
+          </div>
+
+          <!-- META TEMPLATES sub-view -->
+          <div id="waTplSubMeta">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;gap:8px;flex-wrap:wrap">
+              <div>
+                <div style="font-size:14px;font-weight:700">Meta Templates</div>
+                <div style="font-size:11.5px;color:var(--text-faint)">Server-side goedgekeurd door Meta. Status: APPROVED / PENDING / REJECTED.</div>
+              </div>
+              <button class="btn btn-sm btn-primary" id="waMetaNewBtn"><i class="ti ti-plus"></i> Nieuwe template</button>
+            </div>
+            <div style="overflow-x:auto">
+              <table class="users-table" id="waMetaTable">
+                <thead>
+                  <tr>
+                    <th>Naam</th>
+                    <th>Taal</th>
+                    <th>Categorie</th>
+                    <th>Status</th>
+                    <th>Acties</th>
+                  </tr>
+                </thead>
+                <tbody id="waMetaTbody">
+                  <tr><td colspan="5" style="color:var(--text-faint);padding:20px">Laden&hellip;</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- QUICK REPLIES sub-view -->
+          <div id="waTplSubQuick" hidden>
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;gap:8px;flex-wrap:wrap">
+              <div>
+                <div style="font-size:14px;font-weight:700">Snelle antwoorden</div>
+                <div style="font-size:11.5px;color:var(--text-faint)">Interne shortcuts voor agents binnen het 24-uurs antwoordvenster. Geen Meta-approval nodig.</div>
+              </div>
+              <button class="btn btn-sm btn-primary" id="waQrNewBtn"><i class="ti ti-plus"></i> Nieuwe snel antwoord</button>
+            </div>
+            <div style="overflow-x:auto">
+              <table class="users-table" id="waQrTable">
+                <thead>
+                  <tr>
+                    <th>Titel</th>
+                    <th>Body preview</th>
+                    <th>Sort</th>
+                    <th>Actief</th>
+                    <th>Acties</th>
+                  </tr>
+                </thead>
+                <tbody id="waQrTbody">
+                  <tr><td colspan="5" style="color:var(--text-faint);padding:20px">Laden&hellip;</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
   </div>
 </div>
 
@@ -297,6 +389,168 @@
     <div class="modal-footer">
       <button class="btn" onclick="closeWaConfEdit()">Annuleren</button>
       <button class="btn btn-primary" id="waConfSaveBtn" onclick="saveWaConfRow()">Opslaan</button>
+    </div>
+  </div>
+</div>
+
+<!-- WhatsApp Meta Template full editor modal -->
+<div class="modal-overlay hidden" id="waMetaEditModal">
+  <div class="modal-card" style="max-width:1100px;width:96vw">
+    <div class="modal-header">
+      <div class="modal-title" id="waMetaModalTitle">Nieuwe Meta template</div>
+      <button class="modal-close" onclick="closeWaMetaEdit()">&#x2715;</button>
+    </div>
+    <div class="modal-body">
+      <div style="display:grid;grid-template-columns:1fr 380px;gap:20px;align-items:start">
+
+        <!-- LINKS: form -->
+        <div>
+          <div class="form-group">
+            <label class="form-label" for="waMetaNameInput">Naam</label>
+            <input type="text" id="waMetaNameInput" class="form-input" placeholder="bv. order_confirmation_v1" maxlength="512" />
+            <div style="font-size:11px;color:var(--text-faint);margin-top:4px">lowercase_snake_case, alleen a-z 0-9 _</div>
+          </div>
+
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+            <div class="form-group">
+              <label class="form-label" for="waMetaLangSelect">Taal</label>
+              <select id="waMetaLangSelect" class="form-input">
+                <option value="nl">Nederlands (nl)</option>
+                <option value="en_US">English US (en_US)</option>
+                <option value="en">English (en)</option>
+                <option value="de">Deutsch (de)</option>
+                <option value="fr">Fran&ccedil;ais (fr)</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="waMetaCatSelect">Categorie</label>
+              <select id="waMetaCatSelect" class="form-input">
+                <option value="UTILITY">UTILITY</option>
+                <option value="MARKETING">MARKETING</option>
+                <option value="AUTHENTICATION">AUTHENTICATION</option>
+              </select>
+            </div>
+          </div>
+
+          <!-- HEADER -->
+          <details class="form-group" id="waMetaHeaderDetails" style="border:1px solid var(--border);border-radius:8px;padding:10px 12px">
+            <summary style="cursor:pointer;font-weight:600;font-size:13px">Header</summary>
+            <div style="margin-top:10px">
+              <div class="form-group">
+                <label class="form-label" for="waMetaHeaderType">Type</label>
+                <select id="waMetaHeaderType" class="form-input">
+                  <option value="NONE">Geen</option>
+                  <option value="TEXT">Tekst</option>
+                  <option value="IMAGE">Afbeelding</option>
+                  <option value="VIDEO">Video</option>
+                  <option value="DOCUMENT">Document</option>
+                </select>
+              </div>
+              <div class="form-group" id="waMetaHeaderTextGroup" hidden>
+                <label class="form-label" for="waMetaHeaderText">Header tekst</label>
+                <input type="text" id="waMetaHeaderText" class="form-input" maxlength="60" placeholder="Max 60 tekens" />
+                <div style="font-size:11px;color:var(--text-faint);margin-top:4px"><span id="waMetaHeaderTextCount">0</span> / 60</div>
+              </div>
+              <div class="form-group" id="waMetaHeaderUrlGroup" hidden>
+                <label class="form-label" for="waMetaHeaderUrl">Voorbeeld URL</label>
+                <input type="url" id="waMetaHeaderUrl" class="form-input" placeholder="https://&hellip;" />
+                <div style="font-size:11px;color:var(--text-faint);margin-top:4px">Wordt door Meta gebruikt als sample voor approval.</div>
+              </div>
+            </div>
+          </details>
+
+          <!-- BODY -->
+          <div class="form-group">
+            <label class="form-label" for="waMetaBodyText">Body</label>
+            <textarea id="waMetaBodyText" class="form-input" rows="6" maxlength="1024" placeholder="Hi {{1}}, je bestelling {{2}} is bevestigd."></textarea>
+            <div style="font-size:11px;color:var(--text-faint);margin-top:4px">
+              <span id="waMetaBodyCount">0</span> / 1024 &middot; gebruik <code>{{1}}</code>, <code>{{2}}</code> &hellip; voor placeholders.
+            </div>
+            <div id="waMetaVarsBlock" style="margin-top:10px;padding:10px;border:1px dashed var(--border);border-radius:8px;display:none">
+              <div style="font-size:12px;font-weight:600;margin-bottom:6px">Variabelen gevonden: <span id="waMetaVarsList"></span></div>
+              <div id="waMetaVarsInputs" style="display:grid;grid-template-columns:1fr 1fr;gap:8px"></div>
+              <div style="font-size:11px;color:var(--text-faint);margin-top:6px">Voorbeeldwaarden &mdash; gebruikt voor preview &eacute;n als Meta sample bij submit.</div>
+            </div>
+          </div>
+
+          <!-- FOOTER -->
+          <details class="form-group" id="waMetaFooterDetails" style="border:1px solid var(--border);border-radius:8px;padding:10px 12px">
+            <summary style="cursor:pointer;font-weight:600;font-size:13px">Footer</summary>
+            <div style="margin-top:10px">
+              <label class="form-label" for="waMetaFooterInput">Footer tekst</label>
+              <input type="text" id="waMetaFooterInput" class="form-input" maxlength="60" placeholder="bv. De Forex Opleiding" />
+              <div style="font-size:11px;color:var(--text-faint);margin-top:4px"><span id="waMetaFooterCount">0</span> / 60</div>
+            </div>
+          </details>
+
+          <!-- BUTTONS -->
+          <details class="form-group" id="waMetaButtonsDetails" style="border:1px solid var(--border);border-radius:8px;padding:10px 12px">
+            <summary style="cursor:pointer;font-weight:600;font-size:13px">Knoppen (max 3)</summary>
+            <div style="margin-top:10px">
+              <div id="waMetaButtonsList" style="display:flex;flex-direction:column;gap:8px"></div>
+              <button type="button" class="btn btn-sm" id="waMetaBtnAddBtn" style="margin-top:8px"><i class="ti ti-plus"></i> Knop toevoegen</button>
+            </div>
+          </details>
+        </div>
+
+        <!-- RECHTS: preview -->
+        <div>
+          <div id="waMetaPreviewCard" style="position:sticky;top:10px;border:1px solid var(--border);border-radius:10px;padding:14px;background:var(--bg-soft, #f7f7f5)">
+            <div style="font-size:11px;color:var(--text-faint);font-weight:600;margin-bottom:8px;text-transform:uppercase;letter-spacing:.5px">Preview</div>
+            <div id="waMetaPreviewWallpaper" style="background:#e5ddd5;background-image:repeating-linear-gradient(45deg, rgba(255,255,255,0.04) 0 2px, transparent 2px 6px);border-radius:8px;padding:14px;min-height:220px">
+              <div id="waMetaPreviewBubble" style="background:#d9fdd3;border-radius:8px;padding:10px 14px;max-width:280px;box-shadow:0 1px 1px rgba(0,0,0,0.08);font-size:13.5px;line-height:1.45;color:#111">
+                <div id="waMetaPreviewHeader" style="font-weight:700;margin-bottom:6px;display:none"></div>
+                <div id="waMetaPreviewBody" style="white-space:pre-wrap;word-break:break-word">Je bericht verschijnt hier&hellip;</div>
+                <div id="waMetaPreviewFooter" style="font-size:11px;color:#667781;margin-top:6px;display:none"></div>
+              </div>
+              <div id="waMetaPreviewButtons" style="margin-top:8px;display:flex;flex-direction:column;gap:4px;max-width:280px"></div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+      <div class="form-error hidden" id="waMetaError" style="margin-top:12px"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn" onclick="closeWaMetaEdit()">Annuleren</button>
+      <button class="btn btn-primary" id="waMetaSaveBtn" onclick="saveWaMetaTemplate()">Opslaan</button>
+    </div>
+  </div>
+</div>
+
+<!-- WhatsApp Quick Reply edit modal -->
+<div class="modal-overlay hidden" id="waQrEditModal">
+  <div class="modal-card" style="max-width:560px">
+    <div class="modal-header">
+      <div class="modal-title" id="waQrModalTitle">Nieuwe snel antwoord</div>
+      <button class="modal-close" onclick="closeWaQrEdit()">&#x2715;</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-group">
+        <label class="form-label" for="waQrTitleInput">Titel</label>
+        <input type="text" id="waQrTitleInput" class="form-input" maxlength="100" placeholder="bv. Bedankt voor je bericht" />
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="waQrBodyInput">Body</label>
+        <textarea id="waQrBodyInput" class="form-input" rows="5" maxlength="1024" placeholder="Tekst die ingevoegd wordt in het antwoordveld&hellip;"></textarea>
+        <div style="font-size:11px;color:var(--text-faint);margin-top:4px"><span id="waQrBodyCount">0</span> / 1024</div>
+      </div>
+      <div style="display:grid;grid-template-columns:140px 1fr;gap:14px;align-items:center">
+        <div class="form-group" style="margin-bottom:0">
+          <label class="form-label" for="waQrSortInput">Sorteervolgorde</label>
+          <input type="number" id="waQrSortInput" class="form-input" value="0" step="1" />
+        </div>
+        <div class="form-group" style="display:flex;align-items:center;gap:8px;margin-bottom:0">
+          <input type="checkbox" id="waQrActiveInput" checked style="width:16px;height:16px" />
+          <label for="waQrActiveInput" style="font-size:13px;cursor:pointer">Actief (zichtbaar voor agents)</label>
+        </div>
+      </div>
+      <div class="form-error hidden" id="waQrError" style="margin-top:12px"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn" onclick="closeWaQrEdit()">Annuleren</button>
+      <button class="btn btn-primary" id="waQrSaveBtn" onclick="saveWaQuickReply()">Opslaan</button>
     </div>
   </div>
 </div>
@@ -607,11 +861,19 @@ function switchAdminTab(name) {
   document.getElementById('tab-integraties').style.display         = name === 'integraties'         ? '' : 'none';
   const waConnPanel = document.getElementById('tab-whatsapp-connection');
   if (waConnPanel) waConnPanel.style.display = name === 'whatsapp-connection' ? '' : 'none';
+  const waTplPanel = document.getElementById('tab-whatsapp-templates');
+  if (waTplPanel) waTplPanel.style.display = name === 'whatsapp-templates' ? '' : 'none';
+  const waTplView = document.getElementById('view-whatsapp-templates');
+  if (waTplView) waTplView.hidden = name !== 'whatsapp-templates';
   const inviteBtn = document.querySelector('.page-header .btn-primary');
   if (inviteBtn) inviteBtn.style.display = name === 'gebruikers' ? '' : 'none';
   if (name === 'rechten' && !rbacLoaded) loadPermissionsMatrix();
   if (name === 'integraties') { loadTlStatus(); loadWebhooks(); loadTemplateSetting(); }
   if (name === 'whatsapp-connection') { wireWaConfOnce(); loadWaConfList(); }
+  if (name === 'whatsapp-templates') {
+    if (typeof wireWaTemplatesOnce === 'function') wireWaTemplatesOnce();
+    if (typeof loadWaTemplatesList === 'function') loadWaTemplatesList();
+  }
 }
 
 async function loadPermissionsMatrix() {
@@ -771,6 +1033,18 @@ async function init() {
     if (allowWaConn) {
       const wb = document.getElementById('waConnTabBtn');
       if (wb) wb.style.display = '';
+    }
+  } catch (_) { /* RBAC niet geladen — tab blijft verborgen */ }
+
+  // WhatsApp Templates tab: super_admin OF can(admin.whatsapp_templates)
+  try {
+    let allowWaTpl = currentProfile.role === 'super_admin';
+    if (!allowWaTpl && window.RBAC && typeof window.RBAC.can === 'function') {
+      allowWaTpl = await window.RBAC.can('admin.whatsapp_templates');
+    }
+    if (allowWaTpl) {
+      const tb = document.getElementById('waTplTabBtn');
+      if (tb) tb.style.display = '';
     }
   } catch (_) { /* RBAC niet geladen — tab blijft verborgen */ }
 
@@ -1270,7 +1544,12 @@ async function submitInvite() {
 
 // Sluit modal bij ESC
 document.addEventListener('keydown', e => {
-  if (e.key === 'Escape') { closeInviteModal(); closeWaConfEdit(); }
+  if (e.key === 'Escape') {
+    closeInviteModal();
+    closeWaConfEdit();
+    if (typeof closeWaMetaEdit === 'function') closeWaMetaEdit();
+    if (typeof closeWaQrEdit === 'function') closeWaQrEdit();
+  }
 });
 
 // ── WhatsApp Module Connections ─────────────────────────────────────────────
