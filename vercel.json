@@ -47,6 +47,10 @@
     {
       "path": "/api/cron-bank-sync",
       "schedule": "15 * * * *"
+    },
+    {
+      "path": "/api/cron-dunning-engine",
+      "schedule": "0 9 * * *"
     }
   ],
   "headers": [
