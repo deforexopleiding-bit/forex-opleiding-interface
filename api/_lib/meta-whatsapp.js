@@ -80,11 +80,17 @@ async function metaFetch(path, opts = {}) {
  * voor Vercel Logs.
  *
  * @param {object} requestBody — Meta payload (messaging_product, type, etc.)
+ * @param {object} [opts]
+ * @param {string} [opts.phoneNumberId] — override voor cfg.phoneNumberId
+ *                                        (multi-line support; bv. module-scoped
+ *                                        finance-lijn uit whatsapp_module_config).
+ *                                        Bij ontbreken: fallback op env-var.
  * @returns {Promise<object>} Meta's response JSON
  */
-async function metaPostMessage(requestBody) {
+async function metaPostMessage(requestBody, opts = {}) {
   const cfg = getConfig();
-  const path = `/${cfg.phoneNumberId}/messages`;
+  const pnId = opts.phoneNumberId || cfg.phoneNumberId;
+  const path = `/${pnId}/messages`;
   const res = await metaFetch(path, { method: 'POST', body: requestBody });
   const text = await res.text();
   let parsed = null;
@@ -121,11 +127,13 @@ function toMetaPhone(to) {
  * NIET-GEÏMPLEMENTEERD in PR A1.
  *
  * @param {object} opts
- * @param {string} opts.to    E.164 zonder + (Meta-eis: '316XXXXXXX' niet '+316...')
- * @param {string} opts.body  tekst
+ * @param {string} opts.to              E.164 zonder + (Meta-eis: '316XXXXXXX' niet '+316...')
+ * @param {string} opts.body            tekst
+ * @param {string} [opts.phoneNumberId] optionele afzendlijn-override (module-scoped).
+ *                                      Bij ontbreken: env-var fallback via getConfig.
  * @returns {Promise<{ wamid: string }>}
  */
-export async function sendText({ to, body }) {
+export async function sendText({ to, body, phoneNumberId } = {}) {
   if (!to || !body) throw new Error('sendText: to + body vereist');
   const requestBody = {
     messaging_product: 'whatsapp',
@@ -134,7 +142,7 @@ export async function sendText({ to, body }) {
     type:              'text',
     text:              { body: String(body), preview_url: false },
   };
-  const resp = await metaPostMessage(requestBody);
+  const resp = await metaPostMessage(requestBody, { phoneNumberId });
   // Meta response: { messaging_product, contacts:[...], messages:[{ id: 'wamid.XXX' }] }
   const wamid = resp?.messages?.[0]?.id || null;
   if (!wamid) {
@@ -152,14 +160,16 @@ export async function sendText({ to, body }) {
  * NIET-GEÏMPLEMENTEERD in PR A1.
  *
  * @param {object} opts
- * @param {string} opts.to            E.164 zonder +
- * @param {string} opts.templateName  bv. 'invoice_reminder_v1'
- * @param {string} opts.languageCode  bv. 'nl' of 'en'
- * @param {object[]} [opts.components] Meta template-components array
- *                                     (header, body, button parameters).
- *                                     Zie Meta docs message-template-components.
+ * @param {string} opts.to              E.164 zonder +
+ * @param {string} opts.templateName    bv. 'invoice_reminder_v1'
+ * @param {string} opts.languageCode    bv. 'nl' of 'en'
+ * @param {object[]} [opts.components]  Meta template-components array
+ *                                      (header, body, button parameters).
+ *                                      Zie Meta docs message-template-components.
+ * @param {string} [opts.phoneNumberId] optionele afzendlijn-override (module-scoped).
+ *                                      Bij ontbreken: env-var fallback via getConfig.
  */
-export async function sendTemplate({ to, templateName, languageCode = 'nl', variables = [], components = null }) {
+export async function sendTemplate({ to, templateName, languageCode = 'nl', variables = [], components = null, phoneNumberId } = {}) {
   if (!to || !templateName) throw new Error('sendTemplate: to + templateName vereist');
 
   // Twee aanroep-stijlen ondersteund:
@@ -186,7 +196,7 @@ export async function sendTemplate({ to, templateName, languageCode = 'nl', vari
       ...(resolvedComponents ? { components: resolvedComponents } : {}),
     },
   };
-  const resp = await metaPostMessage(requestBody);
+  const resp = await metaPostMessage(requestBody, { phoneNumberId });
   const wamid = resp?.messages?.[0]?.id || null;
   if (!wamid) {
     console.error('[meta-whatsapp] sendTemplate: 2xx maar geen wamid', resp);
@@ -203,9 +213,11 @@ export async function sendTemplate({ to, templateName, languageCode = 'nl', vari
  * NIET-GEÏMPLEMENTEERD in PR A1.
  *
  * @param {object} opts
- * @param {string} opts.wamid  Meta's 'wamid.XXX' message-id van inbound msg
+ * @param {string} opts.wamid           Meta's 'wamid.XXX' message-id van inbound msg
+ * @param {string} [opts.phoneNumberId] optionele afzendlijn-override (module-scoped).
+ *                                      Bij ontbreken: env-var fallback via getConfig.
  */
-export async function markAsRead({ wamid }) {
+export async function markAsRead({ wamid, phoneNumberId } = {}) {
   if (!wamid) throw new Error('markAsRead: wamid vereist');
   const requestBody = {
     messaging_product: 'whatsapp',
@@ -214,7 +226,7 @@ export async function markAsRead({ wamid }) {
   };
   // markAsRead returnt { success: true } bij 2xx. Geen wamid in respons —
   // we returnen alleen het succes-resultaat.
-  const resp = await metaPostMessage(requestBody);
+  const resp = await metaPostMessage(requestBody, { phoneNumberId });
   return { success: resp?.success === true || true };
 }
 

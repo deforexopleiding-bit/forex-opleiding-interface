@@ -81,10 +81,30 @@ export default async function handler(req, res) {
   }
 
   try {
+    // Module-config: finance-WABA-lijn voor outbound routing. Bij ontbreken
+    // valt sendText/sendTemplate terug op env-var (huidige gedrag) zodat
+    // bestaande deploys zonder DB-config blijven werken.
+    let financePnId = null;
+    try {
+      const { data: modCfg, error: modErr } = await supabaseAdmin
+        .from('whatsapp_module_config')
+        .select('phone_number_id')
+        .eq('module', 'finance')
+        .eq('is_active', true)
+        .maybeSingle();
+      if (modErr) {
+        console.error('[inbox-send] module-config lookup:', modErr.message);
+      } else if (modCfg?.phone_number_id) {
+        financePnId = modCfg.phone_number_id;
+      }
+    } catch (e) {
+      console.error('[inbox-send] module-config exception:', e.message);
+    }
+
     // Conversation ophalen — voor phone_number + 24h check
     const { data: conv, error: convErr } = await supabaseAdmin
       .from('whatsapp_conversations')
-      .select('id, phone_number, last_inbound_at, last_message_preview')
+      .select('id, phone_number, phone_number_id, last_inbound_at, last_message_preview')
       .eq('id', convId)
       .maybeSingle();
     if (convErr) throw new Error('conversation lookup: ' + convErr.message);
@@ -103,17 +123,24 @@ export default async function handler(req, res) {
       }
     }
 
+    // Afzendlijn-keuze: prefer conversation.phone_number_id (de lijn waarop
+    // het gesprek binnenkwam) zodat antwoord-routing klopt. Fallback op
+    // finance-module-config; uiteindelijk fallback op env-var (= undefined
+    // doorgeven aan sendText/sendTemplate triggert getConfig default).
+    const outboundPnId = conv.phone_number_id || financePnId || undefined;
+
     // Meta API call
     let metaResult;
     try {
       if (mode === 'text') {
-        metaResult = await sendText({ to: conv.phone_number, body: text });
+        metaResult = await sendText({ to: conv.phone_number, body: text, phoneNumberId: outboundPnId });
       } else {
         metaResult = await sendTemplate({
           to: conv.phone_number,
           templateName,
           languageCode: templateLanguage,
           components: templateComponents,
+          phoneNumberId: outboundPnId,
         });
       }
     } catch (metaErr) {
