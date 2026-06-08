@@ -1283,13 +1283,36 @@ async function loadWaConfList() {
   if (!tbody) return;
   tbody.innerHTML = '<tr><td colspan="5" style="color:var(--text-faint);padding:20px">Laden&hellip;</td></tr>';
   try {
-    const data = await apiRequest('GET', '/api/admin-whatsapp-modules-list');
-    if (data && data.error) throw new Error(data.error);
-    _waConfItems = (data && data.items) || (data && data.modules) || [];
+    // Parallel: laad modules + numbers-available cache. Phones-cache is
+    // nodig om in de tabel het human-readable display_phone_number te
+    // kunnen tonen i.p.v. de raw Meta phone_number_id. Bij phones-fail:
+    // de tabel werkt nog, valt terug op raw id.
+    const [modulesData] = await Promise.all([
+      apiRequest('GET', '/api/admin-whatsapp-modules-list'),
+      loadWaConfPhones().catch(e => {
+        console.warn('[waConf] phones-cache laden mislukt:', e.message);
+        return null;
+      }),
+    ]);
+    if (modulesData && modulesData.error) throw new Error(modulesData.error);
+    _waConfItems = (modulesData && modulesData.items) || (modulesData && modulesData.modules) || [];
     renderWaConfRows();
   } catch (e) {
     tbody.innerHTML = `<tr><td colspan="5" style="color:var(--red);padding:20px">Fout: ${esc(e.message)}</td></tr>`;
   }
+}
+
+// Lookup helper: zet een Meta phone_number_id om naar 'display_phone_number
+// (verified_name)' wanneer beschikbaar in de phones-cache. Fallback op raw id.
+function waConfPhoneDisplay(phoneId) {
+  if (!phoneId) return '—';
+  const phone = (_waConfPhones || []).find(p =>
+    (p.id || p.phone_number_id) === phoneId
+  );
+  if (!phone) return String(phoneId);  // raw id als cache niet geladen
+  const disp = phone.display_phone_number || phone.phone_number || phoneId;
+  const name = phone.verified_name ? ` (${phone.verified_name})` : '';
+  return disp + name;
 }
 
 function renderWaConfRows() {
@@ -1301,7 +1324,10 @@ function renderWaConfRows() {
   }
   tbody.innerHTML = _waConfItems.map(it => {
     const moduleKey  = esc(it.module || it.module_key || '');
-    const phone      = esc(it.phone_number || it.display_phone_number || '—');
+    // Backend levert phone_number_id (de Meta-uuid-achtige id). Lookup naar
+    // display via phones-cache; fallback op raw id zodat de cell nooit leeg is.
+    const phoneId    = it.phone_number_id || it.phone_number || '';
+    const phone      = esc(waConfPhoneDisplay(phoneId));
     const label      = esc(it.display_label || it.label || '—');
     const active     = it.is_active !== false;
     const statusDot  = active ? '<span class="active-dot"></span> Actief' : '<span class="active-dot inactive-dot"></span> Inactief';
@@ -1322,7 +1348,10 @@ async function loadWaConfPhones() {
   try {
     const data = await apiRequest('GET', '/api/admin-whatsapp-numbers-available');
     if (data && data.error) throw new Error(data.error);
-    _waConfPhones = (data && data.phones) || (data && data.numbers) || (data && data.data) || [];
+    // Endpoint returnt { items, cached, expires_in_sec }. Vroegere fallbacks
+    // (phones/numbers/data) blijven staan voor backward-compat.
+    _waConfPhones = (data && data.items) || (data && data.phones)
+                  || (data && data.numbers) || (data && data.data) || [];
     return _waConfPhones;
   } catch (e) {
     _waConfPhones = [];
