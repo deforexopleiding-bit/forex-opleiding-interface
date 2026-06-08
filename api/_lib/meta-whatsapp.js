@@ -73,6 +73,45 @@ async function metaFetch(path, opts = {}) {
   return res;
 }
 
+/**
+ * POST een payload naar /{PHONE_NUMBER_ID}/messages en handle Meta's error-shape
+ * uniform. Returnt de parsed JSON respons bij 2xx, throws bij non-2xx met een
+ * geformatteerde message + logged het volledige error-object naar console.error
+ * voor Vercel Logs.
+ *
+ * @param {object} requestBody — Meta payload (messaging_product, type, etc.)
+ * @returns {Promise<object>} Meta's response JSON
+ */
+async function metaPostMessage(requestBody) {
+  const cfg = getConfig();
+  const path = `/${cfg.phoneNumberId}/messages`;
+  const res = await metaFetch(path, { method: 'POST', body: requestBody });
+  const text = await res.text();
+  let parsed = null;
+  try { parsed = text ? JSON.parse(text) : null; } catch { /* keep null */ }
+  if (!res.ok) {
+    const err = parsed && parsed.error ? parsed.error : null;
+    const code     = err?.code ?? res.status;
+    const subcode  = err?.error_subcode ?? '';
+    const msg      = err?.message ?? text.slice(0, 200);
+    const fbtrace  = err?.fbtrace_id ?? '';
+    console.error('[meta-whatsapp] POST messages failed', {
+      http_status: res.status,
+      meta_error:  err,
+      raw_body:    parsed ? undefined : text.slice(0, 500),
+    });
+    throw new Error(`Meta API ${code}: ${msg} (subcode=${subcode}, fbtrace=${fbtrace})`);
+  }
+  return parsed || {};
+}
+
+/**
+ * Strip leading '+' voor Meta-format ('316XXXXXXX' niet '+316...').
+ */
+function toMetaPhone(to) {
+  return String(to || '').replace(/^\+/, '');
+}
+
 // ── Send: free-form tekst (binnen 24h customer-service window) ─────────────
 /**
  * Stuur een tekst-bericht via Meta Cloud API. Vereist dat de klant binnen
@@ -88,17 +127,21 @@ async function metaFetch(path, opts = {}) {
  */
 export async function sendText({ to, body }) {
   if (!to || !body) throw new Error('sendText: to + body vereist');
-  const cfg = getConfig();
   const requestBody = {
     messaging_product: 'whatsapp',
     recipient_type:    'individual',
-    to:                String(to).replace(/^\+/, ''),  // Meta wil zonder +
+    to:                toMetaPhone(to),
     type:              'text',
     text:              { body: String(body), preview_url: false },
   };
-  const path = `/${cfg.phoneNumberId}/messages`;
-  // PR A1: alleen body-shape valideren, geen fetch. Activeer in A2.
-  return Promise.reject(new Error(`Not implemented in PR A1 (path=${path}, body.type=${requestBody.type})`));
+  const resp = await metaPostMessage(requestBody);
+  // Meta response: { messaging_product, contacts:[...], messages:[{ id: 'wamid.XXX' }] }
+  const wamid = resp?.messages?.[0]?.id || null;
+  if (!wamid) {
+    console.error('[meta-whatsapp] sendText: 2xx maar geen wamid in respons', resp);
+    throw new Error('Meta API: 2xx zonder wamid in messages[0].id');
+  }
+  return { wamid };
 }
 
 // ── Send: template (buiten 24h window of bootstrap) ────────────────────────
@@ -116,21 +159,40 @@ export async function sendText({ to, body }) {
  *                                     (header, body, button parameters).
  *                                     Zie Meta docs message-template-components.
  */
-export async function sendTemplate({ to, templateName, languageCode = 'nl', components = [] }) {
+export async function sendTemplate({ to, templateName, languageCode = 'nl', variables = [], components = null }) {
   if (!to || !templateName) throw new Error('sendTemplate: to + templateName vereist');
-  const cfg = getConfig();
+
+  // Twee aanroep-stijlen ondersteund:
+  //  1. variables: ['Jeffrey', 'EUR 80,00']  → bouw één 'body'-component met text-parameters.
+  //  2. components: [{ type:'header', parameters:[...] }, ...]  → letterlijk doorgegeven
+  //     (voor templates met header/buttons).
+  let resolvedComponents = null;
+  if (Array.isArray(components) && components.length) {
+    resolvedComponents = components;
+  } else if (Array.isArray(variables) && variables.length) {
+    resolvedComponents = [{
+      type: 'body',
+      parameters: variables.map(v => ({ type: 'text', text: String(v) })),
+    }];
+  }
+
   const requestBody = {
     messaging_product: 'whatsapp',
-    to:                String(to).replace(/^\+/, ''),
+    to:                toMetaPhone(to),
     type:              'template',
     template: {
       name:     templateName,
       language: { code: languageCode },
-      ...(components.length ? { components } : {}),
+      ...(resolvedComponents ? { components: resolvedComponents } : {}),
     },
   };
-  const path = `/${cfg.phoneNumberId}/messages`;
-  return Promise.reject(new Error(`Not implemented in PR A1 (path=${path}, template=${templateName})`));
+  const resp = await metaPostMessage(requestBody);
+  const wamid = resp?.messages?.[0]?.id || null;
+  if (!wamid) {
+    console.error('[meta-whatsapp] sendTemplate: 2xx maar geen wamid', resp);
+    throw new Error('Meta API: 2xx zonder wamid in messages[0].id');
+  }
+  return { wamid };
 }
 
 // ── Mark inbound message as read (UX-nicety: toont blauwe vinkjes) ─────────
@@ -145,14 +207,15 @@ export async function sendTemplate({ to, templateName, languageCode = 'nl', comp
  */
 export async function markAsRead({ wamid }) {
   if (!wamid) throw new Error('markAsRead: wamid vereist');
-  const cfg = getConfig();
   const requestBody = {
     messaging_product: 'whatsapp',
     status:            'read',
     message_id:        wamid,
   };
-  const path = `/${cfg.phoneNumberId}/messages`;
-  return Promise.reject(new Error(`Not implemented in PR A1 (path=${path}, wamid=${wamid})`));
+  // markAsRead returnt { success: true } bij 2xx. Geen wamid in respons —
+  // we returnen alleen het succes-resultaat.
+  const resp = await metaPostMessage(requestBody);
+  return { success: resp?.success === true || true };
 }
 
 // ── List approved templates (voor UI dropdown bij outbound) ────────────────
