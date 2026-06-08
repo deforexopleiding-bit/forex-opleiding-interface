@@ -404,6 +404,7 @@
       <button class="modal-close" onclick="closeWaMetaEdit()">&#x2715;</button>
     </div>
     <div class="modal-body">
+      <div id="waMetaStatusBanner" hidden style="margin-bottom:14px;padding:10px 14px;border-radius:8px;font-size:13px;font-weight:500;border:1px solid transparent"></div>
       <div style="display:grid;grid-template-columns:1fr 380px;gap:20px;align-items:start">
 
         <!-- LINKS: form -->
@@ -1766,6 +1767,11 @@ let _waMetaButtonsDraft = [];
 // Examples per variabele-index ({{1}}, {{2}}, ...) — losse state zodat de
 // preview live ververst zonder de form-velden te muteren.
 let _waMetaCurrentExamples = {};
+// Read-only-modus voor de editor-modal. True bij SUBMITTED/APPROVED/PAUSED/DISABLED
+// (statussen waar bewerking lokaal niet zinvol is — Meta bepaalt content). False
+// bij LOCAL en REJECTED (gebruiker mag repareren). Globale window-prop zodat
+// render-helpers (buttons, vars) na re-render de disabled-state kunnen toepassen.
+window._waMetaReadOnly = false;
 
 let _waQrItems        = [];
 let _waQrEditingId    = null;
@@ -2025,6 +2031,8 @@ function renderWaMetaVarsBlock() {
       computeWaMetaPreview();
     });
   });
+  // Re-apply read-only voor nieuwe variabelen-inputs.
+  if (window._waMetaReadOnly) applyWaMetaReadOnly(true);
 }
 
 function renderWaMetaButtons() {
@@ -2097,6 +2105,8 @@ function renderWaMetaButtons() {
       deleteWaMetaButton(idx);
     });
   });
+  // Re-apply read-only voor nieuwe knop-row inputs/buttons.
+  if (window._waMetaReadOnly) applyWaMetaReadOnly(true);
 }
 
 function addWaMetaButton() {
@@ -2179,6 +2189,100 @@ const _waTplVarsAndPreviewDebounced = _waTplDebounce(() => {
   computeWaMetaPreview();
 }, 200);
 
+// Pas read-only state toe op alle relevante editor-controls. Wordt aangeroepen
+// vanuit openWaMetaEdit/openWaMetaNew én vanuit renderWaMetaButtons /
+// renderWaMetaVarsBlock zodat ook na re-render nieuwe inputs disabled blijven
+// wanneer _waMetaReadOnly true is.
+function applyWaMetaReadOnly(disabled) {
+  const ids = [
+    'waMetaNameInput', 'waMetaLangSelect', 'waMetaCatSelect',
+    'waMetaHeaderType', 'waMetaHeaderText', 'waMetaHeaderUrl',
+    'waMetaBodyText', 'waMetaFooterInput'
+  ];
+  ids.forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.disabled = !!disabled;
+  });
+  // Knop "Knop toevoegen"
+  const addBtn = document.getElementById('waMetaBtnAddBtn');
+  if (addBtn) addBtn.disabled = !!disabled;
+  // Alle dynamisch gerenderde button-row inputs + verwijder-knoppen
+  const btnList = document.getElementById('waMetaButtonsList');
+  if (btnList) {
+    btnList.querySelectorAll('select, input, button').forEach(el => {
+      // Bewaar oorspronkelijke disabled (bv. QUICK_REPLY extra-veld) door
+      // bij re-enable alleen de read-only-flag te resetten.
+      if (disabled) el.disabled = true;
+      else el.disabled = el.hasAttribute('data-original-disabled');
+    });
+  }
+  // Variabelen-inputs (dynamisch gerenderd)
+  const varsBlock = document.getElementById('waMetaVarsBlock');
+  if (varsBlock) {
+    varsBlock.querySelectorAll('input').forEach(el => { el.disabled = !!disabled; });
+  }
+  // Save-knop: in read-only modus gebruiken we hem als "Sluiten".
+  const saveBtn = document.getElementById('waMetaSaveBtn');
+  if (saveBtn) {
+    if (disabled) {
+      saveBtn.textContent = 'Sluiten';
+      saveBtn.onclick = closeWaMetaEdit;
+      saveBtn.classList.remove('btn-primary');
+    } else {
+      saveBtn.textContent = 'Opslaan';
+      saveBtn.onclick = saveWaMetaTemplate;
+      saveBtn.classList.add('btn-primary');
+    }
+  }
+}
+
+// Render status-banner bovenaan editor-modal o.b.v. item.status.
+// SUBMITTED  → grijs "Wacht op Meta-review"
+// APPROVED   → groen "Goedgekeurd door Meta op <date>"
+// REJECTED   → rood "Afgewezen door Meta: <reason>" (modal blijft bewerkbaar)
+// PAUSED     → rood "Pause/Disable door Meta"
+// DISABLED   → rood "Pause/Disable door Meta"
+// LOCAL/anders → banner verborgen.
+function renderWaMetaStatusBanner(item) {
+  const banner = document.getElementById('waMetaStatusBanner');
+  if (!banner) return;
+  const status = (item && item.status) || 'LOCAL';
+  let bg = '', fg = '', border = '', html = '';
+  if (status === 'SUBMITTED') {
+    bg = '#f3f4f6'; fg = '#374151'; border = '#d1d5db';
+    html = '<i class="ti ti-clock" style="margin-right:6px"></i>Wacht op Meta-review';
+  } else if (status === 'APPROVED') {
+    bg = '#d1fae5'; fg = '#065f46'; border = '#6ee7b7';
+    let dateStr = '';
+    if (item && item.approved_at) {
+      try {
+        const d = new Date(item.approved_at);
+        if (!isNaN(d.getTime())) dateStr = d.toLocaleDateString('nl-NL', { day: '2-digit', month: 'short', year: 'numeric' });
+      } catch (_) { /* ignore */ }
+    }
+    html = '<i class="ti ti-circle-check" style="margin-right:6px"></i>Goedgekeurd door Meta'
+      + (dateStr ? ' op ' + esc(dateStr) : '');
+  } else if (status === 'REJECTED') {
+    bg = '#fee2e2'; fg = '#991b1b'; border = '#fca5a5';
+    const reason = (item && item.rejection_reason) ? esc(String(item.rejection_reason)) : 'onbekende reden';
+    html = '<i class="ti ti-alert-triangle" style="margin-right:6px"></i>Afgewezen door Meta: '
+      + reason
+      + '<div style="font-weight:400;font-size:11.5px;margin-top:4px;opacity:0.85">Pas de content aan en stuur opnieuw in voor review.</div>';
+  } else if (status === 'PAUSED' || status === 'DISABLED') {
+    bg = '#fee2e2'; fg = '#991b1b'; border = '#fca5a5';
+    html = '<i class="ti ti-player-pause" style="margin-right:6px"></i>Pause/Disable door Meta';
+  } else {
+    banner.hidden = true;
+    banner.innerHTML = '';
+    return;
+  }
+  banner.style.background = bg;
+  banner.style.color = fg;
+  banner.style.borderColor = border;
+  banner.innerHTML = html;
+  banner.hidden = false;
+}
+
 // ─── Meta Templates modal: open / save / delete ───────────────────────────
 function openWaMetaNew() {
   if (!_waTplActiveWaba) {
@@ -2188,6 +2292,10 @@ function openWaMetaNew() {
   _waMetaEditingId = null;
   _waMetaButtonsDraft = [];
   _waMetaCurrentExamples = {};
+  // Nieuwe template is ALTIJD bewerkbaar — reset eventuele read-only state
+  // van een vorig geopend item.
+  window._waMetaReadOnly = false;
+  renderWaMetaStatusBanner(null);
   document.getElementById('waMetaModalTitle').textContent = 'Nieuwe Meta template';
   // Init form-velden
   const nameEl   = document.getElementById('waMetaNameInput');
@@ -2210,6 +2318,7 @@ function openWaMetaNew() {
   renderWaMetaButtons();
   renderWaMetaVarsBlock();
   computeWaMetaPreview();
+  applyWaMetaReadOnly(false);
   const err = document.getElementById('waMetaError');
   if (err) { err.classList.add('hidden'); err.textContent = ''; }
   document.getElementById('waMetaEditModal').classList.remove('hidden');
@@ -2220,7 +2329,18 @@ function openWaMetaEdit(item) {
   _waMetaEditingId = item.id;
   _waMetaButtonsDraft = Array.isArray(item.buttons) ? item.buttons.map(b => ({ ...b })) : [];
   _waMetaCurrentExamples = (item.body_examples && typeof item.body_examples === 'object') ? { ...item.body_examples } : {};
-  document.getElementById('waMetaModalTitle').textContent = 'Template bewerken';
+  // Read-only voor statussen waar bewerken lokaal niet zinvol is (Meta bepaalt
+  // de content). REJECTED blijft bewerkbaar zodat gebruiker kan repareren.
+  const status = item.status || 'LOCAL';
+  const readOnly = ['SUBMITTED', 'APPROVED', 'PAUSED', 'DISABLED'].includes(status);
+  window._waMetaReadOnly = readOnly;
+  const titleEl = document.getElementById('waMetaModalTitle');
+  if (titleEl) {
+    titleEl.textContent = readOnly
+      ? ('Bekijk Meta template: ' + (item.name || ''))
+      : ('Bewerk Meta template: ' + (item.name || ''));
+  }
+  renderWaMetaStatusBanner(item);
   const nameEl   = document.getElementById('waMetaNameInput');
   const langEl   = document.getElementById('waMetaLangSelect');
   const catEl    = document.getElementById('waMetaCatSelect');
@@ -2241,6 +2361,9 @@ function openWaMetaEdit(item) {
   renderWaMetaButtons();
   renderWaMetaVarsBlock();
   computeWaMetaPreview();
+  // BELANGRIJK: applyWaMetaReadOnly() na render-aanroepen zodat de dynamisch
+  // gegenereerde button-row + variabelen-inputs ook disabled worden.
+  applyWaMetaReadOnly(readOnly);
   const err = document.getElementById('waMetaError');
   if (err) { err.classList.add('hidden'); err.textContent = ''; }
   document.getElementById('waMetaEditModal').classList.remove('hidden');
@@ -2252,6 +2375,10 @@ function closeWaMetaEdit() {
   _waMetaEditingId = null;
   _waMetaButtonsDraft = [];
   _waMetaCurrentExamples = {};
+  // Reset read-only state + banner zodat volgende open-call schoon start.
+  window._waMetaReadOnly = false;
+  const banner = document.getElementById('waMetaStatusBanner');
+  if (banner) { banner.hidden = true; banner.innerHTML = ''; }
 }
 
 // Header-type → toon/verberg de juiste sub-inputs (TEXT → tekst-veld;
