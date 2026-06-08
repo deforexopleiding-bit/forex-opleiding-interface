@@ -303,7 +303,10 @@
                 <div style="font-size:14px;font-weight:700">Meta Templates</div>
                 <div style="font-size:11.5px;color:var(--text-faint)">Server-side goedgekeurd door Meta. Status: APPROVED / PENDING / REJECTED.</div>
               </div>
-              <button class="btn btn-sm btn-primary" id="waMetaNewBtn"><i class="ti ti-plus"></i> Nieuwe template</button>
+              <div style="display:flex;gap:8px">
+                <button class="btn btn-sm" id="waMetaSyncBtn" title="Haal templates op uit Meta en update statussen"><i class="ti ti-refresh"></i> Sync met Meta</button>
+                <button class="btn btn-sm btn-primary" id="waMetaNewBtn"><i class="ti ti-plus"></i> Nieuwe template</button>
+              </div>
             </div>
             <div style="overflow-x:auto">
               <table class="users-table" id="waMetaTable">
@@ -1836,16 +1839,24 @@ async function loadWaMetaList() {
   }
 }
 
-function waMetaStatusBadge(status) {
+function waMetaStatusBadge(status, rejectionReason) {
   // Kleur-mapping conform Meta-lifecycle. LOCAL = nog niet ingediend (grijs).
   const map = {
     LOCAL:     { bg: '#e5e7eb', fg: '#374151' },
     SUBMITTED: { bg: '#fef3c7', fg: '#92400e' },
     APPROVED:  { bg: '#d1fae5', fg: '#065f46' },
     REJECTED:  { bg: '#fee2e2', fg: '#991b1b' },
+    PAUSED:    { bg: '#ede9fe', fg: '#5b21b6' },
+    DISABLED:  { bg: '#f3f4f6', fg: '#4b5563' },
   };
   const c = map[status] || { bg: '#f3f4f6', fg: '#374151' };
-  return `<span style="display:inline-block;padding:2px 8px;border-radius:10px;font-size:11.5px;font-weight:600;background:${c.bg};color:${c.fg}">${esc(status || 'UNKNOWN')}</span>`;
+  // Voor REJECTED: tooltip met rejection_reason. esc() ontsnapt geen quotes — extra &quot; replace.
+  let titleAttr = '';
+  if (status === 'REJECTED' && rejectionReason) {
+    const safe = esc(String(rejectionReason)).replace(/"/g, '&quot;');
+    titleAttr = ` title="Rejection: ${safe}"`;
+  }
+  return `<span${titleAttr} style="display:inline-block;padding:2px 8px;border-radius:10px;font-size:11.5px;font-weight:600;background:${c.bg};color:${c.fg}">${esc(status || 'UNKNOWN')}</span>`;
 }
 
 function renderWaMetaRows() {
@@ -1861,19 +1872,42 @@ function renderWaMetaRows() {
     const lang      = esc(it.language || '');
     const cat       = esc(it.category || '');
     const status    = it.status || 'LOCAL';
-    const badge     = waMetaStatusBadge(status);
-    // Edit-gate: alleen LOCAL of REJECTED zijn muteerbaar (server enforced).
-    // Delete-gate: alleen LOCAL (in C1).
-    const canEdit   = status === 'LOCAL' || status === 'REJECTED';
-    const canDelete = status === 'LOCAL';
-    const editBtn   = `<button class="action-btn" data-wa-meta-edit="${id}"${canEdit ? '' : ' disabled style="opacity:0.5;cursor:not-allowed"'}><i class="ti ti-edit"></i> Bewerken</button>`;
-    const delBtn    = `<button class="action-btn" data-wa-meta-del="${id}"${canDelete ? '' : ' disabled style="opacity:0.5;cursor:not-allowed"'}><i class="ti ti-trash"></i> Verwijderen</button>`;
+    const badge     = waMetaStatusBadge(status, it.rejection_reason);
+    // Per-status action-set:
+    //  LOCAL:     Bewerken + Verwijderen + Naar Meta sturen
+    //  SUBMITTED: Bekijken (read-only modal)
+    //  REJECTED:  Bewerken + Opnieuw insturen
+    //  APPROVED:  Bekijken + Dupliceer
+    //  PAUSED/DISABLED: Bekijken
+    let actions = '';
+    if (status === 'LOCAL') {
+      actions = `
+        <button class="action-btn" data-wa-meta-edit="${id}"><i class="ti ti-edit"></i> Bewerken</button>
+        <button class="action-btn" data-wa-meta-del="${id}"><i class="ti ti-trash"></i> Verwijderen</button>
+        <button class="action-btn" data-wa-meta-submit="${id}" style="background:#2563eb;color:#fff;border-color:#2563eb"><i class="ti ti-send"></i> Naar Meta sturen</button>
+      `;
+    } else if (status === 'SUBMITTED') {
+      actions = `<button class="action-btn" data-wa-meta-view="${id}"><i class="ti ti-eye"></i> Bekijken</button>`;
+    } else if (status === 'REJECTED') {
+      actions = `
+        <button class="action-btn" data-wa-meta-edit="${id}"><i class="ti ti-edit"></i> Bewerken</button>
+        <button class="action-btn" data-wa-meta-resubmit="${id}" style="background:#f97316;color:#fff;border-color:#f97316"><i class="ti ti-refresh"></i> Opnieuw insturen</button>
+      `;
+    } else if (status === 'APPROVED') {
+      actions = `
+        <button class="action-btn" data-wa-meta-view="${id}"><i class="ti ti-eye"></i> Bekijken</button>
+        <button class="action-btn" data-wa-meta-dupliceer="${id}"><i class="ti ti-copy"></i> Dupliceer</button>
+      `;
+    } else {
+      // PAUSED / DISABLED / unknown
+      actions = `<button class="action-btn" data-wa-meta-view="${id}"><i class="ti ti-eye"></i> Bekijken</button>`;
+    }
     return `<tr>
       <td><strong>${name}</strong></td>
       <td>${lang}</td>
       <td>${cat}</td>
       <td>${badge}</td>
-      <td>${editBtn} ${delBtn}</td>
+      <td>${actions}</td>
     </tr>`;
   }).join('');
 }
@@ -2328,6 +2362,110 @@ async function deleteWaMetaTemplate(item) {
   }
 }
 
+// ─── C2: Meta sync / submit / resubmit / duplicate ────────────────────────
+
+async function doWaMetaSync() {
+  if (!_waTplActiveWaba) {
+    window.AgentShared?.showToast('Selecteer eerst een WABA', 'error');
+    return;
+  }
+  const btn = document.getElementById('waMetaSyncBtn');
+  const orig = btn ? btn.innerHTML : '';
+  if (btn) { btn.disabled = true; btn.innerHTML = '<i class="ti ti-loader"></i> Bezig…'; }
+  try {
+    const data = await apiRequest('POST', '/api/admin-meta-templates-sync', { business_account_id: _waTplActiveWaba });
+    if (data && data.error) throw new Error(data.error);
+    const scanned = (data && (data.scanned ?? data.synced)) ?? 0;
+    const updated = (data && data.updated) ?? 0;
+    const created = (data && data.created) ?? 0;
+    const parts = [`${scanned} gesynchroniseerd`];
+    if (updated) parts.push(`${updated} status-wijziging${updated === 1 ? '' : 'en'}`);
+    if (created) parts.push(`${created} nieuw`);
+    window.AgentShared?.showToast(parts.join(', '), 'success');
+    await loadWaMetaList();
+  } catch (e) {
+    window.AgentShared?.showToast('Sync mislukt: ' + e.message, 'error');
+  } finally {
+    if (btn) { btn.disabled = false; btn.innerHTML = orig; }
+  }
+}
+
+async function doWaMetaSubmit(item) {
+  if (!item) return;
+  if (!confirm(`Template '${item.name}' naar Meta sturen voor goedkeuring? Daarna is bewerken alleen mogelijk na rejection.`)) return;
+  try {
+    const data = await apiRequest('POST', '/api/admin-meta-templates-submit', { template_id: item.id });
+    if (data && data.error) {
+      const metaMsg = data.meta_error?.message || data.error;
+      window.AgentShared?.showToast('Submit mislukt: ' + metaMsg, 'error');
+      return;
+    }
+    window.AgentShared?.showToast('Template ingestuurd bij Meta', 'success');
+    await loadWaMetaList();
+  } catch (e) {
+    window.AgentShared?.showToast('Submit mislukt: ' + e.message, 'error');
+  }
+}
+
+async function doWaMetaResubmit(item) {
+  if (!item) return;
+  if (!confirm(`Template '${item.name}' opnieuw insturen na rejection?`)) return;
+  try {
+    const data = await apiRequest('POST', '/api/admin-meta-templates-submit', { template_id: item.id });
+    if (data && data.error) {
+      const metaMsg = data.meta_error?.message || data.error;
+      window.AgentShared?.showToast('Opnieuw insturen mislukt: ' + metaMsg, 'error');
+      return;
+    }
+    window.AgentShared?.showToast('Template opnieuw ingestuurd', 'success');
+    await loadWaMetaList();
+  } catch (e) {
+    window.AgentShared?.showToast('Opnieuw insturen mislukt: ' + e.message, 'error');
+  }
+}
+
+async function doWaMetaDuplicate(item) {
+  if (!item) return;
+  if (!_waTplActiveWaba) {
+    window.AgentShared?.showToast('Geen actieve WABA', 'error');
+    return;
+  }
+  // Bouw unieke nieuwe naam: <name>_v2, _v3, etc. Skim bestaande items.
+  const base = String(item.name || '').replace(/_v\d+$/, '');
+  const re = new RegExp('^' + base.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '_v(\\d+)$');
+  let maxN = 1;
+  for (const it of _waMetaItems) {
+    if (it.name === base) maxN = Math.max(maxN, 1);
+    const m = re.exec(it.name || '');
+    if (m) maxN = Math.max(maxN, parseInt(m[1], 10));
+  }
+  const newName = `${base}_v${maxN + 1}`;
+
+  const payload = {
+    business_account_id: _waTplActiveWaba,
+    name:           newName,
+    language:       item.language || 'nl',
+    category:       item.category || 'UTILITY',
+    header_type:    item.header_type || 'NONE',
+    header_content: item.header_content || null,
+    body_text:      item.body_text || '',
+    body_examples:  item.body_examples || null,
+    footer_text:    item.footer_text || null,
+    buttons:        Array.isArray(item.buttons) && item.buttons.length ? item.buttons.map(b => ({ ...b })) : null,
+  };
+  try {
+    const data = await apiRequest('POST', '/api/admin-meta-templates-upsert', payload);
+    if (data && data.error) {
+      window.AgentShared?.showToast('Dupliceer mislukt: ' + data.error, 'error');
+      return;
+    }
+    window.AgentShared?.showToast('Dupliceer aangemaakt: ' + newName, 'success');
+    await loadWaMetaList();
+  } catch (e) {
+    window.AgentShared?.showToast('Dupliceer mislukt: ' + e.message, 'error');
+  }
+}
+
 // ─── Quick Replies modal: open / save / delete ────────────────────────────
 function openWaQrNew() {
   if (!_waTplActiveWaba) {
@@ -2467,23 +2605,43 @@ function wireWaTplOnce() {
   const qrNewBtn = document.getElementById('waQrNewBtn');
   if (qrNewBtn) qrNewBtn.addEventListener('click', () => openWaQrNew());
 
-  // Row-click delegation: bewerken/verwijderen knoppen in beide tables.
+  // Row-click delegation: bewerken/verwijderen/bekijken/submit/resubmit/dupliceer.
   const metaTbody = document.getElementById('waMetaTbody');
   if (metaTbody) {
     metaTbody.addEventListener('click', (e) => {
-      const editBtn = e.target.closest('[data-wa-meta-edit]');
-      const delBtn  = e.target.closest('[data-wa-meta-del]');
+      const editBtn     = e.target.closest('[data-wa-meta-edit]');
+      const delBtn      = e.target.closest('[data-wa-meta-del]');
+      const viewBtn     = e.target.closest('[data-wa-meta-view]');
+      const submitBtn   = e.target.closest('[data-wa-meta-submit]');
+      const resubmitBtn = e.target.closest('[data-wa-meta-resubmit]');
+      const dupBtn      = e.target.closest('[data-wa-meta-dupliceer]');
+      const findItem = (btn, attr) => {
+        const id = btn.getAttribute(attr);
+        return _waMetaItems.find(it => String(it.id) === id);
+      };
       if (editBtn && !editBtn.disabled) {
-        const id = editBtn.getAttribute('data-wa-meta-edit');
-        const item = _waMetaItems.find(it => String(it.id) === id);
+        const item = findItem(editBtn, 'data-wa-meta-edit');
         if (item) openWaMetaEdit(item);
       } else if (delBtn && !delBtn.disabled) {
-        const id = delBtn.getAttribute('data-wa-meta-del');
-        const item = _waMetaItems.find(it => String(it.id) === id);
+        const item = findItem(delBtn, 'data-wa-meta-del');
         if (item) deleteWaMetaTemplate(item);
+      } else if (viewBtn && !viewBtn.disabled) {
+        const item = findItem(viewBtn, 'data-wa-meta-view');
+        if (item) openWaMetaEdit(item); // read-only enforced server-side; modal toont velden.
+      } else if (submitBtn && !submitBtn.disabled) {
+        const item = findItem(submitBtn, 'data-wa-meta-submit');
+        if (item) doWaMetaSubmit(item);
+      } else if (resubmitBtn && !resubmitBtn.disabled) {
+        const item = findItem(resubmitBtn, 'data-wa-meta-resubmit');
+        if (item) doWaMetaResubmit(item);
+      } else if (dupBtn && !dupBtn.disabled) {
+        const item = findItem(dupBtn, 'data-wa-meta-dupliceer');
+        if (item) doWaMetaDuplicate(item);
       }
     });
   }
+  const metaSyncBtn = document.getElementById('waMetaSyncBtn');
+  if (metaSyncBtn) metaSyncBtn.addEventListener('click', () => doWaMetaSync());
   const qrTbody = document.getElementById('waQrTbody');
   if (qrTbody) {
     qrTbody.addEventListener('click', (e) => {
