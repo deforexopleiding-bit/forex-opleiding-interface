@@ -341,6 +341,123 @@ async function applyStatusUpdate(statusObj) {
   return true;
 }
 
+// ── Helpers: template status-update (field=message_template_status_update) ─
+/**
+ * Verwerk een Meta template-status webhook payload (binnen change.value).
+ *
+ * Meta-payload shape (per docs):
+ *   {
+ *     event: 'APPROVED'|'REJECTED'|'FLAGGED'|'PAUSED'|'DISABLED'|'PENDING'|'APPEAL_REQUEST_ELIGIBLE',
+ *     message_template_id: '<META_TEMPLATE_ID>',
+ *     message_template_name: '<name>',
+ *     message_template_language: 'nl',
+ *     reason: '<rejection reason>'   // alleen bij REJECTED/FLAGGED
+ *   }
+ *
+ * Match-strategie: eerst op meta_template_id (uniek), fallback op
+ * (name, language). Geen match → log warning + return false (geen fail).
+ *
+ * Event → onze status enum (SQL CHECK whatsapp_meta_templates.status):
+ *   APPROVED                  → APPROVED  (+ approved_at = now als nog NULL)
+ *   REJECTED / FLAGGED        → REJECTED  (+ rejection_reason = reason)
+ *   PAUSED                    → PAUSED
+ *   DISABLED                  → DISABLED
+ *   PENDING / APPEAL_*        → SUBMITTED (interne pre-review state)
+ *   anders                    → skip + warning
+ */
+async function applyTemplateStatusUpdate(req, value) {
+  const metaId   = value?.message_template_id ? String(value.message_template_id) : null;
+  const tmplName = value?.message_template_name || null;
+  const tmplLang = value?.message_template_language || null;
+  const event    = value?.event || null;
+  const reason   = value?.reason || null;
+
+  if (!event || (!metaId && !tmplName)) {
+    console.warn('[inbox-webhook] template_status_update incompleet', { metaId, tmplName, event });
+    return false;
+  }
+
+  const map = {
+    APPROVED:                  'APPROVED',
+    REJECTED:                  'REJECTED',
+    FLAGGED:                   'REJECTED',
+    PAUSED:                    'PAUSED',
+    DISABLED:                  'DISABLED',
+    PENDING:                   'SUBMITTED',
+    APPEAL_REQUEST_ELIGIBLE:   'SUBMITTED',
+  };
+  const newStatus = map[event];
+  if (!newStatus) {
+    console.warn('[inbox-webhook] unknown template event ' + event + ' (metaId=' + metaId + ')');
+    return false;
+  }
+
+  // Match-strategie: bij voorkeur op meta_template_id (uniek), fallback op (name, language)
+  let q = supabaseAdmin
+    .from('whatsapp_meta_templates')
+    .select('id, status, business_account_id, name, language, approved_at')
+    .limit(1);
+  if (metaId) {
+    q = q.eq('meta_template_id', metaId);
+  } else {
+    q = q.eq('name', tmplName).eq('language', tmplLang);
+  }
+  const { data: rows, error: selErr } = await q;
+  if (selErr) {
+    console.error('[inbox-webhook] template select fail:', selErr.message);
+    return false;
+  }
+  const row = Array.isArray(rows) && rows.length ? rows[0] : null;
+  if (!row) {
+    console.warn('[inbox-webhook] template not found', { metaId, tmplName, tmplLang });
+    return false;
+  }
+
+  const nowIso = new Date().toISOString();
+  const updates = {
+    status:         newStatus,
+    last_synced_at: nowIso,
+  };
+  if (newStatus === 'APPROVED' && !row.approved_at) {
+    updates.approved_at = nowIso;
+  }
+  if (newStatus === 'REJECTED') {
+    updates.rejection_reason = reason || null;
+  }
+  // Idempotent: meta_template_id invullen als die nog leeg was maar payload hem heeft.
+  if (metaId) {
+    updates.meta_template_id = metaId;
+  }
+
+  const { error: updErr } = await supabaseAdmin
+    .from('whatsapp_meta_templates')
+    .update(updates)
+    .eq('id', row.id);
+  if (updErr) {
+    console.error('[inbox-webhook] template update fail id=' + row.id + ':', updErr.message);
+    return false;
+  }
+
+  await logInboxAudit(req, {
+    action:     'whatsapp_meta_template.webhook_status_update',
+    entityType: 'whatsapp_meta_template',
+    entityId:   row.id,
+    afterJson:  {
+      event,
+      name:        row.name,
+      language:    row.language,
+      prev_status: row.status,
+      new_status:  newStatus,
+      reason:      reason || null,
+      meta_template_id: metaId,
+      triggered_by: 'meta_webhook',
+    },
+  });
+
+  console.log('[inbox-webhook] template status updated id=' + row.id + ' ' + row.status + ' → ' + newStatus + ' (event=' + event + ')');
+  return true;
+}
+
 // ── Main handler ───────────────────────────────────────────────────────────
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
@@ -406,13 +523,25 @@ export default async function handler(req, res) {
     // Process entries: per change.value: messages[] + statuses[]
     // CRITICAL: per-item try/catch + ALTIJD 200 returnen, ook bij partiele fail,
     // anders retried Meta de hele batch en triggeren we duplicate-processing.
-    let stats = { msgs_new: 0, msgs_dup: 0, statuses_updated: 0, errors: 0 };
+    let stats = { msgs_new: 0, msgs_dup: 0, statuses_updated: 0, template_status_updates: 0, errors: 0 };
 
     try {
       const entries = Array.isArray(body?.entry) ? body.entry : [];
       for (const entry of entries) {
         const changes = Array.isArray(entry?.changes) ? entry.changes : [];
         for (const change of changes) {
+          // Template status-updates (apart Meta webhook field, vereist
+          // aparte subscription op WABA-app niveau in Meta Developer Console).
+          if (change?.field === 'message_template_status_update') {
+            try {
+              const ok = await applyTemplateStatusUpdate(req, change.value || {});
+              if (ok) stats.template_status_updates++;
+            } catch (e) {
+              stats.errors++;
+              console.error('[inbox-webhook] template status fail:', e.message);
+            }
+            continue;
+          }
           if (change?.field !== 'messages') continue;
           const value = change.value || {};
           const contacts = Array.isArray(value.contacts) ? value.contacts : [];
