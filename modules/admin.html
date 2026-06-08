@@ -122,6 +122,7 @@
       <button class="admin-tab active" data-tab="gebruikers" onclick="switchAdminTab('gebruikers')">Gebruikers</button>
       <button class="admin-tab" data-tab="rechten" id="rechtenTabBtn" onclick="switchAdminTab('rechten')" style="display:none">Rechten</button>
       <button class="admin-tab" data-tab="integraties" onclick="switchAdminTab('integraties')">Integraties</button>
+      <button class="admin-tab" data-tab="whatsapp-connection" id="waConnTabBtn" onclick="switchAdminTab('whatsapp-connection')" style="display:none">WhatsApp Connection</button>
     </div>
 
     <div id="tab-gebruikers" class="admin-tab-panel">
@@ -225,6 +226,78 @@
       </div>
     </div>
 
+    <div id="tab-whatsapp-connection" class="admin-tab-panel" style="display:none">
+      <div class="section-card">
+        <div class="section-header" style="justify-content:space-between">
+          <div>
+            <div style="font-size:15px;font-weight:700">WhatsApp Module Connections</div>
+            <div style="font-size:12px;color:var(--text-faint);font-weight:400;margin-top:4px;max-width:680px">
+              Koppel modules (Inbox, Finance, Sales, ...) aan een specifiek WhatsApp Cloud API telefoonnummer.
+              Per module bepaalt deze tabel met welke afzendlijn berichten verstuurd worden en welke binnenkomende
+              berichten in welke inbox terechtkomen.
+            </div>
+          </div>
+          <div style="display:flex;gap:8px">
+            <button class="btn btn-sm" id="waConfReloadBtn" title="Lijst opnieuw laden"><i class="ti ti-refresh"></i></button>
+            <button class="btn btn-sm btn-primary" id="waConfAddBtn"><i class="ti ti-plus"></i> Module toevoegen</button>
+          </div>
+        </div>
+        <div style="overflow-x:auto">
+          <table class="users-table" id="waConfTable">
+            <thead>
+              <tr>
+                <th>Module</th>
+                <th>Telefoonnummer</th>
+                <th>Display label</th>
+                <th>Status</th>
+                <th>Acties</th>
+              </tr>
+            </thead>
+            <tbody id="waConfTbody">
+              <tr><td colspan="5" style="color:var(--text-faint);padding:20px">Laden&hellip;</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- WhatsApp Module Connection edit modal -->
+<div class="modal-overlay hidden" id="waConfEditModal">
+  <div class="modal-card">
+    <div class="modal-header">
+      <div class="modal-title" id="waConfModalTitle">Module bewerken</div>
+      <button class="modal-close" onclick="closeWaConfEdit()">&#x2715;</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-group">
+        <label class="form-label">Module key</label>
+        <input type="text" id="waConfModuleInput" class="form-input" placeholder="bv. inbox, finance, sales" />
+        <div style="font-size:11px;color:var(--text-faint);margin-top:4px">Unieke identifier. Niet wijzigen bij bestaande koppelingen.</div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Display label</label>
+        <input type="text" id="waConfLabelInput" class="form-input" placeholder="bv. Inbox / Finance / Sales" />
+      </div>
+      <div class="form-group">
+        <label class="form-label">Telefoonnummer (Meta WABA)</label>
+        <select id="waConfPhoneSelect" class="form-input">
+          <option value="">Laden&hellip;</option>
+        </select>
+        <div style="font-size:11px;color:var(--text-faint);margin-top:4px">Gevuld vanuit /api/admin-whatsapp-numbers-available.</div>
+      </div>
+      <div class="form-group" style="display:flex;align-items:center;gap:8px">
+        <input type="checkbox" id="waConfActiveInput" checked style="width:16px;height:16px" />
+        <label for="waConfActiveInput" style="font-size:13px;cursor:pointer">Actief (gebruikt voor send/ontvangen)</label>
+      </div>
+      <div class="form-error hidden" id="waConfError"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn" onclick="closeWaConfEdit()">Annuleren</button>
+      <button class="btn btn-primary" id="waConfSaveBtn" onclick="saveWaConfRow()">Opslaan</button>
+    </div>
   </div>
 </div>
 
@@ -528,13 +601,16 @@ function switchAdminTab(name) {
     rbacDirty = false; updateRbacSaveState();
   }
   document.querySelectorAll('.admin-tab').forEach(b => b.classList.toggle('active', b.dataset.tab === name));
-  document.getElementById('tab-gebruikers').style.display  = name === 'gebruikers'  ? '' : 'none';
-  document.getElementById('tab-rechten').style.display     = name === 'rechten'     ? '' : 'none';
-  document.getElementById('tab-integraties').style.display = name === 'integraties' ? '' : 'none';
+  document.getElementById('tab-gebruikers').style.display          = name === 'gebruikers'          ? '' : 'none';
+  document.getElementById('tab-rechten').style.display             = name === 'rechten'             ? '' : 'none';
+  document.getElementById('tab-integraties').style.display         = name === 'integraties'         ? '' : 'none';
+  const waConnPanel = document.getElementById('tab-whatsapp-connection');
+  if (waConnPanel) waConnPanel.style.display = name === 'whatsapp-connection' ? '' : 'none';
   const inviteBtn = document.querySelector('.page-header .btn-primary');
   if (inviteBtn) inviteBtn.style.display = name === 'gebruikers' ? '' : 'none';
   if (name === 'rechten' && !rbacLoaded) loadPermissionsMatrix();
   if (name === 'integraties') { loadTlStatus(); loadWebhooks(); loadTemplateSetting(); }
+  if (name === 'whatsapp-connection') { wireWaConfOnce(); loadWaConfList(); }
 }
 
 async function loadPermissionsMatrix() {
@@ -684,6 +760,18 @@ async function init() {
     const rb = document.getElementById('rechtenTabBtn');
     if (rb) rb.style.display = '';
   }
+
+  // WhatsApp Connection tab: super_admin OF can(admin.whatsapp_config)
+  try {
+    let allowWaConn = currentProfile.role === 'super_admin';
+    if (!allowWaConn && window.RBAC && typeof window.RBAC.can === 'function') {
+      allowWaConn = await window.RBAC.can('admin.whatsapp_config');
+    }
+    if (allowWaConn) {
+      const wb = document.getElementById('waConnTabBtn');
+      if (wb) wb.style.display = '';
+    }
+  } catch (_) { /* RBAC niet geladen — tab blijft verborgen */ }
 
   accessToken = await window.AuthShared.getAccessToken();
 
@@ -1181,8 +1269,168 @@ async function submitInvite() {
 
 // Sluit modal bij ESC
 document.addEventListener('keydown', e => {
-  if (e.key === 'Escape') closeInviteModal();
+  if (e.key === 'Escape') { closeInviteModal(); closeWaConfEdit(); }
 });
+
+// ── WhatsApp Module Connections ─────────────────────────────────────────────
+let _waConfItems = [];
+let _waConfPhones = [];
+let _waConfEditingId = null;
+let _waConfWired = false;
+
+async function loadWaConfList() {
+  const tbody = document.getElementById('waConfTbody');
+  if (!tbody) return;
+  tbody.innerHTML = '<tr><td colspan="5" style="color:var(--text-faint);padding:20px">Laden&hellip;</td></tr>';
+  try {
+    const data = await apiRequest('GET', '/api/admin-whatsapp-modules-list');
+    if (data && data.error) throw new Error(data.error);
+    _waConfItems = (data && data.items) || (data && data.modules) || [];
+    renderWaConfRows();
+  } catch (e) {
+    tbody.innerHTML = `<tr><td colspan="5" style="color:var(--red);padding:20px">Fout: ${esc(e.message)}</td></tr>`;
+  }
+}
+
+function renderWaConfRows() {
+  const tbody = document.getElementById('waConfTbody');
+  if (!tbody) return;
+  if (!_waConfItems.length) {
+    tbody.innerHTML = '<tr><td colspan="5" style="color:var(--text-faint);padding:20px">Nog geen module-koppelingen. Klik op + Module toevoegen.</td></tr>';
+    return;
+  }
+  tbody.innerHTML = _waConfItems.map(it => {
+    const moduleKey  = esc(it.module || it.module_key || '');
+    const phone      = esc(it.phone_number || it.display_phone_number || '—');
+    const label      = esc(it.display_label || it.label || '—');
+    const active     = it.is_active !== false;
+    const statusDot  = active ? '<span class="active-dot"></span> Actief' : '<span class="active-dot inactive-dot"></span> Inactief';
+    const rowId      = esc(it.id || it.module || '');
+    return `<tr>
+      <td><strong>${moduleKey}</strong></td>
+      <td>${phone}</td>
+      <td>${label}</td>
+      <td>${statusDot}</td>
+      <td>
+        <button class="action-btn" data-wa-edit="${rowId}"><i class="ti ti-edit"></i> Bewerken</button>
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+async function loadWaConfPhones() {
+  try {
+    const data = await apiRequest('GET', '/api/admin-whatsapp-numbers-available');
+    if (data && data.error) throw new Error(data.error);
+    _waConfPhones = (data && data.phones) || (data && data.numbers) || (data && data.data) || [];
+    return _waConfPhones;
+  } catch (e) {
+    _waConfPhones = [];
+    throw e;
+  }
+}
+
+function fillWaConfPhoneSelect(selectedValue) {
+  const sel = document.getElementById('waConfPhoneSelect');
+  if (!sel) return;
+  if (!_waConfPhones.length) {
+    sel.innerHTML = '<option value="">(geen nummers beschikbaar)</option>';
+    return;
+  }
+  sel.innerHTML = '<option value="">— kies een nummer —</option>' + _waConfPhones.map(p => {
+    const id    = p.id || p.phone_number_id || p.value || '';
+    const disp  = p.display_phone_number || p.phone_number || p.label || id;
+    const name  = p.verified_name ? ` (${p.verified_name})` : '';
+    const sel2  = id === selectedValue ? ' selected' : '';
+    return `<option value="${esc(id)}"${sel2}>${esc(disp)}${esc(name)}</option>`;
+  }).join('');
+}
+
+async function openWaConfEdit(item) {
+  _waConfEditingId = item ? (item.id || item.module || null) : null;
+  const isEdit = !!item;
+  document.getElementById('waConfModalTitle').textContent = isEdit ? 'Module bewerken' : 'Module toevoegen';
+  const moduleInput = document.getElementById('waConfModuleInput');
+  const labelInput  = document.getElementById('waConfLabelInput');
+  const activeInput = document.getElementById('waConfActiveInput');
+  const errEl       = document.getElementById('waConfError');
+  errEl.classList.add('hidden'); errEl.textContent = '';
+  moduleInput.value = item ? (item.module || item.module_key || '') : '';
+  moduleInput.disabled = isEdit;
+  labelInput.value  = item ? (item.display_label || item.label || '') : '';
+  activeInput.checked = item ? (item.is_active !== false) : true;
+  fillWaConfPhoneSelect('');
+  document.getElementById('waConfEditModal').classList.remove('hidden');
+  try {
+    await loadWaConfPhones();
+    const currentPhoneId = item ? (item.phone_number_id || item.phone_id || '') : '';
+    fillWaConfPhoneSelect(currentPhoneId);
+  } catch (e) {
+    errEl.textContent = 'Nummers laden mislukt: ' + e.message;
+    errEl.classList.remove('hidden');
+  }
+}
+
+function closeWaConfEdit() {
+  const m = document.getElementById('waConfEditModal');
+  if (m) m.classList.add('hidden');
+  _waConfEditingId = null;
+}
+
+async function saveWaConfRow() {
+  const moduleKey = document.getElementById('waConfModuleInput').value.trim();
+  const label     = document.getElementById('waConfLabelInput').value.trim();
+  const phoneId   = document.getElementById('waConfPhoneSelect').value;
+  const isActive  = document.getElementById('waConfActiveInput').checked;
+  const errEl     = document.getElementById('waConfError');
+  const btn       = document.getElementById('waConfSaveBtn');
+
+  if (!moduleKey)  { errEl.textContent = 'Module key is verplicht'; errEl.classList.remove('hidden'); return; }
+  if (!phoneId)    { errEl.textContent = 'Telefoonnummer is verplicht'; errEl.classList.remove('hidden'); return; }
+
+  errEl.classList.add('hidden');
+  btn.disabled = true; btn.textContent = 'Opslaan…';
+
+  try {
+    const body = {
+      module: moduleKey,
+      display_label: label,
+      phone_number_id: phoneId,
+      is_active: isActive,
+    };
+    const method = _waConfEditingId ? 'PATCH' : 'POST';
+    const path   = '/api/admin-whatsapp-module-upsert' + (_waConfEditingId ? `?id=${encodeURIComponent(_waConfEditingId)}` : '');
+    const data   = await apiRequest(method, path, body);
+    if (data && data.error) throw new Error(data.error);
+    window.AgentShared?.showToast('Module-koppeling opgeslagen', 'success');
+    closeWaConfEdit();
+    loadWaConfList();
+  } catch (e) {
+    errEl.textContent = e.message;
+    errEl.classList.remove('hidden');
+  } finally {
+    btn.disabled = false; btn.textContent = 'Opslaan';
+  }
+}
+
+function wireWaConfOnce() {
+  if (_waConfWired) return;
+  _waConfWired = true;
+  const reloadBtn = document.getElementById('waConfReloadBtn');
+  if (reloadBtn) reloadBtn.addEventListener('click', () => loadWaConfList());
+  const addBtn = document.getElementById('waConfAddBtn');
+  if (addBtn) addBtn.addEventListener('click', () => openWaConfEdit(null));
+  const tbody = document.getElementById('waConfTbody');
+  if (tbody) {
+    tbody.addEventListener('click', (e) => {
+      const editBtn = e.target.closest('[data-wa-edit]');
+      if (!editBtn) return;
+      const rowId = editBtn.getAttribute('data-wa-edit');
+      const item = _waConfItems.find(it => String(it.id || it.module) === rowId);
+      if (item) openWaConfEdit(item);
+    });
+  }
+}
 
 init();
 </script>
