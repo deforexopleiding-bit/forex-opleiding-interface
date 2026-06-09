@@ -789,6 +789,87 @@
   </div>
 </div>
 
+<!-- ── Mark-as-executed modal (TL-resultaat invoeren) ───────────────────────── -->
+<div class="modal-overlay hidden" id="markExecutedModal" role="dialog" aria-modal="true">
+  <div class="modal-card" style="max-width:620px">
+    <div class="modal-header">
+      <div>
+        <div class="modal-title">Markeer als verwerkt</div>
+        <div style="font-size:11px;color:var(--text-faint);margin-top:2px">Leg vast wat je in TeamLeader hebt gedaan</div>
+      </div>
+      <button class="modal-close" onclick="closeMarkExecutedModal()">&#x2715;</button>
+    </div>
+    <div class="modal-body">
+      <!-- Context-readout (sticky boven) -->
+      <div id="markExecContext" style="position:sticky;top:0;z-index:1;background:rgba(56,189,248,0.06);border:1px solid rgba(56,189,248,0.25);border-radius:8px;padding:10px 12px;margin-bottom:14px;font-size:12.5px;color:var(--text-primary,#e5e7eb)">
+        <div id="markExecCtxLine1" style="font-weight:600">&mdash;</div>
+        <div id="markExecCtxLine2" style="font-size:11.5px;color:var(--text-dim);margin-top:2px">&mdash;</div>
+        <div id="markExecCtxLine3" style="font-size:11.5px;color:var(--text-faint);margin-top:2px">&mdash;</div>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label" for="markExecCreditIds">TL credit-note IDs</label>
+        <input type="text" id="markExecCreditIds" class="form-input" placeholder="TLCN-2026-001, TLCN-2026-002" />
+        <div style="font-size:11px;color:var(--text-faint);margin-top:4px">Voorbeeld: TLCN-2026-001, TLCN-2026-002 (komma-gescheiden)</div>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label" for="markExecSubscriptionId">TL subscription ID</label>
+        <input type="text" id="markExecSubscriptionId" class="form-input" placeholder="sub_xxxxxxxx" />
+        <div style="font-size:11px;color:var(--text-faint);margin-top:4px">Voor abonnement-mutaties.</div>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label" for="markExecInvoiceIds">TL invoice IDs</label>
+        <input type="text" id="markExecInvoiceIds" class="form-input" placeholder="INV-2026-101, INV-2026-102" />
+        <div style="font-size:11px;color:var(--text-faint);margin-top:4px">Voor SPLITSING of nieuwe facturen (komma-gescheiden).</div>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label" for="markExecNotes">Manual notes <span style="color:var(--color-danger,#dc2626)">*</span></label>
+        <textarea id="markExecNotes" class="form-input" rows="4" style="resize:vertical;min-height:90px" placeholder="Wat heb je in TL gedaan? Min 10 chars."></textarea>
+        <div style="font-size:11px;color:var(--text-faint);margin-top:4px">Minimaal 10 tekens. Verplicht voor audit-trail.</div>
+      </div>
+
+      <div class="form-error hidden" id="markExecError"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn" onclick="closeMarkExecutedModal()">Annuleren</button>
+      <button class="btn btn-primary" id="markExecConfirmBtn" onclick="submitMarkExecuted()">Bevestig</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Mark-as-not-executed modal (reden vastleggen) ────────────────────────── -->
+<div class="modal-overlay hidden" id="markNotExecutedModal" role="dialog" aria-modal="true">
+  <div class="modal-card" style="max-width:520px">
+    <div class="modal-header">
+      <div>
+        <div class="modal-title">Markeer als niet door te voeren</div>
+        <div style="font-size:11px;color:var(--text-faint);margin-top:2px">Status gaat naar FAILED</div>
+      </div>
+      <button class="modal-close" onclick="closeMarkNotExecutedModal()">&#x2715;</button>
+    </div>
+    <div class="modal-body">
+      <div style="background:rgba(220,38,38,0.06);border:1px solid rgba(220,38,38,0.25);border-radius:8px;padding:10px 12px;margin-bottom:14px;font-size:12.5px;color:var(--text-primary,#e5e7eb)">
+        De actie krijgt status FAILED. Arrangement blijft VOORGESTELD &mdash; annuleer arrangement apart als nodig.
+      </div>
+
+      <div class="form-group">
+        <label class="form-label" for="markNotExecReason">Reden <span style="color:var(--color-danger,#dc2626)">*</span></label>
+        <textarea id="markNotExecReason" class="form-input" rows="4" style="resize:vertical;min-height:90px" placeholder="Waarom kan deze actie niet doorgevoerd worden? Min 10 chars."></textarea>
+        <div style="font-size:11px;color:var(--text-faint);margin-top:4px">Minimaal 10 tekens. Verplicht voor audit-trail.</div>
+      </div>
+
+      <div class="form-error hidden" id="markNotExecError"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn" onclick="closeMarkNotExecutedModal()">Annuleren</button>
+      <button class="btn btn-danger" id="markNotExecConfirmBtn" onclick="submitMarkNotExecuted()">Bevestig</button>
+    </div>
+  </div>
+</div>
+
 <!-- Invite modal -->
 <div class="modal-overlay hidden" id="inviteModal">
   <div class="modal-card">
@@ -3470,7 +3551,7 @@ let _approvWired        = false;
 let _approvLoading      = false;
 let _approvCurrentDetailId = null;
 let _approvCurrentDetailItem = null; // laatst geladen detail-payload (voor execution_result render)
-let _approvRejectContext   = null; // { type:'single'|'bulk'|'mark_not_executed', ids:[uuid] }
+let _approvRejectContext   = null; // { type:'single'|'bulk', ids:[uuid] }
 
 function wireApprovOnce() {
   if (_approvWired) return;
@@ -3483,6 +3564,14 @@ function wireApprovOnce() {
   const rejectM = document.getElementById('rejectActionModal');
   if (rejectM) rejectM.addEventListener('click', (e) => {
     if (e.target === rejectM) closeRejectActionModal();
+  });
+  const markExecM = document.getElementById('markExecutedModal');
+  if (markExecM) markExecM.addEventListener('click', (e) => {
+    if (e.target === markExecM) closeMarkExecutedModal();
+  });
+  const markNotExecM = document.getElementById('markNotExecutedModal');
+  if (markNotExecM) markNotExecM.addEventListener('click', (e) => {
+    if (e.target === markNotExecM) closeMarkNotExecutedModal();
   });
 }
 
@@ -3844,15 +3933,7 @@ function showRejectModal(title, subtitle) {
   if (subEl)   subEl.textContent   = subtitle;
   if (txt)     txt.value = '';
   if (errEl)   { errEl.classList.add('hidden'); errEl.textContent = ''; }
-  // Confirm-button label aanpassen per context-type zodat 'mark_not_executed'
-  // niet misleidend 'Afwijzen' toont.
-  if (btnEl) {
-    if (_approvRejectContext && _approvRejectContext.type === 'mark_not_executed') {
-      btnEl.textContent = 'Markeer als niet doorgevoerd';
-    } else {
-      btnEl.textContent = 'Afwijzen';
-    }
-  }
+  if (btnEl)   btnEl.textContent = 'Afwijzen';
   document.getElementById('rejectActionModal')?.classList.remove('hidden');
   setTimeout(() => { try { txt?.focus(); } catch (_) {} }, 50);
 }
@@ -3881,14 +3962,6 @@ async function confirmRejectAction() {
   try {
     if (ctx.type === 'bulk') {
       await bulkReject(reason);
-    } else if (ctx.type === 'mark_not_executed') {
-      const success = await markNotExecuted(ctx.ids[0], reason);
-      if (success) {
-        window.AgentShared?.showToast('Voorstel gemarkeerd als niet doorgevoerd', 'success');
-        loadApprovalQueue();
-        if (_approvCurrentDetailId === ctx.ids[0]) closePendingActionDetail();
-        try { window.AgentShared?.refreshApprovalsBadge?.(); } catch (_) {}
-      }
     } else {
       const success = await rejectAction(ctx.ids[0], reason);
       if (success) {
@@ -4274,50 +4347,160 @@ function closePendingActionDetail() {
 }
 
 // ── Mark-as-executed / Mark-as-not-executed flow ─────────────────────────────
-// Markeer als verwerkt: directe POST naar /api/pending-actions-mark-executed
-// na inline confirm() (geen reden vereist). Markeer als niet door te voeren:
-// hergebruikt rejectActionModal met context-type 'mark_not_executed' en
-// branched in confirmRejectAction naar /api/pending-actions-mark-not-executed.
-async function markExecutedFromDetail() {
-  if (!_approvCurrentDetailId) return;
+// Beide flows gebruiken eigen modal (markExecutedModal + markNotExecutedModal).
+// Mark-executed verwacht TL-IDs + manual notes (audit-trail). Mark-not-executed
+// verwacht een reden. POSTs naar /api/pending-actions-mark-executed +
+// /api/pending-actions-mark-not-executed.
+
+// Helper: comma-separated string → trimmed array zonder lege entries.
+function parseCommaSeparated(input) {
+  return String(input || '')
+    .split(',')
+    .map(s => s.trim())
+    .filter(s => s.length > 0);
+}
+
+// ─── Mark-as-executed modal ─────────────────────────────────────────────────
+function openMarkExecutedModal(action) {
+  wireApprovOnce();
+  const it = action || _approvCurrentDetailItem || {};
+  // Context-readout: action_type + klant + arrangement + payload-samenvatting.
+  const actionLabel = approvActionLabel(it.action_type) || '—';
+  const actionType  = it.action_type || '';
+  const cust  = it.customer || _approvCurrentDetailItem?.customer || null;
+  const arr   = it.arrangement || _approvCurrentDetailItem?.arrangement || null;
+  const custName = cust && cust.name ? cust.name : '(klant onbekend)';
+  let arrLine = '';
+  if (arr && arr.id) {
+    const arrType   = arr.type || 'arrangement';
+    const arrStatus = arr.arrangement_status || arr.status || '';
+    arrLine = `Arrangement: ${arrType}${arrStatus ? ' (' + arrStatus + ')' : ''}`;
+  } else {
+    arrLine = 'Arrangement: —';
+  }
+  const summary = approvSummary(it);
+
+  const l1 = document.getElementById('markExecCtxLine1');
+  const l2 = document.getElementById('markExecCtxLine2');
+  const l3 = document.getElementById('markExecCtxLine3');
+  if (l1) l1.innerHTML = esc(actionLabel) + (actionType ? ' <span style="color:var(--text-faint);font-size:11px;margin-left:6px">' + esc(actionType) + '</span>' : '') + ' &middot; ' + esc(custName);
+  if (l2) l2.textContent = arrLine;
+  if (l3) l3.textContent = summary;
+
+  // Reset form.
+  const elCredit = document.getElementById('markExecCreditIds');
+  const elSub    = document.getElementById('markExecSubscriptionId');
+  const elInv    = document.getElementById('markExecInvoiceIds');
+  const elNotes  = document.getElementById('markExecNotes');
+  const elErr    = document.getElementById('markExecError');
+  if (elCredit) elCredit.value = '';
+  if (elSub)    elSub.value    = '';
+  if (elInv)    elInv.value    = '';
+  if (elNotes)  elNotes.value  = '';
+  if (elErr)    { elErr.classList.add('hidden'); elErr.textContent = ''; }
+
+  document.getElementById('markExecutedModal')?.classList.remove('hidden');
+  setTimeout(() => { try { elCredit?.focus(); } catch (_) {} }, 50);
+}
+
+function closeMarkExecutedModal() {
+  document.getElementById('markExecutedModal')?.classList.add('hidden');
+}
+
+async function submitMarkExecuted() {
+  const elCredit = document.getElementById('markExecCreditIds');
+  const elSub    = document.getElementById('markExecSubscriptionId');
+  const elInv    = document.getElementById('markExecInvoiceIds');
+  const elNotes  = document.getElementById('markExecNotes');
+  const elErr    = document.getElementById('markExecError');
+  const btn      = document.getElementById('markExecConfirmBtn');
+
+  const notes = (elNotes?.value || '').trim();
+  if (notes.length < 10) {
+    if (elErr) { elErr.textContent = 'Manual notes zijn verplicht (min 10 tekens).'; elErr.classList.remove('hidden'); }
+    return;
+  }
+
   const id = _approvCurrentDetailId;
-  if (!confirm('Markeer dit voorstel als verwerkt? Dit zet de status op EXECUTED en is niet automatisch terug te draaien.')) return;
-  const btn = document.getElementById('pendingActionDetailMarkExecutedBtn');
+  if (!id) {
+    if (elErr) { elErr.textContent = 'Geen actie geselecteerd.'; elErr.classList.remove('hidden'); }
+    return;
+  }
+
+  // Bouw execution_result. Lege velden worden weggelaten.
+  const execution_result = { manual_notes: notes };
+  const creditIds = parseCommaSeparated(elCredit?.value);
+  if (creditIds.length) execution_result.tl_credit_note_ids = creditIds;
+  const subId = (elSub?.value || '').trim();
+  if (subId) execution_result.tl_subscription_id = subId;
+  const invIds = parseCommaSeparated(elInv?.value);
+  if (invIds.length) execution_result.tl_invoice_ids = invIds;
+
   if (btn) { btn.disabled = true; btn.textContent = 'Bezig…'; }
   try {
     const r = await window.AgentShared.apiFetch('/api/pending-actions-mark-executed', {
       method:  'POST',
       headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify({ id }),
+      body:    JSON.stringify({ id, execution_result }),
     });
     const d = await r.json().catch(() => ({}));
     if (!r.ok) {
-      window.AgentShared?.showToast('Markeren mislukt: ' + (d.error || ('HTTP ' + r.status)), 'error');
+      const msg = d.error || ('HTTP ' + r.status);
+      if (elErr) { elErr.textContent = 'Markeren mislukt: ' + msg; elErr.classList.remove('hidden'); }
       return;
     }
-    window.AgentShared?.showToast('Voorstel gemarkeerd als verwerkt', 'success');
+    window.AgentShared?.showToast('Actie gemarkeerd als verwerkt', 'success');
+    closeMarkExecutedModal();
     closePendingActionDetail();
     loadApprovalQueue();
     try { window.AgentShared?.refreshApprovalsBadge?.(); } catch (_) {}
   } catch (e) {
-    console.error('[markExecutedFromDetail]', e);
-    window.AgentShared?.showToast('Markeren mislukt: ' + e.message, 'error');
+    console.error('[submitMarkExecuted]', e);
+    if (elErr) { elErr.textContent = 'Markeren mislukt: ' + e.message; elErr.classList.remove('hidden'); }
   } finally {
-    if (btn) { btn.disabled = false; btn.textContent = 'Markeer als verwerkt'; }
+    if (btn) { btn.disabled = false; btn.textContent = 'Bevestig'; }
   }
 }
 
-function openMarkNotExecutedModalFromDetail() {
+// Detail-modal knop opent de nieuwe modal i.p.v. confirm().
+function markExecutedFromDetail() {
   if (!_approvCurrentDetailId) return;
-  _approvRejectContext = { type: 'mark_not_executed', ids: [_approvCurrentDetailId] };
-  showRejectModal(
-    'Markeer als niet door te voeren',
-    'Voer een reden in waarom dit voorstel niet doorgevoerd kan worden.'
-  );
+  openMarkExecutedModal(_approvCurrentDetailItem || {});
 }
 
-async function markNotExecuted(id, reason) {
-  if (!id) return false;
+// ─── Mark-as-not-executed modal ─────────────────────────────────────────────
+function openMarkNotExecutedModal(action) {
+  wireApprovOnce();
+  const elReason = document.getElementById('markNotExecReason');
+  const elErr    = document.getElementById('markNotExecError');
+  if (elReason) elReason.value = '';
+  if (elErr)    { elErr.classList.add('hidden'); elErr.textContent = ''; }
+  document.getElementById('markNotExecutedModal')?.classList.remove('hidden');
+  setTimeout(() => { try { elReason?.focus(); } catch (_) {} }, 50);
+}
+
+function closeMarkNotExecutedModal() {
+  document.getElementById('markNotExecutedModal')?.classList.add('hidden');
+}
+
+async function submitMarkNotExecuted() {
+  const elReason = document.getElementById('markNotExecReason');
+  const elErr    = document.getElementById('markNotExecError');
+  const btn      = document.getElementById('markNotExecConfirmBtn');
+
+  const reason = (elReason?.value || '').trim();
+  if (reason.length < 10) {
+    if (elErr) { elErr.textContent = 'Reden is verplicht (min 10 tekens).'; elErr.classList.remove('hidden'); }
+    return;
+  }
+
+  const id = _approvCurrentDetailId;
+  if (!id) {
+    if (elErr) { elErr.textContent = 'Geen actie geselecteerd.'; elErr.classList.remove('hidden'); }
+    return;
+  }
+
+  if (btn) { btn.disabled = true; btn.textContent = 'Bezig…'; }
   try {
     const r = await window.AgentShared.apiFetch('/api/pending-actions-mark-not-executed', {
       method:  'POST',
@@ -4326,15 +4509,27 @@ async function markNotExecuted(id, reason) {
     });
     const d = await r.json().catch(() => ({}));
     if (!r.ok) {
-      window.AgentShared?.showToast('Markeren mislukt: ' + (d.error || ('HTTP ' + r.status)), 'error');
-      return false;
+      const msg = d.error || ('HTTP ' + r.status);
+      if (elErr) { elErr.textContent = 'Markeren mislukt: ' + msg; elErr.classList.remove('hidden'); }
+      return;
     }
-    return true;
+    window.AgentShared?.showToast('Actie gemarkeerd als niet doorgevoerd', 'success');
+    closeMarkNotExecutedModal();
+    closePendingActionDetail();
+    loadApprovalQueue();
+    try { window.AgentShared?.refreshApprovalsBadge?.(); } catch (_) {}
   } catch (e) {
-    console.error('[markNotExecuted]', e);
-    window.AgentShared?.showToast('Markeren mislukt: ' + e.message, 'error');
-    return false;
+    console.error('[submitMarkNotExecuted]', e);
+    if (elErr) { elErr.textContent = 'Markeren mislukt: ' + e.message; elErr.classList.remove('hidden'); }
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = 'Bevestig'; }
   }
+}
+
+// Detail-modal knop opent de nieuwe modal i.p.v. de reject-modal te hergebruiken.
+function openMarkNotExecutedModalFromDetail() {
+  if (!_approvCurrentDetailId) return;
+  openMarkNotExecutedModal(_approvCurrentDetailItem || {});
 }
 
 // Lichtgewicht refresh van alleen de tab-badge (PENDING-count) zonder de
