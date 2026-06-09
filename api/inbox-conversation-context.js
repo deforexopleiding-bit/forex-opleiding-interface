@@ -167,7 +167,11 @@ export default async function handler(req, res) {
         )
         .eq('customer_id', customerOut.id)
         .in('status', ['open', 'partially_paid'])
+        // OUDSTE vervaldatum eerst (wanbetaler-context). NULL due_date achteraan
+        // zodat facturen zonder vervaldatum niet de auto-default kapen in de
+        // template-picker. Tiebreak op issue_date voor deterministische volgorde.
         .order('due_date', { ascending: true, nullsFirst: false })
+        .order('issue_date', { ascending: true, nullsFirst: false })
         .limit(MAX_OPEN_INVOICES);
       if (invErr) {
         console.error('[inbox-conversation-context] invoices lookup:', invErr.message);

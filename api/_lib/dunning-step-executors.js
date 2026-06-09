@@ -177,19 +177,28 @@ export async function executeWhatsappStep({ supabaseAdmin, run, step, customer, 
     openInvoices,
   });
 
-  // C4.5 TODO: bij integratie met named-variable templates, roep
-  // ensureInvoicePaymentLink(invoice.id) aan voor de render-step
-  // zodat factuur.betaal_link gevuld is. Zie api/_lib/invoice-payment-link.js.
+  // C4.5 + C4.6 TODO: bij integratie met named-variable templates, twee
+  // extra resolve-stappen vóór de send-call:
+  //
+  //   1. Roep `await ensureInvoicePaymentLink(invoice.id)` aan
+  //      (api/_lib/invoice-payment-link.js) zodat factuur.betaal_link gevuld
+  //      is. Pre-warm bespaart een latency-spike op het send-moment; de
+  //      send-endpoint zelf doet ook lazy-fetch als backup.
+  //   2. Roep `await getModuleContextByPhoneNumberId(supabaseAdmin,
+  //      conv.phone_number_id)` aan (api/_lib/module-context.js) zodat
+  //      afdeling.* (telefoon/whatsapp/email/ondertekenaar) geresolved worden
+  //      uit de juiste whatsapp_module_config rij van de zendende lijn.
+  //   3. Geef beide resultaten door aan resolveVariables-context:
+  //      { customer, invoice, openInvoices, moduleContext }.
   //
   // Pattern (zodra Meta credentials live zijn, PR A2):
-  //   1) Detecteer of de gekozen WhatsApp-template een factuur.betaal_link
-  //      mapping bevat (meta_param_mapping.body bevat de key).
-  //   2) Kies de eerste openInvoices[0] (of een step.config.invoice_id selector)
-  //      en roep `await ensureInvoicePaymentLink(invoice.id)` aan voordat we
-  //      POST naar /api/inbox-send-template doen. Cache wordt dan warm; de
-  //      send-endpoint zelf doet ook lazy-fetch maar pre-warm bespaart een
-  //      latency-spike op het send-moment.
-  //   3) Fail-soft: errors loggen en doorgaan — resolver vult lege string.
+  //   - Detecteer of de gekozen WhatsApp-template een factuur.betaal_link of
+  //     afdeling.* mapping bevat (meta_param_mapping.body bevat de keys).
+  //   - Kies de eerste openInvoices[0] (of een step.config.invoice_id selector)
+  //     en doe pre-warm + lookup.
+  //   - POST naar /api/inbox-send-template (die intern dezelfde resolve-flow
+  //     doet) of inline render via resolveVariables.
+  //   - Fail-soft: errors loggen en doorgaan — resolver vult lege string.
 
   return {
     status: 'skipped',
