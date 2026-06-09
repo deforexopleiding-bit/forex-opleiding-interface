@@ -18,7 +18,11 @@
 //  overig  -> ABONNEMENT_STOP, kwijtschelding -> KWIJTSCHELDING).
 //
 // Details-validatie per type:
-//   UITSTEL           : { new_due_date: 'YYYY-MM-DD' }                            -- per factuur 1 pending_action.
+//   UITSTEL           : { termijnen: int 2-60, starts_on?: 'YYYY-MM-DD',
+//                         amount_per_invoice_excl_vat?: number > 0 (sanity check, server overschrijft) }
+//                       -- 1 atomic pending_action (TL_INVOICE_CONSOLIDATE_AND_RESTART) voor het hele
+//                       arrangement. Server bouwt vat_distribution + totals via _lib/invoice-vat-mix.js
+//                       (live TL invoices.info per factuur).
 //   SPLITSING         : { parts: [ { amount: number, due_date: 'YYYY-MM-DD' } ] } -- per factuur 1 pending_action.
 //                       parts.length >= 2 EN sum(parts.amount) == sum(invoice.amount_total) (1ct tolerantie).
 //   ABONNEMENT_PAUZE  : { subscription_id: uuid, pause_from, pause_until, reason } -- 1 pending_action.
@@ -31,6 +35,7 @@
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
 import { getClientIp } from './_lib/audit-customer.js';
+import { buildVatDistribution, computeTermijnAmounts } from './_lib/invoice-vat-mix.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -54,17 +59,57 @@ const TYPE_ALIASES = {
 
 // Mapping naar pending_actions.action_type. TL_ prefix markeert acties die
 // in D2 door de TeamLeader-executor opgepakt worden.
+//
+// NB (D1.5): UITSTEL is per 2026-06-09 herschreven naar consolidate + restart.
+// Nieuwe arrangements -> 1 atomic TL_INVOICE_CONSOLIDATE_AND_RESTART action.
+// Bestaande arrangements in DB met TL_INVOICE_UPDATE_DUE blijven leesbaar +
+// afhandelbaar door de D2-executor (legacy 1-per-invoice update-due pad).
+// Zie LEGACY_ACTION_TYPE_FOR hieronder voor de oude mapping.
 const ACTION_TYPE_FOR = {
-  UITSTEL:          'TL_INVOICE_UPDATE_DUE',
+  UITSTEL:          'TL_INVOICE_CONSOLIDATE_AND_RESTART',
   SPLITSING:        'TL_INVOICE_SPLIT',
   ABONNEMENT_PAUZE: 'TL_SUBSCRIPTION_PAUSE',
   ABONNEMENT_STOP:  'TL_SUBSCRIPTION_STOP',
   KWIJTSCHELDING:   'TL_INVOICE_WRITEOFF',
 };
 
+// Legacy mapping (pre-D1.5). Niet gebruikt voor nieuwe inserts; alleen ter
+// referentie voor D2-executor / migrations / leesbaarheid van bestaande rows.
+// eslint-disable-next-line no-unused-vars
+const LEGACY_ACTION_TYPE_FOR = {
+  UITSTEL: 'TL_INVOICE_UPDATE_DUE', // pre-2026-06-09: 1 update-due action per invoice
+};
+
 function isUuid(s)  { return typeof s === 'string' && UUID_RE.test(s); }
 function isDate(s)  { return typeof s === 'string' && DATE_RE.test(s); }
 function isPosNum(n){ return typeof n === 'number' && Number.isFinite(n) && n > 0; }
+function isIntInRange(n, min, max) {
+  const v = Number(n);
+  return Number.isFinite(v) && Number.isInteger(v) && v >= min && v <= max;
+}
+
+// Eerste dag van de volgende maand in YYYY-MM-DD (UTC-veilig, geen TZ-drift).
+function firstDayOfNextMonth(today = new Date()) {
+  const y = today.getUTCFullYear();
+  const m = today.getUTCMonth(); // 0-based
+  const next = new Date(Date.UTC(y, m + 1, 1));
+  return next.toISOString().slice(0, 10);
+}
+
+// Voeg N maanden toe aan YYYY-MM-DD en returnt YYYY-MM-DD. Clamps op laatste
+// dag van de maand wanneer de doelmaand korter is (bv. 31 jan + 1 maand -> 28/29 feb).
+function addMonthsYmd(ymd, months) {
+  const [y, m, d] = ymd.split('-').map(Number);
+  const baseDate = new Date(Date.UTC(y, m - 1, 1));
+  baseDate.setUTCMonth(baseDate.getUTCMonth() + months);
+  // bepaal de laatste dag van de doelmaand
+  const targetY = baseDate.getUTCFullYear();
+  const targetM = baseDate.getUTCMonth();
+  const lastDayTarget = new Date(Date.UTC(targetY, targetM + 1, 0)).getUTCDate();
+  const finalDay = Math.min(d, lastDayTarget);
+  const final = new Date(Date.UTC(targetY, targetM, finalDay));
+  return final.toISOString().slice(0, 10);
+}
 
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
@@ -111,7 +156,18 @@ export default async function handler(req, res) {
   try {
     switch (type) {
       case 'UITSTEL': {
-        if (!isDate(details.new_due_date)) throw new Error('details.new_due_date (YYYY-MM-DD) vereist voor UITSTEL');
+        // D1.5 consolidate + restart: 1 nieuwe consolidated invoice + termijn-abonnement
+        // over N termijnen. Server bouwt vat_distribution server-side via TL.
+        if (!isIntInRange(details.termijnen, 2, 60)) {
+          throw new Error('details.termijnen (integer 2-60) vereist voor UITSTEL');
+        }
+        if (details.starts_on != null && !isDate(details.starts_on)) {
+          throw new Error('details.starts_on moet YYYY-MM-DD zijn');
+        }
+        if (details.amount_per_invoice_excl_vat != null
+            && !isPosNum(Number(details.amount_per_invoice_excl_vat))) {
+          throw new Error('details.amount_per_invoice_excl_vat moet > 0 zijn (sanity check)');
+        }
         break;
       }
       case 'SPLITSING': {
@@ -189,10 +245,65 @@ export default async function handler(req, res) {
       }
     }
 
+    // ---- UITSTEL (consolidate + restart): server-side enrichment ----
+    // Bouw vat_distribution + termijn-amounts SERVER-side via TL invoices.info.
+    // Bevestig dat alle facturen openstaand zijn (open / partially_paid).
+    let uitstelEnriched = null;
+    if (type === 'UITSTEL') {
+      const ALLOWED_STATUS = new Set(['open', 'partially_paid']);
+      const wrongStatus = invoices.find(i => !ALLOWED_STATUS.has(String(i.status || '').toLowerCase()));
+      if (wrongStatus) {
+        return res.status(400).json({
+          error: `Factuur ${wrongStatus.invoice_number || wrongStatus.id} heeft status '${wrongStatus.status}'; alleen open/partially_paid toegestaan voor UITSTEL`,
+        });
+      }
+
+      const termijnen = Math.floor(Number(details.termijnen));
+      // starts_on default = eerste dag van volgende maand.
+      const startsOn = isDate(details.starts_on) ? details.starts_on : firstDayOfNextMonth();
+      // ends_on = starts_on + (termijnen - 1) maanden (laatste termijn-datum).
+      const endsOn = addMonthsYmd(startsOn, termijnen - 1);
+
+      // SERVER is bron van waarheid voor vat_distribution: overschrijf client value.
+      const vatDistribution = await buildVatDistribution(supabaseAdmin, invoiceIds);
+      if (!vatDistribution.length) {
+        return res.status(400).json({
+          error: 'Kon geen BTW-verdeling bepalen voor de geselecteerde facturen (TL line-items leeg of niet beschikbaar)',
+        });
+      }
+      // Per-vat_rate termijn-bedragen.
+      const perRateTermijnen = computeTermijnAmounts(0, termijnen, vatDistribution);
+      // Som van termijn-bedragen excl btw (de eerste termijn — laatste kan ander zijn door restant).
+      const amountPerInvoiceExclVat = perRateTermijnen.reduce(
+        (a, r) => a + Number(r.amount_per_invoice_excl_vat || 0),
+        0,
+      );
+
+      uitstelEnriched = {
+        termijnen,
+        starts_on: startsOn,
+        ends_on: endsOn,
+        vat_distribution: vatDistribution,
+        per_rate_termijnen: perRateTermijnen,
+        amount_per_invoice_excl_vat: Math.round(amountPerInvoiceExclVat * 100) / 100,
+        billing_cycle: { unit: 'month', period: 1 },
+      };
+    }
+
     // ---- Bouw details met effective_from/until + rationale-meta ----
     const detailsToStore = { ...details };
     if (effFrom)   detailsToStore.effective_from  = effFrom;
     if (effUntil)  detailsToStore.effective_until = effUntil;
+    if (uitstelEnriched) {
+      // Server-side enriched velden overschrijven client-input (bron van waarheid).
+      detailsToStore.termijnen                   = uitstelEnriched.termijnen;
+      detailsToStore.starts_on                   = uitstelEnriched.starts_on;
+      detailsToStore.ends_on                     = uitstelEnriched.ends_on;
+      detailsToStore.vat_distribution            = uitstelEnriched.vat_distribution;
+      detailsToStore.per_rate_termijnen          = uitstelEnriched.per_rate_termijnen;
+      detailsToStore.amount_per_invoice_excl_vat = uitstelEnriched.amount_per_invoice_excl_vat;
+      detailsToStore.billing_cycle               = uitstelEnriched.billing_cycle;
+    }
 
     // ---- INSERT payment_arrangement ----
     const insertRow = {
@@ -228,12 +339,27 @@ export default async function handler(req, res) {
     const rows = [];
     switch (type) {
       case 'UITSTEL': {
-        for (const invId of invoiceIds) {
-          rows.push({
-            ...baseRow,
-            payload: { invoice_id: invId, new_due_date: details.new_due_date, source: 'manual', rationale },
-          });
-        }
+        // D1.5: 1 atomic action voor het hele arrangement
+        // (TL_INVOICE_CONSOLIDATE_AND_RESTART).
+        // payload bevat alle context die de D2-executor nodig heeft om:
+        //   1) de N oude facturen te crediteren / cancellen
+        //   2) 1 nieuw abonnement aan te maken met de juiste termijnen + btw-mix
+        rows.push({
+          ...baseRow,
+          payload: {
+            credit_invoice_ids: [...invoiceIds],
+            subscription_config: {
+              term_count:                  uitstelEnriched.termijnen,
+              amount_per_invoice_excl_vat: uitstelEnriched.amount_per_invoice_excl_vat,
+              starts_on:                   uitstelEnriched.starts_on,
+              ends_on:                     uitstelEnriched.ends_on,
+              vat_distribution:            uitstelEnriched.vat_distribution,
+              billing_cycle:               uitstelEnriched.billing_cycle,
+            },
+            source:    'manual',
+            rationale,
+          },
+        });
         break;
       }
       case 'SPLITSING': {

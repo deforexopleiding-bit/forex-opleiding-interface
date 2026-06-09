@@ -1699,13 +1699,61 @@
 
       <!-- STAP 3: Details (type-specifiek) -->
       <div id="arrangWizStep3" data-wiz-step="3" hidden>
-        <!-- UITSTEL -->
+        <!-- UITSTEL (D1.5 consolidate + restart) -->
         <div id="arrangWizDet_UITSTEL" hidden>
-          <div style="font-size:13px;font-weight:600;margin-bottom:10px">Nieuwe vervaldatum</div>
-          <label style="font-size:12px;color:var(--text-dim);display:block">
-            <input id="arrangWizUitstelDate" type="date" class="fin-input" style="width:240px"/>
-          </label>
-          <div style="font-size:11px;color:var(--text-faint);margin-top:6px">Dezelfde datum wordt op alle geselecteerde facturen toegepast.</div>
+          <div style="font-size:13px;font-weight:600;margin-bottom:6px">Consolideer en herstart in termijnen</div>
+          <div style="font-size:11.5px;color:var(--text-faint);margin-bottom:14px">
+            De geselecteerde facturen worden in TeamLeader gecrediteerd en vervangen door één nieuw abonnement met termijn-facturen. BTW-mix blijft behouden.
+          </div>
+
+          <!-- Section A: termijn-configuratie -->
+          <div style="font-size:12px;font-weight:600;color:var(--text-dim);margin-bottom:8px">Termijn-configuratie</div>
+          <div style="display:flex;gap:18px;margin-bottom:12px;font-size:12.5px">
+            <label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer">
+              <input type="radio" name="arrangWizUitstelMode" value="termijnen" checked/>
+              Aantal termijnen
+            </label>
+            <label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer">
+              <input type="radio" name="arrangWizUitstelMode" value="bedrag"/>
+              Bedrag per termijn (excl. btw)
+            </label>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px">
+            <label style="font-size:12px;color:var(--text-dim)">
+              <div style="margin-bottom:4px">Aantal termijnen</div>
+              <input id="arrangWizUitstelTermijnen" type="number" class="fin-input" min="2" max="60" value="5" style="width:100%"/>
+              <div id="arrangWizUitstelTermijnenReadonly" style="display:none;font-size:11.5px;color:var(--text-faint);padding:6px 0">—</div>
+            </label>
+            <label style="font-size:12px;color:var(--text-dim)">
+              <div style="margin-bottom:4px">Bedrag per termijn (excl. btw)</div>
+              <input id="arrangWizUitstelBedragPerTermijn" type="number" class="fin-input" min="0.01" step="0.01" style="width:100%" disabled/>
+              <div id="arrangWizUitstelBedragReadonly" style="font-size:11.5px;color:var(--text-faint);padding:6px 0">—</div>
+            </label>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px;font-size:12px;color:var(--text-dim)">
+            <div>Totaal te consolideren (excl. btw): <strong id="arrangWizUitstelTotaal">—</strong></div>
+            <div>Openstaand bedrag: <strong id="arrangWizUitstelOutstanding">—</strong></div>
+          </div>
+
+          <!-- Section B: tijd -->
+          <div style="font-size:12px;font-weight:600;color:var(--text-dim);margin-bottom:8px;margin-top:6px">Looptijd</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px">
+            <label style="font-size:12px;color:var(--text-dim)">
+              <div style="margin-bottom:4px">Eerste termijn-vervaldatum</div>
+              <input id="arrangWizUitstelStartsOn" type="date" class="fin-input" style="width:100%"/>
+            </label>
+            <div style="font-size:12px;color:var(--text-dim)">
+              <div style="margin-bottom:4px">Laatste termijn-vervaldatum</div>
+              <div id="arrangWizUitstelEndsOn" style="font-size:13px;color:var(--text-color);padding:7px 0">—</div>
+            </div>
+          </div>
+
+          <!-- Section C: btw-mix preview -->
+          <div style="font-size:12px;font-weight:600;color:var(--text-dim);margin-bottom:8px;margin-top:6px">BTW-verdeling (per tarief)</div>
+          <div id="arrangWizUitstelVatPreview" style="border:1px solid var(--border-subtle, #2b2f3a);border-radius:8px;padding:10px;background:rgba(0,0,0,0.15);font-size:12px;min-height:60px">
+            <div style="color:var(--text-faint);text-align:center;padding:14px">BTW-mix wordt opgehaald…</div>
+          </div>
+          <div id="arrangWizUitstelVatError" style="display:none;margin-top:8px;padding:6px 10px;background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.3);border-radius:6px;color:#ef4444;font-size:11.5px"></div>
         </div>
         <!-- SPLITSING -->
         <div id="arrangWizDet_SPLITSING" hidden>
@@ -3641,6 +3689,104 @@
     return map[t] || (t || '—');
   }
 
+  // pending_actions.action_type → NL label. Spec-conform TL_-prefix + legacy.
+  function arrangActionTypeLabel(t) {
+    const map = {
+      'TL_INVOICE_UPDATE_DUE':              'Uitstel (per factuur)',
+      'TL_INVOICE_CONSOLIDATE_AND_RESTART': 'Consolideer + nieuwe regeling',
+      'TL_INVOICE_SPLIT':                   'Splitsing in termijnen',
+      'TL_SUBSCRIPTION_PAUSE':              'Abonnement pauze',
+      'TL_SUBSCRIPTION_STOP':               'Abonnement stop',
+      'TL_INVOICE_WRITEOFF':                'Kwijtschelding',
+      'arrangement.uitstel':                'Uitstel',
+      'arrangement.gespreid':               'Splitsing in termijnen',
+      'arrangement.kwijtschelding':         'Kwijtschelding',
+      'arrangement.pauze':                  'Abonnement pauze',
+      'arrangement.abonnement_stop':        'Abonnement stop',
+    };
+    return map[t] || (t || '—');
+  }
+
+  // EUR-formatter (numeriek bedrag → "€ 1.234,56").
+  function fmtEur2Finance(v) {
+    const n = Number(v);
+    if (!isFinite(n)) return '—';
+    return '€ ' + n.toLocaleString('nl-NL', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  }
+
+  // Render een samenvatting van een TL_INVOICE_CONSOLIDATE_AND_RESTART
+  // pending_action: termijn-config, btw-mix, timeline. Best-effort op
+  // verschillende payload-key varianten.
+  function renderArrangConsolidateSummary(pa) {
+    const p = (pa && pa.payload) || {};
+    const ns = p.new_subscription || p.subscription || {};
+    const installments = ns.installments || ns.termijnen || p.installments || null;
+    const perInstExcl  = ns.amount_per_installment_excl_vat
+                      ?? ns.amount_per_installment
+                      ?? ns.amount_per_termijn
+                      ?? p.amount_per_installment
+                      ?? null;
+    const totalExcl    = ns.total_excl_vat ?? ns.total_excl ?? p.total_excl_vat ?? null;
+    const totalIncl    = ns.total_incl_vat ?? ns.total_incl ?? ns.total ?? p.total_incl_vat ?? null;
+    const startsOn     = ns.starts_on || ns.start_date || p.starts_on || null;
+    const endsOn       = ns.ends_on   || ns.end_date   || p.ends_on   || null;
+
+    const vatDist = Array.isArray(p.vat_distribution) ? p.vat_distribution
+                  : Array.isArray(ns.vat_distribution) ? ns.vat_distribution
+                  : Array.isArray(p.tax_rates) ? p.tax_rates
+                  : [];
+    const vatLine = vatDist.length
+      ? vatDist.map(v => {
+          const rate = v.rate ?? v.percentage ?? v.percent ?? '—';
+          const amt  = v.amount_per_installment ?? v.amount ?? v.per_installment ?? null;
+          return `<li style="font-size:12px;color:var(--text-dim)"><strong>${esc(String(rate))}% BTW</strong>${amt != null ? ` <span style="color:var(--text-faint);margin-left:6px">${esc(fmtEur2Finance(amt))}</span> <span style="color:var(--text-faint);font-size:11px">per termijn</span>` : ''}</li>`;
+        }).join('')
+      : '<li style="font-size:12px;color:var(--text-faint)">(geen btw-verdeling in payload)</li>';
+
+    const subLine = (installments && perInstExcl != null)
+      ? `<strong>${esc(String(installments))}</strong> termijnen × <strong>${esc(fmtEur2Finance(perInstExcl))}</strong> <span style="color:var(--text-faint);font-size:11px">excl btw</span>`
+      : (installments ? `<strong>${esc(String(installments))}</strong> termijnen` : '<span style="color:var(--text-faint)">termijn-info ontbreekt</span>');
+
+    const totalLine = (totalIncl != null)
+      ? `<strong>${esc(fmtEur2Finance(totalIncl))}</strong> <span style="color:var(--text-faint);font-size:11px">incl btw</span>`
+      : (totalExcl != null
+          ? `<strong>${esc(fmtEur2Finance(totalExcl))}</strong> <span style="color:var(--text-faint);font-size:11px">excl btw</span>`
+          : '<span style="color:var(--text-faint)">—</span>');
+
+    return `
+      <div style="margin-top:10px;padding:10px 12px;background:rgba(56,189,248,0.06);border:1px solid rgba(56,189,248,0.25);border-radius:8px">
+        <div style="font-size:11.5px;color:var(--text-faint);margin-bottom:6px">Consolidatie + nieuwe regeling</div>
+        <div style="display:grid;grid-template-columns:160px 1fr;gap:6px 10px;font-size:12.5px">
+          <div style="color:var(--text-faint)">Termijn-configuratie</div><div>${subLine}</div>
+          <div style="color:var(--text-faint)">Totaal nieuwe contract</div><div>${totalLine}</div>
+          <div style="color:var(--text-faint)">Eerste vervaldatum</div><div>${esc(startsOn ? fmtDateNl(String(startsOn).slice(0, 10)) : '—')}</div>
+          <div style="color:var(--text-faint)">Laatste vervaldatum</div><div>${esc(endsOn ? fmtDateNl(String(endsOn).slice(0, 10)) : '—')}</div>
+        </div>
+        <div style="font-size:11.5px;color:var(--text-faint);margin-top:8px;margin-bottom:2px">Btw-verdeling per termijn</div>
+        <ul style="margin:0;padding-left:20px;list-style:disc">${vatLine}</ul>
+      </div>
+    `;
+  }
+
+  // Render execution_result-detail voor een pending_action (D2.1+).
+  // Verwachte shape (best-effort):
+  //   { credit_note_id, credit_note_tl_id, new_subscription_id,
+  //     new_subscription_tl_id, executed_at, ... }
+  function renderArrangActionExecution(a) {
+    const r = (a && a.execution_result) || {};
+    const rows = [];
+    const creditTlId = r.credit_note_tl_id || r.credit_note_id || r.credit_note?.tl_id || r.credit_note?.id;
+    const subTlId    = r.new_subscription_tl_id || r.new_subscription_id || r.subscription?.tl_id || r.subscription?.id;
+    if (creditTlId) rows.push(`<div>Credit-nota TL-ID: <span style="font-family:monospace">${esc(String(creditTlId))}</span></div>`);
+    if (subTlId)    rows.push(`<div>Nieuwe subscription TL-ID: <span style="font-family:monospace">${esc(String(subTlId))}</span></div>`);
+    // Fallback: dump JSON als geen herkende keys gevonden.
+    if (!rows.length) {
+      const json = JSON.stringify(r, null, 2);
+      return `<details style="margin-top:4px"><summary style="font-size:11px;color:var(--text-faint);cursor:pointer">Executie-resultaat</summary><pre style="margin:4px 0 0;padding:6px 8px;background:rgba(0,0,0,0.25);border:1px solid var(--border-subtle, #2b2f3a);border-radius:4px;font-size:10.5px;color:var(--text-dim);overflow:auto;max-height:140px">${esc(json)}</pre></details>`;
+    }
+    return `<div style="margin-top:4px;font-size:11px;color:var(--text-dim);line-height:1.4">${rows.join('')}</div>`;
+  }
+
   // Bepaal effective_from / effective_until uit details voor display.
   function arrangEffective(item) {
     const d = item.details || {};
@@ -3780,7 +3926,16 @@
         <div style="font-size:11.5px;color:var(--text-faint);margin-bottom:4px">Details (JSON)</div>
         <pre style="margin:0;padding:8px 10px;background:rgba(0,0,0,0.25);border:1px solid var(--border-subtle, #2b2f3a);border-radius:6px;font-size:11px;color:var(--text-dim);overflow:auto;max-height:160px">${esc(detailsJson)}</pre>
       </div>`;
-      if (sec1El) sec1El.innerHTML = rowsHtml + detailsBlock;
+      // Speciale consolidate-summary (UITSTEL met TL_INVOICE_CONSOLIDATE_AND_RESTART)
+      const pa = Array.isArray(d.pending_actions) ? d.pending_actions : [];
+      const consolidatePa = (arr.type === 'UITSTEL' && pa[0] && pa[0].action_type === 'TL_INVOICE_CONSOLIDATE_AND_RESTART')
+        ? pa[0]
+        : null;
+      const consolidateSummaryHtml = consolidatePa
+        ? renderArrangConsolidateSummary(consolidatePa)
+        : '';
+
+      if (sec1El) sec1El.innerHTML = rowsHtml + consolidateSummaryHtml + detailsBlock;
 
       // Sectie 2: pending actions
       const actions = d.pending_actions || [];
@@ -3802,8 +3957,18 @@
           let approvedInfo = '—';
           if (a.approved_at) approvedInfo = 'approved ' + fmtDateNl(String(a.approved_at).slice(0, 10));
           else if (a.reject_reason) approvedInfo = 'rejected: ' + esc(a.reject_reason);
+          // Executie-resultaat (D2.1 wanneer pending_action wordt afgehandeld)
+          let execHtml = '';
+          if (st === 'EXECUTED' && a.execution_result) {
+            execHtml = renderArrangActionExecution(a);
+          }
+          const actionLabel = arrangActionTypeLabel(a.action_type);
           return `<tr>
-            <td style="font-family:monospace;font-size:11.5px">${esc(a.action_type)}</td>
+            <td style="font-size:11.5px">
+              <div style="font-weight:600">${esc(actionLabel)}</div>
+              <div style="font-family:monospace;font-size:10.5px;color:var(--text-faint)">${esc(a.action_type)}</div>
+              ${execHtml}
+            </td>
             <td>${statusBadge}</td>
             <td style="font-size:11.5px">${esc(proposed)}</td>
             <td style="font-size:11.5px">${approvedInfo}</td>
@@ -3858,6 +4023,24 @@
     subscription_label: '',
     details: {},
   };
+  // D1.5 UITSTEL consolidate-flow state. Apart van _arrangWiz.details om de
+  // user-input (mode + waarden) los te houden van wat naar /arrangements-propose
+  // gestuurd wordt. vat_distribution + totals komen uit /api/arrangements-vat-preview.
+  let _arrangWizUitstel = {
+    mode: 'termijnen',             // 'termijnen' | 'bedrag'
+    termijnen: 5,
+    bedrag_per_termijn: 0,         // excl btw, totaal per termijn (som over alle tarieven)
+    starts_on: '',                 // YYYY-MM-DD, default = eerste-van-volgende-maand
+    ends_on: '',                   // computed, alleen voor UI
+    vat_distribution: [],          // [{ vat_rate, total_amount_excl_vat }]
+    total_excl_vat: 0,
+    total_incl_vat: 0,
+    total_outstanding: 0,
+    vat_loaded: false,             // true zodra /arrangements-vat-preview gelukt is
+    vat_loading: false,
+    vat_error: '',
+  };
+  let _arrangWizVatPreviewToken = 0;
 
   function wireArrangProposeOnce() {
     if (_arrangWizWired) return;
@@ -3881,6 +4064,14 @@
       _arrangWiz.subscription_id = null;
       _arrangWiz.subscription_label = '';
       _arrangWiz.details = {};
+      // D1.5: reset UITSTEL consolidate-flow state als type wisselt.
+      _arrangWizUitstel.vat_loaded = false;
+      _arrangWizUitstel.vat_loading = false;
+      _arrangWizUitstel.vat_error = '';
+      _arrangWizUitstel.vat_distribution = [];
+      _arrangWizUitstel.total_excl_vat = 0;
+      _arrangWizUitstel.total_incl_vat = 0;
+      _arrangWizUitstel.total_outstanding = 0;
     });
 
     // Customer search debounce.
@@ -4007,9 +4198,42 @@
     if (_arrangWizStep === 3) {
       const d = _arrangWiz.details;
       if (_arrangWiz.type === 'UITSTEL') {
-        const dateEl = document.getElementById('arrangWizUitstelDate');
-        if (!dateEl?.value) { arrangWizSetError('Kies een nieuwe vervaldatum.'); return false; }
-        d.new_due_date = dateEl.value;
+        if (!_arrangWiz.invoice_ids.length) {
+          arrangWizSetError('Selecteer minimaal één factuur in stap 2.');
+          return false;
+        }
+        if (_arrangWizUitstel.vat_loading) {
+          arrangWizSetError('BTW-mix wordt nog opgehaald — even geduld.');
+          return false;
+        }
+        if (!_arrangWizUitstel.vat_loaded) {
+          arrangWizSetError(_arrangWizUitstel.vat_error || 'BTW-mix nog niet beschikbaar.');
+          return false;
+        }
+        const termijnen = Math.floor(Number(_arrangWizUitstel.termijnen) || 0);
+        if (!(termijnen >= 2 && termijnen <= 60)) {
+          arrangWizSetError('Aantal termijnen moet tussen 2 en 60 zijn.');
+          return false;
+        }
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(_arrangWizUitstel.starts_on || '')) {
+          arrangWizSetError('Kies een geldige eerste termijn-vervaldatum.');
+          return false;
+        }
+        // Bedrag-per-termijn (excl btw) moet > 0 als sanity. Mode bepaalt
+        // welke van de twee getallen "leidend" is; server is bron van waarheid
+        // en overschrijft amount_per_invoice_excl_vat via TL invoices.info.
+        const perTermijn = Number(_arrangWizUitstel.bedrag_per_termijn) || 0;
+        if (!(perTermijn > 0)) {
+          arrangWizSetError('Bedrag per termijn moet groter dan 0 zijn.');
+          return false;
+        }
+        // Schrijf in _arrangWiz.details voor de POST. Server berekent
+        // vat_distribution + per_rate_termijnen opnieuw; deze waarden zijn
+        // sanity-input. Geen new_due_date meer (legacy veld).
+        delete d.new_due_date;
+        d.termijnen = termijnen;
+        d.starts_on = _arrangWizUitstel.starts_on;
+        d.amount_per_invoice_excl_vat = Math.round(perTermijn * 100) / 100;
       } else if (_arrangWiz.type === 'SPLITSING') {
         const parts = arrangWizCollectParts();
         if (parts.length < 2) { arrangWizSetError('Minimaal 2 termijnen vereist.'); return false; }
@@ -4287,7 +4511,243 @@
       const totalEl = document.getElementById('arrangWizSplitTotalLbl');
       if (totalEl) totalEl.textContent = '€' + arrangWizSelectedInvoicesTotal().toFixed(2);
       arrangWizRegenSplitParts();
+    } else if (_arrangWiz.type === 'UITSTEL') {
+      arrangWizInitUitstelStep3();
     }
+  }
+
+  // ── Stap 3 UITSTEL: consolidate + restart (D1.5) ────────────────────────
+  function arrangWizFirstDayOfNextMonth() {
+    const d = new Date();
+    const y = d.getFullYear();
+    const m = d.getMonth() + 1;          // 0-based -> 1-based
+    const nextY = m === 12 ? y + 1 : y;
+    const nextM = m === 12 ? 1 : m + 1;
+    return `${nextY}-${String(nextM).padStart(2, '0')}-01`;
+  }
+
+  function arrangWizAddMonthsYmd(ymd, n) {
+    const [y, m, d] = ymd.split('-').map(Number);
+    const base = new Date(Date.UTC(y, (m - 1) + n, 1));
+    // Laatste dag van doelmaand (clamp).
+    const lastDay = new Date(Date.UTC(base.getUTCFullYear(), base.getUTCMonth() + 1, 0)).getUTCDate();
+    const day = Math.min(d, lastDay);
+    const finalY = base.getUTCFullYear();
+    const finalM = String(base.getUTCMonth() + 1).padStart(2, '0');
+    const finalD = String(day).padStart(2, '0');
+    return `${finalY}-${finalM}-${finalD}`;
+  }
+
+  function arrangWizInitUitstelStep3() {
+    // Reset state als facturen-set wijzigde sinds vorige open.
+    const u = _arrangWizUitstel;
+    u.vat_loaded = false;
+    u.vat_error = '';
+    u.vat_distribution = [];
+    u.total_excl_vat = 0;
+    u.total_incl_vat = 0;
+    u.total_outstanding = 0;
+
+    // Defaults: mode=termijnen, 5 termijnen, starts_on=1ste vd volgende maand.
+    u.mode = 'termijnen';
+    u.termijnen = Number(u.termijnen) >= 2 ? Math.floor(Number(u.termijnen)) : 5;
+    u.starts_on = u.starts_on && /^\d{4}-\d{2}-\d{2}$/.test(u.starts_on)
+      ? u.starts_on
+      : arrangWizFirstDayOfNextMonth();
+
+    // UI sync: radio + inputs.
+    const radios = document.querySelectorAll('input[name="arrangWizUitstelMode"]');
+    radios.forEach((rb) => {
+      rb.checked = rb.value === u.mode;
+      // Bind eenmaal — gebruik dataset-flag om dubbele binding te voorkomen.
+      if (!rb.dataset.arrangBound) {
+        rb.dataset.arrangBound = '1';
+        rb.addEventListener('change', () => {
+          if (rb.checked) {
+            _arrangWizUitstel.mode = rb.value;
+            arrangWizUpdateUitstelComputed();
+            arrangWizUpdateUitstelInputsEnabled();
+          }
+        });
+      }
+    });
+
+    const termInp = document.getElementById('arrangWizUitstelTermijnen');
+    if (termInp && !termInp.dataset.arrangBound) {
+      termInp.dataset.arrangBound = '1';
+      termInp.addEventListener('input', () => {
+        const n = Math.floor(Number(termInp.value) || 0);
+        _arrangWizUitstel.termijnen = n;
+        arrangWizUpdateUitstelComputed();
+      });
+    }
+    if (termInp) termInp.value = String(u.termijnen);
+
+    const bedInp = document.getElementById('arrangWizUitstelBedragPerTermijn');
+    if (bedInp && !bedInp.dataset.arrangBound) {
+      bedInp.dataset.arrangBound = '1';
+      bedInp.addEventListener('input', () => {
+        const v = Number(bedInp.value) || 0;
+        _arrangWizUitstel.bedrag_per_termijn = v;
+        arrangWizUpdateUitstelComputed();
+      });
+    }
+
+    const startInp = document.getElementById('arrangWizUitstelStartsOn');
+    if (startInp && !startInp.dataset.arrangBound) {
+      startInp.dataset.arrangBound = '1';
+      startInp.addEventListener('input', () => {
+        _arrangWizUitstel.starts_on = startInp.value || '';
+        arrangWizUpdateUitstelComputed();
+      });
+    }
+    if (startInp) startInp.value = u.starts_on;
+
+    arrangWizUpdateUitstelInputsEnabled();
+    arrangWizUpdateUitstelComputed();
+    arrangWizLoadUitstelVatPreview();
+  }
+
+  function arrangWizUpdateUitstelInputsEnabled() {
+    const u = _arrangWizUitstel;
+    const termInp = document.getElementById('arrangWizUitstelTermijnen');
+    const termRo  = document.getElementById('arrangWizUitstelTermijnenReadonly');
+    const bedInp  = document.getElementById('arrangWizUitstelBedragPerTermijn');
+    const bedRo   = document.getElementById('arrangWizUitstelBedragReadonly');
+    if (u.mode === 'termijnen') {
+      if (termInp) { termInp.disabled = false; termInp.style.display = ''; }
+      if (termRo)  { termRo.style.display = 'none'; }
+      if (bedInp)  { bedInp.disabled = true;  bedInp.style.display = 'none'; }
+      if (bedRo)   { bedRo.style.display = ''; }
+    } else {
+      if (termInp) { termInp.disabled = true;  termInp.style.display = 'none'; }
+      if (termRo)  { termRo.style.display = ''; }
+      if (bedInp)  { bedInp.disabled = false; bedInp.style.display = ''; }
+      if (bedRo)   { bedRo.style.display = 'none'; }
+    }
+  }
+
+  function arrangWizUpdateUitstelComputed() {
+    const u = _arrangWizUitstel;
+    const totalExcl = Number(u.total_excl_vat) || 0;
+
+    // Bepaal termijnen + bedrag_per_termijn op basis van mode.
+    if (u.mode === 'termijnen') {
+      const n = Math.max(2, Math.min(60, Math.floor(Number(u.termijnen) || 2)));
+      u.termijnen = n;
+      u.bedrag_per_termijn = totalExcl > 0 ? Math.round((totalExcl / n) * 100) / 100 : 0;
+    } else {
+      const per = Math.max(0, Number(u.bedrag_per_termijn) || 0);
+      u.bedrag_per_termijn = per;
+      if (per > 0 && totalExcl > 0) {
+        const n = Math.max(2, Math.min(60, Math.ceil(totalExcl / per)));
+        u.termijnen = n;
+      }
+    }
+
+    // ends_on = starts_on + (termijnen - 1) maanden.
+    if (/^\d{4}-\d{2}-\d{2}$/.test(u.starts_on) && u.termijnen >= 1) {
+      u.ends_on = arrangWizAddMonthsYmd(u.starts_on, u.termijnen - 1);
+    } else {
+      u.ends_on = '';
+    }
+
+    // Reflect terug in read-only velden.
+    const termRo = document.getElementById('arrangWizUitstelTermijnenReadonly');
+    if (termRo) termRo.textContent = u.termijnen ? `${u.termijnen} termijnen` : '—';
+
+    const bedRo = document.getElementById('arrangWizUitstelBedragReadonly');
+    if (bedRo) bedRo.textContent = u.bedrag_per_termijn > 0
+      ? `€${u.bedrag_per_termijn.toFixed(2)} per termijn (excl. btw)`
+      : '—';
+
+    const endsOnEl = document.getElementById('arrangWizUitstelEndsOn');
+    if (endsOnEl) endsOnEl.textContent = u.ends_on ? fmtDateNl(u.ends_on) : '—';
+
+    const totEl = document.getElementById('arrangWizUitstelTotaal');
+    if (totEl) totEl.textContent = totalExcl > 0 ? `€${totalExcl.toFixed(2)}` : '—';
+
+    const outEl = document.getElementById('arrangWizUitstelOutstanding');
+    if (outEl) outEl.textContent = Number(u.total_outstanding) > 0
+      ? `€${Number(u.total_outstanding).toFixed(2)}`
+      : '—';
+
+    arrangWizRenderUitstelVatPreview();
+  }
+
+  async function arrangWizLoadUitstelVatPreview() {
+    const u = _arrangWizUitstel;
+    const ids = (_arrangWiz.invoice_ids || []).slice();
+    if (!ids.length) {
+      u.vat_loading = false;
+      u.vat_loaded = false;
+      u.vat_error = 'Geen facturen geselecteerd.';
+      arrangWizRenderUitstelVatPreview();
+      return;
+    }
+    u.vat_loading = true;
+    u.vat_error = '';
+    arrangWizRenderUitstelVatPreview();
+    const token = ++_arrangWizVatPreviewToken;
+    try {
+      const params = new URLSearchParams({ invoice_ids: ids.join(',') });
+      const r = await window.AgentShared.apiFetch('/api/arrangements-vat-preview?' + params.toString());
+      const d = await r.json().catch(() => ({}));
+      if (token !== _arrangWizVatPreviewToken) return;  // stale
+      if (!r.ok) {
+        u.vat_loading = false;
+        u.vat_loaded = false;
+        u.vat_error = d.error || ('HTTP ' + r.status);
+        arrangWizRenderUitstelVatPreview();
+        return;
+      }
+      u.vat_distribution  = Array.isArray(d.vat_distribution) ? d.vat_distribution : [];
+      u.total_excl_vat    = Number(d.total_excl_vat) || 0;
+      u.total_incl_vat    = Number(d.total_incl_vat) || 0;
+      u.total_outstanding = Number(d.total_outstanding) || 0;
+      u.vat_loading = false;
+      u.vat_loaded  = true;
+      arrangWizUpdateUitstelComputed();
+    } catch (e) {
+      if (token !== _arrangWizVatPreviewToken) return;
+      u.vat_loading = false;
+      u.vat_loaded = false;
+      u.vat_error = e.message;
+      arrangWizRenderUitstelVatPreview();
+    }
+  }
+
+  function arrangWizRenderUitstelVatPreview() {
+    const wrap = document.getElementById('arrangWizUitstelVatPreview');
+    const errEl = document.getElementById('arrangWizUitstelVatError');
+    const u = _arrangWizUitstel;
+    if (errEl) {
+      if (u.vat_error) { errEl.style.display = 'block'; errEl.textContent = u.vat_error; }
+      else             { errEl.style.display = 'none';  errEl.textContent = ''; }
+    }
+    if (!wrap) return;
+    if (u.vat_loading) {
+      wrap.innerHTML = '<div style="color:var(--text-faint);text-align:center;padding:14px">BTW-mix wordt opgehaald…</div>';
+      return;
+    }
+    if (!u.vat_loaded || !u.vat_distribution.length) {
+      wrap.innerHTML = '<div style="color:var(--text-faint);text-align:center;padding:14px">Nog geen BTW-mix beschikbaar.</div>';
+      return;
+    }
+    const n = Math.max(1, Number(u.termijnen) || 1);
+    const rows = u.vat_distribution.map((row) => {
+      const rate = Number(row.vat_rate) || 0;
+      const total = Number(row.total_amount_excl_vat) || 0;
+      const perTermijn = Math.round((total / n) * 100) / 100;
+      return `<div style="display:grid;grid-template-columns:80px 1fr 1fr;gap:10px;padding:6px 8px;border-bottom:1px solid rgba(255,255,255,.04)">
+        <div style="font-weight:600">${rate}%</div>
+        <div style="font-variant-numeric:tabular-nums">€${total.toFixed(2)} <span style="color:var(--text-faint);font-size:11px">totaal excl. btw</span></div>
+        <div style="font-variant-numeric:tabular-nums">€${perTermijn.toFixed(2)} <span style="color:var(--text-faint);font-size:11px">per termijn</span></div>
+      </div>`;
+    }).join('');
+    wrap.innerHTML = `<div style="display:grid;grid-template-columns:80px 1fr 1fr;gap:10px;padding:4px 8px;font-size:11px;color:var(--text-faint);text-transform:uppercase;letter-spacing:.04em">
+      <div>BTW-tarief</div><div>Totaal excl.</div><div>Per termijn</div>
+    </div>${rows}`;
   }
 
   function arrangWizRegenSplitParts() {
@@ -4381,7 +4841,21 @@
     }
 
     if (_arrangWiz.type === 'UITSTEL') {
-      rows.push(['Nieuwe vervaldatum', esc(fmtDateNl(d.new_due_date))]);
+      const u = _arrangWizUitstel;
+      rows.push(['Aantal termijnen', String(u.termijnen)]);
+      rows.push(['Bedrag per termijn (excl. btw)', '€' + (Number(u.bedrag_per_termijn) || 0).toFixed(2)]);
+      rows.push(['Eerste termijn vervalt', esc(fmtDateNl(u.starts_on))]);
+      rows.push(['Laatste termijn vervalt', esc(fmtDateNl(u.ends_on))]);
+      rows.push(['Totaal te consolideren (excl.)', '€' + (Number(u.total_excl_vat) || 0).toFixed(2)]);
+      if (Number(u.total_outstanding) > 0) {
+        rows.push(['Openstaand bedrag', '€' + Number(u.total_outstanding).toFixed(2)]);
+      }
+      if (Array.isArray(u.vat_distribution) && u.vat_distribution.length) {
+        const vatStr = u.vat_distribution
+          .map(v => `${Number(v.vat_rate)}%: €${(Number(v.total_amount_excl_vat) || 0).toFixed(2)}`)
+          .join(' · ');
+        rows.push(['BTW-mix', esc(vatStr)]);
+      }
     } else if (_arrangWiz.type === 'SPLITSING') {
       const parts = (d.parts || []).map((p, i) => `${i + 1}. €${Number(p.amount).toFixed(2)} op ${fmtDateNl(p.due_date)}`).join('<br>');
       rows.push(['Termijnen', parts || '—']);
@@ -4408,11 +4882,16 @@
     // Impact-summary.
     const impact = document.getElementById('arrangWizPreviewImpact');
     if (impact) {
-      let n = 1;
-      if (_arrangWiz.type === 'UITSTEL' || _arrangWiz.type === 'SPLITSING' || _arrangWiz.type === 'KWIJTSCHELDING') {
-        n = _arrangWiz.invoice_ids.length || 0;
+      if (_arrangWiz.type === 'UITSTEL') {
+        const invN = _arrangWiz.invoice_ids.length || 0;
+        impact.innerHTML = `<i class="ti ti-info-circle" style="margin-right:4px"></i>Dit voorstel maakt <strong>1</strong> pending action aan: consolideer <strong>${invN}</strong> facturen in 1 nieuw abonnement met <strong>${_arrangWizUitstel.termijnen}</strong> termijnen.`;
+      } else {
+        let n = 1;
+        if (_arrangWiz.type === 'SPLITSING' || _arrangWiz.type === 'KWIJTSCHELDING') {
+          n = _arrangWiz.invoice_ids.length || 0;
+        }
+        impact.innerHTML = `<i class="ti ti-info-circle" style="margin-right:4px"></i>Dit voorstel maakt <strong>${n}</strong> pending action(s) aan ter goedkeuring.`;
       }
-      impact.innerHTML = `<i class="ti ti-info-circle" style="margin-right:4px"></i>Dit voorstel maakt <strong>${n}</strong> pending action(s) aan ter goedkeuring.`;
     }
   }
 
