@@ -74,7 +74,14 @@
           navLink('onboarding', '/modules/onboarding-overzicht.html', 'Onboarding') +
           navLink('finance', '/modules/finance.html', 'Finance') +
           '<a class="nav-item" data-module="tickets" href="/modules/tickets.html">' + svg('tickets') + 'Tickets<span class="nav-badge" id="navTicketsBadge"></span></a>' +
-          navLink('admin', '/modules/admin.html', 'Admin', ' id="adminNavLink" style="display:none"') +
+          // Admin nav-item incl. approval-badge (D1 payment-arrangements). Badge linkt direct
+          // naar de Approval-queue-tab in admin.html (#approval-queue), zonder eerst de
+          // Gebruikers-tab te laden. Badge wordt alleen zichtbaar bij PENDING > 0 én als de
+          // user de feature_key finance.arrangements.approve heeft (zie updateApprovalsBadge).
+          '<a class="nav-item" data-module="admin" id="adminNavLink" href="/modules/admin.html" style="display:none">' +
+            svg('admin') + 'Admin' +
+            '<span class="nav-badge" id="navApprovalsBadge" data-target="/modules/admin.html#approval-queue" title="Open approval-queue"></span>' +
+          '</a>' +
           '<div class="nav-section">Binnenkort</div>' +
           concept('whatsapp', 'WhatsApp Bot') +
           concept('contracten', 'Contracten') +
@@ -149,6 +156,77 @@
       if (n > 0) { b.textContent = n; b.classList.add('show'); }
       else       { b.textContent = ''; b.classList.remove('show'); }
     } catch (e) { b.classList.remove('show'); }
+  }
+
+  // Approvals-badge (D1 payment-arrangements):
+  //   - GET /api/pending-actions-list?status=PENDING&limit=1 → counts.PENDING
+  //   - alleen renderen als user feature_key 'finance.arrangements.approve' heeft
+  //     (lookup via window.RBAC.ensurePermissionsLoaded(); super_admin krijgt '*')
+  //   - klik op badge navigeert naar /modules/admin.html#approval-queue (data-target)
+  // Pattern: silent fail, idempotent toggle (zelfde als tickets/taken).
+  var _approvalsBadgeAllowed = null;     // null | true | false → cached na 1e RBAC-check
+  var _approvalsBadgeTimer   = null;     // setInterval handle (cleanup-safe)
+
+  async function approvalsBadgeAllowed() {
+    if (_approvalsBadgeAllowed !== null) return _approvalsBadgeAllowed;
+    try {
+      if (!window.RBAC || typeof window.RBAC.ensurePermissionsLoaded !== 'function') {
+        _approvalsBadgeAllowed = false;
+        return false;
+      }
+      var perms = await window.RBAC.ensurePermissionsLoaded();
+      _approvalsBadgeAllowed = !!(perms && (perms.has('*') || perms.has('finance.arrangements.approve')));
+      return _approvalsBadgeAllowed;
+    } catch (e) {
+      _approvalsBadgeAllowed = false;
+      return false;
+    }
+  }
+
+  async function updateApprovalsBadge() {
+    var b = document.getElementById('navApprovalsBadge');
+    if (!b) return;
+    var ok = await approvalsBadgeAllowed();
+    if (!ok) { b.classList.remove('show'); return; }
+    try {
+      if (!window.AgentShared || typeof window.AgentShared.apiFetch !== 'function') return;
+      var res = await window.AgentShared.apiFetch('/api/pending-actions-list?status=PENDING&limit=1');
+      if (!res.ok) { b.classList.remove('show'); return; }
+      var data = await res.json();
+      var n = (data && data.counts && typeof data.counts.PENDING === 'number')
+        ? data.counts.PENDING
+        : (typeof data.total === 'number' ? data.total : 0);
+      if (n > 0) { b.textContent = String(n); b.classList.add('show'); }
+      else       { b.textContent = ''; b.classList.remove('show'); }
+    } catch (e) { b.classList.remove('show'); }
+  }
+
+  // Click-handler op de badge zelf: navigeert naar /modules/admin.html#approval-queue
+  // zonder dat de outer <a class="nav-item"> dezelfde href (zonder hash) wint. Wordt
+  // 1x gewired bij mount; idempotent via dataset-flag.
+  function wireApprovalsBadgeClick() {
+    var b = document.getElementById('navApprovalsBadge');
+    if (!b || b.dataset.wired === '1') return;
+    b.style.cursor = 'pointer';
+    b.addEventListener('click', function (e) {
+      e.preventDefault();
+      e.stopPropagation();
+      var target = b.getAttribute('data-target') || '/modules/admin.html#approval-queue';
+      window.location.href = target;
+    });
+    b.dataset.wired = '1';
+  }
+
+  // setInterval-cleanup pattern: bij elke (her)mount stoppen we de vorige timer
+  // voor we een nieuwe starten — voorkomt dubbele polling bij SPA-achtige flows.
+  function startApprovalsBadgePolling() {
+    if (_approvalsBadgeTimer) { clearInterval(_approvalsBadgeTimer); _approvalsBadgeTimer = null; }
+    _approvalsBadgeTimer = setInterval(updateApprovalsBadge, 60 * 1000);
+    // Stop polling als de tab onzichtbaar wordt (defensief — browser kan tabs
+    // throttlen, maar zo zijn we expliciet en sparen we API-calls).
+    window.addEventListener('beforeunload', function () {
+      if (_approvalsBadgeTimer) { clearInterval(_approvalsBadgeTimer); _approvalsBadgeTimer = null; }
+    });
   }
 
   // Tickets-badge: telt open + in_progress tickets toegewezen aan ingelogde user.
@@ -259,6 +337,9 @@
     highlightActive();
     updateTakenBadge();
     updateTicketsBadge();
+    wireApprovalsBadgeClick();
+    updateApprovalsBadge();
+    startApprovalsBadgePolling();
     applyAdminGating();
     applyDashboardRouting();
     // Footer (gebruiker + theme-toggle) via bestaande gedeelde helper.
@@ -276,8 +357,9 @@
   // Expose refresh-trigger voor externe modules (tickets-detail.html na PATCH).
   // window.AgentShared bestaat al — agent-shared.js wordt eerder geladen.
   if (window.AgentShared) {
-    window.AgentShared.refreshTicketsBadge = updateTicketsBadge;
-    window.AgentShared.refreshTakenBadge   = updateTakenBadge;
+    window.AgentShared.refreshTicketsBadge   = updateTicketsBadge;
+    window.AgentShared.refreshTakenBadge     = updateTakenBadge;
+    window.AgentShared.refreshApprovalsBadge = updateApprovalsBadge;
   }
 
   if (document.readyState === 'loading') {

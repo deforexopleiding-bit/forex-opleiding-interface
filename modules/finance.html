@@ -1118,6 +1118,7 @@
         <button class="sr-seg" data-dunning-sub="workflows" type="button">Workflows</button>
         <button class="sr-seg" data-dunning-sub="templates" type="button">Templates</button>
         <button class="sr-seg" data-dunning-sub="geschiedenis" type="button">Geschiedenis</button>
+        <button class="sr-seg" data-dunning-sub="arrangements" data-view="arrangements" type="button">Afspraken</button>
       </div>
 
       <!-- Sub-view: Overzicht (default) - PR B5 -->
@@ -1197,7 +1198,7 @@
               <th style="width:140px">Oudste vervaldatum</th>
               <th style="width:120px">Dagen overdue</th>
               <th style="width:150px">Actieve workflow?</th>
-              <th style="width:120px">Acties</th>
+              <th style="width:220px">Acties</th>
             </tr></thead>
             <tbody id="dunProbTbody"><tr><td colspan="7" style="text-align:center;padding:24px;color:var(--text-faint)">Laden…</td></tr></tbody>
           </table>
@@ -1365,6 +1366,45 @@
           <button class="sr-abtn" id="dunHistMoreBtn" type="button" style="font-size:11.5px;padding:5px 12px" hidden>
             <i class="ti ti-chevron-down" style="margin-right:4px"></i>Meer laden
           </button>
+        </div>
+      </div>
+
+      <!-- Sub-view: Afspraken / Betalingsregelingen (D1) -->
+      <div id="view-arrangements" hidden>
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:14px;flex-wrap:wrap;gap:10px">
+          <div>
+            <h2 style="margin:0;font-size:18px;font-weight:700">Afspraken</h2>
+            <div style="font-size:11.5px;color:var(--text-faint);margin-top:2px">Betalingsregelingen per klant (uitstel, splitsing, abonnement pauze/stop, kwijtschelding). Klik op een rij voor details.</div>
+          </div>
+          <div style="display:flex;gap:8px;align-items:center">
+            <button class="sr-abtn primary" id="arrangProposeBtn" type="button" style="font-size:12.5px;padding:6px 12px">
+              <i class="ti ti-plus" style="margin-right:4px"></i>Stel afspraak voor
+            </button>
+            <button class="sr-abtn" id="arrangRefreshBtn" type="button" style="font-size:11.5px;padding:5px 10px">
+              <i class="ti ti-refresh" style="margin-right:4px"></i>Vernieuw
+            </button>
+          </div>
+        </div>
+        <!-- Filter-strip status-pills -->
+        <div class="sr-segments" id="arrangStatusNav" style="margin-bottom:14px">
+          <button class="sr-seg active" data-arrang-status="VOORGESTELD" type="button">Voorgesteld</button>
+          <button class="sr-seg" data-arrang-status="ACTIEF" type="button">Actief</button>
+          <button class="sr-seg" data-arrang-status="NAGEKOMEN" type="button">Nagekomen</button>
+          <button class="sr-seg" data-arrang-status="VERBROKEN" type="button">Verbroken</button>
+          <button class="sr-seg" data-arrang-status="GEANNULEERD" type="button">Geannuleerd</button>
+        </div>
+        <div class="sr-tablewrap">
+          <table class="sr-table" id="arrangementsTable">
+            <thead><tr>
+              <th>Klant</th>
+              <th style="width:130px">Type</th>
+              <th style="width:100px">#Facturen</th>
+              <th style="width:200px">Effectief</th>
+              <th style="width:130px">Status</th>
+              <th style="width:180px">Acties</th>
+            </tr></thead>
+            <tbody id="arrangementsTbody"><tr><td colspan="6" style="text-align:center;padding:24px;color:var(--text-faint)">Laden…</td></tr></tbody>
+          </table>
         </div>
       </div>
     </div>
@@ -1551,6 +1591,232 @@
       <button class="sr-abtn primary" id="dunRunDetailsResumeBtn" type="button" hidden><i class="ti ti-player-play"></i> Hervat</button>
       <button class="sr-abtn danger" id="dunRunDetailsCancelBtn" type="button" hidden><i class="ti ti-x"></i> Annuleer</button>
       <button class="sr-abtn" id="dunRunDetailsCloseBtn" type="button">Sluiten</button>
+    </div>
+  </div>
+</div>
+
+<!-- Arrangement Details modal (D1) -->
+<div class="modal-overlay hidden" id="arrangementDetailModal" role="dialog" aria-modal="true">
+  <div class="modal-card" style="max-width:780px">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px">
+      <div>
+        <h3 id="arrangDetailTitle" style="margin:0;font-size:17px">Afspraak details</h3>
+        <div id="arrangDetailSubtitle" style="font-size:12px;color:var(--text-faint);margin-top:3px">—</div>
+      </div>
+      <button class="sr-ibtn" id="arrangDetailClose" type="button" title="Sluiten" style="margin-top:-4px"><i class="ti ti-x"></i></button>
+    </div>
+
+    <div style="margin-top:16px">
+      <div style="font-size:13px;font-weight:600;margin-bottom:8px">Arrangement</div>
+      <div id="arrangDetailSection1" style="display:flex;flex-direction:column;gap:6px;padding:4px 2px">
+        <div style="font-size:11.5px;color:var(--text-faint);text-align:center;padding:14px">Laden…</div>
+      </div>
+    </div>
+
+    <div style="margin-top:18px">
+      <div style="font-size:13px;font-weight:600;margin-bottom:8px">Pending Actions</div>
+      <div class="sr-tablewrap">
+        <table class="sr-table" id="arrangDetailActionsTable">
+          <thead><tr>
+            <th>Type</th>
+            <th style="width:120px">Status</th>
+            <th style="width:140px">Voorgesteld</th>
+            <th style="width:160px">Approved/Rejected</th>
+          </tr></thead>
+          <tbody id="arrangDetailActionsTbody"><tr><td colspan="4" style="text-align:center;padding:14px;color:var(--text-faint);font-size:11.5px">Laden…</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div id="arrangDetailError" style="display:none;margin-top:12px;padding:8px 12px;background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.3);border-radius:6px;color:#ef4444;font-size:12px"></div>
+
+    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:18px">
+      <button class="sr-abtn" id="arrangDetailCloseBtn" type="button">Sluiten</button>
+    </div>
+  </div>
+</div>
+
+<!-- Arrangement Propose Wizard modal (D1) -->
+<div class="modal-overlay hidden" id="arrangProposeModal" role="dialog" aria-modal="true">
+  <div class="modal-card" style="max-width:780px;display:flex;flex-direction:column;max-height:90vh;padding:0">
+    <!-- Sticky header -->
+    <div style="padding:18px 22px 12px;border-bottom:1px solid var(--border-subtle, #2b2f3a);position:sticky;top:0;background:var(--bg-elev);z-index:2;border-radius:14px 14px 0 0">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px">
+        <div>
+          <h3 style="margin:0;font-size:17px;font-weight:700">Afspraak voorstellen</h3>
+          <div id="arrangWizSubtitle" style="font-size:12px;color:var(--text-faint);margin-top:3px">Stap 1 van 5: Type + klant</div>
+        </div>
+        <button class="sr-ibtn" id="arrangWizClose" type="button" title="Sluiten" style="margin-top:-4px"><i class="ti ti-x"></i></button>
+      </div>
+      <!-- Stepper indicator -->
+      <div style="display:flex;gap:4px;margin-top:12px">
+        <div class="arrang-wiz-dot active" data-step="1" style="flex:1;height:3px;background:var(--accent-cyan);border-radius:2px;transition:background .2s"></div>
+        <div class="arrang-wiz-dot" data-step="2" style="flex:1;height:3px;background:rgba(255,255,255,.08);border-radius:2px;transition:background .2s"></div>
+        <div class="arrang-wiz-dot" data-step="3" style="flex:1;height:3px;background:rgba(255,255,255,.08);border-radius:2px;transition:background .2s"></div>
+        <div class="arrang-wiz-dot" data-step="4" style="flex:1;height:3px;background:rgba(255,255,255,.08);border-radius:2px;transition:background .2s"></div>
+        <div class="arrang-wiz-dot" data-step="5" style="flex:1;height:3px;background:rgba(255,255,255,.08);border-radius:2px;transition:background .2s"></div>
+      </div>
+    </div>
+
+    <!-- Scrollable body -->
+    <div style="padding:18px 22px;overflow-y:auto;flex:1">
+      <!-- STAP 1: Type + klant -->
+      <div id="arrangWizStep1" data-wiz-step="1">
+        <div style="font-size:13px;font-weight:600;margin-bottom:10px">Type afspraak</div>
+        <label style="font-size:12px;color:var(--text-dim);display:block;margin-bottom:14px">
+          <select id="arrangWizType" class="fin-input" style="width:100%">
+            <option value="">— Kies type —</option>
+            <option value="UITSTEL">Uitstel betaaldatum</option>
+            <option value="SPLITSING">Splitsing in termijnen</option>
+            <option value="ABONNEMENT_PAUZE">Abonnement pauzeren</option>
+            <option value="ABONNEMENT_STOP">Abonnement stopzetten</option>
+            <option value="KWIJTSCHELDING">Kwijtschelding (afboeken)</option>
+          </select>
+        </label>
+
+        <div style="font-size:13px;font-weight:600;margin-bottom:10px">Klant</div>
+        <label style="font-size:12px;color:var(--text-dim);display:block;margin-bottom:8px">
+          <input id="arrangWizCustomerSearch" type="search" class="fin-input" placeholder="Zoek op naam, e-mail of telefoon…" autocomplete="off" style="width:100%"/>
+        </label>
+        <div id="arrangWizCustomerResults" style="max-height:180px;overflow-y:auto;border:1px solid var(--border-subtle, #2b2f3a);border-radius:8px;background:rgba(0,0,0,0.2);display:none"></div>
+        <div id="arrangWizCustomerSelected" style="margin-top:8px;padding:10px 12px;background:rgba(56,189,248,.08);border:1px solid rgba(56,189,248,.3);border-radius:8px;font-size:12.5px;display:none">
+          <strong>Geselecteerd:</strong> <span id="arrangWizCustomerSelectedName">—</span>
+          <button type="button" class="sr-ibtn" id="arrangWizCustomerClear" title="Wis selectie" style="float:right;margin-top:-2px"><i class="ti ti-x"></i></button>
+        </div>
+      </div>
+
+      <!-- STAP 2: Facturen / Abonnement -->
+      <div id="arrangWizStep2" data-wiz-step="2" hidden>
+        <!-- Facturen-modus (UITSTEL / SPLITSING / KWIJTSCHELDING) -->
+        <div id="arrangWizInvoiceMode">
+          <div style="font-size:13px;font-weight:600;margin-bottom:6px">Openstaande facturen</div>
+          <div style="font-size:11.5px;color:var(--text-faint);margin-bottom:10px">Selecteer één of meerdere openstaande facturen voor deze afspraak.</div>
+          <div id="arrangWizInvoiceList" style="max-height:280px;overflow-y:auto;border:1px solid var(--border-subtle, #2b2f3a);border-radius:8px;padding:8px;background:rgba(0,0,0,0.15)">
+            <div style="font-size:11.5px;color:var(--text-faint);text-align:center;padding:20px">Selecteer eerst een klant…</div>
+          </div>
+          <div style="margin-top:8px;font-size:12px;color:var(--text-dim)">
+            Geselecteerd: <span id="arrangWizInvoiceCount">0</span> factu(u)r(en) — Totaal: <strong id="arrangWizInvoiceTotal">€0,00</strong>
+          </div>
+        </div>
+        <!-- Abonnement-modus (ABONNEMENT_PAUZE / ABONNEMENT_STOP) -->
+        <div id="arrangWizSubMode" hidden>
+          <div style="font-size:13px;font-weight:600;margin-bottom:6px">Abonnement</div>
+          <div style="font-size:11.5px;color:var(--text-faint);margin-bottom:10px">Selecteer welk abonnement gepauzeerd/gestopt moet worden.</div>
+          <div id="arrangWizSubList" style="max-height:280px;overflow-y:auto;border:1px solid var(--border-subtle, #2b2f3a);border-radius:8px;padding:8px;background:rgba(0,0,0,0.15)">
+            <div style="font-size:11.5px;color:var(--text-faint);text-align:center;padding:20px">Selecteer eerst een klant…</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- STAP 3: Details (type-specifiek) -->
+      <div id="arrangWizStep3" data-wiz-step="3" hidden>
+        <!-- UITSTEL -->
+        <div id="arrangWizDet_UITSTEL" hidden>
+          <div style="font-size:13px;font-weight:600;margin-bottom:10px">Nieuwe vervaldatum</div>
+          <label style="font-size:12px;color:var(--text-dim);display:block">
+            <input id="arrangWizUitstelDate" type="date" class="fin-input" style="width:240px"/>
+          </label>
+          <div style="font-size:11px;color:var(--text-faint);margin-top:6px">Dezelfde datum wordt op alle geselecteerde facturen toegepast.</div>
+        </div>
+        <!-- SPLITSING -->
+        <div id="arrangWizDet_SPLITSING" hidden>
+          <div style="font-size:13px;font-weight:600;margin-bottom:10px">Splitsing in termijnen</div>
+          <div style="display:grid;grid-template-columns:160px 1fr;gap:12px;align-items:end;margin-bottom:14px">
+            <label style="font-size:12px;color:var(--text-dim)">
+              <div style="margin-bottom:4px">Aantal termijnen</div>
+              <input id="arrangWizSplitCount" type="number" class="fin-input" min="2" max="12" value="3" style="width:100%"/>
+            </label>
+            <button class="sr-abtn" id="arrangWizSplitRegen" type="button" style="font-size:11.5px;padding:6px 12px"><i class="ti ti-refresh" style="margin-right:4px"></i>Genereer opnieuw</button>
+          </div>
+          <div style="font-size:12px;color:var(--text-dim);margin-bottom:6px">
+            Totaal te verdelen: <strong id="arrangWizSplitTotalLbl">€0,00</strong>
+          </div>
+          <div class="sr-tablewrap">
+            <table class="sr-table" id="arrangWizSplitTable">
+              <thead><tr>
+                <th style="width:60px">#</th>
+                <th>Bedrag (EUR)</th>
+                <th>Vervaldatum</th>
+              </tr></thead>
+              <tbody id="arrangWizSplitTbody"></tbody>
+            </table>
+          </div>
+          <div id="arrangWizSplitSumWarn" style="display:none;margin-top:8px;padding:6px 10px;background:rgba(245,158,11,.08);border:1px solid rgba(245,158,11,.3);border-radius:6px;color:#f59e0b;font-size:11.5px"></div>
+        </div>
+        <!-- ABONNEMENT_PAUZE -->
+        <div id="arrangWizDet_ABONNEMENT_PAUZE" hidden>
+          <div style="font-size:13px;font-weight:600;margin-bottom:10px">Pauzeer-periode</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px">
+            <label style="font-size:12px;color:var(--text-dim)">
+              <div style="margin-bottom:4px">Pauze vanaf</div>
+              <input id="arrangWizPauseFrom" type="date" class="fin-input" style="width:100%"/>
+            </label>
+            <label style="font-size:12px;color:var(--text-dim)">
+              <div style="margin-bottom:4px">Pauze tot</div>
+              <input id="arrangWizPauseUntil" type="date" class="fin-input" style="width:100%"/>
+            </label>
+          </div>
+          <label style="font-size:12px;color:var(--text-dim);display:block">
+            <div style="margin-bottom:4px">Reden</div>
+            <textarea id="arrangWizPauseReason" class="fin-input" rows="2" placeholder="Bv. tijdelijk financieel krap" style="width:100%;resize:vertical"></textarea>
+          </label>
+        </div>
+        <!-- ABONNEMENT_STOP -->
+        <div id="arrangWizDet_ABONNEMENT_STOP" hidden>
+          <div style="font-size:13px;font-weight:600;margin-bottom:10px">Stopzetten abonnement</div>
+          <label style="font-size:12px;color:var(--text-dim);display:block;margin-bottom:14px">
+            <div style="margin-bottom:4px">Stop-datum</div>
+            <input id="arrangWizStopDate" type="date" class="fin-input" style="width:240px"/>
+          </label>
+          <label style="font-size:12px;color:var(--text-dim);display:block">
+            <div style="margin-bottom:4px">Reden</div>
+            <textarea id="arrangWizStopReason" class="fin-input" rows="2" placeholder="Bv. opzegging op eigen verzoek" style="width:100%;resize:vertical"></textarea>
+          </label>
+        </div>
+        <!-- KWIJTSCHELDING -->
+        <div id="arrangWizDet_KWIJTSCHELDING" hidden>
+          <div style="font-size:13px;font-weight:600;margin-bottom:10px">Kwijtschelding</div>
+          <label style="font-size:12px;color:var(--text-dim);display:block;margin-bottom:14px">
+            <div style="margin-bottom:4px">Af te boeken bedrag (EUR)</div>
+            <input id="arrangWizWriteOffAmount" type="number" min="0" step="0.01" class="fin-input" style="width:240px"/>
+          </label>
+          <label style="font-size:12px;color:var(--text-dim);display:block">
+            <div style="margin-bottom:4px">Reden</div>
+            <textarea id="arrangWizWriteOffReason" class="fin-input" rows="2" placeholder="Bv. oninbaar verklaard, klant niet meer bereikbaar" style="width:100%;resize:vertical"></textarea>
+          </label>
+        </div>
+      </div>
+
+      <!-- STAP 4: Rationale -->
+      <div id="arrangWizStep4" data-wiz-step="4" hidden>
+        <div style="font-size:13px;font-weight:600;margin-bottom:6px">Toelichting</div>
+        <div style="font-size:11.5px;color:var(--text-faint);margin-bottom:10px">Korte zakelijke onderbouwing waarom deze afspraak wordt voorgesteld. Wordt opgeslagen in audit-log en bij de pending action.</div>
+        <textarea id="arrangWizRationale" class="fin-input" rows="6" placeholder="Bv. Klant heeft contact opgenomen, gevraagd om uitstel tot eind van de maand wegens late uitbetaling salaris." style="width:100%;resize:vertical;min-height:120px"></textarea>
+        <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--text-faint);margin-top:4px">
+          <span>Minimaal 10 tekens.</span>
+          <span><span id="arrangWizRationaleLen">0</span> tekens</span>
+        </div>
+      </div>
+
+      <!-- STAP 5: Preview / bevestigen -->
+      <div id="arrangWizStep5" data-wiz-step="5" hidden>
+        <div style="font-size:13px;font-weight:600;margin-bottom:10px">Samenvatting</div>
+        <div id="arrangWizPreview" style="display:flex;flex-direction:column;gap:6px"></div>
+        <div id="arrangWizPreviewImpact" style="margin-top:14px;padding:10px 12px;background:rgba(56,189,248,.08);border:1px solid rgba(56,189,248,.3);border-radius:8px;font-size:12.5px"></div>
+      </div>
+
+      <!-- Error display -->
+      <div id="arrangWizError" style="display:none;margin-top:12px;padding:8px 12px;background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.3);border-radius:6px;color:#ef4444;font-size:12px"></div>
+    </div>
+
+    <!-- Sticky footer -->
+    <div style="padding:14px 22px;border-top:1px solid var(--border-subtle, #2b2f3a);position:sticky;bottom:0;background:var(--bg-elev);z-index:2;border-radius:0 0 14px 14px;display:flex;justify-content:space-between;gap:8px;align-items:center">
+      <button class="sr-abtn" id="arrangWizCancelBtn" type="button">Annuleren</button>
+      <div style="display:flex;gap:8px">
+        <button class="sr-abtn" id="arrangWizPrevBtn" type="button" disabled><i class="ti ti-arrow-left" style="margin-right:4px"></i>Vorige</button>
+        <button class="sr-abtn primary" id="arrangWizNextBtn" type="button">Volgende<i class="ti ti-arrow-right" style="margin-left:4px"></i></button>
+        <button class="sr-abtn primary" id="arrangWizConfirmBtn" type="button" hidden><i class="ti ti-check" style="margin-right:4px"></i>Bevestigen</button>
+      </div>
     </div>
   </div>
 </div>
@@ -2099,12 +2365,21 @@
         if (locked) locked.hidden = false;
       } else {
         // Sub-tab switcher wiring + lazy-load van templates op switch.
-        const subs = ['overzicht','probleemklanten','workflows','templates','geschiedenis'];
+        // Map sub-key -> container-id (afwijkende ids worden hier expliciet vermeld).
+        const SUB_IDS = {
+          overzicht:        'dunningSubOverzicht',
+          probleemklanten:  'dunningSubProbleemklanten',
+          workflows:        'dunningSubWorkflows',
+          templates:        'dunningSubTemplates',
+          geschiedenis:     'dunningSubGeschiedenis',
+          arrangements:     'view-arrangements',
+        };
+        const subs = Object.keys(SUB_IDS);
         document.querySelectorAll('#dunningSubNav .sr-seg').forEach(b => b.addEventListener('click', () => {
           const target = b.dataset.dunningSub;
           document.querySelectorAll('#dunningSubNav .sr-seg').forEach(x => x.classList.toggle('active', x === b));
           for (const s of subs) {
-            const el = document.getElementById('dunningSub' + s.charAt(0).toUpperCase() + s.slice(1));
+            const el = document.getElementById(SUB_IDS[s]);
             if (el) el.hidden = (s !== target);
           }
           if (target === 'overzicht' && !_dunOvLoadedOnce) {
@@ -2129,6 +2404,12 @@
             _dunHistLoadedOnce = true;
             wireDunHistory();
             loadDunHistory({ reset: true });
+          }
+          if (target === 'arrangements' && !_arrangLoadedOnce) {
+            _arrangLoadedOnce = true;
+            wireArrangOnce();
+            wireArrangProposeOnce();
+            loadArrangements();
           }
         }));
         // Wire de modal-knoppen (één keer).
@@ -2927,6 +3208,9 @@
       const viewBtn = p.customer_id
         ? `<a href="/modules/klanten.html?id=${esc(p.customer_id)}&tab=facturen" class="sr-abtn" style="font-size:11px;padding:4px 8px;text-decoration:none"><i class="ti ti-eye"></i> Bekijk</a>`
         : '—';
+      const proposeBtn = p.customer_id
+        ? `<button class="sr-abtn primary" data-arrang-propose-customer="${esc(p.customer_id)}" type="button" style="font-size:11px;padding:4px 8px;margin-left:4px"><i class="ti ti-calendar-plus"></i> Stel afspraak voor</button>`
+        : '';
       return `<tr>
         <td>${customerCell}${emailLine}</td>
         <td style="text-align:center">${esc(p.open_invoice_count)}</td>
@@ -2934,9 +3218,19 @@
         <td>${oldestDue}</td>
         <td>${daysCell}</td>
         <td>${wfBadge}</td>
-        <td>${viewBtn}</td>
+        <td>${viewBtn}${proposeBtn}</td>
       </tr>`;
     }).join('');
+
+    // Delegated click voor "Stel afspraak voor" button.
+    tb.querySelectorAll('[data-arrang-propose-customer]').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const cid = btn.getAttribute('data-arrang-propose-customer');
+        const name = btn.closest('tr')?.querySelector('a, span')?.textContent?.trim() || '';
+        if (cid) openArrangPropose({ customer_id: cid, customer_name: name });
+      });
+    });
   }
 
   // ─── Dunning Geschiedenis sub-tab (PR B5) ──────────────────────────────────
@@ -3266,6 +3560,910 @@
     } catch (e) {
       console.error('[dunRunDetails action]', e);
       window.AgentShared.showToast(`${label} mislukt: ${e.message}`, 'error');
+    }
+  }
+
+  // ─── Afspraken / Payment Arrangements sub-tab (D1) ─────────────────────────
+  let _arrangLoadedOnce  = false;
+  let _arrangWired       = false;
+  let _arrangActiveStatus = 'VOORGESTELD';
+  let _arrangItems        = [];
+
+  function wireArrangOnce() {
+    if (_arrangWired) return;
+    _arrangWired = true;
+
+    // Status-pills wiring.
+    document.querySelectorAll('#arrangStatusNav .sr-seg').forEach(b => {
+      b.addEventListener('click', () => {
+        const s = b.dataset.arrangStatus;
+        if (!s || s === _arrangActiveStatus) return;
+        switchArrangStatus(s);
+      });
+    });
+
+    // Refresh-knop.
+    document.getElementById('arrangRefreshBtn')?.addEventListener('click', () => loadArrangements());
+
+    // Tbody delegation: row-click -> detail (excludeer link/button), data-arrang-cancel knop -> cancel.
+    const tb = document.getElementById('arrangementsTbody');
+    if (tb) {
+      tb.addEventListener('click', (e) => {
+        const cancelBtn = e.target.closest('[data-arrang-cancel]');
+        if (cancelBtn) {
+          e.stopPropagation();
+          const id = cancelBtn.getAttribute('data-arrang-cancel');
+          if (id) cancelArrang(id);
+          return;
+        }
+        const detailBtn = e.target.closest('[data-arrang-detail]');
+        if (detailBtn) {
+          e.stopPropagation();
+          const id = detailBtn.getAttribute('data-arrang-detail');
+          if (id) openArrangDetail(id);
+          return;
+        }
+        // Row-click voor details (skip als op a/button).
+        if (e.target.closest('a, button')) return;
+        const tr = e.target.closest('tr[data-arrang-id]');
+        if (tr) {
+          const id = tr.getAttribute('data-arrang-id');
+          if (id) openArrangDetail(id);
+        }
+      });
+    }
+
+    // Modal close-handlers.
+    const modal = document.getElementById('arrangementDetailModal');
+    document.getElementById('arrangDetailClose')?.addEventListener('click', closeArrangDetail);
+    document.getElementById('arrangDetailCloseBtn')?.addEventListener('click', closeArrangDetail);
+    modal?.addEventListener('click', (e) => {
+      if (e.target.id === 'arrangementDetailModal') closeArrangDetail();
+    });
+  }
+
+  function switchArrangStatus(s) {
+    _arrangActiveStatus = s;
+    document.querySelectorAll('#arrangStatusNav .sr-seg').forEach(b => {
+      b.classList.toggle('active', b.dataset.arrangStatus === s);
+    });
+    loadArrangements();
+  }
+
+  function arrangStatusBadge(status) {
+    const map = {
+      VOORGESTELD:  '<span class="sr-tag" style="background:rgba(56,189,248,.15);color:#38bdf8">Voorgesteld</span>',
+      ACTIEF:       '<span class="sr-tag green">Actief</span>',
+      NAGEKOMEN:    '<span class="sr-tag gray">Nagekomen</span>',
+      VERBROKEN:    '<span class="sr-tag" style="background:rgba(239,68,68,.15);color:#ef4444">Verbroken</span>',
+      GEANNULEERD:  '<span class="sr-tag gray">Geannuleerd</span>',
+    };
+    return map[status] || `<span class="sr-tag gray">${esc(status || '—')}</span>`;
+  }
+
+  function arrangTypeLabel(t) {
+    const map = {
+      UITSTEL:          'Uitstel',
+      SPLITSING:        'Splitsing',
+      ABONNEMENT_PAUZE: 'Abonnement pauze',
+      ABONNEMENT_STOP:  'Abonnement stop',
+      KWIJTSCHELDING:   'Kwijtschelding',
+    };
+    return map[t] || (t || '—');
+  }
+
+  // Bepaal effective_from / effective_until uit details voor display.
+  function arrangEffective(item) {
+    const d = item.details || {};
+    let from = null, until = null;
+    if (item.type === 'ABONNEMENT_PAUZE') {
+      from = d.pause_from || null;
+      until = d.pause_until || null;
+    } else if (item.type === 'ABONNEMENT_STOP') {
+      from = d.stop_date || (item.created_at ? String(item.created_at).slice(0, 10) : null);
+      until = d.stop_date || null;
+    } else if (item.type === 'UITSTEL') {
+      from = item.created_at ? String(item.created_at).slice(0, 10) : null;
+      until = d.new_due_date || null;
+    } else if (item.type === 'SPLITSING' && Array.isArray(d.parts) && d.parts.length) {
+      from = d.parts[0]?.due_date || null;
+      until = d.parts[d.parts.length - 1]?.due_date || null;
+    } else {
+      from = item.created_at ? String(item.created_at).slice(0, 10) : null;
+    }
+    return { from, until };
+  }
+
+  async function loadArrangements() {
+    const tb = document.getElementById('arrangementsTbody');
+    if (!tb) return;
+    tb.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:24px;color:var(--text-faint)">Laden…</td></tr>';
+    const params = new URLSearchParams();
+    params.set('status', _arrangActiveStatus);
+    params.set('limit', '100');
+    try {
+      const r = await window.AgentShared.apiFetch('/api/arrangements-list?' + params.toString());
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        tb.innerHTML = `<tr><td colspan="6" style="text-align:center;padding:24px;color:#ef4444">Fout: ${esc(d.error || ('HTTP ' + r.status))}</td></tr>`;
+        return;
+      }
+      _arrangItems = d.items || [];
+      renderArrangRows(_arrangItems);
+    } catch (e) {
+      console.error('[arrangements-list]', e);
+      tb.innerHTML = `<tr><td colspan="6" style="text-align:center;padding:24px;color:#ef4444">Fout: ${esc(e.message)}</td></tr>`;
+    }
+  }
+
+  function renderArrangRows(items) {
+    const tb = document.getElementById('arrangementsTbody');
+    if (!tb) return;
+    if (!items.length) {
+      tb.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:24px;color:var(--text-faint)">Geen afspraken in deze status.</td></tr>';
+      return;
+    }
+    tb.innerHTML = items.map(it => {
+      const custName = it.customer?.name || '—';
+      const custCell = it.customer_id
+        ? `<a href="/modules/klanten.html?id=${esc(it.customer_id)}&tab=facturen" style="color:var(--accent-cyan);text-decoration:none;font-weight:600">${esc(custName)}</a>`
+        : `<span style="font-weight:600">${esc(custName)}</span>`;
+      const emailLine = it.customer?.email
+        ? `<div style="font-size:11px;color:var(--text-faint);margin-top:2px">${esc(it.customer.email)}</div>`
+        : '';
+      const typeBadge = `<span class="sr-tag" style="background:rgba(255,255,255,0.05);color:var(--text-dim)">${esc(arrangTypeLabel(it.type))}</span>`;
+      const invoiceCount = Array.isArray(it.invoice_ids) ? it.invoice_ids.length : 0;
+      const eff = arrangEffective(it);
+      const effCell = (eff.from || eff.until)
+        ? `${esc(fmtDateNl(eff.from))} <span style="color:var(--text-faint)">→</span> ${esc(fmtDateNl(eff.until))}`
+        : '<span style="color:var(--text-faint)">—</span>';
+      const statusBadge = arrangStatusBadge(it.status);
+      const canCancel = it.status === 'VOORGESTELD' || it.status === 'ACTIEF';
+      const cancelBtn = canCancel
+        ? `<button class="sr-abtn danger" data-arrang-cancel="${esc(it.id)}" type="button" style="font-size:11px;padding:4px 8px"><i class="ti ti-x"></i> Annuleer</button>`
+        : '';
+      return `<tr data-arrang-id="${esc(it.id)}" class="clickable-row" style="cursor:pointer">
+        <td>${custCell}${emailLine}</td>
+        <td>${typeBadge}</td>
+        <td style="text-align:center">${invoiceCount}</td>
+        <td style="font-size:11.5px">${effCell}</td>
+        <td>${statusBadge}</td>
+        <td>
+          <button class="sr-abtn" data-arrang-detail="${esc(it.id)}" type="button" style="font-size:11px;padding:4px 8px"><i class="ti ti-eye"></i> Details</button>
+          ${cancelBtn}
+        </td>
+      </tr>`;
+    }).join('');
+  }
+
+  async function openArrangDetail(id) {
+    if (!id) return;
+    wireArrangOnce();
+    const modal = document.getElementById('arrangementDetailModal');
+    const titleEl   = document.getElementById('arrangDetailTitle');
+    const subEl     = document.getElementById('arrangDetailSubtitle');
+    const sec1El    = document.getElementById('arrangDetailSection1');
+    const actTb     = document.getElementById('arrangDetailActionsTbody');
+    const errEl     = document.getElementById('arrangDetailError');
+    if (titleEl) titleEl.textContent = 'Afspraak details';
+    if (subEl)   subEl.textContent = 'Laden…';
+    if (sec1El)  sec1El.innerHTML = '<div style="font-size:11.5px;color:var(--text-faint);text-align:center;padding:14px">Laden…</div>';
+    if (actTb)   actTb.innerHTML = '<tr><td colspan="4" style="text-align:center;padding:14px;color:var(--text-faint);font-size:11.5px">Laden…</td></tr>';
+    if (errEl)   { errEl.style.display = 'none'; errEl.textContent = ''; }
+    if (modal)   modal.classList.remove('hidden');
+
+    try {
+      const r = await window.AgentShared.apiFetch('/api/arrangements-detail?id=' + encodeURIComponent(id));
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        if (errEl) { errEl.style.display = 'block'; errEl.textContent = d.error || ('HTTP ' + r.status); }
+        if (subEl) subEl.textContent = 'ID: ' + id;
+        return;
+      }
+      const arr = d.arrangement || {};
+      const cust = d.customer || null;
+      if (titleEl) titleEl.textContent = `${arrangTypeLabel(arr.type)} — ${cust?.name || '(onbekend)'}`;
+      if (subEl)   subEl.textContent = 'ID: ' + (arr.id || id);
+
+      // Sectie 1: arrangement
+      const eff = arrangEffective(arr);
+      const detailsJson = JSON.stringify(arr.details || {}, null, 2);
+      const baseRows = [
+        ['Type',             esc(arrangTypeLabel(arr.type))],
+        ['Status',           arrangStatusBadge(arr.status)],
+        ['Voorgesteld op',   esc(arr.created_at ? fmtDateNl(String(arr.created_at).slice(0, 10)) : '—')],
+        ['Goedgekeurd op',   esc(arr.approved_at ? fmtDateNl(String(arr.approved_at).slice(0, 10)) : '—')],
+        ['Effectief vanaf',  esc(eff.from ? fmtDateNl(eff.from) : '—')],
+        ['Effectief tot',    esc(eff.until ? fmtDateNl(eff.until) : '—')],
+        ['Reden / notitie',  esc(arr.notes || '—')],
+      ];
+      // Toon Annuleringsreden als arrangement geannuleerd is en reden bestaat.
+      if (String(arr.status || '').toUpperCase() === 'GEANNULEERD' && arr.cancellation_reason) {
+        baseRows.push(['Annuleringsreden', esc(arr.cancellation_reason)]);
+      }
+      const rowsHtml = baseRows.map(([k, v]) =>
+        `<div style="display:grid;grid-template-columns:160px 1fr;gap:10px;padding:6px 10px;background:rgba(255,255,255,0.02);border:1px solid var(--border-subtle, #2b2f3a);border-radius:6px">
+           <div style="font-size:11.5px;color:var(--text-faint)">${k}</div>
+           <div style="font-size:12.5px">${v}</div>
+         </div>`
+      ).join('');
+      const detailsBlock = `<div style="margin-top:8px">
+        <div style="font-size:11.5px;color:var(--text-faint);margin-bottom:4px">Details (JSON)</div>
+        <pre style="margin:0;padding:8px 10px;background:rgba(0,0,0,0.25);border:1px solid var(--border-subtle, #2b2f3a);border-radius:6px;font-size:11px;color:var(--text-dim);overflow:auto;max-height:160px">${esc(detailsJson)}</pre>
+      </div>`;
+      if (sec1El) sec1El.innerHTML = rowsHtml + detailsBlock;
+
+      // Sectie 2: pending actions
+      const actions = d.pending_actions || [];
+      if (!actions.length) {
+        if (actTb) actTb.innerHTML = '<tr><td colspan="4" style="text-align:center;padding:14px;color:var(--text-faint);font-size:11.5px">Geen pending actions.</td></tr>';
+      } else if (actTb) {
+        actTb.innerHTML = actions.map(a => {
+          // pending_actions.status is UPPERCASE in deployed DB (spec-conform).
+          // Vergelijk hoofdletter-insensitief voor robuustheid mocht een
+          // legacy-row toch lowercase bevatten.
+          const st = String(a.status || '').toUpperCase();
+          const statusBadge = st === 'APPROVED'  ? '<span class="sr-tag green">approved</span>'
+                            : st === 'REJECTED'  ? '<span class="sr-tag" style="background:rgba(239,68,68,.15);color:#ef4444">rejected</span>'
+                            : st === 'EXECUTED'  ? '<span class="sr-tag green">executed</span>'
+                            : st === 'FAILED'    ? '<span class="sr-tag" style="background:rgba(239,68,68,.15);color:#ef4444">failed</span>'
+                            : st === 'CANCELLED' ? '<span class="sr-tag gray">cancelled</span>'
+                            : '<span class="sr-tag" style="background:rgba(56,189,248,.15);color:#38bdf8">pending</span>';
+          const proposed = a.created_at ? fmtDateNl(String(a.created_at).slice(0, 10)) : '—';
+          let approvedInfo = '—';
+          if (a.approved_at) approvedInfo = 'approved ' + fmtDateNl(String(a.approved_at).slice(0, 10));
+          else if (a.reject_reason) approvedInfo = 'rejected: ' + esc(a.reject_reason);
+          return `<tr>
+            <td style="font-family:monospace;font-size:11.5px">${esc(a.action_type)}</td>
+            <td>${statusBadge}</td>
+            <td style="font-size:11.5px">${esc(proposed)}</td>
+            <td style="font-size:11.5px">${approvedInfo}</td>
+          </tr>`;
+        }).join('');
+      }
+    } catch (e) {
+      console.error('[arrangements-detail]', e);
+      if (errEl) { errEl.style.display = 'block'; errEl.textContent = e.message; }
+    }
+  }
+
+  function closeArrangDetail() {
+    document.getElementById('arrangementDetailModal')?.classList.add('hidden');
+  }
+
+  async function cancelArrang(id) {
+    if (!id) return;
+    const reason = prompt('Reden voor annuleren (optioneel):', '');
+    if (reason === null) return;  // user clicked cancel
+    if (!confirm('Afspraak annuleren? Dit kan niet ongedaan worden gemaakt.')) return;
+    try {
+      const r = await window.AgentShared.apiFetch('/api/arrangements-cancel', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id, cancellation_reason: reason || null }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        window.AgentShared.showToast('Annuleren mislukt: ' + (d.error || ('HTTP ' + r.status)), 'error');
+        return;
+      }
+      window.AgentShared.showToast('Afspraak geannuleerd', 'success');
+      loadArrangements();
+    } catch (e) {
+      console.error('[arrangements-cancel]', e);
+      window.AgentShared.showToast('Annuleren mislukt: ' + e.message, 'error');
+    }
+  }
+
+  // ─── Afspraken Wizard (D1) ───────────────────────────────────────────────
+  let _arrangWizStep = 1;
+  let _arrangWizWired = false;
+  let _arrangWizCustomerSearchTimer = null;
+  const _arrangWiz = {
+    type: '',
+    customer_id: null,
+    customer_name: '',
+    invoice_ids: [],
+    invoices_full: [],        // facturen-details (id, invoice_number, amount_open, due_date)
+    subscription_id: null,
+    subscription_label: '',
+    details: {},
+  };
+
+  function wireArrangProposeOnce() {
+    if (_arrangWizWired) return;
+    _arrangWizWired = true;
+
+    document.getElementById('arrangProposeBtn')?.addEventListener('click', () => openArrangPropose());
+    document.getElementById('arrangWizClose')?.addEventListener('click', closeArrangPropose);
+    document.getElementById('arrangWizCancelBtn')?.addEventListener('click', closeArrangPropose);
+    document.getElementById('arrangWizPrevBtn')?.addEventListener('click', arrangWizPrev);
+    document.getElementById('arrangWizNextBtn')?.addEventListener('click', arrangWizNext);
+    document.getElementById('arrangWizConfirmBtn')?.addEventListener('click', arrangWizConfirm);
+
+    document.getElementById('arrangProposeModal')?.addEventListener('click', (e) => {
+      if (e.target.id === 'arrangProposeModal') closeArrangPropose();
+    });
+
+    // Type-change -> reset facturen + sub als modus wisselt.
+    document.getElementById('arrangWizType')?.addEventListener('change', (e) => {
+      _arrangWiz.type = e.target.value || '';
+      _arrangWiz.invoice_ids = [];
+      _arrangWiz.subscription_id = null;
+      _arrangWiz.subscription_label = '';
+      _arrangWiz.details = {};
+    });
+
+    // Customer search debounce.
+    const cs = document.getElementById('arrangWizCustomerSearch');
+    cs?.addEventListener('input', () => {
+      clearTimeout(_arrangWizCustomerSearchTimer);
+      _arrangWizCustomerSearchTimer = setTimeout(() => arrangWizCustomerSearch(cs.value), 250);
+    });
+    document.getElementById('arrangWizCustomerClear')?.addEventListener('click', () => {
+      _arrangWiz.customer_id = null;
+      _arrangWiz.customer_name = '';
+      document.getElementById('arrangWizCustomerSelected').style.display = 'none';
+      document.getElementById('arrangWizCustomerSearch').value = '';
+      document.getElementById('arrangWizCustomerSearch').focus();
+    });
+
+    // Splitsing: regen knop + count-change.
+    document.getElementById('arrangWizSplitRegen')?.addEventListener('click', () => arrangWizRegenSplitParts());
+    document.getElementById('arrangWizSplitCount')?.addEventListener('change', () => arrangWizRegenSplitParts());
+
+    // Rationale: char counter.
+    document.getElementById('arrangWizRationale')?.addEventListener('input', (e) => {
+      const len = (e.target.value || '').trim().length;
+      const el = document.getElementById('arrangWizRationaleLen');
+      if (el) el.textContent = String(len);
+    });
+  }
+
+  function openArrangPropose(opts = {}) {
+    wireArrangProposeOnce();
+    // Reset state.
+    _arrangWizStep = 1;
+    _arrangWiz.type = '';
+    _arrangWiz.customer_id = opts.customer_id || null;
+    _arrangWiz.customer_name = opts.customer_name || '';
+    _arrangWiz.invoice_ids = [];
+    _arrangWiz.invoices_full = [];
+    _arrangWiz.subscription_id = null;
+    _arrangWiz.subscription_label = '';
+    _arrangWiz.details = {};
+
+    document.getElementById('arrangWizType').value = '';
+    document.getElementById('arrangWizCustomerSearch').value = '';
+    document.getElementById('arrangWizCustomerResults').style.display = 'none';
+    document.getElementById('arrangWizCustomerResults').innerHTML = '';
+    document.getElementById('arrangWizRationale').value = '';
+    document.getElementById('arrangWizRationaleLen').textContent = '0';
+    document.getElementById('arrangWizError').style.display = 'none';
+    document.getElementById('arrangWizError').textContent = '';
+
+    // Toon pre-selected klant indien meegegeven.
+    const selWrap = document.getElementById('arrangWizCustomerSelected');
+    if (opts.customer_id) {
+      document.getElementById('arrangWizCustomerSelectedName').textContent = opts.customer_name || opts.customer_id;
+      selWrap.style.display = 'block';
+    } else {
+      selWrap.style.display = 'none';
+    }
+
+    arrangWizRenderStep();
+    document.getElementById('arrangProposeModal').classList.remove('hidden');
+  }
+
+  function closeArrangPropose() {
+    document.getElementById('arrangProposeModal')?.classList.add('hidden');
+  }
+
+  function arrangWizRenderStep() {
+    // Toggle stap-panels.
+    for (let i = 1; i <= 5; i++) {
+      const el = document.getElementById('arrangWizStep' + i);
+      if (el) el.hidden = (i !== _arrangWizStep);
+    }
+    // Stepper-dots.
+    document.querySelectorAll('.arrang-wiz-dot').forEach(d => {
+      const n = Number(d.dataset.step || 0);
+      d.style.background = (n <= _arrangWizStep) ? 'var(--accent-cyan)' : 'rgba(255,255,255,.08)';
+    });
+    // Subtitle.
+    const titles = {
+      1: 'Stap 1 van 5: Type + klant',
+      2: 'Stap 2 van 5: Facturen / abonnement',
+      3: 'Stap 3 van 5: Details',
+      4: 'Stap 4 van 5: Toelichting',
+      5: 'Stap 5 van 5: Preview en bevestigen',
+    };
+    document.getElementById('arrangWizSubtitle').textContent = titles[_arrangWizStep] || '';
+    // Footer buttons.
+    document.getElementById('arrangWizPrevBtn').disabled = (_arrangWizStep === 1);
+    document.getElementById('arrangWizNextBtn').hidden  = (_arrangWizStep === 5);
+    document.getElementById('arrangWizConfirmBtn').hidden = (_arrangWizStep !== 5);
+
+    // Stap-specifieke initialisatie bij entry.
+    if (_arrangWizStep === 2) arrangWizInitStep2();
+    if (_arrangWizStep === 3) arrangWizInitStep3();
+    if (_arrangWizStep === 5) arrangWizRenderPreview();
+  }
+
+  function arrangWizClearError() {
+    const el = document.getElementById('arrangWizError');
+    if (el) { el.style.display = 'none'; el.textContent = ''; }
+  }
+  function arrangWizSetError(msg) {
+    const el = document.getElementById('arrangWizError');
+    if (el) { el.style.display = 'block'; el.textContent = msg || 'Onbekende fout.'; }
+  }
+
+  function arrangWizValidateStep() {
+    arrangWizClearError();
+    if (_arrangWizStep === 1) {
+      if (!_arrangWiz.type)        { arrangWizSetError('Kies een type afspraak.'); return false; }
+      if (!_arrangWiz.customer_id) { arrangWizSetError('Selecteer een klant.'); return false; }
+      return true;
+    }
+    if (_arrangWizStep === 2) {
+      const subMode = (_arrangWiz.type === 'ABONNEMENT_PAUZE' || _arrangWiz.type === 'ABONNEMENT_STOP');
+      if (subMode) {
+        if (!_arrangWiz.subscription_id) { arrangWizSetError('Selecteer een abonnement.'); return false; }
+      } else {
+        if (!_arrangWiz.invoice_ids.length) { arrangWizSetError('Selecteer minimaal één factuur.'); return false; }
+      }
+      return true;
+    }
+    if (_arrangWizStep === 3) {
+      const d = _arrangWiz.details;
+      if (_arrangWiz.type === 'UITSTEL') {
+        const dateEl = document.getElementById('arrangWizUitstelDate');
+        if (!dateEl?.value) { arrangWizSetError('Kies een nieuwe vervaldatum.'); return false; }
+        d.new_due_date = dateEl.value;
+      } else if (_arrangWiz.type === 'SPLITSING') {
+        const parts = arrangWizCollectParts();
+        if (parts.length < 2) { arrangWizSetError('Minimaal 2 termijnen vereist.'); return false; }
+        const sumParts = parts.reduce((a, p) => a + p.amount, 0);
+        const sumInv   = arrangWizSelectedInvoicesTotal();
+        if (Math.abs(sumParts - sumInv) > 0.01) {
+          arrangWizSetError(`Som van termijnen (€${sumParts.toFixed(2)}) moet gelijk zijn aan factuur-totaal (€${sumInv.toFixed(2)}).`);
+          return false;
+        }
+        for (const p of parts) {
+          if (!(p.amount > 0))       { arrangWizSetError('Elk termijn-bedrag moet > 0.'); return false; }
+          if (!/^\d{4}-\d{2}-\d{2}$/.test(p.due_date)) { arrangWizSetError('Elke termijn heeft een vervaldatum nodig.'); return false; }
+        }
+        d.parts = parts;
+      } else if (_arrangWiz.type === 'ABONNEMENT_PAUZE') {
+        const from  = document.getElementById('arrangWizPauseFrom').value;
+        const until = document.getElementById('arrangWizPauseUntil').value;
+        const reason = document.getElementById('arrangWizPauseReason').value.trim();
+        if (!from)  { arrangWizSetError('Kies "Pauze vanaf".'); return false; }
+        if (!until) { arrangWizSetError('Kies "Pauze tot".'); return false; }
+        if (until < from) { arrangWizSetError('"Pauze tot" moet na "Pauze vanaf" liggen.'); return false; }
+        if (!reason) { arrangWizSetError('Geef een reden op.'); return false; }
+        d.subscription_id = _arrangWiz.subscription_id;
+        d.pause_from = from;
+        d.pause_until = until;
+        d.reason = reason;
+      } else if (_arrangWiz.type === 'ABONNEMENT_STOP') {
+        const stopDate = document.getElementById('arrangWizStopDate').value;
+        const reason   = document.getElementById('arrangWizStopReason').value.trim();
+        if (!stopDate) { arrangWizSetError('Kies een stop-datum.'); return false; }
+        if (!reason)   { arrangWizSetError('Geef een reden op.'); return false; }
+        d.subscription_id = _arrangWiz.subscription_id;
+        d.stop_date = stopDate;
+        d.reason = reason;
+      } else if (_arrangWiz.type === 'KWIJTSCHELDING') {
+        const amount = Number(document.getElementById('arrangWizWriteOffAmount').value);
+        const reason = document.getElementById('arrangWizWriteOffReason').value.trim();
+        if (!(amount > 0)) { arrangWizSetError('Bedrag moet > 0 zijn.'); return false; }
+        if (!reason)       { arrangWizSetError('Geef een reden op.'); return false; }
+        d.write_off_amount = amount;
+        d.reason = reason;
+      }
+      return true;
+    }
+    if (_arrangWizStep === 4) {
+      const txt = document.getElementById('arrangWizRationale').value.trim();
+      if (txt.length < 10) { arrangWizSetError('Toelichting moet minimaal 10 tekens bevatten.'); return false; }
+      _arrangWiz.rationale = txt;
+      return true;
+    }
+    return true;
+  }
+
+  function arrangWizNext() {
+    if (!arrangWizValidateStep()) return;
+    if (_arrangWizStep < 5) {
+      _arrangWizStep += 1;
+      arrangWizRenderStep();
+    }
+  }
+  function arrangWizPrev() {
+    if (_arrangWizStep > 1) {
+      _arrangWizStep -= 1;
+      arrangWizRenderStep();
+    }
+  }
+
+  // ── Customer search (Stap 1) ─────────────────────────────────────────────
+  async function arrangWizCustomerSearch(q) {
+    const wrap = document.getElementById('arrangWizCustomerResults');
+    if (!wrap) return;
+    const term = (q || '').trim();
+    if (term.length < 2) {
+      wrap.style.display = 'none';
+      wrap.innerHTML = '';
+      return;
+    }
+    wrap.style.display = 'block';
+    wrap.innerHTML = '<div style="padding:10px;font-size:11.5px;color:var(--text-faint)">Zoeken…</div>';
+    try {
+      const params = new URLSearchParams({ search: term, page_size: '15' });
+      const r = await window.AgentShared.apiFetch('/api/customers?' + params.toString());
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        wrap.innerHTML = `<div style="padding:10px;font-size:11.5px;color:#ef4444">Fout: ${esc(d.error || ('HTTP ' + r.status))}</div>`;
+        return;
+      }
+      const list = d.customers || [];
+      if (!list.length) {
+        wrap.innerHTML = '<div style="padding:10px;font-size:11.5px;color:var(--text-faint)">Geen klanten gevonden.</div>';
+        return;
+      }
+      wrap.innerHTML = list.map(c => {
+        const name = arrangCustomerDisplay(c);
+        const sub = [c.email || '', c.phone || ''].filter(Boolean).join(' · ');
+        return `<div class="arrang-cust-row" data-cid="${esc(c.id)}" data-cname="${esc(name)}" style="padding:8px 12px;cursor:pointer;border-bottom:1px solid var(--border-subtle, #2b2f3a);font-size:12.5px">
+          <div style="font-weight:600">${esc(name)}</div>
+          ${sub ? `<div style="font-size:11px;color:var(--text-faint);margin-top:2px">${esc(sub)}</div>` : ''}
+        </div>`;
+      }).join('');
+      wrap.querySelectorAll('.arrang-cust-row').forEach(row => {
+        row.addEventListener('mouseenter', () => row.style.background = 'rgba(56,189,248,.08)');
+        row.addEventListener('mouseleave', () => row.style.background = '');
+        row.addEventListener('click', () => {
+          _arrangWiz.customer_id = row.getAttribute('data-cid');
+          _arrangWiz.customer_name = row.getAttribute('data-cname');
+          document.getElementById('arrangWizCustomerSelectedName').textContent = _arrangWiz.customer_name;
+          document.getElementById('arrangWizCustomerSelected').style.display = 'block';
+          wrap.style.display = 'none';
+          wrap.innerHTML = '';
+          document.getElementById('arrangWizCustomerSearch').value = '';
+        });
+      });
+    } catch (e) {
+      wrap.innerHTML = `<div style="padding:10px;font-size:11.5px;color:#ef4444">Fout: ${esc(e.message)}</div>`;
+    }
+  }
+
+  function arrangCustomerDisplay(c) {
+    if (!c) return '—';
+    if (c.is_company && c.company_name) return c.company_name;
+    const fn = (c.first_name || '').trim();
+    const ln = (c.last_name || '').trim();
+    if (fn || ln) return [fn, ln].filter(Boolean).join(' ');
+    return c.email || c.id || '—';
+  }
+
+  // ── Stap 2: facturen / abonnement ────────────────────────────────────────
+  async function arrangWizInitStep2() {
+    const subMode = (_arrangWiz.type === 'ABONNEMENT_PAUZE' || _arrangWiz.type === 'ABONNEMENT_STOP');
+    document.getElementById('arrangWizInvoiceMode').hidden = subMode;
+    document.getElementById('arrangWizSubMode').hidden = !subMode;
+    if (subMode) {
+      await arrangWizLoadSubscriptions();
+    } else {
+      await arrangWizLoadInvoices();
+    }
+  }
+
+  async function arrangWizLoadInvoices() {
+    const wrap = document.getElementById('arrangWizInvoiceList');
+    if (!wrap || !_arrangWiz.customer_id) return;
+    wrap.innerHTML = '<div style="font-size:11.5px;color:var(--text-faint);text-align:center;padding:20px">Laden…</div>';
+    try {
+      // /api/finance-invoices?status= verwacht een ENKELE waarde (open|paid|...);
+      // een comma-separated lijst doet exact-match en levert 0 rijen. We laten
+      // de status-param weg en filteren client-side hieronder voor open +
+      // partially_paid. Invoice-status blijft lowercase in DB (los van het
+      // UPPERCASE arrangement-laag); dat is bewust en hier consistent.
+      const params = new URLSearchParams({ customer_id: _arrangWiz.customer_id, page_size: '200' });
+      const r = await window.AgentShared.apiFetch('/api/finance-invoices?' + params.toString());
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        wrap.innerHTML = `<div style="font-size:11.5px;color:#ef4444;padding:14px">Fout: ${esc(d.error || ('HTTP ' + r.status))}</div>`;
+        return;
+      }
+      const all = d.invoices || d.items || [];
+      // Filter: alleen open + partially_paid (DB-statuswaarden zijn lowercase).
+      // 'overdue' is een afgeleide weergave-status (open + voorbij due_date),
+      // niet een DB-waarde — display_status='overdue' wordt opgenomen omdat
+      // de onderliggende row dan status='open' heeft.
+      const open = all.filter(i => {
+        const s = String(i.status || '').toLowerCase();
+        if (!(s === 'open' || s === 'partially_paid')) return false;
+        const total = Number(i.amount_total) || 0;
+        const credited = Number(i.credited_amount) || 0;
+        return credited < total;
+      });
+      _arrangWiz.invoices_full = open;
+      if (!open.length) {
+        wrap.innerHTML = '<div style="font-size:11.5px;color:var(--text-faint);text-align:center;padding:20px">Geen openstaande facturen.</div>';
+        arrangWizUpdateInvoiceTotals();
+        return;
+      }
+      wrap.innerHTML = open.map(inv => {
+        const num = inv.invoice_number || inv.id.slice(0, 8);
+        const total = Number(inv.amount_total) || 0;
+        const paid  = Number(inv.amount_paid) || 0;
+        const credited = Number(inv.credited_amount) || 0;
+        const open = total - paid - credited;
+        const checked = _arrangWiz.invoice_ids.includes(inv.id) ? 'checked' : '';
+        return `<label style="display:grid;grid-template-columns:24px 1fr 120px 110px;gap:8px;align-items:center;padding:6px 8px;border-bottom:1px solid rgba(255,255,255,.04);cursor:pointer;font-size:12.5px">
+          <input type="checkbox" data-arrang-inv="${esc(inv.id)}" ${checked} style="width:auto"/>
+          <div>
+            <div style="font-weight:600">${esc(num)}</div>
+            <div style="font-size:11px;color:var(--text-faint)">Verval: ${esc(fmtDateNl(inv.due_date))}</div>
+          </div>
+          <div style="text-align:right;font-variant-numeric:tabular-nums">Totaal: €${total.toFixed(2)}</div>
+          <div style="text-align:right;font-variant-numeric:tabular-nums;font-weight:600">Open: €${open.toFixed(2)}</div>
+        </label>`;
+      }).join('');
+      wrap.querySelectorAll('[data-arrang-inv]').forEach(cb => {
+        cb.addEventListener('change', () => {
+          const id = cb.getAttribute('data-arrang-inv');
+          if (cb.checked) {
+            if (!_arrangWiz.invoice_ids.includes(id)) _arrangWiz.invoice_ids.push(id);
+          } else {
+            _arrangWiz.invoice_ids = _arrangWiz.invoice_ids.filter(x => x !== id);
+          }
+          arrangWizUpdateInvoiceTotals();
+        });
+      });
+      arrangWizUpdateInvoiceTotals();
+    } catch (e) {
+      wrap.innerHTML = `<div style="font-size:11.5px;color:#ef4444;padding:14px">Fout: ${esc(e.message)}</div>`;
+    }
+  }
+
+  function arrangWizUpdateInvoiceTotals() {
+    const cnt = _arrangWiz.invoice_ids.length;
+    document.getElementById('arrangWizInvoiceCount').textContent = String(cnt);
+    const total = arrangWizSelectedInvoicesTotal();
+    document.getElementById('arrangWizInvoiceTotal').textContent = '€' + total.toFixed(2);
+  }
+
+  function arrangWizSelectedInvoicesTotal() {
+    const map = new Map(_arrangWiz.invoices_full.map(i => [i.id, i]));
+    return _arrangWiz.invoice_ids.reduce((sum, id) => {
+      const inv = map.get(id);
+      return sum + (inv ? Number(inv.amount_total) || 0 : 0);
+    }, 0);
+  }
+
+  async function arrangWizLoadSubscriptions() {
+    const wrap = document.getElementById('arrangWizSubList');
+    if (!wrap || !_arrangWiz.customer_id) return;
+    wrap.innerHTML = '<div style="font-size:11.5px;color:var(--text-faint);text-align:center;padding:20px">Laden…</div>';
+    try {
+      const r = await window.AgentShared.apiFetch('/api/sales-customer-subscriptions?customer_id=' + encodeURIComponent(_arrangWiz.customer_id));
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        wrap.innerHTML = `<div style="font-size:11.5px;color:#ef4444;padding:14px">Fout: ${esc(d.error || ('HTTP ' + r.status))}</div>`;
+        return;
+      }
+      const subs = (d.subscriptions || []).filter(s => String(s.status || '').toLowerCase() !== 'cancelled');
+      if (!subs.length) {
+        wrap.innerHTML = '<div style="font-size:11.5px;color:var(--text-faint);text-align:center;padding:20px">Geen actieve abonnementen voor deze klant.</div>';
+        return;
+      }
+      wrap.innerHTML = subs.map(s => {
+        const desc = s.description || ('Sub ' + String(s.id).slice(0, 8));
+        const dates = [s.start_date ? fmtDateNl(s.start_date) : null, s.end_date ? fmtDateNl(s.end_date) : null].filter(Boolean).join(' → ');
+        const amt = s.amount != null ? '€' + Number(s.amount).toFixed(2) : '';
+        const checked = _arrangWiz.subscription_id === s.id ? 'checked' : '';
+        return `<label style="display:grid;grid-template-columns:24px 1fr auto;gap:8px;align-items:center;padding:8px 10px;border-bottom:1px solid rgba(255,255,255,.04);cursor:pointer;font-size:12.5px">
+          <input type="radio" name="arrangWizSubRadio" data-arrang-sub="${esc(s.id)}" data-arrang-sub-label="${esc(desc)}" ${checked} style="width:auto"/>
+          <div>
+            <div style="font-weight:600">${esc(desc)}</div>
+            <div style="font-size:11px;color:var(--text-faint)">${esc(dates || s.status || '—')}</div>
+          </div>
+          <div style="font-variant-numeric:tabular-nums">${esc(amt)}</div>
+        </label>`;
+      }).join('');
+      wrap.querySelectorAll('[data-arrang-sub]').forEach(rb => {
+        rb.addEventListener('change', () => {
+          if (rb.checked) {
+            _arrangWiz.subscription_id = rb.getAttribute('data-arrang-sub');
+            _arrangWiz.subscription_label = rb.getAttribute('data-arrang-sub-label') || '';
+          }
+        });
+      });
+    } catch (e) {
+      wrap.innerHTML = `<div style="font-size:11.5px;color:#ef4444;padding:14px">Fout: ${esc(e.message)}</div>`;
+    }
+  }
+
+  // ── Stap 3: details ──────────────────────────────────────────────────────
+  function arrangWizInitStep3() {
+    // Hide alle sub-panels, toon alleen relevante.
+    ['UITSTEL', 'SPLITSING', 'ABONNEMENT_PAUZE', 'ABONNEMENT_STOP', 'KWIJTSCHELDING'].forEach(t => {
+      const el = document.getElementById('arrangWizDet_' + t);
+      if (el) el.hidden = (t !== _arrangWiz.type);
+    });
+    if (_arrangWiz.type === 'SPLITSING') {
+      const totalEl = document.getElementById('arrangWizSplitTotalLbl');
+      if (totalEl) totalEl.textContent = '€' + arrangWizSelectedInvoicesTotal().toFixed(2);
+      arrangWizRegenSplitParts();
+    }
+  }
+
+  function arrangWizRegenSplitParts() {
+    const tb = document.getElementById('arrangWizSplitTbody');
+    if (!tb) return;
+    const count = Math.max(2, Math.min(12, Number(document.getElementById('arrangWizSplitCount').value) || 3));
+    const total = arrangWizSelectedInvoicesTotal();
+    const perPart = total / count;
+    // Eerste deel kan iets afwijken om rounding-residue te corrigeren.
+    const parts = [];
+    let acc = 0;
+    for (let i = 0; i < count; i++) {
+      let amt = Math.round(perPart * 100) / 100;
+      if (i === count - 1) amt = Math.round((total - acc) * 100) / 100;
+      acc += amt;
+      const due = arrangWizDateAddMonths(new Date(), i + 1);
+      parts.push({ amount: amt, due_date: due });
+    }
+    tb.innerHTML = parts.map((p, idx) => `<tr>
+      <td style="text-align:center">${idx + 1}</td>
+      <td><input type="number" step="0.01" min="0" data-arrang-part-amt="${idx}" value="${p.amount.toFixed(2)}" class="fin-input" style="width:140px"/></td>
+      <td><input type="date" data-arrang-part-date="${idx}" value="${p.due_date}" class="fin-input" style="width:170px"/></td>
+    </tr>`).join('');
+    tb.querySelectorAll('input').forEach(inp => inp.addEventListener('input', () => arrangWizCheckSplitSum()));
+    arrangWizCheckSplitSum();
+  }
+
+  function arrangWizCollectParts() {
+    const tb = document.getElementById('arrangWizSplitTbody');
+    if (!tb) return [];
+    const rows = tb.querySelectorAll('tr');
+    const out = [];
+    rows.forEach((tr, idx) => {
+      const amt = Number(tr.querySelector(`[data-arrang-part-amt="${idx}"]`)?.value);
+      const due = tr.querySelector(`[data-arrang-part-date="${idx}"]`)?.value;
+      out.push({ amount: amt, due_date: due });
+    });
+    return out;
+  }
+
+  function arrangWizCheckSplitSum() {
+    const parts = arrangWizCollectParts();
+    const sumParts = parts.reduce((a, p) => a + (Number(p.amount) || 0), 0);
+    const sumInv = arrangWizSelectedInvoicesTotal();
+    const warn = document.getElementById('arrangWizSplitSumWarn');
+    if (!warn) return;
+    if (Math.abs(sumParts - sumInv) > 0.01) {
+      warn.style.display = 'block';
+      warn.textContent = `Som van termijnen €${sumParts.toFixed(2)} wijkt af van factuur-totaal €${sumInv.toFixed(2)} (verschil €${(sumParts - sumInv).toFixed(2)}).`;
+    } else {
+      warn.style.display = 'none';
+    }
+  }
+
+  function arrangWizDateAddMonths(date, n) {
+    const d = new Date(date);
+    d.setMonth(d.getMonth() + n);
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  }
+
+  // ── Stap 5: preview ─────────────────────────────────────────────────────
+  function arrangWizRenderPreview() {
+    const wrap = document.getElementById('arrangWizPreview');
+    if (!wrap) return;
+    const typeLabels = {
+      UITSTEL: 'Uitstel betaaldatum',
+      SPLITSING: 'Splitsing in termijnen',
+      ABONNEMENT_PAUZE: 'Abonnement pauzeren',
+      ABONNEMENT_STOP: 'Abonnement stopzetten',
+      KWIJTSCHELDING: 'Kwijtschelding',
+    };
+    const d = _arrangWiz.details || {};
+    const rows = [];
+    rows.push(['Type', esc(typeLabels[_arrangWiz.type] || _arrangWiz.type)]);
+    rows.push(['Klant', esc(_arrangWiz.customer_name || _arrangWiz.customer_id)]);
+
+    const subMode = (_arrangWiz.type === 'ABONNEMENT_PAUZE' || _arrangWiz.type === 'ABONNEMENT_STOP');
+    if (subMode) {
+      rows.push(['Abonnement', esc(_arrangWiz.subscription_label || _arrangWiz.subscription_id)]);
+    } else {
+      const invMap = new Map(_arrangWiz.invoices_full.map(i => [i.id, i]));
+      const invList = _arrangWiz.invoice_ids.map(id => {
+        const inv = invMap.get(id);
+        return inv ? `${esc(inv.invoice_number || id.slice(0, 8))} (€${Number(inv.amount_total || 0).toFixed(2)})` : id;
+      }).join(', ');
+      rows.push(['Facturen', invList || '—']);
+      rows.push(['Totaal', '€' + arrangWizSelectedInvoicesTotal().toFixed(2)]);
+    }
+
+    if (_arrangWiz.type === 'UITSTEL') {
+      rows.push(['Nieuwe vervaldatum', esc(fmtDateNl(d.new_due_date))]);
+    } else if (_arrangWiz.type === 'SPLITSING') {
+      const parts = (d.parts || []).map((p, i) => `${i + 1}. €${Number(p.amount).toFixed(2)} op ${fmtDateNl(p.due_date)}`).join('<br>');
+      rows.push(['Termijnen', parts || '—']);
+    } else if (_arrangWiz.type === 'ABONNEMENT_PAUZE') {
+      rows.push(['Pauze vanaf', esc(fmtDateNl(d.pause_from))]);
+      rows.push(['Pauze tot',   esc(fmtDateNl(d.pause_until))]);
+      rows.push(['Reden',       esc(d.reason || '—')]);
+    } else if (_arrangWiz.type === 'ABONNEMENT_STOP') {
+      rows.push(['Stop-datum', esc(fmtDateNl(d.stop_date))]);
+      rows.push(['Reden',      esc(d.reason || '—')]);
+    } else if (_arrangWiz.type === 'KWIJTSCHELDING') {
+      rows.push(['Af te boeken', '€' + Number(d.write_off_amount || 0).toFixed(2)]);
+      rows.push(['Reden',        esc(d.reason || '—')]);
+    }
+    rows.push(['Toelichting', esc(_arrangWiz.rationale || '—')]);
+
+    wrap.innerHTML = rows.map(([k, v]) =>
+      `<div style="display:grid;grid-template-columns:160px 1fr;gap:10px;padding:6px 10px;background:rgba(255,255,255,0.02);border:1px solid var(--border-subtle, #2b2f3a);border-radius:6px">
+         <div style="font-size:11.5px;color:var(--text-faint)">${k}</div>
+         <div style="font-size:12.5px">${v}</div>
+       </div>`
+    ).join('');
+
+    // Impact-summary.
+    const impact = document.getElementById('arrangWizPreviewImpact');
+    if (impact) {
+      let n = 1;
+      if (_arrangWiz.type === 'UITSTEL' || _arrangWiz.type === 'SPLITSING' || _arrangWiz.type === 'KWIJTSCHELDING') {
+        n = _arrangWiz.invoice_ids.length || 0;
+      }
+      impact.innerHTML = `<i class="ti ti-info-circle" style="margin-right:4px"></i>Dit voorstel maakt <strong>${n}</strong> pending action(s) aan ter goedkeuring.`;
+    }
+  }
+
+  // ── Confirm: POST naar arrangements-propose ─────────────────────────────
+  async function arrangWizConfirm() {
+    if (!arrangWizValidateStep()) return;  // 5 heeft geen validatie maar idempotent ok.
+    const btn = document.getElementById('arrangWizConfirmBtn');
+    if (btn) btn.disabled = true;
+    arrangWizClearError();
+    try {
+      const body = {
+        customer_id: _arrangWiz.customer_id,
+        invoice_ids: _arrangWiz.invoice_ids,
+        type: _arrangWiz.type,
+        details: _arrangWiz.details,
+        rationale: _arrangWiz.rationale,
+      };
+      const r = await window.AgentShared.apiFetch('/api/arrangements-propose', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        arrangWizSetError(d.error || ('HTTP ' + r.status));
+        return;
+      }
+      window.AgentShared.showToast('Afspraak voorgesteld', 'success');
+      closeArrangPropose();
+      // Re-load afspraken-lijst indien actief, switch naar 'VOORGESTELD'.
+      if (typeof switchArrangStatus === 'function' && _arrangActiveStatus !== 'VOORGESTELD') {
+        switchArrangStatus('VOORGESTELD');
+      } else if (typeof loadArrangements === 'function') {
+        loadArrangements();
+      }
+    } catch (e) {
+      console.error('[arrangements-propose]', e);
+      arrangWizSetError(e.message);
+    } finally {
+      if (btn) btn.disabled = false;
     }
   }
 
