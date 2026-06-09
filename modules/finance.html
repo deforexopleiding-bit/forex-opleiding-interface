@@ -316,13 +316,15 @@
       align-items: center;
       gap: 12px;
     }
+    /* Small variant: 36px round bubble met initialen voor thread-header */
     .inbox-c-thread-avatar {
-      width: 40px; height: 40px;
+      width: 36px; height: 36px;
       border-radius: 50%;
       display: flex; align-items: center; justify-content: center;
       color: #fff;
-      font-size: 13px; font-weight: 700;
+      font-size: 12.5px; font-weight: 700;
       flex-shrink: 0;
+      letter-spacing: .02em;
     }
     .inbox-c-thread-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
     .inbox-c-thread-actions { display: flex; gap: 6px; align-items: center; flex-shrink: 0; }
@@ -344,11 +346,14 @@
     }
     .inbox-c-messages {
       flex: 1;
+      min-height: 0;
       overflow-y: auto;
+      overflow-x: hidden;
       padding: 14px 16px;
       display: flex;
       flex-direction: column;
       gap: 8px;
+      scroll-behavior: smooth;
     }
     .inbox-c-messages-inner {
       width: 100%;
@@ -358,13 +363,99 @@
       flex-direction: column;
       gap: 8px;
     }
+    /* Empty-state thread: vriendelijke text-only illustration */
+    .inbox-c-empty-thread {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 12px;
+      padding: 60px 30px;
+      text-align: center;
+      color: var(--text-faint);
+    }
+    .inbox-c-empty-thread[hidden] { display: none; }
+    .inbox-c-empty-thread-icon {
+      font-size: 42px;
+      opacity: .35;
+      line-height: 1;
+    }
+    .inbox-c-empty-thread-title {
+      font-size: 14px;
+      color: var(--text-dim, #94a3b8);
+      font-weight: 600;
+    }
+    .inbox-c-empty-thread-sub {
+      font-size: 12px;
+      color: var(--text-faint);
+      max-width: 320px;
+      line-height: 1.5;
+    }
+    /* Loading-skeletons */
+    @keyframes inboxCSkelPulse {
+      0%, 100% { opacity: .55; }
+      50%      { opacity: .95; }
+    }
+    .inbox-c-skel-bubble {
+      height: 38px;
+      border-radius: 14px;
+      background: rgba(255,255,255,.06);
+      animation: inboxCSkelPulse 1.2s ease-in-out infinite;
+    }
+    .inbox-c-skel-bubble.out { align-self: flex-end; width: 55%; background: rgba(59,130,246,.18); }
+    .inbox-c-skel-bubble.in  { align-self: flex-start; width: 60%; }
+    .inbox-c-skel-bubble.short { width: 35%; }
+    .inbox-c-skel-line {
+      height: 12px;
+      border-radius: 6px;
+      background: rgba(255,255,255,.06);
+      animation: inboxCSkelPulse 1.2s ease-in-out infinite;
+      margin-bottom: 8px;
+    }
+    .inbox-c-skel-line.w70 { width: 70%; }
+    .inbox-c-skel-line.w50 { width: 50%; }
+    .inbox-c-skel-line.w90 { width: 90%; }
+    /* Sticky bottom compose met lichte schaduw boven */
     .inbox-c-compose {
+      position: sticky;
+      bottom: 0;
+      z-index: 2;
       border-top: 1px solid var(--border, rgba(255,255,255,.08));
       padding: 12px 16px;
       background: var(--surface-1, #1a1d24);
       display: flex;
       flex-direction: column;
       gap: 8px;
+      box-shadow: 0 -6px 12px -8px rgba(0,0,0,.35);
+    }
+    /* Subtiele scrollbar styling (Chromium) — messages + conv-list */
+    .inbox-c-messages::-webkit-scrollbar,
+    .inbox-c-customer-content::-webkit-scrollbar,
+    #inboxConvList::-webkit-scrollbar {
+      width: 8px;
+    }
+    .inbox-c-messages::-webkit-scrollbar-track,
+    .inbox-c-customer-content::-webkit-scrollbar-track,
+    #inboxConvList::-webkit-scrollbar-track {
+      background: transparent;
+    }
+    .inbox-c-messages::-webkit-scrollbar-thumb,
+    .inbox-c-customer-content::-webkit-scrollbar-thumb,
+    #inboxConvList::-webkit-scrollbar-thumb {
+      background: rgba(255,255,255,.10);
+      border-radius: 4px;
+    }
+    .inbox-c-messages::-webkit-scrollbar-thumb:hover,
+    .inbox-c-customer-content::-webkit-scrollbar-thumb:hover,
+    #inboxConvList::-webkit-scrollbar-thumb:hover {
+      background: rgba(255,255,255,.20);
+    }
+    .inbox-c-messages,
+    .inbox-c-customer-content,
+    #inboxConvList {
+      scrollbar-width: thin;
+      scrollbar-color: rgba(255,255,255,.15) transparent;
     }
     .inbox-c-compose-textarea {
       width: 100%;
@@ -422,7 +513,7 @@
 
     @media (max-width: 1100px) {
       .inbox-layout-c {
-        grid-template-columns: 280px minmax(0, 1fr);
+        grid-template-columns: 240px 1fr 0;
       }
       .inbox-c-col-right { display: none; }
     }
@@ -775,8 +866,10 @@
         <!-- MIDDLE column: thread view -->
         <div class="inbox-c-col-thread">
           <!-- Empty state -->
-          <div id="inboxThreadEmpty" style="padding:60px 30px;text-align:center;color:var(--text-faint);font-size:13px;flex:1;display:flex;align-items:center;justify-content:center">
-            Kies een gesprek links om de berichten te zien.
+          <div id="inboxThreadEmpty" class="inbox-c-empty-thread">
+            <div class="inbox-c-empty-thread-icon"><i class="ti ti-messages"></i></div>
+            <div class="inbox-c-empty-thread-title">Selecteer een gesprek aan de linker zijde</div>
+            <div class="inbox-c-empty-thread-sub">Kies links een conversatie om de berichten te bekijken en te reageren.</div>
           </div>
 
           <!-- Thread block -->
@@ -833,6 +926,15 @@
         <div class="inbox-c-col-right" id="inboxCustomerPanel">
           <div class="inbox-c-col-right-empty" id="inboxCustomerPanelEmpty">
             Selecteer een gesprek om klant-info te zien
+          </div>
+          <!-- Skeleton tijdens load -->
+          <div class="inbox-c-customer-content" id="inboxCustomerPanelSkeleton" hidden>
+            <div class="inbox-c-skel-bubble" style="width:80px;height:80px;border-radius:50%;margin:4px auto 12px"></div>
+            <div class="inbox-c-skel-line w70" style="margin:0 auto 6px;height:14px"></div>
+            <div class="inbox-c-skel-line w50" style="margin:0 auto 16px"></div>
+            <div class="inbox-c-skel-line w90"></div>
+            <div class="inbox-c-skel-line w70"></div>
+            <div class="inbox-c-skel-line w50"></div>
           </div>
           <div class="inbox-c-customer-content" id="inboxCustomerPanelContent" hidden>
             <div class="inbox-c-avatar-large" id="inboxCustPanelAvatar" style="background:hsl(210,55%,42%)">?</div>
@@ -3166,7 +3268,52 @@
     }
   }
 
-  function _inboxRenderMessages() {
+  // Helper: scroll messages-container naar onderkant. Force=true scrolt altijd,
+  // anders alleen als gebruiker al in de buurt van de bottom zat (binnen 80px) —
+  // voorkomt dat polling-refresh de scroll-positie wegtrekt als gebruiker omhoog scrolt.
+  function _inboxScrollToBottom(force) {
+    const wrap = document.getElementById('inboxMessages');
+    if (!wrap) return;
+    if (!force) {
+      const dist = wrap.scrollHeight - wrap.scrollTop - wrap.clientHeight;
+      if (dist > 80) return; // gebruiker is bewust omhoog gescrold — niet onderbreken
+    }
+    // requestAnimationFrame zodat layout-pas afgerond is voor we scrollen.
+    requestAnimationFrame(() => { wrap.scrollTop = wrap.scrollHeight; });
+  }
+
+  // Skeleton voor messages-area tijdens conv-switch (loading-state).
+  function _inboxShowMessagesSkeleton() {
+    const wrap = document.getElementById('inboxMessages');
+    if (!wrap) return;
+    wrap.innerHTML = ''
+      + '<div class="inbox-c-messages-inner">'
+      +   '<div class="inbox-c-skel-bubble in"></div>'
+      +   '<div class="inbox-c-skel-bubble out short"></div>'
+      +   '<div class="inbox-c-skel-bubble in short"></div>'
+      +   '<div class="inbox-c-skel-bubble out"></div>'
+      +   '<div class="inbox-c-skel-bubble in"></div>'
+      + '</div>';
+  }
+
+  // Skeleton voor klant-paneel tijdens context-load. Toont een aparte
+  // skeleton-container zonder de bestaande #inboxCustomerPanelContent (met
+  // bekende id-children) te overschrijven — anders breken latere render-refs.
+  function _inboxShowCustomerPanelSkeleton() {
+    const emptyEl   = document.getElementById('inboxCustomerPanelEmpty');
+    const skelEl    = document.getElementById('inboxCustomerPanelSkeleton');
+    const contentEl = document.getElementById('inboxCustomerPanelContent');
+    if (emptyEl)   emptyEl.hidden = true;
+    if (contentEl) contentEl.hidden = true;
+    if (skelEl)    skelEl.hidden = false;
+  }
+  function _inboxHideCustomerPanelSkeleton() {
+    const skelEl    = document.getElementById('inboxCustomerPanelSkeleton');
+    if (skelEl) skelEl.hidden = true;
+  }
+
+  function _inboxRenderMessages(opts) {
+    const forceScroll = !!(opts && opts.forceScroll);
     const wrap = document.getElementById('inboxMessages');
     if (!wrap) return;
     if (!_inboxMessages.length) {
@@ -3206,8 +3353,8 @@
       </div>`;
     }).join('');
     wrap.innerHTML = '<div class="inbox-c-messages-inner">' + rows + '</div>';
-    // Scroll naar laatste bericht
-    wrap.scrollTop = wrap.scrollHeight;
+    // Scroll naar laatste bericht — bij polling alleen als gebruiker al bottom-zone zat.
+    _inboxScrollToBottom(forceScroll);
   }
 
   async function openInboxConv(convId) {
@@ -3219,10 +3366,10 @@
     });
     const threadEl = document.getElementById('inboxThread');
     const emptyEl  = document.getElementById('inboxThreadEmpty');
-    const msgsWrap = document.getElementById('inboxMessages');
     if (emptyEl) emptyEl.hidden = true;
     if (threadEl) threadEl.hidden = false;
-    if (msgsWrap) msgsWrap.innerHTML = '<div style="text-align:center;color:var(--text-faint);font-size:12px;padding:20px">Laden…</div>';
+    // Skeleton ipv "Laden…" voor vloeiende conv-switch.
+    _inboxShowMessagesSkeleton();
 
     // Pre-fill header alvast met data uit _inboxConvs zodat de naam direct zichtbaar is.
     const preFromList = _inboxConvs.find(x => x.id === convId);
@@ -3248,6 +3395,7 @@
       const r = await window.AgentShared.apiFetch('/api/inbox-messages-list?' + params.toString());
       const d = await r.json().catch(() => ({}));
       if (!r.ok) {
+        const msgsWrap = document.getElementById('inboxMessages');
         if (msgsWrap) msgsWrap.innerHTML = '<div style="padding:20px;text-align:center;color:#ef4444;font-size:12px">' + esc(d.error || ('HTTP ' + r.status)) + '</div>';
         return;
       }
@@ -3305,13 +3453,15 @@
       // Compose-state syncen (textarea + knoppen + hint).
       _inboxApplyComposeState();
 
-      _inboxRenderMessages();
+      // Initial render: forceer scroll naar bottom zodat laatste bericht direct zichtbaar is.
+      _inboxRenderMessages({ forceScroll: true });
       // Conv-list opnieuw laden zodat unread_count visueel resetst.
       loadInboxConvList();
       // Klant-paneel (rechter kolom) vullen. Geen await: laat thread-render niet wachten op klant-data.
       loadInboxCustomerContext(convId);
     } catch (e) {
       console.error('[openInboxConv]', e);
+      const msgsWrap = document.getElementById('inboxMessages');
       if (msgsWrap) msgsWrap.innerHTML = '<div style="padding:20px;text-align:center;color:#ef4444;font-size:12px">Fout: ' + esc(e.message) + '</div>';
     }
   }
@@ -3422,26 +3572,41 @@
 
   async function refreshInboxConv() {
     // Stille refresh — geen "Laden…" placeholder, geen toasts.
-    if (_inboxActiveConvId) {
+    // Belangrijk: deze poll mag de actieve conv NIET onderbreken:
+    // - skip thread-rerender als er geen nieuwe message-id is bijgekomen
+    // - re-render gebruikt forceScroll=false → respecteert user-scrollpositie
+    // - textarea/input-state blijft onaangeraakt (we patchen alleen messages-DOM)
+    const activeId = _inboxActiveConvId;
+    if (activeId) {
       try {
         const params = new URLSearchParams();
-        params.set('conversation_id', _inboxActiveConvId);
+        params.set('conversation_id', activeId);
         params.set('limit', '200');
         // Niet markeren als gelezen bij auto-poll — gebruiker heeft thread mogelijk niet in beeld.
         params.set('mark_as_read', 'false');
         const r = await window.AgentShared.apiFetch('/api/inbox-messages-list?' + params.toString());
+        // Conv kan tussentijds gewisseld zijn — gooi response weg om flicker te voorkomen.
+        if (activeId !== _inboxActiveConvId) return;
         if (r.ok) {
           const d = await r.json().catch(() => ({}));
-          _inboxMessages        = Array.isArray(d.items) ? d.items : _inboxMessages;
+          const newItems = Array.isArray(d.items) ? d.items : null;
+          const prevLast = (_inboxMessages.length ? _inboxMessages[_inboxMessages.length - 1] : null);
+          const nextLast = (newItems && newItems.length ? newItems[newItems.length - 1] : null);
+          const changed = !!(newItems && (
+            (_inboxMessages.length !== newItems.length) ||
+            (prevLast && nextLast && (prevLast.id !== nextLast.id || prevLast.status !== nextLast.status))
+          ));
+          if (newItems) _inboxMessages = newItems;
           _inboxActiveConv      = d.conversation || _inboxActiveConv;
           _inboxConvCanSendText = !!(d.conversation && d.conversation.can_send_text);
-          _inboxRenderMessages();
+          // Alleen re-render wanneer er daadwerkelijk iets is veranderd, en zonder force-scroll.
+          if (changed) _inboxRenderMessages({ forceScroll: false });
         }
       } catch (e) {
         console.error('[refreshInboxConv]', e);
       }
     }
-    // Conv-list ook stilletjes herladen voor unread-badges.
+    // Conv-list ook stilletjes herladen voor unread-badges (re-highlight active conv).
     loadInboxConvList();
   }
 
@@ -3491,8 +3656,10 @@
   // Reset paneel naar empty-state (zichtbaar als geen conv geselecteerd).
   function _inboxResetCustomerPanel() {
     const emptyEl   = document.getElementById('inboxCustomerPanelEmpty');
+    const skelEl    = document.getElementById('inboxCustomerPanelSkeleton');
     const contentEl = document.getElementById('inboxCustomerPanelContent');
     if (emptyEl)   emptyEl.hidden = false;
+    if (skelEl)    skelEl.hidden = true;
     if (contentEl) contentEl.hidden = true;
   }
 
@@ -3533,9 +3700,8 @@
       return;
     }
 
-    // Toon content-container alvast met placeholders zodat de overgang vloeiend voelt.
-    emptyEl.hidden = true;
-    contentEl.hidden = false;
+    // Skeleton tijdens load — vloeiende overgang naar gevulde content.
+    _inboxShowCustomerPanelSkeleton();
 
     try {
       const params = new URLSearchParams({ conversation_id: conversationId });
@@ -3556,6 +3722,13 @@
 
   // Render-functie. Krijgt response van /api/inbox-conversation-context.
   function _inboxRenderCustomerPanel(d) {
+    // Verberg skeleton + toon content-container.
+    _inboxHideCustomerPanelSkeleton();
+    const contentEl = document.getElementById('inboxCustomerPanelContent');
+    const emptyEl   = document.getElementById('inboxCustomerPanelEmpty');
+    if (emptyEl)   emptyEl.hidden = true;
+    if (contentEl) contentEl.hidden = false;
+
     const conv = d && d.conversation ? d.conversation : null;
     const cust = d && d.customer ? d.customer : null;
     const invs = Array.isArray(d && d.open_invoices) ? d.open_invoices : [];
