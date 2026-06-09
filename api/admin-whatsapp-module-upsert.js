@@ -4,16 +4,17 @@
 // SUPER_ADMIN ONLY. Audit-log entry per mutatie.
 //
 // Body (POST):
-//   { module, phone_number_id, display_label, is_active=true }
+//   { module, phone_number_id, display_label, business_account_id?, is_active=true }
 // Body (PATCH):
-//   { id?, module?, phone_number_id?, display_label?, is_active? }
+//   { id?, module?, phone_number_id?, display_label?, business_account_id?, is_active? }
 //   (id mag ook in query staan)
 //
 // Validatie:
-//   module          : required, 1-50 chars, lowercase, [a-z0-9_-]
-//   phone_number_id : required, non-empty string (Meta cijferreeks)
-//   display_label   : required, 1-100 chars
-//   is_active       : boolean (default true bij INSERT, alleen meegestuurd bij PATCH)
+//   module              : required, 1-50 chars, lowercase, [a-z0-9_-]
+//   phone_number_id     : required, non-empty string (Meta cijferreeks)
+//   display_label       : required, 1-100 chars
+//   business_account_id : optional, non-empty string max 64 chars (Meta WABA-id)
+//   is_active           : boolean (default true bij INSERT, alleen meegestuurd bij PATCH)
 //
 // INSERT-pad: UNIQUE(module) → bij conflict 409.
 // UPDATE-pad: SELECT existing → MERGE → UPDATE updated_at=now() (trigger doet dit ook,
@@ -45,6 +46,16 @@ function validateDisplayLabel(v) {
   const s = v.trim();
   if (!s) return 'display_label: leeg niet toegestaan';
   if (s.length > 100) return 'display_label: max 100 chars';
+  return null;
+}
+// business_account_id is OPTIONAL: null/undefined/'' wordt opgeslagen als NULL,
+// non-empty string moet 1-64 chars zijn (Meta WABA-id is een cijferreeks).
+function validateBusinessAccountId(v) {
+  if (v === null || v === undefined) return null;
+  if (typeof v !== 'string') return 'business_account_id: string vereist';
+  const s = v.trim();
+  if (!s) return null; // lege string → NULL
+  if (s.length > 64) return 'business_account_id: max 64 chars';
   return null;
 }
 
@@ -101,20 +112,26 @@ export default async function handler(req, res) {
       if (errPnid) return res.status(400).json({ error: errPnid });
       const errLabel = validateDisplayLabel(body.display_label);
       if (errLabel) return res.status(400).json({ error: errLabel });
+      const errBaid = validateBusinessAccountId(body.business_account_id);
+      if (errBaid) return res.status(400).json({ error: errBaid });
 
+      const baidTrimmed = (typeof body.business_account_id === 'string')
+        ? body.business_account_id.trim()
+        : '';
       const payload = {
-        module:           String(body.module).trim(),
-        phone_number_id:  String(body.phone_number_id).trim(),
-        display_label:    String(body.display_label).trim(),
-        is_active:        body.is_active === false ? false : true,
-        created_by_user_id: user.id,
+        module:              String(body.module).trim(),
+        phone_number_id:     String(body.phone_number_id).trim(),
+        display_label:       String(body.display_label).trim(),
+        business_account_id: baidTrimmed ? baidTrimmed : null,
+        is_active:           body.is_active === false ? false : true,
+        created_by_user_id:  user.id,
       };
 
       // ON CONFLICT (module) DO NOTHING → check daarna of rij is teruggekomen.
       const { data: inserted, error: insErr } = await supabaseAdmin
         .from('whatsapp_module_config')
         .upsert(payload, { onConflict: 'module', ignoreDuplicates: true })
-        .select('id, module, phone_number_id, display_label, is_active, created_at, updated_at');
+        .select('id, module, phone_number_id, business_account_id, display_label, is_active, created_at, updated_at');
 
       if (insErr) {
         console.error('[admin-whatsapp-module-upsert] insert error:', insErr.message);
@@ -128,7 +145,7 @@ export default async function handler(req, res) {
       }
 
       const row = inserted[0];
-      await logAudit({ action: 'whatsapp_module_config.create', payload: { id: row.id, module: row.module, phone_number_id: row.phone_number_id, display_label: row.display_label, is_active: row.is_active }, userId: user.id });
+      await logAudit({ action: 'whatsapp_module_config.create', payload: { id: row.id, module: row.module, phone_number_id: row.phone_number_id, business_account_id: row.business_account_id, display_label: row.display_label, is_active: row.is_active }, userId: user.id });
       return res.status(200).json({ item: row });
     }
 
@@ -139,7 +156,7 @@ export default async function handler(req, res) {
     // Existing ophalen.
     const { data: existing, error: getErr } = await supabaseAdmin
       .from('whatsapp_module_config')
-      .select('id, module, phone_number_id, display_label, is_active')
+      .select('id, module, phone_number_id, business_account_id, display_label, is_active')
       .eq('id', id)
       .maybeSingle();
     if (getErr) {
@@ -165,6 +182,17 @@ export default async function handler(req, res) {
       if (errLabel) return res.status(400).json({ error: errLabel });
       updates.display_label = String(body.display_label).trim();
     }
+    if (body.business_account_id !== undefined) {
+      const errBaid = validateBusinessAccountId(body.business_account_id);
+      if (errBaid) return res.status(400).json({ error: errBaid });
+      // null / lege string → NULL in DB; anders trimmed string.
+      if (body.business_account_id === null) {
+        updates.business_account_id = null;
+      } else {
+        const s = String(body.business_account_id).trim();
+        updates.business_account_id = s ? s : null;
+      }
+    }
     if (body.is_active !== undefined) {
       if (typeof body.is_active !== 'boolean') {
         return res.status(400).json({ error: 'is_active: boolean vereist' });
@@ -180,7 +208,7 @@ export default async function handler(req, res) {
       .from('whatsapp_module_config')
       .update(updates)
       .eq('id', id)
-      .select('id, module, phone_number_id, display_label, is_active, created_at, updated_at')
+      .select('id, module, phone_number_id, business_account_id, display_label, is_active, created_at, updated_at')
       .single();
 
     if (updErr) {
