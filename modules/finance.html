@@ -115,6 +115,482 @@
     /* Row-click factuur-detail (Fase 5): hover-feedback */
     .sr-table tbody tr.clickable-row { cursor: pointer; }
     .sr-table tbody tr.clickable-row:hover { background: var(--bg-elev-2, #f9fafb); }
+
+    /* ====== Inbox layout C: 3-column grid (list / thread / klant-info) ====== */
+    .inbox-layout-c {
+      display: grid;
+      grid-template-columns: 280px minmax(0, 1fr) 320px;
+      grid-template-rows: minmax(0, 75vh);
+      gap: 16px;
+      min-height: 520px;
+    }
+    .inbox-c-col-left,
+    .inbox-c-col-thread,
+    .inbox-c-col-right {
+      background: var(--surface-1, #1a1d24);
+      border: 1px solid var(--border, rgba(255,255,255,.08));
+      border-radius: 12px;
+      min-height: 0;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+    .inbox-c-col-right { padding: 0; }
+    .inbox-c-col-right-empty {
+      padding: 28px 18px;
+      text-align: center;
+      color: var(--text-faint);
+      font-size: 12.5px;
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .inbox-c-customer-content {
+      flex: 1;
+      overflow-y: auto;
+      padding: 18px 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .inbox-c-avatar-large {
+      width: 80px;
+      height: 80px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #fff;
+      font-size: 28px;
+      font-weight: 600;
+      margin: 4px auto 12px;
+      letter-spacing: .02em;
+    }
+    .inbox-c-customer-name {
+      font-size: 16px;
+      font-weight: 700;
+      color: var(--text-strong, #fff);
+      text-align: center;
+      margin: 0;
+      word-break: break-word;
+    }
+    .inbox-c-customer-phone {
+      font-size: 12.5px;
+      color: var(--text-faint);
+      text-align: center;
+      margin: 2px 0 10px;
+    }
+    .inbox-c-window-badge-large {
+      align-self: center;
+      font-size: 11.5px;
+      padding: 4px 12px;
+      border-radius: 999px;
+      font-weight: 600;
+      margin-bottom: 4px;
+      white-space: nowrap;
+    }
+    .inbox-c-window-badge-large.open {
+      background: rgba(34,197,94,.14);
+      color: #22c55e;
+    }
+    .inbox-c-window-badge-large.expired {
+      background: rgba(239,68,68,.14);
+      color: #ef4444;
+    }
+    .inbox-c-section {
+      padding: 14px 0;
+      border-top: 1px solid var(--border, rgba(255,255,255,.08));
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .inbox-c-section:first-of-type { border-top: none; padding-top: 4px; }
+    .inbox-c-section-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      gap: 10px;
+    }
+    .inbox-c-section-lbl {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: .06em;
+      color: var(--text-faint);
+      font-weight: 700;
+    }
+    .inbox-c-section-total {
+      font-size: 15px;
+      font-weight: 700;
+      color: var(--text-strong, #fff);
+    }
+    .inbox-c-invoice-list {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .inbox-c-invoice-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 10px;
+      font-size: 12.5px;
+      padding: 6px 0;
+      border-bottom: 1px dashed var(--border-subtle, rgba(255,255,255,.05));
+    }
+    .inbox-c-invoice-row:last-child { border-bottom: none; }
+    .inbox-c-invoice-nr {
+      color: var(--text-dim, #94a3b8);
+      font-weight: 600;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .inbox-c-invoice-right {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-shrink: 0;
+    }
+    .inbox-c-invoice-amount {
+      font-weight: 600;
+      color: var(--text-strong, #fff);
+    }
+    .inbox-c-overdue-badge {
+      font-size: 10.5px;
+      padding: 2px 7px;
+      border-radius: 999px;
+      font-weight: 700;
+      letter-spacing: .01em;
+      white-space: nowrap;
+    }
+    .inbox-c-overdue-badge.overdue {
+      background: rgba(239,68,68,.14);
+      color: #ef4444;
+    }
+    .inbox-c-overdue-badge.normal {
+      background: rgba(148,163,184,.14);
+      color: var(--text-dim, #94a3b8);
+    }
+    .inbox-c-kv {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 10px;
+      font-size: 12.5px;
+      padding: 3px 0;
+    }
+    .inbox-c-kv .k {
+      color: var(--text-faint);
+    }
+    .inbox-c-kv .v {
+      color: var(--text-strong, #fff);
+      text-align: right;
+      word-break: break-word;
+    }
+    .inbox-c-kv .v a {
+      color: var(--accent-cyan, #38bdf8);
+      text-decoration: none;
+    }
+    .inbox-c-kv .v a:hover { text-decoration: underline; }
+    .inbox-c-actions-list {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .inbox-c-actions-list .sr-abtn {
+      justify-content: center;
+      width: 100%;
+    }
+    .inbox-c-empty-line {
+      font-size: 12px;
+      color: var(--text-faint);
+      font-style: italic;
+      text-align: center;
+      padding: 6px 0;
+    }
+    .inbox-c-thread-header {
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--border, rgba(255,255,255,.08));
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    /* Small variant: 36px round bubble met initialen voor thread-header */
+    .inbox-c-thread-avatar {
+      width: 36px; height: 36px;
+      border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      color: #fff;
+      font-size: 12.5px; font-weight: 700;
+      flex-shrink: 0;
+      letter-spacing: .02em;
+    }
+    .inbox-c-thread-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+    .inbox-c-thread-actions { display: flex; gap: 6px; align-items: center; flex-shrink: 0; }
+    .inbox-c-window-badge {
+      font-size: 11px;
+      padding: 4px 10px;
+      border-radius: 999px;
+      font-weight: 600;
+      letter-spacing: .01em;
+      white-space: nowrap;
+    }
+    .inbox-c-window-badge.open {
+      background: rgba(34,197,94,.14);
+      color: #22c55e;
+    }
+    .inbox-c-window-badge.expired {
+      background: rgba(239,68,68,.14);
+      color: #ef4444;
+    }
+    .inbox-c-messages {
+      flex: 1;
+      min-height: 0;
+      overflow-y: auto;
+      overflow-x: hidden;
+      padding: 14px 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      scroll-behavior: smooth;
+    }
+    .inbox-c-messages-inner {
+      width: 100%;
+      max-width: 720px;
+      margin: 0 auto;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    /* WhatsApp-style compacte bubbles — fit-content groei + 65 procent cap. */
+    .inbox-c-msg {
+      display: flex;
+      width: 100%;
+      margin-bottom: 2px;
+    }
+    .inbox-c-msg.outbound { justify-content: flex-end; }
+    .inbox-c-msg.inbound  { justify-content: flex-start; }
+    .inbox-c-msg-bubble {
+      flex: 0 0 auto;
+      width: fit-content;
+      max-width: 65%;
+      padding: 6px 12px 8px;
+      border-radius: 10px;
+      font-size: 14.5px;
+      line-height: 1.35;
+      word-break: break-word;
+      overflow-wrap: anywhere;
+      white-space: pre-wrap;
+      min-height: auto;
+      box-sizing: border-box;
+    }
+    .inbox-c-msg.outbound .inbox-c-msg-bubble {
+      background: #3b82f6;
+      color: #fff;
+    }
+    .inbox-c-msg.outbound.failed .inbox-c-msg-bubble {
+      background: rgba(239,68,68,.12);
+      border: 1px solid rgba(239,68,68,.3);
+      color: #fecaca;
+    }
+    .inbox-c-msg.inbound .inbox-c-msg-bubble {
+      background: rgba(255,255,255,.06);
+      color: var(--text-strong, #e5e7eb);
+    }
+    .inbox-c-msg-text {
+      display: block;
+      word-break: break-word;
+      overflow-wrap: anywhere;
+    }
+    .inbox-c-msg-meta {
+      display: flex;
+      gap: 4px;
+      justify-content: flex-end;
+      align-items: center;
+      margin-top: 2px;
+      font-size: 11px;
+      opacity: .65;
+      line-height: 1;
+    }
+    .inbox-c-msg-failed-reason {
+      font-size: 10.5px;
+      color: #fca5a5;
+      margin-top: 3px;
+    }
+    .inbox-c-msg-tplbadge {
+      display: inline-flex;
+      align-items: center;
+      gap: 3px;
+      margin-bottom: 3px;
+      padding: 1px 6px;
+      border-radius: 8px;
+      background: rgba(245,158,11,.18);
+      color: #fbbf24;
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: .02em;
+    }
+    /* Empty-state thread: vriendelijke text-only illustration */
+    .inbox-c-empty-thread {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 12px;
+      padding: 60px 30px;
+      text-align: center;
+      color: var(--text-faint);
+    }
+    .inbox-c-empty-thread[hidden] { display: none; }
+    .inbox-c-empty-thread-icon {
+      font-size: 42px;
+      opacity: .35;
+      line-height: 1;
+    }
+    .inbox-c-empty-thread-title {
+      font-size: 14px;
+      color: var(--text-dim, #94a3b8);
+      font-weight: 600;
+    }
+    .inbox-c-empty-thread-sub {
+      font-size: 12px;
+      color: var(--text-faint);
+      max-width: 320px;
+      line-height: 1.5;
+    }
+    /* Loading-skeletons */
+    @keyframes inboxCSkelPulse {
+      0%, 100% { opacity: .55; }
+      50%      { opacity: .95; }
+    }
+    .inbox-c-skel-bubble {
+      height: 38px;
+      border-radius: 14px;
+      background: rgba(255,255,255,.06);
+      animation: inboxCSkelPulse 1.2s ease-in-out infinite;
+    }
+    .inbox-c-skel-bubble.out { align-self: flex-end; width: 55%; background: rgba(59,130,246,.18); }
+    .inbox-c-skel-bubble.in  { align-self: flex-start; width: 60%; }
+    .inbox-c-skel-bubble.short { width: 35%; }
+    .inbox-c-skel-line {
+      height: 12px;
+      border-radius: 6px;
+      background: rgba(255,255,255,.06);
+      animation: inboxCSkelPulse 1.2s ease-in-out infinite;
+      margin-bottom: 8px;
+    }
+    .inbox-c-skel-line.w70 { width: 70%; }
+    .inbox-c-skel-line.w50 { width: 50%; }
+    .inbox-c-skel-line.w90 { width: 90%; }
+    /* Sticky bottom compose met lichte schaduw boven */
+    .inbox-c-compose {
+      position: sticky;
+      bottom: 0;
+      z-index: 2;
+      border-top: 1px solid var(--border, rgba(255,255,255,.08));
+      padding: 12px 16px;
+      background: var(--surface-1, #1a1d24);
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      box-shadow: 0 -6px 12px -8px rgba(0,0,0,.35);
+    }
+    /* Subtiele scrollbar styling (Chromium) — messages + conv-list */
+    .inbox-c-messages::-webkit-scrollbar,
+    .inbox-c-customer-content::-webkit-scrollbar,
+    #inboxConvList::-webkit-scrollbar {
+      width: 8px;
+    }
+    .inbox-c-messages::-webkit-scrollbar-track,
+    .inbox-c-customer-content::-webkit-scrollbar-track,
+    #inboxConvList::-webkit-scrollbar-track {
+      background: transparent;
+    }
+    .inbox-c-messages::-webkit-scrollbar-thumb,
+    .inbox-c-customer-content::-webkit-scrollbar-thumb,
+    #inboxConvList::-webkit-scrollbar-thumb {
+      background: rgba(255,255,255,.10);
+      border-radius: 4px;
+    }
+    .inbox-c-messages::-webkit-scrollbar-thumb:hover,
+    .inbox-c-customer-content::-webkit-scrollbar-thumb:hover,
+    #inboxConvList::-webkit-scrollbar-thumb:hover {
+      background: rgba(255,255,255,.20);
+    }
+    .inbox-c-messages,
+    .inbox-c-customer-content,
+    #inboxConvList {
+      scrollbar-width: thin;
+      scrollbar-color: rgba(255,255,255,.15) transparent;
+    }
+    .inbox-c-compose-textarea {
+      width: 100%;
+      min-height: 60px;
+      max-height: 120px;
+      padding: 10px 14px;
+      box-sizing: border-box;
+      border: 1px solid var(--border, rgba(255,255,255,.12));
+      border-radius: var(--radius, 8px);
+      background: var(--bg-elev-2, #0f1218);
+      color: var(--text-strong, #fff);
+      resize: none;
+      font-family: inherit;
+      font-size: 14px;
+      line-height: 1.5;
+      outline: none;
+      overflow-y: auto;
+      transition: border-color .15s ease;
+    }
+    .inbox-c-compose-textarea:focus {
+      border-color: var(--accent-cyan, #38bdf8);
+    }
+    .inbox-c-compose-textarea:disabled {
+      opacity: .55;
+      cursor: not-allowed;
+    }
+    .inbox-c-actions {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 8px;
+      padding-top: 8px;
+    }
+    .inbox-c-actions-left {
+      display: flex;
+      gap: 6px;
+      align-items: center;
+    }
+    .inbox-c-actions-right {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+    }
+    .inbox-c-window-hint {
+      font-size: 12px;
+      color: var(--text-dim, #94a3b8);
+      white-space: nowrap;
+    }
+    .inbox-c-window-hint.open { color: #22c55e; }
+    .inbox-c-window-hint.expired { color: #f59e0b; }
+    .inbox-c-compose .sr-abtn[disabled] {
+      opacity: .5;
+      cursor: not-allowed;
+    }
+
+    @media (max-width: 1100px) {
+      .inbox-layout-c {
+        grid-template-columns: 240px 1fr 0;
+      }
+      .inbox-c-col-right { display: none; }
+    }
+    @media (max-width: 720px) {
+      .inbox-layout-c {
+        grid-template-columns: minmax(0, 1fr);
+        grid-template-rows: minmax(0, 1fr);
+      }
+    }
   </style>
 </head>
 <body>
@@ -443,9 +919,9 @@
       <div id="inboxConfigStatus" style="margin-bottom:12px;font-size:11.5px;color:var(--text-faint)">
         Meta-config nog niet geverifieerd.
       </div>
-      <div style="display:grid;grid-template-columns:340px 1fr;gap:18px;min-height:520px">
-        <!-- LEFT pane: conversation list -->
-        <div style="background:var(--surface-1,#1a1d24);border:1px solid var(--border,rgba(255,255,255,.08));border-radius:12px;max-height:75vh;overflow:hidden;display:flex;flex-direction:column">
+      <div class="inbox-layout-c">
+        <!-- LEFT column: conversation list -->
+        <div class="inbox-c-col-left">
           <div style="padding:12px 14px;border-bottom:1px solid var(--border,rgba(255,255,255,.08));display:flex;gap:8px;align-items:center">
             <input id="inboxConvSearch" type="text" class="fin-input" placeholder="Zoeken op naam of nummer…" style="flex:1;font-size:12.5px"/>
             <button class="sr-ibtn" id="inboxConvRefresh" type="button" title="Vernieuwen"><i class="ti ti-refresh"></i></button>
@@ -455,62 +931,115 @@
           </div>
         </div>
 
-        <!-- RIGHT pane: thread view -->
-        <div style="background:var(--surface-1,#1a1d24);border:1px solid var(--border,rgba(255,255,255,.08));border-radius:12px;max-height:75vh;display:flex;flex-direction:column">
+        <!-- MIDDLE column: thread view -->
+        <div class="inbox-c-col-thread">
           <!-- Empty state -->
-          <div id="inboxThreadEmpty" style="padding:60px 30px;text-align:center;color:var(--text-faint);font-size:13px;flex:1;display:flex;align-items:center;justify-content:center">
-            Kies een gesprek links om de berichten te zien.
+          <div id="inboxThreadEmpty" class="inbox-c-empty-thread">
+            <div class="inbox-c-empty-thread-icon"><i class="ti ti-messages"></i></div>
+            <div class="inbox-c-empty-thread-title">Selecteer een gesprek aan de linker zijde</div>
+            <div class="inbox-c-empty-thread-sub">Kies links een conversatie om de berichten te bekijken en te reageren.</div>
           </div>
 
           <!-- Thread block -->
-          <div id="inboxThread" hidden style="display:flex;flex-direction:column;flex:1;overflow:hidden">
+          <div id="inboxThread" hidden style="display:flex;flex-direction:column;flex:1;overflow:hidden;min-height:0">
             <!-- Thread header -->
-            <div style="padding:12px 16px;border-bottom:1px solid var(--border,rgba(255,255,255,.08));display:flex;justify-content:space-between;align-items:center;gap:12px">
-              <div style="display:flex;flex-direction:column;gap:2px;min-width:0">
+            <div class="inbox-c-thread-header">
+              <div class="inbox-c-thread-avatar" id="inboxThreadAvatar" style="background:hsl(210,55%,42%)">??</div>
+              <div class="inbox-c-thread-info">
                 <div id="inboxThreadName" style="font-size:14px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">—</div>
                 <div id="inboxThreadPhone" style="font-size:11.5px;color:var(--text-faint)">—</div>
               </div>
-              <div style="display:flex;gap:6px;align-items:center">
-                <span id="inboxThreadWindowBadge" style="font-size:11px;padding:3px 8px;border-radius:10px;background:rgba(34,197,94,.12);color:#22c55e">24h open</span>
+              <div class="inbox-c-thread-actions">
+                <span id="inboxThreadWindowBadge" class="inbox-c-window-badge open" title="">24h open</span>
                 <button class="sr-ibtn" id="inboxThreadCustomerBtn" type="button" title="Klant-info"><i class="ti ti-user"></i></button>
               </div>
             </div>
 
             <!-- Messages container -->
-            <div id="inboxMessages" style="flex:1;overflow:auto;padding:14px 16px;display:flex;flex-direction:column;gap:8px">
+            <div id="inboxMessages" class="inbox-c-messages">
               <div style="text-align:center;color:var(--text-faint);font-size:12px;padding:20px">Laden…</div>
             </div>
 
-            <!-- Reply footer -->
-            <div style="border-top:1px solid var(--border,rgba(255,255,255,.08));padding:12px 16px">
-              <!-- Free-text reply (binnen 24h-window) -->
-              <div id="inboxReplyText" hidden>
-                <textarea id="inboxReplyTextArea" class="fin-input" rows="3" placeholder="Typ een bericht…" style="resize:vertical;min-height:60px;font-size:13px"></textarea>
-                <div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px;gap:8px">
-                  <div style="display:flex;gap:6px">
-                    <button class="sr-abtn" id="inboxTplBtn" type="button" disabled data-disabled-tip="Eerst gesprek selecteren" title="Eerst gesprek selecteren" style="font-size:12px;padding:6px 10px"><i class="ti ti-template"></i> Template</button>
-                    <button class="sr-abtn" id="inboxQrBtn" type="button" disabled data-disabled-tip="Eerst gesprek selecteren" title="Eerst gesprek selecteren" style="font-size:12px;padding:6px 10px"><i class="ti ti-message-bolt"></i> Snel antwoord</button>
-                  </div>
-                  <button class="sr-abtn primary" id="inboxReplyTextSend" type="button"><i class="ti ti-send"></i> Verstuur</button>
-                </div>
+            <!-- Compose area -->
+            <div class="inbox-c-compose">
+              <!-- Verlopen-window waarschuwing (alleen zichtbaar buiten 24h) -->
+              <div id="inboxComposeExpiredWarn" hidden style="background:rgba(245,158,11,.10);border:1px solid rgba(245,158,11,.3);border-radius:6px;padding:8px 12px;font-size:12px;color:#f59e0b">
+                <i class="ti ti-clock-exclamation"></i> 24-uurs servicewindow verlopen — gebruik de Template-knop voor een goedgekeurde Meta-template.
               </div>
 
-              <!-- Template reply (buiten 24h-window) -->
-              <div id="inboxReplyTemplate" hidden>
-                <div style="background:rgba(245,158,11,.10);border:1px solid rgba(245,158,11,.3);border-radius:6px;padding:8px 12px;font-size:12px;color:#f59e0b;margin-bottom:10px">
-                  <i class="ti ti-clock-exclamation"></i> 24-uurs servicewindow verlopen — gebruik een goedgekeurde Meta-template.
+              <!-- Eén textarea voor alle compose-acties -->
+              <textarea
+                id="inboxComposeTextarea"
+                class="inbox-c-compose-textarea"
+                rows="2"
+                placeholder="Selecteer eerst een gesprek"
+                disabled></textarea>
+
+              <!-- Actie-rij: links pickers, rechts window-hint + Verstuur -->
+              <div class="inbox-c-actions">
+                <div class="inbox-c-actions-left">
+                  <button class="sr-abtn" id="inboxTplBtn" type="button" disabled data-disabled-tip="Eerst gesprek selecteren" title="Eerst gesprek selecteren" style="font-size:12px;padding:6px 10px"><i class="ti ti-template"></i> Template</button>
+                  <button class="sr-abtn" id="inboxQrBtn" type="button" disabled data-disabled-tip="Eerst gesprek selecteren" title="Eerst gesprek selecteren" style="font-size:12px;padding:6px 10px"><i class="ti ti-message-bolt"></i> Snel antwoord</button>
                 </div>
-                <label style="font-size:12px;color:var(--text-dim);display:block">
-                  <div style="margin-bottom:4px;font-weight:600">Meta-template-naam</div>
-                  <input id="inboxReplyTemplateName" type="text" class="fin-input" placeholder="bv. invoice_reminder_v1"/>
-                </label>
-                <div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px;gap:8px">
-                  <div style="display:flex;gap:6px">
-                    <button class="sr-abtn" id="inboxTplBtn2" type="button" disabled data-disabled-tip="Eerst gesprek selecteren" title="Eerst gesprek selecteren" style="font-size:12px;padding:6px 10px"><i class="ti ti-template"></i> Template</button>
-                    <button class="sr-abtn" id="inboxQrBtn2" type="button" disabled data-disabled-tip="Eerst gesprek selecteren" title="Eerst gesprek selecteren" style="font-size:12px;padding:6px 10px"><i class="ti ti-message-bolt"></i> Snel antwoord</button>
-                  </div>
-                  <button class="sr-abtn primary" id="inboxReplyTemplateSend" type="button"><i class="ti ti-send"></i> Verstuur template</button>
+                <div class="inbox-c-actions-right">
+                  <span id="inboxComposeWindowHint" class="inbox-c-window-hint" hidden></span>
+                  <button class="sr-abtn primary" id="inboxComposeSendBtn" type="button" disabled title="Eerst gesprek selecteren"><i class="ti ti-send"></i> Verstuur</button>
                 </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- RIGHT column: klant-info panel -->
+        <div class="inbox-c-col-right" id="inboxCustomerPanel">
+          <div class="inbox-c-col-right-empty" id="inboxCustomerPanelEmpty">
+            Selecteer een gesprek om klant-info te zien
+          </div>
+          <!-- Skeleton tijdens load -->
+          <div class="inbox-c-customer-content" id="inboxCustomerPanelSkeleton" hidden>
+            <div class="inbox-c-skel-bubble" style="width:80px;height:80px;border-radius:50%;margin:4px auto 12px"></div>
+            <div class="inbox-c-skel-line w70" style="margin:0 auto 6px;height:14px"></div>
+            <div class="inbox-c-skel-line w50" style="margin:0 auto 16px"></div>
+            <div class="inbox-c-skel-line w90"></div>
+            <div class="inbox-c-skel-line w70"></div>
+            <div class="inbox-c-skel-line w50"></div>
+          </div>
+          <div class="inbox-c-customer-content" id="inboxCustomerPanelContent" hidden>
+            <div class="inbox-c-avatar-large" id="inboxCustPanelAvatar" style="background:hsl(210,55%,42%)">?</div>
+            <h3 class="inbox-c-customer-name" id="inboxCustPanelName">—</h3>
+            <div class="inbox-c-customer-phone" id="inboxCustPanelPhone">—</div>
+            <span class="inbox-c-window-badge-large open" id="inboxCustPanelWindow" hidden>24h open</span>
+
+            <!-- Sectie: open facturen -->
+            <div class="inbox-c-section">
+              <div class="inbox-c-section-head">
+                <span class="inbox-c-section-lbl">Open facturen</span>
+                <span class="inbox-c-section-total" id="inboxCustPanelOpenTotal">€ 0,00</span>
+              </div>
+              <div class="inbox-c-invoice-list" id="inboxCustPanelInvoices">
+                <div class="inbox-c-empty-line">Geen open facturen</div>
+              </div>
+            </div>
+
+            <!-- Sectie: klant info -->
+            <div class="inbox-c-section" id="inboxCustPanelInfoSection">
+              <div class="inbox-c-section-head">
+                <span class="inbox-c-section-lbl">Klant info</span>
+              </div>
+              <div id="inboxCustPanelInfoBody">
+                <div class="inbox-c-kv"><span class="k">Klant sinds</span><span class="v" id="inboxCustPanelSince">—</span></div>
+                <div class="inbox-c-kv" id="inboxCustPanelEmailRow" hidden><span class="k">E-mail</span><span class="v" id="inboxCustPanelEmail">—</span></div>
+              </div>
+            </div>
+
+            <!-- Sectie: acties -->
+            <div class="inbox-c-section">
+              <div class="inbox-c-section-head">
+                <span class="inbox-c-section-lbl">Acties</span>
+              </div>
+              <div class="inbox-c-actions-list">
+                <a class="sr-abtn" id="inboxCustPanelOpen" href="#" target="_blank" rel="noopener" style="font-size:12.5px"><i class="ti ti-user"></i> Bekijk in klanten</a>
+                <a class="sr-abtn" id="inboxCustPanelInvoice" href="#" target="_blank" rel="noopener" style="font-size:12.5px"><i class="ti ti-file-invoice"></i> Maak factuur aan</a>
               </div>
             </div>
           </div>
@@ -1457,6 +1986,8 @@
     document.querySelectorAll('#financeNav .sr-seg').forEach(b => b.classList.toggle('active', b.dataset.view === view));
     // Stop inbox auto-poll wanneer we de inbox-tab verlaten — bespaart requests.
     if (view !== 'inbox' && typeof stopInboxPolling === 'function') stopInboxPolling();
+    // Reset klant-paneel zodat oude data niet blijft staan bij terugkeer.
+    if (view !== 'inbox' && typeof _inboxResetCustomerPanel === 'function') _inboxResetCustomerPanel();
     // Bij eerste keer Bank (oud) openen: load per beschikbare permission.
     if (view === 'bank' && !_bankLoadedOnce) {
       _bankLoadedOnce = true;
@@ -2805,14 +3336,59 @@
     }
   }
 
-  function _inboxRenderMessages() {
+  // Helper: scroll messages-container naar onderkant. Force=true scrolt altijd,
+  // anders alleen als gebruiker al in de buurt van de bottom zat (binnen 80px) —
+  // voorkomt dat polling-refresh de scroll-positie wegtrekt als gebruiker omhoog scrolt.
+  function _inboxScrollToBottom(force) {
+    const wrap = document.getElementById('inboxMessages');
+    if (!wrap) return;
+    if (!force) {
+      const dist = wrap.scrollHeight - wrap.scrollTop - wrap.clientHeight;
+      if (dist > 80) return; // gebruiker is bewust omhoog gescrold — niet onderbreken
+    }
+    // requestAnimationFrame zodat layout-pas afgerond is voor we scrollen.
+    requestAnimationFrame(() => { wrap.scrollTop = wrap.scrollHeight; });
+  }
+
+  // Skeleton voor messages-area tijdens conv-switch (loading-state).
+  function _inboxShowMessagesSkeleton() {
+    const wrap = document.getElementById('inboxMessages');
+    if (!wrap) return;
+    wrap.innerHTML = ''
+      + '<div class="inbox-c-messages-inner">'
+      +   '<div class="inbox-c-skel-bubble in"></div>'
+      +   '<div class="inbox-c-skel-bubble out short"></div>'
+      +   '<div class="inbox-c-skel-bubble in short"></div>'
+      +   '<div class="inbox-c-skel-bubble out"></div>'
+      +   '<div class="inbox-c-skel-bubble in"></div>'
+      + '</div>';
+  }
+
+  // Skeleton voor klant-paneel tijdens context-load. Toont een aparte
+  // skeleton-container zonder de bestaande #inboxCustomerPanelContent (met
+  // bekende id-children) te overschrijven — anders breken latere render-refs.
+  function _inboxShowCustomerPanelSkeleton() {
+    const emptyEl   = document.getElementById('inboxCustomerPanelEmpty');
+    const skelEl    = document.getElementById('inboxCustomerPanelSkeleton');
+    const contentEl = document.getElementById('inboxCustomerPanelContent');
+    if (emptyEl)   emptyEl.hidden = true;
+    if (contentEl) contentEl.hidden = true;
+    if (skelEl)    skelEl.hidden = false;
+  }
+  function _inboxHideCustomerPanelSkeleton() {
+    const skelEl    = document.getElementById('inboxCustomerPanelSkeleton');
+    if (skelEl) skelEl.hidden = true;
+  }
+
+  function _inboxRenderMessages(opts) {
+    const forceScroll = !!(opts && opts.forceScroll);
     const wrap = document.getElementById('inboxMessages');
     if (!wrap) return;
     if (!_inboxMessages.length) {
       wrap.innerHTML = '<div style="text-align:center;color:var(--text-faint);font-size:12px;padding:20px">Nog geen berichten.</div>';
       return;
     }
-    wrap.innerHTML = _inboxMessages.map(m => {
+    const rows = _inboxMessages.map(m => {
       const out = (m.direction === 'out');
       // Detect template-message: ofwel expliciete type-kolom, ofwel template_name aanwezig,
       // ofwel meta_template_name veld in payload. Toon "via template" badge bij outgoing.
@@ -2822,30 +3398,26 @@
       const time = fmtRelTime(m.sent_at || m.created_at);
       const statusIcon = out ? _inboxStatusIcon(m.status) : '';
       const failed = (m.status === 'failed');
-      const align = out ? 'flex-end' : 'flex-start';
-      const bg = out
-        ? (failed ? 'background:rgba(239,68,68,.12);border:1px solid rgba(239,68,68,.3);color:#fecaca'
-                  : 'background:#3b82f6;color:#fff')
-        : 'background:rgba(255,255,255,.06);color:var(--text-strong, #e5e7eb)';
       const failedRow = (out && failed && m.failed_reason)
-        ? `<div style="font-size:10.5px;color:#fca5a5;margin-top:3px">${esc(m.failed_reason)}</div>`
+        ? `<div class="inbox-c-msg-failed-reason">${esc(m.failed_reason)}</div>`
         : '';
       const tplBadge = isTpl
-        ? `<div style="display:inline-flex;align-items:center;gap:3px;margin-bottom:4px;padding:1px 6px;border-radius:8px;background:rgba(245,158,11,.18);color:#fbbf24;font-size:10px;font-weight:600;letter-spacing:.02em" title="${esc(tplName || '')}"><i class="ti ti-template" style="font-size:11px"></i> via template</div>`
+        ? `<div class="inbox-c-msg-tplbadge" title="${esc(tplName || '')}"><i class="ti ti-template" style="font-size:11px"></i> via template</div>`
         : '';
-      return `<div style="display:flex;justify-content:${align};width:100%">
-        <div style="max-width:72%;padding:8px 12px;border-radius:14px;${bg};font-size:13px;line-height:1.45;word-wrap:break-word;white-space:pre-wrap">
+      return `<div class="inbox-c-msg ${out ? 'outbound' : 'inbound'}${failed ? ' failed' : ''}">
+        <div class="inbox-c-msg-bubble">
           ${tplBadge}
-          <div>${esc(body)}</div>
+          <span class="inbox-c-msg-text">${esc(body)}</span>
           ${failedRow}
-          <div style="display:flex;gap:6px;justify-content:flex-end;align-items:center;margin-top:4px;font-size:10.5px;opacity:.85">
+          <div class="inbox-c-msg-meta">
             <span>${esc(time)}</span>${statusIcon ? ' ' + statusIcon : ''}
           </div>
         </div>
       </div>`;
     }).join('');
-    // Scroll naar laatste bericht
-    wrap.scrollTop = wrap.scrollHeight;
+    wrap.innerHTML = '<div class="inbox-c-messages-inner">' + rows + '</div>';
+    // Scroll naar laatste bericht — bij polling alleen als gebruiker al bottom-zone zat.
+    _inboxScrollToBottom(forceScroll);
   }
 
   async function openInboxConv(convId) {
@@ -2857,18 +3429,25 @@
     });
     const threadEl = document.getElementById('inboxThread');
     const emptyEl  = document.getElementById('inboxThreadEmpty');
-    const msgsWrap = document.getElementById('inboxMessages');
     if (emptyEl) emptyEl.hidden = true;
     if (threadEl) threadEl.hidden = false;
-    if (msgsWrap) msgsWrap.innerHTML = '<div style="text-align:center;color:var(--text-faint);font-size:12px;padding:20px">Laden…</div>';
+    // Skeleton ipv "Laden…" voor vloeiende conv-switch.
+    _inboxShowMessagesSkeleton();
 
     // Pre-fill header alvast met data uit _inboxConvs zodat de naam direct zichtbaar is.
     const preFromList = _inboxConvs.find(x => x.id === convId);
     if (preFromList) {
       const headerName  = document.getElementById('inboxThreadName');
       const headerPhone = document.getElementById('inboxThreadPhone');
-      if (headerName)  headerName.textContent  = 'Klant: ' + (preFromList.customer_name || preFromList.display_name || preFromList.phone_number || 'Onbekend');
-      if (headerPhone) headerPhone.textContent = preFromList.phone_number || '—';
+      const headerAv    = document.getElementById('inboxThreadAvatar');
+      const preName = preFromList.customer_name || preFromList.display_name || preFromList.phone_number || 'Onbekend';
+      const prePhone = preFromList.phone_number || '';
+      if (headerName)  headerName.textContent  = 'Klant: ' + preName;
+      if (headerPhone) headerPhone.textContent = prePhone || '—';
+      if (headerAv) {
+        headerAv.textContent = _inboxInitials(preName, prePhone);
+        headerAv.style.background = _inboxAvatarColor(prePhone);
+      }
     }
 
     try {
@@ -2879,6 +3458,7 @@
       const r = await window.AgentShared.apiFetch('/api/inbox-messages-list?' + params.toString());
       const d = await r.json().catch(() => ({}));
       if (!r.ok) {
+        const msgsWrap = document.getElementById('inboxMessages');
         if (msgsWrap) msgsWrap.innerHTML = '<div style="padding:20px;text-align:center;color:#ef4444;font-size:12px">' + esc(d.error || ('HTTP ' + r.status)) + '</div>';
         return;
       }
@@ -2889,9 +3469,11 @@
       // Thread-header invullen
       const headerName  = document.getElementById('inboxThreadName');
       const headerPhone = document.getElementById('inboxThreadPhone');
+      const headerAv    = document.getElementById('inboxThreadAvatar');
       const badge       = document.getElementById('inboxThreadWindowBadge');
       const conv = _inboxActiveConv || {};
       const niceName = conv.customer_name || conv.display_name || conv.phone_number || 'Onbekend';
+      const nicePhone = conv.phone_number || '';
       if (headerName) {
         headerName.innerHTML = '';
         const span = document.createElement('span');
@@ -2902,37 +3484,95 @@
         span.id = 'inboxThreadCustomerLink';
         headerName.appendChild(span);
       }
-      if (headerPhone) headerPhone.textContent = conv.phone_number || '—';
+      if (headerPhone) headerPhone.textContent = nicePhone || '—';
+      if (headerAv) {
+        headerAv.textContent = _inboxInitials(niceName, nicePhone);
+        headerAv.style.background = _inboxAvatarColor(nicePhone);
+      }
       if (badge) {
+        // last_inbound_at kan via conv.last_inbound_at of conv.last_message_at komen; gebruik wat beschikbaar is voor tooltip.
+        const lastInbound = conv.last_inbound_at || conv.last_inbound_message_at || null;
+        let tip = '';
+        if (lastInbound) {
+          try {
+            const d2 = new Date(lastInbound);
+            if (!isNaN(d2.getTime())) {
+              tip = 'Laatste inbound: ' + d2.toLocaleString('nl-NL');
+            }
+          } catch (_) { /* ignore */ }
+        }
+        badge.classList.remove('open', 'expired');
         if (_inboxConvCanSendText) {
+          badge.classList.add('open');
           badge.textContent = '24h open';
-          badge.style.background = 'rgba(34,197,94,.12)';
-          badge.style.color = '#22c55e';
+          badge.title = tip || '24h-servicewindow nog open';
         } else {
+          badge.classList.add('expired');
           badge.textContent = '24h verlopen';
-          badge.style.background = 'rgba(245,158,11,.12)';
-          badge.style.color = '#f59e0b';
+          badge.title = tip ? (tip + ' — alleen templates') : 'Servicewindow verlopen — alleen templates';
         }
       }
 
-      // Reply-vorm tonen: text als 24h-open, anders template
-      const replyText = document.getElementById('inboxReplyText');
-      const replyTpl  = document.getElementById('inboxReplyTemplate');
-      if (replyText) replyText.hidden = !_inboxConvCanSendText;
-      if (replyTpl)  replyTpl.hidden  =  _inboxConvCanSendText;
+      // Compose-state syncen (textarea + knoppen + hint).
+      _inboxApplyComposeState();
 
-      // Template / Snel-antwoord knoppen enablen — er is nu een actief gesprek.
-      ['inboxTplBtn','inboxTplBtn2','inboxQrBtn','inboxQrBtn2'].forEach(id => {
-        const el = document.getElementById(id);
-        if (el) { el.disabled = false; el.title = ''; }
-      });
-
-      _inboxRenderMessages();
+      // Initial render: forceer scroll naar bottom zodat laatste bericht direct zichtbaar is.
+      _inboxRenderMessages({ forceScroll: true });
       // Conv-list opnieuw laden zodat unread_count visueel resetst.
       loadInboxConvList();
+      // Klant-paneel (rechter kolom) vullen. Geen await: laat thread-render niet wachten op klant-data.
+      loadInboxCustomerContext(convId);
     } catch (e) {
       console.error('[openInboxConv]', e);
+      const msgsWrap = document.getElementById('inboxMessages');
       if (msgsWrap) msgsWrap.innerHTML = '<div style="padding:20px;text-align:center;color:#ef4444;font-size:12px">Fout: ' + esc(e.message) + '</div>';
+    }
+  }
+
+  // Autoresize: groeit met inhoud tot max 120px, daarna scrollt textarea zelf.
+  function autoResizeComposeTextarea() {
+    const ta = document.getElementById('inboxComposeTextarea');
+    if (!ta) return;
+    ta.style.height = 'auto';
+    ta.style.height = Math.min(ta.scrollHeight, 120) + 'px';
+  }
+
+  // Sync compose-UI met huidige conv-state. Eén bron van waarheid voor placeholder/disabled/hint.
+  function _inboxApplyComposeState() {
+    const ta       = document.getElementById('inboxComposeTextarea');
+    const tplBtn   = document.getElementById('inboxTplBtn');
+    const qrBtn    = document.getElementById('inboxQrBtn');
+    const sendBtn  = document.getElementById('inboxComposeSendBtn');
+    const hint     = document.getElementById('inboxComposeWindowHint');
+    const warn     = document.getElementById('inboxComposeExpiredWarn');
+
+    if (!_inboxActiveConvId) {
+      // Geen actief gesprek
+      if (ta)      { ta.disabled = true;  ta.placeholder = 'Selecteer eerst een gesprek'; ta.value = ''; ta.style.height = ''; }
+      if (tplBtn)  { tplBtn.disabled  = true;  tplBtn.title  = 'Eerst gesprek selecteren'; }
+      if (qrBtn)   { qrBtn.disabled   = true;  qrBtn.title   = 'Eerst gesprek selecteren'; }
+      if (sendBtn) { sendBtn.disabled = true;  sendBtn.title = 'Eerst gesprek selecteren'; }
+      if (hint)    { hint.hidden = true; hint.textContent = ''; hint.classList.remove('open','expired'); }
+      if (warn)    { warn.hidden = true; }
+      return;
+    }
+
+    // Actief gesprek
+    if (tplBtn) { tplBtn.disabled = false; tplBtn.title = ''; }
+    if (_inboxConvCanSendText) {
+      // 24h-window open: tekst-bericht versturen mag
+      if (ta)      { ta.disabled = false; ta.placeholder = 'Typ een bericht…'; }
+      if (qrBtn)   { qrBtn.disabled = false; qrBtn.title = ''; }
+      if (sendBtn) { sendBtn.disabled = false; sendBtn.title = 'Versturen (Ctrl+Enter)'; }
+      if (hint)    { hint.hidden = false; hint.textContent = '24h open'; hint.classList.remove('expired'); hint.classList.add('open'); }
+      if (warn)    { warn.hidden = true; }
+    } else {
+      // Window verlopen: alleen templates
+      if (ta)      { ta.disabled = true; ta.placeholder = 'Window verlopen — gebruik Template knop'; }
+      if (qrBtn)   { qrBtn.disabled = true; qrBtn.title = 'Window verlopen — alleen templates toegestaan'; }
+      if (sendBtn) { sendBtn.disabled = true; sendBtn.title = 'Window verlopen — gebruik Template knop'; }
+      if (hint)    { hint.hidden = false; hint.textContent = '24h verlopen'; hint.classList.remove('open'); hint.classList.add('expired'); }
+      if (warn)    { warn.hidden = false; }
     }
   }
 
@@ -2941,14 +3581,14 @@
       window.AgentShared.showToast('Eerst gesprek selecteren', 'error');
       return;
     }
-    const ta = document.getElementById('inboxReplyTextArea');
+    const ta = document.getElementById('inboxComposeTextarea');
     if (!ta) return;
     const body = (ta.value || '').trim();
     if (!body) {
       window.AgentShared.showToast('Bericht is leeg', 'error');
       return;
     }
-    const btn = document.getElementById('inboxReplyTextSend');
+    const btn = document.getElementById('inboxComposeSendBtn');
     if (btn) btn.disabled = true;
     try {
       const r = await window.AgentShared.apiFetch('/api/inbox-send', {
@@ -2958,14 +3598,16 @@
       });
       const d = await r.json().catch(() => ({}));
       if (r.status === 422 && d.error === '24h_window_expired') {
-        // Window net verlopen — switch UI naar template-form
+        // Window net verlopen — sync UI naar verlopen-state
         _inboxConvCanSendText = false;
-        const replyText = document.getElementById('inboxReplyText');
-        const replyTpl  = document.getElementById('inboxReplyTemplate');
-        if (replyText) replyText.hidden = true;
-        if (replyTpl)  replyTpl.hidden  = false;
         const badge = document.getElementById('inboxThreadWindowBadge');
-        if (badge) { badge.textContent = '24h verlopen'; badge.style.background = 'rgba(245,158,11,.12)'; badge.style.color = '#f59e0b'; }
+        if (badge) {
+          badge.classList.remove('open');
+          badge.classList.add('expired');
+          badge.textContent = '24h verlopen';
+          badge.title = 'Servicewindow verlopen — alleen templates';
+        }
+        _inboxApplyComposeState();
         window.AgentShared.showToast('24-uurs window verlopen — gebruik een template', 'error');
         return;
       }
@@ -2978,6 +3620,7 @@
         return;
       }
       ta.value = '';
+      ta.style.height = ''; // reset naar CSS min-height
       window.AgentShared.showToast('Bericht verstuurd', 'success');
       // Direct thread herladen voor zichtbare update
       await openInboxConv(_inboxActiveConvId);
@@ -2985,72 +3628,48 @@
       console.error('[sendInboxText]', e);
       window.AgentShared.showToast('Versturen mislukt: ' + e.message, 'error');
     } finally {
-      if (btn) btn.disabled = false;
-    }
-  }
-
-  async function sendInboxTemplate() {
-    if (!_inboxActiveConvId) {
-      window.AgentShared.showToast('Eerst gesprek selecteren', 'error');
-      return;
-    }
-    const inp = document.getElementById('inboxReplyTemplateName');
-    if (!inp) return;
-    const template_name = (inp.value || '').trim();
-    if (!template_name) {
-      window.AgentShared.showToast('Template-naam vereist', 'error');
-      return;
-    }
-    const btn = document.getElementById('inboxReplyTemplateSend');
-    if (btn) btn.disabled = true;
-    try {
-      const r = await window.AgentShared.apiFetch('/api/inbox-send', {
-        method:  'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ conversation_id: _inboxActiveConvId, mode: 'template', template_name }),
-      });
-      const d = await r.json().catch(() => ({}));
-      if (r.status === 503) {
-        window.AgentShared.showToast('Meta WhatsApp niet geconfigureerd', 'error');
-        return;
-      }
-      if (!r.ok) {
-        window.AgentShared.showToast('Template versturen mislukt: ' + (d.error || ('HTTP ' + r.status)), 'error');
-        return;
-      }
-      inp.value = '';
-      window.AgentShared.showToast('Template verstuurd', 'success');
-      await openInboxConv(_inboxActiveConvId);
-    } catch (e) {
-      console.error('[sendInboxTemplate]', e);
-      window.AgentShared.showToast('Template versturen mislukt: ' + e.message, 'error');
-    } finally {
-      if (btn) btn.disabled = false;
+      // Re-evaluate disabled-state via centrale sync ipv harde toggle.
+      _inboxApplyComposeState();
     }
   }
 
   async function refreshInboxConv() {
     // Stille refresh — geen "Laden…" placeholder, geen toasts.
-    if (_inboxActiveConvId) {
+    // Belangrijk: deze poll mag de actieve conv NIET onderbreken:
+    // - skip thread-rerender als er geen nieuwe message-id is bijgekomen
+    // - re-render gebruikt forceScroll=false → respecteert user-scrollpositie
+    // - textarea/input-state blijft onaangeraakt (we patchen alleen messages-DOM)
+    const activeId = _inboxActiveConvId;
+    if (activeId) {
       try {
         const params = new URLSearchParams();
-        params.set('conversation_id', _inboxActiveConvId);
+        params.set('conversation_id', activeId);
         params.set('limit', '200');
         // Niet markeren als gelezen bij auto-poll — gebruiker heeft thread mogelijk niet in beeld.
         params.set('mark_as_read', 'false');
         const r = await window.AgentShared.apiFetch('/api/inbox-messages-list?' + params.toString());
+        // Conv kan tussentijds gewisseld zijn — gooi response weg om flicker te voorkomen.
+        if (activeId !== _inboxActiveConvId) return;
         if (r.ok) {
           const d = await r.json().catch(() => ({}));
-          _inboxMessages        = Array.isArray(d.items) ? d.items : _inboxMessages;
+          const newItems = Array.isArray(d.items) ? d.items : null;
+          const prevLast = (_inboxMessages.length ? _inboxMessages[_inboxMessages.length - 1] : null);
+          const nextLast = (newItems && newItems.length ? newItems[newItems.length - 1] : null);
+          const changed = !!(newItems && (
+            (_inboxMessages.length !== newItems.length) ||
+            (prevLast && nextLast && (prevLast.id !== nextLast.id || prevLast.status !== nextLast.status))
+          ));
+          if (newItems) _inboxMessages = newItems;
           _inboxActiveConv      = d.conversation || _inboxActiveConv;
           _inboxConvCanSendText = !!(d.conversation && d.conversation.can_send_text);
-          _inboxRenderMessages();
+          // Alleen re-render wanneer er daadwerkelijk iets is veranderd, en zonder force-scroll.
+          if (changed) _inboxRenderMessages({ forceScroll: false });
         }
       } catch (e) {
         console.error('[refreshInboxConv]', e);
       }
     }
-    // Conv-list ook stilletjes herladen voor unread-badges.
+    // Conv-list ook stilletjes herladen voor unread-badges (re-highlight active conv).
     loadInboxConvList();
   }
 
@@ -3091,6 +3710,200 @@
   function closeInboxCustomerModal() {
     const modal = document.getElementById('inboxCustomerModal');
     if (modal) modal.classList.add('hidden');
+  }
+
+  // ──────────────────────────────────────────────────────────────────────────
+  //  Klant-info paneel (rechter kolom in 3-col layout) — data-loading
+  // ──────────────────────────────────────────────────────────────────────────
+
+  // Reset paneel naar empty-state (zichtbaar als geen conv geselecteerd).
+  function _inboxResetCustomerPanel() {
+    const emptyEl   = document.getElementById('inboxCustomerPanelEmpty');
+    const skelEl    = document.getElementById('inboxCustomerPanelSkeleton');
+    const contentEl = document.getElementById('inboxCustomerPanelContent');
+    if (emptyEl)   emptyEl.hidden = false;
+    if (skelEl)    skelEl.hidden = true;
+    if (contentEl) contentEl.hidden = true;
+  }
+
+  // Initialen voor het grote klant-paneel-avatar. Hergebruikt _inboxInitials.
+  function _inboxPanelAvatarFor(name, phone) {
+    return _inboxInitials(name, phone);
+  }
+
+  // Format euro vanuit een number (al in euro's, niet centen).
+  function _inboxFmtEur(n) {
+    const v = Number(n) || 0;
+    try {
+      return new Intl.NumberFormat('nl-NL', { style: 'currency', currency: 'EUR' }).format(v);
+    } catch (_) {
+      return '€ ' + v.toFixed(2).replace('.', ',');
+    }
+  }
+
+  // dd-mm-yyyy uit ISO-string of date-only string. '—' bij ontbreken.
+  function _inboxFmtDateNL(iso) {
+    if (!iso) return '—';
+    const s = String(iso);
+    const d = new Date(s.length > 10 ? s : (s + 'T00:00:00'));
+    if (isNaN(d.getTime())) return '—';
+    return String(d.getDate()).padStart(2, '0') + '-' +
+           String(d.getMonth() + 1).padStart(2, '0') + '-' +
+           d.getFullYear();
+  }
+
+  // Hoofd-laad-functie. Roept /api/inbox-conversation-context aan en vult DOM.
+  async function loadInboxCustomerContext(conversationId) {
+    const emptyEl   = document.getElementById('inboxCustomerPanelEmpty');
+    const contentEl = document.getElementById('inboxCustomerPanelContent');
+    if (!emptyEl || !contentEl) return;
+
+    if (!conversationId) {
+      _inboxResetCustomerPanel();
+      return;
+    }
+
+    // Skeleton tijdens load — vloeiende overgang naar gevulde content.
+    _inboxShowCustomerPanelSkeleton();
+
+    try {
+      const params = new URLSearchParams({ conversation_id: conversationId });
+      const r = await window.AgentShared.apiFetch('/api/inbox-conversation-context?' + params.toString());
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        console.error('[loadInboxCustomerContext]', r.status, d && d.error);
+        // Lichte foutweergave: behoud paneel maar toon "—" overal.
+        _inboxRenderCustomerPanel({ conversation: null, customer: null, open_invoices: [], totals: { open_amount: 0, invoice_count: 0 } });
+        return;
+      }
+      _inboxRenderCustomerPanel(d || {});
+    } catch (e) {
+      console.error('[loadInboxCustomerContext] exception:', e && e.message);
+      _inboxRenderCustomerPanel({ conversation: null, customer: null, open_invoices: [], totals: { open_amount: 0, invoice_count: 0 } });
+    }
+  }
+
+  // Render-functie. Krijgt response van /api/inbox-conversation-context.
+  function _inboxRenderCustomerPanel(d) {
+    // Verberg skeleton + toon content-container.
+    _inboxHideCustomerPanelSkeleton();
+    const contentEl = document.getElementById('inboxCustomerPanelContent');
+    const emptyEl   = document.getElementById('inboxCustomerPanelEmpty');
+    if (emptyEl)   emptyEl.hidden = true;
+    if (contentEl) contentEl.hidden = false;
+
+    const conv = d && d.conversation ? d.conversation : null;
+    const cust = d && d.customer ? d.customer : null;
+    const invs = Array.isArray(d && d.open_invoices) ? d.open_invoices : [];
+    const totals = (d && d.totals) || { open_amount: 0, invoice_count: 0 };
+
+    const avatarEl = document.getElementById('inboxCustPanelAvatar');
+    const nameEl   = document.getElementById('inboxCustPanelName');
+    const phoneEl  = document.getElementById('inboxCustPanelPhone');
+    const badgeEl  = document.getElementById('inboxCustPanelWindow');
+    const totEl    = document.getElementById('inboxCustPanelOpenTotal');
+    const invsEl   = document.getElementById('inboxCustPanelInvoices');
+    const sinceEl  = document.getElementById('inboxCustPanelSince');
+    const emailRow = document.getElementById('inboxCustPanelEmailRow');
+    const emailEl  = document.getElementById('inboxCustPanelEmail');
+    const openLnk  = document.getElementById('inboxCustPanelOpen');
+    const invLnk   = document.getElementById('inboxCustPanelInvoice');
+    const infoSec  = document.getElementById('inboxCustPanelInfoSection');
+
+    // Naam + phone + avatar.
+    const phone = (cust && cust.phone) || (conv && conv.phone_number) || '';
+    const displayName = (cust && cust.name) ? cust.name : 'Onbekend contact';
+    if (nameEl)  nameEl.textContent  = displayName;
+    if (phoneEl) phoneEl.textContent = phone || '—';
+    if (avatarEl) {
+      avatarEl.textContent     = _inboxPanelAvatarFor(displayName, phone);
+      avatarEl.style.background = _inboxAvatarColor(phone || displayName);
+    }
+
+    // 24h window badge.
+    if (badgeEl) {
+      if (!conv) {
+        badgeEl.hidden = true;
+      } else {
+        badgeEl.hidden = false;
+        badgeEl.classList.remove('open', 'expired');
+        if (conv.window_open) {
+          badgeEl.classList.add('open');
+          badgeEl.textContent = '24h open';
+        } else {
+          badgeEl.classList.add('expired');
+          badgeEl.textContent = 'Window verlopen';
+        }
+      }
+    }
+
+    // Open facturen.
+    if (totEl)  totEl.textContent  = _inboxFmtEur(totals.open_amount);
+    if (invsEl) {
+      if (!invs.length) {
+        invsEl.innerHTML = '<div class="inbox-c-empty-line">Geen open facturen</div>';
+      } else {
+        invsEl.innerHTML = invs.map(inv => {
+          const days = Number(inv.days_overdue) || 0;
+          const overdue = !!inv.is_overdue && days > 0;
+          const badgeCls = overdue ? 'overdue' : 'normal';
+          const badgeTxt = overdue ? (days + 'd te laat') : 'Op tijd';
+          const nr = inv.invoice_number || '#' + String(inv.id || '').slice(0, 6);
+          return '<div class="inbox-c-invoice-row">'
+            +    '<span class="inbox-c-invoice-nr">' + esc(nr) + '</span>'
+            +    '<span class="inbox-c-invoice-right">'
+            +      '<span class="inbox-c-invoice-amount">' + esc(_inboxFmtEur(inv.amount_open)) + '</span>'
+            +      '<span class="inbox-c-overdue-badge ' + badgeCls + '">' + esc(badgeTxt) + '</span>'
+            +    '</span>'
+            + '</div>';
+        }).join('');
+      }
+    }
+
+    // Klant info (datums + email). Verberg sectie volledig als er geen klant is.
+    if (infoSec) infoSec.style.display = cust ? '' : 'none';
+    if (cust) {
+      if (sinceEl)  sinceEl.textContent = _inboxFmtDateNL(cust.created_at);
+      if (cust.email) {
+        if (emailRow) emailRow.hidden = false;
+        if (emailEl)  emailEl.innerHTML = '<a href="mailto:' + esc(cust.email) + '">' + esc(cust.email) + '</a>';
+      } else {
+        if (emailRow) emailRow.hidden = true;
+      }
+    }
+
+    // Acties: bekijk-in-klanten / koppel-aan-klant + maak-factuur-aan deeplinks.
+    if (openLnk) {
+      if (cust && cust.id) {
+        openLnk.href = '/modules/klanten.html?id=' + encodeURIComponent(cust.id);
+        openLnk.innerHTML = '<i class="ti ti-user"></i> Bekijk in klanten';
+        openLnk.classList.remove('dim');
+        openLnk.style.pointerEvents = '';
+      } else if (phone) {
+        // Onbekende klant maar wel een nummer: deeplink naar klanten-module om
+        // bestaande klant te zoeken / koppelen op telefoonnummer.
+        openLnk.href = '/modules/klanten.html?phone=' + encodeURIComponent(phone);
+        openLnk.innerHTML = '<i class="ti ti-link"></i> Koppel aan bestaande klant';
+        openLnk.classList.remove('dim');
+        openLnk.style.pointerEvents = '';
+      } else {
+        openLnk.href = '#';
+        openLnk.innerHTML = '<i class="ti ti-user"></i> Bekijk in klanten';
+        openLnk.classList.add('dim');
+        openLnk.style.pointerEvents = 'none';
+      }
+    }
+    if (invLnk) {
+      if (cust && cust.id) {
+        invLnk.href = '/modules/klanten.html?id=' + encodeURIComponent(cust.id) + '&tab=facturen';
+        invLnk.classList.remove('dim');
+        invLnk.style.pointerEvents = '';
+      } else {
+        invLnk.href = '#';
+        invLnk.classList.add('dim');
+        invLnk.style.pointerEvents = 'none';
+      }
+    }
   }
 
   // ──────────────────────────────────────────────────────────────────────────
@@ -3467,9 +4280,9 @@
 
   function selectInboxQr(item) {
     if (!item) return;
-    const ta = document.getElementById('inboxReplyTextArea');
-    if (!ta) {
-      // Geen text-area beschikbaar (bv. 24h verlopen → template-modus).
+    const ta = document.getElementById('inboxComposeTextarea');
+    if (!ta || ta.disabled) {
+      // Textarea uitgeschakeld (bv. 24h verlopen).
       window.AgentShared.showToast('Open eerst een gesprek met actief 24h-window', 'error');
       closeInboxQrPicker();
       return;
@@ -3482,12 +4295,13 @@
       ta.value = body;
     }
     closeInboxQrPicker();
-    // Focus + cursor naar einde.
+    // Focus + cursor naar einde + autoresize.
     try {
       ta.focus();
       const len = ta.value.length;
       ta.setSelectionRange(len, len);
     } catch (_e) { /* defensief */ }
+    autoResizeComposeTextarea();
     window.AgentShared.showToast('Snel antwoord ingevoegd (Bewerk + verstuur)', 'success');
   }
 
@@ -3511,22 +4325,16 @@
     const refreshBtn = document.getElementById('inboxConvRefresh');
     if (refreshBtn) refreshBtn.addEventListener('click', () => loadInboxConvList());
 
-    // Send-knoppen.
-    const sendTextBtn = document.getElementById('inboxReplyTextSend');
-    if (sendTextBtn) sendTextBtn.addEventListener('click', () => sendInboxText());
-    const sendTplBtn  = document.getElementById('inboxReplyTemplateSend');
-    if (sendTplBtn)  sendTplBtn.addEventListener('click', () => sendInboxTemplate());
+    // Send-knop (één compose-knop voor text-versturen).
+    const sendBtn = document.getElementById('inboxComposeSendBtn');
+    if (sendBtn) sendBtn.addEventListener('click', () => sendInboxText());
 
-    // Template-picker openers (zowel binnen text- als template-reply container).
-    ['inboxTplBtn','inboxTplBtn2'].forEach(id => {
-      const b = document.getElementById(id);
-      if (b) b.addEventListener('click', () => openInboxTplPicker());
-    });
+    // Template-picker opener.
+    const tplBtn = document.getElementById('inboxTplBtn');
+    if (tplBtn) tplBtn.addEventListener('click', () => openInboxTplPicker());
     // Snel-antwoord (quick-reply) picker — opent inboxQrPickerModal.
-    ['inboxQrBtn','inboxQrBtn2'].forEach(id => {
-      const b = document.getElementById(id);
-      if (b) b.addEventListener('click', () => openInboxQrPicker());
-    });
+    const qrBtn = document.getElementById('inboxQrBtn');
+    if (qrBtn) qrBtn.addEventListener('click', () => openInboxQrPicker());
 
     // Template-picker modal wiring
     const tplModal     = document.getElementById('inboxTplPickerModal');
@@ -3598,8 +4406,8 @@
       }
     });
 
-    // Cmd/Ctrl+Enter in textarea → versturen.
-    const ta = document.getElementById('inboxReplyTextArea');
+    // Cmd/Ctrl+Enter in compose-textarea → versturen. Plain Enter + Shift+Enter = newline.
+    const ta = document.getElementById('inboxComposeTextarea');
     if (ta) {
       ta.addEventListener('keydown', (e) => {
         if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
@@ -3607,7 +4415,12 @@
           sendInboxText();
         }
       });
+      // Autoresize op elke wijziging (typen, paste, cut).
+      ta.addEventListener('input', () => autoResizeComposeTextarea());
     }
+
+    // Initiële compose-state: nog geen gesprek geselecteerd.
+    _inboxApplyComposeState();
 
     // Klant-info knop in thread-header + delegated klik op customer-link in naam.
     const custBtn = document.getElementById('inboxThreadCustomerBtn');
