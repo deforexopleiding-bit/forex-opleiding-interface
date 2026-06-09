@@ -43,11 +43,13 @@ export default async function handler(req, res) {
   if (!id || !UUID_RE.test(id)) return res.status(400).json({ error: 'id (uuid) vereist' });
 
   try {
+    // NB: DB-kolommen heten proposed_by_user_id / approved_by_user_id;
+    // aliased in de response naar proposed_by / approved_by voor UI-compat.
     const { data: pa, error: paErr } = await supabaseAdmin
       .from('pending_actions')
       .select(`
         id, customer_id, arrangement_id, action_type, payload, status,
-        proposed_by, approved_by, approved_at, executed_at, execution_result,
+        proposed_by_user_id, approved_by_user_id, approved_at, executed_at, execution_result,
         reject_reason, scheduled_for, expires_at, created_at, updated_at,
         customers:customer_id (
           id, is_company, company_name, first_name, last_name, email, phone
@@ -86,15 +88,15 @@ export default async function handler(req, res) {
     } : null;
 
     // ---- Approver / Rejecter lookup ----
-    // approved_by-kolom wordt door /approve EN /reject ingevuld; status bepaalt
-    // welke rol hij feitelijk vervult in de UI.
+    // approved_by_user_id-kolom wordt door /approve EN /reject ingevuld; status
+    // bepaalt welke rol hij feitelijk vervult in de UI.
     let approver = null;
     let rejecter = null;
-    if (pa.approved_by) {
+    if (pa.approved_by_user_id) {
       const { data: prof, error: profErr } = await supabaseAdmin
         .from('profiles')
         .select('id, full_name, email')
-        .eq('id', pa.approved_by)
+        .eq('id', pa.approved_by_user_id)
         .maybeSingle();
       if (profErr) console.error('[pending-actions-detail profile]', profErr.message);
       else if (prof) {
@@ -111,8 +113,8 @@ export default async function handler(req, res) {
       action_type:      pa.action_type,
       payload:          pa.payload || {},
       status:           pa.status,
-      proposed_by:      pa.proposed_by,
-      approved_by:      pa.approved_by,
+      proposed_by:      pa.proposed_by_user_id,
+      approved_by:      pa.approved_by_user_id,
       approved_at:      pa.approved_at,
       executed_at:      pa.executed_at,
       execution_result: pa.execution_result,

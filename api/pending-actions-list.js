@@ -38,6 +38,11 @@ function clampInt(v, def, min, max) {
   return Math.min(Math.max(Math.trunc(n), min), max);
 }
 
+// Status-enum is lowercase in de DB (zie 2026-06-09-payment-arrangements-d1.sql
+// pending_actions_status_check). Spec-laag (arrangement.status) is uppercase,
+// maar pending_actions.status blijft lowercase voor backward-compat met de
+// executor (D2). We accepteren beide casings als query-param en normaliseren
+// naar lowercase voor de SQL-filter.
 const VALID_STATUS = ['pending', 'approved', 'rejected', 'executed', 'failed', 'cancelled'];
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -57,6 +62,9 @@ export default async function handler(req, res) {
   }
 
   const q          = req.query || {};
+  // status-param: accepteer zowel lowercase als UPPERCASE (spec-laag stuurt
+  // uppercase PENDING/APPROVED/...). DB-kolom blijft lowercase, dus we
+  // normaliseren altijd via toLowerCase() voordat de filter wordt gezet.
   const statusRaw  = q.status      ? String(q.status).toLowerCase() : null;
   const actionType = q.action_type ? String(q.action_type)          : null;
   const source     = q.source      ? String(q.source)               : null;
@@ -65,7 +73,7 @@ export default async function handler(req, res) {
   const offset     = Math.max(0, clampInt(q.offset, 0, 0, 1_000_000));
 
   if (statusRaw && !VALID_STATUS.includes(statusRaw)) {
-    return res.status(400).json({ error: `Ongeldige status; verwacht ${VALID_STATUS.join('|')}` });
+    return res.status(400).json({ error: `Ongeldige status; verwacht ${VALID_STATUS.join('|')} (case-insensitive)` });
   }
   if (customerId && !UUID_RE.test(customerId)) {
     return res.status(400).json({ error: 'customer_id moet een uuid zijn' });
@@ -73,11 +81,14 @@ export default async function handler(req, res) {
 
   try {
     // ---- Hoofdquery: items met embedded customer + arrangement ----
+    // NB: DB-kolommen heten proposed_by_user_id / approved_by_user_id.
+    // We mappen ze in de response naar de kortere aliassen proposed_by /
+    // approved_by die de UI verwacht (back-compat met arrangement-laag).
     let query = supabaseAdmin
       .from('pending_actions')
       .select(`
         id, customer_id, arrangement_id, action_type, payload, status,
-        proposed_by, approved_by, approved_at, executed_at, execution_result,
+        proposed_by_user_id, approved_by_user_id, approved_at, executed_at, execution_result,
         reject_reason, scheduled_for, expires_at, created_at, updated_at,
         customers:customer_id ( id, is_company, company_name, first_name, last_name, email ),
         payment_arrangements:arrangement_id ( id, type, status )
@@ -104,8 +115,8 @@ export default async function handler(req, res) {
         action_type:      row.action_type,
         payload:          row.payload || {},
         status:           row.status,
-        proposed_by:      row.proposed_by,
-        approved_by:      row.approved_by,
+        proposed_by:      row.proposed_by_user_id,
+        approved_by:      row.approved_by_user_id,
         approved_at:      row.approved_at,
         executed_at:      row.executed_at,
         execution_result: row.execution_result,

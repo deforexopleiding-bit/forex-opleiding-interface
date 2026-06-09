@@ -7,11 +7,11 @@
 // State-machine: alleen vanuit status='pending' kan afgewezen worden;
 // anders 409 met huidige status.
 //
-// NB: schema-kolomnamen (zie 2026-06-09-payment-arrangements-d1.sql):
-//   - reject_reason  text          (NIET 'rejection_reason')
-//   - approved_by    uuid          (hergebruikt voor 'wie afwees'; geen
-//                                   aparte rejected_by-kolom in schema)
-//   - approved_at    timestamptz   (functioneert hier als 'beslis-tijdstip')
+// NB: schema-kolomnamen in deployed DB:
+//   - reject_reason        text          (NIET 'rejection_reason')
+//   - approved_by_user_id  uuid          (hergebruikt voor 'wie afwees'; geen
+//                                         aparte rejected_by-kolom in schema)
+//   - approved_at          timestamptz   (functioneert hier als 'beslis-tijdstip')
 // De UI/body gebruikt 'rejection_reason' (Engelse semantiek) — we mappen
 // dit op de bestaande 'reject_reason'-kolom voor schema-consistentie.
 
@@ -62,20 +62,20 @@ export default async function handler(req, res) {
     const nowIso = new Date().toISOString();
 
     // ---- UPDATE -> rejected ----
-    // approved_by + approved_at hergebruikt als 'beslisser' / 'beslis-tijdstip'
-    // (geen aparte rejected_by-kolom in schema D1).
+    // approved_by_user_id + approved_at hergebruikt als 'beslisser' / 'beslis-
+    // tijdstip' (geen aparte rejected_by-kolom in schema D1).
     const { data: updated, error: updErr } = await supabaseAdmin
       .from('pending_actions')
       .update({
-        status:        'rejected',
-        approved_at:   nowIso,
-        approved_by:   user.id,
-        reject_reason: reason,
-        updated_at:    nowIso,
+        status:              'rejected',
+        approved_at:         nowIso,
+        approved_by_user_id: user.id,
+        reject_reason:       reason,
+        updated_at:          nowIso,
       })
       .eq('id', id)
       .eq('status', 'pending')   // optimistic concurrency
-      .select('id, status, reject_reason, approved_at, approved_by, updated_at')
+      .select('id, status, reject_reason, approved_at, approved_by_user_id, updated_at')
       .single();
     if (updErr) throw new Error('update: ' + updErr.message);
 

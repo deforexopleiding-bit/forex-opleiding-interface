@@ -36,12 +36,13 @@ export default async function handler(req, res) {
   if (!id || !UUID_RE.test(id)) return res.status(400).json({ error: 'id (uuid) vereist' });
 
   try {
+    // NB: approval-state zit op pending_actions (zie hieronder), niet op
+    // payment_arrangements. De arrangement-tabel bevat alleen de lifecycle-status.
     const { data: arr, error: arrErr } = await supabaseAdmin
       .from('payment_arrangements')
       .select(`
         id, customer_id, invoice_ids, type, status, details,
-        proposed_by, approved_by, approved_at, rejected_at, reject_reason,
-        notes, created_at, updated_at,
+        proposed_by, notes, created_at, updated_at,
         customers:customer_id (
           id, is_company, company_name, first_name, last_name, email, phone
         )
@@ -76,12 +77,19 @@ export default async function handler(req, res) {
     }
 
     // --- Pending actions ophalen (alle statussen — UI bepaalt zelf filtering).
-    const { data: paRows, error: paErr } = await supabaseAdmin
+    // NB: pending_actions-kolommen heten proposed_by_user_id / approved_by_user_id.
+    const { data: paRowsRaw, error: paErr } = await supabaseAdmin
       .from('pending_actions')
-      .select('id, customer_id, arrangement_id, action_type, payload, status, proposed_by, approved_by, approved_at, executed_at, execution_result, reject_reason, scheduled_for, expires_at, created_at, updated_at')
+      .select('id, customer_id, arrangement_id, action_type, payload, status, proposed_by_user_id, approved_by_user_id, approved_at, executed_at, execution_result, reject_reason, scheduled_for, expires_at, created_at, updated_at')
       .eq('arrangement_id', id)
       .order('created_at', { ascending: true });
     if (paErr) throw new Error('pending_actions: ' + paErr.message);
+    // Alias terug naar proposed_by / approved_by voor UI-compat.
+    const paRows = (paRowsRaw || []).map(r => ({
+      ...r,
+      proposed_by: r.proposed_by_user_id,
+      approved_by: r.approved_by_user_id,
+    }));
 
     const arrangement = {
       id:            arr.id,
@@ -91,10 +99,6 @@ export default async function handler(req, res) {
       status:        arr.status,
       details:       arr.details || {},
       proposed_by:   arr.proposed_by,
-      approved_by:   arr.approved_by,
-      approved_at:   arr.approved_at,
-      rejected_at:   arr.rejected_at,
-      reject_reason: arr.reject_reason,
       notes:         arr.notes,
       created_at:    arr.created_at,
       updated_at:    arr.updated_at,

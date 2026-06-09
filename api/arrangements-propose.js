@@ -212,13 +212,15 @@ export default async function handler(req, res) {
     if (arrErr) throw new Error('arrangement-insert: ' + arrErr.message);
 
     // ---- Bouw pending_actions per type ----
+    // NB: pending_actions-kolom heet proposed_by_user_id (verschilt van de
+    // payment_arrangements-laag, waar de kortere alias proposed_by wel bestaat).
     const actionType = ACTION_TYPE_FOR[type];
     const baseRow = {
-      customer_id:    customerId,
-      arrangement_id: arr.id,
-      action_type:    actionType,
-      status:         'pending',
-      proposed_by:    user.id,
+      customer_id:         customerId,
+      arrangement_id:      arr.id,
+      action_type:         actionType,
+      status:              'pending',
+      proposed_by_user_id: user.id,
     };
 
     const rows = [];
@@ -290,7 +292,7 @@ export default async function handler(req, res) {
       const { data: paRows, error: paErr } = await supabaseAdmin
         .from('pending_actions')
         .insert(rows)
-        .select('id, customer_id, arrangement_id, action_type, status, payload, proposed_by, created_at, updated_at');
+        .select('id, customer_id, arrangement_id, action_type, status, payload, proposed_by_user_id, created_at, updated_at');
       if (paErr) {
         // Best-effort rollback: verwijder arrangement zodat we geen weeshuis-rij achterlaten.
         try {

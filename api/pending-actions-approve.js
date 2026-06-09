@@ -7,10 +7,11 @@
 // State-machine: alleen vanuit status='pending' kan goedgekeurd worden;
 // anders 409 met huidige status.
 //
-// NB: schema-kolomnamen (zie 2026-06-09-payment-arrangements-d1.sql):
-//   - approved_by  uuid REFERENCES profiles(id)
-//   - approved_at  timestamptz
-// Geen aparte 'approved_by_user_id'-kolom — code volgt het DB-schema 1-op-1.
+// NB: schema-kolomnamen in deployed DB:
+//   - approved_by_user_id  uuid REFERENCES profiles(id)
+//   - approved_at          timestamptz
+// (De _user_id suffix verschilt van de payment_arrangements-laag waar de
+//  kortere alias proposed_by/approved_by op rij-niveau ontbreekt.)
 //
 // D2 TODO: bij APPROVED en auto_execute=true (of action-type-config in
 //          arrangement_action_settings), queue executor om de TL-actie uit
@@ -65,14 +66,14 @@ export default async function handler(req, res) {
     const { data: updated, error: updErr } = await supabaseAdmin
       .from('pending_actions')
       .update({
-        status:      'approved',
-        approved_at: nowIso,
-        approved_by: user.id,
-        updated_at:  nowIso,
+        status:              'approved',
+        approved_at:         nowIso,
+        approved_by_user_id: user.id,
+        updated_at:          nowIso,
       })
       .eq('id', id)
       .eq('status', 'pending')   // optimistic concurrency
-      .select('id, status, approved_at, approved_by, updated_at')
+      .select('id, status, approved_at, approved_by_user_id, updated_at')
       .single();
     if (updErr) throw new Error('update: ' + updErr.message);
 
