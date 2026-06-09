@@ -134,6 +134,12 @@
     .wa-var-chip { padding:4px 10px; background:#f3f4f6; border:1px solid var(--border); border-radius:999px; font-size:12px; cursor:pointer; color:var(--text); font-family:inherit; line-height:1.3; }
     .wa-var-chip:hover { background:#e5e7eb; }
     .wa-var-chip[disabled] { opacity:.5; cursor:not-allowed; }
+    /* ── WhatsApp Connection edit modal — Contact-informatie afdeling sectie (C4.6) ── */
+    .wa-conf-afdeling-section { margin-top:12px; border-top:1px solid var(--border); padding-top:10px; }
+    .wa-conf-afdeling-section > summary { cursor:pointer; font-size:13px; font-weight:600; color:var(--text-dim); padding:4px 0; user-select:none; }
+    .wa-conf-afdeling-section > summary:hover { color:var(--text); }
+    .wa-conf-afdeling-form { display:grid; grid-template-columns:1fr; gap:8px; padding:8px 0; }
+    .wa-conf-afdeling-form .form-label { font-size:12px; color:var(--text-dim); margin-bottom:2px; display:block; }
     #waMetaVarsBlock.wa-vars-named { background:rgba(34,197,94,0.06); border-style:solid; border-color:rgba(34,197,94,0.4); }
     #waMetaVarsBlock .wa-var-readonly-row { display:grid; grid-template-columns:auto 1fr; gap:8px; align-items:center; padding:3px 0; font-size:12px; }
     #waMetaVarsBlock .wa-var-readonly-key { font-family:monospace; font-size:11.5px; color:var(--text); background:rgba(34,197,94,0.12); padding:2px 6px; border-radius:4px; }
@@ -430,6 +436,27 @@
         <input type="checkbox" id="waConfActiveInput" checked style="width:16px;height:16px" />
         <label for="waConfActiveInput" style="font-size:13px;cursor:pointer">Actief (gebruikt voor send/ontvangen)</label>
       </div>
+      <details class="wa-conf-afdeling-section">
+        <summary>Contact-informatie afdeling</summary>
+        <div class="wa-conf-afdeling-form">
+          <div class="form-group">
+            <label class="form-label" for="waConfAfdelingTelefoon">Telefoon (bel-nummer)</label>
+            <input type="text" id="waConfAfdelingTelefoon" class="form-input" placeholder="+31 85 130 83 62" />
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="waConfAfdelingWhatsapp">WhatsApp-nummer</label>
+            <input type="text" id="waConfAfdelingWhatsapp" class="form-input" placeholder="+31 6 51031673" />
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="waConfAfdelingEmail">E-mail</label>
+            <input type="email" id="waConfAfdelingEmail" class="form-input" placeholder="administratie@deforexopleiding.nl" />
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="waConfAfdelingOndertekenaar">Ondertekenaar (naam)</label>
+            <input type="text" id="waConfAfdelingOndertekenaar" class="form-input" placeholder="De Forex Opleiding" />
+          </div>
+        </div>
+      </details>
       <div class="form-error hidden" id="waConfError"></div>
     </div>
     <div class="modal-footer">
@@ -1740,6 +1767,15 @@ async function openWaConfEdit(item) {
   moduleInput.disabled = isEdit;
   labelInput.value  = item ? (item.display_label || item.label || '') : '';
   activeInput.checked = item ? (item.is_active !== false) : true;
+  // Contact-informatie afdeling velden (C4.6)
+  const afdTel  = document.getElementById('waConfAfdelingTelefoon');
+  const afdWa   = document.getElementById('waConfAfdelingWhatsapp');
+  const afdMail = document.getElementById('waConfAfdelingEmail');
+  const afdOnd  = document.getElementById('waConfAfdelingOndertekenaar');
+  if (afdTel)  afdTel.value  = item ? (item.afdeling_telefoon     || '') : '';
+  if (afdWa)   afdWa.value   = item ? (item.afdeling_whatsapp     || '') : '';
+  if (afdMail) afdMail.value = item ? (item.afdeling_email        || '') : '';
+  if (afdOnd)  afdOnd.value  = item ? (item.afdeling_ondertekenaar || '') : '';
   fillWaConfPhoneSelect('');
   document.getElementById('waConfEditModal').classList.remove('hidden');
   try {
@@ -1773,11 +1809,19 @@ async function saveWaConfRow() {
   btn.disabled = true; btn.textContent = 'Opslaan…';
 
   try {
+    const afdTel  = (document.getElementById('waConfAfdelingTelefoon')?.value || '').trim();
+    const afdWa   = (document.getElementById('waConfAfdelingWhatsapp')?.value || '').trim();
+    const afdMail = (document.getElementById('waConfAfdelingEmail')?.value || '').trim();
+    const afdOnd  = (document.getElementById('waConfAfdelingOndertekenaar')?.value || '').trim();
     const body = {
       module: moduleKey,
       display_label: label,
       phone_number_id: phoneId,
       is_active: isActive,
+      afdeling_telefoon: afdTel,
+      afdeling_whatsapp: afdWa,
+      afdeling_email: afdMail,
+      afdeling_ondertekenaar: afdOnd,
     };
     const method = _waConfEditingId ? 'PATCH' : 'POST';
     const path   = '/api/admin-whatsapp-module-upsert' + (_waConfEditingId ? `?id=${encodeURIComponent(_waConfEditingId)}` : '');
