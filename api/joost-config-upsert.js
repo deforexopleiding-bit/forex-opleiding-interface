@@ -152,7 +152,7 @@ export default async function handler(req, res) {
     updates.is_enabled = body.is_enabled;
   }
 
-  // ---- Existing rij ophalen (om INSERT vs UPDATE pad te kiezen) ----
+  // ---- Existing rij ophalen (voor before_json audit + UPDATE no-op check) ----
   try {
     const { data: existing, error: getErr } = await supabaseAdmin
       .from('joost_config')
@@ -168,51 +168,36 @@ export default async function handler(req, res) {
       return res.status(500).json({ error: getErr.message });
     }
 
-    let row;
-    if (existing) {
-      // UPDATE-pad: minstens 1 mutatie verplicht (anders is de call zinloos).
-      if (Object.keys(updates).length === 0) {
-        return res.status(400).json({ error: 'Geen velden om te updaten' });
-      }
-      updates.updated_by_user_id = user.id;
-      updates.updated_at = new Date().toISOString();
+    // UPDATE-pad zonder mutations is zinloos (INSERT-pad mag wel zonder
+    // updates, dan landen DB-defaults).
+    if (existing && Object.keys(updates).length === 0) {
+      return res.status(400).json({ error: 'Geen velden om te updaten' });
+    }
 
-      const { data: updated, error: updErr } = await supabaseAdmin
-        .from('joost_config')
-        .update(updates)
-        .eq('module', moduleKey)
-        .select(`
-          module, persona_name, persona_tone, system_prompt_template,
-          knowledge_base, model, temperature, context_message_count,
-          is_enabled, updated_by_user_id, updated_at
-        `)
-        .single();
-      if (updErr) {
-        console.error('[joost-config-upsert] update error:', updErr.message);
-        return res.status(500).json({ error: updErr.message });
-      }
-      row = updated;
-    } else {
-      // INSERT-pad: DB-defaults vullen ontbrekende velden (zie migratie).
-      const insertRow = {
-        module: moduleKey,
-        ...updates,
-        updated_by_user_id: user.id,
-      };
-      const { data: inserted, error: insErr } = await supabaseAdmin
-        .from('joost_config')
-        .insert(insertRow)
-        .select(`
-          module, persona_name, persona_tone, system_prompt_template,
-          knowledge_base, model, temperature, context_message_count,
-          is_enabled, updated_by_user_id, updated_at
-        `)
-        .single();
-      if (insErr) {
-        console.error('[joost-config-upsert] insert error:', insErr.message);
-        return res.status(500).json({ error: insErr.message });
-      }
-      row = inserted;
+    // Echte atomic UPSERT: INSERT ... ON CONFLICT (module) DO UPDATE via
+    // PostgREST. Bij geen-rij landen DB-defaults voor velden die niet in
+    // updates zitten (kolom-defaults uit migratie). Bij wel-rij worden
+    // alleen de meegestuurde keys overschreven (PostgREST upsert ignoreert
+    // undefined keys niet — daarom bouwen we de payload expliciet).
+    const upsertRow = {
+      module: moduleKey,
+      ...updates,
+      updated_by_user_id: user.id,
+      updated_at: new Date().toISOString(),
+    };
+
+    const { data: row, error: upsertErr } = await supabaseAdmin
+      .from('joost_config')
+      .upsert(upsertRow, { onConflict: 'module' })
+      .select(`
+        module, persona_name, persona_tone, system_prompt_template,
+        knowledge_base, model, temperature, context_message_count,
+        is_enabled, updated_by_user_id, updated_at
+      `)
+      .single();
+    if (upsertErr) {
+      console.error('[joost-config-upsert] upsert error:', upsertErr.message);
+      return res.status(500).json({ error: upsertErr.message });
     }
 
     // ---- Audit-log (fail-soft) ----
