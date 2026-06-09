@@ -4953,6 +4953,8 @@
     const sendEnabled = canSend && !!inv.tl_invoice_id;
     const updateEnabled = canUpdate && !!inv.tl_invoice_id && inv.status === 'concept';
     const creditEnabled = canCredit && !!inv.tl_invoice_id && inv.status !== 'concept' && Number(inv.credited_amount || 0) < Number(inv.amount_total || 0);
+    // Betaal-link sectie (C4.5): alleen tonen bij TL-gekoppelde open/te-late facturen.
+    const showPayLink = !!inv.tl_invoice_id && ['open', 'partially_paid', 'overdue'].includes(inv.display_status);
     document.getElementById('invModalBody').innerHTML = `
       <div class="fin-card">
         <h4>Info</h4>
@@ -4975,6 +4977,19 @@
           <button class="sr-abtn" id="invBtnPdf" type="button" ${inv.tl_invoice_id ? '' : 'disabled'}><i class="ti ti-file-type-pdf"></i> PDF</button>
           <a class="sr-abtn" href="${tlUrl}" target="_blank"><i class="ti ti-external-link"></i> Teamleader</a>
         </div>
+        ${showPayLink ? `
+        <div id="invPayLinkRow" style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border-subtle, #e5e7eb);display:flex;flex-direction:column;gap:6px">
+          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+            <span style="font-size:12.5px;font-weight:600;color:var(--text-dim)">Betaal-link</span>
+            <span id="invPayLinkBadge" style="display:none;font-size:11px;padding:2px 7px;border-radius:10px;background:#e5e7eb;color:#374151"></span>
+          </div>
+          <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+            <input id="invPayLinkInput" type="text" readonly placeholder="Nog niet opgehaald — klik Ververs" class="fin-input" style="flex:1;min-width:240px;font-size:12px"/>
+            <button class="sr-abtn" id="invoicePaymentLinkRefreshBtn" type="button" data-invoice-id="${esc(inv.id)}" title="Ververs betaal-link (Shift+klik = forceer verse fetch)"><span class="ic"><i class="ti ti-refresh"></i></span> Ververs betaal-link</button>
+            <button class="sr-abtn" id="invPayLinkCopyBtn" type="button" disabled><i class="ti ti-copy"></i> Kopiëren</button>
+            <a class="sr-abtn" id="invPayLinkOpenBtn" href="#" target="_blank" rel="noopener" style="display:none"><i class="ti ti-external-link"></i> Openen</a>
+          </div>
+        </div>` : ''}
       </div>
       <div class="fin-card"><h4>Inhoud</h4><div id="invLinesCard"><div style="color:var(--text-dim);font-size:12px"><i class="ti ti-loader"></i> Laden…</div></div><div id="invCreditCard"></div><div id="invFeeCard"></div></div>
       <div class="fin-card"><h4>Betalingen</h4><div id="invPayCard"></div></div>
@@ -4996,6 +5011,14 @@
     const sendBtn = document.getElementById('invBtnSend'); if (sendBtn) sendBtn.onclick = () => openSendModal(inv);
     const updBtn = document.getElementById('invBtnUpdate'); if (updBtn) updBtn.onclick = () => openUpdateModal(inv);
     const credBtn = document.getElementById('invBtnCredit'); if (credBtn) credBtn.onclick = () => openCreditModal(inv);
+
+    // Betaal-link refresh (C4.5): lazy-fetch + cache TTL via /api/finance-invoice-payment-link.
+    const payLinkBtn = document.getElementById('invoicePaymentLinkRefreshBtn');
+    if (payLinkBtn) {
+      payLinkBtn.addEventListener('click', (ev) => {
+        refreshInvoicePaymentLink(payLinkBtn.dataset.invoiceId || inv.id, { force: !!ev.shiftKey });
+      });
+    }
 
     // Betalingen-kaart.
     const payCard = document.getElementById('invPayCard');
@@ -5058,6 +5081,67 @@
     const el = document.getElementById('invActCard'); if (!el) return;
     const sorted = [...acts].filter(a => a.d).sort((a, b) => String(a.d).localeCompare(String(b.d)));
     el.innerHTML = sorted.length ? sorted.map(a => `<li><span class="ic"><i class="ti ${a.ic}"></i></span><span>${esc(a.t)}</span><span class="dt">${fmtDate(a.d)}</span></li>`).join('') : '<li style="color:var(--text-faint)">Geen activiteit.</li>';
+  }
+
+  // ── Betaal-link refresh (C4.5) ─────────────────────────────────────────
+  // Roept /api/finance-invoice-payment-link aan, met optionele force=true voor
+  // Shift+klik (negeert 24u cache). Toont een toast en updatet het input-veld
+  // + badge (Cache hit / Vers opgehaald) in de invoice-detail modal.
+  async function refreshInvoicePaymentLink(invoiceId, opts = {}) {
+    if (!invoiceId) return;
+    const btn = document.getElementById('invoicePaymentLinkRefreshBtn');
+    const input = document.getElementById('invPayLinkInput');
+    const badge = document.getElementById('invPayLinkBadge');
+    const copyBtn = document.getElementById('invPayLinkCopyBtn');
+    const openBtn = document.getElementById('invPayLinkOpenBtn');
+    const origLabel = btn ? btn.innerHTML : '';
+    if (btn) { btn.disabled = true; btn.innerHTML = '<span class="ic"><i class="ti ti-loader"></i></span> Bezig…'; }
+    try {
+      const qs = opts.force ? '?force=true' : '';
+      const r = await window.AgentShared.apiFetch('/api/finance-invoice-payment-link' + qs, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ invoice_id: invoiceId }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (r.status === 422) {
+        window.AgentShared?.showToast(d.error || 'Geen betaal-link beschikbaar voor deze factuur', 'error');
+        return;
+      }
+      if (r.status === 502) {
+        window.AgentShared?.showToast('Teamleader leverde geen link op — probeer later nogmaals', 'error');
+        return;
+      }
+      if (!r.ok || !d.payment_url) throw new Error(d.error || ('HTTP ' + r.status));
+      if (input) input.value = d.payment_url;
+      if (copyBtn) {
+        copyBtn.disabled = false;
+        copyBtn.onclick = () => {
+          try {
+            navigator.clipboard.writeText(d.payment_url);
+            window.AgentShared?.showToast('Link gekopieerd', 'success');
+          } catch (e) { window.AgentShared?.showToast('Kopiëren mislukt: ' + e.message, 'error'); }
+        };
+      }
+      if (openBtn) { openBtn.href = d.payment_url; openBtn.style.display = ''; }
+      if (badge) {
+        const fetched = d.fetched_at ? new Date(d.fetched_at) : null;
+        const days = fetched ? Math.max(0, Math.floor((Date.now() - fetched.getTime()) / 86400000)) : 0;
+        if (d.from_cache) {
+          badge.textContent = `Cache hit (${days}d oud)`;
+          badge.style.background = '#e5e7eb'; badge.style.color = '#374151';
+        } else {
+          badge.textContent = 'Vers opgehaald';
+          badge.style.background = 'rgba(16,185,129,.15)'; badge.style.color = '#047857';
+        }
+        badge.style.display = '';
+      }
+      const srcLabel = d.from_cache ? 'cache' : (d.source || 'TL');
+      window.AgentShared?.showToast(`Betaal-link vernieuwd (${srcLabel})`, 'success');
+    } catch (e) {
+      window.AgentShared?.showToast('Ophalen mislukt: ' + e.message, 'error');
+    } finally {
+      if (btn) { btn.disabled = false; btn.innerHTML = origLabel; }
+    }
   }
 
   // ── Betaling registreren (Fase 2B, super_admin) ──
