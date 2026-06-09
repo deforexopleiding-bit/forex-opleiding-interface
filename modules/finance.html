@@ -4120,7 +4120,12 @@
     if (!wrap || !_arrangWiz.customer_id) return;
     wrap.innerHTML = '<div style="font-size:11.5px;color:var(--text-faint);text-align:center;padding:20px">Laden…</div>';
     try {
-      const params = new URLSearchParams({ customer_id: _arrangWiz.customer_id, status: 'open,partially_paid,overdue', page_size: '200' });
+      // /api/finance-invoices?status= verwacht een ENKELE waarde (open|paid|...);
+      // een comma-separated lijst doet exact-match en levert 0 rijen. We laten
+      // de status-param weg en filteren client-side hieronder voor open +
+      // partially_paid. Invoice-status blijft lowercase in DB (los van het
+      // UPPERCASE arrangement-laag); dat is bewust en hier consistent.
+      const params = new URLSearchParams({ customer_id: _arrangWiz.customer_id, page_size: '200' });
       const r = await window.AgentShared.apiFetch('/api/finance-invoices?' + params.toString());
       const d = await r.json().catch(() => ({}));
       if (!r.ok) {
@@ -4128,10 +4133,13 @@
         return;
       }
       const all = d.invoices || d.items || [];
-      // Filter: alleen echt open/partially_paid (overdue is virtual).
+      // Filter: alleen open + partially_paid (DB-statuswaarden zijn lowercase).
+      // 'overdue' is een afgeleide weergave-status (open + voorbij due_date),
+      // niet een DB-waarde — display_status='overdue' wordt opgenomen omdat
+      // de onderliggende row dan status='open' heeft.
       const open = all.filter(i => {
         const s = String(i.status || '').toLowerCase();
-        if (!(s === 'open' || s === 'partially_paid' || s === 'overdue')) return false;
+        if (!(s === 'open' || s === 'partially_paid')) return false;
         const total = Number(i.amount_total) || 0;
         const credited = Number(i.credited_amount) || 0;
         return credited < total;
