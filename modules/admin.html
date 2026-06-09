@@ -99,6 +99,49 @@
     .admin-tab { background:transparent; border:none; padding:10px 16px; font-size:13px; font-weight:600; color:var(--text-faint); cursor:pointer; border-bottom:2px solid transparent; font-family:inherit; }
     .admin-tab:hover { color:var(--text); }
     .admin-tab.active { color:var(--text); border-bottom-color:var(--brand-primary); }
+    /* ── Approval-queue ── */
+    .approvals-tab-badge { display:inline-block; min-width:18px; padding:1px 6px; border-radius:10px; background:var(--color-danger,#dc2626); color:#fff; font-size:10px; font-weight:700; line-height:1.4; margin-left:6px; vertical-align:middle; text-align:center; }
+    .approvals-tab-badge.hidden { display:none; }
+    .approv-filter-strip { display:flex; gap:6px; flex-wrap:wrap; margin-bottom:14px; }
+    .approv-pill { background:var(--bg-elev-2); border:1px solid var(--border); border-radius:999px; padding:6px 14px; font-size:12px; color:var(--text-dim); cursor:pointer; font-family:inherit; font-weight:500; display:inline-flex; align-items:center; gap:6px; }
+    .approv-pill:hover { background:var(--surface-card-hover); color:var(--text); }
+    .approv-pill.active { background:var(--brand-primary-soft); color:var(--brand-primary); border-color:var(--brand-primary); }
+    .approv-pill-count { font-size:10px; padding:1px 6px; border-radius:8px; background:var(--bg-elev); color:var(--text-faint); font-weight:600; }
+    .approv-pill.active .approv-pill-count { background:var(--brand-primary); color:#fff; }
+    .approv-bulk-strip { display:flex; align-items:center; gap:10px; flex-wrap:wrap; padding:10px 12px; background:var(--bg-elev-2); border:1px solid var(--border); border-radius:8px; margin-bottom:12px; font-size:12.5px; }
+    .approv-bulk-strip .approv-bulk-info { color:var(--text-faint); }
+    .approv-bulk-strip .approv-bulk-actions { margin-left:auto; display:flex; gap:8px; }
+    .approv-bulk-strip .btn-sm { padding:5px 12px; font-size:12px; }
+    .approv-bulk-strip .btn[disabled] { opacity:.5; cursor:not-allowed; }
+    .approv-table { width:100%; border-collapse:collapse; font-size:13px; }
+    .approv-table th { text-align:left; padding:10px 12px; font-size:10px; text-transform:uppercase; color:var(--text-faint); font-weight:600; letter-spacing:.5px; border-bottom:1px solid var(--border); }
+    .approv-table td { padding:11px 12px; border-bottom:0.5px solid var(--border-subtle,var(--border)); vertical-align:middle; }
+    .approv-table tr:last-child td { border-bottom:none; }
+    .approv-table tr:hover td { background:var(--surface-card); }
+    .approv-table .approv-row.clickable { cursor:pointer; }
+    .approv-table .approv-check-col { width:36px; text-align:center; padding-right:0; }
+    .approv-table input[type=checkbox] { width:15px; height:15px; cursor:pointer; vertical-align:middle; }
+    .approv-action-type { font-family:monospace; font-size:11.5px; color:var(--text-dim); background:var(--bg-elev-2); padding:2px 6px; border-radius:4px; display:inline-block; }
+    .approv-mini-btn { padding:4px 10px; font-size:11.5px; border-radius:6px; border:1px solid var(--border); background:var(--bg-elev); color:var(--text-dim); cursor:pointer; font-family:inherit; }
+    .approv-mini-btn:hover { background:var(--bg-elev-2); color:var(--text); }
+    .approv-mini-btn.primary { background:var(--brand-primary); color:#fff; border-color:var(--brand-primary); }
+    .approv-mini-btn.primary:hover { opacity:.9; }
+    .approv-mini-btn.danger { background:transparent; color:var(--color-danger,#dc2626); border-color:var(--color-danger,#dc2626); }
+    .approv-mini-btn.danger:hover { background:var(--color-danger-soft,rgba(220,38,38,.08)); }
+    .approv-status-badge { display:inline-block; padding:2px 8px; border-radius:8px; font-size:10.5px; font-weight:600; text-transform:uppercase; letter-spacing:.3px; }
+    .approv-status-pending  { background:rgba(56,189,248,.15); color:#0284c7; }
+    .approv-status-approved { background:rgba(34,197,94,.15); color:#15803d; }
+    .approv-status-rejected { background:rgba(239,68,68,.15); color:#b91c1c; }
+    .approv-status-executed { background:rgba(34,197,94,.15); color:#15803d; }
+    .approv-status-failed   { background:rgba(239,68,68,.15); color:#b91c1c; }
+    .approv-status-cancelled{ background:var(--bg-elev-2); color:var(--text-faint); }
+    .approv-truncate { max-width:280px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    #pendingActionDetailModal .modal-card { max-width:760px; max-height:90vh; display:flex; flex-direction:column; }
+    #pendingActionDetailModal .modal-body { overflow-y:auto; flex:1; min-height:0; }
+    .approv-detail-grid { display:grid; grid-template-columns:140px 1fr; gap:8px 14px; font-size:12.5px; margin-bottom:14px; }
+    .approv-detail-grid > div:nth-child(odd) { color:var(--text-faint); }
+    .approv-detail-pre { margin:0; padding:8px 10px; background:rgba(0,0,0,.25); border:1px solid var(--border-subtle,var(--border)); border-radius:6px; font-size:11px; color:var(--text-dim); overflow:auto; max-height:200px; font-family:monospace; }
+    .approv-detail-section-title { font-size:11px; text-transform:uppercase; color:var(--text-faint); font-weight:600; letter-spacing:.5px; margin:14px 0 6px 0; }
     /* ── Rechten-matrix ── */
     .rbac-toolbar { display:flex; align-items:center; gap:12px; margin-bottom:10px; }
     .rbac-dirty { font-size:12px; color:var(--color-warning-text,#b45309); margin-left:auto; }
@@ -172,6 +215,7 @@
       <button class="admin-tab" data-tab="rechten" id="rechtenTabBtn" onclick="switchAdminTab('rechten')" style="display:none">Rechten</button>
       <button class="admin-tab" data-tab="integraties" onclick="switchAdminTab('integraties')">Integraties</button>
       <button class="admin-tab" data-tab="whatsapp-connection" id="waConnTabBtn" onclick="switchAdminTab('whatsapp-connection')" style="display:none">WhatsApp Connection</button>
+      <button class="admin-tab" data-tab="approval-queue" data-view="approval-queue" id="approvalsTabBtn" onclick="switchAdminTab('approval-queue')" style="display:none">Approval-queue <span id="approvalsTabBadge" class="approvals-tab-badge hidden">0</span></button>
       <button class="admin-tab" data-tab="whatsapp-templates" data-view="whatsapp-templates" id="waTplTabBtn" onclick="switchAdminTab('whatsapp-templates')" style="display:none">WhatsApp Templates</button>
     </div>
 
@@ -307,6 +351,69 @@
               <tr><td colspan="5" style="color:var(--text-faint);padding:20px">Laden&hellip;</td></tr>
             </tbody>
           </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Approval-queue (Payment-arrangements D1) ──────────────────────────── -->
+    <div id="tab-approval-queue" class="admin-tab-panel" style="display:none">
+      <div id="view-approval-queue" hidden>
+        <div class="section-card">
+          <div class="section-header" style="justify-content:space-between">
+            <div>
+              <div style="font-size:15px;font-weight:700">Approval-queue</div>
+              <div style="font-size:12px;color:var(--text-faint);font-weight:400;margin-top:4px;max-width:720px">
+                Voorgestelde acties (betalingsregelingen, kwijtscheldingen, uitstel) die wachten op
+                goed- of afkeur. Klik op een rij voor details.
+              </div>
+            </div>
+            <div style="display:flex;gap:8px">
+              <button class="btn btn-sm" onclick="loadApprovalQueue()" title="Lijst opnieuw laden"><i class="ti ti-refresh"></i></button>
+            </div>
+          </div>
+
+          <!-- Filter pills -->
+          <div class="approv-filter-strip" id="approvFilterStrip">
+            <button type="button" class="approv-pill active" data-approv-status="pending"   onclick="switchApprovStatus('pending')">Pending <span class="approv-pill-count" id="approvCntPending">0</span></button>
+            <button type="button" class="approv-pill"        data-approv-status="approved"  onclick="switchApprovStatus('approved')">Approved <span class="approv-pill-count" id="approvCntApproved">0</span></button>
+            <button type="button" class="approv-pill"        data-approv-status="rejected"  onclick="switchApprovStatus('rejected')">Rejected <span class="approv-pill-count" id="approvCntRejected">0</span></button>
+            <button type="button" class="approv-pill"        data-approv-status="executed"  onclick="switchApprovStatus('executed')">Executed <span class="approv-pill-count" id="approvCntExecuted">0</span></button>
+            <button type="button" class="approv-pill"        data-approv-status="failed"    onclick="switchApprovStatus('failed')">Failed <span class="approv-pill-count" id="approvCntFailed">0</span></button>
+          </div>
+
+          <!-- Bulk-actions strip (alleen relevant voor PENDING) -->
+          <div class="approv-bulk-strip" id="approvBulkStrip">
+            <label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer">
+              <input type="checkbox" id="approvSelectAll" onchange="toggleApprovSelectAll()"/>
+              <span>Selecteer alle</span>
+            </label>
+            <span class="approv-bulk-info" id="approvSelectInfo">0 geselecteerd</span>
+            <div class="approv-bulk-actions">
+              <button class="btn btn-sm" id="approvBulkApproveBtn" onclick="bulkApprove()" disabled>Approve geselecteerd</button>
+              <button class="btn btn-sm" id="approvBulkRejectBtn"  onclick="openBulkRejectModal()" disabled>Reject geselecteerd</button>
+            </div>
+          </div>
+
+          <!-- Tabel -->
+          <div style="overflow-x:auto">
+            <table class="approv-table" id="approvalQueueTable">
+              <thead>
+                <tr>
+                  <th class="approv-check-col"><input type="checkbox" id="approvSelectAllHead" onchange="toggleApprovSelectAll()"/></th>
+                  <th>Action type</th>
+                  <th>Klant</th>
+                  <th>Voorstel</th>
+                  <th>Rationale</th>
+                  <th>Source</th>
+                  <th>Voorgesteld op</th>
+                  <th style="text-align:right">Acties</th>
+                </tr>
+              </thead>
+              <tbody id="approvalQueueTbody">
+                <tr><td colspan="8" style="color:var(--text-faint);padding:20px;text-align:center">Laden&hellip;</td></tr>
+              </tbody>
+            </table>
+          </div>
         </div>
       </div>
     </div>
@@ -636,6 +743,49 @@
   </div>
 </div>
 
+<!-- ── Approval-queue detail modal ──────────────────────────────────────────── -->
+<div class="modal-overlay hidden" id="pendingActionDetailModal" role="dialog" aria-modal="true">
+  <div class="modal-card">
+    <div class="modal-header">
+      <div>
+        <div class="modal-title" id="pendingActionDetailTitle">Voorstel details</div>
+        <div id="pendingActionDetailSubtitle" style="font-size:11px;color:var(--text-faint);margin-top:2px">Laden&hellip;</div>
+      </div>
+      <button class="modal-close" onclick="closePendingActionDetail()">&#x2715;</button>
+    </div>
+    <div class="modal-body" id="pendingActionDetailBody">
+      <div style="color:var(--text-faint);padding:14px;text-align:center;font-size:12.5px">Laden&hellip;</div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn"            id="pendingActionDetailCloseBtn"   onclick="closePendingActionDetail()">Sluiten</button>
+      <button class="btn btn-danger" id="pendingActionDetailRejectBtn"  onclick="openRejectModalFromDetail()" style="display:none">Reject</button>
+      <button class="btn btn-primary" id="pendingActionDetailApproveBtn" onclick="approveFromDetail()"        style="display:none">Approve</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Approval-queue reject modal (single + bulk) ──────────────────────────── -->
+<div class="modal-overlay hidden" id="rejectActionModal" role="dialog" aria-modal="true">
+  <div class="modal-card" style="max-width:480px">
+    <div class="modal-header">
+      <div class="modal-title" id="rejectActionTitle">Afwijzen</div>
+      <button class="modal-close" onclick="closeRejectActionModal()">&#x2715;</button>
+    </div>
+    <div class="modal-body">
+      <div id="rejectActionSubtitle" style="font-size:12px;color:var(--text-faint);margin-bottom:10px"></div>
+      <div class="form-group">
+        <label class="form-label" for="rejectActionReason">Reden voor afwijzing <span style="color:var(--color-danger,#dc2626)">*</span></label>
+        <textarea id="rejectActionReason" class="form-input" rows="4" style="resize:vertical;min-height:90px" placeholder="Waarom wijs je dit voorstel af?"></textarea>
+      </div>
+      <div class="form-error hidden" id="rejectActionError"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn" onclick="closeRejectActionModal()">Annuleren</button>
+      <button class="btn btn-danger" id="rejectActionConfirmBtn" onclick="confirmRejectAction()">Afwijzen</button>
+    </div>
+  </div>
+</div>
+
 <!-- Invite modal -->
 <div class="modal-overlay hidden" id="inviteModal">
   <div class="modal-card">
@@ -946,6 +1096,10 @@ function switchAdminTab(name) {
   document.getElementById('tab-integraties').style.display         = name === 'integraties'         ? '' : 'none';
   const waConnPanel = document.getElementById('tab-whatsapp-connection');
   if (waConnPanel) waConnPanel.style.display = name === 'whatsapp-connection' ? '' : 'none';
+  const approvPanel = document.getElementById('tab-approval-queue');
+  if (approvPanel) approvPanel.style.display = name === 'approval-queue' ? '' : 'none';
+  const approvView = document.getElementById('view-approval-queue');
+  if (approvView) approvView.hidden = name !== 'approval-queue';
   const waTplPanel = document.getElementById('tab-whatsapp-templates');
   if (waTplPanel) waTplPanel.style.display = name === 'whatsapp-templates' ? '' : 'none';
   const waTplView = document.getElementById('view-whatsapp-templates');
@@ -955,6 +1109,10 @@ function switchAdminTab(name) {
   if (name === 'rechten' && !rbacLoaded) loadPermissionsMatrix();
   if (name === 'integraties') { loadTlStatus(); loadWebhooks(); loadTemplateSetting(); }
   if (name === 'whatsapp-connection') { wireWaConfOnce(); loadWaConfList(); }
+  if (name === 'approval-queue') {
+    wireApprovOnce();
+    loadApprovalQueue();
+  }
   if (name === 'whatsapp-templates') {
     if (typeof wireWaTplOnce === 'function') wireWaTplOnce();
     if (typeof loadWaTplWabas === 'function') {
@@ -1134,6 +1292,22 @@ async function init() {
     if (allowWaTpl) {
       const tb = document.getElementById('waTplTabBtn');
       if (tb) tb.style.display = '';
+    }
+  } catch (_) { /* RBAC niet geladen — tab blijft verborgen */ }
+
+  // Approval-queue tab: super_admin OF can(finance.arrangements.view)
+  // (view-permission is voldoende om de tab te zien; approve/reject endpoints
+  //  doen hun eigen RBAC-check op finance.arrangements.approve.)
+  try {
+    let allowApprov = currentProfile.role === 'super_admin';
+    if (!allowApprov && window.RBAC && typeof window.RBAC.can === 'function') {
+      allowApprov = await window.RBAC.can('finance.arrangements.view');
+    }
+    if (allowApprov) {
+      const ab = document.getElementById('approvalsTabBtn');
+      if (ab) ab.style.display = '';
+      // Update tab-badge alvast bij init (PENDING-count).
+      try { refreshApprovalsTabBadge(); } catch (_) {}
     }
   } catch (_) { /* RBAC niet geladen — tab blijft verborgen */ }
 
@@ -3270,6 +3444,536 @@ function wireWaTplOnce() {
       insertVariableAtCursor(key);
     });
   }
+}
+
+// ─── Approval-queue (Payment-arrangements D1) ────────────────────────────────
+// Tab toont pending_actions met filter-pills, bulk-actions, detail-modal +
+// reject-modal. Endpoints: /api/pending-actions-{list,detail,approve,reject}.
+let _approvActiveStatus = 'pending';
+let _approvItems        = [];
+let _approvSelectedIds  = [];
+let _approvWired        = false;
+let _approvLoading      = false;
+let _approvCurrentDetailId = null;
+let _approvRejectContext   = null; // { type:'single'|'bulk', ids:[uuid] }
+
+function wireApprovOnce() {
+  if (_approvWired) return;
+  _approvWired = true;
+  // Click-outside-modal closes modal.
+  const detailM = document.getElementById('pendingActionDetailModal');
+  if (detailM) detailM.addEventListener('click', (e) => {
+    if (e.target === detailM) closePendingActionDetail();
+  });
+  const rejectM = document.getElementById('rejectActionModal');
+  if (rejectM) rejectM.addEventListener('click', (e) => {
+    if (e.target === rejectM) closeRejectActionModal();
+  });
+}
+
+function approvStatusBadge(status) {
+  const s = String(status || '').toLowerCase();
+  const cls = ['pending','approved','rejected','executed','failed','cancelled'].includes(s)
+    ? 'approv-status-' + s
+    : 'approv-status-pending';
+  return `<span class="approv-status-badge ${cls}">${esc(s || 'pending')}</span>`;
+}
+
+function approvActionLabel(t) {
+  const map = {
+    'arrangement.uitstel':         'Uitstel',
+    'arrangement.gespreid':        'Gespreid betalen',
+    'arrangement.kwijtschelding':  'Kwijtschelding',
+    'arrangement.pauze':           'Pauze',
+  };
+  return map[t] || (t || '—');
+}
+
+function approvSummary(it) {
+  // Korte voorstel-samenvatting uit payload (best-effort).
+  const p = it.payload || {};
+  const parts = [];
+  if (Array.isArray(p.invoice_ids) && p.invoice_ids.length) {
+    parts.push(`${p.invoice_ids.length} factuur${p.invoice_ids.length === 1 ? '' : 'en'}`);
+  } else if (p.invoice_id) {
+    parts.push('invoice ' + String(p.invoice_id).slice(0, 8));
+  }
+  if (p.new_due_date)  parts.push('nieuwe due: ' + String(p.new_due_date).slice(0, 10));
+  if (p.installments)  parts.push(p.installments + ' termijnen');
+  if (p.amount_total != null) parts.push('€ ' + p.amount_total);
+  if (p.percentage != null)   parts.push(p.percentage + '%');
+  return parts.length ? parts.join(' · ') : '(geen payload)';
+}
+
+function approvFmtDateTime(iso) {
+  if (!iso) return '—';
+  try {
+    const d = new Date(iso);
+    const dd = String(d.getDate()).padStart(2, '0');
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    const yy = d.getFullYear();
+    const hh = String(d.getHours()).padStart(2, '0');
+    const mi = String(d.getMinutes()).padStart(2, '0');
+    return `${dd}-${mm}-${yy} ${hh}:${mi}`;
+  } catch (_) { return String(iso); }
+}
+
+function approvTruncate(s, n) {
+  s = String(s == null ? '' : s);
+  return s.length > n ? s.slice(0, n - 1) + '…' : s;
+}
+
+async function loadApprovalQueue() {
+  const tbody = document.getElementById('approvalQueueTbody');
+  if (!tbody) return;
+  if (_approvLoading) return;
+  _approvLoading = true;
+  tbody.innerHTML = '<tr><td colspan="8" style="color:var(--text-faint);padding:20px;text-align:center">Laden&hellip;</td></tr>';
+  _approvSelectedIds = [];
+  updateApprovBulkUi();
+  try {
+    const url = '/api/pending-actions-list?status=' + encodeURIComponent(_approvActiveStatus) + '&limit=200';
+    const r = await window.AgentShared.apiFetch(url);
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) {
+      tbody.innerHTML = `<tr><td colspan="8" style="color:var(--color-danger,#dc2626);padding:20px;text-align:center">Fout: ${esc(d.error || ('HTTP ' + r.status))}</td></tr>`;
+      return;
+    }
+    _approvItems = Array.isArray(d.items) ? d.items : [];
+    renderApprovCounts(d.counts || {});
+    renderApprovRows();
+  } catch (e) {
+    console.error('[loadApprovalQueue]', e);
+    tbody.innerHTML = `<tr><td colspan="8" style="color:var(--color-danger,#dc2626);padding:20px;text-align:center">Fout: ${esc(e.message)}</td></tr>`;
+  } finally {
+    _approvLoading = false;
+  }
+}
+
+function renderApprovCounts(counts) {
+  const map = {
+    pending:   counts.PENDING   || 0,
+    approved:  counts.APPROVED  || 0,
+    rejected:  counts.REJECTED  || 0,
+    executed:  counts.EXECUTED  || 0,
+    failed:    counts.FAILED    || 0,
+  };
+  const elPending  = document.getElementById('approvCntPending');
+  const elApproved = document.getElementById('approvCntApproved');
+  const elRejected = document.getElementById('approvCntRejected');
+  const elExecuted = document.getElementById('approvCntExecuted');
+  const elFailed   = document.getElementById('approvCntFailed');
+  if (elPending)  elPending.textContent  = map.pending;
+  if (elApproved) elApproved.textContent = map.approved;
+  if (elRejected) elRejected.textContent = map.rejected;
+  if (elExecuted) elExecuted.textContent = map.executed;
+  if (elFailed)   elFailed.textContent   = map.failed;
+
+  // Tab-badge: alleen PENDING-count tonen, verbergen als 0.
+  const badge = document.getElementById('approvalsTabBadge');
+  if (badge) {
+    if (map.pending > 0) {
+      badge.textContent = String(map.pending);
+      badge.classList.remove('hidden');
+    } else {
+      badge.classList.add('hidden');
+    }
+  }
+}
+
+function renderApprovRows() {
+  const tbody = document.getElementById('approvalQueueTbody');
+  if (!tbody) return;
+  if (!_approvItems.length) {
+    tbody.innerHTML = '<tr><td colspan="8" style="color:var(--text-faint);padding:20px;text-align:center">Geen voorstellen in deze status.</td></tr>';
+    return;
+  }
+  const isPending = _approvActiveStatus === 'pending';
+  const rows = _approvItems.map(it => {
+    const checked = _approvSelectedIds.includes(it.id);
+    const checkCell = isPending
+      ? `<input type="checkbox" class="approv-row-check" data-approv-id="${esc(it.id)}"${checked ? ' checked' : ''}/>`
+      : '';
+    const cust = it.customer;
+    const custCell = cust && cust.id
+      ? `<a href="/modules/klanten.html?id=${esc(cust.id)}" style="color:var(--brand-secondary,var(--accent-cyan,#06b6d4));text-decoration:none;font-weight:500" onclick="event.stopPropagation()">${esc(cust.name || '(onbekend)')}</a>`
+      : esc(cust?.name || '(onbekend)');
+    const source = (it.payload && it.payload.source) ? esc(it.payload.source) : 'manual';
+    const proposedAt = it.created_at ? approvFmtDateTime(it.created_at) : '—';
+    const summary = esc(approvSummary(it));
+    const rationale = esc(approvTruncate(it.payload?.rationale || it.payload?.reason || '', 40));
+    const actionsCell = isPending
+      ? `<button class="approv-mini-btn primary" data-approv-approve="${esc(it.id)}" onclick="event.stopPropagation()">Approve</button>
+         <button class="approv-mini-btn danger"  data-approv-reject="${esc(it.id)}" onclick="event.stopPropagation()" style="margin-left:4px">Reject</button>`
+      : approvStatusBadge(it.status);
+    return `<tr class="approv-row clickable" data-approv-row="${esc(it.id)}">
+      <td class="approv-check-col" onclick="event.stopPropagation()">${checkCell}</td>
+      <td><span class="approv-action-type">${esc(approvActionLabel(it.action_type))}</span></td>
+      <td>${custCell}</td>
+      <td class="approv-truncate" title="${summary}">${summary}</td>
+      <td class="approv-truncate" title="${esc(it.payload?.rationale || it.payload?.reason || '')}">${rationale || '<span style="color:var(--text-faint)">—</span>'}</td>
+      <td>${esc(source)}</td>
+      <td style="font-size:11.5px;color:var(--text-dim)">${esc(proposedAt)}</td>
+      <td style="text-align:right;white-space:nowrap">${actionsCell}</td>
+    </tr>`;
+  }).join('');
+  tbody.innerHTML = rows;
+
+  // Wire row-clicks → detail-modal.
+  tbody.querySelectorAll('tr[data-approv-row]').forEach(tr => {
+    tr.addEventListener('click', (e) => {
+      if (e.target.closest('a, button, input')) return;
+      openApprovalDetail(tr.getAttribute('data-approv-row'));
+    });
+  });
+  // Wire checkboxes.
+  tbody.querySelectorAll('.approv-row-check').forEach(cb => {
+    cb.addEventListener('change', () => toggleApprovRowSelect(cb.getAttribute('data-approv-id'), cb.checked));
+  });
+  // Wire row-level approve/reject buttons.
+  tbody.querySelectorAll('[data-approv-approve]').forEach(btn => {
+    btn.addEventListener('click', () => approveAction(btn.getAttribute('data-approv-approve')));
+  });
+  tbody.querySelectorAll('[data-approv-reject]').forEach(btn => {
+    btn.addEventListener('click', () => openRejectModalForSingle(btn.getAttribute('data-approv-reject')));
+  });
+
+  // Bulk-strip alleen relevant voor PENDING.
+  const bulkStrip = document.getElementById('approvBulkStrip');
+  if (bulkStrip) bulkStrip.style.display = isPending ? '' : 'none';
+  updateApprovBulkUi();
+}
+
+function switchApprovStatus(status) {
+  if (status === _approvActiveStatus) return;
+  _approvActiveStatus = status;
+  document.querySelectorAll('#approvFilterStrip .approv-pill').forEach(p => {
+    p.classList.toggle('active', p.getAttribute('data-approv-status') === status);
+  });
+  loadApprovalQueue();
+}
+
+function toggleApprovSelectAll(srcEl) {
+  // Kan getriggerd worden via header-checkbox of strip-checkbox; we syncen ze.
+  const checked = !!(srcEl && srcEl.checked) || (document.getElementById('approvSelectAll')?.checked) || (document.getElementById('approvSelectAllHead')?.checked);
+  // Detecteer welke caller; simpelste pad: check 'approvSelectAll' state.
+  const stripCb = document.getElementById('approvSelectAll');
+  const headCb  = document.getElementById('approvSelectAllHead');
+  // Use most-recent change-source by checking inverse-state — fallback to OR.
+  const desired = (stripCb && stripCb === document.activeElement) ? stripCb.checked
+                : (headCb  && headCb  === document.activeElement) ? headCb.checked
+                : (stripCb ? stripCb.checked : !!checked);
+  if (stripCb) stripCb.checked = desired;
+  if (headCb)  headCb.checked  = desired;
+  _approvSelectedIds = desired ? _approvItems.map(it => it.id) : [];
+  // Update row-checkboxes.
+  document.querySelectorAll('.approv-row-check').forEach(cb => { cb.checked = desired; });
+  updateApprovBulkUi();
+}
+
+function toggleApprovRowSelect(id, checked) {
+  if (!id) return;
+  const idx = _approvSelectedIds.indexOf(id);
+  if (checked && idx < 0) _approvSelectedIds.push(id);
+  if (!checked && idx >= 0) _approvSelectedIds.splice(idx, 1);
+  updateApprovBulkUi();
+}
+
+function updateApprovBulkUi() {
+  const n = _approvSelectedIds.length;
+  const info = document.getElementById('approvSelectInfo');
+  if (info) info.textContent = `${n} geselecteerd`;
+  const approveBtn = document.getElementById('approvBulkApproveBtn');
+  const rejectBtn  = document.getElementById('approvBulkRejectBtn');
+  if (approveBtn) approveBtn.disabled = n === 0;
+  if (rejectBtn)  rejectBtn.disabled  = n === 0;
+  // Sync select-all checkbox state.
+  const total = _approvItems.length;
+  const allChecked = total > 0 && n === total;
+  const stripCb = document.getElementById('approvSelectAll');
+  const headCb  = document.getElementById('approvSelectAllHead');
+  if (stripCb) stripCb.checked = allChecked;
+  if (headCb)  headCb.checked  = allChecked;
+}
+
+async function approveAction(id) {
+  if (!id) return;
+  try {
+    const r = await window.AgentShared.apiFetch('/api/pending-actions-approve', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ id }),
+    });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) {
+      window.AgentShared?.showToast('Approve mislukt: ' + (d.error || ('HTTP ' + r.status)), 'error');
+      return false;
+    }
+    window.AgentShared?.showToast('Voorstel goedgekeurd', 'success');
+    loadApprovalQueue();
+    return true;
+  } catch (e) {
+    console.error('[approveAction]', e);
+    window.AgentShared?.showToast('Approve mislukt: ' + e.message, 'error');
+    return false;
+  }
+}
+
+async function rejectAction(id, reason) {
+  if (!id) return false;
+  try {
+    const r = await window.AgentShared.apiFetch('/api/pending-actions-reject', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ id, rejection_reason: reason }),
+    });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) {
+      window.AgentShared?.showToast('Reject mislukt: ' + (d.error || ('HTTP ' + r.status)), 'error');
+      return false;
+    }
+    return true;
+  } catch (e) {
+    console.error('[rejectAction]', e);
+    window.AgentShared?.showToast('Reject mislukt: ' + e.message, 'error');
+    return false;
+  }
+}
+
+async function bulkApprove() {
+  const ids = _approvSelectedIds.slice();
+  if (!ids.length) return;
+  if (!confirm(`${ids.length} voorstel${ids.length === 1 ? '' : 'len'} goedkeuren?`)) return;
+  let ok = 0, fail = 0;
+  for (const id of ids) {
+    try {
+      const r = await window.AgentShared.apiFetch('/api/pending-actions-approve', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ id }),
+      });
+      if (r.ok) ok++; else { fail++; console.error('[bulkApprove] failed for', id, r.status); }
+    } catch (e) {
+      fail++;
+      console.error('[bulkApprove] error for', id, e);
+    }
+  }
+  const variant = fail === 0 ? 'success' : 'error';
+  window.AgentShared?.showToast(`Bulk approve: ${ok} gelukt, ${fail} mislukt`, variant);
+  loadApprovalQueue();
+}
+
+async function bulkReject(reason) {
+  const ids = _approvSelectedIds.slice();
+  if (!ids.length) return;
+  let ok = 0, fail = 0;
+  for (const id of ids) {
+    const success = await rejectAction(id, reason);
+    if (success) ok++; else fail++;
+  }
+  const variant = fail === 0 ? 'success' : 'error';
+  window.AgentShared?.showToast(`Bulk reject: ${ok} gelukt, ${fail} mislukt`, variant);
+  loadApprovalQueue();
+}
+
+// ── Reject-modal ─────────────────────────────────────────────────────────────
+function openRejectModalForSingle(id) {
+  _approvRejectContext = { type: 'single', ids: [id] };
+  showRejectModal('Voorstel afwijzen', 'Voer een reden in voor deze afwijzing.');
+}
+
+function openBulkRejectModal() {
+  if (!_approvSelectedIds.length) return;
+  _approvRejectContext = { type: 'bulk', ids: _approvSelectedIds.slice() };
+  showRejectModal(
+    `${_approvSelectedIds.length} voorstellen afwijzen`,
+    `Reden geldt voor alle ${_approvSelectedIds.length} geselecteerde voorstellen.`
+  );
+}
+
+function openRejectModalFromDetail() {
+  if (!_approvCurrentDetailId) return;
+  _approvRejectContext = { type: 'single', ids: [_approvCurrentDetailId] };
+  showRejectModal('Voorstel afwijzen', 'Voer een reden in voor deze afwijzing.');
+}
+
+function showRejectModal(title, subtitle) {
+  const titleEl = document.getElementById('rejectActionTitle');
+  const subEl   = document.getElementById('rejectActionSubtitle');
+  const txt     = document.getElementById('rejectActionReason');
+  const errEl   = document.getElementById('rejectActionError');
+  if (titleEl) titleEl.textContent = title;
+  if (subEl)   subEl.textContent   = subtitle;
+  if (txt)     txt.value = '';
+  if (errEl)   { errEl.classList.add('hidden'); errEl.textContent = ''; }
+  document.getElementById('rejectActionModal')?.classList.remove('hidden');
+  setTimeout(() => { try { txt?.focus(); } catch (_) {} }, 50);
+}
+
+function closeRejectActionModal() {
+  document.getElementById('rejectActionModal')?.classList.add('hidden');
+  _approvRejectContext = null;
+}
+
+async function confirmRejectAction() {
+  const txt   = document.getElementById('rejectActionReason');
+  const errEl = document.getElementById('rejectActionError');
+  const reason = (txt?.value || '').trim();
+  if (!reason) {
+    if (errEl) { errEl.textContent = 'Reden is verplicht.'; errEl.classList.remove('hidden'); }
+    return;
+  }
+  if (!_approvRejectContext || !Array.isArray(_approvRejectContext.ids) || !_approvRejectContext.ids.length) {
+    closeRejectActionModal();
+    return;
+  }
+  const ctx = _approvRejectContext;
+  const btn = document.getElementById('rejectActionConfirmBtn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Bezig…'; }
+  try {
+    if (ctx.type === 'bulk') {
+      await bulkReject(reason);
+    } else {
+      const success = await rejectAction(ctx.ids[0], reason);
+      if (success) {
+        window.AgentShared?.showToast('Voorstel afgewezen', 'success');
+        loadApprovalQueue();
+        // Sluit ook detail-modal als die open stond voor dit item.
+        if (_approvCurrentDetailId === ctx.ids[0]) closePendingActionDetail();
+      }
+    }
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = 'Afwijzen'; }
+    closeRejectActionModal();
+  }
+}
+
+// ── Detail-modal ─────────────────────────────────────────────────────────────
+async function openApprovalDetail(id) {
+  if (!id) return;
+  wireApprovOnce();
+  _approvCurrentDetailId = id;
+  const modal = document.getElementById('pendingActionDetailModal');
+  const body  = document.getElementById('pendingActionDetailBody');
+  const sub   = document.getElementById('pendingActionDetailSubtitle');
+  const approveBtn = document.getElementById('pendingActionDetailApproveBtn');
+  const rejectBtn  = document.getElementById('pendingActionDetailRejectBtn');
+  if (sub)  sub.textContent  = 'ID: ' + id;
+  if (body) body.innerHTML   = '<div style="color:var(--text-faint);padding:14px;text-align:center;font-size:12.5px">Laden&hellip;</div>';
+  if (approveBtn) approveBtn.style.display = 'none';
+  if (rejectBtn)  rejectBtn.style.display  = 'none';
+  if (modal) modal.classList.remove('hidden');
+
+  try {
+    const r = await window.AgentShared.apiFetch('/api/pending-actions-detail?id=' + encodeURIComponent(id));
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) {
+      if (body) body.innerHTML = `<div style="color:var(--color-danger,#dc2626);padding:14px">Fout: ${esc(d.error || ('HTTP ' + r.status))}</div>`;
+      return;
+    }
+    renderApprovDetail(d);
+  } catch (e) {
+    console.error('[openApprovalDetail]', e);
+    if (body) body.innerHTML = `<div style="color:var(--color-danger,#dc2626);padding:14px">Fout: ${esc(e.message)}</div>`;
+  }
+}
+
+function renderApprovDetail(d) {
+  const body = document.getElementById('pendingActionDetailBody');
+  if (!body) return;
+  const it   = d.item || {};
+  const cust = d.customer || null;
+  const arr  = d.arrangement || null;
+  const approver = d.approver || null;
+  const rejecter = d.rejecter || null;
+  const isPending = it.status === 'pending';
+
+  const custLink = cust && cust.id
+    ? `<a href="/modules/klanten.html?id=${esc(cust.id)}" style="color:var(--brand-secondary,var(--accent-cyan,#06b6d4));text-decoration:none">${esc(cust.name || '(onbekend)')}</a>`
+    : (cust ? esc(cust.name || '(onbekend)') : '<span style="color:var(--text-faint)">—</span>');
+
+  const arrCell = arr && arr.id
+    ? `<a href="/modules/finance.html#arrangement=${esc(arr.id)}" style="color:var(--brand-secondary,var(--accent-cyan,#06b6d4));text-decoration:none">${esc(arr.type || 'arrangement')} <span style="color:var(--text-faint);font-size:11px">(${esc(arr.arrangement_status || arr.status || '')})</span></a>`
+    : '<span style="color:var(--text-faint)">—</span>';
+
+  const payloadJson = JSON.stringify(it.payload || {}, null, 2);
+  const rationale = esc((it.payload?.rationale) || (it.payload?.reason) || '—');
+  const source = (it.payload && it.payload.source) ? esc(it.payload.source) : 'manual';
+
+  let auditHtml = '';
+  if (approver) {
+    auditHtml += `<div>Goedgekeurd door: ${esc(approver.full_name || approver.email || approver.id)} op ${esc(approvFmtDateTime(it.approved_at))}</div>`;
+  }
+  if (rejecter) {
+    auditHtml += `<div>Afgewezen door: ${esc(rejecter.full_name || rejecter.email || rejecter.id)} op ${esc(approvFmtDateTime(it.approved_at))}</div>`;
+  }
+  if (it.executed_at) {
+    auditHtml += `<div>Uitgevoerd op: ${esc(approvFmtDateTime(it.executed_at))}</div>`;
+  }
+  if (it.reject_reason) {
+    auditHtml += `<div style="margin-top:6px"><span style="color:var(--text-faint)">Reden:</span> ${esc(it.reject_reason)}</div>`;
+  }
+  if (!auditHtml) auditHtml = '<div style="color:var(--text-faint)">(nog geen audit-events)</div>';
+
+  body.innerHTML = `
+    <div class="approv-detail-grid">
+      <div>Action type</div>      <div><span class="approv-action-type">${esc(approvActionLabel(it.action_type))}</span> <span style="color:var(--text-faint);font-size:11px;margin-left:6px">${esc(it.action_type || '')}</span></div>
+      <div>Status</div>           <div>${approvStatusBadge(it.status)}</div>
+      <div>Klant</div>            <div>${custLink}</div>
+      <div>Arrangement</div>      <div>${arrCell}</div>
+      <div>Source</div>           <div>${esc(source)}</div>
+      <div>Rationale</div>        <div>${rationale}</div>
+      <div>Voorgesteld op</div>   <div>${esc(approvFmtDateTime(it.created_at))}</div>
+      <div>Verloopt op</div>      <div>${esc(it.expires_at ? approvFmtDateTime(it.expires_at) : '—')}</div>
+      <div>Gepland voor</div>     <div>${esc(it.scheduled_for ? approvFmtDateTime(it.scheduled_for) : '—')}</div>
+    </div>
+
+    <div class="approv-detail-section-title">Payload</div>
+    <pre class="approv-detail-pre">${esc(payloadJson)}</pre>
+
+    <div class="approv-detail-section-title">Audit historie</div>
+    <div style="font-size:12px;color:var(--text-dim)">${auditHtml}</div>
+  `;
+
+  const approveBtn = document.getElementById('pendingActionDetailApproveBtn');
+  const rejectBtn  = document.getElementById('pendingActionDetailRejectBtn');
+  if (approveBtn) approveBtn.style.display = isPending ? '' : 'none';
+  if (rejectBtn)  rejectBtn.style.display  = isPending ? '' : 'none';
+}
+
+async function approveFromDetail() {
+  if (!_approvCurrentDetailId) return;
+  const id = _approvCurrentDetailId;
+  const btn = document.getElementById('pendingActionDetailApproveBtn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Bezig…'; }
+  try {
+    const ok = await approveAction(id);
+    if (ok) closePendingActionDetail();
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = 'Approve'; }
+  }
+}
+
+function closePendingActionDetail() {
+  document.getElementById('pendingActionDetailModal')?.classList.add('hidden');
+  _approvCurrentDetailId = null;
+}
+
+// Lichtgewicht refresh van alleen de tab-badge (PENDING-count) zonder de
+// volledige lijst te laden. Wordt aangeroepen bij init.
+async function refreshApprovalsTabBadge() {
+  try {
+    const r = await window.AgentShared.apiFetch('/api/pending-actions-list?status=pending&limit=1');
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) return;
+    const cnt = (d.counts && typeof d.counts.PENDING === 'number')
+      ? d.counts.PENDING
+      : (typeof d.total === 'number' ? d.total : 0);
+    const badge = document.getElementById('approvalsTabBadge');
+    if (!badge) return;
+    if (cnt > 0) { badge.textContent = String(cnt); badge.classList.remove('hidden'); }
+    else         { badge.classList.add('hidden'); }
+  } catch (_) { /* fail-soft */ }
 }
 
 init();
