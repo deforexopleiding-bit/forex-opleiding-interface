@@ -198,6 +198,63 @@
     .inbox-c-compose {
       border-top: 1px solid var(--border, rgba(255,255,255,.08));
       padding: 12px 16px;
+      background: var(--surface-1, #1a1d24);
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .inbox-c-compose-textarea {
+      width: 100%;
+      min-height: 60px;
+      max-height: 120px;
+      padding: 10px 14px;
+      box-sizing: border-box;
+      border: 1px solid var(--border, rgba(255,255,255,.12));
+      border-radius: var(--radius, 8px);
+      background: var(--bg-elev-2, #0f1218);
+      color: var(--text-strong, #fff);
+      resize: none;
+      font-family: inherit;
+      font-size: 14px;
+      line-height: 1.5;
+      outline: none;
+      overflow-y: auto;
+      transition: border-color .15s ease;
+    }
+    .inbox-c-compose-textarea:focus {
+      border-color: var(--accent-cyan, #38bdf8);
+    }
+    .inbox-c-compose-textarea:disabled {
+      opacity: .55;
+      cursor: not-allowed;
+    }
+    .inbox-c-actions {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 8px;
+      padding-top: 8px;
+    }
+    .inbox-c-actions-left {
+      display: flex;
+      gap: 6px;
+      align-items: center;
+    }
+    .inbox-c-actions-right {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+    }
+    .inbox-c-window-hint {
+      font-size: 12px;
+      color: var(--text-dim, #94a3b8);
+      white-space: nowrap;
+    }
+    .inbox-c-window-hint.open { color: #22c55e; }
+    .inbox-c-window-hint.expired { color: #f59e0b; }
+    .inbox-c-compose .sr-abtn[disabled] {
+      opacity: .5;
+      cursor: not-allowed;
     }
 
     @media (max-width: 1100px) {
@@ -581,33 +638,28 @@
 
             <!-- Compose area -->
             <div class="inbox-c-compose">
-              <!-- Free-text reply (binnen 24h-window) -->
-              <div id="inboxReplyText" hidden>
-                <textarea id="inboxReplyTextArea" class="fin-input" rows="3" placeholder="Typ een bericht…" style="resize:vertical;min-height:60px;font-size:13px;width:100%"></textarea>
-                <div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px;gap:8px">
-                  <div style="display:flex;gap:6px">
-                    <button class="sr-abtn" id="inboxTplBtn" type="button" disabled data-disabled-tip="Eerst gesprek selecteren" title="Eerst gesprek selecteren" style="font-size:12px;padding:6px 10px"><i class="ti ti-template"></i> Template</button>
-                    <button class="sr-abtn" id="inboxQrBtn" type="button" disabled data-disabled-tip="Eerst gesprek selecteren" title="Eerst gesprek selecteren" style="font-size:12px;padding:6px 10px"><i class="ti ti-message-bolt"></i> Snel antwoord</button>
-                  </div>
-                  <button class="sr-abtn primary" id="inboxReplyTextSend" type="button"><i class="ti ti-send"></i> Verstuur</button>
-                </div>
+              <!-- Verlopen-window waarschuwing (alleen zichtbaar buiten 24h) -->
+              <div id="inboxComposeExpiredWarn" hidden style="background:rgba(245,158,11,.10);border:1px solid rgba(245,158,11,.3);border-radius:6px;padding:8px 12px;font-size:12px;color:#f59e0b">
+                <i class="ti ti-clock-exclamation"></i> 24-uurs servicewindow verlopen — gebruik de Template-knop voor een goedgekeurde Meta-template.
               </div>
 
-              <!-- Template reply (buiten 24h-window) -->
-              <div id="inboxReplyTemplate" hidden>
-                <div style="background:rgba(245,158,11,.10);border:1px solid rgba(245,158,11,.3);border-radius:6px;padding:8px 12px;font-size:12px;color:#f59e0b;margin-bottom:10px">
-                  <i class="ti ti-clock-exclamation"></i> 24-uurs servicewindow verlopen — gebruik een goedgekeurde Meta-template.
+              <!-- Eén textarea voor alle compose-acties -->
+              <textarea
+                id="inboxComposeTextarea"
+                class="inbox-c-compose-textarea"
+                rows="2"
+                placeholder="Selecteer eerst een gesprek"
+                disabled></textarea>
+
+              <!-- Actie-rij: links pickers, rechts window-hint + Verstuur -->
+              <div class="inbox-c-actions">
+                <div class="inbox-c-actions-left">
+                  <button class="sr-abtn" id="inboxTplBtn" type="button" disabled data-disabled-tip="Eerst gesprek selecteren" title="Eerst gesprek selecteren" style="font-size:12px;padding:6px 10px"><i class="ti ti-template"></i> Template</button>
+                  <button class="sr-abtn" id="inboxQrBtn" type="button" disabled data-disabled-tip="Eerst gesprek selecteren" title="Eerst gesprek selecteren" style="font-size:12px;padding:6px 10px"><i class="ti ti-message-bolt"></i> Snel antwoord</button>
                 </div>
-                <label style="font-size:12px;color:var(--text-dim);display:block">
-                  <div style="margin-bottom:4px;font-weight:600">Meta-template-naam</div>
-                  <input id="inboxReplyTemplateName" type="text" class="fin-input" placeholder="bv. invoice_reminder_v1"/>
-                </label>
-                <div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px;gap:8px">
-                  <div style="display:flex;gap:6px">
-                    <button class="sr-abtn" id="inboxTplBtn2" type="button" disabled data-disabled-tip="Eerst gesprek selecteren" title="Eerst gesprek selecteren" style="font-size:12px;padding:6px 10px"><i class="ti ti-template"></i> Template</button>
-                    <button class="sr-abtn" id="inboxQrBtn2" type="button" disabled data-disabled-tip="Eerst gesprek selecteren" title="Eerst gesprek selecteren" style="font-size:12px;padding:6px 10px"><i class="ti ti-message-bolt"></i> Snel antwoord</button>
-                  </div>
-                  <button class="sr-abtn primary" id="inboxReplyTemplateSend" type="button"><i class="ti ti-send"></i> Verstuur template</button>
+                <div class="inbox-c-actions-right">
+                  <span id="inboxComposeWindowHint" class="inbox-c-window-hint" hidden></span>
+                  <button class="sr-abtn primary" id="inboxComposeSendBtn" type="button" disabled title="Eerst gesprek selecteren"><i class="ti ti-send"></i> Verstuur</button>
                 </div>
               </div>
             </div>
@@ -3046,17 +3098,8 @@
         }
       }
 
-      // Reply-vorm tonen: text als 24h-open, anders template
-      const replyText = document.getElementById('inboxReplyText');
-      const replyTpl  = document.getElementById('inboxReplyTemplate');
-      if (replyText) replyText.hidden = !_inboxConvCanSendText;
-      if (replyTpl)  replyTpl.hidden  =  _inboxConvCanSendText;
-
-      // Template / Snel-antwoord knoppen enablen — er is nu een actief gesprek.
-      ['inboxTplBtn','inboxTplBtn2','inboxQrBtn','inboxQrBtn2'].forEach(id => {
-        const el = document.getElementById(id);
-        if (el) { el.disabled = false; el.title = ''; }
-      });
+      // Compose-state syncen (textarea + knoppen + hint).
+      _inboxApplyComposeState();
 
       _inboxRenderMessages();
       // Conv-list opnieuw laden zodat unread_count visueel resetst.
@@ -3067,19 +3110,66 @@
     }
   }
 
+  // Autoresize: groeit met inhoud tot max 120px, daarna scrollt textarea zelf.
+  function autoResizeComposeTextarea() {
+    const ta = document.getElementById('inboxComposeTextarea');
+    if (!ta) return;
+    ta.style.height = 'auto';
+    ta.style.height = Math.min(ta.scrollHeight, 120) + 'px';
+  }
+
+  // Sync compose-UI met huidige conv-state. Eén bron van waarheid voor placeholder/disabled/hint.
+  function _inboxApplyComposeState() {
+    const ta       = document.getElementById('inboxComposeTextarea');
+    const tplBtn   = document.getElementById('inboxTplBtn');
+    const qrBtn    = document.getElementById('inboxQrBtn');
+    const sendBtn  = document.getElementById('inboxComposeSendBtn');
+    const hint     = document.getElementById('inboxComposeWindowHint');
+    const warn     = document.getElementById('inboxComposeExpiredWarn');
+
+    if (!_inboxActiveConvId) {
+      // Geen actief gesprek
+      if (ta)      { ta.disabled = true;  ta.placeholder = 'Selecteer eerst een gesprek'; ta.value = ''; ta.style.height = ''; }
+      if (tplBtn)  { tplBtn.disabled  = true;  tplBtn.title  = 'Eerst gesprek selecteren'; }
+      if (qrBtn)   { qrBtn.disabled   = true;  qrBtn.title   = 'Eerst gesprek selecteren'; }
+      if (sendBtn) { sendBtn.disabled = true;  sendBtn.title = 'Eerst gesprek selecteren'; }
+      if (hint)    { hint.hidden = true; hint.textContent = ''; hint.classList.remove('open','expired'); }
+      if (warn)    { warn.hidden = true; }
+      return;
+    }
+
+    // Actief gesprek
+    if (tplBtn) { tplBtn.disabled = false; tplBtn.title = ''; }
+    if (_inboxConvCanSendText) {
+      // 24h-window open: tekst-bericht versturen mag
+      if (ta)      { ta.disabled = false; ta.placeholder = 'Typ een bericht…'; }
+      if (qrBtn)   { qrBtn.disabled = false; qrBtn.title = ''; }
+      if (sendBtn) { sendBtn.disabled = false; sendBtn.title = 'Versturen (Ctrl+Enter)'; }
+      if (hint)    { hint.hidden = false; hint.textContent = '24h open'; hint.classList.remove('expired'); hint.classList.add('open'); }
+      if (warn)    { warn.hidden = true; }
+    } else {
+      // Window verlopen: alleen templates
+      if (ta)      { ta.disabled = true; ta.placeholder = 'Window verlopen — gebruik Template knop'; }
+      if (qrBtn)   { qrBtn.disabled = true; qrBtn.title = 'Window verlopen — alleen templates toegestaan'; }
+      if (sendBtn) { sendBtn.disabled = true; sendBtn.title = 'Window verlopen — gebruik Template knop'; }
+      if (hint)    { hint.hidden = false; hint.textContent = '24h verlopen'; hint.classList.remove('open'); hint.classList.add('expired'); }
+      if (warn)    { warn.hidden = false; }
+    }
+  }
+
   async function sendInboxText() {
     if (!_inboxActiveConvId) {
       window.AgentShared.showToast('Eerst gesprek selecteren', 'error');
       return;
     }
-    const ta = document.getElementById('inboxReplyTextArea');
+    const ta = document.getElementById('inboxComposeTextarea');
     if (!ta) return;
     const body = (ta.value || '').trim();
     if (!body) {
       window.AgentShared.showToast('Bericht is leeg', 'error');
       return;
     }
-    const btn = document.getElementById('inboxReplyTextSend');
+    const btn = document.getElementById('inboxComposeSendBtn');
     if (btn) btn.disabled = true;
     try {
       const r = await window.AgentShared.apiFetch('/api/inbox-send', {
@@ -3089,12 +3179,8 @@
       });
       const d = await r.json().catch(() => ({}));
       if (r.status === 422 && d.error === '24h_window_expired') {
-        // Window net verlopen — switch UI naar template-form
+        // Window net verlopen — sync UI naar verlopen-state
         _inboxConvCanSendText = false;
-        const replyText = document.getElementById('inboxReplyText');
-        const replyTpl  = document.getElementById('inboxReplyTemplate');
-        if (replyText) replyText.hidden = true;
-        if (replyTpl)  replyTpl.hidden  = false;
         const badge = document.getElementById('inboxThreadWindowBadge');
         if (badge) {
           badge.classList.remove('open');
@@ -3102,6 +3188,7 @@
           badge.textContent = '24h verlopen';
           badge.title = 'Servicewindow verlopen — alleen templates';
         }
+        _inboxApplyComposeState();
         window.AgentShared.showToast('24-uurs window verlopen — gebruik een template', 'error');
         return;
       }
@@ -3114,6 +3201,7 @@
         return;
       }
       ta.value = '';
+      ta.style.height = ''; // reset naar CSS min-height
       window.AgentShared.showToast('Bericht verstuurd', 'success');
       // Direct thread herladen voor zichtbare update
       await openInboxConv(_inboxActiveConvId);
@@ -3121,47 +3209,8 @@
       console.error('[sendInboxText]', e);
       window.AgentShared.showToast('Versturen mislukt: ' + e.message, 'error');
     } finally {
-      if (btn) btn.disabled = false;
-    }
-  }
-
-  async function sendInboxTemplate() {
-    if (!_inboxActiveConvId) {
-      window.AgentShared.showToast('Eerst gesprek selecteren', 'error');
-      return;
-    }
-    const inp = document.getElementById('inboxReplyTemplateName');
-    if (!inp) return;
-    const template_name = (inp.value || '').trim();
-    if (!template_name) {
-      window.AgentShared.showToast('Template-naam vereist', 'error');
-      return;
-    }
-    const btn = document.getElementById('inboxReplyTemplateSend');
-    if (btn) btn.disabled = true;
-    try {
-      const r = await window.AgentShared.apiFetch('/api/inbox-send', {
-        method:  'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ conversation_id: _inboxActiveConvId, mode: 'template', template_name }),
-      });
-      const d = await r.json().catch(() => ({}));
-      if (r.status === 503) {
-        window.AgentShared.showToast('Meta WhatsApp niet geconfigureerd', 'error');
-        return;
-      }
-      if (!r.ok) {
-        window.AgentShared.showToast('Template versturen mislukt: ' + (d.error || ('HTTP ' + r.status)), 'error');
-        return;
-      }
-      inp.value = '';
-      window.AgentShared.showToast('Template verstuurd', 'success');
-      await openInboxConv(_inboxActiveConvId);
-    } catch (e) {
-      console.error('[sendInboxTemplate]', e);
-      window.AgentShared.showToast('Template versturen mislukt: ' + e.message, 'error');
-    } finally {
-      if (btn) btn.disabled = false;
+      // Re-evaluate disabled-state via centrale sync ipv harde toggle.
+      _inboxApplyComposeState();
     }
   }
 
@@ -3603,9 +3652,9 @@
 
   function selectInboxQr(item) {
     if (!item) return;
-    const ta = document.getElementById('inboxReplyTextArea');
-    if (!ta) {
-      // Geen text-area beschikbaar (bv. 24h verlopen → template-modus).
+    const ta = document.getElementById('inboxComposeTextarea');
+    if (!ta || ta.disabled) {
+      // Textarea uitgeschakeld (bv. 24h verlopen).
       window.AgentShared.showToast('Open eerst een gesprek met actief 24h-window', 'error');
       closeInboxQrPicker();
       return;
@@ -3618,12 +3667,13 @@
       ta.value = body;
     }
     closeInboxQrPicker();
-    // Focus + cursor naar einde.
+    // Focus + cursor naar einde + autoresize.
     try {
       ta.focus();
       const len = ta.value.length;
       ta.setSelectionRange(len, len);
     } catch (_e) { /* defensief */ }
+    autoResizeComposeTextarea();
     window.AgentShared.showToast('Snel antwoord ingevoegd (Bewerk + verstuur)', 'success');
   }
 
@@ -3647,22 +3697,16 @@
     const refreshBtn = document.getElementById('inboxConvRefresh');
     if (refreshBtn) refreshBtn.addEventListener('click', () => loadInboxConvList());
 
-    // Send-knoppen.
-    const sendTextBtn = document.getElementById('inboxReplyTextSend');
-    if (sendTextBtn) sendTextBtn.addEventListener('click', () => sendInboxText());
-    const sendTplBtn  = document.getElementById('inboxReplyTemplateSend');
-    if (sendTplBtn)  sendTplBtn.addEventListener('click', () => sendInboxTemplate());
+    // Send-knop (één compose-knop voor text-versturen).
+    const sendBtn = document.getElementById('inboxComposeSendBtn');
+    if (sendBtn) sendBtn.addEventListener('click', () => sendInboxText());
 
-    // Template-picker openers (zowel binnen text- als template-reply container).
-    ['inboxTplBtn','inboxTplBtn2'].forEach(id => {
-      const b = document.getElementById(id);
-      if (b) b.addEventListener('click', () => openInboxTplPicker());
-    });
+    // Template-picker opener.
+    const tplBtn = document.getElementById('inboxTplBtn');
+    if (tplBtn) tplBtn.addEventListener('click', () => openInboxTplPicker());
     // Snel-antwoord (quick-reply) picker — opent inboxQrPickerModal.
-    ['inboxQrBtn','inboxQrBtn2'].forEach(id => {
-      const b = document.getElementById(id);
-      if (b) b.addEventListener('click', () => openInboxQrPicker());
-    });
+    const qrBtn = document.getElementById('inboxQrBtn');
+    if (qrBtn) qrBtn.addEventListener('click', () => openInboxQrPicker());
 
     // Template-picker modal wiring
     const tplModal     = document.getElementById('inboxTplPickerModal');
@@ -3734,8 +3778,8 @@
       }
     });
 
-    // Cmd/Ctrl+Enter in textarea → versturen.
-    const ta = document.getElementById('inboxReplyTextArea');
+    // Cmd/Ctrl+Enter in compose-textarea → versturen. Plain Enter + Shift+Enter = newline.
+    const ta = document.getElementById('inboxComposeTextarea');
     if (ta) {
       ta.addEventListener('keydown', (e) => {
         if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
@@ -3743,7 +3787,12 @@
           sendInboxText();
         }
       });
+      // Autoresize op elke wijziging (typen, paste, cut).
+      ta.addEventListener('input', () => autoResizeComposeTextarea());
     }
+
+    // Initiële compose-state: nog geen gesprek geselecteerd.
+    _inboxApplyComposeState();
 
     // Klant-info knop in thread-header + delegated klik op customer-link in naam.
     const custBtn = document.getElementById('inboxThreadCustomerBtn');
