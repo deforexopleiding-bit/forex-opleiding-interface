@@ -2162,6 +2162,11 @@ const WA_VAR_REGISTRY = [
   { key: 'klant.factuur_lijst', label: 'Lijst openstaande facturen', category: 'klant', example: '- 2026-0001 (EUR 80,00)' },
   { key: 'klant.totaal_open',   label: 'Totaal openstaand',          category: 'klant', example: 'EUR 200,00' },
   { key: 'klant.aantal_open',   label: 'Aantal open facturen',       category: 'klant', example: '2' },
+  // ── afdeling (contact-info) ──────────────────────────────────────────────
+  { key: 'afdeling.telefoon',      label: 'Telefoon',      category: 'afdeling', example: '+31 85 130 83 62' },
+  { key: 'afdeling.whatsapp',      label: 'WhatsApp',      category: 'afdeling', example: '+31 6 51031673' },
+  { key: 'afdeling.email',         label: 'Email',         category: 'afdeling', example: 'administratie@deforexopleiding.nl' },
+  { key: 'afdeling.ondertekenaar', label: 'Ondertekenaar', category: 'afdeling', example: 'De Forex Opleiding' },
   // ── bedrijf ──────────────────────────────────────────────────────────────
   { key: 'bedrijf.naam',     label: 'Bedrijfsnaam',     category: 'bedrijf', example: 'De Forex Opleiding NL B.V.' },
   { key: 'bedrijf.adres',    label: 'Bedrijfsadres',    category: 'bedrijf', example: 'Voorbeeldstraat 1, 1234 AB Plaats' },
@@ -2179,11 +2184,12 @@ const WA_VAR_CATEGORY_LABELS = {
   customer: 'Klantgegevens',
   invoice:  'Factuur',
   klant:    'Klant (aggregaties)',
+  afdeling: 'Afdeling (contact-info)',
   bedrijf:  'Bedrijfsgegevens',
   datum:    'Datum',
 };
 // Volgorde waarin categorieën getoond worden in het paneel.
-const WA_VAR_CATEGORY_ORDER = ['customer', 'invoice', 'klant', 'bedrijf', 'datum'];
+const WA_VAR_CATEGORY_ORDER = ['customer', 'invoice', 'klant', 'afdeling', 'bedrijf', 'datum'];
 // Snelle key-lookup map (zelfde patroon als server-side).
 const WA_VAR_BY_KEY = (() => {
   const m = new Map();
