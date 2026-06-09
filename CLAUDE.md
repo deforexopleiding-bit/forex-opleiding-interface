@@ -26,7 +26,11 @@ Lokaal: C:/Users/jeffr/forex-opleiding-interface
 - CRON_SECRET in environment variables (Vercel + 1Password)
 - SUPABASE_URL + SUPABASE_ANON_KEY in env vars (publiek — ook browser-side via /api/config)
 - SUPABASE_SERVICE_ROLE_KEY in env vars (sensitive — alleen server-side)
-- ANTHROPIC_API_KEY in env vars
+- ANTHROPIC_API_KEY in env vars (sensitive — server-side only). VEREIST voor
+  alle Anthropic-callers: agent-chat, agent-meeting, generate-reply,
+  email-agent, en sinds E1.0 ook joost-suggest. Ontbrekende key → endpoint
+  returnt 503 "ANTHROPIC_API_KEY niet geconfigureerd" zodat config-issues
+  onderscheidbaar zijn van runtime-bugs. Backup in 1Password.
 - Strato IMAP credentials per mailbox in env vars
 
 ## Productie-users
@@ -89,6 +93,17 @@ Lokaal: C:/Users/jeffr/forex-opleiding-interface
   in /modules/finance.html (Wanbetalers-tab). Hoofdnav-badge op Admin-link toont
   PENDING-count; klik → /modules/admin.html#approval-queue. Zie
   docs/payment-arrangements-d1-foundation.md voor architectuur + roadmap (D2-D6).
+- Joost (E1.0) — AI conversational agent voor Finance Inbox in **draft-mode**.
+  Genereert suggesties voor antwoorden op klant-WhatsApp's; medewerker bepaalt
+  of die 1-op-1 / aangepast / niet verstuurd worden. Tabellen `joost_config`
+  (per-module persona + prompt + KB + model) en `joost_suggestions` (log +
+  outcome). Endpoints: `joost-config-get` / `joost-config-upsert` /
+  `joost-suggest` / `joost-mark-outcome`. RBAC: `finance.joost.use` (use) +
+  `admin.joost_config` (config-write). Rate-limit 30s per conversation tegen
+  burst-clicks. Inbox compose-panel met 3 acties (Plak / Plak en bewerk /
+  Negeer); admin-UI in `/modules/admin.html` voor config. Vereist env-var
+  `ANTHROPIC_API_KEY` (503 als ontbrekend). Zie docs/joost-e10-foundation.md
+  voor architectuur + roadmap (E1.1 auto-suggest, E1.2 auto-task, E2 autonomous).
 - /modules/shared/agent-shared.js — cross-modulaire functies 
   (showToast, esc, formatMd, relTime, showReport, approval-helpers,
    getAvatarUrl, renderUserSection, initAuth)
@@ -593,3 +608,32 @@ te onderhouden met grotendeels overlappende kolommen. Eén tabel +
 `action_type` discriminator + helper-prefix (`TL_` vs `MANUAL_`) is de
 elegantere route, vooral omdat de mark-executed cascade automatisch goed
 gaat zodra `arrangement_id` NULL is voor standalone taken.
+
+## Lessons Learned — E1.0 Joost foundation (9 juni 2026)
+
+Volledige documentatie: [`docs/joost-e10-foundation.md`](docs/joost-e10-foundation.md).
+
+### Lesson learned 22 — Structured output via tool-use + tool_choice forceren
+Voor structured JSON-output uit Anthropic-modellen is **tool-use met
+geforceerde `tool_choice`** het robuuste pad. Concreet:
+
+1. Definieer exact 1 tool met JSONSchema voor het gewenste output-object
+   (required fields, enums, descriptions per veld).
+2. Zet `tool_choice = { type: 'tool', name: '<tool_name>' }` zodat het model
+   verplicht is die tool aan te roepen — geen "doe wat je wilt"-fallback.
+3. Lees `data.content.find(b => b.type === 'tool_use' && b.name === <name>)`
+   en gebruik `block.input` direct als geparseerd object.
+
+De helper `anthropicStructuredOutput()` in `api/_lib/anthropic-client.js`
+bundelt dit pattern. Callers (Joost-suggest, en later agent-* refactors) hoeven
+zich niet bezig te houden met retry / error-mapping / tool_use-extractie.
+
+Anti-pattern dat we hiermee vermijden: prompt-engineering richting "antwoord
+alleen in JSON, geen markdown" en daarna `JSON.parse(assistantText)`. Dat is
+fragiel — modellen wrappen output regelmatig in ```json``` codeblocks, voegen
+"Here is the JSON:" toe, of escapen quotes inconsistent. Met geforceerd
+tool-use is het schema contractueel gegarandeerd door de API — geen
+post-processing, geen parsing-failures. Bijkomende win: het `tool_use`-block
+heeft een eigen `stop_reason='tool_use'` zodat we ook duidelijk kunnen falen
+(`ANTHROPIC_TOOL_USE_MISSING`) als het model toch tekst probeert te
+returneren.
