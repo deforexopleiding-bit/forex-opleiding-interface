@@ -16,7 +16,7 @@
 //     {
 //       id, customer_id, arrangement_id, action_type, status, payload,
 //       proposed_by, approved_by, approved_at, executed_at, execution_result,
-//       reject_reason, scheduled_for, expires_at, created_at, updated_at,
+//       reject_reason (alias voor DB-kolom rejection_reason), scheduled_for, expires_at, created_at, updated_at,
 //       customer:     { id, name, email } | null,
 //       arrangement:  { id, type, status } | null
 //     }, ...
@@ -89,7 +89,7 @@ export default async function handler(req, res) {
       .select(`
         id, customer_id, arrangement_id, action_type, payload, status,
         proposed_by_user_id, approved_by_user_id, approved_at, executed_at, execution_result,
-        reject_reason, scheduled_for, expires_at, created_at, updated_at,
+        rejection_reason, scheduled_for, expires_at, created_at, updated_at,
         customers:customer_id ( id, is_company, company_name, first_name, last_name, email ),
         payment_arrangements:arrangement_id ( id, type, status )
       `, { count: 'exact' })
@@ -120,7 +120,7 @@ export default async function handler(req, res) {
         approved_at:      row.approved_at,
         executed_at:      row.executed_at,
         execution_result: row.execution_result,
-        reject_reason:    row.reject_reason,
+        reject_reason:    row.rejection_reason,
         scheduled_for:    row.scheduled_for,
         expires_at:       row.expires_at,
         created_at:       row.created_at,

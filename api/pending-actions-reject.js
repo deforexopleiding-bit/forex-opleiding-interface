@@ -3,17 +3,18 @@
 // finance.arrangements.approve.
 //
 // Body: { id: uuid, rejection_reason: string (verplicht) }
+//        (alias 'reject_reason' wordt ook geaccepteerd voor backward-compat)
 //
 // State-machine: alleen vanuit status='pending' kan afgewezen worden;
 // anders 409 met huidige status.
 //
 // NB: schema-kolomnamen in deployed DB:
-//   - reject_reason        text          (NIET 'rejection_reason')
+//   - rejection_reason     text          (deployed kolom — NIET 'reject_reason')
 //   - approved_by_user_id  uuid          (hergebruikt voor 'wie afwees'; geen
 //                                         aparte rejected_by-kolom in schema)
 //   - approved_at          timestamptz   (functioneert hier als 'beslis-tijdstip')
-// De UI/body gebruikt 'rejection_reason' (Engelse semantiek) — we mappen
-// dit op de bestaande 'reject_reason'-kolom voor schema-consistentie.
+// De UI/body gebruikt 'rejection_reason' (Engelse semantiek) en die schrijft
+// rechtstreeks naar de gelijknamige DB-kolom.
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
@@ -38,7 +39,10 @@ export default async function handler(req, res) {
 
   const body   = req.body || {};
   const id     = body.id ? String(body.id) : null;
-  const reason = body.rejection_reason ? String(body.rejection_reason).trim() : '';
+  // Accept beide param-namen (rejection_reason canonical, reject_reason legacy alias).
+  const reasonRaw = body.rejection_reason != null ? body.rejection_reason
+                  : (body.reject_reason   != null ? body.reject_reason : '');
+  const reason = String(reasonRaw || '').trim();
 
   if (!id || !UUID_RE.test(id)) return res.status(400).json({ error: 'id (uuid) vereist' });
   if (!reason)                  return res.status(400).json({ error: 'rejection_reason vereist' });
@@ -53,7 +57,7 @@ export default async function handler(req, res) {
     if (lookupErr) throw new Error('lookup: ' + lookupErr.message);
     if (!row)      return res.status(404).json({ error: 'Pending action niet gevonden' });
 
-    if (row.status !== 'pending') {
+    if (row.status !== 'PENDING') {
       return res.status(409).json({
         error: `Action is niet meer PENDING (huidige status: ${row.status})`,
       });
@@ -67,15 +71,15 @@ export default async function handler(req, res) {
     const { data: updated, error: updErr } = await supabaseAdmin
       .from('pending_actions')
       .update({
-        status:              'rejected',
+        status:              'REJECTED',
         approved_at:         nowIso,
         approved_by_user_id: user.id,
-        reject_reason:       reason,
+        rejection_reason:    reason,
         updated_at:          nowIso,
       })
       .eq('id', id)
-      .eq('status', 'pending')   // optimistic concurrency
-      .select('id, status, reject_reason, approved_at, approved_by_user_id, updated_at')
+      .eq('status', 'PENDING')   // optimistic concurrency
+      .select('id, status, rejection_reason, approved_at, approved_by_user_id, updated_at')
       .single();
     if (updErr) throw new Error('update: ' + updErr.message);
 
@@ -88,7 +92,7 @@ export default async function handler(req, res) {
         entity_id:   id,
         after_json:  {
           id,
-          status:         'rejected',
+          status:         'REJECTED',
           action_type:    row.action_type,
           customer_id:    row.customer_id,
           arrangement_id: row.arrangement_id,
@@ -101,7 +105,7 @@ export default async function handler(req, res) {
     return res.status(200).json({
       id:                updated.id,
       status:            updated.status,
-      rejection_reason:  updated.reject_reason,
+      rejection_reason:  updated.rejection_reason,
     });
   } catch (e) {
     console.error('[pending-actions-reject]', e.message);

@@ -50,7 +50,7 @@ export default async function handler(req, res) {
       .select(`
         id, customer_id, arrangement_id, action_type, payload, status,
         proposed_by_user_id, approved_by_user_id, approved_at, executed_at, execution_result,
-        reject_reason, scheduled_for, expires_at, created_at, updated_at,
+        rejection_reason, scheduled_for, expires_at, created_at, updated_at,
         customers:customer_id (
           id, is_company, company_name, first_name, last_name, email, phone
         ),
@@ -118,7 +118,7 @@ export default async function handler(req, res) {
       approved_at:      pa.approved_at,
       executed_at:      pa.executed_at,
       execution_result: pa.execution_result,
-      reject_reason:    pa.reject_reason,
+      reject_reason:    pa.rejection_reason,
       scheduled_for:    pa.scheduled_for,
       expires_at:       pa.expires_at,
       created_at:       pa.created_at,

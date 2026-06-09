@@ -77,18 +77,20 @@ export default async function handler(req, res) {
     }
 
     // --- Pending actions ophalen (alle statussen — UI bepaalt zelf filtering).
-    // NB: pending_actions-kolommen heten proposed_by_user_id / approved_by_user_id.
+    // NB: pending_actions-kolommen heten proposed_by_user_id / approved_by_user_id
+    //     en rejection_reason (deployed DB).
     const { data: paRowsRaw, error: paErr } = await supabaseAdmin
       .from('pending_actions')
-      .select('id, customer_id, arrangement_id, action_type, payload, status, proposed_by_user_id, approved_by_user_id, approved_at, executed_at, execution_result, reject_reason, scheduled_for, expires_at, created_at, updated_at')
+      .select('id, customer_id, arrangement_id, action_type, payload, status, proposed_by_user_id, approved_by_user_id, approved_at, executed_at, execution_result, rejection_reason, scheduled_for, expires_at, created_at, updated_at')
       .eq('arrangement_id', id)
       .order('created_at', { ascending: true });
     if (paErr) throw new Error('pending_actions: ' + paErr.message);
-    // Alias terug naar proposed_by / approved_by voor UI-compat.
+    // Alias terug naar proposed_by / approved_by / reject_reason voor UI-compat.
     const paRows = (paRowsRaw || []).map(r => ({
       ...r,
-      proposed_by: r.proposed_by_user_id,
-      approved_by: r.approved_by_user_id,
+      proposed_by:   r.proposed_by_user_id,
+      approved_by:   r.approved_by_user_id,
+      reject_reason: r.rejection_reason,
     }));
 
     const arrangement = {
