@@ -6203,7 +6203,16 @@
       const d = await r.json().catch(() => ({}));
       if (!r.ok) {
         if (r.status === 429) {
-          _joostShowError('Wacht even (vorige suggestie nog actief).');
+          // Server-side rate-limit: parse retry_after_seconds + zet client-side
+          // cooldown gelijk aan server-window, zodat knop synchroon blokkeert.
+          const retryAfter = Math.max(1, Number(d && d.retry_after_seconds) || 30);
+          const msg = (d && d.message) || 'Wacht ' + retryAfter + ' seconden voor je een nieuwe suggestie vraagt';
+          _joostShowError(msg);
+          window.AgentShared.showToast(msg + ' (' + retryAfter + 's)', 'error');
+          // Sync client-side rate-limit window met server-side antwoord.
+          _joostLastRequestAt = Date.now() - Math.max(0, (JOOST_RATE_LIMIT_MS - retryAfter * 1000));
+          _joostApplySuggestBtnState();
+          setTimeout(_joostApplySuggestBtnState, retryAfter * 1000 + 200);
         } else if (r.status === 503) {
           _joostShowError(d.error || 'Joost is niet beschikbaar.');
         } else if (r.status === 403) {

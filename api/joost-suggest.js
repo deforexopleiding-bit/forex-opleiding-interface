@@ -160,27 +160,36 @@ export default async function handler(req, res) {
 
   try {
     // ========================================================================
-    // STAP 1: Rate-limit (per conv: max 1 PROPOSED suggestie per 30 sec)
+    // STAP 1: Rate-limit (per conv: max 1 suggestie per 30 sec, ongeacht status)
     // ========================================================================
-    const rateCutoff = new Date(Date.now() - RATE_LIMIT_WINDOW_MS).toISOString();
+    // E1.0 polish: rate-limit op laatste suggestion (incl. USED_AS_IS / USED_EDITED /
+    // IGNORED / REJECTED) — voorkomt rapid-fire generaties die LLM-kosten opjagen.
     const { data: recentSugg, error: rateErr } = await supabaseAdmin
       .from('joost_suggestions')
       .select('id, created_at')
       .eq('conversation_id', convId)
-      .eq('status', 'PROPOSED')
-      .gte('created_at', rateCutoff)
       .order('created_at', { ascending: false })
       .limit(1)
       .maybeSingle();
     if (rateErr) {
       console.error('[joost-suggest] rate-limit select error:', rateErr.message);
       // Soft-fail: laat rate-limit niet de hoofdflow blokkeren bij DB-glitch.
-    } else if (recentSugg) {
-      return res.status(429).json({
-        error: 'Wacht even (vorige suggestie nog actief)',
-        previous_suggestion_id: recentSugg.id,
-        previous_created_at: recentSugg.created_at,
-      });
+    } else if (recentSugg && recentSugg.created_at) {
+      const lastMs = new Date(recentSugg.created_at).getTime();
+      if (Number.isFinite(lastMs)) {
+        const ageSeconds = (Date.now() - lastMs) / 1000;
+        const windowSeconds = RATE_LIMIT_WINDOW_MS / 1000;
+        if (ageSeconds < windowSeconds) {
+          const retryAfter = Math.max(1, Math.ceil(windowSeconds - ageSeconds));
+          return res.status(429).json({
+            error: 'rate_limit',
+            message: 'Wacht 30 seconden voor je een nieuwe suggestie vraagt',
+            retry_after_seconds: retryAfter,
+            previous_suggestion_id: recentSugg.id,
+            previous_created_at: recentSugg.created_at,
+          });
+        }
+      }
     }
 
     // ========================================================================
