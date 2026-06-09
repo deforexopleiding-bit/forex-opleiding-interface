@@ -578,8 +578,8 @@
                   </select>
                 </div>
                 <div>
-                  <label class="form-label" for="joostCfgTemperature">Temperature <span id="joostCfgTemperatureVal" style="color:var(--text-faint);font-weight:400">0.40</span></label>
-                  <input type="range" id="joostCfgTemperature" min="0" max="1" step="0.05" value="0.4" style="width:100%" />
+                  <label class="form-label" for="joostCfgTemperature">Temperature <span id="joostCfgTemperatureVal" style="color:var(--text-faint);font-weight:400">0.30</span></label>
+                  <input type="range" id="joostCfgTemperature" min="0" max="1" step="0.05" value="0.3" style="width:100%" />
                   <div style="font-size:11px;color:var(--text-faint);margin-top:4px">0.0 = strikt feitelijk, 1.0 = creatief. Aanbevolen 0.3&ndash;0.6 voor finance.</div>
                 </div>
               </div>
@@ -587,12 +587,12 @@
               <div class="form-group" style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
                 <div>
                   <label class="form-label" for="joostCfgContextCount">Context message count</label>
-                  <input type="number" id="joostCfgContextCount" class="form-input" min="5" max="50" step="1" value="10" />
+                  <input type="number" id="joostCfgContextCount" class="form-input" min="5" max="50" step="1" value="20" />
                   <div style="font-size:11px;color:var(--text-faint);margin-top:4px">Aantal recente WhatsApp-berichten dat Joost mag inlezen als history (5&ndash;50).</div>
                 </div>
                 <div style="display:flex;align-items:flex-end">
                   <label style="display:inline-flex;align-items:center;gap:8px;cursor:pointer;padding-bottom:6px">
-                    <input type="checkbox" id="joostCfgEnabled" />
+                    <input type="checkbox" id="joostCfgEnabled" checked />
                     <span style="font-size:13px;font-weight:600">Actief (suggesties-paneel zichtbaar)</span>
                   </label>
                 </div>
@@ -4731,17 +4731,22 @@ async function loadJoostConfig() {
     const cfg = data.config || data || {};
     setVal('joostCfgModule', cfg.module || moduleKey);
     setVal('joostCfgPersonaName', cfg.persona_name || 'Joost');
-    setVal('joostCfgTone', cfg.tone || '');
-    setVal('joostCfgSystemPrompt', cfg.system_prompt || '');
+    setVal('joostCfgTone', cfg.persona_tone || '');
+    setVal('joostCfgSystemPrompt', cfg.system_prompt_template || '');
     setVal('joostCfgKnowledgeBase', cfg.knowledge_base ? JSON.stringify(cfg.knowledge_base, null, 2) : '');
     setVal('joostCfgModel', cfg.model || 'claude-sonnet-4-6');
-    const temp = (typeof cfg.temperature === 'number') ? cfg.temperature : 0.4;
+    // Default-temperature uit spec (0.3) wanneer endpoint geen rij teruggeeft.
+    const temp = (typeof cfg.temperature === 'number') ? Number(cfg.temperature) : 0.3;
     setVal('joostCfgTemperature', String(temp));
     const tempOut = document.getElementById('joostCfgTemperatureVal');
     if (tempOut) tempOut.textContent = Number(temp).toFixed(2);
-    setVal('joostCfgContextCount', String(cfg.context_message_count || 10));
+    // Default context-count uit spec (20) wanneer endpoint geen rij teruggeeft.
+    const ctxCount = (typeof cfg.context_message_count === 'number' && cfg.context_message_count > 0)
+      ? cfg.context_message_count : 20;
+    setVal('joostCfgContextCount', String(ctxCount));
     const en = document.getElementById('joostCfgEnabled');
-    if (en) en.checked = !!cfg.is_enabled;
+    // is_enabled default true (spec) — alleen expliciet false uitvinken.
+    if (en) en.checked = (cfg.is_enabled === false) ? false : true;
     if (loading) loading.style.display = 'none';
     if (form) form.style.display = '';
     _joostCfgLoadedOnce = true;
@@ -4759,16 +4764,19 @@ async function loadJoostConfig() {
 async function saveJoostConfig() {
   const moduleKey = (document.getElementById('joostCfgModule')?.value || 'finance').trim();
   const personaName = (document.getElementById('joostCfgPersonaName')?.value || '').trim();
-  const tone = (document.getElementById('joostCfgTone')?.value || '').trim();
-  const systemPrompt = (document.getElementById('joostCfgSystemPrompt')?.value || '').trim();
+  // BELANGRIJK: server verwacht persona_tone + system_prompt_template (zie
+  // api/joost-config-upsert.js), niet tone/system_prompt. Eerdere mismatch
+  // veroorzaakte dat tone+systemPrompt silently werden gedropt server-side.
+  const personaTone = (document.getElementById('joostCfgTone')?.value || '').trim();
+  const systemPromptTemplate = (document.getElementById('joostCfgSystemPrompt')?.value || '').trim();
   const kbRaw = (document.getElementById('joostCfgKnowledgeBase')?.value || '').trim();
   const model = (document.getElementById('joostCfgModel')?.value || 'claude-sonnet-4-6').trim();
-  const temperature = Number(document.getElementById('joostCfgTemperature')?.value || '0.4');
-  const contextCount = Math.max(5, Math.min(50, parseInt(document.getElementById('joostCfgContextCount')?.value || '10', 10) || 10));
+  const temperature = Number(document.getElementById('joostCfgTemperature')?.value || '0.3');
+  const contextCount = Math.max(5, Math.min(50, parseInt(document.getElementById('joostCfgContextCount')?.value || '20', 10) || 20));
   const isEnabled = !!document.getElementById('joostCfgEnabled')?.checked;
 
   if (!personaName) { window.AgentShared?.showToast('Persona-naam is verplicht', 'error'); return; }
-  if (!systemPrompt) { window.AgentShared?.showToast('System prompt is verplicht', 'error'); return; }
+  if (!systemPromptTemplate) { window.AgentShared?.showToast('System prompt is verplicht', 'error'); return; }
 
   let knowledgeBase = null;
   if (kbRaw) {
@@ -4782,27 +4790,34 @@ async function saveJoostConfig() {
   const btn = document.getElementById('joostCfgSaveBtn');
   if (btn) { btn.disabled = true; btn.textContent = 'Opslaan…'; }
   try {
+    const payload = {
+      module: moduleKey,
+      persona_name: personaName,
+      persona_tone: personaTone,
+      system_prompt_template: systemPromptTemplate,
+      model,
+      temperature,
+      context_message_count: contextCount,
+      is_enabled: isEnabled,
+    };
+    // Server eist plain object voor knowledge_base (geen null/array/scalar).
+    // Alleen meesturen als de user iets heeft ingevuld; anders skip key.
+    if (knowledgeBase && typeof knowledgeBase === 'object' && !Array.isArray(knowledgeBase)) {
+      payload.knowledge_base = knowledgeBase;
+    }
     const r = await window.AgentShared.apiFetch('/api/joost-config-upsert', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        module: moduleKey,
-        persona_name: personaName,
-        tone,
-        system_prompt: systemPrompt,
-        knowledge_base: knowledgeBase,
-        model,
-        temperature,
-        context_message_count: contextCount,
-        is_enabled: isEnabled,
-      }),
+      body: JSON.stringify(payload),
     });
     const data = await r.json().catch(() => ({}));
     if (!r.ok) {
       window.AgentShared?.showToast('Opslaan mislukt: ' + (data.error || r.status), 'error');
       return;
     }
-    window.AgentShared?.showToast('Joost-configuratie opgeslagen', 'success');
+    window.AgentShared?.showToast('Configuratie opgeslagen', 'success');
+    // Reload form via loadJoostConfig om bevestigde server-side waarden te tonen.
+    try { await loadJoostConfig(); } catch (_) { /* fail-soft */ }
   } catch (e) {
     window.AgentShared?.showToast('Opslaan mislukt: ' + e.message, 'error');
   } finally {
