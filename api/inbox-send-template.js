@@ -42,6 +42,7 @@ import { getClientIp } from './_lib/audit-customer.js';
 import { sendTemplate, getConfigStatus, MetaNotConfiguredError } from './_lib/meta-whatsapp.js';
 import { buildMetaVariablesFromMapping, AVAILABLE_VARIABLES } from './_lib/template-variables.js';
 import { ensureInvoicePaymentLink, InvoicePaymentLinkError } from './_lib/invoice-payment-link.js';
+import { getModuleContextByPhoneNumberId } from './_lib/module-context.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const MAX_TEMPLATE_NAME = 200;
@@ -182,6 +183,7 @@ export default async function handler(req, res) {
       const needsInvoice = requiredKeys.some(k => k && k.startsWith('factuur.'));
       const needsInvoices = requiredKeys.some(k => k === 'klant.factuur_lijst' || k === 'klant.totaal_open' || k === 'klant.aantal_open');
       const needsBetaalLink = requiredKeys.includes('factuur.betaal_link');
+      const needsAfdeling = requiredKeys.some(k => k && k.startsWith('afdeling.'));
 
       // Customer lookup — rijker dan inbox-conversation-context (incl. address_*).
       let customer = null;
@@ -282,8 +284,30 @@ export default async function handler(req, res) {
         }
       }
 
+      // Afdeling-context: lookup whatsapp_module_config voor de zendende lijn.
+      // Prioriteit: conv.phone_number_id (gezet door webhook op inbound-time)
+      // → financePnId (fallback uit module='finance' lookup hierboven). Bij
+      // ontbreken: helper doet zelf nog een module='finance' fallback. Bij
+      // ook geen match: null → resolver vult afdeling.* met lege strings +
+      // console.warn.
+      let moduleContext = null;
+      if (needsAfdeling) {
+        try {
+          moduleContext = await getModuleContextByPhoneNumberId(
+            supabaseAdmin,
+            conv.phone_number_id || financePnId || null,
+          );
+          if (!moduleContext) {
+            resolveWarnings.push('Geen module-context gevonden voor afdeling.* variabele(n)');
+          }
+        } catch (e) {
+          console.error('[inbox-send-template] module-context lookup exception:', e.message);
+          resolveWarnings.push('Fout bij ophalen module-context: ' + e.message);
+        }
+      }
+
       // Resolve mapping → { "1": value, "2": value }
-      const ctx = { customer, invoice, openInvoices };
+      const ctx = { customer, invoice, openInvoices, moduleContext };
       resolvedVariables = buildMetaVariablesFromMapping(bodyMapping, ctx);
       resolveMode = 'server_resolved';
 
