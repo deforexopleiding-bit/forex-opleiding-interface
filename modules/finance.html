@@ -146,6 +146,169 @@
       align-items: center;
       justify-content: center;
     }
+    .inbox-c-customer-content {
+      flex: 1;
+      overflow-y: auto;
+      padding: 18px 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .inbox-c-avatar-large {
+      width: 80px;
+      height: 80px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #fff;
+      font-size: 28px;
+      font-weight: 600;
+      margin: 4px auto 12px;
+      letter-spacing: .02em;
+    }
+    .inbox-c-customer-name {
+      font-size: 16px;
+      font-weight: 700;
+      color: var(--text-strong, #fff);
+      text-align: center;
+      margin: 0;
+      word-break: break-word;
+    }
+    .inbox-c-customer-phone {
+      font-size: 12.5px;
+      color: var(--text-faint);
+      text-align: center;
+      margin: 2px 0 10px;
+    }
+    .inbox-c-window-badge-large {
+      align-self: center;
+      font-size: 11.5px;
+      padding: 4px 12px;
+      border-radius: 999px;
+      font-weight: 600;
+      margin-bottom: 4px;
+      white-space: nowrap;
+    }
+    .inbox-c-window-badge-large.open {
+      background: rgba(34,197,94,.14);
+      color: #22c55e;
+    }
+    .inbox-c-window-badge-large.expired {
+      background: rgba(239,68,68,.14);
+      color: #ef4444;
+    }
+    .inbox-c-section {
+      padding: 14px 0;
+      border-top: 1px solid var(--border, rgba(255,255,255,.08));
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .inbox-c-section:first-of-type { border-top: none; padding-top: 4px; }
+    .inbox-c-section-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      gap: 10px;
+    }
+    .inbox-c-section-lbl {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: .06em;
+      color: var(--text-faint);
+      font-weight: 700;
+    }
+    .inbox-c-section-total {
+      font-size: 15px;
+      font-weight: 700;
+      color: var(--text-strong, #fff);
+    }
+    .inbox-c-invoice-list {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .inbox-c-invoice-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 10px;
+      font-size: 12.5px;
+      padding: 6px 0;
+      border-bottom: 1px dashed var(--border-subtle, rgba(255,255,255,.05));
+    }
+    .inbox-c-invoice-row:last-child { border-bottom: none; }
+    .inbox-c-invoice-nr {
+      color: var(--text-dim, #94a3b8);
+      font-weight: 600;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .inbox-c-invoice-right {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-shrink: 0;
+    }
+    .inbox-c-invoice-amount {
+      font-weight: 600;
+      color: var(--text-strong, #fff);
+    }
+    .inbox-c-overdue-badge {
+      font-size: 10.5px;
+      padding: 2px 7px;
+      border-radius: 999px;
+      font-weight: 700;
+      letter-spacing: .01em;
+      white-space: nowrap;
+    }
+    .inbox-c-overdue-badge.overdue {
+      background: rgba(239,68,68,.14);
+      color: #ef4444;
+    }
+    .inbox-c-overdue-badge.normal {
+      background: rgba(148,163,184,.14);
+      color: var(--text-dim, #94a3b8);
+    }
+    .inbox-c-kv {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 10px;
+      font-size: 12.5px;
+      padding: 3px 0;
+    }
+    .inbox-c-kv .k {
+      color: var(--text-faint);
+    }
+    .inbox-c-kv .v {
+      color: var(--text-strong, #fff);
+      text-align: right;
+      word-break: break-word;
+    }
+    .inbox-c-kv .v a {
+      color: var(--accent-cyan, #38bdf8);
+      text-decoration: none;
+    }
+    .inbox-c-kv .v a:hover { text-decoration: underline; }
+    .inbox-c-actions-list {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .inbox-c-actions-list .sr-abtn {
+      justify-content: center;
+      width: 100%;
+    }
+    .inbox-c-empty-line {
+      font-size: 12px;
+      color: var(--text-faint);
+      font-style: italic;
+      text-align: center;
+      padding: 6px 0;
+    }
     .inbox-c-thread-header {
       padding: 12px 16px;
       border-bottom: 1px solid var(--border, rgba(255,255,255,.08));
@@ -666,10 +829,49 @@
           </div>
         </div>
 
-        <!-- RIGHT column: klant-info panel (placeholder; commit C vult dit in) -->
+        <!-- RIGHT column: klant-info panel -->
         <div class="inbox-c-col-right" id="inboxCustomerPanel">
           <div class="inbox-c-col-right-empty" id="inboxCustomerPanelEmpty">
             Selecteer een gesprek om klant-info te zien
+          </div>
+          <div class="inbox-c-customer-content" id="inboxCustomerPanelContent" hidden>
+            <div class="inbox-c-avatar-large" id="inboxCustPanelAvatar" style="background:hsl(210,55%,42%)">?</div>
+            <h3 class="inbox-c-customer-name" id="inboxCustPanelName">—</h3>
+            <div class="inbox-c-customer-phone" id="inboxCustPanelPhone">—</div>
+            <span class="inbox-c-window-badge-large open" id="inboxCustPanelWindow" hidden>24h open</span>
+
+            <!-- Sectie: open facturen -->
+            <div class="inbox-c-section">
+              <div class="inbox-c-section-head">
+                <span class="inbox-c-section-lbl">Open facturen</span>
+                <span class="inbox-c-section-total" id="inboxCustPanelOpenTotal">€ 0,00</span>
+              </div>
+              <div class="inbox-c-invoice-list" id="inboxCustPanelInvoices">
+                <div class="inbox-c-empty-line">Geen open facturen</div>
+              </div>
+            </div>
+
+            <!-- Sectie: klant info -->
+            <div class="inbox-c-section" id="inboxCustPanelInfoSection">
+              <div class="inbox-c-section-head">
+                <span class="inbox-c-section-lbl">Klant info</span>
+              </div>
+              <div id="inboxCustPanelInfoBody">
+                <div class="inbox-c-kv"><span class="k">Klant sinds</span><span class="v" id="inboxCustPanelSince">—</span></div>
+                <div class="inbox-c-kv" id="inboxCustPanelEmailRow" hidden><span class="k">E-mail</span><span class="v" id="inboxCustPanelEmail">—</span></div>
+              </div>
+            </div>
+
+            <!-- Sectie: acties -->
+            <div class="inbox-c-section">
+              <div class="inbox-c-section-head">
+                <span class="inbox-c-section-lbl">Acties</span>
+              </div>
+              <div class="inbox-c-actions-list">
+                <a class="sr-abtn" id="inboxCustPanelOpen" href="#" target="_blank" rel="noopener" style="font-size:12.5px"><i class="ti ti-user"></i> Bekijk in klanten</a>
+                <a class="sr-abtn" id="inboxCustPanelInvoice" href="#" target="_blank" rel="noopener" style="font-size:12.5px"><i class="ti ti-file-invoice"></i> Maak factuur aan</a>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -1614,6 +1816,8 @@
     document.querySelectorAll('#financeNav .sr-seg').forEach(b => b.classList.toggle('active', b.dataset.view === view));
     // Stop inbox auto-poll wanneer we de inbox-tab verlaten — bespaart requests.
     if (view !== 'inbox' && typeof stopInboxPolling === 'function') stopInboxPolling();
+    // Reset klant-paneel zodat oude data niet blijft staan bij terugkeer.
+    if (view !== 'inbox' && typeof _inboxResetCustomerPanel === 'function') _inboxResetCustomerPanel();
     // Bij eerste keer Bank (oud) openen: load per beschikbare permission.
     if (view === 'bank' && !_bankLoadedOnce) {
       _bankLoadedOnce = true;
@@ -3104,6 +3308,8 @@
       _inboxRenderMessages();
       // Conv-list opnieuw laden zodat unread_count visueel resetst.
       loadInboxConvList();
+      // Klant-paneel (rechter kolom) vullen. Geen await: laat thread-render niet wachten op klant-data.
+      loadInboxCustomerContext(convId);
     } catch (e) {
       console.error('[openInboxConv]', e);
       if (msgsWrap) msgsWrap.innerHTML = '<div style="padding:20px;text-align:center;color:#ef4444;font-size:12px">Fout: ' + esc(e.message) + '</div>';
@@ -3276,6 +3482,183 @@
   function closeInboxCustomerModal() {
     const modal = document.getElementById('inboxCustomerModal');
     if (modal) modal.classList.add('hidden');
+  }
+
+  // ──────────────────────────────────────────────────────────────────────────
+  //  Klant-info paneel (rechter kolom in 3-col layout) — data-loading
+  // ──────────────────────────────────────────────────────────────────────────
+
+  // Reset paneel naar empty-state (zichtbaar als geen conv geselecteerd).
+  function _inboxResetCustomerPanel() {
+    const emptyEl   = document.getElementById('inboxCustomerPanelEmpty');
+    const contentEl = document.getElementById('inboxCustomerPanelContent');
+    if (emptyEl)   emptyEl.hidden = false;
+    if (contentEl) contentEl.hidden = true;
+  }
+
+  // Initialen voor het grote klant-paneel-avatar. Hergebruikt _inboxInitials.
+  function _inboxPanelAvatarFor(name, phone) {
+    return _inboxInitials(name, phone);
+  }
+
+  // Format euro vanuit een number (al in euro's, niet centen).
+  function _inboxFmtEur(n) {
+    const v = Number(n) || 0;
+    try {
+      return new Intl.NumberFormat('nl-NL', { style: 'currency', currency: 'EUR' }).format(v);
+    } catch (_) {
+      return '€ ' + v.toFixed(2).replace('.', ',');
+    }
+  }
+
+  // dd-mm-yyyy uit ISO-string of date-only string. '—' bij ontbreken.
+  function _inboxFmtDateNL(iso) {
+    if (!iso) return '—';
+    const s = String(iso);
+    const d = new Date(s.length > 10 ? s : (s + 'T00:00:00'));
+    if (isNaN(d.getTime())) return '—';
+    return String(d.getDate()).padStart(2, '0') + '-' +
+           String(d.getMonth() + 1).padStart(2, '0') + '-' +
+           d.getFullYear();
+  }
+
+  // Hoofd-laad-functie. Roept /api/inbox-conversation-context aan en vult DOM.
+  async function loadInboxCustomerContext(conversationId) {
+    const emptyEl   = document.getElementById('inboxCustomerPanelEmpty');
+    const contentEl = document.getElementById('inboxCustomerPanelContent');
+    if (!emptyEl || !contentEl) return;
+
+    if (!conversationId) {
+      _inboxResetCustomerPanel();
+      return;
+    }
+
+    // Toon content-container alvast met placeholders zodat de overgang vloeiend voelt.
+    emptyEl.hidden = true;
+    contentEl.hidden = false;
+
+    try {
+      const params = new URLSearchParams({ conversation_id: conversationId });
+      const r = await window.AgentShared.apiFetch('/api/inbox-conversation-context?' + params.toString());
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        console.error('[loadInboxCustomerContext]', r.status, d && d.error);
+        // Lichte foutweergave: behoud paneel maar toon "—" overal.
+        _inboxRenderCustomerPanel({ conversation: null, customer: null, open_invoices: [], totals: { open_amount: 0, invoice_count: 0 } });
+        return;
+      }
+      _inboxRenderCustomerPanel(d || {});
+    } catch (e) {
+      console.error('[loadInboxCustomerContext] exception:', e && e.message);
+      _inboxRenderCustomerPanel({ conversation: null, customer: null, open_invoices: [], totals: { open_amount: 0, invoice_count: 0 } });
+    }
+  }
+
+  // Render-functie. Krijgt response van /api/inbox-conversation-context.
+  function _inboxRenderCustomerPanel(d) {
+    const conv = d && d.conversation ? d.conversation : null;
+    const cust = d && d.customer ? d.customer : null;
+    const invs = Array.isArray(d && d.open_invoices) ? d.open_invoices : [];
+    const totals = (d && d.totals) || { open_amount: 0, invoice_count: 0 };
+
+    const avatarEl = document.getElementById('inboxCustPanelAvatar');
+    const nameEl   = document.getElementById('inboxCustPanelName');
+    const phoneEl  = document.getElementById('inboxCustPanelPhone');
+    const badgeEl  = document.getElementById('inboxCustPanelWindow');
+    const totEl    = document.getElementById('inboxCustPanelOpenTotal');
+    const invsEl   = document.getElementById('inboxCustPanelInvoices');
+    const sinceEl  = document.getElementById('inboxCustPanelSince');
+    const emailRow = document.getElementById('inboxCustPanelEmailRow');
+    const emailEl  = document.getElementById('inboxCustPanelEmail');
+    const openLnk  = document.getElementById('inboxCustPanelOpen');
+    const invLnk   = document.getElementById('inboxCustPanelInvoice');
+    const infoSec  = document.getElementById('inboxCustPanelInfoSection');
+
+    // Naam + phone + avatar.
+    const phone = (cust && cust.phone) || (conv && conv.phone_number) || '';
+    const displayName = (cust && cust.name) ? cust.name : (phone || 'Onbekende klant');
+    if (nameEl)  nameEl.textContent  = displayName;
+    if (phoneEl) phoneEl.textContent = phone || '—';
+    if (avatarEl) {
+      avatarEl.textContent     = _inboxPanelAvatarFor(displayName, phone);
+      avatarEl.style.background = _inboxAvatarColor(phone || displayName);
+    }
+
+    // 24h window badge.
+    if (badgeEl) {
+      if (!conv) {
+        badgeEl.hidden = true;
+      } else {
+        badgeEl.hidden = false;
+        badgeEl.classList.remove('open', 'expired');
+        if (conv.window_open) {
+          badgeEl.classList.add('open');
+          badgeEl.textContent = '24h open';
+        } else {
+          badgeEl.classList.add('expired');
+          badgeEl.textContent = 'Window verlopen';
+        }
+      }
+    }
+
+    // Open facturen.
+    if (totEl)  totEl.textContent  = _inboxFmtEur(totals.open_amount);
+    if (invsEl) {
+      if (!invs.length) {
+        invsEl.innerHTML = '<div class="inbox-c-empty-line">Geen open facturen</div>';
+      } else {
+        invsEl.innerHTML = invs.map(inv => {
+          const days = Number(inv.days_overdue) || 0;
+          const overdue = !!inv.is_overdue && days > 0;
+          const badgeCls = overdue ? 'overdue' : 'normal';
+          const badgeTxt = overdue ? (days + 'd te laat') : 'Op tijd';
+          const nr = inv.invoice_number || '#' + String(inv.id || '').slice(0, 6);
+          return '<div class="inbox-c-invoice-row">'
+            +    '<span class="inbox-c-invoice-nr">' + esc(nr) + '</span>'
+            +    '<span class="inbox-c-invoice-right">'
+            +      '<span class="inbox-c-invoice-amount">' + esc(_inboxFmtEur(inv.amount_open)) + '</span>'
+            +      '<span class="inbox-c-overdue-badge ' + badgeCls + '">' + esc(badgeTxt) + '</span>'
+            +    '</span>'
+            + '</div>';
+        }).join('');
+      }
+    }
+
+    // Klant info (datums + email). Verberg sectie volledig als er geen klant is.
+    if (infoSec) infoSec.style.display = cust ? '' : 'none';
+    if (cust) {
+      if (sinceEl)  sinceEl.textContent = _inboxFmtDateNL(cust.created_at);
+      if (cust.email) {
+        if (emailRow) emailRow.hidden = false;
+        if (emailEl)  emailEl.innerHTML = '<a href="mailto:' + esc(cust.email) + '">' + esc(cust.email) + '</a>';
+      } else {
+        if (emailRow) emailRow.hidden = true;
+      }
+    }
+
+    // Acties: bekijk-in-klanten en maak-factuur-aan deeplinks.
+    if (openLnk) {
+      if (cust && cust.id) {
+        openLnk.href = '/modules/klanten.html?id=' + encodeURIComponent(cust.id);
+        openLnk.classList.remove('dim');
+        openLnk.style.pointerEvents = '';
+      } else {
+        openLnk.href = '#';
+        openLnk.classList.add('dim');
+        openLnk.style.pointerEvents = 'none';
+      }
+    }
+    if (invLnk) {
+      if (cust && cust.id) {
+        invLnk.href = '/modules/klanten.html?id=' + encodeURIComponent(cust.id) + '&tab=facturen';
+        invLnk.classList.remove('dim');
+        invLnk.style.pointerEvents = '';
+      } else {
+        invLnk.href = '#';
+        invLnk.classList.add('dim');
+        invLnk.style.pointerEvents = 'none';
+      }
+    }
   }
 
   // ──────────────────────────────────────────────────────────────────────────
