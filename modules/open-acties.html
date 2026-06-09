@@ -1,0 +1,1358 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Open Acties · Agency Command Center</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/modules/shared/agent-shared.css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/dist/tabler-icons.min.css" />
+  <style>
+    /* ── Page chrome ───────────────────────────────────────────────── */
+    .page-header { display:flex; align-items:flex-start; justify-content:space-between; margin-bottom:20px; flex-wrap:wrap; gap:12px; }
+    .page-title  { font-size:22px; font-weight:700; letter-spacing:-.3px; margin-bottom:3px; }
+    .page-sub    { font-size:12px; color:var(--text-faint); }
+
+    .section-card { background:var(--bg-elev); border:1px solid var(--border); border-radius:12px; padding:20px; margin-bottom:16px; }
+    .section-header { display:flex; align-items:center; gap:10px; margin-bottom:16px; font-size:14px; font-weight:600; justify-content:space-between; }
+
+    /* ── KPI count-strip ─────────────────────────────────────────── */
+    .tasks-stats { display:flex; gap:12px; margin-bottom:20px; flex-wrap:wrap; }
+    .stat-chip { background:var(--bg-elev); border:1px solid var(--border); border-radius:10px; padding:12px 16px; min-width:120px; }
+    .stat-chip-value { font-size:24px; font-weight:700; line-height:1; }
+    .stat-chip-label { font-size:10px; text-transform:uppercase; color:var(--text-faint); font-weight:600; letter-spacing:.5px; margin-top:4px; }
+    .stat-chip-accent .stat-chip-value { color:var(--brand-primary, var(--accent-cyan, #06b6d4)); }
+
+    /* ── Filter pills (gedeeld met admin.html approval-queue) ───── */
+    .approv-filter-strip { display:flex; gap:6px; flex-wrap:wrap; margin-bottom:14px; align-items:center; }
+    .approv-filter-strip .filter-group-label { font-size:11px; text-transform:uppercase; color:var(--text-faint); font-weight:600; letter-spacing:.4px; margin-right:4px; }
+    .approv-pill { background:var(--bg-elev-2); border:1px solid var(--border); border-radius:999px; padding:6px 14px; font-size:12px; color:var(--text-dim); cursor:pointer; font-family:inherit; font-weight:500; display:inline-flex; align-items:center; gap:6px; }
+    .approv-pill:hover { background:var(--surface-card-hover); color:var(--text); }
+    .approv-pill.active { background:var(--brand-primary-soft); color:var(--brand-primary); border-color:var(--brand-primary); }
+    .approv-pill-count { font-size:10px; padding:1px 6px; border-radius:8px; background:var(--bg-elev); color:var(--text-faint); font-weight:600; }
+    .approv-pill.active .approv-pill-count { background:var(--brand-primary); color:#fff; }
+
+    /* Inline search-input naast filter-pills */
+    .tasks-search-wrap { margin-left:auto; display:inline-flex; align-items:center; gap:6px; }
+    .tasks-search-input {
+      background:var(--bg-elev-2); border:1px solid var(--border); border-radius:8px;
+      padding:7px 12px; font-size:12.5px; color:var(--text); font-family:inherit; outline:none;
+      min-width:240px; transition:border-color .15s;
+    }
+    .tasks-search-input:focus { border-color:var(--brand-primary, var(--accent-cyan)); }
+
+    /* ── Tabel ───────────────────────────────────────────────────── */
+    .approv-table { width:100%; border-collapse:collapse; font-size:13px; }
+    .approv-table th { text-align:left; padding:10px 12px; font-size:10px; text-transform:uppercase; color:var(--text-faint); font-weight:600; letter-spacing:.5px; border-bottom:1px solid var(--border); }
+    .approv-table td { padding:11px 12px; border-bottom:0.5px solid var(--border-subtle,var(--border)); vertical-align:middle; }
+    .approv-table tr:last-child td { border-bottom:none; }
+    .approv-table tr:hover td { background:var(--surface-card); }
+    .approv-table .approv-row.clickable { cursor:pointer; }
+    .approv-action-type { font-family:monospace; font-size:11.5px; color:var(--text-dim); background:var(--bg-elev-2); padding:2px 6px; border-radius:4px; display:inline-block; }
+    .approv-mini-btn { padding:4px 10px; font-size:11.5px; border-radius:6px; border:1px solid var(--border); background:var(--bg-elev); color:var(--text-dim); cursor:pointer; font-family:inherit; }
+    .approv-mini-btn:hover { background:var(--bg-elev-2); color:var(--text); }
+    .approv-mini-btn.primary { background:var(--brand-primary); color:#fff; border-color:var(--brand-primary); }
+    .approv-mini-btn.primary:hover { opacity:.9; }
+    .approv-mini-btn.danger { background:transparent; color:var(--color-danger,#dc2626); border-color:var(--color-danger,#dc2626); }
+    .approv-mini-btn.danger:hover { background:var(--color-danger-soft,rgba(220,38,38,.08)); }
+    .approv-status-badge { display:inline-block; padding:2px 8px; border-radius:8px; font-size:10.5px; font-weight:600; text-transform:uppercase; letter-spacing:.3px; }
+    .approv-status-pending  { background:rgba(56,189,248,.15); color:#0284c7; }
+    .approv-status-approved { background:rgba(34,197,94,.15); color:#15803d; }
+    .approv-status-rejected { background:rgba(239,68,68,.15); color:#b91c1c; }
+    .approv-status-executed { background:rgba(34,197,94,.15); color:#15803d; }
+    .approv-status-failed   { background:rgba(239,68,68,.15); color:#b91c1c; }
+    .approv-status-cancelled{ background:var(--bg-elev-2); color:var(--text-faint); }
+    .approv-status-rolled_back { background:rgba(245,158,11,.15); color:#b45309; }
+    .approv-truncate { max-width:280px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+
+    /* Type badge (kleurcoded per category) */
+    .tasks-type-badge { display:inline-block; padding:3px 9px; border-radius:6px; font-size:11px; font-weight:500; border:1px solid; white-space:nowrap; }
+    .tasks-type-badge.cat-arrangement   { background:rgba(56,189,248,.12); color:#0284c7; border-color:rgba(56,189,248,.4); }
+    .tasks-type-badge.cat-verify_payment{ background:rgba(168,85,247,.12); color:#7e22ce; border-color:rgba(168,85,247,.4); }
+    .tasks-type-badge.cat-other         { background:var(--bg-elev-2); color:var(--text-dim); border-color:var(--border); }
+
+    /* ── Modal layout (gedeeld) ──────────────────────────────────── */
+    .modal-overlay { position:fixed; inset:0; background:rgba(0,0,0,0.6); z-index:500; display:flex; align-items:center; justify-content:center; backdrop-filter:blur(4px); }
+    .modal-overlay.hidden { display:none!important; }
+    .modal-card { background:var(--bg-elev); border:1px solid var(--border-strong); border-radius:14px; width:100%; max-width:440px; margin:20px; }
+    .modal-header { display:flex; align-items:center; justify-content:space-between; padding:16px 20px; border-bottom:1px solid var(--border); }
+    .modal-title { font-size:15px; font-weight:600; }
+    .modal-close { background:transparent; border:none; color:var(--text-faint); font-size:16px; cursor:pointer; padding:4px; line-height:1; }
+    .modal-body { padding:20px; }
+    .modal-footer { display:flex; justify-content:flex-end; gap:8px; padding:14px 20px; border-top:1px solid var(--border); }
+    #taskDetailModal .modal-card { max-width:760px; max-height:90vh; display:flex; flex-direction:column; }
+    #taskDetailModal .modal-body { overflow-y:auto; flex:1; min-height:0; }
+
+    /* Detail-grid + sections (identiek aan admin.html approv-detail-*) */
+    .approv-detail-grid { display:grid; grid-template-columns:140px 1fr; gap:8px 14px; font-size:12.5px; margin-bottom:14px; }
+    .approv-detail-grid > div:nth-child(odd) { color:var(--text-faint); }
+    .approv-detail-pre { margin:0; padding:8px 10px; background:rgba(0,0,0,.25); border:1px solid var(--border-subtle,var(--border)); border-radius:6px; font-size:11px; color:var(--text-dim); overflow:auto; max-height:200px; font-family:monospace; }
+    .approv-detail-section-title { font-size:11px; text-transform:uppercase; color:var(--text-faint); font-weight:600; letter-spacing:.5px; margin:14px 0 6px 0; }
+
+    /* ── Forms (in modals) ───────────────────────────────────────── */
+    .form-group { margin-bottom:14px; }
+    .form-label { display:block; font-size:12px; font-weight:600; color:var(--text-dim); margin-bottom:6px; }
+    .form-input { width:100%; background:var(--bg-elev-2); border:1px solid var(--border-strong); border-radius:8px; padding:9px 12px; font-size:13px; color:var(--text); font-family:inherit; outline:none; transition:border-color .15s; }
+    .form-input:focus { border-color:var(--brand-secondary, var(--brand-primary)); }
+    .form-error { margin-top:10px; padding:8px 12px; background:var(--color-danger-soft, rgba(220,38,38,0.08)); border:1px solid var(--color-danger, #dc2626); border-radius:8px; font-size:12px; color:var(--color-danger-text, #b91c1c); }
+    .form-error.hidden { display:none!important; }
+
+    .btn-danger { background:var(--color-danger, #dc2626); border-color:var(--color-danger, #dc2626); color:#fff; }
+    .btn-danger:hover { opacity:.9; }
+
+    .hidden { display:none !important; }
+  </style>
+</head>
+<body>
+
+<div id="sidebar-mount"></div>
+
+<div class="main">
+  <div class="main-inner">
+
+    <div class="page-header">
+      <div>
+        <h1 class="page-title">Open Acties</h1>
+        <p class="page-sub">Open acties (te beoordelen + te verwerken) en historische acties &mdash; arrangement-acties en betalingsclaims.</p>
+      </div>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-sm" onclick="loadTasks()" title="Lijst opnieuw laden"><i class="ti ti-refresh"></i> Verversen</button>
+      </div>
+    </div>
+
+    <!-- KPI count-strip -->
+    <div class="tasks-stats" id="tasksStats">
+      <div class="stat-chip stat-chip-accent">
+        <div class="stat-chip-value" id="tasksKpiOpen">0</div>
+        <div class="stat-chip-label">Open taken</div>
+      </div>
+      <div class="stat-chip">
+        <div class="stat-chip-value" id="tasksKpiPending">0</div>
+        <div class="stat-chip-label">Te beoordelen</div>
+      </div>
+      <div class="stat-chip">
+        <div class="stat-chip-value" id="tasksKpiApproved">0</div>
+        <div class="stat-chip-label">Te verwerken</div>
+      </div>
+      <div class="stat-chip">
+        <div class="stat-chip-value" id="tasksKpiExecuted">0</div>
+        <div class="stat-chip-label">Voltooid</div>
+      </div>
+      <div class="stat-chip">
+        <div class="stat-chip-value" id="tasksKpiFailed">0</div>
+        <div class="stat-chip-label">Mislukt</div>
+      </div>
+    </div>
+
+    <div class="section-card" id="view-tasks">
+      <div class="section-header" style="margin-bottom:10px">
+        <span>Takenlijst</span>
+        <span style="font-size:11.5px;color:var(--text-faint);font-weight:400" id="tasksTotalHint">0 resultaten</span>
+      </div>
+
+      <!-- Filter pills: status -->
+      <div class="approv-filter-strip" id="tasksStatusStrip">
+        <span class="filter-group-label">Status</span>
+        <button type="button" class="approv-pill active" data-tasks-status="PENDING"   onclick="switchTasksStatus('PENDING')">Te beoordelen <span class="approv-pill-count" id="tasksPillPending">0</span></button>
+        <button type="button" class="approv-pill"        data-tasks-status="APPROVED"  onclick="switchTasksStatus('APPROVED')">Te verwerken <span class="approv-pill-count" id="tasksPillApproved">0</span></button>
+        <button type="button" class="approv-pill"        data-tasks-status="EXECUTED"  onclick="switchTasksStatus('EXECUTED')">Voltooid <span class="approv-pill-count" id="tasksPillExecuted">0</span></button>
+        <button type="button" class="approv-pill"        data-tasks-status="FAILED"    onclick="switchTasksStatus('FAILED')">Mislukt <span class="approv-pill-count" id="tasksPillFailed">0</span></button>
+
+        <div class="tasks-search-wrap">
+          <i class="ti ti-search" style="color:var(--text-faint);font-size:14px"></i>
+          <input id="tasksSearchInput" class="tasks-search-input" type="text" placeholder="Zoek op klantnaam&hellip;" autocomplete="off" />
+        </div>
+      </div>
+
+      <!-- Filter pills: type / category -->
+      <div class="approv-filter-strip" id="tasksCategoryStrip">
+        <span class="filter-group-label">Type</span>
+        <button type="button" class="approv-pill active" data-tasks-category="all"            onclick="switchTasksCategory('all')">Alle <span class="approv-pill-count" id="tasksPillCatAll">0</span></button>
+        <button type="button" class="approv-pill"        data-tasks-category="arrangement"    onclick="switchTasksCategory('arrangement')">Regelingen <span class="approv-pill-count" id="tasksPillCatArrangement">0</span></button>
+        <button type="button" class="approv-pill"        data-tasks-category="verify_payment" onclick="switchTasksCategory('verify_payment')">Betalingsclaims <span class="approv-pill-count" id="tasksPillCatVerify">0</span></button>
+      </div>
+
+      <!-- Tabel -->
+      <div style="overflow-x:auto">
+        <table class="approv-table" id="tasksTable">
+          <thead>
+            <tr>
+              <th style="width:140px">Type</th>
+              <th>Klant</th>
+              <th>Factuur</th>
+              <th>Samenvatting</th>
+              <th style="width:130px">Voorgesteld</th>
+              <th style="text-align:right;width:200px">Acties</th>
+            </tr>
+          </thead>
+          <tbody id="tasksTableBody">
+            <tr><td colspan="6" style="color:var(--text-faint);padding:20px;text-align:center">Laden&hellip;</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+  </div><!-- /main-inner -->
+</div><!-- /main -->
+
+<!-- ── Task detail modal ────────────────────────────────────────────── -->
+<div class="modal-overlay hidden" id="taskDetailModal" role="dialog" aria-modal="true">
+  <div class="modal-card">
+    <div class="modal-header">
+      <div>
+        <div class="modal-title" id="taskDetailTitle">Task details</div>
+        <div id="taskDetailSubtitle" style="font-size:11px;color:var(--text-faint);margin-top:2px">Laden&hellip;</div>
+      </div>
+      <button class="modal-close" onclick="closeTaskDetail()">&#x2715;</button>
+    </div>
+    <div class="modal-body" id="taskDetailBody">
+      <div style="color:var(--text-faint);padding:14px;text-align:center;font-size:12.5px">Laden&hellip;</div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn" id="taskDetailCloseBtn"          onclick="closeTaskDetail()">Sluiten</button>
+      <button class="btn btn-danger" id="taskDetailRejectBtn"         onclick="openTaskRejectFromDetail()"          style="display:none">Reject</button>
+      <button class="btn btn-primary" id="taskDetailApproveBtn"        onclick="approveTaskFromDetail()"             style="display:none">Approve</button>
+      <button class="btn btn-danger" id="taskDetailMarkNotExecutedBtn" onclick="openTaskMarkNotExecutedFromDetail()" style="display:none">Markeer als niet door te voeren</button>
+      <button class="btn btn-primary" id="taskDetailMarkExecutedBtn"   onclick="openTaskMarkExecutedFromDetail()"    style="display:none">Markeer als verwerkt</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Reject modal ─────────────────────────────────────────────────── -->
+<div class="modal-overlay hidden" id="taskRejectModal" role="dialog" aria-modal="true">
+  <div class="modal-card" style="max-width:480px">
+    <div class="modal-header">
+      <div class="modal-title" id="taskRejectTitle">Voorstel afwijzen</div>
+      <button class="modal-close" onclick="closeTaskRejectModal()">&#x2715;</button>
+    </div>
+    <div class="modal-body">
+      <div id="taskRejectSubtitle" style="font-size:12px;color:var(--text-faint);margin-bottom:10px">Voer een reden in voor deze afwijzing.</div>
+      <div class="form-group">
+        <label class="form-label" for="taskRejectReason">Reden <span style="color:var(--color-danger,#dc2626)">*</span></label>
+        <textarea id="taskRejectReason" class="form-input" rows="4" style="resize:vertical;min-height:90px" placeholder="Waarom wijs je dit voorstel af?"></textarea>
+      </div>
+      <div class="form-error hidden" id="taskRejectError"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn" onclick="closeTaskRejectModal()">Annuleren</button>
+      <button class="btn btn-danger" id="taskRejectConfirmBtn" onclick="confirmTaskReject()">Afwijzen</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Mark-as-executed modal ───────────────────────────────────────── -->
+<div class="modal-overlay hidden" id="taskMarkExecutedModal" role="dialog" aria-modal="true">
+  <div class="modal-card" style="max-width:620px">
+    <div class="modal-header">
+      <div>
+        <div class="modal-title">Markeer als verwerkt</div>
+        <div style="font-size:11px;color:var(--text-faint);margin-top:2px">Leg vast wat je in TeamLeader hebt gedaan</div>
+      </div>
+      <button class="modal-close" onclick="closeTaskMarkExecutedModal()">&#x2715;</button>
+    </div>
+    <div class="modal-body">
+      <div id="taskMarkExecContext" style="background:rgba(56,189,248,0.06);border:1px solid rgba(56,189,248,0.25);border-radius:8px;padding:10px 12px;margin-bottom:14px;font-size:12.5px;color:var(--text-primary,var(--text))">
+        <div id="taskMarkExecCtxLine1" style="font-weight:600">&mdash;</div>
+        <div id="taskMarkExecCtxLine2" style="font-size:11.5px;color:var(--text-dim);margin-top:2px">&mdash;</div>
+        <div id="taskMarkExecCtxLine3" style="font-size:11.5px;color:var(--text-faint);margin-top:2px">&mdash;</div>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label" for="taskMarkExecCreditIds">TL credit-note IDs</label>
+        <input type="text" id="taskMarkExecCreditIds" class="form-input" placeholder="TLCN-2026-001, TLCN-2026-002" />
+        <div style="font-size:11px;color:var(--text-faint);margin-top:4px">Komma-gescheiden. Leeg laten als n.v.t.</div>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label" for="taskMarkExecSubscriptionId">TL subscription ID</label>
+        <input type="text" id="taskMarkExecSubscriptionId" class="form-input" placeholder="sub_xxxxxxxx" />
+        <div style="font-size:11px;color:var(--text-faint);margin-top:4px">Voor abonnement-mutaties.</div>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label" for="taskMarkExecInvoiceIds">TL invoice IDs</label>
+        <input type="text" id="taskMarkExecInvoiceIds" class="form-input" placeholder="INV-2026-101, INV-2026-102" />
+        <div style="font-size:11px;color:var(--text-faint);margin-top:4px">Voor SPLITSING, MANUAL_VERIFY_PAYMENT of nieuwe facturen.</div>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label" for="taskMarkExecNotes">Manual notes <span style="color:var(--color-danger,#dc2626)">*</span></label>
+        <textarea id="taskMarkExecNotes" class="form-input" rows="4" style="resize:vertical;min-height:90px" placeholder="Wat heb je in TL gedaan? Min 10 chars."></textarea>
+        <div style="font-size:11px;color:var(--text-faint);margin-top:4px">Minimaal 10 tekens. Verplicht voor audit-trail.</div>
+      </div>
+
+      <div class="form-error hidden" id="taskMarkExecError"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn" onclick="closeTaskMarkExecutedModal()">Annuleren</button>
+      <button class="btn btn-primary" id="taskMarkExecConfirmBtn" onclick="submitTaskMarkExecuted()">Bevestig</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Mark-as-not-executed modal ───────────────────────────────────── -->
+<div class="modal-overlay hidden" id="taskMarkNotExecutedModal" role="dialog" aria-modal="true">
+  <div class="modal-card" style="max-width:520px">
+    <div class="modal-header">
+      <div>
+        <div class="modal-title">Markeer als niet door te voeren</div>
+        <div style="font-size:11px;color:var(--text-faint);margin-top:2px">Status gaat naar FAILED</div>
+      </div>
+      <button class="modal-close" onclick="closeTaskMarkNotExecutedModal()">&#x2715;</button>
+    </div>
+    <div class="modal-body">
+      <div style="background:rgba(220,38,38,0.06);border:1px solid rgba(220,38,38,0.25);border-radius:8px;padding:10px 12px;margin-bottom:14px;font-size:12.5px;color:var(--text-primary,var(--text))">
+        De actie krijgt status FAILED. Eventueel onderliggend arrangement blijft VOORGESTELD &mdash; annuleer arrangement apart als nodig.
+      </div>
+
+      <div class="form-group">
+        <label class="form-label" for="taskMarkNotExecReason">Reden <span style="color:var(--color-danger,#dc2626)">*</span></label>
+        <textarea id="taskMarkNotExecReason" class="form-input" rows="4" style="resize:vertical;min-height:90px" placeholder="Waarom kan deze actie niet doorgevoerd worden? Min 10 chars."></textarea>
+        <div style="font-size:11px;color:var(--text-faint);margin-top:4px">Minimaal 10 tekens. Verplicht voor audit-trail.</div>
+      </div>
+
+      <div class="form-error hidden" id="taskMarkNotExecError"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn" onclick="closeTaskMarkNotExecutedModal()">Annuleren</button>
+      <button class="btn btn-danger" id="taskMarkNotExecConfirmBtn" onclick="submitTaskMarkNotExecuted()">Bevestig</button>
+    </div>
+  </div>
+</div>
+
+<script src="/modules/shared/supabase-client.js"></script>
+<script src="/modules/shared/agent-shared.js"></script>
+<script>
+  // ── Module-scope state ────────────────────────────────────────────
+  let _tasksActiveStatus   = 'PENDING';      // PENDING | APPROVED | EXECUTED | FAILED
+  let _tasksActiveCategory = 'all';          // all | arrangement | verify_payment
+  let _tasksSearchQuery    = '';
+  let _tasksItems          = [];
+  let _tasksLoading        = false;
+  let _tasksWired          = false;
+  let _tasksSearchDebounceTimer = null;
+
+  let _taskCurrentDetailId   = null;
+  let _taskCurrentDetailItem = null;
+  let _taskRejectContext     = null; // { id }
+
+  // esc(): minimaal HTML-escape (agent-shared.js exposeert dit normaal, maar
+  // duplicate hier voor independence; defensief gebruik).
+  function esc(s) {
+    if (s == null) return '';
+    try {
+      if (window.AgentShared && typeof window.AgentShared.esc === 'function') {
+        return window.AgentShared.esc(s);
+      }
+    } catch (_) { /* fallthrough */ }
+    return String(s)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
+  // ── Helpers (consistent met admin.html approval-queue renderers) ──
+  function approvStatusBadge(status) {
+    const s = String(status || '').toLowerCase();
+    const known = ['pending','approved','rejected','executed','failed','cancelled','rolled_back'];
+    const cls = known.includes(s) ? 'approv-status-' + s : 'approv-status-pending';
+    return '<span class="approv-status-badge ' + cls + '">' + esc(s || 'pending') + '</span>';
+  }
+
+  function approvActionLabel(t) {
+    const map = {
+      'TL_INVOICE_UPDATE_DUE':              'Uitstel',
+      'TL_INVOICE_CONSOLIDATE_AND_RESTART': 'Consolideer + nieuwe regeling',
+      'TL_INVOICE_SPLIT':                   'Splitsing in termijnen',
+      'TL_SUBSCRIPTION_PAUSE':              'Abonnement pauze',
+      'TL_SUBSCRIPTION_STOP':               'Abonnement stop',
+      'TL_INVOICE_WRITEOFF':                'Kwijtschelding',
+      'MANUAL_VERIFY_PAYMENT':              'Betalingscontrole',
+      // Legacy
+      'arrangement.uitstel':         'Uitstel',
+      'arrangement.gespreid':        'Splitsing in termijnen',
+      'arrangement.kwijtschelding':  'Kwijtschelding',
+      'arrangement.pauze':           'Abonnement pauze',
+      'arrangement.abonnement_stop': 'Abonnement stop',
+    };
+    return map[t] || (t || '—');
+  }
+
+  function categoryForActionType(t) {
+    const s = String(t || '');
+    if (s === 'MANUAL_VERIFY_PAYMENT') return 'verify_payment';
+    if (s.indexOf('TL_') === 0)        return 'arrangement';
+    if (s.indexOf('arrangement.') === 0) return 'arrangement';
+    return 'other';
+  }
+
+  function approvSummary(it) {
+    const p = it.payload || {};
+    const parts = [];
+    if (Array.isArray(p.invoice_ids) && p.invoice_ids.length) {
+      parts.push(p.invoice_ids.length + ' factuur' + (p.invoice_ids.length === 1 ? '' : 'en'));
+    } else if (p.invoice_id && !it.invoice_id) {
+      parts.push('invoice ' + String(p.invoice_id).slice(0, 8));
+    }
+    if (p.new_due_date)         parts.push('nieuwe due: ' + String(p.new_due_date).slice(0, 10));
+    if (p.installments)         parts.push(p.installments + ' termijnen');
+    if (p.amount_total != null) parts.push('€ ' + p.amount_total);
+    if (p.claimed_amount != null) parts.push('claim: € ' + p.claimed_amount);
+    if (p.percentage != null)   parts.push(p.percentage + '%');
+    if (p.rationale)            parts.push(approvTruncate(String(p.rationale), 60));
+    return parts.length ? parts.join(' · ') : '(geen payload)';
+  }
+
+  function approvFmtDateTime(iso) {
+    if (!iso) return '—';
+    try {
+      const d = new Date(iso);
+      const dd = String(d.getDate()).padStart(2, '0');
+      const mm = String(d.getMonth() + 1).padStart(2, '0');
+      const yy = d.getFullYear();
+      const hh = String(d.getHours()).padStart(2, '0');
+      const mi = String(d.getMinutes()).padStart(2, '0');
+      return dd + '-' + mm + '-' + yy + ' ' + hh + ':' + mi;
+    } catch (_) { return String(iso); }
+  }
+
+  function approvFmtDateOnly(s) {
+    if (!s) return '—';
+    try {
+      const d = new Date(String(s).length === 10 ? (String(s) + 'T00:00:00') : String(s));
+      if (isNaN(d.getTime())) return String(s);
+      return String(d.getDate()).padStart(2, '0') + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + d.getFullYear();
+    } catch (_) { return String(s); }
+  }
+
+  function approvFmtEur(v) {
+    const n = Number(v);
+    if (!isFinite(n)) return '—';
+    return '€ ' + n.toLocaleString('nl-NL', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  }
+
+  function approvTruncate(s, n) {
+    s = String(s == null ? '' : s);
+    return s.length > n ? s.slice(0, n - 1) + '…' : s;
+  }
+
+  function relTime(iso) {
+    if (!iso) return '—';
+    try {
+      if (window.AgentShared && typeof window.AgentShared.relTime === 'function') {
+        return window.AgentShared.relTime(iso);
+      }
+    } catch (_) { /* fallthrough */ }
+    try {
+      const d = new Date(iso); const diff = (Date.now() - d.getTime()) / 1000;
+      if (diff < 60)    return 'net';
+      if (diff < 3600)  return Math.round(diff / 60) + 'm';
+      if (diff < 86400) return Math.round(diff / 3600) + 'u';
+      return Math.round(diff / 86400) + 'd';
+    } catch (_) { return approvFmtDateTime(iso); }
+  }
+
+  // ── Filter + load ─────────────────────────────────────────────────
+  function buildTasksListUrl() {
+    // Status: één status per pill (geen CSV). Bij FAILED tonen we ook
+    // REJECTED / CANCELLED in dezelfde lijst (samen = "mislukt / niet
+    // doorgegaan"), filter dat client-side niet — server-side via CSV.
+    let statusCsv;
+    if (_tasksActiveStatus === 'FAILED') {
+      statusCsv = 'FAILED,REJECTED,CANCELLED';
+    } else {
+      statusCsv = _tasksActiveStatus;
+    }
+    const params = new URLSearchParams();
+    params.set('status', statusCsv);
+    if (_tasksActiveCategory && _tasksActiveCategory !== 'all') {
+      params.set('category', _tasksActiveCategory);
+    }
+    if (_tasksSearchQuery && _tasksSearchQuery.trim()) {
+      params.set('search', _tasksSearchQuery.trim());
+    }
+    params.set('limit', '100');
+    return '/api/tasks-list?' + params.toString();
+  }
+
+  async function loadTasks() {
+    const tbody = document.getElementById('tasksTableBody');
+    if (!tbody) return;
+    if (_tasksLoading) return;
+    _tasksLoading = true;
+    tbody.innerHTML = '<tr><td colspan="6" style="color:var(--text-faint);padding:20px;text-align:center">Laden&hellip;</td></tr>';
+    try {
+      const url = buildTasksListUrl();
+      const r = await window.AgentShared.apiFetch(url);
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        tbody.innerHTML = '<tr><td colspan="6" style="color:var(--color-danger,#dc2626);padding:20px;text-align:center">Fout: ' + esc(d.error || ('HTTP ' + r.status)) + '</td></tr>';
+        return;
+      }
+      _tasksItems = Array.isArray(d.items) ? d.items : [];
+      renderTasksCounts(d.counts || {});
+      renderTasksRows();
+      const hint = document.getElementById('tasksTotalHint');
+      if (hint) {
+        const n = (typeof d.total === 'number') ? d.total : _tasksItems.length;
+        hint.textContent = n + ' resultaten';
+      }
+    } catch (e) {
+      console.error('[loadTasks]', e);
+      tbody.innerHTML = '<tr><td colspan="6" style="color:var(--color-danger,#dc2626);padding:20px;text-align:center">Fout: ' + esc(e.message) + '</td></tr>';
+    } finally {
+      _tasksLoading = false;
+    }
+  }
+
+  function renderTasksCounts(counts) {
+    const byStatus   = counts.byStatus   || {};
+    const byCategory = counts.byCategory || {};
+    const pending   = byStatus.PENDING   || 0;
+    const approved  = byStatus.APPROVED  || 0;
+    const executed  = byStatus.EXECUTED  || 0;
+    const failedAll = (byStatus.FAILED || 0) + (byStatus.REJECTED || 0) + (byStatus.CANCELLED || 0);
+    const open      = pending + approved;
+
+    const elOpen     = document.getElementById('tasksKpiOpen');
+    const elPending  = document.getElementById('tasksKpiPending');
+    const elApproved = document.getElementById('tasksKpiApproved');
+    const elExecuted = document.getElementById('tasksKpiExecuted');
+    const elFailed   = document.getElementById('tasksKpiFailed');
+    if (elOpen)     elOpen.textContent     = String(open);
+    if (elPending)  elPending.textContent  = String(pending);
+    if (elApproved) elApproved.textContent = String(approved);
+    if (elExecuted) elExecuted.textContent = String(executed);
+    if (elFailed)   elFailed.textContent   = String(failedAll);
+
+    // Pill-counts (status-strip)
+    const pP = document.getElementById('tasksPillPending');
+    const pA = document.getElementById('tasksPillApproved');
+    const pE = document.getElementById('tasksPillExecuted');
+    const pF = document.getElementById('tasksPillFailed');
+    if (pP) pP.textContent = String(pending);
+    if (pA) pA.textContent = String(approved);
+    if (pE) pE.textContent = String(executed);
+    if (pF) pF.textContent = String(failedAll);
+
+    // Pill-counts (category-strip) — "Alle" = arrangement + verify_payment (in
+    // de huidige status-context, server-side berekend).
+    const arrangementCnt   = byCategory.arrangement    || 0;
+    const verifyPaymentCnt = byCategory.verify_payment || 0;
+    const totalCnt         = arrangementCnt + verifyPaymentCnt;
+    const cAll = document.getElementById('tasksPillCatAll');
+    const cArr = document.getElementById('tasksPillCatArrangement');
+    const cVer = document.getElementById('tasksPillCatVerify');
+    if (cAll) cAll.textContent = String(totalCnt);
+    if (cArr) cArr.textContent = String(arrangementCnt);
+    if (cVer) cVer.textContent = String(verifyPaymentCnt);
+  }
+
+  function renderTasksRows() {
+    const tbody = document.getElementById('tasksTableBody');
+    if (!tbody) return;
+    if (!_tasksItems.length) {
+      tbody.innerHTML = '<tr><td colspan="6" style="color:var(--text-faint);padding:20px;text-align:center">Geen taken in deze view.</td></tr>';
+      return;
+    }
+    const isPending  = _tasksActiveStatus === 'PENDING';
+    const isApproved = _tasksActiveStatus === 'APPROVED';
+
+    const rows = _tasksItems.map(function (it) {
+      const cat = categoryForActionType(it.action_type);
+      const catLabel = (cat === 'arrangement') ? 'Regeling'
+                     : (cat === 'verify_payment') ? 'Betalingsclaim'
+                     : 'Overig';
+      const typeBadge =
+        '<span class="tasks-type-badge cat-' + esc(cat) + '" title="' + esc(it.action_type || '') + '">' +
+          esc(catLabel) +
+        '</span>' +
+        '<div style="font-size:10px;color:var(--text-faint);margin-top:3px">' + esc(approvActionLabel(it.action_type)) + '</div>';
+
+      const cust = it.customer;
+      const custCell = (cust && cust.id)
+        ? '<a href="/modules/klanten.html?id=' + esc(cust.id) + '" style="color:var(--brand-secondary,var(--accent-cyan,#06b6d4));text-decoration:none;font-weight:500" onclick="event.stopPropagation()">' + esc(cust.name || '(onbekend)') + '</a>'
+        : esc((cust && cust.name) ? cust.name : '(geen klant)');
+
+      const inv = it.invoice;
+      const invCell = (inv && inv.id)
+        ? '<span style="font-size:12px"><strong>' + esc(inv.invoice_number || ('inv ' + String(inv.id).slice(0,8))) + '</strong>'
+          + (inv.amount_total != null ? ' <span style="color:var(--text-faint);font-size:11px">' + esc(approvFmtEur(inv.amount_total)) + '</span>' : '')
+          + '</span>'
+        : '<span style="color:var(--text-faint)">—</span>';
+
+      const summary = esc(approvSummary(it));
+      const proposed = it.created_at ? esc(relTime(it.created_at)) : '—';
+
+      let actionsCell;
+      if (isPending) {
+        actionsCell =
+          '<button class="approv-mini-btn primary" data-task-approve="' + esc(it.id) + '" onclick="event.stopPropagation()">Approve</button>' +
+          '<button class="approv-mini-btn danger"  data-task-reject="'  + esc(it.id) + '" onclick="event.stopPropagation()" style="margin-left:4px">Reject</button>';
+      } else if (isApproved) {
+        actionsCell =
+          '<button class="approv-mini-btn primary" data-task-mark-executed="' + esc(it.id) + '" onclick="event.stopPropagation()">Verwerkt</button>' +
+          '<button class="approv-mini-btn danger"  data-task-mark-not-executed="' + esc(it.id) + '" onclick="event.stopPropagation()" style="margin-left:4px">Niet doorgevoerd</button>';
+      } else {
+        actionsCell = approvStatusBadge(it.status);
+      }
+
+      return '<tr class="approv-row clickable" data-task-row="' + esc(it.id) + '">' +
+               '<td>' + typeBadge + '</td>' +
+               '<td>' + custCell + '</td>' +
+               '<td>' + invCell + '</td>' +
+               '<td class="approv-truncate" title="' + summary + '">' + summary + '</td>' +
+               '<td style="font-size:11.5px;color:var(--text-dim)" title="' + esc(it.created_at ? approvFmtDateTime(it.created_at) : '') + '">' + proposed + '</td>' +
+               '<td style="text-align:right;white-space:nowrap">' + actionsCell + '</td>' +
+             '</tr>';
+    }).join('');
+    tbody.innerHTML = rows;
+
+    // Wire row-clicks -> detail.
+    tbody.querySelectorAll('tr[data-task-row]').forEach(function (tr) {
+      tr.addEventListener('click', function (e) {
+        if (e.target.closest('a, button, input')) return;
+        openTaskDetail(tr.getAttribute('data-task-row'));
+      });
+    });
+    // Wire row-level buttons.
+    tbody.querySelectorAll('[data-task-approve]').forEach(function (btn) {
+      btn.addEventListener('click', function () { approveTask(btn.getAttribute('data-task-approve')); });
+    });
+    tbody.querySelectorAll('[data-task-reject]').forEach(function (btn) {
+      btn.addEventListener('click', function () { openTaskRejectModalForId(btn.getAttribute('data-task-reject')); });
+    });
+    tbody.querySelectorAll('[data-task-mark-executed]').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        const id = btn.getAttribute('data-task-mark-executed');
+        const it = _tasksItems.find(function (x) { return x.id === id; });
+        openTaskMarkExecutedModal(id, it || null);
+      });
+    });
+    tbody.querySelectorAll('[data-task-mark-not-executed]').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        const id = btn.getAttribute('data-task-mark-not-executed');
+        openTaskMarkNotExecutedModal(id);
+      });
+    });
+  }
+
+  function switchTasksStatus(status) {
+    if (status === _tasksActiveStatus) return;
+    _tasksActiveStatus = status;
+    document.querySelectorAll('#tasksStatusStrip .approv-pill').forEach(function (p) {
+      const ps = p.getAttribute('data-tasks-status');
+      if (ps != null) p.classList.toggle('active', ps === status);
+    });
+    loadTasks();
+  }
+
+  function switchTasksCategory(cat) {
+    if (cat === _tasksActiveCategory) return;
+    _tasksActiveCategory = cat;
+    document.querySelectorAll('#tasksCategoryStrip .approv-pill').forEach(function (p) {
+      const pc = p.getAttribute('data-tasks-category');
+      if (pc != null) p.classList.toggle('active', pc === cat);
+    });
+    loadTasks();
+  }
+
+  function onTasksSearchInput(value) {
+    _tasksSearchQuery = String(value || '');
+    if (_tasksSearchDebounceTimer) clearTimeout(_tasksSearchDebounceTimer);
+    _tasksSearchDebounceTimer = setTimeout(function () {
+      loadTasks();
+    }, 300);
+  }
+
+  // ── Detail-modal ──────────────────────────────────────────────────
+  async function openTaskDetail(id) {
+    if (!id) return;
+    wireTasksOnce();
+    _taskCurrentDetailId   = id;
+    _taskCurrentDetailItem = null;
+
+    const modal = document.getElementById('taskDetailModal');
+    const body  = document.getElementById('taskDetailBody');
+    const sub   = document.getElementById('taskDetailSubtitle');
+    const approveBtn         = document.getElementById('taskDetailApproveBtn');
+    const rejectBtn          = document.getElementById('taskDetailRejectBtn');
+    const markExecutedBtn    = document.getElementById('taskDetailMarkExecutedBtn');
+    const markNotExecutedBtn = document.getElementById('taskDetailMarkNotExecutedBtn');
+    if (sub)  sub.textContent  = 'ID: ' + id;
+    if (body) body.innerHTML   = '<div style="color:var(--text-faint);padding:14px;text-align:center;font-size:12.5px">Laden&hellip;</div>';
+    if (approveBtn)         approveBtn.style.display         = 'none';
+    if (rejectBtn)          rejectBtn.style.display          = 'none';
+    if (markExecutedBtn)    markExecutedBtn.style.display    = 'none';
+    if (markNotExecutedBtn) markNotExecutedBtn.style.display = 'none';
+    if (modal) modal.classList.remove('hidden');
+
+    try {
+      const r = await window.AgentShared.apiFetch('/api/pending-actions-detail?id=' + encodeURIComponent(id));
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        if (body) body.innerHTML = '<div style="color:var(--color-danger,#dc2626);padding:14px">Fout: ' + esc(d.error || ('HTTP ' + r.status)) + '</div>';
+        return;
+      }
+      renderTaskDetail(d);
+    } catch (e) {
+      console.error('[openTaskDetail]', e);
+      if (body) body.innerHTML = '<div style="color:var(--color-danger,#dc2626);padding:14px">Fout: ' + esc(e.message) + '</div>';
+    }
+  }
+
+  function closeTaskDetail() {
+    document.getElementById('taskDetailModal')?.classList.add('hidden');
+    _taskCurrentDetailId   = null;
+    _taskCurrentDetailItem = null;
+  }
+
+  // Renderer: TL_INVOICE_CONSOLIDATE_AND_RESTART (gekopieerd uit admin.html).
+  function renderConsolidateActionDetail(payload, invoices) {
+    const p   = payload || {};
+    const cfg = p.subscription_config || {};
+    const invByIdLocal = {};
+    (Array.isArray(invoices) ? invoices : []).forEach(function (inv) {
+      if (inv && inv.id) invByIdLocal[inv.id] = inv;
+    });
+    const creditIds = Array.isArray(p.credit_invoice_ids) ? p.credit_invoice_ids : [];
+    const creditList = creditIds.map(function (id) {
+      const inv = invByIdLocal[id] || null;
+      return {
+        invoice_id:     id,
+        invoice_number: inv && inv.invoice_number ? inv.invoice_number : null,
+        amount:         inv ? Number(inv.amount_total || 0) : null,
+      };
+    });
+    const creditTotal = creditList.reduce(function (s, x) { return s + (Number(x.amount) || 0); }, 0);
+    const creditCount = creditList.length;
+
+    const creditRowsHtml = creditList.length
+      ? creditList.map(function (ci) {
+          const label = ci.invoice_number
+            ? esc(ci.invoice_number)
+            : 'invoice ' + esc(String(ci.invoice_id).slice(0, 8));
+          const amount = (ci.amount != null && ci.amount > 0) ? approvFmtEur(ci.amount) : '';
+          return '<li style="font-size:12px;color:var(--text-dim);margin:2px 0">' +
+                   '<strong style="color:var(--text)">' + label + '</strong>' +
+                   (amount ? ' <span style="color:var(--text-faint);margin-left:8px">' + esc(amount) + '</span>' : '') +
+                 '</li>';
+        }).join('')
+      : '<li style="font-size:12px;color:var(--text-faint)">(geen factuur-details in payload)</li>';
+
+    const installments = cfg.term_count != null ? Number(cfg.term_count) : null;
+    const perInstExcl  = cfg.amount_per_invoice_excl_vat != null ? Number(cfg.amount_per_invoice_excl_vat) : null;
+    const startsOn     = cfg.starts_on || null;
+    const endsOn       = cfg.ends_on   || null;
+    const totalExcl    = (installments != null && perInstExcl != null) ? Math.round(installments * perInstExcl * 100) / 100 : null;
+
+    const vatDist = Array.isArray(cfg.vat_distribution) ? cfg.vat_distribution : [];
+    const vatRowsHtml = vatDist.length
+      ? vatDist.map(function (v) {
+          const rate = v.vat_rate != null ? v.vat_rate : '—';
+          const totalForRate = v.total_amount_excl_vat != null ? Number(v.total_amount_excl_vat) : null;
+          const perTermijn = (totalForRate != null && installments && installments > 0)
+            ? Math.round((totalForRate / installments) * 100) / 100 : null;
+          return '<li style="font-size:12px;color:var(--text-dim);margin:2px 0">' +
+                   '<strong style="color:var(--text)">' + esc(String(rate)) + '% BTW</strong>' +
+                   (perTermijn != null
+                     ? ' <span style="color:var(--text-faint);margin-left:8px">' + esc(approvFmtEur(perTermijn)) + '</span>' +
+                       ' <span style="color:var(--text-faint);font-size:11px">per termijn (excl btw)</span>'
+                     : '') +
+                 '</li>';
+        }).join('')
+      : '<li style="font-size:12px;color:var(--text-faint)">(geen btw-verdeling in payload)</li>';
+
+    const subSummary = (installments && perInstExcl != null)
+      ? '<strong>' + esc(String(installments)) + '</strong> termijnen van <strong>' + esc(approvFmtEur(perInstExcl)) + '</strong> per termijn <span style="color:var(--text-faint)">(excl btw)</span>'
+      : (installments ? '<strong>' + esc(String(installments)) + '</strong> termijnen' : '(termijn-info ontbreekt)');
+
+    const totalLine = (totalExcl != null)
+      ? 'Totaal nieuwe contract: <strong>' + esc(approvFmtEur(totalExcl)) + '</strong> <span style="color:var(--text-faint);font-size:11px">excl btw</span>'
+      : 'Totaal nieuwe contract: <span style="color:var(--text-faint)">—</span>';
+
+    const startLine = 'Eerste vervaldatum: <strong>' + esc(startsOn ? approvFmtDateOnly(startsOn) : '—') + '</strong>';
+    const endLine   = 'Laatste vervaldatum: <strong>' + esc(endsOn ? approvFmtDateOnly(endsOn) : '—') + '</strong>';
+
+    return '' +
+      '<div class="approv-detail-section-title">Consolidatie + nieuwe regeling</div>' +
+      '<div style="display:flex;flex-direction:column;gap:10px;padding:10px 12px;background:rgba(56,189,248,0.06);border:1px solid rgba(56,189,248,0.25);border-radius:8px">' +
+        '<div style="font-size:12.5px;color:var(--text)">' +
+          'Credit <strong>' + creditCount + '</strong> ' + (creditCount === 1 ? 'factuur' : 'facturen') +
+          ' (totaal <strong>' + esc(approvFmtEur(creditTotal)) + '</strong>):' +
+        '</div>' +
+        '<ul style="margin:0;padding-left:20px;list-style:disc">' + creditRowsHtml + '</ul>' +
+        '<div style="font-size:12.5px;color:var(--text);margin-top:6px">Nieuwe subscription: ' + subSummary + '</div>' +
+        '<div style="font-size:12.5px;color:var(--text)">' + totalLine + '</div>' +
+        '<div style="font-size:12.5px;color:var(--text)">' + startLine + '</div>' +
+        '<div style="font-size:12.5px;color:var(--text)">' + endLine + '</div>' +
+        '<div style="font-size:12.5px;color:var(--text);margin-top:6px">Btw-verdeling per termijn:</div>' +
+        '<ul style="margin:0;padding-left:20px;list-style:disc">' + vatRowsHtml + '</ul>' +
+      '</div>';
+  }
+
+  // Renderer: MANUAL_VERIFY_PAYMENT.
+  function renderVerifyPaymentDetail(payload, invoice) {
+    const p = payload || {};
+    const claimedAmount = (p.claimed_amount != null) ? approvFmtEur(p.claimed_amount) : '—';
+    const claimedAt     = p.claimed_at ? approvFmtDateTime(p.claimed_at) : '—';
+    const claimText     = p.claim_text ? esc(String(p.claim_text)) : '<span style="color:var(--text-faint)">(geen klantbericht)</span>';
+    const messageRef    = p.klant_message_id || p.message_id || p.conversation_id || null;
+    const invLine       = invoice && invoice.id
+      ? '<strong>' + esc(invoice.invoice_number || ('inv ' + String(invoice.id).slice(0,8))) + '</strong>' +
+        (invoice.amount_total != null ? ' <span style="color:var(--text-faint);font-size:11px">' + esc(approvFmtEur(invoice.amount_total)) + '</span>' : '')
+      : '<span style="color:var(--text-faint)">—</span>';
+
+    let msgLink = '<span style="color:var(--text-faint)">—</span>';
+    if (messageRef && p.conversation_id) {
+      const href = '/modules/finance.html#inbox=' + encodeURIComponent(p.conversation_id);
+      msgLink = '<a href="' + esc(href) + '" target="_blank" rel="noopener" style="color:var(--brand-secondary,var(--accent-cyan,#06b6d4));text-decoration:none">' + esc(String(messageRef)) + ' <i class="ti ti-external-link" style="font-size:11px"></i></a>';
+    } else if (messageRef) {
+      msgLink = '<code style="color:var(--text-dim);font-size:11.5px">' + esc(String(messageRef)) + '</code>';
+    }
+
+    return '' +
+      '<div class="approv-detail-section-title">Betalingsclaim van klant</div>' +
+      '<div style="display:flex;flex-direction:column;gap:10px;padding:10px 12px;background:rgba(168,85,247,0.06);border:1px solid rgba(168,85,247,0.25);border-radius:8px">' +
+        '<div style="font-size:12.5px;color:var(--text)">Factuur: ' + invLine + '</div>' +
+        '<div style="font-size:12.5px;color:var(--text)">Geclaimd bedrag: <strong>' + esc(claimedAmount) + '</strong></div>' +
+        '<div style="font-size:12.5px;color:var(--text)">Geclaimd op: <strong>' + esc(claimedAt) + '</strong></div>' +
+        '<div style="font-size:12.5px;color:var(--text)">Bericht-referentie: ' + msgLink + '</div>' +
+        '<div style="font-size:12.5px;color:var(--text);margin-top:4px">Klant-bericht:</div>' +
+        '<div style="font-size:12px;color:var(--text-dim);white-space:pre-wrap;padding:8px 10px;background:rgba(0,0,0,0.06);border-radius:6px">' + claimText + '</div>' +
+      '</div>';
+  }
+
+  function renderExecutionResult(result, status) {
+    const r = result || {};
+    const title = (status === 'FAILED' || status === 'REJECTED' || status === 'CANCELLED')
+      ? 'Niet doorgevoerd' : 'Verwerkt';
+    const rows = [];
+
+    if (status === 'FAILED' || status === 'REJECTED' || status === 'CANCELLED') {
+      const reason = r.failure_reason || r.reason || r.error || '';
+      rows.push(
+        '<div style="font-size:12.5px;color:var(--text)">' +
+          '<strong>Reden:</strong> ' +
+          '<span style="color:var(--text-dim);margin-left:6px">' +
+            (reason ? esc(reason) : '<span style="color:var(--text-faint)">(geen reden vastgelegd)</span>') +
+          '</span>' +
+        '</div>'
+      );
+    }
+
+    if (Array.isArray(r.tl_credit_note_ids) && r.tl_credit_note_ids.length) {
+      const items = r.tl_credit_note_ids.map(function (id) {
+        return '<li style="font-size:12px;color:var(--text-dim);margin:2px 0"><code style="color:var(--text)">' + esc(String(id)) + '</code></li>';
+      }).join('');
+      rows.push(
+        '<div style="font-size:12.5px;color:var(--text)">' +
+          '<strong>TL credit-note IDs:</strong>' +
+          '<ul style="margin:4px 0 0;padding-left:20px;list-style:disc">' + items + '</ul>' +
+        '</div>'
+      );
+    }
+
+    if (r.tl_subscription_id) {
+      rows.push(
+        '<div style="font-size:12.5px;color:var(--text)">' +
+          '<strong>TL subscription ID:</strong> ' +
+          '<code style="color:var(--text-dim);margin-left:6px">' + esc(String(r.tl_subscription_id)) + '</code>' +
+        '</div>'
+      );
+    }
+
+    if (Array.isArray(r.tl_invoice_ids) && r.tl_invoice_ids.length) {
+      const items = r.tl_invoice_ids.map(function (id) {
+        return '<li style="font-size:12px;color:var(--text-dim);margin:2px 0"><code style="color:var(--text)">' + esc(String(id)) + '</code></li>';
+      }).join('');
+      rows.push(
+        '<div style="font-size:12.5px;color:var(--text)">' +
+          '<strong>TL invoice IDs:</strong>' +
+          '<ul style="margin:4px 0 0;padding-left:20px;list-style:disc">' + items + '</ul>' +
+        '</div>'
+      );
+    }
+
+    if (r.manual_notes) {
+      rows.push(
+        '<div style="font-size:12.5px;color:var(--text)">' +
+          '<strong>Notities:</strong>' +
+          '<div style="color:var(--text-dim);margin-top:4px;white-space:pre-wrap">' + esc(String(r.manual_notes)) + '</div>' +
+        '</div>'
+      );
+    }
+
+    if (status === 'EXECUTED' && (r.marked_executed_at || r.marked_by)) {
+      const parts = [];
+      if (r.marked_executed_at) parts.push('op ' + esc(approvFmtDateTime(r.marked_executed_at)));
+      if (r.marked_by)          parts.push('door ' + esc(String(r.marked_by)));
+      rows.push('<div style="font-size:11.5px;color:var(--text-faint)">Handmatig gemarkeerd ' + parts.join(' ') + '</div>');
+    }
+
+    const bodyHtml = rows.length ? rows.join('') : '<div style="font-size:12px;color:var(--text-faint)">(geen execution-details vastgelegd)</div>';
+    const bgClass = (status === 'FAILED' || status === 'REJECTED' || status === 'CANCELLED')
+      ? 'background:rgba(220,38,38,0.06);border:1px solid rgba(220,38,38,0.25)'
+      : 'background:rgba(16,185,129,0.06);border:1px solid rgba(16,185,129,0.25)';
+
+    return '' +
+      '<div class="approv-detail-section-title">' + esc(title) + '</div>' +
+      '<div style="display:flex;flex-direction:column;gap:8px;padding:10px 12px;' + bgClass + ';border-radius:8px">' + bodyHtml + '</div>';
+  }
+
+  function renderTaskDetail(d) {
+    const body = document.getElementById('taskDetailBody');
+    if (!body) return;
+    const it   = d.item || {};
+    const cust = d.customer || null;
+    const arr  = d.arrangement || null;
+    const inv  = d.invoice || (Array.isArray(d.invoices) && d.invoices.length === 1 ? d.invoices[0] : null);
+    const approver = d.approver || null;
+    const rejecter = d.rejecter || null;
+    const status   = it.status || '';
+    const isPending  = status === 'PENDING';
+    const isApproved = status === 'APPROVED';
+    const isExecuted = status === 'EXECUTED';
+    const isFailed   = status === 'FAILED' || status === 'REJECTED' || status === 'CANCELLED';
+    _taskCurrentDetailItem = it;
+
+    const custLink = (cust && cust.id)
+      ? '<a href="/modules/klanten.html?id=' + esc(cust.id) + '" style="color:var(--brand-secondary,var(--accent-cyan,#06b6d4));text-decoration:none">' + esc(cust.name || '(onbekend)') + '</a>'
+      : (cust ? esc(cust.name || '(onbekend)') : '<span style="color:var(--text-faint)">—</span>');
+
+    const arrCell = (arr && arr.id)
+      ? '<a href="/modules/finance.html#arrangement=' + esc(arr.id) + '" style="color:var(--brand-secondary,var(--accent-cyan,#06b6d4));text-decoration:none">' +
+          esc(arr.type || 'arrangement') +
+          ' <span style="color:var(--text-faint);font-size:11px">(' + esc(arr.arrangement_status || arr.status || '') + ')</span>' +
+        '</a>'
+      : '<span style="color:var(--text-faint)">—</span>';
+
+    const invCell = (inv && inv.id)
+      ? '<a href="/modules/finance.html#invoice=' + esc(inv.id) + '" style="color:var(--brand-secondary,var(--accent-cyan,#06b6d4));text-decoration:none">' +
+          esc(inv.invoice_number || ('inv ' + String(inv.id).slice(0,8))) +
+          (inv.amount_total != null ? ' <span style="color:var(--text-faint);font-size:11px">' + esc(approvFmtEur(inv.amount_total)) + '</span>' : '') +
+        '</a>'
+      : '<span style="color:var(--text-faint)">—</span>';
+
+    const payloadJson = JSON.stringify(it.payload || {}, null, 2);
+    const rationale = esc((it.payload && (it.payload.rationale || it.payload.reason)) || '—');
+    const source = (it.payload && it.payload.source) ? esc(it.payload.source) : 'manual';
+
+    let auditHtml = '';
+    if (approver) auditHtml += '<div>Goedgekeurd door: ' + esc(approver.full_name || approver.email || approver.id) + ' op ' + esc(approvFmtDateTime(it.approved_at)) + '</div>';
+    if (rejecter) auditHtml += '<div>Afgewezen door: ' + esc(rejecter.full_name || rejecter.email || rejecter.id) + ' op ' + esc(approvFmtDateTime(it.approved_at)) + '</div>';
+    if (it.executed_at)   auditHtml += '<div>Uitgevoerd op: ' + esc(approvFmtDateTime(it.executed_at)) + '</div>';
+    if (it.reject_reason) auditHtml += '<div style="margin-top:6px"><span style="color:var(--text-faint)">Reden:</span> ' + esc(it.reject_reason) + '</div>';
+    if (!auditHtml) auditHtml = '<div style="color:var(--text-faint)">(nog geen audit-events)</div>';
+
+    // Action-type-specifieke renderer.
+    let specificBlock = '';
+    if (it.action_type === 'TL_INVOICE_CONSOLIDATE_AND_RESTART') {
+      specificBlock = renderConsolidateActionDetail(it.payload || {}, Array.isArray(d.invoices) ? d.invoices : []);
+    } else if (it.action_type === 'MANUAL_VERIFY_PAYMENT') {
+      specificBlock = renderVerifyPaymentDetail(it.payload || {}, inv);
+    }
+
+    const executionBlock = (isExecuted || isFailed)
+      ? renderExecutionResult(it.execution_result || {}, status)
+      : '';
+
+    body.innerHTML = '' +
+      '<div class="approv-detail-grid">' +
+        '<div>Action type</div><div>' +
+          '<span class="approv-action-type">' + esc(approvActionLabel(it.action_type)) + '</span>' +
+          ' <span style="color:var(--text-faint);font-size:11px;margin-left:6px">' + esc(it.action_type || '') + '</span>' +
+        '</div>' +
+        '<div>Status</div><div>' + approvStatusBadge(it.status) + '</div>' +
+        '<div>Klant</div><div>' + custLink + '</div>' +
+        '<div>Factuur</div><div>' + invCell + '</div>' +
+        '<div>Arrangement</div><div>' + arrCell + '</div>' +
+        '<div>Source</div><div>' + esc(source) + '</div>' +
+        '<div>Rationale</div><div>' + rationale + '</div>' +
+        '<div>Voorgesteld op</div><div>' + esc(approvFmtDateTime(it.created_at)) + '</div>' +
+        '<div>Verloopt op</div><div>' + esc(it.expires_at ? approvFmtDateTime(it.expires_at) : '—') + '</div>' +
+        '<div>Gepland voor</div><div>' + esc(it.scheduled_for ? approvFmtDateTime(it.scheduled_for) : '—') + '</div>' +
+      '</div>' +
+      specificBlock +
+      executionBlock +
+      '<div class="approv-detail-section-title">Payload</div>' +
+      '<pre class="approv-detail-pre">' + esc(payloadJson) + '</pre>' +
+      '<div class="approv-detail-section-title">Audit historie</div>' +
+      '<div style="font-size:12px;color:var(--text-dim)">' + auditHtml + '</div>';
+
+    const approveBtn         = document.getElementById('taskDetailApproveBtn');
+    const rejectBtn          = document.getElementById('taskDetailRejectBtn');
+    const markExecutedBtn    = document.getElementById('taskDetailMarkExecutedBtn');
+    const markNotExecutedBtn = document.getElementById('taskDetailMarkNotExecutedBtn');
+    if (approveBtn)         approveBtn.style.display         = isPending  ? '' : 'none';
+    if (rejectBtn)          rejectBtn.style.display          = isPending  ? '' : 'none';
+    if (markExecutedBtn)    markExecutedBtn.style.display    = isApproved ? '' : 'none';
+    if (markNotExecutedBtn) markNotExecutedBtn.style.display = isApproved ? '' : 'none';
+  }
+
+  // ── Approve / reject / mark-executed / mark-not-executed ──────────
+  async function approveTask(id) {
+    if (!id) return false;
+    try {
+      const r = await window.AgentShared.apiFetch('/api/pending-actions-approve', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ id }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        window.AgentShared?.showToast('Approve mislukt: ' + (d.error || ('HTTP ' + r.status)), 'error');
+        return false;
+      }
+      window.AgentShared?.showToast('Voorstel goedgekeurd', 'success');
+      loadTasks();
+      try { window.AgentShared?.refreshApprovalsBadge?.(); } catch (_) {}
+      return true;
+    } catch (e) {
+      console.error('[approveTask]', e);
+      window.AgentShared?.showToast('Approve mislukt: ' + e.message, 'error');
+      return false;
+    }
+  }
+
+  async function approveTaskFromDetail() {
+    if (!_taskCurrentDetailId) return;
+    const id = _taskCurrentDetailId;
+    const btn = document.getElementById('taskDetailApproveBtn');
+    if (btn) { btn.disabled = true; btn.textContent = 'Bezig…'; }
+    try {
+      const ok = await approveTask(id);
+      if (ok) closeTaskDetail();
+    } finally {
+      if (btn) { btn.disabled = false; btn.textContent = 'Approve'; }
+    }
+  }
+
+  // Reject-modal
+  function openTaskRejectModalForId(id) {
+    if (!id) return;
+    _taskRejectContext = { id: id };
+    const titleEl = document.getElementById('taskRejectTitle');
+    const subEl   = document.getElementById('taskRejectSubtitle');
+    const txt     = document.getElementById('taskRejectReason');
+    const errEl   = document.getElementById('taskRejectError');
+    if (titleEl) titleEl.textContent = 'Voorstel afwijzen';
+    if (subEl)   subEl.textContent   = 'Voer een reden in voor deze afwijzing.';
+    if (txt)     txt.value = '';
+    if (errEl)   { errEl.classList.add('hidden'); errEl.textContent = ''; }
+    document.getElementById('taskRejectModal')?.classList.remove('hidden');
+    setTimeout(function () { try { txt?.focus(); } catch (_) {} }, 50);
+  }
+
+  function openTaskRejectFromDetail() {
+    if (!_taskCurrentDetailId) return;
+    openTaskRejectModalForId(_taskCurrentDetailId);
+  }
+
+  function closeTaskRejectModal() {
+    document.getElementById('taskRejectModal')?.classList.add('hidden');
+    _taskRejectContext = null;
+  }
+
+  async function rejectTask(id, reason) {
+    if (!id) return false;
+    try {
+      const r = await window.AgentShared.apiFetch('/api/pending-actions-reject', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ id, rejection_reason: reason }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        window.AgentShared?.showToast('Reject mislukt: ' + (d.error || ('HTTP ' + r.status)), 'error');
+        return false;
+      }
+      return true;
+    } catch (e) {
+      console.error('[rejectTask]', e);
+      window.AgentShared?.showToast('Reject mislukt: ' + e.message, 'error');
+      return false;
+    }
+  }
+
+  async function confirmTaskReject() {
+    const txt   = document.getElementById('taskRejectReason');
+    const errEl = document.getElementById('taskRejectError');
+    const reason = (txt && txt.value || '').trim();
+    if (!reason) {
+      if (errEl) { errEl.textContent = 'Reden is verplicht.'; errEl.classList.remove('hidden'); }
+      return;
+    }
+    if (!_taskRejectContext || !_taskRejectContext.id) {
+      closeTaskRejectModal();
+      return;
+    }
+    const ctx = _taskRejectContext;
+    const btn = document.getElementById('taskRejectConfirmBtn');
+    const origLabel = btn ? btn.textContent : 'Afwijzen';
+    if (btn) { btn.disabled = true; btn.textContent = 'Bezig…'; }
+    try {
+      const ok = await rejectTask(ctx.id, reason);
+      if (ok) {
+        window.AgentShared?.showToast('Voorstel afgewezen', 'success');
+        if (_taskCurrentDetailId === ctx.id) closeTaskDetail();
+        loadTasks();
+        try { window.AgentShared?.refreshApprovalsBadge?.(); } catch (_) {}
+      }
+    } finally {
+      if (btn) { btn.disabled = false; btn.textContent = origLabel || 'Afwijzen'; }
+      closeTaskRejectModal();
+    }
+  }
+
+  // Mark-executed modal
+  function openTaskMarkExecutedModal(id, item) {
+    if (!id) return;
+    wireTasksOnce();
+    _taskCurrentDetailId = id;
+    if (item) _taskCurrentDetailItem = item;
+
+    const it = item || _taskCurrentDetailItem || {};
+    const actionLabel = approvActionLabel(it.action_type) || '—';
+    const actionType  = it.action_type || '';
+    const cust = it.customer || null;
+    const arr  = it.arrangement || null;
+    const custName = cust && cust.name ? cust.name : '(klant onbekend)';
+    let arrLine;
+    if (arr && arr.id) {
+      const arrType   = arr.type || 'arrangement';
+      const arrStatus = arr.arrangement_status || arr.status || '';
+      arrLine = 'Arrangement: ' + arrType + (arrStatus ? ' (' + arrStatus + ')' : '');
+    } else {
+      arrLine = 'Arrangement: —';
+    }
+    const summary = approvSummary(it);
+
+    const l1 = document.getElementById('taskMarkExecCtxLine1');
+    const l2 = document.getElementById('taskMarkExecCtxLine2');
+    const l3 = document.getElementById('taskMarkExecCtxLine3');
+    if (l1) l1.innerHTML = esc(actionLabel) + (actionType ? ' <span style="color:var(--text-faint);font-size:11px;margin-left:6px">' + esc(actionType) + '</span>' : '') + ' &middot; ' + esc(custName);
+    if (l2) l2.textContent = arrLine;
+    if (l3) l3.textContent = summary;
+
+    const elCredit = document.getElementById('taskMarkExecCreditIds');
+    const elSub    = document.getElementById('taskMarkExecSubscriptionId');
+    const elInv    = document.getElementById('taskMarkExecInvoiceIds');
+    const elNotes  = document.getElementById('taskMarkExecNotes');
+    const elErr    = document.getElementById('taskMarkExecError');
+    if (elCredit) elCredit.value = '';
+    if (elSub)    elSub.value    = '';
+    if (elInv)    elInv.value    = '';
+    if (elNotes)  elNotes.value  = '';
+    if (elErr)    { elErr.classList.add('hidden'); elErr.textContent = ''; }
+
+    document.getElementById('taskMarkExecutedModal')?.classList.remove('hidden');
+    setTimeout(function () { try { elNotes?.focus(); } catch (_) {} }, 50);
+  }
+
+  function openTaskMarkExecutedFromDetail() {
+    if (!_taskCurrentDetailId) return;
+    openTaskMarkExecutedModal(_taskCurrentDetailId, _taskCurrentDetailItem || null);
+  }
+
+  function closeTaskMarkExecutedModal() {
+    document.getElementById('taskMarkExecutedModal')?.classList.add('hidden');
+  }
+
+  function parseCommaSeparated(input) {
+    return String(input || '').split(',').map(function (s) { return s.trim(); }).filter(function (s) { return s.length > 0; });
+  }
+
+  async function submitTaskMarkExecuted() {
+    const elCredit = document.getElementById('taskMarkExecCreditIds');
+    const elSub    = document.getElementById('taskMarkExecSubscriptionId');
+    const elInv    = document.getElementById('taskMarkExecInvoiceIds');
+    const elNotes  = document.getElementById('taskMarkExecNotes');
+    const elErr    = document.getElementById('taskMarkExecError');
+    const btn      = document.getElementById('taskMarkExecConfirmBtn');
+
+    const notes = (elNotes && elNotes.value || '').trim();
+    if (notes.length < 10) {
+      if (elErr) { elErr.textContent = 'Manual notes zijn verplicht (min 10 tekens).'; elErr.classList.remove('hidden'); }
+      return;
+    }
+
+    const id = _taskCurrentDetailId;
+    if (!id) {
+      if (elErr) { elErr.textContent = 'Geen taak geselecteerd.'; elErr.classList.remove('hidden'); }
+      return;
+    }
+
+    const execution_result = { manual_notes: notes };
+    const creditIds = parseCommaSeparated(elCredit ? elCredit.value : '');
+    if (creditIds.length) execution_result.tl_credit_note_ids = creditIds;
+    const subId = (elSub && elSub.value || '').trim();
+    if (subId) execution_result.tl_subscription_id = subId;
+    const invIds = parseCommaSeparated(elInv ? elInv.value : '');
+    if (invIds.length) execution_result.tl_invoice_ids = invIds;
+
+    if (btn) { btn.disabled = true; btn.textContent = 'Bezig…'; }
+    try {
+      const r = await window.AgentShared.apiFetch('/api/pending-actions-mark-executed', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ id, execution_result }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        const msg = d.error || ('HTTP ' + r.status);
+        if (elErr) { elErr.textContent = 'Markeren mislukt: ' + msg; elErr.classList.remove('hidden'); }
+        return;
+      }
+      window.AgentShared?.showToast('Taak gemarkeerd als verwerkt', 'success');
+      closeTaskMarkExecutedModal();
+      closeTaskDetail();
+      loadTasks();
+      try { window.AgentShared?.refreshApprovalsBadge?.(); } catch (_) {}
+    } catch (e) {
+      console.error('[submitTaskMarkExecuted]', e);
+      if (elErr) { elErr.textContent = 'Markeren mislukt: ' + e.message; elErr.classList.remove('hidden'); }
+    } finally {
+      if (btn) { btn.disabled = false; btn.textContent = 'Bevestig'; }
+    }
+  }
+
+  // Mark-not-executed modal
+  function openTaskMarkNotExecutedModal(id) {
+    if (!id) return;
+    wireTasksOnce();
+    _taskCurrentDetailId = id;
+    const elReason = document.getElementById('taskMarkNotExecReason');
+    const elErr    = document.getElementById('taskMarkNotExecError');
+    if (elReason) elReason.value = '';
+    if (elErr)    { elErr.classList.add('hidden'); elErr.textContent = ''; }
+    document.getElementById('taskMarkNotExecutedModal')?.classList.remove('hidden');
+    setTimeout(function () { try { elReason?.focus(); } catch (_) {} }, 50);
+  }
+
+  function openTaskMarkNotExecutedFromDetail() {
+    if (!_taskCurrentDetailId) return;
+    openTaskMarkNotExecutedModal(_taskCurrentDetailId);
+  }
+
+  function closeTaskMarkNotExecutedModal() {
+    document.getElementById('taskMarkNotExecutedModal')?.classList.add('hidden');
+  }
+
+  async function submitTaskMarkNotExecuted() {
+    const elReason = document.getElementById('taskMarkNotExecReason');
+    const elErr    = document.getElementById('taskMarkNotExecError');
+    const btn      = document.getElementById('taskMarkNotExecConfirmBtn');
+
+    const reason = (elReason && elReason.value || '').trim();
+    if (reason.length < 10) {
+      if (elErr) { elErr.textContent = 'Reden is verplicht (min 10 tekens).'; elErr.classList.remove('hidden'); }
+      return;
+    }
+
+    const id = _taskCurrentDetailId;
+    if (!id) {
+      if (elErr) { elErr.textContent = 'Geen taak geselecteerd.'; elErr.classList.remove('hidden'); }
+      return;
+    }
+
+    if (btn) { btn.disabled = true; btn.textContent = 'Bezig…'; }
+    try {
+      const r = await window.AgentShared.apiFetch('/api/pending-actions-mark-not-executed', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ id, failure_reason: reason }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        const msg = d.error || ('HTTP ' + r.status);
+        if (elErr) { elErr.textContent = 'Markeren mislukt: ' + msg; elErr.classList.remove('hidden'); }
+        return;
+      }
+      window.AgentShared?.showToast('Taak gemarkeerd als niet doorgevoerd', 'success');
+      closeTaskMarkNotExecutedModal();
+      closeTaskDetail();
+      loadTasks();
+      try { window.AgentShared?.refreshApprovalsBadge?.(); } catch (_) {}
+    } catch (e) {
+      console.error('[submitTaskMarkNotExecuted]', e);
+      if (elErr) { elErr.textContent = 'Markeren mislukt: ' + e.message; elErr.classList.remove('hidden'); }
+    } finally {
+      if (btn) { btn.disabled = false; btn.textContent = 'Bevestig'; }
+    }
+  }
+
+  // ── Event-wiring (idempotent) ─────────────────────────────────────
+  function wireTasksOnce() {
+    if (_tasksWired) return;
+    _tasksWired = true;
+
+    // Click-outside-modal closes.
+    const detailM = document.getElementById('taskDetailModal');
+    if (detailM) detailM.addEventListener('click', function (e) {
+      if (e.target === detailM) closeTaskDetail();
+    });
+    const rejectM = document.getElementById('taskRejectModal');
+    if (rejectM) rejectM.addEventListener('click', function (e) {
+      if (e.target === rejectM) closeTaskRejectModal();
+    });
+    const markExecM = document.getElementById('taskMarkExecutedModal');
+    if (markExecM) markExecM.addEventListener('click', function (e) {
+      if (e.target === markExecM) closeTaskMarkExecutedModal();
+    });
+    const markNotExecM = document.getElementById('taskMarkNotExecutedModal');
+    if (markNotExecM) markNotExecM.addEventListener('click', function (e) {
+      if (e.target === markNotExecM) closeTaskMarkNotExecutedModal();
+    });
+
+    // Escape sluit modals (eerst niet-detail; daarna detail).
+    document.addEventListener('keydown', function (e) {
+      if (e.key !== 'Escape') return;
+      const ids = ['taskMarkExecutedModal', 'taskMarkNotExecutedModal', 'taskRejectModal', 'taskDetailModal'];
+      for (var i = 0; i < ids.length; i++) {
+        var el = document.getElementById(ids[i]);
+        if (el && !el.classList.contains('hidden')) {
+          if (ids[i] === 'taskMarkExecutedModal')    closeTaskMarkExecutedModal();
+          else if (ids[i] === 'taskMarkNotExecutedModal') closeTaskMarkNotExecutedModal();
+          else if (ids[i] === 'taskRejectModal')     closeTaskRejectModal();
+          else if (ids[i] === 'taskDetailModal')     closeTaskDetail();
+          return;
+        }
+      }
+    });
+
+    // Search-input
+    const search = document.getElementById('tasksSearchInput');
+    if (search) {
+      search.addEventListener('input', function (e) { onTasksSearchInput(e.target.value); });
+    }
+  }
+
+  // ── Init ─────────────────────────────────────────────────────────
+  async function init() {
+    await window._authSharedReady;
+    // Auth-gate: requireAuth zonder rol-filter; permission-enforcement via
+    // tasks-list endpoint (finance.tasks.view OF finance.arrangements.view).
+    const profile = await window.AuthShared.requireAuth();
+    if (!profile) return; // requireAuth heeft al naar /login.html geredirect.
+
+    // Render user-section in sidebar-footer.
+    if (window.AgentShared) {
+      try { await window.AgentShared.renderUserSection(profile); } catch (_) {}
+    }
+
+    wireTasksOnce();
+    loadTasks();
+  }
+
+  init();
+</script>
+<script src="/modules/shared/permissions.js"></script>
+<script src="/modules/shared/sidebar.js"></script>
+<script src="/modules/shared/quick-task-button.js" data-module="Taken" defer></script>
+</body>
+</html>

@@ -4,7 +4,7 @@
 // Gebruikt door:
 //   * api/tasks-list.js                  (filter + group-by categorie)
 //   * api/tasks-create-verify-payment.js (insert nieuwe verify-payment task)
-//   * modules/taken.html                 (frontend filter-tabs + labels)
+//   * modules/open-acties.html           (frontend filter-tabs + labels)
 //
 // Achtergrond:
 //   * pending_actions.action_type is vrije tekst in de DB (geen CHECK), zie

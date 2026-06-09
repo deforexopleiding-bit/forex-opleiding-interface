@@ -74,8 +74,9 @@ Lokaal: C:/Users/jeffr/forex-opleiding-interface
 - /modules/control-center.html — Approvals + Audit log
 - /modules/admin.html — Gebruikersbeheer (ADMIN_ROLES: super_admin/admin/manager) +
   Approval-queue tab (#approval-queue) voor D-module payment-arrangements
-- /modules/taken.html — Centraal taken-dashboard (F1) voor alle handmatige
-  verificaties. Toont 2 task-categorieën uit `pending_actions`:
+- /modules/open-acties.html — Centraal Open Acties-dashboard (F1) voor alle
+  handmatige verificaties. Gescheiden van Takenbeheer (taken.html / kanban).
+  Toont 2 task-categorieën uit `pending_actions`:
   * `arrangement` — alle TL_* action_types uit D1 (TL_INVOICE_UPDATE_DUE,
     TL_INVOICE_SPLIT, TL_SUBSCRIPTION_PAUSE, TL_SUBSCRIPTION_STOP,
     TL_INVOICE_WRITEOFF)
