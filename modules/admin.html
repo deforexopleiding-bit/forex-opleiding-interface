@@ -63,6 +63,32 @@
     .modal-close { background:transparent; border:none; color:var(--text-faint); font-size:16px; cursor:pointer; padding:4px; line-height:1; }
     .modal-body { padding:20px; }
     .modal-footer { display:flex; justify-content:flex-end; gap:8px; padding:14px 20px; border-top:1px solid var(--border); }
+    /* WhatsApp Meta template editor: scrollable layout zodat modal binnen viewport blijft. */
+    #waMetaEditModal .modal-card {
+      max-width: min(1100px, 95vw);
+      max-height: 90vh;
+      display: flex;
+      flex-direction: column;
+    }
+    #waMetaEditModal .modal-header { flex-shrink: 0; }
+    #waMetaEditModal .modal-body {
+      flex: 1;
+      overflow-y: auto;
+      min-height: 0;
+    }
+    #waMetaEditModal .modal-footer {
+      flex-shrink: 0;
+      position: sticky;
+      bottom: 0;
+      background: var(--bg-elev);
+      border-top: 1px solid var(--border);
+    }
+    @media (max-width: 800px) {
+      #waMetaEditModal .modal-card { width: 95vw; max-height: 90vh; }
+      #waMetaEditModal .modal-body > div[style*="grid-template-columns:1fr 380px"] {
+        grid-template-columns: 1fr !important;
+      }
+    }
     .form-group { margin-bottom:14px; }
     .form-label { display:block; font-size:12px; font-weight:600; color:var(--text-dim); margin-bottom:6px; }
     .form-input { width:100%; background:var(--bg-elev-2); border:1px solid var(--border-strong); border-radius:8px; padding:9px 12px; font-size:13px; color:var(--text); font-family:inherit; outline:none; transition:border-color .15s; }
