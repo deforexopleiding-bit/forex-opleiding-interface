@@ -177,7 +177,9 @@
   //   - tooltip toont de splitsing ("Te beoordelen: N + Te verwerken: M")
   //   - alleen renderen als user feature_key 'finance.arrangements.approve' heeft
   //     (lookup via window.RBAC.ensurePermissionsLoaded(); super_admin krijgt '*')
-  //   - klik op badge navigeert naar /modules/admin.html#approval-queue (data-target)
+  //   - klik op badge navigeert naar /modules/taken.html?status=PENDING (F1 polish:
+  //     consistent met Taken-badge; admin.html#approval-queue blijft bestaan als
+  //     backward-compat tab maar is geen badge-target meer)
   // Pattern: silent fail, idempotent toggle (zelfde als tickets/taken).
   var _approvalsBadgeAllowed = null;     // null | true | false → cached na 1e RBAC-check
   var _approvalsBadgeTimer   = null;     // setInterval handle (cleanup-safe)
@@ -227,9 +229,10 @@
     } catch (e) { b.classList.remove('show'); }
   }
 
-  // Click-handler op de badge zelf: navigeert naar /modules/admin.html#approval-queue
-  // zonder dat de outer <a class="nav-item"> dezelfde href (zonder hash) wint. Wordt
-  // 1x gewired bij mount; idempotent via dataset-flag.
+  // Click-handler op de badge zelf: navigeert naar /modules/taken.html?status=PENDING
+  // (F1 polish: was /modules/admin.html#approval-queue; nu consistent met Taken-badge).
+  // Voorkomt dat de outer <a class="nav-item"> dezelfde href (zonder hash/query) wint.
+  // Wordt 1x gewired bij mount; idempotent via dataset-flag.
   function wireApprovalsBadgeClick() {
     var b = document.getElementById('navApprovalsBadge');
     if (!b || b.dataset.wired === '1') return;
@@ -237,7 +240,7 @@
     b.addEventListener('click', function (e) {
       e.preventDefault();
       e.stopPropagation();
-      var target = b.getAttribute('data-target') || '/modules/admin.html#approval-queue';
+      var target = b.getAttribute('data-target') || '/modules/taken.html?status=PENDING';
       window.location.href = target;
     });
     b.dataset.wired = '1';
