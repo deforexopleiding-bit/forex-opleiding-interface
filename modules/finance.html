@@ -361,7 +361,75 @@
       margin: 0 auto;
       display: flex;
       flex-direction: column;
-      gap: 8px;
+      gap: 4px;
+    }
+    /* WhatsApp-style compacte bubbles — fit-content groei + 65 procent cap. */
+    .inbox-c-msg {
+      display: flex;
+      width: 100%;
+      margin-bottom: 2px;
+    }
+    .inbox-c-msg.outbound { justify-content: flex-end; }
+    .inbox-c-msg.inbound  { justify-content: flex-start; }
+    .inbox-c-msg-bubble {
+      flex: 0 0 auto;
+      width: fit-content;
+      max-width: 65%;
+      padding: 6px 12px 8px;
+      border-radius: 10px;
+      font-size: 14.5px;
+      line-height: 1.35;
+      word-break: break-word;
+      overflow-wrap: anywhere;
+      white-space: pre-wrap;
+      min-height: auto;
+      box-sizing: border-box;
+    }
+    .inbox-c-msg.outbound .inbox-c-msg-bubble {
+      background: #3b82f6;
+      color: #fff;
+    }
+    .inbox-c-msg.outbound.failed .inbox-c-msg-bubble {
+      background: rgba(239,68,68,.12);
+      border: 1px solid rgba(239,68,68,.3);
+      color: #fecaca;
+    }
+    .inbox-c-msg.inbound .inbox-c-msg-bubble {
+      background: rgba(255,255,255,.06);
+      color: var(--text-strong, #e5e7eb);
+    }
+    .inbox-c-msg-text {
+      display: block;
+      word-break: break-word;
+      overflow-wrap: anywhere;
+    }
+    .inbox-c-msg-meta {
+      display: flex;
+      gap: 4px;
+      justify-content: flex-end;
+      align-items: center;
+      margin-top: 2px;
+      font-size: 11px;
+      opacity: .65;
+      line-height: 1;
+    }
+    .inbox-c-msg-failed-reason {
+      font-size: 10.5px;
+      color: #fca5a5;
+      margin-top: 3px;
+    }
+    .inbox-c-msg-tplbadge {
+      display: inline-flex;
+      align-items: center;
+      gap: 3px;
+      margin-bottom: 3px;
+      padding: 1px 6px;
+      border-radius: 8px;
+      background: rgba(245,158,11,.18);
+      color: #fbbf24;
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: .02em;
     }
     /* Empty-state thread: vriendelijke text-only illustration */
     .inbox-c-empty-thread {
@@ -3330,23 +3398,18 @@
       const time = fmtRelTime(m.sent_at || m.created_at);
       const statusIcon = out ? _inboxStatusIcon(m.status) : '';
       const failed = (m.status === 'failed');
-      const align = out ? 'flex-end' : 'flex-start';
-      const bg = out
-        ? (failed ? 'background:rgba(239,68,68,.12);border:1px solid rgba(239,68,68,.3);color:#fecaca'
-                  : 'background:#3b82f6;color:#fff')
-        : 'background:rgba(255,255,255,.06);color:var(--text-strong, #e5e7eb)';
       const failedRow = (out && failed && m.failed_reason)
-        ? `<div style="font-size:10.5px;color:#fca5a5;margin-top:3px">${esc(m.failed_reason)}</div>`
+        ? `<div class="inbox-c-msg-failed-reason">${esc(m.failed_reason)}</div>`
         : '';
       const tplBadge = isTpl
-        ? `<div style="display:inline-flex;align-items:center;gap:3px;margin-bottom:4px;padding:1px 6px;border-radius:8px;background:rgba(245,158,11,.18);color:#fbbf24;font-size:10px;font-weight:600;letter-spacing:.02em" title="${esc(tplName || '')}"><i class="ti ti-template" style="font-size:11px"></i> via template</div>`
+        ? `<div class="inbox-c-msg-tplbadge" title="${esc(tplName || '')}"><i class="ti ti-template" style="font-size:11px"></i> via template</div>`
         : '';
-      return `<div class="inbox-c-msg ${out ? 'outbound' : 'inbound'}${failed ? ' failed' : ''}" style="display:flex;justify-content:${align};width:100%">
-        <div style="max-width:72%;padding:8px 12px;border-radius:14px;${bg};font-size:13px;line-height:1.45;word-wrap:break-word;white-space:pre-wrap">
+      return `<div class="inbox-c-msg ${out ? 'outbound' : 'inbound'}${failed ? ' failed' : ''}">
+        <div class="inbox-c-msg-bubble">
           ${tplBadge}
-          <div>${esc(body)}</div>
+          <span class="inbox-c-msg-text">${esc(body)}</span>
           ${failedRow}
-          <div style="display:flex;gap:6px;justify-content:flex-end;align-items:center;margin-top:4px;font-size:10.5px;opacity:.85">
+          <div class="inbox-c-msg-meta">
             <span>${esc(time)}</span>${statusIcon ? ' ' + statusIcon : ''}
           </div>
         </div>
