@@ -76,6 +76,10 @@ function customerDisplayName(c) {
 //   'invoice'  -> resolver moet oudste open invoice opzoeken
 //   'invoices' -> resolver moet alle open invoices opzoeken (aggregaties)
 //   null       -> server-side (env / clock), geen DB nodig
+//
+// requires_module_context (boolean): true wanneer de variabele waarde uit
+// de whatsapp_module_config rij van de zendende lijn komt (afdeling.*).
+// Caller moet context.moduleContext meeleveren ({ afdeling_telefoon, ... }).
 
 export const AVAILABLE_VARIABLES = [
   // ── customer ───────────────────────────────────────────────────────────
@@ -98,6 +102,12 @@ export const AVAILABLE_VARIABLES = [
   { key: 'klant.factuur_lijst', label: 'Lijst openstaande facturen', category: 'klant', example: '- 2026-0001 (EUR 80,00)\n- 2026-0002 (EUR 120,00)', requires_context: 'invoices' },
   { key: 'klant.totaal_open',   label: 'Totaal openstaand',          category: 'klant', example: 'EUR 200,00',  requires_context: 'invoices' },
   { key: 'klant.aantal_open',   label: 'Aantal open facturen',       category: 'klant', example: '2',           requires_context: 'invoices' },
+
+  // ── afdeling (per-module contactgegevens uit whatsapp_module_config) ───
+  { key: 'afdeling.telefoon',      label: 'Telefoon afdeling',  category: 'afdeling', example: '+31 85 130 83 62',              requires_context: null, requires_module_context: true },
+  { key: 'afdeling.whatsapp',      label: 'WhatsApp afdeling',  category: 'afdeling', example: '+31 6 51031673',                requires_context: null, requires_module_context: true },
+  { key: 'afdeling.email',         label: 'Email afdeling',     category: 'afdeling', example: 'administratie@deforexopleiding.nl', requires_context: null, requires_module_context: true },
+  { key: 'afdeling.ondertekenaar', label: 'Ondertekenaar',      category: 'afdeling', example: 'De Forex Opleiding',            requires_context: null, requires_module_context: true },
 
   // ── bedrijf (env / constants) ──────────────────────────────────────────
   { key: 'bedrijf.naam',     label: 'Bedrijfsnaam',  category: 'bedrijf', example: 'De Forex Opleiding NL B.V.', requires_context: null },
@@ -238,6 +248,26 @@ function getCompanyValue(key) {
   }
 }
 
+function getAfdelingValue(key, moduleContext) {
+  // moduleContext = whatsapp_module_config rij van de zendende lijn:
+  //   { afdeling_telefoon, afdeling_whatsapp, afdeling_email,
+  //     afdeling_ondertekenaar, ... }.
+  // Bij ontbrekende context (legacy callers): empty string + console.warn
+  // zodat het opvalt in Vercel logs maar de send niet faalt.
+  if (!moduleContext) {
+    // eslint-disable-next-line no-console
+    console.warn(`[template-variables] ${key} requested zonder moduleContext`);
+    return '';
+  }
+  switch (key) {
+    case 'afdeling.telefoon':      return moduleContext.afdeling_telefoon || '';
+    case 'afdeling.whatsapp':      return moduleContext.afdeling_whatsapp || '';
+    case 'afdeling.email':         return moduleContext.afdeling_email || '';
+    case 'afdeling.ondertekenaar': return moduleContext.afdeling_ondertekenaar || '';
+    default: return '';
+  }
+}
+
 function getDateValue(key) {
   const now = new Date();
   switch (key) {
@@ -308,18 +338,24 @@ function getKlantAggregateValue(openInvoices, key) {
 
 /**
  * Resolve een enkele variabele-key naar zijn waarde, gegeven de context.
- * context = { customer, invoice (oudste open), openInvoices (allemaal) }.
+ * context = {
+ *   customer,                // customers rij
+ *   invoice,                 // oudste open invoice
+ *   openInvoices,            // alle open invoices
+ *   moduleContext,           // whatsapp_module_config rij voor afdeling.*
+ * }.
  */
 export function resolveVariableValue(key, context) {
   const v = VAR_BY_KEY.get(key);
   if (!v) return '';
 
   switch (v.category) {
-    case 'bedrijf': return getCompanyValue(key);
-    case 'datum':   return getDateValue(key);
+    case 'bedrijf':  return getCompanyValue(key);
+    case 'datum':    return getDateValue(key);
     case 'customer': return getCustomerValue(context && context.customer, key);
     case 'invoice':  return getInvoiceValue(context && context.invoice, key);
     case 'klant':    return getKlantAggregateValue(context && context.openInvoices, key);
+    case 'afdeling': return getAfdelingValue(key, context && context.moduleContext);
     default: return '';
   }
 }
@@ -331,6 +367,11 @@ export function resolveVariableValue(key, context) {
  *   1) Named-style tekst ({{klant.naam}}): ignore mapping, resolve direct.
  *   2) Positioneel-style ({{1}}, {{2}}) MET mapping: lookup mapping[N] = key,
  *      resolve key tegen context.
+ *
+ * Context-shape: { customer, invoice, openInvoices, moduleContext }.
+ * moduleContext is optioneel — alleen vereist voor afdeling.* keys; caller
+ * (bv. inbox-send-template) bepaalt de juiste whatsapp_module_config rij op
+ * basis van het zendende phone_number_id.
  *
  * Onbekende keys: laat placeholder staan + log warning.
  *
