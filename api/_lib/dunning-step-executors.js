@@ -177,6 +177,20 @@ export async function executeWhatsappStep({ supabaseAdmin, run, step, customer, 
     openInvoices,
   });
 
+  // C4.5 TODO: bij integratie met named-variable templates, roep
+  // ensureInvoicePaymentLink(invoice.id) aan voor de render-step
+  // zodat factuur.betaal_link gevuld is. Zie api/_lib/invoice-payment-link.js.
+  //
+  // Pattern (zodra Meta credentials live zijn, PR A2):
+  //   1) Detecteer of de gekozen WhatsApp-template een factuur.betaal_link
+  //      mapping bevat (meta_param_mapping.body bevat de key).
+  //   2) Kies de eerste openInvoices[0] (of een step.config.invoice_id selector)
+  //      en roep `await ensureInvoicePaymentLink(invoice.id)` aan voordat we
+  //      POST naar /api/inbox-send-template doen. Cache wordt dan warm; de
+  //      send-endpoint zelf doet ook lazy-fetch maar pre-warm bespaart een
+  //      latency-spike op het send-moment.
+  //   3) Fail-soft: errors loggen en doorgaan — resolver vult lege string.
+
   return {
     status: 'skipped',
     log_event: 'whatsapp_skipped_no_meta',

@@ -41,7 +41,7 @@ import { requirePermission } from './_lib/requirePermission.js';
 import { getClientIp } from './_lib/audit-customer.js';
 import { sendTemplate, getConfigStatus, MetaNotConfiguredError } from './_lib/meta-whatsapp.js';
 import { buildMetaVariablesFromMapping, AVAILABLE_VARIABLES } from './_lib/template-variables.js';
-import { getInvoicePaymentLink } from './_lib/teamleader-invoice-link.js';
+import { ensureInvoicePaymentLink, InvoicePaymentLinkError } from './_lib/invoice-payment-link.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const MAX_TEMPLATE_NAME = 200;
@@ -256,6 +256,9 @@ export default async function handler(req, res) {
       }
 
       // Lazy TL-fetch voor invoice.betaal_link (Route A: real-time + cache).
+      // C4.5: hergebruik de shared helper ensureInvoicePaymentLink (zelfde
+      // cache+probe-flow als finance-invoice-payment-link endpoint). Fail-soft:
+      // bij elke error → console.warn + resolver vult lege string.
       if (needsBetaalLink) {
         if (!contextInvoiceId && !invoice) {
           return res.status(400).json({
@@ -264,15 +267,17 @@ export default async function handler(req, res) {
         }
         if (invoice) {
           try {
-            const linkResult = await getInvoicePaymentLink(invoice);
-            if (linkResult.url) {
-              invoice.payment_url = linkResult.url; // gebruikt door resolver
+            const linkResult = await ensureInvoicePaymentLink(invoice.id, { userId: user.id });
+            if (linkResult && linkResult.payment_url) {
+              invoice.payment_url = linkResult.payment_url; // gebruikt door resolver
             } else {
+              console.warn('[inbox-send-template] ensureInvoicePaymentLink: geen url voor invoice', invoice.id);
               resolveWarnings.push('TL betaal-link niet beschikbaar voor invoice ' + invoice.id);
             }
           } catch (e) {
-            console.error('[inbox-send-template] getInvoicePaymentLink exception:', e.message);
-            resolveWarnings.push('Fout bij ophalen TL betaal-link: ' + e.message);
+            const code = e instanceof InvoicePaymentLinkError ? e.code : 'UNKNOWN';
+            console.warn('[inbox-send-template] ensureInvoicePaymentLink fail invoice=' + invoice.id + ' code=' + code + ' reason=' + e.message);
+            resolveWarnings.push('Fout bij ophalen TL betaal-link (' + code + '): ' + e.message);
           }
         }
       }

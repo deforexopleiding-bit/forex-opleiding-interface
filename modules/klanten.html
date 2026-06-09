@@ -1504,6 +1504,8 @@ function koOpenInvoice(inv) {
   const sendEnabled = koInvCanSend && !!inv.tl_invoice_id;
   const updateEnabled = koInvCanUpdate && !!inv.tl_invoice_id && inv.status === 'concept';
   const creditEnabled = koInvCanCredit && !!inv.tl_invoice_id && inv.status !== 'concept' && Number(inv.credited_amount || 0) < Number(inv.amount_total || 0);
+  // Betaal-link sectie (C4.5): alleen tonen bij TL-gekoppelde open/te-late facturen.
+  const showPayLink = !!inv.tl_invoice_id && ['open', 'partially_paid', 'overdue'].includes(inv.display_status);
 
   document.getElementById('koInvTitle').textContent = 'Factuur ' + inv.invoice_number;
   document.getElementById('koInvBody').innerHTML = `
@@ -1528,6 +1530,19 @@ function koOpenInvoice(inv) {
         ${inv.tl_invoice_id ? `<button class="sr-abtn" type="button" onclick="koInvoicePdf('${escapeHtml(inv.tl_invoice_id)}')"><i class="ti ti-file-type-pdf"></i> PDF</button>` : ''}
         <a class="sr-abtn" href="${tlUrl}" target="_blank"><i class="ti ti-external-link"></i> Teamleader</a>
       </div>
+      ${showPayLink ? `
+      <div id="koInvPayLinkRow" style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border-subtle, #e5e7eb);display:flex;flex-direction:column;gap:6px">
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+          <span style="font-size:12.5px;font-weight:600;color:var(--text-dim)">Betaal-link</span>
+          <span id="koInvPayLinkBadge" style="display:none;font-size:11px;padding:2px 7px;border-radius:10px;background:#e5e7eb;color:#374151"></span>
+        </div>
+        <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+          <input id="koInvPayLinkInput" type="text" readonly placeholder="Nog niet opgehaald — klik Ververs" style="flex:1;min-width:240px;padding:6px 9px;border:1px solid var(--border);border-radius:7px;background:var(--bg);color:var(--text);font-size:12px"/>
+          <button class="sr-abtn" id="invoicePaymentLinkRefreshBtn" type="button" data-invoice-id="${escapeHtml(inv.id)}" title="Ververs betaal-link (Shift+klik = forceer verse fetch)"><span class="ic"><i class="ti ti-refresh"></i></span> Ververs betaal-link</button>
+          <button class="sr-abtn" id="koInvPayLinkCopyBtn" type="button" disabled><i class="ti ti-copy"></i> Kopiëren</button>
+          <a class="sr-abtn" id="koInvPayLinkOpenBtn" href="#" target="_blank" rel="noopener" style="display:none"><i class="ti ti-external-link"></i> Openen</a>
+        </div>
+      </div>` : ''}
     </div>
     <div class="fin-card"><h4>Inhoud</h4><div id="koInvLines"><div style="color:var(--text-dim);font-size:12px"><i class="ti ti-loader"></i> Laden…</div></div><div id="koInvCredit"></div><div id="koInvFee"></div></div>
     <div class="fin-card"><h4>Betalingen</h4><div id="koInvPay"></div></div>
@@ -1537,6 +1552,14 @@ function koOpenInvoice(inv) {
   const sbtn = document.getElementById('koBtnSend'); if (sbtn) sbtn.onclick = () => openKoSendModal(inv);
   const ubtn = document.getElementById('koBtnUpdate'); if (ubtn) ubtn.onclick = () => openKoUpdateModal(inv);
   const cbtn = document.getElementById('koBtnCredit'); if (cbtn) cbtn.onclick = () => openKoCreditModal(inv);
+
+  // Betaal-link refresh (C4.5): lazy-fetch + cache TTL via /api/finance-invoice-payment-link.
+  const koPlBtn = document.getElementById('invoicePaymentLinkRefreshBtn');
+  if (koPlBtn) {
+    koPlBtn.addEventListener('click', (ev) => {
+      refreshInvoicePaymentLink(koPlBtn.dataset.invoiceId || inv.id, { force: !!ev.shiftKey });
+    });
+  }
 
   // Betalingen-kaart.
   const payEl = document.getElementById('koInvPay');
@@ -1591,6 +1614,68 @@ function koOpenInvoice(inv) {
     el.innerHTML = `<div style="margin-top:8px"><div class="inv-drow"><span class="lbl">Incassokosten</span><span>${eur2(d.fee_amount)}</span></div><div class="inv-drow"><span class="lbl"><strong>Totaal te betalen</strong></span><span><strong>${eur2(tot)}</strong></span></div></div>`;
   }).catch(() => {});
 }
+
+// ── Betaal-link refresh (C4.5) ────────────────────────────────────────────
+// Roept /api/finance-invoice-payment-link aan, met optionele force=true voor
+// Shift+klik (negeert 24u cache). Updatet input-veld + badge (Cache hit /
+// Vers opgehaald) in de koInvModal invoice-detail modal.
+async function refreshInvoicePaymentLink(invoiceId, opts = {}) {
+  if (!invoiceId) return;
+  const btn = document.getElementById('invoicePaymentLinkRefreshBtn');
+  const input = document.getElementById('koInvPayLinkInput');
+  const badge = document.getElementById('koInvPayLinkBadge');
+  const copyBtn = document.getElementById('koInvPayLinkCopyBtn');
+  const openBtn = document.getElementById('koInvPayLinkOpenBtn');
+  const origLabel = btn ? btn.innerHTML : '';
+  if (btn) { btn.disabled = true; btn.innerHTML = '<span class="ic"><i class="ti ti-loader"></i></span> Bezig…'; }
+  try {
+    const qs = opts.force ? '?force=true' : '';
+    const r = await window.AgentShared.apiFetch('/api/finance-invoice-payment-link' + qs, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ invoice_id: invoiceId }),
+    });
+    const d = await r.json().catch(() => ({}));
+    if (r.status === 422) {
+      window.AgentShared?.showToast(d.error || 'Geen betaal-link beschikbaar voor deze factuur', 'error');
+      return;
+    }
+    if (r.status === 502) {
+      window.AgentShared?.showToast('Teamleader leverde geen link op — probeer later nogmaals', 'error');
+      return;
+    }
+    if (!r.ok || !d.payment_url) throw new Error(d.error || ('HTTP ' + r.status));
+    if (input) input.value = d.payment_url;
+    if (copyBtn) {
+      copyBtn.disabled = false;
+      copyBtn.onclick = () => {
+        try {
+          navigator.clipboard.writeText(d.payment_url);
+          window.AgentShared?.showToast('Link gekopieerd', 'success');
+        } catch (e) { window.AgentShared?.showToast('Kopiëren mislukt: ' + e.message, 'error'); }
+      };
+    }
+    if (openBtn) { openBtn.href = d.payment_url; openBtn.style.display = ''; }
+    if (badge) {
+      const fetched = d.fetched_at ? new Date(d.fetched_at) : null;
+      const days = fetched ? Math.max(0, Math.floor((Date.now() - fetched.getTime()) / 86400000)) : 0;
+      if (d.from_cache) {
+        badge.textContent = `Cache hit (${days}d oud)`;
+        badge.style.background = '#e5e7eb'; badge.style.color = '#374151';
+      } else {
+        badge.textContent = 'Vers opgehaald';
+        badge.style.background = 'rgba(16,185,129,.15)'; badge.style.color = '#047857';
+      }
+      badge.style.display = '';
+    }
+    const srcLabel = d.from_cache ? 'cache' : (d.source || 'TL');
+    window.AgentShared?.showToast(`Betaal-link vernieuwd (${srcLabel})`, 'success');
+  } catch (e) {
+    window.AgentShared?.showToast('Ophalen mislukt: ' + e.message, 'error');
+  } finally {
+    if (btn) { btn.disabled = false; btn.innerHTML = origLabel; }
+  }
+}
+
 function koPayModal(inv) {
   if (!inv || !inv.tl_invoice_id) return;
   koEnsureInvModal();
