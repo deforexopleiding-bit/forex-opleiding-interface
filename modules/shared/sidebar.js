@@ -73,14 +73,26 @@
           navLink('sales', '/modules/sales.html', 'Sales') +
           navLink('onboarding', '/modules/onboarding-overzicht.html', 'Onboarding') +
           navLink('finance', '/modules/finance.html', 'Finance') +
+          // F1: Taken-module (finance-taken / payment-arrangements approval-queue).
+          // Eigen sidebar-link met badge die /api/tasks-list pollt; klik linkt naar
+          // /modules/taken.html?status=PENDING (primaire UX-ingang voor Open taken).
+          // Gate via feature-key finance.tasks.view (zie MODULE_FEATURE_MAP) met
+          // fallback in updateFinanceTasksBadge naar finance.arrangements.view voor
+          // backward-compat met rollen die nog geen finance.tasks.view hebben.
+          '<a class="nav-item" data-module="finance-tasks" href="/modules/taken.html">' +
+            svg('taken') + 'Taken' +
+            '<span class="nav-badge" id="navFinanceTasksBadge" data-target="/modules/taken.html?status=PENDING" title="Open taken"></span>' +
+          '</a>' +
           '<a class="nav-item" data-module="tickets" href="/modules/tickets.html">' + svg('tickets') + 'Tickets<span class="nav-badge" id="navTicketsBadge"></span></a>' +
-          // Admin nav-item incl. approval-badge (D1 payment-arrangements). Badge linkt direct
-          // naar de Approval-queue-tab in admin.html (#approval-queue), zonder eerst de
-          // Gebruikers-tab te laden. Badge wordt alleen zichtbaar bij PENDING > 0 én als de
-          // user de feature_key finance.arrangements.approve heeft (zie updateApprovalsBadge).
+          // Admin nav-item incl. approval-badge (D1 payment-arrangements). De badge zelf
+          // linkt nu naar /modules/taken.html?status=PENDING (cleanere UX dan de oude
+          // Admin#approval-queue ingang); admin.html#approval-queue blijft bestaan als
+          // secundaire/backward-compat route maar wordt niet meer als badge-target gebruikt.
+          // Badge wordt alleen zichtbaar bij PENDING+APPROVED > 0 én als de user de
+          // feature_key finance.arrangements.approve heeft (zie updateApprovalsBadge).
           '<a class="nav-item" data-module="admin" id="adminNavLink" href="/modules/admin.html" style="display:none">' +
             svg('admin') + 'Admin' +
-            '<span class="nav-badge" id="navApprovalsBadge" data-target="/modules/admin.html#approval-queue" title="Open taken"></span>' +
+            '<span class="nav-badge" id="navApprovalsBadge" data-target="/modules/taken.html?status=PENDING" title="Open taken"></span>' +
           '</a>' +
           '<div class="nav-section">Binnenkort</div>' +
           concept('whatsapp', 'WhatsApp Bot') +
@@ -165,7 +177,9 @@
   //   - tooltip toont de splitsing ("Te beoordelen: N + Te verwerken: M")
   //   - alleen renderen als user feature_key 'finance.arrangements.approve' heeft
   //     (lookup via window.RBAC.ensurePermissionsLoaded(); super_admin krijgt '*')
-  //   - klik op badge navigeert naar /modules/admin.html#approval-queue (data-target)
+  //   - klik op badge navigeert naar /modules/taken.html?status=PENDING (F1 polish:
+  //     consistent met Taken-badge; admin.html#approval-queue blijft bestaan als
+  //     backward-compat tab maar is geen badge-target meer)
   // Pattern: silent fail, idempotent toggle (zelfde als tickets/taken).
   var _approvalsBadgeAllowed = null;     // null | true | false → cached na 1e RBAC-check
   var _approvalsBadgeTimer   = null;     // setInterval handle (cleanup-safe)
@@ -215,9 +229,10 @@
     } catch (e) { b.classList.remove('show'); }
   }
 
-  // Click-handler op de badge zelf: navigeert naar /modules/admin.html#approval-queue
-  // zonder dat de outer <a class="nav-item"> dezelfde href (zonder hash) wint. Wordt
-  // 1x gewired bij mount; idempotent via dataset-flag.
+  // Click-handler op de badge zelf: navigeert naar /modules/taken.html?status=PENDING
+  // (F1 polish: was /modules/admin.html#approval-queue; nu consistent met Taken-badge).
+  // Voorkomt dat de outer <a class="nav-item"> dezelfde href (zonder hash/query) wint.
+  // Wordt 1x gewired bij mount; idempotent via dataset-flag.
   function wireApprovalsBadgeClick() {
     var b = document.getElementById('navApprovalsBadge');
     if (!b || b.dataset.wired === '1') return;
@@ -225,7 +240,7 @@
     b.addEventListener('click', function (e) {
       e.preventDefault();
       e.stopPropagation();
-      var target = b.getAttribute('data-target') || '/modules/admin.html#approval-queue';
+      var target = b.getAttribute('data-target') || '/modules/taken.html?status=PENDING';
       window.location.href = target;
     });
     b.dataset.wired = '1';
@@ -233,14 +248,91 @@
 
   // setInterval-cleanup pattern: bij elke (her)mount stoppen we de vorige timer
   // voor we een nieuwe starten — voorkomt dubbele polling bij SPA-achtige flows.
+  // Eén 60s tick update zowel de oude Approvals-badge (Admin-link, backward-compat)
+  // als de nieuwe Finance-tasks badge (F1) — bespaart een tweede setInterval.
   function startApprovalsBadgePolling() {
     if (_approvalsBadgeTimer) { clearInterval(_approvalsBadgeTimer); _approvalsBadgeTimer = null; }
-    _approvalsBadgeTimer = setInterval(updateApprovalsBadge, 60 * 1000);
+    _approvalsBadgeTimer = setInterval(function () {
+      updateApprovalsBadge();
+      updateFinanceTasksBadge();
+    }, 60 * 1000);
     // Stop polling als de tab onzichtbaar wordt (defensief — browser kan tabs
     // throttlen, maar zo zijn we expliciet en sparen we API-calls).
     window.addEventListener('beforeunload', function () {
       if (_approvalsBadgeTimer) { clearInterval(_approvalsBadgeTimer); _approvalsBadgeTimer = null; }
     });
+  }
+
+  // Finance-tasks-badge (F1):
+  //   - GET /api/tasks-list?status=PENDING,APPROVED&limit=1 → counts.byStatus
+  //   - badge-tekst = totaal aantal open finance-taken (PENDING te beoordelen + APPROVED te verwerken)
+  //   - alleen renderen als user feature_key 'finance.tasks.view' OF 'finance.arrangements.view' heeft
+  //     (super_admin krijgt '*' en ziet altijd)
+  //   - klik op badge of nav-item navigeert naar /modules/taken.html?status=PENDING
+  // Patroon hergebruikt approvalsBadgeAllowed-cache + silent fail + idempotent toggle.
+  var _financeTasksBadgeAllowed = null;     // null | true | false → cached na 1e RBAC-check
+
+  async function financeTasksBadgeAllowed() {
+    if (_financeTasksBadgeAllowed !== null) return _financeTasksBadgeAllowed;
+    try {
+      if (!window.RBAC || typeof window.RBAC.ensurePermissionsLoaded !== 'function') {
+        _financeTasksBadgeAllowed = false;
+        return false;
+      }
+      var perms = await window.RBAC.ensurePermissionsLoaded();
+      _financeTasksBadgeAllowed = !!(perms && (
+        perms.has('*') ||
+        perms.has('finance.tasks.view') ||
+        perms.has('finance.arrangements.view')
+      ));
+      return _financeTasksBadgeAllowed;
+    } catch (e) {
+      _financeTasksBadgeAllowed = false;
+      return false;
+    }
+  }
+
+  async function updateFinanceTasksBadge() {
+    var b = document.getElementById('navFinanceTasksBadge');
+    if (!b) return;
+    var ok = await financeTasksBadgeAllowed();
+    if (!ok) { b.classList.remove('show'); return; }
+    try {
+      if (!window.AgentShared || typeof window.AgentShared.apiFetch !== 'function') return;
+      // /api/tasks-list?status=PENDING,APPROVED&limit=1 — list-endpoint geeft counts.byStatus
+      // terug voor alle statussen. We tellen PENDING + APPROVED (open + te verwerken).
+      var res = await window.AgentShared.apiFetch('/api/tasks-list?status=PENDING,APPROVED&limit=1');
+      if (!res.ok) { b.classList.remove('show'); return; }
+      var data = await res.json();
+      var by = (data && (data.counts && (data.counts.byStatus || data.counts))) || {};
+      var pending  = (typeof by.PENDING  === 'number') ? by.PENDING  : 0;
+      var approved = (typeof by.APPROVED === 'number') ? by.APPROVED : 0;
+      var total = pending + approved;
+      if (total > 0) {
+        b.textContent = total;
+        b.setAttribute('title', 'Te beoordelen: ' + pending + ' + Te verwerken: ' + approved);
+        b.classList.add('show');
+      } else {
+        b.textContent = '';
+        b.setAttribute('title', 'Open taken');
+        b.classList.remove('show');
+      }
+    } catch (e) { b.classList.remove('show'); }
+  }
+
+  // Click-handler op de finance-tasks badge: voorkomt dat de outer <a class="nav-item">
+  // dezelfde href (zonder ?status=PENDING) wint. Idempotent via dataset-flag.
+  function wireFinanceTasksBadgeClick() {
+    var b = document.getElementById('navFinanceTasksBadge');
+    if (!b || b.dataset.wired === '1') return;
+    b.style.cursor = 'pointer';
+    b.addEventListener('click', function (e) {
+      e.preventDefault();
+      e.stopPropagation();
+      var target = b.getAttribute('data-target') || '/modules/taken.html?status=PENDING';
+      window.location.href = target;
+    });
+    b.dataset.wired = '1';
   }
 
   // Tickets-badge: telt open + in_progress tickets toegewezen aan ingelogde user.
@@ -287,6 +379,11 @@
     'tickets': 'tickets.module.access',
     'sales': 'sales.module.access',
     'finance': 'finance.module.access',
+    // F1: nieuwe Taken-module (sidebar-only data-module — niet gekoppeld aan een unieke
+    // .html page-name; klik routeert naar /modules/taken.html). Gating is fail-open zoals
+    // de rest: zonder finance.tasks.view wordt de sidebar-link verborgen, maar de
+    // /modules/taken.html pagina valt nog steeds onder de bestaande 'taken'-module-gate.
+    'finance-tasks': 'finance.tasks.view',
     'admin': 'admin.module.access'
   };
 
@@ -352,7 +449,9 @@
     updateTakenBadge();
     updateTicketsBadge();
     wireApprovalsBadgeClick();
+    wireFinanceTasksBadgeClick();
     updateApprovalsBadge();
+    updateFinanceTasksBadge();
     startApprovalsBadgePolling();
     applyAdminGating();
     applyDashboardRouting();
@@ -371,9 +470,10 @@
   // Expose refresh-trigger voor externe modules (tickets-detail.html na PATCH).
   // window.AgentShared bestaat al — agent-shared.js wordt eerder geladen.
   if (window.AgentShared) {
-    window.AgentShared.refreshTicketsBadge   = updateTicketsBadge;
-    window.AgentShared.refreshTakenBadge     = updateTakenBadge;
-    window.AgentShared.refreshApprovalsBadge = updateApprovalsBadge;
+    window.AgentShared.refreshTicketsBadge      = updateTicketsBadge;
+    window.AgentShared.refreshTakenBadge        = updateTakenBadge;
+    window.AgentShared.refreshApprovalsBadge    = updateApprovalsBadge;
+    window.AgentShared.refreshFinanceTasksBadge = updateFinanceTasksBadge;
   }
 
   if (document.readyState === 'loading') {

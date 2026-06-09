@@ -2,7 +2,7 @@
 // POST -> markeer een pending_action handmatig als 'EXECUTED'. Permission:
 // finance.arrangements.approve.
 //
-// Body:
+// Body voor TL-acties (TL_INVOICE_*, TL_SUBSCRIPTION_*):
 //   {
 //     id: uuid (required),
 //     execution_result: {
@@ -12,6 +12,21 @@
 //       manual_notes:        string (min 10 chars, required)
 //     }
 //   }
+//
+// Body voor MANUAL_VERIFY_PAYMENT (klant-claimt-betaald uit Inbox, F1):
+//   {
+//     id: uuid (required),
+//     execution_result: {
+//       outcome:                 'confirmed_paid' | 'not_found_in_bank' | 'klant_misvatting' (required),
+//       matched_transaction_id?: uuid    (alleen bij outcome=confirmed_paid; optioneel),
+//       manual_notes:            string  (min 10 chars, required)
+//     }
+//   }
+//   Semantiek: Jeffrey heeft in CAMT/bank-export gekeken; outcome legt de
+//   uitkomst vast. confirmed_paid markeert taak als afgerond (geld gevonden);
+//   not_found_in_bank en klant_misvatting blijven ook EXECUTED (taak is
+//   afgehandeld, alleen met negatieve uitkomst). Voor "kan niet verifieren /
+//   nog niet duidelijk" gebruik mark-not-executed (-> FAILED).
 //
 // State-machine: alleen vanuit status='APPROVED' kan handmatig op EXECUTED gezet
 // worden; anders 409 met huidige status. APPROVED is de uitkomst van de
@@ -42,6 +57,13 @@ import { getClientIp } from './_lib/audit-customer.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+// MANUAL_VERIFY_PAYMENT (F1) outcome-enum.
+const MANUAL_VERIFY_OUTCOMES = new Set([
+  'confirmed_paid',
+  'not_found_in_bank',
+  'klant_misvatting',
+]);
+
 function isStringArray(x) {
   return Array.isArray(x) && x.every(v => typeof v === 'string' && v.trim().length > 0);
 }
@@ -65,7 +87,7 @@ export default async function handler(req, res) {
   const id   = body.id ? String(body.id) : null;
   if (!id || !UUID_RE.test(id)) return res.status(400).json({ error: 'id (uuid) vereist' });
 
-  // ---- Validate execution_result ----
+  // ---- Basis-validate execution_result (action_type-agnostic) ----
   const er = body.execution_result && typeof body.execution_result === 'object'
     ? body.execution_result
     : null;
@@ -76,33 +98,8 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: 'execution_result.manual_notes vereist (min 10 chars)' });
   }
 
-  const tlCreditNoteIds = er.tl_credit_note_ids != null ? er.tl_credit_note_ids : null;
-  const tlSubscriptionId = er.tl_subscription_id != null ? String(er.tl_subscription_id).trim() : '';
-  const tlInvoiceIds = er.tl_invoice_ids != null ? er.tl_invoice_ids : null;
-
-  if (tlCreditNoteIds != null && !isStringArray(tlCreditNoteIds)) {
-    return res.status(400).json({ error: 'execution_result.tl_credit_note_ids moet string[] zijn' });
-  }
-  if (tlInvoiceIds != null && !isStringArray(tlInvoiceIds)) {
-    return res.status(400).json({ error: 'execution_result.tl_invoice_ids moet string[] zijn' });
-  }
-
-  // Sanitized execution_result voor opslag.
-  const cleanExecutionResult = {
-    manual_notes: manualNotes,
-  };
-  if (tlCreditNoteIds && tlCreditNoteIds.length > 0) {
-    cleanExecutionResult.tl_credit_note_ids = tlCreditNoteIds.map(s => String(s).trim());
-  }
-  if (tlSubscriptionId.length > 0) {
-    cleanExecutionResult.tl_subscription_id = tlSubscriptionId;
-  }
-  if (tlInvoiceIds && tlInvoiceIds.length > 0) {
-    cleanExecutionResult.tl_invoice_ids = tlInvoiceIds.map(s => String(s).trim());
-  }
-
   try {
-    // ---- Lookup huidige row ----
+    // ---- Lookup huidige row (nodig voor action_type-specifieke validatie) ----
     const { data: row, error: lookupErr } = await supabaseAdmin
       .from('pending_actions')
       .select('id, status, action_type, customer_id, arrangement_id, execution_result')
@@ -115,6 +112,59 @@ export default async function handler(req, res) {
       return res.status(409).json({
         error: `Action is niet in APPROVED state (huidige status: ${row.status})`,
       });
+    }
+
+    // ---- Action-type-specifieke validatie + sanitize ----
+    // Sanitized execution_result voor opslag.
+    const cleanExecutionResult = {
+      manual_notes: manualNotes,
+    };
+
+    if (row.action_type === 'MANUAL_VERIFY_PAYMENT') {
+      // F1 — Klant-claimt-betaald (Inbox) wordt door admin handmatig in CAMT
+      // gecheckt. Uitkomst-enum bepaalt of de claim klopt.
+      const outcome = typeof er.outcome === 'string' ? er.outcome.trim() : '';
+      if (!MANUAL_VERIFY_OUTCOMES.has(outcome)) {
+        return res.status(400).json({
+          error: 'execution_result.outcome vereist (confirmed_paid | not_found_in_bank | klant_misvatting)',
+        });
+      }
+      cleanExecutionResult.outcome = outcome;
+
+      if (er.matched_transaction_id != null) {
+        const txId = String(er.matched_transaction_id).trim();
+        if (txId.length > 0) {
+          if (!UUID_RE.test(txId)) {
+            return res.status(400).json({
+              error: 'execution_result.matched_transaction_id moet een uuid zijn',
+            });
+          }
+          cleanExecutionResult.matched_transaction_id = txId;
+        }
+      }
+    } else {
+      // Bestaande TL-shape voor arrangement-acties (UITSTEL / SPLITSING /
+      // ABONNEMENT_* / KWIJTSCHELDING -> TL_INVOICE_* / TL_SUBSCRIPTION_*).
+      const tlCreditNoteIds  = er.tl_credit_note_ids != null ? er.tl_credit_note_ids : null;
+      const tlSubscriptionId = er.tl_subscription_id != null ? String(er.tl_subscription_id).trim() : '';
+      const tlInvoiceIds     = er.tl_invoice_ids != null ? er.tl_invoice_ids : null;
+
+      if (tlCreditNoteIds != null && !isStringArray(tlCreditNoteIds)) {
+        return res.status(400).json({ error: 'execution_result.tl_credit_note_ids moet string[] zijn' });
+      }
+      if (tlInvoiceIds != null && !isStringArray(tlInvoiceIds)) {
+        return res.status(400).json({ error: 'execution_result.tl_invoice_ids moet string[] zijn' });
+      }
+
+      if (tlCreditNoteIds && tlCreditNoteIds.length > 0) {
+        cleanExecutionResult.tl_credit_note_ids = tlCreditNoteIds.map(s => String(s).trim());
+      }
+      if (tlSubscriptionId.length > 0) {
+        cleanExecutionResult.tl_subscription_id = tlSubscriptionId;
+      }
+      if (tlInvoiceIds && tlInvoiceIds.length > 0) {
+        cleanExecutionResult.tl_invoice_ids = tlInvoiceIds.map(s => String(s).trim());
+      }
     }
 
     const nowIso = new Date().toISOString();

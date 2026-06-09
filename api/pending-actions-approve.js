@@ -18,6 +18,13 @@
 //          te voeren (uitstel -> invoice.update_due_date, gespreid -> split,
 //          kwijtschelding -> credit-note, etc.). In D1 alleen status-update;
 //          executor-trigger volgt in D2.
+//
+// F1: MANUAL_VERIFY_PAYMENT (klant-claimt-betaald uit Inbox) is een
+//     standalone action zonder arrangement_id. De approve-stap is hier
+//     puur een state-transition PENDING -> APPROVED (= Jeffrey gaat
+//     handmatig in CAMT verifieren). Mark-executed / mark-not-executed
+//     handelen de uitkomst van de bank-check af. Geen extra logica nodig
+//     in approve — het endpoint is action_type-agnostic.
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
