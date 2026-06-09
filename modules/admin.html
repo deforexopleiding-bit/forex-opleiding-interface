@@ -217,6 +217,7 @@
       <button class="admin-tab" data-tab="whatsapp-connection" id="waConnTabBtn" onclick="switchAdminTab('whatsapp-connection')" style="display:none">WhatsApp Connection</button>
       <button class="admin-tab" data-tab="approval-queue" data-view="approval-queue" id="approvalsTabBtn" onclick="switchAdminTab('approval-queue')" style="display:none">Approval-queue <span id="approvalsTabBadge" class="approvals-tab-badge hidden">0</span></button>
       <button class="admin-tab" data-tab="whatsapp-templates" data-view="whatsapp-templates" id="waTplTabBtn" onclick="switchAdminTab('whatsapp-templates')" style="display:none">WhatsApp Templates</button>
+      <button class="admin-tab" data-tab="joost-config" data-view="joost-config" id="joostCfgTabBtn" onclick="switchAdminTab('joost-config')" style="display:none">Joost (AI)</button>
     </div>
 
     <div id="tab-gebruikers" class="admin-tab-panel">
@@ -507,6 +508,99 @@
                   <tr><td colspan="5" style="color:var(--text-faint);padding:20px">Laden&hellip;</td></tr>
                 </tbody>
               </table>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Joost (AI) configuratie ────────────────────────────────────────── -->
+    <div id="tab-joost-config" class="admin-tab-panel" style="display:none">
+      <div id="view-joost-config" hidden>
+        <div class="section-card" style="max-width:920px">
+          <div class="section-header" style="justify-content:space-between">
+            <div>
+              <div style="font-size:15px;font-weight:700">Joost &mdash; AI antwoord-suggesties</div>
+              <div style="font-size:12px;color:var(--text-faint);font-weight:400;margin-top:4px;max-width:720px">
+                Configureer persona, tone, system prompt, kennisbank en model voor Joost.
+                In E1.0 alleen voor de Finance-inbox (WhatsApp). Toggle &laquo;Actief&raquo; om
+                het suggesties-paneel zichtbaar te maken voor finance-gebruikers.
+              </div>
+            </div>
+            <div style="display:flex;gap:8px">
+              <button class="btn btn-sm" type="button" onclick="loadJoostConfig()" title="Herladen"><i class="ti ti-refresh"></i></button>
+            </div>
+          </div>
+
+          <div id="joostCfgBody" style="padding:8px 4px 18px 4px">
+            <div id="joostCfgLoading" style="color:var(--text-faint);font-size:13px;padding:14px 4px">Laden&hellip;</div>
+
+            <div id="joostCfgForm" style="display:none">
+              <div class="form-group">
+                <label class="form-label" for="joostCfgModule">Module</label>
+                <select id="joostCfgModule" class="form-input" style="max-width:280px">
+                  <option value="finance">Finance (WhatsApp inbox)</option>
+                </select>
+                <div style="font-size:11px;color:var(--text-faint);margin-top:4px">In E1.0 alleen finance. Andere modules volgen in latere fasen.</div>
+              </div>
+
+              <div class="form-group">
+                <label class="form-label" for="joostCfgPersonaName">Persona-naam</label>
+                <input type="text" id="joostCfgPersonaName" class="form-input" style="max-width:360px" placeholder="bv. Joost" />
+                <div style="font-size:11px;color:var(--text-faint);margin-top:4px">Naam waarmee Joost zichzelf intern aanduidt (niet de ondertekenaar voor klanten).</div>
+              </div>
+
+              <div class="form-group">
+                <label class="form-label" for="joostCfgTone">Tone</label>
+                <textarea id="joostCfgTone" class="form-input" rows="3" placeholder="bv. Vriendelijk, professioneel, kort en duidelijk. Geen overdreven beleefdheidsfrases."></textarea>
+                <div style="font-size:11px;color:var(--text-faint);margin-top:4px">Korte beschrijving van de stijl. Wordt mee-geinjecteerd in het system prompt.</div>
+              </div>
+
+              <div class="form-group">
+                <label class="form-label" for="joostCfgSystemPrompt">System prompt</label>
+                <textarea id="joostCfgSystemPrompt" class="form-input" rows="12" placeholder="Je bent Joost, een AI-assistent voor de Finance-inbox..." style="font-family:'SFMono-Regular',Consolas,'Liberation Mono',Menlo,monospace;font-size:12.5px;line-height:1.5"></textarea>
+                <div style="font-size:11px;color:var(--text-faint);margin-top:4px">Ondersteunt named placeholders zoals <code>{klant.naam}</code>, <code>{facturen.totaal_open_bedrag}</code>, <code>{afspraak.samenvatting}</code>, <code>{afdeling.ondertekenaar}</code>, <code>{bedrijf.naam}</code>.</div>
+              </div>
+
+              <div class="form-group">
+                <label class="form-label" for="joostCfgKnowledgeBase">Kennisbank (JSON)</label>
+                <textarea id="joostCfgKnowledgeBase" class="form-input" rows="10" placeholder='{ "facturen": { "betaaltermijn_dagen": 14 }, "regelingen": { "max_termijnen": 6 } }' style="font-family:'SFMono-Regular',Consolas,'Liberation Mono',Menlo,monospace;font-size:12.5px;line-height:1.5"></textarea>
+                <div id="joostCfgKbHint" style="font-size:11px;color:var(--text-faint);margin-top:4px">Vrije JSON-blob met feiten/regels die Joost mag aannemen. Wordt als referentie meegestuurd naar het model.</div>
+              </div>
+
+              <div class="form-group" style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+                <div>
+                  <label class="form-label" for="joostCfgModel">Model</label>
+                  <select id="joostCfgModel" class="form-input">
+                    <option value="claude-sonnet-4-6">claude-sonnet-4-6 (default)</option>
+                    <option value="claude-opus-4-7">claude-opus-4-7 (krachtigst)</option>
+                    <option value="claude-haiku-4-5">claude-haiku-4-5 (snel)</option>
+                  </select>
+                </div>
+                <div>
+                  <label class="form-label" for="joostCfgTemperature">Temperature <span id="joostCfgTemperatureVal" style="color:var(--text-faint);font-weight:400">0.40</span></label>
+                  <input type="range" id="joostCfgTemperature" min="0" max="1" step="0.05" value="0.4" style="width:100%" />
+                  <div style="font-size:11px;color:var(--text-faint);margin-top:4px">0.0 = strikt feitelijk, 1.0 = creatief. Aanbevolen 0.3&ndash;0.6 voor finance.</div>
+                </div>
+              </div>
+
+              <div class="form-group" style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+                <div>
+                  <label class="form-label" for="joostCfgContextCount">Context message count</label>
+                  <input type="number" id="joostCfgContextCount" class="form-input" min="5" max="50" step="1" value="10" />
+                  <div style="font-size:11px;color:var(--text-faint);margin-top:4px">Aantal recente WhatsApp-berichten dat Joost mag inlezen als history (5&ndash;50).</div>
+                </div>
+                <div style="display:flex;align-items:flex-end">
+                  <label style="display:inline-flex;align-items:center;gap:8px;cursor:pointer;padding-bottom:6px">
+                    <input type="checkbox" id="joostCfgEnabled" />
+                    <span style="font-size:13px;font-weight:600">Actief (suggesties-paneel zichtbaar)</span>
+                  </label>
+                </div>
+              </div>
+
+              <div style="display:flex;justify-content:flex-end;gap:8px;border-top:1px solid var(--border);padding-top:14px;margin-top:6px">
+                <button class="btn btn-primary" type="button" id="joostCfgSaveBtn" onclick="saveJoostConfig()">Opslaan</button>
+              </div>
             </div>
           </div>
         </div>
@@ -1193,6 +1287,10 @@ function switchAdminTab(name) {
   if (waTplPanel) waTplPanel.style.display = name === 'whatsapp-templates' ? '' : 'none';
   const waTplView = document.getElementById('view-whatsapp-templates');
   if (waTplView) waTplView.hidden = name !== 'whatsapp-templates';
+  const joostCfgPanel = document.getElementById('tab-joost-config');
+  if (joostCfgPanel) joostCfgPanel.style.display = name === 'joost-config' ? '' : 'none';
+  const joostCfgView = document.getElementById('view-joost-config');
+  if (joostCfgView) joostCfgView.hidden = name !== 'joost-config';
   const inviteBtn = document.querySelector('.page-header .btn-primary');
   if (inviteBtn) inviteBtn.style.display = name === 'gebruikers' ? '' : 'none';
   if (name === 'rechten' && !rbacLoaded) loadPermissionsMatrix();
@@ -1209,6 +1307,10 @@ function switchAdminTab(name) {
       // loadWaTplWabas() roept zelf loadWaMetaList() aan zodra een WABA actief is.
       loadWaTplWabas();
     }
+  }
+  if (name === 'joost-config') {
+    if (typeof wireJoostCfgOnce === 'function') wireJoostCfgOnce();
+    if (typeof loadJoostConfig === 'function') loadJoostConfig();
   }
 }
 
@@ -1384,6 +1486,18 @@ async function init() {
     }
   } catch (_) { /* RBAC niet geladen — tab blijft verborgen */ }
 
+  // Joost-config tab: super_admin OF can(admin.joost_config)
+  try {
+    let allowJoost = currentProfile.role === 'super_admin';
+    if (!allowJoost && window.RBAC && typeof window.RBAC.can === 'function') {
+      allowJoost = await window.RBAC.can('admin.joost_config');
+    }
+    if (allowJoost) {
+      const jb = document.getElementById('joostCfgTabBtn');
+      if (jb) jb.style.display = '';
+    }
+  } catch (_) { /* RBAC niet geladen — tab blijft verborgen */ }
+
   // Approval-queue tab: super_admin OF can(finance.arrangements.view)
   // (view-permission is voldoende om de tab te zien; approve/reject endpoints
   //  doen hun eigen RBAC-check op finance.arrangements.approve.)
@@ -1418,7 +1532,7 @@ async function init() {
   // door Gebruikers heen te moeten klikken. Whitelist alleen bekende tabs.
   try {
     var hash = (location.hash || '').replace(/^#/, '');
-    var allowedHashes = ['approval-queue', 'whatsapp-templates', 'whatsapp-connection', 'integraties', 'rechten', 'gebruikers'];
+    var allowedHashes = ['approval-queue', 'whatsapp-templates', 'whatsapp-connection', 'integraties', 'rechten', 'gebruikers', 'joost-config'];
     if (hash && allowedHashes.indexOf(hash) !== -1) switchAdminTab(hash);
   } catch (_) { /* fail-soft */ }
 }
@@ -4567,6 +4681,133 @@ async function refreshApprovalsTabBadge() {
     if (cnt > 0) { badge.textContent = String(cnt); badge.classList.remove('hidden'); }
     else         { badge.classList.add('hidden'); }
   } catch (_) { /* fail-soft */ }
+}
+
+// ── Joost (AI) configuratie ─────────────────────────────────────────────
+// E1.0: alleen finance-module. GET /api/joost-config-get?module=finance
+// POST /api/joost-config-upsert met body { module, persona_name, tone,
+// system_prompt, knowledge_base (object), model, temperature,
+// context_message_count, is_enabled }.
+let _joostCfgWired = false;
+let _joostCfgLoadedOnce = false;
+
+function wireJoostCfgOnce() {
+  if (_joostCfgWired) return;
+  _joostCfgWired = true;
+  const slider = document.getElementById('joostCfgTemperature');
+  const out = document.getElementById('joostCfgTemperatureVal');
+  if (slider && out) {
+    const sync = () => { out.textContent = Number(slider.value).toFixed(2); };
+    slider.addEventListener('input', sync);
+    sync();
+  }
+  const kb = document.getElementById('joostCfgKnowledgeBase');
+  const hint = document.getElementById('joostCfgKbHint');
+  if (kb && hint) {
+    kb.addEventListener('input', () => {
+      const v = kb.value.trim();
+      if (!v) { hint.textContent = 'Vrije JSON-blob met feiten/regels die Joost mag aannemen. Wordt als referentie meegestuurd naar het model.'; hint.style.color = ''; return; }
+      try { JSON.parse(v); hint.textContent = 'JSON is geldig.'; hint.style.color = 'var(--success, #1D9E75)'; }
+      catch (e) { hint.textContent = 'JSON ongeldig: ' + e.message; hint.style.color = 'var(--danger, #d33)'; }
+    });
+  }
+}
+
+async function loadJoostConfig() {
+  wireJoostCfgOnce();
+  const loading = document.getElementById('joostCfgLoading');
+  const form = document.getElementById('joostCfgForm');
+  if (loading) loading.style.display = '';
+  if (form) form.style.display = 'none';
+  const moduleKey = (document.getElementById('joostCfgModule')?.value) || 'finance';
+  try {
+    const r = await window.AgentShared.apiFetch('/api/joost-config-get?module=' + encodeURIComponent(moduleKey));
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) {
+      window.AgentShared?.showToast('Laden mislukt: ' + (data.error || r.status), 'error');
+      if (loading) loading.textContent = 'Fout bij laden: ' + (data.error || r.status);
+      return;
+    }
+    const cfg = data.config || data || {};
+    setVal('joostCfgModule', cfg.module || moduleKey);
+    setVal('joostCfgPersonaName', cfg.persona_name || 'Joost');
+    setVal('joostCfgTone', cfg.tone || '');
+    setVal('joostCfgSystemPrompt', cfg.system_prompt || '');
+    setVal('joostCfgKnowledgeBase', cfg.knowledge_base ? JSON.stringify(cfg.knowledge_base, null, 2) : '');
+    setVal('joostCfgModel', cfg.model || 'claude-sonnet-4-6');
+    const temp = (typeof cfg.temperature === 'number') ? cfg.temperature : 0.4;
+    setVal('joostCfgTemperature', String(temp));
+    const tempOut = document.getElementById('joostCfgTemperatureVal');
+    if (tempOut) tempOut.textContent = Number(temp).toFixed(2);
+    setVal('joostCfgContextCount', String(cfg.context_message_count || 10));
+    const en = document.getElementById('joostCfgEnabled');
+    if (en) en.checked = !!cfg.is_enabled;
+    if (loading) loading.style.display = 'none';
+    if (form) form.style.display = '';
+    _joostCfgLoadedOnce = true;
+  } catch (e) {
+    window.AgentShared?.showToast('Laden mislukt: ' + e.message, 'error');
+    if (loading) loading.textContent = 'Fout bij laden: ' + e.message;
+  }
+
+  function setVal(id, v) {
+    const el = document.getElementById(id);
+    if (el) el.value = v == null ? '' : v;
+  }
+}
+
+async function saveJoostConfig() {
+  const moduleKey = (document.getElementById('joostCfgModule')?.value || 'finance').trim();
+  const personaName = (document.getElementById('joostCfgPersonaName')?.value || '').trim();
+  const tone = (document.getElementById('joostCfgTone')?.value || '').trim();
+  const systemPrompt = (document.getElementById('joostCfgSystemPrompt')?.value || '').trim();
+  const kbRaw = (document.getElementById('joostCfgKnowledgeBase')?.value || '').trim();
+  const model = (document.getElementById('joostCfgModel')?.value || 'claude-sonnet-4-6').trim();
+  const temperature = Number(document.getElementById('joostCfgTemperature')?.value || '0.4');
+  const contextCount = Math.max(5, Math.min(50, parseInt(document.getElementById('joostCfgContextCount')?.value || '10', 10) || 10));
+  const isEnabled = !!document.getElementById('joostCfgEnabled')?.checked;
+
+  if (!personaName) { window.AgentShared?.showToast('Persona-naam is verplicht', 'error'); return; }
+  if (!systemPrompt) { window.AgentShared?.showToast('System prompt is verplicht', 'error'); return; }
+
+  let knowledgeBase = null;
+  if (kbRaw) {
+    try { knowledgeBase = JSON.parse(kbRaw); }
+    catch (e) {
+      window.AgentShared?.showToast('Kennisbank JSON ongeldig: ' + e.message, 'error');
+      return;
+    }
+  }
+
+  const btn = document.getElementById('joostCfgSaveBtn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Opslaan…'; }
+  try {
+    const r = await window.AgentShared.apiFetch('/api/joost-config-upsert', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        module: moduleKey,
+        persona_name: personaName,
+        tone,
+        system_prompt: systemPrompt,
+        knowledge_base: knowledgeBase,
+        model,
+        temperature,
+        context_message_count: contextCount,
+        is_enabled: isEnabled,
+      }),
+    });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) {
+      window.AgentShared?.showToast('Opslaan mislukt: ' + (data.error || r.status), 'error');
+      return;
+    }
+    window.AgentShared?.showToast('Joost-configuratie opgeslagen', 'success');
+  } catch (e) {
+    window.AgentShared?.showToast('Opslaan mislukt: ' + e.message, 'error');
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = 'Opslaan'; }
+  }
 }
 
 init();
