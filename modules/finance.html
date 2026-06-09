@@ -2248,6 +2248,56 @@
   </div>
 </div>
 
+<!-- Inbox Link-customer modal (F1 polish — vervangt dead-end href) -->
+<div class="modal-overlay hidden" id="inboxLinkCustomerModal" role="dialog" aria-modal="true">
+  <div class="modal-card" style="max-width:560px;max-height:88vh;display:flex;flex-direction:column">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px">
+      <h3 style="margin:0;font-size:17px">Koppel deze conversatie aan een klant</h3>
+      <button class="sr-ibtn" id="inboxLinkCloseX" type="button" title="Sluiten" style="margin-top:-4px"><i class="ti ti-x"></i></button>
+    </div>
+
+    <!-- Info-blok: telefoon van deze conversatie -->
+    <div style="margin-top:12px;background:rgba(59,130,246,.08);border:1px solid rgba(59,130,246,.25);border-radius:6px;padding:8px 12px;font-size:12px;display:flex;align-items:center;gap:8px">
+      <i class="ti ti-phone" style="font-size:14px;color:#3b82f6;flex:0 0 auto"></i>
+      <span>Telefoon van deze conversatie: <strong id="inboxLinkPhone">—</strong></span>
+    </div>
+
+    <!-- Zoek-input -->
+    <div style="margin-top:14px;display:flex;flex-direction:column;gap:6px">
+      <label for="inboxLinkSearch" style="font-size:11px;color:var(--text-dim);text-transform:uppercase;letter-spacing:.04em;font-weight:600">Zoek klant</label>
+      <input id="inboxLinkSearch" type="search" class="fin-input" placeholder="Naam, e-mail of telefoon..." autocomplete="off" style="font-size:13px"/>
+    </div>
+
+    <!-- Resultaten-lijst -->
+    <div style="margin-top:10px;flex:1;min-height:0;overflow:auto;border:1px solid var(--border-subtle, rgba(255,255,255,.08));border-radius:8px">
+      <ul id="inboxLinkResults" style="list-style:none;margin:0;padding:0">
+        <li style="padding:16px;text-align:center;color:var(--text-faint);font-size:12px">Typ minimaal 2 tekens om te zoeken.</li>
+      </ul>
+    </div>
+
+    <!-- Geselecteerde-klant indicator -->
+    <div id="inboxLinkSelectedRow" hidden style="margin-top:10px;background:rgba(34,197,94,.08);border:1px solid rgba(34,197,94,.25);border-radius:6px;padding:8px 12px;font-size:12px;display:flex;align-items:center;gap:8px">
+      <i class="ti ti-check" style="font-size:14px;color:#22c55e;flex:0 0 auto"></i>
+      <span>Geselecteerd: <strong id="inboxLinkSelectedName">—</strong></span>
+    </div>
+
+    <!-- Voeg telefoonnummer toe -->
+    <label style="margin-top:12px;display:flex;align-items:flex-start;gap:8px;font-size:12.5px;cursor:pointer">
+      <input id="inboxLinkAddPhone" type="checkbox" style="margin-top:2px;flex:0 0 auto"/>
+      <span>
+        Voeg dit telefoonnummer toe aan deze klant.
+        <div style="font-size:11px;color:var(--text-faint);font-style:italic;margin-top:2px">Alleen aanvinken als dit nummer nog niet bij de klant bekend is.</div>
+      </span>
+    </label>
+
+    <!-- Footer -->
+    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:18px;flex-wrap:wrap">
+      <button class="sr-abtn" id="inboxLinkCancelBtn" type="button">Annuleren</button>
+      <button class="sr-abtn primary" id="inboxLinkSubmitBtn" type="button" disabled><i class="ti ti-link"></i> Koppel</button>
+    </div>
+  </div>
+</div>
+
 <!-- Inbox Template-picker modal (C3 — 2-step wizard) -->
 <div class="modal-overlay hidden" id="inboxTplPickerModal" role="dialog" aria-modal="true">
   <div class="modal-card" style="max-width:720px;max-height:88vh;display:flex;flex-direction:column">
@@ -6431,6 +6481,193 @@
   }
 
   // ──────────────────────────────────────────────────────────────────────────
+  //  Link-customer modal (F1 polish — vervangt dead-end href in unknown-state)
+  // ──────────────────────────────────────────────────────────────────────────
+
+  let _inboxLinkSelected = null;   // { id, name, email, phone, is_company } | null
+  let _inboxLinkSearchTimer = null;
+  let _inboxLinkLastQuery = '';
+
+  function openInboxLinkModal() {
+    const conv = _inboxActiveConv;
+    if (!conv) {
+      window.AgentShared.showToast('Geen actief gesprek geselecteerd', 'error');
+      return;
+    }
+    const modal = document.getElementById('inboxLinkCustomerModal');
+    if (!modal) return;
+
+    // Reset state — frisse modal bij elke open.
+    _inboxLinkSelected = null;
+    _inboxLinkLastQuery = '';
+    if (_inboxLinkSearchTimer) { clearTimeout(_inboxLinkSearchTimer); _inboxLinkSearchTimer = null; }
+
+    const phoneEl    = document.getElementById('inboxLinkPhone');
+    const searchEl   = document.getElementById('inboxLinkSearch');
+    const resultsEl  = document.getElementById('inboxLinkResults');
+    const selectedEl = document.getElementById('inboxLinkSelectedRow');
+    const submitBtn  = document.getElementById('inboxLinkSubmitBtn');
+    const addPhoneCb = document.getElementById('inboxLinkAddPhone');
+
+    if (phoneEl)    phoneEl.textContent = conv.phone_number || '—';
+    if (searchEl)   searchEl.value = '';
+    if (resultsEl)  resultsEl.innerHTML = '<li style="padding:16px;text-align:center;color:var(--text-faint);font-size:12px">Typ minimaal 2 tekens om te zoeken.</li>';
+    if (selectedEl) selectedEl.hidden = true;
+    if (submitBtn)  submitBtn.disabled = true;
+    if (addPhoneCb) addPhoneCb.checked = false;
+
+    modal.classList.remove('hidden');
+    if (searchEl) setTimeout(() => { try { searchEl.focus(); } catch (_e) {} }, 50);
+  }
+
+  function closeInboxLinkModal() {
+    const modal = document.getElementById('inboxLinkCustomerModal');
+    if (modal) modal.classList.add('hidden');
+    if (_inboxLinkSearchTimer) { clearTimeout(_inboxLinkSearchTimer); _inboxLinkSearchTimer = null; }
+  }
+
+  async function searchInboxCustomers(query) {
+    const resultsEl = document.getElementById('inboxLinkResults');
+    if (!resultsEl) return;
+
+    const q = String(query || '').trim();
+    if (q.length < 2) {
+      resultsEl.innerHTML = '<li style="padding:16px;text-align:center;color:var(--text-faint);font-size:12px">Typ minimaal 2 tekens om te zoeken.</li>';
+      return;
+    }
+
+    // Skip dubbele identieke queries (debounce-race-protection).
+    if (q === _inboxLinkLastQuery) return;
+    _inboxLinkLastQuery = q;
+
+    resultsEl.innerHTML = '<li style="padding:16px;text-align:center;color:var(--text-faint);font-size:12px">Zoeken...</li>';
+
+    try {
+      const params = new URLSearchParams({ q: q, limit: '10' });
+      const r = await window.AgentShared.apiFetch('/api/inbox-customer-search?' + params.toString());
+      const d = await r.json().catch(() => ({}));
+      // Race-check: tijdens fetch kan een nieuwere query gestart zijn.
+      if (q !== _inboxLinkLastQuery) return;
+      if (!r.ok) {
+        resultsEl.innerHTML = '<li style="padding:16px;text-align:center;color:var(--text-faint);font-size:12px">Fout bij zoeken: ' + esc(d.error || ('HTTP ' + r.status)) + '</li>';
+        return;
+      }
+      const items = Array.isArray(d.results) ? d.results : [];
+      if (!items.length) {
+        resultsEl.innerHTML = '<li style="padding:16px;text-align:center;color:var(--text-faint);font-size:12px">Geen klanten gevonden voor "' + esc(q) + '".</li>';
+        return;
+      }
+      resultsEl.innerHTML = items.map((it, i) => {
+        const nm    = esc(it.name || '(naamloos)');
+        const ph    = it.phone ? esc(it.phone) : '<span style="color:var(--text-faint);font-style:italic">geen telefoon</span>';
+        const mail  = it.email ? esc(it.email) : '<span style="color:var(--text-faint);font-style:italic">geen e-mail</span>';
+        const icon  = it.is_company ? 'ti-building' : 'ti-user';
+        return '<li data-link-idx="' + i + '" style="border-bottom:1px solid var(--border-subtle, rgba(255,255,255,.06));padding:10px 12px;display:flex;justify-content:space-between;align-items:center;gap:12px">'
+          +   '<div style="display:flex;flex-direction:column;gap:2px;min-width:0;flex:1">'
+          +     '<div style="font-size:13px;font-weight:600;display:flex;align-items:center;gap:6px"><i class="ti ' + icon + '" style="font-size:13px;color:var(--text-dim)"></i>' + nm + '</div>'
+          +     '<div style="font-size:11.5px;color:var(--text-dim);display:flex;gap:10px;flex-wrap:wrap"><span>' + ph + '</span><span>' + mail + '</span></div>'
+          +   '</div>'
+          +   '<button type="button" class="sr-abtn" data-link-select="' + i + '" style="font-size:12px;flex:0 0 auto"><i class="ti ti-check"></i> Kies</button>'
+          + '</li>';
+      }).join('');
+      // Items cachen voor delegated klik.
+      resultsEl._linkItems = items;
+    } catch (e) {
+      console.error('[searchInboxCustomers]', e && e.message);
+      if (q === _inboxLinkLastQuery) {
+        resultsEl.innerHTML = '<li style="padding:16px;text-align:center;color:var(--text-faint);font-size:12px">Fout bij zoeken: ' + esc(e.message || 'onbekend') + '</li>';
+      }
+    }
+  }
+
+  function selectInboxLinkCustomer(item) {
+    if (!item || !item.id) return;
+    _inboxLinkSelected = item;
+
+    const selectedEl  = document.getElementById('inboxLinkSelectedRow');
+    const selectedNm  = document.getElementById('inboxLinkSelectedName');
+    const submitBtn   = document.getElementById('inboxLinkSubmitBtn');
+    const addPhoneCb  = document.getElementById('inboxLinkAddPhone');
+
+    if (selectedEl) selectedEl.hidden = false;
+    if (selectedNm) selectedNm.textContent = item.name || '(naamloos)';
+    if (submitBtn)  submitBtn.disabled = false;
+
+    // Default check 'voeg phone toe' als klant nog GEEN telefoonnummer heeft —
+    // most-common case bij handmatig koppelen vanuit unknown-state.
+    if (addPhoneCb) {
+      addPhoneCb.checked = !item.phone;
+    }
+
+    // Highlight de gekozen rij in de results-list.
+    const resultsEl = document.getElementById('inboxLinkResults');
+    if (resultsEl) {
+      resultsEl.querySelectorAll('li[data-link-idx]').forEach(li => {
+        li.style.background = '';
+      });
+      const items = resultsEl._linkItems || [];
+      const idx = items.findIndex(x => x && x.id === item.id);
+      if (idx >= 0) {
+        const li = resultsEl.querySelector('li[data-link-idx="' + idx + '"]');
+        if (li) li.style.background = 'rgba(34,197,94,.08)';
+      }
+    }
+  }
+
+  async function submitInboxLink() {
+    const conv = _inboxActiveConv;
+    if (!conv) {
+      window.AgentShared.showToast('Geen actief gesprek geselecteerd', 'error');
+      return;
+    }
+    if (!_inboxLinkSelected || !_inboxLinkSelected.id) {
+      window.AgentShared.showToast('Kies eerst een klant', 'error');
+      return;
+    }
+
+    const submitBtn  = document.getElementById('inboxLinkSubmitBtn');
+    const addPhoneCb = document.getElementById('inboxLinkAddPhone');
+    const addPhone   = !!(addPhoneCb && addPhoneCb.checked);
+
+    if (submitBtn) { submitBtn.disabled = true; submitBtn.innerHTML = '<i class="ti ti-loader"></i> Bezig...'; }
+
+    try {
+      const r = await window.AgentShared.apiFetch('/api/inbox-link-conversation-to-customer', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({
+          conversation_id:        conv.id,
+          customer_id:            _inboxLinkSelected.id,
+          add_phone_to_customer:  addPhone,
+        }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        window.AgentShared.showToast('Koppelen mislukt: ' + (d.error || ('HTTP ' + r.status)), 'error');
+        if (submitBtn) { submitBtn.disabled = false; submitBtn.innerHTML = '<i class="ti ti-link"></i> Koppel'; }
+        return;
+      }
+      const msg = d.relinked ? 'Conversatie verplaatst naar andere klant' : 'Conversatie gekoppeld aan klant';
+      window.AgentShared.showToast(msg + (d.phone_added ? ' (telefoonnummer toegevoegd)' : ''), 'success');
+
+      // Modal dicht + klant-paneel verversen om de nieuwe matched-state te tonen.
+      closeInboxLinkModal();
+      // Conversation-object lokaal bijwerken zodat ook header/list refresh klopt.
+      if (_inboxActiveConv) {
+        _inboxActiveConv.customer_id   = d.customer_id || _inboxLinkSelected.id;
+        _inboxActiveConv.customer_name = d.customer_name || _inboxLinkSelected.name || null;
+      }
+      try { await loadInboxCustomerContext(conv.id); } catch (_e) {}
+      // Conv-list opnieuw laden zodat de naam-update in de lijst zichtbaar wordt.
+      try { await loadInboxConvList(); } catch (_e) {}
+    } catch (e) {
+      console.error('[submitInboxLink]', e && e.message);
+      window.AgentShared.showToast('Koppelen mislukt: ' + (e.message || 'onbekend'), 'error');
+      if (submitBtn) { submitBtn.disabled = false; submitBtn.innerHTML = '<i class="ti ti-link"></i> Koppel'; }
+    }
+  }
+
+  // ──────────────────────────────────────────────────────────────────────────
   //  Klant-info paneel (rechter kolom in 3-col layout) — data-loading
   // ──────────────────────────────────────────────────────────────────────────
 
@@ -6640,6 +6877,8 @@
           openLnk.innerHTML = '<i class="ti ti-user"></i> Bekijk in klanten';
           openLnk.classList.remove('dim');
           openLnk.style.pointerEvents = '';
+          // Clear unknown-state modal-trigger zodat normale navigatie weer werkt.
+          openLnk.onclick = null;
         }
       }
       if (invLnk) {
@@ -6672,18 +6911,26 @@
       if (infoSec)    infoSec.style.display    = 'none';
       if (emailRow)   emailRow.hidden          = true;
 
-      // Acties: alleen 'Koppel aan klant' link aktief; factuur-link disabled.
+      // Acties: 'Koppel aan klant' opent in-place modal (F1 polish — vervangt
+      // dead-end href naar klanten.html). Factuur-link blijft disabled.
       if (openLnk) {
         if (phone) {
-          openLnk.href = '/modules/klanten.html?phone=' + encodeURIComponent(phone);
+          // href op '#' zetten + preventDefault in onclick zodat de browser
+          // niet navigeert; modal opent in-place.
+          openLnk.href = '#';
           openLnk.innerHTML = '<i class="ti ti-link"></i> Koppel aan bestaande klant';
           openLnk.classList.remove('dim');
           openLnk.style.pointerEvents = '';
+          openLnk.onclick = (e) => {
+            e.preventDefault();
+            openInboxLinkModal();
+          };
         } else {
           openLnk.href = '#';
           openLnk.innerHTML = '<i class="ti ti-user"></i> Bekijk in klanten';
           openLnk.classList.add('dim');
           openLnk.style.pointerEvents = 'none';
+          openLnk.onclick = null;
         }
       }
       if (invLnk) {
@@ -7576,6 +7823,54 @@
     document.addEventListener('keydown', (e) => {
       if (e.key === 'Escape' && qrModal && !qrModal.classList.contains('hidden')) {
         closeInboxQrPicker();
+      }
+    });
+
+    // Link-customer modal wiring (F1 polish — vervangt dead-end href)
+    const linkModal     = document.getElementById('inboxLinkCustomerModal');
+    const linkCloseX    = document.getElementById('inboxLinkCloseX');
+    const linkCancelBtn = document.getElementById('inboxLinkCancelBtn');
+    const linkSubmitBtn = document.getElementById('inboxLinkSubmitBtn');
+    const linkSearchEl  = document.getElementById('inboxLinkSearch');
+    const linkResultsEl = document.getElementById('inboxLinkResults');
+    if (linkCloseX)    linkCloseX.addEventListener('click', () => closeInboxLinkModal());
+    if (linkCancelBtn) linkCancelBtn.addEventListener('click', () => closeInboxLinkModal());
+    if (linkSubmitBtn) linkSubmitBtn.addEventListener('click', () => submitInboxLink());
+    if (linkModal) {
+      linkModal.addEventListener('click', (e) => {
+        if (e.target === linkModal) closeInboxLinkModal();
+      });
+    }
+    // Debounced typeahead-search (300ms — gelijk aan conv-list-search pattern).
+    if (linkSearchEl) {
+      linkSearchEl.addEventListener('input', () => {
+        if (_inboxLinkSearchTimer) clearTimeout(_inboxLinkSearchTimer);
+        const val = linkSearchEl.value || '';
+        _inboxLinkSearchTimer = setTimeout(() => {
+          searchInboxCustomers(val);
+        }, 300);
+      });
+    }
+    // Delegated klik op resultaten-lijst: klik op rij of "Kies"-knop → select.
+    if (linkResultsEl) {
+      linkResultsEl.addEventListener('click', (e) => {
+        const btn = e.target.closest('button[data-link-select]');
+        const li  = e.target.closest('li[data-link-idx]');
+        let idx = -1;
+        if (btn) {
+          idx = Number(btn.getAttribute('data-link-select'));
+        } else if (li) {
+          idx = Number(li.getAttribute('data-link-idx'));
+        }
+        if (Number.isFinite(idx) && idx >= 0) {
+          const items = linkResultsEl._linkItems || [];
+          if (items[idx]) selectInboxLinkCustomer(items[idx]);
+        }
+      });
+    }
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && linkModal && !linkModal.classList.contains('hidden')) {
+        closeInboxLinkModal();
       }
     });
 
