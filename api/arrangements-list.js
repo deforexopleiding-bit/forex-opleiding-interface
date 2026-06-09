@@ -96,15 +96,16 @@ export default async function handler(req, res) {
   }
 
   try {
-    // NB: approval-state (approved_by / approved_at / rejected_at / reject_reason)
+    // NB: approval-state (approved_by / approved_at / rejected_at / rejection_reason)
     // hoort op pending_actions, NIET op payment_arrangements. De arrangement-tabel
-    // bevat alleen de lifecycle-status (VOORGESTELD / ACTIEF / etc). UI kan
-    // approval-details opvragen via pending-actions-list / -detail.
+    // bevat alleen de lifecycle-status (VOORGESTELD / ACTIEF / etc) en
+    // cancellation_reason (handmatige cancel-reden). UI kan approval-details
+    // opvragen via pending-actions-list / -detail.
     let query = supabaseAdmin
       .from('payment_arrangements')
       .select(`
         id, customer_id, invoice_ids, type, status, details,
-        proposed_by, notes, created_at, updated_at,
+        proposed_by, notes, cancellation_reason, created_at, updated_at,
         customers:customer_id ( id, is_company, company_name, first_name, last_name, email )
       `, { count: 'exact' })
       .order('created_at', { ascending: false })
@@ -120,21 +121,22 @@ export default async function handler(req, res) {
     const items = (rows || []).map(row => {
       const cust = row.customers || null;
       return {
-        id:            row.id,
-        customer_id:   row.customer_id,
+        id:                  row.id,
+        customer_id:         row.customer_id,
         customer: cust ? {
           id:    cust.id,
           name:  customerDisplayName(cust, '(onbekend)'),
           email: cust.email || null,
         } : null,
-        invoice_ids:   Array.isArray(row.invoice_ids) ? row.invoice_ids : [],
-        type:          row.type,
-        status:        row.status,
-        details:       row.details || {},
-        proposed_by:   row.proposed_by,
-        notes:         row.notes,
-        created_at:    row.created_at,
-        updated_at:    row.updated_at,
+        invoice_ids:         Array.isArray(row.invoice_ids) ? row.invoice_ids : [],
+        type:                row.type,
+        status:              row.status,
+        details:             row.details || {},
+        proposed_by:         row.proposed_by,
+        notes:               row.notes,
+        cancellation_reason: row.cancellation_reason || null,
+        created_at:          row.created_at,
+        updated_at:          row.updated_at,
       };
     });
 

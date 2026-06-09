@@ -3732,15 +3732,20 @@
       // Sectie 1: arrangement
       const eff = arrangEffective(arr);
       const detailsJson = JSON.stringify(arr.details || {}, null, 2);
-      const rowsHtml = [
+      const baseRows = [
         ['Type',             esc(arrangTypeLabel(arr.type))],
         ['Status',           arrangStatusBadge(arr.status)],
         ['Voorgesteld op',   esc(arr.created_at ? fmtDateNl(String(arr.created_at).slice(0, 10)) : '—')],
         ['Goedgekeurd op',   esc(arr.approved_at ? fmtDateNl(String(arr.approved_at).slice(0, 10)) : '—')],
         ['Effectief vanaf',  esc(eff.from ? fmtDateNl(eff.from) : '—')],
         ['Effectief tot',    esc(eff.until ? fmtDateNl(eff.until) : '—')],
-        ['Reden / notitie',  esc(arr.notes || arr.reject_reason || '—')],
-      ].map(([k, v]) =>
+        ['Reden / notitie',  esc(arr.notes || '—')],
+      ];
+      // Toon Annuleringsreden als arrangement geannuleerd is en reden bestaat.
+      if (String(arr.status || '').toUpperCase() === 'GEANNULEERD' && arr.cancellation_reason) {
+        baseRows.push(['Annuleringsreden', esc(arr.cancellation_reason)]);
+      }
+      const rowsHtml = baseRows.map(([k, v]) =>
         `<div style="display:grid;grid-template-columns:160px 1fr;gap:10px;padding:6px 10px;background:rgba(255,255,255,0.02);border:1px solid var(--border-subtle, #2b2f3a);border-radius:6px">
            <div style="font-size:11.5px;color:var(--text-faint)">${k}</div>
            <div style="font-size:12.5px">${v}</div>
@@ -3799,7 +3804,7 @@
       const r = await window.AgentShared.apiFetch('/api/arrangements-cancel', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id, reason: reason || null }),
+        body: JSON.stringify({ id, cancellation_reason: reason || null }),
       });
       const d = await r.json().catch(() => ({}));
       if (!r.ok) {

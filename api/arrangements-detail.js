@@ -37,12 +37,13 @@ export default async function handler(req, res) {
 
   try {
     // NB: approval-state zit op pending_actions (zie hieronder), niet op
-    // payment_arrangements. De arrangement-tabel bevat alleen de lifecycle-status.
+    // payment_arrangements. De arrangement-tabel bevat alleen de lifecycle-status
+    // en cancellation_reason (handmatige cancel-reden).
     const { data: arr, error: arrErr } = await supabaseAdmin
       .from('payment_arrangements')
       .select(`
         id, customer_id, invoice_ids, type, status, details,
-        proposed_by, notes, created_at, updated_at,
+        proposed_by, notes, cancellation_reason, created_at, updated_at,
         customers:customer_id (
           id, is_company, company_name, first_name, last_name, email, phone
         )
@@ -94,16 +95,17 @@ export default async function handler(req, res) {
     }));
 
     const arrangement = {
-      id:            arr.id,
-      customer_id:   arr.customer_id,
-      invoice_ids:   invoiceIds,
-      type:          arr.type,
-      status:        arr.status,
-      details:       arr.details || {},
-      proposed_by:   arr.proposed_by,
-      notes:         arr.notes,
-      created_at:    arr.created_at,
-      updated_at:    arr.updated_at,
+      id:                  arr.id,
+      customer_id:         arr.customer_id,
+      invoice_ids:         invoiceIds,
+      type:                arr.type,
+      status:              arr.status,
+      details:             arr.details || {},
+      proposed_by:         arr.proposed_by,
+      notes:               arr.notes,
+      cancellation_reason: arr.cancellation_reason || null,
+      created_at:          arr.created_at,
+      updated_at:          arr.updated_at,
     };
 
     return res.status(200).json({

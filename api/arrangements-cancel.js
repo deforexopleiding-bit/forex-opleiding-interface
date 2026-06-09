@@ -3,10 +3,15 @@
 // markeer alle openstaande pending_actions als cancelled. Permission:
 // finance.arrangements.propose (annuleren is de inverse van voorstellen).
 //
-// Body: { id: uuid, reason?: string }
+// Body: { id: uuid, cancellation_reason?: string, reject_reason?: string (legacy alias), reason?: string (legacy alias) }
 //
 // State-machine: alleen vanuit 'VOORGESTELD' of 'ACTIEF' is annuleren toegestaan.
 // 'NAGEKOMEN' / 'VERBROKEN' / 'GEANNULEERD' -> 409.
+//
+// NB: cancellation_reason wordt opgeslagen op payment_arrangements (eigen kolom,
+// migratie 2026-06-09-payment-arrangements-d1-cancellation-reason.sql). Dit is
+// semantisch een cancel — geen reject. De approval-flow zit op pending_actions
+// (rejection_reason per actie).
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
@@ -31,9 +36,17 @@ export default async function handler(req, res) {
     return res.status(403).json({ error: 'Geen rechten (finance.arrangements.propose)' });
   }
 
-  const body   = req.body || {};
-  const id     = body.id ? String(body.id) : null;
-  const reason = body.reason ? String(body.reason) : null;
+  const body = req.body || {};
+  const id   = body.id ? String(body.id) : null;
+  // Canonical: cancellation_reason. Legacy aliases: reject_reason + reason.
+  const reason =
+    body.cancellation_reason != null && String(body.cancellation_reason).length > 0
+      ? String(body.cancellation_reason)
+      : body.reject_reason != null && String(body.reject_reason).length > 0
+        ? String(body.reject_reason)
+        : body.reason != null && String(body.reason).length > 0
+          ? String(body.reason)
+          : null;
   if (!id || !UUID_RE.test(id)) return res.status(400).json({ error: 'id (uuid) vereist' });
 
   try {
@@ -54,16 +67,17 @@ export default async function handler(req, res) {
     const nowIso = new Date().toISOString();
 
     // ---- UPDATE arrangement -> GEANNULEERD ----
+    // Schrijf cancellation_reason naar eigen kolom op payment_arrangements
+    // (migratie 2026-06-09-payment-arrangements-d1-cancellation-reason.sql).
     const { data: updated, error: updErr } = await supabaseAdmin
       .from('payment_arrangements')
       .update({
-        status:        'GEANNULEERD',
-        reject_reason: reason,   // hergebruik reject_reason-kolom voor cancel-reden
-        rejected_at:   nowIso,
-        updated_at:    nowIso,
+        status:              'GEANNULEERD',
+        cancellation_reason: reason,
+        updated_at:          nowIso,
       })
       .eq('id', id)
-      .select('id, status, reject_reason, rejected_at, updated_at')
+      .select('id, status, cancellation_reason, updated_at')
       .single();
     if (updErr) throw new Error('update: ' + updErr.message);
 
@@ -93,15 +107,21 @@ export default async function handler(req, res) {
         action:      'finance.arrangement.cancelled',
         entity_type: 'payment_arrangement',
         entity_id:   id,
-        after_json:  { id, status: 'GEANNULEERD', cancelled_pending_actions: cancelledCount },
+        after_json:  {
+          arrangement_id:            id,
+          status:                    'GEANNULEERD',
+          cancellation_reason:       reason,
+          cancelled_pending_actions: cancelledCount,
+        },
         reason_text: reason,
         ip_address:  getClientIp(req),
       });
     } catch (e) { console.error('[arrangements-cancel audit]', e.message); }
 
     return res.status(200).json({
-      id: updated.id,
-      status: updated.status,
+      id:                        updated.id,
+      status:                    updated.status,
+      cancellation_reason:       updated.cancellation_reason,
       cancelled_pending_actions: cancelledCount,
     });
   } catch (e) {
