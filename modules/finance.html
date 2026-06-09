@@ -1586,7 +1586,7 @@
 
 <!-- Arrangement Details modal (D1) -->
 <div class="modal-overlay hidden" id="arrangementDetailModal" role="dialog" aria-modal="true">
-  <div class="modal-card" style="max-width:780px">
+  <div class="modal-card" style="max-width:820px;max-height:90vh;overflow-y:auto">
     <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px">
       <div>
         <h3 id="arrangDetailTitle" style="margin:0;font-size:17px">Afspraak details</h3>
@@ -1594,6 +1594,9 @@
       </div>
       <button class="sr-ibtn" id="arrangDetailClose" type="button" title="Sluiten" style="margin-top:-4px"><i class="ti ti-x"></i></button>
     </div>
+
+    <!-- D1.6: status-banner. Verborgen voor VOORGESTELD; getoond voor ACTIEF/NAGEKOMEN/VERBROKEN/GEANNULEERD. -->
+    <div id="arrangDetailStatusBanner" style="display:none;margin-top:14px;padding:10px 12px;border-radius:8px;font-size:12.5px;line-height:1.4"></div>
 
     <div style="margin-top:16px">
       <div style="font-size:13px;font-weight:600;margin-bottom:8px">Arrangement</div>
@@ -1608,11 +1611,12 @@
         <table class="sr-table" id="arrangDetailActionsTable">
           <thead><tr>
             <th>Type</th>
-            <th style="width:120px">Status</th>
-            <th style="width:140px">Voorgesteld</th>
-            <th style="width:160px">Approved/Rejected</th>
+            <th style="width:110px">Status</th>
+            <th style="width:120px">Voorgesteld</th>
+            <th style="width:140px">Approved/Rejected</th>
+            <th style="width:180px">Acties</th>
           </tr></thead>
-          <tbody id="arrangDetailActionsTbody"><tr><td colspan="4" style="text-align:center;padding:14px;color:var(--text-faint);font-size:11.5px">Laden…</td></tr></tbody>
+          <tbody id="arrangDetailActionsTbody"><tr><td colspan="5" style="text-align:center;padding:14px;color:var(--text-faint);font-size:11.5px">Laden…</td></tr></tbody>
         </table>
       </div>
     </div>
@@ -1621,6 +1625,85 @@
 
     <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:18px">
       <button class="sr-abtn" id="arrangDetailCloseBtn" type="button">Sluiten</button>
+    </div>
+  </div>
+</div>
+
+<!-- D1.6: Mark-as-executed modal (TL-resultaat invoeren, in finance/Wanbetalers) -->
+<div class="modal-overlay hidden" id="markExecutedModalFin" role="dialog" aria-modal="true">
+  <div class="modal-card" style="max-width:620px;max-height:90vh;overflow-y:auto">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px">
+      <div>
+        <h3 style="margin:0;font-size:17px">Markeer als verwerkt</h3>
+        <div style="font-size:11px;color:var(--text-faint);margin-top:2px">Leg vast wat je in TeamLeader hebt gedaan</div>
+      </div>
+      <button class="sr-ibtn" id="markExecFinClose" type="button" title="Sluiten" style="margin-top:-4px"><i class="ti ti-x"></i></button>
+    </div>
+
+    <div style="margin-top:14px">
+      <div id="markExecFinCtx" style="background:rgba(56,189,248,0.06);border:1px solid rgba(56,189,248,0.25);border-radius:8px;padding:10px 12px;margin-bottom:14px;font-size:12.5px;color:var(--text)">
+        <div id="markExecFinCtxLine1" style="font-weight:600">—</div>
+        <div id="markExecFinCtxLine2" style="font-size:11.5px;color:var(--text-dim);margin-top:2px">—</div>
+      </div>
+
+      <div style="margin-bottom:12px">
+        <label style="display:block;font-size:11.5px;color:var(--text-dim);margin-bottom:4px" for="markExecFinCreditIds">TL credit-note IDs</label>
+        <input type="text" id="markExecFinCreditIds" class="fin-input" style="width:100%" placeholder="TLCN-2026-001, TLCN-2026-002" />
+        <div style="font-size:11px;color:var(--text-faint);margin-top:4px">Voorbeeld: TLCN-2026-001, TLCN-2026-002 (komma-gescheiden)</div>
+      </div>
+      <div style="margin-bottom:12px">
+        <label style="display:block;font-size:11.5px;color:var(--text-dim);margin-bottom:4px" for="markExecFinSubscriptionId">TL subscription ID</label>
+        <input type="text" id="markExecFinSubscriptionId" class="fin-input" style="width:100%" placeholder="sub_xxxxxxxx" />
+        <div style="font-size:11px;color:var(--text-faint);margin-top:4px">Voor abonnement-mutaties.</div>
+      </div>
+      <div style="margin-bottom:12px">
+        <label style="display:block;font-size:11.5px;color:var(--text-dim);margin-bottom:4px" for="markExecFinInvoiceIds">TL invoice IDs</label>
+        <input type="text" id="markExecFinInvoiceIds" class="fin-input" style="width:100%" placeholder="INV-2026-101, INV-2026-102" />
+        <div style="font-size:11px;color:var(--text-faint);margin-top:4px">Voor SPLITSING of nieuwe facturen (komma-gescheiden).</div>
+      </div>
+      <div style="margin-bottom:8px">
+        <label style="display:block;font-size:11.5px;color:var(--text-dim);margin-bottom:4px" for="markExecFinNotes">Manual notes <span style="color:#ef4444">*</span></label>
+        <textarea id="markExecFinNotes" class="fin-input" rows="4" style="width:100%;resize:vertical;min-height:90px;font-family:inherit" placeholder="Wat heb je in TL gedaan? Min 10 chars."></textarea>
+        <div style="font-size:11px;color:var(--text-faint);margin-top:4px">Minimaal 10 tekens. Verplicht voor audit-trail.</div>
+      </div>
+
+      <div id="markExecFinError" style="display:none;margin-top:8px;padding:8px 12px;background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.3);border-radius:6px;color:#ef4444;font-size:12px"></div>
+    </div>
+
+    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">
+      <button class="sr-abtn" id="markExecFinCancelBtn" type="button">Annuleren</button>
+      <button class="sr-abtn primary" id="markExecFinConfirmBtn" type="button">Bevestig</button>
+    </div>
+  </div>
+</div>
+
+<!-- D1.6: Mark-as-not-executed modal (reden vastleggen, in finance/Wanbetalers) -->
+<div class="modal-overlay hidden" id="markNotExecutedModalFin" role="dialog" aria-modal="true">
+  <div class="modal-card" style="max-width:520px">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px">
+      <div>
+        <h3 style="margin:0;font-size:17px">Markeer als niet door te voeren</h3>
+        <div style="font-size:11px;color:var(--text-faint);margin-top:2px">Status gaat naar FAILED</div>
+      </div>
+      <button class="sr-ibtn" id="markNotExecFinClose" type="button" title="Sluiten" style="margin-top:-4px"><i class="ti ti-x"></i></button>
+    </div>
+
+    <div style="margin-top:14px">
+      <div style="background:rgba(220,38,38,0.06);border:1px solid rgba(220,38,38,0.25);border-radius:8px;padding:10px 12px;margin-bottom:14px;font-size:12.5px;color:var(--text)">
+        De actie krijgt status FAILED. Arrangement blijft VOORGESTELD &mdash; annuleer arrangement apart als nodig.
+      </div>
+      <div style="margin-bottom:8px">
+        <label style="display:block;font-size:11.5px;color:var(--text-dim);margin-bottom:4px" for="markNotExecFinReason">Reden <span style="color:#ef4444">*</span></label>
+        <textarea id="markNotExecFinReason" class="fin-input" rows="4" style="width:100%;resize:vertical;min-height:90px;font-family:inherit" placeholder="Waarom kan deze actie niet doorgevoerd worden? Min 10 chars."></textarea>
+        <div style="font-size:11px;color:var(--text-faint);margin-top:4px">Minimaal 10 tekens. Verplicht voor audit-trail.</div>
+      </div>
+
+      <div id="markNotExecFinError" style="display:none;margin-top:8px;padding:8px 12px;background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.3);border-radius:6px;color:#ef4444;font-size:12px"></div>
+    </div>
+
+    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">
+      <button class="sr-abtn" id="markNotExecFinCancelBtn" type="button">Annuleren</button>
+      <button class="sr-abtn danger" id="markNotExecFinConfirmBtn" type="button">Bevestig</button>
     </div>
   </div>
 </div>
@@ -3605,6 +3688,13 @@
   let _arrangWired       = false;
   let _arrangActiveStatus = 'VOORGESTELD';
   let _arrangItems        = [];
+  // D1.6: bewaar arrangement-id van huidig geopende detail-modal voor refresh
+  // na mark-executed / mark-not-executed (zelfde patroon als _approvCurrentDetailId
+  // in admin.html). Bewaar ook de action-items map (id -> action-row) zodat de
+  // mark-modal context (klant + action-type) kan tonen zonder extra fetch.
+  let _arrangCurrentDetailId = null;
+  let _arrangCurrentActionsById = {};
+  let _arrangCurrentCustomerName = '';
 
   function wireArrangOnce() {
     if (_arrangWired) return;
@@ -3656,6 +3746,45 @@
     document.getElementById('arrangDetailCloseBtn')?.addEventListener('click', closeArrangDetail);
     modal?.addEventListener('click', (e) => {
       if (e.target.id === 'arrangementDetailModal') closeArrangDetail();
+    });
+
+    // D1.6: Mark-executed knoppen-delegation in pending-actions tabel.
+    const actTb = document.getElementById('arrangDetailActionsTbody');
+    if (actTb) {
+      actTb.addEventListener('click', (e) => {
+        const meBtn = e.target.closest('[data-pa-mark-executed]');
+        if (meBtn) {
+          e.stopPropagation();
+          const id = meBtn.getAttribute('data-pa-mark-executed');
+          if (id) openMarkExecutedModalFin(id);
+          return;
+        }
+        const nmBtn = e.target.closest('[data-pa-mark-not-executed]');
+        if (nmBtn) {
+          e.stopPropagation();
+          const id = nmBtn.getAttribute('data-pa-mark-not-executed');
+          if (id) openMarkNotExecutedModalFin(id);
+          return;
+        }
+      });
+    }
+
+    // D1.6: mark-executed modal close-handlers.
+    const meModal = document.getElementById('markExecutedModalFin');
+    document.getElementById('markExecFinClose')?.addEventListener('click', closeMarkExecutedModalFin);
+    document.getElementById('markExecFinCancelBtn')?.addEventListener('click', closeMarkExecutedModalFin);
+    document.getElementById('markExecFinConfirmBtn')?.addEventListener('click', submitMarkExecutedFin);
+    meModal?.addEventListener('click', (e) => {
+      if (e.target.id === 'markExecutedModalFin') closeMarkExecutedModalFin();
+    });
+
+    // D1.6: mark-not-executed modal close-handlers.
+    const nmModal = document.getElementById('markNotExecutedModalFin');
+    document.getElementById('markNotExecFinClose')?.addEventListener('click', closeMarkNotExecutedModalFin);
+    document.getElementById('markNotExecFinCancelBtn')?.addEventListener('click', closeMarkNotExecutedModalFin);
+    document.getElementById('markNotExecFinConfirmBtn')?.addEventListener('click', submitMarkNotExecutedFin);
+    nmModal?.addEventListener('click', (e) => {
+      if (e.target.id === 'markNotExecutedModalFin') closeMarkNotExecutedModalFin();
     });
   }
 
@@ -3874,16 +4003,21 @@
   async function openArrangDetail(id) {
     if (!id) return;
     wireArrangOnce();
+    _arrangCurrentDetailId = id;
+    _arrangCurrentActionsById = {};
+    _arrangCurrentCustomerName = '';
     const modal = document.getElementById('arrangementDetailModal');
     const titleEl   = document.getElementById('arrangDetailTitle');
     const subEl     = document.getElementById('arrangDetailSubtitle');
     const sec1El    = document.getElementById('arrangDetailSection1');
+    const bannerEl  = document.getElementById('arrangDetailStatusBanner');
     const actTb     = document.getElementById('arrangDetailActionsTbody');
     const errEl     = document.getElementById('arrangDetailError');
     if (titleEl) titleEl.textContent = 'Afspraak details';
     if (subEl)   subEl.textContent = 'Laden…';
     if (sec1El)  sec1El.innerHTML = '<div style="font-size:11.5px;color:var(--text-faint);text-align:center;padding:14px">Laden…</div>';
-    if (actTb)   actTb.innerHTML = '<tr><td colspan="4" style="text-align:center;padding:14px;color:var(--text-faint);font-size:11.5px">Laden…</td></tr>';
+    if (bannerEl){ bannerEl.style.display = 'none'; bannerEl.innerHTML = ''; }
+    if (actTb)   actTb.innerHTML = '<tr><td colspan="5" style="text-align:center;padding:14px;color:var(--text-faint);font-size:11.5px">Laden…</td></tr>';
     if (errEl)   { errEl.style.display = 'none'; errEl.textContent = ''; }
     if (modal)   modal.classList.remove('hidden');
 
@@ -3897,8 +4031,16 @@
       }
       const arr = d.arrangement || {};
       const cust = d.customer || null;
-      if (titleEl) titleEl.textContent = `${arrangTypeLabel(arr.type)} — ${cust?.name || '(onbekend)'}`;
+      _arrangCurrentCustomerName = cust?.name || '(onbekend)';
+      if (titleEl) titleEl.textContent = `${arrangTypeLabel(arr.type)} — ${_arrangCurrentCustomerName}`;
       if (subEl)   subEl.textContent = 'ID: ' + (arr.id || id);
+
+      // D1.6: status-banner voor arrangement-lifecycle (ACTIEF, NAGEKOMEN, etc.).
+      if (bannerEl) {
+        const bannerHtml = arrangStatusBannerHtml(arr.status, arr.cancellation_reason);
+        if (bannerHtml) { bannerEl.innerHTML = bannerHtml; bannerEl.style.display = ''; }
+        else { bannerEl.style.display = 'none'; bannerEl.innerHTML = ''; }
+      }
 
       // Sectie 1: arrangement
       const eff = arrangEffective(arr);
@@ -3937,43 +4079,15 @@
 
       if (sec1El) sec1El.innerHTML = rowsHtml + consolidateSummaryHtml + detailsBlock;
 
-      // Sectie 2: pending actions
+      // Sectie 2: pending actions (D1.6: per rij conditioneel mark-executed /
+      // mark-not-executed knoppen, en uitgebreide info per status).
       const actions = d.pending_actions || [];
+      _arrangCurrentActionsById = {};
+      actions.forEach(a => { if (a && a.id) _arrangCurrentActionsById[a.id] = a; });
       if (!actions.length) {
-        if (actTb) actTb.innerHTML = '<tr><td colspan="4" style="text-align:center;padding:14px;color:var(--text-faint);font-size:11.5px">Geen pending actions.</td></tr>';
+        if (actTb) actTb.innerHTML = '<tr><td colspan="5" style="text-align:center;padding:14px;color:var(--text-faint);font-size:11.5px">Geen pending actions.</td></tr>';
       } else if (actTb) {
-        actTb.innerHTML = actions.map(a => {
-          // pending_actions.status is UPPERCASE in deployed DB (spec-conform).
-          // Vergelijk hoofdletter-insensitief voor robuustheid mocht een
-          // legacy-row toch lowercase bevatten.
-          const st = String(a.status || '').toUpperCase();
-          const statusBadge = st === 'APPROVED'  ? '<span class="sr-tag green">approved</span>'
-                            : st === 'REJECTED'  ? '<span class="sr-tag" style="background:rgba(239,68,68,.15);color:#ef4444">rejected</span>'
-                            : st === 'EXECUTED'  ? '<span class="sr-tag green">executed</span>'
-                            : st === 'FAILED'    ? '<span class="sr-tag" style="background:rgba(239,68,68,.15);color:#ef4444">failed</span>'
-                            : st === 'CANCELLED' ? '<span class="sr-tag gray">cancelled</span>'
-                            : '<span class="sr-tag" style="background:rgba(56,189,248,.15);color:#38bdf8">pending</span>';
-          const proposed = a.created_at ? fmtDateNl(String(a.created_at).slice(0, 10)) : '—';
-          let approvedInfo = '—';
-          if (a.approved_at) approvedInfo = 'approved ' + fmtDateNl(String(a.approved_at).slice(0, 10));
-          else if (a.reject_reason) approvedInfo = 'rejected: ' + esc(a.reject_reason);
-          // Executie-resultaat (D2.1 wanneer pending_action wordt afgehandeld)
-          let execHtml = '';
-          if (st === 'EXECUTED' && a.execution_result) {
-            execHtml = renderArrangActionExecution(a);
-          }
-          const actionLabel = arrangActionTypeLabel(a.action_type);
-          return `<tr>
-            <td style="font-size:11.5px">
-              <div style="font-weight:600">${esc(actionLabel)}</div>
-              <div style="font-family:monospace;font-size:10.5px;color:var(--text-faint)">${esc(a.action_type)}</div>
-              ${execHtml}
-            </td>
-            <td>${statusBadge}</td>
-            <td style="font-size:11.5px">${esc(proposed)}</td>
-            <td style="font-size:11.5px">${approvedInfo}</td>
-          </tr>`;
-        }).join('');
+        actTb.innerHTML = actions.map(a => renderArrangementActionRow(a, arr.status)).join('');
       }
     } catch (e) {
       console.error('[arrangements-detail]', e);
@@ -3983,6 +4097,298 @@
 
   function closeArrangDetail() {
     document.getElementById('arrangementDetailModal')?.classList.add('hidden');
+    _arrangCurrentDetailId    = null;
+    _arrangCurrentActionsById = {};
+    _arrangCurrentCustomerName = '';
+  }
+
+  // D1.6: lifecycle-banner voor arrangement-status. VOORGESTELD krijgt geen
+  // banner (default-state); andere statussen krijgen een gekleurde melding.
+  function arrangStatusBannerHtml(status, cancellationReason) {
+    const st = String(status || '').toUpperCase();
+    if (st === 'ACTIEF') {
+      return `
+        <div style="background:rgba(34,197,94,0.08);border:1px solid rgba(34,197,94,0.35);color:#22c55e;border-radius:8px;padding:10px 12px;display:flex;gap:10px;align-items:flex-start">
+          <i class="ti ti-check" style="font-size:16px;margin-top:1px"></i>
+          <div>
+            <div style="font-weight:600;color:#22c55e">Afspraak is ACTIEF</div>
+            <div style="color:var(--text-dim);font-size:12px;margin-top:2px">De klant betaalt nu volgens de regeling. Volg betaalgedrag via de facturen-tab.</div>
+          </div>
+        </div>`;
+    }
+    if (st === 'NAGEKOMEN') {
+      return `
+        <div style="background:rgba(34,197,94,0.08);border:1px solid rgba(34,197,94,0.35);color:#22c55e;border-radius:8px;padding:10px 12px;display:flex;gap:10px;align-items:flex-start">
+          <i class="ti ti-circle-check" style="font-size:16px;margin-top:1px"></i>
+          <div>
+            <div style="font-weight:600;color:#22c55e">Afspraak NAGEKOMEN</div>
+            <div style="color:var(--text-dim);font-size:12px;margin-top:2px">Klant heeft de regeling volledig voldaan. Geen verdere actie nodig.</div>
+          </div>
+        </div>`;
+    }
+    if (st === 'VERBROKEN') {
+      return `
+        <div style="background:rgba(239,68,68,0.08);border:1px solid rgba(239,68,68,0.35);color:#ef4444;border-radius:8px;padding:10px 12px;display:flex;gap:10px;align-items:flex-start">
+          <i class="ti ti-alert-triangle" style="font-size:16px;margin-top:1px"></i>
+          <div>
+            <div style="font-weight:600;color:#ef4444">Afspraak VERBROKEN</div>
+            <div style="color:var(--text-dim);font-size:12px;margin-top:2px">Klant heeft de regeling niet nagekomen. Bepaal vervolgstappen (nieuwe afspraak / dunning / incasso).</div>
+          </div>
+        </div>`;
+    }
+    if (st === 'GEANNULEERD') {
+      const reasonLine = cancellationReason
+        ? `<div style="color:var(--text-dim);font-size:12px;margin-top:4px"><strong>Reden:</strong> ${esc(cancellationReason)}</div>`
+        : '';
+      return `
+        <div style="background:rgba(148,163,184,0.10);border:1px solid rgba(148,163,184,0.35);color:var(--text-dim);border-radius:8px;padding:10px 12px;display:flex;gap:10px;align-items:flex-start">
+          <i class="ti ti-ban" style="font-size:16px;margin-top:1px"></i>
+          <div>
+            <div style="font-weight:600;color:var(--text)">Afspraak GEANNULEERD</div>
+            <div style="color:var(--text-dim);font-size:12px;margin-top:2px">Deze afspraak is handmatig geannuleerd en wordt niet uitgevoerd.</div>
+            ${reasonLine}
+          </div>
+        </div>`;
+    }
+    return '';
+  }
+
+  // D1.6: Render-helper voor een enkele pending_actions rij in de detail-modal.
+  // Conditioneel per status:
+  //   APPROVED  -> Markeer verwerkt + Markeer niet door te voeren knoppen
+  //   EXECUTED  -> execution_result samenvatting onder type
+  //   FAILED    -> failure_reason (uit execution_result.failure_reason of meta)
+  //   REJECTED  -> reject_reason
+  //   CANCELLED -> rejection_reason als reden
+  function renderArrangementActionRow(a, arrStatus) {
+    const st = String(a.status || '').toUpperCase();
+    const arrSt = String(arrStatus || '').toUpperCase();
+    const statusBadge =
+        st === 'APPROVED'  ? '<span class="sr-tag green">approved</span>'
+      : st === 'REJECTED'  ? '<span class="sr-tag" style="background:rgba(239,68,68,.15);color:#ef4444">rejected</span>'
+      : st === 'EXECUTED'  ? '<span class="sr-tag green">executed</span>'
+      : st === 'FAILED'    ? '<span class="sr-tag" style="background:rgba(239,68,68,.15);color:#ef4444">failed</span>'
+      : st === 'CANCELLED' ? '<span class="sr-tag gray">cancelled</span>'
+      :                      '<span class="sr-tag" style="background:rgba(56,189,248,.15);color:#38bdf8">pending</span>';
+    const proposed = a.created_at ? fmtDateNl(String(a.created_at).slice(0, 10)) : '—';
+
+    // Approved/Rejected info-kolom: per status anders.
+    let approvedInfo = '—';
+    if (st === 'EXECUTED' && a.executed_at) {
+      approvedInfo = 'verwerkt ' + fmtDateNl(String(a.executed_at).slice(0, 10));
+    } else if (st === 'APPROVED' && a.approved_at) {
+      approvedInfo = 'approved ' + fmtDateNl(String(a.approved_at).slice(0, 10));
+    } else if (st === 'REJECTED' && a.reject_reason) {
+      approvedInfo = 'rejected: ' + esc(a.reject_reason);
+    } else if (st === 'CANCELLED' && a.reject_reason) {
+      approvedInfo = 'cancelled: ' + esc(a.reject_reason);
+    } else if (a.approved_at) {
+      approvedInfo = 'approved ' + fmtDateNl(String(a.approved_at).slice(0, 10));
+    } else if (a.reject_reason) {
+      approvedInfo = esc(a.reject_reason);
+    }
+
+    // Extra blok onder type-kolom (executie-resultaat / failure-reason).
+    let extraHtml = '';
+    if (st === 'EXECUTED' && a.execution_result) {
+      extraHtml = renderArrangActionExecution(a);
+    } else if (st === 'FAILED') {
+      // failure_reason kan in execution_result.failure_reason staan (mark-not-
+      // executed endpoint schrijft daar) of in reject_reason als fallback.
+      const failureReason = (a.execution_result && a.execution_result.failure_reason)
+        || a.reject_reason
+        || null;
+      if (failureReason) {
+        extraHtml = `<div style="margin-top:4px;font-size:11px;color:#ef4444;line-height:1.4"><strong>Reden:</strong> ${esc(failureReason)}</div>`;
+      }
+    } else if (st === 'REJECTED' && a.reject_reason) {
+      extraHtml = `<div style="margin-top:4px;font-size:11px;color:var(--text-dim);line-height:1.4"><strong>Afgewezen:</strong> ${esc(a.reject_reason)}</div>`;
+    }
+
+    // Acties-kolom: alleen voor APPROVED-status én arrangement niet
+    // GEANNULEERD/VERBROKEN tonen we mark-knoppen.
+    let actionsCell = '<span style="color:var(--text-faint);font-size:11px">—</span>';
+    if (st === 'APPROVED' && arrSt !== 'GEANNULEERD' && arrSt !== 'VERBROKEN') {
+      actionsCell = `
+        <div style="display:flex;gap:6px;flex-wrap:wrap">
+          <button class="sr-abtn primary" data-pa-mark-executed="${esc(a.id)}" type="button" style="font-size:11px;padding:4px 8px"><i class="ti ti-check"></i> Verwerkt</button>
+          <button class="sr-abtn danger" data-pa-mark-not-executed="${esc(a.id)}" type="button" style="font-size:11px;padding:4px 8px"><i class="ti ti-x"></i> Niet door te voeren</button>
+        </div>`;
+    }
+
+    const actionLabel = arrangActionTypeLabel(a.action_type);
+    return `<tr>
+      <td style="font-size:11.5px">
+        <div style="font-weight:600">${esc(actionLabel)}</div>
+        <div style="font-family:monospace;font-size:10.5px;color:var(--text-faint)">${esc(a.action_type)}</div>
+        ${extraHtml}
+      </td>
+      <td>${statusBadge}</td>
+      <td style="font-size:11.5px">${esc(proposed)}</td>
+      <td style="font-size:11.5px">${approvedInfo}</td>
+      <td>${actionsCell}</td>
+    </tr>`;
+  }
+
+  // D1.6: comma-separated string -> trimmed array zonder lege entries.
+  function parseCsvFin(input) {
+    return String(input || '')
+      .split(',')
+      .map(s => s.trim())
+      .filter(s => s.length > 0);
+  }
+
+  // D1.6 - Mark-as-executed flow (finance/Wanbetalers detail-modal).
+  // Bewaart welke pending_action_id momenteel in de modal wordt verwerkt.
+  let _markFinCurrentActionId = null;
+
+  function openMarkExecutedModalFin(actionId) {
+    if (!actionId) return;
+    wireArrangOnce();
+    _markFinCurrentActionId = actionId;
+    const a = _arrangCurrentActionsById[actionId] || null;
+    const actionLabel = a ? arrangActionTypeLabel(a.action_type) : '—';
+    const actionType  = a?.action_type || '';
+    const custName    = _arrangCurrentCustomerName || '(klant onbekend)';
+
+    const l1 = document.getElementById('markExecFinCtxLine1');
+    const l2 = document.getElementById('markExecFinCtxLine2');
+    if (l1) l1.innerHTML = esc(actionLabel) + (actionType ? ' <span style="color:var(--text-faint);font-size:11px;margin-left:6px">' + esc(actionType) + '</span>' : '') + ' &middot; ' + esc(custName);
+    if (l2) l2.textContent = 'Pending action: ' + actionId;
+
+    // Reset form-velden.
+    const elCredit = document.getElementById('markExecFinCreditIds');
+    const elSub    = document.getElementById('markExecFinSubscriptionId');
+    const elInv    = document.getElementById('markExecFinInvoiceIds');
+    const elNotes  = document.getElementById('markExecFinNotes');
+    const elErr    = document.getElementById('markExecFinError');
+    if (elCredit) elCredit.value = '';
+    if (elSub)    elSub.value    = '';
+    if (elInv)    elInv.value    = '';
+    if (elNotes)  elNotes.value  = '';
+    if (elErr)    { elErr.style.display = 'none'; elErr.textContent = ''; }
+
+    document.getElementById('markExecutedModalFin')?.classList.remove('hidden');
+    setTimeout(() => { try { elCredit?.focus(); } catch (_) {} }, 50);
+  }
+
+  function closeMarkExecutedModalFin() {
+    document.getElementById('markExecutedModalFin')?.classList.add('hidden');
+    _markFinCurrentActionId = null;
+  }
+
+  async function submitMarkExecutedFin() {
+    const elCredit = document.getElementById('markExecFinCreditIds');
+    const elSub    = document.getElementById('markExecFinSubscriptionId');
+    const elInv    = document.getElementById('markExecFinInvoiceIds');
+    const elNotes  = document.getElementById('markExecFinNotes');
+    const elErr    = document.getElementById('markExecFinError');
+    const btn      = document.getElementById('markExecFinConfirmBtn');
+
+    const notes = (elNotes?.value || '').trim();
+    if (notes.length < 10) {
+      if (elErr) { elErr.textContent = 'Manual notes zijn verplicht (min 10 tekens).'; elErr.style.display = 'block'; }
+      return;
+    }
+    const id = _markFinCurrentActionId;
+    if (!id) {
+      if (elErr) { elErr.textContent = 'Geen actie geselecteerd.'; elErr.style.display = 'block'; }
+      return;
+    }
+    const execution_result = { manual_notes: notes };
+    const creditIds = parseCsvFin(elCredit?.value);
+    if (creditIds.length) execution_result.tl_credit_note_ids = creditIds;
+    const subId = (elSub?.value || '').trim();
+    if (subId) execution_result.tl_subscription_id = subId;
+    const invIds = parseCsvFin(elInv?.value);
+    if (invIds.length) execution_result.tl_invoice_ids = invIds;
+
+    if (btn) { btn.disabled = true; btn.textContent = 'Bezig…'; }
+    try {
+      const r = await window.AgentShared.apiFetch('/api/pending-actions-mark-executed', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ id, execution_result }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        const msg = d.error || ('HTTP ' + r.status);
+        if (elErr) { elErr.textContent = 'Markeren mislukt: ' + msg; elErr.style.display = 'block'; }
+        return;
+      }
+      window.AgentShared?.showToast?.('Actie gemarkeerd als verwerkt', 'success');
+      closeMarkExecutedModalFin();
+      // Heropen detail-modal met verse data + ververs de afspraken-lijst en badge.
+      const arrId = _arrangCurrentDetailId;
+      if (arrId) await openArrangDetail(arrId);
+      try { loadArrangements(); } catch (_) {}
+      try { window.AgentShared?.refreshApprovalsBadge?.(); } catch (_) {}
+    } catch (e) {
+      console.error('[submitMarkExecutedFin]', e);
+      if (elErr) { elErr.textContent = 'Markeren mislukt: ' + e.message; elErr.style.display = 'block'; }
+    } finally {
+      if (btn) { btn.disabled = false; btn.textContent = 'Bevestig'; }
+    }
+  }
+
+  function openMarkNotExecutedModalFin(actionId) {
+    if (!actionId) return;
+    wireArrangOnce();
+    _markFinCurrentActionId = actionId;
+    const elReason = document.getElementById('markNotExecFinReason');
+    const elErr    = document.getElementById('markNotExecFinError');
+    if (elReason) elReason.value = '';
+    if (elErr)    { elErr.style.display = 'none'; elErr.textContent = ''; }
+    document.getElementById('markNotExecutedModalFin')?.classList.remove('hidden');
+    setTimeout(() => { try { elReason?.focus(); } catch (_) {} }, 50);
+  }
+
+  function closeMarkNotExecutedModalFin() {
+    document.getElementById('markNotExecutedModalFin')?.classList.add('hidden');
+    _markFinCurrentActionId = null;
+  }
+
+  async function submitMarkNotExecutedFin() {
+    const elReason = document.getElementById('markNotExecFinReason');
+    const elErr    = document.getElementById('markNotExecFinError');
+    const btn      = document.getElementById('markNotExecFinConfirmBtn');
+
+    const reason = (elReason?.value || '').trim();
+    if (reason.length < 10) {
+      if (elErr) { elErr.textContent = 'Reden is verplicht (min 10 tekens).'; elErr.style.display = 'block'; }
+      return;
+    }
+    const id = _markFinCurrentActionId;
+    if (!id) {
+      if (elErr) { elErr.textContent = 'Geen actie geselecteerd.'; elErr.style.display = 'block'; }
+      return;
+    }
+
+    if (btn) { btn.disabled = true; btn.textContent = 'Bezig…'; }
+    try {
+      const r = await window.AgentShared.apiFetch('/api/pending-actions-mark-not-executed', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ id, failure_reason: reason }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        const msg = d.error || ('HTTP ' + r.status);
+        if (elErr) { elErr.textContent = 'Markeren mislukt: ' + msg; elErr.style.display = 'block'; }
+        return;
+      }
+      window.AgentShared?.showToast?.('Actie gemarkeerd als niet doorgevoerd', 'success');
+      closeMarkNotExecutedModalFin();
+      const arrId = _arrangCurrentDetailId;
+      if (arrId) await openArrangDetail(arrId);
+      try { loadArrangements(); } catch (_) {}
+      try { window.AgentShared?.refreshApprovalsBadge?.(); } catch (_) {}
+    } catch (e) {
+      console.error('[submitMarkNotExecutedFin]', e);
+      if (elErr) { elErr.textContent = 'Markeren mislukt: ' + e.message; elErr.style.display = 'block'; }
+    } finally {
+      if (btn) { btn.disabled = false; btn.textContent = 'Bevestig'; }
+    }
   }
 
   async function cancelArrang(id) {
