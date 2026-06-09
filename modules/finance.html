@@ -352,7 +352,8 @@
       padding: 14px 16px;
       display: flex;
       flex-direction: column;
-      gap: 8px;
+      /* Geen gap hier — .inbox-c-msg regelt spacing via margin-bottom. Dubbele
+         spacing (gap + margin) inflated de hoogte tussen bubbles. */
       scroll-behavior: smooth;
     }
     .inbox-c-messages-inner {
@@ -361,12 +362,17 @@
       margin: 0 auto;
       display: flex;
       flex-direction: column;
-      gap: 4px;
+      gap: 0;
     }
-    /* WhatsApp-style compacte bubbles — fit-content groei + 65 procent cap. */
+    /* WhatsApp-app-stijl compacte bubbles — fit-content groei + 65 procent cap.
+       Sender-switch krijgt 8px margin, consecutieve van zelfde sender 2px.
+       Eerste bubble in een stroom krijgt asymmetrische tail-corner. */
     .inbox-c-msg {
       display: flex;
       width: 100%;
+      margin-bottom: 8px;
+    }
+    .inbox-c-msg.same-sender {
       margin-bottom: 2px;
     }
     .inbox-c-msg.outbound { justify-content: flex-end; }
@@ -375,19 +381,31 @@
       flex: 0 0 auto;
       width: fit-content;
       max-width: 65%;
-      padding: 6px 12px 8px;
-      border-radius: 10px;
-      font-size: 14.5px;
-      line-height: 1.35;
+      padding: 5px 9px 6px;
+      border-radius: 7.5px;
+      font-size: 14px;
+      line-height: 1.3;
       word-break: break-word;
       overflow-wrap: anywhere;
-      white-space: pre-wrap;
+      /* pre-line ipv pre-wrap: behoudt newlines maar collapse meerdere spaties,
+         voorkomt dat trailing whitespace de bubble inflate. Combineert met
+         client-side cleanText (collapse 3+ \n) voor compacte WhatsApp-look. */
+      white-space: pre-line;
       min-height: auto;
+      align-self: flex-start;
       box-sizing: border-box;
+      box-shadow: none;
+    }
+    /* Asymmetrische tail-corner voor eerste bubble in een stroom. */
+    .inbox-c-msg.outbound:not(.same-sender) .inbox-c-msg-bubble {
+      border-bottom-right-radius: 2.5px;
+    }
+    .inbox-c-msg.inbound:not(.same-sender) .inbox-c-msg-bubble {
+      border-top-left-radius: 2.5px;
     }
     .inbox-c-msg.outbound .inbox-c-msg-bubble {
-      background: #3b82f6;
-      color: #fff;
+      background: #d9fdd3;
+      color: #111b21;
     }
     .inbox-c-msg.outbound.failed .inbox-c-msg-bubble {
       background: rgba(239,68,68,.12);
@@ -395,8 +413,9 @@
       color: #fecaca;
     }
     .inbox-c-msg.inbound .inbox-c-msg-bubble {
-      background: rgba(255,255,255,.06);
-      color: var(--text-strong, #e5e7eb);
+      background: #ffffff;
+      color: #111b21;
+      border: 0.5px solid rgba(0,0,0,0.08);
     }
     .inbox-c-msg-text {
       display: block;
@@ -410,8 +429,9 @@
       align-items: center;
       margin-top: 2px;
       font-size: 11px;
-      opacity: .65;
+      opacity: .55;
       line-height: 1;
+      margin-left: 6px;
     }
     .inbox-c-msg-failed-reason {
       font-size: 10.5px;
@@ -3406,13 +3426,21 @@
       wrap.innerHTML = '<div style="text-align:center;color:var(--text-faint);font-size:12px;padding:20px">Nog geen berichten.</div>';
       return;
     }
-    const rows = _inboxMessages.map(m => {
+    const rows = _inboxMessages.map((m, idx) => {
       const out = (m.direction === 'out');
+      // Same-sender detectie: vorige message dezelfde direction? -> compactere margin + geen tail-corner.
+      const prev = idx > 0 ? _inboxMessages[idx - 1] : null;
+      const sameSender = !!(prev && (prev.direction === 'out') === out);
       // Detect template-message: ofwel expliciete type-kolom, ofwel template_name aanwezig,
       // ofwel meta_template_name veld in payload. Toon "via template" badge bij outgoing.
       const tplName = m.template_name || m.meta_template_name || null;
       const isTpl = out && (m.type === 'template' || !!tplName);
-      const body = m.body || (tplName ? ('[template] ' + tplName) : (m.media_type ? ('[' + m.media_type + ']') : ''));
+      const rawBody = m.body || (tplName ? ('[template] ' + tplName) : (m.media_type ? ('[' + m.media_type + ']') : ''));
+      // Sanitize: strip \r, collapse 3+ opeenvolgende \n naar maximaal 2, trim.
+      // Inbound payload (api/inbox-webhook.js) wordt onbewerkt opgeslagen, dus
+      // trailing whitespace/newlines inflated de bubble vertikaal. Client-side
+      // fix volstaat omdat backend-history niet gemuteerd hoeft te worden.
+      const body = String(rawBody || '').replace(/\r/g, '').replace(/\n{3,}/g, '\n\n').trim();
       const time = fmtRelTime(m.sent_at || m.created_at);
       const statusIcon = out ? _inboxStatusIcon(m.status) : '';
       const failed = (m.status === 'failed');
@@ -3422,7 +3450,7 @@
       const tplBadge = isTpl
         ? `<div class="inbox-c-msg-tplbadge" title="${esc(tplName || '')}"><i class="ti ti-template" style="font-size:11px"></i> via template</div>`
         : '';
-      return `<div class="inbox-c-msg ${out ? 'outbound' : 'inbound'}${failed ? ' failed' : ''}">
+      return `<div class="inbox-c-msg ${out ? 'outbound' : 'inbound'}${failed ? ' failed' : ''}${sameSender ? ' same-sender' : ''}">
         <div class="inbox-c-msg-bubble">
           ${tplBadge}
           <span class="inbox-c-msg-text">${esc(body)}</span>
@@ -3734,14 +3762,26 @@
   //  Klant-info paneel (rechter kolom in 3-col layout) — data-loading
   // ──────────────────────────────────────────────────────────────────────────
 
+  // ──────────────────────────────────────────────────────────────────────────
+  // Klant-paneel state-machine: één bron van waarheid voor 3 UI-states.
+  //
+  //   'empty'    — geen conv geselecteerd: alleen placeholder zichtbaar
+  //                ("Selecteer een gesprek om klant-info te zien").
+  //                Geen avatar/phone/facturen rendering.
+  //   'matched'  — conv + customer match: avatar + naam + phone + facturen
+  //                + klant-info sectie + actie-knoppen voor gekoppelde klant.
+  //   'unknown'  — conv + geen customer match: avatar (initialen uit phone)
+  //                + "Onbekend contact" + phone + "Koppel aan bestaande klant"
+  //                actie. GEEN facturen-sectie of klant-info sectie.
+  //
+  // Pattern: één renderInboxCustomerPanel(state, data) functie schrijft beide
+  // container-visibility EN content. Voorkomt drift waar header empty-msg
+  // toont terwijl body óók data laat zien.
+  // ──────────────────────────────────────────────────────────────────────────
+
   // Reset paneel naar empty-state (zichtbaar als geen conv geselecteerd).
   function _inboxResetCustomerPanel() {
-    const emptyEl   = document.getElementById('inboxCustomerPanelEmpty');
-    const skelEl    = document.getElementById('inboxCustomerPanelSkeleton');
-    const contentEl = document.getElementById('inboxCustomerPanelContent');
-    if (emptyEl)   emptyEl.hidden = false;
-    if (skelEl)    skelEl.hidden = true;
-    if (contentEl) contentEl.hidden = true;
+    renderInboxCustomerPanel('empty', null);
   }
 
   // Initialen voor het grote klant-paneel-avatar. Hergebruikt _inboxInitials.
@@ -3770,14 +3810,15 @@
            d.getFullYear();
   }
 
-  // Hoofd-laad-functie. Roept /api/inbox-conversation-context aan en vult DOM.
+  // Hoofd-laad-functie. Roept /api/inbox-conversation-context aan en delegeert
+  // naar renderInboxCustomerPanel met de juiste state.
   async function loadInboxCustomerContext(conversationId) {
     const emptyEl   = document.getElementById('inboxCustomerPanelEmpty');
     const contentEl = document.getElementById('inboxCustomerPanelContent');
     if (!emptyEl || !contentEl) return;
 
     if (!conversationId) {
-      _inboxResetCustomerPanel();
+      renderInboxCustomerPanel('empty', null);
       return;
     }
 
@@ -3790,30 +3831,49 @@
       const d = await r.json().catch(() => ({}));
       if (!r.ok) {
         console.error('[loadInboxCustomerContext]', r.status, d && d.error);
-        // Lichte foutweergave: behoud paneel maar toon "—" overal.
-        _inboxRenderCustomerPanel({ conversation: null, customer: null, open_invoices: [], totals: { open_amount: 0, invoice_count: 0 } });
+        // Fail-soft: behandel als 'unknown' state — geen klant data beschikbaar.
+        renderInboxCustomerPanel('unknown', { conversation: null, customer: null, open_invoices: [], totals: { open_amount: 0, invoice_count: 0 } });
         return;
       }
-      _inboxRenderCustomerPanel(d || {});
+      const data = d || {};
+      const state = data.customer && data.customer.id ? 'matched' : 'unknown';
+      renderInboxCustomerPanel(state, data);
     } catch (e) {
       console.error('[loadInboxCustomerContext] exception:', e && e.message);
-      _inboxRenderCustomerPanel({ conversation: null, customer: null, open_invoices: [], totals: { open_amount: 0, invoice_count: 0 } });
+      renderInboxCustomerPanel('unknown', { conversation: null, customer: null, open_invoices: [], totals: { open_amount: 0, invoice_count: 0 } });
     }
   }
 
-  // Render-functie. Krijgt response van /api/inbox-conversation-context.
-  function _inboxRenderCustomerPanel(d) {
-    // Verberg skeleton + toon content-container.
-    _inboxHideCustomerPanelSkeleton();
-    const contentEl = document.getElementById('inboxCustomerPanelContent');
+  // Single-source render-functie. Garandeert dat empty-placeholder EN
+  // content-container nooit tegelijk zichtbaar zijn (root cause van de
+  // "Selecteer een gesprek" header die toch data eronder toonde).
+  //
+  // state: 'empty' | 'matched' | 'unknown'
+  // data:  context-response van /api/inbox-conversation-context (mag null zijn bij 'empty').
+  function renderInboxCustomerPanel(state, data) {
     const emptyEl   = document.getElementById('inboxCustomerPanelEmpty');
+    const contentEl = document.getElementById('inboxCustomerPanelContent');
+    const skelEl    = document.getElementById('inboxCustomerPanelSkeleton');
+
+    // Skeleton altijd verbergen (loadXxx toggle't 'm aan vóór de fetch).
+    if (skelEl) skelEl.hidden = true;
+
+    // STATE 1: empty — geen conv geselecteerd. Toon placeholder, verberg content.
+    if (state === 'empty') {
+      if (emptyEl)   emptyEl.hidden = false;
+      if (contentEl) contentEl.hidden = true;
+      return;
+    }
+
+    // STATE 2 + 3: conv geselecteerd. Verberg placeholder, toon content.
     if (emptyEl)   emptyEl.hidden = true;
     if (contentEl) contentEl.hidden = false;
 
-    const conv = d && d.conversation ? d.conversation : null;
-    const cust = d && d.customer ? d.customer : null;
-    const invs = Array.isArray(d && d.open_invoices) ? d.open_invoices : [];
-    const totals = (d && d.totals) || { open_amount: 0, invoice_count: 0 };
+    const d = data || {};
+    const conv = d.conversation || null;
+    const cust = d.customer || null;
+    const invs = Array.isArray(d.open_invoices) ? d.open_invoices : [];
+    const totals = d.totals || { open_amount: 0, invoice_count: 0 };
 
     const avatarEl = document.getElementById('inboxCustPanelAvatar');
     const nameEl   = document.getElementById('inboxCustPanelName');
@@ -3828,17 +3888,17 @@
     const invLnk   = document.getElementById('inboxCustPanelInvoice');
     const infoSec  = document.getElementById('inboxCustPanelInfoSection');
 
-    // Naam + phone + avatar.
+    // Naam + phone + avatar — gedeeld tussen matched en unknown.
     const phone = (cust && cust.phone) || (conv && conv.phone_number) || '';
-    const displayName = (cust && cust.name) ? cust.name : 'Onbekend contact';
+    const displayName = (state === 'matched' && cust && cust.name) ? cust.name : 'Onbekend contact';
     if (nameEl)  nameEl.textContent  = displayName;
     if (phoneEl) phoneEl.textContent = phone || '—';
     if (avatarEl) {
-      avatarEl.textContent     = _inboxPanelAvatarFor(displayName, phone);
+      avatarEl.textContent      = _inboxPanelAvatarFor(displayName, phone);
       avatarEl.style.background = _inboxAvatarColor(phone || displayName);
     }
 
-    // 24h window badge.
+    // 24h window badge — alleen tonen als we een conv hebben.
     if (badgeEl) {
       if (!conv) {
         badgeEl.hidden = true;
@@ -3855,68 +3915,86 @@
       }
     }
 
-    // Open facturen.
-    if (totEl)  totEl.textContent  = _inboxFmtEur(totals.open_amount);
-    if (invsEl) {
-      if (!invs.length) {
-        invsEl.innerHTML = '<div class="inbox-c-empty-line">Geen open facturen</div>';
-      } else {
-        invsEl.innerHTML = invs.map(inv => {
-          const days = Number(inv.days_overdue) || 0;
-          const overdue = !!inv.is_overdue && days > 0;
-          const badgeCls = overdue ? 'overdue' : 'normal';
-          const badgeTxt = overdue ? (days + 'd te laat') : 'Op tijd';
-          const nr = inv.invoice_number || '#' + String(inv.id || '').slice(0, 6);
-          return '<div class="inbox-c-invoice-row">'
-            +    '<span class="inbox-c-invoice-nr">' + esc(nr) + '</span>'
-            +    '<span class="inbox-c-invoice-right">'
-            +      '<span class="inbox-c-invoice-amount">' + esc(_inboxFmtEur(inv.amount_open)) + '</span>'
-            +      '<span class="inbox-c-overdue-badge ' + badgeCls + '">' + esc(badgeTxt) + '</span>'
-            +    '</span>'
-            + '</div>';
-        }).join('');
-      }
-    }
+    // ── State-specifieke sectie-rendering ────────────────────────────────────
+    // Vind de facturen-sectie (parent van inboxCustPanelInvoices) zodat we 'm
+    // bij state 'unknown' volledig kunnen verbergen ipv "Geen open facturen"
+    // tonen op een niet-gekoppelde klant.
+    const invSection = invsEl ? invsEl.closest('.inbox-c-section') : null;
 
-    // Klant info (datums + email). Verberg sectie volledig als er geen klant is.
-    if (infoSec) infoSec.style.display = cust ? '' : 'none';
-    if (cust) {
-      if (sinceEl)  sinceEl.textContent = _inboxFmtDateNL(cust.created_at);
-      if (cust.email) {
-        if (emailRow) emailRow.hidden = false;
-        if (emailEl)  emailEl.innerHTML = '<a href="mailto:' + esc(cust.email) + '">' + esc(cust.email) + '</a>';
-      } else {
-        if (emailRow) emailRow.hidden = true;
+    if (state === 'matched') {
+      // Facturen-sectie + klant-info + acties allemaal zichtbaar + gevuld.
+      if (invSection) invSection.style.display = '';
+      if (totEl)  totEl.textContent  = _inboxFmtEur(totals.open_amount);
+      if (invsEl) {
+        if (!invs.length) {
+          invsEl.innerHTML = '<div class="inbox-c-empty-line">Geen open facturen</div>';
+        } else {
+          invsEl.innerHTML = invs.map(inv => {
+            const days = Number(inv.days_overdue) || 0;
+            const overdue = !!inv.is_overdue && days > 0;
+            const badgeCls = overdue ? 'overdue' : 'normal';
+            const badgeTxt = overdue ? (days + 'd te laat') : 'Op tijd';
+            const nr = inv.invoice_number || '#' + String(inv.id || '').slice(0, 6);
+            return '<div class="inbox-c-invoice-row">'
+              +    '<span class="inbox-c-invoice-nr">' + esc(nr) + '</span>'
+              +    '<span class="inbox-c-invoice-right">'
+              +      '<span class="inbox-c-invoice-amount">' + esc(_inboxFmtEur(inv.amount_open)) + '</span>'
+              +      '<span class="inbox-c-overdue-badge ' + badgeCls + '">' + esc(badgeTxt) + '</span>'
+              +    '</span>'
+              + '</div>';
+          }).join('');
+        }
       }
-    }
+      // Klant-info sectie tonen.
+      if (infoSec) infoSec.style.display = '';
+      if (cust) {
+        if (sinceEl)  sinceEl.textContent = _inboxFmtDateNL(cust.created_at);
+        if (cust.email) {
+          if (emailRow) emailRow.hidden = false;
+          if (emailEl)  emailEl.innerHTML = '<a href="mailto:' + esc(cust.email) + '">' + esc(cust.email) + '</a>';
+        } else {
+          if (emailRow) emailRow.hidden = true;
+        }
+      }
+      // Acties: gekoppelde klant → bekijk + maak factuur.
+      if (openLnk) {
+        if (cust && cust.id) {
+          openLnk.href = '/modules/klanten.html?id=' + encodeURIComponent(cust.id);
+          openLnk.innerHTML = '<i class="ti ti-user"></i> Bekijk in klanten';
+          openLnk.classList.remove('dim');
+          openLnk.style.pointerEvents = '';
+        }
+      }
+      if (invLnk) {
+        if (cust && cust.id) {
+          invLnk.href = '/modules/klanten.html?id=' + encodeURIComponent(cust.id) + '&tab=facturen';
+          invLnk.classList.remove('dim');
+          invLnk.style.pointerEvents = '';
+        }
+      }
+    } else {
+      // state === 'unknown'
+      // Geen facturen-sectie tonen — we hebben geen klant om facturen aan te
+      // koppelen. Toont "Koppel aan bestaande klant" als primary action.
+      if (invSection) invSection.style.display = 'none';
+      if (infoSec)    infoSec.style.display    = 'none';
+      if (emailRow)   emailRow.hidden          = true;
 
-    // Acties: bekijk-in-klanten / koppel-aan-klant + maak-factuur-aan deeplinks.
-    if (openLnk) {
-      if (cust && cust.id) {
-        openLnk.href = '/modules/klanten.html?id=' + encodeURIComponent(cust.id);
-        openLnk.innerHTML = '<i class="ti ti-user"></i> Bekijk in klanten';
-        openLnk.classList.remove('dim');
-        openLnk.style.pointerEvents = '';
-      } else if (phone) {
-        // Onbekende klant maar wel een nummer: deeplink naar klanten-module om
-        // bestaande klant te zoeken / koppelen op telefoonnummer.
-        openLnk.href = '/modules/klanten.html?phone=' + encodeURIComponent(phone);
-        openLnk.innerHTML = '<i class="ti ti-link"></i> Koppel aan bestaande klant';
-        openLnk.classList.remove('dim');
-        openLnk.style.pointerEvents = '';
-      } else {
-        openLnk.href = '#';
-        openLnk.innerHTML = '<i class="ti ti-user"></i> Bekijk in klanten';
-        openLnk.classList.add('dim');
-        openLnk.style.pointerEvents = 'none';
+      // Acties: alleen 'Koppel aan klant' link aktief; factuur-link disabled.
+      if (openLnk) {
+        if (phone) {
+          openLnk.href = '/modules/klanten.html?phone=' + encodeURIComponent(phone);
+          openLnk.innerHTML = '<i class="ti ti-link"></i> Koppel aan bestaande klant';
+          openLnk.classList.remove('dim');
+          openLnk.style.pointerEvents = '';
+        } else {
+          openLnk.href = '#';
+          openLnk.innerHTML = '<i class="ti ti-user"></i> Bekijk in klanten';
+          openLnk.classList.add('dim');
+          openLnk.style.pointerEvents = 'none';
+        }
       }
-    }
-    if (invLnk) {
-      if (cust && cust.id) {
-        invLnk.href = '/modules/klanten.html?id=' + encodeURIComponent(cust.id) + '&tab=facturen';
-        invLnk.classList.remove('dim');
-        invLnk.style.pointerEvents = '';
-      } else {
+      if (invLnk) {
         invLnk.href = '#';
         invLnk.classList.add('dim');
         invLnk.style.pointerEvents = 'none';
