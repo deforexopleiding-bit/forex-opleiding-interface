@@ -399,3 +399,44 @@ Lopend op Vercel:
 - MRR-trend telt subs op start/eind-window (indicatief, niet 100% historisch correct)
 - Retentie "Verlopen"-pill toont alle historische cases zonder tijdsvenster
   (kan later begrensd)
+
+## WhatsApp template-variabelen (C4 — 9 juni 2026)
+
+Sinds C4 ondersteunen WhatsApp-templates **named placeholders** (`{{klant.naam}}`,
+`{{factuur.bedrag_open}}`, `{{bedrijf.naam}}`, …). Volledige documentatie:
+[`docs/whatsapp-templates-c4-named-variables.md`](docs/whatsapp-templates-c4-named-variables.md).
+
+### Architectuur in één alinea
+- Registry + parsers + resolvers in `api/_lib/template-variables.js` (`AVAILABLE_VARIABLES`).
+- Bij submit (`api/admin-meta-templates-submit.js`) worden named keys vertaald naar
+  positioneel (`{{1}}`, `{{2}}`, …) en bewaard in
+  `whatsapp_meta_templates.meta_param_mapping` (jsonb).
+- Bij send (`api/inbox-send-template.js`) wordt de mapping toegepast: customer +
+  invoice + open-invoices opgezocht, waarden geresolved, Meta-components gebouwd.
+- Backward-compat: legacy positionele templates blijven werken (mapping = NULL).
+
+### Vereiste env-vars voor `bedrijf.*`
+Voeg toe in Vercel (alle environments, NIET sensitive):
+```
+COMPANY_NAME=De Forex Opleiding NL B.V.
+COMPANY_ADDRESS=<adres + postcode + plaats>
+COMPANY_KVK=<8-cijferig>
+COMPANY_BTW=NL<9-cijferig>B01
+COMPANY_PHONE=+31<rest>
+COMPANY_EMAIL=info@deforexopleiding.nl
+```
+`COMPANY_NAME` heeft fallback; rest resolved naar lege string als ontbrekend.
+
+### TL-factuurlink
+`factuur.betaal_link` gebruikt `api/_lib/teamleader-invoice-link.js` — real-time
+TL-fetch met 24u lazy cache in `invoices.payment_url` + `payment_url_fetched_at`.
+Geen nieuwe env-vars: gebruikt bestaande `TEAMLEADER_*` OAuth.
+
+### Lesson learned 15
+Named-placeholders patroon werkt: editor blijft simpel (gewoon `{{categorie.veld}}`
+typen), submit-conversie is transparent en send-time resolution is automatisch.
+Belangrijk pattern hierbij: **mixed templates weigeren** (named én positioneel in
+één body) — dat is ambigu voor mapping-bouw. Admin-editor checkt
+`isMixedTemplateBody()` client-side; server-side niet expliciet maar
+`buildPositionalMapping()` mapt alleen named en laat positionele staan, dus
+resultaat zou inconsistent zijn → houd de check client-side hard.

@@ -99,6 +99,23 @@
     .rbac-role-head { display:flex; flex-direction:column; align-items:center; gap:3px; }
     .rbac-role-all { font-size:9px; padding:1px 6px; background:transparent; border:1px solid var(--border); border-radius:3px; color:var(--text-faint); cursor:pointer; font-family:inherit; text-transform:none; letter-spacing:0; }
     .rbac-role-all:hover { background:var(--bg-elev); color:var(--text); }
+    /* ── WhatsApp Meta template variabelen-paneel (C4) ── */
+    #waMetaVarsPanel { max-width:300px; padding:8px 12px; max-height:320px; overflow:auto; border:1px solid var(--border); border-radius:8px; background:var(--bg-elev-2); }
+    #waMetaVarsPanel details { margin-bottom:6px; }
+    #waMetaVarsPanel details > summary { cursor:pointer; font-size:12px; font-weight:600; color:var(--text-dim); padding:4px 0; user-select:none; }
+    #waMetaVarsPanel details > summary:hover { color:var(--text); }
+    #waMetaVarsPanel .wa-var-chip-row { display:flex; flex-wrap:wrap; gap:4px; padding:4px 0 8px 0; }
+    .wa-var-chip { padding:4px 10px; background:#f3f4f6; border:1px solid var(--border); border-radius:999px; font-size:12px; cursor:pointer; color:var(--text); font-family:inherit; line-height:1.3; }
+    .wa-var-chip:hover { background:#e5e7eb; }
+    .wa-var-chip[disabled] { opacity:.5; cursor:not-allowed; }
+    #waMetaVarsBlock.wa-vars-named { background:rgba(34,197,94,0.06); border-style:solid; border-color:rgba(34,197,94,0.4); }
+    #waMetaVarsBlock .wa-var-readonly-row { display:grid; grid-template-columns:auto 1fr; gap:8px; align-items:center; padding:3px 0; font-size:12px; }
+    #waMetaVarsBlock .wa-var-readonly-key { font-family:monospace; font-size:11.5px; color:var(--text); background:rgba(34,197,94,0.12); padding:2px 6px; border-radius:4px; }
+    #waMetaVarsBlock .wa-var-readonly-example { color:var(--text-faint); font-size:11.5px; }
+    /* C4 polish: preview body styling voor onbekende vars + lege placeholders. */
+    #waMetaPreviewBody .wa-preview-placeholder { color:#888; font-style:italic; }
+    #waMetaPreviewBody .wa-preview-unknown { color:#b91c1c; background:rgba(239,68,68,0.10); padding:0 4px; border-radius:3px; font-family:monospace; font-size:12.5px; display:inline-flex; align-items:center; gap:4px; }
+    #waMetaPreviewBody .wa-preview-unknown-dot { display:inline-block; width:7px; height:7px; border-radius:50%; background:#ef4444; box-shadow:0 0 0 2px rgba(239,68,68,0.20); }
   </style>
 </head>
 <body>
@@ -466,14 +483,21 @@
           <!-- BODY -->
           <div class="form-group">
             <label class="form-label" for="waMetaBodyText">Body</label>
-            <textarea id="waMetaBodyText" class="form-input" rows="6" maxlength="1024" placeholder="Hi {{1}}, je bestelling {{2}} is bevestigd."></textarea>
+            <textarea id="waMetaBodyText" class="form-input" rows="6" maxlength="1024" placeholder="Hi {{klant.naam}}, je factuur {{factuur.nummer}} staat open."></textarea>
             <div style="font-size:11px;color:var(--text-faint);margin-top:4px">
-              <span id="waMetaBodyCount">0</span> / 1024 &middot; gebruik <code>{{1}}</code>, <code>{{2}}</code> &hellip; voor placeholders.
+              <span id="waMetaBodyCount">0</span> / 1024 &middot; klik op een chip hieronder om een variabele in te voegen op de cursor, of typ direct <code>{{klant.naam}}</code> (named) of <code>{{1}}</code> (positioneel, legacy).
             </div>
+
+            <!-- C4: Variabelen-paneel (named-style insert) -->
+            <div id="waMetaVarsPanel" style="margin-top:10px">
+              <div style="font-size:11px;font-weight:600;color:var(--text-faint);text-transform:uppercase;letter-spacing:.4px;margin-bottom:4px">Variabelen invoegen</div>
+              <div id="waMetaVarsPanelBody"></div>
+            </div>
+
             <div id="waMetaVarsBlock" style="margin-top:10px;padding:10px;border:1px dashed var(--border);border-radius:8px;display:none">
-              <div style="font-size:12px;font-weight:600;margin-bottom:6px">Variabelen gevonden: <span id="waMetaVarsList"></span></div>
+              <div style="font-size:12px;font-weight:600;margin-bottom:6px"><span id="waMetaVarsBlockLabel">Variabelen gevonden:</span> <span id="waMetaVarsList"></span></div>
               <div id="waMetaVarsInputs" style="display:grid;grid-template-columns:1fr 1fr;gap:8px"></div>
-              <div style="font-size:11px;color:var(--text-faint);margin-top:6px">Voorbeeldwaarden &mdash; gebruikt voor preview &eacute;n als Meta sample bij submit.</div>
+              <div id="waMetaVarsHelp" style="font-size:11px;color:var(--text-faint);margin-top:6px">Voorbeeldwaarden &mdash; gebruikt voor preview &eacute;n als Meta sample bij submit.</div>
             </div>
           </div>
 
@@ -2045,12 +2069,71 @@ function switchWaTplSub(sub) {
   else                 loadWaQrList();
 }
 
+// ─── Variable registry (C4) ────────────────────────────────────────────────
+// Mirror van api/_lib/template-variables.js — frontend-only, geen API-call
+// voor C4 v1. Bij wijzigingen aan de server-registry ook hier bijwerken.
+// Categorie-volgorde bepaalt de UI-volgorde in het variabelen-paneel.
+const WA_VAR_REGISTRY = [
+  // ── customer ─────────────────────────────────────────────────────────────
+  { key: 'klant.naam',          label: 'Volledige naam',      category: 'customer', example: 'Jeffrey Biemold' },
+  { key: 'klant.voornaam',      label: 'Voornaam',            category: 'customer', example: 'Jeffrey' },
+  { key: 'klant.email',         label: 'E-mailadres',         category: 'customer', example: 'klant@example.com' },
+  { key: 'klant.telefoon',      label: 'Telefoonnummer',      category: 'customer', example: '+31612345678' },
+  { key: 'klant.bedrijf',       label: 'Bedrijfsnaam',        category: 'customer', example: 'Voorbeeld B.V.' },
+  // ── invoice ──────────────────────────────────────────────────────────────
+  { key: 'factuur.nummer',         label: 'Factuurnummer',           category: 'invoice', example: '2026-0001' },
+  { key: 'factuur.bedrag',         label: 'Factuurbedrag (totaal)',  category: 'invoice', example: 'EUR 1.234,56' },
+  { key: 'factuur.bedrag_open',    label: 'Openstaand bedrag',       category: 'invoice', example: 'EUR 80,00' },
+  { key: 'factuur.vervaldatum',    label: 'Vervaldatum',             category: 'invoice', example: '15-06-2026' },
+  { key: 'factuur.dagen_overdue',  label: 'Dagen te laat',           category: 'invoice', example: '12' },
+  { key: 'factuur.factuur_datum',  label: 'Factuurdatum',            category: 'invoice', example: '01-06-2026' },
+  { key: 'factuur.betaal_link',    label: 'Betaal-link',             category: 'invoice', example: 'https://focus.teamleader.eu/...' },
+  // ── klant (aggregaties) ──────────────────────────────────────────────────
+  { key: 'klant.factuur_lijst', label: 'Lijst openstaande facturen', category: 'klant', example: '- 2026-0001 (EUR 80,00)' },
+  { key: 'klant.totaal_open',   label: 'Totaal openstaand',          category: 'klant', example: 'EUR 200,00' },
+  { key: 'klant.aantal_open',   label: 'Aantal open facturen',       category: 'klant', example: '2' },
+  // ── bedrijf ──────────────────────────────────────────────────────────────
+  { key: 'bedrijf.naam',     label: 'Bedrijfsnaam',     category: 'bedrijf', example: 'De Forex Opleiding NL B.V.' },
+  { key: 'bedrijf.adres',    label: 'Bedrijfsadres',    category: 'bedrijf', example: 'Voorbeeldstraat 1, 1234 AB Plaats' },
+  { key: 'bedrijf.kvk',      label: 'KvK-nummer',       category: 'bedrijf', example: '12345678' },
+  { key: 'bedrijf.btw',      label: 'BTW-nummer',       category: 'bedrijf', example: 'NL123456789B01' },
+  { key: 'bedrijf.telefoon', label: 'Bedrijfstelefoon', category: 'bedrijf', example: '+31201234567' },
+  { key: 'bedrijf.email',    label: 'Bedrijfse-mail',   category: 'bedrijf', example: 'info@deforexopleiding.nl' },
+  // ── datum ────────────────────────────────────────────────────────────────
+  { key: 'datum.vandaag',     label: 'Datum vandaag', category: 'datum', example: '09-06-2026' },
+  { key: 'datum.deze_maand',  label: 'Deze maand',    category: 'datum', example: 'juni 2026' },
+  { key: 'datum.dit_jaar',    label: 'Dit jaar',      category: 'datum', example: '2026' },
+];
+
+const WA_VAR_CATEGORY_LABELS = {
+  customer: 'Klantgegevens',
+  invoice:  'Factuur',
+  klant:    'Klant (aggregaties)',
+  bedrijf:  'Bedrijfsgegevens',
+  datum:    'Datum',
+};
+// Volgorde waarin categorieën getoond worden in het paneel.
+const WA_VAR_CATEGORY_ORDER = ['customer', 'invoice', 'klant', 'bedrijf', 'datum'];
+// Snelle key-lookup map (zelfde patroon als server-side).
+const WA_VAR_BY_KEY = (() => {
+  const m = new Map();
+  WA_VAR_REGISTRY.forEach(v => m.set(v.key, v));
+  return m;
+})();
+
+// Regex helpers — gespiegeld op api/_lib/template-variables.js.
+// Named: {{categorie.veld}} — lowercase letters + underscore + dot.
+const WA_VAR_NAMED_RE = /\{\{([a-z_]+\.[a-z_]+)\}\}/g;
+// Positional: {{N}} — legacy Meta-native.
+const WA_VAR_POSITIONAL_RE = /\{\{(\d+)\}\}/g;
+
 // ─── Variable parsing + preview ────────────────────────────────────────────
-// {{N}} placeholders → unieke gesorteerde array van ints. Bv "Hi {{2}} en {{1}}"
-// returnt [1, 2]. Wordt zowel door de vars-block render als de preview gebruikt.
+// Legacy positional parser: {{N}} placeholders → unieke gesorteerde array
+// van ints. Bv "Hi {{2}} en {{1}}" returnt [1, 2]. Behouden voor backward-
+// compatibility met bestaande positional-templates (mapping=NULL).
 function parseTemplateVariables(bodyText) {
   if (!bodyText || typeof bodyText !== 'string') return [];
-  const re = /\{\{(\d+)\}\}/g;
+  const re = new RegExp(WA_VAR_POSITIONAL_RE.source, 'g');
   const seen = new Set();
   let m;
   while ((m = re.exec(bodyText)) !== null) {
@@ -2060,22 +2143,154 @@ function parseTemplateVariables(bodyText) {
   return [...seen].sort((a, b) => a - b);
 }
 
+// Named parser: {{klant.naam}} → ['klant.naam', ...] in volgorde van eerste
+// verschijning. Doublures uitgefilterd. Geen validatie tegen WA_VAR_REGISTRY
+// hier — validateWaMetaNamedKeys() doet dat losstaand.
+function parseTemplateNamedVariables(bodyText) {
+  if (!bodyText || typeof bodyText !== 'string') return [];
+  const re = new RegExp(WA_VAR_NAMED_RE.source, 'g');
+  const seen = new Set();
+  const result = [];
+  let m;
+  while ((m = re.exec(bodyText)) !== null) {
+    const key = m[1];
+    if (!seen.has(key)) { seen.add(key); result.push(key); }
+  }
+  return result;
+}
+
+// True als named placeholders voorkomen EN er geen positionele in de body
+// staan. Mixed templates (beide stijlen tegelijk) zijn niet ondersteund —
+// saveWaMetaTemplate weigert ze met een error.
+function isNamedTemplateBody(bodyText) {
+  const named = parseTemplateNamedVariables(bodyText);
+  const positional = parseTemplateVariables(bodyText);
+  return named.length > 0 && positional.length === 0;
+}
+
+// True als positionele én named placeholders gecombineerd voorkomen.
+function isMixedTemplateBody(bodyText) {
+  return parseTemplateNamedVariables(bodyText).length > 0
+    && parseTemplateVariables(bodyText).length > 0;
+}
+
+// Render variabelen-paneel: collapsible details per categorie met chips.
+// Wordt 1x gebouwd bij modal-open. Click-delegation in wireWaTplOnce.
+function renderWaMetaVarsPanel() {
+  const host = document.getElementById('waMetaVarsPanelBody');
+  if (!host) return;
+  const byCat = new Map();
+  WA_VAR_REGISTRY.forEach(v => {
+    if (!byCat.has(v.category)) byCat.set(v.category, []);
+    byCat.get(v.category).push(v);
+  });
+  const html = WA_VAR_CATEGORY_ORDER.filter(c => byCat.has(c)).map((cat, idx) => {
+    const items = byCat.get(cat);
+    const open = idx === 0 ? ' open' : '';
+    const label = WA_VAR_CATEGORY_LABELS[cat] || cat;
+    const chips = items.map(v => {
+      // C4 polish: tooltip toont key + voorbeeldwaarde. Indeling op meerdere
+      // regels zodat hover snel duidelijk maakt wat de chip oplevert in preview.
+      const t = `{{${v.key}}}\n${v.label}\nVoorbeeld: ${v.example}`;
+      return `<button type="button" class="wa-var-chip" data-wa-var-key="${esc(v.key)}" data-wa-var-example="${esc(v.example)}" title="${esc(t)}" aria-label="${esc(v.label)} (voorbeeld: ${esc(v.example)})">${esc(v.label)}</button>`;
+    }).join('');
+    return `<details${open}>
+      <summary>${esc(label)}</summary>
+      <div class="wa-var-chip-row">${chips}</div>
+    </details>`;
+  }).join('');
+  host.innerHTML = html;
+}
+
+// Voeg "{{key}}" in op huidige cursor-positie in het laatst-gefocuste editor-
+// veld (body, footer, of header-text). Behoudt selectie + plaatst caret achter
+// de ingevoegde string. Triggert input-events zodat parser + preview updaten.
+let _waMetaLastFocusedFieldId = 'waMetaBodyText';
+function _waMetaTrackFocus(id) {
+  if (!id) return;
+  _waMetaLastFocusedFieldId = id;
+}
+function insertVariableAtCursor(key) {
+  if (!key) return;
+  // Target: laatst-gefocuste insert-target. Fallback = body.
+  const targetId = ['waMetaBodyText', 'waMetaFooterInput', 'waMetaHeaderText']
+    .includes(_waMetaLastFocusedFieldId) ? _waMetaLastFocusedFieldId : 'waMetaBodyText';
+  const el = document.getElementById(targetId);
+  if (!el || el.disabled) return;
+  const insertStr = '{{' + key + '}}';
+  const start = (typeof el.selectionStart === 'number') ? el.selectionStart : (el.value || '').length;
+  const end   = (typeof el.selectionEnd   === 'number') ? el.selectionEnd   : start;
+  const value = el.value || '';
+  el.value = value.slice(0, start) + insertStr + value.slice(end);
+  // Caret achter ingevoegde string.
+  const newPos = start + insertStr.length;
+  try { el.setSelectionRange(newPos, newPos); } catch (_) { /* ignore */ }
+  el.focus();
+  // Forceer input-event zodat parser/preview re-render.
+  el.dispatchEvent(new Event('input', { bubbles: true }));
+}
+
+// Validatie: weiger onbekende named-keys (bv. {{customer.onbekend}}).
+// Returnt array met onbekende keys (lege array = OK).
+function validateWaMetaNamedKeys(bodyText) {
+  const keys = parseTemplateNamedVariables(bodyText);
+  return keys.filter(k => !WA_VAR_BY_KEY.has(k));
+}
+
 function renderWaMetaVarsBlock() {
   const bodyEl   = document.getElementById('waMetaBodyText');
   const block    = document.getElementById('waMetaVarsBlock');
+  const labelEl  = document.getElementById('waMetaVarsBlockLabel');
   const listEl   = document.getElementById('waMetaVarsList');
   const inputsEl = document.getElementById('waMetaVarsInputs');
+  const helpEl   = document.getElementById('waMetaVarsHelp');
   if (!bodyEl || !block || !inputsEl) return;
-  const vars = parseTemplateVariables(bodyEl.value || '');
-  if (!vars.length) {
+  const body = bodyEl.value || '';
+  const named = parseTemplateNamedVariables(body);
+  const positional = parseTemplateVariables(body);
+
+  // Niets te tonen → block verbergen.
+  if (!named.length && !positional.length) {
     block.style.display = 'none';
+    block.classList.remove('wa-vars-named');
     inputsEl.innerHTML = '';
     if (listEl) listEl.textContent = '';
     return;
   }
+
+  // ── Named-modus: read-only labels uit registry (geen handmatige input). ──
+  if (named.length > 0 && positional.length === 0) {
+    block.style.display = '';
+    block.classList.add('wa-vars-named');
+    if (labelEl) labelEl.textContent = 'Variabelen gevonden (named):';
+    if (listEl) listEl.textContent = named.map(k => `{{${k}}}`).join(', ');
+    if (helpEl) helpEl.textContent = 'Voorbeeldwaarden komen uit de registry — geen handmatige invoer nodig.';
+    inputsEl.style.gridTemplateColumns = '1fr';
+    inputsEl.innerHTML = named.map(k => {
+      const v = WA_VAR_BY_KEY.get(k);
+      if (!v) {
+        return `<div class="wa-var-readonly-row">
+          <span class="wa-var-readonly-key" style="background:rgba(239,68,68,0.15)">{{${esc(k)}}}</span>
+          <span class="wa-var-readonly-example" style="color:#dc2626">onbekende variabele</span>
+        </div>`;
+      }
+      return `<div class="wa-var-readonly-row">
+        <span class="wa-var-readonly-key">{{${esc(k)}}}</span>
+        <span class="wa-var-readonly-example">${esc(v.label)} &middot; voorbeeld: ${esc(v.example)}</span>
+      </div>`;
+    }).join('');
+    if (window._waMetaReadOnly) applyWaMetaReadOnly(true);
+    return;
+  }
+
+  // ── Positional-modus (legacy): handmatige inputs per {{N}}. ──────────────
   block.style.display = '';
-  if (listEl) listEl.textContent = vars.map(n => `{{${n}}}`).join(', ');
-  inputsEl.innerHTML = vars.map(n => {
+  block.classList.remove('wa-vars-named');
+  if (labelEl) labelEl.textContent = 'Variabelen gevonden:';
+  if (helpEl) helpEl.textContent = 'Voorbeeldwaarden — gebruikt voor preview én als Meta sample bij submit.';
+  inputsEl.style.gridTemplateColumns = '1fr 1fr';
+  if (listEl) listEl.textContent = positional.map(n => `{{${n}}}`).join(', ');
+  inputsEl.innerHTML = positional.map(n => {
     const cur = esc(_waMetaCurrentExamples[String(n)] || '');
     return `<div>
       <label style="display:block;font-size:11.5px;font-weight:600;margin-bottom:3px">{{${n}}}</label>
@@ -2210,14 +2425,49 @@ function computeWaMetaPreview() {
     }
   }
 
-  // Body: vervang {{N}} door examples; lege values laten placeholder staan zodat
-  // de gebruiker ziet welke vars nog ingevuld moeten worden.
+  // Body: vervang named placeholders ({{klant.naam}}) door registry-examples,
+  // en positionele ({{1}}) door _waMetaCurrentExamples. Lege values laten de
+  // placeholder staan zodat de gebruiker ziet welke vars nog ingevuld moeten
+  // worden. Onbekende named-keys krijgen een rood-stip indicator zodat snel
+  // duidelijk is dat er een typefout in de body zit. Output is HTML (escaped
+  // segments + span-wrappers) ipv pure tekst — gebruik innerHTML.
   const rawBody = bodyEl?.value || '';
-  const filled = rawBody.replace(/\{\{(\d+)\}\}/g, (m, n) => {
-    const v = _waMetaCurrentExamples[String(n)];
-    return (v && v.length) ? v : m;
-  });
-  previewBody.textContent = filled || 'Je bericht verschijnt hier…';
+  const segments = [];
+  // Combineer named + positional in één pass zodat segment-volgorde stabiel is.
+  const combinedRe = new RegExp(`(${WA_VAR_NAMED_RE.source}|${WA_VAR_POSITIONAL_RE.source})`, 'g');
+  let lastIdx = 0;
+  let m;
+  while ((m = combinedRe.exec(rawBody)) !== null) {
+    if (m.index > lastIdx) segments.push({ type: 'text', text: rawBody.slice(lastIdx, m.index) });
+    const token = m[0]; // bv. "{{klant.naam}}" of "{{1}}"
+    const inner = token.slice(2, -2);
+    if (/^\d+$/.test(inner)) {
+      const v = _waMetaCurrentExamples[inner];
+      segments.push({ type: (v && v.length) ? 'text' : 'placeholder', text: (v && v.length) ? v : token });
+    } else {
+      const reg = WA_VAR_BY_KEY.get(inner);
+      if (reg) {
+        segments.push({ type: 'text', text: reg.example });
+      } else {
+        segments.push({ type: 'unknown', text: token, key: inner });
+      }
+    }
+    lastIdx = m.index + token.length;
+  }
+  if (lastIdx < rawBody.length) segments.push({ type: 'text', text: rawBody.slice(lastIdx) });
+  if (!segments.length) {
+    previewBody.textContent = 'Je bericht verschijnt hier…';
+  } else {
+    previewBody.innerHTML = segments.map(s => {
+      if (s.type === 'unknown') {
+        return `<span class="wa-preview-unknown" title="Onbekende variabele: ${esc(s.key)}"><span class="wa-preview-unknown-dot" aria-hidden="true"></span>${esc(s.text)}</span>`;
+      }
+      if (s.type === 'placeholder') {
+        return `<span class="wa-preview-placeholder">${esc(s.text)}</span>`;
+      }
+      return esc(s.text);
+    }).join('') || 'Je bericht verschijnt hier…';
+  }
 
   // Footer
   if (previewFooter) {
@@ -2279,6 +2529,11 @@ function applyWaMetaReadOnly(disabled) {
   const varsBlock = document.getElementById('waMetaVarsBlock');
   if (varsBlock) {
     varsBlock.querySelectorAll('input').forEach(el => { el.disabled = !!disabled; });
+  }
+  // C4: Variabelen-paneel chips disablen in read-only modus.
+  const varsPanel = document.getElementById('waMetaVarsPanel');
+  if (varsPanel) {
+    varsPanel.querySelectorAll('.wa-var-chip').forEach(el => { el.disabled = !!disabled; });
   }
   // Save-knop: in read-only modus gebruiken we hem als "Sluiten".
   const saveBtn = document.getElementById('waMetaSaveBtn');
@@ -2373,8 +2628,10 @@ function openWaMetaNew() {
   if (htUrlEl)  htUrlEl.value = '';
   if (bodyEl)   bodyEl.value = '';
   if (footerEl) footerEl.value = '';
+  _waMetaLastFocusedFieldId = 'waMetaBodyText';
   _updateWaMetaHeaderVisibility();
   renderWaMetaButtons();
+  renderWaMetaVarsPanel();
   renderWaMetaVarsBlock();
   computeWaMetaPreview();
   applyWaMetaReadOnly(false);
@@ -2416,8 +2673,10 @@ function openWaMetaEdit(item) {
   if (htUrlEl)  htUrlEl.value = (item.header_content && item.header_content.example_url) || '';
   if (bodyEl)   bodyEl.value = item.body_text || '';
   if (footerEl) footerEl.value = item.footer_text || '';
+  _waMetaLastFocusedFieldId = 'waMetaBodyText';
   _updateWaMetaHeaderVisibility();
   renderWaMetaButtons();
+  renderWaMetaVarsPanel();
   renderWaMetaVarsBlock();
   computeWaMetaPreview();
   // BELANGRIJK: applyWaMetaReadOnly() na render-aanroepen zodat de dynamisch
@@ -2472,6 +2731,24 @@ async function saveWaMetaTemplate() {
   if (!name) { showErr('Naam is verplicht'); return; }
   if (!/^[a-z0-9_]+$/.test(name)) { showErr('Naam: alleen lowercase a-z, 0-9 en _'); return; }
   if (!bodyText) { showErr('Body is verplicht'); return; }
+
+  // C4: weiger mixed named+positionele placeholders in body.
+  if (isMixedTemplateBody(bodyText)) {
+    showErr('Body bevat zowel named ({{klant.naam}}) als positionele ({{1}}) placeholders. Kies één stijl.');
+    return;
+  }
+  // C4: weiger onbekende named-keys. Toon expliciet welke key onbekend is, plus
+  // een hint dat de chips in het variabelen-paneel de geldige keys tonen.
+  const unknownKeys = validateWaMetaNamedKeys(bodyText);
+  if (unknownKeys.length) {
+    const list = unknownKeys.map(k => '{{' + k + '}}').join(', ');
+    const plural = unknownKeys.length === 1 ? 'variabele' : 'variabelen';
+    showErr(
+      'Onbekende ' + plural + ' in body: ' + list +
+      '. Controleer de spelling — geldige keys staan als chips in het variabelen-paneel onder de body.'
+    );
+    return;
+  }
 
   // Header content payload op basis van type.
   let headerContent = null;
@@ -2885,13 +3162,34 @@ function wireWaTplOnce() {
     _waTplPreviewDebounced();
   });
   const htTxtEl = document.getElementById('waMetaHeaderText');
-  if (htTxtEl) htTxtEl.addEventListener('input', () => _waTplPreviewDebounced());
+  if (htTxtEl) {
+    htTxtEl.addEventListener('input', () => _waTplPreviewDebounced());
+    htTxtEl.addEventListener('focus', () => _waMetaTrackFocus('waMetaHeaderText'));
+  }
   const bodyEl = document.getElementById('waMetaBodyText');
-  if (bodyEl) bodyEl.addEventListener('input', () => _waTplVarsAndPreviewDebounced());
+  if (bodyEl) {
+    bodyEl.addEventListener('input', () => _waTplVarsAndPreviewDebounced());
+    bodyEl.addEventListener('focus', () => _waMetaTrackFocus('waMetaBodyText'));
+  }
   const footerEl = document.getElementById('waMetaFooterInput');
-  if (footerEl) footerEl.addEventListener('input', () => _waTplPreviewDebounced());
+  if (footerEl) {
+    footerEl.addEventListener('input', () => _waTplPreviewDebounced());
+    footerEl.addEventListener('focus', () => _waMetaTrackFocus('waMetaFooterInput'));
+  }
   const btnAdd = document.getElementById('waMetaBtnAddBtn');
   if (btnAdd) btnAdd.addEventListener('click', () => addWaMetaButton());
+
+  // C4: Variabelen-paneel chip-click delegation.
+  const varsPanel = document.getElementById('waMetaVarsPanel');
+  if (varsPanel) {
+    varsPanel.addEventListener('click', (e) => {
+      const chip = e.target.closest('.wa-var-chip');
+      if (!chip) return;
+      const key = chip.getAttribute('data-wa-var-key');
+      if (!key) return;
+      insertVariableAtCursor(key);
+    });
+  }
 }
 
 init();

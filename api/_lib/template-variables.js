@@ -1,0 +1,395 @@
+// api/_lib/template-variables.js
+//
+// Variable registry + parser + resolver voor WhatsApp template-variabelen
+// (Module C4). Twee placeholder-stijlen ondersteund:
+//
+//   1) Named (nieuw, dot-notation):    {{klant.naam}}, {{factuur.bedrag_open}}
+//   2) Positional (legacy, Meta-native): {{1}}, {{2}}
+//
+// Meta's WhatsApp Cloud API accepteert ALLEEN positionele placeholders in
+// de uiteindelijke template body. Onze named-style is intern: we vertalen
+// named -> positioneel bij submit, en bij send-time gebruiken we
+// whatsapp_meta_templates.meta_param_mapping om positie -> variable-key te
+// mappen en de waarde te resolven.
+//
+// Backward-compat: legacy templates (mapping = NULL) blijven werken via
+// caller-supplied variables in inbox-send-template.js.
+//
+// Geen DB-import op module-niveau. SQL queries gebeuren in resolveVariables
+// via een meegegeven supabaseAdmin client (callers reuse hun eigen).
+
+// ── Helpers: formatters (lokaal, geen import uit dunning-template-render
+//    om namespace-collision te vermijden — zie recon.data anti-pattern) ─────
+const EUR_FORMATTER = new Intl.NumberFormat('nl-NL', {
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2,
+});
+
+const NL_MONTHS = [
+  'januari', 'februari', 'maart', 'april', 'mei', 'juni',
+  'juli', 'augustus', 'september', 'oktober', 'november', 'december',
+];
+
+function formatEur(amount) {
+  const n = Number(amount) || 0;
+  return `EUR ${EUR_FORMATTER.format(n)}`;
+}
+
+function formatDateNl(isoDate) {
+  if (!isoDate) return '';
+  const ymd = String(isoDate).slice(0, 10);
+  const parts = ymd.split('-');
+  if (parts.length !== 3) return ymd;
+  return parts.reverse().join('-');
+}
+
+function openAmount(inv) {
+  if (!inv) return 0;
+  const total = Number(inv.amount_total) || 0;
+  const paid = Number(inv.amount_paid) || 0;
+  const credited = Number(inv.credited_amount) || 0;
+  return Math.max(0, total - paid - credited);
+}
+
+function customerDisplayName(c) {
+  if (!c) return '';
+  if (c.company_name && String(c.company_name).trim()) {
+    return String(c.company_name).trim();
+  }
+  const first = (c.first_name || '').trim();
+  const last = (c.last_name || '').trim();
+  const full = `${first} ${last}`.trim();
+  return full;
+}
+
+// ── Variable Registry ────────────────────────────────────────────────────
+// Alle ondersteunde named variabelen voor WhatsApp templates.
+// Categorieën:
+//   - customer: klant-velden (uit public.customers)
+//   - invoice:  factuur-velden (oudste open invoice tenzij anders gemarkeerd)
+//   - klant:    aggregaties over alle open invoices van de klant
+//   - bedrijf:  bedrijfsgegevens van De Forex Opleiding (env vars / constants)
+//   - datum:    datum-helpers (vandaag, deze maand, dit jaar)
+//
+// requires_context: welke onderdelen van de resolve-context nodig zijn.
+//   'customer' -> resolver moet customer-rij opzoeken
+//   'invoice'  -> resolver moet oudste open invoice opzoeken
+//   'invoices' -> resolver moet alle open invoices opzoeken (aggregaties)
+//   null       -> server-side (env / clock), geen DB nodig
+
+export const AVAILABLE_VARIABLES = [
+  // ── customer ───────────────────────────────────────────────────────────
+  { key: 'klant.naam',       label: 'Volledige naam',     category: 'customer', example: 'Jeffrey Biemold',    requires_context: 'customer' },
+  { key: 'klant.voornaam',   label: 'Voornaam',           category: 'customer', example: 'Jeffrey',            requires_context: 'customer' },
+  { key: 'klant.email',      label: 'E-mailadres',        category: 'customer', example: 'klant@example.com',  requires_context: 'customer' },
+  { key: 'klant.telefoon',   label: 'Telefoonnummer',     category: 'customer', example: '+31612345678',       requires_context: 'customer' },
+  { key: 'klant.bedrijf',    label: 'Bedrijfsnaam',       category: 'customer', example: 'Voorbeeld B.V.',     requires_context: 'customer' },
+
+  // ── invoice (oudste open factuur) ──────────────────────────────────────
+  { key: 'factuur.nummer',       label: 'Factuurnummer',         category: 'invoice', example: '2026-0001',         requires_context: 'invoice' },
+  { key: 'factuur.bedrag',       label: 'Factuurbedrag (totaal)', category: 'invoice', example: 'EUR 1.234,56',     requires_context: 'invoice' },
+  { key: 'factuur.bedrag_open',  label: 'Openstaand bedrag',     category: 'invoice', example: 'EUR 80,00',         requires_context: 'invoice' },
+  { key: 'factuur.vervaldatum',  label: 'Vervaldatum',           category: 'invoice', example: '15-06-2026',        requires_context: 'invoice' },
+  { key: 'factuur.dagen_overdue', label: 'Dagen te laat',        category: 'invoice', example: '12',                requires_context: 'invoice' },
+  { key: 'factuur.factuur_datum', label: 'Factuurdatum',         category: 'invoice', example: '01-06-2026',        requires_context: 'invoice' },
+  { key: 'factuur.betaal_link',  label: 'Betaal-link',           category: 'invoice', example: 'https://focus.teamleader.eu/...', requires_context: 'invoice' },
+
+  // ── klant (aggregaties over alle open invoices) ────────────────────────
+  { key: 'klant.factuur_lijst', label: 'Lijst openstaande facturen', category: 'klant', example: '- 2026-0001 (EUR 80,00)\n- 2026-0002 (EUR 120,00)', requires_context: 'invoices' },
+  { key: 'klant.totaal_open',   label: 'Totaal openstaand',          category: 'klant', example: 'EUR 200,00',  requires_context: 'invoices' },
+  { key: 'klant.aantal_open',   label: 'Aantal open facturen',       category: 'klant', example: '2',           requires_context: 'invoices' },
+
+  // ── bedrijf (env / constants) ──────────────────────────────────────────
+  { key: 'bedrijf.naam',     label: 'Bedrijfsnaam',  category: 'bedrijf', example: 'De Forex Opleiding NL B.V.', requires_context: null },
+  { key: 'bedrijf.adres',    label: 'Bedrijfsadres', category: 'bedrijf', example: 'Voorbeeldstraat 1, 1234 AB Plaats', requires_context: null },
+  { key: 'bedrijf.kvk',      label: 'KvK-nummer',    category: 'bedrijf', example: '12345678',                   requires_context: null },
+  { key: 'bedrijf.btw',      label: 'BTW-nummer',    category: 'bedrijf', example: 'NL123456789B01',             requires_context: null },
+  { key: 'bedrijf.telefoon', label: 'Bedrijfstelefoon', category: 'bedrijf', example: '+31201234567',            requires_context: null },
+  { key: 'bedrijf.email',    label: 'Bedrijfse-mail',   category: 'bedrijf', example: 'info@deforexopleiding.nl', requires_context: null },
+
+  // ── datum ──────────────────────────────────────────────────────────────
+  { key: 'datum.vandaag',     label: 'Datum vandaag', category: 'datum', example: '09-06-2026',  requires_context: null },
+  { key: 'datum.deze_maand',  label: 'Deze maand',    category: 'datum', example: 'juni 2026',   requires_context: null },
+  { key: 'datum.dit_jaar',    label: 'Dit jaar',      category: 'datum', example: '2026',         requires_context: null },
+];
+
+// Snelle key-lookup map (one-shot bij module-load).
+const VAR_BY_KEY = new Map(AVAILABLE_VARIABLES.map((v) => [v.key, v]));
+
+// ── Regex patterns ───────────────────────────────────────────────────────
+// Named: {{categorie.veld}} — alleen lowercase letters, underscore, dot.
+export const VARIABLE_REGEX = /\{\{([a-z_]+\.[a-z_]+)\}\}/g;
+// Positional: {{N}} — legacy Meta-native.
+export const POSITIONAL_REGEX = /\{\{(\d+)\}\}/g;
+
+// ── Parsers ──────────────────────────────────────────────────────────────
+
+/**
+ * Vind alle named placeholders ({{klant.naam}}) in tekst.
+ * Returnt unieke keys in volgorde van eerste verschijning.
+ */
+export function parseNamedPlaceholders(text) {
+  if (!text || typeof text !== 'string') return [];
+  const seen = new Set();
+  const result = [];
+  const re = new RegExp(VARIABLE_REGEX.source, 'g');
+  let m;
+  while ((m = re.exec(text)) !== null) {
+    const key = m[1];
+    if (!seen.has(key)) {
+      seen.add(key);
+      result.push(key);
+    }
+  }
+  return result;
+}
+
+/**
+ * Vind alle positionele placeholders ({{1}}, {{2}}, ...) in tekst.
+ * Returnt unieke indices (als integers) gesorteerd numeriek.
+ */
+export function parsePositionalPlaceholders(text) {
+  if (!text || typeof text !== 'string') return [];
+  const seen = new Set();
+  const re = new RegExp(POSITIONAL_REGEX.source, 'g');
+  let m;
+  while ((m = re.exec(text)) !== null) {
+    seen.add(parseInt(m[1], 10));
+  }
+  return Array.from(seen).sort((a, b) => a - b);
+}
+
+/**
+ * True als de tekst named placeholders bevat en GEEN positionele.
+ * Mixed templates (beide stijlen) zijn niet ondersteund; submit-endpoint
+ * dient die te weigeren.
+ */
+export function isNamedTemplate(text) {
+  const named = parseNamedPlaceholders(text);
+  const positional = parsePositionalPlaceholders(text);
+  return named.length > 0 && positional.length === 0;
+}
+
+// ── Registry lookup helpers ──────────────────────────────────────────────
+
+export function getVariableByKey(key) {
+  return VAR_BY_KEY.get(key) || null;
+}
+
+export function getExampleForKey(key) {
+  const v = VAR_BY_KEY.get(key);
+  return v ? v.example : '';
+}
+
+// ── Submit-time conversion ───────────────────────────────────────────────
+
+/**
+ * Converteert een named-style body naar Meta-positioneel + bouwt mapping.
+ *
+ * Input:  "Hoi {{klant.naam}}, je factuur {{factuur.nummer}} staat open."
+ * Output: {
+ *   converted_text: "Hoi {{1}}, je factuur {{2}} staat open.",
+ *   mapping:        { "1": "klant.naam", "2": "factuur.nummer" }
+ * }
+ *
+ * Onbekende keys (niet in AVAILABLE_VARIABLES) worden 1-op-1 mee gemapt
+ * met een warning in het result-object (caller kan dan blokkeren).
+ */
+export function buildPositionalMapping(text) {
+  const keys = parseNamedPlaceholders(text);
+  const mapping = {};
+  const unknown = [];
+
+  let converted_text = text || '';
+  keys.forEach((key, idx) => {
+    const position = String(idx + 1);
+    mapping[position] = key;
+    if (!VAR_BY_KEY.has(key)) unknown.push(key);
+    // Vervang alle voorkomens van deze key door {{position}}.
+    const escapedKey = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const placeholderRe = new RegExp(`\\{\\{${escapedKey}\\}\\}`, 'g');
+    converted_text = converted_text.replace(placeholderRe, `{{${position}}}`);
+  });
+
+  return { converted_text, mapping, unknown };
+}
+
+// ── Send-time value resolvers ────────────────────────────────────────────
+
+function getCompanyValue(key) {
+  // Server-side bedrijfsgegevens uit env-vars. Fallback = lege string (caller
+  // moet beslissen wat te doen — sturen mag, leeg veld in template-body is OK).
+  // Documentatie van verwachte env-vars:
+  //   COMPANY_NAME      -> bedrijf.naam     (fallback: 'De Forex Opleiding NL B.V.')
+  //   COMPANY_ADDRESS   -> bedrijf.adres
+  //   COMPANY_KVK       -> bedrijf.kvk
+  //   COMPANY_BTW       -> bedrijf.btw
+  //   COMPANY_PHONE     -> bedrijf.telefoon
+  //   COMPANY_EMAIL     -> bedrijf.email
+  const env = process.env || {};
+  switch (key) {
+    case 'bedrijf.naam':     return env.COMPANY_NAME || 'De Forex Opleiding NL B.V.';
+    case 'bedrijf.adres':    return env.COMPANY_ADDRESS || '';
+    case 'bedrijf.kvk':      return env.COMPANY_KVK || '';
+    case 'bedrijf.btw':      return env.COMPANY_BTW || '';
+    case 'bedrijf.telefoon': return env.COMPANY_PHONE || '';
+    case 'bedrijf.email':    return env.COMPANY_EMAIL || '';
+    default: return '';
+  }
+}
+
+function getDateValue(key) {
+  const now = new Date();
+  switch (key) {
+    case 'datum.vandaag': {
+      const dd = String(now.getDate()).padStart(2, '0');
+      const mm = String(now.getMonth() + 1).padStart(2, '0');
+      const yyyy = now.getFullYear();
+      return `${dd}-${mm}-${yyyy}`;
+    }
+    case 'datum.deze_maand':
+      return `${NL_MONTHS[now.getMonth()]} ${now.getFullYear()}`;
+    case 'datum.dit_jaar':
+      return String(now.getFullYear());
+    default: return '';
+  }
+}
+
+function getCustomerValue(customer, key) {
+  if (!customer) return '';
+  switch (key) {
+    case 'klant.naam':     return customerDisplayName(customer);
+    case 'klant.voornaam': return (customer.first_name || '').trim();
+    case 'klant.email':    return customer.email || '';
+    case 'klant.telefoon': return customer.phone || '';
+    case 'klant.bedrijf':  return customer.company_name || '';
+    default: return '';
+  }
+}
+
+function getInvoiceValue(invoice, key) {
+  if (!invoice) return '';
+  switch (key) {
+    case 'factuur.nummer':         return invoice.invoice_number || '';
+    case 'factuur.bedrag':         return formatEur(invoice.amount_total);
+    case 'factuur.bedrag_open':    return formatEur(openAmount(invoice));
+    case 'factuur.vervaldatum':    return formatDateNl(invoice.due_date);
+    case 'factuur.factuur_datum':  return formatDateNl(invoice.issue_date);
+    case 'factuur.dagen_overdue': {
+      if (!invoice.due_date) return '0';
+      const today = new Date(); today.setHours(0, 0, 0, 0);
+      const due = new Date(`${String(invoice.due_date).slice(0, 10)}T00:00:00`);
+      const diff = Math.floor((today.getTime() - due.getTime()) / 86400000);
+      return String(Math.max(0, diff));
+    }
+    case 'factuur.betaal_link':
+      // payment_url wordt lazy gevuld door /api/finance-invoice-payment-link.
+      // Tot dan: leeg. Caller (resolveVariables) kan optioneel het endpoint
+      // pre-call'en alvorens te resolven.
+      return invoice.payment_url || '';
+    default: return '';
+  }
+}
+
+function getKlantAggregateValue(openInvoices, key) {
+  const invs = Array.isArray(openInvoices) ? openInvoices : [];
+  switch (key) {
+    case 'klant.factuur_lijst':
+      return invs
+        .map((inv) => `- ${inv.invoice_number || inv.id || ''} (${formatEur(openAmount(inv))})`)
+        .join('\n');
+    case 'klant.totaal_open':
+      return formatEur(invs.reduce((sum, inv) => sum + openAmount(inv), 0));
+    case 'klant.aantal_open':
+      return String(invs.length);
+    default: return '';
+  }
+}
+
+/**
+ * Resolve een enkele variabele-key naar zijn waarde, gegeven de context.
+ * context = { customer, invoice (oudste open), openInvoices (allemaal) }.
+ */
+export function resolveVariableValue(key, context) {
+  const v = VAR_BY_KEY.get(key);
+  if (!v) return '';
+
+  switch (v.category) {
+    case 'bedrijf': return getCompanyValue(key);
+    case 'datum':   return getDateValue(key);
+    case 'customer': return getCustomerValue(context && context.customer, key);
+    case 'invoice':  return getInvoiceValue(context && context.invoice, key);
+    case 'klant':    return getKlantAggregateValue(context && context.openInvoices, key);
+    default: return '';
+  }
+}
+
+/**
+ * Hoofdresolver: tekst + mapping + context -> ingevulde tekst.
+ *
+ * Twee modi:
+ *   1) Named-style tekst ({{klant.naam}}): ignore mapping, resolve direct.
+ *   2) Positioneel-style ({{1}}, {{2}}) MET mapping: lookup mapping[N] = key,
+ *      resolve key tegen context.
+ *
+ * Onbekende keys: laat placeholder staan + log warning.
+ *
+ * Returnt { text, values: { '<key>': '<value>' }, warnings: [] }.
+ */
+export function resolveVariables(text, mapping, context) {
+  let result = text == null ? '' : String(text);
+  const values = {};
+  const warnings = [];
+
+  // ── Mode 1: named placeholders direct vervangen ────────────────────────
+  const namedKeys = parseNamedPlaceholders(result);
+  for (const key of namedKeys) {
+    if (!VAR_BY_KEY.has(key)) {
+      warnings.push(`Onbekende variabele-key: ${key}`);
+      continue;
+    }
+    const value = resolveVariableValue(key, context);
+    values[key] = value;
+    const escapedKey = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const re = new RegExp(`\\{\\{${escapedKey}\\}\\}`, 'g');
+    result = result.replace(re, value);
+  }
+
+  // ── Mode 2: positional + mapping ──────────────────────────────────────
+  const positionalIdx = parsePositionalPlaceholders(result);
+  if (positionalIdx.length > 0 && mapping && typeof mapping === 'object') {
+    for (const idx of positionalIdx) {
+      const key = mapping[String(idx)];
+      if (!key) {
+        warnings.push(`Geen mapping voor positie ${idx}`);
+        continue;
+      }
+      if (!VAR_BY_KEY.has(key)) {
+        warnings.push(`Onbekende variabele-key in mapping[${idx}]: ${key}`);
+        continue;
+      }
+      const value = resolveVariableValue(key, context);
+      values[key] = value;
+      const re = new RegExp(`\\{\\{${idx}\\}\\}`, 'g');
+      result = result.replace(re, value);
+    }
+  }
+
+  return { text: result, values, warnings };
+}
+
+/**
+ * Bouwt de Meta body-parameters array uit een mapping + context.
+ * Output-shape past op inbox-send-template.js variables-param:
+ *   { '1': '<resolved>', '2': '<resolved>', ... }
+ */
+export function buildMetaVariablesFromMapping(mapping, context) {
+  const out = {};
+  if (!mapping || typeof mapping !== 'object') return out;
+  const keys = Object.keys(mapping).filter((k) => /^\d+$/.test(k));
+  for (const k of keys) {
+    const varKey = mapping[k];
+    out[k] = resolveVariableValue(varKey, context);
+  }
+  return out;
+}

@@ -1,6 +1,6 @@
 // api/inbox-send-template.js
 // POST → verzend een outbound WhatsApp-template via Meta Cloud API,
-// specifiek voor de Inbox template-picker (C3). Skipt 24h-window check
+// specifiek voor de Inbox template-picker (C3/C4). Skipt 24h-window check
 // (templates mogen altijd buiten 24u verzonden worden) en bouwt de Meta
 // components-array op uit een simpel { "1": "...", "2": "..." } variables-
 // object.
@@ -8,26 +8,40 @@
 // Permission: finance.inbox.send (zelfde als inbox-send.js).
 //
 // Body:
-//   conversation_id   uuid  required
-//   meta_template_id  text  optional — Meta-zijde template id (informational)
-//   template_name     text  required
-//   language          text  optional (default 'nl')
-//   variables         object optional — { "1": "Jeffrey", "2": "EUR 80,00" }
-//                              body-placeholders {{1}}, {{2}}, ...
+//   conversation_id     uuid    required
+//   meta_template_id    text    optional — Meta-zijde template id (informational)
+//   template_name       text    required
+//   language            text    optional (default 'nl')
+//   variables           object  optional — { "1": "Jeffrey", "2": "EUR 80,00" }
+//                                body-placeholders {{1}}, {{2}}, ...
+//   context_invoice_id  uuid    optional — bij named templates met factuur-vars
+//                                (factuur.* / klant.factuur_*) gebruikt de server
+//                                deze invoice-row als resolve-context.
 //
-// Response: 200 { wamid, message_id }
+// C4: send-time named variable resolution
+//   Als de lokale template-row een `meta_param_mapping` heeft (jsonb, shape
+//   { body: { "1": "klant.naam", "2": "factuur.bedrag_open" }, ... }), wordt
+//   server-side de mapping toegepast: customer + (optionele) invoice + open
+//   invoices worden opgezocht en de waarden geresolved via
+//   _lib/template-variables.js. Caller-supplied `variables` worden in dat
+//   geval genegeerd. Zonder mapping = legacy positioneel gedrag (variables
+//   blijft autoritatief).
+//
+// Response: 200 { wamid, message_id, variables, warnings? }
+//           400 { error } bij invalide input of ontbrekende invoice-context
 //           404 { error: 'Conversation niet gevonden' }
 //           502 { error, meta_error } bij Meta-API fout
 //           503 { error, missing: [] } bij niet-geconfigureerde Meta
 //
-// NB: header- en button-variabelen worden in C3 v1 nog NIET ondersteund.
-// Voor C3 v2 kunnen we een rijkere 'components' input accepteren via
-// inbox-send.js (die accepteert al template_components 1-op-1 voor Meta).
+// NB: header- en button-variabelen worden in C3/C4 v1 nog NIET ondersteund —
+// alleen mapping.body[N] wordt geresolved.
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
 import { getClientIp } from './_lib/audit-customer.js';
 import { sendTemplate, getConfigStatus, MetaNotConfiguredError } from './_lib/meta-whatsapp.js';
+import { buildMetaVariablesFromMapping, AVAILABLE_VARIABLES } from './_lib/template-variables.js';
+import { getInvoicePaymentLink } from './_lib/teamleader-invoice-link.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const MAX_TEMPLATE_NAME = 200;
@@ -61,6 +75,9 @@ export default async function handler(req, res) {
   const variablesIn = body.variables && typeof body.variables === 'object' && !Array.isArray(body.variables)
     ? body.variables
     : {};
+  const contextInvoiceId = body.context_invoice_id != null
+    ? String(body.context_invoice_id).trim()
+    : '';
 
   // Validatie
   if (!convId) return res.status(400).json({ error: 'conversation_id vereist' });
@@ -71,6 +88,9 @@ export default async function handler(req, res) {
   }
   if (language.length > MAX_LANG) {
     return res.status(400).json({ error: `language max ${MAX_LANG} chars` });
+  }
+  if (contextInvoiceId && !UUID_RE.test(contextInvoiceId)) {
+    return res.status(400).json({ error: 'context_invoice_id moet geldige uuid zijn' });
   }
 
   // Meta-config check
@@ -111,13 +131,13 @@ export default async function handler(req, res) {
       console.error('[inbox-send-template] module-config exception:', e.message);
     }
 
-    // Optionele lokale template lookup — alleen voor validatie/warning, geen
-    // hard fail (we trusten Meta's template_name+language uniqueness binnen
-    // een WABA).
+    // Lokale template lookup — combineert status-guard (409 bij niet-APPROVED)
+    // EN ophalen van meta_param_mapping (C4 named-vars resolver).
+    let templateRow = null;
     try {
       const { data: tmplRow, error: tmplErr } = await supabaseAdmin
         .from('whatsapp_meta_templates')
-        .select('id, status')
+        .select('id, status, body_text, meta_param_mapping')
         .eq('name', templateName)
         .eq('language', language)
         .maybeSingle();
@@ -125,47 +145,168 @@ export default async function handler(req, res) {
         console.error('[inbox-send-template] template lookup:', tmplErr.message);
       } else if (!tmplRow) {
         console.warn(`[inbox-send-template] geen lokale template-row voor name=${templateName} language=${language} (continue, Meta is autoritatief)`);
-      } else if (tmplRow.status !== 'APPROVED') {
-        console.warn(`[inbox-send-template] lokale template status=${tmplRow.status} (verwacht APPROVED) name=${templateName}`);
+      } else {
+        templateRow = tmplRow;
+        if (tmplRow.status && tmplRow.status !== 'APPROVED') {
+          return res.status(409).json({
+            error: 'Template status is niet APPROVED — gebruik admin -> WhatsApp Templates -> Sync met Meta',
+            status: tmplRow.status,
+          });
+        }
       }
     } catch (e) {
       console.error('[inbox-send-template] template lookup exception:', e.message);
     }
 
-    // Harde status-guard: als template lokaal bestaat maar NIET APPROVED is,
-    // weiger met 409. Dit voorkomt Meta-rejections bij templates die nog in
-    // PENDING/REJECTED/DRAFT staan. Lokaal-onbekende templates worden NIET
-    // geblokkeerd (Meta blijft autoritatief — zie warn-tak hierboven).
-    try {
-      const { data: guardRow, error: guardErr } = await supabaseAdmin
-        .from('whatsapp_meta_templates')
-        .select('status')
-        .eq('name', templateName)
-        .eq('language', language)
-        .maybeSingle();
-      if (guardErr) {
-        console.error('[inbox-send-template] template status-guard lookup:', guardErr.message);
-      } else if (guardRow && guardRow.status && guardRow.status !== 'APPROVED') {
-        return res.status(409).json({
-          error: 'Template status is niet APPROVED — gebruik admin -> WhatsApp Templates -> Sync met Meta',
-          status: guardRow.status,
-        });
+    // ─── C4: server-side resolve van named variabelen ───────────────────────
+    // Mapping shape: { body: { "1": "klant.naam", "2": "factuur.bedrag_open" }, ... }
+    // Backward-compat: zonder mapping = caller-supplied `variables` (positioneel).
+    const mappingFull = templateRow && templateRow.meta_param_mapping
+      && typeof templateRow.meta_param_mapping === 'object'
+      ? templateRow.meta_param_mapping
+      : null;
+    const bodyMapping = mappingFull && mappingFull.body
+      && typeof mappingFull.body === 'object' && !Array.isArray(mappingFull.body)
+      ? mappingFull.body
+      : null;
+
+    let resolvedVariables = {}; // { "1": "value", "2": "value" }
+    const resolveWarnings = [];
+    let resolveMode = 'caller_supplied'; // info-veld voor audit
+
+    if (bodyMapping) {
+      // Bouw resolve-context op basis van welke keys de mapping eist.
+      const requiredKeys = Object.values(bodyMapping).filter(k => typeof k === 'string');
+      const knownKeys = new Set(AVAILABLE_VARIABLES.map(v => v.key));
+      const needsCustomer = requiredKeys.some(k => k && (k.startsWith('klant.') && knownKeys.has(k)));
+      const needsInvoice = requiredKeys.some(k => k && k.startsWith('factuur.'));
+      const needsInvoices = requiredKeys.some(k => k === 'klant.factuur_lijst' || k === 'klant.totaal_open' || k === 'klant.aantal_open');
+      const needsBetaalLink = requiredKeys.includes('factuur.betaal_link');
+
+      // Customer lookup — rijker dan inbox-conversation-context (incl. address_*).
+      let customer = null;
+      if (needsCustomer || needsInvoice || needsInvoices) {
+        try {
+          if (conv.customer_id) {
+            const { data: cust, error: custErr } = await supabaseAdmin
+              .from('customers')
+              .select('id, is_company, company_name, first_name, last_name, email, phone, address_street, address_number, address_postal, address_city')
+              .eq('id', conv.customer_id)
+              .maybeSingle();
+            if (custErr) console.error('[inbox-send-template] customer lookup:', custErr.message);
+            else customer = cust || null;
+          } else if (conv.phone_number) {
+            const { data: cust, error: custErr } = await supabaseAdmin
+              .from('customers')
+              .select('id, is_company, company_name, first_name, last_name, email, phone, address_street, address_number, address_postal, address_city')
+              .eq('phone', conv.phone_number)
+              .maybeSingle();
+            if (custErr) console.error('[inbox-send-template] customer phone-lookup:', custErr.message);
+            else customer = cust || null;
+          }
+        } catch (e) {
+          console.error('[inbox-send-template] customer lookup exception:', e.message);
+        }
       }
-    } catch (e) {
-      console.error('[inbox-send-template] template status-guard exception:', e.message);
+
+      // Invoice context: context_invoice_id wint; anders oudste open invoice
+      // van customer.
+      let invoice = null;
+      let openInvoices = [];
+      if (needsInvoice || needsInvoices) {
+        if (contextInvoiceId) {
+          try {
+            const { data: inv, error: invErr } = await supabaseAdmin
+              .from('invoices')
+              .select('id, customer_id, tl_invoice_id, invoice_number, amount_total, amount_paid, vat_amount, issue_date, due_date, paid_date, status, payment_url, payment_url_fetched_at')
+              .eq('id', contextInvoiceId)
+              .maybeSingle();
+            if (invErr) console.error('[inbox-send-template] invoice lookup:', invErr.message);
+            else invoice = inv || null;
+          } catch (e) {
+            console.error('[inbox-send-template] invoice lookup exception:', e.message);
+          }
+          if (!invoice) {
+            return res.status(400).json({ error: 'context_invoice_id verwijst niet naar bestaande invoice' });
+          }
+        } else if (customer && customer.id) {
+          try {
+            const { data: invs, error: invsErr } = await supabaseAdmin
+              .from('invoices')
+              .select('id, customer_id, tl_invoice_id, invoice_number, amount_total, amount_paid, vat_amount, issue_date, due_date, paid_date, status, payment_url, payment_url_fetched_at')
+              .eq('customer_id', customer.id)
+              .in('status', ['open', 'partially_paid', 'overdue'])
+              .order('due_date', { ascending: true })
+              .limit(25);
+            if (invsErr) {
+              console.error('[inbox-send-template] open-invoices lookup:', invsErr.message);
+            } else {
+              openInvoices = invs || [];
+              invoice = openInvoices[0] || null;
+            }
+          } catch (e) {
+            console.error('[inbox-send-template] open-invoices exception:', e.message);
+          }
+        }
+        if (needsInvoice && !invoice) {
+          // factuur.* gevraagd maar geen invoice gevonden → niet hard breken;
+          // resolver vult lege strings in. Wel een warning loggen.
+          resolveWarnings.push('Geen invoice-context voor factuur.* variabele(n)');
+        }
+      }
+
+      // Lazy TL-fetch voor invoice.betaal_link (Route A: real-time + cache).
+      if (needsBetaalLink) {
+        if (!contextInvoiceId && !invoice) {
+          return res.status(400).json({
+            error: 'Geen invoice context gegeven; sleutel invoice.betaal_link kan niet worden ge-resolved',
+          });
+        }
+        if (invoice) {
+          try {
+            const linkResult = await getInvoicePaymentLink(invoice);
+            if (linkResult.url) {
+              invoice.payment_url = linkResult.url; // gebruikt door resolver
+            } else {
+              resolveWarnings.push('TL betaal-link niet beschikbaar voor invoice ' + invoice.id);
+            }
+          } catch (e) {
+            console.error('[inbox-send-template] getInvoicePaymentLink exception:', e.message);
+            resolveWarnings.push('Fout bij ophalen TL betaal-link: ' + e.message);
+          }
+        }
+      }
+
+      // Resolve mapping → { "1": value, "2": value }
+      const ctx = { customer, invoice, openInvoices };
+      resolvedVariables = buildMetaVariablesFromMapping(bodyMapping, ctx);
+      resolveMode = 'server_resolved';
+
+      // Warning voor onbekende keys.
+      for (const [pos, key] of Object.entries(bodyMapping)) {
+        if (key && !knownKeys.has(key)) {
+          resolveWarnings.push(`Onbekende variabele-key in mapping[${pos}]: ${key}`);
+        }
+      }
+    } else {
+      // Legacy: caller leverde de variables direct.
+      const callerKeys = Object.keys(variablesIn)
+        .filter(k => /^\d+$/.test(k));
+      for (const k of callerKeys) {
+        resolvedVariables[k] = String(variablesIn[k] ?? '');
+      }
     }
 
-    // Build Meta components-array uit variables object.
-    // C3 v1: alleen body-placeholders {{1}}, {{2}}, ... worden ondersteund.
-    // Sortering op numerieke key zodat parameters in juiste volgorde gaan.
-    const sortedKeys = Object.keys(variablesIn)
+    // Build Meta components-array uit resolved variables.
+    // Alleen body-placeholders {{1}}, {{2}}, ... worden ondersteund.
+    const sortedKeys = Object.keys(resolvedVariables)
       .filter(k => /^\d+$/.test(k))
       .sort((a, b) => Number(a) - Number(b));
     const components = [];
     if (sortedKeys.length) {
       const parameters = sortedKeys.map(k => ({
         type: 'text',
-        text: String(variablesIn[k] ?? '').slice(0, MAX_VAR_VALUE),
+        text: String(resolvedVariables[k] ?? '').slice(0, MAX_VAR_VALUE),
       }));
       components.push({ type: 'body', parameters });
     }
@@ -204,13 +345,27 @@ export default async function handler(req, res) {
     // impliciet via template_name != NULL. status default 'queued'; webhook
     // delivery-events promoten later naar sent/delivered/read.
     const templateVarsForDb = sortedKeys.length
-      ? Object.fromEntries(sortedKeys.map(k => [k, String(variablesIn[k] ?? '')]))
+      ? Object.fromEntries(sortedKeys.map(k => [k, String(resolvedVariables[k] ?? '')]))
       : null;
+
+    // Build textual preview body voor chat-history readability: vervang
+    // {{N}} in template body_text met de resolved values. Fail-soft: als
+    // we geen body_text hebben, laat body NULL (huidige gedrag).
+    let previewBody = null;
+    if (templateRow && templateRow.body_text && sortedKeys.length) {
+      let rendered = String(templateRow.body_text);
+      for (const k of sortedKeys) {
+        const re = new RegExp(`\\{\\{${k}\\}\\}`, 'g');
+        rendered = rendered.replace(re, String(resolvedVariables[k] ?? ''));
+      }
+      previewBody = rendered;
+    }
+
     const insertRow = {
       conversation_id:    convId,
       direction:          'out',
       meta_wamid:         wamid,
-      body:               null,
+      body:               previewBody,
       template_name:      templateName,
       template_variables: templateVarsForDb,
       status:             'queued',
@@ -240,14 +395,17 @@ export default async function handler(req, res) {
         entity_type: 'whatsapp_message',
         entity_id:   inserted.id,
         after_json:  {
-          conversation_id:  convId,
-          phone_number:     conv.phone_number,
-          phone_number_id:  outboundPnId || null,
-          template_name:    templateName,
-          meta_template_id: metaTemplateId || null,
+          conversation_id:    convId,
+          phone_number:       conv.phone_number,
+          phone_number_id:    outboundPnId || null,
+          template_name:      templateName,
+          meta_template_id:   metaTemplateId || null,
           language,
-          variables:        templateVarsForDb,
-          meta_wamid:       wamid,
+          variables:          templateVarsForDb,
+          meta_wamid:         wamid,
+          resolve_mode:       resolveMode,
+          context_invoice_id: contextInvoiceId || null,
+          resolve_warnings:   resolveWarnings.length ? resolveWarnings : null,
         },
         ip_address: getClientIp(req),
       });
@@ -258,6 +416,8 @@ export default async function handler(req, res) {
     return res.status(200).json({
       wamid,
       message_id: inserted.id,
+      variables: templateVarsForDb,
+      warnings: resolveWarnings.length ? resolveWarnings : undefined,
     });
   } catch (e) {
     console.error('[inbox-send-template]', e.message);

@@ -13,7 +13,12 @@
 // Response:
 //   200 { items: [{ id, meta_template_id, name, language, category,
 //                   header_type, header_content, body_text, body_examples,
-//                   footer_text, buttons, status, approved_at, updated_at }] }
+//                   footer_text, buttons, status, approved_at, updated_at,
+//                   meta_param_mapping }] }
+//
+// C4: meta_param_mapping wordt meegegeven zodat de picker in modules/finance.html
+//     kan detecteren of een template named-style variabelen heeft en de auto-
+//     resolve-flow kan activeren i.p.v. de handmatige invul-form.
 //   400 { error } — ontbrekende/ongeldige conversation_id
 //   401 { error: 'Niet geauthenticeerd' }
 //   403 { error: 'Geen rechten (finance.inbox.send)' }
@@ -105,7 +110,7 @@ export default async function handler(req, res) {
     // 3) APPROVED templates ophalen.
     const { data, error } = await supabaseAdmin
       .from('whatsapp_meta_templates')
-      .select('id, meta_template_id, name, language, category, header_type, header_content, body_text, body_examples, footer_text, buttons, status, approved_at, updated_at')
+      .select('id, meta_template_id, name, language, category, header_type, header_content, body_text, body_examples, footer_text, buttons, status, approved_at, updated_at, meta_param_mapping')
       .eq('business_account_id', businessAccountId)
       .eq('status', 'APPROVED')
       .order('name', { ascending: true });
