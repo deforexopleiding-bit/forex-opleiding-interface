@@ -2,7 +2,9 @@
 // POST -> markeer een pending_action handmatig als 'FAILED' (niet door te
 // voeren). Permission: finance.arrangements.approve.
 //
-// Body: { id: uuid, reason: string (min 10 chars, required) }
+// Body: { id: uuid, reason?: string, failure_reason?: string }
+// (min 10 chars vereist op de gekozen key — `reason` en `failure_reason` zijn
+//  aliassen; frontend stuurt historisch `failure_reason`, canonical is `reason`.)
 //
 // State-machine: alleen vanuit status='APPROVED' kan op FAILED gezet worden;
 // anders 409 met huidige status. APPROVED is de uitkomst van de approval-flow;
@@ -39,9 +41,14 @@ export default async function handler(req, res) {
     return res.status(403).json({ error: 'Geen rechten (finance.arrangements.approve)' });
   }
 
-  const body   = req.body || {};
-  const id     = body.id ? String(body.id) : null;
-  const reason = typeof body.reason === 'string' ? body.reason.trim() : '';
+  const body = req.body || {};
+  const id   = body.id ? String(body.id) : null;
+  // Accept zowel `reason` (canonical) als `failure_reason` (frontend-legacy).
+  // execution_result.failure_reason blijft de DB-key (Engelse semantiek).
+  const reasonRaw = typeof body.reason === 'string'
+    ? body.reason
+    : (typeof body.failure_reason === 'string' ? body.failure_reason : '');
+  const reason = reasonRaw.trim();
 
   if (!id || !UUID_RE.test(id)) return res.status(400).json({ error: 'id (uuid) vereist' });
   if (reason.length < 10) {
@@ -65,6 +72,8 @@ export default async function handler(req, res) {
     }
 
     const nowIso = new Date().toISOString();
+    // Defensief: user kan in edge-cases zonder id terugkomen.
+    const userId = user?.id || null;
 
     // Merge met bestaande execution_result (jsonb).
     const existingResult = (row.execution_result && typeof row.execution_result === 'object')
@@ -74,7 +83,7 @@ export default async function handler(req, res) {
       ...existingResult,
       failure_reason:          reason,
       marked_not_executed_at:  nowIso,
-      marked_by_user_id:       user.id,
+      marked_by_user_id:       userId,
     };
 
     // ---- UPDATE pending_actions -> FAILED ----
@@ -94,7 +103,7 @@ export default async function handler(req, res) {
     // ---- Audit-log (fail-soft) ----
     try {
       await supabaseAdmin.from('audit_log').insert({
-        user_id:     user.id,
+        user_id:     userId,
         action:      'pending_action.manually_not_executed',
         entity_type: 'pending_action',
         entity_id:   id,

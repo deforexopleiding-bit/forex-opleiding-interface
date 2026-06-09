@@ -118,6 +118,9 @@ export default async function handler(req, res) {
     }
 
     const nowIso = new Date().toISOString();
+    // Defensief: user kan in edge-cases zonder id terugkomen (oude sessie,
+    // service-account). NULL is geldig in executed_by_user_id (uuid nullable).
+    const userId = user?.id || null;
 
     // Merge met bestaande execution_result (jsonb) — handmatige verwerking
     // overschrijft of vult eerdere result aan (bv. executor-attempts).
@@ -127,7 +130,7 @@ export default async function handler(req, res) {
     const mergedResult = {
       ...existingResult,
       ...cleanExecutionResult,
-      executed_by_user_id: user.id,
+      executed_by_user_id: userId,
       marked_manually_at: nowIso,
     };
 
@@ -137,7 +140,7 @@ export default async function handler(req, res) {
       .update({
         status:              'EXECUTED',
         executed_at:         nowIso,
-        executed_by_user_id: user.id,
+        executed_by_user_id: userId,
         execution_result:    mergedResult,
         updated_at:          nowIso,
       })
@@ -192,7 +195,7 @@ export default async function handler(req, res) {
     // ---- Audit-log (fail-soft) ----
     try {
       await supabaseAdmin.from('audit_log').insert({
-        user_id:     user.id,
+        user_id:     userId,
         action:      'pending_action.manually_executed',
         entity_type: 'pending_action',
         entity_id:   id,
