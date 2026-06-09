@@ -3689,6 +3689,104 @@
     return map[t] || (t || '—');
   }
 
+  // pending_actions.action_type → NL label. Spec-conform TL_-prefix + legacy.
+  function arrangActionTypeLabel(t) {
+    const map = {
+      'TL_INVOICE_UPDATE_DUE':              'Uitstel (per factuur)',
+      'TL_INVOICE_CONSOLIDATE_AND_RESTART': 'Consolideer + nieuwe regeling',
+      'TL_INVOICE_SPLIT':                   'Splitsing in termijnen',
+      'TL_SUBSCRIPTION_PAUSE':              'Abonnement pauze',
+      'TL_SUBSCRIPTION_STOP':               'Abonnement stop',
+      'TL_INVOICE_WRITEOFF':                'Kwijtschelding',
+      'arrangement.uitstel':                'Uitstel',
+      'arrangement.gespreid':               'Splitsing in termijnen',
+      'arrangement.kwijtschelding':         'Kwijtschelding',
+      'arrangement.pauze':                  'Abonnement pauze',
+      'arrangement.abonnement_stop':        'Abonnement stop',
+    };
+    return map[t] || (t || '—');
+  }
+
+  // EUR-formatter (numeriek bedrag → "€ 1.234,56").
+  function fmtEur2Finance(v) {
+    const n = Number(v);
+    if (!isFinite(n)) return '—';
+    return '€ ' + n.toLocaleString('nl-NL', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  }
+
+  // Render een samenvatting van een TL_INVOICE_CONSOLIDATE_AND_RESTART
+  // pending_action: termijn-config, btw-mix, timeline. Best-effort op
+  // verschillende payload-key varianten.
+  function renderArrangConsolidateSummary(pa) {
+    const p = (pa && pa.payload) || {};
+    const ns = p.new_subscription || p.subscription || {};
+    const installments = ns.installments || ns.termijnen || p.installments || null;
+    const perInstExcl  = ns.amount_per_installment_excl_vat
+                      ?? ns.amount_per_installment
+                      ?? ns.amount_per_termijn
+                      ?? p.amount_per_installment
+                      ?? null;
+    const totalExcl    = ns.total_excl_vat ?? ns.total_excl ?? p.total_excl_vat ?? null;
+    const totalIncl    = ns.total_incl_vat ?? ns.total_incl ?? ns.total ?? p.total_incl_vat ?? null;
+    const startsOn     = ns.starts_on || ns.start_date || p.starts_on || null;
+    const endsOn       = ns.ends_on   || ns.end_date   || p.ends_on   || null;
+
+    const vatDist = Array.isArray(p.vat_distribution) ? p.vat_distribution
+                  : Array.isArray(ns.vat_distribution) ? ns.vat_distribution
+                  : Array.isArray(p.tax_rates) ? p.tax_rates
+                  : [];
+    const vatLine = vatDist.length
+      ? vatDist.map(v => {
+          const rate = v.rate ?? v.percentage ?? v.percent ?? '—';
+          const amt  = v.amount_per_installment ?? v.amount ?? v.per_installment ?? null;
+          return `<li style="font-size:12px;color:var(--text-dim)"><strong>${esc(String(rate))}% BTW</strong>${amt != null ? ` <span style="color:var(--text-faint);margin-left:6px">${esc(fmtEur2Finance(amt))}</span> <span style="color:var(--text-faint);font-size:11px">per termijn</span>` : ''}</li>`;
+        }).join('')
+      : '<li style="font-size:12px;color:var(--text-faint)">(geen btw-verdeling in payload)</li>';
+
+    const subLine = (installments && perInstExcl != null)
+      ? `<strong>${esc(String(installments))}</strong> termijnen × <strong>${esc(fmtEur2Finance(perInstExcl))}</strong> <span style="color:var(--text-faint);font-size:11px">excl btw</span>`
+      : (installments ? `<strong>${esc(String(installments))}</strong> termijnen` : '<span style="color:var(--text-faint)">termijn-info ontbreekt</span>');
+
+    const totalLine = (totalIncl != null)
+      ? `<strong>${esc(fmtEur2Finance(totalIncl))}</strong> <span style="color:var(--text-faint);font-size:11px">incl btw</span>`
+      : (totalExcl != null
+          ? `<strong>${esc(fmtEur2Finance(totalExcl))}</strong> <span style="color:var(--text-faint);font-size:11px">excl btw</span>`
+          : '<span style="color:var(--text-faint)">—</span>');
+
+    return `
+      <div style="margin-top:10px;padding:10px 12px;background:rgba(56,189,248,0.06);border:1px solid rgba(56,189,248,0.25);border-radius:8px">
+        <div style="font-size:11.5px;color:var(--text-faint);margin-bottom:6px">Consolidatie + nieuwe regeling</div>
+        <div style="display:grid;grid-template-columns:160px 1fr;gap:6px 10px;font-size:12.5px">
+          <div style="color:var(--text-faint)">Termijn-configuratie</div><div>${subLine}</div>
+          <div style="color:var(--text-faint)">Totaal nieuwe contract</div><div>${totalLine}</div>
+          <div style="color:var(--text-faint)">Eerste vervaldatum</div><div>${esc(startsOn ? fmtDateNl(String(startsOn).slice(0, 10)) : '—')}</div>
+          <div style="color:var(--text-faint)">Laatste vervaldatum</div><div>${esc(endsOn ? fmtDateNl(String(endsOn).slice(0, 10)) : '—')}</div>
+        </div>
+        <div style="font-size:11.5px;color:var(--text-faint);margin-top:8px;margin-bottom:2px">Btw-verdeling per termijn</div>
+        <ul style="margin:0;padding-left:20px;list-style:disc">${vatLine}</ul>
+      </div>
+    `;
+  }
+
+  // Render execution_result-detail voor een pending_action (D2.1+).
+  // Verwachte shape (best-effort):
+  //   { credit_note_id, credit_note_tl_id, new_subscription_id,
+  //     new_subscription_tl_id, executed_at, ... }
+  function renderArrangActionExecution(a) {
+    const r = (a && a.execution_result) || {};
+    const rows = [];
+    const creditTlId = r.credit_note_tl_id || r.credit_note_id || r.credit_note?.tl_id || r.credit_note?.id;
+    const subTlId    = r.new_subscription_tl_id || r.new_subscription_id || r.subscription?.tl_id || r.subscription?.id;
+    if (creditTlId) rows.push(`<div>Credit-nota TL-ID: <span style="font-family:monospace">${esc(String(creditTlId))}</span></div>`);
+    if (subTlId)    rows.push(`<div>Nieuwe subscription TL-ID: <span style="font-family:monospace">${esc(String(subTlId))}</span></div>`);
+    // Fallback: dump JSON als geen herkende keys gevonden.
+    if (!rows.length) {
+      const json = JSON.stringify(r, null, 2);
+      return `<details style="margin-top:4px"><summary style="font-size:11px;color:var(--text-faint);cursor:pointer">Executie-resultaat</summary><pre style="margin:4px 0 0;padding:6px 8px;background:rgba(0,0,0,0.25);border:1px solid var(--border-subtle, #2b2f3a);border-radius:4px;font-size:10.5px;color:var(--text-dim);overflow:auto;max-height:140px">${esc(json)}</pre></details>`;
+    }
+    return `<div style="margin-top:4px;font-size:11px;color:var(--text-dim);line-height:1.4">${rows.join('')}</div>`;
+  }
+
   // Bepaal effective_from / effective_until uit details voor display.
   function arrangEffective(item) {
     const d = item.details || {};
@@ -3828,7 +3926,16 @@
         <div style="font-size:11.5px;color:var(--text-faint);margin-bottom:4px">Details (JSON)</div>
         <pre style="margin:0;padding:8px 10px;background:rgba(0,0,0,0.25);border:1px solid var(--border-subtle, #2b2f3a);border-radius:6px;font-size:11px;color:var(--text-dim);overflow:auto;max-height:160px">${esc(detailsJson)}</pre>
       </div>`;
-      if (sec1El) sec1El.innerHTML = rowsHtml + detailsBlock;
+      // Speciale consolidate-summary (UITSTEL met TL_INVOICE_CONSOLIDATE_AND_RESTART)
+      const pa = Array.isArray(d.pending_actions) ? d.pending_actions : [];
+      const consolidatePa = (arr.type === 'UITSTEL' && pa[0] && pa[0].action_type === 'TL_INVOICE_CONSOLIDATE_AND_RESTART')
+        ? pa[0]
+        : null;
+      const consolidateSummaryHtml = consolidatePa
+        ? renderArrangConsolidateSummary(consolidatePa)
+        : '';
+
+      if (sec1El) sec1El.innerHTML = rowsHtml + consolidateSummaryHtml + detailsBlock;
 
       // Sectie 2: pending actions
       const actions = d.pending_actions || [];
@@ -3850,8 +3957,18 @@
           let approvedInfo = '—';
           if (a.approved_at) approvedInfo = 'approved ' + fmtDateNl(String(a.approved_at).slice(0, 10));
           else if (a.reject_reason) approvedInfo = 'rejected: ' + esc(a.reject_reason);
+          // Executie-resultaat (D2.1 wanneer pending_action wordt afgehandeld)
+          let execHtml = '';
+          if (st === 'EXECUTED' && a.execution_result) {
+            execHtml = renderArrangActionExecution(a);
+          }
+          const actionLabel = arrangActionTypeLabel(a.action_type);
           return `<tr>
-            <td style="font-family:monospace;font-size:11.5px">${esc(a.action_type)}</td>
+            <td style="font-size:11.5px">
+              <div style="font-weight:600">${esc(actionLabel)}</div>
+              <div style="font-family:monospace;font-size:10.5px;color:var(--text-faint)">${esc(a.action_type)}</div>
+              ${execHtml}
+            </td>
             <td>${statusBadge}</td>
             <td style="font-size:11.5px">${esc(proposed)}</td>
             <td style="font-size:11.5px">${approvedInfo}</td>
