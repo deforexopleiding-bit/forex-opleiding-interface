@@ -375,6 +375,7 @@
           <!-- Filter pills -->
           <div class="approv-filter-strip" id="approvFilterStrip">
             <button type="button" class="approv-pill active" data-approv-status="PENDING"   onclick="switchApprovStatus('PENDING')">Pending <span class="approv-pill-count" id="approvCntPending">0</span></button>
+            <button type="button" class="approv-pill"        data-approv-status="APPROVED"  data-approv-subfilter="markverwerkt" onclick="switchApprovStatus('APPROVED','markverwerkt')">Te verwerken <span class="approv-pill-count" id="approvCntTodo">0</span></button>
             <button type="button" class="approv-pill"        data-approv-status="APPROVED"  onclick="switchApprovStatus('APPROVED')">Approved <span class="approv-pill-count" id="approvCntApproved">0</span></button>
             <button type="button" class="approv-pill"        data-approv-status="REJECTED"  onclick="switchApprovStatus('REJECTED')">Rejected <span class="approv-pill-count" id="approvCntRejected">0</span></button>
             <button type="button" class="approv-pill"        data-approv-status="EXECUTED"  onclick="switchApprovStatus('EXECUTED')">Executed <span class="approv-pill-count" id="approvCntExecuted">0</span></button>
@@ -757,9 +758,11 @@
       <div style="color:var(--text-faint);padding:14px;text-align:center;font-size:12.5px">Laden&hellip;</div>
     </div>
     <div class="modal-footer">
-      <button class="btn"            id="pendingActionDetailCloseBtn"   onclick="closePendingActionDetail()">Sluiten</button>
-      <button class="btn btn-danger" id="pendingActionDetailRejectBtn"  onclick="openRejectModalFromDetail()" style="display:none">Reject</button>
-      <button class="btn btn-primary" id="pendingActionDetailApproveBtn" onclick="approveFromDetail()"        style="display:none">Approve</button>
+      <button class="btn"            id="pendingActionDetailCloseBtn"          onclick="closePendingActionDetail()">Sluiten</button>
+      <button class="btn btn-danger" id="pendingActionDetailRejectBtn"         onclick="openRejectModalFromDetail()"            style="display:none">Reject</button>
+      <button class="btn btn-primary" id="pendingActionDetailApproveBtn"        onclick="approveFromDetail()"                    style="display:none">Approve</button>
+      <button class="btn btn-danger" id="pendingActionDetailMarkNotExecutedBtn" onclick="openMarkNotExecutedModalFromDetail()"   style="display:none">Markeer als niet door te voeren</button>
+      <button class="btn btn-primary" id="pendingActionDetailMarkExecutedBtn"   onclick="markExecutedFromDetail()"               style="display:none">Markeer als verwerkt</button>
     </div>
   </div>
 </div>
@@ -3459,13 +3462,15 @@ function wireWaTplOnce() {
 // ─── Approval-queue (Payment-arrangements D1) ────────────────────────────────
 // Tab toont pending_actions met filter-pills, bulk-actions, detail-modal +
 // reject-modal. Endpoints: /api/pending-actions-{list,detail,approve,reject}.
-let _approvActiveStatus = 'PENDING';
+let _approvActiveStatus    = 'PENDING';
+let _approvActiveSubFilter = null;  // null | 'markverwerkt' (virtual sub-view op APPROVED)
 let _approvItems        = [];
 let _approvSelectedIds  = [];
 let _approvWired        = false;
 let _approvLoading      = false;
 let _approvCurrentDetailId = null;
-let _approvRejectContext   = null; // { type:'single'|'bulk', ids:[uuid] }
+let _approvCurrentDetailItem = null; // laatst geladen detail-payload (voor execution_result render)
+let _approvRejectContext   = null; // { type:'single'|'bulk'|'mark_not_executed', ids:[uuid] }
 
 function wireApprovOnce() {
   if (_approvWired) return;
@@ -3578,17 +3583,24 @@ function renderApprovCounts(counts) {
     rejected:  counts.REJECTED  || 0,
     executed:  counts.EXECUTED  || 0,
     failed:    counts.FAILED    || 0,
+    // 'Te verwerken' = APPROVED rijen die nog niet executed zijn. In D1 zijn
+    // alle APPROVED-rijen per definitie nog niet executed (D2 executor bestaat
+    // niet), dus mappen we APPROVED 1-op-1. Zodra D2 live is kan de list-
+    // endpoint een aparte counts.TODO_EXECUTE returnen.
+    todo:      (typeof counts.TODO_EXECUTE === 'number' ? counts.TODO_EXECUTE : (counts.APPROVED || 0)),
   };
   const elPending  = document.getElementById('approvCntPending');
   const elApproved = document.getElementById('approvCntApproved');
   const elRejected = document.getElementById('approvCntRejected');
   const elExecuted = document.getElementById('approvCntExecuted');
   const elFailed   = document.getElementById('approvCntFailed');
+  const elTodo     = document.getElementById('approvCntTodo');
   if (elPending)  elPending.textContent  = map.pending;
   if (elApproved) elApproved.textContent = map.approved;
   if (elRejected) elRejected.textContent = map.rejected;
   if (elExecuted) elExecuted.textContent = map.executed;
   if (elFailed)   elFailed.textContent   = map.failed;
+  if (elTodo)     elTodo.textContent     = map.todo;
 
   // Tab-badge: alleen PENDING-count tonen, verbergen als 0.
   const badge = document.getElementById('approvalsTabBadge');
@@ -3665,11 +3677,15 @@ function renderApprovRows() {
   updateApprovBulkUi();
 }
 
-function switchApprovStatus(status) {
-  if (status === _approvActiveStatus) return;
-  _approvActiveStatus = status;
+function switchApprovStatus(status, subFilter) {
+  const sub = subFilter || null;
+  if (status === _approvActiveStatus && sub === _approvActiveSubFilter) return;
+  _approvActiveStatus    = status;
+  _approvActiveSubFilter = sub;
   document.querySelectorAll('#approvFilterStrip .approv-pill').forEach(p => {
-    p.classList.toggle('active', p.getAttribute('data-approv-status') === status);
+    const pStatus = p.getAttribute('data-approv-status');
+    const pSub    = p.getAttribute('data-approv-subfilter') || null;
+    p.classList.toggle('active', pStatus === status && pSub === sub);
   });
   loadApprovalQueue();
 }
@@ -3823,10 +3839,20 @@ function showRejectModal(title, subtitle) {
   const subEl   = document.getElementById('rejectActionSubtitle');
   const txt     = document.getElementById('rejectActionReason');
   const errEl   = document.getElementById('rejectActionError');
+  const btnEl   = document.getElementById('rejectActionConfirmBtn');
   if (titleEl) titleEl.textContent = title;
   if (subEl)   subEl.textContent   = subtitle;
   if (txt)     txt.value = '';
   if (errEl)   { errEl.classList.add('hidden'); errEl.textContent = ''; }
+  // Confirm-button label aanpassen per context-type zodat 'mark_not_executed'
+  // niet misleidend 'Afwijzen' toont.
+  if (btnEl) {
+    if (_approvRejectContext && _approvRejectContext.type === 'mark_not_executed') {
+      btnEl.textContent = 'Markeer als niet doorgevoerd';
+    } else {
+      btnEl.textContent = 'Afwijzen';
+    }
+  }
   document.getElementById('rejectActionModal')?.classList.remove('hidden');
   setTimeout(() => { try { txt?.focus(); } catch (_) {} }, 50);
 }
@@ -3850,10 +3876,19 @@ async function confirmRejectAction() {
   }
   const ctx = _approvRejectContext;
   const btn = document.getElementById('rejectActionConfirmBtn');
+  const origLabel = btn ? btn.textContent : 'Afwijzen';
   if (btn) { btn.disabled = true; btn.textContent = 'Bezig…'; }
   try {
     if (ctx.type === 'bulk') {
       await bulkReject(reason);
+    } else if (ctx.type === 'mark_not_executed') {
+      const success = await markNotExecuted(ctx.ids[0], reason);
+      if (success) {
+        window.AgentShared?.showToast('Voorstel gemarkeerd als niet doorgevoerd', 'success');
+        loadApprovalQueue();
+        if (_approvCurrentDetailId === ctx.ids[0]) closePendingActionDetail();
+        try { window.AgentShared?.refreshApprovalsBadge?.(); } catch (_) {}
+      }
     } else {
       const success = await rejectAction(ctx.ids[0], reason);
       if (success) {
@@ -3864,7 +3899,7 @@ async function confirmRejectAction() {
       }
     }
   } finally {
-    if (btn) { btn.disabled = false; btn.textContent = 'Afwijzen'; }
+    if (btn) { btn.disabled = false; btn.textContent = origLabel || 'Afwijzen'; }
     closeRejectActionModal();
   }
 }
@@ -3873,16 +3908,21 @@ async function confirmRejectAction() {
 async function openApprovalDetail(id) {
   if (!id) return;
   wireApprovOnce();
-  _approvCurrentDetailId = id;
+  _approvCurrentDetailId   = id;
+  _approvCurrentDetailItem = null;
   const modal = document.getElementById('pendingActionDetailModal');
   const body  = document.getElementById('pendingActionDetailBody');
   const sub   = document.getElementById('pendingActionDetailSubtitle');
-  const approveBtn = document.getElementById('pendingActionDetailApproveBtn');
-  const rejectBtn  = document.getElementById('pendingActionDetailRejectBtn');
+  const approveBtn         = document.getElementById('pendingActionDetailApproveBtn');
+  const rejectBtn          = document.getElementById('pendingActionDetailRejectBtn');
+  const markExecutedBtn    = document.getElementById('pendingActionDetailMarkExecutedBtn');
+  const markNotExecutedBtn = document.getElementById('pendingActionDetailMarkNotExecutedBtn');
   if (sub)  sub.textContent  = 'ID: ' + id;
   if (body) body.innerHTML   = '<div style="color:var(--text-faint);padding:14px;text-align:center;font-size:12.5px">Laden&hellip;</div>';
-  if (approveBtn) approveBtn.style.display = 'none';
-  if (rejectBtn)  rejectBtn.style.display  = 'none';
+  if (approveBtn)         approveBtn.style.display         = 'none';
+  if (rejectBtn)          rejectBtn.style.display          = 'none';
+  if (markExecutedBtn)    markExecutedBtn.style.display    = 'none';
+  if (markNotExecutedBtn) markNotExecutedBtn.style.display = 'none';
   if (modal) modal.classList.remove('hidden');
 
   try {
@@ -4031,7 +4071,12 @@ function renderApprovDetail(d) {
   const arr  = d.arrangement || null;
   const approver = d.approver || null;
   const rejecter = d.rejecter || null;
-  const isPending = it.status === 'PENDING';
+  const status   = it.status || '';
+  const isPending  = status === 'PENDING';
+  const isApproved = status === 'APPROVED';
+  const isExecuted = status === 'EXECUTED';
+  const isFailed   = status === 'FAILED';
+  _approvCurrentDetailItem = it;
 
   const custLink = cust && cust.id
     ? `<a href="/modules/klanten.html?id=${esc(cust.id)}" style="color:var(--brand-secondary,var(--accent-cyan,#06b6d4));text-decoration:none">${esc(cust.name || '(onbekend)')}</a>`
@@ -4066,6 +4111,12 @@ function renderApprovDetail(d) {
     ? renderConsolidateActionDetail(it.payload || {})
     : '';
 
+  // Execution-result render: voor EXECUTED toon TL-IDs + manual_notes; voor
+  // FAILED toon failure_reason. Beide read-only.
+  const executionBlock = (isExecuted || isFailed)
+    ? renderExecutionResult(it.execution_result || {}, status)
+    : '';
+
   body.innerHTML = `
     <div class="approv-detail-grid">
       <div>Action type</div>      <div><span class="approv-action-type">${esc(approvActionLabel(it.action_type))}</span> <span style="color:var(--text-faint);font-size:11px;margin-left:6px">${esc(it.action_type || '')}</span></div>
@@ -4081,6 +4132,8 @@ function renderApprovDetail(d) {
 
     ${consolidateBlock}
 
+    ${executionBlock}
+
     <div class="approv-detail-section-title">Payload</div>
     <pre class="approv-detail-pre">${esc(payloadJson)}</pre>
 
@@ -4088,10 +4141,117 @@ function renderApprovDetail(d) {
     <div style="font-size:12px;color:var(--text-dim)">${auditHtml}</div>
   `;
 
-  const approveBtn = document.getElementById('pendingActionDetailApproveBtn');
-  const rejectBtn  = document.getElementById('pendingActionDetailRejectBtn');
-  if (approveBtn) approveBtn.style.display = isPending ? '' : 'none';
-  if (rejectBtn)  rejectBtn.style.display  = isPending ? '' : 'none';
+  const approveBtn         = document.getElementById('pendingActionDetailApproveBtn');
+  const rejectBtn          = document.getElementById('pendingActionDetailRejectBtn');
+  const markExecutedBtn    = document.getElementById('pendingActionDetailMarkExecutedBtn');
+  const markNotExecutedBtn = document.getElementById('pendingActionDetailMarkNotExecutedBtn');
+  if (approveBtn)         approveBtn.style.display         = isPending  ? '' : 'none';
+  if (rejectBtn)          rejectBtn.style.display          = isPending  ? '' : 'none';
+  if (markExecutedBtn)    markExecutedBtn.style.display    = isApproved ? '' : 'none';
+  if (markNotExecutedBtn) markNotExecutedBtn.style.display = isApproved ? '' : 'none';
+}
+
+// renderExecutionResult: bouwt HTML-block met TL-IDs en notes voor EXECUTED of
+// failure_reason voor FAILED. Verwachte (best-effort) execution_result shape:
+//   {
+//     tl_credit_note_ids: [string],
+//     tl_subscription_id: string,
+//     tl_invoice_ids:     [string],
+//     manual_notes:       string,
+//     failure_reason:     string,
+//     marked_executed_at: iso,
+//     marked_by:          uuid,
+//   }
+function renderExecutionResult(result, status) {
+  const r = result || {};
+  const title = (status === 'FAILED')
+    ? 'Niet doorgevoerd'
+    : 'Verwerkt';
+  const rows = [];
+
+  // Failure reason (alleen bij FAILED).
+  if (status === 'FAILED') {
+    const reason = r.failure_reason || r.reason || r.error || '';
+    rows.push(
+      `<div style="font-size:12.5px;color:var(--text-primary,#e5e7eb)">
+         <strong>Reden:</strong>
+         <span style="color:var(--text-dim);margin-left:6px">${reason ? esc(reason) : '<span style="color:var(--text-faint)">(geen reden vastgelegd)</span>'}</span>
+       </div>`
+    );
+  }
+
+  // TL credit-note IDs.
+  if (Array.isArray(r.tl_credit_note_ids) && r.tl_credit_note_ids.length) {
+    const items = r.tl_credit_note_ids.map(id =>
+      `<li style="font-size:12px;color:var(--text-dim);margin:2px 0"><code style="color:var(--text-primary,#e5e7eb)">${esc(String(id))}</code></li>`
+    ).join('');
+    rows.push(
+      `<div style="font-size:12.5px;color:var(--text-primary,#e5e7eb)">
+         <strong>TL credit-note IDs:</strong>
+         <ul style="margin:4px 0 0;padding-left:20px;list-style:disc">${items}</ul>
+       </div>`
+    );
+  }
+
+  // TL subscription ID.
+  if (r.tl_subscription_id) {
+    rows.push(
+      `<div style="font-size:12.5px;color:var(--text-primary,#e5e7eb)">
+         <strong>TL subscription ID:</strong>
+         <code style="color:var(--text-dim);margin-left:6px">${esc(String(r.tl_subscription_id))}</code>
+       </div>`
+    );
+  }
+
+  // TL invoice IDs.
+  if (Array.isArray(r.tl_invoice_ids) && r.tl_invoice_ids.length) {
+    const items = r.tl_invoice_ids.map(id =>
+      `<li style="font-size:12px;color:var(--text-dim);margin:2px 0"><code style="color:var(--text-primary,#e5e7eb)">${esc(String(id))}</code></li>`
+    ).join('');
+    rows.push(
+      `<div style="font-size:12.5px;color:var(--text-primary,#e5e7eb)">
+         <strong>TL invoice IDs:</strong>
+         <ul style="margin:4px 0 0;padding-left:20px;list-style:disc">${items}</ul>
+       </div>`
+    );
+  }
+
+  // Manual notes (vrije tekst).
+  if (r.manual_notes) {
+    rows.push(
+      `<div style="font-size:12.5px;color:var(--text-primary,#e5e7eb)">
+         <strong>Notities:</strong>
+         <div style="color:var(--text-dim);margin-top:4px;white-space:pre-wrap">${esc(String(r.manual_notes))}</div>
+       </div>`
+    );
+  }
+
+  // Marked-executed metadata (alleen bij EXECUTED zinvol).
+  if (status === 'EXECUTED' && (r.marked_executed_at || r.marked_by)) {
+    const parts = [];
+    if (r.marked_executed_at) parts.push('op ' + esc(approvFmtDateTime(r.marked_executed_at)));
+    if (r.marked_by)          parts.push('door ' + esc(String(r.marked_by)));
+    rows.push(
+      `<div style="font-size:11.5px;color:var(--text-faint)">
+         Handmatig gemarkeerd ${parts.join(' ')}
+       </div>`
+    );
+  }
+
+  const bodyHtml = rows.length
+    ? rows.join('')
+    : '<div style="font-size:12px;color:var(--text-faint)">(geen execution-details vastgelegd)</div>';
+
+  const bgClass = (status === 'FAILED')
+    ? 'background:rgba(220,38,38,0.06);border:1px solid rgba(220,38,38,0.25)'
+    : 'background:rgba(16,185,129,0.06);border:1px solid rgba(16,185,129,0.25)';
+
+  return `
+    <div class="approv-detail-section-title">${esc(title)}</div>
+    <div style="display:flex;flex-direction:column;gap:8px;padding:10px 12px;${bgClass};border-radius:8px">
+      ${bodyHtml}
+    </div>
+  `;
 }
 
 async function approveFromDetail() {
@@ -4109,7 +4269,72 @@ async function approveFromDetail() {
 
 function closePendingActionDetail() {
   document.getElementById('pendingActionDetailModal')?.classList.add('hidden');
-  _approvCurrentDetailId = null;
+  _approvCurrentDetailId   = null;
+  _approvCurrentDetailItem = null;
+}
+
+// ── Mark-as-executed / Mark-as-not-executed flow ─────────────────────────────
+// Markeer als verwerkt: directe POST naar /api/pending-actions-mark-executed
+// na inline confirm() (geen reden vereist). Markeer als niet door te voeren:
+// hergebruikt rejectActionModal met context-type 'mark_not_executed' en
+// branched in confirmRejectAction naar /api/pending-actions-mark-not-executed.
+async function markExecutedFromDetail() {
+  if (!_approvCurrentDetailId) return;
+  const id = _approvCurrentDetailId;
+  if (!confirm('Markeer dit voorstel als verwerkt? Dit zet de status op EXECUTED en is niet automatisch terug te draaien.')) return;
+  const btn = document.getElementById('pendingActionDetailMarkExecutedBtn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Bezig…'; }
+  try {
+    const r = await window.AgentShared.apiFetch('/api/pending-actions-mark-executed', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ id }),
+    });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) {
+      window.AgentShared?.showToast('Markeren mislukt: ' + (d.error || ('HTTP ' + r.status)), 'error');
+      return;
+    }
+    window.AgentShared?.showToast('Voorstel gemarkeerd als verwerkt', 'success');
+    closePendingActionDetail();
+    loadApprovalQueue();
+    try { window.AgentShared?.refreshApprovalsBadge?.(); } catch (_) {}
+  } catch (e) {
+    console.error('[markExecutedFromDetail]', e);
+    window.AgentShared?.showToast('Markeren mislukt: ' + e.message, 'error');
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = 'Markeer als verwerkt'; }
+  }
+}
+
+function openMarkNotExecutedModalFromDetail() {
+  if (!_approvCurrentDetailId) return;
+  _approvRejectContext = { type: 'mark_not_executed', ids: [_approvCurrentDetailId] };
+  showRejectModal(
+    'Markeer als niet door te voeren',
+    'Voer een reden in waarom dit voorstel niet doorgevoerd kan worden.'
+  );
+}
+
+async function markNotExecuted(id, reason) {
+  if (!id) return false;
+  try {
+    const r = await window.AgentShared.apiFetch('/api/pending-actions-mark-not-executed', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ id, failure_reason: reason }),
+    });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) {
+      window.AgentShared?.showToast('Markeren mislukt: ' + (d.error || ('HTTP ' + r.status)), 'error');
+      return false;
+    }
+    return true;
+  } catch (e) {
+    console.error('[markNotExecuted]', e);
+    window.AgentShared?.showToast('Markeren mislukt: ' + e.message, 'error');
+    return false;
+  }
 }
 
 // Lichtgewicht refresh van alleen de tab-badge (PENDING-count) zonder de
