@@ -1643,8 +1643,21 @@
             <div style="font-size:11px;color:var(--text-dim);text-transform:uppercase;letter-spacing:.04em;font-weight:600;margin-bottom:4px">Body (met placeholders)</div>
             <div id="inboxTplStep2Body" style="font-size:12.5px;line-height:1.55;background:rgba(255,255,255,.03);border:1px solid var(--border-subtle, rgba(255,255,255,.08));border-radius:6px;padding:10px 12px;white-space:pre-wrap;word-break:break-word">—</div>
           </div>
+          <!-- C4: invoice-selector — alleen zichtbaar als template factuur.* vars heeft. -->
+          <div id="inboxTplInvoiceWrap" hidden style="display:flex;flex-direction:column;gap:6px">
+            <div style="font-size:11px;color:var(--text-dim);text-transform:uppercase;letter-spacing:.04em;font-weight:600">Factuur kiezen</div>
+            <select id="inboxTplInvoiceSelect" class="fin-input" style="font-size:13px;width:100%">
+              <option value="">(geen factuur)</option>
+            </select>
+            <div id="inboxTplInvoiceHint" style="font-size:11px;color:var(--text-faint);font-style:italic">Geselecteerde factuur wordt gebruikt voor factuur.* variabelen.</div>
+          </div>
+          <!-- C4: auto-resolved variabelen — read-only preview-lijst voor named templates. -->
+          <div id="inboxTplResolvedWrap" hidden style="display:flex;flex-direction:column;gap:6px">
+            <div style="font-size:11px;color:var(--text-dim);text-transform:uppercase;letter-spacing:.04em;font-weight:600">Auto-ingevulde variabelen</div>
+            <div id="inboxTplResolvedList" style="display:flex;flex-direction:column;gap:4px;font-size:12px;background:rgba(255,255,255,.03);border:1px solid var(--border-subtle, rgba(255,255,255,.08));border-radius:6px;padding:8px 10px"></div>
+          </div>
           <form id="inboxTplVarsForm" style="display:flex;flex-direction:column;gap:8px">
-            <!-- Dynamisch ingevuld -->
+            <!-- Dynamisch ingevuld (alleen voor legacy positionele templates) -->
           </form>
         </div>
         <!-- Rechter kolom: WhatsApp-look preview -->
@@ -3217,11 +3230,16 @@
   let _inboxWiredOnce        = false;
   let _inboxActiveConv       = null;  // hele conversation-object van laatst-geladen thread
 
-  // ── Template-picker state (C3) ──
+  // ── Template-picker state (C3 + C4) ──
   let _inboxTplItems    = [];     // APPROVED templates voor afzendlijn
   let _inboxTplSelected = null;   // huidig geselecteerde template-row
-  let _inboxTplVars     = {};     // { "1": "...", "2": "..." } actuele waarden
+  let _inboxTplVars     = {};     // { "1": "...", "2": "..." } actuele waarden (legacy positioneel)
   let _inboxTplFilter   = '';     // zoekstring stap 1
+  // C4: customer + open invoices voor auto-resolve van named placeholders.
+  // Wordt 1x geladen bij openInboxTplPicker() per actieve conversation.
+  let _inboxTplContext  = { customer: null, open_invoices: [] };
+  let _inboxTplSelectedInvoiceId = '';   // geselecteerde factuur uit dropdown (lege string = (geen))
+  let _inboxTplResolveMode = 'positional'; // 'positional' (legacy vars-form) of 'named' (auto-resolve)
 
   // Relatieve tijd helper: ISO-string → "5m" / "2u" / "gisteren" / "3d" / "2w" / "3mnd" / "1j"
   function fmtRelTime(iso) {
@@ -3907,8 +3925,171 @@
   }
 
   // ──────────────────────────────────────────────────────────────────────────
-  //  Template-picker (C3)
+  //  Template-picker (C3 + C4 named-variable auto-resolve)
   // ──────────────────────────────────────────────────────────────────────────
+
+  // ── C4: named placeholder helpers (front-end mirror van api/_lib/template-variables.js) ──
+  // Houd registry hier minimal en gefocust op preview-rendering. Server-side
+  // resolve blijft autoritatief (inbox-send-template.js doet de echte resolve).
+  const _INBOX_NL_MONTHS = ['januari','februari','maart','april','mei','juni','juli','augustus','september','oktober','november','december'];
+  // Note: _inboxFmtEur en _inboxFmtDateNL bestaan al hoger (klant-paneel sectie).
+  // Voor WhatsApp template-body gebruiken we EUR-prefix ipv €-symbol om Meta-encoding
+  // problemen te vermijden — daarom een aparte Tpl-variant.
+  function _inboxTplFmtEur(amount) {
+    const n = Number(amount) || 0;
+    return 'EUR ' + n.toLocaleString('nl-NL', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  }
+  function _inboxTplFmtDateNl(isoDate) {
+    if (!isoDate) return '';
+    const ymd = String(isoDate).slice(0, 10);
+    const parts = ymd.split('-');
+    if (parts.length !== 3) return ymd;
+    return parts.reverse().join('-');
+  }
+  function _inboxOpenAmount(inv) {
+    if (!inv) return 0;
+    const total = Number(inv.amount_total) || 0;
+    const paid = Number(inv.amount_paid) || 0;
+    const credited = Number(inv.credited_amount) || 0;
+    return Math.max(0, total - paid - credited);
+  }
+  function _inboxCustomerDisplayName(c) {
+    if (!c) return '';
+    if (c.company_name && String(c.company_name).trim()) return String(c.company_name).trim();
+    const first = (c.first_name || '').trim();
+    const last = (c.last_name || '').trim();
+    return (first + ' ' + last).trim();
+  }
+  // Resolve a single named-variable key tegen { customer, invoice, open_invoices }.
+  // Returns { value, resolved } — resolved=false als context ontbreekt (placeholder
+  // blijft staan, UI toont waarschuwing).
+  function _inboxResolveNamedVar(key, ctx) {
+    const customer = ctx && ctx.customer;
+    const invoice = ctx && ctx.invoice;
+    const opens = (ctx && Array.isArray(ctx.open_invoices)) ? ctx.open_invoices : [];
+    switch (key) {
+      // customer
+      case 'klant.naam':     return customer ? { value: _inboxCustomerDisplayName(customer), resolved: true } : { value: '', resolved: false };
+      case 'klant.voornaam': return customer ? { value: (customer.first_name || '').trim(), resolved: true } : { value: '', resolved: false };
+      case 'klant.email':    return customer ? { value: customer.email || '', resolved: true } : { value: '', resolved: false };
+      case 'klant.telefoon': return customer ? { value: customer.phone || '', resolved: true } : { value: '', resolved: false };
+      case 'klant.bedrijf':  return customer ? { value: customer.company_name || '', resolved: true } : { value: '', resolved: false };
+      // invoice
+      case 'factuur.nummer':        return invoice ? { value: invoice.invoice_number || '', resolved: true } : { value: '', resolved: false };
+      case 'factuur.bedrag':        return invoice ? { value: _inboxTplFmtEur(invoice.amount_total), resolved: true } : { value: '', resolved: false };
+      case 'factuur.bedrag_open':   return invoice ? { value: _inboxTplFmtEur(_inboxOpenAmount(invoice)), resolved: true } : { value: '', resolved: false };
+      case 'factuur.vervaldatum':   return invoice ? { value: _inboxTplFmtDateNl(invoice.due_date), resolved: true } : { value: '', resolved: false };
+      case 'factuur.factuur_datum': return invoice ? { value: _inboxTplFmtDateNl(invoice.issue_date), resolved: true } : { value: '', resolved: false };
+      case 'factuur.dagen_overdue': {
+        if (!invoice || !invoice.due_date) return { value: '0', resolved: !!invoice };
+        const today = new Date(); today.setHours(0,0,0,0);
+        const due = new Date(String(invoice.due_date).slice(0,10) + 'T00:00:00');
+        const diff = Math.floor((today.getTime() - due.getTime()) / 86400000);
+        return { value: String(Math.max(0, diff)), resolved: true };
+      }
+      case 'factuur.betaal_link':
+        // Server resolved deze lazy via TL — preview toont placeholder.
+        return invoice
+          ? { value: '(betaal-link wordt bij verzenden opgehaald)', resolved: true, deferred: true }
+          : { value: '', resolved: false };
+      // klant aggregaties
+      case 'klant.factuur_lijst':
+        return opens.length
+          ? { value: opens.map(i => '- ' + (i.invoice_number || i.id || '') + ' (' + _inboxTplFmtEur(_inboxOpenAmount(i)) + ')').join('\n'), resolved: true }
+          : { value: '', resolved: false };
+      case 'klant.totaal_open':
+        return opens.length
+          ? { value: _inboxTplFmtEur(opens.reduce((s, i) => s + _inboxOpenAmount(i), 0)), resolved: true }
+          : { value: _inboxTplFmtEur(0), resolved: opens != null };
+      case 'klant.aantal_open':
+        return { value: String(opens.length), resolved: true };
+      // bedrijf — front-end weet env-vars niet; tonen placeholder, server resolved.
+      case 'bedrijf.naam':     return { value: 'De Forex Opleiding NL B.V.', resolved: true };
+      case 'bedrijf.adres':    return { value: '(server-gerendeerd)', resolved: true, deferred: true };
+      case 'bedrijf.kvk':      return { value: '(server-gerendeerd)', resolved: true, deferred: true };
+      case 'bedrijf.btw':      return { value: '(server-gerendeerd)', resolved: true, deferred: true };
+      case 'bedrijf.telefoon': return { value: '(server-gerendeerd)', resolved: true, deferred: true };
+      case 'bedrijf.email':    return { value: '(server-gerendeerd)', resolved: true, deferred: true };
+      // datum
+      case 'datum.vandaag': {
+        const n = new Date();
+        const dd = String(n.getDate()).padStart(2,'0');
+        const mm = String(n.getMonth()+1).padStart(2,'0');
+        return { value: dd + '-' + mm + '-' + n.getFullYear(), resolved: true };
+      }
+      case 'datum.deze_maand': {
+        const n = new Date();
+        return { value: _INBOX_NL_MONTHS[n.getMonth()] + ' ' + n.getFullYear(), resolved: true };
+      }
+      case 'datum.dit_jaar':
+        return { value: String((new Date()).getFullYear()), resolved: true };
+      default:
+        return { value: '', resolved: false, unknown: true };
+    }
+  }
+  // True als de template (via mapping óf body_text) named placeholders gebruikt.
+  function _inboxTplIsNamed(tpl) {
+    if (!tpl) return false;
+    const m = tpl.meta_param_mapping;
+    if (m && typeof m === 'object' && m.body && typeof m.body === 'object' && !Array.isArray(m.body)) {
+      if (Object.keys(m.body).length > 0) return true;
+    }
+    // Fallback: body_text bevat een {{cat.veld}}-stijl placeholder.
+    return /\{\{[a-z_]+\.[a-z_]+\}\}/.test(String(tpl.body_text || ''));
+  }
+  // Lever de set named-keys voor een template, geprefereerd uit mapping.body.
+  function _inboxTplNamedKeys(tpl) {
+    const out = [];
+    const seen = new Set();
+    if (tpl && tpl.meta_param_mapping && tpl.meta_param_mapping.body && typeof tpl.meta_param_mapping.body === 'object') {
+      const body = tpl.meta_param_mapping.body;
+      Object.keys(body)
+        .filter(k => /^\d+$/.test(k))
+        .sort((a, b) => Number(a) - Number(b))
+        .forEach(pos => {
+          const key = body[pos];
+          if (typeof key === 'string' && !seen.has(key)) { seen.add(key); out.push(key); }
+        });
+    }
+    // Aanvullend (named-style body_text — pre-submit templates of preview-mode).
+    const txt = String((tpl && tpl.body_text) || '');
+    const re = /\{\{([a-z_]+\.[a-z_]+)\}\}/g;
+    let m;
+    while ((m = re.exec(txt)) !== null) {
+      if (!seen.has(m[1])) { seen.add(m[1]); out.push(m[1]); }
+    }
+    return out;
+  }
+  // True als een van de keys factuur.* is (dan tonen we de invoice-selector).
+  function _inboxTplNeedsInvoice(keys) {
+    return (keys || []).some(k => typeof k === 'string' && k.startsWith('factuur.'));
+  }
+  // Render preview-body waarin alle placeholders (named én positioneel) vervangen
+  // worden door de huidige context-waarden. Onopgeloste keys laten de placeholder
+  // staan zodat duidelijk is wat ontbreekt.
+  function _inboxTplRenderBodyWithContext(body, ctx) {
+    if (!body) return '';
+    let out = String(body);
+    // Named replace
+    out = out.replace(/\{\{([a-z_]+\.[a-z_]+)\}\}/g, (m, k) => {
+      const r = _inboxResolveNamedVar(k, ctx);
+      if (!r.resolved && !r.value) return '{{' + k + '}}';
+      return r.value;
+    });
+    // Positional via mapping (als die er is)
+    const mapping = ctx && ctx.mapping_body;
+    if (mapping) {
+      out = out.replace(/\{\{\s*(\d+)\s*\}\}/g, (m, n) => {
+        const key = mapping[n];
+        if (!key) return m;
+        const r = _inboxResolveNamedVar(key, ctx);
+        if (!r.resolved && !r.value) return '{{' + key + '}}';
+        return r.value;
+      });
+    }
+    return out;
+  }
+
 
   function _inboxTplFormatMetaError(data) {
     const me = data?.meta_error || null;
@@ -4027,6 +4208,9 @@
     _inboxTplSelected = null;
     _inboxTplVars = {};
     _inboxTplFilter = '';
+    _inboxTplContext = { customer: null, open_invoices: [] };
+    _inboxTplSelectedInvoiceId = '';
+    _inboxTplResolveMode = 'positional';
     const search = document.getElementById('inboxTplSearchInput');
     if (search) search.value = '';
     _inboxTplShowError('');
@@ -4047,11 +4231,101 @@
       }
       _inboxTplItems = Array.isArray(d.items) ? d.items : [];
       _inboxTplRenderList();
+
+      // C4: customer-context fire-and-forget (zodat picker direct opent).
+      // Fout = niet-blocking; named-templates blijven werkbaar met handmatige fallback.
+      _inboxLoadTplContext().catch(e => {
+        console.warn('[openInboxTplPicker] context load failed:', e.message);
+      });
     } catch (e) {
       console.error('[openInboxTplPicker]', e);
       if (ul) ul.innerHTML = '<li style="padding:18px;text-align:center;color:#ef4444;font-size:12px">Fout: ' + esc(e.message) + '</li>';
       _inboxTplShowError(e.message);
     }
+  }
+
+  // C4: laad customer + open_invoices voor de actieve conversation.
+  // Customer-info komt uit _inboxActiveConv (id + name reeds beschikbaar) plus
+  // een extra invoices-lookup. Voor C4 v1 doen we de customer-detail-lookup
+  // niet — open_invoices.customer geeft genoeg voor de meeste varianten;
+  // klant.bedrijf/voornaam ontbreken vooralsnog in preview (server resolved).
+  async function _inboxLoadTplContext() {
+    const conv = _inboxActiveConv;
+    if (!conv) return;
+    const customerId = conv.customer_id || null;
+    // Bouw shim customer-object uit conv-data zodat klant.naam direct werkt.
+    const shim = customerId ? {
+      id: customerId,
+      // Geen first_name/last_name/company_name beschikbaar in conv — server
+      // resolved voor de uiteindelijke send. Front-end preview gebruikt de
+      // customer_name die de inbox al toont.
+      first_name: '',
+      last_name:  conv.customer_name || '',
+      company_name: '',
+      email: '',
+      phone: conv.phone_number || '',
+    } : null;
+    _inboxTplContext.customer = shim;
+    _inboxTplContext.open_invoices = [];
+    if (!customerId) return;
+    try {
+      const params = new URLSearchParams({ customer_id: customerId, status: 'open', page_size: '50' });
+      const r = await window.AgentShared.apiFetch('/api/finance-invoices?' + params.toString());
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        console.warn('[_inboxLoadTplContext] finance-invoices fout:', d.error || r.status);
+        return;
+      }
+      const items = Array.isArray(d.items) ? d.items : [];
+      // Map naar dezelfde shape als server-side openInvoices (zodat resolver matcht).
+      _inboxTplContext.open_invoices = items.map(it => ({
+        id: it.id,
+        invoice_number: it.invoice_number,
+        amount_total: it.amount_total,
+        amount_paid: it.amount_paid,
+        credited_amount: it.credited_amount,
+        amount_open: it.amount_open,
+        issue_date: it.issue_date,
+        due_date: it.due_date,
+        status: it.status,
+      }));
+      // Als er al een template geselecteerd is met invoice-vars: re-render
+      // selector + preview met de nieuwe data.
+      if (_inboxTplSelected && _inboxTplResolveMode === 'named') {
+        _inboxTplRefreshInvoiceSelector();
+        _inboxTplRenderPreview();
+      }
+    } catch (e) {
+      console.warn('[_inboxLoadTplContext] exception:', e.message);
+    }
+  }
+
+  // Vul de invoice-dropdown met de open_invoices uit context. Selecteer default
+  // de oudste (eerste in lijst, server sorteert op due_date asc).
+  function _inboxTplRefreshInvoiceSelector() {
+    const sel = document.getElementById('inboxTplInvoiceSelect');
+    if (!sel) return;
+    const opens = _inboxTplContext.open_invoices || [];
+    const opts = ['<option value="">(geen factuur)</option>'];
+    opens.forEach(inv => {
+      const label = (inv.invoice_number || inv.id) + ' — ' + _inboxTplFmtEur(inv.amount_open != null ? inv.amount_open : _inboxOpenAmount(inv))
+        + (inv.due_date ? ' · verv ' + _inboxTplFmtDateNl(inv.due_date) : '');
+      opts.push('<option value="' + esc(inv.id) + '">' + esc(label) + '</option>');
+    });
+    sel.innerHTML = opts.join('');
+    // Default: eerste open factuur (oudste due_date).
+    if (!_inboxTplSelectedInvoiceId && opens.length) {
+      _inboxTplSelectedInvoiceId = opens[0].id;
+    }
+    sel.value = _inboxTplSelectedInvoiceId || '';
+  }
+
+  // Returns het invoice-object dat hoort bij _inboxTplSelectedInvoiceId, of null.
+  function _inboxTplActiveInvoice() {
+    const id = _inboxTplSelectedInvoiceId;
+    if (!id) return null;
+    const opens = _inboxTplContext.open_invoices || [];
+    return opens.find(i => i.id === id) || null;
   }
 
   function closeInboxTplPicker() {
@@ -4100,44 +4374,77 @@
     const metaEl = document.getElementById('inboxTplStep2Meta');
     const bodyEl = document.getElementById('inboxTplStep2Body');
     if (nameEl) nameEl.textContent = tpl.name || '—';
-    if (metaEl) metaEl.textContent = [tpl.language, tpl.category, tpl.status].filter(Boolean).join(' · ');
+    if (metaEl) {
+      const parts = [tpl.language, tpl.category, tpl.status].filter(Boolean);
+      const isNamed = _inboxTplIsNamed(tpl);
+      if (isNamed) parts.push('auto-resolve');
+      metaEl.textContent = parts.join(' · ');
+    }
 
-    // Body met placeholders gemarkeerd (bold) zonder substitutie
+    // Body met placeholders gemarkeerd (bold) zonder substitutie. Markeer
+    // zowel positionele als named placeholders zodat editor-mode templates
+    // (named body_text) ook herkenbaar zijn.
     if (bodyEl) {
       const raw = String(tpl.body_text || '');
-      const html = esc(raw).replace(/\{\{\s*(\d+)\s*\}\}/g, '<b style="background:rgba(245,158,11,.18);color:#f59e0b;padding:0 4px;border-radius:3px">{{$1}}</b>');
+      let html = esc(raw);
+      html = html.replace(/\{\{\s*(\d+)\s*\}\}/g, '<b style="background:rgba(245,158,11,.18);color:#f59e0b;padding:0 4px;border-radius:3px">{{$1}}</b>');
+      html = html.replace(/\{\{([a-z_]+\.[a-z_]+)\}\}/g, '<b style="background:rgba(34,197,94,.16);color:#22c55e;padding:0 4px;border-radius:3px">{{$1}}</b>');
       bodyEl.innerHTML = html || '<i style="color:var(--text-faint)">(geen body-tekst)</i>';
     }
 
-    // Vars init uit body_examples
-    const keys = _inboxTplExtractVarKeys(tpl.body_text);
-    const defaults = _inboxTplDefaultsFromExamples(tpl.body_examples, keys);
-    _inboxTplVars = {};
-    keys.forEach(k => { _inboxTplVars[k] = defaults[k] || ''; });
+    // ── Bepaal resolve-modus ──────────────────────────────────────────────
+    const isNamed = _inboxTplIsNamed(tpl);
+    _inboxTplResolveMode = isNamed ? 'named' : 'positional';
 
-    // Render dynamische form
     const form = document.getElementById('inboxTplVarsForm');
-    if (form) {
-      if (!keys.length) {
-        form.innerHTML = '<div style="font-size:12px;color:var(--text-faint);font-style:italic">Deze template heeft geen variabelen.</div>';
-      } else {
-        form.innerHTML = keys.map(k => {
-          const placeholder = defaults[k] ? ('bv. ' + esc(defaults[k])) : 'Waarde voor {{' + esc(k) + '}}';
-          const val = _inboxTplVars[k] || '';
-          return ''
-            + '<label style="display:block;font-size:12px;color:var(--text-dim)">'
-            +   '<div style="margin-bottom:3px;font-weight:600">Variabele {{' + esc(k) + '}}</div>'
-            +   '<input type="text" class="fin-input" data-tpl-var="' + esc(k) + '" placeholder="' + placeholder + '" value="' + esc(val) + '" style="width:100%;font-size:13px"/>'
-            + '</label>';
-        }).join('');
-        // Wire input listeners
-        form.querySelectorAll('input[data-tpl-var]').forEach(inp => {
-          inp.addEventListener('input', () => {
-            const k = inp.dataset.tplVar;
-            _inboxTplVars[k] = inp.value;
-            _inboxTplRenderPreview();
+    const invoiceWrap = document.getElementById('inboxTplInvoiceWrap');
+    const resolvedWrap = document.getElementById('inboxTplResolvedWrap');
+
+    if (isNamed) {
+      // C4: skip handmatige form, toon read-only auto-resolved values.
+      _inboxTplVars = {};
+      if (form) form.innerHTML = '';
+      const namedKeys = _inboxTplNamedKeys(tpl);
+      const needsInvoice = _inboxTplNeedsInvoice(namedKeys);
+      // Invoice-selector tonen/verbergen.
+      if (invoiceWrap) invoiceWrap.hidden = !needsInvoice;
+      if (needsInvoice) {
+        _inboxTplRefreshInvoiceSelector();
+      }
+      // Resolved-list zichtbaar.
+      if (resolvedWrap) resolvedWrap.hidden = false;
+      _inboxTplRenderResolvedList();
+    } else {
+      // Legacy positioneel: hide auto-resolved + invoice-selector, toon vars-form.
+      if (invoiceWrap) invoiceWrap.hidden = true;
+      if (resolvedWrap) resolvedWrap.hidden = true;
+
+      const keys = _inboxTplExtractVarKeys(tpl.body_text);
+      const defaults = _inboxTplDefaultsFromExamples(tpl.body_examples, keys);
+      _inboxTplVars = {};
+      keys.forEach(k => { _inboxTplVars[k] = defaults[k] || ''; });
+
+      if (form) {
+        if (!keys.length) {
+          form.innerHTML = '<div style="font-size:12px;color:var(--text-faint);font-style:italic">Deze template heeft geen variabelen.</div>';
+        } else {
+          form.innerHTML = keys.map(k => {
+            const placeholder = defaults[k] ? ('bv. ' + esc(defaults[k])) : 'Waarde voor {{' + esc(k) + '}}';
+            const val = _inboxTplVars[k] || '';
+            return ''
+              + '<label style="display:block;font-size:12px;color:var(--text-dim)">'
+              +   '<div style="margin-bottom:3px;font-weight:600">Variabele {{' + esc(k) + '}}</div>'
+              +   '<input type="text" class="fin-input" data-tpl-var="' + esc(k) + '" placeholder="' + placeholder + '" value="' + esc(val) + '" style="width:100%;font-size:13px"/>'
+              + '</label>';
+          }).join('');
+          form.querySelectorAll('input[data-tpl-var]').forEach(inp => {
+            inp.addEventListener('input', () => {
+              const k = inp.dataset.tplVar;
+              _inboxTplVars[k] = inp.value;
+              _inboxTplRenderPreview();
+            });
           });
-        });
+        }
       }
     }
 
@@ -4145,10 +4452,64 @@
     _inboxTplShowStep(2);
   }
 
+  // C4: render de read-only lijst van auto-resolved variabelen voor named templates.
+  // Onopgeloste keys krijgen een waarschuwingsicoon zodat de user ziet dat
+  // server-side resolve nodig is (of context ontbreekt).
+  function _inboxTplRenderResolvedList() {
+    const wrap = document.getElementById('inboxTplResolvedList');
+    if (!wrap) return;
+    const tpl = _inboxTplSelected;
+    if (!tpl) { wrap.innerHTML = ''; return; }
+    const namedKeys = _inboxTplNamedKeys(tpl);
+    if (!namedKeys.length) {
+      wrap.innerHTML = '<div style="font-size:12px;color:var(--text-faint);font-style:italic">Geen variabelen.</div>';
+      return;
+    }
+    const ctx = {
+      customer: _inboxTplContext.customer,
+      invoice: _inboxTplActiveInvoice(),
+      open_invoices: _inboxTplContext.open_invoices,
+    };
+    wrap.innerHTML = namedKeys.map(k => {
+      const r = _inboxResolveNamedVar(k, ctx);
+      let icon = '<i class="ti ti-check" style="color:#22c55e;font-size:13px;flex:0 0 auto;margin-top:2px"></i>';
+      let displayVal = r.value;
+      if (!r.resolved) {
+        icon = '<i class="ti ti-alert-triangle" style="color:#f59e0b;font-size:13px;flex:0 0 auto;margin-top:2px" title="Geen context — vul aan of selecteer factuur"></i>';
+        displayVal = '(geen waarde)';
+      } else if (r.deferred) {
+        icon = '<i class="ti ti-clock" style="color:#3b82f6;font-size:13px;flex:0 0 auto;margin-top:2px" title="Wordt bij verzenden opgehaald"></i>';
+      } else if (r.unknown) {
+        icon = '<i class="ti ti-help-circle" style="color:#f59e0b;font-size:13px;flex:0 0 auto;margin-top:2px" title="Onbekende variabele"></i>';
+      }
+      return ''
+        + '<div style="display:flex;gap:6px;align-items:flex-start">'
+        +   icon
+        +   '<div style="flex:1;min-width:0">'
+        +     '<div style="font-weight:600;font-size:11.5px;color:var(--text-dim)">{{' + esc(k) + '}}</div>'
+        +     '<div style="font-size:12px;white-space:pre-wrap;word-break:break-word">' + esc(displayVal) + '</div>'
+        +   '</div>'
+        + '</div>';
+    }).join('');
+  }
+
   function _inboxTplRenderPreview() {
     const bubble = document.getElementById('inboxTplPreviewBubble');
     if (!bubble || !_inboxTplSelected) return;
-    const rendered = _inboxTplRenderBody(_inboxTplSelected.body_text || '', _inboxTplVars);
+    let rendered;
+    if (_inboxTplResolveMode === 'named') {
+      // C4: auto-resolve via customer + invoice context.
+      const tpl = _inboxTplSelected;
+      const ctx = {
+        customer: _inboxTplContext.customer,
+        invoice: _inboxTplActiveInvoice(),
+        open_invoices: _inboxTplContext.open_invoices,
+        mapping_body: (tpl.meta_param_mapping && tpl.meta_param_mapping.body) || null,
+      };
+      rendered = _inboxTplRenderBodyWithContext(tpl.body_text || '', ctx);
+    } else {
+      rendered = _inboxTplRenderBody(_inboxTplSelected.body_text || '', _inboxTplVars);
+    }
     bubble.textContent = rendered || '(leeg)';
   }
 
@@ -4166,27 +4527,46 @@
       _inboxTplShowError('Header-variabelen worden in deze versie niet ondersteund — verstuur of pas template aan.');
       return;
     }
-    // Validate: alle keys moeten bestaan (lege string toegestaan), geen lege keys.
-    const keys = _inboxTplExtractVarKeys(_inboxTplSelected.body_text);
-    const variables = {};
-    for (const k of keys) {
-      if (!k) { _inboxTplShowError('Ongeldige variable-key'); return; }
-      variables[k] = String(_inboxTplVars[k] ?? '');
-    }
     _inboxTplShowError('');
     const sendBtn = document.getElementById('inboxTplSendBtn');
     if (sendBtn) sendBtn.disabled = true;
+
+    // C4: bouw body afhankelijk van resolve-mode.
+    //  - named  → server resolved via meta_param_mapping, géén variables meesturen.
+    //            Wel context_invoice_id als template factuur.* keys gebruikt.
+    //  - positional → legacy: stuur variables-object zoals C3.
+    const sendBody = {
+      conversation_id:  _inboxActiveConvId,
+      meta_template_id: _inboxTplSelected.meta_template_id || null,
+      template_name:    _inboxTplSelected.name,
+      language:         _inboxTplSelected.language || 'nl',
+    };
+    if (_inboxTplResolveMode === 'named') {
+      const namedKeys = _inboxTplNamedKeys(_inboxTplSelected);
+      if (_inboxTplNeedsInvoice(namedKeys)) {
+        if (!_inboxTplSelectedInvoiceId) {
+          _inboxTplShowError('Selecteer eerst een factuur — template bevat factuur.* variabelen.');
+          if (sendBtn) sendBtn.disabled = false;
+          return;
+        }
+        sendBody.context_invoice_id = _inboxTplSelectedInvoiceId;
+      }
+    } else {
+      // Validate: alle keys moeten bestaan (lege string toegestaan), geen lege keys.
+      const keys = _inboxTplExtractVarKeys(_inboxTplSelected.body_text);
+      const variables = {};
+      for (const k of keys) {
+        if (!k) { _inboxTplShowError('Ongeldige variable-key'); if (sendBtn) sendBtn.disabled = false; return; }
+        variables[k] = String(_inboxTplVars[k] ?? '');
+      }
+      sendBody.variables = variables;
+    }
+
     try {
       const r = await window.AgentShared.apiFetch('/api/inbox-send-template', {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({
-          conversation_id:  _inboxActiveConvId,
-          meta_template_id: _inboxTplSelected.meta_template_id || null,
-          template_name:    _inboxTplSelected.name,
-          language:         _inboxTplSelected.language || 'nl',
-          variables,
-        }),
+        body:    JSON.stringify(sendBody),
       });
       const d = await r.json().catch(() => ({}));
       if (!r.ok) {
@@ -4348,9 +4728,16 @@
     if (tplBackBtn)   tplBackBtn.addEventListener('click', () => {
       _inboxTplSelected = null;
       _inboxTplVars = {};
+      _inboxTplResolveMode = 'positional';
+      _inboxTplSelectedInvoiceId = '';
       _inboxTplShowError('');
       const sb = document.getElementById('inboxTplSendBtn');
       if (sb) { sb.disabled = false; sb.title = ''; }
+      // Verberg C4 UI-blokken bij terug.
+      const invoiceWrap = document.getElementById('inboxTplInvoiceWrap');
+      const resolvedWrap = document.getElementById('inboxTplResolvedWrap');
+      if (invoiceWrap) invoiceWrap.hidden = true;
+      if (resolvedWrap) resolvedWrap.hidden = true;
       _inboxTplShowStep(1);
     });
     if (tplSendBtn)   tplSendBtn.addEventListener('click', () => sendInboxTpl());
@@ -4363,6 +4750,15 @@
     if (tplModal) {
       tplModal.addEventListener('click', (e) => {
         if (e.target === tplModal) closeInboxTplPicker();
+      });
+    }
+    // C4: invoice-selector change → re-render auto-resolved values + preview.
+    const tplInvSel = document.getElementById('inboxTplInvoiceSelect');
+    if (tplInvSel) {
+      tplInvSel.addEventListener('change', () => {
+        _inboxTplSelectedInvoiceId = tplInvSel.value || '';
+        _inboxTplRenderResolvedList();
+        _inboxTplRenderPreview();
       });
     }
     document.addEventListener('keydown', (e) => {
