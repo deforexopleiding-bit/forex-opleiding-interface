@@ -486,7 +486,11 @@
               <!-- Free-text reply (binnen 24h-window) -->
               <div id="inboxReplyText" hidden>
                 <textarea id="inboxReplyTextArea" class="fin-input" rows="3" placeholder="Typ een bericht…" style="resize:vertical;min-height:60px;font-size:13px"></textarea>
-                <div style="display:flex;justify-content:flex-end;margin-top:8px">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px;gap:8px">
+                  <div style="display:flex;gap:6px">
+                    <button class="sr-abtn" id="inboxTplBtn" type="button" disabled data-disabled-tip="Eerst gesprek selecteren" title="Eerst gesprek selecteren" style="font-size:12px;padding:6px 10px"><i class="ti ti-template"></i> Template</button>
+                    <button class="sr-abtn" id="inboxQrBtn" type="button" disabled data-disabled-tip="Eerst gesprek selecteren" title="Eerst gesprek selecteren" style="font-size:12px;padding:6px 10px"><i class="ti ti-message-bolt"></i> Snel antwoord</button>
+                  </div>
                   <button class="sr-abtn primary" id="inboxReplyTextSend" type="button"><i class="ti ti-send"></i> Verstuur</button>
                 </div>
               </div>
@@ -500,7 +504,11 @@
                   <div style="margin-bottom:4px;font-weight:600">Meta-template-naam</div>
                   <input id="inboxReplyTemplateName" type="text" class="fin-input" placeholder="bv. invoice_reminder_v1"/>
                 </label>
-                <div style="display:flex;justify-content:flex-end;margin-top:8px">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px;gap:8px">
+                  <div style="display:flex;gap:6px">
+                    <button class="sr-abtn" id="inboxTplBtn2" type="button" disabled data-disabled-tip="Eerst gesprek selecteren" title="Eerst gesprek selecteren" style="font-size:12px;padding:6px 10px"><i class="ti ti-template"></i> Template</button>
+                    <button class="sr-abtn" id="inboxQrBtn2" type="button" disabled data-disabled-tip="Eerst gesprek selecteren" title="Eerst gesprek selecteren" style="font-size:12px;padding:6px 10px"><i class="ti ti-message-bolt"></i> Snel antwoord</button>
+                  </div>
                   <button class="sr-abtn primary" id="inboxReplyTemplateSend" type="button"><i class="ti ti-send"></i> Verstuur template</button>
                 </div>
               </div>
@@ -1067,6 +1075,92 @@
       <a id="inboxCustomerOpenLink" href="#" target="_blank" rel="noopener" class="sr-abtn" hidden><i class="ti ti-external-link"></i> Bekijk in Klanten</a>
       <a id="inboxCustomerInvoicesLink" href="#" target="_blank" rel="noopener" class="sr-abtn" hidden><i class="ti ti-file-invoice"></i> Bekijk facturen</a>
       <button class="sr-abtn primary" id="inboxCustomerCloseBtn" type="button">Sluit</button>
+    </div>
+  </div>
+</div>
+
+<!-- Inbox Template-picker modal (C3 — 2-step wizard) -->
+<div class="modal-overlay hidden" id="inboxTplPickerModal" role="dialog" aria-modal="true">
+  <div class="modal-card" style="max-width:720px;max-height:88vh;display:flex;flex-direction:column">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:14px">
+      <h3 style="margin:0;font-size:17px">Template kiezen</h3>
+      <button class="sr-ibtn" id="inboxTplCloseX" type="button" title="Sluiten" style="margin-top:-4px"><i class="ti ti-x"></i></button>
+    </div>
+
+    <!-- Stap 1: lijst + zoek -->
+    <div id="inboxTplStep1" style="flex:1;min-height:0;display:flex;flex-direction:column;gap:12px;overflow:hidden">
+      <div style="font-size:12px;line-height:1.5;color:var(--text-dim);background:rgba(245,158,11,.08);border:1px solid rgba(245,158,11,.25);border-radius:6px;padding:8px 10px;display:flex;align-items:flex-start;gap:8px">
+        <i class="ti ti-info-circle" style="font-size:14px;color:#f59e0b;margin-top:1px;flex:0 0 auto"></i>
+        <span>Buiten het 24-uurs venster moet je een door Meta goedgekeurde template gebruiken. Binnen het venster mag je gewoon vrij tekst sturen.</span>
+      </div>
+      <input id="inboxTplSearchInput" type="search" class="fin-input" placeholder="Zoek op naam of inhoud…" autocomplete="off" style="font-size:13px"/>
+      <div style="flex:1;min-height:0;overflow:auto;border:1px solid var(--border-subtle, rgba(255,255,255,.08));border-radius:8px">
+        <ul id="inboxTplListUl" style="list-style:none;margin:0;padding:0">
+          <li style="padding:18px;text-align:center;color:var(--text-faint);font-size:12px">Laden…</li>
+        </ul>
+      </div>
+    </div>
+
+    <!-- Stap 2: detail + vars + preview -->
+    <div id="inboxTplStep2" hidden style="flex:1;min-height:0;display:flex;flex-direction:column;gap:12px;overflow:hidden">
+      <div style="display:grid;grid-template-columns:1fr 280px;gap:16px;flex:1;min-height:0;overflow:hidden">
+        <!-- Linker kolom: details + vars -->
+        <div style="display:flex;flex-direction:column;gap:12px;overflow:auto">
+          <div>
+            <div id="inboxTplStep2Name" style="font-size:14px;font-weight:700;margin-bottom:4px">—</div>
+            <div id="inboxTplStep2Meta" style="font-size:11.5px;color:var(--text-faint)">—</div>
+          </div>
+          <div>
+            <div style="font-size:11px;color:var(--text-dim);text-transform:uppercase;letter-spacing:.04em;font-weight:600;margin-bottom:4px">Body (met placeholders)</div>
+            <div id="inboxTplStep2Body" style="font-size:12.5px;line-height:1.55;background:rgba(255,255,255,.03);border:1px solid var(--border-subtle, rgba(255,255,255,.08));border-radius:6px;padding:10px 12px;white-space:pre-wrap;word-break:break-word">—</div>
+          </div>
+          <form id="inboxTplVarsForm" style="display:flex;flex-direction:column;gap:8px">
+            <!-- Dynamisch ingevuld -->
+          </form>
+        </div>
+        <!-- Rechter kolom: WhatsApp-look preview -->
+        <div style="display:flex;flex-direction:column;gap:6px;overflow:hidden">
+          <div style="font-size:11px;color:var(--text-dim);text-transform:uppercase;letter-spacing:.04em;font-weight:600">Preview</div>
+          <div style="flex:1;background:#0b141a;border:1px solid rgba(255,255,255,.08);border-radius:10px;padding:12px;overflow:auto;display:flex;flex-direction:column;gap:6px">
+            <div id="inboxTplPreviewBubble" style="background:#005c4b;color:#e9edef;border-radius:7px 7px 0 7px;padding:8px 10px;font-size:12.5px;line-height:1.5;white-space:pre-wrap;word-break:break-word;align-self:flex-end;max-width:100%">—</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Footer: error + acties -->
+    <div id="inboxTplError" style="display:none;margin-top:10px;padding:8px 12px;background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.3);border-radius:6px;color:#ef4444;font-size:12px;white-space:pre-wrap"></div>
+
+    <div style="display:flex;gap:8px;justify-content:space-between;margin-top:14px;flex-wrap:wrap">
+      <div style="display:flex;gap:8px">
+        <button class="sr-abtn" id="inboxTplBackBtn" type="button" hidden><i class="ti ti-arrow-left"></i> Terug</button>
+      </div>
+      <div style="display:flex;gap:8px">
+        <button class="sr-abtn" id="inboxTplCancelBtn" type="button">Annuleer</button>
+        <button class="sr-abtn primary" id="inboxTplSendBtn" type="button" hidden><i class="ti ti-send"></i> Verstuur</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Inbox Quick-reply-picker modal (C3) -->
+<div class="modal-overlay hidden" id="inboxQrPickerModal" role="dialog" aria-modal="true">
+  <div class="modal-card" style="max-width:560px;max-height:80vh;display:flex;flex-direction:column">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:14px">
+      <h3 style="margin:0;font-size:17px">Snel antwoord kiezen</h3>
+      <button class="sr-ibtn" id="inboxQrCloseX" type="button" title="Sluiten" style="margin-top:-4px"><i class="ti ti-x"></i></button>
+    </div>
+
+    <div style="flex:1;min-height:0;overflow:auto;border:1px solid var(--border-subtle, rgba(255,255,255,.08));border-radius:8px">
+      <ul id="inboxQrList" style="list-style:none;margin:0;padding:0">
+        <li style="padding:18px;text-align:center;color:var(--text-faint);font-size:12px">Laden…</li>
+      </ul>
+    </div>
+
+    <div id="inboxQrError" style="display:none;margin-top:10px;padding:8px 12px;background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.3);border-radius:6px;color:#ef4444;font-size:12px;white-space:pre-wrap"></div>
+
+    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">
+      <button class="sr-abtn" id="inboxQrCancelBtn" type="button">Annuleren</button>
     </div>
   </div>
 </div>
@@ -2592,6 +2686,12 @@
   let _inboxWiredOnce        = false;
   let _inboxActiveConv       = null;  // hele conversation-object van laatst-geladen thread
 
+  // ── Template-picker state (C3) ──
+  let _inboxTplItems    = [];     // APPROVED templates voor afzendlijn
+  let _inboxTplSelected = null;   // huidig geselecteerde template-row
+  let _inboxTplVars     = {};     // { "1": "...", "2": "..." } actuele waarden
+  let _inboxTplFilter   = '';     // zoekstring stap 1
+
   // Relatieve tijd helper: ISO-string → "5m" / "2u" / "gisteren" / "3d" / "2w" / "3mnd" / "1j"
   function fmtRelTime(iso) {
     if (!iso) return '';
@@ -2714,7 +2814,11 @@
     }
     wrap.innerHTML = _inboxMessages.map(m => {
       const out = (m.direction === 'out');
-      const body = m.body || (m.template_name ? ('[template] ' + m.template_name) : (m.media_type ? ('[' + m.media_type + ']') : ''));
+      // Detect template-message: ofwel expliciete type-kolom, ofwel template_name aanwezig,
+      // ofwel meta_template_name veld in payload. Toon "via template" badge bij outgoing.
+      const tplName = m.template_name || m.meta_template_name || null;
+      const isTpl = out && (m.type === 'template' || !!tplName);
+      const body = m.body || (tplName ? ('[template] ' + tplName) : (m.media_type ? ('[' + m.media_type + ']') : ''));
       const time = fmtRelTime(m.sent_at || m.created_at);
       const statusIcon = out ? _inboxStatusIcon(m.status) : '';
       const failed = (m.status === 'failed');
@@ -2726,8 +2830,12 @@
       const failedRow = (out && failed && m.failed_reason)
         ? `<div style="font-size:10.5px;color:#fca5a5;margin-top:3px">${esc(m.failed_reason)}</div>`
         : '';
+      const tplBadge = isTpl
+        ? `<div style="display:inline-flex;align-items:center;gap:3px;margin-bottom:4px;padding:1px 6px;border-radius:8px;background:rgba(245,158,11,.18);color:#fbbf24;font-size:10px;font-weight:600;letter-spacing:.02em" title="${esc(tplName || '')}"><i class="ti ti-template" style="font-size:11px"></i> via template</div>`
+        : '';
       return `<div style="display:flex;justify-content:${align};width:100%">
         <div style="max-width:72%;padding:8px 12px;border-radius:14px;${bg};font-size:13px;line-height:1.45;word-wrap:break-word;white-space:pre-wrap">
+          ${tplBadge}
           <div>${esc(body)}</div>
           ${failedRow}
           <div style="display:flex;gap:6px;justify-content:flex-end;align-items:center;margin-top:4px;font-size:10.5px;opacity:.85">
@@ -2813,6 +2921,12 @@
       if (replyText) replyText.hidden = !_inboxConvCanSendText;
       if (replyTpl)  replyTpl.hidden  =  _inboxConvCanSendText;
 
+      // Template / Snel-antwoord knoppen enablen — er is nu een actief gesprek.
+      ['inboxTplBtn','inboxTplBtn2','inboxQrBtn','inboxQrBtn2'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) { el.disabled = false; el.title = ''; }
+      });
+
       _inboxRenderMessages();
       // Conv-list opnieuw laden zodat unread_count visueel resetst.
       loadInboxConvList();
@@ -2823,7 +2937,10 @@
   }
 
   async function sendInboxText() {
-    if (!_inboxActiveConvId) return;
+    if (!_inboxActiveConvId) {
+      window.AgentShared.showToast('Eerst gesprek selecteren', 'error');
+      return;
+    }
     const ta = document.getElementById('inboxReplyTextArea');
     if (!ta) return;
     const body = (ta.value || '').trim();
@@ -2873,7 +2990,10 @@
   }
 
   async function sendInboxTemplate() {
-    if (!_inboxActiveConvId) return;
+    if (!_inboxActiveConvId) {
+      window.AgentShared.showToast('Eerst gesprek selecteren', 'error');
+      return;
+    }
     const inp = document.getElementById('inboxReplyTemplateName');
     if (!inp) return;
     const template_name = (inp.value || '').trim();
@@ -2973,6 +3093,404 @@
     if (modal) modal.classList.add('hidden');
   }
 
+  // ──────────────────────────────────────────────────────────────────────────
+  //  Template-picker (C3)
+  // ──────────────────────────────────────────────────────────────────────────
+
+  function _inboxTplFormatMetaError(data) {
+    const me = data?.meta_error || null;
+    if (me && (me.error_user_title || me.error_user_msg)) {
+      const title = me.error_user_title || 'Meta-fout';
+      const msg = me.error_user_msg || '';
+      const trace = me.fbtrace_id ? ` (trace: ${me.fbtrace_id})` : '';
+      return msg ? `${title}\n${msg}${trace}` : `${title}${trace}`;
+    }
+    return data?.error || data?.message || 'Onbekende fout';
+  }
+
+  function _inboxTplShowError(msg) {
+    const el = document.getElementById('inboxTplError');
+    if (!el) return;
+    if (!msg) { el.style.display = 'none'; el.textContent = ''; return; }
+    el.textContent = msg;
+    el.style.display = 'block';
+  }
+
+  // Vervang {{1}}, {{2}}, ... in body met waarden uit vars. Lege waarde → behoud placeholder visueel.
+  function _inboxTplRenderBody(body, vars) {
+    if (!body) return '';
+    return String(body).replace(/\{\{\s*(\d+)\s*\}\}/g, (_m, n) => {
+      const v = vars && vars[n];
+      return (v == null || v === '') ? '{{' + n + '}}' : String(v);
+    });
+  }
+
+  // Vind alle unieke placeholder-nummers in body, gesorteerd op nummer.
+  function _inboxTplExtractVarKeys(body) {
+    if (!body) return [];
+    const set = new Set();
+    const re = /\{\{\s*(\d+)\s*\}\}/g;
+    let m;
+    while ((m = re.exec(String(body))) !== null) set.add(m[1]);
+    return Array.from(set).sort((a, b) => Number(a) - Number(b));
+  }
+
+  // Default-values uit body_examples — meestal { body_text: [["Jeffrey","EUR 80,00"]] }.
+  function _inboxTplDefaultsFromExamples(examples, keys) {
+    const out = {};
+    if (!examples || !Array.isArray(keys) || !keys.length) return out;
+    let arr = null;
+    try {
+      if (examples.body_text && Array.isArray(examples.body_text) && Array.isArray(examples.body_text[0])) {
+        arr = examples.body_text[0];
+      } else if (Array.isArray(examples) && Array.isArray(examples[0])) {
+        arr = examples[0];
+      }
+    } catch (_e) { /* defensief */ }
+    if (!arr) return out;
+    keys.forEach((k, idx) => {
+      const v = arr[idx];
+      if (v != null) out[k] = String(v);
+    });
+    return out;
+  }
+
+  function _inboxTplRenderList() {
+    const ul = document.getElementById('inboxTplListUl');
+    if (!ul) return;
+    const f = _inboxTplFilter.toLowerCase();
+    const items = !f ? _inboxTplItems : _inboxTplItems.filter(t => {
+      return (t.name || '').toLowerCase().includes(f)
+          || (t.body_text || '').toLowerCase().includes(f)
+          || (t.category || '').toLowerCase().includes(f);
+    });
+    if (!items.length) {
+      ul.innerHTML = '<li style="padding:18px;text-align:center;color:var(--text-faint);font-size:12px">Geen APPROVED templates gevonden voor deze afzendlijn.</li>';
+      return;
+    }
+    ul.innerHTML = items.map((t, idx) => {
+      const body = (t.body_text || '').slice(0, 80) + ((t.body_text || '').length > 80 ? '…' : '');
+      return ''
+        + '<li data-tpl-idx="' + idx + '" style="padding:10px 12px;border-bottom:1px solid var(--border-subtle, rgba(255,255,255,.06));cursor:pointer">'
+        +   '<div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px;margin-bottom:3px">'
+        +     '<div style="font-weight:600;font-size:13px">' + esc(t.name || '') + '</div>'
+        +     '<div style="font-size:11px;color:var(--text-faint)">' + esc(t.language || '') + ' &middot; ' + esc(t.category || '') + '</div>'
+        +   '</div>'
+        +   '<div style="font-size:12px;color:var(--text-dim);line-height:1.4">' + esc(body) + '</div>'
+        + '</li>';
+    }).join('');
+    // Wire row-click → selectInboxTpl
+    ul.querySelectorAll('li[data-tpl-idx]').forEach(li => {
+      li.addEventListener('mouseenter', () => { li.style.background = 'rgba(59,130,246,.08)'; });
+      li.addEventListener('mouseleave', () => { li.style.background = ''; });
+      li.addEventListener('click', () => {
+        const idx = Number(li.dataset.tplIdx);
+        const tpl = items[idx];
+        if (tpl) selectInboxTpl(tpl);
+      });
+    });
+  }
+
+  function _inboxTplShowStep(step) {
+    const s1 = document.getElementById('inboxTplStep1');
+    const s2 = document.getElementById('inboxTplStep2');
+    const back = document.getElementById('inboxTplBackBtn');
+    const send = document.getElementById('inboxTplSendBtn');
+    if (s1) s1.hidden = (step !== 1);
+    if (s2) s2.hidden = (step !== 2);
+    if (back) back.hidden = (step !== 2);
+    if (send) send.hidden = (step !== 2);
+  }
+
+  async function openInboxTplPicker() {
+    if (!_inboxActiveConvId || !_inboxActiveConv) {
+      window.AgentShared.showToast('Eerst gesprek selecteren', 'error');
+      return;
+    }
+    const modal = document.getElementById('inboxTplPickerModal');
+    if (!modal) return;
+    // Reset
+    _inboxTplItems = [];
+    _inboxTplSelected = null;
+    _inboxTplVars = {};
+    _inboxTplFilter = '';
+    const search = document.getElementById('inboxTplSearchInput');
+    if (search) search.value = '';
+    _inboxTplShowError('');
+    _inboxTplShowStep(1);
+    const ul = document.getElementById('inboxTplListUl');
+    if (ul) ul.innerHTML = '<li style="padding:18px;text-align:center;color:var(--text-faint);font-size:12px">Laden…</li>';
+    modal.classList.remove('hidden');
+
+    try {
+      const params = new URLSearchParams({ conversation_id: _inboxActiveConvId });
+      const r = await window.AgentShared.apiFetch('/api/inbox-template-list?' + params.toString());
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        const msg = _inboxTplFormatMetaError(d) || ('HTTP ' + r.status);
+        if (ul) ul.innerHTML = '<li style="padding:18px;text-align:center;color:#ef4444;font-size:12px">' + esc(msg) + '</li>';
+        _inboxTplShowError(msg);
+        return;
+      }
+      _inboxTplItems = Array.isArray(d.items) ? d.items : [];
+      _inboxTplRenderList();
+    } catch (e) {
+      console.error('[openInboxTplPicker]', e);
+      if (ul) ul.innerHTML = '<li style="padding:18px;text-align:center;color:#ef4444;font-size:12px">Fout: ' + esc(e.message) + '</li>';
+      _inboxTplShowError(e.message);
+    }
+  }
+
+  function closeInboxTplPicker() {
+    const modal = document.getElementById('inboxTplPickerModal');
+    if (modal) modal.classList.add('hidden');
+  }
+
+  // Heeft de template een header met variabele placeholder ({{N}}) in header_content.text?
+  // C3 v1 ondersteunt geen header-variabelen — alleen body-vars.
+  function _inboxTplHeaderHasVars(tpl) {
+    if (!tpl) return false;
+    const ht = String(tpl.header_type || 'NONE').toUpperCase();
+    if (!ht || ht === 'NONE') return false;
+    // TEXT-header: kijk naar header_content.text
+    if (ht === 'TEXT') {
+      const txt = (tpl.header_content && (tpl.header_content.text || tpl.header_content.content)) || '';
+      return /\{\{\s*\d+\s*\}\}/.test(String(txt));
+    }
+    // Media-headers (IMAGE/VIDEO/DOCUMENT) vereisen altijd een variable-link → niet ondersteund in v1.
+    if (ht === 'IMAGE' || ht === 'VIDEO' || ht === 'DOCUMENT') return true;
+    return false;
+  }
+
+  function selectInboxTpl(tpl) {
+    if (!tpl) return;
+    _inboxTplSelected = tpl;
+    _inboxTplShowError('');
+
+    // Header-vars guard: disable Verstuur + toon waarschuwing als header variabelen heeft.
+    const sendBtnEl = document.getElementById('inboxTplSendBtn');
+    if (_inboxTplHeaderHasVars(tpl)) {
+      _inboxTplShowError('Header-variabelen worden in deze versie niet ondersteund — verstuur of pas template aan.');
+      if (sendBtnEl) {
+        sendBtnEl.disabled = true;
+        sendBtnEl.title = 'Header met variabele wordt niet ondersteund in deze versie';
+      }
+    } else {
+      if (sendBtnEl) {
+        sendBtnEl.disabled = false;
+        sendBtnEl.title = '';
+      }
+    }
+
+    // Header-velden
+    const nameEl = document.getElementById('inboxTplStep2Name');
+    const metaEl = document.getElementById('inboxTplStep2Meta');
+    const bodyEl = document.getElementById('inboxTplStep2Body');
+    if (nameEl) nameEl.textContent = tpl.name || '—';
+    if (metaEl) metaEl.textContent = [tpl.language, tpl.category, tpl.status].filter(Boolean).join(' · ');
+
+    // Body met placeholders gemarkeerd (bold) zonder substitutie
+    if (bodyEl) {
+      const raw = String(tpl.body_text || '');
+      const html = esc(raw).replace(/\{\{\s*(\d+)\s*\}\}/g, '<b style="background:rgba(245,158,11,.18);color:#f59e0b;padding:0 4px;border-radius:3px">{{$1}}</b>');
+      bodyEl.innerHTML = html || '<i style="color:var(--text-faint)">(geen body-tekst)</i>';
+    }
+
+    // Vars init uit body_examples
+    const keys = _inboxTplExtractVarKeys(tpl.body_text);
+    const defaults = _inboxTplDefaultsFromExamples(tpl.body_examples, keys);
+    _inboxTplVars = {};
+    keys.forEach(k => { _inboxTplVars[k] = defaults[k] || ''; });
+
+    // Render dynamische form
+    const form = document.getElementById('inboxTplVarsForm');
+    if (form) {
+      if (!keys.length) {
+        form.innerHTML = '<div style="font-size:12px;color:var(--text-faint);font-style:italic">Deze template heeft geen variabelen.</div>';
+      } else {
+        form.innerHTML = keys.map(k => {
+          const placeholder = defaults[k] ? ('bv. ' + esc(defaults[k])) : 'Waarde voor {{' + esc(k) + '}}';
+          const val = _inboxTplVars[k] || '';
+          return ''
+            + '<label style="display:block;font-size:12px;color:var(--text-dim)">'
+            +   '<div style="margin-bottom:3px;font-weight:600">Variabele {{' + esc(k) + '}}</div>'
+            +   '<input type="text" class="fin-input" data-tpl-var="' + esc(k) + '" placeholder="' + placeholder + '" value="' + esc(val) + '" style="width:100%;font-size:13px"/>'
+            + '</label>';
+        }).join('');
+        // Wire input listeners
+        form.querySelectorAll('input[data-tpl-var]').forEach(inp => {
+          inp.addEventListener('input', () => {
+            const k = inp.dataset.tplVar;
+            _inboxTplVars[k] = inp.value;
+            _inboxTplRenderPreview();
+          });
+        });
+      }
+    }
+
+    _inboxTplRenderPreview();
+    _inboxTplShowStep(2);
+  }
+
+  function _inboxTplRenderPreview() {
+    const bubble = document.getElementById('inboxTplPreviewBubble');
+    if (!bubble || !_inboxTplSelected) return;
+    const rendered = _inboxTplRenderBody(_inboxTplSelected.body_text || '', _inboxTplVars);
+    bubble.textContent = rendered || '(leeg)';
+  }
+
+  async function sendInboxTpl() {
+    if (!_inboxActiveConvId) {
+      window.AgentShared.showToast('Geen actieve conversatie', 'error');
+      return;
+    }
+    if (!_inboxTplSelected) {
+      _inboxTplShowError('Geen template geselecteerd');
+      return;
+    }
+    // Defense-in-depth: header met vars wordt niet ondersteund in C3 v1.
+    if (_inboxTplHeaderHasVars(_inboxTplSelected)) {
+      _inboxTplShowError('Header-variabelen worden in deze versie niet ondersteund — verstuur of pas template aan.');
+      return;
+    }
+    // Validate: alle keys moeten bestaan (lege string toegestaan), geen lege keys.
+    const keys = _inboxTplExtractVarKeys(_inboxTplSelected.body_text);
+    const variables = {};
+    for (const k of keys) {
+      if (!k) { _inboxTplShowError('Ongeldige variable-key'); return; }
+      variables[k] = String(_inboxTplVars[k] ?? '');
+    }
+    _inboxTplShowError('');
+    const sendBtn = document.getElementById('inboxTplSendBtn');
+    if (sendBtn) sendBtn.disabled = true;
+    try {
+      const r = await window.AgentShared.apiFetch('/api/inbox-send-template', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({
+          conversation_id:  _inboxActiveConvId,
+          meta_template_id: _inboxTplSelected.meta_template_id || null,
+          template_name:    _inboxTplSelected.name,
+          language:         _inboxTplSelected.language || 'nl',
+          variables,
+        }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        const msg = _inboxTplFormatMetaError(d) || ('HTTP ' + r.status);
+        _inboxTplShowError(msg);
+        window.AgentShared.showToast('Template versturen mislukt: ' + msg, 'error');
+        return;
+      }
+      window.AgentShared.showToast('Template verstuurd', 'success');
+      closeInboxTplPicker();
+      await openInboxConv(_inboxActiveConvId);
+    } catch (e) {
+      console.error('[sendInboxTpl]', e);
+      _inboxTplShowError(e.message);
+      window.AgentShared.showToast('Template versturen mislukt: ' + e.message, 'error');
+    } finally {
+      if (sendBtn) sendBtn.disabled = false;
+    }
+  }
+
+  // ──────────────────────────────────────────────────────────────────────────
+  //  Quick-reply-picker (C3)
+  // ──────────────────────────────────────────────────────────────────────────
+
+  let _inboxQrItems = [];
+
+  function _inboxQrShowError(msg) {
+    const el = document.getElementById('inboxQrError');
+    if (!el) return;
+    if (!msg) { el.style.display = 'none'; el.textContent = ''; return; }
+    el.textContent = msg;
+    el.style.display = 'block';
+  }
+
+  function _inboxQrRenderList() {
+    const ul = document.getElementById('inboxQrList');
+    if (!ul) return;
+    if (!_inboxQrItems.length) {
+      ul.innerHTML = '<li style="padding:18px;text-align:center;color:var(--text-faint);font-size:12px">Geen actieve snelle antwoorden gevonden voor deze afzendlijn.</li>';
+      return;
+    }
+    ul.innerHTML = _inboxQrItems.map((q, idx) => {
+      const body = q.body_text || '';
+      return ''
+        + '<li data-qr-idx="' + idx + '" style="padding:10px 12px;border-bottom:1px solid var(--border-subtle, rgba(255,255,255,.06));display:flex;align-items:center;gap:10px">'
+        +   '<div style="flex:1;min-width:0">'
+        +     '<div style="font-weight:600;font-size:13px;margin-bottom:3px">' + esc(q.title || '') + '</div>'
+        +     '<div style="font-size:12px;color:var(--text-dim);line-height:1.4;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;text-overflow:ellipsis;white-space:pre-wrap;word-break:break-word">' + esc(body) + '</div>'
+        +   '</div>'
+        +   '<button class="sr-abtn primary" type="button" data-qr-select="' + idx + '" style="flex:0 0 auto;font-size:12px;padding:6px 10px">Kies</button>'
+        + '</li>';
+    }).join('');
+  }
+
+  async function openInboxQrPicker() {
+    if (!_inboxActiveConvId || !_inboxActiveConv) {
+      window.AgentShared.showToast('Eerst gesprek selecteren', 'error');
+      return;
+    }
+    const modal = document.getElementById('inboxQrPickerModal');
+    if (!modal) return;
+    _inboxQrItems = [];
+    _inboxQrShowError('');
+    const ul = document.getElementById('inboxQrList');
+    if (ul) ul.innerHTML = '<li style="padding:18px;text-align:center;color:var(--text-faint);font-size:12px">Laden…</li>';
+    modal.classList.remove('hidden');
+
+    try {
+      const params = new URLSearchParams({ conversation_id: _inboxActiveConvId });
+      const r = await window.AgentShared.apiFetch('/api/inbox-quick-replies-list?' + params.toString());
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        const msg = d.error || ('HTTP ' + r.status);
+        if (ul) ul.innerHTML = '<li style="padding:18px;text-align:center;color:#ef4444;font-size:12px">' + esc(msg) + '</li>';
+        _inboxQrShowError(msg);
+        return;
+      }
+      _inboxQrItems = Array.isArray(d.items) ? d.items : [];
+      _inboxQrRenderList();
+    } catch (e) {
+      console.error('[openInboxQrPicker]', e);
+      if (ul) ul.innerHTML = '<li style="padding:18px;text-align:center;color:#ef4444;font-size:12px">Fout: ' + esc(e.message) + '</li>';
+      _inboxQrShowError(e.message);
+    }
+  }
+
+  function closeInboxQrPicker() {
+    const modal = document.getElementById('inboxQrPickerModal');
+    if (modal) modal.classList.add('hidden');
+  }
+
+  function selectInboxQr(item) {
+    if (!item) return;
+    const ta = document.getElementById('inboxReplyTextArea');
+    if (!ta) {
+      // Geen text-area beschikbaar (bv. 24h verlopen → template-modus).
+      window.AgentShared.showToast('Open eerst een gesprek met actief 24h-window', 'error');
+      closeInboxQrPicker();
+      return;
+    }
+    const body = String(item.body_text || '');
+    const current = ta.value || '';
+    if (current.trim().length > 0) {
+      ta.value = current + (current.endsWith('\n') ? '' : '\n') + body;
+    } else {
+      ta.value = body;
+    }
+    closeInboxQrPicker();
+    // Focus + cursor naar einde.
+    try {
+      ta.focus();
+      const len = ta.value.length;
+      ta.setSelectionRange(len, len);
+    } catch (_e) { /* defensief */ }
+    window.AgentShared.showToast('Snel antwoord ingevoegd (Bewerk + verstuur)', 'success');
+  }
+
   function wireInboxOnce() {
     if (_inboxWiredOnce) return;
     _inboxWiredOnce = true;
@@ -2998,6 +3516,87 @@
     if (sendTextBtn) sendTextBtn.addEventListener('click', () => sendInboxText());
     const sendTplBtn  = document.getElementById('inboxReplyTemplateSend');
     if (sendTplBtn)  sendTplBtn.addEventListener('click', () => sendInboxTemplate());
+
+    // Template-picker openers (zowel binnen text- als template-reply container).
+    ['inboxTplBtn','inboxTplBtn2'].forEach(id => {
+      const b = document.getElementById(id);
+      if (b) b.addEventListener('click', () => openInboxTplPicker());
+    });
+    // Snel-antwoord (quick-reply) picker — opent inboxQrPickerModal.
+    ['inboxQrBtn','inboxQrBtn2'].forEach(id => {
+      const b = document.getElementById(id);
+      if (b) b.addEventListener('click', () => openInboxQrPicker());
+    });
+
+    // Template-picker modal wiring
+    const tplModal     = document.getElementById('inboxTplPickerModal');
+    const tplCloseX    = document.getElementById('inboxTplCloseX');
+    const tplCancelBtn = document.getElementById('inboxTplCancelBtn');
+    const tplBackBtn   = document.getElementById('inboxTplBackBtn');
+    const tplSendBtn   = document.getElementById('inboxTplSendBtn');
+    const tplSearch    = document.getElementById('inboxTplSearchInput');
+    if (tplCloseX)    tplCloseX.addEventListener('click', () => closeInboxTplPicker());
+    if (tplCancelBtn) tplCancelBtn.addEventListener('click', () => closeInboxTplPicker());
+    if (tplBackBtn)   tplBackBtn.addEventListener('click', () => {
+      _inboxTplSelected = null;
+      _inboxTplVars = {};
+      _inboxTplShowError('');
+      const sb = document.getElementById('inboxTplSendBtn');
+      if (sb) { sb.disabled = false; sb.title = ''; }
+      _inboxTplShowStep(1);
+    });
+    if (tplSendBtn)   tplSendBtn.addEventListener('click', () => sendInboxTpl());
+    if (tplSearch) {
+      tplSearch.addEventListener('input', () => {
+        _inboxTplFilter = (tplSearch.value || '').trim();
+        _inboxTplRenderList();
+      });
+    }
+    if (tplModal) {
+      tplModal.addEventListener('click', (e) => {
+        if (e.target === tplModal) closeInboxTplPicker();
+      });
+    }
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && tplModal && !tplModal.classList.contains('hidden')) {
+        closeInboxTplPicker();
+      }
+    });
+
+    // Quick-reply-picker modal wiring (C3)
+    const qrModal     = document.getElementById('inboxQrPickerModal');
+    const qrCloseX    = document.getElementById('inboxQrCloseX');
+    const qrCancelBtn = document.getElementById('inboxQrCancelBtn');
+    const qrListUl    = document.getElementById('inboxQrList');
+    if (qrCloseX)    qrCloseX.addEventListener('click', () => closeInboxQrPicker());
+    if (qrCancelBtn) qrCancelBtn.addEventListener('click', () => closeInboxQrPicker());
+    if (qrModal) {
+      qrModal.addEventListener('click', (e) => {
+        if (e.target === qrModal) closeInboxQrPicker();
+      });
+    }
+    if (qrListUl) {
+      // Delegated klik: zowel op de hele <li> (data-qr-idx) als op de Kies-knop (data-qr-select)
+      // routeren naar selectInboxQr(item).
+      qrListUl.addEventListener('click', (e) => {
+        const btn = e.target.closest('button[data-qr-select]');
+        const li  = e.target.closest('li[data-qr-idx]');
+        let idx = -1;
+        if (btn) {
+          idx = Number(btn.getAttribute('data-qr-select'));
+        } else if (li) {
+          idx = Number(li.getAttribute('data-qr-idx'));
+        }
+        if (Number.isFinite(idx) && idx >= 0 && _inboxQrItems[idx]) {
+          selectInboxQr(_inboxQrItems[idx]);
+        }
+      });
+    }
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && qrModal && !qrModal.classList.contains('hidden')) {
+        closeInboxQrPicker();
+      }
+    });
 
     // Cmd/Ctrl+Enter in textarea → versturen.
     const ta = document.getElementById('inboxReplyTextArea');
