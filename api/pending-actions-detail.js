@@ -15,8 +15,8 @@
 // NB: pending_actions heeft GEEN aparte 'rejected_by'-kolom; bij REJECTED valt
 // approved_by terug op de uitvoerende user (consistent met agent_approval_queue-
 // pattern), maar voor compat exposeren we hier 'rejecter' alleen wanneer status
-// in {rejected, cancelled} is. 'approver' alleen wanneer status in
-// {approved, executed, failed}.
+// in {REJECTED, CANCELLED} is. 'approver' alleen wanneer status in
+// {APPROVED, EXECUTED, FAILED}.
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
@@ -101,7 +101,7 @@ export default async function handler(req, res) {
       if (profErr) console.error('[pending-actions-detail profile]', profErr.message);
       else if (prof) {
         const profObj = { id: prof.id, full_name: prof.full_name || null, email: prof.email || null };
-        if (['rejected', 'cancelled'].includes(pa.status)) rejecter = profObj;
+        if (['REJECTED', 'CANCELLED'].includes(pa.status)) rejecter = profObj;
         else approver = profObj;
       }
     }

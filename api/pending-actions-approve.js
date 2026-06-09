@@ -54,7 +54,7 @@ export default async function handler(req, res) {
     if (lookupErr) throw new Error('lookup: ' + lookupErr.message);
     if (!row)      return res.status(404).json({ error: 'Pending action niet gevonden' });
 
-    if (row.status !== 'pending') {
+    if (row.status !== 'PENDING') {
       return res.status(409).json({
         error: `Action is niet meer PENDING (huidige status: ${row.status})`,
       });
@@ -62,17 +62,18 @@ export default async function handler(req, res) {
 
     const nowIso = new Date().toISOString();
 
-    // ---- UPDATE -> approved ----
+    // ---- UPDATE -> APPROVED ----
+    // pending_actions.status CHECK eist UPPERCASE in deployed DB.
     const { data: updated, error: updErr } = await supabaseAdmin
       .from('pending_actions')
       .update({
-        status:              'approved',
+        status:              'APPROVED',
         approved_at:         nowIso,
         approved_by_user_id: user.id,
         updated_at:          nowIso,
       })
       .eq('id', id)
-      .eq('status', 'pending')   // optimistic concurrency
+      .eq('status', 'PENDING')   // optimistic concurrency
       .select('id, status, approved_at, approved_by_user_id, updated_at')
       .single();
     if (updErr) throw new Error('update: ' + updErr.message);
@@ -89,7 +90,7 @@ export default async function handler(req, res) {
         entity_id:   id,
         after_json:  {
           id,
-          status:         'approved',
+          status:         'APPROVED',
           action_type:    row.action_type,
           customer_id:    row.customer_id,
           arrangement_id: row.arrangement_id,

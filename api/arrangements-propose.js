@@ -219,7 +219,9 @@ export default async function handler(req, res) {
       customer_id:         customerId,
       arrangement_id:      arr.id,
       action_type:         actionType,
-      status:              'pending',
+      // pending_actions.status CHECK eist UPPERCASE in deployed DB
+      // (PENDING/APPROVED/REJECTED/EXECUTED/FAILED/CANCELLED/ROLLED_BACK).
+      status:              'PENDING',
       proposed_by_user_id: user.id,
     };
 

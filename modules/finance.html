@@ -3758,11 +3758,15 @@
         if (actTb) actTb.innerHTML = '<tr><td colspan="4" style="text-align:center;padding:14px;color:var(--text-faint);font-size:11.5px">Geen pending actions.</td></tr>';
       } else if (actTb) {
         actTb.innerHTML = actions.map(a => {
-          const statusBadge = a.status === 'approved'  ? '<span class="sr-tag green">approved</span>'
-                            : a.status === 'rejected'  ? '<span class="sr-tag" style="background:rgba(239,68,68,.15);color:#ef4444">rejected</span>'
-                            : a.status === 'executed'  ? '<span class="sr-tag green">executed</span>'
-                            : a.status === 'failed'    ? '<span class="sr-tag" style="background:rgba(239,68,68,.15);color:#ef4444">failed</span>'
-                            : a.status === 'cancelled' ? '<span class="sr-tag gray">cancelled</span>'
+          // pending_actions.status is UPPERCASE in deployed DB (spec-conform).
+          // Vergelijk hoofdletter-insensitief voor robuustheid mocht een
+          // legacy-row toch lowercase bevatten.
+          const st = String(a.status || '').toUpperCase();
+          const statusBadge = st === 'APPROVED'  ? '<span class="sr-tag green">approved</span>'
+                            : st === 'REJECTED'  ? '<span class="sr-tag" style="background:rgba(239,68,68,.15);color:#ef4444">rejected</span>'
+                            : st === 'EXECUTED'  ? '<span class="sr-tag green">executed</span>'
+                            : st === 'FAILED'    ? '<span class="sr-tag" style="background:rgba(239,68,68,.15);color:#ef4444">failed</span>'
+                            : st === 'CANCELLED' ? '<span class="sr-tag gray">cancelled</span>'
                             : '<span class="sr-tag" style="background:rgba(56,189,248,.15);color:#38bdf8">pending</span>';
           const proposed = a.created_at ? fmtDateNl(String(a.created_at).slice(0, 10)) : '—';
           let approvedInfo = '—';

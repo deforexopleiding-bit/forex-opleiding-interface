@@ -374,11 +374,11 @@
 
           <!-- Filter pills -->
           <div class="approv-filter-strip" id="approvFilterStrip">
-            <button type="button" class="approv-pill active" data-approv-status="pending"   onclick="switchApprovStatus('pending')">Pending <span class="approv-pill-count" id="approvCntPending">0</span></button>
-            <button type="button" class="approv-pill"        data-approv-status="approved"  onclick="switchApprovStatus('approved')">Approved <span class="approv-pill-count" id="approvCntApproved">0</span></button>
-            <button type="button" class="approv-pill"        data-approv-status="rejected"  onclick="switchApprovStatus('rejected')">Rejected <span class="approv-pill-count" id="approvCntRejected">0</span></button>
-            <button type="button" class="approv-pill"        data-approv-status="executed"  onclick="switchApprovStatus('executed')">Executed <span class="approv-pill-count" id="approvCntExecuted">0</span></button>
-            <button type="button" class="approv-pill"        data-approv-status="failed"    onclick="switchApprovStatus('failed')">Failed <span class="approv-pill-count" id="approvCntFailed">0</span></button>
+            <button type="button" class="approv-pill active" data-approv-status="PENDING"   onclick="switchApprovStatus('PENDING')">Pending <span class="approv-pill-count" id="approvCntPending">0</span></button>
+            <button type="button" class="approv-pill"        data-approv-status="APPROVED"  onclick="switchApprovStatus('APPROVED')">Approved <span class="approv-pill-count" id="approvCntApproved">0</span></button>
+            <button type="button" class="approv-pill"        data-approv-status="REJECTED"  onclick="switchApprovStatus('REJECTED')">Rejected <span class="approv-pill-count" id="approvCntRejected">0</span></button>
+            <button type="button" class="approv-pill"        data-approv-status="EXECUTED"  onclick="switchApprovStatus('EXECUTED')">Executed <span class="approv-pill-count" id="approvCntExecuted">0</span></button>
+            <button type="button" class="approv-pill"        data-approv-status="FAILED"    onclick="switchApprovStatus('FAILED')">Failed <span class="approv-pill-count" id="approvCntFailed">0</span></button>
           </div>
 
           <!-- Bulk-actions strip (alleen relevant voor PENDING) -->
@@ -3459,7 +3459,7 @@ function wireWaTplOnce() {
 // ─── Approval-queue (Payment-arrangements D1) ────────────────────────────────
 // Tab toont pending_actions met filter-pills, bulk-actions, detail-modal +
 // reject-modal. Endpoints: /api/pending-actions-{list,detail,approve,reject}.
-let _approvActiveStatus = 'pending';
+let _approvActiveStatus = 'PENDING';
 let _approvItems        = [];
 let _approvSelectedIds  = [];
 let _approvWired        = false;
@@ -3482,6 +3482,8 @@ function wireApprovOnce() {
 }
 
 function approvStatusBadge(status) {
+  // DB-laag levert UPPERCASE; voor CSS-class-naam (approv-status-pending etc.)
+  // gebruiken we lowercase zodat de bestaande CSS-classes blijven matchen.
   const s = String(status || '').toLowerCase();
   const cls = ['pending','approved','rejected','executed','failed','cancelled'].includes(s)
     ? 'approv-status-' + s
@@ -3606,7 +3608,7 @@ function renderApprovRows() {
     tbody.innerHTML = '<tr><td colspan="8" style="color:var(--text-faint);padding:20px;text-align:center">Geen voorstellen in deze status.</td></tr>';
     return;
   }
-  const isPending = _approvActiveStatus === 'pending';
+  const isPending = _approvActiveStatus === 'PENDING';
   const rows = _approvItems.map(it => {
     const checked = _approvSelectedIds.includes(it.id);
     const checkCell = isPending
@@ -3904,7 +3906,7 @@ function renderApprovDetail(d) {
   const arr  = d.arrangement || null;
   const approver = d.approver || null;
   const rejecter = d.rejecter || null;
-  const isPending = it.status === 'pending';
+  const isPending = it.status === 'PENDING';
 
   const custLink = cust && cust.id
     ? `<a href="/modules/klanten.html?id=${esc(cust.id)}" style="color:var(--brand-secondary,var(--accent-cyan,#06b6d4));text-decoration:none">${esc(cust.name || '(onbekend)')}</a>`
@@ -3981,7 +3983,7 @@ function closePendingActionDetail() {
 // volledige lijst te laden. Wordt aangeroepen bij init.
 async function refreshApprovalsTabBadge() {
   try {
-    const r = await window.AgentShared.apiFetch('/api/pending-actions-list?status=pending&limit=1');
+    const r = await window.AgentShared.apiFetch('/api/pending-actions-list?status=PENDING&limit=1');
     const d = await r.json().catch(() => ({}));
     if (!r.ok) return;
     const cnt = (d.counts && typeof d.counts.PENDING === 'number')

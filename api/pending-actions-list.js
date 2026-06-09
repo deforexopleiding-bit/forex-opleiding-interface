@@ -4,7 +4,8 @@
 //
 // Query-params:
 //   status        (text optional)  -> exact-match op pending_actions.status
-//                                     (pending | approved | rejected | executed | failed | cancelled)
+//                                     (PENDING | APPROVED | REJECTED | EXECUTED | FAILED | CANCELLED)
+//                                     case-insensitive input; genormaliseerd naar UPPERCASE voor DB-filter.
 //   action_type   (text optional)  -> exact-match (bv. arrangement.uitstel)
 //   source        (text optional)  -> exact-match op payload->>'source' (bv. manual | auto)
 //   customer_id   (uuid optional)
@@ -38,12 +39,10 @@ function clampInt(v, def, min, max) {
   return Math.min(Math.max(Math.trunc(n), min), max);
 }
 
-// Status-enum is lowercase in de DB (zie 2026-06-09-payment-arrangements-d1.sql
-// pending_actions_status_check). Spec-laag (arrangement.status) is uppercase,
-// maar pending_actions.status blijft lowercase voor backward-compat met de
-// executor (D2). We accepteren beide casings als query-param en normaliseren
-// naar lowercase voor de SQL-filter.
-const VALID_STATUS = ['pending', 'approved', 'rejected', 'executed', 'failed', 'cancelled'];
+// Status-enum is UPPERCASE in deployed DB (spec-conform). We accepteren
+// beide casings als query-param en normaliseren naar UPPERCASE voor de
+// SQL-filter, zodat oude callers / bookmarks met lowercase ook blijven werken.
+const VALID_STATUS = ['PENDING', 'APPROVED', 'REJECTED', 'EXECUTED', 'FAILED', 'CANCELLED'];
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export default async function handler(req, res) {
@@ -62,10 +61,9 @@ export default async function handler(req, res) {
   }
 
   const q          = req.query || {};
-  // status-param: accepteer zowel lowercase als UPPERCASE (spec-laag stuurt
-  // uppercase PENDING/APPROVED/...). DB-kolom blijft lowercase, dus we
-  // normaliseren altijd via toLowerCase() voordat de filter wordt gezet.
-  const statusRaw  = q.status      ? String(q.status).toLowerCase() : null;
+  // status-param: accepteer zowel lowercase als UPPERCASE en normaliseer
+  // altijd naar UPPERCASE — DB CHECK eist UPPERCASE.
+  const statusRaw  = q.status      ? String(q.status).toUpperCase() : null;
   const actionType = q.action_type ? String(q.action_type)          : null;
   const source     = q.source      ? String(q.source)               : null;
   const customerId = q.customer_id ? String(q.customer_id)          : null;
@@ -143,7 +141,7 @@ export default async function handler(req, res) {
     try {
       // Eén aggregate-query per status: PostgREST head:true + count:'exact' is goedkoop.
       // Filter customer_id ook hier om de KPI consistent met de huidige view te houden.
-      const statusKeys = ['pending', 'approved', 'rejected', 'executed', 'failed'];
+      const statusKeys = ['PENDING', 'APPROVED', 'REJECTED', 'EXECUTED', 'FAILED'];
       await Promise.all(statusKeys.map(async (s) => {
         let cq = supabaseAdmin
           .from('pending_actions')
@@ -154,7 +152,7 @@ export default async function handler(req, res) {
         if (source)     cq = cq.eq('payload->>source', source);
         const { count: c, error: ce } = await cq;
         if (ce) { console.error('[pending-actions-list counts', s, ']', ce.message); return; }
-        counts[s.toUpperCase()] = typeof c === 'number' ? c : 0;
+        counts[s] = typeof c === 'number' ? c : 0;
       }));
     } catch (e) {
       console.error('[pending-actions-list counts]', e.message);

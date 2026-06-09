@@ -159,7 +159,7 @@
   }
 
   // Approvals-badge (D1 payment-arrangements):
-  //   - GET /api/pending-actions-list?status=pending&limit=1 → counts.PENDING
+  //   - GET /api/pending-actions-list?status=PENDING&limit=1 → counts.PENDING
   //   - alleen renderen als user feature_key 'finance.arrangements.approve' heeft
   //     (lookup via window.RBAC.ensurePermissionsLoaded(); super_admin krijgt '*')
   //   - klik op badge navigeert naar /modules/admin.html#approval-queue (data-target)
@@ -190,7 +190,7 @@
     if (!ok) { b.classList.remove('show'); return; }
     try {
       if (!window.AgentShared || typeof window.AgentShared.apiFetch !== 'function') return;
-      var res = await window.AgentShared.apiFetch('/api/pending-actions-list?status=pending&limit=1');
+      var res = await window.AgentShared.apiFetch('/api/pending-actions-list?status=PENDING&limit=1');
       if (!res.ok) { b.classList.remove('show'); return; }
       var data = await res.json();
       var n = (data && data.counts && typeof data.counts.PENDING === 'number')

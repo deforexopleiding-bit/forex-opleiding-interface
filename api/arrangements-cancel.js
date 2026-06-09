@@ -67,18 +67,20 @@ export default async function handler(req, res) {
       .single();
     if (updErr) throw new Error('update: ' + updErr.message);
 
-    // ---- UPDATE pending_actions -> cancelled (alleen pending) ----
+    // ---- UPDATE pending_actions -> CANCELLED (alleen PENDING) ----
+    // pending_actions-kolom heet rejection_reason en status-enum is UPPERCASE
+    // in deployed DB (PENDING/APPROVED/REJECTED/EXECUTED/FAILED/CANCELLED).
     let cancelledCount = 0;
     try {
       const { data: paUpd, error: paErr } = await supabaseAdmin
         .from('pending_actions')
         .update({
-          status:        'cancelled',
-          reject_reason: reason || 'arrangement cancelled',
-          updated_at:    nowIso,
+          status:           'CANCELLED',
+          rejection_reason: reason || 'arrangement cancelled',
+          updated_at:       nowIso,
         })
         .eq('arrangement_id', id)
-        .eq('status', 'pending')
+        .eq('status', 'PENDING')
         .select('id');
       if (paErr) console.error('[arrangements-cancel pending_actions]', paErr.message);
       else cancelledCount = (paUpd || []).length;
