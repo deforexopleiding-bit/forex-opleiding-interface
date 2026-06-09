@@ -5,11 +5,11 @@
 // Query-params:
 //   customer_id (uuid optional)  -> filter op klant
 //   status      (text optional)  -> exact-match op arrangement-status
-//                                   (voorgesteld | goedgekeurd | afgewezen |
-//                                    actief | voltooid | geannuleerd)
+//                                   (VOORGESTELD | ACTIEF | NAGEKOMEN |
+//                                    VERBROKEN | GEANNULEERD)
 //   type        (text optional)  -> exact-match op type
-//                                   (uitstel | gespreid | pauze |
-//                                    kwijtschelding | overig)
+//                                   (UITSTEL | SPLITSING | ABONNEMENT_PAUZE |
+//                                    ABONNEMENT_STOP | KWIJTSCHELDING)
 //   limit       (int, default 50, clamp 1..200)
 //   offset      (int, default 0)
 //
@@ -17,6 +17,9 @@
 //
 // Sortering: created_at DESC (de tabel heeft geen aparte proposed_at-kolom;
 // created_at is set bij INSERT en functioneert als voorgesteld-op-tijdstip).
+//
+// Lowercase / legacy waarden worden via een alias-map vertaald naar de
+// uppercase canonieke keys, zodat oude UI / bookmarked URLs blijven werken.
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
@@ -28,8 +31,27 @@ function clampInt(v, def, min, max) {
   return Math.min(Math.max(Math.trunc(n), min), max);
 }
 
-const VALID_STATUS = ['voorgesteld', 'goedgekeurd', 'afgewezen', 'actief', 'voltooid', 'geannuleerd'];
-const VALID_TYPE   = ['uitstel', 'gespreid', 'pauze', 'kwijtschelding', 'overig'];
+const VALID_STATUS = ['VOORGESTELD', 'ACTIEF', 'NAGEKOMEN', 'VERBROKEN', 'GEANNULEERD'];
+const VALID_TYPE   = ['UITSTEL', 'SPLITSING', 'ABONNEMENT_PAUZE', 'ABONNEMENT_STOP', 'KWIJTSCHELDING'];
+
+// Backward-compat aliases (lowercase -> uppercase canonical).
+const STATUS_ALIAS = {
+  voorgesteld:  'VOORGESTELD',
+  actief:       'ACTIEF',
+  voltooid:     'NAGEKOMEN',
+  afgewezen:    'VERBROKEN',
+  geannuleerd:  'GEANNULEERD',
+  // 'goedgekeurd' wordt niet meer als arrangement-status gebruikt — map terug
+  // naar VOORGESTELD (approval-flow zit op pending_actions).
+  goedgekeurd:  'VOORGESTELD',
+};
+const TYPE_ALIAS = {
+  uitstel:        'UITSTEL',
+  gespreid:       'SPLITSING',
+  pauze:          'ABONNEMENT_PAUZE',
+  overig:         'ABONNEMENT_STOP',
+  kwijtschelding: 'KWIJTSCHELDING',
+};
 
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
@@ -48,16 +70,29 @@ export default async function handler(req, res) {
 
   const q          = req.query || {};
   const customerId = q.customer_id ? String(q.customer_id) : null;
-  const statusRaw  = q.status      ? String(q.status).toLowerCase() : null;
-  const typeRaw    = q.type        ? String(q.type).toLowerCase()   : null;
+  const statusIn   = q.status      ? String(q.status)      : null;
+  const typeIn     = q.type        ? String(q.type)        : null;
   const limit      = clampInt(q.limit,  50, 1, 200);
   const offset     = Math.max(0, clampInt(q.offset, 0, 0, 1_000_000));
 
-  if (statusRaw && !VALID_STATUS.includes(statusRaw)) {
-    return res.status(400).json({ error: `Ongeldige status; verwacht ${VALID_STATUS.join('|')}` });
+  // Normaliseer: STATUS_ALIAS mapt legacy lowercase -> uppercase canoniek.
+  let statusFilter = null;
+  if (statusIn) {
+    const lc = statusIn.toLowerCase();
+    if (STATUS_ALIAS[lc])                statusFilter = STATUS_ALIAS[lc];
+    else if (VALID_STATUS.includes(statusIn)) statusFilter = statusIn;
+    else {
+      return res.status(400).json({ error: `Ongeldige status; verwacht ${VALID_STATUS.join('|')}` });
+    }
   }
-  if (typeRaw && !VALID_TYPE.includes(typeRaw)) {
-    return res.status(400).json({ error: `Ongeldige type; verwacht ${VALID_TYPE.join('|')}` });
+  let typeFilter = null;
+  if (typeIn) {
+    const lc = typeIn.toLowerCase();
+    if (TYPE_ALIAS[lc])                typeFilter = TYPE_ALIAS[lc];
+    else if (VALID_TYPE.includes(typeIn)) typeFilter = typeIn;
+    else {
+      return res.status(400).json({ error: `Ongeldige type; verwacht ${VALID_TYPE.join('|')}` });
+    }
   }
 
   try {
@@ -72,9 +107,9 @@ export default async function handler(req, res) {
       .order('created_at', { ascending: false })
       .range(offset, offset + limit - 1);
 
-    if (customerId) query = query.eq('customer_id', customerId);
-    if (statusRaw)  query = query.eq('status',      statusRaw);
-    if (typeRaw)    query = query.eq('type',        typeRaw);
+    if (customerId)   query = query.eq('customer_id', customerId);
+    if (statusFilter) query = query.eq('status',      statusFilter);
+    if (typeFilter)   query = query.eq('type',        typeFilter);
 
     const { data: rows, error, count } = await query;
     if (error) throw new Error('list: ' + error.message);

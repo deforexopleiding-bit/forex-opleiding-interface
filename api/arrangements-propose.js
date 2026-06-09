@@ -1,33 +1,29 @@
 // api/arrangements-propose.js
-// POST -> nieuwe payment_arrangement aanmaken (status='voorgesteld') incl. bijbehorende
+// POST -> nieuwe payment_arrangement aanmaken (status='VOORGESTELD') incl. bijbehorende
 // pending_actions per type. Permission: finance.arrangements.propose.
 //
 // Body (JSON):
 //   {
 //     customer_id:     uuid,
-//     invoice_ids:     uuid[],   // verplicht behalve bij pauze / abonnement-stop
-//     type:            'uitstel' | 'gespreid' | 'pauze' | 'kwijtschelding' | 'overig',
+//     invoice_ids:     uuid[],   // verplicht behalve bij ABONNEMENT_PAUZE / ABONNEMENT_STOP
+//     type:            'UITSTEL' | 'SPLITSING' | 'ABONNEMENT_PAUZE' | 'ABONNEMENT_STOP' | 'KWIJTSCHELDING',
 //     details:         object,   // type-specifiek (zie validatie hieronder)
 //     rationale:       string,   // vrije tekst (opgeslagen in notes + in pending_actions.payload)
 //     effective_from:  date,     // optioneel — meta in details.effective_from
 //     effective_until: date      // optioneel — meta in details.effective_until
 //   }
 //
-// Type-aliassen (acceptatie van oude/uppercase synoniemen voor forward-compat):
-//   'UITSTEL'           -> 'uitstel'
-//   'SPLITSING'         -> 'gespreid'
-//   'ABONNEMENT_PAUZE'  -> 'pauze'
-//   'ABONNEMENT_STOP'   -> 'overig'   (geen aparte stop-enum; gemarkeerd via details.kind='abonnement_stop')
-//   'KWIJTSCHELDING'    -> 'kwijtschelding'
+// Lowercase / legacy synoniemen worden geaccepteerd voor backward-compat
+// (uitstel -> UITSTEL, gespreid -> SPLITSING, pauze -> ABONNEMENT_PAUZE,
+//  overig  -> ABONNEMENT_STOP, kwijtschelding -> KWIJTSCHELDING).
 //
-// Details-validatie per (genormaliseerd) type:
-//   uitstel        : { new_due_date: 'YYYY-MM-DD' }                            -- per factuur 1 pending_action.
-//   gespreid       : { parts: [ { amount: number, due_date: 'YYYY-MM-DD' } ] } -- per factuur 1 pending_action.
-//                    parts.length >= 2 EN sum(parts.amount) == invoice.amount_total per factuur
-//                    (wanneer 1 factuur). Bij meerdere facturen geldt de eis tegen sum(amount_total).
-//   pauze          : { subscription_id: uuid, pause_from, pause_until, reason } -- 1 pending_action.
-//   overig (stop)  : { subscription_id: uuid, stop_date, reason }              -- 1 pending_action.
-//   kwijtschelding : { write_off_amount: number > 0, reason: string }          -- per factuur 1 pending_action.
+// Details-validatie per type:
+//   UITSTEL           : { new_due_date: 'YYYY-MM-DD' }                            -- per factuur 1 pending_action.
+//   SPLITSING         : { parts: [ { amount: number, due_date: 'YYYY-MM-DD' } ] } -- per factuur 1 pending_action.
+//                       parts.length >= 2 EN sum(parts.amount) == sum(invoice.amount_total) (1ct tolerantie).
+//   ABONNEMENT_PAUZE  : { subscription_id: uuid, pause_from, pause_until, reason } -- 1 pending_action.
+//   ABONNEMENT_STOP   : { subscription_id: uuid, stop_date, reason }              -- 1 pending_action.
+//   KWIJTSCHELDING    : { write_off_amount: number > 0, reason: string }          -- per factuur 1 pending_action.
 //
 // Response 201: { arrangement, pending_actions: [...] }
 // Bij INSERT-fout op pending_actions: best-effort rollback (DELETE arrangement) + 500.
@@ -39,23 +35,31 @@ import { getClientIp } from './_lib/audit-customer.js';
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
+// Uppercase enum-keys zijn canoniek. Legacy lowercase / oude 'overig' worden
+// gemapt zodat oude callers blijven werken.
 const TYPE_ALIASES = {
-  UITSTEL:          'uitstel',
-  SPLITSING:        'gespreid',
-  ABONNEMENT_PAUZE: 'pauze',
-  ABONNEMENT_STOP:  'overig',
-  KWIJTSCHELDING:   'kwijtschelding',
-  uitstel: 'uitstel', gespreid: 'gespreid', pauze: 'pauze',
-  kwijtschelding: 'kwijtschelding', overig: 'overig',
+  // Canonieke uppercase keys
+  UITSTEL:          'UITSTEL',
+  SPLITSING:        'SPLITSING',
+  ABONNEMENT_PAUZE: 'ABONNEMENT_PAUZE',
+  ABONNEMENT_STOP:  'ABONNEMENT_STOP',
+  KWIJTSCHELDING:   'KWIJTSCHELDING',
+  // Legacy lowercase (backward compat)
+  uitstel:        'UITSTEL',
+  gespreid:       'SPLITSING',
+  pauze:          'ABONNEMENT_PAUZE',
+  overig:         'ABONNEMENT_STOP',
+  kwijtschelding: 'KWIJTSCHELDING',
 };
 
-// Mapping naar pending_actions.action_type (consistent met migratie-comment).
+// Mapping naar pending_actions.action_type. TL_ prefix markeert acties die
+// in D2 door de TeamLeader-executor opgepakt worden.
 const ACTION_TYPE_FOR = {
-  uitstel:           'arrangement.uitstel',
-  gespreid:          'arrangement.gespreid',
-  pauze:             'arrangement.pauze',
-  overig_stop:       'arrangement.abonnement_stop',
-  kwijtschelding:    'arrangement.kwijtschelding',
+  UITSTEL:          'TL_INVOICE_UPDATE_DUE',
+  SPLITSING:        'TL_INVOICE_SPLIT',
+  ABONNEMENT_PAUZE: 'TL_SUBSCRIPTION_PAUSE',
+  ABONNEMENT_STOP:  'TL_SUBSCRIPTION_STOP',
+  KWIJTSCHELDING:   'TL_INVOICE_WRITEOFF',
 };
 
 function isUuid(s)  { return typeof s === 'string' && UUID_RE.test(s); }
@@ -89,12 +93,14 @@ export default async function handler(req, res) {
   // ---- Basis-validatie ----
   if (!isUuid(customerId))  return res.status(400).json({ error: 'customer_id (uuid) vereist' });
   if (!typeRaw || !(typeRaw in TYPE_ALIASES)) {
-    return res.status(400).json({ error: 'type vereist (uitstel | gespreid | pauze | kwijtschelding | overig — UPPERCASE-aliassen geaccepteerd)' });
+    return res.status(400).json({
+      error: 'type vereist (UITSTEL | SPLITSING | ABONNEMENT_PAUZE | ABONNEMENT_STOP | KWIJTSCHELDING)',
+    });
   }
-  const type        = TYPE_ALIASES[typeRaw];
-  const isStop      = String(typeRaw).toUpperCase() === 'ABONNEMENT_STOP';
-  const invoiceIds  = invoiceIdsRaw.map(String).filter(isUuid);
-  const needsInvoices = !(type === 'pauze' || isStop);
+  const type         = TYPE_ALIASES[typeRaw];
+  const invoiceIds   = invoiceIdsRaw.map(String).filter(isUuid);
+  const isSubAction  = (type === 'ABONNEMENT_PAUZE' || type === 'ABONNEMENT_STOP');
+  const needsInvoices = !isSubAction;
   if (needsInvoices && invoiceIds.length === 0) {
     return res.status(400).json({ error: 'invoice_ids vereist (>=1 uuid) voor type ' + type });
   }
@@ -103,29 +109,40 @@ export default async function handler(req, res) {
 
   // ---- Type-specifieke details-validatie ----
   try {
-    if (type === 'uitstel') {
-      if (!isDate(details.new_due_date)) throw new Error('details.new_due_date (YYYY-MM-DD) vereist voor uitstel');
-    } else if (type === 'gespreid') {
-      if (!Array.isArray(details.parts) || details.parts.length < 2) {
-        throw new Error('details.parts (min 2 elementen) vereist voor gespreid');
+    switch (type) {
+      case 'UITSTEL': {
+        if (!isDate(details.new_due_date)) throw new Error('details.new_due_date (YYYY-MM-DD) vereist voor UITSTEL');
+        break;
       }
-      for (const p of details.parts) {
-        if (!p || typeof p !== 'object') throw new Error('details.parts: elk part is een object {amount, due_date}');
-        if (!isPosNum(Number(p.amount))) throw new Error('details.parts[].amount moet > 0 zijn');
-        if (!isDate(p.due_date))         throw new Error('details.parts[].due_date moet YYYY-MM-DD zijn');
+      case 'SPLITSING': {
+        if (!Array.isArray(details.parts) || details.parts.length < 2) {
+          throw new Error('details.parts (min 2 elementen) vereist voor SPLITSING');
+        }
+        for (const p of details.parts) {
+          if (!p || typeof p !== 'object') throw new Error('details.parts: elk part is een object {amount, due_date}');
+          if (!isPosNum(Number(p.amount))) throw new Error('details.parts[].amount moet > 0 zijn');
+          if (!isDate(p.due_date))         throw new Error('details.parts[].due_date moet YYYY-MM-DD zijn');
+        }
+        break;
       }
-    } else if (type === 'pauze') {
-      if (!isUuid(details.subscription_id)) throw new Error('details.subscription_id (uuid) vereist voor pauze');
-      if (!isDate(details.pause_from))      throw new Error('details.pause_from (YYYY-MM-DD) vereist voor pauze');
-      if (!isDate(details.pause_until))     throw new Error('details.pause_until (YYYY-MM-DD) vereist voor pauze');
-      if (!details.reason || typeof details.reason !== 'string') throw new Error('details.reason vereist voor pauze');
-    } else if (isStop) {
-      if (!isUuid(details.subscription_id)) throw new Error('details.subscription_id (uuid) vereist voor abonnement-stop');
-      if (!isDate(details.stop_date))       throw new Error('details.stop_date (YYYY-MM-DD) vereist voor abonnement-stop');
-      if (!details.reason || typeof details.reason !== 'string') throw new Error('details.reason vereist voor abonnement-stop');
-    } else if (type === 'kwijtschelding') {
-      if (!isPosNum(Number(details.write_off_amount))) throw new Error('details.write_off_amount (>0) vereist voor kwijtschelding');
-      if (!details.reason || typeof details.reason !== 'string') throw new Error('details.reason vereist voor kwijtschelding');
+      case 'ABONNEMENT_PAUZE': {
+        if (!isUuid(details.subscription_id)) throw new Error('details.subscription_id (uuid) vereist voor ABONNEMENT_PAUZE');
+        if (!isDate(details.pause_from))      throw new Error('details.pause_from (YYYY-MM-DD) vereist voor ABONNEMENT_PAUZE');
+        if (!isDate(details.pause_until))     throw new Error('details.pause_until (YYYY-MM-DD) vereist voor ABONNEMENT_PAUZE');
+        if (!details.reason || typeof details.reason !== 'string') throw new Error('details.reason vereist voor ABONNEMENT_PAUZE');
+        break;
+      }
+      case 'ABONNEMENT_STOP': {
+        if (!isUuid(details.subscription_id)) throw new Error('details.subscription_id (uuid) vereist voor ABONNEMENT_STOP');
+        if (!isDate(details.stop_date))       throw new Error('details.stop_date (YYYY-MM-DD) vereist voor ABONNEMENT_STOP');
+        if (!details.reason || typeof details.reason !== 'string') throw new Error('details.reason vereist voor ABONNEMENT_STOP');
+        break;
+      }
+      case 'KWIJTSCHELDING': {
+        if (!isPosNum(Number(details.write_off_amount))) throw new Error('details.write_off_amount (>0) vereist voor KWIJTSCHELDING');
+        if (!details.reason || typeof details.reason !== 'string') throw new Error('details.reason vereist voor KWIJTSCHELDING');
+        break;
+      }
     }
   } catch (e) {
     return res.status(400).json({ error: e.message });
@@ -160,8 +177,8 @@ export default async function handler(req, res) {
       if (wrong) return res.status(400).json({ error: `Factuur ${wrong.invoice_number || wrong.id} hoort niet bij klant` });
     }
 
-    // ---- Gespreid: sum(parts) == sum(amount_total) ----
-    if (type === 'gespreid') {
+    // ---- SPLITSING: sum(parts) == sum(amount_total) ----
+    if (type === 'SPLITSING') {
       const sumParts = details.parts.reduce((a, p) => a + Number(p.amount || 0), 0);
       const sumInv   = invoices.reduce((a, i) => a + (Number(i.amount_total) || 0), 0);
       // 1-cent tolerantie tegen FP-afronding.
@@ -182,7 +199,7 @@ export default async function handler(req, res) {
       customer_id:   customerId,
       invoice_ids:   invoiceIds,
       type,
-      status:        'voorgesteld',
+      status:        'VOORGESTELD',
       details:       detailsToStore,
       proposed_by:   user.id,
       notes:         rationale,
@@ -195,7 +212,7 @@ export default async function handler(req, res) {
     if (arrErr) throw new Error('arrangement-insert: ' + arrErr.message);
 
     // ---- Bouw pending_actions per type ----
-    const actionType = isStop ? ACTION_TYPE_FOR.overig_stop : ACTION_TYPE_FOR[type];
+    const actionType = ACTION_TYPE_FOR[type];
     const baseRow = {
       customer_id:    customerId,
       arrangement_id: arr.id,
@@ -205,55 +222,66 @@ export default async function handler(req, res) {
     };
 
     const rows = [];
-    if (type === 'uitstel') {
-      for (const invId of invoiceIds) {
-        rows.push({
-          ...baseRow,
-          payload: { invoice_id: invId, new_due_date: details.new_due_date, source: 'manual', rationale },
-        });
+    switch (type) {
+      case 'UITSTEL': {
+        for (const invId of invoiceIds) {
+          rows.push({
+            ...baseRow,
+            payload: { invoice_id: invId, new_due_date: details.new_due_date, source: 'manual', rationale },
+          });
+        }
+        break;
       }
-    } else if (type === 'gespreid') {
-      for (const invId of invoiceIds) {
-        rows.push({
-          ...baseRow,
-          payload: { invoice_id: invId, parts: details.parts, source: 'manual', rationale },
-        });
+      case 'SPLITSING': {
+        for (const invId of invoiceIds) {
+          rows.push({
+            ...baseRow,
+            payload: { invoice_id: invId, parts: details.parts, source: 'manual', rationale },
+          });
+        }
+        break;
       }
-    } else if (type === 'pauze') {
-      rows.push({
-        ...baseRow,
-        payload: {
-          subscription_id: details.subscription_id,
-          pause_from:      details.pause_from,
-          pause_until:     details.pause_until,
-          reason:          details.reason,
-          source:          'manual',
-          rationale,
-        },
-      });
-    } else if (isStop) {
-      rows.push({
-        ...baseRow,
-        payload: {
-          subscription_id: details.subscription_id,
-          stop_date:       details.stop_date,
-          reason:          details.reason,
-          source:          'manual',
-          rationale,
-        },
-      });
-    } else if (type === 'kwijtschelding') {
-      for (const invId of invoiceIds) {
+      case 'ABONNEMENT_PAUZE': {
         rows.push({
           ...baseRow,
           payload: {
-            invoice_id:       invId,
-            write_off_amount: Number(details.write_off_amount),
-            reason:           details.reason,
-            source:           'manual',
+            subscription_id: details.subscription_id,
+            pause_from:      details.pause_from,
+            pause_until:     details.pause_until,
+            reason:          details.reason,
+            source:          'manual',
             rationale,
           },
         });
+        break;
+      }
+      case 'ABONNEMENT_STOP': {
+        rows.push({
+          ...baseRow,
+          payload: {
+            subscription_id: details.subscription_id,
+            stop_date:       details.stop_date,
+            reason:          details.reason,
+            source:          'manual',
+            rationale,
+          },
+        });
+        break;
+      }
+      case 'KWIJTSCHELDING': {
+        for (const invId of invoiceIds) {
+          rows.push({
+            ...baseRow,
+            payload: {
+              invoice_id:       invId,
+              write_off_amount: Number(details.write_off_amount),
+              reason:           details.reason,
+              source:           'manual',
+              rationale,
+            },
+          });
+        }
+        break;
       }
     }
 

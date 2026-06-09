@@ -3491,10 +3491,18 @@ function approvStatusBadge(status) {
 
 function approvActionLabel(t) {
   const map = {
+    // Spec-conform TL_ prefix (D1 polish)
+    'TL_INVOICE_UPDATE_DUE':       'Uitstel',
+    'TL_INVOICE_SPLIT':            'Splitsing in termijnen',
+    'TL_SUBSCRIPTION_PAUSE':       'Abonnement pauze',
+    'TL_SUBSCRIPTION_STOP':        'Abonnement stop',
+    'TL_INVOICE_WRITEOFF':         'Kwijtschelding',
+    // Legacy (oude rows pre-D1-polish)
     'arrangement.uitstel':         'Uitstel',
-    'arrangement.gespreid':        'Gespreid betalen',
+    'arrangement.gespreid':        'Splitsing in termijnen',
     'arrangement.kwijtschelding':  'Kwijtschelding',
-    'arrangement.pauze':           'Pauze',
+    'arrangement.pauze':           'Abonnement pauze',
+    'arrangement.abonnement_stop': 'Abonnement stop',
   };
   return map[t] || (t || '—');
 }

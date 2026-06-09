@@ -1,19 +1,20 @@
 // api/arrangements-cancel.js
-// POST -> annuleer een payment_arrangement (voorgesteld | actief -> geannuleerd) +
+// POST -> annuleer een payment_arrangement (VOORGESTELD | ACTIEF -> GEANNULEERD) +
 // markeer alle openstaande pending_actions als cancelled. Permission:
 // finance.arrangements.propose (annuleren is de inverse van voorstellen).
 //
 // Body: { id: uuid, reason?: string }
 //
-// State-machine: alleen vanuit 'voorgesteld' of 'actief' is annuleren toegestaan.
-// 'goedgekeurd' / 'voltooid' / 'afgewezen' / 'geannuleerd' -> 409.
+// State-machine: alleen vanuit 'VOORGESTELD' of 'ACTIEF' is annuleren toegestaan.
+// 'NAGEKOMEN' / 'VERBROKEN' / 'GEANNULEERD' -> 409.
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
 import { getClientIp } from './_lib/audit-customer.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const CANCELLABLE = ['voorgesteld', 'actief'];
+// Canonical uppercase + legacy lowercase fallback (rows die nog niet gemigreerd zijn).
+const CANCELLABLE = ['VOORGESTELD', 'ACTIEF', 'voorgesteld', 'actief'];
 
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
@@ -46,17 +47,17 @@ export default async function handler(req, res) {
 
     if (!CANCELLABLE.includes(arr.status)) {
       return res.status(409).json({
-        error: `Annuleren kan alleen vanuit ${CANCELLABLE.join('|')} (huidig: ${arr.status})`,
+        error: `Annuleren kan alleen vanuit VOORGESTELD|ACTIEF (huidig: ${arr.status})`,
       });
     }
 
     const nowIso = new Date().toISOString();
 
-    // ---- UPDATE arrangement -> geannuleerd ----
+    // ---- UPDATE arrangement -> GEANNULEERD ----
     const { data: updated, error: updErr } = await supabaseAdmin
       .from('payment_arrangements')
       .update({
-        status:        'geannuleerd',
+        status:        'GEANNULEERD',
         reject_reason: reason,   // hergebruik reject_reason-kolom voor cancel-reden
         rejected_at:   nowIso,
         updated_at:    nowIso,
@@ -90,7 +91,7 @@ export default async function handler(req, res) {
         action:      'finance.arrangement.cancelled',
         entity_type: 'payment_arrangement',
         entity_id:   id,
-        after_json:  { id, status: 'geannuleerd', cancelled_pending_actions: cancelledCount },
+        after_json:  { id, status: 'GEANNULEERD', cancelled_pending_actions: cancelledCount },
         reason_text: reason,
         ip_address:  getClientIp(req),
       });

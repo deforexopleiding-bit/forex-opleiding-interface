@@ -3,7 +3,9 @@
 Datum: 2026-06-09
 Sprint: D1 (DB-fundament + approval-queue + propose-wizard, geen TL-executor)
 Branch: `fix/inbox-bubble-compact-and-template-modal-scroll` (mixed)
-Migratie: `docs/sql-migrations/2026-06-09-payment-arrangements-d1.sql`
+Migraties:
+- `docs/sql-migrations/2026-06-09-payment-arrangements-d1.sql` (initieel fundament)
+- `docs/sql-migrations/2026-06-09-payment-arrangements-d1-spec-naming.sql` (uppercase enum-keys)
 
 ---
 
@@ -15,7 +17,7 @@ We bouwen:
 1. **DB-schema** — drie tabellen (`payment_arrangements`, `pending_actions`,
    `arrangement_action_settings`) met RLS-policies, indices en `updated_at` triggers.
 2. **Propose-API** — `POST /api/arrangements-propose` valideert + schrijft een
-   `payment_arrangement` (status `voorgesteld`) plus N `pending_actions` (status
+   `payment_arrangement` (status `VOORGESTELD`) plus N `pending_actions` (status
    `pending`) per arrangement-type.
 3. **Approval-queue** — admin-tab in `/modules/admin.html#approval-queue` met
    filter-pills (pending/approved/rejected/executed/failed), bulk-acties,
@@ -29,7 +31,7 @@ Wat D1 expliciet NIET doet:
 
 - **Geen TL-sync executor** — `pending_actions.status='approved'` blijft staan.
   Geen TL-call, geen factuur-mutatie, geen abonnement-pauze. Dat is D2.
-- **Geen split-parts generator** — `gespreid` accepteert handmatig opgegeven
+- **Geen split-parts generator** — `SPLITSING` accepteert handmatig opgegeven
   parts in de wizard. Auto-genereer (3x gelijke parts, etc.) komt in D3.
 - **Geen auto-execute** — `arrangement_action_settings.auto_execute` bestaat als
   kolom maar wordt nergens gelezen. Toggle-UI komt in D4.
@@ -43,16 +45,21 @@ Wat D1 expliciet NIET doet:
 
 ### `payment_arrangements`
 
-Eén rij per voorstel/regeling per klant. Status-flow:
-`voorgesteld → goedgekeurd | afgewezen → actief → voltooid | geannuleerd`.
+Eén rij per voorstel/regeling per klant. Status-flow (spec-conform sinds
+migratie `2026-06-09-payment-arrangements-d1-spec-naming.sql`):
+`VOORGESTELD → (alle pending_actions APPROVED+EXECUTED) → ACTIEF → NAGEKOMEN | VERBROKEN | GEANNULEERD`.
+
+Approval-flow zit op `pending_actions.status` (PENDING/APPROVED/REJECTED/...),
+niet duplicaat op `payment_arrangements.status`. VERBROKEN is gereserveerd
+voor breach-detectie in D5.
 
 Kolommen (samenvatting; zie migratie voor types):
 
 - `id uuid PK`
 - `customer_id uuid NOT NULL → customers(id) ON DELETE RESTRICT`
 - `invoice_ids uuid[]` — array van factuur-UUIDs (FK op API-niveau)
-- `type text CHECK (uitstel | gespreid | pauze | kwijtschelding | overig)`
-- `status text CHECK (...)` — zie flow boven
+- `type text CHECK (UITSTEL | SPLITSING | ABONNEMENT_PAUZE | ABONNEMENT_STOP | KWIJTSCHELDING)`
+- `status text CHECK (VOORGESTELD | ACTIEF | NAGEKOMEN | VERBROKEN | GEANNULEERD)`
 - `details jsonb` — type-specifieke payload (`new_due_date`, `parts[]`,
   `pause_from/until`, `write_off_amount`, etc.)
 - `proposed_by / approved_by uuid → profiles(id) ON DELETE SET NULL`
@@ -131,25 +138,28 @@ voor RBAC, en `supabaseAdmin` voor de writes (vanwege RLS `WITH CHECK (false)`).
 Bij `arrangements-propose` wordt het arrangement-type omgezet in 1 of meer
 `pending_actions`-rijen. Dual-table pattern: 1 arrangement → N pending_actions.
 
-| Arrangement-type | action_type (per pending_action) | Aantal rows | Payload-keys |
+| Arrangement-type   | action_type (pending_action)   | Aantal rows   | Payload-keys |
 |---|---|---|---|
-| `uitstel`        | `arrangement.uitstel`         | per factuur 1 | `invoice_id`, `new_due_date`, `rationale` |
-| `gespreid`       | `arrangement.gespreid`        | per factuur 1 | `invoice_id`, `parts:[{amount,due_date}]`, `rationale` |
-| `pauze`          | `arrangement.pauze`           | 1             | `subscription_id`, `pause_from`, `pause_until`, `reason` |
-| `overig` (stop)  | `arrangement.abonnement_stop` | 1             | `subscription_id`, `stop_date`, `reason` |
-| `kwijtschelding` | `arrangement.kwijtschelding`  | per factuur 1 | `invoice_id`, `write_off_amount`, `reason` |
+| `UITSTEL`          | `TL_INVOICE_UPDATE_DUE`        | per factuur 1 | `invoice_id`, `new_due_date`, `rationale` |
+| `SPLITSING`        | `TL_INVOICE_SPLIT`             | per factuur 1 | `invoice_id`, `parts:[{amount,due_date}]`, `rationale` |
+| `ABONNEMENT_PAUZE` | `TL_SUBSCRIPTION_PAUSE`        | 1             | `subscription_id`, `pause_from`, `pause_until`, `reason` |
+| `ABONNEMENT_STOP`  | `TL_SUBSCRIPTION_STOP`         | 1             | `subscription_id`, `stop_date`, `reason` |
+| `KWIJTSCHELDING`   | `TL_INVOICE_WRITEOFF`          | per factuur 1 | `invoice_id`, `write_off_amount`, `reason` |
+
+De `TL_` prefix markeert acties die in D2 door de TeamLeader-executor
+opgepakt worden.
 
 Validatie-rules in `arrangements-propose.js`:
 
-- `uitstel` — `details.new_due_date` (YYYY-MM-DD) verplicht
-- `gespreid` — `details.parts.length >= 2` én `sum(parts.amount) == sum(invoice.amount_total)` met 1ct tolerantie
-- `pauze` — `subscription_id`, `pause_from`, `pause_until`, `reason` allemaal verplicht
-- `abonnement_stop` — alias voor `overig` met `details.stop_date` + `reason`
-- `kwijtschelding` — `write_off_amount > 0` en `reason` verplicht
+- `UITSTEL` — `details.new_due_date` (YYYY-MM-DD) verplicht
+- `SPLITSING` — `details.parts.length >= 2` én `sum(parts.amount) == sum(invoice.amount_total)` met 1ct tolerantie
+- `ABONNEMENT_PAUZE` — `subscription_id`, `pause_from`, `pause_until`, `reason` allemaal verplicht
+- `ABONNEMENT_STOP` — `subscription_id`, `stop_date`, `reason` allemaal verplicht
+- `KWIJTSCHELDING` — `write_off_amount > 0` en `reason` verplicht
 
-UPPERCASE-aliassen (`UITSTEL`, `SPLITSING`, `ABONNEMENT_PAUZE`,
-`ABONNEMENT_STOP`, `KWIJTSCHELDING`) worden geaccepteerd voor forward-compat
-met legacy callers en testfixtures.
+Lowercase legacy synoniemen (`uitstel`, `gespreid`, `pauze`, `overig`,
+`kwijtschelding`) worden geaccepteerd als alias voor backward-compat met
+oude callers en bookmarked URLs.
 
 ---
 
@@ -164,7 +174,7 @@ met legacy callers en testfixtures.
                                ▼
               ┌──────────────────────────────────┐
               │ payment_arrangements             │
-              │   status = 'voorgesteld'         │
+              │   status = 'VOORGESTELD'         │
               │ pending_actions (N rows)         │
               │   status = 'pending'             │
               └────────────────┬─────────────────┘
@@ -250,9 +260,9 @@ Geïmplementeerd in `modules/shared/sidebar.js`:
 |---|---|---|
 | **D1** | DB-fundament + propose-API + approval-queue UI + hoofdnav-badge | ✅ live |
 | **D2** | TL-sync executor — leest `pending_actions.status='approved'`, voert TL-call uit (invoice due-date update, credit-note bij kwijtschelding, subscription.deactivate bij stop), zet status → `executed` of `failed` met error-text in `execution_result` | TODO |
-| **D3** | Split-parts generator — wizard biedt presets (3x gelijke parts, 2x 50%, custom) voor `gespreid`-type met datum-spread (maandelijks/wekelijks); validatie blijft sum-check | TODO |
+| **D3** | Split-parts generator — wizard biedt presets (3x gelijke parts, 2x 50%, custom) voor `SPLITSING`-type met datum-spread (maandelijks/wekelijks); validatie blijft sum-check | TODO |
 | **D4** | Auto-execute toggles — UI in admin voor `arrangement_action_settings`: per `action_type` auto-execute on/off + `max_amount` / `max_days` grenzen + `notify_roles[]`. Executor (D2) checkt deze settings; binnen grenzen = skip approval-stap | TODO |
-| **D5** | Dunning workflow auto-pause — bij APPROVED arrangement met `has_active_run`-klant: pauzeer de bijbehorende `dunning_workflow_runs`-rij automatisch met source='arrangement_<id>'. Resume bij `voltooid`-arrangement | TODO |
+| **D5** | Dunning workflow auto-pause + breach-detectie — bij ACTIEF arrangement met `has_active_run`-klant: pauzeer de bijbehorende `dunning_workflow_runs`-rij automatisch met source='arrangement_<id>'. Resume bij NAGEKOMEN-arrangement; bij gemiste betaling -> VERBROKEN + workflow resume | TODO |
 | **D6** | Inbox-wizard — `Stel afspraak voor`-knop in WhatsApp/email inbox naast bestaande quick-replies. Pre-fillt customer_id + open facturen, opent dezelfde propose-wizard als finance.html | TODO |
 
 ---

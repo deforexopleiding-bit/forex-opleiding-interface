@@ -1338,7 +1338,7 @@
         <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:14px;flex-wrap:wrap;gap:10px">
           <div>
             <h2 style="margin:0;font-size:18px;font-weight:700">Afspraken</h2>
-            <div style="font-size:11.5px;color:var(--text-faint);margin-top:2px">Betalingsregelingen per klant (uitstel, gespreid, pauze, kwijtschelding). Klik op een rij voor details.</div>
+            <div style="font-size:11.5px;color:var(--text-faint);margin-top:2px">Betalingsregelingen per klant (uitstel, splitsing, abonnement pauze/stop, kwijtschelding). Klik op een rij voor details.</div>
           </div>
           <div style="display:flex;gap:8px;align-items:center">
             <button class="sr-abtn primary" id="arrangProposeBtn" type="button" style="font-size:12.5px;padding:6px 12px">
@@ -1351,11 +1351,11 @@
         </div>
         <!-- Filter-strip status-pills -->
         <div class="sr-segments" id="arrangStatusNav" style="margin-bottom:14px">
-          <button class="sr-seg active" data-arrang-status="voorgesteld" type="button">Voorgesteld</button>
-          <button class="sr-seg" data-arrang-status="actief" type="button">Actief</button>
-          <button class="sr-seg" data-arrang-status="voltooid" type="button">Nagekomen</button>
-          <button class="sr-seg" data-arrang-status="afgewezen" type="button">Verbroken</button>
-          <button class="sr-seg" data-arrang-status="geannuleerd" type="button">Geannuleerd</button>
+          <button class="sr-seg active" data-arrang-status="VOORGESTELD" type="button">Voorgesteld</button>
+          <button class="sr-seg" data-arrang-status="ACTIEF" type="button">Actief</button>
+          <button class="sr-seg" data-arrang-status="NAGEKOMEN" type="button">Nagekomen</button>
+          <button class="sr-seg" data-arrang-status="VERBROKEN" type="button">Verbroken</button>
+          <button class="sr-seg" data-arrang-status="GEANNULEERD" type="button">Geannuleerd</button>
         </div>
         <div class="sr-tablewrap">
           <table class="sr-table" id="arrangementsTable">
@@ -3530,7 +3530,7 @@
   // ─── Afspraken / Payment Arrangements sub-tab (D1) ─────────────────────────
   let _arrangLoadedOnce  = false;
   let _arrangWired       = false;
-  let _arrangActiveStatus = 'voorgesteld';
+  let _arrangActiveStatus = 'VOORGESTELD';
   let _arrangItems        = [];
 
   function wireArrangOnce() {
@@ -3596,23 +3596,22 @@
 
   function arrangStatusBadge(status) {
     const map = {
-      voorgesteld:  '<span class="sr-tag" style="background:rgba(56,189,248,.15);color:#38bdf8">Voorgesteld</span>',
-      goedgekeurd:  '<span class="sr-tag green">Goedgekeurd</span>',
-      actief:       '<span class="sr-tag green">Actief</span>',
-      voltooid:     '<span class="sr-tag gray">Nagekomen</span>',
-      afgewezen:    '<span class="sr-tag" style="background:rgba(239,68,68,.15);color:#ef4444">Verbroken</span>',
-      geannuleerd:  '<span class="sr-tag gray">Geannuleerd</span>',
+      VOORGESTELD:  '<span class="sr-tag" style="background:rgba(56,189,248,.15);color:#38bdf8">Voorgesteld</span>',
+      ACTIEF:       '<span class="sr-tag green">Actief</span>',
+      NAGEKOMEN:    '<span class="sr-tag gray">Nagekomen</span>',
+      VERBROKEN:    '<span class="sr-tag" style="background:rgba(239,68,68,.15);color:#ef4444">Verbroken</span>',
+      GEANNULEERD:  '<span class="sr-tag gray">Geannuleerd</span>',
     };
     return map[status] || `<span class="sr-tag gray">${esc(status || '—')}</span>`;
   }
 
   function arrangTypeLabel(t) {
     const map = {
-      uitstel:        'Uitstel',
-      gespreid:       'Gespreide betaling',
-      pauze:          'Pauze',
-      kwijtschelding: 'Kwijtschelding',
-      overig:         'Overig',
+      UITSTEL:          'Uitstel',
+      SPLITSING:        'Splitsing',
+      ABONNEMENT_PAUZE: 'Abonnement pauze',
+      ABONNEMENT_STOP:  'Abonnement stop',
+      KWIJTSCHELDING:   'Kwijtschelding',
     };
     return map[t] || (t || '—');
   }
@@ -3621,13 +3620,16 @@
   function arrangEffective(item) {
     const d = item.details || {};
     let from = null, until = null;
-    if (item.type === 'pauze') {
+    if (item.type === 'ABONNEMENT_PAUZE') {
       from = d.pause_from || null;
       until = d.pause_until || null;
-    } else if (item.type === 'uitstel') {
+    } else if (item.type === 'ABONNEMENT_STOP') {
+      from = d.stop_date || (item.created_at ? String(item.created_at).slice(0, 10) : null);
+      until = d.stop_date || null;
+    } else if (item.type === 'UITSTEL') {
       from = item.created_at ? String(item.created_at).slice(0, 10) : null;
       until = d.new_due_date || null;
-    } else if (item.type === 'gespreid' && Array.isArray(d.parts) && d.parts.length) {
+    } else if (item.type === 'SPLITSING' && Array.isArray(d.parts) && d.parts.length) {
       from = d.parts[0]?.due_date || null;
       until = d.parts[d.parts.length - 1]?.due_date || null;
     } else {
@@ -3680,7 +3682,7 @@
         ? `${esc(fmtDateNl(eff.from))} <span style="color:var(--text-faint)">→</span> ${esc(fmtDateNl(eff.until))}`
         : '<span style="color:var(--text-faint)">—</span>';
       const statusBadge = arrangStatusBadge(it.status);
-      const canCancel = it.status === 'voorgesteld' || it.status === 'actief';
+      const canCancel = it.status === 'VOORGESTELD' || it.status === 'ACTIEF';
       const cancelBtn = canCancel
         ? `<button class="sr-abtn danger" data-arrang-cancel="${esc(it.id)}" type="button" style="font-size:11px;padding:4px 8px"><i class="ti ti-x"></i> Annuleer</button>`
         : '';
@@ -4398,9 +4400,9 @@
       }
       window.AgentShared.showToast('Afspraak voorgesteld', 'success');
       closeArrangPropose();
-      // Re-load afspraken-lijst indien actief, switch naar 'voorgesteld'.
-      if (typeof switchArrangStatus === 'function' && _arrangActiveStatus !== 'voorgesteld') {
-        switchArrangStatus('voorgesteld');
+      // Re-load afspraken-lijst indien actief, switch naar 'VOORGESTELD'.
+      if (typeof switchArrangStatus === 'function' && _arrangActiveStatus !== 'VOORGESTELD') {
+        switchArrangStatus('VOORGESTELD');
       } else if (typeof loadArrangements === 'function') {
         loadArrangements();
       }

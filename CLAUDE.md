@@ -508,7 +508,7 @@ Voordelen die we in D1 al concreet ervaren:
    TL-IDs, timestamps, error-codes; geen aggregate-blob op arrangement-niveau
    die je moet uitparseren.
 4. **Cancel-semantiek schoon** — `arrangements-cancel` zet zowel arrangement
-   `status='geannuleerd'` als alle bijbehorende pending_actions op `cancelled`.
+   `status='GEANNULEERD'` als alle bijbehorende pending_actions op `cancelled`.
    Eén SQL UPDATE per tabel, geen complexe state-machine.
 
 Anti-pattern dat we hiermee vermijden: één tabel met `actions jsonb[]` of
@@ -525,3 +525,25 @@ Polling-interval 60s is veilige default voor approval-counts (real-time genoeg,
 ruim binnen Supabase Free-tier budget bij 5-10 actieve users). Permission-cache
 (`_approvalsBadgeAllowed`) zorgt dat we maar 1x `RBAC.ensurePermissionsLoaded()`
 hoeven na te slaan per page-load.
+
+## Payment Arrangements naming convention
+Sinds D1 polish (migratie `2026-06-09-payment-arrangements-d1-spec-naming.sql`):
+
+- **Uppercase enum-keys voor types**: `UITSTEL`, `SPLITSING`,
+  `ABONNEMENT_PAUZE`, `ABONNEMENT_STOP`, `KWIJTSCHELDING`.
+  (Geen `gespreid` of `overig` meer — `SPLITSING` is de naam voor termijn-
+  splits, en abonnement-pauze en abonnement-stop zijn 2 aparte types.)
+- **Uppercase enum-keys voor arrangement-status**: `VOORGESTELD`, `ACTIEF`,
+  `NAGEKOMEN`, `VERBROKEN`, `GEANNULEERD`.
+- **Strict scheiding van statussen**:
+  - `payment_arrangements.status` = lifecycle (VOORGESTELD → ACTIEF →
+    NAGEKOMEN/VERBROKEN/GEANNULEERD).
+  - `pending_actions.status` = approval + execution flow
+    (pending → approved/rejected → executed/failed/cancelled). Lowercase
+    blijft hier intact — DB-CHECK is niet aangeraakt.
+- **`pending_actions.action_type` prefix `TL_`** voor TeamLeader-mappable
+  acties: `TL_INVOICE_UPDATE_DUE`, `TL_INVOICE_SPLIT`,
+  `TL_SUBSCRIPTION_PAUSE`, `TL_SUBSCRIPTION_STOP`, `TL_INVOICE_WRITEOFF`.
+  D2-executor herkent acties via die prefix.
+- Lowercase legacy waarden worden in `arrangements-list` + `arrangements-propose`
+  geaccepteerd als alias voor backward-compat (oude bookmarks / agents).
