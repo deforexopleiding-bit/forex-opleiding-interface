@@ -73,26 +73,28 @@
           navLink('sales', '/modules/sales.html', 'Sales') +
           navLink('onboarding', '/modules/onboarding-overzicht.html', 'Onboarding') +
           navLink('finance', '/modules/finance.html', 'Finance') +
-          // F1: Taken-module (finance-taken / payment-arrangements approval-queue).
+          // F1: Open Acties-module (finance-taken / payment-arrangements approval-queue).
           // Eigen sidebar-link met badge die /api/tasks-list pollt; klik linkt naar
-          // /modules/taken.html?status=PENDING (primaire UX-ingang voor Open taken).
+          // /modules/open-acties.html?status=PENDING (primaire UX-ingang voor Open acties).
           // Gate via feature-key finance.tasks.view (zie MODULE_FEATURE_MAP) met
           // fallback in updateFinanceTasksBadge naar finance.arrangements.view voor
           // backward-compat met rollen die nog geen finance.tasks.view hebben.
-          '<a class="nav-item" data-module="finance-tasks" href="/modules/taken.html">' +
-            svg('taken') + 'Taken' +
-            '<span class="nav-badge" id="navFinanceTasksBadge" data-target="/modules/taken.html?status=PENDING" title="Open taken"></span>' +
+          // NB: gescheiden van Takenbeheer (data-module="taken" / taken.html), dat is
+          // de oude kanban-takenmodule met /api/taken endpoint.
+          '<a class="nav-item" data-module="finance-tasks" href="/modules/open-acties.html">' +
+            svg('taken') + 'Open Acties' +
+            '<span class="nav-badge" id="navFinanceTasksBadge" data-target="/modules/open-acties.html?status=PENDING" title="Open acties"></span>' +
           '</a>' +
           '<a class="nav-item" data-module="tickets" href="/modules/tickets.html">' + svg('tickets') + 'Tickets<span class="nav-badge" id="navTicketsBadge"></span></a>' +
           // Admin nav-item incl. approval-badge (D1 payment-arrangements). De badge zelf
-          // linkt nu naar /modules/taken.html?status=PENDING (cleanere UX dan de oude
+          // linkt nu naar /modules/open-acties.html?status=PENDING (cleanere UX dan de oude
           // Admin#approval-queue ingang); admin.html#approval-queue blijft bestaan als
           // secundaire/backward-compat route maar wordt niet meer als badge-target gebruikt.
           // Badge wordt alleen zichtbaar bij PENDING+APPROVED > 0 én als de user de
           // feature_key finance.arrangements.approve heeft (zie updateApprovalsBadge).
           '<a class="nav-item" data-module="admin" id="adminNavLink" href="/modules/admin.html" style="display:none">' +
             svg('admin') + 'Admin' +
-            '<span class="nav-badge" id="navApprovalsBadge" data-target="/modules/taken.html?status=PENDING" title="Open taken"></span>' +
+            '<span class="nav-badge" id="navApprovalsBadge" data-target="/modules/open-acties.html?status=PENDING" title="Open acties"></span>' +
           '</a>' +
           '<div class="nav-section">Binnenkort</div>' +
           concept('whatsapp', 'WhatsApp Bot') +
@@ -120,6 +122,8 @@
     // sales-dashboard.html highlight valt onder Dashboard-link in de sidebar
     if (cur === 'sales-dashboard') cur = 'dashboard';
     if (cur === 'onboarding-overzicht') cur = 'onboarding';
+    // open-acties.html is de F1 finance-taken pagina; nav-item heeft data-module="finance-tasks"
+    if (cur === 'open-acties') cur = 'finance-tasks';
     document.querySelectorAll('#sidebar-mount [data-module]').forEach(function (el) {
       el.classList.toggle('active', el.getAttribute('data-module') === cur);
     });
@@ -177,8 +181,8 @@
   //   - tooltip toont de splitsing ("Te beoordelen: N + Te verwerken: M")
   //   - alleen renderen als user feature_key 'finance.arrangements.approve' heeft
   //     (lookup via window.RBAC.ensurePermissionsLoaded(); super_admin krijgt '*')
-  //   - klik op badge navigeert naar /modules/taken.html?status=PENDING (F1 polish:
-  //     consistent met Taken-badge; admin.html#approval-queue blijft bestaan als
+  //   - klik op badge navigeert naar /modules/open-acties.html?status=PENDING (F1 polish:
+  //     consistent met Open Acties-badge; admin.html#approval-queue blijft bestaan als
   //     backward-compat tab maar is geen badge-target meer)
   // Pattern: silent fail, idempotent toggle (zelfde als tickets/taken).
   var _approvalsBadgeAllowed = null;     // null | true | false → cached na 1e RBAC-check
@@ -229,8 +233,8 @@
     } catch (e) { b.classList.remove('show'); }
   }
 
-  // Click-handler op de badge zelf: navigeert naar /modules/taken.html?status=PENDING
-  // (F1 polish: was /modules/admin.html#approval-queue; nu consistent met Taken-badge).
+  // Click-handler op de badge zelf: navigeert naar /modules/open-acties.html?status=PENDING
+  // (F1 polish: was /modules/admin.html#approval-queue; nu consistent met Open Acties-badge).
   // Voorkomt dat de outer <a class="nav-item"> dezelfde href (zonder hash/query) wint.
   // Wordt 1x gewired bij mount; idempotent via dataset-flag.
   function wireApprovalsBadgeClick() {
@@ -240,7 +244,7 @@
     b.addEventListener('click', function (e) {
       e.preventDefault();
       e.stopPropagation();
-      var target = b.getAttribute('data-target') || '/modules/taken.html?status=PENDING';
+      var target = b.getAttribute('data-target') || '/modules/open-acties.html?status=PENDING';
       window.location.href = target;
     });
     b.dataset.wired = '1';
@@ -268,7 +272,7 @@
   //   - badge-tekst = totaal aantal open finance-taken (PENDING te beoordelen + APPROVED te verwerken)
   //   - alleen renderen als user feature_key 'finance.tasks.view' OF 'finance.arrangements.view' heeft
   //     (super_admin krijgt '*' en ziet altijd)
-  //   - klik op badge of nav-item navigeert naar /modules/taken.html?status=PENDING
+  //   - klik op badge of nav-item navigeert naar /modules/open-acties.html?status=PENDING
   // Patroon hergebruikt approvalsBadgeAllowed-cache + silent fail + idempotent toggle.
   var _financeTasksBadgeAllowed = null;     // null | true | false → cached na 1e RBAC-check
 
@@ -329,7 +333,7 @@
     b.addEventListener('click', function (e) {
       e.preventDefault();
       e.stopPropagation();
-      var target = b.getAttribute('data-target') || '/modules/taken.html?status=PENDING';
+      var target = b.getAttribute('data-target') || '/modules/open-acties.html?status=PENDING';
       window.location.href = target;
     });
     b.dataset.wired = '1';
@@ -379,10 +383,10 @@
     'tickets': 'tickets.module.access',
     'sales': 'sales.module.access',
     'finance': 'finance.module.access',
-    // F1: nieuwe Taken-module (sidebar-only data-module — niet gekoppeld aan een unieke
-    // .html page-name; klik routeert naar /modules/taken.html). Gating is fail-open zoals
-    // de rest: zonder finance.tasks.view wordt de sidebar-link verborgen, maar de
-    // /modules/taken.html pagina valt nog steeds onder de bestaande 'taken'-module-gate.
+    // F1: nieuwe Open Acties-module (sidebar data-module="finance-tasks" → routeert naar
+    // /modules/open-acties.html). Gating is fail-open zoals de rest: zonder
+    // finance.tasks.view wordt de sidebar-link verborgen. NB: gescheiden van de oude
+    // Takenbeheer ('taken' → /modules/taken.html) — die heeft eigen taken.module.access gate.
     'finance-tasks': 'finance.tasks.view',
     'admin': 'admin.module.access'
   };

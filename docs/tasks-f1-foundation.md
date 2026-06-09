@@ -8,8 +8,11 @@ Branch: `feat/payment-arrangements-d16-manual-execute`
 
 ## 1. Wat F1 doet
 
-F1 introduceert `/modules/taken.html` als **centraal dashboard voor alle
+F1 introduceert `/modules/open-acties.html` als **centraal dashboard voor alle
 handmatige verificaties** die op het bordje van administratie/manager liggen.
+(NB: oorspronkelijk geland onder `/modules/taken.html`, maar dat conflicteerde
+met de bestaande Takenbeheer kanban-module. Hernoemd naar `open-acties.html`
+in fix/taken-naming-conflict; oude Takenbeheer is hersteld.)
 Tot nu toe leefde de approval-queue alleen in `admin.html#approval-queue` met
 focus op D1-arrangements. F1 verbreedt dat naar een echt taken-bakje dat ook
 losse verificatie-stappen toont die niet aan een arrangement hangen.
@@ -81,7 +84,7 @@ extra rolwijziging meteen toegang hebben.
    payload         = { claim_text, claimed_amount, klant_message_id, claimed_at, ... }
         │
         ▼
- Verschijnt in /modules/taken.html onder category=verify_payment
+ Verschijnt in /modules/open-acties.html onder category=verify_payment
    Administratie verifieert in bankafschrift / TL → mark-executed of mark-not-executed
 ```
 
