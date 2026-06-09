@@ -375,6 +375,7 @@
           <!-- Filter pills -->
           <div class="approv-filter-strip" id="approvFilterStrip">
             <button type="button" class="approv-pill active" data-approv-status="PENDING"   onclick="switchApprovStatus('PENDING')">Pending <span class="approv-pill-count" id="approvCntPending">0</span></button>
+            <button type="button" class="approv-pill"        data-approv-status="APPROVED"  data-approv-subfilter="markverwerkt" onclick="switchApprovStatus('APPROVED','markverwerkt')">Te verwerken <span class="approv-pill-count" id="approvCntTodo">0</span></button>
             <button type="button" class="approv-pill"        data-approv-status="APPROVED"  onclick="switchApprovStatus('APPROVED')">Approved <span class="approv-pill-count" id="approvCntApproved">0</span></button>
             <button type="button" class="approv-pill"        data-approv-status="REJECTED"  onclick="switchApprovStatus('REJECTED')">Rejected <span class="approv-pill-count" id="approvCntRejected">0</span></button>
             <button type="button" class="approv-pill"        data-approv-status="EXECUTED"  onclick="switchApprovStatus('EXECUTED')">Executed <span class="approv-pill-count" id="approvCntExecuted">0</span></button>
@@ -757,9 +758,11 @@
       <div style="color:var(--text-faint);padding:14px;text-align:center;font-size:12.5px">Laden&hellip;</div>
     </div>
     <div class="modal-footer">
-      <button class="btn"            id="pendingActionDetailCloseBtn"   onclick="closePendingActionDetail()">Sluiten</button>
-      <button class="btn btn-danger" id="pendingActionDetailRejectBtn"  onclick="openRejectModalFromDetail()" style="display:none">Reject</button>
-      <button class="btn btn-primary" id="pendingActionDetailApproveBtn" onclick="approveFromDetail()"        style="display:none">Approve</button>
+      <button class="btn"            id="pendingActionDetailCloseBtn"          onclick="closePendingActionDetail()">Sluiten</button>
+      <button class="btn btn-danger" id="pendingActionDetailRejectBtn"         onclick="openRejectModalFromDetail()"            style="display:none">Reject</button>
+      <button class="btn btn-primary" id="pendingActionDetailApproveBtn"        onclick="approveFromDetail()"                    style="display:none">Approve</button>
+      <button class="btn btn-danger" id="pendingActionDetailMarkNotExecutedBtn" onclick="openMarkNotExecutedModalFromDetail()"   style="display:none">Markeer als niet door te voeren</button>
+      <button class="btn btn-primary" id="pendingActionDetailMarkExecutedBtn"   onclick="markExecutedFromDetail()"               style="display:none">Markeer als verwerkt</button>
     </div>
   </div>
 </div>
@@ -782,6 +785,87 @@
     <div class="modal-footer">
       <button class="btn" onclick="closeRejectActionModal()">Annuleren</button>
       <button class="btn btn-danger" id="rejectActionConfirmBtn" onclick="confirmRejectAction()">Afwijzen</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Mark-as-executed modal (TL-resultaat invoeren) ───────────────────────── -->
+<div class="modal-overlay hidden" id="markExecutedModal" role="dialog" aria-modal="true">
+  <div class="modal-card" style="max-width:620px">
+    <div class="modal-header">
+      <div>
+        <div class="modal-title">Markeer als verwerkt</div>
+        <div style="font-size:11px;color:var(--text-faint);margin-top:2px">Leg vast wat je in TeamLeader hebt gedaan</div>
+      </div>
+      <button class="modal-close" onclick="closeMarkExecutedModal()">&#x2715;</button>
+    </div>
+    <div class="modal-body">
+      <!-- Context-readout (sticky boven) -->
+      <div id="markExecContext" style="position:sticky;top:0;z-index:1;background:rgba(56,189,248,0.06);border:1px solid rgba(56,189,248,0.25);border-radius:8px;padding:10px 12px;margin-bottom:14px;font-size:12.5px;color:var(--text-primary,#e5e7eb)">
+        <div id="markExecCtxLine1" style="font-weight:600">&mdash;</div>
+        <div id="markExecCtxLine2" style="font-size:11.5px;color:var(--text-dim);margin-top:2px">&mdash;</div>
+        <div id="markExecCtxLine3" style="font-size:11.5px;color:var(--text-faint);margin-top:2px">&mdash;</div>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label" for="markExecCreditIds">TL credit-note IDs</label>
+        <input type="text" id="markExecCreditIds" class="form-input" placeholder="TLCN-2026-001, TLCN-2026-002" />
+        <div style="font-size:11px;color:var(--text-faint);margin-top:4px">Voorbeeld: TLCN-2026-001, TLCN-2026-002 (komma-gescheiden)</div>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label" for="markExecSubscriptionId">TL subscription ID</label>
+        <input type="text" id="markExecSubscriptionId" class="form-input" placeholder="sub_xxxxxxxx" />
+        <div style="font-size:11px;color:var(--text-faint);margin-top:4px">Voor abonnement-mutaties.</div>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label" for="markExecInvoiceIds">TL invoice IDs</label>
+        <input type="text" id="markExecInvoiceIds" class="form-input" placeholder="INV-2026-101, INV-2026-102" />
+        <div style="font-size:11px;color:var(--text-faint);margin-top:4px">Voor SPLITSING of nieuwe facturen (komma-gescheiden).</div>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label" for="markExecNotes">Manual notes <span style="color:var(--color-danger,#dc2626)">*</span></label>
+        <textarea id="markExecNotes" class="form-input" rows="4" style="resize:vertical;min-height:90px" placeholder="Wat heb je in TL gedaan? Min 10 chars."></textarea>
+        <div style="font-size:11px;color:var(--text-faint);margin-top:4px">Minimaal 10 tekens. Verplicht voor audit-trail.</div>
+      </div>
+
+      <div class="form-error hidden" id="markExecError"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn" onclick="closeMarkExecutedModal()">Annuleren</button>
+      <button class="btn btn-primary" id="markExecConfirmBtn" onclick="submitMarkExecuted()">Bevestig</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Mark-as-not-executed modal (reden vastleggen) ────────────────────────── -->
+<div class="modal-overlay hidden" id="markNotExecutedModal" role="dialog" aria-modal="true">
+  <div class="modal-card" style="max-width:520px">
+    <div class="modal-header">
+      <div>
+        <div class="modal-title">Markeer als niet door te voeren</div>
+        <div style="font-size:11px;color:var(--text-faint);margin-top:2px">Status gaat naar FAILED</div>
+      </div>
+      <button class="modal-close" onclick="closeMarkNotExecutedModal()">&#x2715;</button>
+    </div>
+    <div class="modal-body">
+      <div style="background:rgba(220,38,38,0.06);border:1px solid rgba(220,38,38,0.25);border-radius:8px;padding:10px 12px;margin-bottom:14px;font-size:12.5px;color:var(--text-primary,#e5e7eb)">
+        De actie krijgt status FAILED. Arrangement blijft VOORGESTELD &mdash; annuleer arrangement apart als nodig.
+      </div>
+
+      <div class="form-group">
+        <label class="form-label" for="markNotExecReason">Reden <span style="color:var(--color-danger,#dc2626)">*</span></label>
+        <textarea id="markNotExecReason" class="form-input" rows="4" style="resize:vertical;min-height:90px" placeholder="Waarom kan deze actie niet doorgevoerd worden? Min 10 chars."></textarea>
+        <div style="font-size:11px;color:var(--text-faint);margin-top:4px">Minimaal 10 tekens. Verplicht voor audit-trail.</div>
+      </div>
+
+      <div class="form-error hidden" id="markNotExecError"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn" onclick="closeMarkNotExecutedModal()">Annuleren</button>
+      <button class="btn btn-danger" id="markNotExecConfirmBtn" onclick="submitMarkNotExecuted()">Bevestig</button>
     </div>
   </div>
 </div>
@@ -3459,12 +3543,14 @@ function wireWaTplOnce() {
 // ─── Approval-queue (Payment-arrangements D1) ────────────────────────────────
 // Tab toont pending_actions met filter-pills, bulk-actions, detail-modal +
 // reject-modal. Endpoints: /api/pending-actions-{list,detail,approve,reject}.
-let _approvActiveStatus = 'PENDING';
+let _approvActiveStatus    = 'PENDING';
+let _approvActiveSubFilter = null;  // null | 'markverwerkt' (virtual sub-view op APPROVED)
 let _approvItems        = [];
 let _approvSelectedIds  = [];
 let _approvWired        = false;
 let _approvLoading      = false;
 let _approvCurrentDetailId = null;
+let _approvCurrentDetailItem = null; // laatst geladen detail-payload (voor execution_result render)
 let _approvRejectContext   = null; // { type:'single'|'bulk', ids:[uuid] }
 
 function wireApprovOnce() {
@@ -3478,6 +3564,14 @@ function wireApprovOnce() {
   const rejectM = document.getElementById('rejectActionModal');
   if (rejectM) rejectM.addEventListener('click', (e) => {
     if (e.target === rejectM) closeRejectActionModal();
+  });
+  const markExecM = document.getElementById('markExecutedModal');
+  if (markExecM) markExecM.addEventListener('click', (e) => {
+    if (e.target === markExecM) closeMarkExecutedModal();
+  });
+  const markNotExecM = document.getElementById('markNotExecutedModal');
+  if (markNotExecM) markNotExecM.addEventListener('click', (e) => {
+    if (e.target === markNotExecM) closeMarkNotExecutedModal();
   });
 }
 
@@ -3578,17 +3672,24 @@ function renderApprovCounts(counts) {
     rejected:  counts.REJECTED  || 0,
     executed:  counts.EXECUTED  || 0,
     failed:    counts.FAILED    || 0,
+    // 'Te verwerken' = APPROVED rijen die nog niet executed zijn. In D1 zijn
+    // alle APPROVED-rijen per definitie nog niet executed (D2 executor bestaat
+    // niet), dus mappen we APPROVED 1-op-1. Zodra D2 live is kan de list-
+    // endpoint een aparte counts.TODO_EXECUTE returnen.
+    todo:      (typeof counts.TODO_EXECUTE === 'number' ? counts.TODO_EXECUTE : (counts.APPROVED || 0)),
   };
   const elPending  = document.getElementById('approvCntPending');
   const elApproved = document.getElementById('approvCntApproved');
   const elRejected = document.getElementById('approvCntRejected');
   const elExecuted = document.getElementById('approvCntExecuted');
   const elFailed   = document.getElementById('approvCntFailed');
+  const elTodo     = document.getElementById('approvCntTodo');
   if (elPending)  elPending.textContent  = map.pending;
   if (elApproved) elApproved.textContent = map.approved;
   if (elRejected) elRejected.textContent = map.rejected;
   if (elExecuted) elExecuted.textContent = map.executed;
   if (elFailed)   elFailed.textContent   = map.failed;
+  if (elTodo)     elTodo.textContent     = map.todo;
 
   // Tab-badge: alleen PENDING-count tonen, verbergen als 0.
   const badge = document.getElementById('approvalsTabBadge');
@@ -3665,11 +3766,15 @@ function renderApprovRows() {
   updateApprovBulkUi();
 }
 
-function switchApprovStatus(status) {
-  if (status === _approvActiveStatus) return;
-  _approvActiveStatus = status;
+function switchApprovStatus(status, subFilter) {
+  const sub = subFilter || null;
+  if (status === _approvActiveStatus && sub === _approvActiveSubFilter) return;
+  _approvActiveStatus    = status;
+  _approvActiveSubFilter = sub;
   document.querySelectorAll('#approvFilterStrip .approv-pill').forEach(p => {
-    p.classList.toggle('active', p.getAttribute('data-approv-status') === status);
+    const pStatus = p.getAttribute('data-approv-status');
+    const pSub    = p.getAttribute('data-approv-subfilter') || null;
+    p.classList.toggle('active', pStatus === status && pSub === sub);
   });
   loadApprovalQueue();
 }
@@ -3823,10 +3928,12 @@ function showRejectModal(title, subtitle) {
   const subEl   = document.getElementById('rejectActionSubtitle');
   const txt     = document.getElementById('rejectActionReason');
   const errEl   = document.getElementById('rejectActionError');
+  const btnEl   = document.getElementById('rejectActionConfirmBtn');
   if (titleEl) titleEl.textContent = title;
   if (subEl)   subEl.textContent   = subtitle;
   if (txt)     txt.value = '';
   if (errEl)   { errEl.classList.add('hidden'); errEl.textContent = ''; }
+  if (btnEl)   btnEl.textContent = 'Afwijzen';
   document.getElementById('rejectActionModal')?.classList.remove('hidden');
   setTimeout(() => { try { txt?.focus(); } catch (_) {} }, 50);
 }
@@ -3850,6 +3957,7 @@ async function confirmRejectAction() {
   }
   const ctx = _approvRejectContext;
   const btn = document.getElementById('rejectActionConfirmBtn');
+  const origLabel = btn ? btn.textContent : 'Afwijzen';
   if (btn) { btn.disabled = true; btn.textContent = 'Bezig…'; }
   try {
     if (ctx.type === 'bulk') {
@@ -3864,7 +3972,7 @@ async function confirmRejectAction() {
       }
     }
   } finally {
-    if (btn) { btn.disabled = false; btn.textContent = 'Afwijzen'; }
+    if (btn) { btn.disabled = false; btn.textContent = origLabel || 'Afwijzen'; }
     closeRejectActionModal();
   }
 }
@@ -3873,16 +3981,21 @@ async function confirmRejectAction() {
 async function openApprovalDetail(id) {
   if (!id) return;
   wireApprovOnce();
-  _approvCurrentDetailId = id;
+  _approvCurrentDetailId   = id;
+  _approvCurrentDetailItem = null;
   const modal = document.getElementById('pendingActionDetailModal');
   const body  = document.getElementById('pendingActionDetailBody');
   const sub   = document.getElementById('pendingActionDetailSubtitle');
-  const approveBtn = document.getElementById('pendingActionDetailApproveBtn');
-  const rejectBtn  = document.getElementById('pendingActionDetailRejectBtn');
+  const approveBtn         = document.getElementById('pendingActionDetailApproveBtn');
+  const rejectBtn          = document.getElementById('pendingActionDetailRejectBtn');
+  const markExecutedBtn    = document.getElementById('pendingActionDetailMarkExecutedBtn');
+  const markNotExecutedBtn = document.getElementById('pendingActionDetailMarkNotExecutedBtn');
   if (sub)  sub.textContent  = 'ID: ' + id;
   if (body) body.innerHTML   = '<div style="color:var(--text-faint);padding:14px;text-align:center;font-size:12.5px">Laden&hellip;</div>';
-  if (approveBtn) approveBtn.style.display = 'none';
-  if (rejectBtn)  rejectBtn.style.display  = 'none';
+  if (approveBtn)         approveBtn.style.display         = 'none';
+  if (rejectBtn)          rejectBtn.style.display          = 'none';
+  if (markExecutedBtn)    markExecutedBtn.style.display    = 'none';
+  if (markNotExecutedBtn) markNotExecutedBtn.style.display = 'none';
   if (modal) modal.classList.remove('hidden');
 
   try {
@@ -3907,39 +4020,51 @@ function approvFmtEur(v) {
 }
 
 // Specifieke renderer voor TL_INVOICE_CONSOLIDATE_AND_RESTART payloads.
-// Verwacht (best-effort) payload-shape:
+// Canonical payload-shape (uit arrangements-propose.js UITSTEL-branch):
 //   {
-//     credit_invoices: [{ invoice_id, invoice_number, amount }],
-//     credit_total,
-//     new_subscription: { installments, amount_per_installment_excl_vat,
-//                          total_excl_vat, total_incl_vat,
-//                          starts_on, ends_on, description },
-//     vat_distribution: [{ rate, amount_per_installment }],
-//     ...
+//     credit_invoice_ids: [uuid, ...],
+//     subscription_config: {
+//       term_count: int,
+//       amount_per_invoice_excl_vat: number,
+//       starts_on: 'YYYY-MM-DD',
+//       ends_on:   'YYYY-MM-DD',
+//       vat_distribution: [{ vat_rate: int, total_amount_excl_vat: number }],
+//       billing_cycle: { unit: 'month', period: 1 }
+//     },
+//     source: 'manual',
+//     rationale: string
 //   }
-// Verschillende key-namen worden tolerant gelezen (best-effort) zodat we
-// niet op één spec-variant vastzitten.
-function renderConsolidateActionDetail(payload) {
-  const p = payload || {};
-  const ns = p.new_subscription || p.subscription || {};
-  // Credit-facturen
-  let creditList = Array.isArray(p.credit_invoices) ? p.credit_invoices : null;
-  if (!creditList && Array.isArray(p.invoices_to_credit)) creditList = p.invoices_to_credit;
-  if (!creditList && Array.isArray(p.invoice_ids)) {
-    creditList = p.invoice_ids.map(id => ({ invoice_id: id }));
-  }
-  creditList = creditList || [];
-  const creditTotal = (p.credit_total != null) ? Number(p.credit_total)
-                    : (p.total_to_credit != null) ? Number(p.total_to_credit)
-                    : creditList.reduce((s, x) => s + (Number(x.amount) || 0), 0);
+// Optionele invoices-array (uit pending-actions-detail response) bevat
+// { id, invoice_number, amount_total } per credit_invoice_id voor leesbare
+// labels. Zonder die array vallen we terug op truncated uuid.
+function renderConsolidateActionDetail(payload, invoices) {
+  const p   = payload || {};
+  const cfg = p.subscription_config || {};
+  const invByIdLocal = {};
+  (Array.isArray(invoices) ? invoices : []).forEach(inv => {
+    if (inv && inv.id) invByIdLocal[inv.id] = inv;
+  });
+
+  // Credit-facturen: payload bevat credit_invoice_ids[] (uuids). Lookup
+  // invoice_number + amount_total via meegestuurde invoices-array.
+  const creditIds = Array.isArray(p.credit_invoice_ids) ? p.credit_invoice_ids : [];
+  const creditList = creditIds.map(id => {
+    const inv = invByIdLocal[id] || null;
+    return {
+      invoice_id:     id,
+      invoice_number: inv?.invoice_number || null,
+      amount:         inv ? Number(inv.amount_total || 0) : null,
+    };
+  });
+  const creditTotal = creditList.reduce((s, x) => s + (Number(x.amount) || 0), 0);
   const creditCount = creditList.length;
 
   const creditRowsHtml = creditList.length
     ? creditList.map(ci => {
         const label = ci.invoice_number
           ? esc(ci.invoice_number)
-          : (ci.invoice_id ? 'invoice ' + esc(String(ci.invoice_id).slice(0, 8)) : '(onbekend)');
-        const amount = (ci.amount != null) ? approvFmtEur(ci.amount) : '';
+          : 'invoice ' + esc(String(ci.invoice_id).slice(0, 8));
+        const amount = (ci.amount != null && ci.amount > 0) ? approvFmtEur(ci.amount) : '';
         return `<li style="font-size:12px;color:var(--text-dim);margin:2px 0">
                   <strong style="color:var(--text-primary,#e5e7eb)">${label}</strong>
                   ${amount ? `<span style="color:var(--text-faint);margin-left:8px">${esc(amount)}</span>` : ''}
@@ -3947,31 +4072,34 @@ function renderConsolidateActionDetail(payload) {
       }).join('')
     : '<li style="font-size:12px;color:var(--text-faint)">(geen factuur-details in payload)</li>';
 
-  // Nieuwe subscription
-  const installments = ns.installments || ns.termijnen || p.installments || null;
-  const perInstExcl  = ns.amount_per_installment_excl_vat
-                    ?? ns.amount_per_installment
-                    ?? ns.amount_per_termijn
-                    ?? p.amount_per_installment
-                    ?? null;
-  const totalExcl    = ns.total_excl_vat ?? ns.total_excl ?? p.total_excl_vat ?? null;
-  const totalIncl    = ns.total_incl_vat ?? ns.total_incl ?? ns.total ?? p.total_incl_vat ?? null;
-  const startsOn     = ns.starts_on || ns.start_date || p.starts_on || null;
-  const endsOn       = ns.ends_on   || ns.end_date   || p.ends_on   || null;
-  const description  = ns.description || ns.label || p.description || '';
+  // Nieuwe subscription — config-keys uit propose-endpoint.
+  const installments = cfg.term_count != null ? Number(cfg.term_count) : null;
+  const perInstExcl  = cfg.amount_per_invoice_excl_vat != null
+    ? Number(cfg.amount_per_invoice_excl_vat)
+    : null;
+  const startsOn     = cfg.starts_on || null;
+  const endsOn       = cfg.ends_on   || null;
+  // Totaal nieuwe contract excl btw: termijn-bedrag * aantal termijnen
+  // (eenvoudige indicatie; per_rate_termijnen zit in arrangement.details).
+  const totalExcl = (installments != null && perInstExcl != null)
+    ? Math.round(installments * perInstExcl * 100) / 100
+    : null;
 
-  // BTW-verdeling
-  const vatDist = Array.isArray(p.vat_distribution) ? p.vat_distribution
-                : Array.isArray(ns.vat_distribution) ? ns.vat_distribution
-                : Array.isArray(p.tax_rates) ? p.tax_rates
-                : [];
+  // BTW-verdeling — server stuurt buildVatDistribution shape:
+  // [{ vat_rate: int, total_amount_excl_vat: number }]. Per termijn = totaal / N.
+  const vatDist = Array.isArray(cfg.vat_distribution) ? cfg.vat_distribution : [];
   const vatRowsHtml = vatDist.length
     ? vatDist.map(v => {
-        const rate = v.rate ?? v.percentage ?? v.percent ?? '—';
-        const amt  = v.amount_per_installment ?? v.amount ?? v.per_installment ?? null;
+        const rate = v.vat_rate != null ? v.vat_rate : '—';
+        const totalForRate = v.total_amount_excl_vat != null
+          ? Number(v.total_amount_excl_vat)
+          : null;
+        const perTermijn = (totalForRate != null && installments && installments > 0)
+          ? Math.round((totalForRate / installments) * 100) / 100
+          : null;
         return `<li style="font-size:12px;color:var(--text-dim);margin:2px 0">
                   <strong style="color:var(--text-primary,#e5e7eb)">${esc(String(rate))}% BTW</strong>
-                  ${amt != null ? `<span style="color:var(--text-faint);margin-left:8px">${esc(approvFmtEur(amt))}</span> <span style="color:var(--text-faint);font-size:11px">per termijn</span>` : ''}
+                  ${perTermijn != null ? `<span style="color:var(--text-faint);margin-left:8px">${esc(approvFmtEur(perTermijn))}</span> <span style="color:var(--text-faint);font-size:11px">per termijn (excl btw)</span>` : ''}
                 </li>`;
       }).join('')
     : '<li style="font-size:12px;color:var(--text-faint)">(geen btw-verdeling in payload)</li>';
@@ -3980,15 +4108,13 @@ function renderConsolidateActionDetail(payload) {
     ? `<strong>${esc(String(installments))}</strong> termijnen van <strong>${esc(approvFmtEur(perInstExcl))}</strong> per termijn <span style="color:var(--text-faint)">(excl btw)</span>`
     : (installments ? `<strong>${esc(String(installments))}</strong> termijnen` : '(termijn-info ontbreekt)');
 
-  const totalLine = (totalIncl != null)
-    ? `Totaal nieuwe contract: <strong>${esc(approvFmtEur(totalIncl))}</strong> <span style="color:var(--text-faint);font-size:11px">incl btw</span>`
-    : (totalExcl != null
-        ? `Totaal nieuwe contract: <strong>${esc(approvFmtEur(totalExcl))}</strong> <span style="color:var(--text-faint);font-size:11px">excl btw</span>`
-        : 'Totaal nieuwe contract: <span style="color:var(--text-faint)">—</span>');
+  const totalLine = (totalExcl != null)
+    ? `Totaal nieuwe contract: <strong>${esc(approvFmtEur(totalExcl))}</strong> <span style="color:var(--text-faint);font-size:11px">excl btw</span>`
+    : 'Totaal nieuwe contract: <span style="color:var(--text-faint)">—</span>';
 
   const startLine = `Eerste vervaldatum: <strong>${esc(startsOn ? approvFmtDateOnly(startsOn) : '—')}</strong>`;
   const endLine   = `Laatste vervaldatum: <strong>${esc(endsOn ? approvFmtDateOnly(endsOn) : '—')}</strong>`;
-  const descLine  = description ? `<div style="font-size:11.5px;color:var(--text-faint);margin-top:4px">Omschrijving: ${esc(description)}</div>` : '';
+  const descLine  = '';
 
   return `
     <div class="approv-detail-section-title">Consolidatie + nieuwe regeling</div>
@@ -4031,7 +4157,12 @@ function renderApprovDetail(d) {
   const arr  = d.arrangement || null;
   const approver = d.approver || null;
   const rejecter = d.rejecter || null;
-  const isPending = it.status === 'PENDING';
+  const status   = it.status || '';
+  const isPending  = status === 'PENDING';
+  const isApproved = status === 'APPROVED';
+  const isExecuted = status === 'EXECUTED';
+  const isFailed   = status === 'FAILED';
+  _approvCurrentDetailItem = it;
 
   const custLink = cust && cust.id
     ? `<a href="/modules/klanten.html?id=${esc(cust.id)}" style="color:var(--brand-secondary,var(--accent-cyan,#06b6d4));text-decoration:none">${esc(cust.name || '(onbekend)')}</a>`
@@ -4061,9 +4192,17 @@ function renderApprovDetail(d) {
   if (!auditHtml) auditHtml = '<div style="color:var(--text-faint)">(nog geen audit-events)</div>';
 
   // Speciale render-blok voor TL_INVOICE_CONSOLIDATE_AND_RESTART; andere
-  // action_types vallen terug op de standaard payload-pre.
+  // action_types vallen terug op de standaard payload-pre. Invoices uit
+  // pending-actions-detail response worden meegestuurd voor invoice_number
+  // lookup op credit_invoice_ids (uuids alleen in payload).
   const consolidateBlock = (it.action_type === 'TL_INVOICE_CONSOLIDATE_AND_RESTART')
-    ? renderConsolidateActionDetail(it.payload || {})
+    ? renderConsolidateActionDetail(it.payload || {}, Array.isArray(d.invoices) ? d.invoices : [])
+    : '';
+
+  // Execution-result render: voor EXECUTED toon TL-IDs + manual_notes; voor
+  // FAILED toon failure_reason. Beide read-only.
+  const executionBlock = (isExecuted || isFailed)
+    ? renderExecutionResult(it.execution_result || {}, status)
     : '';
 
   body.innerHTML = `
@@ -4081,6 +4220,8 @@ function renderApprovDetail(d) {
 
     ${consolidateBlock}
 
+    ${executionBlock}
+
     <div class="approv-detail-section-title">Payload</div>
     <pre class="approv-detail-pre">${esc(payloadJson)}</pre>
 
@@ -4088,10 +4229,117 @@ function renderApprovDetail(d) {
     <div style="font-size:12px;color:var(--text-dim)">${auditHtml}</div>
   `;
 
-  const approveBtn = document.getElementById('pendingActionDetailApproveBtn');
-  const rejectBtn  = document.getElementById('pendingActionDetailRejectBtn');
-  if (approveBtn) approveBtn.style.display = isPending ? '' : 'none';
-  if (rejectBtn)  rejectBtn.style.display  = isPending ? '' : 'none';
+  const approveBtn         = document.getElementById('pendingActionDetailApproveBtn');
+  const rejectBtn          = document.getElementById('pendingActionDetailRejectBtn');
+  const markExecutedBtn    = document.getElementById('pendingActionDetailMarkExecutedBtn');
+  const markNotExecutedBtn = document.getElementById('pendingActionDetailMarkNotExecutedBtn');
+  if (approveBtn)         approveBtn.style.display         = isPending  ? '' : 'none';
+  if (rejectBtn)          rejectBtn.style.display          = isPending  ? '' : 'none';
+  if (markExecutedBtn)    markExecutedBtn.style.display    = isApproved ? '' : 'none';
+  if (markNotExecutedBtn) markNotExecutedBtn.style.display = isApproved ? '' : 'none';
+}
+
+// renderExecutionResult: bouwt HTML-block met TL-IDs en notes voor EXECUTED of
+// failure_reason voor FAILED. Verwachte (best-effort) execution_result shape:
+//   {
+//     tl_credit_note_ids: [string],
+//     tl_subscription_id: string,
+//     tl_invoice_ids:     [string],
+//     manual_notes:       string,
+//     failure_reason:     string,
+//     marked_executed_at: iso,
+//     marked_by:          uuid,
+//   }
+function renderExecutionResult(result, status) {
+  const r = result || {};
+  const title = (status === 'FAILED')
+    ? 'Niet doorgevoerd'
+    : 'Verwerkt';
+  const rows = [];
+
+  // Failure reason (alleen bij FAILED).
+  if (status === 'FAILED') {
+    const reason = r.failure_reason || r.reason || r.error || '';
+    rows.push(
+      `<div style="font-size:12.5px;color:var(--text-primary,#e5e7eb)">
+         <strong>Reden:</strong>
+         <span style="color:var(--text-dim);margin-left:6px">${reason ? esc(reason) : '<span style="color:var(--text-faint)">(geen reden vastgelegd)</span>'}</span>
+       </div>`
+    );
+  }
+
+  // TL credit-note IDs.
+  if (Array.isArray(r.tl_credit_note_ids) && r.tl_credit_note_ids.length) {
+    const items = r.tl_credit_note_ids.map(id =>
+      `<li style="font-size:12px;color:var(--text-dim);margin:2px 0"><code style="color:var(--text-primary,#e5e7eb)">${esc(String(id))}</code></li>`
+    ).join('');
+    rows.push(
+      `<div style="font-size:12.5px;color:var(--text-primary,#e5e7eb)">
+         <strong>TL credit-note IDs:</strong>
+         <ul style="margin:4px 0 0;padding-left:20px;list-style:disc">${items}</ul>
+       </div>`
+    );
+  }
+
+  // TL subscription ID.
+  if (r.tl_subscription_id) {
+    rows.push(
+      `<div style="font-size:12.5px;color:var(--text-primary,#e5e7eb)">
+         <strong>TL subscription ID:</strong>
+         <code style="color:var(--text-dim);margin-left:6px">${esc(String(r.tl_subscription_id))}</code>
+       </div>`
+    );
+  }
+
+  // TL invoice IDs.
+  if (Array.isArray(r.tl_invoice_ids) && r.tl_invoice_ids.length) {
+    const items = r.tl_invoice_ids.map(id =>
+      `<li style="font-size:12px;color:var(--text-dim);margin:2px 0"><code style="color:var(--text-primary,#e5e7eb)">${esc(String(id))}</code></li>`
+    ).join('');
+    rows.push(
+      `<div style="font-size:12.5px;color:var(--text-primary,#e5e7eb)">
+         <strong>TL invoice IDs:</strong>
+         <ul style="margin:4px 0 0;padding-left:20px;list-style:disc">${items}</ul>
+       </div>`
+    );
+  }
+
+  // Manual notes (vrije tekst).
+  if (r.manual_notes) {
+    rows.push(
+      `<div style="font-size:12.5px;color:var(--text-primary,#e5e7eb)">
+         <strong>Notities:</strong>
+         <div style="color:var(--text-dim);margin-top:4px;white-space:pre-wrap">${esc(String(r.manual_notes))}</div>
+       </div>`
+    );
+  }
+
+  // Marked-executed metadata (alleen bij EXECUTED zinvol).
+  if (status === 'EXECUTED' && (r.marked_executed_at || r.marked_by)) {
+    const parts = [];
+    if (r.marked_executed_at) parts.push('op ' + esc(approvFmtDateTime(r.marked_executed_at)));
+    if (r.marked_by)          parts.push('door ' + esc(String(r.marked_by)));
+    rows.push(
+      `<div style="font-size:11.5px;color:var(--text-faint)">
+         Handmatig gemarkeerd ${parts.join(' ')}
+       </div>`
+    );
+  }
+
+  const bodyHtml = rows.length
+    ? rows.join('')
+    : '<div style="font-size:12px;color:var(--text-faint)">(geen execution-details vastgelegd)</div>';
+
+  const bgClass = (status === 'FAILED')
+    ? 'background:rgba(220,38,38,0.06);border:1px solid rgba(220,38,38,0.25)'
+    : 'background:rgba(16,185,129,0.06);border:1px solid rgba(16,185,129,0.25)';
+
+  return `
+    <div class="approv-detail-section-title">${esc(title)}</div>
+    <div style="display:flex;flex-direction:column;gap:8px;padding:10px 12px;${bgClass};border-radius:8px">
+      ${bodyHtml}
+    </div>
+  `;
 }
 
 async function approveFromDetail() {
@@ -4109,7 +4357,194 @@ async function approveFromDetail() {
 
 function closePendingActionDetail() {
   document.getElementById('pendingActionDetailModal')?.classList.add('hidden');
-  _approvCurrentDetailId = null;
+  _approvCurrentDetailId   = null;
+  _approvCurrentDetailItem = null;
+}
+
+// ── Mark-as-executed / Mark-as-not-executed flow ─────────────────────────────
+// Beide flows gebruiken eigen modal (markExecutedModal + markNotExecutedModal).
+// Mark-executed verwacht TL-IDs + manual notes (audit-trail). Mark-not-executed
+// verwacht een reden. POSTs naar /api/pending-actions-mark-executed +
+// /api/pending-actions-mark-not-executed.
+
+// Helper: comma-separated string → trimmed array zonder lege entries.
+function parseCommaSeparated(input) {
+  return String(input || '')
+    .split(',')
+    .map(s => s.trim())
+    .filter(s => s.length > 0);
+}
+
+// ─── Mark-as-executed modal ─────────────────────────────────────────────────
+function openMarkExecutedModal(action) {
+  wireApprovOnce();
+  const it = action || _approvCurrentDetailItem || {};
+  // Context-readout: action_type + klant + arrangement + payload-samenvatting.
+  const actionLabel = approvActionLabel(it.action_type) || '—';
+  const actionType  = it.action_type || '';
+  const cust  = it.customer || _approvCurrentDetailItem?.customer || null;
+  const arr   = it.arrangement || _approvCurrentDetailItem?.arrangement || null;
+  const custName = cust && cust.name ? cust.name : '(klant onbekend)';
+  let arrLine = '';
+  if (arr && arr.id) {
+    const arrType   = arr.type || 'arrangement';
+    const arrStatus = arr.arrangement_status || arr.status || '';
+    arrLine = `Arrangement: ${arrType}${arrStatus ? ' (' + arrStatus + ')' : ''}`;
+  } else {
+    arrLine = 'Arrangement: —';
+  }
+  const summary = approvSummary(it);
+
+  const l1 = document.getElementById('markExecCtxLine1');
+  const l2 = document.getElementById('markExecCtxLine2');
+  const l3 = document.getElementById('markExecCtxLine3');
+  if (l1) l1.innerHTML = esc(actionLabel) + (actionType ? ' <span style="color:var(--text-faint);font-size:11px;margin-left:6px">' + esc(actionType) + '</span>' : '') + ' &middot; ' + esc(custName);
+  if (l2) l2.textContent = arrLine;
+  if (l3) l3.textContent = summary;
+
+  // Reset form.
+  const elCredit = document.getElementById('markExecCreditIds');
+  const elSub    = document.getElementById('markExecSubscriptionId');
+  const elInv    = document.getElementById('markExecInvoiceIds');
+  const elNotes  = document.getElementById('markExecNotes');
+  const elErr    = document.getElementById('markExecError');
+  if (elCredit) elCredit.value = '';
+  if (elSub)    elSub.value    = '';
+  if (elInv)    elInv.value    = '';
+  if (elNotes)  elNotes.value  = '';
+  if (elErr)    { elErr.classList.add('hidden'); elErr.textContent = ''; }
+
+  document.getElementById('markExecutedModal')?.classList.remove('hidden');
+  setTimeout(() => { try { elCredit?.focus(); } catch (_) {} }, 50);
+}
+
+function closeMarkExecutedModal() {
+  document.getElementById('markExecutedModal')?.classList.add('hidden');
+}
+
+async function submitMarkExecuted() {
+  const elCredit = document.getElementById('markExecCreditIds');
+  const elSub    = document.getElementById('markExecSubscriptionId');
+  const elInv    = document.getElementById('markExecInvoiceIds');
+  const elNotes  = document.getElementById('markExecNotes');
+  const elErr    = document.getElementById('markExecError');
+  const btn      = document.getElementById('markExecConfirmBtn');
+
+  const notes = (elNotes?.value || '').trim();
+  if (notes.length < 10) {
+    if (elErr) { elErr.textContent = 'Manual notes zijn verplicht (min 10 tekens).'; elErr.classList.remove('hidden'); }
+    return;
+  }
+
+  const id = _approvCurrentDetailId;
+  if (!id) {
+    if (elErr) { elErr.textContent = 'Geen actie geselecteerd.'; elErr.classList.remove('hidden'); }
+    return;
+  }
+
+  // Bouw execution_result. Lege velden worden weggelaten.
+  const execution_result = { manual_notes: notes };
+  const creditIds = parseCommaSeparated(elCredit?.value);
+  if (creditIds.length) execution_result.tl_credit_note_ids = creditIds;
+  const subId = (elSub?.value || '').trim();
+  if (subId) execution_result.tl_subscription_id = subId;
+  const invIds = parseCommaSeparated(elInv?.value);
+  if (invIds.length) execution_result.tl_invoice_ids = invIds;
+
+  if (btn) { btn.disabled = true; btn.textContent = 'Bezig…'; }
+  try {
+    const r = await window.AgentShared.apiFetch('/api/pending-actions-mark-executed', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ id, execution_result }),
+    });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) {
+      const msg = d.error || ('HTTP ' + r.status);
+      if (elErr) { elErr.textContent = 'Markeren mislukt: ' + msg; elErr.classList.remove('hidden'); }
+      return;
+    }
+    window.AgentShared?.showToast('Actie gemarkeerd als verwerkt', 'success');
+    closeMarkExecutedModal();
+    closePendingActionDetail();
+    loadApprovalQueue();
+    try { window.AgentShared?.refreshApprovalsBadge?.(); } catch (_) {}
+  } catch (e) {
+    console.error('[submitMarkExecuted]', e);
+    if (elErr) { elErr.textContent = 'Markeren mislukt: ' + e.message; elErr.classList.remove('hidden'); }
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = 'Bevestig'; }
+  }
+}
+
+// Detail-modal knop opent de nieuwe modal i.p.v. confirm().
+function markExecutedFromDetail() {
+  if (!_approvCurrentDetailId) return;
+  openMarkExecutedModal(_approvCurrentDetailItem || {});
+}
+
+// ─── Mark-as-not-executed modal ─────────────────────────────────────────────
+function openMarkNotExecutedModal(action) {
+  wireApprovOnce();
+  const elReason = document.getElementById('markNotExecReason');
+  const elErr    = document.getElementById('markNotExecError');
+  if (elReason) elReason.value = '';
+  if (elErr)    { elErr.classList.add('hidden'); elErr.textContent = ''; }
+  document.getElementById('markNotExecutedModal')?.classList.remove('hidden');
+  setTimeout(() => { try { elReason?.focus(); } catch (_) {} }, 50);
+}
+
+function closeMarkNotExecutedModal() {
+  document.getElementById('markNotExecutedModal')?.classList.add('hidden');
+}
+
+async function submitMarkNotExecuted() {
+  const elReason = document.getElementById('markNotExecReason');
+  const elErr    = document.getElementById('markNotExecError');
+  const btn      = document.getElementById('markNotExecConfirmBtn');
+
+  const reason = (elReason?.value || '').trim();
+  if (reason.length < 10) {
+    if (elErr) { elErr.textContent = 'Reden is verplicht (min 10 tekens).'; elErr.classList.remove('hidden'); }
+    return;
+  }
+
+  const id = _approvCurrentDetailId;
+  if (!id) {
+    if (elErr) { elErr.textContent = 'Geen actie geselecteerd.'; elErr.classList.remove('hidden'); }
+    return;
+  }
+
+  if (btn) { btn.disabled = true; btn.textContent = 'Bezig…'; }
+  try {
+    const r = await window.AgentShared.apiFetch('/api/pending-actions-mark-not-executed', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ id, failure_reason: reason }),
+    });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) {
+      const msg = d.error || ('HTTP ' + r.status);
+      if (elErr) { elErr.textContent = 'Markeren mislukt: ' + msg; elErr.classList.remove('hidden'); }
+      return;
+    }
+    window.AgentShared?.showToast('Actie gemarkeerd als niet doorgevoerd', 'success');
+    closeMarkNotExecutedModal();
+    closePendingActionDetail();
+    loadApprovalQueue();
+    try { window.AgentShared?.refreshApprovalsBadge?.(); } catch (_) {}
+  } catch (e) {
+    console.error('[submitMarkNotExecuted]', e);
+    if (elErr) { elErr.textContent = 'Markeren mislukt: ' + e.message; elErr.classList.remove('hidden'); }
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = 'Bevestig'; }
+  }
+}
+
+// Detail-modal knop opent de nieuwe modal i.p.v. de reject-modal te hergebruiken.
+function openMarkNotExecutedModalFromDetail() {
+  if (!_approvCurrentDetailId) return;
+  openMarkNotExecutedModal(_approvCurrentDetailItem || {});
 }
 
 // Lichtgewicht refresh van alleen de tab-badge (PENDING-count) zonder de

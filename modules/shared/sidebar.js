@@ -80,7 +80,7 @@
           // user de feature_key finance.arrangements.approve heeft (zie updateApprovalsBadge).
           '<a class="nav-item" data-module="admin" id="adminNavLink" href="/modules/admin.html" style="display:none">' +
             svg('admin') + 'Admin' +
-            '<span class="nav-badge" id="navApprovalsBadge" data-target="/modules/admin.html#approval-queue" title="Open approval-queue"></span>' +
+            '<span class="nav-badge" id="navApprovalsBadge" data-target="/modules/admin.html#approval-queue" title="Open taken"></span>' +
           '</a>' +
           '<div class="nav-section">Binnenkort</div>' +
           concept('whatsapp', 'WhatsApp Bot') +
@@ -158,8 +158,11 @@
     } catch (e) { b.classList.remove('show'); }
   }
 
-  // Approvals-badge (D1 payment-arrangements):
-  //   - GET /api/pending-actions-list?status=PENDING&limit=1 → counts.PENDING
+  // Approvals-badge (D1.6 payment-arrangements — "Open taken (N+M)"):
+  //   - GET /api/pending-actions-list?status=PENDING&limit=1 → counts.{PENDING,APPROVED}
+  //     (de list-endpoint geeft ALLE counts terug, ongeacht het status-filter — geen 2e call nodig)
+  //   - badge-tekst = totaal aantal open taken (N PENDING te beoordelen + M APPROVED te verwerken)
+  //   - tooltip toont de splitsing ("Te beoordelen: N + Te verwerken: M")
   //   - alleen renderen als user feature_key 'finance.arrangements.approve' heeft
   //     (lookup via window.RBAC.ensurePermissionsLoaded(); super_admin krijgt '*')
   //   - klik op badge navigeert naar /modules/admin.html#approval-queue (data-target)
@@ -190,14 +193,25 @@
     if (!ok) { b.classList.remove('show'); return; }
     try {
       if (!window.AgentShared || typeof window.AgentShared.apiFetch !== 'function') return;
+      // Eén call volstaat: de list-endpoint geeft counts voor ALLE statussen terug,
+      // ongeacht het ?status=-filter. We tellen PENDING (te beoordelen) + APPROVED
+      // (te verwerken — admin moet handmatig markeren als verwerkt).
       var res = await window.AgentShared.apiFetch('/api/pending-actions-list?status=PENDING&limit=1');
       if (!res.ok) { b.classList.remove('show'); return; }
       var data = await res.json();
-      var n = (data && data.counts && typeof data.counts.PENDING === 'number')
-        ? data.counts.PENDING
-        : (typeof data.total === 'number' ? data.total : 0);
-      if (n > 0) { b.textContent = String(n); b.classList.add('show'); }
-      else       { b.textContent = ''; b.classList.remove('show'); }
+      var counts = (data && data.counts) || {};
+      var pending  = (typeof counts.PENDING  === 'number') ? counts.PENDING  : 0;
+      var approved = (typeof counts.APPROVED === 'number') ? counts.APPROVED : 0;
+      var total = pending + approved;
+      if (total > 0) {
+        b.textContent = 'Open taken (' + total + ')';
+        b.setAttribute('title', 'Te beoordelen: ' + pending + ' + Te verwerken: ' + approved);
+        b.classList.add('show');
+      } else {
+        b.textContent = '';
+        b.setAttribute('title', 'Open taken');
+        b.classList.remove('show');
+      }
     } catch (e) { b.classList.remove('show'); }
   }
 
