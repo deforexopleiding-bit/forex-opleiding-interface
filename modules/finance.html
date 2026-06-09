@@ -635,6 +635,186 @@
       cursor: not-allowed;
     }
 
+    /* ── Joost AI suggesties-panel (E1.0) ─────────────────────────────────── */
+    .inbox-c-joost-panel {
+      border: 1px solid rgba(124, 58, 237, .25);
+      background: rgba(124, 58, 237, .06);
+      border-radius: 8px;
+      padding: 10px 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .inbox-c-joost-panel.collapsed .inbox-c-joost-body { display: none; }
+    .inbox-c-joost-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 8px;
+    }
+    .inbox-c-joost-title {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text-primary, #0f172a);
+    }
+    .inbox-c-joost-header-actions {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .inbox-c-joost-body {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .inbox-c-joost-empty {
+      font-size: 12px;
+      color: var(--text-faint, #94a3b8);
+      padding: 4px 0;
+    }
+    .inbox-c-joost-loading {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 12px;
+      color: var(--text-secondary, #6b7280);
+      padding: 6px 0;
+    }
+    .inbox-c-joost-loading .joost-spinner {
+      width: 14px;
+      height: 14px;
+      border: 2px solid rgba(124, 58, 237, .25);
+      border-top-color: #7c3aed;
+      border-radius: 50%;
+      animation: joost-spin .8s linear infinite;
+    }
+    @keyframes joost-spin {
+      to { transform: rotate(360deg); }
+    }
+    .inbox-c-joost-card {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      background: var(--surface-1, #ffffff);
+      border: 1px solid var(--border, rgba(0,0,0,.08));
+      border-radius: 6px;
+      padding: 10px 12px;
+    }
+    .inbox-c-joost-meta {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .joost-intent-badge {
+      display: inline-flex;
+      align-items: center;
+      padding: 2px 8px;
+      border-radius: 999px;
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: .2px;
+      text-transform: uppercase;
+      background: rgba(148, 163, 184, .18);
+      color: #475569;
+    }
+    .joost-intent-badge.payment_promise   { background: rgba(59, 130, 246, .15); color: #1d4ed8; }
+    .joost-intent-badge.verify_payment    { background: rgba(245, 158, 11, .18); color: #b45309; }
+    .joost-intent-badge.arrangement_request { background: rgba(168, 85, 247, .18); color: #7e22ce; }
+    .joost-intent-badge.escalation_needed { background: rgba(239, 68, 68, .18); color: #b91c1c; }
+    .joost-intent-badge.general_question  { background: rgba(148, 163, 184, .18); color: #475569; }
+    .joost-intent-badge.other             { background: rgba(148, 163, 184, .18); color: #475569; }
+    .joost-confidence {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 11px;
+      color: var(--text-secondary, #6b7280);
+    }
+    .joost-confidence-bar {
+      display: inline-block;
+      width: 60px;
+      height: 6px;
+      background: rgba(148, 163, 184, .25);
+      border-radius: 999px;
+      overflow: hidden;
+      position: relative;
+    }
+    .joost-confidence-bar > span {
+      display: block;
+      height: 100%;
+      border-radius: 999px;
+    }
+    .joost-confidence.high   .joost-confidence-bar > span { background: #16a34a; }
+    .joost-confidence.medium .joost-confidence-bar > span { background: #f59e0b; }
+    .joost-confidence.low    .joost-confidence-bar > span { background: #ef4444; }
+    .joost-confidence-pct {
+      font-weight: 600;
+      color: var(--text-primary, #0f172a);
+    }
+    .joost-reply-textarea {
+      width: 100%;
+      min-height: 70px;
+      max-height: 180px;
+      padding: 8px 10px;
+      box-sizing: border-box;
+      border: 1px solid var(--border, #e5e7eb);
+      border-radius: 6px;
+      background: #ffffff;
+      color: var(--text-primary, #0f172a);
+      resize: vertical;
+      font-family: inherit;
+      font-size: 13px;
+      line-height: 1.45;
+      outline: none;
+    }
+    .joost-reply-textarea:focus {
+      border-color: #7c3aed;
+    }
+    .inbox-c-joost-reasoning {
+      font-size: 12px;
+      color: var(--text-secondary, #6b7280);
+    }
+    .inbox-c-joost-reasoning > summary {
+      cursor: pointer;
+      list-style: none;
+      user-select: none;
+      color: #7c3aed;
+      font-weight: 500;
+    }
+    .inbox-c-joost-reasoning > summary::-webkit-details-marker { display: none; }
+    .inbox-c-joost-reasoning > summary::before {
+      content: "▸ ";
+      display: inline-block;
+      transition: transform .15s ease;
+    }
+    .inbox-c-joost-reasoning[open] > summary::before { content: "▾ "; }
+    .inbox-c-joost-reasoning-text {
+      margin-top: 6px;
+      padding: 8px 10px;
+      background: rgba(124, 58, 237, .05);
+      border-left: 2px solid rgba(124, 58, 237, .35);
+      border-radius: 4px;
+      white-space: pre-wrap;
+    }
+    .inbox-c-joost-actions {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
+    .inbox-c-joost-error {
+      font-size: 12px;
+      color: #b91c1c;
+      background: rgba(239, 68, 68, .08);
+      border: 1px solid rgba(239, 68, 68, .25);
+      border-radius: 4px;
+      padding: 6px 10px;
+    }
+
     @media (max-width: 1100px) {
       .inbox-layout-c {
         grid-template-columns: 240px 1fr 0;
@@ -1010,6 +1190,23 @@
               <!-- Verlopen-window waarschuwing (alleen zichtbaar buiten 24h) -->
               <div id="inboxComposeExpiredWarn" hidden style="background:rgba(245,158,11,.10);border:1px solid rgba(245,158,11,.3);border-radius:6px;padding:8px 12px;font-size:12px;color:#f59e0b">
                 <i class="ti ti-clock-exclamation"></i> 24-uurs servicewindow verlopen — gebruik de Template-knop voor een goedgekeurde Meta-template.
+              </div>
+
+              <!-- Joost AI suggesties-panel (E1.0) — alleen zichtbaar bij finance.joost.use -->
+              <div id="joostPanel" class="inbox-c-joost-panel" hidden>
+                <header class="inbox-c-joost-header">
+                  <div class="inbox-c-joost-title">
+                    <i class="ti ti-sparkles" style="color:#7c3aed"></i>
+                    <span>Joost <span style="color:var(--text-faint);font-weight:500">(AI assistent)</span></span>
+                  </div>
+                  <div class="inbox-c-joost-header-actions">
+                    <button class="sr-abtn primary" id="joostSuggestBtn" type="button" disabled title="Eerst gesprek selecteren" style="font-size:12px;padding:6px 10px"><i class="ti ti-wand"></i> Vraag Joost om suggestie</button>
+                    <button class="sr-ibtn" id="joostCollapseBtn" type="button" title="Inklappen"><i class="ti ti-chevron-up" id="joostCollapseIcon"></i></button>
+                  </div>
+                </header>
+                <div class="inbox-c-joost-body" id="joostResults">
+                  <div class="inbox-c-joost-empty">Klik op <strong>Vraag Joost om suggestie</strong> voor een AI-antwoord op basis van de klant en open facturen.</div>
+                </div>
               </div>
 
               <!-- Eén textarea voor alle compose-acties -->
@@ -5772,6 +5969,7 @@
     const sendBtn  = document.getElementById('inboxComposeSendBtn');
     const hint     = document.getElementById('inboxComposeWindowHint');
     const warn     = document.getElementById('inboxComposeExpiredWarn');
+    const joostBtn = document.getElementById('joostSuggestBtn');
 
     if (!_inboxActiveConvId) {
       // Geen actief gesprek
@@ -5779,13 +5977,17 @@
       if (tplBtn)  { tplBtn.disabled  = true;  tplBtn.title  = 'Eerst gesprek selecteren'; }
       if (qrBtn)   { qrBtn.disabled   = true;  qrBtn.title   = 'Eerst gesprek selecteren'; }
       if (sendBtn) { sendBtn.disabled = true;  sendBtn.title = 'Eerst gesprek selecteren'; }
+      if (joostBtn){ joostBtn.disabled = true; joostBtn.title = 'Eerst gesprek selecteren'; }
       if (hint)    { hint.hidden = true; hint.textContent = ''; hint.classList.remove('open','expired'); }
       if (warn)    { warn.hidden = true; }
+      // Joost-panel resetten naar empty state bij geen conv
+      _joostClearPanel();
       return;
     }
 
     // Actief gesprek
     if (tplBtn) { tplBtn.disabled = false; tplBtn.title = ''; }
+    if (joostBtn) { _joostApplySuggestBtnState(); }
     if (_inboxConvCanSendText) {
       // 24h-window open: tekst-bericht versturen mag
       if (ta)      { ta.disabled = false; ta.placeholder = 'Typ een bericht…'; }
@@ -5846,6 +6048,11 @@
         window.AgentShared.showToast('Versturen mislukt: ' + (d.error || ('HTTP ' + r.status)), 'error');
         return;
       }
+      // Joost outcome-hook: als er een actieve suggestie was, markeer outcome
+      // afhankelijk van mode. USED_AS_IS = pristine suggested_reply,
+      // USED_EDITED = verzonden tekst wijkt af. Fail-soft (eigen try/catch).
+      const sentText = body; // wat daadwerkelijk verzonden is
+      _maybeMarkJoostOutcomeAfterSend(sentText);
       ta.value = '';
       ta.style.height = ''; // reset naar CSS min-height
       window.AgentShared.showToast('Bericht verstuurd', 'success');
@@ -5858,6 +6065,281 @@
       // Re-evaluate disabled-state via centrale sync ipv harde toggle.
       _inboxApplyComposeState();
     }
+  }
+
+  // ─── Joost AI suggesties (E1.0) ───────────────────────────────────────────
+  // State: huidige suggestion + laatste-request-timestamp (rate-limit-hint
+  // client-side, 30s consistent met server-side joost-suggest rate-limit).
+  let _joostCurrentSuggestion = null;   // { id, suggested_reply, detected_intent, confidence, reasoning }
+  let _joostLastRequestAt     = null;   // Date.now() van laatste call
+  let _joostEditMode          = false;  // true zodra user in textarea editeerde + verstuurt
+  let _joostCanUse            = false;  // permission-flag (finance.joost.use)
+  const JOOST_RATE_LIMIT_MS = 30 * 1000;
+
+  function _joostIntentLabel(intent) {
+    switch (intent) {
+      case 'payment_promise':     return 'Betaling toegezegd';
+      case 'verify_payment':      return 'Verificatie betaling';
+      case 'arrangement_request': return 'Regeling gevraagd';
+      case 'escalation_needed':   return 'Escaleren';
+      case 'general_question':    return 'Algemene vraag';
+      case 'other':
+      default:                    return 'Overig';
+    }
+  }
+
+  function _joostConfidenceClass(c) {
+    const x = Number(c) || 0;
+    if (x >= 0.9) return 'high';
+    if (x >= 0.7) return 'medium';
+    return 'low';
+  }
+
+  function _joostApplySuggestBtnState() {
+    const btn = document.getElementById('joostSuggestBtn');
+    if (!btn) return;
+    if (!_joostCanUse) {
+      btn.disabled = true; btn.title = 'Geen rechten (finance.joost.use)';
+      return;
+    }
+    if (!_inboxActiveConvId) {
+      btn.disabled = true; btn.title = 'Eerst gesprek selecteren';
+      return;
+    }
+    if (_joostLastRequestAt && (Date.now() - _joostLastRequestAt) < JOOST_RATE_LIMIT_MS) {
+      const secs = Math.ceil((JOOST_RATE_LIMIT_MS - (Date.now() - _joostLastRequestAt)) / 1000);
+      btn.disabled = true; btn.title = 'Wacht ' + secs + 's voor nieuwe suggestie';
+      return;
+    }
+    btn.disabled = false; btn.title = 'Genereer een suggestie op basis van klant + facturen';
+  }
+
+  function _joostClearPanel() {
+    _joostCurrentSuggestion = null;
+    _joostEditMode = false;
+    const results = document.getElementById('joostResults');
+    if (results) {
+      results.innerHTML = '<div class="inbox-c-joost-empty">Klik op <strong>Vraag Joost om suggestie</strong> voor een AI-antwoord op basis van de klant en open facturen.</div>';
+    }
+  }
+
+  function _joostShowLoading() {
+    const results = document.getElementById('joostResults');
+    if (!results) return;
+    results.innerHTML = '<div class="inbox-c-joost-loading"><span class="joost-spinner"></span><span>Joost denkt na…</span></div>';
+  }
+
+  function _joostShowError(msg) {
+    const results = document.getElementById('joostResults');
+    if (!results) return;
+    results.innerHTML = '<div class="inbox-c-joost-error"><i class="ti ti-alert-circle"></i> ' + esc(String(msg || 'Onbekende fout')) + '</div>';
+  }
+
+  function _joostRenderCard(sugg) {
+    const results = document.getElementById('joostResults');
+    if (!results || !sugg) return;
+    const intent = String(sugg.detected_intent || 'other');
+    const intentClass = intent.replace(/[^a-z_]/gi, '');
+    const conf = Number(sugg.confidence) || 0;
+    const confPct = Math.round(conf * 100);
+    const confCls = _joostConfidenceClass(conf);
+    const reply = String(sugg.suggested_reply || '');
+    const reasoning = String(sugg.reasoning || '');
+
+    const html =
+      '<div class="inbox-c-joost-card">' +
+        '<div class="inbox-c-joost-meta">' +
+          '<span class="joost-intent-badge ' + esc(intentClass) + '">' + esc(_joostIntentLabel(intent)) + '</span>' +
+          '<span class="joost-confidence ' + confCls + '">' +
+            '<span class="joost-confidence-bar"><span style="width:' + confPct + '%"></span></span>' +
+            '<span class="joost-confidence-pct">' + confPct + '%</span>' +
+            '<span>vertrouwen</span>' +
+          '</span>' +
+        '</div>' +
+        '<textarea id="joostReplyText" class="joost-reply-textarea" rows="3">' + esc(reply) + '</textarea>' +
+        (reasoning ? (
+          '<details class="inbox-c-joost-reasoning">' +
+            '<summary>Joost\'s redenering</summary>' +
+            '<div class="inbox-c-joost-reasoning-text">' + esc(reasoning) + '</div>' +
+          '</details>'
+        ) : '') +
+        '<div class="inbox-c-joost-actions">' +
+          '<button class="sr-abtn" id="joostIgnore" type="button" style="font-size:12px;padding:6px 10px"><i class="ti ti-x"></i> Negeer</button>' +
+          '<button class="sr-abtn" id="joostEditSend" type="button" style="font-size:12px;padding:6px 10px"><i class="ti ti-edit"></i> Bewerk + verstuur</button>' +
+          '<button class="sr-abtn primary" id="joostUseAsIs" type="button" style="font-size:12px;padding:6px 10px"><i class="ti ti-send"></i> Verstuur als-is</button>' +
+        '</div>' +
+      '</div>';
+    results.innerHTML = html;
+
+    // Wire buttons
+    const useAsIsBtn = document.getElementById('joostUseAsIs');
+    if (useAsIsBtn) useAsIsBtn.addEventListener('click', () => applyJoostUseAsIs());
+    const editBtn = document.getElementById('joostEditSend');
+    if (editBtn) editBtn.addEventListener('click', () => applyJoostEdit());
+    const ignoreBtn = document.getElementById('joostIgnore');
+    if (ignoreBtn) ignoreBtn.addEventListener('click', () => applyJoostIgnore());
+  }
+
+  async function requestJoostSuggestion() {
+    if (!_inboxActiveConvId) {
+      window.AgentShared.showToast('Eerst gesprek selecteren', 'error');
+      return;
+    }
+    if (_joostLastRequestAt && (Date.now() - _joostLastRequestAt) < JOOST_RATE_LIMIT_MS) {
+      const secs = Math.ceil((JOOST_RATE_LIMIT_MS - (Date.now() - _joostLastRequestAt)) / 1000);
+      window.AgentShared.showToast('Wacht ' + secs + 's voor nieuwe suggestie', 'error');
+      return;
+    }
+    _joostLastRequestAt = Date.now();
+    _joostEditMode = false;
+    _joostApplySuggestBtnState();
+    _joostShowLoading();
+    try {
+      const r = await window.AgentShared.apiFetch('/api/joost-suggest', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ conversation_id: _inboxActiveConvId }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        if (r.status === 429) {
+          _joostShowError('Wacht even (vorige suggestie nog actief).');
+        } else if (r.status === 503) {
+          _joostShowError(d.error || 'Joost is niet beschikbaar.');
+        } else if (r.status === 403) {
+          _joostShowError('Geen rechten (finance.joost.use).');
+        } else {
+          _joostShowError(d.error || ('HTTP ' + r.status));
+        }
+        return;
+      }
+      const sugg = d && d.suggestion ? d.suggestion : null;
+      if (!sugg || !sugg.id) {
+        _joostShowError('Lege suggestie ontvangen.');
+        return;
+      }
+      _joostCurrentSuggestion = sugg;
+      _joostRenderCard(sugg);
+    } catch (e) {
+      console.error('[requestJoostSuggestion]', e);
+      _joostShowError(e.message || 'Onbekende fout');
+    } finally {
+      // Re-enable knop na rate-limit window
+      setTimeout(_joostApplySuggestBtnState, JOOST_RATE_LIMIT_MS + 200);
+    }
+  }
+
+  async function _joostMarkOutcome(status, finalSentText) {
+    if (!_joostCurrentSuggestion || !_joostCurrentSuggestion.id) return;
+    const payload = { suggestion_id: _joostCurrentSuggestion.id, status };
+    if (finalSentText) payload.final_sent_text = finalSentText;
+    try {
+      const r = await window.AgentShared.apiFetch('/api/joost-mark-outcome', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify(payload),
+      });
+      if (!r.ok) {
+        const d = await r.json().catch(() => ({}));
+        console.error('[joost mark-outcome]', r.status, d && d.error);
+      }
+    } catch (e) {
+      console.error('[joost mark-outcome]', e);
+    }
+  }
+
+  // Verstuur de huidige Joost-suggestie ongewijzigd: schrijf naar textarea,
+  // markeer USED_AS_IS, trigger normale send-handler.
+  async function applyJoostUseAsIs() {
+    if (!_joostCurrentSuggestion) return;
+    const ta = document.getElementById('inboxComposeTextarea');
+    if (!ta || ta.disabled) {
+      window.AgentShared.showToast('Textarea uitgeschakeld — controleer 24h-window', 'error');
+      return;
+    }
+    const reply = String(_joostCurrentSuggestion.suggested_reply || '');
+    ta.value = reply;
+    autoResizeComposeTextarea();
+    _joostEditMode = false;
+    const suggIdAtSend = _joostCurrentSuggestion.id;
+    // Markeer outcome USED_AS_IS BEFORE versturen (server-side rate-limit unblocked).
+    await _joostMarkOutcome('USED_AS_IS', reply);
+    // Clear paneel zodat send-hook niet nogmaals mark-outcome doet.
+    _joostCurrentSuggestion = null;
+    _joostClearPanel();
+    // Triggert sendInboxText() flow — daarna refreshe state.
+    await sendInboxText();
+  }
+
+  // Kopieer suggestie naar textarea, geef focus, sluit kaart. User edit + verstuurt
+  // handmatig via de bestaande Verstuur-knop. Send-handler hook detecteert
+  // _joostEditMode + _joostCurrentSuggestion en markeert USED_EDITED.
+  function applyJoostEdit() {
+    if (!_joostCurrentSuggestion) return;
+    const ta = document.getElementById('inboxComposeTextarea');
+    if (!ta || ta.disabled) {
+      window.AgentShared.showToast('Textarea uitgeschakeld — controleer 24h-window', 'error');
+      return;
+    }
+    const reply = String(_joostCurrentSuggestion.suggested_reply || '');
+    ta.value = reply;
+    autoResizeComposeTextarea();
+    _joostEditMode = true;
+    try { ta.focus(); const len = ta.value.length; ta.setSelectionRange(len, len); } catch (_e) { /* noop */ }
+    // Visueel: clear card, behoud _joostCurrentSuggestion in geheugen voor send-hook.
+    const results = document.getElementById('joostResults');
+    if (results) results.innerHTML = '<div class="inbox-c-joost-empty"><i class="ti ti-info-circle" style="color:#7c3aed"></i> Suggestie geladen in compose — bewerk en verstuur via <strong>Verstuur</strong> knop. Outcome wordt gemarkeerd als <em>bewerkt</em>.</div>';
+  }
+
+  async function applyJoostIgnore() {
+    if (!_joostCurrentSuggestion) return;
+    await _joostMarkOutcome('IGNORED', null);
+    _joostCurrentSuggestion = null;
+    _joostEditMode = false;
+    _joostClearPanel();
+    window.AgentShared.showToast('Suggestie genegeerd', 'success');
+  }
+
+  // Hook in sendInboxText() na succesvolle send: als er een actieve suggestion
+  // is en mode was edit → USED_EDITED. Als use-as-is gebruikt werd is suggestion
+  // al gecleared in applyJoostUseAsIs() voorafgaand aan sendInboxText().
+  function _maybeMarkJoostOutcomeAfterSend(sentText) {
+    if (!_joostCurrentSuggestion || !_joostCurrentSuggestion.id) return;
+    if (_joostEditMode) {
+      // Fire-and-forget — log alleen in console bij fout.
+      _joostMarkOutcome('USED_EDITED', sentText);
+      _joostCurrentSuggestion = null;
+      _joostEditMode = false;
+    }
+  }
+
+  function _joostToggleCollapse() {
+    const panel = document.getElementById('joostPanel');
+    const icon  = document.getElementById('joostCollapseIcon');
+    if (!panel) return;
+    const isCollapsed = panel.classList.toggle('collapsed');
+    if (icon) {
+      icon.classList.remove('ti-chevron-up', 'ti-chevron-down');
+      icon.classList.add(isCollapsed ? 'ti-chevron-down' : 'ti-chevron-up');
+    }
+  }
+
+  // Init-helper: gate panel-zichtbaarheid op finance.joost.use permission +
+  // wire de knoppen (collapse + suggest). Wordt aangeroepen vanuit init().
+  function _joostInit(canUse) {
+    _joostCanUse = !!canUse;
+    const panel = document.getElementById('joostPanel');
+    if (!panel) return;
+    if (!_joostCanUse) {
+      panel.hidden = true;
+      return;
+    }
+    panel.hidden = false;
+    const suggestBtn = document.getElementById('joostSuggestBtn');
+    if (suggestBtn) suggestBtn.addEventListener('click', () => requestJoostSuggestion());
+    const collapseBtn = document.getElementById('joostCollapseBtn');
+    if (collapseBtn) collapseBtn.addEventListener('click', () => _joostToggleCollapse());
+    _joostApplySuggestBtnState();
   }
 
   async function refreshInboxConv() {
@@ -8910,6 +9392,7 @@
   // Tab-knop is zichtbaar als de gebruiker MINSTENS één van beide heeft.
   let canBankBalanceView = false, canBankTxView = false;
   let canInboxView = false, canInboxSend = false;
+  let canJoostUse = false;
   let _inboxLoadedOnce = false;
   let canDunningView = false, canDunningConfig = false, canDunningExecute = false;
   let _dunningLoadedOnce = false;
@@ -8932,6 +9415,9 @@
       canBankTxView = can('finance.bank.transactions_view');
       canInboxView = can('finance.inbox.view');
       canInboxSend = can('finance.inbox.send');
+      canJoostUse  = can('finance.joost.use');
+      // Joost-panel zichtbaarheid + wiring (E1.0).
+      try { _joostInit(canJoostUse); } catch (e) { console.error('[joost init]', e); }
       canDunningView    = can('finance.dunning.view');
       canDunningConfig  = can('finance.dunning.config');
       canDunningExecute = can('finance.dunning.execute');
