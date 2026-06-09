@@ -1082,6 +1082,7 @@
         <button class="sr-seg" data-dunning-sub="workflows" type="button">Workflows</button>
         <button class="sr-seg" data-dunning-sub="templates" type="button">Templates</button>
         <button class="sr-seg" data-dunning-sub="geschiedenis" type="button">Geschiedenis</button>
+        <button class="sr-seg" data-dunning-sub="arrangements" data-view="arrangements" type="button">Afspraken</button>
       </div>
 
       <!-- Sub-view: Overzicht (default) - PR B5 -->
@@ -1331,6 +1332,40 @@
           </button>
         </div>
       </div>
+
+      <!-- Sub-view: Afspraken / Betalingsregelingen (D1) -->
+      <div id="view-arrangements" hidden>
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:14px;flex-wrap:wrap;gap:10px">
+          <div>
+            <h2 style="margin:0;font-size:18px;font-weight:700">Afspraken</h2>
+            <div style="font-size:11.5px;color:var(--text-faint);margin-top:2px">Betalingsregelingen per klant (uitstel, gespreid, pauze, kwijtschelding). Klik op een rij voor details.</div>
+          </div>
+          <button class="sr-abtn" id="arrangRefreshBtn" type="button" style="font-size:11.5px;padding:5px 10px">
+            <i class="ti ti-refresh" style="margin-right:4px"></i>Vernieuw
+          </button>
+        </div>
+        <!-- Filter-strip status-pills -->
+        <div class="sr-segments" id="arrangStatusNav" style="margin-bottom:14px">
+          <button class="sr-seg active" data-arrang-status="voorgesteld" type="button">Voorgesteld</button>
+          <button class="sr-seg" data-arrang-status="actief" type="button">Actief</button>
+          <button class="sr-seg" data-arrang-status="voltooid" type="button">Nagekomen</button>
+          <button class="sr-seg" data-arrang-status="afgewezen" type="button">Verbroken</button>
+          <button class="sr-seg" data-arrang-status="geannuleerd" type="button">Geannuleerd</button>
+        </div>
+        <div class="sr-tablewrap">
+          <table class="sr-table" id="arrangementsTable">
+            <thead><tr>
+              <th>Klant</th>
+              <th style="width:130px">Type</th>
+              <th style="width:100px">#Facturen</th>
+              <th style="width:200px">Effectief</th>
+              <th style="width:130px">Status</th>
+              <th style="width:180px">Acties</th>
+            </tr></thead>
+            <tbody id="arrangementsTbody"><tr><td colspan="6" style="text-align:center;padding:24px;color:var(--text-faint)">Laden…</td></tr></tbody>
+          </table>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -1515,6 +1550,47 @@
       <button class="sr-abtn primary" id="dunRunDetailsResumeBtn" type="button" hidden><i class="ti ti-player-play"></i> Hervat</button>
       <button class="sr-abtn danger" id="dunRunDetailsCancelBtn" type="button" hidden><i class="ti ti-x"></i> Annuleer</button>
       <button class="sr-abtn" id="dunRunDetailsCloseBtn" type="button">Sluiten</button>
+    </div>
+  </div>
+</div>
+
+<!-- Arrangement Details modal (D1) -->
+<div class="modal-overlay hidden" id="arrangementDetailModal" role="dialog" aria-modal="true">
+  <div class="modal-card" style="max-width:780px">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px">
+      <div>
+        <h3 id="arrangDetailTitle" style="margin:0;font-size:17px">Afspraak details</h3>
+        <div id="arrangDetailSubtitle" style="font-size:12px;color:var(--text-faint);margin-top:3px">—</div>
+      </div>
+      <button class="sr-ibtn" id="arrangDetailClose" type="button" title="Sluiten" style="margin-top:-4px"><i class="ti ti-x"></i></button>
+    </div>
+
+    <div style="margin-top:16px">
+      <div style="font-size:13px;font-weight:600;margin-bottom:8px">Arrangement</div>
+      <div id="arrangDetailSection1" style="display:flex;flex-direction:column;gap:6px;padding:4px 2px">
+        <div style="font-size:11.5px;color:var(--text-faint);text-align:center;padding:14px">Laden…</div>
+      </div>
+    </div>
+
+    <div style="margin-top:18px">
+      <div style="font-size:13px;font-weight:600;margin-bottom:8px">Pending Actions</div>
+      <div class="sr-tablewrap">
+        <table class="sr-table" id="arrangDetailActionsTable">
+          <thead><tr>
+            <th>Type</th>
+            <th style="width:120px">Status</th>
+            <th style="width:140px">Voorgesteld</th>
+            <th style="width:160px">Approved/Rejected</th>
+          </tr></thead>
+          <tbody id="arrangDetailActionsTbody"><tr><td colspan="4" style="text-align:center;padding:14px;color:var(--text-faint);font-size:11.5px">Laden…</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div id="arrangDetailError" style="display:none;margin-top:12px;padding:8px 12px;background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.3);border-radius:6px;color:#ef4444;font-size:12px"></div>
+
+    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:18px">
+      <button class="sr-abtn" id="arrangDetailCloseBtn" type="button">Sluiten</button>
     </div>
   </div>
 </div>
@@ -2063,12 +2139,21 @@
         if (locked) locked.hidden = false;
       } else {
         // Sub-tab switcher wiring + lazy-load van templates op switch.
-        const subs = ['overzicht','probleemklanten','workflows','templates','geschiedenis'];
+        // Map sub-key -> container-id (afwijkende ids worden hier expliciet vermeld).
+        const SUB_IDS = {
+          overzicht:        'dunningSubOverzicht',
+          probleemklanten:  'dunningSubProbleemklanten',
+          workflows:        'dunningSubWorkflows',
+          templates:        'dunningSubTemplates',
+          geschiedenis:     'dunningSubGeschiedenis',
+          arrangements:     'view-arrangements',
+        };
+        const subs = Object.keys(SUB_IDS);
         document.querySelectorAll('#dunningSubNav .sr-seg').forEach(b => b.addEventListener('click', () => {
           const target = b.dataset.dunningSub;
           document.querySelectorAll('#dunningSubNav .sr-seg').forEach(x => x.classList.toggle('active', x === b));
           for (const s of subs) {
-            const el = document.getElementById('dunningSub' + s.charAt(0).toUpperCase() + s.slice(1));
+            const el = document.getElementById(SUB_IDS[s]);
             if (el) el.hidden = (s !== target);
           }
           if (target === 'overzicht' && !_dunOvLoadedOnce) {
@@ -2093,6 +2178,11 @@
             _dunHistLoadedOnce = true;
             wireDunHistory();
             loadDunHistory({ reset: true });
+          }
+          if (target === 'arrangements' && !_arrangLoadedOnce) {
+            _arrangLoadedOnce = true;
+            wireArrangOnce();
+            loadArrangements();
           }
         }));
         // Wire de modal-knoppen (één keer).
@@ -3230,6 +3320,287 @@
     } catch (e) {
       console.error('[dunRunDetails action]', e);
       window.AgentShared.showToast(`${label} mislukt: ${e.message}`, 'error');
+    }
+  }
+
+  // ─── Afspraken / Payment Arrangements sub-tab (D1) ─────────────────────────
+  let _arrangLoadedOnce  = false;
+  let _arrangWired       = false;
+  let _arrangActiveStatus = 'voorgesteld';
+  let _arrangItems        = [];
+
+  function wireArrangOnce() {
+    if (_arrangWired) return;
+    _arrangWired = true;
+
+    // Status-pills wiring.
+    document.querySelectorAll('#arrangStatusNav .sr-seg').forEach(b => {
+      b.addEventListener('click', () => {
+        const s = b.dataset.arrangStatus;
+        if (!s || s === _arrangActiveStatus) return;
+        switchArrangStatus(s);
+      });
+    });
+
+    // Refresh-knop.
+    document.getElementById('arrangRefreshBtn')?.addEventListener('click', () => loadArrangements());
+
+    // Tbody delegation: row-click -> detail (excludeer link/button), data-arrang-cancel knop -> cancel.
+    const tb = document.getElementById('arrangementsTbody');
+    if (tb) {
+      tb.addEventListener('click', (e) => {
+        const cancelBtn = e.target.closest('[data-arrang-cancel]');
+        if (cancelBtn) {
+          e.stopPropagation();
+          const id = cancelBtn.getAttribute('data-arrang-cancel');
+          if (id) cancelArrang(id);
+          return;
+        }
+        const detailBtn = e.target.closest('[data-arrang-detail]');
+        if (detailBtn) {
+          e.stopPropagation();
+          const id = detailBtn.getAttribute('data-arrang-detail');
+          if (id) openArrangDetail(id);
+          return;
+        }
+        // Row-click voor details (skip als op a/button).
+        if (e.target.closest('a, button')) return;
+        const tr = e.target.closest('tr[data-arrang-id]');
+        if (tr) {
+          const id = tr.getAttribute('data-arrang-id');
+          if (id) openArrangDetail(id);
+        }
+      });
+    }
+
+    // Modal close-handlers.
+    const modal = document.getElementById('arrangementDetailModal');
+    document.getElementById('arrangDetailClose')?.addEventListener('click', closeArrangDetail);
+    document.getElementById('arrangDetailCloseBtn')?.addEventListener('click', closeArrangDetail);
+    modal?.addEventListener('click', (e) => {
+      if (e.target.id === 'arrangementDetailModal') closeArrangDetail();
+    });
+  }
+
+  function switchArrangStatus(s) {
+    _arrangActiveStatus = s;
+    document.querySelectorAll('#arrangStatusNav .sr-seg').forEach(b => {
+      b.classList.toggle('active', b.dataset.arrangStatus === s);
+    });
+    loadArrangements();
+  }
+
+  function arrangStatusBadge(status) {
+    const map = {
+      voorgesteld:  '<span class="sr-tag" style="background:rgba(56,189,248,.15);color:#38bdf8">Voorgesteld</span>',
+      goedgekeurd:  '<span class="sr-tag green">Goedgekeurd</span>',
+      actief:       '<span class="sr-tag green">Actief</span>',
+      voltooid:     '<span class="sr-tag gray">Nagekomen</span>',
+      afgewezen:    '<span class="sr-tag" style="background:rgba(239,68,68,.15);color:#ef4444">Verbroken</span>',
+      geannuleerd:  '<span class="sr-tag gray">Geannuleerd</span>',
+    };
+    return map[status] || `<span class="sr-tag gray">${esc(status || '—')}</span>`;
+  }
+
+  function arrangTypeLabel(t) {
+    const map = {
+      uitstel:        'Uitstel',
+      gespreid:       'Gespreide betaling',
+      pauze:          'Pauze',
+      kwijtschelding: 'Kwijtschelding',
+      overig:         'Overig',
+    };
+    return map[t] || (t || '—');
+  }
+
+  // Bepaal effective_from / effective_until uit details voor display.
+  function arrangEffective(item) {
+    const d = item.details || {};
+    let from = null, until = null;
+    if (item.type === 'pauze') {
+      from = d.pause_from || null;
+      until = d.pause_until || null;
+    } else if (item.type === 'uitstel') {
+      from = item.created_at ? String(item.created_at).slice(0, 10) : null;
+      until = d.new_due_date || null;
+    } else if (item.type === 'gespreid' && Array.isArray(d.parts) && d.parts.length) {
+      from = d.parts[0]?.due_date || null;
+      until = d.parts[d.parts.length - 1]?.due_date || null;
+    } else {
+      from = item.created_at ? String(item.created_at).slice(0, 10) : null;
+    }
+    return { from, until };
+  }
+
+  async function loadArrangements() {
+    const tb = document.getElementById('arrangementsTbody');
+    if (!tb) return;
+    tb.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:24px;color:var(--text-faint)">Laden…</td></tr>';
+    const params = new URLSearchParams();
+    params.set('status', _arrangActiveStatus);
+    params.set('limit', '100');
+    try {
+      const r = await window.AgentShared.apiFetch('/api/arrangements-list?' + params.toString());
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        tb.innerHTML = `<tr><td colspan="6" style="text-align:center;padding:24px;color:#ef4444">Fout: ${esc(d.error || ('HTTP ' + r.status))}</td></tr>`;
+        return;
+      }
+      _arrangItems = d.items || [];
+      renderArrangRows(_arrangItems);
+    } catch (e) {
+      console.error('[arrangements-list]', e);
+      tb.innerHTML = `<tr><td colspan="6" style="text-align:center;padding:24px;color:#ef4444">Fout: ${esc(e.message)}</td></tr>`;
+    }
+  }
+
+  function renderArrangRows(items) {
+    const tb = document.getElementById('arrangementsTbody');
+    if (!tb) return;
+    if (!items.length) {
+      tb.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:24px;color:var(--text-faint)">Geen afspraken in deze status.</td></tr>';
+      return;
+    }
+    tb.innerHTML = items.map(it => {
+      const custName = it.customer?.name || '—';
+      const custCell = it.customer_id
+        ? `<a href="/modules/klanten.html?id=${esc(it.customer_id)}&tab=facturen" style="color:var(--accent-cyan);text-decoration:none;font-weight:600">${esc(custName)}</a>`
+        : `<span style="font-weight:600">${esc(custName)}</span>`;
+      const emailLine = it.customer?.email
+        ? `<div style="font-size:11px;color:var(--text-faint);margin-top:2px">${esc(it.customer.email)}</div>`
+        : '';
+      const typeBadge = `<span class="sr-tag" style="background:rgba(255,255,255,0.05);color:var(--text-dim)">${esc(arrangTypeLabel(it.type))}</span>`;
+      const invoiceCount = Array.isArray(it.invoice_ids) ? it.invoice_ids.length : 0;
+      const eff = arrangEffective(it);
+      const effCell = (eff.from || eff.until)
+        ? `${esc(fmtDateNl(eff.from))} <span style="color:var(--text-faint)">→</span> ${esc(fmtDateNl(eff.until))}`
+        : '<span style="color:var(--text-faint)">—</span>';
+      const statusBadge = arrangStatusBadge(it.status);
+      const canCancel = it.status === 'voorgesteld' || it.status === 'actief';
+      const cancelBtn = canCancel
+        ? `<button class="sr-abtn danger" data-arrang-cancel="${esc(it.id)}" type="button" style="font-size:11px;padding:4px 8px"><i class="ti ti-x"></i> Annuleer</button>`
+        : '';
+      return `<tr data-arrang-id="${esc(it.id)}" class="clickable-row" style="cursor:pointer">
+        <td>${custCell}${emailLine}</td>
+        <td>${typeBadge}</td>
+        <td style="text-align:center">${invoiceCount}</td>
+        <td style="font-size:11.5px">${effCell}</td>
+        <td>${statusBadge}</td>
+        <td>
+          <button class="sr-abtn" data-arrang-detail="${esc(it.id)}" type="button" style="font-size:11px;padding:4px 8px"><i class="ti ti-eye"></i> Details</button>
+          ${cancelBtn}
+        </td>
+      </tr>`;
+    }).join('');
+  }
+
+  async function openArrangDetail(id) {
+    if (!id) return;
+    wireArrangOnce();
+    const modal = document.getElementById('arrangementDetailModal');
+    const titleEl   = document.getElementById('arrangDetailTitle');
+    const subEl     = document.getElementById('arrangDetailSubtitle');
+    const sec1El    = document.getElementById('arrangDetailSection1');
+    const actTb     = document.getElementById('arrangDetailActionsTbody');
+    const errEl     = document.getElementById('arrangDetailError');
+    if (titleEl) titleEl.textContent = 'Afspraak details';
+    if (subEl)   subEl.textContent = 'Laden…';
+    if (sec1El)  sec1El.innerHTML = '<div style="font-size:11.5px;color:var(--text-faint);text-align:center;padding:14px">Laden…</div>';
+    if (actTb)   actTb.innerHTML = '<tr><td colspan="4" style="text-align:center;padding:14px;color:var(--text-faint);font-size:11.5px">Laden…</td></tr>';
+    if (errEl)   { errEl.style.display = 'none'; errEl.textContent = ''; }
+    if (modal)   modal.classList.remove('hidden');
+
+    try {
+      const r = await window.AgentShared.apiFetch('/api/arrangements-detail?id=' + encodeURIComponent(id));
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        if (errEl) { errEl.style.display = 'block'; errEl.textContent = d.error || ('HTTP ' + r.status); }
+        if (subEl) subEl.textContent = 'ID: ' + id;
+        return;
+      }
+      const arr = d.arrangement || {};
+      const cust = d.customer || null;
+      if (titleEl) titleEl.textContent = `${arrangTypeLabel(arr.type)} — ${cust?.name || '(onbekend)'}`;
+      if (subEl)   subEl.textContent = 'ID: ' + (arr.id || id);
+
+      // Sectie 1: arrangement
+      const eff = arrangEffective(arr);
+      const detailsJson = JSON.stringify(arr.details || {}, null, 2);
+      const rowsHtml = [
+        ['Type',             esc(arrangTypeLabel(arr.type))],
+        ['Status',           arrangStatusBadge(arr.status)],
+        ['Voorgesteld op',   esc(arr.created_at ? fmtDateNl(String(arr.created_at).slice(0, 10)) : '—')],
+        ['Goedgekeurd op',   esc(arr.approved_at ? fmtDateNl(String(arr.approved_at).slice(0, 10)) : '—')],
+        ['Effectief vanaf',  esc(eff.from ? fmtDateNl(eff.from) : '—')],
+        ['Effectief tot',    esc(eff.until ? fmtDateNl(eff.until) : '—')],
+        ['Reden / notitie',  esc(arr.notes || arr.reject_reason || '—')],
+      ].map(([k, v]) =>
+        `<div style="display:grid;grid-template-columns:160px 1fr;gap:10px;padding:6px 10px;background:rgba(255,255,255,0.02);border:1px solid var(--border-subtle, #2b2f3a);border-radius:6px">
+           <div style="font-size:11.5px;color:var(--text-faint)">${k}</div>
+           <div style="font-size:12.5px">${v}</div>
+         </div>`
+      ).join('');
+      const detailsBlock = `<div style="margin-top:8px">
+        <div style="font-size:11.5px;color:var(--text-faint);margin-bottom:4px">Details (JSON)</div>
+        <pre style="margin:0;padding:8px 10px;background:rgba(0,0,0,0.25);border:1px solid var(--border-subtle, #2b2f3a);border-radius:6px;font-size:11px;color:var(--text-dim);overflow:auto;max-height:160px">${esc(detailsJson)}</pre>
+      </div>`;
+      if (sec1El) sec1El.innerHTML = rowsHtml + detailsBlock;
+
+      // Sectie 2: pending actions
+      const actions = d.pending_actions || [];
+      if (!actions.length) {
+        if (actTb) actTb.innerHTML = '<tr><td colspan="4" style="text-align:center;padding:14px;color:var(--text-faint);font-size:11.5px">Geen pending actions.</td></tr>';
+      } else if (actTb) {
+        actTb.innerHTML = actions.map(a => {
+          const statusBadge = a.status === 'approved'  ? '<span class="sr-tag green">approved</span>'
+                            : a.status === 'rejected'  ? '<span class="sr-tag" style="background:rgba(239,68,68,.15);color:#ef4444">rejected</span>'
+                            : a.status === 'executed'  ? '<span class="sr-tag green">executed</span>'
+                            : a.status === 'failed'    ? '<span class="sr-tag" style="background:rgba(239,68,68,.15);color:#ef4444">failed</span>'
+                            : a.status === 'cancelled' ? '<span class="sr-tag gray">cancelled</span>'
+                            : '<span class="sr-tag" style="background:rgba(56,189,248,.15);color:#38bdf8">pending</span>';
+          const proposed = a.created_at ? fmtDateNl(String(a.created_at).slice(0, 10)) : '—';
+          let approvedInfo = '—';
+          if (a.approved_at) approvedInfo = 'approved ' + fmtDateNl(String(a.approved_at).slice(0, 10));
+          else if (a.reject_reason) approvedInfo = 'rejected: ' + esc(a.reject_reason);
+          return `<tr>
+            <td style="font-family:monospace;font-size:11.5px">${esc(a.action_type)}</td>
+            <td>${statusBadge}</td>
+            <td style="font-size:11.5px">${esc(proposed)}</td>
+            <td style="font-size:11.5px">${approvedInfo}</td>
+          </tr>`;
+        }).join('');
+      }
+    } catch (e) {
+      console.error('[arrangements-detail]', e);
+      if (errEl) { errEl.style.display = 'block'; errEl.textContent = e.message; }
+    }
+  }
+
+  function closeArrangDetail() {
+    document.getElementById('arrangementDetailModal')?.classList.add('hidden');
+  }
+
+  async function cancelArrang(id) {
+    if (!id) return;
+    const reason = prompt('Reden voor annuleren (optioneel):', '');
+    if (reason === null) return;  // user clicked cancel
+    if (!confirm('Afspraak annuleren? Dit kan niet ongedaan worden gemaakt.')) return;
+    try {
+      const r = await window.AgentShared.apiFetch('/api/arrangements-cancel', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id, reason: reason || null }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        window.AgentShared.showToast('Annuleren mislukt: ' + (d.error || ('HTTP ' + r.status)), 'error');
+        return;
+      }
+      window.AgentShared.showToast('Afspraak geannuleerd', 'success');
+      loadArrangements();
+    } catch (e) {
+      console.error('[arrangements-cancel]', e);
+      window.AgentShared.showToast('Annuleren mislukt: ' + e.message, 'error');
     }
   }
 
