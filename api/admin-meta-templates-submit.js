@@ -21,11 +21,18 @@
 // SUPER_ADMIN ONLY.
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
+import {
+  isNamedTemplate,
+  buildPositionalMapping,
+  getExampleForKey,
+  parseNamedPlaceholders,
+  VARIABLE_REGEX,
+} from './_lib/template-variables.js';
 
 const META_API_VERSION = 'v25.0';
 const META_BASE_URL = `https://graph.facebook.com/${META_API_VERSION}`;
 
-const SELECT_COLS = 'id, business_account_id, meta_template_id, name, language, category, header_type, header_content, body_text, body_examples, footer_text, buttons, status, rejection_reason, submitted_at, approved_at, last_synced_at, created_at, updated_at';
+const SELECT_COLS = 'id, business_account_id, meta_template_id, name, language, category, header_type, header_content, body_text, body_examples, footer_text, buttons, status, rejection_reason, meta_param_mapping, submitted_at, approved_at, last_synced_at, created_at, updated_at';
 
 async function logAudit({ action, payload, status = 'success', error_message = null, userId }) {
   try {
@@ -61,28 +68,76 @@ function extractBodyVarIndices(text) {
 }
 
 /**
- * Bouw het components-array dat Meta verwacht in /message_templates POST.
- * Mapt onze DB-shape (header_type/header_content/body_text/body_examples/footer_text/buttons)
- * naar Meta's component-spec.
+ * Detecteert of een tekst named placeholders bevat ({{categorie.veld}}).
+ * Pure regex-check, geen side-effects.
+ */
+function hasNamedPlaceholders(text) {
+  if (!text || typeof text !== 'string') return false;
+  const re = new RegExp(VARIABLE_REGEX.source, 'g');
+  return re.test(text);
+}
+
+/**
+ * Bouw example-array voor een named-mapping in volgorde van positie-keys.
+ * mapping = { '1': 'klant.naam', '2': 'factuur.bedrag_open' }
+ * → [getExampleForKey('klant.naam'), getExampleForKey('factuur.bedrag_open')]
+ */
+function buildNamedExampleArray(mapping) {
+  const positions = Object.keys(mapping)
+    .filter((k) => /^\d+$/.test(k))
+    .sort((a, b) => parseInt(a, 10) - parseInt(b, 10));
+  return positions.map((p) => {
+    const key = mapping[p];
+    const ex = getExampleForKey(key);
+    return (typeof ex === 'string' && ex.trim()) ? ex : 'voorbeeld';
+  });
+}
+
+/**
+ * Bouw het components-array dat Meta verwacht in /message_templates POST,
+ * PLUS de meta_param_mapping die we zullen bewaren voor send-time resolve.
+ *
+ * Backward-compat:
+ *   - Tekst zonder named placeholders → geen conversion, mapping = null voor
+ *     dat onderdeel (legacy positioneel gedrag exact behouden).
+ *   - Tekst met named placeholders → convert naar {{N}} + bouw mapping.
+ *
+ * Returnt { components, meta_param_mapping (object of null) }.
  */
 function buildComponents(tpl) {
   const components = [];
+  const paramMapping = {};
 
   // ---- HEADER ----
   if (tpl.header_type && tpl.header_type !== 'NONE') {
     const hc = tpl.header_content || {};
     if (tpl.header_type === 'TEXT') {
-      const header = { type: 'HEADER', format: 'TEXT', text: hc.text || '' };
-      // Variabelen in header-text → example.header_text array (string per var).
-      const headerVars = extractBodyVarIndices(hc.text || '');
-      if (headerVars.length > 0) {
-        const exampleArr = headerVars.map((n) => {
-          const ex = hc.example && hc.example[String(n)];
-          return (typeof ex === 'string' && ex.trim()) ? ex : 'voorbeeld';
-        });
-        header.example = { header_text: exampleArr };
+      const rawHeaderText = hc.text || '';
+      const headerHasNamed = hasNamedPlaceholders(rawHeaderText);
+
+      if (headerHasNamed) {
+        // Named → positional conversion.
+        const { converted_text, mapping } = buildPositionalMapping(rawHeaderText);
+        const header = { type: 'HEADER', format: 'TEXT', text: converted_text };
+        const exampleArr = buildNamedExampleArray(mapping);
+        if (exampleArr.length > 0) {
+          header.example = { header_text: exampleArr };
+        }
+        paramMapping.header_text = mapping;
+        components.push(header);
+      } else {
+        // Legacy positioneel: oude flow ongewijzigd.
+        const header = { type: 'HEADER', format: 'TEXT', text: rawHeaderText };
+        const headerVars = extractBodyVarIndices(rawHeaderText);
+        if (headerVars.length > 0) {
+          const exampleArr = headerVars.map((n) => {
+            const ex = hc.example && hc.example[String(n)];
+            return (typeof ex === 'string' && ex.trim()) ? ex : 'voorbeeld';
+          });
+          header.example = { header_text: exampleArr };
+        }
+        components.push(header);
       }
-      components.push(header);
     } else {
       // IMAGE / VIDEO / DOCUMENT — Meta vereist example.header_handle: [<url>].
       const url = (hc.example_url && String(hc.example_url).trim()) || '';
@@ -93,18 +148,33 @@ function buildComponents(tpl) {
   }
 
   // ---- BODY ----
-  const bodyComp = { type: 'BODY', text: tpl.body_text || '' };
-  const bodyVars = extractBodyVarIndices(tpl.body_text || '');
-  if (bodyVars.length > 0) {
-    const examplesObj = (tpl.body_examples && typeof tpl.body_examples === 'object') ? tpl.body_examples : {};
-    const exampleArr = bodyVars.map((n) => {
-      const ex = examplesObj[String(n)];
-      return (typeof ex === 'string' && ex.trim()) ? ex : 'voorbeeld';
-    });
-    // Meta-spec: body_text is een array van arrays (1 set voorbeelden).
-    bodyComp.example = { body_text: [exampleArr] };
+  const rawBodyText = tpl.body_text || '';
+  const bodyHasNamed = hasNamedPlaceholders(rawBodyText);
+
+  if (bodyHasNamed) {
+    // Named → positional conversion.
+    const { converted_text, mapping } = buildPositionalMapping(rawBodyText);
+    const bodyComp = { type: 'BODY', text: converted_text };
+    const exampleArr = buildNamedExampleArray(mapping);
+    if (exampleArr.length > 0) {
+      bodyComp.example = { body_text: [exampleArr] };
+    }
+    paramMapping.body = mapping;
+    components.push(bodyComp);
+  } else {
+    // Legacy positioneel: oude flow ongewijzigd.
+    const bodyComp = { type: 'BODY', text: rawBodyText };
+    const bodyVars = extractBodyVarIndices(rawBodyText);
+    if (bodyVars.length > 0) {
+      const examplesObj = (tpl.body_examples && typeof tpl.body_examples === 'object') ? tpl.body_examples : {};
+      const exampleArr = bodyVars.map((n) => {
+        const ex = examplesObj[String(n)];
+        return (typeof ex === 'string' && ex.trim()) ? ex : 'voorbeeld';
+      });
+      bodyComp.example = { body_text: [exampleArr] };
+    }
+    components.push(bodyComp);
   }
-  components.push(bodyComp);
 
   // ---- FOOTER ----
   if (tpl.footer_text && String(tpl.footer_text).trim()) {
@@ -113,10 +183,23 @@ function buildComponents(tpl) {
 
   // ---- BUTTONS ----
   if (Array.isArray(tpl.buttons) && tpl.buttons.length > 0) {
-    const mapped = tpl.buttons.map((b) => {
+    const buttonMappings = [];
+    const mapped = tpl.buttons.map((b, idx) => {
       if (!b || typeof b !== 'object') return null;
       if (b.type === 'URL') {
-        return { type: 'URL', text: b.text, url: b.url };
+        const rawUrl = b.url || '';
+        if (hasNamedPlaceholders(rawUrl)) {
+          const { converted_text, mapping } = buildPositionalMapping(rawUrl);
+          buttonMappings.push({ index: idx, url_params: mapping });
+          // Meta vereist een example.url als de URL placeholders bevat.
+          const exampleArr = buildNamedExampleArray(mapping);
+          const out = { type: 'URL', text: b.text, url: converted_text };
+          if (exampleArr.length > 0) {
+            out.example = exampleArr;
+          }
+          return out;
+        }
+        return { type: 'URL', text: b.text, url: rawUrl };
       }
       if (b.type === 'PHONE_NUMBER') {
         return { type: 'PHONE_NUMBER', text: b.text, phone_number: b.phone_number };
@@ -129,9 +212,14 @@ function buildComponents(tpl) {
     if (mapped.length > 0) {
       components.push({ type: 'BUTTONS', buttons: mapped });
     }
+    if (buttonMappings.length > 0) {
+      paramMapping.buttons = buttonMappings;
+    }
   }
 
-  return components;
+  // Bewaar mapping alleen als er minimaal één onderdeel named-vars had.
+  const meta_param_mapping = Object.keys(paramMapping).length > 0 ? paramMapping : null;
+  return { components, meta_param_mapping };
 }
 
 /**
@@ -200,8 +288,8 @@ export default async function handler(req, res) {
       });
     }
 
-    // ---- Build Meta payload ----
-    const components = buildComponents(tpl);
+    // ---- Build Meta payload + named→positional conversion ----
+    const { components, meta_param_mapping } = buildComponents(tpl);
     const metaPayload = {
       name:                  tpl.name,
       language:              tpl.language,
@@ -300,10 +388,11 @@ export default async function handler(req, res) {
     const nowIso       = new Date().toISOString();
 
     const updates = {
-      status:           internalStat,
-      submitted_at:     nowIso,
-      last_synced_at:   nowIso,
-      updated_at:       nowIso,
+      status:             internalStat,
+      submitted_at:       nowIso,
+      last_synced_at:     nowIso,
+      updated_at:         nowIso,
+      meta_param_mapping: meta_param_mapping, // null voor legacy positional, object bij named
     };
     if (metaId) updates.meta_template_id = metaId;
     // Bij directe APPROVED-response: zet approved_at meteen.
