@@ -440,3 +440,42 @@ Belangrijk pattern hierbij: **mixed templates weigeren** (named én positioneel 
 `isMixedTemplateBody()` client-side; server-side niet expliciet maar
 `buildPositionalMapping()` mapt alleen named en laat positionele staan, dus
 resultaat zou inconsistent zijn → houd de check client-side hard.
+
+## Lessons Learned — C4.5 TL payment-link + inbox (9 juni 2026)
+
+Volledige documentatie: [`docs/finance-c45-tl-payment-link.md`](docs/finance-c45-tl-payment-link.md).
+
+### Lesson learned 16 — Lazy-fetch + cache TTL voor externe API-resources
+Voor externe resources die langzaam veranderen (TL payment_url, invoice-link, etc.):
+sla het resultaat op in de row zelf met een `*_fetched_at`-kolom en hang een
+**env-gedreven TTL** ervoor (`FINANCE_PAYMENT_LINK_CACHE_TTL_DAYS`, default 7). Cache
+wordt automatisch warm bij eerste use; `?force=true` of `{ force: true }` als bypass.
+Voorkomt N+1 TL-calls bij UI-refresh + WA-send binnen dezelfde minuut. Skip persist
+voor signed/expiring URLs (TL `invoices.download` PDF) — die zijn te kortlevend om
+zinnig te cachen.
+
+### Lesson learned 17 — Lib + endpoint splitsing (cron + inbox + UI = één helper)
+Voorkom dubbele fetch+cache+error-mapping code in cron-jobs, send-endpoints en UI-
+endpoints door een **`_lib/`-helper** te maken (`api/_lib/invoice-payment-link.js`)
+met de pure logica + typed `Error.code`, en daarnaast een **thin HTTP-endpoint** dat
+alleen auth + code→HTTP-mapping doet (`api/finance-invoice-payment-link.js`). Drie
+callers gebruiken nu één pad:
+1. UI-knop in invoice-detail modal (`modules/finance.html` →
+   `apiFetch('/api/finance-invoice-payment-link')`).
+2. Inbox template-send lazy resolve van `{{factuur.betaal_link}}`
+   (`api/inbox-send-template.js` → `ensureInvoicePaymentLink(invoice.id)`).
+3. Dunning engine pre-warm (TODO in `api/_lib/dunning-step-executors.js`, wacht op
+   Meta-credentials PR A2).
+
+Zelfde patroon eerder toegepast bij `register-payment-internal.js` — werkt
+consistent en bespaart 2-3 plekken onderhoud bij elke TL/Meta API-shape wijziging.
+
+### Lesson learned 18 — Phone-normalize: `/\D/g` strip + last-9 fallback
+Klant-telefoonnummers staan inconsistent in DB (met of zonder `+`, met/zonder
+landcode, soms met spaties). Voor lookup-by-phone (inbox webhook, conversation
+context): strip alle non-digits via `String(s).replace(/\D/g, '')` en match
+**eerst exact** op het volle digit-string, **dan fallback** op `slice(-9)` voor de
+lokale variant zonder landcode. Match alleen toepassen als er precies 1 hit is —
+ambiguïteit (2+ klanten met laatste 9 digits gelijk) is een unmatched-conversation
+case, geen "kies de eerste". Zie `api/inbox-conversation-context.js` regel 45-79
+(uit recente PR #132 fix).
