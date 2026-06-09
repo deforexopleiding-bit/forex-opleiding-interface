@@ -72,7 +72,12 @@ Lokaal: C:/Users/jeffr/forex-opleiding-interface
 - /modules/agents.html — 1-op-1 chat met agents
 - /modules/meetings.html — Vergaderruimte
 - /modules/control-center.html — Approvals + Audit log
-- /modules/admin.html — Gebruikersbeheer (ADMIN_ROLES: super_admin/admin/manager)
+- /modules/admin.html — Gebruikersbeheer (ADMIN_ROLES: super_admin/admin/manager) +
+  Approval-queue tab (#approval-queue) voor D-module payment-arrangements
+- D-module (payment-arrangements) — DB-fundament + approval-queue + propose-wizard
+  in /modules/finance.html (Wanbetalers-tab). Hoofdnav-badge op Admin-link toont
+  PENDING-count; klik → /modules/admin.html#approval-queue. Zie
+  docs/payment-arrangements-d1-foundation.md voor architectuur + roadmap (D2-D6).
 - /modules/shared/agent-shared.js — cross-modulaire functies 
   (showToast, esc, formatMd, relTime, showReport, approval-helpers,
    getAvatarUrl, renderUserSection, initAuth)
@@ -479,3 +484,44 @@ lokale variant zonder landcode. Match alleen toepassen als er precies 1 hit is �
 ambiguïteit (2+ klanten met laatste 9 digits gelijk) is een unmatched-conversation
 case, geen "kies de eerste". Zie `api/inbox-conversation-context.js` regel 45-79
 (uit recente PR #132 fix).
+
+## Lessons Learned — D1 Payment Arrangements (9 juni 2026)
+
+Volledige documentatie: [`docs/payment-arrangements-d1-foundation.md`](docs/payment-arrangements-d1-foundation.md).
+
+### Lesson learned 19 — Dual-table pattern voor arrangement + pending_actions
+Voor approval-flows met **één semantische actie maar meerdere uitvoer-stappen**
+(bv. een `gespreid`-arrangement op 3 facturen → 3 TL-mutaties): splits in twee
+tabellen — `payment_arrangements` (1 rij = 1 voorstel met klant + invoice_ids[] +
+type + details jsonb) en `pending_actions` (N rijen = N uitvoer-stappen per
+arrangement, elk met eigen `action_type` + `payload` + `status`).
+
+Voordelen die we in D1 al concreet ervaren:
+1. **Approval blijft atomic per actie** — admin kan in de queue per regel
+   approve/reject (bv. wel uitstel op factuur A, niet op B), zonder dat een
+   gedeeltelijke approval het arrangement zelf in een wankele staat zet.
+2. **Executor flexibel per stap** — D2 executor leest `pending_actions` waar
+   `status='approved'`, voert TL-call uit per rij, en zet status individueel op
+   `executed` of `failed` met error-text in `execution_result` jsonb. Eén
+   gefaalde stap blokkeert de andere niet.
+3. **Audit-trail per stap** — `execution_result jsonb` per pending_action bevat
+   TL-IDs, timestamps, error-codes; geen aggregate-blob op arrangement-niveau
+   die je moet uitparseren.
+4. **Cancel-semantiek schoon** — `arrangements-cancel` zet zowel arrangement
+   `status='geannuleerd'` als alle bijbehorende pending_actions op `cancelled`.
+   Eén SQL UPDATE per tabel, geen complexe state-machine.
+
+Anti-pattern dat we hiermee vermijden: één tabel met `actions jsonb[]` of
+`sub_action_results jsonb` waarin je per element status moet bijhouden. Dat
+maakt selecties zoals "alle openstaande TL-stappen platform-breed" (D2 cron-
+executor) onmogelijk zonder volledige jsonb-scan.
+
+### Lesson learned 20 — Hoofdnav-badge met setInterval-cleanup
+Pattern voor sidebar-badge-polling (taken/tickets/approvals): bewaar
+`setInterval`-handle in module-scope `_xBadgeTimer`, **clear bij elke (her)mount
+vóór het opnieuw starten**, en clear ook op `beforeunload`. Voorkomt
+double-polling bij SPA-achtige flows en spaart API-calls bij snelle navigatie.
+Polling-interval 60s is veilige default voor approval-counts (real-time genoeg,
+ruim binnen Supabase Free-tier budget bij 5-10 actieve users). Permission-cache
+(`_approvalsBadgeAllowed`) zorgt dat we maar 1x `RBAC.ensurePermissionsLoaded()`
+hoeven na te slaan per page-load.

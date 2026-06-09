@@ -1322,6 +1322,16 @@ async function init() {
 
   // Toon TL-koppeling resultaat-banner na OAuth-redirect (en open de tab).
   handleTlReturnBanner();
+
+  // Hash-routing: bv. /modules/admin.html#approval-queue opent direct die tab.
+  // Wordt o.a. gebruikt door de hoofdnav approval-badge (D1 payment-arrangements)
+  // zodat een klik op de sidebar-badge je in de juiste tab dropt zonder eerst
+  // door Gebruikers heen te moeten klikken. Whitelist alleen bekende tabs.
+  try {
+    var hash = (location.hash || '').replace(/^#/, '');
+    var allowedHashes = ['approval-queue', 'whatsapp-templates', 'whatsapp-connection', 'integraties', 'rechten', 'gebruikers'];
+    if (hash && allowedHashes.indexOf(hash) !== -1) switchAdminTab(hash);
+  } catch (_) { /* fail-soft */ }
 }
 
 async function apiRequest(method, path, body) {
