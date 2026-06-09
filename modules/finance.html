@@ -3812,7 +3812,7 @@
 
     // Naam + phone + avatar.
     const phone = (cust && cust.phone) || (conv && conv.phone_number) || '';
-    const displayName = (cust && cust.name) ? cust.name : (phone || 'Onbekende klant');
+    const displayName = (cust && cust.name) ? cust.name : 'Onbekend contact';
     if (nameEl)  nameEl.textContent  = displayName;
     if (phoneEl) phoneEl.textContent = phone || '—';
     if (avatarEl) {
@@ -3872,14 +3872,23 @@
       }
     }
 
-    // Acties: bekijk-in-klanten en maak-factuur-aan deeplinks.
+    // Acties: bekijk-in-klanten / koppel-aan-klant + maak-factuur-aan deeplinks.
     if (openLnk) {
       if (cust && cust.id) {
         openLnk.href = '/modules/klanten.html?id=' + encodeURIComponent(cust.id);
+        openLnk.innerHTML = '<i class="ti ti-user"></i> Bekijk in klanten';
+        openLnk.classList.remove('dim');
+        openLnk.style.pointerEvents = '';
+      } else if (phone) {
+        // Onbekende klant maar wel een nummer: deeplink naar klanten-module om
+        // bestaande klant te zoeken / koppelen op telefoonnummer.
+        openLnk.href = '/modules/klanten.html?phone=' + encodeURIComponent(phone);
+        openLnk.innerHTML = '<i class="ti ti-link"></i> Koppel aan bestaande klant';
         openLnk.classList.remove('dim');
         openLnk.style.pointerEvents = '';
       } else {
         openLnk.href = '#';
+        openLnk.innerHTML = '<i class="ti ti-user"></i> Bekijk in klanten';
         openLnk.classList.add('dim');
         openLnk.style.pointerEvents = 'none';
       }

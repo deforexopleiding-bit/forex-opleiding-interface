@@ -39,16 +39,19 @@ const ONE_DAY_MS = 24 * 60 * 60 * 1000;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const MAX_OPEN_INVOICES = 25;
 
-// Strip alles behalve cijfers + leading '+'. Spiegelt inbox-webhook.js zodat de
-// fallback phone-lookup identiek matched aan hoe inkomende berichten gekoppeld
-// worden.
+// Strip alles behalve cijfers — geen '+' bewaren. Klant-telefoonnummers worden
+// soms met en soms zonder '+' opgeslagen ('+31655270212' vs '31655270212'),
+// dus we vergelijken puur op digits om die mismatch op te lossen.
 function normalizePhone(s) {
   if (!s) return '';
-  return String(s).replace(/[^\d+]/g, '');
+  return String(s).replace(/\D/g, '');
 }
 
-// Best-effort phone-match: alleen koppelen bij exact 1 hit. Over-fetch is
-// acceptabel voor < 5k klanten (gelijk aan inbox-webhook.js patroon).
+// Best-effort phone-match. Match-strategie (in volgorde):
+//   1) exact digits-match → koppel als precies 1 hit
+//   2) fallback laatste 9 digits (lokale variant zonder country-code)
+//      → koppel als precies 1 hit
+// Over-fetch is acceptabel voor < 5k klanten (gelijk aan inbox-webhook.js patroon).
 async function findCustomerIdByPhone(phone) {
   const target = normalizePhone(phone);
   if (!target) return null;
@@ -63,8 +66,16 @@ async function findCustomerIdByPhone(phone) {
       console.error('[inbox-conversation-context] phone-fetch fail:', error.message);
       return null;
     }
-    const matches = (data || []).filter(c => normalizePhone(c.phone) === target);
-    if (matches.length === 1) return matches[0].id;
+    const rows = (data || []).map(c => ({ id: c.id, digits: normalizePhone(c.phone) }))
+                              .filter(r => r.digits);
+    const exact = rows.filter(r => r.digits === target);
+    if (exact.length === 1) return exact[0].id;
+    // Fallback: laatste 9 digits (lokale variant zonder landcode).
+    if (target.length >= 9) {
+      const tail = target.slice(-9);
+      const tailMatches = rows.filter(r => r.digits.slice(-9) === tail);
+      if (tailMatches.length === 1) return tailMatches[0].id;
+    }
     return null;
   } catch (e) {
     console.error('[inbox-conversation-context] phone-match exception:', e && e.message);
