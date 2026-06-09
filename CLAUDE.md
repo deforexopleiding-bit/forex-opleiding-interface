@@ -74,6 +74,17 @@ Lokaal: C:/Users/jeffr/forex-opleiding-interface
 - /modules/control-center.html — Approvals + Audit log
 - /modules/admin.html — Gebruikersbeheer (ADMIN_ROLES: super_admin/admin/manager) +
   Approval-queue tab (#approval-queue) voor D-module payment-arrangements
+- /modules/taken.html — Centraal taken-dashboard (F1) voor alle handmatige
+  verificaties. Toont 2 task-categorieën uit `pending_actions`:
+  * `arrangement` — alle TL_* action_types uit D1 (TL_INVOICE_UPDATE_DUE,
+    TL_INVOICE_SPLIT, TL_SUBSCRIPTION_PAUSE, TL_SUBSCRIPTION_STOP,
+    TL_INVOICE_WRITEOFF)
+  * `verify_payment` — MANUAL_VERIFY_PAYMENT (klant claimt al betaald,
+    aangemaakt vanuit WhatsApp-inbox via tasks-create-verify-payment).
+    arrangement_id=NULL, dus mark-executed skipt de arrangement-cascade.
+  Endpoints: tasks-list / tasks-create-verify-payment. RBAC: finance.tasks.view
+  / finance.tasks.create met fallback naar finance.arrangements.view/propose.
+  Zie docs/tasks-f1-foundation.md voor roadmap F2-F4.
 - D-module (payment-arrangements) — DB-fundament + approval-queue + propose-wizard
   in /modules/finance.html (Wanbetalers-tab). Hoofdnav-badge op Admin-link toont
   PENDING-count; klik → /modules/admin.html#approval-queue. Zie
@@ -547,3 +558,38 @@ Sinds D1 polish (migratie `2026-06-09-payment-arrangements-d1-spec-naming.sql`):
   D2-executor herkent acties via die prefix.
 - Lowercase legacy waarden worden in `arrangements-list` + `arrangements-propose`
   geaccepteerd als alias voor backward-compat (oude bookmarks / agents).
+
+## Lessons Learned — F1 Taken-foundation (9 juni 2026)
+
+Volledige documentatie: [`docs/tasks-f1-foundation.md`](docs/tasks-f1-foundation.md).
+
+### Lesson learned 21 — Centraal taken-dashboard via tasks-list met joins
+Voor een centraal taken-bakje dat meerdere actie-categorieën dekt (D1 TL_-
+arrangements + F1 MANUAL_VERIFY_PAYMENT + later F2-F4 MANUAL_PROPOSE/
+ESCALATION/FOLLOWUP), bouw één **`tasks-list` endpoint** met embedded joins
+op `customers + payment_arrangements + invoices` in plaats van een aparte
+UI-tab per type. Voordelen die we in F1 al concreet zien:
+
+1. **Flexibele filtering zonder UI-duplicatie** — `category` + `action_type`
+   + `status` + `customer_id` + `invoice_id` + `search` zijn allemaal
+   query-params op één endpoint. Frontend hoeft maar één tabel-component te
+   onderhouden; nieuwe action_types verschijnen automatisch zodra ze in
+   `pending_actions` staan.
+2. **Counts per status én per category in één call** — `counts.byStatus`
+   en `counts.byCategory` worden parallel berekend en mee-geserialiseerd.
+   Pill-badges in de UI tonen real-time aantallen zonder extra round-trips.
+3. **Joins één plek** — `customer.name` (via `customerDisplayName`) en
+   `invoice.invoice_number` worden server-side opgelost. F2-F4 nieuwe types
+   krijgen die joins gratis mee zodra ze in dezelfde tabel landen.
+4. **first-class `invoice_id` FK** boven jsonb-payload-only — F1 verplaatste
+   `invoice_id` naar een eigen kolom op `pending_actions`. Daarmee zijn
+   queries als "alle open verify-taken voor factuur X" direct indexeerbaar
+   zonder jsonb-scan.
+
+Anti-pattern dat we hiermee vermijden: een aparte `verify_payments`-tabel
+of `escalations`-tabel per actie-type. Dat zou per type een nieuwe
+list/detail/approve/reject endpoint vereisen en de UI dwingen om N tabbladen
+te onderhouden met grotendeels overlappende kolommen. Eén tabel +
+`action_type` discriminator + helper-prefix (`TL_` vs `MANUAL_`) is de
+elegantere route, vooral omdat de mark-executed cascade automatisch goed
+gaat zodra `arrangement_id` NULL is voor standalone taken.
