@@ -4020,39 +4020,51 @@ function approvFmtEur(v) {
 }
 
 // Specifieke renderer voor TL_INVOICE_CONSOLIDATE_AND_RESTART payloads.
-// Verwacht (best-effort) payload-shape:
+// Canonical payload-shape (uit arrangements-propose.js UITSTEL-branch):
 //   {
-//     credit_invoices: [{ invoice_id, invoice_number, amount }],
-//     credit_total,
-//     new_subscription: { installments, amount_per_installment_excl_vat,
-//                          total_excl_vat, total_incl_vat,
-//                          starts_on, ends_on, description },
-//     vat_distribution: [{ rate, amount_per_installment }],
-//     ...
+//     credit_invoice_ids: [uuid, ...],
+//     subscription_config: {
+//       term_count: int,
+//       amount_per_invoice_excl_vat: number,
+//       starts_on: 'YYYY-MM-DD',
+//       ends_on:   'YYYY-MM-DD',
+//       vat_distribution: [{ vat_rate: int, total_amount_excl_vat: number }],
+//       billing_cycle: { unit: 'month', period: 1 }
+//     },
+//     source: 'manual',
+//     rationale: string
 //   }
-// Verschillende key-namen worden tolerant gelezen (best-effort) zodat we
-// niet op één spec-variant vastzitten.
-function renderConsolidateActionDetail(payload) {
-  const p = payload || {};
-  const ns = p.new_subscription || p.subscription || {};
-  // Credit-facturen
-  let creditList = Array.isArray(p.credit_invoices) ? p.credit_invoices : null;
-  if (!creditList && Array.isArray(p.invoices_to_credit)) creditList = p.invoices_to_credit;
-  if (!creditList && Array.isArray(p.invoice_ids)) {
-    creditList = p.invoice_ids.map(id => ({ invoice_id: id }));
-  }
-  creditList = creditList || [];
-  const creditTotal = (p.credit_total != null) ? Number(p.credit_total)
-                    : (p.total_to_credit != null) ? Number(p.total_to_credit)
-                    : creditList.reduce((s, x) => s + (Number(x.amount) || 0), 0);
+// Optionele invoices-array (uit pending-actions-detail response) bevat
+// { id, invoice_number, amount_total } per credit_invoice_id voor leesbare
+// labels. Zonder die array vallen we terug op truncated uuid.
+function renderConsolidateActionDetail(payload, invoices) {
+  const p   = payload || {};
+  const cfg = p.subscription_config || {};
+  const invByIdLocal = {};
+  (Array.isArray(invoices) ? invoices : []).forEach(inv => {
+    if (inv && inv.id) invByIdLocal[inv.id] = inv;
+  });
+
+  // Credit-facturen: payload bevat credit_invoice_ids[] (uuids). Lookup
+  // invoice_number + amount_total via meegestuurde invoices-array.
+  const creditIds = Array.isArray(p.credit_invoice_ids) ? p.credit_invoice_ids : [];
+  const creditList = creditIds.map(id => {
+    const inv = invByIdLocal[id] || null;
+    return {
+      invoice_id:     id,
+      invoice_number: inv?.invoice_number || null,
+      amount:         inv ? Number(inv.amount_total || 0) : null,
+    };
+  });
+  const creditTotal = creditList.reduce((s, x) => s + (Number(x.amount) || 0), 0);
   const creditCount = creditList.length;
 
   const creditRowsHtml = creditList.length
     ? creditList.map(ci => {
         const label = ci.invoice_number
           ? esc(ci.invoice_number)
-          : (ci.invoice_id ? 'invoice ' + esc(String(ci.invoice_id).slice(0, 8)) : '(onbekend)');
-        const amount = (ci.amount != null) ? approvFmtEur(ci.amount) : '';
+          : 'invoice ' + esc(String(ci.invoice_id).slice(0, 8));
+        const amount = (ci.amount != null && ci.amount > 0) ? approvFmtEur(ci.amount) : '';
         return `<li style="font-size:12px;color:var(--text-dim);margin:2px 0">
                   <strong style="color:var(--text-primary,#e5e7eb)">${label}</strong>
                   ${amount ? `<span style="color:var(--text-faint);margin-left:8px">${esc(amount)}</span>` : ''}
@@ -4060,31 +4072,34 @@ function renderConsolidateActionDetail(payload) {
       }).join('')
     : '<li style="font-size:12px;color:var(--text-faint)">(geen factuur-details in payload)</li>';
 
-  // Nieuwe subscription
-  const installments = ns.installments || ns.termijnen || p.installments || null;
-  const perInstExcl  = ns.amount_per_installment_excl_vat
-                    ?? ns.amount_per_installment
-                    ?? ns.amount_per_termijn
-                    ?? p.amount_per_installment
-                    ?? null;
-  const totalExcl    = ns.total_excl_vat ?? ns.total_excl ?? p.total_excl_vat ?? null;
-  const totalIncl    = ns.total_incl_vat ?? ns.total_incl ?? ns.total ?? p.total_incl_vat ?? null;
-  const startsOn     = ns.starts_on || ns.start_date || p.starts_on || null;
-  const endsOn       = ns.ends_on   || ns.end_date   || p.ends_on   || null;
-  const description  = ns.description || ns.label || p.description || '';
+  // Nieuwe subscription — config-keys uit propose-endpoint.
+  const installments = cfg.term_count != null ? Number(cfg.term_count) : null;
+  const perInstExcl  = cfg.amount_per_invoice_excl_vat != null
+    ? Number(cfg.amount_per_invoice_excl_vat)
+    : null;
+  const startsOn     = cfg.starts_on || null;
+  const endsOn       = cfg.ends_on   || null;
+  // Totaal nieuwe contract excl btw: termijn-bedrag * aantal termijnen
+  // (eenvoudige indicatie; per_rate_termijnen zit in arrangement.details).
+  const totalExcl = (installments != null && perInstExcl != null)
+    ? Math.round(installments * perInstExcl * 100) / 100
+    : null;
 
-  // BTW-verdeling
-  const vatDist = Array.isArray(p.vat_distribution) ? p.vat_distribution
-                : Array.isArray(ns.vat_distribution) ? ns.vat_distribution
-                : Array.isArray(p.tax_rates) ? p.tax_rates
-                : [];
+  // BTW-verdeling — server stuurt buildVatDistribution shape:
+  // [{ vat_rate: int, total_amount_excl_vat: number }]. Per termijn = totaal / N.
+  const vatDist = Array.isArray(cfg.vat_distribution) ? cfg.vat_distribution : [];
   const vatRowsHtml = vatDist.length
     ? vatDist.map(v => {
-        const rate = v.rate ?? v.percentage ?? v.percent ?? '—';
-        const amt  = v.amount_per_installment ?? v.amount ?? v.per_installment ?? null;
+        const rate = v.vat_rate != null ? v.vat_rate : '—';
+        const totalForRate = v.total_amount_excl_vat != null
+          ? Number(v.total_amount_excl_vat)
+          : null;
+        const perTermijn = (totalForRate != null && installments && installments > 0)
+          ? Math.round((totalForRate / installments) * 100) / 100
+          : null;
         return `<li style="font-size:12px;color:var(--text-dim);margin:2px 0">
                   <strong style="color:var(--text-primary,#e5e7eb)">${esc(String(rate))}% BTW</strong>
-                  ${amt != null ? `<span style="color:var(--text-faint);margin-left:8px">${esc(approvFmtEur(amt))}</span> <span style="color:var(--text-faint);font-size:11px">per termijn</span>` : ''}
+                  ${perTermijn != null ? `<span style="color:var(--text-faint);margin-left:8px">${esc(approvFmtEur(perTermijn))}</span> <span style="color:var(--text-faint);font-size:11px">per termijn (excl btw)</span>` : ''}
                 </li>`;
       }).join('')
     : '<li style="font-size:12px;color:var(--text-faint)">(geen btw-verdeling in payload)</li>';
@@ -4093,15 +4108,13 @@ function renderConsolidateActionDetail(payload) {
     ? `<strong>${esc(String(installments))}</strong> termijnen van <strong>${esc(approvFmtEur(perInstExcl))}</strong> per termijn <span style="color:var(--text-faint)">(excl btw)</span>`
     : (installments ? `<strong>${esc(String(installments))}</strong> termijnen` : '(termijn-info ontbreekt)');
 
-  const totalLine = (totalIncl != null)
-    ? `Totaal nieuwe contract: <strong>${esc(approvFmtEur(totalIncl))}</strong> <span style="color:var(--text-faint);font-size:11px">incl btw</span>`
-    : (totalExcl != null
-        ? `Totaal nieuwe contract: <strong>${esc(approvFmtEur(totalExcl))}</strong> <span style="color:var(--text-faint);font-size:11px">excl btw</span>`
-        : 'Totaal nieuwe contract: <span style="color:var(--text-faint)">—</span>');
+  const totalLine = (totalExcl != null)
+    ? `Totaal nieuwe contract: <strong>${esc(approvFmtEur(totalExcl))}</strong> <span style="color:var(--text-faint);font-size:11px">excl btw</span>`
+    : 'Totaal nieuwe contract: <span style="color:var(--text-faint)">—</span>';
 
   const startLine = `Eerste vervaldatum: <strong>${esc(startsOn ? approvFmtDateOnly(startsOn) : '—')}</strong>`;
   const endLine   = `Laatste vervaldatum: <strong>${esc(endsOn ? approvFmtDateOnly(endsOn) : '—')}</strong>`;
-  const descLine  = description ? `<div style="font-size:11.5px;color:var(--text-faint);margin-top:4px">Omschrijving: ${esc(description)}</div>` : '';
+  const descLine  = '';
 
   return `
     <div class="approv-detail-section-title">Consolidatie + nieuwe regeling</div>
@@ -4179,9 +4192,11 @@ function renderApprovDetail(d) {
   if (!auditHtml) auditHtml = '<div style="color:var(--text-faint)">(nog geen audit-events)</div>';
 
   // Speciale render-blok voor TL_INVOICE_CONSOLIDATE_AND_RESTART; andere
-  // action_types vallen terug op de standaard payload-pre.
+  // action_types vallen terug op de standaard payload-pre. Invoices uit
+  // pending-actions-detail response worden meegestuurd voor invoice_number
+  // lookup op credit_invoice_ids (uuids alleen in payload).
   const consolidateBlock = (it.action_type === 'TL_INVOICE_CONSOLIDATE_AND_RESTART')
-    ? renderConsolidateActionDetail(it.payload || {})
+    ? renderConsolidateActionDetail(it.payload || {}, Array.isArray(d.invoices) ? d.invoices : [])
     : '';
 
   // Execution-result render: voor EXECUTED toon TL-IDs + manual_notes; voor

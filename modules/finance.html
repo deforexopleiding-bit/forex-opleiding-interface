@@ -3844,31 +3844,58 @@
   }
 
   // Render een samenvatting van een TL_INVOICE_CONSOLIDATE_AND_RESTART
-  // pending_action: termijn-config, btw-mix, timeline. Best-effort op
-  // verschillende payload-key varianten.
-  function renderArrangConsolidateSummary(pa) {
-    const p = (pa && pa.payload) || {};
-    const ns = p.new_subscription || p.subscription || {};
-    const installments = ns.installments || ns.termijnen || p.installments || null;
-    const perInstExcl  = ns.amount_per_installment_excl_vat
-                      ?? ns.amount_per_installment
-                      ?? ns.amount_per_termijn
-                      ?? p.amount_per_installment
-                      ?? null;
-    const totalExcl    = ns.total_excl_vat ?? ns.total_excl ?? p.total_excl_vat ?? null;
-    const totalIncl    = ns.total_incl_vat ?? ns.total_incl ?? ns.total ?? p.total_incl_vat ?? null;
-    const startsOn     = ns.starts_on || ns.start_date || p.starts_on || null;
-    const endsOn       = ns.ends_on   || ns.end_date   || p.ends_on   || null;
+  // pending_action. Canonical payload-shape (arrangements-propose.js):
+  //   { credit_invoice_ids: uuid[], subscription_config: { term_count,
+  //     amount_per_invoice_excl_vat, starts_on, ends_on,
+  //     vat_distribution: [{ vat_rate, total_amount_excl_vat }], billing_cycle },
+  //     source, rationale }
+  // `invoices` (uit arrangements-detail response) levert invoice_number lookup.
+  function renderArrangConsolidateSummary(pa, invoices) {
+    const p   = (pa && pa.payload) || {};
+    const cfg = p.subscription_config || {};
+    const invByIdLocal = {};
+    (Array.isArray(invoices) ? invoices : []).forEach(inv => {
+      if (inv && inv.id) invByIdLocal[inv.id] = inv;
+    });
 
-    const vatDist = Array.isArray(p.vat_distribution) ? p.vat_distribution
-                  : Array.isArray(ns.vat_distribution) ? ns.vat_distribution
-                  : Array.isArray(p.tax_rates) ? p.tax_rates
-                  : [];
+    const installments = cfg.term_count != null ? Number(cfg.term_count) : null;
+    const perInstExcl  = cfg.amount_per_invoice_excl_vat != null
+      ? Number(cfg.amount_per_invoice_excl_vat)
+      : null;
+    const startsOn     = cfg.starts_on || null;
+    const endsOn       = cfg.ends_on   || null;
+    const totalExcl    = (installments != null && perInstExcl != null)
+      ? Math.round(installments * perInstExcl * 100) / 100
+      : null;
+
+    // Credit-facturen lijst.
+    const creditIds = Array.isArray(p.credit_invoice_ids) ? p.credit_invoice_ids : [];
+    const creditRowsHtml = creditIds.length
+      ? creditIds.map(id => {
+          const inv = invByIdLocal[id] || null;
+          const label = inv?.invoice_number
+            ? esc(inv.invoice_number)
+            : 'invoice ' + esc(String(id).slice(0, 8));
+          const amount = inv?.amount_total != null
+            ? ` <span style="color:var(--text-faint);margin-left:6px">${esc(fmtEur2Finance(inv.amount_total))}</span>`
+            : '';
+          return `<li style="font-size:12px;color:var(--text-dim)"><strong>${label}</strong>${amount}</li>`;
+        }).join('')
+      : '<li style="font-size:12px;color:var(--text-faint)">(geen facturen in payload)</li>';
+
+    // BTW-verdeling: buildVatDistribution shape = { vat_rate, total_amount_excl_vat }.
+    // Per termijn = totaal / N.
+    const vatDist = Array.isArray(cfg.vat_distribution) ? cfg.vat_distribution : [];
     const vatLine = vatDist.length
       ? vatDist.map(v => {
-          const rate = v.rate ?? v.percentage ?? v.percent ?? '—';
-          const amt  = v.amount_per_installment ?? v.amount ?? v.per_installment ?? null;
-          return `<li style="font-size:12px;color:var(--text-dim)"><strong>${esc(String(rate))}% BTW</strong>${amt != null ? ` <span style="color:var(--text-faint);margin-left:6px">${esc(fmtEur2Finance(amt))}</span> <span style="color:var(--text-faint);font-size:11px">per termijn</span>` : ''}</li>`;
+          const rate = v.vat_rate != null ? v.vat_rate : '—';
+          const totalForRate = v.total_amount_excl_vat != null
+            ? Number(v.total_amount_excl_vat)
+            : null;
+          const perTermijn = (totalForRate != null && installments && installments > 0)
+            ? Math.round((totalForRate / installments) * 100) / 100
+            : null;
+          return `<li style="font-size:12px;color:var(--text-dim)"><strong>${esc(String(rate))}% BTW</strong>${perTermijn != null ? ` <span style="color:var(--text-faint);margin-left:6px">${esc(fmtEur2Finance(perTermijn))}</span> <span style="color:var(--text-faint);font-size:11px">per termijn (excl btw)</span>` : ''}</li>`;
         }).join('')
       : '<li style="font-size:12px;color:var(--text-faint)">(geen btw-verdeling in payload)</li>';
 
@@ -3876,15 +3903,15 @@
       ? `<strong>${esc(String(installments))}</strong> termijnen × <strong>${esc(fmtEur2Finance(perInstExcl))}</strong> <span style="color:var(--text-faint);font-size:11px">excl btw</span>`
       : (installments ? `<strong>${esc(String(installments))}</strong> termijnen` : '<span style="color:var(--text-faint)">termijn-info ontbreekt</span>');
 
-    const totalLine = (totalIncl != null)
-      ? `<strong>${esc(fmtEur2Finance(totalIncl))}</strong> <span style="color:var(--text-faint);font-size:11px">incl btw</span>`
-      : (totalExcl != null
-          ? `<strong>${esc(fmtEur2Finance(totalExcl))}</strong> <span style="color:var(--text-faint);font-size:11px">excl btw</span>`
-          : '<span style="color:var(--text-faint)">—</span>');
+    const totalLine = (totalExcl != null)
+      ? `<strong>${esc(fmtEur2Finance(totalExcl))}</strong> <span style="color:var(--text-faint);font-size:11px">excl btw</span>`
+      : '<span style="color:var(--text-faint)">—</span>';
 
     return `
       <div style="margin-top:10px;padding:10px 12px;background:rgba(56,189,248,0.06);border:1px solid rgba(56,189,248,0.25);border-radius:8px">
         <div style="font-size:11.5px;color:var(--text-faint);margin-bottom:6px">Consolidatie + nieuwe regeling</div>
+        <div style="font-size:11.5px;color:var(--text-faint);margin-bottom:2px">Te crediteren facturen (${creditIds.length})</div>
+        <ul style="margin:0 0 8px 0;padding-left:20px;list-style:disc">${creditRowsHtml}</ul>
         <div style="display:grid;grid-template-columns:160px 1fr;gap:6px 10px;font-size:12.5px">
           <div style="color:var(--text-faint)">Termijn-configuratie</div><div>${subLine}</div>
           <div style="color:var(--text-faint)">Totaal nieuwe contract</div><div>${totalLine}</div>
@@ -4074,7 +4101,7 @@
         ? pa[0]
         : null;
       const consolidateSummaryHtml = consolidatePa
-        ? renderArrangConsolidateSummary(consolidatePa)
+        ? renderArrangConsolidateSummary(consolidatePa, Array.isArray(d.invoices) ? d.invoices : [])
         : '';
 
       if (sec1El) sec1El.innerHTML = rowsHtml + consolidateSummaryHtml + detailsBlock;
