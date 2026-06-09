@@ -15,6 +15,13 @@
 // beslissen of arrangement geannuleerd moet worden (via arrangements-cancel)
 // of dat een nieuwe pending_action voorgesteld wordt (via arrangements-propose).
 //
+// F1: MANUAL_VERIFY_PAYMENT (klant-claimt-betaald uit Inbox) gebruikt FAILED
+// voor "kon claim niet bevestigen / onduidelijk" — bv. ambigue bank-match,
+// onverwacht bedrag, nog niet zichtbaar in CAMT na X dagen. De drie
+// "wel-uitgevoerde" outcomes (confirmed_paid / not_found_in_bank /
+// klant_misvatting) lopen via mark-executed. Geen arrangement-cascade nodig
+// — MANUAL_VERIFY_PAYMENT heeft arrangement_id=NULL.
+//
 // NB: schema-kolomnamen in deployed DB (pending_actions):
 //   - status               UPPERCASE enum (PENDING/APPROVED/EXECUTED/FAILED/REJECTED/CANCELLED)
 //   - execution_result     jsonb  (failure_reason wordt hier opgeslagen)
