@@ -1085,6 +1085,7 @@
               <div class="inbox-c-actions-list">
                 <a class="sr-abtn" id="inboxCustPanelOpen" href="#" target="_blank" rel="noopener" style="font-size:12.5px"><i class="ti ti-user"></i> Bekijk in klanten</a>
                 <a class="sr-abtn" id="inboxCustPanelInvoice" href="#" target="_blank" rel="noopener" style="font-size:12.5px"><i class="ti ti-file-invoice"></i> Maak factuur aan</a>
+                <button class="sr-abtn secondary" id="inboxClaimPaidBtn" type="button" style="font-size:12.5px" disabled title="Eerst klant koppelen"><i class="ti ti-cash-check"></i> Klant claimt betaald</button>
               </div>
             </div>
           </div>
@@ -2218,6 +2219,33 @@
     <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:18px">
       <button class="sr-abtn" id="payCancel" type="button">Annuleren</button>
       <button class="sr-abtn success" id="paySubmit" type="button"><i class="ti ti-cash"></i> Registreren</button>
+    </div>
+  </div>
+</div>
+
+<!-- Klant claimt betaald modal (F1 — verify-payment task vanuit inbox) -->
+<div class="modal-overlay hidden" id="claimPaidModal" role="dialog" aria-modal="true">
+  <div class="modal-card" style="max-width:540px">
+    <h3 style="margin:0 0 6px">Klant claimt betaald</h3>
+    <div id="claimPaidSub" class="sr-cellsub" style="margin-bottom:12px">—</div>
+    <div style="display:flex;flex-direction:column;gap:10px">
+      <label style="font-size:12.5px">Factuur
+        <select id="claimPaidInvoiceSelect" class="fin-input" style="width:100%;margin-top:4px"></select>
+      </label>
+      <label style="font-size:12.5px">Geclaimd bedrag (€)
+        <input id="claimPaidAmount" type="number" step="0.01" min="0" class="fin-input" style="width:100%;margin-top:4px"/>
+      </label>
+      <label style="font-size:12.5px">Claim-tekst (klant-bericht)
+        <textarea id="claimPaidText" rows="4" class="fin-input" style="width:100%;margin-top:4px;resize:vertical;font-family:inherit" placeholder="Letterlijke quote van de klant (min. 10 tekens)"></textarea>
+      </label>
+      <div style="font-size:11.5px;color:var(--text-faint);font-style:italic;line-height:1.45">
+        Submit creëert een verify-payment task. Jeffrey gaat de claim handmatig checken in CAMT.053.
+      </div>
+    </div>
+    <div id="claimPaidErr" style="color:#ef4444;font-size:12px;margin-top:8px"></div>
+    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:18px">
+      <button class="sr-abtn" id="claimPaidCancel" type="button">Annuleren</button>
+      <button class="sr-abtn primary" id="claimPaidSubmit" type="button"><i class="ti ti-send"></i> Verstuur</button>
     </div>
   </div>
 </div>
@@ -5384,6 +5412,7 @@
   let _inboxConvCanSendText  = false;
   let _inboxWiredOnce        = false;
   let _inboxActiveConv       = null;  // hele conversation-object van laatst-geladen thread
+  let _inboxCustomerContext  = null;  // laatste /api/inbox-conversation-context response (F1: voor Klant claimt betaald)
 
   // ── Template-picker state (C3 + C4) ──
   let _inboxTplItems    = [];     // APPROVED templates voor afzendlijn
@@ -5970,6 +5999,7 @@
     if (!emptyEl || !contentEl) return;
 
     if (!conversationId) {
+      _inboxCustomerContext = null;
       renderInboxCustomerPanel('empty', null);
       return;
     }
@@ -5984,14 +6014,17 @@
       if (!r.ok) {
         console.error('[loadInboxCustomerContext]', r.status, d && d.error);
         // Fail-soft: behandel als 'unknown' state — geen klant data beschikbaar.
+        _inboxCustomerContext = null;
         renderInboxCustomerPanel('unknown', { conversation: null, customer: null, open_invoices: [], totals: { open_amount: 0, invoice_count: 0 } });
         return;
       }
       const data = d || {};
+      _inboxCustomerContext = data;
       const state = data.customer && data.customer.id ? 'matched' : 'unknown';
       renderInboxCustomerPanel(state, data);
     } catch (e) {
       console.error('[loadInboxCustomerContext] exception:', e && e.message);
+      _inboxCustomerContext = null;
       renderInboxCustomerPanel('unknown', { conversation: null, customer: null, open_invoices: [], totals: { open_amount: 0, invoice_count: 0 } });
     }
   }
@@ -6038,6 +6071,7 @@
     const emailEl  = document.getElementById('inboxCustPanelEmail');
     const openLnk  = document.getElementById('inboxCustPanelOpen');
     const invLnk   = document.getElementById('inboxCustPanelInvoice');
+    const claimBtn = document.getElementById('inboxClaimPaidBtn');
     const infoSec  = document.getElementById('inboxCustPanelInfoSection');
 
     // Naam + phone + avatar — gedeeld tussen matched en unknown.
@@ -6124,6 +6158,21 @@
           invLnk.style.pointerEvents = '';
         }
       }
+      // F1: Klant claimt betaald — enabled bij matched klant met >=1 open factuur.
+      if (claimBtn) {
+        const hasOpen = invs.length > 0;
+        if (cust && cust.id && hasOpen) {
+          claimBtn.disabled = false;
+          claimBtn.classList.remove('dim');
+          claimBtn.style.pointerEvents = '';
+          claimBtn.title = 'Maak verify-payment task aan';
+        } else {
+          claimBtn.disabled = true;
+          claimBtn.classList.add('dim');
+          claimBtn.style.pointerEvents = 'none';
+          claimBtn.title = hasOpen ? 'Eerst klant koppelen' : 'Geen open factuur om te claimen';
+        }
+      }
     } else {
       // state === 'unknown'
       // Geen facturen-sectie tonen — we hebben geen klant om facturen aan te
@@ -6150,6 +6199,13 @@
         invLnk.href = '#';
         invLnk.classList.add('dim');
         invLnk.style.pointerEvents = 'none';
+      }
+      // F1: zonder gekoppelde klant geen claim-paid mogelijk.
+      if (claimBtn) {
+        claimBtn.disabled = true;
+        claimBtn.classList.add('dim');
+        claimBtn.style.pointerEvents = 'none';
+        claimBtn.title = 'Eerst klant koppelen';
       }
     }
   }
@@ -7423,6 +7479,147 @@
       load();
     } catch (e) { errEl.textContent = 'Mislukt: ' + e.message; }
     finally { busyRelease('pay'); btn.disabled = false; btn.innerHTML = orig; }
+  }
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // F1: Klant claimt betaald — verify-payment task aanmaken vanuit inbox.
+  // ──────────────────────────────────────────────────────────────────────────
+  // Bron-data: _inboxCustomerContext (laatste /api/inbox-conversation-context
+  // response). open_invoices is server-side gesorteerd op due_date ASC, dus
+  // open_invoices[0] is automatisch de oudste — ideale default-pre-select.
+  // Klant-tekst wordt auto-gevuld met body van laatste inbound bericht uit
+  // _inboxMessages (direction !== 'out').
+  function openClaimPaidModal() {
+    const ctx = _inboxCustomerContext;
+    if (!ctx || !ctx.customer || !ctx.customer.id) {
+      window.AgentShared?.showToast('Eerst klant koppelen aan dit gesprek', 'error');
+      return;
+    }
+    const invs = Array.isArray(ctx.open_invoices) ? ctx.open_invoices : [];
+    if (!invs.length) {
+      window.AgentShared?.showToast('Geen open facturen om te claimen', 'error');
+      return;
+    }
+    // Subtitle: klant + telefoon.
+    const phone = (ctx.customer.phone) || (ctx.conversation && ctx.conversation.phone_number) || '';
+    document.getElementById('claimPaidSub').textContent =
+      (ctx.customer.name || 'Klant') + (phone ? ' · ' + phone : '');
+
+    // Factuur-dropdown vullen (oudste eerst, server-side gesorteerd).
+    const sel = document.getElementById('claimPaidInvoiceSelect');
+    sel.innerHTML = invs.map(inv => {
+      const nr = inv.invoice_number || ('#' + String(inv.id || '').slice(0, 6));
+      const amt = _inboxFmtEur(inv.amount_open);
+      const dueTxt = inv.due_date ? (' · vervalt ' + _inboxFmtDateNL(inv.due_date)) : '';
+      return '<option value="' + esc(String(inv.id)) + '" data-amount="' + esc(String(inv.amount_open || 0)) + '">'
+        + esc(nr + ' · ' + amt + dueTxt) + '</option>';
+    }).join('');
+    // Default: oudste = eerste item.
+    sel.selectedIndex = 0;
+    const defaultAmount = Number(invs[0].amount_open) || 0;
+    document.getElementById('claimPaidAmount').value = defaultAmount.toFixed(2);
+
+    // Auto-vul claim-tekst: laatste inbound bericht uit _inboxMessages.
+    let claimText = '';
+    try {
+      const msgs = Array.isArray(_inboxMessages) ? _inboxMessages : [];
+      for (let i = msgs.length - 1; i >= 0; i--) {
+        const m = msgs[i];
+        if (m && m.direction !== 'out' && m.body) {
+          claimText = String(m.body).trim();
+          break;
+        }
+      }
+    } catch (_) { /* fail-soft */ }
+    document.getElementById('claimPaidText').value = claimText;
+
+    document.getElementById('claimPaidErr').textContent = '';
+    document.getElementById('claimPaidModal').classList.remove('hidden');
+
+    // Update amount default bij wisselen van factuur (eenmalig wiring via flag).
+    if (!sel.dataset.wired) {
+      sel.addEventListener('change', () => {
+        const opt = sel.options[sel.selectedIndex];
+        if (!opt) return;
+        const amt = Number(opt.getAttribute('data-amount')) || 0;
+        document.getElementById('claimPaidAmount').value = amt.toFixed(2);
+      });
+      sel.dataset.wired = '1';
+    }
+  }
+
+  async function submitClaimPaid() {
+    if (!busyGuard('claimPaid')) return;
+    const errEl = document.getElementById('claimPaidErr');
+    errEl.textContent = '';
+    const ctx = _inboxCustomerContext;
+    const sel = document.getElementById('claimPaidInvoiceSelect');
+    const invoiceId = sel ? sel.value : '';
+    const amount = Number(document.getElementById('claimPaidAmount').value);
+    const claimText = String(document.getElementById('claimPaidText').value || '').trim();
+
+    if (!ctx || !ctx.customer || !ctx.customer.id) {
+      errEl.textContent = 'Geen gekoppelde klant.';
+      busyRelease('claimPaid');
+      return;
+    }
+    if (!invoiceId) {
+      errEl.textContent = 'Selecteer een factuur.';
+      busyRelease('claimPaid');
+      return;
+    }
+    if (!(amount > 0)) {
+      errEl.textContent = 'Bedrag moet > 0 zijn.';
+      busyRelease('claimPaid');
+      return;
+    }
+    if (claimText.length < 10) {
+      errEl.textContent = 'Claim-tekst moet minimaal 10 tekens bevatten.';
+      busyRelease('claimPaid');
+      return;
+    }
+
+    // Laatste inbound message-id meesturen voor audit (best-effort).
+    let klantMessageId = null;
+    try {
+      const msgs = Array.isArray(_inboxMessages) ? _inboxMessages : [];
+      for (let i = msgs.length - 1; i >= 0; i--) {
+        const m = msgs[i];
+        if (m && m.direction !== 'out') {
+          klantMessageId = m.id != null ? String(m.id) : null;
+          break;
+        }
+      }
+    } catch (_) { /* fail-soft */ }
+
+    const btn = document.getElementById('claimPaidSubmit');
+    btn.disabled = true;
+    const orig = btn.innerHTML;
+    btn.innerHTML = '<i class="ti ti-loader"></i> Bezig…';
+    try {
+      const body = {
+        invoice_id: invoiceId,
+        customer_id: ctx.customer.id,
+        claimed_amount: amount,
+        claim_text: claimText,
+      };
+      if (klantMessageId) body.klant_message_id = klantMessageId;
+      const r = await window.AgentShared.apiFetch('/api/tasks-create-verify-payment', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.error || ('HTTP ' + r.status));
+      window.AgentShared?.showToast('Verify-payment task aangemaakt', 'success');
+      document.getElementById('claimPaidModal').classList.add('hidden');
+    } catch (e) {
+      errEl.textContent = 'Mislukt: ' + (e && e.message ? e.message : 'onbekende fout');
+    } finally {
+      busyRelease('claimPaid');
+      btn.disabled = false;
+      btn.innerHTML = orig;
+    }
   }
 
   // ── DEEL A: Verzenden (PIVOT: TL mail-template) ──
@@ -8801,6 +8998,17 @@
       document.getElementById('payCancel').addEventListener('click', () => payModal.classList.add('hidden'));
       document.getElementById('paySubmit').addEventListener('click', submitPay);
       payModal.addEventListener('click', (e) => { if (e.target === payModal) payModal.classList.add('hidden'); });
+      // F1: Klant claimt betaald — button + modal sluiten + submit + click-outside.
+      const claimBtn = document.getElementById('inboxClaimPaidBtn');
+      if (claimBtn) claimBtn.addEventListener('click', (e) => { e.preventDefault(); if (claimBtn.disabled) return; openClaimPaidModal(); });
+      const claimModal = document.getElementById('claimPaidModal');
+      if (claimModal) {
+        const claimCancel = document.getElementById('claimPaidCancel');
+        if (claimCancel) claimCancel.addEventListener('click', () => claimModal.classList.add('hidden'));
+        const claimSubmit = document.getElementById('claimPaidSubmit');
+        if (claimSubmit) claimSubmit.addEventListener('click', submitClaimPaid);
+        claimModal.addEventListener('click', (e) => { if (e.target === claimModal) claimModal.classList.add('hidden'); });
+      }
       // 2C-modals wiring (send/credit/update/new).
       const wire = (id, btn, ok) => { const m = document.getElementById(id); document.getElementById(btn).addEventListener('click', () => m.classList.add('hidden')); m.addEventListener('click', (e) => { if (e.target === m) m.classList.add('hidden'); }); if (ok) document.getElementById(ok).addEventListener('click', () => {}); };
       wire('sendModal', 'sendCancel'); document.getElementById('sendOk').addEventListener('click', submitSend);
@@ -8827,7 +9035,7 @@
       document.getElementById('newCustCreateCancel').addEventListener('click', () => document.getElementById('newCustCreateModal').classList.add('hidden'));
       document.getElementById('newCustCreateOk').addEventListener('click', submitNewCustCreate);
       document.getElementById('newCustCreateModal').addEventListener('click', (e) => { if (e.target.id === 'newCustCreateModal') document.getElementById('newCustCreateModal').classList.add('hidden'); });
-      document.addEventListener('keydown', (e) => { if (e.key === 'Escape') { ['invModal', 'payModal', 'sendModal', 'creditModal', 'updModal', 'newInvModal', 'newCustCreateModal', 'bankTxModal'].forEach(id => document.getElementById(id)?.classList.add('hidden')); } }, true);
+      document.addEventListener('keydown', (e) => { if (e.key === 'Escape') { ['invModal', 'payModal', 'sendModal', 'creditModal', 'updModal', 'newInvModal', 'newCustCreateModal', 'bankTxModal', 'claimPaidModal'].forEach(id => document.getElementById(id)?.classList.add('hidden')); } }, true);
 
       // Lijst-state herstellen (pill/zoek/periode/pagina/scroll) → geen reset bij terugkeer.
       const restored = restoreState();
