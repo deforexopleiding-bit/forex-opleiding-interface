@@ -118,36 +118,29 @@ B3. **#financeNav knop** "Klanten" toevoegen op positie 2
 
 ### Groep C — Finance Dashboard (8-10 commits)
 
-C1. **`/api/finance-dashboard-counts.js`** — fast aggregator
-- 12 KPI's in 1 call (sub-200ms target):
-  - Totaal openstaand, Open facturen, Overdue facturen
-  - Actieve arrangements, Open verify-payment, Open escalations
-  - Bank-balans (uit bank_accounts.balance cache, lazy-fetch TL als stale)
-  - Verwachte cashflow 30d (open invoices + active subs)
-  - Joost autonomy stats (uit joost_suggestions counts)
-  - Conversie wanbetaler-flow (% opgelost van begonnen workflows)
-  - Mentor-bonus pending, MRR uit subscriptions
-- Query-param `?period=today|week|month|quarter|year`
-- Cache: SWR 5min in Supabase (`app_settings` JSON-blob)
+**STATUS: PARTIAL (60-80% scope geleverd)**
 
-C2. **`/api/finance-dashboard-chart-aging.js`** — Aging facturen 0-30/30-60/60-90/90+ bar
-C3. **`/api/finance-dashboard-chart-top-debtors.js`** — Top 10 grootste openstaande klanten
-C4. **`/api/finance-dashboard-chart-joost-intents.js`** — Joost suggestions per intent over tijd (stacked line)
-C5. **`/api/finance-dashboard-chart-arrangements.js`** — Arrangements per status donut
-C6. **`/api/finance-dashboard-chart-tasks.js`** — Open Acties per type bar
-C7. **`/api/finance-dashboard-chart-cashflow.js`** — Cashflow line chart 3mnd
-C8. **`/api/finance-dashboard-chart-payments.js`** — Nieuwe vs herhaal-betalingen stacked bar
+GEDAAN:
+- C1: `/api/finance-dashboard-counts.js` met 12 KPIs + in-memory SWR cache 5min.
+- C2: `/api/finance-dashboard-chart-aging.js` (buckets 0-30/30-60/60-90/90+).
+- C3: `/api/finance-dashboard-chart-top-debtors.js` (top 10 grootste openstaande klanten).
+- C5: `/api/finance-dashboard-chart-arrangements.js` (donut per status).
+- C9: `modules/shared/finance-dashboard.js` met 12 KPIs grid + 3 charts + period filter + manual refresh + Recharts CDN lazy-load.
+- C10: `view-dashboard` container + financeNav knop op positie 1 + DOMContentLoaded default setView('dashboard').
+- E1: `api/_lib/bank-balance.js` lazy-cache helper (15min TTL).
 
-C9. **`shared/finance-dashboard.js`** — module
-- 12 KPI-cards (grid 4×3 desktop / 2 tablet / 1 mobile)
-- Recharts lazy-import (`<script src="https://unpkg.com/recharts...">` op demand)
-- Period-filter dropdown (URL-sync via `?period=`)
-- Refresh-button bovenaan (manual, geen interval)
-- Skeleton-loaders tijdens fetch
-- Drill-down handlers per KPI/chart → `setView()` / `setSubView()` / filter-state
+PARTIAL / TODO (vervolg-PR):
+- C4: `/api/finance-dashboard-chart-joost-intents.js` (Joost suggestions stacked line over tijd).
+- C6: `/api/finance-dashboard-chart-tasks.js` (Open Acties per type bar).
+- C7: `/api/finance-dashboard-chart-cashflow.js` (3-maands cashflow line).
+- C8: `/api/finance-dashboard-chart-payments.js` (nieuwe vs herhaal stacked bar).
+- E2: `/api/finance-bank-balance.js` rewrite naar TL-source (huidige endpoint
+  blijft op e-Boekhouden voor backward-compat; helper is klaar voor wissel).
+- SWR-cache persistent in app_settings (huidige cache is in-memory per Vercel-instance).
 
-C10. **finance.html: `<div id="view-dashboard">` + #financeNav knop op positie 1**
-- Default `setView('dashboard')` op page-load (landing-tab)
+Cache: in-memory SWR 5min per period acceptabel voor MVP; persistent later.
+Recharts lazy-loaded via unpkg (React 17 + ReactDOM + Recharts 2). Bij CDN-fail:
+fallback tabellen ipv crash.
 
 ### Groep D — Admin → Finance Settings migratie (4-6 commits)
 
