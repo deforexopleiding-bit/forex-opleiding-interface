@@ -193,9 +193,14 @@ export default async function handler(req, res) {
       if (er.matched_transaction_id != null) {
         const txId = String(er.matched_transaction_id).trim();
         if (txId.length > 0) {
-          if (!UUID_RE.test(txId)) {
+          // Cleanup D5: matched_transaction_id accepteert ook handmatige
+          // TL-referenties (bv. "TL-12345", "BANK_REF_2026_001") naast UUIDs.
+          // Beperking: max 64 chars, alphanumerieke karakters + dash + underscore.
+          // Bestaande UUID-waarden matchen vanzelf tegen dit patroon (geen
+          // breaking change voor reeds opgeslagen rows of automatische flows).
+          if (txId.length > 64 || !/^[A-Za-z0-9_-]+$/.test(txId)) {
             return res.status(400).json({
-              error: 'execution_result.matched_transaction_id moet een uuid zijn',
+              error: 'execution_result.matched_transaction_id moet max 64 alphanumerieke chars zijn (letters, cijfers, _ en -)',
             });
           }
           cleanExecutionResult.matched_transaction_id = txId;
