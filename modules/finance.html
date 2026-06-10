@@ -806,6 +806,42 @@
       flex-wrap: wrap;
       justify-content: flex-end;
     }
+    /* Intent-aware contextuele actie-knop (E1.2). Naast de 3 standaard-knoppen
+       (Negeer / Bewerk / Verstuur-as-is). Render uitsluitend voor intents waar
+       een vervolg-actie zinvol is (verify_payment, arrangement_request,
+       escalation_needed). Confidence-bands: high (>=0.9) groen primary,
+       medium (0.7-0.9) geel secondary, low (<0.6) rood border met tooltip. */
+    .wa-joost-intent-action {
+      font-size: 12px;
+      padding: 6px 10px;
+      border-radius: 4px;
+      border: 1px solid transparent;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      font-weight: 500;
+      transition: filter .12s ease, background .12s ease, border-color .12s ease;
+      background: rgba(124, 58, 237, .08);
+      color: #6d28d9;
+      border-color: rgba(124, 58, 237, .35);
+    }
+    .wa-joost-intent-action:hover { filter: brightness(.95); }
+    .wa-joost-intent-action.conf-high {
+      background: #16a34a;
+      color: #fff;
+      border-color: #15803d;
+    }
+    .wa-joost-intent-action.conf-medium {
+      background: #fde68a;
+      color: #78350f;
+      border-color: #f59e0b;
+    }
+    .wa-joost-intent-action.conf-low {
+      background: rgba(239, 68, 68, .06);
+      color: #b91c1c;
+      border-color: #ef4444;
+    }
     .inbox-c-joost-error {
       font-size: 12px;
       color: #b91c1c;
@@ -4845,6 +4881,12 @@
 
   function closeArrangPropose() {
     document.getElementById('arrangProposeModal')?.classList.add('hidden');
+    // E1.2: als de wizard werd geopend vanuit een Joost-arrangement_request
+    // intent maar de user sluit zonder confirm, behoudt de suggestion zijn
+    // PROPOSED-state (server-side timeout ruimt op). We clearen alleen de
+    // local pending-id zodat een volgende wizard-open (handmatig pad) niet
+    // per ongeluk een mark-outcome triggert op de oude suggestion.
+    _joostPendingArrangementSuggestionId = null;
   }
 
   function arrangWizRenderStep() {
@@ -5627,7 +5669,31 @@
         arrangWizSetError(d.error || ('HTTP ' + r.status));
         return;
       }
-      window.AgentShared.showToast('Afspraak voorgesteld', 'success');
+      window.AgentShared.showToast('Afspraak-voorstel aangemaakt', 'success');
+      // E1.2: hook Joost-suggestion outcome (USED_ARRANGEMENT_OPENED) als de
+      // wizard vanuit een Joost-intent (arrangement_request) werd geopend.
+      // Fail-soft: console-error als mark-outcome faalt, geen blocking toast.
+      const arrangementIdForJoost = d && d.arrangement && d.arrangement.id ? d.arrangement.id : null;
+      if (_joostPendingArrangementSuggestionId && arrangementIdForJoost) {
+        try {
+          await window.AgentShared.apiFetch('/api/joost-mark-outcome', {
+            method:  'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body:    JSON.stringify({
+              suggestion_id:         _joostPendingArrangementSuggestionId,
+              status:                'USED_ARRANGEMENT_OPENED',
+              linked_arrangement_id: arrangementIdForJoost,
+            }),
+          });
+        } catch (joostErr) {
+          console.error('[arrangWizConfirm joost-mark-outcome]', joostErr);
+        }
+        _joostPendingArrangementSuggestionId = null;
+        // Clear Joost-paneel + actieve suggestion (was nog in geheugen).
+        _joostCurrentSuggestion = null;
+        _joostEditMode = false;
+        try { _joostClearPanel(); } catch (_e) { /* fail-soft */ }
+      }
       closeArrangPropose();
       // Re-load afspraken-lijst indien actief, switch naar 'VOORGESTELD'.
       if (typeof switchArrangStatus === 'function' && _arrangActiveStatus !== 'VOORGESTELD') {
@@ -6124,6 +6190,9 @@
   let _joostLastRequestAt     = null;   // Date.now() van laatste call
   let _joostEditMode          = false;  // true zodra user in textarea editeerde + verstuurt
   let _joostCanUse            = false;  // permission-flag (finance.joost.use)
+  // E1.2: hangt suggestion-id vast aan een geopende arrangement-wizard zodat
+  // arrangWizConfirm de USED_ARRANGEMENT_OPENED-mark kan triggeren na propose.
+  let _joostPendingArrangementSuggestionId = null;
   const JOOST_RATE_LIMIT_MS = 30 * 1000;
 
   function _joostIntentLabel(intent) {
@@ -6185,6 +6254,26 @@
     results.innerHTML = '<div class="inbox-c-joost-error"><i class="ti ti-alert-circle"></i> ' + esc(String(msg || 'Onbekende fout')) + '</div>';
   }
 
+  // ── Intent-aware contextuele actie-knop config (E1.2) ──────────────────────
+  // Per intent rendert _joostRenderCard een 4e knop naast Negeer / Bewerk /
+  // Verstuur-as-is. Doel: directe vervolg-actie (verify-task, afspraak-wizard,
+  // escalatie-mark) zonder dat user terug moet naar inbox-knoppen.
+  // Intents zonder vervolg-actie (payment_promise, general_question, other)
+  // krijgen alleen de standaard 3 knoppen.
+  const JOOST_INTENT_ACTIONS = {
+    verify_payment:      { icon: 'ti-cash-check',    label: 'Maak verify-payment task', handler: 'handleJoostVerifyPayment' },
+    arrangement_request: { icon: 'ti-calendar-plus', label: 'Open afspraak-wizard',     handler: 'handleJoostArrangementRequest' },
+    escalation_needed:   { icon: 'ti-alert-triangle', label: 'Markeer als escalatie',    handler: 'handleJoostEscalation' },
+  };
+
+  function _joostIntentActionClass(conf) {
+    const x = Number(conf) || 0;
+    if (x >= 0.9) return 'conf-high';
+    if (x >= 0.7) return 'conf-medium';
+    if (x < 0.6)  return 'conf-low';
+    return ''; // 0.6 <= conf < 0.7: neutraal (geen extra band)
+  }
+
   function _joostRenderCard(sugg) {
     const results = document.getElementById('joostResults');
     if (!results || !sugg) return;
@@ -6195,6 +6284,20 @@
     const confCls = _joostConfidenceClass(conf);
     const reply = String(sugg.suggested_reply || '');
     const reasoning = String(sugg.reasoning || '');
+
+    // Intent-aware extra knop (alleen voor intents met vervolg-actie).
+    const intentAction = JOOST_INTENT_ACTIONS[intent] || null;
+    let intentBtnHtml = '';
+    if (intentAction) {
+      const bandCls = _joostIntentActionClass(conf);
+      const lowTooltip = (bandCls === 'conf-low')
+        ? ' title="Joost is niet zeker - controleer voor je actie onderneemt"'
+        : '';
+      intentBtnHtml =
+        '<button class="wa-joost-intent-action ' + bandCls + '" id="joostIntentAction" type="button"' + lowTooltip + '>' +
+          '<i class="ti ' + esc(intentAction.icon) + '"></i> ' + esc(intentAction.label) +
+        '</button>';
+    }
 
     const html =
       '<div class="inbox-c-joost-card">' +
@@ -6217,6 +6320,7 @@
           '<button class="sr-abtn" id="joostIgnore" type="button" style="font-size:12px;padding:6px 10px"><i class="ti ti-x"></i> Negeer</button>' +
           '<button class="sr-abtn" id="joostEditSend" type="button" style="font-size:12px;padding:6px 10px"><i class="ti ti-edit"></i> Bewerk + verstuur</button>' +
           '<button class="sr-abtn primary" id="joostUseAsIs" type="button" style="font-size:12px;padding:6px 10px"><i class="ti ti-send"></i> Verstuur als-is</button>' +
+          intentBtnHtml +
         '</div>' +
       '</div>';
     results.innerHTML = html;
@@ -6228,6 +6332,162 @@
     if (editBtn) editBtn.addEventListener('click', () => applyJoostEdit());
     const ignoreBtn = document.getElementById('joostIgnore');
     if (ignoreBtn) ignoreBtn.addEventListener('click', () => applyJoostIgnore());
+    // Wire intent-action knop (indien gerendered).
+    if (intentAction) {
+      const intentBtn = document.getElementById('joostIntentAction');
+      if (intentBtn) {
+        // Capture suggestion-snapshot in closure zodat handler immutable input
+        // krijgt — voorkomt edge cases waarbij _joostCurrentSuggestion mid-flow
+        // wordt gewijzigd door een andere actie.
+        const snapshot = sugg;
+        const handlerName = intentAction.handler;
+        intentBtn.addEventListener('click', () => {
+          try {
+            if (handlerName === 'handleJoostVerifyPayment')      return handleJoostVerifyPayment(snapshot);
+            if (handlerName === 'handleJoostArrangementRequest') return handleJoostArrangementRequest(snapshot);
+            if (handlerName === 'handleJoostEscalation')         return handleJoostEscalation(snapshot);
+          } catch (e) {
+            console.error('[joost intent-action]', handlerName, e);
+            window.AgentShared?.showToast('Actie mislukt: ' + (e && e.message ? e.message : 'onbekende fout'), 'error');
+          }
+        });
+      }
+    }
+  }
+
+  // ── Intent-handlers (E1.2) ────────────────────────────────────────────────
+  // Drie contextuele vervolg-acties per intent. Elk eindigt op een
+  // joost-mark-outcome of joost-create-task-from-suggestion call zodat de
+  // suggestion uit PROPOSED-state gaat en used-ratio metrics correct blijven.
+
+  // verify_payment: één-call combinatie via joost-create-task-from-suggestion.
+  // Server maakt MANUAL_VERIFY_PAYMENT pending_action aan, linkt aan suggestion
+  // (USED_TASK_CREATED + linked_task_id) en doet audit-log atomair.
+  // Default-invoice = oudste open (server-side al gesorteerd in inbox-context).
+  // Geen modal — directe actie met toast bevestiging.
+  async function handleJoostVerifyPayment(suggestion) {
+    if (!suggestion || !suggestion.id) return;
+    const ctx = _inboxCustomerContext;
+    if (!ctx || !ctx.customer || !ctx.customer.id) {
+      window.AgentShared?.showToast('Eerst klant koppelen aan dit gesprek', 'error');
+      return;
+    }
+    const invs = Array.isArray(ctx.open_invoices) ? ctx.open_invoices : [];
+    if (!invs.length) {
+      window.AgentShared?.showToast('Geen open facturen om verify-task voor aan te maken', 'error');
+      return;
+    }
+    const defaultInv = invs[0]; // oudste = eerste, server-side gesorteerd op due_date ASC
+    const intentBtn = document.getElementById('joostIntentAction');
+    if (intentBtn) intentBtn.disabled = true;
+    try {
+      const reply = String(suggestion.suggested_reply || '').trim();
+      const body = {
+        suggestion_id: suggestion.id,
+        invoice_id:    defaultInv.id,
+        claimed_amount: Number(defaultInv.amount_open) || 0,
+      };
+      // Alleen meegeven als minimum-lengte gehaald wordt; anders valt server
+      // terug op suggested_reply uit DB.
+      if (reply && reply.length >= 10) body.claim_text_override = reply;
+      const r = await window.AgentShared.apiFetch('/api/joost-create-task-from-suggestion', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify(body),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.error || ('HTTP ' + r.status));
+      window.AgentShared?.showToast('Verify-payment task aangemaakt', 'success');
+      // Suggestion is server-side gemarkeerd USED_TASK_CREATED — clear paneel.
+      _joostCurrentSuggestion = null;
+      _joostEditMode = false;
+      _joostClearPanel();
+    } catch (e) {
+      console.error('[handleJoostVerifyPayment]', e);
+      window.AgentShared?.showToast('Verify-task mislukt: ' + (e.message || 'onbekende fout'), 'error');
+      if (intentBtn) intentBtn.disabled = false;
+    }
+  }
+
+  // arrangement_request: open de bestaande arrangement-wizard met klant
+  // pre-geselecteerd. Bij confirm in de wizard wordt de suggestion gemarkeerd
+  // USED_ARRANGEMENT_OPENED met linked_arrangement_id. Bij cancel blijft
+  // suggestion in PROPOSED (server-side timeout ruimt op).
+  function handleJoostArrangementRequest(suggestion) {
+    if (!suggestion || !suggestion.id) return;
+    const ctx = _inboxCustomerContext;
+    if (!ctx || !ctx.customer || !ctx.customer.id) {
+      window.AgentShared?.showToast('Eerst klant koppelen aan dit gesprek', 'error');
+      return;
+    }
+    if (typeof openArrangPropose !== 'function') {
+      window.AgentShared?.showToast('Afspraak-wizard niet beschikbaar', 'error');
+      return;
+    }
+    // Hang suggestion-id aan module-scope var zodat arrangWizConfirm de hook
+    // kan triggeren na succesvolle propose. Cleared bij ofwel succesvolle
+    // mark-outcome OF bij sluiten zonder confirm (handled in confirm-pad).
+    _joostPendingArrangementSuggestionId = suggestion.id;
+    try {
+      openArrangPropose({
+        customer_id:   ctx.customer.id,
+        customer_name: ctx.customer.name || '',
+      });
+      // Visuele hint in joost-paneel — suggestion zelf blijft in geheugen
+      // voor arrangWizConfirm hook. Bij sluiten zonder confirm wordt
+      // _joostPendingArrangementSuggestionId gewist via cleanup.
+      const results = document.getElementById('joostResults');
+      if (results) {
+        results.innerHTML = '<div class="inbox-c-joost-empty"><i class="ti ti-info-circle" style="color:#7c3aed"></i> Afspraak-wizard geopend — bevestig daar het voorstel. Outcome wordt automatisch gemarkeerd na bevestigen.</div>';
+      }
+    } catch (e) {
+      console.error('[handleJoostArrangementRequest]', e);
+      _joostPendingArrangementSuggestionId = null;
+      window.AgentShared?.showToast('Afspraak-voorstel aangemaakt: ' + (e.message || 'onbekende fout'), 'error');
+    }
+  }
+
+  // escalation_needed: confirm-dialog + DISMISSED-mark met outcome_notes.
+  // Geen UI-flow naar een andere module — dit is een 'park voor later'-actie
+  // zodat user-naam in de audit zit voor latere triage.
+  async function handleJoostEscalation(suggestion) {
+    if (!suggestion || !suggestion.id) return;
+    const ok = window.confirm('Markeer als escalatie en parkeer voor later?');
+    if (!ok) return;
+    const intentBtn = document.getElementById('joostIntentAction');
+    if (intentBtn) intentBtn.disabled = true;
+    // Probeer user-naam te resolven voor audit-trail (fail-soft).
+    let userName = '';
+    try {
+      if (window.AuthShared?.getProfile) {
+        const p = await window.AuthShared.getProfile();
+        userName = (p && (p.full_name || p.email)) || '';
+      }
+    } catch (_e) { /* fail-soft */ }
+    const notes = 'Escalatie gemarkeerd' + (userName ? (' door ' + userName) : '');
+    try {
+      const r = await window.AgentShared.apiFetch('/api/joost-mark-outcome', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({
+          suggestion_id: suggestion.id,
+          status:        'DISMISSED',
+          outcome_notes: notes,
+        }),
+      });
+      if (!r.ok) {
+        const d = await r.json().catch(() => ({}));
+        throw new Error(d.error || ('HTTP ' + r.status));
+      }
+      window.AgentShared?.showToast('Genoteerd - kom hier later op terug', 'success');
+      _joostCurrentSuggestion = null;
+      _joostEditMode = false;
+      _joostClearPanel();
+    } catch (e) {
+      console.error('[handleJoostEscalation]', e);
+      window.AgentShared?.showToast('Markeren mislukt: ' + (e.message || 'onbekende fout'), 'error');
+      if (intentBtn) intentBtn.disabled = false;
+    }
   }
 
   async function requestJoostSuggestion() {
