@@ -3961,20 +3961,77 @@ function approvActionLabel(t) {
   return map[t] || (t || '—');
 }
 
-function approvSummary(it) {
-  // Korte voorstel-samenvatting uit payload (best-effort).
-  const p = it.payload || {};
-  const parts = [];
-  if (Array.isArray(p.invoice_ids) && p.invoice_ids.length) {
-    parts.push(`${p.invoice_ids.length} factuur${p.invoice_ids.length === 1 ? '' : 'en'}`);
-  } else if (p.invoice_id) {
-    parts.push('invoice ' + String(p.invoice_id).slice(0, 8));
+function renderActionPreview(action) {
+  // Type-specifieke korte voorstel-preview voor de VOORSTEL-kolom in
+  // de approval-queue. Returnt een plain string (caller doet esc()).
+  // Best-effort: valt terug op humanized action_type bij onbekend type
+  // of missende payload-velden.
+  const a = action || {};
+  const p = a.payload || {};
+  const t = a.action_type || '';
+  const inv = a.invoice || null;
+  // Probeer invoice_number af te leiden uit embedded invoice (tasks-list
+  // pattern) of fallback op uuid-prefix. pending-actions-list joint geen
+  // invoices, dus inv is meestal null voor TL_-types — dat is bewust:
+  // de korte preview leunt op counts/dates/bedragen en niet op nummer.
+  const invNum = (inv && inv.invoice_number)
+    ? String(inv.invoice_number)
+    : (p.invoice_id ? '#' + String(p.invoice_id).slice(0, 8) : '');
+  switch (t) {
+    case 'TL_INVOICE_CONSOLIDATE_AND_RESTART': {
+      const n = Array.isArray(p.credit_invoice_ids) ? p.credit_invoice_ids.length : 0;
+      return `Credit ${n} factu${n === 1 ? 'ur' : 'ren'} + nieuw abonnement`;
+    }
+    case 'TL_INVOICE_UPDATE_DUE': {
+      const due = p.new_due_date ? String(p.new_due_date).slice(0, 10) : '?';
+      const tgt = invNum || 'factuur';
+      return `Verleng vervaldatum ${tgt} naar ${due}`;
+    }
+    case 'TL_INVOICE_SPLIT': {
+      const n = Array.isArray(p.parts) ? p.parts.length : 0;
+      const tgt = invNum || 'factuur';
+      return `Splits ${tgt} in ${n} termijn${n === 1 ? '' : 'en'}`;
+    }
+    case 'TL_SUBSCRIPTION_PAUSE': {
+      const until = p.pause_until ? String(p.pause_until).slice(0, 10) : '?';
+      return `Pauzeer abonnement tot ${until}`;
+    }
+    case 'TL_SUBSCRIPTION_STOP': {
+      const stop = p.stop_date ? String(p.stop_date).slice(0, 10) : '?';
+      return `Stop abonnement per ${stop}`;
+    }
+    case 'TL_INVOICE_WRITEOFF': {
+      const tgt = invNum || 'factuur';
+      return `Schrijf ${tgt} af`;
+    }
+    case 'MANUAL_VERIFY_PAYMENT': {
+      const tgt = invNum || 'factuur';
+      return `Verifieer claim ${tgt}`;
+    }
+    case 'MANUAL_ESCALATION': {
+      const sev = p.severity ? String(p.severity) : 'normaal';
+      return `Escalatie (severity: ${sev})`;
+    }
+    case 'MANUAL_PROPOSE_ARRANGEMENT': {
+      const name = a.customer && a.customer.name ? String(a.customer.name) : 'klant';
+      const tname = name.length > 30 ? name.slice(0, 29) + '…' : name;
+      return `Voorstel afspraak ${tname}`;
+    }
+    case 'MANUAL_FOLLOWUP': {
+      const name = a.customer && a.customer.name ? String(a.customer.name) : 'klant';
+      const tname = name.length > 30 ? name.slice(0, 29) + '…' : name;
+      return `Follow-up bericht ${tname}`;
+    }
+    default: {
+      // Fallback: humanized action_type ("TL_INVOICE_SPLIT" → "tl invoice split").
+      return t ? t.toLowerCase().replace(/_/g, ' ') : '(onbekende actie)';
+    }
   }
-  if (p.new_due_date)  parts.push('nieuwe due: ' + String(p.new_due_date).slice(0, 10));
-  if (p.installments)  parts.push(p.installments + ' termijnen');
-  if (p.amount_total != null) parts.push('€ ' + p.amount_total);
-  if (p.percentage != null)   parts.push(p.percentage + '%');
-  return parts.length ? parts.join(' · ') : '(geen payload)';
+}
+
+function approvSummary(it) {
+  // Korte voorstel-samenvatting per action_type (zie renderActionPreview).
+  return renderActionPreview(it);
 }
 
 function approvFmtDateTime(iso) {
