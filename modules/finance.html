@@ -2273,12 +2273,12 @@
       <button class="sr-ibtn" id="inboxCustomerClose" type="button" title="Sluiten" style="margin-top:-4px"><i class="ti ti-x"></i></button>
     </div>
 
-    <!-- Body — content + skeleton + empty share dezelfde scroll-container -->
+    <!-- Body — content + skeleton share dezelfde scroll-container. Empty-state
+         is dead code want modal opent alleen via chat-header (gated op actieve
+         conv). Verwijderd in PR #151 polish — toonde anders een placeholder
+         "Selecteer een gesprek om klant-info te zien" + witruimte boven echte
+         content bij klik op klantnaam in chat-header. -->
     <div style="flex:1;min-height:0;overflow-y:auto;padding:6px 22px 4px">
-      <!-- Empty-state (geen conv geselecteerd) -->
-      <div class="inbox-c-col-right-empty" id="inboxCustomerPanelEmpty">
-        Selecteer een gesprek om klant-info te zien
-      </div>
       <!-- Skeleton tijdens load -->
       <div class="inbox-c-customer-content" id="inboxCustomerPanelSkeleton" hidden style="padding:8px 0">
         <div class="inbox-c-skel-bubble" style="width:80px;height:80px;border-radius:50%;margin:4px auto 12px"></div>
@@ -7006,10 +7006,12 @@
   function openInboxCustomerModal() {
     const modal = document.getElementById('inboxCustomerModal');
     if (!modal) return;
+    // Trigger (klantnaam-klik + klant-info knop in chat-header) is alleen
+    // beschikbaar bij een actieve conv, dus empty-state is geen valide path
+    // meer. Bij ontbrekend convId fail-soft sluiten ipv lege modal tonen.
+    if (!_inboxActiveConvId) return;
     const ctx = _inboxCustomerContext;
-    if (!_inboxActiveConvId) {
-      renderInboxCustomerPanel('empty', null);
-    } else if (ctx && ctx.customer && ctx.customer.id) {
+    if (ctx && ctx.customer && ctx.customer.id) {
       renderInboxCustomerPanel('matched', ctx);
     } else if (ctx) {
       renderInboxCustomerPanel('unknown', ctx);
