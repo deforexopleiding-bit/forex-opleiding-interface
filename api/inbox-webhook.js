@@ -24,10 +24,16 @@
 // Conversation upsert is 2-step (select-then-update/insert) zodat we
 // concurrent webhooks veilig kunnen samenvoegen.
 
-import { verifyWebhookSubscription, verifyWebhookSignature } from './_lib/meta-whatsapp.js';
+import {
+  verifyWebhookSubscription,
+  verifyWebhookSignature,
+  sendText,
+  MetaNotConfiguredError,
+} from './_lib/meta-whatsapp.js';
 import { supabaseAdmin } from './supabase.js';
 import { getClientIp } from './_lib/audit-customer.js';
 import { getModuleContextByPhoneNumberId } from './_lib/module-context.js';
+import { extractEmail, findCustomerByEmail } from './_lib/email-extractor.js';
 
 // Vercel-eis: bodyParser uit zodat we de raw body kunnen lezen voor HMAC.
 export const config = {
@@ -428,6 +434,347 @@ function triggerJoostAutoSuggest({ conversationId, triggeredByMessageId, autonom
   });
 }
 
+// ── Helpers: Joost autonomous intake-flow (E2 intake) ─────────────────────
+//
+// Wanneer een nieuwe inbound message binnenkomt op een conversation ZONDER
+// gekoppelde klant (customer_id IS NULL), kan Joost zelfstandig om een
+// e-mailadres vragen om de klant te identificeren. Pattern:
+//
+//   eerste inbound    → Joost vraagt "met welk e-mailadres ben je bij ons
+//                       bekend?" (intake_status = 'asked').
+//   klant antwoordt   → extractEmail() probeert mail te vinden in body.
+//     mail + 1 match  → koppel conversation aan klant, Joost bevestigt.
+//                       (intake_status = 'matched')
+//     geen mail       → Joost vraagt opnieuw (intake_status blijft 'asked').
+//     mail, geen hit  → MANUAL_FOLLOWUP-taak aangemaakt voor mens.
+//                       (intake_status = 'failed_no_match')
+//   matched/failed_*  → skip intake-logic; normale auto-suggest pipeline.
+//
+// Feature-flag: joost_config.feature_flags.e2_autonomous_intake (per-module,
+// default false). Module-resolve gaat via getModuleContextByPhoneNumberId.
+// Alleen actief op finance-module in E2.0.
+//
+// VASTE TEKSTEN (geen LLM-call) — voorspelbaar en goedkoop. De LLM komt pas
+// in beeld zodra de klant gekoppeld is en de normale Joost-suggest flow draait.
+
+const JOOST_INTAKE_ASK_TEXT =
+  'Hi, om je goed te kunnen helpen — met welk e-mailadres ben je bij ons bekend?';
+const JOOST_INTAKE_RETRY_TEXT =
+  'Sorry, ik heb geen e-mailadres in je bericht herkend. Kun je het nogmaals opgeven?';
+const JOOST_INTAKE_MATCHED_TEXT =
+  'Top, ik heb je gevonden! Hoe kan ik je helpen?';
+const JOOST_INTAKE_FAILED_TEXT =
+  'Bedankt, een collega kijkt ernaar.';
+
+/**
+ * Verstuur een vaste Joost intake-tekst via Meta WhatsApp + persist als
+ * outbound whatsapp_messages-rij + update conversation.last_message_at.
+ *
+ * NIET awaited — fail-soft: bij een fout log + return false zodat de webhook
+ * binnen het 200-OK budget blijft.
+ *
+ * @returns {Promise<boolean>} true bij succes, false bij fail.
+ */
+async function sendJoostIntakeReply(req, { conv, text, phoneNumberId }) {
+  if (!conv?.id || !conv?.phone_number || !text) return false;
+  try {
+    let metaResult;
+    try {
+      metaResult = await sendText({
+        to:             conv.phone_number,
+        body:           text,
+        phoneNumberId:  phoneNumberId || undefined,
+      });
+    } catch (metaErr) {
+      if (metaErr instanceof MetaNotConfiguredError) {
+        console.warn('[inbox-webhook] joost intake send skipped: Meta niet geconfigureerd', metaErr.missing);
+      } else {
+        console.error('[inbox-webhook] joost intake Meta send fail:', metaErr && metaErr.message);
+      }
+      return false;
+    }
+    const wamid = metaResult && metaResult.wamid ? String(metaResult.wamid) : null;
+    const nowIso = new Date().toISOString();
+
+    const { data: inserted, error: insErr } = await supabaseAdmin
+      .from('whatsapp_messages')
+      .insert({
+        conversation_id:    conv.id,
+        direction:          'out',
+        meta_wamid:         wamid,
+        body:               text,
+        template_name:      null,
+        template_variables: null,
+        status:             'queued',
+        sent_at:            nowIso,
+        sent_by_user_id:    null, // system-call vanuit webhook (Joost intake)
+      })
+      .select('id')
+      .single();
+    if (insErr) {
+      console.error('[inbox-webhook] joost intake msg insert fail:', insErr.message);
+      return false;
+    }
+
+    // Update conversation preview + last_message_at zodat UI direct refresht.
+    const preview = text.slice(0, 120);
+    const { error: convUpdErr } = await supabaseAdmin
+      .from('whatsapp_conversations')
+      .update({ last_message_at: nowIso, last_message_preview: preview })
+      .eq('id', conv.id);
+    if (convUpdErr) {
+      console.error('[inbox-webhook] joost intake conv update fail:', convUpdErr.message);
+    }
+
+    await logInboxAudit(req, {
+      action:     'joost.intake.message_sent',
+      entityType: 'whatsapp_conversation',
+      entityId:   conv.id,
+      afterJson:  {
+        message_id: inserted?.id || null,
+        meta_wamid: wamid,
+        text_preview: preview,
+      },
+    });
+    return true;
+  } catch (e) {
+    console.error('[inbox-webhook] sendJoostIntakeReply exception:', e && e.message);
+    return false;
+  }
+}
+
+/**
+ * Hoofd-handler voor de Joost intake-flow. Returns true als de flow het
+ * bericht heeft afgehandeld (caller moet auto-suggest skippen), false anders.
+ *
+ * Pre-conditions die caller MOET checken:
+ *   - msg is inbound + text-type
+ *   - conv.customerId is NULL (geen phone-match)
+ *   - module-resolve gaf 'finance'
+ *   - joost_config.is_enabled = true
+ *   - feature_flags.e2_autonomous_intake = true
+ *
+ * Stateflow op joost_conversation_state.intake_status:
+ *   NULL              → vraag mail, set 'asked'.
+ *   'asked'           → parse mail uit body; match of vraag opnieuw of fail.
+ *   'matched'         → skip (return false → laat auto-suggest draaien).
+ *   'failed_no_*'     → skip (return false → laat auto-suggest draaien).
+ *
+ * @returns {Promise<boolean>} true = intake-flow handelde dit bericht af.
+ */
+async function handleJoostIntakeFlow(req, { conv, messageBody, phoneNumberId }) {
+  if (!conv?.id) return false;
+
+  // 1) Huidige intake_status ophalen.
+  let stateRow = null;
+  try {
+    const { data, error } = await supabaseAdmin
+      .from('joost_conversation_state')
+      .select('conversation_id, intake_status, intake_asked_at')
+      .eq('conversation_id', conv.id)
+      .maybeSingle();
+    if (error) {
+      console.error('[inbox-webhook] joost intake state select fail:', error.message);
+      return false;
+    }
+    stateRow = data || null;
+  } catch (e) {
+    console.error('[inbox-webhook] joost intake state select exception:', e && e.message);
+    return false;
+  }
+
+  const intakeStatus = stateRow?.intake_status || null;
+
+  // Matched of failed_*: intake-flow heeft hier niets meer te doen; normale
+  // auto-suggest pipeline mag draaien.
+  if (intakeStatus === 'matched' || intakeStatus === 'failed_no_match' || intakeStatus === 'failed_no_response') {
+    return false;
+  }
+
+  // ── Geval A: NULL → eerste vraag stellen ─────────────────────────────
+  if (!intakeStatus) {
+    const nowIso = new Date().toISOString();
+    const sent = await sendJoostIntakeReply(req, {
+      conv,
+      text: JOOST_INTAKE_ASK_TEXT,
+      phoneNumberId,
+    });
+    if (!sent) return false; // bij send-fail: niet markeren, opnieuw proberen op volgende inbound
+
+    // UPSERT joost_conversation_state met intake_status = asked.
+    // 2-step pattern (insert → bij 23505 update) consistent met
+    // joost-send-autonomous.js (race-veilig).
+    const insertPayload = {
+      conversation_id: conv.id,
+      intake_status:   'asked',
+      intake_asked_at: nowIso,
+    };
+    const { error: insErr } = await supabaseAdmin
+      .from('joost_conversation_state')
+      .insert(insertPayload);
+    if (insErr) {
+      if (insErr.code === '23505') {
+        // Race: andere call insertte intussen. Update als intake_status nog NULL.
+        await supabaseAdmin
+          .from('joost_conversation_state')
+          .update({ intake_status: 'asked', intake_asked_at: nowIso })
+          .eq('conversation_id', conv.id)
+          .is('intake_status', null);
+      } else {
+        console.error('[inbox-webhook] joost intake state insert fail:', insErr.message);
+      }
+    }
+
+    await logInboxAudit(req, {
+      action:     'joost.intake.asked',
+      entityType: 'whatsapp_conversation',
+      entityId:   conv.id,
+      afterJson:  { intake_status: 'asked', intake_asked_at: nowIso },
+    });
+    return true;
+  }
+
+  // ── Geval B: 'asked' → verwacht email in body ────────────────────────
+  if (intakeStatus === 'asked') {
+    const email = extractEmail(messageBody);
+
+    // B.1: Geen email herkend → vraag opnieuw. intake_status blijft 'asked'.
+    if (!email) {
+      await sendJoostIntakeReply(req, {
+        conv,
+        text: JOOST_INTAKE_RETRY_TEXT,
+        phoneNumberId,
+      });
+      await logInboxAudit(req, {
+        action:     'joost.intake.retry',
+        entityType: 'whatsapp_conversation',
+        entityId:   conv.id,
+        afterJson:  { reason: 'no_email_in_body' },
+      });
+      return true;
+    }
+
+    // B.2: Email + klant gevonden → koppel + bevestig.
+    const customer = await findCustomerByEmail(supabaseAdmin, email);
+    if (customer && customer.id) {
+      // Koppel conversation aan klant. Defensieve check: alleen UPDATE als
+      // customer_id NOG NULL is (idempotent + race-veilig).
+      const { error: linkErr } = await supabaseAdmin
+        .from('whatsapp_conversations')
+        .update({ customer_id: customer.id })
+        .eq('id', conv.id)
+        .is('customer_id', null);
+      if (linkErr) {
+        console.error('[inbox-webhook] joost intake link fail:', linkErr.message);
+        // Fail-soft: ga door met sturen van bevestiging; staat blijft 'asked'
+        // zodat een handmatige link of retry mogelijk blijft.
+        return false;
+      }
+
+      // Optioneel: phone toevoegen aan klant als die nog NULL is (consistent met
+      // inbox-link-conversation-to-customer add_phone_to_customer=true pattern).
+      // Dubbele guard: in-memory + .is('phone', null) op UPDATE.
+      if (!customer.phone && conv.phone_number) {
+        const { error: phErr } = await supabaseAdmin
+          .from('customers')
+          .update({ phone: conv.phone_number })
+          .eq('id', customer.id)
+          .is('phone', null);
+        if (phErr) {
+          // Fail-soft — link is wel geslaagd. Log + door.
+          console.error('[inbox-webhook] joost intake phone-add fail:', phErr.message);
+        }
+      }
+
+      // UPDATE intake_status = matched. (state-rij bestaat al sinds geval A.)
+      const { error: updErr } = await supabaseAdmin
+        .from('joost_conversation_state')
+        .update({ intake_status: 'matched' })
+        .eq('conversation_id', conv.id);
+      if (updErr) {
+        console.error('[inbox-webhook] joost intake state matched-update fail:', updErr.message);
+      }
+
+      await sendJoostIntakeReply(req, {
+        conv,
+        text: JOOST_INTAKE_MATCHED_TEXT,
+        phoneNumberId,
+      });
+
+      await logInboxAudit(req, {
+        action:     'joost.intake.matched',
+        entityType: 'whatsapp_conversation',
+        entityId:   conv.id,
+        afterJson:  {
+          customer_id:   customer.id,
+          matched_email: email,
+          match_reason:  'email_via_joost_intake',
+          phone_added:   !customer.phone && !!conv.phone_number,
+        },
+      });
+      // Conversation is nu gekoppeld; verdere auto-suggest mag bij VOLGENDE
+      // inbound triggeren. Voor DEZE message returnen we true zodat we niet
+      // direct nog een auto-suggest oproepen bovenop de matched-bevestiging.
+      return true;
+    }
+
+    // B.3: Email herkend maar 0 of >1 match → MANUAL_FOLLOWUP-taak.
+    const insertRow = {
+      customer_id:    null,
+      arrangement_id: null,
+      invoice_id:     null,
+      action_type:    'MANUAL_FOLLOWUP',
+      status:         'PENDING',
+      payload: {
+        reason:          'Intake-mismatch',
+        claimed_email:   email,
+        conversation_id: conv.id,
+        source:          'joost',
+        rationale:       'Klant gaf e-mailadres dat niet (uniek) matched in customers — handmatige verificatie nodig.',
+      },
+    };
+    const { error: paErr } = await supabaseAdmin
+      .from('pending_actions')
+      .insert(insertRow);
+    if (paErr) {
+      console.error('[inbox-webhook] joost intake MANUAL_FOLLOWUP insert fail:', paErr.message);
+      // Bij DB-fail: probeer geen verdere stappen + laat status 'asked' staan
+      // zodat een herkansing mogelijk blijft.
+      return false;
+    }
+
+    // UPDATE intake_status = failed_no_match.
+    const { error: updErr } = await supabaseAdmin
+      .from('joost_conversation_state')
+      .update({ intake_status: 'failed_no_match' })
+      .eq('conversation_id', conv.id);
+    if (updErr) {
+      console.error('[inbox-webhook] joost intake state failed-update fail:', updErr.message);
+    }
+
+    await sendJoostIntakeReply(req, {
+      conv,
+      text: JOOST_INTAKE_FAILED_TEXT,
+      phoneNumberId,
+    });
+
+    await logInboxAudit(req, {
+      action:     'joost.intake.failed_no_match',
+      entityType: 'whatsapp_conversation',
+      entityId:   conv.id,
+      afterJson:  {
+        claimed_email: email,
+        reason:        'no_unique_customer_match',
+      },
+    });
+    return true;
+  }
+
+  // Onbekende intake_status: skip + log warning (defensieve fallback).
+  console.warn('[inbox-webhook] joost intake unknown status:', intakeStatus, 'conv=', conv.id);
+  return false;
+}
+
 /**
  * Verwerk een status-update (sent/delivered/read/failed) op een outbound msg.
  * Status monotoon: alleen upgraden (sent < delivered < read). Bij failed: log
@@ -737,61 +1084,93 @@ export default async function handler(req, res) {
               if (insRes.inserted) stats.msgs_new++;
               else                 stats.msgs_dup++;
 
-              // 3. E1.1 Joost auto-suggest trigger (fire-and-forget)
-              // Filters (alle moeten waar zijn):
-              //   a) Nieuwe insert (geen Meta-retry)
-              //   b) text-type message (skip media/system/template-button)
-              //   c) body >= 5 chars + niet in TRIVIAL_REPLIES set
-              //   d) conversation heeft customer_id (gekoppeld aan klant)
-              //   e) module van ontvangende lijn == finance (E1.1 scope)
-              //   f) joost_config.is_enabled = true voor finance
-              //   g) anti-loop: geen outbound binnen 60s (klant antwoordt
-              //      niet op onze eigen recent-verzonden message)
+              // 3. Joost-flows: intake + auto-suggest (fire-and-forget achtig)
               //
-              // Auth: helper gebruikt X-Internal-Token header; joost-suggest
-              // skipt user-JWT + RBAC bij die header-match en zet
-              // requested_by_user_id=NULL + auto_triggered=true.
+              // Twee paden, mutually exclusive op deze message:
+              //   (i)  Intake (E2 autonomous intake) — runt als conv.customerId
+              //        IS NULL én feature_flags.e2_autonomous_intake = true.
+              //        Joost vraagt om e-mailadres, parsed het antwoord en
+              //        koppelt of escaleert. Vaste teksten, geen LLM.
+              //   (ii) Auto-suggest (E1.1) — runt als conv.customerId IS NOT NULL
+              //        (klant gekoppeld) én aan de overige filters voldoet.
+              //        LLM-aangedreven Joost-suggestie + optionele E2.1 chain.
+              //
+              // Gedeelde filters:
+              //   a) Nieuwe insert (geen Meta-retry)
+              //   b) text-type message
+              //   c) module van ontvangende lijn == finance (huidige scope)
+              //   d) joost_config.is_enabled = true voor finance
+              //
+              // Auto-suggest extra filters:
+              //   e) body >= 5 chars + niet in TRIVIAL_REPLIES set
+              //   f) anti-loop: geen outbound binnen 60s
+              //
+              // Auth: auto-suggest gebruikt X-Internal-Token header naar
+              // /api/joost-suggest. Intake-flow gebruikt sendText direct +
+              // schrijft eigen outbound message-rij (geen extra HTTP-hop).
               try {
-                if (insRes.inserted && insRes.messageId && insRes.type === 'text' && conv.customerId) {
-                  const trimmed = String(insRes.body || '').trim();
-                  const lower = trimmed.toLowerCase();
-                  const isTriggerable = trimmed.length >= 5 && !TRIVIAL_REPLIES.has(lower);
-                  if (isTriggerable) {
-                    // Module + joost_config checks server-side (1 lookup-set).
-                    const moduleCtx = await getModuleContextByPhoneNumberId(supabaseAdmin, recvPhoneNumberId);
-                    const resolvedModule = moduleCtx?.module || 'finance';
-                    if (resolvedModule === 'finance') {
-                      const { data: jcfg, error: jcfgErr } = await supabaseAdmin
-                        .from('joost_config')
-                        .select('module, is_enabled, feature_flags')
-                        .eq('module', 'finance')
-                        .maybeSingle();
-                      if (jcfgErr) {
-                        console.warn('[inbox-webhook] joost_config lookup fail:', jcfgErr.message);
-                      } else if (jcfg && jcfg.is_enabled === true) {
-                        const noLoop = await hasNoRecentOutbound(conv.id, 60);
-                        if (noLoop) {
-                          // E2.1 reactive-autonomy gate: alleen chain naar
-                          // /api/joost-send-autonomous als feature-flag
-                          // e2_reactive_autonomy aanstaat. joost-send-autonomous
-                          // doet zelf nogmaals de check (defense-in-depth).
-                          const autonomyEnabled = !!(
-                            jcfg.feature_flags
-                            && typeof jcfg.feature_flags === 'object'
-                            && jcfg.feature_flags.e2_reactive_autonomy === true
-                          );
-                          triggerJoostAutoSuggest({
-                            conversationId:        conv.id,
-                            triggeredByMessageId:  insRes.messageId,
-                            autonomyEnabled,
-                          });
+                if (insRes.inserted && insRes.messageId && insRes.type === 'text') {
+                  // Module + joost_config: éénmalige lookup voor beide paden.
+                  const moduleCtx = await getModuleContextByPhoneNumberId(supabaseAdmin, recvPhoneNumberId);
+                  const resolvedModule = moduleCtx?.module || 'finance';
+                  if (resolvedModule === 'finance') {
+                    const { data: jcfg, error: jcfgErr } = await supabaseAdmin
+                      .from('joost_config')
+                      .select('module, is_enabled, feature_flags')
+                      .eq('module', 'finance')
+                      .maybeSingle();
+                    if (jcfgErr) {
+                      console.warn('[inbox-webhook] joost_config lookup fail:', jcfgErr.message);
+                    } else if (jcfg && jcfg.is_enabled === true) {
+                      const flags = (jcfg.feature_flags && typeof jcfg.feature_flags === 'object')
+                        ? jcfg.feature_flags : {};
+                      const intakeEnabled = flags.e2_autonomous_intake === true;
+
+                      // Pad (i) Intake-flow: alleen als customer_id ontbreekt
+                      // én feature-flag aanstaat. Outbound phone_number_id =
+                      // conv.phone_number_id (al opgeslagen bij upsert) of
+                      // module-context fallback. Bij undefined valt sendText
+                      // terug op env-var (META_WHATSAPP_PHONE_NUMBER_ID).
+                      let intakeHandled = false;
+                      if (!conv.customerId && intakeEnabled) {
+                        const outboundPnId = recvPhoneNumberId || moduleCtx?.phone_number_id || undefined;
+                        // Bouw lokaal conv-object met fields die intake-flow nodig
+                        // heeft (id + phone_number) — webhook-upsert returnt geen
+                        // phone_number maar we kennen 'm uit phoneE164Plus.
+                        intakeHandled = await handleJoostIntakeFlow(req, {
+                          conv:           { id: conv.id, phone_number: phoneE164Plus },
+                          messageBody:    insRes.body || '',
+                          phoneNumberId:  outboundPnId,
+                        });
+                      }
+
+                      // Pad (ii) Auto-suggest: alleen als intake-flow NIET
+                      // heeft afgehandeld én klant gekoppeld is.
+                      if (!intakeHandled && conv.customerId) {
+                        const trimmed = String(insRes.body || '').trim();
+                        const lower = trimmed.toLowerCase();
+                        const isTriggerable = trimmed.length >= 5 && !TRIVIAL_REPLIES.has(lower);
+                        if (isTriggerable) {
+                          const noLoop = await hasNoRecentOutbound(conv.id, 60);
+                          if (noLoop) {
+                            // E2.1 reactive-autonomy gate: alleen chain naar
+                            // /api/joost-send-autonomous als feature-flag
+                            // e2_reactive_autonomy aanstaat. joost-send-autonomous
+                            // doet zelf nogmaals de check (defense-in-depth).
+                            const autonomyEnabled = flags.e2_reactive_autonomy === true;
+                            triggerJoostAutoSuggest({
+                              conversationId:        conv.id,
+                              triggeredByMessageId:  insRes.messageId,
+                              autonomyEnabled,
+                            });
+                          }
                         }
                       }
                     }
                   }
                 }
               } catch (eAuto) {
-                // Auto-trigger mag NOOIT de webhook breken — log + door
+                // Auto-trigger / intake mag NOOIT de webhook breken — log + door
                 console.warn('[inbox-webhook] joost auto-trigger pre-check fail:', eAuto && eAuto.message);
               }
             } catch (e) {

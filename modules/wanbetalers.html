@@ -1,0 +1,517 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Wanbetalers - facturen-lijst - Agency Command Center</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/modules/shared/agent-shared.css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/dist/tabler-icons.min.css" />
+  <style>
+    .page-header { display:flex; align-items:flex-start; justify-content:space-between; margin-bottom:20px; flex-wrap:wrap; gap:12px; }
+    .page-title  { font-size:22px; font-weight:700; letter-spacing:-.3px; margin-bottom:3px; }
+    .page-sub    { font-size:12px; color:var(--text-faint); }
+
+    .section-card { background:var(--bg-elev); border:1px solid var(--border); border-radius:12px; padding:20px; margin-bottom:16px; }
+    .section-header { display:flex; align-items:center; gap:10px; margin-bottom:16px; font-size:14px; font-weight:600; justify-content:space-between; }
+
+    /* Filter pills */
+    .wanb-filter-strip { display:flex; gap:6px; flex-wrap:wrap; margin-bottom:14px; align-items:center; }
+    .wanb-pill { background:var(--bg-elev-2); border:1px solid var(--border); border-radius:999px; padding:6px 14px; font-size:12px; color:var(--text-dim); cursor:pointer; font-family:inherit; font-weight:500; display:inline-flex; align-items:center; gap:6px; }
+    .wanb-pill:hover { background:var(--surface-card-hover); color:var(--text); }
+    .wanb-pill.active { background:var(--brand-primary-soft); color:var(--brand-primary); border-color:var(--brand-primary); }
+    .wanb-pill-count { font-size:10px; padding:1px 6px; border-radius:8px; background:var(--bg-elev); color:var(--text-faint); font-weight:600; }
+    .wanb-pill.active .wanb-pill-count { background:var(--brand-primary); color:#fff; }
+
+    /* Tabel */
+    .wanb-table { width:100%; border-collapse:collapse; font-size:13px; }
+    .wanb-table th { text-align:left; padding:10px 12px; font-size:10px; text-transform:uppercase; color:var(--text-faint); font-weight:600; letter-spacing:.5px; border-bottom:1px solid var(--border); }
+    .wanb-table td { padding:11px 12px; border-bottom:0.5px solid var(--border-subtle,var(--border)); vertical-align:middle; }
+    .wanb-table tr:last-child td { border-bottom:none; }
+    .wanb-table tr:hover td { background:var(--surface-card); }
+    .wanb-table .wanb-col-cb { width:36px; text-align:center; }
+    .wanb-table .wanb-col-cb input[type=checkbox] { cursor:pointer; width:16px; height:16px; }
+
+    .wanb-status-badge { display:inline-block; padding:2px 8px; border-radius:8px; font-size:10.5px; font-weight:600; text-transform:uppercase; letter-spacing:.3px; }
+    .wanb-status-open           { background:rgba(56,189,248,.15); color:#0284c7; }
+    .wanb-status-overdue        { background:rgba(239,68,68,.15); color:#b91c1c; }
+    .wanb-status-partially_paid { background:rgba(245,158,11,.15); color:#b45309; }
+    .wanb-status-paid           { background:rgba(34,197,94,.15); color:#15803d; }
+    .wanb-status-credited       { background:var(--bg-elev-2); color:var(--text-faint); }
+    .wanb-status-concept        { background:var(--bg-elev-2); color:var(--text-dim); }
+
+    /* Bulk-actie-balk */
+    .wanb-bulk-bar {
+      position:sticky; top:0; z-index:30;
+      display:flex; align-items:center; justify-content:space-between;
+      gap:12px;
+      background:var(--brand-primary-soft, rgba(56,189,248,.12));
+      border:1px solid var(--brand-primary, #06b6d4);
+      border-radius:10px;
+      padding:10px 16px;
+      margin-bottom:14px;
+      box-shadow:0 2px 8px rgba(0,0,0,.06);
+    }
+    .wanb-bulk-bar.hidden { display:none !important; }
+    .wanb-bulk-count {
+      font-size:13px; font-weight:600; color:var(--brand-primary, #06b6d4);
+      display:inline-flex; align-items:center; gap:8px;
+    }
+    .wanb-bulk-actions { display:inline-flex; gap:8px; }
+    .wanb-bulk-actions .btn { font-size:12.5px; padding:7px 14px; }
+
+    /* Modal */
+    .modal-overlay { position:fixed; inset:0; background:rgba(0,0,0,0.6); z-index:500; display:flex; align-items:center; justify-content:center; backdrop-filter:blur(4px); }
+    .modal-overlay.hidden { display:none!important; }
+    .modal-card { background:var(--bg-elev); border:1px solid var(--border-strong); border-radius:14px; width:100%; max-width:480px; margin:20px; }
+    .modal-header { display:flex; align-items:center; justify-content:space-between; padding:16px 20px; border-bottom:1px solid var(--border); }
+    .modal-title { font-size:15px; font-weight:600; }
+    .modal-close { background:transparent; border:none; color:var(--text-faint); font-size:16px; cursor:pointer; padding:4px; line-height:1; }
+    .modal-body { padding:20px; font-size:13px; line-height:1.5; }
+    .modal-footer { display:flex; justify-content:flex-end; gap:8px; padding:14px 20px; border-top:1px solid var(--border); }
+    .form-error { margin-top:10px; padding:8px 12px; background:var(--color-danger-soft, rgba(220,38,38,0.08)); border:1px solid var(--color-danger, #dc2626); border-radius:8px; font-size:12px; color:var(--color-danger-text, #b91c1c); }
+    .form-error.hidden { display:none!important; }
+
+    .hidden { display:none !important; }
+  </style>
+</head>
+<body>
+
+<div id="sidebar-mount"></div>
+
+<div class="main">
+  <div class="main-inner">
+
+    <div class="page-header">
+      <div>
+        <h1 class="page-title">Wanbetalers</h1>
+        <p class="page-sub">Open facturen met optie om bulk een dunning-workflow te starten.</p>
+      </div>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-sm" onclick="loadWanbInvoices()" title="Lijst opnieuw laden"><i class="ti ti-refresh"></i> Verversen</button>
+      </div>
+    </div>
+
+    <!-- Bulk-actie-balk (default hidden) -->
+    <div id="wanbBulkActionBar" class="wanb-bulk-bar hidden" role="region" aria-label="Bulk-acties">
+      <div class="wanb-bulk-count">
+        <i class="ti ti-checks"></i>
+        <span id="wanbBulkCountLabel">0 facturen geselecteerd</span>
+      </div>
+      <div class="wanb-bulk-actions">
+        <button type="button" class="btn btn-primary" id="wanbBulkStartBtn" onclick="openBulkConfirm()">
+          <i class="ti ti-player-play"></i> Start dunning-workflow
+        </button>
+        <button type="button" class="btn" id="wanbBulkCancelBtn" onclick="cancelBulk()">Annuleren</button>
+      </div>
+    </div>
+
+    <div class="section-card" id="view-wanbetalers">
+      <div class="section-header" style="margin-bottom:10px">
+        <span>Open facturen</span>
+        <span style="font-size:11.5px;color:var(--text-faint);font-weight:400" id="wanbTotalHint">0 facturen</span>
+      </div>
+
+      <!-- Filter pills: status -->
+      <div class="wanb-filter-strip" id="wanbStatusStrip">
+        <span style="font-size:11px;text-transform:uppercase;color:var(--text-faint);font-weight:600;letter-spacing:.4px;margin-right:4px">Status</span>
+        <button type="button" class="wanb-pill active" data-wanb-status="overdue"        onclick="switchWanbStatus('overdue')">Te laat <span class="wanb-pill-count" id="wanbPillOverdue">0</span></button>
+        <button type="button" class="wanb-pill"        data-wanb-status="open"           onclick="switchWanbStatus('open')">Open <span class="wanb-pill-count" id="wanbPillOpen">0</span></button>
+        <button type="button" class="wanb-pill"        data-wanb-status="partially_paid" onclick="switchWanbStatus('partially_paid')">Deels betaald <span class="wanb-pill-count" id="wanbPillPartial">0</span></button>
+        <button type="button" class="wanb-pill"        data-wanb-status="all_open"       onclick="switchWanbStatus('all_open')">Alle open <span class="wanb-pill-count" id="wanbPillAllOpen">0</span></button>
+      </div>
+
+      <!-- Tabel -->
+      <div style="overflow-x:auto">
+        <table class="wanb-table" id="wanbTable">
+          <thead>
+            <tr>
+              <th class="wanb-col-cb">
+                <input type="checkbox" id="wanbBulkSelectAll" onchange="selectAllToggle(this.checked)" title="Selecteer alle zichtbare facturen"/>
+              </th>
+              <th style="width:140px">Factuurnummer</th>
+              <th>Klant</th>
+              <th style="width:120px">Vervaldatum</th>
+              <th style="width:110px">Bedrag</th>
+              <th style="width:110px">Openstaand</th>
+              <th style="width:120px">Status</th>
+            </tr>
+          </thead>
+          <tbody id="wanbTableBody">
+            <tr><td colspan="7" style="color:var(--text-faint);padding:20px;text-align:center">Laden&hellip;</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+  </div><!-- /main-inner -->
+</div><!-- /main -->
+
+<!-- Bulk confirm modal -->
+<div class="modal-overlay hidden" id="wanbBulkConfirmModal" role="dialog" aria-modal="true">
+  <div class="modal-card">
+    <div class="modal-header">
+      <div class="modal-title">Dunning-workflow starten</div>
+      <button class="modal-close" onclick="closeBulkConfirm()">&#x2715;</button>
+    </div>
+    <div class="modal-body">
+      <p id="wanbBulkConfirmText" style="margin:0 0 8px 0">
+        Je gaat <strong><span id="wanbBulkConfirmCount">0</span></strong> facturen toevoegen aan dunning-workflow. Doorgaan?
+      </p>
+      <p style="margin:0;color:var(--text-faint);font-size:12px">
+        Per klant wordt &eacute;&eacute;n actieve workflow-run gestart. Klanten met al een actieve run of een lopend payment-arrangement worden overgeslagen.
+      </p>
+      <div class="form-error hidden" id="wanbBulkConfirmError"></div>
+    </div>
+    <div class="modal-footer">
+      <button type="button" class="btn" onclick="closeBulkConfirm()">Annuleren</button>
+      <button type="button" class="btn btn-primary" id="wanbBulkConfirmBtn" onclick="submitBulkStartWorkflow()">
+        <i class="ti ti-player-play"></i> Doorgaan
+      </button>
+    </div>
+  </div>
+</div>
+
+<script src="/modules/shared/supabase-client.js"></script>
+<script src="/modules/shared/agent-shared.js"></script>
+<script>
+  // Module-scope state
+  let _wanbActiveStatus = 'overdue';   // overdue | open | partially_paid | all_open
+  let _wanbInvoices = [];              // huidige lijst (na server-filter)
+  let _wanbLoading = false;
+  let _wanbSelectedInvoices = new Set(); // invoice_ids die aangevinkt staan
+  let _wanbSubmitting = false;
+
+  // Statussen die als "open" tellen voor bulk-checkbox eligibility.
+  const BULK_ELIGIBLE_STATUSES = ['open', 'overdue', 'partially_paid'];
+
+  function esc(s) {
+    if (s == null) return '';
+    try {
+      if (window.AgentShared && typeof window.AgentShared.esc === 'function') {
+        return window.AgentShared.esc(s);
+      }
+    } catch (_) {}
+    return String(s)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
+  function fmtEur(v) {
+    const n = Number(v);
+    if (!isFinite(n)) return '—';
+    return '€ ' + n.toLocaleString('nl-NL', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  }
+
+  function fmtDate(s) {
+    if (!s) return '—';
+    try {
+      const d = new Date(String(s).length === 10 ? (String(s) + 'T00:00:00') : String(s));
+      if (isNaN(d.getTime())) return String(s);
+      return String(d.getDate()).padStart(2,'0') + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + d.getFullYear();
+    } catch (_) { return String(s); }
+  }
+
+  function statusBadge(status) {
+    const s = String(status || '').toLowerCase();
+    const known = ['open','overdue','partially_paid','paid','credited','concept'];
+    const cls = known.includes(s) ? 'wanb-status-' + s : 'wanb-status-open';
+    const label = (s === 'partially_paid') ? 'Deels betaald'
+                : (s === 'overdue') ? 'Te laat'
+                : (s === 'open') ? 'Open'
+                : (s === 'paid') ? 'Betaald'
+                : (s === 'credited') ? 'Gecrediteerd'
+                : (s === 'concept') ? 'Concept'
+                : s;
+    return '<span class="wanb-status-badge ' + cls + '">' + esc(label) + '</span>';
+  }
+
+  function isBulkEligible(inv) {
+    const s = String(inv.status || '').toLowerCase();
+    // overdue = open & due_date < today (server kan dit als virtuele status teruggeven)
+    if (BULK_ELIGIBLE_STATUSES.indexOf(s) !== -1) return true;
+    return false;
+  }
+
+  // Server-side mapping: voor 'overdue' filteren we client-side (server kent
+  // dit als virtuele status); voor 'open' / 'partially_paid' geven we de
+  // status door. 'all_open' = open OF partially_paid OF overdue.
+  function buildInvoicesUrl() {
+    const params = new URLSearchParams();
+    if (_wanbActiveStatus === 'open') {
+      params.set('status', 'open');
+    } else if (_wanbActiveStatus === 'partially_paid') {
+      params.set('status', 'partially_paid');
+    } else if (_wanbActiveStatus === 'overdue') {
+      params.set('status', 'overdue');
+    } else if (_wanbActiveStatus === 'all_open') {
+      // Geen status-param: server returnt alles; client filtert.
+    }
+    params.set('page_size', '200');
+    params.set('sort', 'due_date');
+    params.set('dir', 'asc');
+    return '/api/finance-invoices?' + params.toString();
+  }
+
+  async function loadWanbInvoices() {
+    const tbody = document.getElementById('wanbTableBody');
+    if (!tbody) return;
+    if (_wanbLoading) return;
+    _wanbLoading = true;
+    tbody.innerHTML = '<tr><td colspan="7" style="color:var(--text-faint);padding:20px;text-align:center">Laden&hellip;</td></tr>';
+    try {
+      const url = buildInvoicesUrl();
+      const r = await window.AgentShared.apiFetch(url);
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        tbody.innerHTML = '<tr><td colspan="7" style="color:var(--color-danger,#dc2626);padding:20px;text-align:center">Fout: ' + esc(d.error || ('HTTP ' + r.status)) + '</td></tr>';
+        return;
+      }
+      let items = Array.isArray(d.items) ? d.items : [];
+      // Client-side filter voor 'all_open' (open + overdue + partially_paid).
+      if (_wanbActiveStatus === 'all_open') {
+        items = items.filter(function (inv) {
+          const s = String(inv.display_status || inv.status || '').toLowerCase();
+          return s === 'open' || s === 'overdue' || s === 'partially_paid';
+        });
+      }
+      _wanbInvoices = items;
+
+      // Zorg dat de huidige selectie niet meer bevat dan zichtbaar is.
+      // (Geselecteerde IDs blijven bewaard als ze nog zichtbaar zijn in de
+      // huidige lijst; rijen die verdwijnen na filter-switch worden
+      // gedeselecteerd om ghost-selecties te voorkomen.)
+      const visibleIds = new Set(items.map(function (it) { return it.id; }));
+      const toRemove = [];
+      _wanbSelectedInvoices.forEach(function (id) { if (!visibleIds.has(id)) toRemove.push(id); });
+      toRemove.forEach(function (id) { _wanbSelectedInvoices.delete(id); });
+
+      renderWanbRows();
+      renderBulkBar();
+      updateSelectAllState();
+
+      const hint = document.getElementById('wanbTotalHint');
+      if (hint) hint.textContent = items.length + ' facturen';
+
+      // Pill-counts: gebruik de KPI-aggregaten als beschikbaar; anders fallback
+      // op telling van zichtbare items.
+      const kpi = d.kpis || d.kpi || {};
+      const pillOverdue = document.getElementById('wanbPillOverdue');
+      const pillOpen = document.getElementById('wanbPillOpen');
+      const pillPartial = document.getElementById('wanbPillPartial');
+      const pillAllOpen = document.getElementById('wanbPillAllOpen');
+      if (pillOverdue) pillOverdue.textContent = String(kpi.overdueCount != null ? kpi.overdueCount : (_wanbActiveStatus === 'overdue' ? items.length : ''));
+      if (pillOpen) pillOpen.textContent = String(kpi.openCount != null ? kpi.openCount : (_wanbActiveStatus === 'open' ? items.length : ''));
+      if (pillPartial) pillPartial.textContent = '';
+      if (pillAllOpen) pillAllOpen.textContent = String(kpi.openCount != null ? kpi.openCount : '');
+    } catch (e) {
+      console.error('[loadWanbInvoices]', e);
+      tbody.innerHTML = '<tr><td colspan="7" style="color:var(--color-danger,#dc2626);padding:20px;text-align:center">Fout: ' + esc(e.message) + '</td></tr>';
+    } finally {
+      _wanbLoading = false;
+    }
+  }
+
+  function renderWanbRows() {
+    const tbody = document.getElementById('wanbTableBody');
+    if (!tbody) return;
+    if (!_wanbInvoices.length) {
+      tbody.innerHTML = '<tr><td colspan="7" style="color:var(--text-faint);padding:20px;text-align:center">Geen facturen in deze view.</td></tr>';
+      return;
+    }
+    const rows = _wanbInvoices.map(function (inv) {
+      const eligible = isBulkEligible(inv);
+      const checked  = _wanbSelectedInvoices.has(inv.id);
+      const cbCell = eligible
+        ? '<input type="checkbox" class="wanb-bulk-cb" data-invoice-id="' + esc(inv.id) + '" ' + (checked ? 'checked' : '') + ' onchange="toggleBulkCb(\'' + esc(inv.id) + '\', this.checked)"/>'
+        : '<span style="color:var(--text-faint);font-size:11px" title="Niet eligible voor bulk-actie">—</span>';
+
+      const cust = inv.customer || {};
+      const custCell = cust.id
+        ? '<a href="/modules/klanten.html?id=' + esc(cust.id) + '" style="color:var(--brand-secondary,var(--accent-cyan,#06b6d4));text-decoration:none;font-weight:500">' + esc(cust.name || '(onbekend)') + '</a>'
+        : esc(cust.name || '(geen klant)');
+
+      const outstanding = (function () {
+        const tot = Number(inv.amount_total) || 0;
+        const paid = Number(inv.amount_paid) || 0;
+        const credited = Number(inv.credited_amount) || 0;
+        return Math.max(0, tot - paid - credited);
+      })();
+
+      const dispStatus = inv.display_status || inv.status || '';
+
+      return '<tr data-invoice-row="' + esc(inv.id) + '">' +
+               '<td class="wanb-col-cb">' + cbCell + '</td>' +
+               '<td><strong>' + esc(inv.invoice_number || ('inv ' + String(inv.id || '').slice(0,8))) + '</strong></td>' +
+               '<td>' + custCell + '</td>' +
+               '<td>' + esc(fmtDate(inv.due_date)) + '</td>' +
+               '<td>' + esc(fmtEur(inv.amount_total)) + '</td>' +
+               '<td><strong>' + esc(fmtEur(outstanding)) + '</strong></td>' +
+               '<td>' + statusBadge(dispStatus) + '</td>' +
+             '</tr>';
+    }).join('');
+    tbody.innerHTML = rows;
+  }
+
+  // Toggle individuele checkbox.
+  function toggleBulkCb(invoiceId, checked) {
+    if (!invoiceId) return;
+    if (checked) _wanbSelectedInvoices.add(invoiceId);
+    else _wanbSelectedInvoices.delete(invoiceId);
+    renderBulkBar();
+    updateSelectAllState();
+  }
+
+  // Header-checkbox: vink alle zichtbare eligible rows in/uit.
+  function selectAllToggle(checked) {
+    const cbs = document.querySelectorAll('.wanb-bulk-cb');
+    for (let i = 0; i < cbs.length; i++) {
+      const id = cbs[i].getAttribute('data-invoice-id');
+      if (!id) continue;
+      cbs[i].checked = !!checked;
+      if (checked) _wanbSelectedInvoices.add(id);
+      else _wanbSelectedInvoices.delete(id);
+    }
+    renderBulkBar();
+  }
+
+  // Header-checkbox indeterminate-state spiegelt huidige selectie.
+  function updateSelectAllState() {
+    const headerCb = document.getElementById('wanbBulkSelectAll');
+    if (!headerCb) return;
+    const cbs = document.querySelectorAll('.wanb-bulk-cb');
+    const total = cbs.length;
+    let checked = 0;
+    for (let i = 0; i < cbs.length; i++) { if (cbs[i].checked) checked++; }
+    if (total === 0) { headerCb.checked = false; headerCb.indeterminate = false; return; }
+    if (checked === 0) { headerCb.checked = false; headerCb.indeterminate = false; }
+    else if (checked === total) { headerCb.checked = true; headerCb.indeterminate = false; }
+    else { headerCb.checked = false; headerCb.indeterminate = true; }
+  }
+
+  // Toon / verberg de bulk-actie-balk + update count-label.
+  function renderBulkBar() {
+    const bar = document.getElementById('wanbBulkActionBar');
+    const lbl = document.getElementById('wanbBulkCountLabel');
+    const n = _wanbSelectedInvoices.size;
+    if (lbl) lbl.textContent = n + (n === 1 ? ' factuur geselecteerd' : ' facturen geselecteerd');
+    if (bar) bar.classList.toggle('hidden', n < 1);
+  }
+
+  function cancelBulk() {
+    _wanbSelectedInvoices.clear();
+    // Reset alle visible checkboxes
+    const cbs = document.querySelectorAll('.wanb-bulk-cb');
+    for (let i = 0; i < cbs.length; i++) cbs[i].checked = false;
+    renderBulkBar();
+    updateSelectAllState();
+  }
+
+  // Confirm-modal.
+  function openBulkConfirm() {
+    if (_wanbSelectedInvoices.size < 1) return;
+    const cntEl = document.getElementById('wanbBulkConfirmCount');
+    if (cntEl) cntEl.textContent = String(_wanbSelectedInvoices.size);
+    const errEl = document.getElementById('wanbBulkConfirmError');
+    if (errEl) { errEl.classList.add('hidden'); errEl.textContent = ''; }
+    const modal = document.getElementById('wanbBulkConfirmModal');
+    if (modal) modal.classList.remove('hidden');
+  }
+
+  function closeBulkConfirm() {
+    const modal = document.getElementById('wanbBulkConfirmModal');
+    if (modal) modal.classList.add('hidden');
+  }
+
+  // POST naar de bulk-start-workflow endpoint.
+  async function submitBulkStartWorkflow() {
+    if (_wanbSubmitting) return;
+    if (_wanbSelectedInvoices.size < 1) return;
+    const errEl = document.getElementById('wanbBulkConfirmError');
+    const btn = document.getElementById('wanbBulkConfirmBtn');
+    if (errEl) { errEl.classList.add('hidden'); errEl.textContent = ''; }
+    _wanbSubmitting = true;
+    if (btn) btn.disabled = true;
+
+    const invoiceIds = Array.from(_wanbSelectedInvoices);
+    try {
+      const r = await window.AgentShared.apiFetch('/api/wanbetalers-bulk-start-workflow', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ invoice_ids: invoiceIds }),
+      });
+      const d = await r.json().catch(() => ({}));
+      // 207 Multi-Status is success-met-partial-fail; behandel als success.
+      if (!r.ok && r.status !== 207) {
+        const msg = d.error || ('HTTP ' + r.status);
+        if (errEl) { errEl.textContent = msg; errEl.classList.remove('hidden'); }
+        return;
+      }
+      const added = Number(d.success_count || 0);
+      const skipped = Number(d.fail_count || 0);
+      closeBulkConfirm();
+      cancelBulk();
+      if (window.AgentShared && typeof window.AgentShared.showToast === 'function') {
+        window.AgentShared.showToast(added + ' workflows gestart, ' + skipped + ' overgeslagen', 'success');
+      }
+      // Reload lijst zodat klanten met een actieve run er anders uit zien.
+      loadWanbInvoices();
+    } catch (e) {
+      console.error('[submitBulkStartWorkflow]', e);
+      if (errEl) { errEl.textContent = e.message || String(e); errEl.classList.remove('hidden'); }
+    } finally {
+      _wanbSubmitting = false;
+      if (btn) btn.disabled = false;
+    }
+  }
+
+  // Status-pill wisselen
+  function switchWanbStatus(s) {
+    if (!s || s === _wanbActiveStatus) return;
+    _wanbActiveStatus = s;
+    const pills = document.querySelectorAll('[data-wanb-status]');
+    for (let i = 0; i < pills.length; i++) {
+      const p = pills[i];
+      const isActive = (p.getAttribute('data-wanb-status') === s);
+      p.classList.toggle('active', isActive);
+    }
+    // Reset selectie bij status-wissel om verwarring te voorkomen.
+    cancelBulk();
+    loadWanbInvoices();
+  }
+
+  // Init
+  async function init() {
+    await window._authSharedReady;
+    const profile = await window.AuthShared.requireAuth();
+    if (!profile) return;
+
+    if (window.AgentShared) {
+      try { await window.AgentShared.renderUserSection(profile); } catch (_) {}
+    }
+
+    // Modal sluiten bij click op overlay + Escape.
+    const modal = document.getElementById('wanbBulkConfirmModal');
+    if (modal) modal.addEventListener('click', function (e) {
+      if (e.target === modal) closeBulkConfirm();
+    });
+    document.addEventListener('keydown', function (e) {
+      if (e.key !== 'Escape') return;
+      const m = document.getElementById('wanbBulkConfirmModal');
+      if (m && !m.classList.contains('hidden')) closeBulkConfirm();
+    });
+
+    loadWanbInvoices();
+  }
+
+  init();
+</script>
+<script src="/modules/shared/permissions.js"></script>
+<script src="/modules/shared/sidebar.js"></script>
+</body>
+</html>
