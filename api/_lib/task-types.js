@@ -37,6 +37,18 @@ export const TASK_ACTION_TYPES = {
 
   // --- F3: handmatige escalatie-task (inbox/Joost -> finance) ---
   MANUAL_ESCALATION: 'escalation',
+
+  // --- E2/F-uitbreiding: Joost / inbox -> finance ---
+  // Joost stelt een betalingsregeling voor (uitstel/splitsing/etc) buiten zijn
+  // mandaat en parkeert het als taak voor menselijke goedkeuring. Valt onder
+  // de bestaande 'arrangement'-categorie zodat de UI/queue-filter ongewijzigd
+  // blijft.
+  MANUAL_PROPOSE_ARRANGEMENT: 'arrangement',
+  // Follow-up bericht / reminder die door een mens moet worden opgesteld of
+  // verstuurd (bv. na no-reply-streak waar autonomy gepauzeerd is). Hangt
+  // semantisch aan een arrangement / regeling-flow en blijft daarom binnen
+  // de 'arrangement'-categorie.
+  MANUAL_FOLLOWUP: 'arrangement',
 };
 
 /**
@@ -60,4 +72,26 @@ export function getTaskCategoryFor(actionType) {
  */
 export function getTaskCategoryLabel(categoryKey) {
   return TASK_CATEGORY[categoryKey] || TASK_CATEGORY.unknown;
+}
+
+// Optionele NL-labels per action_type voor UI-rendering (badge / row-title).
+// Niet exhaustive: alleen MANUAL_* / nieuwe types waar de TL_*-namen al
+// elders een eigen label-hook hebben (arrangement-types via type-mapper).
+export const TASK_ACTION_LABEL = {
+  MANUAL_VERIFY_PAYMENT:       'Betaling verifiëren',
+  MANUAL_ESCALATION:           'Escalatie',
+  MANUAL_PROPOSE_ARRANGEMENT:  'Voorstel afspraak',
+  MANUAL_FOLLOWUP:             'Follow-up bericht',
+};
+
+/**
+ * Geef het NL-label voor een action_type. Onbekende waardes vallen terug op
+ * de action_type-string zelf zodat de UI nooit een lege cell laat.
+ *
+ * @param {string} actionType
+ * @returns {string}
+ */
+export function getTaskActionLabel(actionType) {
+  if (typeof actionType !== 'string' || !actionType) return '';
+  return TASK_ACTION_LABEL[actionType] || actionType;
 }
