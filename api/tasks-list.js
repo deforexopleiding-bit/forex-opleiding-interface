@@ -26,7 +26,10 @@
 //         reject_reason, scheduled_for, expires_at, created_at, updated_at,
 //         customer:    { id, name, email } | null,
 //         arrangement: { id, type, arrangement_status } | null,
-//         invoice:     { id, invoice_number, amount_total, invoice_status } | null
+//         invoice:     { id, invoice_number, amount_total, invoice_status } | null,
+//         linked_joost_suggestion: {
+//           id, suggested_reply, detected_intent, confidence, conversation_id
+//         } | null
 //       }, ...
 //     ],
 //     total,
@@ -151,7 +154,8 @@ export default async function handler(req, res) {
         rejection_reason, scheduled_for, expires_at, created_at, updated_at,
         customers:customer_id ( id, is_company, company_name, first_name, last_name, email ),
         payment_arrangements:arrangement_id ( id, type, status ),
-        invoices:invoice_id ( id, invoice_number, amount_total, status )
+        invoices:invoice_id ( id, invoice_number, amount_total, status ),
+        joost_suggestions!linked_task_id ( id, suggested_reply, detected_intent, confidence, conversation_id )
       `, { count: 'exact' })
       .order('created_at', { ascending: false })
       .range(offset, offset + limit - 1);
@@ -182,6 +186,11 @@ export default async function handler(req, res) {
       const cust = row.customers || null;
       const arr  = row.payment_arrangements || null;
       const inv  = row.invoices || null;
+      // PostgREST reverse-embed retourneert array; pak eerste (er is max 1 row
+      // omdat linked_task_id niet uniek per pending_action is, maar in praktijk
+      // is dat een 1:1-relatie via de joost-create-task flow).
+      const suggArr = Array.isArray(row.joost_suggestions) ? row.joost_suggestions : [];
+      const sugg = suggArr.length > 0 ? suggArr[0] : null;
       return {
         id:               row.id,
         customer_id:      row.customer_id,
@@ -215,6 +224,13 @@ export default async function handler(req, res) {
           invoice_number: inv.invoice_number,
           amount_total:   inv.amount_total,
           invoice_status: inv.status,
+        } : null,
+        linked_joost_suggestion: sugg ? {
+          id:              sugg.id,
+          suggested_reply: sugg.suggested_reply || null,
+          detected_intent: sugg.detected_intent || null,
+          confidence:      (sugg.confidence != null) ? Number(sugg.confidence) : null,
+          conversation_id: sugg.conversation_id || null,
         } : null,
       };
     });
