@@ -7006,26 +7006,55 @@
   }
 
   // Open de klant-info modal en render de body via renderInboxCustomerPanel met
-  // de bestaande in-memory _inboxCustomerContext (geladen bij conv-open). Geen
-  // nieuwe fetch nodig — context wordt automatisch ververst bij conv-switch en
-  // bij koppel-acties (zie loadInboxCustomerContext-callers).
-  function openInboxCustomerModal() {
+  // de bestaande in-memory _inboxCustomerContext (geladen bij conv-open).
+  //
+  // Race-fix (#155): openInboxConv vuurt loadInboxCustomerContext fire-and-forget
+  // af, dus als de gebruiker direct na conv-switch op de klantnaam klikt is
+  // _inboxCustomerContext nog null en viel de modal terug op de unknown-skeleton
+  // met "Onbekend contact / OC / —" — terwijl de chat-header al de echte naam
+  // toonde (eigen data-source via _inboxActiveConv). Fix: maak modal-open async,
+  // toon skeleton bij ontbrekende context, await de fetch, render met verse data.
+  async function openInboxCustomerModal() {
     const modal = document.getElementById('inboxCustomerModal');
     if (!modal) return;
     // Trigger (klantnaam-klik + klant-info knop in chat-header) is alleen
     // beschikbaar bij een actieve conv, dus empty-state is geen valide path
     // meer. Bij ontbrekend convId fail-soft sluiten ipv lege modal tonen.
     if (!_inboxActiveConvId) return;
-    const ctx = _inboxCustomerContext;
-    if (ctx && ctx.customer && ctx.customer.id) {
-      renderInboxCustomerPanel('matched', ctx);
-    } else if (ctx) {
-      renderInboxCustomerPanel('unknown', ctx);
-    } else {
-      // Context nog niet geladen (race): fail-soft → unknown skeleton-vrij.
-      renderInboxCustomerPanel('unknown', { conversation: null, customer: null, open_invoices: [], totals: { open_amount: 0, invoice_count: 0 } });
+
+    // Snel openen + render uit cache als beschikbaar. Voorkomt knipperende skeleton
+    // wanneer de fetch al klaar is (de normale happy-path bij gebruikers die niet
+    // direct na conv-switch klikken).
+    const cached = _inboxCustomerContext;
+    if (cached && cached.customer && cached.customer.id) {
+      renderInboxCustomerPanel('matched', cached);
+      modal.classList.remove('hidden');
+      return;
     }
+    if (cached && cached.conversation) {
+      // Cache aanwezig, maar unknown (geen gekoppelde klant) — direct unknown
+      // renderen, geen extra fetch nodig.
+      renderInboxCustomerPanel('unknown', cached);
+      modal.classList.remove('hidden');
+      return;
+    }
+
+    // Geen (bruikbare) cache: open modal met skeleton + await de fetch zodat we
+    // niet onterecht in unknown-state landen terwijl de echte data nog inflight is.
     modal.classList.remove('hidden');
+    _inboxShowCustomerPanelSkeleton();
+    const convIdAtOpen = _inboxActiveConvId;
+    try {
+      await loadInboxCustomerContext(convIdAtOpen);
+    } catch (_e) {
+      // loadInboxCustomerContext handelt errors zelf af (rendert unknown).
+    }
+    // Conv-switch guard: gebruiker kan tussentijds een andere conv hebben gekozen.
+    // In dat geval heeft de tweede load al een verse render gedaan — niet
+    // overschrijven met onze oude convId-data.
+    if (convIdAtOpen !== _inboxActiveConvId) return;
+    // loadInboxCustomerContext heeft _inboxCustomerContext gezet én al de juiste
+    // render-call gedaan. Niets extra te doen — modal staat al open.
   }
   function closeInboxCustomerModal() {
     const modal = document.getElementById('inboxCustomerModal');
