@@ -3,11 +3,12 @@
  * Finance Instellingen — beheer-paneel binnen Finance met 3 sub-secties:
  *   1. Joost AI (config / autonomy / decision log) — FULL extract uit
  *      modules/admin.html (Groep D)
- *   2. WhatsApp Templates — DEEP-LINK naar admin.html#whatsapp-templates
- *      (PARTIAL — volledige verhuis volgt in vervolg-PR)
- *   3. WhatsApp Connection / Afdeling-config — DEEP-LINK naar
- *      admin.html#whatsapp-connection (PARTIAL — volledige verhuis volgt
- *      in vervolg-PR)
+ *   2. WhatsApp Templates — FULL extract uit modules/admin.html (PR-4):
+ *      WABA-selector, sub-tabs Meta Templates + Snelle antwoorden,
+ *      Meta-editor met variabelen-paneel + live preview + Meta-sync.
+ *   3. WhatsApp Connection / Afdeling-config — FULL extract uit
+ *      modules/admin.html (PR-4): module-koppelingen + edit-modal met
+ *      contact-info afdeling sectie + webhook-subscribe.
  *
  * Public API: window.FinanceInstellingen.mount({
  *   host: HTMLElement,
@@ -17,14 +18,27 @@
  * mount-guard. Sub-tab state via ?sub=joost|templates|connection URL-param.
  *
  * RBAC: respecteert admin.joost_config (Joost) / admin.whatsapp_templates
- * (Templates) / admin.arrangement_settings (Afdeling) — server-side
- * fail-fast op de onderliggende endpoints. UI rendert altijd (geen client
- * gate); 403's tonen we als load-error.
+ * (Templates) / admin.whatsapp_config (Connection) — server-side fail-fast
+ * op de onderliggende endpoints. UI rendert altijd (geen client gate);
+ * 403's tonen we als load-error.
  *
  * Endpoints (server blijft op admin-* namespace in deze PR — geen rename):
- *   - GET /api/joost-config-get?module=finance
+ *   - GET  /api/joost-config-get?module=finance
  *   - POST /api/joost-config-upsert
- *   - GET /api/joost-autonomy-decisions-list?limit=50
+ *   - GET  /api/joost-autonomy-decisions-list?limit=50
+ *   - GET  /api/admin-whatsapp-modules-list
+ *   - POST /api/admin-whatsapp-module-upsert
+ *   - GET  /api/admin-whatsapp-numbers-available
+ *   - POST /api/admin-whatsapp-webhook-subscribe
+ *   - GET  /api/admin-whatsapp-wabas-list
+ *   - GET  /api/admin-meta-templates-list?business_account_id=...
+ *   - POST /api/admin-meta-templates-upsert (+ PATCH ?id=...)
+ *   - DELETE /api/admin-meta-templates-delete?id=...
+ *   - POST /api/admin-meta-templates-submit
+ *   - POST /api/admin-meta-templates-sync
+ *   - GET  /api/admin-quick-replies-list
+ *   - POST /api/admin-quick-replies-upsert (+ PATCH ?id=...)
+ *   - DELETE /api/admin-quick-replies-delete?id=...
  */
 (function () {
   if (window.FinanceInstellingen && window.FinanceInstellingen.__loaded) return;
@@ -147,43 +161,14 @@
         ${renderJoostMarkup()}
       </div>
 
-      <!-- ─── Sub-tab: WhatsApp Templates (deep-link tijdelijk) ─── -->
+      <!-- ─── Sub-tab: WhatsApp Templates (PR-4 full extract) ─── -->
       <div id="fiSubTemplates" hidden>
-        <div class="fi-deeplink-card">
-          <strong>WhatsApp Templates beheer</strong>
-          <div style="margin-top:8px;color:var(--text-dim)">
-            Beheer Meta-goedgekeurde message templates &eacute;n interne &laquo;snelle antwoorden&raquo;
-            (free-form binnen 24u-window). Selecteer eerst de WhatsApp Business Account.
-          </div>
-          <div style="margin-top:10px;color:var(--text-faint);font-size:12px">
-            <em>Tijdelijk via Admin &mdash; volledige verhuis naar Finance &gt; Instellingen
-            volgt in een vervolg-PR (template-editor met variabelen-paneel is een complex
-            sub-systeem van ~1400 regels code).</em>
-          </div>
-          <a class="btn btn-primary" href="/modules/admin.html#whatsapp-templates" target="_blank" rel="noopener">
-            <i class="ti ti-external-link"></i> Open WhatsApp Templates (Admin)
-          </a>
-        </div>
+        ${renderTemplatesMarkup()}
       </div>
 
-      <!-- ─── Sub-tab: WhatsApp Connection / Afdeling-config (deep-link tijdelijk) ─── -->
+      <!-- ─── Sub-tab: WhatsApp Connection / Afdeling-config (PR-4 full extract) ─── -->
       <div id="fiSubConnection" hidden>
-        <div class="fi-deeplink-card">
-          <strong>Afdeling-configuratie &mdash; WhatsApp module-koppelingen</strong>
-          <div style="margin-top:8px;color:var(--text-dim)">
-            Koppel modules (Inbox, Finance, Sales, &hellip;) aan een specifiek WhatsApp Cloud
-            API telefoonnummer. Per module bepaal je hier ook de contact-informatie van de
-            afdeling: bel-nummer, WhatsApp-nummer, e-mail en ondertekenaar
-            (gebruikt in templates via <code>{afdeling.*}</code> placeholders).
-          </div>
-          <div style="margin-top:10px;color:var(--text-faint);font-size:12px">
-            <em>Tijdelijk via Admin &mdash; volledige verhuis naar Finance &gt; Instellingen
-            volgt in een vervolg-PR.</em>
-          </div>
-          <a class="btn btn-primary" href="/modules/admin.html#whatsapp-connection" target="_blank" rel="noopener">
-            <i class="ti ti-external-link"></i> Open WhatsApp Connection (Admin)
-          </a>
-        </div>
+        ${renderConnectionMarkup()}
       </div>
     `;
   }
@@ -224,6 +209,18 @@
         clearInterval(_joost.decisionsTimer);
         _joost.decisionsTimer = null;
       }
+    }
+
+    // Templates sub-tab: wire en laad WABAs (lazy).
+    if (sub === 'templates') {
+      wireWaTplOnce();
+      if (!_waTpl.loadedOnce) loadWaTplWabas();
+    }
+
+    // Connection sub-tab: wire en laad module-lijst.
+    if (sub === 'connection') {
+      wireWaConfOnce();
+      loadWaConfList();
     }
   }
 
@@ -1049,6 +1046,2029 @@
   window.addEventListener('beforeunload', () => {
     if (_joost.decisionsTimer) { clearInterval(_joost.decisionsTimer); _joost.decisionsTimer = null; }
   });
+
+  // ═════════════════════════════════════════════════════════════════════════
+  //   WHATSAPP CONNECTION — module-koppelingen + edit-modal + webhook-sub.
+  //   Full extract uit modules/admin.html (PR-4). Element-IDs blijven 1-op-1
+  //   ('waConf*') zodat de gekopieerde logica letterlijk werkt. Modals worden
+  //   in document.body geinjecteerd bij mount (eenmalig).
+  // ═════════════════════════════════════════════════════════════════════════
+
+  // Module-scope state (mirrored uit admin.html L1931-1934).
+  const _waConf = {
+    items: [],
+    phones: [],
+    editingId: null,
+    wired: false,
+    modalsInjected: false,
+  };
+
+  function renderConnectionMarkup() {
+    return `
+      <div class="section-card">
+        <div class="section-header" style="justify-content:space-between">
+          <div>
+            <div style="font-size:15px;font-weight:700">WhatsApp Module Connections</div>
+            <div style="font-size:12px;color:var(--text-faint);font-weight:400;margin-top:4px;max-width:680px">
+              Koppel modules (Inbox, Finance, Sales, ...) aan een specifiek WhatsApp Cloud API telefoonnummer.
+              Per module bepaalt deze tabel met welke afzendlijn berichten verstuurd worden en welke binnenkomende
+              berichten in welke inbox terechtkomen.
+            </div>
+          </div>
+          <div style="display:flex;gap:8px">
+            <button class="btn btn-sm" id="waConfReloadBtn" type="button" title="Lijst opnieuw laden"><i class="ti ti-refresh"></i></button>
+            <button class="btn btn-sm btn-primary" id="waConfAddBtn" type="button"><i class="ti ti-plus"></i> Module toevoegen</button>
+          </div>
+        </div>
+        <div style="overflow-x:auto">
+          <table class="users-table" id="waConfTable">
+            <thead>
+              <tr>
+                <th>Module</th>
+                <th>Telefoonnummer</th>
+                <th>Display label</th>
+                <th>Status</th>
+                <th>Acties</th>
+              </tr>
+            </thead>
+            <tbody id="waConfTbody">
+              <tr><td colspan="5" style="color:var(--text-faint);padding:20px">Laden&hellip;</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    `;
+  }
+
+  // Modals + editor-modal styles geinjecteerd in document.body bij mount (1x).
+  function ensureConnectionModalInjected() {
+    if (_waConf.modalsInjected) return;
+    if (document.getElementById('waConfEditModal')) {
+      // Reeds aanwezig (bv. via hot reload).
+      _waConf.modalsInjected = true;
+      return;
+    }
+    const wrap = document.createElement('div');
+    wrap.id = 'fiWaConfModalsRoot';
+    wrap.innerHTML = `
+      <style>
+        /* WhatsApp Connection edit modal — Contact-informatie afdeling sectie (C4.6) */
+        #waConfEditModal .wa-conf-afdeling-section { margin-top:12px; border-top:1px solid var(--border); padding-top:10px; }
+        #waConfEditModal .wa-conf-afdeling-section > summary { cursor:pointer; font-size:13px; font-weight:600; color:var(--text-dim); padding:4px 0; user-select:none; }
+        #waConfEditModal .wa-conf-afdeling-section > summary:hover { color:var(--text); }
+        #waConfEditModal .wa-conf-afdeling-form { display:grid; grid-template-columns:1fr; gap:8px; padding:8px 0; }
+        #waConfEditModal .wa-conf-afdeling-form .form-label { font-size:12px; color:var(--text-dim); margin-bottom:2px; display:block; }
+      </style>
+      <!-- WhatsApp Module Connection edit modal -->
+      <div class="modal-overlay hidden" id="waConfEditModal">
+        <div class="modal-card">
+          <div class="modal-header">
+            <div class="modal-title" id="waConfModalTitle">Module bewerken</div>
+            <button class="modal-close" type="button" data-fi-close="waConfEditModal">&#x2715;</button>
+          </div>
+          <div class="modal-body">
+            <div class="form-group">
+              <label class="form-label">Module key</label>
+              <input type="text" id="waConfModuleInput" class="form-input" placeholder="bv. inbox, finance, sales" />
+              <div style="font-size:11px;color:var(--text-faint);margin-top:4px">Unieke identifier. Niet wijzigen bij bestaande koppelingen.</div>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Display label</label>
+              <input type="text" id="waConfLabelInput" class="form-input" placeholder="bv. Inbox / Finance / Sales" />
+            </div>
+            <div class="form-group">
+              <label class="form-label">Telefoonnummer (Meta WABA)</label>
+              <select id="waConfPhoneSelect" class="form-input">
+                <option value="">Laden&hellip;</option>
+              </select>
+              <div style="font-size:11px;color:var(--text-faint);margin-top:4px">Gevuld vanuit /api/admin-whatsapp-numbers-available.</div>
+            </div>
+            <div class="form-group" style="display:flex;align-items:center;gap:8px">
+              <input type="checkbox" id="waConfActiveInput" checked style="width:16px;height:16px" />
+              <label for="waConfActiveInput" style="font-size:13px;cursor:pointer">Actief (gebruikt voor send/ontvangen)</label>
+            </div>
+            <details class="wa-conf-afdeling-section">
+              <summary>Contact-informatie afdeling</summary>
+              <div class="wa-conf-afdeling-form">
+                <div class="form-group">
+                  <label class="form-label" for="waConfAfdelingTelefoon">Telefoon (bel-nummer)</label>
+                  <input type="text" id="waConfAfdelingTelefoon" class="form-input" placeholder="+31 85 130 83 62" />
+                </div>
+                <div class="form-group">
+                  <label class="form-label" for="waConfAfdelingWhatsapp">WhatsApp-nummer</label>
+                  <input type="text" id="waConfAfdelingWhatsapp" class="form-input" placeholder="+31 6 51031673" />
+                </div>
+                <div class="form-group">
+                  <label class="form-label" for="waConfAfdelingEmail">E-mail</label>
+                  <input type="email" id="waConfAfdelingEmail" class="form-input" placeholder="administratie@deforexopleiding.nl" />
+                </div>
+                <div class="form-group">
+                  <label class="form-label" for="waConfAfdelingOndertekenaar">Ondertekenaar (naam)</label>
+                  <input type="text" id="waConfAfdelingOndertekenaar" class="form-input" placeholder="De Forex Opleiding" />
+                </div>
+              </div>
+            </details>
+            <div class="form-error hidden" id="waConfError"></div>
+          </div>
+          <div class="modal-footer">
+            <button class="btn" type="button" data-fi-close="waConfEditModal">Annuleren</button>
+            <button class="btn btn-primary" id="waConfSaveBtn" type="button">Opslaan</button>
+          </div>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(wrap);
+
+    // Close-buttons + backdrop wiring.
+    wrap.addEventListener('click', (e) => {
+      const closeBtn = e.target.closest('[data-fi-close]');
+      if (closeBtn) { closeWaConfEdit(); return; }
+      const overlay = e.target.closest('#waConfEditModal');
+      if (overlay && e.target === overlay) closeWaConfEdit();
+    });
+    document.getElementById('waConfSaveBtn')?.addEventListener('click', saveWaConfRow);
+    document.addEventListener('keydown', (e) => {
+      if (e.key !== 'Escape') return;
+      const m = document.getElementById('waConfEditModal');
+      if (m && !m.classList.contains('hidden')) closeWaConfEdit();
+    });
+
+    _waConf.modalsInjected = true;
+  }
+
+  // ═════════════════════════════════════════════════════════════════════════
+  //   WHATSAPP TEMPLATES — Meta-templates + Quick replies + editor-modal.
+  //   Full extract uit modules/admin.html (PR-4). Element-IDs blijven 1-op-1
+  //   ('waTpl*' / 'waMeta*' / 'waQr*') zodat de gekopieerde logica letterlijk
+  //   werkt. Modals + variable registry geinjecteerd in document.body.
+  // ═════════════════════════════════════════════════════════════════════════
+
+  const _waTpl = {
+    loadedOnce: false,
+    activeSub: 'meta',       // meta | quick
+    wired: false,
+    wabas: [],
+    activeWaba: null,
+    metaItems: [],
+    metaEditingId: null,
+    metaButtonsDraft: [],
+    metaCurrentExamples: {},
+    metaLastFocusedFieldId: 'waMetaBodyText',
+    qrItems: [],
+    qrEditingId: null,
+    modalsInjected: false,
+  };
+  // Read-only state op window (used by render-helpers).
+  window._waMetaReadOnly = false;
+
+  function renderTemplatesMarkup() {
+    return `
+      <div class="section-card">
+        <div class="section-header" style="justify-content:space-between">
+          <div>
+            <div style="font-size:15px;font-weight:700">WhatsApp Templates</div>
+            <div style="font-size:12px;color:var(--text-faint);font-weight:400;margin-top:4px;max-width:720px">
+              Beheer Meta-goedgekeurde message templates (vereist voor 24u+ outbound)
+              &eacute;n interne &laquo;snelle antwoorden&raquo; (free-form, binnen 24u-window).
+              Selecteer eerst de WhatsApp Business Account.
+            </div>
+          </div>
+          <div style="display:flex;gap:8px">
+            <button class="btn btn-sm" id="waTplReloadBtn" type="button" title="Lijst opnieuw laden"><i class="ti ti-refresh"></i></button>
+          </div>
+        </div>
+
+        <!-- WABA-selector strip -->
+        <div style="display:flex;align-items:center;gap:10px;padding:8px 4px 14px 4px;flex-wrap:wrap">
+          <label for="waTplWabaSelect" style="font-size:12.5px;color:var(--text-dim);font-weight:600">WABA</label>
+          <select id="waTplWabaSelect" class="form-input" style="max-width:340px">
+            <option value="">Laden&hellip;</option>
+          </select>
+          <button class="btn btn-sm" id="waTplWabaRefreshBtn" type="button" title="WABA-lijst opnieuw laden"><i class="ti ti-refresh"></i></button>
+          <span id="waTplWabaHint" style="font-size:11px;color:var(--text-faint)"></span>
+        </div>
+
+        <!-- Sub-tab strip -->
+        <div class="sr-segments" id="waTplSubTabs" role="tablist" style="display:inline-flex;gap:4px;border:1px solid var(--border);border-radius:8px;padding:3px;margin-bottom:14px">
+          <button type="button" class="sr-segment active" data-wa-tpl-sub="meta" role="tab" aria-selected="true">Meta Templates</button>
+          <button type="button" class="sr-segment" data-wa-tpl-sub="quick" role="tab" aria-selected="false">Snelle antwoorden</button>
+        </div>
+
+        <!-- META TEMPLATES sub-view -->
+        <div id="waTplSubMeta">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;gap:8px;flex-wrap:wrap">
+            <div>
+              <div style="font-size:14px;font-weight:700">Meta Templates</div>
+              <div style="font-size:11.5px;color:var(--text-faint)">Server-side goedgekeurd door Meta. Status: APPROVED / PENDING / REJECTED.</div>
+            </div>
+            <div style="display:flex;gap:8px">
+              <button class="btn btn-sm" id="waMetaSyncBtn" type="button" title="Haal templates op uit Meta en update statussen"><i class="ti ti-refresh"></i> Sync met Meta</button>
+              <button class="btn btn-sm btn-primary" id="waMetaNewBtn" type="button"><i class="ti ti-plus"></i> Nieuwe template</button>
+            </div>
+          </div>
+          <div style="overflow-x:auto">
+            <table class="users-table" id="waMetaTable">
+              <thead>
+                <tr>
+                  <th>Naam</th>
+                  <th>Taal</th>
+                  <th>Categorie</th>
+                  <th>Status</th>
+                  <th>Acties</th>
+                </tr>
+              </thead>
+              <tbody id="waMetaTbody">
+                <tr><td colspan="5" style="color:var(--text-faint);padding:20px">Laden&hellip;</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- QUICK REPLIES sub-view -->
+        <div id="waTplSubQuick" hidden>
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;gap:8px;flex-wrap:wrap">
+            <div>
+              <div style="font-size:14px;font-weight:700">Snelle antwoorden</div>
+              <div style="font-size:11.5px;color:var(--text-faint)">Interne shortcuts voor agents binnen het 24-uurs antwoordvenster. Geen Meta-approval nodig.</div>
+            </div>
+            <button class="btn btn-sm btn-primary" id="waQrNewBtn" type="button"><i class="ti ti-plus"></i> Nieuwe snel antwoord</button>
+          </div>
+          <div style="overflow-x:auto">
+            <table class="users-table" id="waQrTable">
+              <thead>
+                <tr>
+                  <th>Titel</th>
+                  <th>Body preview</th>
+                  <th>Sort</th>
+                  <th>Actief</th>
+                  <th>Acties</th>
+                </tr>
+              </thead>
+              <tbody id="waQrTbody">
+                <tr><td colspan="5" style="color:var(--text-faint);padding:20px">Laden&hellip;</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  function ensureTemplatesModalsInjected() {
+    if (_waTpl.modalsInjected) return;
+    if (document.getElementById('waMetaEditModal')) {
+      _waTpl.modalsInjected = true;
+      return;
+    }
+    const wrap = document.createElement('div');
+    wrap.id = 'fiWaTplModalsRoot';
+    wrap.innerHTML = `
+      <style>
+        /* WhatsApp Meta template editor: scrollable layout zodat modal binnen viewport blijft. */
+        #waMetaEditModal .modal-card {
+          max-width: min(1100px, 95vw);
+          max-height: 90vh;
+          display: flex;
+          flex-direction: column;
+        }
+        #waMetaEditModal .modal-header { flex-shrink: 0; }
+        #waMetaEditModal .modal-body {
+          flex: 1;
+          overflow-y: auto;
+          min-height: 0;
+        }
+        #waMetaEditModal .modal-footer {
+          flex-shrink: 0;
+          position: sticky;
+          bottom: 0;
+          background: var(--bg-elev);
+          border-top: 1px solid var(--border);
+        }
+        @media (max-width: 800px) {
+          #waMetaEditModal .modal-card { width: 95vw; max-height: 90vh; }
+          #waMetaEditModal .modal-body > div[style*="grid-template-columns:1fr 380px"] {
+            grid-template-columns: 1fr !important;
+          }
+        }
+        /* WhatsApp Meta template variabelen-paneel (C4) */
+        #waMetaVarsPanel { max-width:300px; padding:8px 12px; max-height:320px; overflow:auto; border:1px solid var(--border); border-radius:8px; background:var(--bg-elev-2); }
+        #waMetaVarsPanel details { margin-bottom:6px; }
+        #waMetaVarsPanel details > summary { cursor:pointer; font-size:12px; font-weight:600; color:var(--text-dim); padding:4px 0; user-select:none; }
+        #waMetaVarsPanel details > summary:hover { color:var(--text); }
+        #waMetaVarsPanel .wa-var-chip-row { display:flex; flex-wrap:wrap; gap:4px; padding:4px 0 8px 0; }
+        .wa-var-chip { padding:4px 10px; background:#f3f4f6; border:1px solid var(--border); border-radius:999px; font-size:12px; cursor:pointer; color:var(--text); font-family:inherit; line-height:1.3; }
+        .wa-var-chip:hover { background:#e5e7eb; }
+        .wa-var-chip[disabled] { opacity:.5; cursor:not-allowed; }
+        #waMetaVarsBlock.wa-vars-named { background:rgba(34,197,94,0.06); border-style:solid; border-color:rgba(34,197,94,0.4); }
+        #waMetaVarsBlock .wa-var-readonly-row { display:grid; grid-template-columns:auto 1fr; gap:8px; align-items:center; padding:3px 0; font-size:12px; }
+        #waMetaVarsBlock .wa-var-readonly-key { font-family:monospace; font-size:11.5px; color:var(--text); background:rgba(34,197,94,0.12); padding:2px 6px; border-radius:4px; }
+        #waMetaVarsBlock .wa-var-readonly-example { color:var(--text-faint); font-size:11.5px; }
+        /* Preview body */
+        #waMetaPreviewBody .wa-preview-placeholder { color:#888; font-style:italic; }
+        #waMetaPreviewBody .wa-preview-unknown { color:#b91c1c; background:rgba(239,68,68,0.10); padding:0 4px; border-radius:3px; font-family:monospace; font-size:12.5px; display:inline-flex; align-items:center; gap:4px; }
+        #waMetaPreviewBody .wa-preview-unknown-dot { display:inline-block; width:7px; height:7px; border-radius:50%; background:#ef4444; box-shadow:0 0 0 2px rgba(239,68,68,0.20); }
+      </style>
+
+      <!-- WhatsApp Meta Template full editor modal -->
+      <div class="modal-overlay hidden" id="waMetaEditModal">
+        <div class="modal-card" style="max-width:1100px;width:96vw">
+          <div class="modal-header">
+            <div class="modal-title" id="waMetaModalTitle">Nieuwe Meta template</div>
+            <button class="modal-close" type="button" data-fi-close="waMetaEditModal">&#x2715;</button>
+          </div>
+          <div class="modal-body">
+            <div id="waMetaStatusBanner" hidden style="margin-bottom:14px;padding:10px 14px;border-radius:8px;font-size:13px;font-weight:500;border:1px solid transparent"></div>
+            <div style="display:grid;grid-template-columns:1fr 380px;gap:20px;align-items:start">
+
+              <!-- LINKS: form -->
+              <div>
+                <div class="form-group">
+                  <label class="form-label" for="waMetaNameInput">Naam</label>
+                  <input type="text" id="waMetaNameInput" class="form-input" placeholder="bv. order_confirmation_v1" maxlength="512" />
+                  <div style="font-size:11px;color:var(--text-faint);margin-top:4px">lowercase_snake_case, alleen a-z 0-9 _</div>
+                </div>
+
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+                  <div class="form-group">
+                    <label class="form-label" for="waMetaLangSelect">Taal</label>
+                    <select id="waMetaLangSelect" class="form-input">
+                      <option value="nl">Nederlands (nl)</option>
+                      <option value="en_US">English US (en_US)</option>
+                      <option value="en">English (en)</option>
+                      <option value="de">Deutsch (de)</option>
+                      <option value="fr">Fran&ccedil;ais (fr)</option>
+                    </select>
+                  </div>
+                  <div class="form-group">
+                    <label class="form-label" for="waMetaCatSelect">Categorie</label>
+                    <select id="waMetaCatSelect" class="form-input">
+                      <option value="UTILITY">UTILITY</option>
+                      <option value="MARKETING">MARKETING</option>
+                      <option value="AUTHENTICATION">AUTHENTICATION</option>
+                    </select>
+                  </div>
+                </div>
+
+                <!-- HEADER -->
+                <details class="form-group" id="waMetaHeaderDetails" style="border:1px solid var(--border);border-radius:8px;padding:10px 12px">
+                  <summary style="cursor:pointer;font-weight:600;font-size:13px">Header</summary>
+                  <div style="margin-top:10px">
+                    <div class="form-group">
+                      <label class="form-label" for="waMetaHeaderType">Type</label>
+                      <select id="waMetaHeaderType" class="form-input">
+                        <option value="NONE">Geen</option>
+                        <option value="TEXT">Tekst</option>
+                        <option value="IMAGE">Afbeelding</option>
+                        <option value="VIDEO">Video</option>
+                        <option value="DOCUMENT">Document</option>
+                      </select>
+                    </div>
+                    <div class="form-group" id="waMetaHeaderTextGroup" hidden>
+                      <label class="form-label" for="waMetaHeaderText">Header tekst</label>
+                      <input type="text" id="waMetaHeaderText" class="form-input" maxlength="60" placeholder="Max 60 tekens" />
+                      <div style="font-size:11px;color:var(--text-faint);margin-top:4px"><span id="waMetaHeaderTextCount">0</span> / 60</div>
+                    </div>
+                    <div class="form-group" id="waMetaHeaderUrlGroup" hidden>
+                      <label class="form-label" for="waMetaHeaderUrl">Voorbeeld URL</label>
+                      <input type="url" id="waMetaHeaderUrl" class="form-input" placeholder="https://&hellip;" />
+                      <div style="font-size:11px;color:var(--text-faint);margin-top:4px">Wordt door Meta gebruikt als sample voor approval.</div>
+                    </div>
+                  </div>
+                </details>
+
+                <!-- BODY -->
+                <div class="form-group">
+                  <label class="form-label" for="waMetaBodyText">Body</label>
+                  <textarea id="waMetaBodyText" class="form-input" rows="6" maxlength="1024" placeholder="Hi {{klant.naam}}, je factuur {{factuur.nummer}} staat open."></textarea>
+                  <div style="font-size:11px;color:var(--text-faint);margin-top:4px">
+                    <span id="waMetaBodyCount">0</span> / 1024 &middot; klik op een chip hieronder om een variabele in te voegen op de cursor, of typ direct <code>{{klant.naam}}</code> (named) of <code>{{1}}</code> (positioneel, legacy).
+                  </div>
+
+                  <!-- C4: Variabelen-paneel (named-style insert) -->
+                  <div id="waMetaVarsPanel" style="margin-top:10px">
+                    <div style="font-size:11px;font-weight:600;color:var(--text-faint);text-transform:uppercase;letter-spacing:.4px;margin-bottom:4px">Variabelen invoegen</div>
+                    <div id="waMetaVarsPanelBody"></div>
+                  </div>
+
+                  <div id="waMetaVarsBlock" style="margin-top:10px;padding:10px;border:1px dashed var(--border);border-radius:8px;display:none">
+                    <div style="font-size:12px;font-weight:600;margin-bottom:6px"><span id="waMetaVarsBlockLabel">Variabelen gevonden:</span> <span id="waMetaVarsList"></span></div>
+                    <div id="waMetaVarsInputs" style="display:grid;grid-template-columns:1fr 1fr;gap:8px"></div>
+                    <div id="waMetaVarsHelp" style="font-size:11px;color:var(--text-faint);margin-top:6px">Voorbeeldwaarden &mdash; gebruikt voor preview &eacute;n als Meta sample bij submit.</div>
+                  </div>
+                </div>
+
+                <!-- FOOTER -->
+                <details class="form-group" id="waMetaFooterDetails" style="border:1px solid var(--border);border-radius:8px;padding:10px 12px">
+                  <summary style="cursor:pointer;font-weight:600;font-size:13px">Footer</summary>
+                  <div style="margin-top:10px">
+                    <label class="form-label" for="waMetaFooterInput">Footer tekst</label>
+                    <input type="text" id="waMetaFooterInput" class="form-input" maxlength="60" placeholder="bv. De Forex Opleiding" />
+                    <div style="font-size:11px;color:var(--text-faint);margin-top:4px"><span id="waMetaFooterCount">0</span> / 60</div>
+                  </div>
+                </details>
+
+                <!-- BUTTONS -->
+                <details class="form-group" id="waMetaButtonsDetails" style="border:1px solid var(--border);border-radius:8px;padding:10px 12px">
+                  <summary style="cursor:pointer;font-weight:600;font-size:13px">Knoppen (max 3)</summary>
+                  <div style="margin-top:10px">
+                    <div id="waMetaButtonsList" style="display:flex;flex-direction:column;gap:8px"></div>
+                    <button type="button" class="btn btn-sm" id="waMetaBtnAddBtn" style="margin-top:8px"><i class="ti ti-plus"></i> Knop toevoegen</button>
+                  </div>
+                </details>
+              </div>
+
+              <!-- RECHTS: preview -->
+              <div>
+                <div id="waMetaPreviewCard" style="position:sticky;top:10px;border:1px solid var(--border);border-radius:10px;padding:14px;background:var(--bg-soft, #f7f7f5)">
+                  <div style="font-size:11px;color:var(--text-faint);font-weight:600;margin-bottom:8px;text-transform:uppercase;letter-spacing:.5px">Preview</div>
+                  <div id="waMetaPreviewWallpaper" style="background:#e5ddd5;background-image:repeating-linear-gradient(45deg, rgba(255,255,255,0.04) 0 2px, transparent 2px 6px);border-radius:8px;padding:14px;min-height:220px">
+                    <div id="waMetaPreviewBubble" style="background:#d9fdd3;border-radius:8px;padding:10px 14px;max-width:280px;box-shadow:0 1px 1px rgba(0,0,0,0.08);font-size:13.5px;line-height:1.45;color:#111">
+                      <div id="waMetaPreviewHeader" style="font-weight:700;margin-bottom:6px;display:none"></div>
+                      <div id="waMetaPreviewBody" style="white-space:pre-wrap;word-break:break-word">Je bericht verschijnt hier&hellip;</div>
+                      <div id="waMetaPreviewFooter" style="font-size:11px;color:#667781;margin-top:6px;display:none"></div>
+                    </div>
+                    <div id="waMetaPreviewButtons" style="margin-top:8px;display:flex;flex-direction:column;gap:4px;max-width:280px"></div>
+                  </div>
+                </div>
+              </div>
+
+            </div>
+
+            <div class="form-error hidden" id="waMetaError" style="margin-top:12px"></div>
+          </div>
+          <div class="modal-footer">
+            <button class="btn" type="button" data-fi-close="waMetaEditModal">Annuleren</button>
+            <button class="btn btn-primary" id="waMetaSaveBtn" type="button">Opslaan</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- WhatsApp Quick Reply edit modal -->
+      <div class="modal-overlay hidden" id="waQrEditModal">
+        <div class="modal-card" style="max-width:560px">
+          <div class="modal-header">
+            <div class="modal-title" id="waQrModalTitle">Nieuwe snel antwoord</div>
+            <button class="modal-close" type="button" data-fi-close="waQrEditModal">&#x2715;</button>
+          </div>
+          <div class="modal-body">
+            <div class="form-group">
+              <label class="form-label" for="waQrTitleInput">Titel</label>
+              <input type="text" id="waQrTitleInput" class="form-input" maxlength="100" placeholder="bv. Bedankt voor je bericht" />
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="waQrBodyInput">Body</label>
+              <textarea id="waQrBodyInput" class="form-input" rows="5" maxlength="1024" placeholder="Tekst die ingevoegd wordt in het antwoordveld&hellip;"></textarea>
+              <div style="font-size:11px;color:var(--text-faint);margin-top:4px"><span id="waQrBodyCount">0</span> / 1024</div>
+            </div>
+            <div style="display:grid;grid-template-columns:140px 1fr;gap:14px;align-items:center">
+              <div class="form-group" style="margin-bottom:0">
+                <label class="form-label" for="waQrSortInput">Sorteervolgorde</label>
+                <input type="number" id="waQrSortInput" class="form-input" value="0" step="1" />
+              </div>
+              <div class="form-group" style="display:flex;align-items:center;gap:8px;margin-bottom:0">
+                <input type="checkbox" id="waQrActiveInput" checked style="width:16px;height:16px" />
+                <label for="waQrActiveInput" style="font-size:13px;cursor:pointer">Actief (zichtbaar voor agents)</label>
+              </div>
+            </div>
+            <div class="form-error hidden" id="waQrError" style="margin-top:12px"></div>
+          </div>
+          <div class="modal-footer">
+            <button class="btn" type="button" data-fi-close="waQrEditModal">Annuleren</button>
+            <button class="btn btn-primary" id="waQrSaveBtn" type="button">Opslaan</button>
+          </div>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(wrap);
+
+    // Close-buttons + backdrop wiring.
+    wrap.addEventListener('click', (e) => {
+      const closeBtn = e.target.closest('[data-fi-close]');
+      if (closeBtn) {
+        const id = closeBtn.getAttribute('data-fi-close');
+        if (id === 'waMetaEditModal') closeWaMetaEdit();
+        else if (id === 'waQrEditModal') closeWaQrEdit();
+        return;
+      }
+      const metaOverlay = e.target.closest('#waMetaEditModal');
+      if (metaOverlay && e.target === metaOverlay) closeWaMetaEdit();
+      const qrOverlay = e.target.closest('#waQrEditModal');
+      if (qrOverlay && e.target === qrOverlay) closeWaQrEdit();
+    });
+    document.addEventListener('keydown', (e) => {
+      if (e.key !== 'Escape') return;
+      const meta = document.getElementById('waMetaEditModal');
+      const qr = document.getElementById('waQrEditModal');
+      if (meta && !meta.classList.contains('hidden')) closeWaMetaEdit();
+      else if (qr && !qr.classList.contains('hidden')) closeWaQrEdit();
+    });
+
+    _waTpl.modalsInjected = true;
+  }
+
+  // ─── apiRequest helper (mirror van admin.html) ────────────────────────────
+  // Gebruikt window.AgentShared.apiFetch onder de motorkap zodat we
+  // automatisch de Bearer-token meekrijgen. Returnt parsed JSON ipv Response.
+  async function apiRequest(method, path, body) {
+    const opts = {
+      method,
+      headers: { 'Content-Type': 'application/json' },
+    };
+    if (body) opts.body = JSON.stringify(body);
+    const res = await window.AgentShared.apiFetch(path, opts);
+    let data = null;
+    try { data = await res.json(); }
+    catch (_) { data = {}; }
+    // Mirror van admin.html-stijl: bij niet-OK response zonder .error, voeg
+    // een synthetic error toe zodat callers downstream dezelfde shape zien.
+    if (!res.ok && !(data && data.error)) {
+      data = data || {};
+      data.error = data.error || ('HTTP ' + res.status);
+    }
+    return data;
+  }
+
+  // ═════════════════════════════════════════════════════════════════════════
+  //   WHATSAPP CONNECTION — handlers (extract uit admin.html L1936-2193)
+  // ═════════════════════════════════════════════════════════════════════════
+
+  async function loadWaConfList() {
+    const tbody = document.getElementById('waConfTbody');
+    if (!tbody) return;
+    tbody.innerHTML = '<tr><td colspan="5" style="color:var(--text-faint);padding:20px">Laden&hellip;</td></tr>';
+    try {
+      const [modulesData] = await Promise.all([
+        apiRequest('GET', '/api/admin-whatsapp-modules-list'),
+        loadWaConfPhones().catch(e => {
+          console.warn('[waConf] phones-cache laden mislukt:', e.message);
+          return null;
+        }),
+      ]);
+      if (modulesData && modulesData.error) throw new Error(modulesData.error);
+      _waConf.items = (modulesData && modulesData.items) || (modulesData && modulesData.modules) || [];
+      renderWaConfRows();
+    } catch (e) {
+      tbody.innerHTML = `<tr><td colspan="5" style="color:var(--red);padding:20px">Fout: ${esc(e.message)}</td></tr>`;
+    }
+  }
+
+  function waConfPhoneDisplay(phoneId) {
+    if (!phoneId) return '—';
+    const phone = (_waConf.phones || []).find(p =>
+      (p.id || p.phone_number_id) === phoneId
+    );
+    if (!phone) return String(phoneId);
+    const disp = phone.display_phone_number || phone.phone_number || phoneId;
+    const name = phone.verified_name ? ` (${phone.verified_name})` : '';
+    return disp + name;
+  }
+
+  function renderWaConfRows() {
+    const tbody = document.getElementById('waConfTbody');
+    if (!tbody) return;
+    if (!_waConf.items.length) {
+      tbody.innerHTML = '<tr><td colspan="5" style="color:var(--text-faint);padding:20px">Nog geen module-koppelingen. Klik op + Module toevoegen.</td></tr>';
+      return;
+    }
+    tbody.innerHTML = _waConf.items.map(it => {
+      const moduleKey  = esc(it.module || it.module_key || '');
+      const phoneId    = it.phone_number_id || it.phone_number || '';
+      const phone      = esc(waConfPhoneDisplay(phoneId));
+      const label      = esc(it.display_label || it.label || '—');
+      const active     = it.is_active !== false;
+      const statusDot  = active ? '<span class="active-dot"></span> Actief' : '<span class="active-dot inactive-dot"></span> Inactief';
+      const rowId      = esc(it.id || it.module || '');
+      const wabaId       = it.business_account_id || '';
+      const moduleRaw    = it.module || it.module_key || '';
+      const subscribeDisabled = wabaId ? '' : ' disabled';
+      const subscribeTitle    = wabaId
+        ? 'Eenmalig per WABA: koppelt webhook events aan onze app. Idempotent.'
+        : 'Eerst business_account_id koppelen via Edit';
+      const subscribeBtn = `<button class="action-btn wa-conf-subscribe-btn" type="button"`
+        + ` data-waba-subscribe="${esc(wabaId)}"`
+        + ` data-module="${esc(moduleRaw)}"`
+        + ` title="${esc(subscribeTitle)}"${subscribeDisabled}>`
+        + `<i class="ti ti-webhook"></i> Webhook subscriben</button>`;
+      return `<tr>
+        <td><strong>${moduleKey}</strong></td>
+        <td>${phone}</td>
+        <td>${label}</td>
+        <td>${statusDot}</td>
+        <td>
+          <button class="action-btn" type="button" data-wa-edit="${rowId}"><i class="ti ti-edit"></i> Bewerken</button>
+          ${subscribeBtn}
+        </td>
+      </tr>`;
+    }).join('');
+  }
+
+  async function loadWaConfPhones() {
+    try {
+      const data = await apiRequest('GET', '/api/admin-whatsapp-numbers-available');
+      if (data && data.error) throw new Error(data.error);
+      _waConf.phones = (data && data.items) || (data && data.phones)
+                    || (data && data.numbers) || (data && data.data) || [];
+      return _waConf.phones;
+    } catch (e) {
+      _waConf.phones = [];
+      throw e;
+    }
+  }
+
+  function fillWaConfPhoneSelect(selectedValue) {
+    const sel = document.getElementById('waConfPhoneSelect');
+    if (!sel) return;
+    if (!_waConf.phones.length) {
+      sel.innerHTML = '<option value="">(geen nummers beschikbaar)</option>';
+      return;
+    }
+    sel.innerHTML = '<option value="">— kies een nummer —</option>' + _waConf.phones.map(p => {
+      const id    = p.id || p.phone_number_id || p.value || '';
+      const disp  = p.display_phone_number || p.phone_number || p.label || id;
+      const name  = p.verified_name ? ` (${p.verified_name})` : '';
+      const sel2  = id === selectedValue ? ' selected' : '';
+      return `<option value="${esc(id)}"${sel2}>${esc(disp)}${esc(name)}</option>`;
+    }).join('');
+  }
+
+  async function openWaConfEdit(item) {
+    ensureConnectionModalInjected();
+    _waConf.editingId = item ? (item.id || item.module || null) : null;
+    const isEdit = !!item;
+    document.getElementById('waConfModalTitle').textContent = isEdit ? 'Module bewerken' : 'Module toevoegen';
+    const moduleInput = document.getElementById('waConfModuleInput');
+    const labelInput  = document.getElementById('waConfLabelInput');
+    const activeInput = document.getElementById('waConfActiveInput');
+    const errEl       = document.getElementById('waConfError');
+    errEl.classList.add('hidden'); errEl.textContent = '';
+    moduleInput.value = item ? (item.module || item.module_key || '') : '';
+    moduleInput.disabled = isEdit;
+    labelInput.value  = item ? (item.display_label || item.label || '') : '';
+    activeInput.checked = item ? (item.is_active !== false) : true;
+    const afdTel  = document.getElementById('waConfAfdelingTelefoon');
+    const afdWa   = document.getElementById('waConfAfdelingWhatsapp');
+    const afdMail = document.getElementById('waConfAfdelingEmail');
+    const afdOnd  = document.getElementById('waConfAfdelingOndertekenaar');
+    if (afdTel)  afdTel.value  = item ? (item.afdeling_telefoon     || '') : '';
+    if (afdWa)   afdWa.value   = item ? (item.afdeling_whatsapp     || '') : '';
+    if (afdMail) afdMail.value = item ? (item.afdeling_email        || '') : '';
+    if (afdOnd)  afdOnd.value  = item ? (item.afdeling_ondertekenaar || '') : '';
+    fillWaConfPhoneSelect('');
+    document.getElementById('waConfEditModal').classList.remove('hidden');
+    try {
+      await loadWaConfPhones();
+      const currentPhoneId = item ? (item.phone_number_id || item.phone_id || '') : '';
+      fillWaConfPhoneSelect(currentPhoneId);
+    } catch (e) {
+      errEl.textContent = 'Nummers laden mislukt: ' + e.message;
+      errEl.classList.remove('hidden');
+    }
+  }
+
+  function closeWaConfEdit() {
+    const m = document.getElementById('waConfEditModal');
+    if (m) m.classList.add('hidden');
+    _waConf.editingId = null;
+  }
+
+  async function saveWaConfRow() {
+    const moduleKey = document.getElementById('waConfModuleInput').value.trim();
+    const label     = document.getElementById('waConfLabelInput').value.trim();
+    const phoneId   = document.getElementById('waConfPhoneSelect').value;
+    const isActive  = document.getElementById('waConfActiveInput').checked;
+    const errEl     = document.getElementById('waConfError');
+    const btn       = document.getElementById('waConfSaveBtn');
+
+    if (!moduleKey)  { errEl.textContent = 'Module key is verplicht'; errEl.classList.remove('hidden'); return; }
+    if (!phoneId)    { errEl.textContent = 'Telefoonnummer is verplicht'; errEl.classList.remove('hidden'); return; }
+
+    errEl.classList.add('hidden');
+    btn.disabled = true; btn.textContent = 'Opslaan…';
+
+    try {
+      const afdTel  = (document.getElementById('waConfAfdelingTelefoon')?.value || '').trim();
+      const afdWa   = (document.getElementById('waConfAfdelingWhatsapp')?.value || '').trim();
+      const afdMail = (document.getElementById('waConfAfdelingEmail')?.value || '').trim();
+      const afdOnd  = (document.getElementById('waConfAfdelingOndertekenaar')?.value || '').trim();
+      const body = {
+        module: moduleKey,
+        display_label: label,
+        phone_number_id: phoneId,
+        is_active: isActive,
+        afdeling_telefoon: afdTel,
+        afdeling_whatsapp: afdWa,
+        afdeling_email: afdMail,
+        afdeling_ondertekenaar: afdOnd,
+      };
+      const method = _waConf.editingId ? 'PATCH' : 'POST';
+      const path   = '/api/admin-whatsapp-module-upsert' + (_waConf.editingId ? `?id=${encodeURIComponent(_waConf.editingId)}` : '');
+      const data   = await apiRequest(method, path, body);
+      if (data && data.error) throw new Error(data.error);
+      toast('Module-koppeling opgeslagen', 'success');
+      closeWaConfEdit();
+      loadWaConfList();
+    } catch (e) {
+      errEl.textContent = e.message;
+      errEl.classList.remove('hidden');
+    } finally {
+      btn.disabled = false; btn.textContent = 'Opslaan';
+    }
+  }
+
+  function wireWaConfOnce() {
+    if (_waConf.wired) return;
+    _waConf.wired = true;
+    const host = _state.hostMounted;
+    if (!host) return;
+    const reloadBtn = host.querySelector('#waConfReloadBtn');
+    if (reloadBtn) reloadBtn.addEventListener('click', () => loadWaConfList());
+    const addBtn = host.querySelector('#waConfAddBtn');
+    if (addBtn) addBtn.addEventListener('click', () => { ensureConnectionModalInjected(); openWaConfEdit(null); });
+    const tbody = host.querySelector('#waConfTbody');
+    if (tbody) {
+      tbody.addEventListener('click', (e) => {
+        const editBtn = e.target.closest('[data-wa-edit]');
+        if (editBtn) {
+          const rowId = editBtn.getAttribute('data-wa-edit');
+          const item = _waConf.items.find(it => String(it.id || it.module) === rowId);
+          if (item) openWaConfEdit(item);
+          return;
+        }
+        const subBtn = e.target.closest('.wa-conf-subscribe-btn');
+        if (subBtn) {
+          if (subBtn.disabled) return;
+          const wabaId = subBtn.getAttribute('data-waba-subscribe') || '';
+          const moduleKey = subBtn.getAttribute('data-module') || '';
+          doWaConfWebhookSubscribe(subBtn, wabaId, moduleKey);
+        }
+      });
+    }
+  }
+
+  // C2: Webhook subscribe per WABA — idempotente POST.
+  async function doWaConfWebhookSubscribe(btn, wabaId, moduleKey) {
+    if (!wabaId) return;
+    const confirmMsg = `Webhook subscriben voor module ${moduleKey} (WABA ${wabaId})? Idempotent. OK om door te gaan.`;
+    if (!confirm(confirmMsg)) return;
+
+    const origHtml = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = '<i class="ti ti-loader"></i> Bezig...';
+    try {
+      const data = await apiRequest('POST', '/api/admin-whatsapp-webhook-subscribe', {
+        business_account_id: wabaId,
+      });
+      if (data && data.error) {
+        const msg = formatMetaError(data);
+        toast('Subscribe mislukt: ' + msg, 'error');
+        btn.innerHTML = origHtml;
+        return;
+      }
+      toast(`Webhook subscribed voor ${moduleKey}`, 'success');
+      btn.innerHTML = '<i class="ti ti-refresh"></i> Subscribed (Hertrigger?)';
+    } catch (e) {
+      const msg = formatMetaError(e);
+      toast('Subscribe mislukt: ' + msg, 'error');
+      btn.innerHTML = origHtml;
+    } finally {
+      btn.disabled = false;
+    }
+  }
+
+  // ═════════════════════════════════════════════════════════════════════════
+  //   WHATSAPP TEMPLATES — handlers (extract uit admin.html L2199-3559).
+  //   Variable registry (frontend-only, mirror van api/_lib/template-variables.js).
+  // ═════════════════════════════════════════════════════════════════════════
+
+  const WA_VAR_REGISTRY = [
+    // customer
+    { key: 'klant.naam',          label: 'Volledige naam',      category: 'customer', example: 'Jeffrey Biemold' },
+    { key: 'klant.voornaam',      label: 'Voornaam',            category: 'customer', example: 'Jeffrey' },
+    { key: 'klant.email',         label: 'E-mailadres',         category: 'customer', example: 'klant@example.com' },
+    { key: 'klant.telefoon',      label: 'Telefoonnummer',      category: 'customer', example: '+31612345678' },
+    { key: 'klant.bedrijf',       label: 'Bedrijfsnaam',        category: 'customer', example: 'Voorbeeld B.V.' },
+    // invoice
+    { key: 'factuur.nummer',         label: 'Factuurnummer',           category: 'invoice', example: '2026-0001' },
+    { key: 'factuur.bedrag',         label: 'Factuurbedrag (totaal)',  category: 'invoice', example: 'EUR 1.234,56' },
+    { key: 'factuur.bedrag_open',    label: 'Openstaand bedrag',       category: 'invoice', example: 'EUR 80,00' },
+    { key: 'factuur.vervaldatum',    label: 'Vervaldatum',             category: 'invoice', example: '15-06-2026' },
+    { key: 'factuur.dagen_overdue',  label: 'Dagen te laat',           category: 'invoice', example: '12' },
+    { key: 'factuur.factuur_datum',  label: 'Factuurdatum',            category: 'invoice', example: '01-06-2026' },
+    { key: 'factuur.betaal_link',    label: 'Betaal-link',             category: 'invoice', example: 'https://focus.teamleader.eu/...' },
+    // klant (aggregaties)
+    { key: 'klant.factuur_lijst', label: 'Lijst openstaande facturen', category: 'klant', example: '- 2026-0001 (EUR 80,00)' },
+    { key: 'klant.totaal_open',   label: 'Totaal openstaand',          category: 'klant', example: 'EUR 200,00' },
+    { key: 'klant.aantal_open',   label: 'Aantal open facturen',       category: 'klant', example: '2' },
+    // afdeling
+    { key: 'afdeling.telefoon',      label: 'Telefoon',      category: 'afdeling', example: '+31 85 130 83 62' },
+    { key: 'afdeling.whatsapp',      label: 'WhatsApp',      category: 'afdeling', example: '+31 6 51031673' },
+    { key: 'afdeling.email',         label: 'Email',         category: 'afdeling', example: 'administratie@deforexopleiding.nl' },
+    { key: 'afdeling.ondertekenaar', label: 'Ondertekenaar', category: 'afdeling', example: 'De Forex Opleiding' },
+    // bedrijf
+    { key: 'bedrijf.naam',     label: 'Bedrijfsnaam',     category: 'bedrijf', example: 'De Forex Opleiding NL B.V.' },
+    { key: 'bedrijf.adres',    label: 'Bedrijfsadres',    category: 'bedrijf', example: 'Voorbeeldstraat 1, 1234 AB Plaats' },
+    { key: 'bedrijf.kvk',      label: 'KvK-nummer',       category: 'bedrijf', example: '12345678' },
+    { key: 'bedrijf.btw',      label: 'BTW-nummer',       category: 'bedrijf', example: 'NL123456789B01' },
+    { key: 'bedrijf.telefoon', label: 'Bedrijfstelefoon', category: 'bedrijf', example: '+31201234567' },
+    { key: 'bedrijf.email',    label: 'Bedrijfse-mail',   category: 'bedrijf', example: 'info@deforexopleiding.nl' },
+    // datum
+    { key: 'datum.vandaag',     label: 'Datum vandaag', category: 'datum', example: '09-06-2026' },
+    { key: 'datum.deze_maand',  label: 'Deze maand',    category: 'datum', example: 'juni 2026' },
+    { key: 'datum.dit_jaar',    label: 'Dit jaar',      category: 'datum', example: '2026' },
+  ];
+
+  const WA_VAR_CATEGORY_LABELS = {
+    customer: 'Klantgegevens',
+    invoice:  'Factuur',
+    klant:    'Klant (aggregaties)',
+    afdeling: 'Afdeling (contact-info)',
+    bedrijf:  'Bedrijfsgegevens',
+    datum:    'Datum',
+  };
+  const WA_VAR_CATEGORY_ORDER = ['customer', 'invoice', 'klant', 'afdeling', 'bedrijf', 'datum'];
+  const WA_VAR_BY_KEY = (() => {
+    const m = new Map();
+    WA_VAR_REGISTRY.forEach(v => m.set(v.key, v));
+    return m;
+  })();
+
+  const WA_VAR_NAMED_RE = /\{\{([a-z_]+\.[a-z_]+)\}\}/g;
+  const WA_VAR_POSITIONAL_RE = /\{\{(\d+)\}\}/g;
+
+  // Debounce helper.
+  function _waTplDebounce(fn, ms) {
+    let t = null;
+    return function (...args) {
+      if (t) clearTimeout(t);
+      t = setTimeout(() => { t = null; fn.apply(this, args); }, ms);
+    };
+  }
+
+  // ─── WABA-list ──────────────────────────────────────────────────────────
+  async function loadWaTplWabas() {
+    const sel = document.getElementById('waTplWabaSelect');
+    const hint = document.getElementById('waTplWabaHint');
+    if (!sel) return;
+    if (hint) hint.textContent = 'Laden…';
+    try {
+      const data = await apiRequest('GET', '/api/admin-whatsapp-wabas-list');
+      if (data && data.error) throw new Error(data.error);
+      _waTpl.wabas = (data && data.items) || [];
+      if (!_waTpl.wabas.length) {
+        sel.innerHTML = '<option value="">(geen WABA gekoppeld)</option>';
+        if (hint) hint.textContent = 'Koppel eerst een module aan een phone_number_id met een business_account_id.';
+        _waTpl.activeWaba = null;
+        _waTpl.metaItems = []; renderWaMetaRows();
+        _waTpl.qrItems = [];   renderWaQrRows();
+        return;
+      }
+      sel.innerHTML = _waTpl.wabas.map(w => {
+        const id = esc(w.business_account_id);
+        const lbl = esc(w.display_label || w.module || w.business_account_id);
+        return `<option value="${id}">${lbl} &middot; ${id}</option>`;
+      }).join('');
+      const stillPresent = _waTpl.activeWaba && _waTpl.wabas.some(w => w.business_account_id === _waTpl.activeWaba);
+      if (!stillPresent) _waTpl.activeWaba = _waTpl.wabas[0].business_account_id;
+      sel.value = _waTpl.activeWaba;
+      if (hint) hint.textContent = '';
+      if (_waTpl.activeSub === 'meta') loadWaMetaList();
+      else loadWaQrList();
+      _waTpl.loadedOnce = true;
+    } catch (e) {
+      sel.innerHTML = '<option value="">(fout bij laden)</option>';
+      if (hint) hint.textContent = 'Fout: ' + e.message;
+      console.warn('[waTpl] WABA-list laden mislukt:', e.message);
+    }
+  }
+
+  // ─── Meta Templates list ────────────────────────────────────────────────
+  async function loadWaMetaList() {
+    const tbody = document.getElementById('waMetaTbody');
+    if (!tbody) return;
+    if (!_waTpl.activeWaba) {
+      tbody.innerHTML = '<tr><td colspan="5" style="color:var(--text-faint);padding:20px">Selecteer eerst een WABA.</td></tr>';
+      return;
+    }
+    tbody.innerHTML = '<tr><td colspan="5" style="color:var(--text-faint);padding:20px">Laden&hellip;</td></tr>';
+    try {
+      const data = await apiRequest('GET', '/api/admin-meta-templates-list?business_account_id=' + encodeURIComponent(_waTpl.activeWaba));
+      if (data && data.error) throw new Error(data.error);
+      _waTpl.metaItems = (data && data.items) || [];
+      renderWaMetaRows();
+    } catch (e) {
+      tbody.innerHTML = `<tr><td colspan="5" style="color:var(--red);padding:20px">Fout: ${esc(e.message)}</td></tr>`;
+    }
+  }
+
+  function waMetaStatusBadge(status, rejectionReason) {
+    const map = {
+      LOCAL:     { bg: '#e5e7eb', fg: '#374151' },
+      SUBMITTED: { bg: '#fef3c7', fg: '#92400e' },
+      APPROVED:  { bg: '#d1fae5', fg: '#065f46' },
+      REJECTED:  { bg: '#fee2e2', fg: '#991b1b' },
+      PAUSED:    { bg: '#ede9fe', fg: '#5b21b6' },
+      DISABLED:  { bg: '#f3f4f6', fg: '#4b5563' },
+    };
+    const c = map[status] || { bg: '#f3f4f6', fg: '#374151' };
+    let titleAttr = '';
+    if (status === 'REJECTED' && rejectionReason) {
+      const safe = esc(String(rejectionReason)).replace(/"/g, '&quot;');
+      titleAttr = ` title="Rejection: ${safe}"`;
+    }
+    return `<span${titleAttr} style="display:inline-block;padding:2px 8px;border-radius:10px;font-size:11.5px;font-weight:600;background:${c.bg};color:${c.fg}">${esc(status || 'UNKNOWN')}</span>`;
+  }
+
+  function renderWaMetaRows() {
+    const tbody = document.getElementById('waMetaTbody');
+    if (!tbody) return;
+    if (!_waTpl.metaItems.length) {
+      tbody.innerHTML = '<tr><td colspan="5" style="color:var(--text-faint);padding:20px">Nog geen templates. Klik op + Nieuwe template.</td></tr>';
+      return;
+    }
+    tbody.innerHTML = _waTpl.metaItems.map(it => {
+      const id        = esc(it.id || '');
+      const name      = esc(it.name || '');
+      const lang      = esc(it.language || '');
+      const cat       = esc(it.category || '');
+      const status    = it.status || 'LOCAL';
+      const badge     = waMetaStatusBadge(status, it.rejection_reason);
+      let actions = '';
+      if (status === 'LOCAL') {
+        actions = `
+          <button class="action-btn" type="button" data-wa-meta-edit="${id}"><i class="ti ti-edit"></i> Bewerken</button>
+          <button class="action-btn" type="button" data-wa-meta-del="${id}"><i class="ti ti-trash"></i> Verwijderen</button>
+          <button class="action-btn" type="button" data-wa-meta-submit="${id}" style="background:#2563eb;color:#fff;border-color:#2563eb"><i class="ti ti-send"></i> Naar Meta sturen</button>
+        `;
+      } else if (status === 'SUBMITTED') {
+        actions = `<button class="action-btn" type="button" data-wa-meta-view="${id}"><i class="ti ti-eye"></i> Bekijken</button>`;
+      } else if (status === 'REJECTED') {
+        actions = `
+          <button class="action-btn" type="button" data-wa-meta-edit="${id}"><i class="ti ti-edit"></i> Bewerken</button>
+          <button class="action-btn" type="button" data-wa-meta-resubmit="${id}" style="background:#f97316;color:#fff;border-color:#f97316"><i class="ti ti-refresh"></i> Opnieuw insturen</button>
+        `;
+      } else if (status === 'APPROVED') {
+        actions = `
+          <button class="action-btn" type="button" data-wa-meta-view="${id}"><i class="ti ti-eye"></i> Bekijken</button>
+          <button class="action-btn" type="button" data-wa-meta-dupliceer="${id}"><i class="ti ti-copy"></i> Dupliceer</button>
+        `;
+      } else {
+        actions = `<button class="action-btn" type="button" data-wa-meta-view="${id}"><i class="ti ti-eye"></i> Bekijken</button>`;
+      }
+      return `<tr>
+        <td><strong>${name}</strong></td>
+        <td>${lang}</td>
+        <td>${cat}</td>
+        <td>${badge}</td>
+        <td>${actions}</td>
+      </tr>`;
+    }).join('');
+  }
+
+  // ─── Quick Replies list ─────────────────────────────────────────────────
+  async function loadWaQrList() {
+    const tbody = document.getElementById('waQrTbody');
+    if (!tbody) return;
+    if (!_waTpl.activeWaba) {
+      tbody.innerHTML = '<tr><td colspan="5" style="color:var(--text-faint);padding:20px">Selecteer eerst een WABA.</td></tr>';
+      return;
+    }
+    tbody.innerHTML = '<tr><td colspan="5" style="color:var(--text-faint);padding:20px">Laden&hellip;</td></tr>';
+    try {
+      const data = await apiRequest('GET', '/api/admin-quick-replies-list?business_account_id=' + encodeURIComponent(_waTpl.activeWaba));
+      if (data && data.error) throw new Error(data.error);
+      _waTpl.qrItems = (data && data.items) || [];
+      renderWaQrRows();
+    } catch (e) {
+      tbody.innerHTML = `<tr><td colspan="5" style="color:var(--red);padding:20px">Fout: ${esc(e.message)}</td></tr>`;
+    }
+  }
+
+  function renderWaQrRows() {
+    const tbody = document.getElementById('waQrTbody');
+    if (!tbody) return;
+    if (!_waTpl.qrItems.length) {
+      tbody.innerHTML = '<tr><td colspan="5" style="color:var(--text-faint);padding:20px">Nog geen snelle antwoorden. Klik op + Nieuwe snel antwoord.</td></tr>';
+      return;
+    }
+    tbody.innerHTML = _waTpl.qrItems.map(it => {
+      const id      = esc(it.id || '');
+      const title   = esc(it.title || '');
+      const body    = String(it.body_text || '');
+      const trunc   = body.length > 80 ? body.slice(0, 80) + '…' : body;
+      const sort    = Number.isFinite(it.sort_order) ? it.sort_order : 0;
+      const active  = it.is_active !== false;
+      const dot     = active
+        ? '<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#22c55e;margin-right:6px"></span>Actief'
+        : '<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#9ca3af;margin-right:6px"></span>Inactief';
+      return `<tr>
+        <td><strong>${title}</strong></td>
+        <td style="color:var(--text-dim)">${esc(trunc)}</td>
+        <td>${sort}</td>
+        <td>${dot}</td>
+        <td>
+          <button class="action-btn" type="button" data-wa-qr-edit="${id}"><i class="ti ti-edit"></i> Bewerken</button>
+          <button class="action-btn" type="button" data-wa-qr-del="${id}"><i class="ti ti-trash"></i> Verwijderen</button>
+        </td>
+      </tr>`;
+    }).join('');
+  }
+
+  // ─── Sub-tab switching ───────────────────────────────────────────────────
+  function switchWaTplSub(sub) {
+    if (sub !== 'meta' && sub !== 'quick') return;
+    _waTpl.activeSub = sub;
+    const metaPanel = document.getElementById('waTplSubMeta');
+    const quickPanel = document.getElementById('waTplSubQuick');
+    if (metaPanel)  metaPanel.hidden  = sub !== 'meta';
+    if (quickPanel) quickPanel.hidden = sub !== 'quick';
+    document.querySelectorAll('#waTplSubTabs [data-wa-tpl-sub]').forEach(btn => {
+      const isActive = btn.getAttribute('data-wa-tpl-sub') === sub;
+      btn.classList.toggle('active', isActive);
+      btn.setAttribute('aria-selected', isActive ? 'true' : 'false');
+    });
+    if (sub === 'meta')  loadWaMetaList();
+    else                 loadWaQrList();
+  }
+
+  // ─── Variable parsing + preview ─────────────────────────────────────────
+  function parseTemplateVariables(bodyText) {
+    if (!bodyText || typeof bodyText !== 'string') return [];
+    const re = new RegExp(WA_VAR_POSITIONAL_RE.source, 'g');
+    const seen = new Set();
+    let m;
+    while ((m = re.exec(bodyText)) !== null) {
+      const n = parseInt(m[1], 10);
+      if (Number.isFinite(n) && n > 0) seen.add(n);
+    }
+    return [...seen].sort((a, b) => a - b);
+  }
+
+  function parseTemplateNamedVariables(bodyText) {
+    if (!bodyText || typeof bodyText !== 'string') return [];
+    const re = new RegExp(WA_VAR_NAMED_RE.source, 'g');
+    const seen = new Set();
+    const result = [];
+    let m;
+    while ((m = re.exec(bodyText)) !== null) {
+      const key = m[1];
+      if (!seen.has(key)) { seen.add(key); result.push(key); }
+    }
+    return result;
+  }
+
+  function isMixedTemplateBody(bodyText) {
+    return parseTemplateNamedVariables(bodyText).length > 0
+      && parseTemplateVariables(bodyText).length > 0;
+  }
+
+  function renderWaMetaVarsPanel() {
+    const host = document.getElementById('waMetaVarsPanelBody');
+    if (!host) return;
+    const byCat = new Map();
+    WA_VAR_REGISTRY.forEach(v => {
+      if (!byCat.has(v.category)) byCat.set(v.category, []);
+      byCat.get(v.category).push(v);
+    });
+    const html = WA_VAR_CATEGORY_ORDER.filter(c => byCat.has(c)).map((cat, idx) => {
+      const items = byCat.get(cat);
+      const open = idx === 0 ? ' open' : '';
+      const label = WA_VAR_CATEGORY_LABELS[cat] || cat;
+      const chips = items.map(v => {
+        const t = `{{${v.key}}}\n${v.label}\nVoorbeeld: ${v.example}`;
+        return `<button type="button" class="wa-var-chip" data-wa-var-key="${esc(v.key)}" data-wa-var-example="${esc(v.example)}" title="${esc(t)}" aria-label="${esc(v.label)} (voorbeeld: ${esc(v.example)})">${esc(v.label)}</button>`;
+      }).join('');
+      return `<details${open}>
+        <summary>${esc(label)}</summary>
+        <div class="wa-var-chip-row">${chips}</div>
+      </details>`;
+    }).join('');
+    host.innerHTML = html;
+  }
+
+  function _waMetaTrackFocus(id) {
+    if (!id) return;
+    _waTpl.metaLastFocusedFieldId = id;
+  }
+  function insertVariableAtCursor(key) {
+    if (!key) return;
+    const targetId = ['waMetaBodyText', 'waMetaFooterInput', 'waMetaHeaderText']
+      .includes(_waTpl.metaLastFocusedFieldId) ? _waTpl.metaLastFocusedFieldId : 'waMetaBodyText';
+    const el = document.getElementById(targetId);
+    if (!el || el.disabled) return;
+    const insertStr = '{{' + key + '}}';
+    const start = (typeof el.selectionStart === 'number') ? el.selectionStart : (el.value || '').length;
+    const end   = (typeof el.selectionEnd   === 'number') ? el.selectionEnd   : start;
+    const value = el.value || '';
+    el.value = value.slice(0, start) + insertStr + value.slice(end);
+    const newPos = start + insertStr.length;
+    try { el.setSelectionRange(newPos, newPos); } catch (_) { /* ignore */ }
+    el.focus();
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+  }
+
+  function validateWaMetaNamedKeys(bodyText) {
+    const keys = parseTemplateNamedVariables(bodyText);
+    return keys.filter(k => !WA_VAR_BY_KEY.has(k));
+  }
+
+  function renderWaMetaVarsBlock() {
+    const bodyEl   = document.getElementById('waMetaBodyText');
+    const block    = document.getElementById('waMetaVarsBlock');
+    const labelEl  = document.getElementById('waMetaVarsBlockLabel');
+    const listEl   = document.getElementById('waMetaVarsList');
+    const inputsEl = document.getElementById('waMetaVarsInputs');
+    const helpEl   = document.getElementById('waMetaVarsHelp');
+    if (!bodyEl || !block || !inputsEl) return;
+    const body = bodyEl.value || '';
+    const named = parseTemplateNamedVariables(body);
+    const positional = parseTemplateVariables(body);
+
+    if (!named.length && !positional.length) {
+      block.style.display = 'none';
+      block.classList.remove('wa-vars-named');
+      inputsEl.innerHTML = '';
+      if (listEl) listEl.textContent = '';
+      return;
+    }
+
+    if (named.length > 0 && positional.length === 0) {
+      block.style.display = '';
+      block.classList.add('wa-vars-named');
+      if (labelEl) labelEl.textContent = 'Variabelen gevonden (named):';
+      if (listEl) listEl.textContent = named.map(k => `{{${k}}}`).join(', ');
+      if (helpEl) helpEl.textContent = 'Voorbeeldwaarden komen uit de registry — geen handmatige invoer nodig.';
+      inputsEl.style.gridTemplateColumns = '1fr';
+      inputsEl.innerHTML = named.map(k => {
+        const v = WA_VAR_BY_KEY.get(k);
+        if (!v) {
+          return `<div class="wa-var-readonly-row">
+            <span class="wa-var-readonly-key" style="background:rgba(239,68,68,0.15)">{{${esc(k)}}}</span>
+            <span class="wa-var-readonly-example" style="color:#dc2626">onbekende variabele</span>
+          </div>`;
+        }
+        return `<div class="wa-var-readonly-row">
+          <span class="wa-var-readonly-key">{{${esc(k)}}}</span>
+          <span class="wa-var-readonly-example">${esc(v.label)} &middot; voorbeeld: ${esc(v.example)}</span>
+        </div>`;
+      }).join('');
+      if (window._waMetaReadOnly) applyWaMetaReadOnly(true);
+      return;
+    }
+
+    // Positional (legacy)
+    block.style.display = '';
+    block.classList.remove('wa-vars-named');
+    if (labelEl) labelEl.textContent = 'Variabelen gevonden:';
+    if (helpEl) helpEl.textContent = 'Voorbeeldwaarden — gebruikt voor preview én als Meta sample bij submit.';
+    inputsEl.style.gridTemplateColumns = '1fr 1fr';
+    if (listEl) listEl.textContent = positional.map(n => `{{${n}}}`).join(', ');
+    inputsEl.innerHTML = positional.map(n => {
+      const cur = esc(_waTpl.metaCurrentExamples[String(n)] || '');
+      return `<div>
+        <label style="display:block;font-size:11.5px;font-weight:600;margin-bottom:3px">{{${n}}}</label>
+        <input type="text" class="form-input" data-wa-meta-var="${n}" value="${cur}" placeholder="Voorbeeldwaarde voor {{${n}}}" />
+      </div>`;
+    }).join('');
+    inputsEl.querySelectorAll('[data-wa-meta-var]').forEach(inp => {
+      inp.addEventListener('input', () => {
+        const k = inp.getAttribute('data-wa-meta-var');
+        _waTpl.metaCurrentExamples[k] = inp.value;
+        computeWaMetaPreview();
+      });
+    });
+    if (window._waMetaReadOnly) applyWaMetaReadOnly(true);
+  }
+
+  function renderWaMetaButtons() {
+    const list = document.getElementById('waMetaButtonsList');
+    const addBtn = document.getElementById('waMetaBtnAddBtn');
+    if (!list) return;
+    if (addBtn) addBtn.disabled = _waTpl.metaButtonsDraft.length >= 3;
+    if (!_waTpl.metaButtonsDraft.length) {
+      list.innerHTML = '<div style="font-size:12px;color:var(--text-faint)">Nog geen knoppen. Klik op + Knop toevoegen (max 3).</div>';
+      return;
+    }
+    list.innerHTML = _waTpl.metaButtonsDraft.map((b, idx) => {
+      const type     = b.type || 'URL';
+      const text     = esc(b.text || '');
+      const url      = esc(b.url || '');
+      const phone    = esc(b.phone_number || '');
+      const showUrl  = type === 'URL';
+      const showPh   = type === 'PHONE_NUMBER';
+      return `<div data-wa-meta-btn-row="${idx}" style="display:grid;grid-template-columns:140px 1fr 1fr auto;gap:6px;align-items:center;border:1px solid var(--border);border-radius:6px;padding:6px 8px">
+        <select class="form-input" data-wa-meta-btn-type="${idx}" style="font-size:12px">
+          <option value="URL"${type==='URL'?' selected':''}>URL</option>
+          <option value="PHONE_NUMBER"${type==='PHONE_NUMBER'?' selected':''}>Telefoon</option>
+          <option value="QUICK_REPLY"${type==='QUICK_REPLY'?' selected':''}>Snel antwoord</option>
+        </select>
+        <input type="text" class="form-input" data-wa-meta-btn-text="${idx}" value="${text}" placeholder="Knoptekst (max 25)" maxlength="25" style="font-size:12px" />
+        <input type="text" class="form-input" data-wa-meta-btn-extra="${idx}"
+          value="${showUrl ? url : (showPh ? phone : '')}"
+          placeholder="${showUrl ? 'https://…' : (showPh ? '+31612345678' : '(geen extra veld)')}"
+          ${type==='QUICK_REPLY' ? 'disabled' : ''}
+          style="font-size:12px" />
+        <button class="btn btn-sm" type="button" data-wa-meta-btn-del="${idx}" title="Knop verwijderen" style="padding:2px 8px"><i class="ti ti-trash"></i></button>
+      </div>`;
+    }).join('');
+    list.querySelectorAll('[data-wa-meta-btn-type]').forEach(el => {
+      el.addEventListener('change', () => {
+        const idx = parseInt(el.getAttribute('data-wa-meta-btn-type'), 10);
+        if (!_waTpl.metaButtonsDraft[idx]) return;
+        _waTpl.metaButtonsDraft[idx].type = el.value;
+        if (el.value === 'URL')          { _waTpl.metaButtonsDraft[idx].phone_number = ''; }
+        if (el.value === 'PHONE_NUMBER') { _waTpl.metaButtonsDraft[idx].url = ''; }
+        if (el.value === 'QUICK_REPLY')  { _waTpl.metaButtonsDraft[idx].url = ''; _waTpl.metaButtonsDraft[idx].phone_number = ''; }
+        renderWaMetaButtons();
+        computeWaMetaPreview();
+      });
+    });
+    list.querySelectorAll('[data-wa-meta-btn-text]').forEach(el => {
+      el.addEventListener('input', () => {
+        const idx = parseInt(el.getAttribute('data-wa-meta-btn-text'), 10);
+        if (!_waTpl.metaButtonsDraft[idx]) return;
+        _waTpl.metaButtonsDraft[idx].text = el.value;
+        _waTplPreviewDebounced();
+      });
+    });
+    list.querySelectorAll('[data-wa-meta-btn-extra]').forEach(el => {
+      el.addEventListener('input', () => {
+        const idx = parseInt(el.getAttribute('data-wa-meta-btn-extra'), 10);
+        if (!_waTpl.metaButtonsDraft[idx]) return;
+        const type = _waTpl.metaButtonsDraft[idx].type;
+        if (type === 'URL') _waTpl.metaButtonsDraft[idx].url = el.value;
+        else if (type === 'PHONE_NUMBER') _waTpl.metaButtonsDraft[idx].phone_number = el.value;
+        _waTplPreviewDebounced();
+      });
+    });
+    list.querySelectorAll('[data-wa-meta-btn-del]').forEach(el => {
+      el.addEventListener('click', () => {
+        const idx = parseInt(el.getAttribute('data-wa-meta-btn-del'), 10);
+        deleteWaMetaButton(idx);
+      });
+    });
+    if (window._waMetaReadOnly) applyWaMetaReadOnly(true);
+  }
+
+  function addWaMetaButton() {
+    if (_waTpl.metaButtonsDraft.length >= 3) return;
+    _waTpl.metaButtonsDraft.push({ type: 'URL', text: '', url: '' });
+    renderWaMetaButtons();
+    computeWaMetaPreview();
+  }
+
+  function deleteWaMetaButton(idx) {
+    if (idx < 0 || idx >= _waTpl.metaButtonsDraft.length) return;
+    _waTpl.metaButtonsDraft.splice(idx, 1);
+    renderWaMetaButtons();
+    computeWaMetaPreview();
+  }
+
+  function computeWaMetaPreview() {
+    const headerType    = (document.getElementById('waMetaHeaderType')?.value || 'NONE');
+    const headerTextEl  = document.getElementById('waMetaHeaderText');
+    const footerInput   = document.getElementById('waMetaFooterInput');
+    const bodyEl        = document.getElementById('waMetaBodyText');
+    const previewHeader = document.getElementById('waMetaPreviewHeader');
+    const previewBody   = document.getElementById('waMetaPreviewBody');
+    const previewFooter = document.getElementById('waMetaPreviewFooter');
+    const previewBtns   = document.getElementById('waMetaPreviewButtons');
+    if (!previewBody) return;
+
+    if (previewHeader) {
+      if (headerType === 'TEXT') {
+        const txt = (headerTextEl?.value || '').trim();
+        previewHeader.textContent = txt;
+        previewHeader.style.display = txt ? '' : 'none';
+      } else if (headerType === 'NONE') {
+        previewHeader.textContent = '';
+        previewHeader.style.display = 'none';
+      } else {
+        previewHeader.textContent = `[${headerType}]`;
+        previewHeader.style.display = '';
+      }
+    }
+
+    const rawBody = bodyEl?.value || '';
+    const segments = [];
+    const combinedRe = new RegExp(`(${WA_VAR_NAMED_RE.source}|${WA_VAR_POSITIONAL_RE.source})`, 'g');
+    let lastIdx = 0;
+    let m;
+    while ((m = combinedRe.exec(rawBody)) !== null) {
+      if (m.index > lastIdx) segments.push({ type: 'text', text: rawBody.slice(lastIdx, m.index) });
+      const token = m[0];
+      const inner = token.slice(2, -2);
+      if (/^\d+$/.test(inner)) {
+        const v = _waTpl.metaCurrentExamples[inner];
+        segments.push({ type: (v && v.length) ? 'text' : 'placeholder', text: (v && v.length) ? v : token });
+      } else {
+        const reg = WA_VAR_BY_KEY.get(inner);
+        if (reg) {
+          segments.push({ type: 'text', text: reg.example });
+        } else {
+          segments.push({ type: 'unknown', text: token, key: inner });
+        }
+      }
+      lastIdx = m.index + token.length;
+    }
+    if (lastIdx < rawBody.length) segments.push({ type: 'text', text: rawBody.slice(lastIdx) });
+    if (!segments.length) {
+      previewBody.textContent = 'Je bericht verschijnt hier…';
+    } else {
+      previewBody.innerHTML = segments.map(s => {
+        if (s.type === 'unknown') {
+          return `<span class="wa-preview-unknown" title="Onbekende variabele: ${esc(s.key)}"><span class="wa-preview-unknown-dot" aria-hidden="true"></span>${esc(s.text)}</span>`;
+        }
+        if (s.type === 'placeholder') {
+          return `<span class="wa-preview-placeholder">${esc(s.text)}</span>`;
+        }
+        return esc(s.text);
+      }).join('') || 'Je bericht verschijnt hier…';
+    }
+
+    if (previewFooter) {
+      const ft = (footerInput?.value || '').trim();
+      previewFooter.textContent = ft;
+      previewFooter.style.display = ft ? '' : 'none';
+    }
+
+    if (previewBtns) {
+      if (!_waTpl.metaButtonsDraft.length) {
+        previewBtns.innerHTML = '';
+      } else {
+        previewBtns.innerHTML = _waTpl.metaButtonsDraft.map(b => {
+          const lbl = esc((b.text || '').trim() || '(knop)');
+          const icon = b.type === 'URL' ? 'ti-external-link'
+                     : b.type === 'PHONE_NUMBER' ? 'ti-phone'
+                     : 'ti-message-circle';
+          return `<div style="background:#fff;border-radius:8px;padding:8px 10px;text-align:center;color:#0a7cff;font-weight:600;font-size:13px;box-shadow:0 1px 1px rgba(0,0,0,0.06)"><i class="ti ${icon}" style="margin-right:6px"></i>${lbl}</div>`;
+        }).join('');
+      }
+    }
+  }
+  const _waTplPreviewDebounced = _waTplDebounce(computeWaMetaPreview, 100);
+  const _waTplVarsAndPreviewDebounced = _waTplDebounce(() => {
+    renderWaMetaVarsBlock();
+    computeWaMetaPreview();
+  }, 200);
+
+  function applyWaMetaReadOnly(disabled) {
+    const ids = [
+      'waMetaNameInput', 'waMetaLangSelect', 'waMetaCatSelect',
+      'waMetaHeaderType', 'waMetaHeaderText', 'waMetaHeaderUrl',
+      'waMetaBodyText', 'waMetaFooterInput'
+    ];
+    ids.forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.disabled = !!disabled;
+    });
+    const addBtn = document.getElementById('waMetaBtnAddBtn');
+    if (addBtn) addBtn.disabled = !!disabled;
+    const btnList = document.getElementById('waMetaButtonsList');
+    if (btnList) {
+      btnList.querySelectorAll('select, input, button').forEach(el => {
+        if (disabled) el.disabled = true;
+        else el.disabled = el.hasAttribute('data-original-disabled');
+      });
+    }
+    const varsBlock = document.getElementById('waMetaVarsBlock');
+    if (varsBlock) {
+      varsBlock.querySelectorAll('input').forEach(el => { el.disabled = !!disabled; });
+    }
+    const varsPanel = document.getElementById('waMetaVarsPanel');
+    if (varsPanel) {
+      varsPanel.querySelectorAll('.wa-var-chip').forEach(el => { el.disabled = !!disabled; });
+    }
+    const saveBtn = document.getElementById('waMetaSaveBtn');
+    if (saveBtn) {
+      if (disabled) {
+        saveBtn.textContent = 'Sluiten';
+        saveBtn.onclick = closeWaMetaEdit;
+        saveBtn.classList.remove('btn-primary');
+      } else {
+        saveBtn.textContent = 'Opslaan';
+        saveBtn.onclick = saveWaMetaTemplate;
+        saveBtn.classList.add('btn-primary');
+      }
+    }
+  }
+
+  function renderWaMetaStatusBanner(item) {
+    const banner = document.getElementById('waMetaStatusBanner');
+    if (!banner) return;
+    const status = (item && item.status) || 'LOCAL';
+    let bg = '', fg = '', border = '', html = '';
+    if (status === 'SUBMITTED') {
+      bg = '#f3f4f6'; fg = '#374151'; border = '#d1d5db';
+      html = '<i class="ti ti-clock" style="margin-right:6px"></i>Wacht op Meta-review';
+    } else if (status === 'APPROVED') {
+      bg = '#d1fae5'; fg = '#065f46'; border = '#6ee7b7';
+      let dateStr = '';
+      if (item && item.approved_at) {
+        try {
+          const d = new Date(item.approved_at);
+          if (!isNaN(d.getTime())) dateStr = d.toLocaleDateString('nl-NL', { day: '2-digit', month: 'short', year: 'numeric' });
+        } catch (_) { /* ignore */ }
+      }
+      html = '<i class="ti ti-circle-check" style="margin-right:6px"></i>Goedgekeurd door Meta'
+        + (dateStr ? ' op ' + esc(dateStr) : '');
+    } else if (status === 'REJECTED') {
+      bg = '#fee2e2'; fg = '#991b1b'; border = '#fca5a5';
+      const reason = (item && item.rejection_reason) ? esc(String(item.rejection_reason)) : 'onbekende reden';
+      html = '<i class="ti ti-alert-triangle" style="margin-right:6px"></i>Afgewezen door Meta: '
+        + reason
+        + '<div style="font-weight:400;font-size:11.5px;margin-top:4px;opacity:0.85">Pas de content aan en stuur opnieuw in voor review.</div>';
+    } else if (status === 'PAUSED' || status === 'DISABLED') {
+      bg = '#fee2e2'; fg = '#991b1b'; border = '#fca5a5';
+      html = '<i class="ti ti-player-pause" style="margin-right:6px"></i>Pause/Disable door Meta';
+    } else {
+      banner.hidden = true;
+      banner.innerHTML = '';
+      return;
+    }
+    banner.style.background = bg;
+    banner.style.color = fg;
+    banner.style.borderColor = border;
+    banner.innerHTML = html;
+    banner.hidden = false;
+  }
+
+  // ─── Meta Templates modal: open / save / delete ─────────────────────────
+  function openWaMetaNew() {
+    if (!_waTpl.activeWaba) {
+      toast('Selecteer eerst een WABA', 'error');
+      return;
+    }
+    ensureTemplatesModalsInjected();
+    _waTpl.metaEditingId = null;
+    _waTpl.metaButtonsDraft = [];
+    _waTpl.metaCurrentExamples = {};
+    window._waMetaReadOnly = false;
+    renderWaMetaStatusBanner(null);
+    document.getElementById('waMetaModalTitle').textContent = 'Nieuwe Meta template';
+    const nameEl   = document.getElementById('waMetaNameInput');
+    const langEl   = document.getElementById('waMetaLangSelect');
+    const catEl    = document.getElementById('waMetaCatSelect');
+    const htEl     = document.getElementById('waMetaHeaderType');
+    const htTxtEl  = document.getElementById('waMetaHeaderText');
+    const htUrlEl  = document.getElementById('waMetaHeaderUrl');
+    const bodyEl   = document.getElementById('waMetaBodyText');
+    const footerEl = document.getElementById('waMetaFooterInput');
+    if (nameEl)   { nameEl.value = ''; nameEl.disabled = false; }
+    if (langEl)   langEl.value = 'nl';
+    if (catEl)    catEl.value = 'UTILITY';
+    if (htEl)     htEl.value = 'NONE';
+    if (htTxtEl)  htTxtEl.value = '';
+    if (htUrlEl)  htUrlEl.value = '';
+    if (bodyEl)   bodyEl.value = '';
+    if (footerEl) footerEl.value = '';
+    _waTpl.metaLastFocusedFieldId = 'waMetaBodyText';
+    _updateWaMetaHeaderVisibility();
+    renderWaMetaButtons();
+    renderWaMetaVarsPanel();
+    renderWaMetaVarsBlock();
+    computeWaMetaPreview();
+    applyWaMetaReadOnly(false);
+    wireWaMetaModalOnce();
+    const err = document.getElementById('waMetaError');
+    if (err) { err.classList.add('hidden'); err.textContent = ''; }
+    document.getElementById('waMetaEditModal').classList.remove('hidden');
+  }
+
+  function openWaMetaEdit(item) {
+    if (!item) return;
+    ensureTemplatesModalsInjected();
+    _waTpl.metaEditingId = item.id;
+    _waTpl.metaButtonsDraft = Array.isArray(item.buttons) ? item.buttons.map(b => ({ ...b })) : [];
+    _waTpl.metaCurrentExamples = (item.body_examples && typeof item.body_examples === 'object') ? { ...item.body_examples } : {};
+    const status = item.status || 'LOCAL';
+    const readOnly = ['SUBMITTED', 'APPROVED', 'PAUSED', 'DISABLED'].includes(status);
+    window._waMetaReadOnly = readOnly;
+    const titleEl = document.getElementById('waMetaModalTitle');
+    if (titleEl) {
+      titleEl.textContent = readOnly
+        ? ('Bekijk Meta template: ' + (item.name || ''))
+        : ('Bewerk Meta template: ' + (item.name || ''));
+    }
+    renderWaMetaStatusBanner(item);
+    const nameEl   = document.getElementById('waMetaNameInput');
+    const langEl   = document.getElementById('waMetaLangSelect');
+    const catEl    = document.getElementById('waMetaCatSelect');
+    const htEl     = document.getElementById('waMetaHeaderType');
+    const htTxtEl  = document.getElementById('waMetaHeaderText');
+    const htUrlEl  = document.getElementById('waMetaHeaderUrl');
+    const bodyEl   = document.getElementById('waMetaBodyText');
+    const footerEl = document.getElementById('waMetaFooterInput');
+    if (nameEl)   { nameEl.value = item.name || ''; nameEl.disabled = false; }
+    if (langEl)   langEl.value = item.language || 'nl';
+    if (catEl)    catEl.value = item.category || 'UTILITY';
+    if (htEl)     htEl.value = item.header_type || 'NONE';
+    if (htTxtEl)  htTxtEl.value = (item.header_content && item.header_content.text) || '';
+    if (htUrlEl)  htUrlEl.value = (item.header_content && item.header_content.example_url) || '';
+    if (bodyEl)   bodyEl.value = item.body_text || '';
+    if (footerEl) footerEl.value = item.footer_text || '';
+    _waTpl.metaLastFocusedFieldId = 'waMetaBodyText';
+    _updateWaMetaHeaderVisibility();
+    renderWaMetaButtons();
+    renderWaMetaVarsPanel();
+    renderWaMetaVarsBlock();
+    computeWaMetaPreview();
+    applyWaMetaReadOnly(readOnly);
+    wireWaMetaModalOnce();
+    const err = document.getElementById('waMetaError');
+    if (err) { err.classList.add('hidden'); err.textContent = ''; }
+    document.getElementById('waMetaEditModal').classList.remove('hidden');
+  }
+
+  function closeWaMetaEdit() {
+    const m = document.getElementById('waMetaEditModal');
+    if (m) m.classList.add('hidden');
+    _waTpl.metaEditingId = null;
+    _waTpl.metaButtonsDraft = [];
+    _waTpl.metaCurrentExamples = {};
+    window._waMetaReadOnly = false;
+    const banner = document.getElementById('waMetaStatusBanner');
+    if (banner) { banner.hidden = true; banner.innerHTML = ''; }
+  }
+
+  function _updateWaMetaHeaderVisibility() {
+    const ht       = (document.getElementById('waMetaHeaderType')?.value || 'NONE');
+    const txtGroup = document.getElementById('waMetaHeaderTextGroup');
+    const urlGroup = document.getElementById('waMetaHeaderUrlGroup');
+    if (txtGroup) txtGroup.hidden = ht !== 'TEXT';
+    if (urlGroup) urlGroup.hidden = !(ht === 'IMAGE' || ht === 'VIDEO' || ht === 'DOCUMENT');
+  }
+
+  async function saveWaMetaTemplate() {
+    const errEl = document.getElementById('waMetaError');
+    const btn   = document.getElementById('waMetaSaveBtn');
+    const showErr = (msg) => { if (errEl) { errEl.textContent = msg; errEl.classList.remove('hidden'); } };
+    const hideErr = () => { if (errEl) { errEl.classList.add('hidden'); errEl.textContent = ''; } };
+    hideErr();
+
+    if (!_waTpl.activeWaba) { showErr('Geen actieve WABA — herlaad de pagina.'); return; }
+
+    const name      = (document.getElementById('waMetaNameInput')?.value || '').trim();
+    const language  = (document.getElementById('waMetaLangSelect')?.value || 'nl').trim();
+    const category  = (document.getElementById('waMetaCatSelect')?.value || 'UTILITY').trim();
+    const headerType = (document.getElementById('waMetaHeaderType')?.value || 'NONE').trim();
+    const headerTxt = (document.getElementById('waMetaHeaderText')?.value || '').trim();
+    const headerUrl = (document.getElementById('waMetaHeaderUrl')?.value || '').trim();
+    const bodyText  = (document.getElementById('waMetaBodyText')?.value || '').trim();
+    const footerTxt = (document.getElementById('waMetaFooterInput')?.value || '').trim();
+
+    if (!name) { showErr('Naam is verplicht'); return; }
+    if (!/^[a-z0-9_]+$/.test(name)) { showErr('Naam: alleen lowercase a-z, 0-9 en _'); return; }
+    if (!bodyText) { showErr('Body is verplicht'); return; }
+
+    if (isMixedTemplateBody(bodyText)) {
+      showErr('Body bevat zowel named ({{klant.naam}}) als positionele ({{1}}) placeholders. Kies één stijl.');
+      return;
+    }
+    const unknownKeys = validateWaMetaNamedKeys(bodyText);
+    if (unknownKeys.length) {
+      const list = unknownKeys.map(k => '{{' + k + '}}').join(', ');
+      const plural = unknownKeys.length === 1 ? 'variabele' : 'variabelen';
+      showErr(
+        'Onbekende ' + plural + ' in body: ' + list +
+        '. Controleer de spelling — geldige keys staan als chips in het variabelen-paneel onder de body.'
+      );
+      return;
+    }
+
+    let headerContent = null;
+    if (headerType === 'TEXT') headerContent = { text: headerTxt };
+    else if (headerType === 'IMAGE' || headerType === 'VIDEO' || headerType === 'DOCUMENT') {
+      headerContent = headerUrl ? { example_url: headerUrl } : null;
+    }
+
+    const vars = parseTemplateVariables(bodyText);
+    const examples = {};
+    vars.forEach(n => {
+      const v = _waTpl.metaCurrentExamples[String(n)];
+      if (v != null && String(v).length) examples[String(n)] = String(v);
+    });
+
+    const buttons = _waTpl.metaButtonsDraft
+      .filter(b => b && b.type && (b.text || '').trim())
+      .map(b => {
+        const out = { type: b.type, text: String(b.text).trim() };
+        if (b.type === 'URL') out.url = String(b.url || '').trim();
+        if (b.type === 'PHONE_NUMBER') out.phone_number = String(b.phone_number || '').trim();
+        return out;
+      });
+
+    const payload = {
+      business_account_id: _waTpl.activeWaba,
+      name,
+      language,
+      category,
+      header_type:    headerType,
+      header_content: headerContent,
+      body_text:      bodyText,
+      body_examples:  Object.keys(examples).length ? examples : null,
+      footer_text:    footerTxt || null,
+      buttons:        buttons.length ? buttons : null,
+    };
+
+    if (btn) { btn.disabled = true; btn.textContent = 'Opslaan…'; }
+    try {
+      const method = _waTpl.metaEditingId ? 'PATCH' : 'POST';
+      const path   = '/api/admin-meta-templates-upsert' + (_waTpl.metaEditingId ? `?id=${encodeURIComponent(_waTpl.metaEditingId)}` : '');
+      const data   = await apiRequest(method, path, payload);
+      if (data && data.error) {
+        showErr(data.error);
+        return;
+      }
+      toast('Template opgeslagen', 'success');
+      closeWaMetaEdit();
+      loadWaMetaList();
+    } catch (e) {
+      showErr(e.message);
+    } finally {
+      if (btn) { btn.disabled = false; btn.textContent = 'Opslaan'; }
+    }
+  }
+
+  async function deleteWaMetaTemplate(item) {
+    if (!item) return;
+    if (!confirm(`Template '${item.name}' verwijderen?`)) return;
+    try {
+      const data = await apiRequest('DELETE', '/api/admin-meta-templates-delete?id=' + encodeURIComponent(item.id));
+      if (data && data.error) {
+        alert('Verwijderen mislukt: ' + data.error);
+        return;
+      }
+      toast('Template verwijderd', 'success');
+      loadWaMetaList();
+    } catch (e) {
+      alert('Verwijderen mislukt: ' + e.message);
+    }
+  }
+
+  // ─── Meta sync / submit / resubmit / duplicate ────────────────────────────
+  function formatMetaError(err) {
+    const me = err?.meta_error || err?.data?.meta_error || null;
+    if (me && (me.error_user_title || me.error_user_msg)) {
+      const title = me.error_user_title || 'Meta-fout';
+      const msg = me.error_user_msg || '';
+      const trace = me.fbtrace_id ? ` (trace: ${me.fbtrace_id})` : '';
+      return msg ? `${title}\n${msg}${trace}` : `${title}${trace}`;
+    }
+    return err?.error || err?.message || 'Onbekende fout';
+  }
+
+  async function doWaMetaSync() {
+    if (!_waTpl.activeWaba) {
+      toast('Selecteer eerst een WABA', 'error');
+      return;
+    }
+    const btn = document.getElementById('waMetaSyncBtn');
+    const orig = btn ? btn.innerHTML : '';
+    if (btn) { btn.disabled = true; btn.innerHTML = '<i class="ti ti-loader"></i> Bezig…'; }
+    try {
+      const data = await apiRequest('POST', '/api/admin-meta-templates-sync', { business_account_id: _waTpl.activeWaba });
+      if (data && data.error) {
+        toast('Sync mislukt: ' + formatMetaError(data), 'error');
+        return;
+      }
+      const scanned = (data && (data.scanned ?? data.synced)) ?? 0;
+      const updated = (data && data.updated) ?? 0;
+      const created = (data && data.created) ?? 0;
+      const parts = [`${scanned} gesynchroniseerd`];
+      if (updated) parts.push(`${updated} status-wijziging${updated === 1 ? '' : 'en'}`);
+      if (created) parts.push(`${created} nieuw`);
+      toast(parts.join(', '), 'success');
+      await loadWaMetaList();
+    } catch (e) {
+      toast('Sync mislukt: ' + (e?.message || 'Onbekende fout'), 'error');
+    } finally {
+      if (btn) { btn.disabled = false; btn.innerHTML = orig; }
+    }
+  }
+
+  async function doWaMetaSubmit(item) {
+    if (!item) return;
+    if (!confirm(`Template '${item.name}' naar Meta sturen voor goedkeuring? Daarna is bewerken alleen mogelijk na rejection.`)) return;
+    try {
+      const data = await apiRequest('POST', '/api/admin-meta-templates-submit', { template_id: item.id });
+      if (data && data.error) {
+        toast('Submit mislukt: ' + formatMetaError(data), 'error');
+        return;
+      }
+      toast('Template ingestuurd bij Meta', 'success');
+      await loadWaMetaList();
+    } catch (e) {
+      toast('Submit mislukt: ' + (e?.message || 'Onbekende fout'), 'error');
+    }
+  }
+
+  async function doWaMetaResubmit(item) {
+    if (!item) return;
+    if (!confirm(`Template '${item.name}' opnieuw insturen na rejection?`)) return;
+    try {
+      const data = await apiRequest('POST', '/api/admin-meta-templates-submit', { template_id: item.id });
+      if (data && data.error) {
+        toast('Opnieuw insturen mislukt: ' + formatMetaError(data), 'error');
+        return;
+      }
+      toast('Template opnieuw ingestuurd', 'success');
+      await loadWaMetaList();
+    } catch (e) {
+      toast('Opnieuw insturen mislukt: ' + (e?.message || 'Onbekende fout'), 'error');
+    }
+  }
+
+  async function doWaMetaDuplicate(item) {
+    if (!item) return;
+    if (!_waTpl.activeWaba) {
+      toast('Geen actieve WABA', 'error');
+      return;
+    }
+    const base = String(item.name || '').replace(/_v\d+$/, '');
+    const re = new RegExp('^' + base.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '_v(\\d+)$');
+    let maxN = 1;
+    for (const it of _waTpl.metaItems) {
+      if (it.name === base) maxN = Math.max(maxN, 1);
+      const m = re.exec(it.name || '');
+      if (m) maxN = Math.max(maxN, parseInt(m[1], 10));
+    }
+    const newName = `${base}_v${maxN + 1}`;
+
+    const payload = {
+      business_account_id: _waTpl.activeWaba,
+      name:           newName,
+      language:       item.language || 'nl',
+      category:       item.category || 'UTILITY',
+      header_type:    item.header_type || 'NONE',
+      header_content: item.header_content || null,
+      body_text:      item.body_text || '',
+      body_examples:  item.body_examples || null,
+      footer_text:    item.footer_text || null,
+      buttons:        Array.isArray(item.buttons) && item.buttons.length ? item.buttons.map(b => ({ ...b })) : null,
+    };
+    try {
+      const data = await apiRequest('POST', '/api/admin-meta-templates-upsert', payload);
+      if (data && data.error) {
+        toast('Dupliceer mislukt: ' + data.error, 'error');
+        return;
+      }
+      toast('Dupliceer aangemaakt: ' + newName, 'success');
+      await loadWaMetaList();
+    } catch (e) {
+      toast('Dupliceer mislukt: ' + e.message, 'error');
+    }
+  }
+
+  // ─── Quick Replies modal ──────────────────────────────────────────────────
+  function openWaQrNew() {
+    if (!_waTpl.activeWaba) {
+      toast('Selecteer eerst een WABA', 'error');
+      return;
+    }
+    ensureTemplatesModalsInjected();
+    _waTpl.qrEditingId = null;
+    document.getElementById('waQrModalTitle').textContent = 'Nieuwe snel antwoord';
+    const titleEl  = document.getElementById('waQrTitleInput');
+    const bodyEl   = document.getElementById('waQrBodyInput');
+    const sortEl   = document.getElementById('waQrSortInput');
+    const activeEl = document.getElementById('waQrActiveInput');
+    if (titleEl)  titleEl.value = '';
+    if (bodyEl)   bodyEl.value = '';
+    if (sortEl)   sortEl.value = '0';
+    if (activeEl) activeEl.checked = true;
+    wireWaQrModalOnce();
+    const err = document.getElementById('waQrError');
+    if (err) { err.classList.add('hidden'); err.textContent = ''; }
+    document.getElementById('waQrEditModal').classList.remove('hidden');
+  }
+
+  function openWaQrEdit(item) {
+    if (!item) return;
+    ensureTemplatesModalsInjected();
+    _waTpl.qrEditingId = item.id;
+    document.getElementById('waQrModalTitle').textContent = 'Snel antwoord bewerken';
+    const titleEl  = document.getElementById('waQrTitleInput');
+    const bodyEl   = document.getElementById('waQrBodyInput');
+    const sortEl   = document.getElementById('waQrSortInput');
+    const activeEl = document.getElementById('waQrActiveInput');
+    if (titleEl)  titleEl.value = item.title || '';
+    if (bodyEl)   bodyEl.value = item.body_text || '';
+    if (sortEl)   sortEl.value = String(Number.isFinite(item.sort_order) ? item.sort_order : 0);
+    if (activeEl) activeEl.checked = item.is_active !== false;
+    wireWaQrModalOnce();
+    const err = document.getElementById('waQrError');
+    if (err) { err.classList.add('hidden'); err.textContent = ''; }
+    document.getElementById('waQrEditModal').classList.remove('hidden');
+  }
+
+  function closeWaQrEdit() {
+    const m = document.getElementById('waQrEditModal');
+    if (m) m.classList.add('hidden');
+    _waTpl.qrEditingId = null;
+  }
+
+  async function saveWaQuickReply() {
+    const errEl = document.getElementById('waQrError');
+    const btn   = document.getElementById('waQrSaveBtn');
+    const showErr = (msg) => { if (errEl) { errEl.textContent = msg; errEl.classList.remove('hidden'); } };
+    const hideErr = () => { if (errEl) { errEl.classList.add('hidden'); errEl.textContent = ''; } };
+    hideErr();
+
+    if (!_waTpl.activeWaba) { showErr('Geen actieve WABA — herlaad de pagina.'); return; }
+
+    const title    = (document.getElementById('waQrTitleInput')?.value || '').trim();
+    const bodyText = (document.getElementById('waQrBodyInput')?.value || '').trim();
+    const sortRaw  = (document.getElementById('waQrSortInput')?.value || '0').trim();
+    const isActive = !!document.getElementById('waQrActiveInput')?.checked;
+
+    if (!title)    { showErr('Titel is verplicht'); return; }
+    if (!bodyText) { showErr('Body is verplicht'); return; }
+    const sort = parseInt(sortRaw, 10);
+    if (!Number.isFinite(sort)) { showErr('Sorteervolgorde moet een geheel getal zijn'); return; }
+
+    const payload = {
+      business_account_id: _waTpl.activeWaba,
+      title,
+      body_text:  bodyText,
+      sort_order: sort,
+      is_active:  isActive,
+    };
+
+    if (btn) { btn.disabled = true; btn.textContent = 'Opslaan…'; }
+    try {
+      const method = _waTpl.qrEditingId ? 'PATCH' : 'POST';
+      const path   = '/api/admin-quick-replies-upsert' + (_waTpl.qrEditingId ? `?id=${encodeURIComponent(_waTpl.qrEditingId)}` : '');
+      const data   = await apiRequest(method, path, payload);
+      if (data && data.error) { showErr(data.error); return; }
+      toast('Snel antwoord opgeslagen', 'success');
+      closeWaQrEdit();
+      loadWaQrList();
+    } catch (e) {
+      showErr(e.message);
+    } finally {
+      if (btn) { btn.disabled = false; btn.textContent = 'Opslaan'; }
+    }
+  }
+
+  async function deleteWaQuickReply(item) {
+    if (!item) return;
+    if (!confirm(`Snel antwoord '${item.title}' verwijderen?`)) return;
+    try {
+      const data = await apiRequest('DELETE', '/api/admin-quick-replies-delete?id=' + encodeURIComponent(item.id));
+      if (data && data.error) { alert('Verwijderen mislukt: ' + data.error); return; }
+      toast('Snel antwoord verwijderd', 'success');
+      loadWaQrList();
+    } catch (e) {
+      alert('Verwijderen mislukt: ' + e.message);
+    }
+  }
+
+  // ─── Master wiring (one-time per host) ──────────────────────────────────
+  function wireWaTplOnce() {
+    if (_waTpl.wired) return;
+    _waTpl.wired = true;
+    ensureTemplatesModalsInjected();
+    const host = _state.hostMounted;
+    if (!host) return;
+
+    const wabaSel = host.querySelector('#waTplWabaSelect');
+    if (wabaSel) {
+      wabaSel.addEventListener('change', () => {
+        _waTpl.activeWaba = wabaSel.value || null;
+        if (_waTpl.activeSub === 'meta') loadWaMetaList();
+        else loadWaQrList();
+      });
+    }
+    const wabaRefreshBtn = host.querySelector('#waTplWabaRefreshBtn');
+    if (wabaRefreshBtn) wabaRefreshBtn.addEventListener('click', () => loadWaTplWabas());
+
+    host.querySelectorAll('#waTplSubTabs [data-wa-tpl-sub]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const sub = btn.getAttribute('data-wa-tpl-sub');
+        switchWaTplSub(sub);
+      });
+    });
+
+    const reloadBtn = host.querySelector('#waTplReloadBtn');
+    if (reloadBtn) reloadBtn.addEventListener('click', () => {
+      if (_waTpl.activeSub === 'meta') loadWaMetaList();
+      else loadWaQrList();
+    });
+
+    const metaNewBtn = host.querySelector('#waMetaNewBtn');
+    if (metaNewBtn) metaNewBtn.addEventListener('click', () => openWaMetaNew());
+    const qrNewBtn = host.querySelector('#waQrNewBtn');
+    if (qrNewBtn) qrNewBtn.addEventListener('click', () => openWaQrNew());
+
+    const metaTbody = host.querySelector('#waMetaTbody');
+    if (metaTbody) {
+      metaTbody.addEventListener('click', (e) => {
+        const editBtn     = e.target.closest('[data-wa-meta-edit]');
+        const delBtn      = e.target.closest('[data-wa-meta-del]');
+        const viewBtn     = e.target.closest('[data-wa-meta-view]');
+        const submitBtn   = e.target.closest('[data-wa-meta-submit]');
+        const resubmitBtn = e.target.closest('[data-wa-meta-resubmit]');
+        const dupBtn      = e.target.closest('[data-wa-meta-dupliceer]');
+        const findItem = (btn, attr) => {
+          const id = btn.getAttribute(attr);
+          return _waTpl.metaItems.find(it => String(it.id) === id);
+        };
+        if (editBtn && !editBtn.disabled) {
+          const item = findItem(editBtn, 'data-wa-meta-edit');
+          if (item) openWaMetaEdit(item);
+        } else if (delBtn && !delBtn.disabled) {
+          const item = findItem(delBtn, 'data-wa-meta-del');
+          if (item) deleteWaMetaTemplate(item);
+        } else if (viewBtn && !viewBtn.disabled) {
+          const item = findItem(viewBtn, 'data-wa-meta-view');
+          if (item) openWaMetaEdit(item);
+        } else if (submitBtn && !submitBtn.disabled) {
+          const item = findItem(submitBtn, 'data-wa-meta-submit');
+          if (item) doWaMetaSubmit(item);
+        } else if (resubmitBtn && !resubmitBtn.disabled) {
+          const item = findItem(resubmitBtn, 'data-wa-meta-resubmit');
+          if (item) doWaMetaResubmit(item);
+        } else if (dupBtn && !dupBtn.disabled) {
+          const item = findItem(dupBtn, 'data-wa-meta-dupliceer');
+          if (item) doWaMetaDuplicate(item);
+        }
+      });
+    }
+    const metaSyncBtn = host.querySelector('#waMetaSyncBtn');
+    if (metaSyncBtn) metaSyncBtn.addEventListener('click', () => doWaMetaSync());
+    const qrTbody = host.querySelector('#waQrTbody');
+    if (qrTbody) {
+      qrTbody.addEventListener('click', (e) => {
+        const editBtn = e.target.closest('[data-wa-qr-edit]');
+        const delBtn  = e.target.closest('[data-wa-qr-del]');
+        if (editBtn) {
+          const id = editBtn.getAttribute('data-wa-qr-edit');
+          const item = _waTpl.qrItems.find(it => String(it.id) === id);
+          if (item) openWaQrEdit(item);
+        } else if (delBtn) {
+          const id = delBtn.getAttribute('data-wa-qr-del');
+          const item = _waTpl.qrItems.find(it => String(it.id) === id);
+          if (item) deleteWaQuickReply(item);
+        }
+      });
+    }
+  }
+
+  // Modal-level wiring: event-binding op velden in de modal. Idempotent
+  // via flag (omdat we open meermalig kunnen aanroepen). Hangs on document
+  // (modal lives in body) — not on the host.
+  let _waMetaModalWired = false;
+  function wireWaMetaModalOnce() {
+    if (_waMetaModalWired) return;
+    _waMetaModalWired = true;
+    const htEl = document.getElementById('waMetaHeaderType');
+    if (htEl) htEl.addEventListener('change', () => {
+      _updateWaMetaHeaderVisibility();
+      _waTplPreviewDebounced();
+    });
+    const htTxtEl = document.getElementById('waMetaHeaderText');
+    if (htTxtEl) {
+      htTxtEl.addEventListener('input', () => _waTplPreviewDebounced());
+      htTxtEl.addEventListener('focus', () => _waMetaTrackFocus('waMetaHeaderText'));
+    }
+    const bodyEl = document.getElementById('waMetaBodyText');
+    if (bodyEl) {
+      bodyEl.addEventListener('input', () => _waTplVarsAndPreviewDebounced());
+      bodyEl.addEventListener('focus', () => _waMetaTrackFocus('waMetaBodyText'));
+    }
+    const footerEl = document.getElementById('waMetaFooterInput');
+    if (footerEl) {
+      footerEl.addEventListener('input', () => _waTplPreviewDebounced());
+      footerEl.addEventListener('focus', () => _waMetaTrackFocus('waMetaFooterInput'));
+    }
+    const btnAdd = document.getElementById('waMetaBtnAddBtn');
+    if (btnAdd) btnAdd.addEventListener('click', () => addWaMetaButton());
+
+    // Variabelen-paneel chip-click delegation.
+    const varsPanel = document.getElementById('waMetaVarsPanel');
+    if (varsPanel) {
+      varsPanel.addEventListener('click', (e) => {
+        const chip = e.target.closest('.wa-var-chip');
+        if (!chip) return;
+        const key = chip.getAttribute('data-wa-var-key');
+        if (!key) return;
+        insertVariableAtCursor(key);
+      });
+    }
+
+    // Save-knop: default → saveWaMetaTemplate (kan door applyWaMetaReadOnly
+    // ge-overridden worden naar closeWaMetaEdit in read-only).
+    const saveBtn = document.getElementById('waMetaSaveBtn');
+    if (saveBtn) saveBtn.onclick = saveWaMetaTemplate;
+  }
+
+  let _waQrModalWired = false;
+  function wireWaQrModalOnce() {
+    if (_waQrModalWired) return;
+    _waQrModalWired = true;
+    const saveBtn = document.getElementById('waQrSaveBtn');
+    if (saveBtn) saveBtn.onclick = saveWaQuickReply;
+  }
 
   // ── Expose public API ──────────────────────────────────────────────────────
   window.FinanceInstellingen = {
