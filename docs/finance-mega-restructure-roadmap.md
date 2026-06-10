@@ -144,29 +144,37 @@ fallback tabellen ipv crash.
 
 ### Groep D — Admin → Finance Settings migratie (4-6 commits)
 
-D1. **`shared/finance-instellingen.js`** — wrapper module met 3 secties
+**STATUS: PARTIAL (Joost AI verhuisd, Templates + Afdeling deep-link)**
 
-D2. **Joost AI config sectie verhuizen**
-- Cut uit `modules/admin.html` regel 220+ + 544-630 (joostCfgBody + joostCfgForm)
-- Paste in `shared/finance-instellingen.js`
-- Handlers meeverhuizen: saveJoostConfig, loadJoostConfig, autonomy-config, decisions-log
-- Admin.html: tab-knop + body verwijderen
+GEDAAN (juni 2026):
+- D1: `modules/shared/finance-instellingen.js` — wrapper-module met
+  3 sub-tabs (Joost / Templates / Connection) + idempotente mount.
+- D2: Joost AI volledig geporteerd — algemeen + autonomy + decision-log
+  met identieke handlers (loadJoostConfig, saveJoostConfig,
+  loadJoostAutonomyConfig, saveJoostAutonomyConfig, loadDecisionLog,
+  switchJoostSubTab) + 30s decision-log polling + beforeunload cleanup.
+- D5: `<div id="view-instellingen">` in finance.html + financeNav-knop
+  op laatste positie + setView('instellingen') mount.
+- D6: Joost-tab + ~500 regels JS uit admin.html verwijderd
+  (admin.html: 5494 -> 4655 lines, netto -839 lines).
 
-D3. **WhatsApp templates sectie verhuizen**
-- Cut/paste vergelijkbaar
-- API-endpoint blijft `admin-meta-templates-*` (geen rename in deze PR)
+PARTIAL / TODO (vervolg-PR):
+- D3: WhatsApp Templates volledige verhuis — tijdelijk deep-link naar
+  admin.html#whatsapp-templates. Reden: template-editor met variabelen-
+  paneel + Meta-sync + quick-replies is ~1400 regels code + grote modal-
+  HTML (~200 regels). Veilig porteer-werk voor aparte PR.
+- D4: WhatsApp Connection / Afdeling-config volledige verhuis —
+  tijdelijk deep-link naar admin.html#whatsapp-connection. Reden:
+  module-koppelings-tabel + Meta webhook-subscribe flow zit met
+  WhatsApp-templates verweven; samen porteren is logischer.
+- Beide deep-links gebruiken `target="_blank"` zodat de admin-flow
+  niet de Finance-tab-state breekt.
 
-D4. **Afdeling-config sectie verhuizen**
-- Cut/paste vergelijkbaar
-- API-endpoint blijft `admin-*` (geen rename in deze PR)
-
-D5. **finance.html: `<div id="view-instellingen">` + #financeNav knop op positie 7**
-- Mount `FinanceInstellingen.mount(host)`
-- 3 sub-secties via accordion of sub-tabs
-
-D6. **Admin.html cleanup**
-- Verwijder 3 tabs uit admin-tabs nav
-- Behoudt: Users + RBAC + TL integraties + system settings
+RBAC-keys (admin.joost_config / admin.whatsapp_templates /
+admin.arrangement_settings / finance.joost.*) zijn ONGEWIJZIGD in
+FEATURE_REGISTRY — alleen Joost host-pagina is verplaatst.
+Endpoints (joost-config-*, admin-meta-templates-*,
+admin-whatsapp-modules-*) blijven server-side identiek.
 
 ### Groep E — Backend (3-4 commits)
 
