@@ -943,6 +943,86 @@
       padding: 6px 10px;
     }
 
+    /* ── Joost autonomy badges + info-strip (E2.x) ─────────────────────────── */
+    /* Conv-row autonomy badge (Joost actief / Wacht op Jeffrey). */
+    .joost-conv-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 3px;
+      font-size: 9.5px;
+      font-weight: 700;
+      letter-spacing: .02em;
+      padding: 2px 6px;
+      border-radius: 8px;
+      line-height: 1.1;
+      white-space: nowrap;
+      flex-shrink: 0;
+    }
+    .joost-conv-badge.active {
+      background: rgba(34, 197, 94, .18);
+      color: #16a34a;
+      border: 1px solid rgba(34, 197, 94, .35);
+    }
+    .joost-conv-badge.waiting {
+      background: rgba(245, 158, 11, .18);
+      color: #b45309;
+      border: 1px solid rgba(245, 158, 11, .35);
+    }
+    .joost-conv-badge i {
+      font-size: 10px;
+    }
+
+    /* Autonomy info-strip boven thread (Joost-status + berichten vandaag + pauze/hervat). */
+    .joost-autonomy-strip {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 6px 14px;
+      background: rgba(124, 58, 237, .07);
+      border-bottom: 1px solid rgba(124, 58, 237, .18);
+      font-size: 11.5px;
+      flex-wrap: wrap;
+    }
+    .joost-autonomy-strip[hidden] { display: none; }
+    .joost-autonomy-strip .strip-status {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      font-weight: 600;
+    }
+    .joost-autonomy-strip .strip-status.active   { color: #16a34a; }
+    .joost-autonomy-strip .strip-status.paused   { color: #b45309; }
+    .joost-autonomy-strip .strip-status.disabled { color: var(--text-faint); }
+    .joost-autonomy-strip .strip-counter {
+      color: var(--text-dim);
+      font-size: 11px;
+    }
+    .joost-autonomy-strip .strip-spacer { flex: 1; }
+    .joost-autonomy-strip .strip-btn {
+      font-size: 11px;
+      padding: 3px 8px;
+      border-radius: 6px;
+      border: 1px solid var(--border, rgba(255,255,255,.12));
+      background: transparent;
+      color: var(--text-dim);
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+    }
+    .joost-autonomy-strip .strip-btn:hover { background: rgba(255,255,255,.05); }
+    .joost-autonomy-strip .strip-btn.pause { color: #b45309; border-color: rgba(245,158,11,.35); }
+    .joost-autonomy-strip .strip-btn.resume { color: #16a34a; border-color: rgba(34,197,94,.35); }
+
+    /* Sparkle-icon (autonomous-sent badge) in bubble-meta. */
+    .bubble-meta .autonomous-sparkle {
+      display: inline-flex;
+      align-items: center;
+      color: #a855f7;
+      margin-right: 2px;
+      opacity: .85;
+    }
+
     @media (max-width: 1100px) {
       .inbox-layout-c {
         grid-template-columns: minmax(240px, 33%) minmax(0, 1fr);
@@ -1302,6 +1382,16 @@
                 <span id="inboxThreadWindowBadge" class="inbox-c-window-badge open" title="">24h open</span>
                 <button class="sr-ibtn" id="inboxThreadCustomerBtn" type="button" title="Klant-info"><i class="ti ti-user"></i></button>
               </div>
+            </div>
+
+            <!-- Joost autonomy info-strip (E2.x) — toont status + berichten vandaag + pauzeer/hervat.
+                 Hidden tot loadJoostConvState() autonomy_enabled bevestigt voor deze conv. -->
+            <div class="joost-autonomy-strip" id="inboxJoostAutonomyStrip" hidden>
+              <span class="strip-status" id="inboxJoostAutonomyStatus"><i class="ti ti-sparkles"></i> <span id="inboxJoostAutonomyStatusLabel">Joost: actief</span></span>
+              <span class="strip-counter" id="inboxJoostAutonomyCounter">Berichten vandaag: —</span>
+              <span class="strip-spacer"></span>
+              <button class="strip-btn pause" id="inboxJoostAutonomyPauseBtn" type="button" hidden><i class="ti ti-player-pause"></i> Pauzeer Joost</button>
+              <button class="strip-btn resume" id="inboxJoostAutonomyResumeBtn" type="button" hidden><i class="ti ti-player-play"></i> Hervat Joost</button>
             </div>
 
             <!-- Messages container -->
@@ -2394,6 +2484,40 @@
     <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:18px;flex-wrap:wrap">
       <button class="sr-abtn" id="joostEscCancel" type="button">Annuleren</button>
       <button class="sr-abtn" id="joostEscSubmit" type="button" style="background:#b91c1c;color:#fff;border-color:#991b1b"><i class="ti ti-alert-triangle"></i> Maak escalatie</button>
+    </div>
+  </div>
+</div>
+
+<!-- Joost Pauzeer-modal (E2.x) — reason + duur. PATCH /api/joost-conversation-state. -->
+<div class="modal-overlay hidden" id="joostPauseModal" role="dialog" aria-modal="true">
+  <div class="modal-card" style="max-width:480px">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px">
+      <h3 style="margin:0;font-size:17px;display:flex;align-items:center;gap:8px"><i class="ti ti-player-pause" style="color:#b45309"></i> Pauzeer Joost</h3>
+      <button class="sr-ibtn" id="joostPauseCloseX" type="button" title="Sluiten" style="margin-top:-4px"><i class="ti ti-x"></i></button>
+    </div>
+
+    <div style="margin-top:14px;display:flex;flex-direction:column;gap:12px">
+      <div style="display:flex;flex-direction:column;gap:6px">
+        <label for="joostPauseReason" style="font-size:11px;color:var(--text-dim);text-transform:uppercase;letter-spacing:.04em;font-weight:600">Reden (optioneel)</label>
+        <textarea id="joostPauseReason" rows="3" class="fin-input" placeholder="Waarom pauzeer je Joost voor deze conversatie?" style="font-size:13px;resize:vertical;min-height:70px"></textarea>
+      </div>
+
+      <div style="display:flex;flex-direction:column;gap:6px">
+        <label for="joostPauseDuration" style="font-size:11px;color:var(--text-dim);text-transform:uppercase;letter-spacing:.04em;font-weight:600">Duur</label>
+        <select id="joostPauseDuration" class="fin-input" style="font-size:13px">
+          <option value="24h">24 uur</option>
+          <option value="48h" selected>48 uur</option>
+          <option value="7d">7 dagen</option>
+          <option value="manual">Handmatig hervatten</option>
+        </select>
+      </div>
+
+      <div id="joostPauseError" style="display:none;padding:8px 12px;background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.3);border-radius:6px;color:#ef4444;font-size:12px"></div>
+    </div>
+
+    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:18px;flex-wrap:wrap">
+      <button class="sr-abtn" id="joostPauseCancel" type="button">Annuleren</button>
+      <button class="sr-abtn" id="joostPauseSubmit" type="button" style="background:#b45309;color:#fff;border-color:#92400e"><i class="ti ti-player-pause"></i> Pauzeer</button>
     </div>
   </div>
 </div>
@@ -5982,6 +6106,9 @@
       list.querySelectorAll('[data-conv-id]').forEach(row => {
         row.addEventListener('click', () => openInboxConv(row.dataset.convId));
       });
+      // E2.x: render autonomy-badges per conv (Joost actief / Wacht op Jeffrey).
+      // Fail-soft: gebruikt cache wanneer beschikbaar, fetcht parallel anders.
+      _joostRenderAllConvBadges(_inboxConvs);
     } catch (e) {
       console.error('[loadInboxConvList]', e);
       list.innerHTML = '<div style="padding:20px;text-align:center;color:#ef4444;font-size:12px">Fout: ' + esc(e.message) + '</div>';
@@ -6082,7 +6209,15 @@
       // blijven compact, lange messages krijgen automatisch witruimte op de
       // laatste regel waar de meta over ligt.
       const receiptSpacer = statusIcon ? ' ✓' : '';
-      const metaInner = `${esc(time)}${statusIcon ? `<span class="receipt">${statusIcon}</span>` : ''}`;
+      // E2.x: sparkle-icon (vier-punts-ster) wanneer Joost de message autonoom
+      // verstuurde (DB-flag sent_autonomously=true). Klein purper icoontje vóór
+      // de timestamp in de bubble-meta — onderscheidt autonoom verstuurd van
+      // handmatig verstuurd.
+      const autonomous = !!(out && m.sent_autonomously);
+      const sparkleIcon = autonomous
+        ? '<span class="autonomous-sparkle" title="Autonoom verstuurd door Joost">✦</span>'
+        : '';
+      const metaInner = `${sparkleIcon}${esc(time)}${statusIcon ? `<span class="receipt">${statusIcon}</span>` : ''}`;
       return `<div class="inbox-c-msg ${out ? 'outbound' : 'inbound'}${failed ? ' failed' : ''}${sameSender ? ' same-sender' : ''}">
         <div class="inbox-c-msg-bubble">
           ${tplBadge}
@@ -6229,6 +6364,23 @@
       // voor déze conv ophalen en de badge weer aanzetten.
       _joostClearPanel();
 
+      // E2.x: laad/refresh autonomy-state voor info-strip boven thread.
+      // Fail-soft, non-blocking. Cache wordt geüpdate door loadJoostConvState.
+      if (_joostCanUse) {
+        // Eerst direct render met cache (indien aanwezig) voor snelle UI.
+        _joostRenderAutonomyStrip(convId);
+        loadJoostConvState(convId).then(() => {
+          // Conv-mismatch guard: gebruiker kan tussentijds gewisseld zijn.
+          if (_inboxActiveConvId === convId) {
+            _joostRenderAutonomyStrip(convId);
+            renderConvAutonomyBadge(convId);
+          }
+        }).catch(() => { /* fail-soft */ });
+      } else {
+        const strip = document.getElementById('inboxJoostAutonomyStrip');
+        if (strip) strip.hidden = true;
+      }
+
       // Initial render: forceer scroll naar bottom zodat laatste bericht direct zichtbaar is.
       _inboxRenderMessages({ forceScroll: true });
       // Conv-list opnieuw laden zodat unread_count visueel resetst.
@@ -6272,6 +6424,9 @@
       if (hint)    { hint.hidden = true; hint.textContent = ''; hint.classList.remove('open','expired'); }
       // Joost-state resetten naar empty bij geen conv (badge + cache leeg).
       _joostClearPanel();
+      // Verberg autonomy-strip wanneer geen conv geselecteerd is.
+      const strip = document.getElementById('inboxJoostAutonomyStrip');
+      if (strip) strip.hidden = true;
       return;
     }
 
@@ -6971,6 +7126,275 @@
     btn.hidden = false;
     btn.addEventListener('click', () => openInboxJoostModal());
     _joostApplySuggestBtnState();
+  }
+
+  // ─── Joost autonomy indicators (E2.x) ──────────────────────────────────────
+  // Per-conv state cache zodat conv-list rerenders niet steeds /api/joost-
+  // conversation-state hoeven aan te roepen. Key = conv.id, value = state-object
+  // ({ autonomy_enabled, autonomy_paused_reason, autonomy_paused_until,
+  //   last_suggestion_status, stop_task_type, messages_today, messages_limit }).
+  const _joostConvStates = new Map();
+  let _joostPauseTargetConvId = null; // actief in pauzeer-modal
+
+  // Fetch conv-state via /api/joost-conversation-state. Cached na load —
+  // refetch alleen bij conv-open of na succesvolle pause/resume mutation.
+  async function loadJoostConvState(convId) {
+    if (!convId) return null;
+    try {
+      const params = new URLSearchParams({ conversation_id: convId });
+      const r = await window.AgentShared.apiFetch('/api/joost-conversation-state?' + params.toString());
+      if (!r.ok) {
+        // Fail-soft: cache "autonomy_enabled=false" zodat we niets renderen.
+        const off = { autonomy_enabled: false };
+        _joostConvStates.set(convId, off);
+        return off;
+      }
+      const d = await r.json().catch(() => ({}));
+      const state = d && d.state ? d.state : (d || {});
+      _joostConvStates.set(convId, state);
+      return state;
+    } catch (e) {
+      console.error('[loadJoostConvState]', e && e.message);
+      const off = { autonomy_enabled: false };
+      _joostConvStates.set(convId, off);
+      return off;
+    }
+  }
+
+  // Bepaal welk badge-type (active / waiting / null) bij deze conv-state hoort.
+  // - 'active'  : autonomy_enabled + geen autonomy_paused_reason
+  // - 'waiting' : laatste suggestion BLOCKED_* of stop_task_type set
+  // - null      : niets tonen
+  function _joostBadgeTypeFor(state) {
+    if (!state || !state.autonomy_enabled) return null;
+    const lastStatus = String(state.last_suggestion_status || '');
+    const stopType   = state.stop_task_type || null;
+    if ((lastStatus && lastStatus.startsWith('BLOCKED_')) || stopType) {
+      return 'waiting';
+    }
+    if (!state.autonomy_paused_reason) {
+      return 'active';
+    }
+    return null;
+  }
+
+  // Render één badge-element voor een conv-row. Wordt vanuit loadInboxConvList
+  // aangeroepen NA loadJoostConvState resolve (per-conv parallel fetch).
+  function renderConvAutonomyBadge(convId) {
+    const row = document.querySelector('#inboxConvList [data-conv-id="' + (window.CSS && CSS.escape ? CSS.escape(convId) : convId) + '"]');
+    if (!row) return;
+    // Verwijder bestaande badge — re-renders vervangen.
+    const existing = row.querySelector('.joost-conv-badge');
+    if (existing) existing.remove();
+    const state = _joostConvStates.get(convId);
+    const type = _joostBadgeTypeFor(state);
+    if (!type) return;
+    const badge = document.createElement('span');
+    badge.className = 'joost-conv-badge ' + type;
+    if (type === 'active') {
+      badge.innerHTML = '<i class="ti ti-sparkles"></i> Joost actief';
+      badge.title = 'Joost handelt deze conversatie autonoom af';
+    } else {
+      badge.innerHTML = '<i class="ti ti-hand-stop"></i> Wacht op Jeffrey';
+      badge.title = 'Joost heeft gestopt en wacht op handmatige actie';
+    }
+    // Plaats badge in de header-rij naast timestamp.
+    const headerRow = row.querySelector('div[style*="justify-content:space-between"]');
+    if (headerRow) {
+      headerRow.appendChild(badge);
+    } else {
+      row.appendChild(badge);
+    }
+  }
+
+  // Trigger per zichtbare conv een state-fetch + badge-render. Gebruikt cache
+  // wanneer state al bekend is om dubbele round-trips te vermijden.
+  function _joostRenderAllConvBadges(convs) {
+    if (!_joostCanUse) return;
+    if (!Array.isArray(convs) || !convs.length) return;
+    convs.forEach(c => {
+      if (!c || !c.id) return;
+      const cached = _joostConvStates.get(c.id);
+      if (cached) {
+        renderConvAutonomyBadge(c.id);
+        return;
+      }
+      loadJoostConvState(c.id).then(() => renderConvAutonomyBadge(c.id))
+        .catch(() => { /* fail-soft */ });
+    });
+  }
+
+  // Update info-strip boven de thread op basis van huidige state.
+  function _joostRenderAutonomyStrip(convId) {
+    const strip      = document.getElementById('inboxJoostAutonomyStrip');
+    const statusEl   = document.getElementById('inboxJoostAutonomyStatus');
+    const labelEl    = document.getElementById('inboxJoostAutonomyStatusLabel');
+    const counterEl  = document.getElementById('inboxJoostAutonomyCounter');
+    const pauseBtn   = document.getElementById('inboxJoostAutonomyPauseBtn');
+    const resumeBtn  = document.getElementById('inboxJoostAutonomyResumeBtn');
+    if (!strip) return;
+    const state = _joostConvStates.get(convId);
+    if (!_joostCanUse || !state || !state.autonomy_enabled) {
+      strip.hidden = true;
+      return;
+    }
+    strip.hidden = false;
+
+    const isPaused = !!state.autonomy_paused_reason;
+    // Status-label + kleur-class
+    if (statusEl) {
+      statusEl.classList.remove('active', 'paused', 'disabled');
+      statusEl.classList.add(isPaused ? 'paused' : 'active');
+    }
+    if (labelEl) {
+      if (isPaused) {
+        const reason = String(state.autonomy_paused_reason || '').slice(0, 60);
+        labelEl.textContent = 'Joost: gepauzeerd' + (reason ? ' — ' + reason : '');
+      } else {
+        labelEl.textContent = 'Joost: actief';
+      }
+    }
+    // Berichten vandaag X/Y
+    if (counterEl) {
+      const used  = (state.messages_today != null) ? Number(state.messages_today) : null;
+      const limit = (state.messages_limit != null) ? Number(state.messages_limit) : null;
+      if (used != null && limit != null) {
+        counterEl.textContent = 'Berichten vandaag: ' + used + '/' + limit;
+      } else if (used != null) {
+        counterEl.textContent = 'Berichten vandaag: ' + used;
+      } else {
+        counterEl.textContent = 'Berichten vandaag: —';
+      }
+    }
+    // Pause / Resume knoppen toggle
+    if (pauseBtn)  pauseBtn.hidden  = isPaused;
+    if (resumeBtn) resumeBtn.hidden = !isPaused;
+  }
+
+  // Open de pauzeer-modal met reason + duur. Submit doet PATCH naar
+  // /api/joost-conversation-state met autonomy_paused_reason + autonomy_paused_until.
+  function openJoostPauseModal() {
+    if (!_inboxActiveConvId) {
+      window.AgentShared?.showToast('Eerst gesprek selecteren', 'error');
+      return;
+    }
+    const modal     = document.getElementById('joostPauseModal');
+    const reasonEl  = document.getElementById('joostPauseReason');
+    const durEl     = document.getElementById('joostPauseDuration');
+    const errEl     = document.getElementById('joostPauseError');
+    const submitBtn = document.getElementById('joostPauseSubmit');
+    if (!modal) return;
+    _joostPauseTargetConvId = _inboxActiveConvId;
+    if (reasonEl)  reasonEl.value = '';
+    if (durEl)     durEl.value = '48h';
+    if (errEl)     { errEl.style.display = 'none'; errEl.textContent = ''; }
+    if (submitBtn) { submitBtn.disabled = false; submitBtn.innerHTML = '<i class="ti ti-player-pause"></i> Pauzeer'; }
+    modal.classList.remove('hidden');
+  }
+
+  function closeJoostPauseModal() {
+    const modal = document.getElementById('joostPauseModal');
+    if (modal) modal.classList.add('hidden');
+    _joostPauseTargetConvId = null;
+  }
+
+  // Bereken autonomy_paused_until ISO-string op basis van duur-keuze.
+  // 'manual' → null (geen einddatum, blijft gepauzeerd tot expliciete resume).
+  function _joostPauseUntilFor(duration) {
+    const now = Date.now();
+    if (duration === '24h') return new Date(now + 24 * 3600 * 1000).toISOString();
+    if (duration === '48h') return new Date(now + 48 * 3600 * 1000).toISOString();
+    if (duration === '7d')  return new Date(now + 7 * 24 * 3600 * 1000).toISOString();
+    return null; // manual
+  }
+
+  async function submitJoostPause() {
+    const convId = _joostPauseTargetConvId;
+    if (!convId) { closeJoostPauseModal(); return; }
+    const reasonEl  = document.getElementById('joostPauseReason');
+    const durEl     = document.getElementById('joostPauseDuration');
+    const errEl     = document.getElementById('joostPauseError');
+    const submitBtn = document.getElementById('joostPauseSubmit');
+    const reason = ((reasonEl && reasonEl.value) || '').trim() || 'Handmatig gepauzeerd via inbox';
+    const duration = (durEl && durEl.value) || '48h';
+    const until = _joostPauseUntilFor(duration);
+    if (submitBtn) { submitBtn.disabled = true; submitBtn.innerHTML = '<i class="ti ti-loader"></i> Pauzeren…'; }
+    if (errEl)     { errEl.style.display = 'none'; errEl.textContent = ''; }
+    try {
+      const r = await window.AgentShared.apiFetch('/api/joost-conversation-state', {
+        method:  'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({
+          conversation_id:         convId,
+          autonomy_paused_reason:  reason,
+          autonomy_paused_until:   until,
+        }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        if (errEl) {
+          errEl.textContent = d.error || ('HTTP ' + r.status);
+          errEl.style.display = 'block';
+        }
+        if (submitBtn) { submitBtn.disabled = false; submitBtn.innerHTML = '<i class="ti ti-player-pause"></i> Pauzeer'; }
+        return;
+      }
+      // Update lokale cache + strip + conv-list-badge.
+      const state = _joostConvStates.get(convId) || { autonomy_enabled: true };
+      state.autonomy_paused_reason = reason;
+      state.autonomy_paused_until  = until;
+      _joostConvStates.set(convId, state);
+      closeJoostPauseModal();
+      if (convId === _inboxActiveConvId) _joostRenderAutonomyStrip(convId);
+      renderConvAutonomyBadge(convId);
+      window.AgentShared?.showToast('Joost gepauzeerd voor deze conversatie', 'success');
+    } catch (e) {
+      console.error('[submitJoostPause]', e);
+      if (errEl) {
+        errEl.textContent = e.message || 'Onbekende fout';
+        errEl.style.display = 'block';
+      }
+      if (submitBtn) { submitBtn.disabled = false; submitBtn.innerHTML = '<i class="ti ti-player-pause"></i> Pauzeer'; }
+    }
+  }
+
+  // Hervat Joost: clear autonomy_paused_reason + autonomy_paused_until via PATCH.
+  async function resumeJoost() {
+    const convId = _inboxActiveConvId;
+    if (!convId) {
+      window.AgentShared?.showToast('Eerst gesprek selecteren', 'error');
+      return;
+    }
+    const resumeBtn = document.getElementById('inboxJoostAutonomyResumeBtn');
+    if (resumeBtn) resumeBtn.disabled = true;
+    try {
+      const r = await window.AgentShared.apiFetch('/api/joost-conversation-state', {
+        method:  'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({
+          conversation_id:        convId,
+          autonomy_paused_reason: null,
+          autonomy_paused_until:  null,
+        }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        window.AgentShared?.showToast('Hervatten mislukt: ' + (d.error || ('HTTP ' + r.status)), 'error');
+        return;
+      }
+      const state = _joostConvStates.get(convId) || { autonomy_enabled: true };
+      state.autonomy_paused_reason = null;
+      state.autonomy_paused_until  = null;
+      _joostConvStates.set(convId, state);
+      _joostRenderAutonomyStrip(convId);
+      renderConvAutonomyBadge(convId);
+      window.AgentShared?.showToast('Joost hervat voor deze conversatie', 'success');
+    } catch (e) {
+      console.error('[resumeJoost]', e);
+      window.AgentShared?.showToast('Hervatten mislukt: ' + (e.message || 'Onbekende fout'), 'error');
+    } finally {
+      if (resumeBtn) resumeBtn.disabled = false;
+    }
   }
 
   async function refreshInboxConv() {
@@ -8642,6 +9066,30 @@
     document.addEventListener('keydown', (e) => {
       if (e.key === 'Escape' && joostModalOverlay && !joostModalOverlay.classList.contains('hidden')) {
         closeInboxJoostModal();
+      }
+    });
+
+    // E2.x: autonomy info-strip Pauzeer / Hervat knoppen + Pauzeer-modal wiring.
+    const autonomyPauseBtn  = document.getElementById('inboxJoostAutonomyPauseBtn');
+    const autonomyResumeBtn = document.getElementById('inboxJoostAutonomyResumeBtn');
+    if (autonomyPauseBtn)  autonomyPauseBtn.addEventListener('click', () => openJoostPauseModal());
+    if (autonomyResumeBtn) autonomyResumeBtn.addEventListener('click', () => resumeJoost());
+
+    const pauseClose   = document.getElementById('joostPauseCloseX');
+    const pauseCancel  = document.getElementById('joostPauseCancel');
+    const pauseSubmit  = document.getElementById('joostPauseSubmit');
+    const pauseOverlay = document.getElementById('joostPauseModal');
+    if (pauseClose)  pauseClose.addEventListener('click', () => closeJoostPauseModal());
+    if (pauseCancel) pauseCancel.addEventListener('click', () => closeJoostPauseModal());
+    if (pauseSubmit) pauseSubmit.addEventListener('click', () => submitJoostPause());
+    if (pauseOverlay) {
+      pauseOverlay.addEventListener('click', (e) => {
+        if (e.target === pauseOverlay) closeJoostPauseModal();
+      });
+    }
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && pauseOverlay && !pauseOverlay.classList.contains('hidden')) {
+        closeJoostPauseModal();
       }
     });
   }
