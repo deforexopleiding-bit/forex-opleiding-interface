@@ -5,7 +5,8 @@
 // Query: ?id=<uuid>  (verplicht)
 //
 // Response: {
-//   item:        { ...pending_action },
+//   item:        { ...pending_action, linked_joost_suggestion: { id, suggested_reply,
+//                  detected_intent, confidence, conversation_id } | null },
 //   customer:    { id, name, email, phone, is_company, ... } | null,
 //   arrangement: { id, type, status, details, ... } | null,
 //   invoices:    [ { id, invoice_number, status, amount_total, ... } ],
@@ -112,6 +113,33 @@ export default async function handler(req, res) {
       }
     }
 
+    // ---- Joost-suggestion lookup (E1.2 task-linking) ----
+    // Als deze pending_action voortkwam uit een Joost-suggestie (zie
+    // api/joost-create-task-from-suggestion.js) wordt linked_task_id op de
+    // suggestion-row gezet. We tonen die context in de Open Acties detail-modal.
+    let linked_joost_suggestion = null;
+    try {
+      const { data: suggRow, error: suggErr } = await supabaseAdmin
+        .from('joost_suggestions')
+        .select('id, suggested_reply, detected_intent, confidence, conversation_id')
+        .eq('linked_task_id', pa.id)
+        .order('used_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (suggErr) console.error('[pending-actions-detail joost]', suggErr.message);
+      else if (suggRow) {
+        linked_joost_suggestion = {
+          id:              suggRow.id,
+          suggested_reply: suggRow.suggested_reply || null,
+          detected_intent: suggRow.detected_intent || null,
+          confidence:      (suggRow.confidence != null) ? Number(suggRow.confidence) : null,
+          conversation_id: suggRow.conversation_id || null,
+        };
+      }
+    } catch (e) {
+      console.error('[pending-actions-detail joost]', e.message);
+    }
+
     const item = {
       id:               pa.id,
       customer_id:      pa.customer_id,
@@ -129,6 +157,7 @@ export default async function handler(req, res) {
       expires_at:       pa.expires_at,
       created_at:       pa.created_at,
       updated_at:       pa.updated_at,
+      linked_joost_suggestion,
     };
 
     // ---- Invoice-lookup voor leesbare invoice_numbers in de detail-modal ----

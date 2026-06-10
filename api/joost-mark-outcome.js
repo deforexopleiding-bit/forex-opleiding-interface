@@ -5,23 +5,28 @@
 //
 // Body:
 //   {
-//     suggestion_id:   uuid (required),
-//     status:          'USED_AS_IS' | 'USED_EDITED' | 'IGNORED' | 'DISMISSED' (required),
-//     final_sent_text: string (optional — verplicht bij USED_AS_IS + USED_EDITED),
-//     outcome_notes:   string (optional)
+//     suggestion_id:          uuid (required),
+//     status:                 'USED_AS_IS' | 'USED_EDITED' | 'IGNORED' | 'DISMISSED'
+//                              | 'USED_TASK_CREATED' | 'USED_ARRANGEMENT_OPENED' (required),
+//     final_sent_text:        string (optional — verplicht bij USED_AS_IS + USED_EDITED),
+//     outcome_notes:          string (optional),
+//     linked_task_id:         uuid   (optional — verplicht bij USED_TASK_CREATED),
+//     linked_arrangement_id:  uuid   (optional — verplicht bij USED_ARRANGEMENT_OPENED)
 //   }
 //
 // Validatie:
 //   - suggestion_id moet bestaan + huidige status='PROPOSED' (anders 409).
-//   - USED_AS_IS:  final_sent_text vereist (= suggested_reply normaal).
-//   - USED_EDITED: final_sent_text vereist (= aangepaste tekst).
-//   - IGNORED / DISMISSED: final_sent_text optioneel.
+//   - USED_AS_IS:               final_sent_text vereist (= suggested_reply normaal).
+//   - USED_EDITED:              final_sent_text vereist (= aangepaste tekst).
+//   - USED_TASK_CREATED:        linked_task_id vereist.
+//   - USED_ARRANGEMENT_OPENED:  linked_arrangement_id vereist.
+//   - IGNORED / DISMISSED:      final_sent_text optioneel.
 //
 // Audit (audit_log, fail-soft):
 //   action      = 'joost.outcome_marked'
 //   entity_type = 'joost_suggestion'
 //   entity_id   = suggestion_id
-//   after_json  = { suggestion_id, status }
+//   after_json  = { suggestion_id, status, linked_task_id?, linked_arrangement_id? }
 //
 // Response 200: { suggestion: updated_row }
 // Error responses:
@@ -37,7 +42,14 @@ import { requirePermission } from './_lib/requirePermission.js';
 import { getClientIp } from './_lib/audit-customer.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const VALID_STATUSES = ['USED_AS_IS', 'USED_EDITED', 'IGNORED', 'DISMISSED'];
+const VALID_STATUSES = [
+  'USED_AS_IS',
+  'USED_EDITED',
+  'IGNORED',
+  'DISMISSED',
+  'USED_TASK_CREATED',
+  'USED_ARRANGEMENT_OPENED',
+];
 const STATUSES_REQUIRING_TEXT = ['USED_AS_IS', 'USED_EDITED'];
 const MAX_TEXT_LEN = 10000;
 const MAX_NOTES_LEN = 2000;
@@ -111,6 +123,36 @@ export default async function handler(req, res) {
     outcomeNotes = s.length > 0 ? s : null;
   }
 
+  // linked_task_id (optioneel, verplicht bij USED_TASK_CREATED)
+  let linkedTaskId = null;
+  if (body.linked_task_id !== undefined && body.linked_task_id !== null && body.linked_task_id !== '') {
+    if (typeof body.linked_task_id !== 'string' || !isUuid(body.linked_task_id.trim())) {
+      return res.status(400).json({ error: 'linked_task_id moet geldige uuid zijn' });
+    }
+    linkedTaskId = body.linked_task_id.trim();
+  }
+  if (newStatus === 'USED_TASK_CREATED' && !linkedTaskId) {
+    return res.status(400).json({ error: 'linked_task_id vereist bij status=USED_TASK_CREATED' });
+  }
+
+  // linked_arrangement_id (optioneel, verplicht bij USED_ARRANGEMENT_OPENED)
+  let linkedArrangementId = null;
+  if (
+    body.linked_arrangement_id !== undefined &&
+    body.linked_arrangement_id !== null &&
+    body.linked_arrangement_id !== ''
+  ) {
+    if (typeof body.linked_arrangement_id !== 'string' || !isUuid(body.linked_arrangement_id.trim())) {
+      return res.status(400).json({ error: 'linked_arrangement_id moet geldige uuid zijn' });
+    }
+    linkedArrangementId = body.linked_arrangement_id.trim();
+  }
+  if (newStatus === 'USED_ARRANGEMENT_OPENED' && !linkedArrangementId) {
+    return res.status(400).json({
+      error: 'linked_arrangement_id vereist bij status=USED_ARRANGEMENT_OPENED',
+    });
+  }
+
   try {
     // ========================================================================
     // STAP 1: huidige suggestion ophalen + valideren
@@ -139,11 +181,13 @@ export default async function handler(req, res) {
     // ========================================================================
     const nowIso = new Date().toISOString();
     const updates = {
-      status:            newStatus,
-      final_sent_text:   finalSentText,
-      outcome_notes:     outcomeNotes,
-      used_by_user_id:   user.id,
-      used_at:           nowIso,
+      status:                newStatus,
+      final_sent_text:       finalSentText,
+      outcome_notes:         outcomeNotes,
+      used_by_user_id:       user.id,
+      used_at:               nowIso,
+      linked_task_id:        linkedTaskId,
+      linked_arrangement_id: linkedArrangementId,
     };
 
     const { data: updated, error: updErr } = await supabaseAdmin
@@ -153,7 +197,8 @@ export default async function handler(req, res) {
       .select(
         'id, conversation_id, module, suggested_reply, detected_intent, ' +
         'confidence, reasoning, status, final_sent_text, outcome_notes, ' +
-        'requested_by_user_id, used_by_user_id, created_at, used_at'
+        'requested_by_user_id, used_by_user_id, created_at, used_at, ' +
+        'linked_task_id, linked_arrangement_id'
       )
       .single();
     if (updErr) {
@@ -165,15 +210,19 @@ export default async function handler(req, res) {
     // STAP 3: audit-log (fail-soft)
     // ========================================================================
     try {
+      const afterJson = {
+        suggestion_id: suggestionId,
+        status:        newStatus,
+      };
+      if (linkedTaskId)        afterJson.linked_task_id        = linkedTaskId;
+      if (linkedArrangementId) afterJson.linked_arrangement_id = linkedArrangementId;
+
       await supabaseAdmin.from('audit_log').insert({
         user_id:     user.id,
         action:      'joost.outcome_marked',
         entity_type: 'joost_suggestion',
         entity_id:   suggestionId,
-        after_json:  {
-          suggestion_id: suggestionId,
-          status:        newStatus,
-        },
+        after_json:  afterJson,
         reason_text: outcomeNotes ? outcomeNotes.slice(0, 500) : null,
         ip_address:  getClientIp(req),
       });

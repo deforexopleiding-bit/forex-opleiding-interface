@@ -105,6 +105,23 @@ Lokaal: C:/Users/jeffr/forex-opleiding-interface
   Negeer); admin-UI in `/modules/admin.html` voor config. Vereist env-var
   `ANTHROPIC_API_KEY` (503 als ontbrekend). Zie docs/joost-e10-foundation.md
   voor architectuur + roadmap (E1.1 auto-suggest, E1.2 auto-task, E2 autonomous).
+- Joost (E1.2) — Intent-to-task. Sluit loop tussen Joost-suggestie en
+  operationele actie. Suggestion-card toont contextuele actie-knop bij 3
+  intents (`verify_payment` -> verify-task in F1, `arrangement_request` ->
+  arrangement-wizard pre-fill, `escalation_needed` -> escalation-flow); de
+  andere 3 intents (`payment_promise`, `general_question`, `other`) blijven
+  pure tekst-suggestie. Confidence-bands sturen visuele styling
+  (high>=0.80 primary / medium 0.50-0.79 secondary / low<0.50 contextuele
+  knop verborgen). Schema-uitbreiding op `joost_suggestions`:
+  `linked_task_id` (FK pending_actions) + `linked_arrangement_id` (FK
+  payment_arrangements) + 2 nieuwe statussen (USED_TASK_CREATED /
+  USED_ARRANGEMENT_OPENED). Endpoint
+  `/api/joost-create-task-from-suggestion` combineert task-aanmaak +
+  mark-outcome atomair (best-effort rollback). Open Acties detail-modal
+  toont dossier-link terug naar bron-conversatie via
+  `payload.source='joost'` + `payload.joost_suggestion_id`. Zie
+  docs/joost-e12-intent-to-task.md voor architectuur + roadmap E2
+  (auto-execute).
 - /modules/shared/agent-shared.js — cross-modulaire functies 
   (showToast, esc, formatMd, relTime, showReport, approval-helpers,
    getAvatarUrl, renderUserSection, initAuth)
@@ -638,3 +655,53 @@ post-processing, geen parsing-failures. Bijkomende win: het `tool_use`-block
 heeft een eigen `stop_reason='tool_use'` zodat we ook duidelijk kunnen falen
 (`ANTHROPIC_TOOL_USE_MISSING`) als het model toch tekst probeert te
 returneren.
+
+## Lessons Learned — E1.2 Joost intent-to-task (10 juni 2026)
+
+Volledige documentatie: [`docs/joost-e12-intent-to-task.md`](docs/joost-e12-intent-to-task.md).
+
+### Lesson learned 23 — Intent-to-action mapping als interface tussen LLM en operatie
+Een LLM-suggestie wordt pas echt waardevol als hij een operationele taak kan
+**initiëren**, niet alleen een tekst kan voorstellen. Het patroon dat we in
+E1.2 hanteren: de LLM produceert via geforceerd tool-use een gestructureerd
+`detected_intent`-veld (enum), en de UI heeft een **statische intent->actie
+mapping** die voor een subset van intents een contextuele knop rendert
+(`verify_payment` -> verify-task, `arrangement_request` -> wizard-pre-fill,
+`escalation_needed` -> escalation-flow). De andere intents tonen alleen
+neutrale tekst-acties (Plak / Bewerken / Negeer).
+
+Drie redenen waarom dit het sweet-spot tussen LLM-flex en operationele
+zekerheid is:
+
+1. **Mens blijft in controle voor het irreversibele deel** — task-aanmaak
+   en arrangement-wizard openen vereisen een expliciete klik. LLM-output is
+   het *signaal* dat de actie zinvol kan zijn; de mens beslist of het in de
+   ops-pipeline belandt. Geen hallucination kan een spookafspraak met TL
+   maken.
+2. **Confidence stuurt visuele weging, niet auto-execute** — band-styling
+   (high primary / medium secondary / low verbergen) maakt zichtbaar
+   welk vertrouwen Joost heeft, zonder dat een lage confidence stilletjes
+   doorklikt naar productie-data. Bij low-confidence verbergt de UI de
+   contextuele knop volledig — een grijsgemaakte knop nodigt uit tot
+   "toch maar klikken na refresh", verborgen is een hard signaal "kijk
+   zelf".
+3. **Traceability blijft compleet door FK-koppeling** — `linked_task_id` +
+   `linked_arrangement_id` op `joost_suggestions` + `payload.source='joost'`
+   + `payload.joost_suggestion_id` op `pending_actions` maakt dat we
+   bidirectioneel terug kunnen kijken: vanuit Open Acties zien welke
+   suggestie de task triggerde, vanuit Joost-eval zien welke suggesties
+   tot operationele actie leidden. ON DELETE SET NULL behoudt de
+   audit-rijen ook als de afgeleide entiteit weg is.
+
+Anti-pattern dat we hiermee vermijden: een free-text `next_action`-veld
+van de LLM (bv. "ik denk dat je een verify-task moet maken") en de UI laten
+parseren wat de bedoeling is. Dat is fragiel, taal-afhankelijk en koppelt
+de UI direct aan model-versies. Met een enum + statische mapping zit de
+business-logica in code (één plek, testbaar) en blijft de LLM-output
+contractueel gegarandeerd.
+
+Patroon is herbruikbaar voor toekomstige agents (Aron, Simon, Leon): zodra
+een intent-classificatie betrouwbaar is, hang er een statische mapping aan
+naar de juiste operationele actie. De agent wordt zo een interface tussen
+ongestructureerd klant-signaal en gestructureerde ops-flow — precies de
+brug die ontbreekt zonder zo'n laag.
