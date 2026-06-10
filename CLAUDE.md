@@ -31,6 +31,14 @@ Lokaal: C:/Users/jeffr/forex-opleiding-interface
   email-agent, en sinds E1.0 ook joost-suggest. Ontbrekende key → endpoint
   returnt 503 "ANTHROPIC_API_KEY niet geconfigureerd" zodat config-issues
   onderscheidbaar zijn van runtime-bugs. Backup in 1Password.
+- INTERNAL_API_TOKEN in env vars (sensitive — server-side only). VEREIST
+  sinds E1.1 Joost auto-suggest: shared-secret voor server-to-server calls
+  binnen het platform (inbox-webhook -> joost-suggest fire-and-forget).
+  Endpoint herkent header `X-Internal-Token` en skipt user-JWT + RBAC bij
+  exacte match; suggestion-row wordt opgeslagen met
+  `requested_by_user_id=NULL` + `auto_triggered=true`. Ontbreken → webhook
+  logt warning + skipt auto-trigger (geen runtime-crash). Setup: random
+  32+ byte hex/base64 in alle Vercel-environments. Backup in 1Password.
 - Strato IMAP credentials per mailbox in env vars
 
 ## Productie-users
@@ -122,6 +130,34 @@ Lokaal: C:/Users/jeffr/forex-opleiding-interface
   `payload.source='joost'` + `payload.joost_suggestion_id`. Zie
   docs/joost-e12-intent-to-task.md voor architectuur + roadmap E2
   (auto-execute).
+- Joost (E1.1) — Auto-suggest bij inbound webhook. `inbox-webhook.js`
+  triggert fire-and-forget `/api/joost-suggest` na elke nieuwe inbound
+  text-message van een gekoppelde finance-klant. Filter-rules (7 checks):
+  nieuwe insert, type=text, body>=5 chars + niet in TRIVIAL_REPLIES set,
+  conversation gekoppeld, module=finance + `joost_config.is_enabled`,
+  geen outbound binnen 60s (anti-loop). Auth via header
+  `X-Internal-Token: <INTERNAL_API_TOKEN>`; `joost-suggest` skipt
+  user-JWT + RBAC bij internal-call en zet `requested_by_user_id=NULL` +
+  `auto_triggered=true`. Schema-uitbreiding: `joost_suggestions.auto_triggered`
+  boolean default false. Frontend toont "auto-gesuggereerd" badge op
+  recente PROPOSED-cards via `/api/joost-suggestions-recent`. Vereist
+  env-vars `ANTHROPIC_API_KEY` + `INTERNAL_API_TOKEN`. Zie
+  docs/joost-e11-and-f3-escalation.md voor flow + roadmap E2 (autonomy).
+- F3 escalation — `MANUAL_ESCALATION` action_type op `pending_actions`
+  voor escalaties die geen TL-actie en geen verify-payment zijn (boos /
+  juridisch / handover naar incasso). Endpoint
+  `/api/tasks-create-escalation` (RBAC: `finance.tasks.create` met fallback
+  `finance.joost.use`). Payload-shape: severity (low/medium/high, default
+  medium) + reason (min 10 chars) + context_summary + source (joost/manual)
+  + optionele `joost_suggestion_id` cross-link. Status start op PENDING
+  (escalation IS de taak; geen approval). Outcome via
+  `pending-actions-mark-executed`: `resolved` / `handed_over` / `ongoing`
+  (laatste blijft PENDING + appendt progress_log). `arrangement_id=NULL`
+  + `invoice_id=NULL` (klant-brede escalatie). Open Acties krijgt
+  filter-pill **Escalaties**. Inbox heeft escalation quick-modal vanuit
+  Joost-card (intent=escalation_needed) of conversation-header. Zie
+  docs/joost-e11-and-f3-escalation.md voor payload + UX + roadmap F4
+  (MANUAL_FOLLOWUP).
 - /modules/shared/agent-shared.js — cross-modulaire functies 
   (showToast, esc, formatMd, relTime, showReport, approval-helpers,
    getAvatarUrl, renderUserSection, initAuth)
@@ -705,3 +741,101 @@ een intent-classificatie betrouwbaar is, hang er een statische mapping aan
 naar de juiste operationele actie. De agent wordt zo een interface tussen
 ongestructureerd klant-signaal en gestructureerde ops-flow — precies de
 brug die ontbreekt zonder zo'n laag.
+
+## Lessons Learned — E1.1 auto-suggest + F3 escalation (10 juni 2026)
+
+Volledige documentatie: [`docs/joost-e11-and-f3-escalation.md`](docs/joost-e11-and-f3-escalation.md).
+
+### Lesson learned 24 — Webhook fire-and-forget pattern voor non-critical async work
+Vercel Node-runtime heeft **geen** `ctx.waitUntil()` zoals Edge of Cloudflare
+Workers — er is geen formele primitive om een "background promise" te
+markeren die nog mag voltooien nadat `res.json()` is gestuurd. Voor
+non-critical follow-up werk (Joost auto-suggest, analytics-ping, log-flush)
+is het patroon dat we hanteren:
+
+```js
+fetch(url, { method: 'POST', headers, body })
+  .then(async (resp) => { if (!resp.ok) console.warn(...); })
+  .catch((e) => console.warn('fetch fail:', e?.message));
+// NIET awaited — caller returnt direct, response gaat naar Meta binnen budget.
+```
+
+Vier bewuste keuzes:
+
+1. **Geen `await`** in de caller — anders blokkeert de outbound HTTP-response
+   op de async-call (Anthropic kan 3s duren, Meta retried bij >5s).
+2. **`.catch()` op de promise** — unhandled rejections kunnen de Lambda
+   silenced doen crashen. Console.warn is voldoende voor non-critical werk.
+3. **Geen retry-logica** — als de fire-and-forget faalt, accepteer het.
+   De gebruiker heeft een handmatige fallback (knop in UI).
+4. **Acceptatie van occasionally-dropped work** — bij Lambda cold-shutdown
+   verliezen we soms een call. Acceptabel voor MVP-features met fallback.
+   Voor mission-critical async werk: queue (Inngest / QStash / Vercel cron).
+
+Anti-pattern dat we hiermee vermijden: synchroon awaiten op de async-call
+en hopen dat de outer caller (Meta-webhook, frontend) genoeg tijd-budget
+heeft. Bij Anthropic-calls (3s+) is dat een **gegarandeerde timeout** bij
+elke piekbelasting. Beter expliciet kiezen: "deze call is best-effort, niet
+contractueel" en de uitvoering loskoppelen van de respons-deadline.
+
+Wanneer NIET dit pattern: betalingen, mail-send, irreversibele state-mutaties.
+Daar moet de outer caller weten of het gelukt is — die zijn niet "non-critical".
+
+### Lesson learned 25 — INTERNAL_API_TOKEN voor service-to-service auth
+Voor server-to-server calls **binnen** het platform (webhook -> ander
+endpoint, cron -> shared helper-endpoint) hebben we geen user-sessie. We
+kunnen daar geen Bearer-JWT voor opzetten zonder een "system-user" in
+`auth.users` aan te maken en JWT's te tekenen — over-engineered voor het
+doel. Het patroon dat we hanteren: een **shared secret** in env-var
+`INTERNAL_API_TOKEN`, doorgegeven als header `X-Internal-Token`. Endpoints
+herkennen de header en skippen user-JWT + RBAC bij exacte match.
+
+Implementatie (zie `api/joost-suggest.js` auth-block):
+
+```js
+const internalTokenHeader   = req.headers['x-internal-token'] || null;
+const expectedInternalToken = process.env.INTERNAL_API_TOKEN || null;
+const isInternalCall = !!(
+  internalTokenHeader && expectedInternalToken &&
+  internalTokenHeader === expectedInternalToken
+);
+if (isInternalCall) {
+  // Skip user-JWT + RBAC. requested_by_user_id = NULL, auto_triggered = true.
+} else {
+  // Normale Bearer-JWT + permission-check.
+}
+```
+
+Voordelen boven alternatieven:
+
+- **Geen self-signed JWT nodig** — geen "system-user" in `auth.users`, geen
+  signing-key voor JWT's. Simpel shared secret.
+- **Eenvoudig te roteren** — env-var update in Vercel + redeploy. Geen
+  user-management.
+- **Duidelijk audit-spoor** — `requested_by_user_id IS NULL` markeert
+  system-triggered rijen. Discriminator-flag (`auto_triggered`) onderscheidt
+  bron-systeem als er meerdere internal callers zijn.
+
+Risico's en mitigaties:
+
+- **Token-leak via logs** — `INTERNAL_API_TOKEN` mag NOOIT in
+  `console.log` of error-text verschijnen. Defensive: log alleen sentinel
+  ("INTERNAL_API_TOKEN ontbreekt"), nooit de waarde.
+- **Token-leak via request-replay** — server-only env-var, alleen bekend
+  op Vercel-runtime. Niet bereikbaar vanuit browser of Meta. CSRF is niet
+  relevant want er is geen browser-session.
+- **Verwarring met user-tokens** — header-name `X-Internal-Token` is
+  duidelijk anders dan `Authorization: Bearer ...` zodat een log-grep
+  per-token-type onderscheid maakt.
+
+Setup: `INTERNAL_API_TOKEN` als **Sensitive** env-var in alle Vercel
+environments. Waarde: random 32+ byte hex/base64 (`openssl rand -hex 32`).
+Backup in 1Password. Bij ontbreken: caller logt warning + skipt
+(geen runtime-crash); endpoint valt terug op normale JWT-flow.
+
+Pattern is herbruikbaar voor toekomstige service-to-service calls:
+cron -> helper-endpoint, dunning-executor -> Meta-template-send, agent ->
+agent meeting-trigger. Eén shared secret voor alle internal traffic; zodra
+we meerdere bron-systemen krijgen kan een `X-Internal-Source`-header
+(`webhook` / `cron` / `agent`) discriminator-flag bieden zonder extra
+secrets.
