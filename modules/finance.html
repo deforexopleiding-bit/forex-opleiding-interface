@@ -1059,10 +1059,23 @@
 <div class="app" id="appContent">
   <div class="sr-segments" id="financeNav" style="margin-bottom:18px">
     <button class="sr-seg active" data-view="facturen" type="button">Facturen</button>
+    <button class="sr-seg" id="navWanbetalers" data-view="wanbetalers" type="button" style="display:none">Wanbetalers</button>
     <button class="sr-seg" id="navCamtBank" data-view="camtbank" type="button" style="display:none">Bank</button>
-    <button class="sr-seg" id="navInbox" data-view="inbox" type="button" style="display:none">Inbox</button>
-    <button class="sr-seg" id="navDunning" data-view="dunning" type="button" style="display:none">Wanbetalers</button>
     <button class="sr-seg" data-view="roadmap" type="button">Roadmap</button>
+  </div>
+
+  <!-- ===== Wanbetalers wrapper (Groep A: nested 4 sub-tabs) ===== -->
+  <div id="view-wanbetalers" hidden>
+    <div class="sr-segments" id="wanbetalersSubNav" style="margin-bottom:18px">
+      <button class="sr-seg active" data-wb-sub="overzicht"   type="button">Overzicht</button>
+      <button class="sr-seg"        data-wb-sub="inbox"       type="button">Inbox</button>
+      <button class="sr-seg"        data-wb-sub="arrangements" type="button">Arrangements</button>
+      <button class="sr-seg"        data-wb-sub="open-acties" type="button">Open Acties</button>
+    </div>
+    <!-- Open Acties sub-tab host: hier mount FinanceTasks. De andere 3 sub-tabs
+         hergebruiken view-dunning / view-inbox / view-arrangements via display-
+         toggling (zie setSubView()), zodat hun DOM-node + state behouden blijft. -->
+    <div id="wb-sub-open-acties" hidden></div>
   </div>
 
   <!-- ===== Facturen-view (read-only TL-spiegel, Fase 2A) ===== -->
@@ -3014,6 +3027,8 @@
 <script src="/modules/shared/permissions.js"></script>
 <script src="/modules/shared/sidebar.js"></script>
 <script src="/modules/shared/quick-task-button.js" data-module="Finance" defer></script>
+<!-- Groep A: Open Acties module voor Finance > Wanbetalers > Open Acties sub-tab. -->
+<script src="/modules/shared/finance-tasks.js"></script>
 
 <!-- ===== Finance Fase 2A — Facturen-view logica ===== -->
 <script>
@@ -3056,18 +3071,38 @@
     const sr = document.getElementById('invSearch'); if (sr) sr.value = state.q || '';
   }
 
+  // Wanbetalers sub-tab state (Groep A — nested under view-wanbetalers).
+  // Mogelijke waardes: 'overzicht' | 'inbox' | 'arrangements' | 'open-acties'.
+  let _wbActiveSub = null;
+  let _wbWired = false;
+
   function setView(view) {
+    // 'wanbetalers' is een logische wrapper die de echte view-inbox / view-dunning /
+    // view-arrangements / wb-sub-open-acties orchestreert via setSubView(). De
+    // sub-toggles binnen wanbetalers verbergen of tonen de bestaande view-nodes —
+    // ze worden niet verplaatst (DOM-state + bestaande wiring blijft intact).
+    const wbWrap = document.getElementById('view-wanbetalers');
     document.getElementById('view-facturen').hidden = (view !== 'facturen');
     document.getElementById('view-camtbank').hidden = (view !== 'camtbank');
     document.getElementById('view-bank').hidden = (view !== 'bank');
-    document.getElementById('view-inbox').hidden = (view !== 'inbox');
-    document.getElementById('view-dunning').hidden = (view !== 'dunning');
     document.getElementById('view-roadmap').hidden = (view !== 'roadmap');
+    if (wbWrap) wbWrap.hidden = (view !== 'wanbetalers');
+    if (view !== 'wanbetalers') {
+      document.getElementById('view-inbox').hidden = true;
+      document.getElementById('view-dunning').hidden = true;
+    }
     document.querySelectorAll('#financeNav .sr-seg').forEach(b => b.classList.toggle('active', b.dataset.view === view));
-    // Stop inbox auto-poll wanneer we de inbox-tab verlaten — bespaart requests.
-    if (view !== 'inbox' && typeof stopInboxPolling === 'function') stopInboxPolling();
-    // Reset klant-paneel zodat oude data niet blijft staan bij terugkeer.
-    if (view !== 'inbox' && typeof _inboxResetCustomerPanel === 'function') _inboxResetCustomerPanel();
+
+    if (view === 'wanbetalers') {
+      wireWanbetalersOnce();
+      // Default sub als nog niet gekozen.
+      const initialSub = _wbActiveSub || 'overzicht';
+      setSubView(initialSub);
+    } else {
+      // Stop inbox auto-poll wanneer we de inbox-tab verlaten — bespaart requests.
+      if (typeof stopInboxPolling === 'function') stopInboxPolling();
+      if (typeof _inboxResetCustomerPanel === 'function') _inboxResetCustomerPanel();
+    }
     // Bij eerste keer Bank (oud) openen: load per beschikbare permission.
     if (view === 'bank' && !_bankLoadedOnce) {
       _bankLoadedOnce = true;
@@ -3080,90 +3115,188 @@
       if (canBankBalanceView) loadCamtBalance();
       if (canBankTxView) { loadCamtBank(); loadCamtStatementsList(); }
     }
-    // Bij eerste keer Inbox openen: RBAC-gate + lazy-load conv-lijst.
-    if (view === 'inbox' && !_inboxLoadedOnce) {
+  }
+
+  // ─── Wanbetalers nested sub-tab orchestratie (Groep A) ─────────────────────
+  // setSubView() schakelt visibility van de bestaande view-inbox / view-dunning
+  // / view-arrangements binnen de wanbetalers wrapper. Bestaande dunning sub-nav
+  // (overzicht/probleemklanten/workflows/templates/geschiedenis/arrangements)
+  // blijft volledig intact onder de 'overzicht' sub-tab.
+  function setSubView(sub) {
+    const validSubs = ['overzicht', 'inbox', 'arrangements', 'open-acties'];
+    if (!validSubs.includes(sub)) sub = 'overzicht';
+    _wbActiveSub = sub;
+
+    // Sub-nav highlight.
+    document.querySelectorAll('#wanbetalersSubNav .sr-seg').forEach(b => {
+      b.classList.toggle('active', b.dataset.wbSub === sub);
+    });
+
+    // Visibility van de onderliggende panels.
+    const vInbox        = document.getElementById('view-inbox');
+    const vDunning      = document.getElementById('view-dunning');
+    const vArrangements = document.getElementById('view-arrangements');
+    const vOpenActies   = document.getElementById('wb-sub-open-acties');
+
+    // Default: alles uit, dan target weer aan.
+    if (vInbox)        vInbox.hidden        = true;
+    if (vDunning)      vDunning.hidden      = true;
+    if (vOpenActies)   vOpenActies.hidden   = true;
+
+    if (sub === 'inbox') {
+      if (vInbox) vInbox.hidden = false;
+      ensureInboxLoaded();
+    } else if (sub === 'arrangements') {
+      // Arrangements zit binnen view-dunning > dunningSubNav als 'arrangements'.
+      if (vDunning) vDunning.hidden = false;
+      ensureDunningLoaded();
+      activateDunningSub('arrangements');
+    } else if (sub === 'open-acties') {
+      if (vOpenActies) vOpenActies.hidden = false;
+      mountFinanceTasksHost();
+    } else { // overzicht
+      if (vDunning) vDunning.hidden = false;
+      ensureDunningLoaded();
+      // Behoud bestaande dunning sub-tab als al gekozen; default = overzicht.
+      const curActive = document.querySelector('#dunningSubNav .sr-seg.active');
+      const curSub = curActive ? curActive.dataset.dunningSub : null;
+      if (!curSub || curSub === 'arrangements') {
+        // Reset naar dunning-overzicht zodat we niet per ongeluk arrangements tonen.
+        activateDunningSub('overzicht');
+      }
+    }
+
+    // URL-sync zonder page-reload.
+    try {
+      const url = new URL(window.location.href);
+      url.searchParams.set('tab', 'wanbetalers');
+      url.searchParams.set('sub', sub);
+      window.history.replaceState(null, '', url.toString());
+    } catch (_) {}
+  }
+
+  // Wanbetalers sub-nav wiring (één keer).
+  function wireWanbetalersOnce() {
+    if (_wbWired) return;
+    _wbWired = true;
+    document.querySelectorAll('#wanbetalersSubNav .sr-seg').forEach(b => {
+      b.addEventListener('click', () => setSubView(b.dataset.wbSub));
+    });
+  }
+
+  // Mount FinanceTasks in de open-acties host. Idempotent: tweede call met
+  // zelfde host doet niets bijzonders dankzij de mount-guard in
+  // shared/finance-tasks.js.
+  function mountFinanceTasksHost() {
+    const host = document.getElementById('wb-sub-open-acties');
+    if (!host) return;
+    if (!window.FinanceTasks || typeof window.FinanceTasks.mount !== 'function') {
+      host.innerHTML = '<div style="padding:20px;color:var(--text-faint);font-size:13px">Open Acties module wordt geladen…</div>';
+      return;
+    }
+    // Default status uit URL param ?status= (backward-compat met legacy
+    // /modules/open-acties.html?status=PENDING redirector).
+    let statusFilter = 'PENDING';
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const s = params.get('status');
+      if (s && ['PENDING','APPROVED','EXECUTED','FAILED'].includes(s)) statusFilter = s;
+    } catch (_) {}
+    window.FinanceTasks.mount({ host, statusFilter });
+  }
+
+  // Activeer een specifieke sub binnen view-dunning's dunningSubNav. Triggert
+  // hetzelfde click-handler-pad zodat lazy-loaders worden aangeroepen.
+  function activateDunningSub(target) {
+    const btn = document.querySelector('#dunningSubNav .sr-seg[data-dunning-sub="' + target + '"]');
+    if (btn) btn.click();
+  }
+
+  // Lazy-init voor view-inbox (verplaatste logica uit oude setView).
+  let _inboxInitialized = false;
+  function ensureInboxLoaded() {
+    if (!_inboxLoadedOnce) {
       _inboxLoadedOnce = true;
-      const main = document.getElementById('inboxMain');
+      const main   = document.getElementById('inboxMain');
       const locked = document.getElementById('inboxLocked');
       if (!canInboxView) {
         if (main)   main.hidden = true;
         if (locked) locked.hidden = false;
-      } else {
-        // PR A2: conversation-list laden + auto-refresh + wire UI.
-        wireInboxOnce();
-        loadInboxConvList();
-        startInboxPolling();
+        _inboxInitialized = true;
+        return;
       }
-    } else if (view === 'inbox' && _inboxLoadedOnce && canInboxView) {
+      wireInboxOnce();
+      loadInboxConvList();
+      startInboxPolling();
+      _inboxInitialized = true;
+    } else if (canInboxView) {
       // Re-entry: poll opnieuw starten + verse data.
       loadInboxConvList();
       startInboxPolling();
     }
-    // Bij eerste keer Wanbetalers openen: RBAC-gate.
-    if (view === 'dunning' && !_dunningLoadedOnce) {
-      _dunningLoadedOnce = true;
-      const main = document.getElementById('dunningMain');
-      const locked = document.getElementById('dunningLocked');
-      if (!canDunningView) {
-        if (main)   main.hidden = true;
-        if (locked) locked.hidden = false;
-      } else {
-        // Sub-tab switcher wiring + lazy-load van templates op switch.
-        // Map sub-key -> container-id (afwijkende ids worden hier expliciet vermeld).
-        const SUB_IDS = {
-          overzicht:        'dunningSubOverzicht',
-          probleemklanten:  'dunningSubProbleemklanten',
-          workflows:        'dunningSubWorkflows',
-          templates:        'dunningSubTemplates',
-          geschiedenis:     'dunningSubGeschiedenis',
-          arrangements:     'view-arrangements',
-        };
-        const subs = Object.keys(SUB_IDS);
-        document.querySelectorAll('#dunningSubNav .sr-seg').forEach(b => b.addEventListener('click', () => {
-          const target = b.dataset.dunningSub;
-          document.querySelectorAll('#dunningSubNav .sr-seg').forEach(x => x.classList.toggle('active', x === b));
-          for (const s of subs) {
-            const el = document.getElementById(SUB_IDS[s]);
-            if (el) el.hidden = (s !== target);
-          }
-          if (target === 'overzicht' && !_dunOvLoadedOnce) {
-            _dunOvLoadedOnce = true;
-            loadDunOverview();
-          }
-          if (target === 'templates' && !_dunTplLoadedOnce) {
-            _dunTplLoadedOnce = true;
-            loadDunTpls();
-          }
-          if (target === 'workflows' && !_dunWfLoadedOnce) {
-            _dunWfLoadedOnce = true;
-            loadDunWfList();
-            wireDunWfEditor();
-          }
-          if (target === 'probleemklanten' && !_dunProbLoadedOnce) {
-            _dunProbLoadedOnce = true;
-            wireDunProb();
-            loadDunProblemCustomers();
-          }
-          if (target === 'geschiedenis' && !_dunHistLoadedOnce) {
-            _dunHistLoadedOnce = true;
-            wireDunHistory();
-            loadDunHistory({ reset: true });
-          }
-          if (target === 'arrangements' && !_arrangLoadedOnce) {
-            _arrangLoadedOnce = true;
-            wireArrangOnce();
-            wireArrangProposeOnce();
-            loadArrangements();
-          }
-        }));
-        // Wire de modal-knoppen (één keer).
-        wireDunTplModal();
-        // Overzicht is default sub-tab: laad direct bij eerste opening Wanbetalers.
-        if (!_dunOvLoadedOnce) {
-          _dunOvLoadedOnce = true;
-          loadDunOverview();
-        }
+  }
+
+  // Lazy-init voor view-dunning (verplaatste logica uit oude setView).
+  function ensureDunningLoaded() {
+    if (_dunningLoadedOnce) return;
+    _dunningLoadedOnce = true;
+    const main = document.getElementById('dunningMain');
+    const locked = document.getElementById('dunningLocked');
+    if (!canDunningView) {
+      if (main)   main.hidden = true;
+      if (locked) locked.hidden = false;
+      return;
+    }
+    const SUB_IDS = {
+      overzicht:        'dunningSubOverzicht',
+      probleemklanten:  'dunningSubProbleemklanten',
+      workflows:        'dunningSubWorkflows',
+      templates:        'dunningSubTemplates',
+      geschiedenis:     'dunningSubGeschiedenis',
+      arrangements:     'view-arrangements',
+    };
+    const subs = Object.keys(SUB_IDS);
+    document.querySelectorAll('#dunningSubNav .sr-seg').forEach(b => b.addEventListener('click', () => {
+      const target = b.dataset.dunningSub;
+      document.querySelectorAll('#dunningSubNav .sr-seg').forEach(x => x.classList.toggle('active', x === b));
+      for (const s of subs) {
+        const el = document.getElementById(SUB_IDS[s]);
+        if (el) el.hidden = (s !== target);
       }
+      if (target === 'overzicht' && !_dunOvLoadedOnce) {
+        _dunOvLoadedOnce = true;
+        loadDunOverview();
+      }
+      if (target === 'templates' && !_dunTplLoadedOnce) {
+        _dunTplLoadedOnce = true;
+        loadDunTpls();
+      }
+      if (target === 'workflows' && !_dunWfLoadedOnce) {
+        _dunWfLoadedOnce = true;
+        loadDunWfList();
+        wireDunWfEditor();
+      }
+      if (target === 'probleemklanten' && !_dunProbLoadedOnce) {
+        _dunProbLoadedOnce = true;
+        wireDunProb();
+        loadDunProblemCustomers();
+      }
+      if (target === 'geschiedenis' && !_dunHistLoadedOnce) {
+        _dunHistLoadedOnce = true;
+        wireDunHistory();
+        loadDunHistory({ reset: true });
+      }
+      if (target === 'arrangements' && !_arrangLoadedOnce) {
+        _arrangLoadedOnce = true;
+        wireArrangOnce();
+        wireArrangProposeOnce();
+        loadArrangements();
+      }
+    }));
+    wireDunTplModal();
+    if (!_dunOvLoadedOnce) {
+      _dunOvLoadedOnce = true;
+      loadDunOverview();
     }
   }
 
@@ -11091,12 +11224,13 @@
         const ncb = document.getElementById('navCamtBank'); if (ncb) ncb.style.display = '';
         const nb = document.getElementById('navBank');     if (nb)  nb.style.display  = '';
       }
-      // Inbox-tab zichtbaar bij finance.inbox.view permission.
-      if (canInboxView) {
-        const ni = document.getElementById('navInbox'); if (ni) ni.style.display = '';
-      }
-      if (canDunningView) {
-        const nd = document.getElementById('navDunning'); if (nd) nd.style.display = '';
+      // Wanbetalers-tab (Groep A nested wrapper) zichtbaar zodra minimaal één
+      // van inbox-view / dunning-view / tasks-view permissie aanwezig is. Sub-
+      // tabs binnen Wanbetalers tonen alleen content waar deze user toegang
+      // toe heeft (RBAC blijft server-side enforced via de onderliggende
+      // endpoints).
+      if (canInboxView || canDunningView) {
+        const nw = document.getElementById('navWanbetalers'); if (nw) nw.style.display = '';
       }
       // Verberg saldo-kaart en/of transactie-blok per ontbrekende permission.
       // Beide ontbreken → locked-banner tonen, main hide (zelfde patroon als
@@ -11129,6 +11263,21 @@
 
       // Nav.
       document.querySelectorAll('#financeNav .sr-seg').forEach(b => b.addEventListener('click', () => setView(b.dataset.view)));
+
+      // Initial view + sub-view uit URL params (?tab=wanbetalers&sub=open-acties).
+      // Backward-compat met legacy /modules/open-acties.html redirector + sidebar
+      // badge-click target.
+      try {
+        const params = new URLSearchParams(window.location.search);
+        const initialTab = params.get('tab');
+        const initialSub = params.get('sub');
+        if (initialTab === 'wanbetalers') {
+          if (initialSub) _wbActiveSub = initialSub;
+          setView('wanbetalers');
+        } else if (initialTab && ['facturen','camtbank','bank','roadmap'].includes(initialTab)) {
+          setView(initialTab);
+        }
+      } catch (_) { /* fail-safe: default view-facturen blijft actief */ }
       // Status-pills.
       document.querySelectorAll('#invStatusSeg .sr-seg').forEach(b => b.addEventListener('click', () => {
         document.querySelectorAll('#invStatusSeg .sr-seg').forEach(x => x.classList.remove('active'));
