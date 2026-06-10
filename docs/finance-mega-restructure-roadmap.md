@@ -1,8 +1,45 @@
 # Finance Mega-Restructure — Roadmap
 
 **Branch:** `feat/finance-mega-restructure`
+**PR:** [#162](https://github.com/deforexopleiding-bit/forex-opleiding-interface/pull/162)
 **Foundation-commit:** `29fe398`
-**Status:** WIP — foundation gelegd, vervolg-commits per gebied nodig.
+**Status:** READY FOR REVIEW — groepen A/B/C/D/E/F geleverd (PARTIAL bij C+D voor follow-up PRs).
+
+## Status per groep (samenvatting)
+
+| Groep | Scope | Status | Toelichting |
+|-------|-------|--------|-------------|
+| Foundation | Sidebar + redirector + SQL | **DONE** | `29fe398` |
+| A | Wanbetalers nested 4 sub-tabs | **DONE** | `7a879f2`, `8c8eca3` |
+| B | Finance > Klanten thin view | **DONE** | `6712c96`, `804c414` |
+| C | Finance Dashboard | **PARTIAL** | 12 KPIs + 3 charts live; 4 extra charts in follow-up |
+| D | Admin -> Finance Settings | **PARTIAL** | Joost AI verhuisd; Templates + Connection deep-link |
+| E | Backend helpers | **PARTIAL** | bank-balance helper live; finance-bank-balance rewrite TODO |
+| F | Smoke tests + roadmap + PR-readiness | **DONE** | `docs/finance-mega-smoke-tests.md` + dit doc |
+
+## Chronologische commit-historie (branch -> main)
+
+In volgorde van push naar `feat/finance-mega-restructure`:
+
+| # | SHA (7) | Type | Bericht |
+|---|---------|------|---------|
+| 1 | `29fe398` | feat(finance) | mega-restructure foundation - sidebar + open-acties redirector + bank-balance cache SQL |
+| 2 | `f46f24e` | docs(finance) | mega-restructure roadmap met goedgekeurde beslissingen + commit-groepen A-F |
+| 3 | `8c8eca3` | feat(finance-tasks) | extract Open Acties UI to shared module for Wanbetalers nesting |
+| 4 | `7a879f2` | feat(finance) | nest Wanbetalers as wrapper with 4 sub-tabs (Overzicht/Inbox/Arrangements/Open Acties) |
+| 5 | `804c414` | feat(finance-customers) | aggregated klant-endpoint met open bedrag + arrangements + dunning-status |
+| 6 | `6712c96` | feat(finance) | Klanten thin-view tab met FinanceKlanten shared module |
+| 7 | `470d2fc` | feat(finance-dashboard) | bank-balance lazy-cache helper (Group E1) |
+| 8 | `205a689` | feat(finance-dashboard) | fast-aggregator endpoint met 12 KPIs + SWR-cache (Group C1) |
+| 9 | `47c9963` | feat(finance-dashboard) | 3 chart endpoints (aging/top-debtors/arrangements) |
+| 10 | `3dfb398` | feat(finance-dashboard) | shared frontend module met 12 KPIs + 3 charts |
+| 11 | `65aac85` | feat(finance) | wire Dashboard tab + view-dashboard mount in finance.html (Group C) |
+| 12 | `c250a7d` | docs(finance) | mark Group C+E1 PARTIAL with TODO list for next PR |
+| 13 | `19c2dc7` | feat(finance-instellingen) | shared module skeleton + Joost AI sectie volledig |
+| 14 | `67110c8` | feat(finance) | wire Instellingen tab + view-instellingen mount in finance.html |
+| 15 | `f761ebf` | refactor(admin) | remove Joost AI tab + handlers (verhuisd naar Finance > Instellingen) |
+| 16 | `3144ad7` | docs(finance) | mark Group D PARTIAL with Joost done + Templates/Connection deep-link TODO |
+| 17 | (Groep F) | docs(finance) | smoke-test doc + roadmap status-update + PR-readiness |
 
 ## Doelstructuur (groen licht ontvangen)
 
@@ -192,17 +229,127 @@ E3. **`api/finance-dashboard-counts.js`** — zie C1
 
 E4. **`api/finance-dashboard-chart-*.js`** — zie C2-C8
 
-### Groep F — Polish + smoke tests (2-3 commits)
+### Groep F — Polish + smoke tests (DONE)
 
-F1. **Smoke-test doc** in `docs/finance-mega-smoke-tests.md`
-- 4 secties (Dashboard / Klanten / Wanbetalers-nested / Settings)
-- Per sectie: stappen + verwacht resultaat + regressie-checks
+GEDAAN (juni 2026):
+- F1: `docs/finance-mega-smoke-tests.md` — 5 secties (Pre-flight +
+  Dashboard / Klanten / Wanbetalers-nested / Settings / Backward-compat)
+  met stappen + verwacht resultaat + SQL verificatie-query.
+- F2: Status-tabel per groep + chronologische commit-historie + "Voor
+  merge"-checklist + "TODO voor follow-up PRs" sectie in dit doc.
+- F3: PR #162 markeer als "ready for review" (geen merge).
 
-F2. **PR-beschrijving + screenshots**
-- Preview-URL met all-tabs visible
-- Diff-stat per groep
+NIET in scope F (volgende stap, na review):
+- Eventuele bugfixes uit smoke-test ronde (deze PR is intern; bug-fixes
+  worden in cherry-pick commits toegevoegd).
+- Productie-merge zelf — wacht op smoke-test groen-licht + Jeffrey's
+  expliciete go.
 
-F3. **Eventuele bugfixes uit smoke tests**
+## Voor merge — verplichte checklist
+
+Voordat PR #162 gemerged wordt naar `main` MOETEN onderstaande punten
+groen zijn. Geen merge zonder volledige checklist.
+
+- [ ] **Vercel build groen** voor `feat/finance-mega-restructure`
+  (PR #162 GitHub-checks tonen geen rode kruisjes)
+- [ ] **SQL migratie gedraaid in productie Supabase**
+  File: `docs/sql-migrations/2026-06-10-finance-mega-restructure.sql`
+  Verificatie-query in `docs/finance-mega-smoke-tests.md` sectie 0.
+- [ ] **Smoke-test 5 secties geslaagd** (`docs/finance-mega-smoke-tests.md`)
+  - [ ] Sectie 1: Dashboard — KPIs + charts + drill-down + permission
+  - [ ] Sectie 2: Klanten — lijst + filters + search + doorklik
+  - [ ] Sectie 3: Wanbetalers nested — 4 sub-tabs + klant-modal regressie
+  - [ ] Sectie 4: Instellingen — Joost AI + Templates deep-link
+  - [ ] Sectie 5: Backward-compat — redirector + sidebar + admin clean
+- [ ] **STRICT `"merged": true` assertion** vóór branch-delete
+  Lesson uit PR #148: na `gh pr merge` of merge-script ALTIJD de
+  PR-status checken via API:
+  ```
+  curl -s -H "Authorization: Bearer $GH_TOKEN" \
+    https://api.github.com/repos/deforexopleiding-bit/forex-opleiding-interface/pulls/162 \
+    | grep -E '"merged":\s*true'
+  ```
+  Pas branch-delete uitvoeren als bovenstaande `merged: true` returnt.
+- [ ] **`INTERNAL_API_TOKEN` env-var aanwezig** in Vercel (alle envs,
+  Sensitive). Zonder deze faalt Joost auto-suggest stil; smoke-test
+  van inbound webhook flow zou regressie tonen.
+- [ ] **`COMPANY_*` env-vars aanwezig** in Vercel (alle envs, niet
+  Sensitive). Zonder deze blijven `{{bedrijf.naam}}` etc. leeg in
+  template-rendering — niet kritisch voor smoke-test maar wel polish.
+- [ ] **`ANTHROPIC_API_KEY` aanwezig** (alle envs, Sensitive). Vereist
+  voor Joost-suggest + agent-* endpoints.
+- [ ] **Geen rode console-errors** in browser tijdens smoke-test
+  (kritiek: `FinanceDashboard is not defined`, `FinanceKlanten`,
+  `FinanceInstellingen`, `FinanceTasks` moeten allemaal mounten).
+- [ ] **PR-beschrijving up-to-date** met groep-status + diff-stat +
+  smoke-test verwijzing.
+
+## TODO voor follow-up PRs
+
+Scope die bewust **niet** in PR #162 zit en in latere PRs landt. Per item
+de bron-groep + reden + suggested-PR-titel.
+
+### Dashboard (Groep C — extra charts)
+
+Bron: C4 / C6 / C7 / C8 (zie Groep C sectie hierboven).
+
+- [ ] **C4 — Joost intents stacked-line chart**
+  Endpoint `/api/finance-dashboard-chart-joost-intents.js`. Gebruikt
+  `joost_suggestions.detected_intent` + `auto_triggered` + tijds-window.
+  Suggested PR: `feat(finance-dashboard): Joost intent chart`.
+- [ ] **C6 — Open Acties per type bar chart**
+  Endpoint `/api/finance-dashboard-chart-tasks.js`. Gebruikt
+  `pending_actions.action_type` counts per status.
+  Suggested PR: `feat(finance-dashboard): Open Acties chart`.
+- [ ] **C7 — 3-maands cashflow line chart**
+  Endpoint `/api/finance-dashboard-chart-cashflow.js`. Gebruikt
+  `invoices.paid_at` + `payments` of e-boekhouden source.
+  Suggested PR: `feat(finance-dashboard): cashflow chart`.
+- [ ] **C8 — Nieuwe vs herhaal stacked bar**
+  Endpoint `/api/finance-dashboard-chart-payments.js`. Onderscheid
+  nieuwe klanten vs herhaal-betalingen per maand.
+  Suggested PR: `feat(finance-dashboard): payment-type chart`.
+
+### Settings (Groep D — Templates + Connection volledige verhuis)
+
+Bron: D3 / D4 (zie Groep D sectie hierboven). Beide blijven nu een
+deep-link `target="_blank"` naar `admin.html`.
+
+- [ ] **D3 — WhatsApp Templates volledige verhuis naar Finance**
+  Editor met variabelen-paneel + Meta-sync + quick-replies (~1400 regels
+  JS + ~200 regels modal-HTML). Module: `shared/finance-templates.js`.
+  Suggested PR: `feat(finance-instellingen): WhatsApp Templates verhuis`.
+- [ ] **D4 — WhatsApp Connection / Afdeling-config verhuis**
+  Module-koppelings-tabel + Meta webhook-subscribe flow. Verweven met
+  D3, samen porteren is logischer. Module: `shared/finance-connection.js`.
+  Suggested PR: `feat(finance-instellingen): WhatsApp Connection verhuis`.
+
+### Backend (Groep E — endpoint-renaming + cache-persistence)
+
+- [ ] **E2 — `api/finance-bank-balance.js` rewrite naar TL-source**
+  Huidige endpoint gebruikt nog e-Boekhouden voor backward-compat. Helper
+  `api/_lib/bank-balance.js` is al klaar (commit `470d2fc`); endpoint moet
+  ernaartoe wijzen.
+  Suggested PR: `refactor(finance-bank-balance): use _lib/bank-balance helper`.
+- [ ] **C-cache persistent** — SWR-cache `finance-dashboard-counts.js`
+  staat nu in-memory per Vercel-instance. Hot path: persisteer naar
+  `app_settings` of een dedicated tabel zodat 1 fetch over alle
+  Vercel-cold-boots geldt.
+  Suggested PR: `feat(finance-dashboard): persistent SWR cache`.
+- [ ] **Endpoint-renaming `admin-*` -> `finance-settings-*`**
+  Op termijn na Templates/Connection verhuis: rename
+  `admin-meta-templates-*.js` -> `finance-settings-templates-*.js` en
+  `admin-whatsapp-modules-*.js` -> `finance-settings-connection-*.js`.
+  RBAC-keys mogen blijven; alleen file-namen + frontend-calls aanpassen.
+  Suggested PR: `refactor(api): rename admin-meta-* to finance-settings-*`.
+
+### UX-polish (geen blocker, na hoofd-merge)
+
+- [ ] Dashboard period-filter zichtbaar maken per chart (nu alleen global).
+- [ ] Klanten-tab arrangement-status filter toevoegen (nu alleen
+      "actieve arrangements" pill).
+- [ ] FinanceTasks mount-host hover-state visueel onderscheiden van
+      gestandaloned Open Acties (subtle, geen redesign).
 
 ## Risico's
 
