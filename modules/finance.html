@@ -11283,8 +11283,10 @@
           // ?conversation=<uuid> impliciet richten op inbox sub-tab.
           if (!initialSub && params.get('conversation')) _wbActiveSub = 'inbox';
           setView('wanbetalers');
-        } else if (initialTab && ['dashboard','facturen','klanten','camtbank','bank','roadmap'].includes(initialTab)) {
+        } else if (initialTab && ['dashboard','facturen','klanten','camtbank','bank','roadmap','instellingen'].includes(initialTab)) {
           setView(initialTab);
+          // Voor 'instellingen': ?sub=joost|templates|connection wordt door
+          // FinanceInstellingen.mount() zelf gelezen uit location.search.
         } else if (!initialTab) {
           // Default landing-tab is Dashboard (Groep C).
           setView('dashboard');
