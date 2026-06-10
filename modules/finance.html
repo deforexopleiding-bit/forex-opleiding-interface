@@ -3236,11 +3236,18 @@
     const vDunning      = document.getElementById('view-dunning');
     const vArrangements = document.getElementById('view-arrangements');
     const vOpenActies   = document.getElementById('wb-sub-open-acties');
+    const dunningSubNav = document.getElementById('dunningSubNav');
 
     // Default: alles uit, dan target weer aan.
     if (vInbox)        vInbox.hidden        = true;
     if (vDunning)      vDunning.hidden      = true;
     if (vOpenActies)   vOpenActies.hidden   = true;
+
+    // Sub-nav layering fix: bij Wanbetalers-wrapper actief verbergen we de
+    // interne dunningSubNav (Overzicht/Probleemklanten/Workflows/Templates/
+    // Geschiedenis/Arrangements). De Wanbetalers sub-nav vervult die rol nu.
+    // We schakelen programmatisch naar de juiste interne dunning-sub-tab.
+    if (dunningSubNav) dunningSubNav.style.display = 'none';
 
     if (sub === 'inbox') {
       if (vInbox) vInbox.hidden = false;
@@ -3256,13 +3263,11 @@
     } else { // overzicht
       if (vDunning) vDunning.hidden = false;
       ensureDunningLoaded();
-      // Behoud bestaande dunning sub-tab als al gekozen; default = overzicht.
-      const curActive = document.querySelector('#dunningSubNav .sr-seg.active');
-      const curSub = curActive ? curActive.dataset.dunningSub : null;
-      if (!curSub || curSub === 'arrangements') {
-        // Reset naar dunning-overzicht zodat we niet per ongeluk arrangements tonen.
-        activateDunningSub('overzicht');
-      }
+      // Forceer altijd dunning-overzicht voor de Wanbetalers > Overzicht tab —
+      // we tonen de dunningSubNav toch niet meer, dus de gebruiker moet altijd
+      // op het overzicht-paneel landen (niet op een vorige selectie zoals
+      // 'probleemklanten' of 'workflows').
+      activateDunningSub('overzicht');
     }
 
     // URL-sync zonder page-reload.
