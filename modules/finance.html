@@ -2312,6 +2312,17 @@
           </div>
         </div>
 
+        <!-- Sectie: actieve abonnementen -->
+        <div class="inbox-c-section" id="inboxCustPanelSubsSection">
+          <div class="inbox-c-section-head">
+            <span class="inbox-c-section-lbl">Actieve abonnementen</span>
+            <span class="inbox-c-section-total" id="inboxCustPanelSubsTotal" title="Totale MRR (per maand)">€ 0,00<span style="font-weight:400;opacity:.75">/mnd</span></span>
+          </div>
+          <div class="inbox-c-invoice-list" id="inboxCustPanelSubs">
+            <div class="inbox-c-empty-line">Geen actieve abonnementen</div>
+          </div>
+        </div>
+
         <!-- Sectie: klant info -->
         <div class="inbox-c-section" id="inboxCustPanelInfoSection">
           <div class="inbox-c-section-head">
@@ -7289,6 +7300,22 @@
     }
   }
 
+  // billing_cycle → korte NL label ('/mnd', '/kwartaal', '/jaar', '/2 mnd',
+  // '/6 mnd', '/N mnd'). Onbekend / null → '/mnd' (default = per_month).
+  function _inboxFmtCycle(label) {
+    if (!label) return '/mnd';
+    switch (label) {
+      case 'per_month': return '/mnd';
+      case 'per_2_months': return '/2 mnd';
+      case 'per_quarter': return '/kwartaal';
+      case 'per_6_months': return '/6 mnd';
+      case 'per_year': return '/jaar';
+    }
+    const m = String(label).match(/per_(\d+)_months/);
+    if (m) return '/' + m[1] + ' mnd';
+    return '/mnd';
+  }
+
   // dd-mm-yyyy uit ISO-string of date-only string. '—' bij ontbreken.
   function _inboxFmtDateNL(iso) {
     if (!iso) return '—';
@@ -7411,7 +7438,8 @@
     const conv = d.conversation || null;
     const cust = d.customer || null;
     const invs = Array.isArray(d.open_invoices) ? d.open_invoices : [];
-    const totals = d.totals || { open_amount: 0, invoice_count: 0 };
+    const subs = Array.isArray(d.active_subscriptions) ? d.active_subscriptions : [];
+    const totals = d.totals || { open_amount: 0, invoice_count: 0, subscriptions_count: 0, subscriptions_total_mrr: 0, subscriptions_total_contract_value: 0 };
 
     const avatarEl = document.getElementById('inboxCustPanelAvatar');
     const nameEl   = document.getElementById('inboxCustPanelName');
@@ -7419,6 +7447,9 @@
     const badgeEl  = document.getElementById('inboxCustPanelWindow');
     const totEl    = document.getElementById('inboxCustPanelOpenTotal');
     const invsEl   = document.getElementById('inboxCustPanelInvoices');
+    const subsEl   = document.getElementById('inboxCustPanelSubs');
+    const subsTotEl = document.getElementById('inboxCustPanelSubsTotal');
+    const subsSec  = document.getElementById('inboxCustPanelSubsSection');
     const sinceEl  = document.getElementById('inboxCustPanelSince');
     const emailRow = document.getElementById('inboxCustPanelEmailRow');
     const emailEl  = document.getElementById('inboxCustPanelEmail');
@@ -7461,7 +7492,7 @@
     const invSection = invsEl ? invsEl.closest('.inbox-c-section') : null;
 
     if (state === 'matched') {
-      // Facturen-sectie + klant-info + acties allemaal zichtbaar + gevuld.
+      // Facturen-sectie + abonnementen + klant-info + acties allemaal zichtbaar + gevuld.
       if (invSection) invSection.style.display = '';
       if (totEl)  totEl.textContent  = _inboxFmtEur(totals.open_amount);
       if (invsEl) {
@@ -7479,6 +7510,33 @@
               +    '<span class="inbox-c-invoice-right">'
               +      '<span class="inbox-c-invoice-amount">' + esc(_inboxFmtEur(inv.amount_open)) + '</span>'
               +      '<span class="inbox-c-overdue-badge ' + badgeCls + '">' + esc(badgeTxt) + '</span>'
+              +    '</span>'
+              + '</div>';
+          }).join('');
+        }
+      }
+      // Abonnementen-sectie tonen + vullen. Header-totaal = MRR (per maand);
+      // hover-title toont contract-totaal (som van termijn-bedragen) zodat de
+      // gebruiker beide getallen kan zien zonder UI-clutter.
+      if (subsSec) subsSec.style.display = '';
+      if (subsTotEl) {
+        const mrr = Number(totals.subscriptions_total_mrr) || 0;
+        const contract = Number(totals.subscriptions_total_contract_value) || 0;
+        subsTotEl.innerHTML = esc(_inboxFmtEur(mrr)) + '<span style="font-weight:400;opacity:.75">/mnd</span>';
+        subsTotEl.title = 'MRR: ' + _inboxFmtEur(mrr) + ' per maand · Termijn-totaal: ' + _inboxFmtEur(contract);
+      }
+      if (subsEl) {
+        if (!subs.length) {
+          subsEl.innerHTML = '<div class="inbox-c-empty-line">Geen actieve abonnementen</div>';
+        } else {
+          subsEl.innerHTML = subs.map(s => {
+            const desc = s.description || 'Abonnement';
+            const cycleLbl = _inboxFmtCycle(s.billing_cycle);
+            const perTerm = Number(s.amount_incl) || 0;
+            return '<div class="inbox-c-invoice-row">'
+              +    '<span class="inbox-c-invoice-nr" title="' + esc(desc) + '">' + esc(desc) + '</span>'
+              +    '<span class="inbox-c-invoice-right">'
+              +      '<span class="inbox-c-invoice-amount">' + esc(_inboxFmtEur(perTerm)) + esc(cycleLbl) + '</span>'
               +    '</span>'
               + '</div>';
           }).join('');
@@ -7530,9 +7588,11 @@
       }
     } else {
       // state === 'unknown'
-      // Geen facturen-sectie tonen — we hebben geen klant om facturen aan te
-      // koppelen. Toont "Koppel aan bestaande klant" als primary action.
+      // Geen facturen / abonnementen-sectie tonen — we hebben geen klant om
+      // bedragen aan te koppelen. Toont "Koppel aan bestaande klant" als
+      // primary action.
       if (invSection) invSection.style.display = 'none';
+      if (subsSec)    subsSec.style.display    = 'none';
       if (infoSec)    infoSec.style.display    = 'none';
       if (emailRow)   emailRow.hidden          = true;
 

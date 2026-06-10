@@ -3,12 +3,16 @@
 // Permission: finance.inbox.view (zelfde gate als inbox-messages-list / conversations-list).
 //
 // In 1 round-trip levert dit endpoint:
-//   - conversation: id, phone_number, last_inbound_at, window_open (24h-bool)
-//   - customer:      gekoppelde klant (NULL als conversation.customer_id leeg is
-//                    EN er geen exact-1 phone-match in customers gevonden wordt)
-//   - open_invoices: max 25 openstaande facturen, op due_date oplopend
-//                    (open + partially_paid, NIET volledig gecrediteerd)
-//   - totals:        open_amount + invoice_count voor het paneel-totaal
+//   - conversation:         id, phone_number, last_inbound_at, window_open (24h-bool)
+//   - customer:             gekoppelde klant (NULL als conversation.customer_id leeg is
+//                           EN er geen exact-1 phone-match in customers gevonden wordt)
+//   - open_invoices:        max 25 openstaande facturen, op due_date oplopend
+//                           (open + partially_paid, NIET volledig gecrediteerd)
+//   - active_subscriptions: actieve abonnementen van de klant (status='active'),
+//                           via deals.customer_id → subscriptions.deal_id. Bevat
+//                           per sub: amount_incl per termijn + mrr-equivalent.
+//   - totals:               open_amount + invoice_count + subscriptions_count +
+//                           subscriptions_total_mrr + subscriptions_total_contract_value
 //
 // Query params:
 //   conversation_id  uuid (required)
@@ -20,7 +24,11 @@
 //     open_invoices: [{ id, invoice_number, total_amount, amount_open,
 //                       due_date, days_overdue, is_overdue, status,
 //                       tl_invoice_id }],
-//     totals: { open_amount, invoice_count }
+//     active_subscriptions: [{ id, description, amount_incl, billing_cycle,
+//                              cycle_months, mrr, start_date, end_date, status,
+//                              teamleader_subscription_id }],
+//     totals: { open_amount, invoice_count, subscriptions_count,
+//               subscriptions_total_mrr, subscriptions_total_contract_value }
 //   }
 //
 // Error responses:
@@ -38,6 +46,27 @@ const TWENTY_FOUR_HOURS_MS = 24 * 60 * 60 * 1000;
 const ONE_DAY_MS = 24 * 60 * 60 * 1000;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const MAX_OPEN_INVOICES = 25;
+const MAX_SUBSCRIPTIONS = 50;
+
+// Billing cycle → maanden. Spiegelt api/sales-mrr-report.js zodat MRR-berekening
+// consistent is met het MRR-overzicht. Default 1 voor onbekende/lege cycles
+// (wizard-subs zonder billing_cycle gedragen zich als per_month).
+const CYCLE_M = { per_month: 1, per_2_months: 2, per_quarter: 3, per_6_months: 6, per_year: 12 };
+function cycleMonths(label) {
+  if (!label) return 1;
+  if (CYCLE_M[label] != null) return CYCLE_M[label];
+  const m = String(label).match(/per_(\d+)_months/);
+  return m ? Number(m[1]) : 1;
+}
+// Incl-BTW bedrag per termijn — prefereer line_items (mix-safe per regel) en
+// val terug op amount + vat_percentage voor oude subs zonder line_items.
+function inclPerTerm(sub) {
+  const lines = Array.isArray(sub.line_items) ? sub.line_items : [];
+  if (lines.length) {
+    return lines.reduce((sum, li) => sum + (Number(li.amount) || 0) * (1 + (Number(li.vat_percentage) || 0) / 100), 0);
+  }
+  return (Number(sub.amount) || 0) * (1 + (Number(sub.vat_percentage) || 0) / 100);
+}
 
 // Strip alles behalve cijfers — geen '+' bewaren. Klant-telefoonnummers worden
 // soms met en soms zonder '+' opgeslagen ('+31655270212' vs '31655270212'),
@@ -210,6 +239,65 @@ export default async function handler(req, res) {
       }
     }
 
+    // 4) Actieve abonnementen. Subscriptions hangen aan deals (geen direct
+    //    customer_id), dus eerst deal_ids van de klant ophalen. Soft-fail per
+    //    stap zodat UI altijd iets toont, zelfs als 1 query stuk gaat.
+    const activeSubs = [];
+    let subsTotalMrr = 0;
+    let subsTotalContract = 0;
+    if (customerOut) {
+      try {
+        const { data: deals, error: dealsErr } = await supabaseAdmin
+          .from('deals')
+          .select('id')
+          .eq('customer_id', customerOut.id)
+          .is('archived_at', null);
+        if (dealsErr) {
+          console.error('[inbox-conversation-context] deals lookup:', dealsErr.message);
+        } else {
+          const dealIds = (deals || []).map(d => d.id);
+          if (dealIds.length) {
+            const { data: subs, error: subsErr } = await supabaseAdmin
+              .from('subscriptions')
+              .select(
+                'id, deal_id, description, amount, vat_percentage, term_count, ' +
+                'start_date, end_date, status, line_items, billing_cycle, ' +
+                'teamleader_subscription_id'
+              )
+              .in('deal_id', dealIds)
+              .eq('status', 'active')
+              .order('start_date', { ascending: true, nullsFirst: false })
+              .limit(MAX_SUBSCRIPTIONS);
+            if (subsErr) {
+              console.error('[inbox-conversation-context] subscriptions lookup:', subsErr.message);
+            } else {
+              for (const s of subs || []) {
+                const amountIncl = inclPerTerm(s);
+                const cm = cycleMonths(s.billing_cycle);
+                const mrr = cm > 0 ? amountIncl / cm : amountIncl;
+                activeSubs.push({
+                  id: s.id,
+                  description: s.description || null,
+                  amount_incl: Math.round(amountIncl * 100) / 100,
+                  billing_cycle: s.billing_cycle || null,
+                  cycle_months: cm,
+                  mrr: Math.round(mrr * 100) / 100,
+                  start_date: s.start_date || null,
+                  end_date: s.end_date || null,
+                  status: s.status || null,
+                  teamleader_subscription_id: s.teamleader_subscription_id || null,
+                });
+                subsTotalMrr += mrr;
+                subsTotalContract += amountIncl;
+              }
+            }
+          }
+        }
+      } catch (e) {
+        console.error('[inbox-conversation-context] subs exception:', e && e.message);
+      }
+    }
+
     return res.status(200).json({
       conversation: {
         id: conv.id,
@@ -219,9 +307,13 @@ export default async function handler(req, res) {
       },
       customer: customerOut,
       open_invoices: openInvoices,
+      active_subscriptions: activeSubs,
       totals: {
         open_amount: Math.round(totalOpen * 100) / 100,
         invoice_count: openInvoices.length,
+        subscriptions_count: activeSubs.length,
+        subscriptions_total_mrr: Math.round(subsTotalMrr * 100) / 100,
+        subscriptions_total_contract_value: Math.round(subsTotalContract * 100) / 100,
       },
     });
   } catch (e) {
