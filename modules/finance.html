@@ -1059,6 +1059,8 @@
 <div class="app" id="appContent">
   <div class="sr-segments" id="financeNav" style="margin-bottom:18px">
     <button class="sr-seg active" data-view="facturen" type="button">Facturen</button>
+    <!-- Groep B: Klanten thin view. Positie 1 na Facturen (Dashboard volgt in Groep C). -->
+    <button class="sr-seg" id="navKlanten" data-view="klanten" type="button">Klanten</button>
     <button class="sr-seg" id="navWanbetalers" data-view="wanbetalers" type="button" style="display:none">Wanbetalers</button>
     <button class="sr-seg" id="navCamtBank" data-view="camtbank" type="button" style="display:none">Bank</button>
     <button class="sr-seg" data-view="roadmap" type="button">Roadmap</button>
@@ -1077,6 +1079,12 @@
          toggling (zie setSubView()), zodat hun DOM-node + state behouden blijft. -->
     <div id="wb-sub-open-acties" hidden></div>
   </div>
+
+  <!-- ===== Klanten-view (Groep B: thin view binnen Finance) =====
+       Mount-target voor shared/finance-klanten.js. Klant-lijst met
+       finance-context (open bedrag, arrangements, dunning) en doorklik
+       naar het volledige klant-dossier via /modules/klanten.html?id=. -->
+  <div id="view-klanten" hidden></div>
 
   <!-- ===== Facturen-view (read-only TL-spiegel, Fase 2A) ===== -->
   <div id="view-facturen">
@@ -3029,6 +3037,8 @@
 <script src="/modules/shared/quick-task-button.js" data-module="Finance" defer></script>
 <!-- Groep A: Open Acties module voor Finance > Wanbetalers > Open Acties sub-tab. -->
 <script src="/modules/shared/finance-tasks.js"></script>
+<!-- Groep B: Finance > Klanten thin view (klant-lijst met finance-context). -->
+<script src="/modules/shared/finance-klanten.js"></script>
 
 <!-- ===== Finance Fase 2A — Facturen-view logica ===== -->
 <script>
@@ -3082,11 +3092,13 @@
     // sub-toggles binnen wanbetalers verbergen of tonen de bestaande view-nodes —
     // ze worden niet verplaatst (DOM-state + bestaande wiring blijft intact).
     const wbWrap = document.getElementById('view-wanbetalers');
+    const klantenWrap = document.getElementById('view-klanten');
     document.getElementById('view-facturen').hidden = (view !== 'facturen');
     document.getElementById('view-camtbank').hidden = (view !== 'camtbank');
     document.getElementById('view-bank').hidden = (view !== 'bank');
     document.getElementById('view-roadmap').hidden = (view !== 'roadmap');
     if (wbWrap) wbWrap.hidden = (view !== 'wanbetalers');
+    if (klantenWrap) klantenWrap.hidden = (view !== 'klanten');
     if (view !== 'wanbetalers') {
       document.getElementById('view-inbox').hidden = true;
       document.getElementById('view-dunning').hidden = true;
@@ -3103,6 +3115,10 @@
       if (typeof stopInboxPolling === 'function') stopInboxPolling();
       if (typeof _inboxResetCustomerPanel === 'function') _inboxResetCustomerPanel();
     }
+    // Groep B: bij Klanten-view → mount FinanceKlanten (idempotent).
+    if (view === 'klanten' && klantenWrap) {
+      mountFinanceKlantenHost(klantenWrap);
+    }
     // Bij eerste keer Bank (oud) openen: load per beschikbare permission.
     if (view === 'bank' && !_bankLoadedOnce) {
       _bankLoadedOnce = true;
@@ -3115,6 +3131,13 @@
       if (canBankBalanceView) loadCamtBalance();
       if (canBankTxView) { loadCamtBank(); loadCamtStatementsList(); }
     }
+  }
+
+  // Mount FinanceKlanten in de view-klanten host. Idempotent: tweede call op
+  // dezelfde host returnt early dankzij mount-guard in shared/finance-klanten.js.
+  function mountFinanceKlantenHost(host) {
+    if (!host || !window.FinanceKlanten || typeof window.FinanceKlanten.mount !== 'function') return;
+    window.FinanceKlanten.mount({ host });
   }
 
   // ─── Wanbetalers nested sub-tab orchestratie (Groep A) ─────────────────────
@@ -11266,7 +11289,7 @@
 
       // Initial view + sub-view uit URL params (?tab=wanbetalers&sub=open-acties).
       // Backward-compat met legacy /modules/open-acties.html redirector + sidebar
-      // badge-click target.
+      // badge-click target. Groep B: 'klanten' toegevoegd aan whitelist.
       try {
         const params = new URLSearchParams(window.location.search);
         const initialTab = params.get('tab');
@@ -11274,7 +11297,7 @@
         if (initialTab === 'wanbetalers') {
           if (initialSub) _wbActiveSub = initialSub;
           setView('wanbetalers');
-        } else if (initialTab && ['facturen','camtbank','bank','roadmap'].includes(initialTab)) {
+        } else if (initialTab && ['facturen','klanten','camtbank','bank','roadmap'].includes(initialTab)) {
           setView(initialTab);
         }
       } catch (_) { /* fail-safe: default view-facturen blijft actief */ }
