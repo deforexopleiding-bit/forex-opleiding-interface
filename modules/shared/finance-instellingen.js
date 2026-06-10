@@ -1108,6 +1108,11 @@
       _waConf.modalsInjected = true;
       return;
     }
+    // Style injectie (eenmalig) voor classes die niet in agent-shared.css of
+    // finance.html staan maar wel door de gekopieerde admin.html-modals worden
+    // gebruikt. .modal-overlay / .modal-card zijn al in finance.html — alleen
+    // de modal-* sub-classes + form-* + tables + helpers ontbreken.
+    ensureSharedModalStylesInjected();
     const wrap = document.createElement('div');
     wrap.id = 'fiWaConfModalsRoot';
     wrap.innerHTML = `
@@ -1320,6 +1325,7 @@
       _waTpl.modalsInjected = true;
       return;
     }
+    ensureSharedModalStylesInjected();
     const wrap = document.createElement('div');
     wrap.id = 'fiWaTplModalsRoot';
     wrap.innerHTML = `
@@ -1564,6 +1570,61 @@
     });
 
     _waTpl.modalsInjected = true;
+  }
+
+  // ─── Shared modal/table/form styles (eenmalige injectie) ───────────────────
+  // Deze classes ('.modal-header / .modal-body / .modal-footer / .modal-title /
+  // .modal-close / .users-table / .action-btn / .active-dot / .form-error /
+  // .sr-segments / .sr-segment / .section-header / .hidden') waren in admin.html
+  // inline gedefinieerd. Bij verhuis naar Finance > Instellingen (PR-4) zijn ze
+  // niet in agent-shared.css of finance.html beschikbaar — we injecteren ze
+  // eenmalig in document.head bij eerste modal-open zodat de gekopieerde HTML
+  // (1-op-1 uit admin.html) er hetzelfde uitziet als voorheen.
+  let _sharedModalStylesInjected = false;
+  function ensureSharedModalStylesInjected() {
+    if (_sharedModalStylesInjected) return;
+    if (document.getElementById('fiSharedModalStyles')) {
+      _sharedModalStylesInjected = true;
+      return;
+    }
+    const style = document.createElement('style');
+    style.id = 'fiSharedModalStyles';
+    style.textContent = `
+      /* PR-4 shared modal/table/form styles (eens een admin.html-inline-block;
+         nu hostable in Finance > Instellingen). */
+      .modal-header { display:flex; align-items:center; justify-content:space-between; padding:16px 20px; border-bottom:1px solid var(--border); }
+      .modal-title { font-size:15px; font-weight:600; }
+      .modal-close { background:transparent; border:none; color:var(--text-faint); font-size:16px; cursor:pointer; padding:4px; line-height:1; }
+      .modal-body { padding:20px; }
+      .modal-footer { display:flex; justify-content:flex-end; gap:8px; padding:14px 20px; border-top:1px solid var(--border); }
+      /* Scope-specifiek: onze 3 modals laten hun header/body/footer hun eigen
+         padding bepalen ipv de generic modal-card padding van finance.html. */
+      #waConfEditModal .modal-card,
+      #waMetaEditModal .modal-card,
+      #waQrEditModal .modal-card { padding:0; }
+      .users-table { width:100%; border-collapse:collapse; }
+      .users-table th { text-align:left; padding:10px 12px; font-size:10px; text-transform:uppercase; color:var(--text-faint); font-weight:600; letter-spacing:.5px; border-bottom:1px solid var(--border); }
+      .users-table td { padding:12px; border-bottom:0.5px solid var(--border-subtle, var(--border)); font-size:13px; vertical-align:middle; }
+      .users-table tr:last-child td { border-bottom:none; }
+      .users-table tr:hover td { background:var(--surface-card, transparent); }
+      .action-btn { background:transparent; border:none; padding:5px 8px; border-radius:6px; color:var(--text-faint); cursor:pointer; font-size:12px; font-family:inherit; }
+      .action-btn:hover { background:var(--surface-card-hover, var(--bg-elev-2)); color:var(--text); }
+      .active-dot { display:inline-block; width:8px; height:8px; border-radius:50%; background:var(--color-success, #22c55e); }
+      .active-dot.inactive-dot { background:var(--text-faint, #9ca3af); }
+      .form-error { margin-top:10px; padding:8px 12px; background:var(--color-danger-soft, rgba(220,38,38,0.08)); border:1px solid var(--color-danger, #dc2626); border-radius:8px; font-size:12px; color:var(--color-danger-text, #b91c1c); }
+      .form-error.hidden { display:none; }
+      /* sr-segments + sr-segment (sub-tabs binnen WhatsApp Templates) */
+      .sr-segments { display:inline-flex; }
+      .sr-segment { background:transparent; border:none; padding:6px 12px; font-size:12.5px; font-weight:500; color:var(--text-dim); cursor:pointer; border-radius:6px; font-family:inherit; }
+      .sr-segment:hover { color:var(--text); }
+      .sr-segment.active { background:var(--brand-primary-soft, rgba(59,130,246,0.1)); color:var(--brand-primary, #2563eb); }
+      /* section-header (gebruikt in renderTemplatesMarkup en renderConnectionMarkup) */
+      .section-header { display:flex; align-items:center; gap:10px; margin-bottom:16px; font-size:14px; font-weight:600; }
+      /* hidden utility (geldt alleen op modal-overlay als hidden class). */
+      .modal-overlay.hidden { display:none !important; }
+    `;
+    document.head.appendChild(style);
+    _sharedModalStylesInjected = true;
   }
 
   // ─── apiRequest helper (mirror van admin.html) ────────────────────────────
