@@ -7303,9 +7303,10 @@
   // Hoofd-laad-functie. Roept /api/inbox-conversation-context aan en delegeert
   // naar renderInboxCustomerPanel met de juiste state.
   async function loadInboxCustomerContext(conversationId) {
-    const emptyEl   = document.getElementById('inboxCustomerPanelEmpty');
+    // NB: #inboxCustomerPanelEmpty bestaat sinds PR #151 niet meer (modal opent
+    // alleen met geselecteerde conv). Guard checkt nu alleen op contentEl.
     const contentEl = document.getElementById('inboxCustomerPanelContent');
-    if (!emptyEl || !contentEl) return;
+    if (!contentEl) return;
 
     if (!conversationId) {
       _inboxCustomerContext = null;
