@@ -3330,13 +3330,40 @@
         return;
       }
       wireInboxOnce();
-      loadInboxConvList();
+      loadInboxConvList().then(() => maybeOpenDeepLinkedConversation()).catch(() => {});
       startInboxPolling();
       _inboxInitialized = true;
     } else if (canInboxView) {
       // Re-entry: poll opnieuw starten + verse data.
-      loadInboxConvList();
+      loadInboxConvList().then(() => maybeOpenDeepLinkedConversation()).catch(() => {});
       startInboxPolling();
+    }
+  }
+
+  // Deep-link consumer: zodra de conv-list geladen is, openen we evt. de
+  // conversation uit ?conversation=<uuid> (gebruikt door de Klanten kebab
+  // 'Open inbox-conversatie'-actie). One-shot per pageload: na consumptie
+  // strippen we de param zodat een sub-tab switch geen herhaalde open
+  // triggert.
+  let _inboxDeepLinkConsumed = false;
+  function maybeOpenDeepLinkedConversation() {
+    if (_inboxDeepLinkConsumed) return;
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const convId = params.get('conversation');
+      if (!convId) { _inboxDeepLinkConsumed = true; return; }
+      if (typeof openInboxConv === 'function') {
+        openInboxConv(convId);
+      }
+      _inboxDeepLinkConsumed = true;
+      // Strip param uit URL zonder navigatie.
+      try {
+        const url = new URL(window.location.href);
+        url.searchParams.delete('conversation');
+        window.history.replaceState(null, '', url.toString());
+      } catch (_) {}
+    } catch (_) {
+      _inboxDeepLinkConsumed = true;
     }
   }
 
@@ -11378,6 +11405,8 @@
         const initialSub = params.get('sub');
         if (initialTab === 'wanbetalers') {
           if (initialSub) _wbActiveSub = initialSub;
+          // ?conversation=<uuid> impliciet richten op inbox sub-tab.
+          if (!initialSub && params.get('conversation')) _wbActiveSub = 'inbox';
           setView('wanbetalers');
         } else if (initialTab && ['dashboard','facturen','klanten','camtbank','bank','roadmap'].includes(initialTab)) {
           setView(initialTab);

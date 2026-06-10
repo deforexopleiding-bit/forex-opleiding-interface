@@ -152,6 +152,16 @@
 
       .fk-action-link { color:var(--brand-primary, var(--accent-cyan, #06b6d4)); cursor:pointer; font-size:12.5px; text-decoration:none; padding:4px 8px; border-radius:6px; display:inline-flex; align-items:center; gap:4px; }
       .fk-action-link:hover { background:var(--brand-primary-soft, rgba(6,182,212,.12)); }
+
+      .fk-actions-wrap { display:inline-flex; align-items:center; gap:6px; position:relative; }
+      .fk-kebab { background:transparent; border:1px solid var(--border); border-radius:6px; color:var(--text-dim); cursor:pointer; padding:4px 8px; font-size:14px; line-height:1; }
+      .fk-kebab:hover { background:var(--bg); color:var(--text); }
+      .fk-menu { position:fixed; min-width:220px; background:var(--bg-elev); border:1px solid var(--border); border-radius:8px; box-shadow:0 8px 24px rgba(0,0,0,.25); z-index:1200; padding:4px; display:none; }
+      .fk-menu.open { display:block; }
+      .fk-menu-item { display:flex; align-items:center; gap:8px; padding:8px 10px; font-size:13px; color:var(--text); cursor:pointer; border-radius:6px; text-decoration:none; }
+      .fk-menu-item:hover:not(.disabled) { background:var(--bg); }
+      .fk-menu-item.disabled { color:var(--text-faint); cursor:not-allowed; opacity:.65; }
+      .fk-menu-item i { font-size:14px; }
     `;
     document.head.appendChild(style);
   }
@@ -260,7 +270,12 @@
             + '<td class="num">' + arrCell + '</td>'
             + '<td>' + dunningStatusBadge(it) + '</td>'
             + '<td>' + statusPill + '</td>'
-            + '<td><a class="fk-action-link" href="/modules/klanten.html?id=' + encodeURIComponent(it.id) + '" data-fk-action="dossier"><i class="ti ti-user"></i> Dossier</a></td>'
+            + '<td>'
+            + '  <div class="fk-actions-wrap">'
+            + '    <a class="fk-action-link" href="/modules/klanten.html?id=' + encodeURIComponent(it.id) + '" data-fk-action="dossier"><i class="ti ti-user"></i> Dossier</a>'
+            + '    <button type="button" class="fk-kebab" data-fk-kebab="' + esc(it.id) + '" title="Meer acties" aria-label="Meer acties">&#8942;</button>'
+            + '  </div>'
+            + '</td>'
             + '</tr>';
     }
     tbody.innerHTML = html;
@@ -268,12 +283,131 @@
     // Row-click → klant-dossier (zelfde target als de actie-link).
     tbody.querySelectorAll('tr[data-customer-id]').forEach(tr => {
       tr.addEventListener('click', (e) => {
-        // Negeer kliks op interne actie-links (die regelen zelf navigatie).
+        // Negeer kliks op interne actie-links / kebab-buttons (die regelen zelf navigatie).
         if (e.target.closest('a, button')) return;
         const id = tr.getAttribute('data-customer-id');
         if (id) window.location.href = '/modules/klanten.html?id=' + encodeURIComponent(id);
       });
     });
+
+    // Kebab-knoppen wiring (per row een eigen menu, gemount in body).
+    tbody.querySelectorAll('button[data-fk-kebab]').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const customerId = btn.getAttribute('data-fk-kebab');
+        openKebabMenu(btn, customerId);
+      });
+    });
+  }
+
+  // ── Kebab dropdown (position:fixed, één per keer) ──────────────────────────
+  let _kebabMenuEl = null;
+  let _kebabCloseHandlers = null;
+
+  function closeKebabMenu() {
+    if (_kebabMenuEl) {
+      _kebabMenuEl.remove();
+      _kebabMenuEl = null;
+    }
+    if (_kebabCloseHandlers) {
+      document.removeEventListener('click', _kebabCloseHandlers.docClick, true);
+      window.removeEventListener('scroll', _kebabCloseHandlers.scroll, true);
+      window.removeEventListener('resize', _kebabCloseHandlers.scroll);
+      _kebabCloseHandlers = null;
+    }
+  }
+
+  function openKebabMenu(anchorEl, customerId) {
+    closeKebabMenu();
+    const menu = document.createElement('div');
+    menu.className = 'fk-menu open';
+
+    // Item 1: Dossier (zelfde target als de quick-link, voor symmetrie).
+    const dossierUrl = '/modules/klanten.html?id=' + encodeURIComponent(customerId);
+    const dossierLink = document.createElement('a');
+    dossierLink.className = 'fk-menu-item';
+    dossierLink.href = dossierUrl;
+    dossierLink.innerHTML = '<i class="ti ti-user"></i> Open klant-dossier';
+    dossierLink.addEventListener('click', () => closeKebabMenu());
+    menu.appendChild(dossierLink);
+
+    // Item 2: Open inbox-conversation — async lookup, default disabled tot resolve.
+    const inboxItem = document.createElement('div');
+    inboxItem.className = 'fk-menu-item disabled';
+    inboxItem.innerHTML = '<i class="ti ti-message-circle"></i> Inbox-conversatie laden&hellip;';
+    inboxItem.title = 'Lookup loopt';
+    menu.appendChild(inboxItem);
+
+    document.body.appendChild(menu);
+    _kebabMenuEl = menu;
+
+    // Positie: vlak onder de anchor-button, rechts-uitgelijnd.
+    const rect = anchorEl.getBoundingClientRect();
+    menu.style.top = (rect.bottom + 4) + 'px';
+    // Rechter-rand van menu uitlijnen met rechter-rand van de knop.
+    const menuRect = menu.getBoundingClientRect();
+    let left = rect.right - menuRect.width;
+    if (left < 8) left = 8;
+    menu.style.left = left + 'px';
+
+    // Flip-up als menu onderaan scherm valt.
+    const vh = window.innerHeight;
+    if (rect.bottom + menuRect.height + 8 > vh) {
+      menu.style.top = (rect.top - menuRect.height - 4) + 'px';
+    }
+
+    // Close-handlers: klik buiten / scroll / resize.
+    const docClick = (e) => {
+      if (!menu.contains(e.target)) closeKebabMenu();
+    };
+    const scroll = () => closeKebabMenu();
+    document.addEventListener('click', docClick, true);
+    window.addEventListener('scroll', scroll, true);
+    window.addEventListener('resize', scroll);
+    _kebabCloseHandlers = { docClick, scroll };
+
+    // Async resolve conversation_id via dedicated lightweight endpoint.
+    resolveInboxConversation(customerId).then((conversationId) => {
+      // Menu kan inmiddels gesloten zijn — guard tegen stale closure.
+      if (!_kebabMenuEl || _kebabMenuEl !== menu) return;
+      if (conversationId) {
+        const link = document.createElement('a');
+        link.className = 'fk-menu-item';
+        link.href = '/modules/finance.html?tab=wanbetalers&sub=inbox&conversation=' + encodeURIComponent(conversationId);
+        link.innerHTML = '<i class="ti ti-message-circle"></i> Open inbox-conversatie';
+        link.title = 'Spring naar de Wanbetalers Inbox';
+        link.addEventListener('click', () => closeKebabMenu());
+        menu.replaceChild(link, inboxItem);
+      } else {
+        inboxItem.innerHTML = '<i class="ti ti-message-circle-off"></i> Geen inbox-conversatie';
+        inboxItem.title = 'Geen WhatsApp-conversatie gekoppeld aan deze klant';
+      }
+    }).catch((err) => {
+      if (!_kebabMenuEl || _kebabMenuEl !== menu) return;
+      console.warn('[FinanceKlanten] inbox-lookup fail:', err?.message);
+      inboxItem.innerHTML = '<i class="ti ti-alert-triangle"></i> Inbox-lookup mislukt';
+      inboxItem.title = String(err?.message || 'Onbekende fout');
+    });
+  }
+
+  async function resolveInboxConversation(customerId) {
+    let resp;
+    const url = '/api/inbox-conversation-by-customer?customer_id=' + encodeURIComponent(customerId);
+    if (window.AgentShared && typeof window.AgentShared.apiFetch === 'function') {
+      resp = await window.AgentShared.apiFetch(url);
+    } else {
+      resp = await fetch(url, { credentials: 'include' });
+    }
+    if (!resp.ok) {
+      // 403/500/etc → behandel als not-found in UI (geen toast-spam).
+      if (resp.status === 403) return null;
+      const txt = await resp.text().catch(() => '');
+      throw new Error('HTTP ' + resp.status + ' ' + txt.slice(0, 80));
+    }
+    const data = await resp.json();
+    if (data && data.found && data.conversation_id) return data.conversation_id;
+    return null;
   }
 
   function renderPager() {
