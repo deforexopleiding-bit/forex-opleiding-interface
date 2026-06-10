@@ -40,7 +40,7 @@ In volgorde van push naar `feat/finance-mega-restructure`:
 | 15 | `f761ebf` | refactor(admin) | remove Joost AI tab + handlers (verhuisd naar Finance > Instellingen) |
 | 16 | `3144ad7` | docs(finance) | mark Group D PARTIAL with Joost done + Templates/Connection deep-link TODO |
 | 17 | `538b03d` | docs(finance) | smoke-test doc + roadmap status-update + voor-merge checklist (Group F) |
-| 18 | (Groep F) | docs(finance) | fill commit-17 SHA + PR-readiness instructie |
+| 18 | `fd9f958` | docs(finance) | fill commit-17 SHA + PR-readiness instructie |
 
 ## Doelstructuur (groen licht ontvangen)
 
