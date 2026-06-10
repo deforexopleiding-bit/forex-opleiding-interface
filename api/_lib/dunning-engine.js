@@ -110,6 +110,11 @@ function matchesCustomerType(customer, wanted) {
 /**
  * Fetch open invoices, optionally scoped to one customer_id. Returns rows with
  * embedded customer record (single-query, no N+1).
+ *
+ * D5 auto-pause: invoices die in een ACTIEF payment_arrangement zitten worden
+ * uitgesloten — de dunning-engine mag klanten niet stalken zolang er een
+ * actieve betaalafspraak loopt. Bij VERBROKEN/NAGEKOMEN/GEANNULEERD valt de
+ * factuur vanzelf weer in scope op de volgende cron-run.
  */
 async function fetchOpenInvoices(customerId = null) {
   let q = supabaseAdmin
@@ -121,7 +126,41 @@ async function fetchOpenInvoices(customerId = null) {
   if (customerId) q = q.eq('customer_id', customerId);
   const { data, error } = await q;
   if (error) throw error;
-  return Array.isArray(data) ? data : [];
+  const rows = Array.isArray(data) ? data : [];
+  if (rows.length === 0) return rows;
+
+  // D5 — auto-pause: bouw set van invoice_ids die in een ACTIEF arrangement
+  // zitten (UPPERCASE + legacy lowercase). Filter die invoices weg.
+  try {
+    const activeInvoiceIds = await fetchActiveArrangementInvoiceIds(customerId);
+    if (activeInvoiceIds.size === 0) return rows;
+    return rows.filter((inv) => !activeInvoiceIds.has(inv.id));
+  } catch (e) {
+    // Fail-soft: bij DB-issue logt + valt terug op ongefilterde set (oude
+    // gedrag). Beter doorgaan met onnodige reminder dan een complete cron-stop.
+    console.error('[dunning-engine] arrangement-pause lookup failed, continuing without filter', e?.message);
+    return rows;
+  }
+}
+
+/**
+ * D5 helper: verzamel invoice_ids uit alle ACTIEF payment_arrangements.
+ * Optioneel gescoped per customer_id voor de advance-fase (kleinere query).
+ */
+async function fetchActiveArrangementInvoiceIds(customerId = null) {
+  let q = supabaseAdmin
+    .from('payment_arrangements')
+    .select('invoice_ids, customer_id, status')
+    .in('status', ['ACTIEF', 'actief']);
+  if (customerId) q = q.eq('customer_id', customerId);
+  const { data, error } = await q;
+  if (error) throw error;
+  const set = new Set();
+  for (const row of data || []) {
+    const ids = Array.isArray(row.invoice_ids) ? row.invoice_ids : [];
+    for (const id of ids) if (id) set.add(id);
+  }
+  return set;
 }
 
 /**

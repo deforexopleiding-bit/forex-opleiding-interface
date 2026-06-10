@@ -53,6 +53,10 @@
       "schedule": "0 9 * * *"
     },
     {
+      "path": "/api/cron-arrangements-breach-check",
+      "schedule": "0 6 * * *"
+    },
+    {
       "path": "/api/joost-outbound-scheduler",
       "schedule": "30 8,11,14,17 * * 1-5"
     }
