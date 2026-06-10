@@ -51,6 +51,10 @@
     {
       "path": "/api/cron-dunning-engine",
       "schedule": "0 9 * * *"
+    },
+    {
+      "path": "/api/joost-outbound-scheduler",
+      "schedule": "30 8,11,14,17 * * 1-5"
     }
   ],
   "headers": [
