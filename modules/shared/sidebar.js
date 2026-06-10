@@ -72,18 +72,14 @@
           navLink('follow-up', '/modules/follow-up.html', 'Follow-up') +
           navLink('sales', '/modules/sales.html', 'Sales') +
           navLink('onboarding', '/modules/onboarding-overzicht.html', 'Onboarding') +
-          navLink('finance', '/modules/finance.html', 'Finance') +
-          // F1: Open Acties-module (finance-taken / payment-arrangements approval-queue).
-          // Eigen sidebar-link met badge die /api/tasks-list pollt; klik linkt naar
-          // /modules/open-acties.html?status=PENDING (primaire UX-ingang voor Open acties).
-          // Gate via feature-key finance.tasks.view (zie MODULE_FEATURE_MAP) met
-          // fallback in updateFinanceTasksBadge naar finance.arrangements.view voor
-          // backward-compat met rollen die nog geen finance.tasks.view hebben.
-          // NB: gescheiden van Takenbeheer (data-module="taken" / taken.html), dat is
-          // de oude kanban-takenmodule met /api/taken endpoint.
-          '<a class="nav-item" data-module="finance-tasks" href="/modules/open-acties.html">' +
-            svg('taken') + 'Open Acties' +
-            '<span class="nav-badge" id="navFinanceTasksBadge" data-target="/modules/open-acties.html?status=PENDING" title="Open acties"></span>' +
+          // Finance — Mega-restructure: badge voor Open Acties (F1 finance-taken) hangt
+          // nu inline op de Finance nav-item zelf. Open Acties is verhuisd naar
+          // /modules/finance.html?tab=wanbetalers&sub=open-acties (sub-tab onder Wanbetalers).
+          // Backward-compat: /modules/open-acties.html bestaat nog als thin redirector
+          // (toont melding + auto-redirect na 2s).
+          '<a class="nav-item" data-module="finance" href="/modules/finance.html">' +
+            svg('finance') + 'Finance' +
+            '<span class="nav-badge" id="navFinanceTasksBadge" data-target="/modules/finance.html?tab=wanbetalers&sub=open-acties&status=PENDING" title="Open acties"></span>' +
           '</a>' +
           '<a class="nav-item" data-module="tickets" href="/modules/tickets.html">' + svg('tickets') + 'Tickets<span class="nav-badge" id="navTicketsBadge"></span></a>' +
           // Admin nav-item incl. approval-badge (D1 payment-arrangements). De badge zelf
@@ -122,8 +118,12 @@
     // sales-dashboard.html highlight valt onder Dashboard-link in de sidebar
     if (cur === 'sales-dashboard') cur = 'dashboard';
     if (cur === 'onboarding-overzicht') cur = 'onboarding';
-    // open-acties.html is de F1 finance-taken pagina; nav-item heeft data-module="finance-tasks"
-    if (cur === 'open-acties') cur = 'finance-tasks';
+    // open-acties.html is verhuisd naar Finance > Wanbetalers > Open Acties sub-tab.
+    // Backward-compat: redirector-pagina bestaat nog en highlight onder Finance.
+    if (cur === 'open-acties') cur = 'finance';
+    // wanbetalers.html (legacy) highlight valt onder Finance — die module is volledig
+    // gemigreerd naar finance.html?tab=wanbetalers (mega-restructure).
+    if (cur === 'wanbetalers') cur = 'finance';
     document.querySelectorAll('#sidebar-mount [data-module]').forEach(function (el) {
       el.classList.toggle('active', el.getAttribute('data-module') === cur);
     });
@@ -325,7 +325,9 @@
   }
 
   // Click-handler op de finance-tasks badge: voorkomt dat de outer <a class="nav-item">
-  // dezelfde href (zonder ?status=PENDING) wint. Idempotent via dataset-flag.
+  // dezelfde href (zonder query) wint. Idempotent via dataset-flag.
+  // Target migreerde van /modules/open-acties.html naar
+  // /modules/finance.html?tab=wanbetalers&sub=open-acties&status=PENDING.
   function wireFinanceTasksBadgeClick() {
     var b = document.getElementById('navFinanceTasksBadge');
     if (!b || b.dataset.wired === '1') return;
@@ -333,7 +335,7 @@
     b.addEventListener('click', function (e) {
       e.preventDefault();
       e.stopPropagation();
-      var target = b.getAttribute('data-target') || '/modules/open-acties.html?status=PENDING';
+      var target = b.getAttribute('data-target') || '/modules/finance.html?tab=wanbetalers&sub=open-acties&status=PENDING';
       window.location.href = target;
     });
     b.dataset.wired = '1';
@@ -383,11 +385,10 @@
     'tickets': 'tickets.module.access',
     'sales': 'sales.module.access',
     'finance': 'finance.module.access',
-    // F1: nieuwe Open Acties-module (sidebar data-module="finance-tasks" → routeert naar
-    // /modules/open-acties.html). Gating is fail-open zoals de rest: zonder
-    // finance.tasks.view wordt de sidebar-link verborgen. NB: gescheiden van de oude
-    // Takenbeheer ('taken' → /modules/taken.html) — die heeft eigen taken.module.access gate.
-    'finance-tasks': 'finance.tasks.view',
+    // Open Acties (F1 finance-taken) is verhuisd naar Finance > Wanbetalers > Open Acties
+    // sub-tab — geen eigen sidebar-link meer. Badge hangt nu op de Finance nav-item zelf.
+    // Backward-compat: /modules/open-acties.html bestaat als redirector. RBAC-gating voor
+    // de badge (finance.tasks.view) zit in financeTasksBadgeAllowed() hieronder.
     'admin': 'admin.module.access'
   };
 
