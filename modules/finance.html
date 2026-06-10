@@ -151,11 +151,17 @@
       justify-content: center;
     }
     /* Customer-content wrapper — gebruikt in #inboxCustomerModal body. Container
-       wrapper levert al overflow-y:auto + padding, dus hier geen flex-centering
-       of overflow meer (avatar werd onbedoeld omlaag gepusht door display:flex
-       + flex:1 in een non-flex parent). Selector blijft bestaan voor de scrollbar
-       styling hieronder die nog steeds van toepassing is bij smalle viewport. */
+       wrapper levert al overflow-y:auto + padding, dus hier geen flex:1, overflow
+       of eigen padding meer (dat veroorzaakte witruimte boven avatar in #153).
+       Wél nog display:flex + flex-direction:column + gap voor child-stacking:
+       sommige children (zoals .inbox-c-window-badge-large met align-self:center)
+       rekenen op een flex-parent, en sections hebben gap nodig voor verticale
+       spacing zonder dubbele border-tops te stapelen. Padding blijft 0 zodat
+       avatar direct onder de Klantgegevens-header staat. */
     .inbox-c-customer-content {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
       padding: 0;
     }
     .inbox-c-avatar-large {
