@@ -398,6 +398,9 @@ Lopend op Vercel:
 - /api/backfill-bodies (*/5 min) — body content backfill
 - /api/agent-expire-approvals (0 * * * *) — verloop approvals
 - /api/standup-weekly (maandag 08:00) — wekelijkse standup
+- /api/cron-arrangements-breach-check (0 6 * * *) — D5 dagelijkse breach-detection
+  voor ACTIEF payment_arrangements (UITSTEL/SPLITSING/ABONNEMENT_PAUZE → NAGEKOMEN/VERBROKEN).
+  Zie docs/cleanup-batch-d5-uuid-modal-voorstel.md.
 
 ## Bekende externe systemen (nog niet geïntegreerd)
 - Mollie API — voor betalingen (Aron's payment tools wachten hierop)
@@ -935,3 +938,51 @@ scope-checks na de LLM-output** is het onmogelijk om buiten mandaat te
 treden, ongeacht prompt-engineering of model-keuze. Dezelfde redenering
 geldt voor `communication_limits` (max berichten per dag / cooldown /
 office-hours): het LLM weet er niets van — engine handhaaft het.
+
+## Lessons Learned — D5 breach-detection (10 juni 2026)
+
+Volledige documentatie: [`docs/cleanup-batch-d5-uuid-modal-voorstel.md`](docs/cleanup-batch-d5-uuid-modal-voorstel.md).
+
+### Lesson learned 25 — Type-specifieke breach-logic ipv generieke deadline-kolom
+Bij payment_arrangements wonen de "wanneer is deze afspraak verlopen?"-
+deadlines op **per-type verschillende paths binnen `details` (jsonb)**:
+
+- `UITSTEL` → `details.ends_on` (D1.5 canonical, legacy `new_due_date`).
+- `SPLITSING` → `details.parts[].due_date` (lijst van termijnen, oudste
+  verstreken telt als breach-signaal).
+- `ABONNEMENT_PAUZE` → `details.pause_until`.
+- `ABONNEMENT_STOP` / `KWIJTSCHELDING` → geen deadline; final actions die
+  via mark-executed cascade direct naar NAGEKOMEN gaan.
+
+Daarmee is een **generieke `details.deadline_at`-kolom + één SQL-WHERE-filter
+op `deadline_at < now()` onmogelijk** zonder eerst alle bestaande arrangements
+te migreren naar een gestandaardiseerde shape. We hebben hier bewust voor
+gekozen om de evaluatie in JS te doen (`evaluateArrangement(arr)` met `switch
+(type)` over de upper-case key), en niet over een uniform schema te
+forceren. Voordelen:
+
+1. **Wizard-output blijft semantisch** — `parts[]` voor SPLITSING bevat per
+   termijn een eigen bedrag + due_date + factuur-koppeling. Plat trekken
+   naar één `deadline_at` zou de invariant dat een SPLITSING N termijnen
+   heeft kapot maken voor downstream-readers (TL-mutation cron, UI-detail
+   modal, audit-trail).
+2. **Legacy keys blijven werken** — UITSTEL met `new_due_date` (pre-D1.5)
+   wordt nog door de cron als geldig herkend zonder dat we migrate-scripts
+   moeten draaien. Switch-case heeft een explicit fallback.
+3. **Final-types zijn no-op in de cron** — `ABONNEMENT_STOP` en
+   `KWIJTSCHELDING` returnen `null` uit `evaluateArrangement`, zodat ze
+   stil overgeslagen worden. Geen aparte status-handling nodig in een
+   uniforme query.
+
+Anti-pattern dat we hiermee vermijden: een database-trigger of materialized
+view die "afgeleide deadline_at"-kolom berekent. Dat verschuift de
+type-specifieke logica naar SQL waar het minder leesbaar en niet
+testbaar-met-unit-tests is, en kost een DB-migratie + backfill bij elke
+nieuwe arrangement-type-toevoeging. JS-switch in `api/cron-arrangements-
+breach-check.js` is direct uitbreidbaar: nieuw type = nieuwe `case`, geen
+schema-wijziging.
+
+Bijkomende win: dit pattern dwingt af dat een nieuw arrangement-type bij
+introductie expliciet kiest "heb ik een breach-deadline of niet?". Dat
+voorkomt dat we per ongeluk een type leveren dat in ACTIEF-staat blijft
+hangen omdat niemand de breach-evaluatie heeft bedacht.
