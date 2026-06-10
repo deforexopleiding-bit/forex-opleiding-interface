@@ -682,36 +682,35 @@
       cursor: not-allowed;
     }
 
-    /* ── Joost AI suggesties-panel (E1.0) ─────────────────────────────────── */
-    .inbox-c-joost-panel {
-      border: 1px solid rgba(124, 58, 237, .25);
-      background: rgba(124, 58, 237, .06);
-      border-radius: 8px;
-      padding: 10px 12px;
-      display: flex;
-      flex-direction: column;
-      gap: 10px;
+    /* ── Joost AI suggesties (E1.0) ───────────────────────────────────────── */
+    /* Knop in compose actie-rij (vervangt het oude joostPanel boven compose).
+       Klik opent inboxJoostModal met de volledige suggestion-card UX. */
+    .inbox-joost-btn {
+      position: relative;
     }
-    .inbox-c-joost-panel.collapsed .inbox-c-joost-body { display: none; }
-    .inbox-c-joost-header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      gap: 8px;
+    /* Groene pulserende dot rechts-boven wanneer er een recente auto-suggestion
+       beschikbaar is (E1.1 webhook of conv-open auto-fetch). Reset bij conv-
+       switch en bij use/edit/ignore. */
+    .inbox-joost-btn[data-joost-has-recent="true"]::after {
+      content: '';
+      position: absolute;
+      top: -3px;
+      right: -3px;
+      width: 9px;
+      height: 9px;
+      border-radius: 50%;
+      background: #16a34a;
+      border: 2px solid var(--surface-1, #ffffff);
+      box-shadow: 0 0 0 0 rgba(22, 163, 74, .6);
+      animation: inbox-joost-pulse 1.8s ease-out infinite;
     }
-    .inbox-c-joost-title {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      font-size: 13px;
-      font-weight: 600;
-      color: var(--text-primary, #0f172a);
+    @keyframes inbox-joost-pulse {
+      0%   { box-shadow: 0 0 0 0 rgba(22, 163, 74, .6); }
+      70%  { box-shadow: 0 0 0 6px rgba(22, 163, 74, 0); }
+      100% { box-shadow: 0 0 0 0 rgba(22, 163, 74, 0); }
     }
-    .inbox-c-joost-header-actions {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-    }
+    /* Modal body container — herbergt initiële "Vraag Joost om suggestie" knop
+       OF de gerendered suggestion-card (renderJoostSuggestion → #joostResults). */
     .inbox-c-joost-body {
       display: flex;
       flex-direction: column;
@@ -721,6 +720,23 @@
       font-size: 12px;
       color: var(--text-faint, #94a3b8);
       padding: 4px 0;
+    }
+    /* Centrale "Vraag Joost om suggestie"-CTA wanneer er geen recente suggestion
+       beschikbaar is bij modal-open. Klik → requestJoostSuggestion(). */
+    .inbox-joost-modal-cta {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      padding: 28px 18px;
+      text-align: center;
+    }
+    .inbox-joost-modal-cta-hint {
+      font-size: 12.5px;
+      color: var(--text-faint, #94a3b8);
+      max-width: 380px;
+      line-height: 1.5;
     }
     .inbox-c-joost-loading {
       display: flex;
@@ -1284,27 +1300,8 @@
 
             <!-- Compose area -->
             <div class="inbox-c-compose">
-              <!-- Verlopen-window waarschuwing (alleen zichtbaar buiten 24h) -->
-              <div id="inboxComposeExpiredWarn" hidden style="background:rgba(245,158,11,.10);border:1px solid rgba(245,158,11,.3);border-radius:6px;padding:8px 12px;font-size:12px;color:#f59e0b">
-                <i class="ti ti-clock-exclamation"></i> 24-uurs servicewindow verlopen — gebruik de Template-knop voor een goedgekeurde Meta-template.
-              </div>
-
-              <!-- Joost AI suggesties-panel (E1.0) — alleen zichtbaar bij finance.joost.use -->
-              <div id="joostPanel" class="inbox-c-joost-panel" hidden>
-                <header class="inbox-c-joost-header">
-                  <div class="inbox-c-joost-title">
-                    <i class="ti ti-sparkles" style="color:#7c3aed"></i>
-                    <span>Joost <span style="color:var(--text-faint);font-weight:500">(AI assistent)</span></span>
-                  </div>
-                  <div class="inbox-c-joost-header-actions">
-                    <button class="sr-abtn primary" id="joostSuggestBtn" type="button" disabled title="Eerst gesprek selecteren" style="font-size:12px;padding:6px 10px"><i class="ti ti-wand"></i> Vraag Joost om suggestie</button>
-                    <button class="sr-ibtn" id="joostCollapseBtn" type="button" title="Inklappen"><i class="ti ti-chevron-up" id="joostCollapseIcon"></i></button>
-                  </div>
-                </header>
-                <div class="inbox-c-joost-body" id="joostResults">
-                  <div class="inbox-c-joost-empty">Klik op <strong>Vraag Joost om suggestie</strong> voor een AI-antwoord op basis van de klant en open facturen.</div>
-                </div>
-              </div>
+              <!-- 24-uurs servicewindow banner is verwijderd (de "24h verlopen"-tag
+                   onder de Verstuur-knop geeft visueel voldoende waarschuwing). -->
 
               <!-- Eén textarea voor alle compose-acties -->
               <textarea
@@ -1314,11 +1311,16 @@
                 placeholder="Selecteer eerst een gesprek"
                 disabled></textarea>
 
-              <!-- Actie-rij: links pickers, rechts window-hint + Verstuur -->
+              <!-- Actie-rij: links pickers (incl. Vraag Joost), rechts window-hint + Verstuur -->
               <div class="inbox-c-actions">
                 <div class="inbox-c-actions-left">
                   <button class="sr-abtn" id="inboxTplBtn" type="button" disabled data-disabled-tip="Eerst gesprek selecteren" title="Eerst gesprek selecteren" style="font-size:12px;padding:6px 10px"><i class="ti ti-template"></i> Template</button>
                   <button class="sr-abtn" id="inboxQrBtn" type="button" disabled data-disabled-tip="Eerst gesprek selecteren" title="Eerst gesprek selecteren" style="font-size:12px;padding:6px 10px"><i class="ti ti-message-bolt"></i> Snel antwoord</button>
+                  <!-- Joost AI knop (E1.0) — opent inboxJoostModal met suggestion-card.
+                       Groene pulserende dot rechts-boven wanneer data-joost-has-recent="true"
+                       (recente auto-suggestion uit E1.1 webhook beschikbaar). Hidden tot
+                       finance.joost.use permission via _joostInit() zichtbaar maakt. -->
+                  <button class="sr-abtn inbox-joost-btn" id="inboxJoostBtn" type="button" disabled hidden data-disabled-tip="Eerst gesprek selecteren" title="AI assistent suggesties" style="font-size:12px;padding:6px 10px"><i class="ti ti-sparkles" style="color:#7c3aed"></i> Vraag Joost</button>
                 </div>
                 <div class="inbox-c-actions-right">
                   <span id="inboxComposeWindowHint" class="inbox-c-window-hint" hidden></span>
@@ -2370,6 +2372,36 @@
     <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:18px;flex-wrap:wrap">
       <button class="sr-abtn" id="joostEscCancel" type="button">Annuleren</button>
       <button class="sr-abtn" id="joostEscSubmit" type="button" style="background:#b91c1c;color:#fff;border-color:#991b1b"><i class="ti ti-alert-triangle"></i> Maak escalatie</button>
+    </div>
+  </div>
+</div>
+
+<!-- Joost AI assistent modal (vervangt het oude joostPanel boven compose).
+     Body bevat ofwel de auto-suggested card (uit E1.1 cache, _inboxRecentJoostSuggestion)
+     ofwel een centrale "Vraag Joost om suggestie"-CTA. Render-doel = #joostResults
+     zodat de bestaande _joostRenderCard / _joostShowLoading / _joostShowError flow
+     ongewijzigd werkt — alleen de container is verplaatst van panel → modal. -->
+<div class="modal-overlay hidden" id="inboxJoostModal" role="dialog" aria-modal="true">
+  <div class="modal-card" style="max-width:640px;display:flex;flex-direction:column">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px">
+      <h3 style="margin:0;font-size:17px;display:flex;align-items:center;gap:8px">
+        <i class="ti ti-sparkles" style="color:#7c3aed"></i>
+        Joost <span style="color:var(--text-faint);font-weight:500;font-size:14px">(AI assistent)</span>
+      </h3>
+      <button class="sr-ibtn" id="inboxJoostModalCloseX" type="button" title="Sluiten" style="margin-top:-4px"><i class="ti ti-x"></i></button>
+    </div>
+
+    <div id="inboxJoostModalBody" style="margin-top:14px;min-height:140px">
+      <!-- Body wordt ingevuld door openInboxJoostModal():
+           - Recent _inboxRecentJoostSuggestion → direct #joostResults met card render
+           - Anders → centrale "Vraag Joost om suggestie" knop -->
+      <div class="inbox-c-joost-body" id="joostResults">
+        <div class="inbox-c-joost-empty">Laden…</div>
+      </div>
+    </div>
+
+    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:18px;flex-wrap:wrap">
+      <button class="sr-abtn" id="inboxJoostModalCloseBtn" type="button">Sluiten</button>
     </div>
   </div>
 </div>
@@ -6170,6 +6202,11 @@
       // Compose-state syncen (textarea + knoppen + hint).
       _inboxApplyComposeState();
 
+      // Joost-state resetten bij conv-switch: cache + badge leeg. Auto-load in
+      // loadInboxCustomerContext kan vervolgens een verse recente suggestion
+      // voor déze conv ophalen en de badge weer aanzetten.
+      _joostClearPanel();
+
       // Initial render: forceer scroll naar bottom zodat laatste bericht direct zichtbaar is.
       _inboxRenderMessages({ forceScroll: true });
       // Conv-list opnieuw laden zodat unread_count visueel resetst.
@@ -6198,8 +6235,10 @@
     const qrBtn    = document.getElementById('inboxQrBtn');
     const sendBtn  = document.getElementById('inboxComposeSendBtn');
     const hint     = document.getElementById('inboxComposeWindowHint');
-    const warn     = document.getElementById('inboxComposeExpiredWarn');
-    const joostBtn = document.getElementById('joostSuggestBtn');
+    // De 24-uurs servicewindow banner (inboxComposeExpiredWarn) is verwijderd —
+    // de "24h verlopen"-tag onder de Verstuur-knop geeft visueel voldoende
+    // waarschuwing.
+    const joostBtn = document.getElementById('inboxJoostBtn');
 
     if (!_inboxActiveConvId) {
       // Geen actief gesprek
@@ -6209,8 +6248,7 @@
       if (sendBtn) { sendBtn.disabled = true;  sendBtn.title = 'Eerst gesprek selecteren'; }
       if (joostBtn){ joostBtn.disabled = true; joostBtn.title = 'Eerst gesprek selecteren'; }
       if (hint)    { hint.hidden = true; hint.textContent = ''; hint.classList.remove('open','expired'); }
-      if (warn)    { warn.hidden = true; }
-      // Joost-panel resetten naar empty state bij geen conv
+      // Joost-state resetten naar empty bij geen conv (badge + cache leeg).
       _joostClearPanel();
       return;
     }
@@ -6224,14 +6262,12 @@
       if (qrBtn)   { qrBtn.disabled = false; qrBtn.title = ''; }
       if (sendBtn) { sendBtn.disabled = false; sendBtn.title = 'Versturen (Ctrl+Enter)'; }
       if (hint)    { hint.hidden = false; hint.textContent = '24h open'; hint.classList.remove('expired'); hint.classList.add('open'); }
-      if (warn)    { warn.hidden = true; }
     } else {
       // Window verlopen: alleen templates
       if (ta)      { ta.disabled = true; ta.placeholder = 'Window verlopen — gebruik Template knop'; }
       if (qrBtn)   { qrBtn.disabled = true; qrBtn.title = 'Window verlopen — alleen templates toegestaan'; }
       if (sendBtn) { sendBtn.disabled = true; sendBtn.title = 'Window verlopen — gebruik Template knop'; }
       if (hint)    { hint.hidden = false; hint.textContent = '24h verlopen'; hint.classList.remove('open'); hint.classList.add('expired'); }
-      if (warn)    { warn.hidden = false; }
     }
   }
 
@@ -6329,7 +6365,11 @@
   }
 
   function _joostApplySuggestBtnState() {
-    const btn = document.getElementById('joostSuggestBtn');
+    // De Joost-actie-knop in de compose actie-rij (#inboxJoostBtn) opent het modal.
+    // Disabled-state volgt dezelfde regels als de oude joostSuggestBtn maar zonder
+    // rate-limit (klik opent modal; rate-limit wordt afgedwongen in
+    // requestJoostSuggestion zelf — knop opent altijd het modal, ook tijdens cooldown).
+    const btn = document.getElementById('inboxJoostBtn');
     if (!btn) return;
     if (!_joostCanUse) {
       btn.disabled = true; btn.title = 'Geen rechten (finance.joost.use)';
@@ -6339,17 +6379,27 @@
       btn.disabled = true; btn.title = 'Eerst gesprek selecteren';
       return;
     }
-    if (_joostLastRequestAt && (Date.now() - _joostLastRequestAt) < JOOST_RATE_LIMIT_MS) {
-      const secs = Math.ceil((JOOST_RATE_LIMIT_MS - (Date.now() - _joostLastRequestAt)) / 1000);
-      btn.disabled = true; btn.title = 'Wacht ' + secs + 's voor nieuwe suggestie';
-      return;
+    btn.disabled = false; btn.title = 'AI assistent suggesties';
+  }
+
+  // Update de groene pulserende dot indicator op de #inboxJoostBtn knop.
+  // hasRecent=true wanneer er een auto-suggested PROPOSED suggestion beschikbaar
+  // is (E1.1 webhook of conv-open auto-fetch); reset bij conv-switch en bij
+  // use/edit/ignore zodat de medewerker weet wanneer er nieuws is.
+  function _joostUpdateButtonBadge(hasRecent) {
+    const btn = document.getElementById('inboxJoostBtn');
+    if (!btn) return;
+    if (hasRecent) {
+      btn.setAttribute('data-joost-has-recent', 'true');
+    } else {
+      btn.removeAttribute('data-joost-has-recent');
     }
-    btn.disabled = false; btn.title = 'Genereer een suggestie op basis van klant + facturen';
   }
 
   function _joostClearPanel() {
     _joostCurrentSuggestion = null;
     _joostEditMode = false;
+    _joostUpdateButtonBadge(false);
     const results = document.getElementById('joostResults');
     if (results) {
       results.innerHTML = '<div class="inbox-c-joost-empty">Klik op <strong>Vraag Joost om suggestie</strong> voor een AI-antwoord op basis van de klant en open facturen.</div>';
@@ -6840,32 +6890,64 @@
     }
   }
 
-  function _joostToggleCollapse() {
-    const panel = document.getElementById('joostPanel');
-    const icon  = document.getElementById('joostCollapseIcon');
-    if (!panel) return;
-    const isCollapsed = panel.classList.toggle('collapsed');
-    if (icon) {
-      icon.classList.remove('ti-chevron-up', 'ti-chevron-down');
-      icon.classList.add(isCollapsed ? 'ti-chevron-down' : 'ti-chevron-up');
-    }
-  }
-
-  // Init-helper: gate panel-zichtbaarheid op finance.joost.use permission +
-  // wire de knoppen (collapse + suggest). Wordt aangeroepen vanuit init().
-  function _joostInit(canUse) {
-    _joostCanUse = !!canUse;
-    const panel = document.getElementById('joostPanel');
-    if (!panel) return;
+  // Open de Joost-modal. Body bevat ofwel:
+  //  - de bestaande _joostCurrentSuggestion card (auto-loaded of net gegenereerd)
+  //  - een centrale "Vraag Joost om suggestie"-CTA wanneer er geen recente is.
+  // Modal-render gebruikt #joostResults zodat alle bestaande Joost-flow-functies
+  // (_joostRenderCard / _joostShowLoading / _joostShowError) ongewijzigd werken.
+  function openInboxJoostModal() {
+    const modal = document.getElementById('inboxJoostModal');
+    if (!modal) return;
     if (!_joostCanUse) {
-      panel.hidden = true;
+      window.AgentShared?.showToast('Geen rechten (finance.joost.use)', 'error');
       return;
     }
-    panel.hidden = false;
-    const suggestBtn = document.getElementById('joostSuggestBtn');
-    if (suggestBtn) suggestBtn.addEventListener('click', () => requestJoostSuggestion());
-    const collapseBtn = document.getElementById('joostCollapseBtn');
-    if (collapseBtn) collapseBtn.addEventListener('click', () => _joostToggleCollapse());
+    if (!_inboxActiveConvId) {
+      window.AgentShared?.showToast('Eerst gesprek selecteren', 'error');
+      return;
+    }
+    const results = document.getElementById('joostResults');
+    if (results) {
+      if (_joostCurrentSuggestion) {
+        // Hergebruik bestaande card-render — zelfde DOM-target, andere container.
+        _joostRenderCard(_joostCurrentSuggestion);
+      } else {
+        // Centrale CTA — klik triggert requestJoostSuggestion() flow met spinner.
+        results.innerHTML =
+          '<div class="inbox-joost-modal-cta">' +
+            '<button class="sr-abtn primary" id="inboxJoostModalAskBtn" type="button" style="font-size:13px;padding:8px 14px">' +
+              '<i class="ti ti-wand"></i> Vraag Joost om suggestie' +
+            '</button>' +
+            '<div class="inbox-joost-modal-cta-hint">Genereer een AI-antwoord op basis van de klant + open facturen + laatste berichten.</div>' +
+          '</div>';
+        const askBtn = document.getElementById('inboxJoostModalAskBtn');
+        if (askBtn) askBtn.addEventListener('click', () => requestJoostSuggestion());
+      }
+    }
+    modal.classList.remove('hidden');
+    // Badge mag uit zodra de medewerker de modal heeft geopend (gezien = niet meer "nieuw").
+    _joostUpdateButtonBadge(false);
+  }
+
+  function closeInboxJoostModal() {
+    const modal = document.getElementById('inboxJoostModal');
+    if (modal) modal.classList.add('hidden');
+    // Cache (_joostCurrentSuggestion) blijft intact zodat opnieuw openen
+    // dezelfde suggestie toont. Pas bij use/edit/ignore wordt 'm gewist.
+  }
+
+  // Init-helper: gate knop-zichtbaarheid op finance.joost.use permission +
+  // wire de knop. Wordt aangeroepen vanuit init().
+  function _joostInit(canUse) {
+    _joostCanUse = !!canUse;
+    const btn = document.getElementById('inboxJoostBtn');
+    if (!btn) return;
+    if (!_joostCanUse) {
+      btn.hidden = true;
+      return;
+    }
+    btn.hidden = false;
+    btn.addEventListener('click', () => openInboxJoostModal());
     _joostApplySuggestBtnState();
   }
 
@@ -7232,7 +7314,7 @@
   async function _maybeAutoLoadJoostSuggestion(conversationId) {
     if (!_joostCanUse) return;
     if (!conversationId) return;
-    // Skip als er al een suggestion in beeld is (handmatige flow heeft voorrang).
+    // Skip als er al een suggestion in geheugen is (handmatige flow heeft voorrang).
     if (_joostCurrentSuggestion) return;
     const activeIdAtFetch = conversationId;
     try {
@@ -7247,11 +7329,15 @@
       if (!sugg || !sugg.id) return;
       // Conv-mismatch guard: gebruiker kan tussentijds een andere conv hebben gekozen.
       if (activeIdAtFetch !== _inboxActiveConvId) return;
-      // Race-check: handmatige call kan ondertussen een verse sugg hebben gerendered.
+      // Race-check: handmatige call kan ondertussen een verse sugg in geheugen hebben gezet.
       if (_joostCurrentSuggestion) return;
       sugg.auto_loaded = true;
       _joostCurrentSuggestion = sugg;
-      _joostRenderCard(sugg);
+      // Geen inline render meer — paneel bestaat niet. Toon groene dot op de
+      // "Vraag Joost"-knop om aan te geven dat er iets klaar staat. Bij klik
+      // op de knop opent openInboxJoostModal() en wordt _joostCurrentSuggestion
+      // direct als card gerenderd in #joostResults.
+      _joostUpdateButtonBadge(true);
     } catch (e) {
       console.error('[_maybeAutoLoadJoostSuggestion]', e && e.message);
       // fail-soft
@@ -8435,6 +8521,24 @@
     document.addEventListener('keydown', (e) => {
       if (e.key === 'Escape' && escOverlay && !escOverlay.classList.contains('hidden')) {
         closeJoostEscalationModal();
+      }
+    });
+
+    // Joost AI assistent modal wiring (vervangt het oude joostPanel boven compose).
+    // Sluit-paden: X / Sluiten-knop / backdrop / Escape.
+    const joostModalClose  = document.getElementById('inboxJoostModalCloseX');
+    const joostModalCloseB = document.getElementById('inboxJoostModalCloseBtn');
+    const joostModalOverlay = document.getElementById('inboxJoostModal');
+    if (joostModalClose)  joostModalClose.addEventListener('click', () => closeInboxJoostModal());
+    if (joostModalCloseB) joostModalCloseB.addEventListener('click', () => closeInboxJoostModal());
+    if (joostModalOverlay) {
+      joostModalOverlay.addEventListener('click', (e) => {
+        if (e.target === joostModalOverlay) closeInboxJoostModal();
+      });
+    }
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && joostModalOverlay && !joostModalOverlay.classList.contains('hidden')) {
+        closeInboxJoostModal();
       }
     });
   }
