@@ -250,7 +250,7 @@ export default async function handler(req, res) {
       .from('joost_config')
       .select(
         'module, persona_name, persona_tone, system_prompt_template, knowledge_base, ' +
-        'model, temperature, context_message_count, is_enabled'
+        'model, temperature, context_message_count, is_enabled, autonomy_config'
       )
       .eq('module', resolvedModule)
       .maybeSingle();
@@ -263,7 +263,7 @@ export default async function handler(req, res) {
         .from('joost_config')
         .select(
           'module, persona_name, persona_tone, system_prompt_template, knowledge_base, ' +
-          'model, temperature, context_message_count, is_enabled'
+          'model, temperature, context_message_count, is_enabled, autonomy_config'
         )
         .eq('module', 'finance')
         .maybeSingle();
@@ -401,6 +401,27 @@ export default async function handler(req, res) {
       .reverse()
       .filter(m => typeof m.body === 'string' && m.body.trim().length > 0);
 
+    // E2.4: conversation-state (topics_discussed / last_proposal_made /
+    // messages_sent_today) -- ophalen vóór prompt-bouw zodat Joost weet wat
+    // al langs is en niet steeds in herhaling valt.
+    let convState = null;
+    {
+      const { data: stateRow, error: stateErr } = await supabaseAdmin
+        .from('joost_conversation_state')
+        .select(
+          'topics_discussed, last_proposal_made, messages_sent_today, ' +
+          'messages_sent_today_date, messages_sent_total, last_message_sent_at, ' +
+          'no_reply_streak_count, autonomy_paused_reason, autonomy_paused_until'
+        )
+        .eq('conversation_id', convId)
+        .maybeSingle();
+      if (stateErr) {
+        console.error('[joost-suggest] conversation_state lookup:', stateErr.message);
+      } else if (stateRow) {
+        convState = stateRow;
+      }
+    }
+
     // Afdeling + bedrijf (uit module-context + env)
     const afdeling = {
       naam:           moduleCtx?.display_label || resolvedModule || 'Finance',
@@ -507,6 +528,147 @@ export default async function handler(req, res) {
       }
     }
     ctxLines.push('---');
+
+    // ------------------------------------------------------------------------
+    // E2.4: extra alinea -- Mandate (autonomy_config.arrangement_mandate)
+    //       + Conversation State (joost_conversation_state). Zorgt dat Joost
+    //       niets voorstelt buiten mandaat en niet in herhaling valt.
+    // ------------------------------------------------------------------------
+    const autonomyCfg = (config.autonomy_config && typeof config.autonomy_config === 'object')
+      ? config.autonomy_config : {};
+    const mandate = (autonomyCfg.arrangement_mandate && typeof autonomyCfg.arrangement_mandate === 'object')
+      ? autonomyCfg.arrangement_mandate : {};
+    const uitstelM   = mandate.uitstel   && typeof mandate.uitstel   === 'object' ? mandate.uitstel   : {};
+    const splitsingM = mandate.splitsing && typeof mandate.splitsing === 'object' ? mandate.splitsing : {};
+
+    const uitstelEnabled   = uitstelM.enabled   !== false; // default true tenzij expliciet false
+    const splitsingEnabled = splitsingM.enabled !== false;
+
+    const allowedTypes = [];
+    if (uitstelEnabled)   allowedTypes.push('UITSTEL');
+    if (splitsingEnabled) allowedTypes.push('SPLITSING');
+
+    const maxUitstelDagen = Number.isFinite(Number(uitstelM.max_dagen_total))
+      ? Number(uitstelM.max_dagen_total) : null;
+    const maxTermijnen = Number.isFinite(Number(splitsingM.max_termijnen_total))
+      ? Number(splitsingM.max_termijnen_total) : null;
+    const minEersteTermijnPct = Number.isFinite(Number(splitsingM.min_eerste_termijn_pct))
+      ? Number(splitsingM.min_eerste_termijn_pct) : null;
+
+    // Min/max bedrag-per-termijn ligt niet direct in de mandate-blob; we leiden
+    // hem af uit min_eerste_termijn_pct * totaal_open. Voor de prompt nemen we
+    // het laagste plausibele bedrag per termijn als richtlijn.
+    let minBedragPerTermijn = null;
+    if (minEersteTermijnPct !== null && totalOpen > 0) {
+      minBedragPerTermijn = Math.round(totalOpen * minEersteTermijnPct * 100) / 100;
+    }
+
+    const mandateLines = [];
+    mandateLines.push('MANDAAT (autonomy_config.arrangement_mandate):');
+    if (allowedTypes.length > 0) {
+      mandateLines.push(`Toegestane arrangement-types: ${allowedTypes.join(', ')}`);
+    } else {
+      mandateLines.push('Toegestane arrangement-types: GEEN -- je mag zelf geen arrangement voorstellen.');
+    }
+    if (uitstelEnabled) {
+      mandateLines.push(
+        `UITSTEL: max ${maxUitstelDagen != null ? maxUitstelDagen : '?'} dagen totaal uitstel.`
+      );
+    }
+    if (splitsingEnabled) {
+      const pctStr = minEersteTermijnPct != null
+        ? `${Math.round(minEersteTermijnPct * 100)}%` : '?';
+      const minBedragStr = minBedragPerTermijn != null
+        ? `EUR ${fmtEur(minBedragPerTermijn)}` : 'n.v.t.';
+      mandateLines.push(
+        `SPLITSING: max ${maxTermijnen != null ? maxTermijnen : '?'} termijnen. ` +
+        `Min eerste termijn: ${pctStr} van openstaand bedrag (richtlijn min EUR per termijn: ${minBedragStr}).`
+      );
+    }
+
+    // Range-check: als klant.open_amount buiten min/max range valt, expliciet
+    // melden dat zelf voorstellen verboden is en escalatie nodig is.
+    const rangeRemarks = [];
+    if (totalOpen <= 0) {
+      rangeRemarks.push('Klant heeft geen openstaand bedrag -- zelf voorstellen verboden, verwijs naar mens.');
+    } else {
+      if (splitsingEnabled && minBedragPerTermijn != null && totalOpen < minBedragPerTermijn) {
+        rangeRemarks.push(
+          `Openstaand bedrag (EUR ${fmtEur(totalOpen)}) ligt onder de minimum-termijn ` +
+          `(EUR ${fmtEur(minBedragPerTermijn)}) -- zelf SPLITSING voorstellen verboden.`
+        );
+      }
+      if (uitstelEnabled && maxUitstelDagen != null && maxUitstelDagen <= 0) {
+        rangeRemarks.push('UITSTEL is gedeactiveerd door max_dagen_total=0 -- zelf voorstellen verboden.');
+      }
+    }
+    if (rangeRemarks.length > 0) {
+      mandateLines.push('Range-waarschuwingen:');
+      for (const r of rangeRemarks) mandateLines.push(`  - ${r}`);
+    }
+
+    // ------------------------------------------------------------------------
+    // Conversation State alinea
+    // ------------------------------------------------------------------------
+    const stateLines = [];
+    stateLines.push('GESPREKS-STATE (joost_conversation_state):');
+    if (convState) {
+      const topics = Array.isArray(convState.topics_discussed) ? convState.topics_discussed : [];
+      if (topics.length > 0) {
+        const topicSummaries = topics.slice(0, 10).map(t => {
+          if (typeof t === 'string') return t;
+          if (t && typeof t === 'object') {
+            if (t.topic)  return String(t.topic);
+            if (t.intent) return String(t.intent);
+            if (t.label)  return String(t.label);
+            return JSON.stringify(t).slice(0, 80);
+          }
+          return String(t);
+        });
+        stateLines.push(`Eerdere onderwerpen: ${topicSummaries.join(', ')}`);
+      } else {
+        stateLines.push('Eerdere onderwerpen: nog geen.');
+      }
+
+      // last_proposal_made
+      const lp = convState.last_proposal_made;
+      if (lp && typeof lp === 'object') {
+        const lpType   = lp.type || lp.arrangement_type || 'onbekend';
+        const lpDate   = lp.proposed_at || lp.created_at || null;
+        const lpDetail = lp.details || lp.summary || null;
+        let lpLine = `Laatste arrangement-voorstel: ${lpType}`;
+        if (lpDate) lpLine += ` (op ${lpDate})`;
+        if (lpDetail) {
+          const detStr = typeof lpDetail === 'string' ? lpDetail : JSON.stringify(lpDetail).slice(0, 200);
+          lpLine += ` -- details: ${detStr}`;
+        }
+        stateLines.push(lpLine);
+        stateLines.push('  -> Doe NIET hetzelfde voorstel opnieuw; verwijs ernaar of bied iets anders.');
+      } else {
+        stateLines.push('Laatste arrangement-voorstel: nog geen.');
+      }
+
+      // messages_sent_today
+      const sentToday = Number(convState.messages_sent_today) || 0;
+      const sentDate  = convState.messages_sent_today_date || null;
+      stateLines.push(`Berichten vandaag aan deze klant: ${sentToday}${sentDate ? ` (datum: ${sentDate})` : ''}`);
+
+      if (convState.autonomy_paused_reason) {
+        stateLines.push(`Autonomy gepauzeerd: ${convState.autonomy_paused_reason}`);
+      }
+    } else {
+      stateLines.push('Nog geen state-rij voor deze conversatie -- eerste interactie.');
+    }
+
+    ctxLines.push('');
+    ctxLines.push(...mandateLines);
+    ctxLines.push('');
+    ctxLines.push(...stateLines);
+    ctxLines.push('---');
+    ctxLines.push('BELANGRIJK: Stel NOOIT een arrangement voor buiten het bovenstaande mandaat.');
+    ctxLines.push('Bij twijfel: stel geen arrangement voor maar verwijs naar een medewerker.');
+    ctxLines.push('---');
+
     const fullSystemPrompt = `${systemPrompt}\n\n${ctxLines.join('\n')}`;
 
     // ========================================================================
