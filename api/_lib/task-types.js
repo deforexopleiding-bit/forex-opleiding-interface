@@ -18,6 +18,7 @@
 export const TASK_CATEGORY = {
   arrangement:    'Regelingen',
   verify_payment: 'Betalingsclaims',
+  escalation:     'Escalaties',
   unknown:        'Overig',
 };
 
@@ -33,6 +34,9 @@ export const TASK_ACTION_TYPES = {
 
   // --- F1: handmatige verify-payment task (inbox -> finance) ---
   MANUAL_VERIFY_PAYMENT: 'verify_payment',
+
+  // --- F3: handmatige escalatie-task (inbox/Joost -> finance) ---
+  MANUAL_ESCALATION: 'escalation',
 };
 
 /**
@@ -41,7 +45,7 @@ export const TASK_ACTION_TYPES = {
  * nog steeds rendert (in plaats van te verbergen).
  *
  * @param {string} actionType
- * @returns {'arrangement'|'verify_payment'|'unknown'}
+ * @returns {'arrangement'|'verify_payment'|'escalation'|'unknown'}
  */
 export function getTaskCategoryFor(actionType) {
   if (typeof actionType !== 'string' || !actionType) return 'unknown';
