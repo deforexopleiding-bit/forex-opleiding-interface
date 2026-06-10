@@ -44,6 +44,10 @@
     aging:        null,
     topDebtors:   null,
     arrangements: null,
+    joostIntents: null,
+    tasksByType:  null,
+    cashflow:     null,
+    paymentsMix:  null,
     loading:      false,
     rechartsLoading: false,
     rechartsReady: false,
@@ -256,9 +260,22 @@
           <div class="fd-chart-title">Top 10 grootste openstaande klanten <small id="fdTdMeta">—</small></div>
           <div class="fd-chart-host" id="fdTdHost"><div class="fd-chart-placeholder">Laden…</div></div>
         </div>
-      </div>
-      <div class="fd-todo">
-        Komt later: Joost intent-trend, Open Acties per type, Cashflow 3 maanden, Nieuwe vs herhaal-betalingen.
+        <div class="fd-chart-panel" id="fdChartTasks">
+          <div class="fd-chart-title">Open Acties per type <small id="fdTasksMeta">—</small></div>
+          <div class="fd-chart-host" id="fdTasksHost"><div class="fd-chart-placeholder">Laden…</div></div>
+        </div>
+        <div class="fd-chart-panel" id="fdChartJoost">
+          <div class="fd-chart-title">Joost intents 30 dagen <small id="fdJoostMeta">—</small></div>
+          <div class="fd-chart-host" id="fdJoostHost"><div class="fd-chart-placeholder">Laden…</div></div>
+        </div>
+        <div class="fd-chart-panel wide" id="fdChartCashflow">
+          <div class="fd-chart-title">Cashflow trend (binnenkomend 90d, verwacht 30d) <small id="fdCfMeta">—</small></div>
+          <div class="fd-chart-host" id="fdCfHost"><div class="fd-chart-placeholder">Laden…</div></div>
+        </div>
+        <div class="fd-chart-panel wide" id="fdChartPayments">
+          <div class="fd-chart-title">Nieuwe vs herhaal-betalingen per maand <small id="fdPmMeta">—</small></div>
+          <div class="fd-chart-host" id="fdPmHost"><div class="fd-chart-placeholder">Laden…</div></div>
+        </div>
       </div>
     `;
     document.getElementById('fdPeriod').value = _state.period;
@@ -519,6 +536,246 @@
     }
   }
 
+  // ── Render: Open Acties per type (bar chart C6) ────────────────────────────
+  function renderTasksChart() {
+    const host = document.getElementById('fdTasksHost');
+    const meta = document.getElementById('fdTasksMeta');
+    if (!host) return;
+    const d = _state.tasksByType;
+    if (!d) { host.innerHTML = '<div class="fd-chart-placeholder">Laden…</div>'; return; }
+    const items = Array.isArray(d.items) ? d.items : [];
+    if (meta) meta.textContent = `${fmtInt(d.totalCount)} open · ${fmtInt(items.length)} types`;
+    if (items.length === 0) {
+      host.innerHTML = '<div class="fd-chart-placeholder">Geen open acties.</div>';
+      return;
+    }
+    if (!_state.rechartsReady) {
+      host.innerHTML = `
+        <table class="fd-fallback-table">
+          <thead><tr><th>Type</th><th class="num">Aantal</th></tr></thead>
+          <tbody>${items.map(it => `
+            <tr><td>${esc(it.label)}</td><td class="num">${fmtInt(it.count)}</td></tr>
+          `).join('')}</tbody>
+        </table>
+      `;
+      return;
+    }
+    try {
+      const R = window.Recharts;
+      const React = window.React;
+      const ReactDOM = window.ReactDOM;
+      const data = items.map(it => ({ name: it.label, count: it.count, category: it.category }));
+      host.innerHTML = '';
+      const el = React.createElement(R.ResponsiveContainer, { width: '100%', height: 230 },
+        React.createElement(R.BarChart, { data, margin: { top: 10, right: 12, left: 0, bottom: 30 } },
+          React.createElement(R.CartesianGrid, { strokeDasharray: '3 3', opacity: 0.2 }),
+          React.createElement(R.XAxis, { dataKey: 'name', fontSize: 10, angle: -25, textAnchor: 'end', interval: 0 }),
+          React.createElement(R.YAxis, { fontSize: 11, allowDecimals: false }),
+          React.createElement(R.Tooltip, { formatter: (v) => fmtInt(v) }),
+          React.createElement(R.Bar, { dataKey: 'count', fill: '#10b981', name: 'Aantal' }),
+        ),
+      );
+      ReactDOM.render(el, host);
+    } catch (e) {
+      console.warn('[FinanceDashboard] tasks chart render fail:', e?.message);
+      host.innerHTML = '<div class="fd-chart-placeholder">Chart-fout (zie console).</div>';
+    }
+  }
+
+  // ── Render: Joost intents trend (stacked line C4) ──────────────────────────
+  function renderJoostIntentsChart() {
+    const host = document.getElementById('fdJoostHost');
+    const meta = document.getElementById('fdJoostMeta');
+    if (!host) return;
+    const d = _state.joostIntents;
+    if (!d) { host.innerHTML = '<div class="fd-chart-placeholder">Laden…</div>'; return; }
+    const series = Array.isArray(d.series) ? d.series : [];
+    const dates = Array.isArray(d.dates) ? d.dates : [];
+    if (meta) meta.textContent = `${fmtInt(d.totalCount)} suggesties · ${fmtInt(dates.length)} dagen`;
+    if (!d.totalCount || dates.length === 0) {
+      host.innerHTML = '<div class="fd-chart-placeholder">Nog geen Joost-suggesties in periode.</div>';
+      return;
+    }
+    if (!_state.rechartsReady) {
+      // Fallback: per-intent totaal-tabel.
+      const totals = series.map(s => ({
+        label: s.label,
+        total: (s.points || []).reduce((acc, p) => acc + (p.count || 0), 0),
+      })).sort((a, b) => b.total - a.total);
+      host.innerHTML = `
+        <table class="fd-fallback-table">
+          <thead><tr><th>Intent</th><th class="num">Totaal 30d</th></tr></thead>
+          <tbody>${totals.map(t => `
+            <tr><td>${esc(t.label)}</td><td class="num">${fmtInt(t.total)}</td></tr>
+          `).join('')}</tbody>
+        </table>
+      `;
+      return;
+    }
+    try {
+      const R = window.Recharts;
+      const React = window.React;
+      const ReactDOM = window.ReactDOM;
+      // Flatten naar { date, [intent_label]: count, ... } voor Recharts.
+      const rows = dates.map((date, idx) => {
+        const row = { date };
+        for (const s of series) {
+          row[s.label] = (s.points && s.points[idx]) ? s.points[idx].count : 0;
+        }
+        return row;
+      });
+      const colors = ['#06b6d4', '#a78bfa', '#10b981', '#f59e0b', '#ef4444', '#737580'];
+      host.innerHTML = '';
+      const el = React.createElement(R.ResponsiveContainer, { width: '100%', height: 230 },
+        React.createElement(R.AreaChart, { data: rows, margin: { top: 10, right: 12, left: 0, bottom: 0 } },
+          React.createElement(R.CartesianGrid, { strokeDasharray: '3 3', opacity: 0.2 }),
+          React.createElement(R.XAxis, { dataKey: 'date', fontSize: 10, tickFormatter: v => String(v).slice(5) }),
+          React.createElement(R.YAxis, { fontSize: 11, allowDecimals: false }),
+          React.createElement(R.Tooltip, { formatter: (v) => fmtInt(v) }),
+          React.createElement(R.Legend, { fontSize: 11, iconSize: 8 }),
+          ...series.map((s, i) => React.createElement(R.Area, {
+            key:     s.intent,
+            type:    'monotone',
+            dataKey: s.label,
+            stackId: '1',
+            stroke:  colors[i % colors.length],
+            fill:    colors[i % colors.length],
+            fillOpacity: 0.55,
+          })),
+        ),
+      );
+      ReactDOM.render(el, host);
+    } catch (e) {
+      console.warn('[FinanceDashboard] joost intents chart render fail:', e?.message);
+      host.innerHTML = '<div class="fd-chart-placeholder">Chart-fout (zie console).</div>';
+    }
+  }
+
+  // ── Render: Cashflow trend (line C7) ───────────────────────────────────────
+  function renderCashflowChart() {
+    const host = document.getElementById('fdCfHost');
+    const meta = document.getElementById('fdCfMeta');
+    if (!host) return;
+    const d = _state.cashflow;
+    if (!d) { host.innerHTML = '<div class="fd-chart-placeholder">Laden…</div>'; return; }
+    const incoming = Array.isArray(d.incoming) ? d.incoming : [];
+    const expected = Array.isArray(d.expected) ? d.expected : [];
+    const totals = d.totals || { incoming: 0, expected: 0 };
+    if (meta) meta.textContent = `${fmtEur(totals.incoming)} binnen · ${fmtEur(totals.expected)} verwacht`;
+    if (incoming.length === 0 && expected.length === 0) {
+      host.innerHTML = '<div class="fd-chart-placeholder">Geen cashflow-data.</div>';
+      return;
+    }
+    if (!_state.rechartsReady) {
+      // Fallback: laatste 7 dagen + komende 7 dagen samenvatting.
+      const lastInc = incoming.slice(-7);
+      const nextExp = expected.slice(0, 7);
+      host.innerHTML = `
+        <table class="fd-fallback-table">
+          <thead><tr><th>Periode</th><th>Datum</th><th class="num">Bedrag</th></tr></thead>
+          <tbody>
+            ${lastInc.map(p => `<tr><td>Binnen</td><td>${esc(p.date)}</td><td class="num">${fmtEur(p.amount)}</td></tr>`).join('')}
+            ${nextExp.map(p => `<tr><td>Verwacht</td><td>${esc(p.date)}</td><td class="num">${fmtEur(p.amount)}</td></tr>`).join('')}
+          </tbody>
+        </table>
+      `;
+      return;
+    }
+    try {
+      const R = window.Recharts;
+      const React = window.React;
+      const ReactDOM = window.ReactDOM;
+      // Merge naar single rows { date, incoming, expected }.
+      const byDate = new Map();
+      for (const p of incoming) {
+        byDate.set(p.date, { date: p.date, incoming: p.amount, expected: null });
+      }
+      for (const p of expected) {
+        const r = byDate.get(p.date) || { date: p.date, incoming: null, expected: 0 };
+        r.expected = p.amount;
+        byDate.set(p.date, r);
+      }
+      const rows = Array.from(byDate.values()).sort((a, b) => a.date.localeCompare(b.date));
+      host.innerHTML = '';
+      const el = React.createElement(R.ResponsiveContainer, { width: '100%', height: 260 },
+        React.createElement(R.LineChart, { data: rows, margin: { top: 10, right: 18, left: 0, bottom: 0 } },
+          React.createElement(R.CartesianGrid, { strokeDasharray: '3 3', opacity: 0.2 }),
+          React.createElement(R.XAxis, { dataKey: 'date', fontSize: 10, tickFormatter: v => String(v).slice(5), minTickGap: 18 }),
+          React.createElement(R.YAxis, { fontSize: 11, tickFormatter: v => '€' + Math.round(v) }),
+          React.createElement(R.Tooltip, { formatter: (v) => v == null ? '—' : fmtEur(v) }),
+          React.createElement(R.Legend, { fontSize: 11, iconSize: 8 }),
+          React.createElement(R.Line, { type: 'monotone', dataKey: 'incoming', stroke: '#10b981', strokeWidth: 2, dot: false, name: 'Binnenkomend' }),
+          React.createElement(R.Line, { type: 'monotone', dataKey: 'expected', stroke: '#f59e0b', strokeWidth: 2, strokeDasharray: '4 3', dot: false, name: 'Verwacht' }),
+        ),
+      );
+      ReactDOM.render(el, host);
+    } catch (e) {
+      console.warn('[FinanceDashboard] cashflow chart render fail:', e?.message);
+      host.innerHTML = '<div class="fd-chart-placeholder">Chart-fout (zie console).</div>';
+    }
+  }
+
+  // ── Render: Nieuwe vs herhaal-betalingen (stacked bar C8) ──────────────────
+  function renderPaymentsMixChart() {
+    const host = document.getElementById('fdPmHost');
+    const meta = document.getElementById('fdPmMeta');
+    if (!host) return;
+    const d = _state.paymentsMix;
+    if (!d) { host.innerHTML = '<div class="fd-chart-placeholder">Laden…</div>'; return; }
+    const buckets = Array.isArray(d.buckets) ? d.buckets : [];
+    const totals = d.totals || { firstCount: 0, repeatCount: 0 };
+    if (meta) meta.textContent = `${fmtInt(totals.firstCount)} nieuw · ${fmtInt(totals.repeatCount)} herhaal`;
+    if (buckets.length === 0 || (totals.firstCount === 0 && totals.repeatCount === 0)) {
+      host.innerHTML = '<div class="fd-chart-placeholder">Geen betalingen in periode.</div>';
+      return;
+    }
+    if (!_state.rechartsReady) {
+      host.innerHTML = `
+        <table class="fd-fallback-table">
+          <thead><tr><th>Maand</th><th class="num">Nieuw</th><th class="num">Herhaal</th><th class="num">Nieuw EUR</th><th class="num">Herhaal EUR</th></tr></thead>
+          <tbody>${buckets.map(b => `
+            <tr>
+              <td>${esc(b.month)}</td>
+              <td class="num">${fmtInt(b.firstCount)}</td>
+              <td class="num">${fmtInt(b.repeatCount)}</td>
+              <td class="num">${fmtEur(b.firstAmount)}</td>
+              <td class="num">${fmtEur(b.repeatAmount)}</td>
+            </tr>
+          `).join('')}</tbody>
+        </table>
+      `;
+      return;
+    }
+    try {
+      const R = window.Recharts;
+      const React = window.React;
+      const ReactDOM = window.ReactDOM;
+      const data = buckets.map(b => ({
+        month:        b.month,
+        Nieuw:        b.firstCount,
+        Herhaal:      b.repeatCount,
+        firstAmount:  b.firstAmount,
+        repeatAmount: b.repeatAmount,
+      }));
+      host.innerHTML = '';
+      const el = React.createElement(R.ResponsiveContainer, { width: '100%', height: 260 },
+        React.createElement(R.BarChart, { data, margin: { top: 10, right: 12, left: 0, bottom: 0 } },
+          React.createElement(R.CartesianGrid, { strokeDasharray: '3 3', opacity: 0.2 }),
+          React.createElement(R.XAxis, { dataKey: 'month', fontSize: 11 }),
+          React.createElement(R.YAxis, { fontSize: 11, allowDecimals: false }),
+          React.createElement(R.Tooltip, { formatter: (v) => fmtInt(v) }),
+          React.createElement(R.Legend, { fontSize: 11, iconSize: 8 }),
+          React.createElement(R.Bar, { dataKey: 'Nieuw',   stackId: 'a', fill: '#06b6d4' }),
+          React.createElement(R.Bar, { dataKey: 'Herhaal', stackId: 'a', fill: '#a78bfa' }),
+        ),
+      );
+      ReactDOM.render(el, host);
+    } catch (e) {
+      console.warn('[FinanceDashboard] payments-mix chart render fail:', e?.message);
+      host.innerHTML = '<div class="fd-chart-placeholder">Chart-fout (zie console).</div>';
+    }
+  }
+
   // ── Data fetching ──────────────────────────────────────────────────────────
   async function loadAll(force = false) {
     if (_state.loading) return;
@@ -531,21 +788,30 @@
     _state.aging = null;
     _state.topDebtors = null;
     _state.arrangements = null;
+    _state.joostIntents = null;
+    _state.tasksByType = null;
+    _state.cashflow = null;
+    _state.paymentsMix = null;
     renderKpis();
-    const aHost  = document.getElementById('fdAgingHost'); if (aHost) aHost.innerHTML = '<div class="fd-chart-placeholder">Laden…</div>';
-    const tdHost = document.getElementById('fdTdHost');    if (tdHost) tdHost.innerHTML = '<div class="fd-chart-placeholder">Laden…</div>';
-    const arHost = document.getElementById('fdArrHost');   if (arHost) arHost.innerHTML = '<div class="fd-chart-placeholder">Laden…</div>';
+    const skel = (id) => { const h = document.getElementById(id); if (h) h.innerHTML = '<div class="fd-chart-placeholder">Laden…</div>'; };
+    skel('fdAgingHost'); skel('fdTdHost'); skel('fdArrHost');
+    skel('fdTasksHost'); skel('fdJoostHost'); skel('fdCfHost'); skel('fdPmHost');
 
     try {
       // Start recharts CDN-load parallel met data-calls.
       const rechartsReadyP = loadRechartsOnce();
 
       const q = (s) => `?period=${encodeURIComponent(_state.period)}${force ? '&force=true' : ''}${s ? '&' + s : ''}`;
-      const [countsRes, agingRes, tdRes, arrRes, rechartsOk] = await Promise.allSettled([
+      const f = force ? '?force=true' : '';
+      const [countsRes, agingRes, tdRes, arrRes, tasksRes, joostRes, cfRes, pmRes, rechartsOk] = await Promise.allSettled([
         apiGet('/api/finance-dashboard-counts' + q()),
-        apiGet('/api/finance-dashboard-chart-aging' + (force ? '?force=true' : '')),
-        apiGet('/api/finance-dashboard-chart-top-debtors' + (force ? '?force=true' : '')),
-        apiGet('/api/finance-dashboard-chart-arrangements' + (force ? '?force=true' : '')),
+        apiGet('/api/finance-dashboard-chart-aging' + f),
+        apiGet('/api/finance-dashboard-chart-top-debtors' + f),
+        apiGet('/api/finance-dashboard-chart-arrangements' + f),
+        apiGet('/api/finance-dashboard-chart-tasks' + f),
+        apiGet('/api/finance-dashboard-chart-joost-intents' + f),
+        apiGet('/api/finance-dashboard-chart-cashflow' + f),
+        apiGet('/api/finance-dashboard-chart-payments' + f),
         rechartsReadyP,
       ]);
 
@@ -553,16 +819,28 @@
       _state.aging        = agingRes.status  === 'fulfilled' ? agingRes.value  : null;
       _state.topDebtors   = tdRes.status     === 'fulfilled' ? tdRes.value     : null;
       _state.arrangements = arrRes.status    === 'fulfilled' ? arrRes.value    : null;
+      _state.tasksByType  = tasksRes.status  === 'fulfilled' ? tasksRes.value  : null;
+      _state.joostIntents = joostRes.status  === 'fulfilled' ? joostRes.value  : null;
+      _state.cashflow     = cfRes.status     === 'fulfilled' ? cfRes.value     : null;
+      _state.paymentsMix  = pmRes.status     === 'fulfilled' ? pmRes.value     : null;
 
       if (countsRes.status === 'rejected') console.warn('[FinanceDashboard] counts:', countsRes.reason?.message);
       if (agingRes.status  === 'rejected') console.warn('[FinanceDashboard] aging:',  agingRes.reason?.message);
       if (tdRes.status     === 'rejected') console.warn('[FinanceDashboard] top-debtors:', tdRes.reason?.message);
       if (arrRes.status    === 'rejected') console.warn('[FinanceDashboard] arrangements:', arrRes.reason?.message);
+      if (tasksRes.status  === 'rejected') console.warn('[FinanceDashboard] tasks:', tasksRes.reason?.message);
+      if (joostRes.status  === 'rejected') console.warn('[FinanceDashboard] joost-intents:', joostRes.reason?.message);
+      if (cfRes.status     === 'rejected') console.warn('[FinanceDashboard] cashflow:', cfRes.reason?.message);
+      if (pmRes.status     === 'rejected') console.warn('[FinanceDashboard] payments-mix:', pmRes.reason?.message);
 
       renderKpis();
       renderAgingChart();
       renderArrangementsChart();
       renderTopDebtorsChart();
+      renderTasksChart();
+      renderJoostIntentsChart();
+      renderCashflowChart();
+      renderPaymentsMixChart();
 
       if (_state.counts) {
         try {
