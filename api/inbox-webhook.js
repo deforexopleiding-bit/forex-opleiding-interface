@@ -27,6 +27,7 @@
 import { verifyWebhookSubscription, verifyWebhookSignature } from './_lib/meta-whatsapp.js';
 import { supabaseAdmin } from './supabase.js';
 import { getClientIp } from './_lib/audit-customer.js';
+import { getModuleContextByPhoneNumberId } from './_lib/module-context.js';
 
 // Vercel-eis: bodyParser uit zodat we de raw body kunnen lezen voor HMAC.
 export const config = {
@@ -228,7 +229,10 @@ async function upsertConversation(req, { phoneE164Plus, displayName, inboundTime
 // ── Helpers: message persist ───────────────────────────────────────────────
 /**
  * Insert inbound message, idempotent op meta_wamid UNIQUE constraint.
- * Returnt true bij nieuwe insert, false bij duplicate (Meta retry).
+ * Returnt { inserted, messageId, type, body } — inserted=true bij nieuwe rij,
+ * false bij duplicate (Meta retry). messageId is gevuld bij nieuwe insert,
+ * null bij duplicate. type/body altijd ingevuld voor downstream filtering
+ * (auto-suggest trigger).
  */
 async function insertInboundMessage(conversationId, msg) {
   const wamid = msg.id;
@@ -258,7 +262,7 @@ async function insertInboundMessage(conversationId, msg) {
     ? new Date(parseInt(msg.timestamp, 10) * 1000).toISOString()
     : new Date().toISOString();
 
-  const { error } = await supabaseAdmin
+  const { data: insertedRow, error } = await supabaseAdmin
     .from('whatsapp_messages')
     .insert({
       conversation_id: conversationId,
@@ -270,14 +274,116 @@ async function insertInboundMessage(conversationId, msg) {
       status:          'delivered',  // inbound is per definitie geleverd aan ons
       delivered_at:    tsIso,
       created_at:      tsIso,
-    });
+    })
+    .select('id')
+    .single();
   if (error) {
     // UNIQUE violation op meta_wamid → Meta retry, geen écht probleem
-    if (error.code === '23505') return false;
+    if (error.code === '23505') return { inserted: false, messageId: null, type, body };
     console.error('[inbox-webhook] msg insert fail wamid=' + wamid + ':', error.message);
     throw error;
   }
-  return true;
+  return { inserted: true, messageId: insertedRow?.id || null, type, body };
+}
+
+// ── Helpers: Joost auto-suggest fire-and-forget (E1.1) ─────────────────────
+//
+// Triggert /api/joost-suggest in een non-awaited fetch zodat de webhook
+// binnen het 200-OK budget van Meta blijft (zie comment regel 615:
+// 'ALTIJD 200 — Meta retried bij non-2xx'). Op Vercel Node-runtime is er
+// GEEN ctx.waitUntil() beschikbaar (geen runtime='edge' in deze codebase),
+// dus we vertrouwen op het feit dat Vercel het execution-context typisch
+// warm houdt zolang er open promises zijn — best-effort pattern. Bij
+// lambda-cold-shutdown kan een suggestie soms wegvallen; voor MVP
+// (E1.1) acceptabel.
+//
+// Auth: gebruikt INTERNAL_API_TOKEN env-var als X-Internal-Token header.
+// joost-suggest.js herkent die en skipt de user-JWT + RBAC check; de
+// suggestion wordt opgeslagen met requested_by_user_id=NULL en
+// auto_triggered=true.
+//
+// Anti-loop: caller doet expliciete filter-checks vóór trigger (zie
+// shouldAutoTrigger). Helper is best-effort en cancelt niets zelf.
+
+// Trivial-replies die we niet automatisch laten triggeren — burst-reductie.
+const TRIVIAL_REPLIES = new Set([
+  'ok','okee','oke','ja','nee','top','goed','prima','thx','dank','dankje','dankjewel','klopt',
+]);
+
+/**
+ * Anti-loop check: is er een outbound message in deze conversation binnen
+ * de laatste N seconden? Indien ja → skip auto-suggest (klant antwoordt op
+ * onze net-verzonden message). Default window 60s.
+ *
+ * Returns true als we WEL mogen triggeren (geen recente outbound), false
+ * als we moeten skippen.
+ */
+async function hasNoRecentOutbound(conversationId, windowSec = 60) {
+  try {
+    const since = new Date(Date.now() - windowSec * 1000).toISOString();
+    const { data, error } = await supabaseAdmin
+      .from('whatsapp_messages')
+      .select('id')
+      .eq('conversation_id', conversationId)
+      .eq('direction', 'out')
+      .gte('created_at', since)
+      .limit(1);
+    if (error) {
+      console.warn('[inbox-webhook] anti-loop check fail:', error.message);
+      return true; // fail-open: trigger toch (anders nooit autosuggest bij DB-glitch)
+    }
+    return !(Array.isArray(data) && data.length > 0);
+  } catch (e) {
+    console.warn('[inbox-webhook] anti-loop check exception:', e.message);
+    return true;
+  }
+}
+
+/**
+ * Fire-and-forget HTTP self-call naar /api/joost-suggest. NIET awaited
+ * door caller — gebruikt .catch() om unhandled rejections af te vangen.
+ *
+ * Auth: X-Internal-Token header met process.env.INTERNAL_API_TOKEN.
+ * joost-suggest.js (auth-blok regel 138-146) skipt user-JWT + RBAC bij
+ * deze header-match.
+ *
+ * URL: VERCEL_URL > APP_BASE_URL > http://localhost:3000. VERCEL_URL
+ * is automatisch geset op alle Vercel deploys (preview + production).
+ */
+function triggerJoostAutoSuggest({ conversationId, triggeredByMessageId }) {
+  const token = process.env.INTERNAL_API_TOKEN;
+  if (!token) {
+    console.warn('[inbox-webhook] joost auto-trigger skipped: INTERNAL_API_TOKEN ontbreekt');
+    return;
+  }
+  const base = process.env.VERCEL_URL
+    ? `https://${process.env.VERCEL_URL}`
+    : (process.env.APP_BASE_URL || 'http://localhost:3000');
+  const url = `${base}/api/joost-suggest`;
+
+  // Fire-and-forget: NIET awaited. Vercel Node-runtime houdt context warm
+  // zolang er open promises zijn, maar geeft geen voltooiings-garantie na
+  // res.json(). Best-effort; bij occasionally-dropped suggestion is dat
+  // acceptabel voor MVP (E1.1).
+  fetch(url, {
+    method:  'POST',
+    headers: {
+      'content-type':     'application/json',
+      'x-internal-token': token,
+    },
+    body: JSON.stringify({
+      conversation_id:         conversationId,
+      triggered_by_message_id: triggeredByMessageId || null,
+      auto_triggered:          true,
+    }),
+  }).then(async (resp) => {
+    if (!resp.ok) {
+      const txt = await resp.text().catch(() => '');
+      console.warn(`[inbox-webhook] joost auto-trigger HTTP ${resp.status}: ${txt.slice(0, 200)}`);
+    }
+  }).catch((e) => {
+    console.warn('[inbox-webhook] joost auto-trigger fetch fail:', e && e.message);
+  });
 }
 
 /**
@@ -585,9 +691,57 @@ export default async function handler(req, res) {
               });
 
               // 2. Insert message
-              const inserted = await insertInboundMessage(conv.id, msg);
-              if (inserted) stats.msgs_new++;
-              else          stats.msgs_dup++;
+              const insRes = await insertInboundMessage(conv.id, msg);
+              if (insRes.inserted) stats.msgs_new++;
+              else                 stats.msgs_dup++;
+
+              // 3. E1.1 Joost auto-suggest trigger (fire-and-forget)
+              // Filters (alle moeten waar zijn):
+              //   a) Nieuwe insert (geen Meta-retry)
+              //   b) text-type message (skip media/system/template-button)
+              //   c) body >= 5 chars + niet in TRIVIAL_REPLIES set
+              //   d) conversation heeft customer_id (gekoppeld aan klant)
+              //   e) module van ontvangende lijn == finance (E1.1 scope)
+              //   f) joost_config.is_enabled = true voor finance
+              //   g) anti-loop: geen outbound binnen 60s (klant antwoordt
+              //      niet op onze eigen recent-verzonden message)
+              //
+              // Auth: helper gebruikt X-Internal-Token header; joost-suggest
+              // skipt user-JWT + RBAC bij die header-match en zet
+              // requested_by_user_id=NULL + auto_triggered=true.
+              try {
+                if (insRes.inserted && insRes.messageId && insRes.type === 'text' && conv.customerId) {
+                  const trimmed = String(insRes.body || '').trim();
+                  const lower = trimmed.toLowerCase();
+                  const isTriggerable = trimmed.length >= 5 && !TRIVIAL_REPLIES.has(lower);
+                  if (isTriggerable) {
+                    // Module + joost_config checks server-side (1 lookup-set).
+                    const moduleCtx = await getModuleContextByPhoneNumberId(supabaseAdmin, recvPhoneNumberId);
+                    const resolvedModule = moduleCtx?.module || 'finance';
+                    if (resolvedModule === 'finance') {
+                      const { data: jcfg, error: jcfgErr } = await supabaseAdmin
+                        .from('joost_config')
+                        .select('module, is_enabled')
+                        .eq('module', 'finance')
+                        .maybeSingle();
+                      if (jcfgErr) {
+                        console.warn('[inbox-webhook] joost_config lookup fail:', jcfgErr.message);
+                      } else if (jcfg && jcfg.is_enabled === true) {
+                        const noLoop = await hasNoRecentOutbound(conv.id, 60);
+                        if (noLoop) {
+                          triggerJoostAutoSuggest({
+                            conversationId:        conv.id,
+                            triggeredByMessageId:  insRes.messageId,
+                          });
+                        }
+                      }
+                    }
+                  }
+                }
+              } catch (eAuto) {
+                // Auto-trigger mag NOOIT de webhook breken — log + door
+                console.warn('[inbox-webhook] joost auto-trigger pre-check fail:', eAuto && eAuto.message);
+              }
             } catch (e) {
               stats.errors++;
               console.error('[inbox-webhook] msg processing fail wamid=' + (msg.id || '?') + ':', e.message);

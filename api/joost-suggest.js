@@ -24,12 +24,24 @@
 // Body:
 //   {
 //     conversation_id:           uuid (verplicht),
-//     triggered_by_message_id:   uuid (optioneel — meestal de laatste inbound)
+//     triggered_by_message_id:   uuid (optioneel — meestal de laatste inbound),
+//     auto_triggered:            boolean (optioneel; default false) — markeert
+//                                rij als E1.1 webhook-triggered i.p.v. handmatige
+//                                'Vraag Joost'-klik. Wordt opgeslagen op
+//                                joost_suggestions.auto_triggered.
 //   }
+//
+// Headers:
+//   Authorization: Bearer <supabase-jwt>  — normale user-call (handmatig).
+//   X-Internal-Token: <INTERNAL_API_TOKEN> — interne system-call vanuit
+//                                            inbox-webhook (E1.1 auto-suggest).
+//                                            Skipt user-JWT + RBAC; insert
+//                                            krijgt requested_by_user_id=NULL.
 //
 // Error responses:
 //   400  conversation_id ontbreekt / ongeldige uuid
-//   401  geen sessie
+//   401  geen sessie (alleen bij user-call zonder geldige Bearer + zonder
+//        geldige X-Internal-Token)
 //   403  geen finance.joost.use rechten
 //   404  conversation niet gevonden
 //   429  rate-limit (vorige suggestie < 30s oud)
@@ -136,13 +148,35 @@ export default async function handler(req, res) {
   }
 
   // ---- Auth ----
-  const userClient = createUserClient(req);
-  const { data: { user }, error: userErr } = await userClient.auth.getUser();
-  if (userErr || !user) return res.status(401).json({ error: 'Niet geauthenticeerd' });
+  // Twee paden:
+  //   (a) X-Internal-Token header == process.env.INTERNAL_API_TOKEN
+  //       → system-triggered (inbox-webhook E1.1 auto-suggest). Skip
+  //         user-JWT + RBAC. requested_by_user_id wordt NULL.
+  //   (b) Anders: normale Bearer-JWT + finance.joost.use permission-check.
+  const internalTokenHeader = req.headers['x-internal-token'] || req.headers['X-Internal-Token'] || null;
+  const expectedInternalToken = process.env.INTERNAL_API_TOKEN || null;
+  const isInternalCall = !!(
+    internalTokenHeader &&
+    expectedInternalToken &&
+    typeof internalTokenHeader === 'string' &&
+    internalTokenHeader === expectedInternalToken
+  );
 
-  // ---- Permission (strict: finance.joost.use) ----
-  if (!(await requirePermission(req, 'finance.joost.use'))) {
-    return res.status(403).json({ error: 'Geen rechten (finance.joost.use)' });
+  let user = null;
+  if (isInternalCall) {
+    // System-pad: geen user. Insert gebruikt requested_by_user_id=NULL.
+    // RBAC wordt geskipt; vertrouwens-grens is INTERNAL_API_TOKEN (alleen
+    // bekend op server-side env-vars).
+  } else {
+    const userClient = createUserClient(req);
+    const { data: { user: u }, error: userErr } = await userClient.auth.getUser();
+    if (userErr || !u) return res.status(401).json({ error: 'Niet geauthenticeerd' });
+    user = u;
+
+    // ---- Permission (strict: finance.joost.use) ----
+    if (!(await requirePermission(req, 'finance.joost.use'))) {
+      return res.status(403).json({ error: 'Geen rechten (finance.joost.use)' });
+    }
   }
 
   // ---- Body parsen ----
@@ -157,6 +191,10 @@ export default async function handler(req, res) {
   if (triggeredById && !isUuid(triggeredById)) {
     return res.status(400).json({ error: 'triggered_by_message_id moet geldige uuid zijn' });
   }
+
+  // E1.1: auto_triggered discriminator (default false). Webhook-self-call zet true,
+  // handmatige 'Vraag Joost'-knop laat default staan.
+  const autoTriggered = body.auto_triggered === true;
 
   try {
     // ========================================================================
@@ -579,7 +617,8 @@ export default async function handler(req, res) {
       reasoning,
       context_snapshot:         contextSnapshot,
       status:                   'PROPOSED',
-      requested_by_user_id:     user.id,
+      requested_by_user_id:     user ? user.id : null,
+      auto_triggered:           autoTriggered,
     };
 
     const { data: sugg, error: insErr } = await supabaseAdmin
@@ -592,8 +631,8 @@ export default async function handler(req, res) {
     // ---- Audit-log (fail-soft) ----
     try {
       await supabaseAdmin.from('audit_log').insert({
-        user_id:     user.id,
-        action:      'joost.suggestion.generated',
+        user_id:     user ? user.id : null,
+        action:      autoTriggered ? 'joost.suggestion.auto_generated' : 'joost.suggestion.generated',
         entity_type: 'whatsapp_conversation',
         entity_id:   convId,
         after_json:  {
@@ -604,6 +643,8 @@ export default async function handler(req, res) {
           detected_intent:  detectedIntent,
           confidence,
           messages_in_ctx:  anthropicMessages.length,
+          auto_triggered:   autoTriggered,
+          triggered_by:     autoTriggered ? 'inbox_webhook' : 'user_click',
         },
         reason_text: lastInbound ? String(lastInbound.body).slice(0, 500) : null,
         ip_address:  getClientIp(req),
