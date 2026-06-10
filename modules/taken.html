@@ -110,7 +110,12 @@
     .nav-item:hover { background: var(--nav-item-hover); color: var(--text); }
     .nav-item.active { background: var(--nav-item-active); color: var(--nav-item-active-text); }
     .nav-item.concept { opacity: 0.45; pointer-events: none; }
-    .nav-item svg { flex-shrink: 0; }
+    .nav-item.nav-concept { color: var(--text-faint); cursor: default; opacity: .65; }
+    /* Sidebar SVG-icons: shared sidebar.js rendert <svg class="nav-icon"> zonder
+       inline width/height; size komt normaal uit modules/shared/agent-shared.css.
+       taken.html laadt die CSS niet, dus zonder onderstaande regel renderen
+       browsers het SVG op default (~300px) en wordt de hele sidebar verstoord. */
+    .nav-item svg, .nav-icon { width: 15px; height: 15px; flex-shrink: 0; }
     .nav-badge {
       margin-left: auto;
       background: var(--red);
@@ -120,6 +125,8 @@
       border-radius: 8px;
       line-height: 1.6;
     }
+    .nav-badge:empty { display: none; }
+    .nav-soon { margin-left: auto; font-size: 9px; font-weight: 600; color: var(--text-faint); background: var(--nav-item-hover); border-radius: 4px; padding: 1px 5px; }
     .nav-section {
       font-size: 10px; font-weight: 600;
       color: var(--text-faint);
