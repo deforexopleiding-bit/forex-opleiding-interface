@@ -28,10 +28,30 @@
 //   afgehandeld, alleen met negatieve uitkomst). Voor "kan niet verifieren /
 //   nog niet duidelijk" gebruik mark-not-executed (-> FAILED).
 //
-// State-machine: alleen vanuit status='APPROVED' kan handmatig op EXECUTED gezet
-// worden; anders 409 met huidige status. APPROVED is de uitkomst van de
-// approval-flow; EXECUTED is de uitkomst van handmatige verwerking door admin
-// (D1.6 — D2 vervangt dit later door auto-executor cron).
+// Body voor MANUAL_ESCALATION (Finance Inbox escalatie, F3):
+//   {
+//     id: uuid (required),
+//     execution_result: {
+//       outcome:        'resolved' | 'handed_over' | 'ongoing' (required),
+//       handed_over_to?: string  (optioneel, max 200 chars — naam/email van overdracht;
+//                                 zinvol bij outcome=handed_over),
+//       manual_notes:    string  (min 10 chars, required)
+//     }
+//   }
+//   Semantiek: MANUAL_ESCALATION rows starten in status=PENDING (escalation IS de
+//   task; geen approval-stap). De uitkomst bepaalt of de taak afgesloten wordt:
+//     - resolved     : escalation is opgelost -> status PENDING -> EXECUTED.
+//     - handed_over  : doorgegeven aan extern persoon (advocaat/incasso) -> EXECUTED.
+//     - ongoing      : voortgang loggen, taak BLIJFT in PENDING. execution_result
+//                      krijgt een progress_log[]-entry appended. Eindigen-flow moet
+//                      later alsnog via resolved of handed_over.
+//
+// State-machine:
+//   - TL_*  + MANUAL_VERIFY_PAYMENT : alleen vanuit APPROVED -> EXECUTED.
+//   - MANUAL_ESCALATION             : alleen vanuit PENDING. Bij outcome=ongoing
+//                                     blijft status=PENDING; bij resolved /
+//                                     handed_over wordt PENDING -> EXECUTED.
+//   Andere statussen -> 409 met huidige status.
 //
 // Cascade naar payment_arrangements:
 //   Na succesvolle EXECUTED-update: tel pending_actions per arrangement_id.
@@ -62,6 +82,15 @@ const MANUAL_VERIFY_OUTCOMES = new Set([
   'confirmed_paid',
   'not_found_in_bank',
   'klant_misvatting',
+]);
+
+// MANUAL_ESCALATION (F3) outcome-enum.
+// - resolved / handed_over: PENDING -> EXECUTED (taak afgesloten).
+// - ongoing               : PENDING blijft PENDING, alleen progress_log appended.
+const MANUAL_ESCALATION_OUTCOMES = new Set([
+  'resolved',
+  'handed_over',
+  'ongoing',
 ]);
 
 function isStringArray(x) {
@@ -108,9 +137,13 @@ export default async function handler(req, res) {
     if (lookupErr) throw new Error('lookup: ' + lookupErr.message);
     if (!row)      return res.status(404).json({ error: 'Pending action niet gevonden' });
 
-    if (row.status !== 'APPROVED') {
+    // State-machine guard: MANUAL_ESCALATION start in PENDING (geen approve-stap),
+    // andere action_types vereisen APPROVED.
+    const isEscalation = row.action_type === 'MANUAL_ESCALATION';
+    const requiredStatus = isEscalation ? 'PENDING' : 'APPROVED';
+    if (row.status !== requiredStatus) {
       return res.status(409).json({
-        error: `Action is niet in APPROVED state (huidige status: ${row.status})`,
+        error: `Action is niet in ${requiredStatus} state (huidige status: ${row.status})`,
       });
     }
 
@@ -120,7 +153,33 @@ export default async function handler(req, res) {
       manual_notes: manualNotes,
     };
 
-    if (row.action_type === 'MANUAL_VERIFY_PAYMENT') {
+    // Escalation-specifieke vlag die de UPDATE-fase straks gebruikt om tussen
+    // 'ongoing' (PENDING blijft) en terminal-outcomes (-> EXECUTED) te kiezen.
+    let escalationOutcome = null;        // 'resolved' | 'handed_over' | 'ongoing'
+
+    if (row.action_type === 'MANUAL_ESCALATION') {
+      // F3 — Escalation outcome bepaalt of de taak afgesloten of doorlopend is.
+      const outcome = typeof er.outcome === 'string' ? er.outcome.trim() : '';
+      if (!MANUAL_ESCALATION_OUTCOMES.has(outcome)) {
+        return res.status(400).json({
+          error: 'execution_result.outcome vereist (resolved | handed_over | ongoing)',
+        });
+      }
+      escalationOutcome = outcome;
+      cleanExecutionResult.outcome = outcome;
+
+      if (er.handed_over_to != null) {
+        const handedOverTo = String(er.handed_over_to).trim();
+        if (handedOverTo.length > 200) {
+          return res.status(400).json({
+            error: 'execution_result.handed_over_to mag max 200 karakters bevatten',
+          });
+        }
+        if (handedOverTo.length > 0) {
+          cleanExecutionResult.handed_over_to = handedOverTo;
+        }
+      }
+    } else if (row.action_type === 'MANUAL_VERIFY_PAYMENT') {
       // F1 — Klant-claimt-betaald (Inbox) wordt door admin handmatig in CAMT
       // gecheckt. Uitkomst-enum bepaalt of de claim klopt.
       const outcome = typeof er.outcome === 'string' ? er.outcome.trim() : '';
@@ -177,34 +236,80 @@ export default async function handler(req, res) {
     const existingResult = (row.execution_result && typeof row.execution_result === 'object')
       ? row.execution_result
       : {};
-    const mergedResult = {
-      ...existingResult,
-      ...cleanExecutionResult,
-      executed_by_user_id: userId,
-      marked_manually_at: nowIso,
-    };
 
-    // ---- UPDATE pending_actions -> EXECUTED ----
+    // Determine effective status + executed-timestamps voor de UPDATE.
+    // - MANUAL_ESCALATION + ongoing : status BLIJFT PENDING, geen executed_at/by;
+    //                                  outcome wordt geappend aan progress_log[].
+    // - MANUAL_ESCALATION + terminal: PENDING -> EXECUTED met executed_at/by.
+    // - andere action_types         : APPROVED -> EXECUTED met executed_at/by.
+    const isOngoingEscalation = isEscalation && escalationOutcome === 'ongoing';
+
+    // Voor 'ongoing': bouw progress_log entry en append aan bestaande array
+    // zonder de outcome-property in mergedResult te zetten (anders raken we
+    // de progress-historie kwijt bij volgende ongoing-update).
+    let mergedResult;
+    if (isOngoingEscalation) {
+      const existingLog = Array.isArray(existingResult.progress_log) ? existingResult.progress_log : [];
+      const progressEntry = {
+        at:               nowIso,
+        outcome:          'ongoing',
+        manual_notes:     manualNotes,
+        logged_by_user_id: userId,
+      };
+      // handed_over_to op een ongoing-event is ongebruikelijk maar wel toegestaan
+      // (bv. admin noteert tussentijdse overdracht voor sparring) -> meenemen.
+      if (cleanExecutionResult.handed_over_to) {
+        progressEntry.handed_over_to = cleanExecutionResult.handed_over_to;
+      }
+      mergedResult = {
+        ...existingResult,
+        progress_log:       [...existingLog, progressEntry],
+        last_progress_at:   nowIso,
+        last_outcome:       'ongoing',
+        marked_manually_at: nowIso,
+      };
+    } else {
+      mergedResult = {
+        ...existingResult,
+        ...cleanExecutionResult,
+        executed_by_user_id: userId,
+        marked_manually_at: nowIso,
+      };
+    }
+
+    // ---- UPDATE pending_actions ----
+    // Concurrency-guard op de huidige source-status (APPROVED of PENDING).
+    const updatePayload = isOngoingEscalation
+      ? {
+          // Ongoing-escalation: status onveranderd (PENDING), alleen result + updated_at.
+          execution_result: mergedResult,
+          updated_at:       nowIso,
+        }
+      : {
+          // Normaal terminal-pad: -> EXECUTED met executed_at/by.
+          status:              'EXECUTED',
+          executed_at:         nowIso,
+          executed_by_user_id: userId,
+          execution_result:    mergedResult,
+          updated_at:          nowIso,
+        };
+
     const { data: updated, error: updErr } = await supabaseAdmin
       .from('pending_actions')
-      .update({
-        status:              'EXECUTED',
-        executed_at:         nowIso,
-        executed_by_user_id: userId,
-        execution_result:    mergedResult,
-        updated_at:          nowIso,
-      })
+      .update(updatePayload)
       .eq('id', id)
-      .eq('status', 'APPROVED')   // optimistic concurrency
+      .eq('status', requiredStatus)   // optimistic concurrency op source-status
       .select('id, status, executed_at, executed_by_user_id, execution_result, arrangement_id, updated_at')
       .single();
     if (updErr) throw new Error('update: ' + updErr.message);
 
     // ---- Cascade naar payment_arrangements (fail-soft) ----
+    // Escalations hebben arrangement_id=NULL en raken dus geen arrangement; skip.
+    // Ongoing-escalations zijn ook geen state-transitie -> niets te cascaderen.
     let arrangementStatusUpdated = false;
     let arrangementIdForResponse = updated.arrangement_id || row.arrangement_id || null;
 
-    if (arrangementIdForResponse) {
+    if (arrangementIdForResponse && !isOngoingEscalation) {
       try {
         // Tel alle pending_actions voor dit arrangement per status.
         const { data: siblings, error: sibErr } = await supabaseAdmin
@@ -242,21 +347,29 @@ export default async function handler(req, res) {
       }
     }
 
+    // Effectieve nieuwe status na UPDATE: ongoing-escalation blijft PENDING,
+    // alle andere paden eindigen op EXECUTED.
+    const newStatus = isOngoingEscalation ? 'PENDING' : 'EXECUTED';
+    const auditAction = isOngoingEscalation
+      ? 'pending_action.escalation_progress_logged'
+      : 'pending_action.manually_executed';
+
     // ---- Audit-log (fail-soft) ----
     try {
       await supabaseAdmin.from('audit_log').insert({
         user_id:     userId,
-        action:      'pending_action.manually_executed',
+        action:      auditAction,
         entity_type: 'pending_action',
         entity_id:   id,
         after_json:  {
           pending_action_id: id,
-          status:            'EXECUTED',
+          status:            newStatus,
           action_type:       row.action_type,
           customer_id:       row.customer_id,
           arrangement_id:    arrangementIdForResponse,
           execution_result:  mergedResult,
           arrangement_status_updated: arrangementStatusUpdated,
+          escalation_outcome: escalationOutcome,   // null voor niet-escalation
         },
         ip_address:  getClientIp(req),
       });
@@ -264,9 +377,10 @@ export default async function handler(req, res) {
 
     return res.status(200).json({
       id:                          updated.id,
-      status:                      'EXECUTED',
+      status:                      newStatus,
       arrangement_status_updated:  arrangementStatusUpdated,
       arrangement_id:              arrangementIdForResponse,
+      escalation_outcome:          escalationOutcome,   // null voor niet-escalation
     });
   } catch (e) {
     console.error('[pending-actions-mark-executed]', e.message);
