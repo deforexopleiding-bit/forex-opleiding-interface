@@ -150,13 +150,13 @@
       align-items: center;
       justify-content: center;
     }
+    /* Customer-content wrapper — gebruikt in #inboxCustomerModal body. Container
+       wrapper levert al overflow-y:auto + padding, dus hier geen flex-centering
+       of overflow meer (avatar werd onbedoeld omlaag gepusht door display:flex
+       + flex:1 in een non-flex parent). Selector blijft bestaan voor de scrollbar
+       styling hieronder die nog steeds van toepassing is bij smalle viewport. */
     .inbox-c-customer-content {
-      flex: 1;
-      overflow-y: auto;
-      padding: 18px 16px;
-      display: flex;
-      flex-direction: column;
-      gap: 6px;
+      padding: 0;
     }
     .inbox-c-avatar-large {
       width: 80px;
@@ -2278,9 +2278,9 @@
          conv). Verwijderd in PR #151 polish — toonde anders een placeholder
          "Selecteer een gesprek om klant-info te zien" + witruimte boven echte
          content bij klik op klantnaam in chat-header. -->
-    <div style="flex:1;min-height:0;overflow-y:auto;padding:6px 22px 4px">
+    <div style="flex:1;min-height:0;overflow-y:auto;padding:0 22px 4px">
       <!-- Skeleton tijdens load -->
-      <div class="inbox-c-customer-content" id="inboxCustomerPanelSkeleton" hidden style="padding:8px 0">
+      <div class="inbox-c-customer-content" id="inboxCustomerPanelSkeleton" hidden style="padding:0">
         <div class="inbox-c-skel-bubble" style="width:80px;height:80px;border-radius:50%;margin:4px auto 12px"></div>
         <div class="inbox-c-skel-line w70" style="margin:0 auto 6px;height:14px"></div>
         <div class="inbox-c-skel-line w50" style="margin:0 auto 16px"></div>
@@ -2289,7 +2289,7 @@
         <div class="inbox-c-skel-line w50"></div>
       </div>
       <!-- Content -->
-      <div class="inbox-c-customer-content" id="inboxCustomerPanelContent" hidden style="padding:8px 0">
+      <div class="inbox-c-customer-content" id="inboxCustomerPanelContent" hidden style="padding:0">
         <div class="inbox-c-avatar-large" id="inboxCustPanelAvatar" style="background:hsl(210,55%,42%)">?</div>
         <h3 class="inbox-c-customer-name" id="inboxCustPanelName">—</h3>
         <div class="inbox-c-customer-phone" id="inboxCustPanelPhone">—</div>
