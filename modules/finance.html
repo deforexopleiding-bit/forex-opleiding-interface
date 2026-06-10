@@ -727,6 +727,23 @@
     .joost-intent-badge.escalation_needed { background: rgba(239, 68, 68, .18); color: #b91c1c; }
     .joost-intent-badge.general_question  { background: rgba(148, 163, 184, .18); color: #475569; }
     .joost-intent-badge.other             { background: rgba(148, 163, 184, .18); color: #475569; }
+    /* Auto-suggested chip (E1.1) — kleine blauwe badge naast intent-badge wanneer
+       de suggestie automatisch is geladen uit een eerdere PROPOSED-rij (webhook-
+       triggered of bij conv-open) i.p.v. een verse 'Vraag Joost' klik. */
+    .joost-auto-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 2px 8px;
+      border-radius: 10px;
+      font-size: 10.5px;
+      font-weight: 600;
+      letter-spacing: .2px;
+      text-transform: uppercase;
+      background: rgba(59, 130, 246, .15);
+      color: #1d4ed8;
+      border: 1px solid rgba(59, 130, 246, .3);
+    }
     .joost-confidence {
       display: inline-flex;
       align-items: center;
@@ -2280,6 +2297,44 @@
       <a id="inboxCustomerOpenLink" href="#" target="_blank" rel="noopener" class="sr-abtn" hidden><i class="ti ti-external-link"></i> Bekijk in Klanten</a>
       <a id="inboxCustomerInvoicesLink" href="#" target="_blank" rel="noopener" class="sr-abtn" hidden><i class="ti ti-file-invoice"></i> Bekijk facturen</a>
       <button class="sr-abtn primary" id="inboxCustomerCloseBtn" type="button">Sluit</button>
+    </div>
+  </div>
+</div>
+
+<!-- Joost Escalation quick-modal (E1.2 + F3) -->
+<div class="modal-overlay hidden" id="joostEscalationModal" role="dialog" aria-modal="true">
+  <div class="modal-card" style="max-width:520px">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px">
+      <h3 style="margin:0;font-size:17px;display:flex;align-items:center;gap:8px"><i class="ti ti-alert-triangle" style="color:#b91c1c"></i> Markeer als escalatie</h3>
+      <button class="sr-ibtn" id="joostEscCloseX" type="button" title="Sluiten" style="margin-top:-4px"><i class="ti ti-x"></i></button>
+    </div>
+
+    <div style="margin-top:14px;display:flex;flex-direction:column;gap:12px">
+      <div style="display:flex;flex-direction:column;gap:6px">
+        <label for="joostEscReason" style="font-size:11px;color:var(--text-dim);text-transform:uppercase;letter-spacing:.04em;font-weight:600">Reden voor escalatie</label>
+        <textarea id="joostEscReason" rows="4" class="fin-input" placeholder="Waarom moet deze conversatie geescaleerd worden? (minimaal 10 tekens)" style="font-size:13px;resize:vertical;min-height:90px"></textarea>
+      </div>
+
+      <div style="display:flex;flex-direction:column;gap:6px">
+        <label for="joostEscSeverity" style="font-size:11px;color:var(--text-dim);text-transform:uppercase;letter-spacing:.04em;font-weight:600">Urgentie</label>
+        <select id="joostEscSeverity" class="fin-input" style="font-size:13px">
+          <option value="low">Laag</option>
+          <option value="medium" selected>Gemiddeld</option>
+          <option value="high">Hoog</option>
+        </select>
+      </div>
+
+      <div style="font-size:11.5px;line-height:1.5;color:var(--text-dim);background:rgba(59,130,246,.08);border:1px solid rgba(59,130,246,.25);border-radius:6px;padding:8px 10px;display:flex;align-items:flex-start;gap:8px">
+        <i class="ti ti-info-circle" style="font-size:14px;color:#3b82f6;margin-top:1px;flex:0 0 auto"></i>
+        <span>Escalatie blijft open in de Taken-lijst totdat een admin hem heeft afgehandeld.</span>
+      </div>
+
+      <div id="joostEscError" style="display:none;padding:8px 12px;background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.3);border-radius:6px;color:#ef4444;font-size:12px"></div>
+    </div>
+
+    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:18px;flex-wrap:wrap">
+      <button class="sr-abtn" id="joostEscCancel" type="button">Annuleren</button>
+      <button class="sr-abtn" id="joostEscSubmit" type="button" style="background:#b91c1c;color:#fff;border-color:#991b1b"><i class="ti ti-alert-triangle"></i> Maak escalatie</button>
     </div>
   </div>
 </div>
@@ -6299,10 +6354,19 @@
         '</button>';
     }
 
+    // E1.1: auto-suggested badge wanneer suggestion door webhook of conv-open
+    // auto-load is binnengekomen (server-side flag `auto_triggered`, of client-side
+    // hint `auto_loaded` voor conv-open auto-fetch).
+    const isAuto = !!(sugg.auto_triggered || sugg.auto_loaded);
+    const autoBadgeHtml = isAuto
+      ? '<span class="joost-auto-badge" title="Automatisch geladen — Joost heeft deze suggestie al voorbereid"><i class="ti ti-sparkles"></i> Auto-suggested</span>'
+      : '';
+
     const html =
       '<div class="inbox-c-joost-card">' +
         '<div class="inbox-c-joost-meta">' +
           '<span class="joost-intent-badge ' + esc(intentClass) + '">' + esc(_joostIntentLabel(intent)) + '</span>' +
+          autoBadgeHtml +
           '<span class="joost-confidence ' + confCls + '">' +
             '<span class="joost-confidence-bar"><span style="width:' + confPct + '%"></span></span>' +
             '<span class="joost-confidence-pct">' + confPct + '%</span>' +
@@ -6447,46 +6511,131 @@
     }
   }
 
-  // escalation_needed: confirm-dialog + DISMISSED-mark met outcome_notes.
-  // Geen UI-flow naar een andere module — dit is een 'park voor later'-actie
-  // zodat user-naam in de audit zit voor latere triage.
-  async function handleJoostEscalation(suggestion) {
+  // escalation_needed: opent een quick-modal waar de medewerker een reden +
+  // severity invult, en POST naar /api/tasks-create-escalation om een nieuwe
+  // MANUAL_ESCALATION pending_action aan te maken (status=PENDING, blijft open
+  // in Open Acties totdat een admin hem afhandelt). De Joost-suggestion wordt
+  // server-side automatisch op USED_TASK_CREATED gezet en gelinkt aan de task.
+  // Snapshot van de suggestion wordt vastgehouden in module-scope var
+  // _joostEscalationPendingSuggestion zodat het modal-submit pad immutable
+  // input krijgt.
+  let _joostEscalationPendingSuggestion = null;
+
+  function handleJoostEscalation(suggestion) {
     if (!suggestion || !suggestion.id) return;
-    const ok = window.confirm('Markeer als escalatie en parkeer voor later?');
-    if (!ok) return;
-    const intentBtn = document.getElementById('joostIntentAction');
-    if (intentBtn) intentBtn.disabled = true;
-    // Probeer user-naam te resolven voor audit-trail (fail-soft).
-    let userName = '';
+    const ctx = _inboxCustomerContext;
+    if (!ctx || !ctx.customer || !ctx.customer.id) {
+      window.AgentShared?.showToast('Eerst klant koppelen aan dit gesprek', 'error');
+      return;
+    }
+    const conversationId = _inboxActiveConvId;
+    if (!conversationId) {
+      window.AgentShared?.showToast('Geen actief gesprek geselecteerd', 'error');
+      return;
+    }
+    _joostEscalationPendingSuggestion = suggestion;
+    openJoostEscalationModal(suggestion);
+  }
+
+  // Open de escalatie quick-modal en pre-fill de reason-textarea met Joost's
+  // reasoning (of fallback op suggested_reply). Severity default 'medium'.
+  function openJoostEscalationModal(suggestion) {
+    const modal     = document.getElementById('joostEscalationModal');
+    const reasonEl  = document.getElementById('joostEscReason');
+    const sevEl     = document.getElementById('joostEscSeverity');
+    const errEl     = document.getElementById('joostEscError');
+    const submitBtn = document.getElementById('joostEscSubmit');
+    if (!modal || !reasonEl || !sevEl) return;
+
+    // Pre-fill reason met reasoning (of suggested_reply als reasoning leeg is).
+    const preFill = String(
+      (suggestion && (suggestion.reasoning || suggestion.suggested_reply)) || ''
+    ).trim().slice(0, 500);
+    reasonEl.value = preFill;
+    sevEl.value = 'medium';
+    if (errEl) { errEl.style.display = 'none'; errEl.textContent = ''; }
+    if (submitBtn) submitBtn.disabled = false;
+    modal.classList.remove('hidden');
+    setTimeout(() => { try { reasonEl.focus(); reasonEl.setSelectionRange(reasonEl.value.length, reasonEl.value.length); } catch (_e) {} }, 50);
+  }
+
+  function closeJoostEscalationModal() {
+    const modal = document.getElementById('joostEscalationModal');
+    if (modal) modal.classList.add('hidden');
+    _joostEscalationPendingSuggestion = null;
+  }
+
+  async function submitJoostEscalation() {
+    const suggestion = _joostEscalationPendingSuggestion;
+    if (!suggestion || !suggestion.id) {
+      closeJoostEscalationModal();
+      return;
+    }
+    const conversationId = _inboxActiveConvId;
+    if (!conversationId) {
+      window.AgentShared?.showToast('Geen actief gesprek geselecteerd', 'error');
+      return;
+    }
+    const reasonEl  = document.getElementById('joostEscReason');
+    const sevEl     = document.getElementById('joostEscSeverity');
+    const errEl     = document.getElementById('joostEscError');
+    const submitBtn = document.getElementById('joostEscSubmit');
+    const reason = String((reasonEl && reasonEl.value) || '').trim();
+    const severity = String((sevEl && sevEl.value) || 'medium').trim().toLowerCase();
+    if (!reason || reason.length < 10) {
+      if (errEl) {
+        errEl.textContent = 'Reden vereist (minimaal 10 tekens).';
+        errEl.style.display = 'block';
+      }
+      if (reasonEl) try { reasonEl.focus(); } catch (_e) {}
+      return;
+    }
+    if (submitBtn) submitBtn.disabled = true;
+    if (errEl) { errEl.style.display = 'none'; errEl.textContent = ''; }
+
+    // Triggered-by-message: laatste inbound bericht (best effort).
+    let triggeredById = null;
     try {
-      if (window.AuthShared?.getProfile) {
-        const p = await window.AuthShared.getProfile();
-        userName = (p && (p.full_name || p.email)) || '';
+      if (Array.isArray(_inboxMessages)) {
+        for (let i = _inboxMessages.length - 1; i >= 0; i--) {
+          const m = _inboxMessages[i];
+          if (m && m.direction === 'in' && m.id) { triggeredById = m.id; break; }
+        }
       }
     } catch (_e) { /* fail-soft */ }
-    const notes = 'Escalatie gemarkeerd' + (userName ? (' door ' + userName) : '');
+
     try {
-      const r = await window.AgentShared.apiFetch('/api/joost-mark-outcome', {
+      const body = {
+        conversation_id:         conversationId,
+        reason,
+        severity,
+        joost_suggestion_id:     suggestion.id,
+      };
+      if (triggeredById) body.triggered_by_message_id = triggeredById;
+
+      const r = await window.AgentShared.apiFetch('/api/tasks-create-escalation', {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({
-          suggestion_id: suggestion.id,
-          status:        'DISMISSED',
-          outcome_notes: notes,
-        }),
+        body:    JSON.stringify(body),
       });
-      if (!r.ok) {
-        const d = await r.json().catch(() => ({}));
-        throw new Error(d.error || ('HTTP ' + r.status));
-      }
-      window.AgentShared?.showToast('Genoteerd - kom hier later op terug', 'success');
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.error || ('HTTP ' + r.status));
+
+      window.AgentShared?.showToast('Escalatie aangemaakt', 'success');
+      closeJoostEscalationModal();
+      // Verberg Joost-paneel: suggestion is server-side gemarkeerd USED_TASK_CREATED.
       _joostCurrentSuggestion = null;
       _joostEditMode = false;
       _joostClearPanel();
     } catch (e) {
-      console.error('[handleJoostEscalation]', e);
-      window.AgentShared?.showToast('Markeren mislukt: ' + (e.message || 'onbekende fout'), 'error');
-      if (intentBtn) intentBtn.disabled = false;
+      console.error('[submitJoostEscalation]', e);
+      if (errEl) {
+        errEl.textContent = 'Escalatie aanmaken mislukt: ' + (e.message || 'onbekende fout');
+        errEl.style.display = 'block';
+      } else {
+        window.AgentShared?.showToast('Escalatie mislukt: ' + (e.message || 'onbekende fout'), 'error');
+      }
+      if (submitBtn) submitBtn.disabled = false;
     }
   }
 
@@ -7010,10 +7159,49 @@
       _inboxCustomerContext = data;
       const state = data.customer && data.customer.id ? 'matched' : 'unknown';
       renderInboxCustomerPanel(state, data);
+
+      // E1.1: auto-load recente PROPOSED Joost-suggestie voor deze conv (zonder
+      // dat user op "Vraag Joost" hoeft te klikken). Fail-soft, geen toast.
+      // Conv-mismatch guard: capture activeId vóór de fetch en check na de await.
+      _maybeAutoLoadJoostSuggestion(conversationId);
     } catch (e) {
       console.error('[loadInboxCustomerContext] exception:', e && e.message);
       _inboxCustomerContext = null;
       renderInboxCustomerPanel('unknown', { conversation: null, customer: null, open_invoices: [], totals: { open_amount: 0, invoice_count: 0 } });
+    }
+  }
+
+  // E1.1: auto-load recente PROPOSED suggestie bij conv-open. Fail-soft, geen
+  // toast bij fail (visuele aanwezigheid van de card spreekt voor zich, en als
+  // er niets is val je gewoon terug op de "Vraag Joost"-knop). Beïnvloedt NIET
+  // het client-side rate-limit window (_joostLastRequestAt blijft ongemoeid),
+  // zodat de knop direct beschikbaar blijft als de user toch een verse wil.
+  async function _maybeAutoLoadJoostSuggestion(conversationId) {
+    if (!_joostCanUse) return;
+    if (!conversationId) return;
+    // Skip als er al een suggestion in beeld is (handmatige flow heeft voorrang).
+    if (_joostCurrentSuggestion) return;
+    const activeIdAtFetch = conversationId;
+    try {
+      const params = new URLSearchParams({
+        conversation_id: conversationId,
+        max_age_minutes: '10',
+      });
+      const r = await window.AgentShared.apiFetch('/api/joost-suggestions-recent?' + params.toString());
+      if (!r.ok) return; // 403/500 → stilletjes negeren
+      const d = await r.json().catch(() => ({}));
+      const sugg = d && d.suggestion ? d.suggestion : null;
+      if (!sugg || !sugg.id) return;
+      // Conv-mismatch guard: gebruiker kan tussentijds een andere conv hebben gekozen.
+      if (activeIdAtFetch !== _inboxActiveConvId) return;
+      // Race-check: handmatige call kan ondertussen een verse sugg hebben gerendered.
+      if (_joostCurrentSuggestion) return;
+      sugg.auto_loaded = true;
+      _joostCurrentSuggestion = sugg;
+      _joostRenderCard(sugg);
+    } catch (e) {
+      console.error('[_maybeAutoLoadJoostSuggestion]', e && e.message);
+      // fail-soft
     }
   }
 
@@ -8175,6 +8363,25 @@
     document.addEventListener('keydown', (e) => {
       if (e.key === 'Escape' && overlay && !overlay.classList.contains('hidden')) {
         closeInboxCustomerModal();
+      }
+    });
+
+    // Joost escalation-modal wiring (E1.2 + F3).
+    const escClose  = document.getElementById('joostEscCloseX');
+    const escCancel = document.getElementById('joostEscCancel');
+    const escSubmit = document.getElementById('joostEscSubmit');
+    const escOverlay = document.getElementById('joostEscalationModal');
+    if (escClose)  escClose.addEventListener('click', () => closeJoostEscalationModal());
+    if (escCancel) escCancel.addEventListener('click', () => closeJoostEscalationModal());
+    if (escSubmit) escSubmit.addEventListener('click', () => submitJoostEscalation());
+    if (escOverlay) {
+      escOverlay.addEventListener('click', (e) => {
+        if (e.target === escOverlay) closeJoostEscalationModal();
+      });
+    }
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && escOverlay && !escOverlay.classList.contains('hidden')) {
+        closeJoostEscalationModal();
       }
     });
   }
