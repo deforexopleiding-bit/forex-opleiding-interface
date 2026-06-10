@@ -1066,6 +1066,8 @@
     <button class="sr-seg" id="navWanbetalers" data-view="wanbetalers" type="button" style="display:none">Wanbetalers</button>
     <button class="sr-seg" id="navCamtBank" data-view="camtbank" type="button" style="display:none">Bank</button>
     <button class="sr-seg" data-view="roadmap" type="button">Roadmap</button>
+    <!-- Groep D: Instellingen tab (Joost AI / WhatsApp Templates / Afdeling-config). -->
+    <button class="sr-seg" id="navInstellingen" data-view="instellingen" type="button">Instellingen</button>
   </div>
 
   <!-- ===== Dashboard-view (Groep C: 12 KPIs + 3 charts) =====
@@ -1931,6 +1933,13 @@
     </div>
 
   </div>
+
+  <!-- ===== Instellingen-view (Groep D: Joost AI / WhatsApp Templates / Afdeling-config) =====
+       Mount-target voor shared/finance-instellingen.js. Joost AI is volledig
+       verhuisd uit modules/admin.html; WhatsApp Templates en WhatsApp Connection
+       blijven (PARTIAL) als deep-link naar admin.html voor nu — volledige
+       verhuis volgt in vervolg-PR. -->
+  <div id="view-instellingen" hidden></div>
 </div>
 
 <!-- Dunning Run-details modal (PR B5) -->
@@ -3048,6 +3057,8 @@
 <script src="/modules/shared/finance-klanten.js"></script>
 <!-- Groep C: Finance Dashboard (12 KPIs + 3 charts, Recharts lazy-loaded). -->
 <script src="/modules/shared/finance-dashboard.js"></script>
+<!-- Groep D: Finance > Instellingen (Joost AI verhuisd uit Admin + WhatsApp Templates/Connection deep-links). -->
+<script src="/modules/shared/finance-instellingen.js"></script>
 
 <!-- ===== Finance Fase 2A — Facturen-view logica ===== -->
 <script>
@@ -3103,6 +3114,8 @@
     const wbWrap = document.getElementById('view-wanbetalers');
     const klantenWrap = document.getElementById('view-klanten');
     const dashboardWrap = document.getElementById('view-dashboard');
+    // Groep D: Instellingen-view (Joost AI / Templates / Afdeling-config).
+    const instellingenWrap = document.getElementById('view-instellingen');
     document.getElementById('view-facturen').hidden = (view !== 'facturen');
     document.getElementById('view-camtbank').hidden = (view !== 'camtbank');
     document.getElementById('view-bank').hidden = (view !== 'bank');
@@ -3110,6 +3123,7 @@
     if (wbWrap) wbWrap.hidden = (view !== 'wanbetalers');
     if (klantenWrap) klantenWrap.hidden = (view !== 'klanten');
     if (dashboardWrap) dashboardWrap.hidden = (view !== 'dashboard');
+    if (instellingenWrap) instellingenWrap.hidden = (view !== 'instellingen');
     if (view !== 'wanbetalers') {
       document.getElementById('view-inbox').hidden = true;
       document.getElementById('view-dunning').hidden = true;
@@ -3134,6 +3148,10 @@
     if (view === 'klanten' && klantenWrap) {
       mountFinanceKlantenHost(klantenWrap);
     }
+    // Groep D: bij Instellingen-view → mount FinanceInstellingen (idempotent).
+    if (view === 'instellingen' && instellingenWrap) {
+      mountFinanceInstellingenHost(instellingenWrap);
+    }
     // Bij eerste keer Bank (oud) openen: load per beschikbare permission.
     if (view === 'bank' && !_bankLoadedOnce) {
       _bankLoadedOnce = true;
@@ -3153,6 +3171,18 @@
   function mountFinanceKlantenHost(host) {
     if (!host || !window.FinanceKlanten || typeof window.FinanceKlanten.mount !== 'function') return;
     window.FinanceKlanten.mount({ host });
+  }
+
+  // Groep D: Mount FinanceInstellingen in de view-instellingen host. Idempotent:
+  // tweede call op dezelfde host returnt early dankzij mount-guard in
+  // shared/finance-instellingen.js.
+  function mountFinanceInstellingenHost(host) {
+    if (!host) return;
+    if (!window.FinanceInstellingen || typeof window.FinanceInstellingen.mount !== 'function') {
+      host.innerHTML = '<div style="padding:20px;color:var(--text-faint);font-size:13px">Instellingen-module wordt geladen…</div>';
+      return;
+    }
+    window.FinanceInstellingen.mount({ host });
   }
 
   // Groep C: Mount FinanceDashboard in de view-dashboard host. Idempotent.
