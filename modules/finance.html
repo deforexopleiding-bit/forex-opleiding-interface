@@ -164,6 +164,12 @@
       gap: 8px;
       padding: 0;
     }
+    /* Browser-default [hidden]{display:none} verliest van bovenstaande
+       display:flex regel — daarom expliciete override zodat skeleton +
+       content NIET tegelijk getoond worden (=witruimte boven avatar bug). */
+    .inbox-c-customer-content[hidden] {
+      display: none !important;
+    }
     .inbox-c-avatar-large {
       width: 80px;
       height: 80px;
@@ -959,7 +965,6 @@
   <div class="sr-segments" id="financeNav" style="margin-bottom:18px">
     <button class="sr-seg active" data-view="facturen" type="button">Facturen</button>
     <button class="sr-seg" id="navCamtBank" data-view="camtbank" type="button" style="display:none">Bank</button>
-    <button class="sr-seg" id="navBank" data-view="bank" type="button" style="display:none">Bank (oud)</button>
     <button class="sr-seg" id="navInbox" data-view="inbox" type="button" style="display:none">Inbox</button>
     <button class="sr-seg" id="navDunning" data-view="dunning" type="button" style="display:none">Wanbetalers</button>
     <button class="sr-seg" data-view="roadmap" type="button">Roadmap</button>
