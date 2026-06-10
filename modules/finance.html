@@ -529,6 +529,21 @@
       color: #fca5a5;
       margin-top: 3px;
     }
+    /* WhatsApp-stijl datum-separator chip — centered tussen message-stroken
+       wanneer day-grens overschreden wordt (Vandaag / Gisteren / weekdag / datum). */
+    .inbox-c-date-separator {
+      text-align: center;
+      margin: 16px 0 8px;
+    }
+    .inbox-c-date-separator span {
+      display: inline-block;
+      background: rgba(0, 0, 0, 0.05);
+      padding: 4px 12px;
+      border-radius: 12px;
+      font-size: 10.5px;
+      color: #5e6368;
+      font-weight: 500;
+    }
     .inbox-c-msg-tplbadge {
       display: inline-flex;
       align-items: center;
@@ -6140,6 +6155,38 @@
     return hh + ':' + mm;
   }
 
+  // WhatsApp-stijl datum-separator header voor messages-stream.
+  // Vandaag / Gisteren / weekdag (binnen 7 dagen) / "15 maart" / "15 maart 2025".
+  // Gebruik lokale-datum vergelijking (getFullYear/Month/Date) — NIET toISOString
+  // (UTC bug, lesson learned punt over off-by-one bij timezone-grens).
+  function _inboxFormatDateHeader(iso, refDate) {
+    if (!iso) return '';
+    const d = new Date(iso);
+    const t = d.getTime();
+    if (!Number.isFinite(t)) return '';
+    const now = refDate instanceof Date ? refDate : new Date();
+    const aDay = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+    const bDay = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+    const dayDiff = Math.round((bDay - aDay) / (24 * 60 * 60 * 1000));
+    if (dayDiff === 0) return 'Vandaag';
+    if (dayDiff === 1) return 'Gisteren';
+    const weekdays = ['Zondag', 'Maandag', 'Dinsdag', 'Woensdag', 'Donderdag', 'Vrijdag', 'Zaterdag'];
+    if (dayDiff > 1 && dayDiff < 7) return weekdays[d.getDay()];
+    const months = ['januari', 'februari', 'maart', 'april', 'mei', 'juni',
+                    'juli', 'augustus', 'september', 'oktober', 'november', 'december'];
+    const dayStr = d.getDate() + ' ' + months[d.getMonth()];
+    if (d.getFullYear() === now.getFullYear()) return dayStr;
+    return dayStr + ' ' + d.getFullYear();
+  }
+
+  // Lokale YYYY-MM-DD key voor day-grouping (NIET toISOString — UTC bug).
+  function _inboxLocalDayKey(iso) {
+    if (!iso) return '';
+    const d = new Date(iso);
+    if (!Number.isFinite(d.getTime())) return '';
+    return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+  }
+
   function fmtRelTime(iso) {
     if (!iso) return '';
     const t = new Date(iso).getTime();
@@ -6307,11 +6354,22 @@
       wrap.innerHTML = '<div style="text-align:center;color:var(--text-faint);font-size:12px;padding:20px">Nog geen berichten.</div>';
       return;
     }
+    const _today = new Date();
+    let _lastDayKey = '';
     const rows = _inboxMessages.map((m, idx) => {
       const out = (m.direction === 'out');
       // Same-sender detectie: vorige message dezelfde direction? -> compactere margin + geen tail-corner.
       const prev = idx > 0 ? _inboxMessages[idx - 1] : null;
-      const sameSender = !!(prev && (prev.direction === 'out') === out);
+      // WhatsApp-stijl datum-separator wanneer day-grens overschreden wordt.
+      // Day-grens reset same-sender ook — eerste bubble na divider krijgt tail-corner.
+      const msgIso = m.sent_at || m.created_at;
+      const curDayKey = _inboxLocalDayKey(msgIso);
+      const dayChanged = (curDayKey && curDayKey !== _lastDayKey);
+      const dateSep = dayChanged
+        ? `<div class="inbox-c-date-separator"><span>${esc(_inboxFormatDateHeader(msgIso, _today))}</span></div>`
+        : '';
+      if (dayChanged) _lastDayKey = curDayKey;
+      const sameSender = !dayChanged && !!(prev && (prev.direction === 'out') === out);
       // Detect template-message: ofwel expliciete type-kolom, ofwel template_name aanwezig,
       // ofwel meta_template_name veld in payload. Toon "via template" badge bij outgoing.
       const tplName = m.template_name || m.meta_template_name || null;
@@ -6346,7 +6404,7 @@
         ? '<span class="autonomous-sparkle" title="Autonoom verstuurd door Joost">✦</span>'
         : '';
       const metaInner = `${sparkleIcon}${esc(time)}${statusIcon ? `<span class="receipt">${statusIcon}</span>` : ''}`;
-      return `<div class="inbox-c-msg ${out ? 'outbound' : 'inbound'}${failed ? ' failed' : ''}${sameSender ? ' same-sender' : ''}">
+      return `${dateSep}<div class="inbox-c-msg ${out ? 'outbound' : 'inbound'}${failed ? ' failed' : ''}${sameSender ? ' same-sender' : ''}">
         <div class="inbox-c-msg-bubble">
           ${tplBadge}
           <span class="bubble-text">${esc(body)}<span class="meta-phantom" aria-hidden="true">${esc(time)}${receiptSpacer}</span></span>
