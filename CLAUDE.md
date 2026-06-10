@@ -166,6 +166,16 @@ Lokaal: C:/Users/jeffr/forex-opleiding-interface
   `abonnement_stop` / `kwijtschelding` blijven default `enabled=false`
   (hard achter human-approval). Zie docs/joost-e2-autonomy-foundation.md
   voor architectuur + smoke-test scenarios + rollout-checklist.
+  Extra feature-flag `e2_autonomous_intake` (default UIT) op finance-row:
+  bij inbound op conversation zonder gekoppelde klant vraagt Joost
+  zelfstandig om een e-mailadres en koppelt op unieke `customers.email`
+  match. State-machine op nieuwe kolommen `joost_conversation_state.
+  intake_status` (NULL / asked / matched / failed_no_match / failed_no_response)
+  + `intake_asked_at`. Vaste teksten (geen LLM-call) voor ask/retry/
+  matched/failed. Bij 0 of >1 match → MANUAL_FOLLOWUP-taak via
+  `pending_actions`. Helpers in `api/_lib/email-extractor.js`; gate-check
+  + flow-handler in `api/inbox-webhook.js`. Zie
+  docs/joost-intake-and-wanbetalers-bulk-and-datum-headers.md.
 - F3 escalation — `MANUAL_ESCALATION` action_type op `pending_actions`
   voor escalaties die geen TL-actie en geen verify-payment zijn (boos /
   juridisch / handover naar incasso). Endpoint
@@ -986,3 +996,51 @@ Bijkomende win: dit pattern dwingt af dat een nieuw arrangement-type bij
 introductie expliciet kiest "heb ik een breach-deadline of niet?". Dat
 voorkomt dat we per ongeluk een type leveren dat in ACTIEF-staat blijft
 hangen omdat niemand de breach-evaluatie heeft bedacht.
+
+## Lessons Learned — Joost intake-flow (10 juni 2026)
+
+Volledige documentatie: [`docs/joost-intake-and-wanbetalers-bulk-and-datum-headers.md`](docs/joost-intake-and-wanbetalers-bulk-and-datum-headers.md).
+
+### Lesson learned 26 — Vaste intake-tekst (geen LLM-call) voor eerste contact
+Voor de allereerste interactie van Joost met een onbekende klant
+(intake-vraag "met welk e-mailadres ben je bij ons bekend?") gebruiken we
+**vier hardcoded tekstconstanten** in `api/inbox-webhook.js` — geen
+Anthropic-call. Concreet:
+
+- `JOOST_INTAKE_ASK_TEXT`     — eerste vraag.
+- `JOOST_INTAKE_RETRY_TEXT`   — bij geen email in body.
+- `JOOST_INTAKE_MATCHED_TEXT` — bij succesvolle email-match.
+- `JOOST_INTAKE_FAILED_TEXT`  — bij 0 of >1 hits (escalatie naar mens).
+
+De LLM komt pas in beeld *na* matched, wanneer de normale E1.1
+auto-suggest pipeline triggert met klant-context geladen.
+
+Voordelen die we hiermee borgen:
+
+1. **Voorspelbaar** — elke nieuwe klant ziet exact dezelfde ask-tekst.
+   Geen drift tussen calls, geen "Joost is vandaag chagrijnig"-variatie
+   die merkbeeld kan schaden bij de eerste indruk.
+2. **Geen kost** — intake-vraag kost ~0 Anthropic-tokens. Bij N onbekende
+   inbounds per dag tikt dat anders aan tegen elke message.
+3. **Geen hallucinatie-risico op eerste indruk** — een LLM die de
+   eerste klant-interactie genereert kan in zeldzame gevallen iets
+   onverwachts zeggen (verkeerd merkbeeld, fictieve context, of erger:
+   verwijzen naar een niet-bestaand factuur-nummer). Bij de eerste
+   contact-tekst is dat onaanvaardbaar.
+4. **Geen ANTHROPIC_API_KEY-afhankelijkheid op de intake-pad** — als de
+   key tijdelijk weg is, blijft de intake-flow gewoon werken. Pas de
+   *vervolgstap* (E1.1 suggest na matched) faalt met 503, en daar is
+   dat acceptabel.
+
+Anti-pattern dat we hiermee vermijden: een LLM-call om "dynamisch een
+welkomsttekst te genereren op basis van conversation-history" voor een
+flow waar er nog *geen* history is. Dat is over-engineering met
+asymmetrisch risico (kans op een verkeerde eerste zin > waarde van
+variatie). Pas zodra Joost klant-context heeft (matched + customer-
+profile + invoice-context), wordt de marginale waarde van LLM-output
+groter dan het risico.
+
+Generaliseerbare regel: **eerste-contact-teksten zijn templates, geen
+LLM-output**. Pas op een vervolgstap met geladen context schakel je over
+naar generatief. Geldt ook voor E2.2 outbound-scheduler eerste herinnering,
+F3 escalation-confirm, en toekomstige cold-outreach flows.
