@@ -140,6 +140,7 @@
       .fd-fallback-table th, .fd-fallback-table td { padding:6px 8px; text-align:left; border-bottom:1px solid var(--border); }
       .fd-fallback-table th { color:var(--text-faint); font-weight:600; font-size:11px; text-transform:uppercase; letter-spacing:.4px; }
       .fd-fallback-table td.num { text-align:right; font-variant-numeric: tabular-nums; }
+      .fd-fallback-note { font-size:10.5px; color:var(--text-faint); padding:4px 0 8px; font-style:italic; }
       .fd-cache-note { font-size:11px; color:var(--text-faint); margin-top:8px; }
       .fd-section-title { font-size:11px; text-transform:uppercase; letter-spacing:.5px; color:var(--text-faint); font-weight:600; margin:6px 0 10px; }
       .fd-todo { font-size:11.5px; color:var(--text-faint); padding:10px 14px; border:1px dashed var(--border); border-radius:10px; background:var(--bg-elev); margin-top:14px; }
@@ -204,6 +205,17 @@
       };
       loadNext();
     });
+  }
+
+  // Inline note voor tabel-fallback (alleen wanneer Recharts NIET geladen is
+  // door netwerk-issue, niet wanneer hij nog laadt). Bij rechartsLoading
+  // returnt het een lege string zodat de gebruiker niet ten onrechte denkt
+  // dat de chart kapot is.
+  function fallbackNote() {
+    if (_state.rechartsFailed) {
+      return '<div class="fd-fallback-note" role="status">Tabel-weergave (chart-bibliotheek niet bereikbaar via CDN).</div>';
+    }
+    return '';
   }
 
   // ── Drill-down helper ──────────────────────────────────────────────────────
@@ -409,7 +421,7 @@
     }
     if (!_state.rechartsReady) {
       // Fallback: tabel.
-      host.innerHTML = `
+      host.innerHTML = fallbackNote() + `
         <table class="fd-fallback-table">
           <thead><tr><th>Bucket</th><th class="num">Aantal</th><th class="num">Bedrag</th></tr></thead>
           <tbody>${d.buckets.map(b => `
@@ -455,7 +467,7 @@
       return;
     }
     if (!_state.rechartsReady) {
-      host.innerHTML = `
+      host.innerHTML = fallbackNote() + `
         <table class="fd-fallback-table">
           <thead><tr><th>Status</th><th class="num">Aantal</th></tr></thead>
           <tbody>${d.items.map(it => `
@@ -504,7 +516,7 @@
       return;
     }
     if (!_state.rechartsReady) {
-      host.innerHTML = `
+      host.innerHTML = fallbackNote() + `
         <table class="fd-fallback-table">
           <thead><tr><th>Klant</th><th class="num">Facturen</th><th class="num">Open</th></tr></thead>
           <tbody>${items.map(it => `
@@ -550,7 +562,7 @@
       return;
     }
     if (!_state.rechartsReady) {
-      host.innerHTML = `
+      host.innerHTML = fallbackNote() + `
         <table class="fd-fallback-table">
           <thead><tr><th>Type</th><th class="num">Aantal</th></tr></thead>
           <tbody>${items.map(it => `
@@ -602,7 +614,7 @@
         label: s.label,
         total: (s.points || []).reduce((acc, p) => acc + (p.count || 0), 0),
       })).sort((a, b) => b.total - a.total);
-      host.innerHTML = `
+      host.innerHTML = fallbackNote() + `
         <table class="fd-fallback-table">
           <thead><tr><th>Intent</th><th class="num">Totaal 30d</th></tr></thead>
           <tbody>${totals.map(t => `
@@ -670,7 +682,7 @@
       // Fallback: laatste 7 dagen + komende 7 dagen samenvatting.
       const lastInc = incoming.slice(-7);
       const nextExp = expected.slice(0, 7);
-      host.innerHTML = `
+      host.innerHTML = fallbackNote() + `
         <table class="fd-fallback-table">
           <thead><tr><th>Periode</th><th>Datum</th><th class="num">Bedrag</th></tr></thead>
           <tbody>
@@ -730,7 +742,7 @@
       return;
     }
     if (!_state.rechartsReady) {
-      host.innerHTML = `
+      host.innerHTML = fallbackNote() + `
         <table class="fd-fallback-table">
           <thead><tr><th>Maand</th><th class="num">Nieuw</th><th class="num">Herhaal</th><th class="num">Nieuw EUR</th><th class="num">Herhaal EUR</th></tr></thead>
           <tbody>${buckets.map(b => `
