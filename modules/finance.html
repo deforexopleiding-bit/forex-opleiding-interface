@@ -2053,6 +2053,37 @@
   </div>
 </div>
 
+<!-- Cancel arrangement modal (cleanup: vervangt native prompt/confirm) -->
+<div class="modal-overlay hidden" id="cancelArrangementModal" role="dialog" aria-modal="true">
+  <div class="modal-card" style="max-width:560px">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px">
+      <div>
+        <h3 style="margin:0;font-size:17px">Annuleer betalingsregeling</h3>
+        <div style="font-size:11px;color:var(--text-faint);margin-top:2px">Status gaat naar GEANNULEERD. Openstaande pending_actions worden gecanceld.</div>
+      </div>
+      <button class="sr-ibtn" id="cancelArrangementCloseBtn" type="button" title="Sluiten" style="margin-top:-4px"><i class="ti ti-x"></i></button>
+    </div>
+
+    <div style="margin-top:14px">
+      <div id="cancelArrangementContext" style="background:rgba(255,255,255,0.04);border:1px solid var(--border-subtle, #2b2f3a);border-radius:8px;padding:10px 12px;margin-bottom:14px;font-size:12.5px;color:var(--text)">
+        <!-- gevuld door openCancelArrangementModal -->
+      </div>
+      <div style="margin-bottom:8px">
+        <label style="display:block;font-size:11.5px;color:var(--text-dim);margin-bottom:4px" for="cancelArrangementReason">Reden <span style="color:#ef4444">*</span></label>
+        <textarea id="cancelArrangementReason" class="fin-input" rows="4" style="width:100%;resize:vertical;min-height:90px;font-family:inherit" placeholder="Waarom wordt deze regeling geannuleerd?"></textarea>
+        <div style="font-size:11px;color:var(--text-faint);margin-top:4px">Minimaal 5 tekens. Wordt vastgelegd in cancellation_reason + audit-trail.</div>
+      </div>
+
+      <div id="cancelArrangementError" style="display:none;margin-top:8px;padding:8px 12px;background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.3);border-radius:6px;color:#ef4444;font-size:12px"></div>
+    </div>
+
+    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">
+      <button class="sr-abtn" id="cancelArrangementCancelBtn" type="button">Sluiten</button>
+      <button class="sr-abtn danger" id="cancelArrangementConfirmBtn" type="button" disabled>Annuleer regeling</button>
+    </div>
+  </div>
+</div>
+
 <!-- Arrangement Propose Wizard modal (D1) -->
 <div class="modal-overlay hidden" id="arrangProposeModal" role="dialog" aria-modal="true">
   <div class="modal-card" style="max-width:780px;display:flex;flex-direction:column;max-height:90vh;padding:0">
@@ -4273,6 +4304,8 @@
   let _arrangCurrentDetailId = null;
   let _arrangCurrentActionsById = {};
   let _arrangCurrentCustomerName = '';
+  // Cleanup: DOM-modal voor Annuleer arrangement ipv native prompt/confirm.
+  let _cancelArrangCurrentId = null;
 
   function wireArrangOnce() {
     if (_arrangWired) return;
@@ -4363,6 +4396,27 @@
     document.getElementById('markNotExecFinConfirmBtn')?.addEventListener('click', submitMarkNotExecutedFin);
     nmModal?.addEventListener('click', (e) => {
       if (e.target.id === 'markNotExecutedModalFin') closeMarkNotExecutedModalFin();
+    });
+
+    // Cancel-arrangement modal close-handlers + reason-validatie + submit.
+    const caModal = document.getElementById('cancelArrangementModal');
+    document.getElementById('cancelArrangementCloseBtn')?.addEventListener('click', closeCancelArrangementModal);
+    document.getElementById('cancelArrangementCancelBtn')?.addEventListener('click', closeCancelArrangementModal);
+    document.getElementById('cancelArrangementConfirmBtn')?.addEventListener('click', submitCancelArrangement);
+    caModal?.addEventListener('click', (e) => {
+      if (e.target.id === 'cancelArrangementModal') closeCancelArrangementModal();
+    });
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && caModal && !caModal.classList.contains('hidden')) {
+        closeCancelArrangementModal();
+      }
+    });
+    const caReason = document.getElementById('cancelArrangementReason');
+    caReason?.addEventListener('input', () => {
+      const btn = document.getElementById('cancelArrangementConfirmBtn');
+      if (!btn) return;
+      const v = (caReason.value || '').trim();
+      btn.disabled = v.length < 5;
     });
   }
 
@@ -4996,27 +5050,101 @@
     }
   }
 
-  async function cancelArrang(id) {
+  // Cleanup: DOM-modal vervangt native prompt/confirm voor Annuleer arrangement.
+  // Entry-points: tabel-rij-knop (data-arrang-cancel) -> cancelArrang(id) -> openCancelArrangementModal(arrangement).
+  function cancelArrang(id) {
     if (!id) return;
-    const reason = prompt('Reden voor annuleren (optioneel):', '');
-    if (reason === null) return;  // user clicked cancel
-    if (!confirm('Afspraak annuleren? Dit kan niet ongedaan worden gemaakt.')) return;
+    const arrangement = (_arrangItems || []).find(x => x && x.id === id) || { id };
+    openCancelArrangementModal(arrangement);
+  }
+
+  function openCancelArrangementModal(arrangement) {
+    if (!arrangement || !arrangement.id) return;
+    wireArrangOnce();
+    _cancelArrangCurrentId = arrangement.id;
+
+    // Context-readout bouwen.
+    const custName = (arrangement.customer && arrangement.customer.name) || _arrangCurrentCustomerName || '—';
+    const typeLabel = arrangTypeLabel(arrangement.type);
+    const invoiceCount = Array.isArray(arrangement.invoice_ids) ? arrangement.invoice_ids.length : 0;
+    let amount = null;
+    try {
+      const d = arrangement.details || {};
+      if (typeof d.write_off_amount === 'number') amount = d.write_off_amount;
+      else if (typeof d.amount_per_invoice_excl_vat === 'number' && typeof d.termijnen === 'number') {
+        amount = d.amount_per_invoice_excl_vat * d.termijnen;
+      } else if (Array.isArray(d.parts)) {
+        amount = d.parts.reduce((s, p) => s + (Number(p?.amount) || 0), 0);
+      }
+    } catch (_) {}
+    const fmtEuro = (v) => (v == null || isNaN(v))
+      ? '—'
+      : '€ ' + Number(v).toLocaleString('nl-NL', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const ctxEl = document.getElementById('cancelArrangementContext');
+    if (ctxEl) {
+      ctxEl.innerHTML = `
+        <div style="display:grid;grid-template-columns:90px 1fr;gap:6px 12px;font-size:12.5px">
+          <div style="color:var(--text-faint)">Klant</div><div style="font-weight:600">${esc(custName)}</div>
+          <div style="color:var(--text-faint)">Type</div><div>${esc(typeLabel)}</div>
+          <div style="color:var(--text-faint)">Facturen</div><div>${invoiceCount}</div>
+          <div style="color:var(--text-faint)">Bedrag</div><div>${esc(fmtEuro(amount))}</div>
+        </div>`;
+    }
+
+    const elReason = document.getElementById('cancelArrangementReason');
+    const elErr    = document.getElementById('cancelArrangementError');
+    const btn      = document.getElementById('cancelArrangementConfirmBtn');
+    if (elReason) elReason.value = '';
+    if (elErr)    { elErr.style.display = 'none'; elErr.textContent = ''; }
+    if (btn)      { btn.disabled = true; btn.textContent = 'Annuleer regeling'; }
+    document.getElementById('cancelArrangementModal')?.classList.remove('hidden');
+    setTimeout(() => { try { elReason?.focus(); } catch (_) {} }, 50);
+  }
+
+  function closeCancelArrangementModal() {
+    document.getElementById('cancelArrangementModal')?.classList.add('hidden');
+    _cancelArrangCurrentId = null;
+  }
+
+  async function submitCancelArrangement() {
+    const elReason = document.getElementById('cancelArrangementReason');
+    const elErr    = document.getElementById('cancelArrangementError');
+    const btn      = document.getElementById('cancelArrangementConfirmBtn');
+
+    const reason = (elReason?.value || '').trim();
+    if (reason.length < 5) {
+      if (elErr) { elErr.textContent = 'Reden is verplicht (min 5 tekens).'; elErr.style.display = 'block'; }
+      return;
+    }
+    const id = _cancelArrangCurrentId;
+    if (!id) {
+      if (elErr) { elErr.textContent = 'Geen regeling geselecteerd.'; elErr.style.display = 'block'; }
+      return;
+    }
+
+    if (btn) { btn.disabled = true; btn.textContent = 'Bezig…'; }
     try {
       const r = await window.AgentShared.apiFetch('/api/arrangements-cancel', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id, cancellation_reason: reason || null }),
+        body: JSON.stringify({ id, cancellation_reason: reason }),
       });
       const d = await r.json().catch(() => ({}));
       if (!r.ok) {
-        window.AgentShared.showToast('Annuleren mislukt: ' + (d.error || ('HTTP ' + r.status)), 'error');
+        const msg = d.error || ('HTTP ' + r.status);
+        if (elErr) { elErr.textContent = 'Annuleren mislukt: ' + msg; elErr.style.display = 'block'; }
         return;
       }
-      window.AgentShared.showToast('Afspraak geannuleerd', 'success');
-      loadArrangements();
+      window.AgentShared?.showToast?.('Afspraak geannuleerd', 'success');
+      closeCancelArrangementModal();
+      try { if (typeof closeArrangDetail === 'function') closeArrangDetail(); } catch (_) {}
+      try { loadArrangements(); } catch (_) {}
+      try { window.AgentShared?.refreshApprovalsBadge?.(); } catch (_) {}
     } catch (e) {
       console.error('[arrangements-cancel]', e);
-      window.AgentShared.showToast('Annuleren mislukt: ' + e.message, 'error');
+      if (elErr) { elErr.textContent = 'Annuleren mislukt: ' + e.message; elErr.style.display = 'block'; }
+    } finally {
+      if (btn) { btn.disabled = false; btn.textContent = 'Annuleer regeling'; }
     }
   }
 
