@@ -116,17 +116,18 @@
     .sr-table tbody tr.clickable-row { cursor: pointer; }
     .sr-table tbody tr.clickable-row:hover { background: var(--bg-elev-2, #f9fafb); }
 
-    /* ====== Inbox layout C: 3-column grid (list / thread / klant-info) ====== */
+    /* ====== Inbox layout C: 2-column grid (1/3 list — 2/3 thread). Klant-info
+       opent als modal via klik op klantnaam in chat-header. ====== */
     .inbox-layout-c {
       display: grid;
-      grid-template-columns: 280px minmax(0, 1fr) 320px;
+      grid-template-columns: minmax(280px, 33%) minmax(0, 1fr);
       grid-template-rows: minmax(0, 75vh);
       gap: 16px;
       min-height: 520px;
     }
+    .inbox-c-col-left { max-width: 380px; }
     .inbox-c-col-left,
-    .inbox-c-col-thread,
-    .inbox-c-col-right {
+    .inbox-c-col-thread {
       background: var(--surface-1, #1a1d24);
       border: 1px solid var(--border, rgba(255,255,255,.08));
       border-radius: 12px;
@@ -135,7 +136,10 @@
       display: flex;
       flex-direction: column;
     }
-    .inbox-c-col-right { padding: 0; }
+    /* Klant-info wordt nu in een modal getoond — onderstaande klassen blijven
+       bestaan zodat de bestaande render-functies (avatar/naam/facturen/acties)
+       binnen de modal-body hergebruikt kunnen worden. */
+    .inbox-c-customer-content-wrap { padding: 0; }
     .inbox-c-col-right-empty {
       padding: 28px 18px;
       text-align: center;
@@ -168,12 +172,55 @@
       letter-spacing: .02em;
     }
     .inbox-c-customer-name {
-      font-size: 16px;
+      font-size: 15px;
       font-weight: 700;
       color: var(--text-strong, #fff);
       text-align: center;
       margin: 0;
       word-break: break-word;
+    }
+    /* Klantnaam-trigger in de chat-header. Button-styling lijkt op gewone
+       tekst maar geeft duidelijk klik-feedback met subtiele hover-tint. */
+    .chat-header-customer-trigger {
+      background: transparent;
+      border: 0;
+      padding: 2px 6px;
+      margin: -2px -6px;
+      border-radius: 6px;
+      cursor: pointer;
+      color: inherit;
+      font: inherit;
+      font-size: 15px;
+      font-weight: 700;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      max-width: 100%;
+      text-align: left;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      transition: background-color .15s ease;
+    }
+    .chat-header-customer-trigger:hover { background: rgba(255,255,255,.06); }
+    .chat-header-customer-trigger:focus-visible {
+      outline: 2px solid rgba(59,130,246,.5);
+      outline-offset: 1px;
+    }
+    .chat-header-customer-trigger .info-glyph {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 14px;
+      height: 14px;
+      border-radius: 50%;
+      border: 1px solid var(--text-faint, #94a3b8);
+      color: var(--text-faint, #94a3b8);
+      font-size: 9px;
+      font-weight: 700;
+      font-style: italic;
+      flex-shrink: 0;
+      line-height: 1;
     }
     .inbox-c-customer-phone {
       font-size: 12.5px;
@@ -389,7 +436,7 @@
       border-radius: 7.5px;
       max-width: 65%;
       min-width: 60px;
-      font-size: 14.2px;
+      font-size: 13.5px;
       line-height: 1.35;
       word-wrap: break-word;
       box-sizing: border-box;
@@ -433,7 +480,7 @@
       position: absolute;
       bottom: 4px;
       right: 8px;
-      font-size: 11px;
+      font-size: 10.5px;
       opacity: 0.55;
       white-space: nowrap;
       line-height: 1;
@@ -870,15 +917,15 @@
 
     @media (max-width: 1100px) {
       .inbox-layout-c {
-        grid-template-columns: 240px 1fr 0;
+        grid-template-columns: minmax(240px, 33%) minmax(0, 1fr);
       }
-      .inbox-c-col-right { display: none; }
     }
-    @media (max-width: 720px) {
+    @media (max-width: 800px) {
       .inbox-layout-c {
         grid-template-columns: minmax(0, 1fr);
         grid-template-rows: minmax(0, 1fr);
       }
+      .inbox-c-col-left { max-width: none; }
     }
   </style>
 </head>
@@ -1194,9 +1241,6 @@
       <div style="font-size:12.5px">Je mist de rechten <code>finance.inbox.view</code>. Vraag een beheerder om deze permissie te activeren.</div>
     </div>
     <div id="inboxMain">
-      <div id="inboxConfigStatus" style="margin-bottom:12px;font-size:11.5px;color:var(--text-faint)">
-        Meta-config nog niet geverifieerd.
-      </div>
       <div class="inbox-layout-c">
         <!-- LEFT column: conversation list -->
         <div class="inbox-c-col-left">
@@ -1285,61 +1329,8 @@
           </div>
         </div>
 
-        <!-- RIGHT column: klant-info panel -->
-        <div class="inbox-c-col-right" id="inboxCustomerPanel">
-          <div class="inbox-c-col-right-empty" id="inboxCustomerPanelEmpty">
-            Selecteer een gesprek om klant-info te zien
-          </div>
-          <!-- Skeleton tijdens load -->
-          <div class="inbox-c-customer-content" id="inboxCustomerPanelSkeleton" hidden>
-            <div class="inbox-c-skel-bubble" style="width:80px;height:80px;border-radius:50%;margin:4px auto 12px"></div>
-            <div class="inbox-c-skel-line w70" style="margin:0 auto 6px;height:14px"></div>
-            <div class="inbox-c-skel-line w50" style="margin:0 auto 16px"></div>
-            <div class="inbox-c-skel-line w90"></div>
-            <div class="inbox-c-skel-line w70"></div>
-            <div class="inbox-c-skel-line w50"></div>
-          </div>
-          <div class="inbox-c-customer-content" id="inboxCustomerPanelContent" hidden>
-            <div class="inbox-c-avatar-large" id="inboxCustPanelAvatar" style="background:hsl(210,55%,42%)">?</div>
-            <h3 class="inbox-c-customer-name" id="inboxCustPanelName">—</h3>
-            <div class="inbox-c-customer-phone" id="inboxCustPanelPhone">—</div>
-            <span class="inbox-c-window-badge-large open" id="inboxCustPanelWindow" hidden>24h open</span>
-
-            <!-- Sectie: open facturen -->
-            <div class="inbox-c-section">
-              <div class="inbox-c-section-head">
-                <span class="inbox-c-section-lbl">Open facturen</span>
-                <span class="inbox-c-section-total" id="inboxCustPanelOpenTotal">€ 0,00</span>
-              </div>
-              <div class="inbox-c-invoice-list" id="inboxCustPanelInvoices">
-                <div class="inbox-c-empty-line">Geen open facturen</div>
-              </div>
-            </div>
-
-            <!-- Sectie: klant info -->
-            <div class="inbox-c-section" id="inboxCustPanelInfoSection">
-              <div class="inbox-c-section-head">
-                <span class="inbox-c-section-lbl">Klant info</span>
-              </div>
-              <div id="inboxCustPanelInfoBody">
-                <div class="inbox-c-kv"><span class="k">Klant sinds</span><span class="v" id="inboxCustPanelSince">—</span></div>
-                <div class="inbox-c-kv" id="inboxCustPanelEmailRow" hidden><span class="k">E-mail</span><span class="v" id="inboxCustPanelEmail">—</span></div>
-              </div>
-            </div>
-
-            <!-- Sectie: acties -->
-            <div class="inbox-c-section">
-              <div class="inbox-c-section-head">
-                <span class="inbox-c-section-lbl">Acties</span>
-              </div>
-              <div class="inbox-c-actions-list">
-                <a class="sr-abtn" id="inboxCustPanelOpen" href="#" target="_blank" rel="noopener" style="font-size:12.5px"><i class="ti ti-user"></i> Bekijk in klanten</a>
-                <a class="sr-abtn" id="inboxCustPanelInvoice" href="#" target="_blank" rel="noopener" style="font-size:12.5px"><i class="ti ti-file-invoice"></i> Maak factuur aan</a>
-                <button class="sr-abtn secondary" id="inboxClaimPaidBtn" type="button" style="font-size:12.5px" disabled title="Eerst klant koppelen"><i class="ti ti-cash-check"></i> Klant claimt betaald</button>
-              </div>
-            </div>
-          </div>
-        </div>
+        <!-- RIGHT column verwijderd — klant-info wordt nu getoond in
+             #inboxCustomerModal (klik op klantnaam in chat-header). -->
       </div>
     </div>
   </div>
@@ -2266,37 +2257,81 @@
   </div>
 </div>
 
-<!-- Inbox Customer-info modal (PR A2) -->
+<!-- Inbox Customer-info modal — toont klant-info bij klik op klantnaam in chat-header.
+     Bevat de volledige rich klant-context: avatar / naam / phone / 24h-window-badge,
+     open facturen, klant-info en acties (Open klant-profiel / Maak factuur aan /
+     Klant claimt betaald + Koppel-actie bij unmatched). IDs hergebruikt van het
+     vroegere rechter-paneel zodat renderInboxCustomerPanel zonder aanpassing
+     blijft werken. -->
 <div class="modal-overlay hidden" id="inboxCustomerModal" role="dialog" aria-modal="true">
-  <div class="modal-card" style="max-width:520px">
-    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px">
-      <h3 style="margin:0;font-size:17px">Klant-info</h3>
+  <div class="modal-card" style="max-width:560px;max-height:88vh;display:flex;flex-direction:column;padding:0">
+    <!-- Header -->
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;padding:18px 22px 8px">
+      <h3 style="margin:0;font-size:17px">Klantgegevens</h3>
       <button class="sr-ibtn" id="inboxCustomerClose" type="button" title="Sluiten" style="margin-top:-4px"><i class="ti ti-x"></i></button>
     </div>
 
-    <div style="margin-top:16px;display:flex;flex-direction:column;gap:10px">
-      <div style="display:flex;gap:10px;align-items:baseline">
-        <div style="font-size:12px;color:var(--text-faint);min-width:90px">Naam</div>
-        <div id="inboxCustomerName" style="font-size:13.5px;font-weight:600">—</div>
+    <!-- Body — content + skeleton + empty share dezelfde scroll-container -->
+    <div style="flex:1;min-height:0;overflow-y:auto;padding:6px 22px 4px">
+      <!-- Empty-state (geen conv geselecteerd) -->
+      <div class="inbox-c-col-right-empty" id="inboxCustomerPanelEmpty">
+        Selecteer een gesprek om klant-info te zien
       </div>
-      <div style="display:flex;gap:10px;align-items:baseline">
-        <div style="font-size:12px;color:var(--text-faint);min-width:90px">Telefoon</div>
-        <div id="inboxCustomerPhone" style="font-size:13px">—</div>
+      <!-- Skeleton tijdens load -->
+      <div class="inbox-c-customer-content" id="inboxCustomerPanelSkeleton" hidden style="padding:8px 0">
+        <div class="inbox-c-skel-bubble" style="width:80px;height:80px;border-radius:50%;margin:4px auto 12px"></div>
+        <div class="inbox-c-skel-line w70" style="margin:0 auto 6px;height:14px"></div>
+        <div class="inbox-c-skel-line w50" style="margin:0 auto 16px"></div>
+        <div class="inbox-c-skel-line w90"></div>
+        <div class="inbox-c-skel-line w70"></div>
+        <div class="inbox-c-skel-line w50"></div>
       </div>
-      <div style="display:flex;gap:10px;align-items:baseline">
-        <div style="font-size:12px;color:var(--text-faint);min-width:90px">E-mail</div>
-        <div id="inboxCustomerEmail" style="font-size:13px">—</div>
+      <!-- Content -->
+      <div class="inbox-c-customer-content" id="inboxCustomerPanelContent" hidden style="padding:8px 0">
+        <div class="inbox-c-avatar-large" id="inboxCustPanelAvatar" style="background:hsl(210,55%,42%)">?</div>
+        <h3 class="inbox-c-customer-name" id="inboxCustPanelName">—</h3>
+        <div class="inbox-c-customer-phone" id="inboxCustPanelPhone">—</div>
+        <span class="inbox-c-window-badge-large open" id="inboxCustPanelWindow" hidden>24h open</span>
+
+        <!-- Sectie: open facturen -->
+        <div class="inbox-c-section">
+          <div class="inbox-c-section-head">
+            <span class="inbox-c-section-lbl">Open facturen</span>
+            <span class="inbox-c-section-total" id="inboxCustPanelOpenTotal">€ 0,00</span>
+          </div>
+          <div class="inbox-c-invoice-list" id="inboxCustPanelInvoices">
+            <div class="inbox-c-empty-line">Geen open facturen</div>
+          </div>
+        </div>
+
+        <!-- Sectie: klant info -->
+        <div class="inbox-c-section" id="inboxCustPanelInfoSection">
+          <div class="inbox-c-section-head">
+            <span class="inbox-c-section-lbl">Klant info</span>
+          </div>
+          <div id="inboxCustPanelInfoBody">
+            <div class="inbox-c-kv"><span class="k">Klant sinds</span><span class="v" id="inboxCustPanelSince">—</span></div>
+            <div class="inbox-c-kv" id="inboxCustPanelEmailRow" hidden><span class="k">E-mail</span><span class="v" id="inboxCustPanelEmail">—</span></div>
+          </div>
+        </div>
+
+        <!-- Sectie: acties -->
+        <div class="inbox-c-section">
+          <div class="inbox-c-section-head">
+            <span class="inbox-c-section-lbl">Acties</span>
+          </div>
+          <div class="inbox-c-actions-list">
+            <a class="sr-abtn" id="inboxCustPanelOpen" href="#" target="_blank" rel="noopener" style="font-size:12.5px"><i class="ti ti-user"></i> Open klant-profiel</a>
+            <a class="sr-abtn" id="inboxCustPanelInvoice" href="#" target="_blank" rel="noopener" style="font-size:12.5px"><i class="ti ti-file-invoice"></i> Maak factuur aan</a>
+            <button class="sr-abtn secondary" id="inboxClaimPaidBtn" type="button" style="font-size:12.5px" disabled title="Eerst klant koppelen"><i class="ti ti-cash-check"></i> Klant claimt betaald</button>
+          </div>
+        </div>
       </div>
     </div>
 
-    <div id="inboxCustomerUnmatched" hidden style="margin-top:14px;background:rgba(245,158,11,.10);border:1px solid rgba(245,158,11,.3);border-radius:6px;padding:8px 12px;font-size:12px;color:#f59e0b">
-      <i class="ti ti-link-off"></i> Nog geen klant gekoppeld aan dit nummer.
-    </div>
-
-    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:18px;flex-wrap:wrap">
-      <a id="inboxCustomerOpenLink" href="#" target="_blank" rel="noopener" class="sr-abtn" hidden><i class="ti ti-external-link"></i> Bekijk in Klanten</a>
-      <a id="inboxCustomerInvoicesLink" href="#" target="_blank" rel="noopener" class="sr-abtn" hidden><i class="ti ti-file-invoice"></i> Bekijk facturen</a>
-      <button class="sr-abtn primary" id="inboxCustomerCloseBtn" type="button">Sluit</button>
+    <!-- Footer -->
+    <div style="display:flex;gap:8px;justify-content:flex-end;padding:12px 22px 18px;border-top:1px solid var(--border, rgba(255,255,255,.08))">
+      <button class="sr-abtn primary" id="inboxCustomerCloseBtn" type="button">Sluiten</button>
     </div>
   </div>
 </div>
@@ -2831,7 +2866,6 @@
         if (locked) locked.hidden = false;
       } else {
         // PR A2: conversation-list laden + auto-refresh + wire UI.
-        loadInboxConfigStatus();
         wireInboxOnce();
         loadInboxConvList();
         startInboxPolling();
@@ -5764,12 +5798,6 @@
     }
   }
 
-  async function loadInboxConfigStatus() {
-    const el = document.getElementById('inboxConfigStatus');
-    if (!el) return;
-    el.textContent = 'Meta-config check komt in PR A3 (endpoint /api/finance-inbox-status).';
-  }
-
   // ─── Inbox (Meta WhatsApp Cloud API) — PR A2 UI ───────────────────────────
   let _inboxConvs            = [];
   let _inboxConvFilter       = '';
@@ -6037,7 +6065,27 @@
       const headerAv    = document.getElementById('inboxThreadAvatar');
       const preName = preFromList.customer_name || preFromList.display_name || preFromList.phone_number || 'Onbekend';
       const prePhone = preFromList.phone_number || '';
-      if (headerName)  headerName.textContent  = 'Klant: ' + preName;
+      if (headerName) {
+        // Render direct als trigger-button zodat klik op naam ook tijdens
+        // initial-skeleton al de (lege) modal opent.
+        headerName.innerHTML = '';
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'chat-header-customer-trigger';
+        btn.id = 'inboxThreadCustomerLink';
+        btn.title = 'Klant-info bekijken';
+        const label = document.createElement('span');
+        label.textContent = preName;
+        label.style.overflow = 'hidden';
+        label.style.textOverflow = 'ellipsis';
+        const glyph = document.createElement('span');
+        glyph.className = 'info-glyph';
+        glyph.setAttribute('aria-hidden', 'true');
+        glyph.textContent = 'i';
+        btn.appendChild(label);
+        btn.appendChild(glyph);
+        headerName.appendChild(btn);
+      }
       if (headerPhone) headerPhone.textContent = prePhone || '—';
       if (headerAv) {
         headerAv.textContent = _inboxInitials(preName, prePhone);
@@ -6070,14 +6118,25 @@
       const niceName = conv.customer_name || conv.display_name || conv.phone_number || 'Onbekend';
       const nicePhone = conv.phone_number || '';
       if (headerName) {
+        // Render klantnaam als clickable button-trigger met klein info-icon.
+        // Modal opent via delegated handler in wireInboxOnce (#inboxThreadCustomerLink).
         headerName.innerHTML = '';
-        const span = document.createElement('span');
-        span.textContent = 'Klant: ' + niceName;
-        span.style.cursor = 'pointer';
-        span.style.textDecoration = 'underline';
-        span.style.textDecorationStyle = 'dotted';
-        span.id = 'inboxThreadCustomerLink';
-        headerName.appendChild(span);
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'chat-header-customer-trigger';
+        btn.id = 'inboxThreadCustomerLink';
+        btn.title = 'Klant-info bekijken';
+        const label = document.createElement('span');
+        label.textContent = niceName;
+        label.style.overflow = 'hidden';
+        label.style.textOverflow = 'ellipsis';
+        const glyph = document.createElement('span');
+        glyph.className = 'info-glyph';
+        glyph.setAttribute('aria-hidden', 'true');
+        glyph.textContent = 'i';
+        btn.appendChild(label);
+        btn.appendChild(glyph);
+        headerName.appendChild(btn);
       }
       if (headerPhone) headerPhone.textContent = nicePhone || '—';
       if (headerAv) {
@@ -6858,29 +6917,23 @@
     if (_inboxPollTimer) { clearInterval(_inboxPollTimer); _inboxPollTimer = null; }
   }
 
+  // Open de klant-info modal en render de body via renderInboxCustomerPanel met
+  // de bestaande in-memory _inboxCustomerContext (geladen bij conv-open). Geen
+  // nieuwe fetch nodig — context wordt automatisch ververst bij conv-switch en
+  // bij koppel-acties (zie loadInboxCustomerContext-callers).
   function openInboxCustomerModal() {
-    const conv = _inboxActiveConv;
-    if (!conv) return;
     const modal = document.getElementById('inboxCustomerModal');
     if (!modal) return;
-    const nameEl  = document.getElementById('inboxCustomerName');
-    const phoneEl = document.getElementById('inboxCustomerPhone');
-    const mailEl  = document.getElementById('inboxCustomerEmail');
-    const unmatch = document.getElementById('inboxCustomerUnmatched');
-    const openLnk = document.getElementById('inboxCustomerOpenLink');
-    const invLnk  = document.getElementById('inboxCustomerInvoicesLink');
-    const niceName = conv.customer_name || conv.display_name || conv.phone_number || 'Onbekend';
-    if (nameEl)  nameEl.textContent  = niceName;
-    if (phoneEl) phoneEl.textContent = conv.phone_number || '—';
-    if (mailEl)  mailEl.textContent  = '—';
-    if (conv.customer_id) {
-      if (unmatch) unmatch.hidden = true;
-      if (openLnk) { openLnk.hidden = false; openLnk.href = '/modules/klanten.html?id=' + encodeURIComponent(conv.customer_id); }
-      if (invLnk)  { invLnk.hidden  = false; invLnk.href  = '/modules/klanten.html?id=' + encodeURIComponent(conv.customer_id) + '&tab=facturen'; }
+    const ctx = _inboxCustomerContext;
+    if (!_inboxActiveConvId) {
+      renderInboxCustomerPanel('empty', null);
+    } else if (ctx && ctx.customer && ctx.customer.id) {
+      renderInboxCustomerPanel('matched', ctx);
+    } else if (ctx) {
+      renderInboxCustomerPanel('unknown', ctx);
     } else {
-      if (unmatch) unmatch.hidden = false;
-      if (openLnk) openLnk.hidden = true;
-      if (invLnk)  invLnk.hidden  = true;
+      // Context nog niet geladen (race): fail-soft → unknown skeleton-vrij.
+      renderInboxCustomerPanel('unknown', { conversation: null, customer: null, open_invoices: [], totals: { open_amount: 0, invoice_count: 0 } });
     }
     modal.classList.remove('hidden');
   }
