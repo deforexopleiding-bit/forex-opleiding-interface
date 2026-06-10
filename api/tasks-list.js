@@ -10,7 +10,8 @@
 //                                     Default (bij ontbreken): "PENDING,APPROVED" = open taken.
 //   action_type   (CSV optional)   -> exact-match (bv. MANUAL_VERIFY_PAYMENT,TL_INVOICE_SPLIT)
 //   category      (text optional)  -> 'arrangement' (action_type ILIKE 'TL\_%') |
-//                                     'verify_payment' (action_type = 'MANUAL_VERIFY_PAYMENT')
+//                                     'verify_payment' (action_type = 'MANUAL_VERIFY_PAYMENT') |
+//                                     'escalation' (action_type = 'MANUAL_ESCALATION')
 //   customer_id   (uuid optional)
 //   invoice_id    (uuid optional)  -> first-class FK-kolom uit F1-migratie
 //   search        (text optional)  -> ILIKE op klant-naamvelden (first_name / last_name / company_name)
@@ -35,7 +36,7 @@
 //     total,
 //     counts: {
 //       byStatus:   { PENDING, APPROVED, EXECUTED, REJECTED, FAILED, CANCELLED },
-//       byCategory: { arrangement, verify_payment }
+//       byCategory: { arrangement, verify_payment, escalation }
 //     },
 //     limit, offset
 //   }
@@ -49,7 +50,7 @@ import { customerDisplayName } from './_lib/customer-name.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const VALID_STATUS = ['PENDING', 'APPROVED', 'REJECTED', 'EXECUTED', 'FAILED', 'CANCELLED'];
-const VALID_CATEGORY = ['arrangement', 'verify_payment'];
+const VALID_CATEGORY = ['arrangement', 'verify_payment', 'escalation'];
 
 function clampInt(v, def, min, max) {
   const n = Number(v);
@@ -135,6 +136,8 @@ export default async function handler(req, res) {
       qb = qb.ilike('action_type', 'TL\\_%');
     } else if (category === 'verify_payment') {
       qb = qb.eq('action_type', 'MANUAL_VERIFY_PAYMENT');
+    } else if (category === 'escalation') {
+      qb = qb.eq('action_type', 'MANUAL_ESCALATION');
     }
     if (customerId) qb = qb.eq('customer_id', customerId);
     if (invoiceId)  qb = qb.eq('invoice_id', invoiceId);
@@ -250,6 +253,7 @@ export default async function handler(req, res) {
         else if (actionTypes.length > 1) cq = cq.in('action_type', actionTypes);
         if (category === 'arrangement')      cq = cq.ilike('action_type', 'TL\\_%');
         else if (category === 'verify_payment') cq = cq.eq('action_type', 'MANUAL_VERIFY_PAYMENT');
+        else if (category === 'escalation')     cq = cq.eq('action_type', 'MANUAL_ESCALATION');
         if (customerId) cq = cq.eq('customer_id', customerId);
         if (invoiceId)  cq = cq.eq('invoice_id', invoiceId);
         const { count: c, error: ce } = await cq;
@@ -260,10 +264,10 @@ export default async function handler(req, res) {
       console.error('[tasks-list byStatus]', e.message);
     }
 
-    // ---- Counts per category (arrangement / verify_payment) ----
+    // ---- Counts per category (arrangement / verify_payment / escalation) ----
     // Negeert de category-param zelf zodat tab-badges in de UI altijd het totaal
-    // van beide categorieën weergeven, gefilterd op overige criteria.
-    const byCategory = { arrangement: 0, verify_payment: 0 };
+    // van alle categorieën weergeven, gefilterd op overige criteria.
+    const byCategory = { arrangement: 0, verify_payment: 0, escalation: 0 };
     try {
       // arrangement (TL_-prefix)
       let arrQ = supabaseAdmin
@@ -290,6 +294,19 @@ export default async function handler(req, res) {
       const { count: verCount, error: verErr } = await verQ;
       if (verErr) console.error('[tasks-list byCategory.verify_payment]', verErr.message);
       else byCategory.verify_payment = typeof verCount === 'number' ? verCount : 0;
+
+      // escalation
+      let escQ = supabaseAdmin
+        .from('pending_actions')
+        .select('id', { count: 'exact', head: true })
+        .eq('action_type', 'MANUAL_ESCALATION');
+      if (statusList.length === 1) escQ = escQ.eq('status', statusList[0]);
+      else if (statusList.length > 1) escQ = escQ.in('status', statusList);
+      if (customerId) escQ = escQ.eq('customer_id', customerId);
+      if (invoiceId)  escQ = escQ.eq('invoice_id', invoiceId);
+      const { count: escCount, error: escErr } = await escQ;
+      if (escErr) console.error('[tasks-list byCategory.escalation]', escErr.message);
+      else byCategory.escalation = typeof escCount === 'number' ? escCount : 0;
     } catch (e) {
       console.error('[tasks-list byCategory]', e.message);
     }

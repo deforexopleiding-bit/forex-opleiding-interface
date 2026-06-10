@@ -71,7 +71,14 @@
     .tasks-type-badge { display:inline-block; padding:3px 9px; border-radius:6px; font-size:11px; font-weight:500; border:1px solid; white-space:nowrap; }
     .tasks-type-badge.cat-arrangement   { background:rgba(56,189,248,.12); color:#0284c7; border-color:rgba(56,189,248,.4); }
     .tasks-type-badge.cat-verify_payment{ background:rgba(168,85,247,.12); color:#7e22ce; border-color:rgba(168,85,247,.4); }
+    .tasks-type-badge.cat-escalation    { background:rgba(239,68,68,.12); color:#b91c1c; border-color:rgba(239,68,68,.4); }
     .tasks-type-badge.cat-other         { background:var(--bg-elev-2); color:var(--text-dim); border-color:var(--border); }
+
+    /* Severity badge voor MANUAL_ESCALATION */
+    .tasks-severity-badge { display:inline-block; padding:2px 8px; border-radius:10px; font-size:10.5px; font-weight:600; text-transform:uppercase; letter-spacing:.3px; border:1px solid transparent; }
+    .tasks-severity-badge.sev-low    { background:#d4edda; color:#15803d; border-color:rgba(34,197,94,.4); }
+    .tasks-severity-badge.sev-medium { background:#fff3cd; color:#b45309; border-color:rgba(245,158,11,.4); }
+    .tasks-severity-badge.sev-high   { background:#f8d7da; color:#b91c1c; border-color:rgba(239,68,68,.4); }
 
     /* ── Modal layout (gedeeld) ──────────────────────────────────── */
     .modal-overlay { position:fixed; inset:0; background:rgba(0,0,0,0.6); z-index:500; display:flex; align-items:center; justify-content:center; backdrop-filter:blur(4px); }
@@ -172,6 +179,7 @@
         <button type="button" class="approv-pill active" data-tasks-category="all"            onclick="switchTasksCategory('all')">Alle <span class="approv-pill-count" id="tasksPillCatAll">0</span></button>
         <button type="button" class="approv-pill"        data-tasks-category="arrangement"    onclick="switchTasksCategory('arrangement')">Regelingen <span class="approv-pill-count" id="tasksPillCatArrangement">0</span></button>
         <button type="button" class="approv-pill"        data-tasks-category="verify_payment" onclick="switchTasksCategory('verify_payment')">Betalingsclaims <span class="approv-pill-count" id="tasksPillCatVerify">0</span></button>
+        <button type="button" class="approv-pill"        data-tasks-category="escalation"     onclick="switchTasksCategory('escalation')">Escalaties <span class="approv-pill-count" id="tasksPillCatEscalation">0</span></button>
       </div>
 
       <!-- Tabel -->
@@ -216,6 +224,69 @@
       <button class="btn btn-primary" id="taskDetailApproveBtn"        onclick="approveTaskFromDetail()"             style="display:none">Approve</button>
       <button class="btn btn-danger" id="taskDetailMarkNotExecutedBtn" onclick="openTaskMarkNotExecutedFromDetail()" style="display:none">Markeer als niet door te voeren</button>
       <button class="btn btn-primary" id="taskDetailMarkExecutedBtn"   onclick="openTaskMarkExecutedFromDetail()"    style="display:none">Markeer als verwerkt</button>
+      <button class="btn"             id="taskDetailEscAddNoteBtn"     onclick="openEscAddNoteFromDetail()"          style="display:none">Voeg notitie toe</button>
+      <button class="btn btn-primary" id="taskDetailEscResolveBtn"     onclick="openEscResolveFromDetail()"          style="display:none">Markeer afgehandeld</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Escalatie: markeer afgehandeld modal (resolved / handed_over) ── -->
+<div class="modal-overlay hidden" id="escResolveModal" role="dialog" aria-modal="true">
+  <div class="modal-card" style="max-width:540px">
+    <div class="modal-header">
+      <div>
+        <div class="modal-title">Escalatie markeren als afgehandeld</div>
+        <div style="font-size:11px;color:var(--text-faint);margin-top:2px">Leg de outcome vast voor audit-trail</div>
+      </div>
+      <button class="modal-close" onclick="closeEscResolveModal()">&#x2715;</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-group">
+        <label class="form-label" for="escResolveOutcome">Outcome <span style="color:var(--color-danger,#dc2626)">*</span></label>
+        <select id="escResolveOutcome" class="form-input">
+          <option value="resolved">Opgelost</option>
+          <option value="handed_over">Overgedragen</option>
+        </select>
+        <div style="font-size:11px;color:var(--text-faint);margin-top:4px">Kies "Overgedragen" als de afhandeling buiten dit dashboard verder loopt.</div>
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="escResolveNotes">Notes <span style="color:var(--color-danger,#dc2626)">*</span></label>
+        <textarea id="escResolveNotes" class="form-input" rows="4" style="resize:vertical;min-height:90px" placeholder="Hoe is de escalatie afgehandeld? Min 10 chars."></textarea>
+        <div style="font-size:11px;color:var(--text-faint);margin-top:4px">Minimaal 10 tekens. Verplicht voor audit-trail.</div>
+      </div>
+      <div class="form-error hidden" id="escResolveError"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn" onclick="closeEscResolveModal()">Annuleren</button>
+      <button class="btn btn-primary" id="escResolveConfirmBtn" onclick="submitEscResolve()">Bevestig</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Escalatie: voeg notitie toe (outcome=ongoing) ─────────────────── -->
+<div class="modal-overlay hidden" id="escAddNoteModal" role="dialog" aria-modal="true">
+  <div class="modal-card" style="max-width:540px">
+    <div class="modal-header">
+      <div>
+        <div class="modal-title">Voeg notitie toe</div>
+        <div style="font-size:11px;color:var(--text-faint);margin-top:2px">Tussenupdate zonder status-wijziging</div>
+      </div>
+      <button class="modal-close" onclick="closeEscAddNoteModal()">&#x2715;</button>
+    </div>
+    <div class="modal-body">
+      <div style="background:rgba(56,189,248,0.06);border:1px solid rgba(56,189,248,0.25);border-radius:8px;padding:10px 12px;margin-bottom:14px;font-size:12.5px;color:var(--text-primary,var(--text))">
+        Notitie wordt toegevoegd aan voortgangslog. Status blijft ongewijzigd.
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="escAddNoteText">Notitie <span style="color:var(--color-danger,#dc2626)">*</span></label>
+        <textarea id="escAddNoteText" class="form-input" rows="4" style="resize:vertical;min-height:90px" placeholder="Wat is er gebeurd? Min 10 chars."></textarea>
+        <div style="font-size:11px;color:var(--text-faint);margin-top:4px">Minimaal 10 tekens. Verplicht voor audit-trail.</div>
+      </div>
+      <div class="form-error hidden" id="escAddNoteError"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn" onclick="closeEscAddNoteModal()">Annuleren</button>
+      <button class="btn btn-primary" id="escAddNoteConfirmBtn" onclick="submitEscAddNote()">Opslaan</button>
     </div>
   </div>
 </div>
@@ -327,7 +398,7 @@
 <script>
   // ── Module-scope state ────────────────────────────────────────────
   let _tasksActiveStatus   = 'PENDING';      // PENDING | APPROVED | EXECUTED | FAILED
-  let _tasksActiveCategory = 'all';          // all | arrangement | verify_payment
+  let _tasksActiveCategory = 'all';          // all | arrangement | verify_payment | escalation
   let _tasksSearchQuery    = '';
   let _tasksItems          = [];
   let _tasksLoading        = false;
@@ -372,6 +443,7 @@
       'TL_SUBSCRIPTION_STOP':               'Abonnement stop',
       'TL_INVOICE_WRITEOFF':                'Kwijtschelding',
       'MANUAL_VERIFY_PAYMENT':              'Betalingscontrole',
+      'MANUAL_ESCALATION':                  'Escalatie',
       // Legacy
       'arrangement.uitstel':         'Uitstel',
       'arrangement.gespreid':        'Splitsing in termijnen',
@@ -385,6 +457,7 @@
   function categoryForActionType(t) {
     const s = String(t || '');
     if (s === 'MANUAL_VERIFY_PAYMENT') return 'verify_payment';
+    if (s === 'MANUAL_ESCALATION')     return 'escalation';
     if (s.indexOf('TL_') === 0)        return 'arrangement';
     if (s.indexOf('arrangement.') === 0) return 'arrangement';
     return 'other';
@@ -539,17 +612,20 @@
     if (pE) pE.textContent = String(executed);
     if (pF) pF.textContent = String(failedAll);
 
-    // Pill-counts (category-strip) — "Alle" = arrangement + verify_payment (in
-    // de huidige status-context, server-side berekend).
+    // Pill-counts (category-strip) — "Alle" = arrangement + verify_payment +
+    // escalation (in de huidige status-context, server-side berekend).
     const arrangementCnt   = byCategory.arrangement    || 0;
     const verifyPaymentCnt = byCategory.verify_payment || 0;
-    const totalCnt         = arrangementCnt + verifyPaymentCnt;
+    const escalationCnt    = byCategory.escalation     || 0;
+    const totalCnt         = arrangementCnt + verifyPaymentCnt + escalationCnt;
     const cAll = document.getElementById('tasksPillCatAll');
     const cArr = document.getElementById('tasksPillCatArrangement');
     const cVer = document.getElementById('tasksPillCatVerify');
+    const cEsc = document.getElementById('tasksPillCatEscalation');
     if (cAll) cAll.textContent = String(totalCnt);
     if (cArr) cArr.textContent = String(arrangementCnt);
     if (cVer) cVer.textContent = String(verifyPaymentCnt);
+    if (cEsc) cEsc.textContent = String(escalationCnt);
   }
 
   function renderTasksRows() {
@@ -566,6 +642,7 @@
       const cat = categoryForActionType(it.action_type);
       const catLabel = (cat === 'arrangement') ? 'Regeling'
                      : (cat === 'verify_payment') ? 'Betalingsclaim'
+                     : (cat === 'escalation') ? 'Escalatie'
                      : 'Overig';
       const typeBadge =
         '<span class="tasks-type-badge cat-' + esc(cat) + '" title="' + esc(it.action_type || '') + '">' +
@@ -827,11 +904,112 @@
       '</div>';
   }
 
+  // Renderer: MANUAL_ESCALATION (F3 task-type).
+  // Toont severity-badge, volledige reden/escalation-text (geen truncate),
+  // optionele context-summary, en een "Bekijk gesprek"-link naar finance.html
+  // inbox (zelfde pattern als verify-payment).
+  function renderEscalationActionDetail(payload, execution_result) {
+    const p = payload || {};
+    const sevRaw = (p.severity != null ? String(p.severity) : '').toLowerCase();
+    const sevValid = (sevRaw === 'low' || sevRaw === 'medium' || sevRaw === 'high') ? sevRaw : null;
+    const sevLabel = sevValid
+      ? ({ low: 'Laag', medium: 'Middel', high: 'Hoog' })[sevValid]
+      : null;
+    const sevBadge = sevValid
+      ? '<span class="tasks-severity-badge sev-' + esc(sevValid) + '">' + esc(sevLabel) + '</span>'
+      : '<span style="color:var(--text-faint);font-size:11.5px">(geen severity)</span>';
+
+    const reasonText = (p.escalation_text != null && String(p.escalation_text).trim().length > 0)
+      ? String(p.escalation_text)
+      : (p.reason != null && String(p.reason).trim().length > 0)
+        ? String(p.reason)
+        : (p.rationale != null ? String(p.rationale) : '');
+    const reasonBlock = reasonText
+      ? '<div style="font-size:12.5px;color:var(--text);margin-top:6px">Reden:</div>' +
+        '<div style="font-size:12px;color:var(--text-dim);white-space:pre-wrap;padding:8px 10px;background:rgba(0,0,0,0.06);border-radius:6px;margin-top:4px">' + esc(reasonText) + '</div>'
+      : '<div style="font-size:12px;color:var(--text-faint);margin-top:4px">(geen reden vastgelegd)</div>';
+
+    const ctxSummary = (p.context_summary != null && String(p.context_summary).trim().length > 0)
+      ? String(p.context_summary)
+      : null;
+    const ctxBlock = ctxSummary
+      ? '<div style="font-size:12.5px;color:var(--text);margin-top:8px">Context-samenvatting:</div>' +
+        '<div style="font-size:12px;color:var(--text-dim);white-space:pre-wrap;padding:8px 10px;background:rgba(0,0,0,0.06);border-radius:6px;margin-top:4px">' + esc(ctxSummary) + '</div>'
+      : '';
+
+    let convLink = '';
+    if (p.conversation_id) {
+      const href = '/modules/finance.html#inbox?conversation_id=' + encodeURIComponent(p.conversation_id);
+      convLink =
+        '<div style="margin-top:8px">' +
+          '<a href="' + esc(href) + '" target="_blank" rel="noopener" style="color:var(--brand-secondary,var(--accent-cyan,#06b6d4));text-decoration:none;font-size:12px">' +
+            '<i class="ti ti-message-circle" style="font-size:11px"></i> Bekijk gesprek <i class="ti ti-external-link" style="font-size:11px"></i>' +
+          '</a>' +
+        '</div>';
+    }
+
+    const createdAt = p.created_at ? approvFmtDateTime(p.created_at) : null;
+    const source = p.source ? esc(String(p.source)) : null;
+
+    // Eventuele voortgangslog uit execution_result.progress_log[].
+    const r = execution_result || {};
+    const progress = Array.isArray(r.progress_log) ? r.progress_log : [];
+    const progressBlock = progress.length
+      ? '<div style="font-size:12.5px;color:var(--text);margin-top:10px">Voortgangslog:</div>' +
+        '<ul style="margin:4px 0 0;padding-left:20px;list-style:disc">' +
+          progress.map(function (ev) {
+            const evTs = ev && ev.at ? approvFmtDateTime(ev.at) : '';
+            const evBy = ev && ev.by ? String(ev.by) : '';
+            const evNote = ev && (ev.note || ev.notes || ev.text) ? String(ev.note || ev.notes || ev.text) : '';
+            return '<li style="font-size:12px;color:var(--text-dim);margin:2px 0">' +
+                     (evTs ? '<strong style="color:var(--text)">' + esc(evTs) + '</strong> ' : '') +
+                     (evBy ? '<span style="color:var(--text-faint);font-size:11px">' + esc(evBy) + '</span> ' : '') +
+                     (evNote ? '<div style="margin-top:2px;white-space:pre-wrap">' + esc(evNote) + '</div>' : '') +
+                   '</li>';
+          }).join('') +
+        '</ul>'
+      : '';
+
+    return '' +
+      '<div class="approv-detail-section-title">Escalatie</div>' +
+      '<div style="display:flex;flex-direction:column;gap:6px;padding:10px 12px;background:rgba(239,68,68,0.06);border:1px solid rgba(239,68,68,0.25);border-radius:8px">' +
+        '<div style="display:flex;align-items:center;flex-wrap:wrap;gap:8px">' +
+          '<span style="font-size:12.5px;color:var(--text);font-weight:600">Severity:</span>' +
+          sevBadge +
+          (source ? ' <span style="font-size:11.5px;color:var(--text-faint);margin-left:6px">bron: <strong style="color:var(--text-dim)">' + source + '</strong></span>' : '') +
+          (createdAt ? ' <span style="font-size:11.5px;color:var(--text-faint);margin-left:6px">aangemaakt: <strong style="color:var(--text-dim)">' + esc(createdAt) + '</strong></span>' : '') +
+        '</div>' +
+        reasonBlock +
+        ctxBlock +
+        convLink +
+        progressBlock +
+      '</div>';
+  }
+
   function renderExecutionResult(result, status) {
     const r = result || {};
     const title = (status === 'FAILED' || status === 'REJECTED' || status === 'CANCELLED')
       ? 'Niet doorgevoerd' : 'Verwerkt';
     const rows = [];
+
+    // Outcome-veld (gezet bij MANUAL_VERIFY_PAYMENT en MANUAL_ESCALATION).
+    if (r.outcome) {
+      const outcomeLabels = {
+        resolved:           'Opgelost',
+        handed_over:        'Overgedragen',
+        ongoing:            'Lopend (notitie toegevoegd)',
+        confirmed_paid:     'Bevestigd betaald',
+        not_found_in_bank:  'Niet gevonden in bank',
+        klant_misvatting:   'Klant-misvatting',
+      };
+      const outcomeLabel = outcomeLabels[r.outcome] || r.outcome;
+      rows.push(
+        '<div style="font-size:12.5px;color:var(--text)">' +
+          '<strong>Outcome:</strong> ' +
+          '<span style="color:var(--text-dim);margin-left:6px">' + esc(outcomeLabel) + '</span>' +
+        '</div>'
+      );
+    }
 
     if (status === 'FAILED' || status === 'REJECTED' || status === 'CANCELLED') {
       const reason = r.failure_reason || r.reason || r.error || '';
@@ -1011,6 +1189,8 @@
       specificBlock = renderConsolidateActionDetail(it.payload || {}, Array.isArray(d.invoices) ? d.invoices : []);
     } else if (it.action_type === 'MANUAL_VERIFY_PAYMENT') {
       specificBlock = renderVerifyPaymentDetail(it.payload || {}, inv);
+    } else if (it.action_type === 'MANUAL_ESCALATION') {
+      specificBlock = renderEscalationActionDetail(it.payload || {}, it.execution_result || {});
     }
 
     // Joost-suggestion link (E1.2 task-linking) — toont herkomst van de taak.
@@ -1048,10 +1228,27 @@
     const rejectBtn          = document.getElementById('taskDetailRejectBtn');
     const markExecutedBtn    = document.getElementById('taskDetailMarkExecutedBtn');
     const markNotExecutedBtn = document.getElementById('taskDetailMarkNotExecutedBtn');
-    if (approveBtn)         approveBtn.style.display         = isPending  ? '' : 'none';
-    if (rejectBtn)          rejectBtn.style.display          = isPending  ? '' : 'none';
-    if (markExecutedBtn)    markExecutedBtn.style.display    = isApproved ? '' : 'none';
-    if (markNotExecutedBtn) markNotExecutedBtn.style.display = isApproved ? '' : 'none';
+    const escResolveBtn      = document.getElementById('taskDetailEscResolveBtn');
+    const escAddNoteBtn      = document.getElementById('taskDetailEscAddNoteBtn');
+    const isEscalation       = it.action_type === 'MANUAL_ESCALATION';
+
+    if (isEscalation) {
+      // Escalaties hebben geen formele approve/reject — meteen actiebaar bij PENDING en APPROVED.
+      if (approveBtn)         approveBtn.style.display         = 'none';
+      if (rejectBtn)          rejectBtn.style.display          = 'none';
+      if (markExecutedBtn)    markExecutedBtn.style.display    = 'none';
+      if (markNotExecutedBtn) markNotExecutedBtn.style.display = 'none';
+      const showEscActions = isPending || isApproved;
+      if (escResolveBtn) escResolveBtn.style.display = showEscActions ? '' : 'none';
+      if (escAddNoteBtn) escAddNoteBtn.style.display = showEscActions ? '' : 'none';
+    } else {
+      if (approveBtn)         approveBtn.style.display         = isPending  ? '' : 'none';
+      if (rejectBtn)          rejectBtn.style.display          = isPending  ? '' : 'none';
+      if (markExecutedBtn)    markExecutedBtn.style.display    = isApproved ? '' : 'none';
+      if (markNotExecutedBtn) markNotExecutedBtn.style.display = isApproved ? '' : 'none';
+      if (escResolveBtn) escResolveBtn.style.display = 'none';
+      if (escAddNoteBtn) escAddNoteBtn.style.display = 'none';
+    }
   }
 
   // ── Approve / reject / mark-executed / mark-not-executed ──────────
@@ -1346,6 +1543,143 @@
     }
   }
 
+  // ── Escalatie: markeer afgehandeld (resolved / handed_over) ───────
+  function openEscResolveFromDetail() {
+    if (!_taskCurrentDetailId) return;
+    wireTasksOnce();
+    const sel   = document.getElementById('escResolveOutcome');
+    const notes = document.getElementById('escResolveNotes');
+    const err   = document.getElementById('escResolveError');
+    if (sel)   sel.value   = 'resolved';
+    if (notes) notes.value = '';
+    if (err)   { err.classList.add('hidden'); err.textContent = ''; }
+    document.getElementById('escResolveModal')?.classList.remove('hidden');
+    setTimeout(function () { try { notes?.focus(); } catch (_) {} }, 50);
+  }
+
+  function closeEscResolveModal() {
+    document.getElementById('escResolveModal')?.classList.add('hidden');
+  }
+
+  async function submitEscResolve() {
+    const sel   = document.getElementById('escResolveOutcome');
+    const notes = document.getElementById('escResolveNotes');
+    const err   = document.getElementById('escResolveError');
+    const btn   = document.getElementById('escResolveConfirmBtn');
+
+    const outcome = sel ? String(sel.value || '') : '';
+    if (outcome !== 'resolved' && outcome !== 'handed_over') {
+      if (err) { err.textContent = 'Kies een outcome.'; err.classList.remove('hidden'); }
+      return;
+    }
+    const notesText = (notes && notes.value || '').trim();
+    if (notesText.length < 10) {
+      if (err) { err.textContent = 'Notes zijn verplicht (min 10 tekens).'; err.classList.remove('hidden'); }
+      return;
+    }
+    const id = _taskCurrentDetailId;
+    if (!id) {
+      if (err) { err.textContent = 'Geen taak geselecteerd.'; err.classList.remove('hidden'); }
+      return;
+    }
+
+    const execution_result = {
+      outcome:      outcome,
+      manual_notes: notesText,
+    };
+
+    if (btn) { btn.disabled = true; btn.textContent = 'Bezig…'; }
+    try {
+      const r = await window.AgentShared.apiFetch('/api/pending-actions-mark-executed', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ id, execution_result }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        const msg = d.error || ('HTTP ' + r.status);
+        if (err) { err.textContent = 'Afhandelen mislukt: ' + msg; err.classList.remove('hidden'); }
+        return;
+      }
+      window.AgentShared?.showToast('Escalatie afgehandeld', 'success');
+      closeEscResolveModal();
+      closeTaskDetail();
+      loadTasks();
+      try { window.AgentShared?.refreshApprovalsBadge?.(); } catch (_) {}
+    } catch (e) {
+      console.error('[submitEscResolve]', e);
+      if (err) { err.textContent = 'Afhandelen mislukt: ' + e.message; err.classList.remove('hidden'); }
+    } finally {
+      if (btn) { btn.disabled = false; btn.textContent = 'Bevestig'; }
+    }
+  }
+
+  // ── Escalatie: voeg notitie toe (outcome=ongoing, geen status-change) ─
+  function openEscAddNoteFromDetail() {
+    if (!_taskCurrentDetailId) return;
+    wireTasksOnce();
+    const txt = document.getElementById('escAddNoteText');
+    const err = document.getElementById('escAddNoteError');
+    if (txt) txt.value = '';
+    if (err) { err.classList.add('hidden'); err.textContent = ''; }
+    document.getElementById('escAddNoteModal')?.classList.remove('hidden');
+    setTimeout(function () { try { txt?.focus(); } catch (_) {} }, 50);
+  }
+
+  function closeEscAddNoteModal() {
+    document.getElementById('escAddNoteModal')?.classList.add('hidden');
+  }
+
+  async function submitEscAddNote() {
+    const txt = document.getElementById('escAddNoteText');
+    const err = document.getElementById('escAddNoteError');
+    const btn = document.getElementById('escAddNoteConfirmBtn');
+
+    const note = (txt && txt.value || '').trim();
+    if (note.length < 10) {
+      if (err) { err.textContent = 'Notitie is verplicht (min 10 tekens).'; err.classList.remove('hidden'); }
+      return;
+    }
+    const id = _taskCurrentDetailId;
+    if (!id) {
+      if (err) { err.textContent = 'Geen taak geselecteerd.'; err.classList.remove('hidden'); }
+      return;
+    }
+
+    // outcome=ongoing: mark-executed met progress-event. Server schrijft naar
+    // execution_result.progress_log[]; bij ongoing-outcome blijft status APPROVED.
+    const execution_result = {
+      outcome:      'ongoing',
+      manual_notes: note,
+    };
+
+    if (btn) { btn.disabled = true; btn.textContent = 'Bezig…'; }
+    try {
+      const r = await window.AgentShared.apiFetch('/api/pending-actions-mark-executed', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ id, execution_result }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        const msg = d.error || ('HTTP ' + r.status);
+        if (err) { err.textContent = 'Notitie toevoegen mislukt: ' + msg; err.classList.remove('hidden'); }
+        return;
+      }
+      window.AgentShared?.showToast('Notitie toegevoegd', 'success');
+      closeEscAddNoteModal();
+      // Detail-modal openhouden en herladen zodat de log direct zichtbaar is.
+      try { openTaskDetail(id); } catch (_) {}
+      loadTasks();
+      try { window.AgentShared?.refreshApprovalsBadge?.(); } catch (_) {}
+    } catch (e) {
+      console.error('[submitEscAddNote]', e);
+      if (err) { err.textContent = 'Notitie toevoegen mislukt: ' + e.message; err.classList.remove('hidden'); }
+    } finally {
+      if (btn) { btn.disabled = false; btn.textContent = 'Opslaan'; }
+    }
+  }
+
   // ── Event-wiring (idempotent) ─────────────────────────────────────
   function wireTasksOnce() {
     if (_tasksWired) return;
@@ -1368,15 +1702,25 @@
     if (markNotExecM) markNotExecM.addEventListener('click', function (e) {
       if (e.target === markNotExecM) closeTaskMarkNotExecutedModal();
     });
+    const escResolveM = document.getElementById('escResolveModal');
+    if (escResolveM) escResolveM.addEventListener('click', function (e) {
+      if (e.target === escResolveM) closeEscResolveModal();
+    });
+    const escAddNoteM = document.getElementById('escAddNoteModal');
+    if (escAddNoteM) escAddNoteM.addEventListener('click', function (e) {
+      if (e.target === escAddNoteM) closeEscAddNoteModal();
+    });
 
     // Escape sluit modals (eerst niet-detail; daarna detail).
     document.addEventListener('keydown', function (e) {
       if (e.key !== 'Escape') return;
-      const ids = ['taskMarkExecutedModal', 'taskMarkNotExecutedModal', 'taskRejectModal', 'taskDetailModal'];
+      const ids = ['escResolveModal', 'escAddNoteModal', 'taskMarkExecutedModal', 'taskMarkNotExecutedModal', 'taskRejectModal', 'taskDetailModal'];
       for (var i = 0; i < ids.length; i++) {
         var el = document.getElementById(ids[i]);
         if (el && !el.classList.contains('hidden')) {
-          if (ids[i] === 'taskMarkExecutedModal')    closeTaskMarkExecutedModal();
+          if (ids[i] === 'escResolveModal')          closeEscResolveModal();
+          else if (ids[i] === 'escAddNoteModal')     closeEscAddNoteModal();
+          else if (ids[i] === 'taskMarkExecutedModal')    closeTaskMarkExecutedModal();
           else if (ids[i] === 'taskMarkNotExecutedModal') closeTaskMarkNotExecutedModal();
           else if (ids[i] === 'taskRejectModal')     closeTaskRejectModal();
           else if (ids[i] === 'taskDetailModal')     closeTaskDetail();
