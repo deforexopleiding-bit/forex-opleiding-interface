@@ -2277,8 +2277,13 @@
          is dead code want modal opent alleen via chat-header (gated op actieve
          conv). Verwijderd in PR #151 polish — toonde anders een placeholder
          "Selecteer een gesprek om klant-info te zien" + witruimte boven echte
-         content bij klik op klantnaam in chat-header. -->
-    <div style="flex:1;min-height:0;overflow-y:auto;padding:6px 22px 4px">
+         content bij klik op klantnaam in chat-header.
+         NB: geen `flex:1` meer (PR regressie-fix #151). Met flex:1 stretchte de
+         body naar max-height 88vh ook bij weinig content (vooral in unknown-state
+         met enkel "Onbekend contact" + avatar), wat een visuele leegte gaf boven
+         en onder. Zonder flex:1 schaalt modal-card mee met content, en blijft
+         max-height 88vh + overflow-y:auto als veiligheidsklep voor lange lijsten. -->
+    <div style="min-height:0;max-height:calc(88vh - 110px);overflow-y:auto;padding:6px 22px 4px">
       <!-- Skeleton tijdens load -->
       <div class="inbox-c-customer-content" id="inboxCustomerPanelSkeleton" hidden style="padding:8px 0">
         <div class="inbox-c-skel-bubble" style="width:80px;height:80px;border-radius:50%;margin:4px auto 12px"></div>
@@ -7268,9 +7273,13 @@
   // Hoofd-laad-functie. Roept /api/inbox-conversation-context aan en delegeert
   // naar renderInboxCustomerPanel met de juiste state.
   async function loadInboxCustomerContext(conversationId) {
-    const emptyEl   = document.getElementById('inboxCustomerPanelEmpty');
+    // NB: #inboxCustomerPanelEmpty is verwijderd in PR #151 (empty-state cleanup).
+    // De vroegere guard `if (!emptyEl || !contentEl) return;` returnt sindsdien
+    // altijd vroeg, waardoor _inboxCustomerContext nooit gevuld werd en de
+    // klant-modal alleen "Onbekend contact" toonde. We checken nu alleen het
+    // content-element — render-functie zelf is no-op-safe als el's ontbreken.
     const contentEl = document.getElementById('inboxCustomerPanelContent');
-    if (!emptyEl || !contentEl) return;
+    if (!contentEl) return;
 
     if (!conversationId) {
       _inboxCustomerContext = null;
