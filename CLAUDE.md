@@ -143,6 +143,29 @@ Lokaal: C:/Users/jeffr/forex-opleiding-interface
   recente PROPOSED-cards via `/api/joost-suggestions-recent`. Vereist
   env-vars `ANTHROPIC_API_KEY` + `INTERNAL_API_TOKEN`. Zie
   docs/joost-e11-and-f3-escalation.md voor flow + roadmap E2 (autonomy).
+- Joost (E2) — Autonomy-foundation in 5 fases (E2.0 decision-engine logs /
+  E2.1 reactive autonomy / E2.2 outbound scheduler / E2.3 negotiation +
+  pauzeer-per-conv / E2.4 prompt-context). Schema-uitbreidingen: jsonb
+  `autonomy_config` + `feature_flags` op `joost_config`, 3 nieuwe kolommen
+  + 6 nieuwe statussen op `joost_suggestions` (incl. `SENT_AUTONOMOUSLY` +
+  BLOCKED_*), nieuwe tabel `joost_conversation_state` (1 rij/conv met
+  counters + topics + pauze-state). Decision engine `evaluateAutonomy()`
+  is pure function in `api/joost-autonomy-evaluate.js` (8 checks in vaste
+  volgorde: validatie / confidence / intent-mode / office-hours /
+  rate-limit / paused / mandate / mode). Default feature-flag-state:
+  alleen `e2_decision_engine_logs=true` (shadow-mode); rest UIT zodat
+  Jeffrey per fase kan opbouwen. Endpoints: `joost-autonomy-evaluate` +
+  `joost-autonomy-decisions-list` + `joost-send-autonomous` (E2.1) +
+  `joost-outbound-send` + `joost-outbound-scheduler` (E2.2 cron, schedule
+  `30 8,11,14,17 * * 1-5`) + `joost-conversation-state` (E2.3
+  pauze/hervat). Admin-UI: Autonomy tab + Decision Log tab in Joost AI
+  sectie. Inbox-UI: pauze-knop + "Joost actief" + "Autonoom gepauzeerd"
+  badges. Open Acties krijgt renderers voor `MANUAL_PROPOSE_ARRANGEMENT`
+  en `MANUAL_FOLLOWUP` + Joost-autonoom badges. Mandate-config: 5
+  arrangement-types met `enabled` + caps; `abonnement_pauze` /
+  `abonnement_stop` / `kwijtschelding` blijven default `enabled=false`
+  (hard achter human-approval). Zie docs/joost-e2-autonomy-foundation.md
+  voor architectuur + smoke-test scenarios + rollout-checklist.
 - F3 escalation — `MANUAL_ESCALATION` action_type op `pending_actions`
   voor escalaties die geen TL-actie en geen verify-payment zijn (boos /
   juridisch / handover naar incasso). Endpoint
@@ -839,3 +862,76 @@ agent meeting-trigger. Eén shared secret voor alle internal traffic; zodra
 we meerdere bron-systemen krijgen kan een `X-Internal-Source`-header
 (`webhook` / `cron` / `agent`) discriminator-flag bieden zonder extra
 secrets.
+
+## Lessons Learned — E2 Joost autonomy-foundation (10 juni 2026)
+
+Volledige documentatie:
+[`docs/joost-e2-autonomy-foundation.md`](docs/joost-e2-autonomy-foundation.md).
+
+### Lesson learned 23 — Feature-flag-first deployment voor risico-volle autonomy
+Bij autonomy-features (waar code zelfstandig namens het bedrijf naar
+klanten communiceert) is **feature-flag-first deployment** geen optie maar
+verplicht. Concreet pattern dat we in E2 hanteren:
+
+1. **Migratie zet alle gedrag default UIT** — alleen het loggen van
+   beslissingen (`e2_decision_engine_logs=true`) staat aan. Reactive send,
+   outbound cron, scheduler, executor: allemaal `false`.
+2. **Engine draait sowieso in shadow-mode** — zodra de migratie loopt
+   berekent `evaluateAutonomy()` per inbound bericht zijn decision en
+   slaat die op in `joost_suggestions.autonomy_decision`. Geen
+   side-effects, alleen audit-data. Jeffrey kan 24-48u meekijken
+   "wat zou Joost doen?" voordat hij ook maar één flag omhoog zet.
+3. **Per-fase rollout, één flag tegelijk** — E2.1 (`e2_auto_send_text`)
+   gaat als eerste live, blijft 24u draaien, dan E2.2 scheduler, dan
+   executor, dan E2.3 etc. Bij regressie: flag terug op `false` en
+   probleem stopt direct — geen rollback van schema nodig.
+4. **Defense-in-depth tussen schedule + execute** — scheduler-flag
+   (`e2_outbound_cron`) en send-flag (`e2_outbound_executor`) zijn apart
+   schakelbaar. Cron kan dus pending-events selecteren en loggen ("had ik
+   willen sturen") zonder dat de send-endpoint er ook maar één daadwerkelijk
+   verstuurt. Twee laagjes om door te breken voordat een klant iets ziet.
+
+Anti-pattern dat we hiermee vermijden: één big-bang feature die "klaar" is
+en bij merge live gaat. Bij autonomy is dat onverantwoord — een hallucinatie
+in shadow-mode is een log-regel, in productie-autonomy is het een verkeerd
+bericht naar een klant met factuur-issue. Het feature-flag-first patroon
+geeft Jeffrey de regie om elk autonomy-pad pas aan te zetten als hij in de
+Decision Log heeft gezien dat het zinvol redeneert.
+
+### Lesson learned 24 — Gemandateerde scope-checks voor LLM-acties
+Bij autonomous arrangement-voorstellen (waar het LLM een bedrag / aantal
+dagen / aantal termijnen voorstelt) zijn **mandate-checks essentieel als
+hard contract om het LLM heen**. We vertrouwen het model NIET om binnen de
+business rules te blijven — we **dwingen het af in code**, los van wat het
+genereert:
+
+1. **`allowed_types` enum als hard whitelist** — als
+   `arrangement_mandate.allowed_types = ['UITSTEL','SPLITSING']`, dan
+   wordt een LLM-voorstel met type `KWIJTSCHELDING` direct
+   `BLOCKED_OUT_OF_MANDATE`, ongeacht hoe overtuigend de reasoning is.
+   Engine-side, niet prompt-side.
+2. **Min/max bedragen** — `min_total_amount_to_negotiate_eur` (geen
+   onderhandeling onder X euro — gewoon betalen) en
+   `max_total_amount_to_auto_propose_eur` (boven Y euro altijd door
+   mens). Beide bedragen zijn cap-checks op `customer_context.open_amount`
+   die de engine doet vóór hij ook maar overweegt door te sturen.
+3. **Max termijnen + max dagen uitstel** — voor splitsing en uitstel
+   afzonderlijk: `mandate.uitstel.max_dagen_zonder_approval` (default 14)
+   en `mandate.splitsing.max_termijnen_zonder_approval` (default 2). Het
+   LLM mag voorstellen wat het wil; voorstel boven cap → engine zet
+   `stop_action='task_create'` + `MANUAL_PROPOSE_ARRANGEMENT` zodat een
+   mens de afweging maakt.
+4. **Sub-mandate-flags als laatste deur** — per arrangement-type een
+   `auto_approve_if_within` boolean. UITSTEL binnen 14 dagen mag self-
+   approve (laag risico, één factuur); SPLITSING binnen 2 termijnen niet
+   (raakt N facturen + TL line-items per termijn, verdient tweede paar
+   ogen).
+
+Anti-pattern dat we hiermee vermijden: vertrouwen op "we hebben het in de
+system-prompt gezegd dat Joost geen kwijtscheldingen mag voorstellen". Een
+voldoende creatieve klant praat het model er alsnog toe; een hallucinatie
+kan een random voorstel uit het niets genereren. Door **code-side
+scope-checks na de LLM-output** is het onmogelijk om buiten mandaat te
+treden, ongeacht prompt-engineering of model-keuze. Dezelfde redenering
+geldt voor `communication_limits` (max berichten per dag / cooldown /
+office-hours): het LLM weet er niets van — engine handhaaft het.

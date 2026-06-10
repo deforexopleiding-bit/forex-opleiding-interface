@@ -80,6 +80,31 @@
     .tasks-severity-badge.sev-medium { background:#fff3cd; color:#b45309; border-color:rgba(245,158,11,.4); }
     .tasks-severity-badge.sev-high   { background:#f8d7da; color:#b91c1c; border-color:rgba(239,68,68,.4); }
 
+    /* Joost-autonoom mini-badge (paars, sparkle-icon) — voor rij + detail. */
+    .tasks-joost-badge {
+      display:inline-flex; align-items:center; gap:3px;
+      padding:1px 6px; border-radius:6px;
+      background:rgba(168,85,247,0.12); color:#7e22ce;
+      border:1px solid rgba(168,85,247,0.4);
+      font-size:10px; font-weight:600; letter-spacing:.2px;
+      vertical-align:middle;
+    }
+    .tasks-joost-badge .ti { font-size:11px; }
+    .tasks-joost-badge.compact { padding:1px 4px; font-size:9.5px; }
+
+    /* Sub-filter strip (action_type filter onder Regelingen). */
+    .tasks-subfilter-strip {
+      display:flex; gap:6px; flex-wrap:wrap; align-items:center;
+      margin:-6px 0 14px 0; padding:6px 10px;
+      background:var(--bg-elev-2); border:1px dashed var(--border);
+      border-radius:8px;
+    }
+    .tasks-subfilter-strip .filter-group-label {
+      font-size:10.5px; text-transform:uppercase; color:var(--text-faint);
+      font-weight:600; letter-spacing:.4px; margin-right:4px;
+    }
+    .tasks-subfilter-strip .approv-pill { padding:4px 11px; font-size:11px; }
+
     /* ── Modal layout (gedeeld) ──────────────────────────────────── */
     .modal-overlay { position:fixed; inset:0; background:rgba(0,0,0,0.6); z-index:500; display:flex; align-items:center; justify-content:center; backdrop-filter:blur(4px); }
     .modal-overlay.hidden { display:none!important; }
@@ -180,6 +205,15 @@
         <button type="button" class="approv-pill"        data-tasks-category="arrangement"    onclick="switchTasksCategory('arrangement')">Regelingen <span class="approv-pill-count" id="tasksPillCatArrangement">0</span></button>
         <button type="button" class="approv-pill"        data-tasks-category="verify_payment" onclick="switchTasksCategory('verify_payment')">Betalingsclaims <span class="approv-pill-count" id="tasksPillCatVerify">0</span></button>
         <button type="button" class="approv-pill"        data-tasks-category="escalation"     onclick="switchTasksCategory('escalation')">Escalaties <span class="approv-pill-count" id="tasksPillCatEscalation">0</span></button>
+      </div>
+
+      <!-- Sub-filter strip: action_type-filter onder Regelingen (Voorstellen / Follow-ups).
+           Alleen zichtbaar als category = 'arrangement' of 'all'. -->
+      <div class="tasks-subfilter-strip hidden" id="tasksSubfilterStrip">
+        <span class="filter-group-label">Sub-type</span>
+        <button type="button" class="approv-pill active" data-tasks-subtype="all"                         onclick="switchTasksSubtype('all')">Alle</button>
+        <button type="button" class="approv-pill"        data-tasks-subtype="MANUAL_PROPOSE_ARRANGEMENT"  onclick="switchTasksSubtype('MANUAL_PROPOSE_ARRANGEMENT')">Voorstellen <span class="approv-pill-count" id="tasksPillSubPropose">0</span></button>
+        <button type="button" class="approv-pill"        data-tasks-subtype="MANUAL_FOLLOWUP"             onclick="switchTasksSubtype('MANUAL_FOLLOWUP')">Follow-ups <span class="approv-pill-count" id="tasksPillSubFollowup">0</span></button>
       </div>
 
       <!-- Tabel -->
@@ -399,6 +433,7 @@
   // ── Module-scope state ────────────────────────────────────────────
   let _tasksActiveStatus   = 'PENDING';      // PENDING | APPROVED | EXECUTED | FAILED
   let _tasksActiveCategory = 'all';          // all | arrangement | verify_payment | escalation
+  let _tasksActiveSubtype  = 'all';          // all | MANUAL_PROPOSE_ARRANGEMENT | MANUAL_FOLLOWUP (client-side filter binnen arrangement)
   let _tasksSearchQuery    = '';
   let _tasksItems          = [];
   let _tasksLoading        = false;
@@ -444,6 +479,8 @@
       'TL_INVOICE_WRITEOFF':                'Kwijtschelding',
       'MANUAL_VERIFY_PAYMENT':              'Betalingscontrole',
       'MANUAL_ESCALATION':                  'Escalatie',
+      'MANUAL_PROPOSE_ARRANGEMENT':         'Voorstel afspraak',
+      'MANUAL_FOLLOWUP':                    'Follow-up bericht',
       // Legacy
       'arrangement.uitstel':         'Uitstel',
       'arrangement.gespreid':        'Splitsing in termijnen',
@@ -456,11 +493,39 @@
 
   function categoryForActionType(t) {
     const s = String(t || '');
-    if (s === 'MANUAL_VERIFY_PAYMENT') return 'verify_payment';
-    if (s === 'MANUAL_ESCALATION')     return 'escalation';
-    if (s.indexOf('TL_') === 0)        return 'arrangement';
-    if (s.indexOf('arrangement.') === 0) return 'arrangement';
+    if (s === 'MANUAL_VERIFY_PAYMENT')       return 'verify_payment';
+    if (s === 'MANUAL_ESCALATION')           return 'escalation';
+    if (s === 'MANUAL_PROPOSE_ARRANGEMENT')  return 'arrangement';
+    if (s === 'MANUAL_FOLLOWUP')             return 'arrangement';
+    if (s.indexOf('TL_') === 0)              return 'arrangement';
+    if (s.indexOf('arrangement.') === 0)     return 'arrangement';
     return 'other';
+  }
+
+  // Detect Joost-autonoom herkomst. Een taak is "Joost-autonoom" als:
+  //  - action.source === 'joost' (top-level vlag op pending_actions row), of
+  //  - payload.source === 'joost' (legacy / nested), of
+  //  - action.created_by === 'joost' (sentinel system-user).
+  // Wordt gebruikt voor mini-badge op rij-niveau + detail-modal header.
+  function isJoostAutonomous(it) {
+    if (!it) return false;
+    if (String(it.source || '').toLowerCase() === 'joost') return true;
+    if (String(it.created_by || '').toLowerCase() === 'joost') return true;
+    const p = it.payload || {};
+    if (String(p.source || '').toLowerCase() === 'joost') return true;
+    if (String(p.created_by || '').toLowerCase() === 'joost') return true;
+    // Een action_type uit de Joost-pipeline + linked_joost_suggestion zien we
+    // als impliciete bevestiging.
+    if (it.linked_joost_suggestion && (it.action_type === 'MANUAL_PROPOSE_ARRANGEMENT' || it.action_type === 'MANUAL_FOLLOWUP')) {
+      return true;
+    }
+    return false;
+  }
+
+  function joostAutonomousBadge(opts) {
+    const compact = !!(opts && opts.compact);
+    const cls = 'tasks-joost-badge' + (compact ? ' compact' : '');
+    return '<span class="' + cls + '" title="Aangemaakt door Joost autonoom"><i class="ti ti-sparkles"></i>Joost</span>';
   }
 
   function approvSummary(it) {
@@ -545,6 +610,13 @@
     if (_tasksActiveCategory && _tasksActiveCategory !== 'all') {
       params.set('category', _tasksActiveCategory);
     }
+    // Sub-type filter (Voorstellen / Follow-ups) komt server-side door als
+    // action_type-CSV. Server-side filter is best-effort; bij oudere endpoints
+    // die de param niet kennen valt het terug op client-side filter in
+    // renderTasksRows() via _tasksActiveSubtype.
+    if (_tasksActiveSubtype && _tasksActiveSubtype !== 'all') {
+      params.set('action_type', _tasksActiveSubtype);
+    }
     if (_tasksSearchQuery && _tasksSearchQuery.trim()) {
       params.set('search', _tasksSearchQuery.trim());
     }
@@ -626,28 +698,70 @@
     if (cArr) cArr.textContent = String(arrangementCnt);
     if (cVer) cVer.textContent = String(verifyPaymentCnt);
     if (cEsc) cEsc.textContent = String(escalationCnt);
+
+    // Sub-type pill counts. byActionType is een optionele (E2.x+) extra die
+    // tasks-list mag returnen; valt anders terug op client-side telling
+    // uit _tasksItems (bij actieve subtype-filter is _tasksItems al
+    // gefilterd, dus dan is de count niet representatief — beter laten staan
+    // van vorige load).
+    const byActionType = counts.byActionType || null;
+    let proposeCnt = 0;
+    let followupCnt = 0;
+    if (byActionType) {
+      proposeCnt  = Number(byActionType.MANUAL_PROPOSE_ARRANGEMENT || 0);
+      followupCnt = Number(byActionType.MANUAL_FOLLOWUP || 0);
+    } else if (_tasksActiveSubtype === 'all') {
+      // Geen server-side telling beschikbaar: derive uit huidige items.
+      for (let i = 0; i < _tasksItems.length; i++) {
+        const at = _tasksItems[i].action_type;
+        if (at === 'MANUAL_PROPOSE_ARRANGEMENT') proposeCnt++;
+        else if (at === 'MANUAL_FOLLOWUP')       followupCnt++;
+      }
+    }
+    const sP = document.getElementById('tasksPillSubPropose');
+    const sF = document.getElementById('tasksPillSubFollowup');
+    if (sP) sP.textContent = String(proposeCnt);
+    if (sF) sF.textContent = String(followupCnt);
+
+    // Sub-filter strip is zichtbaar bij category=arrangement of all.
+    const subStrip = document.getElementById('tasksSubfilterStrip');
+    if (subStrip) {
+      const visible = (_tasksActiveCategory === 'all' || _tasksActiveCategory === 'arrangement');
+      subStrip.classList.toggle('hidden', !visible);
+    }
   }
 
   function renderTasksRows() {
     const tbody = document.getElementById('tasksTableBody');
     if (!tbody) return;
-    if (!_tasksItems.length) {
+
+    // Client-side subtype-filter: redundante safety op de gerenderde items
+    // voor het geval server-side action_type filter (nog) niet werkt.
+    let items = _tasksItems;
+    if (_tasksActiveSubtype && _tasksActiveSubtype !== 'all') {
+      items = items.filter(function (it) { return it.action_type === _tasksActiveSubtype; });
+    }
+
+    if (!items.length) {
       tbody.innerHTML = '<tr><td colspan="6" style="color:var(--text-faint);padding:20px;text-align:center">Geen taken in deze view.</td></tr>';
       return;
     }
     const isPending  = _tasksActiveStatus === 'PENDING';
     const isApproved = _tasksActiveStatus === 'APPROVED';
 
-    const rows = _tasksItems.map(function (it) {
+    const rows = items.map(function (it) {
       const cat = categoryForActionType(it.action_type);
       const catLabel = (cat === 'arrangement') ? 'Regeling'
                      : (cat === 'verify_payment') ? 'Betalingsclaim'
                      : (cat === 'escalation') ? 'Escalatie'
                      : 'Overig';
+      const joostMini = isJoostAutonomous(it)
+        ? ' ' + joostAutonomousBadge({ compact: true })
+        : '';
       const typeBadge =
         '<span class="tasks-type-badge cat-' + esc(cat) + '" title="' + esc(it.action_type || '') + '">' +
           esc(catLabel) +
-        '</span>' +
+        '</span>' + joostMini +
         '<div style="font-size:10px;color:var(--text-faint);margin-top:3px">' + esc(approvActionLabel(it.action_type)) + '</div>';
 
       const cust = it.customer;
@@ -734,6 +848,25 @@
     document.querySelectorAll('#tasksCategoryStrip .approv-pill').forEach(function (p) {
       const pc = p.getAttribute('data-tasks-category');
       if (pc != null) p.classList.toggle('active', pc === cat);
+    });
+    // Sub-filter alleen relevant binnen arrangement/all. Bij switch naar
+    // andere category -> reset subtype zodat de filter niet 'plakt'.
+    if (cat !== 'all' && cat !== 'arrangement' && _tasksActiveSubtype !== 'all') {
+      _tasksActiveSubtype = 'all';
+      document.querySelectorAll('#tasksSubfilterStrip .approv-pill').forEach(function (p) {
+        const ps = p.getAttribute('data-tasks-subtype');
+        if (ps != null) p.classList.toggle('active', ps === 'all');
+      });
+    }
+    loadTasks();
+  }
+
+  function switchTasksSubtype(subtype) {
+    if (subtype === _tasksActiveSubtype) return;
+    _tasksActiveSubtype = subtype;
+    document.querySelectorAll('#tasksSubfilterStrip .approv-pill').forEach(function (p) {
+      const ps = p.getAttribute('data-tasks-subtype');
+      if (ps != null) p.classList.toggle('active', ps === subtype);
     });
     loadTasks();
   }
@@ -986,6 +1119,194 @@
       '</div>';
   }
 
+  // Renderer: MANUAL_PROPOSE_ARRANGEMENT (E2.x — Joost stelt arrangement voor).
+  // Toont suggested_intent (vertaald naar NL label), customer_context summary
+  // (open_amount + open_invoices_count), optionele Joost-quote uit
+  // linked_joost_suggestion.suggested_reply, en een Open-afspraak-wizard knop
+  // met pre-fill via finance.html#arrangement-wizard.
+  function renderProposeArrangementDetail(it, linkedSugg) {
+    const p = it && it.payload ? it.payload : {};
+    const cust = it && it.customer ? it.customer : null;
+    const inv  = it && it.invoice  ? it.invoice  : null;
+
+    // Suggested intent (uitstel / splitsing / kwijtschelding / etc).
+    const intentRaw = (p.suggested_intent != null) ? String(p.suggested_intent) : '';
+    const intentLabels = {
+      UITSTEL:           'Uitstel',
+      SPLITSING:         'Splitsing in termijnen',
+      ABONNEMENT_PAUZE:  'Abonnement pauze',
+      ABONNEMENT_STOP:   'Abonnement stop',
+      KWIJTSCHELDING:    'Kwijtschelding',
+      // Legacy lowercase
+      uitstel:           'Uitstel',
+      gespreid:          'Splitsing in termijnen',
+      splitsing:         'Splitsing in termijnen',
+      pauze:             'Abonnement pauze',
+      abonnement_pauze:  'Abonnement pauze',
+      abonnement_stop:   'Abonnement stop',
+      kwijtschelding:    'Kwijtschelding',
+    };
+    const intentLabel = intentRaw ? (intentLabels[intentRaw] || intentRaw) : null;
+    const intentBadge = intentLabel
+      ? '<span style="display:inline-block;padding:3px 9px;border-radius:6px;background:rgba(56,189,248,0.18);color:#0284c7;font-size:11px;font-weight:600;border:1px solid rgba(56,189,248,0.4)">' + esc(intentLabel) + '</span>'
+      : '<span style="color:var(--text-faint);font-size:11.5px">(geen intent voorgesteld)</span>';
+
+    // Customer-context summary (openstaand bedrag + factuur-count).
+    const ctx = p.customer_context || {};
+    const ctxParts = [];
+    if (ctx.open_amount != null && isFinite(Number(ctx.open_amount))) {
+      ctxParts.push('Openstaand: <strong>' + esc(approvFmtEur(Number(ctx.open_amount))) + '</strong>');
+    }
+    if (ctx.open_invoices_count != null) {
+      ctxParts.push('<strong>' + esc(String(ctx.open_invoices_count)) + '</strong> open ' + (Number(ctx.open_invoices_count) === 1 ? 'factuur' : 'facturen'));
+    }
+    if (ctx.oldest_due_date) {
+      ctxParts.push('Oudste vervaldatum: <strong>' + esc(approvFmtDateOnly(ctx.oldest_due_date)) + '</strong>');
+    }
+    if (ctx.messages_sent_total != null) {
+      ctxParts.push('<strong>' + esc(String(ctx.messages_sent_total)) + '</strong> Joost-berichten verstuurd');
+    }
+    const ctxBlock = ctxParts.length
+      ? '<div style="font-size:12.5px;color:var(--text);margin-top:6px">Klant-context:</div>' +
+        '<ul style="margin:4px 0 0;padding-left:20px;list-style:disc">' +
+          ctxParts.map(function (s) { return '<li style="font-size:12px;color:var(--text-dim);margin:1px 0">' + s + '</li>'; }).join('') +
+        '</ul>'
+      : '<div style="font-size:12px;color:var(--text-faint);margin-top:4px">(geen context-summary in payload)</div>';
+
+    // Joost-quote: bij voorkeur uit linked_joost_suggestion.suggested_reply,
+    // anders payload.suggested_reply / payload.joost_quote.
+    const joostQuote = (linkedSugg && linkedSugg.suggested_reply)
+      ? String(linkedSugg.suggested_reply)
+      : (p.suggested_reply ? String(p.suggested_reply)
+         : (p.joost_quote ? String(p.joost_quote) : ''));
+    const joostQuoteBlock = joostQuote
+      ? '<div style="font-size:12.5px;color:var(--text);margin-top:10px;display:flex;align-items:center;gap:6px">' +
+          '<i class="ti ti-sparkles" style="color:#7e22ce;font-size:14px"></i>' +
+          '<strong>Joost zegt:</strong>' +
+        '</div>' +
+        '<blockquote style="margin:4px 0 0;padding:8px 12px;border-left:3px solid #7e22ce;background:rgba(168,85,247,0.06);font-size:12px;color:var(--text-dim);white-space:pre-wrap;font-style:italic">' + esc(joostQuote) + '</blockquote>'
+      : '';
+
+    // Reden / rationale voor het voorstel.
+    const rationaleText = p.rationale ? String(p.rationale)
+                       : (p.reason ? String(p.reason) : '');
+    const rationaleBlock = rationaleText
+      ? '<div style="font-size:12.5px;color:var(--text);margin-top:10px">Reden:</div>' +
+        '<div style="font-size:12px;color:var(--text-dim);white-space:pre-wrap;padding:8px 10px;background:rgba(0,0,0,0.06);border-radius:6px;margin-top:4px">' + esc(rationaleText) + '</div>'
+      : '';
+
+    // Open afspraak-wizard knop met pre-fill (intent + customer_id + invoice_id).
+    const wizardParams = new URLSearchParams();
+    if (intentRaw)              wizardParams.set('intent',       intentRaw);
+    if (cust && cust.id)        wizardParams.set('customer_id',  cust.id);
+    if (inv && inv.id)          wizardParams.set('invoice_id',   inv.id);
+    if (it && it.id)            wizardParams.set('task_id',      it.id);
+    const wizardHref = '/modules/finance.html#arrangement-wizard?' + wizardParams.toString();
+    const wizardBtn =
+      '<div style="margin-top:12px">' +
+        '<a href="' + esc(wizardHref) + '" target="_blank" rel="noopener" class="btn btn-primary btn-sm" style="display:inline-flex;align-items:center;gap:6px;text-decoration:none">' +
+          '<i class="ti ti-wand"></i> Open afspraak-wizard' +
+        '</a>' +
+      '</div>';
+
+    return '' +
+      '<div class="approv-detail-section-title">Voorstel afspraak (Joost)</div>' +
+      '<div style="display:flex;flex-direction:column;gap:4px;padding:10px 12px;background:rgba(56,189,248,0.06);border:1px solid rgba(56,189,248,0.25);border-radius:8px">' +
+        '<div style="display:flex;align-items:center;flex-wrap:wrap;gap:8px">' +
+          '<span style="font-size:12.5px;color:var(--text);font-weight:600">Voorgesteld type:</span>' +
+          intentBadge +
+        '</div>' +
+        ctxBlock +
+        rationaleBlock +
+        joostQuoteBlock +
+        wizardBtn +
+      '</div>';
+  }
+
+  // Renderer: MANUAL_FOLLOWUP (E2.x / F4 — follow-up bericht / reminder).
+  // Toont reden + suggested_template (knop voor handmatige template-send naar
+  // finance.html inbox-compose), eventuele due_at en assignee_user_id.
+  function renderFollowupDetail(it, linkedSugg) {
+    const p = it && it.payload ? it.payload : {};
+    const cust = it && it.customer ? it.customer : null;
+
+    const reasonText = p.reason ? String(p.reason)
+                       : (p.rationale ? String(p.rationale)
+                          : (p.followup_reason ? String(p.followup_reason) : ''));
+    const reasonBlock = reasonText
+      ? '<div style="font-size:12.5px;color:var(--text);margin-top:6px">Reden:</div>' +
+        '<div style="font-size:12px;color:var(--text-dim);white-space:pre-wrap;padding:8px 10px;background:rgba(0,0,0,0.06);border-radius:6px;margin-top:4px">' + esc(reasonText) + '</div>'
+      : '<div style="font-size:12px;color:var(--text-faint);margin-top:4px">(geen reden vastgelegd)</div>';
+
+    // suggested_template kan een string (template-naam) of een object zijn
+    // ({ name, language, params }). Toon naam + params.
+    const templateRaw = p.suggested_template || p.template_name || null;
+    let templateName = '';
+    let templateLang = '';
+    let templateParams = null;
+    if (templateRaw) {
+      if (typeof templateRaw === 'string') {
+        templateName = templateRaw;
+      } else if (typeof templateRaw === 'object') {
+        templateName   = templateRaw.name || templateRaw.template_name || '';
+        templateLang   = templateRaw.language || templateRaw.lang || '';
+        templateParams = templateRaw.params || templateRaw.variables || null;
+      }
+    }
+    const templateBlock = templateName
+      ? '<div style="font-size:12.5px;color:var(--text);margin-top:10px">Voorgesteld template:</div>' +
+        '<div style="font-size:12px;color:var(--text-dim);padding:8px 10px;background:rgba(0,0,0,0.06);border-radius:6px;margin-top:4px">' +
+          '<code style="color:var(--text);font-size:11.5px">' + esc(templateName) + '</code>' +
+          (templateLang ? ' <span style="color:var(--text-faint);margin-left:6px">(' + esc(templateLang) + ')</span>' : '') +
+          (templateParams ? '<pre class="approv-detail-pre" style="margin-top:6px;max-height:120px">' + esc(JSON.stringify(templateParams, null, 2)) + '</pre>' : '') +
+        '</div>'
+      : '';
+
+    const dueAt = p.due_at ? approvFmtDateTime(p.due_at) : null;
+    const assignee = p.assignee_user_id || p.assignee || null;
+    const metaParts = [];
+    if (dueAt)    metaParts.push('Deadline: <strong>' + esc(dueAt) + '</strong>');
+    if (assignee) metaParts.push('Toegewezen aan: <strong>' + esc(String(assignee)) + '</strong>');
+    const metaBlock = metaParts.length
+      ? '<div style="font-size:12px;color:var(--text-dim);margin-top:8px">' + metaParts.join(' &middot; ') + '</div>'
+      : '';
+
+    // Joost-quote uit linked suggestion.
+    const joostQuote = (linkedSugg && linkedSugg.suggested_reply) ? String(linkedSugg.suggested_reply) : '';
+    const joostQuoteBlock = joostQuote
+      ? '<div style="font-size:12.5px;color:var(--text);margin-top:10px;display:flex;align-items:center;gap:6px">' +
+          '<i class="ti ti-sparkles" style="color:#7e22ce;font-size:14px"></i>' +
+          '<strong>Joost zegt:</strong>' +
+        '</div>' +
+        '<blockquote style="margin:4px 0 0;padding:8px 12px;border-left:3px solid #7e22ce;background:rgba(168,85,247,0.06);font-size:12px;color:var(--text-dim);white-space:pre-wrap;font-style:italic">' + esc(joostQuote) + '</blockquote>'
+      : '';
+
+    // Aanmaak-task knop: open inbox compose-panel met template pre-fill (handmatige send).
+    const sendParams = new URLSearchParams();
+    if (cust && cust.id)       sendParams.set('customer_id',   cust.id);
+    if (templateName)          sendParams.set('template',      templateName);
+    if (templateLang)          sendParams.set('language',      templateLang);
+    if (p.conversation_id)     sendParams.set('conversation_id', p.conversation_id);
+    if (it && it.id)           sendParams.set('task_id',       it.id);
+    const sendHref = '/modules/finance.html#inbox-compose?' + sendParams.toString();
+    const sendBtn =
+      '<div style="margin-top:12px">' +
+        '<a href="' + esc(sendHref) + '" target="_blank" rel="noopener" class="btn btn-primary btn-sm" style="display:inline-flex;align-items:center;gap:6px;text-decoration:none">' +
+          '<i class="ti ti-send"></i> Aanmaak template-send' +
+        '</a>' +
+      '</div>';
+
+    return '' +
+      '<div class="approv-detail-section-title">Follow-up bericht</div>' +
+      '<div style="display:flex;flex-direction:column;gap:4px;padding:10px 12px;background:rgba(56,189,248,0.06);border:1px solid rgba(56,189,248,0.25);border-radius:8px">' +
+        reasonBlock +
+        templateBlock +
+        joostQuoteBlock +
+        metaBlock +
+        sendBtn +
+      '</div>';
+  }
+
   function renderExecutionResult(result, status) {
     const r = result || {};
     const title = (status === 'FAILED' || status === 'REJECTED' || status === 'CANCELLED')
@@ -1183,18 +1504,37 @@
     if (it.reject_reason) auditHtml += '<div style="margin-top:6px"><span style="color:var(--text-faint)">Reden:</span> ' + esc(it.reject_reason) + '</div>';
     if (!auditHtml) auditHtml = '<div style="color:var(--text-faint)">(nog geen audit-events)</div>';
 
+    // Inject customer + invoice + linked-suggestion op het item zodat downstream
+    // renderers ze niet apart hoeven door te krijgen via params.
+    if (cust && !it.customer) it.customer = cust;
+    if (inv  && !it.invoice)  it.invoice  = inv;
+
     // Action-type-specifieke renderer.
     let specificBlock = '';
+    const linkedSugg = it.linked_joost_suggestion || null;
     if (it.action_type === 'TL_INVOICE_CONSOLIDATE_AND_RESTART') {
       specificBlock = renderConsolidateActionDetail(it.payload || {}, Array.isArray(d.invoices) ? d.invoices : []);
     } else if (it.action_type === 'MANUAL_VERIFY_PAYMENT') {
       specificBlock = renderVerifyPaymentDetail(it.payload || {}, inv);
     } else if (it.action_type === 'MANUAL_ESCALATION') {
       specificBlock = renderEscalationActionDetail(it.payload || {}, it.execution_result || {});
+    } else if (it.action_type === 'MANUAL_PROPOSE_ARRANGEMENT') {
+      specificBlock = renderProposeArrangementDetail(it, linkedSugg);
+    } else if (it.action_type === 'MANUAL_FOLLOWUP') {
+      specificBlock = renderFollowupDetail(it, linkedSugg);
     }
 
     // Joost-suggestion link (E1.2 task-linking) — toont herkomst van de taak.
-    const joostBlock = renderJoostSuggestionDetail(it.linked_joost_suggestion || null);
+    const joostBlock = renderJoostSuggestionDetail(linkedSugg);
+
+    // Joost-autonoom badge in detail-modal subtitle (zichtbaar als de taak
+    // door Joost autonoom is aangemaakt).
+    const sub = document.getElementById('taskDetailSubtitle');
+    if (sub) {
+      const joostFlag = isJoostAutonomous(it);
+      sub.innerHTML = 'ID: ' + esc(it.id || _taskCurrentDetailId || '') +
+        (joostFlag ? ' &nbsp; ' + joostAutonomousBadge({ compact: false }) : '');
+    }
 
     const executionBlock = (isExecuted || isFailed)
       ? renderExecutionResult(it.execution_result || {}, status)
