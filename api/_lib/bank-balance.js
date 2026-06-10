@@ -66,6 +66,24 @@ function toNumberOrNull(v) {
 
 // Defensieve TL probe — TL apiary documenteert balans NIET expliciet op
 // financialAccounts.info, dus we accepteren stilte (return null) ipv throw.
+//
+// TL veldnamen-validatie (juni 2026):
+//   - GEEN bestaande callers in deze repo van financialAccounts.info — de
+//     enige caller is deze helper. Validatie van responseshape moet
+//     daarom defensief blijven (probeer meerdere candidate-velden).
+//   - TL apiary publiek toont: data.id, data.iban, data.bic, data.bank,
+//     data.summary; balance-velden zijn niet gegarandeerd aanwezig en
+//     verschillen mogelijk per locale.
+//   - Strategie: pak het eerste valide numerieke veld uit een ordered
+//     prioriteit (specifiekste eerst); val anders terug op
+//     legacy_current_balance van de bank_accounts row.
+//   - Bij regressie of TL-shape-wijziging: log het hele response object
+//     één keer in productie (DEBUG-flag), niet hier in de happy-path
+//     om logs niet vol te zetten.
+//
+// TODO: zodra TL daadwerkelijk een actief financialAccounts sync heeft
+//       (zie roadmap E2), kunnen we dit harderen door de exacte veldnaam
+//       te kiezen uit een gebruiks-statistiek.
 async function tlFetchBalance(tlAccountId) {
   if (!tlAccountId) return { balance: null, http: null, error: 'no_tl_id' };
   try {
@@ -80,12 +98,14 @@ async function tlFetchBalance(tlAccountId) {
     const json = await r.json().catch(() => null);
     const data = json && json.data ? json.data : null;
     if (!data) return { balance: null, http: r.status, error: 'empty_data' };
-    // Defensief: meerdere candidate-velden afgrazen.
+    // Defensief: meerdere candidate-velden afgrazen (ordered, specifiekste eerst).
     const candidates = [
-      data.balance,
-      data.current_balance,
-      data?.balance?.amount,
-      data?.current_balance?.amount,
+      data?.current_balance?.amount,    // genest object met amount/currency
+      data?.balance?.amount,            // alternatief genest object
+      data.current_balance,             // top-level numeric
+      data.balance,                     // top-level numeric
+      data?.summary?.balance?.amount,   // genest in summary
+      data?.summary?.balance,           // summary numeric
     ];
     for (const c of candidates) {
       const n = toNumberOrNull(c);

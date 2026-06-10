@@ -167,13 +167,25 @@ GEDAAN:
 - C10: `view-dashboard` container + financeNav knop op positie 1 + DOMContentLoaded default setView('dashboard').
 - E1: `api/_lib/bank-balance.js` lazy-cache helper (15min TTL).
 
+GEDAAN (PR-3, juni 2026):
+- C4: `/api/finance-dashboard-chart-joost-intents.js` (Joost suggestions
+  stacked-area-chart over 30 dagen, per detected_intent).
+- C6: `/api/finance-dashboard-chart-tasks.js` (Open Acties per
+  action_type bar-chart + byCategory aggregaat).
+- C7: `/api/finance-dashboard-chart-cashflow.js` (binnenkomend 90d uit
+  payments + verwacht 30d uit open invoices, dual-line trend).
+- C8: `/api/finance-dashboard-chart-payments.js` (nieuwe vs herhaal per
+  maand, JS-seen-Set lookup ipv window-functie).
+- E2: `/api/finance-bank-balance.js` heeft nu opt-in `?source=bank_accounts`
+  pad via `_lib/bank-balance.js` helper. Default blijft e-Boekhouden voor
+  backward-compat. Activeerbaar via env-default
+  `FINANCE_BANK_BALANCE_SOURCE=bank_accounts` of per-call query param.
+- Frontend: 4 nieuwe chart-panelen in `finance-dashboard.js` met
+  Recharts (BarChart + AreaChart + LineChart + Stacked BarChart) +
+  table-fallback bij CDN-fail (inline note "tabel-weergave" voor
+  duidelijkheid).
+
 PARTIAL / TODO (vervolg-PR):
-- C4: `/api/finance-dashboard-chart-joost-intents.js` (Joost suggestions stacked line over tijd).
-- C6: `/api/finance-dashboard-chart-tasks.js` (Open Acties per type bar).
-- C7: `/api/finance-dashboard-chart-cashflow.js` (3-maands cashflow line).
-- C8: `/api/finance-dashboard-chart-payments.js` (nieuwe vs herhaal stacked bar).
-- E2: `/api/finance-bank-balance.js` rewrite naar TL-source (huidige endpoint
-  blijft op e-Boekhouden voor backward-compat; helper is klaar voor wissel).
 - SWR-cache persistent in app_settings (huidige cache is in-memory per Vercel-instance).
 
 Cache: in-memory SWR 5min per period acceptabel voor MVP; persistent later.
