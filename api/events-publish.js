@@ -5,17 +5,19 @@
 //
 // Query: ?id=<uuid>  (verplicht)
 //
-// Voor F1 alleen lokale status-flip; F2 voegt outbound sync toe (Webflow CMS
-// upsert + GoHighLevel form-create + Bubble LMS). Daarom geen webflow/ghl
-// fields aangeraakt in dit endpoint.
+// F2: na succesvolle status-flip wordt syncEventToOutbound() AWAITED uitgevoerd.
+// Beide outbound targets (Webflow + GHL) zijn intern geisoleerd in eigen
+// try/catch, dus 1 faal-target stopt de respons niet. Per-target status komt
+// terug in response.sync.
 //
 // Status-overgang strict: alleen draft -> published toegestaan. Een al gepubliceerd
 // event opnieuw publiceren is no-op (409). Voor draft hervatten gebruik events-update.
 //
-// Response 200: { event: { ...row } }
+// Response 200: { event: { ...row }, sync: { webflow: {...}, ghl: {...} } }
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
+import { syncEventToOutbound } from './_lib/event-sync-orchestrator.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -73,7 +75,34 @@ export default async function handler(req, res) {
     if (error) throw new Error('events-publish: ' + error.message);
     if (!ev)   return res.status(404).json({ error: 'Event niet gevonden' });
 
-    return res.status(200).json({ event: ev });
+    // F2: AWAITED outbound sync naar Webflow + GHL. Targets zijn binnen de
+    // orchestrator geisoleerd in eigen try/catch, dus 1 faal-target neemt de
+    // andere niet mee en de status-flip blijft staan ongeacht sync-uitkomst.
+    let sync = null;
+    try {
+      sync = await syncEventToOutbound(ev.id);
+    } catch (syncErr) {
+      console.error('[events-publish sync]', syncErr?.message || syncErr);
+      sync = { error: syncErr?.message || 'sync exception' };
+    }
+
+    // Refetch event om bijgewerkte webflow_item_id / sync_status / synced_at terug te geven.
+    let evAfter = ev;
+    try {
+      const { data: refetched } = await supabaseAdmin
+        .from('events')
+        .select(`
+          id, title, starts_at, ends_at, location, capacity, status, niveau,
+          description_md, webflow_item_id, webflow_sync_status, webflow_last_synced_at,
+          ghl_sync_status, ghl_last_synced_at,
+          created_by_user_id, created_at, updated_at
+        `)
+        .eq('id', ev.id)
+        .maybeSingle();
+      if (refetched) evAfter = refetched;
+    } catch {}
+
+    return res.status(200).json({ event: evAfter, sync });
   } catch (e) {
     console.error('[events-publish]', e.message);
     return res.status(500).json({ error: e.message });
