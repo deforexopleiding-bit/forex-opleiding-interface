@@ -38,7 +38,16 @@
 // op de /items/{id}/live route, wat een live-unpublish is, geen item-removal.
 
 const WEBFLOW_API_BASE   = 'https://api.webflow.com/v2';
-const SCHEMA_CACHE_TTL_MS = 5 * 60 * 1000; // 5 min
+const SCHEMA_CACHE_TTL_MS   = 5 * 60 * 1000;   // 5 min
+const TEMPLATE_CACHE_TTL_MS = 10 * 60 * 1000;  // 10 min (templates wijzigen zelden)
+
+// Mapping: lowercase Event Type option-NAME -> events.niveau slug.
+// Wordt gebruikt bij template-discovery om elk Webflow CMS-item te classifyeren
+// als basis- of gevorderd-template op basis van zijn category-veld.
+const WEBFLOW_TYPE_TO_NIVEAU = {
+  'forex kickstart live': 'basis',
+  'trading deep dive'   : 'gevorderd',
+};
 
 // In-memory module-scope cache. Reset bij elke koude Lambda-start (acceptabel).
 let _schemaCache = {
@@ -47,6 +56,21 @@ let _schemaCache = {
   fieldsByDisplayName: null,         // { lower(displayName) -> field-object }
   eventTypeOptions   : null,         // array van { id?, name, slug? }
   lastFetched        : 0,
+};
+
+// Template-cache voor clone-from-niveau-template strategie in createLiveItem.
+// byNiveau = { basis?: <item>, gevorderd?: <item> } - elke key alleen aanwezig
+// als er een Webflow CMS-item met dat niveau is gevonden.
+let _templateCache = {
+  byNiveau    : null,
+  lastFetched : 0,
+};
+
+// Cache voor Tijdstip-slug (display "Tijdstip" - runtime gediscovered).
+// null = nog niet gepoogd; '' = gepoogd maar veld niet gevonden; '<slug>' = found.
+let _tijdstipSlugCache = {
+  slug        : null,
+  lastFetched : 0,
 };
 
 // Welke version-header werkte voor de laatste succesvolle call (null = default).
@@ -434,6 +458,131 @@ async function publishSiteIfEnabled(context = '') {
   }
 }
 
+// ── Niveau-template discovery (voor createLiveItem clone-strategie) ──────────
+//
+// Doel: nieuwe Webflow items er net zo compleet uit laten zien als de
+// handmatige (Featured Image / Author / Entreeprijs / Event Type / Speakers /
+// Short text / Tekst 3). Aanpak: voor elk niveau (basis/gevorderd) zoeken we
+// een bestaand CMS-item dat we als template hergebruiken. createLiveItem
+// kloont fieldData uit dat template en overschrijft DAARNA alleen de
+// event-specifieke velden (name/slug/time/locatie-2/event-content/Tijdstip).
+//
+// Niveau-match logica:
+//   - Voor elk item: lees Event Type-veldwaarde (option-id of -name)
+//   - Map naar option-name via schema.eventTypeOptions
+//   - WEBFLOW_TYPE_TO_NIVEAU ('Forex Kickstart Live' -> 'basis',
+//                              'Trading Deep Dive'    -> 'gevorderd')
+//   - Eerste match per niveau wint (geen sortering ge-impliceerd)
+//
+// Env-var overrides: WEBFLOW_TEMPLATE_ITEM_ID_BASIS / _GEVORDERD - als gezet,
+// gebruiken we dat exacte item-ID als template, anders fallback op auto-match.
+//
+// Cache: 10 min TTL. Defensief: bij fetch-failure (geen 5xx-retry-loop hier)
+// returnen we {} - createLiveItem detecteert dat en valt terug op core-only.
+async function discoverNiveauTemplates({ force = false } = {}) {
+  const now = Date.now();
+  if (!force && _templateCache.byNiveau && (now - _templateCache.lastFetched) < TEMPLATE_CACHE_TTL_MS) {
+    return _templateCache.byNiveau;
+  }
+
+  try {
+    const { collId } = getEnv();
+    const schema = await getCollectionSchema();
+
+    // Detecteer Event Type slug uit schema (default 'category' uit recon)
+    const eventTypeField = schema.fieldsByDisplayName?.['event type']
+      || schema.fieldsBySlug?.category;
+    const eventTypeSlug = eventTypeField?.slug || 'category';
+
+    // GET items (staged - bevat alle items inclusief handmatig gemaakte)
+    const data = await webflowFetch(`/collections/${collId}/items?limit=100`, {
+      method: 'GET',
+    });
+    const items = Array.isArray(data?.items) ? data.items : [];
+
+    const byNiveau = {};
+    for (const item of items) {
+      const typeVal = item?.fieldData?.[eventTypeSlug];
+      if (!typeVal) continue;
+      // typeVal kan option-id zijn; map via schema.eventTypeOptions naar name
+      const opt = (schema.eventTypeOptions || []).find((o) =>
+        o?.id === typeVal || o?.slug === typeVal || o?.name === typeVal
+      );
+      const displayName = String(opt?.name || typeVal).toLowerCase().trim();
+      const niveau = WEBFLOW_TYPE_TO_NIVEAU[displayName];
+      if (niveau && !byNiveau[niveau]) {
+        byNiveau[niveau] = item;
+      }
+    }
+
+    // Env-var overrides hebben voorrang (admin pin een specifieke template)
+    const ovBasis     = process.env.WEBFLOW_TEMPLATE_ITEM_ID_BASIS;
+    const ovGevorderd = process.env.WEBFLOW_TEMPLATE_ITEM_ID_GEVORDERD;
+    if (ovBasis) {
+      const it = items.find((i) => i?.id === ovBasis);
+      if (it) byNiveau.basis = it;
+      else console.warn(`[webflow-client] WEBFLOW_TEMPLATE_ITEM_ID_BASIS=${ovBasis} niet gevonden in items`);
+    }
+    if (ovGevorderd) {
+      const it = items.find((i) => i?.id === ovGevorderd);
+      if (it) byNiveau.gevorderd = it;
+      else console.warn(`[webflow-client] WEBFLOW_TEMPLATE_ITEM_ID_GEVORDERD=${ovGevorderd} niet gevonden in items`);
+    }
+
+    _templateCache = { byNiveau, lastFetched: now };
+    return byNiveau;
+  } catch (e) {
+    console.warn('[webflow-client] template-discovery failed:', e?.message || e);
+    return {};
+  }
+}
+
+// Runtime-resolve van de "Tijdstip" TEXT-veld slug via collection-schema.
+// Cache mirror van schema-cache TTL. Return null als veld niet gevonden;
+// caller skipt dan dat veld en logt.
+async function resolveTijdstipSlug() {
+  const now = Date.now();
+  if (_tijdstipSlugCache.slug !== null && (now - _tijdstipSlugCache.lastFetched) < SCHEMA_CACHE_TTL_MS) {
+    return _tijdstipSlugCache.slug || null;
+  }
+  try {
+    const schema = await getCollectionSchema();
+    const fld = schema.fieldsByDisplayName?.['tijdstip'];
+    const slug = fld?.slug || '';
+    if (slug) {
+      console.log(`[webflow-client] Tijdstip-veld slug discovered: '${slug}'`);
+    } else {
+      console.warn('[webflow-client] Tijdstip-veld niet gevonden in collection-schema; skip');
+    }
+    _tijdstipSlugCache = { slug, lastFetched: now };
+    return slug || null;
+  } catch (e) {
+    console.warn('[webflow-client] resolveTijdstipSlug error:', e?.message || e);
+    return null;
+  }
+}
+
+// Format Tijdstip TEXT-waarde uit starts_at/ends_at in nl-NL (Europe/Amsterdam).
+//   met ends_at: 'HH:MM - HH:MM'
+//   alleen starts_at: 'HH:MM'
+//   geen starts_at: null
+function formatTijdstipNl(startsAt, endsAt) {
+  if (!startsAt) return null;
+  try {
+    const start = new Date(startsAt);
+    const timeFmt = new Intl.DateTimeFormat('nl-NL', {
+      hour: '2-digit', minute: '2-digit', hour12: false,
+      timeZone: 'Europe/Amsterdam',
+    });
+    const s = timeFmt.format(start);
+    if (!endsAt) return s;
+    const e = timeFmt.format(new Date(endsAt));
+    return `${s} - ${e}`;
+  } catch {
+    return null;
+  }
+}
+
 // ── Public API ────────────────────────────────────────────────────────────────
 
 export async function createLiveItem({ event, descriptionHtml }) {
@@ -442,7 +591,61 @@ export async function createLiveItem({ event, descriptionHtml }) {
   }
   const { collId } = getEnv();
   const schema = await getCollectionSchema();
-  const fieldData = buildFieldData({ event, descriptionHtml, schema });
+
+  // Stap 1: discover niveau-templates (basis / gevorderd)
+  const templates = await discoverNiveauTemplates();
+  const requestedNiveau = String(event?.niveau || '').toLowerCase().trim();
+  let template = null;
+  let templateInfo = { used: false, item_id: null, niveau: null, fallback: null };
+
+  if (requestedNiveau && templates[requestedNiveau]) {
+    template = templates[requestedNiveau];
+    templateInfo = { used: true, item_id: template.id || null, niveau: requestedNiveau, fallback: null };
+  } else if (templates.basis || templates.gevorderd) {
+    // Fallback op andere niveau-template (basis voorkeur boven gevorderd voor MVP)
+    template = templates.basis || templates.gevorderd;
+    const fallbackNiveau = templates.basis ? 'basis' : 'gevorderd';
+    templateInfo = {
+      used: true, item_id: template.id || null, niveau: fallbackNiveau,
+      fallback: requestedNiveau || '(empty)',
+    };
+  } else {
+    templateInfo = { used: false, item_id: null, niveau: null, fallback: 'core_only' };
+  }
+
+  // Stap 2: clone fieldData uit template, strip conflicterende id-achtige velden.
+  // event-specifieke velden worden in stap 3 overschreven.
+  const fieldData = template?.fieldData ? { ...template.fieldData } : {};
+  // Veiligheidsstrip: voorkom dat de template's id-achtige velden in onze POST komen.
+  delete fieldData._id;
+  delete fieldData.id;
+  delete fieldData['cms-locale-id'];
+
+  // Stap 3: bouw override-set + apply. buildFieldData zet name/slug/time/locatie-2/event-content.
+  const overrides = buildFieldData({ event, descriptionHtml, schema });
+
+  // Tijdstip TEXT veld: runtime slug + formatted "HH:MM - HH:MM"
+  const tijdstipSlug  = await resolveTijdstipSlug();
+  const tijdstipValue = formatTijdstipNl(event?.starts_at, event?.ends_at);
+  if (tijdstipSlug && tijdstipValue) {
+    overrides[tijdstipSlug] = tijdstipValue;
+  }
+
+  // Merge: overrides over template-base. Niet-overschreven velden (Featured
+  // Image / Author / Entreeprijs / Event Type / Speakers / Short text / Tekst 3)
+  // erven dus de template-waarde, precies de bedoeling van clone-from-niveau.
+  for (const [k, v] of Object.entries(overrides)) {
+    fieldData[k] = v;
+  }
+
+  console.log(
+    `[webflow-client] CREATE clone-from-niveau: ` +
+    `template=${templateInfo.item_id || 'none'} ` +
+    `(niveau=${templateInfo.niveau || 'n/a'}` +
+    (templateInfo.fallback ? `, fallback for '${templateInfo.fallback}'` : '') +
+    `) tijdstipSlug='${tijdstipSlug || 'n/a'}' tijdstipValue='${tijdstipValue || 'n/a'}' ` +
+    `overrides=[${Object.keys(overrides).join(',')}]`
+  );
 
   // POST /items/live - publiceert direct op live site, geen aparte site-publish nodig.
   const body = {
@@ -467,7 +670,7 @@ export async function createLiveItem({ event, descriptionHtml }) {
   }
 
   const sitePublish = await publishSiteIfEnabled('create-' + itemId);
-  return { itemId, raw: data, requestPayload: body, sitePublish };
+  return { itemId, raw: data, requestPayload: body, sitePublish, template: templateInfo };
 }
 
 export async function updateItem({ webflowItemId, event, descriptionHtml }) {
@@ -477,7 +680,6 @@ export async function updateItem({ webflowItemId, event, descriptionHtml }) {
   const schema = await getCollectionSchema();
   const fieldData = buildFieldData({ event, descriptionHtml, schema });
 
-  // PATCH /items/live/{id} - update LIVE item (item is + blijft publiek zichtbaar).
   const body = {
     isArchived: false,
     isDraft   : false,
