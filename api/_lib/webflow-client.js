@@ -11,24 +11,31 @@
 //   - Typed errors zodat caller (event-sync-orchestrator) ze kan loggen
 //     en mappen op event_sync_log.error_code
 //
-// Endpoints (Data API v2) - LIVE-VARIANT (publiek zichtbaar zonder site-publish):
+// Endpoints (Data API v2) - LIVE-VARIANT.
+// PATH-VOLGORDE: /live komt NA itemId voor update/unpublish (v2 ondersteunt
+// /items/live/{id} NIET - returnt 404). Alleen create heeft /live aan eind.
 //   GET    /collections/{coll}                              — schema (read)
 //   POST   /collections/{coll}/items/live                   — create LIVE item
-//   PATCH  /collections/{coll}/items/live/{itemId}          — update LIVE item
-//   DELETE /collections/{coll}/items/live/{itemId}          — unpublish van live site
+//   PATCH  /collections/{coll}/items/{itemId}/live          — update LIVE item
+//   DELETE /collections/{coll}/items/{itemId}/live          — unpublish van live site
 //                                                              (item blijft als staged bestaan)
 //
 // WAAROM /items/live ipv /items?  De staged variant (POST /items, PATCH
 // /items/{id}) maakt of update STAGED items. Die zijn NIET publiek zichtbaar
 // totdat iemand een aparte site-publish (POST /sites/{site_id}/publish) doet.
-// De /items/live varianten skippen die stap - item wordt direct live.
+// De /items/live varianten skippen die stap voor de item-records zelf.
 //
-// POST /sites/{site_id}/publish is dus NIET nodig per event-publish. We
-// gebruiken het ook niet als fallback - dat zou ook andere staged changes
-// in de site mee-publiceren (UI-edits, andere collections), wat ongewenst is.
+// Static-list-publicatie note: Webflow's CMS Collection Page (lijst-pagina van
+// een collection) is STATIC en wordt alleen ververst bij een SITE-publish.
+// Nieuwe live-items via /items/live zijn dus al "live" als individuele item-
+// records, maar de event-overzichtspagina (die ze in een lijst toont) ziet ze
+// pas na een site-publish. Daarom is publishSiteIfEnabled() toegevoegd: env-
+// flag EVENTS_WEBFLOW_SITE_PUBLISH (default 'false'). Bij 'true' doet de
+// client na een succesvolle item-sync 1 POST /sites/{site_id}/publish. Default
+// uit zodat staging-omgevingen geen onbedoelde site-publish triggeren.
 //
 // Spec G (geen DELETE op staged item) blijft gerespecteerd: we DELETEn alleen
-// op de /items/live route, wat een live-unpublish is, geen item-removal.
+// op de /items/{id}/live route, wat een live-unpublish is, geen item-removal.
 
 const WEBFLOW_API_BASE   = 'https://api.webflow.com/v2';
 const SCHEMA_CACHE_TTL_MS = 5 * 60 * 1000; // 5 min
@@ -372,6 +379,61 @@ function buildFieldData({ event, descriptionHtml, schema }) {
   return fd;
 }
 
+// ── Optionele site-publish ────────────────────────────────────────────────────
+//
+// Webflow's Collection-overzichtspagina (statische lijst-pagina van een
+// collection) wordt alleen ververst bij een site-publish. Individuele items
+// via /items/live zijn al "live" als records, maar tonen pas in de lijst-
+// pagina na deze call.
+//
+// Gated achter env-flag EVENTS_WEBFLOW_SITE_PUBLISH (default 'false'). Bij
+// 'true' wordt na een succesvolle item-sync 1 POST /sites/{site_id}/publish
+// gedaan. Optioneel: WEBFLOW_CUSTOM_DOMAIN_IDS (comma-separated) om naar
+// custom-domain te publiceren; standaard alleen Webflow-subdomain.
+//
+// Errors in deze call breken de item-sync NIET (defensive try/catch). Caller
+// ontvangt de uitkomst via return.sitePublish voor logging.
+async function publishSiteIfEnabled(context = '') {
+  const flag = String(process.env.EVENTS_WEBFLOW_SITE_PUBLISH || 'false').toLowerCase();
+  if (flag !== 'true') {
+    return { skipped: true, reason: 'EVENTS_WEBFLOW_SITE_PUBLISH != true' };
+  }
+  const siteId = process.env.WEBFLOW_SITE_ID;
+  if (!siteId) {
+    console.warn(`[webflow-client] site-publish skipped (${context}): WEBFLOW_SITE_ID missing`);
+    return { skipped: true, reason: 'WEBFLOW_SITE_ID missing' };
+  }
+
+  const customDomainsRaw = process.env.WEBFLOW_CUSTOM_DOMAIN_IDS || '';
+  const customDomains = customDomainsRaw
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+
+  const body = customDomains.length > 0
+    ? { customDomains, publishToWebflowSubdomain: true }
+    : { publishToWebflowSubdomain: true };
+
+  console.log(
+    `[webflow-client] site-publish triggered (${context}): site=${siteId}, ` +
+    `customDomains=${customDomains.length}, subdomain=true`
+  );
+
+  try {
+    const data = await webflowFetch(`/sites/${siteId}/publish`, {
+      method: 'POST',
+      body,
+    });
+    console.log(
+      `[webflow-client] site-publish OK (${context}): ${JSON.stringify(data || {}).slice(0, 200)}`
+    );
+    return { ok: true, body, response: data };
+  } catch (e) {
+    console.warn(`[webflow-client] site-publish FAILED (${context}): ${e?.message || e}`);
+    return { ok: false, error: e?.message || String(e) };
+  }
+}
+
 // ── Public API ────────────────────────────────────────────────────────────────
 
 export async function createLiveItem({ event, descriptionHtml }) {
@@ -403,7 +465,9 @@ export async function createLiveItem({ event, descriptionHtml }) {
   if (!itemId) {
     throw new WebflowError('VALIDATION_FAIL', 'Webflow create-live response zonder item id', { body: data });
   }
-  return { itemId, raw: data, requestPayload: body };
+
+  const sitePublish = await publishSiteIfEnabled('create-' + itemId);
+  return { itemId, raw: data, requestPayload: body, sitePublish };
 }
 
 export async function updateItem({ webflowItemId, event, descriptionHtml }) {
@@ -420,24 +484,28 @@ export async function updateItem({ webflowItemId, event, descriptionHtml }) {
     fieldData,
   };
 
-  const data = await webflowFetch(`/collections/${collId}/items/live/${webflowItemId}`, {
+  // PATCH /items/{id}/live - update LIVE item (item blijft publiek zichtbaar).
+  // PATH-volgorde: /live komt NA itemId. /items/live/{id} bestaat NIET in v2.
+  const data = await webflowFetch(`/collections/${collId}/items/${webflowItemId}/live`, {
     method: 'PATCH',
     body,
   });
 
-  return { itemId: webflowItemId, raw: data, requestPayload: body };
+  const sitePublish = await publishSiteIfEnabled('update-' + webflowItemId);
+  return { itemId: webflowItemId, raw: data, requestPayload: body, sitePublish };
 }
 
 export async function unpublishItem({ webflowItemId }) {
   if (!webflowItemId) throw new WebflowError('VALIDATION_FAIL', 'webflowItemId vereist');
   const { collId } = getEnv();
 
-  // DELETE /items/live/{id} - verwijdert ALLEEN de live-publicatie. Het item
+  // DELETE /items/{id}/live - verwijdert ALLEEN de live-publicatie. Het item
   // blijft als staged record bestaan (kan later hergepubliceerd worden).
-  // Geen body nodig.
-  const data = await webflowFetch(`/collections/${collId}/items/live/${webflowItemId}`, {
+  // Geen body nodig. PATH-volgorde: /live komt NA itemId.
+  const data = await webflowFetch(`/collections/${collId}/items/${webflowItemId}/live`, {
     method: 'DELETE',
   });
 
-  return { itemId: webflowItemId, raw: data, requestPayload: null };
+  const sitePublish = await publishSiteIfEnabled('unpublish-' + webflowItemId);
+  return { itemId: webflowItemId, raw: data, requestPayload: null, sitePublish };
 }

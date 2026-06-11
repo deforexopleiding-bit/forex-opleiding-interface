@@ -125,8 +125,13 @@ function capitalize(s) {
 
 /**
  * Format een event-rij naar het label-formaat voor de GHL-dropdown.
- *   met ends_at: 'Woensdag 24 juni 2026 | 18:00 - 21:00'
- *   zonder ends_at: 'Woensdag 24 juni 2026 | 18:00'
+ *   met ends_at + niveau: 'Woensdag 24 juni 2026 | 18:00 - 21:00 | Gevorderd'
+ *   met ends_at zonder niveau: 'Woensdag 24 juni 2026 | 18:00 - 21:00'
+ *   zonder ends_at: 'Woensdag 24 juni 2026 | 18:00 | Gevorderd'
+ *   minimum (alleen starts_at): 'Woensdag 24 juni 2026 | 18:00'
+ *
+ * Niveau wordt gekapitaliseerd ('basis' -> 'Basis', 'gevorderd' -> 'Gevorderd').
+ * Onbekende niveau-waarden worden hetzelfde behandeld (eerste letter kapitaal).
  */
 export function formatEventLabel(event) {
   if (!event?.starts_at) return '';
@@ -142,12 +147,13 @@ export function formatEventLabel(event) {
     });
     const datePart  = capitalize(dateFmt.format(start));
     const startTime = timeFmt.format(start);
-    if (event.ends_at) {
-      const end = new Date(event.ends_at);
-      const endTime = timeFmt.format(end);
-      return `${datePart} | ${startTime} - ${endTime}`;
-    }
-    return `${datePart} | ${startTime}`;
+    const timeRange = event.ends_at
+      ? `${startTime} - ${timeFmt.format(new Date(event.ends_at))}`
+      : startTime;
+    const niveauPart = event.niveau
+      ? ` | ${capitalize(String(event.niveau).trim())}`
+      : '';
+    return `${datePart} | ${timeRange}${niveauPart}`;
   } catch {
     return '';
   }
