@@ -594,6 +594,120 @@ sessies. Vervangt informele WhatsApp-rapportage richting mentoren.
 self-service-rapportage. Aanpakken zodra Events F5 live + 1-2 wekenlijkse events met
 echte bonus-data om te tonen.
 
+### [NB0a] Events roadmap-refinements (per fase, na plan-gate v2 lock)
+
+Aanvullingen op de Events-module per fase, ontdekt na plan-gate v2 lock. Geen
+nieuwe plan-gate-ronde voor F1/F2/F3 nodig — alleen scope-uitbreidingen binnen
+de bestaande agent-prompts.
+
+#### [F1] ✅ AL GEDEKT — geen actie nodig
+- **Mentoren day-of toevoegen via Mentoren-tab**: events-detail.html Mentoren-tab
+  ondersteunt assign/remove tot aan event-start. Geen extra werk.
+- **Bonus-snapshot vangt day-of-mentoren**: F5 bonus-engine leest `event_mentors`
+  op moment van sale-flip en bewaart in `event_bonuses.mentor_snapshot jsonb`.
+  Day-of toevoegingen worden automatisch correct meegenomen.
+
+#### [QW] Quick win — "Dupliceer event" (losse mini-PR of bij F2-UI)
+**Doel:** event als template hergebruiken — vooral handig bij wekelijkse repeat-events.
+
+**Scope:**
+- Knop "Dupliceer" in events-detail.html header (RBAC: `events.event.create`)
+- Wizard-pre-fill via URL-param: `/modules/events-wizard.html?clone_from=<event_id>`
+- Pre-fill: titel + locatie + capaciteit + niveau + beschrijving van bron-event
+- User vult alleen datum (starts_at / ends_at) zelf in
+- **NIET kopiëren**: aanwezigen, mentoren, sync-status, audit-log
+- Defaults: `status='draft'`, mentoren-set leeg (user assignt opnieuw via Mentoren-tab)
+- Implementatie: 1 endpoint `GET /api/events-clone-template?id=<uuid>` (returns
+  template-payload) + wizard pre-fill logica + extra knop
+
+**Effort:** 1-2 commits. Mag bij F2-UI commits, of losse mini-PR vóór F2.
+
+#### [F2-refinement] Webflow + GHL-sync — user-beslissingen open
+**Webflow:** veld-schema aan te maken door user in CMS-UI (Events Collection):
+- Datum / tijd
+- Locatie (huidig: 1 string-veld in DB)
+- **Volledig adres (nieuw veld?)** — straat / postcode / plaats. Beslispunt:
+  uitbreiden `events.location` → opdelen in `events.address_street` +
+  `address_postal` + `address_city` (zoals customers tabel), of separaat
+  `events.full_address` text-veld. Zie ook [F3-prep] reminders met adres.
+- Capaciteit (Number)
+- Niveau (option-ref of text)
+- Beschrijving (Rich Text)
+
+**GHL-sync:** user weegt af of de complexiteit nodig is:
+- **Optie A** (in plan): 3 custom values voor "eerstvolgend event" (titel/datum/locatie),
+  daily cron + on-publish sync. Plan-gate v2 lockt dit.
+- **Optie B** (vereenvoudigen): user past form-datum-dropdown handmatig of
+  klein-automatisch aan (bv. 1× per week). GHL-sync skip volledig of versimpelen tot
+  alleen datum (1 cv ipv 3).
+- **Beslispunt voor user** vóór F2 implementatie: A of B? Bij B vervalt
+  `api/_lib/ghl-custom-value.js` + daily cron uit F2-scope. Webflow-sync blijft
+  ongewijzigd in beide opties.
+
+#### [F3-prep] Comms + Automation-builder aanvullingen
+**Reminders met tijdstip + adres als merge-velden:**
+- Template-variables uitbreiden met `{{event.tijd}}` (formatted starts_at zonder
+  datum-prefix, bv "19:00") en `{{event.adres}}` (vol adres). Zie ook
+  [F2-refinement] over apart adres-veld.
+- F3a executor `executeSendEmailStep` + `executeSendWaStep` resolven deze nieuwe
+  vars via `api/_lib/event-template-render.js`.
+
+**Automation-regel "status switched_to_other_event → extra reminder voor nieuw event":**
+- Trigger: `attendee_status_changed` met `new_status='switched_to_other_event'`
+  + `switched_from_event_id IS NOT NULL`
+- Actie: spawn extra reminder-comm voor het NIEUWE event (post-switch
+  `attendee.event_id`), niet voor het oude event
+- Seed-rule kandidaat bovenop de voorgedefinieerde reminders in F3a
+
+**Apart volledig adres-veld op events:** zie [F2-refinement] — beslispunt of
+`events.location` opdelen of een extra `address_full` toevoegen. Beslis nu in
+F2/F3 ipv later wijzigen.
+
+#### [F5-uitbreiding] Mentor-grootboek (faseerbaar)
+**Doel:** dubbele boekhouding per mentor — credits (bonussen uit sales) +
+debits (event-uitgaven die de mentor declareerde of het bedrijf voor hem
+betaalde). Verrekening bij vervallen bonus (VOID) of bij maandafrekening.
+
+**Datamodel ontwerp NU al grootboek-geschikt** (voorkomt schema-rewrite in v2):
+- Bestaande `event_bonuses` blijft de credit-bron (3% commissie per mentor per
+  sale, lifecycle PENDING → CONFIRMED / VOID)
+- **Nieuw** in F5: `mentor_ledger_entries` tabel met:
+  - `id`, `team_member_id` FK
+  - `entry_type` enum: `bonus_credit` (uit event_bonuses) | `event_expense_debit`
+    (per-event uitgave) | `manual_adjustment` (correctie) | `payout` (uitbetaald)
+  - `event_id` FK NULL (bv. payout is event-loos)
+  - `source_bonus_id` FK NULL → event_bonuses.id (voor credit-rijen + VOID-claw-back)
+  - `amount_eur` (positief voor credit, negatief voor debit/payout)
+  - `currency` text default 'EUR'
+  - `status` text — `pending` / `cleared` / `reversed`
+  - `description` text + `created_by_user_id` + `created_at`
+- Saldo per mentor = `sum(amount_eur) WHERE team_member_id=X AND status='cleared'`
+
+**Fasering:**
+- **F5.1** (MVP): simpel grootboek + handmatige verrekening
+  - Bonus-confirm-cron schrijft bonus_credit-rij bij CONFIRMED
+  - Bonus-void-cron schrijft tegen-rij (negatieve credit) bij VOID — auto-clawback
+    via boekhoudkundig juiste tegenboeking
+  - Admin-UI in `/modules/mentor-grootboek.html` (super_admin + manager): per-mentor
+    grootboek-lijst + handmatige debit/payout-rijen invoeren + saldo
+  - RBAC: `events.mentor_ledger.view` + `events.mentor_ledger.write`
+- **F5.2** (later): auto-reconciliatie
+  - Event-uitgaven uit `bank_categories` / `bank_transactions` koppelen aan
+    `mentor_team_member_id` (declaratie-flow) → automatisch debit-rij
+  - Payout-cron: maandelijks saldo > drempel → markeer cleared + creëer payout-rij
+  - Maandrapportages per mentor
+
+**Beslissing v2-data-model:**
+- Hou `event_bonuses` als geïsoleerde "bonus per sale" tabel; spiegelen naar
+  grootboek via tegenboeking-pattern (niet UNION-view)
+- `mentor_ledger_entries.amount_eur` als enkele numeric kolom (niet aparte
+  credit/debit kolommen) — standaard boekhoud-conventie, eenvoudiger sum-query
+- Nooit rijen UPDATE'en behalve status → cleared/reversed; correctie altijd via
+  tegenboeking (immutable ledger pattern)
+
+**Effort F5.1:** +5-8 commits bovenop F5-bonus-scope (~3-4 uur extra).
+**Effort F5.2:** eigen mini-fase, +6-10 commits (~3-4 uur).
+
 ### [NB1] KPI banner CC uitbreiden met meeting-taken counter
 **Bestand:** `modules/control-center.html` — `loadKPIBanner()` + KPI-grid HTML  
 **Verzoek:** Voeg een vijfde KPI-kaart toe: "Actieve meeting-taken: N" met klik-door naar Takenbeheer  
