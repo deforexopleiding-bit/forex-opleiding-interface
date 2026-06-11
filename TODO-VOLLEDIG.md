@@ -572,6 +572,28 @@ Diagnose recovery-link flow + SMTP-config geparkeerd tijdens scope-discussie Fol
 
 ## 🟢 NIET-BLOKKEREND — Toekomstige verbeteringen
 
+### [NB0] Mentoren-module (toekomstig, gepland na Events F5)
+**Doel:** Eigen module voor mentor-zelfbediening — overzicht eigen events, eigen
+bonus-status (pending / confirmed / void), persoonlijke kalender met komende
+sessies. Vervangt informele WhatsApp-rapportage richting mentoren.
+
+**Data-grondslag is al beschikbaar via Events-module F1–F5** (geen schema-migratie nodig):
+- `team_members` (`type='mentor'`, `is_active=true`) — bron van mentor-identiteit
+- `event_mentors` (n:m koppeling per event) — toont welke events een mentor heeft begeleid
+- `event_bonuses.mentor_team_member_id` — bonus-rij per mentor per sale
+- `event_bonuses.mentor_snapshot jsonb` — audit-trail van mentor-set bij sale (post-switch correct)
+- `event_bonuses.status` (`PENDING` / `CONFIRMED` / `VOID`) — life-cycle voor display
+
+**Scope wanneer opgepakt:**
+- Nieuwe lees-endpoints: `GET /api/mentor-my-events`, `GET /api/mentor-my-bonuses`, `GET /api/mentor-my-calendar`
+- Nieuwe UI: `/modules/mentor-dashboard.html` (mentor zelf), `/modules/mentor-detail.html` (admin-view)
+- Sidebar nav-item gating: nieuwe RBAC `mentor.module.access` + `mentor.bonus.view_own`
+- Koppeling profile → team_members: `profiles.team_member_id` (kolom bestaat al) ontsluit "eigen" filter
+
+**NIET in scope nu:** payouts, contracten, mentor-onboarding-flow. Alleen visibility +
+self-service-rapportage. Aanpakken zodra Events F5 live + 1-2 wekenlijkse events met
+echte bonus-data om te tonen.
+
 ### [NB1] KPI banner CC uitbreiden met meeting-taken counter
 **Bestand:** `modules/control-center.html` — `loadKPIBanner()` + KPI-grid HTML  
 **Verzoek:** Voeg een vijfde KPI-kaart toe: "Actieve meeting-taken: N" met klik-door naar Takenbeheer  
