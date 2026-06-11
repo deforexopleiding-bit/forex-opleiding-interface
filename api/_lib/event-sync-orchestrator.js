@@ -299,7 +299,16 @@ async function unpublishWebflow(event) {
 // Bereken upcoming-events labels uit DB:
 //   events WHERE status='published' AND starts_at > now()
 //   ORDER BY starts_at ASC
-async function computeUpcomingLabels() {
+//
+// SINGLE SOURCE voor zowel publish/update/cancel-triggers (via syncGhl in
+// deze file) als de daily refresh-cron (api/cron-events-ghl-next-update.js
+// importeert deze export). Voorkomt query-drift tussen trigger en cron.
+//
+// Empty-result-pad: bij 0 events returnt deze gewoon []; de GUARD in
+// ghl-custom-field.js updateOptions() vangt empty array af en SKIPT de PUT
+// om de bestaande GHL-dropdown niet te legen. Dat is bewust geen "fail"
+// state - bij een leeg DB-resultaat hoort de GHL-dropdown onaangetast.
+export async function computeUpcomingLabels() {
   const nowIso = new Date().toISOString();
   const { data, error } = await supabaseAdmin
     .from('events')
@@ -331,10 +340,14 @@ async function syncGhl(event) {
         target          : 'ghl',
         action,
         request_payload : { labelsCount: labels.length },
-        response_payload: { skipped: true },
+        response_payload: {
+          skipped     : true,
+          reason      : result.reason || null,
+          tried_shapes: result.tried_shapes || null,
+        },
         status          : 'failure',
-        error_code      : 'SKIPPED_GRACEFUL',
-        error_message   : result.reason || 'graceful skip',
+        error_code      : result.reason || 'SKIPPED_GRACEFUL',
+        error_message   : result.message || result.reason || 'graceful skip',
         retry_count,
         next_retry_at,
       });
@@ -379,7 +392,13 @@ async function syncGhl(event) {
       target          : 'ghl',
       action,
       request_payload : { labelsCount: labels.length },
-      response_payload: { optionsKey: result.optionsKey, optionsCount: result.optionsCount },
+      response_payload: {
+        optionsKey   : result.optionsKey,       // backward-compat alias = put_options_key
+        put_options_key: result.put_options_key,
+        used_shape   : result.used_shape,
+        tried_shapes : result.tried_shapes,
+        optionsCount : result.optionsCount,
+      },
       status          : 'success',
     });
     await supabaseAdmin

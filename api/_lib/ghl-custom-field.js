@@ -284,6 +284,24 @@ export async function updateOptions({ labels }) {
     return { ok: false, error_code: 'INVALID_INPUT', message: 'labels must be array' };
   }
 
+  // KRITIEKE GUARD: een PUT met lege options-array WIST de bestaande GHL
+  // dropdown - inclusief handmatig door Jeffrey ingevulde opties. Voorbeeld
+  // bug: publish van enige event -> annuleer dat event -> 0 upcoming events
+  // -> dropdown leeg. Caller mag verwachten dat empty input = NO-OP. We slaan
+  // de PUT over, laten de bestaande GHL-opties intact, en signaleren als
+  // graceful skip (rate-limit-vriendelijke retry-loop is niet zinnig - bron
+  // is geen scope/shape probleem maar leeg DB-resultaat).
+  if (labels.length === 0) {
+    console.warn('[ghl-custom-field] GUARD: 0 labels - SKIP PUT om bestaande GHL-dropdown niet te legen');
+    return {
+      skipped     : true,
+      reason      : 'GHL_GUARD_EMPTY_LABELS',
+      message     : '0 labels - PUT geskipt om bestaande dropdown-opties te beschermen',
+      labels_count: 0,
+      tried_shapes: [],
+    };
+  }
+
   const resolved = await resolveFieldId();
   if (resolved.skipped) return resolved;
   if (!resolved.ok)    return resolved;

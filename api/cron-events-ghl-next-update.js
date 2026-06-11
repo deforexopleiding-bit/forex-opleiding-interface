@@ -23,7 +23,8 @@
 // Schedule: 0 6 * * * (zie vercel.json).
 
 import { checkCronAuth, supabaseAdmin } from './supabase.js';
-import { updateOptions, formatEventLabel } from './_lib/ghl-custom-field.js';
+import { updateOptions } from './_lib/ghl-custom-field.js';
+import { computeUpcomingLabels } from './_lib/event-sync-orchestrator.js';
 
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
@@ -39,10 +40,11 @@ export default async function handler(req, res) {
 
   const startedAt = Date.now();
   const summary = {
-    upcoming_events: 0,
     labels_count: 0,
     ghl_status: null,
     ghl_options_key: null,
+    ghl_used_shape: null,
+    ghl_tried_shapes: null,
     skipped: false,
     skip_reason: null,
     errors: [],
@@ -50,33 +52,28 @@ export default async function handler(req, res) {
   };
 
   try {
-    const nowIso = new Date().toISOString();
-    const { data: events, error: selErr } = await supabaseAdmin
-      .from('events')
-      .select('id, title, starts_at, ends_at, status')
-      .eq('status', 'published')
-      .gt('starts_at', nowIso)
-      .order('starts_at', { ascending: true });
-    if (selErr) throw new Error('select events: ' + selErr.message);
-
-    summary.upcoming_events = (events || []).length;
-
-    const labels = (events || [])
-      .map(formatEventLabel)
-      .filter(Boolean);
+    // Use the SAME helper as the orchestrator-triggers (publish/update/cancel)
+    // so cron and triggers can never drift apart in event-selection logic.
+    const labels = await computeUpcomingLabels();
     summary.labels_count = labels.length;
 
     const result = await updateOptions({ labels });
 
     if (result?.skipped) {
-      summary.skipped     = true;
-      summary.skip_reason = result.reason || 'graceful skip';
-      summary.ghl_status  = 'skipped_graceful';
+      // GHL_GUARD_EMPTY_LABELS (0 labels) komt hier ook door - bewust een
+      // skip, niet een failure. Dropdown blijft in zijn vorige goede staat.
+      summary.skipped         = true;
+      summary.skip_reason     = result.reason || 'graceful skip';
+      summary.ghl_status      = 'skipped_graceful';
+      summary.ghl_tried_shapes = result.tried_shapes || null;
     } else if (result?.ok) {
       summary.ghl_status      = 'success';
-      summary.ghl_options_key = result.optionsKey || null;
+      summary.ghl_options_key = result.put_options_key || result.optionsKey || null;
+      summary.ghl_used_shape  = result.used_shape || null;
+      summary.ghl_tried_shapes = result.tried_shapes || null;
     } else {
       summary.ghl_status = 'failure';
+      summary.ghl_tried_shapes = result?.tried_shapes || null;
       summary.errors.push({
         error_code: result?.error_code || 'UNKNOWN',
         message   : result?.message    || 'unknown error',
