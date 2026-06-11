@@ -239,28 +239,27 @@ function resolveSlug(schema, logicalName) {
 // Best-effort enum-mapping voor Event Type. Returnt option-shape die naar
 // Webflow gestuurd kan worden (id wanneer aanwezig, anders name).
 //
-// TODO: na recon-spike output update deze mapping met definitieve option-IDs.
+// LOCKED OFF na recon (2026-06-11): de "category"-opties in productie zijn
+// content-categorieen ("Forex Kickstart Live"/"Trading Deep Dive") plus junk,
+// GEEN skill-niveaus. Mapping naar events.niveau geeft dus altijd misclassificatie.
+// Helper blijft staan voor schema-introspectie/debug + toekomstige re-introduce
+// als juiste niveau-opties in het collection-schema worden aangemaakt.
+// CALLER buildFieldData() roept matchEventTypeOption() NIET meer aan.
+// includes-fallback verwijderd: bij re-introduce alleen exacte name-match
+// (geen risico op stille mismatch).
 function matchEventTypeOption(schema, niveau) {
   if (!niveau || !Array.isArray(schema.eventTypeOptions) || schema.eventTypeOptions.length === 0) {
     return null;
   }
   const lc = String(niveau).toLowerCase();
-  // Strategie 1: exacte name-match
-  let opt = schema.eventTypeOptions.find((o) =>
+  // Alleen exacte name-match. Geen includes-fallback (recon-lock).
+  const opt = schema.eventTypeOptions.find((o) =>
     String(o?.name || '').toLowerCase() === lc
   );
-  // Strategie 2: includes-match (label bevat niveau-slug)
   if (!opt) {
-    opt = schema.eventTypeOptions.find((o) =>
-      String(o?.name || '').toLowerCase().includes(lc)
-    );
-  }
-  if (!opt) {
-    console.warn('[webflow-client] geen Event Type match voor niveau:', niveau);
+    console.warn('[webflow-client] geen exacte Event Type-match voor niveau:', niveau);
     return null;
   }
-  // Webflow Data API v2 accepteert vaak de option-id als string; sommige
-  // collecties verwachten de option-name. We sturen wat aanwezig is.
   return opt.id || opt.slug || opt.name || null;
 }
 
@@ -303,18 +302,13 @@ function buildFieldData({ event, descriptionHtml, schema }) {
     console.warn('[webflow-client] geen slug voor Event Content-veld in schema; skip');
   }
 
-  // Event Type veld (best-effort enum)
-  const typeSlug = resolveSlug(schema, 'niveau');
-  if (typeSlug) {
-    const optionValue = matchEventTypeOption(schema, event?.niveau);
-    if (optionValue) {
-      fd[typeSlug] = optionValue;
-    } else {
-      console.warn('[webflow-client] Event Type-veld bekend maar geen option-match voor', event?.niveau, '; skip veld');
-    }
-  } else {
-    console.warn('[webflow-client] geen slug voor Event Type-veld in schema; skip');
-  }
+  // Event Type / category veld: niveau-mapping LOCKED OFF na recon (2026-06-11).
+  // De bestaande "category" opties zijn "Forex Kickstart Live" / "Trading Deep
+  // Dive" + junk ("d", "E") - GEEN skill-niveaus (basis/gevorderd). Er bestaat
+  // dus geen Webflow-tegenhanger voor events.niveau in dit collection-schema.
+  // We laten category ongezet bij sync; events.niveau blijft alleen lokaal in
+  // onze DB. (FIELD_NAME_MAP/getCollectionSchema behouden de niveau-entry voor
+  // schema-introspectie + toekomstige re-introduce bij juiste opties.)
 
   return fd;
 }

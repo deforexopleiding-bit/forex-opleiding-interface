@@ -7,13 +7,20 @@
 //
 // Defensief design:
 //   - Runtime field-id resolve via /locations/{loc}/customFields (cached 30m)
-//   - Runtime detect van de juiste options-array-key
+//   - Runtime detect van de GET options-array-key (voor read-context)
 //     (candidates: options/picklistOptions/choices/textBoxList)
-//   - Runtime detect van item-shape binnen die array (object {id,name,value}
-//     vs plain string). Bij update mirroren we exact dezelfde shape terug.
 //   - Graceful degradation: 401/403 of body-shape-mismatch returnt
 //     { skipped:true, reason } - de orchestrator faalt niet op een GHL-error
 //     omdat Webflow het primaire kanaal is.
+//
+// RECON-LOCK (2026-06-11) - GHL GET/PUT key-asymmetrie:
+//   GET-respons gebruikt 'picklistOptions' als options-array key.
+//   PUT-body VERPLICHT 'options' (GHL returnt 422 "property picklistOptions
+//   should not exist" bij elke andere key). Scope is OK (geen 401/403).
+//   updateOptions() forceert daarom PUT_OPTIONS_KEY='options' ongeacht
+//   GET-detect. Primaire shape = string-array (recon: primitive strings);
+//   bij 422 fallback naar object-shapes [{key,label}] -> [{value,label}].
+//   Field-id: BG0wJnnZegEaNzK856Rj, dataType SINGLE_OPTIONS.
 //
 // Constants:
 //   GHL_BASE        = https://services.leadconnectorhq.com
@@ -278,81 +285,98 @@ export async function updateOptions({ labels }) {
   if (resolved.skipped) return resolved;
   if (!resolved.ok)    return resolved;
 
-  const { fieldId, optionsKey, fieldShape, rawFieldBody } = resolved;
+  const { fieldId, rawFieldBody } = resolved;
 
-  // Bouw nieuwe options-array in dezelfde shape als oorspronkelijk
-  let newOptionsArr;
-  if (fieldShape === 'string') {
-    newOptionsArr = labels.map((l) => String(l));
-  } else {
-    // object-shape: probeer {id,name,value} of {label,value} - we gebruiken
-    // de keys die we observeren in de bestaande array indien aanwezig
-    const sample = Array.isArray(rawFieldBody?.[optionsKey]) && rawFieldBody[optionsKey][0]
-      ? rawFieldBody[optionsKey][0]
-      : null;
-    const sampleKeys = sample && typeof sample === 'object' ? Object.keys(sample) : null;
+  // RECON-LOCK (2026-06-11): GET-key (picklistOptions) is NIET de PUT-key.
+  // GHL accepteert alleen 'options' in de PUT-body; anders 422
+  // "property picklistOptions should not exist". Detect-from-GET (optionsKey
+  // op resolved) blijft als read-context maar wordt hier NIET gebruikt.
+  const PUT_OPTIONS_KEY = 'options';
 
-    newOptionsArr = labels.map((l) => {
-      const str = String(l);
-      if (sampleKeys && sampleKeys.length > 0) {
-        const obj = {};
-        for (const k of sampleKeys) {
-          if (k === 'id' || k === '_id') {
-            // Laat GHL nieuwe id toewijzen - skippen vermijdt collisions
-            continue;
-          } else if (k === 'name' || k === 'label' || k === 'text' || k === 'displayName') {
-            obj[k] = str;
-          } else if (k === 'value' || k === 'key') {
-            obj[k] = str;
-          } else {
-            // Onbekende key: kopieer leeg om shape te behouden
-            obj[k] = '';
-          }
-        }
-        // Zorg dat er minstens 1 zinnig veld is
-        if (!('name' in obj) && !('label' in obj) && !('value' in obj)) {
-          obj.name  = str;
-          obj.value = str;
-        }
-        return obj;
-      }
-      // Geen sample beschikbaar: veilige defaults
-      return { name: str, value: str };
+  // Minimale PUT-body: alleen velden die GHL plausibel accepteert.
+  // Recon-output bevestigde dataType=SINGLE_OPTIONS + name onveranderd.
+  // Geen volledige mirror van rawFieldBody (zou picklistOptions terug-leveren
+  // en triggert 422).
+  const baseBody = {
+    name    : rawFieldBody?.name || rawFieldBody?.displayName,
+    dataType: rawFieldBody?.dataType || rawFieldBody?.type,
+  };
+
+  // Drie shape-pogingen in volgorde:
+  //   1. string-array (primair - recon: primitive strings)
+  //   2. [{key,label}] object-shape
+  //   3. [{value,label}] object-shape
+  // Bij 422 doorgaan naar volgende; bij 401/403 of andere statussen stoppen.
+  const attempts = [
+    { shape: 'string_array',        build: () => labels.map((l) => String(l)) },
+    { shape: 'object_key_label',    build: () => labels.map((l) => ({ key:   String(l), label: String(l) })) },
+    { shape: 'object_value_label',  build: () => labels.map((l) => ({ value: String(l), label: String(l) })) },
+  ];
+
+  const triedShapes = [];
+  let lastResp = null;
+
+  for (const attempt of attempts) {
+    const opts = attempt.build();
+    const putBody = { ...baseBody, [PUT_OPTIONS_KEY]: opts };
+
+    const putResp = await ghlFetch(`/locations/${GHL_LOCATION}/customFields/${fieldId}`, {
+      method: 'PUT',
+      body  : putBody,
     });
-  }
+    triedShapes.push({ shape: attempt.shape, status: putResp.status });
+    lastResp = putResp;
 
-  // Mirror bestaande body, replace alleen de options-array
-  const putBody = { ...(rawFieldBody || {}) };
-  putBody[optionsKey] = newOptionsArr;
-  // Verwijder velden die GHL niet accepteert op PUT (defensief)
-  delete putBody.id;
-  delete putBody._id;
-  delete putBody.locationId;
-  delete putBody.dateAdded;
-  delete putBody.dateUpdated;
+    if (putResp.ok) {
+      // Log welke shape uiteindelijk werkte - handig bij toekomstige
+      // wijzigingen aan de GHL API.
+      if (attempt.shape !== 'string_array') {
+        console.warn('[ghl-custom-field] PUT_OPTIONS_KEY="options" + shape', attempt.shape,
+          '- string_array faalde met', triedShapes[0]?.status);
+      }
+      return {
+        ok             : true,
+        put_options_key: PUT_OPTIONS_KEY,
+        used_shape     : attempt.shape,
+        optionsCount   : opts.length,
+        tried_shapes   : triedShapes,
+        // Backward-compat alias voor orchestrator audit-log (event_sync_log
+        // response_payload kent optionsKey nog uit de mirror-tijd).
+        optionsKey     : PUT_OPTIONS_KEY,
+      };
+    }
 
-  const putResp = await ghlFetch(`/locations/${GHL_LOCATION}/customFields/${fieldId}`, {
-    method: 'PUT',
-    body  : putBody,
-  });
-
-  if (!putResp.ok) {
+    // 401/403: scope-issue, geen retry zinnig
     if (putResp.status === 401 || putResp.status === 403) {
-      return { skipped: true, reason: 'GHL_AUTH_OR_SCOPE_FAIL', message: `PUT ${putResp.status}` };
+      return {
+        skipped     : true,
+        reason      : 'GHL_AUTH_OR_SCOPE_FAIL',
+        message     : `PUT ${putResp.status}`,
+        tried_shapes: triedShapes,
+      };
     }
+
+    // 400/422: shape-mismatch, probeer volgende shape
     if (putResp.status === 400 || putResp.status === 422) {
-      return { skipped: true, reason: 'GHL_SHAPE_MISMATCH', message: `PUT ${putResp.status}: ${putResp.body?.message || ''}` };
+      // Loop verder
+      continue;
     }
+
+    // Andere fout: stop direct (5xx / netwerk / unexpected)
     return {
-      ok        : false,
-      error_code: 'GHL_DOWN',
-      message   : `GHL PUT customField ${putResp.status}: ${putResp.body?.message || putResp.error || 'unknown'}`,
+      ok          : false,
+      error_code  : 'GHL_DOWN',
+      message     : `GHL PUT customField ${putResp.status}: ${putResp.body?.message || putResp.error || 'unknown'}`,
+      tried_shapes: triedShapes,
     };
   }
 
+  // Alle 3 shapes gefaald met 400/422 - log de mismatch voor follow-up
+  console.warn('[ghl-custom-field] ALL 3 shapes mismatched on PUT options key. tried:', triedShapes);
   return {
-    ok          : true,
-    optionsKey,
-    optionsCount: newOptionsArr.length,
+    skipped     : true,
+    reason      : 'GHL_SHAPE_MISMATCH',
+    message     : `Alle shapes faalden. Last: ${lastResp?.status} ${lastResp?.body?.message || ''}`,
+    tried_shapes: triedShapes,
   };
 }
