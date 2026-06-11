@@ -24,12 +24,15 @@
 //
 // Constants:
 //   GHL_BASE        = https://services.leadconnectorhq.com
-//   GHL_VERSION     = '2021-07-28' (v3 LeadConnector standaard header)
+//   GHL_VERSION     = 'v3' (recon-bevestigd voor customFields write-endpoint;
+//                           date-versioning '2021-07-28' werkte op GET maar
+//                           is ongetest op PUT. ghl-contact.js gebruikt nog
+//                           '2021-07-28' voor contacts-endpoints - ongewijzigd.)
 //   GHL_LOCATION    = hardcoded 'YdIAWnq0DutM7VNOGReg' (Events-specifieke loc)
 //   TARGET_FIELD_KEY = 'single_dropdown_12e8o'
 
 const GHL_BASE        = 'https://services.leadconnectorhq.com';
-const GHL_VERSION     = '2021-07-28';
+const GHL_VERSION     = 'v3';
 const GHL_LOCATION    = 'YdIAWnq0DutM7VNOGReg';
 const TARGET_FIELD_KEY = 'single_dropdown_12e8o';
 
