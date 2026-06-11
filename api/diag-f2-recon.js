@@ -6,13 +6,19 @@
 // onzekerheden uit de GHL/Webflow recon. Wordt na de findings VERWIJDERD —
 // dit bestand mag NIET in main belanden zonder vervolg-cleanup-PR.
 //
+// LESSON LEARNED (rename): filename was eerder /api/_diag-f2-recon.js. Vercel
+// routeert bestanden in /api/ die met "_" beginnen NIET als serverless function
+// (ze worden als private helper genegeerd) → endpoint 404'te. Bij temp/diag
+// endpoints dus geen underscore-prefix gebruiken. Echte helpers (geen route
+// nodig) horen in /api/_lib/* — dat is het project-pattern.
+//
 // Auth: super_admin Bearer-JWT (verifyAdmin + extra role-check).
 //       Read-only voor Webflow + GHL-list; idempotent write-probe voor GHL.
 //       Geen secrets in response (tokens worden alleen als set/unset gerapporteerd).
 //
 // Aanroep (vanuit ingelogde browser-DevTools console op de preview-URL):
 //   const tok = (await window.AuthShared.getAccessToken());
-//   const r = await fetch('/api/_diag-f2-recon', { headers:{Authorization:'Bearer '+tok} });
+//   const r = await fetch('/api/diag-f2-recon', { headers:{Authorization:'Bearer '+tok} });
 //   console.log(JSON.stringify(await r.json(), null, 2));
 //
 // Optioneel: ?skip_write=true → slaat de PUT-probe over (alleen reads).
