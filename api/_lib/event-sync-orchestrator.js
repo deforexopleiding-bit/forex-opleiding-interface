@@ -312,7 +312,7 @@ export async function computeUpcomingLabels() {
   const nowIso = new Date().toISOString();
   const { data, error } = await supabaseAdmin
     .from('events')
-    .select('id, title, starts_at, ends_at, status')
+    .select('id, title, starts_at, ends_at, niveau, status')
     .eq('status', 'published')
     .gt('starts_at', nowIso)
     .order('starts_at', { ascending: true });
