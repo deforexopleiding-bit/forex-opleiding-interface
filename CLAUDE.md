@@ -412,14 +412,54 @@ Lopend op Vercel:
   voor ACTIEF payment_arrangements (UITSTEL/SPLITSING/ABONNEMENT_PAUZE → NAGEKOMEN/VERBROKEN).
   Zie docs/cleanup-batch-d5-uuid-modal-voorstel.md.
 
-## Bekende externe systemen (nog niet geïntegreerd)
-- Mollie API — voor betalingen (Aron's payment tools wachten hierop)
-- Teamleader — CRM data
-- Bubble LMS — student management
-- e-boekhouden — boekhouding (Rogier extern)
-- GoHighLevel — marketing automation
-- Discord — community
-- Trustpilot — reviews (4.8, 85+ reviews)
+## TeamLeader (TL) — Backend-only integratie
+
+KRITIEK voor agent-adviezen: Jeffrey klikt NIET in de TeamLeader Focus UI. De TL UI
+is alleen voor read-only inspectie door een externe boekhouder (Rogier). Alle
+mutaties die in TL terechtkomen worden gestart vanuit ons eigen systeem en
+gesynchroniseerd via de TL API.
+
+### Mutatie-routes (klant-mutaties die in TL eindigen):
+
+| Mutatie-type | UI-laag (eigen systeem) | TL-sync mechanisme |
+|---|---|---|
+| Offerte create/edit/delete | Sales-module (sales.html / sales-wizard.html / offerte-detail.html) | quotations.create + quotations.delete via TL OAuth |
+| Factuur create / book / send | Sales-module (sales.html > klant-detail > Finance-tab) | invoices.* endpoints in api/finance-* (validate-first, TL blocking) |
+| Factuur crediteren | Sales-module > klant-detail | invoices.credit via TL OAuth |
+| Abonnement create/pause/stop | Sales-module (subscription-wizard.html) | subscriptions.* via TL OAuth |
+| Bank-balans / reconciliatie | Finance > Bank-module (finance.html > view-bank/view-camtbank) | camt-statements upload + matching (geen TL-sync) |
+| Klant-data (NAW/email) | Sales-module > Klanten / klanten.html | contacts.update via TL OAuth |
+
+### Read-only sync (TL → ons systeem):
+
+- TL OAuth blijft draaien voor inbound data-sync (factuur/klant/abonnement updates
+  die buitenom toch in TL belanden, bv. handmatige factuur door externe boekhouder).
+- `teamleader_webhook` + `teamleader_webhook_events` voor change-notificaties.
+- Periodieke poll-crons als webhook gemist wordt.
+
+### NIET DOEN (voor agents):
+- NOOIT adviseren om in TL UI te klikken (geen "ga naar focus.teamleader.eu en doe X").
+- NOOIT TL als single source of truth voor data die ook in ons systeem leeft;
+  ons systeem leidt, TL volgt via sync.
+- "TL Betalingsregeling product registreren" was eerder in de D-roadmap opgenomen
+  als prerequisite voor D2.1 — dat is **OBSOLETE**: payment_arrangements worden
+  uitgevoerd via TL_INVOICE_UPDATE_DUE / TL_INVOICE_SPLIT / TL_SUBSCRIPTION_PAUSE
+  endpoints, geen apart "Betalingsregeling"-product in TL nodig.
+- Bank-saldo NIET uit TL halen — gebruik Finance > Bank-module (camt-statements
+  + bank_accounts tabel + matching pipeline). TL `/financialAccounts.*` is
+  defensief en optioneel (zie `api/_lib/bank-balance.js`).
+
+## Bekende externe systemen
+- TeamLeader Focus — CRM + facturatie + abonnementen, **backend-only via OAuth**
+  (zie sectie hierboven). UI niet door Jeffrey gebruikt; alleen Rogier read-only.
+- Mollie API — voor betalingen (Aron's payment tools wachten hierop, niet geïntegreerd)
+- Bubble LMS — student management (niet geïntegreerd)
+- e-boekhouden — boekhouding (Rogier extern; eigen bank-balans endpoint
+  `api/finance-bank-balance.js` blijft default-source voor backward-compat)
+- GoHighLevel — marketing automation + Lisa AI agent (geïntegreerd via
+  `api/lisa-*` + `api/follow-up-ghl-*`)
+- Discord — community (niet geïntegreerd)
+- Trustpilot — reviews (4.8, 85+ reviews, niet geïntegreerd)
 
 ## Lessons Learned — 19 mei 2026 sessie
 
