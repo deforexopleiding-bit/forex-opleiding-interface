@@ -21,6 +21,7 @@
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
+import { syncEventToOutbound, unpublishEventOutbound } from './_lib/event-sync-orchestrator.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const ALLOWED_STATUS = ['draft', 'published', 'cancelled', 'archived'];
@@ -146,7 +147,42 @@ export default async function handler(req, res) {
     if (error) throw new Error('events-update: ' + error.message);
     if (!ev)   return res.status(404).json({ error: 'Event niet gevonden' });
 
-    return res.status(200).json({ event: ev });
+    // F2: outbound sync. Twee paden afhankelijk van resultierende status:
+    //   - published        -> syncEventToOutbound (create/update item + GHL options)
+    //   - cancelled        -> unpublishEventOutbound (Webflow draft + GHL options refresh)
+    //   - draft / archived -> geen sync (caller wil expliciet uit live-pool).
+    // Beide calls AWAITED; orchestrator isoleert webflow vs ghl intern.
+    let sync = null;
+    try {
+      if (ev.status === 'published') {
+        sync = await syncEventToOutbound(ev.id);
+      } else if (ev.status === 'cancelled') {
+        sync = await unpublishEventOutbound(ev.id);
+      }
+    } catch (syncErr) {
+      console.error('[events-update sync]', syncErr?.message || syncErr);
+      sync = { error: syncErr?.message || 'sync exception' };
+    }
+
+    // Refetch om bijgewerkte sync-metadata terug te geven.
+    let evAfter = ev;
+    if (sync) {
+      try {
+        const { data: refetched } = await supabaseAdmin
+          .from('events')
+          .select(`
+            id, title, starts_at, ends_at, location, capacity, status, niveau,
+            description_md, webflow_item_id, webflow_sync_status, webflow_last_synced_at,
+            ghl_sync_status, ghl_last_synced_at,
+            created_by_user_id, created_at, updated_at
+          `)
+          .eq('id', ev.id)
+          .maybeSingle();
+        if (refetched) evAfter = refetched;
+      } catch {}
+    }
+
+    return res.status(200).json({ event: evAfter, sync });
   } catch (e) {
     console.error('[events-update]', e.message);
     return res.status(500).json({ error: e.message });

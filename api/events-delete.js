@@ -17,6 +17,7 @@
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
+import { unpublishEventOutbound } from './_lib/event-sync-orchestrator.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -65,7 +66,34 @@ export default async function handler(req, res) {
     if (error) throw new Error('events-delete (archive): ' + error.message);
     if (!ev)   return res.status(404).json({ error: 'Event niet gevonden' });
 
-    return res.status(200).json({ event: ev });
+    // F2: archived = out-of-live. Unpublish op outbound kanalen (Webflow draft +
+    // GHL options-list refresh zodat dit event niet meer in de dropdown staat).
+    // AWAITED; targets binnen orchestrator zijn intern geisoleerd.
+    let sync = null;
+    try {
+      sync = await unpublishEventOutbound(ev.id);
+    } catch (syncErr) {
+      console.error('[events-delete sync]', syncErr?.message || syncErr);
+      sync = { error: syncErr?.message || 'sync exception' };
+    }
+
+    // Refetch om bijgewerkte sync-metadata terug te geven.
+    let evAfter = ev;
+    try {
+      const { data: refetched } = await supabaseAdmin
+        .from('events')
+        .select(`
+          id, title, starts_at, ends_at, location, capacity, status, niveau,
+          description_md, webflow_item_id, webflow_sync_status, webflow_last_synced_at,
+          ghl_sync_status, ghl_last_synced_at,
+          created_by_user_id, created_at, updated_at
+        `)
+        .eq('id', ev.id)
+        .maybeSingle();
+      if (refetched) evAfter = refetched;
+    } catch {}
+
+    return res.status(200).json({ event: evAfter, sync });
   } catch (e) {
     console.error('[events-delete]', e.message);
     return res.status(500).json({ error: e.message });

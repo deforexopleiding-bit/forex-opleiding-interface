@@ -35,6 +35,15 @@
     .status-cancelled { background: rgba(220,38,38,0.15); color:#b91c1c; }
     .status-archived { background: rgba(148,163,184,0.2); color: var(--text-faint); opacity:.7; }
 
+    /* Sync badges (Webflow + GHL) */
+    .sync-badges { display:inline-flex; gap:4px; flex-wrap:wrap; }
+    .sync-badge { display:inline-flex; align-items:center; gap:3px; padding:2px 7px; border-radius:8px; font-size:10px; font-weight:700; letter-spacing:.03em; cursor: help; }
+    .sync-badge.sync-ok      { background: rgba(5,150,105,0.15); color:#059669; border:1px solid rgba(5,150,105,0.25); }
+    .sync-badge.sync-fail    { background: rgba(220,38,38,0.15); color:#b91c1c; border:1px solid rgba(220,38,38,0.3); }
+    .sync-badge.sync-skip    { background: rgba(245,158,11,0.15); color:#b45309; border:1px solid rgba(245,158,11,0.3); }
+    .sync-badge.sync-unpub   { background: rgba(148,163,184,0.2); color: var(--text-faint); border:1px solid var(--border); }
+    .sync-badge.sync-none    { background: var(--bg-elev-2); color: var(--text-faint); border:1px solid var(--border); }
+
     /* Skeleton */
     .skel-row { height: 44px; background: linear-gradient(90deg, var(--bg-elev) 0%, var(--bg-elev-2) 50%, var(--bg-elev) 100%); background-size: 200% 100%; animation: shimmer 1.4s linear infinite; border-radius: 6px; margin-bottom: 6px; }
     @keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
@@ -99,6 +108,37 @@ function capPillClass(active, capacity) {
   if (active >= capacity) return 'cap-pill full';
   if (ratio >= 0.8) return 'cap-pill warn';
   return 'cap-pill ok';
+}
+
+// ── Sync-badge mapping ───────────────────────────────────────────────────────
+//
+// Webflow status: success | failure | unpublished | null
+// GHL status    : success | failure | skipped_graceful | null
+//
+// renderSyncBadge returnt 1 badge HTML met label + tooltip (last_synced_at).
+function renderSyncBadge(target, status, lastSyncedAt) {
+  const labelPrefix = target === 'webflow' ? 'WF' : 'GHL';
+  let cls = 'sync-none';
+  let label = '-';
+  if (status === 'success') { cls = 'sync-ok';   label = `${labelPrefix} OK`; }
+  else if (status === 'failure') { cls = 'sync-fail'; label = `${labelPrefix} FAIL`; }
+  else if (status === 'skipped_graceful') { cls = 'sync-skip'; label = `${labelPrefix} SKIP`; }
+  else if (status === 'unpublished') { cls = 'sync-unpub'; label = `${labelPrefix} UNPUB`; }
+
+  const tooltipParts = [];
+  tooltipParts.push(target === 'webflow' ? 'Webflow' : 'GoHighLevel');
+  tooltipParts.push('status: ' + (status || 'nog niet gesynct'));
+  if (lastSyncedAt) tooltipParts.push('laatst: ' + fmtDate(lastSyncedAt));
+  const tooltip = tooltipParts.join(' | ');
+
+  return `<span class="sync-badge ${cls}" title="${esc(tooltip)}">${esc(label)}</span>`;
+}
+
+function renderSyncCell(ev) {
+  return `<span class="sync-badges">
+    ${renderSyncBadge('webflow', ev.webflow_sync_status, ev.webflow_last_synced_at)}
+    ${renderSyncBadge('ghl', ev.ghl_sync_status, ev.ghl_last_synced_at)}
+  </span>`;
 }
 
 // ── Render ───────────────────────────────────────────────────────────────────
@@ -204,6 +244,7 @@ function renderList() {
         <th>Niveau</th>
         <th class="center">Capaciteit</th>
         <th>Status</th>
+        <th>Sync</th>
         <th></th>
       </tr></thead>
       <tbody>${state.items.map((ev) => {
@@ -220,6 +261,7 @@ function renderList() {
             <td>${esc(niveauLbl)}</td>
             <td class="center"><span class="${capClass}">${active}/${cap}</span></td>
             <td><span class="status-badge status-${ev.status}">${esc(STATUS_LABELS[ev.status] || ev.status)}</span></td>
+            <td>${renderSyncCell(ev)}</td>
             <td class="sr-actions"><a class="sr-ibtn" href="${esc(href)}" title="Open detail"><i class="ti ti-arrow-right"></i></a></td>
           </tr>
         `;

@@ -16,7 +16,9 @@
 //     items: [
 //       {
 //         id, title, starts_at, ends_at, location, capacity, status, niveau,
-//         description_md, webflow_sync_status, ghl_sync_status,
+//         description_md,
+//         webflow_sync_status, webflow_last_synced_at,
+//         ghl_sync_status,     ghl_last_synced_at,
 //         created_at, updated_at,
 //         attendee_count_active   (aangemeld + aanwezig + sale),
 //         attendee_count_total    (alle statussen),
@@ -82,7 +84,9 @@ export default async function handler(req, res) {
       .from('events')
       .select(`
         id, title, starts_at, ends_at, location, capacity, status, niveau,
-        description_md, webflow_sync_status, ghl_sync_status,
+        description_md,
+        webflow_sync_status, webflow_last_synced_at,
+        ghl_sync_status,     ghl_last_synced_at,
         created_at, updated_at
       `, { count: 'exact' })
       .order('starts_at', { ascending: true })
@@ -128,22 +132,24 @@ export default async function handler(req, res) {
         console.error('[events-list total-count]', row.id, e.message);
       }
       return {
-        id:                  row.id,
-        title:               row.title,
-        starts_at:           row.starts_at,
-        ends_at:             row.ends_at,
-        location:            row.location,
-        capacity:            row.capacity,
-        status:              row.status,
-        niveau:              row.niveau,
-        description_md:      row.description_md,
-        webflow_sync_status: row.webflow_sync_status,
-        ghl_sync_status:     row.ghl_sync_status,
-        created_at:          row.created_at,
-        updated_at:          row.updated_at,
-        attendee_count_active: activeCount,
-        attendee_count_total:  totalCount,
-        seats_remaining:       Math.max(0, (row.capacity || 0) - activeCount),
+        id:                     row.id,
+        title:                  row.title,
+        starts_at:              row.starts_at,
+        ends_at:                row.ends_at,
+        location:               row.location,
+        capacity:               row.capacity,
+        status:                 row.status,
+        niveau:                 row.niveau,
+        description_md:         row.description_md,
+        webflow_sync_status:    row.webflow_sync_status,
+        webflow_last_synced_at: row.webflow_last_synced_at,
+        ghl_sync_status:        row.ghl_sync_status,
+        ghl_last_synced_at:     row.ghl_last_synced_at,
+        created_at:             row.created_at,
+        updated_at:             row.updated_at,
+        attendee_count_active:  activeCount,
+        attendee_count_total:   totalCount,
+        seats_remaining:        Math.max(0, (row.capacity || 0) - activeCount),
       };
     }));
 
