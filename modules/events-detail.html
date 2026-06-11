@@ -37,6 +37,19 @@
     .cap-pill.warn { background: rgba(245,158,11,0.15); color:#b45309; border-color: rgba(245,158,11,0.3); }
     .cap-pill.ok { background: rgba(5,150,105,0.12); color:#059669; border-color: rgba(5,150,105,0.25); }
 
+    /* Sync badges header (Webflow + GHL) */
+    .sync-strip { display:flex; gap:8px; align-items:center; flex-wrap:wrap; padding: 8px 0 4px; margin-bottom: 14px; border-bottom: 1px solid var(--border); }
+    .sync-strip .sync-label { font-size: 11px; color: var(--text-faint); text-transform: uppercase; letter-spacing: .06em; font-weight: 700; margin-right: 4px; }
+    .sync-badge-lg { display:inline-flex; align-items:center; gap:5px; padding: 4px 11px; border-radius: 10px; font-size: 12px; font-weight: 700; letter-spacing:.03em; cursor: help; }
+    .sync-badge-lg.sync-ok      { background: rgba(5,150,105,0.15); color:#059669; border:1px solid rgba(5,150,105,0.25); }
+    .sync-badge-lg.sync-fail    { background: rgba(220,38,38,0.15); color:#b91c1c; border:1px solid rgba(220,38,38,0.3); }
+    .sync-badge-lg.sync-skip    { background: rgba(245,158,11,0.15); color:#b45309; border:1px solid rgba(245,158,11,0.3); }
+    .sync-badge-lg.sync-unpub   { background: rgba(148,163,184,0.2); color: var(--text-faint); border:1px solid var(--border); }
+    .sync-badge-lg.sync-none    { background: var(--bg-elev-2); color: var(--text-faint); border:1px solid var(--border); }
+    .btn-retry { background: var(--bg-elev); color: var(--text); border: 1px solid var(--border); padding: 5px 11px; border-radius: 8px; font-size: 12px; font-weight: 600; cursor: pointer; font-family: inherit; display: inline-flex; align-items: center; gap: 5px; }
+    .btn-retry:hover { background: var(--bg-elev-2); }
+    .btn-retry:disabled { opacity: .5; cursor: not-allowed; }
+
     .btn-primary { background: var(--brand-primary, #093d54); color: #fff; border: none; padding: 7px 13px; border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer; font-family: inherit; display: inline-flex; align-items: center; gap: 6px; }
     .btn-primary:hover { opacity: .9; }
     .btn-primary:disabled { opacity: .5; cursor: not-allowed; }
@@ -357,6 +370,28 @@ function can(key) {
   return window.RBAC?.canSync?.(key) || false;
 }
 
+// ── Sync-badge mapping ───────────────────────────────────────────────────────
+//
+// Webflow status: success | failure | unpublished | null
+// GHL status    : success | failure | skipped_graceful | null
+function renderSyncBadgeLg(target, status, lastSyncedAt) {
+  const labelPrefix = target === 'webflow' ? 'Webflow' : 'GoHighLevel';
+  let cls = 'sync-none';
+  let label = labelPrefix + ': nog niet gesynct';
+  if (status === 'success')          { cls = 'sync-ok';    label = labelPrefix + ': OK'; }
+  else if (status === 'failure')     { cls = 'sync-fail';  label = labelPrefix + ': FAIL'; }
+  else if (status === 'skipped_graceful') { cls = 'sync-skip';  label = labelPrefix + ': SKIP'; }
+  else if (status === 'unpublished') { cls = 'sync-unpub'; label = labelPrefix + ': UNPUB'; }
+
+  const tooltipParts = [labelPrefix, 'status: ' + (status || 'nog niet gesynct')];
+  if (lastSyncedAt) tooltipParts.push('laatst: ' + fmtDate(lastSyncedAt));
+  return `<span class="sync-badge-lg ${cls}" title="${esc(tooltipParts.join(' | '))}">${esc(label)}</span>`;
+}
+
+function hasSyncFailure(ev) {
+  return ev.webflow_sync_status === 'failure' || ev.ghl_sync_status === 'failure';
+}
+
 // ── Render: forbidden / not-found ────────────────────────────────────────────
 
 function renderForbidden(reason) {
@@ -416,6 +451,13 @@ function renderPage() {
       </div>
     </div>
 
+    <div class="sync-strip">
+      <span class="sync-label">Sync</span>
+      ${renderSyncBadgeLg('webflow', ev.webflow_sync_status, ev.webflow_last_synced_at)}
+      ${renderSyncBadgeLg('ghl',     ev.ghl_sync_status,     ev.ghl_last_synced_at)}
+      ${(canPublish && hasSyncFailure(ev)) ? '<button class="btn-retry" id="syncRetryBtn" onclick="retrySync()"><i class="ti ti-refresh"></i> Retry sync</button>' : ''}
+    </div>
+
     <div class="tabs" role="tablist">
       <button class="tab ${state.tab === 'info' ? 'active' : ''}" data-tab="info"><i class="ti ti-info-circle"></i> Info</button>
       <button class="tab ${state.tab === 'attendees' ? 'active' : ''}" data-tab="attendees"><i class="ti ti-users"></i> Aanwezigen <span class="tab-count" id="tabCountAtt">${c?.attendees_total || 0}</span></button>
@@ -468,8 +510,8 @@ function renderInfoTab() {
       </div>
       <div class="info-card">
         <h3>Sync &amp; meta</h3>
-        <div class="info-row"><div class="info-label">Webflow</div><div class="info-value">${esc(ev.webflow_sync_status || '—')}</div></div>
-        <div class="info-row"><div class="info-label">GoHighLevel</div><div class="info-value">${esc(ev.ghl_sync_status || '—')}</div></div>
+        <div class="info-row"><div class="info-label">Webflow</div><div class="info-value">${esc(ev.webflow_sync_status || '—')}${ev.webflow_last_synced_at ? ` <span style="color:var(--text-faint);font-size:11px">(${esc(fmtDate(ev.webflow_last_synced_at))})</span>` : ''}</div></div>
+        <div class="info-row"><div class="info-label">GoHighLevel</div><div class="info-value">${esc(ev.ghl_sync_status || '—')}${ev.ghl_last_synced_at ? ` <span style="color:var(--text-faint);font-size:11px">(${esc(fmtDate(ev.ghl_last_synced_at))})</span>` : ''}</div></div>
         <div class="info-row"><div class="info-label">Aangemaakt</div><div class="info-value">${esc(fmtDate(ev.created_at))}</div></div>
         <div class="info-row"><div class="info-label">Bijgewerkt</div><div class="info-value">${esc(fmtDate(ev.updated_at))}</div></div>
       </div>
@@ -863,6 +905,31 @@ async function publishEvent() {
     renderPage();
   } catch (e) {
     window.AgentShared?.showToast?.('Publiceren mislukt: ' + e.message, 'error');
+  }
+}
+
+async function retrySync() {
+  const btn = document.getElementById('syncRetryBtn');
+  if (btn) btn.disabled = true;
+  try {
+    const res = await window.AgentShared.apiFetch('/api/events-sync-retry', {
+      method: 'POST',
+      body: JSON.stringify({ event_id: state.eventId, target: 'both' }),
+    });
+    if (!res.ok) {
+      const e = await res.json().catch(() => ({}));
+      throw new Error(e.error || `HTTP ${res.status}`);
+    }
+    window.AgentShared?.showToast?.('Retry gestart', 'success');
+    // Reload sync-status na 3s zodat orchestrator klaar is
+    setTimeout(async () => {
+      const ok = await loadEvent();
+      if (ok) renderPage();
+    }, 3000);
+  } catch (e) {
+    console.error('[retrySync]', e);
+    window.AgentShared?.showToast?.('Retry mislukt: ' + e.message, 'error');
+    if (btn) btn.disabled = false;
   }
 }
 
