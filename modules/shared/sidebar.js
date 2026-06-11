@@ -35,6 +35,8 @@
     contracten: '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/>',
     finance: '<path d="M12 2v20"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>',
     sales: '<circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"/>',
+    // lucide "calendar-event" — visueel duidelijk onderscheid van meetings (people-group).
+    events: '<rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/><rect x="8" y="14" width="8" height="5" rx="1"/>',
     tickets: '<path d="M2 9a3 3 0 0 1 0 6v2a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-2a3 3 0 0 1 0-6V7a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2Z"/><path d="M13 5v2"/><path d="M13 11v2"/><path d="M13 17v2"/>',
     onboarding: '<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>'
   };
@@ -71,6 +73,7 @@
           navLink('control-center', '/modules/control-center.html', 'Control Center') +
           navLink('follow-up', '/modules/follow-up.html', 'Follow-up') +
           navLink('sales', '/modules/sales.html', 'Sales') +
+          navLink('events', '/modules/events.html', 'Events') +
           navLink('onboarding', '/modules/onboarding-overzicht.html', 'Onboarding') +
           // Finance — Mega-restructure: badge voor Open Acties (F1 finance-taken) hangt
           // nu inline op de Finance nav-item zelf. Open Acties is verhuisd naar
@@ -118,6 +121,8 @@
     // sales-dashboard.html highlight valt onder Dashboard-link in de sidebar
     if (cur === 'sales-dashboard') cur = 'dashboard';
     if (cur === 'onboarding-overzicht') cur = 'onboarding';
+    // events-detail.html + events-wizard.html highlighten onder de Events-link
+    if (cur === 'events-detail' || cur === 'events-wizard') cur = 'events';
     // open-acties.html is verhuisd naar Finance > Wanbetalers > Open Acties sub-tab.
     // Backward-compat: redirector-pagina bestaat nog en highlight onder Finance.
     if (cur === 'open-acties') cur = 'finance';
@@ -384,6 +389,11 @@
     'follow-up': 'followup.module.access',
     'tickets': 'tickets.module.access',
     'sales': 'sales.module.access',
+    'events': 'events.module.access',
+    // events-detail.html + events-wizard.html erven dezelfde module.access-gate
+    // (de pagina's checken zelf óók via window.RBAC.canSync in init() — defense-in-depth).
+    'events-detail': 'events.module.access',
+    'events-wizard': 'events.module.access',
     'finance': 'finance.module.access',
     // Open Acties (F1 finance-taken) is verhuisd naar Finance > Wanbetalers > Open Acties
     // sub-tab — geen eigen sidebar-link meer. Badge hangt nu op de Finance nav-item zelf.

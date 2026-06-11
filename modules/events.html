@@ -1,0 +1,313 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Events · De Forex Opleiding</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/dist/tabler-icons.min.css" />
+  <link rel="stylesheet" href="/modules/shared/agent-shared.css" />
+  <link rel="stylesheet" href="/styles/sales-redesign.css" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; }
+    body { font-family: 'Inter', system-ui, sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; -webkit-font-smoothing: antialiased; }
+    .app { margin-left: 220px; padding: 24px 28px 60px; max-width: 1400px; }
+    .page-head { display:flex; align-items:center; justify-content: space-between; padding-bottom: 14px; border-bottom: 1px solid var(--border); margin-bottom: 18px; gap: 16px; flex-wrap: wrap; }
+    .page-head h1 { font-size: 22px; font-weight: 800; letter-spacing: -.3px; }
+    .page-head .sub { font-size: 12.5px; color: var(--text-dim); margin-top: 2px; }
+    .btn-primary { background: var(--brand-primary, #093d54); color: #fff; border: none; padding: 8px 14px; border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer; font-family: inherit; display: inline-flex; align-items: center; gap: 6px; }
+    .btn-primary:hover { opacity: .9; }
+    .btn-primary:disabled { opacity: .5; cursor: not-allowed; }
+
+    /* Capacity pill */
+    .cap-pill { display:inline-flex; align-items:center; gap:4px; padding:2px 9px; border-radius:12px; font-size:11px; font-weight:600; background: var(--bg-elev-2); color: var(--text-dim); border:1px solid var(--border); }
+    .cap-pill.full { background: rgba(220,38,38,0.15); color:#b91c1c; border-color: rgba(220,38,38,0.3); }
+    .cap-pill.warn { background: rgba(245,158,11,0.15); color:#b45309; border-color: rgba(245,158,11,0.3); }
+    .cap-pill.ok { background: rgba(5,150,105,0.12); color:#059669; border-color: rgba(5,150,105,0.25); }
+
+    /* Status badges */
+    .status-badge { display:inline-block; padding:2px 9px; border-radius:10px; font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:.05em; }
+    .status-draft { background: rgba(148,163,184,0.2); color: var(--text-faint); }
+    .status-published { background: rgba(5,150,105,0.15); color:#059669; }
+    .status-cancelled { background: rgba(220,38,38,0.15); color:#b91c1c; }
+    .status-archived { background: rgba(148,163,184,0.2); color: var(--text-faint); opacity:.7; }
+
+    /* Skeleton */
+    .skel-row { height: 44px; background: linear-gradient(90deg, var(--bg-elev) 0%, var(--bg-elev-2) 50%, var(--bg-elev) 100%); background-size: 200% 100%; animation: shimmer 1.4s linear infinite; border-radius: 6px; margin-bottom: 6px; }
+    @keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+
+    .empty-state { padding: 40px 20px; text-align: center; color: var(--text-faint); font-size: 13px; }
+    .empty-state .empty-icon { font-size: 32px; margin-bottom: 10px; opacity: .6; }
+
+    .forbidden-card { background: var(--bg-elev); border: 1px solid var(--border); border-radius: 12px; padding: 32px 28px; max-width: 480px; margin: 40px auto; text-align: center; }
+    .forbidden-card h2 { font-size: 16px; font-weight: 700; margin-bottom: 6px; }
+    .forbidden-card p { font-size: 13px; color: var(--text-dim); margin-bottom: 16px; }
+    .forbidden-card a { color: var(--brand-secondary-light, #688b9b); text-decoration: none; font-size: 13px; font-weight: 500; }
+    .forbidden-card a:hover { text-decoration: underline; }
+
+    @media (max-width: 880px) { .app { margin-left: 0; padding: 14px; } }
+  </style>
+</head>
+<body>
+<div id="sidebar-mount"></div>
+
+<div class="app" id="page-content">
+  <!-- gevuld door init() -->
+</div>
+
+<script src="/modules/shared/supabase-client.js"></script>
+<script src="/modules/shared/agent-shared.js"></script>
+<script src="/modules/shared/theme-shared.js"></script>
+<script src="/modules/shared/permissions.js"></script>
+<script src="/modules/shared/sidebar.js"></script>
+
+<script>
+// ── Module-state ─────────────────────────────────────────────────────────────
+const VALID_STATUS = ['draft', 'published', 'cancelled', 'archived'];
+const STATUS_LABELS = {
+  draft: 'Concept',
+  published: 'Gepubliceerd',
+  cancelled: 'Geannuleerd',
+  archived: 'Gearchiveerd',
+};
+
+const state = {
+  // Filter-state. status=null betekent default ('draft,published' op de API).
+  status: null,           // null | 'draft' | 'published' | 'cancelled' | 'archived'
+  niveau: null,           // null | slug
+  search: '',
+  items: [],
+  niveauOptions: [],
+  loading: false,
+};
+
+const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+function fmtDate(iso) {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  if (!Number.isFinite(d.getTime())) return '—';
+  return d.toLocaleString('nl-NL', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+}
+
+function capPillClass(active, capacity) {
+  if (!capacity || capacity <= 0) return 'cap-pill';
+  const ratio = active / capacity;
+  if (active >= capacity) return 'cap-pill full';
+  if (ratio >= 0.8) return 'cap-pill warn';
+  return 'cap-pill ok';
+}
+
+// ── Render ───────────────────────────────────────────────────────────────────
+
+function renderForbidden() {
+  document.getElementById('page-content').innerHTML = `
+    <div class="forbidden-card">
+      <h2>Geen toegang</h2>
+      <p>Je hebt geen rechten om de Events-module te bekijken.</p>
+      <a href="/index.html">&larr; Terug naar dashboard</a>
+    </div>
+  `;
+}
+
+function renderPage(canCreate) {
+  document.getElementById('page-content').innerHTML = `
+    <div class="page-head">
+      <div>
+        <h1>Events</h1>
+        <div class="sub">Workshops, live trainingen en mentor-sessies.</div>
+      </div>
+      ${canCreate ? '<a class="btn-primary" href="/modules/events-wizard.html"><i class="ti ti-plus"></i> Nieuw event</a>' : ''}
+    </div>
+
+    <div class="sr-filterstrip" style="margin-bottom:14px">
+      <div class="sr-search"><input id="evSearch" type="search" placeholder="Zoek titel of locatie…" /></div>
+      <select class="sr-select" id="evNiveau">
+        <option value="">Alle niveaus</option>
+      </select>
+      <button class="sr-iconbtn sr-spacer" id="evRefresh" title="Vernieuwen"><i class="ti ti-refresh"></i></button>
+    </div>
+
+    <div class="sr-segments" id="evSegments" style="margin-bottom:14px">
+      <button class="sr-seg active" data-status="">Alle</button>
+      <button class="sr-seg" data-status="draft">Concept</button>
+      <button class="sr-seg" data-status="published">Gepubliceerd</button>
+      <button class="sr-seg" data-status="cancelled">Geannuleerd</button>
+      <button class="sr-seg" data-status="archived">Gearchiveerd</button>
+    </div>
+
+    <div id="eventsList">
+      <div class="skel-row"></div>
+      <div class="skel-row"></div>
+      <div class="skel-row"></div>
+    </div>
+  `;
+
+  // Wire filters
+  document.getElementById('evSearch').addEventListener('input', debounce((e) => {
+    state.search = e.target.value.trim();
+    loadEvents();
+  }, 300));
+  document.getElementById('evNiveau').addEventListener('change', (e) => {
+    state.niveau = e.target.value || null;
+    loadEvents();
+  });
+  document.getElementById('evRefresh').addEventListener('click', () => loadEvents());
+  document.querySelectorAll('#evSegments .sr-seg').forEach((seg) => {
+    seg.addEventListener('click', () => {
+      document.querySelectorAll('#evSegments .sr-seg').forEach((s) => s.classList.remove('active'));
+      seg.classList.add('active');
+      state.status = seg.dataset.status || null;
+      loadEvents();
+    });
+  });
+}
+
+function renderNiveauOptions() {
+  const sel = document.getElementById('evNiveau');
+  if (!sel) return;
+  const cur = sel.value;
+  sel.innerHTML = '<option value="">Alle niveaus</option>' +
+    state.niveauOptions.map((o) => `<option value="${esc(o.slug)}">${esc(o.label || o.slug)}</option>`).join('');
+  sel.value = cur;
+}
+
+function renderList() {
+  const wrap = document.getElementById('eventsList');
+  if (!wrap) return;
+  if (state.loading) {
+    wrap.innerHTML = '<div class="skel-row"></div><div class="skel-row"></div><div class="skel-row"></div>';
+    return;
+  }
+  if (!state.items.length) {
+    wrap.innerHTML = `
+      <div class="empty-state">
+        <div class="empty-icon"><i class="ti ti-calendar-off"></i></div>
+        Geen events gevonden voor deze filters.
+      </div>
+    `;
+    return;
+  }
+
+  const niveauLabelBySlug = {};
+  state.niveauOptions.forEach((o) => { niveauLabelBySlug[o.slug] = o.label || o.slug; });
+
+  wrap.innerHTML = `
+    <div class="sr-tablewrap"><table class="sr-table">
+      <thead><tr>
+        <th>Titel</th>
+        <th>Datum</th>
+        <th>Locatie</th>
+        <th>Niveau</th>
+        <th class="center">Capaciteit</th>
+        <th>Status</th>
+        <th></th>
+      </tr></thead>
+      <tbody>${state.items.map((ev) => {
+        const niveauLbl = ev.niveau ? (niveauLabelBySlug[ev.niveau] || ev.niveau) : '—';
+        const cap = ev.capacity || 0;
+        const active = ev.attendee_count_active || 0;
+        const capClass = capPillClass(active, cap);
+        const href = `/modules/events-detail.html?id=${encodeURIComponent(ev.id)}`;
+        return `
+          <tr style="cursor:pointer" data-href="${esc(href)}">
+            <td><a href="${esc(href)}" style="color:inherit;text-decoration:none;font-weight:600">${esc(ev.title || '—')}</a></td>
+            <td>${esc(fmtDate(ev.starts_at))}</td>
+            <td>${esc(ev.location || '—')}</td>
+            <td>${esc(niveauLbl)}</td>
+            <td class="center"><span class="${capClass}">${active}/${cap}</span></td>
+            <td><span class="status-badge status-${ev.status}">${esc(STATUS_LABELS[ev.status] || ev.status)}</span></td>
+            <td class="sr-actions"><a class="sr-ibtn" href="${esc(href)}" title="Open detail"><i class="ti ti-arrow-right"></i></a></td>
+          </tr>
+        `;
+      }).join('')}</tbody>
+    </table></div>
+  `;
+
+  // Klik-op-rij → detail
+  wrap.querySelectorAll('tr[data-href]').forEach((tr) => {
+    tr.addEventListener('click', (e) => {
+      // Niet hijacken als gebruiker een link of knop in de rij raakt
+      if (e.target.closest('a, button')) return;
+      window.location.href = tr.dataset.href;
+    });
+  });
+}
+
+// ── Fetch ────────────────────────────────────────────────────────────────────
+
+async function loadNiveauOptions() {
+  try {
+    const res = await window.AgentShared.apiFetch('/api/events-niveau-options');
+    if (!res.ok) return;
+    const data = await res.json();
+    state.niveauOptions = data.options || [];
+    renderNiveauOptions();
+  } catch (e) {
+    console.warn('[events] niveau-options laden mislukt:', e.message);
+  }
+}
+
+async function loadEvents() {
+  state.loading = true;
+  renderList();
+  try {
+    const params = new URLSearchParams();
+    if (state.status) params.set('status', state.status);
+    if (state.niveau) params.set('niveau', state.niveau);
+    if (state.search) params.set('q', state.search);
+    params.set('limit', '100');
+    const res = await window.AgentShared.apiFetch('/api/events-list?' + params.toString());
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || `HTTP ${res.status}`);
+    }
+    const data = await res.json();
+    state.items = data.items || [];
+  } catch (e) {
+    console.error('[events] load error:', e);
+    window.AgentShared?.showToast?.('Events laden mislukt: ' + e.message, 'error');
+    state.items = [];
+  } finally {
+    state.loading = false;
+    renderList();
+  }
+}
+
+// ── Util ─────────────────────────────────────────────────────────────────────
+
+function debounce(fn, ms) {
+  let t = null;
+  return function (...args) {
+    if (t) clearTimeout(t);
+    t = setTimeout(() => fn.apply(this, args), ms);
+  };
+}
+
+// ── Init ─────────────────────────────────────────────────────────────────────
+
+async function init() {
+  await window._authSharedReady;
+  const profile = await window.AuthShared.requireAuth();
+  if (!profile) return;
+  if (window.AgentShared) await window.AgentShared.renderUserSection(profile);
+
+  await window.RBAC.ensurePermissionsLoaded();
+  if (!window.RBAC.canSync('events.module.access')) {
+    renderForbidden();
+    return;
+  }
+
+  const canCreate = window.RBAC.canSync('events.event.create');
+  renderPage(canCreate);
+  await Promise.all([loadNiveauOptions(), loadEvents()]);
+}
+
+init();
+</script>
+
+</body>
+</html>

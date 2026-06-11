@@ -1,0 +1,540 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Nieuw event · De Forex Opleiding</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/dist/tabler-icons.min.css" />
+  <link rel="stylesheet" href="/modules/shared/agent-shared.css" />
+  <link rel="stylesheet" href="/styles/sales-redesign.css" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; }
+    body { font-family: 'Inter', system-ui, sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; -webkit-font-smoothing: antialiased; }
+    .app { margin-left: 220px; padding: 24px 28px 60px; max-width: 880px; }
+
+    .crumb { font-size: 12px; color: var(--text-faint); margin-bottom: 8px; }
+    .crumb a { color: var(--brand-secondary-light, #688b9b); text-decoration: none; }
+    .crumb a:hover { text-decoration: underline; }
+
+    h1 { font-size: 22px; font-weight: 800; letter-spacing: -.3px; margin-bottom: 4px; }
+    .sub { font-size: 13px; color: var(--text-dim); margin-bottom: 20px; }
+
+    /* Stepper */
+    .stepper { display: flex; gap: 8px; margin-bottom: 24px; padding-bottom: 16px; border-bottom: 1px solid var(--border); }
+    .step { flex: 1; padding: 10px 12px; background: var(--bg-elev); border: 1px solid var(--border); border-radius: 8px; font-size: 12px; color: var(--text-faint); display: flex; align-items: center; gap: 8px; }
+    .step.active { background: var(--brand-primary, #093d54); color: #fff; border-color: var(--brand-primary, #093d54); }
+    .step.done { background: var(--bg-elev-2); color: var(--text); border-color: var(--border); }
+    .step-num { width: 22px; height: 22px; border-radius: 50%; background: rgba(255,255,255,0.15); display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 11px; flex-shrink: 0; }
+    .step.done .step-num { background: var(--brand-primary-soft, #093d5420); color: var(--brand-primary, #093d54); }
+    .step:not(.active):not(.done) .step-num { background: var(--bg-elev-2); }
+
+    /* Card */
+    .card { background: var(--bg-elev); border: 1px solid var(--border); border-radius: 12px; padding: 24px; margin-bottom: 18px; }
+    .card h2 { font-size: 16px; font-weight: 700; margin-bottom: 4px; }
+    .card .card-sub { font-size: 12.5px; color: var(--text-faint); margin-bottom: 18px; }
+
+    .form-field { display: flex; flex-direction: column; gap: 4px; margin-bottom: 14px; }
+    .form-field label { font-size: 12px; font-weight: 500; color: var(--text-faint); }
+    .form-field label .req { color: #ef4444; }
+    .form-field input, .form-field textarea, .form-field select { padding: 9px 12px; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; color: var(--text); font-size: 13px; font-family: inherit; }
+    .form-field input:focus, .form-field textarea:focus, .form-field select:focus { outline: none; border-color: var(--brand-primary, #093d54); }
+    .form-field textarea { resize: vertical; min-height: 100px; }
+    .form-field .hint { font-size: 11px; color: var(--text-faint); margin-top: 2px; }
+    .form-row-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+
+    /* Buttons */
+    .btn-primary { background: var(--brand-primary, #093d54); color: #fff; border: none; padding: 9px 18px; border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer; font-family: inherit; display: inline-flex; align-items: center; gap: 6px; }
+    .btn-primary:hover { opacity: .9; }
+    .btn-primary:disabled { opacity: .5; cursor: not-allowed; }
+    .btn-secondary { background: var(--bg-elev); color: var(--text-dim); border: 1px solid var(--border); padding: 9px 18px; border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer; font-family: inherit; display: inline-flex; align-items: center; gap: 6px; }
+    .btn-secondary:hover { background: var(--bg-elev-2); color: var(--text); }
+
+    .nav-row { display: flex; justify-content: space-between; gap: 10px; margin-top: 12px; }
+
+    /* Mentor select */
+    .mentor-list { display: grid; gap: 8px; }
+    .mentor-pick { display: flex; align-items: center; gap: 10px; padding: 10px 12px; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; cursor: pointer; transition: background .15s, border-color .15s; }
+    .mentor-pick:hover { background: var(--bg-elev-2); }
+    .mentor-pick input[type=checkbox] { width: 16px; height: 16px; cursor: pointer; }
+    .mentor-pick .mp-name { font-size: 13px; font-weight: 600; }
+    .mentor-pick .mp-role { font-size: 11px; color: var(--text-faint); margin-left: auto; }
+    .mentor-pick.selected { background: var(--brand-primary-soft, #093d5420); border-color: var(--brand-primary, #093d54); }
+
+    /* Review */
+    .review-section { padding: 12px 0; border-bottom: 1px solid var(--border); }
+    .review-section:last-child { border-bottom: none; }
+    .review-section h3 { font-size: 12px; font-weight: 700; color: var(--text-faint); text-transform: uppercase; letter-spacing: .06em; margin-bottom: 8px; }
+    .review-row { display: grid; grid-template-columns: 160px 1fr; gap: 10px; padding: 4px 0; font-size: 13px; }
+    .review-label { color: var(--text-faint); font-size: 12px; }
+    .review-value { color: var(--text); }
+
+    /* Skeleton */
+    .skel-row { height: 44px; background: linear-gradient(90deg, var(--bg-elev) 0%, var(--bg-elev-2) 50%, var(--bg-elev) 100%); background-size: 200% 100%; animation: shimmer 1.4s linear infinite; border-radius: 6px; margin-bottom: 6px; }
+    @keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+
+    .banner { padding: 10px 12px; margin-bottom: 12px; background: rgba(239,68,68,0.1); border: 1px solid #ef4444; border-radius: 8px; color: #ef4444; font-size: 13px; display: none; }
+    .banner.visible { display: block; }
+
+    .forbidden-card { background: var(--bg-elev); border: 1px solid var(--border); border-radius: 12px; padding: 32px 28px; max-width: 480px; margin: 40px auto; text-align: center; }
+    .forbidden-card h2 { font-size: 16px; font-weight: 700; margin-bottom: 6px; }
+    .forbidden-card p { font-size: 13px; color: var(--text-dim); margin-bottom: 16px; }
+    .forbidden-card a { color: var(--brand-secondary-light, #688b9b); text-decoration: none; font-size: 13px; font-weight: 500; }
+    .forbidden-card a:hover { text-decoration: underline; }
+
+    @media (max-width: 880px) { .app { margin-left: 0; padding: 14px; } .form-row-2 { grid-template-columns: 1fr; } .review-row { grid-template-columns: 1fr; } .review-label { font-weight: 600; } }
+  </style>
+</head>
+<body>
+<div id="sidebar-mount"></div>
+
+<div class="app" id="page-content">
+  <!-- gevuld door init() -->
+</div>
+
+<script src="/modules/shared/supabase-client.js"></script>
+<script src="/modules/shared/agent-shared.js"></script>
+<script src="/modules/shared/theme-shared.js"></script>
+<script src="/modules/shared/permissions.js"></script>
+<script src="/modules/shared/sidebar.js"></script>
+
+<script>
+// ── State ────────────────────────────────────────────────────────────────────
+const state = {
+  step: 1,                           // 1..4
+  niveauOptions: [],
+  availableMentors: [],
+  form: {
+    title: '',
+    starts_at: '',                   // local datetime-input value (YYYY-MM-DDTHH:mm)
+    ends_at: '',
+    location: '',
+    capacity: '',
+    niveau: '',
+    description_md: '',
+  },
+  selectedMentors: new Set(),        // team_member.id
+  submitting: false,
+};
+
+const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+function fmtDate(iso) {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  if (!Number.isFinite(d.getTime())) return '—';
+  return d.toLocaleString('nl-NL', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+}
+
+function localInputToIso(s) {
+  if (!s) return null;
+  const d = new Date(s);
+  if (!Number.isFinite(d.getTime())) return null;
+  return d.toISOString();
+}
+
+// ── Render: forbidden ────────────────────────────────────────────────────────
+
+function renderForbidden() {
+  document.getElementById('page-content').innerHTML = `
+    <div class="forbidden-card">
+      <h2>Geen toegang</h2>
+      <p>Je hebt geen rechten om events aan te maken.</p>
+      <a href="/modules/events.html">&larr; Terug naar events</a>
+    </div>
+  `;
+}
+
+// ── Render: stepper + page shell ────────────────────────────────────────────
+
+function renderShell() {
+  document.getElementById('page-content').innerHTML = `
+    <div class="crumb"><a href="/modules/events.html">Events</a> &rsaquo; <span>Nieuw event</span></div>
+    <h1>Nieuw event</h1>
+    <div class="sub">Maak in 4 stappen een nieuw event aan en koppel meteen de mentoren.</div>
+
+    <div class="stepper" id="stepper"></div>
+    <div id="banner" class="banner"></div>
+    <div id="stepContent"></div>
+  `;
+  renderStepper();
+  renderStep();
+}
+
+function renderStepper() {
+  const steps = [
+    { n: 1, label: 'Basis info' },
+    { n: 2, label: 'Niveau' },
+    { n: 3, label: 'Mentoren' },
+    { n: 4, label: 'Review' },
+  ];
+  document.getElementById('stepper').innerHTML = steps.map((s) => {
+    const cls = s.n === state.step ? 'active' : (s.n < state.step ? 'done' : '');
+    return `<div class="step ${cls}"><span class="step-num">${s.n}</span><span>${esc(s.label)}</span></div>`;
+  }).join('');
+}
+
+function setBanner(msg) {
+  const b = document.getElementById('banner');
+  if (!b) return;
+  if (msg) {
+    b.textContent = msg;
+    b.classList.add('visible');
+  } else {
+    b.textContent = '';
+    b.classList.remove('visible');
+  }
+}
+
+// ── Render: step content ─────────────────────────────────────────────────────
+
+function renderStep() {
+  setBanner('');
+  if (state.step === 1) return renderStep1();
+  if (state.step === 2) return renderStep2();
+  if (state.step === 3) return renderStep3();
+  if (state.step === 4) return renderStep4();
+}
+
+function renderStep1() {
+  const f = state.form;
+  document.getElementById('stepContent').innerHTML = `
+    <div class="card">
+      <h2>Basis-informatie</h2>
+      <div class="card-sub">Titel, datum, locatie en capaciteit.</div>
+
+      <div class="form-field">
+        <label>Titel <span class="req">*</span></label>
+        <input type="text" id="f_title" maxlength="255" value="${esc(f.title)}" placeholder="bv. Live workshop trendlijnen" />
+      </div>
+      <div class="form-row-2">
+        <div class="form-field">
+          <label>Start (lokaal) <span class="req">*</span></label>
+          <input type="datetime-local" id="f_starts" value="${esc(f.starts_at)}" />
+        </div>
+        <div class="form-field">
+          <label>Eind (lokaal)</label>
+          <input type="datetime-local" id="f_ends" value="${esc(f.ends_at)}" />
+          <div class="hint">Optioneel; moet na de starttijd liggen.</div>
+        </div>
+      </div>
+      <div class="form-field">
+        <label>Locatie</label>
+        <input type="text" id="f_location" maxlength="255" value="${esc(f.location)}" placeholder="bv. Hilversum, ZOOM, online" />
+      </div>
+      <div class="form-field">
+        <label>Capaciteit <span class="req">*</span></label>
+        <input type="number" id="f_capacity" min="1" value="${esc(f.capacity)}" placeholder="bv. 24" />
+        <div class="hint">Aantal deelnemers; bepaalt de capacity-pill.</div>
+      </div>
+      <div class="form-field">
+        <label>Beschrijving</label>
+        <textarea id="f_desc" rows="4" placeholder="Korte body (markdown).">${esc(f.description_md)}</textarea>
+      </div>
+    </div>
+
+    <div class="nav-row">
+      <a class="btn-secondary" href="/modules/events.html"><i class="ti ti-arrow-left"></i> Annuleren</a>
+      <button class="btn-primary" id="nextBtn">Volgende <i class="ti ti-arrow-right"></i></button>
+    </div>
+  `;
+  document.getElementById('nextBtn').addEventListener('click', onStep1Next);
+}
+
+function renderStep2() {
+  const f = state.form;
+  let optsHtml = '';
+  if (!state.niveauOptions.length) {
+    optsHtml = '<div class="skel-row"></div><div class="skel-row"></div>';
+  } else {
+    optsHtml = '<option value="">— Geen niveau —</option>' +
+      state.niveauOptions.map((o) => `<option value="${esc(o.slug)}" ${o.slug === f.niveau ? 'selected' : ''}>${esc(o.label || o.slug)}</option>`).join('');
+  }
+
+  document.getElementById('stepContent').innerHTML = `
+    <div class="card">
+      <h2>Niveau</h2>
+      <div class="card-sub">Bepaalt voor welke groep deelnemers het event geschikt is. Optioneel.</div>
+
+      <div class="form-field">
+        <label>Niveau</label>
+        ${state.niveauOptions.length ? `<select id="f_niveau">${optsHtml}</select>` : optsHtml}
+        <div class="hint">Niveau is optioneel; F1 stuurt alleen vooraf-bekende waarden door (basis / gevorderd / …).</div>
+      </div>
+    </div>
+
+    <div class="nav-row">
+      <button class="btn-secondary" id="prevBtn"><i class="ti ti-arrow-left"></i> Vorige</button>
+      <button class="btn-primary" id="nextBtn">Volgende <i class="ti ti-arrow-right"></i></button>
+    </div>
+  `;
+  document.getElementById('prevBtn').addEventListener('click', () => { state.step = 1; renderStepper(); renderStep(); });
+  document.getElementById('nextBtn').addEventListener('click', onStep2Next);
+}
+
+function renderStep3() {
+  let body = '';
+  if (!state.availableMentors.length) {
+    body = `
+      <div class="skel-row"></div>
+      <div class="skel-row"></div>
+      <div class="skel-row"></div>
+    `;
+  } else {
+    body = `
+      <div class="mentor-list">
+        ${state.availableMentors.map((m) => {
+          const checked = state.selectedMentors.has(m.id);
+          const role = m.role || m.type || 'mentor';
+          return `
+            <label class="mentor-pick ${checked ? 'selected' : ''}">
+              <input type="checkbox" data-id="${esc(m.id)}" ${checked ? 'checked' : ''} />
+              <span class="mp-name">${esc(m.name)}</span>
+              <span class="mp-role">${esc(role)}</span>
+            </label>
+          `;
+        }).join('')}
+      </div>
+    `;
+  }
+
+  document.getElementById('stepContent').innerHTML = `
+    <div class="card">
+      <h2>Mentoren</h2>
+      <div class="card-sub">Kies één of meer mentoren die dit event begeleiden. Optioneel.</div>
+      ${body}
+    </div>
+
+    <div class="nav-row">
+      <button class="btn-secondary" id="prevBtn"><i class="ti ti-arrow-left"></i> Vorige</button>
+      <button class="btn-primary" id="nextBtn">Volgende <i class="ti ti-arrow-right"></i></button>
+    </div>
+  `;
+
+  document.querySelectorAll('.mentor-pick input[type=checkbox]').forEach((cb) => {
+    cb.addEventListener('change', () => {
+      const id = cb.dataset.id;
+      if (cb.checked) state.selectedMentors.add(id);
+      else state.selectedMentors.delete(id);
+      cb.closest('.mentor-pick').classList.toggle('selected', cb.checked);
+    });
+  });
+
+  document.getElementById('prevBtn').addEventListener('click', () => { state.step = 2; renderStepper(); renderStep(); });
+  document.getElementById('nextBtn').addEventListener('click', () => { state.step = 4; renderStepper(); renderStep(); });
+}
+
+function renderStep4() {
+  const f = state.form;
+  const niveauLabel = (state.niveauOptions.find((o) => o.slug === f.niveau) || {}).label || (f.niveau || '—');
+  const mentorList = state.availableMentors.filter((m) => state.selectedMentors.has(m.id));
+
+  const startsAt = f.starts_at ? localInputToIso(f.starts_at) : null;
+  const endsAt = f.ends_at ? localInputToIso(f.ends_at) : null;
+
+  document.getElementById('stepContent').innerHTML = `
+    <div class="card">
+      <h2>Review</h2>
+      <div class="card-sub">Controleer de gegevens en klik op "Aanmaken" om het event als concept op te slaan.</div>
+
+      <div class="review-section">
+        <h3>Basis-informatie</h3>
+        <div class="review-row"><div class="review-label">Titel</div><div class="review-value">${esc(f.title || '—')}</div></div>
+        <div class="review-row"><div class="review-label">Start</div><div class="review-value">${esc(fmtDate(startsAt))}</div></div>
+        <div class="review-row"><div class="review-label">Eind</div><div class="review-value">${esc(fmtDate(endsAt))}</div></div>
+        <div class="review-row"><div class="review-label">Locatie</div><div class="review-value">${esc(f.location || '—')}</div></div>
+        <div class="review-row"><div class="review-label">Capaciteit</div><div class="review-value">${esc(f.capacity || '—')}</div></div>
+        <div class="review-row"><div class="review-label">Beschrijving</div><div class="review-value">${f.description_md ? esc(f.description_md) : '—'}</div></div>
+      </div>
+
+      <div class="review-section">
+        <h3>Niveau</h3>
+        <div class="review-row"><div class="review-label">Niveau</div><div class="review-value">${esc(niveauLabel)}</div></div>
+      </div>
+
+      <div class="review-section">
+        <h3>Mentoren</h3>
+        <div class="review-row"><div class="review-label">${mentorList.length} geselecteerd</div><div class="review-value">${mentorList.map((m) => esc(m.name)).join(', ') || '—'}</div></div>
+      </div>
+    </div>
+
+    <div class="nav-row">
+      <button class="btn-secondary" id="prevBtn"><i class="ti ti-arrow-left"></i> Vorige</button>
+      <button class="btn-primary" id="submitBtn"><i class="ti ti-check"></i> Aanmaken</button>
+    </div>
+  `;
+  document.getElementById('prevBtn').addEventListener('click', () => { state.step = 3; renderStepper(); renderStep(); });
+  document.getElementById('submitBtn').addEventListener('click', submitEvent);
+}
+
+// ── Step transitions ─────────────────────────────────────────────────────────
+
+function onStep1Next() {
+  // Lees velden in state
+  state.form.title = document.getElementById('f_title').value.trim();
+  state.form.starts_at = document.getElementById('f_starts').value;
+  state.form.ends_at = document.getElementById('f_ends').value;
+  state.form.location = document.getElementById('f_location').value.trim();
+  state.form.capacity = document.getElementById('f_capacity').value;
+  state.form.description_md = document.getElementById('f_desc').value;
+
+  // Validatie
+  if (!state.form.title) { setBanner('Titel verplicht.'); return; }
+  if (state.form.title.length > 255) { setBanner('Titel te lang (max 255 tekens).'); return; }
+  if (!state.form.starts_at) { setBanner('Start-datum verplicht.'); return; }
+  const startsIso = localInputToIso(state.form.starts_at);
+  if (!startsIso) { setBanner('Start-datum is geen geldige datum.'); return; }
+  if (state.form.ends_at) {
+    const endsIso = localInputToIso(state.form.ends_at);
+    if (!endsIso) { setBanner('Eind-datum is geen geldige datum.'); return; }
+    if (new Date(endsIso) <= new Date(startsIso)) { setBanner('Eind-datum moet na de start-datum liggen.'); return; }
+  }
+  const cap = Number(state.form.capacity);
+  if (!Number.isInteger(cap) || cap <= 0) { setBanner('Capaciteit moet een positief geheel getal zijn.'); return; }
+
+  state.step = 2;
+  renderStepper();
+  renderStep();
+  if (!state.niveauOptions.length) loadNiveauOptions();
+}
+
+function onStep2Next() {
+  // Lees niveau
+  const sel = document.getElementById('f_niveau');
+  state.form.niveau = sel ? sel.value : '';
+  state.step = 3;
+  renderStepper();
+  renderStep();
+  if (!state.availableMentors.length) loadAvailableMentors();
+}
+
+// ── Fetch ────────────────────────────────────────────────────────────────────
+
+async function loadNiveauOptions() {
+  try {
+    const res = await window.AgentShared.apiFetch('/api/events-niveau-options');
+    if (!res.ok) return;
+    const data = await res.json();
+    state.niveauOptions = data.options || [];
+    if (state.step === 2) renderStep();
+  } catch (e) {
+    console.warn('[wizard] niveau-options load failed:', e.message);
+  }
+}
+
+async function loadAvailableMentors() {
+  try {
+    // Geen event_id bij wizard — alle actieve mentoren tonen.
+    const res = await window.AgentShared.apiFetch('/api/events-mentors-available');
+    if (!res.ok) {
+      // Geen rechten op assign? Toon lege lijst (mentoren zijn optioneel).
+      state.availableMentors = [];
+      if (state.step === 3) renderStep();
+      return;
+    }
+    const data = await res.json();
+    state.availableMentors = data.mentors || [];
+    if (state.step === 3) renderStep();
+  } catch (e) {
+    console.warn('[wizard] mentors-available load failed:', e.message);
+  }
+}
+
+// ── Submit ───────────────────────────────────────────────────────────────────
+
+async function submitEvent() {
+  if (state.submitting) return;
+  state.submitting = true;
+  setBanner('');
+  const btn = document.getElementById('submitBtn');
+  if (btn) { btn.disabled = true; btn.innerHTML = '<i class="ti ti-loader"></i> Aanmaken…'; }
+
+  try {
+    const payload = {
+      title: state.form.title,
+      starts_at: localInputToIso(state.form.starts_at),
+      ends_at: state.form.ends_at ? localInputToIso(state.form.ends_at) : null,
+      location: state.form.location || null,
+      capacity: Number(state.form.capacity),
+      niveau: state.form.niveau || null,
+      description_md: state.form.description_md || null,
+      status: 'draft',
+    };
+
+    const res = await window.AgentShared.apiFetch('/api/events-create', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) {
+      const e = await res.json().catch(() => ({}));
+      throw new Error(e.error || `HTTP ${res.status}`);
+    }
+    const data = await res.json();
+    const newId = data.event?.id;
+    if (!newId) throw new Error('Geen event-id ontvangen van server');
+
+    // Mentoren koppelen — best-effort, per mentor één call.
+    const mentorIds = Array.from(state.selectedMentors);
+    const failed = [];
+    for (const teamMemberId of mentorIds) {
+      try {
+        const r = await window.AgentShared.apiFetch('/api/events-mentor-assign', {
+          method: 'POST',
+          body: JSON.stringify({ event_id: newId, team_member_id: teamMemberId }),
+        });
+        if (!r.ok) {
+          const e = await r.json().catch(() => ({}));
+          failed.push((state.availableMentors.find((m) => m.id === teamMemberId) || {}).name || teamMemberId);
+          console.warn('[wizard] mentor-assign failed for', teamMemberId, e.error);
+        }
+      } catch (e) {
+        failed.push((state.availableMentors.find((m) => m.id === teamMemberId) || {}).name || teamMemberId);
+      }
+    }
+    if (failed.length) {
+      window.AgentShared?.showToast?.(`Event aangemaakt, maar ${failed.length} mentor(en) niet gekoppeld: ${failed.join(', ')}`, 'error');
+    } else {
+      window.AgentShared?.showToast?.('Event aangemaakt', 'success');
+    }
+    // Redirect naar detail
+    window.location.href = '/modules/events-detail.html?id=' + encodeURIComponent(newId);
+  } catch (e) {
+    setBanner('Aanmaken mislukt: ' + e.message);
+    if (btn) { btn.disabled = false; btn.innerHTML = '<i class="ti ti-check"></i> Aanmaken'; }
+  } finally {
+    state.submitting = false;
+  }
+}
+
+// ── Init ─────────────────────────────────────────────────────────────────────
+
+async function init() {
+  await window._authSharedReady;
+  const profile = await window.AuthShared.requireAuth();
+  if (!profile) return;
+  if (window.AgentShared) await window.AgentShared.renderUserSection(profile);
+
+  await window.RBAC.ensurePermissionsLoaded();
+  if (!window.RBAC.canSync('events.module.access')) {
+    renderForbidden();
+    return;
+  }
+  if (!window.RBAC.canSync('events.event.create')) {
+    renderForbidden();
+    return;
+  }
+
+  renderShell();
+  // Preload niveau-options + mentoren parallel zodat step 2 / 3 direct gevuld zijn.
+  loadNiveauOptions();
+  loadAvailableMentors();
+}
+
+init();
+</script>
+
+</body>
+</html>
