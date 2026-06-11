@@ -37,6 +37,17 @@
 > ~32 finance.* RBAC-keys + placeholder modules/finance.html. **Nul endpoints, nul
 > UI-functionaliteit** — Fase 2 bouwt de eerste werkende Finance-features.
 
+> **ARCHITECTUUR-CORRECTIE (11 juni 2026)**: TL is **backend-only**. Jeffrey klikt
+> NIET in TL UI. Alle factuur/abonnement-mutaties starten in **Sales-module**
+> (sales.html / klant-detail Finance-tab) en syncen naar TL backend via OAuth.
+> Bank-saldo + reconciliatie via **Finance > Bank-module** (camt-statements +
+> matching), niet via TL `/financialAccounts.*`. TL OAuth blijft draaien voor
+> inbound data-sync. Zie CLAUDE.md sectie "TeamLeader (TL) — Backend-only
+> integratie" voor het volledige pattern. Endpoints hieronder in 2A/2B/Plus
+> blijven correct (TL.invoices.* en TL.subscriptions.* aanroepen vanuit ons
+> systeem); de hertypering is dat Jeffrey/Aron/Dave de TRIGGER voor die calls
+> altijd in onze UI doen, nooit in focus.teamleader.eu.
+
 ### Scope (overgenomen van Code's research)
 **2A — TL-factuurspiegel (read-only, laag risico)**
 - [ ] `api/finance-tl-invoice-sync.js` (cron + manual): `invoices.list` per department →
