@@ -680,7 +680,6 @@ export async function updateItem({ webflowItemId, event, descriptionHtml }) {
   const schema = await getCollectionSchema();
   const fieldData = buildFieldData({ event, descriptionHtml, schema });
 
-  // PATCH /items/live/{id} - update LIVE item (item is + blijft publiek zichtbaar).
   const body = {
     isArchived: false,
     isDraft   : false,
