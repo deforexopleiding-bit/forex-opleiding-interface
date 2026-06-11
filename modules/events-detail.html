@@ -1,0 +1,1328 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Event detail · De Forex Opleiding</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/dist/tabler-icons.min.css" />
+  <link rel="stylesheet" href="/modules/shared/agent-shared.css" />
+  <link rel="stylesheet" href="/styles/sales-redesign.css" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; }
+    body { font-family: 'Inter', system-ui, sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; -webkit-font-smoothing: antialiased; }
+    .app { margin-left: 220px; padding: 24px 28px 60px; max-width: 1400px; }
+
+    .crumb { font-size: 12px; color: var(--text-faint); margin-bottom: 8px; }
+    .crumb a { color: var(--brand-secondary-light, #688b9b); text-decoration: none; }
+    .crumb a:hover { text-decoration: underline; }
+
+    .ev-head { display:flex; gap:16px; align-items:flex-start; justify-content:space-between; flex-wrap:wrap; padding-bottom: 14px; border-bottom: 1px solid var(--border); margin-bottom: 18px; }
+    .ev-title { font-size: 22px; font-weight: 800; letter-spacing: -.3px; }
+    .ev-meta { font-size: 13px; color: var(--text-dim); margin-top: 4px; display:flex; gap:14px; flex-wrap:wrap; }
+    .ev-meta .it { display:inline-flex; align-items:center; gap:5px; }
+    .ev-actions { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+
+    .status-badge { display:inline-block; padding:3px 10px; border-radius:10px; font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.05em; }
+    .status-draft { background: rgba(148,163,184,0.2); color: var(--text-faint); }
+    .status-published { background: rgba(5,150,105,0.15); color:#059669; }
+    .status-cancelled { background: rgba(220,38,38,0.15); color:#b91c1c; }
+    .status-archived { background: rgba(148,163,184,0.2); color: var(--text-faint); opacity:.7; }
+
+    .cap-pill { display:inline-flex; align-items:center; gap:4px; padding:3px 10px; border-radius:12px; font-size:12px; font-weight:600; background: var(--bg-elev-2); color: var(--text-dim); border:1px solid var(--border); }
+    .cap-pill.full { background: rgba(220,38,38,0.15); color:#b91c1c; border-color: rgba(220,38,38,0.3); }
+    .cap-pill.warn { background: rgba(245,158,11,0.15); color:#b45309; border-color: rgba(245,158,11,0.3); }
+    .cap-pill.ok { background: rgba(5,150,105,0.12); color:#059669; border-color: rgba(5,150,105,0.25); }
+
+    .btn-primary { background: var(--brand-primary, #093d54); color: #fff; border: none; padding: 7px 13px; border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer; font-family: inherit; display: inline-flex; align-items: center; gap: 6px; }
+    .btn-primary:hover { opacity: .9; }
+    .btn-primary:disabled { opacity: .5; cursor: not-allowed; }
+    .btn-secondary { background: var(--bg-elev); color: var(--text-dim); border: 1px solid var(--border); padding: 7px 13px; border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer; font-family: inherit; display: inline-flex; align-items: center; gap: 6px; }
+    .btn-secondary:hover { background: var(--bg-elev-2); color: var(--text); }
+    .btn-danger { background: var(--red, #dc2626); color: #fff; border: none; padding: 7px 13px; border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer; font-family: inherit; display: inline-flex; align-items: center; gap: 6px; }
+    .btn-danger:hover { opacity: .9; }
+
+    /* Tabs */
+    .tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border); margin-bottom: 18px; }
+    .tab { padding: 9px 16px; font: inherit; font-size: 13px; font-weight: 600; background: transparent; border: none; cursor: pointer; color: var(--text-faint); border-bottom: 2px solid transparent; display:inline-flex; align-items:center; gap:6px; }
+    .tab:hover { color: var(--text); }
+    .tab.active { color: var(--text); border-bottom-color: var(--accent, #093d54); }
+    .tab-count { background: var(--bg-elev-2); color: var(--text-faint); padding:1px 7px; border-radius:10px; font-size:11px; font-weight:600; min-width:18px; text-align:center; }
+    .tab.active .tab-count { background: var(--accent, #093d54); color: #fff; }
+    .tab-content { display: none; }
+    .tab-content.active { display: block; }
+
+    /* Info-tab */
+    .info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    .info-card { background: var(--bg-elev); border: 1px solid var(--border); border-radius: 10px; padding: 16px; }
+    .info-card h3 { font-size: 12px; font-weight: 700; color: var(--text-faint); text-transform: uppercase; letter-spacing: .06em; margin-bottom: 10px; }
+    .info-row { display: grid; grid-template-columns: 140px 1fr; gap: 10px; padding: 6px 0; border-bottom: 1px solid var(--border); font-size: 13px; }
+    .info-row:last-child { border-bottom: none; }
+    .info-label { color: var(--text-faint); font-size: 11.5px; }
+    .info-value { color: var(--text); }
+    .desc-box { background: var(--bg-elev-2); border: 1px solid var(--border); border-radius: 8px; padding: 12px; font-size: 13px; color: var(--text); white-space: pre-wrap; min-height: 60px; }
+
+    /* Attendees */
+    .att-toolbar { display: flex; gap: 10px; align-items: center; margin-bottom: 12px; flex-wrap: wrap; }
+    .chip-group { display:flex; gap:6px; flex-wrap:wrap; }
+    .chip { padding:5px 11px; background:var(--bg-elev); border:1px solid var(--border); border-radius:14px; font-size:12px; cursor:pointer; color:var(--text-dim); font-family:inherit; transition:all .15s; }
+    .chip:hover { background:var(--bg-elev-2); color:var(--text); }
+    .chip.active { background:var(--brand-primary-soft, #093d5420); border-color:var(--brand-primary, #093d54); color:var(--brand-primary, #093d54); font-weight:500; }
+
+    .tag-chip { display:inline-block; padding:1px 7px; border-radius:8px; font-size:10px; font-weight:600; background: var(--bg-elev-2); color: var(--text-dim); border:1px solid var(--border); margin-right:4px; }
+
+    /* Mentor cards */
+    .mentor-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
+    .mentor-card { background: var(--bg-elev); border: 1px solid var(--border); border-radius: 10px; padding: 14px; display: flex; align-items: center; gap: 12px; position: relative; }
+    .mentor-avatar { width: 40px; height: 40px; border-radius: 50%; background: var(--bg-elev-2); display: flex; align-items: center; justify-content: center; font-size: 18px; flex-shrink: 0; }
+    .mentor-info { flex: 1; min-width: 0; }
+    .mentor-name { font-size: 13px; font-weight: 600; }
+    .mentor-role { font-size: 11px; color: var(--text-faint); margin-top: 2px; }
+    .mentor-remove { background: transparent; border: none; cursor: pointer; color: var(--text-faint); padding: 4px; border-radius: 4px; }
+    .mentor-remove:hover { background: var(--bg-elev-2); color: var(--red, #dc2626); }
+
+    /* Skeleton */
+    .skel-row { height: 44px; background: linear-gradient(90deg, var(--bg-elev) 0%, var(--bg-elev-2) 50%, var(--bg-elev) 100%); background-size: 200% 100%; animation: shimmer 1.4s linear infinite; border-radius: 6px; margin-bottom: 6px; }
+    @keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+
+    .empty-state { padding: 40px 20px; text-align: center; color: var(--text-faint); font-size: 13px; }
+    .empty-state .empty-icon { font-size: 32px; margin-bottom: 10px; opacity: .6; }
+
+    .forbidden-card { background: var(--bg-elev); border: 1px solid var(--border); border-radius: 12px; padding: 32px 28px; max-width: 480px; margin: 40px auto; text-align: center; }
+    .forbidden-card h2 { font-size: 16px; font-weight: 700; margin-bottom: 6px; }
+    .forbidden-card p { font-size: 13px; color: var(--text-dim); margin-bottom: 16px; }
+    .forbidden-card a { color: var(--brand-secondary-light, #688b9b); text-decoration: none; font-size: 13px; font-weight: 500; }
+    .forbidden-card a:hover { text-decoration: underline; }
+
+    /* Modal */
+    .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.6); z-index: 500; display: flex; align-items: center; justify-content: center; backdrop-filter: blur(4px); padding: 20px; }
+    .modal-overlay.hidden { display: none !important; }
+    .modal-card { background: var(--bg-elev); border: 1px solid var(--border); border-radius: 14px; width: 100%; max-width: 560px; max-height: calc(100vh - 40px); display: flex; flex-direction: column; }
+    .modal-header { display: flex; align-items: center; justify-content: space-between; padding: 16px 20px; border-bottom: 1px solid var(--border); }
+    .modal-title { font-size: 15px; font-weight: 700; }
+    .modal-close { background: transparent; border: none; color: var(--text-faint); font-size: 18px; cursor: pointer; padding: 4px; line-height: 1; }
+    .modal-body { padding: 20px; overflow-y: auto; }
+    .modal-footer { display: flex; justify-content: flex-end; gap: 8px; padding: 14px 20px; border-top: 1px solid var(--border); }
+    .modal-banner { padding: 10px 12px; margin-bottom: 12px; background: rgba(239,68,68,0.1); border: 1px solid #ef4444; border-radius: 8px; color: #ef4444; font-size: 13px; display: none; }
+    .modal-banner.visible { display: block; }
+
+    .form-field { display: flex; flex-direction: column; gap: 4px; margin-bottom: 12px; }
+    .form-field label { font-size: 12px; font-weight: 500; color: var(--text-faint); }
+    .form-field label .req { color: #ef4444; }
+    .form-field input, .form-field textarea, .form-field select { padding: 8px 10px; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; color: var(--text); font-size: 13px; font-family: inherit; }
+    .form-field input:focus, .form-field textarea:focus, .form-field select:focus { outline: none; border-color: var(--brand-primary, #093d54); }
+    .form-field textarea { resize: vertical; min-height: 80px; }
+    .form-row-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+
+    /* Alternatives suggestions */
+    .alt-list { display: grid; gap: 8px; margin-top: 12px; }
+    .alt-card { background: var(--bg-elev-2); border: 1px solid var(--border); border-radius: 8px; padding: 12px; display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+    .alt-card-info { flex: 1; min-width: 0; }
+    .alt-card-title { font-size: 13px; font-weight: 600; }
+    .alt-card-sub { font-size: 11px; color: var(--text-faint); margin-top: 2px; }
+
+    /* Kebab menu */
+    .kebab-wrap { position: relative; display: inline-block; }
+    .kebab-menu { position: absolute; right: 0; top: 28px; background: var(--bg-elev); border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,0.15); padding: 4px; min-width: 180px; z-index: 200; display: none; }
+    .kebab-menu.show { display: block; }
+    .kebab-item { display: block; width: 100%; padding: 7px 10px; text-align: left; background: transparent; border: none; cursor: pointer; font-size: 12.5px; color: var(--text); border-radius: 4px; font-family: inherit; }
+    .kebab-item:hover { background: var(--bg-elev-2); }
+    .kebab-item.danger { color: var(--red, #dc2626); }
+
+    @media (max-width: 880px) { .app { margin-left: 0; padding: 14px; } .info-grid { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+<div id="sidebar-mount"></div>
+
+<div class="app" id="page-content">
+  <!-- gevuld door init() -->
+</div>
+
+<!-- ── Modal: attendee toevoegen ──────────────────────────────────────── -->
+<div class="modal-overlay hidden" id="attAddModal" role="dialog" aria-modal="true">
+  <div class="modal-card">
+    <div class="modal-header">
+      <div class="modal-title">Aanwezige toevoegen</div>
+      <button class="modal-close" type="button" onclick="closeAttAddModal()">&#x2715;</button>
+    </div>
+    <div class="modal-body">
+      <div class="modal-banner" id="attAddBanner"></div>
+      <form id="attAddForm" onsubmit="event.preventDefault(); submitAttAdd();">
+        <div class="form-row-2">
+          <div class="form-field">
+            <label>Voornaam</label>
+            <input type="text" id="aafFirst" maxlength="100" autocomplete="off" />
+          </div>
+          <div class="form-field">
+            <label>Achternaam</label>
+            <input type="text" id="aafLast" maxlength="100" autocomplete="off" />
+          </div>
+        </div>
+        <div class="form-field">
+          <label>Email</label>
+          <input type="email" id="aafEmail" maxlength="200" autocomplete="off" />
+        </div>
+        <div class="form-field">
+          <label>Telefoon</label>
+          <input type="tel" id="aafPhone" maxlength="40" autocomplete="off" />
+        </div>
+      </form>
+      <div id="altSuggestionsWrap"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn-secondary" type="button" onclick="closeAttAddModal()">Annuleren</button>
+      <button class="btn-primary" type="button" id="aafSubmit" onclick="submitAttAdd()">Toevoegen</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Modal: mentor toevoegen ──────────────────────────────────────── -->
+<div class="modal-overlay hidden" id="mentorAddModal" role="dialog" aria-modal="true">
+  <div class="modal-card">
+    <div class="modal-header">
+      <div class="modal-title">Mentor toevoegen</div>
+      <button class="modal-close" type="button" onclick="closeMentorAddModal()">&#x2715;</button>
+    </div>
+    <div class="modal-body">
+      <div class="modal-banner" id="mentorAddBanner"></div>
+      <div class="form-field">
+        <label>Mentor <span class="req">*</span></label>
+        <select id="mentorAddSelect">
+          <option value="">— Kies mentor —</option>
+        </select>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn-secondary" type="button" onclick="closeMentorAddModal()">Annuleren</button>
+      <button class="btn-primary" type="button" id="mentorAddSubmit" onclick="submitMentorAdd()">Koppelen</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Modal: tag toevoegen ──────────────────────────────────────── -->
+<div class="modal-overlay hidden" id="tagAddModal" role="dialog" aria-modal="true">
+  <div class="modal-card">
+    <div class="modal-header">
+      <div class="modal-title">Tag toevoegen</div>
+      <button class="modal-close" type="button" onclick="closeTagAddModal()">&#x2715;</button>
+    </div>
+    <div class="modal-body">
+      <div class="modal-banner" id="tagAddBanner"></div>
+      <div class="form-field">
+        <label>Tag <span class="req">*</span></label>
+        <select id="tagAddSelect">
+          <option value="">— Kies tag —</option>
+        </select>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn-secondary" type="button" onclick="closeTagAddModal()">Annuleren</button>
+      <button class="btn-primary" type="button" id="tagAddSubmit" onclick="submitTagAdd()">Toevoegen</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Modal: event bewerken ──────────────────────────────────────── -->
+<div class="modal-overlay hidden" id="evEditModal" role="dialog" aria-modal="true">
+  <div class="modal-card">
+    <div class="modal-header">
+      <div class="modal-title">Event bewerken</div>
+      <button class="modal-close" type="button" onclick="closeEvEditModal()">&#x2715;</button>
+    </div>
+    <div class="modal-body">
+      <div class="modal-banner" id="evEditBanner"></div>
+      <div class="form-field">
+        <label>Titel <span class="req">*</span></label>
+        <input type="text" id="evEditTitle" maxlength="255" />
+      </div>
+      <div class="form-row-2">
+        <div class="form-field">
+          <label>Start (lokaal)</label>
+          <input type="datetime-local" id="evEditStarts" />
+        </div>
+        <div class="form-field">
+          <label>Eind (lokaal)</label>
+          <input type="datetime-local" id="evEditEnds" />
+        </div>
+      </div>
+      <div class="form-field">
+        <label>Locatie</label>
+        <input type="text" id="evEditLocation" maxlength="255" />
+      </div>
+      <div class="form-row-2">
+        <div class="form-field">
+          <label>Capaciteit <span class="req">*</span></label>
+          <input type="number" id="evEditCapacity" min="1" />
+        </div>
+        <div class="form-field">
+          <label>Niveau</label>
+          <select id="evEditNiveau"><option value="">—</option></select>
+        </div>
+      </div>
+      <div class="form-field">
+        <label>Beschrijving</label>
+        <textarea id="evEditDesc" rows="4"></textarea>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn-secondary" type="button" onclick="closeEvEditModal()">Annuleren</button>
+      <button class="btn-primary" type="button" id="evEditSubmit" onclick="submitEvEdit()">Opslaan</button>
+    </div>
+  </div>
+</div>
+
+<script src="/modules/shared/supabase-client.js"></script>
+<script src="/modules/shared/agent-shared.js"></script>
+<script src="/modules/shared/theme-shared.js"></script>
+<script src="/modules/shared/permissions.js"></script>
+<script src="/modules/shared/sidebar.js"></script>
+
+<script>
+// ── Constants ────────────────────────────────────────────────────────────────
+const ATT_STATUS_KEYS = ['aangemeld', 'aanwezig', 'no_show', 'sale', 'switched_to_other_event'];
+const ATT_STATUS_LABELS = {
+  aangemeld: 'Aangemeld',
+  aanwezig: 'Aanwezig',
+  no_show: 'No-show',
+  sale: 'Sale',
+  switched_to_other_event: 'Verplaatst',
+};
+const EV_STATUS_LABELS = {
+  draft: 'Concept',
+  published: 'Gepubliceerd',
+  cancelled: 'Geannuleerd',
+  archived: 'Gearchiveerd',
+};
+
+// ── Module-state ─────────────────────────────────────────────────────────────
+const state = {
+  eventId: null,
+  event: null,
+  counts: null,
+  niveauOptions: [],
+  attendees: [],
+  attendeeStatus: '',   // '' = alle
+  attendeeSearch: '',
+  attendeeCounts: { aangemeld: 0, aanwezig: 0, no_show: 0, sale: 0, switched_to_other_event: 0 },
+  mentors: [],
+  audit: [],
+  tagsCatalog: [],
+  tab: 'info',
+};
+
+const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+function fmtDate(iso) {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  if (!Number.isFinite(d.getTime())) return '—';
+  return d.toLocaleString('nl-NL', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+}
+
+function fmtDateShort(iso) {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  if (!Number.isFinite(d.getTime())) return '—';
+  return d.toLocaleString('nl-NL', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
+}
+
+function isoToLocalInput(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (!Number.isFinite(d.getTime())) return '';
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+function localInputToIso(s) {
+  if (!s) return null;
+  const d = new Date(s);
+  if (!Number.isFinite(d.getTime())) return null;
+  return d.toISOString();
+}
+
+function capPillClass(active, capacity) {
+  if (!capacity || capacity <= 0) return 'cap-pill';
+  const ratio = active / capacity;
+  if (active >= capacity) return 'cap-pill full';
+  if (ratio >= 0.8) return 'cap-pill warn';
+  return 'cap-pill ok';
+}
+
+function can(key) {
+  return window.RBAC?.canSync?.(key) || false;
+}
+
+// ── Render: forbidden / not-found ────────────────────────────────────────────
+
+function renderForbidden(reason) {
+  document.getElementById('page-content').innerHTML = `
+    <div class="forbidden-card">
+      <h2>Geen toegang</h2>
+      <p>${esc(reason || 'Je hebt geen rechten om dit event te bekijken.')}</p>
+      <a href="/modules/events.html">&larr; Terug naar events</a>
+    </div>
+  `;
+}
+
+function renderNotFound() {
+  document.getElementById('page-content').innerHTML = `
+    <div class="forbidden-card">
+      <h2>Event niet gevonden</h2>
+      <p>Dit event bestaat niet of is verwijderd.</p>
+      <a href="/modules/events.html">&larr; Terug naar events</a>
+    </div>
+  `;
+}
+
+// ── Render: page header + tabs ───────────────────────────────────────────────
+
+function renderPage() {
+  const ev = state.event;
+  const c = state.counts;
+  const active = c?.active || 0;
+  const cap = ev.capacity || 0;
+  const capClass = capPillClass(active, cap);
+
+  const isDraft = ev.status === 'draft';
+  const isPublished = ev.status === 'published';
+
+  const canEdit = can('events.event.edit');
+  const canPublish = can('events.event.publish');
+  const canCancel = can('events.event.delete');
+
+  document.getElementById('page-content').innerHTML = `
+    <div class="crumb"><a href="/modules/events.html">Events</a> &rsaquo; <span>${esc(ev.title || '—')}</span></div>
+
+    <div class="ev-head">
+      <div>
+        <div class="ev-title">${esc(ev.title || '—')}</div>
+        <div class="ev-meta">
+          <span class="it"><i class="ti ti-calendar"></i> ${esc(fmtDate(ev.starts_at))}</span>
+          ${ev.location ? `<span class="it"><i class="ti ti-map-pin"></i> ${esc(ev.location)}</span>` : ''}
+          ${ev.niveau ? `<span class="it"><i class="ti ti-stairs-up"></i> ${esc(ev.niveau_label || ev.niveau)}</span>` : ''}
+          <span class="it"><span class="status-badge status-${ev.status}">${esc(EV_STATUS_LABELS[ev.status] || ev.status)}</span></span>
+          <span class="it"><span class="${capClass}">${active}/${cap} plekken</span></span>
+        </div>
+      </div>
+      <div class="ev-actions">
+        ${canEdit ? '<button class="btn-secondary" onclick="openEvEditModal()"><i class="ti ti-edit"></i> Bewerken</button>' : ''}
+        ${(canPublish && isDraft) ? '<button class="btn-primary" onclick="publishEvent()"><i class="ti ti-rocket"></i> Publiceren</button>' : ''}
+        ${(canCancel && (isDraft || isPublished)) ? '<button class="btn-danger" onclick="cancelEvent()"><i class="ti ti-x"></i> Annuleren</button>' : ''}
+      </div>
+    </div>
+
+    <div class="tabs" role="tablist">
+      <button class="tab ${state.tab === 'info' ? 'active' : ''}" data-tab="info"><i class="ti ti-info-circle"></i> Info</button>
+      <button class="tab ${state.tab === 'attendees' ? 'active' : ''}" data-tab="attendees"><i class="ti ti-users"></i> Aanwezigen <span class="tab-count" id="tabCountAtt">${c?.attendees_total || 0}</span></button>
+      <button class="tab ${state.tab === 'mentors' ? 'active' : ''}" data-tab="mentors"><i class="ti ti-user-check"></i> Mentoren <span class="tab-count" id="tabCountMentors">${c?.mentors || 0}</span></button>
+      <button class="tab ${state.tab === 'audit' ? 'active' : ''}" data-tab="audit"><i class="ti ti-history"></i> Audit</button>
+    </div>
+
+    <section class="tab-content ${state.tab === 'info' ? 'active' : ''}" id="tab-info"></section>
+    <section class="tab-content ${state.tab === 'attendees' ? 'active' : ''}" id="tab-attendees"></section>
+    <section class="tab-content ${state.tab === 'mentors' ? 'active' : ''}" id="tab-mentors"></section>
+    <section class="tab-content ${state.tab === 'audit' ? 'active' : ''}" id="tab-audit"></section>
+  `;
+
+  // Tab switching
+  document.querySelectorAll('.tab[data-tab]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const t = btn.dataset.tab;
+      state.tab = t;
+      document.querySelectorAll('.tab').forEach((b) => b.classList.remove('active'));
+      btn.classList.add('active');
+      document.querySelectorAll('.tab-content').forEach((s) => s.classList.remove('active'));
+      document.getElementById('tab-' + t).classList.add('active');
+      if (t === 'attendees' && !state.attendees.length) loadAttendees();
+      else if (t === 'mentors' && !state.mentors.length) loadMentors();
+      else if (t === 'audit') loadAudit();
+    });
+  });
+
+  renderInfoTab();
+  if (state.tab === 'attendees') renderAttendeesTab();
+  if (state.tab === 'mentors') renderMentorsTab();
+  if (state.tab === 'audit') renderAuditTab();
+}
+
+// ── Tab: Info ────────────────────────────────────────────────────────────────
+
+function renderInfoTab() {
+  const ev = state.event;
+  document.getElementById('tab-info').innerHTML = `
+    <div class="info-grid">
+      <div class="info-card">
+        <h3>Algemeen</h3>
+        <div class="info-row"><div class="info-label">Titel</div><div class="info-value">${esc(ev.title || '—')}</div></div>
+        <div class="info-row"><div class="info-label">Start</div><div class="info-value">${esc(fmtDate(ev.starts_at))}</div></div>
+        <div class="info-row"><div class="info-label">Eind</div><div class="info-value">${esc(fmtDate(ev.ends_at))}</div></div>
+        <div class="info-row"><div class="info-label">Locatie</div><div class="info-value">${esc(ev.location || '—')}</div></div>
+        <div class="info-row"><div class="info-label">Capaciteit</div><div class="info-value">${ev.capacity || '—'}</div></div>
+        <div class="info-row"><div class="info-label">Niveau</div><div class="info-value">${esc(ev.niveau_label || ev.niveau || '—')}</div></div>
+        <div class="info-row"><div class="info-label">Status</div><div class="info-value"><span class="status-badge status-${ev.status}">${esc(EV_STATUS_LABELS[ev.status] || ev.status)}</span></div></div>
+      </div>
+      <div class="info-card">
+        <h3>Sync &amp; meta</h3>
+        <div class="info-row"><div class="info-label">Webflow</div><div class="info-value">${esc(ev.webflow_sync_status || '—')}</div></div>
+        <div class="info-row"><div class="info-label">GoHighLevel</div><div class="info-value">${esc(ev.ghl_sync_status || '—')}</div></div>
+        <div class="info-row"><div class="info-label">Aangemaakt</div><div class="info-value">${esc(fmtDate(ev.created_at))}</div></div>
+        <div class="info-row"><div class="info-label">Bijgewerkt</div><div class="info-value">${esc(fmtDate(ev.updated_at))}</div></div>
+      </div>
+    </div>
+    <div class="info-card" style="margin-top:16px">
+      <h3>Beschrijving</h3>
+      <div class="desc-box">${ev.description_md ? esc(ev.description_md) : '<em style="color:var(--text-faint)">Geen beschrijving.</em>'}</div>
+    </div>
+  `;
+}
+
+// ── Tab: Aanwezigen ──────────────────────────────────────────────────────────
+
+function renderAttendeesTab() {
+  const c = state.counts;
+  const active = c?.active || 0;
+  const cap = state.event.capacity || 0;
+  const capClass = capPillClass(active, cap);
+  const canAdd = can('events.attendee.create');
+
+  const tagBySlug = {};
+  state.tagsCatalog.forEach((t) => { tagBySlug[t.slug] = t; });
+
+  const canChangeStatus = can('events.attendee.status_change');
+  const canEditAtt = can('events.attendee.edit');
+  const canTagAdd = can('events.attendee.tag_add');
+  const canTagRemove = can('events.attendee.tag_remove');
+  const canDelAtt = can('events.attendee.delete');
+
+  document.getElementById('tab-attendees').innerHTML = `
+    <div class="att-toolbar">
+      <span class="${capClass}" style="font-size:13px">${active}/${cap} plekken</span>
+      <div class="sr-search" style="max-width:260px"><input id="attSearch" type="search" placeholder="Zoek naam of email…" value="${esc(state.attendeeSearch)}" /></div>
+      ${canAdd ? '<button class="btn-primary" style="margin-left:auto" onclick="openAttAddModal()"><i class="ti ti-plus"></i> Aanwezige toevoegen</button>' : ''}
+    </div>
+
+    <div class="chip-group" id="attStatusChips" style="margin-bottom:12px"></div>
+
+    <div id="attendeesList"><div class="skel-row"></div><div class="skel-row"></div></div>
+  `;
+
+  // Status chips
+  const chipsHtml = [{ value: '', label: 'Alle', count: c?.attendees_total || 0 }]
+    .concat(ATT_STATUS_KEYS.map((k) => ({
+      value: k,
+      label: ATT_STATUS_LABELS[k],
+      count: state.attendeeCounts[k] || 0,
+    })))
+    .map((c) => `
+      <button class="chip ${state.attendeeStatus === c.value ? 'active' : ''}" data-status="${esc(c.value)}">
+        ${esc(c.label)} <span style="font-weight:600;opacity:.7">${c.count}</span>
+      </button>
+    `).join('');
+  document.getElementById('attStatusChips').innerHTML = chipsHtml;
+
+  document.querySelectorAll('#attStatusChips .chip').forEach((chip) => {
+    chip.addEventListener('click', () => {
+      state.attendeeStatus = chip.dataset.status || '';
+      loadAttendees();
+    });
+  });
+
+  document.getElementById('attSearch').addEventListener('input', debounce((e) => {
+    state.attendeeSearch = e.target.value.trim();
+    loadAttendees();
+  }, 300));
+
+  // Lijst-render
+  const listEl = document.getElementById('attendeesList');
+  if (!state.attendees.length) {
+    listEl.innerHTML = `
+      <div class="empty-state">
+        <div class="empty-icon"><i class="ti ti-users-minus"></i></div>
+        Geen aanwezigen voor deze filter.
+      </div>
+    `;
+    return;
+  }
+
+  listEl.innerHTML = `
+    <div class="sr-tablewrap"><table class="sr-table">
+      <thead><tr>
+        <th>Naam</th>
+        <th>Email</th>
+        <th>Telefoon</th>
+        <th>Status</th>
+        <th>Tags</th>
+        <th></th>
+      </tr></thead>
+      <tbody>${state.attendees.map((a) => {
+        const fullName = [a.first_name, a.last_name].filter(Boolean).join(' ') || '—';
+        const tagsHtml = (a.tags || []).map((t) => {
+          const color = t.color || null;
+          const styleAttr = color ? ` style="background:${esc(color)}20;color:${esc(color)};border-color:${esc(color)}40"` : '';
+          return `<span class="tag-chip"${styleAttr}>${esc(t.label || t.slug)}</span>`;
+        }).join('');
+
+        let statusCell;
+        if (canChangeStatus) {
+          statusCell = `
+            <select class="att-status-sel" data-id="${esc(a.id)}" style="padding:4px 6px;font-size:11px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-family:inherit">
+              ${ATT_STATUS_KEYS.map((k) => `<option value="${k}" ${a.status === k ? 'selected' : ''}>${esc(ATT_STATUS_LABELS[k])}</option>`).join('')}
+            </select>
+          `;
+        } else {
+          statusCell = `<span class="tag-chip">${esc(ATT_STATUS_LABELS[a.status] || a.status)}</span>`;
+        }
+
+        const kebabItems = [];
+        if (canEditAtt) kebabItems.push(`<button class="kebab-item" data-action="edit" data-id="${esc(a.id)}"><i class="ti ti-edit"></i> Bewerken</button>`);
+        if (canTagAdd) kebabItems.push(`<button class="kebab-item" data-action="tag-add" data-id="${esc(a.id)}"><i class="ti ti-tag"></i> Tag toevoegen</button>`);
+        if (canTagRemove && (a.tags || []).length > 0) kebabItems.push(`<button class="kebab-item" data-action="tag-remove" data-id="${esc(a.id)}"><i class="ti ti-tag-off"></i> Tag verwijderen</button>`);
+        if (canDelAtt) kebabItems.push(`<button class="kebab-item danger" data-action="delete" data-id="${esc(a.id)}"><i class="ti ti-trash"></i> Verwijderen</button>`);
+        const kebab = kebabItems.length ? `
+          <div class="kebab-wrap">
+            <button class="sr-ibtn kebab-toggle" data-id="${esc(a.id)}" title="Acties"><i class="ti ti-dots"></i></button>
+            <div class="kebab-menu" id="kebab-${esc(a.id)}">${kebabItems.join('')}</div>
+          </div>
+        ` : '';
+
+        return `
+          <tr>
+            <td><strong>${esc(fullName)}</strong></td>
+            <td>${esc(a.email || '—')}</td>
+            <td>${esc(a.phone || '—')}</td>
+            <td>${statusCell}</td>
+            <td>${tagsHtml || '<span style="color:var(--text-faint)">—</span>'}</td>
+            <td class="sr-actions">${kebab}</td>
+          </tr>
+        `;
+      }).join('')}</tbody>
+    </table></div>
+  `;
+
+  // Status-dropdown wire
+  document.querySelectorAll('.att-status-sel').forEach((sel) => {
+    sel.addEventListener('change', () => onAttStatusChange(sel.dataset.id, sel.value));
+  });
+
+  // Kebab wire
+  document.querySelectorAll('.kebab-toggle').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const id = btn.dataset.id;
+      const menu = document.getElementById('kebab-' + id);
+      // Sluit andere menus
+      document.querySelectorAll('.kebab-menu.show').forEach((m) => { if (m !== menu) m.classList.remove('show'); });
+      menu?.classList.toggle('show');
+    });
+  });
+  document.addEventListener('click', () => {
+    document.querySelectorAll('.kebab-menu.show').forEach((m) => m.classList.remove('show'));
+  }, { once: true });
+
+  document.querySelectorAll('.kebab-item').forEach((item) => {
+    item.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const action = item.dataset.action;
+      const id = item.dataset.id;
+      // Sluit menus
+      document.querySelectorAll('.kebab-menu.show').forEach((m) => m.classList.remove('show'));
+      if (action === 'edit') return openAttEdit(id);
+      if (action === 'tag-add') return openTagAddModal(id);
+      if (action === 'tag-remove') return openTagRemove(id);
+      if (action === 'delete') return deleteAttendee(id);
+    });
+  });
+}
+
+// ── Tab: Mentoren ────────────────────────────────────────────────────────────
+
+function renderMentorsTab() {
+  const canAssign = can('events.mentor.assign');
+  const canRemove = can('events.mentor.remove');
+
+  let body = '';
+  if (!state.mentors.length) {
+    body = `
+      <div class="empty-state">
+        <div class="empty-icon"><i class="ti ti-user-question"></i></div>
+        Geen mentoren toegekend.
+      </div>
+    `;
+  } else {
+    body = `
+      <div class="mentor-grid">
+        ${state.mentors.map((m) => {
+          const initial = (m.name || '?').slice(0, 1).toUpperCase();
+          const bg = m.avatar_color || 'var(--bg-elev-2)';
+          const emoji = m.avatar_emoji || '';
+          return `
+            <div class="mentor-card">
+              <div class="mentor-avatar" style="background:${esc(bg)}">${emoji ? esc(emoji) : esc(initial)}</div>
+              <div class="mentor-info">
+                <div class="mentor-name">${esc(m.name || '—')}</div>
+                <div class="mentor-role">${esc(m.role || m.type || '')}</div>
+              </div>
+              ${canRemove ? `<button class="mentor-remove" data-id="${esc(m.team_member_id)}" title="Verwijderen"><i class="ti ti-x"></i></button>` : ''}
+            </div>
+          `;
+        }).join('')}
+      </div>
+    `;
+  }
+
+  document.getElementById('tab-mentors').innerHTML = `
+    <div class="att-toolbar">
+      ${canAssign ? '<button class="btn-primary" style="margin-left:auto" onclick="openMentorAddModal()"><i class="ti ti-user-plus"></i> Mentor toevoegen</button>' : ''}
+    </div>
+    ${body}
+  `;
+
+  document.querySelectorAll('.mentor-remove').forEach((btn) => {
+    btn.addEventListener('click', () => removeMentor(btn.dataset.id));
+  });
+}
+
+// ── Tab: Audit ──────────────────────────────────────────────────────────────
+
+function renderAuditTab() {
+  const target = document.getElementById('tab-audit');
+  if (!state.audit.length) {
+    target.innerHTML = `
+      <div class="empty-state">
+        <div class="empty-icon"><i class="ti ti-history"></i></div>
+        Geen audit-events.
+      </div>
+    `;
+    return;
+  }
+  target.innerHTML = `
+    <div class="sr-tablewrap"><table class="sr-table">
+      <thead><tr>
+        <th>Tijd</th>
+        <th>Aanwezige</th>
+        <th>Actie</th>
+        <th>Door</th>
+      </tr></thead>
+      <tbody>${state.audit.map((r) => `
+        <tr>
+          <td>${esc(fmtDateShort(r.at))}</td>
+          <td>${esc(r.attendee_name || '—')}</td>
+          <td>${esc(r.action || '—')}</td>
+          <td>${esc(r.by_user?.full_name || r.by_user?.email || '—')}</td>
+        </tr>
+      `).join('')}</tbody>
+    </table></div>
+  `;
+}
+
+// ── Fetch ────────────────────────────────────────────────────────────────────
+
+async function loadEvent() {
+  try {
+    const res = await window.AgentShared.apiFetch('/api/events-detail?id=' + encodeURIComponent(state.eventId));
+    if (res.status === 404) { renderNotFound(); return false; }
+    if (res.status === 403) { renderForbidden('Geen rechten (events.event.view).'); return false; }
+    if (!res.ok) {
+      const e = await res.json().catch(() => ({}));
+      throw new Error(e.error || `HTTP ${res.status}`);
+    }
+    const data = await res.json();
+    state.event = data.event;
+    state.counts = data.counts;
+    return true;
+  } catch (e) {
+    console.error('[events-detail] load error:', e);
+    window.AgentShared?.showToast?.('Event laden mislukt: ' + e.message, 'error');
+    return false;
+  }
+}
+
+async function loadNiveauOptions() {
+  try {
+    const res = await window.AgentShared.apiFetch('/api/events-niveau-options');
+    if (!res.ok) return;
+    const data = await res.json();
+    state.niveauOptions = data.options || [];
+  } catch (e) { /* niet kritiek */ }
+}
+
+async function loadTagsCatalog() {
+  try {
+    const res = await window.AgentShared.apiFetch('/api/events-tags-catalog-list');
+    if (!res.ok) return;
+    const data = await res.json();
+    state.tagsCatalog = data.tags || [];
+  } catch (e) { /* niet kritiek */ }
+}
+
+async function loadAttendees() {
+  try {
+    const params = new URLSearchParams();
+    params.set('event_id', state.eventId);
+    if (state.attendeeStatus) params.set('status', state.attendeeStatus);
+    if (state.attendeeSearch) params.set('q', state.attendeeSearch);
+    params.set('limit', '200');
+    const res = await window.AgentShared.apiFetch('/api/events-attendees-list?' + params.toString());
+    if (!res.ok) {
+      const e = await res.json().catch(() => ({}));
+      throw new Error(e.error || `HTTP ${res.status}`);
+    }
+    const data = await res.json();
+    state.attendees = data.items || [];
+    state.attendeeCounts = (data.counts?.byStatus) || state.attendeeCounts;
+    renderAttendeesTab();
+  } catch (e) {
+    console.error('[attendees] load error:', e);
+    window.AgentShared?.showToast?.('Aanwezigen laden mislukt: ' + e.message, 'error');
+  }
+}
+
+async function loadMentors() {
+  try {
+    const res = await window.AgentShared.apiFetch('/api/events-mentors-list?event_id=' + encodeURIComponent(state.eventId));
+    if (!res.ok) {
+      const e = await res.json().catch(() => ({}));
+      throw new Error(e.error || `HTTP ${res.status}`);
+    }
+    const data = await res.json();
+    state.mentors = data.mentors || [];
+    renderMentorsTab();
+    // Update tabcount
+    const c = document.getElementById('tabCountMentors');
+    if (c) c.textContent = state.mentors.length;
+  } catch (e) {
+    console.error('[mentors] load error:', e);
+    window.AgentShared?.showToast?.('Mentoren laden mislukt: ' + e.message, 'error');
+  }
+}
+
+async function loadAudit() {
+  // Audit-endpoint vereist attendee_id. Verzamel audit-rows per attendee in dit event.
+  try {
+    // Eerst attendees ophalen (voor naam-mapping) als we ze nog niet hebben.
+    if (!state.attendees.length) {
+      const params = new URLSearchParams();
+      params.set('event_id', state.eventId);
+      params.set('limit', '500');
+      const res = await window.AgentShared.apiFetch('/api/events-attendees-list?' + params.toString());
+      if (res.ok) {
+        const data = await res.json();
+        state.attendees = data.items || [];
+      }
+    }
+
+    const nameById = {};
+    state.attendees.forEach((a) => {
+      const full = [a.first_name, a.last_name].filter(Boolean).join(' ') || a.email || a.id.slice(0, 8);
+      nameById[a.id] = full;
+    });
+
+    // Parallel audit-fetch per attendee. Limiet 50 rijen per attendee.
+    const auditRows = [];
+    const fetches = state.attendees.slice(0, 200).map(async (a) => {
+      try {
+        const res = await window.AgentShared.apiFetch('/api/events-attendee-audit-log?attendee_id=' + encodeURIComponent(a.id) + '&limit=50');
+        if (!res.ok) return;
+        const data = await res.json();
+        (data.items || []).forEach((r) => {
+          auditRows.push({ ...r, attendee_id: a.id, attendee_name: nameById[a.id] });
+        });
+      } catch (e) {
+        // Niet kritiek; sla over.
+      }
+    });
+    await Promise.all(fetches);
+
+    // Sorteer DESC op at, limit 200
+    auditRows.sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime());
+    state.audit = auditRows.slice(0, 200);
+    renderAuditTab();
+  } catch (e) {
+    console.error('[audit] load error:', e);
+    window.AgentShared?.showToast?.('Audit laden mislukt: ' + e.message, 'error');
+  }
+}
+
+// ── Actions: event-level ─────────────────────────────────────────────────────
+
+async function publishEvent() {
+  if (!confirm('Dit event publiceren? Daarna is het zichtbaar voor inschrijvingen.')) return;
+  try {
+    const res = await window.AgentShared.apiFetch('/api/events-publish?id=' + encodeURIComponent(state.eventId), { method: 'POST' });
+    if (!res.ok) {
+      const e = await res.json().catch(() => ({}));
+      throw new Error(e.error || `HTTP ${res.status}`);
+    }
+    window.AgentShared?.showToast?.('Event gepubliceerd', 'success');
+    await loadEvent();
+    renderPage();
+  } catch (e) {
+    window.AgentShared?.showToast?.('Publiceren mislukt: ' + e.message, 'error');
+  }
+}
+
+async function cancelEvent() {
+  if (!confirm('Dit event annuleren? Aangemelde deelnemers blijven in de lijst maar het event krijgt status "Geannuleerd".')) return;
+  try {
+    const res = await window.AgentShared.apiFetch('/api/events-update?id=' + encodeURIComponent(state.eventId), {
+      method: 'PATCH',
+      body: JSON.stringify({ status: 'cancelled' }),
+    });
+    if (!res.ok) {
+      const e = await res.json().catch(() => ({}));
+      throw new Error(e.error || `HTTP ${res.status}`);
+    }
+    window.AgentShared?.showToast?.('Event geannuleerd', 'success');
+    await loadEvent();
+    renderPage();
+  } catch (e) {
+    window.AgentShared?.showToast?.('Annuleren mislukt: ' + e.message, 'error');
+  }
+}
+
+function openEvEditModal() {
+  const ev = state.event;
+  document.getElementById('evEditBanner').classList.remove('visible');
+  document.getElementById('evEditTitle').value = ev.title || '';
+  document.getElementById('evEditStarts').value = isoToLocalInput(ev.starts_at);
+  document.getElementById('evEditEnds').value = isoToLocalInput(ev.ends_at);
+  document.getElementById('evEditLocation').value = ev.location || '';
+  document.getElementById('evEditCapacity').value = ev.capacity || '';
+  document.getElementById('evEditDesc').value = ev.description_md || '';
+
+  // Niveau-dropdown
+  const niveauSel = document.getElementById('evEditNiveau');
+  niveauSel.innerHTML = '<option value="">—</option>' +
+    state.niveauOptions.map((o) => `<option value="${esc(o.slug)}" ${o.slug === ev.niveau ? 'selected' : ''}>${esc(o.label || o.slug)}</option>`).join('');
+
+  document.getElementById('evEditModal').classList.remove('hidden');
+}
+function closeEvEditModal() { document.getElementById('evEditModal').classList.add('hidden'); }
+
+async function submitEvEdit() {
+  const banner = document.getElementById('evEditBanner');
+  banner.classList.remove('visible');
+  const payload = {
+    title: document.getElementById('evEditTitle').value.trim(),
+    starts_at: localInputToIso(document.getElementById('evEditStarts').value),
+    ends_at: document.getElementById('evEditEnds').value ? localInputToIso(document.getElementById('evEditEnds').value) : null,
+    location: document.getElementById('evEditLocation').value.trim() || null,
+    capacity: Number(document.getElementById('evEditCapacity').value),
+    niveau: document.getElementById('evEditNiveau').value || null,
+    description_md: document.getElementById('evEditDesc').value || null,
+  };
+  if (!payload.title) {
+    banner.textContent = 'Titel verplicht';
+    banner.classList.add('visible');
+    return;
+  }
+  if (!payload.starts_at) {
+    banner.textContent = 'Startdatum verplicht';
+    banner.classList.add('visible');
+    return;
+  }
+  if (!Number.isInteger(payload.capacity) || payload.capacity <= 0) {
+    banner.textContent = 'Capaciteit moet positief geheel getal zijn';
+    banner.classList.add('visible');
+    return;
+  }
+  const btn = document.getElementById('evEditSubmit');
+  btn.disabled = true; btn.textContent = 'Opslaan…';
+  try {
+    const res = await window.AgentShared.apiFetch('/api/events-update?id=' + encodeURIComponent(state.eventId), {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) {
+      const e = await res.json().catch(() => ({}));
+      throw new Error(e.error || `HTTP ${res.status}`);
+    }
+    closeEvEditModal();
+    window.AgentShared?.showToast?.('Event bijgewerkt', 'success');
+    await loadEvent();
+    renderPage();
+  } catch (e) {
+    banner.textContent = e.message;
+    banner.classList.add('visible');
+  } finally {
+    btn.disabled = false; btn.textContent = 'Opslaan';
+  }
+}
+
+// ── Actions: attendees ───────────────────────────────────────────────────────
+
+function openAttAddModal() {
+  document.getElementById('attAddBanner').classList.remove('visible');
+  document.getElementById('aafFirst').value = '';
+  document.getElementById('aafLast').value = '';
+  document.getElementById('aafEmail').value = '';
+  document.getElementById('aafPhone').value = '';
+  document.getElementById('altSuggestionsWrap').innerHTML = '';
+  document.getElementById('attAddModal').classList.remove('hidden');
+}
+function closeAttAddModal() { document.getElementById('attAddModal').classList.add('hidden'); }
+
+async function submitAttAdd() {
+  const banner = document.getElementById('attAddBanner');
+  banner.classList.remove('visible');
+  const payload = {
+    event_id: state.eventId,
+    first_name: document.getElementById('aafFirst').value.trim() || null,
+    last_name: document.getElementById('aafLast').value.trim() || null,
+    email: document.getElementById('aafEmail').value.trim() || null,
+    phone: document.getElementById('aafPhone').value.trim() || null,
+  };
+  if (!payload.first_name && !payload.last_name && !payload.email && !payload.phone) {
+    banner.textContent = 'Vul minimaal 1 veld in (naam, email of telefoon).';
+    banner.classList.add('visible');
+    return;
+  }
+  const btn = document.getElementById('aafSubmit');
+  btn.disabled = true; btn.textContent = 'Toevoegen…';
+  try {
+    const res = await window.AgentShared.apiFetch('/api/events-attendee-add', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+    if (res.status === 409) {
+      const e = await res.json().catch(() => ({}));
+      if (e.code === 'SEATS_FULL') {
+        // Toon alternatieven
+        banner.textContent = 'Event is vol. Hieronder 5 alternatieven:';
+        banner.classList.add('visible');
+        await showAlternatives();
+      } else {
+        banner.textContent = e.error || 'Conflict bij toevoegen';
+        banner.classList.add('visible');
+      }
+      return;
+    }
+    if (!res.ok) {
+      const e = await res.json().catch(() => ({}));
+      throw new Error(e.error || `HTTP ${res.status}`);
+    }
+    closeAttAddModal();
+    window.AgentShared?.showToast?.('Aanwezige toegevoegd', 'success');
+    await loadEvent();
+    await loadAttendees();
+    renderPage();
+  } catch (e) {
+    banner.textContent = e.message;
+    banner.classList.add('visible');
+  } finally {
+    btn.disabled = false; btn.textContent = 'Toevoegen';
+  }
+}
+
+async function showAlternatives() {
+  const wrap = document.getElementById('altSuggestionsWrap');
+  wrap.innerHTML = '<div style="font-size:12px;color:var(--text-faint);margin-top:8px">Alternatieven laden…</div>';
+  try {
+    const params = new URLSearchParams();
+    params.set('source_event_id', state.eventId);
+    params.set('max_results', '5');
+    const res = await window.AgentShared.apiFetch('/api/events-alternatives?' + params.toString());
+    if (!res.ok) {
+      wrap.innerHTML = '<div style="font-size:12px;color:var(--text-faint);margin-top:8px">Geen alternatieven gevonden.</div>';
+      return;
+    }
+    const data = await res.json();
+    const alts = data.alternatives || [];
+    if (!alts.length) {
+      wrap.innerHTML = '<div style="font-size:12px;color:var(--text-faint);margin-top:8px">Geen alternatieven gevonden.</div>';
+      return;
+    }
+    wrap.innerHTML = `
+      <div class="alt-list">
+        ${alts.map((a) => `
+          <div class="alt-card">
+            <div class="alt-card-info">
+              <div class="alt-card-title">${esc(a.title)}</div>
+              <div class="alt-card-sub">${esc(fmtDateShort(a.starts_at))} · ${esc(a.location || '—')} · ${a.seats_remaining}/${a.capacity} vrij</div>
+            </div>
+            <a class="btn-primary" href="/modules/events-detail.html?id=${encodeURIComponent(a.id)}" target="_blank"><i class="ti ti-external-link"></i> Aanmelden hier</a>
+          </div>
+        `).join('')}
+      </div>
+    `;
+  } catch (e) {
+    wrap.innerHTML = '<div style="font-size:12px;color:var(--text-faint);margin-top:8px">Alternatieven laden mislukt.</div>';
+  }
+}
+
+async function onAttStatusChange(attendeeId, newStatus) {
+  try {
+    const res = await window.AgentShared.apiFetch('/api/events-attendee-status-change', {
+      method: 'POST',
+      body: JSON.stringify({ attendee_id: attendeeId, status: newStatus }),
+    });
+    if (!res.ok) {
+      const e = await res.json().catch(() => ({}));
+      throw new Error(e.error || `HTTP ${res.status}`);
+    }
+    window.AgentShared?.showToast?.('Status bijgewerkt', 'success');
+    await loadEvent();
+    await loadAttendees();
+  } catch (e) {
+    window.AgentShared?.showToast?.('Status wijzigen mislukt: ' + e.message, 'error');
+    await loadAttendees(); // herstel UI
+  }
+}
+
+async function deleteAttendee(attendeeId) {
+  if (!confirm('Deze aanwezige verwijderen? Dit is permanent.')) return;
+  try {
+    const res = await window.AgentShared.apiFetch('/api/events-attendee-delete?id=' + encodeURIComponent(attendeeId), { method: 'DELETE' });
+    if (!res.ok && res.status !== 204) {
+      const e = await res.json().catch(() => ({}));
+      throw new Error(e.error || `HTTP ${res.status}`);
+    }
+    window.AgentShared?.showToast?.('Verwijderd', 'success');
+    await loadEvent();
+    await loadAttendees();
+    renderPage();
+  } catch (e) {
+    window.AgentShared?.showToast?.('Verwijderen mislukt: ' + e.message, 'error');
+  }
+}
+
+function openAttEdit(attendeeId) {
+  // Voor F1 minimal: prompts. Polish-tab kan vervangen door modal.
+  const a = state.attendees.find((x) => x.id === attendeeId);
+  if (!a) return;
+  const firstName = prompt('Voornaam:', a.first_name || '');
+  if (firstName === null) return;
+  const lastName = prompt('Achternaam:', a.last_name || '');
+  if (lastName === null) return;
+  const email = prompt('Email:', a.email || '');
+  if (email === null) return;
+  const phone = prompt('Telefoon:', a.phone || '');
+  if (phone === null) return;
+
+  (async () => {
+    try {
+      const res = await window.AgentShared.apiFetch('/api/events-attendee-update?id=' + encodeURIComponent(attendeeId), {
+        method: 'PATCH',
+        body: JSON.stringify({
+          first_name: firstName.trim() || null,
+          last_name: lastName.trim() || null,
+          email: email.trim() || null,
+          phone: phone.trim() || null,
+        }),
+      });
+      if (!res.ok) {
+        const e = await res.json().catch(() => ({}));
+        throw new Error(e.error || `HTTP ${res.status}`);
+      }
+      window.AgentShared?.showToast?.('Bijgewerkt', 'success');
+      await loadAttendees();
+    } catch (e) {
+      window.AgentShared?.showToast?.('Bijwerken mislukt: ' + e.message, 'error');
+    }
+  })();
+}
+
+// ── Tag-add modal ────────────────────────────────────────────────────────────
+
+let tagAddAttendeeId = null;
+
+function openTagAddModal(attendeeId) {
+  tagAddAttendeeId = attendeeId;
+  document.getElementById('tagAddBanner').classList.remove('visible');
+  const sel = document.getElementById('tagAddSelect');
+  // F1: alleen non-system tags handmatig toevoegbaar
+  const opts = state.tagsCatalog.filter((t) => !t.is_system);
+  sel.innerHTML = '<option value="">— Kies tag —</option>' +
+    opts.map((t) => `<option value="${esc(t.slug)}">${esc(t.label || t.slug)}</option>`).join('');
+  document.getElementById('tagAddModal').classList.remove('hidden');
+}
+function closeTagAddModal() { document.getElementById('tagAddModal').classList.add('hidden'); }
+
+async function submitTagAdd() {
+  const banner = document.getElementById('tagAddBanner');
+  banner.classList.remove('visible');
+  const tagSlug = document.getElementById('tagAddSelect').value;
+  if (!tagSlug) {
+    banner.textContent = 'Kies een tag.';
+    banner.classList.add('visible');
+    return;
+  }
+  const btn = document.getElementById('tagAddSubmit');
+  btn.disabled = true; btn.textContent = 'Toevoegen…';
+  try {
+    const res = await window.AgentShared.apiFetch('/api/events-attendee-tag-add', {
+      method: 'POST',
+      body: JSON.stringify({ attendee_id: tagAddAttendeeId, tag_slug: tagSlug }),
+    });
+    if (!res.ok) {
+      const e = await res.json().catch(() => ({}));
+      throw new Error(e.error || `HTTP ${res.status}`);
+    }
+    closeTagAddModal();
+    window.AgentShared?.showToast?.('Tag toegevoegd', 'success');
+    await loadAttendees();
+  } catch (e) {
+    banner.textContent = e.message;
+    banner.classList.add('visible');
+  } finally {
+    btn.disabled = false; btn.textContent = 'Toevoegen';
+  }
+}
+
+async function openTagRemove(attendeeId) {
+  const a = state.attendees.find((x) => x.id === attendeeId);
+  if (!a || !a.tags || !a.tags.length) {
+    window.AgentShared?.showToast?.('Geen tags om te verwijderen', 'error');
+    return;
+  }
+  const labels = a.tags.map((t, i) => `${i + 1}. ${t.label || t.slug}`).join('\n');
+  const choice = prompt('Welke tag verwijderen? Geef nummer:\n\n' + labels);
+  const idx = Number(choice) - 1;
+  if (!Number.isInteger(idx) || idx < 0 || idx >= a.tags.length) return;
+  const tagSlug = a.tags[idx].slug;
+  try {
+    const res = await window.AgentShared.apiFetch('/api/events-attendee-tag-remove', {
+      method: 'POST',
+      body: JSON.stringify({ attendee_id: attendeeId, tag_slug: tagSlug }),
+    });
+    if (!res.ok) {
+      const e = await res.json().catch(() => ({}));
+      throw new Error(e.error || `HTTP ${res.status}`);
+    }
+    window.AgentShared?.showToast?.('Tag verwijderd', 'success');
+    await loadAttendees();
+  } catch (e) {
+    window.AgentShared?.showToast?.('Tag verwijderen mislukt: ' + e.message, 'error');
+  }
+}
+
+// ── Mentor actions ───────────────────────────────────────────────────────────
+
+async function openMentorAddModal() {
+  document.getElementById('mentorAddBanner').classList.remove('visible');
+  const sel = document.getElementById('mentorAddSelect');
+  sel.innerHTML = '<option value="">— Laden… —</option>';
+  document.getElementById('mentorAddModal').classList.remove('hidden');
+  try {
+    const res = await window.AgentShared.apiFetch('/api/events-mentors-available?event_id=' + encodeURIComponent(state.eventId));
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+    const mentors = data.mentors || [];
+    if (!mentors.length) {
+      sel.innerHTML = '<option value="">Geen beschikbare mentoren</option>';
+      return;
+    }
+    sel.innerHTML = '<option value="">— Kies mentor —</option>' +
+      mentors.map((m) => `<option value="${esc(m.id)}">${esc(m.name)} (${esc(m.role || m.type || 'mentor')})</option>`).join('');
+  } catch (e) {
+    sel.innerHTML = '<option value="">Laden mislukt</option>';
+  }
+}
+function closeMentorAddModal() { document.getElementById('mentorAddModal').classList.add('hidden'); }
+
+async function submitMentorAdd() {
+  const banner = document.getElementById('mentorAddBanner');
+  banner.classList.remove('visible');
+  const teamMemberId = document.getElementById('mentorAddSelect').value;
+  if (!teamMemberId) {
+    banner.textContent = 'Kies een mentor.';
+    banner.classList.add('visible');
+    return;
+  }
+  const btn = document.getElementById('mentorAddSubmit');
+  btn.disabled = true; btn.textContent = 'Koppelen…';
+  try {
+    const res = await window.AgentShared.apiFetch('/api/events-mentor-assign', {
+      method: 'POST',
+      body: JSON.stringify({ event_id: state.eventId, team_member_id: teamMemberId }),
+    });
+    if (!res.ok) {
+      const e = await res.json().catch(() => ({}));
+      throw new Error(e.error || `HTTP ${res.status}`);
+    }
+    closeMentorAddModal();
+    window.AgentShared?.showToast?.('Mentor gekoppeld', 'success');
+    await loadEvent();
+    await loadMentors();
+  } catch (e) {
+    banner.textContent = e.message;
+    banner.classList.add('visible');
+  } finally {
+    btn.disabled = false; btn.textContent = 'Koppelen';
+  }
+}
+
+async function removeMentor(teamMemberId) {
+  if (!confirm('Deze mentor ontkoppelen van het event?')) return;
+  try {
+    const res = await window.AgentShared.apiFetch('/api/events-mentor-remove', {
+      method: 'POST',
+      body: JSON.stringify({ event_id: state.eventId, team_member_id: teamMemberId }),
+    });
+    if (!res.ok) {
+      const e = await res.json().catch(() => ({}));
+      throw new Error(e.error || `HTTP ${res.status}`);
+    }
+    window.AgentShared?.showToast?.('Mentor ontkoppeld', 'success');
+    await loadEvent();
+    await loadMentors();
+  } catch (e) {
+    window.AgentShared?.showToast?.('Ontkoppelen mislukt: ' + e.message, 'error');
+  }
+}
+
+// ── Util ─────────────────────────────────────────────────────────────────────
+
+function debounce(fn, ms) {
+  let t = null;
+  return function (...args) {
+    if (t) clearTimeout(t);
+    t = setTimeout(() => fn.apply(this, args), ms);
+  };
+}
+
+// ── Init ─────────────────────────────────────────────────────────────────────
+
+async function init() {
+  await window._authSharedReady;
+  const profile = await window.AuthShared.requireAuth();
+  if (!profile) return;
+  if (window.AgentShared) await window.AgentShared.renderUserSection(profile);
+
+  await window.RBAC.ensurePermissionsLoaded();
+  if (!window.RBAC.canSync('events.module.access')) {
+    renderForbidden();
+    return;
+  }
+
+  // URL-param
+  const params = new URLSearchParams(window.location.search);
+  state.eventId = params.get('id');
+  if (!state.eventId) {
+    renderNotFound();
+    return;
+  }
+
+  // Skeleton tijdens eerste fetch
+  document.getElementById('page-content').innerHTML = `
+    <div class="crumb"><a href="/modules/events.html">Events</a> &rsaquo; <span>laden…</span></div>
+    <div class="skel-row" style="height:60px;margin-bottom:18px"></div>
+    <div class="skel-row" style="height:300px"></div>
+  `;
+
+  await Promise.all([loadNiveauOptions(), loadTagsCatalog()]);
+  const ok = await loadEvent();
+  if (!ok) return;
+  renderPage();
+}
+
+init();
+</script>
+
+</body>
+</html>
