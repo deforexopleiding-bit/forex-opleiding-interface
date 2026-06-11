@@ -11,12 +11,24 @@
 //   - Typed errors zodat caller (event-sync-orchestrator) ze kan loggen
 //     en mappen op event_sync_log.error_code
 //
-// Endpoints (Data API v2):
-//   GET    /collections/{coll}                — schema
-//   POST   /collections/{coll}/items          — create LIVE item (isDraft:false)
-//   PATCH  /collections/{coll}/items/{itemId} — update of unpublish (isDraft:true)
+// Endpoints (Data API v2) - LIVE-VARIANT (publiek zichtbaar zonder site-publish):
+//   GET    /collections/{coll}                              — schema (read)
+//   POST   /collections/{coll}/items/live                   — create LIVE item
+//   PATCH  /collections/{coll}/items/live/{itemId}          — update LIVE item
+//   DELETE /collections/{coll}/items/live/{itemId}          — unpublish van live site
+//                                                              (item blijft als staged bestaan)
 //
-// Niet ondersteund (per spec G): DELETE. Unpublish gaat via isDraft=true.
+// WAAROM /items/live ipv /items?  De staged variant (POST /items, PATCH
+// /items/{id}) maakt of update STAGED items. Die zijn NIET publiek zichtbaar
+// totdat iemand een aparte site-publish (POST /sites/{site_id}/publish) doet.
+// De /items/live varianten skippen die stap - item wordt direct live.
+//
+// POST /sites/{site_id}/publish is dus NIET nodig per event-publish. We
+// gebruiken het ook niet als fallback - dat zou ook andere staged changes
+// in de site mee-publiceren (UI-edits, andere collections), wat ongewenst is.
+//
+// Spec G (geen DELETE op staged item) blijft gerespecteerd: we DELETEn alleen
+// op de /items/live route, wat een live-unpublish is, geen item-removal.
 
 const WEBFLOW_API_BASE   = 'https://api.webflow.com/v2';
 const SCHEMA_CACHE_TTL_MS = 5 * 60 * 1000; // 5 min
@@ -153,9 +165,35 @@ async function webflowFetch(path, opts = {}) {
 
 // ── Schema discovery ──────────────────────────────────────────────────────────
 
-// Map van logische naam -> kandidaat-displayName voor matching.
+// HARDCODED_FIELD_SLUGS: bron-of-truth uit recon (2026-06-11), bevestigd via
+// /api/diag-f2-recon GET response (Collection 6998472019eb629c85b9c448).
+//
+// WAAROM HARDCODED IPV displayName-runtime-resolve?
+// Eerste F2-deploy faalde: alleen het Name-veld werd ingevuld, time/locatie-2/
+// event-content bleven leeg. Root cause: de runtime displayName-match in
+// resolveSlug() vergelijkt exact lowercase met FIELD_NAME_MAP-target. In de
+// echte collection wijken de displayNames af van onze aannames:
+//   - time-veld:    onze gok 'Time' matched niet (echte displayName afwijkend)
+//   - locatie-2:    onze gok 'Locatie' matched niet (slug '-2' suggereert dat
+//                   een eerder Locatie-veld is verwijderd en de huidige
+//                   ofwel "Locatie:" met dubbele punt, of "Locatie 2", of
+//                   gewoon "Locatie" met variant-spelling heeft)
+//   - event-content:onze gok 'Event Content' matched niet
+//
+// Recon gaf de SLUGS met zekerheid; die zijn stabiel zolang de velden niet
+// verwijderd/hernoemd worden in Webflow. We hardcoden ze daarom als primaire
+// source. De displayName-fallback in resolveSlug() blijft staan voor
+// toekomst-resilience: als een slug onverwacht verandert detecteren we het.
+const HARDCODED_FIELD_SLUGS = {
+  time    : 'time',
+  location: 'locatie-2',
+  content : 'event-content',
+};
+
+// Map van logische naam -> kandidaat-displayName voor FALLBACK matching.
+// (Hardcoded slug hierboven wint; deze map is alleen voor reserve-discovery.)
 const FIELD_NAME_MAP = {
-  title  : 'Name',           // Webflow stelt 'Name' altijd verplicht
+  title  : 'Name',           // Webflow stelt 'Name' altijd verplicht (slug 'name')
   time   : 'Time',
   location: 'Locatie',
   content: 'Event Content',
@@ -227,12 +265,33 @@ export async function getCollectionSchema(opts = {}) {
   return _schemaCache;
 }
 
-// Resolve een logische naam naar een slug via schema-cache. Returnt null als
-// niet gevonden (caller skipt dat veld in payload).
+// Resolve een logische naam naar een slug. Volgorde:
+//   1. HARDCODED_FIELD_SLUGS (bron-of-truth uit recon 2026-06-11)
+//      Sanity-check: slug moet in collection-schema staan; anders fallback.
+//   2. Displayname-fallback via FIELD_NAME_MAP (toekomst-resilience)
+// Returnt null als niets gevonden (caller skipt dat veld in payload).
 function resolveSlug(schema, logicalName) {
+  // Stap 1: hardcoded slug uit recon
+  const hardSlug = HARDCODED_FIELD_SLUGS[logicalName];
+  if (hardSlug) {
+    if (schema.fieldsBySlug?.[hardSlug]) {
+      return hardSlug;
+    }
+    console.warn(
+      `[webflow-client] HARDCODED slug '${hardSlug}' voor '${logicalName}' ` +
+      'NIET in collection-schema gevonden - fallback op displayName-match'
+    );
+  }
+  // Stap 2: displayName-fallback
   const target = FIELD_NAME_MAP[logicalName];
   if (!target) return null;
   const f = schema.fieldsByDisplayName[String(target).toLowerCase()];
+  if (!f) {
+    console.warn(
+      `[webflow-client] FALLBACK displayName-match faalde voor '${logicalName}' ` +
+      `(zocht '${target}'). Veld wordt SKIPPED in payload.`
+    );
+  }
   return f?.slug || null;
 }
 
@@ -323,20 +382,26 @@ export async function createLiveItem({ event, descriptionHtml }) {
   const schema = await getCollectionSchema();
   const fieldData = buildFieldData({ event, descriptionHtml, schema });
 
+  // POST /items/live - publiceert direct op live site, geen aparte site-publish nodig.
   const body = {
-    isDraft: false,
+    isArchived: false,
+    isDraft   : false,
     fieldData,
   };
 
-  const data = await webflowFetch(`/collections/${collId}/items`, {
+  const data = await webflowFetch(`/collections/${collId}/items/live`, {
     method: 'POST',
     body,
   });
 
-  // Items API v2 returnt item-object met id
-  const itemId = data?.id || data?.item?.id || null;
+  // /items/live returnt 202 Accepted met item-object (of items[] bij batch).
+  // Single-item POST returnt het object direct met id; we accepteren ook batch-shape.
+  const itemId = data?.id
+    || data?.items?.[0]?.id
+    || data?.item?.id
+    || null;
   if (!itemId) {
-    throw new WebflowError('VALIDATION_FAIL', 'Webflow create response zonder item id', { body: data });
+    throw new WebflowError('VALIDATION_FAIL', 'Webflow create-live response zonder item id', { body: data });
   }
   return { itemId, raw: data, requestPayload: body };
 }
@@ -348,12 +413,14 @@ export async function updateItem({ webflowItemId, event, descriptionHtml }) {
   const schema = await getCollectionSchema();
   const fieldData = buildFieldData({ event, descriptionHtml, schema });
 
+  // PATCH /items/live/{id} - update LIVE item (item is + blijft publiek zichtbaar).
   const body = {
-    isDraft: false,
+    isArchived: false,
+    isDraft   : false,
     fieldData,
   };
 
-  const data = await webflowFetch(`/collections/${collId}/items/${webflowItemId}`, {
+  const data = await webflowFetch(`/collections/${collId}/items/live/${webflowItemId}`, {
     method: 'PATCH',
     body,
   });
@@ -365,12 +432,12 @@ export async function unpublishItem({ webflowItemId }) {
   if (!webflowItemId) throw new WebflowError('VALIDATION_FAIL', 'webflowItemId vereist');
   const { collId } = getEnv();
 
-  const body = { isDraft: true };
-
-  const data = await webflowFetch(`/collections/${collId}/items/${webflowItemId}`, {
-    method: 'PATCH',
-    body,
+  // DELETE /items/live/{id} - verwijdert ALLEEN de live-publicatie. Het item
+  // blijft als staged record bestaan (kan later hergepubliceerd worden).
+  // Geen body nodig.
+  const data = await webflowFetch(`/collections/${collId}/items/live/${webflowItemId}`, {
+    method: 'DELETE',
   });
 
-  return { itemId: webflowItemId, raw: data, requestPayload: body };
+  return { itemId: webflowItemId, raw: data, requestPayload: null };
 }
