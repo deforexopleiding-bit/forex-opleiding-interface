@@ -27,6 +27,7 @@ import {
   updateItem,
   unpublishItem,
   hardDeleteItem,
+  republishItem,
   WebflowError,
 } from './webflow-client.js';
 import {
@@ -591,6 +592,142 @@ export async function hardDeleteEventOutbound(eventId) {
 
   // GHL: caller heeft status='archived' al gezet voor we hier zijn; computeUpcomingLabels
   // filtert dit event er vanzelf uit.
+  const ghl = await syncGhl(event);
+
+  return {
+    eventId,
+    webflow,
+    ghl,
+  };
+}
+
+// ── Signups close / reopen pad (Blok 1) ──────────────────────────────────────
+//
+// closeSignupsOutbound:
+//   1. Webflow: PATCH item naar isDraft=true (hergebruik unpublishItem helper).
+//      Het Webflow-record blijft staan (staged), zodat reopen-flow het terug
+//      kan promoten via republishItem zonder veld-data te verliezen.
+//   2. GHL: recompute upcoming-labels - event valt uit de set door
+//      signups_closed=true filter in computeUpcomingLabels (Blok 1).
+//
+// reopenSignupsOutbound:
+//   1. Webflow: PATCH /items/{id}/live met isDraft=false + fieldData
+//      (republishItem helper; PATCH /live primair, POST /publish fallback).
+//   2. GHL: recompute upcoming-labels - event komt terug in de set.
+//
+// event_sync_log.action CHECK staat op ('create'|'update'|'unpublish'). We
+// hergebruiken bewust de bestaande enum-values:
+//   - close-flow Webflow  -> action='unpublish' (semantisch correct, item gaat naar draft)
+//   - reopen-flow Webflow -> action='update'    (item wordt opnieuw live gezet)
+//   - close/reopen GHL    -> action='update'    (recompute + PUT options)
+// Specifieke close/reopen-context wordt vastgelegd in response_payload.strategy
+// + response_payload.flow zodat downstream tooling (sync-retry, dashboards)
+// kan onderscheiden zonder schema-wijziging.
+
+async function republishWebflow(event) {
+  if (!event.webflow_item_id) {
+    // Geen staged Webflow-record - dit kan gebeuren als het event nooit eerder
+    // gepubliceerd is. Reopen wordt dan een no-op op Webflow-niveau; de GHL-
+    // recompute zorgt dat het event in de dropdown verschijnt zodra het
+    // status='published' + signups_closed=false heeft.
+    return { ok: true, action: 'update', status: 'noop', flow: 'reopen' };
+  }
+  try {
+    const descriptionHtml = mdToHtmlSimple(event.description_md || '');
+    const result = await republishItem({
+      webflowItemId: event.webflow_item_id,
+      event,
+      descriptionHtml,
+    });
+    await logSyncAttempt({
+      event_id        : event.id,
+      target          : 'webflow',
+      action          : 'update',
+      request_payload : { flow: 'reopen', strategy: result.strategy, payload: result.requestPayload },
+      response_payload: { itemId: result.itemId, strategy: result.strategy, flow: 'reopen' },
+      status          : 'success',
+    });
+    await supabaseAdmin
+      .from('events')
+      .update({
+        webflow_sync_status   : 'success',
+        webflow_last_synced_at: new Date().toISOString(),
+      })
+      .eq('id', event.id);
+    return { ok: true, action: 'update', status: 'success', strategy: result.strategy, flow: 'reopen' };
+  } catch (e) {
+    const isWfErr = e instanceof WebflowError;
+    const code    = isWfErr ? e.code : 'UNKNOWN';
+    const message = e?.message || 'unknown error';
+
+    const retry_count   = await getCurrentRetryCount(event.id, 'webflow');
+    const next_retry_at = computeNextRetryAt(retry_count);
+
+    await logSyncAttempt({
+      event_id        : event.id,
+      target          : 'webflow',
+      action          : 'update',
+      request_payload : { flow: 'reopen' },
+      response_payload: isWfErr ? { ...e.detail, flow: 'reopen' } : { flow: 'reopen' },
+      status          : 'failure',
+      error_code      : code,
+      error_message   : message,
+      retry_count,
+      next_retry_at,
+    });
+    await supabaseAdmin
+      .from('events')
+      .update({
+        webflow_sync_status   : 'failure',
+        webflow_last_synced_at: new Date().toISOString(),
+      })
+      .eq('id', event.id);
+    return { ok: false, action: 'update', status: 'failure', error_code: code, message, flow: 'reopen' };
+  }
+}
+
+/**
+ * Sluit inschrijvingen voor een event op outbound kanalen.
+ * - Webflow: PATCH item naar isDraft=true (staged record blijft staan)
+ * - GHL: herbereken upcoming-labels (event valt uit door signups_closed=true filter)
+ *
+ * Caller (events-close-signups) heeft signups_closed=true en
+ * signups_closed_at/_reason/_by_user_id al gezet voordat hij ons aanroept.
+ */
+export async function closeSignupsOutbound(eventId) {
+  if (!eventId) throw new Error('eventId vereist');
+  const event = await fetchEvent(eventId);
+
+  const webflow = await unpublishWebflow(event);
+
+  // GHL: recompute. Het event is door de caller op signups_closed=true gezet,
+  // dus computeUpcomingLabels filtert het er vanzelf uit.
+  const ghl = await syncGhl(event);
+
+  return {
+    eventId,
+    webflow,
+    ghl,
+  };
+}
+
+/**
+ * Heropen inschrijvingen voor een event op outbound kanalen.
+ * - Webflow: PATCH /items/{id}/live met isDraft=false + fieldData (republish)
+ *            Primair PATCH /live, fallback POST /publish.
+ * - GHL: herbereken upcoming-labels (event komt terug in de set).
+ *
+ * Caller (events-reopen-signups) heeft signups_closed=false en de bijbehorende
+ * audit-velden al genuld voordat hij ons aanroept.
+ */
+export async function reopenSignupsOutbound(eventId) {
+  if (!eventId) throw new Error('eventId vereist');
+  const event = await fetchEvent(eventId);
+
+  const webflow = await republishWebflow(event);
+
+  // GHL: recompute. Het event is door de caller op signups_closed=false gezet,
+  // dus computeUpcomingLabels neemt het weer mee in de upcoming-set.
   const ghl = await syncGhl(event);
 
   return {
