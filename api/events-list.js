@@ -87,6 +87,7 @@ export default async function handler(req, res) {
         description_md,
         webflow_sync_status, webflow_last_synced_at,
         ghl_sync_status,     ghl_last_synced_at,
+        signups_closed, signups_closed_at, signups_closed_reason,
         created_at, updated_at
       `, { count: 'exact' })
       .order('starts_at', { ascending: true })
@@ -145,6 +146,9 @@ export default async function handler(req, res) {
         webflow_last_synced_at: row.webflow_last_synced_at,
         ghl_sync_status:        row.ghl_sync_status,
         ghl_last_synced_at:     row.ghl_last_synced_at,
+        signups_closed:         row.signups_closed === true,
+        signups_closed_at:      row.signups_closed_at,
+        signups_closed_reason:  row.signups_closed_reason,
         created_at:             row.created_at,
         updated_at:             row.updated_at,
         attendee_count_active:  activeCount,
