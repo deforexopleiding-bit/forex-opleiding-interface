@@ -32,6 +32,13 @@
     .status-cancelled { background: rgba(220,38,38,0.15); color:#b91c1c; }
     .status-archived { background: rgba(148,163,184,0.2); color: var(--text-faint); opacity:.7; }
 
+    /* Signups-closed badge (Blok 1) */
+    .signups-closed-badge { display:inline-flex; align-items:center; gap:5px; padding:3px 11px; border-radius:10px; font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.05em; background: rgba(245,158,11,0.18); color:#b45309; border:1px solid rgba(245,158,11,0.3); cursor: help; }
+    .signups-closed-banner { display:flex; align-items:center; gap:10px; padding: 10px 14px; margin: 8px 0 14px; background: rgba(245,158,11,0.1); border: 1px solid rgba(245,158,11,0.3); border-radius: 10px; color: #b45309; font-size: 13px; }
+    .signups-closed-banner .scb-icon { font-size: 18px; }
+    .signups-closed-banner .scb-title { font-weight: 700; }
+    .signups-closed-banner .scb-meta { color: var(--text-dim); font-size: 12px; }
+
     .cap-pill { display:inline-flex; align-items:center; gap:4px; padding:3px 10px; border-radius:12px; font-size:12px; font-weight:600; background: var(--bg-elev-2); color: var(--text-dim); border:1px solid var(--border); }
     .cap-pill.full { background: rgba(220,38,38,0.15); color:#b91c1c; border-color: rgba(220,38,38,0.3); }
     .cap-pill.warn { background: rgba(245,158,11,0.15); color:#b45309; border-color: rgba(245,158,11,0.3); }
@@ -425,10 +432,20 @@ function renderPage() {
 
   const isDraft = ev.status === 'draft';
   const isPublished = ev.status === 'published';
+  const isCancelled = ev.status === 'cancelled';
+  const isArchived = ev.status === 'archived';
+  const signupsClosed = ev.signups_closed === true;
 
   const canEdit = can('events.event.edit');
   const canPublish = can('events.event.publish');
   const canCancel = can('events.event.delete');
+
+  // Blok 1: close/reopen knoppen alleen voor niet-gearchiveerde events
+  // met edit-recht. Close: zichtbaar bij open inschrijvingen. Reopen:
+  // zichtbaar bij gesloten inschrijvingen (server-side deadline-guard
+  // levert 409 REOPEN_TOO_LATE indien te laat).
+  const canShowCloseBtn = canEdit && !isArchived && !signupsClosed && (isDraft || isPublished);
+  const canShowReopenBtn = canEdit && !isArchived && signupsClosed;
 
   document.getElementById('page-content').innerHTML = `
     <div class="crumb"><a href="/modules/events.html">Events</a> &rsaquo; <span>${esc(ev.title || '—')}</span></div>
@@ -441,15 +458,20 @@ function renderPage() {
           ${ev.location ? `<span class="it"><i class="ti ti-map-pin"></i> ${esc(ev.location)}</span>` : ''}
           ${ev.niveau ? `<span class="it"><i class="ti ti-stairs-up"></i> ${esc(ev.niveau_label || ev.niveau)}</span>` : ''}
           <span class="it"><span class="status-badge status-${ev.status}">${esc(EV_STATUS_LABELS[ev.status] || ev.status)}</span></span>
+          ${signupsClosed ? `<span class="it">${renderSignupsClosedBadgeHead(ev)}</span>` : ''}
           <span class="it"><span class="${capClass}">${active}/${cap} plekken</span></span>
         </div>
       </div>
       <div class="ev-actions">
         ${canEdit ? '<button class="btn-secondary" onclick="openEvEditModal()"><i class="ti ti-edit"></i> Bewerken</button>' : ''}
         ${(canPublish && isDraft) ? '<button class="btn-primary" onclick="publishEvent()"><i class="ti ti-rocket"></i> Publiceren</button>' : ''}
+        ${canShowCloseBtn ? '<button class="btn-secondary" onclick="closeSignupsAction()"><i class="ti ti-lock"></i> Aanmelding sluiten</button>' : ''}
+        ${canShowReopenBtn ? '<button class="btn-secondary" onclick="reopenSignupsAction()"><i class="ti ti-lock-open"></i> Aanmelding heropen</button>' : ''}
         ${(canCancel && (isDraft || isPublished)) ? '<button class="btn-danger" onclick="cancelEvent()"><i class="ti ti-x"></i> Annuleren</button>' : ''}
       </div>
     </div>
+
+    ${signupsClosed ? renderSignupsClosedBanner(ev) : ''}
 
     <div class="sync-strip">
       <span class="sync-label">Sync</span>
@@ -541,11 +563,20 @@ function renderAttendeesTab() {
   const canTagRemove = can('events.attendee.tag_remove');
   const canDelAtt = can('events.attendee.delete');
 
+  // Blok 1: bij gesloten inschrijvingen tonen we Aanwezige-toevoegen knop
+  // disabled met tooltip - oplosbaar door eerst te heropen.
+  const signupsClosed = state.event.signups_closed === true;
+  const addBtnHtml = canAdd
+    ? (signupsClosed
+        ? '<button class="btn-primary" style="margin-left:auto" disabled title="Aanmelding is gesloten - heropen eerst om aanwezigen toe te voegen"><i class="ti ti-plus"></i> Aanwezige toevoegen</button>'
+        : '<button class="btn-primary" style="margin-left:auto" onclick="openAttAddModal()"><i class="ti ti-plus"></i> Aanwezige toevoegen</button>')
+    : '';
+
   document.getElementById('tab-attendees').innerHTML = `
     <div class="att-toolbar">
       <span class="${capClass}" style="font-size:13px">${active}/${cap} plekken</span>
       <div class="sr-search" style="max-width:260px"><input id="attSearch" type="search" placeholder="Zoek naam of email…" value="${esc(state.attendeeSearch)}" /></div>
-      ${canAdd ? '<button class="btn-primary" style="margin-left:auto" onclick="openAttAddModal()"><i class="ti ti-plus"></i> Aanwezige toevoegen</button>' : ''}
+      ${addBtnHtml}
     </div>
 
     <div class="chip-group" id="attStatusChips" style="margin-bottom:12px"></div>
@@ -887,6 +918,87 @@ async function loadAudit() {
   } catch (e) {
     console.error('[audit] load error:', e);
     window.AgentShared?.showToast?.('Audit laden mislukt: ' + e.message, 'error');
+  }
+}
+
+// ── Signups-closed UI (Blok 1) ───────────────────────────────────────────────
+//
+// Helper render-functies voor de "Aanmelding gesloten"-status. Worden alleen
+// gerendered als event.signups_closed === true.
+const SIGNUPS_CLOSED_REASON_LABEL = {
+  auto_time: 'Automatisch gesloten (T-1 dag)',
+  auto_full: 'Automatisch gesloten (vol)',
+  auto_deadline: 'Automatisch gesloten (deadline)',
+  manual: 'Handmatig gesloten',
+};
+
+function signupsClosedReasonLabel(reason) {
+  if (!reason) return 'Aanmelding gesloten';
+  return SIGNUPS_CLOSED_REASON_LABEL[reason] || 'Aanmelding gesloten';
+}
+
+function renderSignupsClosedBadgeHead(ev) {
+  const reasonLabel = signupsClosedReasonLabel(ev.signups_closed_reason);
+  const parts = [reasonLabel];
+  if (ev.signups_closed_at) parts.push('sinds ' + fmtDate(ev.signups_closed_at));
+  return `<span class="signups-closed-badge" title="${esc(parts.join(' | '))}"><i class="ti ti-lock"></i> Aanmelding GESLOTEN</span>`;
+}
+
+function renderSignupsClosedBanner(ev) {
+  const reasonLabel = signupsClosedReasonLabel(ev.signups_closed_reason);
+  const since = ev.signups_closed_at ? ('Sinds ' + fmtDate(ev.signups_closed_at)) : '';
+  return `
+    <div class="signups-closed-banner" role="status">
+      <i class="ti ti-lock scb-icon"></i>
+      <div>
+        <div class="scb-title">Aanmelding GESLOTEN</div>
+        <div class="scb-meta">${esc(reasonLabel)}${since ? ' · ' + esc(since) : ''}</div>
+      </div>
+    </div>
+  `;
+}
+
+async function closeSignupsAction() {
+  if (!confirm('Inschrijvingen voor dit event handmatig sluiten? Webflow-item wordt op draft gezet en GHL-dropdown wordt bijgewerkt.')) return;
+  try {
+    const res = await window.AgentShared.apiFetch('/api/events-close-signups?id=' + encodeURIComponent(state.eventId), {
+      method: 'POST',
+      body: JSON.stringify({ reason: 'manual' }),
+    });
+    if (!res.ok) {
+      const e = await res.json().catch(() => ({}));
+      throw new Error(e.error || `HTTP ${res.status}`);
+    }
+    window.AgentShared?.showToast?.('Inschrijvingen gesloten', 'success');
+    await loadEvent();
+    renderPage();
+  } catch (e) {
+    console.error('[closeSignupsAction]', e);
+    window.AgentShared?.showToast?.('Sluiten mislukt: ' + e.message, 'error');
+  }
+}
+
+async function reopenSignupsAction() {
+  if (!confirm('Inschrijvingen voor dit event heropenen? Webflow-item wordt republished en GHL-dropdown wordt bijgewerkt.')) return;
+  try {
+    const res = await window.AgentShared.apiFetch('/api/events-reopen-signups?id=' + encodeURIComponent(state.eventId), {
+      method: 'POST',
+    });
+    if (!res.ok) {
+      const e = await res.json().catch(() => ({}));
+      // OQ6: dedicated melding voor REOPEN_TOO_LATE.
+      if (res.status === 409 && e.code === 'REOPEN_TOO_LATE') {
+        window.AgentShared?.showToast?.('Te laat om opnieuw te openen - cron zou direct weer sluiten', 'error');
+        return;
+      }
+      throw new Error(e.error || `HTTP ${res.status}`);
+    }
+    window.AgentShared?.showToast?.('Inschrijvingen heropend', 'success');
+    await loadEvent();
+    renderPage();
+  } catch (e) {
+    console.error('[reopenSignupsAction]', e);
+    window.AgentShared?.showToast?.('Heropenen mislukt: ' + e.message, 'error');
   }
 }
 

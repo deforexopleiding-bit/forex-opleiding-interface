@@ -67,6 +67,14 @@
     {
       "path": "/api/cron-events-ghl-next-update",
       "schedule": "0 6 * * *"
+    },
+    {
+      "path": "/api/cron-events-signups-auto-close",
+      "schedule": "0 * * * *"
+    },
+    {
+      "path": "/api/cron-events-cms-cleanup",
+      "schedule": "5 1 * * *"
     }
   ],
   "headers": [
