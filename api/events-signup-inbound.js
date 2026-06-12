@@ -38,7 +38,7 @@
 
 import { supabaseAdmin } from './supabase.js';
 import { extractClientIp, hashIp } from './_lib/assessment-validation.js';
-import { findEventsByLabel } from './_lib/event-label-matcher.js';
+import { resolveEventByLabel } from './_lib/event-label-matcher.js';
 import {
   getConfirmedCount,
   syncGastenlijstWebflow,
@@ -238,35 +238,39 @@ export default async function handler(req, res) {
     });
   }
 
-  // 7) Reverse-lookup label -> event.
+  // 7) Reverse-lookup label -> event. Tolerant: niveau-suffix optioneel,
+  // canonical match op (date, startTime) met endTime + niveau als
+  // tiebreakers (zie resolveEventByLabel in event-label-matcher.js).
   let lookup;
   try {
-    lookup = await findEventsByLabel(eventDateLabel);
+    lookup = await resolveEventByLabel(eventDateLabel);
   } catch (e) {
-    console.error('[events-signup-inbound] label lookup:', e.message);
-    // We laten de inbox-rij op 'no_match' staan; admin moet handmatig
-    // resolven. 200 zodat GHL niet retried.
+    console.error('[events-signup-inbound] label resolve:', e.message);
     return res.status(200).json({
       ok: false, inbox_id: inboxId, match_status: 'no_match',
-      error: 'label-lookup failed', message: e.message,
+      error: 'label-resolve failed', message: e.message,
     });
   }
 
   const matches = lookup.matches;
 
-  // 8) Geen match.
+  // 8) Geen match (incl. onparsebaar label).
   if (matches.length === 0) {
+    await patchInboxRow(inboxId, { notes: `resolve_reason=${lookup.reason}` });
     return res.status(200).json({
       ok: true, inbox_id: inboxId, match_status: 'no_match',
       candidate_count: lookup.candidateCount,
+      resolve_reason: lookup.reason,
     });
   }
 
   // 9) 1+ match -> attendee aanmaken (bij ambiguous: pak de eerste + flag).
+  // reason='unique-canonical-match' | 'endtime-tiebreaker' | 'niveau-tiebreaker'
+  // -> 1 match (matched). Andere reasons met >=2 matches -> ambiguous.
   const isAmbiguous = matches.length > 1;
   const chosenEvent = matches[0];
   const followUpReason = isAmbiguous
-    ? `AMBIGUOUS_LABEL: ${matches.length} candidates matched same label`
+    ? `AMBIGUOUS_LABEL: ${matches.length} candidates after ${lookup.reason}`
     : null;
 
   // Dedup-check vooraf zodat we niet onnodig insert+catch hoeven.
@@ -318,12 +322,14 @@ export default async function handler(req, res) {
   }
 
   // 11) Inbox-rij definitief bijwerken.
+  const noteParts = [`resolve_reason=${lookup.reason}`];
+  if (dedupNote) noteParts.push(dedupNote);
   await patchInboxRow(inboxId, {
     match_status        : isAmbiguous ? 'ambiguous' : 'matched',
     matched_event_id    : chosenEvent.id,
     matched_attendee_id : attendeeId,
     match_candidate_ids : matches.map((m) => m.id),
-    notes               : dedupNote,
+    notes               : noteParts.join('; '),
   });
 
   return res.status(200).json({
@@ -337,5 +343,6 @@ export default async function handler(req, res) {
     confirmed_count  : confirmedCount,
     gastenlijst_label: gastenlijst?.label || null,
     auto_closed      : !!autoClose?.auto_closed,
+    resolve_reason   : lookup.reason,
   });
 }

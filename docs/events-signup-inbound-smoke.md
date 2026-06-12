@@ -241,6 +241,59 @@ WHERE email='smoke+inbound-dedup@deforexopleiding.nl';
 
 ---
 
+## Scenario 4b — niveau-suffix tolerantie (legacy-labels)
+
+**Doel:** Een binnenkomend label ZONDER `' | <niveau>'`-suffix matcht
+nog steeds het event dat F2 mét suffix exporteert. Andersom werkt ook.
+
+**Achtergrond:** Historisch heeft GHL labels zonder niveau opgeslagen
+(voorbeeld: `'Zaterdag 13 juni 2026 | 10:00 - 13:00'`). De resolver
+matched canoniek op `(date, startTime)` en gebruikt endTime + niveau
+alleen als tiebreaker bij ≥ 2 hits.
+
+**Pre-flight:**
+- Eén event `SMOKE-INBOUND-TOL` published, `niveau='basis'`,
+  `starts_at` = een unieke datum + tijd zodat er maar 1 candidate is.
+
+**Call A — input zonder niveau-suffix:**
+```bash
+curl -sS -X POST "$BASE_URL/api/events-signup-inbound" \
+  -H "Content-Type: application/json" \
+  -H "X-Webhook-Secret: $SECRET" \
+  -d '{
+    "first_name": "Tol",
+    "last_name":  "ZonderNiveau",
+    "email":      "smoke+inbound-tol-a@deforexopleiding.nl",
+    "event_date_label": "<label van SMOKE-INBOUND-TOL ZONDER \" | Basis\">"
+  }'
+```
+Verwacht: `match_status: "matched"`, `resolve_reason: "unique-canonical-match"`,
+gekoppeld aan SMOKE-INBOUND-TOL.
+
+Wacht 6 sec. **Call B — input MET niveau-suffix (full label):**
+```bash
+curl -sS -X POST "$BASE_URL/api/events-signup-inbound" \
+  -H "Content-Type: application/json" \
+  -H "X-Webhook-Secret: $SECRET" \
+  -d '{
+    "first_name": "Tol",
+    "last_name":  "MetNiveau",
+    "email":      "smoke+inbound-tol-b@deforexopleiding.nl",
+    "event_date_label": "<full label MET \" | Basis\">"
+  }'
+```
+Verwacht: `match_status: "matched"`, `resolve_reason: "unique-canonical-match"`,
+zelfde event.
+
+**Bonus — tiebreaker scenario:** Maak 2 events op exact dezelfde
+`(date, startTime)` maar verschillend `niveau` (één basis, één gevorderd).
+Stuur een webhook met label inclusief `' | Basis'` → resolver kiest
+de basis-rij met `resolve_reason: 'niveau-tiebreaker'`. Stuur dezelfde
+label maar zonder niveau-suffix → `resolve_reason: 'ambiguous-multiple-canonical-matches'`,
+beide rijen in `match_candidate_ids`.
+
+---
+
 ## Scenario 5 — seat-fill + auto-vol op matched
 
 **Doel:** Een matched-webhook op een capaciteits-bereikt event triggert
