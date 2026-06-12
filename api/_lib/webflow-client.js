@@ -29,10 +29,19 @@
 // een collection) is STATIC en wordt alleen ververst bij een SITE-publish.
 // Nieuwe live-items via /items/live zijn dus al "live" als individuele item-
 // records, maar de event-overzichtspagina (die ze in een lijst toont) ziet ze
-// pas na een site-publish. Daarom is publishSiteIfEnabled() toegevoegd: env-
-// flag EVENTS_WEBFLOW_SITE_PUBLISH (default 'false'). Bij 'true' doet de
-// client na een succesvolle item-sync 1 POST /sites/{site_id}/publish. Default
-// uit zodat staging-omgevingen geen onbedoelde site-publish triggeren.
+// pas na een site-publish.
+//
+// SITE-PUBLISH (Blok 2 PR 4): publishSite() doet de raw POST
+// /sites/{site_id}/publish (idempotent, 429 = retry-baar). De auto-publish
+// orchestratie zit in api/_lib/webflow-publish.js: maybePublishSite() leest
+// de DB-toggle (app_settings.webflow_auto_publish_enabled), houdt een
+// lock + trailing-debounce bij in app_settings.webflow_publish_state zodat
+// een burst van mutaties coalesceert tot ~1 publish, en zet pending=true
+// als de toggle UIT is voor catch-up later.
+//
+// publishSiteIfEnabled() blijft als thin wrapper voor de bestaande callers
+// in deze file; hij delegeert nu naar maybePublishSite. De oude env-flag
+// EVENTS_WEBFLOW_SITE_PUBLISH is geen autoriteit meer; de DB-toggle wint.
 //
 // Spec G (geen DELETE op staged item) blijft gerespecteerd: we DELETEn alleen
 // op de /items/{id}/live route, wat een live-unpublish is, geen item-removal.
@@ -417,22 +426,25 @@ function buildFieldData({ event, descriptionHtml, schema }) {
 // via /items/live zijn al "live" als records, maar tonen pas in de lijst-
 // pagina na deze call.
 //
-// Gated achter env-flag EVENTS_WEBFLOW_SITE_PUBLISH (default 'false'). Bij
-// 'true' wordt na een succesvolle item-sync 1 POST /sites/{site_id}/publish
-// gedaan. Optioneel: WEBFLOW_CUSTOM_DOMAIN_IDS (comma-separated) om naar
-// custom-domain te publiceren; standaard alleen Webflow-subdomain.
+// publishSite - RAW HTTP-call naar Webflow publish-API. Idempotent op site-
+// niveau: een tweede publish kort na de eerste levert weer een build op
+// (Webflow queueet of dedupeert intern; voor onze hook zorgt webflow-publish.js
+// dat dit niet binnen DEBOUNCE_MS gebeurt). 429 wordt door webflowFetch
+// geclassificeerd als 'RATE_LIMIT' wat de orchestrator als retry-baar
+// behandelt.
 //
-// Errors in deze call breken de item-sync NIET (defensive try/catch). Caller
-// ontvangt de uitkomst via return.sitePublish voor logging.
-async function publishSiteIfEnabled(context = '') {
-  const flag = String(process.env.EVENTS_WEBFLOW_SITE_PUBLISH || 'false').toLowerCase();
-  if (flag !== 'true') {
-    return { skipped: true, reason: 'EVENTS_WEBFLOW_SITE_PUBLISH != true' };
-  }
+// Optioneel: WEBFLOW_CUSTOM_DOMAIN_IDS (comma-separated) om naar custom-domain
+// te publiceren naast Webflow-subdomain. WEBFLOW_SITE_ID is verplicht.
+//
+// Errors worden NIET hier afgevangen - we gooien WebflowError zodat de
+// caller (maybePublishSite) ze kan classifyeren (rate-limit vs harde fout).
+export async function publishSite({ context = '' } = {}) {
   const siteId = process.env.WEBFLOW_SITE_ID;
   if (!siteId) {
-    console.warn(`[webflow-client] site-publish skipped (${context}): WEBFLOW_SITE_ID missing`);
-    return { skipped: true, reason: 'WEBFLOW_SITE_ID missing' };
+    throw new WebflowError(
+      'VALIDATION_FAIL',
+      `publishSite: WEBFLOW_SITE_ID ontbreekt in env (${context})`
+    );
   }
 
   const customDomainsRaw = process.env.WEBFLOW_CUSTOM_DOMAIN_IDS || '';
@@ -446,7 +458,7 @@ async function publishSiteIfEnabled(context = '') {
     : { publishToWebflowSubdomain: true };
 
   console.log(
-    `[webflow-client] site-publish triggered (${context}): site=${siteId}, ` +
+    `[webflow-client] publishSite (${context}): site=${siteId}, ` +
     `customDomains=${customDomains.length}, subdomain=true`
   );
 
@@ -456,13 +468,26 @@ async function publishSiteIfEnabled(context = '') {
       body,
     });
     console.log(
-      `[webflow-client] site-publish OK (${context}): ${JSON.stringify(data || {}).slice(0, 200)}`
+      `[webflow-client] publishSite OK (${context}): ${JSON.stringify(data || {}).slice(0, 200)}`
     );
-    return { ok: true, body, response: data };
+    return { ok: true, body, raw: data };
   } catch (e) {
-    console.warn(`[webflow-client] site-publish FAILED (${context}): ${e?.message || e}`);
-    return { ok: false, error: e?.message || String(e) };
+    // Re-throw met typed code. webflowFetch heeft 'm al geclassificeerd
+    // (AUTH_FAIL / RATE_LIMIT / WEBFLOW_DOWN / NOT_FOUND / etc).
+    console.warn(`[webflow-client] publishSite FAILED (${context}): ${e?.message || e}`);
+    throw e;
   }
+}
+
+// Thin wrapper voor backward-compat met bestaande callers (createLiveItem,
+// updateItem, unpublishItem, republishItem). Delegeert nu naar
+// maybePublishSite uit api/_lib/webflow-publish.js zodat de DB-toggle +
+// debounce + pending-flag voor ALLE outbound mutaties consistent zijn.
+async function publishSiteIfEnabled(context = '') {
+  // Lazy import om circulair import-probleem te voorkomen (webflow-publish
+  // importeert publishSite uit deze file).
+  const { maybePublishSite } = await import('./webflow-publish.js');
+  return maybePublishSite(context);
 }
 
 // ── Niveau-template discovery (voor createLiveItem clone-strategie) ──────────
@@ -754,11 +779,18 @@ export async function hardDeleteItem({ webflowItemId }) {
     const data = await webflowFetch(`/collections/${collId}/items/${webflowItemId}`, {
       method: 'DELETE',
     });
-    return { itemId: webflowItemId, raw: data, requestPayload: null, deleted: true };
+    // Blok 2 PR 4: trigger site-publish hook zodat overzichts-CMS-pagina
+    // het verwijderde item niet meer toont. Lock+debounce zit in
+    // maybePublishSite; deze call is fire-and-forward + return-prop.
+    const sitePublish = await publishSiteIfEnabled('hard-delete-' + webflowItemId);
+    return { itemId: webflowItemId, raw: data, requestPayload: null, deleted: true, sitePublish };
   } catch (e) {
     if (e instanceof WebflowError && e.code === 'NOT_FOUND') {
       console.log(`[webflow-client] hardDeleteItem 404 idempotent (${webflowItemId})`);
-      return { itemId: webflowItemId, raw: null, requestPayload: null, deleted: false, reason: '404 already gone' };
+      // 404 = al weg; alsnog publish-hook zodat eventueel pending mutaties
+      // in dezelfde burst toch een trailing publish krijgen.
+      const sitePublish = await publishSiteIfEnabled('hard-delete-404-' + webflowItemId);
+      return { itemId: webflowItemId, raw: null, requestPayload: null, deleted: false, reason: '404 already gone', sitePublish };
     }
     throw e;
   }
@@ -851,12 +883,12 @@ export async function republishItem({ webflowItemId, event, descriptionHtml }) {
  *   - 409 / 422 -> WebflowError met code
  *   - alle velden onbekend -> { skipped: true, reason: 'no resolvable fields' }
  *
- * Niet gevolgd door site-publish (frequente kleine updates zoals teller-
- * bijwerk willen we niet elke keer een site-publish triggeren). Wel kunnen
- * we expliciet publish maken voor smoke; default = staged-publish van het
- * CMS-item, geen full site-publish.
+ * Gevolgd door publishSiteIfEnabled() (Blok 2 PR 4): de DB-toggle + debounce
+ * in maybePublishSite zorgt dat een burst van teller-updates samenvalt tot
+ * ~1 site-publish, zodat de overzichtspagina de nieuwste "X / Y" toont
+ * zonder dat we per registratie een hele site-build triggeren.
  *
- * @returns { itemId, raw, requestPayload, resolvedFields, skipped? }
+ * @returns { itemId, raw, requestPayload, resolvedFields, skipped?, sitePublish? }
  */
 export async function updateLiveFields({ webflowItemId, fieldData }) {
   if (!webflowItemId) throw new WebflowError('VALIDATION_FAIL', 'webflowItemId vereist');
@@ -899,10 +931,13 @@ export async function updateLiveFields({ webflowItemId, fieldData }) {
     body,
   });
 
+  const sitePublish = await publishSiteIfEnabled('update-fields-' + webflowItemId);
+
   return {
     itemId        : webflowItemId,
     raw           : data,
     requestPayload: body,
     resolvedFields: Object.keys(resolved),
+    sitePublish,
   };
 }
