@@ -631,11 +631,13 @@ export async function hardDeleteEventOutbound(eventId) {
 //      (republishItem helper; PATCH /live primair, POST /publish fallback).
 //   2. GHL: recompute upcoming-labels - event komt terug in de set.
 //
-// event_sync_log.action CHECK staat op ('create'|'update'|'unpublish'). We
-// hergebruiken bewust de bestaande enum-values:
-//   - close-flow Webflow  -> action='unpublish' (semantisch correct, item gaat naar draft)
-//   - reopen-flow Webflow -> action='update'    (item wordt opnieuw live gezet)
-//   - close/reopen GHL    -> action='update'    (recompute + PUT options)
+// event_sync_log.action CHECK is uitgebreid naar
+// ('create'|'update'|'unpublish'|'hard_delete') via migratie
+// 2026-06-12-event-sync-log-hard-delete-action.sql. Mapping per flow:
+//   - close-flow Webflow  -> action='unpublish'   (staged record blijft)
+//   - reopen-flow Webflow -> action='update'      (item terug live)
+//   - close/reopen GHL    -> action='update'      (recompute + PUT options)
+//   - delete-flow Webflow -> action='hard_delete' (item permanent weg)
 // Specifieke close/reopen-context wordt vastgelegd in response_payload.strategy
 // + response_payload.flow zodat downstream tooling (sync-retry, dashboards)
 // kan onderscheiden zonder schema-wijziging.
