@@ -250,10 +250,14 @@ export async function maybePublishSite(context = '') {
     await recordPublishResult({ ok, errorMessage: ok ? null : result?.error });
     return {
       ok,
-      published: ok,
-      skipped  : false,
-      raw      : result?.raw || null,
-      error    : ok ? null : (result?.error || null),
+      published         : ok,
+      skipped           : false,
+      raw               : result?.raw || null,
+      error             : ok ? null : (result?.error || null),
+      domainSource      : result?.domainSource || null,
+      customDomainsCount: result?.customDomainsCount ?? null,
+      degraded          : result?.degraded === true,
+      degradedReason    : result?.degradedReason || null,
       context,
     };
   } catch (e) {
@@ -298,10 +302,14 @@ export async function forcePublishSite(context = 'manual') {
     await recordPublishResult({ ok, errorMessage: ok ? null : result?.error });
     return {
       ok,
-      published: ok,
-      skipped  : false,
-      raw      : result?.raw || null,
-      error    : ok ? null : (result?.error || null),
+      published         : ok,
+      skipped           : false,
+      raw               : result?.raw || null,
+      error             : ok ? null : (result?.error || null),
+      domainSource      : result?.domainSource || null,
+      customDomainsCount: result?.customDomainsCount ?? null,
+      degraded          : result?.degraded === true,
+      degradedReason    : result?.degradedReason || null,
       context,
     };
   } catch (e) {

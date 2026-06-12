@@ -426,18 +426,92 @@ function buildFieldData({ event, descriptionHtml, schema }) {
 // via /items/live zijn al "live" als records, maar tonen pas in de lijst-
 // pagina na deze call.
 //
-// publishSite - RAW HTTP-call naar Webflow publish-API. Idempotent op site-
-// niveau: een tweede publish kort na de eerste levert weer een build op
-// (Webflow queueet of dedupeert intern; voor onze hook zorgt webflow-publish.js
-// dat dit niet binnen DEBOUNCE_MS gebeurt). 429 wordt door webflowFetch
-// geclassificeerd als 'RATE_LIMIT' wat de orchestrator als retry-baar
-// behandelt.
+// Custom-domain discovery cache. Webflow custom domains wijzigen zelden
+// (DNS-config blijft maanden/jaren stabiel). TTL ruim genoeg dat we niet
+// elke publish 2 API-calls doen, kort genoeg om configuratie-wijzigingen
+// binnen een werkdag op te pikken zonder cold-restart.
+const CUSTOM_DOMAINS_CACHE_TTL_MS = 6 * 60 * 60 * 1000; // 6 uur
+let _customDomainsCache = {
+  siteId      : null,
+  domainIds   : null,    // string[] of null bij niet-gediscovered
+  domainUrls  : null,    // bookkeeping voor logs
+  lastFetched : 0,
+};
+
+/**
+ * Discover de custom-domein IDs voor de geconfigureerde site. Returnt
+ * { ok, domainIds, domainUrls } op success of { ok:false, error } bij
+ * fail. Faal-modes:
+ *   - WEBFLOW_SITE_ID ontbreekt -> { ok:false, error:'no site id' }
+ *   - HTTP-fout (401/403/5xx)   -> { ok:false, error:<typed code> }
+ *   - geen custom-domains       -> { ok:true, domainIds:[], domainUrls:[] }
+ *
+ * Cached per siteId voor CUSTOM_DOMAINS_CACHE_TTL_MS. Geen exception:
+ * publishSite valt terug op subdomain-only bij fail (degraded mode).
+ */
+async function discoverCustomDomainIds({ force = false } = {}) {
+  const siteId = process.env.WEBFLOW_SITE_ID;
+  if (!siteId) {
+    return { ok: false, error: 'WEBFLOW_SITE_ID missing' };
+  }
+
+  const now = Date.now();
+  if (
+    !force &&
+    _customDomainsCache.siteId === siteId &&
+    Array.isArray(_customDomainsCache.domainIds) &&
+    (now - _customDomainsCache.lastFetched) < CUSTOM_DOMAINS_CACHE_TTL_MS
+  ) {
+    return {
+      ok        : true,
+      domainIds : _customDomainsCache.domainIds.slice(),
+      domainUrls: _customDomainsCache.domainUrls.slice(),
+      cached    : true,
+    };
+  }
+
+  try {
+    const data = await webflowFetch(`/sites/${siteId}/custom_domains`, { method: 'GET' });
+    // v2 returnt { customDomains: [{ id, url, lastPublished? }, ...] }
+    const list = Array.isArray(data?.customDomains) ? data.customDomains : [];
+    const ids  = list.map((d) => d?.id).filter((id) => typeof id === 'string' && id.length > 0);
+    const urls = list.map((d) => d?.url || '').filter(Boolean);
+
+    _customDomainsCache = {
+      siteId,
+      domainIds  : ids,
+      domainUrls : urls,
+      lastFetched: now,
+    };
+    return { ok: true, domainIds: ids.slice(), domainUrls: urls.slice(), cached: false };
+  } catch (e) {
+    const code = (e instanceof WebflowError) ? e.code : 'UNKNOWN';
+    console.warn(
+      `[webflow-client] discoverCustomDomainIds FAILED (${code}): ${e?.message || e}`
+    );
+    return { ok: false, error: code, message: e?.message || String(e) };
+  }
+}
+
+// publishSite - RAW HTTP-call naar Webflow publish-API.
 //
-// Optioneel: WEBFLOW_CUSTOM_DOMAIN_IDS (comma-separated) om naar custom-domain
-// te publiceren naast Webflow-subdomain. WEBFLOW_SITE_ID is verplicht.
+// LIVE-DOMEIN PUBLISH (Blok 2 PR 4 fix): we publishen standaard naar ALLE
+// custom-domains van de site PLUS het Webflow-subdomain. customDomains
+// worden runtime-gediscovered via GET /sites/{site_id}/custom_domains
+// zodat ze niet hardcoded hoeven en automatisch meebewegen met
+// DNS-config-wijzigingen. WEBFLOW_CUSTOM_DOMAIN_IDS env-var blijft als
+// override-mechanisme (handig om in dev/staging alleen het subdomein te
+// raken zonder discovery te draaien).
 //
-// Errors worden NIET hier afgevangen - we gooien WebflowError zodat de
-// caller (maybePublishSite) ze kan classifyeren (rate-limit vs harde fout).
+// Faal-modes:
+//   - WEBFLOW_SITE_ID ontbreekt -> VALIDATION_FAIL
+//   - custom-domains discovery faalt -> degraded mode (alleen subdomein,
+//     mark resultaat met degraded:true zodat caller dit kan loggen)
+//   - publish 4xx/5xx -> throw typed WebflowError (AUTH_FAIL / RATE_LIMIT /
+//     WEBFLOW_DOWN / etc).
+//
+// Idempotent op site-niveau (Webflow queueet/dedupeert duplicate publishes;
+// de webflow-publish.js debounce voorkomt frequent-genoeg dubbel-fire).
 export async function publishSite({ context = '' } = {}) {
   const siteId = process.env.WEBFLOW_SITE_ID;
   if (!siteId) {
@@ -447,11 +521,44 @@ export async function publishSite({ context = '' } = {}) {
     );
   }
 
-  const customDomainsRaw = process.env.WEBFLOW_CUSTOM_DOMAIN_IDS || '';
-  const customDomains = customDomainsRaw
+  // Stap 1: bepaal customDomains. Override via env-var heeft voorrang
+  // (handig voor dev/staging om alleen subdomein te raken zonder
+  // discovery-call). Anders runtime-discovery via GET custom_domains.
+  const envOverrideRaw = process.env.WEBFLOW_CUSTOM_DOMAIN_IDS || '';
+  const envOverride    = envOverrideRaw
     .split(',')
     .map((s) => s.trim())
     .filter(Boolean);
+
+  let customDomains = [];
+  let domainSource  = 'none';
+  let domainUrls    = [];
+  let degraded      = false;
+  let degradedReason = null;
+
+  if (envOverride.length > 0) {
+    customDomains = envOverride;
+    domainSource  = 'env';
+  } else {
+    const disco = await discoverCustomDomainIds();
+    if (disco.ok) {
+      customDomains = disco.domainIds;
+      domainUrls    = disco.domainUrls;
+      domainSource  = disco.cached ? 'discovery-cached' : 'discovery-fresh';
+      // Geen custom-domains bekend op deze site is geen fout, maar het is
+      // wel degraded: live-domein wordt niet geraakt omdat het er niet
+      // is. Voor productie (waar www.deforexopleiding.nl als custom-
+      // domein staat) signaleert dit een config-probleem.
+      if (customDomains.length === 0) {
+        degraded       = true;
+        degradedReason = 'no custom domains configured on site';
+      }
+    } else {
+      // Discovery FAIL: fallback naar subdomain-only + degraded vlag.
+      degraded       = true;
+      degradedReason = `custom_domains discovery failed: ${disco.error || 'unknown'}`;
+    }
+  }
 
   const body = customDomains.length > 0
     ? { customDomains, publishToWebflowSubdomain: true }
@@ -459,7 +566,10 @@ export async function publishSite({ context = '' } = {}) {
 
   console.log(
     `[webflow-client] publishSite (${context}): site=${siteId}, ` +
-    `customDomains=${customDomains.length}, subdomain=true`
+    `domainSource=${domainSource}, customDomains=${customDomains.length}` +
+    (domainUrls.length ? ` (${domainUrls.join(',')})` : '') +
+    `, subdomain=true` +
+    (degraded ? ` [DEGRADED: ${degradedReason}]` : '')
   );
 
   try {
@@ -468,9 +578,18 @@ export async function publishSite({ context = '' } = {}) {
       body,
     });
     console.log(
-      `[webflow-client] publishSite OK (${context}): ${JSON.stringify(data || {}).slice(0, 200)}`
+      `[webflow-client] publishSite OK (${context}, ${domainSource}, ${customDomains.length} custom): ` +
+      `${JSON.stringify(data || {}).slice(0, 200)}`
     );
-    return { ok: true, body, raw: data };
+    return {
+      ok          : true,
+      body,
+      raw         : data,
+      domainSource,
+      customDomainsCount: customDomains.length,
+      degraded,
+      degradedReason,
+    };
   } catch (e) {
     // Re-throw met typed code. webflowFetch heeft 'm al geclassificeerd
     // (AUTH_FAIL / RATE_LIMIT / WEBFLOW_DOWN / NOT_FOUND / etc).
