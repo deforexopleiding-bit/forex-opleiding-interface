@@ -533,11 +533,43 @@ export async function unpublishEventOutbound(eventId) {
 // de Webflow CMS (zowel live-publicatie als staged record). 404 = success
 // (item al weg, idempotent). Daarna wordt webflow_item_id genuld zodat een
 // eventuele heropvoer een vers item produceert.
+//
+// 2-staps cleanup (events-delete robustness):
+//   Stap A: unpublish-live (DELETE /items/{id}/live) - best-effort. 404 = al
+//           niet meer live, prima. Andere fouten: log warn + ga door naar
+//           delete-item (de delete-stap bepaalt success/deferred).
+//   Stap B: delete-item (DELETE /items/{id}) - definitieve verwijdering.
+//           success/404 -> NULL webflow_item_id + sync_status='deleted' +
+//           cleanup_status='done'.
+//           retryable (429/5xx/network) -> link BLIJFT + sync_status='failure'
+//           + cleanup_status='deferred' (herdraai pakt het op via retry-cron
+//           of admin-trigger).
+//
+// cleanup_status discriminator zit in return-object zodat events-delete
+// een schone response-shape ({ webflow_cleanup: 'done'|'deferred'|'none' })
+// kan produceren zonder zelf orchestrator-internals te kennen.
 async function hardDeleteWebflow(event) {
   if (!event.webflow_item_id) {
-    // Niets om te verwijderen - log no-op success
-    return { ok: true, action: 'hard_delete', status: 'noop' };
+    return {
+      ok: true, action: 'hard_delete', status: 'noop',
+      cleanup_status: 'none',
+    };
   }
+
+  // ── Stap A: unpublish-live (best-effort, defensive pre-step) ─────────────
+  try {
+    await unpublishItem({ webflowItemId: event.webflow_item_id });
+  } catch (e) {
+    // Niet fataal - delete-item kan het item alsnog opruimen, en als delete
+    // hierna ook faalt rapporteren we via die catch-tak.
+    const code = (e instanceof WebflowError) ? e.code : 'UNKNOWN';
+    console.warn(
+      `[event-sync-orchestrator] hardDeleteWebflow unpublish-live pre-step faalde ` +
+      `(${code}: ${e?.message?.slice(0, 120) || ''}) - doorgaan naar delete-item`
+    );
+  }
+
+  // ── Stap B: delete-item (canonical) ─────────────────────────────────────
   try {
     const result = await hardDeleteItem({ webflowItemId: event.webflow_item_id });
     await logSyncAttempt({
@@ -556,15 +588,20 @@ async function hardDeleteWebflow(event) {
       .from('events')
       .update({
         webflow_item_id       : null,
-        webflow_sync_status   : 'archived',
+        webflow_sync_status   : 'deleted',
         webflow_last_synced_at: new Date().toISOString(),
       })
       .eq('id', event.id);
-    return { ok: true, action: 'hard_delete', status: result.deleted ? 'deleted' : 'already_gone' };
+    return {
+      ok: true, action: 'hard_delete',
+      status: result.deleted ? 'deleted' : 'already_gone',
+      cleanup_status: 'done',
+    };
   } catch (e) {
     const isWfErr = e instanceof WebflowError;
     const code    = isWfErr ? e.code : 'UNKNOWN';
     const message = e?.message || 'unknown error';
+    const retryable = ['RATE_LIMIT', 'WEBFLOW_DOWN'].includes(code);
 
     const retry_count   = await getCurrentRetryCount(event.id, 'webflow');
     const next_retry_at = computeNextRetryAt(retry_count);
@@ -581,6 +618,9 @@ async function hardDeleteWebflow(event) {
       retry_count,
       next_retry_at,
     });
+    // CRITISCH: webflow_item_id BLIJFT staan zodat herdraai het opnieuw kan
+    // proberen. Alleen webflow_sync_status='failure' + last_synced_at
+    // bijwerken.
     await supabaseAdmin
       .from('events')
       .update({
@@ -588,7 +628,12 @@ async function hardDeleteWebflow(event) {
         webflow_last_synced_at: new Date().toISOString(),
       })
       .eq('id', event.id);
-    return { ok: false, action: 'hard_delete', status: 'failure', error_code: code, message };
+    return {
+      ok: false, action: 'hard_delete', status: 'failure',
+      error_code: code, message,
+      cleanup_status: 'deferred',
+      retryable,
+    };
   }
 }
 
