@@ -298,12 +298,17 @@ async function unpublishWebflow(event) {
 // ── GHL target ────────────────────────────────────────────────────────────────
 
 // Bereken upcoming-events labels uit DB:
-//   events WHERE status='published' AND starts_at > now()
+//   events WHERE status='published' AND signups_closed=false AND starts_at > now()
 //   ORDER BY starts_at ASC
 //
 // SINGLE SOURCE voor zowel publish/update/cancel-triggers (via syncGhl in
 // deze file) als de daily refresh-cron (api/cron-events-ghl-next-update.js
 // importeert deze export). Voorkomt query-drift tussen trigger en cron.
+//
+// Filter signups_closed=false (Blok 1): events waarvan inschrijvingen handmatig
+// of automatisch (auto-close cron) gesloten zijn vallen direct uit de GHL
+// upcoming-set. Reopen-flow zet signups_closed=false en triggert recompute,
+// waardoor het event weer terugkomt in de dropdown.
 //
 // Empty-result-pad: bij 0 events returnt deze gewoon []; de GUARD in
 // ghl-custom-field.js updateOptions() vangt empty array af en SKIPT de PUT
@@ -315,6 +320,7 @@ export async function computeUpcomingLabels() {
     .from('events')
     .select('id, title, starts_at, ends_at, niveau, status')
     .eq('status', 'published')
+    .eq('signups_closed', false)
     .gt('starts_at', nowIso)
     .order('starts_at', { ascending: true });
 
