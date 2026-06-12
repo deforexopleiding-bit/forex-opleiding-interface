@@ -1,0 +1,410 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Assessment - De Forex Opleiding</title>
+  <meta name="robots" content="noindex, nofollow" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg        : #f6f8fa;
+      --bg-card   : #ffffff;
+      --text      : #1f2937;
+      --text-mute : #6b7280;
+      --border    : #e5e7eb;
+      --primary   : #093d54;
+      --primary-h : #0a4a66;
+      --danger    : #dc2626;
+      --ok        : #10b981;
+      --focus     : rgba(9, 61, 84, 0.16);
+    }
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0; padding: 0; min-height: 100vh;
+      font-family: 'Inter', system-ui, sans-serif;
+      background: var(--bg); color: var(--text);
+      -webkit-font-smoothing: antialiased;
+      line-height: 1.5;
+    }
+    .page {
+      max-width: 720px; margin: 0 auto;
+      padding: 32px 20px 80px;
+    }
+    .intro h1 {
+      font-size: 26px; font-weight: 700; margin: 0 0 8px;
+      color: var(--primary);
+    }
+    .intro p {
+      color: var(--text-mute); margin: 0 0 24px; font-size: 15px;
+    }
+    .card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 24px;
+      margin-bottom: 16px;
+    }
+    .section-title {
+      font-size: 12px; font-weight: 700;
+      text-transform: uppercase; letter-spacing: 0.06em;
+      color: var(--text-mute); margin-bottom: 12px;
+    }
+    .question {
+      margin-bottom: 20px;
+    }
+    .question:last-child { margin-bottom: 0; }
+    .q-label {
+      display: block; font-weight: 600; font-size: 15px;
+      margin-bottom: 6px;
+    }
+    .q-help {
+      display: block; color: var(--text-mute); font-size: 13px;
+      margin-bottom: 10px;
+    }
+    .q-required-mark { color: var(--danger); margin-left: 2px; }
+    input[type="text"], input[type="email"], textarea {
+      width: 100%;
+      padding: 10px 12px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      font-family: inherit; font-size: 15px; color: var(--text);
+      background: #fff; outline: none;
+      transition: border-color 0.15s, box-shadow 0.15s;
+    }
+    input:focus, textarea:focus {
+      border-color: var(--primary);
+      box-shadow: 0 0 0 3px var(--focus);
+    }
+    textarea { min-height: 120px; resize: vertical; }
+    .radio-list, .scale-list {
+      display: grid; gap: 8px;
+    }
+    .scale-list { grid-template-columns: repeat(5, 1fr); }
+    .scale-list.scale10 { grid-template-columns: repeat(10, 1fr); }
+    .radio-row, .scale-cell {
+      display: flex; align-items: center; gap: 10px;
+      padding: 10px 12px;
+      border: 1px solid var(--border); border-radius: 8px;
+      cursor: pointer; background: #fff;
+      transition: border-color 0.15s, background 0.15s;
+    }
+    .scale-cell {
+      justify-content: center; flex-direction: column; gap: 2px;
+      font-size: 13px; font-weight: 600;
+    }
+    .radio-row:hover, .scale-cell:hover { border-color: var(--primary); }
+    .radio-row input[type="radio"], .scale-cell input[type="radio"] { margin: 0; }
+    .radio-row.selected, .scale-cell.selected {
+      border-color: var(--primary);
+      background: rgba(9, 61, 84, 0.05);
+    }
+    .word-count {
+      display: block; font-size: 12px; color: var(--text-mute);
+      margin-top: 6px;
+    }
+    .word-count.ok { color: var(--ok); }
+    .word-count.warn { color: var(--danger); }
+    .errors {
+      background: #fef2f2; border: 1px solid #fecaca;
+      color: #991b1b; padding: 14px 16px;
+      border-radius: 10px; margin-bottom: 16px; font-size: 14px;
+    }
+    .errors ul { margin: 8px 0 0; padding-left: 20px; }
+    .submit-row {
+      display: flex; justify-content: flex-end; gap: 12px;
+      margin-top: 8px;
+    }
+    button.btn-primary {
+      background: var(--primary); color: #fff;
+      border: 0; border-radius: 10px;
+      padding: 12px 22px; font-size: 15px; font-weight: 600;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+    button.btn-primary:hover { background: var(--primary-h); }
+    button.btn-primary:disabled { opacity: 0.6; cursor: not-allowed; }
+    .honeypot {
+      position: absolute; left: -10000px; top: auto;
+      width: 1px; height: 1px; overflow: hidden;
+    }
+    .success {
+      text-align: center; padding: 40px 20px;
+    }
+    .success h2 { color: var(--primary); margin: 0 0 12px; }
+    .success p  { color: var(--text-mute); margin: 0; }
+    .loading, .fatal {
+      text-align: center; padding: 40px 20px; color: var(--text-mute);
+    }
+    .fatal { color: var(--danger); }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <div class="intro">
+      <h1>Forex Opleiding Assessment</h1>
+      <p>Vul deze korte vragenlijst in zodat we je passend kunnen begeleiden. Duurt ongeveer 3 minuten.</p>
+    </div>
+
+    <div id="loading" class="loading">Vragen laden...</div>
+    <div id="fatal" class="fatal" hidden></div>
+    <form id="form" hidden novalidate>
+      <div id="errors" class="errors" hidden>
+        <strong>Niet alle velden zijn correct ingevuld:</strong>
+        <ul id="errors-list"></ul>
+      </div>
+
+      <div id="sections"></div>
+
+      <div class="honeypot" aria-hidden="true">
+        <label>Bedrijfsnaam <input type="text" name="hp_company" tabindex="-1" autocomplete="off" /></label>
+      </div>
+
+      <div class="submit-row">
+        <button id="submit-btn" type="submit" class="btn-primary">Inzenden</button>
+      </div>
+    </form>
+
+    <div id="success" class="success" hidden>
+      <h2>Bedankt voor je inzending!</h2>
+      <p>We hebben je antwoorden goed ontvangen. Je hoort snel van ons.</p>
+    </div>
+  </main>
+
+  <script>
+    (function () {
+      const SECTION_LABELS = {
+        identiteit : 'Wie ben je',
+        routing    : 'Je ervaring',
+        engagement : 'Wat zoek je',
+        doel       : 'Je doel',
+      };
+
+      const $loading = document.getElementById('loading');
+      const $fatal   = document.getElementById('fatal');
+      const $form    = document.getElementById('form');
+      const $sections= document.getElementById('sections');
+      const $errors  = document.getElementById('errors');
+      const $errList = document.getElementById('errors-list');
+      const $submit  = document.getElementById('submit-btn');
+      const $success = document.getElementById('success');
+
+      const urlParams = new URLSearchParams(window.location.search);
+      const eventId   = urlParams.get('event') || null;
+
+      let questions = [];
+
+      function esc(s) {
+        return String(s == null ? '' : s)
+          .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+          .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+      }
+
+      function showFatal(msg) {
+        $loading.hidden = true;
+        $fatal.textContent = msg;
+        $fatal.hidden = false;
+      }
+
+      function renderSections(qs) {
+        // Group by section, preserving order
+        const groups = {};
+        const orderedSections = [];
+        for (const q of qs) {
+          if (!groups[q.section]) {
+            groups[q.section] = [];
+            orderedSections.push(q.section);
+          }
+          groups[q.section].push(q);
+        }
+
+        $sections.innerHTML = orderedSections.map((sec) => {
+          const title = SECTION_LABELS[sec] || sec;
+          const items = groups[sec].map(renderQuestion).join('');
+          return `
+            <div class="card" data-section="${esc(sec)}">
+              <div class="section-title">${esc(title)}</div>
+              ${items}
+            </div>`;
+        }).join('');
+
+        // Wire radio interactions for visual selected-state + word-count
+        $sections.querySelectorAll('.radio-row, .scale-cell').forEach((el) => {
+          el.addEventListener('click', () => {
+            const input = el.querySelector('input[type="radio"]');
+            if (!input) return;
+            input.checked = true;
+            const name = input.name;
+            $sections.querySelectorAll(`input[name="${CSS.escape(name)}"]`).forEach((r) => {
+              const parent = r.closest('.radio-row, .scale-cell');
+              if (parent) parent.classList.toggle('selected', r === input);
+            });
+          });
+        });
+        $sections.querySelectorAll('textarea[data-min-words]').forEach((ta) => {
+          const min = parseInt(ta.dataset.minWords, 10) || 0;
+          const counter = ta.parentElement.querySelector('.word-count');
+          const upd = () => {
+            const words = (ta.value.trim().match(/\S+/g) || []).length;
+            counter.textContent = `${words} / ${min} woorden`;
+            counter.classList.toggle('ok',   words >= min && min > 0);
+            counter.classList.toggle('warn', min > 0 && words < min);
+          };
+          ta.addEventListener('input', upd); upd();
+        });
+      }
+
+      function renderQuestion(q) {
+        const reqMark = q.required ? '<span class="q-required-mark">*</span>' : '';
+        const help    = q.help_text ? `<span class="q-help">${esc(q.help_text)}</span>` : '';
+        let control = '';
+
+        switch (q.type) {
+          case 'text':
+            control = `<input type="text" name="${esc(q.key)}" autocomplete="${q.key === 'voornaam' ? 'given-name' : q.key === 'achternaam' ? 'family-name' : 'off'}" />`;
+            break;
+          case 'email':
+            control = `<input type="email" name="${esc(q.key)}" autocomplete="email" />`;
+            break;
+          case 'radio': {
+            const opts = Array.isArray(q.options) ? q.options : [];
+            control = `<div class="radio-list">${opts.map((o) => `
+              <label class="radio-row">
+                <input type="radio" name="${esc(q.key)}" value="${esc(o.value)}" />
+                <span>${esc(o.label)}</span>
+              </label>`).join('')}</div>`;
+            break;
+          }
+          case 'scale_1_5':
+          case 'scale_1_10': {
+            const max = q.type === 'scale_1_10' ? 10 : 5;
+            const klass = q.type === 'scale_1_10' ? 'scale-list scale10' : 'scale-list';
+            const cells = [];
+            for (let i = 1; i <= max; i++) {
+              cells.push(`
+                <label class="scale-cell">
+                  <input type="radio" name="${esc(q.key)}" value="${i}" />
+                  <span>${i}</span>
+                </label>`);
+            }
+            control = `<div class="${klass}">${cells.join('')}</div>`;
+            break;
+          }
+          case 'open_text': {
+            const min = Number.isInteger(q.min_words) ? q.min_words : 0;
+            control = `
+              <textarea name="${esc(q.key)}" data-min-words="${min}" placeholder="Beschrijf zo concreet mogelijk..."></textarea>
+              <span class="word-count">0 / ${min} woorden</span>`;
+            break;
+          }
+          default:
+            control = `<em>(onbekend veldtype: ${esc(q.type)})</em>`;
+        }
+
+        return `
+          <div class="question" data-key="${esc(q.key)}">
+            <label class="q-label">${esc(q.label)}${reqMark}</label>
+            ${help}
+            ${control}
+          </div>`;
+      }
+
+      function collectAnswers() {
+        const out = {};
+        for (const q of questions) {
+          if (q.type === 'text' || q.type === 'email' || q.type === 'open_text') {
+            const el = $form.querySelector(`[name="${CSS.escape(q.key)}"]`);
+            if (el && el.value && el.value.trim() !== '') {
+              out[q.key] = el.value.trim();
+            }
+          } else if (q.type === 'radio' || q.type === 'scale_1_5' || q.type === 'scale_1_10') {
+            const sel = $form.querySelector(`input[name="${CSS.escape(q.key)}"]:checked`);
+            if (sel) {
+              if (q.type === 'radio') {
+                out[q.key] = sel.value;
+              } else {
+                out[q.key] = parseInt(sel.value, 10);
+              }
+            }
+          }
+        }
+        return out;
+      }
+
+      function showErrors(list) {
+        $errors.hidden = list.length === 0;
+        $errList.innerHTML = list.map((e) => `<li>${esc(e.message || e.code || 'Onbekende fout')}</li>`).join('');
+        if (list.length > 0) $errors.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+
+      async function loadQuestions() {
+        try {
+          const r = await fetch('/api/assessment-questions', { headers: { Accept: 'application/json' } });
+          if (!r.ok) throw new Error('HTTP ' + r.status);
+          const j = await r.json();
+          questions = Array.isArray(j.questions) ? j.questions : [];
+          if (!questions.length) {
+            showFatal('Er zijn op dit moment geen vragen geconfigureerd. Probeer het later opnieuw.');
+            return;
+          }
+          $loading.hidden = true;
+          renderSections(questions);
+          $form.hidden = false;
+        } catch (e) {
+          console.error('loadQuestions', e);
+          showFatal('Kon de vragenlijst niet laden. Vernieuw de pagina of probeer het later.');
+        }
+      }
+
+      $form.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        showErrors([]);
+        $submit.disabled = true;
+        $submit.textContent = 'Bezig met versturen...';
+
+        try {
+          const answers = collectAnswers();
+          const hp = $form.querySelector('input[name="hp_company"]');
+          const payload = {
+            event_id: eventId,
+            answers,
+            hp_company: hp ? hp.value : '',
+          };
+          const r = await fetch('/api/assessment-submit', {
+            method : 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body   : JSON.stringify(payload),
+          });
+          const j = await r.json().catch(() => ({}));
+
+          if (r.status === 200 && j.ok) {
+            $form.hidden = true;
+            $success.hidden = false;
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+            return;
+          }
+          if (r.status === 429) {
+            showErrors([{ message: j.error || 'Te veel inzendingen vanaf dit netwerk. Probeer het zo opnieuw.' }]);
+            return;
+          }
+          if (r.status === 400 && Array.isArray(j.errors)) {
+            showErrors(j.errors);
+            return;
+          }
+          showErrors([{ message: j.error || ('Inzenden mislukt (HTTP ' + r.status + ').') }]);
+        } catch (err) {
+          console.error('submit', err);
+          showErrors([{ message: 'Er ging iets mis tijdens versturen. Probeer het opnieuw.' }]);
+        } finally {
+          $submit.disabled = false;
+          $submit.textContent = 'Inzenden';
+        }
+      });
+
+      loadQuestions();
+    })();
+  </script>
+</body>
+</html>

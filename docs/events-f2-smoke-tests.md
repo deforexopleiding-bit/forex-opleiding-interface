@@ -554,6 +554,167 @@ assessment blijven beschikbaar voor historische rapportage).
 
 ---
 
+## Scenario 15 — Assessment-pagina rendert vragen uit config (Blok 2 PR 1)
+
+**Doel:** Bevestigen dat `/modules/assessment.html` de actieve vragen uit
+`assessment_questions` haalt via `/api/assessment-questions` en correct
+rendert per sectie + type.
+
+**Pre-flight:**
+- SQL migratie `2026-06-12-blok2-assessment-foundation.sql` gerund (2
+  tabellen + 12 seeds + FK + RLS).
+- Verifieer seeds:
+  ```sql
+  SELECT section, count(*) FROM public.assessment_questions
+  WHERE active=true GROUP BY section ORDER BY section;
+  -- verwacht: doel=1, engagement=3, identiteit=3, routing=5
+  ```
+
+**Stappen:**
+1. Open `https://<preview-url>/modules/assessment.html` in een
+   anonymous/incognito tab (geen Supabase-sessie nodig — publieke pagina).
+2. Open DevTools -> Network en bevestig:
+   - `GET /api/assessment-questions` -> 200 met `{ questions: [...] }`
+     (12 entries).
+   - Response bevat GEEN `routing_weights` en GEEN `is_routing` (server-only
+     velden uitgesneden via `sanitizeQuestionsForPublic`).
+3. Visueel: 4 secties zichtbaar in volgorde Wie ben je / Je ervaring /
+   Wat zoek je / Je doel. Elke vraag toont label + verplicht-asterisk
+   waar `required=true`.
+4. Veldtypes:
+   - voornaam/achternaam = text input;
+   - email = email input;
+   - ervaring/handelen/tradeplan_risico/winstgevend/uitspraak/doel = radio
+     list met de exacte NL labels;
+   - kennis = 5-cell scale (1..5);
+   - motivatie = 10-cell scale (1..10);
+   - grootste_uitdaging = textarea + woord-counter "0 / 30 woorden".
+5. Tik in textarea: counter werkt en kleurt groen bij >=30 woorden.
+
+**Verwacht:** alle controls renderen, geen console-errors, network-response
+bevat exact 12 questions zonder routing-config.
+
+---
+
+## Scenario 16 — Validation blokkeert lege/te korte inzending (Blok 2 PR 1)
+
+**Doel:** Required-checks + min-words op `open_text` werken server-side
+(client mag faciliteren maar mag niet alleen waarheid zijn).
+
+**Stappen:**
+1. Open assessment-pagina (zoals scenario 15).
+2. Klik direct op "Inzenden" zonder iets in te vullen.
+3. Verwacht: HTTP 400 van `/api/assessment-submit` met body
+   `{ error: 'Validatie mislukt.', errors: [...] }`. Elke required-veld
+   verschijnt als `{ key, code: 'REQUIRED', message }`. Foutbox
+   bovenaan toont de lijst.
+4. Vul voornaam/achternaam/email + alle radio's + de scales + doel in,
+   maar laat `grootste_uitdaging` op 5 woorden hangen.
+5. Klik "Inzenden". Verwacht: 400 met 1 fout `{ key:'grootste_uitdaging',
+   code:'MIN_WORDS', message: 'Veld "grootste_uitdaging" moet minstens
+   30 woorden bevatten (nu 5).' }`.
+6. Test een ongeldige radio-waarde via DevTools console:
+   ```js
+   fetch('/api/assessment-submit', {
+     method:'POST',
+     headers:{'Content-Type':'application/json'},
+     body: JSON.stringify({ answers: { voornaam:'X', achternaam:'Y',
+       email:'a@b.cd', ervaring:'fake', handelen:'demo',
+       tradeplan_risico:'nee', winstgevend:'nog_niet', kennis:3,
+       motivatie:5, uitspraak:'eerst_leren',
+       grootste_uitdaging:('woord '.repeat(35)), doel:'anders' } })
+   }).then(r => r.json()).then(console.log);
+   ```
+   Verwacht: 400 met `{ key:'ervaring', code:'OPTION', message:'...' }`.
+
+**Verwacht:** Server side validatie weigert elke vorm van incomplete of
+ongeldige input; geen rij in `assessment_responses` voor deze pogingen.
+
+---
+
+## Scenario 17 — Geldige inzending wordt opgeslagen (Blok 2 PR 1)
+
+**Doel:** Een volledig + geldig formulier landt als rij in
+`assessment_responses` met `status='submitted'`, `routing_result=NULL` en
+`score=NULL` (geen routing in deze PR).
+
+**Stappen:**
+1. Open assessment-pagina; vul alle 12 velden correct in. Gebruik een
+   uniek e-mailadres (bv. `smoke+blok2pr1@deforexopleiding.nl`).
+2. Klik "Inzenden". Verwacht: HTTP 200 + success-card "Bedankt voor je
+   inzending!". Network response body: `{ ok:true, id:<uuid>,
+   status:'submitted', routing_result:null, submitted_at:... }`.
+3. Verifieer in Supabase:
+   ```sql
+   SELECT id, email, first_name, last_name, status, routing_result,
+          score, event_id, submitted_at,
+          answers ? 'voornaam'  AS has_voornaam,
+          answers ? 'doel'      AS has_doel
+   FROM public.assessment_responses
+   WHERE email = 'smoke+blok2pr1@deforexopleiding.nl'
+   ORDER BY submitted_at DESC LIMIT 1;
+   ```
+   Verwacht: 1 rij, `status='submitted'`, `routing_result=NULL`,
+   `score=NULL`, beide `has_*` velden `true`, `event_id` NULL als
+   geen `?event=` querystring meegegeven was.
+4. Herhaal met `/modules/assessment.html?event=<uuid van bestaand event>`
+   en verifieer dat `event_id` nu gevuld is met die uuid.
+
+**Verwacht:** capture-only is volledig; geen routing/scoring/side-effects
+in deze PR.
+
+---
+
+## Scenario 18 — Honeypot + IP-rate-limit (Blok 2 PR 1)
+
+**Doel:** Anti-abuse maatregelen werken: honeypot weigert bot-achtige
+inzendingen, en zelfde IP-hash kan max 1 inzending per 30 seconden doen.
+
+**Stappen (honeypot):**
+1. Open DevTools console op de assessment-pagina.
+2. Verstuur via fetch een payload waarin `hp_company` gevuld is:
+   ```js
+   fetch('/api/assessment-submit', {
+     method:'POST',
+     headers:{'Content-Type':'application/json'},
+     body: JSON.stringify({
+       hp_company: 'Acme BV',
+       answers: { voornaam:'Bot', achternaam:'Test',
+         email:'bot@example.com', ervaring:'<3mnd', handelen:'nog_niet',
+         tradeplan_risico:'nee', winstgevend:'nog_niet', kennis:1,
+         motivatie:1, uitspraak:'gratis_info',
+         grootste_uitdaging:('woord '.repeat(35)), doel:'anders' }
+     })
+   }).then(r => r.status).then(console.log);
+   ```
+   Verwacht: HTTP 422 met body `{ error: 'Inzending kon niet worden
+   verwerkt.' }`. Geen rij in `assessment_responses` voor dit e-mailadres.
+
+**Stappen (rate-limit):**
+1. Stuur een geldige inzending in (zoals scenario 17, met een nieuw,
+   uniek e-mailadres).
+2. Stuur direct daarna een tweede geldige inzending (ander e-mailadres,
+   binnen 30 sec).
+3. Verwacht 2e response: HTTP 429 met body
+   `{ error: 'Te veel inzendingen vanaf dit IP. Probeer het over 30
+   seconden opnieuw.', latest_at: <iso> }`.
+4. Verifieer: maar 1 rij toegevoegd in `assessment_responses` voor deze
+   2 pogingen.
+5. Wacht 30 sec; herhaal tweede inzending; verwacht 200.
+
+**Verifieer raw IP NIET in DB:**
+```sql
+SELECT submitter_ip_hash, length(submitter_ip_hash) AS hashlen
+FROM public.assessment_responses
+ORDER BY submitted_at DESC LIMIT 3;
+-- verwacht: hashlen=32 (SHA-256 truncated), GEEN 4 oktet IPv4 of IPv6
+```
+
+**Verwacht:** honeypot return 422, rate-limit return 429, IP zelf nooit
+in raw vorm opgeslagen.
+
+---
+
 ## Pre-merge checklist Blok 1
 
 - [ ] SQL migratie `2026-06-12-events-signups-closed.sql` gerund in
