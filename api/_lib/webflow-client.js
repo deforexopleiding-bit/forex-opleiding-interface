@@ -217,19 +217,25 @@ async function webflowFetch(path, opts = {}) {
 // source. De displayName-fallback in resolveSlug() blijft staan voor
 // toekomst-resilience: als een slug onverwacht verandert detecteren we het.
 const HARDCODED_FIELD_SLUGS = {
-  time    : 'time',
-  location: 'locatie-2',
-  content : 'event-content',
+  time       : 'time',
+  location   : 'locatie-2',
+  content    : 'event-content',
+  // Blok 2 PR 3: Gastenlijst-veld voor "<bevestigd>/<capaciteit>" label.
+  // Best guess slug uit Webflow-conventie (lowercase NL). Bij mismatch
+  // valt resolveSlug() terug op displayName-match 'Gastenlijst' uit
+  // FIELD_NAME_MAP hieronder, of skipt het veld + console.warn.
+  gastenlijst: 'gastenlijst',
 };
 
 // Map van logische naam -> kandidaat-displayName voor FALLBACK matching.
 // (Hardcoded slug hierboven wint; deze map is alleen voor reserve-discovery.)
 const FIELD_NAME_MAP = {
-  title  : 'Name',           // Webflow stelt 'Name' altijd verplicht (slug 'name')
-  time   : 'Time',
-  location: 'Locatie',
-  content: 'Event Content',
-  niveau : 'Event Type',
+  title      : 'Name',           // Webflow stelt 'Name' altijd verplicht (slug 'name')
+  time       : 'Time',
+  location   : 'Locatie',
+  content    : 'Event Content',
+  niveau     : 'Event Type',
+  gastenlijst: 'Gastenlijst',
 };
 
 // Vind een field waar displayName case-insensitive matched.
@@ -823,5 +829,80 @@ export async function republishItem({ webflowItemId, event, descriptionHtml }) {
     stagedUpdate : stagedResult ? { ok: true } : { ok: false, skipped: true },
     sitePublish,
     strategy     : 'post_publish_bulk',
+  };
+}
+
+/**
+ * updateLiveFields - PATCH /items/{id}/live met een SUBSET van fields zodat
+ * we de Gastenlijst-teller kunnen bijwerken zonder de volledige event-payload
+ * te hoeven herbouwen (geen schema-discovery of buildFieldData nodig per
+ * registratie).
+ *
+ * @param {object} arg
+ * @param {string} arg.webflowItemId  - id van het live CMS-item
+ * @param {object} arg.fieldData      - { logicalName: value, ... } waar
+ *                                       logicalName via resolveSlug() vertaald
+ *                                       wordt naar de echte Webflow-slug.
+ *                                       Onbekende logicalNames worden GESKIPT
+ *                                       met console.warn (geen exception).
+ *
+ * Idempotent: PATCH op /live van een live item; faal-modes:
+ *   - 404 (item nooit gepubliceerd / verwijderd) -> WebflowError NOT_FOUND
+ *   - 409 / 422 -> WebflowError met code
+ *   - alle velden onbekend -> { skipped: true, reason: 'no resolvable fields' }
+ *
+ * Niet gevolgd door site-publish (frequente kleine updates zoals teller-
+ * bijwerk willen we niet elke keer een site-publish triggeren). Wel kunnen
+ * we expliciet publish maken voor smoke; default = staged-publish van het
+ * CMS-item, geen full site-publish.
+ *
+ * @returns { itemId, raw, requestPayload, resolvedFields, skipped? }
+ */
+export async function updateLiveFields({ webflowItemId, fieldData }) {
+  if (!webflowItemId) throw new WebflowError('VALIDATION_FAIL', 'webflowItemId vereist');
+  if (!fieldData || typeof fieldData !== 'object') {
+    throw new WebflowError('VALIDATION_FAIL', 'fieldData object vereist');
+  }
+  const { collId } = getEnv();
+  const schema = await getCollectionSchema();
+
+  // Vertaal logicalName -> slug. Skip onresolvable.
+  const resolved = {};
+  for (const [logicalName, value] of Object.entries(fieldData)) {
+    const slug = resolveSlug(schema, logicalName);
+    if (slug) {
+      resolved[slug] = value;
+    } else {
+      console.warn(`[webflow-client] updateLiveFields skipt '${logicalName}' (geen slug gevonden)`);
+    }
+  }
+
+  if (Object.keys(resolved).length === 0) {
+    return {
+      itemId        : webflowItemId,
+      raw           : null,
+      requestPayload: null,
+      resolvedFields: [],
+      skipped       : true,
+      reason        : 'no resolvable fields',
+    };
+  }
+
+  const body = {
+    isArchived: false,
+    isDraft   : false,
+    fieldData : resolved,
+  };
+
+  const data = await webflowFetch(`/collections/${collId}/items/${webflowItemId}/live`, {
+    method: 'PATCH',
+    body,
+  });
+
+  return {
+    itemId        : webflowItemId,
+    raw           : data,
+    requestPayload: body,
+    resolvedFields: Object.keys(resolved),
   };
 }

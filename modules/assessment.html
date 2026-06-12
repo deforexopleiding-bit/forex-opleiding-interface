@@ -175,6 +175,54 @@
     .result.tier-low  h2     { color: #92400e; }
     .result.tier-incomplete .badge { background: rgba(220,38,38,0.10); color: var(--danger); }
     .result.tier-incomplete h2     { color: var(--danger); }
+    .result .cta-row { margin-top: 24px; }
+
+    /* Event-picker (Blok 2 PR 3) */
+    .picker {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 28px 24px;
+      margin-top: 16px;
+    }
+    .picker h3 {
+      font-size: 18px; font-weight: 700;
+      margin: 0 0 6px; color: var(--primary);
+    }
+    .picker .subtitle {
+      font-size: 14px; color: var(--text-mute);
+      margin: 0 0 18px;
+    }
+    .event-list { display: grid; gap: 10px; }
+    .event-card {
+      display: flex; justify-content: space-between; align-items: center;
+      gap: 14px; padding: 14px 16px;
+      border: 1px solid var(--border); border-radius: 10px;
+      cursor: pointer; background: #fff;
+      transition: border-color 0.15s, background 0.15s, transform 0.05s;
+    }
+    .event-card:hover     { border-color: var(--primary); }
+    .event-card.selected  { border-color: var(--primary); background: rgba(9,61,84,0.05); }
+    .event-card.full      { opacity: 0.55; cursor: not-allowed; }
+    .event-meta-main {
+      display: flex; flex-direction: column; gap: 2px;
+    }
+    .event-date  { font-weight: 600; font-size: 15px; }
+    .event-title { font-size: 13px; color: var(--text-mute); }
+    .event-count {
+      font-size: 13px; font-weight: 600;
+      padding: 4px 10px; border-radius: 999px;
+      background: rgba(9,61,84,0.06); color: var(--primary);
+      white-space: nowrap;
+    }
+    .event-count.full {
+      background: rgba(220,38,38,0.08); color: var(--danger);
+    }
+    .picker .empty {
+      padding: 20px; text-align: center;
+      color: var(--text-mute); font-size: 14px;
+      background: rgba(0,0,0,0.02); border-radius: 10px;
+    }
   </style>
 </head>
 <body>
@@ -213,6 +261,28 @@
       <h2 id="result-title"></h2>
       <p id="result-copy"></p>
       <p class="followup" id="result-followup"></p>
+      <div class="cta-row" id="result-cta-row" hidden>
+        <button id="cta-pick-date" type="button" class="btn-primary">Kies je datum</button>
+      </div>
+    </div>
+
+    <div id="picker" class="picker" hidden>
+      <h3 id="picker-title">Kies een datum</h3>
+      <p class="subtitle" id="picker-subtitle">Beschikbare datums voor jouw niveau:</p>
+      <div id="picker-loading" class="loading" hidden>Datums laden...</div>
+      <div id="picker-empty"   class="empty"   hidden>Er zijn momenteel geen open datums voor jouw niveau. We nemen binnenkort contact met je op.</div>
+      <div id="event-list"     class="event-list"></div>
+      <div id="picker-errors"  class="errors" hidden>
+        <strong>Inschrijven mislukt:</strong>
+        <span id="picker-errors-msg"></span>
+      </div>
+    </div>
+
+    <div id="confirm" class="result tier-high" hidden>
+      <span class="badge">Inschrijving bevestigd</span>
+      <h2 id="confirm-title">Je bent ingeschreven</h2>
+      <p id="confirm-copy"></p>
+      <p class="followup" id="confirm-followup">We sturen je vooraf alle praktische details.</p>
     </div>
   </main>
 
@@ -238,6 +308,23 @@
       const $rTitle  = document.getElementById('result-title');
       const $rCopy   = document.getElementById('result-copy');
       const $rFollow = document.getElementById('result-followup');
+      const $ctaRow      = document.getElementById('result-cta-row');
+      const $ctaPickDate = document.getElementById('cta-pick-date');
+
+      const $picker      = document.getElementById('picker');
+      const $pickerSub   = document.getElementById('picker-subtitle');
+      const $pickerLoad  = document.getElementById('picker-loading');
+      const $pickerEmpty = document.getElementById('picker-empty');
+      const $eventList   = document.getElementById('event-list');
+      const $pickerErr   = document.getElementById('picker-errors');
+      const $pickerErrM  = document.getElementById('picker-errors-msg');
+
+      const $confirm     = document.getElementById('confirm');
+      const $confirmCopy = document.getElementById('confirm-copy');
+
+      // State na een succesvolle inzending - nodig voor de date-pick-stap.
+      let assessmentId      = null;
+      let assessmentRouting = null;
 
       // Fallback-tekst per tier - API stuurt copy_text mee maar als die om
       // welke reden dan ook ontbreekt, vallen we hierop terug zodat de
@@ -439,9 +526,151 @@
         $rCopy.textContent   = copy;
         $rFollow.textContent = fb.followup;
 
+        // Bewaar state voor de date-pick-stap (PR 3).
+        assessmentId      = (payload && payload.id) || null;
+        assessmentRouting = (payload && payload.routing_result) || null;
+
+        // CTA toon-logica: alleen bij valide niveau (gevorderd/basis) +
+        // wanneer we een assessmentId hebben om door te geven aan register.
+        const canPickDate = !!assessmentId
+          && (assessmentRouting === 'gevorderd' || assessmentRouting === 'basis');
+        $ctaRow.hidden = !canPickDate;
+
         $success.hidden = true;
         $result.hidden  = false;
       }
+
+      // niveau-matrix moet exact spiegelen wat de server doet
+      // (api/_lib/event-registration.js NIVEAU_FROM_ROUTING).
+      function niveauForRouting(routing) {
+        if (routing === 'gevorderd') return 'gevorderd';
+        if (routing === 'basis')     return 'basis';
+        return null;
+      }
+
+      function formatDateLabel(iso) {
+        if (!iso) return '';
+        const d = new Date(iso);
+        if (Number.isNaN(d.getTime())) return iso;
+        const opts = { weekday: 'short', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' };
+        try {
+          return new Intl.DateTimeFormat('nl-NL', opts).format(d);
+        } catch {
+          return d.toISOString();
+        }
+      }
+
+      async function loadOpenEvents() {
+        const niveau = niveauForRouting(assessmentRouting);
+        if (!niveau) {
+          showPickerError('Onbekend routing-niveau - kan geen datums laden.');
+          return;
+        }
+        $result.hidden  = true;
+        $picker.hidden  = false;
+        $pickerErr.hidden = true;
+        $pickerEmpty.hidden = true;
+        $pickerLoad.hidden = false;
+        $eventList.innerHTML = '';
+        $pickerSub.textContent = niveau === 'gevorderd'
+          ? 'Beschikbare datums voor de gevorderd-track:'
+          : 'Beschikbare datums voor de basis-track:';
+        try {
+          const r = await fetch('/api/assessment-open-events?niveau=' + encodeURIComponent(niveau));
+          if (!r.ok) throw new Error('HTTP ' + r.status);
+          const j = await r.json();
+          const events = Array.isArray(j.events) ? j.events : [];
+          $pickerLoad.hidden = true;
+          if (events.length === 0) {
+            $pickerEmpty.hidden = false;
+            return;
+          }
+          $eventList.innerHTML = events.map((ev) => {
+            const dateLabel = formatDateLabel(ev.starts_at);
+            const isFull    = ev.capacity != null && ev.confirmed_count >= ev.capacity;
+            const cnt = (ev.capacity == null)
+              ? `${ev.confirmed_count} aanmelding${ev.confirmed_count === 1 ? '' : 'en'}`
+              : `${ev.confirmed_count} / ${ev.capacity}`;
+            return `
+              <div class="event-card${isFull ? ' full' : ''}" data-event-id="${esc(ev.id)}" data-full="${isFull ? '1' : '0'}">
+                <div class="event-meta-main">
+                  <span class="event-date">${esc(dateLabel)}</span>
+                  <span class="event-title">${esc(ev.title || '')}</span>
+                </div>
+                <span class="event-count${isFull ? ' full' : ''}">${esc(cnt)}</span>
+              </div>`;
+          }).join('');
+          // Klik-handlers (geen library; eenvoudige binding).
+          $eventList.querySelectorAll('.event-card').forEach((card) => {
+            card.addEventListener('click', () => {
+              if (card.dataset.full === '1') return;
+              const id = card.dataset.eventId;
+              registerForEvent(id, card);
+            });
+          });
+        } catch (e) {
+          console.error('loadOpenEvents', e);
+          $pickerLoad.hidden = true;
+          showPickerError('Kon de datums niet laden. Vernieuw de pagina of probeer het later.');
+        }
+      }
+
+      function showPickerError(msg) {
+        $pickerErr.hidden = false;
+        $pickerErrM.textContent = ' ' + (msg || 'Onbekende fout.');
+      }
+
+      async function registerForEvent(eventId, cardEl) {
+        if (!assessmentId || !eventId) return;
+        $pickerErr.hidden = true;
+        // Visual selected-state direct, even als request faalt.
+        $eventList.querySelectorAll('.event-card').forEach((c) => c.classList.remove('selected'));
+        if (cardEl) cardEl.classList.add('selected');
+
+        try {
+          const r = await fetch('/api/assessment-register', {
+            method : 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body   : JSON.stringify({
+              assessment_response_id: assessmentId,
+              event_id              : eventId,
+            }),
+          });
+          const j = await r.json().catch(() => ({}));
+
+          if (r.status === 200 && j.ok) {
+            const ev = cardEl;
+            const dateLabel = ev ? (ev.querySelector('.event-date')?.textContent || '') : '';
+            const eventTitle = ev ? (ev.querySelector('.event-title')?.textContent || '') : '';
+            const datumText = dateLabel || 'je gekozen datum';
+            $confirmCopy.textContent = `Je bent ingeschreven voor ${datumText}${eventTitle ? ' (' + eventTitle + ')' : ''}.`;
+            $picker.hidden  = true;
+            $confirm.hidden = false;
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+            return;
+          }
+          if (r.status === 409) {
+            const codeMsg = {
+              EVENT_NOT_OPEN       : 'Dit event is niet meer open voor inschrijving.',
+              EVENT_CLOSED         : 'De inschrijvingen voor dit event zijn net gesloten. Kies een andere datum.',
+              NIVEAU_MISMATCH      : 'Dit event past niet bij jouw niveau.',
+              ASSESSMENT_INCOMPLETE: 'Je assessment is niet volledig gescoord; we kunnen geen inschrijving doorvoeren.',
+              DUPLICATE            : 'Je staat al ingeschreven voor dit event.',
+            };
+            const m = codeMsg[j.code] || j.error || 'Inschrijven kon niet worden voltooid.';
+            showPickerError(m);
+            // Reload events bij EVENT_CLOSED zodat de lijst klopt.
+            if (j.code === 'EVENT_CLOSED') loadOpenEvents();
+            return;
+          }
+          showPickerError(j.error || ('Inschrijven mislukt (HTTP ' + r.status + ').'));
+        } catch (err) {
+          console.error('register', err);
+          showPickerError('Er ging iets mis. Probeer het opnieuw.');
+        }
+      }
+
+      $ctaPickDate.addEventListener('click', () => { loadOpenEvents(); });
 
       async function loadQuestions() {
         try {

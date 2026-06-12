@@ -883,6 +883,225 @@ thresholds en scored_at.
 
 ---
 
+## Scenario 24 — Inschrijving + Webflow Gastenlijst (Blok 2 PR 3)
+
+**Doel:** Een geldige assessment + niveau-match levert een
+`event_attendees`-rij op, schrijft "bevestigd / capaciteit" naar het
+Webflow Gastenlijst-veld, en geeft een bevestigingsscherm in de UI.
+
+**Pre-flight:**
+- Mini-migratie `2026-06-12-blok2-event-attendees-link.sql` gerund
+  (kolom `created_via` + partial UNIQUE index aanwezig - zie
+  verificatie-queries footer migratie).
+- 1 published event van niveau `basis` met `capacity=10` voor de smoke
+  beschikbaar. Webflow-item moet bestaan (status published heeft de
+  F2 publish-sync al voor je gedaan).
+
+**Stappen:**
+1. Open `/modules/assessment.html` op preview-URL.
+2. Vul een MID-profiel in (zoals scenario 20) zodat `routing_result=basis`.
+3. Klik op "Kies je datum" in het result-card.
+4. De picker laadt; verwachte network-call:
+   `GET /api/assessment-open-events?niveau=basis` -> 200 met `events:[...]`
+   met per event `confirmed_count` + `has_space`.
+5. Klik op het test-event-card.
+6. Verwachte network-call:
+   `POST /api/assessment-register` body `{ assessment_response_id, event_id }`
+   -> 200 met `{ ok:true, attendee_id, confirmed_count, capacity,
+   gastenlijst_label: "1 / 10", gastenlijst_sync: "updated",
+   auto_closed: false }`.
+7. UI toont "Inschrijving bevestigd" card met datum-label.
+8. Verifieer DB:
+   ```sql
+   SELECT id, event_id, assessment_response_id, status, created_via,
+          first_name, last_name, email, registered_at
+   FROM public.event_attendees
+   WHERE created_via = 'assessment'
+   ORDER BY registered_at DESC LIMIT 1;
+   ```
+   Verwacht: `status='aangemeld'`, `created_via='assessment'`,
+   identiteit ingevuld uit assessment.
+9. Verifieer Webflow CMS (Webflow Designer of API): het Gastenlijst-veld
+   van dit event toont `"1 / 10"` (of `"2 / 10"`, `"3 / 10"`,... als er
+   eerder smoke-rijen op dit event landden).
+
+**Verwacht:** rij toegevoegd, Webflow live-veld bijgewerkt, geen
+auto-close (1 < 10).
+
+---
+
+## Scenario 25 — Niveau-mismatch -> 409 (Blok 2 PR 3)
+
+**Doel:** Een assessment met `routing_result='basis'` mag NIET inschrijven
+op een `gevorderd`-event (en vice versa). Server-side gate retourneert
+`409 NIVEAU_MISMATCH`.
+
+**Stappen:**
+1. Pak een MID-profiel-assessment (routing_result='basis') uit scenario 24.
+2. Forceer een POST via DevTools console naar
+   `/api/assessment-register` met body:
+   ```js
+   fetch('/api/assessment-register', {
+     method: 'POST',
+     headers: {'Content-Type':'application/json'},
+     body: JSON.stringify({
+       assessment_response_id: '<basis-assessment-uuid>',
+       event_id: '<published-gevorderd-event-uuid>'
+     })
+   }).then(r => r.json().then(j => ({ status: r.status, ...j }))).then(console.log);
+   ```
+3. Verwacht:
+   ```json
+   { "status": 409, "code": "NIVEAU_MISMATCH",
+     "error": "Niveau van event komt niet overeen met jouw resultaat (basis vs gevorderd)." }
+   ```
+4. Verifieer dat er GEEN rij is toegevoegd in `event_attendees` voor
+   deze combinatie:
+   ```sql
+   SELECT count(*) FROM public.event_attendees
+   WHERE assessment_response_id = '<basis-assessment-uuid>'
+     AND event_id              = '<gevorderd-event-uuid>';
+   -- verwacht: 0
+   ```
+
+**Verwacht:** server weigert, DB schoon.
+
+---
+
+## Scenario 26 — Dubbel-guard via partial UNIQUE (Blok 2 PR 3)
+
+**Doel:** Dezelfde assessment kan NIET tweemaal voor hetzelfde event
+inschrijven (partial UNIQUE blokkeert), maar WEL voor een ander event
+van hetzelfde niveau (1:N model).
+
+**Stappen (zelfde event):**
+1. Open een tweede tab of stuur direct via DevTools console een POST
+   met EXACT dezelfde body als de succesvolle registratie uit scenario 24.
+2. Verwacht: `409 DUPLICATE`, body
+   `{ code: 'DUPLICATE', error: 'Je bent al ingeschreven voor dit event.' }`.
+3. Verifieer dat het totaal aantal rijen voor deze combinatie nog
+   steeds 1 is:
+   ```sql
+   SELECT count(*) FROM public.event_attendees
+   WHERE assessment_response_id = '<assessment-uuid>'
+     AND event_id              = '<event-uuid>';
+   -- verwacht: 1
+   ```
+
+**Stappen (ander event, zelfde niveau):**
+1. Zorg dat er een TWEEDE published basis-event bestaat (capacity >= 1).
+2. Stuur POST met zelfde `assessment_response_id` maar het andere
+   `event_id`. Verwacht: 200 met `ok:true`.
+3. Verifieer DB heeft nu 2 rijen voor deze assessment (verschillende
+   event_ids):
+   ```sql
+   SELECT event_id, status, registered_at
+   FROM public.event_attendees
+   WHERE assessment_response_id = '<assessment-uuid>'
+   ORDER BY registered_at;
+   -- verwacht: 2 rijen, 2 verschillende event_ids
+   ```
+
+**Verwacht:** UNIQUE-constraint blokkeert per event, 1:N over events
+werkt zoals gewenst.
+
+---
+
+## Scenario 27 — Auto-vol op WEGWERP-testevent (Blok 2 PR 3)
+
+**WAARSCHUWING:** Voer deze scenario ALLEEN uit op een wegwerp-testevent
+met lage capaciteit (cap=2). NOOIT op een echt publiek event - dat zou
+het real-world event op auto_full sluiten + uit GHL/Webflow halen.
+
+**Doel:** Capaciteit bereiken triggert `signups_closed=true` met reason
+`auto_full`, Webflow-item gaat naar draft, GHL-dropdown vernieuwd.
+
+**Pre-flight:**
+- Maak een testevent aan met titel "SMOKE-AUTOVOL", niveau `basis`,
+  capaciteit `2`, status `published`, datum `morgen+1`.
+- Wacht tot F2 publish-sync klaar is (`webflow_item_id IS NOT NULL`,
+  `webflow_sync_status='success'`).
+- Maak 2 valide basis-assessments aan met verschillende e-mailadressen
+  (smoke+autovol-a@... en smoke+autovol-b@...).
+
+**Stappen:**
+1. Stuur POST `/api/assessment-register` voor assessment A op het
+   testevent. Verwacht 200, `gastenlijst_label: "1 / 2"`,
+   `auto_closed: false`.
+2. Stuur POST voor assessment B op hetzelfde testevent. Verwacht 200,
+   `gastenlijst_label: "2 / 2"`, **`auto_closed: true`**.
+3. Verifieer DB:
+   ```sql
+   SELECT id, signups_closed, signups_closed_reason, signups_closed_at,
+          webflow_sync_status
+   FROM public.events
+   WHERE title='SMOKE-AUTOVOL';
+   -- verwacht: signups_closed=true, reason='auto_full',
+   --           webflow_sync_status='unpublished'
+   ```
+4. Verifieer Webflow CMS: het CMS-item van SMOKE-AUTOVOL is naar
+   draft gegaan (detail-pagina niet meer publiek bereikbaar).
+5. Verifieer GHL: dit event is verdwenen uit de upcoming-dropdown
+   (filter `signups_closed=false` in `computeUpcomingLabels`).
+6. Verifieer `event_sync_log`:
+   ```sql
+   SELECT target, action, status, attempted_at
+   FROM public.event_sync_log
+   WHERE event_id='<SMOKE-AUTOVOL-id>'
+   ORDER BY attempted_at DESC LIMIT 5;
+   -- verwacht: webflow/unpublish/success + ghl/update/success rijen
+   ```
+
+**Opruimen na smoke:**
+- Reopen via `/api/events-reopen-signups?id=<id>` (alleen mogelijk tot
+  T-1 dag deadline) OF
+- Archive via `/api/events-delete?id=<id>` (hard-delete cascade) OF
+- Forceer `starts_at` op datum in het verleden + trigger cleanup-cron
+  voor hard-delete.
+
+**Verwacht:** auto-vol triggert exact bij capacity-bereik; Blok 1
+close-cascade hergebruikt; testevent na opruimen weg.
+
+---
+
+## Scenario 28 — Capaciteit NULL: alleen getal, geen auto-vol (Blok 2 PR 3)
+
+**Doel:** Events zonder `capacity` (NULL) tonen alleen het bevestigd-
+aantal als label (`"3"` ipv `"3 / X"`) en triggeren NOOIT auto-vol -
+ook niet bij honderden inschrijvingen.
+
+**Pre-flight:**
+- Maak een testevent "SMOKE-UNLIMITED" met `capacity = NULL`, niveau
+  `basis`, status published. (Capacity check-constraint > 0 staat in
+  F1; NULL is wel toegestaan want CHECK is `capacity > 0` met NULL-pass).
+
+  Indien de F1-CHECK NULL niet toestaat: skip dit scenario op de
+  preview en mark als out-of-scope voor PR 3 + open follow-up
+  `CHECK (capacity IS NULL OR capacity > 0)`.
+- Maak 1 valide basis-assessment.
+
+**Stappen:**
+1. Stuur POST `/api/assessment-register` voor de assessment + event.
+2. Verwacht response:
+   ```json
+   { "ok": true, "gastenlijst_label": "1", "auto_closed": false,
+     "capacity": null }
+   ```
+3. Verifieer Webflow CMS: Gastenlijst-veld toont `"1"` (zonder `/`).
+4. Stuur nog 2-3 inzendingen (verschillende emails / assessments).
+   Verifieer dat label opklimt naar `"2"`, `"3"`, etc.
+5. Verifieer event blijft `signups_closed=false`:
+   ```sql
+   SELECT signups_closed, signups_closed_reason
+   FROM public.events
+   WHERE title='SMOKE-UNLIMITED';
+   -- verwacht: signups_closed=false, reason=null
+   ```
+
+**Verwacht:** geen capacity = geen auto-vol; label is alleen het getal.
+
+---
+
 ## Pre-merge checklist Blok 1
 
 - [ ] SQL migratie `2026-06-12-events-signups-closed.sql` gerund in
