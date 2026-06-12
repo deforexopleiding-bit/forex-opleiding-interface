@@ -704,10 +704,55 @@ export async function unpublishItem({ webflowItemId }) {
   // DELETE /items/{id}/live - verwijdert ALLEEN de live-publicatie. Het item
   // blijft als staged record bestaan (kan later hergepubliceerd worden).
   // Geen body nodig. PATH-volgorde: /live komt NA itemId.
-  const data = await webflowFetch(`/collections/${collId}/items/${webflowItemId}/live`, {
-    method: 'DELETE',
-  });
+  //
+  // 404-as-success: bij een herhaalde unpublish (item al unpublished) returnt
+  // Webflow 404 NOT_FOUND. Voor reopen-flow en delete-flow is dat semantisch
+  // success: de gewenste eindstand (item niet meer live) is al bereikt.
+  try {
+    const data = await webflowFetch(`/collections/${collId}/items/${webflowItemId}/live`, {
+      method: 'DELETE',
+    });
+    const sitePublish = await publishSiteIfEnabled('unpublish-' + webflowItemId);
+    return { itemId: webflowItemId, raw: data, requestPayload: null, sitePublish };
+  } catch (e) {
+    if (e instanceof WebflowError && e.code === 'NOT_FOUND') {
+      console.log(`[webflow-client] unpublishItem 404 idempotent (${webflowItemId})`);
+      return {
+        itemId         : webflowItemId,
+        raw            : null,
+        requestPayload : null,
+        sitePublish    : { skipped: true, reason: 'unpublish 404 already gone' },
+        unpublished    : false,
+        reason         : '404 already gone',
+      };
+    }
+    throw e;
+  }
+}
 
-  const sitePublish = await publishSiteIfEnabled('unpublish-' + webflowItemId);
-  return { itemId: webflowItemId, raw: data, requestPayload: null, sitePublish };
+/**
+ * Hard-delete een Webflow CMS-item PERMANENT (= weg uit CMS, niet alleen
+ * unpublish). Voor archive-pad en cleanup-cron (>7d na event).
+ *
+ * Path: DELETE /collections/{coll}/items/{itemId} (GEEN /live suffix).
+ * 404 = treat as success (item al weg, idempotent).
+ *
+ * @returns { itemId, raw, requestPayload: null, deleted: true }
+ *          | { itemId, raw, requestPayload: null, deleted: false, reason: '404 already gone' }
+ */
+export async function hardDeleteItem({ webflowItemId }) {
+  if (!webflowItemId) throw new WebflowError('VALIDATION_FAIL', 'webflowItemId vereist');
+  const { collId } = getEnv();
+  try {
+    const data = await webflowFetch(`/collections/${collId}/items/${webflowItemId}`, {
+      method: 'DELETE',
+    });
+    return { itemId: webflowItemId, raw: data, requestPayload: null, deleted: true };
+  } catch (e) {
+    if (e instanceof WebflowError && e.code === 'NOT_FOUND') {
+      console.log(`[webflow-client] hardDeleteItem 404 idempotent (${webflowItemId})`);
+      return { itemId: webflowItemId, raw: null, requestPayload: null, deleted: false, reason: '404 already gone' };
+    }
+    throw e;
+  }
 }
