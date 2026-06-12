@@ -186,10 +186,22 @@ async function webflowFetch(path, opts = {}) {
 
     if (!resp.ok) {
       const code = classifyStatus(resp.status);
+      // Retry-After meegeven in detail bij 429 zodat publishSite het kan
+      // gebruiken voor backoff. RFC7231: kan seconds (integer) of HTTP-date
+      // zijn; voor MVP parsen we alleen het seconds-formaat (Webflow stuurt
+      // dat).
+      let retryAfterSec = null;
+      if (resp.status === 429) {
+        const raw = resp.headers?.get?.('retry-after') || resp.headers?.get?.('Retry-After') || null;
+        if (raw) {
+          const n = parseInt(String(raw).trim(), 10);
+          if (Number.isInteger(n) && n > 0 && n <= 600) retryAfterSec = n;
+        }
+      }
       throw new WebflowError(
         code,
         `Webflow ${resp.status} op ${path}: ${bodyJson?.message || bodyJson?.msg || text || 'unknown'}`,
-        { status: resp.status, body: bodyJson }
+        { status: resp.status, body: bodyJson, retryAfterSec }
       );
     }
 
@@ -572,29 +584,65 @@ export async function publishSite({ context = '' } = {}) {
     (degraded ? ` [DEGRADED: ${degradedReason}]` : '')
   );
 
-  try {
-    const data = await webflowFetch(`/sites/${siteId}/publish`, {
-      method: 'POST',
-      body,
-    });
-    console.log(
-      `[webflow-client] publishSite OK (${context}, ${domainSource}, ${customDomains.length} custom): ` +
-      `${JSON.stringify(data || {}).slice(0, 200)}`
-    );
-    return {
-      ok          : true,
-      body,
-      raw         : data,
-      domainSource,
-      customDomainsCount: customDomains.length,
-      degraded,
-      degradedReason,
-    };
-  } catch (e) {
-    // Re-throw met typed code. webflowFetch heeft 'm al geclassificeerd
-    // (AUTH_FAIL / RATE_LIMIT / WEBFLOW_DOWN / NOT_FOUND / etc).
-    console.warn(`[webflow-client] publishSite FAILED (${context}): ${e?.message || e}`);
-    throw e;
+  // 429-backoff: max 2 retries (3 attempts totaal) op RATE_LIMIT.
+  // Wait = Retry-After header (seconds) als gestuurd, anders fallback
+  // sequence 5s -> 10s. Andere fouten (5xx/auth/etc) gaan direct door
+  // de catch en re-throwen.
+  const PUBLISH_RETRY_DELAYS_MS = [5_000, 10_000];
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  let attempt    = 0;
+  let lastRateLimitErr = null;
+
+  for (;;) {
+    attempt++;
+    try {
+      const data = await webflowFetch(`/sites/${siteId}/publish`, {
+        method: 'POST',
+        body,
+      });
+      console.log(
+        `[webflow-client] publishSite OK (${context}, ${domainSource}, ` +
+        `${customDomains.length} custom, attempt=${attempt}): ` +
+        `${JSON.stringify(data || {}).slice(0, 200)}`
+      );
+      return {
+        ok                : true,
+        body,
+        raw               : data,
+        domainSource,
+        customDomainsCount: customDomains.length,
+        degraded,
+        degradedReason,
+        attempts          : attempt,
+      };
+    } catch (e) {
+      // RATE_LIMIT retry-pad
+      const isRateLimit = (e instanceof WebflowError && e.code === 'RATE_LIMIT');
+      if (isRateLimit && attempt <= PUBLISH_RETRY_DELAYS_MS.length) {
+        const retryAfterSec = e?.detail?.retryAfterSec;
+        const waitMs = Number.isInteger(retryAfterSec) && retryAfterSec > 0
+          ? retryAfterSec * 1000
+          : PUBLISH_RETRY_DELAYS_MS[attempt - 1];
+        console.warn(
+          `[webflow-client] publishSite RATE_LIMIT attempt=${attempt} ` +
+          `(retryAfterSec=${retryAfterSec ?? 'absent'}), waiting ${waitMs}ms before retry`
+        );
+        lastRateLimitErr = e;
+        await sleep(waitMs);
+        continue;
+      }
+      // Exhausted 429 of andere fout -> log + re-throw zodat caller
+      // (maybePublishSite) kan classifyeren en pending=true zetten.
+      if (isRateLimit) {
+        console.warn(
+          `[webflow-client] publishSite [DEGRADED: publish_429_retries_exhausted] ` +
+          `(${context}, attempt=${attempt}): ${e?.message || e}`
+        );
+      } else {
+        console.warn(`[webflow-client] publishSite FAILED (${context}, attempt=${attempt}): ${e?.message || e}`);
+      }
+      throw e;
+    }
   }
 }
 

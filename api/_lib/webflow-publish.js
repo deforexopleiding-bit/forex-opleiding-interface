@@ -263,14 +263,22 @@ export async function maybePublishSite(context = '') {
   } catch (e) {
     const code = e?.code || null;
     const retryable = code === 'RATE_LIMIT' || code === 'WEBFLOW_DOWN';
+    // RATE_LIMIT na publishSite-retries is exhausted: pending blijft true
+    // (gezet door recordPublishResult), volgende debounced publish probeert
+    // het opnieuw. Degraded i.p.v. throw: caller (mutatie-flow) hoeft
+    // niets te doen.
+    const degraded = code === 'RATE_LIMIT';
+    const degradedReason = degraded ? 'publish_429_retries_exhausted' : null;
     await recordPublishResult({ ok: false, errorMessage: e?.message });
     return {
-      ok       : false,
-      published: false,
-      skipped  : false,
-      error    : e?.message || String(e),
+      ok            : false,
+      published     : false,
+      skipped       : false,
+      error         : e?.message || String(e),
       code,
       retryable,
+      degraded,
+      degradedReason,
       context,
     };
   }
@@ -315,14 +323,22 @@ export async function forcePublishSite(context = 'manual') {
   } catch (e) {
     const code = e?.code || null;
     const retryable = code === 'RATE_LIMIT' || code === 'WEBFLOW_DOWN';
+    // RATE_LIMIT na publishSite-retries is exhausted: pending blijft true
+    // (gezet door recordPublishResult), volgende debounced publish probeert
+    // het opnieuw. Degraded i.p.v. throw: caller (mutatie-flow) hoeft
+    // niets te doen.
+    const degraded = code === 'RATE_LIMIT';
+    const degradedReason = degraded ? 'publish_429_retries_exhausted' : null;
     await recordPublishResult({ ok: false, errorMessage: e?.message });
     return {
-      ok       : false,
-      published: false,
-      skipped  : false,
-      error    : e?.message || String(e),
+      ok            : false,
+      published     : false,
+      skipped       : false,
+      error         : e?.message || String(e),
       code,
       retryable,
+      degraded,
+      degradedReason,
       context,
     };
   }
