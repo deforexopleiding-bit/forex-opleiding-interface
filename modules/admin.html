@@ -269,6 +269,23 @@
               </div>
             </div>
           </div>
+
+          <div class="integration-card" id="card-webflow-auto-publish" style="border:1px solid var(--border);border-radius:10px;padding:18px;margin-top:12px">
+            <div style="display:flex;align-items:flex-start;gap:14px">
+              <div style="font-size:26px;color:var(--text-dim);line-height:1"><i class="ti ti-world-www"></i></div>
+              <div style="flex:1;min-width:0">
+                <div style="font-size:15px;font-weight:700">Webflow auto-publish</div>
+                <div style="font-size:12.5px;color:var(--text-dim);margin-bottom:10px">Na elke CMS-mutatie (event aanmaken / wijzigen / sluiten / inschrijving) wordt de Webflow-site automatisch gepublisht. Zet uit als het team zelf in Webflow werkt.</div>
+                <div id="wfAutoPublishStatus" style="font-size:13px;display:flex;align-items:center;gap:8px;margin-bottom:14px">
+                  <span class="wf-dot" style="width:9px;height:9px;border-radius:50%;background:var(--text-faint);display:inline-block"></span>
+                  <span>Status laden&hellip;</span>
+                </div>
+                <div id="wfAutoPublishMeta" style="font-size:11.5px;color:var(--text-faint);margin-bottom:12px"></div>
+                <div id="wfAutoPublishActions" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center"></div>
+                <div id="wfAutoPublishErr" style="font-size:12px;color:var(--danger);margin-top:8px;display:none"></div>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -820,7 +837,7 @@ function switchAdminTab(name) {
   const inviteBtn = document.querySelector('.page-header .btn-primary');
   if (inviteBtn) inviteBtn.style.display = name === 'gebruikers' ? '' : 'none';
   if (name === 'rechten' && !rbacLoaded) loadPermissionsMatrix();
-  if (name === 'integraties') { loadTlStatus(); loadWebhooks(); loadTemplateSetting(); }
+  if (name === 'integraties') { loadTlStatus(); loadWebhooks(); loadTemplateSetting(); loadWebflowAutoPublishState(); }
   if (name === 'approval-queue') {
     wireApprovOnce();
     loadApprovalQueue();
@@ -1227,6 +1244,154 @@ async function saveTemplateSetting() {
     if (data && data.success) window.AgentShared?.showToast('Standaard-template opgeslagen', 'success');
     else window.AgentShared?.showToast('Opslaan mislukt: ' + (data.error || 'onbekend'), 'error');
   } catch (e) { window.AgentShared?.showToast('Opslaan mislukt: ' + e.message, 'error'); }
+}
+
+// ── Webflow auto-publish (Blok 2 PR 4) ────────────────────────────────────
+let _wfAutoPublishBusy = false;
+
+function wfSetStatus(color, text) {
+  const dot = document.querySelector('#wfAutoPublishStatus .wf-dot');
+  const span = document.querySelector('#wfAutoPublishStatus span:last-child');
+  if (dot) dot.style.background = color;
+  if (span) span.textContent = text;
+}
+function wfSetMeta(text) {
+  const m = document.getElementById('wfAutoPublishMeta');
+  if (m) m.textContent = text || '';
+}
+function wfSetErr(text) {
+  const e = document.getElementById('wfAutoPublishErr');
+  if (!e) return;
+  if (!text) { e.style.display = 'none'; e.textContent = ''; }
+  else { e.style.display = ''; e.textContent = text; }
+}
+function wfSetActions(html) {
+  const a = document.getElementById('wfAutoPublishActions');
+  if (a) a.innerHTML = html;
+}
+function wfFormatTime(iso) {
+  if (!iso) return 'nooit';
+  try {
+    return new Intl.DateTimeFormat('nl-NL', {
+      day:'2-digit', month:'short', hour:'2-digit', minute:'2-digit',
+    }).format(new Date(iso));
+  } catch { return iso; }
+}
+
+async function loadWebflowAutoPublishState() {
+  wfSetErr('');
+  wfSetStatus('var(--text-faint)', 'Status laden…');
+  wfSetMeta('');
+  wfSetActions('');
+  try {
+    const e = await window.AgentShared.apiFetch('/api/app-settings?key=webflow_auto_publish_enabled');
+    let enabled = true;
+    if (e.ok) {
+      const j = await e.json();
+      if (j && j.value && typeof j.value.enabled === 'boolean') enabled = j.value.enabled;
+    }
+    let state = { pending: false, last_publish_at: null, in_progress: false };
+    const s = await window.AgentShared.apiFetch('/api/app-settings?key=webflow_publish_state');
+    if (s.ok) {
+      const j = await s.json();
+      if (j && j.value && typeof j.value === 'object') state = { ...state, ...j.value };
+    }
+    renderWebflowAutoPublishCard(enabled, state);
+  } catch (err) {
+    wfSetStatus('var(--danger)', 'Kon status niet laden');
+    wfSetErr(err?.message || String(err));
+  }
+}
+
+function renderWebflowAutoPublishCard(enabled, state) {
+  const color = enabled
+    ? (state.in_progress ? '#f59e0b' : (state.pending ? '#f59e0b' : '#10b981'))
+    : '#9ca3af';
+  const txt = enabled
+    ? (state.in_progress ? 'AAN · publish loopt nu' : (state.pending ? 'AAN · catch-up nodig' : 'AAN · up-to-date'))
+    : 'UIT · automatisch publishen gepauzeerd';
+  wfSetStatus(color, txt);
+
+  const lastTxt    = 'Laatste publish: ' + wfFormatTime(state.last_publish_at);
+  const pendingTxt = state.pending ? ' · pending: ja' : ' · pending: nee';
+  wfSetMeta(lastTxt + pendingTxt);
+
+  const toggleLabel = enabled ? 'Zet auto-publish UIT' : 'Zet auto-publish AAN';
+  const toggleClass = enabled ? 'btn btn-sm' : 'btn btn-sm btn-primary';
+  const busyAttr = _wfAutoPublishBusy ? 'disabled' : '';
+  wfSetActions(
+    `<button class="${toggleClass}" ${busyAttr} onclick="toggleWebflowAutoPublish(${enabled ? 'false' : 'true'})">${toggleLabel}</button>` +
+    `<button class="btn btn-sm" ${busyAttr} onclick="webflowPublishNow()"><i class="ti ti-cloud-upload"></i> Publish nu</button>`
+  );
+}
+
+async function toggleWebflowAutoPublish(target) {
+  if (_wfAutoPublishBusy) return;
+  _wfAutoPublishBusy = true;
+  wfSetErr('');
+  wfSetStatus('var(--text-faint)', target ? 'Inschakelen…' : 'Uitschakelen…');
+  try {
+    const r = await window.AgentShared.apiFetch('/api/app-settings', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ key: 'webflow_auto_publish_enabled', value: { enabled: !!target } }),
+    });
+    if (!r.ok) {
+      const j = await r.json().catch(() => ({}));
+      throw new Error(j.error || ('HTTP ' + r.status));
+    }
+    // Catch-up: bij omzetten naar AAN met pending=true direct publishen.
+    if (target) {
+      const st = await window.AgentShared.apiFetch('/api/app-settings?key=webflow_publish_state');
+      if (st.ok) {
+        const j = await st.json();
+        if (j?.value?.pending === true) {
+          await window.AgentShared.apiFetch('/api/admin-webflow-publish-now', {
+            method: 'POST', headers: { 'Content-Type':'application/json' },
+            body: JSON.stringify({ context: 'toggle-on-catchup' }),
+          });
+          window.AgentShared?.showToast('Toggle AAN + catch-up publish gestart', 'success');
+        } else {
+          window.AgentShared?.showToast('Auto-publish ingeschakeld', 'success');
+        }
+      }
+    } else {
+      window.AgentShared?.showToast('Auto-publish uitgeschakeld', 'success');
+    }
+  } catch (e) {
+    wfSetErr('Toggle mislukt: ' + (e?.message || e));
+    window.AgentShared?.showToast('Toggle mislukt', 'error');
+  } finally {
+    _wfAutoPublishBusy = false;
+    loadWebflowAutoPublishState();
+  }
+}
+
+async function webflowPublishNow() {
+  if (_wfAutoPublishBusy) return;
+  _wfAutoPublishBusy = true;
+  wfSetErr('');
+  wfSetStatus('#f59e0b', 'Publish wordt gestart…');
+  try {
+    const r = await window.AgentShared.apiFetch('/api/admin-webflow-publish-now', {
+      method: 'POST', headers: { 'Content-Type':'application/json' },
+      body: JSON.stringify({ context: 'manual-button' }),
+    });
+    const j = await r.json().catch(() => ({}));
+    if (r.ok && j.ok) {
+      window.AgentShared?.showToast('Publish gestart', 'success');
+    } else if (j.skipped) {
+      window.AgentShared?.showToast('Publish overgeslagen (' + (j.reason || 'onbekend') + ')', 'info');
+    } else {
+      throw new Error(j.error || ('HTTP ' + r.status));
+    }
+  } catch (e) {
+    wfSetErr('Publish mislukt: ' + (e?.message || e));
+    window.AgentShared?.showToast('Publish mislukt', 'error');
+  } finally {
+    _wfAutoPublishBusy = false;
+    loadWebflowAutoPublishState();
+  }
 }
 
 function showAdminBanner(kind, text, autoMs) {

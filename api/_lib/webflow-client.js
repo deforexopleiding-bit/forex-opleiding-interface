@@ -29,10 +29,19 @@
 // een collection) is STATIC en wordt alleen ververst bij een SITE-publish.
 // Nieuwe live-items via /items/live zijn dus al "live" als individuele item-
 // records, maar de event-overzichtspagina (die ze in een lijst toont) ziet ze
-// pas na een site-publish. Daarom is publishSiteIfEnabled() toegevoegd: env-
-// flag EVENTS_WEBFLOW_SITE_PUBLISH (default 'false'). Bij 'true' doet de
-// client na een succesvolle item-sync 1 POST /sites/{site_id}/publish. Default
-// uit zodat staging-omgevingen geen onbedoelde site-publish triggeren.
+// pas na een site-publish.
+//
+// SITE-PUBLISH (Blok 2 PR 4): publishSite() doet de raw POST
+// /sites/{site_id}/publish (idempotent, 429 = retry-baar). De auto-publish
+// orchestratie zit in api/_lib/webflow-publish.js: maybePublishSite() leest
+// de DB-toggle (app_settings.webflow_auto_publish_enabled), houdt een
+// lock + trailing-debounce bij in app_settings.webflow_publish_state zodat
+// een burst van mutaties coalesceert tot ~1 publish, en zet pending=true
+// als de toggle UIT is voor catch-up later.
+//
+// publishSiteIfEnabled() blijft als thin wrapper voor de bestaande callers
+// in deze file; hij delegeert nu naar maybePublishSite. De oude env-flag
+// EVENTS_WEBFLOW_SITE_PUBLISH is geen autoriteit meer; de DB-toggle wint.
 //
 // Spec G (geen DELETE op staged item) blijft gerespecteerd: we DELETEn alleen
 // op de /items/{id}/live route, wat een live-unpublish is, geen item-removal.
@@ -417,37 +426,150 @@ function buildFieldData({ event, descriptionHtml, schema }) {
 // via /items/live zijn al "live" als records, maar tonen pas in de lijst-
 // pagina na deze call.
 //
-// Gated achter env-flag EVENTS_WEBFLOW_SITE_PUBLISH (default 'false'). Bij
-// 'true' wordt na een succesvolle item-sync 1 POST /sites/{site_id}/publish
-// gedaan. Optioneel: WEBFLOW_CUSTOM_DOMAIN_IDS (comma-separated) om naar
-// custom-domain te publiceren; standaard alleen Webflow-subdomain.
-//
-// Errors in deze call breken de item-sync NIET (defensive try/catch). Caller
-// ontvangt de uitkomst via return.sitePublish voor logging.
-async function publishSiteIfEnabled(context = '') {
-  const flag = String(process.env.EVENTS_WEBFLOW_SITE_PUBLISH || 'false').toLowerCase();
-  if (flag !== 'true') {
-    return { skipped: true, reason: 'EVENTS_WEBFLOW_SITE_PUBLISH != true' };
-  }
+// Custom-domain discovery cache. Webflow custom domains wijzigen zelden
+// (DNS-config blijft maanden/jaren stabiel). TTL ruim genoeg dat we niet
+// elke publish 2 API-calls doen, kort genoeg om configuratie-wijzigingen
+// binnen een werkdag op te pikken zonder cold-restart.
+const CUSTOM_DOMAINS_CACHE_TTL_MS = 6 * 60 * 60 * 1000; // 6 uur
+let _customDomainsCache = {
+  siteId      : null,
+  domainIds   : null,    // string[] of null bij niet-gediscovered
+  domainUrls  : null,    // bookkeeping voor logs
+  lastFetched : 0,
+};
+
+/**
+ * Discover de custom-domein IDs voor de geconfigureerde site. Returnt
+ * { ok, domainIds, domainUrls } op success of { ok:false, error } bij
+ * fail. Faal-modes:
+ *   - WEBFLOW_SITE_ID ontbreekt -> { ok:false, error:'no site id' }
+ *   - HTTP-fout (401/403/5xx)   -> { ok:false, error:<typed code> }
+ *   - geen custom-domains       -> { ok:true, domainIds:[], domainUrls:[] }
+ *
+ * Cached per siteId voor CUSTOM_DOMAINS_CACHE_TTL_MS. Geen exception:
+ * publishSite valt terug op subdomain-only bij fail (degraded mode).
+ */
+async function discoverCustomDomainIds({ force = false } = {}) {
   const siteId = process.env.WEBFLOW_SITE_ID;
   if (!siteId) {
-    console.warn(`[webflow-client] site-publish skipped (${context}): WEBFLOW_SITE_ID missing`);
-    return { skipped: true, reason: 'WEBFLOW_SITE_ID missing' };
+    return { ok: false, error: 'WEBFLOW_SITE_ID missing' };
   }
 
-  const customDomainsRaw = process.env.WEBFLOW_CUSTOM_DOMAIN_IDS || '';
-  const customDomains = customDomainsRaw
+  const now = Date.now();
+  if (
+    !force &&
+    _customDomainsCache.siteId === siteId &&
+    Array.isArray(_customDomainsCache.domainIds) &&
+    (now - _customDomainsCache.lastFetched) < CUSTOM_DOMAINS_CACHE_TTL_MS
+  ) {
+    return {
+      ok        : true,
+      domainIds : _customDomainsCache.domainIds.slice(),
+      domainUrls: _customDomainsCache.domainUrls.slice(),
+      cached    : true,
+    };
+  }
+
+  try {
+    const data = await webflowFetch(`/sites/${siteId}/custom_domains`, { method: 'GET' });
+    // v2 returnt { customDomains: [{ id, url, lastPublished? }, ...] }
+    const list = Array.isArray(data?.customDomains) ? data.customDomains : [];
+    const ids  = list.map((d) => d?.id).filter((id) => typeof id === 'string' && id.length > 0);
+    const urls = list.map((d) => d?.url || '').filter(Boolean);
+
+    _customDomainsCache = {
+      siteId,
+      domainIds  : ids,
+      domainUrls : urls,
+      lastFetched: now,
+    };
+    return { ok: true, domainIds: ids.slice(), domainUrls: urls.slice(), cached: false };
+  } catch (e) {
+    const code = (e instanceof WebflowError) ? e.code : 'UNKNOWN';
+    console.warn(
+      `[webflow-client] discoverCustomDomainIds FAILED (${code}): ${e?.message || e}`
+    );
+    return { ok: false, error: code, message: e?.message || String(e) };
+  }
+}
+
+// publishSite - RAW HTTP-call naar Webflow publish-API.
+//
+// LIVE-DOMEIN PUBLISH (Blok 2 PR 4 fix): we publishen standaard naar ALLE
+// custom-domains van de site PLUS het Webflow-subdomain. customDomains
+// worden runtime-gediscovered via GET /sites/{site_id}/custom_domains
+// zodat ze niet hardcoded hoeven en automatisch meebewegen met
+// DNS-config-wijzigingen. WEBFLOW_CUSTOM_DOMAIN_IDS env-var blijft als
+// override-mechanisme (handig om in dev/staging alleen het subdomein te
+// raken zonder discovery te draaien).
+//
+// Faal-modes:
+//   - WEBFLOW_SITE_ID ontbreekt -> VALIDATION_FAIL
+//   - custom-domains discovery faalt -> degraded mode (alleen subdomein,
+//     mark resultaat met degraded:true zodat caller dit kan loggen)
+//   - publish 4xx/5xx -> throw typed WebflowError (AUTH_FAIL / RATE_LIMIT /
+//     WEBFLOW_DOWN / etc).
+//
+// Idempotent op site-niveau (Webflow queueet/dedupeert duplicate publishes;
+// de webflow-publish.js debounce voorkomt frequent-genoeg dubbel-fire).
+export async function publishSite({ context = '' } = {}) {
+  const siteId = process.env.WEBFLOW_SITE_ID;
+  if (!siteId) {
+    throw new WebflowError(
+      'VALIDATION_FAIL',
+      `publishSite: WEBFLOW_SITE_ID ontbreekt in env (${context})`
+    );
+  }
+
+  // Stap 1: bepaal customDomains. Override via env-var heeft voorrang
+  // (handig voor dev/staging om alleen subdomein te raken zonder
+  // discovery-call). Anders runtime-discovery via GET custom_domains.
+  const envOverrideRaw = process.env.WEBFLOW_CUSTOM_DOMAIN_IDS || '';
+  const envOverride    = envOverrideRaw
     .split(',')
     .map((s) => s.trim())
     .filter(Boolean);
+
+  let customDomains = [];
+  let domainSource  = 'none';
+  let domainUrls    = [];
+  let degraded      = false;
+  let degradedReason = null;
+
+  if (envOverride.length > 0) {
+    customDomains = envOverride;
+    domainSource  = 'env';
+  } else {
+    const disco = await discoverCustomDomainIds();
+    if (disco.ok) {
+      customDomains = disco.domainIds;
+      domainUrls    = disco.domainUrls;
+      domainSource  = disco.cached ? 'discovery-cached' : 'discovery-fresh';
+      // Geen custom-domains bekend op deze site is geen fout, maar het is
+      // wel degraded: live-domein wordt niet geraakt omdat het er niet
+      // is. Voor productie (waar www.deforexopleiding.nl als custom-
+      // domein staat) signaleert dit een config-probleem.
+      if (customDomains.length === 0) {
+        degraded       = true;
+        degradedReason = 'no custom domains configured on site';
+      }
+    } else {
+      // Discovery FAIL: fallback naar subdomain-only + degraded vlag.
+      degraded       = true;
+      degradedReason = `custom_domains discovery failed: ${disco.error || 'unknown'}`;
+    }
+  }
 
   const body = customDomains.length > 0
     ? { customDomains, publishToWebflowSubdomain: true }
     : { publishToWebflowSubdomain: true };
 
   console.log(
-    `[webflow-client] site-publish triggered (${context}): site=${siteId}, ` +
-    `customDomains=${customDomains.length}, subdomain=true`
+    `[webflow-client] publishSite (${context}): site=${siteId}, ` +
+    `domainSource=${domainSource}, customDomains=${customDomains.length}` +
+    (domainUrls.length ? ` (${domainUrls.join(',')})` : '') +
+    `, subdomain=true` +
+    (degraded ? ` [DEGRADED: ${degradedReason}]` : '')
   );
 
   try {
@@ -456,13 +578,35 @@ async function publishSiteIfEnabled(context = '') {
       body,
     });
     console.log(
-      `[webflow-client] site-publish OK (${context}): ${JSON.stringify(data || {}).slice(0, 200)}`
+      `[webflow-client] publishSite OK (${context}, ${domainSource}, ${customDomains.length} custom): ` +
+      `${JSON.stringify(data || {}).slice(0, 200)}`
     );
-    return { ok: true, body, response: data };
+    return {
+      ok          : true,
+      body,
+      raw         : data,
+      domainSource,
+      customDomainsCount: customDomains.length,
+      degraded,
+      degradedReason,
+    };
   } catch (e) {
-    console.warn(`[webflow-client] site-publish FAILED (${context}): ${e?.message || e}`);
-    return { ok: false, error: e?.message || String(e) };
+    // Re-throw met typed code. webflowFetch heeft 'm al geclassificeerd
+    // (AUTH_FAIL / RATE_LIMIT / WEBFLOW_DOWN / NOT_FOUND / etc).
+    console.warn(`[webflow-client] publishSite FAILED (${context}): ${e?.message || e}`);
+    throw e;
   }
+}
+
+// Thin wrapper voor backward-compat met bestaande callers (createLiveItem,
+// updateItem, unpublishItem, republishItem). Delegeert nu naar
+// maybePublishSite uit api/_lib/webflow-publish.js zodat de DB-toggle +
+// debounce + pending-flag voor ALLE outbound mutaties consistent zijn.
+async function publishSiteIfEnabled(context = '') {
+  // Lazy import om circulair import-probleem te voorkomen (webflow-publish
+  // importeert publishSite uit deze file).
+  const { maybePublishSite } = await import('./webflow-publish.js');
+  return maybePublishSite(context);
 }
 
 // ── Niveau-template discovery (voor createLiveItem clone-strategie) ──────────
@@ -754,11 +898,18 @@ export async function hardDeleteItem({ webflowItemId }) {
     const data = await webflowFetch(`/collections/${collId}/items/${webflowItemId}`, {
       method: 'DELETE',
     });
-    return { itemId: webflowItemId, raw: data, requestPayload: null, deleted: true };
+    // Blok 2 PR 4: trigger site-publish hook zodat overzichts-CMS-pagina
+    // het verwijderde item niet meer toont. Lock+debounce zit in
+    // maybePublishSite; deze call is fire-and-forward + return-prop.
+    const sitePublish = await publishSiteIfEnabled('hard-delete-' + webflowItemId);
+    return { itemId: webflowItemId, raw: data, requestPayload: null, deleted: true, sitePublish };
   } catch (e) {
     if (e instanceof WebflowError && e.code === 'NOT_FOUND') {
       console.log(`[webflow-client] hardDeleteItem 404 idempotent (${webflowItemId})`);
-      return { itemId: webflowItemId, raw: null, requestPayload: null, deleted: false, reason: '404 already gone' };
+      // 404 = al weg; alsnog publish-hook zodat eventueel pending mutaties
+      // in dezelfde burst toch een trailing publish krijgen.
+      const sitePublish = await publishSiteIfEnabled('hard-delete-404-' + webflowItemId);
+      return { itemId: webflowItemId, raw: null, requestPayload: null, deleted: false, reason: '404 already gone', sitePublish };
     }
     throw e;
   }
@@ -851,12 +1002,12 @@ export async function republishItem({ webflowItemId, event, descriptionHtml }) {
  *   - 409 / 422 -> WebflowError met code
  *   - alle velden onbekend -> { skipped: true, reason: 'no resolvable fields' }
  *
- * Niet gevolgd door site-publish (frequente kleine updates zoals teller-
- * bijwerk willen we niet elke keer een site-publish triggeren). Wel kunnen
- * we expliciet publish maken voor smoke; default = staged-publish van het
- * CMS-item, geen full site-publish.
+ * Gevolgd door publishSiteIfEnabled() (Blok 2 PR 4): de DB-toggle + debounce
+ * in maybePublishSite zorgt dat een burst van teller-updates samenvalt tot
+ * ~1 site-publish, zodat de overzichtspagina de nieuwste "X / Y" toont
+ * zonder dat we per registratie een hele site-build triggeren.
  *
- * @returns { itemId, raw, requestPayload, resolvedFields, skipped? }
+ * @returns { itemId, raw, requestPayload, resolvedFields, skipped?, sitePublish? }
  */
 export async function updateLiveFields({ webflowItemId, fieldData }) {
   if (!webflowItemId) throw new WebflowError('VALIDATION_FAIL', 'webflowItemId vereist');
@@ -899,10 +1050,13 @@ export async function updateLiveFields({ webflowItemId, fieldData }) {
     body,
   });
 
+  const sitePublish = await publishSiteIfEnabled('update-fields-' + webflowItemId);
+
   return {
     itemId        : webflowItemId,
     raw           : data,
     requestPayload: body,
     resolvedFields: Object.keys(resolved),
+    sitePublish,
   };
 }

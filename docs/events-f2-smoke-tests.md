@@ -1102,6 +1102,133 @@ ook niet bij honderden inschrijvingen.
 
 ---
 
+## Scenario 29 — Toggle AAN + burst-debounce (Blok 2 PR 4)
+
+**Doel:** Bij `webflow_auto_publish_enabled.enabled=true` triggert elke
+outbound CMS-mutatie een site-publish-hook. Een burst van mutaties binnen
+~5s coalesceert tot ongeveer één publish.
+
+**Pre-flight:**
+- Mini-migratie `2026-06-12-blok2-webflow-auto-publish.sql` gerund (2
+  `app_settings`-rijen).
+- Env-vars `WEBFLOW_API_TOKEN` + `WEBFLOW_SITE_ID`
+  (`699062301b8d0a6dc9ec22b6`) in Vercel.
+- `app_settings.webflow_auto_publish_enabled.enabled = true`.
+- `app_settings.webflow_publish_state.pending = false`,
+  `in_progress = false`.
+
+**Stappen:**
+1. Open `/modules/admin.html#integraties` -> integration-card "Webflow
+   auto-publish" toont status "AAN · up-to-date".
+2. Maak in snelle volgorde 3 events aan + publish ze (3× publish-flow
+   via Sales/events-admin). Doe dit binnen ~5 seconden.
+3. Verifieer Vercel logs (filter op `webflow-client`): er staan 3
+   `publishSite (...)` candidates, maar maximaal 1-2 echte
+   `publishSite OK` lines; de andere zijn `maybePublishSite` skipt met
+   `reason='in_progress'` of `'debounced'`.
+4. Verifieer `app_settings.webflow_publish_state`:
+   ```sql
+   SELECT value FROM public.app_settings WHERE key='webflow_publish_state';
+   -- verwacht: last_publish_at recent, pending kan true blijven als
+   -- een trailing burst-mutatie nog niet gecaught is.
+   ```
+5. Wacht 10s, doe één extra mutatie (bv. event-update). Verifieer dat
+   eventueel pending=true door deze extra mutatie wordt gecleared (in_progress
+   draait een laatste publish + zet pending=false).
+
+**Verwacht:** burst-debounce werkt; logs tonen coalescentie; eind-state is
+up-to-date.
+
+---
+
+## Scenario 30 — Toggle UIT: geen publish, pending=true (Blok 2 PR 4)
+
+**Doel:** Bij `enabled=false` doen mutaties geen publish-call; er wordt wel
+een vlag `pending=true` gezet zodat een catch-up later mogelijk is.
+
+**Stappen:**
+1. Ga naar `/modules/admin.html#integraties` -> integration-card "Webflow
+   auto-publish" -> klik "Zet auto-publish UIT".
+2. Toast: "Auto-publish uitgeschakeld". Status-dot grijs, tekst
+   "UIT · automatisch publishen gepauzeerd".
+3. Wijzig een event (bv. titel-update) via Sales/events-admin.
+4. Verifieer in Vercel logs: NIET `publishSite OK ...`. Wel logregels
+   `maybePublishSite ... reason='disabled'`.
+5. Verifieer DB:
+   ```sql
+   SELECT value FROM public.app_settings
+   WHERE key='webflow_publish_state';
+   -- verwacht: { "pending": true, "in_progress": false,
+   --             "last_publish_at": <vorige iso>, ... }
+   ```
+6. Verifieer Webflow live-site: de wijziging is NIET zichtbaar op de
+   overzichtspagina (CMS-item is wel bijgewerkt op staged/live record,
+   maar overzichtspagina blijft op vorige site-build).
+
+**Verwacht:** geen site-publish; pending=true geregistreerd voor
+toekomstige catch-up.
+
+---
+
+## Scenario 31 — Toggle terug AAN -> catch-up publish, pending gewist (Blok 2 PR 4)
+
+**Doel:** Bij omzetten van toggle UIT naar AAN met `pending=true` triggert
+de admin-UI een direct catch-up publish; daarna staat `pending=false`.
+
+**Stappen:**
+1. Voortbouwend op scenario 30 (`pending=true`, toggle UIT).
+2. Klik in admin "Zet auto-publish AAN".
+3. Toast: "Toggle AAN + catch-up publish gestart".
+4. Verifieer Vercel logs: `publishSite (toggle-on-catchup): site=...`
+   gevolgd door `publishSite OK`.
+5. Verifieer DB:
+   ```sql
+   SELECT value FROM public.app_settings
+   WHERE key='webflow_publish_state';
+   -- verwacht: { "pending": false, "in_progress": false,
+   --             "last_publish_at": <nieuwe iso>, ... }
+   ```
+6. Verifieer Webflow live-site: de wijziging uit scenario 30 is nu
+   zichtbaar op de overzichtspagina.
+
+**Verwacht:** catch-up draait binnen seconden na toggle-flip; pending
+gewist; live-site bijgewerkt.
+
+---
+
+## Scenario 32 — Auto-vol (testevent) -> na publish weg van overzicht (Blok 2 PR 4)
+
+**Doel:** Verifieer dat de auto-vol close (Blok 2 PR 3) gevolgd door
+de auto-publish-hook ervoor zorgt dat het volgelopen testevent
+binnen één e2e-flow van de Webflow-overzichtspagina verdwijnt.
+
+**WAARSCHUWING:** Alleen op een WEGWERP-testevent met lage capaciteit
+(cap=2). NOOIT op een echt publiek event.
+
+**Pre-flight:**
+- Auto-publish toggle = AAN.
+- Pre-flight uit scenario 27 (testevent "SMOKE-AUTOVOL" cap=2 +
+  2 valide basis-assessments).
+
+**Stappen:**
+1. Voer scenario 27 uit tot en met "auto_closed=true".
+2. Wacht ~5-10s zodat de site-publish na de close-cascade voltooit.
+3. Verifieer Vercel logs: na `closeSignupsOutbound` zie je
+   `publishSite (unpublish-...)` gevolgd door `publishSite OK`.
+4. Open de Webflow-events-overzichtspagina (publiek). Verifieer dat
+   "SMOKE-AUTOVOL" NIET meer in de lijst staat (Webflow overzicht
+   filtert op gepubliceerde items + er is een verse site-build).
+5. Verifieer `app_settings.webflow_publish_state.last_publish_at` is
+   recent (binnen laatste minuut).
+
+**Opruimen:** zoals scenario 27 (reopen of hard-delete).
+
+**Verwacht:** auto-vol + auto-publish samen leveren binnen ~15s een
+verse site waarin het volle testevent niet meer zichtbaar is op het
+publieke overzicht.
+
+---
+
 ## Pre-merge checklist Blok 1
 
 - [ ] SQL migratie `2026-06-12-events-signups-closed.sql` gerund in
