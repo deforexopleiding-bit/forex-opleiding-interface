@@ -2,9 +2,9 @@
 // PUBLIEKE POST-endpoint: registreert een nieuwe assessment-inzending.
 // Geen auth (deelnemers zijn niet ingelogd).
 //
-// In deze Blok 2 PR1: capture-only. We schrijven status='submitted' en
-// laten routing_result + score NULL. Latere PR's voegen scoring-engine +
-// outbound side-effects toe.
+// Blok 2 PR 2: scoring + routing-engine is geactiveerd. Na insert wordt
+// score() aangeroepen en de rij geupdate met routing_result + score jsonb.
+// Side-effects (GHL push, event-koppeling) komen pas in PR 3.
 //
 // Body (JSON):
 //   {
@@ -17,7 +17,13 @@
 //   - Honeypot: 'hp_company' moet ontbreken/leeg zijn (bots vullen 'm).
 //   - IP-rate-limit: zelfde IP-hash mag max 1 inzending per 30s.
 //
-// Response 200: { ok: true, id: uuid, routing_result: null, status: 'submitted' }
+// Response 200: {
+//   ok: true, id, status: 'submitted', submitted_at,
+//   routing_result: 'gevorderd'|'basis'|'incomplete',
+//   copy_tier: 'high'|'mid'|'low'|'incomplete',
+//   copy_text: string,
+//   skill_score, engagement_ok
+// }
 // Response 400: validation errors {error, errors:[{key,code,message}]}
 // Response 405: POST only
 // Response 422: honeypot tripped
@@ -34,6 +40,7 @@ import {
   UUID_RE,
   EMAIL_RE,
 } from './_lib/assessment-validation.js';
+import { score } from './_lib/assessment-scoring.js';
 
 export default async function handler(req, res) {
   res.setHeader('Content-Type', 'application/json');
@@ -112,7 +119,30 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: 'E-mailadres ontbreekt.' });
   }
 
-  // 7) Insert
+  // 7) Score + insert in 1 atomic write
+  let scored;
+  try {
+    scored = score(normalized, questions);
+  } catch (e) {
+    // Pure functie - faalt alleen bij programmer-error, niet bij data.
+    console.error('[assessment-submit] score() threw:', e.message);
+    return res.status(500).json({ error: 'Scoring mislukte.' });
+  }
+
+  // score-jsonb voor DB: alles behalve routing_result (eigen kolom) +
+  // copy_text (afgeleid van copy_tier, niet persisten).
+  const scoreJson = {
+    skill_score    : scored.skill_score,
+    skill_breakdown: scored.skill_breakdown,
+    motivatie      : scored.motivatie,
+    engagement_ok  : scored.engagement_ok,
+    copy_tier      : scored.copy_tier,
+    reason         : scored.reason,
+    thresholds     : scored.thresholds,
+    missing_keys   : scored.missing_keys,
+    scored_at      : new Date().toISOString(),
+  };
+
   try {
     const { data: row, error } = await supabaseAdmin
       .from('assessment_responses')
@@ -122,12 +152,12 @@ export default async function handler(req, res) {
         first_name        : firstName,
         last_name         : lastName,
         answers           : normalized,
-        routing_result    : null,
-        score             : null,
+        routing_result    : scored.routing_result,
+        score             : scoreJson,
         status            : 'submitted',
         submitter_ip_hash : ipHash,
       })
-      .select('id, status, submitted_at')
+      .select('id, status, routing_result, submitted_at')
       .maybeSingle();
     if (error) throw new Error('insert: ' + error.message);
     if (!row)  throw new Error('insert returnde geen rij.');
@@ -136,8 +166,12 @@ export default async function handler(req, res) {
       ok            : true,
       id            : row.id,
       status        : row.status,
-      routing_result: null,
       submitted_at  : row.submitted_at,
+      routing_result: row.routing_result,
+      copy_tier     : scored.copy_tier,
+      copy_text     : scored.copy_text,
+      skill_score   : scored.skill_score,
+      engagement_ok : scored.engagement_ok,
     });
   } catch (e) {
     console.error('[assessment-submit] insert', e.message);
