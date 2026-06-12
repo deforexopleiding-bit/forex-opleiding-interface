@@ -17,7 +17,7 @@
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
-import { unpublishEventOutbound } from './_lib/event-sync-orchestrator.js';
+import { hardDeleteEventOutbound } from './_lib/event-sync-orchestrator.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -66,12 +66,14 @@ export default async function handler(req, res) {
     if (error) throw new Error('events-delete (archive): ' + error.message);
     if (!ev)   return res.status(404).json({ error: 'Event niet gevonden' });
 
-    // F2: archived = out-of-live. Unpublish op outbound kanalen (Webflow draft +
-    // GHL options-list refresh zodat dit event niet meer in de dropdown staat).
-    // AWAITED; targets binnen orchestrator zijn intern geisoleerd.
+    // Blok 1 item 6: archive = permanent uit Webflow CMS (geen draft-park).
+    // hardDeleteEventOutbound doet DELETE /items/{id} (zonder /live) en nult
+    // webflow_item_id, plus GHL options refresh (event filtert uit
+    // computeUpcomingLabels door status='archived'). 404 op Webflow = success
+    // (item al weg, idempotent). AWAITED; targets intern geisoleerd.
     let sync = null;
     try {
-      sync = await unpublishEventOutbound(ev.id);
+      sync = await hardDeleteEventOutbound(ev.id);
     } catch (syncErr) {
       console.error('[events-delete sync]', syncErr?.message || syncErr);
       sync = { error: syncErr?.message || 'sync exception' };

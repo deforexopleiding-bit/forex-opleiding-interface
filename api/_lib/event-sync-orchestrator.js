@@ -26,6 +26,7 @@ import {
   createLiveItem,
   updateItem,
   unpublishItem,
+  hardDeleteItem,
   WebflowError,
 } from './webflow-client.js';
 import {
@@ -494,6 +495,96 @@ export async function unpublishEventOutbound(eventId) {
   // GHL: list zonder dit event (status != published OR starts_at <= now will be filtered).
   // Caller heeft normaal al status='cancelled'/'archived' gezet voordat hij ons aanroept,
   // dus computeUpcomingLabels filtert dit event er vanzelf uit.
+  const ghl = await syncGhl(event);
+
+  return {
+    eventId,
+    webflow,
+    ghl,
+  };
+}
+
+// ── Hard-delete pad (archive + cleanup-cron) ─────────────────────────────────
+//
+// Verschil met unpublishWebflow: hard-delete verwijdert het item PERMANENT uit
+// de Webflow CMS (zowel live-publicatie als staged record). 404 = success
+// (item al weg, idempotent). Daarna wordt webflow_item_id genuld zodat een
+// eventuele heropvoer een vers item produceert.
+async function hardDeleteWebflow(event) {
+  if (!event.webflow_item_id) {
+    // Niets om te verwijderen - log no-op success
+    return { ok: true, action: 'hard_delete', status: 'noop' };
+  }
+  try {
+    const result = await hardDeleteItem({ webflowItemId: event.webflow_item_id });
+    await logSyncAttempt({
+      event_id        : event.id,
+      target          : 'webflow',
+      action          : 'hard_delete',
+      request_payload : null,
+      response_payload: {
+        itemId : result.itemId,
+        deleted: result.deleted,
+        reason : result.reason || null,
+      },
+      status          : 'success',
+    });
+    await supabaseAdmin
+      .from('events')
+      .update({
+        webflow_item_id       : null,
+        webflow_sync_status   : 'archived',
+        webflow_last_synced_at: new Date().toISOString(),
+      })
+      .eq('id', event.id);
+    return { ok: true, action: 'hard_delete', status: result.deleted ? 'deleted' : 'already_gone' };
+  } catch (e) {
+    const isWfErr = e instanceof WebflowError;
+    const code    = isWfErr ? e.code : 'UNKNOWN';
+    const message = e?.message || 'unknown error';
+
+    const retry_count   = await getCurrentRetryCount(event.id, 'webflow');
+    const next_retry_at = computeNextRetryAt(retry_count);
+
+    await logSyncAttempt({
+      event_id        : event.id,
+      target          : 'webflow',
+      action          : 'hard_delete',
+      request_payload : null,
+      response_payload: isWfErr ? e.detail : null,
+      status          : 'failure',
+      error_code      : code,
+      error_message   : message,
+      retry_count,
+      next_retry_at,
+    });
+    await supabaseAdmin
+      .from('events')
+      .update({
+        webflow_sync_status   : 'failure',
+        webflow_last_synced_at: new Date().toISOString(),
+      })
+      .eq('id', event.id);
+    return { ok: false, action: 'hard_delete', status: 'failure', error_code: code, message };
+  }
+}
+
+/**
+ * Hard-delete een event uit outbound kanalen.
+ * - Webflow: DELETE /items/{id} (permanente verwijdering, 404=success)
+ * - GHL: herbereken labels (event valt uit upcoming-set door status='archived')
+ *
+ * Gebruikt door events-delete (archive-pad) en de cleanup-cron (>7d na event).
+ * Eén code-path, geen drift tussen admin-trigger en cron-trigger.
+ */
+export async function hardDeleteEventOutbound(eventId) {
+  if (!eventId) throw new Error('eventId vereist');
+  const event = await fetchEvent(eventId);
+
+  const webflow = await hardDeleteWebflow(event);
+
+  // GHL: caller heeft status='archived' al gezet voor we hier zijn; computeUpcomingLabels
+  // filtert dit event er vanzelf uit.
   const ghl = await syncGhl(event);
 
   return {
