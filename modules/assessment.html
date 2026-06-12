@@ -139,6 +139,42 @@
       text-align: center; padding: 40px 20px; color: var(--text-mute);
     }
     .fatal { color: var(--danger); }
+
+    /* Routing-result screen (Blok 2 PR 2) */
+    .result {
+      padding: 36px 28px;
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      text-align: center;
+    }
+    .result .badge {
+      display: inline-block;
+      font-size: 12px; font-weight: 700;
+      text-transform: uppercase; letter-spacing: 0.08em;
+      padding: 6px 12px; border-radius: 999px;
+      margin-bottom: 16px;
+    }
+    .result h2 {
+      font-size: 22px; font-weight: 700;
+      margin: 0 0 16px; color: var(--primary);
+    }
+    .result p {
+      font-size: 15px; line-height: 1.65;
+      color: var(--text); margin: 0 0 8px;
+      max-width: 560px; margin-left: auto; margin-right: auto;
+    }
+    .result .followup {
+      color: var(--text-mute); font-size: 14px;
+      margin-top: 18px;
+    }
+    .result.tier-high .badge { background: rgba(16,185,129,0.12); color: #047857; }
+    .result.tier-high h2     { color: #047857; }
+    .result.tier-mid  .badge { background: rgba(9,61,84,0.10);  color: var(--primary); }
+    .result.tier-low  .badge { background: rgba(234,179,8,0.16); color: #92400e; }
+    .result.tier-low  h2     { color: #92400e; }
+    .result.tier-incomplete .badge { background: rgba(220,38,38,0.10); color: var(--danger); }
+    .result.tier-incomplete h2     { color: var(--danger); }
   </style>
 </head>
 <body>
@@ -171,6 +207,13 @@
       <h2>Bedankt voor je inzending!</h2>
       <p>We hebben je antwoorden goed ontvangen. Je hoort snel van ons.</p>
     </div>
+
+    <div id="result" class="result" hidden>
+      <span class="badge" id="result-badge"></span>
+      <h2 id="result-title"></h2>
+      <p id="result-copy"></p>
+      <p class="followup" id="result-followup"></p>
+    </div>
   </main>
 
   <script>
@@ -190,6 +233,41 @@
       const $errList = document.getElementById('errors-list');
       const $submit  = document.getElementById('submit-btn');
       const $success = document.getElementById('success');
+      const $result  = document.getElementById('result');
+      const $rBadge  = document.getElementById('result-badge');
+      const $rTitle  = document.getElementById('result-title');
+      const $rCopy   = document.getElementById('result-copy');
+      const $rFollow = document.getElementById('result-followup');
+
+      // Fallback-tekst per tier - API stuurt copy_text mee maar als die om
+      // welke reden dan ook ontbreekt, vallen we hierop terug zodat de
+      // gebruiker nooit een leeg scherm krijgt.
+      const TIER_FALLBACK = {
+        high: {
+          badge: 'Match: gevorderd',
+          title: 'Je komt in aanmerking voor de Trading Deep Dive',
+          copy : 'Op basis van jouw antwoorden kom je in aanmerking voor onze exclusieve Trading Deep Dive. Tijdens deze sessie analyseren we samen waarom je ondanks jouw kennis nog niet de gewenste resultaten behaalt.',
+          followup: 'We nemen binnenkort persoonlijk contact met je op met de details.',
+        },
+        mid: {
+          badge: 'Match: basis',
+          title: 'Forex Kickstart Live past het beste bij jou',
+          copy : 'Je hebt duidelijk interesse in trading en bent bezig met jouw ontwikkeling. Op dit moment denken we dat Forex Kickstart Live de meeste waarde zal bieden.',
+          followup: 'We sturen je binnenkort de details met onze beste keuze voor jou.',
+        },
+        low: {
+          badge: 'Aanbeveling: bouw je fundering',
+          title: 'We raden Forex Kickstart Live aan',
+          copy : 'Bedankt voor jouw interesse. Op basis van jouw antwoorden denken we dat het momenteel waardevoller is om eerst verder te bouwen aan jouw fundering. We raden daarom aan om te starten met Forex Kickstart Live.',
+          followup: 'Je ontvangt binnenkort meer informatie over Forex Kickstart Live.',
+        },
+        incomplete: {
+          badge: 'Inzending incompleet',
+          title: 'We hebben nog wat aanvulling nodig',
+          copy : 'Gelieve de ontbrekende onderdelen aan te vullen zodat we jouw aanvraag verder kunnen verwerken.',
+          followup: 'Vernieuw de pagina en vul de ontbrekende velden aan.',
+        },
+      };
 
       const urlParams = new URLSearchParams(window.location.search);
       const eventId   = urlParams.get('event') || null;
@@ -339,6 +417,32 @@
         if (list.length > 0) $errors.scrollIntoView({ behavior: 'smooth', block: 'start' });
       }
 
+      function renderResult(payload) {
+        // Tier-bepaling: copy_tier wint; routing_result als fallback voor
+        // backward-compat met PR-1 response-shape.
+        let tier = (payload && payload.copy_tier) || null;
+        if (!tier) {
+          if (payload && payload.routing_result === 'incomplete') tier = 'incomplete';
+          else if (payload && payload.routing_result === 'gevorderd') tier = 'high';
+          else tier = 'mid';
+        }
+        if (!TIER_FALLBACK[tier]) tier = 'mid';
+
+        const fb = TIER_FALLBACK[tier];
+        const copy = (payload && typeof payload.copy_text === 'string' && payload.copy_text.trim())
+          ? payload.copy_text.trim()
+          : fb.copy;
+
+        $result.className = 'result tier-' + tier;
+        $rBadge.textContent  = fb.badge;
+        $rTitle.textContent  = fb.title;
+        $rCopy.textContent   = copy;
+        $rFollow.textContent = fb.followup;
+
+        $success.hidden = true;
+        $result.hidden  = false;
+      }
+
       async function loadQuestions() {
         try {
           const r = await fetch('/api/assessment-questions', { headers: { Accept: 'application/json' } });
@@ -381,7 +485,7 @@
 
           if (r.status === 200 && j.ok) {
             $form.hidden = true;
-            $success.hidden = false;
+            renderResult(j);
             window.scrollTo({ top: 0, behavior: 'smooth' });
             return;
           }

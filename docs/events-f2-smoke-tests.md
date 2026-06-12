@@ -715,6 +715,174 @@ in raw vorm opgeslagen.
 
 ---
 
+## Scenario 19 — High-profiel routing: gevorderd + tier high (Blok 2 PR 2)
+
+**Doel:** Een ervaren + gemotiveerde deelnemer landt in `routing_result='gevorderd'`
+met `copy_tier='high'` en krijgt de Trading Deep Dive copy.
+
+**Verwachte skill_score:** 3 (`>5jr`) + 2 (`live`) + 2 (`allebei`) + 2
+(`consistent`) + 2 (kennis 5) = **11**. Engagement: motivatie 8 ≥ 5 ✓,
+uitspraak `actief_begeleiding` ≠ gratis_info ✓.
+
+**Stappen:**
+1. Open `/modules/assessment.html` op de preview-URL (geen `?event=` nodig).
+2. Vul in:
+   - voornaam = Senior, achternaam = Test, email = `smoke+high@deforexopleiding.nl`
+   - ervaring = "Meer dan 5 jaar" (`>5jr`)
+   - handelen = "Live (met echt geld)" (`live`)
+   - tradeplan_risico = "Allebei" (`allebei`)
+   - winstgevend = "Consistent winstgevend" (`consistent`)
+   - kennis = 5
+   - motivatie = 8
+   - uitspraak = "Ik wil actief begeleid worden" (`actief_begeleiding`)
+   - grootste_uitdaging = 35+ woorden over jouw uitdaging
+   - doel = elk geldig doel
+3. Klik "Inzenden".
+4. Verwacht response (DevTools Network):
+   ```json
+   { "ok": true, "id": "<uuid>", "status": "submitted",
+     "routing_result": "gevorderd", "copy_tier": "high",
+     "copy_text": "Op basis van jouw antwoorden kom je in aanmerking voor onze exclusieve Trading Deep Dive...",
+     "skill_score": 11, "engagement_ok": true }
+   ```
+5. Visueel: result-card met groene "Match: gevorderd" badge + Trading Deep
+   Dive title + copy. Geen formulier meer zichtbaar.
+
+---
+
+## Scenario 20 — Mid-profiel routing: basis + tier mid (Blok 2 PR 2)
+
+**Doel:** Een deelnemer met middenniveau-skill landt in `routing_result='basis'`
+met `copy_tier='mid'` en krijgt de Forex Kickstart Live copy.
+
+**Verwachte skill_score:** 1 (`3-12mnd`) + 1 (`demo`) + 1 (`een`) + 1
+(`af_en_toe`) + 1 (kennis 3) = **5**. Score in [LOW_MID_THRESHOLD 4,
+GEVORDERD_THRESHOLD-1 = 6] → mid. Engagement: motivatie 7 ≥ 5 ✓ (engagement
+maakt niet uit bij mid-band, maar zorgt dat het niet als incomplete
+gemarkeerd wordt).
+
+**Stappen:**
+1. Open `/modules/assessment.html` (uniek e-mail bv. `smoke+mid@...`).
+2. Vul in: ervaring=`3-12mnd`, handelen=`demo`, tradeplan_risico=`een`,
+   winstgevend=`af_en_toe`, kennis=3, motivatie=7, uitspraak=`eerst_leren`,
+   open_text 35+ woorden, doel willekeurig.
+3. Verwacht response:
+   ```json
+   { "routing_result": "basis", "copy_tier": "mid",
+     "copy_text": "Je hebt duidelijk interesse in trading...",
+     "skill_score": 5, "engagement_ok": true }
+   ```
+4. Visueel: blauwe "Match: basis" badge + Kickstart Live copy.
+
+---
+
+## Scenario 21 — Low-profiel routing: basis + tier low (Blok 2 PR 2)
+
+**Doel:** Beginnend deelnemer (skill_score < LOW_MID_THRESHOLD 4) landt in
+`routing_result='basis'` met `copy_tier='low'`.
+
+**Verwachte skill_score:** 0 (`<3mnd`) + 0 (`nog_niet`) + 0 (`nee`) + 0
+(`nog_niet`) + 0 (kennis 1) = **0**. Onder LOW_MID_THRESHOLD = low.
+
+**Stappen:**
+1. Open `/modules/assessment.html` (uniek e-mail `smoke+low@...`).
+2. Vul in: ervaring=`<3mnd`, handelen=`nog_niet`, tradeplan_risico=`nee`,
+   winstgevend=`nog_niet`, kennis=1, motivatie=6, uitspraak=`eerst_leren`,
+   open_text 35+ woorden, doel willekeurig.
+3. Verwacht response:
+   ```json
+   { "routing_result": "basis", "copy_tier": "low",
+     "copy_text": "Bedankt voor jouw interesse. Op basis van jouw antwoorden...",
+     "skill_score": 0, "engagement_ok": true }
+   ```
+4. Visueel: amber "Aanbeveling: bouw je fundering" badge + low-copy.
+
+---
+
+## Scenario 22 — Engagement-gate capt high naar mid (Blok 2 PR 2)
+
+**Doel:** Hoge skill maar lage engagement (uitspraak=gratis_info OF
+motivatie < MOTIVATIE_FLOOR) wordt gecapt: `routing_result='basis'` met
+`copy_tier='mid'` i.p.v. `gevorderd/high`.
+
+**Stappen (cap via uitspraak):**
+1. Open `/modules/assessment.html` (uniek e-mail `smoke+cap-uitspraak@...`).
+2. Gebruik EXACT dezelfde antwoorden als scenario 19 (skill_score=11), MAAR
+   zet `uitspraak = "Ik ben op zoek naar gratis info"` (`gratis_info`).
+3. Verwacht response:
+   ```json
+   { "routing_result": "basis", "copy_tier": "mid",
+     "skill_score": 11, "engagement_ok": false }
+   ```
+   De `score.reason` in DB-row bevat "engagement-gate gecapt
+   (uitspraak=gratis_info)".
+
+**Stappen (cap via motivatie):**
+1. Nieuw e-mail `smoke+cap-motivatie@...`.
+2. Gebruik antwoorden uit scenario 19, MAAR zet motivatie = 2.
+3. Verwacht response: `routing_result='basis'`, `copy_tier='mid'`,
+   `engagement_ok=false`. `score.reason` bevat "motivatie 2 <
+   MOTIVATIE_FLOOR 5".
+
+**Verifieer beide rijen:**
+```sql
+SELECT email, routing_result, score->>'copy_tier' AS tier,
+       (score->>'skill_score')::int AS skill,
+       (score->>'engagement_ok')::bool AS engaged,
+       score->>'reason' AS why
+FROM public.assessment_responses
+WHERE email LIKE 'smoke+cap-%'
+ORDER BY submitted_at DESC LIMIT 2;
+-- verwacht: 2 rijen, beide tier='mid', engaged=false, skill=11,
+-- why begint met "skill_score 11 >= 7 maar engagement-gate gecapt"
+```
+
+---
+
+## Scenario 23 — Score-jsonb + routing_result persisted op de rij (Blok 2 PR 2)
+
+**Doel:** Na een succesvolle inzending bevat de rij in `assessment_responses`
+zowel de `routing_result`-kolom als een gevulde `score`-jsonb met breakdown,
+thresholds en scored_at.
+
+**Stappen:**
+1. Stuur 1 willekeurige geldige inzending (bv. uit scenario 20).
+2. Run in Supabase:
+   ```sql
+   SELECT
+     id, email, routing_result,
+     score->>'copy_tier'      AS copy_tier,
+     (score->>'skill_score')::int AS skill_score,
+     score->'skill_breakdown' AS breakdown,
+     (score->>'engagement_ok')::bool AS engaged,
+     (score->>'motivatie')::int     AS motivatie,
+     score->'thresholds'      AS thresholds,
+     score->>'reason'         AS reason,
+     score->>'scored_at'      AS scored_at
+   FROM public.assessment_responses
+   ORDER BY submitted_at DESC LIMIT 1;
+   ```
+3. Verwacht:
+   - `routing_result` IN ('gevorderd','basis','incomplete').
+   - `copy_tier` IN ('high','mid','low','incomplete').
+   - `breakdown` is object met sleutels: ervaring, handelen,
+     tradeplan_risico, winstgevend, kennis (elk getal).
+   - `thresholds` is object: `{ GEVORDERD_THRESHOLD, MOTIVATIE_FLOOR,
+     LOW_MID_THRESHOLD }` met de actuele env- of default-waardes.
+   - `scored_at` is ISO-timestamp, dichtbij `submitted_at`.
+4. Verifieer dat capture-only-rijen uit PR 1 nu NIET retroactief gescoord
+   zijn (alleen nieuwe inzendingen sinds PR 2 hebben gevulde `score`):
+   ```sql
+   SELECT count(*) FILTER (WHERE score IS NULL)  AS pr1_rows,
+          count(*) FILTER (WHERE score IS NOT NULL) AS pr2_rows
+   FROM public.assessment_responses;
+   ```
+
+**Verwacht:** elke PR 2-inzending heeft `routing_result IS NOT NULL` en
+`score IS NOT NULL` met de volledige breakdown.
+
+---
+
 ## Pre-merge checklist Blok 1
 
 - [ ] SQL migratie `2026-06-12-events-signups-closed.sql` gerund in
