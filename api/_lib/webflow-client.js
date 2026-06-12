@@ -756,3 +756,46 @@ export async function hardDeleteItem({ webflowItemId }) {
     throw e;
   }
 }
+
+/**
+ * Republish een Webflow-item dat in draft staat (gevolg van unpublishItem).
+ * Voor reopen-signups flow.
+ *
+ * Strategie:
+ *   1. PATCH /collections/{coll}/items/{itemId}/live met isDraft=false +
+ *      fieldData (zelfde shape als updateItem)
+ *   2. Bij 404 of 422: fallback POST /collections/{coll}/items/{itemId}/publish
+ *      (singular publish endpoint - werkt op staged item)
+ *
+ * Valideren we in smoke. Bij beide-faal: gooi WebflowError door.
+ *
+ * @returns { itemId, raw, requestPayload, strategy: 'patch_live'|'post_publish' }
+ */
+export async function republishItem({ webflowItemId, event, descriptionHtml }) {
+  if (!webflowItemId) throw new WebflowError('VALIDATION_FAIL', 'webflowItemId vereist');
+  if (!event?.id)     throw new WebflowError('VALIDATION_FAIL', 'event.id vereist');
+  const { collId } = getEnv();
+  const schema = await getCollectionSchema();
+  const fieldData = buildFieldData({ event, descriptionHtml, schema });
+
+  // Strategie 1: PATCH /items/{id}/live met isDraft=false
+  const body = { isArchived: false, isDraft: false, fieldData };
+  try {
+    const data = await webflowFetch(`/collections/${collId}/items/${webflowItemId}/live`, {
+      method: 'PATCH',
+      body,
+    });
+    const sitePublish = await publishSiteIfEnabled('republish-' + webflowItemId);
+    return { itemId: webflowItemId, raw: data, requestPayload: body, sitePublish, strategy: 'patch_live' };
+  } catch (e) {
+    if (!(e instanceof WebflowError) || !['NOT_FOUND','VALIDATION_FAIL'].includes(e.code)) throw e;
+    console.warn(`[webflow-client] republishItem PATCH /live faalde (${e.code}); fallback POST /publish`);
+  }
+
+  // Strategie 2: POST /collections/{coll}/items/{itemId}/publish (singular publish endpoint)
+  const data = await webflowFetch(`/collections/${collId}/items/${webflowItemId}/publish`, {
+    method: 'POST',
+  });
+  const sitePublish = await publishSiteIfEnabled('republish-fallback-' + webflowItemId);
+  return { itemId: webflowItemId, raw: data, requestPayload: null, sitePublish, strategy: 'post_publish' };
+}
