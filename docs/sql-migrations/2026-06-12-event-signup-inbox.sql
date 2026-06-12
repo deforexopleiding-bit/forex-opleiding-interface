@@ -103,7 +103,7 @@ COMMIT;
 --    SELECT column_name, data_type FROM information_schema.columns
 --    WHERE table_schema='public' AND table_name='event_signup_inbox'
 --    ORDER BY ordinal_position;
---    -- verwacht: 17 kolommen.
+--    -- verwacht: 21 kolommen.
 --
 --    SELECT conname, pg_get_constraintdef(oid)
 --    FROM pg_constraint
