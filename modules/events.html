@@ -35,6 +35,9 @@
     .status-cancelled { background: rgba(220,38,38,0.15); color:#b91c1c; }
     .status-archived { background: rgba(148,163,184,0.2); color: var(--text-faint); opacity:.7; }
 
+    /* Signups-closed badge (Blok 1) */
+    .signups-closed-badge { display:inline-block; padding:2px 9px; border-radius:10px; font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:.05em; background: rgba(245,158,11,0.18); color:#b45309; border:1px solid rgba(245,158,11,0.3); margin-left: 4px; cursor: help; }
+
     /* Sync badges (Webflow + GHL) */
     .sync-badges { display:inline-flex; gap:4px; flex-wrap:wrap; }
     .sync-badge { display:inline-flex; align-items:center; gap:3px; padding:2px 7px; border-radius:8px; font-size:10px; font-weight:700; letter-spacing:.03em; cursor: help; }
@@ -139,6 +142,34 @@ function renderSyncCell(ev) {
     ${renderSyncBadge('webflow', ev.webflow_sync_status, ev.webflow_last_synced_at)}
     ${renderSyncBadge('ghl', ev.ghl_sync_status, ev.ghl_last_synced_at)}
   </span>`;
+}
+
+// ── Signups-closed badge (Blok 1) ────────────────────────────────────────────
+//
+// Toont een kleine pill "Aanmelding gesloten" achter de status-badge zodra
+// `signups_closed=true`. Tooltip-tekst hangt af van `signups_closed_reason`:
+//   - 'auto_time'     → Automatisch gesloten (T-1 dag)
+//   - 'auto_full'     → Automatisch gesloten (vol)
+//   - 'auto_deadline' → Automatisch gesloten (deadline)
+//   - 'manual'        → Handmatig gesloten
+//   - andere/leeg     → generieke tekst
+//
+// Bevat ook timestamp uit `signups_closed_at` als die meegegeven wordt.
+const SIGNUPS_CLOSED_REASON_LABEL = {
+  auto_time: 'Automatisch gesloten (T-1 dag)',
+  auto_full: 'Automatisch gesloten (vol)',
+  auto_deadline: 'Automatisch gesloten (deadline)',
+  manual: 'Handmatig gesloten',
+};
+
+function renderSignupsClosedBadge(ev) {
+  if (!ev || ev.signups_closed !== true) return '';
+  const reason = ev.signups_closed_reason || '';
+  const reasonLabel = SIGNUPS_CLOSED_REASON_LABEL[reason] || 'Aanmelding gesloten';
+  const parts = [reasonLabel];
+  if (ev.signups_closed_at) parts.push('sinds ' + fmtDate(ev.signups_closed_at));
+  const tooltip = parts.join(' | ');
+  return `<span class="signups-closed-badge" title="${esc(tooltip)}">Aanmelding gesloten</span>`;
 }
 
 // ── Render ───────────────────────────────────────────────────────────────────
@@ -260,7 +291,7 @@ function renderList() {
             <td>${esc(ev.location || '—')}</td>
             <td>${esc(niveauLbl)}</td>
             <td class="center"><span class="${capClass}">${active}/${cap}</span></td>
-            <td><span class="status-badge status-${ev.status}">${esc(STATUS_LABELS[ev.status] || ev.status)}</span></td>
+            <td><span class="status-badge status-${ev.status}">${esc(STATUS_LABELS[ev.status] || ev.status)}</span>${renderSignupsClosedBadge(ev)}</td>
             <td>${renderSyncCell(ev)}</td>
             <td class="sr-actions"><a class="sr-ibtn" href="${esc(href)}" title="Open detail"><i class="ti ti-arrow-right"></i></a></td>
           </tr>
