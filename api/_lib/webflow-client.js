@@ -99,6 +99,7 @@ function getEnv() {
 function classifyStatus(status) {
   if (status === 401 || status === 403) return 'AUTH_FAIL';
   if (status === 404) return 'NOT_FOUND';
+  if (status === 409) return 'CONFLICT';
   if (status === 429) return 'RATE_LIMIT';
   if (status === 400 || status === 422) return 'VALIDATION_FAIL';
   if (status >= 500) return 'WEBFLOW_DOWN';
@@ -761,15 +762,24 @@ export async function hardDeleteItem({ webflowItemId }) {
  * Republish een Webflow-item dat in draft staat (gevolg van unpublishItem).
  * Voor reopen-signups flow.
  *
+ * SMOKE-LESSON (2026-06-12): PATCH /items/{id}/live op een ge-unpublisht
+ * item returnt Webflow 409 met "Live PATCH updates can't be applied to items
+ * that have never been published" - de live record bestaat niet meer, alleen
+ * de staged versie. Voor herpubliceren is dan een ECHTE publish nodig, niet
+ * een PATCH live.
+ *
  * Strategie:
- *   1. PATCH /collections/{coll}/items/{itemId}/live met isDraft=false +
- *      fieldData (zelfde shape als updateItem)
- *   2. Bij 404 of 422: fallback POST /collections/{coll}/items/{itemId}/publish
- *      (singular publish endpoint - werkt op staged item)
+ *   1. PATCH /collections/{coll}/items/{itemId} met fieldData (update staged
+ *      record met laatste data zodat de PUBLISH-stap straks de juiste content
+ *      bevat). Skippen we voor MVP omdat event-data doorgaans niet wijzigt
+ *      tussen close en reopen; alleen status verandert.
+ *   2. POST /collections/{coll}/items/publish met body { itemIds: [id] }
+ *      (Webflow v2 bulk publish - werkt op staged items, ook bij never-published).
  *
- * Valideren we in smoke. Bij beide-faal: gooi WebflowError door.
+ * Optioneel: bij ANY niet-success status -> log + gooi. Bij success: site-
+ * publish helper voor lijst-pagina refresh.
  *
- * @returns { itemId, raw, requestPayload, strategy: 'patch_live'|'post_publish' }
+ * @returns { itemId, raw, requestPayload, strategy: 'post_publish_bulk' }
  */
 export async function republishItem({ webflowItemId, event, descriptionHtml }) {
   if (!webflowItemId) throw new WebflowError('VALIDATION_FAIL', 'webflowItemId vereist');
@@ -778,24 +788,40 @@ export async function republishItem({ webflowItemId, event, descriptionHtml }) {
   const schema = await getCollectionSchema();
   const fieldData = buildFieldData({ event, descriptionHtml, schema });
 
-  // Strategie 1: PATCH /items/{id}/live met isDraft=false
-  const body = { isArchived: false, isDraft: false, fieldData };
+  // Stap 1 (best-effort): update staged record met laatste fieldData. Werkt
+  // ongeacht of het item live is of niet. Faal != fataal - publish-stap
+  // hieronder volgt sowieso.
+  const stagedBody = { isArchived: false, isDraft: false, fieldData };
+  let stagedResult = null;
   try {
-    const data = await webflowFetch(`/collections/${collId}/items/${webflowItemId}/live`, {
+    stagedResult = await webflowFetch(`/collections/${collId}/items/${webflowItemId}`, {
       method: 'PATCH',
-      body,
+      body: stagedBody,
     });
-    const sitePublish = await publishSiteIfEnabled('republish-' + webflowItemId);
-    return { itemId: webflowItemId, raw: data, requestPayload: body, sitePublish, strategy: 'patch_live' };
   } catch (e) {
-    if (!(e instanceof WebflowError) || !['NOT_FOUND','VALIDATION_FAIL'].includes(e.code)) throw e;
-    console.warn(`[webflow-client] republishItem PATCH /live faalde (${e.code}); fallback POST /publish`);
+    if (e instanceof WebflowError && e.code === 'NOT_FOUND') {
+      console.warn(`[webflow-client] republishItem PATCH staged 404 - item misschien hard-deleted (${webflowItemId})`);
+      throw e; // niets te republishen
+    }
+    // Andere errors loggen maar doorgaan naar publish-stap (vaak werkt die nog)
+    console.warn(`[webflow-client] republishItem PATCH staged faalde (${e?.code || 'unknown'}: ${e?.message?.slice(0, 120) || ''}); doorgaan met bulk-publish`);
   }
 
-  // Strategie 2: POST /collections/{coll}/items/{itemId}/publish (singular publish endpoint)
-  const data = await webflowFetch(`/collections/${collId}/items/${webflowItemId}/publish`, {
+  // Stap 2: bulk publish endpoint - documented Webflow v2 path voor
+  // PUBLISH staged items naar live site. Werkt ook bij never-published items.
+  const publishBody = { itemIds: [webflowItemId] };
+  const publishData = await webflowFetch(`/collections/${collId}/items/publish`, {
     method: 'POST',
+    body: publishBody,
   });
-  const sitePublish = await publishSiteIfEnabled('republish-fallback-' + webflowItemId);
-  return { itemId: webflowItemId, raw: data, requestPayload: null, sitePublish, strategy: 'post_publish' };
+
+  const sitePublish = await publishSiteIfEnabled('republish-' + webflowItemId);
+  return {
+    itemId       : webflowItemId,
+    raw          : publishData,
+    requestPayload: publishBody,
+    stagedUpdate : stagedResult ? { ok: true } : { ok: false, skipped: true },
+    sitePublish,
+    strategy     : 'post_publish_bulk',
+  };
 }

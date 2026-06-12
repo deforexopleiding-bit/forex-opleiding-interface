@@ -30,7 +30,12 @@ import { requirePermission } from './_lib/requirePermission.js';
 import { closeSignupsOutbound } from './_lib/event-sync-orchestrator.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const ALLOWED_REASONS = ['manual', 'auto_full', 'auto_deadline'];
+// MOET overeenkomen met DB CHECK-constraint events_signups_closed_reason_valid:
+//   ('auto_time'|'auto_full'|'manual')
+// Eerder stond hier per ongeluk 'auto_deadline' ipv 'auto_time' - DB-flip met
+// die waarde liet de CHECK falen en gooide 500, waardoor zowel DB als sync
+// nooit het juiste pad gingen. Nu strikt 1-op-1 met migratie.
+const ALLOWED_REASONS = ['manual', 'auto_full', 'auto_time'];
 
 const EVENT_SELECT = `
   id, title, starts_at, ends_at, location, capacity, status, niveau,

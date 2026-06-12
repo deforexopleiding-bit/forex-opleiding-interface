@@ -319,17 +319,33 @@ export async function computeUpcomingLabels() {
   const nowIso = new Date().toISOString();
   const { data, error } = await supabaseAdmin
     .from('events')
-    .select('id, title, starts_at, ends_at, niveau, status')
+    .select('id, title, starts_at, ends_at, niveau, status, signups_closed')
     .eq('status', 'published')
     .eq('signups_closed', false)
     .gt('starts_at', nowIso)
     .order('starts_at', { ascending: true });
 
   if (error) {
+    // Defensieve log: bij missing-column-error (migratie nog niet gerund)
+    // krijgen we hier een PostgREST error. computeUpcomingLabels returnt
+    // dan [] zodat de GHL_GUARD_EMPTY_LABELS verhindert dat we de dropdown
+    // legen. Belangrijk: deze foutmelding wijst dan ook naar migratie-status.
     console.error('[event-sync-orchestrator] computeUpcomingLabels error:', error.message);
     return [];
   }
-  return (data || []).map(formatEventLabel).filter(Boolean);
+
+  const labels = (data || []).map(formatEventLabel).filter(Boolean);
+
+  // Observability voor Blok 1 smoke: log de filter-uitkomst zodat we in
+  // Vercel logs direct kunnen verifieren dat signups_closed=true events
+  // worden uitgesloten. Format: count + ids voor cross-check met DB-state.
+  console.log(
+    `[event-sync-orchestrator] computeUpcomingLabels: ${labels.length} labels ` +
+    `(filter status=published, signups_closed=false, starts_at>${nowIso}). ` +
+    `event_ids=[${(data || []).map((r) => r.id?.slice(0, 8)).join(',')}]`
+  );
+
+  return labels;
 }
 
 async function syncGhl(event) {
@@ -452,7 +468,7 @@ async function syncGhl(event) {
 async function fetchEvent(eventId) {
   const { data, error } = await supabaseAdmin
     .from('events')
-    .select('id, title, starts_at, ends_at, location, status, niveau, description_md, webflow_item_id, webflow_sync_status, ghl_sync_status')
+    .select('id, title, starts_at, ends_at, location, status, niveau, description_md, webflow_item_id, webflow_sync_status, ghl_sync_status, signups_closed, signups_closed_reason')
     .eq('id', eventId)
     .single();
   if (error) throw new Error(`fetchEvent: ${error.message}`);
@@ -697,6 +713,26 @@ async function republishWebflow(event) {
 export async function closeSignupsOutbound(eventId) {
   if (!eventId) throw new Error('eventId vereist');
   const event = await fetchEvent(eventId);
+
+  // Defense-in-depth: bevestig dat caller daadwerkelijk signups_closed=true
+  // heeft gezet voordat wij de side-effects triggeren. Bij smoke 2026-06-12
+  // bleek het mogelijk dat de DB-flip niet door was gegaan (oude
+  // ALLOWED_REASONS bug) maar de outbound-sync wel werd geroepen - dat gaf
+  // de illusie van een gefaalde GHL-filter terwijl het in feite een
+  // DB-flip-fail was. Door dit hier expliciet te checken + loggen krijgen
+  // we duidelijke signal in Vercel logs.
+  if (event?.signups_closed !== true) {
+    console.warn(
+      `[event-sync-orchestrator] closeSignupsOutbound(${eventId}) ` +
+      `ontving event met signups_closed=${event?.signups_closed} ` +
+      `(verwacht true). DB-flip mogelijk niet doorgekomen.`
+    );
+  } else {
+    console.log(
+      `[event-sync-orchestrator] closeSignupsOutbound(${eventId}) ` +
+      `bevestigt signups_closed=true (reason=${event?.signups_closed_reason || 'n/a'})`
+    );
+  }
 
   const webflow = await unpublishWebflow(event);
 
