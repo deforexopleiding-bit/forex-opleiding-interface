@@ -29,6 +29,28 @@
         var userId = profile && profile.id;
         if (!supa || !userId) return new Set();
 
+        // ── BACKEND-SYMMETRIC SUPER_ADMIN-BYPASS ─────────────────────────
+        // Backend-RPC user_has_permission (migratie 002, regel 112-132) is
+        // SECURITY DEFINER en heeft een onafhankelijke OR-tak
+        // `EXISTS user_roles.role='super_admin'`. Daardoor bypasst de API
+        // altijd voor super_admin, ook bij:
+        //   - transiente user_roles RLS-glitches (de DEFINER omzeilt RLS)
+        //   - mixed-role configs waarin user_roles 'admin' bevat maar
+        //     profile.role 'super_admin' is.
+        // De oude frontend-code controleerde super_admin pas NA de
+        // user_roles-query, en alleen op de roles-array. Daardoor:
+        //   - rolesRes.error -> immediate return new Set() (geen bypass)
+        //   - mixed-role -> roles=['admin'], fallback fired niet (lengte>0),
+        //     'super_admin' niet in array -> geen bypass
+        //   - netto: UI ontzegt alles terwijl API alles toestaat.
+        // Fix: explicit short-circuit op profile.role==='super_admin'.
+        // Niet-super_admin gedrag is byte-identiek — code-pad hieronder
+        // ongewijzigd.
+        if (profile.role === 'super_admin') {
+          _rolesCache = ['super_admin'];
+          return new Set(['*']);
+        }
+
         // 1) Alle rollen van de user (RLS: eigen rijen leesbaar).
         var rolesRes = await supa.from('user_roles').select('role').eq('user_id', userId);
         if (rolesRes.error) { console.warn('[RBAC] user_roles:', rolesRes.error.message); return new Set(); }
@@ -37,6 +59,9 @@
         if (roles.length === 0 && profile.role) roles = [profile.role];
         _rolesCache = roles;
 
+        // Defense-in-depth: user_roles kan na fix-1 (profile.role-bypass)
+        // alsnog 'super_admin' bevatten zonder dat profile.role gezet was —
+        // we honoreren dat ook (bestaand gedrag).
         if (roles.indexOf('super_admin') !== -1) return new Set(['*']);
         if (roles.length === 0) return new Set();
 
