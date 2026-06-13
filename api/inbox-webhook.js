@@ -34,6 +34,7 @@ import { supabaseAdmin } from './supabase.js';
 import { getClientIp } from './_lib/audit-customer.js';
 import { getModuleContextByPhoneNumberId } from './_lib/module-context.js';
 import { extractEmail, findCustomerByEmail } from './_lib/email-extractor.js';
+import { runJoostSuggest } from './_lib/joost-suggest-core.js';
 
 // Vercel-eis: bodyParser uit zodat we de raw body kunnen lezen voor HMAC.
 export const config = {
@@ -346,74 +347,61 @@ async function hasNoRecentOutbound(conversationId, windowSec = 60) {
 }
 
 /**
- * Fire-and-forget HTTP self-call naar /api/joost-suggest. NIET awaited
- * door caller — gebruikt .catch() om unhandled rejections af te vangen.
+ * Reactieve Joost-suggest trigger: in-process aanroep van runJoostSuggest
+ * (geen HTTP-self-call meer). Fase 2 stap 1 — vervangt de oude
+ * fetch(`${VERCEL_URL}/api/joost-suggest`) die structureel `fetch failed`
+ * gaf op prod (Vercel Deployment Protection / cold-start DNS-race; self-
+ * HTTP-calls op Node-runtime zijn een gedocumenteerd anti-pattern).
  *
- * Auth: X-Internal-Token header met process.env.INTERNAL_API_TOKEN.
- * joost-suggest.js (auth-blok regel 138-146) skipt user-JWT + RBAC bij
- * deze header-match.
+ * Fire-and-forget patroon BLIJFT: caller awaited niet, .then()/.catch()
+ * vangt resultaat + errors zodat de Meta-webhook binnen het 200-OK budget
+ * blijft. Vercel Node-runtime houdt de execution-context typisch warm
+ * zolang er open promises zijn — best-effort, zoals voorheen.
  *
- * URL: VERCEL_URL > APP_BASE_URL > http://localhost:3000. VERCEL_URL
- * is automatisch geset op alle Vercel deploys (preview + production).
+ * Geen INTERNAL_API_TOKEN / VERCEL_URL nodig voor het suggest-pad zelf.
  *
- * E2.1 reactive autonomy chain:
- *   Als `autonomyEnabled=true` (feature-flag joost_config.feature_flags.
- *   e2_reactive_autonomy = true) wordt na een 200-response van
- *   joost-suggest direct /api/joost-send-autonomous aangeroepen met de
- *   net-gemaakte suggestion_id. Joost-send-autonomous heeft een eigen
- *   feature-flag-check (defense-in-depth) + decision-engine die bepaalt
- *   of de message daadwerkelijk verzonden wordt of als BLOCKED_* wordt
- *   gemarkeerd. Volledig fire-and-forget, geen blocking op de webhook.
+ * E2.1 autonomous chain (out-of-scope voor Fase 2 stap 1):
+ *   Als `autonomyEnabled=true` (feature-flag e2_reactive_autonomy, default
+ *   UIT op finance), na een succesvolle suggestion-insert: HTTP self-call
+ *   naar /api/joost-send-autonomous met INTERNAL_API_TOKEN. Dit pad heeft
+ *   dezelfde 'fetch failed'-fragiliteit als het oude suggest-pad — wordt
+ *   in Fase 2 stap 2 omgezet naar in-process. Voor nu: gated OFF default,
+ *   dus geen observable impact.
  */
-function triggerJoostAutoSuggest({ conversationId, triggeredByMessageId, autonomyEnabled }) {
-  const token = process.env.INTERNAL_API_TOKEN;
-  if (!token) {
-    console.warn('[inbox-webhook] joost auto-trigger skipped: INTERNAL_API_TOKEN ontbreekt');
-    return;
-  }
-  const base = process.env.VERCEL_URL
-    ? `https://${process.env.VERCEL_URL}`
-    : (process.env.APP_BASE_URL || 'http://localhost:3000');
-  const suggestUrl    = `${base}/api/joost-suggest`;
-  const autonomousUrl = `${base}/api/joost-send-autonomous`;
-
-  // Fire-and-forget: NIET awaited. Vercel Node-runtime houdt context warm
-  // zolang er open promises zijn, maar geeft geen voltooiings-garantie na
-  // res.json(). Best-effort; bij occasionally-dropped suggestion is dat
-  // acceptabel voor MVP (E1.1).
-  fetch(suggestUrl, {
-    method:  'POST',
-    headers: {
-      'content-type':     'application/json',
-      'x-internal-token': token,
-    },
-    body: JSON.stringify({
-      conversation_id:         conversationId,
-      triggered_by_message_id: triggeredByMessageId || null,
-      auto_triggered:          true,
-    }),
-  }).then(async (resp) => {
-    if (!resp.ok) {
-      const txt = await resp.text().catch(() => '');
-      console.warn(`[inbox-webhook] joost auto-trigger HTTP ${resp.status}: ${txt.slice(0, 200)}`);
+function triggerJoostAutoSuggest({ conversationId, triggeredByMessageId, autonomyEnabled, clientIp }) {
+  runJoostSuggest({
+    supabase:             supabaseAdmin,
+    conversationId,
+    triggeredByMessageId: triggeredByMessageId || null,
+    autoTriggered:        true,
+    requestedByUserId:    null,
+    clientIp:             clientIp || null,
+  }).then((result) => {
+    if (result.status !== 200) {
+      console.warn(
+        '[inbox-webhook] joost in-process suggest status=' + result.status +
+        ': ' + JSON.stringify(result.body || {}).slice(0, 200)
+      );
       return;
     }
-    // E2.1 reactive autonomy chain — alleen als feature-flag aanstaat én
-    // joost-suggest een suggestion-id heeft teruggegeven. joost-send-autonomous
-    // heeft een eigen guard op de flag (defense-in-depth) en op state.
     if (!autonomyEnabled) return;
-    let suggestionId = null;
-    try {
-      const payload = await resp.json();
-      suggestionId = payload?.suggestion?.id || null;
-    } catch (eParse) {
-      console.warn('[inbox-webhook] joost-suggest response parse fail:', eParse && eParse.message);
-      return;
-    }
+
+    const suggestionId = result.body?.suggestion?.id || null;
     if (!suggestionId) {
-      console.warn('[inbox-webhook] joost-suggest response zonder suggestion.id — autonomy chain skipped');
+      console.warn('[inbox-webhook] joost in-process suggest zonder suggestion.id — autonomy chain skipped');
       return;
     }
+
+    // ── E2.1 autonomous chain — nog HTTP self-call (Fase 2 stap 2 scope) ──
+    const token = process.env.INTERNAL_API_TOKEN;
+    if (!token) {
+      console.warn('[inbox-webhook] joost autonomous-trigger skipped: INTERNAL_API_TOKEN ontbreekt');
+      return;
+    }
+    const base = process.env.VERCEL_URL
+      ? `https://${process.env.VERCEL_URL}`
+      : (process.env.APP_BASE_URL || 'http://localhost:3000');
+    const autonomousUrl = `${base}/api/joost-send-autonomous`;
     fetch(autonomousUrl, {
       method:  'POST',
       headers: {
@@ -430,7 +418,7 @@ function triggerJoostAutoSuggest({ conversationId, triggeredByMessageId, autonom
       console.warn('[inbox-webhook] joost autonomous-trigger fetch fail:', e2 && e2.message);
     });
   }).catch((e) => {
-    console.warn('[inbox-webhook] joost auto-trigger fetch fail:', e && e.message);
+    console.warn('[inbox-webhook] joost in-process suggest threw:', e && e.message);
   });
 }
 
@@ -1102,12 +1090,16 @@ export default async function handler(req, res) {
               //   d) joost_config.is_enabled = true voor finance
               //
               // Auto-suggest extra filters:
-              //   e) body >= 5 chars + niet in TRIVIAL_REPLIES set
-              //   f) anti-loop: geen outbound binnen 60s
+              //   e) joost_config.feature_flags.reactive_suggest_enabled = true
+              //      (per-module gate, Fase 2 stap 1; default UIT op finance)
+              //   f) body >= 5 chars + niet in TRIVIAL_REPLIES set
+              //   g) anti-loop: geen outbound binnen 60s
               //
-              // Auth: auto-suggest gebruikt X-Internal-Token header naar
-              // /api/joost-suggest. Intake-flow gebruikt sendText direct +
-              // schrijft eigen outbound message-rij (geen extra HTTP-hop).
+              // Aanroep: auto-suggest doet sinds Fase 2 stap 1 een IN-PROCESS
+              // call van runJoostSuggest (api/_lib/joost-suggest-core.js).
+              // Geen HTTP-self-call meer, dus geen VERCEL_URL / INTERNAL_API_TOKEN
+              // afhankelijkheid voor dit pad. Intake-flow gebruikt sendText
+              // direct + schrijft eigen outbound message-rij (geen extra hop).
               try {
                 if (insRes.inserted && insRes.messageId && insRes.type === 'text') {
                   // Module + joost_config: éénmalige lookup voor beide paden.
@@ -1162,22 +1154,34 @@ export default async function handler(req, res) {
                       // Pad (ii) Auto-suggest: alleen als intake-flow NIET
                       // heeft afgehandeld én klant gekoppeld is.
                       if (!intakeHandled && conv.customerId) {
-                        const trimmed = String(insRes.body || '').trim();
-                        const lower = trimmed.toLowerCase();
-                        const isTriggerable = trimmed.length >= 5 && !TRIVIAL_REPLIES.has(lower);
-                        if (isTriggerable) {
-                          const noLoop = await hasNoRecentOutbound(conv.id, 60);
-                          if (noLoop) {
-                            // E2.1 reactive-autonomy gate: alleen chain naar
-                            // /api/joost-send-autonomous als feature-flag
-                            // e2_reactive_autonomy aanstaat. joost-send-autonomous
-                            // doet zelf nogmaals de check (defense-in-depth).
-                            const autonomyEnabled = flags.e2_reactive_autonomy === true;
-                            triggerJoostAutoSuggest({
-                              conversationId:        conv.id,
-                              triggeredByMessageId:  insRes.messageId,
-                              autonomyEnabled,
-                            });
+                        // Per-module reactive-suggest gate (Fase 2 stap 1).
+                        // joost_config.feature_flags.reactive_suggest_enabled
+                        // bepaalt per module of de reactieve in-process suggest
+                        // vuurt na een inbound. Default UIT op finance zodat
+                        // observable gedrag identiek blijft aan de gebroken
+                        // HTTP-self-call-toestand (= geen suggesties). Admin
+                        // flipt 'm aan op de finance-rij (of straks events-rij
+                        // voor Simone) om reactieve drafts te activeren.
+                        const reactiveEnabled = flags.reactive_suggest_enabled === true;
+                        if (reactiveEnabled) {
+                          const trimmed = String(insRes.body || '').trim();
+                          const lower = trimmed.toLowerCase();
+                          const isTriggerable = trimmed.length >= 5 && !TRIVIAL_REPLIES.has(lower);
+                          if (isTriggerable) {
+                            const noLoop = await hasNoRecentOutbound(conv.id, 60);
+                            if (noLoop) {
+                              // E2.1 reactive-autonomy gate: alleen chain naar
+                              // /api/joost-send-autonomous als feature-flag
+                              // e2_reactive_autonomy aanstaat. joost-send-autonomous
+                              // doet zelf nogmaals de check (defense-in-depth).
+                              const autonomyEnabled = flags.e2_reactive_autonomy === true;
+                              triggerJoostAutoSuggest({
+                                conversationId:        conv.id,
+                                triggeredByMessageId:  insRes.messageId,
+                                autonomyEnabled,
+                                clientIp:              getClientIp(req),
+                              });
+                            }
                           }
                         }
                       }
