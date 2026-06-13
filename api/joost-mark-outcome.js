@@ -70,10 +70,10 @@ export default async function handler(req, res) {
   const { data: { user }, error: userErr } = await userClient.auth.getUser();
   if (userErr || !user) return res.status(401).json({ error: 'Niet geauthenticeerd' });
 
-  // ---- Permission (strict: finance.joost.use) ----
-  if (!(await requirePermission(req, 'finance.joost.use'))) {
-    return res.status(403).json({ error: 'Geen rechten (finance.joost.use)' });
-  }
+  // ---- Permission (module-conditioned, gecheckt na suggestion-load) ----
+  // Default = finance.joost.use; voor module='events' valt 'm op events.simone.use.
+  // De suggestion-row is autoritatief voor de module-discriminator, niet de body
+  // (anti-spoofing). Body bevat geen module-veld om dezelfde reden.
 
   // ---- Body parsen ----
   const body = req.body || {};
@@ -159,7 +159,7 @@ export default async function handler(req, res) {
     // ========================================================================
     const { data: current, error: selErr } = await supabaseAdmin
       .from('joost_suggestions')
-      .select('id, status, suggested_reply, conversation_id')
+      .select('id, status, suggested_reply, conversation_id, module')
       .eq('id', suggestionId)
       .maybeSingle();
     if (selErr) {
@@ -174,6 +174,12 @@ export default async function handler(req, res) {
         error: 'Suggestion is niet in PROPOSED state',
         current_status: current.status,
       });
+    }
+
+    // Module-conditioned permission check — row is autoritatief.
+    const permKey = current.module === 'events' ? 'events.simone.use' : 'finance.joost.use';
+    if (!(await requirePermission(req, permKey))) {
+      return res.status(403).json({ error: 'Geen rechten (' + permKey + ')' });
     }
 
     // ========================================================================

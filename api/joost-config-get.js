@@ -56,6 +56,7 @@ function buildDefaultConfig(moduleKey) {
     temperature: 0.3,
     context_message_count: 20,
     is_enabled: true,
+    feature_flags: {},
     updated_by_user_id: null,
     updated_at: null,
     is_default: true,
@@ -76,20 +77,30 @@ export default async function handler(req, res) {
   const { data: { user }, error: userErr } = await userClient.auth.getUser();
   if (userErr || !user) return res.status(401).json({ error: 'Niet geauthenticeerd' });
 
-  // ---- Permission (OR-fallback, short-circuit) ----
-  // admin.joost_config geeft volledige toegang; finance.joost.view is read-only
-  // gate voor inbox-gebruikers die het paneel mogen zien.
-  const hasAdmin = await requirePermission(req, 'admin.joost_config');
-  const hasView  = hasAdmin ? true : await requirePermission(req, 'finance.joost.view');
-  if (!hasAdmin && !hasView) {
-    return res.status(403).json({ error: 'Geen rechten (admin.joost_config of finance.joost.view)' });
-  }
-
-  // ---- Module-param valideren ----
+  // ---- Module-param valideren (BEFORE permission zodat we per module kunnen
+  //      checken; default 'finance' houdt bestaande callers byte-identiek). ----
   const moduleRaw = (req.query?.module ?? 'finance').toString().trim();
   const moduleKey = moduleRaw || 'finance';
   if (!MODULE_RX.test(moduleKey)) {
     return res.status(400).json({ error: 'module: alleen lowercase a-z, 0-9, _ en - (max 50 chars)' });
+  }
+
+  // ---- Permission (module-conditioned, OR-fallback met short-circuit) ----
+  // Voor module='events' (Simone): admin.simone_config (volledige toegang) of
+  // events.simone.use (read-only paneel-gate). Voor andere modules: bestaande
+  // finance/joost-gate, byte-identiek met pre-stap-2c.
+  let adminPermKey, viewPermKey;
+  if (moduleKey === 'events') {
+    adminPermKey = 'admin.simone_config';
+    viewPermKey  = 'events.simone.use';
+  } else {
+    adminPermKey = 'admin.joost_config';
+    viewPermKey  = 'finance.joost.view';
+  }
+  const hasAdmin = await requirePermission(req, adminPermKey);
+  const hasView  = hasAdmin ? true : await requirePermission(req, viewPermKey);
+  if (!hasAdmin && !hasView) {
+    return res.status(403).json({ error: 'Geen rechten (' + adminPermKey + ' of ' + viewPermKey + ')' });
   }
 
   // ---- Query ----
@@ -99,7 +110,7 @@ export default async function handler(req, res) {
       .select(`
         module, persona_name, persona_tone, system_prompt_template,
         knowledge_base, model, temperature, context_message_count,
-        is_enabled, updated_by_user_id, updated_at
+        is_enabled, feature_flags, updated_by_user_id, updated_at
       `)
       .eq('module', moduleKey)
       .maybeSingle();
