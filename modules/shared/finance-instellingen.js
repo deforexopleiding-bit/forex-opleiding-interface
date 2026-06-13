@@ -1451,12 +1451,12 @@
                 <!-- BODY -->
                 <div class="form-group">
                   <label class="form-label" for="waMetaBodyText">Body</label>
-                  <!-- Fase B: opmaak-toolbar (WhatsApp markdown: *bold* _italic_ ~strike~ `mono`) -->
+                  <!-- Fase B: opmaak-toolbar (WhatsApp markdown bold/italic/strike/mono). -->
                   <div id="waMetaFormatToolbar" style="display:flex;gap:4px;margin-bottom:6px;flex-wrap:wrap">
                     <button type="button" class="btn btn-sm" data-wa-fmt="bold"   title="Vetgedrukt — *tekst*" style="font-weight:700;min-width:32px">B</button>
                     <button type="button" class="btn btn-sm" data-wa-fmt="italic" title="Cursief — _tekst_" style="font-style:italic;min-width:32px">I</button>
                     <button type="button" class="btn btn-sm" data-wa-fmt="strike" title="Doorgehaald — ~tekst~" style="text-decoration:line-through;min-width:32px">S</button>
-                    <button type="button" class="btn btn-sm" data-wa-fmt="code"   title="Monospace — `tekst`" style="font-family:ui-monospace,Menlo,Monaco,Consolas,monospace;min-width:32px">&lt;/&gt;</button>
+                    <button type="button" class="btn btn-sm" data-wa-fmt="code"   title="Monospace (code-stijl)" style="font-family:ui-monospace,Menlo,Monaco,Consolas,monospace;min-width:32px">&lt;/&gt;</button>
                   </div>
                   <textarea id="waMetaBodyText" class="form-input" rows="6" maxlength="1024" placeholder="Hi {{klant.naam}}, je factuur {{factuur.nummer}} staat open."></textarea>
                   <div style="font-size:11px;color:var(--text-faint);margin-top:4px">
