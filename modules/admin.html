@@ -168,6 +168,7 @@
       <button class="admin-tab" data-tab="rechten" id="rechtenTabBtn" onclick="switchAdminTab('rechten')" style="display:none">Rechten</button>
       <button class="admin-tab" data-tab="integraties" onclick="switchAdminTab('integraties')">Integraties</button>
       <button class="admin-tab" data-tab="approval-queue" data-view="approval-queue" id="approvalsTabBtn" onclick="switchAdminTab('approval-queue')" style="display:none">Approval-queue <span id="approvalsTabBadge" class="approvals-tab-badge hidden">0</span></button>
+      <button class="admin-tab" data-tab="assessment" id="assessmentTabBtn" onclick="switchAdminTab('assessment')" style="display:none">Assessment-vragen</button>
       <!-- Joost (AI) tab VERHUISD naar Finance > Instellingen (Groep D, juni 2026). -->
       <!-- WhatsApp Connection + WhatsApp Templates VERHUISD naar Finance > Instellingen (PR-4, juni 2026). -->
     </div>
@@ -360,6 +361,109 @@
 
     <!-- ── Joost (AI) configuratie — VERHUISD naar Finance > Instellingen (Groep D) — zie modules/shared/finance-instellingen.js ── -->
 
+    <!-- ── Assessment-vragen editor (forward-only config) ────────────────── -->
+    <div id="tab-assessment" class="admin-tab-panel" style="display:none">
+      <div class="section-card">
+        <div class="section-header" style="justify-content:space-between">
+          <div>
+            <div style="font-size:15px;font-weight:700">Assessment-vragen</div>
+            <div style="font-size:12px;color:var(--text-faint);font-weight:400;margin-top:4px;max-width:720px">
+              Beheer van de vragen in <code>/modules/assessment.html</code>. Wijzigingen zijn <strong>forward-only</strong> — bestaande inzendingen
+              behouden hun antwoorden + scores; alleen nieuwe submissies gebruiken de nieuwe config. Routing-weights bepalen de scoring (Blok 2 PR 2);
+              wees voorzichtig met aanpassingen.
+            </div>
+          </div>
+          <div style="display:flex;gap:8px">
+            <button class="btn btn-sm" onclick="loadAssessmentQuestions()" title="Lijst opnieuw laden"><i class="ti ti-refresh"></i></button>
+            <button class="btn btn-sm btn-primary" onclick="openAssessmentQuestionEdit(null)"><i class="ti ti-plus"></i> Nieuwe vraag</button>
+          </div>
+        </div>
+        <div id="assessmentQuestionsBanner" style="display:none;margin:8px 0 0;padding:10px 14px;border-radius:8px;font-size:13px"></div>
+        <div id="assessmentQuestionsList" style="padding:16px 0;display:flex;flex-direction:column;gap:18px">
+          <div style="font-size:12.5px;color:var(--text-faint)">Laden…</div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ── Assessment-vraag edit modal ──────────────────────────────────────────── -->
+<div class="modal-overlay hidden" id="assessmentQuestionEditModal" role="dialog" aria-modal="true">
+  <div class="modal-card" style="max-width:720px">
+    <div class="modal-header">
+      <div class="modal-title" id="assessmentQuestionModalTitle">Nieuwe vraag</div>
+      <button class="modal-close" type="button" onclick="closeAssessmentQuestionEdit()">&#x2715;</button>
+    </div>
+    <div class="modal-body" style="max-height:70vh;overflow-y:auto">
+      <div id="assessmentQuestionEditError" style="display:none;margin-bottom:10px;padding:8px 12px;background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.3);border-radius:6px;color:#dc2626;font-size:12px;white-space:pre-wrap"></div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+        <div class="form-group">
+          <label class="form-label" for="aqKey">Key (uniek, slug)</label>
+          <input type="text" id="aqKey" class="form-input" maxlength="64" placeholder="bv. ervaring" />
+          <div style="font-size:11px;color:var(--text-faint);margin-top:4px">Lowercase a-z, 0-9, _ en -. Niet aanpasbaar na create.</div>
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="aqSection">Section</label>
+          <input type="text" id="aqSection" class="form-input" maxlength="64" placeholder="bv. identiteit / routing / engagement / doel" />
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="aqType">Type</label>
+          <select id="aqType" class="form-input">
+            <option value="text">text</option>
+            <option value="email">email</option>
+            <option value="radio">radio</option>
+            <option value="scale_1_5">scale_1_5</option>
+            <option value="scale_1_10">scale_1_10</option>
+            <option value="open_text">open_text</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="aqOrderIndex">Order index</label>
+          <input type="number" id="aqOrderIndex" class="form-input" min="0" step="10" value="0" />
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="aqLabel">Label (NL)</label>
+        <input type="text" id="aqLabel" class="form-input" maxlength="500" placeholder="De vraagtekst zoals de deelnemer 'm ziet" />
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="aqHelpText">Help-tekst (optioneel)</label>
+        <textarea id="aqHelpText" class="form-input" rows="2" maxlength="1000" placeholder="Korte toelichting onder de vraag"></textarea>
+      </div>
+      <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:10px">
+        <label style="display:flex;align-items:center;gap:6px;font-size:13px">
+          <input type="checkbox" id="aqRequired" checked /> Verplicht
+        </label>
+        <label style="display:flex;align-items:center;gap:6px;font-size:13px">
+          <input type="checkbox" id="aqActive" checked /> Actief (toon op publieke pagina)
+        </label>
+        <label style="display:flex;align-items:center;gap:6px;font-size:13px">
+          <input type="checkbox" id="aqIsRouting" /> is_routing (telt mee in scoring)
+        </label>
+      </div>
+      <div class="form-group" id="aqMinWordsGroup" style="display:none">
+        <label class="form-label" for="aqMinWords">Min. woorden (open_text)</label>
+        <input type="number" id="aqMinWords" class="form-input" min="0" step="1" placeholder="bv. 30" />
+      </div>
+      <div class="form-group" id="aqOptionsGroup" style="display:none">
+        <label class="form-label" for="aqOptionsJson">Options (radio) — JSON</label>
+        <textarea id="aqOptionsJson" class="form-input" rows="6" placeholder='[{"value":"basis","label":"Basis"}, {"value":"gevorderd","label":"Gevorderd"}]'></textarea>
+        <div style="font-size:11px;color:var(--text-faint);margin-top:4px">Array van <code>{ value, label }</code>. Strikte JSON-syntax.</div>
+      </div>
+      <div class="form-group" id="aqRoutingWeightsGroup" style="display:none">
+        <label class="form-label" for="aqRoutingWeightsJson">routing_weights — JSON ⚠ beïnvloedt scoring</label>
+        <textarea id="aqRoutingWeightsJson" class="form-input" rows="6" placeholder='{"basis":0,"gevorderd":3}'></textarea>
+        <div style="font-size:11px;color:var(--text-faint);margin-top:4px">
+          Voor radio: object met de option-values als keys → score (number). Voor scale: keys <code>"1"</code>..<code>"5"</code> of <code>"10"</code>.
+          Negatieve waardes zijn toegestaan (rem-functie zoals motivatie). Bestaande inzendingen worden NIET herberekend.
+        </div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn" type="button" onclick="closeAssessmentQuestionEdit()">Annuleren</button>
+      <button class="btn btn-primary" id="aqSaveBtn" type="button" onclick="saveAssessmentQuestion()">Opslaan</button>
+    </div>
   </div>
 </div>
 
@@ -831,6 +935,8 @@ function switchAdminTab(name) {
   if (approvPanel) approvPanel.style.display = name === 'approval-queue' ? '' : 'none';
   const approvView = document.getElementById('view-approval-queue');
   if (approvView) approvView.hidden = name !== 'approval-queue';
+  const aqPanel = document.getElementById('tab-assessment');
+  if (aqPanel) aqPanel.style.display = name === 'assessment' ? '' : 'none';
   // WhatsApp Connection + WhatsApp Templates panels VERHUISD naar Finance >
   // Instellingen (PR-4). Joost-config tab VERHUISD naar Finance > Instellingen
   // (Groep D, juni 2026).
@@ -841,6 +947,9 @@ function switchAdminTab(name) {
   if (name === 'approval-queue') {
     wireApprovOnce();
     loadApprovalQueue();
+  }
+  if (name === 'assessment') {
+    loadAssessmentQuestions();
   }
   // WhatsApp Templates + Connection init VERHUISD: zie
   // modules/shared/finance-instellingen.js (Finance > Instellingen).
@@ -1019,6 +1128,20 @@ async function init() {
     }
   } catch (_) { /* RBAC niet geladen — tab blijft verborgen */ }
 
+  // Assessment-vragen tab: super_admin OF can(admin.joost_config).
+  // Hergebruikt joost_config-permissie: assessment-routing is semantisch
+  // dezelfde AI/scoring-config-tier.
+  try {
+    let allowAQ = currentProfile.role === 'super_admin';
+    if (!allowAQ && window.RBAC && typeof window.RBAC.can === 'function') {
+      allowAQ = await window.RBAC.can('admin.joost_config');
+    }
+    if (allowAQ) {
+      const ab = document.getElementById('assessmentTabBtn');
+      if (ab) ab.style.display = '';
+    }
+  } catch (_) { /* RBAC niet geladen — tab blijft verborgen */ }
+
   accessToken = await window.AuthShared.getAccessToken();
 
   // Render user section
@@ -1050,7 +1173,7 @@ async function init() {
       location.replace(legacyRedirectMap[hash]);
       return;
     }
-    var allowedHashes = ['approval-queue', 'integraties', 'rechten', 'gebruikers'];
+    var allowedHashes = ['approval-queue', 'integraties', 'rechten', 'gebruikers', 'assessment'];
     if (hash && allowedHashes.indexOf(hash) !== -1) switchAdminTab(hash);
   } catch (_) { /* fail-soft */ }
 }
@@ -1848,6 +1971,303 @@ function approvFmtDateTime(iso) {
 function approvTruncate(s, n) {
   s = String(s == null ? '' : s);
   return s.length > n ? s.slice(0, n - 1) + '…' : s;
+}
+
+// ── Assessment-vragen editor ──────────────────────────────────────────────
+//
+// Forward-only invariant: edits beïnvloeden GEEN bestaande assessment_responses.
+// Antwoorden zijn verbatim opgeslagen + score + routing_result vastgelegd
+// at-submit-tijd. Alleen NIEUWE inzendingen gebruiken de nieuwe config.
+// Hard-delete is bewust niet beschikbaar; deactiveren via active=false.
+
+let _aqItems       = [];
+let _aqEditingId   = null;
+
+function aqBanner(kind, text, autoMs) {
+  const el = document.getElementById('assessmentQuestionsBanner');
+  if (!el) return;
+  const bg = kind === 'success' ? 'rgba(5,150,105,.10)' : 'rgba(220,38,38,.10)';
+  const fg = kind === 'success' ? '#059669' : '#b91c1c';
+  el.style.background = bg; el.style.color = fg; el.style.border = '1px solid ' + fg + '40';
+  el.textContent = text;
+  el.style.display = '';
+  if (autoMs) setTimeout(() => { el.style.display = 'none'; }, autoMs);
+}
+
+async function loadAssessmentQuestions() {
+  const wrap = document.getElementById('assessmentQuestionsList');
+  if (!wrap) return;
+  wrap.innerHTML = '<div style="font-size:12.5px;color:var(--text-faint)">Laden…</div>';
+  try {
+    const r = await window.AgentShared.apiFetch('/api/admin-assessment-questions-list');
+    if (!r.ok) {
+      const j = await r.json().catch(() => ({}));
+      wrap.innerHTML = '<div style="color:#b91c1c;font-size:13px">Fout: ' + esc(j.error || ('HTTP ' + r.status)) + '</div>';
+      return;
+    }
+    const j = await r.json();
+    _aqItems = Array.isArray(j.questions) ? j.questions : [];
+    renderAssessmentQuestionsList();
+  } catch (e) {
+    wrap.innerHTML = '<div style="color:#b91c1c;font-size:13px">Fout: ' + esc(e.message) + '</div>';
+  }
+}
+
+function renderAssessmentQuestionsList() {
+  const wrap = document.getElementById('assessmentQuestionsList');
+  if (!wrap) return;
+  if (_aqItems.length === 0) {
+    wrap.innerHTML = '<div style="font-size:12.5px;color:var(--text-faint);padding:14px">Nog geen vragen — klik op + Nieuwe vraag.</div>';
+    return;
+  }
+  // Group by section (server-side order is al section, order_index).
+  const groups = {};
+  const sectionOrder = [];
+  for (const q of _aqItems) {
+    const s = q.section || '(geen sectie)';
+    if (!groups[s]) { groups[s] = []; sectionOrder.push(s); }
+    groups[s].push(q);
+  }
+  wrap.innerHTML = sectionOrder.map(sec => {
+    const items = groups[sec];
+    return ''
+      + '<div style="border:1px solid var(--border);border-radius:10px;overflow:hidden">'
+      +   '<div style="padding:10px 14px;background:rgba(0,0,0,.04);font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--text-dim)">' + esc(sec) + ' (' + items.length + ')</div>'
+      +   items.map((q, idx) => renderAssessmentQuestionRow(q, idx, items.length)).join('')
+      + '</div>';
+  }).join('');
+}
+
+function renderAssessmentQuestionRow(q, idxInSection, totalInSection) {
+  const dimStyle = q.active ? '' : 'opacity:0.55';
+  const badges = []
+    .concat(q.is_routing ? ['<span style="font-size:10px;font-weight:600;background:rgba(99,102,241,.15);color:#6366f1;padding:2px 6px;border-radius:999px">routing</span>'] : [])
+    .concat(q.required ? ['<span style="font-size:10px;font-weight:600;background:rgba(220,38,38,.12);color:#dc2626;padding:2px 6px;border-radius:999px">verplicht</span>'] : [])
+    .concat(!q.active ? ['<span style="font-size:10px;font-weight:600;background:rgba(107,114,128,.15);color:#6b7280;padding:2px 6px;border-radius:999px">inactive</span>'] : [])
+    .join(' ');
+  const reorderUp   = idxInSection > 0 ? '<button class="btn btn-sm" type="button" onclick="reorderAssessmentQuestion(\'' + esc(q.id) + '\', -1)" title="Omhoog"><i class="ti ti-chevron-up"></i></button>' : '<span style="display:inline-block;width:30px"></span>';
+  const reorderDown = idxInSection < totalInSection - 1 ? '<button class="btn btn-sm" type="button" onclick="reorderAssessmentQuestion(\'' + esc(q.id) + '\', +1)" title="Omlaag"><i class="ti ti-chevron-down"></i></button>' : '<span style="display:inline-block;width:30px"></span>';
+  const toggleLabel = q.active ? 'Deactiveer' : 'Activeer';
+  return ''
+    + '<div style="display:grid;grid-template-columns:80px 1fr auto auto;gap:10px;align-items:center;padding:10px 14px;border-top:1px solid var(--border);' + dimStyle + '">'
+    +   '<div style="font-family:ui-monospace,Menlo,Consolas,monospace;font-size:11.5px;color:var(--text-faint)">#' + esc(q.order_index) + '</div>'
+    +   '<div>'
+    +     '<div style="font-size:13.5px;font-weight:600">' + esc(q.label) + '</div>'
+    +     '<div style="font-size:11.5px;color:var(--text-faint);margin-top:2px">'
+    +       '<code style="font-family:ui-monospace,Menlo,Consolas,monospace">' + esc(q.key) + '</code>'
+    +       ' · ' + esc(q.type)
+    +       (q.type === 'open_text' && q.min_words ? ' · min ' + esc(q.min_words) + ' woorden' : '')
+    +       (Array.isArray(q.options) ? ' · ' + q.options.length + ' opties' : '')
+    +       ' ' + badges
+    +     '</div>'
+    +   '</div>'
+    +   '<div style="display:flex;gap:4px">' + reorderUp + reorderDown + '</div>'
+    +   '<div style="display:flex;gap:4px">'
+    +     '<button class="btn btn-sm" type="button" onclick="openAssessmentQuestionEdit(\'' + esc(q.id) + '\')"><i class="ti ti-edit"></i></button>'
+    +     '<button class="btn btn-sm" type="button" onclick="toggleAssessmentQuestionActive(\'' + esc(q.id) + '\')" title="' + toggleLabel + '"><i class="ti ti-' + (q.active ? 'eye-off' : 'eye') + '"></i></button>'
+    +   '</div>'
+    + '</div>';
+}
+
+function openAssessmentQuestionEdit(id) {
+  _aqEditingId = id || null;
+  const tpl = id ? (_aqItems.find(x => x.id === id) || null) : null;
+  document.getElementById('assessmentQuestionModalTitle').textContent = tpl ? 'Vraag bewerken' : 'Nieuwe vraag';
+  document.getElementById('assessmentQuestionEditError').style.display = 'none';
+
+  const keyEl = document.getElementById('aqKey');
+  keyEl.value = tpl ? tpl.key : '';
+  keyEl.disabled = !!tpl; // immutable na create
+
+  document.getElementById('aqSection').value     = tpl ? (tpl.section || '') : '';
+  document.getElementById('aqType').value        = tpl ? tpl.type : 'text';
+  document.getElementById('aqOrderIndex').value  = tpl ? tpl.order_index : 0;
+  document.getElementById('aqLabel').value       = tpl ? tpl.label : '';
+  document.getElementById('aqHelpText').value    = tpl && tpl.help_text ? tpl.help_text : '';
+  document.getElementById('aqRequired').checked  = tpl ? !!tpl.required : true;
+  document.getElementById('aqActive').checked    = tpl ? !!tpl.active   : true;
+  document.getElementById('aqIsRouting').checked = tpl ? !!tpl.is_routing : false;
+  document.getElementById('aqMinWords').value    = tpl && tpl.min_words != null ? tpl.min_words : '';
+  document.getElementById('aqOptionsJson').value = tpl && tpl.options ? JSON.stringify(tpl.options, null, 2) : '';
+  document.getElementById('aqRoutingWeightsJson').value = tpl && tpl.routing_weights ? JSON.stringify(tpl.routing_weights, null, 2) : '';
+
+  _aqUpdateConditionalGroups();
+  document.getElementById('aqType').addEventListener('change', _aqUpdateConditionalGroups);
+  document.getElementById('aqIsRouting').addEventListener('change', _aqUpdateConditionalGroups);
+
+  document.getElementById('assessmentQuestionEditModal').classList.remove('hidden');
+}
+
+function _aqUpdateConditionalGroups() {
+  const type = document.getElementById('aqType').value;
+  const isRouting = document.getElementById('aqIsRouting').checked;
+  document.getElementById('aqMinWordsGroup').style.display       = type === 'open_text' ? '' : 'none';
+  document.getElementById('aqOptionsGroup').style.display        = type === 'radio'     ? '' : 'none';
+  document.getElementById('aqRoutingWeightsGroup').style.display = isRouting            ? '' : 'none';
+}
+
+function _aqShowError(msg) {
+  const el = document.getElementById('assessmentQuestionEditError');
+  if (!el) return;
+  el.textContent = msg;
+  el.style.display = '';
+}
+
+async function saveAssessmentQuestion() {
+  const errEl = document.getElementById('assessmentQuestionEditError');
+  if (errEl) errEl.style.display = 'none';
+
+  const type      = document.getElementById('aqType').value;
+  const isRouting = document.getElementById('aqIsRouting').checked;
+
+  const payload = {
+    section     : (document.getElementById('aqSection').value || '').trim(),
+    type        : type,
+    order_index : Number(document.getElementById('aqOrderIndex').value || 0),
+    label       : (document.getElementById('aqLabel').value || '').trim(),
+    help_text   : (document.getElementById('aqHelpText').value || '').trim() || null,
+    required    : !!document.getElementById('aqRequired').checked,
+    active      : !!document.getElementById('aqActive').checked,
+    is_routing  : isRouting,
+  };
+
+  if (!payload.section) { _aqShowError('Section is verplicht'); return; }
+  if (!payload.label)   { _aqShowError('Label is verplicht'); return; }
+
+  if (type === 'open_text') {
+    const mwRaw = (document.getElementById('aqMinWords').value || '').trim();
+    payload.min_words = mwRaw === '' ? null : Number(mwRaw);
+    if (mwRaw !== '' && (!Number.isInteger(payload.min_words) || payload.min_words < 0)) {
+      _aqShowError('Min. woorden moet een integer >= 0 zijn'); return;
+    }
+  } else {
+    payload.min_words = null;
+  }
+
+  if (type === 'radio') {
+    const txt = (document.getElementById('aqOptionsJson').value || '').trim();
+    if (!txt) { _aqShowError('Options vereist voor type=radio'); return; }
+    try {
+      const parsed = JSON.parse(txt);
+      if (!Array.isArray(parsed)) { _aqShowError('Options moet een JSON-array zijn'); return; }
+      for (const o of parsed) {
+        if (!o || typeof o !== 'object' || typeof o.value !== 'string' || typeof o.label !== 'string') {
+          _aqShowError('Elke option moet { value:string, label:string } zijn'); return;
+        }
+      }
+      payload.options = parsed;
+    } catch (e) {
+      _aqShowError('Options JSON parse-fout: ' + e.message); return;
+    }
+  } else {
+    payload.options = null;
+  }
+
+  if (isRouting) {
+    const txt = (document.getElementById('aqRoutingWeightsJson').value || '').trim();
+    if (!txt) { _aqShowError('routing_weights vereist als is_routing aanstaat'); return; }
+    try {
+      const parsed = JSON.parse(txt);
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        _aqShowError('routing_weights moet een JSON-object zijn'); return;
+      }
+      for (const [k, v] of Object.entries(parsed)) {
+        if (typeof v !== 'number' || !Number.isFinite(v)) {
+          _aqShowError('routing_weights.' + k + ' moet een getal zijn'); return;
+        }
+      }
+      payload.routing_weights = parsed;
+    } catch (e) {
+      _aqShowError('routing_weights JSON parse-fout: ' + e.message); return;
+    }
+  } else {
+    payload.routing_weights = null;
+  }
+
+  const btn = document.getElementById('aqSaveBtn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Opslaan…'; }
+  try {
+    let r;
+    if (_aqEditingId) {
+      r = await window.AgentShared.apiFetch('/api/admin-assessment-questions-upsert?id=' + encodeURIComponent(_aqEditingId), {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
+      });
+    } else {
+      const keyVal = (document.getElementById('aqKey').value || '').trim();
+      if (!/^[a-z0-9_-]{1,64}$/.test(keyVal)) { _aqShowError('Key moet lowercase a-z, 0-9, _ of - zijn'); if (btn) { btn.disabled = false; btn.textContent = 'Opslaan'; } return; }
+      payload.key = keyVal;
+      r = await window.AgentShared.apiFetch('/api/admin-assessment-questions-upsert', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
+      });
+    }
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) {
+      _aqShowError(j.error || ('HTTP ' + r.status));
+      return;
+    }
+    document.getElementById('assessmentQuestionEditModal').classList.add('hidden');
+    aqBanner('success', _aqEditingId ? 'Vraag bijgewerkt.' : 'Vraag aangemaakt.', 4000);
+    _aqEditingId = null;
+    loadAssessmentQuestions();
+  } catch (e) {
+    _aqShowError('Fout: ' + e.message);
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = 'Opslaan'; }
+  }
+}
+
+function closeAssessmentQuestionEdit() {
+  const m = document.getElementById('assessmentQuestionEditModal');
+  if (m) m.classList.add('hidden');
+  _aqEditingId = null;
+}
+
+async function toggleAssessmentQuestionActive(id) {
+  const q = _aqItems.find(x => x.id === id);
+  if (!q) return;
+  const verb = q.active ? 'deactiveren' : 'activeren';
+  if (!confirm('Vraag "' + q.label + '" ' + verb + '?\n\nForward-only: bestaande inzendingen blijven hun antwoorden behouden.')) return;
+  try {
+    const r = await window.AgentShared.apiFetch('/api/admin-assessment-questions-upsert?id=' + encodeURIComponent(id), {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ active: !q.active }),
+    });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) { aqBanner('error', j.error || 'Update mislukt', 6000); return; }
+    aqBanner('success', q.active ? 'Vraag gedeactiveerd.' : 'Vraag geactiveerd.', 4000);
+    loadAssessmentQuestions();
+  } catch (e) {
+    aqBanner('error', 'Fout: ' + e.message, 6000);
+  }
+}
+
+async function reorderAssessmentQuestion(id, delta) {
+  // Wissel order_index met buur in dezelfde section.
+  const q = _aqItems.find(x => x.id === id);
+  if (!q) return;
+  const section = q.section;
+  const peers = _aqItems.filter(x => x.section === section).sort((a, b) => a.order_index - b.order_index);
+  const idx = peers.findIndex(x => x.id === id);
+  const otherIdx = idx + delta;
+  if (otherIdx < 0 || otherIdx >= peers.length) return;
+  const other = peers[otherIdx];
+  // Swap order_index waardes. Bij gelijke waardes: assign duidelijke verschillen.
+  const a = q.order_index, b = other.order_index;
+  const newA = (a === b) ? (delta < 0 ? a - 1 : a + 1) : b;
+  const newB = (a === b) ? a : a;
+  try {
+    const [r1, r2] = await Promise.all([
+      window.AgentShared.apiFetch('/api/admin-assessment-questions-upsert?id=' + encodeURIComponent(q.id), {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ order_index: newA }),
+      }),
+      window.AgentShared.apiFetch('/api/admin-assessment-questions-upsert?id=' + encodeURIComponent(other.id), {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ order_index: newB }),
+      }),
+    ]);
+    if (!r1.ok || !r2.ok) { aqBanner('error', 'Reorder mislukt', 5000); return; }
+    loadAssessmentQuestions();
+  } catch (e) {
+    aqBanner('error', 'Fout: ' + e.message, 6000);
+  }
 }
 
 async function loadApprovalQueue() {
