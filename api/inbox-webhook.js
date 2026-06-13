@@ -1112,8 +1112,23 @@ export default async function handler(req, res) {
                 if (insRes.inserted && insRes.messageId && insRes.type === 'text') {
                   // Module + joost_config: éénmalige lookup voor beide paden.
                   const moduleCtx = await getModuleContextByPhoneNumberId(supabaseAdmin, recvPhoneNumberId);
-                  const resolvedModule = moduleCtx?.module || 'finance';
-                  if (resolvedModule === 'finance') {
+                  // FASE 0 Joost-gate-hardening: GEEN silent-failover.
+                  // Een null/onbekende/non-finance/inactive module -> Joost
+                  // wordt NOOIT getriggerd. Conversation blijft persisted in
+                  // whatsapp_conversations (upsert hierboven), maar is
+                  // 'unrouted' voor inbox-views (inbox-conversations-list
+                  // filtert hardcoded op finance phone_number_id).
+                  if (!moduleCtx) {
+                    console.warn(
+                      '[inbox-webhook] inbound van ongekoppeld nummer phone_number_id=' +
+                      String(recvPhoneNumberId || '<missing>') +
+                      ' - conversation persisted als unrouted, Joost-trigger geskipt'
+                    );
+                  }
+                  const isFinanceLijn = !!(moduleCtx
+                    && moduleCtx.module === 'finance'
+                    && moduleCtx.is_active === true);
+                  if (isFinanceLijn) {
                     const { data: jcfg, error: jcfgErr } = await supabaseAdmin
                       .from('joost_config')
                       .select('module, is_enabled, feature_flags')
