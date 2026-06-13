@@ -1,26 +1,38 @@
 // api/inbox-conversations-list.js
 // GET → lijst whatsapp_conversations met klant-koppeling en 24h-window flag.
-// Permission: finance.inbox.view
 //
-// Module-scoping: lijst toont enkel conversations die binnenkwamen op de
-// finance-WABA-lijn (whatsapp_module_config WHERE module='finance' AND
-// is_active=true). Als geen actieve finance-config bestaat: lege items +
-// configured:false zodat UI een banner kan tonen i.p.v. alle conversaties
-// over modules heen te mixen.
+// Module-scoping (Fase 1 events-inbox): parameter ?module=finance|events.
+//   - Default 'finance' (backward-compat: bestaande callers blijven exact
+//     hetzelfde gedrag krijgen — query, pnId-lookup en permissie ongewijzigd).
+//   - module='events': zelfde query maar gefilterd op de events-phone_number_id
+//     uit whatsapp_module_config WHERE module='events' AND is_active=true.
+//
+// Permission per module (parallelle takken):
+//   module='finance' -> finance.inbox.view (zoals voor)
+//   module='events'  -> events.inbox.view  (Fase 1 nieuw)
+//
+// Andere modules worden geweigerd (400) zodat we niet per ongeluk een
+// nieuwe agent introduceren zonder permission-key te registreren.
 //
 // Query params:
+//   module  text   'finance' | 'events' (default 'finance')
 //   limit   integer (default 50, clamp 1..100)
 //   offset  integer (default 0)
-//   search  text — filtert phone_number / display_name / customer-naam (ILIKE)
+//   search  text — filtert phone_number / display_name (ILIKE)
 //
 // Response: { items: [{ id, phone_number, display_name, customer_id, customer_name,
 //                       status, last_message_at, last_message_preview, unread_count,
-//                       last_inbound_at, can_send_text }], total, configured }
+//                       last_inbound_at, can_send_text }], total, configured, module }
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
 
 const TWENTY_FOUR_HOURS_MS = 24 * 60 * 60 * 1000;
+
+const MODULE_PERMISSIONS = {
+  finance: 'finance.inbox.view',
+  events : 'events.inbox.view',
+};
 
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
@@ -33,11 +45,23 @@ export default async function handler(req, res) {
   const supabase = createUserClient(req);
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return res.status(401).json({ error: 'Niet geauthenticeerd' });
-  if (!(await requirePermission(req, 'finance.inbox.view'))) {
-    return res.status(403).json({ error: 'Geen rechten (finance.inbox.view)' });
-  }
 
   const q = req.query || {};
+  // Module-resolve: default 'finance' voor backward-compat met bestaande
+  // finance-callers die geen ?module meegeven.
+  const moduleRaw = typeof q.module === 'string' && q.module.trim()
+    ? q.module.trim().toLowerCase()
+    : 'finance';
+  const permKey = MODULE_PERMISSIONS[moduleRaw];
+  if (!permKey) {
+    return res.status(400).json({
+      error: `module='${moduleRaw}' niet ondersteund; verwacht ${Object.keys(MODULE_PERMISSIONS).join('|')}`,
+    });
+  }
+  if (!(await requirePermission(req, permKey))) {
+    return res.status(403).json({ error: `Geen rechten (${permKey})` });
+  }
+
   let limit = parseInt(q.limit, 10);
   if (!Number.isFinite(limit) || limit < 1) limit = 50;
   if (limit > 100) limit = 100;
@@ -46,25 +70,28 @@ export default async function handler(req, res) {
   const search = String(q.search || '').trim();
 
   try {
-    // Module-config: welk phone_number_id hoort bij finance?
+    // Module-config: welk phone_number_id hoort bij de gevraagde module?
+    // Identiek pattern aan de oude finance-only lookup, alleen .eq('module', ...)
+    // is nu parameter ipv hardcoded.
     const { data: modCfg, error: modErr } = await supabaseAdmin
       .from('whatsapp_module_config')
       .select('phone_number_id')
-      .eq('module', 'finance')
+      .eq('module', moduleRaw)
       .eq('is_active', true)
       .maybeSingle();
     if (modErr) {
       console.error('[inbox-conversations-list] module-config lookup:', modErr.message);
       // Fail-soft: behandel als niet-geconfigureerd i.p.v. 500.
     }
-    const financePnId = modCfg?.phone_number_id || null;
-    if (!financePnId) {
-      // Geen actieve finance-config — return leeg, UI toont config-banner.
+    const modulePnId = modCfg?.phone_number_id || null;
+    if (!modulePnId) {
+      // Geen actieve config voor deze module — return leeg, UI toont config-banner.
       return res.status(200).json({
         items: [],
         total: 0,
         configured: false,
-        warning: 'Geen actieve finance-config in whatsapp_module_config — vraag een admin om in te stellen.',
+        module: moduleRaw,
+        warning: `Geen actieve ${moduleRaw}-config in whatsapp_module_config — vraag een admin om in te stellen.`,
       });
     }
 
@@ -76,7 +103,7 @@ export default async function handler(req, res) {
         'customer:customers(id, first_name, last_name, company_name)',
         { count: 'exact' }
       )
-      .eq('phone_number_id', financePnId)
+      .eq('phone_number_id', modulePnId)
       .order('last_message_at', { ascending: false, nullsFirst: false })
       .range(offset, offset + limit - 1);
 
@@ -117,7 +144,12 @@ export default async function handler(req, res) {
       };
     });
 
-    return res.status(200).json({ items, total: count || items.length, configured: true });
+    return res.status(200).json({
+      items,
+      total: count || items.length,
+      configured: true,
+      module: moduleRaw,
+    });
   } catch (e) {
     console.error('[inbox-conversations-list]', e.message);
     return res.status(500).json({ error: e.message });
