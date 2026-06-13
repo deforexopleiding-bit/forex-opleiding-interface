@@ -2407,7 +2407,7 @@
   }
 
   function addWaMetaButton() {
-    if (_waTpl.metaButtonsDraft.length >= 3) return;
+    if (_waTpl.metaButtonsDraft.length >= 10) return;
     _waTpl.metaButtonsDraft.push({ type: 'URL', text: '', url: '' });
     renderWaMetaButtons();
     computeWaMetaPreview();
