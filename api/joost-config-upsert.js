@@ -59,13 +59,8 @@ export default async function handler(req, res) {
   const { data: { user }, error: userErr } = await userClient.auth.getUser();
   if (userErr || !user) return res.status(401).json({ error: 'Niet geauthenticeerd' });
 
-  // ---- Permission (strict) ----
-  const hasAdmin = await requirePermission(req, 'admin.joost_config');
-  if (!hasAdmin) {
-    return res.status(403).json({ error: 'Geen rechten (admin.joost_config)' });
-  }
-
-  // ---- Body parsen ----
+  // ---- Body parsen + module bepalen (vóór permission zodat we per module
+  //      kunnen gaten; default-shape blijft byte-identiek voor finance). ----
   const body = req.body || {};
 
   // module: required
@@ -75,6 +70,16 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: 'module: alleen lowercase a-z, 0-9, _ en - (max 50 chars)' });
   }
   const moduleKey = moduleRaw;
+
+  // ---- Permission (module-conditioned, strict) ----
+  // module='events' (Simone) gates op admin.simone_config; andere modules
+  // (waaronder finance/Joost) houden admin.joost_config — byte-identiek voor
+  // bestaande finance-callers.
+  const adminPermKey = moduleKey === 'events' ? 'admin.simone_config' : 'admin.joost_config';
+  const hasAdmin = await requirePermission(req, adminPermKey);
+  if (!hasAdmin) {
+    return res.status(403).json({ error: 'Geen rechten (' + adminPermKey + ')' });
+  }
 
   // Optionele velden: alleen meenemen als ze in body zijn meegestuurd, zodat
   // UPDATE-pad een partial merge doet en INSERT-pad de DB-defaults gebruikt voor
@@ -152,6 +157,23 @@ export default async function handler(req, res) {
     updates.is_enabled = body.is_enabled;
   }
 
+  // feature_flags: vrije jsonb-map waar alle waarden boolean moeten zijn.
+  // UI-laag stuurt de FULL flags-object (read-modify-write) zodat we hier
+  // gewoon overschrijven; geen merge-on-server. Voor module='events' verwacht
+  // de UI alleen 'reactive_suggest_enabled' te sturen; 'e2_reactive_autonomy'
+  // is uit scope voor Simone (suggest-only).
+  if (body.feature_flags !== undefined) {
+    if (!isPlainObject(body.feature_flags)) {
+      return res.status(400).json({ error: 'feature_flags: plain object vereist (geen array/null/scalar)' });
+    }
+    for (const [k, v] of Object.entries(body.feature_flags)) {
+      if (typeof v !== 'boolean') {
+        return res.status(400).json({ error: 'feature_flags.' + k + ': boolean vereist' });
+      }
+    }
+    updates.feature_flags = body.feature_flags;
+  }
+
   // ---- Existing rij ophalen (voor before_json audit + UPDATE no-op check) ----
   try {
     const { data: existing, error: getErr } = await supabaseAdmin
@@ -159,7 +181,7 @@ export default async function handler(req, res) {
       .select(`
         module, persona_name, persona_tone, system_prompt_template,
         knowledge_base, model, temperature, context_message_count,
-        is_enabled, updated_by_user_id, updated_at
+        is_enabled, feature_flags, updated_by_user_id, updated_at
       `)
       .eq('module', moduleKey)
       .maybeSingle();
@@ -192,7 +214,7 @@ export default async function handler(req, res) {
       .select(`
         module, persona_name, persona_tone, system_prompt_template,
         knowledge_base, model, temperature, context_message_count,
-        is_enabled, updated_by_user_id, updated_at
+        is_enabled, feature_flags, updated_by_user_id, updated_at
       `)
       .single();
     if (upsertErr) {

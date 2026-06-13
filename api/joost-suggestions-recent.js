@@ -50,9 +50,20 @@ export default async function handler(req, res) {
   const { data: { user }, error: userErr } = await supabase.auth.getUser();
   if (userErr || !user) return res.status(401).json({ error: 'Niet geauthenticeerd' });
 
-  // ---- Permission ----
-  if (!(await requirePermission(req, 'finance.joost.use'))) {
-    return res.status(403).json({ error: 'Geen rechten (finance.joost.use)' });
+  // ---- Module-param ----
+  // Default 'finance' zodat bestaande finance-callers byte-identiek blijven
+  // (zelfde precedent als inbox-conversations-list / joost-config-get).
+  const moduleKey = typeof req.query.module === 'string'
+    ? req.query.module.trim().toLowerCase()
+    : 'finance';
+  if (moduleKey !== 'finance' && moduleKey !== 'events') {
+    return res.status(400).json({ error: 'module moet finance of events zijn' });
+  }
+
+  // ---- Permission (per module) ----
+  const permKey = moduleKey === 'events' ? 'events.simone.use' : 'finance.joost.use';
+  if (!(await requirePermission(req, permKey))) {
+    return res.status(403).json({ error: 'Geen rechten (' + permKey + ')' });
   }
 
   // ---- Query params ----
@@ -75,17 +86,24 @@ export default async function handler(req, res) {
   try {
     const cutoffIso = new Date(Date.now() - maxAgeMin * 60 * 1000).toISOString();
 
-    const { data, error } = await supabaseAdmin
+    // Voor module=events filteren we strikt op module='events' zodat we geen
+    // finance-suggestion teruggeven aan de Simone-UI. Voor module=finance
+    // (default) skippen we de eq-filter zodat byte-identiek pre-stap-2c gedrag
+    // behouden blijft (legacy rijen zonder module-discriminator matchen
+    // gewoon mee — backwards-compat met de pre-E1.x history).
+    let q = supabaseAdmin
       .from('joost_suggestions')
       .select(`
         id, conversation_id, suggested_reply, detected_intent, confidence,
-        reasoning, auto_triggered, created_at
+        reasoning, auto_triggered, created_at, module
       `)
       .eq('conversation_id', convId)
       .eq('status', 'PROPOSED')
       .gte('created_at', cutoffIso)
       .order('created_at', { ascending: false })
       .limit(1);
+    if (moduleKey === 'events') q = q.eq('module', 'events');
+    const { data, error } = await q;
 
     if (error) throw new Error('joost-suggestions-lookup: ' + error.message);
 

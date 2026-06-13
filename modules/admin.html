@@ -169,6 +169,7 @@
       <button class="admin-tab" data-tab="integraties" onclick="switchAdminTab('integraties')">Integraties</button>
       <button class="admin-tab" data-tab="approval-queue" data-view="approval-queue" id="approvalsTabBtn" onclick="switchAdminTab('approval-queue')" style="display:none">Approval-queue <span id="approvalsTabBadge" class="approvals-tab-badge hidden">0</span></button>
       <button class="admin-tab" data-tab="assessment" id="assessmentTabBtn" onclick="switchAdminTab('assessment')" style="display:none">Assessment-vragen</button>
+      <button class="admin-tab" data-tab="simone-config" id="simoneCfgTabBtn" onclick="switchAdminTab('simone-config')" style="display:none">Simone-config</button>
       <!-- Joost (AI) tab VERHUISD naar Finance > Instellingen (Groep D, juni 2026). -->
       <!-- WhatsApp Connection + WhatsApp Templates VERHUISD naar Finance > Instellingen (PR-4, juni 2026). -->
     </div>
@@ -380,6 +381,30 @@
         </div>
         <div id="assessmentQuestionsBanner" style="display:none;margin:8px 0 0;padding:10px 14px;border-radius:8px;font-size:13px"></div>
         <div id="assessmentQuestionsList" style="padding:16px 0;display:flex;flex-direction:column;gap:18px">
+          <div style="font-size:12.5px;color:var(--text-faint)">Laden…</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Simone-config (events-agent — Fase 2 stap 2c) ──────────────────── -->
+    <div id="tab-simone-config" class="admin-tab-panel" style="display:none">
+      <div class="section-card">
+        <div class="section-header" style="justify-content:space-between">
+          <div>
+            <div style="font-size:15px;font-weight:700">Simone — events-agent</div>
+            <div style="font-size:12px;color:var(--text-faint);font-weight:400;margin-top:4px;max-width:720px">
+              Mirror van Joost's config-scherm voor de events-agent. Wijzigingen werken op <code>joost_config</code> waar <code>module='events'</code>.
+              Simone is <strong>suggest-only</strong> — geen autonomous-send. Vul de prompt-template aan en flip <em>reactieve auto-suggest</em> aan
+              zodra je live wilt (events-inbound triggert dan in-process Simone).
+            </div>
+          </div>
+          <div style="display:flex;gap:8px">
+            <button class="btn btn-sm" onclick="loadSimoneConfig()" title="Opnieuw laden"><i class="ti ti-refresh"></i></button>
+            <button class="btn btn-sm btn-primary" id="simoneCfgSaveBtn" onclick="saveSimoneConfig()" disabled><i class="ti ti-device-floppy"></i> Opslaan</button>
+          </div>
+        </div>
+        <div id="simoneCfgBanner" style="display:none;margin:8px 0 0;padding:10px 14px;border-radius:8px;font-size:13px"></div>
+        <div id="simoneCfgForm" style="padding:16px 0;display:flex;flex-direction:column;gap:14px">
           <div style="font-size:12.5px;color:var(--text-faint)">Laden…</div>
         </div>
       </div>
@@ -895,6 +920,7 @@ const FEATURE_REGISTRY = [
     { key:'admin.whatsapp_templates', label:'WhatsApp Templates beheer' },
     { key:'admin.arrangement_settings', label:'Auto-execute toggles configureren (D4)' },
     { key:'admin.joost_config', label:'Joost configuratie aanpassen' },
+    { key:'admin.simone_config', label:'Simone configuratie aanpassen (events-agent)' },
     { key:'admin.joost_autonomy', label:'Joost autonomy-config + feature flags beheren' },
   ]},
   { moduleKey:'tickets', moduleLabel:'Tickets', moduleIcon:'ti-ticket', features:[
@@ -939,6 +965,8 @@ function switchAdminTab(name) {
   if (approvView) approvView.hidden = name !== 'approval-queue';
   const aqPanel = document.getElementById('tab-assessment');
   if (aqPanel) aqPanel.style.display = name === 'assessment' ? '' : 'none';
+  const scPanel = document.getElementById('tab-simone-config');
+  if (scPanel) scPanel.style.display = name === 'simone-config' ? '' : 'none';
   // WhatsApp Connection + WhatsApp Templates panels VERHUISD naar Finance >
   // Instellingen (PR-4). Joost-config tab VERHUISD naar Finance > Instellingen
   // (Groep D, juni 2026).
@@ -952,6 +980,9 @@ function switchAdminTab(name) {
   }
   if (name === 'assessment') {
     loadAssessmentQuestions();
+  }
+  if (name === 'simone-config') {
+    loadSimoneConfig();
   }
   // WhatsApp Templates + Connection init VERHUISD: zie
   // modules/shared/finance-instellingen.js (Finance > Instellingen).
@@ -1144,6 +1175,19 @@ async function init() {
     }
   } catch (_) { /* RBAC niet geladen — tab blijft verborgen */ }
 
+  // Simone-config tab: super_admin OF can(admin.simone_config). Mirror van
+  // de Joost-config-tab in Finance > Instellingen; events-agent suggest-only.
+  try {
+    let allowSimone = currentProfile.role === 'super_admin';
+    if (!allowSimone && window.RBAC && typeof window.RBAC.can === 'function') {
+      allowSimone = await window.RBAC.can('admin.simone_config');
+    }
+    if (allowSimone) {
+      const sb = document.getElementById('simoneCfgTabBtn');
+      if (sb) sb.style.display = '';
+    }
+  } catch (_) { /* RBAC niet geladen — tab blijft verborgen */ }
+
   accessToken = await window.AuthShared.getAccessToken();
 
   // Render user section
@@ -1175,7 +1219,7 @@ async function init() {
       location.replace(legacyRedirectMap[hash]);
       return;
     }
-    var allowedHashes = ['approval-queue', 'integraties', 'rechten', 'gebruikers', 'assessment'];
+    var allowedHashes = ['approval-queue', 'integraties', 'rechten', 'gebruikers', 'assessment', 'simone-config'];
     if (hash && allowedHashes.indexOf(hash) !== -1) switchAdminTab(hash);
   } catch (_) { /* fail-soft */ }
 }
@@ -3205,6 +3249,163 @@ async function refreshApprovalsTabBadge() {
 // upsert + joost-autonomy-decisions-list) zijn ongewijzigd; alleen de
 // host-page is verplaatst van /modules/admin.html naar
 // /modules/finance.html?tab=instellingen&sub=joost.
+
+// ── Simone-config (Fase 2 stap 2c) ───────────────────────────────────────────
+// Mirror van Joost's config (modules/shared/finance-instellingen.js — Groep D)
+// maar gericht op joost_config WHERE module='events'. Suggest-only: GEEN
+// e2_reactive_autonomy in deze UI. Endpoints: GET /api/joost-config-get?module=events
+// + POST /api/joost-config-upsert (server stuurt op module-conditioned RBAC).
+let _simoneCfg = null;
+let _simoneCfgDirty = false;
+
+function _scShowBanner(text, kind) {
+  const el = document.getElementById('simoneCfgBanner');
+  if (!el) return;
+  if (!text) { el.style.display = 'none'; el.textContent = ''; return; }
+  const palette = kind === 'success'
+    ? { bg:'rgba(5,150,105,0.12)', col:'#059669', border:'rgba(5,150,105,0.3)' }
+    : kind === 'error'
+    ? { bg:'rgba(220,38,38,0.12)', col:'#b91c1c', border:'rgba(220,38,38,0.3)' }
+    : { bg:'rgba(59,130,246,0.12)', col:'#1d4ed8', border:'rgba(59,130,246,0.3)' };
+  el.style.display = '';
+  el.style.background = palette.bg;
+  el.style.color = palette.col;
+  el.style.border = '1px solid ' + palette.border;
+  el.textContent = text;
+}
+
+function _scMarkDirty() {
+  _simoneCfgDirty = true;
+  const btn = document.getElementById('simoneCfgSaveBtn');
+  if (btn) btn.disabled = false;
+}
+
+async function loadSimoneConfig() {
+  const wrap = document.getElementById('simoneCfgForm');
+  if (!wrap) return;
+  wrap.innerHTML = '<div style="font-size:12.5px;color:var(--text-faint)">Laden…</div>';
+  _scShowBanner('', null);
+  try {
+    const r = await fetch('/api/joost-config-get?module=events', {
+      headers: { 'Authorization': 'Bearer ' + accessToken },
+    });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) {
+      wrap.innerHTML = '<div style="color:#b91c1c;font-size:13px">Fout: ' + esc(d.error || ('HTTP ' + r.status)) + '</div>';
+      return;
+    }
+    _simoneCfg = d.config || {};
+    _simoneCfgDirty = false;
+    document.getElementById('simoneCfgSaveBtn').disabled = true;
+    renderSimoneConfigForm();
+    if (_simoneCfg.is_default) {
+      _scShowBanner('Geen joost_config-rij voor module=events; getoonde waarden zijn defaults. Eerste opslaan creëert de rij.', 'info');
+    }
+  } catch (e) {
+    wrap.innerHTML = '<div style="color:#b91c1c;font-size:13px">Fout: ' + esc(e.message) + '</div>';
+  }
+}
+
+function renderSimoneConfigForm() {
+  const wrap = document.getElementById('simoneCfgForm');
+  if (!wrap || !_simoneCfg) return;
+  const ff = (_simoneCfg.feature_flags && typeof _simoneCfg.feature_flags === 'object') ? _simoneCfg.feature_flags : {};
+  const isEnabled = _simoneCfg.is_enabled !== false;
+  const reactive  = ff.reactive_suggest_enabled === true;
+  const updatedAt = _simoneCfg.updated_at
+    ? new Date(_simoneCfg.updated_at).toLocaleString('nl-NL')
+    : '—';
+  wrap.innerHTML =
+      '<div style="display:grid;grid-template-columns:200px 1fr;gap:14px;align-items:start">'
+    +   '<label style="font-size:13px;font-weight:600;padding-top:8px">Persona-naam</label>'
+    +   '<input id="scPersonaName" type="text" maxlength="100" style="padding:8px 10px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-family:inherit;font-size:13.5px" value="' + esc(_simoneCfg.persona_name || 'Simone') + '" />'
+
+    +   '<label style="font-size:13px;font-weight:600;padding-top:8px">Persona-toon</label>'
+    +   '<input id="scPersonaTone" type="text" maxlength="500" style="padding:8px 10px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-family:inherit;font-size:13.5px" value="' + esc(_simoneCfg.persona_tone || '') + '" />'
+
+    +   '<label style="font-size:13px;font-weight:600;padding-top:8px">System-prompt template</label>'
+    +   '<textarea id="scSystemPrompt" maxlength="10000" style="padding:10px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-family:inherit;font-size:13px;line-height:1.55;min-height:240px;resize:vertical">' + esc(_simoneCfg.system_prompt_template || '') + '</textarea>'
+
+    +   '<label style="font-size:13px;font-weight:600;padding-top:8px">Status</label>'
+    +   '<div>'
+    +     '<label style="display:inline-flex;gap:8px;align-items:center;font-size:13px;cursor:pointer">'
+    +       '<input id="scIsEnabled" type="checkbox" ' + (isEnabled ? 'checked' : '') + ' />'
+    +       '<span>Simone is geactiveerd (is_enabled)</span>'
+    +     '</label>'
+    +     '<div style="font-size:11.5px;color:var(--text-faint);margin-top:4px">Uit zetten zorgt dat alle suggest-aanroepen 503 teruggeven.</div>'
+    +   '</div>'
+
+    +   '<label style="font-size:13px;font-weight:600;padding-top:8px">Reactieve auto-suggest</label>'
+    +   '<div>'
+    +     '<label style="display:inline-flex;gap:8px;align-items:center;font-size:13px;cursor:pointer">'
+    +       '<input id="scReactiveEnabled" type="checkbox" ' + (reactive ? 'checked' : '') + ' />'
+    +       '<span>feature_flags.reactive_suggest_enabled</span>'
+    +     '</label>'
+    +     '<div style="font-size:11.5px;color:var(--text-faint);margin-top:4px">'
+    +     'Aan = events-inbound triggert in-process Simone via webhook (Fase 2 stap 2b). Default uit tot go-live.'
+    +     '</div>'
+    +   '</div>'
+
+    +   '<div></div>'
+    +   '<div style="font-size:11px;color:var(--text-faint)">Laatste update: ' + esc(updatedAt) + '</div>'
+    + '</div>';
+
+  // Dirty-tracking op alle inputs
+  ['scPersonaName','scPersonaTone','scSystemPrompt','scIsEnabled','scReactiveEnabled'].forEach((id) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.addEventListener(el.type === 'checkbox' ? 'change' : 'input', _scMarkDirty);
+  });
+}
+
+async function saveSimoneConfig() {
+  if (!_simoneCfg) return;
+  const btn = document.getElementById('simoneCfgSaveBtn');
+  if (btn) btn.disabled = true;
+  _scShowBanner('Opslaan…', 'info');
+  try {
+    const personaName = (document.getElementById('scPersonaName').value || '').trim();
+    const personaTone = (document.getElementById('scPersonaTone').value || '').trim();
+    const systemPrompt = document.getElementById('scSystemPrompt').value || '';
+    const isEnabled = !!document.getElementById('scIsEnabled').checked;
+    const reactive  = !!document.getElementById('scReactiveEnabled').checked;
+    // Read-modify-write op feature_flags zodat we andere flags (bv. e2_reactive_autonomy)
+    // niet stilletjes overschrijven.
+    const ffExisting = (_simoneCfg.feature_flags && typeof _simoneCfg.feature_flags === 'object')
+      ? _simoneCfg.feature_flags : {};
+    const feature_flags = { ...ffExisting, reactive_suggest_enabled: reactive };
+    if (!personaName) {
+      _scShowBanner('Persona-naam mag niet leeg zijn', 'error');
+      if (btn) btn.disabled = false;
+      return;
+    }
+    const r = await fetch('/api/joost-config-upsert', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + accessToken },
+      body: JSON.stringify({
+        module: 'events',
+        persona_name: personaName,
+        persona_tone: personaTone || 'vriendelijk-professioneel',
+        system_prompt_template: systemPrompt,
+        is_enabled: isEnabled,
+        feature_flags,
+      }),
+    });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) {
+      _scShowBanner(d.error || ('HTTP ' + r.status), 'error');
+      if (btn) btn.disabled = false;
+      return;
+    }
+    _simoneCfg = d.config || _simoneCfg;
+    _simoneCfgDirty = false;
+    _scShowBanner('Opgeslagen', 'success');
+    renderSimoneConfigForm();
+  } catch (e) {
+    _scShowBanner(e.message, 'error');
+    if (btn) btn.disabled = false;
+  }
+}
 
 init();
 </script>

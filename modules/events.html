@@ -236,13 +236,46 @@ function renderPage(canCreate, canViewInbox) {
     </div>
 
     <div id="ev-pane-inbox" style="display:none">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
-        <div style="font-size:12.5px;color:var(--text-dim)">Inbound WhatsApp-conversaties op de events-lijn. Lees-only; antwoorden komt later (Simone).</div>
-        <button class="sr-iconbtn" id="evInboxRefresh" title="Vernieuwen"><i class="ti ti-refresh"></i></button>
+      <div id="evInboxListPane">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+          <div style="font-size:12.5px;color:var(--text-dim)">Inbound WhatsApp-conversaties op de events-lijn. Klik een rij om te openen en met Simone te beantwoorden.</div>
+          <button class="sr-iconbtn" id="evInboxRefresh" title="Vernieuwen"><i class="ti ti-refresh"></i></button>
+        </div>
+        <div id="eventsInboxList">
+          <div class="skel-row"></div>
+          <div class="skel-row"></div>
+        </div>
       </div>
-      <div id="eventsInboxList">
-        <div class="skel-row"></div>
-        <div class="skel-row"></div>
+
+      <!-- Thread-view (verborgen tot een conv geopend wordt) -->
+      <div id="evThreadPane" style="display:none">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px">
+          <button class="sr-iconbtn" id="evThreadBack" title="Terug naar lijst"><i class="ti ti-arrow-left"></i></button>
+          <div style="flex:1;min-width:0">
+            <div id="evThreadName" style="font-size:14.5px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">—</div>
+            <div id="evThreadPhone" style="font-size:11.5px;color:var(--text-faint)">—</div>
+          </div>
+          <span id="evThreadWindowBadge" style="font-size:10px;font-weight:700;padding:3px 8px;border-radius:10px;text-transform:uppercase;letter-spacing:.04em">—</span>
+        </div>
+
+        <div id="evThreadMessages" style="height:42vh;min-height:280px;overflow-y:auto;border:1px solid var(--border);border-radius:10px;padding:12px;background:var(--bg-elev-1);display:flex;flex-direction:column;gap:8px">
+          <div style="color:var(--text-faint);font-size:12px;text-align:center;padding:20px">Laden…</div>
+        </div>
+
+        <!-- Simone suggestion-paneel -->
+        <div id="evSimoneSuggestionPanel" style="margin-top:14px"></div>
+
+        <!-- Compose-rij -->
+        <div style="margin-top:12px;display:flex;gap:8px;align-items:flex-start">
+          <button class="btn-primary" id="evAskSimoneBtn" type="button" style="background:#7c3aed;white-space:nowrap" title="Vraag Simone om een suggestie">
+            <i class="ti ti-sparkles"></i> Vraag Simone
+          </button>
+          <textarea id="evComposeTextarea" placeholder="Typ een vrij bericht…" style="flex:1;min-height:62px;max-height:140px;font-family:inherit;font-size:13px;padding:8px 10px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);resize:vertical"></textarea>
+          <button class="btn-primary" id="evComposeSendBtn" type="button" title="Versturen">
+            <i class="ti ti-send"></i> Versturen
+          </button>
+        </div>
+        <div id="evThreadHint" style="font-size:11.5px;color:var(--text-faint);margin-top:4px"></div>
       </div>
     </div>
   `;
@@ -265,6 +298,21 @@ function renderPage(canCreate, canViewInbox) {
   }));
   const inboxRefresh = document.getElementById('evInboxRefresh');
   if (inboxRefresh) inboxRefresh.addEventListener('click', () => loadEventsInbox());
+
+  // Fase 2 stap 2c — thread-view wiring
+  const backBtn = document.getElementById('evThreadBack');
+  if (backBtn) backBtn.addEventListener('click', () => _evShowListView());
+  const askBtn = document.getElementById('evAskSimoneBtn');
+  if (askBtn) askBtn.addEventListener('click', () => askSimone());
+  const composeSendBtn = document.getElementById('evComposeSendBtn');
+  if (composeSendBtn) composeSendBtn.addEventListener('click', () => sendComposeText());
+  // Disable Simone-knop als user geen events.simone.use heeft (RBAC client-gate;
+  // server doet de echte check). super_admin krijgt 'm via permission-RPC.
+  if (askBtn && window.RBAC && typeof window.RBAC.can === 'function') {
+    window.RBAC.can('events.simone.use').then((ok) => {
+      if (!ok) { askBtn.disabled = true; askBtn.title = 'Geen rechten (events.simone.use)'; askBtn.style.opacity = 0.4; }
+    }).catch(() => {});
+  }
 
   // Wire filters
   document.getElementById('evSearch').addEventListener('input', debounce((e) => {
@@ -471,18 +519,318 @@ async function loadEventsInbox() {
           const unread = it.unread_count > 0
             ? '<span style="background:rgba(220,38,38,0.15);color:#b91c1c;border-radius:10px;padding:2px 8px;font-size:11px;font-weight:600">' + it.unread_count + '</span>'
             : '<span style="color:var(--text-faint);font-size:11px">—</span>';
-          return '<tr>'
+          // Fix over-escape: bij geen koppeling renderen we de <i>-tag direct
+          // (geen esc() over HTML). Bij wel-koppeling esc()-en we de klantnaam.
+          const klantCell = it.customer_name
+            ? esc(it.customer_name)
+            : '<i style="color:var(--text-faint)">geen koppeling</i>';
+          return '<tr style="cursor:pointer" data-conv-id="' + esc(it.id) + '"'
+            + ' data-phone="' + esc(it.phone_number || '') + '"'
+            + ' data-display="' + esc(it.display_name || '') + '"'
+            + ' data-customer="' + esc(it.customer_name || '') + '">'
             + '<td><code style="font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px">' + esc(it.phone_number) + '</code></td>'
             + '<td>' + esc(it.display_name || '—') + '</td>'
-            + '<td>' + esc(it.customer_name || '<i style="color:var(--text-faint)">geen koppeling</i>') + '</td>'
+            + '<td>' + klantCell + '</td>'
             + '<td style="max-width:380px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(preview) + '</td>'
             + '<td style="text-align:right;font-size:11.5px;color:var(--text-dim)">' + esc(fmtDate(it.last_message_at)) + '</td>'
             + '<td style="text-align:right">' + unread + '</td>'
             + '</tr>';
         }).join('')
       + '</tbody></table></div>';
+    // Row-click → open conv-thread view
+    list.querySelectorAll('tr[data-conv-id]').forEach((row) => {
+      row.addEventListener('click', () => openEventsConv({
+        id:          row.dataset.convId,
+        phone:       row.dataset.phone || '',
+        displayName: row.dataset.display || '',
+        customer:    row.dataset.customer || '',
+      }));
+    });
   } catch (e) {
     list.innerHTML = '<div class="empty-state"><div style="color:#b91c1c;font-size:13px">Fout: ' + esc(e.message) + '</div></div>';
+  }
+}
+
+// ── Fase 2 stap 2c: events thread + Simone interactie ────────────────────────
+const _evState = { convId: null, conv: null, canSendText: false, suggestion: null };
+
+function _evShowThreadView() {
+  document.getElementById('evInboxListPane').style.display = 'none';
+  document.getElementById('evThreadPane').style.display   = '';
+}
+function _evShowListView() {
+  document.getElementById('evInboxListPane').style.display = '';
+  document.getElementById('evThreadPane').style.display    = 'none';
+  _evState.convId = null;
+  _evState.conv = null;
+  _evState.suggestion = null;
+}
+
+async function openEventsConv({ id, phone, displayName, customer }) {
+  if (!id) return;
+  _evState.convId = id;
+  _evShowThreadView();
+
+  // Pre-fill header met data uit list-rij voor snappy switch
+  document.getElementById('evThreadName').textContent  = customer || displayName || phone || 'Onbekend';
+  document.getElementById('evThreadPhone').textContent = phone || '—';
+  const badge = document.getElementById('evThreadWindowBadge');
+  badge.textContent = '…';
+  badge.style.background = 'var(--bg-elev-2)';
+  badge.style.color = 'var(--text-dim)';
+  document.getElementById('evThreadMessages').innerHTML = '<div style="color:var(--text-faint);font-size:12px;text-align:center;padding:20px">Laden…</div>';
+  document.getElementById('evSimoneSuggestionPanel').innerHTML = '';
+  document.getElementById('evComposeTextarea').value = '';
+  document.getElementById('evThreadHint').textContent = '';
+
+  // Messages laden
+  try {
+    const params = new URLSearchParams({ conversation_id: id, limit: '200', mark_as_read: 'true' });
+    const r = await window.AgentShared.apiFetch('/api/inbox-messages-list?' + params.toString());
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) {
+      document.getElementById('evThreadMessages').innerHTML =
+        '<div style="color:#ef4444;font-size:12px;padding:14px">Fout: ' + esc(d.error || ('HTTP ' + r.status)) + '</div>';
+      return;
+    }
+    _evState.conv = d.conversation || null;
+    _evState.canSendText = !!(d.conversation && d.conversation.can_send_text);
+    _renderEvThread(d.items || [], d.conversation || null);
+    _applyEvComposeState();
+    // Refresh list-tab badges (unread reset)
+    loadEventsInbox();
+    // Laatste PROPOSED suggestie tonen
+    loadLatestEventsSuggestion(id);
+  } catch (e) {
+    document.getElementById('evThreadMessages').innerHTML =
+      '<div style="color:#ef4444;font-size:12px;padding:14px">Fout: ' + esc(e.message) + '</div>';
+  }
+}
+
+function _renderEvThread(items, conv) {
+  const wrap = document.getElementById('evThreadMessages');
+  if (!wrap) return;
+  if (!items || items.length === 0) {
+    wrap.innerHTML = '<div style="color:var(--text-faint);font-size:12px;text-align:center;padding:20px">Nog geen berichten in deze conversatie.</div>';
+  } else {
+    wrap.innerHTML = items.map((m) => {
+      const inbound = m.direction === 'in';
+      const align = inbound ? 'flex-start' : 'flex-end';
+      const bg    = inbound ? 'var(--bg-elev-2)' : '#093d54';
+      const color = inbound ? 'var(--text)' : '#ffffff';
+      const time  = m.created_at ? fmtDate(m.created_at) : '';
+      const body  = String(m.body || (m.template_name ? '[template:' + m.template_name + ']' : '[media]'));
+      return '<div style="display:flex;justify-content:' + align + '">'
+        + '<div style="max-width:70%;background:' + bg + ';color:' + color + ';padding:7px 11px;border-radius:10px;font-size:13px;line-height:1.4">'
+        + '<div style="white-space:pre-wrap;word-wrap:break-word">' + esc(body) + '</div>'
+        + '<div style="font-size:10px;opacity:0.65;margin-top:3px;text-align:right">' + esc(time) + '</div>'
+        + '</div></div>';
+    }).join('');
+  }
+  // Auto-scroll naar onderkant
+  wrap.scrollTop = wrap.scrollHeight;
+
+  // Window-badge
+  const badge = document.getElementById('evThreadWindowBadge');
+  if (_evState.canSendText) {
+    badge.textContent = '24h open';
+    badge.style.background = 'rgba(5,150,105,0.15)';
+    badge.style.color = '#059669';
+    badge.title = '24h-servicewindow nog open — vrije tekst toegestaan';
+  } else {
+    badge.textContent = '24h verlopen';
+    badge.style.background = 'rgba(245,158,11,0.18)';
+    badge.style.color = '#b45309';
+    badge.title = 'Servicewindow verlopen — alleen templates';
+  }
+}
+
+function _applyEvComposeState() {
+  const ta = document.getElementById('evComposeTextarea');
+  const sendBtn = document.getElementById('evComposeSendBtn');
+  const hint = document.getElementById('evThreadHint');
+  if (_evState.canSendText) {
+    if (ta) { ta.disabled = false; ta.placeholder = 'Typ een vrij bericht…'; }
+    if (sendBtn) { sendBtn.disabled = false; sendBtn.title = 'Versturen'; }
+    if (hint) hint.textContent = '';
+  } else {
+    if (ta) { ta.disabled = true; ta.placeholder = '24h-window verlopen — alleen templates (later)'; }
+    if (sendBtn) { sendBtn.disabled = true; sendBtn.title = '24h-window verlopen'; }
+    if (hint) hint.textContent = '24h-window verlopen sinds laatste inbound — vrije tekst niet meer toegestaan.';
+  }
+}
+
+async function loadLatestEventsSuggestion(convId) {
+  try {
+    const r = await window.AgentShared.apiFetch('/api/joost-suggestions-recent?' +
+      new URLSearchParams({ module: 'events', conversation_id: convId, max_age_minutes: '60' }).toString());
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) {
+      _renderEvSuggestionPanel(null, d.error || ('HTTP ' + r.status));
+      return;
+    }
+    _evState.suggestion = d.suggestion || null;
+    _renderEvSuggestionPanel(_evState.suggestion, null);
+  } catch (e) {
+    _renderEvSuggestionPanel(null, e.message);
+  }
+}
+
+function _renderEvSuggestionPanel(sugg, errMsg) {
+  const wrap = document.getElementById('evSimoneSuggestionPanel');
+  if (!wrap) return;
+  if (errMsg) {
+    wrap.innerHTML = '<div style="color:#b45309;font-size:12px;background:rgba(245,158,11,0.1);border:1px solid rgba(245,158,11,0.3);border-radius:8px;padding:8px 10px">Suggestie laden mislukt: ' + esc(errMsg) + '</div>';
+    return;
+  }
+  if (!sugg) { wrap.innerHTML = ''; return; }
+  const auto = sugg.auto_triggered ? '<span style="background:#7c3aed;color:#fff;font-size:9.5px;font-weight:700;padding:2px 7px;border-radius:8px;letter-spacing:.04em">AUTO</span>' : '';
+  const conf = (typeof sugg.confidence === 'number') ? (Math.round(sugg.confidence * 100) + '%') : '—';
+  wrap.innerHTML =
+    '<div style="border:1px solid #7c3aed;border-radius:10px;background:rgba(124,58,237,0.05);padding:12px">'
+    + '<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">'
+    + '<i class="ti ti-sparkles" style="color:#7c3aed"></i>'
+    + '<span style="font-weight:700;font-size:12.5px;color:#7c3aed">Simone-suggestie</span>'
+    + auto
+    + '<span style="font-size:11px;color:var(--text-dim);margin-left:auto">intent: ' + esc(sugg.detected_intent || '?') + ' · ' + conf + '</span>'
+    + '</div>'
+    + '<textarea id="evSuggText" style="width:100%;min-height:78px;font-family:inherit;font-size:13px;padding:8px 10px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);resize:vertical">' + esc(sugg.suggested_reply || '') + '</textarea>'
+    + (sugg.reasoning ? '<div style="font-size:11px;color:var(--text-dim);margin-top:6px;font-style:italic">Reasoning: ' + esc(sugg.reasoning) + '</div>' : '')
+    + '<div style="display:flex;gap:8px;margin-top:10px">'
+    + '<button class="btn-primary" id="evSuggSendBtn" type="button"><i class="ti ti-send"></i> Versturen</button>'
+    + '<button class="sr-btn" id="evSuggDismissBtn" type="button" style="background:transparent;border:1px solid var(--border);color:var(--text-dim);padding:7px 12px;border-radius:8px;font-size:12.5px;cursor:pointer">Afwijzen</button>'
+    + '</div>'
+    + '</div>';
+  // Wire actions
+  const sendBtn = document.getElementById('evSuggSendBtn');
+  const dismissBtn = document.getElementById('evSuggDismissBtn');
+  if (sendBtn) sendBtn.addEventListener('click', () => sendSuggestion(sugg));
+  if (dismissBtn) dismissBtn.addEventListener('click', () => dismissSuggestion(sugg));
+}
+
+async function askSimone() {
+  const convId = _evState.convId;
+  if (!convId) return;
+  const btn = document.getElementById('evAskSimoneBtn');
+  if (btn) { btn.disabled = true; btn.textContent = '…Simone denkt na'; }
+  try {
+    const r = await window.AgentShared.apiFetch('/api/simone-suggest', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ conversation_id: convId }),
+    });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) {
+      window.AgentShared.showToast(d.error || ('HTTP ' + r.status), 'error');
+      return;
+    }
+    // Force reload latest suggestion (krijgt de net-gemaakte rij terug)
+    await loadLatestEventsSuggestion(convId);
+  } catch (e) {
+    window.AgentShared.showToast(e.message, 'error');
+  } finally {
+    if (btn) { btn.disabled = false; btn.innerHTML = '<i class="ti ti-sparkles"></i> Vraag Simone'; }
+  }
+}
+
+async function sendSuggestion(sugg) {
+  const convId = _evState.convId;
+  if (!convId || !sugg) return;
+  if (!_evState.canSendText) {
+    window.AgentShared.showToast('24h-window verlopen — vrij bericht niet meer toegestaan', 'error');
+    return;
+  }
+  const ta = document.getElementById('evSuggText');
+  const finalText = ta ? String(ta.value || '').trim() : (sugg.suggested_reply || '').trim();
+  if (!finalText) { window.AgentShared.showToast('Bericht is leeg', 'error'); return; }
+  const wasEdited = (finalText !== String(sugg.suggested_reply || '').trim());
+  const btn = document.getElementById('evSuggSendBtn');
+  if (btn) btn.disabled = true;
+  try {
+    const sr = await window.AgentShared.apiFetch('/api/inbox-send', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ conversation_id: convId, mode: 'text', body: finalText }),
+    });
+    const sd = await sr.json().catch(() => ({}));
+    if (!sr.ok) {
+      window.AgentShared.showToast(sd.error || ('HTTP ' + sr.status), 'error');
+      if (btn) btn.disabled = false;
+      return;
+    }
+    // Mark outcome (fail-soft: send-success is leidend)
+    await window.AgentShared.apiFetch('/api/joost-mark-outcome', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        suggestion_id:   sugg.id,
+        status:          wasEdited ? 'USED_EDITED' : 'USED_AS_IS',
+        final_sent_text: finalText,
+      }),
+    }).catch(() => {});
+    window.AgentShared.showToast(wasEdited ? 'Aangepast bericht verstuurd' : 'Suggestie verstuurd', 'success');
+    _evState.suggestion = null;
+    document.getElementById('evSimoneSuggestionPanel').innerHTML = '';
+    // Thread refreshen
+    openEventsConv({ id: convId, phone: _evState.conv?.phone_number || '', displayName: _evState.conv?.display_name || '', customer: _evState.conv?.customer_name || '' });
+  } catch (e) {
+    window.AgentShared.showToast(e.message, 'error');
+    if (btn) btn.disabled = false;
+  }
+}
+
+async function dismissSuggestion(sugg) {
+  if (!sugg) return;
+  const btn = document.getElementById('evSuggDismissBtn');
+  if (btn) btn.disabled = true;
+  try {
+    const r = await window.AgentShared.apiFetch('/api/joost-mark-outcome', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ suggestion_id: sugg.id, status: 'DISMISSED' }),
+    });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) {
+      window.AgentShared.showToast(d.error || ('HTTP ' + r.status), 'error');
+      if (btn) btn.disabled = false;
+      return;
+    }
+    window.AgentShared.showToast('Suggestie afgewezen', 'success');
+    _evState.suggestion = null;
+    document.getElementById('evSimoneSuggestionPanel').innerHTML = '';
+  } catch (e) {
+    window.AgentShared.showToast(e.message, 'error');
+    if (btn) btn.disabled = false;
+  }
+}
+
+async function sendComposeText() {
+  const convId = _evState.convId;
+  if (!convId) return;
+  const ta = document.getElementById('evComposeTextarea');
+  const text = ta ? String(ta.value || '').trim() : '';
+  if (!text) { window.AgentShared.showToast('Bericht is leeg', 'error'); return; }
+  const btn = document.getElementById('evComposeSendBtn');
+  if (btn) btn.disabled = true;
+  try {
+    const r = await window.AgentShared.apiFetch('/api/inbox-send', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ conversation_id: convId, mode: 'text', body: text }),
+    });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) {
+      window.AgentShared.showToast(d.error || ('HTTP ' + r.status), 'error');
+      if (btn) btn.disabled = false;
+      return;
+    }
+    window.AgentShared.showToast('Bericht verstuurd', 'success');
+    if (ta) ta.value = '';
+    // Reload thread
+    openEventsConv({ id: convId, phone: _evState.conv?.phone_number || '', displayName: _evState.conv?.display_name || '', customer: _evState.conv?.customer_name || '' });
+  } catch (e) {
+    window.AgentShared.showToast(e.message, 'error');
+    if (btn) btn.disabled = false;
   }
 }
 

@@ -42,8 +42,16 @@ export default async function handler(req, res) {
   const supabase = createUserClient(req);
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return res.status(401).json({ error: 'Niet geauthenticeerd' });
-  if (!(await requirePermission(req, 'finance.inbox.send'))) {
-    return res.status(403).json({ error: 'Geen rechten (finance.inbox.send)' });
+
+  // Coarse-grained upfront gate: tenminste één van finance.inbox.send of
+  // events.simone.use moet granted zijn. De definitieve module-check gebeurt
+  // ná conv-load (autoritatief op conv.phone_number_id → whatsapp_module_config).
+  // Finance-callers met finance.inbox.send blijven byte-identiek: hun upfront-
+  // 403 bestaat nog, alleen het foutbericht is licht uitgebreid.
+  const hasFinanceSend = await requirePermission(req, 'finance.inbox.send');
+  const hasSimoneUse   = hasFinanceSend ? true : await requirePermission(req, 'events.simone.use');
+  if (!hasFinanceSend && !hasSimoneUse) {
+    return res.status(403).json({ error: 'Geen rechten (finance.inbox.send of events.simone.use)' });
   }
 
   const body = req.body || {};
@@ -110,6 +118,35 @@ export default async function handler(req, res) {
     if (convErr) throw new Error('conversation lookup: ' + convErr.message);
     if (!conv) return res.status(404).json({ error: 'Conversation niet gevonden' });
     if (!conv.phone_number) return res.status(400).json({ error: 'Conversation heeft geen phone_number' });
+
+    // Refined module-permission check: derive de module van deze conv via
+    // conv.phone_number_id -> whatsapp_module_config. Voorkomt dat een gebruiker
+    // met alleen events.simone.use namens finance verstuurt (of omgekeerd).
+    // Default = finance bij onbekende pnId → preserve byte-identiek gedrag.
+    let convModule = 'finance';
+    if (conv.phone_number_id) {
+      try {
+        const { data: convMod, error: convModErr } = await supabaseAdmin
+          .from('whatsapp_module_config')
+          .select('module')
+          .eq('phone_number_id', conv.phone_number_id)
+          .eq('is_active', true)
+          .maybeSingle();
+        if (convModErr) {
+          console.error('[inbox-send] conv-module lookup:', convModErr.message);
+        } else if (convMod?.module) {
+          convModule = String(convMod.module).toLowerCase();
+        }
+      } catch (e) {
+        console.error('[inbox-send] conv-module exception:', e.message);
+      }
+    }
+    if (convModule === 'events' && !hasSimoneUse) {
+      return res.status(403).json({ error: 'Geen rechten (events.simone.use voor events-conv)' });
+    }
+    if (convModule !== 'events' && !hasFinanceSend) {
+      return res.status(403).json({ error: 'Geen rechten (finance.inbox.send voor finance-conv)' });
+    }
 
     // 24h-window guard voor free-form text
     if (mode === 'text') {
