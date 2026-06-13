@@ -35,6 +35,7 @@ import { getClientIp } from './_lib/audit-customer.js';
 import { getModuleContextByPhoneNumberId } from './_lib/module-context.js';
 import { extractEmail, findCustomerByEmail } from './_lib/email-extractor.js';
 import { runJoostSuggest } from './_lib/joost-suggest-core.js';
+import { waitUntil } from '@vercel/functions';
 
 // Vercel-eis: bodyParser uit zodat we de raw body kunnen lezen voor HMAC.
 export const config = {
@@ -348,78 +349,129 @@ async function hasNoRecentOutbound(conversationId, windowSec = 60) {
 
 /**
  * Reactieve Joost-suggest trigger: in-process aanroep van runJoostSuggest
- * (geen HTTP-self-call meer). Fase 2 stap 1 — vervangt de oude
- * fetch(`${VERCEL_URL}/api/joost-suggest`) die structureel `fetch failed`
- * gaf op prod (Vercel Deployment Protection / cold-start DNS-race; self-
- * HTTP-calls op Node-runtime zijn een gedocumenteerd anti-pattern).
+ * (geen HTTP-self-call meer; zie Fase 2 stap 1 / commit 743d145).
  *
- * Fire-and-forget patroon BLIJFT: caller awaited niet, .then()/.catch()
- * vangt resultaat + errors zodat de Meta-webhook binnen het 200-OK budget
- * blijft. Vercel Node-runtime houdt de execution-context typisch warm
- * zolang er open promises zijn — best-effort, zoals voorheen.
+ * Fase 2 stap 1b — waitUntil() gebruik:
+ *   Een unawaited .then().catch() overleeft het einde van de HTTP-respons
+ *   NIET op Vercel Node-runtime. Empirisch bevestigd ná stap 1: webhook
+ *   returnde 200 schoon, geen "fetch failed", maar 0 joost_suggestions-rij.
+ *   De Anthropic-call (~3-5s) + insert raakten halverwege bevroren omdat de
+ *   lambda freezed direct ná res.status(200).json(...).
  *
- * Geen INTERNAL_API_TOKEN / VERCEL_URL nodig voor het suggest-pad zelf.
+ *   waitUntil() uit @vercel/functions registreert een promise als
+ *   "background work" zodat de runtime de lambda LEVEND houdt tot het werk
+ *   klaar is, óók ná de respons. De caller awaited NIET — de Meta-webhook
+ *   reageert direct met 200, terwijl Joost' werk in de achtergrond
+ *   voltooit binnen de function-maxDuration (Pro: 60s default).
+ *
+ *   Geen INTERNAL_API_TOKEN / VERCEL_URL nodig voor het suggest-pad zelf.
  *
  * E2.1 autonomous chain (out-of-scope voor Fase 2 stap 1):
  *   Als `autonomyEnabled=true` (feature-flag e2_reactive_autonomy, default
  *   UIT op finance), na een succesvolle suggestion-insert: HTTP self-call
- *   naar /api/joost-send-autonomous met INTERNAL_API_TOKEN. Dit pad heeft
- *   dezelfde 'fetch failed'-fragiliteit als het oude suggest-pad — wordt
- *   in Fase 2 stap 2 omgezet naar in-process. Voor nu: gated OFF default,
- *   dus geen observable impact.
+ *   naar /api/joost-send-autonomous met INTERNAL_API_TOKEN. Zelfde
+ *   fragiliteit als oude self-call (out-of-scope; gated OFF default).
+ *   De HTTP-fetch zit nu binnen waitUntil-scope zodat tenminste de poging
+ *   overleeft.
+ *
+ * Observabiliteit:
+ *   - console.log entry  '[inbox-webhook] reactive suggest start ...'
+ *   - console.log done   '[inbox-webhook] reactive suggest done id=...'
+ *   - console.warn skip  '[inbox-webhook] reactive suggest skipped: ...'
+ *   - console.warn fail  '[inbox-webhook] reactive suggest threw: ...'
  */
-function triggerJoostAutoSuggest({ conversationId, triggeredByMessageId, autonomyEnabled, clientIp }) {
-  runJoostSuggest({
-    supabase:             supabaseAdmin,
-    conversationId,
-    triggeredByMessageId: triggeredByMessageId || null,
-    autoTriggered:        true,
-    requestedByUserId:    null,
-    clientIp:             clientIp || null,
-  }).then((result) => {
-    if (result.status !== 200) {
-      console.warn(
-        '[inbox-webhook] joost in-process suggest status=' + result.status +
-        ': ' + JSON.stringify(result.body || {}).slice(0, 200)
-      );
-      return;
-    }
-    if (!autonomyEnabled) return;
+function triggerJoostAutoSuggest({ conversationId, triggeredByMessageId, autonomyEnabled, clientIp, module }) {
+  const modLabel = module || '?';
+  console.log(
+    '[inbox-webhook] reactive suggest start module=' + modLabel +
+    ' conv=' + conversationId +
+    ' autonomy=' + (autonomyEnabled ? 'on' : 'off')
+  );
 
-    const suggestionId = result.body?.suggestion?.id || null;
-    if (!suggestionId) {
-      console.warn('[inbox-webhook] joost in-process suggest zonder suggestion.id — autonomy chain skipped');
-      return;
-    }
-
-    // ── E2.1 autonomous chain — nog HTTP self-call (Fase 2 stap 2 scope) ──
-    const token = process.env.INTERNAL_API_TOKEN;
-    if (!token) {
-      console.warn('[inbox-webhook] joost autonomous-trigger skipped: INTERNAL_API_TOKEN ontbreekt');
-      return;
-    }
-    const base = process.env.VERCEL_URL
-      ? `https://${process.env.VERCEL_URL}`
-      : (process.env.APP_BASE_URL || 'http://localhost:3000');
-    const autonomousUrl = `${base}/api/joost-send-autonomous`;
-    fetch(autonomousUrl, {
-      method:  'POST',
-      headers: {
-        'content-type':     'application/json',
-        'x-internal-token': token,
-      },
-      body: JSON.stringify({ suggestion_id: suggestionId }),
-    }).then(async (resp2) => {
-      if (!resp2.ok) {
-        const txt = await resp2.text().catch(() => '');
-        console.warn(`[inbox-webhook] joost autonomous-trigger HTTP ${resp2.status}: ${txt.slice(0, 200)}`);
+  // waitUntil registreert het werk bij de Vercel-runtime zodat de lambda
+  // niet bevroren wordt voordat runJoostSuggest klaar is.
+  waitUntil(
+    runJoostSuggest({
+      supabase:             supabaseAdmin,
+      conversationId,
+      triggeredByMessageId: triggeredByMessageId || null,
+      autoTriggered:        true,
+      requestedByUserId:    null,
+      clientIp:             clientIp || null,
+    }).then((result) => {
+      if (result.status !== 200) {
+        console.warn(
+          '[inbox-webhook] reactive suggest skipped: status=' + result.status +
+          ' module=' + modLabel +
+          ' conv=' + conversationId +
+          ' body=' + JSON.stringify(result.body || {}).slice(0, 200)
+        );
+        return;
       }
-    }).catch((e2) => {
-      console.warn('[inbox-webhook] joost autonomous-trigger fetch fail:', e2 && e2.message);
-    });
-  }).catch((e) => {
-    console.warn('[inbox-webhook] joost in-process suggest threw:', e && e.message);
-  });
+      const suggestionId = result.body?.suggestion?.id || null;
+      const intent       = result.body?.suggestion?.detected_intent || null;
+      console.log(
+        '[inbox-webhook] reactive suggest done id=' + (suggestionId || '<no-id>') +
+        ' module=' + modLabel +
+        ' conv=' + conversationId +
+        ' intent=' + (intent || '?')
+      );
+
+      if (!autonomyEnabled) return;
+      if (!suggestionId) {
+        console.warn(
+          '[inbox-webhook] reactive suggest skipped autonomy chain: geen suggestion.id ' +
+          'module=' + modLabel + ' conv=' + conversationId
+        );
+        return;
+      }
+
+      // ── E2.1 autonomous chain — nog HTTP self-call (Fase 2 stap 2 scope) ──
+      const token = process.env.INTERNAL_API_TOKEN;
+      if (!token) {
+        console.warn(
+          '[inbox-webhook] reactive suggest skipped autonomy chain: ' +
+          'INTERNAL_API_TOKEN ontbreekt module=' + modLabel
+        );
+        return;
+      }
+      const base = process.env.VERCEL_URL
+        ? `https://${process.env.VERCEL_URL}`
+        : (process.env.APP_BASE_URL || 'http://localhost:3000');
+      const autonomousUrl = `${base}/api/joost-send-autonomous`;
+      return fetch(autonomousUrl, {
+        method:  'POST',
+        headers: {
+          'content-type':     'application/json',
+          'x-internal-token': token,
+        },
+        body: JSON.stringify({ suggestion_id: suggestionId }),
+      }).then(async (resp2) => {
+        if (!resp2.ok) {
+          const txt = await resp2.text().catch(() => '');
+          console.warn(
+            '[inbox-webhook] reactive suggest autonomy chain HTTP ' + resp2.status +
+            ' module=' + modLabel + ': ' + txt.slice(0, 200)
+          );
+        } else {
+          console.log(
+            '[inbox-webhook] reactive suggest autonomy chain HTTP 200 ' +
+            'module=' + modLabel + ' suggestion=' + suggestionId
+          );
+        }
+      }).catch((e2) => {
+        console.warn(
+          '[inbox-webhook] reactive suggest autonomy chain fetch fail ' +
+          'module=' + modLabel + ': ' + (e2 && e2.message)
+        );
+      });
+    }).catch((e) => {
+      console.warn(
+        '[inbox-webhook] reactive suggest threw module=' + modLabel +
+        ' conv=' + conversationId + ': ' + (e && e.message)
+      );
+    })
+  );
 }
 
 // ── Helpers: Joost autonomous intake-flow (E2 intake) ─────────────────────
@@ -1180,6 +1232,7 @@ export default async function handler(req, res) {
                                 triggeredByMessageId:  insRes.messageId,
                                 autonomyEnabled,
                                 clientIp:              getClientIp(req),
+                                module:                jcfg.module || moduleCtx?.module || null,
                               });
                             }
                           }
