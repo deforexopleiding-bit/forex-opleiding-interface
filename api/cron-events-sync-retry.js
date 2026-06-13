@@ -52,6 +52,8 @@ export default async function handler(req, res) {
     success: 0,
     failure: 0,
     skipped: 0,
+    skipped_archived: 0,
+    stale_rows_cleared: 0,
     errors: [],
     duration_ms: 0,
   };
@@ -70,14 +72,52 @@ export default async function handler(req, res) {
 
     summary.candidates = (rows || []).length;
 
+    // Batch-fetch events voor selection-level guard. Voorkomt dat we
+    // archived/deleted events via een stale event_sync_log-rij opnieuw
+    // door de orchestrator jagen - die zou ze nu wel skippen (defense-
+    // in-depth), maar we besparen API-roundtrips + maken de cron-summary
+    // expliciet over wat er overgeslagen wordt.
+    const eventIds = [...new Set((rows || []).map((r) => r.event_id))];
+    const eventById = {};
+    if (eventIds.length > 0) {
+      const { data: events, error: evErr } = await supabaseAdmin
+        .from('events')
+        .select('id, status, webflow_sync_status')
+        .in('id', eventIds);
+      if (evErr) {
+        console.error('[cron-events-sync-retry] events batch-fetch:', evErr.message);
+      } else {
+        for (const e of (events || [])) eventById[e.id] = e;
+      }
+    }
+
     // Dedup per event_id: orchestrator syncEventToOutbound triggert beide
     // targets in 1 call. Geen zin om dezelfde event 2x te retryen binnen 1 run.
     const seenEventIds = new Set();
+    // Stale failure-rijen verzamelen: we clearen next_retry_at zodat de cron
+    // ze niet de volgende run weer oppikt. NULL = alarm/terminal-state in de
+    // bestaande retry-strategie (zelfde semantiek als 5+ failures).
+    const staleRowIdsToClear = [];
 
     for (const row of rows || []) {
       if (Date.now() - startedAt > ABORT_MS) {
         summary.errors.push({ phase: 'time_budget', message: 'aborted before completion' });
         break;
+      }
+
+      // Selection-level skip: event archived of webflow-cleanup-done.
+      const ev = eventById[row.event_id] || null;
+      const isArchived = !ev /* event verwijderd? */ ||
+                          ev.status === 'archived' ||
+                          ev.webflow_sync_status === 'deleted';
+      if (isArchived) {
+        summary.skipped_archived++;
+        staleRowIdsToClear.push(row.id);
+        // Markeer event_id als 'gezien' zodat overige rijen voor hetzelfde
+        // event ook in de skipped_archived-counter belanden i.p.v. opnieuw
+        // geprobeerd te worden.
+        seenEventIds.add(row.event_id);
+        continue;
       }
 
       if (seenEventIds.has(row.event_id)) {
@@ -103,6 +143,21 @@ export default async function handler(req, res) {
           error: e?.message || String(e),
         });
         console.error('[cron-events-sync-retry] sync failed', row.event_id, e?.message);
+      }
+    }
+
+    // Stale-row cleanup: zet next_retry_at = NULL op alle rijen die naar
+    // archived/deleted events wezen. Idempotent: NULL blijft NULL.
+    if (staleRowIdsToClear.length > 0) {
+      const { error: clearErr } = await supabaseAdmin
+        .from('event_sync_log')
+        .update({ next_retry_at: null })
+        .in('id', staleRowIdsToClear);
+      if (clearErr) {
+        console.error('[cron-events-sync-retry] clear stale next_retry_at:', clearErr.message);
+        summary.errors.push({ phase: 'clear_stale', error: clearErr.message });
+      } else {
+        summary.stale_rows_cleared = staleRowIdsToClear.length;
       }
     }
 
