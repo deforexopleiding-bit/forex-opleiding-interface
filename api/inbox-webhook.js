@@ -129,20 +129,56 @@ async function logInboxAudit(req, { action, entityType, entityId, afterJson }) {
 
 // ── Helpers: conversation upsert ───────────────────────────────────────────
 /**
- * Upsert whatsapp_conversations op phone_number. 2-step pattern (SELECT
- * → UPDATE/INSERT) i.p.v. ON CONFLICT, omdat lesson learned 20 mei: bij
- * partial unique index kan ON CONFLICT niet als arbiter; veiliger pattern
- * generaliseert ook hier.
+ * Upsert whatsapp_conversations op (phone_number, phone_number_id). 2-step
+ * pattern (SELECT → UPDATE/INSERT) i.p.v. ON CONFLICT — lesson learned 20 mei:
+ * bij partial unique index kan ON CONFLICT niet als arbiter; veiliger pattern.
  *
- * Returnt { id, created } — created=true bij nieuwe conversation (voor audit-log).
+ * Multi-line fix (Fase 2 stap 2b voorbereiding):
+ *   Match-strategie is lijn-specifiek geworden zodat dezelfde afzender op
+ *   verschillende WABA-lijnen aparte conversaties krijgt (events-lijn naast
+ *   finance-lijn). Voorheen werd op phone_number-only gematcht, waardoor een
+ *   events-inbound voor een nummer dat al een finance-conv had werd
+ *   geappended op die finance-conv (bevestigd in prod-test +31655270212).
+ *
+ * Match-volgorde:
+ *   - phoneNumberId aanwezig (regulier pad)   → tuple-SELECT
+ *     (phone_number, phone_number_id).maybeSingle(). Uniciteit op de tuple
+ *     wordt door de DB afgedwongen via migratie 2026-06-13-whatsapp-conv-
+ *     unique-on-phone-and-pnid.sql (drop UNIQUE op phone_number, add UNIQUE
+ *     op (phone_number, phone_number_id)).
+ *   - phoneNumberId null/leeg (ongebruikelijk — payload zonder metadata) →
+ *     phone-only fallback met deterministische tie-break (created_at ASC,
+ *     pak oudste). Warn-log zodat dit pad zichtbaar is.
+ *
+ * Returnt { id, created, customerId } — created=true bij nieuwe conversation.
  */
 async function upsertConversation(req, { phoneE164Plus, displayName, inboundTimestamp, previewText, phoneNumberId }) {
-  // 1. Bestaande conversation ophalen
-  const { data: existing, error: selErr } = await supabaseAdmin
-    .from('whatsapp_conversations')
-    .select('id, customer_id, unread_count, phone_number_id')
-    .eq('phone_number', phoneE164Plus)
-    .maybeSingle();
+  // 1. Bestaande conversation ophalen (lijn-specifiek of phone-only fallback)
+  let existing = null;
+  let selErr   = null;
+  if (phoneNumberId) {
+    const r = await supabaseAdmin
+      .from('whatsapp_conversations')
+      .select('id, customer_id, unread_count, phone_number_id')
+      .eq('phone_number',    phoneE164Plus)
+      .eq('phone_number_id', phoneNumberId)
+      .maybeSingle();
+    existing = r.data || null;
+    selErr   = r.error || null;
+  } else {
+    console.warn(
+      '[inbox-webhook] upsertConversation: geen pnId, phone-only fallback voor ' +
+      phoneE164Plus
+    );
+    const r = await supabaseAdmin
+      .from('whatsapp_conversations')
+      .select('id, customer_id, unread_count, phone_number_id')
+      .eq('phone_number', phoneE164Plus)
+      .order('created_at', { ascending: true })
+      .limit(1);
+    existing = (r.data && r.data[0]) || null;
+    selErr   = r.error || null;
+  }
   if (selErr) {
     console.error('[inbox-webhook] conv select fail:', selErr.message);
     throw selErr;
@@ -161,9 +197,11 @@ async function upsertConversation(req, { phoneE164Plus, displayName, inboundTime
       last_inbound_at:      tsIso,
     };
     if (displayName) updatePayload.display_name = displayName;
-    // phone_number_id: preserve original mapping — alleen zetten als nog NULL.
-    // Bij multi-line setup is de eerst-binnenkomende lijn leidend; switchen
-    // zou outbound-routing breken (we sturen terug via dezelfde lijn).
+    // phone_number_id: veilige heal. Met de tuple-SELECT hierboven is een
+    // match al lijn-specifiek — de oude "eerste lijn leidend"-preservation
+    // is daarmee overbodig en zou multi-line correctness juist breken. We
+    // healen alleen legacy rijen die nooit een pnId hebben gekregen
+    // (bv. via de phone-only fallback hierboven of pre-fix historie).
     if (phoneNumberId && !existing.phone_number_id) {
       updatePayload.phone_number_id = phoneNumberId;
     }
@@ -197,13 +235,28 @@ async function upsertConversation(req, { phoneE164Plus, displayName, inboundTime
     .select('id')
     .single();
   if (insErr) {
-    // Race condition: andere webhook insertte intussen. Re-select.
+    // Race condition: andere webhook insertte intussen. Re-select met dezelfde
+    // tuple-strategie als de initiële SELECT — anders mist de re-select de
+    // race-result post-migratie (UNIQUE op (phone_number, phone_number_id)).
     if (insErr.code === '23505') {
-      const { data: again } = await supabaseAdmin
-        .from('whatsapp_conversations')
-        .select('id, customer_id')
-        .eq('phone_number', phoneE164Plus)
-        .maybeSingle();
+      let again = null;
+      if (phoneNumberId) {
+        const r = await supabaseAdmin
+          .from('whatsapp_conversations')
+          .select('id, customer_id')
+          .eq('phone_number',    phoneE164Plus)
+          .eq('phone_number_id', phoneNumberId)
+          .maybeSingle();
+        again = r.data || null;
+      } else {
+        const r = await supabaseAdmin
+          .from('whatsapp_conversations')
+          .select('id, customer_id')
+          .eq('phone_number', phoneE164Plus)
+          .order('created_at', { ascending: true })
+          .limit(1);
+        again = (r.data && r.data[0]) || null;
+      }
       if (again) return { id: again.id, created: false, customerId: again.customer_id };
     }
     console.error('[inbox-webhook] conv insert fail:', insErr.message);
