@@ -175,6 +175,22 @@ async function getCurrentRetryCount(event_id, target) {
 // ── Webflow target ────────────────────────────────────────────────────────────
 
 async function syncWebflow(event) {
+  // DEFENSE-IN-DEPTH: archived events of events met cleanup-state mogen
+  // NOOIT (opnieuw) naar Webflow gepusht worden. Een stale failure-row in
+  // event_sync_log kan ons hier brengen via de retry-cron; ook handmatige
+  // debug-aanroepen mogen niet door dit pad een gearchiveerd event opnieuw
+  // aanmaken. Skip + warn-log; geen DB-mutatie, geen logSyncAttempt-rij.
+  if (event.status === 'archived' || event.webflow_sync_status === 'deleted') {
+    console.warn(
+      `[event-sync-orchestrator] syncWebflow SKIPPED archived/deleted event ${event.id} ` +
+      `(status=${event.status}, webflow_sync_status=${event.webflow_sync_status})`
+    );
+    return {
+      ok: true, action: 'skip', status: 'skipped_archived',
+      reason: 'event is archived or webflow_sync_status=deleted',
+    };
+  }
+
   const action = event.webflow_item_id ? 'update' : 'create';
   let result;
   try {
@@ -486,6 +502,24 @@ async function fetchEvent(eventId) {
 export async function syncEventToOutbound(eventId) {
   if (!eventId) throw new Error('eventId vereist');
   const event = await fetchEvent(eventId);
+
+  // Early-skip voor archived/deleted events. Voorkomt dat een stale
+  // failure-row in event_sync_log de retry-cron een gearchiveerd event
+  // laat re-creeren in Webflow. syncWebflow heeft dezelfde guard als
+  // defense-in-depth voor andere callers van syncWebflow.
+  if (event.status === 'archived' || event.webflow_sync_status === 'deleted') {
+    console.warn(
+      `[event-sync-orchestrator] syncEventToOutbound SKIPPED archived/deleted event ${eventId} ` +
+      `(status=${event.status}, webflow_sync_status=${event.webflow_sync_status})`
+    );
+    return {
+      eventId,
+      skipped: true,
+      reason : 'event archived or webflow_sync_status=deleted',
+      webflow: { ok: true, action: 'skip', status: 'skipped_archived' },
+      ghl    : { ok: true, action: 'skip', status: 'skipped_archived' },
+    };
+  }
 
   // Webflow eerst (primair kanaal), dan GHL (secundair)
   const webflow = await syncWebflow(event);
