@@ -2599,7 +2599,11 @@
             <div id="inboxTplResolvedList" style="display:flex;flex-direction:column;gap:4px;font-size:12px;background:rgba(255,255,255,.03);border:1px solid var(--border-subtle, rgba(255,255,255,.08));border-radius:6px;padding:8px 10px"></div>
           </div>
           <!-- Fase A: runtime media-upload voor IMAGE/VIDEO/DOCUMENT templates -->
-          <div id="inboxTplMediaWrap" hidden style="display:flex;flex-direction:column;gap:6px">
+          <!-- LET OP: gebruik display:none als default (geen 'hidden' attribute met
+               conflicterende inline display:flex - die laatste wint over de UA-style
+               [hidden]{display:none}, waardoor de picker bij body-only templates
+               niet verborg). JS schakelt naar display:flex bij media-headers. -->
+          <div id="inboxTplMediaWrap" style="flex-direction:column;gap:6px;display:none">
             <div style="font-size:11px;color:var(--text-dim);text-transform:uppercase;letter-spacing:.04em;font-weight:600">
               Bijlage (<span id="inboxTplMediaKindLabel">media</span>)
             </div>
@@ -8821,8 +8825,10 @@
       const txt = (tpl.header_content && (tpl.header_content.text || tpl.header_content.content)) || '';
       return /\{\{\s*\d+\s*\}\}/.test(String(txt));
     }
-    // Media-headers (IMAGE/VIDEO/DOCUMENT) vereisen altijd een variable-link → niet ondersteund in v1.
-    if (ht === 'IMAGE' || ht === 'VIDEO' || ht === 'DOCUMENT') return true;
+    // Media-headers (IMAGE/VIDEO/DOCUMENT) hebben geen text-vars. Sinds Fase A
+    // worden ze ondersteund via runtime_media (file-picker in send-modal). De
+    // oude v1-guard die hier 'true' returnde zou Fase A volledig blokkeren.
+    if (ht === 'IMAGE' || ht === 'VIDEO' || ht === 'DOCUMENT') return false;
     return false;
   }
 
@@ -8951,13 +8957,16 @@
     const ht = String(tpl && tpl.header_type || 'NONE').toUpperCase();
     const cfg = _INBOX_TPL_MEDIA_KINDS[ht] || null;
     if (!cfg) {
-      wrap.hidden = true;
+      // BELANGRIJK: gebruik style.display, niet de 'hidden' attribute.
+      // Het wrap-element heeft inline display-stijl die de UA-style
+      // [hidden]{display:none} zou overrulen. Style.display is autoritatief.
+      wrap.style.display = 'none';
       input.value = '';
       clearBtn.hidden = true;
       return;
     }
 
-    wrap.hidden = false;
+    wrap.style.display = 'flex';
     kindLbl.textContent = cfg.label;
     input.accept = cfg.accept;
     input.value = '';
