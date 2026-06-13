@@ -1434,10 +1434,16 @@
                       <input type="text" id="waMetaHeaderText" class="form-input" maxlength="60" placeholder="Max 60 tekens" />
                       <div style="font-size:11px;color:var(--text-faint);margin-top:4px"><span id="waMetaHeaderTextCount">0</span> / 60</div>
                     </div>
-                    <div class="form-group" id="waMetaHeaderUrlGroup" hidden>
-                      <label class="form-label" for="waMetaHeaderUrl">Voorbeeld URL</label>
+                    <div class="form-group" id="waMetaHeaderUrlGroup" style="display:none">
+                      <label class="form-label">Sample-bestand</label>
+                      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:6px">
+                        <input type="file" id="waMetaHeaderFileInput" class="form-input" style="flex:1;min-width:0;font-size:12px" />
+                        <button class="btn btn-sm" type="button" id="waMetaHeaderFileClearBtn" hidden>Wissen</button>
+                      </div>
+                      <div id="waMetaHeaderFileStatus" style="font-size:11px;color:var(--text-faint);margin-bottom:8px">Geen bestand gekozen (max ~3 MB).</div>
+                      <label class="form-label" for="waMetaHeaderUrl" style="font-size:11px;color:var(--text-dim)">Of plak een publieke URL</label>
                       <input type="url" id="waMetaHeaderUrl" class="form-input" placeholder="https://&hellip;" />
-                      <div style="font-size:11px;color:var(--text-faint);margin-top:4px">Wordt door Meta gebruikt als sample voor approval.</div>
+                      <div style="font-size:11px;color:var(--text-faint);margin-top:4px">Meta haalt dit sample op tijdens approval (kan uren/dagen duren) — moet publiek bereikbaar zijn.</div>
                     </div>
                   </div>
                 </details>
@@ -1445,6 +1451,13 @@
                 <!-- BODY -->
                 <div class="form-group">
                   <label class="form-label" for="waMetaBodyText">Body</label>
+                  <!-- Fase B: opmaak-toolbar (WhatsApp markdown: *bold* _italic_ ~strike~ `mono`) -->
+                  <div id="waMetaFormatToolbar" style="display:flex;gap:4px;margin-bottom:6px;flex-wrap:wrap">
+                    <button type="button" class="btn btn-sm" data-wa-fmt="bold"   title="Vetgedrukt — *tekst*" style="font-weight:700;min-width:32px">B</button>
+                    <button type="button" class="btn btn-sm" data-wa-fmt="italic" title="Cursief — _tekst_" style="font-style:italic;min-width:32px">I</button>
+                    <button type="button" class="btn btn-sm" data-wa-fmt="strike" title="Doorgehaald — ~tekst~" style="text-decoration:line-through;min-width:32px">S</button>
+                    <button type="button" class="btn btn-sm" data-wa-fmt="code"   title="Monospace — `tekst`" style="font-family:ui-monospace,Menlo,Monaco,Consolas,monospace;min-width:32px">&lt;/&gt;</button>
+                  </div>
                   <textarea id="waMetaBodyText" class="form-input" rows="6" maxlength="1024" placeholder="Hi {{klant.naam}}, je factuur {{factuur.nummer}} staat open."></textarea>
                   <div style="font-size:11px;color:var(--text-faint);margin-top:4px">
                     <span id="waMetaBodyCount">0</span> / 1024 &middot; klik op een chip hieronder om een variabele in te voegen op de cursor, of typ direct <code>{{klant.naam}}</code> (named) of <code>{{1}}</code> (positioneel, legacy).
@@ -1475,10 +1488,14 @@
 
                 <!-- BUTTONS -->
                 <details class="form-group" id="waMetaButtonsDetails" style="border:1px solid var(--border);border-radius:8px;padding:10px 12px">
-                  <summary style="cursor:pointer;font-weight:600;font-size:13px">Knoppen (max 3)</summary>
+                  <summary style="cursor:pointer;font-weight:600;font-size:13px">Knoppen (max 10)</summary>
                   <div style="margin-top:10px">
                     <div id="waMetaButtonsList" style="display:flex;flex-direction:column;gap:8px"></div>
                     <button type="button" class="btn btn-sm" id="waMetaBtnAddBtn" style="margin-top:8px"><i class="ti ti-plus"></i> Knop toevoegen</button>
+                    <div id="waMetaButtonsLimitHint" style="font-size:11px;color:var(--text-faint);margin-top:8px">
+                      Meta-limieten: max 3 quick-reply, max 2 CTA (URL + telefoon), hybride combineren tot 10 totaal. Buiten deze limieten weigert Meta de template.
+                    </div>
+                    <div id="waMetaButtonsLimitWarn" style="font-size:11px;color:#dc2626;margin-top:4px;display:none"></div>
                   </div>
                 </details>
               </div>
@@ -2304,9 +2321,28 @@
     const list = document.getElementById('waMetaButtonsList');
     const addBtn = document.getElementById('waMetaBtnAddBtn');
     if (!list) return;
-    if (addBtn) addBtn.disabled = _waTpl.metaButtonsDraft.length >= 3;
+    if (addBtn) addBtn.disabled = _waTpl.metaButtonsDraft.length >= 10;
+    // Per-type warnings: quick-reply max 3, CTA (URL+PHONE) max 2.
+    const limitWarn = document.getElementById('waMetaButtonsLimitWarn');
+    const counts = { QUICK_REPLY: 0, URL: 0, PHONE_NUMBER: 0 };
+    for (const b of _waTpl.metaButtonsDraft) {
+      const t = (b && b.type) || 'URL';
+      if (counts[t] != null) counts[t]++;
+    }
+    const warns = [];
+    if (counts.QUICK_REPLY > 3) warns.push('Max 3 quick-reply-knoppen');
+    if (counts.URL + counts.PHONE_NUMBER > 2) warns.push('Max 2 CTA-knoppen (URL + telefoon)');
+    if (_waTpl.metaButtonsDraft.length > 10) warns.push('Max 10 knoppen totaal');
+    if (limitWarn) {
+      if (warns.length) {
+        limitWarn.style.display = '';
+        limitWarn.textContent = '⚠ ' + warns.join('. ') + '.';
+      } else {
+        limitWarn.style.display = 'none';
+      }
+    }
     if (!_waTpl.metaButtonsDraft.length) {
-      list.innerHTML = '<div style="font-size:12px;color:var(--text-faint)">Nog geen knoppen. Klik op + Knop toevoegen (max 3).</div>';
+      list.innerHTML = '<div style="font-size:12px;color:var(--text-faint)">Nog geen knoppen. Klik op + Knop toevoegen (max 10).</div>';
       return;
     }
     list.innerHTML = _waTpl.metaButtonsDraft.map((b, idx) => {
@@ -2396,6 +2432,8 @@
     if (!previewBody) return;
 
     if (previewHeader) {
+      const headerUrlEl = document.getElementById('waMetaHeaderUrl');
+      const headerUrl = (headerUrlEl?.value || '').trim();
       if (headerType === 'TEXT') {
         const txt = (headerTextEl?.value || '').trim();
         previewHeader.textContent = txt;
@@ -2403,7 +2441,18 @@
       } else if (headerType === 'NONE') {
         previewHeader.textContent = '';
         previewHeader.style.display = 'none';
+      } else if (headerType === 'IMAGE' && /^https?:\/\//i.test(headerUrl)) {
+        // Fase B: toon thumbnail van het sample-image (na upload of na URL-plak).
+        previewHeader.innerHTML = `<img src="${esc(headerUrl)}" alt="" style="display:block;max-width:240px;max-height:140px;border-radius:6px;object-fit:cover" />`;
+        previewHeader.style.display = '';
+      } else if (headerType === 'VIDEO' && /^https?:\/\//i.test(headerUrl)) {
+        previewHeader.innerHTML = `<div style="display:flex;align-items:center;gap:8px;font-size:13px"><i class="ti ti-video" style="font-size:20px"></i><span>Video bijgevoegd</span></div>`;
+        previewHeader.style.display = '';
+      } else if (headerType === 'DOCUMENT' && /^https?:\/\//i.test(headerUrl)) {
+        previewHeader.innerHTML = `<div style="display:flex;align-items:center;gap:8px;font-size:13px"><i class="ti ti-file-text" style="font-size:20px"></i><span>Document bijgevoegd</span></div>`;
+        previewHeader.style.display = '';
       } else {
+        // Geen sample beschikbaar nog -> placeholder.
         previewHeader.textContent = `[${headerType}]`;
         previewHeader.style.display = '';
       }
@@ -2442,7 +2491,8 @@
         if (s.type === 'placeholder') {
           return `<span class="wa-preview-placeholder">${esc(s.text)}</span>`;
         }
-        return esc(s.text);
+        // Fase B: WhatsApp markdown render in tekst-segmenten.
+        return _waApplyMarkdown(esc(s.text));
       }).join('') || 'Je bericht verschijnt hier…';
     }
 
@@ -2656,7 +2706,14 @@
     const txtGroup = document.getElementById('waMetaHeaderTextGroup');
     const urlGroup = document.getElementById('waMetaHeaderUrlGroup');
     if (txtGroup) txtGroup.hidden = ht !== 'TEXT';
-    if (urlGroup) urlGroup.hidden = !(ht === 'IMAGE' || ht === 'VIDEO' || ht === 'DOCUMENT');
+    // urlGroup heeft inline style="display:none" als default (CSS-specificity
+    // override van 'hidden'-attribute - lesson learned uit Fase A smoke). We
+    // schakelen daarom via style.display autoritatief.
+    if (urlGroup) {
+      const showMedia = (ht === 'IMAGE' || ht === 'VIDEO' || ht === 'DOCUMENT');
+      urlGroup.style.display = showMedia ? '' : 'none';
+      if (showMedia) _waMetaSyncFileAccept();
+    }
   }
 
   async function saveWaMetaTemplate() {
@@ -3077,6 +3134,135 @@
 
   // Modal-level wiring: event-binding op velden in de modal. Idempotent
   // via flag (omdat we open meermalig kunnen aanroepen). Hangs on document
+  // ── Fase B helpers ────────────────────────────────────────────────────────
+
+  // WhatsApp-markdown renderer voor preview. Krijgt al-geëscapete text als
+  // input en wrapt *bold*, _italic_, ~strike~, `mono` in HTML-tags. Werkt
+  // alleen op single-line spans (geen \n in de groep) zodat we niet
+  // ongewenst over regelbreaken matchen.
+  function _waApplyMarkdown(escaped) {
+    if (!escaped || typeof escaped !== 'string') return '';
+    let out = escaped;
+    // Code eerst (zo blijft markup binnen `…` letterlijk).
+    out = out.replace(/`([^`\n]+?)`/g, '<code style="font-family:ui-monospace,Menlo,Monaco,Consolas,monospace;background:rgba(0,0,0,0.08);padding:0 3px;border-radius:3px">$1</code>');
+    out = out.replace(/\*([^*\n]+?)\*/g, '<b>$1</b>');
+    out = out.replace(/_([^_\n]+?)_/g, '<i>$1</i>');
+    out = out.replace(/~([^~\n]+?)~/g, '<s>$1</s>');
+    return out;
+  }
+
+  // Wrap-selectie in body-textarea voor opmaak-toolbar. fmt ∈
+  // 'bold'|'italic'|'strike'|'code'. Bij lege selectie: cursor tussen
+  // de wrappers plaatsen zodat gebruiker direct kan typen.
+  function _waMetaApplyFormat(fmt) {
+    const ta = document.getElementById('waMetaBodyText');
+    if (!ta) return;
+    const wrap = fmt === 'bold' ? '*' : fmt === 'italic' ? '_' : fmt === 'strike' ? '~' : '`';
+    const start = ta.selectionStart;
+    const end   = ta.selectionEnd;
+    const value = ta.value;
+    const before = value.slice(0, start);
+    const middle = value.slice(start, end);
+    const after  = value.slice(end);
+    ta.value = before + wrap + middle + wrap + after;
+    const cursorStart = before.length + wrap.length;
+    const cursorEnd   = cursorStart + middle.length;
+    ta.focus();
+    try { ta.setSelectionRange(cursorStart, cursorEnd); } catch {}
+    // Trigger input-events zodat preview + vars-panel updaten.
+    ta.dispatchEvent(new Event('input', { bubbles: true }));
+  }
+
+  // Upload-helpers voor header-file-picker. Reuse /api/whatsapp-media-upload
+  // uit Fase A; output-URL wordt in waMetaHeaderUrl-input geschreven en als
+  // example_url naar de submit-payload meegestuurd door bestaande logica.
+  const _WA_META_UPLOAD_MAX_BYTES = 3 * 1024 * 1024;
+  const _WA_META_UPLOAD_ACCEPT = {
+    IMAGE   : 'image/jpeg,image/png',
+    VIDEO   : 'video/mp4,video/3gpp',
+    DOCUMENT: 'application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-powerpoint,application/vnd.openxmlformats-officedocument.presentationml.presentation,text/plain',
+  };
+
+  function _waMetaSyncFileAccept() {
+    const fileEl = document.getElementById('waMetaHeaderFileInput');
+    const ht = (document.getElementById('waMetaHeaderType')?.value || 'NONE');
+    if (!fileEl) return;
+    if (_WA_META_UPLOAD_ACCEPT[ht]) fileEl.accept = _WA_META_UPLOAD_ACCEPT[ht];
+    else fileEl.accept = '';
+  }
+
+  function _waMetaClearHeaderFile() {
+    const fileEl   = document.getElementById('waMetaHeaderFileInput');
+    const status   = document.getElementById('waMetaHeaderFileStatus');
+    const clearBtn = document.getElementById('waMetaHeaderFileClearBtn');
+    if (fileEl) fileEl.value = '';
+    if (status) { status.style.color = 'var(--text-faint)'; status.textContent = 'Geen bestand gekozen (max ~3 MB).'; }
+    if (clearBtn) clearBtn.hidden = true;
+  }
+
+  function _waMetaFileToBase64(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const result = String(reader.result || '');
+        const idx = result.indexOf(',');
+        resolve(idx >= 0 ? result.slice(idx + 1) : result);
+      };
+      reader.onerror = () => reject(new Error('FileReader failed'));
+      reader.readAsDataURL(file);
+    });
+  }
+
+  async function _waMetaHandleHeaderFilePick() {
+    const ht = (document.getElementById('waMetaHeaderType')?.value || 'NONE');
+    if (ht !== 'IMAGE' && ht !== 'VIDEO' && ht !== 'DOCUMENT') {
+      return; // veiligheidsklep
+    }
+    const fileEl   = document.getElementById('waMetaHeaderFileInput');
+    const urlEl    = document.getElementById('waMetaHeaderUrl');
+    const status   = document.getElementById('waMetaHeaderFileStatus');
+    const clearBtn = document.getElementById('waMetaHeaderFileClearBtn');
+    const file = fileEl && fileEl.files && fileEl.files[0] ? fileEl.files[0] : null;
+    if (!file) return;
+    if (file.size > _WA_META_UPLOAD_MAX_BYTES) {
+      if (status) { status.style.color = '#dc2626'; status.textContent = 'Bestand te groot (' + (file.size / 1024 / 1024).toFixed(1) + ' MB > 3 MB). Splits het op of gebruik Fase C (komt later).'; }
+      if (clearBtn) clearBtn.hidden = false;
+      return;
+    }
+    if (status) { status.style.color = 'var(--text-dim)'; status.textContent = 'Uploaden naar storage…'; }
+    try {
+      const b64 = await _waMetaFileToBase64(file);
+      const kind = ht.toLowerCase();
+      const resp = await window.AgentShared.apiFetch('/api/whatsapp-media-upload', {
+        method : 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body   : JSON.stringify({
+          filename     : file.name,
+          content_type : file.type || 'application/octet-stream',
+          kind,
+          data_base64  : b64,
+        }),
+      });
+      const r = await resp.json().catch(() => ({}));
+      if (!resp.ok || !r || !r.ok) {
+        if (status) { status.style.color = '#dc2626'; status.textContent = 'Upload mislukt: ' + ((r && r.error) || ('HTTP ' + resp.status)); }
+        if (clearBtn) clearBtn.hidden = false;
+        return;
+      }
+      if (urlEl) urlEl.value = r.url;
+      if (status) {
+        status.style.color = '#16a34a';
+        const sizeTxt = (typeof r.size_bytes === 'number') ? r.size_bytes.toLocaleString() : String(file.size);
+        status.textContent = '✓ ' + file.name + ' (' + sizeTxt + ' bytes) — URL in veld hieronder.';
+      }
+      if (clearBtn) clearBtn.hidden = false;
+      _waTplPreviewDebounced();
+    } catch (e) {
+      if (status) { status.style.color = '#dc2626'; status.textContent = 'Upload exception: ' + (e && e.message || e); }
+      if (clearBtn) clearBtn.hidden = false;
+    }
+  }
+
   // (modal lives in body) — not on the host.
   let _waMetaModalWired = false;
   function wireWaMetaModalOnce() {
@@ -3085,6 +3271,10 @@
     const htEl = document.getElementById('waMetaHeaderType');
     if (htEl) htEl.addEventListener('change', () => {
       _updateWaMetaHeaderVisibility();
+      _waMetaSyncFileAccept();
+      // Bij wisselen van header-kind: file-keuze terug naar leeg (anders
+      // mismatch tussen sample-bestand en het nieuwe kind).
+      _waMetaClearHeaderFile();
       _waTplPreviewDebounced();
     });
     const htTxtEl = document.getElementById('waMetaHeaderText');
@@ -3104,6 +3294,25 @@
     }
     const btnAdd = document.getElementById('waMetaBtnAddBtn');
     if (btnAdd) btnAdd.addEventListener('click', () => addWaMetaButton());
+
+    // Fase B: header URL-input handmatig + file-upload wiring.
+    const urlEl = document.getElementById('waMetaHeaderUrl');
+    if (urlEl) urlEl.addEventListener('input', () => _waTplPreviewDebounced());
+    const fileEl = document.getElementById('waMetaHeaderFileInput');
+    if (fileEl) fileEl.addEventListener('change', () => _waMetaHandleHeaderFilePick());
+    const fileClearEl = document.getElementById('waMetaHeaderFileClearBtn');
+    if (fileClearEl) fileClearEl.addEventListener('click', () => _waMetaClearHeaderFile());
+
+    // Fase B: opmaak-toolbar (B / I / S / </>) — wrap-selectie in WhatsApp-markdown.
+    const toolbar = document.getElementById('waMetaFormatToolbar');
+    if (toolbar) {
+      toolbar.addEventListener('click', (e) => {
+        const btn = e.target.closest('[data-wa-fmt]');
+        if (!btn) return;
+        e.preventDefault();
+        _waMetaApplyFormat(btn.getAttribute('data-wa-fmt'));
+      });
+    }
 
     // Variabelen-paneel chip-click delegation.
     const varsPanel = document.getElementById('waMetaVarsPanel');
