@@ -22,6 +22,12 @@
     .btn-primary:hover { opacity: .9; }
     .btn-primary:disabled { opacity: .5; cursor: not-allowed; }
 
+    /* Fase 1 events-tabs */
+    .ev-tabs { padding-bottom: 0; }
+    .ev-tab { background: transparent; border: none; padding: 10px 14px; font-size: 13.5px; font-weight: 600; color: var(--text-dim); cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -1px; display: inline-flex; align-items: center; gap: 6px; font-family: inherit; }
+    .ev-tab:hover { color: var(--text); }
+    .ev-tab.active { color: var(--brand-primary, #093d54); border-bottom-color: var(--brand-primary, #093d54); }
+
     /* Capacity pill */
     .cap-pill { display:inline-flex; align-items:center; gap:4px; padding:2px 9px; border-radius:12px; font-size:11px; font-weight:600; background: var(--bg-elev-2); color: var(--text-dim); border:1px solid var(--border); }
     .cap-pill.full { background: rgba(220,38,38,0.15); color:#b91c1c; border-color: rgba(220,38,38,0.3); }
@@ -184,7 +190,13 @@ function renderForbidden() {
   `;
 }
 
-function renderPage(canCreate) {
+function renderPage(canCreate, canViewInbox) {
+  // Fase 1 events-inbox: tabbar boven de filter-strip. Inbox-tab alleen
+  // zichtbaar bij events.inbox.view permissie. Default tab = 'overzicht'
+  // zodat bestaand gedrag onveranderd is.
+  const inboxTabBtn = canViewInbox
+    ? '<button class="ev-tab" data-evtab="inbox"><i class="ti ti-inbox"></i> Inbox</button>'
+    : '';
   document.getElementById('page-content').innerHTML = `
     <div class="page-head">
       <div>
@@ -194,28 +206,65 @@ function renderPage(canCreate) {
       ${canCreate ? '<a class="btn-primary" href="/modules/events-wizard.html"><i class="ti ti-plus"></i> Nieuw event</a>' : ''}
     </div>
 
-    <div class="sr-filterstrip" style="margin-bottom:14px">
-      <div class="sr-search"><input id="evSearch" type="search" placeholder="Zoek titel of locatie…" /></div>
-      <select class="sr-select" id="evNiveau">
-        <option value="">Alle niveaus</option>
-      </select>
-      <button class="sr-iconbtn sr-spacer" id="evRefresh" title="Vernieuwen"><i class="ti ti-refresh"></i></button>
+    <div class="ev-tabs" style="display:flex;gap:6px;margin-bottom:14px;border-bottom:1px solid var(--border)">
+      <button class="ev-tab active" data-evtab="overzicht"><i class="ti ti-list"></i> Overzicht</button>
+      ${inboxTabBtn}
     </div>
 
-    <div class="sr-segments" id="evSegments" style="margin-bottom:14px">
-      <button class="sr-seg active" data-status="">Alle</button>
-      <button class="sr-seg" data-status="draft">Concept</button>
-      <button class="sr-seg" data-status="published">Gepubliceerd</button>
-      <button class="sr-seg" data-status="cancelled">Geannuleerd</button>
-      <button class="sr-seg" data-status="archived">Gearchiveerd</button>
+    <div id="ev-pane-overzicht">
+      <div class="sr-filterstrip" style="margin-bottom:14px">
+        <div class="sr-search"><input id="evSearch" type="search" placeholder="Zoek titel of locatie…" /></div>
+        <select class="sr-select" id="evNiveau">
+          <option value="">Alle niveaus</option>
+        </select>
+        <button class="sr-iconbtn sr-spacer" id="evRefresh" title="Vernieuwen"><i class="ti ti-refresh"></i></button>
+      </div>
+
+      <div class="sr-segments" id="evSegments" style="margin-bottom:14px">
+        <button class="sr-seg active" data-status="">Alle</button>
+        <button class="sr-seg" data-status="draft">Concept</button>
+        <button class="sr-seg" data-status="published">Gepubliceerd</button>
+        <button class="sr-seg" data-status="cancelled">Geannuleerd</button>
+        <button class="sr-seg" data-status="archived">Gearchiveerd</button>
+      </div>
+
+      <div id="eventsList">
+        <div class="skel-row"></div>
+        <div class="skel-row"></div>
+        <div class="skel-row"></div>
+      </div>
     </div>
 
-    <div id="eventsList">
-      <div class="skel-row"></div>
-      <div class="skel-row"></div>
-      <div class="skel-row"></div>
+    <div id="ev-pane-inbox" style="display:none">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+        <div style="font-size:12.5px;color:var(--text-dim)">Inbound WhatsApp-conversaties op de events-lijn. Lees-only; antwoorden komt later (Simone).</div>
+        <button class="sr-iconbtn" id="evInboxRefresh" title="Vernieuwen"><i class="ti ti-refresh"></i></button>
+      </div>
+      <div id="eventsInboxList">
+        <div class="skel-row"></div>
+        <div class="skel-row"></div>
+      </div>
     </div>
   `;
+
+  // Tab-switch wiring
+  const tabBtns = document.querySelectorAll('.ev-tab');
+  const paneOverview = document.getElementById('ev-pane-overzicht');
+  const paneInbox    = document.getElementById('ev-pane-inbox');
+  tabBtns.forEach(b => b.addEventListener('click', () => {
+    const which = b.getAttribute('data-evtab');
+    tabBtns.forEach(x => x.classList.toggle('active', x === b));
+    if (which === 'overzicht') {
+      paneOverview.style.display = '';
+      paneInbox.style.display = 'none';
+    } else if (which === 'inbox') {
+      paneOverview.style.display = 'none';
+      paneInbox.style.display = '';
+      loadEventsInbox();
+    }
+  }));
+  const inboxRefresh = document.getElementById('evInboxRefresh');
+  if (inboxRefresh) inboxRefresh.addEventListener('click', () => loadEventsInbox());
 
   // Wire filters
   document.getElementById('evSearch').addEventListener('input', debounce((e) => {
@@ -374,9 +423,67 @@ async function init() {
     return;
   }
 
-  const canCreate = window.RBAC.canSync('events.event.create');
-  renderPage(canCreate);
+  const canCreate     = window.RBAC.canSync('events.event.create');
+  const canViewInbox  = window.RBAC.canSync('events.inbox.view');
+  renderPage(canCreate, canViewInbox);
   await Promise.all([loadNiveauOptions(), loadEvents()]);
+}
+
+// ── Fase 1: events-inbox (read-only) ─────────────────────────────────────────
+// Hergebruikt /api/inbox-conversations-list met ?module=events. Filtert
+// daar op de events-phone_number_id uit whatsapp_module_config. Geen
+// reply-functionaliteit in deze fase; volledige thread-view + send
+// volgt zodra Simone er is (Fase 2).
+async function loadEventsInbox() {
+  const list = document.getElementById('eventsInboxList');
+  if (!list) return;
+  list.innerHTML = '<div class="skel-row"></div><div class="skel-row"></div>';
+  try {
+    const r = await window.AgentShared.apiFetch('/api/inbox-conversations-list?module=events&limit=100');
+    if (!r.ok) {
+      const j = await r.json().catch(() => ({}));
+      list.innerHTML = '<div class="empty-state"><div style="color:#b91c1c;font-size:13px">Fout: ' + esc(j.error || ('HTTP ' + r.status)) + '</div></div>';
+      return;
+    }
+    const j = await r.json();
+    if (!j.configured) {
+      list.innerHTML = '<div class="empty-state" style="padding:24px;text-align:center">'
+        + '<div class="empty-icon"><i class="ti ti-plug-connected-x"></i></div>'
+        + '<div style="font-size:14px;font-weight:600;margin-top:6px">Events-lijn nog niet geconfigureerd</div>'
+        + '<div style="font-size:12.5px;color:var(--text-dim);margin-top:4px">' + esc(j.warning || 'Maak een rij aan in whatsapp_module_config met module=\'events\' en is_active=true.') + '</div>'
+        + '</div>';
+      return;
+    }
+    const items = Array.isArray(j.items) ? j.items : [];
+    if (items.length === 0) {
+      list.innerHTML = '<div class="empty-state" style="padding:24px;text-align:center">'
+        + '<div class="empty-icon"><i class="ti ti-inbox"></i></div>'
+        + '<div style="font-size:14px;font-weight:600;margin-top:6px">Nog geen events-conversaties</div>'
+        + '<div style="font-size:12.5px;color:var(--text-dim);margin-top:4px">Inbound op de events-WhatsApp-lijn verschijnt hier.</div>'
+        + '</div>';
+      return;
+    }
+    list.innerHTML = '<div class="sr-tablewrap"><table class="sr-table">'
+      + '<thead><tr><th>Telefoon</th><th>Naam</th><th>Klant</th><th>Laatste bericht</th><th style="text-align:right">Tijd</th><th style="text-align:right">Ongelezen</th></tr></thead>'
+      + '<tbody>'
+      + items.map(it => {
+          const preview = (it.last_message_preview || '').slice(0, 80);
+          const unread = it.unread_count > 0
+            ? '<span style="background:rgba(220,38,38,0.15);color:#b91c1c;border-radius:10px;padding:2px 8px;font-size:11px;font-weight:600">' + it.unread_count + '</span>'
+            : '<span style="color:var(--text-faint);font-size:11px">—</span>';
+          return '<tr>'
+            + '<td><code style="font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px">' + esc(it.phone_number) + '</code></td>'
+            + '<td>' + esc(it.display_name || '—') + '</td>'
+            + '<td>' + esc(it.customer_name || '<i style="color:var(--text-faint)">geen koppeling</i>') + '</td>'
+            + '<td style="max-width:380px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(preview) + '</td>'
+            + '<td style="text-align:right;font-size:11.5px;color:var(--text-dim)">' + esc(fmtDate(it.last_message_at)) + '</td>'
+            + '<td style="text-align:right">' + unread + '</td>'
+            + '</tr>';
+        }).join('')
+      + '</tbody></table></div>';
+  } catch (e) {
+    list.innerHTML = '<div class="empty-state"><div style="color:#b91c1c;font-size:13px">Fout: ' + esc(e.message) + '</div></div>';
+  }
 }
 
 init();
