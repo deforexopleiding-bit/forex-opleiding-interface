@@ -35,6 +35,7 @@ import { getClientIp } from './_lib/audit-customer.js';
 import { getModuleContextByPhoneNumberId } from './_lib/module-context.js';
 import { extractEmail, findCustomerByEmail } from './_lib/email-extractor.js';
 import { runJoostSuggest } from './_lib/joost-suggest-core.js';
+import { runSimoneSuggest } from './_lib/simone-suggest-core.js';
 import { waitUntil } from '@vercel/functions';
 
 // Vercel-eis: bodyParser uit zodat we de raw body kunnen lezen voor HMAC.
@@ -522,6 +523,64 @@ function triggerJoostAutoSuggest({ conversationId, triggeredByMessageId, autonom
       console.warn(
         '[inbox-webhook] reactive suggest threw module=' + modLabel +
         ' conv=' + conversationId + ': ' + (e && e.message)
+      );
+    })
+  );
+}
+
+/**
+ * Reactieve Simone-suggest trigger (events-agent). Sibling van
+ * triggerJoostAutoSuggest — zelfde waitUntil + fire-and-forget shape,
+ * zelfde observability-log-format ('reactive suggest start/done/skipped/
+ * threw'), maar 'agent=simone' tag in de logs en runSimoneSuggest in plaats
+ * van runJoostSuggest.
+ *
+ * Geen autonomy-chain: Simone heeft (nog) geen autonomous-send endpoint;
+ * dat is buiten Fase 2-scope. Deze helper levert alleen suggestion-drafts.
+ *
+ * Persist naar joost_suggestions met module='events' (door runSimoneSuggest).
+ */
+function triggerSimoneAutoSuggest({ conversationId, triggeredByMessageId, clientIp, module }) {
+  const modLabel = module || 'events';
+  console.log(
+    '[inbox-webhook] reactive suggest start module=' + modLabel +
+    ' conv=' + conversationId +
+    ' agent=simone'
+  );
+
+  waitUntil(
+    runSimoneSuggest({
+      supabase:             supabaseAdmin,
+      conversationId,
+      triggeredByMessageId: triggeredByMessageId || null,
+      autoTriggered:        true,
+      requestedByUserId:    null,
+      clientIp:             clientIp || null,
+    }).then((result) => {
+      if (result.status !== 200) {
+        console.warn(
+          '[inbox-webhook] reactive suggest skipped: status=' + result.status +
+          ' module=' + modLabel +
+          ' conv=' + conversationId +
+          ' agent=simone' +
+          ' body=' + JSON.stringify(result.body || {}).slice(0, 200)
+        );
+        return;
+      }
+      const suggestionId = result.body?.suggestion?.id || null;
+      const intent       = result.body?.suggestion?.detected_intent || null;
+      console.log(
+        '[inbox-webhook] reactive suggest done id=' + (suggestionId || '<no-id>') +
+        ' module=' + modLabel +
+        ' conv=' + conversationId +
+        ' agent=simone' +
+        ' intent=' + (intent || '?')
+      );
+    }).catch((e) => {
+      console.warn(
+        '[inbox-webhook] reactive suggest threw module=' + modLabel +
+        ' conv=' + conversationId +
+        ' agent=simone: ' + (e && e.message)
       );
     })
   );
@@ -1177,9 +1236,15 @@ export default async function handler(req, res) {
               if (insRes.inserted) stats.msgs_new++;
               else                 stats.msgs_dup++;
 
-              // 3. Joost-flows: intake + auto-suggest (fire-and-forget achtig)
+              // 3. Agent-flows: per-module reactive suggest + Joost intake
               //
-              // Twee paden, mutually exclusive op deze message:
+              // Routing per moduleCtx.module (mutually exclusive):
+              //   - 'finance' → Joost-tak (Pad (i) intake óf Pad (ii) auto-suggest)
+              //   - 'events'  → Simone-tak (Fase 2 stap 2b — reactive only,
+              //                 geen intake-pad)
+              //   - null      → unrouted, geen agent (Fase 0 gate-hardening)
+              //
+              // Joost-paden (alleen bij module='finance'):
               //   (i)  Intake (E2 autonomous intake) — runt als conv.customerId
               //        IS NULL én feature_flags.e2_autonomous_intake = true.
               //        Joost vraagt om e-mailadres, parsed het antwoord en
@@ -1188,23 +1253,27 @@ export default async function handler(req, res) {
               //        (klant gekoppeld) én aan de overige filters voldoet.
               //        LLM-aangedreven Joost-suggestie + optionele E2.1 chain.
               //
-              // Gedeelde filters:
+              // Simone-pad (alleen bij module='events'):
+              //   (iii) Auto-suggest — runt zonder customer_id-vereiste
+              //         (event-leads zijn prospects). Pre-filters identiek aan
+              //         Joost-(ii): body+TRIVIAL_REPLIES + anti-loop 60s.
+              //         Persist naar joost_suggestions met module='events'.
+              //
+              // Gedeelde gating-filters (over alle agents):
               //   a) Nieuwe insert (geen Meta-retry)
               //   b) text-type message
-              //   c) module van ontvangende lijn == finance (huidige scope)
-              //   d) joost_config.is_enabled = true voor finance
-              //
-              // Auto-suggest extra filters:
+              //   c) module van ontvangende lijn matched (geen silent-failover)
+              //   d) joost_config.is_enabled = true voor die module
               //   e) joost_config.feature_flags.reactive_suggest_enabled = true
-              //      (per-module gate, Fase 2 stap 1; default UIT op finance)
               //   f) body >= 5 chars + niet in TRIVIAL_REPLIES set
               //   g) anti-loop: geen outbound binnen 60s
               //
-              // Aanroep: auto-suggest doet sinds Fase 2 stap 1 een IN-PROCESS
-              // call van runJoostSuggest (api/_lib/joost-suggest-core.js).
-              // Geen HTTP-self-call meer, dus geen VERCEL_URL / INTERNAL_API_TOKEN
-              // afhankelijkheid voor dit pad. Intake-flow gebruikt sendText
-              // direct + schrijft eigen outbound message-rij (geen extra hop).
+              // Aanroep: agents-suggest doet sinds Fase 2 stap 1 een IN-PROCESS
+              // call (runJoostSuggest / runSimoneSuggest), gewrapt in waitUntil()
+              // zodat de Vercel-lambda het werk afmaakt ná de 200-response. Geen
+              // HTTP-self-call meer, dus geen VERCEL_URL / INTERNAL_API_TOKEN
+              // afhankelijkheid voor dit pad. Intake-flow (Joost-only) gebruikt
+              // sendText direct + schrijft eigen outbound message-rij.
               try {
                 if (insRes.inserted && insRes.messageId && insRes.type === 'text') {
                   // Module + joost_config: éénmalige lookup voor beide paden.
@@ -1288,6 +1357,57 @@ export default async function handler(req, res) {
                                 module:                jcfg.module || moduleCtx?.module || null,
                               });
                             }
+                          }
+                        }
+                      }
+                    }
+                  }
+
+                  // ── Simone-tak (events) — Fase 2 stap 2b ───────────────────
+                  // Mutually exclusive met finance-tak: moduleCtx.module is
+                  // 'finance' XOR 'events' XOR null, dus events-inbound raakt
+                  // de Joost-flows nooit en finance-inbound nooit Simone.
+                  // Geen customer_id-vereiste: event-leads zijn prospects;
+                  // runSimoneSuggest matcht zelf phone -> event_attendees en
+                  // valt elegant terug op general-purpose bij no-match.
+                  const isEventsLijn = !!(moduleCtx
+                    && moduleCtx.module === 'events'
+                    && moduleCtx.is_active === true);
+                  if (isEventsLijn) {
+                    const { data: scfg, error: scfgErr } = await supabaseAdmin
+                      .from('joost_config')
+                      .select('module, is_enabled, feature_flags')
+                      .eq('module', 'events')
+                      .maybeSingle();
+                    if (scfgErr) {
+                      console.warn('[inbox-webhook] joost_config (events) lookup fail:', scfgErr.message);
+                    } else if (scfg && scfg.is_enabled === true) {
+                      const sFlags = (scfg.feature_flags && typeof scfg.feature_flags === 'object')
+                        ? scfg.feature_flags : {};
+                      const sReactiveEnabled = sFlags.reactive_suggest_enabled === true;
+                      if (!sReactiveEnabled) {
+                        // Gate-redenering-log: maakt zichtbaar dat de events-tak
+                        // het inbound zag maar bewust geskipt is (default-OFF na
+                        // seed). Finance-tak heeft deze log niet — daar was de
+                        // historische default ook OFF maar het gate-fenomeen
+                        // werd al geverifieerd via stap 1 smoke.
+                        console.log(
+                          '[inbox-webhook] reactive suggest skipped (events): ' +
+                          'reactive_suggest_enabled=false conv=' + conv.id
+                        );
+                      } else {
+                        const trimmed = String(insRes.body || '').trim();
+                        const lower = trimmed.toLowerCase();
+                        const isTriggerable = trimmed.length >= 5 && !TRIVIAL_REPLIES.has(lower);
+                        if (isTriggerable) {
+                          const noLoop = await hasNoRecentOutbound(conv.id, 60);
+                          if (noLoop) {
+                            triggerSimoneAutoSuggest({
+                              conversationId:       conv.id,
+                              triggeredByMessageId: insRes.messageId,
+                              clientIp:             getClientIp(req),
+                              module:               scfg.module || moduleCtx?.module || null,
+                            });
                           }
                         }
                       }
