@@ -2598,6 +2598,21 @@
             <div style="font-size:11px;color:var(--text-dim);text-transform:uppercase;letter-spacing:.04em;font-weight:600">Auto-ingevulde variabelen</div>
             <div id="inboxTplResolvedList" style="display:flex;flex-direction:column;gap:4px;font-size:12px;background:rgba(255,255,255,.03);border:1px solid var(--border-subtle, rgba(255,255,255,.08));border-radius:6px;padding:8px 10px"></div>
           </div>
+          <!-- Fase A: runtime media-upload voor IMAGE/VIDEO/DOCUMENT templates -->
+          <!-- LET OP: gebruik display:none als default (geen 'hidden' attribute met
+               conflicterende inline display:flex - die laatste wint over de UA-style
+               [hidden]{display:none}, waardoor de picker bij body-only templates
+               niet verborg). JS schakelt naar display:flex bij media-headers. -->
+          <div id="inboxTplMediaWrap" style="flex-direction:column;gap:6px;display:none">
+            <div style="font-size:11px;color:var(--text-dim);text-transform:uppercase;letter-spacing:.04em;font-weight:600">
+              Bijlage (<span id="inboxTplMediaKindLabel">media</span>)
+            </div>
+            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+              <input type="file" id="inboxTplMediaInput" class="fin-input" style="font-size:12px;flex:1;min-width:0" />
+              <button type="button" class="sr-abtn" id="inboxTplMediaClearBtn" hidden>Wissen</button>
+            </div>
+            <div id="inboxTplMediaStatus" style="font-size:11px;color:var(--text-faint)">Geen bestand gekozen.</div>
+          </div>
           <form id="inboxTplVarsForm" style="display:flex;flex-direction:column;gap:8px">
             <!-- Dynamisch ingevuld (alleen voor legacy positionele templates) -->
           </form>
@@ -6280,6 +6295,9 @@
   let _inboxTplContext  = { customer: null, open_invoices: [] };
   let _inboxTplSelectedInvoiceId = '';   // geselecteerde factuur uit dropdown (lege string = (geen))
   let _inboxTplResolveMode = 'positional'; // 'positional' (legacy vars-form) of 'named' (auto-resolve)
+  // Fase A: runtime-media voor IMAGE/VIDEO/DOCUMENT-header templates.
+  // { kind: 'image'|'video'|'document', link: '<https-url>', filename, size }
+  let _inboxTplRuntimeMedia = null;
 
   // Relatieve tijd helper: ISO-string → "5m" / "2u" / "gisteren" / "3d" / "2w" / "3mnd" / "1j"
   // Korte tijd-string voor in bubble-meta (HH:MM, lokale tijd) — zoals WhatsApp Web.
@@ -8807,8 +8825,10 @@
       const txt = (tpl.header_content && (tpl.header_content.text || tpl.header_content.content)) || '';
       return /\{\{\s*\d+\s*\}\}/.test(String(txt));
     }
-    // Media-headers (IMAGE/VIDEO/DOCUMENT) vereisen altijd een variable-link → niet ondersteund in v1.
-    if (ht === 'IMAGE' || ht === 'VIDEO' || ht === 'DOCUMENT') return true;
+    // Media-headers (IMAGE/VIDEO/DOCUMENT) hebben geen text-vars. Sinds Fase A
+    // worden ze ondersteund via runtime_media (file-picker in send-modal). De
+    // oude v1-guard die hier 'true' returnde zou Fase A volledig blokkeren.
+    if (ht === 'IMAGE' || ht === 'VIDEO' || ht === 'DOCUMENT') return false;
     return false;
   }
 
@@ -8911,8 +8931,118 @@
       }
     }
 
+    // Fase A: configureer media-picker afhankelijk van header_type.
+    _inboxTplConfigureMediaPicker(tpl);
+
     _inboxTplRenderPreview();
     _inboxTplShowStep(2);
+  }
+
+  // ── Fase A: runtime-media picker helpers ──────────────────────────────────
+  const _INBOX_TPL_MEDIA_KINDS = {
+    IMAGE   : { label: 'afbeelding', accept: 'image/jpeg,image/png', maxMB: 3 },
+    VIDEO   : { label: 'video',      accept: 'video/mp4,video/3gpp', maxMB: 3 },
+    DOCUMENT: { label: 'document',   accept: 'application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-powerpoint,application/vnd.openxmlformats-officedocument.presentationml.presentation,text/plain', maxMB: 3 },
+  };
+
+  function _inboxTplConfigureMediaPicker(tpl) {
+    _inboxTplRuntimeMedia = null;
+    const wrap     = document.getElementById('inboxTplMediaWrap');
+    const input    = document.getElementById('inboxTplMediaInput');
+    const status   = document.getElementById('inboxTplMediaStatus');
+    const clearBtn = document.getElementById('inboxTplMediaClearBtn');
+    const kindLbl  = document.getElementById('inboxTplMediaKindLabel');
+    if (!wrap || !input || !status || !clearBtn || !kindLbl) return;
+
+    const ht = String(tpl && tpl.header_type || 'NONE').toUpperCase();
+    const cfg = _INBOX_TPL_MEDIA_KINDS[ht] || null;
+    if (!cfg) {
+      // BELANGRIJK: gebruik style.display, niet de 'hidden' attribute.
+      // Het wrap-element heeft inline display-stijl die de UA-style
+      // [hidden]{display:none} zou overrulen. Style.display is autoritatief.
+      wrap.style.display = 'none';
+      input.value = '';
+      clearBtn.hidden = true;
+      return;
+    }
+
+    wrap.style.display = 'flex';
+    kindLbl.textContent = cfg.label;
+    input.accept = cfg.accept;
+    input.value = '';
+    clearBtn.hidden = true;
+    status.style.color = 'var(--text-faint)';
+    status.textContent = 'Geen bestand gekozen (max ' + cfg.maxMB + 'MB).';
+
+    // Bind 1x — verwijder vorige handlers door clone-replace pattern.
+    const newInput = input.cloneNode(true);
+    input.parentNode.replaceChild(newInput, input);
+    const newClear = clearBtn.cloneNode(true);
+    clearBtn.parentNode.replaceChild(newClear, clearBtn);
+
+    newInput.addEventListener('change', () => _inboxTplHandleMediaPick(newInput, ht, cfg));
+    newClear.addEventListener('click', () => {
+      _inboxTplRuntimeMedia = null;
+      newInput.value = '';
+      newClear.hidden = true;
+      const s = document.getElementById('inboxTplMediaStatus');
+      if (s) { s.style.color = 'var(--text-faint)'; s.textContent = 'Geen bestand gekozen (max ' + cfg.maxMB + 'MB).'; }
+    });
+  }
+
+  async function _inboxTplHandleMediaPick(inputEl, headerType, cfg) {
+    const status   = document.getElementById('inboxTplMediaStatus');
+    const clearBtn = document.getElementById('inboxTplMediaClearBtn');
+    const file = inputEl.files && inputEl.files[0] ? inputEl.files[0] : null;
+    if (!file) return;
+    if (file.size > cfg.maxMB * 1024 * 1024) {
+      _inboxTplRuntimeMedia = null;
+      if (status) { status.style.color = '#ef4444'; status.textContent = 'Bestand te groot (' + (file.size / 1024 / 1024).toFixed(1) + 'MB > ' + cfg.maxMB + 'MB).'; }
+      if (clearBtn) clearBtn.hidden = false;
+      return;
+    }
+    if (status) { status.style.color = 'var(--text-dim)'; status.textContent = 'Bestand uploaden…'; }
+    try {
+      const b64 = await _inboxTplFileToBase64(file);
+      const kind = headerType.toLowerCase();
+      const r = await window.AgentShared.apiFetch('/api/whatsapp-media-upload', {
+        method : 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body   : JSON.stringify({
+          filename     : file.name,
+          content_type : file.type || 'application/octet-stream',
+          kind,
+          data_base64  : b64,
+        }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok || !d.ok) {
+        _inboxTplRuntimeMedia = null;
+        if (status) { status.style.color = '#ef4444'; status.textContent = 'Upload mislukt: ' + (d.error || 'HTTP ' + r.status); }
+        if (clearBtn) clearBtn.hidden = false;
+        return;
+      }
+      _inboxTplRuntimeMedia = { kind, link: d.url, filename: file.name, size: d.size_bytes || file.size };
+      if (status) { status.style.color = '#10b981'; status.textContent = '✓ ' + file.name + ' (' + (d.size_bytes || file.size).toLocaleString() + ' bytes)'; }
+      if (clearBtn) clearBtn.hidden = false;
+    } catch (e) {
+      _inboxTplRuntimeMedia = null;
+      if (status) { status.style.color = '#ef4444'; status.textContent = 'Upload exception: ' + (e && e.message || e); }
+      if (clearBtn) clearBtn.hidden = false;
+    }
+  }
+
+  function _inboxTplFileToBase64(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const result = String(reader.result || '');
+        const idx = result.indexOf(',');
+        resolve(idx >= 0 ? result.slice(idx + 1) : result);
+      };
+      reader.onerror = () => reject(new Error('FileReader failed'));
+      reader.readAsDataURL(file);
+    });
   }
 
   // C4: render de read-only lijst van auto-resolved variabelen voor named templates.
@@ -8994,6 +9124,17 @@
     const sendBtn = document.getElementById('inboxTplSendBtn');
     if (sendBtn) sendBtn.disabled = true;
 
+    // Fase A: media-header guard — template heeft IMAGE/VIDEO/DOCUMENT-header
+    // maar er is nog niets geüpload.
+    const ht = String(_inboxTplSelected.header_type || 'NONE').toUpperCase();
+    if (ht === 'IMAGE' || ht === 'VIDEO' || ht === 'DOCUMENT') {
+      if (!_inboxTplRuntimeMedia || !_inboxTplRuntimeMedia.link) {
+        _inboxTplShowError('Deze template verwacht een ' + ht.toLowerCase() + ' als bijlage — kies eerst een bestand.');
+        if (sendBtn) sendBtn.disabled = false;
+        return;
+      }
+    }
+
     // C4: bouw body afhankelijk van resolve-mode.
     //  - named  → server resolved via meta_param_mapping, géén variables meesturen.
     //            Wel context_invoice_id als template factuur.* keys gebruikt.
@@ -9004,6 +9145,13 @@
       template_name:    _inboxTplSelected.name,
       language:         _inboxTplSelected.language || 'nl',
     };
+    if (_inboxTplRuntimeMedia && _inboxTplRuntimeMedia.link) {
+      sendBody.runtime_media = {
+        kind    : _inboxTplRuntimeMedia.kind,
+        link    : _inboxTplRuntimeMedia.link,
+        filename: _inboxTplRuntimeMedia.filename || undefined,
+      };
+    }
     if (_inboxTplResolveMode === 'named') {
       const namedKeys = _inboxTplNamedKeys(_inboxTplSelected);
       if (_inboxTplNeedsInvoice(namedKeys)) {

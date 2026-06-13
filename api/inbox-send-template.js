@@ -43,6 +43,11 @@ import { sendTemplate, getConfigStatus, MetaNotConfiguredError } from './_lib/me
 import { buildMetaVariablesFromMapping, AVAILABLE_VARIABLES } from './_lib/template-variables.js';
 import { ensureInvoicePaymentLink, InvoicePaymentLinkError } from './_lib/invoice-payment-link.js';
 import { getModuleContextByPhoneNumberId } from './_lib/module-context.js';
+import { buildSendComponents } from './_lib/meta-template-components-builder.js';
+
+const MEDIA_HEADER_TYPES = new Set(['IMAGE', 'VIDEO', 'DOCUMENT']);
+const RUNTIME_MEDIA_KINDS = new Set(['image', 'video', 'document']);
+const URL_HTTPS_RE = /^https:\/\/[^\s]{8,2048}$/i;
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const MAX_TEMPLATE_NAME = 200;
@@ -79,6 +84,17 @@ export default async function handler(req, res) {
   const contextInvoiceId = body.context_invoice_id != null
     ? String(body.context_invoice_id).trim()
     : '';
+  // Fase A: runtime media voor IMAGE/VIDEO/DOCUMENT headers. Object met
+  //   { kind: 'image'|'video'|'document', link: '<https-url>', filename? }
+  const runtimeMediaIn = (body.runtime_media && typeof body.runtime_media === 'object' && !Array.isArray(body.runtime_media))
+    ? body.runtime_media
+    : null;
+  // Fase A: optionele per-button URL-params override:
+  //   { "<button-index>": { "<param-idx>": "<value>" } }
+  const runtimeButtonParamsIn = (body.runtime_button_params && typeof body.runtime_button_params === 'object'
+    && !Array.isArray(body.runtime_button_params))
+    ? body.runtime_button_params
+    : null;
 
   // Validatie
   if (!convId) return res.status(400).json({ error: 'conversation_id vereist' });
@@ -92,6 +108,16 @@ export default async function handler(req, res) {
   }
   if (contextInvoiceId && !UUID_RE.test(contextInvoiceId)) {
     return res.status(400).json({ error: 'context_invoice_id moet geldige uuid zijn' });
+  }
+  if (runtimeMediaIn) {
+    const kind = String(runtimeMediaIn.kind || '').toLowerCase().trim();
+    const link = String(runtimeMediaIn.link || '').trim();
+    if (!RUNTIME_MEDIA_KINDS.has(kind)) {
+      return res.status(400).json({ error: `runtime_media.kind moet image|video|document zijn (kreeg '${kind}')` });
+    }
+    if (!URL_HTTPS_RE.test(link)) {
+      return res.status(400).json({ error: 'runtime_media.link moet een geldige https-URL zijn' });
+    }
   }
 
   // Meta-config check
@@ -138,7 +164,7 @@ export default async function handler(req, res) {
     try {
       const { data: tmplRow, error: tmplErr } = await supabaseAdmin
         .from('whatsapp_meta_templates')
-        .select('id, status, body_text, meta_param_mapping')
+        .select('id, status, body_text, meta_param_mapping, header_type, header_content')
         .eq('name', templateName)
         .eq('language', language)
         .maybeSingle();
@@ -326,18 +352,52 @@ export default async function handler(req, res) {
       }
     }
 
-    // Build Meta components-array uit resolved variables.
-    // Alleen body-placeholders {{1}}, {{2}}, ... worden ondersteund.
+    // Build Meta components-array via Fase A builder. De builder kent:
+    //   - HEADER (IMAGE/VIDEO/DOCUMENT) als runtime_media meegegeven
+    //   - BODY met text-parameters (zoals de oude inline-logica)
+    //   - BUTTON (URL met url_params) als meta_param_mapping.buttons er staat
+    //
+    // Backward-compat: body-only templates (header_type=NONE, geen
+    // button-url-params) produceren EXACT 1 body-component met text-params,
+    // identiek aan de oude code. Geen wijziging in observable behaviour
+    // voor finance/Joost-flows.
     const sortedKeys = Object.keys(resolvedVariables)
       .filter(k => /^\d+$/.test(k))
       .sort((a, b) => Number(a) - Number(b));
-    const components = [];
-    if (sortedKeys.length) {
-      const parameters = sortedKeys.map(k => ({
-        type: 'text',
-        text: String(resolvedVariables[k] ?? '').slice(0, MAX_VAR_VALUE),
-      }));
-      components.push({ type: 'body', parameters });
+    const cappedBodyVariables = Object.fromEntries(
+      sortedKeys.map(k => [k, String(resolvedVariables[k] ?? '').slice(0, MAX_VAR_VALUE)])
+    );
+
+    // Guard: template heeft media-header maar caller stuurde geen runtime_media -> 400.
+    if (templateRow && MEDIA_HEADER_TYPES.has(String(templateRow.header_type || '').toUpperCase())) {
+      if (!runtimeMediaIn) {
+        return res.status(400).json({
+          error: 'Template heeft een ' + templateRow.header_type + '-header maar geen runtime_media meegegeven.',
+          code : 'RUNTIME_MEDIA_REQUIRED',
+        });
+      }
+      const expected = String(templateRow.header_type).toLowerCase();
+      const got      = String(runtimeMediaIn.kind || '').toLowerCase();
+      if (expected !== got) {
+        return res.status(400).json({
+          error: `Template-header verwacht kind='${expected}' maar runtime_media.kind='${got}'.`,
+          code : 'RUNTIME_MEDIA_KIND_MISMATCH',
+        });
+      }
+    }
+
+    const { components, warnings: buildWarnings } = buildSendComponents({
+      template      : templateRow,
+      bodyVariables : cappedBodyVariables,
+      runtimeMedia  : runtimeMediaIn ? {
+        type    : String(runtimeMediaIn.kind || '').toLowerCase(),
+        link    : String(runtimeMediaIn.link || '').trim(),
+        filename: runtimeMediaIn.filename || undefined,
+      } : null,
+      runtimeButtonParams: runtimeButtonParamsIn,
+    });
+    if (Array.isArray(buildWarnings) && buildWarnings.length > 0) {
+      console.warn('[inbox-send-template] component-build warnings:', buildWarnings.join(' | '));
     }
 
     // Afzendlijn-keuze: prefer conversation.phone_number_id; fallback op
