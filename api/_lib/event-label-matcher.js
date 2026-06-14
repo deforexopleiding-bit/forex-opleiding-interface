@@ -1,28 +1,21 @@
 // api/_lib/event-label-matcher.js
 // Reverse-lookup van een (mogelijk inconsistente) GHL/legacy-label-string
-// naar een event-id. Gebruikt dezelfde formatEventLabel als de F2 outbound
-// (computeUpcomingLabels) als BRON van candidates, maar matched TOLERANT:
-// het ' | <niveau>'-suffix is OPTIONEEL aan beide kanten en wordt alleen
-// als tiebreaker gebruikt, niet als onderdeel van de canonical key.
-//
-// Reden: GHL heeft eerder labels zonder niveau-suffix opgeslagen
-// (voorbeeld: 'Zaterdag 13 juni 2026 | 10:00 - 13:00'). De F2-export
-// produceert nu wél een niveau-suffix waar mogelijk. Een exacte
-// string-match zou die historische rijen missen. Daarom matchen we op
-// `(date, startTime)` als canonical key, met endTime + niveau als
-// tiebreakers in die volgorde.
-//
-// Deze resolver is bewust geïsoleerd zodat zowel de inbound webhook
-// (api/events-signup-inbound.js) als de Fase 0-backfill van de 92
-// bestaande GHL-contacten 1-op-1 dezelfde logica gebruiken.
+// naar een event-id. TOLERANT: parseLabelTime trekt datum + starttijd uit de
+// string via regex, ongeacht weekday-prefix, titel-prefix, pipes of "om HH:MM".
+// Canonical key = (jaar, maand, dag, starttijd). endTime + niveau zijn alleen
+// tiebreakers. Zo matchen zowel het canonical pipe-formaat
+// ("Zaterdag 20 juni 2026 | 10:00 - 13:00 | Basis") als het natuurlijke
+// funnel-formaat ("Gevorderde Forex Masterclass Gent - zaterdag 27 juni 2026 om 10:00").
 
 import { supabaseAdmin } from '../supabase.js';
 import { formatEventLabel } from './ghl-custom-field.js';
 
-// Selectiecriteria voor candidates. Bewust BREDER dan computeUpcomingLabels:
-// geen signups_closed-filter en 24u terugkijken op starts_at. Zo vinden we
-// ook een zojuist gesloten of net-gestart event als legacy-label binnenkomt.
 const MATCH_BACKLOOK_HOURS = 24;
+
+const NL_MONTHS = {
+  januari: 1, februari: 2, maart: 3, april: 4, mei: 5, juni: 6,
+  juli: 7, augustus: 8, september: 9, oktober: 10, november: 11, december: 12,
+};
 
 async function loadCandidates() {
   const cutoffIso = new Date(Date.now() - MATCH_BACKLOOK_HOURS * 3_600_000).toISOString();
@@ -38,169 +31,100 @@ async function loadCandidates() {
 }
 
 /**
- * Parse een label-string naar { date, startTime, endTime?, niveau? }.
- *
- * Verwacht formaat (zoals formatEventLabel produceert; legacy varianten
- * volgen hetzelfde patroon zonder niveau-suffix):
- *   '<Weekday> <day> <month> <year> | HH:MM[ - HH:MM][ | <Niveau>]'
- *
- * Voorbeelden die we moeten kunnen parsen:
- *   'Woensdag 24 juni 2026 | 18:00 - 21:00 | Gevorderd'   (full)
- *   'Woensdag 24 juni 2026 | 18:00 - 21:00'               (no niveau)
- *   'Woensdag 24 juni 2026 | 18:00 | Gevorderd'           (no ends_at)
- *   'Woensdag 24 juni 2026 | 18:00'                       (minimum)
- *
- * Returnt null bij onparsebare input zodat caller 'no-match'/error-pad
- * kan kiezen zonder uitzondering.
+ * Parse een label-string naar { y, m, d, startTime, endTime?, niveau?, date }.
+ * Tolerant: vindt de datum (<dag> <nl-maand> <jaar>) en tijd ergens in de string.
+ * Tijd: eerst een range "HH:MM - HH:MM", anders een enkele "HH:MM" (ook na "om").
+ * Returnt null als datum of tijd ontbreekt, zodat caller no-match/error kan kiezen.
  */
 export function parseLabelTime(s) {
   if (typeof s !== 'string') return null;
-  const trimmed = s.trim();
-  if (!trimmed) return null;
+  const str = s.trim();
+  if (!str) return null;
+  const lower = str.toLowerCase();
 
-  const parts = trimmed.split('|').map((p) => p.trim()).filter(Boolean);
-  if (parts.length < 2) return null;
+  const dm = lower.match(
+    /(\d{1,2})\s+(januari|februari|maart|april|mei|juni|juli|augustus|september|oktober|november|december)\s+(\d{4})/
+  );
+  if (!dm) return null;
+  const d = parseInt(dm[1], 10);
+  const m = NL_MONTHS[dm[2]];
+  const y = parseInt(dm[3], 10);
 
-  const date      = parts[0];
-  const timeRange = parts[1];
-  const niveau    = parts.length >= 3 ? parts[2] : null;
+  const pad = (h, mm) => `${String(parseInt(h, 10)).padStart(2, '0')}:${mm}`;
+  let startTime = null;
+  let endTime = null;
+  const range = str.match(/(\d{1,2}):(\d{2})\s*-\s*(\d{1,2}):(\d{2})/);
+  if (range) {
+    startTime = pad(range[1], range[2]);
+    endTime   = pad(range[3], range[4]);
+  } else {
+    const single = str.match(/(\d{1,2}):(\d{2})/);
+    if (!single) return null;
+    startTime = pad(single[1], single[2]);
+  }
 
-  const timeMatch = timeRange.match(/^(\d{1,2}:\d{2})(?:\s*-\s*(\d{1,2}:\d{2}))?$/);
-  if (!timeMatch) return null;
+  let niveau = null;
+  if (lower.includes('gevorderd')) niveau = 'gevorderd';
+  else if (lower.includes('basis')) niveau = 'basis';
 
-  // Normaliseer HH:MM naar 2-digit hours (formatEventLabel gebruikt 24h
-  // 2-digit format dankzij Intl). Maar voor robuustheid tegen handmatig
-  // gewijzigde GHL-strings ('9:00' i.p.v. '09:00') padden we naar 2-digit.
-  const padTime = (t) => {
-    const [h, m] = t.split(':');
-    return `${h.padStart(2, '0')}:${m}`;
-  };
-
-  return {
-    date,
-    startTime: padTime(timeMatch[1]),
-    endTime  : timeMatch[2] ? padTime(timeMatch[2]) : null,
-    niveau   : niveau ? niveau.toLowerCase() : null,
-  };
+  return { y, m, d, startTime, endTime, niveau, date: `${d} ${dm[2]} ${y}` };
 }
 
 /**
- * resolveEventByLabel(label)
- *
- * Tolerant resolver: matched op de canonical key (date, startTime). Het
- * niveau-suffix is OPTIONEEL aan beide kanten - input zonder niveau matcht
- * candidates met niveau (en omgekeerd). Bij 2+ canonical-matches probeert
- * de resolver in volgorde:
- *   1. endTime gelijk (als beide zijden een endTime hebben),
- *   2. niveau gelijk (als beide zijden een niveau hebben),
- *   3. anders ambiguous.
- *
- * @param {string} label - de string die GHL terugstuurt of die in een
- *                          legacy contact-record staat.
- * @returns {Promise<{
- *   matches       : Array<eventRow>,
- *   reason        : 'unparseable-label' |
- *                   'no-canonical-match' |
- *                   'unique-canonical-match' |
- *                   'endtime-tiebreaker' |
- *                   'niveau-tiebreaker' |
- *                   'ambiguous-multiple-canonical-matches' |
- *                   'ambiguous-after-niveau',
- *   input         : parsedLabel | null,
- *   candidateCount: number
- * }>}
- *
- * Caller interpreteert matches.length:
- *   0 -> match_status='no_match' (zie reason voor onparsebaar vs geen-kandidaat)
- *   1 -> match_status='matched'
- *   2+ -> match_status='ambiguous' (bewaart match_candidate_ids)
+ * Pure match-core (DB-vrij, unit-testbaar). Matched een label tegen een set
+ * candidate-event-rijen. Canonical key = (y,m,d,startTime); endTime dan niveau
+ * als tiebreakers. Reasons identiek aan voorheen.
  */
-export async function resolveEventByLabel(label) {
+export function matchLabelToCandidates(label, candidates) {
+  const list = candidates || [];
   const input = parseLabelTime(label);
   if (!input) {
-    return {
-      matches       : [],
-      reason        : 'unparseable-label',
-      input         : null,
-      candidateCount: 0,
-    };
+    return { matches: [], reason: 'unparseable-label', input: null, candidateCount: list.length };
   }
 
-  const candidates = await loadCandidates();
-  const parsed = candidates
+  const parsed = list
     .map((row) => ({ row, parts: parseLabelTime(formatEventLabel(row)) }))
     .filter((c) => c.parts !== null);
 
-  // Canonical filter: date + startTime.
+  const sameDay = (a, b) => a.y === b.y && a.m === b.m && a.d === b.d;
   const canonMatches = parsed.filter((c) =>
-    c.parts.date.toLowerCase() === input.date.toLowerCase() &&
-    c.parts.startTime === input.startTime
+    sameDay(c.parts, input) && c.parts.startTime === input.startTime
   );
 
   if (canonMatches.length === 0) {
-    return {
-      matches       : [],
-      reason        : 'no-canonical-match',
-      input,
-      candidateCount: candidates.length,
-    };
+    return { matches: [], reason: 'no-canonical-match', input, candidateCount: list.length };
   }
   if (canonMatches.length === 1) {
-    return {
-      matches       : [canonMatches[0].row],
-      reason        : 'unique-canonical-match',
-      input,
-      candidateCount: candidates.length,
-    };
+    return { matches: [canonMatches[0].row], reason: 'unique-canonical-match', input, candidateCount: list.length };
   }
 
-  // Tiebreaker 1: endTime (alleen relevant als BEIDE een endTime hebben).
   let pool = canonMatches;
   if (input.endTime) {
     const endMatches = pool.filter((c) => c.parts.endTime === input.endTime);
     if (endMatches.length === 1) {
-      return {
-        matches       : [endMatches[0].row],
-        reason        : 'endtime-tiebreaker',
-        input,
-        candidateCount: candidates.length,
-      };
+      return { matches: [endMatches[0].row], reason: 'endtime-tiebreaker', input, candidateCount: list.length };
     }
     if (endMatches.length > 1) pool = endMatches;
-    // Bij 0 endMatches: VAL TERUG op de bredere pool (canonMatches). Sommige
-    // legacy-labels hebben helemaal geen endTime in de DB-event-vorm.
   }
 
-  // Tiebreaker 2: niveau (alleen relevant als BEIDE een niveau hebben).
   if (input.niveau) {
-    const niveauMatches = pool.filter((c) =>
-      c.parts.niveau && c.parts.niveau === input.niveau
-    );
+    const niveauMatches = pool.filter((c) => c.parts.niveau && c.parts.niveau === input.niveau);
     if (niveauMatches.length === 1) {
-      return {
-        matches       : [niveauMatches[0].row],
-        reason        : 'niveau-tiebreaker',
-        input,
-        candidateCount: candidates.length,
-      };
+      return { matches: [niveauMatches[0].row], reason: 'niveau-tiebreaker', input, candidateCount: list.length };
     }
     if (niveauMatches.length > 1) {
-      return {
-        matches       : niveauMatches.map((c) => c.row),
-        reason        : 'ambiguous-after-niveau',
-        input,
-        candidateCount: candidates.length,
-      };
+      return { matches: niveauMatches.map((c) => c.row), reason: 'ambiguous-after-niveau', input, candidateCount: list.length };
     }
-    // 0 niveau-matches: VAL TERUG op bredere pool. Input had een niveau,
-    // candidates niet (legacy-events of mismatch-niveau) - we kunnen niet
-    // disambigueren maar willen niet falen.
   }
 
-  return {
-    matches       : pool.map((c) => c.row),
-    reason        : 'ambiguous-multiple-canonical-matches',
-    input,
-    candidateCount: candidates.length,
-  };
+  return { matches: pool.map((c) => c.row), reason: 'ambiguous-multiple-canonical-matches', input, candidateCount: list.length };
+}
+
+/**
+ * resolveEventByLabel(label): laadt candidates uit de DB en delegeert naar de
+ * pure match-core. Publieke API + return-shape ongewijzigd t.o.v. voorheen.
+ */
+export async function resolveEventByLabel(label) {
+  const candidates = await loadCandidates();
+  return matchLabelToCandidates(label, candidates);
 }
