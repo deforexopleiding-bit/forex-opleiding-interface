@@ -30,6 +30,10 @@ import {
   republishItem,
   WebflowError,
 } from './webflow-client.js';
+
+// Markeer of een update-actie via de republishItem-fallback liep zodat de
+// audit-log dat zichtbaar maakt (zonder een nieuw action-enum nodig).
+const REPUBLISH_FALLBACK_FLAG = 'used_republish_fallback_after_409';
 import {
   updateOptions as ghlUpdateOptions,
   formatEventLabel,
@@ -119,8 +123,9 @@ async function logSyncAttempt({
   status, error_code = null, error_message = null,
   retry_count = 0, next_retry_at = null,
 }) {
+  let insertedId = null;
   try {
-    const { error } = await supabaseAdmin
+    const { data: inserted, error } = await supabaseAdmin
       .from('event_sync_log')
       .insert({
         event_id,
@@ -133,12 +138,43 @@ async function logSyncAttempt({
         error_message,
         retry_count,
         next_retry_at,
-      });
+      })
+      .select('id')
+      .maybeSingle();
     if (error) {
       console.error('[event-sync-orchestrator] event_sync_log insert error:', error.message);
+    } else {
+      insertedId = inserted?.id || null;
     }
   } catch (e) {
     console.error('[event-sync-orchestrator] event_sync_log insert exception:', e?.message);
+  }
+
+  // FIX (c) loop-terminatie: zodra een nieuwere attempt voor (event_id, target)
+  // is gelogd — success OF failure — markeren we alle OUDERE failure-rijen voor
+  // datzelfde paar als terminal (next_retry_at=NULL). Voorkomt dat oude
+  // failure-rijen elke 15-min-cron-run opnieuw geselecteerd worden en de
+  // backoff-cap (retry_count>=4 → NULL) nooit effectief termineert. Generaliseert
+  // naar alle events; geen invloed op events zonder oudere failure-rijen
+  // (queries no-op).
+  // Defensive: alleen lopen als we een id terugkregen — anders kunnen we niet
+  // veilig "behalve mezelf" filteren.
+  if (insertedId) {
+    try {
+      const { error: clearErr } = await supabaseAdmin
+        .from('event_sync_log')
+        .update({ next_retry_at: null })
+        .eq('event_id', event_id)
+        .eq('target', target)
+        .eq('status', 'failure')
+        .neq('id', insertedId)
+        .not('next_retry_at', 'is', null);
+      if (clearErr) {
+        console.error('[event-sync-orchestrator] clear older retry pointers error:', clearErr.message);
+      }
+    } catch (e) {
+      console.error('[event-sync-orchestrator] clear older retry pointers exception:', e?.message);
+    }
   }
 }
 
@@ -175,34 +211,76 @@ async function getCurrentRetryCount(event_id, target) {
 // ── Webflow target ────────────────────────────────────────────────────────────
 
 async function syncWebflow(event) {
-  // DEFENSE-IN-DEPTH: archived events of events met cleanup-state mogen
-  // NOOIT (opnieuw) naar Webflow gepusht worden. Een stale failure-row in
-  // event_sync_log kan ons hier brengen via de retry-cron; ook handmatige
-  // debug-aanroepen mogen niet door dit pad een gearchiveerd event opnieuw
-  // aanmaken. Skip + warn-log; geen DB-mutatie, geen logSyncAttempt-rij.
-  if (event.status === 'archived' || event.webflow_sync_status === 'deleted') {
+  // DEFENSE-IN-DEPTH: archived/cancelled/verleden events mogen NOOIT (opnieuw)
+  // naar Webflow gepusht worden. Een stale failure-row in event_sync_log kan
+  // ons hier brengen via de retry-cron; ook handmatige debug-aanroepen mogen
+  // niet door dit pad een gearchiveerd/cancelled event opnieuw aanmaken of
+  // een verleden event blijven retryen. Skip + warn-log; geen DB-mutatie,
+  // geen logSyncAttempt-rij.
+  //
+  // FIX (b): naast archived/deleted ook cancelled + verleden events skippen.
+  // Voorkomt de 13-juni-loop waar een ge-published past event eindeloos in
+  // de retry-cron blijft hangen. Cron-niveau heeft een gespiegelde guard
+  // zodat stale-rijen daar ook netjes opgeruimd worden.
+  const isPast       = !!event.starts_at && new Date(event.starts_at).getTime() < Date.now();
+  const isCancelled  = event.status === 'cancelled';
+  const isArchived   = event.status === 'archived' || event.webflow_sync_status === 'deleted';
+  if (isArchived || isCancelled || isPast) {
+    const reasonParts = [];
+    if (isArchived)  reasonParts.push('archived/deleted');
+    if (isCancelled) reasonParts.push('cancelled');
+    if (isPast)      reasonParts.push('past starts_at');
+    const reasonStr = reasonParts.join(' + ');
     console.warn(
-      `[event-sync-orchestrator] syncWebflow SKIPPED archived/deleted event ${event.id} ` +
-      `(status=${event.status}, webflow_sync_status=${event.webflow_sync_status})`
+      `[event-sync-orchestrator] syncWebflow SKIPPED event ${event.id} ` +
+      `(${reasonStr}; status=${event.status}, ` +
+      `webflow_sync_status=${event.webflow_sync_status}, starts_at=${event.starts_at})`
     );
     return {
-      ok: true, action: 'skip', status: 'skipped_archived',
-      reason: 'event is archived or webflow_sync_status=deleted',
+      ok: true, action: 'skip',
+      status: isArchived ? 'skipped_archived' : (isCancelled ? 'skipped_cancelled' : 'skipped_past'),
+      reason: reasonStr,
     };
   }
 
   const action = event.webflow_item_id ? 'update' : 'create';
   let result;
+  let usedRepublishFallback = false;
   try {
     const descriptionHtml = mdToHtmlSimple(event.description_md || '');
     if (action === 'create') {
       result = await createLiveItem({ event, descriptionHtml });
     } else {
-      result = await updateItem({
-        webflowItemId  : event.webflow_item_id,
-        event,
-        descriptionHtml,
-      });
+      // FIX (a): updateItem doet PATCH /items/{id}/live. Op een nooit-gepubliceerd
+      // (of inmiddels ge-unpublisht) item returnt Webflow 409 CONFLICT met
+      // "Live PATCH updates can't be applied to items that have never been
+      // published". In dat geval vallen we terug op republishItem (PATCH
+      // staged + POST /items/publish) — al getest pad voor reopen-signups,
+      // werkt OOK voor never-published items. Andere errors (RATE_LIMIT,
+      // WEBFLOW_DOWN, etc.) gooien we door naar de outer catch zoals voorheen.
+      try {
+        result = await updateItem({
+          webflowItemId  : event.webflow_item_id,
+          event,
+          descriptionHtml,
+        });
+      } catch (e) {
+        if (e instanceof WebflowError && e.code === 'CONFLICT') {
+          console.warn(
+            `[event-sync-orchestrator] syncWebflow updateItem 409 CONFLICT ` +
+            `voor event=${event.id} item=${event.webflow_item_id} → ` +
+            `fallback naar republishItem (POST /items/publish)`
+          );
+          result = await republishItem({
+            webflowItemId  : event.webflow_item_id,
+            event,
+            descriptionHtml,
+          });
+          usedRepublishFallback = true;
+        } else {
+          throw e;
+        }
+      }
     }
     // Success
     await logSyncAttempt({
@@ -210,7 +288,9 @@ async function syncWebflow(event) {
       target          : 'webflow',
       action,
       request_payload : result.requestPayload,
-      response_payload: { itemId: result.itemId },
+      response_payload: usedRepublishFallback
+        ? { itemId: result.itemId, [REPUBLISH_FALLBACK_FLAG]: true, strategy: result.strategy || null }
+        : { itemId: result.itemId },
       status          : 'success',
     });
 
@@ -503,21 +583,37 @@ export async function syncEventToOutbound(eventId) {
   if (!eventId) throw new Error('eventId vereist');
   const event = await fetchEvent(eventId);
 
-  // Early-skip voor archived/deleted events. Voorkomt dat een stale
-  // failure-row in event_sync_log de retry-cron een gearchiveerd event
-  // laat re-creeren in Webflow. syncWebflow heeft dezelfde guard als
-  // defense-in-depth voor andere callers van syncWebflow.
-  if (event.status === 'archived' || event.webflow_sync_status === 'deleted') {
+  // Early-skip voor archived/cancelled/verleden events. Voorkomt dat een
+  // stale failure-row in event_sync_log de retry-cron een gearchiveerd of
+  // verlopen event laat re-creeren in Webflow. syncWebflow heeft dezelfde
+  // guard als defense-in-depth voor andere callers.
+  //
+  // FIX (b): cancelled + past-starts_at toegevoegd. 13-juni-loop case:
+  // event is published maar starts_at is verleden → retry-cron blijft
+  // 'm pakken en de PATCH /live 409't. Nu vroege exit met aparte status.
+  const isPast       = !!event.starts_at && new Date(event.starts_at).getTime() < Date.now();
+  const isCancelled  = event.status === 'cancelled';
+  const isArchived   = event.status === 'archived' || event.webflow_sync_status === 'deleted';
+  if (isArchived || isCancelled || isPast) {
+    const reasonParts = [];
+    if (isArchived)  reasonParts.push('archived/deleted');
+    if (isCancelled) reasonParts.push('cancelled');
+    if (isPast)      reasonParts.push('past starts_at');
+    const reasonStr = reasonParts.join(' + ');
+    const skipStatus = isArchived ? 'skipped_archived'
+                     : isCancelled ? 'skipped_cancelled'
+                     : 'skipped_past';
     console.warn(
-      `[event-sync-orchestrator] syncEventToOutbound SKIPPED archived/deleted event ${eventId} ` +
-      `(status=${event.status}, webflow_sync_status=${event.webflow_sync_status})`
+      `[event-sync-orchestrator] syncEventToOutbound SKIPPED event ${eventId} ` +
+      `(${reasonStr}; status=${event.status}, ` +
+      `webflow_sync_status=${event.webflow_sync_status}, starts_at=${event.starts_at})`
     );
     return {
       eventId,
       skipped: true,
-      reason : 'event archived or webflow_sync_status=deleted',
-      webflow: { ok: true, action: 'skip', status: 'skipped_archived' },
-      ghl    : { ok: true, action: 'skip', status: 'skipped_archived' },
+      reason : reasonStr,
+      webflow: { ok: true, action: 'skip', status: skipStatus },
+      ghl    : { ok: true, action: 'skip', status: skipStatus },
     };
   }
 
