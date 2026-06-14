@@ -1,0 +1,1032 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Events-automations · De Forex Opleiding</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/dist/tabler-icons.min.css" />
+  <link rel="stylesheet" href="/modules/shared/agent-shared.css" />
+  <link rel="stylesheet" href="/styles/sales-redesign.css" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; }
+    body { font-family: 'Inter', system-ui, sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; -webkit-font-smoothing: antialiased; }
+    .app { margin-left: 220px; padding: 24px 28px 60px; max-width: 1100px; }
+
+    .crumb { font-size: 12px; color: var(--text-faint); margin-bottom: 8px; }
+    .crumb a { color: var(--brand-secondary-light, #688b9b); text-decoration: none; }
+    .crumb a:hover { text-decoration: underline; }
+
+    .page-head { display:flex; gap:16px; align-items:flex-start; justify-content:space-between; flex-wrap:wrap; padding-bottom: 14px; border-bottom: 1px solid var(--border); margin-bottom: 18px; }
+    .page-title { font-size: 22px; font-weight: 800; letter-spacing: -.3px; }
+    .page-sub { font-size: 13px; color: var(--text-dim); margin-top: 4px; }
+    .page-actions { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+
+    .btn-primary { background: var(--brand-primary, #093d54); color: #fff; border: none; padding: 7px 13px; border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer; font-family: inherit; display: inline-flex; align-items: center; gap: 6px; text-decoration:none; }
+    .btn-primary:hover { opacity: .9; }
+    .btn-primary:disabled { opacity: .5; cursor: not-allowed; }
+    .btn-secondary { background: var(--bg-elev); color: var(--text-dim); border: 1px solid var(--border); padding: 7px 13px; border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer; font-family: inherit; display: inline-flex; align-items: center; gap: 6px; text-decoration:none; }
+    .btn-secondary:hover { background: var(--bg-elev-2); color: var(--text); }
+    .btn-danger { background: var(--red, #dc2626); color: #fff; border: none; padding: 7px 13px; border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer; font-family: inherit; display: inline-flex; align-items: center; gap: 6px; }
+    .btn-danger:hover { opacity: .9; }
+    .btn-ghost { background: transparent; border: 1px solid var(--border); color: var(--text-dim); padding: 5px 10px; border-radius: 7px; font-size: 12px; font-weight: 600; cursor: pointer; font-family: inherit; display: inline-flex; align-items: center; gap: 5px; }
+    .btn-ghost:hover { background: var(--bg-elev-2); color: var(--text); }
+
+    /* List view */
+    .a-list { display: grid; gap: 12px; }
+    .a-card { background: var(--bg-elev); border: 1px solid var(--border); border-radius: 12px; padding: 16px 18px; display: grid; grid-template-columns: 1fr auto; gap: 12px; align-items: start; }
+    .a-name { font-size: 15px; font-weight: 700; margin-bottom: 2px; }
+    .a-desc { font-size: 12.5px; color: var(--text-dim); margin-bottom: 8px; }
+    .a-meta { display: flex; gap: 14px; flex-wrap: wrap; font-size: 12px; color: var(--text-dim); }
+    .a-meta .it { display: inline-flex; align-items: center; gap: 5px; }
+    .a-meta .it i { color: var(--text-faint); }
+    .a-badge { display: inline-block; padding: 2px 9px; border-radius: 10px; font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; background: var(--bg-elev-2); color: var(--text-dim); border: 1px solid var(--border); }
+    .a-badge.enroll-new { background: rgba(5,150,105,0.12); color:#059669; border-color: rgba(5,150,105,0.25); }
+    .a-badge.enroll-incl { background: rgba(245,158,11,0.15); color:#b45309; border-color: rgba(245,158,11,0.3); }
+    .a-actions { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
+    .a-actions .switch { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-dim); }
+
+    /* Switch */
+    .toggle { position: relative; width: 36px; height: 20px; background: var(--bg-elev-2); border-radius: 99px; cursor: pointer; transition: background .15s; border: 1px solid var(--border); }
+    .toggle::after { content: ''; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; background: #fff; border-radius: 50%; transition: left .15s; box-shadow: 0 1px 2px rgba(0,0,0,0.2); }
+    .toggle.on { background: var(--brand-primary, #093d54); border-color: var(--brand-primary, #093d54); }
+    .toggle.on::after { left: 18px; }
+    .toggle.busy { opacity: .5; cursor: wait; }
+
+    .empty-state { padding: 60px 20px; text-align: center; color: var(--text-faint); font-size: 13px; background: var(--bg-elev); border: 1px dashed var(--border); border-radius: 12px; }
+    .empty-state .empty-icon { font-size: 36px; margin-bottom: 12px; opacity: .55; }
+    .empty-state .empty-title { font-size: 14px; font-weight: 600; color: var(--text-dim); margin-bottom: 4px; }
+
+    .forbidden-card { background: var(--bg-elev); border: 1px solid var(--border); border-radius: 12px; padding: 32px 28px; max-width: 480px; margin: 40px auto; text-align: center; }
+    .forbidden-card h2 { font-size: 16px; font-weight: 700; margin-bottom: 6px; }
+    .forbidden-card p { font-size: 13px; color: var(--text-dim); margin-bottom: 16px; }
+    .forbidden-card a { color: var(--brand-secondary-light, #688b9b); text-decoration: none; font-size: 13px; font-weight: 500; }
+    .forbidden-card a:hover { text-decoration: underline; }
+
+    /* Editor */
+    .editor-card { background: var(--bg-elev); border: 1px solid var(--border); border-radius: 12px; padding: 20px 22px; }
+    .editor-section { margin-bottom: 18px; }
+    .editor-section h3 { font-size: 12px; font-weight: 700; color: var(--text-faint); text-transform: uppercase; letter-spacing: .06em; margin-bottom: 10px; }
+    .form-field { display: flex; flex-direction: column; gap: 4px; margin-bottom: 12px; }
+    .form-field label { font-size: 12px; font-weight: 500; color: var(--text-faint); }
+    .form-field label .req { color: #ef4444; }
+    .form-field input, .form-field textarea, .form-field select { padding: 8px 10px; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; color: var(--text); font-size: 13px; font-family: inherit; }
+    .form-field input:focus, .form-field textarea:focus, .form-field select:focus { outline: none; border-color: var(--brand-primary, #093d54); }
+    .form-field textarea { resize: vertical; min-height: 80px; }
+    .form-row-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .form-help { font-size: 11.5px; color: var(--text-faint); margin-top: 2px; }
+    .radio-row { display: flex; gap: 14px; flex-wrap: wrap; }
+    .radio-row label { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--text); cursor: pointer; }
+    .radio-row input[type=radio] { accent-color: var(--brand-primary, #093d54); }
+
+    .multi-select { display: flex; flex-direction: column; gap: 4px; max-height: 220px; overflow: auto; padding: 8px; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; }
+    .multi-select label { display: flex; gap: 8px; padding: 5px 6px; font-size: 12.5px; color: var(--text); cursor: pointer; border-radius: 5px; }
+    .multi-select label:hover { background: var(--bg-elev-2); }
+
+    /* Steps */
+    .steps-list { display: grid; gap: 10px; margin-bottom: 12px; }
+    .step-card { background: var(--bg-elev-2); border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; position: relative; }
+    .step-card .step-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 10px; }
+    .step-card .step-type { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 700; color: var(--text-dim); text-transform: uppercase; letter-spacing: .04em; }
+    .step-card .step-type i { color: var(--brand-primary, #093d54); font-size: 14px; }
+    .step-card .step-tools { display: flex; gap: 4px; }
+    .step-tool { background: transparent; border: 1px solid var(--border); color: var(--text-faint); cursor: pointer; padding: 3px 7px; border-radius: 6px; font-size: 12px; font-family: inherit; }
+    .step-tool:hover { background: var(--bg-elev); color: var(--text); }
+    .step-tool.danger:hover { color: var(--red, #dc2626); border-color: rgba(220,38,38,0.4); }
+    .step-tool:disabled { opacity: .4; cursor: not-allowed; }
+    .step-add-row { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+    .step-add-row .step-add-label { font-size: 12px; color: var(--text-faint); margin-right: 4px; }
+
+    /* Var-picker */
+    .var-picker { background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; margin-top: 6px; }
+    .var-picker .vp-group { margin-bottom: 6px; }
+    .var-picker .vp-group:last-child { margin-bottom: 0; }
+    .var-picker .vp-label { font-size: 10.5px; font-weight: 700; color: var(--text-faint); text-transform: uppercase; letter-spacing: .05em; margin-bottom: 4px; }
+    .var-picker .vp-chips { display: flex; flex-wrap: wrap; gap: 4px; }
+    .vp-chip { padding: 3px 9px; background: var(--bg-elev); border: 1px solid var(--border); border-radius: 99px; font-size: 11.5px; cursor: pointer; color: var(--text); font-family: inherit; line-height: 1.3; }
+    .vp-chip:hover { background: var(--bg-elev-2); }
+
+    .editor-footer { display: flex; justify-content: space-between; gap: 8px; padding-top: 14px; border-top: 1px solid var(--border); margin-top: 8px; }
+    .editor-footer .right { display: flex; gap: 8px; }
+    .editor-banner { padding: 10px 12px; margin-bottom: 12px; background: rgba(239,68,68,0.1); border: 1px solid #ef4444; border-radius: 8px; color: #ef4444; font-size: 13px; display: none; }
+    .editor-banner.visible { display: block; }
+
+    /* Modal (runs) */
+    .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.6); z-index: 500; display: flex; align-items: center; justify-content: center; backdrop-filter: blur(4px); padding: 20px; }
+    .modal-overlay.hidden { display: none !important; }
+    .modal-card { background: var(--bg-elev); border: 1px solid var(--border); border-radius: 14px; width: 100%; max-width: 760px; max-height: calc(100vh - 40px); display: flex; flex-direction: column; }
+    .modal-header { display: flex; align-items: center; justify-content: space-between; padding: 16px 20px; border-bottom: 1px solid var(--border); }
+    .modal-title { font-size: 15px; font-weight: 700; }
+    .modal-close { background: transparent; border: none; color: var(--text-faint); font-size: 18px; cursor: pointer; padding: 4px; line-height: 1; }
+    .modal-body { padding: 18px 20px; overflow-y: auto; }
+    .modal-footer { display: flex; justify-content: flex-end; gap: 8px; padding: 14px 20px; border-top: 1px solid var(--border); }
+
+    .runs-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+    .runs-table th { text-align: left; font-weight: 600; color: var(--text-faint); padding: 6px 8px; border-bottom: 1px solid var(--border); font-size: 11px; text-transform: uppercase; letter-spacing: .04em; }
+    .runs-table td { padding: 7px 8px; border-bottom: 1px solid var(--border); color: var(--text); }
+    .runs-table tr:last-child td { border-bottom: none; }
+    .runs-status { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; }
+    .runs-status.active     { background: rgba(245,158,11,0.15); color:#b45309; }
+    .runs-status.completed  { background: rgba(5,150,105,0.15); color:#059669; }
+    .runs-status.exited     { background: var(--bg-elev-2); color: var(--text-faint); border: 1px solid var(--border); }
+    .runs-status.cancelled  { background: rgba(148,163,184,0.2); color: var(--text-faint); }
+    .runs-status.failed     { background: rgba(220,38,38,0.15); color:#b91c1c; }
+
+    @media (max-width: 880px) {
+      .app { margin-left: 0; padding: 14px; }
+      .form-row-2 { grid-template-columns: 1fr; }
+      .a-card { grid-template-columns: 1fr; }
+      .a-actions { justify-content: flex-start; }
+    }
+  </style>
+</head>
+<body>
+<div id="sidebar-mount"></div>
+
+<div class="app" id="page-content">
+  <!-- gevuld door init() -->
+</div>
+
+<!-- ── Modal: runs-historie ──────────────────────────────────────── -->
+<div class="modal-overlay hidden" id="runsModal" role="dialog" aria-modal="true">
+  <div class="modal-card">
+    <div class="modal-header">
+      <div class="modal-title" id="runsModalTitle">Run-historie</div>
+      <button class="modal-close" type="button" onclick="closeRunsModal()">&#x2715;</button>
+    </div>
+    <div class="modal-body" id="runsModalBody"></div>
+    <div class="modal-footer">
+      <button class="btn-secondary" type="button" onclick="closeRunsModal()">Sluiten</button>
+    </div>
+  </div>
+</div>
+
+<script src="/modules/shared/supabase-client.js"></script>
+<script src="/modules/shared/agent-shared.js"></script>
+<script src="/modules/shared/theme-shared.js"></script>
+<script src="/modules/shared/permissions.js"></script>
+<script src="/modules/shared/sidebar.js"></script>
+
+<script>
+// ── Constants ────────────────────────────────────────────────────────────────
+const TRIGGER_LABELS = {
+  on_signup: 'Bij aanmelding',
+  on_assessment_completed: 'Bij vragenlijst ingevuld',
+  time_before_event: 'Tijd vóór het event',
+};
+const SCOPE_LABELS = {
+  all: 'Alle events',
+  niveau: 'Per niveau',
+  events: 'Specifieke events',
+};
+const COND_CHECK_LABELS = {
+  assessment_completed: 'Vragenlijst is ingevuld',
+  assessment_not_completed: 'Vragenlijst niet ingevuld',
+  still_registered: 'Nog ingeschreven',
+};
+const COND_FAIL_LABELS = { exit: 'Stop deze flow', skip_to_end: 'Spring naar einde' };
+const WAIT_UNIT_LABELS = { minutes: 'minuten', hours: 'uren', days: 'dagen' };
+
+const EVENT_VARS = [
+  { key: 'event.titel',      label: 'Titel' },
+  { key: 'event.datum',      label: 'Datum' },
+  { key: 'event.starttijd',  label: 'Starttijd' },
+  { key: 'event.eindtijd',   label: 'Eindtijd' },
+  { key: 'event.locatie',    label: 'Locatie' },
+  { key: 'event.niveau',     label: 'Niveau' },
+];
+const ATTENDEE_VARS = [
+  { key: 'attendee.voornaam',   label: 'Voornaam' },
+  { key: 'attendee.achternaam', label: 'Achternaam' },
+  { key: 'attendee.naam',       label: 'Volledige naam' },
+  { key: 'attendee.email',      label: 'E-mail' },
+  { key: 'attendee.telefoon',   label: 'Telefoon' },
+  { key: 'attendee.keuze_link', label: 'Keuze-link' },
+];
+
+// ── State ────────────────────────────────────────────────────────────────────
+const state = {
+  view: 'list',           // 'list' | 'editor'
+  automations: [],
+  events: [],             // voor scope=events multi-select; lazy geladen
+  eventsLoaded: false,
+  editing: null,          // het bewerkte/nieuwe automation-object
+  editingErr: null,
+  saving: false,
+  lastFocusedFieldId: null,
+};
+
+const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+function toastErr(msg) {
+  try { window.AgentShared?.showToast?.(msg, 'error'); } catch { alert(msg); }
+}
+function toastOk(msg) {
+  try { window.AgentShared?.showToast?.(msg, 'success'); } catch {}
+}
+
+function fmtDate(iso) {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  if (!Number.isFinite(d.getTime())) return '—';
+  return d.toLocaleString('nl-NL', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+}
+
+function can(key) { return window.RBAC?.canSync?.(key) || false; }
+
+// ── Boot ─────────────────────────────────────────────────────────────────────
+(async function init() {
+  try {
+    if (window._authSharedReady) await window._authSharedReady;
+    const profile = await window.AuthShared.requireAuth();
+    if (!profile) return; // requireAuth redirect
+
+    // RBAC: events.module.access voor zichtbaarheid; lijst gebruikt events.event.view.
+    if (!can('events.module.access') && !can('events.event.view')) {
+      document.getElementById('page-content').innerHTML = `
+        <div class="forbidden-card">
+          <h2>Geen toegang</h2>
+          <p>Je hebt geen rechten om events-automations te bekijken.</p>
+          <a href="/index.html">&larr; Terug naar dashboard</a>
+        </div>`;
+      return;
+    }
+    await loadAutomations();
+    renderList();
+  } catch (e) {
+    console.error('[events-automations] init', e);
+    toastErr('Pagina laden mislukt: ' + (e?.message || e));
+  }
+})();
+
+// ── Data-loaders ─────────────────────────────────────────────────────────────
+async function loadAutomations() {
+  const r = await window.AgentShared.apiFetch('/api/events-automations-list');
+  const data = await r.json();
+  if (!r.ok) throw new Error(data?.error || 'list failed');
+  state.automations = Array.isArray(data.automations) ? data.automations : [];
+}
+
+async function loadEventsForScope() {
+  if (state.eventsLoaded) return;
+  const r = await window.AgentShared.apiFetch('/api/events-list?status=draft,published&limit=200&offset=0');
+  const data = await r.json();
+  if (!r.ok) throw new Error(data?.error || 'events-list failed');
+  state.events = Array.isArray(data.items) ? data.items : [];
+  state.eventsLoaded = true;
+}
+
+// ── List view ────────────────────────────────────────────────────────────────
+function summarizeTrigger(a) {
+  if (a.trigger_type === 'time_before_event') {
+    const h = Number(a.trigger_config?.hours_before) || 0;
+    if (h % 24 === 0 && h >= 24) return `${h / 24} dagen vóór event`;
+    return `${h} uur vóór event`;
+  }
+  return TRIGGER_LABELS[a.trigger_type] || a.trigger_type;
+}
+function summarizeScope(a) {
+  if (a.scope_type === 'niveau') {
+    const n = a.scope_config?.niveau || '';
+    return `Niveau: ${n ? (n.charAt(0).toUpperCase() + n.slice(1)) : '?'}`;
+  }
+  if (a.scope_type === 'events') {
+    const ids = Array.isArray(a.scope_config?.event_ids) ? a.scope_config.event_ids : [];
+    return `${ids.length} ${ids.length === 1 ? 'event' : 'events'}`;
+  }
+  return 'Alle events';
+}
+function summarizeSteps(a) {
+  const steps = Array.isArray(a.steps) ? a.steps : [];
+  return `${steps.length} ${steps.length === 1 ? 'stap' : 'stappen'}`;
+}
+function enrollBadge(a) {
+  if (a.enroll_mode === 'include_existing') return `<span class="a-badge enroll-incl">Ook bestaande</span>`;
+  return `<span class="a-badge enroll-new">Alleen nieuwe</span>`;
+}
+
+function renderList() {
+  state.view = 'list';
+  const canEdit = can('events.event.edit');
+  const list = state.automations;
+  const cards = list.map((a) => `
+    <div class="a-card" data-aid="${esc(a.id)}">
+      <div class="a-body">
+        <div class="a-name">${esc(a.name || '(zonder naam)')}</div>
+        ${a.description ? `<div class="a-desc">${esc(a.description)}</div>` : ''}
+        <div class="a-meta">
+          <span class="it"><i class="ti ti-bolt"></i> ${esc(summarizeTrigger(a))}</span>
+          <span class="it"><i class="ti ti-target"></i> ${esc(summarizeScope(a))}</span>
+          <span class="it"><i class="ti ti-list-numbers"></i> ${esc(summarizeSteps(a))}</span>
+          ${enrollBadge(a)}
+        </div>
+      </div>
+      <div class="a-actions">
+        <span class="switch">
+          <span class="toggle ${a.enabled ? 'on' : ''}" data-toggle="${esc(a.id)}" title="${a.enabled ? 'Aan — klik om uit te zetten' : 'Uit — klik om aan te zetten'}"></span>
+          <span>${a.enabled ? 'Aan' : 'Uit'}</span>
+        </span>
+        <button class="btn-ghost" type="button" data-act="runs" data-aid="${esc(a.id)}"><i class="ti ti-history"></i> Runs</button>
+        ${canEdit ? `<button class="btn-secondary" type="button" data-act="edit" data-aid="${esc(a.id)}"><i class="ti ti-edit"></i> Bewerken</button>` : ''}
+        ${canEdit ? `<button class="btn-danger" type="button" data-act="delete" data-aid="${esc(a.id)}"><i class="ti ti-trash"></i></button>` : ''}
+      </div>
+    </div>
+  `).join('');
+
+  const empty = `
+    <div class="empty-state">
+      <div class="empty-icon"><i class="ti ti-robot"></i></div>
+      <div class="empty-title">Nog geen automations</div>
+      <div>Maak er een en stuur deelnemers automatisch de juiste mail of WhatsApp op het juiste moment.</div>
+    </div>`;
+
+  document.getElementById('page-content').innerHTML = `
+    <div class="crumb"><a href="/modules/events.html">&larr; Terug naar Events</a></div>
+    <div class="page-head">
+      <div>
+        <div class="page-title">Events-automations</div>
+        <div class="page-sub">Configureer automatische mail- en WhatsApp-flows rond events.</div>
+      </div>
+      <div class="page-actions">
+        ${canEdit ? `<button class="btn-primary" type="button" data-act="new"><i class="ti ti-plus"></i> Nieuwe automation</button>` : ''}
+      </div>
+    </div>
+    ${list.length === 0 ? empty : `<div class="a-list">${cards}</div>`}
+  `;
+
+  // Click-delegation
+  document.getElementById('page-content').addEventListener('click', onListClick);
+}
+
+async function onListClick(ev) {
+  const t = ev.target.closest('[data-act], [data-toggle]');
+  if (!t) return;
+  if (t.dataset.act === 'new') return startEditor(null);
+  if (t.dataset.act === 'edit') { const a = state.automations.find((x) => x.id === t.dataset.aid); if (a) startEditor(a); return; }
+  if (t.dataset.act === 'delete') return deleteAutomation(t.dataset.aid);
+  if (t.dataset.act === 'runs') return openRunsModal(t.dataset.aid);
+  if (t.dataset.toggle) return toggleEnabled(t.dataset.toggle, t);
+}
+
+// ── Toggle enable ────────────────────────────────────────────────────────────
+async function toggleEnabled(automationId, toggleEl) {
+  const a = state.automations.find((x) => x.id === automationId);
+  if (!a) return;
+  if (!can('events.event.edit')) { toastErr('Geen rechten (events.event.edit)'); return; }
+  toggleEl.classList.add('busy');
+  const payload = {
+    id: a.id, name: a.name, description: a.description,
+    enabled: !a.enabled,
+    trigger_type: a.trigger_type, trigger_config: a.trigger_config || {},
+    scope_type: a.scope_type, scope_config: a.scope_config || {},
+    enroll_mode: a.enroll_mode, steps: a.steps || [],
+  };
+  try {
+    const r = await window.AgentShared.apiFetch('/api/events-automation-save', { method: 'POST', body: JSON.stringify(payload) });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data?.error || 'save failed');
+    a.enabled = !!data.automation?.enabled;
+    a.enabled_at = data.automation?.enabled_at ?? a.enabled_at;
+    toastOk(a.enabled ? 'Automation aan' : 'Automation uit');
+    renderList();
+  } catch (e) {
+    toastErr('Bijwerken mislukt: ' + (e?.message || e));
+  } finally {
+    toggleEl.classList.remove('busy');
+  }
+}
+
+// ── Delete ───────────────────────────────────────────────────────────────────
+async function deleteAutomation(id) {
+  const a = state.automations.find((x) => x.id === id);
+  if (!a) return;
+  if (!can('events.event.edit')) { toastErr('Geen rechten (events.event.edit)'); return; }
+  if (!confirm(`Weet je zeker dat je "${a.name}" wilt verwijderen?\n\nLopende runs van deze automation worden ook verwijderd.`)) return;
+  try {
+    const r = await window.AgentShared.apiFetch('/api/events-automation-delete', { method: 'POST', body: JSON.stringify({ id }) });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data?.error || 'delete failed');
+    state.automations = state.automations.filter((x) => x.id !== id);
+    toastOk('Verwijderd');
+    renderList();
+  } catch (e) {
+    toastErr('Verwijderen mislukt: ' + (e?.message || e));
+  }
+}
+
+// ── Editor view ──────────────────────────────────────────────────────────────
+function defaultEditing() {
+  return {
+    id: null, name: '', description: '',
+    enabled: false,
+    trigger_type: 'on_signup',
+    trigger_config: { hours_before: 24 },
+    scope_type: 'all',
+    scope_config: { event_ids: [] },
+    enroll_mode: 'new_only',
+    steps: [],
+  };
+}
+function cloneEditing(a) {
+  return JSON.parse(JSON.stringify({
+    id: a.id || null, name: a.name || '', description: a.description || '',
+    enabled: !!a.enabled,
+    trigger_type: a.trigger_type || 'on_signup',
+    trigger_config: a.trigger_config && typeof a.trigger_config === 'object' ? a.trigger_config : {},
+    scope_type: a.scope_type || 'all',
+    scope_config: a.scope_config && typeof a.scope_config === 'object' ? a.scope_config : {},
+    enroll_mode: a.enroll_mode || 'new_only',
+    steps: Array.isArray(a.steps) ? a.steps : [],
+  }));
+}
+
+async function startEditor(a) {
+  if (!can('events.event.edit')) { toastErr('Geen rechten (events.event.edit)'); return; }
+  state.editing = a ? cloneEditing(a) : defaultEditing();
+  state.editingErr = null;
+  if (state.editing.scope_type === 'events') {
+    try { await loadEventsForScope(); } catch (e) { toastErr('Events laden mislukt: ' + (e?.message || e)); }
+  }
+  renderEditor();
+}
+
+function renderEditor() {
+  state.view = 'editor';
+  const a = state.editing;
+  const isEdit = !!a.id;
+
+  document.getElementById('page-content').innerHTML = `
+    <div class="crumb"><a href="#" data-act="back-list">&larr; Terug naar lijst</a></div>
+    <div class="page-head">
+      <div>
+        <div class="page-title">${isEdit ? 'Automation bewerken' : 'Nieuwe automation'}</div>
+        <div class="page-sub">${isEdit ? esc(a.name || '') : 'Configureer trigger, scope en stappen.'}</div>
+      </div>
+    </div>
+
+    <div class="editor-card">
+      <div class="editor-banner" id="editorBanner"></div>
+
+      <div class="editor-section">
+        <h3>Algemeen</h3>
+        <div class="form-field">
+          <label>Naam <span class="req">*</span></label>
+          <input type="text" id="fName" maxlength="255" value="${esc(a.name)}" />
+        </div>
+        <div class="form-field">
+          <label>Omschrijving</label>
+          <textarea id="fDesc" rows="2" maxlength="2000">${esc(a.description || '')}</textarea>
+        </div>
+      </div>
+
+      <div class="editor-section">
+        <h3>Trigger</h3>
+        <div class="form-field">
+          <label>Wanneer start deze automation? <span class="req">*</span></label>
+          <select id="fTrigger">
+            <option value="on_signup"               ${a.trigger_type === 'on_signup' ? 'selected' : ''}>Bij aanmelding</option>
+            <option value="on_assessment_completed" ${a.trigger_type === 'on_assessment_completed' ? 'selected' : ''}>Bij vragenlijst ingevuld</option>
+            <option value="time_before_event"       ${a.trigger_type === 'time_before_event' ? 'selected' : ''}>Tijd vóór het event</option>
+          </select>
+        </div>
+        <div id="fTriggerExtra"></div>
+      </div>
+
+      <div class="editor-section">
+        <h3>Scope — voor welke events?</h3>
+        <div class="form-field">
+          <label>Scope <span class="req">*</span></label>
+          <select id="fScope">
+            <option value="all"    ${a.scope_type === 'all'    ? 'selected' : ''}>Alle events</option>
+            <option value="niveau" ${a.scope_type === 'niveau' ? 'selected' : ''}>Per niveau</option>
+            <option value="events" ${a.scope_type === 'events' ? 'selected' : ''}>Specifieke events</option>
+          </select>
+        </div>
+        <div id="fScopeExtra"></div>
+      </div>
+
+      <div class="editor-section">
+        <h3>Enrollment</h3>
+        <div class="radio-row">
+          <label><input type="radio" name="fEnroll" value="new_only" ${a.enroll_mode === 'new_only' ? 'checked' : ''}> Alleen nieuwe aanmeldingen</label>
+          <label><input type="radio" name="fEnroll" value="include_existing" ${a.enroll_mode === 'include_existing' ? 'checked' : ''}> Ook bestaande deelnemers</label>
+        </div>
+        <div class="form-help">"Alleen nieuwe" filtert op gebeurtenissen na het moment dat de automation aan ging.</div>
+      </div>
+
+      <div class="editor-section">
+        <h3>Stappen</h3>
+        <div class="steps-list" id="stepsList"></div>
+        <div class="step-add-row">
+          <span class="step-add-label">Stap toevoegen:</span>
+          <button class="btn-ghost" type="button" data-add="wait"><i class="ti ti-hourglass"></i> Wacht</button>
+          <button class="btn-ghost" type="button" data-add="condition"><i class="ti ti-git-branch"></i> Conditie</button>
+          <button class="btn-ghost" type="button" data-add="send_email"><i class="ti ti-mail"></i> Stuur e-mail</button>
+          <button class="btn-ghost" type="button" data-add="send_whatsapp"><i class="ti ti-brand-whatsapp"></i> Stuur WhatsApp</button>
+        </div>
+      </div>
+
+      <div class="editor-footer">
+        <button class="btn-secondary" type="button" data-act="cancel-editor"><i class="ti ti-arrow-left"></i> Annuleren</button>
+        <div class="right">
+          <button class="btn-primary" type="button" data-act="save" id="btnSave"><i class="ti ti-device-floppy"></i> Opslaan</button>
+        </div>
+      </div>
+    </div>
+  `;
+
+  renderTriggerExtra();
+  renderScopeExtra();
+  renderSteps();
+
+  // Form listeners.
+  document.getElementById('fTrigger').addEventListener('change', (e) => {
+    a.trigger_type = e.target.value;
+    if (a.trigger_type === 'time_before_event' && !(Number(a.trigger_config?.hours_before) > 0)) {
+      a.trigger_config = { hours_before: 24 };
+    }
+    renderTriggerExtra();
+  });
+  document.getElementById('fScope').addEventListener('change', async (e) => {
+    a.scope_type = e.target.value;
+    if (a.scope_type === 'niveau') a.scope_config = { niveau: a.scope_config?.niveau || 'basis' };
+    else if (a.scope_type === 'events') {
+      a.scope_config = { event_ids: Array.isArray(a.scope_config?.event_ids) ? a.scope_config.event_ids : [] };
+      try { await loadEventsForScope(); } catch (err) { toastErr('Events laden mislukt: ' + (err?.message || err)); }
+    } else {
+      a.scope_config = {};
+    }
+    renderScopeExtra();
+  });
+  document.querySelectorAll('input[name=fEnroll]').forEach((r) => {
+    r.addEventListener('change', (e) => { a.enroll_mode = e.target.value; });
+  });
+
+  // Click-delegation voor buttons.
+  document.getElementById('page-content').addEventListener('click', onEditorClick);
+}
+
+function renderTriggerExtra() {
+  const a = state.editing;
+  const host = document.getElementById('fTriggerExtra');
+  if (a.trigger_type !== 'time_before_event') { host.innerHTML = ''; return; }
+  const totalHours = Number(a.trigger_config?.hours_before) || 24;
+  // Heuristiek: heel veelvouden van 24 → dagen, anders uren.
+  const unit = (totalHours % 24 === 0 && totalHours >= 24) ? 'days' : 'hours';
+  const amount = unit === 'days' ? totalHours / 24 : totalHours;
+  host.innerHTML = `
+    <div class="form-row-2">
+      <div class="form-field">
+        <label>Hoeveel?</label>
+        <input type="number" id="fTrigAmount" min="1" value="${amount}" />
+      </div>
+      <div class="form-field">
+        <label>Eenheid</label>
+        <select id="fTrigUnit">
+          <option value="hours" ${unit === 'hours' ? 'selected' : ''}>uren vóór event</option>
+          <option value="days"  ${unit === 'days'  ? 'selected' : ''}>dagen vóór event</option>
+        </select>
+      </div>
+    </div>
+  `;
+  function sync() {
+    const amt = Math.max(1, Number(document.getElementById('fTrigAmount').value) || 1);
+    const u = document.getElementById('fTrigUnit').value;
+    a.trigger_config = { hours_before: u === 'days' ? amt * 24 : amt };
+  }
+  document.getElementById('fTrigAmount').addEventListener('input', sync);
+  document.getElementById('fTrigUnit').addEventListener('change', sync);
+}
+
+function renderScopeExtra() {
+  const a = state.editing;
+  const host = document.getElementById('fScopeExtra');
+  if (a.scope_type === 'all') { host.innerHTML = ''; return; }
+  if (a.scope_type === 'niveau') {
+    const cur = (a.scope_config?.niveau || 'basis').toLowerCase();
+    host.innerHTML = `
+      <div class="form-field">
+        <label>Niveau <span class="req">*</span></label>
+        <select id="fNiveau">
+          <option value="basis"     ${cur === 'basis' ? 'selected' : ''}>Basis</option>
+          <option value="gevorderd" ${cur === 'gevorderd' ? 'selected' : ''}>Gevorderd</option>
+        </select>
+      </div>`;
+    document.getElementById('fNiveau').addEventListener('change', (e) => {
+      a.scope_config = { niveau: e.target.value };
+    });
+    return;
+  }
+  // events
+  const selected = new Set(Array.isArray(a.scope_config?.event_ids) ? a.scope_config.event_ids : []);
+  const evs = state.events || [];
+  const options = evs.length === 0
+    ? '<div class="form-help">Geen events gevonden.</div>'
+    : `<div class="multi-select" id="fEventsMulti">${evs.map((e) => `
+        <label><input type="checkbox" value="${esc(e.id)}" ${selected.has(e.id) ? 'checked' : ''} />
+        <span><strong>${esc(e.title || '(zonder titel)')}</strong> · ${esc(fmtDate(e.starts_at))}${e.niveau ? ' · ' + esc(e.niveau) : ''}</span></label>`).join('')}</div>`;
+  host.innerHTML = `
+    <div class="form-field">
+      <label>Selecteer events <span class="req">*</span></label>
+      ${options}
+      <div class="form-help">${selected.size} geselecteerd.</div>
+    </div>`;
+  if (evs.length > 0) {
+    document.getElementById('fEventsMulti').addEventListener('change', () => {
+      const ids = Array.from(document.querySelectorAll('#fEventsMulti input[type=checkbox]:checked')).map((el) => el.value);
+      a.scope_config = { event_ids: ids };
+      // refresh-count
+      const help = document.querySelector('#fScopeExtra .form-help');
+      if (help) help.textContent = `${ids.length} geselecteerd.`;
+    });
+  }
+}
+
+// ── Steps editor ─────────────────────────────────────────────────────────────
+function renderSteps() {
+  const a = state.editing;
+  const host = document.getElementById('stepsList');
+  if (!host) return;
+  const steps = a.steps || [];
+  if (steps.length === 0) {
+    host.innerHTML = `<div class="empty-state" style="padding:24px 12px">
+      <div>Nog geen stappen. Voeg er een toe hieronder.</div>
+    </div>`;
+    return;
+  }
+  host.innerHTML = steps.map((s, idx) => renderStepCard(s, idx, steps.length)).join('');
+}
+
+function renderStepCard(s, idx, total) {
+  const head = `
+    <div class="step-head">
+      <span class="step-type">${stepIcon(s.type)} Stap ${idx + 1} · ${stepTypeLabel(s.type)}</span>
+      <div class="step-tools">
+        <button class="step-tool" type="button" data-step-act="up"   data-idx="${idx}" ${idx === 0 ? 'disabled' : ''} title="Omhoog"><i class="ti ti-chevron-up"></i></button>
+        <button class="step-tool" type="button" data-step-act="down" data-idx="${idx}" ${idx === total - 1 ? 'disabled' : ''} title="Omlaag"><i class="ti ti-chevron-down"></i></button>
+        <button class="step-tool danger" type="button" data-step-act="remove" data-idx="${idx}" title="Verwijderen"><i class="ti ti-x"></i></button>
+      </div>
+    </div>`;
+  let body = '';
+  if (s.type === 'wait') {
+    const c = s.config || {};
+    body = `
+      <div class="form-row-2">
+        <div class="form-field">
+          <label>Wacht hoeveel?</label>
+          <input type="number" min="1" value="${Number(c.amount) > 0 ? c.amount : 1}" data-step-field="amount" data-idx="${idx}" />
+        </div>
+        <div class="form-field">
+          <label>Eenheid</label>
+          <select data-step-field="unit" data-idx="${idx}">
+            <option value="minutes" ${c.unit === 'minutes' ? 'selected' : ''}>minuten</option>
+            <option value="hours"   ${c.unit === 'hours'   ? 'selected' : ''}>uren</option>
+            <option value="days"    ${c.unit === 'days'    ? 'selected' : ''}>dagen</option>
+          </select>
+        </div>
+      </div>`;
+  } else if (s.type === 'condition') {
+    const c = s.config || {};
+    body = `
+      <div class="form-row-2">
+        <div class="form-field">
+          <label>Conditie</label>
+          <select data-step-field="check" data-idx="${idx}">
+            <option value="assessment_completed"     ${c.check === 'assessment_completed' ? 'selected' : ''}>Vragenlijst is ingevuld</option>
+            <option value="assessment_not_completed" ${c.check === 'assessment_not_completed' ? 'selected' : ''}>Vragenlijst niet ingevuld</option>
+            <option value="still_registered"         ${c.check === 'still_registered' ? 'selected' : ''}>Nog ingeschreven</option>
+          </select>
+        </div>
+        <div class="form-field">
+          <label>Anders</label>
+          <select data-step-field="on_fail" data-idx="${idx}">
+            <option value="exit"        ${(c.on_fail || 'exit') === 'exit' ? 'selected' : ''}>Stop deze flow</option>
+            <option value="skip_to_end" ${c.on_fail === 'skip_to_end' ? 'selected' : ''}>Spring naar einde</option>
+          </select>
+        </div>
+      </div>`;
+  } else if (s.type === 'send_email') {
+    const c = s.config || {};
+    const subjectId = `eSubj_${idx}`, bodyId = `eBody_${idx}`, btnLabelId = `eBtnL_${idx}`, btnUrlId = `eBtnU_${idx}`;
+    const hasButton = !!(c.button && (c.button.label || c.button.url));
+    body = `
+      <div class="form-field">
+        <label>Onderwerp <span class="req">*</span></label>
+        <input type="text" id="${subjectId}" data-step-field="subject" data-idx="${idx}" value="${esc(c.subject || '')}" onfocus="trackEmailFocus('${subjectId}')" />
+      </div>
+      <div class="form-field">
+        <label>Bericht <span class="req">*</span></label>
+        <textarea id="${bodyId}" data-step-field="body" data-idx="${idx}" rows="5" onfocus="trackEmailFocus('${bodyId}')">${esc(c.body || '')}</textarea>
+        ${varPickerHtml()}
+      </div>
+      <div class="form-field">
+        <label style="display:flex; align-items:center; gap:8px;">
+          <input type="checkbox" data-step-field="hasButton" data-idx="${idx}" ${hasButton ? 'checked' : ''} /> CTA-knop toevoegen
+        </label>
+      </div>
+      <div data-step-button="${idx}" style="${hasButton ? '' : 'display:none'}">
+        <div class="form-row-2">
+          <div class="form-field">
+            <label>Knop-tekst</label>
+            <input type="text" id="${btnLabelId}" data-step-field="button.label" data-idx="${idx}" value="${esc(c.button?.label || '')}" onfocus="trackEmailFocus('${btnLabelId}')" />
+          </div>
+          <div class="form-field">
+            <label>Knop-link</label>
+            <input type="text" id="${btnUrlId}" data-step-field="button.url" data-idx="${idx}" value="${esc(c.button?.url || '')}" placeholder="{{attendee.keuze_link}}" onfocus="trackEmailFocus('${btnUrlId}')" />
+          </div>
+        </div>
+        <div class="form-help">Tip: gebruik <code>{{attendee.keuze_link}}</code> voor de persoonlijke keuzepagina.</div>
+      </div>`;
+  } else if (s.type === 'send_whatsapp') {
+    const c = s.config || {};
+    body = `
+      <div class="form-field">
+        <label>WhatsApp-template <span class="req">*</span></label>
+        <input type="text" data-step-field="template_name" data-idx="${idx}" value="${esc(c.template_name || '')}" placeholder="events_keuze_link" />
+        <div class="form-help">Naam van de goedgekeurde Meta-template (bijv. <code>events_keuze_link</code>).</div>
+      </div>`;
+  } else {
+    body = `<div class="form-help">Onbekend staptype.</div>`;
+  }
+  return `<div class="step-card" data-step-idx="${idx}">${head}${body}</div>`;
+}
+
+function stepTypeLabel(t) {
+  return { wait: 'Wachten', condition: 'Conditie', send_email: 'Stuur e-mail', send_whatsapp: 'Stuur WhatsApp' }[t] || t;
+}
+function stepIcon(t) {
+  const map = { wait: 'hourglass', condition: 'git-branch', send_email: 'mail', send_whatsapp: 'brand-whatsapp' };
+  return `<i class="ti ti-${map[t] || 'circle'}"></i>`;
+}
+
+function varPickerHtml() {
+  const chips = (arr) => arr.map((v) => `<button class="vp-chip" type="button" data-var="${esc(v.key)}" title="{{${esc(v.key)}}}">${esc(v.label)}</button>`).join('');
+  return `
+    <div class="var-picker">
+      <div class="vp-group">
+        <div class="vp-label">Event</div>
+        <div class="vp-chips">${chips(EVENT_VARS)}</div>
+      </div>
+      <div class="vp-group">
+        <div class="vp-label">Deelnemer</div>
+        <div class="vp-chips">${chips(ATTENDEE_VARS)}</div>
+      </div>
+    </div>`;
+}
+
+window.trackEmailFocus = function (id) { state.lastFocusedFieldId = id; };
+
+function insertVarAtCursor(varKey) {
+  const id = state.lastFocusedFieldId;
+  if (!id) { toastErr('Klik eerst in een tekstveld'); return; }
+  const el = document.getElementById(id);
+  if (!el) return;
+  const token = `{{${varKey}}}`;
+  const start = el.selectionStart ?? el.value.length;
+  const end   = el.selectionEnd   ?? el.value.length;
+  const before = el.value.slice(0, start);
+  const after  = el.value.slice(end);
+  el.value = before + token + after;
+  const pos = start + token.length;
+  el.focus();
+  try { el.setSelectionRange(pos, pos); } catch {}
+  // Trigger save naar state.
+  el.dispatchEvent(new Event('input', { bubbles: true }));
+}
+
+// ── Editor click-delegation ──────────────────────────────────────────────────
+function onEditorClick(ev) {
+  const back = ev.target.closest('[data-act="back-list"]');
+  if (back) { ev.preventDefault(); cancelEditor(); return; }
+  const cancel = ev.target.closest('[data-act="cancel-editor"]');
+  if (cancel) return cancelEditor();
+  const save = ev.target.closest('[data-act="save"]');
+  if (save) return saveEditor();
+  const add = ev.target.closest('[data-add]');
+  if (add) return addStep(add.dataset.add);
+  const stepBtn = ev.target.closest('[data-step-act]');
+  if (stepBtn) {
+    const idx = Number(stepBtn.dataset.idx);
+    if (stepBtn.dataset.stepAct === 'up')   return moveStep(idx, -1);
+    if (stepBtn.dataset.stepAct === 'down') return moveStep(idx,  1);
+    if (stepBtn.dataset.stepAct === 'remove') return removeStep(idx);
+  }
+  const varChip = ev.target.closest('[data-var]');
+  if (varChip) return insertVarAtCursor(varChip.dataset.var);
+  // Step-field veranderingen: vang via input/change-delegation.
+}
+
+// Algemene input/change delegation om steps[].config bij te werken.
+document.addEventListener('input', (ev) => {
+  const t = ev.target.closest('[data-step-field][data-idx]');
+  if (!t || state.view !== 'editor') return;
+  applyStepFieldChange(t);
+});
+document.addEventListener('change', (ev) => {
+  const t = ev.target.closest('[data-step-field][data-idx]');
+  if (!t || state.view !== 'editor') return;
+  applyStepFieldChange(t);
+});
+
+function applyStepFieldChange(input) {
+  const idx = Number(input.dataset.idx);
+  const field = input.dataset.stepField;
+  const step = state.editing?.steps?.[idx];
+  if (!step) return;
+  if (!step.config) step.config = {};
+  if (field === 'amount') step.config.amount = Math.max(1, Number(input.value) || 1);
+  else if (field === 'unit')      step.config.unit = input.value;
+  else if (field === 'check')     step.config.check = input.value;
+  else if (field === 'on_fail')   step.config.on_fail = input.value;
+  else if (field === 'subject')   step.config.subject = input.value;
+  else if (field === 'body')      step.config.body = input.value;
+  else if (field === 'template_name') step.config.template_name = input.value;
+  else if (field === 'hasButton') {
+    if (input.checked) {
+      if (!step.config.button) step.config.button = { label: '', url: '' };
+    } else {
+      delete step.config.button;
+    }
+    const wrap = document.querySelector(`[data-step-button="${idx}"]`);
+    if (wrap) wrap.style.display = input.checked ? '' : 'none';
+  } else if (field === 'button.label') {
+    if (!step.config.button) step.config.button = { label: '', url: '' };
+    step.config.button.label = input.value;
+  } else if (field === 'button.url') {
+    if (!step.config.button) step.config.button = { label: '', url: '' };
+    step.config.button.url = input.value;
+  }
+}
+
+function addStep(type) {
+  const a = state.editing;
+  const defaults = {
+    wait:         { type: 'wait',         config: { amount: 1,  unit: 'hours' } },
+    condition:    { type: 'condition',    config: { check: 'assessment_completed', on_fail: 'exit' } },
+    send_email:   { type: 'send_email',   config: { subject: '', body: '' } },
+    send_whatsapp: { type: 'send_whatsapp', config: { template_name: '' } },
+  };
+  if (!defaults[type]) return;
+  a.steps = a.steps || [];
+  a.steps.push(JSON.parse(JSON.stringify(defaults[type])));
+  renderSteps();
+}
+function moveStep(idx, delta) {
+  const a = state.editing;
+  const ni = idx + delta;
+  if (ni < 0 || ni >= a.steps.length) return;
+  const [s] = a.steps.splice(idx, 1);
+  a.steps.splice(ni, 0, s);
+  renderSteps();
+}
+function removeStep(idx) {
+  const a = state.editing;
+  if (!confirm('Deze stap verwijderen?')) return;
+  a.steps.splice(idx, 1);
+  renderSteps();
+}
+
+// ── Cancel + Save ────────────────────────────────────────────────────────────
+function cancelEditor() {
+  if (state.editing) {
+    if (!confirm('Wijzigingen weggooien?')) return;
+  }
+  state.editing = null;
+  state.editingErr = null;
+  renderList();
+}
+
+function readAndValidateEditor() {
+  const a = state.editing;
+  // Pak directe input-velden (naam/desc).
+  a.name = (document.getElementById('fName')?.value || '').trim();
+  a.description = (document.getElementById('fDesc')?.value || '').trim();
+  // Trigger.
+  a.trigger_type = document.getElementById('fTrigger')?.value || a.trigger_type;
+  if (a.trigger_type === 'time_before_event') {
+    const amt = Number(document.getElementById('fTrigAmount')?.value) || 0;
+    const u   = document.getElementById('fTrigUnit')?.value || 'hours';
+    a.trigger_config = { hours_before: u === 'days' ? amt * 24 : amt };
+  } else {
+    a.trigger_config = {};
+  }
+  // Scope.
+  a.scope_type = document.getElementById('fScope')?.value || a.scope_type;
+  if (a.scope_type === 'niveau') {
+    const n = document.getElementById('fNiveau')?.value || a.scope_config?.niveau || 'basis';
+    a.scope_config = { niveau: n };
+  } else if (a.scope_type === 'events') {
+    const ids = Array.from(document.querySelectorAll('#fEventsMulti input[type=checkbox]:checked')).map((el) => el.value);
+    a.scope_config = { event_ids: ids };
+  } else {
+    a.scope_config = {};
+  }
+  // Enroll.
+  const enroll = document.querySelector('input[name=fEnroll]:checked');
+  if (enroll) a.enroll_mode = enroll.value;
+
+  // Client-side validatie (spiegelt server).
+  if (!a.name) return 'Naam is verplicht.';
+  if (a.trigger_type === 'time_before_event' && !(Number(a.trigger_config?.hours_before) > 0)) {
+    return 'Vul een geldige tijd vóór het event in.';
+  }
+  if (a.scope_type === 'niveau' && !a.scope_config?.niveau) return 'Kies een niveau.';
+  if (a.scope_type === 'events' && (!Array.isArray(a.scope_config?.event_ids) || a.scope_config.event_ids.length === 0)) {
+    return 'Kies minimaal één event.';
+  }
+  if (!Array.isArray(a.steps)) a.steps = [];
+  for (let i = 0; i < a.steps.length; i++) {
+    const s = a.steps[i];
+    const c = s?.config || {};
+    if (s.type === 'wait') {
+      if (!(Number(c.amount) > 0)) return `Stap ${i + 1}: vul een geldige duur in.`;
+      if (!['minutes', 'hours', 'days'].includes(c.unit)) return `Stap ${i + 1}: kies een eenheid.`;
+    } else if (s.type === 'condition') {
+      if (!['assessment_completed', 'assessment_not_completed', 'still_registered'].includes(c.check)) return `Stap ${i + 1}: kies een conditie.`;
+    } else if (s.type === 'send_email') {
+      if (!c.subject) return `Stap ${i + 1}: onderwerp is verplicht.`;
+      if (!c.body) return `Stap ${i + 1}: bericht is verplicht.`;
+      if (c.button && (!c.button.label || !c.button.url)) return `Stap ${i + 1}: CTA-knop vereist label + link.`;
+    } else if (s.type === 'send_whatsapp') {
+      if (!c.template_name) return `Stap ${i + 1}: template-naam is verplicht.`;
+    }
+  }
+  return null;
+}
+
+async function saveEditor() {
+  const err = readAndValidateEditor();
+  const banner = document.getElementById('editorBanner');
+  if (err) {
+    if (banner) { banner.textContent = err; banner.classList.add('visible'); }
+    return;
+  }
+  if (banner) { banner.textContent = ''; banner.classList.remove('visible'); }
+
+  const a = state.editing;
+  state.saving = true;
+  const btn = document.getElementById('btnSave');
+  if (btn) btn.disabled = true;
+  try {
+    const r = await window.AgentShared.apiFetch('/api/events-automation-save', { method: 'POST', body: JSON.stringify(a) });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data?.error || 'save failed');
+    toastOk('Opgeslagen');
+    await loadAutomations();
+    state.editing = null;
+    renderList();
+  } catch (e) {
+    if (banner) { banner.textContent = 'Opslaan mislukt: ' + (e?.message || e); banner.classList.add('visible'); }
+    toastErr('Opslaan mislukt: ' + (e?.message || e));
+  } finally {
+    state.saving = false;
+    if (btn) btn.disabled = false;
+  }
+}
+
+// ── Runs modal ───────────────────────────────────────────────────────────────
+async function openRunsModal(automationId) {
+  const a = state.automations.find((x) => x.id === automationId);
+  document.getElementById('runsModalTitle').textContent = `Run-historie · ${a?.name || ''}`;
+  document.getElementById('runsModalBody').innerHTML = `<div class="empty-state" style="padding:30px 12px"><i class="ti ti-loader-2"></i> Laden…</div>`;
+  document.getElementById('runsModal').classList.remove('hidden');
+  try {
+    const r = await window.AgentShared.apiFetch('/api/events-automation-runs?automation_id=' + encodeURIComponent(automationId));
+    const data = await r.json();
+    if (!r.ok) throw new Error(data?.error || 'runs failed');
+    const runs = Array.isArray(data.runs) ? data.runs : [];
+    if (runs.length === 0) {
+      document.getElementById('runsModalBody').innerHTML = `<div class="empty-state" style="padding:30px 12px">Nog geen runs voor deze automation.</div>`;
+      return;
+    }
+    document.getElementById('runsModalBody').innerHTML = `
+      <table class="runs-table">
+        <thead><tr>
+          <th>Status</th><th>Stap</th><th>Volgende run</th><th>Gestart</th><th>Laatste fout</th>
+        </tr></thead>
+        <tbody>
+          ${runs.map((r) => `
+            <tr>
+              <td><span class="runs-status ${esc(r.status)}">${esc(r.status)}</span></td>
+              <td>${esc(String(r.current_step_index ?? '—'))}</td>
+              <td>${esc(fmtDate(r.next_run_at))}</td>
+              <td>${esc(fmtDate(r.started_at))}</td>
+              <td style="color:var(--text-faint)">${esc(r.last_error || '')}</td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>`;
+  } catch (e) {
+    document.getElementById('runsModalBody').innerHTML = `<div class="empty-state" style="padding:30px 12px">Laden mislukt: ${esc(e?.message || e)}</div>`;
+  }
+}
+function closeRunsModal() {
+  document.getElementById('runsModal').classList.add('hidden');
+}
+window.closeRunsModal = closeRunsModal;
+</script>
+</body>
+</html>
