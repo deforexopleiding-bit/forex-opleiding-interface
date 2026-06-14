@@ -123,29 +123,47 @@ export async function advanceRun({ run, attendee, event, now = new Date(), deps,
 
 async function loadCandidatesForAutomation(auto, now) {
   const nowIso = now.toISOString();
-  let q = supabaseAdmin
-    .from('event_attendees')
-    .select('id, event_id, registered_at, assessment_response_id, assessment_linked_at, status, events!inner(niveau, starts_at, status)')
-    .limit(500);
 
-  // scope
+  // Bepaal toegestane event_ids o.b.v. scope (+ time_before_event-window).
+  // null = geen event-id-restrictie (scope 'all').
+  let allowedEventIds = null;
   if (auto.scope_type === 'niveau' && auto.scope_config && auto.scope_config.niveau) {
-    q = q.eq('events.niveau', auto.scope_config.niveau);
+    const { data: evs, error } = await supabaseAdmin
+      .from('events').select('id').eq('niveau', auto.scope_config.niveau);
+    if (error) throw new Error('candidates niveau-events: ' + error.message);
+    allowedEventIds = (evs || []).map((e) => e.id);
   } else if (auto.scope_type === 'events' && Array.isArray(auto.scope_config && auto.scope_config.event_ids)) {
-    q = q.in('event_id', auto.scope_config.event_ids);
+    allowedEventIds = auto.scope_config.event_ids;
   }
 
-  const newOnly = auto.enroll_mode === 'new_only' && auto.enabled_at;
+  if (auto.trigger_type === 'time_before_event') {
+    const hours = Number(auto.trigger_config && auto.trigger_config.hours_before) || 0;
+    const upper = new Date(now.getTime() + hours * 3_600_000).toISOString();
+    const { data: evs, error } = await supabaseAdmin
+      .from('events').select('id').gt('starts_at', nowIso).lte('starts_at', upper);
+    if (error) throw new Error('candidates window-events: ' + error.message);
+    const windowIds = (evs || []).map((e) => e.id);
+    allowedEventIds = (allowedEventIds == null)
+      ? windowIds
+      : allowedEventIds.filter((id) => windowIds.includes(id));
+  }
 
+  // Lege scope/window → geen kandidaten.
+  if (allowedEventIds != null && allowedEventIds.length === 0) return [];
+
+  let q = supabaseAdmin
+    .from('event_attendees')
+    .select('id, event_id, registered_at, assessment_response_id, assessment_linked_at, status')
+    .limit(500);
+  if (allowedEventIds != null) q = q.in('event_id', allowedEventIds);
+
+  const newOnly = auto.enroll_mode === 'new_only' && auto.enabled_at;
   if (auto.trigger_type === 'on_signup') {
     if (newOnly) q = q.gte('registered_at', auto.enabled_at);
   } else if (auto.trigger_type === 'on_assessment_completed') {
     q = q.not('assessment_response_id', 'is', null);
     if (newOnly) q = q.gte('assessment_linked_at', auto.enabled_at);
   } else if (auto.trigger_type === 'time_before_event') {
-    const hours = Number(auto.trigger_config && auto.trigger_config.hours_before) || 0;
-    const upper = new Date(now.getTime() + hours * 3_600_000).toISOString();
-    q = q.gt('events.starts_at', nowIso).lte('events.starts_at', upper);
     if (newOnly) q = q.gte('registered_at', auto.enabled_at);
   } else {
     return [];
