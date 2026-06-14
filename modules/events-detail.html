@@ -672,6 +672,9 @@ function renderAttendeesTab() {
 
         const kebabItems = [];
         if (canEditAtt) kebabItems.push(`<button class="kebab-item" data-action="edit" data-id="${esc(a.id)}"><i class="ti ti-edit"></i> Bewerken</button>`);
+        // Fase 3b: "Stuur keuze-link" — gegate op events.attendee.edit
+        // (operationele actie op bestaande rij; geen aparte invite-key).
+        if (canEditAtt) kebabItems.push(`<button class="kebab-item" data-action="send-invite" data-id="${esc(a.id)}"><i class="ti ti-send"></i> Stuur keuze-link</button>`);
         if (canTagAdd) kebabItems.push(`<button class="kebab-item" data-action="tag-add" data-id="${esc(a.id)}"><i class="ti ti-tag"></i> Tag toevoegen</button>`);
         if (canTagRemove && (a.tags || []).length > 0) kebabItems.push(`<button class="kebab-item" data-action="tag-remove" data-id="${esc(a.id)}"><i class="ti ti-tag-off"></i> Tag verwijderen</button>`);
         if (canDelAtt) kebabItems.push(`<button class="kebab-item danger" data-action="delete" data-id="${esc(a.id)}"><i class="ti ti-trash"></i> Verwijderen</button>`);
@@ -725,11 +728,49 @@ function renderAttendeesTab() {
       // Sluit menus
       document.querySelectorAll('.kebab-menu.show').forEach((m) => m.classList.remove('show'));
       if (action === 'edit') return openAttEdit(id);
+      if (action === 'send-invite') return sendInviteToAttendee(id);
       if (action === 'tag-add') return openTagAddModal(id);
       if (action === 'tag-remove') return openTagRemove(id);
       if (action === 'delete') return deleteAttendee(id);
     });
   });
+}
+
+// ── Fase 3b: send-invite (keuze-link per WhatsApp + e-mail) ──────────────────
+//
+// Operator klikt "Stuur keuze-link" in het kebab-menu van een attendee →
+// POST /api/events-attendee-send-invite. Endpoint stuurt beide kanalen
+// onafhankelijk; we tonen per-kanaal-resultaat in een korte toast/alert.
+async function sendInviteToAttendee(attendeeId) {
+  if (!attendeeId) return;
+  if (!confirm('Stuur de persoonlijke keuze-link via WhatsApp + e-mail?')) return;
+  try {
+    const r = await window.AgentShared.apiFetch('/api/events-attendee-send-invite', {
+      method : 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body   : JSON.stringify({ attendee_id: attendeeId }),
+    });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) {
+      window.AgentShared.showToast(j.error || ('Versturen mislukt (HTTP ' + r.status + ')'), 'error');
+      return;
+    }
+    // Per-kanaal-status samenvatten zodat operator ziet wat er gebeurd is.
+    const parts = [];
+    const mail = j.mail || {};
+    const wa   = j.whatsapp || {};
+    if (mail.ok)                 parts.push('e-mail verstuurd');
+    else if (mail.skipped)       parts.push('e-mail overgeslagen (' + (mail.reason || '?') + ')');
+    else                         parts.push('e-mail mislukt' + (mail.error ? ': ' + mail.error : ''));
+    if (wa.ok)                   parts.push('WhatsApp verstuurd');
+    else if (wa.skipped)         parts.push('WhatsApp overgeslagen (' + (wa.reason || '?') + ')');
+    else                         parts.push('WhatsApp mislukt' + (wa.error ? ': ' + wa.error : ''));
+    const kind = (mail.ok || wa.ok) ? 'success' : 'error';
+    window.AgentShared.showToast(parts.join(' · '), kind);
+  } catch (e) {
+    console.error('[sendInviteToAttendee]', e);
+    window.AgentShared.showToast('Versturen mislukt: ' + (e?.message || 'onbekende fout'), 'error');
+  }
 }
 
 // ── Tab: Mentoren ────────────────────────────────────────────────────────────
