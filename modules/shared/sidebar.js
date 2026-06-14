@@ -121,8 +121,8 @@
     // sales-dashboard.html highlight valt onder Dashboard-link in de sidebar
     if (cur === 'sales-dashboard') cur = 'dashboard';
     if (cur === 'onboarding-overzicht') cur = 'onboarding';
-    // events-detail.html + events-wizard.html highlighten onder de Events-link
-    if (cur === 'events-detail' || cur === 'events-wizard') cur = 'events';
+    // events-detail.html + events-wizard.html + events-automations.html highlighten onder de Events-link
+    if (cur === 'events-detail' || cur === 'events-wizard' || cur === 'events-automations') cur = 'events';
     // open-acties.html is verhuisd naar Finance > Wanbetalers > Open Acties sub-tab.
     // Backward-compat: redirector-pagina bestaat nog en highlight onder Finance.
     if (cur === 'open-acties') cur = 'finance';
@@ -390,10 +390,12 @@
     'tickets': 'tickets.module.access',
     'sales': 'sales.module.access',
     'events': 'events.module.access',
-    // events-detail.html + events-wizard.html erven dezelfde module.access-gate
-    // (de pagina's checken zelf óók via window.RBAC.canSync in init() — defense-in-depth).
+    // events-detail.html + events-wizard.html + events-automations.html erven dezelfde
+    // module.access-gate (de pagina's checken zelf óók via window.RBAC.canSync in init()
+    // — defense-in-depth).
     'events-detail': 'events.module.access',
     'events-wizard': 'events.module.access',
+    'events-automations': 'events.module.access',
     'finance': 'finance.module.access',
     // Open Acties (F1 finance-taken) is verhuisd naar Finance > Wanbetalers > Open Acties
     // sub-tab — geen eigen sidebar-link meer. Badge hangt nu op de Finance nav-item zelf.

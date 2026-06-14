@@ -21,6 +21,8 @@
     .btn-primary { background: var(--brand-primary, #093d54); color: #fff; border: none; padding: 8px 14px; border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer; font-family: inherit; display: inline-flex; align-items: center; gap: 6px; }
     .btn-primary:hover { opacity: .9; }
     .btn-primary:disabled { opacity: .5; cursor: not-allowed; }
+    .btn-secondary { background: var(--bg-elev); color: var(--text-dim); border: 1px solid var(--border); padding: 8px 14px; border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer; font-family: inherit; display: inline-flex; align-items: center; gap: 6px; }
+    .btn-secondary:hover { background: var(--bg-elev-2); color: var(--text); }
 
     /* Fase 1 events-tabs */
     .ev-tabs { padding-bottom: 0; }
@@ -208,7 +210,10 @@ function renderPage(canCreate, canViewInbox, canManageSignupInbox) {
         <h1>Events</h1>
         <div class="sub">Workshops, live trainingen en mentor-sessies.</div>
       </div>
-      ${canCreate ? '<a class="btn-primary" href="/modules/events-wizard.html"><i class="ti ti-plus"></i> Nieuw event</a>' : ''}
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+        <a class="btn-secondary" href="/modules/events-automations.html" style="text-decoration:none"><i class="ti ti-robot"></i> Automations</a>
+        ${canCreate ? '<a class="btn-primary" href="/modules/events-wizard.html"><i class="ti ti-plus"></i> Nieuw event</a>' : ''}
+      </div>
     </div>
 
     <div class="ev-tabs" style="display:flex;gap:6px;margin-bottom:14px;border-bottom:1px solid var(--border)">
