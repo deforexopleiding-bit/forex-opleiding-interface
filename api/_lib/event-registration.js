@@ -81,6 +81,83 @@ export async function getConfirmedCount(eventId) {
   return Number.isFinite(count) ? count : 0;
 }
 
+// ── Open events met has_space (publieke event-keuze) ────────────────────────
+//
+// Gedeeld door /api/assessment-open-events (na voltooide assessment) én
+// /api/event-choice-get (publieke choice-link). Single source of truth voor
+// "welke events kan een deelnemer kiezen?" — capaciteits-regel is identiek
+// aan getConfirmedCount: status IN ('aangemeld','aanwezig') AND
+// assessment_response_id IS NOT NULL (Fase 1).
+//
+// Params:
+//   niveau  — string 'basis' | 'gevorderd' (filter) of null / undefined
+//             (geen niveau-filter → alle open events teruggeven).
+//   limit   — int (default 50, clamp 1..200).
+//
+// Returnt (op success):
+//   Array<{ id, title, starts_at, ends_at, capacity, location, niveau,
+//           confirmed_count, has_space }>
+// Bij DB-fout: throws Error (caller bepaalt response-shape).
+
+const OPEN_EVENTS_DEFAULT_LIMIT = 50;
+const OPEN_EVENTS_MAX_LIMIT     = 200;
+
+export async function getOpenEventsWithSpace({ niveau = null, limit = OPEN_EVENTS_DEFAULT_LIMIT } = {}) {
+  const lim = Math.max(1, Math.min(OPEN_EVENTS_MAX_LIMIT, Number.isFinite(Number(limit)) ? Number(limit) : OPEN_EVENTS_DEFAULT_LIMIT));
+  const nowIso = new Date().toISOString();
+
+  // 1) Open events filter
+  let q = supabaseAdmin
+    .from('events')
+    .select('id, title, starts_at, ends_at, capacity, location, niveau')
+    .eq('status', 'published')
+    .eq('signups_closed', false)
+    .gt('starts_at', nowIso)
+    .order('starts_at', { ascending: true })
+    .limit(lim);
+  if (niveau) q = q.eq('niveau', niveau);
+
+  const { data: events, error: evErr } = await q;
+  if (evErr) throw new Error('open events select: ' + evErr.message);
+  if (!events || events.length === 0) return [];
+
+  // 2) Confirmed counts per event in 1 round-trip — Fase 1 semantiek
+  // (status IN CONFIRMED_STATUSES AND assessment_response_id IS NOT NULL).
+  const eventIds = events.map((e) => e.id);
+  const { data: countRows, error: cntErr } = await supabaseAdmin
+    .from('event_attendees')
+    .select('event_id')
+    .in('event_id', eventIds)
+    .in('status', CONFIRMED_STATUSES)
+    .not('assessment_response_id', 'is', null);
+  if (cntErr) {
+    // Soft-fail: log + return events met confirmed_count=0 zodat de caller
+    // bruikbare output krijgt. Auto-vol mist signaal maar dat heeft het
+    // registratie-endpoint server-side z'n eigen guard.
+    console.error('[event-registration] getOpenEventsWithSpace count error:', cntErr.message);
+  }
+  const countsByEvent = {};
+  for (const r of (countRows || [])) {
+    countsByEvent[r.event_id] = (countsByEvent[r.event_id] || 0) + 1;
+  }
+
+  return events.map((e) => {
+    const cnt = countsByEvent[e.id] || 0;
+    const cap = Number.isInteger(Number(e.capacity)) ? Number(e.capacity) : null;
+    return {
+      id              : e.id,
+      title           : e.title,
+      starts_at       : e.starts_at,
+      ends_at         : e.ends_at,
+      capacity        : cap,
+      location        : e.location,
+      niveau          : e.niveau || null,
+      confirmed_count : cnt,
+      has_space       : cap == null ? true : cnt < cap,
+    };
+  });
+}
+
 /**
  * Formatteert het Gastenlijst-label:
  *   - capacity gevuld -> "<bevestigd> / <capacity>"
