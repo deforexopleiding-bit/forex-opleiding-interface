@@ -63,12 +63,17 @@ export default async function handler(req, res) {
     }
 
     // 2) Confirmed counts per event in 1 round-trip.
+    // Fase 1 capaciteits-regel: identiek aan getConfirmedCount —
+    // assessment_response_id moet NOT NULL zijn anders telt de rij niet mee
+    // voor 'vol' / has_space. Voorkomt dat een attendee zonder voltooide
+    // assessment een vol event kan kiezen.
     const eventIds = events.map((e) => e.id);
     const { data: countRows, error: cntErr } = await supabaseAdmin
       .from('event_attendees')
       .select('event_id')
       .in('event_id', eventIds)
-      .in('status', CONFIRMED_STATUSES);
+      .in('status', CONFIRMED_STATUSES)
+      .not('assessment_response_id', 'is', null);
     if (cntErr) {
       // Soft-fail: log + return events met confirmed_count=0 zodat de UI
       // wel bruikbaar blijft (auto-vol mist wel signaal, maar dat heeft de

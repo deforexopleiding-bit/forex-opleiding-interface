@@ -48,10 +48,17 @@ export function isNiveauMatch(routingResult, eventNiveau) {
 
 // ── Confirmed-count ─────────────────────────────────────────────────────────
 //
-// "Bevestigd" = de F1 enum-waarde 'aangemeld' (NL voor confirmed-to-come).
-// We tellen alleen rijen die NIET geswitched zijn naar een ander event;
-// rijen met status='switched_to_other_event' vallen weg uit de
-// gastenlijst-teller van dit event.
+// "Bevestigd / actief" = deelnemer met (a) status IN ('aangemeld','aanwezig')
+// ÉN (b) een gekoppelde, voltooide Blok-2-assessment (assessment_response_id
+// IS NOT NULL). Aanmeldingen zonder assessment blijven 'aangemeld' maar
+// tellen NIET mee voor capaciteit — zij gaan pas meetellen zodra hun
+// assessment alsnog gekoppeld wordt (Fase 2 / signup-first pad).
+//
+// Single source of truth: autoCloseIfFull, syncGastenlijstWebflow's label,
+// assessment-open-events.has_space én events-list/events-detail's
+// 'active'-teller volgen allemaal deze regel. Bestaande status-enum-labels
+// blijven onaangetast; de assessment-filter is een EXTRA "telt-mee"-laag
+// bovenop de status.
 //
 // Returnt 0 bij DB-fout (soft-fail) zodat de registratie-flow niet
 // blokkeert; error wordt geloggd voor follow-up. Auto-vol blijft dan
@@ -65,7 +72,8 @@ export async function getConfirmedCount(eventId) {
     .from('event_attendees')
     .select('id', { count: 'exact', head: true })
     .eq('event_id', eventId)
-    .in('status', CONFIRMED_STATUSES);
+    .in('status', CONFIRMED_STATUSES)
+    .not('assessment_response_id', 'is', null);
   if (error) {
     console.error('[event-registration] getConfirmedCount error:', error.message);
     return 0;

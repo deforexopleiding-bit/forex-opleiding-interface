@@ -9,20 +9,24 @@
 //   {
 //     event: { ...event-row, niveau_label },
 //     counts: {
-//       mentors:        <int>,
-//       attendees_total: <int>,
-//       byStatus: { aangemeld, aanwezig, no_show, sale, switched_to_other_event },
-//       active:          <int>  (aangemeld + aanwezig + sale),
-//       seats_remaining: <int>  (capacity - active)
+//       mentors:                  <int>,
+//       attendees_total:          <int>,
+//       byStatus:                 { aangemeld, aanwezig, no_show, sale, switched_to_other_event },
+//       active:                   <int>  (= getConfirmedCount: status IN
+//                                          ('aangemeld','aanwezig') AND
+//                                          assessment_response_id IS NOT NULL),
+//       aangemeld_no_assessment:  <int>  (aangemeld zonder voltooide assessment —
+//                                          staat in lijst, telt NIET mee voor capaciteit),
+//       seats_remaining:          <int>  (capacity - active)
 //     }
 //   }
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
+import { getConfirmedCount } from './_lib/event-registration.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const STATUS_KEYS = ['aangemeld', 'aanwezig', 'no_show', 'sale', 'switched_to_other_event'];
-const ACTIVE_KEYS = ['aangemeld', 'aanwezig', 'sale'];
 
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
@@ -99,7 +103,34 @@ export default async function handler(req, res) {
       console.error('[events-detail total-attendees]', e.message);
     }
 
-    const active = ACTIVE_KEYS.reduce((sum, k) => sum + (byStatus[k] || 0), 0);
+    // Fase 1 capaciteits-regel: active = getConfirmedCount (status IN
+    // ('aangemeld','aanwezig') AND assessment_response_id IS NOT NULL).
+    // Eerder: ACTIVE_KEYS-reduce ['aangemeld','aanwezig','sale'] zonder
+    // assessment-filter. byStatus per status BLIJFT zoals voorheen — alleen
+    // de "telt-mee voor capaciteit"-laag is strikter geworden.
+    let active = 0;
+    try {
+      active = await getConfirmedCount(id);
+    } catch (e) {
+      console.error('[events-detail active-count]', e.message);
+    }
+
+    // Extra UI-teller: aangemeld zonder voltooide assessment (in de lijst,
+    // niet meegerekend voor capaciteit). Maakt het onderscheid expliciet in
+    // de Aanwezigen-tab.
+    let aangemeldNoAssessment = 0;
+    try {
+      const { count } = await supabaseAdmin
+        .from('event_attendees')
+        .select('id', { count: 'exact', head: true })
+        .eq('event_id', id)
+        .eq('status', 'aangemeld')
+        .is('assessment_response_id', null);
+      aangemeldNoAssessment = typeof count === 'number' ? count : 0;
+    } catch (e) {
+      console.error('[events-detail aangemeld-no-assessment]', e.message);
+    }
+
     const seatsRemaining = Math.max(0, (ev.capacity || 0) - active);
 
     return res.status(200).json({
@@ -128,11 +159,12 @@ export default async function handler(req, res) {
         updated_at:                ev.updated_at,
       },
       counts: {
-        mentors:         mentorCount,
-        attendees_total: totalAttendees,
+        mentors:                 mentorCount,
+        attendees_total:         totalAttendees,
         byStatus,
         active,
-        seats_remaining: seatsRemaining,
+        aangemeld_no_assessment: aangemeldNoAssessment,
+        seats_remaining:         seatsRemaining,
       },
     });
   } catch (e) {
