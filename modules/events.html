@@ -1018,7 +1018,12 @@ function _siRenderRows(rows) {
         const naam   = [r.first_name, r.last_name].filter(Boolean).join(' ').trim() || '—';
         const email  = r.email ? esc(r.email) : '<span style="color:var(--text-faint)">geen email</span>';
         const phone  = r.phone ? esc(r.phone) : '';
-        const label  = r.event_date_label || '<span style="color:var(--text-faint)">geen label</span>';
+        // Fix over-escape (zelfde pattern als KLANT-kolom in loadEventsInbox):
+        // bij ontbrekend label renderen we de italic-placeholder direct, anders
+        // esc()-en we de echte label en wrappen 'm in <code>.
+        const labelCell = r.event_date_label
+          ? '<code style="font-family:ui-monospace,Menlo,Consolas,monospace;font-size:11.5px">' + esc(r.event_date_label) + '</code>'
+          : '<span style="color:var(--text-faint);font-style:italic">geen label</span>';
         const status = _siStatusBadge(r.match_status);
         const cands  = Array.isArray(r.match_candidate_ids) && r.match_candidate_ids.length > 0
           ? '<div style="font-size:11px;color:var(--text-faint);margin-top:3px">' + r.match_candidate_ids.length + ' kandidaten</div>'
@@ -1033,7 +1038,7 @@ function _siRenderRows(rows) {
         return '<tr>'
           + '<td>' + esc(naam) + '</td>'
           + '<td>' + email + (phone ? '<div style="font-size:11.5px;color:var(--text-dim);margin-top:2px">' + phone + '</div>' : '') + '</td>'
-          + '<td><code style="font-family:ui-monospace,Menlo,Consolas,monospace;font-size:11.5px">' + esc(label) + '</code>' + cands + matchedEvt + '</td>'
+          + '<td>' + labelCell + cands + matchedEvt + '</td>'
           + '<td>' + status + '</td>'
           + '<td style="font-size:11.5px;color:var(--text-dim)">' + esc(fmtDate(r.received_at)) + '</td>'
           + '<td style="text-align:right">' + actionCell + '</td>'
