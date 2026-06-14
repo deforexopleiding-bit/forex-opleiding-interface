@@ -24,9 +24,21 @@ import { sendTemplate, MetaNotConfiguredError } from './meta-whatsapp.js';
 import { getModuleContextByPhoneNumberId } from './module-context.js';
 import { buildMetaVariablesFromMapping, resolveVariables } from './template-variables.js';
 import { upsertOutboundConversation } from './conv-upsert.js';
-import { sendMail, wrapEmailHtml } from '../mailer.js';
+import { sendEventMail, wrapEmailHtml } from '../mailer.js';
 
 const MAX_VAR_VALUE = 1000;
+
+// Eigen footer voor events-automation-mails (vervangt de generieke
+// Follow-up-footer uit wrapEmailHtml default). Branded voor events; verwijst
+// naar het juiste contactpunt zodat reply-flow naar events@ gaat.
+const EVENTS_EMAIL_FOOTER = `<p style="margin:0; color:#6b7280; font-size:12px;">
+  De Forex Opleiding<br>
+  Vragen? Mail naar <a href="mailto:events@deforexopleiding.nl" style="color:#6b7280;">events@deforexopleiding.nl</a>
+</p>`;
+
+function ctaButtonHtml(label, url) {
+  return `<p style="text-align:center;margin:28px 0"><a href="${escHtml(url)}" style="display:inline-block;background:#093d54;color:#ffffff;padding:12px 28px;border-radius:8px;font-weight:600;text-decoration:none">${escHtml(label)}</a></p>`;
+}
 
 function toE164Plus(phone) {
   if (!phone) return null;
@@ -248,38 +260,40 @@ export async function sendEventWhatsAppTemplate({
 //      vangen.
 //   3) Newlines: '\n\n' -> '</p><p>'; daarna resterende '\n' -> '<br>';
 //      tenslotte alles inwikkelen in één buiten-<p>.
-export function renderEmailParts({ subject, body, event, attendee } = {}) {
+export function renderEmailParts({ subject, body, event, attendee, button } = {}) {
   const ctx = { event, attendee };
   const renderedSubject = resolveVariables(subject || '', null, ctx).text;
   const renderedBody    = resolveVariables(body    || '', null, ctx).text;
 
   let s = escHtml(renderedBody);
-  // Linkify http(s)-URLs. Na escape kan een URL '&amp;' bevatten — dat is
-  // wenselijk in de href-attribute én in de zichtbare tekst, dus we matchen
-  // simpelweg op het escaped-niet-whitespace-deel.
   s = s.replace(/(https?:\/\/[^\s]+)/g, (url) => `<a href="${url}">${url}</a>`);
-  // Paragraphs + line-breaks.
   s = s.replace(/\n\n+/g, '</p><p>').replace(/\n/g, '<br>');
-  const bodyHtml = `<p>${s}</p>`;
+  let bodyHtml = `<p>${s}</p>`;
 
-  const html = wrapEmailHtml(renderedSubject, bodyHtml);
-  return { subject: renderedSubject, text: renderedBody, html };
+  let buttonUrl = null;
+  if (button && button.label && button.url) {
+    buttonUrl = resolveVariables(String(button.url), null, ctx).text.trim();
+    if (buttonUrl) bodyHtml += ctaButtonHtml(button.label, buttonUrl);
+  }
+
+  const html = wrapEmailHtml(renderedSubject, bodyHtml, { footerHtml: EVENTS_EMAIL_FOOTER });
+
+  let text = renderedBody;
+  if (buttonUrl) text += `\n\n${button.label}: ${buttonUrl}`;
+
+  return { subject: renderedSubject, text, html };
 }
 
-// ── 3. sendEventEmail — render + sendMail ───────────────────────────────────
-export async function sendEventEmail({ attendee, event, subject, body } = {}) {
+// ── 3. sendEventEmail — render + sendEventMail (events@-afzender, fallback info@) ──
+export async function sendEventEmail({ attendee, event, subject, body, button } = {}) {
   if (!attendee?.email) {
     return { ok: false, skipped: true, reason: 'no-email' };
   }
-  const parts = renderEmailParts({ subject, body, event, attendee });
+  const parts = renderEmailParts({ subject, body, event, attendee, button });
   try {
-    await sendMail({
-      to     : attendee.email,
-      subject: parts.subject,
-      text   : parts.text,
-      html   : parts.html,
-    });
-    return { ok: true };
+    const r = await sendEventMail({ to: attendee.email, subject: parts.subject, text: parts.text, html: parts.html });
+    if (r && r.success) return { ok: true, from: r.from, fallback: r.fallback };
+    return { ok: false, error: (r && r.error) || 'mail send failed', from: r && r.from };
   } catch (e) {
     console.error('[events-send] sendEventEmail:', e?.message || e);
     return { ok: false, error: e?.message || 'mail send failed' };
