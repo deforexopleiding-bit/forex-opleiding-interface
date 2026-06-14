@@ -75,6 +75,10 @@
     {
       "path": "/api/cron-events-cms-cleanup",
       "schedule": "5 1 * * *"
+    },
+    {
+      "path": "/api/cron-events-automations",
+      "schedule": "* * * * *"
     }
   ],
   "headers": [
