@@ -133,6 +133,13 @@ export default async function handler(req, res) {
   }
 
   // ── 4) Insert event_attendees ─────────────────────────────────────────
+  //
+  // Fase 2c robustness: bij 23505 op (event_id, lower(email)) kan de
+  // conflict-rij een signup-first attendee zijn (assessment_response_id
+  // IS NULL). In dat geval doen we recovery-UPDATE i.p.v. 409 — die rij
+  // krijgt nu de assessment + naam-velden uit assessment_responses, telt
+  // vanaf nu mee voor capaciteit. Andere conflict-state (al gekoppeld
+  // aan een andere assessment) blijft 409 DUPLICATE.
   let attendeeId;
   try {
     const { data: row, error } = await supabaseAdmin
@@ -150,17 +157,57 @@ export default async function handler(req, res) {
       .select('id')
       .maybeSingle();
     if (error) {
-      // PG-23505 = unique_violation. Webhook-friendly: 409 DUPLICATE.
+      // PG-23505 = unique_violation. Recovery-pad voor signup-first attendees.
       if (error.code === '23505' || /duplicate key/i.test(error.message || '')) {
-        return res.status(409).json({
-          error: 'Je bent al ingeschreven voor dit event.',
-          code : 'DUPLICATE',
-        });
+        // Zoek de conflicterende rij via (event_id, lower(email)). Gevoeligheid
+        // op email is via de partial UNIQUE index op lower(email); we matchen
+        // hier in code dezelfde semantiek via ilike.
+        let existing = null;
+        try {
+          if (assessment.email) {
+            const { data: existingRow } = await supabaseAdmin
+              .from('event_attendees')
+              .select('id, assessment_response_id')
+              .eq('event_id', event.id)
+              .ilike('email', assessment.email)
+              .maybeSingle();
+            existing = existingRow;
+          }
+        } catch (e2) {
+          console.error('[assessment-register] conflict lookup:', e2?.message || e2);
+        }
+        // Signup-first recovery: existing rij heeft geen assessment → UPDATE.
+        if (existing && existing.assessment_response_id == null) {
+          const { error: updErr } = await supabaseAdmin
+            .from('event_attendees')
+            .update({
+              assessment_response_id: assessment.id,
+              first_name            : assessment.first_name,
+              last_name             : assessment.last_name,
+            })
+            .eq('id', existing.id);
+          if (updErr) {
+            console.error('[assessment-register] signup-first link update:', updErr.message);
+            return res.status(500).json({ error: 'Inschrijving kon niet worden opgeslagen.' });
+          }
+          attendeeId = existing.id;
+          // Doorvallen naar side-effects hieronder zodat de rij die nu
+          // meetelt direct in de gastenlijst en eventueel auto-vol komt.
+        } else {
+          // Andere conflicten (al gekoppeld aan andere assessment, of
+          // conflicting rij niet vindbaar): blijf 409 DUPLICATE.
+          return res.status(409).json({
+            error: 'Je bent al ingeschreven voor dit event.',
+            code : 'DUPLICATE',
+          });
+        }
+      } else {
+        throw new Error('attendee insert: ' + error.message);
       }
-      throw new Error('attendee insert: ' + error.message);
+    } else {
+      if (!row) throw new Error('attendee insert returnde geen rij.');
+      attendeeId = row.id;
     }
-    if (!row) throw new Error('attendee insert returnde geen rij.');
-    attendeeId = row.id;
   } catch (e) {
     console.error('[assessment-register] insert', e.message);
     return res.status(500).json({ error: 'Inschrijving kon niet worden opgeslagen.' });
