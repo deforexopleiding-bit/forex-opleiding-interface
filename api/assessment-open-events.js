@@ -20,10 +20,9 @@
 // Response 405: GET only
 // Response 500: database-fout
 
-import { supabaseAdmin } from './supabase.js';
 import {
-  CONFIRMED_STATUSES,
   NIVEAU_FROM_ROUTING,
+  getOpenEventsWithSpace,
 } from './_lib/event-registration.js';
 
 const ALLOWED_NIVEAUS = Object.values(NIVEAU_FROM_ROUTING); // ['gevorderd','basis']
@@ -45,61 +44,22 @@ export default async function handler(req, res) {
   }
 
   try {
-    const nowIso = new Date().toISOString();
-
-    // 1) Open events voor dit niveau.
-    const { data: events, error: evErr } = await supabaseAdmin
-      .from('events')
-      .select('id, title, starts_at, ends_at, capacity, location')
-      .eq('status', 'published')
-      .eq('signups_closed', false)
-      .eq('niveau', niveau)
-      .gt('starts_at', nowIso)
-      .order('starts_at', { ascending: true })
-      .limit(50);
-    if (evErr) throw new Error('events select: ' + evErr.message);
-    if (!events || events.length === 0) {
-      return res.status(200).json({ niveau, events: [] });
-    }
-
-    // 2) Confirmed counts per event in 1 round-trip.
-    // Fase 1 capaciteits-regel: identiek aan getConfirmedCount —
-    // assessment_response_id moet NOT NULL zijn anders telt de rij niet mee
-    // voor 'vol' / has_space. Voorkomt dat een attendee zonder voltooide
-    // assessment een vol event kan kiezen.
-    const eventIds = events.map((e) => e.id);
-    const { data: countRows, error: cntErr } = await supabaseAdmin
-      .from('event_attendees')
-      .select('event_id')
-      .in('event_id', eventIds)
-      .in('status', CONFIRMED_STATUSES)
-      .not('assessment_response_id', 'is', null);
-    if (cntErr) {
-      // Soft-fail: log + return events met confirmed_count=0 zodat de UI
-      // wel bruikbaar blijft (auto-vol mist wel signaal, maar dat heeft de
-      // registratie-endpoint server-side z'n eigen guard).
-      console.error('[assessment-open-events] count error:', cntErr.message);
-    }
-    const countsByEvent = {};
-    for (const r of (countRows || [])) {
-      countsByEvent[r.event_id] = (countsByEvent[r.event_id] || 0) + 1;
-    }
-
-    const out = events.map((e) => {
-      const cnt = countsByEvent[e.id] || 0;
-      const cap = Number.isInteger(Number(e.capacity)) ? Number(e.capacity) : null;
-      return {
-        id              : e.id,
-        title           : e.title,
-        starts_at       : e.starts_at,
-        ends_at         : e.ends_at,
-        capacity        : cap,
-        confirmed_count : cnt,
-        has_space       : cap == null ? true : cnt < cap,
-        location        : e.location,
-      };
-    });
-
+    // Fase 2a: delegeer naar getOpenEventsWithSpace helper (single source of
+    // truth voor "open events met has_space"). Output-shape voor de publieke
+    // assessment-flow is byte-identiek aan vóór de refactor — we strippen
+    // het 'niveau'-veld uit de helper-output omdat de oorspronkelijke
+    // response-shape het niet bevatte (caller weet al voor welk niveau).
+    const events = await getOpenEventsWithSpace({ niveau, limit: 50 });
+    const out = events.map((e) => ({
+      id              : e.id,
+      title           : e.title,
+      starts_at       : e.starts_at,
+      ends_at         : e.ends_at,
+      capacity        : e.capacity,
+      confirmed_count : e.confirmed_count,
+      has_space       : e.has_space,
+      location        : e.location,
+    }));
     return res.status(200).json({ niveau, events: out });
   } catch (e) {
     console.error('[assessment-open-events]', e.message);
