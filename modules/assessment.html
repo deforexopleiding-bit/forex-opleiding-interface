@@ -358,6 +358,15 @@
 
       const urlParams = new URLSearchParams(window.location.search);
       const eventId   = urlParams.get('event') || null;
+      // Fase 2c: ?t=<choice_token> betekent "signup-first attendee vult
+      // alsnog z'n assessment in via z'n keuze-link". In dat geval gaat
+      // de inschrijf-actie NIET via /api/assessment-register maar via
+      // /api/event-choice-submit (z'n bestaande rij wordt gekoppeld of
+      // verplaatst). Token alleen accepteren als 'ie de uuid-shape heeft.
+      const _ctRaw = urlParams.get('t') || null;
+      const choiceToken = _ctRaw && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(_ctRaw)
+        ? _ctRaw
+        : null;
 
       let questions = [];
 
@@ -627,14 +636,27 @@
         $eventList.querySelectorAll('.event-card').forEach((c) => c.classList.remove('selected'));
         if (cardEl) cardEl.classList.add('selected');
 
-        try {
-          const r = await fetch('/api/assessment-register', {
-            method : 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body   : JSON.stringify({
+        // Fase 2c: bij choice_token in URL → choice-submit (koppelt de
+        // bestaande signup-first rij). Zonder token → klassieke
+        // assessment-register (maakt nieuwe rij). UI-shape is in beide
+        // gevallen identiek (succes-card hieronder).
+        const endpoint = choiceToken ? '/api/event-choice-submit' : '/api/assessment-register';
+        const payload = choiceToken
+          ? {
+              t                     : choiceToken,
+              target_event_id       : eventId,
+              assessment_response_id: assessmentId,
+            }
+          : {
               assessment_response_id: assessmentId,
               event_id              : eventId,
-            }),
+            };
+
+        try {
+          const r = await fetch(endpoint, {
+            method : 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body   : JSON.stringify(payload),
           });
           const j = await r.json().catch(() => ({}));
 
@@ -651,16 +673,30 @@
           }
           if (r.status === 409) {
             const codeMsg = {
-              EVENT_NOT_OPEN       : 'Dit event is niet meer open voor inschrijving.',
-              EVENT_CLOSED         : 'De inschrijvingen voor dit event zijn net gesloten. Kies een andere datum.',
-              NIVEAU_MISMATCH      : 'Dit event past niet bij jouw niveau.',
-              ASSESSMENT_INCOMPLETE: 'Je assessment is niet volledig gescoord; we kunnen geen inschrijving doorvoeren.',
-              DUPLICATE            : 'Je staat al ingeschreven voor dit event.',
+              EVENT_NOT_OPEN          : 'Dit event is niet meer open voor inschrijving.',
+              EVENT_CLOSED            : 'De inschrijvingen voor dit event zijn net gesloten. Kies een andere datum.',
+              NIVEAU_MISMATCH         : 'Dit event past niet bij jouw niveau.',
+              ASSESSMENT_INCOMPLETE   : 'Je assessment is niet volledig gescoord; we kunnen geen inschrijving doorvoeren.',
+              DUPLICATE               : 'Je staat al ingeschreven voor dit event.',
+              EVENT_FULL              : 'Dit event is net vol. Kies een andere datum.',
             };
             const m = codeMsg[j.code] || j.error || 'Inschrijven kon niet worden voltooid.';
             showPickerError(m);
-            // Reload events bij EVENT_CLOSED zodat de lijst klopt.
-            if (j.code === 'EVENT_CLOSED') loadOpenEvents();
+            // Reload events bij EVENT_CLOSED of EVENT_FULL zodat de lijst klopt.
+            if (j.code === 'EVENT_CLOSED' || j.code === 'EVENT_FULL') loadOpenEvents();
+            return;
+          }
+          if (r.status === 422) {
+            const codeMsg = {
+              ASSESSMENT_EMAIL_MISMATCH: 'Het e-mailadres in je assessment komt niet overeen met je inschrijving.',
+              ASSESSMENT_NOT_FOUND     : 'Je assessment kon niet worden gevonden. Vernieuw de pagina.',
+            };
+            showPickerError(codeMsg[j.code] || j.error || 'Validatiefout.');
+            return;
+          }
+          if (r.status === 404) {
+            // Alleen bij choice_token-flow: TOKEN_INVALID.
+            showPickerError(j.error || 'Link niet (meer) geldig.');
             return;
           }
           showPickerError(j.error || ('Inschrijven mislukt (HTTP ' + r.status + ').'));

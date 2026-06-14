@@ -9,8 +9,28 @@
 // wordt aangemaakt op het target-event met switched_from_event_id zodat
 // we de switch bidirectioneel kunnen volgen.
 //
+// Fase 2c — signup-first → assessment-koppeling:
+//   Body kan optioneel assessment_response_id meegeven. Dit is de zojuist
+//   ingevulde assessment die aan de bestaande signup-first attendee
+//   gekoppeld moet worden. Validatie:
+//     - assessment_responses-rij hoort bij dezelfde persoon (email
+//       case-insensitief == attendee.email)
+//     - routing_result in ('basis','gevorderd')
+//   Met deze body-supplied assessment:
+//     - SAME-event + attendee.assessment_response_id IS NULL → UPDATE de
+//       bestaande rij (zet assessment_response_id + naam-velden); de rij
+//       telt nu mee voor capaciteit (Fase 1 regel). Niveau-check moet
+//       wel slagen anders 409 NIVEAU_MISMATCH (ze moeten dan switchen).
+//     - SAME-event + attendee al gekoppeld aan een (andere) assessment →
+//       NO_OP (we negeren de body-supplied id om silent overwrites te
+//       voorkomen; dat is een rare flow die niet voorkomt in 2c-UI).
+//     - DIFFERENT-event → de NIEUWE rij krijgt de body-supplied
+//       assessment_response_id. Niveau-check op het target loopt op de
+//       body-supplied routing.
+//
 // Body (JSON):
-//   { t: <choice_token uuid>, target_event_id: <uuid> }
+//   { t: <choice_token uuid>, target_event_id: <uuid>,
+//     assessment_response_id?: <uuid> }
 //
 // Atomiciteit:
 //   Supabase REST heeft geen multi-statement transactions; we doen
@@ -89,11 +109,19 @@ export default async function handler(req, res) {
   const token = typeof body.t === 'string' ? body.t.trim() : null;
   const targetEventId = typeof body.target_event_id === 'string'
     ? body.target_event_id.trim() : null;
+  const suppliedAssessmentId = typeof body.assessment_response_id === 'string'
+    ? body.assessment_response_id.trim() : null;
   if (!token || !UUID_RE.test(token)) {
     return res.status(400).json({ error: 'Token vereist.', code: 'TOKEN_REQUIRED' });
   }
   if (!targetEventId || !UUID_RE.test(targetEventId)) {
     return res.status(400).json({ error: 'target_event_id vereist.', code: 'TARGET_REQUIRED' });
+  }
+  if (suppliedAssessmentId && !UUID_RE.test(suppliedAssessmentId)) {
+    return res.status(400).json({
+      error: 'assessment_response_id moet een geldige uuid zijn.',
+      code : 'ASSESSMENT_ID_INVALID',
+    });
   }
 
   // 2) Rate-limit
@@ -148,34 +176,141 @@ export default async function handler(req, res) {
       });
     }
 
-    // 5) Niveau-check indien assessment aanwezig
-    if (attendee.assessment_response_id) {
+    // 5) Effective assessment bepalen + niveau-check.
+    //
+    // Fase 2c: body kan een assessment_response_id meegeven (zojuist
+    // ingevuld via assessment.html?t=<choice_token>). Die overrulet
+    // attendee.assessment_response_id voor zowel niveau-check als de
+    // straks-te-INSERTen / UPDATEn rij. Validatie zorgt dat we geen
+    // assessment van iemand anders koppelen (email-match) en dat de
+    // routing een valide niveau-keuze toelaat.
+    let effectiveRouting        = null;  // 'basis' | 'gevorderd' | null
+    let effectiveAssessmentId   = null;
+    let effectiveFirstName      = null;
+    let effectiveLastName       = null;
+
+    if (suppliedAssessmentId) {
+      // Body-supplied: validatie verplicht.
+      const { data: ar, error: arErr } = await supabaseAdmin
+        .from('assessment_responses')
+        .select('id, email, routing_result, first_name, last_name')
+        .eq('id', suppliedAssessmentId)
+        .maybeSingle();
+      if (arErr) {
+        console.error('[event-choice-submit] supplied assessment fetch:', arErr.message);
+        return res.status(500).json({ error: 'Kon assessment niet ophalen.' });
+      }
+      if (!ar) {
+        return res.status(422).json({
+          error: 'Assessment niet gevonden.',
+          code : 'ASSESSMENT_NOT_FOUND',
+        });
+      }
+      // Email-match case-insensitief. Zonder beide emails kunnen we niet
+      // verifiëren dat het dezelfde persoon is → 422.
+      const attEmail = String(attendee.email || '').trim().toLowerCase();
+      const arEmail  = String(ar.email      || '').trim().toLowerCase();
+      if (!attEmail || !arEmail || attEmail !== arEmail) {
+        return res.status(422).json({
+          error: 'Assessment hoort niet bij deze deelnemer.',
+          code : 'ASSESSMENT_EMAIL_MISMATCH',
+        });
+      }
+      // Routing moet een valide niveau-keuze toelaten. 'incomplete' / null
+      // → 409 zodat de UI een duidelijke boodschap kan tonen.
+      if (ar.routing_result !== 'basis' && ar.routing_result !== 'gevorderd') {
+        return res.status(409).json({
+          error: 'Assessment is niet volledig gescoord.',
+          code : 'ASSESSMENT_INCOMPLETE',
+        });
+      }
+      effectiveRouting      = ar.routing_result;
+      effectiveAssessmentId = ar.id;
+      effectiveFirstName    = ar.first_name || null;
+      effectiveLastName     = ar.last_name  || null;
+    } else if (attendee.assessment_response_id) {
+      // Geen body-id → fall back op attendee's bestaande assessment.
       try {
         const { data: ar } = await supabaseAdmin
           .from('assessment_responses')
           .select('routing_result')
           .eq('id', attendee.assessment_response_id)
           .maybeSingle();
-        const routing = ar?.routing_result || null;
-        if (routing === 'basis' || routing === 'gevorderd') {
-          if (!isNiveauMatch(routing, targetEvent.niveau)) {
-            return res.status(409).json({
-              error: `Niveau van event komt niet overeen met jouw resultaat (${routing} vs ${targetEvent.niveau}).`,
-              code : 'NIVEAU_MISMATCH',
-            });
-          }
+        if (ar?.routing_result === 'basis' || ar?.routing_result === 'gevorderd') {
+          effectiveRouting = ar.routing_result;
         }
-        // 'incomplete' / null: niveau-check overslaan (signup-first pad
-        // krijgt z'n niveau pas na Fase 2c).
       } catch (e) {
-        console.error('[event-choice-submit] assessment fetch:', e?.message || e);
-        // Soft-fail: laat niveau-check vallen i.p.v. crash; UI's
-        // foutboodschap zou hier onhelpzaam zijn.
+        console.error('[event-choice-submit] existing assessment fetch:', e?.message || e);
+        // Soft-fail: niveau-check overslaan i.p.v. crash; switch-flow
+        // wordt niet geblokkeerd door een DB-glitch op een read-only stap.
       }
+      effectiveAssessmentId = attendee.assessment_response_id;
     }
 
-    // 6) Same-event no-op
+    // Niveau-check tegen target.niveau (alleen als er een effectieve
+    // routing is — signup-first pad zonder assessment slaat dit over).
+    if (effectiveRouting && !isNiveauMatch(effectiveRouting, targetEvent.niveau)) {
+      return res.status(409).json({
+        error: `Niveau van event komt niet overeen met jouw resultaat (${effectiveRouting} vs ${targetEvent.niveau}).`,
+        code : 'NIVEAU_MISMATCH',
+      });
+    }
+
+    // 6) Same-event: NO_OP óf assessment-LINK (Fase 2c).
+    //
+    // Signup-first attendee zonder assessment vult via z'n keuze-link de
+    // Blok2-assessment in, kiest HETZELFDE event → we koppelen z'n
+    // bestaande rij aan de net-gemaakte assessment. De rij telt vanaf nu
+    // mee voor capaciteit (Fase 1 regel), dus we draaien daarna de
+    // gastenlijst + autoCloseIfFull cascade voor het target-event.
+    //
+    // Bij attendee al gekoppeld aan een (andere) assessment → silent
+    // NO_OP zodat we geen onverwacht overwrite doen; dit pad komt niet
+    // voor in de 2c-UI (UI stuurt body-assessment alleen voor
+    // signup-first attendees).
     if (attendee.event_id === targetEvent.id) {
+      if (suppliedAssessmentId && !attendee.assessment_response_id) {
+        const updatePayload = {
+          assessment_response_id: effectiveAssessmentId,
+        };
+        if (effectiveFirstName) updatePayload.first_name = effectiveFirstName;
+        if (effectiveLastName)  updatePayload.last_name  = effectiveLastName;
+        const { error: linkErr } = await supabaseAdmin
+          .from('event_attendees')
+          .update(updatePayload)
+          .eq('id', attendee.id);
+        if (linkErr) {
+          console.error('[event-choice-submit] same-event link:', linkErr.message);
+          return res.status(500).json({ error: 'Kon assessment niet koppelen.' });
+        }
+        // Cascade: deze rij telt nu mee → recount + gastenlijst + autoClose.
+        let count = 0;
+        let gast  = { ok: true, skipped: true, label: null };
+        let autoclose = { ok: true, skipped: true };
+        try {
+          count = await getConfirmedCount(targetEvent.id);
+          gast  = await syncGastenlijstWebflow(targetEvent, count);
+          autoclose = await autoCloseIfFull(targetEvent, count);
+        } catch (e) {
+          console.error('[event-choice-submit] same-event link cascade:', e?.message || e);
+        }
+        const capForResp = Number.isInteger(Number(targetEvent.capacity))
+          ? Number(targetEvent.capacity) : null;
+        return res.status(200).json({
+          ok                       : true,
+          code                     : 'ASSESSMENT_LINKED',
+          new_attendee_id          : attendee.id,
+          old_attendee_id          : attendee.id,
+          target_event_id          : targetEvent.id,
+          old_event_id             : targetEvent.id,
+          confirmed_count_target   : count,
+          capacity_target          : capForResp,
+          gastenlijst_label_target : gast?.label || null,
+          gastenlijst_label_old    : null,
+          auto_closed_target       : !!autoclose?.auto_closed,
+        });
+      }
+      // Geen body-id of al gekoppeld → bestaand NO_OP gedrag.
       return res.status(200).json({
         ok               : true,
         code             : 'NO_OP',
@@ -200,16 +335,20 @@ export default async function handler(req, res) {
     // nieuw uuid (per-rij volatile gen_random_uuid()).
     let newAttendeeId;
     {
+      // Voorkeur voor body-supplied assessment (Fase 2c signup-first pad).
+      // effectiveFirstName/LastName komen uit de assessment-row die de
+      // gebruiker net heeft afgemaakt — die zijn autoritatief over de
+      // signup-first naam-velden (kunnen onvolledig zijn ingevoerd).
       const { data: newRow, error: insErr } = await supabaseAdmin
         .from('event_attendees')
         .insert({
           event_id              : targetEvent.id,
-          first_name            : attendee.first_name,
-          last_name             : attendee.last_name,
+          first_name            : effectiveFirstName || attendee.first_name,
+          last_name             : effectiveLastName  || attendee.last_name,
           email                 : attendee.email,
           status                : 'aangemeld',
           created_via           : 'choice',
-          assessment_response_id: attendee.assessment_response_id || null,
+          assessment_response_id: effectiveAssessmentId || null,
           switched_from_event_id: attendee.event_id,
           registered_at         : new Date().toISOString(),
         })
