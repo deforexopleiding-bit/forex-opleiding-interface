@@ -190,12 +190,17 @@ function renderForbidden() {
   `;
 }
 
-function renderPage(canCreate, canViewInbox) {
+function renderPage(canCreate, canViewInbox, canManageSignupInbox) {
   // Fase 1 events-inbox: tabbar boven de filter-strip. Inbox-tab alleen
   // zichtbaar bij events.inbox.view permissie. Default tab = 'overzicht'
   // zodat bestaand gedrag onveranderd is.
   const inboxTabBtn = canViewInbox
     ? '<button class="ev-tab" data-evtab="inbox"><i class="ti ti-inbox"></i> Inbox</button>'
+    : '';
+  // Inschrijvingen-inbox tab: alleen zichtbaar bij events.attendee.create
+  // (zelfde gate als de onderliggende -list / -resolve endpoints).
+  const signupInboxTabBtn = canManageSignupInbox
+    ? '<button class="ev-tab" data-evtab="signup-inbox"><i class="ti ti-clipboard-list"></i> Inschrijvingen-inbox <span id="evSignupInboxBadge" style="display:none;background:rgba(245,158,11,0.18);color:#b45309;border-radius:10px;padding:1px 7px;font-size:10.5px;font-weight:700;margin-left:4px">0</span></button>'
     : '';
   document.getElementById('page-content').innerHTML = `
     <div class="page-head">
@@ -209,6 +214,7 @@ function renderPage(canCreate, canViewInbox) {
     <div class="ev-tabs" style="display:flex;gap:6px;margin-bottom:14px;border-bottom:1px solid var(--border)">
       <button class="ev-tab active" data-evtab="overzicht"><i class="ti ti-list"></i> Overzicht</button>
       ${inboxTabBtn}
+      ${signupInboxTabBtn}
     </div>
 
     <div id="ev-pane-overzicht">
@@ -278,26 +284,99 @@ function renderPage(canCreate, canViewInbox) {
         <div id="evThreadHint" style="font-size:11.5px;color:var(--text-faint);margin-top:4px"></div>
       </div>
     </div>
+
+    <!-- Inschrijvingen-inbox (stap 1) — review-scherm voor event_signup_inbox -->
+    <div id="ev-pane-signup-inbox" style="display:none">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;gap:12px;flex-wrap:wrap">
+        <div style="font-size:12.5px;color:var(--text-dim);max-width:680px">
+          GHL form-submissions die niet automatisch aan een event gekoppeld konden worden.
+          Open een rij om handmatig het juiste event te kiezen — de deelnemer wordt dan
+          alsnog aangemaakt + de zaalcapaciteit bijgewerkt.
+        </div>
+        <button class="sr-iconbtn" id="evSignupInboxRefresh" title="Vernieuwen"><i class="ti ti-refresh"></i></button>
+      </div>
+      <div class="sr-segments" id="evSignupInboxFilters" style="margin-bottom:12px;display:flex;gap:6px;flex-wrap:wrap">
+        <button class="sr-seg active" data-sistatus="todo">Te reviewen <span data-cnt="todo" style="margin-left:4px;opacity:0.7"></span></button>
+        <button class="sr-seg" data-sistatus="no_match">No match <span data-cnt="no_match" style="margin-left:4px;opacity:0.7"></span></button>
+        <button class="sr-seg" data-sistatus="ambiguous">Ambiguous <span data-cnt="ambiguous" style="margin-left:4px;opacity:0.7"></span></button>
+        <button class="sr-seg" data-sistatus="matched">Matched <span data-cnt="matched" style="margin-left:4px;opacity:0.7"></span></button>
+        <button class="sr-seg" data-sistatus="invalid_payload">Invalid <span data-cnt="invalid_payload" style="margin-left:4px;opacity:0.7"></span></button>
+        <button class="sr-seg" data-sistatus="all">Alle <span data-cnt="all" style="margin-left:4px;opacity:0.7"></span></button>
+      </div>
+      <div id="evSignupInboxList">
+        <div class="skel-row"></div>
+        <div class="skel-row"></div>
+      </div>
+    </div>
+
+    <!-- Resolve-modal: event-picker per inbox-rij -->
+    <div id="evSignupResolveModal" class="modal-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:9999;align-items:center;justify-content:center;padding:24px">
+      <div class="modal-card" style="background:var(--bg);border:1px solid var(--border);border-radius:12px;max-width:560px;width:100%;padding:20px;max-height:88vh;overflow-y:auto">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+          <div style="font-size:15px;font-weight:700">Inschrijving koppelen aan event</div>
+          <button class="sr-iconbtn" id="evSignupResolveCancel" type="button" title="Sluiten"><i class="ti ti-x"></i></button>
+        </div>
+        <div id="evSignupResolveContext" style="font-size:12.5px;color:var(--text-dim);background:var(--bg-elev-2);border-radius:8px;padding:10px 12px;margin-bottom:14px"></div>
+        <label style="display:block;font-size:13px;font-weight:600;margin-bottom:6px">Kies gepubliceerd event</label>
+        <select id="evSignupResolveEventPicker" style="width:100%;padding:9px 10px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-family:inherit;font-size:13.5px;margin-bottom:12px">
+          <option value="">— Laden…</option>
+        </select>
+        <label style="display:block;font-size:13px;font-weight:600;margin-bottom:6px">Notitie (optioneel)</label>
+        <textarea id="evSignupResolveNotes" placeholder="Korte notitie voor de audit-trail…" maxlength="1000" style="width:100%;min-height:62px;padding:8px 10px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-family:inherit;font-size:13px;resize:vertical"></textarea>
+        <div id="evSignupResolveError" style="display:none;margin-top:10px;padding:8px 10px;background:rgba(220,38,38,0.12);color:#b91c1c;border:1px solid rgba(220,38,38,0.3);border-radius:8px;font-size:12.5px"></div>
+        <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px">
+          <button class="sr-btn" id="evSignupResolveCancel2" type="button" style="background:transparent;border:1px solid var(--border);color:var(--text-dim);padding:8px 14px;border-radius:8px;font-size:13px;cursor:pointer">Annuleer</button>
+          <button class="btn-primary" id="evSignupResolveSubmit" type="button"><i class="ti ti-check"></i> Koppel + maak deelnemer</button>
+        </div>
+      </div>
+    </div>
   `;
 
   // Tab-switch wiring
   const tabBtns = document.querySelectorAll('.ev-tab');
-  const paneOverview = document.getElementById('ev-pane-overzicht');
-  const paneInbox    = document.getElementById('ev-pane-inbox');
+  const paneOverview    = document.getElementById('ev-pane-overzicht');
+  const paneInbox       = document.getElementById('ev-pane-inbox');
+  const paneSignupInbox = document.getElementById('ev-pane-signup-inbox');
   tabBtns.forEach(b => b.addEventListener('click', () => {
     const which = b.getAttribute('data-evtab');
     tabBtns.forEach(x => x.classList.toggle('active', x === b));
     if (which === 'overzicht') {
       paneOverview.style.display = '';
       paneInbox.style.display = 'none';
+      if (paneSignupInbox) paneSignupInbox.style.display = 'none';
     } else if (which === 'inbox') {
       paneOverview.style.display = 'none';
       paneInbox.style.display = '';
+      if (paneSignupInbox) paneSignupInbox.style.display = 'none';
       loadEventsInbox();
+    } else if (which === 'signup-inbox') {
+      paneOverview.style.display = 'none';
+      paneInbox.style.display = 'none';
+      if (paneSignupInbox) paneSignupInbox.style.display = '';
+      loadSignupInbox();
     }
   }));
   const inboxRefresh = document.getElementById('evInboxRefresh');
   if (inboxRefresh) inboxRefresh.addEventListener('click', () => loadEventsInbox());
+
+  // Inschrijvingen-inbox wiring
+  const siRefresh = document.getElementById('evSignupInboxRefresh');
+  if (siRefresh) siRefresh.addEventListener('click', () => loadSignupInbox());
+  const siFilters = document.querySelectorAll('#evSignupInboxFilters .sr-seg');
+  siFilters.forEach((seg) => {
+    seg.addEventListener('click', () => {
+      siFilters.forEach((s) => s.classList.remove('active'));
+      seg.classList.add('active');
+      _siState.filter = seg.dataset.sistatus || 'todo';
+      loadSignupInbox();
+    });
+  });
+  const siCancel  = document.getElementById('evSignupResolveCancel');
+  const siCancel2 = document.getElementById('evSignupResolveCancel2');
+  const siSubmit  = document.getElementById('evSignupResolveSubmit');
+  if (siCancel)  siCancel.addEventListener('click', () => closeSignupResolveModal());
+  if (siCancel2) siCancel2.addEventListener('click', () => closeSignupResolveModal());
+  if (siSubmit)  siSubmit.addEventListener('click', () => submitSignupResolve());
 
   // Fase 2 stap 2c — thread-view wiring
   const backBtn = document.getElementById('evThreadBack');
@@ -471,9 +550,10 @@ async function init() {
     return;
   }
 
-  const canCreate     = window.RBAC.canSync('events.event.create');
-  const canViewInbox  = window.RBAC.canSync('events.inbox.view');
-  renderPage(canCreate, canViewInbox);
+  const canCreate         = window.RBAC.canSync('events.event.create');
+  const canViewInbox      = window.RBAC.canSync('events.inbox.view');
+  const canManageSignupInbox = window.RBAC.canSync('events.attendee.create');
+  renderPage(canCreate, canViewInbox, canManageSignupInbox);
   await Promise.all([loadNiveauOptions(), loadEvents()]);
 }
 
@@ -831,6 +911,242 @@ async function sendComposeText() {
   } catch (e) {
     window.AgentShared.showToast(e.message, 'error');
     if (btn) btn.disabled = false;
+  }
+}
+
+// ── Stap 1: Inschrijvingen-inbox (events.attendee.create) ───────────────────
+const _siState = { filter: 'todo', counts: null, activeRow: null, eventsCache: null };
+
+async function loadSignupInbox() {
+  const list = document.getElementById('evSignupInboxList');
+  if (!list) return;
+  list.innerHTML = '<div class="skel-row"></div><div class="skel-row"></div>';
+  try {
+    // 'todo' = no_match + ambiguous: 2 calls + merge (server ondersteunt 1 status
+    // per call). Voor de andere filters 1 directe call.
+    let rows = [];
+    let counts = null;
+    if (_siState.filter === 'todo') {
+      const [a, b] = await Promise.all([
+        _siFetchList({ status: 'no_match',  limit: 200 }),
+        _siFetchList({ status: 'ambiguous', limit: 200 }),
+      ]);
+      if (a.error || b.error) throw new Error(a.error || b.error);
+      rows = [...(a.rows || []), ...(b.rows || [])]
+        .sort((x, y) => String(y.received_at).localeCompare(String(x.received_at)));
+      counts = a.counts || b.counts || null;
+    } else if (_siState.filter === 'all') {
+      const r = await _siFetchList({ limit: 200 });
+      if (r.error) throw new Error(r.error);
+      rows = r.rows || [];
+      counts = r.counts || null;
+    } else {
+      const r = await _siFetchList({ status: _siState.filter, limit: 200 });
+      if (r.error) throw new Error(r.error);
+      rows = r.rows || [];
+      counts = r.counts || null;
+    }
+    _siState.counts = counts;
+    _siRenderCounts(counts);
+    _siUpdateBadge(counts);
+    _siRenderRows(rows);
+  } catch (e) {
+    list.innerHTML = '<div class="empty-state"><div style="color:#b91c1c;font-size:13px">Fout: ' + esc(e.message) + '</div></div>';
+  }
+}
+
+async function _siFetchList({ status, limit }) {
+  const params = new URLSearchParams();
+  if (status) params.set('status', status);
+  if (limit)  params.set('limit',  String(limit));
+  const r = await window.AgentShared.apiFetch('/api/events-signup-inbox-list?' + params.toString());
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) return { error: d.error || ('HTTP ' + r.status) };
+  return d;
+}
+
+function _siRenderCounts(counts) {
+  if (!counts) return;
+  const todoCount = (counts.no_match || 0) + (counts.ambiguous || 0);
+  const setCnt = (key, val) => {
+    document.querySelectorAll('#evSignupInboxFilters [data-cnt="' + key + '"]').forEach((s) => {
+      s.textContent = '(' + (val || 0) + ')';
+    });
+  };
+  setCnt('todo',            todoCount);
+  setCnt('no_match',        counts.no_match);
+  setCnt('ambiguous',       counts.ambiguous);
+  setCnt('matched',         counts.matched);
+  setCnt('invalid_payload', counts.invalid_payload);
+  setCnt('all',             counts.total);
+}
+
+function _siUpdateBadge(counts) {
+  const badge = document.getElementById('evSignupInboxBadge');
+  if (!badge || !counts) return;
+  const n = (counts.no_match || 0) + (counts.ambiguous || 0);
+  if (n > 0) { badge.textContent = String(n); badge.style.display = ''; }
+  else       { badge.style.display = 'none'; }
+}
+
+function _siStatusBadge(status) {
+  const palette = {
+    matched         : { bg: 'rgba(5,150,105,0.15)',  c: '#059669' },
+    no_match        : { bg: 'rgba(220,38,38,0.15)',  c: '#b91c1c' },
+    ambiguous       : { bg: 'rgba(245,158,11,0.18)', c: '#b45309' },
+    invalid_payload : { bg: 'rgba(148,163,184,0.2)', c: 'var(--text-faint)' },
+  };
+  const p = palette[status] || palette.invalid_payload;
+  return '<span style="display:inline-block;padding:2px 9px;border-radius:10px;font-size:10px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;background:' + p.bg + ';color:' + p.c + '">' + esc(status) + '</span>';
+}
+
+function _siRenderRows(rows) {
+  const list = document.getElementById('evSignupInboxList');
+  if (!list) return;
+  if (!rows || rows.length === 0) {
+    list.innerHTML = '<div class="empty-state" style="padding:24px;text-align:center">'
+      + '<div class="empty-icon"><i class="ti ti-clipboard-check"></i></div>'
+      + '<div style="font-size:14px;font-weight:600;margin-top:6px">Niets te reviewen</div>'
+      + '<div style="font-size:12.5px;color:var(--text-dim);margin-top:4px">Geen openstaande GHL-signups in deze filter.</div>'
+      + '</div>';
+    return;
+  }
+  list.innerHTML = '<div class="sr-tablewrap"><table class="sr-table">'
+    + '<thead><tr><th>Naam</th><th>Email / Telefoon</th><th>Event-label</th><th>Status</th><th>Ontvangen</th><th style="text-align:right">Actie</th></tr></thead>'
+    + '<tbody>'
+    + rows.map((r) => {
+        const naam   = [r.first_name, r.last_name].filter(Boolean).join(' ').trim() || '—';
+        const email  = r.email ? esc(r.email) : '<span style="color:var(--text-faint)">geen email</span>';
+        const phone  = r.phone ? esc(r.phone) : '';
+        const label  = r.event_date_label || '<span style="color:var(--text-faint)">geen label</span>';
+        const status = _siStatusBadge(r.match_status);
+        const cands  = Array.isArray(r.match_candidate_ids) && r.match_candidate_ids.length > 0
+          ? '<div style="font-size:11px;color:var(--text-faint);margin-top:3px">' + r.match_candidate_ids.length + ' kandidaten</div>'
+          : '';
+        const matchedEvt = r.matched_event
+          ? '<div style="font-size:11px;color:var(--text-faint);margin-top:3px">→ ' + esc(r.matched_event.title || '?') + '</div>'
+          : '';
+        const isActionable = r.match_status === 'no_match' || r.match_status === 'ambiguous' || r.match_status === 'invalid_payload';
+        const actionCell = isActionable
+          ? '<button class="sr-iconbtn" data-resolve-id="' + esc(r.id) + '" title="Koppel aan event"><i class="ti ti-link"></i> Koppel</button>'
+          : '<span style="font-size:11px;color:var(--text-faint)">read-only</span>';
+        return '<tr>'
+          + '<td>' + esc(naam) + '</td>'
+          + '<td>' + email + (phone ? '<div style="font-size:11.5px;color:var(--text-dim);margin-top:2px">' + phone + '</div>' : '') + '</td>'
+          + '<td><code style="font-family:ui-monospace,Menlo,Consolas,monospace;font-size:11.5px">' + esc(label) + '</code>' + cands + matchedEvt + '</td>'
+          + '<td>' + status + '</td>'
+          + '<td style="font-size:11.5px;color:var(--text-dim)">' + esc(fmtDate(r.received_at)) + '</td>'
+          + '<td style="text-align:right">' + actionCell + '</td>'
+          + '</tr>';
+      }).join('')
+    + '</tbody></table></div>';
+  list.querySelectorAll('button[data-resolve-id]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const id = btn.dataset.resolveId;
+      const row = rows.find((r) => r.id === id);
+      if (row) openSignupResolveModal(row);
+    });
+  });
+}
+
+async function openSignupResolveModal(row) {
+  _siState.activeRow = row;
+  const modal = document.getElementById('evSignupResolveModal');
+  if (!modal) return;
+  document.getElementById('evSignupResolveNotes').value = '';
+  document.getElementById('evSignupResolveError').style.display = 'none';
+  const naam  = [row.first_name, row.last_name].filter(Boolean).join(' ').trim() || '—';
+  const lines = [
+    '<strong>' + esc(naam) + '</strong>' + (row.email ? ' &middot; ' + esc(row.email) : '') + (row.phone ? ' &middot; ' + esc(row.phone) : ''),
+    '<div style="margin-top:4px">Label: <code style="font-family:ui-monospace,Menlo,Consolas,monospace;font-size:11.5px">' + esc(row.event_date_label || '—') + '</code></div>',
+    '<div style="margin-top:4px">Status: ' + _siStatusBadge(row.match_status) + '</div>',
+  ];
+  document.getElementById('evSignupResolveContext').innerHTML = lines.join('');
+  // Toon modal vóór events-load zodat skeleton zichtbaar is
+  modal.style.display = 'flex';
+  await _siLoadEventOptions();
+}
+
+function closeSignupResolveModal() {
+  const modal = document.getElementById('evSignupResolveModal');
+  if (modal) modal.style.display = 'none';
+  _siState.activeRow = null;
+}
+
+async function _siLoadEventOptions() {
+  const sel = document.getElementById('evSignupResolveEventPicker');
+  if (!sel) return;
+  // Cache events tijdens deze modul (events veranderen niet snel). Bij refresh:
+  // _siState.eventsCache = null setten via [vernieuwen] knop later toevoegen.
+  if (!_siState.eventsCache) {
+    try {
+      const r = await window.AgentShared.apiFetch('/api/events-list?status=published&limit=200');
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        sel.innerHTML = '<option value="">Fout: ' + esc(d.error || ('HTTP ' + r.status)) + '</option>';
+        return;
+      }
+      _siState.eventsCache = Array.isArray(d.items) ? d.items : [];
+    } catch (e) {
+      sel.innerHTML = '<option value="">Fout: ' + esc(e.message) + '</option>';
+      return;
+    }
+  }
+  const events = _siState.eventsCache;
+  if (events.length === 0) {
+    sel.innerHTML = '<option value="">Geen gepubliceerde events gevonden</option>';
+    return;
+  }
+  // Sorteer chronologisch op starts_at ascending.
+  const sorted = [...events].sort((a, b) => String(a.starts_at || '').localeCompare(String(b.starts_at || '')));
+  sel.innerHTML = '<option value="">— Kies een event —</option>'
+    + sorted.map((e) => {
+        const closed = e.signups_closed ? ' (gesloten)' : '';
+        const dt = fmtDate(e.starts_at);
+        return '<option value="' + esc(e.id) + '">' + esc(dt) + ' &middot; ' + esc(e.title || '?') + closed + '</option>';
+      }).join('');
+}
+
+async function submitSignupResolve() {
+  if (!_siState.activeRow) return;
+  const sel = document.getElementById('evSignupResolveEventPicker');
+  const notesEl = document.getElementById('evSignupResolveNotes');
+  const errEl   = document.getElementById('evSignupResolveError');
+  const submitBtn = document.getElementById('evSignupResolveSubmit');
+  errEl.style.display = 'none';
+  const eventId = sel ? String(sel.value || '').trim() : '';
+  if (!eventId) {
+    errEl.textContent = 'Kies eerst een event.';
+    errEl.style.display = '';
+    return;
+  }
+  const notes = notesEl ? String(notesEl.value || '').trim() : '';
+  if (submitBtn) { submitBtn.disabled = true; submitBtn.innerHTML = '<i class="ti ti-loader"></i> Bezig…'; }
+  try {
+    const r = await window.AgentShared.apiFetch('/api/events-signup-inbox-resolve', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({
+        inbox_id: _siState.activeRow.id,
+        event_id: eventId,
+        notes:    notes || undefined,
+      }),
+    });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) {
+      errEl.textContent = (d.error || ('HTTP ' + r.status)) + (d.code ? ' [' + d.code + ']' : '');
+      errEl.style.display = '';
+      if (submitBtn) { submitBtn.disabled = false; submitBtn.innerHTML = '<i class="ti ti-check"></i> Koppel + maak deelnemer'; }
+      return;
+    }
+    closeSignupResolveModal();
+    const dedup = d.deduplicated ? ' (bestaande deelnemer hergebruikt)' : '';
+    window.AgentShared.showToast('Gekoppeld + deelnemer aangemaakt' + dedup, 'success');
+    loadSignupInbox();
+  } catch (e) {
+    errEl.textContent = e.message;
+    errEl.style.display = '';
+    if (submitBtn) { submitBtn.disabled = false; submitBtn.innerHTML = '<i class="ti ti-check"></i> Koppel + maak deelnemer'; }
   }
 }
 
