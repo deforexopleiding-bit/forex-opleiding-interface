@@ -127,6 +127,11 @@ export const AVAILABLE_VARIABLES = [
   { key: 'event.locatie',    label: 'Locatie',     category: 'event', example: 'Van der Valk, Gent',        requires_context: 'event' },
   { key: 'event.niveau',     label: 'Niveau',      category: 'event', example: 'Basis',                     requires_context: 'event' },
 
+  // ── attendee (Fase 3a) — vereist context.attendee (event_attendees-row
+  //   met minimaal choice_token). Caller die geen attendee meegeeft krijgt
+  //   lege string — geen crash, geen regressie voor finance-flows.
+  { key: 'attendee.keuze_link', label: 'Keuze-link', category: 'attendee', example: 'https://forex-opleiding-interface.vercel.app/modules/event-keuze.html?t=00000000-0000-0000-0000-000000000000', requires_context: 'attendee' },
+
   // ── datum ──────────────────────────────────────────────────────────────
   { key: 'datum.vandaag',     label: 'Datum vandaag', category: 'datum', example: '09-06-2026',  requires_context: null },
   { key: 'datum.deze_maand',  label: 'Deze maand',    category: 'datum', example: 'juni 2026',   requires_context: null },
@@ -399,6 +404,26 @@ function getEventValue(event, key) {
   }
 }
 
+// ── attendee (Fase 3a) ──────────────────────────────────────────────────────
+//
+// Persoonlijke keuze-link per deelnemer: base-URL via PUBLIC_BASE_URL
+// (zelfde env-var-patroon als sales-onboarding-send / teamleader-webhook-
+// register). Productie-fallback op de Vercel-alias zodat de link altijd naar
+// productie wijst, niet naar de deployment-specifieke VERCEL_URL.
+const PUBLIC_BASE_URL = process.env.PUBLIC_BASE_URL || 'https://forex-opleiding-interface.vercel.app';
+
+function getAttendeeValue(attendee, key) {
+  if (!attendee) return '';
+  switch (key) {
+    case 'attendee.keuze_link': {
+      const token = attendee.choice_token;
+      if (!token) return '';
+      return `${PUBLIC_BASE_URL}/modules/event-keuze.html?t=${encodeURIComponent(String(token))}`;
+    }
+    default: return '';
+  }
+}
+
 /**
  * Resolve een enkele variabele-key naar zijn waarde, gegeven de context.
  * context = {
@@ -409,6 +434,10 @@ function getEventValue(event, key) {
  *   event,                   // events rij voor event.* (Fase 4 — optioneel;
  *                            //   callers zonder event krijgen lege strings,
  *                            //   geen crash, geen regressie voor finance-flow)
+ *   attendee,                // event_attendees rij voor attendee.* (Fase 3a —
+ *                            //   optioneel; minimaal choice_token nodig voor
+ *                            //   attendee.keuze_link. Callers zonder attendee
+ *                            //   krijgen lege string, geen crash.)
  * }.
  */
 export function resolveVariableValue(key, context) {
@@ -423,6 +452,7 @@ export function resolveVariableValue(key, context) {
     case 'klant':    return getKlantAggregateValue(context && context.openInvoices, key);
     case 'afdeling': return getAfdelingValue(key, context && context.moduleContext);
     case 'event':    return getEventValue(context && context.event, key);
+    case 'attendee': return getAttendeeValue(context && context.attendee, key);
     default: return '';
   }
 }
@@ -442,6 +472,9 @@ export function resolveVariableValue(key, context) {
  * event is optioneel — alleen vereist voor event.* keys; caller (bv. een
  * toekomstige events-template-send) geeft de events-row mee. Finance-flows
  * sturen geen event mee — event.* keys vallen dan terug op '' (geen crash).
+ * attendee is optioneel — alleen vereist voor attendee.* keys; caller (bv. een
+ * outbound naar een specifieke deelnemer) geeft de event_attendees-row mee
+ * (minimaal choice_token voor attendee.keuze_link). Geen attendee → ''.
  *
  * Onbekende keys: laat placeholder staan + log warning.
  *
