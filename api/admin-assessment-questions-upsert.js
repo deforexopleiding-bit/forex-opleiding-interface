@@ -16,6 +16,7 @@
 //   key             text     required bij POST; max 64; lowercase a-z0-9_-
 //   section         text     required; max 64
 //   order_index     integer  >= 0 (default 0 bij create)
+//   page            integer  >= 1 (default 1 bij create); stap-/paginanummer voor multi-step
 //   type            enum     required bij POST; in ('text','email','radio',
 //                            'scale_1_5','scale_1_10','open_text')
 //   label           text     required; max 500
@@ -88,6 +89,12 @@ function validatePayload(payload, { isCreate }) {
       return { ok: false, error: 'order_index moet een integer >= 0 zijn' };
     }
   }
+  if (payload.page !== undefined && payload.page !== null) {
+    const n = Number(payload.page);
+    if (!Number.isInteger(n) || n < 1) {
+      return { ok: false, error: 'page moet een geheel getal >= 1 zijn' };
+    }
+  }
   // min_words
   if (payload.min_words !== undefined && payload.min_words !== null) {
     const n = Number(payload.min_words);
@@ -143,6 +150,7 @@ function pickInsertRow(payload) {
     section         : payload.section.trim(),
     order_index     : payload.order_index !== undefined && payload.order_index !== null
                         ? Number(payload.order_index) : 0,
+    page            : payload.page != null ? Number(payload.page) : 1,
     type            : payload.type,
     label           : payload.label.trim(),
     help_text       : payload.help_text != null ? String(payload.help_text) : null,
@@ -159,6 +167,7 @@ function pickUpdatePatch(payload) {
   const patch = {};
   if (payload.section !== undefined)         patch.section         = payload.section.trim();
   if (payload.order_index !== undefined)     patch.order_index     = Number(payload.order_index);
+  if (payload.page !== undefined)            patch.page            = Number(payload.page);
   if (payload.type !== undefined)            patch.type            = payload.type;
   if (payload.label !== undefined)           patch.label           = payload.label.trim();
   if (payload.help_text !== undefined)       patch.help_text       = payload.help_text;

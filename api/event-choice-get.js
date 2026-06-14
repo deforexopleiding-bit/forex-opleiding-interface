@@ -167,7 +167,9 @@ export default async function handler(req, res) {
         ends_at   : e.ends_at,
         location  : e.location,
         niveau    : e.niveau,
+        image_url : e.image_url,
         has_space : e.has_space,
+        spots_left: e.spots_left,
       })),
     });
   } catch (e) {
