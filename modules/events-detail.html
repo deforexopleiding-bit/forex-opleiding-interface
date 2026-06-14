@@ -550,6 +550,11 @@ function renderInfoTab() {
 function renderAttendeesTab() {
   const c = state.counts;
   const active = c?.active || 0;
+  // Fase 1: "actief" = (status IN ('aangemeld','aanwezig')) AND
+  // assessment_response_id IS NOT NULL. Telt mee voor X/capacity. De
+  // aangemeld-zonder-vragenlijst rijen staan in de lijst maar tellen NIET
+  // mee voor capaciteit (totdat hun assessment alsnog gekoppeld wordt).
+  const aangemeldNoAss = c?.aangemeld_no_assessment || 0;
   const cap = state.event.capacity || 0;
   const capClass = capPillClass(active, cap);
   const canAdd = can('events.attendee.create');
@@ -572,9 +577,15 @@ function renderAttendeesTab() {
         : '<button class="btn-primary" style="margin-left:auto" onclick="openAttAddModal()"><i class="ti ti-plus"></i> Aanwezige toevoegen</button>')
     : '';
 
+  // Helper-strip: maakt expliciet wat actief telt voor capaciteit + waarschuwt
+  // visueel als er aangemeld-zonder-vragenlijst rijen klaarliggen.
+  const helperStrip = aangemeldNoAss > 0
+    ? `<span style="font-size:11.5px;color:#b45309;background:rgba(245,158,11,0.12);border:1px solid rgba(245,158,11,0.3);border-radius:8px;padding:3px 9px" title="Deze rijen staan in de lijst maar tellen niet mee voor capaciteit totdat hun assessment gekoppeld is."><i class="ti ti-alert-circle"></i> ${aangemeldNoAss} aangemeld zonder vragenlijst</span>`
+    : '';
   document.getElementById('tab-attendees').innerHTML = `
     <div class="att-toolbar">
-      <span class="${capClass}" style="font-size:13px">${active}/${cap} plekken</span>
+      <span class="${capClass}" style="font-size:13px" title="Actief = met voltooide vragenlijst. Telt mee voor capaciteit.">${active}/${cap} plekken</span>
+      ${helperStrip}
       <div class="sr-search" style="max-width:260px"><input id="attSearch" type="search" placeholder="Zoek naam of email…" value="${esc(state.attendeeSearch)}" /></div>
       ${addBtnHtml}
     </div>
@@ -629,6 +640,7 @@ function renderAttendeesTab() {
         <th>Email</th>
         <th>Telefoon</th>
         <th>Status</th>
+        <th title="Telt mee voor capaciteit als de vragenlijst is voltooid (assessment_response_id aanwezig).">Vragenlijst</th>
         <th>Tags</th>
         <th></th>
       </tr></thead>
@@ -651,6 +663,13 @@ function renderAttendeesTab() {
           statusCell = `<span class="tag-chip">${esc(ATT_STATUS_LABELS[a.status] || a.status)}</span>`;
         }
 
+        // Fase 1: telt-mee-laag bovenop de status — assessment_response_id
+        // gevuld → "Actief" (telt mee), leeg → "Ontbreekt" (telt niet mee).
+        const hasAssessment = !!a.assessment_response_id;
+        const assessmentCell = hasAssessment
+          ? '<span style="display:inline-flex;align-items:center;gap:4px;padding:3px 9px;border-radius:10px;font-size:11px;font-weight:600;background:rgba(5,150,105,0.15);color:#059669" title="Vragenlijst voltooid · telt mee voor capaciteit"><i class="ti ti-check"></i> Actief</span>'
+          : '<span style="display:inline-flex;align-items:center;gap:4px;padding:3px 9px;border-radius:10px;font-size:11px;font-weight:600;background:rgba(245,158,11,0.18);color:#b45309" title="Geen voltooide vragenlijst · telt niet mee voor capaciteit"><i class="ti ti-alert-circle"></i> Ontbreekt</span>';
+
         const kebabItems = [];
         if (canEditAtt) kebabItems.push(`<button class="kebab-item" data-action="edit" data-id="${esc(a.id)}"><i class="ti ti-edit"></i> Bewerken</button>`);
         if (canTagAdd) kebabItems.push(`<button class="kebab-item" data-action="tag-add" data-id="${esc(a.id)}"><i class="ti ti-tag"></i> Tag toevoegen</button>`);
@@ -669,6 +688,7 @@ function renderAttendeesTab() {
             <td>${esc(a.email || '—')}</td>
             <td>${esc(a.phone || '—')}</td>
             <td>${statusCell}</td>
+            <td>${assessmentCell}</td>
             <td>${tagsHtml || '<span style="color:var(--text-faint)">—</span>'}</td>
             <td class="sr-actions">${kebab}</td>
           </tr>

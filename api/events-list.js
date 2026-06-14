@@ -20,7 +20,10 @@
 //         webflow_sync_status, webflow_last_synced_at,
 //         ghl_sync_status,     ghl_last_synced_at,
 //         created_at, updated_at,
-//         attendee_count_active   (aangemeld + aanwezig + sale),
+//         attendee_count_active   (= getConfirmedCount: status IN
+//                                  ('aangemeld','aanwezig') AND
+//                                  assessment_response_id IS NOT NULL —
+//                                  Fase 1 capaciteits-regel),
 //         attendee_count_total    (alle statussen),
 //         seats_remaining
 //       }, ...
@@ -32,9 +35,9 @@
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
+import { getConfirmedCount } from './_lib/event-registration.js';
 
 const VALID_STATUS = ['draft', 'published', 'cancelled', 'archived'];
-const ACTIVE_ATTENDEE_STATUSES = ['aangemeld', 'aanwezig', 'sale'];
 
 function clampInt(v, def, min, max) {
   const n = Number(v);
@@ -110,16 +113,16 @@ export default async function handler(req, res) {
     if (error) throw new Error('events-list: ' + error.message);
 
     // Per event: tel actieve attendees + totaal. Twee parallelle counts.
+    // active = getConfirmedCount = status IN ('aangemeld','aanwezig') AND
+    // assessment_response_id IS NOT NULL (Fase 1 single source of truth voor
+    // capaciteit). Eerder: ACTIVE_ATTENDEE_STATUSES ['aangemeld','aanwezig','sale']
+    // zonder assessment-filter — dat is na deze fix de verkeerde regel; we
+    // volgen voortaan getConfirmedCount.
     const items = await Promise.all((rows || []).map(async (row) => {
       let activeCount = 0;
       let totalCount = 0;
       try {
-        const { count: a } = await supabaseAdmin
-          .from('event_attendees')
-          .select('id', { count: 'exact', head: true })
-          .eq('event_id', row.id)
-          .in('status', ACTIVE_ATTENDEE_STATUSES);
-        activeCount = typeof a === 'number' ? a : 0;
+        activeCount = await getConfirmedCount(row.id);
       } catch (e) {
         console.error('[events-list active-count]', row.id, e.message);
       }
