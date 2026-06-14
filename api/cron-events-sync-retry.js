@@ -53,6 +53,8 @@ export default async function handler(req, res) {
     failure: 0,
     skipped: 0,
     skipped_archived: 0,
+    skipped_cancelled: 0,
+    skipped_past: 0,
     stale_rows_cleared: 0,
     errors: [],
     duration_ms: 0,
@@ -82,7 +84,7 @@ export default async function handler(req, res) {
     if (eventIds.length > 0) {
       const { data: events, error: evErr } = await supabaseAdmin
         .from('events')
-        .select('id, status, webflow_sync_status')
+        .select('id, status, webflow_sync_status, starts_at')
         .in('id', eventIds);
       if (evErr) {
         console.error('[cron-events-sync-retry] events batch-fetch:', evErr.message);
@@ -90,6 +92,7 @@ export default async function handler(req, res) {
         for (const e of (events || [])) eventById[e.id] = e;
       }
     }
+    const cronNowMs = Date.now();
 
     // Dedup per event_id: orchestrator syncEventToOutbound triggert beide
     // targets in 1 call. Geen zin om dezelfde event 2x te retryen binnen 1 run.
@@ -105,17 +108,25 @@ export default async function handler(req, res) {
         break;
       }
 
-      // Selection-level skip: event archived of webflow-cleanup-done.
+      // Selection-level skip: event archived, cancelled, of verleden.
+      // FIX (b): naast archived/deleted ook cancelled + starts_at < now()
+      // skippen + stale-rij clearen, zodat 13-juni-loop direct stopt en
+      // generaliseert naar alle verleden/geannuleerde events.
       const ev = eventById[row.event_id] || null;
-      const isArchived = !ev /* event verwijderd? */ ||
+      const isArchived  = !ev /* event verwijderd? */ ||
                           ev.status === 'archived' ||
                           ev.webflow_sync_status === 'deleted';
-      if (isArchived) {
-        summary.skipped_archived++;
+      const isCancelled = !!ev && ev.status === 'cancelled';
+      const isPast      = !!ev && !!ev.starts_at &&
+                          new Date(ev.starts_at).getTime() < cronNowMs;
+      if (isArchived || isCancelled || isPast) {
+        if (isArchived)       summary.skipped_archived++;
+        else if (isCancelled) summary.skipped_cancelled++;
+        else                  summary.skipped_past++;
         staleRowIdsToClear.push(row.id);
         // Markeer event_id als 'gezien' zodat overige rijen voor hetzelfde
-        // event ook in de skipped_archived-counter belanden i.p.v. opnieuw
-        // geprobeerd te worden.
+        // event ook in de skipped-tellers belanden i.p.v. opnieuw geprobeerd
+        // te worden.
         seenEventIds.add(row.event_id);
         continue;
       }
