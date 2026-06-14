@@ -312,10 +312,12 @@ export default async function handler(req, res) {
 
       // Afdeling-context: lookup whatsapp_module_config voor de zendende lijn.
       // Prioriteit: conv.phone_number_id (gezet door webhook op inbound-time)
-      // → financePnId (fallback uit module='finance' lookup hierboven). Bij
-      // ontbreken: helper doet zelf nog een module='finance' fallback. Bij
-      // ook geen match: null → resolver vult afdeling.* met lege strings +
-      // console.warn.
+      // is autoritatief — sinds de multi-line fix (#192, unique op
+      // (phone_number, phone_number_id)) is dat per definitie de juiste lijn,
+      // ongeacht of dat finance of events is. `financePnId` blijft als
+      // backwards-compat-fallback voor zeer oude conv-rijen zonder
+      // phone_number_id (in productie geen rijen meer). Bij geen match:
+      // null → resolver vult afdeling.* met lege strings + console.warn.
       let moduleContext = null;
       if (needsAfdeling) {
         try {
