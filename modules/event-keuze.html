@@ -1,0 +1,437 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Mijn deelname - De Forex Opleiding</title>
+  <meta name="robots" content="noindex, nofollow" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg        : #f6f8fa;
+      --bg-card   : #ffffff;
+      --text      : #1f2937;
+      --text-mute : #6b7280;
+      --border    : #e5e7eb;
+      --primary   : #093d54;
+      --primary-h : #0a4a66;
+      --danger    : #dc2626;
+      --ok        : #10b981;
+      --warn-bg   : rgba(245,158,11,0.12);
+      --warn-text : #b45309;
+      --warn-bord : rgba(245,158,11,0.3);
+      --focus     : rgba(9, 61, 84, 0.16);
+    }
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0; padding: 0; min-height: 100vh;
+      font-family: 'Inter', system-ui, sans-serif;
+      background: var(--bg); color: var(--text);
+      -webkit-font-smoothing: antialiased;
+      line-height: 1.5;
+    }
+    .page {
+      max-width: 720px; margin: 0 auto;
+      padding: 32px 20px 80px;
+    }
+    .intro h1 {
+      font-size: 26px; font-weight: 700; margin: 0 0 8px;
+      color: var(--primary);
+    }
+    .intro p {
+      color: var(--text-mute); margin: 0 0 24px; font-size: 15px;
+    }
+    .card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 24px;
+      margin-bottom: 16px;
+    }
+    .banner-warn {
+      background: var(--warn-bg);
+      border: 1px solid var(--warn-bord);
+      color: var(--warn-text);
+      padding: 14px 16px;
+      border-radius: 12px;
+      margin-bottom: 18px;
+      font-size: 14.5px;
+      line-height: 1.55;
+    }
+    .banner-warn a {
+      color: var(--warn-text);
+      font-weight: 700;
+      text-decoration: underline;
+    }
+    .event-list {
+      display: grid;
+      gap: 12px;
+    }
+    .event-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 16px 18px;
+      cursor: pointer;
+      transition: border-color .15s, box-shadow .15s, transform .05s;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .event-card:hover {
+      border-color: var(--primary);
+      box-shadow: 0 1px 6px var(--focus);
+    }
+    .event-card.selected {
+      border-color: var(--primary);
+      background: rgba(9, 61, 84, 0.04);
+    }
+    .event-card.disabled {
+      cursor: not-allowed;
+      opacity: .55;
+    }
+    .event-card.disabled:hover { border-color: var(--border); box-shadow: none; }
+    .event-card.current {
+      border: 2px solid var(--ok);
+      background: rgba(16, 185, 129, 0.06);
+    }
+    .event-title {
+      font-weight: 700; font-size: 16px;
+    }
+    .event-meta {
+      color: var(--text-mute); font-size: 13.5px;
+      display: flex; gap: 10px; flex-wrap: wrap;
+    }
+    .event-meta .pill {
+      display: inline-flex; align-items: center;
+      padding: 1px 8px; border-radius: 10px;
+      background: rgba(9, 61, 84, 0.08);
+      color: var(--primary);
+      font-size: 11.5px; font-weight: 600;
+    }
+    .event-meta .pill.full {
+      background: rgba(220, 38, 38, 0.12);
+      color: var(--danger);
+    }
+    .event-meta .pill.current {
+      background: rgba(16, 185, 129, 0.18);
+      color: var(--ok);
+    }
+    .picker-error {
+      color: var(--danger);
+      background: rgba(220, 38, 38, 0.08);
+      border: 1px solid rgba(220, 38, 38, 0.25);
+      padding: 10px 14px;
+      border-radius: 10px;
+      margin-top: 16px;
+      font-size: 13.5px;
+    }
+    .empty {
+      color: var(--text-mute); text-align: center; padding: 24px 12px;
+    }
+    .loading { color: var(--text-mute); text-align: center; padding: 36px 12px; }
+    .confirm {
+      background: rgba(16, 185, 129, 0.08);
+      border: 1px solid rgba(16, 185, 129, 0.3);
+      color: var(--ok);
+      padding: 18px 20px;
+      border-radius: 12px;
+      font-size: 15px;
+    }
+    .confirm strong { color: #047857; }
+    .footer-note { color: var(--text-mute); font-size: 12px; text-align: center; margin-top: 28px; }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <div class="intro">
+      <h1 id="greeting">Welkom!</h1>
+      <p id="subline">We laden je deelname-informatie…</p>
+    </div>
+
+    <div id="loading-card" class="card loading">Bezig met laden…</div>
+
+    <div id="content-card" class="card" hidden>
+      <div id="warn-no-assessment" class="banner-warn" hidden></div>
+      <div id="event-list" class="event-list"></div>
+      <div id="picker-error" class="picker-error" hidden></div>
+      <div id="empty-state" class="empty" hidden>
+        Er zijn op dit moment geen open datums beschikbaar. We nemen binnenkort contact met je op.
+      </div>
+    </div>
+
+    <div id="confirm-card" class="confirm" hidden></div>
+
+    <div id="fatal-card" class="card" hidden>
+      <div class="picker-error" id="fatal-error" style="margin:0"></div>
+    </div>
+
+    <div class="footer-note">De Forex Opleiding NL B.V.</div>
+  </div>
+
+  <script>
+    (function () {
+      'use strict';
+
+      // ── Helpers ─────────────────────────────────────────────────────────
+      function esc(s) {
+        if (s == null) return '';
+        return String(s)
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+          .replace(/"/g, '&quot;');
+      }
+
+      function getToken() {
+        try {
+          const u = new URL(window.location.href);
+          const t = u.searchParams.get('t');
+          return t && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(t) ? t : null;
+        } catch (_e) { return null; }
+      }
+
+      function fmtDateNl(iso) {
+        if (!iso) return '';
+        try {
+          const dt = new Date(iso);
+          if (!Number.isFinite(dt.getTime())) return '';
+          return new Intl.DateTimeFormat('nl-NL', {
+            weekday: 'long', day: 'numeric', month: 'long', year: 'numeric',
+            timeZone: 'Europe/Amsterdam',
+          }).format(dt);
+        } catch (_e) { return ''; }
+      }
+
+      function fmtTimeNl(iso) {
+        if (!iso) return '';
+        try {
+          const dt = new Date(iso);
+          if (!Number.isFinite(dt.getTime())) return '';
+          return new Intl.DateTimeFormat('nl-NL', {
+            hour: '2-digit', minute: '2-digit', hour12: false,
+            timeZone: 'Europe/Amsterdam',
+          }).format(dt);
+        } catch (_e) { return ''; }
+      }
+
+      function capitalizeFirst(s) {
+        if (!s || typeof s !== 'string') return '';
+        return s.charAt(0).toUpperCase() + s.slice(1);
+      }
+
+      // ── DOM refs ────────────────────────────────────────────────────────
+      const $greeting     = document.getElementById('greeting');
+      const $subline      = document.getElementById('subline');
+      const $loading      = document.getElementById('loading-card');
+      const $content      = document.getElementById('content-card');
+      const $warnNoAss    = document.getElementById('warn-no-assessment');
+      const $eventList    = document.getElementById('event-list');
+      const $pickerErr    = document.getElementById('picker-error');
+      const $empty        = document.getElementById('empty-state');
+      const $confirm      = document.getElementById('confirm-card');
+      const $fatal        = document.getElementById('fatal-card');
+      const $fatalErr     = document.getElementById('fatal-error');
+
+      function showFatal(msg) {
+        $loading.hidden = true;
+        $content.hidden = true;
+        $confirm.hidden = true;
+        $fatal.hidden = false;
+        $fatalErr.textContent = msg || 'Er ging iets mis. Vraag een nieuwe link via De Forex Opleiding.';
+      }
+
+      function showPickerError(msg) {
+        $pickerErr.hidden = false;
+        $pickerErr.textContent = msg;
+      }
+
+      function clearPickerError() {
+        $pickerErr.hidden = true;
+        $pickerErr.textContent = '';
+      }
+
+      // ── State + flow ────────────────────────────────────────────────────
+      const token = getToken();
+      let state = { attendee: null, events: [] };
+
+      if (!token) {
+        showFatal('De link is niet geldig. Vraag een nieuwe link aan via De Forex Opleiding.');
+        return;
+      }
+
+      async function loadChoice() {
+        try {
+          const r = await fetch('/api/event-choice-get?t=' + encodeURIComponent(token), {
+            headers: { Accept: 'application/json' },
+          });
+          const j = await r.json().catch(() => ({}));
+          if (r.status === 404) {
+            showFatal('De link is niet (meer) geldig.');
+            return;
+          }
+          if (r.status === 429) {
+            showFatal('Te veel verzoeken. Probeer het over een minuut opnieuw.');
+            return;
+          }
+          if (!r.ok) {
+            showFatal(j.error || ('Er ging iets mis (HTTP ' + r.status + ').'));
+            return;
+          }
+          state.attendee = j.attendee || null;
+          state.events   = Array.isArray(j.events) ? j.events : [];
+          renderInitial();
+        } catch (e) {
+          console.error('[event-keuze] load', e);
+          showFatal('Kon de pagina niet laden. Probeer het later opnieuw.');
+        }
+      }
+
+      function renderInitial() {
+        $loading.hidden = true;
+        $content.hidden = false;
+        const a = state.attendee || {};
+        const naam = a.first_name || 'jij';
+        $greeting.textContent = 'Hoi, ' + naam + '!';
+        if (a.has_assessment) {
+          const niveauStr = a.niveau ? ' (' + capitalizeFirst(a.niveau) + ')' : '';
+          $subline.textContent = 'Kies hieronder het event dat het beste bij jou past' + niveauStr + '. Je huidige inschrijving wordt automatisch verplaatst.';
+        } else {
+          $subline.textContent = 'Kies hieronder een event. Voor persoonlijk advies kun je eerst de vragenlijst afmaken.';
+        }
+
+        if (!a.has_assessment) {
+          // CTA naar assessment.html?t=<token>. De koppelflow (signup-first
+          // → assessment koppelen) wordt in Fase 2c bedraad; voor nu sturen
+          // we de gebruiker naar de bestaande assessment-pagina met token in
+          // de URL zodat 2c die alvast kan oppikken.
+          const cta = '/modules/assessment.html?t=' + encodeURIComponent(token);
+          $warnNoAss.hidden = false;
+          $warnNoAss.innerHTML =
+              'Je hebt de vragenlijst nog niet ingevuld. Doe dat eerst voor een persoonlijk advies. '
+            + '<a href="' + esc(cta) + '">Naar de vragenlijst</a>';
+        } else {
+          $warnNoAss.hidden = true;
+        }
+
+        renderEvents();
+      }
+
+      function renderEvents() {
+        const a = state.attendee || {};
+        const list = state.events || [];
+        $eventList.innerHTML = '';
+        clearPickerError();
+        if (list.length === 0) {
+          $empty.hidden = false;
+          return;
+        }
+        $empty.hidden = true;
+        for (const ev of list) {
+          const card = document.createElement('div');
+          const isCurrent = ev.id === a.current_event_id;
+          const canPick   = ev.has_space === true;
+          card.className = 'event-card'
+            + (isCurrent ? ' current' : '')
+            + (!canPick  ? ' disabled' : '');
+
+          const dateStr = fmtDateNl(ev.starts_at);
+          const startStr = fmtTimeNl(ev.starts_at);
+          const endStr   = fmtTimeNl(ev.ends_at);
+          const tijdStr = startStr && endStr ? (startStr + ' - ' + endStr) : startStr;
+          const niveauStr = ev.niveau ? capitalizeFirst(ev.niveau) : '';
+
+          const pills = [];
+          if (niveauStr) pills.push('<span class="pill">' + esc(niveauStr) + '</span>');
+          if (isCurrent) pills.push('<span class="pill current">Huidige keuze</span>');
+          if (!canPick && !isCurrent) pills.push('<span class="pill full">Vol</span>');
+
+          card.innerHTML =
+              '<div class="event-title">' + esc(ev.title || 'Event') + '</div>'
+            + '<div class="event-meta">'
+            +   '<span>' + esc(dateStr) + '</span>'
+            +   (tijdStr ? '<span>' + esc(tijdStr) + '</span>' : '')
+            +   (ev.location ? '<span>' + esc(ev.location) + '</span>' : '')
+            +   pills.join('')
+            + '</div>';
+
+          if (canPick && !isCurrent) {
+            card.addEventListener('click', () => submitChoice(ev, card));
+          }
+          $eventList.appendChild(card);
+        }
+      }
+
+      async function submitChoice(ev, cardEl) {
+        clearPickerError();
+        // Visual selected-state
+        $eventList.querySelectorAll('.event-card').forEach((c) => c.classList.remove('selected'));
+        if (cardEl) cardEl.classList.add('selected');
+
+        try {
+          const r = await fetch('/api/event-choice-submit', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ t: token, target_event_id: ev.id }),
+          });
+          const j = await r.json().catch(() => ({}));
+
+          if (r.status === 200 && j.ok) {
+            showSuccess(ev, j);
+            return;
+          }
+          if (r.status === 409) {
+            const codeMsg = {
+              EVENT_NOT_OPEN  : 'Dit event is niet meer open voor inschrijving.',
+              EVENT_CLOSED    : 'De inschrijvingen voor dit event zijn net gesloten. Kies een andere datum.',
+              NIVEAU_MISMATCH : 'Dit event past niet bij jouw niveau.',
+              DUPLICATE       : 'Je staat al ingeschreven voor dit event.',
+              EVENT_FULL      : 'Dit event is net vol. Kies een andere datum.',
+            };
+            const m = codeMsg[j.code] || j.error || 'Verplaatsen kon niet worden voltooid.';
+            showPickerError(m);
+            if (j.code === 'EVENT_CLOSED' || j.code === 'EVENT_FULL') {
+              // Reload zodat de lijst klopt.
+              loadChoice();
+            }
+            return;
+          }
+          if (r.status === 404) {
+            showFatal(j.error || 'Link niet geldig.');
+            return;
+          }
+          if (r.status === 429) {
+            showPickerError('Te veel verzoeken. Probeer het over een minuut opnieuw.');
+            return;
+          }
+          showPickerError(j.error || ('Verplaatsen mislukt (HTTP ' + r.status + ').'));
+        } catch (err) {
+          console.error('[event-keuze] submit', err);
+          showPickerError('Er ging iets mis. Probeer het opnieuw.');
+        }
+      }
+
+      function showSuccess(ev, resp) {
+        $loading.hidden = true;
+        $content.hidden = true;
+        $fatal.hidden = true;
+        $confirm.hidden = false;
+        const dateStr = fmtDateNl(ev.starts_at);
+        if (resp && resp.code === 'NO_OP') {
+          $confirm.innerHTML = '<strong>Je staat al ingeschreven voor dit event.</strong><br>'
+            + 'Geen verandering nodig.';
+        } else {
+          $confirm.innerHTML = '<strong>Je bent verplaatst naar ' + esc(ev.title || 'het gekozen event')
+            + (dateStr ? ' op ' + esc(dateStr) : '') + '.</strong><br>'
+            + 'We zien je daar graag.';
+        }
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      }
+
+      loadChoice();
+    })();
+  </script>
+</body>
+</html>
