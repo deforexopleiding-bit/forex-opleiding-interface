@@ -223,18 +223,97 @@
       color: var(--text-mute); font-size: 14px;
       background: rgba(0,0,0,0.02); border-radius: 10px;
     }
+
+    /* Intro-gate */
+    .intro-meta {
+      display: flex; gap: 18px; flex-wrap: wrap;
+      color: var(--text-mute); font-size: 13px; margin: 0 0 24px;
+    }
+    .intro-meta span { display: inline-flex; align-items: center; }
+
+    /* Progress / stepper */
+    .progress { margin-bottom: 20px; }
+    .progress-label {
+      font-size: 13px; font-weight: 600; color: var(--text-mute);
+      margin-bottom: 8px;
+    }
+    .progress-track {
+      height: 6px; border-radius: 999px; background: var(--border); overflow: hidden;
+    }
+    .progress-fill {
+      height: 100%; width: 0%; border-radius: 999px; background: var(--primary);
+      transition: width 0.25s ease;
+    }
+
+    /* Stappen */
+    .step { display: none; }
+    .step.active { display: block; }
+    @media (prefers-reduced-motion: no-preference) {
+      .step.active { animation: stepIn 0.2s ease; }
+    }
+    @keyframes stepIn {
+      from { opacity: 0; transform: translateY(4px); }
+      to   { opacity: 1; transform: none; }
+    }
+
+    /* Step-navigatie */
+    .step-nav { display: flex; align-items: center; gap: 12px; margin-top: 8px; }
+    .step-nav .spacer { flex: 1; }
+    button.btn-secondary {
+      background: #fff; color: var(--primary);
+      border: 1px solid var(--border); border-radius: 10px;
+      padding: 12px 22px; font-size: 15px; font-weight: 600; cursor: pointer;
+      transition: border-color 0.15s;
+    }
+    button.btn-secondary:hover { border-color: var(--primary); }
+
+    /* Picker: foto + niveau-badge */
+    .event-card { align-items: center; }
+    .event-thumb {
+      width: 56px; height: 56px; border-radius: 10px; flex-shrink: 0;
+      background-size: cover; background-position: center;
+      background-color: var(--border);
+    }
+    .event-thumb-empty {
+      background: rgba(9, 61, 84, 0.08);
+    }
+    .event-niveau-badge {
+      align-self: flex-start;
+      font-size: 11px; font-weight: 700; text-transform: uppercase;
+      letter-spacing: 0.06em; color: var(--primary);
+      background: rgba(9, 61, 84, 0.06);
+      border-radius: 999px; padding: 2px 8px; margin-bottom: 2px;
+    }
+
+    /* Mobile-first touch-ups */
+    @media (max-width: 480px) {
+      .scale-list.scale10 { grid-template-columns: repeat(5, 1fr); }
+      .step-nav .btn-primary, .step-nav .btn-secondary { flex: 1; }
+      .step-nav .spacer { display: none; }
+      .intro-meta { flex-direction: column; gap: 6px; }
+    }
   </style>
 </head>
 <body>
   <main class="page">
-    <div class="intro">
-      <h1>Forex Opleiding Assessment</h1>
-      <p>Vul deze korte vragenlijst in zodat we je passend kunnen begeleiden. Duurt ongeveer 3 minuten.</p>
+    <div id="intro" class="intro" hidden>
+      <h1>Ontdek welk traject bij je past</h1>
+      <p>Een paar korte vragen over je ervaring en je doelen. Aan het eind zie je meteen welke sessie het beste aansluit — en kies je direct je datum.</p>
+      <div class="intro-meta">
+        <span id="intro-steps"></span>
+        <span>± 3 minuten</span>
+      </div>
+      <button id="btn-start" type="button" class="btn-primary">Begin de intake</button>
     </div>
 
     <div id="loading" class="loading">Vragen laden...</div>
     <div id="fatal" class="fatal" hidden></div>
     <form id="form" hidden novalidate>
+      <div class="progress" id="progress">
+        <div class="progress-label" id="progress-label"></div>
+        <div class="progress-track"><div class="progress-fill" id="progress-fill"></div></div>
+      </div>
+
       <div id="errors" class="errors" hidden>
         <strong>Niet alle velden zijn correct ingevuld:</strong>
         <ul id="errors-list"></ul>
@@ -246,8 +325,11 @@
         <label>Bedrijfsnaam <input type="text" name="hp_company" tabindex="-1" autocomplete="off" /></label>
       </div>
 
-      <div class="submit-row">
-        <button id="submit-btn" type="submit" class="btn-primary">Inzenden</button>
+      <div class="step-nav">
+        <button id="btn-prev" type="button" class="btn-secondary" hidden>Vorige</button>
+        <span class="spacer"></span>
+        <button id="btn-next" type="button" class="btn-primary">Volgende</button>
+        <button id="submit-btn" type="submit" class="btn-primary" hidden>Verstuur antwoorden</button>
       </div>
     </form>
 
@@ -322,6 +404,14 @@
       const $confirm     = document.getElementById('confirm');
       const $confirmCopy = document.getElementById('confirm-copy');
 
+      const $intro     = document.getElementById('intro');
+      const $btnStart  = document.getElementById('btn-start');
+      const $introSteps= document.getElementById('intro-steps');
+      const $progLabel = document.getElementById('progress-label');
+      const $progFill  = document.getElementById('progress-fill');
+      const $btnPrev   = document.getElementById('btn-prev');
+      const $btnNext   = document.getElementById('btn-next');
+
       // State na een succesvolle inzending - nodig voor de date-pick-stap.
       let assessmentId      = null;
       let assessmentRouting = null;
@@ -369,6 +459,8 @@
         : null;
 
       let questions = [];
+      let steps = [];
+      let currentStep = 0;
 
       function esc(s) {
         return String(s == null ? '' : s)
@@ -382,29 +474,41 @@
         $fatal.hidden = false;
       }
 
-      function renderSections(qs) {
-        // Group by section, preserving order
-        const groups = {};
-        const orderedSections = [];
+      function buildSteps(qs) {
+        const byPage = new Map();
         for (const q of qs) {
-          if (!groups[q.section]) {
-            groups[q.section] = [];
-            orderedSections.push(q.section);
-          }
-          groups[q.section].push(q);
+          const p = Number.isInteger(q.page) ? q.page : 1;
+          if (!byPage.has(p)) byPage.set(p, []);
+          byPage.get(p).push(q);
         }
+        const pages = [...byPage.keys()].sort((a, b) => a - b);
+        return pages.map((p) => {
+          const items = byPage.get(p);
+          const secOrder = []; const secMap = {};
+          for (const q of items) {
+            if (!secMap[q.section]) { secMap[q.section] = []; secOrder.push(q.section); }
+            secMap[q.section].push(q);
+          }
+          return {
+            page: p,
+            questions: items,
+            sections: secOrder.map((s) => ({
+              section: s, label: SECTION_LABELS[s] || s, questions: secMap[s],
+            })),
+          };
+        });
+      }
 
-        $sections.innerHTML = orderedSections.map((sec) => {
-          const title = SECTION_LABELS[sec] || sec;
-          const items = groups[sec].map(renderQuestion).join('');
-          return `
-            <div class="card" data-section="${esc(sec)}">
-              <div class="section-title">${esc(title)}</div>
-              ${items}
-            </div>`;
-        }).join('');
+      function renderSteps() {
+        $sections.innerHTML = steps.map((st, idx) => `
+          <div class="step" data-step-index="${idx}">
+            ${st.sections.map((sec) => `
+              <div class="card" data-section="${esc(sec.section)}">
+                <div class="section-title">${esc(sec.label)}</div>
+                ${sec.questions.map(renderQuestion).join('')}
+              </div>`).join('')}
+          </div>`).join('');
 
-        // Wire radio interactions for visual selected-state + word-count
         $sections.querySelectorAll('.radio-row, .scale-cell').forEach((el) => {
           el.addEventListener('click', () => {
             const input = el.querySelector('input[type="radio"]');
@@ -423,12 +527,58 @@
           const upd = () => {
             const words = (ta.value.trim().match(/\S+/g) || []).length;
             counter.textContent = `${words} / ${min} woorden`;
-            counter.classList.toggle('ok',   words >= min && min > 0);
+            counter.classList.toggle('ok', words >= min && min > 0);
             counter.classList.toggle('warn', min > 0 && words < min);
           };
           ta.addEventListener('input', upd); upd();
         });
       }
+
+      function updateStepUI() {
+        const last = steps.length - 1;
+        $sections.querySelectorAll('.step').forEach((el) => {
+          el.classList.toggle('active', Number(el.dataset.stepIndex) === currentStep);
+        });
+        const human = currentStep + 1;
+        const label = steps[currentStep].sections[0] ? steps[currentStep].sections[0].label : '';
+        $progLabel.textContent = `Stap ${human} van ${steps.length}${label ? ' — ' + label : ''}`;
+        $progFill.style.width = (human / steps.length * 100) + '%';
+        $btnPrev.hidden = currentStep === 0;
+        $btnNext.hidden = currentStep === last;
+        $submit.hidden  = currentStep !== last;
+        showErrors([]);
+        const f = $sections.querySelector('.step.active input, .step.active textarea');
+        if (f) { try { f.focus({ preventScroll: true }); } catch { f.focus(); } }
+      }
+
+      function validateStep(idx) {
+        const errs = [];
+        const emailRe = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
+        for (const q of steps[idx].questions) {
+          const need = !!q.required;
+          if (q.type === 'text' || q.type === 'email' || q.type === 'open_text') {
+            const el = $form.querySelector(`[name="${CSS.escape(q.key)}"]`);
+            const v = el && el.value ? el.value.trim() : '';
+            if (need && !v) {
+              errs.push({ key: q.key, message: `Vul "${q.label}" in.` });
+            } else if (q.type === 'email' && v && !emailRe.test(v)) {
+              errs.push({ key: q.key, message: 'Vul een geldig e-mailadres in.' });
+            } else if (q.type === 'open_text' && v) {
+              const min = Number.isInteger(q.min_words) ? q.min_words : 0;
+              const words = (v.match(/\S+/g) || []).length;
+              if (min > 0 && words < min) {
+                errs.push({ key: q.key, message: `Schrijf minstens ${min} woorden bij "${q.label}" (nu ${words}).` });
+              }
+            }
+          } else if (q.type === 'radio' || q.type === 'scale_1_5' || q.type === 'scale_1_10') {
+            const sel = $form.querySelector(`input[name="${CSS.escape(q.key)}"]:checked`);
+            if (need && !sel) errs.push({ key: q.key, message: `Kies een optie bij "${q.label}".` });
+          }
+        }
+        return errs;
+      }
+
+      function gotoTop() { window.scrollTo({ top: 0, behavior: 'smooth' }); }
 
       function renderQuestion(q) {
         const reqMark = q.required ? '<span class="q-required-mark">*</span>' : '';
@@ -594,19 +744,30 @@
             $pickerEmpty.hidden = false;
             return;
           }
+          const niveauLabel = niveau === 'gevorderd' ? 'Deep Dive' : 'Kickstart';
           $eventList.innerHTML = events.map((ev) => {
             const dateLabel = formatDateLabel(ev.starts_at);
-            const isFull    = ev.capacity != null && ev.confirmed_count >= ev.capacity;
-            const cnt = (ev.capacity == null)
+            const cap = ev.capacity;
+            const left = (ev.spots_left != null)
+              ? ev.spots_left
+              : (cap != null ? Math.max(0, cap - ev.confirmed_count) : null);
+            const isFull = (left != null) ? left <= 0 : (cap != null && ev.confirmed_count >= cap);
+            const spotsText = (left == null)
               ? `${ev.confirmed_count} aanmelding${ev.confirmed_count === 1 ? '' : 'en'}`
-              : `${ev.confirmed_count} / ${ev.capacity}`;
+              : (left <= 0 ? 'Vol' : `nog ${left} ${left === 1 ? 'plek' : 'plekken'}`);
+            const img = ev.image_url ? esc(ev.image_url) : '';
+            const thumb = img
+              ? `<div class="event-thumb" style="background-image:url('${img}')"></div>`
+              : `<div class="event-thumb event-thumb-empty" aria-hidden="true"></div>`;
             return `
               <div class="event-card${isFull ? ' full' : ''}" data-event-id="${esc(ev.id)}" data-full="${isFull ? '1' : '0'}">
+                ${thumb}
                 <div class="event-meta-main">
+                  <span class="event-niveau-badge">${esc(niveauLabel)}</span>
                   <span class="event-date">${esc(dateLabel)}</span>
                   <span class="event-title">${esc(ev.title || '')}</span>
                 </div>
-                <span class="event-count${isFull ? ' full' : ''}">${esc(cnt)}</span>
+                <span class="event-count${isFull ? ' full' : ''}">${esc(spotsText)}</span>
               </div>`;
           }).join('');
           // Klik-handlers (geen library; eenvoudige binding).
@@ -708,6 +869,22 @@
 
       $ctaPickDate.addEventListener('click', () => { loadOpenEvents(); });
 
+      $btnStart.addEventListener('click', () => {
+        $intro.hidden = true;
+        $form.hidden = false;
+        currentStep = 0;
+        updateStepUI();
+        gotoTop();
+      });
+      $btnNext.addEventListener('click', () => {
+        const e = validateStep(currentStep);
+        if (e.length) { showErrors(e); return; }
+        if (currentStep < steps.length - 1) { currentStep++; updateStepUI(); gotoTop(); }
+      });
+      $btnPrev.addEventListener('click', () => {
+        if (currentStep > 0) { currentStep--; updateStepUI(); gotoTop(); }
+      });
+
       async function loadQuestions() {
         try {
           const r = await fetch('/api/assessment-questions', { headers: { Accept: 'application/json' } });
@@ -718,9 +895,11 @@
             showFatal('Er zijn op dit moment geen vragen geconfigureerd. Probeer het later opnieuw.');
             return;
           }
+          steps = buildSteps(questions);
+          renderSteps();
+          $introSteps.textContent = `${questions.length} vragen in ${steps.length} stappen`;
           $loading.hidden = true;
-          renderSections(questions);
-          $form.hidden = false;
+          $intro.hidden = false;
         } catch (e) {
           console.error('loadQuestions', e);
           showFatal('Kon de vragenlijst niet laden. Vernieuw de pagina of probeer het later.');
@@ -759,6 +938,11 @@
             return;
           }
           if (r.status === 400 && Array.isArray(j.errors)) {
+            const keys = j.errors.map((x) => x.key).filter(Boolean);
+            if (keys.length) {
+              const jump = steps.findIndex((st) => st.questions.some((q) => keys.includes(q.key)));
+              if (jump >= 0 && jump !== currentStep) { currentStep = jump; updateStepUI(); }
+            }
             showErrors(j.errors);
             return;
           }
@@ -768,7 +952,7 @@
           showErrors([{ message: 'Er ging iets mis tijdens versturen. Probeer het opnieuw.' }]);
         } finally {
           $submit.disabled = false;
-          $submit.textContent = 'Inzenden';
+          $submit.textContent = 'Verstuur antwoorden';
         }
       });
 
