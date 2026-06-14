@@ -66,14 +66,59 @@ function stripHtml(html) {
   return html.replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim();
 }
 
+// ── Events-afzender (events@deforexopleiding.nl) ─────────────────────────────
+const EVENTS_FROM_ADDRESS = 'events@deforexopleiding.nl';
+const EVENTS_FROM_NAME = 'De Forex Opleiding';
+let cachedEventsTransport = null;
+
+function getEventsTransport() {
+  if (cachedEventsTransport) return cachedEventsTransport;
+  const pass = process.env.EVENTS_MAIL_PASS;
+  if (!pass) return null; // niet geconfigureerd → caller valt terug op info@
+  cachedEventsTransport = nodemailer.createTransport({
+    host: 'smtp.strato.com',
+    port: 465,
+    secure: true,
+    auth: { user: process.env.EVENTS_MAIL_USER || EVENTS_FROM_ADDRESS, pass },
+  });
+  return cachedEventsTransport;
+}
+
 /**
- * Wrapper voor brand-consistente HTML-email layout.
- *
- * @param {string} title
- * @param {string} bodyHtml
- * @returns {string}
+ * Verstuur events-automation-mail vanaf events@deforexopleiding.nl.
+ * Valt veilig terug op info@ als EVENTS_MAIL_PASS ontbreekt.
+ * @returns {Promise<{success:boolean, messageId?:string, from:string, fallback:boolean, error?:string}>}
  */
-export function wrapEmailHtml(title, bodyHtml) {
+export async function sendEventMail({ to, subject, text, html }) {
+  if (!to || !subject || (!text && !html)) {
+    return { success: false, from: EVENTS_FROM_ADDRESS, fallback: false, error: 'Missing required fields' };
+  }
+  const recipients = Array.isArray(to) ? to : [to];
+  const eventsTransport = getEventsTransport();
+  const useEvents = !!eventsTransport;
+  const fromAddr = useEvents ? EVENTS_FROM_ADDRESS : FROM_ADDRESS;
+  const fromName = useEvents ? EVENTS_FROM_NAME : FROM_NAME;
+  try {
+    const transport = eventsTransport || getTransport();
+    const info = await transport.sendMail({
+      from: `"${fromName}" <${fromAddr}>`,
+      to: recipients.join(', '),
+      subject,
+      text: text || stripHtml(html),
+      html,
+    });
+    return { success: true, messageId: info.messageId, from: fromAddr, fallback: !useEvents };
+  } catch (err) {
+    console.error('[mailer] sendEventMail error:', err.message);
+    return { success: false, from: fromAddr, fallback: !useEvents, error: err.message };
+  }
+}
+
+export function wrapEmailHtml(title, bodyHtml, opts = {}) {
+  const footerInner = (opts && opts.footerHtml) || `<p style="margin:0; color:#6b7280; font-size:12px;">
+                Agency Command Center — Follow-up Module<br>
+                De Forex Opleiding NL B.V.
+              </p>`;
   return `<!DOCTYPE html>
 <html lang="nl">
 <head>
@@ -98,10 +143,7 @@ export function wrapEmailHtml(title, bodyHtml) {
           </tr>
           <tr>
             <td style="background:#f8f9fa; padding:16px 32px; border-top:1px solid #e5e7eb;">
-              <p style="margin:0; color:#6b7280; font-size:12px;">
-                Agency Command Center — Follow-up Module<br>
-                De Forex Opleiding NL B.V.
-              </p>
+              ${footerInner}
             </td>
           </tr>
         </table>
