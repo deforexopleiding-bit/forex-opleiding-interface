@@ -180,8 +180,16 @@ export default async function handler(req, res) {
   const body = (req.body && typeof req.body === 'object') ? req.body : null;
   if (!body) return res.status(400).json({ error: 'Body moet JSON zijn' });
 
+  // GHL nest onze Custom Data onder `customData`; top-level staat GHL's
+  // standaard-contactdata. Voor alle eigen velden lezen we daarom eerst
+  // uit customData en pas dan top-level (backwards-compat met directe
+  // POST's vanuit andere bronnen). raw_payload (= volledige body) wordt
+  // hieronder ongewijzigd opgeslagen voor audit.
+  const cd = (body && typeof body.customData === 'object' && body.customData) || {};
+
   // 3) Honeypot (geen DB-mutatie als bot).
-  if (body.hp_company != null && String(body.hp_company).trim() !== '') {
+  const hpCompany = cd.hp_company ?? body.hp_company;
+  if (hpCompany != null && String(hpCompany).trim() !== '') {
     return res.status(422).json({ error: 'Inzending kon niet worden verwerkt.' });
   }
 
@@ -192,15 +200,15 @@ export default async function handler(req, res) {
     return res.status(429).json({ error: 'Te veel webhook-aanvragen vanaf dit IP.' });
   }
 
-  // 5) Payload normaliseren.
-  const firstName = pickString(body.first_name, 200);
-  const lastName  = pickString(body.last_name, 200);
-  const rawEmail  = pickString(body.email, 320);
+  // 5) Payload normaliseren — customData-first, top-level fallback.
+  const firstName = pickString(cd.first_name ?? body.first_name, 200);
+  const lastName  = pickString(cd.last_name  ?? body.last_name,  200);
+  const rawEmail  = pickString(cd.email      ?? body.email,      320);
   const email     = (rawEmail && EMAIL_RE.test(rawEmail.toLowerCase())) ? rawEmail.toLowerCase() : null;
-  const phone     = pickString(body.phone, 50);
-  const ghlContactId       = pickString(body.ghl_contact_id, 200);
-  const ghlFormSubmissionId = pickString(body.ghl_form_submission_id, 200);
-  const eventDateLabel     = pickString(body.event_date_label, 500);
+  const phone     = pickString(cd.phone      ?? body.phone,      50);
+  const ghlContactId       = pickString(cd.ghl_contact_id        ?? body.ghl_contact_id,        200);
+  const ghlFormSubmissionId = pickString(cd.ghl_form_submission_id ?? body.ghl_form_submission_id, 200);
+  const eventDateLabel     = pickString(cd.event_date_label      ?? body.event_date_label,      500);
 
   // 6) Inbox-rij is altijd onze single source-of-truth, ongeacht resolve-uitkomst.
   let initialMatchStatus = 'no_match';
