@@ -1362,6 +1362,11 @@
         #waMetaVarsPanel details > summary { cursor:pointer; font-size:12px; font-weight:600; color:var(--text-dim); padding:4px 0; user-select:none; }
         #waMetaVarsPanel details > summary:hover { color:var(--text); }
         #waMetaVarsPanel .wa-var-chip-row { display:flex; flex-wrap:wrap; gap:4px; padding:4px 0 8px 0; }
+        /* Groep-koppen boven categorie-secties (afdelings-structuur) */
+        #waMetaVarsPanel .wa-var-group { margin-bottom:10px; }
+        #waMetaVarsPanel .wa-var-group + .wa-var-group { margin-top:6px; }
+        #waMetaVarsPanel .wa-var-group-title { font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.06em; color:var(--text-faint); padding:2px 0 4px 0; margin:0 0 4px 0; border-bottom:1px solid var(--border); }
+        #waMetaVarsPanel .wa-var-group details { margin-left:2px; }
         .wa-var-chip { padding:4px 10px; background:#f3f4f6; border:1px solid var(--border); border-radius:999px; font-size:12px; cursor:pointer; color:var(--text); font-family:inherit; line-height:1.3; }
         .wa-var-chip:hover { background:#e5e7eb; }
         .wa-var-chip[disabled] { opacity:.5; cursor:not-allowed; }
@@ -1984,6 +1989,18 @@
   // (in volgorde van eerste verschijning), zodat toekomstige categorieën
   // direct in de picker verschijnen zonder code-wijziging.
   const WA_VAR_CATEGORY_ORDER = ['customer', 'invoice', 'klant', 'afdeling', 'bedrijf', 'event', 'attendee', 'datum'];
+  // Groep-structuur (afdelings-koppen) boven de categorie-secties. Elke
+  // groep heeft een title (NL-label, getoond als kop) en categories[]
+  // (welke categorie-keys eronder vallen). Een categorie die in geen groep
+  // staat valt automatisch in de "Overig"-fallback-groep onderaan — zo
+  // verdwijnen toekomstige categorieën uit WA_VAR_REGISTRY nooit uit beeld,
+  // ook als ze hier nog niet aan een groep zijn toegewezen.
+  const WA_VAR_CATEGORY_GROUPS = [
+    { title: 'Klant & facturatie', categories: ['customer', 'invoice', 'klant'] },
+    { title: 'Events',             categories: ['event', 'attendee'] },
+    { title: 'Algemeen',           categories: ['afdeling', 'bedrijf', 'datum'] },
+  ];
+  const WA_VAR_GROUPS_FALLBACK_TITLE = 'Overig';
   const WA_VAR_BY_KEY = (() => {
     const m = new Map();
     WA_VAR_REGISTRY.forEach(v => m.set(v.key, v));
@@ -2227,33 +2244,70 @@
       if (!byCat.has(v.category)) byCat.set(v.category, []);
       byCat.get(v.category).push(v);
     });
-    // Render-volgorde: eerst bekende categorieën uit WA_VAR_CATEGORY_ORDER,
-    // dan eventueel onbekende categorieën (uit registry maar niet in ORDER)
-    // in volgorde van eerste verschijning. Zo verschijnen toekomstige
-    // categorieën automatisch in de picker zonder hier code te wijzigen.
-    const seen = new Set();
-    const renderOrder = [];
-    WA_VAR_CATEGORY_ORDER.forEach(c => {
-      if (byCat.has(c) && !seen.has(c)) { renderOrder.push(c); seen.add(c); }
-    });
+
+    // Render-volgorde binnen elke groep: ORDER-volgorde behouden, dan
+    // categorieën uit de registry die niet in ORDER zitten erachter (in
+    // registry-verschijningsvolgorde). Zo verschijnt een nieuwe categorie
+    // automatisch — zowel binnen een toegewezen groep als in de
+    // fallback-"Overig"-groep — zonder code-wijziging hier.
+    const orderRank = new Map(WA_VAR_CATEGORY_ORDER.map((c, i) => [c, i]));
+    function sortCats(cats) {
+      // Bekende ORDER eerst (op ORDER-index), daarna onbekende in
+      // registry-verschijningsvolgorde (zelfde als renderOrder-fallback in
+      // de pre-groepen-versie).
+      const known    = cats.filter(c => orderRank.has(c)).sort((a, b) => orderRank.get(a) - orderRank.get(b));
+      const unknown  = [];
+      const knownSet = new Set(known);
+      WA_VAR_REGISTRY.forEach(v => {
+        if (cats.includes(v.category) && !knownSet.has(v.category) && !unknown.includes(v.category)) {
+          unknown.push(v.category);
+        }
+      });
+      return [...known, ...unknown];
+    }
+
+    // Bepaal welke categorieën in een expliciete groep zitten.
+    const assigned = new Set();
+    WA_VAR_CATEGORY_GROUPS.forEach(g => g.categories.forEach(c => assigned.add(c)));
+
+    // Onbekende categorieën uit de registry die in geen groep zitten →
+    // fallback-groep "Overig" aan het eind (forward-compat: nieuwe
+    // categorie toevoegen aan WA_VAR_REGISTRY zonder groep-mapping laat de
+    // chips alsnog renderen).
+    const fallbackCats = [];
     WA_VAR_REGISTRY.forEach(v => {
-      if (!seen.has(v.category) && byCat.has(v.category)) {
-        renderOrder.push(v.category);
-        seen.add(v.category);
+      if (!assigned.has(v.category) && !fallbackCats.includes(v.category) && byCat.has(v.category)) {
+        fallbackCats.push(v.category);
       }
     });
-    const html = renderOrder.map((cat, idx) => {
-      const items = byCat.get(cat);
-      const open = idx === 0 ? ' open' : '';
-      const label = WA_VAR_CATEGORY_LABELS[cat] || cat;
-      const chips = items.map(v => {
-        const t = `{{${v.key}}}\n${v.label}\nVoorbeeld: ${v.example}`;
-        return `<button type="button" class="wa-var-chip" data-wa-var-key="${esc(v.key)}" data-wa-var-example="${esc(v.example)}" title="${esc(t)}" aria-label="${esc(v.label)} (voorbeeld: ${esc(v.example)})">${esc(v.label)}</button>`;
+
+    const groupsToRender = [...WA_VAR_CATEGORY_GROUPS];
+    if (fallbackCats.length > 0) {
+      groupsToRender.push({ title: WA_VAR_GROUPS_FALLBACK_TITLE, categories: fallbackCats });
+    }
+
+    let catIdx = 0;
+    const html = groupsToRender.map(g => {
+      const cats = sortCats(g.categories).filter(c => byCat.has(c));
+      if (cats.length === 0) return '';
+      const sections = cats.map(cat => {
+        const open  = catIdx === 0 ? ' open' : '';
+        catIdx++;
+        const items = byCat.get(cat);
+        const label = WA_VAR_CATEGORY_LABELS[cat] || cat;
+        const chips = items.map(v => {
+          const t = `{{${v.key}}}\n${v.label}\nVoorbeeld: ${v.example}`;
+          return `<button type="button" class="wa-var-chip" data-wa-var-key="${esc(v.key)}" data-wa-var-example="${esc(v.example)}" title="${esc(t)}" aria-label="${esc(v.label)} (voorbeeld: ${esc(v.example)})">${esc(v.label)}</button>`;
+        }).join('');
+        return `<details${open}>
+          <summary>${esc(label)}</summary>
+          <div class="wa-var-chip-row">${chips}</div>
+        </details>`;
       }).join('');
-      return `<details${open}>
-        <summary>${esc(label)}</summary>
-        <div class="wa-var-chip-row">${chips}</div>
-      </details>`;
+      return `<div class="wa-var-group">
+        <h4 class="wa-var-group-title">${esc(g.title)}</h4>
+        ${sections}
+      </div>`;
     }).join('');
     host.innerHTML = html;
   }
