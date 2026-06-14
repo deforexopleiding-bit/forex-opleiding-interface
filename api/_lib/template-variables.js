@@ -127,10 +127,16 @@ export const AVAILABLE_VARIABLES = [
   { key: 'event.locatie',    label: 'Locatie',     category: 'event', example: 'Van der Valk, Gent',        requires_context: 'event' },
   { key: 'event.niveau',     label: 'Niveau',      category: 'event', example: 'Basis',                     requires_context: 'event' },
 
-  // ── attendee (Fase 3a) — vereist context.attendee (event_attendees-row
-  //   met minimaal choice_token). Caller die geen attendee meegeeft krijgt
-  //   lege string — geen crash, geen regressie voor finance-flows.
-  { key: 'attendee.keuze_link', label: 'Keuze-link', category: 'attendee', example: 'https://forex-opleiding-interface.vercel.app/modules/event-keuze.html?t=00000000-0000-0000-0000-000000000000', requires_context: 'attendee' },
+  // ── attendee (Fase 3a) — vereist context.attendee (event_attendees-row).
+  //   Caller die geen attendee meegeeft krijgt lege strings — geen crash,
+  //   geen regressie voor finance-flows. Eigen domein (NIET klant) omdat
+  //   een keuze-link-ontvanger een event-inschrijving / prospect is.
+  { key: 'attendee.voornaam',   label: 'Voornaam',        category: 'attendee', example: 'Jeffrey',                                                                                                        requires_context: 'attendee' },
+  { key: 'attendee.achternaam', label: 'Achternaam',      category: 'attendee', example: 'Biemold',                                                                                                        requires_context: 'attendee' },
+  { key: 'attendee.naam',       label: 'Volledige naam',  category: 'attendee', example: 'Jeffrey Biemold',                                                                                                requires_context: 'attendee' },
+  { key: 'attendee.email',      label: 'E-mail',          category: 'attendee', example: 'naam@voorbeeld.nl',                                                                                              requires_context: 'attendee' },
+  { key: 'attendee.telefoon',   label: 'Telefoon',        category: 'attendee', example: '+31 6 12345678',                                                                                                 requires_context: 'attendee' },
+  { key: 'attendee.keuze_link', label: 'Keuze-link',      category: 'attendee', example: 'https://forex-opleiding-interface.vercel.app/modules/event-keuze.html?t=00000000-0000-0000-0000-000000000000',   requires_context: 'attendee' },
 
   // ── datum ──────────────────────────────────────────────────────────────
   { key: 'datum.vandaag',     label: 'Datum vandaag', category: 'datum', example: '09-06-2026',  requires_context: null },
@@ -415,6 +421,17 @@ const PUBLIC_BASE_URL = process.env.PUBLIC_BASE_URL || 'https://forex-opleiding-
 function getAttendeeValue(attendee, key) {
   if (!attendee) return '';
   switch (key) {
+    case 'attendee.voornaam':   return String(attendee.first_name || '');
+    case 'attendee.achternaam': return String(attendee.last_name  || '');
+    case 'attendee.naam': {
+      // Trim + filter zodat ontbrekende achternaam geen losse spatie geeft.
+      const parts = [attendee.first_name, attendee.last_name]
+        .map((s) => (s == null ? '' : String(s).trim()))
+        .filter((s) => s.length > 0);
+      return parts.join(' ');
+    }
+    case 'attendee.email':      return String(attendee.email || '');
+    case 'attendee.telefoon':   return String(attendee.phone || '');
     case 'attendee.keuze_link': {
       const token = attendee.choice_token;
       if (!token) return '';
