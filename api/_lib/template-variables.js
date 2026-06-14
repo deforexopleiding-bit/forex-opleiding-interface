@@ -117,6 +117,16 @@ export const AVAILABLE_VARIABLES = [
   { key: 'bedrijf.telefoon', label: 'Bedrijfstelefoon', category: 'bedrijf', example: '+31201234567',            requires_context: null },
   { key: 'bedrijf.email',    label: 'Bedrijfse-mail',   category: 'bedrijf', example: 'info@deforexopleiding.nl', requires_context: null },
 
+  // ── event (Fase 4) — vereist context.event (events-row met starts_at /
+  //   ends_at / location / niveau / title). Caller die geen event meegeeft
+  //   (bv. finance-flows) krijgt lege strings — geen crash, geen regressie.
+  { key: 'event.titel',      label: 'Event-titel', category: 'event', example: 'Forex Masterclass',         requires_context: 'event' },
+  { key: 'event.datum',      label: 'Datum',       category: 'event', example: 'zaterdag 20 juni 2026',     requires_context: 'event' },
+  { key: 'event.starttijd',  label: 'Starttijd',   category: 'event', example: '10:00',                     requires_context: 'event' },
+  { key: 'event.eindtijd',   label: 'Eindtijd',    category: 'event', example: '13:00',                     requires_context: 'event' },
+  { key: 'event.locatie',    label: 'Locatie',     category: 'event', example: 'Van der Valk, Gent',        requires_context: 'event' },
+  { key: 'event.niveau',     label: 'Niveau',      category: 'event', example: 'Basis',                     requires_context: 'event' },
+
   // ── datum ──────────────────────────────────────────────────────────────
   { key: 'datum.vandaag',     label: 'Datum vandaag', category: 'datum', example: '09-06-2026',  requires_context: null },
   { key: 'datum.deze_maand',  label: 'Deze maand',    category: 'datum', example: 'juni 2026',   requires_context: null },
@@ -336,6 +346,59 @@ function getKlantAggregateValue(openInvoices, key) {
   }
 }
 
+// ── event (Fase 4) ─────────────────────────────────────────────────────────
+//
+// NL-locale + timezone Europe/Amsterdam zodat een event op zaterdagochtend
+// niet als vrijdagavond UTC verschijnt. Bij ontbrekend/ongeldig timestamp
+// returnt elke formatter '' — consistent met andere requires_context helpers.
+
+function fmtEventDateNl(iso) {
+  if (!iso) return '';
+  try {
+    const dt = new Date(iso);
+    if (!Number.isFinite(dt.getTime())) return '';
+    return new Intl.DateTimeFormat('nl-NL', {
+      weekday : 'long',
+      day     : 'numeric',
+      month   : 'long',
+      year    : 'numeric',
+      timeZone: 'Europe/Amsterdam',
+    }).format(dt);
+  } catch (_e) { return ''; }
+}
+
+function fmtEventTimeNl(iso) {
+  if (!iso) return '';
+  try {
+    const dt = new Date(iso);
+    if (!Number.isFinite(dt.getTime())) return '';
+    return new Intl.DateTimeFormat('nl-NL', {
+      hour    : '2-digit',
+      minute  : '2-digit',
+      hour12  : false,
+      timeZone: 'Europe/Amsterdam',
+    }).format(dt);
+  } catch (_e) { return ''; }
+}
+
+function capitalizeFirst(s) {
+  if (!s || typeof s !== 'string') return '';
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+function getEventValue(event, key) {
+  if (!event) return '';
+  switch (key) {
+    case 'event.titel':     return String(event.title    || '');
+    case 'event.datum':     return fmtEventDateNl(event.starts_at);
+    case 'event.starttijd': return fmtEventTimeNl(event.starts_at);
+    case 'event.eindtijd':  return fmtEventTimeNl(event.ends_at);
+    case 'event.locatie':   return String(event.location || '');
+    case 'event.niveau':    return capitalizeFirst(String(event.niveau || ''));
+    default: return '';
+  }
+}
+
 /**
  * Resolve een enkele variabele-key naar zijn waarde, gegeven de context.
  * context = {
@@ -343,6 +406,9 @@ function getKlantAggregateValue(openInvoices, key) {
  *   invoice,                 // oudste open invoice
  *   openInvoices,            // alle open invoices
  *   moduleContext,           // whatsapp_module_config rij voor afdeling.*
+ *   event,                   // events rij voor event.* (Fase 4 — optioneel;
+ *                            //   callers zonder event krijgen lege strings,
+ *                            //   geen crash, geen regressie voor finance-flow)
  * }.
  */
 export function resolveVariableValue(key, context) {
@@ -356,6 +422,7 @@ export function resolveVariableValue(key, context) {
     case 'invoice':  return getInvoiceValue(context && context.invoice, key);
     case 'klant':    return getKlantAggregateValue(context && context.openInvoices, key);
     case 'afdeling': return getAfdelingValue(key, context && context.moduleContext);
+    case 'event':    return getEventValue(context && context.event, key);
     default: return '';
   }
 }
@@ -368,10 +435,13 @@ export function resolveVariableValue(key, context) {
  *   2) Positioneel-style ({{1}}, {{2}}) MET mapping: lookup mapping[N] = key,
  *      resolve key tegen context.
  *
- * Context-shape: { customer, invoice, openInvoices, moduleContext }.
+ * Context-shape: { customer, invoice, openInvoices, moduleContext, event }.
  * moduleContext is optioneel — alleen vereist voor afdeling.* keys; caller
  * (bv. inbox-send-template) bepaalt de juiste whatsapp_module_config rij op
  * basis van het zendende phone_number_id.
+ * event is optioneel — alleen vereist voor event.* keys; caller (bv. een
+ * toekomstige events-template-send) geeft de events-row mee. Finance-flows
+ * sturen geen event mee — event.* keys vallen dan terug op '' (geen crash).
  *
  * Onbekende keys: laat placeholder staan + log warning.
  *
