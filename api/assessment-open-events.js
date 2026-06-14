@@ -59,6 +59,8 @@ export default async function handler(req, res) {
       confirmed_count : e.confirmed_count,
       has_space       : e.has_space,
       location        : e.location,
+      image_url       : e.image_url,
+      spots_left      : e.spots_left,
     }));
     return res.status(200).json({ niveau, events: out });
   } catch (e) {

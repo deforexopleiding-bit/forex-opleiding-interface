@@ -25,8 +25,9 @@ const SCALE_RANGES = {
 export async function loadActiveQuestions() {
   const { data, error } = await supabaseAdmin
     .from('assessment_questions')
-    .select('id, key, section, order_index, type, label, help_text, required, options, min_words, is_routing, routing_weights, active')
+    .select('id, key, section, order_index, page, type, label, help_text, required, options, min_words, is_routing, routing_weights, active')
     .eq('active', true)
+    .order('page', { ascending: true })
     .order('order_index', { ascending: true });
   if (error) throw new Error('loadActiveQuestions: ' + error.message);
   return data || [];
@@ -41,6 +42,7 @@ export function sanitizeQuestionsForPublic(questions) {
     key        : q.key,
     section    : q.section,
     order_index: q.order_index,
+    page       : q.page,
     type       : q.type,
     label      : q.label,
     help_text  : q.help_text,

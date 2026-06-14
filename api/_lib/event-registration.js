@@ -109,7 +109,7 @@ export async function getOpenEventsWithSpace({ niveau = null, limit = OPEN_EVENT
   // 1) Open events filter
   let q = supabaseAdmin
     .from('events')
-    .select('id, title, starts_at, ends_at, capacity, location, niveau')
+    .select('id, title, starts_at, ends_at, capacity, location, niveau, image_url')
     .eq('status', 'published')
     .eq('signups_closed', false)
     .gt('starts_at', nowIso)
@@ -141,6 +141,23 @@ export async function getOpenEventsWithSpace({ niveau = null, limit = OPEN_EVENT
     countsByEvent[r.event_id] = (countsByEvent[r.event_id] || 0) + 1;
   }
 
+  // 2b) Niveau-fallback foto's voor events zonder eigen image_url (optie B).
+  const nivDefaults = {};
+  const niveausNeedingDefault = [...new Set(
+    events.filter((e) => !e.image_url && e.niveau).map((e) => e.niveau)
+  )];
+  if (niveausNeedingDefault.length > 0) {
+    const { data: nivRows, error: nivErr } = await supabaseAdmin
+      .from('event_niveau_options')
+      .select('slug, default_image_url')
+      .in('slug', niveausNeedingDefault);
+    if (nivErr) {
+      console.error('[event-registration] niveau default_image_url error:', nivErr.message);
+    } else {
+      for (const r of (nivRows || [])) nivDefaults[r.slug] = r.default_image_url || null;
+    }
+  }
+
   return events.map((e) => {
     const cnt = countsByEvent[e.id] || 0;
     const cap = Number.isInteger(Number(e.capacity)) ? Number(e.capacity) : null;
@@ -152,8 +169,10 @@ export async function getOpenEventsWithSpace({ niveau = null, limit = OPEN_EVENT
       capacity        : cap,
       location        : e.location,
       niveau          : e.niveau || null,
+      image_url       : e.image_url || nivDefaults[e.niveau] || null,
       confirmed_count : cnt,
       has_space       : cap == null ? true : cnt < cap,
+      spots_left      : cap == null ? null : Math.max(0, cap - cnt),
     };
   });
 }
