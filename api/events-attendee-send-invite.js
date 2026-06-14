@@ -28,28 +28,17 @@
 //                      api/_lib/template-variables.js getAttendeeValue.
 //   - EVENTS_KEUZE_LINK_TEMPLATE_NAME (env, fallback 'events_keuze_link')
 //                      naam van de goedgekeurde WhatsApp-template die we
-//                      versturen. Admin moet deze template aanmaken +
-//                      indienen voor Meta-approval in /modules/admin.html
-//                      Templates-tab; body kan {{event.titel}} +
-//                      {{attendee.keuze_link}} + ... bevatten via
-//                      meta_param_mapping. Niet hardcoden in body_text.
+//                      versturen.
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
-import { sendTemplate, MetaNotConfiguredError } from './_lib/meta-whatsapp.js';
-import { getModuleContextByPhoneNumberId } from './_lib/module-context.js';
-import {
-  buildMetaVariablesFromMapping,
-  resolveVariables,
-} from './_lib/template-variables.js';
-import { upsertOutboundConversation } from './_lib/conv-upsert.js';
 import { sendMail, wrapEmailHtml } from './mailer.js';
+import { sendEventWhatsAppTemplate } from './_lib/events-send.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const PUBLIC_BASE_URL = process.env.PUBLIC_BASE_URL || 'https://forex-opleiding-interface.vercel.app';
 const TEMPLATE_NAME   = process.env.EVENTS_KEUZE_LINK_TEMPLATE_NAME || 'events_keuze_link';
 const TEMPLATE_LANG   = 'nl';
-const MAX_VAR_VALUE   = 1000;
 
 function escHtml(s) {
   if (s == null) return '';
@@ -60,14 +49,7 @@ function escHtml(s) {
     .replace(/"/g, '&quot;');
 }
 
-function toE164Plus(phone) {
-  if (!phone) return null;
-  const s = String(phone).trim();
-  if (!s) return null;
-  return s.startsWith('+') ? s : '+' + s.replace(/^00/, '');
-}
-
-// ── Mail-helper ─────────────────────────────────────────────────────────────
+// ── Operator-mail-helper (bespoke; blijft hier, niet in de lib) ─────────────
 async function sendInviteMail({ firstName, keuzeLink, toEmail }) {
   if (!toEmail) return { ok: false, skipped: true, reason: 'no-email' };
 
@@ -93,193 +75,6 @@ async function sendInviteMail({ firstName, keuzeLink, toEmail }) {
     console.error('[events-attendee-send-invite] mail:', e?.message || e);
     return { ok: false, error: e?.message || 'mail send failed' };
   }
-}
-
-// ── WhatsApp-helper ─────────────────────────────────────────────────────────
-async function sendInviteWhatsApp({ attendee, event, user }) {
-  const phone = toE164Plus(attendee.phone);
-  if (!phone) return { ok: false, skipped: true, reason: 'no-phone' };
-
-  // 1) Events phone_number_id ophalen.
-  const { data: modCfg, error: modErr } = await supabaseAdmin
-    .from('whatsapp_module_config')
-    .select('phone_number_id, business_account_id')
-    .eq('module', 'events')
-    .eq('is_active', true)
-    .maybeSingle();
-  if (modErr) {
-    console.error('[events-attendee-send-invite] module-config:', modErr.message);
-    return { ok: false, error: 'module-config lookup failed' };
-  }
-  const eventsPnId = modCfg?.phone_number_id || null;
-  if (!eventsPnId) {
-    return { ok: false, skipped: true, reason: 'no-events-module-config' };
-  }
-
-  // 2) Template-row ophalen voor body_text + meta_param_mapping.
-  const { data: templateRow, error: tplErr } = await supabaseAdmin
-    .from('whatsapp_meta_templates')
-    .select('id, status, body_text, meta_param_mapping, header_type, header_content')
-    .eq('name', TEMPLATE_NAME)
-    .maybeSingle();
-  if (tplErr) {
-    console.error('[events-attendee-send-invite] template fetch:', tplErr.message);
-    return { ok: false, error: 'template lookup failed' };
-  }
-  if (!templateRow) {
-    return {
-      ok: false, skipped: true,
-      reason: `template '${TEMPLATE_NAME}' niet gevonden in whatsapp_meta_templates`,
-    };
-  }
-  if (templateRow.status && templateRow.status !== 'APPROVED' && templateRow.status !== 'approved') {
-    // Defensive: stuur alleen als status APPROVED. Andere statussen → Meta
-    // zal sowieso 400 geven; geef die info hier al terug.
-    return {
-      ok: false, skipped: true,
-      reason: `template '${TEMPLATE_NAME}' status=${templateRow.status} (verwacht APPROVED)`,
-    };
-  }
-
-  // 3) Module-context (afdeling-vars).
-  let moduleContext = null;
-  try {
-    moduleContext = await getModuleContextByPhoneNumberId(supabaseAdmin, eventsPnId);
-  } catch (e) {
-    console.error('[events-attendee-send-invite] module-context:', e?.message || e);
-  }
-
-  // 4) Conv-upsert (outbound).
-  let convId;
-  let convCreated = false;
-  try {
-    const upsert = await upsertOutboundConversation({
-      phoneE164Plus : phone,
-      phoneNumberId : eventsPnId,
-      displayName   : [attendee.first_name, attendee.last_name].filter(Boolean).join(' ').trim() || null,
-      customerId    : attendee.customer_id || null,
-    });
-    convId = upsert.id;
-    convCreated = upsert.created;
-  } catch (e) {
-    console.error('[events-attendee-send-invite] conv-upsert:', e?.message || e);
-    return { ok: false, error: 'conv upsert failed: ' + (e?.message || 'unknown') };
-  }
-
-  // 5) Variabelen resolven via meta_param_mapping.
-  const bodyMapping = (templateRow.meta_param_mapping && typeof templateRow.meta_param_mapping === 'object')
-    ? (templateRow.meta_param_mapping.body || templateRow.meta_param_mapping)
-    : null;
-
-  const ctx = {
-    event,
-    attendee,
-    moduleContext,
-  };
-
-  let resolvedVariables = {};
-  if (bodyMapping && typeof bodyMapping === 'object' && Object.keys(bodyMapping).length > 0) {
-    try {
-      resolvedVariables = buildMetaVariablesFromMapping(bodyMapping, ctx) || {};
-    } catch (e) {
-      console.error('[events-attendee-send-invite] resolve:', e?.message || e);
-      return { ok: false, error: 'variable resolve failed' };
-    }
-  }
-  // Truncate elke waarde defensief.
-  const sortedKeys = Object.keys(resolvedVariables)
-    .filter((k) => /^\d+$/.test(k))
-    .sort((a, b) => Number(a) - Number(b));
-  const variables = sortedKeys.map((k) => String(resolvedVariables[k] ?? '').slice(0, MAX_VAR_VALUE));
-
-  // 6) Send via Meta.
-  let metaResult;
-  try {
-    metaResult = await sendTemplate({
-      to            : phone.replace(/^\+/, ''),
-      templateName  : TEMPLATE_NAME,
-      languageCode  : TEMPLATE_LANG,
-      variables,
-      phoneNumberId : eventsPnId,
-    });
-  } catch (e) {
-    if (e instanceof MetaNotConfiguredError) {
-      return {
-        ok: false, skipped: true,
-        reason: 'Meta-config ontbreekt: ' + (e.missing || []).join(', '),
-      };
-    }
-    console.error('[events-attendee-send-invite] Meta send:', e?.message || e);
-    return { ok: false, error: 'Meta send failed: ' + (e?.message || 'unknown') };
-  }
-  const wamid = metaResult && metaResult.wamid ? String(metaResult.wamid) : null;
-
-  // 7) Persist outbound whatsapp_messages.
-  const templateVarsForDb = sortedKeys.length
-    ? Object.fromEntries(sortedKeys.map((k) => [k, String(resolvedVariables[k] ?? '')]))
-    : null;
-
-  // Build preview-body voor chat-history.
-  let previewBody = null;
-  if (templateRow.body_text && sortedKeys.length) {
-    let rendered = String(templateRow.body_text);
-    for (const k of sortedKeys) {
-      const re = new RegExp(`\\{\\{${k}\\}\\}`, 'g');
-      rendered = rendered.replace(re, String(resolvedVariables[k] ?? ''));
-    }
-    previewBody = rendered;
-  } else if (templateRow.body_text) {
-    previewBody = String(templateRow.body_text);
-  }
-
-  const nowIso = new Date().toISOString();
-  const insertRow = {
-    conversation_id   : convId,
-    direction         : 'out',
-    meta_wamid        : wamid,
-    body              : previewBody,
-    template_name     : TEMPLATE_NAME,
-    template_variables: templateVarsForDb,
-    status            : 'queued',
-    sent_at           : nowIso,
-    sent_by_user_id   : user.id,
-  };
-  let insertedId = null;
-  try {
-    const { data: inserted, error: insErr } = await supabaseAdmin
-      .from('whatsapp_messages')
-      .insert(insertRow)
-      .select('id')
-      .single();
-    if (insErr) {
-      console.error('[events-attendee-send-invite] message persist:', insErr.message);
-    } else {
-      insertedId = inserted?.id || null;
-    }
-  } catch (e) {
-    console.error('[events-attendee-send-invite] message persist exception:', e?.message || e);
-  }
-
-  // Update conv.last_message_at + preview (best-effort).
-  try {
-    await supabaseAdmin
-      .from('whatsapp_conversations')
-      .update({
-        last_message_at     : nowIso,
-        last_message_preview: previewBody ? String(previewBody).slice(0, 120) : null,
-      })
-      .eq('id', convId);
-  } catch (e) {
-    console.error('[events-attendee-send-invite] conv update:', e?.message || e);
-  }
-
-  return {
-    ok          : true,
-    message_id  : insertedId,
-    meta_wamid  : wamid,
-    conv_id     : convId,
-    conv_created: convCreated,
-  };
 }
 
 // ── Handler ────────────────────────────────────────────────────────────────
@@ -318,8 +113,6 @@ export default async function handler(req, res) {
     if (attErr) throw new Error('attendee fetch: ' + attErr.message);
     if (!attendee) return res.status(404).json({ error: 'Deelnemer niet gevonden.' });
     if (!attendee.choice_token) {
-      // Mag in productie niet voorkomen (NOT NULL DEFAULT in migratie),
-      // maar defensief: zonder token kan de link niet werken.
       return res.status(500).json({ error: 'Deelnemer mist choice_token (data-anomalie).' });
     }
 
@@ -335,9 +128,15 @@ export default async function handler(req, res) {
     // Build keuze-link (zelfde patroon als attendee.keuze_link template-var).
     const keuzeLink = `${PUBLIC_BASE_URL}/modules/event-keuze.html?t=${encodeURIComponent(attendee.choice_token)}`;
 
-    // Parallel: WhatsApp + Mail. Beide independent.
+    // Parallel: WhatsApp via herbruikbare lib + bespoke operator-mail.
     const [waResult, mailResult] = await Promise.all([
-      sendInviteWhatsApp({ attendee, event, user }),
+      sendEventWhatsAppTemplate({
+        attendee,
+        event,
+        templateName : TEMPLATE_NAME,
+        languageCode : TEMPLATE_LANG,
+        sentByUserId : user.id,
+      }),
       sendInviteMail({
         firstName: attendee.first_name,
         keuzeLink,
