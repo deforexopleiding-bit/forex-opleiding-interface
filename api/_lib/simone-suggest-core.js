@@ -209,7 +209,22 @@ export async function runSimoneSuggest({
 
   // Simone is hard-coded gebonden aan module='events'. We resolven moduleCtx
   // alleen voor afdeling-vars in de prompt; de config-lookup is altijd events.
+  //
+  // Fase 2 stap 2c hardening: expliciete guard — Simone opereert ALLEEN op
+  // events-conversations. Reactieve webhook-pad gaat al door isEventsLijn-gate;
+  // manual-knop op events.html werkt alleen op events-conv; finance-conv die
+  // per ongeluk doorgegeven wordt → expliciete afwijzing.
   const moduleCtx = await getModuleContextByPhoneNumberId(supabase, conv.phone_number_id);
+  if (moduleCtx?.module !== 'events') {
+    return {
+      status: 422,
+      body: {
+        error: 'conversation_module_mismatch',
+        message: 'Simone is alleen beschikbaar voor events-conversations.',
+        resolved_module: moduleCtx?.module || null,
+      },
+    };
+  }
 
   const { data: cfg, error: cfgErr } = await supabase
     .from('joost_config')

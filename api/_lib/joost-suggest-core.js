@@ -155,10 +155,24 @@ export async function runJoostSuggest({
   if (convErr) throw new Error('conversation lookup: ' + convErr.message);
   if (!conv) return { status: 404, body: { error: 'Conversation niet gevonden' } };
 
-  // Module-resolve via whatsapp_module_config (exact phone_number_id match,
-  // fallback 'finance'). Default 'finance' als ook fallback null is.
+  // Module-resolve via whatsapp_module_config (exact phone_number_id match).
+  // Fase 2 stap 2c hardening: Joost opereert ALLEEN op finance — geen stille
+  // default-naar-finance bij een onbekende of cross-module conv. Reactieve
+  // webhook-pad gaat al door isFinanceLijn-gate (inbox-webhook); manual-knop
+  // op finance.html werkt alleen op finance-conv; events-conv die per
+  // ongeluk doorgegeven wordt → expliciete afwijzing.
   const moduleCtx = await getModuleContextByPhoneNumberId(supabase, conv.phone_number_id);
-  const resolvedModule = moduleCtx?.module || 'finance';
+  if (moduleCtx?.module !== 'finance') {
+    return {
+      status: 422,
+      body: {
+        error: 'conversation_module_mismatch',
+        message: 'Joost is alleen beschikbaar voor finance-conversations.',
+        resolved_module: moduleCtx?.module || null,
+      },
+    };
+  }
+  const resolvedModule = 'finance';
 
   const { data: cfg, error: cfgErr } = await supabase
     .from('joost_config')
