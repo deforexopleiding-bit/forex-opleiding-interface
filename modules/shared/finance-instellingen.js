@@ -1949,6 +1949,20 @@
     { key: 'bedrijf.btw',      label: 'BTW-nummer',       category: 'bedrijf', example: 'NL123456789B01' },
     { key: 'bedrijf.telefoon', label: 'Bedrijfstelefoon', category: 'bedrijf', example: '+31201234567' },
     { key: 'bedrijf.email',    label: 'Bedrijfse-mail',   category: 'bedrijf', example: 'info@deforexopleiding.nl' },
+    // event (Fase 4 / Fase 3a) — Events-module
+    { key: 'event.titel',      label: 'Event-titel', category: 'event', example: 'Forex Masterclass' },
+    { key: 'event.datum',      label: 'Datum',       category: 'event', example: 'zaterdag 20 juni 2026' },
+    { key: 'event.starttijd',  label: 'Starttijd',   category: 'event', example: '10:00' },
+    { key: 'event.eindtijd',   label: 'Eindtijd',    category: 'event', example: '13:00' },
+    { key: 'event.locatie',    label: 'Locatie',     category: 'event', example: 'Van der Valk, Gent' },
+    { key: 'event.niveau',     label: 'Niveau',      category: 'event', example: 'Basis' },
+    // attendee (Fase 3a / 3a-extra) — Events-module deelnemer
+    { key: 'attendee.voornaam',   label: 'Voornaam',       category: 'attendee', example: 'Jeffrey' },
+    { key: 'attendee.achternaam', label: 'Achternaam',     category: 'attendee', example: 'Biemold' },
+    { key: 'attendee.naam',       label: 'Volledige naam', category: 'attendee', example: 'Jeffrey Biemold' },
+    { key: 'attendee.email',      label: 'E-mail',         category: 'attendee', example: 'naam@voorbeeld.nl' },
+    { key: 'attendee.telefoon',   label: 'Telefoon',       category: 'attendee', example: '+31 6 12345678' },
+    { key: 'attendee.keuze_link', label: 'Keuze-link',     category: 'attendee', example: 'https://forex-opleiding-interface.vercel.app/modules/event-keuze.html?t=...' },
     // datum
     { key: 'datum.vandaag',     label: 'Datum vandaag', category: 'datum', example: '09-06-2026' },
     { key: 'datum.deze_maand',  label: 'Deze maand',    category: 'datum', example: 'juni 2026' },
@@ -1961,9 +1975,15 @@
     klant:    'Klant (aggregaties)',
     afdeling: 'Afdeling (contact-info)',
     bedrijf:  'Bedrijfsgegevens',
+    event:    'Event',
+    attendee: 'Deelnemer',
     datum:    'Datum',
   };
-  const WA_VAR_CATEGORY_ORDER = ['customer', 'invoice', 'klant', 'afdeling', 'bedrijf', 'datum'];
+  // Voorkeursvolgorde voor bekende categorieën. Onbekende categorieën uit
+  // WA_VAR_REGISTRY worden bij render automatisch achter de bekende geplakt
+  // (in volgorde van eerste verschijning), zodat toekomstige categorieën
+  // direct in de picker verschijnen zonder code-wijziging.
+  const WA_VAR_CATEGORY_ORDER = ['customer', 'invoice', 'klant', 'afdeling', 'bedrijf', 'event', 'attendee', 'datum'];
   const WA_VAR_BY_KEY = (() => {
     const m = new Map();
     WA_VAR_REGISTRY.forEach(v => m.set(v.key, v));
@@ -2207,7 +2227,22 @@
       if (!byCat.has(v.category)) byCat.set(v.category, []);
       byCat.get(v.category).push(v);
     });
-    const html = WA_VAR_CATEGORY_ORDER.filter(c => byCat.has(c)).map((cat, idx) => {
+    // Render-volgorde: eerst bekende categorieën uit WA_VAR_CATEGORY_ORDER,
+    // dan eventueel onbekende categorieën (uit registry maar niet in ORDER)
+    // in volgorde van eerste verschijning. Zo verschijnen toekomstige
+    // categorieën automatisch in de picker zonder hier code te wijzigen.
+    const seen = new Set();
+    const renderOrder = [];
+    WA_VAR_CATEGORY_ORDER.forEach(c => {
+      if (byCat.has(c) && !seen.has(c)) { renderOrder.push(c); seen.add(c); }
+    });
+    WA_VAR_REGISTRY.forEach(v => {
+      if (!seen.has(v.category) && byCat.has(v.category)) {
+        renderOrder.push(v.category);
+        seen.add(v.category);
+      }
+    });
+    const html = renderOrder.map((cat, idx) => {
       const items = byCat.get(cat);
       const open = idx === 0 ? ' open' : '';
       const label = WA_VAR_CATEGORY_LABELS[cat] || cat;
