@@ -83,6 +83,7 @@ export default async function handler(req, res) {
       .from('event_attendees')
       .select(`
         id, event_id, first_name, last_name, email, phone, status,
+        attendance_status, outcome,
         customer_id, deal_id, subscription_id,
         ghl_contact_id, ghl_form_submission_id, assessment_response_id,
         switched_from_event_id, switched_at,
@@ -134,9 +135,36 @@ export default async function handler(req, res) {
       }
     }
 
+    // PR Z: sale-detectie via gekoppelde deals — pure flag, geen handmatige optie.
+    // Een attendee is "sale" als zijn deal_id een tl_quotation_status in
+    // ('accepted','signed') heeft, of een tl_quotation_accepted_at-stempel.
+    const signedDealIds = new Set();
+    const dealIds = Array.from(new Set((rows || []).map((r) => r.deal_id).filter(Boolean)));
+    if (dealIds.length > 0) {
+      try {
+        const { data: deals, error: dealErr } = await supabaseAdmin
+          .from('deals')
+          .select('id, tl_quotation_status, tl_quotation_accepted_at')
+          .in('id', dealIds);
+        if (dealErr) {
+          console.error('[events-attendees-list deals]', dealErr.message);
+        } else {
+          for (const d of deals || []) {
+            const st = String(d.tl_quotation_status || '').toLowerCase();
+            if (st === 'accepted' || st === 'signed' || d.tl_quotation_accepted_at) {
+              signedDealIds.add(d.id);
+            }
+          }
+        }
+      } catch (e) {
+        console.error('[events-attendees-list deals-fetch]', e?.message || e);
+      }
+    }
+
     const items = (rows || []).map((r) => ({
       ...r,
       tags: tagsByAttendee.get(r.id) || [],
+      has_signed_deal: !!(r.deal_id && signedDealIds.has(r.deal_id)),
     }));
 
     // byStatus counts (zonder paginatie, zonder status-filter, met search).

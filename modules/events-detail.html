@@ -1415,6 +1415,8 @@ async function submitEvEdit() {
 
 // ── Actions: Event afronden (F5.1) ───────────────────────────────────────────
 
+// PR Z: 'Niet geïnteresseerd' is verplaatst naar de Uitkomst-laag
+// (outcome='geen_interesse'); reden hoort nu bij follow-up zelf.
 const FOLLOWUP_REASONS = [
   'Terugbellen — twijfelt nog',
   'Geen budget nu — later benaderen',
@@ -1422,8 +1424,16 @@ const FOLLOWUP_REASONS = [
   'Meer info gewenst',
   'Verkeerd moment',
   'Niet bereikbaar',
-  'Niet geïnteresseerd',
 ];
+
+// PR Z: uitkomst-dropdown bij attendance_status='aanwezig'
+const ATT_OUTCOMES = [
+  { value: 'opvolgen',        label: 'Opvolgen' },
+  { value: 'geen_interesse',  label: 'Geen interesse' },
+  { value: 'nog_onbekend',    label: 'Nog onbekend' },
+];
+
+let _evCompleteFollowupOwners = []; // [{ id, full_name, email }]
 
 let _evCompleteExpenses = []; // [{ amount, vendor, spent_at, note, mentor_team_member_ids:[] }]
 let _evCompleteAllMentors = []; // F5.1+: alle rol-mentoren (events-mentors-available) gemerget met was_present uit event_mentors
@@ -1473,6 +1483,17 @@ async function openEvCompleteModal() {
       was_present   : presentByTm.get(m.id) === true,
     }));
 
+    // PR Z: laad owner-opties voor follow-up (best-effort; bij faal valt
+    // de dropdown terug op een lege keuze = default-owner server-side).
+    try {
+      const ur = await window.AgentShared.apiFetch('/api/profiles-list');
+      const uj = await ur.json().catch(() => ({}));
+      _evCompleteFollowupOwners = Array.isArray(uj.members) ? uj.members : [];
+    } catch (e) {
+      console.error('[evCompleteModal] owners load', e);
+      _evCompleteFollowupOwners = [];
+    }
+
     renderEvCompleteAttendees(state.attendees || []);
     renderEvCompleteMentors(_evCompleteAllMentors);
   } catch (e) {
@@ -1494,35 +1515,76 @@ function renderEvCompleteAttendees(list) {
     host.innerHTML = '<div style="font-size:12.5px;color:var(--text-dim)">Geen actieve deelnemers.</div>';
     return;
   }
-  const reasonOpts = FOLLOWUP_REASONS.map((r) => `<option value="${esc(r)}">${esc(r)}</option>`).join('');
+  // PR Z: 2-laags model
+  //   Laag 1 — Aanwezigheid (radio: aanwezig|no_show|afgemeld).
+  //   Laag 2 — Uitkomst (dropdown), alleen bij Aanwezig.
+  //   Follow-up block bij Aanwezig+opvolgen OF No-show (nabellen).
+  //   Sale-badge: read-only, getoond als attendee een getekende offerte heeft.
+  const reasonOpts   = FOLLOWUP_REASONS.map((r) => `<option value="${esc(r)}">${esc(r)}</option>`).join('');
+  const outcomeOpts  = ATT_OUTCOMES.map((o) => `<option value="${esc(o.value)}">${esc(o.label)}</option>`).join('');
+  const ownerOpts    = _evCompleteFollowupOwners.map((u) => {
+    const label = u.full_name || u.email || u.id;
+    return `<option value="${esc(u.id)}">${esc(label)}</option>`;
+  }).join('');
+  // Default follow-up datum = vandaag + 7 dagen (yyyy-mm-dd lokaal).
+  const _d = new Date(); _d.setDate(_d.getDate() + 7);
+  const pad = (n) => String(n).padStart(2, '0');
+  const defaultFollowupDate = `${_d.getFullYear()}-${pad(_d.getMonth() + 1)}-${pad(_d.getDate())}`;
+
   host.innerHTML = rows.map((a) => {
     const naam = [a.first_name, a.last_name].filter(Boolean).join(' ') || a.email || '(zonder naam)';
     const initial = (a.attendance_status === 'aanwezig' || a.attendance_status === 'no_show' || a.attendance_status === 'afgemeld')
       ? a.attendance_status : 'aanwezig';
+    const initialOutcome = (a.outcome === 'opvolgen' || a.outcome === 'geen_interesse' || a.outcome === 'nog_onbekend')
+      ? a.outcome : '';
+    const saleBadge = a.has_signed_deal
+      ? '<span title="Klant heeft een getekende offerte — telt als sale" style="display:inline-flex;align-items:center;gap:4px;margin-left:6px;padding:2px 8px;border-radius:99px;font-size:11px;font-weight:700;background:rgba(5,150,105,0.18);color:#059669"><i class="ti ti-circle-check"></i> Sale</span>'
+      : '';
     return `
-      <div class="evc-att-row" data-att="${esc(a.id)}" style="display:grid;grid-template-columns:1fr auto;gap:8px;padding:8px 0;border-bottom:1px solid var(--border)">
-        <div>
-          <div style="font-size:13.5px;font-weight:600">${esc(naam)}</div>
-          ${a.email ? `<div style="font-size:11.5px;color:var(--text-faint)">${esc(a.email)}</div>` : ''}
-          <div class="evc-reason-wrap" style="margin-top:6px; display:${initial === 'no_show' ? 'block' : 'none'}">
-            <select class="evc-reason" style="font-size:12.5px;padding:5px 8px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);width:100%">
-              <option value="">— Reden (optioneel)</option>
-              ${reasonOpts}
-            </select>
+      <div class="evc-att-row" data-att="${esc(a.id)}" style="padding:10px 0;border-bottom:1px solid var(--border)">
+        <div style="display:grid;grid-template-columns:1fr auto;gap:8px;align-items:flex-start">
+          <div>
+            <div style="font-size:13.5px;font-weight:600">${esc(naam)}${saleBadge}</div>
+            ${a.email ? `<div style="font-size:11.5px;color:var(--text-faint)">${esc(a.email)}</div>` : ''}
+          </div>
+          <div style="display:flex;gap:4px;flex-wrap:wrap;justify-content:flex-end">
+            <label class="evc-st" style="font-size:12px;padding:4px 9px;border:1px solid var(--border);border-radius:99px;cursor:pointer"><input type="radio" name="evc_${esc(a.id)}" value="aanwezig" ${initial === 'aanwezig' ? 'checked' : ''} style="display:none"> Aanwezig</label>
+            <label class="evc-st" style="font-size:12px;padding:4px 9px;border:1px solid var(--border);border-radius:99px;cursor:pointer"><input type="radio" name="evc_${esc(a.id)}" value="no_show" ${initial === 'no_show' ? 'checked' : ''} style="display:none"> No-show</label>
+            <label class="evc-st" style="font-size:12px;padding:4px 9px;border:1px solid var(--border);border-radius:99px;cursor:pointer"><input type="radio" name="evc_${esc(a.id)}" value="afgemeld" ${initial === 'afgemeld' ? 'checked' : ''} style="display:none"> Afgemeld</label>
           </div>
         </div>
-        <div style="display:flex;gap:4px;align-items:flex-start;flex-wrap:wrap;justify-content:flex-end">
-          <label class="evc-st" style="font-size:12px;padding:4px 9px;border:1px solid var(--border);border-radius:99px;cursor:pointer"><input type="radio" name="evc_${esc(a.id)}" value="aanwezig" ${initial === 'aanwezig' ? 'checked' : ''} style="display:none"> Aanwezig</label>
-          <label class="evc-st" style="font-size:12px;padding:4px 9px;border:1px solid var(--border);border-radius:99px;cursor:pointer"><input type="radio" name="evc_${esc(a.id)}" value="no_show" ${initial === 'no_show' ? 'checked' : ''} style="display:none"> No-show</label>
-          <label class="evc-st" style="font-size:12px;padding:4px 9px;border:1px solid var(--border);border-radius:99px;cursor:pointer"><input type="radio" name="evc_${esc(a.id)}" value="afgemeld" ${initial === 'afgemeld' ? 'checked' : ''} style="display:none"> Afgemeld</label>
+
+        <div class="evc-outcome-wrap" style="margin-top:8px;display:${initial === 'aanwezig' ? 'flex' : 'none'};align-items:center;gap:8px">
+          <label style="font-size:11.5px;color:var(--text-dim);font-weight:600;min-width:70px">Uitkomst</label>
+          <select class="evc-outcome" style="font-size:12.5px;padding:5px 8px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);flex:1">
+            <option value="">— Kies</option>
+            ${outcomeOpts}
+          </select>
+        </div>
+
+        <div class="evc-followup-wrap" style="margin-top:8px;display:none;padding:10px;border:1px dashed var(--border);border-radius:8px;background:var(--bg-elev)">
+          <div style="font-size:11.5px;color:var(--text-dim);font-weight:600;margin-bottom:6px">
+            <i class="ti ti-arrow-iteration"></i> Follow-up — komt in Dave's scherm
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 130px 1fr;gap:6px">
+            <select class="evc-fu-reason" style="font-size:12.5px;padding:5px 8px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text)">
+              <option value="">— Reden</option>
+              ${reasonOpts}
+            </select>
+            <input type="date" class="evc-fu-date" value="${esc(defaultFollowupDate)}" style="font-size:12.5px;padding:5px 8px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text)">
+            <select class="evc-fu-owner" style="font-size:12.5px;padding:5px 8px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text)">
+              <option value="">— Eigenaar (default)</option>
+              ${ownerOpts}
+            </select>
+          </div>
         </div>
       </div>`;
   }).join('');
 
-  // Visual selected-state + toon/verberg reason bij no_show
+  // Visual selected-state + toon/verberg outcome + follow-up
   function applyVisual(rowEl) {
     const checked = rowEl.querySelector('input[type=radio]:checked');
-    const val = checked ? checked.value : null;
+    const attVal = checked ? checked.value : null;
     rowEl.querySelectorAll('.evc-st').forEach((lb) => {
       const ri = lb.querySelector('input[type=radio]');
       const sel = ri && ri.checked;
@@ -1531,14 +1593,27 @@ function renderEvCompleteAttendees(list) {
       lb.style.color = sel ? '#0a2f63' : 'var(--text-dim)';
       lb.style.fontWeight = sel ? '700' : '600';
     });
-    const rWrap = rowEl.querySelector('.evc-reason-wrap');
-    if (rWrap) rWrap.style.display = (val === 'no_show') ? 'block' : 'none';
+
+    const outcomeWrap = rowEl.querySelector('.evc-outcome-wrap');
+    const outcomeSel  = rowEl.querySelector('.evc-outcome');
+    const fuWrap      = rowEl.querySelector('.evc-followup-wrap');
+
+    // Laag 2: uitkomst alleen bij Aanwezig.
+    if (outcomeWrap) outcomeWrap.style.display = (attVal === 'aanwezig') ? 'flex' : 'none';
+    if (attVal !== 'aanwezig' && outcomeSel) outcomeSel.value = '';
+
+    // Follow-up bij no-show OF (aanwezig + opvolgen).
+    const showFu = (attVal === 'no_show') ||
+                   (attVal === 'aanwezig' && outcomeSel && outcomeSel.value === 'opvolgen');
+    if (fuWrap) fuWrap.style.display = showFu ? 'block' : 'none';
   }
   host.querySelectorAll('.evc-att-row').forEach((row) => {
     applyVisual(row);
     row.querySelectorAll('input[type=radio]').forEach((ri) => {
       ri.addEventListener('change', () => applyVisual(row));
     });
+    const outcomeSel = row.querySelector('.evc-outcome');
+    if (outcomeSel) outcomeSel.addEventListener('change', () => applyVisual(row));
   });
 }
 
@@ -1662,10 +1737,29 @@ async function submitEvComplete() {
       const status = (r.querySelector('input[type=radio]:checked') || {}).value;
       if (!status) throw new Error('Kies een aanwezigheids-status voor elke deelnemer.');
       const item = { attendee_id: attId, attendance_status: status };
-      if (status === 'no_show') {
-        const reasonSel = r.querySelector('.evc-reason');
-        if (reasonSel && reasonSel.value) item.followup_reason = reasonSel.value;
+
+      // PR Z: outcome alleen bij Aanwezig.
+      if (status === 'aanwezig') {
+        const outcomeSel = r.querySelector('.evc-outcome');
+        const outcomeVal = outcomeSel ? outcomeSel.value : '';
+        if (outcomeVal) item.outcome = outcomeVal;
       }
+
+      // PR Z: follow-up triggert bij no_show (nabellen) OF aanwezig+opvolgen.
+      const triggersFollowup = (status === 'no_show') ||
+                               (status === 'aanwezig' && item.outcome === 'opvolgen');
+      if (triggersFollowup) {
+        const reasonSel = r.querySelector('.evc-fu-reason');
+        const dateInp   = r.querySelector('.evc-fu-date');
+        const ownerSel  = r.querySelector('.evc-fu-owner');
+        const fu = {
+          reason         : (reasonSel && reasonSel.value) ? reasonSel.value : null,
+          follow_up_date : (dateInp   && dateInp.value)   ? dateInp.value   : null,
+          owner_id       : (ownerSel  && ownerSel.value)  ? ownerSel.value  : null,
+        };
+        item.followup = fu;
+      }
+
       attendees.push(item);
     }
 
@@ -1702,7 +1796,10 @@ async function submitEvComplete() {
     if (!r.ok) throw new Error(j.error || ('HTTP ' + r.status));
 
     const s = j.summary || {};
-    const msg = `Afgerond — ${s.attendees_updated || 0} deelnemer(s), ${s.mentors_marked_present || 0} mentor(en), ${s.expenses_inserted || 0} uitgave(n). Ledger: ${s.bonus_entries_created || 0} bonus + ${s.expense_entries_created || 0} uitgave-entries.`;
+    const fuPart = (s.followups_created || s.followups_updated)
+      ? ` · Follow-ups: ${s.followups_created || 0} nieuw + ${s.followups_updated || 0} bijgewerkt`
+      : '';
+    const msg = `Afgerond — ${s.attendees_updated || 0} deelnemer(s), ${s.mentors_marked_present || 0} mentor(en), ${s.expenses_inserted || 0} uitgave(n). Ledger: ${s.bonus_entries_created || 0} bonus + ${s.expense_entries_created || 0} uitgave-entries.${fuPart}`;
     window.AgentShared?.showToast?.(msg, 'success');
     if (Array.isArray(s.warnings) && s.warnings.length > 0) {
       console.warn('[events-complete] warnings:', s.warnings);

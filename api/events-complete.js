@@ -54,8 +54,10 @@ import { computeDealTotals } from './_lib/deal-total.js';
 
 const UUID_RE   = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const ATT_SET   = new Set(['aanwezig', 'no_show', 'afgemeld']);
+const OUTCOME_SET = new Set(['opvolgen', 'geen_interesse', 'nog_onbekend']);
 const ACCEPTED  = new Set(['accepted', 'signed']);
 const BONUS_PCT = 3;  // % van excl-BTW dealwaarde
+const DEFAULT_FOLLOWUP_OWNER_ID = process.env.DEFAULT_EVENT_FOLLOWUP_OWNER_ID || null;
 
 function round2(n) { return Math.round(Number(n) * 100) / 100; }
 
@@ -105,6 +107,27 @@ export default async function handler(req, res) {
     if (!ATT_SET.has(String(a.attendance_status || ''))) {
       return res.status(400).json({ error: `attendance_status ongeldig voor ${a.attendee_id}` });
     }
+    // PR Z: outcome optioneel; alleen geldig bij Aanwezig.
+    if (a.outcome != null) {
+      if (!OUTCOME_SET.has(String(a.outcome))) {
+        return res.status(400).json({ error: `outcome ongeldig voor ${a.attendee_id}` });
+      }
+      if (a.attendance_status !== 'aanwezig') {
+        return res.status(400).json({ error: `outcome alleen toegestaan bij attendance_status='aanwezig' (${a.attendee_id})` });
+      }
+    }
+    // PR Z: followup-object optioneel.
+    if (a.followup != null) {
+      if (typeof a.followup !== 'object' || Array.isArray(a.followup)) {
+        return res.status(400).json({ error: `followup moet object zijn voor ${a.attendee_id}` });
+      }
+      if (a.followup.follow_up_date && !isDateString(a.followup.follow_up_date)) {
+        return res.status(400).json({ error: `followup.follow_up_date moet YYYY-MM-DD zijn (${a.attendee_id})` });
+      }
+      if (a.followup.owner_id != null && !UUID_RE.test(String(a.followup.owner_id))) {
+        return res.status(400).json({ error: `followup.owner_id ongeldig (${a.attendee_id})` });
+      }
+    }
   }
   for (const m of presentMentorIds) {
     if (!UUID_RE.test(String(m || ''))) return res.status(400).json({ error: 'present_team_member_ids: uuid verwacht' });
@@ -128,6 +151,8 @@ export default async function handler(req, res) {
     expenses_inserted      : 0,
     bonus_entries_created  : 0,
     expense_entries_created: 0,
+    followups_created      : 0,
+    followups_updated      : 0,
     skipped                : {},
     total_bonus_amount     : 0,
     total_expense_amount   : 0,
@@ -166,10 +191,15 @@ export default async function handler(req, res) {
       if (cErr) throw new Error('event complete update: ' + cErr.message);
     }
 
-    // ── 3) Per attendee: status + followup_reason ──────────────────────────
+    // ── 3) Per attendee: attendance_status + outcome (PR Z) ───────────────
     for (const a of attendeesIn) {
       const upd = { attendance_status: a.attendance_status };
-      if (a.followup_reason != null) upd.followup_reason = String(a.followup_reason).slice(0, 500);
+      // PR Z: outcome alleen bij Aanwezig (validatie reeds gedaan); bij andere
+      // statussen expliciet leegmaken zodat her-afronden geen oude outcome
+      // laat staan op een no_show/afgemeld-rij.
+      upd.outcome = (a.attendance_status === 'aanwezig' && a.outcome) ? a.outcome : null;
+      // Legacy followup_reason kolom is uitgefaseerd in dit endpoint — reden
+      // hoort nu bij event_followups (zie sectie 6 hieronder).
       const { error: aErr } = await supabaseAdmin
         .from('event_attendees')
         .update(upd)
@@ -180,6 +210,100 @@ export default async function handler(req, res) {
         summary.warnings.push(`attendee ${a.attendee_id}: ${aErr.message}`);
       } else {
         summary.attendees_updated += 1;
+      }
+    }
+
+    // ── 3b) Event follow-ups (PR Z) — UPSERT op partial unique index ──────
+    // Triggers: attendance_status='no_show' (nabellen) OF
+    //           (attendance_status='aanwezig' AND outcome='opvolgen').
+    // Idempotent: exact 1 open-rij per attendee dankzij
+    //   event_followups_one_open_per_attendee (UNIQUE WHERE status='open').
+    // Bij her-afronden: bestaande open-rij UPDATE; bij eerste keer: INSERT.
+    for (const a of attendeesIn) {
+      const triggers = (a.attendance_status === 'no_show') ||
+                       (a.attendance_status === 'aanwezig' && a.outcome === 'opvolgen');
+      if (!triggers) continue;
+      if (!a.followup || typeof a.followup !== 'object') continue;
+
+      const reasonText  = a.followup.reason != null ? String(a.followup.reason).slice(0, 500) : null;
+      const followDate  = a.followup.follow_up_date || null;
+      const ownerId     = a.followup.owner_id || DEFAULT_FOLLOWUP_OWNER_ID || null;
+
+      try {
+        // Zoek bestaande open-rij voor deze attendee (idempotent).
+        const { data: existing, error: selErr } = await supabaseAdmin
+          .from('event_followups')
+          .select('id')
+          .eq('attendee_id', a.attendee_id)
+          .eq('status', 'open')
+          .maybeSingle();
+        if (selErr) {
+          summary.warnings.push(`followup-lookup ${a.attendee_id}: ${selErr.message}`);
+          continue;
+        }
+        if (existing) {
+          const { error: upErr } = await supabaseAdmin
+            .from('event_followups')
+            .update({
+              event_id      : eventId,
+              reason        : reasonText,
+              follow_up_date: followDate,
+              owner_id      : ownerId,
+            })
+            .eq('id', existing.id);
+          if (upErr) {
+            summary.warnings.push(`followup-update ${a.attendee_id}: ${upErr.message}`);
+          } else {
+            summary.followups_updated += 1;
+          }
+        } else {
+          const { error: insErr } = await supabaseAdmin
+            .from('event_followups')
+            .insert({
+              attendee_id   : a.attendee_id,
+              event_id      : eventId,
+              reason        : reasonText,
+              follow_up_date: followDate,
+              owner_id      : ownerId,
+              status        : 'open',
+              created_by    : user.id,
+            });
+          if (insErr) {
+            // 23505 = unique-violation op de partial index (race condition).
+            // Behandel als update-pad: refetch + update.
+            if (insErr.code === '23505') {
+              const { data: again } = await supabaseAdmin
+                .from('event_followups')
+                .select('id')
+                .eq('attendee_id', a.attendee_id)
+                .eq('status', 'open')
+                .maybeSingle();
+              if (again) {
+                const { error: upErr2 } = await supabaseAdmin
+                  .from('event_followups')
+                  .update({
+                    event_id      : eventId,
+                    reason        : reasonText,
+                    follow_up_date: followDate,
+                    owner_id      : ownerId,
+                  })
+                  .eq('id', again.id);
+                if (upErr2) {
+                  summary.warnings.push(`followup-race-update ${a.attendee_id}: ${upErr2.message}`);
+                } else {
+                  summary.followups_updated += 1;
+                }
+              }
+            } else {
+              summary.warnings.push(`followup-insert ${a.attendee_id}: ${insErr.message}`);
+            }
+          } else {
+            summary.followups_created += 1;
+          }
+        }
+      } catch (e) {
+        console.error('[events-complete followup]', a.attendee_id, e?.message || e);
+        summary.warnings.push(`followup ${a.attendee_id}: ${e?.message || 'unknown'}`);
       }
     }
 
