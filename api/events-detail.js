@@ -54,6 +54,7 @@ export default async function handler(req, res) {
         description_md, webflow_item_id, webflow_sync_status, webflow_last_synced_at,
         ghl_sync_status, ghl_last_synced_at,
         signups_closed, signups_closed_at, signups_closed_reason, signups_closed_by_user_id,
+        completed_at, completed_by,
         created_by_user_id, created_at, updated_at,
         event_niveau_options:niveau ( slug, label )
       `)

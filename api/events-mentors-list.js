@@ -45,8 +45,8 @@ export default async function handler(req, res) {
     const { data, error } = await supabaseAdmin
       .from('event_mentors')
       .select(`
-        team_member_id, added_at, added_by_user_id,
-        team_members:team_member_id ( id, name, role, type, email, avatar_emoji, avatar_color, is_active )
+        team_member_id, added_at, added_by_user_id, was_present,
+        team_members:team_member_id ( id, name, role, type, email, avatar_emoji, avatar_color, is_active, user_id )
       `)
       .eq('event_id', eventId)
       .order('added_at', { ascending: true });
@@ -63,6 +63,9 @@ export default async function handler(req, res) {
         avatar_emoji:     tm.avatar_emoji || null,
         avatar_color:     tm.avatar_color || null,
         is_active:        tm.is_active !== false,
+        user_id:          tm.user_id || null,
+        user_linked:      !!tm.user_id,
+        was_present:      !!row.was_present,
         added_at:         row.added_at,
         added_by_user_id: row.added_by_user_id,
       };
