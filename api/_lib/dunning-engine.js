@@ -24,6 +24,7 @@ import {
   executeWaitStep,
   executeTaskStep,
 } from './dunning-step-executors.js';
+import { markOverdue } from './mentor-ledger-engine.js';
 
 const OPEN_STATUSES = ['open', 'partially_paid', 'overdue'];
 
@@ -261,6 +262,18 @@ async function detectAndStartRuns(startedAt, abortMs, errors) {
       if (elapsed(startedAt) > abortMs) break outer;
 
       if (agg.days_overdue < minDays) continue;
+
+      // F5.1 mentor-hook: zodra vaststaat dat de klant te laat is, openstaande
+      // bonus-entries (pending) van die klant op 'wachten_op_betaling' zetten.
+      // Non-blocking; engine is idempotent. Voor de matchesCustomerType-check
+      // zodat álle te late klanten gemarkeerd worden, niet alleen die binnen
+      // deze workflow vallen.
+      try {
+        await markOverdue({ customerId });
+      } catch (e) {
+        console.error('[dunning-engine] mentor-hook markOverdue:', e.message);
+      }
+
       if (!matchesCustomerType(agg.customer, customerType)) continue;
       if (agg.total_open_eur < minTotal) continue;
 

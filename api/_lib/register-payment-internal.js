@@ -12,6 +12,7 @@
 
 import { supabaseAdmin } from '../supabase.js';
 import { tlFetch } from './teamleader-token.js';
+import { releaseForPaidInvoice } from './mentor-ledger-engine.js';
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
@@ -188,6 +189,16 @@ export async function registerPaymentInternal(opts) {
   if (upErr) {
     console.error('[register-payment-internal] invoice update', upErr.message);
     throw new RegisterPaymentError('db', 'TL+payment OK maar invoice update faalde: ' + upErr.message);
+  }
+
+  // 5b. F5.1 mentor-hook: factuur volledig betaald → openstaande bonus-entries
+  // van deze klant vrijgeven. Non-blocking; engine is idempotent.
+  if (newStatus === 'paid' && inv.customer_id) {
+    try {
+      await releaseForPaidInvoice({ customerId: inv.customer_id, sourceInvoiceId: inv.id });
+    } catch (e) {
+      console.error('[register-payment-internal] mentor-hook releaseForPaidInvoice:', e.message);
+    }
   }
 
   // 6. Audit (fail-soft).

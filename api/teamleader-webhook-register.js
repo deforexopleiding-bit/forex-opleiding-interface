@@ -11,7 +11,7 @@ import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
 import { tlFetch, getActiveToken } from './_lib/teamleader-token.js';
 
-const EVENT_TYPES = ['deal.won', 'deal.moved'];
+const EVENT_TYPES = ['deal.won', 'deal.moved', 'deal.lost'];
 const WEBHOOK_URL = (process.env.PUBLIC_BASE_URL || 'https://forex-opleiding-interface.vercel.app') + '/api/teamleader-webhook';
 
 export default async function handler(req, res) {
