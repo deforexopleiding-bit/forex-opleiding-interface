@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Mentor-grootboek · De Forex Opleiding</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/dist/tabler-icons.min.css" />
+  <link rel="stylesheet" href="/modules/shared/agent-shared.css" />
+  <link rel="stylesheet" href="/styles/sales-redesign.css" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; }
+    body { font-family: 'Inter', system-ui, sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; -webkit-font-smoothing: antialiased; }
+    .app { margin-left: 220px; padding: 24px 28px 60px; max-width: 1280px; }
+
+    .page-head { display:flex; gap:16px; align-items:flex-start; justify-content:space-between; flex-wrap:wrap; padding-bottom: 14px; border-bottom: 1px solid var(--border); margin-bottom: 18px; }
+    .page-title { font-size: 22px; font-weight: 800; letter-spacing: -.3px; }
+    .page-sub { font-size: 13px; color: var(--text-dim); margin-top: 4px; }
+
+    .kpi-strip { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 18px; }
+    .kpi { background: var(--bg-elev); border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; }
+    .kpi .lbl { font-size: 11px; font-weight: 700; color: var(--text-faint); text-transform: uppercase; letter-spacing: .06em; margin-bottom: 6px; }
+    .kpi .val { font-size: 18px; font-weight: 700; color: var(--text); }
+    .kpi.netto-pos .val { color: #059669; }
+    .kpi.netto-neg .val { color: #b91c1c; }
+
+    h3.sec { font-size: 12px; font-weight: 700; color: var(--text-faint); text-transform: uppercase; letter-spacing: .06em; margin: 22px 0 10px; }
+
+    table.lt { width: 100%; border-collapse: collapse; font-size: 13px; background: var(--bg-elev); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+    table.lt th { text-align: left; font-weight: 600; color: var(--text-faint); padding: 8px 12px; font-size: 11px; text-transform: uppercase; letter-spacing: .05em; background: var(--bg-elev-2); border-bottom: 1px solid var(--border); }
+    table.lt td { padding: 9px 12px; border-bottom: 1px solid var(--border); }
+    table.lt tr:last-child td { border-bottom: none; }
+    table.lt td.num { text-align: right; font-variant-numeric: tabular-nums; }
+
+    .status-pill { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; }
+    .status-pending             { background: rgba(148,163,184,0.22); color: #475569; }
+    .status-wachten_op_betaling { background: rgba(245,158,11,0.18); color: #b45309; }
+    .status-vrijgegeven         { background: rgba(5,150,105,0.18); color: #047857; }
+    .status-geannuleerd         { background: rgba(148,163,184,0.18); color: var(--text-faint); }
+    .status-uitbetaald          { background: rgba(20,115,214,0.18); color: #1160bd; }
+
+    .empty-state { padding: 60px 20px; text-align: center; color: var(--text-faint); font-size: 13px; background: var(--bg-elev); border: 1px dashed var(--border); border-radius: 12px; }
+    .forbidden-card { background: var(--bg-elev); border: 1px solid var(--border); border-radius: 12px; padding: 32px 28px; max-width: 480px; margin: 40px auto; text-align: center; }
+    .forbidden-card h2 { font-size: 16px; font-weight: 700; margin-bottom: 6px; }
+    .forbidden-card p { font-size: 13px; color: var(--text-dim); margin-bottom: 16px; }
+    .forbidden-card a { color: var(--brand-secondary-light, #688b9b); text-decoration: none; font-size: 13px; font-weight: 500; }
+
+    .scope-badge { display: inline-block; font-size: 11px; padding: 2px 9px; border-radius: 10px; background: var(--bg-elev-2); color: var(--text-dim); font-weight: 600; }
+    .scope-badge.self { background: rgba(20,115,214,0.18); color: #1160bd; }
+
+    @media (max-width: 880px) {
+      .app { margin-left: 0; padding: 14px; }
+      .kpi-strip { grid-template-columns: 1fr 1fr; }
+    }
+  </style>
+</head>
+<body>
+<div id="sidebar-mount"></div>
+
+<div class="app" id="page-content">
+  <!-- gevuld door init() -->
+</div>
+
+<script src="/modules/shared/supabase-client.js"></script>
+<script src="/modules/shared/agent-shared.js"></script>
+<script src="/modules/shared/theme-shared.js"></script>
+<script src="/modules/shared/permissions.js"></script>
+<script src="/modules/shared/sidebar.js"></script>
+
+<script>
+const STATUS_LABELS = {
+  pending: 'Pending',
+  wachten_op_betaling: 'Wachten op betaling',
+  vrijgegeven: 'Vrijgegeven',
+  geannuleerd: 'Geannuleerd',
+  uitbetaald: 'Uitbetaald',
+};
+
+const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const eur = (n) => 'EUR ' + (Math.round((Number(n) || 0) * 100) / 100).toFixed(2).replace('.', ',');
+const fmtDate = (iso) => {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  if (!Number.isFinite(d.getTime())) return '—';
+  return d.toLocaleString('nl-NL', { day: '2-digit', month: 'short', year: 'numeric' });
+};
+
+function can(key) { return window.RBAC?.canSync?.(key) || false; }
+
+(async function init() {
+  try {
+    if (window._authSharedReady) await window._authSharedReady;
+    const profile = await window.AuthShared.requireAuth();
+    if (!profile) return;
+
+    if (!can('mentor.ledger.view')) {
+      document.getElementById('page-content').innerHTML = `
+        <div class="forbidden-card">
+          <h2>Geen toegang</h2>
+          <p>Je hebt geen rechten om het mentor-grootboek te bekijken.</p>
+          <a href="/index.html">← Terug naar dashboard</a>
+        </div>`;
+      return;
+    }
+
+    await loadOverview();
+  } catch (e) {
+    console.error('[mentor-grootboek] init', e);
+    document.getElementById('page-content').innerHTML = `<div class="empty-state">Laden mislukt: ${esc(e?.message || e)}</div>`;
+  }
+})();
+
+async function loadOverview() {
+  document.getElementById('page-content').innerHTML = '<div class="empty-state">Laden…</div>';
+  const r = await window.AgentShared.apiFetch('/api/mentor-ledger-overview');
+  const j = await r.json();
+  if (!r.ok) throw new Error(j?.error || 'Laden mislukt');
+  render(j);
+}
+
+function statusPill(key) {
+  return `<span class="status-pill status-${esc(key)}">${esc(STATUS_LABELS[key] || key)}</span>`;
+}
+
+function statusBreakdown(perStatus) {
+  const cells = Object.keys(STATUS_LABELS).map((k) => {
+    const v = Number(perStatus?.[k] || 0);
+    if (Math.abs(v) < 0.005) return '';
+    return `<div style="display:inline-flex;align-items:center;gap:5px;margin-right:8px">${statusPill(k)} <span style="font-variant-numeric:tabular-nums">${eur(v)}</span></div>`;
+  }).filter(Boolean).join('');
+  return cells || '<span style="color:var(--text-faint)">—</span>';
+}
+
+function render(data) {
+  const scope = data.scope || 'all';
+  const t = data.totals || {};
+  const nettoCls = (t.netto || 0) >= 0 ? 'netto-pos' : 'netto-neg';
+
+  const byEventRows = (data.byEvent || []).map((e) => `
+    <tr>
+      <td>${esc(e.event_title || '(zonder titel)')}</td>
+      <td>${esc(fmtDate(e.starts_at))}</td>
+      <td class="num">${eur(e.omzet)}</td>
+      <td class="num">${eur(e.bonuspot)}</td>
+      <td class="num">${eur(e.uitgaven)}</td>
+      <td class="num" style="font-weight:600;color:${(e.netto||0) >= 0 ? '#059669' : '#b91c1c'}">${eur(e.netto)}</td>
+      <td>${statusBreakdown(e.per_status)}</td>
+    </tr>
+  `).join('');
+
+  const byMentorRows = (data.byMentor || []).map((m) => `
+    <tr>
+      <td>${esc(m.mentor_name || m.mentor_email || '(onbekend)')}</td>
+      <td style="color:var(--text-faint);font-size:12px">${esc(m.mentor_email || '')}</td>
+      <td class="num" style="font-weight:600;color:${(m.saldo||0) >= 0 ? '#059669' : '#b91c1c'}">${eur(m.saldo)}</td>
+      <td class="num">${m.meegenomen_min_saldo > 0 ? eur(m.meegenomen_min_saldo) : '—'}</td>
+      <td>${statusBreakdown(m.per_status)}</td>
+    </tr>
+  `).join('');
+
+  document.getElementById('page-content').innerHTML = `
+    <div class="page-head">
+      <div>
+        <div class="page-title">Mentor-grootboek <span class="scope-badge ${scope === 'self' ? 'self' : ''}">${scope === 'self' ? 'eigen rijen' : 'alles'}</span></div>
+        <div class="page-sub">Bonussen, uitgaven en uitbetalingen per event en per mentor.</div>
+      </div>
+    </div>
+
+    <div class="kpi-strip">
+      <div class="kpi"><div class="lbl">Omzet (basis)</div><div class="val">${eur(t.omzet)}</div></div>
+      <div class="kpi"><div class="lbl">Bonuspot</div><div class="val">${eur(t.bonuspot)}</div></div>
+      <div class="kpi"><div class="lbl">Uitgaven</div><div class="val">${eur(t.uitgaven)}</div></div>
+      <div class="kpi ${nettoCls}"><div class="lbl">Netto</div><div class="val">${eur(t.netto)}</div></div>
+    </div>
+
+    <h3 class="sec">Per event</h3>
+    ${(data.byEvent || []).length === 0
+      ? '<div class="empty-state">Nog geen ledger-entries op events.</div>'
+      : `<table class="lt">
+          <thead><tr>
+            <th>Event</th><th>Datum</th>
+            <th style="text-align:right">Omzet</th>
+            <th style="text-align:right">Bonus</th>
+            <th style="text-align:right">Uitgaven</th>
+            <th style="text-align:right">Netto</th>
+            <th>Per status</th>
+          </tr></thead>
+          <tbody>${byEventRows}</tbody>
+        </table>`}
+
+    <h3 class="sec">Per mentor</h3>
+    ${(data.byMentor || []).length === 0
+      ? '<div class="empty-state">Nog geen mentoren met ledger-entries.</div>'
+      : `<table class="lt">
+          <thead><tr>
+            <th>Mentor</th><th>E-mail</th>
+            <th style="text-align:right">Saldo</th>
+            <th style="text-align:right">Mee te nemen</th>
+            <th>Per status</th>
+          </tr></thead>
+          <tbody>${byMentorRows}</tbody>
+        </table>`}
+  `;
+}
+</script>
+</body>
+</html>
