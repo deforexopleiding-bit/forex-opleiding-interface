@@ -7,22 +7,28 @@
   <meta name="robots" content="noindex, nofollow" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet" />
   <style>
     :root {
-      --bg        : #f6f8fa;
-      --bg-card   : #ffffff;
-      --text      : #1f2937;
-      --text-mute : #6b7280;
-      --border    : #e5e7eb;
-      --primary   : #093d54;
-      --primary-h : #0a4a66;
-      --danger    : #dc2626;
-      --ok        : #10b981;
-      --warn-bg   : rgba(245,158,11,0.12);
-      --warn-text : #b45309;
-      --warn-bord : rgba(245,158,11,0.3);
-      --focus     : rgba(9, 61, 84, 0.16);
+      --bg          : #f2f6fb;
+      --bg-card     : #ffffff;
+      --text        : #16263f;
+      --text-mute   : #5c6b7d;
+      --border      : #dde6f1;
+      --primary     : #0a2f63;
+      --primary-h   : #082850;
+      --action      : #1473d6;
+      --action-h    : #1160bd;
+      --accent      : #1f9fe0;
+      --accent-tint : rgba(31, 159, 224, 0.16);
+      --hero        : #0a2f63;
+      --font-display: 'Space Grotesk', 'Inter', system-ui, sans-serif;
+      --danger      : #dc2626;
+      --ok          : #10b981;
+      --warn-bg     : rgba(245,158,11,0.12);
+      --warn-text   : #b45309;
+      --warn-bord   : rgba(245,158,11,0.3);
+      --focus       : rgba(20, 115, 214, 0.18);
     }
     * { box-sizing: border-box; }
     html, body {
@@ -43,6 +49,15 @@
     .intro p {
       color: var(--text-mute); margin: 0 0 24px; font-size: 15px;
     }
+    .intro.hero {
+      background: var(--hero); border-radius: 18px;
+      padding: 32px 28px; margin-bottom: 20px;
+    }
+    .hero-logo { width: 132px; height: auto; margin-bottom: 18px; }
+    .intro.hero h1 {
+      font-size: 26px; font-weight: 600; color: #ffffff; margin: 0 0 8px;
+    }
+    .intro.hero p { color: #aebfd6; font-size: 15px; margin: 0; }
     .card {
       background: var(--bg-card);
       border: 1px solid var(--border);
@@ -81,12 +96,12 @@
       gap: 6px;
     }
     .event-card:hover {
-      border-color: var(--primary);
+      border-color: var(--accent);
       box-shadow: 0 1px 6px var(--focus);
     }
     .event-card.selected {
-      border-color: var(--primary);
-      background: rgba(9, 61, 84, 0.04);
+      border-color: var(--accent);
+      background: var(--accent-tint);
     }
     .event-card.disabled {
       cursor: not-allowed;
@@ -107,7 +122,7 @@
     .event-meta .pill {
       display: inline-flex; align-items: center;
       padding: 1px 8px; border-radius: 10px;
-      background: rgba(9, 61, 84, 0.08);
+      background: var(--accent-tint);
       color: var(--primary);
       font-size: 11.5px; font-weight: 600;
     }
@@ -142,11 +157,13 @@
     }
     .confirm strong { color: #047857; }
     .footer-note { color: var(--text-mute); font-size: 12px; text-align: center; margin-top: 28px; }
+    .intro.hero h1, .event-title { font-family: var(--font-display); }
   </style>
 </head>
 <body>
   <div class="page">
-    <div class="intro">
+    <div class="intro hero">
+      <img class="hero-logo" src="https://cdn.prod.website-files.com/699062301b8d0a6dc9ec22b6/6994827286124f771cb6b997_dfo---wit---v1.png" alt="De Forex Opleiding" />
       <h1 id="greeting">Welkom!</h1>
       <p id="subline">We laden je deelname-informatie…</p>
     </div>
