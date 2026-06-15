@@ -322,8 +322,12 @@
       <div id="evCompleteMentors"></div>
 
       <h3 style="font-size:12px; font-weight:700; color:var(--text-faint); text-transform:uppercase; letter-spacing:.06em; margin:16px 0 8px">Uitgaven</h3>
+      <div style="font-size:11.5px; color:var(--text-faint); margin-bottom:6px">Per uitgave kun je aangeven over welke aanwezige mentoren 'm verdeeld wordt. Niets aangevinkt = automatisch over alle aanwezige mentoren.</div>
       <div id="evCompleteExpenses"></div>
       <button class="btn-secondary" type="button" onclick="addEvCompleteExpense()" style="margin-top:8px"><i class="ti ti-plus"></i> Uitgave toevoegen</button>
+
+      <h3 style="font-size:12px; font-weight:700; color:var(--text-faint); text-transform:uppercase; letter-spacing:.06em; margin:16px 0 8px">Korte samenvatting</h3>
+      <textarea id="evcSummary" rows="3" placeholder="Hoe ging het? Korte notitie voor het dossier (optioneel)." style="width:100%; padding:8px 10px; border:1px solid var(--border); border-radius:8px; background:var(--bg); color:var(--text); font-family:inherit; font-size:13px; resize:vertical"></textarea>
     </div>
     <div class="modal-footer">
       <button class="btn-secondary" type="button" onclick="closeEvCompleteModal()">Annuleren</button>
@@ -1258,7 +1262,8 @@ const FOLLOWUP_REASONS = [
   'Niet geïnteresseerd',
 ];
 
-let _evCompleteExpenses = []; // [{ amount, vendor, spent_at, note }]
+let _evCompleteExpenses = []; // [{ amount, vendor, spent_at, note, mentor_team_member_ids:[] }]
+let _evCompleteAllMentors = []; // F5.1+: alle rol-mentoren (events-mentors-available) gemerget met was_present uit event_mentors
 
 async function openEvCompleteModal() {
   const banner = document.getElementById('evCompleteBanner');
@@ -1267,7 +1272,9 @@ async function openEvCompleteModal() {
   document.getElementById('evCompleteAttendees').innerHTML = '<div style="font-size:12.5px;color:var(--text-dim)">Laden…</div>';
   document.getElementById('evCompleteMentors').innerHTML = '';
   _evCompleteExpenses = [];
+  _evCompleteAllMentors = [];
   renderEvCompleteExpenses();
+  const sumEl = document.getElementById('evcSummary'); if (sumEl) sumEl.value = '';
   document.getElementById('evCompleteModal').classList.remove('hidden');
 
   try {
@@ -1275,11 +1282,36 @@ async function openEvCompleteModal() {
     if (!state.attendees || state.attendees.length === 0) {
       try { await loadAttendees(); } catch {}
     }
+    // F5.1+: niet meer de event-gekoppelde mentoren maar ALLE rol-mentoren.
+    // Hergebruik /api/events-mentors-available (filtert op user_roles.role='mentor').
+    // Bij Her-afronden: was_present overerven uit state.mentors (event_mentors-tabel).
+    let allMentors = [];
+    try {
+      // Zonder event_id: complete set rol-mentoren (events-mentors-available
+      // filtert al-gekoppelde uit zodra event_id wél meekomt; dat willen we hier niet).
+      const mr = await window.AgentShared.apiFetch('/api/events-mentors-available');
+      const mj = await mr.json().catch(() => ({}));
+      allMentors = Array.isArray(mj.mentors) ? mj.mentors : [];
+    } catch (e) {
+      console.error('[evCompleteModal] mentors load', e);
+    }
+    // Pre-load aan-event-gekoppelde mentoren voor was_present-vinkje.
     if (!state.mentors || state.mentors.length === 0) {
       try { await loadMentors(); } catch {}
     }
+    const presentByTm = new Map();
+    for (const m of (state.mentors || [])) {
+      if (m.team_member_id) presentByTm.set(m.team_member_id, !!m.was_present);
+    }
+    _evCompleteAllMentors = allMentors.map((m) => ({
+      team_member_id: m.id,                     // events-mentors-available returnt team_members.id als 'id'
+      name          : m.name,
+      user_linked   : !!m.user_linked,
+      was_present   : presentByTm.get(m.id) === true,
+    }));
+
     renderEvCompleteAttendees(state.attendees || []);
-    renderEvCompleteMentors(state.mentors || []);
+    renderEvCompleteMentors(_evCompleteAllMentors);
   } catch (e) {
     banner.textContent = 'Laden mislukt: ' + (e?.message || e);
     banner.classList.add('visible');
@@ -1351,7 +1383,7 @@ function renderEvCompleteMentors(list) {
   const host = document.getElementById('evCompleteMentors');
   const rows = list || [];
   if (rows.length === 0) {
-    host.innerHTML = '<div style="font-size:12.5px;color:var(--text-dim)">Nog geen mentoren gekoppeld aan dit event.</div>';
+    host.innerHTML = '<div style="font-size:12.5px;color:var(--text-dim)">Geen actieve mentoren met de rol \'mentor\' gevonden.</div>';
     return;
   }
   host.innerHTML = `<div style="display:flex;gap:6px;flex-wrap:wrap">${
@@ -1365,6 +1397,23 @@ function renderEvCompleteMentors(list) {
       </label>`;
     }).join('')
   }</div>`;
+  // Bij wisselen van aanwezig-vinkje: sync state + her-render uitgaven zodat de
+  // per-uitgave mentor-keuze de actuele aanwezigen-set toont.
+  host.querySelectorAll('.evc-mentor').forEach((cb) => {
+    cb.addEventListener('change', () => {
+      const tmId = cb.value;
+      const row = _evCompleteAllMentors.find((m) => m.team_member_id === tmId);
+      if (row) row.was_present = cb.checked;
+      // Filter uitgave-rij-selectie zodat alleen huidige aanwezigen overblijven.
+      const presentIds = new Set(_evCompleteAllMentors.filter((m) => m.was_present).map((m) => m.team_member_id));
+      for (const e of _evCompleteExpenses) {
+        if (Array.isArray(e.mentor_team_member_ids)) {
+          e.mentor_team_member_ids = e.mentor_team_member_ids.filter((id) => presentIds.has(id));
+        }
+      }
+      renderEvCompleteExpenses();
+    });
+  });
 }
 
 function renderEvCompleteExpenses() {
@@ -1373,20 +1422,51 @@ function renderEvCompleteExpenses() {
     host.innerHTML = '<div style="font-size:12.5px;color:var(--text-dim)">Nog geen uitgaven toegevoegd.</div>';
     return;
   }
-  host.innerHTML = _evCompleteExpenses.map((e, idx) => `
-    <div style="display:grid;grid-template-columns:110px 1fr 130px 1fr auto;gap:6px;align-items:center;margin-bottom:6px">
-      <input type="number" min="0" step="0.01" placeholder="Bedrag €" value="${esc(String(e.amount ?? ''))}" data-exp-idx="${idx}" data-exp-field="amount" style="padding:6px 8px;border:1px solid var(--border);border-radius:6px;font-size:12.5px;background:var(--bg);color:var(--text)">
-      <input type="text" placeholder="Leverancier" value="${esc(e.vendor || '')}" data-exp-idx="${idx}" data-exp-field="vendor" style="padding:6px 8px;border:1px solid var(--border);border-radius:6px;font-size:12.5px;background:var(--bg);color:var(--text)">
-      <input type="date" value="${esc(e.spent_at || '')}" data-exp-idx="${idx}" data-exp-field="spent_at" style="padding:6px 8px;border:1px solid var(--border);border-radius:6px;font-size:12.5px;background:var(--bg);color:var(--text)">
-      <input type="text" placeholder="Notitie" value="${esc(e.note || '')}" data-exp-idx="${idx}" data-exp-field="note" style="padding:6px 8px;border:1px solid var(--border);border-radius:6px;font-size:12.5px;background:var(--bg);color:var(--text)">
-      <button type="button" data-exp-remove="${idx}" class="btn-secondary" style="padding:4px 9px"><i class="ti ti-x"></i></button>
-    </div>`).join('');
+  const presentMentors = _evCompleteAllMentors.filter((m) => m.was_present);
+  host.innerHTML = _evCompleteExpenses.map((e, idx) => {
+    const selectedSet = new Set(Array.isArray(e.mentor_team_member_ids) ? e.mentor_team_member_ids : []);
+    const mentorPicker = presentMentors.length > 0
+      ? `<div style="display:flex;flex-wrap:wrap;gap:4px;margin-top:6px">${presentMentors.map((m) => `
+          <label style="display:inline-flex;align-items:center;gap:4px;padding:2px 7px;border:1px solid var(--border);border-radius:99px;cursor:pointer;font-size:11.5px;background:var(--bg-elev)" title="${esc(m.user_linked ? '' : 'Geen user-koppeling — krijgt geen ledger-entry')}">
+            <input type="checkbox" class="evc-exp-mentor" data-exp-idx="${idx}" value="${esc(m.team_member_id)}" ${selectedSet.has(m.team_member_id) ? 'checked' : ''} style="margin:0">
+            <span>${esc(m.name || '?')}</span>
+          </label>`).join('')}</div>
+          <div style="font-size:11px;color:var(--text-faint);margin-top:3px">Niets aangevinkt = verdeeld over alle ${presentMentors.length} aanwezige mentor(en).</div>`
+      : `<div style="font-size:11px;color:var(--text-faint);margin-top:6px">Geen aanwezige mentoren — uitgave gaat niet naar het grootboek.</div>`;
+    return `
+      <div style="border:1px solid var(--border);border-radius:8px;padding:10px;margin-bottom:8px;background:var(--bg-elev-2)">
+        <div style="display:grid;grid-template-columns:110px 1fr 130px 1fr auto;gap:6px;align-items:center">
+          <input type="number" min="0" step="0.01" placeholder="Bedrag €" value="${esc(String(e.amount ?? ''))}" data-exp-idx="${idx}" data-exp-field="amount" style="padding:6px 8px;border:1px solid var(--border);border-radius:6px;font-size:12.5px;background:var(--bg);color:var(--text)">
+          <input type="text" placeholder="Leverancier" value="${esc(e.vendor || '')}" data-exp-idx="${idx}" data-exp-field="vendor" style="padding:6px 8px;border:1px solid var(--border);border-radius:6px;font-size:12.5px;background:var(--bg);color:var(--text)">
+          <input type="date" value="${esc(e.spent_at || '')}" data-exp-idx="${idx}" data-exp-field="spent_at" style="padding:6px 8px;border:1px solid var(--border);border-radius:6px;font-size:12.5px;background:var(--bg);color:var(--text)">
+          <input type="text" placeholder="Notitie" value="${esc(e.note || '')}" data-exp-idx="${idx}" data-exp-field="note" style="padding:6px 8px;border:1px solid var(--border);border-radius:6px;font-size:12.5px;background:var(--bg);color:var(--text)">
+          <button type="button" data-exp-remove="${idx}" class="btn-secondary" style="padding:4px 9px"><i class="ti ti-x"></i></button>
+        </div>
+        ${mentorPicker}
+      </div>`;
+  }).join('');
   host.querySelectorAll('input[data-exp-field]').forEach((el) => {
     el.addEventListener('input', () => {
       const idx = Number(el.dataset.expIdx);
       const f = el.dataset.expField;
       if (!_evCompleteExpenses[idx]) return;
       _evCompleteExpenses[idx][f] = (f === 'amount') ? el.value : el.value.trim();
+    });
+  });
+  host.querySelectorAll('.evc-exp-mentor').forEach((cb) => {
+    cb.addEventListener('change', () => {
+      const idx = Number(cb.dataset.expIdx);
+      const tmId = cb.value;
+      if (!_evCompleteExpenses[idx]) return;
+      const list = Array.isArray(_evCompleteExpenses[idx].mentor_team_member_ids)
+        ? _evCompleteExpenses[idx].mentor_team_member_ids : [];
+      if (cb.checked) {
+        if (!list.includes(tmId)) list.push(tmId);
+      } else {
+        const i = list.indexOf(tmId);
+        if (i >= 0) list.splice(i, 1);
+      }
+      _evCompleteExpenses[idx].mentor_team_member_ids = list;
     });
   });
   host.querySelectorAll('[data-exp-remove]').forEach((b) => {
@@ -1399,7 +1479,7 @@ function renderEvCompleteExpenses() {
 }
 
 function addEvCompleteExpense() {
-  _evCompleteExpenses.push({ amount: '', vendor: '', spent_at: '', note: '' });
+  _evCompleteExpenses.push({ amount: '', vendor: '', spent_at: '', note: '', mentor_team_member_ids: [] });
   renderEvCompleteExpenses();
 }
 
@@ -1429,17 +1509,19 @@ async function submitEvComplete() {
     // Verzamel mentoren
     const mentorIds = Array.from(document.querySelectorAll('#evCompleteMentors .evc-mentor:checked')).map((c) => c.value);
 
-    // Verzamel expenses (filter lege rijen)
+    // Verzamel expenses (filter lege rijen + mentor_team_member_ids meegeven)
     const expenses = _evCompleteExpenses
       .map((e) => ({
-        amount  : Number(e.amount),
-        vendor  : e.vendor || null,
-        spent_at: e.spent_at || null,
-        note    : e.note || null,
+        amount                 : Number(e.amount),
+        vendor                 : e.vendor || null,
+        spent_at               : e.spent_at || null,
+        note                   : e.note || null,
+        mentor_team_member_ids : Array.isArray(e.mentor_team_member_ids) ? e.mentor_team_member_ids : [],
       }))
       .filter((e) => Number.isFinite(e.amount) && e.amount > 0);
 
     const basisInclBtw = !!document.getElementById('evcBasisInclBtw')?.checked;
+    const completionSummary = (document.getElementById('evcSummary')?.value || '').trim();
 
     const r = await window.AgentShared.apiFetch('/api/events-complete', {
       method: 'POST',
@@ -1450,6 +1532,7 @@ async function submitEvComplete() {
         present_team_member_ids: mentorIds,
         expenses,
         basis_incl_btw         : basisInclBtw,
+        completion_summary     : completionSummary,
       }),
     });
     const j = await r.json().catch(() => ({}));
