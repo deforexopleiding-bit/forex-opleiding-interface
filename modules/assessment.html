@@ -927,9 +927,60 @@
           $introSteps.textContent = `${questions.length} vragen in ${steps.length} stappen`;
           $loading.hidden = true;
           $intro.hidden = false;
+
+          // Choice-token-flow: aanmelder is al bekend → naam/e-mail/telefoon
+          // auto-vullen. Non-blocking: bij elke fout (404/429/netwerk) stil
+          // overslaan — het formulier blijft normaal werken.
+          if (choiceToken) { void prefillFromChoiceToken(); }
         } catch (e) {
           console.error('loadQuestions', e);
           showFatal('Kon de vragenlijst niet laden. Vernieuw de pagina of probeer het later.');
+        }
+      }
+
+      // Prefill-key-sets (lowercase) per veldtype. Match op q.key.lower().
+      const PREFILL_FIRST_NAME_KEYS = new Set(['voornaam','first_name','firstname','fname']);
+      const PREFILL_LAST_NAME_KEYS  = new Set(['achternaam','last_name','lastname','lname']);
+      const PREFILL_FULL_NAME_KEYS  = new Set(['naam','volledige_naam','full_name','voor_en_achternaam']);
+      const PREFILL_PHONE_KEYS      = new Set(['telefoon','telefoonnummer','phone','phone_number','gsm','mobiel','mobiel_nummer','tel']);
+
+      async function prefillFromChoiceToken() {
+        try {
+          const r = await fetch('/api/event-choice-prefill?t=' + encodeURIComponent(choiceToken), {
+            headers: { Accept: 'application/json' },
+          });
+          if (!r.ok) return; // 404/429/500 → stil overslaan
+          const j = await r.json().catch(() => null);
+          const p = j && j.prefill;
+          if (!p) return;
+
+          const fullName = [p.first_name, p.last_name].filter(Boolean).join(' ').trim();
+
+          // Per vraag: kijk of het een voorvulbaar veld is (op q.type/q.key)
+          // en zo ja, vul ALLEEN als het input-veld nu leeg is. Gebruikers-
+          // invoer mag nooit overschreven worden. Velden blijven bewerkbaar.
+          for (const q of questions) {
+            const keyLc = String(q.key || '').toLowerCase();
+            let val = null;
+
+            if (q.type === 'email') {
+              val = p.email;
+            } else if (q.type === 'text') {
+              if (PREFILL_FIRST_NAME_KEYS.has(keyLc))      val = p.first_name;
+              else if (PREFILL_LAST_NAME_KEYS.has(keyLc))  val = p.last_name;
+              else if (PREFILL_FULL_NAME_KEYS.has(keyLc))  val = fullName || null;
+              else if (PREFILL_PHONE_KEYS.has(keyLc))      val = p.phone;
+            }
+
+            if (val == null || val === '') continue;
+            const el = $form.querySelector(`[name="${CSS.escape(q.key)}"]`);
+            if (!el) continue;
+            if (el.value && el.value.trim() !== '') continue; // niet overschrijven
+            el.value = String(val);
+          }
+        } catch (e) {
+          // Stil — prefill is best-effort.
+          console.warn('[prefillFromChoiceToken]', e?.message || e);
         }
       }
 
