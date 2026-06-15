@@ -7,19 +7,25 @@
   <meta name="robots" content="noindex, nofollow" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet" />
   <style>
     :root {
-      --bg        : #f6f8fa;
-      --bg-card   : #ffffff;
-      --text      : #1f2937;
-      --text-mute : #6b7280;
-      --border    : #e5e7eb;
-      --primary   : #093d54;
-      --primary-h : #0a4a66;
-      --danger    : #dc2626;
-      --ok        : #10b981;
-      --focus     : rgba(9, 61, 84, 0.16);
+      --bg          : #f2f6fb;
+      --bg-card     : #ffffff;
+      --text        : #16263f;
+      --text-mute   : #5c6b7d;
+      --border      : #dde6f1;
+      --primary     : #0a2f63;
+      --primary-h   : #082850;
+      --action      : #1473d6;
+      --action-h    : #1160bd;
+      --accent      : #1f9fe0;
+      --accent-tint : rgba(31, 159, 224, 0.16);
+      --hero        : #0a2f63;
+      --font-display: 'Space Grotesk', 'Inter', system-ui, sans-serif;
+      --danger      : #dc2626;
+      --ok          : #10b981;
+      --focus       : rgba(20, 115, 214, 0.18);
     }
     * { box-sizing: border-box; }
     html, body {
@@ -40,6 +46,20 @@
     .intro p {
       color: var(--text-mute); margin: 0 0 24px; font-size: 15px;
     }
+    .intro.hero {
+      background: var(--hero); border-radius: 18px;
+      padding: 44px 28px 34px; min-height: 460px;
+      display: flex; flex-direction: column;
+    }
+    .hero-logo { width: 150px; height: auto; }
+    .hero-body { margin-top: auto; }
+    .intro.hero h1 {
+      font-size: 30px; font-weight: 600; line-height: 1.15;
+      color: #ffffff; margin: 26px 0 10px;
+    }
+    .intro.hero p { color: #aebfd6; font-size: 15px; margin: 0 0 18px; max-width: 34ch; }
+    .intro.hero .intro-meta { color: #5cc0f0; margin: 0 0 22px; }
+    .intro.hero .btn-primary { width: 100%; text-align: center; }
     .card {
       background: var(--bg-card);
       border: 1px solid var(--border);
@@ -75,7 +95,7 @@
       transition: border-color 0.15s, box-shadow 0.15s;
     }
     input:focus, textarea:focus {
-      border-color: var(--primary);
+      border-color: var(--action);
       box-shadow: 0 0 0 3px var(--focus);
     }
     textarea { min-height: 120px; resize: vertical; }
@@ -95,11 +115,11 @@
       justify-content: center; flex-direction: column; gap: 2px;
       font-size: 13px; font-weight: 600;
     }
-    .radio-row:hover, .scale-cell:hover { border-color: var(--primary); }
+    .radio-row:hover, .scale-cell:hover { border-color: var(--accent); }
     .radio-row input[type="radio"], .scale-cell input[type="radio"] { margin: 0; }
     .radio-row.selected, .scale-cell.selected {
-      border-color: var(--primary);
-      background: rgba(9, 61, 84, 0.05);
+      border-color: var(--accent);
+      background: var(--accent-tint);
     }
     .word-count {
       display: block; font-size: 12px; color: var(--text-mute);
@@ -118,13 +138,13 @@
       margin-top: 8px;
     }
     button.btn-primary {
-      background: var(--primary); color: #fff;
+      background: var(--action); color: #fff;
       border: 0; border-radius: 10px;
       padding: 12px 22px; font-size: 15px; font-weight: 600;
       cursor: pointer;
       transition: background 0.15s;
     }
-    button.btn-primary:hover { background: var(--primary-h); }
+    button.btn-primary:hover { background: var(--action-h); }
     button.btn-primary:disabled { opacity: 0.6; cursor: not-allowed; }
     .honeypot {
       position: absolute; left: -10000px; top: auto;
@@ -168,9 +188,9 @@
       color: var(--text-mute); font-size: 14px;
       margin-top: 18px;
     }
-    .result.tier-high .badge { background: rgba(16,185,129,0.12); color: #047857; }
-    .result.tier-high h2     { color: #047857; }
-    .result.tier-mid  .badge { background: rgba(9,61,84,0.10);  color: var(--primary); }
+    .result.tier-high .badge { background: var(--accent-tint); color: #0a3a72; }
+    .result.tier-high h2     { color: var(--primary); }
+    .result.tier-mid  .badge { background: rgba(20,115,214,0.10);  color: var(--action); }
     .result.tier-low  .badge { background: rgba(234,179,8,0.16); color: #92400e; }
     .result.tier-low  h2     { color: #92400e; }
     .result.tier-incomplete .badge { background: rgba(220,38,38,0.10); color: var(--danger); }
@@ -201,8 +221,8 @@
       cursor: pointer; background: #fff;
       transition: border-color 0.15s, background 0.15s, transform 0.05s;
     }
-    .event-card:hover     { border-color: var(--primary); }
-    .event-card.selected  { border-color: var(--primary); background: rgba(9,61,84,0.05); }
+    .event-card:hover     { border-color: var(--accent); }
+    .event-card.selected  { border-color: var(--accent); background: var(--accent-tint); }
     .event-card.full      { opacity: 0.55; cursor: not-allowed; }
     .event-meta-main {
       display: flex; flex-direction: column; gap: 2px;
@@ -212,7 +232,7 @@
     .event-count {
       font-size: 13px; font-weight: 600;
       padding: 4px 10px; border-radius: 999px;
-      background: rgba(9,61,84,0.06); color: var(--primary);
+      background: var(--accent-tint); color: var(--primary);
       white-space: nowrap;
     }
     .event-count.full {
@@ -241,7 +261,7 @@
       height: 6px; border-radius: 999px; background: var(--border); overflow: hidden;
     }
     .progress-fill {
-      height: 100%; width: 0%; border-radius: 999px; background: var(--primary);
+      height: 100%; width: 0%; border-radius: 999px; background: var(--accent);
       transition: width 0.25s ease;
     }
 
@@ -275,13 +295,13 @@
       background-color: var(--border);
     }
     .event-thumb-empty {
-      background: rgba(9, 61, 84, 0.08);
+      background: var(--primary);
     }
     .event-niveau-badge {
       align-self: flex-start;
       font-size: 11px; font-weight: 700; text-transform: uppercase;
       letter-spacing: 0.06em; color: var(--primary);
-      background: rgba(9, 61, 84, 0.06);
+      background: var(--accent-tint);
       border-radius: 999px; padding: 2px 8px; margin-bottom: 2px;
     }
 
@@ -292,18 +312,24 @@
       .step-nav .spacer { display: none; }
       .intro-meta { flex-direction: column; gap: 6px; }
     }
+    .section-title, .progress-label, .result h2, .picker h3,
+    .event-niveau-badge, .event-date, .scale-cell,
+    .intro.hero h1, .intro.hero .intro-meta { font-family: var(--font-display); }
   </style>
 </head>
 <body>
   <main class="page">
-    <div id="intro" class="intro" hidden>
-      <h1>Ontdek welk traject bij je past</h1>
-      <p>Een paar korte vragen over je ervaring en je doelen. Aan het eind zie je meteen welke sessie het beste aansluit — en kies je direct je datum.</p>
-      <div class="intro-meta">
-        <span id="intro-steps"></span>
-        <span>± 3 minuten</span>
+    <div id="intro" class="intro hero" hidden>
+      <img class="hero-logo" src="https://cdn.prod.website-files.com/699062301b8d0a6dc9ec22b6/6994827286124f771cb6b997_dfo---wit---v1.png" alt="De Forex Opleiding" />
+      <div class="hero-body">
+        <h1>We beginnen met inzicht.</h1>
+        <p>Wie ben jij als trader? Wat is je doel? In een paar minuten weten we welk traject het beste bij je past.</p>
+        <div class="intro-meta">
+          <span id="intro-steps"></span>
+          <span>± 3 minuten</span>
+        </div>
+        <button id="btn-start" type="button" class="btn-primary">Begin de intake</button>
       </div>
-      <button id="btn-start" type="button" class="btn-primary">Begin de intake</button>
     </div>
 
     <div id="loading" class="loading">Vragen laden...</div>
