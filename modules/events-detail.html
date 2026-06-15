@@ -1605,10 +1605,10 @@ async function onAttStatusChange(attendeeId, newStatus) {
 async function onAttCalledChange(attendeeId, called, cbEl) {
   if (cbEl) cbEl.disabled = true;
   try {
-    const res = await window.AgentShared.apiFetch('/api/events-attendee-update', {
-      method: 'POST',
+    const res = await window.AgentShared.apiFetch('/api/events-attendee-update?id=' + encodeURIComponent(attendeeId), {
+      method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id: attendeeId, called: !!called }),
+      body: JSON.stringify({ called: !!called }),
     });
     if (!res.ok) {
       const e = await res.json().catch(() => ({}));
