@@ -279,6 +279,29 @@ async function loadEventsForScope() {
   state.eventsLoaded = true;
 }
 
+// Cache goedgekeurde WhatsApp-templates voor de send_whatsapp-stap-editor.
+// Niet-blokkerend: bij faal blijft het select-veld bruikbaar (toont alleen
+// een eventueel bestaande waarde + "Templates konden niet geladen worden"-hint).
+async function loadWaTemplatesForEditor() {
+  if (state.waTemplatesLoaded) return;
+  try {
+    const r = await window.AgentShared.apiFetch('/api/events-whatsapp-templates-list');
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) {
+      state.waTemplatesError = data?.error || ('HTTP ' + r.status);
+      state.waTemplates = [];
+    } else {
+      state.waTemplates = Array.isArray(data.items) ? data.items : [];
+      state.waTemplatesError = null;
+    }
+  } catch (e) {
+    console.error('[events-automations] wa-templates load:', e?.message || e);
+    state.waTemplatesError = e?.message || 'fetch failed';
+    state.waTemplates = [];
+  }
+  state.waTemplatesLoaded = true;
+}
+
 // ── List view ────────────────────────────────────────────────────────────────
 function summarizeTrigger(a) {
   if (a.trigger_type === 'time_before_event') {
@@ -450,6 +473,8 @@ async function startEditor(a) {
   if (state.editing.scope_type === 'events') {
     try { await loadEventsForScope(); } catch (e) { toastErr('Events laden mislukt: ' + (e?.message || e)); }
   }
+  // Best-effort: WhatsApp-templates voor send_whatsapp-stap-dropdown.
+  await loadWaTemplatesForEditor();
   renderEditor();
 }
 
@@ -745,13 +770,35 @@ function renderStepCard(s, idx, total) {
     body = `
       <div class="form-field">
         <label>WhatsApp-template <span class="req">*</span></label>
-        <input type="text" data-step-field="template_name" data-idx="${idx}" value="${esc(c.template_name || '')}" placeholder="events_keuze_link" />
-        <div class="form-help">Naam van de goedgekeurde Meta-template (bijv. <code>events_keuze_link</code>).</div>
+        ${renderWaTemplateSelect(idx, c.template_name || '')}
+        ${state.waTemplatesError
+          ? `<div class="form-help" style="color:#dc2626">Templates konden niet geladen worden: ${esc(state.waTemplatesError)}</div>`
+          : `<div class="form-help">Kies een goedgekeurde Meta-template (bijv. <code>events_keuze_link</code>).</div>`}
       </div>`;
   } else {
     body = `<div class="form-help">Onbekend staptype.</div>`;
   }
   return `<div class="step-card" data-step-idx="${idx}">${head}${body}</div>`;
+}
+
+// Render dropdown van goedgekeurde WA-templates voor een send_whatsapp-stap.
+// Als de huidig opgeslagen template_name niet (meer) in de approved-lijst zit,
+// voeg 'm dan toch toe als geselecteerde optie met "(niet meer goedgekeurd)"-suffix
+// zodat een bestaande config nooit stil verloren gaat.
+function renderWaTemplateSelect(idx, currentValue) {
+  const items = Array.isArray(state.waTemplates) ? state.waTemplates : [];
+  const known = items.some((t) => t.name === currentValue);
+  let opts = '<option value="">— Kies template —</option>';
+  for (const t of items) {
+    const lang  = t.language ? ` · ${t.language}` : '';
+    const label = `${t.name}${lang}`;
+    const sel   = (t.name === currentValue) ? ' selected' : '';
+    opts += `<option value="${esc(t.name)}"${sel}>${esc(label)}</option>`;
+  }
+  if (currentValue && !known) {
+    opts += `<option value="${esc(currentValue)}" selected>${esc(currentValue)} (niet meer goedgekeurd)</option>`;
+  }
+  return `<select data-step-field="template_name" data-idx="${idx}">${opts}</select>`;
 }
 
 function stepTypeLabel(t) {
