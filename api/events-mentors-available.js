@@ -1,5 +1,6 @@
 // api/events-mentors-available.js
-// GET -> lijst van actieve mentoren (team_members WHERE type='mentor' AND is_active=true).
+// GET -> lijst van échte mentoren: team_members met user_id, waarvan die user
+// de rol 'mentor' heeft (via user_roles). team_members.is_active=true.
 // Voor mentor-select dropdown in event-detail UI.
 //
 // Permission: events.mentor.assign.
@@ -9,9 +10,14 @@
 //
 // Response: { mentors: [ { id, name, role, email, avatar_emoji, avatar_color, user_linked } ] }
 // Sortering: name ASC.
-// user_linked = team_members.user_id IS NOT NULL (F5.0). Mentor zonder user_id kan
-// nog wel als mentor gekoppeld worden aan een event, maar krijgt geen ledger-entries
-// totdat een super_admin de koppeling aan auth.users maakt via team-member-link-user.
+//
+// Rol-gate (F5 post-activatie): de team_members.type='mentor'-vlag is NIET meer
+// leidend. Een team_member-rij is alleen een mentor als de gekoppelde auth.user
+// ook de 'mentor'-rol in user_roles heeft. Zo voorkomen we dat oude type='mentor'-
+// rijen zonder echte mentor-account in de dropdown verschijnen.
+//
+// user_linked blijft true (per definitie heeft elke rij hier een user_id; veld
+// is behouden voor API-stabiliteit met eerdere callers).
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
@@ -39,10 +45,23 @@ export default async function handler(req, res) {
   }
 
   try {
+    // 1) user_ids die de mentor-rol hebben (user_roles is bron van waarheid).
+    const { data: mentorRoleRows, error: rolesErr } = await supabaseAdmin
+      .from('user_roles')
+      .select('user_id')
+      .eq('role', 'mentor');
+    if (rolesErr) throw new Error('mentor-roles fetch: ' + rolesErr.message);
+    const mentorUserIds = [...new Set((mentorRoleRows || []).map((r) => r.user_id).filter(Boolean))];
+    if (mentorUserIds.length === 0) {
+      return res.status(200).json({ mentors: [] });
+    }
+
+    // 2) team_members met die user_id én is_active=true. type='mentor' is
+    //    NIET meer leidend; de rol-koppeling is dat wel.
     const { data: all, error } = await supabaseAdmin
       .from('team_members')
       .select('id, name, role, type, email, avatar_emoji, avatar_color, is_active, user_id')
-      .eq('type', 'mentor')
+      .in('user_id', mentorUserIds)
       .eq('is_active', true)
       .order('name', { ascending: true });
     if (error) throw new Error('mentors-available: ' + error.message);

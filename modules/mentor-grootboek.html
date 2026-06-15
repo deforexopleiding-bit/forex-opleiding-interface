@@ -96,6 +96,8 @@ function can(key) { return window.RBAC?.canSync?.(key) || false; }
     const profile = await window.AuthShared.requireAuth();
     if (!profile) return;
 
+    await window.RBAC.ensurePermissionsLoaded();
+
     if (!can('mentor.ledger.view')) {
       document.getElementById('page-content').innerHTML = `
         <div class="forbidden-card">
