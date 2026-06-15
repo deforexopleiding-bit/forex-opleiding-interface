@@ -87,9 +87,15 @@ function getEventsTransport() {
 /**
  * Verstuur events-automation-mail vanaf events@deforexopleiding.nl.
  * Valt veilig terug op info@ als EVENTS_MAIL_PASS ontbreekt.
+ *
+ * Optionele `attachments`: nodemailer-compatible array, bv.
+ *   [{ filename: 'flyer.pdf', path: 'https://...public.../mail-attachments/...' }]
+ * Nodemailer haalt het bestand op via de path (HTTP-URL of lokaal pad) en
+ * stuurt het mee als e-mailbijlage. Leeg/ontbrekend → niet meesturen.
+ *
  * @returns {Promise<{success:boolean, messageId?:string, from:string, fallback:boolean, error?:string}>}
  */
-export async function sendEventMail({ to, subject, text, html }) {
+export async function sendEventMail({ to, subject, text, html, attachments }) {
   if (!to || !subject || (!text && !html)) {
     return { success: false, from: EVENTS_FROM_ADDRESS, fallback: false, error: 'Missing required fields' };
   }
@@ -100,13 +106,17 @@ export async function sendEventMail({ to, subject, text, html }) {
   const fromName = useEvents ? EVENTS_FROM_NAME : FROM_NAME;
   try {
     const transport = eventsTransport || getTransport();
-    const info = await transport.sendMail({
+    const mail = {
       from: `"${fromName}" <${fromAddr}>`,
       to: recipients.join(', '),
       subject,
       text: text || stripHtml(html),
       html,
-    });
+    };
+    if (Array.isArray(attachments) && attachments.length > 0) {
+      mail.attachments = attachments;
+    }
+    const info = await transport.sendMail(mail);
     return { success: true, messageId: info.messageId, from: fromAddr, fallback: !useEvents };
   } catch (err) {
     console.error('[mailer] sendEventMail error:', err.message);

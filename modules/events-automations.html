@@ -164,6 +164,54 @@
   </div>
 </div>
 
+<!-- ── Modal: bijlagen-bibliotheek ─────────────────────────────────── -->
+<div class="modal-overlay hidden" id="attLibModal" role="dialog" aria-modal="true">
+  <div class="modal-card" style="max-width:720px;width:100%">
+    <div class="modal-header">
+      <div class="modal-title">Bijlagen-bibliotheek</div>
+      <button class="modal-close" type="button" onclick="closeAttLibModal()">&#x2715;</button>
+    </div>
+    <div class="modal-body">
+      <div id="attLibBanner" style="display:none;margin-bottom:10px;padding:8px 12px;background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.3);border-radius:6px;color:#dc2626;font-size:12px;white-space:pre-wrap"></div>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px">
+        <div style="border:1px solid var(--border);border-radius:8px;padding:12px;background:var(--bg-elev,transparent)">
+          <div style="font-weight:600;font-size:13px;margin-bottom:8px"><i class="ti ti-link"></i> Toevoegen via URL</div>
+          <div class="form-field">
+            <label>Label *</label>
+            <input type="text" id="attUrlLabel" maxlength="200" placeholder="bv. Programma PDF" />
+          </div>
+          <div class="form-field">
+            <label>URL *</label>
+            <input type="text" id="attUrlValue" placeholder="https://..." />
+          </div>
+          <button type="button" class="btn-primary" id="attUrlAdd"><i class="ti ti-plus"></i> Toevoegen</button>
+        </div>
+
+        <div style="border:1px solid var(--border);border-radius:8px;padding:12px;background:var(--bg-elev,transparent)">
+          <div style="font-weight:600;font-size:13px;margin-bottom:8px"><i class="ti ti-upload"></i> Bestand uploaden</div>
+          <div class="form-field">
+            <label>Label *</label>
+            <input type="text" id="attUpLabel" maxlength="200" placeholder="bv. Programma PDF" />
+          </div>
+          <div class="form-field">
+            <label>Bestand *</label>
+            <input type="file" id="attUpFile" />
+            <div class="form-help">PDF, Office, afbeelding of CSV/TXT — max 10 MB.</div>
+          </div>
+          <button type="button" class="btn-primary" id="attUpAdd"><i class="ti ti-cloud-upload"></i> Uploaden</button>
+        </div>
+      </div>
+
+      <div style="font-weight:600;font-size:13px;margin:14px 0 6px"><i class="ti ti-files"></i> Bibliotheek</div>
+      <div id="attLibList"><div style="font-size:12px;color:var(--text-faint)">Laden…</div></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn-secondary" type="button" onclick="closeAttLibModal()">Sluiten</button>
+    </div>
+  </div>
+</div>
+
 <script src="/modules/shared/supabase-client.js"></script>
 <script src="/modules/shared/agent-shared.js"></script>
 <script src="/modules/shared/theme-shared.js"></script>
@@ -302,6 +350,29 @@ async function loadWaTemplatesForEditor() {
   state.waTemplatesLoaded = true;
 }
 
+// Cache bijlagen-bibliotheek voor de send_email-stap-picker en de beheer-modal.
+// Zelfde patroon als waTemplates: eenmalig laden, force=true bij invalidatie
+// (na toevoegen/verwijderen) zodat de UI met de actuele set werkt.
+async function loadMailAttachmentsForEditor(force) {
+  if (state.mailAttachmentsLoaded && !force) return;
+  try {
+    const r = await window.AgentShared.apiFetch('/api/event-attachments-list');
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) {
+      state.mailAttachmentsError = data?.error || ('HTTP ' + r.status);
+      state.mailAttachments = [];
+    } else {
+      state.mailAttachments = Array.isArray(data.items) ? data.items : [];
+      state.mailAttachmentsError = null;
+    }
+  } catch (e) {
+    console.error('[events-automations] mail-attachments load:', e?.message || e);
+    state.mailAttachmentsError = e?.message || 'fetch failed';
+    state.mailAttachments = [];
+  }
+  state.mailAttachmentsLoaded = true;
+}
+
 // ── List view ────────────────────────────────────────────────────────────────
 function summarizeTrigger(a) {
   if (a.trigger_type === 'time_before_event') {
@@ -374,6 +445,7 @@ function renderList() {
         <div class="page-sub">Configureer automatische mail- en WhatsApp-flows rond events.</div>
       </div>
       <div class="page-actions">
+        ${canEdit ? `<button class="btn-ghost" type="button" data-act="att-lib"><i class="ti ti-paperclip"></i> Bijlagen</button>` : ''}
         ${canEdit ? `<button class="btn-primary" type="button" data-act="new"><i class="ti ti-plus"></i> Nieuwe automation</button>` : ''}
       </div>
     </div>
@@ -391,6 +463,7 @@ async function onListClick(ev) {
   if (t.dataset.act === 'edit') { const a = state.automations.find((x) => x.id === t.dataset.aid); if (a) startEditor(a); return; }
   if (t.dataset.act === 'delete') return deleteAutomation(t.dataset.aid);
   if (t.dataset.act === 'runs') return openRunsModal(t.dataset.aid);
+  if (t.dataset.act === 'att-lib') return openAttLibModal();
   if (t.dataset.toggle) return toggleEnabled(t.dataset.toggle, t);
 }
 
@@ -475,6 +548,8 @@ async function startEditor(a) {
   }
   // Best-effort: WhatsApp-templates voor send_whatsapp-stap-dropdown.
   await loadWaTemplatesForEditor();
+  // Best-effort: bijlagen-bibliotheek voor send_email-stap-picker.
+  await loadMailAttachmentsForEditor();
   renderEditor();
 }
 
@@ -764,7 +839,8 @@ function renderStepCard(s, idx, total) {
           </div>
         </div>
         <div class="form-help">Tip: gebruik <code>{{attendee.keuze_link}}</code> voor de persoonlijke keuzepagina.</div>
-      </div>`;
+      </div>
+      ${renderMailAttachmentPicker(idx, Array.isArray(c.attachment_ids) ? c.attachment_ids : [])}`;
   } else if (s.type === 'send_whatsapp') {
     const c = s.config || {};
     body = `
@@ -779,6 +855,66 @@ function renderStepCard(s, idx, total) {
     body = `<div class="form-help">Onbekend staptype.</div>`;
   }
   return `<div class="step-card" data-step-idx="${idx}">${head}${body}</div>`;
+}
+
+// Render bijlagen-picker voor een send_email-stap. Toont een checkbox-lijst
+// van bibliotheek-items; aangevinkte ids worden meegegeven aan de engine via
+// step.config.attachment_ids (zie applyStepFieldChange voor de mutatie).
+// Niet-bestaande ids (bv. inmiddels verwijderd) worden zichtbaar getoond als
+// "ontbreekt" zodat de bewerker 'm bewust kan verwijderen of vervangen.
+function renderMailAttachmentPicker(idx, selectedIds) {
+  const lib = Array.isArray(state.mailAttachments) ? state.mailAttachments : [];
+  const selSet = new Set(selectedIds || []);
+  const libById = new Map(lib.map((a) => [a.id, a]));
+
+  const missing = (selectedIds || []).filter((id) => !libById.has(id));
+
+  const summaryNames = (selectedIds || [])
+    .map((id) => libById.get(id))
+    .filter(Boolean)
+    .map((a) => a.label || a.filename || a.id)
+    .concat(missing.map((id) => '(ontbreekt: ' + id.slice(0, 8) + ')'));
+
+  const headerHint = state.mailAttachmentsError
+    ? `<span style="color:#dc2626">Bibliotheek niet geladen: ${esc(state.mailAttachmentsError)}</span>`
+    : (lib.length === 0
+        ? `<span style="color:var(--text-faint)">Nog geen bijlagen — gebruik <em>Bijlagen</em> bovenin om er een toe te voegen.</span>`
+        : '');
+
+  const rows = lib.map((a) => {
+    const checked = selSet.has(a.id) ? 'checked' : '';
+    const meta = [a.mime_type, a.size_bytes ? Math.round(a.size_bytes / 1024) + ' kB' : null]
+      .filter(Boolean).join(' · ');
+    return `
+      <label style="display:flex;gap:8px;align-items:flex-start;padding:6px 8px;border:1px solid var(--border);border-radius:6px;cursor:pointer;background:var(--bg)">
+        <input type="checkbox" data-step-field="attachment.toggle" data-idx="${idx}" data-att-id="${esc(a.id)}" ${checked} style="margin-top:2px" />
+        <span style="display:flex;flex-direction:column;gap:2px;font-size:12.5px">
+          <span style="font-weight:600">${esc(a.label || a.filename || a.id)}</span>
+          <span style="color:var(--text-faint);font-size:11.5px">${esc(a.filename || '')}${meta ? ' · ' + esc(meta) : ''}</span>
+        </span>
+      </label>
+    `;
+  }).join('');
+
+  const missingRows = missing.map((id) => `
+    <div style="display:flex;gap:8px;align-items:center;padding:6px 8px;border:1px dashed var(--border);border-radius:6px;background:rgba(245,158,11,0.08);font-size:12px;color:#b45309">
+      <i class="ti ti-alert-triangle"></i>
+      <span>Bijlage ontbreekt (id ${esc(id)}). <button type="button" class="btn-ghost" style="padding:2px 6px;font-size:11px" data-step-field="attachment.toggle" data-idx="${idx}" data-att-id="${esc(id)}" data-untick="1">Loskoppelen</button></span>
+    </div>
+  `).join('');
+
+  const summary = summaryNames.length > 0
+    ? `<div style="margin-top:6px;font-size:11.5px;color:var(--text-dim)"><i class="ti ti-paperclip"></i> Geselecteerd: ${esc(summaryNames.join(', '))}</div>`
+    : '';
+
+  return `
+    <div class="form-field">
+      <label>Bijlagen</label>
+      ${headerHint ? `<div class="form-help" style="margin-bottom:6px">${headerHint}</div>` : ''}
+      ${(rows || missingRows) ? `<div style="display:flex;flex-direction:column;gap:6px">${rows}${missingRows}</div>` : ''}
+      ${summary}
+    </div>
+  `;
 }
 
 // Render dropdown van goedgekeurde WA-templates voor een send_whatsapp-stap.
@@ -863,6 +999,9 @@ function onEditorClick(ev) {
   }
   const varChip = ev.target.closest('[data-var]');
   if (varChip) return insertVarAtCursor(varChip.dataset.var);
+  // Bijlagen-picker "Loskoppelen"-knop (buttons fire geen change/input).
+  const attUntick = ev.target.closest('[data-step-field="attachment.toggle"][data-untick="1"]');
+  if (attUntick) { ev.preventDefault(); return applyStepFieldChange(attUntick); }
   // Step-field veranderingen: vang via input/change-delegation.
 }
 
@@ -905,6 +1044,29 @@ function applyStepFieldChange(input) {
   } else if (field === 'button.url') {
     if (!step.config.button) step.config.button = { label: '', url: '' };
     step.config.button.url = input.value;
+  } else if (field === 'attachment.toggle') {
+    // Bijlagen-picker: vinkje aan/uit muteert step.config.attachment_ids.
+    // "Loskoppelen"-knop bij ontbrekende bijlagen heeft data-untick="1" en
+    // verwijdert de id uit de lijst.
+    const attId = input.dataset.attId;
+    if (!attId) return;
+    if (!Array.isArray(step.config.attachment_ids)) step.config.attachment_ids = [];
+    const arr = step.config.attachment_ids;
+    const idx2 = arr.indexOf(attId);
+    const forceOff = input.dataset.untick === '1';
+    let shouldHave;
+    if (forceOff) {
+      shouldHave = false;
+    } else if (input.type === 'checkbox') {
+      shouldHave = !!input.checked;
+    } else {
+      shouldHave = idx2 < 0; // toggle voor non-checkbox triggers
+    }
+    if (shouldHave && idx2 < 0) arr.push(attId);
+    else if (!shouldHave && idx2 >= 0) arr.splice(idx2, 1);
+    if (arr.length === 0) delete step.config.attachment_ids;
+    // Voor "Loskoppelen": re-render zodat de waarschuwing weg gaat.
+    if (forceOff) renderSteps();
   }
 }
 
@@ -1074,6 +1236,169 @@ function closeRunsModal() {
   document.getElementById('runsModal').classList.add('hidden');
 }
 window.closeRunsModal = closeRunsModal;
+
+// ── Bijlagen-bibliotheek (modal) ────────────────────────────────────────────
+function _attLibBannerShow(msg) {
+  const el = document.getElementById('attLibBanner');
+  if (!el) return;
+  el.textContent = msg;
+  el.style.display = '';
+}
+function _attLibBannerHide() {
+  const el = document.getElementById('attLibBanner');
+  if (el) el.style.display = 'none';
+}
+
+async function openAttLibModal() {
+  _attLibBannerHide();
+  // Reset velden
+  ['attUrlLabel','attUrlValue','attUpLabel','attUpFile'].forEach((id) => {
+    const el = document.getElementById(id);
+    if (el) el.value = '';
+  });
+  document.getElementById('attLibModal').classList.remove('hidden');
+  await loadMailAttachmentsForEditor(true);
+  renderAttLibList();
+}
+
+function closeAttLibModal() {
+  document.getElementById('attLibModal').classList.add('hidden');
+  // Bij her-open van een editor moet de nieuwe set zichtbaar zijn.
+  if (state.view === 'editor') renderSteps();
+}
+window.closeAttLibModal = closeAttLibModal;
+
+function renderAttLibList() {
+  const host = document.getElementById('attLibList');
+  if (!host) return;
+  if (state.mailAttachmentsError) {
+    host.innerHTML = `<div style="font-size:12px;color:#dc2626">Niet geladen: ${esc(state.mailAttachmentsError)}</div>`;
+    return;
+  }
+  const items = Array.isArray(state.mailAttachments) ? state.mailAttachments : [];
+  if (items.length === 0) {
+    host.innerHTML = '<div style="font-size:12px;color:var(--text-faint)">Nog geen bijlagen in de bibliotheek.</div>';
+    return;
+  }
+  host.innerHTML = items.map((a) => {
+    const meta = [a.mime_type, a.size_bytes ? Math.round(a.size_bytes / 1024) + ' kB' : null]
+      .filter(Boolean).join(' · ');
+    return `
+      <div style="display:flex;gap:10px;align-items:center;justify-content:space-between;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg);margin-bottom:6px">
+        <div style="display:flex;flex-direction:column;gap:2px;font-size:12.5px;min-width:0;flex:1">
+          <div style="font-weight:600">${esc(a.label || a.filename || a.id)}</div>
+          <div style="color:var(--text-faint);font-size:11.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(a.url || '')}">
+            ${esc(a.filename || '')}${meta ? ' · ' + esc(meta) : ''}
+          </div>
+        </div>
+        <div style="display:flex;gap:6px;flex-shrink:0">
+          ${a.url ? `<a class="btn-ghost" href="${esc(a.url)}" target="_blank" rel="noopener"><i class="ti ti-external-link"></i></a>` : ''}
+          <button type="button" class="btn-ghost" data-att-del="${esc(a.id)}" title="Verwijderen"><i class="ti ti-trash"></i></button>
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+// Klik-delegatie binnen attachments-modal (delete-knop).
+document.addEventListener('click', async (ev) => {
+  const delBtn = ev.target.closest('[data-att-del]');
+  if (!delBtn) return;
+  const id = delBtn.dataset.attDel;
+  if (!confirm('Bijlage verwijderen uit de bibliotheek?')) return;
+  delBtn.disabled = true;
+  try {
+    const r = await window.AgentShared.apiFetch('/api/event-attachment-delete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id }),
+    });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) { _attLibBannerShow(j.error || ('HTTP ' + r.status)); delBtn.disabled = false; return; }
+    await loadMailAttachmentsForEditor(true);
+    renderAttLibList();
+  } catch (e) {
+    _attLibBannerShow(e?.message || 'Verwijderen mislukt');
+    delBtn.disabled = false;
+  }
+});
+
+// URL-modus toevoegen
+document.addEventListener('click', async (ev) => {
+  if (!ev.target.closest('#attUrlAdd')) return;
+  const labelEl = document.getElementById('attUrlLabel');
+  const urlEl   = document.getElementById('attUrlValue');
+  const btn     = document.getElementById('attUrlAdd');
+  const label = (labelEl.value || '').trim();
+  const url   = (urlEl.value || '').trim();
+  if (!label || !url) { _attLibBannerShow('Label en URL zijn verplicht.'); return; }
+  _attLibBannerHide();
+  btn.disabled = true;
+  try {
+    const r = await window.AgentShared.apiFetch('/api/event-attachment-create', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mode: 'url', label, url }),
+    });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) { _attLibBannerShow(j.error || ('HTTP ' + r.status)); return; }
+    labelEl.value = ''; urlEl.value = '';
+    await loadMailAttachmentsForEditor(true);
+    renderAttLibList();
+  } catch (e) {
+    _attLibBannerShow(e?.message || 'Toevoegen mislukt');
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+// Upload-modus toevoegen
+document.addEventListener('click', async (ev) => {
+  if (!ev.target.closest('#attUpAdd')) return;
+  const labelEl = document.getElementById('attUpLabel');
+  const fileEl  = document.getElementById('attUpFile');
+  const btn     = document.getElementById('attUpAdd');
+  const label = (labelEl.value || '').trim();
+  const file  = fileEl.files && fileEl.files[0];
+  if (!label || !file) { _attLibBannerShow('Label en bestand zijn verplicht.'); return; }
+  if (file.size > 10 * 1024 * 1024) { _attLibBannerShow('Bestand groter dan 10 MB.'); return; }
+  _attLibBannerHide();
+  btn.disabled = true;
+  try {
+    const b64 = await new Promise((resolve, reject) => {
+      const fr = new FileReader();
+      fr.onerror = () => reject(new Error('Bestand kon niet gelezen worden'));
+      fr.onload  = () => {
+        const result = String(fr.result || '');
+        const i = result.indexOf(',');
+        resolve(i >= 0 ? result.slice(i + 1) : result);
+      };
+      fr.readAsDataURL(file);
+    });
+    const r = await window.AgentShared.apiFetch('/api/event-attachment-create', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        mode: 'upload',
+        label,
+        filename: file.name,
+        mimeType: file.type || 'application/octet-stream',
+        contentBase64: b64,
+      }),
+    });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) { _attLibBannerShow(j.error || ('HTTP ' + r.status)); return; }
+    labelEl.value = ''; fileEl.value = '';
+    await loadMailAttachmentsForEditor(true);
+    renderAttLibList();
+  } catch (e) {
+    _attLibBannerShow(e?.message || 'Upload mislukt');
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+window.openAttLibModal = openAttLibModal;
 </script>
 </body>
 </html>

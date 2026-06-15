@@ -278,10 +278,40 @@ export async function stepDueRuns({ now = new Date(), limit = 100, abortMs = 50_
             .insert({ run_id: run.id, step_index: idx, step_type: stepType, result });
           if (e && e.code !== '23505') console.error('[events-automation log]', e.message);
         },
-        sendEmail: (step, ctx) => sendEventEmail({
-          attendee: ctx.attendee, event: ctx.event,
-          subject: step.config && step.config.subject, body: step.config && step.config.body,
-        }),
+        sendEmail: async (step, ctx) => {
+          // Bijlagen-bibliotheek: step.config.attachment_ids (array van uuids)
+          // → fetch corresponding rows en mappen naar nodemailer-shape
+          //   { filename, path }. Niet-gevonden ids stil overslaan; de e-mail
+          //   mag nooit falen op een ontbrekende bijlage.
+          let attachments;
+          const attIds = Array.isArray(step?.config?.attachment_ids)
+            ? step.config.attachment_ids.filter((x) => typeof x === 'string' && x.length > 0)
+            : [];
+          if (attIds.length > 0) {
+            try {
+              const { data: rows, error: attErr } = await supabaseAdmin
+                .from('event_mail_attachments')
+                .select('id, filename, url')
+                .in('id', attIds);
+              if (attErr) {
+                console.error('[events-automation send_email attachments]', attErr.message);
+              } else if (Array.isArray(rows) && rows.length > 0) {
+                attachments = rows
+                  .filter((r) => r && r.url)
+                  .map((r) => ({ filename: r.filename || 'bijlage', path: r.url }));
+              }
+            } catch (e) {
+              console.error('[events-automation send_email attachments exception]', e?.message || e);
+            }
+          }
+          return sendEventEmail({
+            attendee: ctx.attendee,
+            event   : ctx.event,
+            subject : step.config && step.config.subject,
+            body    : step.config && step.config.body,
+            attachments: (attachments && attachments.length > 0) ? attachments : undefined,
+          });
+        },
         sendWhatsApp: (step, ctx) => sendEventWhatsAppTemplate({
           attendee: ctx.attendee, event: ctx.event,
           templateName: step.config && step.config.template_name, sentByUserId: null,
