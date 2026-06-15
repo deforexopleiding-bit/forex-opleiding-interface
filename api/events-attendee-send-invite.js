@@ -32,7 +32,7 @@
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
-import { sendMail, wrapEmailHtml } from './mailer.js';
+import { sendEventMail, wrapEmailHtml } from './mailer.js';
 import { sendEventWhatsAppTemplate } from './_lib/events-send.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -69,7 +69,7 @@ async function sendInviteMail({ firstName, keuzeLink, toEmail }) {
   const text = `Hoi ${naam}, kies de datum voor je Forex Masterclass: ${keuzeLink} — Simone, De Forex Opleiding`;
 
   try {
-    await sendMail({ to: toEmail, subject, text, html });
+    await sendEventMail({ to: toEmail, subject, text, html });
     return { ok: true };
   } catch (e) {
     console.error('[events-attendee-send-invite] mail:', e?.message || e);
