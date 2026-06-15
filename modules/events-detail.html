@@ -29,6 +29,7 @@
     .status-badge { display:inline-block; padding:3px 10px; border-radius:10px; font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.05em; }
     .status-draft { background: rgba(148,163,184,0.2); color: var(--text-faint); }
     .status-published { background: rgba(5,150,105,0.15); color:#059669; }
+    .status-afgerond { background: var(--accent-tint, rgba(31,159,224,0.16)); color: var(--accent, #1f9fe0); }
     .status-cancelled { background: rgba(220,38,38,0.15); color:#b91c1c; }
     .status-archived { background: rgba(148,163,184,0.2); color: var(--text-faint); opacity:.7; }
 
@@ -496,6 +497,7 @@ function renderPage() {
           ${ev.location ? `<span class="it"><i class="ti ti-map-pin"></i> ${esc(ev.location)}</span>` : ''}
           ${ev.niveau ? `<span class="it"><i class="ti ti-stairs-up"></i> ${esc(ev.niveau_label || ev.niveau)}</span>` : ''}
           <span class="it"><span class="status-badge status-${ev.status}">${esc(EV_STATUS_LABELS[ev.status] || ev.status)}</span></span>
+          ${isCompleted ? `<span class="it"><span class="status-badge status-afgerond"><i class="ti ti-checks"></i> Afgerond &middot; ${esc(new Date(ev.completed_at).toLocaleDateString('nl-NL', { day: '2-digit', month: 'short', year: 'numeric' }))}</span></span>` : ''}
           ${signupsClosed ? `<span class="it">${renderSignupsClosedBadgeHead(ev)}</span>` : ''}
           <span class="it"><span class="${capClass}">${active}/${cap} plekken</span></span>
         </div>

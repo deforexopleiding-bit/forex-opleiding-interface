@@ -14,6 +14,7 @@
 // een account-mismatch (401), dan willen we de afzender juist afwijzen.
 
 import { supabaseAdmin } from './supabase.js';
+import { cancelForCancelledQuote } from './_lib/mentor-ledger-engine.js';
 import { tlFetch, getActiveToken } from './_lib/teamleader-token.js';
 
 export const config = { api: { bodyParser: false } };
@@ -86,6 +87,20 @@ export default async function handler(req, res) {
       } else {
         verified = false;
       }
+    } else if (eventType === 'deal.lost' && objectId) {
+      // F5.1 mentor-hook: deal verloren → openstaande bonus-entries op deze
+      // deal annuleren. Lookup tl_deal_id → deals.id, dan engine-call.
+      const { data: dealRow } = await supabaseAdmin
+        .from('deals').select('id').eq('tl_deal_id', objectId).maybeSingle();
+      if (dealRow) {
+        try {
+          await cancelForCancelledQuote({ quoteId: dealRow.id });
+        } catch (e) {
+          console.error('[tl-webhook] mentor-hook cancelForCancelledQuote:', e.message);
+        }
+      }
+      processedAt = new Date().toISOString();
+      verified = true;
     } else {
       // deal.moved e.a.: alleen loggen.
       processedAt = new Date().toISOString();
