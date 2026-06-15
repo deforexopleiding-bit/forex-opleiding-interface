@@ -379,15 +379,22 @@ function renderPage(canCreate, canViewInbox, canManageSignupInbox) {
     hideAll();
     if (which === 'overzicht') {
       paneOverview.style.display = '';
+      _evTeardownRealtime();
     } else if (which === 'afgerond') {
       if (paneAfgerond) paneAfgerond.style.display = '';
       loadAfgerondEvents();
+      _evTeardownRealtime();
     } else if (which === 'inbox') {
       paneInbox.style.display = '';
       loadEventsInbox();
+      // Realtime: lijst-kanaal + 30s backstop-poll. Berichten-kanaal volgt
+      // pas wanneer een specifieke conversatie open gaat (openEventsConv).
+      _evSubscribeConversations();
+      _evStartBackstop();
     } else if (which === 'signup-inbox') {
       if (paneSignupInbox) paneSignupInbox.style.display = '';
       loadSignupInbox();
+      _evTeardownRealtime();
     }
   }));
   const inboxRefresh = document.getElementById('evInboxRefresh');
@@ -891,6 +898,131 @@ function _evShowListView() {
   _evState.convId = null;
   _evState.conv = null;
   _evState.suggestion = null;
+  // Realtime: alleen het berichten-kanaal opruimen; convCh + backstop blijven
+  // zolang de inbox-tab open is (lijst-updates moeten doorlopen).
+  _evTeardownThreadChannel();
+}
+
+// ── Events-inbox realtime ────────────────────────────────────────────────────
+// Live updates via Supabase-realtime, met handmatige refresh als fallback.
+//   _evRealtime.msgCh    : kanaal voor whatsapp_messages-inserts in open thread
+//   _evRealtime.convCh   : kanaal voor whatsapp_conversations (lijst)
+//   _evRealtime.backstop : 30s setInterval die loadEventsInbox() draait
+//                          (+ _evRefreshOpenThread() als een thread open is)
+// Alles defensief: zonder window.supabase wordt het stille no-op en blijft de
+// refresh-knop werken.
+const _evRealtime = { msgCh: null, convCh: null, backstop: null };
+
+function _evMakeDebouncer(ms) {
+  let t = null;
+  return (fn) => {
+    if (t) clearTimeout(t);
+    t = setTimeout(() => { t = null; try { fn(); } catch (e) { console.warn('[ev-realtime]', e?.message || e); } }, ms);
+  };
+}
+const _evDebounceThread = _evMakeDebouncer(300);
+const _evDebounceList   = _evMakeDebouncer(300);
+
+// Hergebruikbare "messages opnieuw ophalen voor open thread"-helper.
+// Zelfde call als de eerste load in openEventsConv (mark_as_read=true blijft
+// goed: realtime-update markeert ook nieuwe inbound-berichten als gelezen).
+async function _evRefreshOpenThread() {
+  const convId = _evState.convId;
+  if (!convId) return;
+  try {
+    const params = new URLSearchParams({ conversation_id: convId, limit: '200', mark_as_read: 'true' });
+    const r = await window.AgentShared.apiFetch('/api/inbox-messages-list?' + params.toString());
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) return; // stil — backstop probeert opnieuw, of gebruiker drukt refresh
+    // convId kan tijdens fetch veranderd zijn (race met _evShowListView).
+    if (_evState.convId !== convId) return;
+    _evState.conv = d.conversation || null;
+    _evState.canSendText = !!(d.conversation && d.conversation.can_send_text);
+    _renderEvThread(d.items || [], d.conversation || null);
+    _applyEvComposeState();
+  } catch (e) {
+    console.warn('[_evRefreshOpenThread]', e?.message || e);
+  }
+}
+
+async function _evSubscribeMessages(convId) {
+  await window._authSharedReady;
+  if (!window.supabase || !convId) return;
+  // Idempotent: bestaande msgCh eerst opruimen (zelfde of andere conv).
+  if (_evRealtime.msgCh) {
+    try { window.supabase.removeChannel(_evRealtime.msgCh); } catch {}
+    _evRealtime.msgCh = null;
+  }
+  try {
+    _evRealtime.msgCh = window.supabase
+      .channel('ev-inbox-msg-' + convId)
+      .on('postgres_changes', {
+        event : 'INSERT',
+        schema: 'public',
+        table : 'whatsapp_messages',
+        filter: 'conversation_id=eq.' + convId,
+      }, () => _evDebounceThread(_evRefreshOpenThread))
+      .subscribe();
+  } catch (e) {
+    console.warn('[_evSubscribeMessages]', e?.message || e);
+    _evRealtime.msgCh = null;
+  }
+}
+
+async function _evSubscribeConversations() {
+  await window._authSharedReady;
+  if (!window.supabase) return;
+  if (_evRealtime.convCh) {
+    try { window.supabase.removeChannel(_evRealtime.convCh); } catch {}
+    _evRealtime.convCh = null;
+  }
+  try {
+    // Geen module-filter in het kanaal — loadEventsInbox() filtert server-side
+    // al op module=events. Eenvoudiger dan een kolom-filter en consistent als
+    // er ooit andere modules op dezelfde tabel komen.
+    _evRealtime.convCh = window.supabase
+      .channel('ev-inbox-convs')
+      .on('postgres_changes', {
+        event : '*',
+        schema: 'public',
+        table : 'whatsapp_conversations',
+      }, () => _evDebounceList(loadEventsInbox))
+      .subscribe();
+  } catch (e) {
+    console.warn('[_evSubscribeConversations]', e?.message || e);
+    _evRealtime.convCh = null;
+  }
+}
+
+function _evStartBackstop() {
+  if (_evRealtime.backstop) return;
+  _evRealtime.backstop = setInterval(() => {
+    try {
+      loadEventsInbox();
+      if (_evState.convId) _evRefreshOpenThread();
+    } catch (e) {
+      console.warn('[ev-backstop]', e?.message || e);
+    }
+  }, 30000);
+}
+
+function _evTeardownThreadChannel() {
+  if (_evRealtime.msgCh) {
+    try { window.supabase && window.supabase.removeChannel(_evRealtime.msgCh); } catch {}
+    _evRealtime.msgCh = null;
+  }
+}
+
+function _evTeardownRealtime() {
+  _evTeardownThreadChannel();
+  if (_evRealtime.convCh) {
+    try { window.supabase && window.supabase.removeChannel(_evRealtime.convCh); } catch {}
+    _evRealtime.convCh = null;
+  }
+  if (_evRealtime.backstop) {
+    clearInterval(_evRealtime.backstop);
+    _evRealtime.backstop = null;
+  }
 }
 
 async function openEventsConv({ id, phone, displayName, customer }) {
@@ -910,7 +1042,7 @@ async function openEventsConv({ id, phone, displayName, customer }) {
   document.getElementById('evComposeTextarea').value = '';
   document.getElementById('evThreadHint').textContent = '';
 
-  // Messages laden
+  // Messages laden (eerste pass — daarna stuurt _evRefreshOpenThread updates).
   try {
     const params = new URLSearchParams({ conversation_id: id, limit: '200', mark_as_read: 'true' });
     const r = await window.AgentShared.apiFetch('/api/inbox-messages-list?' + params.toString());
@@ -932,6 +1064,10 @@ async function openEventsConv({ id, phone, displayName, customer }) {
     document.getElementById('evThreadMessages').innerHTML =
       '<div style="color:#ef4444;font-size:12px;padding:14px">Fout: ' + esc(e.message) + '</div>';
   }
+
+  // Realtime subscriben op INSERTs in deze conversatie. Stille no-op zonder
+  // window.supabase; backstop-poll + handmatige refresh blijven werken.
+  _evSubscribeMessages(id);
 }
 
 function _renderEvThread(items, conv) {
