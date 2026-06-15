@@ -1007,6 +1007,11 @@
         <i class="ti ti-checks" aria-hidden="true"></i>
         <span>Afgehandelde afspraken</span>
       </button>
+      <button class="fu-tab" data-tab="event-followups" role="tab" aria-selected="false">
+        <i class="ti ti-presentation" aria-hidden="true"></i>
+        <span>Event follow-ups</span>
+        <span class="fu-tab-count" id="tab-count-event-followups">—</span>
+      </button>
       <button class="fu-tab" data-tab="kalender" role="tab" aria-selected="false">
         <i class="ti ti-calendar" aria-hidden="true"></i>
         <span>Kalender</span>
@@ -1176,6 +1181,27 @@
           </div>
         </div>
       </section>
+    </div>
+
+    <!-- Event follow-ups tab (PR Z) -->
+    <div class="fu-tab-panel" data-panel="event-followups">
+      <div class="fu-section">
+        <div class="fu-section-header" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+          <div class="fu-section-title">Event follow-ups</div>
+          <div class="fu-section-count" id="count-event-followups">—</div>
+          <div style="flex:1"></div>
+          <select id="event-followups-status" style="padding:6px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:13px">
+            <option value="open" selected>Open</option>
+            <option value="afgehandeld">Afgehandeld</option>
+          </select>
+          <button id="event-followups-refresh" class="fu-toggle-btn" type="button" title="Vernieuwen">
+            <i class="ti ti-refresh"></i>
+          </button>
+        </div>
+        <div id="event-followups-list">
+          <div class="fu-loading">Laden…</div>
+        </div>
+      </div>
     </div>
 
     <!-- Kalender-tab panel -->
@@ -2521,6 +2547,165 @@
         archiefPage = 1;
         loadArchief();
       }
+      if (tabId === 'event-followups') {
+        loadEventFollowups();
+      }
+    }
+
+    // ── PR Z: Event follow-ups tab ───────────────────────────────────────────
+    let _eventFollowupsState = { status: 'open' };
+
+    function esc(s) {
+      if (s == null) return '';
+      return String(s)
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+    }
+
+    function fmtEvFuDate(iso) {
+      if (!iso) return '—';
+      const d = new Date(iso);
+      if (Number.isNaN(d.getTime())) return iso;
+      return d.toLocaleDateString('nl-NL', { day: '2-digit', month: 'short', year: 'numeric' });
+    }
+
+    function fmtEvFuDateTime(iso) {
+      if (!iso) return '—';
+      const d = new Date(iso);
+      if (Number.isNaN(d.getTime())) return iso;
+      return d.toLocaleString('nl-NL', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
+    }
+
+    async function loadEventFollowups() {
+      const listEl  = document.getElementById('event-followups-list');
+      const countEl = document.getElementById('count-event-followups');
+      const status  = _eventFollowupsState.status || 'open';
+
+      if (listEl) listEl.innerHTML = '<div class="fu-loading">Laden…</div>';
+
+      try {
+        const token = await window.AuthShared.getAccessToken();
+        const params = new URLSearchParams({ status, limit: '200' });
+        const res = await fetch('/api/events-followups-list?' + params.toString(), {
+          headers: { 'Authorization': 'Bearer ' + token },
+        });
+        const j = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          listEl.innerHTML = `<div class="fu-empty"><i class="ti ti-alert-circle" style="color:#f87171;font-size:16px" aria-hidden="true"></i>${esc(j.error || ('HTTP ' + res.status))}</div>`;
+          return;
+        }
+
+        const items = Array.isArray(j.items) ? j.items : [];
+        const counts = j.counts || {};
+        if (countEl) countEl.textContent = `${items.length} ${items.length === 1 ? 'item' : 'items'}`;
+        const tabCount = document.getElementById('tab-count-event-followups');
+        if (tabCount) {
+          tabCount.textContent = counts.open ?? items.length;
+          tabCount.classList.toggle('urgent', (counts.open || 0) > 0);
+        }
+
+        if (items.length === 0) {
+          const emptyMsg = status === 'open'
+            ? 'Geen open event follow-ups.'
+            : 'Geen afgehandelde event follow-ups.';
+          listEl.innerHTML = `<div class="fu-empty"><i class="ti ti-circle-check fu-empty-icon" aria-hidden="true"></i>${esc(emptyMsg)}</div>`;
+          return;
+        }
+
+        listEl.innerHTML = items.map((it) => renderEventFollowupCard(it, status)).join('');
+
+        if (status === 'open') {
+          listEl.querySelectorAll('[data-ev-fu-resolve]').forEach((btn) => {
+            btn.addEventListener('click', () => resolveEventFollowup(btn.dataset.evFuResolve, btn));
+          });
+        }
+      } catch (e) {
+        console.error('[loadEventFollowups]', e);
+        listEl.innerHTML = `<div class="fu-empty"><i class="ti ti-alert-circle" style="color:#f87171;font-size:16px" aria-hidden="true"></i>Laden mislukt: ${esc(e?.message || 'onbekende fout')}</div>`;
+      }
+    }
+
+    function renderEventFollowupCard(it, status) {
+      const att = it.attendee || {};
+      const ev  = it.event || {};
+      const owner = it.owner || {};
+      const naam = [att.first_name, att.last_name].filter(Boolean).join(' ') || att.email || '(onbekend)';
+      const ownerLabel = owner.full_name || owner.email || '—';
+      const evTitle = ev.title || '—';
+      const evWhen = ev.starts_at ? fmtEvFuDateTime(ev.starts_at) : '';
+      const saleBadge = att.has_signed_deal
+        ? '<span style="display:inline-flex;align-items:center;gap:4px;margin-left:6px;padding:2px 8px;border-radius:99px;font-size:11px;font-weight:700;background:rgba(5,150,105,0.18);color:#059669"><i class="ti ti-circle-check"></i> Sale</span>'
+        : '';
+
+      const handleBtn = (status === 'open')
+        ? `<button class="btn-primary" data-ev-fu-resolve="${esc(it.id)}" type="button" style="margin-top:8px"><i class="ti ti-check"></i> Afhandelen</button>`
+        : `<div style="font-size:11.5px;color:var(--text-faint);margin-top:8px"><i class="ti ti-check"></i> Afgehandeld ${esc(fmtEvFuDateTime(it.handled_at))}</div>`;
+
+      return `
+        <div class="fu-card" style="padding:14px;border:1px solid var(--border);border-radius:10px;background:var(--bg-elev);margin-bottom:10px">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px">
+            <div style="flex:1">
+              <div style="font-size:14px;font-weight:700">${esc(naam)}${saleBadge}</div>
+              <div style="font-size:12px;color:var(--text-dim);margin-top:2px">${esc(evTitle)}${evWhen ? ' · ' + esc(evWhen) : ''}</div>
+              ${att.email ? `<div style="font-size:11.5px;color:var(--text-faint);margin-top:2px">${esc(att.email)}${att.phone ? ' · ' + esc(att.phone) : ''}</div>` : ''}
+            </div>
+            <div style="text-align:right;font-size:11.5px;color:var(--text-faint)">
+              <div><i class="ti ti-user"></i> ${esc(ownerLabel)}</div>
+            </div>
+          </div>
+
+          <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:10px">
+            ${it.reason ? `<span style="padding:3px 9px;border-radius:99px;background:rgba(9,61,84,0.10);color:#0a2f63;font-size:11.5px;font-weight:600">${esc(it.reason)}</span>` : ''}
+            ${it.follow_up_date ? `<span style="padding:3px 9px;border-radius:99px;background:rgba(245,158,11,0.18);color:#b45309;font-size:11.5px;font-weight:600"><i class="ti ti-calendar"></i> ${esc(fmtEvFuDate(it.follow_up_date))}</span>` : ''}
+          </div>
+
+          ${handleBtn}
+        </div>
+      `;
+    }
+
+    async function resolveEventFollowup(followupId, btn) {
+      if (!followupId) return;
+      if (!confirm('Markeer deze follow-up als afgehandeld?')) return;
+
+      const orig = btn.innerHTML;
+      btn.disabled = true;
+      btn.innerHTML = 'Bezig…';
+      try {
+        const token = await window.AuthShared.getAccessToken();
+        const res = await fetch('/api/event-followup-resolve', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+          body: JSON.stringify({ followup_id: followupId }),
+        });
+        const j = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          alert(j.error || ('HTTP ' + res.status));
+          btn.disabled = false;
+          btn.innerHTML = orig;
+          return;
+        }
+        await loadEventFollowups();
+      } catch (e) {
+        console.error('[resolveEventFollowup]', e);
+        alert('Afhandelen mislukt: ' + (e?.message || 'onbekende fout'));
+        btn.disabled = false;
+        btn.innerHTML = orig;
+      }
+    }
+
+    function bindEventFollowupsControls() {
+      const sel = document.getElementById('event-followups-status');
+      if (sel) {
+        sel.addEventListener('change', () => {
+          _eventFollowupsState.status = sel.value;
+          loadEventFollowups();
+        });
+      }
+      const refresh = document.getElementById('event-followups-refresh');
+      if (refresh) {
+        refresh.addEventListener('click', () => loadEventFollowups());
+      }
     }
 
     function updateTabCounts() {
@@ -2683,8 +2868,31 @@
       }
       bindTimeToggle();
       initOpvolgingSearch();  // zoek-input in opvolging-tab activeren
+      bindEventFollowupsControls();   // PR Z
 
       await refreshFollowUpData();
+
+      // PR Z: best-effort count voor tab-badge bij init (geen blokkering).
+      void refreshEventFollowupsBadge();
+    }
+
+    async function refreshEventFollowupsBadge() {
+      try {
+        const token = await window.AuthShared.getAccessToken();
+        const res = await fetch('/api/events-followups-list?status=open&limit=1', {
+          headers: { 'Authorization': 'Bearer ' + token },
+        });
+        if (!res.ok) return;
+        const j = await res.json().catch(() => ({}));
+        const cnt = (j.counts && typeof j.counts.open === 'number') ? j.counts.open : (j.total || 0);
+        const el = document.getElementById('tab-count-event-followups');
+        if (el) {
+          el.textContent = cnt;
+          el.classList.toggle('urgent', cnt > 0);
+        }
+      } catch (e) {
+        // Stil — niet kritiek; tab werkt ook zonder badge.
+      }
     }
 
     async function loadDashboardMetrics() {
