@@ -74,6 +74,7 @@
           navLink('follow-up', '/modules/follow-up.html', 'Follow-up') +
           navLink('sales', '/modules/sales.html', 'Sales') +
           navLink('events', '/modules/events.html', 'Events') +
+          navLink('mentor-grootboek', '/modules/mentor-grootboek.html', 'Mentor-grootboek') +
           navLink('onboarding', '/modules/onboarding-overzicht.html', 'Onboarding') +
           // Finance — Mega-restructure: badge voor Open Acties (F1 finance-taken) hangt
           // nu inline op de Finance nav-item zelf. Open Acties is verhuisd naar
@@ -390,6 +391,7 @@
     'tickets': 'tickets.module.access',
     'sales': 'sales.module.access',
     'events': 'events.module.access',
+    'mentor-grootboek': 'mentor.module.access',
     // events-detail.html + events-wizard.html + events-automations.html erven dezelfde
     // module.access-gate (de pagina's checken zelf óók via window.RBAC.canSync in init()
     // — defense-in-depth).
