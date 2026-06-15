@@ -285,13 +285,21 @@ export function renderEmailParts({ subject, body, event, attendee, button } = {}
 }
 
 // ── 3. sendEventEmail — render + sendEventMail (events@-afzender, fallback info@) ──
-export async function sendEventEmail({ attendee, event, subject, body, button } = {}) {
+// `attachments` (optioneel) wordt 1-op-1 doorgegeven aan sendEventMail —
+// nodemailer-compatible shape: [{ filename, path }] of [{ filename, content }].
+export async function sendEventEmail({ attendee, event, subject, body, button, attachments } = {}) {
   if (!attendee?.email) {
     return { ok: false, skipped: true, reason: 'no-email' };
   }
   const parts = renderEmailParts({ subject, body, event, attendee, button });
   try {
-    const r = await sendEventMail({ to: attendee.email, subject: parts.subject, text: parts.text, html: parts.html });
+    const r = await sendEventMail({
+      to       : attendee.email,
+      subject  : parts.subject,
+      text     : parts.text,
+      html     : parts.html,
+      attachments,
+    });
     if (r && r.success) return { ok: true, from: r.from, fallback: r.fallback };
     return { ok: false, error: (r && r.error) || 'mail send failed', from: r && r.from };
   } catch (e) {
