@@ -10,7 +10,11 @@
 //     last_name:  string  (optioneel),
 //     email:      string  (optioneel; uniek per event als opgegeven),
 //     phone:      string  (optioneel),
-//     status:     string  (optioneel, default 'aangemeld')
+//     status:     string  (optioneel, default 'aangemeld'),
+//     send_invite: bool   (optioneel, default false) — als true, na succesvolle
+//                  insert wordt de keuze-link (WhatsApp + e-mail) gestuurd.
+//                  Niet-blokkerend: faalt de invite, dan blijft de aanmelding
+//                  staan en wordt de invite-status in de response gerapporteerd.
 //   }
 //
 // Capacity-check: bij status in (aangemeld|aanwezig|sale) wordt eerst
@@ -21,10 +25,11 @@
 //
 // Audit-log: event_attendee_audit_log entry met action='created'.
 //
-// Response 201: { attendee: { ...row } }
+// Response 201: { attendee: { ...row }, invite?: { ok, mail?, whatsapp?, error? } }
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
+import { sendEventAttendeeInvite } from './_lib/events-invite.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const VALID_STATUS = ['aangemeld', 'aanwezig', 'no_show', 'sale', 'switched_to_other_event'];
@@ -53,6 +58,7 @@ export default async function handler(req, res) {
   const email     = body.email      != null ? String(body.email).trim()      : null;
   const phone     = body.phone      != null ? String(body.phone).trim()      : null;
   const status    = body.status ? String(body.status).toLowerCase() : 'aangemeld';
+  const sendInvite = body.send_invite === true || body.send_invite === 'true';
 
   if (!eventId || !UUID_RE.test(eventId)) return res.status(400).json({ error: 'event_id (uuid) vereist' });
   if (!VALID_STATUS.includes(status)) {
@@ -155,7 +161,21 @@ export default async function handler(req, res) {
       console.error('[events-attendee-add audit]', e.message);
     }
 
-    return res.status(201).json({ attendee: row });
+    // Optionele invite-flow (niet-blokkerend; mislukken laat aanmelding staan).
+    let invite = null;
+    if (sendInvite) {
+      try {
+        invite = await sendEventAttendeeInvite({
+          attendeeId:   row.id,
+          sentByUserId: user?.id || null,
+        });
+      } catch (e) {
+        console.error('[events-attendee-add invite]', e?.message || e);
+        invite = { ok: false, error: e?.message || 'invite send failed' };
+      }
+    }
+
+    return res.status(201).json({ attendee: row, invite });
   } catch (e) {
     console.error('[events-attendee-add]', e.message);
     return res.status(500).json({ error: e.message });
