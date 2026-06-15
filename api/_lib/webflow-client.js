@@ -53,9 +53,17 @@ const TEMPLATE_CACHE_TTL_MS = 10 * 60 * 1000;  // 10 min (templates wijzigen zel
 // Mapping: lowercase Event Type option-NAME -> events.niveau slug.
 // Wordt gebruikt bij template-discovery om elk Webflow CMS-item te classifyeren
 // als basis- of gevorderd-template op basis van zijn category-veld.
+//
+// Superset voor non-breaking Webflow-rename ('Forex Kickstart Live' -> 'Basis',
+// 'Trading Deep Dive' -> 'Gevorderd'): zowel de oude als de nieuwe optie-namen
+// staan hier. De lookup lowercased al, dus dit werkt ongeacht hoe Webflow de
+// optie precies toont. Mocht de oude naam ooit terugkomen, dan blijft die ook
+// gewoon mappen.
 const WEBFLOW_TYPE_TO_NIVEAU = {
   'forex kickstart live': 'basis',
   'trading deep dive'   : 'gevorderd',
+  'basis'               : 'basis',
+  'gevorderd'           : 'gevorderd',
 };
 
 // In-memory module-scope cache. Reset bij elke koude Lambda-start (acceptabel).
