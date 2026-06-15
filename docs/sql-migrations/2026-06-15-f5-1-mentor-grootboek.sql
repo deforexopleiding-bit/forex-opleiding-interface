@@ -101,6 +101,7 @@ CREATE TABLE IF NOT EXISTS public.mentor_ledger_entries (
   attendee_id      uuid REFERENCES public.event_attendees(id) ON DELETE SET NULL,
   customer_id      uuid REFERENCES public.customers(id) ON DELETE SET NULL,
   basis            numeric(12,2),
+  basis_incl_btw   boolean NOT NULL DEFAULT true,
   pct              numeric(5,2),
   amount           numeric(12,2) NOT NULL,
   status           text NOT NULL DEFAULT 'pending',
@@ -126,6 +127,8 @@ ALTER TABLE public.mentor_ledger_entries
 CREATE INDEX IF NOT EXISTS idx_ledger_mentor ON public.mentor_ledger_entries (mentor_user_id);
 CREATE INDEX IF NOT EXISTS idx_ledger_event  ON public.mentor_ledger_entries (event_id);
 CREATE INDEX IF NOT EXISTS idx_ledger_status ON public.mentor_ledger_entries (status);
+ALTER TABLE public.mentor_ledger_entries
+  ADD COLUMN IF NOT EXISTS basis_incl_btw boolean NOT NULL DEFAULT true;
 
 -- ── RLS — alleen SELECT-policies; schrijven gaat via service-role endpoints ──
 ALTER TABLE public.event_expenses        ENABLE ROW LEVEL SECURITY;
