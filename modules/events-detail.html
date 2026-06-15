@@ -295,6 +295,37 @@
   </div>
 </div>
 
+<!-- ── Modal: Event afronden (F5.1) ──────────────────────────────────────── -->
+<div class="modal-overlay hidden" id="evCompleteModal" role="dialog" aria-modal="true">
+  <div class="modal-card" style="max-width:720px;width:100%;max-height:calc(100vh - 40px)">
+    <div class="modal-header">
+      <div class="modal-title">Event afronden</div>
+      <button class="modal-close" type="button" onclick="closeEvCompleteModal()">&#x2715;</button>
+    </div>
+    <div class="modal-body" style="overflow-y:auto">
+      <div class="modal-banner" id="evCompleteBanner"></div>
+
+      <div style="font-size:12px; color:var(--text-dim); margin-bottom:12px">
+        Markeer aanwezigheid + opvolg-redenen, wie van het team aanwezig was, en eventuele uitgaven. De bonus van 3 % en het uitgaven-aandeel worden meteen verdeeld in het mentor-grootboek.
+      </div>
+
+      <h3 style="font-size:12px; font-weight:700; color:var(--text-faint); text-transform:uppercase; letter-spacing:.06em; margin:6px 0 8px">Aanwezigheid</h3>
+      <div id="evCompleteAttendees"></div>
+
+      <h3 style="font-size:12px; font-weight:700; color:var(--text-faint); text-transform:uppercase; letter-spacing:.06em; margin:16px 0 8px">Welke mentoren waren aanwezig?</h3>
+      <div id="evCompleteMentors"></div>
+
+      <h3 style="font-size:12px; font-weight:700; color:var(--text-faint); text-transform:uppercase; letter-spacing:.06em; margin:16px 0 8px">Uitgaven</h3>
+      <div id="evCompleteExpenses"></div>
+      <button class="btn-secondary" type="button" onclick="addEvCompleteExpense()" style="margin-top:8px"><i class="ti ti-plus"></i> Uitgave toevoegen</button>
+    </div>
+    <div class="modal-footer">
+      <button class="btn-secondary" type="button" onclick="closeEvCompleteModal()">Annuleren</button>
+      <button class="btn-primary" type="button" id="evCompleteSubmit" onclick="submitEvComplete()"><i class="ti ti-checks"></i> Event afronden</button>
+    </div>
+  </div>
+</div>
+
 <script src="/modules/shared/supabase-client.js"></script>
 <script src="/modules/shared/agent-shared.js"></script>
 <script src="/modules/shared/theme-shared.js"></script>
@@ -439,6 +470,8 @@ function renderPage() {
   const canEdit = can('events.event.edit');
   const canPublish = can('events.event.publish');
   const canCancel = can('events.event.delete');
+  const canComplete = can('events.event.complete');
+  const isCompleted = !!ev.completed_at;
 
   // Blok 1: close/reopen knoppen alleen voor niet-gearchiveerde events
   // met edit-recht. Close: zichtbaar bij open inschrijvingen. Reopen:
@@ -467,6 +500,7 @@ function renderPage() {
         ${(canPublish && isDraft) ? '<button class="btn-primary" onclick="publishEvent()"><i class="ti ti-rocket"></i> Publiceren</button>' : ''}
         ${canShowCloseBtn ? '<button class="btn-secondary" onclick="closeSignupsAction()"><i class="ti ti-lock"></i> Aanmelding sluiten</button>' : ''}
         ${canShowReopenBtn ? '<button class="btn-secondary" onclick="reopenSignupsAction()"><i class="ti ti-lock-open"></i> Aanmelding heropen</button>' : ''}
+        ${(canComplete && isPublished) ? `<button class="btn-primary" onclick="openEvCompleteModal()" title="${isCompleted ? 'Wijzig aanwezigheid / her-afronden' : 'Event afronden'}"><i class="ti ti-checks"></i> ${isCompleted ? 'Her-afronden' : 'Event afronden'}</button>` : ''}
         ${(canCancel && (isDraft || isPublished)) ? '<button class="btn-danger" onclick="cancelEvent()"><i class="ti ti-x"></i> Annuleren</button>' : ''}
       </div>
     </div>
@@ -1191,6 +1225,231 @@ async function submitEvEdit() {
     banner.classList.add('visible');
   } finally {
     btn.disabled = false; btn.textContent = 'Opslaan';
+  }
+}
+
+// ── Actions: Event afronden (F5.1) ───────────────────────────────────────────
+
+const FOLLOWUP_REASONS = [
+  'Terugbellen — twijfelt nog',
+  'Geen budget nu — later benaderen',
+  'Wil eerst overleggen',
+  'Meer info gewenst',
+  'Verkeerd moment',
+  'Niet bereikbaar',
+  'Niet geïnteresseerd',
+];
+
+let _evCompleteExpenses = []; // [{ amount, vendor, spent_at, note }]
+
+async function openEvCompleteModal() {
+  const banner = document.getElementById('evCompleteBanner');
+  banner.classList.remove('visible');
+
+  document.getElementById('evCompleteAttendees').innerHTML = '<div style="font-size:12.5px;color:var(--text-dim)">Laden…</div>';
+  document.getElementById('evCompleteMentors').innerHTML = '';
+  _evCompleteExpenses = [];
+  renderEvCompleteExpenses();
+  document.getElementById('evCompleteModal').classList.remove('hidden');
+
+  try {
+    // Lazy-load — als de gebruiker de tabs nog niet heeft geopend.
+    if (!state.attendees || state.attendees.length === 0) {
+      try { await loadAttendees(); } catch {}
+    }
+    if (!state.mentors || state.mentors.length === 0) {
+      try { await loadMentors(); } catch {}
+    }
+    renderEvCompleteAttendees(state.attendees || []);
+    renderEvCompleteMentors(state.mentors || []);
+  } catch (e) {
+    banner.textContent = 'Laden mislukt: ' + (e?.message || e);
+    banner.classList.add('visible');
+  }
+}
+
+function closeEvCompleteModal() {
+  document.getElementById('evCompleteModal').classList.add('hidden');
+}
+
+function renderEvCompleteAttendees(list) {
+  const host = document.getElementById('evCompleteAttendees');
+  // Filter aangemeld + aanwezig (status zou na afronden alleen die overhouden;
+  // andere zijn al verplaatst of no-show ge-tagged eerder).
+  const rows = (list || []).filter((a) => a.status === 'aangemeld' || a.status === 'aanwezig');
+  if (rows.length === 0) {
+    host.innerHTML = '<div style="font-size:12.5px;color:var(--text-dim)">Geen actieve deelnemers.</div>';
+    return;
+  }
+  const reasonOpts = FOLLOWUP_REASONS.map((r) => `<option value="${esc(r)}">${esc(r)}</option>`).join('');
+  host.innerHTML = rows.map((a) => {
+    const naam = [a.first_name, a.last_name].filter(Boolean).join(' ') || a.email || '(zonder naam)';
+    const initial = (a.attendance_status === 'aanwezig' || a.attendance_status === 'no_show' || a.attendance_status === 'afgemeld')
+      ? a.attendance_status : 'aanwezig';
+    return `
+      <div class="evc-att-row" data-att="${esc(a.id)}" style="display:grid;grid-template-columns:1fr auto;gap:8px;padding:8px 0;border-bottom:1px solid var(--border)">
+        <div>
+          <div style="font-size:13.5px;font-weight:600">${esc(naam)}</div>
+          ${a.email ? `<div style="font-size:11.5px;color:var(--text-faint)">${esc(a.email)}</div>` : ''}
+          <div class="evc-reason-wrap" style="margin-top:6px; display:${initial === 'no_show' ? 'block' : 'none'}">
+            <select class="evc-reason" style="font-size:12.5px;padding:5px 8px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);width:100%">
+              <option value="">— Reden (optioneel)</option>
+              ${reasonOpts}
+            </select>
+          </div>
+        </div>
+        <div style="display:flex;gap:4px;align-items:flex-start;flex-wrap:wrap;justify-content:flex-end">
+          <label class="evc-st" style="font-size:12px;padding:4px 9px;border:1px solid var(--border);border-radius:99px;cursor:pointer"><input type="radio" name="evc_${esc(a.id)}" value="aanwezig" ${initial === 'aanwezig' ? 'checked' : ''} style="display:none"> Aanwezig</label>
+          <label class="evc-st" style="font-size:12px;padding:4px 9px;border:1px solid var(--border);border-radius:99px;cursor:pointer"><input type="radio" name="evc_${esc(a.id)}" value="no_show" ${initial === 'no_show' ? 'checked' : ''} style="display:none"> No-show</label>
+          <label class="evc-st" style="font-size:12px;padding:4px 9px;border:1px solid var(--border);border-radius:99px;cursor:pointer"><input type="radio" name="evc_${esc(a.id)}" value="afgemeld" ${initial === 'afgemeld' ? 'checked' : ''} style="display:none"> Afgemeld</label>
+        </div>
+      </div>`;
+  }).join('');
+
+  // Visual selected-state + toon/verberg reason bij no_show
+  function applyVisual(rowEl) {
+    const checked = rowEl.querySelector('input[type=radio]:checked');
+    const val = checked ? checked.value : null;
+    rowEl.querySelectorAll('.evc-st').forEach((lb) => {
+      const ri = lb.querySelector('input[type=radio]');
+      const sel = ri && ri.checked;
+      lb.style.background = sel ? 'rgba(9,61,84,0.12)' : '';
+      lb.style.borderColor = sel ? '#0a2f63' : 'var(--border)';
+      lb.style.color = sel ? '#0a2f63' : 'var(--text-dim)';
+      lb.style.fontWeight = sel ? '700' : '600';
+    });
+    const rWrap = rowEl.querySelector('.evc-reason-wrap');
+    if (rWrap) rWrap.style.display = (val === 'no_show') ? 'block' : 'none';
+  }
+  host.querySelectorAll('.evc-att-row').forEach((row) => {
+    applyVisual(row);
+    row.querySelectorAll('input[type=radio]').forEach((ri) => {
+      ri.addEventListener('change', () => applyVisual(row));
+    });
+  });
+}
+
+function renderEvCompleteMentors(list) {
+  const host = document.getElementById('evCompleteMentors');
+  const rows = list || [];
+  if (rows.length === 0) {
+    host.innerHTML = '<div style="font-size:12.5px;color:var(--text-dim)">Nog geen mentoren gekoppeld aan dit event.</div>';
+    return;
+  }
+  host.innerHTML = `<div style="display:flex;gap:6px;flex-wrap:wrap">${
+    rows.map((m) => {
+      const noUser = m.user_linked === false;
+      const initialChecked = m.was_present === true;
+      const title = noUser ? 'Geen user-koppeling — krijgt geen ledger-entries' : '';
+      return `<label style="display:inline-flex;align-items:center;gap:6px;padding:6px 10px;border:1px solid var(--border);border-radius:8px;cursor:pointer;background:var(--bg-elev)" title="${esc(title)}">
+        <input type="checkbox" class="evc-mentor" value="${esc(m.team_member_id)}" ${initialChecked ? 'checked' : ''}>
+        <span style="font-size:13px">${esc(m.name || '?')}${noUser ? ' <span style="color:var(--text-faint);font-size:11px">(niet gekoppeld)</span>' : ''}</span>
+      </label>`;
+    }).join('')
+  }</div>`;
+}
+
+function renderEvCompleteExpenses() {
+  const host = document.getElementById('evCompleteExpenses');
+  if (_evCompleteExpenses.length === 0) {
+    host.innerHTML = '<div style="font-size:12.5px;color:var(--text-dim)">Nog geen uitgaven toegevoegd.</div>';
+    return;
+  }
+  host.innerHTML = _evCompleteExpenses.map((e, idx) => `
+    <div style="display:grid;grid-template-columns:110px 1fr 130px 1fr auto;gap:6px;align-items:center;margin-bottom:6px">
+      <input type="number" min="0" step="0.01" placeholder="Bedrag €" value="${esc(String(e.amount ?? ''))}" data-exp-idx="${idx}" data-exp-field="amount" style="padding:6px 8px;border:1px solid var(--border);border-radius:6px;font-size:12.5px;background:var(--bg);color:var(--text)">
+      <input type="text" placeholder="Leverancier" value="${esc(e.vendor || '')}" data-exp-idx="${idx}" data-exp-field="vendor" style="padding:6px 8px;border:1px solid var(--border);border-radius:6px;font-size:12.5px;background:var(--bg);color:var(--text)">
+      <input type="date" value="${esc(e.spent_at || '')}" data-exp-idx="${idx}" data-exp-field="spent_at" style="padding:6px 8px;border:1px solid var(--border);border-radius:6px;font-size:12.5px;background:var(--bg);color:var(--text)">
+      <input type="text" placeholder="Notitie" value="${esc(e.note || '')}" data-exp-idx="${idx}" data-exp-field="note" style="padding:6px 8px;border:1px solid var(--border);border-radius:6px;font-size:12.5px;background:var(--bg);color:var(--text)">
+      <button type="button" data-exp-remove="${idx}" class="btn-secondary" style="padding:4px 9px"><i class="ti ti-x"></i></button>
+    </div>`).join('');
+  host.querySelectorAll('input[data-exp-field]').forEach((el) => {
+    el.addEventListener('input', () => {
+      const idx = Number(el.dataset.expIdx);
+      const f = el.dataset.expField;
+      if (!_evCompleteExpenses[idx]) return;
+      _evCompleteExpenses[idx][f] = (f === 'amount') ? el.value : el.value.trim();
+    });
+  });
+  host.querySelectorAll('[data-exp-remove]').forEach((b) => {
+    b.addEventListener('click', () => {
+      const idx = Number(b.dataset.expRemove);
+      _evCompleteExpenses.splice(idx, 1);
+      renderEvCompleteExpenses();
+    });
+  });
+}
+
+function addEvCompleteExpense() {
+  _evCompleteExpenses.push({ amount: '', vendor: '', spent_at: '', note: '' });
+  renderEvCompleteExpenses();
+}
+
+async function submitEvComplete() {
+  const banner = document.getElementById('evCompleteBanner');
+  banner.classList.remove('visible');
+  const btn = document.getElementById('evCompleteSubmit');
+  btn.disabled = true;
+  const orig = btn.innerHTML;
+  btn.innerHTML = 'Bezig…';
+  try {
+    // Verzamel attendees
+    const rows = document.querySelectorAll('#evCompleteAttendees .evc-att-row');
+    const attendees = [];
+    for (const r of rows) {
+      const attId = r.dataset.att;
+      const status = (r.querySelector('input[type=radio]:checked') || {}).value;
+      if (!status) throw new Error('Kies een aanwezigheids-status voor elke deelnemer.');
+      const item = { attendee_id: attId, attendance_status: status };
+      if (status === 'no_show') {
+        const reasonSel = r.querySelector('.evc-reason');
+        if (reasonSel && reasonSel.value) item.followup_reason = reasonSel.value;
+      }
+      attendees.push(item);
+    }
+
+    // Verzamel mentoren
+    const mentorIds = Array.from(document.querySelectorAll('#evCompleteMentors .evc-mentor:checked')).map((c) => c.value);
+
+    // Verzamel expenses (filter lege rijen)
+    const expenses = _evCompleteExpenses
+      .map((e) => ({
+        amount  : Number(e.amount),
+        vendor  : e.vendor || null,
+        spent_at: e.spent_at || null,
+        note    : e.note || null,
+      }))
+      .filter((e) => Number.isFinite(e.amount) && e.amount > 0);
+
+    const r = await window.AgentShared.apiFetch('/api/events-complete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        event_id              : state.eventId,
+        attendees,
+        present_team_member_ids: mentorIds,
+        expenses,
+      }),
+    });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(j.error || ('HTTP ' + r.status));
+
+    const s = j.summary || {};
+    const msg = `Afgerond — ${s.attendees_updated || 0} deelnemer(s), ${s.mentors_marked_present || 0} mentor(en), ${s.expenses_inserted || 0} uitgave(n). Ledger: ${s.bonus_entries_created || 0} bonus + ${s.expense_entries_created || 0} uitgave-entries.`;
+    window.AgentShared?.showToast?.(msg, 'success');
+    if (Array.isArray(s.warnings) && s.warnings.length > 0) {
+      console.warn('[events-complete] warnings:', s.warnings);
+    }
+    closeEvCompleteModal();
+    await loadEvent();
+    await loadAttendees?.();
+    await loadMentors?.();
+    renderPage();
+  } catch (e) {
+    banner.textContent = e?.message || 'Afronden mislukt';
+    banner.classList.add('visible');
+  } finally {
+    btn.disabled = false; btn.innerHTML = orig;
   }
 }
 
