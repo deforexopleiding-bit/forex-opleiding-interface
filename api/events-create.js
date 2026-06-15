@@ -51,6 +51,8 @@ export default async function handler(req, res) {
   const capacity    = body.capacity != null ? Number(body.capacity) : null;
   const niveau      = body.niveau != null ? String(body.niveau).trim().toLowerCase() : null;
   const descriptionMd = body.description_md != null ? String(body.description_md) : null;
+  const imageUrl = (body.image_url != null && String(body.image_url).trim() !== '')
+    ? String(body.image_url).trim() : null;
   const status      = body.status ? String(body.status).toLowerCase() : 'draft';
 
   // ---- Validatie ----
@@ -66,6 +68,9 @@ export default async function handler(req, res) {
   }
   if (!ALLOWED_STATUS_ON_CREATE.includes(status)) {
     return res.status(400).json({ error: `status moet ${ALLOWED_STATUS_ON_CREATE.join('|')} zijn bij create` });
+  }
+  if (imageUrl && (!/^https?:\/\//i.test(imageUrl) || imageUrl.length > 1000)) {
+    return res.status(400).json({ error: 'image_url moet een geldige http(s)-URL zijn (max 1000 tekens)' });
   }
 
   // Niveau-validatie: moet bestaande actieve slug zijn (als opgegeven).
@@ -94,6 +99,7 @@ export default async function handler(req, res) {
       status,
       niveau:            niveau || null,
       description_md:    descriptionMd,
+      image_url: imageUrl,
       created_by_user_id: user?.id || null,
     };
 
