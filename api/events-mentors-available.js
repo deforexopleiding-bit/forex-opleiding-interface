@@ -7,8 +7,11 @@
 // Query: ?event_id=<uuid>  (optioneel — als opgegeven worden al-gekoppelde mentoren
 //                            uitgesloten zodat de select alleen "kies nieuwe mentor" toont)
 //
-// Response: { mentors: [ { id, name, role, email, avatar_emoji, avatar_color } ] }
+// Response: { mentors: [ { id, name, role, email, avatar_emoji, avatar_color, user_linked } ] }
 // Sortering: name ASC.
+// user_linked = team_members.user_id IS NOT NULL (F5.0). Mentor zonder user_id kan
+// nog wel als mentor gekoppeld worden aan een event, maar krijgt geen ledger-entries
+// totdat een super_admin de koppeling aan auth.users maakt via team-member-link-user.
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
@@ -38,7 +41,7 @@ export default async function handler(req, res) {
   try {
     const { data: all, error } = await supabaseAdmin
       .from('team_members')
-      .select('id, name, role, type, email, avatar_emoji, avatar_color, is_active')
+      .select('id, name, role, type, email, avatar_emoji, avatar_color, is_active, user_id')
       .eq('type', 'mentor')
       .eq('is_active', true)
       .order('name', { ascending: true });
@@ -59,7 +62,16 @@ export default async function handler(req, res) {
       }
     }
 
-    return res.status(200).json({ mentors });
+    const out = mentors.map((m) => ({
+      id           : m.id,
+      name         : m.name,
+      role         : m.role,
+      email        : m.email,
+      avatar_emoji : m.avatar_emoji,
+      avatar_color : m.avatar_color,
+      user_linked  : !!m.user_id,
+    }));
+    return res.status(200).json({ mentors: out });
   } catch (e) {
     console.error('[events-mentors-available]', e.message);
     return res.status(500).json({ error: e.message });
