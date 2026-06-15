@@ -27,7 +27,7 @@ export default async function handler(req, res) {
   try {
     const { data, error } = await supabaseAdmin
       .from('event_niveau_options')
-      .select('slug, label, sort_order, is_active')
+      .select('slug, label, sort_order, is_active, default_image_url')
       .eq('is_active', true)
       .order('sort_order', { ascending: true })
       .order('label', { ascending: true });
