@@ -22,7 +22,7 @@ import { requirePermission } from './_lib/requirePermission.js';
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-const EDITABLE_FIELDS = ['first_name', 'last_name', 'email', 'phone', 'customer_id', 'follow_up_flagged', 'follow_up_reason'];
+const EDITABLE_FIELDS = ['first_name', 'last_name', 'email', 'phone', 'customer_id', 'follow_up_flagged', 'follow_up_reason', 'called'];
 
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
@@ -75,6 +75,9 @@ export default async function handler(req, res) {
       case 'follow_up_reason':
         patch.follow_up_reason = v === null || v === '' ? null : String(v).trim();
         break;
+      case 'called':
+        patch.called_at = v ? new Date().toISOString() : null;
+        break;
       default:
         // shouldn't reach
         break;
@@ -116,7 +119,7 @@ export default async function handler(req, res) {
         ghl_contact_id, ghl_form_submission_id, assessment_response_id,
         switched_from_event_id, switched_at,
         registered_at, attended_at, no_show_marked_at, sale_at,
-        follow_up_flagged, follow_up_reason,
+        follow_up_flagged, follow_up_reason, called_at,
         created_at, updated_at
       `)
       .maybeSingle();

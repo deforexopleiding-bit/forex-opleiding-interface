@@ -686,6 +686,7 @@ function renderAttendeesTab() {
         <th>Telefoon</th>
         <th>Status</th>
         <th title="Telt mee voor capaciteit als de vragenlijst is voltooid (assessment_response_id aanwezig).">Vragenlijst</th>
+        <th title="Markeer als al gebeld">Gebeld</th>
         <th>Tags</th>
         <th></th>
       </tr></thead>
@@ -730,6 +731,10 @@ function renderAttendeesTab() {
           </div>
         ` : '';
 
+        const calledChecked = a.called_at ? 'checked' : '';
+        const calledTitle = a.called_at ? ('Gebeld op ' + fmtDate(a.called_at)) : 'Nog niet gebeld';
+        const calledCell = `<input type="checkbox" class="att-called-chk" data-id="${esc(a.id)}" ${calledChecked} title="${esc(calledTitle)}" style="cursor:pointer" ${canEditAtt ? '' : 'disabled'} />`;
+
         return `
           <tr>
             <td><strong>${esc(fullName)}</strong></td>
@@ -737,6 +742,7 @@ function renderAttendeesTab() {
             <td>${esc(a.phone || '—')}</td>
             <td>${statusCell}</td>
             <td>${assessmentCell}</td>
+            <td>${calledCell}</td>
             <td>${tagsHtml || '<span style="color:var(--text-faint)">—</span>'}</td>
             <td class="sr-actions">${kebab}</td>
           </tr>
@@ -748,6 +754,11 @@ function renderAttendeesTab() {
   // Status-dropdown wire
   document.querySelectorAll('.att-status-sel').forEach((sel) => {
     sel.addEventListener('change', () => onAttStatusChange(sel.dataset.id, sel.value));
+  });
+
+  // Gebeld-checkbox wire
+  document.querySelectorAll('.att-called-chk').forEach((cb) => {
+    cb.addEventListener('change', () => onAttCalledChange(cb.dataset.id, cb.checked, cb));
   });
 
   // Kebab wire
@@ -1671,6 +1682,28 @@ async function onAttStatusChange(attendeeId, newStatus) {
   } catch (e) {
     window.AgentShared?.showToast?.('Status wijzigen mislukt: ' + e.message, 'error');
     await loadAttendees(); // herstel UI
+  }
+}
+
+async function onAttCalledChange(attendeeId, called, cbEl) {
+  if (cbEl) cbEl.disabled = true;
+  try {
+    const res = await window.AgentShared.apiFetch('/api/events-attendee-update?id=' + encodeURIComponent(attendeeId), {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ called: !!called }),
+    });
+    if (!res.ok) {
+      const e = await res.json().catch(() => ({}));
+      throw new Error(e.error || `HTTP ${res.status}`);
+    }
+    window.AgentShared?.showToast?.(called ? 'Gemarkeerd als gebeld' : 'Vinkje verwijderd', 'success');
+    await loadAttendees();
+  } catch (e) {
+    window.AgentShared?.showToast?.('Gebeld wijzigen mislukt: ' + e.message, 'error');
+    await loadAttendees(); // herstel UI
+  } finally {
+    if (cbEl) cbEl.disabled = false;
   }
 }
 
