@@ -153,6 +153,7 @@ export default async function handler(req, res) {
         status                : 'aangemeld',
         created_via           : 'assessment',
         registered_at         : new Date().toISOString(),
+        assessment_linked_at  : new Date().toISOString(),
       })
       .select('id')
       .maybeSingle();
@@ -182,6 +183,7 @@ export default async function handler(req, res) {
             .from('event_attendees')
             .update({
               assessment_response_id: assessment.id,
+              assessment_linked_at  : new Date().toISOString(),
               first_name            : assessment.first_name,
               last_name             : assessment.last_name,
             })

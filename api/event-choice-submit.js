@@ -272,6 +272,7 @@ export default async function handler(req, res) {
       if (suppliedAssessmentId && !attendee.assessment_response_id) {
         const updatePayload = {
           assessment_response_id: effectiveAssessmentId,
+          assessment_linked_at  : new Date().toISOString(),
         };
         if (effectiveFirstName) updatePayload.first_name = effectiveFirstName;
         if (effectiveLastName)  updatePayload.last_name  = effectiveLastName;
@@ -349,6 +350,7 @@ export default async function handler(req, res) {
           status                : 'aangemeld',
           created_via           : 'choice',
           assessment_response_id: effectiveAssessmentId || null,
+          assessment_linked_at  : effectiveAssessmentId ? new Date().toISOString() : null,
           switched_from_event_id: attendee.event_id,
           registered_at         : new Date().toISOString(),
         })
