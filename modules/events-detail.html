@@ -191,12 +191,48 @@
           <label>Telefoon</label>
           <input type="tel" id="aafPhone" maxlength="40" autocomplete="off" />
         </div>
+        <div class="form-field" style="margin-top:8px">
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-weight:500">
+            <input type="checkbox" id="aafSendInvite" />
+            <span>Stuur bevestiging + vragenlijst (WhatsApp + e-mail)</span>
+          </label>
+        </div>
       </form>
       <div id="altSuggestionsWrap"></div>
     </div>
     <div class="modal-footer">
       <button class="btn-secondary" type="button" onclick="closeAttAddModal()">Annuleren</button>
       <button class="btn-primary" type="button" id="aafSubmit" onclick="submitAttAdd()">Toevoegen</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Modal: deelnemer verplaatsen ──────────────────────────────────── -->
+<div class="modal-overlay hidden" id="attMoveModal" role="dialog" aria-modal="true">
+  <div class="modal-card">
+    <div class="modal-header">
+      <div class="modal-title">Deelnemer verplaatsen</div>
+      <button class="modal-close" type="button" onclick="closeAttMoveModal()">&#x2715;</button>
+    </div>
+    <div class="modal-body">
+      <div class="modal-banner" id="attMoveBanner"></div>
+      <div id="attMoveSubject" style="font-size:13px;color:var(--text-faint);margin-bottom:12px"></div>
+      <div class="form-field">
+        <label>Doel-event <span class="req">*</span></label>
+        <select id="attMoveTarget">
+          <option value="">— Events laden… —</option>
+        </select>
+      </div>
+      <div class="form-field" style="margin-top:8px">
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-weight:500">
+          <input type="checkbox" id="attMoveSendInvite" />
+          <span>Stuur bevestiging + vragenlijst (WhatsApp + e-mail)</span>
+        </label>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn-secondary" type="button" onclick="closeAttMoveModal()">Annuleren</button>
+      <button class="btn-primary" type="button" id="attMoveSubmit" onclick="submitAttMove()">Verplaatsen</button>
     </div>
   </div>
 </div>
@@ -721,6 +757,11 @@ function renderAttendeesTab() {
         // Fase 3b: "Stuur keuze-link" — gegate op events.attendee.edit
         // (operationele actie op bestaande rij; geen aparte invite-key).
         if (canEditAtt) kebabItems.push(`<button class="kebab-item" data-action="send-invite" data-id="${esc(a.id)}"><i class="ti ti-send"></i> Stuur keuze-link</button>`);
+        // Verplaatsen: creëert nieuwe rij op doel-event → gegated op create-rechten.
+        // Alleen tonen voor "live" rijen; reeds geswitchte rij is een audit-end-state.
+        if (canAdd && a.status !== 'switched_to_other_event') {
+          kebabItems.push(`<button class="kebab-item" data-action="move" data-id="${esc(a.id)}"><i class="ti ti-arrow-right"></i> Verplaatsen</button>`);
+        }
         if (canTagAdd) kebabItems.push(`<button class="kebab-item" data-action="tag-add" data-id="${esc(a.id)}"><i class="ti ti-tag"></i> Tag toevoegen</button>`);
         if (canTagRemove && (a.tags || []).length > 0) kebabItems.push(`<button class="kebab-item" data-action="tag-remove" data-id="${esc(a.id)}"><i class="ti ti-tag-off"></i> Tag verwijderen</button>`);
         if (canDelAtt) kebabItems.push(`<button class="kebab-item danger" data-action="delete" data-id="${esc(a.id)}"><i class="ti ti-trash"></i> Verwijderen</button>`);
@@ -785,6 +826,7 @@ function renderAttendeesTab() {
       document.querySelectorAll('.kebab-menu.show').forEach((m) => m.classList.remove('show'));
       if (action === 'edit') return openAttEdit(id);
       if (action === 'send-invite') return sendInviteToAttendee(id);
+      if (action === 'move') return openAttMoveModal(id);
       if (action === 'tag-add') return openTagAddModal(id);
       if (action === 'tag-remove') return openTagRemove(id);
       if (action === 'delete') return deleteAttendee(id);
@@ -826,6 +868,127 @@ async function sendInviteToAttendee(attendeeId) {
   } catch (e) {
     console.error('[sendInviteToAttendee]', e);
     window.AgentShared.showToast('Versturen mislukt: ' + (e?.message || 'onbekende fout'), 'error');
+  }
+}
+
+// ── Verplaatsen: deelnemer naar ander event ─────────────────────────────────
+//
+// openAttMoveModal(attId) — laadt doel-event-opties via /api/events-list,
+// filtert huidig event uit en stuurt POST /api/events-attendee-move.
+
+const _attMove = { attendeeId: null, eventsLoaded: false };
+
+async function openAttMoveModal(attendeeId) {
+  if (!attendeeId) return;
+  _attMove.attendeeId = attendeeId;
+
+  const att = (state.attendees || []).find((x) => x.id === attendeeId);
+  const fullName = att ? ([att.first_name, att.last_name].filter(Boolean).join(' ') || att.email || att.phone || '—') : '—';
+
+  const subj = document.getElementById('attMoveSubject');
+  if (subj) subj.textContent = 'Deelnemer: ' + fullName;
+
+  const banner = document.getElementById('attMoveBanner');
+  if (banner) banner.classList.remove('visible');
+  const inviteCb = document.getElementById('attMoveSendInvite');
+  if (inviteCb) inviteCb.checked = false;
+  const submitBtn = document.getElementById('attMoveSubmit');
+  if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = 'Verplaatsen'; }
+
+  const sel = document.getElementById('attMoveTarget');
+  if (sel) {
+    sel.innerHTML = '<option value="">— Events laden… —</option>';
+    sel.disabled = true;
+  }
+  document.getElementById('attMoveModal').classList.remove('hidden');
+
+  try {
+    const res = await window.AgentShared.apiFetch('/api/events-list?status=published,draft&limit=200');
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || ('HTTP ' + res.status));
+    const events = (data.items || data.events || []).filter((e) => e.id !== state.eventId);
+    if (!events.length) {
+      sel.innerHTML = '<option value="">— Geen andere events gevonden —</option>';
+      sel.disabled = true;
+      return;
+    }
+    events.sort((a, b) => String(a.starts_at || '').localeCompare(String(b.starts_at || '')));
+    sel.innerHTML = '<option value="">— Kies een event —</option>' + events.map((e) => {
+      const dt = e.starts_at ? fmtDateShort(e.starts_at) : '';
+      const cap = (typeof e.active_count === 'number' && typeof e.capacity === 'number')
+        ? ` · ${e.active_count}/${e.capacity}`
+        : (typeof e.capacity === 'number' ? ` · cap ${e.capacity}` : '');
+      const label = `${e.title || '(geen titel)'}${dt ? ' — ' + dt : ''}${cap}`;
+      return `<option value="${esc(e.id)}">${esc(label)}</option>`;
+    }).join('');
+    sel.disabled = false;
+  } catch (e) {
+    console.error('[openAttMoveModal events-list]', e);
+    sel.innerHTML = '<option value="">— Laden mislukt —</option>';
+    if (banner) {
+      banner.textContent = 'Events laden mislukt: ' + (e?.message || 'onbekende fout');
+      banner.classList.add('visible');
+    }
+  }
+}
+
+function closeAttMoveModal() {
+  document.getElementById('attMoveModal').classList.add('hidden');
+  _attMove.attendeeId = null;
+}
+
+async function submitAttMove() {
+  const banner = document.getElementById('attMoveBanner');
+  banner.classList.remove('visible');
+  const targetEventId = document.getElementById('attMoveTarget').value;
+  const sendInvite = !!document.getElementById('attMoveSendInvite').checked;
+  if (!_attMove.attendeeId) { banner.textContent = 'Geen deelnemer geselecteerd.'; banner.classList.add('visible'); return; }
+  if (!targetEventId) { banner.textContent = 'Kies een doel-event.'; banner.classList.add('visible'); return; }
+
+  const btn = document.getElementById('attMoveSubmit');
+  btn.disabled = true; btn.textContent = 'Verplaatsen…';
+  try {
+    const res = await window.AgentShared.apiFetch('/api/events-attendee-move', {
+      method: 'POST',
+      body: JSON.stringify({
+        attendee_id:     _attMove.attendeeId,
+        target_event_id: targetEventId,
+        send_invite:     sendInvite,
+      }),
+    });
+    const j = await res.json().catch(() => ({}));
+    if (res.status === 409) {
+      const msg = j.code === 'SEATS_FULL' ? 'Doel-event is vol'
+                : j.code === 'EMAIL_EXISTS' ? 'Deze deelnemer is al aangemeld voor het doel-event'
+                : j.code === 'EVENT_ARCHIVED' ? 'Doel-event is gearchiveerd'
+                : (j.error || 'Conflict bij verplaatsen');
+      banner.textContent = msg;
+      banner.classList.add('visible');
+      return;
+    }
+    if (!res.ok) throw new Error(j.error || ('HTTP ' + res.status));
+
+    let toastMsg = 'Deelnemer verplaatst';
+    let toastKind = 'success';
+    if (sendInvite) {
+      const inv = j.invite || null;
+      const waOk = !!inv?.whatsapp?.ok;
+      const mailOk = !!inv?.mail?.ok;
+      if (waOk && mailOk) toastMsg = 'Verplaatst + uitnodiging (WhatsApp + e-mail) verstuurd';
+      else if (waOk)      toastMsg = 'Verplaatst + uitnodiging via WhatsApp verstuurd';
+      else if (mailOk)    toastMsg = 'Verplaatst + uitnodiging via e-mail verstuurd';
+      else { toastMsg = 'Verplaatst, maar uitnodiging mislukte'; toastKind = 'warning'; }
+    }
+    closeAttMoveModal();
+    window.AgentShared?.showToast?.(toastMsg, toastKind);
+    await loadEvent();
+    await loadAttendees();
+    renderPage();
+  } catch (e) {
+    banner.textContent = e?.message || 'Verplaatsen mislukt';
+    banner.classList.add('visible');
+  } finally {
+    btn.disabled = false; btn.textContent = 'Verplaatsen';
   }
 }
 
@@ -1565,6 +1728,8 @@ function openAttAddModal() {
   document.getElementById('aafLast').value = '';
   document.getElementById('aafEmail').value = '';
   document.getElementById('aafPhone').value = '';
+  const inviteCb = document.getElementById('aafSendInvite');
+  if (inviteCb) inviteCb.checked = false;
   document.getElementById('altSuggestionsWrap').innerHTML = '';
   document.getElementById('attAddModal').classList.remove('hidden');
 }
@@ -1573,12 +1738,14 @@ function closeAttAddModal() { document.getElementById('attAddModal').classList.a
 async function submitAttAdd() {
   const banner = document.getElementById('attAddBanner');
   banner.classList.remove('visible');
+  const sendInvite = !!document.getElementById('aafSendInvite')?.checked;
   const payload = {
     event_id: state.eventId,
     first_name: document.getElementById('aafFirst').value.trim() || null,
     last_name: document.getElementById('aafLast').value.trim() || null,
     email: document.getElementById('aafEmail').value.trim() || null,
     phone: document.getElementById('aafPhone').value.trim() || null,
+    send_invite: sendInvite,
   };
   if (!payload.first_name && !payload.last_name && !payload.email && !payload.phone) {
     banner.textContent = 'Vul minimaal 1 veld in (naam, email of telefoon).';
@@ -1609,8 +1776,28 @@ async function submitAttAdd() {
       const e = await res.json().catch(() => ({}));
       throw new Error(e.error || `HTTP ${res.status}`);
     }
+    const respJson = await res.json().catch(() => ({}));
     closeAttAddModal();
-    window.AgentShared?.showToast?.('Aanwezige toegevoegd', 'success');
+    let toastMsg = 'Aanwezige toegevoegd';
+    let toastKind = 'success';
+    if (sendInvite) {
+      const inv = respJson?.invite || null;
+      if (!inv) {
+        toastMsg = 'Toegevoegd, invite niet verstuurd';
+        toastKind = 'warning';
+      } else {
+        const waOk = !!inv?.whatsapp?.ok;
+        const mailOk = !!inv?.mail?.ok;
+        if (waOk && mailOk) toastMsg = 'Toegevoegd + uitnodiging (WhatsApp + e-mail) verstuurd';
+        else if (waOk)      toastMsg = 'Toegevoegd + uitnodiging via WhatsApp verstuurd';
+        else if (mailOk)    toastMsg = 'Toegevoegd + uitnodiging via e-mail verstuurd';
+        else {
+          toastMsg = 'Toegevoegd, maar uitnodiging mislukte';
+          toastKind = 'warning';
+        }
+      }
+    }
+    window.AgentShared?.showToast?.(toastMsg, toastKind);
     await loadEvent();
     await loadAttendees();
     renderPage();
