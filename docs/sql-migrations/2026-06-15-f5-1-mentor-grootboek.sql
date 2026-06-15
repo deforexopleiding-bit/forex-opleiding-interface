@@ -18,27 +18,7 @@
 -- =============================================================================
 BEGIN;
 
--- ── has_any_role(text[]) -> boolean ──────────────────────────────────────────
--- Checkt of de huidige auth.uid()-gebruiker een actieve profielrol in de array
--- heeft. SECURITY DEFINER omdat profiles via RLS afgeschermd kan zijn voor de
--- aanroeper; volume-impact verwaarloosbaar (1 row lookup per RLS-check).
-CREATE OR REPLACE FUNCTION public.has_any_role(roles text[])
-RETURNS boolean
-LANGUAGE sql
-STABLE
-SECURITY DEFINER
-SET search_path = public
-AS $$
-  SELECT EXISTS (
-    SELECT 1
-    FROM public.profiles
-    WHERE id = auth.uid()
-      AND is_active = true
-      AND role = ANY(roles)
-  );
-$$;
-
-GRANT EXECUTE ON FUNCTION public.has_any_role(text[]) TO authenticated, anon, service_role;
+-- has_any_role(text[]) bestaat al in productie (richer: checkt user_roles EN profiles.role). Hier NIET (her)definiëren — de RLS-policies hieronder binden aan de bestaande functie.
 
 -- ── events.completed_* ───────────────────────────────────────────────────────
 ALTER TABLE public.events
