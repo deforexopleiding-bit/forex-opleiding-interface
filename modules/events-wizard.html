@@ -112,9 +112,10 @@ const state = {
     starts_at: '',                   // local datetime-input value (YYYY-MM-DDTHH:mm)
     ends_at: '',
     location: '',
-    capacity: '',
+    capacity: '6',
     niveau: '',
     description_md: '',
+    image_url: '',
   },
   selectedMentors: new Set(),        // team_member.id
   submitting: false,
@@ -227,12 +228,19 @@ function renderStep1() {
       </div>
       <div class="form-field">
         <label>Capaciteit <span class="req">*</span></label>
-        <input type="number" id="f_capacity" min="1" value="${esc(f.capacity)}" placeholder="bv. 24" />
+        <input type="number" id="f_capacity" min="1" value="${esc(f.capacity)}" placeholder="bv. 6" />
         <div class="hint">Aantal deelnemers; bepaalt de capacity-pill.</div>
       </div>
       <div class="form-field">
         <label>Beschrijving</label>
         <textarea id="f_desc" rows="4" placeholder="Korte body (markdown).">${esc(f.description_md)}</textarea>
+      </div>
+      <div class="form-field">
+        <label>Foto (optioneel)</label>
+        <input type="file" id="f_image" accept="image/png,image/jpeg,image/webp" />
+        <div class="hint">JPG, PNG of WEBP, max 3 MB. Wordt als kleine thumbnail in de keuzelijst getoond.</div>
+        <div id="f_image_status" class="hint"></div>
+        <div id="f_image_preview"></div>
       </div>
     </div>
 
@@ -242,6 +250,70 @@ function renderStep1() {
     </div>
   `;
   document.getElementById('nextBtn').addEventListener('click', onStep1Next);
+  wireStep1Image();
+  renderImagePreview();
+}
+
+function wireStep1Image() {
+  const fi = document.getElementById('f_image');
+  if (fi) fi.addEventListener('change', (e) => {
+    const file = e.target.files && e.target.files[0];
+    if (file) uploadEventImage(file);
+  });
+}
+
+function renderImagePreview() {
+  const box = document.getElementById('f_image_preview');
+  if (!box) return;
+  box.innerHTML = state.form.image_url
+    ? `<img src="${esc(state.form.image_url)}" alt="" style="max-width:120px;border-radius:8px;margin-top:8px;display:block;" />
+       <button type="button" id="f_image_remove" class="btn-secondary" style="margin-top:6px;">Verwijderen</button>`
+    : '';
+  const rm = document.getElementById('f_image_remove');
+  if (rm) rm.addEventListener('click', () => {
+    state.form.image_url = '';
+    const st = document.getElementById('f_image_status'); if (st) st.textContent = '';
+    const fi = document.getElementById('f_image'); if (fi) fi.value = '';
+    renderImagePreview();
+  });
+}
+
+async function uploadEventImage(file) {
+  const status = document.getElementById('f_image_status');
+  const okTypes = ['image/png', 'image/jpeg', 'image/jpg', 'image/webp'];
+  if (!okTypes.includes((file.type || '').toLowerCase())) {
+    if (status) status.textContent = 'Alleen JPG, PNG of WEBP.'; return;
+  }
+  if (file.size > 3 * 1024 * 1024) {
+    if (status) status.textContent = 'Bestand te groot (max 3 MB).'; return;
+  }
+  if (status) status.textContent = 'Uploaden…';
+  try {
+    const dataUrl = await new Promise((resolve, reject) => {
+      const fr = new FileReader();
+      fr.onload = () => resolve(fr.result);
+      fr.onerror = () => reject(new Error('Kon bestand niet lezen'));
+      fr.readAsDataURL(file);
+    });
+    const base64 = String(dataUrl).split(',')[1] || '';
+    const res = await window.AgentShared.apiFetch('/api/event-image-upload', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        filename: file.name,
+        content_type: (file.type || '').toLowerCase(),
+        data_base64: base64,
+      }),
+    });
+    const j = await res.json().catch(() => ({}));
+    if (!res.ok || !j.ok) throw new Error(j.error || ('HTTP ' + res.status));
+    state.form.image_url = j.url;
+    if (status) status.textContent = 'Foto toegevoegd.';
+    renderImagePreview();
+  } catch (err) {
+    console.error('[wizard] image upload', err);
+    if (status) status.textContent = 'Upload mislukt: ' + err.message;
+  }
 }
 
 function renderStep2() {
@@ -347,6 +419,7 @@ function renderStep4() {
         <div class="review-row"><div class="review-label">Eind</div><div class="review-value">${esc(fmtDate(endsAt))}</div></div>
         <div class="review-row"><div class="review-label">Locatie</div><div class="review-value">${esc(f.location || '—')}</div></div>
         <div class="review-row"><div class="review-label">Capaciteit</div><div class="review-value">${esc(f.capacity || '—')}</div></div>
+        <div class="review-row"><div class="review-label">Foto</div><div class="review-value">${f.image_url ? 'Ingesteld' : '—'}</div></div>
         <div class="review-row"><div class="review-label">Beschrijving</div><div class="review-value">${f.description_md ? esc(f.description_md) : '—'}</div></div>
       </div>
 
@@ -461,6 +534,7 @@ async function submitEvent() {
       capacity: Number(state.form.capacity),
       niveau: state.form.niveau || null,
       description_md: state.form.description_md || null,
+      image_url: state.form.image_url || null,
       status: 'draft',
     };
 
