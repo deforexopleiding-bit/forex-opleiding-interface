@@ -212,6 +212,7 @@ function renderPage(canCreate, canViewInbox, canManageSignupInbox) {
       </div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
         <a class="btn-secondary" href="/modules/events-automations.html" style="text-decoration:none"><i class="ti ti-robot"></i> Automations</a>
+        ${canCreate ? '<button class="btn-secondary" id="evNiveauPhotosBtn" type="button"><i class="ti ti-photo"></i> Niveau-foto\'s</button>' : ''}
         ${canCreate ? '<a class="btn-primary" href="/modules/events-wizard.html"><i class="ti ti-plus"></i> Nieuw event</a>' : ''}
       </div>
     </div>
@@ -335,6 +336,17 @@ function renderPage(canCreate, canViewInbox, canManageSignupInbox) {
         </div>
       </div>
     </div>
+
+    <div id="evNiveauPhotoModal" class="modal-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:9999;align-items:center;justify-content:center;padding:24px">
+      <div class="modal-card" style="background:var(--bg);border:1px solid var(--border);border-radius:12px;max-width:480px;width:100%;padding:20px;max-height:88vh;overflow-y:auto">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+          <div style="font-size:15px;font-weight:700">Niveau-standaardfoto's</div>
+          <button class="sr-iconbtn" id="evNiveauPhotoClose" type="button" title="Sluiten"><i class="ti ti-x"></i></button>
+        </div>
+        <div style="font-size:12.5px;color:var(--text-dim);margin-bottom:14px">Deze foto verschijnt in de keuzelijst als een event van dit niveau geen eigen foto heeft. JPG/PNG/WEBP, max 3 MB.</div>
+        <div id="evNiveauPhotoSlots"></div>
+      </div>
+    </div>
   `;
 
   // Tab-switch wiring
@@ -383,6 +395,13 @@ function renderPage(canCreate, canViewInbox, canManageSignupInbox) {
   if (siCancel2) siCancel2.addEventListener('click', () => closeSignupResolveModal());
   if (siSubmit)  siSubmit.addEventListener('click', () => submitSignupResolve());
 
+  const npBtn = document.getElementById('evNiveauPhotosBtn');
+  if (npBtn) npBtn.addEventListener('click', openNiveauPhotoModal);
+  const npClose = document.getElementById('evNiveauPhotoClose');
+  if (npClose) npClose.addEventListener('click', () => {
+    const m = document.getElementById('evNiveauPhotoModal'); if (m) m.style.display = 'none';
+  });
+
   // Fase 2 stap 2c — thread-view wiring
   const backBtn = document.getElementById('evThreadBack');
   if (backBtn) backBtn.addEventListener('click', () => _evShowListView());
@@ -416,6 +435,71 @@ function renderPage(canCreate, canViewInbox, canManageSignupInbox) {
       loadEvents();
     });
   });
+}
+
+async function openNiveauPhotoModal() {
+  const modal = document.getElementById('evNiveauPhotoModal');
+  const slots = document.getElementById('evNiveauPhotoSlots');
+  if (!modal || !slots) return;
+  slots.innerHTML = '<div style="color:var(--text-dim);font-size:13px">Laden…</div>';
+  modal.style.display = 'flex';
+  try {
+    const r = await window.AgentShared.apiFetch('/api/events-niveau-options');
+    const j = await r.json().catch(() => ({}));
+    const opts = Array.isArray(j.options) ? j.options : [];
+    const BRAND = { basis: 'Forex Kickstart Live', gevorderd: 'Trading Deep Dive' };
+    slots.innerHTML = opts.map((o) => `
+      <div class="ev-niv-slot" data-slug="${esc(o.slug)}" style="border:1px solid var(--border);border-radius:8px;padding:12px;margin-bottom:10px">
+        <div style="font-weight:600;margin-bottom:8px">${esc(BRAND[o.slug] || o.label || o.slug)}</div>
+        <div class="ev-niv-preview" style="margin-bottom:8px">${o.default_image_url ? `<img src="${esc(o.default_image_url)}" alt="" style="max-width:140px;border-radius:6px;display:block" />` : '<span style="color:var(--text-dim);font-size:12px">Nog geen foto</span>'}</div>
+        <input type="file" class="ev-niv-file" accept="image/png,image/jpeg,image/webp" />
+        <div class="ev-niv-status" style="font-size:12px;color:var(--text-dim);margin-top:6px"></div>
+      </div>`).join('');
+    slots.querySelectorAll('.ev-niv-slot').forEach((slot) => {
+      const fi = slot.querySelector('.ev-niv-file');
+      if (fi) fi.addEventListener('change', (e) => {
+        const file = e.target.files && e.target.files[0];
+        if (file) uploadNiveauPhoto(slot.dataset.slug, file, slot);
+      });
+    });
+  } catch (e) {
+    slots.innerHTML = '<div style="color:#b91c1c;font-size:13px">Kon niveaus niet laden.</div>';
+  }
+}
+
+async function uploadNiveauPhoto(slug, file, slot) {
+  const status = slot.querySelector('.ev-niv-status');
+  const okTypes = ['image/png', 'image/jpeg', 'image/jpg', 'image/webp'];
+  if (!okTypes.includes((file.type || '').toLowerCase())) { if (status) status.textContent = 'Alleen JPG, PNG of WEBP.'; return; }
+  if (file.size > 3 * 1024 * 1024) { if (status) status.textContent = 'Bestand te groot (max 3 MB).'; return; }
+  if (status) status.textContent = 'Uploaden…';
+  try {
+    const dataUrl = await new Promise((resolve, reject) => {
+      const fr = new FileReader();
+      fr.onload = () => resolve(fr.result);
+      fr.onerror = () => reject(new Error('lees-fout'));
+      fr.readAsDataURL(file);
+    });
+    const base64 = String(dataUrl).split(',')[1] || '';
+    const up = await window.AgentShared.apiFetch('/api/event-image-upload', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ filename: file.name, content_type: (file.type || '').toLowerCase(), data_base64: base64 }),
+    });
+    const uj = await up.json().catch(() => ({}));
+    if (!up.ok || !uj.ok) throw new Error(uj.error || ('upload HTTP ' + up.status));
+    const sv = await window.AgentShared.apiFetch('/api/events-niveau-default-image-save', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ slug, default_image_url: uj.url }),
+    });
+    const sj = await sv.json().catch(() => ({}));
+    if (!sv.ok || !sj.ok) throw new Error(sj.error || ('opslaan HTTP ' + sv.status));
+    const prev = slot.querySelector('.ev-niv-preview');
+    if (prev) prev.innerHTML = `<img src="${esc(uj.url)}" alt="" style="max-width:140px;border-radius:6px;display:block" />`;
+    if (status) status.textContent = 'Opgeslagen.';
+  } catch (e) {
+    console.error('[niveau-photo]', e);
+    if (status) status.textContent = 'Mislukt: ' + (e?.message || 'onbekend');
+  }
 }
 
 function renderNiveauOptions() {
