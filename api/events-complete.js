@@ -25,8 +25,12 @@
 //                   attendance_status: 'aanwezig'|'no_show'|'afgemeld',
 //                   followup_reason?: string }],
 //     present_team_member_ids: uuid[],  (aanwezige mentoren — rest blijft/wordt was_present=false)
-//     expenses: [{ amount: number, vendor?: string, spent_at?: 'YYYY-MM-DD', note?: string }],
-//     basis_incl_btw?: boolean   // default true (incl. BTW); F5.1 amend
+//     expenses: [{ amount: number, vendor?: string, spent_at?: 'YYYY-MM-DD',
+//                  note?: string, mentor_team_member_ids?: uuid[] }],
+//                  // mentor_team_member_ids: per uitgave wie mee deelt; leeg/
+//                  // ontbrekend = alle aanwezige mentoren (F5.1+ herzien)
+//     basis_incl_btw?: boolean,    // default true (incl. BTW); F5.1 amend
+//     completion_summary?: string  // korte tekst op events.completion_summary (F5.1+ herzien)
 //   }
 //
 // Response 200: { ok, event_id, completed_at, summary: {
@@ -90,6 +94,10 @@ export default async function handler(req, res) {
   // afwezig of null in de body — backwards-compatible voor callers die het
   // veld nog niet meesturen.
   const basisInclBtw = body.basis_incl_btw === false ? false : true;
+  // F5.1+ herzien: korte samenvatting (events.completion_summary)
+  const completionSummary = typeof body.completion_summary === 'string'
+    ? body.completion_summary.slice(0, 5000)
+    : null;
 
   for (const a of attendeesIn) {
     if (!a || typeof a !== 'object') return res.status(400).json({ error: 'attendees-item ongeldig' });
@@ -106,6 +114,12 @@ export default async function handler(req, res) {
     const amt = Number(e.amount);
     if (!Number.isFinite(amt) || amt < 0) return res.status(400).json({ error: 'expense.amount moet >= 0 zijn' });
     if (e.spent_at && !isDateString(e.spent_at)) return res.status(400).json({ error: 'expense.spent_at moet YYYY-MM-DD zijn' });
+    if (e.mentor_team_member_ids != null && !Array.isArray(e.mentor_team_member_ids)) {
+      return res.status(400).json({ error: 'expense.mentor_team_member_ids moet array zijn' });
+    }
+    for (const tm of (e.mentor_team_member_ids || [])) {
+      if (!UUID_RE.test(String(tm || ''))) return res.status(400).json({ error: 'expense.mentor_team_member_ids: uuid verwacht' });
+    }
   }
 
   const summary = {
@@ -131,16 +145,25 @@ export default async function handler(req, res) {
     if (evErr) throw new Error('event fetch: ' + evErr.message);
     if (!event) return res.status(404).json({ error: 'Event niet gevonden' });
 
-    // ── 2) events.completed_at/by zetten (idempotent) ──────────────────────
+    // ── 2) events.completed_at/by + completion_summary ────────────────────
+    // completed_at: idempotent (alleen zetten bij eerste keer afronden).
+    // completion_summary: altijd overschrijven als er een waarde is meegestuurd
+    // (ook bij her-afronden moet de samenvatting bijgewerkt kunnen worden).
     let completedAt = event.completed_at;
+    const evUpdate = {};
     if (!completedAt) {
       const nowIso = new Date().toISOString();
-      const { error: cErr } = await supabaseAdmin
-        .from('events')
-        .update({ completed_at: nowIso, completed_by: user.id })
-        .eq('id', eventId);
-      if (cErr) throw new Error('event complete update: ' + cErr.message);
+      evUpdate.completed_at = nowIso;
+      evUpdate.completed_by = user.id;
       completedAt = nowIso;
+    }
+    if (completionSummary != null) {
+      evUpdate.completion_summary = completionSummary || null;
+    }
+    if (Object.keys(evUpdate).length > 0) {
+      const { error: cErr } = await supabaseAdmin
+        .from('events').update(evUpdate).eq('id', eventId);
+      if (cErr) throw new Error('event complete update: ' + cErr.message);
     }
 
     // ── 3) Per attendee: status + followup_reason ──────────────────────────
@@ -184,29 +207,32 @@ export default async function handler(req, res) {
       }
     }
 
-    // ── 5) Uitgaven inserten ──────────────────────────────────────────────
+    // ── 5) Uitgaven inserten (incl. mentor_team_member_ids per uitgave) ───
     const expenseRows = expensesIn
       .filter((e) => Number(e.amount) > 0)
       .map((e) => ({
-        event_id  : eventId,
-        amount    : round2(e.amount),
-        vendor    : e.vendor ? String(e.vendor).slice(0, 255) : null,
-        spent_at  : e.spent_at || null,
-        note      : e.note ? String(e.note).slice(0, 1000) : null,
-        created_by: user.id,
+        event_id              : eventId,
+        amount                : round2(e.amount),
+        vendor                : e.vendor ? String(e.vendor).slice(0, 255) : null,
+        spent_at              : e.spent_at || null,
+        note                  : e.note ? String(e.note).slice(0, 1000) : null,
+        mentor_team_member_ids: Array.isArray(e.mentor_team_member_ids) && e.mentor_team_member_ids.length > 0
+                                  ? e.mentor_team_member_ids : null,
+        created_by            : user.id,
       }));
+    let insertedExpenses = [];
     if (expenseRows.length > 0) {
       const { error: exErr, data: exData } = await supabaseAdmin
         .from('event_expenses')
         .insert(expenseRows)
-        .select('id, amount');
+        .select('id, amount, mentor_team_member_ids');
       if (exErr) {
         summary.warnings.push('expenses insert: ' + exErr.message);
       } else {
-        summary.expenses_inserted = (exData || []).length;
+        insertedExpenses = exData || [];
+        summary.expenses_inserted = insertedExpenses.length;
       }
     }
-    const totalExpenses = expenseRows.reduce((s, r) => s + Number(r.amount), 0);
 
     // ── 6) Bepaal "aanwezige mentoren met user_id" (basis voor ledger) ─────
     const { data: mentorsAll, error: mErr } = await supabaseAdmin
@@ -325,11 +351,27 @@ export default async function handler(req, res) {
         }
       }
 
-      // ── 8) Ledger: uitgaven verdelen per mentor (NEGATIEF) ───────────────
-      if (totalExpenses > 0) {
-        const perMentor = -round2(totalExpenses / N);
-        for (const m of eligibleMentors) {
-          const idem = `${eventId}:uitgave:${m.user_id}`;
+      // ── 8) Ledger: per uitgave splitsen over de aangewezen mentoren ──────
+      // Per expense kan een lijst mentor_team_member_ids meekomen. Leeg →
+      // verdelen over alle aanwezige mentoren met user_id (= huidige eligible).
+      // Anders: filter eligibleMentors op die team_member_ids.
+      // Idempotency-key per (event, expense_id, mentor_user_id) — bij her-
+      // afronden ontstaan nieuwe expense-ids, dus nieuwe ledger-entries.
+      const releasedAt = new Date().toISOString();
+      for (const exp of insertedExpenses) {
+        const explicitIds = Array.isArray(exp.mentor_team_member_ids) ? exp.mentor_team_member_ids : null;
+        const targetMentors = (explicitIds && explicitIds.length > 0)
+          ? eligibleMentors.filter((m) => explicitIds.includes(m.team_member_id))
+          : eligibleMentors;
+        if (targetMentors.length === 0) {
+          bump('uitgave_zonder_mentor');
+          continue;
+        }
+        const amountAbs = Number(exp.amount) || 0;
+        const perMentor = -round2(amountAbs / targetMentors.length);
+        if (perMentor === 0) { bump('uitgave_afgerond_naar_nul'); continue; }
+        for (const m of targetMentors) {
+          const idem = `${eventId}:uitgave:${exp.id}:${m.user_id}`;
           const { error: insErr } = await supabaseAdmin
             .from('mentor_ledger_entries')
             .insert({
@@ -337,13 +379,13 @@ export default async function handler(req, res) {
               team_member_id : m.team_member_id,
               event_id       : eventId,
               entry_type     : 'uitgave',
-              basis          : totalExpenses,
+              basis          : amountAbs,
               pct            : null,
               amount         : perMentor,
               status         : 'vrijgegeven',
               idempotency_key: idem,
-              note           : `Aandeel uitgaven EUR ${totalExpenses.toFixed(2)} / ${N} mentor(en)`,
-              released_at    : new Date().toISOString(),
+              note           : `Aandeel uitgave EUR ${amountAbs.toFixed(2)} / ${targetMentors.length} mentor(en)`,
+              released_at    : releasedAt,
             });
           if (insErr) {
             if (insErr.code === '23505' || /duplicate key/i.test(insErr.message || '')) {

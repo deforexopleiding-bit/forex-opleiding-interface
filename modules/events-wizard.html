@@ -104,9 +104,8 @@
 <script>
 // ── State ────────────────────────────────────────────────────────────────────
 const state = {
-  step: 1,                           // 1..4
+  step: 1,                           // 1..3 (mentoren-stap is verwijderd; rol-mentoren worden bij afronden gekozen)
   niveauOptions: [],
-  availableMentors: [],
   form: {
     title: '',
     starts_at: '',                   // local datetime-input value (YYYY-MM-DDTHH:mm)
@@ -117,7 +116,6 @@ const state = {
     description_md: '',
     image_url: '',
   },
-  selectedMentors: new Set(),        // team_member.id
   submitting: false,
 };
 
@@ -155,7 +153,7 @@ function renderShell() {
   document.getElementById('page-content').innerHTML = `
     <div class="crumb"><a href="/modules/events.html">Events</a> &rsaquo; <span>Nieuw event</span></div>
     <h1>Nieuw event</h1>
-    <div class="sub">Maak in 4 stappen een nieuw event aan en koppel meteen de mentoren.</div>
+    <div class="sub">Maak in 3 stappen een nieuw event aan. Mentoren worden bij het afronden toegekend.</div>
 
     <div class="stepper" id="stepper"></div>
     <div id="banner" class="banner"></div>
@@ -169,8 +167,7 @@ function renderStepper() {
   const steps = [
     { n: 1, label: 'Basis info' },
     { n: 2, label: 'Niveau' },
-    { n: 3, label: 'Mentoren' },
-    { n: 4, label: 'Review' },
+    { n: 3, label: 'Review' },
   ];
   document.getElementById('stepper').innerHTML = steps.map((s) => {
     const cls = s.n === state.step ? 'active' : (s.n < state.step ? 'done' : '');
@@ -197,7 +194,6 @@ function renderStep() {
   if (state.step === 1) return renderStep1();
   if (state.step === 2) return renderStep2();
   if (state.step === 3) return renderStep3();
-  if (state.step === 4) return renderStep4();
 }
 
 function renderStep1() {
@@ -348,61 +344,8 @@ function renderStep2() {
 }
 
 function renderStep3() {
-  let body = '';
-  if (!state.availableMentors.length) {
-    body = `
-      <div class="skel-row"></div>
-      <div class="skel-row"></div>
-      <div class="skel-row"></div>
-    `;
-  } else {
-    body = `
-      <div class="mentor-list">
-        ${state.availableMentors.map((m) => {
-          const checked = state.selectedMentors.has(m.id);
-          const role = m.role || m.type || 'mentor';
-          return `
-            <label class="mentor-pick ${checked ? 'selected' : ''}">
-              <input type="checkbox" data-id="${esc(m.id)}" ${checked ? 'checked' : ''} />
-              <span class="mp-name">${esc(m.name)}</span>
-              <span class="mp-role">${esc(role)}</span>
-            </label>
-          `;
-        }).join('')}
-      </div>
-    `;
-  }
-
-  document.getElementById('stepContent').innerHTML = `
-    <div class="card">
-      <h2>Mentoren</h2>
-      <div class="card-sub">Kies één of meer mentoren die dit event begeleiden. Optioneel.</div>
-      ${body}
-    </div>
-
-    <div class="nav-row">
-      <button class="btn-secondary" id="prevBtn"><i class="ti ti-arrow-left"></i> Vorige</button>
-      <button class="btn-primary" id="nextBtn">Volgende <i class="ti ti-arrow-right"></i></button>
-    </div>
-  `;
-
-  document.querySelectorAll('.mentor-pick input[type=checkbox]').forEach((cb) => {
-    cb.addEventListener('change', () => {
-      const id = cb.dataset.id;
-      if (cb.checked) state.selectedMentors.add(id);
-      else state.selectedMentors.delete(id);
-      cb.closest('.mentor-pick').classList.toggle('selected', cb.checked);
-    });
-  });
-
-  document.getElementById('prevBtn').addEventListener('click', () => { state.step = 2; renderStepper(); renderStep(); });
-  document.getElementById('nextBtn').addEventListener('click', () => { state.step = 4; renderStepper(); renderStep(); });
-}
-
-function renderStep4() {
   const f = state.form;
   const niveauLabel = (state.niveauOptions.find((o) => o.slug === f.niveau) || {}).label || (f.niveau || '—');
-  const mentorList = state.availableMentors.filter((m) => state.selectedMentors.has(m.id));
 
   const startsAt = f.starts_at ? localInputToIso(f.starts_at) : null;
   const endsAt = f.ends_at ? localInputToIso(f.ends_at) : null;
@@ -427,11 +370,6 @@ function renderStep4() {
         <h3>Niveau</h3>
         <div class="review-row"><div class="review-label">Niveau</div><div class="review-value">${esc(niveauLabel)}</div></div>
       </div>
-
-      <div class="review-section">
-        <h3>Mentoren</h3>
-        <div class="review-row"><div class="review-label">${mentorList.length} geselecteerd</div><div class="review-value">${mentorList.map((m) => esc(m.name)).join(', ') || '—'}</div></div>
-      </div>
     </div>
 
     <div class="nav-row">
@@ -439,7 +377,7 @@ function renderStep4() {
       <button class="btn-primary" id="submitBtn"><i class="ti ti-check"></i> Aanmaken</button>
     </div>
   `;
-  document.getElementById('prevBtn').addEventListener('click', () => { state.step = 3; renderStepper(); renderStep(); });
+  document.getElementById('prevBtn').addEventListener('click', () => { state.step = 2; renderStepper(); renderStep(); });
   document.getElementById('submitBtn').addEventListener('click', submitEvent);
 }
 
@@ -481,7 +419,6 @@ function onStep2Next() {
   state.step = 3;
   renderStepper();
   renderStep();
-  if (!state.availableMentors.length) loadAvailableMentors();
 }
 
 // ── Fetch ────────────────────────────────────────────────────────────────────
@@ -495,24 +432,6 @@ async function loadNiveauOptions() {
     if (state.step === 2) renderStep();
   } catch (e) {
     console.warn('[wizard] niveau-options load failed:', e.message);
-  }
-}
-
-async function loadAvailableMentors() {
-  try {
-    // Geen event_id bij wizard — alle actieve mentoren tonen.
-    const res = await window.AgentShared.apiFetch('/api/events-mentors-available');
-    if (!res.ok) {
-      // Geen rechten op assign? Toon lege lijst (mentoren zijn optioneel).
-      state.availableMentors = [];
-      if (state.step === 3) renderStep();
-      return;
-    }
-    const data = await res.json();
-    state.availableMentors = data.mentors || [];
-    if (state.step === 3) renderStep();
-  } catch (e) {
-    console.warn('[wizard] mentors-available load failed:', e.message);
   }
 }
 
@@ -550,29 +469,7 @@ async function submitEvent() {
     const newId = data.event?.id;
     if (!newId) throw new Error('Geen event-id ontvangen van server');
 
-    // Mentoren koppelen — best-effort, per mentor één call.
-    const mentorIds = Array.from(state.selectedMentors);
-    const failed = [];
-    for (const teamMemberId of mentorIds) {
-      try {
-        const r = await window.AgentShared.apiFetch('/api/events-mentor-assign', {
-          method: 'POST',
-          body: JSON.stringify({ event_id: newId, team_member_id: teamMemberId }),
-        });
-        if (!r.ok) {
-          const e = await r.json().catch(() => ({}));
-          failed.push((state.availableMentors.find((m) => m.id === teamMemberId) || {}).name || teamMemberId);
-          console.warn('[wizard] mentor-assign failed for', teamMemberId, e.error);
-        }
-      } catch (e) {
-        failed.push((state.availableMentors.find((m) => m.id === teamMemberId) || {}).name || teamMemberId);
-      }
-    }
-    if (failed.length) {
-      window.AgentShared?.showToast?.(`Event aangemaakt, maar ${failed.length} mentor(en) niet gekoppeld: ${failed.join(', ')}`, 'error');
-    } else {
-      window.AgentShared?.showToast?.('Event aangemaakt', 'success');
-    }
+    window.AgentShared?.showToast?.('Event aangemaakt', 'success');
     // Redirect naar detail
     window.location.href = '/modules/events-detail.html?id=' + encodeURIComponent(newId);
   } catch (e) {
@@ -602,9 +499,8 @@ async function init() {
   }
 
   renderShell();
-  // Preload niveau-options + mentoren parallel zodat step 2 / 3 direct gevuld zijn.
+  // Preload niveau-options zodat step 2 direct gevuld is.
   loadNiveauOptions();
-  loadAvailableMentors();
 }
 
 init();
