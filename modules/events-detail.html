@@ -309,6 +309,11 @@
         Markeer aanwezigheid + opvolg-redenen, wie van het team aanwezig was, en eventuele uitgaven. De bonus van 3 % en het uitgaven-aandeel worden meteen verdeeld in het mentor-grootboek.
       </div>
 
+      <label style="display:flex; align-items:center; gap:8px; padding:10px 12px; background:var(--bg-elev-2); border:1px solid var(--border); border-radius:8px; margin-bottom:14px; cursor:pointer; font-size:13px">
+        <input type="checkbox" id="evcBasisInclBtw" checked />
+        <span><strong>Bonus berekenen incl. BTW</strong> <span style="color:var(--text-faint); font-size:12px">— als uit, dan rekent de 3 %-bonus over het excl. BTW totaal van de getekende offerte</span></span>
+      </label>
+
       <h3 style="font-size:12px; font-weight:700; color:var(--text-faint); text-transform:uppercase; letter-spacing:.06em; margin:6px 0 8px">Aanwezigheid</h3>
       <div id="evCompleteAttendees"></div>
 
@@ -1421,6 +1426,8 @@ async function submitEvComplete() {
       }))
       .filter((e) => Number.isFinite(e.amount) && e.amount > 0);
 
+    const basisInclBtw = !!document.getElementById('evcBasisInclBtw')?.checked;
+
     const r = await window.AgentShared.apiFetch('/api/events-complete', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -1429,6 +1436,7 @@ async function submitEvComplete() {
         attendees,
         present_team_member_ids: mentorIds,
         expenses,
+        basis_incl_btw         : basisInclBtw,
       }),
     });
     const j = await r.json().catch(() => ({}));

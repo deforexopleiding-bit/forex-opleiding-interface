@@ -25,7 +25,8 @@
 //                   attendance_status: 'aanwezig'|'no_show'|'afgemeld',
 //                   followup_reason?: string }],
 //     present_team_member_ids: uuid[],  (aanwezige mentoren — rest blijft/wordt was_present=false)
-//     expenses: [{ amount: number, vendor?: string, spent_at?: 'YYYY-MM-DD', note?: string }]
+//     expenses: [{ amount: number, vendor?: string, spent_at?: 'YYYY-MM-DD', note?: string }],
+//     basis_incl_btw?: boolean   // default true (incl. BTW); F5.1 amend
 //   }
 //
 // Response 200: { ok, event_id, completed_at, summary: {
@@ -85,6 +86,10 @@ export default async function handler(req, res) {
   const attendeesIn = Array.isArray(body.attendees) ? body.attendees : [];
   const presentMentorIds = Array.isArray(body.present_team_member_ids) ? body.present_team_member_ids : [];
   const expensesIn = Array.isArray(body.expenses) ? body.expenses : [];
+  // F5.1 amend: bonus-grondslag incl. of excl. BTW. Default true (incl.) als
+  // afwezig of null in de body — backwards-compatible voor callers die het
+  // veld nog niet meesturen.
+  const basisInclBtw = body.basis_incl_btw === false ? false : true;
 
   for (const a of attendeesIn) {
     if (!a || typeof a !== 'object') return res.status(400).json({ error: 'attendees-item ongeldig' });
@@ -280,7 +285,7 @@ export default async function handler(req, res) {
           .select('quantity, unit_price, vat_percentage, price_includes_vat')
           .eq('deal_id', deal.id);
         const totals = computeDealTotals(deal, lines || []);
-        const basis = totals.excl; // bonus op excl-BTW omzet
+        const basis = basisInclBtw ? totals.incl : totals.excl; // F5.1: per-event toggle
         if (!Number.isFinite(basis) || basis <= 0) { bump('deal_zonder_waarde'); continue; }
 
         // 7c) Per mentor één bonus-entry (idempotent)
@@ -298,12 +303,13 @@ export default async function handler(req, res) {
               attendee_id    : att.id,
               customer_id    : deal.customer_id || att.customer_id || null,
               basis          : basis,
+              basis_incl_btw : basisInclBtw,
               pct            : BONUS_PCT,
               amount         : perMentor,
               status         : 'pending',
               source_quote_id: deal.id,
               idempotency_key: idem,
-              note           : `Bonus ${BONUS_PCT}% van EUR ${basis.toFixed(2)} / ${N} mentor(en)`,
+              note           : `Bonus ${BONUS_PCT}% van EUR ${basis.toFixed(2)} ${basisInclBtw ? 'incl' : 'excl'} BTW / ${N} mentor(en)`,
             });
           if (insErr) {
             if (insErr.code === '23505' || /duplicate key/i.test(insErr.message || '')) {
