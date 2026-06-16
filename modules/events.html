@@ -21,6 +21,86 @@
     .ev-kebab-item:hover { background: var(--bg-elev-2); }
     .ev-kebab-item.danger { color: #dc2626; }
 
+    /* STAP 6a — twee-paneel inbox shell (links lijst, rechts thread+composer). */
+    .evx-shell {
+      display: grid;
+      grid-template-columns: 340px 1fr;
+      gap: 0;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      overflow: hidden;
+      height: calc(100vh - 260px);
+      min-height: 540px;
+      background: var(--bg-elev);
+    }
+    .evx-list-pane {
+      border-right: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      background: var(--bg);
+      min-width: 0;
+    }
+    .evx-list-header {
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      flex-shrink: 0;
+    }
+    .evx-list-body { flex: 1; overflow-y: auto; padding: 6px; min-height: 0; }
+    .evx-thread-pane { display: flex; flex-direction: column; overflow: hidden; min-width: 0; background: var(--bg); }
+    .evx-thread-header { padding: 12px 16px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
+    .evx-thread-messages { flex: 1; overflow-y: auto; padding: 14px; display: flex; flex-direction: column; gap: 8px; background: var(--bg-elev-1, var(--bg-elev)); min-height: 0; }
+    .evx-thread-footer { border-top: 1px solid var(--border); padding: 10px 12px; flex-shrink: 0; background: var(--bg); }
+
+    /* Conversation-rij in lijst-pane (vervangt de oude tabel). */
+    .evx-conv-row {
+      padding: 9px 10px;
+      cursor: pointer;
+      border-radius: 8px;
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      margin-bottom: 2px;
+      border: 1px solid transparent;
+      transition: background-color .12s, border-color .12s;
+    }
+    .evx-conv-row:hover { background: var(--bg-elev-2); }
+    .evx-conv-row.active { background: rgba(9,61,84,0.10); border-color: rgba(9,61,84,0.18); }
+    .evx-conv-avatar {
+      width: 36px; height: 36px; border-radius: 50%;
+      background: var(--bg-elev-2);
+      display: inline-flex; align-items: center; justify-content: center;
+      font-weight: 700; font-size: 13px; color: var(--text-dim);
+      flex-shrink: 0;
+    }
+    .evx-conv-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+    .evx-conv-toprow { display: flex; align-items: center; gap: 6px; }
+    .evx-conv-name { font-size: 13.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1; min-width: 0; }
+    .evx-conv-time { font-size: 10.5px; color: var(--text-faint); flex-shrink: 0; }
+    .evx-conv-preview { font-size: 12px; color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .evx-conv-meta { display: flex; align-items: center; gap: 6px; margin-top: 1px; }
+    .evx-conv-unread { background: rgba(220,38,38,0.15); color: #b91c1c; border-radius: 10px; padding: 1px 7px; font-size: 10.5px; font-weight: 700; }
+
+    /* Empty-state als nog geen gesprek geopend is. */
+    .evx-thread-empty { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 24px; text-align: center; color: var(--text-faint); }
+
+    /* Responsive: smal scherm → één-paneel toggle via .thread-open op de shell. */
+    @media (max-width: 880px) {
+      .evx-shell { grid-template-columns: 1fr; height: auto; min-height: 0; }
+      .evx-list-pane { border-right: none; }
+      .evx-shell.thread-open .evx-list-pane { display: none; }
+      .evx-shell:not(.thread-open) .evx-thread-pane { display: none; }
+    }
+    /* Op breed scherm: terug-knop is geen pane-switch nodig — hij deselecteert
+       wel het actieve gesprek. Verberg ze als 'er is geen gesprek open'. */
+    @media (min-width: 881px) {
+      .evx-shell .evx-thread-pane #evThreadBack { display: none; }
+    }
+
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     html, body { height: 100%; }
     body { font-family: 'Inter', system-ui, sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; -webkit-font-smoothing: antialiased; }
@@ -279,46 +359,65 @@ function renderPage(canCreate, canViewInbox, canManageSignupInbox) {
     </div>
 
     <div id="ev-pane-inbox" style="display:none">
-      <div id="evInboxListPane">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
-          <div style="font-size:12.5px;color:var(--text-dim)">Inbound WhatsApp-conversaties op de events-lijn. Klik een rij om te openen en met Simone te beantwoorden.</div>
-          <button class="sr-iconbtn" id="evInboxRefresh" title="Vernieuwen"><i class="ti ti-refresh"></i></button>
-        </div>
-        <div id="eventsInboxList">
-          <div class="skel-row"></div>
-          <div class="skel-row"></div>
-        </div>
-      </div>
-
-      <!-- Thread-view (verborgen tot een conv geopend wordt) -->
-      <div id="evThreadPane" style="display:none">
-        <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px">
-          <button class="sr-iconbtn" id="evThreadBack" title="Terug naar lijst"><i class="ti ti-arrow-left"></i></button>
-          <div style="flex:1;min-width:0">
-            <div id="evThreadName" style="font-size:14.5px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">—</div>
-            <div id="evThreadPhone" style="font-size:11.5px;color:var(--text-faint)">—</div>
+      <!-- STAP 6a: persistent twee-paneel. LINKS gesprekkenlijst, RECHTS de
+           open thread + composer. Empty-state als nog niks geselecteerd is. -->
+      <div class="evx-shell" id="evInboxShell">
+        <!-- LEFT: lijst-pane -->
+        <aside id="evInboxListPane" class="evx-list-pane">
+          <div class="evx-list-header">
+            <div style="font-size:12.5px;font-weight:600;color:var(--text)">Gesprekken</div>
+            <button class="sr-iconbtn" id="evInboxRefresh" title="Vernieuwen"><i class="ti ti-refresh"></i></button>
           </div>
-          <span id="evThreadWindowBadge" style="font-size:10px;font-weight:700;padding:3px 8px;border-radius:10px;text-transform:uppercase;letter-spacing:.04em">—</span>
-        </div>
+          <div id="eventsInboxList" class="evx-list-body">
+            <div class="skel-row"></div>
+            <div class="skel-row"></div>
+          </div>
+        </aside>
 
-        <div id="evThreadMessages" style="height:42vh;min-height:280px;overflow-y:auto;border:1px solid var(--border);border-radius:10px;padding:12px;background:var(--bg-elev-1);display:flex;flex-direction:column;gap:8px">
-          <div style="color:var(--text-faint);font-size:12px;text-align:center;padding:20px">Laden…</div>
-        </div>
+        <!-- RIGHT: thread-pane (altijd in DOM; toont empty-state of de open conv). -->
+        <section id="evThreadPane" class="evx-thread-pane">
+          <!-- Empty-state (zichtbaar wanneer _evState.convId == null). -->
+          <div id="evThreadEmpty" class="evx-thread-empty">
+            <i class="ti ti-message-circle" style="font-size:36px;color:var(--text-faint)"></i>
+            <div style="font-size:13.5px;font-weight:600;color:var(--text)">Selecteer een gesprek</div>
+            <div style="font-size:12px;color:var(--text-faint);max-width:320px">
+              Kies een conversatie links om de berichten te zien en met Simone te beantwoorden.
+            </div>
+          </div>
 
-        <!-- Simone suggestion-paneel -->
-        <div id="evSimoneSuggestionPanel" style="margin-top:14px"></div>
+          <!-- Actieve thread (zichtbaar wanneer er een conv geopend is). -->
+          <div id="evThreadContent" style="display:none;flex:1;min-height:0;flex-direction:column">
+            <div class="evx-thread-header">
+              <button class="sr-iconbtn" id="evThreadBack" title="Terug naar lijst"><i class="ti ti-arrow-left"></i></button>
+              <div style="flex:1;min-width:0">
+                <div id="evThreadName" style="font-size:14.5px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">—</div>
+                <div id="evThreadPhone" style="font-size:11.5px;color:var(--text-faint)">—</div>
+              </div>
+              <span id="evThreadWindowBadge" style="font-size:10px;font-weight:700;padding:3px 8px;border-radius:10px;text-transform:uppercase;letter-spacing:.04em">—</span>
+            </div>
 
-        <!-- Compose-rij -->
-        <div style="margin-top:12px;display:flex;gap:8px;align-items:flex-start">
-          <button class="btn-primary" id="evAskSimoneBtn" type="button" style="background:#7c3aed;white-space:nowrap" title="Vraag Simone om een suggestie">
-            <i class="ti ti-sparkles"></i> Vraag Simone
-          </button>
-          <textarea id="evComposeTextarea" placeholder="Typ een vrij bericht…" style="flex:1;min-height:62px;max-height:140px;font-family:inherit;font-size:13px;padding:8px 10px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);resize:vertical"></textarea>
-          <button class="btn-primary" id="evComposeSendBtn" type="button" title="Versturen">
-            <i class="ti ti-send"></i> Versturen
-          </button>
-        </div>
-        <div id="evThreadHint" style="font-size:11.5px;color:var(--text-faint);margin-top:4px"></div>
+            <div id="evThreadMessages" class="evx-thread-messages">
+              <div style="color:var(--text-faint);font-size:12px;text-align:center;padding:20px">Laden…</div>
+            </div>
+
+            <!-- Simone suggestion-paneel -->
+            <div id="evSimoneSuggestionPanel" style="padding:0 14px"></div>
+
+            <!-- Composer -->
+            <div class="evx-thread-footer">
+              <div style="display:flex;gap:8px;align-items:flex-start">
+                <button class="btn-primary" id="evAskSimoneBtn" type="button" style="background:#7c3aed;white-space:nowrap" title="Vraag Simone om een suggestie">
+                  <i class="ti ti-sparkles"></i> Vraag Simone
+                </button>
+                <textarea id="evComposeTextarea" placeholder="Typ een vrij bericht…" style="flex:1;min-height:62px;max-height:140px;font-family:inherit;font-size:13px;padding:8px 10px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);resize:vertical"></textarea>
+                <button class="btn-primary" id="evComposeSendBtn" type="button" title="Versturen">
+                  <i class="ti ti-send"></i> Versturen
+                </button>
+              </div>
+              <div id="evThreadHint" style="font-size:11.5px;color:var(--text-faint);margin-top:4px"></div>
+            </div>
+          </div>
+        </section>
       </div>
     </div>
 
@@ -1041,34 +1140,41 @@ async function loadEventsInbox() {
         + '</div>';
       return;
     }
-    list.innerHTML = '<div class="sr-tablewrap"><table class="sr-table">'
-      + '<thead><tr><th>Telefoon</th><th>Naam</th><th>Klant</th><th>Laatste bericht</th><th style="text-align:right">Tijd</th><th style="text-align:right">Ongelezen</th></tr></thead>'
-      + '<tbody>'
-      + items.map(it => {
-          const preview = (it.last_message_preview || '').slice(0, 80);
-          const unread = it.unread_count > 0
-            ? '<span style="background:rgba(220,38,38,0.15);color:#b91c1c;border-radius:10px;padding:2px 8px;font-size:11px;font-weight:600">' + it.unread_count + '</span>'
-            : '<span style="color:var(--text-faint);font-size:11px">—</span>';
-          // Fix over-escape: bij geen koppeling renderen we de <i>-tag direct
-          // (geen esc() over HTML). Bij wel-koppeling esc()-en we de klantnaam.
-          const klantCell = it.customer_name
-            ? esc(it.customer_name)
-            : '<i style="color:var(--text-faint)">geen koppeling</i>';
-          return '<tr style="cursor:pointer" data-conv-id="' + esc(it.id) + '"'
-            + ' data-phone="' + esc(it.phone_number || '') + '"'
-            + ' data-display="' + esc(it.display_name || '') + '"'
-            + ' data-customer="' + esc(it.customer_name || '') + '">'
-            + '<td><code style="font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px">' + esc(it.phone_number) + '</code></td>'
-            + '<td>' + esc(it.display_name || '—') + '</td>'
-            + '<td>' + klantCell + '</td>'
-            + '<td style="max-width:380px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(preview) + '</td>'
-            + '<td style="text-align:right;font-size:11.5px;color:var(--text-dim)">' + esc(fmtDate(it.last_message_at)) + '</td>'
-            + '<td style="text-align:right">' + unread + '</td>'
-            + '</tr>';
-        }).join('')
-      + '</tbody></table></div>';
-    // Row-click → open conv-thread view
-    list.querySelectorAll('tr[data-conv-id]').forEach((row) => {
+    // STAP 6a: card-rijen i.p.v. tabel — past in de smalle linker-pane van de
+    // twee-paneel-shell. Active-state op _evState.convId (huidige geopend).
+    const activeId = _evState.convId || null;
+    list.innerHTML = items.map((it) => {
+      const preview     = (it.last_message_preview || '').slice(0, 80);
+      const initialLbl  = (it.customer_name || it.display_name || it.phone_number || '?').trim();
+      const initial     = (initialLbl.match(/[A-Za-z0-9]/) || ['?'])[0].toUpperCase();
+      const nameLabel   = it.customer_name || it.display_name || it.phone_number || '(geen naam)';
+      const subtitle    = it.customer_name && it.display_name && it.display_name !== it.customer_name
+        ? it.display_name
+        : (it.phone_number || '');
+      const unreadHtml  = it.unread_count > 0
+        ? `<span class="evx-conv-unread">${esc(String(it.unread_count))}</span>`
+        : '';
+      const timeShort   = it.last_message_at ? esc(fmtDate(it.last_message_at)) : '';
+      const isActive    = activeId && it.id === activeId ? ' active' : '';
+      return `
+        <div class="evx-conv-row${isActive}" data-conv-id="${esc(it.id)}"
+             data-phone="${esc(it.phone_number || '')}"
+             data-display="${esc(it.display_name || '')}"
+             data-customer="${esc(it.customer_name || '')}">
+          <div class="evx-conv-avatar">${esc(initial)}</div>
+          <div class="evx-conv-body">
+            <div class="evx-conv-toprow">
+              <div class="evx-conv-name">${esc(nameLabel)}</div>
+              <div class="evx-conv-time">${timeShort}</div>
+            </div>
+            <div class="evx-conv-preview">${esc(preview || subtitle || '—')}</div>
+            ${unreadHtml ? `<div class="evx-conv-meta">${unreadHtml}</div>` : ''}
+          </div>
+        </div>
+      `;
+    }).join('');
+    // Rij-click → open conv (her-render markeert de nieuwe actieve rij).
+    list.querySelectorAll('.evx-conv-row[data-conv-id]').forEach((row) => {
       row.addEventListener('click', () => openEventsConv({
         id:          row.dataset.convId,
         phone:       row.dataset.phone || '',
@@ -1084,16 +1190,31 @@ async function loadEventsInbox() {
 // ── Fase 2 stap 2c: events thread + Simone interactie ────────────────────────
 const _evState = { convId: null, conv: null, canSendText: false, suggestion: null };
 
+// STAP 6a: persistent twee-paneel — beide panes staan altijd in de DOM.
+// _evShowThreadView toont de content-area + verbergt het empty-state.
+// _evShowListView verbergt de content-area + toont empty-state (deselect).
+// Op smal scherm wisselt CSS via .thread-open op de shell tussen lijst en thread.
 function _evShowThreadView() {
-  document.getElementById('evInboxListPane').style.display = 'none';
-  document.getElementById('evThreadPane').style.display   = '';
+  const shell   = document.getElementById('evInboxShell');
+  const empty   = document.getElementById('evThreadEmpty');
+  const content = document.getElementById('evThreadContent');
+  if (shell)   shell.classList.add('thread-open');
+  if (empty)   empty.style.display = 'none';
+  if (content) content.style.display = 'flex';
 }
 function _evShowListView() {
-  document.getElementById('evInboxListPane').style.display = '';
-  document.getElementById('evThreadPane').style.display    = 'none';
+  const shell   = document.getElementById('evInboxShell');
+  const empty   = document.getElementById('evThreadEmpty');
+  const content = document.getElementById('evThreadContent');
+  if (shell)   shell.classList.remove('thread-open');
+  if (empty)   empty.style.display = '';
+  if (content) content.style.display = 'none';
   _evState.convId = null;
   _evState.conv = null;
   _evState.suggestion = null;
+  // De-mark actieve rij in de lijst (her-renderen niet nodig — class wegnemen
+  // is sneller en behoudt scroll-positie).
+  document.querySelectorAll('#eventsInboxList .evx-conv-row.active').forEach((el) => el.classList.remove('active'));
   // Realtime: alleen het berichten-kanaal opruimen; convCh + backstop blijven
   // zolang de inbox-tab open is (lijst-updates moeten doorlopen).
   _evTeardownThreadChannel();
@@ -1225,6 +1346,11 @@ async function openEventsConv({ id, phone, displayName, customer }) {
   if (!id) return;
   _evState.convId = id;
   _evShowThreadView();
+  // STAP 6a: markeer direct de actieve rij in de lijst (geen wacht op
+  // loadEventsInbox onderaan — voelt sneller bij wisselen tussen conversaties).
+  document.querySelectorAll('#eventsInboxList .evx-conv-row.active').forEach((el) => el.classList.remove('active'));
+  const newRow = document.querySelector('#eventsInboxList .evx-conv-row[data-conv-id="' + id.replace(/"/g, '') + '"]');
+  if (newRow) newRow.classList.add('active');
 
   // Pre-fill header met data uit list-rij voor snappy switch
   document.getElementById('evThreadName').textContent  = customer || displayName || phone || 'Onbekend';
