@@ -5,7 +5,10 @@
 // components-array op uit een simpel { "1": "...", "2": "..." } variables-
 // object.
 //
-// Permission: finance.inbox.send (zelfde als inbox-send.js).
+// Permission: finance.inbox.send OF events.simone.use (zelfde OR-patroon als
+// inbox-send.js — events-hub template-picker hangt sinds stap 6c op dit
+// endpoint zonder finance-rechten te hebben). Additief; finance-callers
+// blijven byte-identiek.
 //
 // Body:
 //   conversation_id     uuid    required
@@ -66,8 +69,13 @@ export default async function handler(req, res) {
   const supabase = createUserClient(req);
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return res.status(401).json({ error: 'Niet geauthenticeerd' });
-  if (!(await requirePermission(req, 'finance.inbox.send'))) {
-    return res.status(403).json({ error: 'Geen rechten (finance.inbox.send)' });
+  // FIX 3 — additief: events.simone.use ook accepteren (parallel met inbox-send.js).
+  // Finance-callers met finance.inbox.send blijven byte-identiek werken
+  // doordat we het bestaande pad als eerste evalueren.
+  const hasFinanceSend = await requirePermission(req, 'finance.inbox.send');
+  const hasSimoneUse   = hasFinanceSend ? true : await requirePermission(req, 'events.simone.use');
+  if (!hasFinanceSend && !hasSimoneUse) {
+    return res.status(403).json({ error: 'Geen rechten (finance.inbox.send of events.simone.use)' });
   }
 
   // Body parsing

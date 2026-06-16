@@ -1,6 +1,7 @@
 // api/inbox-messages-list.js
 // GET → lijst whatsapp_messages voor een conversation, oudste → nieuwste.
-// Permission: finance.inbox.view
+// Permission: finance.inbox.view OF events.inbox.view (additief; events-hub
+// gebruikt deze endpoint sinds stap 6a/6b zonder finance-rechten te hebben).
 //
 // Query params:
 //   conversation_id  uuid (required)
@@ -33,8 +34,12 @@ export default async function handler(req, res) {
   const supabase = createUserClient(req);
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return res.status(401).json({ error: 'Niet geauthenticeerd' });
-  if (!(await requirePermission(req, 'finance.inbox.view'))) {
-    return res.status(403).json({ error: 'Geen rechten (finance.inbox.view)' });
+  // FIX 3 — additief: events.inbox.view ook accepteren. Finance-callers met
+  // finance.inbox.view blijven byte-identiek werken (short-circuit).
+  const hasFinanceView = await requirePermission(req, 'finance.inbox.view');
+  const hasEventsView  = hasFinanceView ? true : await requirePermission(req, 'events.inbox.view');
+  if (!hasFinanceView && !hasEventsView) {
+    return res.status(403).json({ error: 'Geen rechten (finance.inbox.view of events.inbox.view)' });
   }
 
   const q = req.query || {};
