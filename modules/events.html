@@ -211,17 +211,17 @@ function renderPage(canCreate, canViewInbox, canManageSignupInbox) {
         <div class="sub">Workshops, live trainingen en mentor-sessies.</div>
       </div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
-        <a class="btn-secondary" href="/modules/events-automations.html" style="text-decoration:none"><i class="ti ti-robot"></i> Automations</a>
-        ${canCreate ? '<button class="btn-secondary" id="evNiveauPhotosBtn" type="button"><i class="ti ti-photo"></i> Niveau-foto\'s</button>' : ''}
         ${canCreate ? '<a class="btn-primary" href="/modules/events-wizard.html"><i class="ti ti-plus"></i> Nieuw event</a>' : ''}
       </div>
     </div>
 
-    <div class="ev-tabs" style="display:flex;gap:6px;margin-bottom:14px;border-bottom:1px solid var(--border)">
+    <div class="ev-tabs" style="display:flex;gap:6px;margin-bottom:14px;border-bottom:1px solid var(--border);align-items:center">
       <button class="ev-tab active" data-evtab="overzicht"><i class="ti ti-list"></i> Overzicht</button>
-      <button class="ev-tab" data-evtab="afgerond"><i class="ti ti-checks"></i> Afgerond</button>
       ${inboxTabBtn}
       ${signupInboxTabBtn}
+      <button class="ev-tab" data-evtab="mentor-grootboek"><i class="ti ti-book"></i> Mentor-grootboek</button>
+      <div style="flex:1"></div>
+      <button class="sr-iconbtn" id="evSettingsBtn" type="button" title="Instellingen" style="margin-bottom:1px"><i class="ti ti-settings"></i></button>
     </div>
 
     <div id="ev-pane-overzicht">
@@ -237,26 +237,35 @@ function renderPage(canCreate, canViewInbox, canManageSignupInbox) {
         <button class="sr-seg active" data-status="">Alle</button>
         <button class="sr-seg" data-status="draft">Concept</button>
         <button class="sr-seg" data-status="published">Gepubliceerd</button>
+        <button class="sr-seg" data-status="afgerond">Afgerond</button>
         <button class="sr-seg" data-status="cancelled">Geannuleerd</button>
         <button class="sr-seg" data-status="archived">Gearchiveerd</button>
       </div>
 
+      <!-- Standaard events-grid (alle status-filters behalve 'afgerond') -->
       <div id="eventsList">
         <div class="skel-row"></div>
         <div class="skel-row"></div>
         <div class="skel-row"></div>
       </div>
+
+      <!-- Afgerond-sub-pane: getoond wanneer status-filter='afgerond'. Inhoud
+           is hetzelfde als de oude #ev-pane-afgerond, alleen visueel
+           geïntegreerd in Overzicht zodat "Afgerond" een filter is i.p.v.
+           een top-tab. -->
+      <div id="eventsAfgerondList" style="display:none">
+        <div class="skel-row"></div>
+        <div class="skel-row"></div>
+      </div>
     </div>
 
-    <div id="ev-pane-afgerond" style="display:none">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
-        <div style="font-size:12.5px;color:var(--text-dim)">Events die zijn afgerond. Klik een kaart om details (samenvatting, uitgaven, bonus per mentor) te zien.</div>
-        <button class="sr-iconbtn" id="evAfgerondRefresh" title="Vernieuwen"><i class="ti ti-refresh"></i></button>
+    <!-- Instellingen-pane: in-page panel met kaarten die naar bestaande
+         schermen linken (geen fysieke verhuizing — die volgt in stap 7). -->
+    <div id="ev-pane-settings" style="display:none">
+      <div style="font-size:13px;color:var(--text-dim);margin-bottom:14px">
+        Beheer van vragenlijst, AI-config, automations en niveau-instellingen voor de Events-module.
       </div>
-      <div id="eventsAfgerondList">
-        <div class="skel-row"></div>
-        <div class="skel-row"></div>
-      </div>
+      <div id="evSettingsCards" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px"></div>
     </div>
 
     <div id="ev-pane-inbox" style="display:none">
@@ -364,26 +373,31 @@ function renderPage(canCreate, canViewInbox, canManageSignupInbox) {
   // Tab-switch wiring
   const tabBtns = document.querySelectorAll('.ev-tab');
   const paneOverview    = document.getElementById('ev-pane-overzicht');
-  const paneAfgerond    = document.getElementById('ev-pane-afgerond');
   const paneInbox       = document.getElementById('ev-pane-inbox');
   const paneSignupInbox = document.getElementById('ev-pane-signup-inbox');
+  const paneSettings    = document.getElementById('ev-pane-settings');
   function hideAll() {
     paneOverview.style.display = 'none';
-    if (paneAfgerond) paneAfgerond.style.display = 'none';
     paneInbox.style.display = 'none';
     if (paneSignupInbox) paneSignupInbox.style.display = 'none';
+    if (paneSettings) paneSettings.style.display = 'none';
   }
   tabBtns.forEach(b => b.addEventListener('click', () => {
     const which = b.getAttribute('data-evtab');
+    // Mentor-grootboek opent (voorlopig) de bestaande standalone pagina —
+    // geen pane-switch. Stap 7 brengt 'm definitief naar de hub.
+    if (which === 'mentor-grootboek') {
+      window.location.href = '/modules/mentor-grootboek.html';
+      return;
+    }
     tabBtns.forEach(x => x.classList.toggle('active', x === b));
     hideAll();
     if (which === 'overzicht') {
       paneOverview.style.display = '';
       _evTeardownRealtime();
-    } else if (which === 'afgerond') {
-      if (paneAfgerond) paneAfgerond.style.display = '';
-      loadAfgerondEvents();
-      _evTeardownRealtime();
+      // Re-render zodat de huidige status-filter (incl. 'afgerond') correct
+      // de juiste sub-lijst toont (events-grid vs. afgerond-grid).
+      _evApplyStatusFilterView();
     } else if (which === 'inbox') {
       paneInbox.style.display = '';
       loadEventsInbox();
@@ -397,10 +411,22 @@ function renderPage(canCreate, canViewInbox, canManageSignupInbox) {
       _evTeardownRealtime();
     }
   }));
+
+  // ⚙ Instellingen — eigen pane, géén top-tab. Active-state op de tabs
+  // wordt afgezet zodat zichtbaar is dat we niet in een tabblad zitten.
+  const settingsBtn = document.getElementById('evSettingsBtn');
+  if (settingsBtn) {
+    settingsBtn.addEventListener('click', () => {
+      tabBtns.forEach(x => x.classList.remove('active'));
+      hideAll();
+      if (paneSettings) paneSettings.style.display = '';
+      _renderEvSettings();
+      _evTeardownRealtime();
+    });
+  }
+
   const inboxRefresh = document.getElementById('evInboxRefresh');
   if (inboxRefresh) inboxRefresh.addEventListener('click', () => loadEventsInbox());
-  const afgerondRefresh = document.getElementById('evAfgerondRefresh');
-  if (afgerondRefresh) afgerondRefresh.addEventListener('click', () => loadAfgerondEvents());
 
   // Inschrijvingen-inbox wiring
   const siRefresh = document.getElementById('evSignupInboxRefresh');
@@ -458,8 +484,84 @@ function renderPage(canCreate, canViewInbox, canManageSignupInbox) {
       document.querySelectorAll('#evSegments .sr-seg').forEach((s) => s.classList.remove('active'));
       seg.classList.add('active');
       state.status = seg.dataset.status || null;
-      loadEvents();
+      _evApplyStatusFilterView();
     });
+  });
+}
+
+// Beslist welke sub-lijst zichtbaar is in Overzicht en triggert de juiste loader.
+//   status === 'afgerond' -> /api/events-completed-list via loadAfgerondEvents()
+//   andere statussen      -> /api/events-list via loadEvents()
+// "Afgerond" is hierdoor een filter binnen Overzicht i.p.v. een aparte top-tab.
+function _evApplyStatusFilterView() {
+  const eventsListEl   = document.getElementById('eventsList');
+  const afgerondListEl = document.getElementById('eventsAfgerondList');
+  if (state.status === 'afgerond') {
+    if (eventsListEl)   eventsListEl.style.display = 'none';
+    if (afgerondListEl) afgerondListEl.style.display = '';
+    loadAfgerondEvents();
+  } else {
+    if (eventsListEl)   eventsListEl.style.display = '';
+    if (afgerondListEl) afgerondListEl.style.display = 'none';
+    loadEvents();
+  }
+}
+
+// Render het Instellingen-paneel met kaarten die naar de bestaande schermen
+// linken. STAP 1 is nav-shell — geen fysieke verhuizing van inhoud.
+// STAP 7 brengt vragenlijst + Simone-config fysiek hier naartoe.
+function _renderEvSettings() {
+  const host = document.getElementById('evSettingsCards');
+  if (!host) return;
+  const cards = [
+    {
+      icon : 'ti-file-text',
+      title: 'Vragenlijst-editor',
+      desc : 'Beheer de assessment-vragen die deelnemers invullen.',
+      href : '/modules/admin.html#assessment',
+      ext  : false,
+    },
+    {
+      icon : 'ti-robot',
+      title: 'Simone-config',
+      desc : 'AI-persona, prompts en kennisbank voor Simone (events).',
+      href : '/modules/admin.html#simone-config',
+      ext  : false,
+    },
+    {
+      icon : 'ti-bolt',
+      title: 'Automations',
+      desc : 'Configureer automatische mail- en WhatsApp-flows rond events.',
+      href : '/modules/events-automations.html',
+      ext  : false,
+    },
+    {
+      icon : 'ti-photo',
+      title: 'Niveau-foto\'s',
+      desc : 'Stel per niveau de overzichtsfoto in die wordt getoond.',
+      href : '#niveau-photos',
+      ext  : false,
+      onClick: 'openNiveauPhotoModal',
+    },
+  ];
+  host.innerHTML = cards.map((c) => `
+    <a class="ev-settings-card" ${c.onClick ? `data-act="${c.onClick}"` : `href="${c.href}"`}
+       style="display:block;text-decoration:none;color:inherit;border:1px solid var(--border);border-radius:10px;padding:14px;background:var(--bg-elev,transparent);cursor:pointer;transition:border-color .15s">
+      <div style="display:flex;align-items:flex-start;gap:10px">
+        <div style="width:36px;height:36px;border-radius:8px;background:rgba(9,61,84,0.10);color:#0a2f63;display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0">
+          <i class="ti ${c.icon}"></i>
+        </div>
+        <div style="flex:1;min-width:0">
+          <div style="font-size:13.5px;font-weight:700;margin-bottom:2px">${c.title}</div>
+          <div style="font-size:12px;color:var(--text-dim);line-height:1.4">${c.desc}</div>
+        </div>
+        <i class="ti ti-arrow-right" style="color:var(--text-faint);font-size:16px"></i>
+      </div>
+    </a>
+  `).join('');
+  // Niveau-foto's card opent een lokale modal in plaats van te navigeren.
+  host.querySelectorAll('[data-act="openNiveauPhotoModal"]').forEach((el) => {
+    el.addEventListener('click', (e) => { e.preventDefault(); openNiveauPhotoModal(); });
   });
 }
 
