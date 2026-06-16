@@ -7,6 +7,7 @@
 
 import { supabaseAdmin } from '../supabase.js';
 import { sendEventEmail, sendEventWhatsAppTemplate } from './events-send.js';
+import { logComms, mapSendStatus } from './comms-log.js';
 
 const UNIT_MS = { minutes: 60_000, hours: 3_600_000, days: 86_400_000 };
 const MAX_SEND_ATTEMPTS = 3;
@@ -80,9 +81,11 @@ export async function advanceRun({ run, attendee, event, now = new Date(), deps,
       if (await deps.isStepDone(idx)) { idx += 1; attempts = 0; continue; }
       let result;
       try {
+        // FIX 4: stepIndex meegeven via ctx zodat de deps-wrappers naar de
+        // event_attendee_comms_log kunnen schrijven met juiste step_index.
         result = type === 'send_email'
-          ? await deps.sendEmail(step, { attendee, event })
-          : await deps.sendWhatsApp(step, { attendee, event });
+          ? await deps.sendEmail(step, { attendee, event, stepIndex: idx })
+          : await deps.sendWhatsApp(step, { attendee, event, stepIndex: idx });
       } catch (e) {
         result = { ok: false, error: (e && e.message) || 'send threw' };
       }
@@ -304,18 +307,61 @@ export async function stepDueRuns({ now = new Date(), limit = 100, abortMs = 50_
               console.error('[events-automation send_email attachments exception]', e?.message || e);
             }
           }
-          return sendEventEmail({
+          const result = await sendEventEmail({
             attendee: ctx.attendee,
             event   : ctx.event,
             subject : step.config && step.config.subject,
             body    : step.config && step.config.body,
             attachments: (attachments && attachments.length > 0) ? attachments : undefined,
           });
+          // FIX 4 — log naar event_attendee_comms_log. Awaited binnen
+          // try/catch (fail-soft) zodat een log-fout de send-flow niet
+          // breekt en de INSERT op Vercel daadwerkelijk afrondt.
+          try {
+            const map = mapSendStatus(result);
+            await logComms({
+              attendeeId:      ctx.attendee?.id,
+              eventId:         ctx.event?.id,
+              channel:         'email',
+              status:          map.status,
+              subject:         step.config && step.config.subject,
+              sentByUserId:    null,
+              automationRunId: run.id,
+              stepIndex:       typeof ctx.stepIndex === 'number' ? ctx.stepIndex : null,
+              failureReason:   map.reason,
+            });
+          } catch (e) {
+            console.error('[automation-engine comms-log mail]', e?.message || e);
+          }
+          return result;
         },
-        sendWhatsApp: (step, ctx) => sendEventWhatsAppTemplate({
-          attendee: ctx.attendee, event: ctx.event,
-          templateName: step.config && step.config.template_name, sentByUserId: null,
-        }),
+        sendWhatsApp: async (step, ctx) => {
+          const result = await sendEventWhatsAppTemplate({
+            attendee:    ctx.attendee,
+            event:       ctx.event,
+            templateName: step.config && step.config.template_name,
+            sentByUserId: null,
+          });
+          // FIX 4 — log idem als bij sendEmail.
+          try {
+            const map = mapSendStatus(result);
+            await logComms({
+              attendeeId:      ctx.attendee?.id,
+              eventId:         ctx.event?.id,
+              channel:         'whatsapp',
+              status:          map.status,
+              templateName:    step.config && step.config.template_name,
+              sentByUserId:    null,
+              automationRunId: run.id,
+              stepIndex:       typeof ctx.stepIndex === 'number' ? ctx.stepIndex : null,
+              metaWamid:       result?.meta_wamid || null,
+              failureReason:   map.reason,
+            });
+          } catch (e) {
+            console.error('[automation-engine comms-log wa]', e?.message || e);
+          }
+          return result;
+        },
       };
 
       const u = await advanceRun({ run, attendee, event, now, deps });
