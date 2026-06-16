@@ -147,16 +147,18 @@ export default async function handler(req, res) {
     if (error) throw new Error('events-update: ' + error.message);
     if (!ev)   return res.status(404).json({ error: 'Event niet gevonden' });
 
-    // F2: outbound sync. Twee paden afhankelijk van resultierende status:
-    //   - published        -> syncEventToOutbound (create/update item + GHL options)
-    //   - cancelled        -> unpublishEventOutbound (Webflow draft + GHL options refresh)
-    //   - draft / archived -> geen sync (caller wil expliciet uit live-pool).
+    // F2: outbound sync. Drie paden afhankelijk van resultierende status:
+    //   - published          -> syncEventToOutbound (create/update item + GHL options)
+    //   - cancelled|archived -> unpublishEventOutbound (Webflow draft + GHL options refresh)
+    //   - draft              -> geen sync (caller wil expliciet uit live-pool).
+    // 'archived' deelt het unpublish-pad met 'cancelled' (stap 2 hub-herinrichting):
+    // archief = niet langer publiek zichtbaar, identiek aan cancelled qua outbound effect.
     // Beide calls AWAITED; orchestrator isoleert webflow vs ghl intern.
     let sync = null;
     try {
       if (ev.status === 'published') {
         sync = await syncEventToOutbound(ev.id);
-      } else if (ev.status === 'cancelled') {
+      } else if (ev.status === 'cancelled' || ev.status === 'archived') {
         sync = await unpublishEventOutbound(ev.id);
       }
     } catch (syncErr) {
