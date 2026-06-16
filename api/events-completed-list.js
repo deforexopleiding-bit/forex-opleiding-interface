@@ -15,7 +15,7 @@
 //       sales,
 //       expenses: [{ vendor, amount, spent_at }], expenses_total,
 //       bonus_total,
-//       per_mentor: [{ name, bonus, uitgave, netto }]
+//       per_mentor: [{ name, was_present, bonus, uitgave, netto }]
 //     }, ...]
 //   }
 //
@@ -27,7 +27,12 @@
 //   - expenses: alle event_expenses.* rows + sum
 //   - bonus_total: sum(amount) over mentor_ledger_entries WHERE entry_type='bonus'
 //     en status IN ('vrijgegeven','uitbetaald','pending','wachten_op_betaling')
-//   - per_mentor: per mentor_user_id → bonus + uitgave + netto
+//   - per_mentor: BASIS uit event_mentors (event_id) zodat aanwezig-gemarkeerde
+//     mentoren zónder ledger-entry ook verschijnen; LEFT JOIN op
+//     mentor_ledger_entries via team_members.user_id ↔ mentor_user_id voor
+//     bonus / uitgave / netto. Orphan ledger-entries (mentor met bonus maar
+//     geen event_mentors-rij) krijgen was_present=false zodat een mismatch
+//     niet stil bedragen wegfilter.
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
@@ -128,7 +133,7 @@ export default async function handler(req, res) {
         .from('profiles').select('id, email, full_name').in('id', mentorUserIds);
       for (const p of (profiles || [])) mentorNameById.set(p.id, p.full_name || p.email || '(onbekend)');
     }
-    // per-event aggregaties
+    // per-event aggregaties (bonus_total + ledger-cijfers per mentor_user_id)
     const bonusByEvent = new Map();
     // map<event_id, map<mentor_user_id, { bonus, uitgave }>>
     const perMentorByEvent = new Map();
@@ -145,19 +150,74 @@ export default async function handler(req, res) {
       perMentorByEvent.set(l.event_id, cell);
     }
 
+    // ── 4b) STAP 5: event_mentors-basis (was_present) + team_members → user_id ──
+    // per_mentor wordt nu opgebouwd vanuit event_mentors zodat ook
+    // aanwezig-gemarkeerde mentoren ZONDER ledger-entry verschijnen
+    // (bv. mentor zonder sale-koppeling). LEFT JOIN op ledger via
+    // team_members.user_id ↔ mentor_ledger_entries.mentor_user_id.
+    const { data: evMentorRows, error: emErr } = await supabaseAdmin
+      .from('event_mentors')
+      .select('event_id, team_member_id, was_present')
+      .in('event_id', eventIds);
+    if (emErr) {
+      console.error('[events-completed-list] event_mentors:', emErr.message);
+    }
+    const teamMemberIds = [...new Set((evMentorRows || []).map((r) => r.team_member_id).filter(Boolean))];
+    const tmById = new Map();
+    if (teamMemberIds.length > 0) {
+      const { data: tms } = await supabaseAdmin
+        .from('team_members')
+        .select('id, name, user_id')
+        .in('id', teamMemberIds);
+      for (const tm of tms || []) tmById.set(tm.id, tm);
+    }
+    const evMentorsByEvent = new Map();
+    for (const em of (evMentorRows || [])) {
+      const list = evMentorsByEvent.get(em.event_id) || [];
+      list.push(em);
+      evMentorsByEvent.set(em.event_id, list);
+    }
+
     // ── 5) Bouw output ──────────────────────────────────────────────────
     const out = rows.map((ev) => {
       const att = attendanceByEvent.get(ev.id) || { aanwezig: 0, no_show: 0, afgemeld: 0, sales: 0 };
       const expList = expensesByEvent.get(ev.id) || [];
       const expensesTotal = round2(expList.reduce((s, e) => s + e.amount, 0));
-      const mentorMap = perMentorByEvent.get(ev.id) || new Map();
-      const perMentor = Array.from(mentorMap.entries())
-        .map(([mid, m]) => ({
-          name   : mentorNameById.get(mid) || '(onbekend)',
-          bonus  : round2(m.bonus),
-          uitgave: round2(m.uitgave),
-          netto  : round2(m.bonus - m.uitgave),
-        }))
+      const mentorLedger = perMentorByEvent.get(ev.id) || new Map();
+      const evMentorsForEvent = evMentorsByEvent.get(ev.id) || [];
+
+      // Basis: alle event_mentors voor dit event (LEFT JOIN op ledger).
+      const perMentorFromEm = evMentorsForEvent.map((em) => {
+        const tm     = tmById.get(em.team_member_id);
+        const userId = tm?.user_id || null;
+        const led    = userId ? (mentorLedger.get(userId) || { bonus: 0, uitgave: 0 })
+                              : { bonus: 0, uitgave: 0 };
+        return {
+          name        : tm?.name || (userId && mentorNameById.get(userId)) || '(onbekend)',
+          was_present : !!em.was_present,
+          bonus       : round2(led.bonus),
+          uitgave     : round2(led.uitgave),
+          netto       : round2(led.bonus - led.uitgave),
+          _userId     : userId, // privé — voor dedup hieronder
+        };
+      });
+      // Defensief: orphan-ledger-entries (mentor met bonus maar geen
+      // event_mentors-rij) blijven zichtbaar zodat een mismatch nooit stil
+      // bonus-bedragen wegfilter. was_present=false als er geen em-rij is.
+      const seenUserIds = new Set(perMentorFromEm.map((m) => m._userId).filter(Boolean));
+      for (const [uid, led] of mentorLedger.entries()) {
+        if (seenUserIds.has(uid)) continue;
+        perMentorFromEm.push({
+          name        : mentorNameById.get(uid) || '(onbekend)',
+          was_present : false,
+          bonus       : round2(led.bonus),
+          uitgave     : round2(led.uitgave),
+          netto       : round2(led.bonus - led.uitgave),
+          _userId     : uid,
+        });
+      }
+      const perMentor = perMentorFromEm
+        .map((m) => { const { _userId, ...rest } = m; return rest; })
         .sort((a, b) => (a.name || '').localeCompare(b.name || ''));
       return {
         event_id          : ev.id,
