@@ -147,7 +147,7 @@
 
     /* Kebab menu */
     .kebab-wrap { position: relative; display: inline-block; }
-    .kebab-menu { position: absolute; right: 0; top: 28px; background: var(--bg-elev); border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,0.15); padding: 4px; min-width: 180px; z-index: 200; display: none; }
+    .kebab-menu { position: fixed; background: var(--bg-elev); border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,0.15); padding: 4px; min-width: 180px; z-index: 400; display: none; }
     .kebab-menu.show { display: block; }
     .kebab-item { display: block; width: 100%; padding: 7px 10px; text-align: left; background: transparent; border: none; cursor: pointer; font-size: 12.5px; color: var(--text); border-radius: 4px; font-family: inherit; }
     .kebab-item:hover { background: var(--bg-elev-2); }
@@ -808,14 +808,42 @@ function renderAttendeesTab() {
       e.stopPropagation();
       const id = btn.dataset.id;
       const menu = document.getElementById('kebab-' + id);
+      if (!menu) return;
       // Sluit andere menus
       document.querySelectorAll('.kebab-menu.show').forEach((m) => { if (m !== menu) m.classList.remove('show'); });
-      menu?.classList.toggle('show');
+      const willShow = !menu.classList.contains('show');
+      if (willShow) {
+        // Eerst .show toevoegen zodat offsetWidth/offsetHeight meetbaar zijn.
+        menu.classList.add('show');
+        const r = btn.getBoundingClientRect();
+        let left = r.right - menu.offsetWidth;
+        if (left < 8) left = 8;
+        let top = r.bottom + 4;
+        if (top + menu.offsetHeight > window.innerHeight - 8) {
+          top = r.top - menu.offsetHeight - 4;
+        }
+        menu.style.left = left + 'px';
+        menu.style.top  = top  + 'px';
+      } else {
+        menu.classList.remove('show');
+      }
     });
   });
   document.addEventListener('click', () => {
     document.querySelectorAll('.kebab-menu.show').forEach((m) => m.classList.remove('show'));
   }, { once: true });
+
+  // Eénmalige globale listeners: sluit fixed-positioned kebab-menus bij scroll
+  // (incl. scroll binnen de tabel-wrapper → capture-phase) of resize, zodat het
+  // menu niet "los" blijft hangen wanneer de rij wegbeweegt onder de cursor.
+  if (!window._kebabGlobalWired) {
+    const closeAll = () => {
+      document.querySelectorAll('.kebab-menu.show').forEach((m) => m.classList.remove('show'));
+    };
+    window.addEventListener('scroll', closeAll, { capture: true, passive: true });
+    window.addEventListener('resize', closeAll);
+    window._kebabGlobalWired = true;
+  }
 
   document.querySelectorAll('.kebab-item').forEach((item) => {
     item.addEventListener('click', (e) => {
