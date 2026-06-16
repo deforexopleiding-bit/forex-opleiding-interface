@@ -363,49 +363,47 @@
     <!-- ── Joost (AI) configuratie — VERHUISD naar Finance > Instellingen (Groep D) — zie modules/shared/finance-instellingen.js ── -->
 
     <!-- ── Assessment-vragen editor (forward-only config) ────────────────── -->
+    <!-- STAP 7 — Assessment-vragen-editor is fysiek verhuisd naar
+         Events → Instellingen → Vragenlijst. Tab-pane toont een banner +
+         deeplink-knop zodat bookmarks op /modules/admin.html#assessment
+         niet breken. Oude JS-functies blijven dead-code in dit bestand
+         voor incrementele rollback (zie switchAdminTab-comment). -->
     <div id="tab-assessment" class="admin-tab-panel" style="display:none">
       <div class="section-card">
-        <div class="section-header" style="justify-content:space-between">
-          <div>
-            <div style="font-size:15px;font-weight:700">Assessment-vragen</div>
-            <div style="font-size:12px;color:var(--text-faint);font-weight:400;margin-top:4px;max-width:720px">
-              Beheer van de vragen in <code>/modules/assessment.html</code>. Wijzigingen zijn <strong>forward-only</strong> — bestaande inzendingen
-              behouden hun antwoorden + scores; alleen nieuwe submissies gebruiken de nieuwe config. Routing-weights bepalen de scoring (Blok 2 PR 2);
-              wees voorzichtig met aanpassingen.
+        <div style="display:flex;align-items:flex-start;gap:14px;padding:14px;border:1px solid var(--border);border-radius:10px;background:rgba(59,130,246,0.08)">
+          <div style="width:36px;height:36px;border-radius:8px;background:rgba(59,130,246,0.2);color:#1d4ed8;display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0">
+            <i class="ti ti-arrow-right"></i>
+          </div>
+          <div style="flex:1;min-width:0">
+            <div style="font-size:14.5px;font-weight:700;color:var(--text)">Assessment-vragen zijn verhuisd</div>
+            <div style="font-size:12.5px;color:var(--text-dim);margin-top:4px;max-width:680px;line-height:1.5">
+              De vragenlijst-editor zit nu in <strong>Events → Instellingen → Vragenlijst</strong>. Endpoints, RBAC en datamodel zijn ongewijzigd.
             </div>
+            <a href="/modules/events.html#settings-assessment" class="btn btn-sm btn-primary" style="margin-top:12px;text-decoration:none;display:inline-flex;align-items:center;gap:6px">
+              <i class="ti ti-external-link"></i> Open in Events → Instellingen
+            </a>
           </div>
-          <div style="display:flex;gap:8px">
-            <button class="btn btn-sm" onclick="loadAssessmentQuestions()" title="Lijst opnieuw laden"><i class="ti ti-refresh"></i></button>
-            <button class="btn btn-sm btn-primary" onclick="openAssessmentQuestionEdit(null)"><i class="ti ti-plus"></i> Nieuwe vraag</button>
-          </div>
-        </div>
-        <div id="assessmentQuestionsBanner" style="display:none;margin:8px 0 0;padding:10px 14px;border-radius:8px;font-size:13px"></div>
-        <div id="assessmentQuestionsList" style="padding:16px 0;display:flex;flex-direction:column;gap:18px">
-          <div style="font-size:12.5px;color:var(--text-faint)">Laden…</div>
         </div>
       </div>
     </div>
 
-    <!-- ── Simone-config (events-agent — Fase 2 stap 2c) ──────────────────── -->
+    <!-- STAP 7 — Simone-config is fysiek verhuisd naar
+         Events → Instellingen → Simone-config. -->
     <div id="tab-simone-config" class="admin-tab-panel" style="display:none">
       <div class="section-card">
-        <div class="section-header" style="justify-content:space-between">
-          <div>
-            <div style="font-size:15px;font-weight:700">Simone — events-agent</div>
-            <div style="font-size:12px;color:var(--text-faint);font-weight:400;margin-top:4px;max-width:720px">
-              Mirror van Joost's config-scherm voor de events-agent. Wijzigingen werken op <code>joost_config</code> waar <code>module='events'</code>.
-              Simone is <strong>suggest-only</strong> — geen autonomous-send. Vul de prompt-template aan en flip <em>reactieve auto-suggest</em> aan
-              zodra je live wilt (events-inbound triggert dan in-process Simone).
+        <div style="display:flex;align-items:flex-start;gap:14px;padding:14px;border:1px solid var(--border);border-radius:10px;background:rgba(124,58,237,0.08)">
+          <div style="width:36px;height:36px;border-radius:8px;background:rgba(124,58,237,0.2);color:#7c3aed;display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0">
+            <i class="ti ti-robot"></i>
+          </div>
+          <div style="flex:1;min-width:0">
+            <div style="font-size:14.5px;font-weight:700;color:var(--text)">Simone-config is verhuisd</div>
+            <div style="font-size:12.5px;color:var(--text-dim);margin-top:4px;max-width:680px;line-height:1.5">
+              De AI-config voor Simone zit nu in <strong>Events → Instellingen → Simone-config</strong>. Endpoints, RBAC en datamodel zijn ongewijzigd.
             </div>
+            <a href="/modules/events.html#settings-simone" class="btn btn-sm btn-primary" style="margin-top:12px;text-decoration:none;display:inline-flex;align-items:center;gap:6px">
+              <i class="ti ti-external-link"></i> Open in Events → Instellingen
+            </a>
           </div>
-          <div style="display:flex;gap:8px">
-            <button class="btn btn-sm" onclick="loadSimoneConfig()" title="Opnieuw laden"><i class="ti ti-refresh"></i></button>
-            <button class="btn btn-sm btn-primary" id="simoneCfgSaveBtn" onclick="saveSimoneConfig()" disabled><i class="ti ti-device-floppy"></i> Opslaan</button>
-          </div>
-        </div>
-        <div id="simoneCfgBanner" style="display:none;margin:8px 0 0;padding:10px 14px;border-radius:8px;font-size:13px"></div>
-        <div id="simoneCfgForm" style="padding:16px 0;display:flex;flex-direction:column;gap:14px">
-          <div style="font-size:12.5px;color:var(--text-faint)">Laden…</div>
         </div>
       </div>
     </div>
@@ -1011,12 +1009,13 @@ function switchAdminTab(name) {
     wireApprovOnce();
     loadApprovalQueue();
   }
-  if (name === 'assessment') {
-    loadAssessmentQuestions();
-  }
-  if (name === 'simone-config') {
-    loadSimoneConfig();
-  }
+  // STAP 7 — Assessment-vragen en Simone-config zijn fysiek verhuisd naar
+  // Events → Instellingen. De oude loader-functies blijven dead-code in dit
+  // bestand voor incrementele rollback; we roepen ze niet meer aan zodat er
+  // geen console-errors komen op IDs die nu in events.html leven.
+  // De tab-buttons + redirect-banners (zie tab-content hieronder) blijven
+  // bestaan zodat /modules/admin.html#assessment + #simone-config blijven
+  // werken en de operator naar de hub kan klikken.
   // WhatsApp Templates + Connection init VERHUISD: zie
   // modules/shared/finance-instellingen.js (Finance > Instellingen).
 }

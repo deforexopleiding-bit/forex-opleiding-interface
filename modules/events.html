@@ -147,6 +147,42 @@
     .evx-sim-actions .btn-dismiss { background: transparent; border: 1px solid var(--border); color: var(--text-faint); padding: 5px 10px; border-radius: 7px; font-size: 11.5px; cursor: pointer; font-family: inherit; margin-left: auto; }
     .evx-sim-actions .btn-dismiss:hover { color: var(--text-dim); }
 
+    /* STAP 7 — Verhuisde modal-CSS uit admin.html, geprefixed met aq- om
+       botsing met bestaande events-modals (evSignupResolveModal /
+       evNiveauPhotoModal) die ook class="modal-overlay" / class="modal-card"
+       gebruiken te voorkomen. */
+    .aq-modal-overlay { position:fixed; inset:0; background:rgba(0,0,0,0.6); z-index:500; display:flex; align-items:center; justify-content:center; backdrop-filter:blur(4px); }
+    .aq-modal-overlay.hidden { display:none !important; }
+    .aq-modal-card { background:var(--bg-elev); border:1px solid var(--border-strong, var(--border)); border-radius:14px; width:100%; max-width:440px; margin:20px; }
+    .aq-modal-header { display:flex; align-items:center; justify-content:space-between; padding:16px 20px; border-bottom:1px solid var(--border); }
+    .aq-modal-title { font-size:15px; font-weight:600; }
+    .aq-modal-close { background:transparent; border:none; color:var(--text-faint); font-size:16px; cursor:pointer; padding:4px; line-height:1; }
+    .aq-modal-body { padding:20px; }
+    .aq-modal-footer { display:flex; justify-content:flex-end; gap:8px; padding:14px 20px; border-top:1px solid var(--border); }
+
+    /* STAP 7 — form-classes uit admin.html. Niet eerder gedefinieerd in
+       events.html; geen botsing. */
+    .form-group { margin-bottom:14px; }
+    .form-label { display:block; font-size:12px; font-weight:600; color:var(--text-dim); margin-bottom:6px; }
+    .form-input { width:100%; background:var(--bg-elev-2); border:1px solid var(--border-strong, var(--border)); border-radius:8px; padding:9px 12px; font-size:13px; color:var(--text); font-family:inherit; outline:none; transition:border-color .15s; }
+    .form-input:focus { border-color:var(--brand-primary, #093d54); }
+    .form-error { margin-top:10px; padding:8px 12px; background:rgba(220,38,38,.10); border:1px solid rgba(220,38,38,.30); border-radius:8px; font-size:12px; color:#b91c1c; }
+    .form-row-2 { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+    .form-help { font-size:11px; color:var(--text-faint); margin-top:4px; }
+
+    /* STAP 7 — sub-tab-strip binnen #ev-pane-settings. */
+    .evs-sub-tabs { display:flex; gap:4px; border-bottom:1px solid var(--border); margin-bottom:18px; flex-wrap:wrap; }
+    .evs-sub-tab { background:transparent; border:none; padding:9px 14px; font-size:13px; font-weight:600; color:var(--text-faint); cursor:pointer; border-bottom:2px solid transparent; font-family:inherit; margin-bottom:-1px; display:inline-flex; align-items:center; gap:6px; }
+    .evs-sub-tab:hover { color:var(--text); }
+    .evs-sub-tab.active { color:var(--brand-primary, #093d54); border-bottom-color:var(--brand-primary, #093d54); }
+    .evs-sub-section { display:none; }
+    .evs-sub-section.active { display:block; }
+
+    /* STAP 7 — section-card / section-header voor verhuisde Assessment +
+       Simone-config secties (uit admin.html). */
+    .aq-section-card { background:var(--bg-elev); border:1px solid var(--border); border-radius:10px; padding:18px 20px; }
+    .aq-section-header { display:flex; align-items:flex-start; gap:14px; margin-bottom:8px; }
+
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     html, body { height: 100%; }
     body { font-family: 'Inter', system-ui, sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; -webkit-font-smoothing: antialiased; }
@@ -395,13 +431,89 @@ function renderPage(canCreate, canViewInbox, canManageSignupInbox) {
       </div>
     </div>
 
-    <!-- Instellingen-pane: in-page panel met kaarten die naar bestaande
-         schermen linken (geen fysieke verhuizing — die volgt in stap 7). -->
+    <!-- STAP 7 — Instellingen-pane: vragenlijst-editor + Simone-config zijn
+         fysiek verhuisd uit admin.html. Sub-tab-strip wisselt tussen Vragenlijst,
+         Simone-config, Automations (link), Niveau-foto's (modal). -->
     <div id="ev-pane-settings" style="display:none">
       <div style="font-size:13px;color:var(--text-dim);margin-bottom:14px">
-        Beheer van vragenlijst, AI-config, automations en niveau-instellingen voor de Events-module.
+        Beheer van vragenlijst, Simone-config, automations en niveau-instellingen voor de Events-module.
       </div>
-      <div id="evSettingsCards" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px"></div>
+      <nav class="evs-sub-tabs" id="evSettingsSubTabs">
+        <button class="evs-sub-tab" data-evsub="assessment"><i class="ti ti-file-text"></i> Vragenlijst</button>
+        <button class="evs-sub-tab" data-evsub="simone"><i class="ti ti-robot"></i> Simone-config</button>
+        <button class="evs-sub-tab" data-evsub="automations"><i class="ti ti-bolt"></i> Automations</button>
+        <button class="evs-sub-tab" data-evsub="niveau"><i class="ti ti-photo"></i> Niveau-foto's</button>
+      </nav>
+
+      <!-- ── Sub-sectie: Vragenlijst-editor (verhuisd uit admin.html#assessment) ── -->
+      <section class="evs-sub-section" data-evsubsec="assessment">
+        <div class="aq-section-card">
+          <div class="aq-section-header" style="justify-content:space-between">
+            <div>
+              <div style="font-size:15px;font-weight:700">Assessment-vragen</div>
+              <div style="font-size:12px;color:var(--text-faint);font-weight:400;margin-top:4px;max-width:720px">
+                Beheer van de vragen in <code>/modules/assessment.html</code>. Wijzigingen zijn <strong>forward-only</strong> — bestaande inzendingen
+                behouden hun antwoorden + scores; alleen nieuwe submissies gebruiken de nieuwe config. Routing-weights bepalen de scoring (Blok 2 PR 2);
+                wees voorzichtig met aanpassingen.
+              </div>
+            </div>
+            <div style="display:flex;gap:8px">
+              <button class="btn btn-sm" onclick="loadAssessmentQuestions()" title="Lijst opnieuw laden"><i class="ti ti-refresh"></i></button>
+              <button class="btn btn-sm btn-primary" onclick="openAssessmentQuestionEdit(null)"><i class="ti ti-plus"></i> Nieuwe vraag</button>
+            </div>
+          </div>
+          <div id="assessmentQuestionsBanner" style="display:none;margin:8px 0 0;padding:10px 14px;border-radius:8px;font-size:13px"></div>
+          <div id="assessmentQuestionsList" style="padding:16px 0;display:flex;flex-direction:column;gap:18px">
+            <div style="font-size:12.5px;color:var(--text-faint)">Laden…</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ── Sub-sectie: Simone-config (verhuisd uit admin.html#simone-config) ── -->
+      <section class="evs-sub-section" data-evsubsec="simone">
+        <div class="aq-section-card">
+          <div class="aq-section-header" style="justify-content:space-between">
+            <div>
+              <div style="font-size:15px;font-weight:700">Simone — events-agent</div>
+              <div style="font-size:12px;color:var(--text-faint);font-weight:400;margin-top:4px;max-width:720px">
+                Configuratie voor de events-agent op <code>joost_config</code> waar <code>module='events'</code>.
+                Simone is <strong>suggest-only</strong> — geen autonomous-send. Vul de prompt-template aan en flip <em>reactieve auto-suggest</em> aan
+                zodra je live wilt (events-inbound triggert dan in-process Simone).
+              </div>
+            </div>
+            <div style="display:flex;gap:8px">
+              <button class="btn btn-sm" onclick="loadSimoneConfig()" title="Opnieuw laden"><i class="ti ti-refresh"></i></button>
+              <button class="btn btn-sm btn-primary" id="simoneCfgSaveBtn" onclick="saveSimoneConfig()" disabled><i class="ti ti-device-floppy"></i> Opslaan</button>
+            </div>
+          </div>
+          <div id="simoneCfgBanner" style="display:none;margin:8px 0 0;padding:10px 14px;border-radius:8px;font-size:13px"></div>
+          <div id="simoneCfgForm" style="padding:16px 0;display:flex;flex-direction:column;gap:14px">
+            <div style="font-size:12.5px;color:var(--text-faint)">Laden…</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ── Sub-sectie: Automations (link naar bestaande pagina) ── -->
+      <section class="evs-sub-section" data-evsubsec="automations">
+        <div class="aq-section-card">
+          <div style="font-size:15px;font-weight:700;margin-bottom:6px">Automations</div>
+          <div style="font-size:12.5px;color:var(--text-dim);margin-bottom:14px">Configureer automatische mail- en WhatsApp-flows rond events.</div>
+          <a class="btn btn-primary" href="/modules/events-automations.html" style="text-decoration:none;display:inline-flex;align-items:center;gap:6px">
+            <i class="ti ti-arrow-right"></i> Open Automations
+          </a>
+        </div>
+      </section>
+
+      <!-- ── Sub-sectie: Niveau-foto's (lokale modal) ── -->
+      <section class="evs-sub-section" data-evsubsec="niveau">
+        <div class="aq-section-card">
+          <div style="font-size:15px;font-weight:700;margin-bottom:6px">Niveau-foto's</div>
+          <div style="font-size:12.5px;color:var(--text-dim);margin-bottom:14px">Stel per niveau de overzichtsfoto in die wordt getoond.</div>
+          <button class="btn btn-primary" type="button" onclick="openNiveauPhotoModal()" style="display:inline-flex;align-items:center;gap:6px">
+            <i class="ti ti-photo"></i> Open Niveau-foto-modal
+          </button>
+        </div>
+      </section>
     </div>
 
     <div id="ev-pane-inbox" style="display:none">
@@ -547,6 +659,110 @@ function renderPage(canCreate, canViewInbox, canManageSignupInbox) {
       </div>
     </div>
 
+    <!-- STAP 7 — Verhuisde Assessment-vraag edit-modal (uit admin.html).
+         Klassen zijn geprefixt met aq- om botsing met evSignupResolveModal /
+         evNiveauPhotoModal (.modal-overlay / .modal-card) te voorkomen.
+         IDs, JS-koppelingen en formulierwerking ongewijzigd. -->
+    <div class="aq-modal-overlay hidden" id="assessmentQuestionEditModal" role="dialog" aria-modal="true">
+      <div class="aq-modal-card" style="max-width:720px">
+        <div class="aq-modal-header">
+          <div class="aq-modal-title" id="assessmentQuestionModalTitle">Nieuwe vraag</div>
+          <button class="aq-modal-close" type="button" onclick="closeAssessmentQuestionEdit()">&#x2715;</button>
+        </div>
+        <div class="aq-modal-body" style="max-height:70vh;overflow-y:auto">
+          <div id="assessmentQuestionEditError" style="display:none;margin-bottom:10px;padding:8px 12px;background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.3);border-radius:6px;color:#dc2626;font-size:12px;white-space:pre-wrap"></div>
+
+          <div class="form-group">
+            <label class="form-label" for="aqLabel">Vraag (label)</label>
+            <input type="text" id="aqLabel" class="form-input" maxlength="500" placeholder="De vraagtekst zoals de deelnemer 'm ziet" />
+          </div>
+
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+            <div class="form-group">
+              <label class="form-label" for="aqSection">Sectie</label>
+              <input type="text" id="aqSection" class="form-input" maxlength="64" placeholder="bv. identiteit / routing / engagement / doel" />
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="aqType">Type vraag</label>
+              <select id="aqType" class="form-input">
+                <option value="text">Tekst</option>
+                <option value="email">E-mail</option>
+                <option value="radio">Meerkeuze</option>
+                <option value="scale_1_5">Schaal 1–5</option>
+                <option value="scale_1_10">Schaal 1–10</option>
+                <option value="open_text">Open tekst</option>
+              </select>
+              <div id="aqEmailPrefillHint" style="display:none;font-size:11px;color:var(--text-faint);margin-top:4px">
+                <i class="ti ti-info-circle"></i> Wordt vooraf ingevuld vanuit het aanmeldformulier.
+              </div>
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="aqOrderIndex">Volgorde</label>
+              <input type="number" id="aqOrderIndex" class="form-input" min="0" step="10" value="0" />
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="aqKey">Sleutel <span id="aqKeyAutoBadge" style="font-size:10px;font-weight:500;color:var(--text-faint);margin-left:6px">(automatisch)</span></label>
+              <div style="display:flex;gap:6px;align-items:center">
+                <input type="text" id="aqKey" class="form-input" maxlength="64" placeholder="auto" readonly style="flex:1;background:var(--bg-elev-2,#f8f8f8);color:var(--text-dim)" />
+                <button type="button" id="aqKeyEditBtn" class="btn btn-sm" style="white-space:nowrap" onclick="_aqUnlockKey()">Sleutel aanpassen</button>
+              </div>
+              <div style="font-size:11px;color:var(--text-faint);margin-top:4px">Wordt automatisch gemaakt van het label. Aanpassen alleen bij een naam-botsing.</div>
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label" for="aqHelpText">Help-tekst (optioneel)</label>
+            <textarea id="aqHelpText" class="form-input" rows="2" maxlength="1000" placeholder="Korte toelichting onder de vraag"></textarea>
+          </div>
+
+          <div style="display:flex;gap:14px;flex-wrap:wrap;margin-bottom:12px;padding:10px 12px;border:1px solid var(--border);border-radius:8px;background:var(--bg-elev,transparent)">
+            <label style="display:flex;align-items:center;gap:6px;font-size:13px">
+              <input type="checkbox" id="aqRequired" checked /> Verplicht
+            </label>
+            <label style="display:flex;align-items:center;gap:6px;font-size:13px">
+              <input type="checkbox" id="aqActive" checked /> Actief (toon op publieke pagina)
+            </label>
+            <label id="aqIsRoutingWrap" style="display:none;align-items:center;gap:6px;font-size:13px">
+              <input type="checkbox" id="aqIsRouting" /> Telt mee in scoring (Basis/Gevorderd)
+            </label>
+          </div>
+
+          <div class="form-group" id="aqMinWordsGroup" style="display:none">
+            <label class="form-label" for="aqMinWords">Minimum aantal woorden</label>
+            <input type="number" id="aqMinWords" class="form-input" min="0" step="1" placeholder="bv. 30" />
+          </div>
+
+          <div class="form-group" id="aqOptionsGroup" style="display:none">
+            <label class="form-label">Antwoordopties</label>
+            <div id="aqOptionsRows" style="display:flex;flex-direction:column;gap:6px"></div>
+            <button type="button" class="btn btn-sm" style="margin-top:6px" onclick="_aqAddOptionRow()">
+              <i class="ti ti-plus"></i> Optie toevoegen
+            </button>
+          </div>
+
+          <div class="form-group" id="aqScaleWeightsGroup" style="display:none">
+            <label class="form-label">Punten per stap <span style="font-size:11px;font-weight:500;color:var(--text-faint)">— beïnvloedt scoring</span></label>
+            <div id="aqScaleWeightsRows" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:6px"></div>
+            <div style="font-size:11px;color:var(--text-faint);margin-top:4px">
+              Negatieve punten zijn toegestaan (rem-functie). Bestaande inzendingen worden NIET herberekend.
+            </div>
+          </div>
+
+          <div style="margin-top:16px;border-top:1px solid var(--border);padding-top:12px">
+            <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px;font-weight:600;color:var(--text-dim)">
+              <input type="checkbox" id="aqPreviewToggle" onchange="_aqRenderPreview()" />
+              <i class="ti ti-eye"></i> Toon preview (zoals deelnemer 'm ziet)
+            </label>
+            <div id="aqPreviewWrap" style="display:none;margin-top:10px;padding:12px 14px;border:1px dashed var(--border);border-radius:8px;background:var(--bg-elev,transparent)"></div>
+          </div>
+        </div>
+        <div class="aq-modal-footer">
+          <button class="btn" type="button" onclick="closeAssessmentQuestionEdit()">Annuleren</button>
+          <button class="btn btn-primary" id="aqSaveBtn" type="button" onclick="saveAssessmentQuestion()">Opslaan</button>
+        </div>
+      </div>
+    </div>
+
     <div id="evNiveauPhotoModal" class="modal-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:9999;align-items:center;justify-content:center;padding:24px">
       <div class="modal-card" style="background:var(--bg);border:1px solid var(--border);border-radius:12px;max-width:480px;width:100%;padding:20px;max-height:88vh;overflow-y:auto">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
@@ -603,6 +819,8 @@ function renderPage(canCreate, canViewInbox, canManageSignupInbox) {
 
   // ⚙ Instellingen — eigen pane, géén top-tab. Active-state op de tabs
   // wordt afgezet zodat zichtbaar is dat we niet in een tabblad zitten.
+  // STAP 7: _renderEvSettings is async (RBAC-check). Geen await; render-
+  // initialisatie loopt zelf (sub-tab-keuze + lazy load).
   const settingsBtn = document.getElementById('evSettingsBtn');
   if (settingsBtn) {
     settingsBtn.addEventListener('click', () => {
@@ -613,6 +831,13 @@ function renderPage(canCreate, canViewInbox, canManageSignupInbox) {
       _evTeardownRealtime();
     });
   }
+  // STAP 7 — Deeplink-handling: bij #settings-assessment of #settings-simone
+  // direct het Instellingen-paneel openen op de juiste sub-tab.
+  (function _evSettingsHashOnLoad() {
+    const h = (window.location.hash || '').toLowerCase();
+    if (h !== '#settings-assessment' && h !== '#settings-simone') return;
+    if (settingsBtn) settingsBtn.click();
+  })();
 
   const inboxRefresh = document.getElementById('evInboxRefresh');
   if (inboxRefresh) inboxRefresh.addEventListener('click', () => loadEventsInbox());
@@ -715,62 +940,814 @@ function _evApplyStatusFilterView() {
   }
 }
 
-// Render het Instellingen-paneel met kaarten die naar de bestaande schermen
-// linken. STAP 1 is nav-shell — geen fysieke verhuizing van inhoud.
-// STAP 7 brengt vragenlijst + Simone-config fysiek hier naartoe.
-function _renderEvSettings() {
-  const host = document.getElementById('evSettingsCards');
-  if (!host) return;
-  const cards = [
-    {
-      icon : 'ti-file-text',
-      title: 'Vragenlijst-editor',
-      desc : 'Beheer de assessment-vragen die deelnemers invullen.',
-      href : '/modules/admin.html#assessment',
-      ext  : false,
-    },
-    {
-      icon : 'ti-robot',
-      title: 'Simone-config',
-      desc : 'AI-persona, prompts en kennisbank voor Simone (events).',
-      href : '/modules/admin.html#simone-config',
-      ext  : false,
-    },
-    {
-      icon : 'ti-bolt',
-      title: 'Automations',
-      desc : 'Configureer automatische mail- en WhatsApp-flows rond events.',
-      href : '/modules/events-automations.html',
-      ext  : false,
-    },
-    {
-      icon : 'ti-photo',
-      title: 'Niveau-foto\'s',
-      desc : 'Stel per niveau de overzichtsfoto in die wordt getoond.',
-      href : '#niveau-photos',
-      ext  : false,
-      onClick: 'openNiveauPhotoModal',
-    },
-  ];
-  host.innerHTML = cards.map((c) => `
-    <a class="ev-settings-card" ${c.onClick ? `data-act="${c.onClick}"` : `href="${c.href}"`}
-       style="display:block;text-decoration:none;color:inherit;border:1px solid var(--border);border-radius:10px;padding:14px;background:var(--bg-elev,transparent);cursor:pointer;transition:border-color .15s">
-      <div style="display:flex;align-items:flex-start;gap:10px">
-        <div style="width:36px;height:36px;border-radius:8px;background:rgba(9,61,84,0.10);color:#0a2f63;display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0">
-          <i class="ti ${c.icon}"></i>
-        </div>
-        <div style="flex:1;min-width:0">
-          <div style="font-size:13.5px;font-weight:700;margin-bottom:2px">${c.title}</div>
-          <div style="font-size:12px;color:var(--text-dim);line-height:1.4">${c.desc}</div>
-        </div>
-        <i class="ti ti-arrow-right" style="color:var(--text-faint);font-size:16px"></i>
-      </div>
-    </a>
-  `).join('');
-  // Niveau-foto's card opent een lokale modal in plaats van te navigeren.
-  host.querySelectorAll('[data-act="openNiveauPhotoModal"]').forEach((el) => {
-    el.addEventListener('click', (e) => { e.preventDefault(); openNiveauPhotoModal(); });
+// STAP 7 — Instellingen-paneel: sub-tab-strip met Vragenlijst / Simone-config /
+// Automations / Niveau-foto's. Vragenlijst en Simone zijn fysiek verhuisd uit
+// admin.html; Automations is een link naar /modules/events-automations.html en
+// Niveau-foto's opent een bestaande lokale modal.
+//
+// Lazy load: openen van sub-tab triggert loadAssessmentQuestions() resp.
+// loadSimoneConfig() — alleen de eerste keer (loaded-vlag voorkomt herhaling).
+// RBAC-gating: Vragenlijst zichtbaar bij admin.joost_config; Simone bij
+// admin.simone_config. Andere sub-tabs blijven altijd zichtbaar.
+const _evSettingsState = { activeSub: null, assessmentLoaded: false, simoneLoaded: false };
+
+async function _renderEvSettings() {
+  const tabs = document.querySelectorAll('#evSettingsSubTabs .evs-sub-tab');
+  if (!tabs.length) return;
+  // RBAC-checks (best-effort; bij falen vallen we terug op "verbergen").
+  let canAssessment = false, canSimone = false;
+  try {
+    if (window.RBAC && typeof window.RBAC.can === 'function') {
+      canAssessment = await window.RBAC.can('admin.joost_config');
+      canSimone     = await window.RBAC.can('admin.simone_config');
+    }
+  } catch (e) { /* stil — niet-blokkerend */ }
+  tabs.forEach((btn) => {
+    const sub = btn.dataset.evsub;
+    if (sub === 'assessment') btn.style.display = canAssessment ? '' : 'none';
+    else if (sub === 'simone') btn.style.display = canSimone ? '' : 'none';
+    else btn.style.display = '';
   });
+  // Standaard sub-tab kiezen: deeplink heeft prioriteit, anders eerste
+  // beschikbare. Idempotent — re-render bij tab-switch.
+  let target = _evSettingsState.activeSub;
+  if (!target) {
+    const h = (window.location.hash || '').toLowerCase();
+    if (h === '#settings-assessment' && canAssessment) target = 'assessment';
+    else if (h === '#settings-simone' && canSimone)    target = 'simone';
+    else if (canAssessment)                            target = 'assessment';
+    else if (canSimone)                                target = 'simone';
+    else                                               target = 'automations';
+  }
+  _evSelectSettingsSubTab(target);
+  // Eénmalig wire — voorkomt duplicate handlers bij ⚙-tab her-open.
+  if (!_renderEvSettings._wired) {
+    tabs.forEach((btn) => {
+      btn.addEventListener('click', () => _evSelectSettingsSubTab(btn.dataset.evsub));
+    });
+    _renderEvSettings._wired = true;
+  }
+}
+
+function _evSelectSettingsSubTab(name) {
+  _evSettingsState.activeSub = name;
+  document.querySelectorAll('#evSettingsSubTabs .evs-sub-tab').forEach((b) => {
+    b.classList.toggle('active', b.dataset.evsub === name);
+  });
+  document.querySelectorAll('.evs-sub-section[data-evsubsec]').forEach((s) => {
+    s.classList.toggle('active', s.dataset.evsubsec === name);
+  });
+  // Lazy load triggers
+  if (name === 'assessment' && !_evSettingsState.assessmentLoaded) {
+    _evSettingsState.assessmentLoaded = true;
+    try { loadAssessmentQuestions(); } catch (e) { console.error('[settings/assessment]', e); }
+  }
+  if (name === 'simone' && !_evSettingsState.simoneLoaded) {
+    _evSettingsState.simoneLoaded = true;
+    try { loadSimoneConfig(); } catch (e) { console.error('[settings/simone]', e); }
+  }
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// STAP 7 — VERHUISDE ASSESSMENT-VRAGEN-EDITOR (uit modules/admin.html)
+// Forward-only invariant: edits beïnvloeden GEEN bestaande assessment_responses.
+// Endpoints, payloads en RBAC blijven exact gelijk aan admin's implementatie.
+// ──────────────────────────────────────────────────────────────────────────────
+
+let _aqItems       = [];
+let _aqEditingId   = null;
+
+function aqBanner(kind, text, autoMs) {
+  const el = document.getElementById('assessmentQuestionsBanner');
+  if (!el) return;
+  const bg = kind === 'success' ? 'rgba(5,150,105,.10)' : 'rgba(220,38,38,.10)';
+  const fg = kind === 'success' ? '#059669' : '#b91c1c';
+  el.style.background = bg; el.style.color = fg; el.style.border = '1px solid ' + fg + '40';
+  el.textContent = text;
+  el.style.display = '';
+  if (autoMs) setTimeout(() => { el.style.display = 'none'; }, autoMs);
+}
+
+async function loadAssessmentQuestions() {
+  const wrap = document.getElementById('assessmentQuestionsList');
+  if (!wrap) return;
+  wrap.innerHTML = '<div style="font-size:12.5px;color:var(--text-faint)">Laden…</div>';
+  try {
+    const r = await window.AgentShared.apiFetch('/api/admin-assessment-questions-list');
+    if (!r.ok) {
+      const j = await r.json().catch(() => ({}));
+      wrap.innerHTML = '<div style="color:#b91c1c;font-size:13px">Fout: ' + esc(j.error || ('HTTP ' + r.status)) + '</div>';
+      return;
+    }
+    const j = await r.json();
+    _aqItems = Array.isArray(j.questions) ? j.questions : [];
+    renderAssessmentQuestionsList();
+  } catch (e) {
+    wrap.innerHTML = '<div style="color:#b91c1c;font-size:13px">Fout: ' + esc(e.message) + '</div>';
+  }
+}
+
+function renderAssessmentQuestionsList() {
+  const wrap = document.getElementById('assessmentQuestionsList');
+  if (!wrap) return;
+  if (_aqItems.length === 0) {
+    wrap.innerHTML = '<div style="font-size:12.5px;color:var(--text-faint);padding:14px">Nog geen vragen — klik op + Nieuwe vraag.</div>';
+    return;
+  }
+  const groups = {};
+  const sectionOrder = [];
+  for (const q of _aqItems) {
+    const s = q.section || '(geen sectie)';
+    if (!groups[s]) { groups[s] = []; sectionOrder.push(s); }
+    groups[s].push(q);
+  }
+  wrap.innerHTML = sectionOrder.map(sec => {
+    const items = groups[sec];
+    return ''
+      + '<div style="border:1px solid var(--border);border-radius:10px;overflow:hidden">'
+      +   '<div style="padding:10px 14px;background:rgba(0,0,0,.04);font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--text-dim)">' + esc(sec) + ' (' + items.length + ')</div>'
+      +   items.map((q, idx) => renderAssessmentQuestionRow(q, idx, items.length)).join('')
+      + '</div>';
+  }).join('');
+}
+
+function renderAssessmentQuestionRow(q, idxInSection, totalInSection) {
+  const dimStyle = q.active ? '' : 'opacity:0.55';
+  const badges = []
+    .concat(q.is_routing ? ['<span style="font-size:10px;font-weight:600;background:rgba(99,102,241,.15);color:#6366f1;padding:2px 6px;border-radius:999px">routing</span>'] : [])
+    .concat(q.required ? ['<span style="font-size:10px;font-weight:600;background:rgba(220,38,38,.12);color:#dc2626;padding:2px 6px;border-radius:999px">verplicht</span>'] : [])
+    .concat(!q.active ? ['<span style="font-size:10px;font-weight:600;background:rgba(107,114,128,.15);color:#6b7280;padding:2px 6px;border-radius:999px">inactive</span>'] : [])
+    .join(' ');
+  const reorderUp   = idxInSection > 0 ? '<button class="btn btn-sm" type="button" onclick="reorderAssessmentQuestion(\'' + esc(q.id) + '\', -1)" title="Omhoog"><i class="ti ti-chevron-up"></i></button>' : '<span style="display:inline-block;width:30px"></span>';
+  const reorderDown = idxInSection < totalInSection - 1 ? '<button class="btn btn-sm" type="button" onclick="reorderAssessmentQuestion(\'' + esc(q.id) + '\', +1)" title="Omlaag"><i class="ti ti-chevron-down"></i></button>' : '<span style="display:inline-block;width:30px"></span>';
+  const toggleLabel = q.active ? 'Deactiveer' : 'Activeer';
+  return ''
+    + '<div style="display:grid;grid-template-columns:80px 1fr auto auto;gap:10px;align-items:center;padding:10px 14px;border-top:1px solid var(--border);' + dimStyle + '">'
+    +   '<div style="font-family:ui-monospace,Menlo,Consolas,monospace;font-size:11.5px;color:var(--text-faint)">#' + esc(q.order_index) + '</div>'
+    +   '<div>'
+    +     '<div style="font-size:13.5px;font-weight:600">' + esc(q.label) + '</div>'
+    +     '<div style="font-size:11.5px;color:var(--text-faint);margin-top:2px">'
+    +       '<code style="font-family:ui-monospace,Menlo,Consolas,monospace">' + esc(q.key) + '</code>'
+    +       ' · ' + esc(q.type)
+    +       (q.type === 'open_text' && q.min_words ? ' · min ' + esc(q.min_words) + ' woorden' : '')
+    +       (Array.isArray(q.options) ? ' · ' + q.options.length + ' opties' : '')
+    +       ' ' + badges
+    +     '</div>'
+    +   '</div>'
+    +   '<div style="display:flex;gap:4px">' + reorderUp + reorderDown + '</div>'
+    +   '<div style="display:flex;gap:4px">'
+    +     '<button class="btn btn-sm" type="button" onclick="openAssessmentQuestionEdit(\'' + esc(q.id) + '\')"><i class="ti ti-edit"></i></button>'
+    +     '<button class="btn btn-sm" type="button" onclick="toggleAssessmentQuestionActive(\'' + esc(q.id) + '\')" title="' + toggleLabel + '"><i class="ti ti-' + (q.active ? 'eye-off' : 'eye') + '"></i></button>'
+    +   '</div>'
+    + '</div>';
+}
+
+let _aqOptionRows  = [];
+let _aqScaleWeights = {};
+
+function _aqSlugify(input) {
+  if (input == null) return 'vraag';
+  const s = String(input)
+    .toLowerCase()
+    .normalize('NFKD')
+    .replace(/[̀-ͯ]/g, '')
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/_+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .slice(0, 64);
+  return s.length ? s : 'vraag';
+}
+
+function _aqUnlockKey() {
+  const keyEl  = document.getElementById('aqKey');
+  const badge  = document.getElementById('aqKeyAutoBadge');
+  const btn    = document.getElementById('aqKeyEditBtn');
+  if (!keyEl) return;
+  keyEl.removeAttribute('readonly');
+  keyEl.style.background = '';
+  keyEl.style.color = '';
+  keyEl.focus();
+  keyEl.select();
+  if (badge) badge.style.display = 'none';
+  if (btn)   btn.style.display = 'none';
+  keyEl.dataset.aqAuto = '0';
+}
+
+function _aqSyncKeyFromLabel() {
+  const labelEl = document.getElementById('aqLabel');
+  const keyEl   = document.getElementById('aqKey');
+  if (!labelEl || !keyEl) return;
+  if (keyEl.dataset.aqAuto !== '1') return;
+  keyEl.value = _aqSlugify(labelEl.value);
+}
+
+function _aqAddOptionRow(value, label, points, isOriginal) {
+  _aqOptionRows.push({
+    value     : value || '',
+    label     : label || '',
+    points    : (typeof points === 'number' && Number.isFinite(points)) ? points : 0,
+    isOriginal: !!isOriginal,
+  });
+  _aqRenderOptionRows();
+  const rows = document.querySelectorAll('#aqOptionsRows .aq-opt-row');
+  const last = rows[rows.length - 1];
+  const inp = last && last.querySelector('.aq-opt-label');
+  if (inp) inp.focus();
+}
+
+function _aqRemoveOptionRow(idx) {
+  if (idx < 0 || idx >= _aqOptionRows.length) return;
+  _aqOptionRows.splice(idx, 1);
+  _aqRenderOptionRows();
+  _aqRenderPreview();
+}
+
+function _aqRenderOptionRows() {
+  const host = document.getElementById('aqOptionsRows');
+  if (!host) return;
+  const isRouting = document.getElementById('aqIsRouting')?.checked;
+  if (_aqOptionRows.length === 0) {
+    host.innerHTML = '<div style="font-size:12px;color:var(--text-faint);padding:6px 0">Nog geen opties — klik op "Optie toevoegen".</div>';
+    return;
+  }
+  host.innerHTML = _aqOptionRows.map((row, idx) => {
+    const lockTitle = row.isOriginal
+      ? 'Bestaande optie — de interne sleutel (value) blijft ongewijzigd bij hernoemen.'
+      : 'Nieuwe optie — de interne sleutel wordt afgeleid uit het label.';
+    const valHint = row.value
+      ? `<span style="font-size:10.5px;color:var(--text-faint);margin-left:6px" title="${row.isOriginal ? 'Bewaard' : 'Wordt opgeslagen'}">${row.isOriginal ? '🔒 ' : '↳ '}${row.value}</span>`
+      : '';
+    const pointsField = isRouting
+      ? `<input type="number" class="form-input aq-opt-points" data-idx="${idx}" step="1" value="${Number.isFinite(row.points) ? row.points : 0}" title="Punten" style="width:80px" />`
+      : '';
+    return `
+      <div class="aq-opt-row" data-idx="${idx}" style="display:flex;gap:6px;align-items:center" title="${lockTitle}">
+        <input type="text" class="form-input aq-opt-label" data-idx="${idx}" value="${(row.label || '').replace(/"/g, '&quot;')}" maxlength="200" placeholder="Optie-tekst" style="flex:1" />
+        ${pointsField}
+        <button type="button" class="btn btn-sm" data-idx="${idx}" onclick="_aqRemoveOptionRow(${idx})" title="Verwijderen"><i class="ti ti-x"></i></button>
+        ${valHint ? `<div style="min-width:90px">${valHint}</div>` : '<div style="min-width:90px"></div>'}
+      </div>
+    `;
+  }).join('');
+  host.querySelectorAll('.aq-opt-label').forEach((el) => {
+    el.addEventListener('input', () => {
+      const idx = Number(el.dataset.idx);
+      if (!_aqOptionRows[idx]) return;
+      _aqOptionRows[idx].label = el.value;
+      if (!_aqOptionRows[idx].isOriginal) {
+        _aqOptionRows[idx].value = _aqSlugify(el.value);
+        const hint = el.closest('.aq-opt-row').querySelector('span');
+        if (hint) hint.textContent = '↳ ' + (_aqOptionRows[idx].value || '');
+      }
+      _aqRenderPreview();
+    });
+  });
+  host.querySelectorAll('.aq-opt-points').forEach((el) => {
+    el.addEventListener('input', () => {
+      const idx = Number(el.dataset.idx);
+      if (!_aqOptionRows[idx]) return;
+      const n = Number(el.value);
+      _aqOptionRows[idx].points = Number.isFinite(n) ? n : 0;
+    });
+  });
+}
+
+function _aqRenderScaleWeights() {
+  const host = document.getElementById('aqScaleWeightsRows');
+  if (!host) return;
+  const type = document.getElementById('aqType').value;
+  const max  = type === 'scale_1_10' ? 10 : (type === 'scale_1_5' ? 5 : 0);
+  if (max === 0) { host.innerHTML = ''; return; }
+  host.innerHTML = '';
+  for (let i = 1; i <= max; i++) {
+    const key = String(i);
+    if (!(key in _aqScaleWeights)) _aqScaleWeights[key] = i - 1;
+    const val = _aqScaleWeights[key];
+    const wrap = document.createElement('div');
+    wrap.style.cssText = 'display:flex;align-items:center;gap:6px;padding:4px 6px;border:1px solid var(--border);border-radius:6px;background:var(--bg)';
+    wrap.innerHTML = `
+      <span style="font-size:12px;font-weight:600;color:var(--text-dim);min-width:18px;text-align:center">${i}</span>
+      <input type="number" class="form-input aq-scale-w" data-step="${key}" step="1" value="${val}" style="width:64px" />
+    `;
+    host.appendChild(wrap);
+  }
+  host.querySelectorAll('.aq-scale-w').forEach((el) => {
+    el.addEventListener('input', () => {
+      const step = el.dataset.step;
+      const n = Number(el.value);
+      _aqScaleWeights[step] = Number.isFinite(n) ? n : 0;
+    });
+  });
+}
+
+function _aqRenderPreview() {
+  const wrap = document.getElementById('aqPreviewWrap');
+  const toggle = document.getElementById('aqPreviewToggle');
+  if (!wrap || !toggle) return;
+  if (!toggle.checked) { wrap.style.display = 'none'; return; }
+  wrap.style.display = '';
+
+  const escHtml = (s) => (s == null ? '' : String(s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;'));
+
+  const type    = document.getElementById('aqType').value;
+  const label   = document.getElementById('aqLabel').value.trim() || '(geen vraag-label)';
+  const help    = document.getElementById('aqHelpText').value.trim();
+  const req     = !!document.getElementById('aqRequired').checked;
+  const required = req ? '<span style="color:#dc2626;font-weight:700;margin-left:4px">*</span>' : '';
+
+  let inputHtml = '';
+  if (type === 'text' || type === 'email') {
+    const ph = type === 'email' ? 'naam@voorbeeld.nl' : '';
+    inputHtml = `<input type="${escHtml(type)}" class="form-input" disabled placeholder="${escHtml(ph)}" />`;
+  } else if (type === 'radio') {
+    if (_aqOptionRows.length === 0) {
+      inputHtml = '<div style="font-size:12px;color:var(--text-faint)">Voeg opties toe om de preview te zien.</div>';
+    } else {
+      inputHtml = '<div style="display:flex;flex-direction:column;gap:6px;margin-top:4px">' +
+        _aqOptionRows.map((o, i) => `
+          <label style="display:flex;align-items:center;gap:8px;padding:6px 10px;border:1px solid var(--border);border-radius:6px;cursor:not-allowed;background:var(--bg)">
+            <input type="radio" name="aq-preview" disabled />
+            <span>${escHtml(o.label || '(zonder label)')}</span>
+          </label>
+        `).join('') +
+      '</div>';
+    }
+  } else if (type === 'scale_1_5' || type === 'scale_1_10') {
+    const max = type === 'scale_1_10' ? 10 : 5;
+    let chips = '';
+    for (let i = 1; i <= max; i++) {
+      chips += `<label style="display:inline-flex;flex-direction:column;align-items:center;gap:2px;padding:6px 10px;border:1px solid var(--border);border-radius:99px;cursor:not-allowed;background:var(--bg);font-size:12px;font-weight:600">
+        <span>${i}</span>
+        <input type="radio" name="aq-preview-scale" disabled style="margin:0" />
+      </label>`;
+    }
+    inputHtml = '<div style="display:flex;flex-wrap:wrap;gap:4px;margin-top:4px">' + chips + '</div>';
+  } else if (type === 'open_text') {
+    const mw = document.getElementById('aqMinWords').value;
+    const note = (mw && Number(mw) > 0) ? `<div style="font-size:11px;color:var(--text-faint);margin-top:4px">Minimaal ${escHtml(mw)} woorden.</div>` : '';
+    inputHtml = `<textarea class="form-input" disabled rows="4" placeholder="Antwoord van de deelnemer…"></textarea>${note}`;
+  }
+
+  wrap.innerHTML = `
+    <div style="font-size:13.5px;font-weight:700;margin-bottom:4px">${escHtml(label)}${required}</div>
+    ${help ? `<div style="font-size:12px;color:var(--text-dim);margin-bottom:8px">${escHtml(help)}</div>` : ''}
+    ${inputHtml}
+  `;
+}
+
+function openAssessmentQuestionEdit(id) {
+  _aqEditingId = id || null;
+  const tpl = id ? (_aqItems.find(x => x.id === id) || null) : null;
+  document.getElementById('assessmentQuestionModalTitle').textContent = tpl ? 'Vraag bewerken' : 'Nieuwe vraag';
+  document.getElementById('assessmentQuestionEditError').style.display = 'none';
+
+  const keyEl   = document.getElementById('aqKey');
+  const keyBtn  = document.getElementById('aqKeyEditBtn');
+  const keyBadge = document.getElementById('aqKeyAutoBadge');
+  keyEl.value = tpl ? tpl.key : '';
+  if (tpl) {
+    keyEl.setAttribute('readonly', 'readonly');
+    keyEl.disabled = true;
+    keyEl.style.background = 'var(--bg-elev-2,#f8f8f8)';
+    keyEl.style.color = 'var(--text-dim)';
+    keyEl.dataset.aqAuto = '0';
+    if (keyBtn)   keyBtn.style.display = 'none';
+    if (keyBadge) { keyBadge.textContent = '(vast)'; keyBadge.style.display = ''; }
+  } else {
+    keyEl.disabled = false;
+    keyEl.setAttribute('readonly', 'readonly');
+    keyEl.style.background = 'var(--bg-elev-2,#f8f8f8)';
+    keyEl.style.color = 'var(--text-dim)';
+    keyEl.dataset.aqAuto = '1';
+    if (keyBtn)   keyBtn.style.display = '';
+    if (keyBadge) { keyBadge.textContent = '(automatisch)'; keyBadge.style.display = ''; }
+  }
+
+  document.getElementById('aqSection').value     = tpl ? (tpl.section || '') : '';
+  document.getElementById('aqType').value        = tpl ? tpl.type : 'text';
+  document.getElementById('aqOrderIndex').value  = tpl ? tpl.order_index : 0;
+  document.getElementById('aqLabel').value       = tpl ? tpl.label : '';
+  document.getElementById('aqHelpText').value    = tpl && tpl.help_text ? tpl.help_text : '';
+  document.getElementById('aqRequired').checked  = tpl ? !!tpl.required : true;
+  document.getElementById('aqActive').checked    = tpl ? !!tpl.active   : true;
+  document.getElementById('aqIsRouting').checked = tpl ? !!tpl.is_routing : false;
+  document.getElementById('aqMinWords').value    = tpl && tpl.min_words != null ? tpl.min_words : '';
+
+  _aqOptionRows = [];
+  if (tpl && Array.isArray(tpl.options) && tpl.type === 'radio') {
+    const rw = (tpl.routing_weights && typeof tpl.routing_weights === 'object' && !Array.isArray(tpl.routing_weights))
+      ? tpl.routing_weights : {};
+    for (const o of tpl.options) {
+      if (!o || typeof o.value !== 'string' || typeof o.label !== 'string') continue;
+      const pts = (typeof rw[o.value] === 'number' && Number.isFinite(rw[o.value])) ? rw[o.value] : 0;
+      _aqOptionRows.push({ value: o.value, label: o.label, points: pts, isOriginal: true });
+    }
+  }
+
+  _aqScaleWeights = {};
+  if (tpl && (tpl.type === 'scale_1_5' || tpl.type === 'scale_1_10')) {
+    const rw = (tpl.routing_weights && typeof tpl.routing_weights === 'object' && !Array.isArray(tpl.routing_weights))
+      ? tpl.routing_weights : {};
+    const max = tpl.type === 'scale_1_10' ? 10 : 5;
+    for (let i = 1; i <= max; i++) {
+      const k = String(i);
+      _aqScaleWeights[k] = (typeof rw[k] === 'number' && Number.isFinite(rw[k])) ? rw[k] : (i - 1);
+    }
+  }
+
+  const pt = document.getElementById('aqPreviewToggle');
+  if (pt) pt.checked = false;
+  const pw = document.getElementById('aqPreviewWrap');
+  if (pw) pw.style.display = 'none';
+
+  if (!openAssessmentQuestionEdit._wired) {
+    document.getElementById('aqType').addEventListener('change', _aqUpdateConditionalGroups);
+    document.getElementById('aqIsRouting').addEventListener('change', () => {
+      _aqRenderOptionRows();
+      _aqUpdateConditionalGroups();
+    });
+    document.getElementById('aqLabel').addEventListener('input', () => {
+      _aqSyncKeyFromLabel();
+      _aqRenderPreview();
+    });
+    document.getElementById('aqHelpText').addEventListener('input', _aqRenderPreview);
+    document.getElementById('aqRequired').addEventListener('change', _aqRenderPreview);
+    document.getElementById('aqMinWords').addEventListener('input', _aqRenderPreview);
+    openAssessmentQuestionEdit._wired = true;
+  }
+
+  _aqUpdateConditionalGroups();
+  if (!tpl) _aqSyncKeyFromLabel();
+  _aqRenderPreview();
+
+  document.getElementById('assessmentQuestionEditModal').classList.remove('hidden');
+}
+
+function _aqUpdateConditionalGroups() {
+  const type = document.getElementById('aqType').value;
+  const isRouting = document.getElementById('aqIsRouting').checked;
+  const isRadio = type === 'radio';
+  const isScale = type === 'scale_1_5' || type === 'scale_1_10';
+  const isOpen  = type === 'open_text';
+
+  document.getElementById('aqMinWordsGroup').style.display     = isOpen  ? '' : 'none';
+  document.getElementById('aqOptionsGroup').style.display      = isRadio ? '' : 'none';
+  document.getElementById('aqScaleWeightsGroup').style.display = (isScale && isRouting) ? '' : 'none';
+
+  const isRoutingWrap = document.getElementById('aqIsRoutingWrap');
+  if (isRoutingWrap) {
+    isRoutingWrap.style.display = (isRadio || isScale) ? 'inline-flex' : 'none';
+  }
+  const ph = document.getElementById('aqEmailPrefillHint');
+  if (ph) ph.style.display = (type === 'email') ? '' : 'none';
+
+  if (isRadio) _aqRenderOptionRows();
+  if (isScale && isRouting) _aqRenderScaleWeights();
+
+  _aqRenderPreview();
+}
+
+function _aqShowError(msg) {
+  const el = document.getElementById('assessmentQuestionEditError');
+  if (!el) return;
+  el.textContent = msg;
+  el.style.display = '';
+}
+
+async function saveAssessmentQuestion() {
+  const errEl = document.getElementById('assessmentQuestionEditError');
+  if (errEl) errEl.style.display = 'none';
+
+  const type      = document.getElementById('aqType').value;
+  const isRouting = document.getElementById('aqIsRouting').checked;
+
+  const payload = {
+    section     : (document.getElementById('aqSection').value || '').trim(),
+    type        : type,
+    order_index : Number(document.getElementById('aqOrderIndex').value || 0),
+    label       : (document.getElementById('aqLabel').value || '').trim(),
+    help_text   : (document.getElementById('aqHelpText').value || '').trim() || null,
+    required    : !!document.getElementById('aqRequired').checked,
+    active      : !!document.getElementById('aqActive').checked,
+    is_routing  : isRouting,
+  };
+
+  if (!payload.section) { _aqShowError('Section is verplicht'); return; }
+  if (!payload.label)   { _aqShowError('Label is verplicht'); return; }
+
+  if (type === 'open_text') {
+    const mwRaw = (document.getElementById('aqMinWords').value || '').trim();
+    payload.min_words = mwRaw === '' ? null : Number(mwRaw);
+    if (mwRaw !== '' && (!Number.isInteger(payload.min_words) || payload.min_words < 0)) {
+      _aqShowError('Min. woorden moet een integer >= 0 zijn'); return;
+    }
+  } else {
+    payload.min_words = null;
+  }
+
+  if (type === 'radio') {
+    if (_aqOptionRows.length === 0) { _aqShowError('Voeg ten minste 1 antwoordoptie toe'); return; }
+    const outOpts = [];
+    const outWeights = isRouting ? {} : null;
+    const seenValues = new Set();
+    for (let i = 0; i < _aqOptionRows.length; i++) {
+      const row = _aqOptionRows[i];
+      const labelText = (row.label || '').trim();
+      if (!labelText) { _aqShowError('Optie ' + (i + 1) + ' mist een label'); return; }
+      let val = row.value;
+      if (!row.isOriginal) {
+        const base = _aqSlugify(labelText);
+        val = base;
+        let n = 2;
+        while (seenValues.has(val)) {
+          val = base + '_' + n;
+          n++;
+          if (n > 50) break;
+        }
+      }
+      if (!val || !/^[a-z0-9_-]{1,64}$/.test(val)) {
+        _aqShowError('Optie ' + (i + 1) + ' heeft een ongeldige interne sleutel (' + (val || 'leeg') + ')'); return;
+      }
+      if (seenValues.has(val)) { _aqShowError('Optie ' + (i + 1) + ': dubbele interne sleutel ' + val); return; }
+      seenValues.add(val);
+      outOpts.push({ value: val, label: labelText });
+      if (outWeights) {
+        const pts = (typeof row.points === 'number' && Number.isFinite(row.points)) ? row.points : 0;
+        outWeights[val] = pts;
+      }
+    }
+    payload.options = outOpts;
+    payload.routing_weights = outWeights;
+  } else if (type === 'scale_1_5' || type === 'scale_1_10') {
+    payload.options = null;
+    if (isRouting) {
+      const max = type === 'scale_1_10' ? 10 : 5;
+      const out = {};
+      for (let i = 1; i <= max; i++) {
+        const k = String(i);
+        const v = _aqScaleWeights[k];
+        if (typeof v !== 'number' || !Number.isFinite(v)) {
+          _aqShowError('Punten voor stap ' + i + ' moet een getal zijn'); return;
+        }
+        out[k] = v;
+      }
+      payload.routing_weights = out;
+    } else {
+      payload.routing_weights = null;
+    }
+  } else {
+    payload.options = null;
+    payload.routing_weights = null;
+  }
+
+  const btn = document.getElementById('aqSaveBtn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Opslaan…'; }
+  try {
+    let r;
+    if (_aqEditingId) {
+      r = await window.AgentShared.apiFetch('/api/admin-assessment-questions-upsert?id=' + encodeURIComponent(_aqEditingId), {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
+      });
+    } else {
+      const keyEl = document.getElementById('aqKey');
+      let keyVal  = (keyEl.value || '').trim();
+      if (!keyVal && (keyEl.dataset.aqAuto === '1')) {
+        keyVal = _aqSlugify(document.getElementById('aqLabel').value);
+        keyEl.value = keyVal;
+      }
+      if (!/^[a-z0-9_-]{1,64}$/.test(keyVal)) {
+        _aqShowError('Sleutel ongeldig: alleen kleine letters, cijfers, _ of -. Klik op "Sleutel aanpassen" en pas hem aan.');
+        if (btn) { btn.disabled = false; btn.textContent = 'Opslaan'; }
+        return;
+      }
+      payload.key = keyVal;
+      r = await window.AgentShared.apiFetch('/api/admin-assessment-questions-upsert', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
+      });
+    }
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) {
+      _aqShowError(j.error || ('HTTP ' + r.status));
+      return;
+    }
+    document.getElementById('assessmentQuestionEditModal').classList.add('hidden');
+    aqBanner('success', _aqEditingId ? 'Vraag bijgewerkt.' : 'Vraag aangemaakt.', 4000);
+    _aqEditingId = null;
+    loadAssessmentQuestions();
+  } catch (e) {
+    _aqShowError('Fout: ' + e.message);
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = 'Opslaan'; }
+  }
+}
+
+function closeAssessmentQuestionEdit() {
+  const m = document.getElementById('assessmentQuestionEditModal');
+  if (m) m.classList.add('hidden');
+  _aqEditingId = null;
+}
+
+async function toggleAssessmentQuestionActive(id) {
+  const q = _aqItems.find(x => x.id === id);
+  if (!q) return;
+  const verb = q.active ? 'deactiveren' : 'activeren';
+  if (!confirm('Vraag "' + q.label + '" ' + verb + '?\n\nForward-only: bestaande inzendingen blijven hun antwoorden behouden.')) return;
+  try {
+    const r = await window.AgentShared.apiFetch('/api/admin-assessment-questions-upsert?id=' + encodeURIComponent(id), {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ active: !q.active }),
+    });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) { aqBanner('error', j.error || 'Update mislukt', 6000); return; }
+    aqBanner('success', q.active ? 'Vraag gedeactiveerd.' : 'Vraag geactiveerd.', 4000);
+    loadAssessmentQuestions();
+  } catch (e) {
+    aqBanner('error', 'Fout: ' + e.message, 6000);
+  }
+}
+
+async function reorderAssessmentQuestion(id, delta) {
+  const q = _aqItems.find(x => x.id === id);
+  if (!q) return;
+  const section = q.section;
+  const peers = _aqItems.filter(x => x.section === section).sort((a, b) => a.order_index - b.order_index);
+  const idx = peers.findIndex(x => x.id === id);
+  const otherIdx = idx + delta;
+  if (otherIdx < 0 || otherIdx >= peers.length) return;
+  const other = peers[otherIdx];
+  const a = q.order_index, b = other.order_index;
+  const newA = (a === b) ? (delta < 0 ? a - 1 : a + 1) : b;
+  const newB = (a === b) ? a : a;
+  try {
+    const [r1, r2] = await Promise.all([
+      window.AgentShared.apiFetch('/api/admin-assessment-questions-upsert?id=' + encodeURIComponent(q.id), {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ order_index: newA }),
+      }),
+      window.AgentShared.apiFetch('/api/admin-assessment-questions-upsert?id=' + encodeURIComponent(other.id), {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ order_index: newB }),
+      }),
+    ]);
+    if (!r1.ok || !r2.ok) { aqBanner('error', 'Reorder mislukt', 5000); return; }
+    loadAssessmentQuestions();
+  } catch (e) {
+    aqBanner('error', 'Fout: ' + e.message, 6000);
+  }
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// STAP 7 — VERHUISDE SIMONE-CONFIG (uit modules/admin.html)
+// Mirror van joost_config WHERE module='events'. Suggest-only (geen
+// e2_reactive_autonomy in deze UI). Endpoints: GET /api/joost-config-get +
+// POST /api/joost-config-upsert. Auth nu via AgentShared.apiFetch i.p.v.
+// admin's accessToken-globale; verder identiek.
+// ──────────────────────────────────────────────────────────────────────────────
+
+let _simoneCfg = null;
+let _simoneCfgDirty = false;
+
+function _scShowBanner(text, kind) {
+  const el = document.getElementById('simoneCfgBanner');
+  if (!el) return;
+  if (!text) { el.style.display = 'none'; el.textContent = ''; return; }
+  const palette = kind === 'success'
+    ? { bg:'rgba(5,150,105,0.12)', col:'#059669', border:'rgba(5,150,105,0.3)' }
+    : kind === 'error'
+    ? { bg:'rgba(220,38,38,0.12)', col:'#b91c1c', border:'rgba(220,38,38,0.3)' }
+    : { bg:'rgba(59,130,246,0.12)', col:'#1d4ed8', border:'rgba(59,130,246,0.3)' };
+  el.style.display = '';
+  el.style.background = palette.bg;
+  el.style.color = palette.col;
+  el.style.border = '1px solid ' + palette.border;
+  el.textContent = text;
+}
+
+function _scMarkDirty() {
+  _simoneCfgDirty = true;
+  const btn = document.getElementById('simoneCfgSaveBtn');
+  if (btn) btn.disabled = false;
+}
+
+async function loadSimoneConfig() {
+  const wrap = document.getElementById('simoneCfgForm');
+  if (!wrap) return;
+  wrap.innerHTML = '<div style="font-size:12.5px;color:var(--text-faint)">Laden…</div>';
+  _scShowBanner('', null);
+  try {
+    const r = await window.AgentShared.apiFetch('/api/joost-config-get?module=events');
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) {
+      wrap.innerHTML = '<div style="color:#b91c1c;font-size:13px">Fout: ' + esc(d.error || ('HTTP ' + r.status)) + '</div>';
+      return;
+    }
+    _simoneCfg = d.config || {};
+    _simoneCfgDirty = false;
+    document.getElementById('simoneCfgSaveBtn').disabled = true;
+    renderSimoneConfigForm();
+    if (_simoneCfg.is_default) {
+      _scShowBanner('Geen joost_config-rij voor module=events; getoonde waarden zijn defaults. Eerste opslaan creëert de rij.', 'info');
+    }
+  } catch (e) {
+    wrap.innerHTML = '<div style="color:#b91c1c;font-size:13px">Fout: ' + esc(e.message) + '</div>';
+  }
+}
+
+function renderSimoneConfigForm() {
+  const wrap = document.getElementById('simoneCfgForm');
+  if (!wrap || !_simoneCfg) return;
+  const ff = (_simoneCfg.feature_flags && typeof _simoneCfg.feature_flags === 'object') ? _simoneCfg.feature_flags : {};
+  const isEnabled = _simoneCfg.is_enabled !== false;
+  const reactive  = ff.reactive_suggest_enabled === true;
+  const updatedAt = _simoneCfg.updated_at
+    ? new Date(_simoneCfg.updated_at).toLocaleString('nl-NL')
+    : '—';
+  wrap.innerHTML =
+      '<div style="display:grid;grid-template-columns:200px 1fr;gap:14px;align-items:start">'
+    +   '<label style="font-size:13px;font-weight:600;padding-top:8px">Persona-naam</label>'
+    +   '<input id="scPersonaName" type="text" maxlength="100" style="padding:8px 10px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-family:inherit;font-size:13.5px" value="' + esc(_simoneCfg.persona_name || 'Simone') + '" />'
+
+    +   '<label style="font-size:13px;font-weight:600;padding-top:8px">Persona-toon</label>'
+    +   '<input id="scPersonaTone" type="text" maxlength="500" style="padding:8px 10px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-family:inherit;font-size:13.5px" value="' + esc(_simoneCfg.persona_tone || '') + '" />'
+
+    +   '<label style="font-size:13px;font-weight:600;padding-top:8px">System-prompt template</label>'
+    +   '<textarea id="scSystemPrompt" maxlength="10000" style="padding:10px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-family:inherit;font-size:13px;line-height:1.55;min-height:240px;resize:vertical">' + esc(_simoneCfg.system_prompt_template || '') + '</textarea>'
+
+    +   '<label style="font-size:13px;font-weight:600;padding-top:8px">Status</label>'
+    +   '<div>'
+    +     '<label style="display:inline-flex;gap:8px;align-items:center;font-size:13px;cursor:pointer">'
+    +       '<input id="scIsEnabled" type="checkbox" ' + (isEnabled ? 'checked' : '') + ' />'
+    +       '<span>Simone is geactiveerd (is_enabled)</span>'
+    +     '</label>'
+    +     '<div style="font-size:11.5px;color:var(--text-faint);margin-top:4px">Uit zetten zorgt dat alle suggest-aanroepen 503 teruggeven.</div>'
+    +   '</div>'
+
+    +   '<label style="font-size:13px;font-weight:600;padding-top:8px">Reactieve auto-suggest</label>'
+    +   '<div>'
+    +     '<label style="display:inline-flex;gap:8px;align-items:center;font-size:13px;cursor:pointer">'
+    +       '<input id="scReactiveEnabled" type="checkbox" ' + (reactive ? 'checked' : '') + ' />'
+    +       '<span>feature_flags.reactive_suggest_enabled</span>'
+    +     '</label>'
+    +     '<div style="font-size:11.5px;color:var(--text-faint);margin-top:4px">'
+    +     'Aan = events-inbound triggert in-process Simone via webhook (Fase 2 stap 2b). Default uit tot go-live.'
+    +     '</div>'
+    +   '</div>'
+
+    +   '<div></div>'
+    +   '<div style="font-size:11px;color:var(--text-faint)">Laatste update: ' + esc(updatedAt) + '</div>'
+    + '</div>';
+
+  ['scPersonaName','scPersonaTone','scSystemPrompt','scIsEnabled','scReactiveEnabled'].forEach((id) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.addEventListener(el.type === 'checkbox' ? 'change' : 'input', _scMarkDirty);
+  });
+}
+
+async function saveSimoneConfig() {
+  if (!_simoneCfg) return;
+  const btn = document.getElementById('simoneCfgSaveBtn');
+  if (btn) btn.disabled = true;
+  _scShowBanner('Opslaan…', 'info');
+  try {
+    const personaName = (document.getElementById('scPersonaName').value || '').trim();
+    const personaTone = (document.getElementById('scPersonaTone').value || '').trim();
+    const systemPrompt = document.getElementById('scSystemPrompt').value || '';
+    const isEnabled = !!document.getElementById('scIsEnabled').checked;
+    const reactive  = !!document.getElementById('scReactiveEnabled').checked;
+    const ffExisting = (_simoneCfg.feature_flags && typeof _simoneCfg.feature_flags === 'object')
+      ? _simoneCfg.feature_flags : {};
+    const feature_flags = { ...ffExisting, reactive_suggest_enabled: reactive };
+    if (!personaName) {
+      _scShowBanner('Persona-naam mag niet leeg zijn', 'error');
+      if (btn) btn.disabled = false;
+      return;
+    }
+    const r = await window.AgentShared.apiFetch('/api/joost-config-upsert', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        module: 'events',
+        persona_name: personaName,
+        persona_tone: personaTone || 'vriendelijk-professioneel',
+        system_prompt_template: systemPrompt,
+        is_enabled: isEnabled,
+        feature_flags,
+      }),
+    });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) {
+      _scShowBanner(d.error || ('HTTP ' + r.status), 'error');
+      if (btn) btn.disabled = false;
+      return;
+    }
+    _simoneCfg = d.config || _simoneCfg;
+    _simoneCfgDirty = false;
+    _scShowBanner('Opgeslagen', 'success');
+    renderSimoneConfigForm();
+  } catch (e) {
+    _scShowBanner(e.message, 'error');
+    if (btn) btn.disabled = false;
+  }
 }
 
 async function openNiveauPhotoModal() {
