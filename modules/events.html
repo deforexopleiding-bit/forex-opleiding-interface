@@ -11,6 +11,16 @@
   <link rel="stylesheet" href="/modules/shared/agent-shared.css" />
   <link rel="stylesheet" href="/styles/sales-redesign.css" />
   <style>
+    /* Kebab-actiemenu op event-rij (overview) — fixed-positioned zodat het
+       niet door tabel-overflow geklipt wordt. Zelfde patroon als de
+       attendee-kebab in events-detail.html (PR #245). */
+    .ev-kebab-wrap { position: relative; display: inline-block; }
+    .ev-kebab-menu { position: fixed; background: var(--bg-elev); border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,0.15); padding: 4px; min-width: 180px; z-index: 400; display: none; }
+    .ev-kebab-menu.show { display: block; }
+    .ev-kebab-item { display: block; width: 100%; padding: 7px 10px; text-align: left; background: transparent; border: none; cursor: pointer; font-size: 12.5px; color: var(--text); border-radius: 4px; font-family: inherit; }
+    .ev-kebab-item:hover { background: var(--bg-elev-2); }
+    .ev-kebab-item.danger { color: #dc2626; }
+
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     html, body { height: 100%; }
     body { font-family: 'Inter', system-ui, sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; -webkit-font-smoothing: antialiased; }
@@ -688,6 +698,14 @@ function renderList() {
             <td>${renderSyncCell(ev)}</td>
             <td class="sr-actions">
               ${window.RBAC?.canSync?.('events.event.create') ? `<button class="sr-ibtn ev-dup-btn" data-id="${esc(ev.id)}" title="Kopieer event als concept" type="button"><i class="ti ti-copy"></i></button>` : ''}
+              ${(window.RBAC?.canSync?.('events.event.delete') && ev.status !== 'archived') ? `
+                <span class="ev-kebab-wrap">
+                  <button class="sr-ibtn ev-kebab-toggle" data-id="${esc(ev.id)}" type="button" title="Acties"><i class="ti ti-dots"></i></button>
+                  <div class="ev-kebab-menu" id="ev-kebab-${esc(ev.id)}">
+                    <button class="ev-kebab-item" data-action="archive" data-id="${esc(ev.id)}" data-title="${esc(ev.title || '')}" type="button"><i class="ti ti-archive"></i> Archiveren</button>
+                  </div>
+                </span>
+              ` : ''}
               <a class="sr-ibtn" href="${esc(href)}" title="Open detail"><i class="ti ti-arrow-right"></i></a>
             </td>
           </tr>
@@ -712,6 +730,82 @@ function renderList() {
       duplicateEvent(btn.dataset.id);
     });
   });
+
+  // Kebab-toggle per rij — fixed-positioning (zelfde patroon als PR #245).
+  wrap.querySelectorAll('.ev-kebab-toggle').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const id   = btn.dataset.id;
+      const menu = document.getElementById('ev-kebab-' + id);
+      if (!menu) return;
+      // Sluit andere menu's
+      document.querySelectorAll('.ev-kebab-menu.show').forEach((m) => { if (m !== menu) m.classList.remove('show'); });
+      const willShow = !menu.classList.contains('show');
+      if (willShow) {
+        // Eerst .show toevoegen zodat offsetWidth/offsetHeight meetbaar zijn.
+        menu.classList.add('show');
+        const r = btn.getBoundingClientRect();
+        let left = r.right - menu.offsetWidth;
+        if (left < 8) left = 8;
+        let top = r.bottom + 4;
+        if (top + menu.offsetHeight > window.innerHeight - 8) {
+          top = r.top - menu.offsetHeight - 4;
+        }
+        menu.style.left = left + 'px';
+        menu.style.top  = top  + 'px';
+      } else {
+        menu.classList.remove('show');
+      }
+    });
+  });
+
+  // Outside-click sluit alle menu's (one-shot na elke render — zelfde patroon
+  // als events-detail.html).
+  document.addEventListener('click', () => {
+    document.querySelectorAll('.ev-kebab-menu.show').forEach((m) => m.classList.remove('show'));
+  }, { once: true });
+
+  // Item-clicks per kebab
+  wrap.querySelectorAll('.ev-kebab-item').forEach((item) => {
+    item.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const action = item.dataset.action;
+      const id     = item.dataset.id;
+      const title  = item.dataset.title || '';
+      document.querySelectorAll('.ev-kebab-menu.show').forEach((m) => m.classList.remove('show'));
+      if (action === 'archive') return archiveEvent(id, title);
+    });
+  });
+}
+
+// Eenmalig: sluit fixed-positioned kebabs bij scroll (capture-phase voor
+// scroll binnen de tabel-wrapper) of resize.
+if (!window._evOverviewKebabGlobalWired) {
+  const closeAll = () => {
+    document.querySelectorAll('.ev-kebab-menu.show').forEach((m) => m.classList.remove('show'));
+  };
+  window.addEventListener('scroll', closeAll, { capture: true, passive: true });
+  window.addEventListener('resize', closeAll);
+  window._evOverviewKebabGlobalWired = true;
+}
+
+async function archiveEvent(eventId, title) {
+  if (!eventId) return;
+  const t = title ? ` "${title}"` : '';
+  if (!confirm(`Event${t} archiveren? Het wordt onzichtbaar voor klanten (Webflow unpublish) en uit de standaard-overzichten gefilterd. Aangemelde deelnemers + alle data blijven bewaard.`)) return;
+  try {
+    const res = await window.AgentShared.apiFetch('/api/events-update?id=' + encodeURIComponent(eventId), {
+      method: 'PATCH',
+      body  : JSON.stringify({ status: 'archived' }),
+    });
+    const j = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(j.error || ('HTTP ' + res.status));
+    window.AgentShared?.showToast?.('Event gearchiveerd', 'success');
+    // Re-render zodat de rij weg is uit de huidige filter (tenzij 'Alle' actief).
+    _evApplyStatusFilterView();
+  } catch (e) {
+    window.AgentShared?.showToast?.('Archiveren mislukt: ' + (e?.message || 'onbekende fout'), 'error');
+  }
 }
 
 async function duplicateEvent(sourceEventId) {

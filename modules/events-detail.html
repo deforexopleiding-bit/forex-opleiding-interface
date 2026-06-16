@@ -549,6 +549,7 @@ function renderPage() {
         ${canShowReopenBtn ? '<button class="btn-secondary" onclick="reopenSignupsAction()"><i class="ti ti-lock-open"></i> Aanmelding heropen</button>' : ''}
         ${(canComplete && isPublished) ? `<button class="btn-primary" onclick="openEvCompleteModal()" title="${isCompleted ? 'Wijzig aanwezigheid / her-afronden' : 'Event afronden'}"><i class="ti ti-checks"></i> ${isCompleted ? 'Her-afronden' : 'Event afronden'}</button>` : ''}
         ${(canCancel && (isDraft || isPublished)) ? '<button class="btn-danger" onclick="cancelEvent()"><i class="ti ti-x"></i> Annuleren</button>' : ''}
+        ${(canCancel && !isArchived) ? '<button class="btn-secondary" onclick="archiveEvent()" title="Verberg uit live-lijsten en unpublish op Webflow"><i class="ti ti-archive"></i> Archiveren</button>' : ''}
       </div>
     </div>
 
@@ -1369,6 +1370,29 @@ async function cancelEvent() {
     renderPage();
   } catch (e) {
     window.AgentShared?.showToast?.('Annuleren mislukt: ' + e.message, 'error');
+  }
+}
+
+// Archiveren: status -> 'archived' + Webflow-item unpublishen (zelfde
+// pad als cancelled in events-update). Bedoeld voor oude events die uit
+// de filters Concept/Live/Geannuleerd moeten verdwijnen maar wel met de
+// hele history blijven bestaan.
+async function archiveEvent() {
+  if (!confirm('Dit event archiveren? Het wordt onzichtbaar voor klanten (Webflow unpublish) en uit de standaard-overzichten gefilterd. Aangemelde deelnemers + alle data blijven bewaard.')) return;
+  try {
+    const res = await window.AgentShared.apiFetch('/api/events-update?id=' + encodeURIComponent(state.eventId), {
+      method: 'PATCH',
+      body: JSON.stringify({ status: 'archived' }),
+    });
+    if (!res.ok) {
+      const e = await res.json().catch(() => ({}));
+      throw new Error(e.error || `HTTP ${res.status}`);
+    }
+    window.AgentShared?.showToast?.('Event gearchiveerd', 'success');
+    await loadEvent();
+    renderPage();
+  } catch (e) {
+    window.AgentShared?.showToast?.('Archiveren mislukt: ' + e.message, 'error');
   }
 }
 
