@@ -5,8 +5,11 @@
 // worden als die nog geen phone heeft (default false; UI mag default-checken
 // als customer.phone IS NULL).
 //
-// Permission: finance.inbox.send (write-actie binnen dezelfde semantische scope
-// als inbox-send / inbox-send-template; geen aparte 'manage' key in registry).
+// Permission: finance.inbox.send OF events.simone.use (write-actie binnen
+// dezelfde semantische scope als inbox-send / inbox-send-template — zelfde
+// OR-patroon. Events-hub Koppel-klant-flow hangt sinds stap 6d op dit
+// endpoint zonder finance-rechten te hebben). Additief; finance-callers
+// blijven byte-identiek.
 //
 // Body:
 //   conversation_id        uuid    required
@@ -80,8 +83,13 @@ export default async function handler(req, res) {
   const supabase = createUserClient(req);
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return res.status(401).json({ error: 'Niet geauthenticeerd' });
-  if (!(await requirePermission(req, 'finance.inbox.send'))) {
-    return res.status(403).json({ error: 'Geen rechten (finance.inbox.send)' });
+  // FIX 3 — additief: events.simone.use ook accepteren (parallel met
+  // inbox-send.js / inbox-send-template.js). Finance-callers met
+  // finance.inbox.send blijven byte-identiek werken.
+  const hasFinanceSend = await requirePermission(req, 'finance.inbox.send');
+  const hasSimoneUse   = hasFinanceSend ? true : await requirePermission(req, 'events.simone.use');
+  if (!hasFinanceSend && !hasSimoneUse) {
+    return res.status(403).json({ error: 'Geen rechten (finance.inbox.send of events.simone.use)' });
   }
 
   // Body parsing
