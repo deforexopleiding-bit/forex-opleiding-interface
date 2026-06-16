@@ -187,7 +187,7 @@ export function formatGastenlijstLabel(confirmedCount, capacity) {
   if (capacity == null || !Number.isInteger(Number(capacity))) {
     return String(cnt);
   }
-  return `${cnt} / ${Number(capacity)}`;
+  return `${cnt}/${Number(capacity)}`;
 }
 
 // ── Webflow Gastenlijst-sync ────────────────────────────────────────────────
