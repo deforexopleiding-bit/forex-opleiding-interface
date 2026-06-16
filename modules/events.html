@@ -101,6 +101,52 @@
       .evx-shell .evx-thread-pane #evThreadBack { display: none; }
     }
 
+    /* STAP 6b — 24u-dot per lijst-rij. Groen = binnen venster, rood = verlopen.
+       Bron: it.can_send_text uit /api/inbox-conversations-list. */
+    .evx-24h-dot {
+      display: inline-block;
+      width: 9px;
+      height: 9px;
+      border-radius: 50%;
+      flex-shrink: 0;
+      margin-left: 4px;
+    }
+    .evx-24h-dot.open   { background: #059669; box-shadow: 0 0 0 2px rgba(5,150,105,0.18); }
+    .evx-24h-dot.closed { background: #dc2626; box-shadow: 0 0 0 2px rgba(220,38,38,0.18); }
+
+    /* STAP 6c — template-picker modal. */
+    .evx-modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.55); z-index: 9999; display: none; align-items: flex-start; justify-content: center; padding: 60px 16px; overflow-y: auto; }
+    .evx-modal-overlay.show { display: flex; }
+    .evx-modal-card { background: var(--bg); border: 1px solid var(--border); border-radius: 12px; width: 100%; max-width: 560px; padding: 16px 18px; box-shadow: 0 12px 40px rgba(0,0,0,0.25); }
+    .evx-modal-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+    .evx-modal-title { font-size: 14.5px; font-weight: 700; color: var(--text); }
+    .evx-modal-search { width: 100%; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-elev); font-size: 13px; color: var(--text); font-family: inherit; margin-bottom: 8px; }
+    .evx-modal-list { max-height: 360px; overflow-y: auto; display: flex; flex-direction: column; gap: 4px; }
+    .evx-modal-item { padding: 9px 10px; border: 1px solid var(--border); border-radius: 8px; cursor: pointer; background: var(--bg-elev); transition: background-color .12s, border-color .12s; }
+    .evx-modal-item:hover { background: var(--bg-elev-2); border-color: var(--text-faint); }
+    .evx-modal-item .iname { font-size: 13px; font-weight: 600; color: var(--text); }
+    .evx-modal-item .imeta { font-size: 11.5px; color: var(--text-dim); margin-top: 2px; }
+    .evx-modal-footer { display: flex; gap: 8px; justify-content: flex-end; margin-top: 12px; }
+
+    /* STAP 6d — klant-context-strip + Simone-polish. */
+    .evx-ctx-strip { display: flex; align-items: center; gap: 10px; padding: 8px 14px; background: var(--bg-elev-2); border-bottom: 1px solid var(--border); font-size: 12.5px; color: var(--text-dim); flex-wrap: wrap; flex-shrink: 0; }
+    .evx-ctx-strip .evx-ctx-label { font-weight: 700; color: var(--text-faint); text-transform: uppercase; font-size: 10.5px; letter-spacing: .04em; }
+    .evx-ctx-strip .evx-ctx-link-btn { background: transparent; border: 1px solid var(--border); color: var(--text-dim); padding: 3px 9px; border-radius: 7px; font-size: 11.5px; font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; gap: 4px; font-family: inherit; }
+    .evx-ctx-strip .evx-ctx-link-btn:hover { background: var(--bg); color: var(--text); }
+    .evx-ctx-strip .evx-ctx-event-link { color: var(--text); text-decoration: none; border-bottom: 1px dashed var(--text-faint); }
+    .evx-ctx-strip .evx-ctx-event-link:hover { color: var(--text-dim); }
+
+    /* Simone-polish: preview-box met Gebruiken / Aanpassen buttons. */
+    .evx-sim-card { border: 1px solid #7c3aed; border-radius: 10px; background: rgba(124,58,237,0.05); padding: 12px; margin: 6px 14px 0 14px; }
+    .evx-sim-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+    .evx-sim-head .ti { color: #7c3aed; }
+    .evx-sim-title { font-weight: 700; font-size: 12.5px; color: #7c3aed; }
+    .evx-sim-meta { font-size: 11px; color: var(--text-dim); margin-left: auto; }
+    .evx-sim-quote { background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; font-size: 13px; color: var(--text); white-space: pre-wrap; line-height: 1.45; }
+    .evx-sim-actions { display: flex; gap: 8px; margin-top: 10px; align-items: center; flex-wrap: wrap; }
+    .evx-sim-actions .btn-dismiss { background: transparent; border: 1px solid var(--border); color: var(--text-faint); padding: 5px 10px; border-radius: 7px; font-size: 11.5px; cursor: pointer; font-family: inherit; margin-left: auto; }
+    .evx-sim-actions .btn-dismiss:hover { color: var(--text-dim); }
+
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     html, body { height: 100%; }
     body { font-family: 'Inter', system-ui, sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; -webkit-font-smoothing: antialiased; }
@@ -396,6 +442,9 @@ function renderPage(canCreate, canViewInbox, canManageSignupInbox) {
               <span id="evThreadWindowBadge" style="font-size:10px;font-weight:700;padding:3px 8px;border-radius:10px;text-transform:uppercase;letter-spacing:.04em">—</span>
             </div>
 
+            <!-- STAP 6d — klant-context-strip (gevuld door _renderEvCustomerStrip). -->
+            <div id="evCustomerStrip" class="evx-ctx-strip" style="display:none"></div>
+
             <div id="evThreadMessages" class="evx-thread-messages">
               <div style="color:var(--text-faint);font-size:12px;text-align:center;padding:20px">Laden…</div>
             </div>
@@ -408,6 +457,9 @@ function renderPage(canCreate, canViewInbox, canManageSignupInbox) {
               <div style="display:flex;gap:8px;align-items:flex-start">
                 <button class="btn-primary" id="evAskSimoneBtn" type="button" style="background:#7c3aed;white-space:nowrap" title="Vraag Simone om een suggestie">
                   <i class="ti ti-sparkles"></i> Vraag Simone
+                </button>
+                <button class="sr-iconbtn" id="evComposeTemplateBtn" type="button" title="Verstuur een goedgekeurde Meta-template" style="align-self:flex-start">
+                  <i class="ti ti-template"></i>
                 </button>
                 <textarea id="evComposeTextarea" placeholder="Typ een vrij bericht…" style="flex:1;min-height:62px;max-height:140px;font-family:inherit;font-size:13px;padding:8px 10px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);resize:vertical"></textarea>
                 <button class="btn-primary" id="evComposeSendBtn" type="button" title="Versturen">
@@ -463,6 +515,34 @@ function renderPage(canCreate, canViewInbox, canManageSignupInbox) {
         <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px">
           <button class="sr-btn" id="evSignupResolveCancel2" type="button" style="background:transparent;border:1px solid var(--border);color:var(--text-dim);padding:8px 14px;border-radius:8px;font-size:13px;cursor:pointer">Annuleer</button>
           <button class="btn-primary" id="evSignupResolveSubmit" type="button"><i class="ti ti-check"></i> Koppel + maak deelnemer</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- STAP 6c — Template-picker modal. Stuurt via /api/inbox-send-template. -->
+    <div id="evTemplatePickerModal" class="evx-modal-overlay">
+      <div class="evx-modal-card">
+        <div class="evx-modal-header">
+          <div class="evx-modal-title" id="evTplModalTitle">Kies een template</div>
+          <button class="sr-iconbtn" id="evTplCloseBtn" type="button" title="Sluiten"><i class="ti ti-x"></i></button>
+        </div>
+        <div id="evTplBody"><div style="color:var(--text-faint);font-size:12px;padding:14px;text-align:center">Laden…</div></div>
+      </div>
+    </div>
+
+    <!-- STAP 6d — Klant-koppel modal (search + kies). -->
+    <div id="evCustomerLinkModal" class="evx-modal-overlay">
+      <div class="evx-modal-card">
+        <div class="evx-modal-header">
+          <div class="evx-modal-title">Koppel een klant aan dit gesprek</div>
+          <button class="sr-iconbtn" id="evCustLinkCloseBtn" type="button" title="Sluiten"><i class="ti ti-x"></i></button>
+        </div>
+        <input id="evCustSearchInput" class="evx-modal-search" type="search" placeholder="Zoek op naam, email of telefoon…" autocomplete="off" />
+        <div class="evx-modal-list" id="evCustSearchResults">
+          <div style="color:var(--text-faint);font-size:12px;padding:10px;text-align:center">Typ minimaal 2 tekens om te zoeken.</div>
+        </div>
+        <div class="evx-modal-footer">
+          <button class="sr-btn" id="evCustLinkCancelBtn" type="button" style="background:transparent;border:1px solid var(--border);color:var(--text-dim);padding:6px 12px;border-radius:7px;font-size:12px;cursor:pointer">Annuleren</button>
         </div>
       </div>
     </div>
@@ -536,6 +616,25 @@ function renderPage(canCreate, canViewInbox, canManageSignupInbox) {
 
   const inboxRefresh = document.getElementById('evInboxRefresh');
   if (inboxRefresh) inboxRefresh.addEventListener('click', () => loadEventsInbox());
+
+  // STAP 6c — Template-picker wiring
+  const tplBtn = document.getElementById('evComposeTemplateBtn');
+  if (tplBtn) tplBtn.addEventListener('click', () => openTemplatePicker());
+  const tplClose = document.getElementById('evTplCloseBtn');
+  if (tplClose) tplClose.addEventListener('click', () => closeTemplatePicker());
+  // Buiten-modal-click sluit het picker-paneel.
+  const tplOverlay = document.getElementById('evTemplatePickerModal');
+  if (tplOverlay) tplOverlay.addEventListener('click', (e) => { if (e.target === tplOverlay) closeTemplatePicker(); });
+
+  // STAP 6d — Klant-koppel modal wiring
+  const custClose  = document.getElementById('evCustLinkCloseBtn');
+  if (custClose)  custClose.addEventListener('click', () => closeCustomerLinkModal());
+  const custCancel = document.getElementById('evCustLinkCancelBtn');
+  if (custCancel) custCancel.addEventListener('click', () => closeCustomerLinkModal());
+  const custOverlay = document.getElementById('evCustomerLinkModal');
+  if (custOverlay) custOverlay.addEventListener('click', (e) => { if (e.target === custOverlay) closeCustomerLinkModal(); });
+  const custInput = document.getElementById('evCustSearchInput');
+  if (custInput) custInput.addEventListener('input', _evCustSearchOnInput);
 
   // Inschrijvingen-inbox wiring
   const siRefresh = document.getElementById('evSignupInboxRefresh');
@@ -1156,6 +1255,11 @@ async function loadEventsInbox() {
         : '';
       const timeShort   = it.last_message_at ? esc(fmtDate(it.last_message_at)) : '';
       const isActive    = activeId && it.id === activeId ? ' active' : '';
+      // STAP 6b — 24u-dot: groen wanneer can_send_text uit
+      // /api/inbox-conversations-list true, rood wanneer venster verlopen.
+      // Geen extra berekening — endpoint heeft het al gedaan.
+      const dotCls   = it.can_send_text ? 'open' : 'closed';
+      const dotTitle = it.can_send_text ? '24h-venster open — vrij bericht toegestaan' : '24h-venster verlopen — alleen template';
       return `
         <div class="evx-conv-row${isActive}" data-conv-id="${esc(it.id)}"
              data-phone="${esc(it.phone_number || '')}"
@@ -1166,6 +1270,7 @@ async function loadEventsInbox() {
             <div class="evx-conv-toprow">
               <div class="evx-conv-name">${esc(nameLabel)}</div>
               <div class="evx-conv-time">${timeShort}</div>
+              <span class="evx-24h-dot ${dotCls}" title="${esc(dotTitle)}"></span>
             </div>
             <div class="evx-conv-preview">${esc(preview || subtitle || '—')}</div>
             ${unreadHtml ? `<div class="evx-conv-meta">${unreadHtml}</div>` : ''}
@@ -1188,7 +1293,7 @@ async function loadEventsInbox() {
 }
 
 // ── Fase 2 stap 2c: events thread + Simone interactie ────────────────────────
-const _evState = { convId: null, conv: null, canSendText: false, suggestion: null };
+const _evState = { convId: null, conv: null, canSendText: false, suggestion: null, editingSuggestionId: null };
 
 // STAP 6a: persistent twee-paneel — beide panes staan altijd in de DOM.
 // _evShowThreadView toont de content-area + verbergt het empty-state.
@@ -1209,9 +1314,12 @@ function _evShowListView() {
   if (shell)   shell.classList.remove('thread-open');
   if (empty)   empty.style.display = '';
   if (content) content.style.display = 'none';
+  const strip = document.getElementById('evCustomerStrip');
+  if (strip) strip.style.display = 'none';
   _evState.convId = null;
   _evState.conv = null;
   _evState.suggestion = null;
+  _evState.editingSuggestionId = null;
   // De-mark actieve rij in de lijst (her-renderen niet nodig — class wegnemen
   // is sneller en behoudt scroll-positie).
   document.querySelectorAll('#eventsInboxList .evx-conv-row.active').forEach((el) => el.classList.remove('active'));
@@ -1378,6 +1486,8 @@ async function openEventsConv({ id, phone, displayName, customer }) {
     _evState.canSendText = !!(d.conversation && d.conversation.can_send_text);
     _renderEvThread(d.items || [], d.conversation || null);
     _applyEvComposeState();
+    // STAP 6d: klant-context-strip + event-context (read-only afgeleid).
+    _renderEvCustomerStrip(_evState.conv);
     // Refresh list-tab badges (unread reset)
     loadEventsInbox();
     // Laatste PROPOSED suggestie tonen
@@ -1465,32 +1575,91 @@ function _renderEvSuggestionPanel(sugg, errMsg) {
   const wrap = document.getElementById('evSimoneSuggestionPanel');
   if (!wrap) return;
   if (errMsg) {
-    wrap.innerHTML = '<div style="color:#b45309;font-size:12px;background:rgba(245,158,11,0.1);border:1px solid rgba(245,158,11,0.3);border-radius:8px;padding:8px 10px">Suggestie laden mislukt: ' + esc(errMsg) + '</div>';
+    wrap.innerHTML = '<div style="color:#b45309;font-size:12px;background:rgba(245,158,11,0.1);border:1px solid rgba(245,158,11,0.3);border-radius:8px;padding:8px 10px;margin:6px 14px 0 14px">Suggestie laden mislukt: ' + esc(errMsg) + '</div>';
     return;
   }
   if (!sugg) { wrap.innerHTML = ''; return; }
+  // STAP 6d Simone-polish: Gebruiken / Aanpassen / Afwijzen.
+  // "Gebruiken" = stuur suggested_reply as-is + mark USED_AS_IS.
+  // "Aanpassen" = kopieer naar de composer ter bewerking; USED_EDITED komt
+  // pas na verzenden via sendComposeText (zie _evState.editingSuggestionId).
   const auto = sugg.auto_triggered ? '<span style="background:#7c3aed;color:#fff;font-size:9.5px;font-weight:700;padding:2px 7px;border-radius:8px;letter-spacing:.04em">AUTO</span>' : '';
   const conf = (typeof sugg.confidence === 'number') ? (Math.round(sugg.confidence * 100) + '%') : '—';
   wrap.innerHTML =
-    '<div style="border:1px solid #7c3aed;border-radius:10px;background:rgba(124,58,237,0.05);padding:12px">'
-    + '<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">'
-    + '<i class="ti ti-sparkles" style="color:#7c3aed"></i>'
-    + '<span style="font-weight:700;font-size:12.5px;color:#7c3aed">Simone-suggestie</span>'
-    + auto
-    + '<span style="font-size:11px;color:var(--text-dim);margin-left:auto">intent: ' + esc(sugg.detected_intent || '?') + ' · ' + conf + '</span>'
+    '<div class="evx-sim-card">'
+    + '<div class="evx-sim-head">'
+    +   '<i class="ti ti-sparkles"></i>'
+    +   '<span class="evx-sim-title">Simone-suggestie</span>'
+    +   auto
+    +   '<span class="evx-sim-meta">intent: ' + esc(sugg.detected_intent || '?') + ' · ' + conf + '</span>'
     + '</div>'
-    + '<textarea id="evSuggText" style="width:100%;min-height:78px;font-family:inherit;font-size:13px;padding:8px 10px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);resize:vertical">' + esc(sugg.suggested_reply || '') + '</textarea>'
+    + '<div class="evx-sim-quote">' + esc(sugg.suggested_reply || '') + '</div>'
     + (sugg.reasoning ? '<div style="font-size:11px;color:var(--text-dim);margin-top:6px;font-style:italic">Reasoning: ' + esc(sugg.reasoning) + '</div>' : '')
-    + '<div style="display:flex;gap:8px;margin-top:10px">'
-    + '<button class="btn-primary" id="evSuggSendBtn" type="button"><i class="ti ti-send"></i> Versturen</button>'
-    + '<button class="sr-btn" id="evSuggDismissBtn" type="button" style="background:transparent;border:1px solid var(--border);color:var(--text-dim);padding:7px 12px;border-radius:8px;font-size:12.5px;cursor:pointer">Afwijzen</button>'
+    + '<div class="evx-sim-actions">'
+    +   '<button class="btn-primary" id="evSimUseBtn" type="button" title="Verstuur de suggestie ongewijzigd"><i class="ti ti-check"></i> Gebruiken</button>'
+    +   '<button class="sr-btn" id="evSimEditBtn" type="button" style="background:transparent;border:1px solid #7c3aed;color:#7c3aed;padding:6px 11px;border-radius:7px;font-size:12.5px;cursor:pointer;font-family:inherit" title="Kopieer naar het tekstveld om aan te passen"><i class="ti ti-edit"></i> Aanpassen</button>'
+    +   '<button class="btn-dismiss" id="evSimDismissBtn" type="button" title="Negeer deze suggestie">Negeren</button>'
     + '</div>'
     + '</div>';
-  // Wire actions
-  const sendBtn = document.getElementById('evSuggSendBtn');
-  const dismissBtn = document.getElementById('evSuggDismissBtn');
-  if (sendBtn) sendBtn.addEventListener('click', () => sendSuggestion(sugg));
+  const useBtn     = document.getElementById('evSimUseBtn');
+  const editBtn    = document.getElementById('evSimEditBtn');
+  const dismissBtn = document.getElementById('evSimDismissBtn');
+  if (useBtn)     useBtn.addEventListener('click', () => useSimoneAsIs(sugg));
+  if (editBtn)    editBtn.addEventListener('click', () => editSimoneInComposer(sugg));
   if (dismissBtn) dismissBtn.addEventListener('click', () => dismissSuggestion(sugg));
+}
+
+// STAP 6d — Gebruiken: stuur as-is via /api/inbox-send + mark USED_AS_IS.
+async function useSimoneAsIs(sugg) {
+  const convId = _evState.convId;
+  if (!convId || !sugg) return;
+  if (!_evState.canSendText) {
+    window.AgentShared.showToast('24h-window verlopen — vrij bericht niet meer toegestaan', 'error');
+    return;
+  }
+  const text = String(sugg.suggested_reply || '').trim();
+  if (!text) { window.AgentShared.showToast('Suggestie is leeg', 'error'); return; }
+  const btn = document.getElementById('evSimUseBtn');
+  if (btn) btn.disabled = true;
+  try {
+    const sr = await window.AgentShared.apiFetch('/api/inbox-send', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ conversation_id: convId, mode: 'text', body: text }),
+    });
+    const sd = await sr.json().catch(() => ({}));
+    if (!sr.ok) {
+      window.AgentShared.showToast(sd.error || ('HTTP ' + sr.status), 'error');
+      if (btn) btn.disabled = false;
+      return;
+    }
+    await window.AgentShared.apiFetch('/api/joost-mark-outcome', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ suggestion_id: sugg.id, status: 'USED_AS_IS', final_sent_text: text }),
+    }).catch(() => {});
+    window.AgentShared.showToast('Suggestie verstuurd', 'success');
+    _evState.suggestion = null;
+    _evState.editingSuggestionId = null;
+    document.getElementById('evSimoneSuggestionPanel').innerHTML = '';
+    openEventsConv({ id: convId, phone: _evState.conv?.phone_number || '', displayName: _evState.conv?.display_name || '', customer: _evState.conv?.customer_name || '' });
+  } catch (e) {
+    window.AgentShared.showToast(e.message, 'error');
+    if (btn) btn.disabled = false;
+  }
+}
+
+// STAP 6d — Aanpassen: kopieer naar composer; USED_EDITED komt pas bij sendComposeText.
+function editSimoneInComposer(sugg) {
+  if (!sugg) return;
+  const ta = document.getElementById('evComposeTextarea');
+  if (ta) {
+    ta.value = String(sugg.suggested_reply || '');
+    ta.focus();
+    try { ta.setSelectionRange(ta.value.length, ta.value.length); } catch {}
+  }
+  _evState.editingSuggestionId = sugg.id;
+  window.AgentShared.showToast('Suggestie in tekstveld geladen — pas aan en verstuur', 'success');
 }
 
 async function askSimone() {
@@ -1609,6 +1778,17 @@ async function sendComposeText() {
       if (btn) btn.disabled = false;
       return;
     }
+    // STAP 6d: als de operator een Simone-suggestie heeft "Aangepast" en daarna
+    // vrij verstuurt -> markeer als USED_EDITED (fail-soft).
+    if (_evState.editingSuggestionId) {
+      const eid = _evState.editingSuggestionId;
+      _evState.editingSuggestionId = null;
+      window.AgentShared.apiFetch('/api/joost-mark-outcome', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ suggestion_id: eid, status: 'USED_EDITED', final_sent_text: text }),
+      }).catch(() => {});
+    }
     window.AgentShared.showToast('Bericht verstuurd', 'success');
     if (ta) ta.value = '';
     // Reload thread
@@ -1616,6 +1796,328 @@ async function sendComposeText() {
   } catch (e) {
     window.AgentShared.showToast(e.message, 'error');
     if (btn) btn.disabled = false;
+  }
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// STAP 6c — Template-picker (zoek + verstuur via /api/inbox-send-template).
+// ──────────────────────────────────────────────────────────────────────────────
+const _evTplState = { items: [], filter: '', activeTpl: null, selectedVars: {} };
+
+function openTemplatePicker() {
+  const convId = _evState.convId;
+  if (!convId) return;
+  document.getElementById('evTplModalTitle').textContent = 'Kies een template';
+  const modal = document.getElementById('evTemplatePickerModal');
+  const body  = document.getElementById('evTplBody');
+  body.innerHTML = '<div style="color:var(--text-faint);font-size:12px;padding:14px;text-align:center">Laden…</div>';
+  modal.classList.add('show');
+  _evTplState.filter = '';
+  _evTplState.activeTpl = null;
+  _evTplState.selectedVars = {};
+  loadTemplates(convId);
+}
+
+function closeTemplatePicker() {
+  document.getElementById('evTemplatePickerModal').classList.remove('show');
+}
+
+async function loadTemplates(convId) {
+  const body = document.getElementById('evTplBody');
+  try {
+    const r = await window.AgentShared.apiFetch('/api/inbox-template-list?conversation_id=' + encodeURIComponent(convId));
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) {
+      body.innerHTML = '<div style="color:#dc2626;font-size:12.5px;padding:14px">Fout: ' + esc(j.error || ('HTTP ' + r.status)) + '</div>';
+      return;
+    }
+    _evTplState.items = Array.isArray(j.items) ? j.items : [];
+    _renderTplListView();
+  } catch (e) {
+    body.innerHTML = '<div style="color:#dc2626;font-size:12.5px;padding:14px">Fout: ' + esc(e.message) + '</div>';
+  }
+}
+
+function _renderTplListView() {
+  const body = document.getElementById('evTplBody');
+  const filter = (_evTplState.filter || '').toLowerCase().trim();
+  const filtered = _evTplState.items.filter((t) => !filter || (t.name || '').toLowerCase().includes(filter));
+  const rowsHtml = filtered.length > 0
+    ? filtered.map((t) => `
+        <div class="evx-modal-item" data-tpl-name="${esc(t.name)}">
+          <div class="iname">${esc(t.name)}</div>
+          <div class="imeta">${esc(t.language || '')}${t.category ? ' · ' + esc(t.category) : ''}</div>
+        </div>
+      `).join('')
+    : '<div style="color:var(--text-faint);font-size:12px;padding:10px;text-align:center">Geen templates gevonden.</div>';
+  body.innerHTML = `
+    <input id="evTplSearch" class="evx-modal-search" type="search" placeholder="Zoek op template-naam…" autocomplete="off" value="${esc(_evTplState.filter)}" />
+    <div class="evx-modal-list">${rowsHtml}</div>
+  `;
+  // Wire search (client-side filter; behoudt focus + caret).
+  const inp = document.getElementById('evTplSearch');
+  if (inp) {
+    inp.focus();
+    inp.addEventListener('input', (e) => {
+      _evTplState.filter = e.target.value || '';
+      _renderTplListView();
+    });
+  }
+  body.querySelectorAll('.evx-modal-item[data-tpl-name]').forEach((row) => {
+    row.addEventListener('click', () => {
+      const name = row.dataset.tplName;
+      const tpl  = _evTplState.items.find((t) => t.name === name);
+      if (tpl) onTemplatePicked(tpl);
+    });
+  });
+}
+
+// Detecteer named-mapping vs positionele template + render volgende stap.
+//   - Named: meta_param_mapping.body bestaat en is non-leeg -> server resolved.
+//     We sturen direct (geen UI-vraag).
+//   - Positioneel: {{1}}, {{2}}, … in body_text. Vraag de operator om
+//     de waarden in te vullen.
+function onTemplatePicked(tpl) {
+  _evTplState.activeTpl = tpl;
+  const mapping = tpl.meta_param_mapping || null;
+  const namedBody = mapping && mapping.body && typeof mapping.body === 'object' && Object.keys(mapping.body).length > 0;
+  if (namedBody) {
+    // Named mapping → server resolves alles (klant.*, factuur.*, bedrijf.*,
+    // datum.*, afdeling.* en event/attendee fallback ''). Geen UI-vraag.
+    _renderTplConfirmView(tpl, null);
+    return;
+  }
+  // Positioneel: detecteer {{N}}-placeholders in body_text.
+  const bodyText = tpl.body_text || '';
+  const matches = bodyText.match(/\{\{\s*(\d+)\s*\}\}/g) || [];
+  const indices = Array.from(new Set(matches.map((m) => (m.match(/\d+/) || [])[0]).filter(Boolean))).sort((a, b) => Number(a) - Number(b));
+  if (indices.length === 0) {
+    _renderTplConfirmView(tpl, null);
+    return;
+  }
+  _renderTplPositionalForm(tpl, indices);
+}
+
+function _renderTplPositionalForm(tpl, indices) {
+  const body = document.getElementById('evTplBody');
+  document.getElementById('evTplModalTitle').textContent = 'Variabelen invullen — ' + (tpl.name || '');
+  body.innerHTML = `
+    <div style="font-size:12.5px;color:var(--text-dim);margin-bottom:8px">Vul de placeholders in:</div>
+    <div style="background:var(--bg-elev);border:1px solid var(--border);border-radius:8px;padding:10px;font-size:12.5px;color:var(--text);white-space:pre-wrap;margin-bottom:10px">${esc(tpl.body_text || '')}</div>
+    <div style="display:flex;flex-direction:column;gap:8px">
+      ${indices.map((i) => `
+        <label style="display:flex;flex-direction:column;gap:3px">
+          <span style="font-size:11.5px;color:var(--text-faint);font-weight:600">{{${esc(i)}}}</span>
+          <input type="text" class="evx-tpl-var" data-idx="${esc(i)}" style="padding:6px 9px;border:1px solid var(--border);border-radius:7px;background:var(--bg);color:var(--text);font-size:13px;font-family:inherit" />
+        </label>
+      `).join('')}
+    </div>
+    <div class="evx-modal-footer">
+      <button class="sr-btn" id="evTplBackBtn" type="button" style="background:transparent;border:1px solid var(--border);color:var(--text-dim);padding:6px 12px;border-radius:7px;font-size:12px;cursor:pointer">Terug</button>
+      <button class="btn-primary" id="evTplSendBtn" type="button"><i class="ti ti-send"></i> Versturen</button>
+    </div>
+  `;
+  document.getElementById('evTplBackBtn').addEventListener('click', () => _renderTplListView());
+  document.getElementById('evTplSendBtn').addEventListener('click', () => {
+    const vars = {};
+    body.querySelectorAll('.evx-tpl-var').forEach((inp) => {
+      vars[String(inp.dataset.idx)] = String(inp.value || '');
+    });
+    sendTemplate(tpl, vars);
+  });
+}
+
+function _renderTplConfirmView(tpl, hint) {
+  const body = document.getElementById('evTplBody');
+  document.getElementById('evTplModalTitle').textContent = 'Verzenden — ' + (tpl.name || '');
+  body.innerHTML = `
+    <div style="font-size:12.5px;color:var(--text-dim);margin-bottom:8px">Preview (server vult variabelen automatisch in vanuit klant/factuur/bedrijf/datum):</div>
+    <div style="background:var(--bg-elev);border:1px solid var(--border);border-radius:8px;padding:10px;font-size:12.5px;color:var(--text);white-space:pre-wrap;margin-bottom:10px">${esc(tpl.body_text || '')}</div>
+    ${hint ? `<div style="font-size:11.5px;color:var(--text-faint);margin-bottom:8px">${esc(hint)}</div>` : ''}
+    <div class="evx-modal-footer">
+      <button class="sr-btn" id="evTplBackBtn" type="button" style="background:transparent;border:1px solid var(--border);color:var(--text-dim);padding:6px 12px;border-radius:7px;font-size:12px;cursor:pointer">Terug</button>
+      <button class="btn-primary" id="evTplSendBtn" type="button"><i class="ti ti-send"></i> Versturen</button>
+    </div>
+  `;
+  document.getElementById('evTplBackBtn').addEventListener('click', () => _renderTplListView());
+  document.getElementById('evTplSendBtn').addEventListener('click', () => sendTemplate(tpl, {}));
+}
+
+async function sendTemplate(tpl, variables) {
+  const convId = _evState.convId;
+  if (!convId || !tpl) return;
+  const sendBtn = document.getElementById('evTplSendBtn');
+  if (sendBtn) { sendBtn.disabled = true; sendBtn.innerHTML = '…Versturen'; }
+  try {
+    const r = await window.AgentShared.apiFetch('/api/inbox-send-template', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        conversation_id: convId,
+        template_name  : tpl.name,
+        language       : tpl.language || 'nl',
+        variables      : variables || {},
+      }),
+    });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) {
+      window.AgentShared.showToast(j.error || ('HTTP ' + r.status), 'error');
+      if (sendBtn) { sendBtn.disabled = false; sendBtn.innerHTML = '<i class="ti ti-send"></i> Versturen'; }
+      return;
+    }
+    window.AgentShared.showToast('Template verstuurd', 'success');
+    closeTemplatePicker();
+    openEventsConv({ id: convId, phone: _evState.conv?.phone_number || '', displayName: _evState.conv?.display_name || '', customer: _evState.conv?.customer_name || '' });
+  } catch (e) {
+    window.AgentShared.showToast(e.message, 'error');
+    if (sendBtn) { sendBtn.disabled = false; sendBtn.innerHTML = '<i class="ti ti-send"></i> Versturen'; }
+  }
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// STAP 6d — Klant-context-strip + koppel-klant flow + event-context (read-only).
+// ──────────────────────────────────────────────────────────────────────────────
+
+function _renderEvCustomerStrip(conv) {
+  const strip = document.getElementById('evCustomerStrip');
+  if (!strip) return;
+  if (!conv) { strip.style.display = 'none'; return; }
+  strip.style.display = '';
+  if (conv.customer_id) {
+    const label = conv.customer_name || '(klant)';
+    strip.innerHTML = `
+      <span class="evx-ctx-label"><i class="ti ti-user"></i> Klant</span>
+      <span><strong>${esc(label)}</strong></span>
+      <button class="evx-ctx-link-btn" id="evCustChangeBtn" type="button" title="Wijzig klant-koppeling"><i class="ti ti-refresh"></i> Wijzigen</button>
+      <span class="evx-ctx-label" id="evCtxEventLabel" style="margin-left:auto;display:none"><i class="ti ti-presentation"></i> Event</span>
+      <span id="evCtxEventValue"></span>
+    `;
+    const changeBtn = document.getElementById('evCustChangeBtn');
+    if (changeBtn) changeBtn.addEventListener('click', () => openCustomerLinkModal());
+    // Event-context (read-only afgeleid via supabase client-side query).
+    loadEventContextForCustomer(conv.customer_id);
+  } else {
+    strip.innerHTML = `
+      <span class="evx-ctx-label"><i class="ti ti-user-off"></i> Geen koppeling</span>
+      <span style="color:var(--text-faint)">Dit nummer is nog niet aan een klant gekoppeld.</span>
+      <button class="evx-ctx-link-btn" id="evCustLinkBtn" type="button" style="margin-left:auto;border-color:#0a2f63;color:#0a2f63"><i class="ti ti-link"></i> Koppel klant</button>
+    `;
+    const linkBtn = document.getElementById('evCustLinkBtn');
+    if (linkBtn) linkBtn.addEventListener('click', () => openCustomerLinkModal());
+  }
+}
+
+// Event-context via client-side supabase RLS-query op event_attendees.
+// Best-effort: bij fout (geen window.supabase, RLS-block, netwerk) gewoon
+// niets tonen. Spec sluit nieuwe endpoints uit.
+async function loadEventContextForCustomer(customerId) {
+  const evLabel = document.getElementById('evCtxEventLabel');
+  const evValue = document.getElementById('evCtxEventValue');
+  if (!evLabel || !evValue) return;
+  evLabel.style.display = 'none';
+  evValue.innerHTML = '';
+  try {
+    await window._authSharedReady;
+    if (!window.supabase || !customerId) return;
+    const { data, error } = await window.supabase
+      .from('event_attendees')
+      .select('event_id, registered_at, events(id, title, starts_at, status)')
+      .eq('customer_id', customerId)
+      .order('registered_at', { ascending: false })
+      .limit(5);
+    if (error) { console.warn('[event-context]', error.message); return; }
+    const rows = Array.isArray(data) ? data.filter((r) => r.events) : [];
+    if (rows.length === 0) return;
+    const first  = rows[0];
+    const evRow  = first.events;
+    const dateStr = evRow.starts_at ? new Date(evRow.starts_at).toLocaleDateString('nl-NL', { day: '2-digit', month: 'short', year: 'numeric' }) : '';
+    const more   = rows.length > 1 ? ` <span style="color:var(--text-faint);font-size:11px">+${rows.length - 1} meer</span>` : '';
+    evLabel.style.display = '';
+    evValue.innerHTML = `
+      <a class="evx-ctx-event-link" href="/modules/events-detail.html?id=${esc(evRow.id)}" title="Open event-detail">
+        ${esc(evRow.title || '(geen titel)')}${dateStr ? ' · ' + esc(dateStr) : ''}
+      </a>${more}
+    `;
+  } catch (e) {
+    console.warn('[event-context exception]', e?.message || e);
+  }
+}
+
+function openCustomerLinkModal() {
+  const convId = _evState.convId;
+  if (!convId) return;
+  document.getElementById('evCustomerLinkModal').classList.add('show');
+  const inp = document.getElementById('evCustSearchInput');
+  const res = document.getElementById('evCustSearchResults');
+  if (inp) { inp.value = ''; inp.focus(); }
+  if (res) res.innerHTML = '<div style="color:var(--text-faint);font-size:12px;padding:10px;text-align:center">Typ minimaal 2 tekens om te zoeken.</div>';
+}
+
+function closeCustomerLinkModal() {
+  document.getElementById('evCustomerLinkModal').classList.remove('show');
+}
+
+const _evCustSearchDebounce = _evMakeDebouncer(250);
+function _evCustSearchOnInput() {
+  const inp = document.getElementById('evCustSearchInput');
+  const q = (inp && inp.value || '').trim();
+  if (q.length < 2) {
+    document.getElementById('evCustSearchResults').innerHTML = '<div style="color:var(--text-faint);font-size:12px;padding:10px;text-align:center">Typ minimaal 2 tekens om te zoeken.</div>';
+    return;
+  }
+  _evCustSearchDebounce(() => _evCustSearchRun(q));
+}
+
+async function _evCustSearchRun(q) {
+  const res = document.getElementById('evCustSearchResults');
+  if (!res) return;
+  res.innerHTML = '<div style="color:var(--text-faint);font-size:12px;padding:10px;text-align:center">Zoeken…</div>';
+  try {
+    const r = await window.AgentShared.apiFetch('/api/inbox-customer-search?q=' + encodeURIComponent(q) + '&limit=15');
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) {
+      res.innerHTML = '<div style="color:#dc2626;font-size:12px;padding:10px">Fout: ' + esc(j.error || ('HTTP ' + r.status)) + '</div>';
+      return;
+    }
+    const items = Array.isArray(j.results) ? j.results : [];
+    if (items.length === 0) {
+      res.innerHTML = '<div style="color:var(--text-faint);font-size:12px;padding:10px;text-align:center">Geen klanten gevonden.</div>';
+      return;
+    }
+    res.innerHTML = items.map((c) => `
+      <div class="evx-modal-item" data-customer-id="${esc(c.id)}">
+        <div class="iname">${esc(c.name || '(geen naam)')}</div>
+        <div class="imeta">${esc(c.email || '—')}${c.phone ? ' · ' + esc(c.phone) : ''}</div>
+      </div>
+    `).join('');
+    res.querySelectorAll('.evx-modal-item[data-customer-id]').forEach((row) => {
+      row.addEventListener('click', () => linkCustomer(row.dataset.customerId));
+    });
+  } catch (e) {
+    res.innerHTML = '<div style="color:#dc2626;font-size:12px;padding:10px">Fout: ' + esc(e.message) + '</div>';
+  }
+}
+
+async function linkCustomer(customerId) {
+  const convId = _evState.convId;
+  if (!convId || !customerId) return;
+  try {
+    const r = await window.AgentShared.apiFetch('/api/inbox-link-conversation-to-customer', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ conversation_id: convId, customer_id: customerId, add_phone_to_customer: false }),
+    });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) {
+      window.AgentShared.showToast(j.error || ('HTTP ' + r.status), 'error');
+      return;
+    }
+    window.AgentShared.showToast('Klant gekoppeld' + (j.relinked ? ' (overschreven)' : ''), 'success');
+    closeCustomerLinkModal();
+    // Reload thread + strip
+    openEventsConv({ id: convId, phone: _evState.conv?.phone_number || '', displayName: _evState.conv?.display_name || '', customer: j.customer_name || _evState.conv?.customer_name || '' });
+  } catch (e) {
+    window.AgentShared.showToast(e.message, 'error');
   }
 }
 
