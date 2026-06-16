@@ -637,22 +637,24 @@ function renderPage() {
       </div>
     </div>
 
-    <!-- Tabs: Mentoren-tab weg (per stap 3-spec; stap 5 brengt 'm terug voor afgeronde events). -->
+    <!-- Tabs: Mentoren-tab alleen bij afgerond event (stap 5). -->
     <div class="tabs" role="tablist">
       <button class="tab ${state.tab === 'info' ? 'active' : ''}" data-tab="info"><i class="ti ti-info-circle"></i> Info</button>
       <button class="tab ${state.tab === 'attendees' ? 'active' : ''}" data-tab="attendees"><i class="ti ti-users"></i> Aanwezigen <span class="tab-count" id="tabCountAtt">${c?.attendees_total || 0}</span></button>
+      ${isCompleted ? `<button class="tab ${state.tab === 'mentors' ? 'active' : ''}" data-tab="mentors"><i class="ti ti-user-check"></i> Mentoren</button>` : ''}
       <button class="tab ${state.tab === 'audit' ? 'active' : ''}" data-tab="audit"><i class="ti ti-history"></i> Audit</button>
     </div>
 
     <section class="tab-content ${state.tab === 'info' ? 'active' : ''}" id="tab-info"></section>
     <section class="tab-content ${state.tab === 'attendees' ? 'active' : ''}" id="tab-attendees"></section>
+    ${isCompleted ? `<section class="tab-content ${state.tab === 'mentors' ? 'active' : ''}" id="tab-mentors"></section>` : ''}
     <section class="tab-content ${state.tab === 'audit' ? 'active' : ''}" id="tab-audit"></section>
   `;
 
-  // Tab switching — mentoren-tak verwijderd (stap 5 brengt 'm terug). Als
-  // state.tab toch op 'mentors' staat (deeplink), val terug op 'info' zodat
-  // we niet een dood tabblad tonen.
-  if (state.tab === 'mentors') state.tab = 'info';
+  // Tab switching — mentoren-tak alleen bij afgerond. Bij niet-afgerond:
+  // deeplink state.tab='mentors' valt terug op 'info' zodat we geen dood
+  // tabblad tonen.
+  if (state.tab === 'mentors' && !isCompleted) state.tab = 'info';
   document.querySelectorAll('.tab[data-tab]').forEach((btn) => {
     btn.addEventListener('click', () => {
       const t = btn.dataset.tab;
@@ -662,6 +664,7 @@ function renderPage() {
       document.querySelectorAll('.tab-content').forEach((s) => s.classList.remove('active'));
       document.getElementById('tab-' + t).classList.add('active');
       if (t === 'attendees' && !state.attendees.length) loadAttendees();
+      else if (t === 'mentors' && isCompleted) loadCompletedMentors();
       else if (t === 'audit') loadAudit();
     });
   });
@@ -669,6 +672,74 @@ function renderPage() {
   renderInfoTab();
   if (state.tab === 'attendees') renderAttendeesTab();
   if (state.tab === 'audit') renderAuditTab();
+  if (state.tab === 'mentors' && isCompleted) loadCompletedMentors();
+}
+
+// STAP 5: Mentoren-tab voor afgerond event — alleen-lezen weergave van de
+// bij het afronden aanwezig-gemarkeerde mentoren + bonus/uitgave/netto.
+// Bron: api/events-completed-list (uitgebreid met per_mentor[i].was_present);
+// frontend filtert client-side op event_id. Geen nieuwe boekingen.
+let _completedMentorsCache = null;
+async function loadCompletedMentors() {
+  const host = document.getElementById('tab-mentors');
+  if (!host) return;
+  if (_completedMentorsCache) { _renderCompletedMentorsTab(host, _completedMentorsCache); return; }
+  host.innerHTML = '<div style="color:var(--text-faint);font-size:13px;padding:20px">Laden…</div>';
+  try {
+    const r = await window.AgentShared.apiFetch('/api/events-completed-list');
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) {
+      host.innerHTML = '<div style="color:#dc2626;font-size:13px;padding:14px">Fout: ' + esc(j.error || ('HTTP ' + r.status)) + '</div>';
+      return;
+    }
+    const ev = (Array.isArray(j.events) ? j.events : []).find((e) => e.event_id === state.eventId) || null;
+    _completedMentorsCache = ev;
+    _renderCompletedMentorsTab(host, ev);
+  } catch (e) {
+    host.innerHTML = '<div style="color:#dc2626;font-size:13px;padding:14px">Fout: ' + esc(e?.message || 'onbekende fout') + '</div>';
+  }
+}
+
+function _renderCompletedMentorsTab(host, ev) {
+  if (!ev) {
+    host.innerHTML = '<div style="color:var(--text-faint);font-size:13px;padding:20px">Geen afgerond-gegevens beschikbaar voor dit event.</div>';
+    return;
+  }
+  const mentors = Array.isArray(ev.per_mentor) ? ev.per_mentor : [];
+  // Alleen de aanwezig-gemarkeerde mentoren tonen — dat is de kern van de
+  // mentoren-weergave bij een afgerond event. Mentoren in per_mentor met
+  // was_present=false (orphan-ledger) zijn defensief in de payload, maar
+  // niet relevant voor deze UI.
+  const present = mentors.filter((m) => m.was_present);
+  if (present.length === 0) {
+    host.innerHTML = '<div style="color:var(--text-faint);font-size:13px;padding:20px">Geen aanwezig-gemarkeerde mentoren voor dit event.</div>';
+    return;
+  }
+  const eur = (n) => '€ ' + (Math.round((Number(n) || 0) * 100) / 100).toFixed(2).replace('.', ',');
+  const rows = present.map((m) => `
+    <tr>
+      <td><strong>${esc(m.name || '—')}</strong></td>
+      <td><span style="display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:700;background:rgba(5,150,105,0.15);color:#059669"><i class="ti ti-check"></i> Aanwezig</span></td>
+      <td style="text-align:right;font-variant-numeric:tabular-nums">${esc(eur(m.bonus))}</td>
+      <td style="text-align:right;font-variant-numeric:tabular-nums">${esc(eur(m.uitgave))}</td>
+      <td style="text-align:right;font-variant-numeric:tabular-nums;font-weight:700">${esc(eur(m.netto))}</td>
+    </tr>
+  `).join('');
+  host.innerHTML = `
+    <div style="margin-bottom:12px;font-size:12.5px;color:var(--text-dim)">
+      Mentoren die bij het afronden van dit event als aanwezig gemarkeerd zijn. Bonus + uitgave via het mentor-grootboek.
+    </div>
+    <div class="sr-tablewrap"><table class="sr-table">
+      <thead><tr>
+        <th>Mentor</th>
+        <th>Status</th>
+        <th style="text-align:right">Bonus</th>
+        <th style="text-align:right">Uitgave</th>
+        <th style="text-align:right">Netto</th>
+      </tr></thead>
+      <tbody>${rows}</tbody>
+    </table></div>
+  `;
 }
 
 // ── Tab: Info ────────────────────────────────────────────────────────────────
@@ -853,7 +924,12 @@ function renderAttendeesTab() {
 
         return `
           <tr>
-            <td><strong>${esc(fullName)}</strong></td>
+            <td>
+              <button class="att-name-btn" data-id="${esc(a.id)}" type="button" title="Toon verzonden en geplande communicatie" style="background:transparent;border:none;padding:0;cursor:pointer;color:inherit;font:inherit;display:inline-flex;align-items:center;gap:5px">
+                <i class="ti ti-chevron-right att-name-caret" id="att-caret-${esc(a.id)}" style="color:var(--text-faint);font-size:14px;transition:transform .15s"></i>
+                <strong>${esc(fullName)}</strong>
+              </button>
+            </td>
             <td>${esc(a.email || '—')}</td>
             <td>${esc(a.phone || '—')}</td>
             <td>${statusCell}</td>
@@ -861,6 +937,13 @@ function renderAttendeesTab() {
             <td>${calledCell}</td>
             <td>${tagsHtml || '<span style="color:var(--text-faint)">—</span>'}</td>
             <td class="sr-actions">${kebab}</td>
+          </tr>
+          <tr class="att-comms-row" id="att-comms-row-${esc(a.id)}" data-att-id="${esc(a.id)}" style="display:none">
+            <td colspan="8" style="background:var(--bg-elev-2);padding:14px 18px;border-top:0">
+              <div class="att-comms-body" id="att-comms-body-${esc(a.id)}">
+                <div style="font-size:12px;color:var(--text-faint)">Laden…</div>
+              </div>
+            </td>
           </tr>
         `;
       }).join('')}</tbody>
@@ -875,6 +958,14 @@ function renderAttendeesTab() {
   // Gebeld-checkbox wire
   document.querySelectorAll('.att-called-chk').forEach((cb) => {
     cb.addEventListener('change', () => onAttCalledChange(cb.dataset.id, cb.checked, cb));
+  });
+
+  // STAP 4: klik op naam → uitklaprij met communicatie van die attendee.
+  document.querySelectorAll('.att-name-btn').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      toggleAttCommsRow(btn.dataset.id);
+    });
   });
 
   // Kebab wire
@@ -1093,6 +1184,95 @@ async function submitAttMove() {
   } finally {
     btn.disabled = false; btn.textContent = 'Verplaatsen';
   }
+}
+
+// ── STAP 4: communicatie per attendee (uitklap) ─────────────────────────────
+// Cache per attendee_id zodat openen/sluiten geen extra fetch triggert.
+// On force-refresh kan de cache geleegd worden (toekomstig pad).
+const _attCommsCache = new Map();
+
+async function toggleAttCommsRow(attendeeId) {
+  if (!attendeeId) return;
+  const row    = document.getElementById('att-comms-row-' + attendeeId);
+  const caret  = document.getElementById('att-caret-' + attendeeId);
+  const body   = document.getElementById('att-comms-body-' + attendeeId);
+  if (!row || !body) return;
+  const open = row.style.display !== 'none';
+  if (open) {
+    row.style.display = 'none';
+    if (caret) caret.style.transform = '';
+    return;
+  }
+  // Sluit andere geopende uitklap-rijen (één tegelijk).
+  document.querySelectorAll('.att-comms-row').forEach((r) => {
+    if (r !== row) r.style.display = 'none';
+  });
+  document.querySelectorAll('.att-name-caret').forEach((c) => {
+    if (c !== caret) c.style.transform = '';
+  });
+  row.style.display = '';
+  if (caret) caret.style.transform = 'rotate(90deg)';
+
+  // Lazy fetch (uit cache als al geladen).
+  if (_attCommsCache.has(attendeeId)) {
+    _renderAttComms(body, _attCommsCache.get(attendeeId));
+    return;
+  }
+  body.innerHTML = '<div style="font-size:12px;color:var(--text-faint)">Laden…</div>';
+  try {
+    const r = await window.AgentShared.apiFetch('/api/events-attendee-comms?attendee_id=' + encodeURIComponent(attendeeId));
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) {
+      body.innerHTML = '<div style="font-size:12px;color:#dc2626">Fout: ' + esc(j.error || ('HTTP ' + r.status)) + '</div>';
+      return;
+    }
+    _attCommsCache.set(attendeeId, j);
+    _renderAttComms(body, j);
+  } catch (e) {
+    body.innerHTML = '<div style="font-size:12px;color:#dc2626">Fout: ' + esc(e?.message || 'onbekende fout') + '</div>';
+  }
+}
+
+function _renderAttComms(host, data) {
+  const items = Array.isArray(data?.items) ? data.items : [];
+  const note  = data?.note || '';
+  if (items.length === 0) {
+    host.innerHTML = `
+      <div style="font-size:12.5px;color:var(--text-dim)">Geen verzonden of geplande communicatie voor deze deelnemer.</div>
+      ${note ? `<div style="font-size:11px;color:var(--text-faint);margin-top:6px"><i class="ti ti-info-circle"></i> ${esc(note)}</div>` : ''}
+    `;
+    return;
+  }
+  const fmtAt = (iso) => {
+    if (!iso) return '—';
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return iso;
+    return d.toLocaleString('nl-NL', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+  };
+  const rows = items.map((it) => {
+    const icon = it.channel === 'email' ? 'ti-mail' : 'ti-brand-whatsapp';
+    const isSent = it.status === 'verzonden';
+    const statusStyle = isSent
+      ? 'background:rgba(5,150,105,0.15);color:#059669;border:1px solid rgba(5,150,105,0.25)'
+      : 'background:var(--bg-elev);color:var(--text-faint);border:1px solid var(--border)';
+    const statusIcon = isSent ? 'ti-check' : 'ti-clock';
+    return `
+      <div style="display:flex;align-items:center;gap:10px;padding:7px 10px;border:1px solid var(--border);border-radius:8px;background:var(--bg);${isSent ? '' : 'opacity:.85'}">
+        <i class="ti ${icon}" style="font-size:16px;color:var(--text-faint);flex-shrink:0"></i>
+        <div style="flex:1;min-width:0">
+          <div style="font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(it.label || '—')}</div>
+          <div style="font-size:11.5px;color:var(--text-faint);margin-top:1px">${esc(fmtAt(it.at))}</div>
+        </div>
+        <span style="display:inline-flex;align-items:center;gap:4px;padding:3px 9px;border-radius:99px;font-size:11px;font-weight:700;${statusStyle}">
+          <i class="ti ${statusIcon}"></i> ${esc(it.status)}
+        </span>
+      </div>
+    `;
+  }).join('');
+  host.innerHTML = `
+    <div style="display:flex;flex-direction:column;gap:6px">${rows}</div>
+    ${note ? `<div style="font-size:11px;color:var(--text-faint);margin-top:10px"><i class="ti ti-info-circle"></i> ${esc(note)}</div>` : ''}
+  `;
 }
 
 // ── Tab: Mentoren ────────────────────────────────────────────────────────────
