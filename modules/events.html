@@ -2094,7 +2094,12 @@ function renderAfgerondList() {
               <td style="padding:4px 6px;text-align:right;font-variant-numeric:tabular-nums">${eur(x.amount)}</td>
             </tr>`).join('')}</tbody>
         </table>`;
-    const mentorHtml = (ev.per_mentor || []).length === 0
+    // FIX 1 — Afgerond-lijst toont alleen mentoren met daadwerkelijke
+    // bonus of uitgave (≠ 0). Was_present-mentoren zonder ledger-effect
+    // staan wel in per_mentor (sinds stap 5) maar horen niet in deze
+    // bonus/uitgave-tabel — die zit in de detailpagina-Mentoren-tab.
+    const paidMentors = (ev.per_mentor || []).filter((m) => (Number(m.bonus) || 0) !== 0 || (Number(m.uitgave) || 0) !== 0);
+    const mentorHtml = paidMentors.length === 0
       ? '<div style="font-size:12.5px;color:var(--text-faint)">Geen mentor-bonussen.</div>'
       : `<table style="width:100%;font-size:12.5px;border-collapse:collapse">
           <thead><tr style="color:var(--text-faint);text-align:left">
@@ -2103,7 +2108,7 @@ function renderAfgerondList() {
             <th style="padding:4px 6px;text-align:right">Uitgave</th>
             <th style="padding:4px 6px;text-align:right">Netto</th>
           </tr></thead>
-          <tbody>${ev.per_mentor.map((m) => `
+          <tbody>${paidMentors.map((m) => `
             <tr>
               <td style="padding:4px 6px">${esc(m.name)}</td>
               <td style="padding:4px 6px;text-align:right;font-variant-numeric:tabular-nums">${eur(m.bonus)}</td>
