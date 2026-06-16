@@ -77,6 +77,31 @@
     .tab-content.active { display: block; }
 
     /* Info-tab */
+    /* STAP 3 — twee-koloms event-detail layout:
+       LINKS smalle details-box + sync-chips + actieknoppen, RECHTS beschrijving.
+       Tabs strip + tab-content komen onder dit blok. */
+    .ev-split { display: grid; grid-template-columns: 300px 1fr; gap: 16px; margin-bottom: 18px; }
+    @media (max-width: 880px) { .ev-split { grid-template-columns: 1fr; } }
+    .ev-card { background: var(--bg-elev); border: 1px solid var(--border); border-radius: 10px; padding: 14px; }
+    .ev-card + .ev-card { margin-top: 12px; }
+    .ev-card h3 { font-size: 11.5px; font-weight: 700; color: var(--text-faint); text-transform: uppercase; letter-spacing: .06em; margin-bottom: 10px; display:flex; align-items:center; gap:6px; }
+    .ev-detail-row { display: flex; align-items: center; gap: 8px; font-size: 13px; padding: 5px 0; color: var(--text); }
+    .ev-detail-row > i { color: var(--text-faint); font-size: 16px; flex-shrink: 0; width: 18px; }
+    .ev-detail-row .label { color: var(--text-faint); font-size: 11.5px; text-transform: uppercase; letter-spacing: .04em; min-width: 60px; }
+    .ev-pill-row { display:flex; flex-wrap:wrap; gap:6px; margin-top: 6px; }
+    .ev-sync-chips { display:flex; flex-direction:column; gap: 8px; }
+    .ev-actions-vert { display:flex; flex-direction:column; gap:10px; }
+    .ev-actions-vert .btn-primary,
+    .ev-actions-vert .btn-secondary { width:100%; justify-content:center; }
+    .ev-icon-row { display:flex; gap:6px; }
+    .ev-icon-row > button { flex:1; background: var(--bg-elev-2); border: 1px solid var(--border); color: var(--text-dim); padding: 7px 0; border-radius: 7px; font-size: 13px; cursor: pointer; display:flex; align-items:center; justify-content:center; gap:4px; font-family: inherit; }
+    .ev-icon-row > button:hover { background: var(--bg); color: var(--text); border-color: var(--text-faint); }
+    .ev-icon-row > button.danger { color: #dc2626; }
+    .ev-icon-row > button.danger:hover { background: rgba(220,38,38,0.08); border-color: rgba(220,38,38,0.3); }
+    .ev-desc-card { background: var(--bg-elev); border: 1px solid var(--border); border-radius: 10px; padding: 16px; min-height: 200px; }
+    .ev-desc-card .desc-content { font-size: 14px; color: var(--text); white-space: pre-wrap; line-height: 1.5; }
+    .ev-desc-card .desc-empty { color: var(--text-faint); font-style: italic; }
+
     .info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
     .info-card { background: var(--bg-elev); border: 1px solid var(--border); border-radius: 10px; padding: 16px; }
     .info-card h3 { font-size: 12px; font-weight: 700; color: var(--text-faint); text-transform: uppercase; letter-spacing: .06em; margin-bottom: 10px; }
@@ -526,56 +551,108 @@ function renderPage() {
   const canShowCloseBtn = canEdit && !isArchived && !signupsClosed && (isDraft || isPublished);
   const canShowReopenBtn = canEdit && !isArchived && signupsClosed;
 
+  // STAP 3 — Primaire actieknop is context-bepaald:
+  //   isDraft + canPublish               -> "Publiceren"
+  //   isPublished + canComplete (open)   -> "Event afronden"
+  //   isCompleted + canComplete          -> "Her-afronden"
+  // Anders: geen primaire knop (de status-pill zegt al genoeg).
+  let primaryActionHtml = '';
+  if (isDraft && canPublish) {
+    primaryActionHtml = '<button class="btn-primary" onclick="publishEvent()"><i class="ti ti-rocket"></i> Publiceren</button>';
+  } else if (isPublished && canComplete) {
+    primaryActionHtml = `<button class="btn-primary" onclick="openEvCompleteModal()" title="${isCompleted ? 'Wijzig aanwezigheid / her-afronden' : 'Event afronden'}"><i class="ti ti-checks"></i> ${isCompleted ? 'Her-afronden' : 'Event afronden'}</button>`;
+  }
+
+  // Icon-rij onder de primaire knop. Slot 2 toont Heropenen of Sluiten
+  // afhankelijk van signupsClosed. Archiveren = subtiele 4e icoonknop zodat
+  // stap 2's actie ook hier blijft, naast de hoofd-icoonknoppen.
+  const editIconHtml    = canEdit ? '<button onclick="openEvEditModal()" title="Bewerken"><i class="ti ti-edit"></i></button>' : '';
+  let signupsIconHtml = '';
+  if (canShowReopenBtn) {
+    signupsIconHtml = '<button onclick="reopenSignupsAction()" title="Heropenen"><i class="ti ti-lock-open"></i></button>';
+  } else if (canShowCloseBtn) {
+    signupsIconHtml = '<button onclick="closeSignupsAction()" title="Aanmelding sluiten"><i class="ti ti-lock"></i></button>';
+  }
+  const cancelIconHtml  = (canCancel && (isDraft || isPublished)) ? '<button class="danger" onclick="cancelEvent()" title="Annuleren"><i class="ti ti-x"></i></button>' : '';
+  const archiveIconHtml = (canCancel && !isArchived) ? '<button onclick="archiveEvent()" title="Archiveren — verberg uit live-lijsten en unpublish op Webflow"><i class="ti ti-archive"></i></button>' : '';
+  const iconRowHtml = (editIconHtml || signupsIconHtml || cancelIconHtml || archiveIconHtml)
+    ? `<div class="ev-icon-row">${editIconHtml}${signupsIconHtml}${cancelIconHtml}${archiveIconHtml}</div>`
+    : '';
+
   document.getElementById('page-content').innerHTML = `
     <div class="crumb"><a href="/modules/events.html">Events</a> &rsaquo; <span>${esc(ev.title || '—')}</span></div>
 
     <div class="ev-head">
       <div>
         <div class="ev-title">${esc(ev.title || '—')}</div>
-        <div class="ev-meta">
-          <span class="it"><i class="ti ti-calendar"></i> ${esc(fmtDate(ev.starts_at))}</span>
-          ${ev.location ? `<span class="it"><i class="ti ti-map-pin"></i> ${esc(ev.location)}</span>` : ''}
-          ${ev.niveau ? `<span class="it"><i class="ti ti-stairs-up"></i> ${esc(ev.niveau_label || ev.niveau)}</span>` : ''}
-          <span class="it"><span class="status-badge status-${ev.status}">${esc(EV_STATUS_LABELS[ev.status] || ev.status)}</span></span>
-          ${isCompleted ? `<span class="it"><span class="status-badge status-afgerond"><i class="ti ti-checks"></i> Afgerond &middot; ${esc(new Date(ev.completed_at).toLocaleDateString('nl-NL', { day: '2-digit', month: 'short', year: 'numeric' }))}</span></span>` : ''}
-          ${signupsClosed ? `<span class="it">${renderSignupsClosedBadgeHead(ev)}</span>` : ''}
-          <span class="it"><span class="${capClass}">${active}/${cap} plekken</span></span>
-        </div>
-      </div>
-      <div class="ev-actions">
-        ${canEdit ? '<button class="btn-secondary" onclick="openEvEditModal()"><i class="ti ti-edit"></i> Bewerken</button>' : ''}
-        ${(canPublish && isDraft) ? '<button class="btn-primary" onclick="publishEvent()"><i class="ti ti-rocket"></i> Publiceren</button>' : ''}
-        ${canShowCloseBtn ? '<button class="btn-secondary" onclick="closeSignupsAction()"><i class="ti ti-lock"></i> Aanmelding sluiten</button>' : ''}
-        ${canShowReopenBtn ? '<button class="btn-secondary" onclick="reopenSignupsAction()"><i class="ti ti-lock-open"></i> Aanmelding heropen</button>' : ''}
-        ${(canComplete && isPublished) ? `<button class="btn-primary" onclick="openEvCompleteModal()" title="${isCompleted ? 'Wijzig aanwezigheid / her-afronden' : 'Event afronden'}"><i class="ti ti-checks"></i> ${isCompleted ? 'Her-afronden' : 'Event afronden'}</button>` : ''}
-        ${(canCancel && (isDraft || isPublished)) ? '<button class="btn-danger" onclick="cancelEvent()"><i class="ti ti-x"></i> Annuleren</button>' : ''}
-        ${(canCancel && !isArchived) ? '<button class="btn-secondary" onclick="archiveEvent()" title="Verberg uit live-lijsten en unpublish op Webflow"><i class="ti ti-archive"></i> Archiveren</button>' : ''}
       </div>
     </div>
 
     ${signupsClosed ? renderSignupsClosedBanner(ev) : ''}
 
-    <div class="sync-strip">
-      <span class="sync-label">Sync</span>
-      ${renderSyncBadgeLg('webflow', ev.webflow_sync_status, ev.webflow_last_synced_at)}
-      ${renderSyncBadgeLg('ghl',     ev.ghl_sync_status,     ev.ghl_last_synced_at)}
-      ${(canPublish && hasSyncFailure(ev)) ? '<button class="btn-retry" id="syncRetryBtn" onclick="retrySync()"><i class="ti ti-refresh"></i> Retry sync</button>' : ''}
+    <!-- Twee-koloms blok: LINKS smalle details-box + sync + actions, RECHTS beschrijving. -->
+    <div class="ev-split">
+      <div>
+        <!-- Details-box -->
+        <div class="ev-card">
+          <h3><i class="ti ti-info-circle"></i> Details</h3>
+          <div class="ev-detail-row"><i class="ti ti-calendar"></i><span>${esc(fmtDate(ev.starts_at))}</span></div>
+          <div class="ev-detail-row"><i class="ti ti-map-pin"></i><span>${esc(ev.location || '—')}</span></div>
+          <div class="ev-detail-row"><i class="ti ti-stairs-up"></i><span>${esc(ev.niveau_label || ev.niveau || '—')}</span></div>
+          <div class="ev-detail-row"><i class="ti ti-users"></i><span class="${capClass}">${active}/${cap} plekken</span></div>
+          <div class="ev-pill-row">
+            <span class="status-badge status-${ev.status}">${esc(EV_STATUS_LABELS[ev.status] || ev.status)}</span>
+            ${isCompleted ? `<span class="status-badge status-afgerond"><i class="ti ti-checks"></i> Afgerond &middot; ${esc(new Date(ev.completed_at).toLocaleDateString('nl-NL', { day: '2-digit', month: 'short', year: 'numeric' }))}</span>` : ''}
+            ${signupsClosed ? renderSignupsClosedBadgeHead(ev) : ''}
+          </div>
+        </div>
+
+        <!-- Sync-chips -->
+        <div class="ev-card">
+          <h3><i class="ti ti-refresh"></i> Sync</h3>
+          <div class="ev-sync-chips">
+            ${renderSyncBadgeLg('webflow', ev.webflow_sync_status, ev.webflow_last_synced_at)}
+            ${renderSyncBadgeLg('ghl',     ev.ghl_sync_status,     ev.ghl_last_synced_at)}
+          </div>
+          ${(canPublish && hasSyncFailure(ev)) ? '<button class="btn-retry" id="syncRetryBtn" onclick="retrySync()" style="margin-top:10px;width:100%"><i class="ti ti-refresh"></i> Retry sync</button>' : ''}
+        </div>
+
+        <!-- Actieknoppen: primair vol bovenaan, daaronder icon-rij -->
+        ${(primaryActionHtml || iconRowHtml) ? `
+        <div class="ev-card">
+          <h3><i class="ti ti-bolt"></i> Acties</h3>
+          <div class="ev-actions-vert">
+            ${primaryActionHtml}
+            ${iconRowHtml}
+          </div>
+        </div>` : ''}
+      </div>
+
+      <!-- RECHTS: beschrijving -->
+      <div>
+        <div class="ev-desc-card">
+          <h3 style="font-size:11.5px;font-weight:700;color:var(--text-faint);text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px;display:flex;align-items:center;gap:6px"><i class="ti ti-file-text"></i> Beschrijving</h3>
+          <div class="desc-content">${ev.description_md ? esc(ev.description_md) : '<span class="desc-empty">Geen beschrijving.</span>'}</div>
+        </div>
+      </div>
     </div>
 
+    <!-- Tabs: Mentoren-tab weg (per stap 3-spec; stap 5 brengt 'm terug voor afgeronde events). -->
     <div class="tabs" role="tablist">
       <button class="tab ${state.tab === 'info' ? 'active' : ''}" data-tab="info"><i class="ti ti-info-circle"></i> Info</button>
       <button class="tab ${state.tab === 'attendees' ? 'active' : ''}" data-tab="attendees"><i class="ti ti-users"></i> Aanwezigen <span class="tab-count" id="tabCountAtt">${c?.attendees_total || 0}</span></button>
-      <button class="tab ${state.tab === 'mentors' ? 'active' : ''}" data-tab="mentors"><i class="ti ti-user-check"></i> Mentoren <span class="tab-count" id="tabCountMentors">${c?.mentors || 0}</span></button>
       <button class="tab ${state.tab === 'audit' ? 'active' : ''}" data-tab="audit"><i class="ti ti-history"></i> Audit</button>
     </div>
 
     <section class="tab-content ${state.tab === 'info' ? 'active' : ''}" id="tab-info"></section>
     <section class="tab-content ${state.tab === 'attendees' ? 'active' : ''}" id="tab-attendees"></section>
-    <section class="tab-content ${state.tab === 'mentors' ? 'active' : ''}" id="tab-mentors"></section>
     <section class="tab-content ${state.tab === 'audit' ? 'active' : ''}" id="tab-audit"></section>
   `;
 
-  // Tab switching
+  // Tab switching — mentoren-tak verwijderd (stap 5 brengt 'm terug). Als
+  // state.tab toch op 'mentors' staat (deeplink), val terug op 'info' zodat
+  // we niet een dood tabblad tonen.
+  if (state.tab === 'mentors') state.tab = 'info';
   document.querySelectorAll('.tab[data-tab]').forEach((btn) => {
     btn.addEventListener('click', () => {
       const t = btn.dataset.tab;
@@ -585,14 +662,12 @@ function renderPage() {
       document.querySelectorAll('.tab-content').forEach((s) => s.classList.remove('active'));
       document.getElementById('tab-' + t).classList.add('active');
       if (t === 'attendees' && !state.attendees.length) loadAttendees();
-      else if (t === 'mentors' && !state.mentors.length) loadMentors();
       else if (t === 'audit') loadAudit();
     });
   });
 
   renderInfoTab();
   if (state.tab === 'attendees') renderAttendeesTab();
-  if (state.tab === 'mentors') renderMentorsTab();
   if (state.tab === 'audit') renderAuditTab();
 }
 
@@ -600,6 +675,9 @@ function renderPage() {
 
 function renderInfoTab() {
   const ev = state.event;
+  // STAP 3: beschrijving-card verhuisde naar de rechter-kolom in renderPage().
+  // Info-tab toont nu alleen Algemeen + Sync & meta data; de details-box
+  // links bovenin geeft al een snelle samenvatting.
   document.getElementById('tab-info').innerHTML = `
     <div class="info-grid">
       <div class="info-card">
@@ -619,10 +697,6 @@ function renderInfoTab() {
         <div class="info-row"><div class="info-label">Aangemaakt</div><div class="info-value">${esc(fmtDate(ev.created_at))}</div></div>
         <div class="info-row"><div class="info-label">Bijgewerkt</div><div class="info-value">${esc(fmtDate(ev.updated_at))}</div></div>
       </div>
-    </div>
-    <div class="info-card" style="margin-top:16px">
-      <h3>Beschrijving</h3>
-      <div class="desc-box">${ev.description_md ? esc(ev.description_md) : '<em style="color:var(--text-faint)">Geen beschrijving.</em>'}</div>
     </div>
   `;
 }
