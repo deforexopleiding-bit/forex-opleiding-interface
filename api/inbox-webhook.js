@@ -535,17 +535,21 @@ function triggerJoostAutoSuggest({ conversationId, triggeredByMessageId, autonom
  * threw'), maar 'agent=simone' tag in de logs en runSimoneSuggest in plaats
  * van runJoostSuggest.
  *
- * Geen autonomy-chain: Simone heeft (nog) geen autonomous-send endpoint;
- * dat is buiten Fase 2-scope. Deze helper levert alleen suggestion-drafts.
+ * Autonomous chain (Simone events): wanneer autonomyEnabled true is, doen
+ * we ná een succesvolle suggestion een HTTP self-call naar
+ * /api/simone-send-autonomous met X-Internal-Token. Pattern 1:1 gespiegeld
+ * met Joost E2.1. Default: autonomyEnabled=false → alleen suggest, geen
+ * send.
  *
  * Persist naar joost_suggestions met module='events' (door runSimoneSuggest).
  */
-function triggerSimoneAutoSuggest({ conversationId, triggeredByMessageId, clientIp, module }) {
+function triggerSimoneAutoSuggest({ conversationId, triggeredByMessageId, autonomyEnabled, clientIp, module }) {
   const modLabel = module || 'events';
   console.log(
     '[inbox-webhook] reactive suggest start module=' + modLabel +
     ' conv=' + conversationId +
-    ' agent=simone'
+    ' agent=simone' +
+    ' autonomy=' + (autonomyEnabled ? 'on' : 'off')
   );
 
   waitUntil(
@@ -576,6 +580,55 @@ function triggerSimoneAutoSuggest({ conversationId, triggeredByMessageId, client
         ' agent=simone' +
         ' intent=' + (intent || '?')
       );
+
+      if (!autonomyEnabled) return;
+      if (!suggestionId) {
+        console.warn(
+          '[inbox-webhook] reactive suggest skipped autonomy chain: geen suggestion.id ' +
+          'module=' + modLabel + ' agent=simone conv=' + conversationId
+        );
+        return;
+      }
+
+      // ── Simone autonomous chain — HTTP self-call (spiegel Joost E2.1) ──
+      const token = process.env.INTERNAL_API_TOKEN;
+      if (!token) {
+        console.warn(
+          '[inbox-webhook] reactive suggest skipped autonomy chain: ' +
+          'INTERNAL_API_TOKEN ontbreekt module=' + modLabel + ' agent=simone'
+        );
+        return;
+      }
+      const base = process.env.VERCEL_URL
+        ? `https://${process.env.VERCEL_URL}`
+        : (process.env.APP_BASE_URL || 'http://localhost:3000');
+      const autonomousUrl = `${base}/api/simone-send-autonomous`;
+      return fetch(autonomousUrl, {
+        method:  'POST',
+        headers: {
+          'content-type':     'application/json',
+          'x-internal-token': token,
+        },
+        body: JSON.stringify({ suggestion_id: suggestionId }),
+      }).then(async (resp2) => {
+        if (!resp2.ok) {
+          const txt = await resp2.text().catch(() => '');
+          console.warn(
+            '[inbox-webhook] reactive suggest autonomy chain HTTP ' + resp2.status +
+            ' module=' + modLabel + ' agent=simone: ' + txt.slice(0, 200)
+          );
+        } else {
+          console.log(
+            '[inbox-webhook] reactive suggest autonomy chain HTTP 200 ' +
+            'module=' + modLabel + ' agent=simone suggestion=' + suggestionId
+          );
+        }
+      }).catch((e2) => {
+        console.warn(
+          '[inbox-webhook] reactive suggest autonomy chain fetch fail ' +
+          'module=' + modLabel + ' agent=simone: ' + (e2 && e2.message)
+        );
+      });
     }).catch((e) => {
       console.warn(
         '[inbox-webhook] reactive suggest threw module=' + modLabel +
@@ -1402,9 +1455,16 @@ export default async function handler(req, res) {
                         if (isTriggerable) {
                           const noLoop = await hasNoRecentOutbound(conv.id, 60);
                           if (noLoop) {
+                            // Autonomy alleen ketenen wanneer
+                            // feature_flags.events_reactive_autonomy aan staat.
+                            // Default UIT → triggerSimoneAutoSuggest doet alleen
+                            // de suggest-stap; geen self-call naar
+                            // /api/simone-send-autonomous.
+                            const sAutonomyEnabled = sFlags.events_reactive_autonomy === true;
                             triggerSimoneAutoSuggest({
                               conversationId:       conv.id,
                               triggeredByMessageId: insRes.messageId,
+                              autonomyEnabled:      sAutonomyEnabled,
                               clientIp:             getClientIp(req),
                               module:               scfg.module || moduleCtx?.module || null,
                             });

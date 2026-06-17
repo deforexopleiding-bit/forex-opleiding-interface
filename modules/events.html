@@ -426,7 +426,7 @@ function renderPage(canCreate, canViewInbox, canManageSignupInbox) {
   // zichtbaar bij events.inbox.view permissie. Default tab = 'overzicht'
   // zodat bestaand gedrag onveranderd is.
   const inboxTabBtn = canViewInbox
-    ? '<button class="ev-tab" data-evtab="inbox"><i class="ti ti-inbox"></i> Inbox</button>'
+    ? '<button class="ev-tab" data-evtab="inbox"><i class="ti ti-inbox"></i> Inbox <span id="evInboxManualBadge" style="display:none;background:rgba(220,38,38,0.15);color:#b91c1c;border-radius:10px;padding:1px 7px;font-size:10.5px;font-weight:700;margin-left:4px">0</span></button>'
     : '';
   // Inschrijvingen-inbox tab: alleen zichtbaar bij events.attendee.create
   // (zelfde gate als de onderliggende -list / -resolve endpoints).
@@ -2235,55 +2235,261 @@ async function loadSimoneConfig() {
   }
 }
 
+// Intent-keys voor de events-agent. Cancel_or_reschedule + escalation_needed
+// zijn "altijd mens" — read-only weergegeven in de form. Andere 5 intents
+// hebben aan/uit + confidence-drempel.
+const SC_INTENT_KEYS = ['event_info', 'date_location', 'registration_intent', 'logistics', 'general_question'];
+const SC_LOCKED_INTENT_KEYS = ['cancel_or_reschedule', 'escalation_needed'];
+const SC_INTENT_LABELS = {
+  event_info:           'Event-info',
+  date_location:        'Datum / locatie',
+  registration_intent:  'Aanmeld-intentie',
+  logistics:            'Logistiek',
+  general_question:     'Algemene vraag',
+  cancel_or_reschedule: 'Annuleren / verzetten',
+  escalation_needed:    'Escalatie nodig',
+};
+const SC_MODELS_ALLOWED = ['claude-sonnet-4-6', 'claude-opus-4-7', 'claude-haiku-4-5'];
+
+function _scAutonomy() {
+  return (_simoneCfg && _simoneCfg.autonomy_config && typeof _simoneCfg.autonomy_config === 'object')
+    ? _simoneCfg.autonomy_config : {};
+}
+function _scIntents() {
+  const a = _scAutonomy();
+  return (a.intents && typeof a.intents === 'object') ? a.intents : {};
+}
+function _scComm() {
+  const a = _scAutonomy();
+  return (a.communication_limits && typeof a.communication_limits === 'object') ? a.communication_limits : {};
+}
+function _scPersonality() {
+  const a = _scAutonomy();
+  return (a.personality && typeof a.personality === 'object') ? a.personality : {};
+}
+
 function renderSimoneConfigForm() {
   const wrap = document.getElementById('simoneCfgForm');
   if (!wrap || !_simoneCfg) return;
   const ff = (_simoneCfg.feature_flags && typeof _simoneCfg.feature_flags === 'object') ? _simoneCfg.feature_flags : {};
-  const isEnabled = _simoneCfg.is_enabled !== false;
-  const reactive  = ff.reactive_suggest_enabled === true;
-  const updatedAt = _simoneCfg.updated_at
+  const isEnabled       = _simoneCfg.is_enabled !== false;
+  const reactive        = ff.reactive_suggest_enabled === true;
+  const autonomous      = ff.events_reactive_autonomy === true;
+  const updatedAt       = _simoneCfg.updated_at
     ? new Date(_simoneCfg.updated_at).toLocaleString('nl-NL')
     : '—';
+  const model           = _simoneCfg.model || 'claude-sonnet-4-6';
+  const temperature     = Number.isFinite(Number(_simoneCfg.temperature)) ? Number(_simoneCfg.temperature) : 0.3;
+  const ctxCount        = Number.isFinite(Number(_simoneCfg.context_message_count)) ? Number(_simoneCfg.context_message_count) : 20;
+  const intentsCfg      = _scIntents();
+  const comm            = _scComm();
+  const personality     = _scPersonality();
+  const ohOn            = comm.office_hours_only !== false;
+  const ohTz            = comm.office_hours_tz   || 'Europe/Amsterdam';
+  const ohDays          = Array.isArray(comm.office_hours_days) ? comm.office_hours_days : [1,2,3,4,5];
+  const ohStart         = comm.office_hours_start || '08:30';
+  const ohEnd           = comm.office_hours_end   || '21:00';
+  const maxPerDay       = Number.isFinite(Number(comm.max_messages_per_conversation_per_day))
+    ? Number(comm.max_messages_per_conversation_per_day) : 3;
+  const maxTotal        = Number.isFinite(Number(comm.max_messages_per_conversation_total))
+    ? Number(comm.max_messages_per_conversation_total) : 20;
+  const cooldownMin     = Number.isFinite(Number(comm.cooldown_after_outbound_minutes))
+    ? Number(comm.cooldown_after_outbound_minutes) : 30;
+  const noReplyTh       = Number.isFinite(Number(comm.no_reply_pause_threshold))
+    ? Number(comm.no_reply_pause_threshold) : 3;
+  const noReplyHrs      = Number.isFinite(Number(comm.no_reply_pause_duration_hours))
+    ? Number(comm.no_reply_pause_duration_hours) : 48;
+  const maxChars        = Number.isFinite(Number(personality.max_message_chars))
+    ? Number(personality.max_message_chars) : 480;
+  const emojiPolicy     = personality.emoji_policy || 'sparingly';
+  const useTutoyeer     = personality.use_tutoyeer !== false;
+  const dayLabels       = ['ma','di','wo','do','vr','za','zo'];
+
+  const modelOptions = SC_MODELS_ALLOWED.map((m) =>
+    '<option value="' + esc(m) + '"' + (m === model ? ' selected' : '') + '>' + esc(m) + '</option>'
+  ).join('');
+  const dayCheckboxes = dayLabels.map((lbl, idx) => {
+    const d = idx + 1; // 1=ma..7=zo
+    const on = ohDays.includes(d);
+    return '<label style="display:inline-flex;align-items:center;gap:4px;font-size:12px;margin-right:8px">'
+         +   '<input type="checkbox" class="sc-oh-day" data-day="' + d + '"' + (on ? ' checked' : '') + ' /> ' + esc(lbl)
+         + '</label>';
+  }).join('');
+
+  const intentRows = SC_INTENT_KEYS.map((k) => {
+    const cur = intentsCfg[k] || {};
+    const on  = cur.mode === 'autonomous';
+    const thr = Number.isFinite(Number(cur.min_confidence)) ? Number(cur.min_confidence) : 0.85;
+    return ''
+      + '<div style="display:grid;grid-template-columns:1fr auto 100px;gap:10px;align-items:center;padding:6px 0;border-top:1px dashed var(--border)">'
+      +   '<div style="font-size:13px;font-weight:600">' + esc(SC_INTENT_LABELS[k] || k) + '</div>'
+      +   '<label style="display:inline-flex;gap:6px;align-items:center;font-size:12px;cursor:pointer">'
+      +     '<input type="checkbox" class="sc-intent-mode" data-key="' + esc(k) + '"' + (on ? ' checked' : '') + ' />'
+      +     '<span>autonoom</span>'
+      +   '</label>'
+      +   '<input type="number" class="sc-intent-conf" data-key="' + esc(k) + '" min="0" max="1" step="0.05" value="' + esc(thr.toFixed(2)) + '" style="padding:4px 6px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:12.5px;text-align:right" title="Minimale confidence-drempel" />'
+      + '</div>';
+  }).join('');
+  const lockedRows = SC_LOCKED_INTENT_KEYS.map((k) => ''
+    + '<div style="display:grid;grid-template-columns:1fr auto;gap:10px;align-items:center;padding:6px 0;border-top:1px dashed var(--border);opacity:.7">'
+    +   '<div style="font-size:13px;font-weight:600">' + esc(SC_INTENT_LABELS[k] || k) + '</div>'
+    +   '<span style="font-size:11.5px;color:var(--text-faint);font-style:italic">altijd mens — niet aanpasbaar</span>'
+    + '</div>'
+  ).join('');
+
   wrap.innerHTML =
-      '<div style="display:grid;grid-template-columns:200px 1fr;gap:14px;align-items:start">'
-    +   '<label style="font-size:13px;font-weight:600;padding-top:8px">Persona-naam</label>'
-    +   '<input id="scPersonaName" type="text" maxlength="100" style="padding:8px 10px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-family:inherit;font-size:13.5px" value="' + esc(_simoneCfg.persona_name || 'Simone') + '" />'
+      '<div style="display:flex;flex-direction:column;gap:18px">'
 
-    +   '<label style="font-size:13px;font-weight:600;padding-top:8px">Persona-toon</label>'
-    +   '<input id="scPersonaTone" type="text" maxlength="500" style="padding:8px 10px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-family:inherit;font-size:13.5px" value="' + esc(_simoneCfg.persona_tone || '') + '" />'
-
-    +   '<label style="font-size:13px;font-weight:600;padding-top:8px">System-prompt template</label>'
-    +   '<textarea id="scSystemPrompt" maxlength="10000" style="padding:10px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-family:inherit;font-size:13px;line-height:1.55;min-height:240px;resize:vertical">' + esc(_simoneCfg.system_prompt_template || '') + '</textarea>'
-
-    +   '<label style="font-size:13px;font-weight:600;padding-top:8px">Status</label>'
-    +   '<div>'
-    +     '<label style="display:inline-flex;gap:8px;align-items:center;font-size:13px;cursor:pointer">'
-    +       '<input id="scIsEnabled" type="checkbox" ' + (isEnabled ? 'checked' : '') + ' />'
-    +       '<span>Simone is geactiveerd (is_enabled)</span>'
-    +     '</label>'
-    +     '<div style="font-size:11.5px;color:var(--text-faint);margin-top:4px">Uit zetten zorgt dat alle suggest-aanroepen 503 teruggeven.</div>'
-    +   '</div>'
-
-    +   '<label style="font-size:13px;font-weight:600;padding-top:8px">Reactieve auto-suggest</label>'
-    +   '<div>'
-    +     '<label style="display:inline-flex;gap:8px;align-items:center;font-size:13px;cursor:pointer">'
-    +       '<input id="scReactiveEnabled" type="checkbox" ' + (reactive ? 'checked' : '') + ' />'
-    +       '<span>feature_flags.reactive_suggest_enabled</span>'
-    +     '</label>'
-    +     '<div style="font-size:11.5px;color:var(--text-faint);margin-top:4px">'
-    +     'Aan = events-inbound triggert in-process Simone via webhook (Fase 2 stap 2b). Default uit tot go-live.'
+    // ── Status + autonomous-master-switch ─────────────────────────────────
+    +   '<section style="background:var(--bg-elev);border:1px solid var(--border);border-radius:10px;padding:12px 14px">'
+    +     '<div style="font-size:12px;font-weight:700;color:var(--text-faint);text-transform:uppercase;letter-spacing:.04em;margin-bottom:8px">Algemeen</div>'
+    +     '<div style="display:grid;grid-template-columns:200px 1fr;gap:10px;align-items:start">'
+    +       '<label style="font-size:13px;font-weight:600;padding-top:6px">Simone actief</label>'
+    +       '<div>'
+    +         '<label style="display:inline-flex;gap:8px;align-items:center;font-size:13px;cursor:pointer">'
+    +           '<input id="scIsEnabled" type="checkbox" ' + (isEnabled ? 'checked' : '') + ' />'
+    +           '<span>is_enabled — uit zet alle suggest-calls op 503</span>'
+    +         '</label>'
+    +       '</div>'
+    +       '<label style="font-size:13px;font-weight:600;padding-top:6px">Reactieve suggest</label>'
+    +       '<div>'
+    +         '<label style="display:inline-flex;gap:8px;align-items:center;font-size:13px;cursor:pointer">'
+    +           '<input id="scReactiveEnabled" type="checkbox" ' + (reactive ? 'checked' : '') + ' />'
+    +           '<span>Inbound triggert Simone-suggestie (webhook)</span>'
+    +         '</label>'
+    +         '<div style="font-size:11.5px;color:var(--text-faint);margin-top:4px">Default uit. Met uit blijft Simone wachten op handmatig "Vraag Simone".</div>'
+    +       '</div>'
+    +       '<label style="font-size:13px;font-weight:600;padding-top:6px">Simone verstuurt zelf</label>'
+    +       '<div>'
+    +         '<label style="display:inline-flex;gap:8px;align-items:center;font-size:13px;cursor:pointer">'
+    +           '<input id="scAutonomousEnabled" type="checkbox" ' + (autonomous ? 'checked' : '') + ' />'
+    +           '<span><strong>events_reactive_autonomy</strong> — Simone verstuurt suggesties autonoom</span>'
+    +         '</label>'
+    +         '<div style="font-size:11.5px;color:#b45309;margin-top:4px">'
+    +         '<i class="ti ti-alert-triangle"></i> Pas actief als deze aan staat. Suggesties die de drempels passeren worden direct verstuurd zonder menselijke review.'
+    +         '</div>'
+    +       '</div>'
     +     '</div>'
-    +   '</div>'
+    +   '</section>'
 
-    +   '<div></div>'
+    // ── Pause-all ─────────────────────────────────────────────────────────
+    +   '<section style="background:var(--bg-elev);border:1px solid var(--border);border-radius:10px;padding:12px 14px">'
+    +     '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">'
+    +       '<div style="font-size:12px;font-weight:700;color:var(--text-faint);text-transform:uppercase;letter-spacing:.04em">Globale pauze</div>'
+    +     '</div>'
+    +     '<div style="font-size:12.5px;color:var(--text-dim);margin-bottom:8px">Pause-all schakelt <code>is_enabled</code> én alle autonomous-flags meteen uit. Ideaal bij een incident — geen reset van per-intent instellingen.</div>'
+    +     '<button class="btn btn-sm" type="button" id="scPauseAllBtn" style="border-color:#b91c1c;color:#b91c1c"><i class="ti ti-player-pause"></i> Pauzeer Simone</button>'
+    +   '</section>'
+
+    // ── Persona / prompt / model ─────────────────────────────────────────
+    +   '<section style="background:var(--bg-elev);border:1px solid var(--border);border-radius:10px;padding:12px 14px">'
+    +     '<div style="font-size:12px;font-weight:700;color:var(--text-faint);text-transform:uppercase;letter-spacing:.04em;margin-bottom:8px">Persona &amp; prompt</div>'
+    +     '<div style="display:grid;grid-template-columns:200px 1fr;gap:14px;align-items:start">'
+    +       '<label style="font-size:13px;font-weight:600;padding-top:8px">Persona-naam</label>'
+    +       '<input id="scPersonaName" type="text" maxlength="100" style="padding:8px 10px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-family:inherit;font-size:13.5px" value="' + esc(_simoneCfg.persona_name || 'Simone') + '" />'
+    +       '<label style="font-size:13px;font-weight:600;padding-top:8px">Persona-toon</label>'
+    +       '<input id="scPersonaTone" type="text" maxlength="500" style="padding:8px 10px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-family:inherit;font-size:13.5px" value="' + esc(_simoneCfg.persona_tone || '') + '" />'
+    +       '<label style="font-size:13px;font-weight:600;padding-top:8px">System-prompt template</label>'
+    +       '<textarea id="scSystemPrompt" maxlength="10000" style="padding:10px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-family:inherit;font-size:13px;line-height:1.55;min-height:200px;resize:vertical">' + esc(_simoneCfg.system_prompt_template || '') + '</textarea>'
+    +       '<label style="font-size:13px;font-weight:600;padding-top:8px">Model</label>'
+    +       '<select id="scModel" style="padding:8px 10px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-family:inherit;font-size:13.5px">' + modelOptions + '</select>'
+    +       '<label style="font-size:13px;font-weight:600;padding-top:8px">Temperatuur</label>'
+    +       '<input id="scTemperature" type="number" min="0" max="1" step="0.05" value="' + esc(temperature.toFixed(2)) + '" style="padding:8px 10px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-family:inherit;font-size:13.5px;max-width:120px" />'
+    +       '<label style="font-size:13px;font-weight:600;padding-top:8px">Context-berichten</label>'
+    +       '<input id="scContextCount" type="number" min="5" max="50" step="1" value="' + esc(ctxCount) + '" style="padding:8px 10px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-family:inherit;font-size:13.5px;max-width:120px" />'
+    +     '</div>'
+    +   '</section>'
+
+    // ── Per-intent ────────────────────────────────────────────────────────
+    +   '<section style="background:var(--bg-elev);border:1px solid var(--border);border-radius:10px;padding:12px 14px">'
+    +     '<div style="font-size:12px;font-weight:700;color:var(--text-faint);text-transform:uppercase;letter-spacing:.04em;margin-bottom:8px">Per intent</div>'
+    +     '<div style="font-size:11.5px;color:var(--text-faint);margin-bottom:6px">Vink "autonoom" aan om Simone een bepaald intent zelf te laten beantwoorden zodra de confidence-drempel gehaald wordt.</div>'
+    +     '<div>' + intentRows + lockedRows + '</div>'
+    +   '</section>'
+
+    // ── Communicatie-limieten ─────────────────────────────────────────────
+    +   '<section style="background:var(--bg-elev);border:1px solid var(--border);border-radius:10px;padding:12px 14px">'
+    +     '<div style="font-size:12px;font-weight:700;color:var(--text-faint);text-transform:uppercase;letter-spacing:.04em;margin-bottom:8px">Communicatie-limieten</div>'
+    +     '<div style="display:grid;grid-template-columns:220px 1fr;gap:10px;align-items:start">'
+    +       '<label style="font-size:13px;font-weight:600;padding-top:6px">Kantooruren-only</label>'
+    +       '<div>'
+    +         '<label style="display:inline-flex;gap:8px;align-items:center;font-size:13px;cursor:pointer">'
+    +           '<input id="scOhOn" type="checkbox" ' + (ohOn ? 'checked' : '') + ' />'
+    +           '<span>Alleen versturen binnen kantooruren</span>'
+    +         '</label>'
+    +       '</div>'
+    +       '<label style="font-size:13px;font-weight:600;padding-top:6px">Tijdzone</label>'
+    +       '<input id="scOhTz" type="text" value="' + esc(ohTz) + '" style="padding:6px 9px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-size:13px;max-width:240px" />'
+    +       '<label style="font-size:13px;font-weight:600;padding-top:6px">Dagen</label>'
+    +       '<div>' + dayCheckboxes + '</div>'
+    +       '<label style="font-size:13px;font-weight:600;padding-top:6px">Tijdsvenster</label>'
+    +       '<div style="display:flex;gap:8px;align-items:center">'
+    +         '<input id="scOhStart" type="time" value="' + esc(ohStart) + '" style="padding:6px 9px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-size:13px" />'
+    +         '<span style="font-size:12px;color:var(--text-faint)">tot</span>'
+    +         '<input id="scOhEnd" type="time" value="' + esc(ohEnd) + '" style="padding:6px 9px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-size:13px" />'
+    +       '</div>'
+    +       '<label style="font-size:13px;font-weight:600;padding-top:6px">Max berichten / dag</label>'
+    +       '<input id="scMaxPerDay" type="number" min="0" max="50" step="1" value="' + esc(maxPerDay) + '" style="padding:6px 9px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-size:13px;max-width:120px" />'
+    +       '<label style="font-size:13px;font-weight:600;padding-top:6px">Max berichten totaal</label>'
+    +       '<input id="scMaxTotal" type="number" min="0" max="500" step="1" value="' + esc(maxTotal) + '" style="padding:6px 9px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-size:13px;max-width:120px" />'
+    +       '<label style="font-size:13px;font-weight:600;padding-top:6px">Cooldown (min)</label>'
+    +       '<input id="scCooldown" type="number" min="0" max="1440" step="1" value="' + esc(cooldownMin) + '" style="padding:6px 9px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-size:13px;max-width:120px" />'
+    +       '<label style="font-size:13px;font-weight:600;padding-top:6px">No-reply pauze</label>'
+    +       '<div style="display:flex;gap:8px;align-items:center">'
+    +         '<input id="scNoReplyTh" type="number" min="0" max="20" step="1" value="' + esc(noReplyTh) + '" style="padding:6px 9px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-size:13px;max-width:80px" />'
+    +         '<span style="font-size:12px;color:var(--text-faint)">berichten zonder reply →</span>'
+    +         '<input id="scNoReplyHrs" type="number" min="1" max="720" step="1" value="' + esc(noReplyHrs) + '" style="padding:6px 9px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-size:13px;max-width:80px" />'
+    +         '<span style="font-size:12px;color:var(--text-faint)">uur pauze</span>'
+    +       '</div>'
+    +     '</div>'
+    +   '</section>'
+
+    // ── Persoonlijkheid ──────────────────────────────────────────────────
+    +   '<section style="background:var(--bg-elev);border:1px solid var(--border);border-radius:10px;padding:12px 14px">'
+    +     '<div style="font-size:12px;font-weight:700;color:var(--text-faint);text-transform:uppercase;letter-spacing:.04em;margin-bottom:8px">Persoonlijkheid</div>'
+    +     '<div style="display:grid;grid-template-columns:220px 1fr;gap:10px;align-items:start">'
+    +       '<label style="font-size:13px;font-weight:600;padding-top:6px">Tutoyeren</label>'
+    +       '<div>'
+    +         '<label style="display:inline-flex;gap:8px;align-items:center;font-size:13px;cursor:pointer">'
+    +           '<input id="scTutoyeer" type="checkbox" ' + (useTutoyeer ? 'checked' : '') + ' />'
+    +           '<span>Spreek de deelnemer aan met "je" (anders "u")</span>'
+    +         '</label>'
+    +       '</div>'
+    +       '<label style="font-size:13px;font-weight:600;padding-top:6px">Max bericht-tekens</label>'
+    +       '<input id="scMaxChars" type="number" min="50" max="4096" step="10" value="' + esc(maxChars) + '" style="padding:6px 9px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-size:13px;max-width:120px" />'
+    +       '<label style="font-size:13px;font-weight:600;padding-top:6px">Emoji-beleid</label>'
+    +       '<select id="scEmojiPolicy" style="padding:6px 9px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-size:13px;max-width:200px">'
+    +         '<option value="never"'      + (emojiPolicy === 'never'      ? ' selected' : '') + '>nooit</option>'
+    +         '<option value="sparingly"'  + (emojiPolicy === 'sparingly'  ? ' selected' : '') + '>spaarzaam</option>'
+    +         '<option value="welcome"'    + (emojiPolicy === 'welcome'    ? ' selected' : '') + '>welkom</option>'
+    +       '</select>'
+    +     '</div>'
+    +   '</section>'
+
     +   '<div style="font-size:11px;color:var(--text-faint)">Laatste update: ' + esc(updatedAt) + '</div>'
     + '</div>';
 
-  ['scPersonaName','scPersonaTone','scSystemPrompt','scIsEnabled','scReactiveEnabled'].forEach((id) => {
-    const el = document.getElementById(id);
-    if (!el) return;
-    el.addEventListener(el.type === 'checkbox' ? 'change' : 'input', _scMarkDirty);
+  // Wire dirty-tracking voor alle inputs/selects/checkboxes binnen het form.
+  wrap.querySelectorAll('input,select,textarea').forEach((el) => {
+    const ev = (el.type === 'checkbox' || el.tagName === 'SELECT') ? 'change' : 'input';
+    el.addEventListener(ev, _scMarkDirty);
   });
+  const pauseBtn = document.getElementById('scPauseAllBtn');
+  if (pauseBtn) pauseBtn.addEventListener('click', _scPauseAll);
+}
+
+// Pause-all: zet is_enabled + alle autonomous-vlaggen lokaal uit, markeert
+// het form dirty zodat de Opslaan-knop actief wordt. Geen direct POST —
+// operator kan nog tweaken vóór commit.
+function _scPauseAll() {
+  const en = document.getElementById('scIsEnabled');
+  const re = document.getElementById('scReactiveEnabled');
+  const au = document.getElementById('scAutonomousEnabled');
+  if (en) en.checked = false;
+  if (re) re.checked = false;
+  if (au) au.checked = false;
+  _scMarkDirty();
+  _scShowBanner('Pauze-keuzes gezet. Klik op Opslaan om door te voeren.', 'info');
 }
 
 async function saveSimoneConfig() {
@@ -2295,11 +2501,76 @@ async function saveSimoneConfig() {
     const personaName = (document.getElementById('scPersonaName').value || '').trim();
     const personaTone = (document.getElementById('scPersonaTone').value || '').trim();
     const systemPrompt = document.getElementById('scSystemPrompt').value || '';
-    const isEnabled = !!document.getElementById('scIsEnabled').checked;
-    const reactive  = !!document.getElementById('scReactiveEnabled').checked;
+    const isEnabled  = !!document.getElementById('scIsEnabled').checked;
+    const reactive   = !!document.getElementById('scReactiveEnabled').checked;
+    const autonomous = !!document.getElementById('scAutonomousEnabled').checked;
+    const model      = document.getElementById('scModel').value || 'claude-sonnet-4-6';
+    const tempRaw    = Number(document.getElementById('scTemperature').value);
+    const ctxRaw     = Number(document.getElementById('scContextCount').value);
+    const temperature = Number.isFinite(tempRaw) ? Math.min(1, Math.max(0, tempRaw)) : 0.3;
+    const context_message_count = Number.isInteger(ctxRaw) ? Math.min(50, Math.max(5, ctxRaw)) : 20;
+
+    // Per-intent autonomy-cfg samenstellen uit de form.
+    const intents = {};
+    SC_INTENT_KEYS.forEach((k) => {
+      const onEl = document.querySelector('.sc-intent-mode[data-key="' + k + '"]');
+      const thEl = document.querySelector('.sc-intent-conf[data-key="' + k + '"]');
+      const on = onEl && onEl.checked;
+      const th = thEl ? Number(thEl.value) : NaN;
+      intents[k] = {
+        mode: on ? 'autonomous' : 'disabled',
+        min_confidence: Number.isFinite(th) ? Math.min(1, Math.max(0, Math.round(th * 100) / 100)) : 0.85,
+      };
+    });
+    intents.cancel_or_reschedule = { mode: 'disabled' };
+    intents.escalation_needed    = { mode: 'disabled' };
+    intents.other                = { mode: 'disabled' };
+
+    // Communicatie-limieten.
+    const ohDays = Array.from(document.querySelectorAll('.sc-oh-day'))
+      .filter((el) => el.checked)
+      .map((el) => Number(el.dataset.day))
+      .filter((n) => Number.isInteger(n) && n >= 1 && n <= 7)
+      .sort((a, b) => a - b);
+    const communication_limits = {
+      max_messages_per_conversation_per_day: Math.max(0, Math.min(50, Number(document.getElementById('scMaxPerDay').value) || 3)),
+      max_messages_per_conversation_total:   Math.max(0, Math.min(500, Number(document.getElementById('scMaxTotal').value) || 20)),
+      cooldown_after_outbound_minutes:       Math.max(0, Math.min(1440, Number(document.getElementById('scCooldown').value) || 30)),
+      no_reply_pause_threshold:              Math.max(0, Math.min(20, Number(document.getElementById('scNoReplyTh').value) || 3)),
+      no_reply_pause_duration_hours:         Math.max(1, Math.min(720, Number(document.getElementById('scNoReplyHrs').value) || 48)),
+      office_hours_only:  !!document.getElementById('scOhOn').checked,
+      office_hours_tz:    (document.getElementById('scOhTz').value || 'Europe/Amsterdam').trim(),
+      office_hours_days:  ohDays.length > 0 ? ohDays : [1,2,3,4,5],
+      office_hours_start: document.getElementById('scOhStart').value || '08:30',
+      office_hours_end:   document.getElementById('scOhEnd').value   || '21:00',
+    };
+
+    // Persoonlijkheid.
+    const personality = {
+      tone:            personaTone || 'vriendelijk-professioneel',
+      use_tutoyeer:    !!document.getElementById('scTutoyeer').checked,
+      max_message_chars: Math.max(50, Math.min(4096, Number(document.getElementById('scMaxChars').value) || 480)),
+      emoji_policy:    document.getElementById('scEmojiPolicy').value || 'sparingly',
+    };
+
+    // Full read-modify-write op feature_flags + autonomy_config: behoud
+    // bestaande sleutels die de UI niet kent (forward-compat).
     const ffExisting = (_simoneCfg.feature_flags && typeof _simoneCfg.feature_flags === 'object')
       ? _simoneCfg.feature_flags : {};
-    const feature_flags = { ...ffExisting, reactive_suggest_enabled: reactive };
+    const feature_flags = {
+      ...ffExisting,
+      reactive_suggest_enabled: reactive,
+      events_reactive_autonomy: autonomous,
+    };
+    const acExisting = (_simoneCfg.autonomy_config && typeof _simoneCfg.autonomy_config === 'object')
+      ? _simoneCfg.autonomy_config : {};
+    const autonomy_config = {
+      ...acExisting,
+      intents,
+      communication_limits,
+      personality,
+    };
+
     if (!personaName) {
       _scShowBanner('Persona-naam mag niet leeg zijn', 'error');
       if (btn) btn.disabled = false;
@@ -2313,8 +2584,12 @@ async function saveSimoneConfig() {
         persona_name: personaName,
         persona_tone: personaTone || 'vriendelijk-professioneel',
         system_prompt_template: systemPrompt,
+        model,
+        temperature,
+        context_message_count,
         is_enabled: isEnabled,
         feature_flags,
+        autonomy_config,
       }),
     });
     const d = await r.json().catch(() => ({}));
@@ -2768,6 +3043,13 @@ async function init() {
   const canManageSignupInbox = window.RBAC.canSync('events.attendee.create');
   renderPage(canCreate, canViewInbox, canManageSignupInbox);
   await Promise.all([loadNiveauOptions(), loadEvents()]);
+  // Inbox-badge: initial-fetch + periodieke refresh zodat de Inbox-tab óók
+  // teller bijwerkt wanneer de operator op de Overzicht-tab staat. Alleen
+  // als de user 'm überhaupt mag zien.
+  if (canViewInbox) {
+    _evRefreshInboxManualBadge();
+    _evInstallInboxManualBadgeInterval();
+  }
 }
 
 // ── Fase 1: events-inbox (read-only) ─────────────────────────────────────────
@@ -2796,6 +3078,10 @@ async function loadEventsInbox() {
       return;
     }
     const items = Array.isArray(j.items) ? j.items : [];
+    // Rode badge bij de Inbox-tab: aantal gesprekken dat een handmatig
+    // antwoord nodig heeft = items met unread_count > 0. Zodra Simone of een
+    // mens antwoordt, daalt deze waarde vanzelf bij de volgende refresh.
+    _evUpdateInboxManualBadge(items);
     if (items.length === 0) {
       list.innerHTML = '<div class="empty-state" style="padding:24px;text-align:center">'
         + '<div class="empty-icon"><i class="ti ti-inbox"></i></div>'
@@ -2855,6 +3141,54 @@ async function loadEventsInbox() {
   } catch (e) {
     list.innerHTML = '<div class="empty-state"><div style="color:#b91c1c;font-size:13px">Fout: ' + esc(e.message) + '</div></div>';
   }
+}
+
+// Rode badge bij de Events Inbox-tab. Telt het aantal events-conversaties
+// dat een handmatig antwoord nodig heeft (unread_count > 0). Bron =
+// /api/inbox-conversations-list?module=events. Zodra Simone of een mens
+// antwoordt, daalt 'ie vanzelf bij de volgende refresh.
+function _evUpdateInboxManualBadge(items) {
+  const badge = document.getElementById('evInboxManualBadge');
+  if (!badge) return;
+  if (!Array.isArray(items)) { badge.style.display = 'none'; return; }
+  let n = 0;
+  for (const it of items) {
+    if (Number(it && it.unread_count) > 0) n++;
+  }
+  if (n > 0) { badge.textContent = String(n); badge.style.display = ''; }
+  else       { badge.style.display = 'none'; }
+}
+
+// Lichte refresh van alleen de badge — gebruikt voor de init-fetch + periodiek
+// poll-interval zodat een operator op een andere tab de teller ziet stijgen.
+async function _evRefreshInboxManualBadge() {
+  try {
+    const r = await window.AgentShared.apiFetch('/api/inbox-conversations-list?module=events&limit=100');
+    if (!r.ok) return;
+    const j = await r.json().catch(() => ({}));
+    if (!j || j.configured === false) {
+      const badge = document.getElementById('evInboxManualBadge');
+      if (badge) badge.style.display = 'none';
+      return;
+    }
+    _evUpdateInboxManualBadge(Array.isArray(j.items) ? j.items : []);
+  } catch (_e) {
+    // Stille no-op — badge mag nooit de hele Events-module breken.
+  }
+}
+
+// Eénmalige periodieke refresh-installatie (idempotent). 60s — voldoende
+// snel om binnen 1 minuut te zien dat er een nieuw gesprek wacht, traag
+// genoeg om server niet te overspoelen.
+function _evInstallInboxManualBadgeInterval() {
+  if (window._evInboxManualBadgeTimer) return;
+  window._evInboxManualBadgeTimer = setInterval(_evRefreshInboxManualBadge, 60000);
+  window.addEventListener('beforeunload', () => {
+    if (window._evInboxManualBadgeTimer) {
+      clearInterval(window._evInboxManualBadgeTimer);
+      window._evInboxManualBadgeTimer = null;
+    }
+  });
 }
 
 // ── Fase 2 stap 2c: events thread + Simone interactie ────────────────────────
