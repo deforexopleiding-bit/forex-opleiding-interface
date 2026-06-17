@@ -17,6 +17,7 @@
 import { supabaseAdmin } from '../supabase.js';
 import { sendEventMail, wrapEmailHtml } from '../mailer.js';
 import { sendEventWhatsAppTemplate } from './events-send.js';
+import { logComms, mapMailStatus, mapSendStatus } from './comms-log.js';
 
 const PUBLIC_BASE_URL = process.env.PUBLIC_BASE_URL || 'https://forex-opleiding-interface.vercel.app';
 const TEMPLATE_NAME   = process.env.EVENTS_KEUZE_LINK_TEMPLATE_NAME || 'events_keuze_link';
@@ -105,6 +106,40 @@ export async function sendEventAttendeeInvite({ attendeeId, sentByUserId }) {
         toEmail  : attendee.email,
       }),
     ]);
+
+    // FIX 4 — log naar event_attendee_comms_log. Awaited binnen try/catch
+    // (fail-soft) zodat een log-fout het verzenden nooit breekt en de
+    // INSERT op Vercel daadwerkelijk afrondt.
+    try {
+      const waMap = mapSendStatus(waResult);
+      await logComms({
+        attendeeId:    attendee.id,
+        eventId:       attendee.event_id,
+        channel:       'whatsapp',
+        status:        waMap.status,
+        templateName:  TEMPLATE_NAME,
+        sentByUserId:  sentByUserId || null,
+        metaWamid:     waResult?.meta_wamid || null,
+        failureReason: waMap.reason,
+      });
+    } catch (e) {
+      console.error('[events-invite comms-log wa]', e?.message || e);
+    }
+    try {
+      const mailMap = mapMailStatus(mailResult);
+      await logComms({
+        attendeeId:    attendee.id,
+        eventId:       attendee.event_id,
+        channel:       'email',
+        status:        mailMap.status,
+        subject:       'Kies de datum voor je Forex Masterclass',
+        sentByUserId:  sentByUserId || null,
+        messageId:     mailResult?.messageId || null,
+        failureReason: mailMap.reason,
+      });
+    } catch (e) {
+      console.error('[events-invite comms-log mail]', e?.message || e);
+    }
 
     const ok = !!(waResult?.ok || mailResult?.ok);
     return {
