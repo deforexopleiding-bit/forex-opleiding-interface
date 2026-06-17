@@ -772,6 +772,10 @@ function renderAttendeesTab() {
   // van de aanwezige (sessionStorage one-shot voor onbekende klant; URL
   // ?customer_id= voor reeds gekoppelde klant).
   const canCreateQuotation = can('sales.deal.create');
+  // Deel B — Vragenlijst-inzien: per rij gerenderd, maar de RBAC-check
+  // gebeurt één keer hier zodat alle rijen dezelfde knop-zichtbaarheid
+  // delen. Endpoint is /api/events-attendee-assessment-get.
+  const canViewAssessment = can('events.attendee.assessment_view');
 
   // Blok 1: bij gesloten inschrijvingen tonen we Aanwezige-toevoegen knop
   // disabled met tooltip - oplosbaar door eerst te heropen.
@@ -902,13 +906,24 @@ function renderAttendeesTab() {
         const calledTitle = a.called_at ? ('Gebeld op ' + fmtDate(a.called_at)) : 'Nog niet gebeld';
         const calledCell = `<input type="checkbox" class="att-called-chk" data-id="${esc(a.id)}" ${calledChecked} title="${esc(calledTitle)}" style="cursor:pointer" ${canEditAtt ? '' : 'disabled'} />`;
 
+        // TAAL-FILTER: kleine badge wanneer taal !== 'nl' (en niet leeg).
+        // 'en' → amber "EN (een beetje)"; 'anders' → rood "Niet-NL".
+        // Geen badge bij 'nl' of ontbrekende waarde (oude inzendingen
+        // zonder de taal-vraag).
+        let taalBadge = '';
+        if (a.taal === 'en') {
+          taalBadge = '<span title="Deelnemer gaf aan: een beetje Nederlands" style="display:inline-flex;align-items:center;padding:2px 7px;border-radius:10px;font-size:10.5px;font-weight:700;background:rgba(245,158,11,0.18);color:#b45309;border:1px solid rgba(245,158,11,0.3);margin-left:6px">EN (een beetje)</span>';
+        } else if (a.taal === 'anders') {
+          taalBadge = '<span title="Deelnemer gaf aan: andere taal dan Nederlands" style="display:inline-flex;align-items:center;padding:2px 7px;border-radius:10px;font-size:10.5px;font-weight:700;background:rgba(220,38,38,0.15);color:#b91c1c;border:1px solid rgba(220,38,38,0.3);margin-left:6px">Niet-NL</span>';
+        }
+
         return `
           <tr>
             <td>
               <button class="att-name-btn" data-id="${esc(a.id)}" type="button" title="Toon verzonden en geplande communicatie" style="background:transparent;border:none;padding:0;cursor:pointer;color:inherit;font:inherit;display:inline-flex;align-items:center;gap:5px">
                 <i class="ti ti-chevron-right att-name-caret" id="att-caret-${esc(a.id)}" style="color:var(--text-faint);font-size:14px;transition:transform .15s"></i>
                 <strong>${esc(fullName)}</strong>
-              </button>
+              </button>${taalBadge}
             </td>
             <td>${esc(a.email || '—')}</td>
             <td>${esc(a.phone || '—')}</td>
@@ -924,6 +939,9 @@ function renderAttendeesTab() {
                    inline ✎ → textarea + Opslaan/Annuleren. Render bij open
                    door _renderAttNotes (lees uit state.attendees + canEditAtt). -->
               <div class="att-notes-host" id="att-notes-host-${esc(a.id)}" data-att-id="${esc(a.id)}" style="margin-bottom:12px"></div>
+              ${(hasAssessment && canViewAssessment)
+                ? `<div class="att-assessment-host" id="att-assessment-host-${esc(a.id)}" data-att-id="${esc(a.id)}" style="margin-bottom:12px"></div>`
+                : ''}
               <div class="att-comms-body" id="att-comms-body-${esc(a.id)}">
                 <div style="font-size:12px;color:var(--text-faint)">Laden…</div>
               </div>
@@ -1253,6 +1271,11 @@ async function toggleAttCommsRow(attendeeId) {
   // state.attendees zodat een verse open geen extra fetch nodig heeft.
   _renderAttNotes(attendeeId);
 
+  // Deel B — vragenlijst-inzien initial-state (knop "Vragenlijst bekijken").
+  // De host bestaat alleen als hasAssessment && canViewAssessment in
+  // renderAttendeesTab; bij absentie is dit een no-op.
+  _renderAttAssessmentInitial(attendeeId);
+
   // Lazy fetch (uit cache als al geladen).
   if (_attCommsCache.has(attendeeId)) {
     _renderAttComms(body, _attCommsCache.get(attendeeId));
@@ -1355,6 +1378,118 @@ async function _saveAttNotes(attendeeId) {
     if (saveBtn) { saveBtn.disabled = false; saveBtn.innerHTML = '<i class="ti ti-device-floppy"></i> Opslaan'; }
     if (cancelBtn) cancelBtn.disabled = false;
   }
+}
+
+// ── Deel B — vragenlijst-inzien (per aanwezige) ──────────────────────────────
+//
+// Endpoint: /api/events-attendee-assessment-get (POST { attendee_id }).
+// Gated op events.attendee.assessment_view; de host bestaat alleen als de
+// rij hasAssessment heeft en de user de RBAC-key heeft (zie
+// renderAttendeesTab).
+//
+// Flow:
+//   - initial open uitklap → _renderAttAssessmentInitial → toont "Vragenlijst
+//     bekijken"-knop (collapsed).
+//   - klik → _renderAttAssessmentExpanded → POST + render vraag→antwoord-paren
+//     + routing/skill-context. Bij 404 → "Geen ingevulde vragenlijst."
+const _attAssessmentCache = new Map();
+
+function _renderAttAssessmentInitial(attendeeId) {
+  // Bij open van de uitklap-rij: cache-hit → meteen expanded tonen (geen
+  // tweede fetch). Eerste open → toon de "Vragenlijst bekijken"-knop.
+  if (_attAssessmentCache.has(attendeeId)) {
+    _renderAttAssessmentExpanded(attendeeId);
+    return;
+  }
+  _renderAttAssessmentCollapsed(attendeeId);
+}
+
+function _renderAttAssessmentCollapsed(attendeeId) {
+  const host = document.getElementById('att-assessment-host-' + attendeeId);
+  if (!host) return;
+  host.innerHTML = `
+    <div style="display:flex;align-items:center;gap:10px;padding:8px 10px;background:rgba(99,102,241,.08);border:1px solid rgba(99,102,241,.25);border-radius:8px">
+      <i class="ti ti-clipboard-text" style="color:#6366f1"></i>
+      <span style="font-size:12.5px;color:var(--text-dim);flex:1">Deze aanwezige heeft een ingevulde vragenlijst.</span>
+      <button class="btn btn-sm" type="button" id="att-assessment-show-${esc(attendeeId)}"><i class="ti ti-eye"></i> Vragenlijst bekijken</button>
+    </div>
+  `;
+  const btn = document.getElementById('att-assessment-show-' + attendeeId);
+  if (btn) btn.addEventListener('click', () => _renderAttAssessmentExpanded(attendeeId));
+}
+
+async function _renderAttAssessmentExpanded(attendeeId) {
+  const host = document.getElementById('att-assessment-host-' + attendeeId);
+  if (!host) return;
+  // Loading-state.
+  host.innerHTML = `
+    <div style="padding:10px 12px;background:rgba(99,102,241,.05);border:1px solid rgba(99,102,241,.2);border-radius:8px">
+      <div style="font-size:12px;color:var(--text-faint)">Laden…</div>
+    </div>
+  `;
+  let data;
+  if (_attAssessmentCache.has(attendeeId)) {
+    data = _attAssessmentCache.get(attendeeId);
+  } else {
+    try {
+      const r = await window.AgentShared.apiFetch('/api/events-attendee-assessment-get', {
+        method : 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body   : JSON.stringify({ attendee_id: attendeeId }),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        const msg = (r.status === 404)
+          ? 'Geen ingevulde vragenlijst voor deze deelnemer.'
+          : (j.error || ('HTTP ' + r.status));
+        host.innerHTML = `<div style="padding:10px 12px;background:rgba(220,38,38,.08);border:1px solid rgba(220,38,38,.25);color:#b91c1c;border-radius:8px;font-size:12.5px">${esc(msg)}</div>`;
+        return;
+      }
+      data = j;
+      _attAssessmentCache.set(attendeeId, data);
+    } catch (e) {
+      host.innerHTML = `<div style="padding:10px 12px;background:rgba(220,38,38,.08);border:1px solid rgba(220,38,38,.25);color:#b91c1c;border-radius:8px;font-size:12.5px">Fout: ${esc(e?.message || 'onbekende fout')}</div>`;
+      return;
+    }
+  }
+  const items   = Array.isArray(data.items) ? data.items : [];
+  const routing = data.routing_result ? String(data.routing_result) : '';
+  const skill   = (typeof data.skill_score === 'number') ? data.skill_score : null;
+  const routingTag = routing
+    ? `<span style="display:inline-flex;align-items:center;padding:2px 9px;border-radius:10px;font-size:11px;font-weight:700;background:${
+        routing === 'gevorderd' ? 'rgba(16,185,129,.15);color:#059669'
+        : routing === 'basis'   ? 'rgba(99,102,241,.15);color:#6366f1'
+        :                          'rgba(245,158,11,.15);color:#b45309'
+      }">${esc(routing)}</span>`
+    : '';
+  const skillTag = (skill != null)
+    ? `<span style="font-size:11.5px;color:var(--text-dim)">Skill-score: <strong>${esc(skill)}</strong></span>`
+    : '';
+  const rows = items.length === 0
+    ? '<div style="font-size:12.5px;color:var(--text-faint);padding:10px">Geen antwoorden gevonden.</div>'
+    : items.map((it) => `
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:8px 10px;border-top:1px solid var(--border)">
+          <div style="font-size:12.5px;color:var(--text-dim)">${esc(it.question_label || it.question_key)}</div>
+          <div style="font-size:12.5px;color:var(--text);font-weight:600">${esc(it.answer_label || '')}</div>
+        </div>
+      `).join('');
+  host.innerHTML = `
+    <div style="padding:10px 12px;background:rgba(99,102,241,.05);border:1px solid rgba(99,102,241,.2);border-radius:8px">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
+        <i class="ti ti-clipboard-text" style="color:#6366f1"></i>
+        <strong style="font-size:13px">Ingevulde vragenlijst</strong>
+        <span style="flex:1"></span>
+        ${routingTag}
+        ${skillTag}
+        <button class="btn btn-sm" type="button" id="att-assessment-hide-${esc(attendeeId)}" title="Inklappen"><i class="ti ti-x"></i></button>
+      </div>
+      <div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;overflow:hidden">
+        ${rows}
+      </div>
+    </div>
+  `;
+  const hideBtn = document.getElementById('att-assessment-hide-' + attendeeId);
+  if (hideBtn) hideBtn.addEventListener('click', () => _renderAttAssessmentCollapsed(attendeeId));
 }
 
 function _renderAttComms(host, data) {

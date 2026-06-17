@@ -161,10 +161,42 @@ export default async function handler(req, res) {
       }
     }
 
+    // Taal per aanwezige — mirror van het tags/deals secundaire-fetch-patroon.
+    // Bron: assessment_responses.answers->>'taal' (de nieuwe radio-vraag
+    // 'taal' met waarden 'nl'|'en'|'anders'). Afwezigheid van de vraag
+    // (oude inzendingen) → taal=null; events-detail toont dan geen badge.
+    // Fail-soft: bij DB-fout → taal=null op alle rijen, geen 500.
+    const responseIds = Array.from(new Set(
+      (rows || []).map((r) => r.assessment_response_id).filter(Boolean)
+    ));
+    const taalByResponse = new Map();
+    if (responseIds.length > 0) {
+      try {
+        const { data: respRows, error: respErr } = await supabaseAdmin
+          .from('assessment_responses')
+          .select('id, answers')
+          .in('id', responseIds);
+        if (respErr) {
+          console.error('[events-attendees-list responses]', respErr.message);
+        } else {
+          for (const rr of respRows || []) {
+            const a = rr && rr.answers;
+            const t = (a && typeof a === 'object' && typeof a.taal === 'string')
+              ? a.taal.trim().toLowerCase()
+              : null;
+            taalByResponse.set(rr.id, t || null);
+          }
+        }
+      } catch (e) {
+        console.error('[events-attendees-list responses-fetch]', e?.message || e);
+      }
+    }
+
     const items = (rows || []).map((r) => ({
       ...r,
       tags: tagsByAttendee.get(r.id) || [],
       has_signed_deal: !!(r.deal_id && signedDealIds.has(r.deal_id)),
+      taal: r.assessment_response_id ? (taalByResponse.get(r.assessment_response_id) || null) : null,
     }));
 
     // byStatus counts (zonder paginatie, zonder status-filter, met search).

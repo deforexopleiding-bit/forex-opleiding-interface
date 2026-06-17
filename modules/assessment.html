@@ -726,6 +726,26 @@
         $result.hidden  = false;
       }
 
+      // TAAL-FILTER: render een nette niet-NL melding i.p.v. de routing-
+      // uitkomst. Hergebruikt het bestaande #result-blok zodat de stijl
+      // matched; verbergt de #result-cta-row (datumkiezer/CTA).
+      function renderLanguageBlock() {
+        $result.className = 'result tier-low';
+        $rBadge.textContent  = 'Taal';
+        $rTitle.textContent  = 'Voorlopig alleen in het Nederlands';
+        $rCopy.textContent   = 'Onze trainingen zijn momenteel alleen in het Nederlands. Daarom kunnen we je nu geen datum aanbieden — we nemen contact op als daar verandering in komt.';
+        $rFollow.textContent = 'Bedankt voor je inzending.';
+
+        // GEEN datumkiezer.
+        $ctaRow.hidden = true;
+        // Reset state-velden zodat een verdwaalde register-call onmogelijk wordt.
+        assessmentId      = null;
+        assessmentRouting = null;
+
+        $success.hidden = true;
+        $result.hidden  = false;
+      }
+
       // niveau-matrix moet exact spiegelen wat de server doet
       // (api/_lib/event-registration.js NIVEAU_FROM_ROUTING).
       function niveauForRouting(routing) {
@@ -1007,7 +1027,20 @@
 
           if (r.status === 200 && j.ok) {
             $form.hidden = true;
-            renderResult(j);
+            // TAAL-FILTER: zacht blokkeren bij niet-NL deelnemers. De nieuwe
+            // assessment-vraag met key 'taal' (radio: 'nl'|'en'|'anders')
+            // wordt mee-verstuurd in answers. Bij 'anders' tonen we een
+            // nette mededeling i.p.v. de routing-uitkomst, en GEEN
+            // datumkiezer. 'nl'/'en' en ontbrekende waarde (oude
+            // inzendingen zonder de vraag) → ongewijzigd renderResult.
+            const taalAns = answers && typeof answers.taal === 'string'
+              ? answers.taal.trim().toLowerCase()
+              : '';
+            if (taalAns === 'anders') {
+              renderLanguageBlock();
+            } else {
+              renderResult(j);
+            }
             window.scrollTo({ top: 0, behavior: 'smooth' });
             return;
           }
