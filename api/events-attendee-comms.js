@@ -24,25 +24,31 @@
 //   event_attendee_comms_log. Daar landen nu ook handmatige invite-mails
 //   (api/_lib/events-invite.js) — de oude blinde vlek.
 //
-//   Om geen historie te verliezen ZONDER te dedupen tussen de log en de
-//   3 oude bronnen, knippen we de tijdlijn in twee:
+//   LET OP: handmatige inbox-WhatsApp (compose-panel in events-inbox /
+//   agents) schrijft NIET naar event_attendee_comms_log; alleen events-
+//   invite.js + automation-engine doen dat. Voor die kanaal-mix combineren
+//   we twee strategieën per bron:
 //
-//     cutover = MIN(created_at) van event_attendee_comms_log (globaal,
-//               één query over de hele tabel).
+//   1. Tijd-split via cutover voor bronnen ZONDER stabiele dedup-key:
+//      cutover = MIN(created_at) van event_attendee_comms_log (globaal).
+//      event_automation_run_log (5a) draait op < cutover; vanaf cutover
+//      dekt de comms-log (4) diezelfde stappen.
 //
-//   - vanaf cutover (>=): VERZONDEN-items komen UITSLUITEND uit
-//     event_attendee_comms_log. Status 'sent' en 'failed' tellen als
-//     'verzonden' (poging telt mee voor de tijdlijn); 'skipped' laten we
-//     vallen; 'queued' tonen we ook als 'verzonden' (ingepland → uitgaand).
-//   - vóór cutover (<): VERZONDEN-items komen uit de oude 3 bronnen
-//     (event_automation_run_log + handmatige WA via whatsapp_messages).
-//     Strikte tijd-split garandeert dat een rij niet in beide buckets
-//     verschijnt → geen dedup-key nodig.
+//   2. wamid-dedup voor de WhatsApp-tweesporen:
+//      whatsapp_messages (handmatig, sent_by_user_id IS NOT NULL) leest
+//      ALL-TIME. Invite/automation-WA staat ook in whatsapp_messages MET
+//      meta_wamid + parallel in de comms-log met dezelfde wamid. We
+//      skippen WA-msg-rijen waarvan meta_wamid voorkomt in de Set wamids
+//      die uit de comms-log gehaald zijn → handmatige inbox-WA (lege
+//      wamid of niet in Set) blijft over.
+//
+//   Status mapping comms-log → tijdlijn: 'sent' + 'failed' + 'queued' →
+//   'verzonden'; 'skipped' → niet tonen.
 //
 //   GEPLAND blijft ongewijzigd uit event_automation_runs.next_run_at.
-//   Bij geen enkele rij in event_attendee_comms_log (pre-migration of
-//   lege DB) valt cutover terug op 'now', zodat de oude flow byte-
-//   identiek blijft werken.
+//   Lege event_attendee_comms_log (pre-migration / rollback): cutover =
+//   now → oude 3 bronnen serveren alles; geen wamid in de Set → WA-dedup
+//   is no-op. Byte-identiek aan pre-PR-Y voor die scenario's.
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
@@ -166,10 +172,19 @@ export default async function handler(req, res) {
     //    Dit dekt vanaf go-live: automation-runs (engine schrijft), invite-
     //    mails handmatig (events-invite.js schrijft), en alles wat later
     //    aan logComms() wordt gekoppeld.
+    //
+    //    NB: handmatige inbox-WhatsApp (compose-panel in events-inbox / agents)
+    //    schrijft NIET naar event_attendee_comms_log. Die rijen halen we
+    //    onder in 5b op uit whatsapp_messages — over ALLE tijden, niet
+    //    alleen pre-cutover. Om dubbeltellingen te voorkomen met automation-
+    //    /invite-WA (die wél in de log zitten met meta_wamid), bouwen we
+    //    hier een Set van wamids uit de log; 5b skipt rijen waarvan de
+    //    wamid daarin voorkomt.
+    const wamidsInLog = new Set();
     try {
       const { data: logRows, error: logErr } = await supabaseAdmin
         .from('event_attendee_comms_log')
-        .select('channel, status, sent_at, created_at, template_name, subject, automation_run_id, step_index')
+        .select('channel, status, sent_at, created_at, template_name, subject, automation_run_id, step_index, meta_wamid')
         .eq('attendee_id', attendeeId)
         .eq('direction', 'outbound')
         .gte('created_at', new Date(cutoverMs).toISOString());
@@ -177,6 +192,7 @@ export default async function handler(req, res) {
         console.error('[events-attendee-comms log]', logErr.message);
       }
       for (const r of logRows || []) {
+        if (r.meta_wamid) wamidsInLog.add(r.meta_wamid);
         const timelineStatus = commsLogStatusToTimeline(r.status);
         if (!timelineStatus) continue; // 'skipped' → weglaten
         const channel = r.channel === 'email' || r.channel === 'whatsapp' ? r.channel : null;
@@ -235,10 +251,23 @@ export default async function handler(req, res) {
       }
     }
 
-    // 5b) PRE-CUTOVER manuele uitgaande WhatsApp via customer-koppeling.
-    //     Filter sent_by_user_id IS NOT NULL omdat automation-engine
-    //     sentByUserId=null doorgeeft → die rijen tellen alleen pre-cutover
-    //     mee via 5a (event_automation_run_log).
+    // 5b) Manuele uitgaande WhatsApp via customer-koppeling — ALL-TIME.
+    //
+    //     Handmatige inbox-WA (compose-panel) schrijft niet naar
+    //     event_attendee_comms_log, dus we mogen 'm hier NIET op tijd
+    //     afkappen — dat zou post-cutover handmatige WA onzichtbaar maken.
+    //
+    //     Dedup-veilig via meta_wamid: events-invite.js + automation-engine
+    //     loggen hun WA-rij met meta_wamid in event_attendee_comms_log (zie 4).
+    //     Dezelfde rij staat ook in whatsapp_messages met diezelfde wamid.
+    //     We skippen hier rijen waarvan wamid in wamidsInLog zit — die
+    //     worden al via de comms-log getoond. Rijen met lege wamid of
+    //     wamid niet in de Set zijn handmatige inbox-WA → meenemen.
+    //
+    //     Filter sent_by_user_id IS NOT NULL: automation-engine schrijft
+    //     met sentByUserId=null in whatsapp_messages, dus die rijen
+    //     vallen sowieso buiten dit filter (en worden via comms-log /
+    //     pre-cutover run_log gedekt).
     if (attendee.customer_id) {
       try {
         const { data: convs, error: convErr } = await supabaseAdmin
@@ -252,19 +281,19 @@ export default async function handler(req, res) {
         if (convIds.length > 0) {
           const { data: msgs, error: msgErr } = await supabaseAdmin
             .from('whatsapp_messages')
-            .select('template_name, body, sent_at, created_at, sent_by_user_id')
+            .select('template_name, body, sent_at, created_at, sent_by_user_id, meta_wamid')
             .in('conversation_id', convIds)
             .eq('direction', 'out')
-            .not('sent_by_user_id', 'is', null)
-            .lt('created_at', cutoverIso);
+            .not('sent_by_user_id', 'is', null);
           if (msgErr) {
             console.error('[events-attendee-comms wa-msgs]', msgErr.message);
           }
           for (const m of msgs || []) {
             const at = m.sent_at || m.created_at;
             if (!at) continue;
-            // Pre-cutover items mogen wel sent_at hebben >= cutover (delivery
-            // kwam later binnen) — we splitten op created_at zoals de filter.
+            // Dedup: als deze wamid al via de comms-log getoond wordt,
+            // sla 'm hier over (anders dubbel).
+            if (m.meta_wamid && wamidsInLog.has(m.meta_wamid)) continue;
             const label = m.template_name
               ? `Template: ${m.template_name}`
               : (m.body ? m.body.slice(0, 60) : 'WhatsApp');
