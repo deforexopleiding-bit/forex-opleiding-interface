@@ -41,6 +41,7 @@ import {
   EMAIL_RE,
 } from './_lib/assessment-validation.js';
 import { score } from './_lib/assessment-scoring.js';
+import { getActiveQuestionnaire } from './_lib/assessment-questionnaires.js';
 
 export default async function handler(req, res) {
   res.setHeader('Content-Type', 'application/json');
@@ -91,9 +92,14 @@ export default async function handler(req, res) {
   }
 
   // 5) Vragen + answer-validation
+  // FEATURE C: zoek eerst de actieve vragenlijst zodat we per-vragenlijst
+  // drempels kunnen toepassen en questionnaire_id op de response kunnen
+  // schrijven. Bij geen actieve rij (legacy) fall-back op alle actieve
+  // vragen (loadActiveQuestions(null)).
+  const activeQuestionnaire = await getActiveQuestionnaire();
   let questions;
   try {
-    questions = await loadActiveQuestions();
+    questions = await loadActiveQuestions(activeQuestionnaire?.id || null);
   } catch (e) {
     console.error('[assessment-submit] loadActiveQuestions:', e.message);
     return res.status(500).json({ error: 'Vragenlijst niet beschikbaar.' });
@@ -120,9 +126,10 @@ export default async function handler(req, res) {
   }
 
   // 7) Score + insert in 1 atomic write
+  // FEATURE C: drempels van de actieve vragenlijst meegeven aan score().
   let scored;
   try {
-    scored = score(normalized, questions);
+    scored = score(normalized, questions, activeQuestionnaire);
   } catch (e) {
     // Pure functie - faalt alleen bij programmer-error, niet bij data.
     console.error('[assessment-submit] score() threw:', e.message);
@@ -156,6 +163,10 @@ export default async function handler(req, res) {
         score             : scoreJson,
         status            : 'submitted',
         submitter_ip_hash : ipHash,
+        // FEATURE C: vastleggen welke vragenlijst gold bij submit. NULL als
+        // geen actieve rij (legacy / pre-migration); FK SET NULL als de
+        // vragenlijst later verwijderd wordt → response blijft leesbaar.
+        questionnaire_id  : activeQuestionnaire?.id || null,
       })
       .select('id, status, routing_result, submitted_at')
       .maybeSingle();

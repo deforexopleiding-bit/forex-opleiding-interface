@@ -10,6 +10,7 @@
 // Response 500: database-fout
 
 import { loadActiveQuestions, sanitizeQuestionsForPublic } from './_lib/assessment-validation.js';
+import { getActiveQuestionnaire } from './_lib/assessment-questionnaires.js';
 
 export default async function handler(req, res) {
   res.setHeader('Content-Type', 'application/json');
@@ -21,7 +22,11 @@ export default async function handler(req, res) {
   }
 
   try {
-    const questions = await loadActiveQuestions();
+    // FEATURE C: filter op vragen van de actieve vragenlijst. Bij geen
+    // actieve rij (legacy / pre-migration): fall back op alle actieve vragen
+    // ongeacht questionnaire_id zodat de publieke flow nooit ineens stilstaat.
+    const activeQ = await getActiveQuestionnaire();
+    const questions = await loadActiveQuestions(activeQ?.id || null);
     return res.status(200).json({
       questions: sanitizeQuestionsForPublic(questions),
     });

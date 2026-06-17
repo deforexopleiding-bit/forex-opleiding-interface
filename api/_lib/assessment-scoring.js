@@ -48,13 +48,24 @@ function getThreshold(envKey, def) {
 }
 
 /**
- * Returnt de actuele drempels (env-override of default). Pure read; goedkoop.
+ * Returnt de actuele drempels. Volgorde:
+ *   1. waarden op het meegegeven questionnaire-object (FEATURE C — per-
+ *      vragenlijst drempels uit assessment_questionnaires).
+ *   2. env-vars (legacy / globale override).
+ *   3. hard-coded defaults.
+ *
+ * Geen vragenlijst meegegeven → backward-compat (env / default).
  */
-export function getThresholds() {
+export function getThresholds(questionnaire = null) {
+  const fromQ = (key) => {
+    if (!questionnaire || typeof questionnaire !== 'object') return null;
+    const v = questionnaire[key];
+    return (typeof v === 'number' && Number.isFinite(v)) ? v : null;
+  };
   return {
-    GEVORDERD_THRESHOLD: getThreshold('ASSESSMENT_GEVORDERD_THRESHOLD', DEFAULT_GEVORDERD_THRESHOLD),
-    MOTIVATIE_FLOOR    : getThreshold('ASSESSMENT_MOTIVATIE_FLOOR',     DEFAULT_MOTIVATIE_FLOOR),
-    LOW_MID_THRESHOLD  : getThreshold('ASSESSMENT_LOW_MID_THRESHOLD',   DEFAULT_LOW_MID_THRESHOLD),
+    GEVORDERD_THRESHOLD: fromQ('gevorderd_threshold') ?? getThreshold('ASSESSMENT_GEVORDERD_THRESHOLD', DEFAULT_GEVORDERD_THRESHOLD),
+    MOTIVATIE_FLOOR    : fromQ('motivatie_floor')     ?? getThreshold('ASSESSMENT_MOTIVATIE_FLOOR',     DEFAULT_MOTIVATIE_FLOOR),
+    LOW_MID_THRESHOLD  : fromQ('low_mid_threshold')   ?? getThreshold('ASSESSMENT_LOW_MID_THRESHOLD',   DEFAULT_LOW_MID_THRESHOLD),
   };
 }
 
@@ -95,10 +106,12 @@ function lookupWeight(question, answerValue) {
  *   missing_keys: string[]
  * }}
  */
-export function score(answers, questionsConfig) {
+export function score(answers, questionsConfig, questionnaire = null) {
+  // FEATURE C: 3e param 'questionnaire' bepaalt drempels per-vragenlijst.
+  // null/undefined → backward-compat (env / defaults via getThresholds).
   const ans = (answers && typeof answers === 'object') ? answers : {};
   const cfg = Array.isArray(questionsConfig) ? questionsConfig : [];
-  const T   = getThresholds();
+  const T   = getThresholds(questionnaire);
 
   const qByKey = {};
   for (const q of cfg) {
