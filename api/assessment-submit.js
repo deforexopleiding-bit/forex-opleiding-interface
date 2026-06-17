@@ -173,6 +173,53 @@ export default async function handler(req, res) {
     if (error) throw new Error('insert: ' + error.message);
     if (!row)  throw new Error('insert returnde geen rij.');
 
+    // Late-koppeling aan bestaande aanwezigen.
+    // Use-case: iemand is via Webflow al als aanwezige geregistreerd
+    // (assessment_response_id IS NULL, "Vragenlijst Ontbreekt") en vult
+    // de vragenlijst later in, maar stopt vóór de datumkeuze. De normale
+    // koppelpaden (assessment-register bij date-pick, event-choice-submit
+    // via keuze-link) raken die persoon dan niet. Hier koppelen we ALLE
+    // matchende event_attendees aan deze response op basis van e-mail —
+    // dezelfde identiteit-aanname als in de andere recovery-paden.
+    //
+    // Best-effort + fail-soft: een fout hier mag de submit NOOIT laten
+    // falen — de response is al opgeslagen.
+    //
+    // Side-effect (bewust): aanwezigen flippen van "Ontbreekt" (telt
+    // niet mee) naar "Actief" (telt mee). Dit kan een event over de
+    // getoonde capaciteit duwen — correct, want die persoon was al
+    // reëel aangemeld.
+    try {
+      const { data: existing, error: lookupErr } = await supabaseAdmin
+        .from('event_attendees')
+        .select('id, first_name, last_name')
+        .ilike('email', email)
+        .is('assessment_response_id', null);
+      if (lookupErr) {
+        console.error('[assessment-submit] late-link lookup:', lookupErr.message);
+      } else if (Array.isArray(existing) && existing.length > 0) {
+        // Per rij updaten: assessment_response_id altijd, first/last_name
+        // alleen als ze nu leeg/null zijn (bestaande namen NIET overschrijven
+        // — operator-edits respecteren).
+        for (const att of existing) {
+          const patch = { assessment_response_id: row.id };
+          const fnEmpty = !(att.first_name && String(att.first_name).trim());
+          const lnEmpty = !(att.last_name  && String(att.last_name).trim());
+          if (fnEmpty && firstName) patch.first_name = firstName;
+          if (lnEmpty && lastName)  patch.last_name  = lastName;
+          const { error: updErr } = await supabaseAdmin
+            .from('event_attendees')
+            .update(patch)
+            .eq('id', att.id);
+          if (updErr) {
+            console.error('[assessment-submit] late-link update:', att.id, updErr.message);
+          }
+        }
+      }
+    } catch (e) {
+      console.error('[assessment-submit] late-link exception:', e?.message || e);
+    }
+
     return res.status(200).json({
       ok            : true,
       id            : row.id,
