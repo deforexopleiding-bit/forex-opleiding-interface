@@ -174,6 +174,18 @@ export default async function handler(req, res) {
     updates.feature_flags = body.feature_flags;
   }
 
+  // autonomy_config: vrije jsonb-blob met Simone/Joost autonomy-state. Geen
+  // diepe schema-validatie (de evaluator (api/simone-autonomy-evaluate.js /
+  // joost-autonomy-evaluate.js) is defensief tegen ontbrekende keys); wel
+  // afdwingen dat 't een plain object is. UI-laag stuurt de full blob
+  // (read-modify-write).
+  if (body.autonomy_config !== undefined) {
+    if (!isPlainObject(body.autonomy_config)) {
+      return res.status(400).json({ error: 'autonomy_config: plain object vereist (geen array/null/scalar)' });
+    }
+    updates.autonomy_config = body.autonomy_config;
+  }
+
   // ---- Existing rij ophalen (voor before_json audit + UPDATE no-op check) ----
   try {
     const { data: existing, error: getErr } = await supabaseAdmin
@@ -181,7 +193,8 @@ export default async function handler(req, res) {
       .select(`
         module, persona_name, persona_tone, system_prompt_template,
         knowledge_base, model, temperature, context_message_count,
-        is_enabled, feature_flags, updated_by_user_id, updated_at
+        is_enabled, feature_flags, autonomy_config,
+        updated_by_user_id, updated_at
       `)
       .eq('module', moduleKey)
       .maybeSingle();
@@ -214,7 +227,8 @@ export default async function handler(req, res) {
       .select(`
         module, persona_name, persona_tone, system_prompt_template,
         knowledge_base, model, temperature, context_message_count,
-        is_enabled, feature_flags, updated_by_user_id, updated_at
+        is_enabled, feature_flags, autonomy_config,
+        updated_by_user_id, updated_at
       `)
       .single();
     if (upsertErr) {

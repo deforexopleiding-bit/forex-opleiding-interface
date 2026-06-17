@@ -57,6 +57,7 @@ function buildDefaultConfig(moduleKey) {
     context_message_count: 20,
     is_enabled: true,
     feature_flags: {},
+    autonomy_config: {},
     updated_by_user_id: null,
     updated_at: null,
     is_default: true,
@@ -110,7 +111,8 @@ export default async function handler(req, res) {
       .select(`
         module, persona_name, persona_tone, system_prompt_template,
         knowledge_base, model, temperature, context_message_count,
-        is_enabled, feature_flags, updated_by_user_id, updated_at
+        is_enabled, feature_flags, autonomy_config,
+        updated_by_user_id, updated_at
       `)
       .eq('module', moduleKey)
       .maybeSingle();

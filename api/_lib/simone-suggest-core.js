@@ -229,8 +229,13 @@ export async function runSimoneSuggest({
   const { data: cfg, error: cfgErr } = await supabase
     .from('joost_config')
     .select(
+      // autonomy_config + feature_flags meegelezen zodat een latere
+      // autonomous-send-call (api/simone-send-autonomous) en de UI dezelfde
+      // bron raadplegen. Suggest-gedrag zelf is ongewijzigd — deze kolommen
+      // worden hier niet gebruikt voor de prompt-build.
       'module, persona_name, persona_tone, system_prompt_template, knowledge_base, ' +
-      'model, temperature, context_message_count, is_enabled'
+      'model, temperature, context_message_count, is_enabled, ' +
+      'autonomy_config, feature_flags'
     )
     .eq('module', 'events')
     .maybeSingle();
