@@ -1229,6 +1229,11 @@ async function submitDeal(syncToTl) {
       matched_customer_id: state.matched_customer_id,
       tl_imported_contact_id: state.tl_imported_contact_id,
       sync_to_tl: !!syncToTl,
+      // FEATURE 2: server-side terugkoppeling event_attendees.customer_id
+      // (vervangt de eerdere client-side PATCH). Vereist geen
+      // events.attendee.edit op de wizard-user — sales-deal-create regelt 't
+      // onder zijn eigen sales.deal.create-scope, best-effort + fail-soft.
+      event_attendee_id: state.prefillEventAttendeeId || null,
     };
     let res, data;
     if (state.editDealId) {
@@ -1257,23 +1262,9 @@ async function submitDeal(syncToTl) {
       setTimeout(() => toast(`Klant opgeslagen lokaal, offerte sturen mislukt: ${data.tl_error || ''}`, 'error'), 1200);
     }
     await window.AgentShared.apiFetch('/api/sales-wizard-drafts', { method: 'DELETE' });
-    // FEATURE 2: best-effort terugkoppeling event_attendees.customer_id zodat
-    // de aanwezigen-rij in events-detail straks tl_quotation_status meekrijgt
-    // via de bestaande join op deals. Fail-soft — geen UI-blok bij 403/fout.
-    if (state.prefillEventAttendeeId && data.customer_id) {
-      try {
-        await window.AgentShared.apiFetch(
-          '/api/events-attendee-update?id=' + encodeURIComponent(state.prefillEventAttendeeId),
-          {
-            method : 'PATCH',
-            headers: { 'Content-Type': 'application/json' },
-            body   : JSON.stringify({ customer_id: data.customer_id }),
-          },
-        );
-      } catch (e) {
-        console.warn('[wizard prefill back-link]', e?.message || e);
-      }
-    }
+    // FEATURE 2 (PR-X): terugkoppeling event_attendees.customer_id gebeurt nu
+    // server-side in sales-deal-create (best-effort, fail-soft, geen extra
+    // RBAC). De wizard hoeft 'r niets meer voor te doen.
     setTimeout(() => { window.location.href = `/modules/offerte-detail.html?id=${data.deal_id}`; }, 800);
   } catch (e) {
     toast('Verzenden mislukt: ' + e.message, 'error');
