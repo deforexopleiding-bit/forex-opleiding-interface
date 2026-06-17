@@ -2424,7 +2424,7 @@ async function onAttCalledChange(attendeeId, called, cbEl) {
 async function deleteAttendee(attendeeId) {
   if (!confirm('Deze aanwezige verwijderen? Dit is permanent.')) return;
   try {
-    const res = await window.AgentShared.apiFetch('/api/events-attendee-delete?id=' + encodeURIComponent(attendeeId), { method: 'DELETE' });
+    const res = await window.AgentShared.apiFetch('/api/events-attendee-delete?id=' + encodeURIComponent(attendeeId), { method: 'POST' });
     if (!res.ok && res.status !== 204) {
       const e = await res.json().catch(() => ({}));
       throw new Error(e.error || `HTTP ${res.status}`);
