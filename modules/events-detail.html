@@ -384,6 +384,7 @@
 
       <h3 style="font-size:12px; font-weight:700; color:var(--text-faint); text-transform:uppercase; letter-spacing:.06em; margin:16px 0 8px">Uitgaven</h3>
       <div style="font-size:11.5px; color:var(--text-faint); margin-bottom:6px">Per uitgave kun je aangeven over welke aanwezige mentoren 'm verdeeld wordt. Niets aangevinkt = automatisch over alle aanwezige mentoren.</div>
+      <div style="font-size:11.5px; color:var(--text-faint); margin-bottom:6px">Bedragen incl. btw invoeren.</div>
       <div id="evCompleteExpenses"></div>
       <button class="btn-secondary" type="button" onclick="addEvCompleteExpense()" style="margin-top:8px"><i class="ti ti-plus"></i> Uitgave toevoegen</button>
 
@@ -2072,7 +2073,7 @@ function renderEvCompleteExpenses() {
     return `
       <div style="border:1px solid var(--border);border-radius:8px;padding:10px;margin-bottom:8px;background:var(--bg-elev-2)">
         <div style="display:grid;grid-template-columns:110px 1fr 130px 1fr auto;gap:6px;align-items:center">
-          <input type="number" min="0" step="0.01" placeholder="Bedrag €" value="${esc(String(e.amount ?? ''))}" data-exp-idx="${idx}" data-exp-field="amount" style="padding:6px 8px;border:1px solid var(--border);border-radius:6px;font-size:12.5px;background:var(--bg);color:var(--text)">
+          <input type="number" min="0" step="0.01" placeholder="Bedrag incl. btw €" value="${esc(String(e.amount ?? ''))}" data-exp-idx="${idx}" data-exp-field="amount" style="padding:6px 8px;border:1px solid var(--border);border-radius:6px;font-size:12.5px;background:var(--bg);color:var(--text)">
           <input type="text" placeholder="Leverancier" value="${esc(e.vendor || '')}" data-exp-idx="${idx}" data-exp-field="vendor" style="padding:6px 8px;border:1px solid var(--border);border-radius:6px;font-size:12.5px;background:var(--bg);color:var(--text)">
           <input type="date" value="${esc(e.spent_at || '')}" data-exp-idx="${idx}" data-exp-field="spent_at" style="padding:6px 8px;border:1px solid var(--border);border-radius:6px;font-size:12.5px;background:var(--bg);color:var(--text)">
           <input type="text" placeholder="Notitie" value="${esc(e.note || '')}" data-exp-idx="${idx}" data-exp-field="note" style="padding:6px 8px;border:1px solid var(--border);border-radius:6px;font-size:12.5px;background:var(--bg);color:var(--text)">
