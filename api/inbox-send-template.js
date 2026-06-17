@@ -375,7 +375,7 @@ export default async function handler(req, res) {
         try {
           const { data: att, error: attErr } = await supabaseAdmin
             .from('event_attendees')
-            .select('id, event_id, first_name, last_name, email, phone, choice_token')
+            .select('id, event_id, first_name, last_name, email, phone, choice_token, customer_id')
             .eq('id', contextEventAttendeeId)
             .maybeSingle();
           if (attErr) console.error('[inbox-send-template] attendee lookup:', attErr.message);
@@ -387,6 +387,24 @@ export default async function handler(req, res) {
           return res.status(400).json({
             error: 'context_event_attendee_id verwijst niet naar bestaande aanwezige',
             code : 'EVENT_ATTENDEE_NOT_FOUND',
+          });
+        }
+        // Binding-check: de meegegeven aanwezige moet aan deze conversatie
+        // gekoppeld zijn via exact dezelfde match-logica als de UI-resolver
+        // _evResolveAttendeeCandidatesForConv in modules/events.html:
+        //   1. event_attendees.customer_id = conv.customer_id, of
+        //   2. event_attendees.phone       = conv.phone_number
+        // Allebei strict equality (PostgREST .eq → SQL =), geen
+        // phone-normalisatie. Hiermee accepteert de backend exact dezelfde
+        // selecties als de UI aanbiedt (geen valse 400's), en geen poging
+        // om "een willekeurige attendee-id mee te smokkelen op een vreemde
+        // conversation".
+        const linkedByCustomer = !!(conv.customer_id && attendee.customer_id && attendee.customer_id === conv.customer_id);
+        const linkedByPhone    = !!(attendee.phone && conv.phone_number && attendee.phone === conv.phone_number);
+        if (!linkedByCustomer && !linkedByPhone) {
+          return res.status(400).json({
+            error: 'Deze aanwezige hoort niet bij deze conversatie.',
+            code : 'EVENT_ATTENDEE_NOT_LINKED',
           });
         }
         if (needsChoiceLink && !attendee.choice_token) {
