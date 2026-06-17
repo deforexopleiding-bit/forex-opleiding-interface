@@ -74,7 +74,8 @@
           navLink('follow-up', '/modules/follow-up.html', 'Follow-up') +
           navLink('sales', '/modules/sales.html', 'Sales') +
           navLink('events', '/modules/events.html', 'Events') +
-          navLink('mentor-grootboek', '/modules/mentor-grootboek.html', 'Mentor-grootboek') +
+          // PR-A — mentor-grootboek is verhuisd naar Events → Mentor-grootboek-tab.
+          // Sidebar-entry verwijderd; deeplink events.html#mentor-grootboek werkt.
           navLink('onboarding', '/modules/onboarding-overzicht.html', 'Onboarding') +
           // Finance — Mega-restructure: badge voor Open Acties (F1 finance-taken) hangt
           // nu inline op de Finance nav-item zelf. Open Acties is verhuisd naar
@@ -391,7 +392,9 @@
     'tickets': 'tickets.module.access',
     'sales': 'sales.module.access',
     'events': 'events.module.access',
-    'mentor-grootboek': 'mentor.module.access',
+    // PR-A — mentor-grootboek-key verwijderd; pagina is verhuisd naar
+    // Events → Mentor-grootboek-tab. RBAC mentor.ledger.view blijft als
+    // endpoint-gate; sidebar-entry bestaat niet meer dus geen module-gating.
     // events-detail.html + events-wizard.html + events-automations.html erven dezelfde
     // module.access-gate (de pagina's checken zelf óók via window.RBAC.canSync in init()
     // — defense-in-depth).
