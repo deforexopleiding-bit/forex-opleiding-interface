@@ -183,6 +183,27 @@
     .aq-section-card { background:var(--bg-elev); border:1px solid var(--border); border-radius:10px; padding:18px 20px; }
     .aq-section-header { display:flex; align-items:flex-start; gap:14px; margin-bottom:8px; }
 
+    /* FEATURE C (PR-Cfrontend) — interne sub-tab-strip binnen de Vragenlijst-
+       sectie: "Vragen" + "Puntensysteem" per geselecteerde vragenlijst.
+       Prefix qq- (questionnaire) om botsing met evs- / aq- te vermijden. */
+    .qq-subtabs { display:flex; gap:4px; border-bottom:1px solid var(--border); margin:14px 0 16px; flex-wrap:wrap; }
+    .qq-subtab { background:transparent; border:none; padding:7px 12px; font-size:12.5px; font-weight:600; color:var(--text-faint); cursor:pointer; border-bottom:2px solid transparent; font-family:inherit; margin-bottom:-1px; display:inline-flex; align-items:center; gap:5px; }
+    .qq-subtab:hover { color:var(--text); }
+    .qq-subtab.active { color:var(--brand-primary, #093d54); border-bottom-color:var(--brand-primary, #093d54); }
+    .qq-subpane { display:none; }
+    .qq-subpane.active { display:block; }
+    .qq-active-badge { font-size:10px; font-weight:700; background:rgba(16,185,129,.15); color:#059669; padding:2px 7px; border-radius:999px; text-transform:uppercase; letter-spacing:.04em; }
+    .qq-selector-row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; padding:10px 12px; background:rgba(0,0,0,.03); border:1px solid var(--border); border-radius:8px; margin-bottom:14px; }
+    .qq-selector-row select { padding:6px 8px; border:1px solid var(--border); border-radius:6px; background:var(--bg); color:var(--text); font-family:inherit; font-size:13px; min-width:240px; }
+    .qq-band-row { display:grid; grid-template-columns:140px 1fr auto; gap:10px; align-items:center; padding:8px 10px; border:1px solid var(--border); border-radius:8px; background:rgba(0,0,0,.02); font-size:12.5px; }
+    .qq-band-row + .qq-band-row { margin-top:6px; }
+    .qq-band-lbl { font-weight:700; }
+    .qq-band-desc { color:var(--text-dim); }
+    .qq-band-tag { font-size:10px; font-weight:700; padding:2px 7px; border-radius:999px; text-transform:uppercase; letter-spacing:.04em; }
+    .qq-band-tag.low  { background:rgba(220,38,38,.12); color:#b91c1c; }
+    .qq-band-tag.mid  { background:rgba(245,158,11,.15); color:#b45309; }
+    .qq-band-tag.high { background:rgba(16,185,129,.15); color:#059669; }
+
     /* PR-A — Mentor-grootboek pane (verhuisd uit modules/mentor-grootboek.html).
        Geprefixt waar de klasse generiek genoeg is dat events.html-elders 'm
        ook zou kunnen raken (status-pill, scope-badge). De rest (.kpi-strip,
@@ -486,26 +507,87 @@ function renderPage(canCreate, canViewInbox, canManageSignupInbox) {
         <button class="evs-sub-tab" data-evsub="niveau"><i class="ti ti-photo"></i> Niveau-foto's</button>
       </nav>
 
-      <!-- ── Sub-sectie: Vragenlijst-editor (verhuisd uit admin.html#assessment) ── -->
+      <!-- ── Sub-sectie: Vragenlijst (verhuisd uit admin.html#assessment + FEATURE C 2-laags) ── -->
       <section class="evs-sub-section" data-evsubsec="assessment">
         <div class="aq-section-card">
           <div class="aq-section-header" style="justify-content:space-between">
             <div>
-              <div style="font-size:15px;font-weight:700">Assessment-vragen</div>
+              <div style="font-size:15px;font-weight:700">Vragenlijst</div>
               <div style="font-size:12px;color:var(--text-faint);font-weight:400;margin-top:4px;max-width:720px">
-                Beheer van de vragen in <code>/modules/assessment.html</code>. Wijzigingen zijn <strong>forward-only</strong> — bestaande inzendingen
-                behouden hun antwoorden + scores; alleen nieuwe submissies gebruiken de nieuwe config. Routing-weights bepalen de scoring (Blok 2 PR 2);
-                wees voorzichtig met aanpassingen.
+                Meerdere benoemde vragenlijsten met exact één actieve. <strong>Forward-only</strong>:
+                bestaande inzendingen behouden hun antwoorden + score (at-submit vastgelegd).
+                Alleen nieuwe submissies op <code>/modules/assessment.html</code> gebruiken de actieve set.
               </div>
             </div>
-            <div style="display:flex;gap:8px">
-              <button class="btn btn-sm" onclick="loadAssessmentQuestions()" title="Lijst opnieuw laden"><i class="ti ti-refresh"></i></button>
-              <button class="btn btn-sm btn-primary" onclick="openAssessmentQuestionEdit(null)"><i class="ti ti-plus"></i> Nieuwe vraag</button>
+          </div>
+
+          <!-- Vragenlijst-selector + acties (zichtbaar op beide sub-tabs) -->
+          <div class="qq-selector-row" id="qqSelectorRow">
+            <label for="qqSelector" style="font-size:12.5px;font-weight:600">Vragenlijst:</label>
+            <select id="qqSelector" onchange="qqOnSelectorChange()">
+              <option value="">Laden…</option>
+            </select>
+            <span id="qqActiveBadge" class="qq-active-badge" style="display:none">Actief</span>
+            <div style="flex:1"></div>
+            <button class="btn btn-sm" type="button" onclick="qqLoadList()" title="Lijst opnieuw laden"><i class="ti ti-refresh"></i></button>
+            <button class="btn btn-sm" type="button" onclick="qqNewQuestionnaire()" title="Nieuwe vragenlijst aanmaken"><i class="ti ti-plus"></i> Nieuwe</button>
+            <button class="btn btn-sm" type="button" onclick="qqRenameQuestionnaire()" title="Naam wijzigen"><i class="ti ti-edit"></i> Hernoemen</button>
+            <button class="btn btn-sm btn-primary" type="button" id="qqActivateBtn" onclick="qqActivateQuestionnaire()" title="Maak deze vragenlijst actief voor de publieke flow"><i class="ti ti-check"></i> Actief zetten</button>
+          </div>
+
+          <!-- Interne sub-tab-strip: "Vragen" + "Puntensysteem" -->
+          <nav class="qq-subtabs" id="qqSubTabs">
+            <button class="qq-subtab active" type="button" data-qqsub="questions"><i class="ti ti-list"></i> Vragen</button>
+            <button class="qq-subtab" type="button" data-qqsub="scoring"><i class="ti ti-target"></i> Puntensysteem</button>
+          </nav>
+
+          <!-- Sub-pane: Vragen -->
+          <div class="qq-subpane active" data-qqsubpane="questions">
+            <div style="display:flex;justify-content:flex-end;margin-bottom:10px">
+              <button class="btn btn-sm btn-primary" type="button" onclick="openAssessmentQuestionEdit(null)"><i class="ti ti-plus"></i> Nieuwe vraag</button>
+            </div>
+            <div id="assessmentQuestionsBanner" style="display:none;margin:0 0 10px;padding:10px 14px;border-radius:8px;font-size:13px"></div>
+            <div id="assessmentQuestionsList" style="display:flex;flex-direction:column;gap:18px">
+              <div style="font-size:12.5px;color:var(--text-faint)">Laden…</div>
             </div>
           </div>
-          <div id="assessmentQuestionsBanner" style="display:none;margin:8px 0 0;padding:10px 14px;border-radius:8px;font-size:13px"></div>
-          <div id="assessmentQuestionsList" style="padding:16px 0;display:flex;flex-direction:column;gap:18px">
-            <div style="font-size:12.5px;color:var(--text-faint)">Laden…</div>
+
+          <!-- Sub-pane: Puntensysteem -->
+          <div class="qq-subpane" data-qqsubpane="scoring">
+            <div style="font-size:12.5px;color:var(--text-dim);margin-bottom:12px;max-width:680px">
+              Drempels van de geselecteerde vragenlijst. Pas aan om de routing tussen
+              <strong>basis-low</strong> / <strong>basis-mid</strong> / <strong>gevorderd</strong>
+              te kalibreren. De score-bands hieronder updaten live mee. <em>Forward-only</em>:
+              bestaande responses blijven hun originele routing behouden.
+            </div>
+            <div id="qqScoringBanner" style="display:none;margin:0 0 10px;padding:10px 14px;border-radius:8px;font-size:13px"></div>
+            <div id="qqScoringForm" style="display:flex;flex-direction:column;gap:14px">
+              <div style="display:grid;grid-template-columns:repeat(3, minmax(0,1fr));gap:12px">
+                <div>
+                  <label for="qqGevorderd" style="display:block;font-size:12.5px;font-weight:700;margin-bottom:4px">Gevorderd-drempel</label>
+                  <input type="number" id="qqGevorderd" class="form-input" min="0" step="1" oninput="qqRenderBands()" />
+                  <div class="form-help">Skill-score &gt;= deze waarde + motivatie OK → <code>gevorderd</code>.</div>
+                </div>
+                <div>
+                  <label for="qqMotivatie" style="display:block;font-size:12.5px;font-weight:700;margin-bottom:4px">Motivatie-floor</label>
+                  <input type="number" id="qqMotivatie" class="form-input" min="0" step="1" oninput="qqRenderBands()" />
+                  <div class="form-help">Motivatie (1-10) &lt; floor → capt naar <code>basis</code>.</div>
+                </div>
+                <div>
+                  <label for="qqLowMid" style="display:block;font-size:12.5px;font-weight:700;margin-bottom:4px">Low-mid-drempel</label>
+                  <input type="number" id="qqLowMid" class="form-input" min="0" step="1" oninput="qqRenderBands()" />
+                  <div class="form-help">Skill-score &gt;= deze waarde &amp; &lt; gevorderd → <code>basis-mid</code>.</div>
+                </div>
+              </div>
+              <div>
+                <div style="font-size:11px;font-weight:700;color:var(--text-faint);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">Live preview score-bands</div>
+                <div id="qqBandPreview"></div>
+              </div>
+              <div style="display:flex;justify-content:flex-end;gap:8px">
+                <button class="btn btn-sm" type="button" onclick="qqLoadThresholds()" title="Originele waarden herstellen"><i class="ti ti-refresh"></i> Reset</button>
+                <button class="btn btn-sm btn-primary" type="button" id="qqSaveBtn" onclick="qqSaveThresholds()"><i class="ti ti-device-floppy"></i> Opslaan</button>
+              </div>
+            </div>
           </div>
         </div>
       </section>
@@ -1049,7 +1131,14 @@ function _evSelectSettingsSubTab(name) {
   // Lazy load triggers
   if (name === 'assessment' && !_evSettingsState.assessmentLoaded) {
     _evSettingsState.assessmentLoaded = true;
-    try { loadAssessmentQuestions(); } catch (e) { console.error('[settings/assessment]', e); }
+    try {
+      _qqWireSubTabs();
+      // FEATURE C: qqLoadList haalt vragenlijsten op én triggert daarna
+      // loadAssessmentQuestions() + qqLoadThresholds() met de juiste
+      // selectie. Backward-compat: bij ontbrekende endpoint valt de
+      // banner terug op een error en de vragen-lijst blijft "Laden…".
+      qqLoadList();
+    } catch (e) { console.error('[settings/assessment]', e); }
   }
   if (name === 'simone' && !_evSettingsState.simoneLoaded) {
     _evSettingsState.simoneLoaded = true;
@@ -1215,7 +1304,12 @@ async function loadAssessmentQuestions() {
   if (!wrap) return;
   wrap.innerHTML = '<div style="font-size:12.5px;color:var(--text-faint)">Laden…</div>';
   try {
-    const r = await window.AgentShared.apiFetch('/api/admin-assessment-questions-list');
+    // FEATURE C: filter op de geselecteerde vragenlijst (of fall-back op actief
+    // server-side als _qqState nog niet geïnitialiseerd is).
+    const qid = (window._qqState && window._qqState.selectedId) || null;
+    const url = '/api/admin-assessment-questions-list'
+      + (qid ? '?questionnaire_id=' + encodeURIComponent(qid) : '');
+    const r = await window.AgentShared.apiFetch(url);
     if (!r.ok) {
       const j = await r.json().catch(() => ({}));
       wrap.innerHTML = '<div style="color:#b91c1c;font-size:13px">Fout: ' + esc(j.error || ('HTTP ' + r.status)) + '</div>';
@@ -1227,6 +1321,306 @@ async function loadAssessmentQuestions() {
   } catch (e) {
     wrap.innerHTML = '<div style="color:#b91c1c;font-size:13px">Fout: ' + esc(e.message) + '</div>';
   }
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// FEATURE C (PR-Cfrontend) — multi-questionnaire UI
+// State + helpers voor de "Vragenlijst"-sectie: selector + Nieuwe/Hernoemen/
+// Actief zetten + sub-tabs "Vragen" / "Puntensysteem". Endpoints uit PR-Cbackend:
+//   - /api/assessment-questionnaires-list      (GET)
+//   - /api/assessment-questionnaires-create    (POST {slug, name})
+//   - /api/assessment-questionnaires-update    (PATCH ?id= {name | drempels})
+//   - /api/assessment-questionnaires-activate  (POST {id})
+// Geen RBAC-/endpoint-wijziging — alles op admin.joost_config.
+// ──────────────────────────────────────────────────────────────────────────────
+window._qqState = window._qqState || {
+  loaded: false,
+  items: [],
+  selectedId: null,
+  activeSubTab: 'questions',
+};
+
+function qqShowBanner(host, type, msg) {
+  const el = document.getElementById(host);
+  if (!el) return;
+  const palette = type === 'error'
+    ? 'background:rgba(220,38,38,.12);color:#b91c1c;border:1px solid rgba(220,38,38,.3)'
+    : 'background:rgba(16,185,129,.12);color:#059669;border:1px solid rgba(16,185,129,.3)';
+  el.style.cssText = 'display:block;margin:0 0 10px;padding:10px 14px;border-radius:8px;font-size:13px;' + palette;
+  el.textContent = msg;
+}
+
+function qqHideBanner(host) {
+  const el = document.getElementById(host);
+  if (el) el.style.display = 'none';
+}
+
+function qqGetSelected() {
+  if (!window._qqState.selectedId) return null;
+  return window._qqState.items.find((it) => it.id === window._qqState.selectedId) || null;
+}
+
+async function qqLoadList() {
+  const sel = document.getElementById('qqSelector');
+  if (!sel) return;
+  sel.innerHTML = '<option value="">Laden…</option>';
+  try {
+    const r = await window.AgentShared.apiFetch('/api/assessment-questionnaires-list');
+    if (!r.ok) {
+      const j = await r.json().catch(() => ({}));
+      sel.innerHTML = '<option value="">Fout</option>';
+      qqShowBanner('assessmentQuestionsBanner', 'error', 'Vragenlijsten laden mislukt: ' + (j.error || ('HTTP ' + r.status)));
+      return;
+    }
+    const j = await r.json();
+    window._qqState.items = Array.isArray(j.items) ? j.items : [];
+    window._qqState.loaded = true;
+
+    // Selectie bepalen: behoud huidige als die nog bestaat, anders pak actief,
+    // anders eerste item.
+    let target = null;
+    if (window._qqState.selectedId) {
+      target = window._qqState.items.find((it) => it.id === window._qqState.selectedId) || null;
+    }
+    if (!target) target = window._qqState.items.find((it) => it.is_active) || null;
+    if (!target && window._qqState.items.length > 0) target = window._qqState.items[0];
+    window._qqState.selectedId = target ? target.id : null;
+
+    qqRenderSelector();
+    // Laad afgeleide content voor de geselecteerde vragenlijst.
+    loadAssessmentQuestions();
+    qqLoadThresholds();
+  } catch (e) {
+    sel.innerHTML = '<option value="">Fout</option>';
+    qqShowBanner('assessmentQuestionsBanner', 'error', 'Vragenlijsten laden mislukt: ' + e.message);
+  }
+}
+
+function qqRenderSelector() {
+  const sel = document.getElementById('qqSelector');
+  const badge = document.getElementById('qqActiveBadge');
+  const actBtn = document.getElementById('qqActivateBtn');
+  if (!sel) return;
+  if (window._qqState.items.length === 0) {
+    sel.innerHTML = '<option value="">(geen vragenlijsten)</option>';
+    if (badge) badge.style.display = 'none';
+    if (actBtn) actBtn.disabled = true;
+    return;
+  }
+  sel.innerHTML = window._qqState.items.map((it) => ''
+    + '<option value="' + esc(it.id) + '"' + (it.id === window._qqState.selectedId ? ' selected' : '') + '>'
+    +   esc(it.name) + ' (' + esc(it.slug) + ')'
+    +   (it.is_active ? ' — actief' : '')
+    + '</option>'
+  ).join('');
+  const selected = qqGetSelected();
+  if (badge) badge.style.display = (selected && selected.is_active) ? 'inline-flex' : 'none';
+  if (actBtn) actBtn.disabled = !!(selected && selected.is_active);
+}
+
+function qqOnSelectorChange() {
+  const sel = document.getElementById('qqSelector');
+  if (!sel) return;
+  window._qqState.selectedId = sel.value || null;
+  qqRenderSelector();
+  qqHideBanner('assessmentQuestionsBanner');
+  qqHideBanner('qqScoringBanner');
+  loadAssessmentQuestions();
+  qqLoadThresholds();
+}
+
+async function qqNewQuestionnaire() {
+  qqHideBanner('assessmentQuestionsBanner');
+  const name = (prompt('Naam van de nieuwe vragenlijst (bv. "Forex 2026 — variant A")') || '').trim();
+  if (!name) return;
+  const slugDefault = name.toLowerCase().normalize('NFKD').replace(/[̀-ͯ]/g, '')
+    .replace(/[^a-z0-9]+/g, '-').replace(/-+/g, '-').replace(/^-+|-+$/g, '').slice(0, 64) || 'vragenlijst';
+  const slug = (prompt('Slug (lowercase a-z0-9_-)', slugDefault) || '').trim();
+  if (!slug) return;
+  if (!/^[a-z0-9_-]{1,64}$/.test(slug)) {
+    qqShowBanner('assessmentQuestionsBanner', 'error', 'Slug ongeldig: alleen lowercase a-z0-9_- en max 64 chars.');
+    return;
+  }
+  try {
+    const r = await window.AgentShared.apiFetch('/api/assessment-questionnaires-create', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ slug, name }),
+    });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) {
+      qqShowBanner('assessmentQuestionsBanner', 'error', j.error || ('HTTP ' + r.status));
+      return;
+    }
+    qqShowBanner('assessmentQuestionsBanner', 'success', 'Vragenlijst "' + name + '" aangemaakt. Voeg vragen toe en zet hem actief wanneer klaar.');
+    window._qqState.selectedId = j.item?.id || null;
+    await qqLoadList();
+  } catch (e) {
+    qqShowBanner('assessmentQuestionsBanner', 'error', 'Aanmaken mislukt: ' + e.message);
+  }
+}
+
+async function qqRenameQuestionnaire() {
+  qqHideBanner('assessmentQuestionsBanner');
+  const cur = qqGetSelected();
+  if (!cur) return;
+  const next = (prompt('Nieuwe naam voor "' + cur.name + '":', cur.name) || '').trim();
+  if (!next || next === cur.name) return;
+  try {
+    const r = await window.AgentShared.apiFetch('/api/assessment-questionnaires-update?id=' + encodeURIComponent(cur.id), {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: next }),
+    });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) {
+      qqShowBanner('assessmentQuestionsBanner', 'error', j.error || ('HTTP ' + r.status));
+      return;
+    }
+    qqShowBanner('assessmentQuestionsBanner', 'success', 'Hernoemd naar "' + next + '".');
+    await qqLoadList();
+  } catch (e) {
+    qqShowBanner('assessmentQuestionsBanner', 'error', 'Hernoemen mislukt: ' + e.message);
+  }
+}
+
+async function qqActivateQuestionnaire() {
+  qqHideBanner('assessmentQuestionsBanner');
+  const cur = qqGetSelected();
+  if (!cur) return;
+  if (cur.is_active) return;
+  if (!confirm('"' + cur.name + '" als actieve vragenlijst zetten? De publieke flow gaat dan deze set serveren.')) return;
+  const btn = document.getElementById('qqActivateBtn');
+  if (btn) btn.disabled = true;
+  try {
+    const r = await window.AgentShared.apiFetch('/api/assessment-questionnaires-activate', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: cur.id }),
+    });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) {
+      qqShowBanner('assessmentQuestionsBanner', 'error', j.error || ('HTTP ' + r.status));
+      if (btn) btn.disabled = false;
+      return;
+    }
+    qqShowBanner('assessmentQuestionsBanner', 'success', '"' + cur.name + '" is nu actief.');
+    await qqLoadList();
+  } catch (e) {
+    qqShowBanner('assessmentQuestionsBanner', 'error', 'Activeren mislukt: ' + e.message);
+    if (btn) btn.disabled = false;
+  }
+}
+
+function qqSelectSubTab(name) {
+  if (name !== 'questions' && name !== 'scoring') return;
+  window._qqState.activeSubTab = name;
+  document.querySelectorAll('#qqSubTabs .qq-subtab').forEach((b) => {
+    b.classList.toggle('active', b.dataset.qqsub === name);
+  });
+  document.querySelectorAll('.qq-subpane[data-qqsubpane]').forEach((p) => {
+    p.classList.toggle('active', p.dataset.qqsubpane === name);
+  });
+}
+
+function qqLoadThresholds() {
+  qqHideBanner('qqScoringBanner');
+  const cur = qqGetSelected();
+  const inG = document.getElementById('qqGevorderd');
+  const inM = document.getElementById('qqMotivatie');
+  const inL = document.getElementById('qqLowMid');
+  if (!inG || !inM || !inL) return;
+  if (!cur) {
+    inG.value = ''; inM.value = ''; inL.value = '';
+    qqRenderBands();
+    return;
+  }
+  inG.value = Number.isFinite(cur.gevorderd_threshold) ? cur.gevorderd_threshold : '';
+  inM.value = Number.isFinite(cur.motivatie_floor)     ? cur.motivatie_floor     : '';
+  inL.value = Number.isFinite(cur.low_mid_threshold)   ? cur.low_mid_threshold   : '';
+  qqRenderBands();
+}
+
+function qqRenderBands() {
+  const host = document.getElementById('qqBandPreview');
+  if (!host) return;
+  const g = Number(document.getElementById('qqGevorderd')?.value);
+  const m = Number(document.getElementById('qqMotivatie')?.value);
+  const l = Number(document.getElementById('qqLowMid')?.value);
+  if (!Number.isFinite(g) || !Number.isFinite(m) || !Number.isFinite(l)) {
+    host.innerHTML = '<div style="font-size:12px;color:var(--text-faint)">Vul alle drie de drempels in om de bands te zien.</div>';
+    return;
+  }
+  // Sanity-warnings (niet-blokkerend, want server accepteert elke waarde >= 0).
+  const warns = [];
+  if (l >= g) warns.push('Low-mid (' + l + ') ligt op of boven Gevorderd (' + g + ') — de mid-band is leeg.');
+  if (m < 0 || m > 10) warns.push('Motivatie-floor (' + m + ') hoort tussen 0 en 10 te liggen.');
+  host.innerHTML = ''
+    + '<div class="qq-band-row">'
+    +   '<div class="qq-band-lbl">basis-low</div>'
+    +   '<div class="qq-band-desc">skill-score &lt; <strong>' + l + '</strong> &nbsp;→&nbsp; routing <code>basis</code> · copy-tier <em>low</em></div>'
+    +   '<span class="qq-band-tag low">low</span>'
+    + '</div>'
+    + '<div class="qq-band-row">'
+    +   '<div class="qq-band-lbl">basis-mid</div>'
+    +   '<div class="qq-band-desc">skill-score in [<strong>' + l + '</strong> .. ' + Math.max(g - 1, l) + '] &nbsp;<em>of</em>&nbsp; skill ≥ ' + g + ' maar motivatie &lt; ' + m + ' / uitspraak=gratis_info &nbsp;→&nbsp; routing <code>basis</code> · copy-tier <em>mid</em></div>'
+    +   '<span class="qq-band-tag mid">mid</span>'
+    + '</div>'
+    + '<div class="qq-band-row">'
+    +   '<div class="qq-band-lbl">gevorderd</div>'
+    +   '<div class="qq-band-desc">skill-score ≥ <strong>' + g + '</strong> &nbsp;&amp;&nbsp; motivatie ≥ <strong>' + m + '</strong> &nbsp;&amp;&nbsp; uitspraak ≠ gratis_info &nbsp;→&nbsp; routing <code>gevorderd</code> · copy-tier <em>high</em></div>'
+    +   '<span class="qq-band-tag high">high</span>'
+    + '</div>'
+    + (warns.length ? '<div style="margin-top:8px;font-size:11.5px;color:#b45309">⚠ ' + warns.map(esc).join(' &nbsp;·&nbsp; ') + '</div>' : '');
+}
+
+async function qqSaveThresholds() {
+  qqHideBanner('qqScoringBanner');
+  const cur = qqGetSelected();
+  if (!cur) {
+    qqShowBanner('qqScoringBanner', 'error', 'Geen vragenlijst geselecteerd.');
+    return;
+  }
+  const g = Number(document.getElementById('qqGevorderd').value);
+  const m = Number(document.getElementById('qqMotivatie').value);
+  const l = Number(document.getElementById('qqLowMid').value);
+  for (const [label, v] of [['Gevorderd-drempel', g], ['Motivatie-floor', m], ['Low-mid-drempel', l]]) {
+    if (!Number.isInteger(v) || v < 0) {
+      qqShowBanner('qqScoringBanner', 'error', label + ' moet een integer >= 0 zijn.');
+      return;
+    }
+  }
+  const btn = document.getElementById('qqSaveBtn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Opslaan…'; }
+  try {
+    const r = await window.AgentShared.apiFetch('/api/assessment-questionnaires-update?id=' + encodeURIComponent(cur.id), {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        gevorderd_threshold: g,
+        motivatie_floor    : m,
+        low_mid_threshold  : l,
+      }),
+    });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) {
+      qqShowBanner('qqScoringBanner', 'error', j.error || ('HTTP ' + r.status));
+      return;
+    }
+    // Update lokale state met de geretourneerde rij.
+    const idx = window._qqState.items.findIndex((it) => it.id === cur.id);
+    if (idx >= 0 && j.item) window._qqState.items[idx] = { ...window._qqState.items[idx], ...j.item };
+    qqShowBanner('qqScoringBanner', 'success', 'Drempels opgeslagen. Nieuwe submissies gebruiken vanaf nu deze waarden.');
+  } catch (e) {
+    qqShowBanner('qqScoringBanner', 'error', 'Opslaan mislukt: ' + e.message);
+  } finally {
+    if (btn) { btn.disabled = false; btn.innerHTML = '<i class="ti ti-device-floppy"></i> Opslaan'; }
+  }
+}
+
+// Wire de sub-tab-strip (idempotent — _wired vlag voorkomt dubbele handlers).
+function _qqWireSubTabs() {
+  if (_qqWireSubTabs._wired) return;
+  const tabs = document.querySelectorAll('#qqSubTabs .qq-subtab');
+  if (!tabs.length) return;
+  tabs.forEach((btn) => {
+    btn.addEventListener('click', () => qqSelectSubTab(btn.dataset.qqsub));
+  });
+  _qqWireSubTabs._wired = true;
 }
 
 function renderAssessmentQuestionsList() {
@@ -1705,6 +2099,11 @@ async function saveAssessmentQuestion() {
         return;
       }
       payload.key = keyVal;
+      // FEATURE C: nieuwe vraag landt op de geselecteerde vragenlijst (anders
+      // server-side default = actief). Voor consistentie geven we 'm altijd
+      // expliciet mee als er een selectie is.
+      const selQid = (window._qqState && window._qqState.selectedId) || null;
+      if (selQid) payload.questionnaire_id = selQid;
       r = await window.AgentShared.apiFetch('/api/admin-assessment-questions-upsert', {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
       });
