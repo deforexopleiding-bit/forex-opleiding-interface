@@ -21,14 +21,22 @@ const SCALE_RANGES = {
 /**
  * Laadt alle actieve assessment_questions in volgorde. Strikt server-side;
  * routing_weights wordt NIET uitgesneden hier - caller bepaalt.
+ *
+ * FEATURE C: optionele `questionnaireId` filtert op één vragenlijst. Zonder
+ * id valt 'ie terug op het oude gedrag (alle actieve vragen, ongeacht
+ * questionnaire_id) — backward-compat tot alle callers questionnaire-aware
+ * zijn. assessment-questions.js (publiek pad) geeft sinds FEATURE C de
+ * actieve questionnaire mee.
  */
-export async function loadActiveQuestions() {
-  const { data, error } = await supabaseAdmin
+export async function loadActiveQuestions(questionnaireId = null) {
+  let q = supabaseAdmin
     .from('assessment_questions')
-    .select('id, key, section, order_index, page, type, label, help_text, required, options, min_words, is_routing, routing_weights, active')
+    .select('id, key, section, order_index, page, type, label, help_text, required, options, min_words, is_routing, routing_weights, active, questionnaire_id')
     .eq('active', true)
     .order('page', { ascending: true })
     .order('order_index', { ascending: true });
+  if (questionnaireId) q = q.eq('questionnaire_id', questionnaireId);
+  const { data, error } = await q;
   if (error) throw new Error('loadActiveQuestions: ' + error.message);
   return data || [];
 }

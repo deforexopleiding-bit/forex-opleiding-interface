@@ -15,6 +15,7 @@
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
+import { getActiveQuestionnaire } from './_lib/assessment-questionnaires.js';
 
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
@@ -33,13 +34,30 @@ export default async function handler(req, res) {
   }
 
   try {
-    const { data, error } = await supabaseAdmin
+    // FEATURE C: optionele ?questionnaire_id= filter. Zonder param valt 'ie
+    // terug op de actieve vragenlijst. Frontend kan dus expliciet een andere
+    // vragenlijst opvragen voor de editor.
+    let questionnaireId = null;
+    const raw = req.query?.questionnaire_id;
+    if (raw && typeof raw === 'string' && raw.trim()) {
+      questionnaireId = raw.trim();
+    } else {
+      const active = await getActiveQuestionnaire();
+      questionnaireId = active?.id || null;
+    }
+
+    let q = supabaseAdmin
       .from('assessment_questions')
-      .select('id, key, section, order_index, type, label, help_text, required, options, min_words, is_routing, routing_weights, active, created_at, updated_at')
+      .select('id, key, section, order_index, page, type, label, help_text, required, options, min_words, is_routing, routing_weights, active, questionnaire_id, created_at, updated_at')
       .order('section', { ascending: true })
       .order('order_index', { ascending: true });
+    if (questionnaireId) q = q.eq('questionnaire_id', questionnaireId);
+    const { data, error } = await q;
     if (error) throw new Error(error.message);
-    return res.status(200).json({ questions: data || [] });
+    return res.status(200).json({
+      questions: data || [],
+      questionnaire_id: questionnaireId,
+    });
   } catch (e) {
     console.error('[admin-assessment-questions-list]', e.message);
     return res.status(500).json({ error: e.message });

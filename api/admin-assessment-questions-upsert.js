@@ -37,6 +37,7 @@
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
+import { getActiveQuestionnaire } from './_lib/assessment-questionnaires.js';
 
 const UUID_RE  = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const KEY_RE   = /^[a-z0-9_-]{1,64}$/;
@@ -141,10 +142,16 @@ function validatePayload(payload, { isCreate }) {
       return { ok: false, error: `${k} moet boolean zijn` };
     }
   }
+  // FEATURE C: optionele questionnaire_id moet een uuid zijn als gezet.
+  if (payload.questionnaire_id !== undefined && payload.questionnaire_id !== null) {
+    if (typeof payload.questionnaire_id !== 'string' || !UUID_RE.test(payload.questionnaire_id)) {
+      return { ok: false, error: 'questionnaire_id moet een uuid zijn' };
+    }
+  }
   return { ok: true };
 }
 
-function pickInsertRow(payload) {
+function pickInsertRow(payload, questionnaireId) {
   return {
     key             : payload.key.trim(),
     section         : payload.section.trim(),
@@ -160,6 +167,9 @@ function pickInsertRow(payload) {
     is_routing      : payload.is_routing === true,
     routing_weights : payload.routing_weights != null ? payload.routing_weights : null,
     active          : payload.active !== undefined ? !!payload.active : true,
+    // FEATURE C: vragen horen bij een vragenlijst. Default = actief, optioneel
+    // override via payload.questionnaire_id (bv. tijdens hernoemen / kopiëren).
+    questionnaire_id: questionnaireId,
   };
 }
 
@@ -177,6 +187,8 @@ function pickUpdatePatch(payload) {
   if (payload.is_routing !== undefined)      patch.is_routing      = !!payload.is_routing;
   if (payload.routing_weights !== undefined) patch.routing_weights = payload.routing_weights;
   if (payload.active !== undefined)          patch.active          = !!payload.active;
+  // FEATURE C: verhuizen van een vraag naar een andere vragenlijst is mogelijk.
+  if (payload.questionnaire_id !== undefined) patch.questionnaire_id = payload.questionnaire_id;
   return patch;
 }
 
@@ -203,7 +215,21 @@ export default async function handler(req, res) {
     const validation = validatePayload(body, { isCreate: true });
     if (!validation.ok) return res.status(400).json({ error: validation.error });
 
-    const insertRow = pickInsertRow(body);
+    // FEATURE C: questionnaire_id bepalen (default = actieve vragenlijst).
+    let questionnaireId = (typeof body.questionnaire_id === 'string' && body.questionnaire_id)
+      ? body.questionnaire_id
+      : null;
+    if (!questionnaireId) {
+      const active = await getActiveQuestionnaire();
+      questionnaireId = active?.id || null;
+    }
+    if (!questionnaireId) {
+      return res.status(400).json({
+        error: 'Geen actieve vragenlijst; geef expliciet een questionnaire_id mee.',
+      });
+    }
+
+    const insertRow = pickInsertRow(body, questionnaireId);
     try {
       const { data, error } = await supabaseAdmin
         .from('assessment_questions')
