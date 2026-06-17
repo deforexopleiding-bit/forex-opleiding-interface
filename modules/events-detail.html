@@ -940,6 +940,10 @@ function renderAttendeesTab() {
           </tr>
           <tr class="att-comms-row" id="att-comms-row-${esc(a.id)}" data-att-id="${esc(a.id)}" style="display:none">
             <td colspan="8" style="background:var(--bg-elev-2);padding:14px 18px;border-top:0">
+              <!-- FEATURE B — notitie-blok bovenaan de uitklap. Read-only met
+                   inline ✎ → textarea + Opslaan/Annuleren. Render bij open
+                   door _renderAttNotes (lees uit state.attendees + canEditAtt). -->
+              <div class="att-notes-host" id="att-notes-host-${esc(a.id)}" data-att-id="${esc(a.id)}" style="margin-bottom:12px"></div>
               <div class="att-comms-body" id="att-comms-body-${esc(a.id)}">
                 <div style="font-size:12px;color:var(--text-faint)">Laden…</div>
               </div>
@@ -1213,6 +1217,10 @@ async function toggleAttCommsRow(attendeeId) {
   row.style.display = '';
   if (caret) caret.style.transform = 'rotate(90deg)';
 
+  // FEATURE B — render notitie-blok bovenaan de uitklap. Leest direct uit
+  // state.attendees zodat een verse open geen extra fetch nodig heeft.
+  _renderAttNotes(attendeeId);
+
   // Lazy fetch (uit cache als al geladen).
   if (_attCommsCache.has(attendeeId)) {
     _renderAttComms(body, _attCommsCache.get(attendeeId));
@@ -1230,6 +1238,90 @@ async function toggleAttCommsRow(attendeeId) {
     _renderAttComms(body, j);
   } catch (e) {
     body.innerHTML = '<div style="font-size:12px;color:#dc2626">Fout: ' + esc(e?.message || 'onbekende fout') + '</div>';
+  }
+}
+
+// FEATURE B — notitie per aanwezige (inline-edit in uitklaprij).
+// Gegated op events.attendee.edit; readers zien alleen de notitie.
+// Save via PATCH /api/events-attendee-update?id=… met body {notes}.
+function _renderAttNotes(attendeeId, opts) {
+  const host = document.getElementById('att-notes-host-' + attendeeId);
+  if (!host) return;
+  const a = (state.attendees || []).find((x) => x.id === attendeeId);
+  if (!a) { host.innerHTML = ''; return; }
+  const canEdit = !!can('events.attendee.edit');
+  const editing = opts && opts.editing === true;
+  const note = a.notes || '';
+  if (editing) {
+    host.innerHTML = `
+      <div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:10px 12px">
+        <div style="display:flex;align-items:center;gap:6px;font-size:11px;font-weight:700;color:var(--text-faint);text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px">
+          <i class="ti ti-note"></i> Notitie
+        </div>
+        <textarea class="att-notes-textarea" data-att-id="${esc(attendeeId)}" rows="3" maxlength="2000" placeholder="Vrije notitie…" style="width:100%;font-family:inherit;font-size:13px;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);resize:vertical">${esc(note)}</textarea>
+        <div style="display:flex;gap:6px;justify-content:flex-end;margin-top:8px">
+          <button class="btn-secondary att-notes-cancel" data-att-id="${esc(attendeeId)}" type="button" style="padding:5px 11px;font-size:12px">Annuleren</button>
+          <button class="btn-primary att-notes-save" data-att-id="${esc(attendeeId)}" type="button" style="padding:5px 11px;font-size:12px"><i class="ti ti-device-floppy"></i> Opslaan</button>
+        </div>
+      </div>`;
+    const ta = host.querySelector('.att-notes-textarea');
+    if (ta) ta.focus();
+    host.querySelector('.att-notes-cancel')?.addEventListener('click', () => _renderAttNotes(attendeeId, { editing: false }));
+    host.querySelector('.att-notes-save')?.addEventListener('click', () => _saveAttNotes(attendeeId));
+    return;
+  }
+  // Read-only view
+  const editBtn = canEdit
+    ? `<button class="sr-ibtn att-notes-edit" data-att-id="${esc(attendeeId)}" type="button" title="Notitie bewerken" style="padding:3px 6px"><i class="ti ti-pencil"></i></button>`
+    : '';
+  const body = note
+    ? `<div style="font-size:13px;color:var(--text);white-space:pre-wrap;line-height:1.45">${esc(note)}</div>`
+    : `<div style="font-size:12.5px;color:var(--text-faint);font-style:italic">${canEdit ? 'Klik op het potlood om een notitie toe te voegen.' : 'Geen notitie.'}</div>`;
+  host.innerHTML = `
+    <div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:10px 12px">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:6px;margin-bottom:6px">
+        <div style="display:flex;align-items:center;gap:6px;font-size:11px;font-weight:700;color:var(--text-faint);text-transform:uppercase;letter-spacing:.04em">
+          <i class="ti ti-note"></i> Notitie
+        </div>
+        ${editBtn}
+      </div>
+      ${body}
+    </div>`;
+  host.querySelector('.att-notes-edit')?.addEventListener('click', () => _renderAttNotes(attendeeId, { editing: true }));
+}
+
+async function _saveAttNotes(attendeeId) {
+  const host = document.getElementById('att-notes-host-' + attendeeId);
+  if (!host) return;
+  const ta = host.querySelector('.att-notes-textarea');
+  const newVal = ta ? String(ta.value || '').trim() : '';
+  const saveBtn = host.querySelector('.att-notes-save');
+  const cancelBtn = host.querySelector('.att-notes-cancel');
+  if (saveBtn) { saveBtn.disabled = true; saveBtn.innerHTML = 'Bezig…'; }
+  if (cancelBtn) cancelBtn.disabled = true;
+  try {
+    const r = await window.AgentShared.apiFetch('/api/events-attendee-update?id=' + encodeURIComponent(attendeeId), {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ notes: newVal || null }),
+    });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) {
+      window.AgentShared?.showToast?.('Opslaan mislukt: ' + (j.error || ('HTTP ' + r.status)), 'error');
+      if (saveBtn) { saveBtn.disabled = false; saveBtn.innerHTML = '<i class="ti ti-device-floppy"></i> Opslaan'; }
+      if (cancelBtn) cancelBtn.disabled = false;
+      return;
+    }
+    // In-place updaten van state.attendees zodat re-render meteen de nieuwe
+    // waarde toont en de comms-cache niet verloren gaat.
+    const idx = (state.attendees || []).findIndex((x) => x.id === attendeeId);
+    if (idx >= 0) state.attendees[idx].notes = newVal || null;
+    window.AgentShared?.showToast?.('Notitie opgeslagen', 'success');
+    _renderAttNotes(attendeeId, { editing: false });
+  } catch (e) {
+    window.AgentShared?.showToast?.('Opslaan mislukt: ' + (e?.message || 'onbekende fout'), 'error');
+    if (saveBtn) { saveBtn.disabled = false; saveBtn.innerHTML = '<i class="ti ti-device-floppy"></i> Opslaan'; }
+    if (cancelBtn) cancelBtn.disabled = false;
   }
 }
 

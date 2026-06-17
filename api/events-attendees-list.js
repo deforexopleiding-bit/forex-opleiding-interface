@@ -88,7 +88,7 @@ export default async function handler(req, res) {
         ghl_contact_id, ghl_form_submission_id, assessment_response_id,
         switched_from_event_id, switched_at,
         registered_at, attended_at, no_show_marked_at, sale_at,
-        follow_up_flagged, follow_up_reason, called_at,
+        follow_up_flagged, follow_up_reason, called_at, notes,
         created_at, updated_at
       `, { count: 'exact' })
       .eq('event_id', eventId)

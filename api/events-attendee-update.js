@@ -22,7 +22,7 @@ import { requirePermission } from './_lib/requirePermission.js';
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-const EDITABLE_FIELDS = ['first_name', 'last_name', 'email', 'phone', 'customer_id', 'follow_up_flagged', 'follow_up_reason', 'called'];
+const EDITABLE_FIELDS = ['first_name', 'last_name', 'email', 'phone', 'customer_id', 'follow_up_flagged', 'follow_up_reason', 'called', 'notes'];
 
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
@@ -77,6 +77,11 @@ export default async function handler(req, res) {
         break;
       case 'called':
         patch.called_at = v ? new Date().toISOString() : null;
+        break;
+      case 'notes':
+        // FEATURE B — vrije-tekst notitie. Lege string → null zodat een
+        // gewiste notitie ook echt weg is (in plaats van een lege string).
+        patch.notes = v === null ? null : (String(v).trim() || null);
         break;
       default:
         // shouldn't reach
