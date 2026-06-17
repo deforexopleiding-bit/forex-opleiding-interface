@@ -3421,70 +3421,27 @@ async function _evResolveAttendeeCandidatesForConv(conv) {
   const phone      = conv.phone_number || conv.phone || null;
   if (!customerId && !phone) return [];
 
+  // Server-side resolutie via /api/events-attendee-candidates. Het oude pad
+  // (window.supabase op event_attendees) gaf structureel een leeg array
+  // terug omdat RLS aan staat zonder SELECT-policy voor 'authenticated'
+  // (zie docs/sql-migrations/2026-06-11-events-f1-foundation.sql:253-256).
+  // Endpoint gebruikt supabaseAdmin en bewaakt RBAC additief.
   try {
-    await window._authSharedReady;
-    if (!window.supabase) return [];
-
-    const seenIds = new Set();
-    const rows = [];
-
-    const sel = 'id, event_id, first_name, last_name, email, phone, choice_token, customer_id, events(id, title, starts_at, status)';
-
-    if (customerId) {
-      const { data, error } = await window.supabase
-        .from('event_attendees')
-        .select(sel)
-        .eq('customer_id', customerId)
-        .limit(25);
-      if (error) console.warn('[attendee-candidates customer]', error.message);
-      for (const r of (data || [])) {
-        if (seenIds.has(r.id)) continue;
-        seenIds.add(r.id);
-        rows.push(r);
-      }
-    }
-
-    if (phone) {
-      const { data, error } = await window.supabase
-        .from('event_attendees')
-        .select(sel)
-        .eq('phone', phone)
-        .limit(25);
-      if (error) console.warn('[attendee-candidates phone]', error.message);
-      for (const r of (data || [])) {
-        if (seenIds.has(r.id)) continue;
-        seenIds.add(r.id);
-        rows.push(r);
-      }
-    }
-
-    const now = Date.now();
-    const norm = rows.map((r) => {
-      const ev = r.events || null;
-      const startsMs = ev && ev.starts_at ? new Date(ev.starts_at).getTime() : 0;
-      const fullName = [r.first_name, r.last_name].filter(Boolean).join(' ').trim();
-      return {
-        attendee_id      : r.id,
-        attendee_name    : fullName || (r.email || r.phone || '—'),
-        attendee_email   : r.email || '',
-        attendee_phone   : r.phone || '',
-        has_choice_token : !!r.choice_token,
-        event_id         : ev ? ev.id : null,
-        event_title      : ev ? (ev.title || '') : '',
-        event_starts_at  : ev ? ev.starts_at : null,
-        event_status     : ev ? (ev.status || '') : '',
-        _futureRank      : (Number.isFinite(startsMs) && startsMs >= now) ? 0 : (startsMs > 0 ? 1 : 2),
-        _startsMs        : startsMs,
-      };
+    const r = await window.AgentShared.apiFetch('/api/events-attendee-candidates', {
+      method : 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body   : JSON.stringify({
+        customer_id: customerId || null,
+        phone      : phone      || null,
+      }),
     });
-    norm.sort((a, b) => {
-      if (a._futureRank !== b._futureRank) return a._futureRank - b._futureRank;
-      // Within future bucket → ascending (eerstvolgende boven); within past
-      // bucket → descending (meest recente boven).
-      if (a._futureRank === 0) return a._startsMs - b._startsMs;
-      return b._startsMs - a._startsMs;
-    });
-    return norm;
+    if (!r.ok) {
+      const j = await r.json().catch(() => ({}));
+      console.warn('[attendee-candidates]', j.error || ('HTTP ' + r.status));
+      return [];
+    }
+    const j = await r.json();
+    return Array.isArray(j.candidates) ? j.candidates : [];
   } catch (e) {
     console.warn('[attendee-candidates exception]', e?.message || e);
     return [];
@@ -4107,26 +4064,40 @@ async function loadEventContextForCustomer(customerId) {
   if (!evLabel || !evValue) return;
   evLabel.style.display = 'none';
   evValue.innerHTML = '';
+  if (!customerId) return;
+  // Bonus: zelfde root-cause als _evResolveAttendeeCandidatesForConv —
+  // window.supabase op event_attendees was structureel leeg door RLS.
+  // Hergebruik /api/events-attendee-candidates (server-side, supabaseAdmin)
+  // zodat de event-context-strip eindelijk vult. Best-effort: bij fout
+  // gewoon niets tonen.
   try {
-    await window._authSharedReady;
-    if (!window.supabase || !customerId) return;
-    const { data, error } = await window.supabase
-      .from('event_attendees')
-      .select('event_id, registered_at, events(id, title, starts_at, status)')
-      .eq('customer_id', customerId)
-      .order('registered_at', { ascending: false })
-      .limit(5);
-    if (error) { console.warn('[event-context]', error.message); return; }
-    const rows = Array.isArray(data) ? data.filter((r) => r.events) : [];
+    const r = await window.AgentShared.apiFetch('/api/events-attendee-candidates', {
+      method : 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body   : JSON.stringify({ customer_id: customerId }),
+    });
+    if (!r.ok) {
+      const j = await r.json().catch(() => ({}));
+      console.warn('[event-context]', j.error || ('HTTP ' + r.status));
+      return;
+    }
+    const j = await r.json();
+    const rows = (Array.isArray(j.candidates) ? j.candidates : [])
+      .filter((c) => c.event_id);
     if (rows.length === 0) return;
-    const first  = rows[0];
-    const evRow  = first.events;
-    const dateStr = evRow.starts_at ? new Date(evRow.starts_at).toLocaleDateString('nl-NL', { day: '2-digit', month: 'short', year: 'numeric' }) : '';
-    const more   = rows.length > 1 ? ` <span style="color:var(--text-faint);font-size:11px">+${rows.length - 1} meer</span>` : '';
+    // Voorkeur voor het eerste toekomstige (server sorteert future-asc → past-desc),
+    // anders pak gewoon de eerste.
+    const first   = rows[0];
+    const dateStr = first.event_starts_at
+      ? new Date(first.event_starts_at).toLocaleDateString('nl-NL', { day: '2-digit', month: 'short', year: 'numeric' })
+      : '';
+    const more    = rows.length > 1
+      ? ` <span style="color:var(--text-faint);font-size:11px">+${rows.length - 1} meer</span>`
+      : '';
     evLabel.style.display = '';
     evValue.innerHTML = `
-      <a class="evx-ctx-event-link" href="/modules/events-detail.html?id=${esc(evRow.id)}" title="Open event-detail">
-        ${esc(evRow.title || '(geen titel)')}${dateStr ? ' · ' + esc(dateStr) : ''}
+      <a class="evx-ctx-event-link" href="/modules/events-detail.html?id=${esc(first.event_id)}" title="Open event-detail">
+        ${esc(first.event_title || '(geen titel)')}${dateStr ? ' · ' + esc(dateStr) : ''}
       </a>${more}
     `;
   } catch (e) {
