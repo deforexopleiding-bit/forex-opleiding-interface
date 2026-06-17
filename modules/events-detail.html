@@ -591,54 +591,10 @@ function renderPage() {
 
     ${signupsClosed ? renderSignupsClosedBanner(ev) : ''}
 
-    <!-- Twee-koloms blok: LINKS smalle details-box + sync + actions, RECHTS beschrijving. -->
-    <div class="ev-split">
-      <div>
-        <!-- Details-box -->
-        <div class="ev-card">
-          <h3><i class="ti ti-info-circle"></i> Details</h3>
-          <div class="ev-detail-row"><i class="ti ti-calendar"></i><span>${esc(fmtDate(ev.starts_at))}</span></div>
-          <div class="ev-detail-row"><i class="ti ti-map-pin"></i><span>${esc(ev.location || '—')}</span></div>
-          <div class="ev-detail-row"><i class="ti ti-stairs-up"></i><span>${esc(ev.niveau_label || ev.niveau || '—')}</span></div>
-          <div class="ev-detail-row"><i class="ti ti-users"></i><span class="${capClass}">${active}/${cap} plekken</span></div>
-          <div class="ev-pill-row">
-            <span class="status-badge status-${ev.status}">${esc(EV_STATUS_LABELS[ev.status] || ev.status)}</span>
-            ${isCompleted ? `<span class="status-badge status-afgerond"><i class="ti ti-checks"></i> Afgerond &middot; ${esc(new Date(ev.completed_at).toLocaleDateString('nl-NL', { day: '2-digit', month: 'short', year: 'numeric' }))}</span>` : ''}
-            ${signupsClosed ? renderSignupsClosedBadgeHead(ev) : ''}
-          </div>
-        </div>
-
-        <!-- Sync-chips -->
-        <div class="ev-card">
-          <h3><i class="ti ti-refresh"></i> Sync</h3>
-          <div class="ev-sync-chips">
-            ${renderSyncBadgeLg('webflow', ev.webflow_sync_status, ev.webflow_last_synced_at)}
-            ${renderSyncBadgeLg('ghl',     ev.ghl_sync_status,     ev.ghl_last_synced_at)}
-          </div>
-          ${(canPublish && hasSyncFailure(ev)) ? '<button class="btn-retry" id="syncRetryBtn" onclick="retrySync()" style="margin-top:10px;width:100%"><i class="ti ti-refresh"></i> Retry sync</button>' : ''}
-        </div>
-
-        <!-- Actieknoppen: primair vol bovenaan, daaronder icon-rij -->
-        ${(primaryActionHtml || iconRowHtml) ? `
-        <div class="ev-card">
-          <h3><i class="ti ti-bolt"></i> Acties</h3>
-          <div class="ev-actions-vert">
-            ${primaryActionHtml}
-            ${iconRowHtml}
-          </div>
-        </div>` : ''}
-      </div>
-
-      <!-- RECHTS: beschrijving -->
-      <div>
-        <div class="ev-desc-card">
-          <h3 style="font-size:11.5px;font-weight:700;color:var(--text-faint);text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px;display:flex;align-items:center;gap:6px"><i class="ti ti-file-text"></i> Beschrijving</h3>
-          <div class="desc-content">${ev.description_md ? esc(ev.description_md) : '<span class="desc-empty">Geen beschrijving.</span>'}</div>
-        </div>
-      </div>
-    </div>
-
-    <!-- Tabs: Mentoren-tab alleen bij afgerond event (stap 5). -->
+    <!-- LAYOUT: tab-strip nu direct onder titel-blok + (optionele) banner.
+         De two-column samenvatting (.ev-split) verhuist naar binnen de
+         Info-tab als eerste kind; renderInfoTab() vult #tab-info-meta
+         onder de samenvatting met de Algemeen/Sync&meta-tabellen. -->
     <div class="tabs" role="tablist">
       <button class="tab ${state.tab === 'info' ? 'active' : ''}" data-tab="info"><i class="ti ti-info-circle"></i> Info</button>
       <button class="tab ${state.tab === 'attendees' ? 'active' : ''}" data-tab="attendees"><i class="ti ti-users"></i> Aanwezigen <span class="tab-count" id="tabCountAtt">${c?.attendees_total || 0}</span></button>
@@ -646,7 +602,57 @@ function renderPage() {
       <button class="tab ${state.tab === 'audit' ? 'active' : ''}" data-tab="audit"><i class="ti ti-history"></i> Audit</button>
     </div>
 
-    <section class="tab-content ${state.tab === 'info' ? 'active' : ''}" id="tab-info"></section>
+    <section class="tab-content ${state.tab === 'info' ? 'active' : ''}" id="tab-info">
+      <!-- Two-koloms blok: LINKS smalle details-box + sync + actions, RECHTS beschrijving. -->
+      <div class="ev-split">
+        <div>
+          <!-- Details-box -->
+          <div class="ev-card">
+            <h3><i class="ti ti-info-circle"></i> Details</h3>
+            <div class="ev-detail-row"><i class="ti ti-calendar"></i><span>${esc(fmtDate(ev.starts_at))}</span></div>
+            <div class="ev-detail-row"><i class="ti ti-map-pin"></i><span>${esc(ev.location || '—')}</span></div>
+            <div class="ev-detail-row"><i class="ti ti-stairs-up"></i><span>${esc(ev.niveau_label || ev.niveau || '—')}</span></div>
+            <div class="ev-detail-row"><i class="ti ti-users"></i><span class="${capClass}">${active}/${cap} plekken</span></div>
+            <div class="ev-pill-row">
+              <span class="status-badge status-${ev.status}">${esc(EV_STATUS_LABELS[ev.status] || ev.status)}</span>
+              ${isCompleted ? `<span class="status-badge status-afgerond"><i class="ti ti-checks"></i> Afgerond &middot; ${esc(new Date(ev.completed_at).toLocaleDateString('nl-NL', { day: '2-digit', month: 'short', year: 'numeric' }))}</span>` : ''}
+              ${signupsClosed ? renderSignupsClosedBadgeHead(ev) : ''}
+            </div>
+          </div>
+
+          <!-- Sync-chips -->
+          <div class="ev-card">
+            <h3><i class="ti ti-refresh"></i> Sync</h3>
+            <div class="ev-sync-chips">
+              ${renderSyncBadgeLg('webflow', ev.webflow_sync_status, ev.webflow_last_synced_at)}
+              ${renderSyncBadgeLg('ghl',     ev.ghl_sync_status,     ev.ghl_last_synced_at)}
+            </div>
+            ${(canPublish && hasSyncFailure(ev)) ? '<button class="btn-retry" id="syncRetryBtn" onclick="retrySync()" style="margin-top:10px;width:100%"><i class="ti ti-refresh"></i> Retry sync</button>' : ''}
+          </div>
+
+          <!-- Actieknoppen: primair vol bovenaan, daaronder icon-rij -->
+          ${(primaryActionHtml || iconRowHtml) ? `
+          <div class="ev-card">
+            <h3><i class="ti ti-bolt"></i> Acties</h3>
+            <div class="ev-actions-vert">
+              ${primaryActionHtml}
+              ${iconRowHtml}
+            </div>
+          </div>` : ''}
+        </div>
+
+        <!-- RECHTS: beschrijving -->
+        <div>
+          <div class="ev-desc-card">
+            <h3 style="font-size:11.5px;font-weight:700;color:var(--text-faint);text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px;display:flex;align-items:center;gap:6px"><i class="ti ti-file-text"></i> Beschrijving</h3>
+            <div class="desc-content">${ev.description_md ? esc(ev.description_md) : '<span class="desc-empty">Geen beschrijving.</span>'}</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Algemeen + Sync & meta tabellen (gevuld door renderInfoTab). -->
+      <div id="tab-info-meta"></div>
+    </section>
     <section class="tab-content ${state.tab === 'attendees' ? 'active' : ''}" id="tab-attendees"></section>
     ${isCompleted ? `<section class="tab-content ${state.tab === 'mentors' ? 'active' : ''}" id="tab-mentors"></section>` : ''}
     <section class="tab-content ${state.tab === 'audit' ? 'active' : ''}" id="tab-audit"></section>
@@ -748,9 +754,13 @@ function _renderCompletedMentorsTab(host, ev) {
 function renderInfoTab() {
   const ev = state.event;
   // STAP 3: beschrijving-card verhuisde naar de rechter-kolom in renderPage().
-  // Info-tab toont nu alleen Algemeen + Sync & meta data; de details-box
-  // links bovenin geeft al een snelle samenvatting.
-  document.getElementById('tab-info').innerHTML = `
+  // LAYOUT-update: de samenvatting (.ev-split) staat nu ALS EERSTE KIND in
+  // #tab-info; deze tabellen (Algemeen + Sync & meta) komen daaronder via
+  // de sub-container #tab-info-meta zodat we de samenvatting niet wissen
+  // door innerHTML op #tab-info te zetten.
+  const host = document.getElementById('tab-info-meta');
+  if (!host) return;
+  host.innerHTML = `
     <div class="info-grid">
       <div class="info-card">
         <h3>Algemeen</h3>
