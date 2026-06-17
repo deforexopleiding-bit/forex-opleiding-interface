@@ -59,8 +59,16 @@ export default async function handler(req, res) {
   const phone     = body.phone      != null ? String(body.phone).trim()      : null;
   const status    = body.status ? String(body.status).toLowerCase() : 'aangemeld';
   const sendInvite = body.send_invite === true || body.send_invite === 'true';
+  // Optioneel: koppel de nieuwe aanwezige direct aan een bestaande klant.
+  // Gebruikt door de inbox-template-picker (0-kandidaten flow) zodat de
+  // net-toegevoegde aanwezige meteen via customer_id-match terugkomt in
+  // _evResolveAttendeeCandidatesForConv. NULL = niet gekoppeld.
+  const customerId = body.customer_id != null ? String(body.customer_id).trim() || null : null;
 
   if (!eventId || !UUID_RE.test(eventId)) return res.status(400).json({ error: 'event_id (uuid) vereist' });
+  if (customerId && !UUID_RE.test(customerId)) {
+    return res.status(400).json({ error: 'customer_id moet geldige uuid zijn' });
+  }
   if (!VALID_STATUS.includes(status)) {
     return res.status(400).json({ error: `status moet ${VALID_STATUS.join('|')} zijn` });
   }
@@ -114,6 +122,8 @@ export default async function handler(req, res) {
       attended_at:        status === 'aanwezig' ? nowIso : null,
       no_show_marked_at:  status === 'no_show'  ? nowIso : null,
       sale_at:            status === 'sale'     ? nowIso : null,
+      // Optionele customer-koppeling (zie body-destructuring boven).
+      customer_id:        customerId,
     };
 
     const { data: row, error } = await supabaseAdmin

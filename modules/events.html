@@ -3491,6 +3491,100 @@ async function _evResolveAttendeeCandidatesForConv(conv) {
   }
 }
 
+// FEATURE 0-kandidaten inline-actie: helpers voor "voeg toe als aanwezige".
+// Cache de gepubliceerde events-lijst per template-picker-open zodat 'we 'm
+// niet bij elke re-render opnieuw fetchen.
+window._evTplPubEventsCache = window._evTplPubEventsCache || null;
+
+async function _evLoadPublishedEventsForAdd() {
+  if (window._evTplPubEventsCache) return window._evTplPubEventsCache;
+  try {
+    const r = await window.AgentShared.apiFetch('/api/events-list?status=published&limit=200');
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) {
+      console.warn('[tpl-add-events] events-list:', d.error || ('HTTP ' + r.status));
+      window._evTplPubEventsCache = [];
+      return window._evTplPubEventsCache;
+    }
+    const now = Date.now();
+    const items = Array.isArray(d.items) ? d.items : [];
+    // Filter toekomstige events (starts_at >= now) — selectie van past-events
+    // zou raar zijn voor een net-aangemaakte aanwezige.
+    const future = items.filter((ev) => {
+      if (!ev.starts_at) return false;
+      const t = new Date(ev.starts_at).getTime();
+      return Number.isFinite(t) && t >= now;
+    });
+    future.sort((a, b) => new Date(a.starts_at).getTime() - new Date(b.starts_at).getTime());
+    window._evTplPubEventsCache = future;
+    return window._evTplPubEventsCache;
+  } catch (e) {
+    console.warn('[tpl-add-events exception]', e?.message || e);
+    window._evTplPubEventsCache = [];
+    return window._evTplPubEventsCache;
+  }
+}
+
+// Klantgegevens (first/last/email) ophalen voor de POST. Inbox-conversation
+// heeft alleen customer_id + customer_name (samengevoegd) — voor een nette
+// rij willen we ze apart in event_attendees. Client-side Supabase zelfde
+// RLS-pad als bestaande loadEventContextForCustomer.
+async function _evLoadCustomerNawForAdd(customerId) {
+  if (!customerId) return null;
+  try {
+    await window._authSharedReady;
+    if (!window.supabase) return null;
+    const { data, error } = await window.supabase
+      .from('customers')
+      .select('first_name, last_name, email')
+      .eq('id', customerId)
+      .maybeSingle();
+    if (error) {
+      console.warn('[tpl-add customer]', error.message);
+      return null;
+    }
+    return data || null;
+  } catch (e) {
+    console.warn('[tpl-add customer exception]', e?.message || e);
+    return null;
+  }
+}
+
+// POST naar /api/events-attendee-add met de samengestelde payload. Geen
+// auto-invite (de operator stuurt zometeen zelf de template).
+async function _evAddAttendeeFromInbox(eventId) {
+  if (!eventId) return { ok: false, error: 'Geen event geselecteerd' };
+  const conv = _evState.conv || {};
+  const naw  = conv.customer_id ? await _evLoadCustomerNawForAdd(conv.customer_id) : null;
+  const payload = {
+    event_id    : eventId,
+    first_name  : naw && naw.first_name ? naw.first_name : null,
+    last_name   : naw && naw.last_name  ? naw.last_name  : null,
+    email       : naw && naw.email      ? naw.email      : null,
+    phone       : conv.phone_number || null,
+    customer_id : conv.customer_id || null,
+    send_invite : false,
+  };
+  try {
+    const r = await window.AgentShared.apiFetch('/api/events-attendee-add', {
+      method : 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body   : JSON.stringify(payload),
+    });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) {
+      // 409 EMAIL_EXISTS / SEATS_FULL / archived; 403 no perm; 4xx algemeen.
+      const msg = d.code === 'EMAIL_EXISTS' ? 'Deze klant is al aangemeld voor dit event.'
+        : d.code === 'SEATS_FULL'           ? 'Dit event is vol; kies een ander event.'
+        : (d.error || ('HTTP ' + r.status));
+      return { ok: false, error: msg, status: r.status, code: d.code || null };
+    }
+    return { ok: true, attendee: d.attendee || null };
+  } catch (e) {
+    return { ok: false, error: e?.message || 'onbekende fout' };
+  }
+}
+
 function _evFmtAttendeeOption(c) {
   const dateStr = c.event_starts_at
     ? new Date(c.event_starts_at).toLocaleDateString('nl-NL', { day: '2-digit', month: 'short', year: 'numeric' })
@@ -3514,6 +3608,9 @@ function openTemplatePicker() {
   _evTplState.attendeeCandidates = [];
   _evTplState.attendeeCandidatesLoaded = false;
   _evTplState.selectedAttendeeId = null;
+  // Vergeet ook de events-lijst-cache: capacity / nieuwe events kunnen tussen
+  // template-picker-opens veranderen.
+  window._evTplPubEventsCache = null;
   loadTemplates(convId);
 }
 
@@ -3686,11 +3783,33 @@ function _renderTplConfirmView(tpl, hint) {
   let eventCtxHtml = '';
   if (needsEventCtx) {
     if (cands.length === 0) {
-      eventCtxHtml = `
-        <div style="background:rgba(220,38,38,.08);border:1px solid rgba(220,38,38,.25);color:#b91c1c;border-radius:8px;padding:10px;font-size:12.5px;margin-bottom:10px">
-          <strong>Geen aanwezige gekoppeld.</strong> Deze template gebruikt aanwezige- of event-variabelen. Koppel eerst een klant aan dit gesprek, of voeg deze persoon als aanwezige toe op een event.
-        </div>
-      `;
+      // 0-kandidaten: ALLEEN als users events.attendee.create heeft, toon een
+      // inline "Voeg toe als aanwezige op een event"-blokje. Anders: nette tekst
+      // met verwijzing naar event-detail. Geen knop renderen die niet werkt.
+      const canCreateAttendee = window.RBAC?.canSync?.('events.attendee.create') === true;
+      if (canCreateAttendee) {
+        eventCtxHtml = `
+          <div style="background:rgba(220,38,38,.08);border:1px solid rgba(220,38,38,.25);color:#b91c1c;border-radius:8px;padding:10px;font-size:12.5px;margin-bottom:6px">
+            <strong>Geen aanwezige gekoppeld.</strong> Deze template gebruikt aanwezige- of event-variabelen. Voeg deze persoon hieronder direct toe als aanwezige op een event.
+          </div>
+          <div id="evTplAddAttendeeBox" style="background:var(--bg-elev);border:1px solid var(--border);border-radius:8px;padding:10px 12px;margin-bottom:10px">
+            <div style="font-size:11px;font-weight:700;color:var(--text-faint);text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px">Voeg toe als aanwezige op een event</div>
+            <div style="display:flex;gap:8px;align-items:stretch;flex-wrap:wrap">
+              <select id="evTplAddEventSel" style="flex:1;min-width:220px;padding:7px 9px;border:1px solid var(--border);border-radius:7px;background:var(--bg);color:var(--text);font-family:inherit;font-size:13px">
+                <option value="">Events laden…</option>
+              </select>
+              <button class="btn-primary" id="evTplAddBtn" type="button" disabled style="white-space:nowrap"><i class="ti ti-user-plus"></i> Toevoegen + selecteren</button>
+            </div>
+            <div id="evTplAddMsg" style="font-size:11.5px;color:var(--text-faint);margin-top:6px"></div>
+          </div>
+        `;
+      } else {
+        eventCtxHtml = `
+          <div style="background:rgba(220,38,38,.08);border:1px solid rgba(220,38,38,.25);color:#b91c1c;border-radius:8px;padding:10px;font-size:12.5px;margin-bottom:10px">
+            <strong>Geen aanwezige gekoppeld.</strong> Deze template gebruikt aanwezige- of event-variabelen, maar deze persoon staat (nog) niet als aanwezige op een event. Voeg 'm toe via de aanwezigen-tab op het betreffende event-detail, of vraag een collega met de juiste rechten.
+          </div>
+        `;
+      }
     } else if (cands.length === 1) {
       const c = cands[0];
       const optTxt = _evFmtAttendeeOption(c);
@@ -3736,6 +3855,71 @@ function _renderTplConfirmView(tpl, hint) {
       // Re-render zodat de send-knop opnieuw evalueert (choice-token-disable).
       _renderTplConfirmView(tpl, hint);
     });
+  }
+  // 0-kandidaten + canCreateAttendee: hydrateer event-dropdown en wire button.
+  const addBox = document.getElementById('evTplAddAttendeeBox');
+  if (addBox) {
+    const evSel  = document.getElementById('evTplAddEventSel');
+    const addBtn = document.getElementById('evTplAddBtn');
+    const msg    = document.getElementById('evTplAddMsg');
+    _evLoadPublishedEventsForAdd().then((events) => {
+      if (!evSel) return;
+      if (!events || events.length === 0) {
+        evSel.innerHTML = '<option value="">Geen toekomstige events gevonden</option>';
+        if (addBtn) addBtn.disabled = true;
+        return;
+      }
+      const opts = events.map((ev) => {
+        const dateStr = ev.starts_at
+          ? new Date(ev.starts_at).toLocaleDateString('nl-NL', { day: '2-digit', month: 'short', year: 'numeric' })
+          : '';
+        const cap = (typeof ev.attendee_count_active === 'number' && typeof ev.capacity === 'number')
+          ? ` (${ev.attendee_count_active}/${ev.capacity})`
+          : '';
+        const label = (ev.title || '(zonder titel)') + (dateStr ? ' · ' + dateStr : '') + cap;
+        return '<option value="' + esc(ev.id) + '">' + esc(label) + '</option>';
+      });
+      evSel.innerHTML = '<option value="">— kies event —</option>' + opts.join('');
+      if (addBtn) addBtn.disabled = true;
+      evSel.addEventListener('change', (e) => {
+        if (addBtn) addBtn.disabled = !e.target.value;
+      });
+    });
+    if (addBtn) {
+      addBtn.addEventListener('click', async () => {
+        if (addBtn.disabled) return;
+        const eventId = evSel && evSel.value || '';
+        if (!eventId) return;
+        addBtn.disabled = true;
+        addBtn.innerHTML = '<i class="ti ti-loader-2"></i> Toevoegen…';
+        if (msg) { msg.style.color = 'var(--text-faint)'; msg.textContent = ''; }
+        const result = await _evAddAttendeeFromInbox(eventId);
+        if (!result.ok) {
+          if (msg) {
+            msg.style.color = '#b91c1c';
+            msg.textContent = 'Toevoegen mislukt: ' + (result.error || 'onbekende fout');
+          }
+          addBtn.disabled = false;
+          addBtn.innerHTML = '<i class="ti ti-user-plus"></i> Toevoegen + selecteren';
+          return;
+        }
+        // Succes: forceer re-resolve van kandidaten + auto-select de net
+        // toegevoegde rij (matched via customer_id of phone). Cache eerst
+        // ongeldig maken zodat de nieuwe rij meegeladen wordt.
+        _evTplState.attendeeCandidatesLoaded = false;
+        _evTplState.attendeeCandidates = [];
+        const cands2 = await _evResolveAttendeeCandidatesForConv(_evState.conv);
+        _evTplState.attendeeCandidates = cands2;
+        _evTplState.attendeeCandidatesLoaded = true;
+        const newId = result.attendee && result.attendee.id;
+        if (newId && cands2.some((c) => c.attendee_id === newId)) {
+          _evTplState.selectedAttendeeId = newId;
+        } else if (cands2.length > 0) {
+          _evTplState.selectedAttendeeId = cands2[0].attendee_id;
+        }
+        _renderTplConfirmView(tpl, null);
+      });
+    }
   }
   document.getElementById('evTplSendBtn').addEventListener('click', () => {
     if (blocked) return;
