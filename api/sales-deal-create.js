@@ -28,7 +28,15 @@ export default async function handler(req, res) {
 
   const body = req.body || {};
   const { customer_data = {}, deal_data = {}, products = [],
-          matched_customer_id, tl_imported_contact_id, sync_to_tl = false } = body;
+          matched_customer_id, tl_imported_contact_id, sync_to_tl = false,
+          // Optioneel: wizard gestart vanuit Events-aanwezige. Zo ja, koppelen
+          // we event_attendees.customer_id server-side (best-effort, fail-soft)
+          // zodat de aanwezigen-tabel meteen tl_quotation_status mee krijgt via
+          // de bestaande join. Voorheen deed de wizard een client-side PATCH op
+          // /api/events-attendee-update, wat events.attendee.edit-rechten
+          // vereiste. Server-side draait dit binnen de al verleende
+          // sales.deal.create-scope (geen extra RBAC nodig).
+          event_attendee_id } = body;
 
   // Lead-bron is optioneel geworden (P2): geen verplichting meer.
   if (!Array.isArray(products) || products.length === 0) return res.status(400).json({ error: 'minimaal 1 product vereist' });
@@ -69,6 +77,23 @@ export default async function handler(req, res) {
         throw cErr;
       }
       customerId = cust.id;
+    }
+
+    // 1b. Best-effort: koppel de aanwezige aan deze klant zodat de
+    //     Events-aanwezigentabel meteen offerte-status toont. Failures
+    //     loggen we alleen — mogen de deal-creatie nooit breken.
+    if (event_attendee_id && customerId) {
+      try {
+        const { error: eaErr } = await supabaseAdmin
+          .from('event_attendees')
+          .update({ customer_id: customerId })
+          .eq('id', event_attendee_id);
+        if (eaErr) {
+          console.warn('[sales-deal-create] event_attendees back-link failed:', eaErr.message);
+        }
+      } catch (e) {
+        console.warn('[sales-deal-create] event_attendees back-link exception:', e?.message || e);
+      }
     }
 
     // 2. Bereken total_amount uit producten.
