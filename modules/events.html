@@ -2341,7 +2341,7 @@ async function openNiveauPhotoModal() {
     const r = await window.AgentShared.apiFetch('/api/events-niveau-options');
     const j = await r.json().catch(() => ({}));
     const opts = Array.isArray(j.options) ? j.options : [];
-    const BRAND = { basis: 'Forex Kickstart Live', gevorderd: 'Trading Deep Dive' };
+    const BRAND = { basis: 'Forex Masterclass Basis', gevorderd: 'Forex Masterclass Gevorderd' };
     slots.innerHTML = opts.map((o) => `
       <div class="ev-niv-slot" data-slug="${esc(o.slug)}" style="border:1px solid var(--border);border-radius:8px;padding:12px;margin-bottom:10px">
         <div style="font-weight:600;margin-bottom:8px">${esc(BRAND[o.slug] || o.label || o.slug)}</div>
