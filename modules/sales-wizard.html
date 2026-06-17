@@ -384,6 +384,10 @@ const state = {
   entities: [],
   trajects: [],
   editDealId: null,
+  // FEATURE 2: gevuld als de wizard geopend werd vanuit een aanwezige in
+  // events-detail. Submit-handler doet hiermee een best-effort PATCH op
+  // events-attendee-update om de aanwezige aan de nieuwe klant te koppelen.
+  prefillEventAttendeeId: null,
   wizard: {
     // Stap 1: bedrijf
     tl_department_id: '',
@@ -596,6 +600,35 @@ async function init() {
     } catch {}
     renderProgress(); syncStep1Fields(); syncStep2Fields(); renderEntityCards(); populateTrajectSelect(); renderTags(); renderDealProducts();
     return;
+  }
+
+  // ── FEATURE 2: prefill vanuit Events-aanwezige (one-shot sessionStorage). ──
+  // Events-detail zet hier {first_name,last_name,email,phone,event_attendee_id}
+  // (pad 2: nieuwe klant) OF {customer_id,event_attendee_id} (pad 1: bestaande
+  // klant — naast de ?customer_id= query). We lezen + verwijderen direct en
+  // bewaren event_attendee_id zodat submitDeal() na succes terug kan koppelen
+  // (PATCH events-attendee-update met de nieuwe customer_id).
+  try {
+    const prefillRaw = sessionStorage.getItem('_prefill_event_attendee');
+    if (prefillRaw) {
+      sessionStorage.removeItem('_prefill_event_attendee');
+      const prefill = JSON.parse(prefillRaw);
+      if (prefill && typeof prefill === 'object') {
+        if (prefill.event_attendee_id) {
+          state.prefillEventAttendeeId = prefill.event_attendee_id;
+        }
+        // NAW-velden alleen overnemen als er nog niks staat (URL ?customer_id=
+        // wint altijd — die laadt zometeen alsnog de canonieke customer-row).
+        if (!state.matched_customer_id) {
+          if (prefill.first_name) state.wizard.first_name = String(prefill.first_name);
+          if (prefill.last_name)  state.wizard.last_name  = String(prefill.last_name);
+          if (prefill.email)      state.wizard.email      = String(prefill.email);
+          if (prefill.phone)      state.wizard.phone      = String(prefill.phone);
+        }
+      }
+    }
+  } catch (e) {
+    console.warn('[wizard prefill]', e?.message || e);
   }
 
   const preCustId = params.get('customer_id');
@@ -1224,6 +1257,23 @@ async function submitDeal(syncToTl) {
       setTimeout(() => toast(`Klant opgeslagen lokaal, offerte sturen mislukt: ${data.tl_error || ''}`, 'error'), 1200);
     }
     await window.AgentShared.apiFetch('/api/sales-wizard-drafts', { method: 'DELETE' });
+    // FEATURE 2: best-effort terugkoppeling event_attendees.customer_id zodat
+    // de aanwezigen-rij in events-detail straks tl_quotation_status meekrijgt
+    // via de bestaande join op deals. Fail-soft — geen UI-blok bij 403/fout.
+    if (state.prefillEventAttendeeId && data.customer_id) {
+      try {
+        await window.AgentShared.apiFetch(
+          '/api/events-attendee-update?id=' + encodeURIComponent(state.prefillEventAttendeeId),
+          {
+            method : 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body   : JSON.stringify({ customer_id: data.customer_id }),
+          },
+        );
+      } catch (e) {
+        console.warn('[wizard prefill back-link]', e?.message || e);
+      }
+    }
     setTimeout(() => { window.location.href = `/modules/offerte-detail.html?id=${data.deal_id}`; }, 800);
   } catch (e) {
     toast('Verzenden mislukt: ' + e.message, 'error');

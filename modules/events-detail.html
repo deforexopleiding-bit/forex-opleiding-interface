@@ -795,6 +795,10 @@ function renderAttendeesTab() {
   const canTagAdd = can('events.attendee.tag_add');
   const canTagRemove = can('events.attendee.tag_remove');
   const canDelAtt = can('events.attendee.delete');
+  // FEATURE 2: kebab-actie "Offerte aanmaken" — opent sales-wizard met prefill
+  // van de aanwezige (sessionStorage one-shot voor onbekende klant; URL
+  // ?customer_id= voor reeds gekoppelde klant).
+  const canCreateQuotation = can('sales.deal.create');
 
   // Blok 1: bij gesloten inschrijvingen tonen we Aanwezige-toevoegen knop
   // disabled met tooltip - oplosbaar door eerst te heropen.
@@ -909,6 +913,8 @@ function renderAttendeesTab() {
         if (canAdd && a.status !== 'switched_to_other_event') {
           kebabItems.push(`<button class="kebab-item" data-action="move" data-id="${esc(a.id)}"><i class="ti ti-arrow-right"></i> Verplaatsen</button>`);
         }
+        // FEATURE 2: "Offerte aanmaken" → opent sales-wizard met prefill.
+        if (canCreateQuotation) kebabItems.push(`<button class="kebab-item" data-action="create-quotation" data-id="${esc(a.id)}"><i class="ti ti-file-invoice"></i> Offerte aanmaken</button>`);
         if (canTagAdd) kebabItems.push(`<button class="kebab-item" data-action="tag-add" data-id="${esc(a.id)}"><i class="ti ti-tag"></i> Tag toevoegen</button>`);
         if (canTagRemove && (a.tags || []).length > 0) kebabItems.push(`<button class="kebab-item" data-action="tag-remove" data-id="${esc(a.id)}"><i class="ti ti-tag-off"></i> Tag verwijderen</button>`);
         if (canDelAtt) kebabItems.push(`<button class="kebab-item danger" data-action="delete" data-id="${esc(a.id)}"><i class="ti ti-trash"></i> Verwijderen</button>`);
@@ -1026,6 +1032,7 @@ function renderAttendeesTab() {
       if (action === 'edit') return openAttEdit(id);
       if (action === 'send-invite') return sendInviteToAttendee(id);
       if (action === 'move') return openAttMoveModal(id);
+      if (action === 'create-quotation') return openQuotationWizardFromAttendee(id);
       if (action === 'tag-add') return openTagAddModal(id);
       if (action === 'tag-remove') return openTagRemove(id);
       if (action === 'delete') return deleteAttendee(id);
@@ -1067,6 +1074,57 @@ async function sendInviteToAttendee(attendeeId) {
   } catch (e) {
     console.error('[sendInviteToAttendee]', e);
     window.AgentShared.showToast('Versturen mislukt: ' + (e?.message || 'onbekende fout'), 'error');
+  }
+}
+
+// ── FEATURE 2: Offerte aanmaken vanuit aanwezige ────────────────────────────
+//
+// Twee paden:
+//   1. Aanwezige heeft al een gekoppelde klant (a.customer_id) → navigeer
+//      naar sales-wizard met ?customer_id=<uuid>. Bestaand URL-contract: de
+//      wizard zet matched_customer_id, lockt NAW-velden en skipt
+//      duplicate-check (zie modules/sales-wizard.html init-flow).
+//   2. Geen customer_id → sessionStorage one-shot key
+//      `_prefill_event_attendee` met de NAW + event_attendee_id, dan
+//      navigeer naar sales-wizard zonder query. De wizard leest de key bij
+//      init, vult stap 2 + bewaart event_attendee_id voor een best-effort
+//      terugkoppeling (PATCH events-attendee-update met customer_id) na een
+//      succesvolle deal-create.
+//
+// Endpoints/RBAC ongewijzigd. Gating gebeurt al via canCreateQuotation
+// (sales.deal.create) op de kebab-item-render.
+function openQuotationWizardFromAttendee(attendeeId) {
+  if (!attendeeId) return;
+  const a = (state.attendees || []).find((x) => x.id === attendeeId);
+  if (!a) {
+    window.AgentShared.showToast('Aanwezige niet gevonden in deze lijst.', 'error');
+    return;
+  }
+  try {
+    if (a.customer_id) {
+      // Pad 1: bestaande klant → URL ?customer_id=… (wizard skipt dup-check).
+      // event_attendee_id ook in sessionStorage zodat post-submit terugkoppeling
+      // mogelijk blijft (customer_id zal dezelfde zijn, maar de wizard kan
+      // het attendee-id alsnog gebruiken voor andere koppel-acties).
+      sessionStorage.setItem('_prefill_event_attendee', JSON.stringify({
+        event_attendee_id: a.id,
+        customer_id      : a.customer_id,
+      }));
+      window.location.href = '/modules/sales-wizard.html?customer_id=' + encodeURIComponent(a.customer_id);
+      return;
+    }
+    // Pad 2: nieuwe klant → NAW + event_attendee_id in sessionStorage.
+    sessionStorage.setItem('_prefill_event_attendee', JSON.stringify({
+      event_attendee_id: a.id,
+      first_name       : a.first_name || '',
+      last_name        : a.last_name  || '',
+      email            : a.email      || '',
+      phone            : a.phone      || '',
+    }));
+    window.location.href = '/modules/sales-wizard.html';
+  } catch (e) {
+    console.error('[openQuotationWizardFromAttendee]', e);
+    window.AgentShared.showToast('Openen mislukt: ' + (e?.message || 'onbekende fout'), 'error');
   }
 }
 
