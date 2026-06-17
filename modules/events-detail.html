@@ -591,10 +591,10 @@ function renderPage() {
 
     ${signupsClosed ? renderSignupsClosedBanner(ev) : ''}
 
-    <!-- LAYOUT: tab-strip nu direct onder titel-blok + (optionele) banner.
-         De two-column samenvatting (.ev-split) verhuist naar binnen de
-         Info-tab als eerste kind; renderInfoTab() vult #tab-info-meta
-         onder de samenvatting met de Algemeen/Sync&meta-tabellen. -->
+    <!-- LAYOUT: tab-strip direct onder titel-blok + (optionele) banner.
+         De two-column samenvatting (.ev-split) staat binnen de Info-tab
+         als eerste (en enige) kind — daar zit alle relevante samenvatting
+         al in (details / sync / acties + beschrijving). -->
     <div class="tabs" role="tablist">
       <button class="tab ${state.tab === 'info' ? 'active' : ''}" data-tab="info"><i class="ti ti-info-circle"></i> Info</button>
       <button class="tab ${state.tab === 'attendees' ? 'active' : ''}" data-tab="attendees"><i class="ti ti-users"></i> Aanwezigen <span class="tab-count" id="tabCountAtt">${c?.attendees_total || 0}</span></button>
@@ -650,8 +650,6 @@ function renderPage() {
         </div>
       </div>
 
-      <!-- Algemeen + Sync & meta tabellen (gevuld door renderInfoTab). -->
-      <div id="tab-info-meta"></div>
     </section>
     <section class="tab-content ${state.tab === 'attendees' ? 'active' : ''}" id="tab-attendees"></section>
     ${isCompleted ? `<section class="tab-content ${state.tab === 'mentors' ? 'active' : ''}" id="tab-mentors"></section>` : ''}
@@ -676,7 +674,6 @@ function renderPage() {
     });
   });
 
-  renderInfoTab();
   if (state.tab === 'attendees') renderAttendeesTab();
   if (state.tab === 'audit') renderAuditTab();
   if (state.tab === 'mentors' && isCompleted) loadCompletedMentors();
@@ -746,40 +743,6 @@ function _renderCompletedMentorsTab(host, ev) {
       </tr></thead>
       <tbody>${rows}</tbody>
     </table></div>
-  `;
-}
-
-// ── Tab: Info ────────────────────────────────────────────────────────────────
-
-function renderInfoTab() {
-  const ev = state.event;
-  // STAP 3: beschrijving-card verhuisde naar de rechter-kolom in renderPage().
-  // LAYOUT-update: de samenvatting (.ev-split) staat nu ALS EERSTE KIND in
-  // #tab-info; deze tabellen (Algemeen + Sync & meta) komen daaronder via
-  // de sub-container #tab-info-meta zodat we de samenvatting niet wissen
-  // door innerHTML op #tab-info te zetten.
-  const host = document.getElementById('tab-info-meta');
-  if (!host) return;
-  host.innerHTML = `
-    <div class="info-grid">
-      <div class="info-card">
-        <h3>Algemeen</h3>
-        <div class="info-row"><div class="info-label">Titel</div><div class="info-value">${esc(ev.title || '—')}</div></div>
-        <div class="info-row"><div class="info-label">Start</div><div class="info-value">${esc(fmtDate(ev.starts_at))}</div></div>
-        <div class="info-row"><div class="info-label">Eind</div><div class="info-value">${esc(fmtDate(ev.ends_at))}</div></div>
-        <div class="info-row"><div class="info-label">Locatie</div><div class="info-value">${esc(ev.location || '—')}</div></div>
-        <div class="info-row"><div class="info-label">Capaciteit</div><div class="info-value">${ev.capacity || '—'}</div></div>
-        <div class="info-row"><div class="info-label">Niveau</div><div class="info-value">${esc(ev.niveau_label || ev.niveau || '—')}</div></div>
-        <div class="info-row"><div class="info-label">Status</div><div class="info-value"><span class="status-badge status-${ev.status}">${esc(EV_STATUS_LABELS[ev.status] || ev.status)}</span></div></div>
-      </div>
-      <div class="info-card">
-        <h3>Sync &amp; meta</h3>
-        <div class="info-row"><div class="info-label">Webflow</div><div class="info-value">${esc(ev.webflow_sync_status || '—')}${ev.webflow_last_synced_at ? ` <span style="color:var(--text-faint);font-size:11px">(${esc(fmtDate(ev.webflow_last_synced_at))})</span>` : ''}</div></div>
-        <div class="info-row"><div class="info-label">GoHighLevel</div><div class="info-value">${esc(ev.ghl_sync_status || '—')}${ev.ghl_last_synced_at ? ` <span style="color:var(--text-faint);font-size:11px">(${esc(fmtDate(ev.ghl_last_synced_at))})</span>` : ''}</div></div>
-        <div class="info-row"><div class="info-label">Aangemaakt</div><div class="info-value">${esc(fmtDate(ev.created_at))}</div></div>
-        <div class="info-row"><div class="info-label">Bijgewerkt</div><div class="info-value">${esc(fmtDate(ev.updated_at))}</div></div>
-      </div>
-    </div>
   `;
 }
 
