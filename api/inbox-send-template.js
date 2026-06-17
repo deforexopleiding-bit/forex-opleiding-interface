@@ -92,6 +92,14 @@ export default async function handler(req, res) {
   const contextInvoiceId = body.context_invoice_id != null
     ? String(body.context_invoice_id).trim()
     : '';
+  // Events-hub: optionele attendee-context voor templates die attendee.*
+  // of event.* vars gebruiken (keuze-link / event-titel / -datum etc.).
+  // Wordt geresolved naar context.attendee + context.event en doorgegeven
+  // aan buildMetaVariablesFromMapping. Geen extra RBAC nodig — sales/events
+  // permissions zitten al in de auth-gate hierboven.
+  const contextEventAttendeeId = body.context_event_attendee_id != null
+    ? String(body.context_event_attendee_id).trim()
+    : '';
   // Fase A: runtime media voor IMAGE/VIDEO/DOCUMENT headers. Object met
   //   { kind: 'image'|'video'|'document', link: '<https-url>', filename? }
   const runtimeMediaIn = (body.runtime_media && typeof body.runtime_media === 'object' && !Array.isArray(body.runtime_media))
@@ -116,6 +124,9 @@ export default async function handler(req, res) {
   }
   if (contextInvoiceId && !UUID_RE.test(contextInvoiceId)) {
     return res.status(400).json({ error: 'context_invoice_id moet geldige uuid zijn' });
+  }
+  if (contextEventAttendeeId && !UUID_RE.test(contextEventAttendeeId)) {
+    return res.status(400).json({ error: 'context_event_attendee_id moet geldige uuid zijn' });
   }
   if (runtimeMediaIn) {
     const kind = String(runtimeMediaIn.kind || '').toLowerCase().trim();
@@ -218,6 +229,10 @@ export default async function handler(req, res) {
       const needsInvoices = requiredKeys.some(k => k === 'klant.factuur_lijst' || k === 'klant.totaal_open' || k === 'klant.aantal_open');
       const needsBetaalLink = requiredKeys.includes('factuur.betaal_link');
       const needsAfdeling = requiredKeys.some(k => k && k.startsWith('afdeling.'));
+      // Events-hub: attendee/event-variabelen vereisen een context_event_attendee_id.
+      const needsAttendee  = requiredKeys.some(k => k && k.startsWith('attendee.'));
+      const needsEvent     = requiredKeys.some(k => k && k.startsWith('event.'));
+      const needsChoiceLink = requiredKeys.includes('attendee.keuze_link');
 
       // Customer lookup — rijker dan inbox-conversation-context (incl. address_*).
       let customer = null;
@@ -342,8 +357,64 @@ export default async function handler(req, res) {
         }
       }
 
+      // Events-hub: attendee + event context laden als de mapping ze gebruikt.
+      // - context_event_attendee_id is verplicht zodra een attendee.* of
+      //   event.* key in de body-mapping staat (anders kunnen we niet
+      //   eenduidig kiezen welke deelnemer/event we serveren).
+      // - attendee.keuze_link vereist een geldig choice_token op de rij;
+      //   anders 400 met een nette tekst zodat de UI 'm kan tonen.
+      let attendee = null;
+      let event    = null;
+      if (needsAttendee || needsEvent) {
+        if (!contextEventAttendeeId) {
+          return res.status(400).json({
+            error: 'Deze template gebruikt aanwezige- of event-variabelen. Selecteer eerst een aanwezige (context_event_attendee_id ontbreekt).',
+            code : 'EVENT_ATTENDEE_REQUIRED',
+          });
+        }
+        try {
+          const { data: att, error: attErr } = await supabaseAdmin
+            .from('event_attendees')
+            .select('id, event_id, first_name, last_name, email, phone, choice_token')
+            .eq('id', contextEventAttendeeId)
+            .maybeSingle();
+          if (attErr) console.error('[inbox-send-template] attendee lookup:', attErr.message);
+          else attendee = att || null;
+        } catch (e) {
+          console.error('[inbox-send-template] attendee lookup exception:', e.message);
+        }
+        if (!attendee) {
+          return res.status(400).json({
+            error: 'context_event_attendee_id verwijst niet naar bestaande aanwezige',
+            code : 'EVENT_ATTENDEE_NOT_FOUND',
+          });
+        }
+        if (needsChoiceLink && !attendee.choice_token) {
+          return res.status(400).json({
+            error: 'Deze aanwezige heeft geen keuze-link beschikbaar. Genereer eerst een choice-token of kies een andere aanwezige.',
+            code : 'ATTENDEE_CHOICE_TOKEN_MISSING',
+          });
+        }
+        if ((needsEvent || needsAttendee) && attendee.event_id) {
+          try {
+            const { data: ev, error: evErr } = await supabaseAdmin
+              .from('events')
+              .select('id, title, starts_at, ends_at, status, location, niveau')
+              .eq('id', attendee.event_id)
+              .maybeSingle();
+            if (evErr) console.error('[inbox-send-template] event lookup:', evErr.message);
+            else event = ev || null;
+          } catch (e) {
+            console.error('[inbox-send-template] event lookup exception:', e.message);
+          }
+          if (needsEvent && !event) {
+            resolveWarnings.push('Geen event-row gevonden voor attendee ' + attendee.id);
+          }
+        }
+      }
+
       // Resolve mapping → { "1": value, "2": value }
-      const ctx = { customer, invoice, openInvoices, moduleContext };
+      const ctx = { customer, invoice, openInvoices, moduleContext, attendee, event };
       resolvedVariables = buildMetaVariablesFromMapping(bodyMapping, ctx);
       resolveMode = 'server_resolved';
 
@@ -504,6 +575,7 @@ export default async function handler(req, res) {
           meta_wamid:         wamid,
           resolve_mode:       resolveMode,
           context_invoice_id: contextInvoiceId || null,
+          context_event_attendee_id: contextEventAttendeeId || null,
           resolve_warnings:   resolveWarnings.length ? resolveWarnings : null,
         },
         ip_address: getClientIp(req),
