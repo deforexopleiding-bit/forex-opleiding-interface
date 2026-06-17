@@ -3976,15 +3976,27 @@ function _renderEvCustomerStrip(conv) {
   strip.style.display = '';
   if (conv.customer_id) {
     const label = conv.customer_name || '(klant)';
+    // Ontkoppel-knop is alleen zinvol bij een gekoppelde klant. Zelfde
+    // RBAC-gate als koppelen (zie endpoint: finance.inbox.send OF
+    // events.simone.use). canSync is synchroon zodat we 'm direct in de
+    // template kunnen branchen — async laden zou een knop-flicker geven.
+    const canUnlink = !!(window.RBAC?.canSync?.('finance.inbox.send')
+                       || window.RBAC?.canSync?.('events.simone.use'));
+    const unlinkBtnHtml = canUnlink
+      ? '<button class="evx-ctx-link-btn" id="evCustUnlinkBtn" type="button" title="Ontkoppel klant van deze conversatie"><i class="ti ti-unlink"></i> Ontkoppel</button>'
+      : '';
     strip.innerHTML = `
       <span class="evx-ctx-label"><i class="ti ti-user"></i> Klant</span>
       <span><strong>${esc(label)}</strong></span>
       <button class="evx-ctx-link-btn" id="evCustChangeBtn" type="button" title="Wijzig klant-koppeling"><i class="ti ti-refresh"></i> Wijzigen</button>
+      ${unlinkBtnHtml}
       <span class="evx-ctx-label" id="evCtxEventLabel" style="margin-left:auto;display:none"><i class="ti ti-presentation"></i> Event</span>
       <span id="evCtxEventValue"></span>
     `;
     const changeBtn = document.getElementById('evCustChangeBtn');
     if (changeBtn) changeBtn.addEventListener('click', () => openCustomerLinkModal());
+    const unlinkBtn = document.getElementById('evCustUnlinkBtn');
+    if (unlinkBtn) unlinkBtn.addEventListener('click', () => _renderEvCustomerStripUnlinkConfirm(conv));
     // Event-context (read-only afgeleid via supabase client-side query).
     loadEventContextForCustomer(conv.customer_id);
   } else {
@@ -3995,6 +4007,58 @@ function _renderEvCustomerStrip(conv) {
     `;
     const linkBtn = document.getElementById('evCustLinkBtn');
     if (linkBtn) linkBtn.addEventListener('click', () => openCustomerLinkModal());
+  }
+}
+
+// In-app confirm voor ontkoppelen — vervangt tijdelijk de strip-inhoud zodat
+// we GEEN window.confirm hoeven te gebruiken (gaf eerder een Chrome-freeze in
+// deze module). Annuleer → re-render normale strip; Ontkoppelen → call endpoint,
+// op succes update _evState.conv en re-render naar de niet-gekoppelde branch.
+function _renderEvCustomerStripUnlinkConfirm(conv) {
+  const strip = document.getElementById('evCustomerStrip');
+  if (!strip) return;
+  const label = (conv && conv.customer_name) || '(klant)';
+  strip.innerHTML = `
+    <span class="evx-ctx-label"><i class="ti ti-alert-triangle" style="color:#b45309"></i> Bevestig</span>
+    <span>Weet je zeker dat je <strong>${esc(label)}</strong> van deze contactpersoon wilt verwijderen?</span>
+    <span style="margin-left:auto;display:inline-flex;gap:6px">
+      <button class="evx-ctx-link-btn" id="evCustUnlinkCancel" type="button">Annuleren</button>
+      <button class="evx-ctx-link-btn" id="evCustUnlinkConfirm" type="button" style="border-color:#b91c1c;color:#b91c1c"><i class="ti ti-unlink"></i> Ontkoppelen</button>
+    </span>
+  `;
+  const cancelBtn  = document.getElementById('evCustUnlinkCancel');
+  const confirmBtn = document.getElementById('evCustUnlinkConfirm');
+  if (cancelBtn) cancelBtn.addEventListener('click', () => _renderEvCustomerStrip(_evState.conv));
+  if (confirmBtn) {
+    confirmBtn.addEventListener('click', async () => {
+      if (!_evState.conv || !_evState.conv.id) return;
+      confirmBtn.disabled = true;
+      confirmBtn.innerHTML = '<i class="ti ti-loader-2"></i> Ontkoppelen…';
+      try {
+        const r = await window.AgentShared.apiFetch('/api/inbox-unlink-conversation-from-customer', {
+          method : 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body   : JSON.stringify({ conversation_id: _evState.conv.id }),
+        });
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) {
+          window.AgentShared.showToast(d.error || ('Ontkoppelen mislukt (HTTP ' + r.status + ')'), 'error');
+          // Toon weer de gekoppelde-staat zodat operator opnieuw kan proberen.
+          _renderEvCustomerStrip(_evState.conv);
+          return;
+        }
+        // Lokale state bijwerken zodat re-renders consistent zijn met server.
+        // Event-context-strip elementen leeg zijn na re-render (niet-gekoppelde
+        // branch toont 'm überhaupt niet meer).
+        _evState.conv.customer_id   = null;
+        _evState.conv.customer_name = null;
+        _renderEvCustomerStrip(_evState.conv);
+        window.AgentShared.showToast('Klant ontkoppeld', 'success');
+      } catch (e) {
+        window.AgentShared.showToast(e?.message || 'Ontkoppelen mislukt', 'error');
+        _renderEvCustomerStrip(_evState.conv);
+      }
+    });
   }
 }
 
