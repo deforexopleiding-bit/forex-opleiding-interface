@@ -3365,7 +3365,139 @@ async function sendComposeText() {
 // ──────────────────────────────────────────────────────────────────────────────
 // STAP 6c — Template-picker (zoek + verstuur via /api/inbox-send-template).
 // ──────────────────────────────────────────────────────────────────────────────
-const _evTplState = { items: [], filter: '', activeTpl: null, selectedVars: {} };
+const _evTplState = {
+  items: [],
+  filter: '',
+  activeTpl: null,
+  selectedVars: {},
+  // FEATURE event-aware templates: kandidaat-aanwezigen voor de actieve
+  // conversation (via customer_id + phone-fallback) + huidige selectie.
+  // Wordt lazy gevuld door _evResolveAttendeeCandidatesForConv() pas
+  // wanneer een template attendee.* / event.* gebruikt.
+  attendeeCandidates: [],
+  attendeeCandidatesLoaded: false,
+  selectedAttendeeId: null,
+};
+
+// Scan een template's meta_param_mapping body voor attendee.* / event.* vars.
+// Returnt true zodra ten minste 1 mapping-waarde met die prefix begint.
+function _evTplNeedsEventContext(tpl) {
+  if (!tpl) return false;
+  const mapping = tpl.meta_param_mapping && tpl.meta_param_mapping.body;
+  if (!mapping || typeof mapping !== 'object') return false;
+  for (const v of Object.values(mapping)) {
+    if (typeof v !== 'string') continue;
+    if (v.startsWith('attendee.') || v.startsWith('event.')) return true;
+  }
+  return false;
+}
+
+// Helper voor de UI: heeft de actieve template een attendee.keuze_link nodig?
+// Wordt gebruikt om aanwezigen zonder choice_token niet te laten kiezen.
+function _evTplNeedsChoiceLink(tpl) {
+  if (!tpl) return false;
+  const mapping = tpl.meta_param_mapping && tpl.meta_param_mapping.body;
+  if (!mapping || typeof mapping !== 'object') return false;
+  for (const v of Object.values(mapping)) {
+    if (v === 'attendee.keuze_link') return true;
+  }
+  return false;
+}
+
+// Resolve kandidaat-aanwezigen voor de open conversation. Client-side
+// Supabase met dezelfde RLS als loadEventContextForCustomer. Returnt een
+// array van { attendee_id, attendee_name, attendee_email, attendee_phone,
+// has_choice_token, event_id, event_title, event_starts_at, event_status }.
+//
+// Match-strategie:
+//   1. event_attendees.customer_id = conv.customer_id (als gekoppeld)
+//   2. event_attendees.phone = conv.phone_number  (fallback)
+// Resultaten worden gededupliceerd op attendee_id en gesorteerd: events
+// met starts_at in de toekomst eerst (oplopend); daarna events in het
+// verleden (aflopend). Aanwezigen zonder gekoppeld event komen onderaan.
+async function _evResolveAttendeeCandidatesForConv(conv) {
+  if (!conv) return [];
+  const customerId = conv.customer_id || null;
+  const phone      = conv.phone_number || conv.phone || null;
+  if (!customerId && !phone) return [];
+
+  try {
+    await window._authSharedReady;
+    if (!window.supabase) return [];
+
+    const seenIds = new Set();
+    const rows = [];
+
+    const sel = 'id, event_id, first_name, last_name, email, phone, choice_token, customer_id, events(id, title, starts_at, status)';
+
+    if (customerId) {
+      const { data, error } = await window.supabase
+        .from('event_attendees')
+        .select(sel)
+        .eq('customer_id', customerId)
+        .limit(25);
+      if (error) console.warn('[attendee-candidates customer]', error.message);
+      for (const r of (data || [])) {
+        if (seenIds.has(r.id)) continue;
+        seenIds.add(r.id);
+        rows.push(r);
+      }
+    }
+
+    if (phone) {
+      const { data, error } = await window.supabase
+        .from('event_attendees')
+        .select(sel)
+        .eq('phone', phone)
+        .limit(25);
+      if (error) console.warn('[attendee-candidates phone]', error.message);
+      for (const r of (data || [])) {
+        if (seenIds.has(r.id)) continue;
+        seenIds.add(r.id);
+        rows.push(r);
+      }
+    }
+
+    const now = Date.now();
+    const norm = rows.map((r) => {
+      const ev = r.events || null;
+      const startsMs = ev && ev.starts_at ? new Date(ev.starts_at).getTime() : 0;
+      const fullName = [r.first_name, r.last_name].filter(Boolean).join(' ').trim();
+      return {
+        attendee_id      : r.id,
+        attendee_name    : fullName || (r.email || r.phone || '—'),
+        attendee_email   : r.email || '',
+        attendee_phone   : r.phone || '',
+        has_choice_token : !!r.choice_token,
+        event_id         : ev ? ev.id : null,
+        event_title      : ev ? (ev.title || '') : '',
+        event_starts_at  : ev ? ev.starts_at : null,
+        event_status     : ev ? (ev.status || '') : '',
+        _futureRank      : (Number.isFinite(startsMs) && startsMs >= now) ? 0 : (startsMs > 0 ? 1 : 2),
+        _startsMs        : startsMs,
+      };
+    });
+    norm.sort((a, b) => {
+      if (a._futureRank !== b._futureRank) return a._futureRank - b._futureRank;
+      // Within future bucket → ascending (eerstvolgende boven); within past
+      // bucket → descending (meest recente boven).
+      if (a._futureRank === 0) return a._startsMs - b._startsMs;
+      return b._startsMs - a._startsMs;
+    });
+    return norm;
+  } catch (e) {
+    console.warn('[attendee-candidates exception]', e?.message || e);
+    return [];
+  }
+}
+
+function _evFmtAttendeeOption(c) {
+  const dateStr = c.event_starts_at
+    ? new Date(c.event_starts_at).toLocaleDateString('nl-NL', { day: '2-digit', month: 'short', year: 'numeric' })
+    : '';
+  const ev = c.event_title ? (c.event_title + (dateStr ? ' · ' + dateStr : '')) : '(geen event)';
+  return c.attendee_name + ' — ' + ev;
+}
 
 function openTemplatePicker() {
   const convId = _evState.convId;
@@ -3378,6 +3510,10 @@ function openTemplatePicker() {
   _evTplState.filter = '';
   _evTplState.activeTpl = null;
   _evTplState.selectedVars = {};
+  // Reset event-aware-state: nieuwe open = nieuwe kandidaten-resolve.
+  _evTplState.attendeeCandidates = [];
+  _evTplState.attendeeCandidatesLoaded = false;
+  _evTplState.selectedAttendeeId = null;
   loadTemplates(convId);
 }
 
@@ -3440,13 +3576,46 @@ function _renderTplListView() {
 //     We sturen direct (geen UI-vraag).
 //   - Positioneel: {{1}}, {{2}}, … in body_text. Vraag de operator om
 //     de waarden in te vullen.
-function onTemplatePicked(tpl) {
+async function onTemplatePicked(tpl) {
   _evTplState.activeTpl = tpl;
   const mapping = tpl.meta_param_mapping || null;
   const namedBody = mapping && mapping.body && typeof mapping.body === 'object' && Object.keys(mapping.body).length > 0;
   if (namedBody) {
-    // Named mapping → server resolves alles (klant.*, factuur.*, bedrijf.*,
-    // datum.*, afdeling.* en event/attendee fallback ''). Geen UI-vraag.
+    // FEATURE event-aware templates: als de mapping attendee.*/event.* heeft,
+    // resolve kandidaat-aanwezigen voor deze conv. 0 → blokkeer; 1 → auto-pick;
+    // N → selector in confirm-view.
+    if (_evTplNeedsEventContext(tpl)) {
+      _renderTplLoadingView('Aanwezigen zoeken…');
+      try {
+        if (!_evTplState.attendeeCandidatesLoaded) {
+          _evTplState.attendeeCandidates = await _evResolveAttendeeCandidatesForConv(_evState.conv);
+          _evTplState.attendeeCandidatesLoaded = true;
+        }
+        const cands = _evTplState.attendeeCandidates || [];
+        // Bij attendee.keuze_link → filter kandidaten zonder choice_token
+        // voor de auto-pick. Met choice_token tonen we ze wél in de selector
+        // maar disabled (zodat de operator ziet dat 't kan, maar niet voor
+        // deze template).
+        if (cands.length === 0) {
+          _evTplState.selectedAttendeeId = null;
+          _renderTplConfirmView(tpl, 'Geen aanwezige gevonden voor deze klant/telefoon. Koppel een klant of voeg deze persoon als aanwezige toe.');
+          return;
+        }
+        if (cands.length === 1) {
+          _evTplState.selectedAttendeeId = cands[0].attendee_id;
+          _renderTplConfirmView(tpl, null);
+          return;
+        }
+        // Meerdere: kies de eerste future-event als default (sort heeft die boven).
+        _evTplState.selectedAttendeeId = cands[0].attendee_id;
+        _renderTplConfirmView(tpl, null);
+        return;
+      } catch (e) {
+        _renderTplConfirmView(tpl, 'Aanwezigen ophalen mislukt: ' + (e?.message || 'onbekende fout'));
+        return;
+      }
+    }
+    // Named mapping zonder event-vars → ongewijzigd server-resolved gedrag.
     _renderTplConfirmView(tpl, null);
     return;
   }
@@ -3459,6 +3628,12 @@ function onTemplatePicked(tpl) {
     return;
   }
   _renderTplPositionalForm(tpl, indices);
+}
+
+function _renderTplLoadingView(text) {
+  const body = document.getElementById('evTplBody');
+  if (!body) return;
+  body.innerHTML = '<div style="color:var(--text-faint);font-size:12px;padding:14px;text-align:center">' + esc(text || 'Laden…') + '</div>';
 }
 
 function _renderTplPositionalForm(tpl, indices) {
@@ -3493,17 +3668,79 @@ function _renderTplPositionalForm(tpl, indices) {
 function _renderTplConfirmView(tpl, hint) {
   const body = document.getElementById('evTplBody');
   document.getElementById('evTplModalTitle').textContent = 'Verzenden — ' + (tpl.name || '');
+
+  // FEATURE event-aware: bouw optionele event-context UI als de template
+  // attendee/event-vars gebruikt en we kandidaten hebben opgehaald.
+  const needsEventCtx   = _evTplNeedsEventContext(tpl);
+  const needsChoiceLink = _evTplNeedsChoiceLink(tpl);
+  const cands           = needsEventCtx ? (_evTplState.attendeeCandidates || []) : [];
+  const selected        = needsEventCtx
+    ? cands.find((c) => c.attendee_id === _evTplState.selectedAttendeeId) || null
+    : null;
+  const blocked         = needsEventCtx && (
+    cands.length === 0
+    || !selected
+    || (needsChoiceLink && !selected.has_choice_token)
+  );
+
+  let eventCtxHtml = '';
+  if (needsEventCtx) {
+    if (cands.length === 0) {
+      eventCtxHtml = `
+        <div style="background:rgba(220,38,38,.08);border:1px solid rgba(220,38,38,.25);color:#b91c1c;border-radius:8px;padding:10px;font-size:12.5px;margin-bottom:10px">
+          <strong>Geen aanwezige gekoppeld.</strong> Deze template gebruikt aanwezige- of event-variabelen. Koppel eerst een klant aan dit gesprek, of voeg deze persoon als aanwezige toe op een event.
+        </div>
+      `;
+    } else if (cands.length === 1) {
+      const c = cands[0];
+      const optTxt = _evFmtAttendeeOption(c);
+      const missingLink = needsChoiceLink && !c.has_choice_token;
+      eventCtxHtml = `
+        <div style="background:var(--bg-elev);border:1px solid var(--border);border-radius:8px;padding:10px;font-size:12.5px;margin-bottom:10px">
+          <div style="font-size:11px;font-weight:700;color:var(--text-faint);text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px">Voor</div>
+          <div>${esc(optTxt)}</div>
+          ${missingLink ? '<div style="margin-top:6px;color:#b91c1c;font-size:11.5px"><i class="ti ti-alert-triangle"></i> Deze aanwezige heeft geen keuze-link; verstuur niet mogelijk.</div>' : ''}
+        </div>
+      `;
+    } else {
+      const options = cands.map((c) => {
+        const dis  = needsChoiceLink && !c.has_choice_token ? ' disabled' : '';
+        const txt  = _evFmtAttendeeOption(c) + (dis ? ' — (geen keuze-link)' : '');
+        const sel  = c.attendee_id === _evTplState.selectedAttendeeId ? ' selected' : '';
+        return `<option value="${esc(c.attendee_id)}"${sel}${dis}>${esc(txt)}</option>`;
+      }).join('');
+      eventCtxHtml = `
+        <label style="display:block;font-size:11px;font-weight:700;color:var(--text-faint);text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px">Aanwezige</label>
+        <select id="evTplAttendeeSel" style="width:100%;padding:7px 9px;border:1px solid var(--border);border-radius:7px;background:var(--bg);color:var(--text);font-family:inherit;font-size:13px;margin-bottom:10px">
+          ${options}
+        </select>
+      `;
+    }
+  }
+
   body.innerHTML = `
-    <div style="font-size:12.5px;color:var(--text-dim);margin-bottom:8px">Preview (server vult variabelen automatisch in vanuit klant/factuur/bedrijf/datum):</div>
+    <div style="font-size:12.5px;color:var(--text-dim);margin-bottom:8px">Preview (server vult variabelen automatisch in vanuit klant/factuur/bedrijf/datum${needsEventCtx ? '/aanwezige/event' : ''}):</div>
     <div style="background:var(--bg-elev);border:1px solid var(--border);border-radius:8px;padding:10px;font-size:12.5px;color:var(--text);white-space:pre-wrap;margin-bottom:10px">${esc(tpl.body_text || '')}</div>
+    ${eventCtxHtml}
     ${hint ? `<div style="font-size:11.5px;color:var(--text-faint);margin-bottom:8px">${esc(hint)}</div>` : ''}
     <div class="evx-modal-footer">
       <button class="sr-btn" id="evTplBackBtn" type="button" style="background:transparent;border:1px solid var(--border);color:var(--text-dim);padding:6px 12px;border-radius:7px;font-size:12px;cursor:pointer">Terug</button>
-      <button class="btn-primary" id="evTplSendBtn" type="button"><i class="ti ti-send"></i> Versturen</button>
+      <button class="btn-primary" id="evTplSendBtn" type="button"${blocked ? ' disabled style="opacity:.5;cursor:not-allowed"' : ''}><i class="ti ti-send"></i> Versturen</button>
     </div>
   `;
   document.getElementById('evTplBackBtn').addEventListener('click', () => _renderTplListView());
-  document.getElementById('evTplSendBtn').addEventListener('click', () => sendTemplate(tpl, {}));
+  const sel = document.getElementById('evTplAttendeeSel');
+  if (sel) {
+    sel.addEventListener('change', (e) => {
+      _evTplState.selectedAttendeeId = e.target.value || null;
+      // Re-render zodat de send-knop opnieuw evalueert (choice-token-disable).
+      _renderTplConfirmView(tpl, hint);
+    });
+  }
+  document.getElementById('evTplSendBtn').addEventListener('click', () => {
+    if (blocked) return;
+    sendTemplate(tpl, {});
+  });
 }
 
 async function sendTemplate(tpl, variables) {
@@ -3512,15 +3749,22 @@ async function sendTemplate(tpl, variables) {
   const sendBtn = document.getElementById('evTplSendBtn');
   if (sendBtn) { sendBtn.disabled = true; sendBtn.innerHTML = '…Versturen'; }
   try {
+    // FEATURE event-aware: stuur context_event_attendee_id mee als de
+    // template attendee.* / event.* gebruikt en we een selectie hebben.
+    // Templates zonder event-vars sturen 'm niet mee (achterwaarts compat).
+    const sendBody = {
+      conversation_id: convId,
+      template_name  : tpl.name,
+      language       : tpl.language || 'nl',
+      variables      : variables || {},
+    };
+    if (_evTplNeedsEventContext(tpl) && _evTplState.selectedAttendeeId) {
+      sendBody.context_event_attendee_id = _evTplState.selectedAttendeeId;
+    }
     const r = await window.AgentShared.apiFetch('/api/inbox-send-template', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        conversation_id: convId,
-        template_name  : tpl.name,
-        language       : tpl.language || 'nl',
-        variables      : variables || {},
-      }),
+      body: JSON.stringify(sendBody),
     });
     const j = await r.json().catch(() => ({}));
     if (!r.ok) {
