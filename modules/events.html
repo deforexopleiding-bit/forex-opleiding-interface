@@ -616,15 +616,10 @@ function renderPage(canCreate, canViewInbox, canManageSignupInbox) {
         </div>
       </section>
 
-      <!-- ── Sub-sectie: Automations (link naar bestaande pagina) ── -->
+      <!-- ── Sub-sectie: Automations (iframe-embed van /modules/events-automations.html?embed=1) ── -->
       <section class="evs-sub-section" data-evsubsec="automations">
-        <div class="aq-section-card">
-          <div style="font-size:15px;font-weight:700;margin-bottom:6px">Automations</div>
-          <div style="font-size:12.5px;color:var(--text-dim);margin-bottom:14px">Configureer automatische mail- en WhatsApp-flows rond events.</div>
-          <a class="btn btn-primary" href="/modules/events-automations.html" style="text-decoration:none;display:inline-flex;align-items:center;gap:6px">
-            <i class="ti ti-arrow-right"></i> Open Automations
-          </a>
-        </div>
+        <iframe id="evAutomationsFrame" data-src="/modules/events-automations.html?embed=1"
+                style="width:100%; height:calc(100vh - 220px); min-height:620px; border:0; border-radius:10px; background:var(--bg); display:block"></iframe>
       </section>
 
       <!-- ── Sub-sectie: Niveau-foto's (lokale modal) ── -->
@@ -1128,6 +1123,13 @@ function _evSelectSettingsSubTab(name) {
   document.querySelectorAll('.evs-sub-section[data-evsubsec]').forEach((s) => {
     s.classList.toggle('active', s.dataset.evsubsec === name);
   });
+  // Automations-iframe lazy-load: src wordt pas gezet bij de eerste opening
+  // van de subtab zodat de standalone-pagina niet onnodig in elke
+  // events.html-load wordt geladen.
+  if (name === 'automations') {
+    const fr = document.getElementById('evAutomationsFrame');
+    if (fr && !fr.src && fr.dataset.src) fr.src = fr.dataset.src;
+  }
   // Lazy load triggers
   if (name === 'assessment' && !_evSettingsState.assessmentLoaded) {
     _evSettingsState.assessmentLoaded = true;

@@ -141,6 +141,23 @@
       .a-card { grid-template-columns: 1fr; }
       .a-actions { justify-content: flex-start; }
     }
+
+    /* Embed-modus: pagina wordt in een iframe ingebed (events.html →
+       Instellingen → Automations). Verberg de eigen sidebar + globale
+       theme-toggle en laat de content de volle iframe-breedte gebruiken
+       zonder de standalone-margins. Activatie via ?embed=1 in de URL —
+       de bootstrap onder in deze pagina zet 'embed-mode' op <body>. */
+    body.embed-mode #sidebar-mount { display: none !important; }
+    body.embed-mode .app {
+      margin-left: 0 !important;
+      max-width: none !important;
+      padding: 16px 18px 32px !important;
+    }
+    body.embed-mode #theme-toggle,
+    body.embed-mode .theme-toggle,
+    body.embed-mode [data-role="theme-toggle"] {
+      display: none !important;
+    }
   </style>
 </head>
 <body>
@@ -219,6 +236,17 @@
 <script src="/modules/shared/sidebar.js"></script>
 
 <script>
+// ── Embed-modus ──────────────────────────────────────────────────────────────
+// Bij ?embed=1 (gebruikt door events.html → Instellingen → Automations)
+// verbergen we de eigen sidebar + theme-toggle en laten de content de volle
+// iframe-breedte gebruiken. Verder geen logica-wijziging — de standalone-
+// pagina (zonder ?embed=1) blijft byte-identiek werken.
+try {
+  if (new URLSearchParams(location.search).get('embed') === '1') {
+    document.body.classList.add('embed-mode');
+  }
+} catch (_e) { /* niet-blokkerend */ }
+
 // ── Constants ────────────────────────────────────────────────────────────────
 const TRIGGER_LABELS = {
   on_signup: 'Bij aanmelding',
