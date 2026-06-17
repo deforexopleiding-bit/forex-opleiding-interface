@@ -222,23 +222,38 @@ async function syncWebflow(event) {
   // Voorkomt de 13-juni-loop waar een ge-published past event eindeloos in
   // de retry-cron blijft hangen. Cron-niveau heeft een gespiegelde guard
   // zodat stale-rijen daar ook netjes opgeruimd worden.
+  //
+  // FIX (c): signups_closed=true ook skippen. Anders zou een update of retry
+  // (na een failure-row in event_sync_log) het Webflow-item live republishen
+  // terwijl de inschrijvingen bewust dicht zijn — wat de close-flow
+  // (events-close-signups) net via republish onzichtbaar heeft gemaakt.
+  // Reopen-pad blijft ongemoeid: reopen zet signups_closed=false vóórdat
+  // de outbound-sync getriggerd wordt en gebruikt republishWebflow direct,
+  // niet syncWebflow.
   const isPast       = !!event.starts_at && new Date(event.starts_at).getTime() < Date.now();
   const isCancelled  = event.status === 'cancelled';
   const isArchived   = event.status === 'archived' || event.webflow_sync_status === 'deleted';
-  if (isArchived || isCancelled || isPast) {
+  const isClosed     = event.signups_closed === true;
+  if (isArchived || isCancelled || isPast || isClosed) {
     const reasonParts = [];
     if (isArchived)  reasonParts.push('archived/deleted');
     if (isCancelled) reasonParts.push('cancelled');
     if (isPast)      reasonParts.push('past starts_at');
+    if (isClosed)    reasonParts.push('signups_closed');
     const reasonStr = reasonParts.join(' + ');
     console.warn(
       `[event-sync-orchestrator] syncWebflow SKIPPED event ${event.id} ` +
       `(${reasonStr}; status=${event.status}, ` +
-      `webflow_sync_status=${event.webflow_sync_status}, starts_at=${event.starts_at})`
+      `webflow_sync_status=${event.webflow_sync_status}, ` +
+      `starts_at=${event.starts_at}, signups_closed=${event.signups_closed})`
     );
+    const skipStatus = isArchived  ? 'skipped_archived'
+                     : isCancelled ? 'skipped_cancelled'
+                     : isPast      ? 'skipped_past'
+                     :               'skipped_signups_closed';
     return {
       ok: true, action: 'skip',
-      status: isArchived ? 'skipped_archived' : (isCancelled ? 'skipped_cancelled' : 'skipped_past'),
+      status: skipStatus,
       reason: reasonStr,
     };
   }
@@ -591,22 +606,30 @@ export async function syncEventToOutbound(eventId) {
   // FIX (b): cancelled + past-starts_at toegevoegd. 13-juni-loop case:
   // event is published maar starts_at is verleden → retry-cron blijft
   // 'm pakken en de PATCH /live 409't. Nu vroege exit met aparte status.
+  //
+  // FIX (c): signups_closed=true skip-pad gespiegeld met syncWebflow zodat
+  // de retry-cron een gesloten event ook niet republisht. fetchEvent
+  // selecteert signups_closed al sinds de close-feature (regel 567).
   const isPast       = !!event.starts_at && new Date(event.starts_at).getTime() < Date.now();
   const isCancelled  = event.status === 'cancelled';
   const isArchived   = event.status === 'archived' || event.webflow_sync_status === 'deleted';
-  if (isArchived || isCancelled || isPast) {
+  const isClosed     = event.signups_closed === true;
+  if (isArchived || isCancelled || isPast || isClosed) {
     const reasonParts = [];
     if (isArchived)  reasonParts.push('archived/deleted');
     if (isCancelled) reasonParts.push('cancelled');
     if (isPast)      reasonParts.push('past starts_at');
+    if (isClosed)    reasonParts.push('signups_closed');
     const reasonStr = reasonParts.join(' + ');
-    const skipStatus = isArchived ? 'skipped_archived'
+    const skipStatus = isArchived  ? 'skipped_archived'
                      : isCancelled ? 'skipped_cancelled'
-                     : 'skipped_past';
+                     : isPast      ? 'skipped_past'
+                     :               'skipped_signups_closed';
     console.warn(
       `[event-sync-orchestrator] syncEventToOutbound SKIPPED event ${eventId} ` +
       `(${reasonStr}; status=${event.status}, ` +
-      `webflow_sync_status=${event.webflow_sync_status}, starts_at=${event.starts_at})`
+      `webflow_sync_status=${event.webflow_sync_status}, ` +
+      `starts_at=${event.starts_at}, signups_closed=${event.signups_closed})`
     );
     return {
       eventId,
