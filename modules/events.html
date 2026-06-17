@@ -3556,11 +3556,34 @@ async function _evAddAttendeeFromInbox(eventId) {
   if (!eventId) return { ok: false, error: 'Geen event geselecteerd' };
   const conv = _evState.conv || {};
   const naw  = conv.customer_id ? await _evLoadCustomerNawForAdd(conv.customer_id) : null;
+
+  // Bepaal first_name/last_name. Met gekoppelde klant → naw uit customers.
+  // Zonder klant: val terug op de gespreksnaam (display_name = Meta WhatsApp
+  // profile name, of customer_name uit een eerdere koppeling). Split op de
+  // eerste spatie zodat de aanwezige niet naamloos in de DB belandt.
+  let firstName = null;
+  let lastName  = null;
+  if (naw) {
+    firstName = naw.first_name || null;
+    lastName  = naw.last_name  || null;
+  } else {
+    const convName = (conv.display_name || conv.customer_name || '').trim();
+    if (convName) {
+      const sp = convName.indexOf(' ');
+      if (sp === -1) {
+        firstName = convName;
+      } else {
+        firstName = convName.slice(0, sp).trim() || null;
+        lastName  = convName.slice(sp + 1).trim() || null;
+      }
+    }
+  }
+
   const payload = {
     event_id    : eventId,
-    first_name  : naw && naw.first_name ? naw.first_name : null,
-    last_name   : naw && naw.last_name  ? naw.last_name  : null,
-    email       : naw && naw.email      ? naw.email      : null,
+    first_name  : firstName,
+    last_name   : lastName,
+    email       : naw && naw.email ? naw.email : null,
     phone       : conv.phone_number || null,
     customer_id : conv.customer_id || null,
     send_invite : false,
@@ -3573,8 +3596,9 @@ async function _evAddAttendeeFromInbox(eventId) {
     });
     const d = await r.json().catch(() => ({}));
     if (!r.ok) {
-      // 409 EMAIL_EXISTS / SEATS_FULL / archived; 403 no perm; 4xx algemeen.
+      // 409 EMAIL_EXISTS / PHONE_EXISTS / SEATS_FULL / archived; 403 no perm.
       const msg = d.code === 'EMAIL_EXISTS' ? 'Deze klant is al aangemeld voor dit event.'
+        : d.code === 'PHONE_EXISTS'         ? 'Dit nummer staat al op dit event.'
         : d.code === 'SEATS_FULL'           ? 'Dit event is vol; kies een ander event.'
         : (d.error || ('HTTP ' + r.status));
       return { ok: false, error: msg, status: r.status, code: d.code || null };
@@ -3903,20 +3927,32 @@ function _renderTplConfirmView(tpl, hint) {
           addBtn.innerHTML = '<i class="ti ti-user-plus"></i> Toevoegen + selecteren';
           return;
         }
-        // Succes: forceer re-resolve van kandidaten + auto-select de net
-        // toegevoegde rij (matched via customer_id of phone). Cache eerst
-        // ongeldig maken zodat de nieuwe rij meegeladen wordt.
-        _evTplState.attendeeCandidatesLoaded = false;
-        _evTplState.attendeeCandidates = [];
-        const cands2 = await _evResolveAttendeeCandidatesForConv(_evState.conv);
-        _evTplState.attendeeCandidates = cands2;
+        // Succes: bouw het kandidaat-object DIRECT uit de POST-response
+        // (geen client-side re-resolve via window.supabase nodig — dat pad
+        // is afhankelijk van een SELECT-policy op event_attendees voor de
+        // 'authenticated' rol die er momenteel niet is; alle nieuwe
+        // policies van de F1-foundation laten anon/authenticated 'niets
+        // lezen/muteren' en het API-pad bypassed RLS via service_role).
+        // Hierdoor schuift de UI altijd door naar "Voor: …" + enabled
+        // Versturen, ongeacht of RLS later wel/niet wordt opengezet.
+        const att = result.attendee || {};
+        const selectedEvent = (window._evTplPubEventsCache || []).find((e) => e.id === eventId) || null;
+        const fullName = [att.first_name, att.last_name].filter(Boolean).join(' ').trim()
+          || att.email || att.phone || '—';
+        const newCand = {
+          attendee_id      : att.id,
+          attendee_name    : fullName,
+          attendee_email   : att.email || '',
+          attendee_phone   : att.phone || '',
+          has_choice_token : !!att.choice_token,
+          event_id         : att.event_id || (selectedEvent && selectedEvent.id) || eventId,
+          event_title      : selectedEvent ? (selectedEvent.title || '') : '',
+          event_starts_at  : selectedEvent ? selectedEvent.starts_at : null,
+          event_status     : selectedEvent ? (selectedEvent.status || '') : '',
+        };
+        _evTplState.attendeeCandidates = [newCand];
         _evTplState.attendeeCandidatesLoaded = true;
-        const newId = result.attendee && result.attendee.id;
-        if (newId && cands2.some((c) => c.attendee_id === newId)) {
-          _evTplState.selectedAttendeeId = newId;
-        } else if (cands2.length > 0) {
-          _evTplState.selectedAttendeeId = cands2[0].attendee_id;
-        }
+        _evTplState.selectedAttendeeId = newCand.attendee_id;
         _renderTplConfirmView(tpl, null);
       });
     }

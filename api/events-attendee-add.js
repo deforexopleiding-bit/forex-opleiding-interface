@@ -109,6 +109,34 @@ export default async function handler(req, res) {
       }
     }
 
+    // Phone-dedup binnen dit event. Geen partial unique index op
+    // (event_id, phone) — telefoonnummers staan vrij geformatteerd in DB —
+    // dus we doen een expliciete check op exact match (zelfde shape als
+    // _evResolveAttendeeCandidatesForConv die op phone matcht). Voorkomt
+    // dat de inbox-add-flow per ongeluk dubbele rijen aanmaakt wanneer de
+    // operator de knop tweemaal indrukt of de check-flow eerder mis-merged
+    // had.
+    if (phone) {
+      const { data: existingPhone, error: pErr } = await supabaseAdmin
+        .from('event_attendees')
+        .select('id')
+        .eq('event_id', eventId)
+        .eq('phone', phone)
+        .limit(1)
+        .maybeSingle();
+      if (pErr) {
+        console.error('[events-attendee-add phone-check]', pErr.message);
+        // Fail-soft: bij een DB-fout op de check NIET hard-falen — laat de
+        // INSERT z'n werk doen. Een echte dubbele wordt dan eventueel door
+        // de email-uniqueness-constraint nog gevangen.
+      } else if (existingPhone) {
+        return res.status(409).json({
+          code:  'PHONE_EXISTS',
+          error: 'Dit nummer staat al op dit event.',
+        });
+      }
+    }
+
     const nowIso = new Date().toISOString();
     const insertRow = {
       event_id:           eventId,
@@ -136,6 +164,7 @@ export default async function handler(req, res) {
         switched_from_event_id, switched_at,
         registered_at, attended_at, no_show_marked_at, sale_at,
         follow_up_flagged, follow_up_reason,
+        choice_token,
         created_at, updated_at
       `)
       .single();
