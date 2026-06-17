@@ -34,9 +34,9 @@ export const GRATIS_INFO_VALUE = 'gratis_info';
 // niet zelf hoeft te mappen en wij de tekst kunnen kalibreren zonder
 // frontend-deploy.
 export const COPY_BY_TIER = {
-  high: 'Op basis van jouw antwoorden kom je in aanmerking voor onze exclusieve Trading Deep Dive. Tijdens deze sessie analyseren we samen waarom je ondanks jouw kennis nog niet de gewenste resultaten behaalt.',
-  mid:  'Je hebt duidelijk interesse in trading en bent bezig met jouw ontwikkeling. Op dit moment denken we dat Forex Kickstart Live de meeste waarde zal bieden.',
-  low:  'Bedankt voor jouw interesse. Op basis van jouw antwoorden denken we dat het momenteel waardevoller is om eerst verder te bouwen aan jouw fundering. We raden daarom aan om te starten met Forex Kickstart Live.',
+  high: 'Op basis van jouw antwoorden kom je in aanmerking voor onze exclusieve Forex Masterclass Gevorderd. Tijdens deze masterclass analyseren we samen waarom je ondanks jouw kennis nog niet de gewenste resultaten behaalt.',
+  mid:  'Je hebt duidelijk interesse in trading en bent bezig met jouw ontwikkeling. Op dit moment denken we dat Forex Masterclass Basis de meeste waarde zal bieden.',
+  low:  'Bedankt voor jouw interesse. Op basis van jouw antwoorden denken we dat het momenteel waardevoller is om eerst verder te bouwen aan jouw fundering. We raden daarom aan om te starten met Forex Masterclass Basis.',
   incomplete: 'Gelieve de ontbrekende onderdelen aan te vullen zodat we jouw aanvraag verder kunnen verwerken.',
 };
 

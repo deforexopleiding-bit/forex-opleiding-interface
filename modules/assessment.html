@@ -449,21 +449,21 @@
       const TIER_FALLBACK = {
         high: {
           badge: 'Match: gevorderd',
-          title: 'Je komt in aanmerking voor de Trading Deep Dive',
-          copy : 'Op basis van jouw antwoorden kom je in aanmerking voor onze exclusieve Trading Deep Dive. Tijdens deze sessie analyseren we samen waarom je ondanks jouw kennis nog niet de gewenste resultaten behaalt.',
+          title: 'Je komt in aanmerking voor de Forex Masterclass Gevorderd',
+          copy : 'Op basis van jouw antwoorden kom je in aanmerking voor onze exclusieve Forex Masterclass Gevorderd. Tijdens deze masterclass analyseren we samen waarom je ondanks jouw kennis nog niet de gewenste resultaten behaalt.',
           followup: 'We nemen binnenkort persoonlijk contact met je op met de details.',
         },
         mid: {
           badge: 'Match: basis',
-          title: 'Forex Kickstart Live past het beste bij jou',
-          copy : 'Je hebt duidelijk interesse in trading en bent bezig met jouw ontwikkeling. Op dit moment denken we dat Forex Kickstart Live de meeste waarde zal bieden.',
+          title: 'Forex Masterclass Basis past het beste bij jou',
+          copy : 'Je hebt duidelijk interesse in trading en bent bezig met jouw ontwikkeling. Op dit moment denken we dat Forex Masterclass Basis de meeste waarde zal bieden.',
           followup: 'We sturen je binnenkort de details met onze beste keuze voor jou.',
         },
         low: {
           badge: 'Aanbeveling: bouw je fundering',
-          title: 'We raden Forex Kickstart Live aan',
-          copy : 'Bedankt voor jouw interesse. Op basis van jouw antwoorden denken we dat het momenteel waardevoller is om eerst verder te bouwen aan jouw fundering. We raden daarom aan om te starten met Forex Kickstart Live.',
-          followup: 'Je ontvangt binnenkort meer informatie over Forex Kickstart Live.',
+          title: 'We raden Forex Masterclass Basis aan',
+          copy : 'Bedankt voor jouw interesse. Op basis van jouw antwoorden denken we dat het momenteel waardevoller is om eerst verder te bouwen aan jouw fundering. We raden daarom aan om te starten met Forex Masterclass Basis.',
+          followup: 'Je ontvangt binnenkort meer informatie over Forex Masterclass Basis.',
         },
         incomplete: {
           badge: 'Inzending incompleet',
@@ -771,7 +771,7 @@
             $pickerEmpty.hidden = false;
             return;
           }
-          const niveauLabel = niveau === 'gevorderd' ? 'Deep Dive' : 'Kickstart';
+          const niveauLabel = niveau === 'gevorderd' ? 'Gevorderd' : 'Basis';
           $eventList.innerHTML = events.map((ev) => {
             const dateLabel = formatDateLabel(ev.starts_at);
             const cap = ev.capacity;
