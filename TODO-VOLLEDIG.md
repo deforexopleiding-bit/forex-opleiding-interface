@@ -6,6 +6,58 @@
 
 ---
 
+## ✅ Sessie 17–18 juni 2026 — Events comms + Simone autonomie + automation-tester + Webflow fix + Fase 4A
+
+### Voltooid — LIVE op main (laatste hoofd-SHA: 646978022ee7c64fc90f740e024e848cfc329227)
+
+**Events-communicatie + autonomie**
+- 4 WhatsApp-templates op events-WABA (`bevestiging_aanmelding_v2`, `vragenlijst_herinnering_v2`, `reminder_24u`, `reminder_2u`), allemaal met benoemde placeholders en meta_param_mapping gevuld.
+- 4 automations LIVE (bevestiging, vragenlijst-herinnering, reminder 24u, reminder 2u; email + WhatsApp).
+- PR #281 (6bc050c) — Simone events-agent autonomie-laag (`simone-autonomy-evaluate.js`, `simone-send-autonomous.js`, events-branch in `inbox-webhook.js`). Cancel/klacht = altijd mens (hard-escalate). Master-gate `feature_flags.events_reactive_autonomy = false`. UI in events.html Simone-config-tab uitgebreid + rode inbox-badge.
+- PR #282 (9db1718) — ⓘ-tooltips bij elk veld in de Simone-config (helper `scTip` + `SC_TIPS` map met 28 teksten).
+- PR #289 (7983366) + PR #291 — Simone Sandbox: "Test Simone"-tool in Simone-config-tab. Dummy `whatsapp_conversations`+`whatsapp_messages` met +99999-prefix, runSimoneSuggest via service-role (RLS-bypass), try/finally cleanup met CASCADE.
+- PR #292 (6beea52) — Sandbox cleanup-fix: explicit error-logging per DELETE-stap + inbox-list filtert `phone_number NOT ILIKE '+99999%'` (defense-in-depth safety-net).
+- PR #293 (6469780) — Simone-context uitgebreid met PUBLIEK INSCHRIJFBARE EVENTS (top 8 via `getOpenEventsWithSpace`); nu kan ze concreet antwoorden op "wanneer zijn jullie events?" i.p.v. naar de website verwijzen.
+
+**Automation-tester + uitbreiding**
+- PR #283 (68ec5fb) — Automation-tester MVP: `is_test` boolean op `event_attendees` + `event_automation_runs`, `POST /api/events-automation-test` (synthetische attendee + direct enroll, bypasst trigger_type), engine versnelt waits naar 15s op test-runs, "🧪 Test"-knop + modal + "🧹 Wis test-data"-knop in events-automations.html, TEST-pill in Run-historie, is_test-filters in events-attendees-list/events-detail/getConfirmedCount.
+- PR #284 + #285 — quick-fixes voor de tester (kolomnaam `enabled` i.p.v. `status`; verplichte `steps_snapshot`+`event_id`+`context` bij run-INSERT).
+- PR #290 (2d34695) — Automations Fase 4A:
+  - 1 nieuwe trigger: `on_assessment_not_completed_after` (config `hours_after_signup`).
+  - 2 nieuwe condities: `niveau_is_basis`, `niveau_is_gevorderd`.
+  - 3 nieuwe step-types: `set_tag`, `update_attendee_status`, `send_internal_notification` (env `INTERNAL_NOTIFICATION_EMAIL` fallback `jeffrey@deforexopleiding.nl`).
+  - Migratie: DROP+RECREATE check-constraint op `event_automations.trigger_type`.
+
+**Variabelen + Webflow-fix**
+- PR #286 (7e9e537) — Nieuwe template-variabele `attendee.vragenlijst_link` (analoog aan `keuze_link`, wijst naar `assessment.html?t=<choice_token>`).
+- PR #288 (1105372) — Webflow gastenlijst-clone-leak: bij CREATE van nieuw event-item in Webflow CMS klonte `webflow-client.js` de hele fieldData van het niveau-template inclusief `gastenlijst`-veld → elk nieuw Basis-event toonde "2/6" (van de basis-template). Strip + init op `formatGastenlijstLabel(0, event.capacity)` toegevoegd.
+
+### Openstaand voor Jeffrey (één-malig)
+- Cleanup-SQL: `DELETE FROM whatsapp_conversations WHERE phone_number LIKE '+99999%'` (huidige sandbox-rommel).
+- Settings-SQL voor Simone (autonomy_config, communication_limits ma–zo 08:30–21:00, intents) — staat nog open uit nacht-sessie. Reactieve suggest AAN, autonomie UIT.
+- Simone system_prompt_template uitbreiden met de PUBLIEK INSCHRIJFBARE EVENTS-context-instructie (via UI Simone-config opslaan).
+- Bestaande Webflow-events met onjuist gelekte `gastenlijst` (zoals 24 juni → "2/6") één-malig handmatig corrigeren in Webflow CMS-editor.
+- WhatsApp-stap toevoegen aan automation 1 (bevestiging) + 2 (vragenlijst) zodra `bevestiging_aanmelding_v2` door Meta is goedgekeurd (`bevestiging_aanmelding_v2` is APPROVED — bevestigd; mapping was null → gefixt met UPDATE meta_param_mapping voor body 1-5).
+- Abonnement-uitstel via Teamleader: locked next-invoice → echte fix = stop oude sub + maak nieuwe (geparkeerd).
+
+### Lessons (kritiek voor toekomstige sessies)
+- **WhatsApp Meta-templates**: gebruik benoemde placeholders (`{{attendee.voornaam}}`), nooit `{{1}}` zonder mapping. `meta_param_mapping=null` → `events-send.js` filtert op body-keys → vult NIETS → Meta error #132000 "Number of parameters does not match". Link altijd in BODY, nooit in button-URL.
+- **Webflow CMS clone-pattern**: elk per-event runtime-veld (zoals `gastenlijst`) moet EXPLICIET worden gestript + geïnitialiseerd in `webflow-client.js` clone-pad. Niveau-templates bewaren hun fieldData en lekken anders state.
+- **Cleanup-strategie**: ALTIJD `console.log` per DELETE-stap (id + error.message), NOOIT silent. Een sandbox/test-cleanup zonder logs is onmogelijk te debuggen als 'ie faalt.
+- **Tester-pattern**: `is_test` boolean op tabel + per-feature filter (`.eq('is_test', false)`) + cleanup-endpoint + UI-knop is een herbruikbaar patroon voor elke nieuwe synthetische-data-feature.
+- **Sandbox-pattern**: try/finally rond runSimoneSuggest, supabaseAdmin (service-role) voor de RLS-bypass binnen het endpoint (RBAC zit op endpoint-niveau), prefix-based filter (`+99999%`) als safety-net in alle list-endpoints.
+- **ES module cycles**: tolereerd zolang imports alleen in function bodies worden gebruikt (geen module-eval-tijd evaluatie). `formatGastenlijstLabel` cycle tussen `webflow-client.js` ↔ `event-registration.js` werkt prima.
+- **Chrome-agent screenshots >2000px**: Retina-schermen geven image-error. Mitigatie: smal venster + lagere schermresolutie + één taak per chat; multi-veld-config liever via SQL dan Chrome.
+- **Reminder 24u toont als "1 dagen vóór event"**: correct (24u→1 dag normalisatie). Niet fixen.
+- **Schema-recon EERST bij elke nieuwe feature**: kolomnamen wijken vaak af (event_automations heeft `enabled` niet `status`; `event_automation_runs` is enkelvoud event_, plural _runs; whatsapp_messages.direction is `'in'/'out'` niet `inbound/outbound`).
+
+### Backlog uit deze sessie
+- **Fase 4B Automations**: `create_task` step (vereist agent_tasks tabel die nog niet bestaat), `date_chosen`-conditie (geen DB-veld, design nodig), `on_attended`/`on_no_show` triggers (vereist betrouwbare attended-detectie).
+- **Automation-tester cleanup uitbreiden**: huidige cleanup verwijdert alleen test-event_attendees, niet de bijbehorende `whatsapp_conversations` (die op echte phone-nummers staan, dus prefix-filter werkt niet — design nodig).
+- **Webflow bulk-resync endpoint**: voor de gevallen waar gastenlijst is gelekt; bestaande events handmatig corrigeren is nu de workaround.
+
+---
+
 ## ✅ Sessie 3 juni 2026 — Sales-redesign + TL-integratie
 
 ### Voltooid (LIVE op main)
@@ -573,6 +625,9 @@ Diagnose recovery-link flow + SMTP-config geparkeerd tijdens scope-discussie Fol
 ## 🟢 NIET-BLOKKEREND — Toekomstige verbeteringen
 
 ### [NB0] Mentoren-module (toekomstig, gepland na Events F5)
+
+> STATUS (18 juni 2026): NOG NIET OPGEPAKT — kickoff klaarliggen voor nieuwe chat (zie /mnt/user-data/outputs/Mentordashboard-kickoff-nieuwe-chat.md uit 18-juni sessie). Datalaag geverifieerd aanwezig (event_mentors, event_bonuses + mentor_team_member_id/mentor_snapshot/status, event_expenses.mentor_team_member_ids, profiles.team_member_id). F5.1-grootboek (mentor_ledger_entries/mentor_payouts + engine + endpoints + mentor-grootboek.html) is al LIVE. Te bouwen: self-service mentor-dashboard-UI + endpoints mentor-my-events/-bonuses/-calendar + RBAC mentor.module.access/mentor.bonus.view_own. NB: verifieer actuele schema — F5.1 shipte mentor_user_id/amount, het plan noemt team_member_id/amount_eur.
+
 **Doel:** Eigen module voor mentor-zelfbediening — overzicht eigen events, eigen
 bonus-status (pending / confirmed / void), persoonlijke kalender met komende
 sessies. Vervangt informele WhatsApp-rapportage richting mentoren.
