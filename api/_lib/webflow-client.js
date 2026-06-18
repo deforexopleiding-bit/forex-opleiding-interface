@@ -93,6 +93,12 @@ let _tijdstipSlugCache = {
 // Welke version-header werkte voor de laatste succesvolle call (null = default).
 let _versionHeaderShape = null; // null of '2.0.0'
 
+// Gastenlijst-label helper (gedeeld met event-registration.js — kleine cyclus:
+// event-registration importeert updateLiveFields uit deze file, maar beide
+// gebruikers staan in function bodies, niet top-level — ES-modules tolereren
+// dit via live bindings).
+import { formatGastenlijstLabel } from './event-registration.js';
+
 // Typed Error-class
 export class WebflowError extends Error {
   constructor(code, message, detail = null) {
@@ -827,6 +833,12 @@ export async function createLiveItem({ event, descriptionHtml }) {
   delete fieldData._id;
   delete fieldData.id;
   delete fieldData['cms-locale-id'];
+  // Per-event state-velden mogen NIET uit het template erven (zoals 'gastenlijst':
+  // dat is een runtime-counter die per event uniek is). Strip + initialiseer
+  // expliciet op "0/<capacity>" zodat de site direct correct rendert; de
+  // bestaande syncGastenlijstWebflow flow updatet 'm vanaf de eerste registratie.
+  delete fieldData.gastenlijst;
+  fieldData.gastenlijst = formatGastenlijstLabel(0, event?.capacity);
 
   // Stap 3: bouw override-set + apply. buildFieldData zet name/slug/time/locatie-2/event-content.
   const overrides = buildFieldData({ event, descriptionHtml, schema });
