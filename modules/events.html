@@ -2415,6 +2415,18 @@ function renderSimoneConfigForm() {
   wrap.innerHTML =
       '<div style="display:flex;flex-direction:column;gap:18px">'
 
+    // ── 🧪 Test Simone (sandbox) ─────────────────────────────────────────
+    +   '<section style="background:var(--bg-elev);border:1px solid var(--border);border-radius:10px;padding:12px 14px">'
+    +     '<div style="font-size:12px;font-weight:700;color:var(--text-faint);text-transform:uppercase;letter-spacing:.04em;margin-bottom:8px">🧪 Test Simone</div>'
+    +     '<div style="font-size:12.5px;color:var(--text-dim);margin-bottom:8px">Typ een voorbeeld-klantvraag en zie direct welk antwoord Simone genereert + of \'t autonoom verstuurd zou worden. Maakt tijdelijk een dummy gesprek aan dat na de test direct weer verwijderd wordt.</div>'
+    +     '<textarea id="scSandboxInput" rows="3" placeholder="Typ een voorbeeld-vraag van een prospect…" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-family:inherit;font-size:13px;resize:vertical"></textarea>'
+    +     '<div style="display:flex;gap:8px;margin-top:8px">'
+    +       '<button class="btn btn-sm btn-primary" type="button" id="scSandboxRunBtn" onclick="runSimoneSandbox()"><i class="ti ti-flask"></i> Test</button>'
+    +       '<button class="btn btn-sm" type="button" id="scSandboxResetBtn" onclick="resetSimoneSandbox()" style="display:none"><i class="ti ti-trash"></i> Wissen</button>'
+    +     '</div>'
+    +     '<div id="scSandboxOutput" style="display:none;margin-top:12px"></div>'
+    +   '</section>'
+
     // ── Status + autonomous-master-switch ─────────────────────────────────
     +   '<section style="background:var(--bg-elev);border:1px solid var(--border);border-radius:10px;padding:12px 14px">'
     +     '<div style="font-size:12px;font-weight:700;color:var(--text-faint);text-transform:uppercase;letter-spacing:.04em;margin-bottom:8px">Algemeen</div>'
@@ -2556,6 +2568,80 @@ function renderSimoneConfigForm() {
 // Pause-all: zet is_enabled + alle autonomous-vlaggen lokaal uit, markeert
 // het form dirty zodat de Opslaan-knop actief wordt. Geen direct POST —
 // operator kan nog tweaken vóór commit.
+// ── Simone sandbox: fake klantvraag testen ──────────────────────────────────
+async function runSimoneSandbox() {
+  const ta  = document.getElementById('scSandboxInput');
+  const out = document.getElementById('scSandboxOutput');
+  const btn = document.getElementById('scSandboxRunBtn');
+  const rst = document.getElementById('scSandboxResetBtn');
+  if (!ta || !out) return;
+  const text = (ta.value || '').trim();
+  if (!text) {
+    out.style.display = 'block';
+    out.innerHTML = '<div style="padding:10px 12px;background:rgba(220,38,38,.08);border:1px solid rgba(220,38,38,.25);color:#b91c1c;border-radius:8px;font-size:12.5px">Typ eerst een voorbeeld-vraag.</div>';
+    return;
+  }
+  if (btn) { btn.disabled = true; btn.innerHTML = '<i class="ti ti-loader-2"></i> Bezig…'; }
+  out.style.display = 'block';
+  out.innerHTML = '<div style="padding:10px 12px;background:var(--bg);border:1px solid var(--border);border-radius:8px;color:var(--text-dim);font-size:12.5px">Simone denkt na…</div>';
+  try {
+    const r = await window.AgentShared.apiFetch('/api/simone-sandbox-test', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ message_text: text }),
+    });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) {
+      out.innerHTML = '<div style="padding:10px 12px;background:rgba(220,38,38,.08);border:1px solid rgba(220,38,38,.25);color:#b91c1c;border-radius:8px;font-size:12.5px">' + esc(d?.error || ('HTTP ' + r.status)) + '</div>';
+      if (rst) rst.style.display = '';
+      return;
+    }
+    const sg = d.suggestion || {};
+    const au = d.autonomy   || {};
+    const confPct = (typeof sg.confidence === 'number') ? Math.round(sg.confidence * 100) + '%' : '—';
+    const intentBadge = sg.detected_intent
+      ? '<span style="display:inline-flex;align-items:center;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:700;background:rgba(99,102,241,.15);color:#6366f1">' + esc(sg.detected_intent) + '</span>'
+      : '<span style="color:var(--text-faint);font-size:12px">?</span>';
+    const autoLine = au.allow_autonomous
+      ? '<div style="display:flex;align-items:center;gap:6px;padding:7px 10px;background:rgba(16,185,129,.12);border:1px solid rgba(16,185,129,.35);color:#059669;border-radius:8px;font-size:12.5px;font-weight:600"><i class="ti ti-check"></i> Zou autonoom verstuurd worden</div>'
+      : '<div style="display:flex;align-items:center;gap:6px;padding:7px 10px;background:rgba(220,38,38,.10);border:1px solid rgba(220,38,38,.3);color:#b91c1c;border-radius:8px;font-size:12.5px;font-weight:600"><i class="ti ti-x"></i> Wordt geblokkeerd' + (au.blocked_reason ? ' (' + esc(au.blocked_reason) + ')' : '') + (au.stop_action ? ' — stop_action=' + esc(au.stop_action) : '') + '</div>';
+    const logItems = Array.isArray(au.decision_log) && au.decision_log.length > 0
+      ? '<ul style="margin:6px 0 0 18px;padding:0;font-size:11.5px;color:var(--text-dim)">' + au.decision_log.map((l) => '<li>' + esc(l) + '</li>').join('') + '</ul>'
+      : '';
+    out.innerHTML =
+        '<div style="display:flex;flex-direction:column;gap:8px">'
+      +   '<div style="display:flex;align-items:center;gap:10px;font-size:12.5px">'
+      +     '<span style="color:var(--text-faint);font-weight:600">Intent:</span> ' + intentBadge
+      +     '<span style="color:var(--text-faint);font-weight:600;margin-left:8px">Confidence:</span> <strong>' + esc(confPct) + '</strong>'
+      +   '</div>'
+      +   '<div>'
+      +     '<div style="font-size:11px;font-weight:700;color:var(--text-faint);text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px">Voorgesteld antwoord</div>'
+      +     '<pre style="margin:0;padding:10px 12px;background:var(--bg);border:1px solid var(--border);border-radius:8px;font-family:inherit;font-size:13px;line-height:1.5;white-space:pre-wrap;color:var(--text)">' + esc(sg.suggested_reply || '(leeg)') + '</pre>'
+      +   '</div>'
+      +   autoLine
+      +   logItems
+      +   (sg.reasoning ? '<div><div style="font-size:11px;font-weight:700;color:var(--text-faint);text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px;margin-top:6px">Reasoning</div><div style="font-size:11.5px;color:var(--text-dim);white-space:pre-wrap">' + esc(sg.reasoning) + '</div></div>' : '')
+      + '</div>';
+    if (rst) rst.style.display = '';
+  } catch (e) {
+    out.innerHTML = '<div style="padding:10px 12px;background:rgba(220,38,38,.08);border:1px solid rgba(220,38,38,.25);color:#b91c1c;border-radius:8px;font-size:12.5px">Fout: ' + esc(e?.message || 'onbekend') + '</div>';
+    if (rst) rst.style.display = '';
+  } finally {
+    if (btn) { btn.disabled = false; btn.innerHTML = '<i class="ti ti-flask"></i> Test'; }
+  }
+}
+window.runSimoneSandbox = runSimoneSandbox;
+
+function resetSimoneSandbox() {
+  const ta  = document.getElementById('scSandboxInput');
+  const out = document.getElementById('scSandboxOutput');
+  const rst = document.getElementById('scSandboxResetBtn');
+  if (ta)  ta.value = '';
+  if (out) { out.style.display = 'none'; out.innerHTML = ''; }
+  if (rst) rst.style.display = 'none';
+}
+window.resetSimoneSandbox = resetSimoneSandbox;
+
 function _scPauseAll() {
   const en = document.getElementById('scIsEnabled');
   const re = document.getElementById('scReactiveEnabled');
