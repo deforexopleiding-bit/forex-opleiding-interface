@@ -136,7 +136,8 @@ export const AVAILABLE_VARIABLES = [
   { key: 'attendee.naam',       label: 'Volledige naam',  category: 'attendee', example: 'Jeffrey Biemold',                                                                                                requires_context: 'attendee' },
   { key: 'attendee.email',      label: 'E-mail',          category: 'attendee', example: 'naam@voorbeeld.nl',                                                                                              requires_context: 'attendee' },
   { key: 'attendee.telefoon',   label: 'Telefoon',        category: 'attendee', example: '+31 6 12345678',                                                                                                 requires_context: 'attendee' },
-  { key: 'attendee.keuze_link', label: 'Keuze-link',      category: 'attendee', example: 'https://forex-opleiding-interface.vercel.app/modules/event-keuze.html?t=00000000-0000-0000-0000-000000000000',   requires_context: 'attendee' },
+  { key: 'attendee.keuze_link',      label: 'Keuze-link',      category: 'attendee', example: 'https://forex-opleiding-interface.vercel.app/modules/event-keuze.html?t=00000000-0000-0000-0000-000000000000',   requires_context: 'attendee' },
+  { key: 'attendee.vragenlijst_link', label: 'Vragenlijst-link', category: 'attendee', example: 'https://forex-opleiding-interface.vercel.app/modules/assessment.html?t=00000000-0000-0000-0000-000000000000', requires_context: 'attendee' },
 
   // ── datum ──────────────────────────────────────────────────────────────
   { key: 'datum.vandaag',     label: 'Datum vandaag', category: 'datum', example: '09-06-2026',  requires_context: null },
@@ -436,6 +437,11 @@ function getAttendeeValue(attendee, key) {
       const token = attendee.choice_token;
       if (!token) return '';
       return `${PUBLIC_BASE_URL}/modules/event-keuze.html?t=${encodeURIComponent(String(token))}`;
+    }
+    case 'attendee.vragenlijst_link': {
+      const token = attendee.choice_token;
+      if (!token) return '';
+      return `${PUBLIC_BASE_URL}/modules/assessment.html?t=${encodeURIComponent(String(token))}`;
     }
     default: return '';
   }
