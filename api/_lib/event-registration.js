@@ -72,6 +72,8 @@ export async function getConfirmedCount(eventId) {
     .from('event_attendees')
     .select('id', { count: 'exact', head: true })
     .eq('event_id', eventId)
+    // Automation-tester: test-attendees nooit meetellen voor capaciteit.
+    .eq('is_test', false)
     .in('status', CONFIRMED_STATUSES)
     .not('assessment_response_id', 'is', null);
   if (error) {

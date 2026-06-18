@@ -92,6 +92,8 @@ export default async function handler(req, res) {
         created_at, updated_at
       `, { count: 'exact' })
       .eq('event_id', eventId)
+      // Automation-tester: filter test-rijen uit reguliere lijsten.
+      .eq('is_test', false)
       .order('registered_at', { ascending: true })
       .range(offset, offset + limit - 1);
 
@@ -207,6 +209,7 @@ export default async function handler(req, res) {
           .from('event_attendees')
           .select('id', { count: 'exact', head: true })
           .eq('event_id', eventId)
+          .eq('is_test', false)
           .eq('status', s);
         if (search) {
           const safe = search.replace(/[%,]/g, '');
