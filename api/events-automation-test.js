@@ -88,7 +88,7 @@ export default async function handler(req, res) {
     // FK-violation).
     const { data: autom, error: autErr } = await supabaseAdmin
       .from('event_automations')
-      .select('id, name, enabled')
+      .select('id, name, enabled, steps')
       .eq('id', automationId)
       .maybeSingle();
     if (autErr) throw new Error('automation-lookup: ' + autErr.message);
@@ -129,16 +129,21 @@ export default async function handler(req, res) {
     // 2) INSERT automation-run. status='active' + current_step_index=0 +
     //    next_run_at=now → engine pikt 'm bij eerstvolgende tick op en doet
     //    stap 0; vanaf daar versnelt 'ie elke wait naar 15s omdat is_test=true.
-    //    NB: steps_snapshot wordt door de engine zelf gelezen uit
-    //    event_automations bij start; we hoeven 'm hier niet te kopiëren.
+    //    steps_snapshot + event_id + context volgen het patroon van het
+    //    echte enroll-pad in events-automation-engine.js (regel 217-227):
+    //    de engine LEEST run.steps_snapshot bij advanceRun, dus die MOET
+    //    bij INSERT al gevuld zijn.
     const { data: run, error: runInsErr } = await supabaseAdmin
       .from('event_automation_runs')
       .insert({
         automation_id:      automationId,
         attendee_id:        att.id,
+        event_id:           eventId,
         status:             'active',
         current_step_index: 0,
         next_run_at:        nowIso,
+        steps_snapshot:     Array.isArray(autom.steps) ? autom.steps : [],
+        context:            {},
         is_test:            true,
       })
       .select('id')
