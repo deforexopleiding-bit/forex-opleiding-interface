@@ -136,11 +136,11 @@ export default async function handler(req, res) {
     if (msgErr) throw new Error('message insert: ' + msgErr.message);
     msgId = msg.id;
 
-    // STAP 3: runSimoneSuggest. Note: simone-suggest-core werkt met de
-    // supabase-arg voor lees-rate-limit, maar schrijft via supabaseAdmin
-    // intern. We geven de user-client mee zoals de echte caller doet.
+    // Gebruik supabaseAdmin (service-role): de dummy-conv is via admin
+    // INSERT'd en is niet zichtbaar voor de user-client door RLS. RBAC is
+    // al op endpoint-niveau gecheckt (events.simone.use).
     const result = await runSimoneSuggest({
-      supabase:             userClient,
+      supabase:             supabaseAdmin,
       conversationId:       convId,
       triggeredByMessageId: msgId,
       autoTriggered:        false,
