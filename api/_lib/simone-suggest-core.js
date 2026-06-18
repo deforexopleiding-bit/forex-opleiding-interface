@@ -39,6 +39,7 @@
 // joost_config.knowledge_base.
 
 import { getModuleContextByPhoneNumberId } from './module-context.js';
+import { getOpenEventsWithSpace } from './event-registration.js';
 
 const TWENTY_FOUR_HOURS_MS = 24 * 60 * 60 * 1000;
 const RATE_LIMIT_WINDOW_MS = 30 * 1000;
@@ -375,6 +376,24 @@ export async function runSimoneSuggest({
     generated_at: new Date().toISOString(),
   };
 
+  // ── Publieke open events (voor NIEUWE prospects zonder attendee-match,
+  //    of voor algemene "wanneer zijn er events?"-vragen). Zelfde bron als
+  //    de publieke event-keuze flow (api/event-choice-get.js).
+  let publicOpenEvents = [];
+  try {
+    publicOpenEvents = await getOpenEventsWithSpace({ limit: 8 });
+  } catch (e) {
+    console.error('[simone-suggest-core] getOpenEventsWithSpace:', e?.message || e);
+  }
+  contextSnapshot.public_open_events = publicOpenEvents.map((e) => ({
+    id:         e.id,
+    title:      e.title,
+    starts_at:  e.starts_at,
+    location:   e.location,
+    niveau:     e.niveau,
+    spots_left: e.spots_left,
+  }));
+
   // ========================================================================
   // STAP 4: System-prompt renderen
   // ========================================================================
@@ -419,6 +438,20 @@ export async function runSimoneSuggest({
       );
     }
     ctxLines.push('');
+  }
+  if (publicOpenEvents.length > 0) {
+    ctxLines.push('');
+    ctxLines.push('PUBLIEK INSCHRIJFBARE EVENTS (open voor iedereen):');
+    for (const e of publicOpenEvents) {
+      const spotsTxt = (typeof e.spots_left === 'number')
+        ? ` — ${e.spots_left} plek${e.spots_left === 1 ? '' : 'ken'} vrij`
+        : '';
+      const niveauTxt = e.niveau ? ` (${e.niveau})` : '';
+      ctxLines.push(
+        `  - ${e.title}${niveauTxt}, ${fmtDateNL(e.starts_at)} @ ${e.location || '?'}${spotsTxt}`
+      );
+    }
+    ctxLines.push('Gebruik bovenstaande lijst om concreet te antwoorden bij vragen naar data, locatie of beschikbaarheid van events. Verwijs alleen naar de website als de prospect zich daadwerkelijk wil inschrijven en je geen attendee-koppeling hebt.');
   }
   ctxLines.push(`Afdeling: ${afdeling.naam}`);
   if (afdeling.ondertekenaar) ctxLines.push(`Ondertekenaar: ${afdeling.ondertekenaar}`);
