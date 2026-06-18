@@ -13,6 +13,12 @@ const UNIT_MS = { minutes: 60_000, hours: 3_600_000, days: 86_400_000 };
 const MAX_SEND_ATTEMPTS = 3;
 const RETRY_BACKOFF_MS = 5 * 60_000;
 
+// Automation-tester: test-runs (run.is_test=true) versnellen wait-stappen
+// naar deze duur ongeacht waitConfig.unit/amount. 15s = lang genoeg dat de
+// engine z'n DB-write doet en weer wordt opgepikt door de eerstvolgende
+// cron-tick, kort genoeg dat Jeffrey de hele flow in minuten doorloopt.
+const TEST_WAIT_MS = 15 * 1000;
+
 // ── Pure helpers ────────────────────────────────────────────────────────────
 
 export function computeNextRunAt(waitConfig, fromMs) {
@@ -62,6 +68,12 @@ export async function advanceRun({ run, attendee, event, now = new Date(), deps,
 
     if (type === 'wait') {
       nextRunAt = computeNextRunAt(step.config, nowMs);
+      // Automation-tester: test-runs versnellen elke wait naar TEST_WAIT_MS.
+      // Override gebeurt NA computeNextRunAt zodat de pure helper unit-
+      // testbaar blijft zonder is_test-context.
+      if (run.is_test === true) {
+        nextRunAt = new Date(nowMs + TEST_WAIT_MS);
+      }
       idx += 1; attempts = 0; status = 'active';
       break; // wait persisteren; engine hervat bij volgende due-tick
     }

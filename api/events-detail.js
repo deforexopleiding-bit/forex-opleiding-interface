@@ -85,6 +85,7 @@ export default async function handler(req, res) {
           .from('event_attendees')
           .select('id', { count: 'exact', head: true })
           .eq('event_id', id)
+          .eq('is_test', false)
           .eq('status', s);
         if (error) { console.error('[events-detail status-count]', s, error.message); return; }
         byStatus[s] = typeof count === 'number' ? count : 0;
@@ -98,7 +99,8 @@ export default async function handler(req, res) {
       const { count } = await supabaseAdmin
         .from('event_attendees')
         .select('id', { count: 'exact', head: true })
-        .eq('event_id', id);
+        .eq('event_id', id)
+        .eq('is_test', false);
       totalAttendees = typeof count === 'number' ? count : 0;
     } catch (e) {
       console.error('[events-detail total-attendees]', e.message);
@@ -125,6 +127,7 @@ export default async function handler(req, res) {
         .from('event_attendees')
         .select('id', { count: 'exact', head: true })
         .eq('event_id', id)
+        .eq('is_test', false)
         .eq('status', 'aangemeld')
         .is('assessment_response_id', null);
       aangemeldNoAssessment = typeof count === 'number' ? count : 0;
