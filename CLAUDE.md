@@ -71,9 +71,9 @@ Lokaal: C:/Users/jeffr/forex-opleiding-interface
 - Zie TODO-VOLLEDIG.md ## 🔧 Polish-items voor volledige lijst
 
 ## Volgende prioriteiten
-1. Maxim + Dave aanmaken via /modules/admin.html
-2. polish-11 / polish-12 oppakken
-3. endp-2-cleanup: one-time endpoints verwijderen (admin-seed, db-migrate, debug-*, test-*)
+1. **Mentordashboard** ([NB0] in TODO-VOLLEDIG.md) — self-service mentor-module: eigen events, eigen bonus-status, persoonlijke kalender + admin-view. Datalaag bestaat (event_mentors, event_bonuses, profiles.team_member_id); F5.1-grootboek is live. Bouw: read-endpoints mentor-my-events/-bonuses/-calendar, UI mentor-dashboard.html + mentor-detail.html, RBAC mentor.module.access + mentor.bonus.view_own. Kickoff-document ligt klaar voor nieuwe chat.
+2. **Simone autonomie aanzetten** — code staat live + gated UIT. Stappen: settings-SQL draaien → reactieve concepten beoordelen → per intent op `autonomous`@0.85 → master-gate `feature_flags.events_reactive_autonomy` aanzetten.
+3. **Automations Fase 4B** — `create_task` (vereist agent_tasks tabel), `date_chosen`-conditie (design nodig), `on_attended`/`on_no_show` triggers.
 
 ## Module-architectuur
 - /index.html — Dashboard
@@ -1084,3 +1084,22 @@ Generaliseerbare regel: **eerste-contact-teksten zijn templates, geen
 LLM-output**. Pas op een vervolgstap met geladen context schakel je over
 naar generatief. Geldt ook voor E2.2 outbound-scheduler eerste herinnering,
 F3 escalation-confirm, en toekomstige cold-outreach flows.
+
+## Sessie 17–18 juni 2026 — Events comms + Simone autonomie + sandbox + automation-tester + Webflow fix + Fase 4A
+
+11 PRs gemerged (#281, #282, #283, #284, #285, #286, #288, #289, #290, #291, #292, #293). Main = 646978022ee7c64fc90f740e024e848cfc329227.
+
+Hoofd-deliverables:
+- Events comms-suite live (4 templates + 4 automations met email/WA).
+- Simone events-autonomie laag gebouwd (gated UIT) + config-tooltips + Sandbox-tool + publieke-events-context.
+- Automation-tester MVP (is_test pattern) + Fase 4A (1 trigger, 2 condities, 3 step-types).
+- Webflow gastenlijst-clone-leak gefixt.
+- Vragenlijst-link variabele toegevoegd.
+
+### Lessons (zie TODO-VOLLEDIG.md sessie-sectie voor uitgebreide versie)
+- WhatsApp Meta-templates: named placeholders + mapping non-null verplicht; link in BODY niet in button.
+- Webflow clone: strip + init alle per-event runtime-velden expliciet.
+- Cleanup-blokken: ALTIJD console.log per stap.
+- Tester-pattern (is_test boolean) is herbruikbaar.
+- ES module cycles OK zolang imports alleen in function bodies.
+- Schema-recon eerst — kolomnamen wijken vaak af van wat spec verwacht.
