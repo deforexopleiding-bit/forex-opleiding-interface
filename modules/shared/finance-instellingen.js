@@ -1967,7 +1967,8 @@
     { key: 'attendee.naam',       label: 'Volledige naam', category: 'attendee', example: 'Jeffrey Biemold' },
     { key: 'attendee.email',      label: 'E-mail',         category: 'attendee', example: 'naam@voorbeeld.nl' },
     { key: 'attendee.telefoon',   label: 'Telefoon',       category: 'attendee', example: '+31 6 12345678' },
-    { key: 'attendee.keuze_link', label: 'Keuze-link',     category: 'attendee', example: 'https://forex-opleiding-interface.vercel.app/modules/event-keuze.html?t=...' },
+    { key: 'attendee.keuze_link',      label: 'Keuze-link',      category: 'attendee', example: 'https://forex-opleiding-interface.vercel.app/modules/event-keuze.html?t=...' },
+    { key: 'attendee.vragenlijst_link', label: 'Vragenlijst-link', category: 'attendee', example: 'https://forex-opleiding-interface.vercel.app/modules/assessment.html?t=...' },
     // datum
     { key: 'datum.vandaag',     label: 'Datum vandaag', category: 'datum', example: '09-06-2026' },
     { key: 'datum.deze_maand',  label: 'Deze maand',    category: 'datum', example: 'juni 2026' },
