@@ -29,12 +29,16 @@ export function computeNextRunAt(waitConfig, fromMs) {
   return new Date(fromMs + amount * ms);
 }
 
-export function buildConditionState(attendee) {
+export function buildConditionState(attendee, event) {
   const status = attendee && attendee.status;
+  // Fase 4A: event_niveau uit het gekoppelde event mee zodat
+  // niveau_is_basis / niveau_is_gevorderd checks kunnen.
+  const niveau = (event && typeof event.niveau === 'string') ? event.niveau.trim().toLowerCase() : '';
   return {
     assessment_completed: !!(attendee && attendee.assessment_response_id),
     status,
     still_registered: status !== 'switched_to_other_event' && status !== 'no_show',
+    event_niveau:        niveau,
   };
 }
 
@@ -43,6 +47,12 @@ export function evaluateCondition(check, state) {
     case 'assessment_completed':     return state.assessment_completed === true;
     case 'assessment_not_completed': return state.assessment_completed === false;
     case 'still_registered':         return state.still_registered === true;
+    // Fase 4A: niveau-checks. ILIKE-gedrag via lowercase compare.
+    case 'niveau_is_basis':          return state.event_niveau === 'basis';
+    case 'niveau_is_gevorderd':      return state.event_niveau === 'gevorderd';
+    // TODO fase 4b: 'date_chosen' vereist nieuw schema-veld of impliciete
+    // detectie. Pragmatische versie geparkeerd tot een betrouwbare definitie
+    // beschikbaar is.
     default:                         return true; // onbekende check blokkeert niet
   }
 }
@@ -79,7 +89,7 @@ export async function advanceRun({ run, attendee, event, now = new Date(), deps,
     }
 
     if (type === 'condition') {
-      const state = buildConditionState(attendee);
+      const state = buildConditionState(attendee, event);
       const pass = evaluateCondition(step.config && step.config.check, state);
       await deps.recordLog(idx, 'condition', { ok: true, pass, check: step.config && step.config.check });
       if (pass) { idx += 1; attempts = 0; continue; }
@@ -117,6 +127,36 @@ export async function advanceRun({ run, attendee, event, now = new Date(), deps,
       }
       nextRunAt = new Date(nowMs + RETRY_BACKOFF_MS); // retry zelfde stap
       break;
+    }
+
+    // Fase 4A: set_tag / update_attendee_status / send_internal_notification.
+    // Idempotency-pattern als bij send_email: isStepDone-check vóór action.
+    if (type === 'set_tag' || type === 'update_attendee_status' || type === 'send_internal_notification') {
+      if (await deps.isStepDone(idx)) { idx += 1; attempts = 0; continue; }
+      let result;
+      try {
+        if (type === 'set_tag') {
+          result = await deps.setTag(step, { attendee, event, stepIndex: idx });
+        } else if (type === 'update_attendee_status') {
+          result = await deps.updateAttendeeStatus(step, { attendee, event, stepIndex: idx });
+        } else {
+          result = await deps.sendInternalNotification(step, { attendee, event, stepIndex: idx });
+        }
+      } catch (e) {
+        result = { ok: false, error: (e && e.message) || 'step threw' };
+      }
+      if (result && result.ok) {
+        await deps.recordLog(idx, type, result);
+        idx += 1; attempts = 0; lastError = null; continue;
+      }
+      if (result && result.skipped) {
+        await deps.recordLog(idx, type, result);
+        idx += 1; attempts = 0; continue;
+      }
+      // Niet retry-en op deze types — geen externe API met flaky-risico,
+      // gewoon doorgaan en fail-soft loggen.
+      await deps.recordLog(idx, type, { ok: false, error: (result && result.error) || 'step failed' });
+      idx += 1; attempts = 0; continue;
     }
 
     // onbekend staptype → log skip + door
@@ -179,6 +219,13 @@ async function loadCandidatesForAutomation(auto, now) {
     q = q.not('assessment_response_id', 'is', null);
     if (newOnly) q = q.gte('assessment_linked_at', auto.enabled_at);
   } else if (auto.trigger_type === 'time_before_event') {
+    if (newOnly) q = q.gte('registered_at', auto.enabled_at);
+  } else if (auto.trigger_type === 'on_assessment_not_completed_after') {
+    // Fase 4A: attendees X uur na aanmelding zonder voltooid assessment.
+    const hours = Number(auto.trigger_config && auto.trigger_config.hours_after_signup) || 0;
+    if (!(hours > 0)) return [];
+    const cutoff = new Date(now.getTime() - hours * 3_600_000).toISOString();
+    q = q.is('assessment_response_id', null).lte('registered_at', cutoff);
     if (newOnly) q = q.gte('registered_at', auto.enabled_at);
   } else {
     return [];
@@ -373,6 +420,80 @@ export async function stepDueRuns({ now = new Date(), limit = 100, abortMs = 50_
             console.error('[automation-engine comms-log wa]', e?.message || e);
           }
           return result;
+        },
+        // Fase 4A: set_tag — INSERT in event_attendee_tags. ON CONFLICT DO NOTHING.
+        setTag: async (step) => {
+          const slug = step?.config?.tag_slug;
+          if (!slug || typeof slug !== 'string') {
+            return { ok: false, error: 'tag_slug ontbreekt' };
+          }
+          try {
+            const { error } = await supabaseAdmin
+              .from('event_attendee_tags')
+              .insert({
+                attendee_id: attendee.id,
+                tag_slug:    slug,
+                source:      'automation',
+                source_ref:  run.automation_id,
+              });
+            if (error) {
+              if (error.code === '23505') {
+                // Already-tagged → idempotent succes.
+                return { ok: true, idempotent: true, tag_slug: slug };
+              }
+              return { ok: false, error: error.message };
+            }
+            return { ok: true, tag_slug: slug };
+          } catch (e) {
+            return { ok: false, error: e?.message || 'set_tag failed' };
+          }
+        },
+        // Fase 4A: update_attendee_status — UPDATE event_attendees.status.
+        // Idempotent: skip wanneer status al gelijk.
+        updateAttendeeStatus: async (step) => {
+          const newStatus = step?.config?.new_status;
+          if (!newStatus) return { ok: false, error: 'new_status ontbreekt' };
+          if (attendee.status === newStatus) {
+            return { ok: true, skipped: true, reason: 'already-status' };
+          }
+          try {
+            const { error } = await supabaseAdmin
+              .from('event_attendees')
+              .update({ status: newStatus, updated_at: nowIso })
+              .eq('id', attendee.id);
+            if (error) return { ok: false, error: error.message };
+            return { ok: true, new_status: newStatus, previous_status: attendee.status };
+          } catch (e) {
+            return { ok: false, error: e?.message || 'status-update failed' };
+          }
+        },
+        // Fase 4A: send_internal_notification — interne mail naar team.
+        // Bypasst events-mailer (geen attendee-templating); raw sendEventMail
+        // via mailer.js. Onderwerp + body krijgen [INTERNAL] prefix zodat
+        // ze in de inbox visueel apart staan van klantmail.
+        sendInternalNotification: async (step) => {
+          const subject = step?.config?.subject;
+          const body    = step?.config?.body;
+          if (!subject || !body) return { ok: false, error: 'subject + body verplicht' };
+          const to = step?.config?.to_email
+            || process.env.INTERNAL_NOTIFICATION_EMAIL
+            || 'jeffrey@deforexopleiding.nl';
+          try {
+            const { sendEventMail } = await import('../mailer.js');
+            const ctxLine = `[Attendee ${attendee?.email || attendee?.phone || attendee?.id} · Event ${event?.title || event?.id}]`;
+            const result = await sendEventMail({
+              to,
+              subject: '[INTERNAL] ' + subject,
+              text:    body + '\n\n' + ctxLine,
+              html:    `<p>${String(body).replace(/\n/g, '<br>')}</p><hr><p style="color:#888;font-size:12px">${ctxLine}</p>`,
+            });
+            if (result && result.ok === false) {
+              return { ok: false, error: result.error || 'mail failed' };
+            }
+            return { ok: true, to };
+          } catch (e) {
+            return { ok: false, error: e?.message || 'internal-notification failed' };
+          }
         },
       };
 

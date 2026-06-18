@@ -296,6 +296,7 @@ const TRIGGER_LABELS = {
   on_signup: 'Bij aanmelding',
   on_assessment_completed: 'Bij vragenlijst ingevuld',
   time_before_event: 'Tijd vóór het event',
+  on_assessment_not_completed_after: 'Vragenlijst niet ingevuld na X uur',
 };
 const SCOPE_LABELS = {
   all: 'Alle events',
@@ -306,6 +307,16 @@ const COND_CHECK_LABELS = {
   assessment_completed: 'Vragenlijst is ingevuld',
   assessment_not_completed: 'Vragenlijst niet ingevuld',
   still_registered: 'Nog ingeschreven',
+  niveau_is_basis: 'Niveau is Basis',
+  niveau_is_gevorderd: 'Niveau is Gevorderd',
+};
+// Fase 4A: extra step-type labels.
+const ATTENDEE_STATUS_LABELS = {
+  aangemeld:               'Aangemeld',
+  aanwezig:                'Aanwezig',
+  no_show:                 'No-show',
+  sale:                    'Sale',
+  switched_to_other_event: 'Verplaatst naar ander event',
 };
 const COND_FAIL_LABELS = { exit: 'Stop deze flow', skip_to_end: 'Spring naar einde' };
 const WAIT_UNIT_LABELS = { minutes: 'minuten', hours: 'uren', days: 'dagen' };
@@ -664,9 +675,10 @@ function renderEditor() {
         <div class="form-field">
           <label>Wanneer start deze automation? <span class="req">*</span></label>
           <select id="fTrigger">
-            <option value="on_signup"               ${a.trigger_type === 'on_signup' ? 'selected' : ''}>Bij aanmelding</option>
-            <option value="on_assessment_completed" ${a.trigger_type === 'on_assessment_completed' ? 'selected' : ''}>Bij vragenlijst ingevuld</option>
-            <option value="time_before_event"       ${a.trigger_type === 'time_before_event' ? 'selected' : ''}>Tijd vóór het event</option>
+            <option value="on_signup"                       ${a.trigger_type === 'on_signup' ? 'selected' : ''}>Bij aanmelding</option>
+            <option value="on_assessment_completed"          ${a.trigger_type === 'on_assessment_completed' ? 'selected' : ''}>Bij vragenlijst ingevuld</option>
+            <option value="time_before_event"                ${a.trigger_type === 'time_before_event' ? 'selected' : ''}>Tijd vóór het event</option>
+            <option value="on_assessment_not_completed_after" ${a.trigger_type === 'on_assessment_not_completed_after' ? 'selected' : ''}>Vragenlijst niet ingevuld na X uur</option>
           </select>
         </div>
         <div id="fTriggerExtra"></div>
@@ -703,6 +715,9 @@ function renderEditor() {
           <button class="btn-ghost" type="button" data-add="condition"><i class="ti ti-git-branch"></i> Conditie</button>
           <button class="btn-ghost" type="button" data-add="send_email"><i class="ti ti-mail"></i> Stuur e-mail</button>
           <button class="btn-ghost" type="button" data-add="send_whatsapp"><i class="ti ti-brand-whatsapp"></i> Stuur WhatsApp</button>
+          <button class="btn-ghost" type="button" data-add="set_tag"><i class="ti ti-tag"></i> Tag zetten</button>
+          <button class="btn-ghost" type="button" data-add="update_attendee_status"><i class="ti ti-user-check"></i> Status wijzigen</button>
+          <button class="btn-ghost" type="button" data-add="send_internal_notification"><i class="ti ti-bell"></i> Interne melding</button>
         </div>
       </div>
 
@@ -724,6 +739,11 @@ function renderEditor() {
     a.trigger_type = e.target.value;
     if (a.trigger_type === 'time_before_event' && !(Number(a.trigger_config?.hours_before) > 0)) {
       a.trigger_config = { hours_before: 24 };
+    }
+    // Fase 4A: default config voor nieuwe trigger.
+    if (a.trigger_type === 'on_assessment_not_completed_after'
+        && !(Number(a.trigger_config?.hours_after_signup) > 0)) {
+      a.trigger_config = { hours_after_signup: 48 };
     }
     renderTriggerExtra();
   });
@@ -749,6 +769,22 @@ function renderEditor() {
 function renderTriggerExtra() {
   const a = state.editing;
   const host = document.getElementById('fTriggerExtra');
+  // Fase 4A: nieuwe trigger met eigen extra-config-veld.
+  if (a.trigger_type === 'on_assessment_not_completed_after') {
+    const cur = Number(a.trigger_config?.hours_after_signup) || 48;
+    host.innerHTML = `
+      <div class="form-field">
+        <label>Uur na aanmelding</label>
+        <input type="number" id="fHoursAfterSignup" min="1" step="1" value="${cur}" />
+        <div class="form-help">Hoeveel uur na aanmelding triggert dit als de attendee nog geen vragenlijst heeft ingevuld.</div>
+      </div>`;
+    const el = document.getElementById('fHoursAfterSignup');
+    if (el) el.addEventListener('input', (e) => {
+      const v = Math.max(1, Math.floor(Number(e.target.value) || 0));
+      a.trigger_config = { hours_after_signup: v };
+    });
+    return;
+  }
   if (a.trigger_type !== 'time_before_event') { host.innerHTML = ''; return; }
   const totalHours = Number(a.trigger_config?.hours_before) || 24;
   // Heuristiek: heel veelvouden van 24 → dagen, anders uren.
@@ -875,6 +911,8 @@ function renderStepCard(s, idx, total) {
             <option value="assessment_completed"     ${c.check === 'assessment_completed' ? 'selected' : ''}>Vragenlijst is ingevuld</option>
             <option value="assessment_not_completed" ${c.check === 'assessment_not_completed' ? 'selected' : ''}>Vragenlijst niet ingevuld</option>
             <option value="still_registered"         ${c.check === 'still_registered' ? 'selected' : ''}>Nog ingeschreven</option>
+            <option value="niveau_is_basis"          ${c.check === 'niveau_is_basis' ? 'selected' : ''}>Niveau is Basis</option>
+            <option value="niveau_is_gevorderd"      ${c.check === 'niveau_is_gevorderd' ? 'selected' : ''}>Niveau is Gevorderd</option>
           </select>
         </div>
         <div class="form-field">
@@ -927,6 +965,47 @@ function renderStepCard(s, idx, total) {
         ${state.waTemplatesError
           ? `<div class="form-help" style="color:#dc2626">Templates konden niet geladen worden: ${esc(state.waTemplatesError)}</div>`
           : `<div class="form-help">Kies een goedgekeurde Meta-template (bijv. <code>events_keuze_link</code>).</div>`}
+      </div>`;
+  } else if (s.type === 'set_tag') {
+    const c = s.config || {};
+    body = `
+      <div class="form-field">
+        <label>Tag-slug <span class="req">*</span></label>
+        <input type="text" data-step-field="tag_slug" data-idx="${idx}" value="${esc(c.tag_slug || '')}" placeholder="bijv. hot-lead" />
+        <div class="form-help">Slug uit <code>event_tags_catalog</code>. Wordt eenmalig op de aanwezige gezet (idempotent).</div>
+      </div>`;
+  } else if (s.type === 'update_attendee_status') {
+    const c = s.config || {};
+    const statuses = [
+      ['aangemeld', 'Aangemeld'],
+      ['aanwezig', 'Aanwezig'],
+      ['no_show', 'No-show'],
+      ['sale', 'Sale'],
+      ['switched_to_other_event', 'Verplaatst naar ander event'],
+    ];
+    body = `
+      <div class="form-field">
+        <label>Nieuwe status <span class="req">*</span></label>
+        <select data-step-field="new_status" data-idx="${idx}">
+          ${statuses.map(([v, l]) => `<option value="${v}" ${c.new_status === v ? 'selected' : ''}>${l}</option>`).join('')}
+        </select>
+        <div class="form-help">Status van de aanwezige op het event. Idempotent — slaat over als de status al klopt.</div>
+      </div>`;
+  } else if (s.type === 'send_internal_notification') {
+    const c = s.config || {};
+    body = `
+      <div class="form-field">
+        <label>Onderwerp <span class="req">*</span></label>
+        <input type="text" data-step-field="subject" data-idx="${idx}" value="${esc(c.subject || '')}" />
+      </div>
+      <div class="form-field">
+        <label>Bericht <span class="req">*</span></label>
+        <textarea data-step-field="body" data-idx="${idx}" rows="4">${esc(c.body || '')}</textarea>
+        <div class="form-help">Variabelen zoals {{voornaam}} of {{event_naam}} worden geresolved.</div>
+      </div>
+      <div class="form-field">
+        <label>Naar e-mail (optioneel)</label>
+        <input type="email" data-step-field="to_email" data-idx="${idx}" value="${esc(c.to_email || '')}" placeholder="leeg = INTERNAL_NOTIFICATION_EMAIL env / jeffrey@deforexopleiding.nl" />
       </div>`;
   } else {
     body = `<div class="form-help">Onbekend staptype.</div>`;
@@ -1015,10 +1094,26 @@ function renderWaTemplateSelect(idx, currentValue) {
 }
 
 function stepTypeLabel(t) {
-  return { wait: 'Wachten', condition: 'Conditie', send_email: 'Stuur e-mail', send_whatsapp: 'Stuur WhatsApp' }[t] || t;
+  return {
+    wait: 'Wachten',
+    condition: 'Conditie',
+    send_email: 'Stuur e-mail',
+    send_whatsapp: 'Stuur WhatsApp',
+    set_tag: 'Tag zetten',
+    update_attendee_status: 'Status wijzigen',
+    send_internal_notification: 'Interne melding sturen',
+  }[t] || t;
 }
 function stepIcon(t) {
-  const map = { wait: 'hourglass', condition: 'git-branch', send_email: 'mail', send_whatsapp: 'brand-whatsapp' };
+  const map = {
+    wait: 'hourglass',
+    condition: 'git-branch',
+    send_email: 'mail',
+    send_whatsapp: 'brand-whatsapp',
+    set_tag: 'tag',
+    update_attendee_status: 'user-check',
+    send_internal_notification: 'bell',
+  };
   return `<i class="ti ti-${map[t] || 'circle'}"></i>`;
 }
 
@@ -1107,6 +1202,9 @@ function applyStepFieldChange(input) {
   else if (field === 'subject')   step.config.subject = input.value;
   else if (field === 'body')      step.config.body = input.value;
   else if (field === 'template_name') step.config.template_name = input.value;
+  else if (field === 'tag_slug')      step.config.tag_slug = input.value;
+  else if (field === 'new_status')    step.config.new_status = input.value;
+  else if (field === 'to_email')      step.config.to_email = input.value;
   else if (field === 'hasButton') {
     if (input.checked) {
       if (!step.config.button) step.config.button = { label: '', url: '' };
@@ -1154,6 +1252,10 @@ function addStep(type) {
     condition:    { type: 'condition',    config: { check: 'assessment_completed', on_fail: 'exit' } },
     send_email:   { type: 'send_email',   config: { subject: '', body: '' } },
     send_whatsapp: { type: 'send_whatsapp', config: { template_name: '' } },
+    // Fase 4A: nieuwe step-types.
+    set_tag:                    { type: 'set_tag',                    config: { tag_slug: '' } },
+    update_attendee_status:     { type: 'update_attendee_status',     config: { new_status: 'aanwezig' } },
+    send_internal_notification: { type: 'send_internal_notification', config: { subject: '', body: '', to_email: '' } },
   };
   if (!defaults[type]) return;
   a.steps = a.steps || [];
@@ -1196,6 +1298,9 @@ function readAndValidateEditor() {
     const amt = Number(document.getElementById('fTrigAmount')?.value) || 0;
     const u   = document.getElementById('fTrigUnit')?.value || 'hours';
     a.trigger_config = { hours_before: u === 'days' ? amt * 24 : amt };
+  } else if (a.trigger_type === 'on_assessment_not_completed_after') {
+    const hrs = Math.max(1, Math.floor(Number(document.getElementById('fHoursAfterSignup')?.value) || 0));
+    a.trigger_config = { hours_after_signup: hrs };
   } else {
     a.trigger_config = {};
   }
@@ -1219,6 +1324,10 @@ function readAndValidateEditor() {
   if (a.trigger_type === 'time_before_event' && !(Number(a.trigger_config?.hours_before) > 0)) {
     return 'Vul een geldige tijd vóór het event in.';
   }
+  if (a.trigger_type === 'on_assessment_not_completed_after'
+      && !(Number.isInteger(Number(a.trigger_config?.hours_after_signup)) && Number(a.trigger_config?.hours_after_signup) > 0)) {
+    return 'Vul een geldig aantal uur (>= 1) na aanmelding in.';
+  }
   if (a.scope_type === 'niveau' && !a.scope_config?.niveau) return 'Kies een niveau.';
   if (a.scope_type === 'events' && (!Array.isArray(a.scope_config?.event_ids) || a.scope_config.event_ids.length === 0)) {
     return 'Kies minimaal één event.';
@@ -1231,13 +1340,23 @@ function readAndValidateEditor() {
       if (!(Number(c.amount) > 0)) return `Stap ${i + 1}: vul een geldige duur in.`;
       if (!['minutes', 'hours', 'days'].includes(c.unit)) return `Stap ${i + 1}: kies een eenheid.`;
     } else if (s.type === 'condition') {
-      if (!['assessment_completed', 'assessment_not_completed', 'still_registered'].includes(c.check)) return `Stap ${i + 1}: kies een conditie.`;
+      if (!['assessment_completed', 'assessment_not_completed', 'still_registered',
+            'niveau_is_basis', 'niveau_is_gevorderd'].includes(c.check)) return `Stap ${i + 1}: kies een conditie.`;
     } else if (s.type === 'send_email') {
       if (!c.subject) return `Stap ${i + 1}: onderwerp is verplicht.`;
       if (!c.body) return `Stap ${i + 1}: bericht is verplicht.`;
       if (c.button && (!c.button.label || !c.button.url)) return `Stap ${i + 1}: CTA-knop vereist label + link.`;
     } else if (s.type === 'send_whatsapp') {
       if (!c.template_name) return `Stap ${i + 1}: template-naam is verplicht.`;
+    } else if (s.type === 'set_tag') {
+      if (!c.tag_slug) return `Stap ${i + 1}: kies een tag.`;
+    } else if (s.type === 'update_attendee_status') {
+      if (!['aangemeld','aanwezig','no_show','sale','switched_to_other_event'].includes(c.new_status)) {
+        return `Stap ${i + 1}: kies een nieuwe status.`;
+      }
+    } else if (s.type === 'send_internal_notification') {
+      if (!c.subject) return `Stap ${i + 1}: onderwerp interne notificatie is verplicht.`;
+      if (!c.body)    return `Stap ${i + 1}: bericht interne notificatie is verplicht.`;
     }
   }
   return null;
