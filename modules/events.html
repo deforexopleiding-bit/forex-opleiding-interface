@@ -298,6 +298,28 @@
     .forbidden-card a:hover { text-decoration: underline; }
 
     @media (max-width: 880px) { .app { margin-left: 0; padding: 14px; } }
+
+    /* Tooltip-bubbel voor de Simone-config form. ⓘ-icoon krijgt op hover
+       een kleine pop-over met uitleg; tegelijk staat dezelfde tekst in
+       title="" als toegankelijkheids-/mobiel-fallback. */
+    .sc-tip { position: relative; display: inline-flex; align-items: center; justify-content: center;
+              width: 14px; height: 14px; margin-left: 5px;
+              border-radius: 50%; background: rgba(99,102,241,0.15); color: #6366f1;
+              font-size: 10px; font-weight: 700; cursor: help; user-select: none;
+              vertical-align: middle; line-height: 1; }
+    .sc-tip::before { content: 'i'; font-style: italic; font-family: Georgia, serif; }
+    .sc-tip > .sc-tip-bubble {
+      position: absolute; left: 50%; bottom: calc(100% + 8px); transform: translateX(-50%);
+      width: max-content; max-width: 280px; padding: 8px 10px;
+      background: var(--bg-elev, #fff); color: var(--text);
+      border: 1px solid var(--border); border-radius: 8px;
+      box-shadow: 0 6px 18px rgba(0,0,0,0.15);
+      font-size: 12px; font-weight: 400; line-height: 1.45; white-space: normal;
+      opacity: 0; visibility: hidden; pointer-events: none; transition: opacity .12s;
+      z-index: 50;
+    }
+    .sc-tip:hover > .sc-tip-bubble,
+    .sc-tip:focus-within > .sc-tip-bubble { opacity: 1; visibility: visible; }
   </style>
 </head>
 <body>
@@ -2251,6 +2273,57 @@ const SC_INTENT_LABELS = {
 };
 const SC_MODELS_ALLOWED = ['claude-sonnet-4-6', 'claude-opus-4-7', 'claude-haiku-4-5'];
 
+// Helper voor inline tooltips in de Simone-config form. Geeft een klein
+// ⓘ-icoon dat op hover/focus een bubbel met uitleg toont én dezelfde
+// tekst als title-attribute (mobiel + screenreaders).
+function scTip(text) {
+  if (!text) return '';
+  const safe = esc(text);
+  return '<span class="sc-tip" tabindex="0" role="tooltip" aria-label="' + safe + '" title="' + safe + '">'
+       +   '<span class="sc-tip-bubble">' + safe + '</span>'
+       + '</span>';
+}
+
+// Tooltip-teksten op één plek zodat ze makkelijk te updaten zijn.
+const SC_TIPS = {
+  is_enabled:        'Hoofdschakelaar. Uit = Simone doet niets (suggest-aanroepen geven 503). Laat aan zodra je Simone gebruikt.',
+  reactive_suggest:  'Simone zet automatisch een concept-antwoord klaar zodra een klant appt, zodat je alleen hoeft te controleren en versturen. Uit = Simone suggereert alleen als je er zelf om vraagt. Verstuurt nooit zelf.',
+  autonomous_send:   'Hoofdschakelaar voor autonomie. Aan = Simone mag zelf antwoorden versturen binnen alle onderstaande regels. Uit = alles blijft een suggestie. Zet pas aan als je de kwaliteit vertrouwt.',
+  pause_all:         'Noodknop: zet in één klik Simone én alle autonomie-schakelaars uit, zonder je per-intent-instellingen te wissen.',
+  persona_name:      'Naam waarmee Simone zich voorstelt. Cosmetisch/intern; stuurt het model niet aan.',
+  persona_tone:      'Korte toon-omschrijving. Let op: dit veld gaat NIET naar het model — de toon hoort in de system-prompt. Puur een label voor jezelf.',
+  system_prompt:     'De kerninstructie: wie Simone is, hoe ze schrijft en welke regels ze volgt (nooit winst/rendement beloven, geen beleggingsadvies). Variabelen {prospect_naam}, {events_count}, {next_event_title}, {attendee_status} worden automatisch ingevuld. Belangrijkste afstel-veld.',
+  model:             'Welk AI-model Simone gebruikt. Sonnet = goede balans (aanbevolen). Opus = slimmer maar duurder/trager. Haiku = sneller/goedkoper, minder genuanceerd.',
+  temperature:       'Hoe variabel Simone schrijft. Laag (0.2–0.4) = consistent en voorspelbaar (aanbevolen voor klantcontact). Hoog = meer variatie, minder controle.',
+  context_count:     'Hoeveel voorgaande berichten Simone meeleest als context. Meer = beter begrip, iets trager/duurder. 20 is een prima standaard.',
+  per_intent_intro:  'Per soort vraag: vink "autonoom" aan om Simone die zelf te laten beantwoorden, en stel de confidence-drempel in. Onder de drempel of niet-autonoom → suggestie voor een mens. Let op: annuleren/verzetten en klachten gaan ALTIJD naar een mens en staan daarom niet in deze lijst.',
+  intent_confidence: 'Minimale zekerheid (0–1) die Simone\'s classificatie moet halen voor autonoom antwoord. Hoger = voorzichtiger. 0.85 is een veilige standaard.',
+  intent_event_info:           'Vragen over de inhoud/het programma van een training.',
+  intent_date_location:        'Vragen over datum, tijd of locatie.',
+  intent_registration_intent:  'Iemand wil zich inschrijven of vraagt hoe dat moet.',
+  intent_logistics:            'Praktische vragen: parkeren, route, wat meenemen, inlooptijd.',
+  intent_general_question:     'Algemene vragen die niet in de andere categorieën vallen.',
+  office_hours_only: 'Beperk autonoom versturen tot de ingestelde dagen/tijden. Buiten kantooruren maakt Simone hooguit een suggestie. Uit = 24/7 autonoom.',
+  office_hours_tz:   'Tijdzone waarin de kantooruren gelden. NL/BE: Europe/Amsterdam.',
+  office_hours_days: 'Op welke dagen Simone autonoom mag versturen.',
+  office_hours_window: 'Begin- en eindtijd van de kantooruren voor autonoom versturen.',
+  max_per_day:       'Max aantal autonome berichten per gesprek per dag. Voorkomt dat één klant op één dag overspoeld wordt.',
+  max_total:         'Totale aantal autonome berichten dat Simone ooit in één gesprek stuurt. Daarna naar een mens.',
+  cooldown:          'Minimale wachttijd tussen twee autonome berichten in hetzelfde gesprek.',
+  no_reply_pause:    'Reageert de klant X keer niet op Simone\'s autonome berichten, dan pauzeert Simone dit gesprek Y uur — om niet door te blijven appen.',
+  tutoyeer:          'Aan = "je", uit = "u".',
+  max_chars:         'Maximale lengte van Simone\'s bericht. Kort past bij WhatsApp; 480 ≈ een paar zinnen.',
+  emoji_policy:      'Nooit = geen emoji. Spaarzaam = af en toe een passende. Welkom = emoji\'s zijn prima.',
+};
+
+const SC_INTENT_TIPS = {
+  event_info:          SC_TIPS.intent_event_info,
+  date_location:       SC_TIPS.intent_date_location,
+  registration_intent: SC_TIPS.intent_registration_intent,
+  logistics:           SC_TIPS.intent_logistics,
+  general_question:    SC_TIPS.intent_general_question,
+};
+
 function _scAutonomy() {
   return (_simoneCfg && _simoneCfg.autonomy_config && typeof _simoneCfg.autonomy_config === 'object')
     ? _simoneCfg.autonomy_config : {};
@@ -2320,14 +2393,16 @@ function renderSimoneConfigForm() {
     const cur = intentsCfg[k] || {};
     const on  = cur.mode === 'autonomous';
     const thr = Number.isFinite(Number(cur.min_confidence)) ? Number(cur.min_confidence) : 0.85;
+    const labelTip = SC_INTENT_TIPS[k] ? scTip(SC_INTENT_TIPS[k]) : '';
     return ''
-      + '<div style="display:grid;grid-template-columns:1fr auto 100px;gap:10px;align-items:center;padding:6px 0;border-top:1px dashed var(--border)">'
-      +   '<div style="font-size:13px;font-weight:600">' + esc(SC_INTENT_LABELS[k] || k) + '</div>'
+      + '<div style="display:grid;grid-template-columns:1fr auto 100px auto;gap:10px;align-items:center;padding:6px 0;border-top:1px dashed var(--border)">'
+      +   '<div style="font-size:13px;font-weight:600">' + esc(SC_INTENT_LABELS[k] || k) + labelTip + '</div>'
       +   '<label style="display:inline-flex;gap:6px;align-items:center;font-size:12px;cursor:pointer">'
       +     '<input type="checkbox" class="sc-intent-mode" data-key="' + esc(k) + '"' + (on ? ' checked' : '') + ' />'
       +     '<span>autonoom</span>'
       +   '</label>'
-      +   '<input type="number" class="sc-intent-conf" data-key="' + esc(k) + '" min="0" max="1" step="0.05" value="' + esc(thr.toFixed(2)) + '" style="padding:4px 6px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:12.5px;text-align:right" title="Minimale confidence-drempel" />'
+      +   '<input type="number" class="sc-intent-conf" data-key="' + esc(k) + '" min="0" max="1" step="0.05" value="' + esc(thr.toFixed(2)) + '" style="padding:4px 6px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:12.5px;text-align:right" />'
+      +   '<span>' + scTip(SC_TIPS.intent_confidence) + '</span>'
       + '</div>';
   }).join('');
   const lockedRows = SC_LOCKED_INTENT_KEYS.map((k) => ''
@@ -2344,14 +2419,14 @@ function renderSimoneConfigForm() {
     +   '<section style="background:var(--bg-elev);border:1px solid var(--border);border-radius:10px;padding:12px 14px">'
     +     '<div style="font-size:12px;font-weight:700;color:var(--text-faint);text-transform:uppercase;letter-spacing:.04em;margin-bottom:8px">Algemeen</div>'
     +     '<div style="display:grid;grid-template-columns:200px 1fr;gap:10px;align-items:start">'
-    +       '<label style="font-size:13px;font-weight:600;padding-top:6px">Simone actief</label>'
+    +       '<label style="font-size:13px;font-weight:600;padding-top:6px">Simone actief' + scTip(SC_TIPS.is_enabled) + '</label>'
     +       '<div>'
     +         '<label style="display:inline-flex;gap:8px;align-items:center;font-size:13px;cursor:pointer">'
     +           '<input id="scIsEnabled" type="checkbox" ' + (isEnabled ? 'checked' : '') + ' />'
     +           '<span>is_enabled — uit zet alle suggest-calls op 503</span>'
     +         '</label>'
     +       '</div>'
-    +       '<label style="font-size:13px;font-weight:600;padding-top:6px">Reactieve suggest</label>'
+    +       '<label style="font-size:13px;font-weight:600;padding-top:6px">Reactieve suggest' + scTip(SC_TIPS.reactive_suggest) + '</label>'
     +       '<div>'
     +         '<label style="display:inline-flex;gap:8px;align-items:center;font-size:13px;cursor:pointer">'
     +           '<input id="scReactiveEnabled" type="checkbox" ' + (reactive ? 'checked' : '') + ' />'
@@ -2359,7 +2434,7 @@ function renderSimoneConfigForm() {
     +         '</label>'
     +         '<div style="font-size:11.5px;color:var(--text-faint);margin-top:4px">Default uit. Met uit blijft Simone wachten op handmatig "Vraag Simone".</div>'
     +       '</div>'
-    +       '<label style="font-size:13px;font-weight:600;padding-top:6px">Simone verstuurt zelf</label>'
+    +       '<label style="font-size:13px;font-weight:600;padding-top:6px">Simone verstuurt zelf' + scTip(SC_TIPS.autonomous_send) + '</label>'
     +       '<div>'
     +         '<label style="display:inline-flex;gap:8px;align-items:center;font-size:13px;cursor:pointer">'
     +           '<input id="scAutonomousEnabled" type="checkbox" ' + (autonomous ? 'checked' : '') + ' />'
@@ -2378,31 +2453,31 @@ function renderSimoneConfigForm() {
     +       '<div style="font-size:12px;font-weight:700;color:var(--text-faint);text-transform:uppercase;letter-spacing:.04em">Globale pauze</div>'
     +     '</div>'
     +     '<div style="font-size:12.5px;color:var(--text-dim);margin-bottom:8px">Pause-all schakelt <code>is_enabled</code> én alle autonomous-flags meteen uit. Ideaal bij een incident — geen reset van per-intent instellingen.</div>'
-    +     '<button class="btn btn-sm" type="button" id="scPauseAllBtn" style="border-color:#b91c1c;color:#b91c1c"><i class="ti ti-player-pause"></i> Pauzeer Simone</button>'
+    +     '<button class="btn btn-sm" type="button" id="scPauseAllBtn" style="border-color:#b91c1c;color:#b91c1c"><i class="ti ti-player-pause"></i> Pauzeer Simone</button>' + scTip(SC_TIPS.pause_all)
     +   '</section>'
 
     // ── Persona / prompt / model ─────────────────────────────────────────
     +   '<section style="background:var(--bg-elev);border:1px solid var(--border);border-radius:10px;padding:12px 14px">'
     +     '<div style="font-size:12px;font-weight:700;color:var(--text-faint);text-transform:uppercase;letter-spacing:.04em;margin-bottom:8px">Persona &amp; prompt</div>'
     +     '<div style="display:grid;grid-template-columns:200px 1fr;gap:14px;align-items:start">'
-    +       '<label style="font-size:13px;font-weight:600;padding-top:8px">Persona-naam</label>'
+    +       '<label style="font-size:13px;font-weight:600;padding-top:8px">Persona-naam' + scTip(SC_TIPS.persona_name) + '</label>'
     +       '<input id="scPersonaName" type="text" maxlength="100" style="padding:8px 10px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-family:inherit;font-size:13.5px" value="' + esc(_simoneCfg.persona_name || 'Simone') + '" />'
-    +       '<label style="font-size:13px;font-weight:600;padding-top:8px">Persona-toon</label>'
+    +       '<label style="font-size:13px;font-weight:600;padding-top:8px">Persona-toon' + scTip(SC_TIPS.persona_tone) + '</label>'
     +       '<input id="scPersonaTone" type="text" maxlength="500" style="padding:8px 10px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-family:inherit;font-size:13.5px" value="' + esc(_simoneCfg.persona_tone || '') + '" />'
-    +       '<label style="font-size:13px;font-weight:600;padding-top:8px">System-prompt template</label>'
+    +       '<label style="font-size:13px;font-weight:600;padding-top:8px">System-prompt template' + scTip(SC_TIPS.system_prompt) + '</label>'
     +       '<textarea id="scSystemPrompt" maxlength="10000" style="padding:10px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-family:inherit;font-size:13px;line-height:1.55;min-height:200px;resize:vertical">' + esc(_simoneCfg.system_prompt_template || '') + '</textarea>'
-    +       '<label style="font-size:13px;font-weight:600;padding-top:8px">Model</label>'
+    +       '<label style="font-size:13px;font-weight:600;padding-top:8px">Model' + scTip(SC_TIPS.model) + '</label>'
     +       '<select id="scModel" style="padding:8px 10px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-family:inherit;font-size:13.5px">' + modelOptions + '</select>'
-    +       '<label style="font-size:13px;font-weight:600;padding-top:8px">Temperatuur</label>'
+    +       '<label style="font-size:13px;font-weight:600;padding-top:8px">Temperatuur' + scTip(SC_TIPS.temperature) + '</label>'
     +       '<input id="scTemperature" type="number" min="0" max="1" step="0.05" value="' + esc(temperature.toFixed(2)) + '" style="padding:8px 10px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-family:inherit;font-size:13.5px;max-width:120px" />'
-    +       '<label style="font-size:13px;font-weight:600;padding-top:8px">Context-berichten</label>'
+    +       '<label style="font-size:13px;font-weight:600;padding-top:8px">Context-berichten' + scTip(SC_TIPS.context_count) + '</label>'
     +       '<input id="scContextCount" type="number" min="5" max="50" step="1" value="' + esc(ctxCount) + '" style="padding:8px 10px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-family:inherit;font-size:13.5px;max-width:120px" />'
     +     '</div>'
     +   '</section>'
 
     // ── Per-intent ────────────────────────────────────────────────────────
     +   '<section style="background:var(--bg-elev);border:1px solid var(--border);border-radius:10px;padding:12px 14px">'
-    +     '<div style="font-size:12px;font-weight:700;color:var(--text-faint);text-transform:uppercase;letter-spacing:.04em;margin-bottom:8px">Per intent</div>'
+    +     '<div style="font-size:12px;font-weight:700;color:var(--text-faint);text-transform:uppercase;letter-spacing:.04em;margin-bottom:8px">Per intent' + scTip(SC_TIPS.per_intent_intro) + '</div>'
     +     '<div style="font-size:11.5px;color:var(--text-faint);margin-bottom:6px">Vink "autonoom" aan om Simone een bepaald intent zelf te laten beantwoorden zodra de confidence-drempel gehaald wordt.</div>'
     +     '<div>' + intentRows + lockedRows + '</div>'
     +   '</section>'
@@ -2411,30 +2486,30 @@ function renderSimoneConfigForm() {
     +   '<section style="background:var(--bg-elev);border:1px solid var(--border);border-radius:10px;padding:12px 14px">'
     +     '<div style="font-size:12px;font-weight:700;color:var(--text-faint);text-transform:uppercase;letter-spacing:.04em;margin-bottom:8px">Communicatie-limieten</div>'
     +     '<div style="display:grid;grid-template-columns:220px 1fr;gap:10px;align-items:start">'
-    +       '<label style="font-size:13px;font-weight:600;padding-top:6px">Kantooruren-only</label>'
+    +       '<label style="font-size:13px;font-weight:600;padding-top:6px">Kantooruren-only' + scTip(SC_TIPS.office_hours_only) + '</label>'
     +       '<div>'
     +         '<label style="display:inline-flex;gap:8px;align-items:center;font-size:13px;cursor:pointer">'
     +           '<input id="scOhOn" type="checkbox" ' + (ohOn ? 'checked' : '') + ' />'
     +           '<span>Alleen versturen binnen kantooruren</span>'
     +         '</label>'
     +       '</div>'
-    +       '<label style="font-size:13px;font-weight:600;padding-top:6px">Tijdzone</label>'
+    +       '<label style="font-size:13px;font-weight:600;padding-top:6px">Tijdzone' + scTip(SC_TIPS.office_hours_tz) + '</label>'
     +       '<input id="scOhTz" type="text" value="' + esc(ohTz) + '" style="padding:6px 9px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-size:13px;max-width:240px" />'
-    +       '<label style="font-size:13px;font-weight:600;padding-top:6px">Dagen</label>'
+    +       '<label style="font-size:13px;font-weight:600;padding-top:6px">Dagen' + scTip(SC_TIPS.office_hours_days) + '</label>'
     +       '<div>' + dayCheckboxes + '</div>'
-    +       '<label style="font-size:13px;font-weight:600;padding-top:6px">Tijdsvenster</label>'
+    +       '<label style="font-size:13px;font-weight:600;padding-top:6px">Tijdsvenster' + scTip(SC_TIPS.office_hours_window) + '</label>'
     +       '<div style="display:flex;gap:8px;align-items:center">'
     +         '<input id="scOhStart" type="time" value="' + esc(ohStart) + '" style="padding:6px 9px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-size:13px" />'
     +         '<span style="font-size:12px;color:var(--text-faint)">tot</span>'
     +         '<input id="scOhEnd" type="time" value="' + esc(ohEnd) + '" style="padding:6px 9px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-size:13px" />'
     +       '</div>'
-    +       '<label style="font-size:13px;font-weight:600;padding-top:6px">Max berichten / dag</label>'
+    +       '<label style="font-size:13px;font-weight:600;padding-top:6px">Max berichten / dag' + scTip(SC_TIPS.max_per_day) + '</label>'
     +       '<input id="scMaxPerDay" type="number" min="0" max="50" step="1" value="' + esc(maxPerDay) + '" style="padding:6px 9px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-size:13px;max-width:120px" />'
-    +       '<label style="font-size:13px;font-weight:600;padding-top:6px">Max berichten totaal</label>'
+    +       '<label style="font-size:13px;font-weight:600;padding-top:6px">Max berichten totaal' + scTip(SC_TIPS.max_total) + '</label>'
     +       '<input id="scMaxTotal" type="number" min="0" max="500" step="1" value="' + esc(maxTotal) + '" style="padding:6px 9px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-size:13px;max-width:120px" />'
-    +       '<label style="font-size:13px;font-weight:600;padding-top:6px">Cooldown (min)</label>'
+    +       '<label style="font-size:13px;font-weight:600;padding-top:6px">Cooldown (min)' + scTip(SC_TIPS.cooldown) + '</label>'
     +       '<input id="scCooldown" type="number" min="0" max="1440" step="1" value="' + esc(cooldownMin) + '" style="padding:6px 9px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-size:13px;max-width:120px" />'
-    +       '<label style="font-size:13px;font-weight:600;padding-top:6px">No-reply pauze</label>'
+    +       '<label style="font-size:13px;font-weight:600;padding-top:6px">No-reply pauze' + scTip(SC_TIPS.no_reply_pause) + '</label>'
     +       '<div style="display:flex;gap:8px;align-items:center">'
     +         '<input id="scNoReplyTh" type="number" min="0" max="20" step="1" value="' + esc(noReplyTh) + '" style="padding:6px 9px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-size:13px;max-width:80px" />'
     +         '<span style="font-size:12px;color:var(--text-faint)">berichten zonder reply →</span>'
@@ -2448,16 +2523,16 @@ function renderSimoneConfigForm() {
     +   '<section style="background:var(--bg-elev);border:1px solid var(--border);border-radius:10px;padding:12px 14px">'
     +     '<div style="font-size:12px;font-weight:700;color:var(--text-faint);text-transform:uppercase;letter-spacing:.04em;margin-bottom:8px">Persoonlijkheid</div>'
     +     '<div style="display:grid;grid-template-columns:220px 1fr;gap:10px;align-items:start">'
-    +       '<label style="font-size:13px;font-weight:600;padding-top:6px">Tutoyeren</label>'
+    +       '<label style="font-size:13px;font-weight:600;padding-top:6px">Tutoyeren' + scTip(SC_TIPS.tutoyeer) + '</label>'
     +       '<div>'
     +         '<label style="display:inline-flex;gap:8px;align-items:center;font-size:13px;cursor:pointer">'
     +           '<input id="scTutoyeer" type="checkbox" ' + (useTutoyeer ? 'checked' : '') + ' />'
     +           '<span>Spreek de deelnemer aan met "je" (anders "u")</span>'
     +         '</label>'
     +       '</div>'
-    +       '<label style="font-size:13px;font-weight:600;padding-top:6px">Max bericht-tekens</label>'
+    +       '<label style="font-size:13px;font-weight:600;padding-top:6px">Max bericht-tekens' + scTip(SC_TIPS.max_chars) + '</label>'
     +       '<input id="scMaxChars" type="number" min="50" max="4096" step="10" value="' + esc(maxChars) + '" style="padding:6px 9px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-size:13px;max-width:120px" />'
-    +       '<label style="font-size:13px;font-weight:600;padding-top:6px">Emoji-beleid</label>'
+    +       '<label style="font-size:13px;font-weight:600;padding-top:6px">Emoji-beleid' + scTip(SC_TIPS.emoji_policy) + '</label>'
     +       '<select id="scEmojiPolicy" style="padding:6px 9px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-size:13px;max-width:200px">'
     +         '<option value="never"'      + (emojiPolicy === 'never'      ? ' selected' : '') + '>nooit</option>'
     +         '<option value="sparingly"'  + (emojiPolicy === 'sparingly'  ? ' selected' : '') + '>spaarzaam</option>'
