@@ -38,7 +38,9 @@
     // lucide "calendar-event" — visueel duidelijk onderscheid van meetings (people-group).
     events: '<rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/><rect x="8" y="14" width="8" height="5" rx="1"/>',
     tickets: '<path d="M2 9a3 3 0 0 1 0 6v2a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-2a3 3 0 0 1 0-6V7a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2Z"/><path d="M13 5v2"/><path d="M13 11v2"/><path d="M13 17v2"/>',
-    onboarding: '<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>'
+    onboarding: '<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>',
+    // lucide "graduation-cap" — onderscheid van events (calendar) en agents (avatar).
+    'mentor-dashboard': '<path d="M22 10v6M2 10l10-5 10 5-10 5z"/><path d="M6 12v5c3 3 9 3 12 0v-5"/>'
   };
 
   function svg(key) {
@@ -76,6 +78,10 @@
           navLink('events', '/modules/events.html', 'Events') +
           // PR-A — mentor-grootboek is verhuisd naar Events → Mentor-grootboek-tab.
           // Sidebar-entry verwijderd; deeplink events.html#mentor-grootboek werkt.
+          // Mentor-dashboard PR-1 — self-service voor mentor-rol; gated via
+          // mentor.module.access (zie MODULE_FEATURE_MAP). Voor andere rollen
+          // verbergt applyModuleGating de link.
+          navLink('mentor-dashboard', '/modules/mentor-dashboard.html', 'Mentor-dashboard') +
           navLink('onboarding', '/modules/onboarding-overzicht.html', 'Onboarding') +
           // Finance — Mega-restructure: badge voor Open Acties (F1 finance-taken) hangt
           // nu inline op de Finance nav-item zelf. Open Acties is verhuisd naar
@@ -401,6 +407,9 @@
     'events-detail': 'events.module.access',
     'events-wizard': 'events.module.access',
     'events-automations': 'events.module.access',
+    // Mentor-dashboard PR-1 — sidebar-link + page-gating via mentor.module.access.
+    // Endpoint-gate (mentor-my-events/-calendar) doet dezelfde check; deze is voor UX.
+    'mentor-dashboard': 'mentor.module.access',
     'finance': 'finance.module.access',
     // Open Acties (F1 finance-taken) is verhuisd naar Finance > Wanbetalers > Open Acties
     // sub-tab — geen eigen sidebar-link meer. Badge hangt nu op de Finance nav-item zelf.

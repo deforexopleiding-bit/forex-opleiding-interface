@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Mentor-dashboard · De Forex Opleiding</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/dist/tabler-icons.min.css" />
+  <link rel="stylesheet" href="/modules/shared/agent-shared.css" />
+  <link rel="stylesheet" href="/styles/sales-redesign.css" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; }
+    body { font-family: 'Inter', system-ui, sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; -webkit-font-smoothing: antialiased; }
+    .app { margin-left: 220px; padding: 24px 28px 60px; max-width: 1280px; }
+
+    .page-header { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 18px; gap: 12px; flex-wrap: wrap; }
+    .page-header h1 { font-size: 22px; font-weight: 700; color: var(--text); }
+    .page-header p { font-size: 13px; color: var(--text-dim); }
+
+    .kpi-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-bottom: 22px; }
+    .kpi-card { background: var(--bg-elev); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; }
+    .kpi-label { font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-dim); font-weight: 600; }
+    .kpi-value { font-size: 22px; font-weight: 700; margin-top: 4px; color: var(--text); }
+    .kpi-sub   { font-size: 11.5px; color: var(--text-dim); margin-top: 2px; }
+    @media (max-width: 880px) { .kpi-row { grid-template-columns: repeat(2, 1fr); } .app { margin-left: 0; padding: 14px; } }
+
+    .section { margin-bottom: 28px; }
+    .section h2 { font-size: 15px; font-weight: 700; margin-bottom: 10px; color: var(--text); display: flex; align-items: center; gap: 8px; }
+    .section h2 i { color: var(--text-dim); }
+
+    .data-table { width: 100%; border-collapse: collapse; background: var(--bg-elev); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+    .data-table th, .data-table td { padding: 10px 12px; text-align: left; font-size: 13px; border-bottom: 1px solid var(--border); }
+    .data-table th { background: rgba(0,0,0,0.02); font-weight: 600; color: var(--text-dim); font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.03em; }
+    .data-table tr:last-child td { border-bottom: 0; }
+    .data-table td.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+    .badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; white-space: nowrap; }
+    .badge-green  { background: rgba(34,197,94,0.13);  color: #15803d; }
+    .badge-amber  { background: rgba(245,158,11,0.16); color: #b45309; }
+    .badge-grey   { background: rgba(100,116,139,0.18); color: #475569; }
+    .badge-blue   { background: rgba(20,115,214,0.16); color: #1160bd; }
+    .badge-red    { background: rgba(220,38,38,0.13);  color: #b91c1c; }
+
+    .empty-state { background: var(--bg-elev); border: 1px dashed var(--border); border-radius: 10px; padding: 24px 16px; text-align: center; font-size: 13px; color: var(--text-dim); }
+    .empty-state i { font-size: 26px; display: block; margin-bottom: 6px; opacity: 0.6; }
+
+    .skeleton { display: inline-block; width: 80px; height: 16px; background: linear-gradient(90deg, rgba(0,0,0,0.05), rgba(0,0,0,0.10), rgba(0,0,0,0.05)); border-radius: 4px; animation: sk 1.2s infinite; }
+    @keyframes sk { 0% { background-position: 0% 0; } 100% { background-position: 200% 0; } }
+  </style>
+</head>
+<body>
+<div id="sidebar-mount"></div>
+
+<div class="app">
+  <div class="page-header">
+    <div>
+      <h1>Mentor-dashboard</h1>
+      <p>Jouw events, jouw bonussen, jouw kalender.</p>
+    </div>
+  </div>
+
+  <div class="kpi-row" id="kpiRow">
+    <div class="kpi-card"><div class="kpi-label">Saldo (netto)</div><div class="kpi-value"><span class="skeleton"></span></div><div class="kpi-sub">Vrijgegeven minus uitgaven</div></div>
+    <div class="kpi-card"><div class="kpi-label">Bonuspot bruto</div><div class="kpi-value"><span class="skeleton"></span></div><div class="kpi-sub">Alle statussen samen</div></div>
+    <div class="kpi-card"><div class="kpi-label">Komende events</div><div class="kpi-value"><span class="skeleton"></span></div><div class="kpi-sub">Vanaf vandaag</div></div>
+    <div class="kpi-card"><div class="kpi-label">Events totaal</div><div class="kpi-value"><span class="skeleton"></span></div><div class="kpi-sub">Verleden + toekomst</div></div>
+  </div>
+
+  <div class="section">
+    <h2><i class="ti ti-coin"></i> Bonussen per event</h2>
+    <div id="bonusByEventWrap"></div>
+  </div>
+
+  <div class="section">
+    <h2><i class="ti ti-calendar-event"></i> Mijn komende sessies</h2>
+    <div id="calendarWrap"></div>
+  </div>
+
+  <div class="section">
+    <h2><i class="ti ti-list-details"></i> Mijn events (compleet)</h2>
+    <div id="myEventsWrap"></div>
+  </div>
+</div>
+
+<script src="/modules/shared/supabase-client.js"></script>
+<script src="/modules/shared/agent-shared.js"></script>
+<script src="/modules/shared/theme-shared.js"></script>
+<script src="/modules/shared/permissions.js"></script>
+<script src="/modules/shared/sidebar.js"></script>
+<script>
+(function () {
+  'use strict';
+
+  const fmtEUR = (n) => {
+    const v = Number(n) || 0;
+    return v.toLocaleString('nl-NL', { style: 'currency', currency: 'EUR', minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  };
+  const fmtDateNL = (iso) => {
+    if (!iso) return '—';
+    try {
+      const d = new Date(iso);
+      return d.toLocaleDateString('nl-NL', { day: '2-digit', month: 'short', year: 'numeric' });
+    } catch { return iso; }
+  };
+  const fmtDateTimeNL = (iso) => {
+    if (!iso) return '—';
+    try {
+      const d = new Date(iso);
+      return d.toLocaleString('nl-NL', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+    } catch { return iso; }
+  };
+  const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+
+  const STATUS_BADGE = {
+    pending:               { label: 'Pending',           cls: 'badge-amber' },
+    wachten_op_betaling:   { label: 'Wachten op betaling', cls: 'badge-amber' },
+    vrijgegeven:           { label: 'Vrijgegeven',       cls: 'badge-green' },
+    geannuleerd:           { label: 'Geannuleerd',       cls: 'badge-grey'  },
+    uitbetaald:            { label: 'Uitbetaald',        cls: 'badge-blue'  },
+  };
+
+  function statusChips(perStatus) {
+    if (!perStatus) return '';
+    const order = ['vrijgegeven', 'pending', 'wachten_op_betaling', 'geannuleerd', 'uitbetaald'];
+    return order
+      .filter((s) => Math.abs(Number(perStatus[s]) || 0) > 0.005)
+      .map((s) => {
+        const b = STATUS_BADGE[s];
+        return `<span class="badge ${b.cls}" title="${esc(b.label)}">${esc(b.label)}: ${fmtEUR(perStatus[s])}</span>`;
+      })
+      .join(' ');
+  }
+
+  function setKpis({ netto, bonuspot, upcoming, total }) {
+    const row = document.getElementById('kpiRow');
+    row.innerHTML =
+      `<div class="kpi-card"><div class="kpi-label">Saldo (netto)</div><div class="kpi-value">${fmtEUR(netto)}</div><div class="kpi-sub">Vrijgegeven minus uitgaven</div></div>` +
+      `<div class="kpi-card"><div class="kpi-label">Bonuspot bruto</div><div class="kpi-value">${fmtEUR(bonuspot)}</div><div class="kpi-sub">Alle statussen samen</div></div>` +
+      `<div class="kpi-card"><div class="kpi-label">Komende events</div><div class="kpi-value">${upcoming}</div><div class="kpi-sub">Vanaf vandaag</div></div>` +
+      `<div class="kpi-card"><div class="kpi-label">Events totaal</div><div class="kpi-value">${total}</div><div class="kpi-sub">Verleden + toekomst</div></div>`;
+  }
+
+  function renderBonusByEvent(byEvent) {
+    const wrap = document.getElementById('bonusByEventWrap');
+    if (!Array.isArray(byEvent) || byEvent.length === 0) {
+      wrap.innerHTML = `<div class="empty-state"><i class="ti ti-coin-off"></i>Nog geen bonus-regels in het grootboek.</div>`;
+      return;
+    }
+    const rows = byEvent.map((c) => {
+      const chips = statusChips(c.per_status);
+      return `
+        <tr>
+          <td>${esc(c.event_title || '—')}</td>
+          <td>${fmtDateNL(c.starts_at)}</td>
+          <td class="num">${fmtEUR(c.bonuspot)}</td>
+          <td class="num">${fmtEUR(c.uitgaven)}</td>
+          <td class="num"><strong>${fmtEUR(c.netto)}</strong></td>
+          <td>${chips || '<span class="badge badge-grey">—</span>'}</td>
+        </tr>`;
+    }).join('');
+    wrap.innerHTML = `
+      <table class="data-table">
+        <thead><tr><th>Event</th><th>Datum</th><th class="num">Bonus bruto</th><th class="num">Uitgaven</th><th class="num">Netto</th><th>Status</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>`;
+  }
+
+  function renderCalendar(events) {
+    const wrap = document.getElementById('calendarWrap');
+    if (!Array.isArray(events) || events.length === 0) {
+      wrap.innerHTML = `<div class="empty-state"><i class="ti ti-calendar-off"></i>Geen komende sessies gepland.</div>`;
+      return;
+    }
+    const rows = events.map((e) => `
+      <tr>
+        <td>${esc(e.title || '—')}</td>
+        <td>${fmtDateTimeNL(e.starts_at)}</td>
+        <td>${e.was_present ? '<span class="badge badge-green">Aanwezig</span>' : '<span class="badge badge-grey">—</span>'}</td>
+      </tr>`).join('');
+    wrap.innerHTML = `
+      <table class="data-table">
+        <thead><tr><th>Event</th><th>Datum + tijd</th><th>Status</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>`;
+  }
+
+  function renderMyEvents(events) {
+    const wrap = document.getElementById('myEventsWrap');
+    if (!Array.isArray(events) || events.length === 0) {
+      wrap.innerHTML = `<div class="empty-state"><i class="ti ti-calendar-question"></i>Je bent nog aan geen events gekoppeld.</div>`;
+      return;
+    }
+    const rows = events.map((e) => `
+      <tr>
+        <td>${esc(e.title || '—')}</td>
+        <td>${fmtDateTimeNL(e.starts_at)}</td>
+        <td>${e.was_present ? '<span class="badge badge-green">Aanwezig</span>' : '<span class="badge badge-grey">—</span>'}</td>
+      </tr>`).join('');
+    wrap.innerHTML = `
+      <table class="data-table">
+        <thead><tr><th>Event</th><th>Datum + tijd</th><th>Aanwezig?</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>`;
+  }
+
+  function setError(elId, msg) {
+    document.getElementById(elId).innerHTML =
+      `<div class="empty-state" style="border-color:#fecaca;color:#b91c1c"><i class="ti ti-alert-triangle"></i>${esc(msg)}</div>`;
+  }
+
+  async function loadAll() {
+    const apiFetch = window.AgentShared?.apiFetch;
+    if (typeof apiFetch !== 'function') {
+      ['bonusByEventWrap','calendarWrap','myEventsWrap'].forEach((id) => setError(id, 'apiFetch niet beschikbaar (agent-shared.js niet geladen?).'));
+      return;
+    }
+
+    // Eerst auth-shared awaiten zodat de Bearer-token klaar staat.
+    try { if (window._authSharedReady) await window._authSharedReady; } catch {}
+
+    let ledger = null, myEvents = null, calendar = null;
+
+    try {
+      const r = await apiFetch('/api/mentor-ledger-overview');
+      const d = await r.json();
+      if (!r.ok) throw new Error(d?.error || 'ledger fetch failed');
+      ledger = d;
+    } catch (e) {
+      console.error('[mentor-dashboard] ledger:', e?.message || e);
+      setError('bonusByEventWrap', 'Bonussen ophalen mislukt: ' + (e?.message || e));
+    }
+
+    try {
+      const r = await apiFetch('/api/mentor-my-events?scope=all');
+      const d = await r.json();
+      if (!r.ok) throw new Error(d?.error || 'my-events fetch failed');
+      myEvents = d;
+    } catch (e) {
+      console.error('[mentor-dashboard] my-events:', e?.message || e);
+      setError('myEventsWrap', 'Eigen events ophalen mislukt: ' + (e?.message || e));
+    }
+
+    try {
+      const r = await apiFetch('/api/mentor-my-calendar');
+      const d = await r.json();
+      if (!r.ok) throw new Error(d?.error || 'calendar fetch failed');
+      calendar = d;
+    } catch (e) {
+      console.error('[mentor-dashboard] calendar:', e?.message || e);
+      setError('calendarWrap', 'Kalender ophalen mislukt: ' + (e?.message || e));
+    }
+
+    const totals = ledger?.totals || { netto: 0, bonuspot: 0 };
+    const evtList = myEvents?.events || [];
+    const calList = calendar?.events || [];
+    setKpis({
+      netto:    totals.netto,
+      bonuspot: totals.bonuspot,
+      upcoming: calList.length,
+      total:    evtList.length,
+    });
+
+    if (ledger) renderBonusByEvent(ledger.byEvent || []);
+    if (calendar) renderCalendar(calList);
+    if (myEvents)  renderMyEvents(evtList);
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', loadAll);
+  } else {
+    loadAll();
+  }
+})();
+</script>
+</body>
+</html>
