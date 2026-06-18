@@ -104,6 +104,8 @@ export default async function handler(req, res) {
         { count: 'exact' }
       )
       .eq('phone_number_id', modulePnId)
+      // Simone-sandbox dummy-convs uitfilteren (cleanup-safety-net).
+      .not('phone_number', 'ilike', '+99999%')
       .order('last_message_at', { ascending: false, nullsFirst: false })
       .range(offset, offset + limit - 1);
 

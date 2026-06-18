@@ -211,25 +211,23 @@ export default async function handler(req, res) {
     console.error('[simone-sandbox-test]', e?.message || e);
     return res.status(500).json({ error: e?.message || 'Interne fout' });
   } finally {
-    // CLEANUP: altijd, ook bij fouten.
     if (convId) {
+      // Expliciet logging per stap zodat een silent fout VOORTAAN zichtbaar
+      // is in Vercel logs. CASCADE op whatsapp_conversations zou messages +
+      // suggestions + conversation_state automatisch meenemen; we doen ze
+      // toch expliciet (idempotent) om aparte fout-paden te isoleren.
       try {
-        // joost_suggestions koppelt op conversation_id; verwijder alles.
-        await supabaseAdmin.from('joost_suggestions').delete().eq('conversation_id', convId);
-      } catch (e) {
-        console.error('[simone-sandbox-test cleanup suggestions]', e?.message || e);
-      }
+        const r1 = await supabaseAdmin.from('joost_suggestions').delete().eq('conversation_id', convId).select('id');
+        console.log('[simone-sandbox cleanup] joost_suggestions deleted:', r1?.data?.length ?? 0, 'err=', r1?.error?.message || 'none');
+      } catch (e) { console.error('[simone-sandbox cleanup] joost_suggestions THREW:', e?.message || e); }
       try {
-        // CASCADE op messages bij conv-delete, maar expliciet voor zekerheid.
-        await supabaseAdmin.from('whatsapp_messages').delete().eq('conversation_id', convId);
-      } catch (e) {
-        console.error('[simone-sandbox-test cleanup messages]', e?.message || e);
-      }
+        const r2 = await supabaseAdmin.from('whatsapp_messages').delete().eq('conversation_id', convId).select('id');
+        console.log('[simone-sandbox cleanup] whatsapp_messages deleted:', r2?.data?.length ?? 0, 'err=', r2?.error?.message || 'none');
+      } catch (e) { console.error('[simone-sandbox cleanup] whatsapp_messages THREW:', e?.message || e); }
       try {
-        await supabaseAdmin.from('whatsapp_conversations').delete().eq('id', convId);
-      } catch (e) {
-        console.error('[simone-sandbox-test cleanup conv]', e?.message || e);
-      }
+        const r3 = await supabaseAdmin.from('whatsapp_conversations').delete().eq('id', convId).select('id');
+        console.log('[simone-sandbox cleanup] whatsapp_conversations deleted:', r3?.data?.length ?? 0, 'err=', r3?.error?.message || 'none');
+      } catch (e) { console.error('[simone-sandbox cleanup] whatsapp_conversations THREW:', e?.message || e); }
     }
   }
 }
