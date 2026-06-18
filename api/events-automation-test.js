@@ -88,11 +88,14 @@ export default async function handler(req, res) {
     // FK-violation).
     const { data: autom, error: autErr } = await supabaseAdmin
       .from('event_automations')
-      .select('id, name, status')
+      .select('id, name, enabled')
       .eq('id', automationId)
       .maybeSingle();
     if (autErr) throw new Error('automation-lookup: ' + autErr.message);
     if (!autom)  return res.status(404).json({ error: 'Automation niet gevonden' });
+    if (!autom.enabled) {
+      return res.status(400).json({ error: 'Automation staat uit — zet \'m eerst aan' });
+    }
 
     const { data: ev, error: evErr } = await supabaseAdmin
       .from('events')
