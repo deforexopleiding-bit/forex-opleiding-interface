@@ -696,6 +696,8 @@ function renderPage(canCreate, canViewInbox, canManageSignupInbox) {
 
             <!-- STAP 6d — klant-context-strip (gevuld door _renderEvCustomerStrip). -->
             <div id="evCustomerStrip" class="evx-ctx-strip" style="display:none"></div>
+            <!-- Aanmelding (event_attendee) — persistente koppeling parallel aan klant-koppeling. -->
+            <div id="evAttendeeStrip" class="evx-ctx-strip" style="display:none"></div>
 
             <div id="evThreadMessages" class="evx-thread-messages">
               <div style="color:var(--text-faint);font-size:12px;text-align:center;padding:20px">Laden…</div>
@@ -779,6 +781,23 @@ function renderPage(canCreate, canViewInbox, canManageSignupInbox) {
           <button class="sr-iconbtn" id="evTplCloseBtn" type="button" title="Sluiten"><i class="ti ti-x"></i></button>
         </div>
         <div id="evTplBody"><div style="color:var(--text-faint);font-size:12px;padding:14px;text-align:center">Laden…</div></div>
+      </div>
+    </div>
+
+    <!-- Aanmeldings-koppel modal (search + kies). Spiegel van klant-koppel modal. -->
+    <div id="evAttendeeLinkModal" class="evx-modal-overlay">
+      <div class="evx-modal-card">
+        <div class="evx-modal-header">
+          <div class="evx-modal-title">Koppel een aanmelding aan dit gesprek</div>
+          <button class="sr-iconbtn" id="evAttLinkCloseBtn" type="button" title="Sluiten"><i class="ti ti-x"></i></button>
+        </div>
+        <input id="evAttSearchInput" class="evx-modal-search" type="search" placeholder="Zoek op naam, email of telefoon…" autocomplete="off" />
+        <div class="evx-modal-list" id="evAttSearchResults">
+          <div style="color:var(--text-faint);font-size:12px;padding:10px;text-align:center">Typ minimaal 2 tekens om te zoeken.</div>
+        </div>
+        <div class="evx-modal-footer">
+          <button class="sr-btn" id="evAttLinkCancelBtn" type="button" style="background:transparent;border:1px solid var(--border);color:var(--text-dim);padding:6px 12px;border-radius:7px;font-size:12px;cursor:pointer">Annuleren</button>
+        </div>
       </div>
     </div>
 
@@ -1009,6 +1028,16 @@ function renderPage(canCreate, canViewInbox, canManageSignupInbox) {
   if (custOverlay) custOverlay.addEventListener('click', (e) => { if (e.target === custOverlay) closeCustomerLinkModal(); });
   const custInput = document.getElementById('evCustSearchInput');
   if (custInput) custInput.addEventListener('input', _evCustSearchOnInput);
+
+  // Aanmelding-koppel modal wiring (spiegel van klant-modal hierboven)
+  const attClose  = document.getElementById('evAttLinkCloseBtn');
+  if (attClose)  attClose.addEventListener('click', () => closeAttendeeLinkModal());
+  const attCancel = document.getElementById('evAttLinkCancelBtn');
+  if (attCancel) attCancel.addEventListener('click', () => closeAttendeeLinkModal());
+  const attOverlay = document.getElementById('evAttendeeLinkModal');
+  if (attOverlay) attOverlay.addEventListener('click', (e) => { if (e.target === attOverlay) closeAttendeeLinkModal(); });
+  const attInput = document.getElementById('evAttSearchInput');
+  if (attInput) attInput.addEventListener('input', _evAttSearchOnInput);
 
   // Inschrijvingen-inbox wiring
   const siRefresh = document.getElementById('evSignupInboxRefresh');
@@ -3273,6 +3302,12 @@ async function loadEventsInbox() {
       // Geen extra berekening — endpoint heeft het al gedaan.
       const dotCls   = it.can_send_text ? 'open' : 'closed';
       const dotTitle = it.can_send_text ? '24h-venster open — vrij bericht toegestaan' : '24h-venster verlopen — alleen template';
+      // Persistente aanmelding-koppeling: klein ticket-icoontje vóór de naam
+      // zodat operator in één oogopslag ziet welke gesprekken een attendee
+      // hebben (parallel aan de customer-koppeling die uit nameLabel blijkt).
+      const attIcon = it.attendee_id
+        ? `<i class="ti ti-ticket" title="Gekoppeld aan aanmelding${it.attendee_event_title ? ' · ' + it.attendee_event_title : ''}" style="color:#0a2f63;font-size:13px;margin-right:4px;flex-shrink:0"></i>`
+        : '';
       return `
         <div class="evx-conv-row${isActive}" data-conv-id="${esc(it.id)}"
              data-phone="${esc(it.phone_number || '')}"
@@ -3281,7 +3316,7 @@ async function loadEventsInbox() {
           <div class="evx-conv-avatar">${esc(initial)}</div>
           <div class="evx-conv-body">
             <div class="evx-conv-toprow">
-              <div class="evx-conv-name">${esc(nameLabel)}</div>
+              <div class="evx-conv-name">${attIcon}${esc(nameLabel)}</div>
               <div class="evx-conv-time">${timeShort}</div>
               <span class="evx-24h-dot ${dotCls}" title="${esc(dotTitle)}"></span>
             </div>
@@ -3549,6 +3584,7 @@ async function openEventsConv({ id, phone, displayName, customer }) {
     _applyEvComposeState();
     // STAP 6d: klant-context-strip + event-context (read-only afgeleid).
     _renderEvCustomerStrip(_evState.conv);
+    _renderEvAttendeeStrip(_evState.conv);
     // Refresh list-tab badges (unread reset)
     loadEventsInbox();
     // Laatste PROPOSED suggestie tonen
@@ -4676,6 +4712,188 @@ async function linkCustomer(customerId) {
     closeCustomerLinkModal();
     // Reload thread + strip
     openEventsConv({ id: convId, phone: _evState.conv?.phone_number || '', displayName: _evState.conv?.display_name || '', customer: j.customer_name || _evState.conv?.customer_name || '' });
+  } catch (e) {
+    window.AgentShared.showToast(e.message, 'error');
+  }
+}
+
+// ── Aanmelding-koppeling (event_attendee) ───────────────────────────────────
+// 1:1 spiegel van de klant-koppel-flow hierboven: strip-render + modal-open
+// + search + link + unlink, met een eigen pictogram (🎫) en eigen endpoints.
+function _evFmtAttDate(iso) {
+  if (!iso) return '';
+  try {
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return '';
+    return d.toLocaleDateString('nl-NL', { day: '2-digit', month: 'short', year: 'numeric' });
+  } catch { return ''; }
+}
+
+function _renderEvAttendeeStrip(conv) {
+  const strip = document.getElementById('evAttendeeStrip');
+  if (!strip) return;
+  if (!conv) { strip.style.display = 'none'; strip.innerHTML = ''; return; }
+  strip.style.display = '';
+  const canUnlink = (window.RBAC?.canSync?.('finance.inbox.send')
+                       || window.RBAC?.canSync?.('events.simone.use'));
+  if (conv.attendee_id) {
+    const name  = conv.attendee_name || '(aanmelding)';
+    const evt   = conv.attendee_event_title || null;
+    const date  = _evFmtAttDate(conv.attendee_event_starts_at);
+    const sub   = [evt, date].filter(Boolean).join(' · ');
+    const unlinkBtnHtml = canUnlink
+      ? '<button class="evx-ctx-link-btn" id="evAttUnlinkBtn" type="button" title="Ontkoppel aanmelding van deze conversatie"><i class="ti ti-unlink"></i> Ontkoppel</button>'
+      : '';
+    strip.innerHTML = `
+      <span class="evx-ctx-label"><i class="ti ti-ticket"></i> Aanmelding</span>
+      <span><strong>${esc(name)}</strong>${sub ? ' <span style="color:var(--text-faint)">— ' + esc(sub) + '</span>' : ''}</span>
+      <button class="evx-ctx-link-btn" id="evAttChangeBtn" type="button" title="Wijzig aanmelding-koppeling" style="margin-left:auto"><i class="ti ti-refresh"></i> Wijzigen</button>
+      ${unlinkBtnHtml}
+    `;
+    const changeBtn = document.getElementById('evAttChangeBtn');
+    if (changeBtn) changeBtn.addEventListener('click', () => openAttendeeLinkModal());
+    const unlinkBtn = document.getElementById('evAttUnlinkBtn');
+    if (unlinkBtn) unlinkBtn.addEventListener('click', () => _renderEvAttendeeStripUnlinkConfirm(conv));
+  } else {
+    strip.innerHTML = `
+      <span class="evx-ctx-label"><i class="ti ti-ticket"></i> Aanmelding</span>
+      <span style="color:var(--text-faint)">Geen aanmelding gekoppeld.</span>
+      <button class="evx-ctx-link-btn" id="evAttLinkBtn" type="button" style="margin-left:auto;border-color:#0a2f63;color:#0a2f63"><i class="ti ti-link"></i> Koppel aanmelding</button>
+    `;
+    const linkBtn = document.getElementById('evAttLinkBtn');
+    if (linkBtn) linkBtn.addEventListener('click', () => openAttendeeLinkModal());
+  }
+}
+
+function _renderEvAttendeeStripUnlinkConfirm(conv) {
+  const strip = document.getElementById('evAttendeeStrip');
+  if (!strip) return;
+  const label = (conv && conv.attendee_name) || '(aanmelding)';
+  strip.innerHTML = `
+    <span class="evx-ctx-label"><i class="ti ti-alert-triangle" style="color:#b45309"></i> Bevestig</span>
+    <span>Weet je zeker dat je <strong>${esc(label)}</strong> van deze conversatie wilt loskoppelen?</span>
+    <span style="margin-left:auto;display:inline-flex;gap:6px">
+      <button class="evx-ctx-link-btn" id="evAttUnlinkCancel" type="button">Annuleren</button>
+      <button class="evx-ctx-link-btn" id="evAttUnlinkConfirm" type="button" style="border-color:#b91c1c;color:#b91c1c"><i class="ti ti-unlink"></i> Ontkoppelen</button>
+    </span>
+  `;
+  const cancelBtn  = document.getElementById('evAttUnlinkCancel');
+  const confirmBtn = document.getElementById('evAttUnlinkConfirm');
+  if (cancelBtn) cancelBtn.addEventListener('click', () => _renderEvAttendeeStrip(_evState.conv));
+  if (confirmBtn) {
+    confirmBtn.addEventListener('click', async () => {
+      if (!_evState.conv || !_evState.conv.id) return;
+      confirmBtn.disabled = true;
+      confirmBtn.innerHTML = '<i class="ti ti-loader-2"></i> Ontkoppelen…';
+      try {
+        const r = await window.AgentShared.apiFetch('/api/inbox-unlink-conversation-from-attendee', {
+          method : 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body   : JSON.stringify({ conversation_id: _evState.conv.id }),
+        });
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) {
+          window.AgentShared.showToast(d.error || ('Ontkoppelen mislukt (HTTP ' + r.status + ')'), 'error');
+          _renderEvAttendeeStrip(_evState.conv);
+          return;
+        }
+        _evState.conv.attendee_id              = null;
+        _evState.conv.attendee_name            = null;
+        _evState.conv.attendee_event_title     = null;
+        _evState.conv.attendee_event_starts_at = null;
+        _renderEvAttendeeStrip(_evState.conv);
+        window.AgentShared.showToast('Aanmelding ontkoppeld', 'success');
+      } catch (e) {
+        window.AgentShared.showToast(e?.message || 'Ontkoppelen mislukt', 'error');
+        _renderEvAttendeeStrip(_evState.conv);
+      }
+    });
+  }
+}
+
+function openAttendeeLinkModal() {
+  const convId = _evState.convId;
+  if (!convId) return;
+  document.getElementById('evAttendeeLinkModal').classList.add('show');
+  const inp = document.getElementById('evAttSearchInput');
+  const res = document.getElementById('evAttSearchResults');
+  if (inp) { inp.value = ''; inp.focus(); }
+  if (res) res.innerHTML = '<div style="color:var(--text-faint);font-size:12px;padding:10px;text-align:center">Typ minimaal 2 tekens om te zoeken.</div>';
+}
+
+function closeAttendeeLinkModal() {
+  document.getElementById('evAttendeeLinkModal').classList.remove('show');
+}
+
+const _evAttSearchDebounce = _evMakeDebouncer(250);
+function _evAttSearchOnInput() {
+  const inp = document.getElementById('evAttSearchInput');
+  const q = (inp && inp.value || '').trim();
+  if (q.length < 2) {
+    document.getElementById('evAttSearchResults').innerHTML = '<div style="color:var(--text-faint);font-size:12px;padding:10px;text-align:center">Typ minimaal 2 tekens om te zoeken.</div>';
+    return;
+  }
+  _evAttSearchDebounce(() => _evAttSearchRun(q));
+}
+
+async function _evAttSearchRun(q) {
+  const res = document.getElementById('evAttSearchResults');
+  if (!res) return;
+  res.innerHTML = '<div style="color:var(--text-faint);font-size:12px;padding:10px;text-align:center">Zoeken…</div>';
+  try {
+    const r = await window.AgentShared.apiFetch('/api/inbox-attendee-search?q=' + encodeURIComponent(q) + '&limit=20');
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) {
+      res.innerHTML = '<div style="color:#dc2626;font-size:12px;padding:10px">Fout: ' + esc(j.error || ('HTTP ' + r.status)) + '</div>';
+      return;
+    }
+    const items = Array.isArray(j.results) ? j.results : [];
+    if (items.length === 0) {
+      res.innerHTML = '<div style="color:var(--text-faint);font-size:12px;padding:10px;text-align:center">Geen aanmeldingen gevonden.</div>';
+      return;
+    }
+    res.innerHTML = items.map((a) => {
+      const fullName = [a.first_name, a.last_name].filter(Boolean).join(' ').trim() || a.email || a.phone || '(geen naam)';
+      const evt = a.event_title || '—';
+      const date = _evFmtAttDate(a.event_starts_at);
+      const meta = [a.email || '', date ? evt + ' · ' + date : evt].filter(Boolean).join(' — ');
+      return `
+        <div class="evx-modal-item" data-attendee-id="${esc(a.id)}">
+          <div class="iname">${esc(fullName)}</div>
+          <div class="imeta">${esc(meta)}</div>
+        </div>`;
+    }).join('');
+    res.querySelectorAll('.evx-modal-item[data-attendee-id]').forEach((row) => {
+      row.addEventListener('click', () => linkAttendee(row.dataset.attendeeId));
+    });
+  } catch (e) {
+    res.innerHTML = '<div style="color:#dc2626;font-size:12px;padding:10px">Fout: ' + esc(e.message) + '</div>';
+  }
+}
+
+async function linkAttendee(attendeeId) {
+  const convId = _evState.convId;
+  if (!convId || !attendeeId) return;
+  try {
+    const r = await window.AgentShared.apiFetch('/api/inbox-link-conversation-to-attendee', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ conversation_id: convId, attendee_id: attendeeId }),
+    });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) {
+      window.AgentShared.showToast(j.error || ('HTTP ' + r.status), 'error');
+      return;
+    }
+    window.AgentShared.showToast('Aanmelding gekoppeld' + (j.relinked ? ' (overschreven)' : ''), 'success');
+    closeAttendeeLinkModal();
+    // Reload thread + strip.
+    openEventsConv({
+      id:          convId,
+      phone:       _evState.conv?.phone_number || '',
+      displayName: _evState.conv?.display_name || '',
+      customer:    _evState.conv?.customer_name || '',
+    });
   } catch (e) {
     window.AgentShared.showToast(e.message, 'error');
   }

@@ -98,9 +98,11 @@ export default async function handler(req, res) {
     let query = supabaseAdmin
       .from('whatsapp_conversations')
       .select(
-        'id, phone_number, display_name, customer_id, status, last_message_at, ' +
+        'id, phone_number, display_name, customer_id, attendee_id, status, last_message_at, ' +
         'last_message_preview, unread_count, last_inbound_at, ' +
-        'customer:customers(id, first_name, last_name, company_name)',
+        'customer:customers(id, first_name, last_name, company_name), ' +
+        'attendee:event_attendees!attendee_id(id, first_name, last_name, email, ' +
+          'event:event_id(id, title, starts_at))',
         { count: 'exact' }
       )
       .eq('phone_number_id', modulePnId)
@@ -126,6 +128,16 @@ export default async function handler(req, res) {
         const parts = [cust.first_name, cust.last_name].filter(Boolean).join(' ').trim();
         customerName = parts || cust.company_name || null;
       }
+      const att = row.attendee || null;
+      let attendeeName = null;
+      let attendeeEventTitle = null;
+      let attendeeEventStartsAt = null;
+      if (att) {
+        const parts = [att.first_name, att.last_name].filter(Boolean).join(' ').trim();
+        attendeeName = parts || att.email || null;
+        attendeeEventTitle    = att.event?.title     || null;
+        attendeeEventStartsAt = att.event?.starts_at || null;
+      }
       let canSendText = false;
       if (row.last_inbound_at) {
         const t = new Date(row.last_inbound_at).getTime();
@@ -137,6 +149,10 @@ export default async function handler(req, res) {
         display_name: row.display_name,
         customer_id: row.customer_id,
         customer_name: customerName,
+        attendee_id: row.attendee_id,
+        attendee_name: attendeeName,
+        attendee_event_title: attendeeEventTitle,
+        attendee_event_starts_at: attendeeEventStartsAt,
         status: row.status,
         last_message_at: row.last_message_at,
         last_message_preview: row.last_message_preview,
