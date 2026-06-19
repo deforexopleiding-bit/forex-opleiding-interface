@@ -371,7 +371,7 @@
       <p id="result-copy"></p>
       <p class="followup" id="result-followup"></p>
       <div class="cta-row" id="result-cta-row" hidden>
-        <button id="cta-pick-date" type="button" class="btn-primary">Kies je datum</button>
+        <button id="cta-pick-date" type="button" class="btn-primary">Klik hier en bevestig je datum</button>
       </div>
     </div>
 
@@ -468,7 +468,7 @@
           badge: 'Match: basis',
           title: 'Forex Masterclass Basis past het beste bij jou',
           copy : 'Je hebt duidelijk interesse in trading en bent bezig met jouw ontwikkeling. Op dit moment denken we dat Forex Masterclass Basis de meeste waarde zal bieden.',
-          followup: 'We sturen je binnenkort de details met onze beste keuze voor jou.',
+          followup: '',
         },
         low: {
           badge: 'Aanbeveling: bouw je fundering',
@@ -801,8 +801,8 @@
         // event-choice-get het huidige event teruggeeft (current_event_id != null).
         await maybeShowKeepCurrent();
         $pickerSub.textContent = niveau === 'gevorderd'
-          ? 'Beschikbare datums voor de gevorderd-track:'
-          : 'Beschikbare datums voor de basis-track:';
+          ? 'Beschikbare datums voor de gevorderd-masterclass:'
+          : 'Beschikbare datums voor de basis-masterclass:';
         try {
           const r = await fetch('/api/assessment-open-events?niveau=' + encodeURIComponent(niveau));
           if (!r.ok) throw new Error('HTTP ' + r.status);
