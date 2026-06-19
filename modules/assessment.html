@@ -335,6 +335,21 @@
 
     <div id="loading" class="loading">Vragen laden...</div>
     <div id="fatal" class="fatal" hidden></div>
+
+    <!-- Anti-double-submit: token-flow met has_assessment=true → toon deze
+         success-state i.p.v. het formulier. Voorkomt dubbele invul +
+         dubbele assessment_responses-rij voor dezelfde attendee. -->
+    <div id="alreadySubmitted" hidden style="text-align:center;padding:40px 20px;">
+      <div style="font-size:48px;margin-bottom:12px;color:#059669;">✓</div>
+      <h2 style="margin:0 0 12px;">Je hebt de vragenlijst al succesvol ingediend.</h2>
+      <p id="alreadySubmittedSubtitle" style="color:var(--text-muted,#666);margin:0 0 24px;line-height:1.5">
+        Bedankt — je gegevens zijn binnen. We zien je graag op de masterclass.
+      </p>
+      <a id="alreadySubmittedCta" href="#" class="btn-primary" style="display:none;">
+        Klik hier om je datum te kiezen
+      </a>
+    </div>
+
     <form id="form" hidden novalidate>
       <div class="progress" id="progress">
         <div class="progress-label" id="progress-label"></div>
@@ -1018,10 +1033,14 @@
           $loading.hidden = true;
           $intro.hidden = false;
 
-          // Choice-token-flow: aanmelder is al bekend → naam/e-mail/telefoon
-          // auto-vullen. Non-blocking: bij elke fout (404/429/netwerk) stil
-          // overslaan — het formulier blijft normaal werken.
-          if (choiceToken) { void prefillFromChoiceToken(); }
+          // Choice-token-flow: eerst checken of de attendee de vragenlijst
+          // al heeft ingediend. Zo ja → toon 'al ingediend'-state en stop;
+          // anders prefill naam/e-mail/telefoon. Beide non-blocking: bij elke
+          // fout valt 'ie terug op het normale formulier.
+          if (choiceToken) {
+            const stop = await checkAlreadySubmitted();
+            if (!stop) void prefillFromChoiceToken();
+          }
         } catch (e) {
           console.error('loadQuestions', e);
           showFatal('Kon de vragenlijst niet laden. Vernieuw de pagina of probeer het later.');
@@ -1033,6 +1052,45 @@
       const PREFILL_LAST_NAME_KEYS  = new Set(['achternaam','last_name','lastname','lname']);
       const PREFILL_FULL_NAME_KEYS  = new Set(['naam','volledige_naam','full_name','voor_en_achternaam']);
       const PREFILL_PHONE_KEYS      = new Set(['telefoon','telefoonnummer','phone','phone_number','gsm','mobiel','mobiel_nummer','tel']);
+
+      // Anti-double-submit: check via event-choice-get of de attendee de
+      // vragenlijst al heeft ingediend. Returnt true wanneer de 'al ingediend'-
+      // state getoond is en de caller moet stoppen met de normale flow.
+      // Best-effort: bij elke fout returnt 'ie false zodat het formulier
+      // gewoon werkt en de attendee niet permanent vastzit.
+      async function checkAlreadySubmitted() {
+        if (!choiceToken) return false;
+        try {
+          const r = await fetch('/api/event-choice-get?t=' + encodeURIComponent(choiceToken), {
+            headers: { Accept: 'application/json' },
+          });
+          if (!r.ok) return false;
+          const j = await r.json().catch(() => null);
+          if (!j || !j.attendee || !j.attendee.has_assessment) return false;
+          // Al ingediend → verberg intro + formulier, toon 'al ingediend'-state.
+          const introEl   = document.getElementById('intro');
+          const formEl    = document.getElementById('form');
+          const loadingEl = document.getElementById('loading');
+          const alreadyEl = document.getElementById('alreadySubmitted');
+          if (introEl)   introEl.hidden = true;
+          if (formEl)    formEl.hidden = true;
+          if (loadingEl) loadingEl.hidden = true;
+          if (alreadyEl) alreadyEl.hidden = false;
+          // Geen event-keuze gemaakt → CTA naar de event-keuze pagina met dezelfde
+          // token zodat de attendee alsnog z'n datum kan kiezen.
+          if (!j.attendee.current_event_id) {
+            const cta = document.getElementById('alreadySubmittedCta');
+            if (cta) {
+              cta.href = '/modules/event-keuze.html?t=' + encodeURIComponent(choiceToken);
+              cta.style.display = 'inline-block';
+            }
+          }
+          return true;
+        } catch (e) {
+          console.warn('[checkAlreadySubmitted]', e?.message || e);
+          return false;
+        }
+      }
 
       async function prefillFromChoiceToken() {
         try {
