@@ -178,8 +178,29 @@ export async function sendEventWhatsAppTemplate({
         reason: 'Meta-config ontbreekt: ' + (e.missing || []).join(', '),
       };
     }
-    console.error('[events-send] Meta send:', e?.message || e);
-    return { ok: false, error: 'Meta send failed: ' + (e?.message || 'unknown') };
+    // Permanente Meta-errors (HTTP 4xx of bekende validatie-codes) → retry zinloos:
+    // dezelfde payload geeft dezelfde error. De engine ziet result.permanent en
+    // markeert de stap als afgerond i.p.v. opnieuw te proberen.
+    const msg = String(e?.message || 'unknown');
+    const httpStatus = e && (e.status || e.httpStatus);
+    const metaCode = e && (e.metaCode || (e.meta && e.meta.code));
+    // 132000 num-of-params mismatch, 132001 component-format, 132005 translated_text,
+    // 132007 template_paused_or_disabled, 132012 param-format, 132068 template_disabled,
+    // 131008 required_param_missing, 131026 message_undeliverable, 131051 message_type_unsupported.
+    const PERMANENT_CODES = [132000, 132001, 132005, 132007, 132012, 132068, 131008, 131026, 131051];
+    // Meta-helper gooit "Meta API <code>: <msg> (subcode=...)" zonder rijke
+    // properties. Parse code uit de message als fallback.
+    const codeFromMsg = (msg.match(/Meta API (\d{3,6})/) || msg.match(/#(\d{3,6})/) || [])[1];
+    const isPermanent =
+      (httpStatus && httpStatus >= 400 && httpStatus < 500) ||
+      (metaCode && PERMANENT_CODES.includes(Number(metaCode))) ||
+      (codeFromMsg && PERMANENT_CODES.includes(Number(codeFromMsg)));
+    if (isPermanent) {
+      console.error('[events-send] Meta permanent error (no retry):', msg);
+      return { ok: false, permanent: true, error: 'Meta send failed (permanent): ' + msg };
+    }
+    console.error('[events-send] Meta send:', msg);
+    return { ok: false, error: 'Meta send failed: ' + msg };
   }
   const wamid = metaResult && metaResult.wamid ? String(metaResult.wamid) : null;
 

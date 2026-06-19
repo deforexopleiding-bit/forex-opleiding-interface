@@ -62,11 +62,14 @@ const STEP_TYPE_TO_CHANNEL = {
   send_whatsapp: 'whatsapp',
 };
 
-// comms-log status → tijdlijn-status. 'skipped' valt weg (geen verzending);
-// 'failed' en 'queued' tonen we wel als 'verzonden' zodat operator de
-// poging ziet en kan opvolgen.
+// comms-log status → tijdlijn-status. 'skipped' valt weg (geen verzending).
+// 'sent'   → 'verzonden' (groene badge in UI).
+// 'failed' → 'mislukt'   (rode badge + reason-tooltip met Meta-error).
+// 'queued' → 'wacht'     (amber badge — Meta heeft 'm aangenomen maar nog niet sent).
 function commsLogStatusToTimeline(s) {
-  if (s === 'sent' || s === 'failed' || s === 'queued') return 'verzonden';
+  if (s === 'sent')   return 'verzonden';
+  if (s === 'failed') return 'mislukt';
+  if (s === 'queued') return 'wacht';
   return null; // skipped → niet tonen
 }
 
@@ -184,7 +187,7 @@ export default async function handler(req, res) {
     try {
       const { data: logRows, error: logErr } = await supabaseAdmin
         .from('event_attendee_comms_log')
-        .select('channel, status, sent_at, created_at, template_name, subject, automation_run_id, step_index, meta_wamid')
+        .select('channel, status, sent_at, created_at, template_name, subject, automation_run_id, step_index, meta_wamid, failure_reason')
         .eq('attendee_id', attendeeId)
         .eq('direction', 'outbound')
         .gte('created_at', new Date(cutoverMs).toISOString());
@@ -215,6 +218,7 @@ export default async function handler(req, res) {
           status: timelineStatus,
           at    : r.sent_at || r.created_at,
           label,
+          reason: r.failure_reason || null,
         });
       }
     } catch (e) {
