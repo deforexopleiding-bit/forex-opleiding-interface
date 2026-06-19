@@ -272,6 +272,21 @@
             </div>
           </div>
 
+          <!-- PR2a — Mentor ↔ Bubble-koppeling. Admin-tool om team_members.bubble_user_id
+               te zetten/wissen. Toont elke actieve mentor (rol mentor, team_member
+               actief) met huidige koppeling-status + actie-knop voor de picker. -->
+          <div class="integration-card" id="card-mentor-bubble" style="border:1px solid var(--border);border-radius:10px;padding:18px;margin-top:12px">
+            <div style="display:flex;align-items:flex-start;gap:14px">
+              <div style="font-size:26px;color:var(--text-dim);line-height:1"><i class="ti ti-link"></i></div>
+              <div style="flex:1;min-width:0">
+                <div style="font-size:15px;font-weight:700">Mentor ↔ Bubble-koppeling</div>
+                <div style="font-size:12.5px;color:var(--text-dim);margin-bottom:10px">Koppel een mentor aan een bubble.io-User zodat het mentor-dashboard later z'n studenten + calls uit Bubble kan tonen.</div>
+                <div id="mentorBubbleListWrap" style="display:flex;flex-direction:column;gap:6px;font-size:13px"></div>
+                <div id="mentorBubbleHint" style="font-size:11.5px;color:var(--text-faint);margin-top:8px"></div>
+              </div>
+            </div>
+          </div>
+
           <div class="integration-card" id="card-webflow-auto-publish" style="border:1px solid var(--border);border-radius:10px;padding:18px;margin-top:12px">
             <div style="display:flex;align-items:flex-start;gap:14px">
               <div style="font-size:26px;color:var(--text-dim);line-height:1"><i class="ti ti-world-www"></i></div>
@@ -905,7 +920,7 @@ function switchAdminTab(name) {
   const inviteBtn = document.querySelector('.page-header .btn-primary');
   if (inviteBtn) inviteBtn.style.display = name === 'gebruikers' ? '' : 'none';
   if (name === 'rechten' && !rbacLoaded) loadPermissionsMatrix();
-  if (name === 'integraties') { loadTlStatus(); loadWebhooks(); loadTemplateSetting(); loadWebflowAutoPublishState(); }
+  if (name === 'integraties') { loadTlStatus(); loadWebhooks(); loadTemplateSetting(); loadWebflowAutoPublishState(); loadMentorBubbleSection(); }
   if (name === 'approval-queue') {
     wireApprovOnce();
     loadApprovalQueue();
@@ -1528,6 +1543,166 @@ function handleTlReturnBanner() {
   }
   // Schoon de query-params op zodat refresh de banner niet herhaalt.
   history.replaceState(null, '', location.pathname);
+}
+
+// ── PR2a · Mentor ↔ Bubble-koppeling ─────────────────────────────────────────
+const _mb = { mentors: [], bubbleUsers: [], activeRowId: null };
+
+function _mbEsc(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+}
+
+async function loadMentorBubbleSection() {
+  const wrap = document.getElementById('mentorBubbleListWrap');
+  const hint = document.getElementById('mentorBubbleHint');
+  if (!wrap) return;
+  wrap.innerHTML = '<div style="color:var(--text-faint);font-size:12.5px">Mentoren laden&hellip;</div>';
+  if (hint) hint.textContent = '';
+  try {
+    const r = await window.AgentShared.apiFetch('/api/team-members-bubble-status');
+    const data = await r.json();
+    if (!r.ok) throw new Error(data?.error || 'load failed');
+    _mb.mentors = Array.isArray(data.mentors) ? data.mentors : [];
+    renderMentorBubbleList();
+  } catch (e) {
+    wrap.innerHTML = '<div style="color:var(--danger);font-size:12.5px">Mentoren ophalen mislukt: ' + _mbEsc(e?.message || e) + '</div>';
+  }
+}
+
+function renderMentorBubbleList() {
+  const wrap = document.getElementById('mentorBubbleListWrap');
+  if (!wrap) return;
+  if (!_mb.mentors.length) {
+    wrap.innerHTML = '<div style="color:var(--text-faint);font-size:12.5px">Nog geen actieve mentoren met user-koppeling.</div>';
+    return;
+  }
+  wrap.innerHTML = _mb.mentors.map((m) => {
+    const linked = !!m.bubble_user_id;
+    const status = linked
+      ? '<span style="background:rgba(34,197,94,0.13);color:#15803d;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600">Gekoppeld</span> ' +
+        '<code style="font-size:11px;color:var(--text-dim)">' + _mbEsc(m.bubble_user_id) + '</code>'
+      : '<span style="background:rgba(100,116,139,0.18);color:#475569;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600">Niet gekoppeld</span>';
+    const actionBtn = linked
+      ? '<button class="btn btn-sm" onclick="openMentorBubblePicker(\'' + _mbEsc(m.id) + '\')">Wijzigen</button> ' +
+        '<button class="btn btn-sm" style="color:var(--danger)" onclick="unlinkMentorBubble(\'' + _mbEsc(m.id) + '\')">Ontkoppelen</button>'
+      : '<button class="btn btn-sm btn-primary" onclick="openMentorBubblePicker(\'' + _mbEsc(m.id) + '\')">Koppelen</button>';
+    return '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:8px 10px;border:1px solid var(--border);border-radius:8px;background:var(--bg)">' +
+      '<div style="flex:1;min-width:160px">' +
+        '<div style="font-weight:600">' + _mbEsc(m.name || '?') + '</div>' +
+        '<div style="font-size:11.5px;color:var(--text-faint)">' + _mbEsc(m.email || '—') + '</div>' +
+      '</div>' +
+      '<div style="font-size:12px">' + status + '</div>' +
+      '<div style="display:flex;gap:6px">' + actionBtn + '</div>' +
+    '</div>';
+  }).join('');
+}
+
+async function openMentorBubblePicker(teamMemberId) {
+  _mb.activeRowId = teamMemberId;
+  const mentor = _mb.mentors.find((x) => x.id === teamMemberId);
+  if (!mentor) return;
+  let modal = document.getElementById('mentorBubbleModal');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'mentorBubbleModal';
+    modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:1000;display:flex;align-items:center;justify-content:center;padding:20px';
+    modal.innerHTML =
+      '<div style="background:var(--bg-elev);border:1px solid var(--border);border-radius:12px;max-width:560px;width:100%;max-height:90vh;display:flex;flex-direction:column;overflow:hidden">' +
+        '<div style="display:flex;align-items:center;justify-content:space-between;padding:14px 18px;border-bottom:1px solid var(--border)">' +
+          '<div><div style="font-weight:700;font-size:15px">Bubble-User kiezen</div><div id="mbModalSub" style="font-size:12px;color:var(--text-dim)"></div></div>' +
+          '<button class="btn btn-sm" onclick="closeMentorBubblePicker()" aria-label="Sluiten">&times;</button>' +
+        '</div>' +
+        '<div style="padding:12px 18px;border-bottom:1px solid var(--border)">' +
+          '<input id="mbSearch" type="text" placeholder="Zoeken op naam of e-mail..." class="form-input" style="width:100%" oninput="filterMentorBubbleResults()" />' +
+        '</div>' +
+        '<div id="mbResults" style="overflow-y:auto;padding:8px 12px;flex:1;min-height:240px"></div>' +
+      '</div>';
+    document.body.appendChild(modal);
+  }
+  document.getElementById('mbModalSub').textContent = 'Voor ' + (mentor.name || mentor.email || '?');
+  document.getElementById('mbSearch').value = '';
+  const results = document.getElementById('mbResults');
+  results.innerHTML = '<div style="color:var(--text-faint);font-size:12.5px;padding:14px">Bubble-mentoren laden&hellip;</div>';
+  modal.style.display = 'flex';
+  try {
+    const r = await window.AgentShared.apiFetch('/api/bubble-mentors-list');
+    const data = await r.json();
+    if (!r.ok) throw new Error(data?.error || 'bubble-list failed');
+    _mb.bubbleUsers = Array.isArray(data.mentors) ? data.mentors : [];
+    renderMentorBubbleResults('');
+  } catch (e) {
+    results.innerHTML = '<div style="color:var(--danger);font-size:12.5px;padding:14px">Ophalen mislukt: ' + _mbEsc(e?.message || e) + '</div>';
+  }
+}
+
+function filterMentorBubbleResults() {
+  const q = (document.getElementById('mbSearch')?.value || '').trim().toLowerCase();
+  renderMentorBubbleResults(q);
+}
+
+function renderMentorBubbleResults(q) {
+  const results = document.getElementById('mbResults');
+  if (!results) return;
+  const linkedIds = new Set(_mb.mentors.filter((m) => m.bubble_user_id).map((m) => m.bubble_user_id));
+  const list = (_mb.bubbleUsers || []).filter((u) => {
+    if (!q) return true;
+    return (u.name || '').toLowerCase().includes(q) || (u.email || '').toLowerCase().includes(q);
+  });
+  if (!list.length) {
+    results.innerHTML = '<div style="color:var(--text-faint);font-size:12.5px;padding:14px">Geen resultaten.</div>';
+    return;
+  }
+  results.innerHTML = list.map((u) => {
+    const alreadyLinked = linkedIds.has(u.bubble_user_id);
+    return '<button type="button" class="btn" style="width:100%;text-align:left;display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:6px;padding:10px 12px" ' +
+        (alreadyLinked ? 'disabled title="Al gekoppeld aan een andere mentor"' : 'onclick="confirmMentorBubbleLink(\'' + _mbEsc(u.bubble_user_id) + '\')"') + '>' +
+      '<span><span style="font-weight:600">' + _mbEsc(u.name || '?') + '</span>' +
+      '<span style="display:block;font-size:11.5px;color:var(--text-faint)">' + _mbEsc(u.email || '—') + '</span></span>' +
+      '<span style="font-size:11px;color:var(--text-faint)">' + (alreadyLinked ? 'Al gekoppeld' : _mbEsc(u.bubble_user_id)) + '</span>' +
+    '</button>';
+  }).join('');
+}
+
+async function confirmMentorBubbleLink(bubbleUserId) {
+  const tmId = _mb.activeRowId;
+  if (!tmId) return;
+  try {
+    const r = await window.AgentShared.apiFetch('/api/mentor-bubble-link', {
+      method: 'POST',
+      body: JSON.stringify({ team_member_id: tmId, bubble_user_id: bubbleUserId }),
+    });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data?.error || 'link failed');
+    window.AgentShared?.showToast?.('Bubble-koppeling opgeslagen', 'success');
+    closeMentorBubblePicker();
+    await loadMentorBubbleSection();
+  } catch (e) {
+    window.AgentShared?.showToast?.('Koppelen mislukt: ' + (e?.message || e), 'error');
+  }
+}
+
+async function unlinkMentorBubble(teamMemberId) {
+  const mentor = _mb.mentors.find((x) => x.id === teamMemberId);
+  if (!mentor) return;
+  if (!confirm('Bubble-koppeling van ' + (mentor.name || 'mentor') + ' wissen?')) return;
+  try {
+    const r = await window.AgentShared.apiFetch('/api/mentor-bubble-link', {
+      method: 'POST',
+      body: JSON.stringify({ team_member_id: teamMemberId, bubble_user_id: null }),
+    });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data?.error || 'unlink failed');
+    window.AgentShared?.showToast?.('Bubble-koppeling gewist', 'success');
+    await loadMentorBubbleSection();
+  } catch (e) {
+    window.AgentShared?.showToast?.('Wissen mislukt: ' + (e?.message || e), 'error');
+  }
+}
+
+function closeMentorBubblePicker() {
+  const m = document.getElementById('mentorBubbleModal');
+  if (m) m.style.display = 'none';
+  _mb.activeRowId = null;
 }
 
 async function loadUsers() {
