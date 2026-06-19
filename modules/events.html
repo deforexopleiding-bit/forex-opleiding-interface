@@ -827,6 +827,7 @@ function renderPage(canCreate, canViewInbox, canManageSignupInbox) {
               <select id="aqType" class="form-input">
                 <option value="text">Tekst</option>
                 <option value="email">E-mail</option>
+                <option value="tel">Telefoonnummer</option>
                 <option value="radio">Meerkeuze</option>
                 <option value="scale_1_5">Schaal 1–5</option>
                 <option value="scale_1_10">Schaal 1–10</option>
@@ -1858,8 +1859,8 @@ function _aqRenderPreview() {
   const required = req ? '<span style="color:#dc2626;font-weight:700;margin-left:4px">*</span>' : '';
 
   let inputHtml = '';
-  if (type === 'text' || type === 'email') {
-    const ph = type === 'email' ? 'naam@voorbeeld.nl' : '';
+  if (type === 'text' || type === 'email' || type === 'tel') {
+    const ph = type === 'email' ? 'naam@voorbeeld.nl' : (type === 'tel' ? '+316...' : '');
     inputHtml = `<input type="${escHtml(type)}" class="form-input" disabled placeholder="${escHtml(ph)}" />`;
   } else if (type === 'radio') {
     if (_aqOptionRows.length === 0) {
@@ -2001,7 +2002,7 @@ function _aqUpdateConditionalGroups() {
     isRoutingWrap.style.display = (isRadio || isScale) ? 'inline-flex' : 'none';
   }
   const ph = document.getElementById('aqEmailPrefillHint');
-  if (ph) ph.style.display = (type === 'email') ? '' : 'none';
+  if (ph) ph.style.display = (type === 'email' || type === 'tel') ? '' : 'none';
 
   if (isRadio) _aqRenderOptionRows();
   if (isScale && isRouting) _aqRenderScaleWeights();
