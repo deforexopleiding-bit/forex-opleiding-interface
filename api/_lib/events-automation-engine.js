@@ -115,7 +115,10 @@ export async function advanceRun({ run, attendee, event, now = new Date(), deps,
         await deps.recordLog(idx, type, result);
         idx += 1; attempts = 0; lastError = null; continue;
       }
-      if (result && result.skipped) { // bv. no-phone / template niet APPROVED → finaliseer, niet retryen
+      if (result && (result.skipped || result.permanent)) {
+        // skipped: no-phone / template niet APPROVED — niets om te retry-en.
+        // permanent: Meta 4xx / bekende validatie-code (zie events-send.js).
+        // Retry zou exact dezelfde payload sturen → exact dezelfde error.
         await deps.recordLog(idx, type, result);
         idx += 1; attempts = 0; continue;
       }
