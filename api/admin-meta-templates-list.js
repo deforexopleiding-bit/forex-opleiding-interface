@@ -41,7 +41,7 @@ export default async function handler(req, res) {
 
     const { data, error } = await supabaseAdmin
       .from('whatsapp_meta_templates')
-      .select('id, business_account_id, meta_template_id, name, language, category, header_type, header_content, body_text, body_examples, footer_text, buttons, status, rejection_reason, submitted_at, approved_at, last_synced_at, created_at, updated_at')
+      .select('id, business_account_id, meta_template_id, name, language, category, header_type, header_content, body_text, body_examples, footer_text, buttons, folder_id, status, rejection_reason, submitted_at, approved_at, last_synced_at, created_at, updated_at')
       .eq('business_account_id', businessAccountId)
       .order('updated_at', { ascending: false });
 

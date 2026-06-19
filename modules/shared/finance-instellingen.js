@@ -1215,6 +1215,7 @@
     wabas: [],
     activeWaba: null,
     metaItems: [],
+    metaFolders: [],
     metaEditingId: null,
     metaButtonsDraft: [],
     metaCurrentExamples: {},
@@ -1268,6 +1269,7 @@
             </div>
             <div style="display:flex;gap:8px">
               <button class="btn btn-sm" id="waMetaSyncBtn" type="button" title="Haal templates op uit Meta en update statussen"><i class="ti ti-refresh"></i> Sync met Meta</button>
+              <button class="btn btn-sm" id="waMetaNewFolderBtn" type="button" title="Nieuwe map om templates in te groeperen"><i class="ti ti-folder-plus"></i> Nieuwe map</button>
               <button class="btn btn-sm btn-primary" id="waMetaNewBtn" type="button"><i class="ti ti-plus"></i> Nieuwe template</button>
             </div>
           </div>
@@ -2072,9 +2074,14 @@
     }
     tbody.innerHTML = '<tr><td colspan="5" style="color:var(--text-faint);padding:20px">Laden&hellip;</td></tr>';
     try {
-      const data = await apiRequest('GET', '/api/admin-meta-templates-list?business_account_id=' + encodeURIComponent(_waTpl.activeWaba));
-      if (data && data.error) throw new Error(data.error);
-      _waTpl.metaItems = (data && data.items) || [];
+      // Parallel: templates + folders zodat de UI in 1 round-trip kan renderen.
+      const [items, folders] = await Promise.all([
+        apiRequest('GET', '/api/admin-meta-templates-list?business_account_id=' + encodeURIComponent(_waTpl.activeWaba)),
+        apiRequest('GET', '/api/admin-template-folders-list?business_account_id=' + encodeURIComponent(_waTpl.activeWaba)).catch(() => ({ folders: [] })),
+      ]);
+      if (items && items.error) throw new Error(items.error);
+      _waTpl.metaItems   = (items && items.items) || [];
+      _waTpl.metaFolders = (folders && folders.folders) || [];
       renderWaMetaRows();
     } catch (e) {
       tbody.innerHTML = `<tr><td colspan="5" style="color:var(--red);padding:20px">Fout: ${esc(e.message)}</td></tr>`;
@@ -2099,50 +2106,106 @@
     return `<span${titleAttr} style="display:inline-block;padding:2px 8px;border-radius:10px;font-size:11.5px;font-weight:600;background:${c.bg};color:${c.fg}">${esc(status || 'UNKNOWN')}</span>`;
   }
 
+  function renderWaMetaTemplateRow(it) {
+    const id        = esc(it.id || '');
+    const name      = esc(it.name || '');
+    const lang      = esc(it.language || '');
+    const cat       = esc(it.category || '');
+    const status    = it.status || 'LOCAL';
+    const badge     = waMetaStatusBadge(status, it.rejection_reason);
+    let actions = '';
+    if (status === 'LOCAL') {
+      actions = `
+        <button class="action-btn" type="button" data-wa-meta-edit="${id}"><i class="ti ti-edit"></i> Bewerken</button>
+        <button class="action-btn" type="button" data-wa-meta-del="${id}"><i class="ti ti-trash"></i> Verwijderen</button>
+        <button class="action-btn" type="button" data-wa-meta-submit="${id}" style="background:#2563eb;color:#fff;border-color:#2563eb"><i class="ti ti-send"></i> Naar Meta sturen</button>
+      `;
+    } else if (status === 'SUBMITTED') {
+      actions = `<button class="action-btn" type="button" data-wa-meta-view="${id}"><i class="ti ti-eye"></i> Bekijken</button>`;
+    } else if (status === 'REJECTED') {
+      actions = `
+        <button class="action-btn" type="button" data-wa-meta-edit="${id}"><i class="ti ti-edit"></i> Bewerken</button>
+        <button class="action-btn" type="button" data-wa-meta-del="${id}"><i class="ti ti-trash"></i> Verwijderen</button>
+        <button class="action-btn" type="button" data-wa-meta-resubmit="${id}" style="background:#f97316;color:#fff;border-color:#f97316"><i class="ti ti-refresh"></i> Opnieuw insturen</button>
+      `;
+    } else if (status === 'APPROVED') {
+      actions = `
+        <button class="action-btn" type="button" data-wa-meta-view="${id}"><i class="ti ti-eye"></i> Bekijken</button>
+        <button class="action-btn" type="button" data-wa-meta-dupliceer="${id}"><i class="ti ti-copy"></i> Dupliceer</button>
+      `;
+    } else {
+      actions = `<button class="action-btn" type="button" data-wa-meta-view="${id}"><i class="ti ti-eye"></i> Bekijken</button>`;
+    }
+    // Drag-handle + draggable rij. cursor=grab voor visuele hint.
+    return `<tr class="wa-meta-row" data-template-id="${id}" draggable="true" style="cursor:grab">
+      <td><i class="ti ti-grip-vertical" style="color:var(--text-faint);margin-right:6px"></i><strong>${name}</strong></td>
+      <td>${lang}</td>
+      <td>${cat}</td>
+      <td>${badge}</td>
+      <td>${actions}</td>
+    </tr>`;
+  }
+
+  function renderWaMetaFolderHeader(folder) {
+    const id    = esc(folder.id || '');
+    const name  = esc(folder.name || '');
+    const count = Number(folder.template_count) || 0;
+    return `<tr class="wa-folder-row" data-folder-id="${id}" style="background:rgba(99,102,241,0.06)">
+      <td colspan="5" style="padding:10px 14px;border-top:1px solid var(--border);border-bottom:1px solid var(--border)">
+        <div style="display:flex;align-items:center;gap:10px">
+          <i class="ti ti-folder" style="color:var(--accent,#6366f1)"></i>
+          <strong class="wa-folder-name" style="cursor:pointer" title="Dubbelklik om te hernoemen">${name}</strong>
+          <span style="font-size:11.5px;color:var(--text-faint)">(${count})</span>
+          <span style="flex:1"></span>
+          <button class="action-btn" type="button" data-wa-folder-rename="${id}" title="Hernoemen"><i class="ti ti-pencil"></i></button>
+          <button class="action-btn" type="button" data-wa-folder-del="${id}" title="Map verwijderen" style="color:var(--red,#dc2626)"><i class="ti ti-trash"></i></button>
+        </div>
+      </td>
+    </tr>`;
+  }
+
+  function renderWaMetaUngroupedHeader(count) {
+    return `<tr class="wa-folder-row wa-folder-ungrouped" data-folder-id="" style="background:rgba(100,116,139,0.06)">
+      <td colspan="5" style="padding:10px 14px;border-top:1px solid var(--border);border-bottom:1px solid var(--border)">
+        <div style="display:flex;align-items:center;gap:10px">
+          <i class="ti ti-inbox" style="color:var(--text-faint)"></i>
+          <strong>Ongegroepeerd</strong>
+          <span style="font-size:11.5px;color:var(--text-faint)">(${count})</span>
+        </div>
+      </td>
+    </tr>`;
+  }
+
   function renderWaMetaRows() {
     const tbody = document.getElementById('waMetaTbody');
     if (!tbody) return;
-    if (!_waTpl.metaItems.length) {
+    if (!_waTpl.metaItems.length && !_waTpl.metaFolders.length) {
       tbody.innerHTML = '<tr><td colspan="5" style="color:var(--text-faint);padding:20px">Nog geen templates. Klik op + Nieuwe template.</td></tr>';
       return;
     }
-    tbody.innerHTML = _waTpl.metaItems.map(it => {
-      const id        = esc(it.id || '');
-      const name      = esc(it.name || '');
-      const lang      = esc(it.language || '');
-      const cat       = esc(it.category || '');
-      const status    = it.status || 'LOCAL';
-      const badge     = waMetaStatusBadge(status, it.rejection_reason);
-      let actions = '';
-      if (status === 'LOCAL') {
-        actions = `
-          <button class="action-btn" type="button" data-wa-meta-edit="${id}"><i class="ti ti-edit"></i> Bewerken</button>
-          <button class="action-btn" type="button" data-wa-meta-del="${id}"><i class="ti ti-trash"></i> Verwijderen</button>
-          <button class="action-btn" type="button" data-wa-meta-submit="${id}" style="background:#2563eb;color:#fff;border-color:#2563eb"><i class="ti ti-send"></i> Naar Meta sturen</button>
-        `;
-      } else if (status === 'SUBMITTED') {
-        actions = `<button class="action-btn" type="button" data-wa-meta-view="${id}"><i class="ti ti-eye"></i> Bekijken</button>`;
-      } else if (status === 'REJECTED') {
-        actions = `
-          <button class="action-btn" type="button" data-wa-meta-edit="${id}"><i class="ti ti-edit"></i> Bewerken</button>
-          <button class="action-btn" type="button" data-wa-meta-resubmit="${id}" style="background:#f97316;color:#fff;border-color:#f97316"><i class="ti ti-refresh"></i> Opnieuw insturen</button>
-        `;
-      } else if (status === 'APPROVED') {
-        actions = `
-          <button class="action-btn" type="button" data-wa-meta-view="${id}"><i class="ti ti-eye"></i> Bekijken</button>
-          <button class="action-btn" type="button" data-wa-meta-dupliceer="${id}"><i class="ti ti-copy"></i> Dupliceer</button>
-        `;
+    const byFolder = new Map();
+    const ungrouped = [];
+    for (const it of _waTpl.metaItems) {
+      if (it.folder_id) {
+        if (!byFolder.has(it.folder_id)) byFolder.set(it.folder_id, []);
+        byFolder.get(it.folder_id).push(it);
       } else {
-        actions = `<button class="action-btn" type="button" data-wa-meta-view="${id}"><i class="ti ti-eye"></i> Bekijken</button>`;
+        ungrouped.push(it);
       }
-      return `<tr>
-        <td><strong>${name}</strong></td>
-        <td>${lang}</td>
-        <td>${cat}</td>
-        <td>${badge}</td>
-        <td>${actions}</td>
-      </tr>`;
-    }).join('');
+    }
+    const parts = [];
+    for (const f of _waTpl.metaFolders) {
+      const inFolder = byFolder.get(f.id) || [];
+      parts.push(renderWaMetaFolderHeader({ ...f, template_count: inFolder.length }));
+      for (const it of inFolder) parts.push(renderWaMetaTemplateRow(it));
+    }
+    // Altijd "Ongegroepeerd"-zone tonen zodra er folders zijn (zodat er een drop-target
+    // is om templates UIT een map te slepen). Zonder folders: alleen tonen bij content.
+    if (ungrouped.length > 0 || _waTpl.metaFolders.length > 0) {
+      parts.push(renderWaMetaUngroupedHeader(ungrouped.length));
+      for (const it of ungrouped) parts.push(renderWaMetaTemplateRow(it));
+    }
+    tbody.innerHTML = parts.join('');
   }
 
   // ─── Quick Replies list ─────────────────────────────────────────────────
@@ -2937,6 +3000,68 @@
     }
   }
 
+  // ─── Folder-CRUD + drag-drop move ─────────────────────────────────────────
+  async function doWaFolderCreate() {
+    if (!_waTpl.activeWaba) { toast('Selecteer eerst een WABA', 'error'); return; }
+    const name = window.prompt('Naam voor de nieuwe map:');
+    if (!name) return;
+    const trimmed = String(name).trim();
+    if (!trimmed) return;
+    try {
+      const data = await apiRequest('POST', '/api/admin-template-folders-create', {
+        business_account_id: _waTpl.activeWaba,
+        name: trimmed,
+      });
+      if (data && data.error) { alert('Aanmaken mislukt: ' + data.error); return; }
+      toast('Map aangemaakt', 'success');
+      loadWaMetaList();
+    } catch (e) {
+      alert('Aanmaken mislukt: ' + e.message);
+    }
+  }
+
+  async function doWaFolderRename(folder) {
+    if (!folder) return;
+    const name = window.prompt('Nieuwe naam voor map:', folder.name || '');
+    if (!name) return;
+    const trimmed = String(name).trim();
+    if (!trimmed || trimmed === folder.name) return;
+    try {
+      const data = await apiRequest('PATCH', '/api/admin-template-folders-rename?id=' + encodeURIComponent(folder.id), { name: trimmed });
+      if (data && data.error) { alert('Hernoemen mislukt: ' + data.error); return; }
+      toast('Map hernoemd', 'success');
+      loadWaMetaList();
+    } catch (e) {
+      alert('Hernoemen mislukt: ' + e.message);
+    }
+  }
+
+  async function doWaFolderDelete(folder) {
+    if (!folder) return;
+    if (!confirm(`Map '${folder.name}' verwijderen? Templates blijven behouden maar verliezen folder-toewijzing.`)) return;
+    try {
+      const data = await apiRequest('DELETE', '/api/admin-template-folders-delete?id=' + encodeURIComponent(folder.id));
+      if (data && data.error) { alert('Verwijderen mislukt: ' + data.error); return; }
+      toast('Map verwijderd', 'success');
+      loadWaMetaList();
+    } catch (e) {
+      alert('Verwijderen mislukt: ' + e.message);
+    }
+  }
+
+  async function moveTemplateToFolder(templateId, folderId) {
+    try {
+      const data = await apiRequest('POST', '/api/admin-template-folder-move', {
+        template_id: templateId,
+        folder_id  : folderId,
+      });
+      if (data && data.error) { alert('Verplaatsen mislukt: ' + data.error); return; }
+      loadWaMetaList();
+    } catch (e) {
+      alert('Verplaatsen mislukt: ' + e.message);
+    }
+  }
+
   // ─── Meta sync / submit / resubmit / duplicate ────────────────────────────
   function formatMetaError(err) {
     const me = err?.meta_error || err?.data?.meta_error || null;
@@ -3224,8 +3349,81 @@
           const item = findItem(dupBtn, 'data-wa-meta-dupliceer');
           if (item) doWaMetaDuplicate(item);
         }
+        // Folder-acties.
+        const fRenameBtn = e.target.closest('[data-wa-folder-rename]');
+        const fDelBtn    = e.target.closest('[data-wa-folder-del]');
+        if (fRenameBtn) {
+          const id = fRenameBtn.getAttribute('data-wa-folder-rename');
+          const f  = _waTpl.metaFolders.find(x => String(x.id) === id);
+          if (f) doWaFolderRename(f);
+        } else if (fDelBtn) {
+          const id = fDelBtn.getAttribute('data-wa-folder-del');
+          const f  = _waTpl.metaFolders.find(x => String(x.id) === id);
+          if (f) doWaFolderDelete(f);
+        }
+      });
+      // Dubbelklik op folder-naam → inline rename (matched de pencil-knop hierboven).
+      metaTbody.addEventListener('dblclick', (e) => {
+        const nameEl = e.target.closest('.wa-folder-name');
+        if (!nameEl) return;
+        const row = nameEl.closest('.wa-folder-row');
+        if (!row) return;
+        const id  = row.getAttribute('data-folder-id');
+        if (!id) return;
+        const f = _waTpl.metaFolders.find(x => String(x.id) === id);
+        if (f) doWaFolderRename(f);
+      });
+      // Drag-and-drop: HTML5 native API, geen library.
+      metaTbody.addEventListener('dragstart', (e) => {
+        const row = e.target.closest('.wa-meta-row[data-template-id]');
+        if (!row) return;
+        const id = row.getAttribute('data-template-id') || '';
+        try {
+          e.dataTransfer.setData('text/wa-template-id', id);
+          e.dataTransfer.effectAllowed = 'move';
+        } catch {}
+        row.style.opacity = '0.55';
+      });
+      metaTbody.addEventListener('dragend', (e) => {
+        const row = e.target.closest('.wa-meta-row[data-template-id]');
+        if (row) row.style.opacity = '';
+        metaTbody.querySelectorAll('.wa-folder-row.drop-target')
+          .forEach((el) => el.classList.remove('drop-target'));
+      });
+      metaTbody.addEventListener('dragover', (e) => {
+        const target = e.target.closest('.wa-folder-row');
+        if (!target) return;
+        e.preventDefault();
+        try { e.dataTransfer.dropEffect = 'move'; } catch {}
+        target.classList.add('drop-target');
+        target.style.background = 'rgba(99,102,241,0.18)';
+      });
+      metaTbody.addEventListener('dragleave', (e) => {
+        const target = e.target.closest('.wa-folder-row');
+        if (!target) return;
+        target.classList.remove('drop-target');
+        // Reset alleen als we echt uit de rij bewegen (relatedTarget buiten rij).
+        if (!target.contains(e.relatedTarget)) {
+          target.style.background = target.classList.contains('wa-folder-ungrouped')
+            ? 'rgba(100,116,139,0.06)'
+            : 'rgba(99,102,241,0.06)';
+        }
+      });
+      metaTbody.addEventListener('drop', async (e) => {
+        const target = e.target.closest('.wa-folder-row');
+        if (!target) return;
+        e.preventDefault();
+        target.classList.remove('drop-target');
+        let templateId = '';
+        try { templateId = e.dataTransfer.getData('text/wa-template-id') || ''; } catch {}
+        if (!templateId) return;
+        const folderIdRaw = target.getAttribute('data-folder-id');
+        const folderId = folderIdRaw ? folderIdRaw : null;
+        await moveTemplateToFolder(templateId, folderId);
       });
     }
+    const metaNewFolderBtn = host.querySelector('#waMetaNewFolderBtn');
+    if (metaNewFolderBtn) metaNewFolderBtn.addEventListener('click', () => doWaFolderCreate());
     const metaSyncBtn = host.querySelector('#waMetaSyncBtn');
     if (metaSyncBtn) metaSyncBtn.addEventListener('click', () => doWaMetaSync());
     const qrTbody = host.querySelector('#waQrTbody');
