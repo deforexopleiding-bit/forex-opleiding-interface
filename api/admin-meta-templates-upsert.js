@@ -27,6 +27,7 @@
 // Response 200: { item: row }
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
+import { deriveBodyMappingFromText, hasPositionalPlaceholders } from './_lib/meta-template-mapping.js';
 
 const NAME_RX     = /^[a-z0-9_]+$/;
 const E164_RX     = /^\+[1-9]\d{1,14}$/;
@@ -158,7 +159,7 @@ async function logAudit({ action, payload, status = 'success', error_message = n
   }
 }
 
-const SELECT_COLS = 'id, business_account_id, meta_template_id, name, language, category, header_type, header_content, body_text, body_examples, footer_text, buttons, status, rejection_reason, submitted_at, approved_at, last_synced_at, created_at, updated_at';
+const SELECT_COLS = 'id, business_account_id, meta_template_id, name, language, category, header_type, header_content, body_text, body_examples, footer_text, buttons, meta_param_mapping, status, rejection_reason, submitted_at, approved_at, last_synced_at, created_at, updated_at';
 
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
@@ -226,6 +227,23 @@ export default async function handler(req, res) {
       const errBtn = validateButtons(buttons);
       if (errBtn) return res.status(400).json({ error: errBtn });
 
+      const bodyTextTrim = String(body.body_text).trim();
+
+      // AUTO-MAPPING: voor PURE named body_text genereer mapping automatisch zodat
+      // events-send + admin-meta-templates-submit direct correct werken (#132000-fix).
+      // Expliciet meegestuurde mapping in body wint altijd.
+      let metaParamMapping = body.meta_param_mapping || null;
+      if (!metaParamMapping) {
+        const derived = deriveBodyMappingFromText(bodyTextTrim);
+        if (derived) {
+          metaParamMapping = derived;
+        } else if (hasPositionalPlaceholders(bodyTextTrim)) {
+          console.warn('[admin-meta-templates-upsert] template', body.name,
+            'gebruikt positionele {{N}} placeholders maar krijgt mapping=null',
+            '— Meta zal weigeren bij submit (error #132000). Tip: gebruik named placeholders via de variabele-chips.');
+        }
+      }
+
       const payload = {
         business_account_id: String(body.business_account_id).trim(),
         name:                String(body.name).trim(),
@@ -233,10 +251,11 @@ export default async function handler(req, res) {
         category,
         header_type:         headerType,
         header_content:      headerContent,
-        body_text:           String(body.body_text).trim(),
+        body_text:           bodyTextTrim,
         body_examples:       bodyExamples,
         footer_text:         footerText,
         buttons,
+        meta_param_mapping:  metaParamMapping,
         status:              'LOCAL',
       };
 
@@ -321,6 +340,26 @@ export default async function handler(req, res) {
       const errBt = validateBodyText(body.body_text);
       if (errBt) return res.status(400).json({ error: errBt });
       updates.body_text = String(body.body_text).trim();
+      // AUTO-MAPPING: regenerate mapping zodra de body verandert, tenzij de caller
+      // expliciet een eigen meta_param_mapping meestuurt (die wordt verderop verwerkt).
+      if (body.meta_param_mapping === undefined) {
+        const derived = deriveBodyMappingFromText(updates.body_text);
+        if (derived) {
+          updates.meta_param_mapping = derived;
+        } else if (hasPositionalPlaceholders(updates.body_text)) {
+          console.warn('[admin-meta-templates-upsert] PATCH template', id,
+            'gebruikt positionele {{N}} placeholders — mapping NIET overschreven, behoud bestaande.',
+            'Meta weigert bij submit (error #132000) als mapping=null is.');
+        } else {
+          // Pure tekst zonder placeholders → mapping niet langer relevant; expliciet
+          // null zetten zodat een legacy-mapping niet rond blijft hangen.
+          updates.meta_param_mapping = null;
+        }
+      }
+    }
+    if (body.meta_param_mapping !== undefined) {
+      // Expliciet meegegeven mapping wint altijd (manual override / restore-flow).
+      updates.meta_param_mapping = body.meta_param_mapping || null;
     }
     if (body.body_examples !== undefined) {
       const errBe = validateBodyExamples(body.body_examples);

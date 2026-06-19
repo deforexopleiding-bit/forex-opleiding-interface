@@ -1467,6 +1467,11 @@
                   <div style="font-size:11px;color:var(--text-faint);margin-top:4px">
                     <span id="waMetaBodyCount">0</span> / 1024 &middot; klik op een chip hieronder om een variabele in te voegen op de cursor, of typ direct <code>{{klant.naam}}</code> (named) of <code>{{1}}</code> (positioneel, legacy).
                   </div>
+                  <!-- Auto-mapping live-warning: getoond als body positional placeholders bevat
+                       zonder dat er een mapping is — Meta weigert die bij submit (#132000). -->
+                  <div id="waMetaBodyMappingWarn" style="display:none;margin-top:6px;padding:8px 10px;border-radius:6px;background:rgba(245,158,11,0.12);border:1px solid rgba(245,158,11,0.35);font-size:12px;color:#92400e">
+                    <strong>Let op:</strong> deze template gebruikt positionele plaatshouders <code>{{1}}</code>, <code>{{2}}</code>… die geen auto-mapping krijgen. Meta weigert de template bij submit (error #132000). Vervang ze door named variabelen via de chips hieronder, of stel <code>meta_param_mapping</code> handmatig in.
+                  </div>
 
                   <!-- C4: Variabelen-paneel (named-style insert) -->
                   <div id="waMetaVarsPanel" style="margin-top:10px">
@@ -2606,9 +2611,28 @@
       }
     }
   }
+  function renderWaMetaBodyMappingWarn() {
+    const bodyEl = document.getElementById('waMetaBodyText');
+    const warnEl = document.getElementById('waMetaBodyMappingWarn');
+    if (!bodyEl || !warnEl) return;
+    const body = bodyEl.value || '';
+    const named      = parseTemplateNamedVariables(body);
+    const positional = parseTemplateVariables(body);
+    // Warning alleen als er positionele placeholders zijn die niet auto-mapbaar
+    // zijn (mengsel met named is óók problematisch). Pure named krijgt mapping
+    // automatisch via upsert — dus geen warn nodig.
+    warnEl.style.display = (positional.length > 0) ? '' : 'none';
+    if (positional.length > 0 && named.length > 0) {
+      warnEl.innerHTML = '<strong>Let op:</strong> deze body mengt named en positionele plaatshouders. Dat is ambigu voor auto-mapping; upsert laat <code>meta_param_mapping</code> ongemoeid. Splits in puur named of puur positioneel + handmatige mapping.';
+    } else if (positional.length > 0) {
+      warnEl.innerHTML = '<strong>Let op:</strong> deze template gebruikt positionele plaatshouders <code>{{1}}</code>, <code>{{2}}</code>&hellip; die geen auto-mapping krijgen. Meta weigert de template bij submit (error #132000). Vervang ze door named variabelen via de chips hieronder, of stel <code>meta_param_mapping</code> handmatig in.';
+    }
+  }
+
   const _waTplPreviewDebounced = _waTplDebounce(computeWaMetaPreview, 100);
   const _waTplVarsAndPreviewDebounced = _waTplDebounce(() => {
     renderWaMetaVarsBlock();
+    renderWaMetaBodyMappingWarn();
     computeWaMetaPreview();
   }, 200);
 
