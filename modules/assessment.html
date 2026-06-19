@@ -379,12 +379,23 @@
       <h3 id="picker-title">Kies een datum</h3>
       <p class="subtitle" id="picker-subtitle">Beschikbare datums voor jouw niveau:</p>
       <div id="picker-loading" class="loading" hidden>Datums laden...</div>
-      <div id="picker-empty"   class="empty"   hidden>Er zijn momenteel geen open datums voor jouw niveau. We nemen binnenkort contact met je op.</div>
       <div id="event-list"     class="event-list"></div>
+      <!-- Conditioneel: getoond als attendee al een huidige event-keuze heeft (choice-token flow). -->
+      <div id="pickerKeepCurrent" class="picker-keep-current" hidden style="margin-top:14px;padding:14px;border:1px solid var(--accent,#cbd5e1);border-radius:10px;background:rgba(99,102,241,0.05);text-align:center">
+        <p style="margin:0 0 10px;font-size:14px;line-height:1.45">Of blijf bij je huidige keuze: <strong id="pickerKeepCurrentTitle"></strong> op <strong id="pickerKeepCurrentDate"></strong></p>
+        <button type="button" id="pickerKeepCurrentBtn" class="btn-ghost" style="padding:8px 14px;border:1px solid var(--accent,#6366f1);background:#fff;color:var(--accent,#6366f1);border-radius:8px;font-weight:600;cursor:pointer">Blijf bij m'n keuze</button>
+      </div>
+      <div id="picker-empty"   class="empty"   hidden>Er zijn momenteel geen open datums voor jouw niveau. We nemen binnenkort contact met je op.</div>
       <div id="picker-errors"  class="errors" hidden>
         <strong>Inschrijven mislukt:</strong>
         <span id="picker-errors-msg"></span>
       </div>
+    </div>
+
+    <div id="keep-current-result" class="result tier-high" hidden>
+      <span class="badge">Inschrijving bevestigd</span>
+      <h2 id="keep-current-title">Je blijft bij je huidige keuze</h2>
+      <p id="keep-current-copy"></p>
     </div>
 
     <div id="confirm" class="result tier-high" hidden>
@@ -778,6 +789,9 @@
         $pickerEmpty.hidden = true;
         $pickerLoad.hidden = false;
         $eventList.innerHTML = '';
+        // "Blijf bij m'n keuze"-blok: alleen tonen bij choice-token flow zodra
+        // event-choice-get het huidige event teruggeeft (current_event_id != null).
+        await maybeShowKeepCurrent();
         $pickerSub.textContent = niveau === 'gevorderd'
           ? 'Beschikbare datums voor de gevorderd-track:'
           : 'Beschikbare datums voor de basis-track:';
@@ -836,6 +850,54 @@
         $pickerErr.hidden = false;
         $pickerErrM.textContent = ' ' + (msg || 'Onbekende fout.');
       }
+
+      // "Blijf bij m'n keuze"-knop in de picker. Vraagt /api/event-choice-get
+      // (alleen bij choice-token flow) en toont het blok als er een huidige
+      // event-koppeling is. Soft-fail: bij elke fout blijft het blok verborgen
+      // en gaat de normale picker gewoon door.
+      const $pickerKeep    = document.getElementById('pickerKeepCurrent');
+      const $pickerKeepT   = document.getElementById('pickerKeepCurrentTitle');
+      const $pickerKeepD   = document.getElementById('pickerKeepCurrentDate');
+      const $pickerKeepBtn = document.getElementById('pickerKeepCurrentBtn');
+      const $keepResult    = document.getElementById('keep-current-result');
+      const $keepCopy      = document.getElementById('keep-current-copy');
+      let _keepCurrentData = null;
+
+      async function maybeShowKeepCurrent() {
+        if (!$pickerKeep) return;
+        $pickerKeep.hidden = true;
+        if (!choiceToken) return;
+        try {
+          const r = await fetch('/api/event-choice-get?t=' + encodeURIComponent(choiceToken), {
+            headers: { Accept: 'application/json' },
+          });
+          if (!r.ok) return;
+          const j = await r.json().catch(() => null);
+          const a = j && j.attendee;
+          if (!a || !a.current_event_id || !a.current_event_title || !a.current_event_starts_at) return;
+          _keepCurrentData = {
+            event_id  : a.current_event_id,
+            title     : a.current_event_title,
+            starts_at : a.current_event_starts_at,
+          };
+          $pickerKeepT.textContent = a.current_event_title;
+          $pickerKeepD.textContent = formatDateLabel(a.current_event_starts_at);
+          $pickerKeep.hidden = false;
+        } catch (e) {
+          console.error('[maybeShowKeepCurrent]', e);
+        }
+      }
+
+      function keepCurrentEvent() {
+        if (!_keepCurrentData) return;
+        $picker.hidden = true;
+        if ($pickerKeep) $pickerKeep.hidden = true;
+        if ($keepResult && $keepCopy) {
+          $keepCopy.textContent = `Top, je blijft op ${_keepCurrentData.title} op ${formatDateLabel(_keepCurrentData.starts_at)}. We zien je daar — tot snel!`;
+          $keepResult.hidden = false;
+        }
+      }
+      if ($pickerKeepBtn) $pickerKeepBtn.addEventListener('click', keepCurrentEvent);
 
       async function registerForEvent(eventId, cardEl) {
         if (!assessmentId || !eventId) return;

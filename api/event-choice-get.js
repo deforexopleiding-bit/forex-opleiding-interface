@@ -26,10 +26,14 @@
 // Response 200:
 //   {
 //     attendee: {
-//       first_name      : string|null,
-//       current_event_id: uuid|null,        // event waar attendee NU staat
-//       has_assessment  : boolean,          // assessment_response_id != null
-//       niveau          : 'basis'|'gevorderd'|null,
+//       first_name             : string|null,
+//       current_event_id       : uuid|null,        // event waar attendee NU staat
+//       current_event_title    : string|null,
+//       current_event_starts_at: timestamp|null,
+//       current_event_location : string|null,
+//       current_event_niveau   : 'basis'|'gevorderd'|null,
+//       has_assessment         : boolean,          // assessment_response_id != null
+//       niveau                 : 'basis'|'gevorderd'|null,
 //     },
 //     events: [
 //       { id, title, starts_at, ends_at, location, niveau, has_space }
@@ -99,9 +103,11 @@ export default async function handler(req, res) {
 
   try {
     // 3) Token → attendee. GEEN email/telefoon/last_name selecteren.
+    // Joinen op events zodat de "blijf bij m'n keuze"-knop in de assessment-
+    // picker een concrete titel + datum + locatie kan tonen zonder extra call.
     const { data: attendee, error: attErr } = await supabaseAdmin
       .from('event_attendees')
-      .select('id, first_name, event_id, assessment_response_id')
+      .select('id, first_name, event_id, assessment_response_id, events:event_id ( title, starts_at, location, niveau )')
       .eq('choice_token', token)
       .maybeSingle();
     if (attErr) {
@@ -155,10 +161,14 @@ export default async function handler(req, res) {
     // email/telefoon/last_name. Token NIET teruggeven (caller heeft 'm al).
     return res.status(200).json({
       attendee: {
-        first_name      : attendee.first_name || null,
-        current_event_id: attendee.event_id || null,
-        has_assessment  : !!attendee.assessment_response_id,
-        niveau          : niveau,
+        first_name             : attendee.first_name || null,
+        current_event_id       : attendee.event_id || null,
+        current_event_title    : attendee.events?.title     || null,
+        current_event_starts_at: attendee.events?.starts_at || null,
+        current_event_location : attendee.events?.location  || null,
+        current_event_niveau   : attendee.events?.niveau    || null,
+        has_assessment         : !!attendee.assessment_response_id,
+        niveau                 : niveau,
       },
       events: events.map((e) => ({
         id        : e.id,
