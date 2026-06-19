@@ -209,7 +209,12 @@ export default async function handler(req, res) {
         // alleen als ze nu leeg/null zijn (bestaande namen NIET overschrijven
         // — operator-edits respecteren).
         for (const att of existing) {
-          const patch = { assessment_response_id: row.id };
+          // assessment_linked_at is critical voor on_assessment_completed-triggers
+          // (events-automation-engine r229 filtert hierop bij newOnly).
+          const patch = {
+            assessment_response_id: row.id,
+            assessment_linked_at: new Date().toISOString(),
+          };
           const fnEmpty = !(att.first_name && String(att.first_name).trim());
           const lnEmpty = !(att.last_name  && String(att.last_name).trim());
           if (fnEmpty && firstName) patch.first_name = firstName;
