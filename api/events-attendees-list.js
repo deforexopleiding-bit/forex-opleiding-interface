@@ -32,7 +32,7 @@ import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const VALID_STATUS = ['aangemeld', 'aanwezig', 'no_show', 'sale', 'switched_to_other_event'];
+const VALID_STATUS = ['aangemeld', 'aanwezig', 'no_show', 'sale', 'switched_to_other_event', 'geannuleerd'];
 
 function clampInt(v, def, min, max) {
   const n = Number(v);
@@ -203,7 +203,7 @@ export default async function handler(req, res) {
     }));
 
     // byStatus counts (zonder paginatie, zonder status-filter, met search).
-    const byStatus = { aangemeld: 0, aanwezig: 0, no_show: 0, sale: 0, switched_to_other_event: 0 };
+    const byStatus = { aangemeld: 0, aanwezig: 0, no_show: 0, sale: 0, switched_to_other_event: 0, geannuleerd: 0 };
     try {
       await Promise.all(VALID_STATUS.map(async (s) => {
         let cq = supabaseAdmin

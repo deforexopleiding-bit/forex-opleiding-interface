@@ -14,7 +14,7 @@ const WAIT_UNITS = ['minutes', 'hours', 'days'];
 // date_chosen SKIPPED — geen DB-veld of bestaande logica; TODO bij design fase 4b.
 const COND_CHECKS = ['assessment_completed', 'assessment_not_completed', 'still_registered', 'niveau_is_basis', 'niveau_is_gevorderd'];
 const COND_FAIL = ['exit', 'skip_to_end'];
-const ATTENDEE_STATUSES = ['aangemeld', 'aanwezig', 'no_show', 'sale', 'switched_to_other_event'];
+const ATTENDEE_STATUSES = ['aangemeld', 'aanwezig', 'no_show', 'sale', 'switched_to_other_event', 'geannuleerd'];
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export function validateSteps(steps) {
