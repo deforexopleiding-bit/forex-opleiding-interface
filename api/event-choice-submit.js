@@ -349,6 +349,7 @@ export default async function handler(req, res) {
           email                 : attendee.email,
           status                : 'aangemeld',
           created_via           : 'choice',
+          source                : 'webflow',
           assessment_response_id: effectiveAssessmentId || null,
           assessment_linked_at  : effectiveAssessmentId ? new Date().toISOString() : null,
           switched_from_event_id: attendee.event_id,

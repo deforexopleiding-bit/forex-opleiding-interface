@@ -917,13 +917,27 @@ function renderAttendeesTab() {
           taalBadge = '<span title="Deelnemer gaf aan: andere taal dan Nederlands" style="display:inline-flex;align-items:center;padding:2px 7px;border-radius:10px;font-size:10.5px;font-weight:700;background:rgba(220,38,38,0.15);color:#b91c1c;border:1px solid rgba(220,38,38,0.3);margin-left:6px">Niet-NL</span>';
         }
 
+        // SOURCE-badge: kanaal waarvia attendee is binnengekomen.
+        // NULL (pre-migration data) → geen badge.
+        const SOURCE_STYLES = {
+          webflow         : { label: 'Webflow',   bg: 'rgba(34,197,94,0.16)',  fg: '#15803d', border: 'rgba(34,197,94,0.32)',  title: 'Aangemaakt via publieke Webflow-flow (assessment / event-keuze)' },
+          ghl             : { label: 'GHL',       bg: 'rgba(20,115,214,0.16)', fg: '#1160bd', border: 'rgba(20,115,214,0.32)', title: 'Aangemaakt via GHL inbound-webhook' },
+          manual          : { label: 'Handmatig', bg: 'rgba(100,116,139,0.18)', fg: '#475569', border: 'rgba(100,116,139,0.3)', title: 'Handmatig toegevoegd door een admin' },
+          automation_test : { label: 'Test',      bg: 'rgba(245,158,11,0.18)', fg: '#b45309', border: 'rgba(245,158,11,0.3)',  title: 'Synthetische attendee uit automation-tester' },
+        };
+        let sourceBadge = '';
+        const srcStyle = a.source ? SOURCE_STYLES[a.source] : null;
+        if (srcStyle) {
+          sourceBadge = `<span title="${esc(srcStyle.title)}" style="display:inline-flex;align-items:center;padding:2px 7px;border-radius:10px;font-size:10.5px;font-weight:700;background:${srcStyle.bg};color:${srcStyle.fg};border:1px solid ${srcStyle.border};margin-left:6px">${esc(srcStyle.label)}</span>`;
+        }
+
         return `
           <tr>
             <td>
               <button class="att-name-btn" data-id="${esc(a.id)}" type="button" title="Toon verzonden en geplande communicatie" style="background:transparent;border:none;padding:0;cursor:pointer;color:inherit;font:inherit;display:inline-flex;align-items:center;gap:5px">
                 <i class="ti ti-chevron-right att-name-caret" id="att-caret-${esc(a.id)}" style="color:var(--text-faint);font-size:14px;transition:transform .15s"></i>
                 <strong>${esc(fullName)}</strong>
-              </button>${taalBadge}
+              </button>${sourceBadge}${taalBadge}
             </td>
             <td>${esc(a.email || '—')}</td>
             <td>${esc(a.phone || '—')}</td>

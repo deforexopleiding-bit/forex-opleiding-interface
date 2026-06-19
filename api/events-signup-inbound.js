@@ -128,6 +128,7 @@ async function createAttendee({ event, payload, followUpReason = null, ghlContac
     phone                 : payload.phone,
     status                : 'aangemeld',
     created_via           : 'ghl_inbound',
+    source                : 'ghl',
     ghl_contact_id        : ghlContactId,
     ghl_form_submission_id: ghlFormSubmissionId,
     assessment_response_id: null,
