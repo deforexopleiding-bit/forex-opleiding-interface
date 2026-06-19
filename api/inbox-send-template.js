@@ -152,12 +152,20 @@ export default async function handler(req, res) {
     // Conversation ophalen — voor phone_number + outbound-lijn keuze
     const { data: conv, error: convErr } = await supabaseAdmin
       .from('whatsapp_conversations')
-      .select('id, phone_number, phone_number_id, customer_id, last_message_preview')
+      .select('id, phone_number, phone_number_id, customer_id, attendee_id, last_message_preview')
       .eq('id', convId)
       .maybeSingle();
     if (convErr) throw new Error('conversation lookup: ' + convErr.message);
     if (!conv) return res.status(404).json({ error: 'Conversation niet gevonden' });
     if (!conv.phone_number) return res.status(400).json({ error: 'Conversation heeft geen phone_number' });
+
+    // Persistente attendee-koppeling vult de context als er geen expliciete
+    // context_event_attendee_id is meegegeven. Expliciete waarde uit body
+    // wint altijd (operator-override).
+    let effectiveAttendeeId = contextEventAttendeeId;
+    if (!effectiveAttendeeId && conv.attendee_id) {
+      effectiveAttendeeId = conv.attendee_id;
+    }
 
     // Module-config fallback voor afzendlijn — gelijk aan inbox-send.js
     let financePnId = null;
@@ -366,7 +374,7 @@ export default async function handler(req, res) {
       let attendee = null;
       let event    = null;
       if (needsAttendee || needsEvent) {
-        if (!contextEventAttendeeId) {
+        if (!effectiveAttendeeId) {
           return res.status(400).json({
             error: 'Deze template gebruikt aanwezige- of event-variabelen. Selecteer eerst een aanwezige (context_event_attendee_id ontbreekt).',
             code : 'EVENT_ATTENDEE_REQUIRED',
@@ -376,7 +384,7 @@ export default async function handler(req, res) {
           const { data: att, error: attErr } = await supabaseAdmin
             .from('event_attendees')
             .select('id, event_id, first_name, last_name, email, phone, choice_token, customer_id')
-            .eq('id', contextEventAttendeeId)
+            .eq('id', effectiveAttendeeId)
             .maybeSingle();
           if (attErr) console.error('[inbox-send-template] attendee lookup:', attErr.message);
           else attendee = att || null;
@@ -593,7 +601,7 @@ export default async function handler(req, res) {
           meta_wamid:         wamid,
           resolve_mode:       resolveMode,
           context_invoice_id: contextInvoiceId || null,
-          context_event_attendee_id: contextEventAttendeeId || null,
+          context_event_attendee_id: effectiveAttendeeId || null,
           resolve_warnings:   resolveWarnings.length ? resolveWarnings : null,
         },
         ip_address: getClientIp(req),
