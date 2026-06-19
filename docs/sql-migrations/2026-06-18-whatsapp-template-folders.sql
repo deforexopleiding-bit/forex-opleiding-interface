@@ -1,8 +1,7 @@
 -- Migration: WhatsApp Meta-template folders (UI-grouping only — geen Meta-impact).
--- - whatsapp_template_folders: 1 rij per map per WABA.
--- - whatsapp_meta_templates.folder_id: optionele FK; ON DELETE SET NULL.
---
--- Strategie: idempotent (CREATE IF NOT EXISTS / ADD COLUMN IF NOT EXISTS).
+-- N.B. UNIQUE case-insensitive op (business_account_id, name) → aparte
+-- CREATE UNIQUE INDEX want PostgreSQL accepteert geen expressies in inline
+-- UNIQUE-constraints.
 
 BEGIN;
 
@@ -13,9 +12,11 @@ CREATE TABLE IF NOT EXISTS public.whatsapp_template_folders (
   sort_order           integer NOT NULL DEFAULT 0,
   created_by_user_id   uuid REFERENCES auth.users(id) ON DELETE SET NULL,
   created_at           timestamptz NOT NULL DEFAULT now(),
-  updated_at           timestamptz NOT NULL DEFAULT now(),
-  UNIQUE (business_account_id, lower(name))
+  updated_at           timestamptz NOT NULL DEFAULT now()
 );
+
+CREATE UNIQUE INDEX IF NOT EXISTS uniq_wa_template_folders_waba_lname
+  ON public.whatsapp_template_folders (business_account_id, lower(name));
 
 CREATE INDEX IF NOT EXISTS idx_wa_template_folders_waba
   ON public.whatsapp_template_folders (business_account_id, sort_order);
