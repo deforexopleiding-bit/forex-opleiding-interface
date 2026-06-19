@@ -212,6 +212,12 @@ async function loadCandidatesForAutomation(auto, now) {
   let q = supabaseAdmin
     .from('event_attendees')
     .select('id, event_id, registered_at, assessment_response_id, assessment_linked_at, status')
+    // Opt-in herontwerp: attendees met automation_enabled=false zijn stil
+    // toegevoegd door admin en mogen geen automation-flow krijgen. Filter
+    // hier zodat ALLE trigger-types (on_signup / time_before_event /
+    // on_assessment_completed / on_assessment_not_completed_after) consistent
+    // overslaan.
+    .eq('automation_enabled', true)
     .limit(500);
   if (allowedEventIds != null) q = q.in('event_id', allowedEventIds);
 

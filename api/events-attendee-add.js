@@ -11,10 +11,12 @@
 //     email:      string  (optioneel; uniek per event als opgegeven),
 //     phone:      string  (optioneel),
 //     status:     string  (optioneel, default 'aangemeld'),
-//     send_invite: bool   (optioneel, default false) — als true, na succesvolle
-//                  insert wordt de keuze-link (WhatsApp + e-mail) gestuurd.
-//                  Niet-blokkerend: faalt de invite, dan blijft de aanmelding
-//                  staan en wordt de invite-status in de response gerapporteerd.
+//     send_invite: bool   (optioneel, default false) — bepaalt automation_enabled
+//                  op de nieuwe rij. true → attendee wordt door automations
+//                  opgepakt (bv. on_signup stuurt zelf bevestiging+vragenlijst
+//                  bij eerstvolgende cron-tick). false → STILLE handmatige
+//                  toevoeging, uitgesloten van ALLE automations. Geen one-shot
+//                  invite meer (oude dubbele-communicatie-bug).
 //   }
 //
 // Capacity-check: bij status in (aangemeld|aanwezig|sale) wordt eerst
@@ -25,11 +27,15 @@
 //
 // Audit-log: event_attendee_audit_log entry met action='created'.
 //
-// Response 201: { attendee: { ...row }, invite?: { ok, mail?, whatsapp?, error? } }
+// Response 201: { attendee: { ...row }, invite: null }
+//   `invite` blijft in de shape voor backwards-compat met oude UI's, maar is
+//   altijd null (one-shot path verwijderd).
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
-import { sendEventAttendeeInvite } from './_lib/events-invite.js';
+// Sinds opt-in herontwerp: 'send_invite' triggert nu automation_enabled i.p.v.
+// een one-shot invite. De sendEventAttendeeInvite-helper is dus niet meer nodig
+// hier (blijft beschikbaar voor andere callers zoals de move-flow).
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const VALID_STATUS = ['aangemeld', 'aanwezig', 'no_show', 'sale', 'switched_to_other_event'];
@@ -146,6 +152,12 @@ export default async function handler(req, res) {
       phone:              phone,
       status,
       source:             'manual',
+      // send_invite (true/false) bepaalt of de attendee door automations wordt
+      // opgepakt. true → automation_enabled=true (default; bv. on_signup pakt
+      // 'm op bij de eerstvolgende tick en stuurt bevestiging/vragenlijst).
+      // false → automation_enabled=false → STILLE handmatige toevoeging,
+      // geen mail/WA. Zelfde endpoint blijft één call voor de UI.
+      automation_enabled: sendInvite,
       created_by_user_id: user?.id || null,
       // Timestamp-stempels op create voor statussen die al doorlopen zijn.
       attended_at:        status === 'aanwezig' ? nowIso : null,
@@ -201,21 +213,15 @@ export default async function handler(req, res) {
       console.error('[events-attendee-add audit]', e.message);
     }
 
-    // Optionele invite-flow (niet-blokkerend; mislukken laat aanmelding staan).
-    let invite = null;
-    if (sendInvite) {
-      try {
-        invite = await sendEventAttendeeInvite({
-          attendeeId:   row.id,
-          sentByUserId: user?.id || null,
-        });
-      } catch (e) {
-        console.error('[events-attendee-add invite]', e?.message || e);
-        invite = { ok: false, error: e?.message || 'invite send failed' };
-      }
-    }
-
-    return res.status(201).json({ attendee: row, invite });
+    // GEEN one-shot invite meer vanuit deze endpoint. send_invite=true zet
+    // automation_enabled=true (zie INSERT hierboven) — de on_signup-automation
+    // pikt de attendee bij de eerstvolgende cron-tick op en stuurt zelf de
+    // bevestiging/vragenlijst. Voorkomt de oude dubbele communicatie
+    // (one-shot + automation). send_invite=false → automation_enabled=false
+    // → stille handmatige toevoeging, zonder berichten.
+    // 'invite' blijft in de response voor backwards-compat met UI's die het
+    // veld nog uitlezen, maar is altijd null.
+    return res.status(201).json({ attendee: row, invite: null });
   } catch (e) {
     console.error('[events-attendee-add]', e.message);
     return res.status(500).json({ error: e.message });

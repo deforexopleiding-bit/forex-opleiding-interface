@@ -75,7 +75,7 @@ export default async function handler(req, res) {
       .from('event_attendees')
       .select(`
         id, event_id, first_name, last_name, email, phone, status,
-        customer_id, deal_id, assessment_response_id, source
+        customer_id, deal_id, assessment_response_id, source, automation_enabled
       `)
       .eq('id', attendeeId)
       .maybeSingle();
@@ -138,6 +138,9 @@ export default async function handler(req, res) {
       // herkomst niet verloren gaat. Fallback 'manual' want de move-actie
       // zelf gebeurt via admin-UI.
       source:                  source.source || 'manual',
+      // Behoud automation-opt-in van de bron-rij. Stilte attendees blijven
+      // stil; opt-in attendees krijgen op het nieuwe event hun automation-flow.
+      automation_enabled:      source.automation_enabled !== false,
       created_by_user_id:      user?.id || null,
     };
 
