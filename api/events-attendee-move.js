@@ -75,7 +75,7 @@ export default async function handler(req, res) {
       .from('event_attendees')
       .select(`
         id, event_id, first_name, last_name, email, phone, status,
-        customer_id, deal_id, assessment_response_id
+        customer_id, deal_id, assessment_response_id, source
       `)
       .eq('id', attendeeId)
       .maybeSingle();
@@ -134,6 +134,10 @@ export default async function handler(req, res) {
       assessment_response_id:  source.assessment_response_id,
       switched_from_event_id:  source.event_id,
       switched_at:             nowIso,
+      // Behoud het oorspronkelijke kanaal bij een move zodat de attendee-
+      // herkomst niet verloren gaat. Fallback 'manual' want de move-actie
+      // zelf gebeurt via admin-UI.
+      source:                  source.source || 'manual',
       created_by_user_id:      user?.id || null,
     };
 

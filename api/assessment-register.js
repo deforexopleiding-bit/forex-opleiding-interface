@@ -152,6 +152,7 @@ export default async function handler(req, res) {
         email                 : assessment.email,
         status                : 'aangemeld',
         created_via           : 'assessment',
+        source                : 'webflow',
         registered_at         : new Date().toISOString(),
         assessment_linked_at  : new Date().toISOString(),
       })

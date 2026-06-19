@@ -119,6 +119,7 @@ export default async function handler(req, res) {
         phone,
         status:             'aangemeld',
         is_test:            true,
+        source:             'automation_test',
         registered_at:      nowIso,
         created_by_user_id: user.id,
       })

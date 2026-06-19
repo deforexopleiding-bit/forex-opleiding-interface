@@ -145,6 +145,7 @@ export default async function handler(req, res) {
       email:              email,
       phone:              phone,
       status,
+      source:             'manual',
       created_by_user_id: user?.id || null,
       // Timestamp-stempels op create voor statussen die al doorlopen zijn.
       attended_at:        status === 'aanwezig' ? nowIso : null,
