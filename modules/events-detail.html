@@ -1508,22 +1508,31 @@ function _renderAttComms(host, data) {
     if (Number.isNaN(d.getTime())) return iso;
     return d.toLocaleString('nl-NL', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
   };
+  // Per-status styling — 'verzonden' = success groen, 'mislukt' = rood + reason-
+  // tooltip uit failure_reason, 'wacht' = amber (queued bij Meta), default
+  // (bv. 'gepland') = neutraal-grijs.
+  const STATUS_STYLE = {
+    verzonden: { bg: 'rgba(5,150,105,0.15)', fg: '#059669', border: 'rgba(5,150,105,0.25)', icon: 'ti-check',          opacity: '' },
+    mislukt:   { bg: 'rgba(220,38,38,0.15)', fg: '#b91c1c', border: 'rgba(220,38,38,0.3)',  icon: 'ti-alert-triangle', opacity: '' },
+    wacht:     { bg: 'rgba(245,158,11,0.18)',fg: '#b45309', border: 'rgba(245,158,11,0.3)', icon: 'ti-clock',          opacity: 'opacity:.85' },
+  };
+  const DEFAULT_STYLE = { bg: 'var(--bg-elev)', fg: 'var(--text-faint)', border: 'var(--border)', icon: 'ti-clock', opacity: 'opacity:.85' };
   const rows = items.map((it) => {
     const icon = it.channel === 'email' ? 'ti-mail' : 'ti-brand-whatsapp';
-    const isSent = it.status === 'verzonden';
-    const statusStyle = isSent
-      ? 'background:rgba(5,150,105,0.15);color:#059669;border:1px solid rgba(5,150,105,0.25)'
-      : 'background:var(--bg-elev);color:var(--text-faint);border:1px solid var(--border)';
-    const statusIcon = isSent ? 'ti-check' : 'ti-clock';
+    const st = STATUS_STYLE[it.status] || DEFAULT_STYLE;
+    const statusStyle = `background:${st.bg};color:${st.fg};border:1px solid ${st.border}`;
+    // Mislukt: tooltip met de Meta-error-message zodat operator kan zien
+    // waarom het faalde zonder logs te openen.
+    const rowTooltip = (it.status === 'mislukt' && it.reason) ? ` title="${esc(it.reason)}"` : '';
     return `
-      <div style="display:flex;align-items:center;gap:10px;padding:7px 10px;border:1px solid var(--border);border-radius:8px;background:var(--bg);${isSent ? '' : 'opacity:.85'}">
+      <div${rowTooltip} style="display:flex;align-items:center;gap:10px;padding:7px 10px;border:1px solid var(--border);border-radius:8px;background:var(--bg);${st.opacity}">
         <i class="ti ${icon}" style="font-size:16px;color:var(--text-faint);flex-shrink:0"></i>
         <div style="flex:1;min-width:0">
           <div style="font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(it.label || '—')}</div>
           <div style="font-size:11.5px;color:var(--text-faint);margin-top:1px">${esc(fmtAt(it.at))}</div>
         </div>
         <span style="display:inline-flex;align-items:center;gap:4px;padding:3px 9px;border-radius:99px;font-size:11px;font-weight:700;${statusStyle}">
-          <i class="ti ${statusIcon}"></i> ${esc(it.status)}
+          <i class="ti ${st.icon}"></i> ${esc(it.status)}
         </span>
       </div>
     `;
