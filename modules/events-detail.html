@@ -217,10 +217,13 @@
           <input type="tel" id="aafPhone" maxlength="40" autocomplete="off" />
         </div>
         <div class="form-field" style="margin-top:8px">
-          <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-weight:500">
-            <input type="checkbox" id="aafSendInvite" />
-            <span>Stuur bevestiging + vragenlijst (WhatsApp + e-mail)</span>
+          <label style="display:flex;align-items:flex-start;gap:8px;cursor:pointer;font-weight:500">
+            <input type="checkbox" id="aafSendInvite" style="margin-top:3px" />
+            <span>Voeg toe aan automation-flow (bevestiging, vragenlijst en eventuele reminders worden automatisch verstuurd)</span>
           </label>
+          <div style="font-size:11.5px;color:var(--text-faint);margin-top:4px;margin-left:24px">
+            Uitgevinkt = stille toevoeging zonder berichten. Je kunt later handmatig een uitnodiging sturen via de attendee-detailpagina.
+          </div>
         </div>
       </form>
       <div id="altSuggestionsWrap"></div>
@@ -931,13 +934,20 @@ function renderAttendeesTab() {
           sourceBadge = `<span title="${esc(srcStyle.title)}" style="display:inline-flex;align-items:center;padding:2px 7px;border-radius:10px;font-size:10.5px;font-weight:700;background:${srcStyle.bg};color:${srcStyle.fg};border:1px solid ${srcStyle.border};margin-left:6px">${esc(srcStyle.label)}</span>`;
         }
 
+        // Automation opt-in badge: tonen alleen als ie expliciet UIT staat.
+        // automation_enabled=true (default) of NULL (pre-migration) → geen badge.
+        let autoOffBadge = '';
+        if (a.automation_enabled === false) {
+          autoOffBadge = `<span title="Uitgesloten van automation-flow (geen automatische bevestiging/vragenlijst/reminders)" style="display:inline-flex;align-items:center;gap:3px;padding:2px 7px;border-radius:10px;font-size:10.5px;font-weight:700;background:rgba(100,116,139,0.18);color:#475569;border:1px solid rgba(100,116,139,0.3);margin-left:6px"><i class="ti ti-bell-off" style="font-size:11px"></i> Auto: uit</span>`;
+        }
+
         return `
           <tr>
             <td>
               <button class="att-name-btn" data-id="${esc(a.id)}" type="button" title="Toon verzonden en geplande communicatie" style="background:transparent;border:none;padding:0;cursor:pointer;color:inherit;font:inherit;display:inline-flex;align-items:center;gap:5px">
                 <i class="ti ti-chevron-right att-name-caret" id="att-caret-${esc(a.id)}" style="color:var(--text-faint);font-size:14px;transition:transform .15s"></i>
                 <strong>${esc(fullName)}</strong>
-              </button>${sourceBadge}${taalBadge}
+              </button>${sourceBadge}${autoOffBadge}${taalBadge}
             </td>
             <td>${esc(a.email || '—')}</td>
             <td>${esc(a.phone || '—')}</td>
