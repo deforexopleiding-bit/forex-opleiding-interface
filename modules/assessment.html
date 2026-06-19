@@ -594,13 +594,18 @@
         const emailRe = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
         for (const q of steps[idx].questions) {
           const need = !!q.required;
-          if (q.type === 'text' || q.type === 'email' || q.type === 'open_text') {
+          if (q.type === 'text' || q.type === 'email' || q.type === 'open_text' || q.type === 'tel') {
             const el = $form.querySelector(`[name="${CSS.escape(q.key)}"]`);
             const v = el && el.value ? el.value.trim() : '';
             if (need && !v) {
               errs.push({ key: q.key, message: `Vul "${q.label}" in.` });
             } else if (q.type === 'email' && v && !emailRe.test(v)) {
               errs.push({ key: q.key, message: 'Vul een geldig e-mailadres in.' });
+            } else if (q.type === 'tel' && v) {
+              // Minimaal acceptabel formaat: begint met + of cijfer, daarna
+              // alleen cijfers/spaties/streepjes/haakjes, totaal min. 7 chars.
+              const telRe = /^[+\d][\d\s\-()]{6,}$/;
+              if (!telRe.test(v)) errs.push({ key: q.key, message: 'Vul een geldig telefoonnummer in.' });
             } else if (q.type === 'open_text' && v) {
               const min = Number.isInteger(q.min_words) ? q.min_words : 0;
               const words = (v.match(/\S+/g) || []).length;
@@ -629,6 +634,9 @@
             break;
           case 'email':
             control = `<input type="email" name="${esc(q.key)}" autocomplete="email" />`;
+            break;
+          case 'tel':
+            control = `<input type="tel" name="${esc(q.key)}" autocomplete="tel" inputmode="tel" placeholder="+316..." />`;
             break;
           case 'radio': {
             const opts = Array.isArray(q.options) ? q.options : [];
@@ -676,7 +684,7 @@
       function collectAnswers() {
         const out = {};
         for (const q of questions) {
-          if (q.type === 'text' || q.type === 'email' || q.type === 'open_text') {
+          if (q.type === 'text' || q.type === 'email' || q.type === 'open_text' || q.type === 'tel') {
             const el = $form.querySelector(`[name="${CSS.escape(q.key)}"]`);
             if (el && el.value && el.value.trim() !== '') {
               out[q.key] = el.value.trim();
@@ -1047,6 +1055,9 @@
 
             if (q.type === 'email') {
               val = p.email;
+            } else if (q.type === 'tel') {
+              // Type='tel' is per definitie het telefoonnummer; geen key-check nodig.
+              val = p.phone;
             } else if (q.type === 'text') {
               if (PREFILL_FIRST_NAME_KEYS.has(keyLc))      val = p.first_name;
               else if (PREFILL_LAST_NAME_KEYS.has(keyLc))  val = p.last_name;

@@ -17,7 +17,7 @@
 //   section         text     required; max 64
 //   order_index     integer  >= 0 (default 0 bij create)
 //   page            integer  >= 1 (default 1 bij create); stap-/paginanummer voor multi-step
-//   type            enum     required bij POST; in ('text','email','radio',
+//   type            enum     required bij POST; in ('text','email','tel','radio',
 //                            'scale_1_5','scale_1_10','open_text')
 //   label           text     required; max 500
 //   help_text       text?    max 1000
@@ -41,7 +41,7 @@ import { getActiveQuestionnaire } from './_lib/assessment-questionnaires.js';
 
 const UUID_RE  = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const KEY_RE   = /^[a-z0-9_-]{1,64}$/;
-const TYPES    = new Set(['text', 'email', 'radio', 'scale_1_5', 'scale_1_10', 'open_text']);
+const TYPES    = new Set(['text', 'email', 'tel', 'radio', 'scale_1_5', 'scale_1_10', 'open_text']);
 
 const MAX_LABEL    = 500;
 const MAX_HELP     = 1000;
