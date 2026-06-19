@@ -409,13 +409,14 @@
 
 <script>
 // ── Constants ────────────────────────────────────────────────────────────────
-const ATT_STATUS_KEYS = ['aangemeld', 'aanwezig', 'no_show', 'sale', 'switched_to_other_event'];
+const ATT_STATUS_KEYS = ['aangemeld', 'aanwezig', 'no_show', 'sale', 'switched_to_other_event', 'geannuleerd'];
 const ATT_STATUS_LABELS = {
   aangemeld: 'Aangemeld',
   aanwezig: 'Aanwezig',
   no_show: 'No-show',
   sale: 'Sale',
   switched_to_other_event: 'Verplaatst',
+  geannuleerd: 'Geannuleerd',
 };
 const EV_STATUS_LABELS = {
   draft: 'Concept',
@@ -433,7 +434,7 @@ const state = {
   attendees: [],
   attendeeStatus: '',   // '' = alle
   attendeeSearch: '',
-  attendeeCounts: { aangemeld: 0, aanwezig: 0, no_show: 0, sale: 0, switched_to_other_event: 0 },
+  attendeeCounts: { aangemeld: 0, aanwezig: 0, no_show: 0, sale: 0, switched_to_other_event: 0, geannuleerd: 0 },
   mentors: [],
   audit: [],
   tagsCatalog: [],

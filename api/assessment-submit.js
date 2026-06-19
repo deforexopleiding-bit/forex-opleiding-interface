@@ -189,10 +189,17 @@ export default async function handler(req, res) {
     // niet mee) naar "Actief" (telt mee). Dit kan een event over de
     // getoonde capaciteit duwen — correct, want die persoon was al
     // reëel aangemeld.
+    //
+    // Routing 'incomplete' (bv. niet-NL spreker): naast het koppelen zetten
+    // we de status op 'geannuleerd' zodat ze NIET meer in de capaciteit
+    // tellen (CONFIRMED_STATUSES = ['aangemeld','aanwezig']). Status alleen
+    // overschrijven bij 'aangemeld' — operator-edits naar aanwezig/sale/etc
+    // blijven gerespecteerd.
+    const isIncomplete = scored.routing_result === 'incomplete';
     try {
       const { data: existing, error: lookupErr } = await supabaseAdmin
         .from('event_attendees')
-        .select('id, first_name, last_name')
+        .select('id, first_name, last_name, status')
         .ilike('email', email)
         .is('assessment_response_id', null);
       if (lookupErr) {
@@ -207,6 +214,11 @@ export default async function handler(req, res) {
           const lnEmpty = !(att.last_name  && String(att.last_name).trim());
           if (fnEmpty && firstName) patch.first_name = firstName;
           if (lnEmpty && lastName)  patch.last_name  = lastName;
+          // Annuleer alleen rijen die nog op 'aangemeld' staan — operator-
+          // edits (aanwezig / sale / no_show) blijven intact.
+          if (isIncomplete && att.status === 'aangemeld') {
+            patch.status = 'geannuleerd';
+          }
           const { error: updErr } = await supabaseAdmin
             .from('event_attendees')
             .update(patch)

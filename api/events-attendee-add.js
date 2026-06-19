@@ -38,7 +38,7 @@ import { requirePermission } from './_lib/requirePermission.js';
 // hier (blijft beschikbaar voor andere callers zoals de move-flow).
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const VALID_STATUS = ['aangemeld', 'aanwezig', 'no_show', 'sale', 'switched_to_other_event'];
+const VALID_STATUS = ['aangemeld', 'aanwezig', 'no_show', 'sale', 'switched_to_other_event', 'geannuleerd'];
 const ACTIVE_STATUSES = ['aangemeld', 'aanwezig', 'sale'];
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
