@@ -2132,6 +2132,12 @@
       actions = `
         <button class="action-btn" type="button" data-wa-meta-view="${id}"><i class="ti ti-eye"></i> Bekijken</button>
         <button class="action-btn" type="button" data-wa-meta-dupliceer="${id}"><i class="ti ti-copy"></i> Dupliceer</button>
+        <button class="action-btn" type="button" data-wa-meta-del="${id}" title="Verwijderen (ook bij Meta)" style="color:var(--red,#dc2626)"><i class="ti ti-trash"></i> Verwijderen</button>
+      `;
+    } else if (status === 'PAUSED' || status === 'DISABLED') {
+      actions = `
+        <button class="action-btn" type="button" data-wa-meta-view="${id}"><i class="ti ti-eye"></i> Bekijken</button>
+        <button class="action-btn" type="button" data-wa-meta-del="${id}" title="Verwijderen (ook bij Meta)" style="color:var(--red,#dc2626)"><i class="ti ti-trash"></i> Verwijderen</button>
       `;
     } else {
       actions = `<button class="action-btn" type="button" data-wa-meta-view="${id}"><i class="ti ti-eye"></i> Bekijken</button>`;
@@ -2986,14 +2992,22 @@
 
   async function deleteWaMetaTemplate(item) {
     if (!item) return;
-    if (!confirm(`Template '${item.name}' verwijderen?`)) return;
+    const status = item.status || 'LOCAL';
+    const needsMeta = (status === 'APPROVED' || status === 'PAUSED' || status === 'DISABLED' || status === 'SUBMITTED');
+    const msg = needsMeta
+      ? `Template "${item.name}" verwijderen?\n\nDit verwijdert 'm OOK bij Meta (definitief). Doorgaan?`
+      : `Template "${item.name}" verwijderen?`;
+    if (!confirm(msg)) return;
     try {
       const data = await apiRequest('DELETE', '/api/admin-meta-templates-delete?id=' + encodeURIComponent(item.id));
       if (data && data.error) {
         alert('Verwijderen mislukt: ' + data.error);
         return;
       }
-      toast('Template verwijderd', 'success');
+      let tail = '';
+      if (data && data.meta_already_gone) tail = ' (Meta wist hem al)';
+      else if (data && data.meta_deleted)  tail = ' (incl. Meta)';
+      toast('Template verwijderd' + tail, 'success');
       loadWaMetaList();
     } catch (e) {
       alert('Verwijderen mislukt: ' + e.message);
