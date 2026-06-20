@@ -40,7 +40,9 @@
     tickets: '<path d="M2 9a3 3 0 0 1 0 6v2a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-2a3 3 0 0 1 0-6V7a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2Z"/><path d="M13 5v2"/><path d="M13 11v2"/><path d="M13 17v2"/>',
     onboarding: '<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>',
     // lucide "graduation-cap" — onderscheid van events (calendar) en agents (avatar).
-    'mentor-dashboard': '<path d="M22 10v6M2 10l10-5 10 5-10 5z"/><path d="M6 12v5c3 3 9 3 12 0v-5"/>'
+    'mentor-dashboard': '<path d="M22 10v6M2 10l10-5 10 5-10 5z"/><path d="M6 12v5c3 3 9 3 12 0v-5"/>',
+    // lucide "users-shield" — admin per-mentor meekijken; eenvoudige user+shield.
+    'mentor-detail': '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M19 16l3 1.5V21l-3 1.5-3-1.5v-3.5z"/>'
   };
 
   function svg(key) {
@@ -82,6 +84,9 @@
           // mentor.module.access (zie MODULE_FEATURE_MAP). Voor andere rollen
           // verbergt applyModuleGating de link.
           navLink('mentor-dashboard', '/modules/mentor-dashboard.html', 'Mentor-dashboard') +
+          // Mentor-detail PR-4 — admin-view per mentor; gated via
+          // mentor.admin.view (manager+). Mentors zelf zien 'm dus niet.
+          navLink('mentor-detail', '/modules/mentor-detail.html', 'Mentor-overzicht (admin)') +
           navLink('onboarding', '/modules/onboarding-overzicht.html', 'Onboarding') +
           // Finance — Mega-restructure: badge voor Open Acties (F1 finance-taken) hangt
           // nu inline op de Finance nav-item zelf. Open Acties is verhuisd naar
@@ -410,6 +415,9 @@
     // Mentor-dashboard PR-1 — sidebar-link + page-gating via mentor.module.access.
     // Endpoint-gate (mentor-my-events/-calendar) doet dezelfde check; deze is voor UX.
     'mentor-dashboard': 'mentor.module.access',
+    // Mentor-detail PR-4 — admin per-mentor meekijken. Manager+ rollen krijgen
+    // mentor.admin.view via de role_permissions grant; mentors zelf niet.
+    'mentor-detail': 'mentor.admin.view',
     'finance': 'finance.module.access',
     // Open Acties (F1 finance-taken) is verhuisd naar Finance > Wanbetalers > Open Acties
     // sub-tab — geen eigen sidebar-link meer. Badge hangt nu op de Finance nav-item zelf.
