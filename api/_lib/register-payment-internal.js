@@ -12,7 +12,7 @@
 
 import { supabaseAdmin } from '../supabase.js';
 import { tlFetch } from './teamleader-token.js';
-import { releaseForPaidInvoice } from './mentor-ledger-engine.js';
+import { releaseProportionalForPayment } from './mentor-ledger-engine.js';
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
@@ -191,13 +191,24 @@ export async function registerPaymentInternal(opts) {
     throw new RegisterPaymentError('db', 'TL+payment OK maar invoice update faalde: ' + upErr.message);
   }
 
-  // 5b. F5.1 mentor-hook: factuur volledig betaald → openstaande bonus-entries
-  // van deze klant vrijgeven. Non-blocking; engine is idempotent.
-  if (newStatus === 'paid' && inv.customer_id) {
+  // 5b. F5.2 mentor-hook: bij ELKE betaling (partial of full) wordt het
+  // evenredige deel van de openstaande bonus-obligaties vrijgegeven via
+  // child-entries. Forward-only / no clawback. Non-blocking; engine is
+  // idempotent op (parent_id, payment_id).
+  // Bij fullyPaid spawnt 'ie ook een settle-child voor evt. afrondings-restjes
+  // zodat de gehele obligatie volledig vrijgegeven is na de eindbetaling.
+  if (inv.customer_id && payRow?.id) {
     try {
-      await releaseForPaidInvoice({ customerId: inv.customer_id, sourceInvoiceId: inv.id });
+      await releaseProportionalForPayment({
+        customerId      : inv.customer_id,
+        sourceInvoiceId : inv.id,
+        paymentId       : payRow.id,
+        paymentAmount   : r2(amtNum),
+        invoiceTotal    : Number(inv.amount_total) || 0,
+        fullyPaid       : newStatus === 'paid',
+      });
     } catch (e) {
-      console.error('[register-payment-internal] mentor-hook releaseForPaidInvoice:', e.message);
+      console.error('[register-payment-internal] mentor-hook releaseProportionalForPayment:', e.message);
     }
   }
 
