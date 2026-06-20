@@ -18,4 +18,15 @@ CREATE INDEX IF NOT EXISTS idx_mentor_ledger_entries_parent
   ON public.mentor_ledger_entries (parent_entry_id)
   WHERE parent_entry_id IS NOT NULL;
 
+-- Snapshot van de oorspronkelijke obligatie (vóór per-termijn-vrijgave krimpt).
+-- Nodig zodat slice = original_amount × ratio i.p.v. remaining × ratio
+-- (geometrisch aflopend). NULL voor pre-migration rijen; engine zet 'm op
+-- eerste betaling vast op de huidige parent.amount (= oorspronkelijke
+-- obligatie wanneer er nog geen children zijn).
+ALTER TABLE public.mentor_ledger_entries
+  ADD COLUMN IF NOT EXISTS original_amount numeric(12,2);
+
+COMMENT ON COLUMN public.mentor_ledger_entries.original_amount IS
+  'F5.2: snapshot van de obligatie-amount vóór per-termijn-vrijgave. Engine zet ''m op de eerste betaling vast (gelijk aan parent.amount op dat moment, want children bestaan nog niet). NULL = pre-migration of nog niet aangeraakt.';
+
 COMMIT;

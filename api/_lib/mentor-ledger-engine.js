@@ -45,6 +45,13 @@ export async function releaseForPaidInvoice({ customerId, sourceInvoiceId = null
  * De parent.amount wordt verlaagd met dezelfde slice; sum(children) per
  * parent gaat nooit boven de oorspronkelijke obligatie.
  *
+ * Slice-formule: slice = original_amount × (paymentAmount / invoiceTotal).
+ * NIET remaining × ratio (zou geometrisch aflopen i.p.v. een vaste
+ * percentage per betaling). original_amount wordt op de eerste aanraking
+ * gepersist op de huidige parent.amount (zonder children = oorspronkelijke
+ * obligatie). Cap blijft op remaining zodat we nooit méér vrijgeven
+ * dan er nog open staat.
+ *
  * Forward-only / no clawback: een vrijgegeven child wordt nooit teruggedraaid.
  *
  * Idempotent op 2 niveaus:
@@ -93,7 +100,7 @@ export async function releaseProportionalForPayment({
   //    die nog niet (volledig) zijn vrijgegeven.
   let q = supabaseAdmin
     .from('mentor_ledger_entries')
-    .select('id, mentor_user_id, team_member_id, event_id, customer_id, attendee_id, source_invoice_id, source_quote_id, amount')
+    .select('id, mentor_user_id, team_member_id, event_id, customer_id, attendee_id, source_invoice_id, source_quote_id, amount, original_amount')
     .eq('entry_type', 'bonus')
     .eq('customer_id', customerId)
     .in('status', ['pending', 'wachten_op_betaling'])
@@ -110,8 +117,24 @@ export async function releaseProportionalForPayment({
     const remaining = Number(parent.amount) || 0;
     if (remaining <= 0) continue;
 
-    // Proportionele slice gecapt op resterend.
-    let slice = Math.round(remaining * ratio * 100) / 100;
+    // F5.2 fix: slice moet evenredig zijn met de ORIGINELE obligatie, niet
+    // met het resterende bedrag (anders krimpt 'ie geometrisch i.p.v. een
+    // vaste 3% per betaling). Snapshot persisten op de eerste aanraking —
+    // op dat moment heeft de parent nog GEEN children, dus parent.amount
+    // is per definitie gelijk aan de oorspronkelijke obligatie.
+    let origAmount = (parent.original_amount != null) ? Number(parent.original_amount) : remaining;
+    if (parent.original_amount == null) {
+      const { error: snapErr } = await supabaseAdmin
+        .from('mentor_ledger_entries')
+        .update({ original_amount: origAmount })
+        .eq('id', parent.id)
+        .is('original_amount', null);
+      if (snapErr) throw new Error('releaseProportionalForPayment snapshot: ' + snapErr.message);
+      parent.original_amount = origAmount;
+    }
+
+    // Proportionele slice op basis van originele obligatie, gecapt op resterend.
+    let slice = Math.round(origAmount * ratio * 100) / 100;
     if (slice > remaining) slice = remaining;
     if (slice <= 0) continue;
 
