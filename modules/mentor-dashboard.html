@@ -49,6 +49,24 @@
 
     .skeleton { display: inline-block; width: 80px; height: 16px; background: linear-gradient(90deg, rgba(0,0,0,0.05), rgba(0,0,0,0.10), rgba(0,0,0,0.05)); border-radius: 4px; animation: sk 1.2s infinite; }
     @keyframes sk { 0% { background-position: 0% 0; } 100% { background-position: 200% 0; } }
+
+    /* Tab-strips (top-level + subtabs binnen Verdiensten) */
+    .tab-strip { display: flex; gap: 4px; border-bottom: 1px solid var(--border); margin-bottom: 18px; flex-wrap: wrap; }
+    .tab-btn { background: transparent; border: 0; padding: 10px 14px; font-size: 13.5px; font-weight: 600; color: var(--text-dim); cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -1px; }
+    .tab-btn:hover { color: var(--text); }
+    .tab-btn.active { color: var(--text); border-bottom-color: var(--accent, #6366f1); }
+    .subtab-strip { display: flex; gap: 4px; margin-bottom: 14px; flex-wrap: wrap; }
+    .subtab-btn { background: var(--bg-elev); border: 1px solid var(--border); padding: 6px 12px; border-radius: 16px; font-size: 12px; font-weight: 600; color: var(--text-dim); cursor: pointer; }
+    .subtab-btn:hover { color: var(--text); }
+    .subtab-btn.active { background: var(--accent, #6366f1); color: #fff; border-color: var(--accent, #6366f1); }
+
+    /* 12-maands balk in Verdiensten-overzicht */
+    .month-bars { display: grid; grid-template-columns: repeat(12, 1fr); gap: 6px; align-items: end; padding: 14px 12px 10px; background: var(--bg-elev); border: 1px solid var(--border); border-radius: 10px; min-height: 180px; }
+    .month-bar { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+    .month-bar .bar { width: 100%; background: linear-gradient(180deg, var(--accent, #6366f1) 0%, rgba(99,102,241,0.55) 100%); border-radius: 4px 4px 0 0; min-height: 2px; transition: height 0.2s; }
+    .month-bar .bar.zero { background: var(--bg-elev-2, rgba(100,116,139,0.18)); }
+    .month-bar .bar-label { font-size: 10.5px; color: var(--text-faint); margin-top: 2px; text-transform: uppercase; }
+    .month-bar .bar-amount { font-size: 10.5px; color: var(--text-dim); font-variant-numeric: tabular-nums; }
   </style>
 </head>
 <body>
@@ -62,26 +80,78 @@
     </div>
   </div>
 
-  <div class="kpi-row" id="kpiRow">
-    <div class="kpi-card"><div class="kpi-label">Saldo (netto)</div><div class="kpi-value"><span class="skeleton"></span></div><div class="kpi-sub">Vrijgegeven minus uitgaven</div></div>
-    <div class="kpi-card"><div class="kpi-label">Bonuspot bruto</div><div class="kpi-value"><span class="skeleton"></span></div><div class="kpi-sub">Alle statussen samen</div></div>
-    <div class="kpi-card"><div class="kpi-label">Komende events</div><div class="kpi-value"><span class="skeleton"></span></div><div class="kpi-sub">Vanaf vandaag</div></div>
-    <div class="kpi-card"><div class="kpi-label">Events totaal</div><div class="kpi-value"><span class="skeleton"></span></div><div class="kpi-sub">Verleden + toekomst</div></div>
+  <div class="tab-strip" role="tablist">
+    <button class="tab-btn active" data-tab="grootboek" type="button">Grootboek</button>
+    <button class="tab-btn" data-tab="verdiensten" type="button">Verdiensten</button>
   </div>
 
-  <div class="section">
-    <h2><i class="ti ti-coin"></i> Bonussen per event</h2>
-    <div id="bonusByEventWrap"></div>
+  <!-- Tab: Grootboek (bestaande secties) -->
+  <div id="tabGrootboek" class="tab-panel">
+    <div class="kpi-row" id="kpiRow">
+      <div class="kpi-card"><div class="kpi-label">Saldo (netto)</div><div class="kpi-value"><span class="skeleton"></span></div><div class="kpi-sub">Vrijgegeven minus uitgaven</div></div>
+      <div class="kpi-card"><div class="kpi-label">Bonuspot bruto</div><div class="kpi-value"><span class="skeleton"></span></div><div class="kpi-sub">Alle statussen samen</div></div>
+      <div class="kpi-card"><div class="kpi-label">Komende events</div><div class="kpi-value"><span class="skeleton"></span></div><div class="kpi-sub">Vanaf vandaag</div></div>
+      <div class="kpi-card"><div class="kpi-label">Events totaal</div><div class="kpi-value"><span class="skeleton"></span></div><div class="kpi-sub">Verleden + toekomst</div></div>
+    </div>
+
+    <div class="section">
+      <h2><i class="ti ti-coin"></i> Bonussen per event</h2>
+      <div id="bonusByEventWrap"></div>
+    </div>
+
+    <div class="section">
+      <h2><i class="ti ti-calendar-event"></i> Mijn komende sessies</h2>
+      <div id="calendarWrap"></div>
+    </div>
+
+    <div class="section">
+      <h2><i class="ti ti-list-details"></i> Mijn events (compleet)</h2>
+      <div id="myEventsWrap"></div>
+    </div>
   </div>
 
-  <div class="section">
-    <h2><i class="ti ti-calendar-event"></i> Mijn komende sessies</h2>
-    <div id="calendarWrap"></div>
-  </div>
+  <!-- Tab: Verdiensten -->
+  <div id="tabVerdiensten" class="tab-panel" hidden>
+    <div class="subtab-strip" role="tablist">
+      <button class="subtab-btn active" data-subtab="overzicht"   type="button">Overzicht</button>
+      <button class="subtab-btn"        data-subtab="event-bonus" type="button">Event-bonus</button>
+      <button class="subtab-btn"        data-subtab="uitbetalingen" type="button">Uitbetalingen</button>
+      <button class="subtab-btn"        data-subtab="coaching"     type="button">Coaching</button>
+    </div>
 
-  <div class="section">
-    <h2><i class="ti ti-list-details"></i> Mijn events (compleet)</h2>
-    <div id="myEventsWrap"></div>
+    <div id="subOverzicht" class="subtab-panel">
+      <div class="kpi-row" id="kpiVerdiensten">
+        <div class="kpi-card"><div class="kpi-label">Deze maand</div><div class="kpi-value"><span class="skeleton"></span></div><div class="kpi-sub">Te ontvangen uit termijnen</div></div>
+        <div class="kpi-card"><div class="kpi-label">Volgende maand</div><div class="kpi-value"><span class="skeleton"></span></div><div class="kpi-sub">Te ontvangen uit termijnen</div></div>
+        <div class="kpi-card"><div class="kpi-label">Verdiend (totaal)</div><div class="kpi-value"><span class="skeleton"></span></div><div class="kpi-sub">Alle bonus-aandelen</div></div>
+        <div class="kpi-card"><div class="kpi-label">Open</div><div class="kpi-value"><span class="skeleton"></span></div><div class="kpi-sub">Niet-betaalde termijnen</div></div>
+      </div>
+      <div class="section">
+        <h2><i class="ti ti-chart-bar"></i> 12-maands projectie</h2>
+        <div id="projection12mWrap"></div>
+      </div>
+    </div>
+
+    <div id="subEventBonus" class="subtab-panel" hidden>
+      <div class="section">
+        <h2><i class="ti ti-coin-euro"></i> Bonus per event / sale</h2>
+        <div id="eventBonusWrap"></div>
+      </div>
+    </div>
+
+    <div id="subUitbetalingen" class="subtab-panel" hidden>
+      <div class="section">
+        <h2><i class="ti ti-receipt-2"></i> Uitbetalings-historie</h2>
+        <div id="payoutsWrap"></div>
+      </div>
+    </div>
+
+    <div id="subCoaching" class="subtab-panel" hidden>
+      <div class="section">
+        <h2><i class="ti ti-school"></i> Coaching</h2>
+        <div class="empty-state"><i class="ti ti-clock-hour-4"></i>Binnenkort beschikbaar (wacht op bubble-koppeling).</div>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -211,6 +281,184 @@
       `<div class="empty-state" style="border-color:#fecaca;color:#b91c1c"><i class="ti ti-alert-triangle"></i>${esc(msg)}</div>`;
   }
 
+  // ── Tab-wiring ────────────────────────────────────────────────────────────
+  const _vState = { loaded: false, payoutsLoaded: false };
+
+  function activateTab(name) {
+    document.querySelectorAll('.tab-btn').forEach((b) => {
+      b.classList.toggle('active', b.dataset.tab === name);
+    });
+    document.getElementById('tabGrootboek').hidden    = (name !== 'grootboek');
+    document.getElementById('tabVerdiensten').hidden  = (name !== 'verdiensten');
+    if (name === 'verdiensten' && !_vState.loaded) loadVerdiensten();
+  }
+
+  function activateSubtab(name) {
+    document.querySelectorAll('.subtab-btn').forEach((b) => {
+      b.classList.toggle('active', b.dataset.subtab === name);
+    });
+    document.getElementById('subOverzicht').hidden     = (name !== 'overzicht');
+    document.getElementById('subEventBonus').hidden    = (name !== 'event-bonus');
+    document.getElementById('subUitbetalingen').hidden = (name !== 'uitbetalingen');
+    document.getElementById('subCoaching').hidden      = (name !== 'coaching');
+    if (name === 'uitbetalingen' && !_vState.payoutsLoaded) loadPayouts();
+  }
+
+  function wireTabs() {
+    document.querySelectorAll('.tab-btn').forEach((btn) => {
+      btn.addEventListener('click', () => activateTab(btn.dataset.tab));
+    });
+    document.querySelectorAll('.subtab-btn').forEach((btn) => {
+      btn.addEventListener('click', () => activateSubtab(btn.dataset.subtab));
+    });
+  }
+
+  // ── Verdiensten KPI's + projection-balk ──────────────────────────────────
+  function setVerdienstenKpis(t) {
+    const row = document.getElementById('kpiVerdiensten');
+    row.innerHTML =
+      `<div class="kpi-card"><div class="kpi-label">Deze maand</div><div class="kpi-value">${fmtEUR(t.deze_maand)}</div><div class="kpi-sub">Te ontvangen uit termijnen</div></div>` +
+      `<div class="kpi-card"><div class="kpi-label">Volgende maand</div><div class="kpi-value">${fmtEUR(t.volgende_maand)}</div><div class="kpi-sub">Te ontvangen uit termijnen</div></div>` +
+      `<div class="kpi-card"><div class="kpi-label">Verdiend (totaal)</div><div class="kpi-value">${fmtEUR(t.earned_total)}</div><div class="kpi-sub">Alle bonus-aandelen</div></div>` +
+      `<div class="kpi-card"><div class="kpi-label">Open</div><div class="kpi-value">${fmtEUR(t.open)}</div><div class="kpi-sub">Niet-betaalde termijnen</div></div>`;
+  }
+
+  function renderProjection12m(months) {
+    const wrap = document.getElementById('projection12mWrap');
+    if (!Array.isArray(months) || months.length === 0) {
+      wrap.innerHTML = `<div class="empty-state"><i class="ti ti-chart-bar-off"></i>Geen projectie beschikbaar.</div>`;
+      return;
+    }
+    const max = months.reduce((m, x) => Math.max(m, Number(x.amount) || 0), 0);
+    const bars = months.map((m) => {
+      const amt   = Number(m.amount) || 0;
+      const pct   = max > 0 ? Math.max(2, Math.round((amt / max) * 140)) : 2;
+      const lbl   = (m.month || '').split('-')[1] || '';
+      const monthShort = ['', 'jan', 'feb', 'mrt', 'apr', 'mei', 'jun', 'jul', 'aug', 'sep', 'okt', 'nov', 'dec'][parseInt(lbl, 10)] || lbl;
+      return `
+        <div class="month-bar" title="${esc(m.month)} — ${fmtEUR(amt)}">
+          <div class="bar-amount">${amt > 0 ? Math.round(amt) : ''}</div>
+          <div class="bar ${amt > 0 ? '' : 'zero'}" style="height:${pct}px"></div>
+          <div class="bar-label">${esc(monthShort)}</div>
+        </div>`;
+    }).join('');
+    wrap.innerHTML = `<div class="month-bars">${bars}</div>`;
+  }
+
+  function renderEventBonus(perEvent) {
+    const wrap = document.getElementById('eventBonusWrap');
+    if (!Array.isArray(perEvent) || perEvent.length === 0) {
+      wrap.innerHTML = `<div class="empty-state"><i class="ti ti-coin-off"></i>Geen sales gevonden voor je events.</div>`;
+      return;
+    }
+    wrap.innerHTML = perEvent.map((ev) => {
+      const evHead = `
+        <div style="margin-top:18px;margin-bottom:6px;display:flex;align-items:baseline;gap:10px">
+          <strong style="font-size:14px">${esc(ev.event_title || '—')}</strong>
+          <span style="font-size:11.5px;color:var(--text-faint)">${fmtDateNL(ev.starts_at)}</span>
+        </div>`;
+      const sales = (ev.sales || []).map((s) => {
+        const schemaWarn = s.schema_unknown
+          ? '<span class="badge badge-amber" title="Geen volledig termijnschema bekend (open-ended sub of geen subscription) — projectie is voorlopig">Onbekend schema</span>'
+          : '';
+        const termRows = (s.termijnen || []).map((t) => {
+          const badge = t.status === 'betaald'
+            ? '<span class="badge badge-green">Betaald</span>'
+            : '<span class="badge badge-amber">Open</span>';
+          return `
+            <tr>
+              <td>${t.index}</td>
+              <td>${fmtDateNL(t.due_date)}</td>
+              <td class="num">${fmtEUR(t.amount)}</td>
+              <td>${badge}</td>
+            </tr>`;
+        }).join('');
+        return `
+          <div style="margin-bottom:14px;padding:12px;border:1px solid var(--border);border-radius:10px;background:var(--bg-elev)">
+            <div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:8px">
+              <strong>${esc(s.customer_label || '—')}</strong>
+              ${schemaWarn}
+              <span style="margin-left:auto;font-size:11.5px;color:var(--text-dim)">
+                Sale: ${fmtEUR(s.sale_total_incl)} · jouw aandeel ${fmtEUR(s.mentor_share_total)} (${s.term_count}×)
+              </span>
+            </div>
+            <table class="data-table">
+              <thead><tr><th>#</th><th>Vervaldatum</th><th class="num">Bedrag</th><th>Status</th></tr></thead>
+              <tbody>${termRows}</tbody>
+            </table>
+          </div>`;
+      }).join('');
+      return evHead + sales;
+    }).join('');
+  }
+
+  function renderPayouts(payouts) {
+    const wrap = document.getElementById('payoutsWrap');
+    if (!Array.isArray(payouts) || payouts.length === 0) {
+      wrap.innerHTML = `<div class="empty-state"><i class="ti ti-receipt-off"></i>Nog geen uitbetalings-batches.</div>`;
+      return;
+    }
+    const rows = payouts.map((p) => {
+      const badge = p.status === 'uitbetaald'
+        ? '<span class="badge badge-blue">Uitbetaald</span>'
+        : '<span class="badge badge-amber">Open</span>';
+      return `
+        <tr>
+          <td>${esc(p.period_month || '—')}</td>
+          <td class="num">${fmtEUR(p.total)}</td>
+          <td>${badge}</td>
+          <td>${fmtDateNL(p.created_at)}</td>
+          <td>${p.paid_at ? fmtDateNL(p.paid_at) : '—'}</td>
+        </tr>`;
+    }).join('');
+    wrap.innerHTML = `
+      <table class="data-table">
+        <thead><tr><th>Periode</th><th class="num">Totaal</th><th>Status</th><th>Aangemaakt</th><th>Uitbetaald</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>`;
+  }
+
+  async function loadVerdiensten() {
+    _vState.loaded = true;
+    const apiFetch = window.AgentShared?.apiFetch;
+    if (typeof apiFetch !== 'function') {
+      setError('projection12mWrap', 'apiFetch niet beschikbaar.');
+      return;
+    }
+    try { if (window._authSharedReady) await window._authSharedReady; } catch {}
+    try {
+      const r = await apiFetch('/api/mentor-bonus-overview');
+      const d = await r.json();
+      if (!r.ok) throw new Error(d?.error || 'bonus-overview failed');
+      setVerdienstenKpis(d.totals || { earned_total: 0, betaald_uit: 0, open: 0, deze_maand: 0, volgende_maand: 0 });
+      renderProjection12m(d.projection_12m || []);
+      renderEventBonus(d.per_event || []);
+    } catch (e) {
+      console.error('[mentor-dashboard] verdiensten:', e?.message || e);
+      setError('projection12mWrap', 'Verdiensten ophalen mislukt: ' + (e?.message || e));
+      setError('eventBonusWrap',   'Verdiensten ophalen mislukt: ' + (e?.message || e));
+    }
+  }
+
+  async function loadPayouts() {
+    _vState.payoutsLoaded = true;
+    const apiFetch = window.AgentShared?.apiFetch;
+    if (typeof apiFetch !== 'function') {
+      setError('payoutsWrap', 'apiFetch niet beschikbaar.');
+      return;
+    }
+    try { if (window._authSharedReady) await window._authSharedReady; } catch {}
+    try {
+      const r = await apiFetch('/api/mentor-payouts-list-self');
+      const d = await r.json();
+      if (!r.ok) throw new Error(d?.error || 'payouts fetch failed');
+      renderPayouts(d.payouts || []);
+    } catch (e) {
+      console.error('[mentor-dashboard] payouts:', e?.message || e);
+      setError('payoutsWrap', 'Uitbetalingen ophalen mislukt: ' + (e?.message || e));
+    }
+  }
+
   async function loadAll() {
     const apiFetch = window.AgentShared?.apiFetch;
     if (typeof apiFetch !== 'function') {
@@ -269,8 +517,9 @@
   }
 
   if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', loadAll);
+    document.addEventListener('DOMContentLoaded', () => { wireTabs(); loadAll(); });
   } else {
+    wireTabs();
     loadAll();
   }
 })();
