@@ -1,0 +1,440 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Mentor-overzicht · De Forex Opleiding</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/dist/tabler-icons.min.css" />
+  <link rel="stylesheet" href="/modules/shared/agent-shared.css" />
+  <link rel="stylesheet" href="/styles/sales-redesign.css" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; }
+    body { font-family: 'Inter', system-ui, sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; -webkit-font-smoothing: antialiased; }
+    .app { margin-left: 220px; padding: 24px 28px 60px; max-width: 1280px; }
+
+    .page-header { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 18px; gap: 12px; flex-wrap: wrap; }
+    .page-header h1 { font-size: 22px; font-weight: 700; color: var(--text); }
+    .page-header p { font-size: 13px; color: var(--text-dim); }
+
+    .picker-row { display: flex; align-items: center; gap: 10px; margin-bottom: 22px; padding: 12px 14px; background: var(--bg-elev); border: 1px solid var(--border); border-radius: 10px; flex-wrap: wrap; }
+    .picker-row label { font-size: 12px; font-weight: 600; color: var(--text-dim); }
+    .picker-row select { padding: 7px 10px; font-size: 13.5px; border: 1px solid var(--border); border-radius: 7px; background: var(--bg); color: var(--text); font-family: inherit; min-width: 280px; }
+
+    .kpi-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-bottom: 22px; }
+    .kpi-card { background: var(--bg-elev); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; }
+    .kpi-label { font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-dim); font-weight: 600; }
+    .kpi-value { font-size: 22px; font-weight: 700; margin-top: 4px; color: var(--text); }
+    .kpi-sub   { font-size: 11.5px; color: var(--text-dim); margin-top: 2px; }
+    @media (max-width: 880px) { .kpi-row { grid-template-columns: repeat(2, 1fr); } .app { margin-left: 0; padding: 14px; } }
+
+    .section { margin-bottom: 28px; }
+    .section h2 { font-size: 15px; font-weight: 700; margin-bottom: 10px; color: var(--text); display: flex; align-items: center; gap: 8px; }
+    .section h2 i { color: var(--text-dim); }
+
+    .data-table { width: 100%; border-collapse: collapse; background: var(--bg-elev); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+    .data-table th, .data-table td { padding: 10px 12px; text-align: left; font-size: 13px; border-bottom: 1px solid var(--border); }
+    .data-table th { background: rgba(0,0,0,0.02); font-weight: 600; color: var(--text-dim); font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.03em; }
+    .data-table tr:last-child td { border-bottom: 0; }
+    .data-table td.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+    .badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; white-space: nowrap; }
+    .badge-green  { background: rgba(34,197,94,0.13);  color: #15803d; }
+    .badge-amber  { background: rgba(245,158,11,0.16); color: #b45309; }
+    .badge-grey   { background: rgba(100,116,139,0.18); color: #475569; }
+    .badge-blue   { background: rgba(20,115,214,0.16); color: #1160bd; }
+
+    .empty-state { background: var(--bg-elev); border: 1px dashed var(--border); border-radius: 10px; padding: 24px 16px; text-align: center; font-size: 13px; color: var(--text-dim); }
+    .empty-state i { font-size: 26px; display: block; margin-bottom: 6px; opacity: 0.6; }
+
+    .skeleton { display: inline-block; width: 80px; height: 16px; background: linear-gradient(90deg, rgba(0,0,0,0.05), rgba(0,0,0,0.10), rgba(0,0,0,0.05)); border-radius: 4px; animation: sk 1.2s infinite; }
+    @keyframes sk { 0% { background-position: 0% 0; } 100% { background-position: 200% 0; } }
+
+    .month-bars { display: grid; grid-template-columns: repeat(12, 1fr); gap: 6px; align-items: end; padding: 14px 12px 10px; background: var(--bg-elev); border: 1px solid var(--border); border-radius: 10px; min-height: 180px; }
+    .month-bar { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+    .month-bar .bar { width: 100%; background: linear-gradient(180deg, var(--accent, #6366f1) 0%, rgba(99,102,241,0.55) 100%); border-radius: 4px 4px 0 0; min-height: 2px; transition: height 0.2s; }
+    .month-bar .bar.zero { background: var(--bg-elev-2, rgba(100,116,139,0.18)); }
+    .month-bar .bar-label { font-size: 10.5px; color: var(--text-faint); margin-top: 2px; text-transform: uppercase; }
+    .month-bar .bar-amount { font-size: 10.5px; color: var(--text-dim); font-variant-numeric: tabular-nums; }
+  </style>
+</head>
+<body>
+<div id="sidebar-mount"></div>
+
+<div class="app">
+  <div class="page-header">
+    <div>
+      <h1>Mentor-overzicht (admin)</h1>
+      <p>Kies een mentor om hun events, kalender, grootboek en verdiensten in te zien.</p>
+    </div>
+  </div>
+
+  <div class="picker-row">
+    <label for="mentorPicker">Mentor:</label>
+    <select id="mentorPicker"><option value="">Mentoren laden…</option></select>
+    <span id="pickerStatus" style="font-size:12px;color:var(--text-faint)"></span>
+  </div>
+
+  <div id="emptyHint" class="empty-state">
+    <i class="ti ti-arrow-up"></i>Kies een mentor uit de lijst hierboven om hun overzicht te zien.
+  </div>
+
+  <div id="detailWrap" hidden>
+    <div class="kpi-row" id="kpiRow"></div>
+
+    <div class="section">
+      <h2><i class="ti ti-coin"></i> Bonussen per event (grootboek)</h2>
+      <div id="bonusByEventWrap"></div>
+    </div>
+
+    <div class="section">
+      <h2><i class="ti ti-chart-bar"></i> 12-maands projectie</h2>
+      <div id="projection12mWrap"></div>
+    </div>
+
+    <div class="section">
+      <h2><i class="ti ti-coin-euro"></i> Bonus per event / sale (termijn-projectie)</h2>
+      <div id="eventBonusWrap"></div>
+    </div>
+
+    <div class="section">
+      <h2><i class="ti ti-calendar-event"></i> Komende sessies</h2>
+      <div id="calendarWrap"></div>
+    </div>
+
+    <div class="section">
+      <h2><i class="ti ti-list-details"></i> Events (compleet)</h2>
+      <div id="myEventsWrap"></div>
+    </div>
+  </div>
+</div>
+
+<script src="/modules/shared/supabase-client.js"></script>
+<script src="/modules/shared/agent-shared.js"></script>
+<script src="/modules/shared/theme-shared.js"></script>
+<script src="/modules/shared/permissions.js"></script>
+<script src="/modules/shared/sidebar.js"></script>
+<script>
+(function () {
+  'use strict';
+
+  const fmtEUR = (n) => {
+    const v = Number(n) || 0;
+    return v.toLocaleString('nl-NL', { style: 'currency', currency: 'EUR', minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  };
+  const fmtDateNL = (iso) => {
+    if (!iso) return '—';
+    try {
+      const d = new Date(iso);
+      return d.toLocaleDateString('nl-NL', { day: '2-digit', month: 'short', year: 'numeric' });
+    } catch { return iso; }
+  };
+  const fmtDateTimeNL = (iso) => {
+    if (!iso) return '—';
+    try {
+      const d = new Date(iso);
+      return d.toLocaleString('nl-NL', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+    } catch { return iso; }
+  };
+  const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+
+  const STATUS_BADGE = {
+    pending:               { label: 'Pending',           cls: 'badge-amber' },
+    wachten_op_betaling:   { label: 'Wachten op betaling', cls: 'badge-amber' },
+    vrijgegeven:           { label: 'Vrijgegeven',       cls: 'badge-green' },
+    geannuleerd:           { label: 'Geannuleerd',       cls: 'badge-grey'  },
+    uitbetaald:            { label: 'Uitbetaald',        cls: 'badge-blue'  },
+  };
+
+  function statusChips(perStatus) {
+    if (!perStatus) return '';
+    const order = ['vrijgegeven', 'pending', 'wachten_op_betaling', 'geannuleerd', 'uitbetaald'];
+    return order
+      .filter((s) => Math.abs(Number(perStatus[s]) || 0) > 0.005)
+      .map((s) => {
+        const b = STATUS_BADGE[s];
+        return `<span class="badge ${b.cls}" title="${esc(b.label)}">${esc(b.label)}: ${fmtEUR(perStatus[s])}</span>`;
+      })
+      .join(' ');
+  }
+
+  function setError(elId, msg) {
+    const el = document.getElementById(elId);
+    if (!el) return;
+    el.innerHTML = `<div class="empty-state" style="border-color:#fecaca;color:#b91c1c"><i class="ti ti-alert-triangle"></i>${esc(msg)}</div>`;
+  }
+
+  function setKpis({ netto, bonuspot, deze_maand, open }) {
+    const row = document.getElementById('kpiRow');
+    row.innerHTML =
+      `<div class="kpi-card"><div class="kpi-label">Saldo (netto)</div><div class="kpi-value">${fmtEUR(netto)}</div><div class="kpi-sub">Vrijgegeven minus uitgaven</div></div>` +
+      `<div class="kpi-card"><div class="kpi-label">Bonuspot bruto</div><div class="kpi-value">${fmtEUR(bonuspot)}</div><div class="kpi-sub">Alle statussen samen</div></div>` +
+      `<div class="kpi-card"><div class="kpi-label">Deze maand</div><div class="kpi-value">${fmtEUR(deze_maand)}</div><div class="kpi-sub">Te ontvangen uit termijnen</div></div>` +
+      `<div class="kpi-card"><div class="kpi-label">Open</div><div class="kpi-value">${fmtEUR(open)}</div><div class="kpi-sub">Niet-betaalde termijnen</div></div>`;
+  }
+
+  function renderBonusByEvent(byEvent) {
+    const wrap = document.getElementById('bonusByEventWrap');
+    if (!Array.isArray(byEvent) || byEvent.length === 0) {
+      wrap.innerHTML = `<div class="empty-state"><i class="ti ti-coin-off"></i>Geen bonus-regels in het grootboek.</div>`;
+      return;
+    }
+    const rows = byEvent.map((c) => {
+      const chips = statusChips(c.per_status);
+      return `
+        <tr>
+          <td>${esc(c.event_title || '—')}</td>
+          <td>${fmtDateNL(c.starts_at)}</td>
+          <td class="num">${fmtEUR(c.bonuspot)}</td>
+          <td class="num">${fmtEUR(c.uitgaven)}</td>
+          <td class="num"><strong>${fmtEUR(c.netto)}</strong></td>
+          <td>${chips || '<span class="badge badge-grey">—</span>'}</td>
+        </tr>`;
+    }).join('');
+    wrap.innerHTML = `
+      <table class="data-table">
+        <thead><tr><th>Event</th><th>Datum</th><th class="num">Bonus bruto</th><th class="num">Uitgaven</th><th class="num">Netto</th><th>Status</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>`;
+  }
+
+  function renderProjection12m(months) {
+    const wrap = document.getElementById('projection12mWrap');
+    if (!Array.isArray(months) || months.length === 0) {
+      wrap.innerHTML = `<div class="empty-state"><i class="ti ti-chart-bar-off"></i>Geen projectie beschikbaar.</div>`;
+      return;
+    }
+    const max = months.reduce((m, x) => Math.max(m, Number(x.amount) || 0), 0);
+    const bars = months.map((m) => {
+      const amt   = Number(m.amount) || 0;
+      const pct   = max > 0 ? Math.max(2, Math.round((amt / max) * 140)) : 2;
+      const lbl   = (m.month || '').split('-')[1] || '';
+      const monthShort = ['', 'jan', 'feb', 'mrt', 'apr', 'mei', 'jun', 'jul', 'aug', 'sep', 'okt', 'nov', 'dec'][parseInt(lbl, 10)] || lbl;
+      return `
+        <div class="month-bar" title="${esc(m.month)} — ${fmtEUR(amt)}">
+          <div class="bar-amount">${amt > 0 ? Math.round(amt) : ''}</div>
+          <div class="bar ${amt > 0 ? '' : 'zero'}" style="height:${pct}px"></div>
+          <div class="bar-label">${esc(monthShort)}</div>
+        </div>`;
+    }).join('');
+    wrap.innerHTML = `<div class="month-bars">${bars}</div>`;
+  }
+
+  function renderEventBonus(perEvent) {
+    const wrap = document.getElementById('eventBonusWrap');
+    if (!Array.isArray(perEvent) || perEvent.length === 0) {
+      wrap.innerHTML = `<div class="empty-state"><i class="ti ti-coin-off"></i>Geen sales gevonden voor deze mentor.</div>`;
+      return;
+    }
+    wrap.innerHTML = perEvent.map((ev) => {
+      const evHead = `
+        <div style="margin-top:18px;margin-bottom:6px;display:flex;align-items:baseline;gap:10px">
+          <strong style="font-size:14px">${esc(ev.event_title || '—')}</strong>
+          <span style="font-size:11.5px;color:var(--text-faint)">${fmtDateNL(ev.starts_at)}</span>
+        </div>`;
+      const sales = (ev.sales || []).map((s) => {
+        const schemaWarn = s.schema_unknown
+          ? '<span class="badge badge-amber" title="Geen volledig termijnschema bekend">Onbekend schema</span>'
+          : '';
+        const termRows = (s.termijnen || []).map((t) => {
+          const badge = t.status === 'betaald'
+            ? '<span class="badge badge-green">Betaald</span>'
+            : '<span class="badge badge-amber">Open</span>';
+          return `
+            <tr>
+              <td>${t.index}</td>
+              <td>${fmtDateNL(t.due_date)}</td>
+              <td class="num">${fmtEUR(t.amount)}</td>
+              <td>${badge}</td>
+            </tr>`;
+        }).join('');
+        return `
+          <div style="margin-bottom:14px;padding:12px;border:1px solid var(--border);border-radius:10px;background:var(--bg-elev)">
+            <div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:8px">
+              <strong>${esc(s.customer_label || '—')}</strong>
+              ${schemaWarn}
+              <span style="margin-left:auto;font-size:11.5px;color:var(--text-dim)">
+                Sale: ${fmtEUR(s.sale_total_incl)} · mentor-aandeel ${fmtEUR(s.mentor_share_total)} (${s.term_count}×)
+              </span>
+            </div>
+            <table class="data-table">
+              <thead><tr><th>#</th><th>Vervaldatum</th><th class="num">Bedrag</th><th>Status</th></tr></thead>
+              <tbody>${termRows}</tbody>
+            </table>
+          </div>`;
+      }).join('');
+      return evHead + sales;
+    }).join('');
+  }
+
+  function renderCalendar(events) {
+    const wrap = document.getElementById('calendarWrap');
+    if (!Array.isArray(events) || events.length === 0) {
+      wrap.innerHTML = `<div class="empty-state"><i class="ti ti-calendar-off"></i>Geen komende sessies.</div>`;
+      return;
+    }
+    const rows = events.map((e) => `
+      <tr>
+        <td>${esc(e.title || '—')}</td>
+        <td>${fmtDateTimeNL(e.starts_at)}</td>
+        <td>${e.was_present ? '<span class="badge badge-green">Aanwezig</span>' : '<span class="badge badge-grey">—</span>'}</td>
+      </tr>`).join('');
+    wrap.innerHTML = `
+      <table class="data-table">
+        <thead><tr><th>Event</th><th>Datum + tijd</th><th>Status</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>`;
+  }
+
+  function renderMyEvents(events) {
+    const wrap = document.getElementById('myEventsWrap');
+    if (!Array.isArray(events) || events.length === 0) {
+      wrap.innerHTML = `<div class="empty-state"><i class="ti ti-calendar-question"></i>Niet aan events gekoppeld.</div>`;
+      return;
+    }
+    const rows = events.map((e) => `
+      <tr>
+        <td>${esc(e.title || '—')}</td>
+        <td>${fmtDateTimeNL(e.starts_at)}</td>
+        <td>${e.was_present ? '<span class="badge badge-green">Aanwezig</span>' : '<span class="badge badge-grey">—</span>'}</td>
+      </tr>`).join('');
+    wrap.innerHTML = `
+      <table class="data-table">
+        <thead><tr><th>Event</th><th>Datum + tijd</th><th>Aanwezig?</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>`;
+  }
+
+  async function loadMentors() {
+    const apiFetch = window.AgentShared?.apiFetch;
+    const sel = document.getElementById('mentorPicker');
+    if (typeof apiFetch !== 'function') {
+      sel.innerHTML = '<option value="">apiFetch niet beschikbaar</option>';
+      return;
+    }
+    try { if (window._authSharedReady) await window._authSharedReady; } catch {}
+    try {
+      const r = await apiFetch('/api/mentor-admin-list');
+      const d = await r.json();
+      if (!r.ok) throw new Error(d?.error || 'mentor-list failed');
+      const mentors = Array.isArray(d.mentors) ? d.mentors : [];
+      if (mentors.length === 0) {
+        sel.innerHTML = '<option value="">Geen mentoren gevonden</option>';
+        return;
+      }
+      sel.innerHTML = '<option value="">— Kies een mentor —</option>' +
+        mentors.map((m) => {
+          const label = m.name || m.email || m.user_id;
+          return `<option value="${esc(m.user_id)}">${esc(label)}${m.email ? ' — ' + esc(m.email) : ''}</option>`;
+        }).join('');
+    } catch (e) {
+      console.error('[mentor-detail] mentors:', e?.message || e);
+      sel.innerHTML = '<option value="">Mentoren ophalen mislukt</option>';
+    }
+  }
+
+  async function loadDetail(mentorUserId) {
+    if (!mentorUserId) {
+      document.getElementById('detailWrap').hidden = true;
+      document.getElementById('emptyHint').hidden = false;
+      return;
+    }
+    document.getElementById('emptyHint').hidden = true;
+    document.getElementById('detailWrap').hidden = false;
+    ['bonusByEventWrap','projection12mWrap','eventBonusWrap','calendarWrap','myEventsWrap'].forEach((id) => {
+      const el = document.getElementById(id);
+      if (el) el.innerHTML = '<div class="empty-state"><span class="skeleton" style="width:120px"></span></div>';
+    });
+    const kpiRow = document.getElementById('kpiRow');
+    kpiRow.innerHTML =
+      `<div class="kpi-card"><div class="kpi-label">Saldo (netto)</div><div class="kpi-value"><span class="skeleton"></span></div></div>` +
+      `<div class="kpi-card"><div class="kpi-label">Bonuspot bruto</div><div class="kpi-value"><span class="skeleton"></span></div></div>` +
+      `<div class="kpi-card"><div class="kpi-label">Deze maand</div><div class="kpi-value"><span class="skeleton"></span></div></div>` +
+      `<div class="kpi-card"><div class="kpi-label">Open</div><div class="kpi-value"><span class="skeleton"></span></div></div>`;
+
+    const apiFetch = window.AgentShared?.apiFetch;
+    if (typeof apiFetch !== 'function') return;
+    try { if (window._authSharedReady) await window._authSharedReady; } catch {}
+
+    const q = '?mentor_user_id=' + encodeURIComponent(mentorUserId);
+    let ledger = null, bonus = null, myEvents = null, calendar = null;
+
+    try {
+      const r = await apiFetch('/api/mentor-ledger-overview' + q);
+      const d = await r.json();
+      if (!r.ok) throw new Error(d?.error || 'ledger fetch failed');
+      ledger = d;
+    } catch (e) {
+      console.error('[mentor-detail] ledger:', e?.message || e);
+      setError('bonusByEventWrap', 'Bonussen ophalen mislukt: ' + (e?.message || e));
+    }
+
+    try {
+      const r = await apiFetch('/api/mentor-bonus-overview' + q);
+      const d = await r.json();
+      if (!r.ok) throw new Error(d?.error || 'bonus-overview failed');
+      bonus = d;
+    } catch (e) {
+      console.error('[mentor-detail] bonus-overview:', e?.message || e);
+      setError('projection12mWrap', 'Verdiensten ophalen mislukt: ' + (e?.message || e));
+      setError('eventBonusWrap',   'Verdiensten ophalen mislukt: ' + (e?.message || e));
+    }
+
+    try {
+      const r = await apiFetch('/api/mentor-my-events' + q + '&scope=all');
+      const d = await r.json();
+      if (!r.ok) throw new Error(d?.error || 'my-events failed');
+      myEvents = d;
+    } catch (e) {
+      console.error('[mentor-detail] my-events:', e?.message || e);
+      setError('myEventsWrap', 'Events ophalen mislukt: ' + (e?.message || e));
+    }
+
+    try {
+      const r = await apiFetch('/api/mentor-my-calendar' + q);
+      const d = await r.json();
+      if (!r.ok) throw new Error(d?.error || 'calendar failed');
+      calendar = d;
+    } catch (e) {
+      console.error('[mentor-detail] calendar:', e?.message || e);
+      setError('calendarWrap', 'Kalender ophalen mislukt: ' + (e?.message || e));
+    }
+
+    setKpis({
+      netto       : ledger?.totals?.netto    || 0,
+      bonuspot    : ledger?.totals?.bonuspot || 0,
+      deze_maand  : bonus?.totals?.deze_maand || 0,
+      open        : bonus?.totals?.open      || 0,
+    });
+    if (ledger)   renderBonusByEvent(ledger.byEvent || []);
+    if (bonus) {
+      renderProjection12m(bonus.projection_12m || []);
+      renderEventBonus(bonus.per_event || []);
+    }
+    if (calendar) renderCalendar(calendar.events || []);
+    if (myEvents) renderMyEvents(myEvents.events || []);
+  }
+
+  function wirePicker() {
+    const sel = document.getElementById('mentorPicker');
+    if (!sel) return;
+    sel.addEventListener('change', () => loadDetail(sel.value));
+  }
+
+  async function init() {
+    wirePicker();
+    await loadMentors();
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init);
+  } else {
+    init();
+  }
+})();
+</script>
+</body>
+</html>

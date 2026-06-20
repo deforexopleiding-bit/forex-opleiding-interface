@@ -42,6 +42,8 @@
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 // Bedrag incl. BTW per termijn. Identiek aan helper in sales-subscriptions-list.js.
@@ -109,8 +111,25 @@ export default async function handler(req, res) {
   const supabase = createUserClient(req);
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return res.status(401).json({ error: 'Niet geauthenticeerd' });
-  if (!(await requirePermission(req, 'mentor.module.access'))) {
-    return res.status(403).json({ error: 'Geen rechten (mentor.module.access)' });
+
+  // Dual-gate: ?mentor_user_id=… → admin-pad (mentor.admin.view);
+  // afwezig → self-pad (mentor.module.access, auth.uid()).
+  const requestedMentorId = typeof req.query?.mentor_user_id === 'string'
+    ? req.query.mentor_user_id.trim() : '';
+  let effectiveUserId;
+  if (requestedMentorId) {
+    if (!UUID_RE.test(requestedMentorId)) {
+      return res.status(400).json({ error: 'mentor_user_id (uuid) ongeldig' });
+    }
+    if (!(await requirePermission(req, 'mentor.admin.view'))) {
+      return res.status(403).json({ error: 'Geen rechten (mentor.admin.view)' });
+    }
+    effectiveUserId = requestedMentorId;
+  } else {
+    if (!(await requirePermission(req, 'mentor.module.access'))) {
+      return res.status(403).json({ error: 'Geen rechten (mentor.module.access)' });
+    }
+    effectiveUserId = user.id;
   }
 
   try {
@@ -118,7 +137,7 @@ export default async function handler(req, res) {
     const { data: entries, error: entErr } = await supabaseAdmin
       .from('mentor_ledger_entries')
       .select('id, mentor_user_id, event_id, entry_type, basis, amount, pct, status, attendee_id, customer_id, source_invoice_id, created_at')
-      .eq('mentor_user_id', user.id)
+      .eq('mentor_user_id', effectiveUserId)
       .eq('entry_type', 'bonus')
       .neq('status', 'geannuleerd')
       .limit(5000);
