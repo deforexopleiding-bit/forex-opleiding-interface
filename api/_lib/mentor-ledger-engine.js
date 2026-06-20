@@ -39,6 +39,169 @@ export async function releaseForPaidInvoice({ customerId, sourceInvoiceId = null
 }
 
 /**
+ * F5.2 PR-3: bij ELKE klantbetaling (partial of full) wordt het
+ * evenredige stuk van de openstaande bonus-obligaties vrijgegeven
+ * via een child-entry (status='vrijgegeven') die naar de parent wijst.
+ * De parent.amount wordt verlaagd met dezelfde slice; sum(children) per
+ * parent gaat nooit boven de oorspronkelijke obligatie.
+ *
+ * Forward-only / no clawback: een vrijgegeven child wordt nooit teruggedraaid.
+ *
+ * Idempotent op 2 niveaus:
+ *  1. idempotency_key = `${parent.id}:pay:${paymentId}` blokkeert dat
+ *     dezelfde betaling 2x een slice spawnt voor dezelfde parent. Bij 23505
+ *     (unique-violation) wordt de spawn voor die parent overgeslagen.
+ *  2. Parent wordt geselecteerd op status IN ('pending','wachten_op_betaling')
+ *     EN parent_entry_id IS NULL. Children zelf hebben parent_entry_id !=
+ *     NULL en vallen daarmee buiten de query — re-runs krijgen alleen de
+ *     nog-niet-vrijgegeven parents te zien.
+ *
+ * Bij fullyPaid=true wordt een SETTLE-child gespawnd voor elke parent met
+ * resterende amount > 0 (backstop tegen afrondings-/race-restanten).
+ *
+ * Args:
+ *   customerId       (verplicht) — klant-id waarvan de obligaties zijn
+ *   sourceInvoiceId  (optioneel) — bij voorkeur scoping op invoice; valt
+ *                                   anders terug op customer_id alleen
+ *   paymentId        (verplicht) — payments.id, gebruikt voor idempotency_key
+ *   paymentAmount    (verplicht) — bedrag dat zojuist binnen kwam (>0)
+ *   invoiceTotal     (verplicht) — invoices.amount_total (>0)
+ *   fullyPaid        (default false) — als invoice nu volledig betaald is,
+ *                                       spawn ook restje-children
+ *
+ * Returnt: { released: <int children gespawnd>, ids: uuid[] }.
+ */
+export async function releaseProportionalForPayment({
+  customerId,
+  sourceInvoiceId = null,
+  paymentId,
+  paymentAmount,
+  invoiceTotal,
+  fullyPaid = false,
+} = {}) {
+  if (!customerId) throw new Error('releaseProportionalForPayment: customerId vereist');
+  if (!paymentId)  throw new Error('releaseProportionalForPayment: paymentId vereist');
+  const payAmt = Number(paymentAmount) || 0;
+  const invTot = Number(invoiceTotal)  || 0;
+  if (payAmt <= 0 || invTot <= 0) {
+    // Niets om vrij te geven; behandel als no-op zodat caller geen 500 krijgt.
+    return { released: 0, ids: [] };
+  }
+  const ratio = payAmt / invTot; // proportionele factor van deze betaling
+
+  // 1) Parents ophalen — alleen ECHTE obligaties (parent_entry_id IS NULL)
+  //    die nog niet (volledig) zijn vrijgegeven.
+  let q = supabaseAdmin
+    .from('mentor_ledger_entries')
+    .select('id, mentor_user_id, team_member_id, event_id, customer_id, attendee_id, source_invoice_id, source_quote_id, amount')
+    .eq('entry_type', 'bonus')
+    .eq('customer_id', customerId)
+    .in('status', ['pending', 'wachten_op_betaling'])
+    .is('parent_entry_id', null);
+  if (sourceInvoiceId) q = q.eq('source_invoice_id', sourceInvoiceId);
+  const { data: parents, error: pErr } = await q;
+  if (pErr) throw new Error('releaseProportionalForPayment select: ' + pErr.message);
+  if (!parents || parents.length === 0) return { released: 0, ids: [] };
+
+  const nowIso = new Date().toISOString();
+  const releasedIds = [];
+
+  for (const parent of parents) {
+    const remaining = Number(parent.amount) || 0;
+    if (remaining <= 0) continue;
+
+    // Proportionele slice gecapt op resterend.
+    let slice = Math.round(remaining * ratio * 100) / 100;
+    if (slice > remaining) slice = remaining;
+    if (slice <= 0) continue;
+
+    // Insert child — bij 23505 (idempotency_key bestaat al) overslaan.
+    const childRow = {
+      mentor_user_id   : parent.mentor_user_id,
+      team_member_id   : parent.team_member_id,
+      event_id         : parent.event_id,
+      entry_type       : 'bonus',
+      attendee_id      : parent.attendee_id,
+      customer_id      : parent.customer_id,
+      amount           : slice,
+      status           : 'vrijgegeven',
+      source_invoice_id: parent.source_invoice_id || sourceInvoiceId || null,
+      source_quote_id  : parent.source_quote_id || null,
+      parent_entry_id  : parent.id,
+      released_at      : nowIso,
+      idempotency_key  : `${parent.id}:pay:${paymentId}`,
+    };
+    const { data: insertedChild, error: cErr } = await supabaseAdmin
+      .from('mentor_ledger_entries')
+      .insert(childRow)
+      .select('id')
+      .maybeSingle();
+    if (cErr) {
+      if (cErr.code === '23505') {
+        // Reeds verwerkt voor deze (parent, payment) — sla over.
+        continue;
+      }
+      throw new Error('releaseProportionalForPayment child insert: ' + cErr.message);
+    }
+    if (insertedChild?.id) releasedIds.push(insertedChild.id);
+
+    // Verlaag parent.amount.
+    const newAmount = Math.round((remaining - slice) * 100) / 100;
+    const { error: uErr } = await supabaseAdmin
+      .from('mentor_ledger_entries')
+      .update({ amount: newAmount })
+      .eq('id', parent.id);
+    if (uErr) throw new Error('releaseProportionalForPayment parent update: ' + uErr.message);
+    parent.amount = newAmount; // lokaal voor evt. settle hieronder
+  }
+
+  // 2) Backstop bij fullyPaid: spawn settle-children voor restjes
+  //    (afronding, gedeeltelijke-betalingen die door rounding nooit tot 0
+  //    convergeren). Aparte idempotency_key zodat hij naast de :pay:-child
+  //    kan bestaan op dezelfde parent+payment.
+  if (fullyPaid) {
+    for (const parent of parents) {
+      const rest = Number(parent.amount) || 0;
+      if (rest <= 0) continue;
+
+      const settleRow = {
+        mentor_user_id   : parent.mentor_user_id,
+        team_member_id   : parent.team_member_id,
+        event_id         : parent.event_id,
+        entry_type       : 'bonus',
+        attendee_id      : parent.attendee_id,
+        customer_id      : parent.customer_id,
+        amount           : rest,
+        status           : 'vrijgegeven',
+        source_invoice_id: parent.source_invoice_id || sourceInvoiceId || null,
+        source_quote_id  : parent.source_quote_id || null,
+        parent_entry_id  : parent.id,
+        released_at      : nowIso,
+        idempotency_key  : `${parent.id}:settle:${paymentId}`,
+      };
+      const { data: settled, error: sErr } = await supabaseAdmin
+        .from('mentor_ledger_entries')
+        .insert(settleRow)
+        .select('id')
+        .maybeSingle();
+      if (sErr) {
+        if (sErr.code === '23505') continue;
+        throw new Error('releaseProportionalForPayment settle insert: ' + sErr.message);
+      }
+      if (settled?.id) releasedIds.push(settled.id);
+
+      const { error: u2Err } = await supabaseAdmin
+        .from('mentor_ledger_entries')
+        .update({ amount: 0 })
+        .eq('id', parent.id);
+      if (u2Err) throw new Error('releaseProportionalForPayment parent settle update: ' + u2Err.message);
+    }
+  }
+
+  return { released: releasedIds.length, ids: releasedIds };
+}
+
+/**
  * Geannuleerde offerte → bonus-entries gekoppeld aan die deal (via
  * source_quote_id) op 'pending'/'wachten_op_betaling' → 'geannuleerd'.
  * Idempotent op rows die al geannuleerd zijn.
