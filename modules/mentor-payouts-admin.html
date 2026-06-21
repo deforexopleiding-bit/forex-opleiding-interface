@@ -287,6 +287,17 @@
 
     host.innerHTML = `
       <div class="detail-meta">${meta.join(' · ') || '<em>Nog niet gegenereerd</em>'}</div>
+      <div style="margin:-4px 0 10px">
+        <button type="button" class="coach-debug-btn"
+                data-mentor-id="${esc(p.mentor_user_id)}"
+                data-period="${esc(p.period_month)}"
+                data-idx="${esc(idx)}"
+                style="display:inline-flex;align-items:center;gap:4px;padding:4px 9px;font-size:11.5px;font-weight:600;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);cursor:pointer;font-family:inherit">
+          🔍 Coaching-debug
+        </button>
+        <pre class="coach-debug-out" id="coach-debug-out-${esc(idx)}"
+             style="display:none;margin-top:8px;background:#0f172a;color:#e2e8f0;padding:10px 12px;border-radius:8px;font-size:11px;line-height:1.45;overflow-x:auto;max-height:360px;white-space:pre-wrap;word-break:break-word"></pre>
+      </div>
       <table class="lines-table">
         <thead>
           <tr>
@@ -342,6 +353,34 @@
       addBtn.addEventListener('click', () =>
         addAdjustment(addBtn.dataset.payoutId, addBtn.dataset.mentorId, addBtn.dataset.period, addBtn.dataset.idx, host)
       );
+    }
+    const debugBtn = host.querySelector('.coach-debug-btn');
+    if (debugBtn) {
+      debugBtn.addEventListener('click', () =>
+        runCoachingDebug(debugBtn.dataset.mentorId, debugBtn.dataset.period, debugBtn.dataset.idx)
+      );
+    }
+  }
+
+  // ── Coaching-debug — toont de 1-op-1 telling zoals de core 'm ziet ────
+  async function runCoachingDebug(mentorUserId, periodMonth, idx) {
+    const out = document.getElementById('coach-debug-out-' + idx);
+    if (!out) return;
+    const apiFetch = window.AgentShared?.apiFetch;
+    if (typeof apiFetch !== 'function') return;
+    out.style.display = 'block';
+    out.textContent = 'Laden…';
+    // period_month uit detail-payload kan 'YYYY-MM-01' zijn; endpoint wil 'YYYY-MM'.
+    const ym = String(periodMonth || '').slice(0, 7);
+    try {
+      const r = await apiFetch(
+        `/api/mentor-coaching-debug?mentor_user_id=${encodeURIComponent(mentorUserId)}&period_month=${encodeURIComponent(ym)}`
+      );
+      const d = await r.json();
+      if (!r.ok) throw new Error(d?.error || 'debug-fetch faalde');
+      out.textContent = JSON.stringify(d, null, 2);
+    } catch (e) {
+      out.textContent = 'Fout: ' + (e?.message || e);
     }
   }
 
