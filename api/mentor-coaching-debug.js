@@ -33,6 +33,18 @@ function asBool(v) {
   return !!v;
 }
 
+// Bubble option-set veld → leesbare string. String blijft string; object met
+// .display/.text wordt geplat naar die waarde; alles anders → null.
+function pickOption(v) {
+  if (v == null) return null;
+  if (typeof v === 'string') return v.trim() || null;
+  if (typeof v === 'object') {
+    const d = v.display || v.text || v.value || null;
+    return d ? String(d).trim() || null : null;
+  }
+  return null;
+}
+
 function readFirst(u, keys) {
   if (!u) return undefined;
   for (const k of keys) {
@@ -172,12 +184,28 @@ export default async function handler(req, res) {
     let doneAndNoshow = 0;
     const counted = [];
     const MAX_COUNTED = 120;
+
+    // Learntype-verdeling: groepeer in-range sessies op learn_type1 option-set.
+    // Sleutel '(none)' voor sessies zonder lt-waarde zodat alles getelt blijft.
+    const byLearnType = {};
+    function ensureLt(key) {
+      if (!byLearnType[key]) {
+        byLearnType[key] = { done: 0, done_not_noshow: 0, noshow: 0 };
+      }
+      return byLearnType[key];
+    }
+    let total_done = 0;
+    let total_done_not_noshow = 0;
+    let total_noshow = 0;
+
     for (const s of sessionRows) {
-      const done    = asBool(readFirst(s, ['isdone_boolean', 'isDone']));
-      const ns      = asBool(readFirst(s, ['noshow_boolean', 'NoShow']));
-      const compDt  = readFirst(s, ['completed_date_date', 'completed date']);
+      const done     = asBool(readFirst(s, ['isdone_boolean', 'isDone']));
+      const ns       = asBool(readFirst(s, ['noshow_boolean', 'NoShow']));
+      const compDt   = readFirst(s, ['completed_date_date', 'completed date']);
       const memberId = readFirst(s, ['member_user', 'member']);
-      const inWin   = inRange(compDt, period.fromMs, period.toMsIncl);
+      const lt       = pickOption(readFirst(s, ['learn_type1_option_os___learning_type']));
+      const inWin    = inRange(compDt, period.fromMs, period.toMsIncl);
+
       if (done && inWin) {
         oneOnOne += 1;
         if (counted.length < MAX_COUNTED) {
@@ -186,7 +214,19 @@ export default async function handler(req, res) {
             done: !!done,
             ns  : !!ns,
             m   : memberId ? String(memberId) : null,
+            lt  : lt,
           });
+        }
+        // byLearnType + totals — alleen voor in-range done sessies.
+        const cell = ensureLt(lt || '(none)');
+        cell.done += 1;
+        total_done += 1;
+        if (ns) {
+          cell.noshow += 1;
+          total_noshow += 1;
+        } else {
+          cell.done_not_noshow += 1;
+          total_done_not_noshow += 1;
         }
       }
       if (done && ns && inWin) {
@@ -208,6 +248,10 @@ export default async function handler(req, res) {
       sessionSampleKeys,
       oneOnOne_count        : oneOnOne,
       doneAndNoshow_in_range: doneAndNoshow,
+      byLearnType,
+      total_done,
+      total_done_not_noshow,
+      total_noshow,
       counted,
     });
   } catch (e) {
