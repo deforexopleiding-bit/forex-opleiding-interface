@@ -399,6 +399,87 @@ export default async function handler(req, res) {
         sample: dupeSample,
       };
 
+      // ── Dedup-reconcile (strateeg-canoniek) ────────────────────────────
+      // Dedupe probeArr op session._id zodat een per ongeluk dubbel
+      // teruggekomen rij maar één keer telt. Herbereken vervolgens Alpha-bucket
+      // + per-student vanaf nul, zodat de som per_student gegarandeerd gelijk
+      // is aan seppe_alpha_dedup (reconcile-velden onderaan).
+      const seenIds = new Set();
+      const uniqueSessions = [];
+      for (const s of probeArr) {
+        const id = s && s._id ? String(s._id) : null;
+        if (!id) {
+          uniqueSessions.push(s); // geen id → kan niet dedupe'n; toch meenemen.
+          continue;
+        }
+        if (seenIds.has(id)) continue;
+        seenIds.add(id);
+        uniqueSessions.push(s);
+      }
+      const probe_fetched_raw = probeArr.length;
+      const probe_unique      = uniqueSessions.length;
+      const probe_dupe_count  = probe_fetched_raw - probe_unique;
+
+      let seppeAlphaCalls = 0;
+      let seppeAlphaNs    = 0;
+      const alphaPerStudentDedup = new Map(); // member → { calls, noshow }
+      for (const s of uniqueSessions) {
+        const cb = readFirst(s, ['Created By', 'created_by']);
+        if (!cb || String(cb) !== seppeBubbleId) continue;
+        const lt = pickOption(readFirst(s, ['learn_type1_option_os___learning_type']));
+        if (lt !== 'Alpha Program') continue;
+        const sd = readFirst(s, ['starting_date_date', 'starting date']);
+        if (!inRange(sd, period.fromMs, period.toMsIncl)) continue;
+        const done = asBool(readFirst(s, ['isdone_boolean', 'isDone']));
+        if (!done) continue;
+        const ns = asBool(readFirst(s, ['noshow_boolean', 'NoShow']));
+
+        const member = readFirst(s, ['member_user', 'member']);
+        const memberStr = member ? String(member) : '(none)';
+        let bucket = alphaPerStudentDedup.get(memberStr);
+        if (!bucket) {
+          bucket = { calls: 0, noshow: 0 };
+          alphaPerStudentDedup.set(memberStr, bucket);
+        }
+        if (ns) { bucket.noshow += 1; seppeAlphaNs    += 1; }
+        else    { bucket.calls  += 1; seppeAlphaCalls += 1; }
+      }
+
+      const seppe_alpha_dedup = {
+        calls            : seppeAlphaCalls,
+        noshow           : seppeAlphaNs,
+        total            : seppeAlphaCalls + seppeAlphaNs,
+        students_distinct: alphaPerStudentDedup.size,
+      };
+
+      const seppe_alpha_per_student_dedup = [];
+      let perstudent_sum_calls   = 0;
+      let perstudent_sum_noshow  = 0;
+      let current_students_in_set = 0;
+      let drifted_students_in_set = 0;
+      for (const [memberStr, bucket] of alphaPerStudentDedup.entries()) {
+        const isCurrent = studentIdsSet.has(memberStr);
+        if (isCurrent) current_students_in_set += 1;
+        else           drifted_students_in_set += 1;
+        perstudent_sum_calls  += bucket.calls;
+        perstudent_sum_noshow += bucket.noshow;
+        seppe_alpha_per_student_dedup.push({
+          member_user: memberStr,
+          current    : isCurrent,
+          calls      : bucket.calls,
+          noshow     : bucket.noshow,
+        });
+      }
+      seppe_alpha_per_student_dedup.sort((a, b) => b.calls - a.calls);
+
+      const reconcile = {
+        perstudent_sum_calls,
+        perstudent_sum_noshow,
+        distinct_students         : alphaPerStudentDedup.size,
+        current_students_in_set,
+        drifted_students_in_set,
+      };
+
       // ── seppe_alpha_split / per_student / drifted_detail ────────────────
       // current = member ∈ huidige student-bucket (studentIdsSet); drifted = rest.
       const seppe_alpha_split = {
@@ -443,6 +524,9 @@ export default async function handler(req, res) {
         fetched,
         capped,
         month_total_all  : fetched,
+        probe_fetched_raw,
+        probe_unique,
+        probe_dupe_count,
         cb_histogram,
         seppe_match: {
           done_not_noshow: seppeDoneNotNs,
@@ -455,6 +539,9 @@ export default async function handler(req, res) {
         seppe_alpha_per_student,
         seppe_drifted_detail,
         seppe_alpha_same_day_dupes,
+        seppe_alpha_dedup,
+        seppe_alpha_per_student_dedup,
+        reconcile,
         seppe_students_count      : seppeStudentIds.length,
         drifted_students_count    : driftedStudents.length,
         drifted_students          : driftedStudents.slice(0, 50),
