@@ -114,4 +114,15 @@ window._authSharedReady = (async function () {
       return session?.access_token || null;
     },
   };
+
+  // Sessie-herstel forceren vóór de IIFE returnt. Zonder deze warmup is er een
+  // race waarbij pagina's die `await window._authSharedReady` doen, daarna
+  // toch een lege sessie + tokenLen=0 zien (Supabase laadt de persisted sessie
+  // namelijk lazy bij de eerste auth-call). Door hier 1x getSession() te
+  // awaiten is "ready" gegarandeerd "sessie beschikbaar".
+  try {
+    await window.AuthShared.getSession();
+  } catch (e) {
+    console.warn('[supabase-client] session warmup faalde:', e?.message || e);
+  }
 })();
