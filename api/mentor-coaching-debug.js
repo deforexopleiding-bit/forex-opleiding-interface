@@ -198,19 +198,29 @@ export default async function handler(req, res) {
     let total_done_not_noshow = 0;
     let total_noshow = 0;
 
+    // byDateField: vergelijk telling op completed_date vs starting_date over
+    // ALLE opgehaalde sessies (niet alleen de in-range bucket hierboven).
+    const byDateField = {
+      completed_in_range: { done: 0, done_not_noshow: 0, noshow: 0 },
+      starting_in_range : { done: 0, done_not_noshow: 0, noshow: 0 },
+    };
+
     for (const s of sessionRows) {
       const done     = asBool(readFirst(s, ['isdone_boolean', 'isDone']));
       const ns       = asBool(readFirst(s, ['noshow_boolean', 'NoShow']));
       const compDt   = readFirst(s, ['completed_date_date', 'completed date']);
+      const startDt  = readFirst(s, ['starting_date_date', 'starting date']);
       const memberId = readFirst(s, ['member_user', 'member']);
       const lt       = pickOption(readFirst(s, ['learn_type1_option_os___learning_type']));
-      const inWin    = inRange(compDt, period.fromMs, period.toMsIncl);
+      const inWin    = inRange(compDt,  period.fromMs, period.toMsIncl);
+      const inWinSt  = inRange(startDt, period.fromMs, period.toMsIncl);
 
       if (done && inWin) {
         oneOnOne += 1;
         if (counted.length < MAX_COUNTED) {
           counted.push({
-            c   : compDt || null,
+            c   : compDt  || null,
+            s   : startDt || null,
             done: !!done,
             ns  : !!ns,
             m   : memberId ? String(memberId) : null,
@@ -232,6 +242,19 @@ export default async function handler(req, res) {
       if (done && ns && inWin) {
         doneAndNoshow += 1;
       }
+
+      // byDateField — alleen done sessies meetellen, gesplitst op datumveld
+      // dat in de maand valt. Onafhankelijk van counted/byLearnType.
+      if (done && inWin) {
+        byDateField.completed_in_range.done += 1;
+        if (ns) byDateField.completed_in_range.noshow          += 1;
+        else    byDateField.completed_in_range.done_not_noshow += 1;
+      }
+      if (done && inWinSt) {
+        byDateField.starting_in_range.done += 1;
+        if (ns) byDateField.starting_in_range.noshow          += 1;
+        else    byDateField.starting_in_range.done_not_noshow += 1;
+      }
     }
 
     const sessionSampleKeys = sessionRows[0] ? Object.keys(sessionRows[0]) : [];
@@ -249,6 +272,7 @@ export default async function handler(req, res) {
       oneOnOne_count        : oneOnOne,
       doneAndNoshow_in_range: doneAndNoshow,
       byLearnType,
+      byDateField,
       total_done,
       total_done_not_noshow,
       total_noshow,
