@@ -298,9 +298,23 @@
         <span class="approve-status" id="approve-status-${esc(idx)}" style="font-size:11.5px;color:var(--text-faint);margin-left:8px"></span>
       </div>` : '';
 
+    // Fase 3 — alleen bij status 'goedgekeurd' de markeer-uitbetaald-knop renderen.
+    const showPaidBtn = (p.status === 'goedgekeurd');
+    const paidBlock = showPaidBtn ? `
+      <div style="margin:6px 0 10px">
+        <button type="button" class="paid-btn"
+                data-payout-id="${esc(p.id)}"
+                data-idx="${esc(idx)}"
+                style="display:inline-flex;align-items:center;gap:6px;padding:7px 13px;font-size:12.5px;font-weight:600;border:0;border-radius:7px;background:#0a2f63;color:#fff;cursor:pointer;font-family:inherit">
+          💶 Markeer als uitbetaald
+        </button>
+        <span class="paid-status" id="paid-status-${esc(idx)}" style="font-size:11.5px;color:var(--text-faint);margin-left:8px"></span>
+      </div>` : '';
+
     host.innerHTML = `
       <div class="detail-meta">${meta.join(' · ') || '<em>Nog niet gegenereerd</em>'}</div>
       ${approveBlock}
+      ${paidBlock}
       <div style="margin:-4px 0 10px">
         <button type="button" class="coach-debug-btn"
                 data-mentor-id="${esc(p.mentor_user_id)}"
@@ -379,6 +393,50 @@
       approveBtn.addEventListener('click', () =>
         approvePayout(approveBtn.dataset.payoutId, approveBtn.dataset.idx, approveBtn)
       );
+    }
+    const paidBtn = host.querySelector('.paid-btn');
+    if (paidBtn) {
+      paidBtn.addEventListener('click', () =>
+        markPaid(paidBtn.dataset.payoutId, paidBtn.dataset.idx, paidBtn)
+      );
+    }
+  }
+
+  // ── Markeer als uitbetaald (fase 3) ────────────────────────────────────
+  async function markPaid(payoutId, idx, btn) {
+    const apiFetch = window.AgentShared?.apiFetch;
+    if (typeof apiFetch !== 'function') return;
+    const status = document.getElementById('paid-status-' + idx);
+    if (!window.confirm('Rapport markeren als uitbetaald? Dit boekt de ledger-entries definitief in en kan niet meer worden teruggedraaid.')) return;
+    btn.disabled = true;
+    if (status) status.textContent = 'Markeren…';
+    try {
+      const r = await apiFetch('/api/mentor-payout-mark-paid', {
+        method : 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body   : JSON.stringify({ payout_id: payoutId }),
+      });
+      const d = await r.json();
+      if (!r.ok) {
+        // BONUS_DRIFT krijgt een specifieke, actiegerichte melding.
+        if (d?.code === 'BONUS_DRIFT') {
+          if (status) status.textContent = '⚠️ Bonusbedrag is gewijzigd sinds goedkeuren. Keur het rapport opnieuw goed voordat je het op uitbetaald zet.';
+          btn.disabled = false;
+          return;
+        }
+        throw new Error(d?.error || 'markeren faalde');
+      }
+      if (status) {
+        const n = Number(d.ledger_marked) || 0;
+        status.textContent = '✅ Uitbetaald · ' + n + ' ledger-' + (n === 1 ? 'entry' : 'entries') + ' definitief geboekt';
+      }
+      btn.style.display = 'none';
+      _detailCache.delete(payoutId);
+      await refetchDetail(payoutId, idx);
+      await loadList();
+    } catch (e) {
+      if (status) status.textContent = 'Fout: ' + (e?.message || e);
+      btn.disabled = false;
     }
   }
 
