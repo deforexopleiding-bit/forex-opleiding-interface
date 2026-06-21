@@ -469,6 +469,7 @@
     };
     const rows = payouts.map((p) => {
       // Bij goedgekeurde rapporten een CTA: factuur insturen voor het bedrag incl. btw.
+      // Bij uitbetaalde rapporten verdwijnt deze CTA (status !== 'goedgekeurd').
       const cta = (p.status === 'goedgekeurd')
         ? `<div style="margin-top:4px;font-size:11.5px;color:var(--text-dim)">
              📨 Stuur je factuur voor dit bedrag (<strong>${fmtEUR(p.total)}</strong> incl. btw).
