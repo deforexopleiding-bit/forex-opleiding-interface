@@ -3,13 +3,20 @@
 // GET → self-scope historie van mentor_payouts voor de ingelogde mentor.
 // Read-only. RBAC: mentor.module.access.
 //
+// Filter: alleen status IN ('goedgekeurd','uitbetaald') — concepten zijn
+// finance-only en mogen NOOIT bij de mentor zichtbaar zijn (de strateeg /
+// finance-medewerker controleert het rapport eerst).
+//
 // Response 200:
 //   { ok: true, scope: 'self', payouts: [
-//       { id, period_month, total, status, created_at, paid_at }, ...
+//       { id, period_month, total, total_excl, btw_amount, status,
+//         created_at, paid_at }, ...
 //   ] }
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
+
+const VISIBLE_STATUSES = ['goedgekeurd', 'uitbetaald'];
 
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
@@ -29,8 +36,9 @@ export default async function handler(req, res) {
   try {
     const { data, error } = await supabaseAdmin
       .from('mentor_payouts')
-      .select('id, period_month, total, status, created_at, paid_at')
+      .select('id, period_month, total, total_excl, btw_amount, status, created_at, paid_at')
       .eq('mentor_user_id', user.id)
+      .in('status', VISIBLE_STATUSES)
       .order('created_at', { ascending: false })
       .limit(200);
     if (error) throw new Error('payouts fetch: ' + error.message);
@@ -38,7 +46,9 @@ export default async function handler(req, res) {
     const payouts = (data || []).map((p) => ({
       id           : p.id,
       period_month : p.period_month,
-      total        : Number(p.total) || 0,
+      total        : Number(p.total)      || 0,
+      total_excl   : Number(p.total_excl) || 0,
+      btw_amount   : Number(p.btw_amount) || 0,
       status       : p.status || null,
       created_at   : p.created_at,
       paid_at      : p.paid_at,
