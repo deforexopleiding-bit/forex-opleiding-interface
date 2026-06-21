@@ -83,6 +83,38 @@ export async function bubbleList(type, constraints = [], opts = {}) {
   return { results };
 }
 
+// Robuuste display-helper voor Bubble User-objecten. Bubble's veld-keys
+// variëren tussen apps ('first name' vs 'first_name' vs 'Voornaam'); email
+// staat vaak genest onder authentication.email.email. Deze helper pakt de
+// eerste niet-lege variant en geeft { name, email } terug. Herbruikt in
+// bubble-mentors-list + (straks) de studenten-proxy.
+function pick(u, keys) {
+  if (!u || typeof u !== 'object') return null;
+  for (const k of keys) {
+    const v = u[k];
+    if (v != null && String(v).trim() !== '') return String(v).trim();
+  }
+  return null;
+}
+export function bubbleUserDisplay(u) {
+  if (!u || typeof u !== 'object') return { name: '', email: null };
+  const firstName = pick(u, ['first name', 'first_name', 'First Name', 'firstname', 'voornaam', 'Voornaam']);
+  const lastName  = pick(u, ['last name',  'last_name',  'Last Name',  'lastname',  'achternaam','Achternaam']);
+  let name = [firstName, lastName].filter(Boolean).join(' ').trim();
+  if (!name) {
+    name = pick(u, ['name', 'Name', 'full_name', 'Full Name', 'volledige naam']) || '';
+  }
+  // Email zit bij authenticated users meestal genest:
+  //   u.authentication.email.email = 'foo@bar.nl'
+  // Custom-velden komen onder verschillende keys.
+  const nestedEmail = u && u.authentication && u.authentication.email && u.authentication.email.email;
+  const rawEmail = (typeof nestedEmail === 'string' && nestedEmail.trim())
+    ? nestedEmail.trim()
+    : pick(u, ['email', 'Email', 'e-mail', 'E-mail']);
+  const email = rawEmail ? String(rawEmail).toLowerCase() : null;
+  return { name, email };
+}
+
 // Eén object ophalen; null bij 404 (zodat callers expliciet "niet gevonden"
 // kunnen onderscheiden van een echte fout).
 export async function bubbleGet(type, id) {
