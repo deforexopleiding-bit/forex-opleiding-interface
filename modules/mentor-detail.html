@@ -109,6 +109,15 @@
       <h2><i class="ti ti-list-details"></i> Events (compleet)</h2>
       <div id="myEventsWrap"></div>
     </div>
+
+    <!-- Payout-instellingen — alleen zichtbaar voor users met mentor.payout.manage.
+         Diepblauw brand-accent via inline style; tabel-look matcht andere secties. -->
+    <div class="section" id="payoutSettingsSection" hidden style="--brand-deep:#0a2f63;--brand-azure:#1e6cd6">
+      <h2><i class="ti ti-settings-cog"></i> Payout-instellingen</h2>
+      <div id="payoutSettingsWrap">
+        <div class="empty-state"><span class="skeleton" style="width:120px"></span></div>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -416,6 +425,241 @@
     }
     if (calendar) renderCalendar(calendar.events || []);
     if (myEvents) renderMyEvents(myEvents.events || []);
+
+    // Payout-instellingen (alleen voor users met mentor.payout.manage).
+    await loadPayoutSettings(mentorUserId);
+  }
+
+  // ── Payout-instellingen ──────────────────────────────────────────────────
+  // Permission-cache: één lookup per page-load.
+  let _payoutManageAllowed = null;
+  async function payoutManageAllowed() {
+    if (_payoutManageAllowed !== null) return _payoutManageAllowed;
+    try {
+      if (!window.RBAC || typeof window.RBAC.ensurePermissionsLoaded !== 'function') {
+        _payoutManageAllowed = false; return false;
+      }
+      const perms = await window.RBAC.ensurePermissionsLoaded();
+      _payoutManageAllowed = !!(perms && (perms.has('*') || perms.has('mentor.payout.manage')));
+      return _payoutManageAllowed;
+    } catch { _payoutManageAllowed = false; return false; }
+  }
+
+  // Houd huidige mentor + settings vast — handlers hebben deze nodig.
+  let _payoutSettings = { mentorUserId: null, config: { travel_enabled: false, travel_day_rate_incl: 0 }, recurring: [] };
+
+  async function loadPayoutSettings(mentorUserId) {
+    const section = document.getElementById('payoutSettingsSection');
+    const wrap    = document.getElementById('payoutSettingsWrap');
+    if (!section || !wrap) return;
+    if (!(await payoutManageAllowed())) {
+      section.hidden = true;
+      return;
+    }
+    section.hidden = false;
+    wrap.innerHTML = '<div class="empty-state"><span class="skeleton" style="width:120px"></span></div>';
+    const apiFetch = window.AgentShared?.apiFetch;
+    if (typeof apiFetch !== 'function') { wrap.innerHTML = '<div class="empty-state">apiFetch niet beschikbaar.</div>'; return; }
+    try {
+      const r = await apiFetch('/api/mentor-payout-settings-get?mentor_user_id=' + encodeURIComponent(mentorUserId));
+      const d = await r.json();
+      if (!r.ok) throw new Error(d?.error || 'settings-fetch faalde');
+      _payoutSettings = {
+        mentorUserId,
+        config   : d.config    || { travel_enabled: false, travel_day_rate_incl: 0 },
+        recurring: d.recurring || [],
+      };
+      renderPayoutSettings();
+    } catch (e) {
+      console.error('[mentor-detail] payout-settings:', e?.message || e);
+      wrap.innerHTML = `<div class="empty-state" style="border-color:#fecaca;color:#b91c1c"><i class="ti ti-alert-triangle"></i>Instellingen ophalen mislukt: ${esc(e?.message || e)}</div>`;
+    }
+  }
+
+  function renderPayoutSettings() {
+    const wrap = document.getElementById('payoutSettingsWrap');
+    if (!wrap) return;
+    const c = _payoutSettings.config;
+    const r = _payoutSettings.recurring;
+
+    const recurringRows = r.length === 0
+      ? `<tr><td colspan="4" style="text-align:center;color:var(--text-faint);padding:14px">Nog geen vaste posten.</td></tr>`
+      : r.map((it) => `
+          <tr data-rec-id="${esc(it.id)}">
+            <td>${esc(it.label)}</td>
+            <td class="num">${fmtEUR(it.amount_incl)}</td>
+            <td>${it.active ? '<span class="badge badge-green">Actief</span>' : '<span class="badge badge-grey">Inactief</span>'}</td>
+            <td class="num">
+              <button type="button" class="ps-btn-secondary ps-rec-edit"  data-id="${esc(it.id)}">Bewerken</button>
+              <button type="button" class="ps-btn-secondary ps-rec-del"   data-id="${esc(it.id)}">Verwijderen</button>
+            </td>
+          </tr>`).join('');
+
+    wrap.innerHTML = `
+      <style>
+        #payoutSettingsWrap .ps-card { background: var(--bg-elev); border: 1px solid var(--border); border-radius: 10px; padding: 16px 18px; margin-bottom: 16px; }
+        #payoutSettingsWrap .ps-card h3 { font-size: 13.5px; font-weight: 700; margin-bottom: 10px; color: var(--text); display:flex; align-items:center; gap:6px }
+        #payoutSettingsWrap .ps-card h3 i { color: var(--text-dim) }
+        #payoutSettingsWrap .ps-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+        #payoutSettingsWrap .ps-row label { font-size: 12.5px; color: var(--text-dim); font-weight: 600; }
+        #payoutSettingsWrap input[type=number], #payoutSettingsWrap input[type=text] { padding: 7px 10px; font-size: 13px; border: 1px solid var(--border); border-radius: 7px; background: var(--bg); color: var(--text); font-family: inherit; min-width: 100px; }
+        #payoutSettingsWrap input[type=text] { min-width: 220px; }
+        #payoutSettingsWrap .ps-toggle { display:inline-flex; align-items:center; gap:6px; cursor:pointer; user-select:none }
+        #payoutSettingsWrap .ps-btn-primary   { display:inline-flex; align-items:center; gap:6px; padding:7px 12px; font-size:12.5px; font-weight:600; border:0; border-radius:7px; background:var(--brand-deep,#0a2f63); color:#fff; cursor:pointer; font-family:inherit }
+        #payoutSettingsWrap .ps-btn-primary:hover:not([disabled])   { background:var(--brand-azure,#1e6cd6) }
+        #payoutSettingsWrap .ps-btn-secondary { display:inline-flex; align-items:center; gap:4px; padding:5px 10px; font-size:12px; font-weight:600; border:1px solid var(--border); border-radius:7px; background:var(--bg); color:var(--text); cursor:pointer; font-family:inherit; margin-left:6px }
+        #payoutSettingsWrap .ps-btn-secondary:hover:not([disabled]) { background:var(--bg-elev) }
+        #payoutSettingsWrap .ps-status { font-size:11.5px; color:var(--text-faint); margin-left:10px }
+      </style>
+
+      <div class="ps-card">
+        <h3><i class="ti ti-car"></i> Reiskosten</h3>
+        <div class="ps-row">
+          <label class="ps-toggle">
+            <input type="checkbox" id="psTravelEnabled" ${c.travel_enabled ? 'checked' : ''} />
+            Reiskosten meerekenen
+          </label>
+          <label for="psTravelRate">Dagtarief (incl. btw):</label>
+          <input type="number" id="psTravelRate" min="0" step="0.01" value="${Number(c.travel_day_rate_incl) || 0}" />
+          <button type="button" class="ps-btn-primary" id="psSaveConfig">Opslaan</button>
+          <span class="ps-status" id="psConfigStatus"></span>
+        </div>
+      </div>
+
+      <div class="ps-card">
+        <h3><i class="ti ti-list-numbers"></i> Vaste maandposten</h3>
+        <table class="data-table" style="margin-bottom:12px">
+          <thead>
+            <tr>
+              <th>Label</th>
+              <th class="num">Bedrag (incl)</th>
+              <th>Status</th>
+              <th class="num">Acties</th>
+            </tr>
+          </thead>
+          <tbody>${recurringRows}</tbody>
+        </table>
+        <div class="ps-row" style="margin-top:6px">
+          <input type="text"   id="psRecLabel"  placeholder="Label (bv. Telefoonvergoeding)" />
+          <input type="number" id="psRecAmount" min="0" step="0.01" placeholder="Bedrag incl" />
+          <label class="ps-toggle"><input type="checkbox" id="psRecActive" checked /> Actief</label>
+          <button type="button" class="ps-btn-primary" id="psAddRec">Toevoegen</button>
+          <span class="ps-status" id="psRecStatus"></span>
+        </div>
+      </div>
+    `;
+
+    // Wiring.
+    document.getElementById('psSaveConfig').addEventListener('click', savePayoutConfig);
+    document.getElementById('psAddRec')   .addEventListener('click', addRecurring);
+    document.querySelectorAll('.ps-rec-edit').forEach((b) => b.addEventListener('click', () => editRecurringPrompt(b.dataset.id)));
+    document.querySelectorAll('.ps-rec-del') .forEach((b) => b.addEventListener('click', () => deleteRecurring(b.dataset.id)));
+  }
+
+  async function savePayoutConfig() {
+    const apiFetch = window.AgentShared?.apiFetch;
+    if (typeof apiFetch !== 'function') return;
+    const enabled = document.getElementById('psTravelEnabled').checked;
+    const rate    = Number(document.getElementById('psTravelRate').value) || 0;
+    const status  = document.getElementById('psConfigStatus');
+    const btn     = document.getElementById('psSaveConfig');
+    btn.disabled = true; status.textContent = 'Opslaan…';
+    try {
+      const r = await apiFetch('/api/mentor-payout-config-set', {
+        method : 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body   : JSON.stringify({
+          mentor_user_id      : _payoutSettings.mentorUserId,
+          travel_enabled      : enabled,
+          travel_day_rate_incl: rate,
+        }),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d?.error || 'save faalde');
+      _payoutSettings.config = d.config || _payoutSettings.config;
+      status.textContent = 'Opgeslagen.';
+      setTimeout(() => { status.textContent = ''; }, 2000);
+    } catch (e) {
+      status.textContent = 'Fout: ' + (e?.message || e);
+    } finally { btn.disabled = false; }
+  }
+
+  async function addRecurring() {
+    const apiFetch = window.AgentShared?.apiFetch;
+    if (typeof apiFetch !== 'function') return;
+    const labelEl  = document.getElementById('psRecLabel');
+    const amountEl = document.getElementById('psRecAmount');
+    const activeEl = document.getElementById('psRecActive');
+    const status   = document.getElementById('psRecStatus');
+    const btn      = document.getElementById('psAddRec');
+    const label    = (labelEl.value || '').trim();
+    const amount   = Number(amountEl.value) || 0;
+    if (!label) { status.textContent = 'Label vereist.'; return; }
+    if (amount < 0) { status.textContent = 'Bedrag moet ≥ 0.'; return; }
+    btn.disabled = true; status.textContent = 'Toevoegen…';
+    try {
+      const r = await apiFetch('/api/mentor-recurring-save', {
+        method : 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body   : JSON.stringify({
+          mentor_user_id: _payoutSettings.mentorUserId,
+          label,
+          amount_incl   : amount,
+          active        : activeEl.checked,
+        }),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d?.error || 'insert faalde');
+      labelEl.value = ''; amountEl.value = ''; activeEl.checked = true;
+      status.textContent = '';
+      await loadPayoutSettings(_payoutSettings.mentorUserId);
+    } catch (e) {
+      status.textContent = 'Fout: ' + (e?.message || e);
+    } finally { btn.disabled = false; }
+  }
+
+  async function editRecurringPrompt(id) {
+    const item = _payoutSettings.recurring.find((x) => x.id === id);
+    if (!item) return;
+    const nieuweLabel  = window.prompt('Label:', item.label);
+    if (nieuweLabel === null) return;
+    const nieuwBedrag  = window.prompt('Bedrag incl. btw:', String(item.amount_incl));
+    if (nieuwBedrag === null) return;
+    const actiefStr    = window.prompt('Actief? (ja/nee):', item.active ? 'ja' : 'nee');
+    if (actiefStr === null) return;
+    const apiFetch = window.AgentShared?.apiFetch;
+    if (typeof apiFetch !== 'function') return;
+    try {
+      const r = await apiFetch('/api/mentor-recurring-save', {
+        method : 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body   : JSON.stringify({
+          id,
+          label      : (nieuweLabel || '').trim(),
+          amount_incl: Number(nieuwBedrag) || 0,
+          active     : /^(ja|j|y|yes|1|true)$/i.test((actiefStr || '').trim()),
+        }),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d?.error || 'update faalde');
+      await loadPayoutSettings(_payoutSettings.mentorUserId);
+    } catch (e) { alert('Bewerken mislukt: ' + (e?.message || e)); }
+  }
+
+  async function deleteRecurring(id) {
+    if (!window.confirm('Vaste post verwijderen?')) return;
+    const apiFetch = window.AgentShared?.apiFetch;
+    if (typeof apiFetch !== 'function') return;
+    try {
+      const r = await apiFetch('/api/mentor-recurring-delete', {
+        method : 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body   : JSON.stringify({ id }),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d?.error || 'delete faalde');
+      await loadPayoutSettings(_payoutSettings.mentorUserId);
+    } catch (e) { alert('Verwijderen mislukt: ' + (e?.message || e)); }
   }
 
   function wirePicker() {

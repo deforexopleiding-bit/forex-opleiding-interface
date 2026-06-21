@@ -78,6 +78,15 @@
 
     .detail-meta { font-size: 11.5px; color: var(--text-dim); margin-bottom: 8px; display: flex; gap: 16px; flex-wrap: wrap; }
     .detail-meta strong { color: var(--text); font-weight: 600; }
+
+    /* Edit/delete knoppen op handmatige posten — compacte secondary style. */
+    .lines-table .adj-edit, .lines-table .adj-del {
+      display: inline-flex; align-items: center; gap: 4px; padding: 4px 9px;
+      font-size: 11.5px; font-weight: 600; border: 1px solid var(--border);
+      border-radius: 6px; background: var(--bg); color: var(--text); cursor: pointer;
+      font-family: inherit; margin-left: 4px;
+    }
+    .lines-table .adj-edit:hover, .lines-table .adj-del:hover { background: var(--bg-elev); }
   </style>
 </head>
 <body>
@@ -261,6 +270,21 @@
     if (p.approved_at)  meta.push(`Goedgekeurd: <strong>${esc(fmtDateTimeNL(p.approved_at))}</strong>`);
     if (p.paid_at)      meta.push(`Uitbetaald: <strong>${esc(fmtDateTimeNL(p.paid_at))}</strong>`);
 
+    // Handmatige posten (mentor_payout_adjustments) komen als eigen array
+    // mee in het detail-payload zodat we ze met id kunnen edit/delete'n.
+    const adjustments = Array.isArray(p.adjustments) ? p.adjustments : [];
+    const adjRows = adjustments.length === 0
+      ? `<tr><td colspan="3" style="text-align:center;color:var(--text-faint);padding:10px">Nog geen handmatige posten.</td></tr>`
+      : adjustments.map((a) => `
+          <tr>
+            <td>${esc(a.label || 'Handmatige post')}</td>
+            <td class="num" style="${(Number(a.amount_incl)||0) < 0 ? 'color:#b91c1c' : ''}">${fmtEUR(a.amount_incl)}</td>
+            <td class="num">
+              <button type="button" class="adj-edit" data-adj-id="${esc(a.id)}" data-payout-id="${esc(p.id)}" data-idx="${esc(idx)}">Bewerken</button>
+              <button type="button" class="adj-del"  data-adj-id="${esc(a.id)}" data-payout-id="${esc(p.id)}" data-idx="${esc(idx)}">Verwijderen</button>
+            </td>
+          </tr>`).join('');
+
     host.innerHTML = `
       <div class="detail-meta">${meta.join(' · ') || '<em>Nog niet gegenereerd</em>'}</div>
       <table class="lines-table">
@@ -282,7 +306,140 @@
           </tr>
         </tfoot>
       </table>
+
+      <h4 style="margin-top:16px;font-size:12.5px;font-weight:700;color:var(--text);display:flex;align-items:center;gap:6px">
+        <i class="ti ti-edit"></i> Handmatige posten
+        <span style="font-weight:400;color:var(--text-faint);font-size:11.5px">(mag negatief)</span>
+      </h4>
+      <table class="lines-table" style="margin-top:6px">
+        <thead>
+          <tr>
+            <th>Label</th>
+            <th class="num">Bedrag (incl)</th>
+            <th class="num">Acties</th>
+          </tr>
+        </thead>
+        <tbody>${adjRows}</tbody>
+      </table>
+
+      <div class="adj-add" style="display:flex;gap:10px;align-items:center;margin-top:10px;flex-wrap:wrap">
+        <input type="text"   class="adj-add-label"  placeholder="Label" style="padding:6px 10px;font-size:12.5px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-family:inherit;min-width:220px" />
+        <input type="number" class="adj-add-amount" step="0.01" placeholder="Bedrag incl (mag negatief)" style="padding:6px 10px;font-size:12.5px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-family:inherit;min-width:160px" />
+        <button type="button" class="adj-add-btn btn-primary" data-payout-id="${esc(p.id)}" data-mentor-id="${esc(p.mentor_user_id)}" data-period="${esc(p.period_month)}" data-idx="${esc(idx)}" style="padding:6px 12px;font-size:12.5px">Post toevoegen</button>
+        <span class="adj-add-status" style="font-size:11.5px;color:var(--text-faint)"></span>
+      </div>
     `;
+
+    // Wiring voor edit/delete/add — zelfde host-scope.
+    host.querySelectorAll('.adj-edit').forEach((b) => b.addEventListener('click', () =>
+      editAdjustmentPrompt(b.dataset.adjId, b.dataset.payoutId, b.dataset.idx)
+    ));
+    host.querySelectorAll('.adj-del').forEach((b) => b.addEventListener('click', () =>
+      deleteAdjustment(b.dataset.adjId, b.dataset.payoutId, b.dataset.idx)
+    ));
+    const addBtn = host.querySelector('.adj-add-btn');
+    if (addBtn) {
+      addBtn.addEventListener('click', () =>
+        addAdjustment(addBtn.dataset.payoutId, addBtn.dataset.mentorId, addBtn.dataset.period, addBtn.dataset.idx, host)
+      );
+    }
+  }
+
+  // ── Handmatige posten — server-driven CRUD met recompute + UI-refresh ──
+  async function refetchDetail(payoutId, idx) {
+    const apiFetch = window.AgentShared?.apiFetch;
+    if (typeof apiFetch !== 'function') return;
+    try {
+      const r = await apiFetch(`/api/mentor-payout-detail?payout_id=${encodeURIComponent(payoutId)}`);
+      const d = await r.json();
+      if (!r.ok) throw new Error(d?.error || 'detail-fetch faalde');
+      _detailCache.set(payoutId, d.payout);
+      renderDetail(idx, d.payout);
+    } catch (e) {
+      const body = document.getElementById('detail-body-' + idx);
+      if (body) body.innerHTML = `<em style="color:#b91c1c">Detail laden mislukt: ${esc(e?.message || e)}</em>`;
+    }
+  }
+
+  async function addAdjustment(payoutId, mentorUserId, periodMonth, idx, host) {
+    const apiFetch = window.AgentShared?.apiFetch;
+    if (typeof apiFetch !== 'function') return;
+    const labelEl  = host.querySelector('.adj-add-label');
+    const amountEl = host.querySelector('.adj-add-amount');
+    const status   = host.querySelector('.adj-add-status');
+    const btn      = host.querySelector('.adj-add-btn');
+    const label    = (labelEl.value || '').trim();
+    const amount   = Number(amountEl.value);
+    if (!label) { status.textContent = 'Label vereist.'; return; }
+    if (!Number.isFinite(amount)) { status.textContent = 'Bedrag vereist.'; return; }
+    btn.disabled = true; status.textContent = 'Toevoegen…';
+    try {
+      const r = await apiFetch('/api/mentor-payout-adjustment-save', {
+        method : 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body   : JSON.stringify({
+          mentor_user_id: mentorUserId,
+          period_month  : periodMonth,
+          label,
+          amount_incl   : amount,
+        }),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d?.error || 'insert faalde');
+      // Recompute heeft KPI's + lines geüpdatet — herlaad detail + de hele lijst
+      // zodat de kop-tabel (bonus/coaching/totaal/btw) ook weer klopt.
+      await refetchDetail(payoutId, idx);
+      await loadList();
+    } catch (e) {
+      status.textContent = 'Fout: ' + (e?.message || e);
+      btn.disabled = false;
+    }
+  }
+
+  async function editAdjustmentPrompt(adjId, payoutId, idx) {
+    const cached = _detailCache.get(payoutId);
+    const item   = cached?.adjustments?.find((a) => a.id === adjId);
+    if (!item) return;
+    const nieuweLabel  = window.prompt('Label:', item.label);
+    if (nieuweLabel === null) return;
+    const nieuwBedrag  = window.prompt('Bedrag incl. btw (mag negatief):', String(item.amount_incl));
+    if (nieuwBedrag === null) return;
+    const apiFetch = window.AgentShared?.apiFetch;
+    if (typeof apiFetch !== 'function') return;
+    try {
+      const r = await apiFetch('/api/mentor-payout-adjustment-save', {
+        method : 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body   : JSON.stringify({
+          id              : adjId,
+          mentor_user_id  : cached.mentor_user_id,
+          period_month    : cached.period_month,
+          label           : (nieuweLabel || '').trim(),
+          amount_incl     : Number(nieuwBedrag) || 0,
+        }),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d?.error || 'update faalde');
+      await refetchDetail(payoutId, idx);
+      await loadList();
+    } catch (e) { alert('Bewerken mislukt: ' + (e?.message || e)); }
+  }
+
+  async function deleteAdjustment(adjId, payoutId, idx) {
+    if (!window.confirm('Handmatige post verwijderen?')) return;
+    const apiFetch = window.AgentShared?.apiFetch;
+    if (typeof apiFetch !== 'function') return;
+    try {
+      const r = await apiFetch('/api/mentor-payout-adjustment-delete', {
+        method : 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body   : JSON.stringify({ id: adjId }),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d?.error || 'delete faalde');
+      await refetchDetail(payoutId, idx);
+      await loadList();
+    } catch (e) { alert('Verwijderen mislukt: ' + (e?.message || e)); }
   }
 
   // Cache van detail-fetches per payout-id zodat klap-toggle geen 2e fetch doet.
@@ -327,44 +484,15 @@
     try {
       if (window._authSharedReady) await window._authSharedReady;
     } catch {}
-
-    // ── DIAG: auth-staat zichtbaar tonen vóór + ná de fetch ───────────────
-    const _tok = await (window.AuthShared?.getAccessToken?.() ?? Promise.resolve(null)).catch(() => null);
-    let _dbg = `DBG authShared=${!!window.AuthShared} tokenLen=${_tok ? _tok.length : 0} ready=${typeof window._authSharedReady} supa=${!!window.supabase}`;
-    const _dbgHost = document.getElementById('payoutsWrap');
-    if (_dbgHost) {
-      _dbgHost.innerHTML = `<pre id="diagBox" style="background:#0f172a;color:#e2e8f0;padding:10px 12px;border-radius:8px;font-size:11.5px;margin-bottom:14px;white-space:pre-wrap;word-break:break-all">${_dbg}</pre>`;
-    }
-
     try {
       _detailCache.clear();
       const r = await apiFetch(`/api/mentor-payouts-admin-list?period_month=${encodeURIComponent(periodMonth)}`);
-      _dbg += ` status=${r.status}`;
-      const _diagBox = document.getElementById('diagBox');
-      if (_diagBox) _diagBox.textContent = _dbg;
       const d = await r.json();
       if (!r.ok) throw new Error(d?.error || 'lijst-fetch faalde');
       renderTable(d.payouts || []);
-      // Re-injecteer de diag-box ná renderTable (die overschrijft de hele wrap).
-      const wrap = document.getElementById('payoutsWrap');
-      if (wrap) {
-        const box = document.createElement('pre');
-        box.id = 'diagBox';
-        box.style.cssText = 'background:#0f172a;color:#e2e8f0;padding:10px 12px;border-radius:8px;font-size:11.5px;margin-bottom:14px;white-space:pre-wrap;word-break:break-all';
-        box.textContent = _dbg;
-        wrap.insertBefore(box, wrap.firstChild);
-      }
     } catch (e) {
       console.error('[mentor-payouts-admin] list:', e?.message || e);
       renderError('Rapporten ophalen mislukt: ' + (e?.message || e));
-      const wrap = document.getElementById('payoutsWrap');
-      if (wrap) {
-        const box = document.createElement('pre');
-        box.id = 'diagBox';
-        box.style.cssText = 'background:#0f172a;color:#e2e8f0;padding:10px 12px;border-radius:8px;font-size:11.5px;margin-bottom:14px;white-space:pre-wrap;word-break:break-all';
-        box.textContent = _dbg;
-        wrap.insertBefore(box, wrap.firstChild);
-      }
     }
   }
 
