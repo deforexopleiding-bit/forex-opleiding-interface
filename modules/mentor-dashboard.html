@@ -173,7 +173,8 @@
     <div id="subCoaching" class="subtab-panel" hidden>
       <div class="section">
         <h2><i class="ti ti-school"></i> Coaching</h2>
-        <div class="empty-state"><i class="ti ti-clock-hour-4"></i>Binnenkort beschikbaar (wacht op bubble-koppeling).</div>
+        <div id="coachingPicker" style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:14px"></div>
+        <div id="coachingWrap"></div>
       </div>
     </div>
   </div>
@@ -336,6 +337,7 @@
     document.getElementById('subUitbetalingen').hidden = (name !== 'uitbetalingen');
     document.getElementById('subCoaching').hidden      = (name !== 'coaching');
     if (name === 'uitbetalingen' && !_vState.payoutsLoaded) loadPayouts();
+    if (name === 'coaching' && !_vState.coachingInited) initCoaching();
   }
 
   function wireTabs() {
@@ -641,6 +643,219 @@
       console.error('[mentor-dashboard] students:', e?.message || e);
       setError('studentsWrap', 'Studenten ophalen mislukt: ' + (e?.message || e));
     }
+  }
+
+  // ── Coaching-verdiensten v1 ──────────────────────────────────────────────
+  const _coach = { mode: 'month', from: null, to: null };
+
+  function _dateOnlyUtc(d) {
+    const y  = d.getUTCFullYear();
+    const m  = String(d.getUTCMonth() + 1).padStart(2, '0');
+    const dd = String(d.getUTCDate()).padStart(2, '0');
+    return `${y}-${m}-${dd}`;
+  }
+  function _parseDateOnly(s) {
+    if (!s) return new Date();
+    const m = String(s).match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (!m) return new Date();
+    return new Date(Date.UTC(+m[1], +m[2] - 1, +m[3]));
+  }
+  function _startOfWeekMonday(d) {
+    const x = new Date(d.getTime());
+    const day = x.getUTCDay(); // 0=zo,1=ma..6=za
+    const diff = (day === 0 ? -6 : 1 - day);
+    x.setUTCDate(x.getUTCDate() + diff);
+    return x;
+  }
+  function _addDays(d, n) {
+    const x = new Date(d.getTime());
+    x.setUTCDate(x.getUTCDate() + n);
+    return x;
+  }
+  function _firstOfMonth(d) {
+    return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1));
+  }
+  function _lastOfMonth(d) {
+    return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0));
+  }
+
+  function _coachRangeForMode(mode, anchorIso) {
+    const anchor = _parseDateOnly(anchorIso || _dateOnlyUtc(new Date()));
+    if (mode === 'day') return { from: _dateOnlyUtc(anchor), to: _dateOnlyUtc(anchor) };
+    if (mode === 'week') {
+      const mon = _startOfWeekMonday(anchor);
+      return { from: _dateOnlyUtc(mon), to: _dateOnlyUtc(_addDays(mon, 6)) };
+    }
+    // month default
+    return { from: _dateOnlyUtc(_firstOfMonth(anchor)), to: _dateOnlyUtc(_lastOfMonth(anchor)) };
+  }
+
+  function _coachStepRange(mode, from, to, delta) {
+    if (mode === 'day') {
+      const d = _addDays(_parseDateOnly(from), delta);
+      return { from: _dateOnlyUtc(d), to: _dateOnlyUtc(d) };
+    }
+    if (mode === 'week') {
+      const mon = _addDays(_startOfWeekMonday(_parseDateOnly(from)), delta * 7);
+      return { from: _dateOnlyUtc(mon), to: _dateOnlyUtc(_addDays(mon, 6)) };
+    }
+    if (mode === 'month') {
+      const ref = _parseDateOnly(from);
+      const shifted = new Date(Date.UTC(ref.getUTCFullYear(), ref.getUTCMonth() + delta, 1));
+      return { from: _dateOnlyUtc(_firstOfMonth(shifted)), to: _dateOnlyUtc(_lastOfMonth(shifted)) };
+    }
+    return { from, to };
+  }
+
+  function _coachLabel(mode, from, to) {
+    if (mode === 'day') return fmtDateNL(from);
+    if (mode === 'week') return `${fmtDateNL(from)} — ${fmtDateNL(to)}`;
+    if (mode === 'month') {
+      const d = _parseDateOnly(from);
+      return d.toLocaleDateString('nl-NL', { month: 'long', year: 'numeric' });
+    }
+    return `${fmtDateNL(from)} — ${fmtDateNL(to)}`;
+  }
+
+  function renderCoachingPicker() {
+    const host = document.getElementById('coachingPicker');
+    if (!host) return;
+    const isFree = _coach.mode === 'free';
+    const lbl    = _coachLabel(_coach.mode, _coach.from, _coach.to);
+    host.innerHTML = `
+      <div style="display:inline-flex;gap:0;border:1px solid var(--border);border-radius:8px;overflow:hidden;background:var(--bg-elev)">
+        ${['day','week','month','free'].map((m) => `
+          <button type="button" data-mode="${m}" style="padding:6px 12px;font-size:12px;font-weight:600;border:0;background:${_coach.mode === m ? 'var(--accent,#6366f1)' : 'transparent'};color:${_coach.mode === m ? '#fff' : 'var(--text-dim)'};cursor:pointer">${({day:'Dag',week:'Week',month:'Maand',free:'Vrij'})[m]}</button>`).join('')}
+      </div>
+      ${isFree ? `
+        <input type="date" id="coachFrom" value="${esc(_coach.from || '')}" style="padding:6px 8px;font-size:12px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-family:inherit" />
+        <span style="color:var(--text-faint);font-size:11.5px">t/m</span>
+        <input type="date" id="coachTo"   value="${esc(_coach.to   || '')}" style="padding:6px 8px;font-size:12px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-family:inherit" />
+      ` : `
+        <button type="button" id="coachPrev" title="Vorige" style="padding:6px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg);cursor:pointer">◀</button>
+        <div style="font-size:13px;font-weight:600;min-width:160px;text-align:center">${esc(lbl)}</div>
+        <button type="button" id="coachNext" title="Volgende" style="padding:6px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg);cursor:pointer">▶</button>
+      `}
+    `;
+    host.querySelectorAll('button[data-mode]').forEach((b) => {
+      b.addEventListener('click', () => {
+        const newMode = b.dataset.mode;
+        if (newMode === _coach.mode) return;
+        _coach.mode = newMode;
+        if (newMode !== 'free') {
+          const r = _coachRangeForMode(newMode, _coach.from);
+          _coach.from = r.from; _coach.to = r.to;
+        }
+        renderCoachingPicker();
+        loadCoaching();
+      });
+    });
+    const prev = document.getElementById('coachPrev');
+    const next = document.getElementById('coachNext');
+    if (prev) prev.addEventListener('click', () => { const r = _coachStepRange(_coach.mode, _coach.from, _coach.to, -1); _coach.from = r.from; _coach.to = r.to; renderCoachingPicker(); loadCoaching(); });
+    if (next) next.addEventListener('click', () => { const r = _coachStepRange(_coach.mode, _coach.from, _coach.to,  1); _coach.from = r.from; _coach.to = r.to; renderCoachingPicker(); loadCoaching(); });
+    const cf = document.getElementById('coachFrom');
+    const ct = document.getElementById('coachTo');
+    if (cf) cf.addEventListener('change', () => { _coach.from = cf.value; loadCoaching(); });
+    if (ct) ct.addEventListener('change', () => { _coach.to   = ct.value; loadCoaching(); });
+  }
+
+  function renderCoaching(payload) {
+    const wrap = document.getElementById('coachingWrap');
+    if (!wrap) return;
+    if (!payload || payload.linked === false) {
+      wrap.innerHTML = `<div class="empty-state"><i class="ti ti-link-off"></i>Je account is nog niet gekoppeld aan een bubble-mentor — vraag een admin om de koppeling te leggen.</div>`;
+      return;
+    }
+    const b = payload.breakdown || {};
+    const grand = Number(payload.grand_total) || 0;
+    const row = (label, cell, note) => {
+      const c = Number(cell?.count) || 0;
+      const r = Number(cell?.rate)  || 0;
+      const t = Number(cell?.total) || 0;
+      return `
+        <tr>
+          <td>${esc(label)}${note ? `<div style="font-size:11px;color:var(--text-faint);margin-top:2px">${esc(note)}</div>` : ''}</td>
+          <td class="num">${c}</td>
+          <td class="num">${fmtEUR(r)}</td>
+          <td class="num"><strong>${fmtEUR(t)}</strong></td>
+        </tr>`;
+    };
+    wrap.innerHTML = `
+      <div style="font-size:12.5px;color:var(--text-dim);margin-bottom:8px">
+        Periode: <strong>${esc(_coachLabel(_coach.mode, payload.from, payload.to))}</strong>
+        <span style="color:var(--text-faint)">(${esc(payload.from)} — ${esc(payload.to)})</span>
+      </div>
+      <table class="data-table">
+        <thead><tr><th>Categorie</th><th class="num">Aantal</th><th class="num">Tarief</th><th class="num">Bedrag</th></tr></thead>
+        <tbody>
+          ${row('1-op-1 sessies',  b.one_on_one)}
+          ${row('Teamtrainingen',  b.team)}
+          ${row('No-shows',        b.no_show)}
+          ${row('Funded-students', b.funded, 'Activeert bij certificaat-upload')}
+        </tbody>
+        <tfoot>
+          <tr style="background:rgba(99,102,241,0.06)">
+            <td colspan="3" style="text-align:right;font-weight:700">Totaal</td>
+            <td class="num"><strong>${fmtEUR(grand)}</strong></td>
+          </tr>
+        </tfoot>
+      </table>
+    `;
+  }
+
+  async function loadCoaching() {
+    const apiFetch = window.AgentShared?.apiFetch;
+    if (typeof apiFetch !== 'function') { setError('coachingWrap', 'apiFetch niet beschikbaar.'); return; }
+    try { if (window._authSharedReady) await window._authSharedReady; } catch {}
+    const wrap = document.getElementById('coachingWrap');
+    if (wrap) wrap.innerHTML = `<div style="color:var(--text-faint);font-size:12.5px;padding:14px;text-align:center">Laden…</div>`;
+    try {
+      const url = `/api/mentor-coaching-earnings?from=${encodeURIComponent(_coach.from)}&to=${encodeURIComponent(_coach.to)}`;
+      const r = await apiFetch(url);
+      const d = await r.json();
+      if (!r.ok) throw new Error(d?.error || 'coaching fetch failed');
+      renderCoaching(d);
+    } catch (e) {
+      console.error('[mentor-dashboard] coaching:', e?.message || e);
+      setError('coachingWrap', 'Coaching-verdiensten ophalen mislukt: ' + (e?.message || e));
+    }
+  }
+
+  async function initCoaching() {
+    _vState.coachingInited = true;
+    // Default = huidige maand.
+    const today = new Date();
+    const r = _coachRangeForMode('month', _dateOnlyUtc(today));
+    _coach.from = r.from; _coach.to = r.to;
+
+    // ?coachdebug=1 → toon debug-payload bovenaan en stop verder render.
+    try {
+      const params = new URLSearchParams(window.location.search || '');
+      if (params.get('coachdebug') === '1') {
+        const apiFetch = window.AgentShared?.apiFetch;
+        if (typeof apiFetch === 'function') {
+          if (window._authSharedReady) await window._authSharedReady;
+          const url = `/api/mentor-coaching-earnings?from=${encodeURIComponent(_coach.from)}&to=${encodeURIComponent(_coach.to)}&debug=1`;
+          const r = await apiFetch(url);
+          const j = await r.json().catch(() => ({}));
+          const wrap = document.getElementById('coachingWrap');
+          if (wrap) {
+            const pre = document.createElement('pre');
+            pre.style.cssText = 'background:#0f172a;color:#e2e8f0;padding:14px;border-radius:8px;font-size:11.5px;line-height:1.5;overflow-x:auto;margin-bottom:14px;white-space:pre-wrap;word-break:break-word';
+            pre.textContent = JSON.stringify(j && j.debug ? j.debug : j, null, 2);
+            wrap.innerHTML = '';
+            wrap.appendChild(pre);
+          }
+          return;
+        }
+      }
+    } catch (e) {
+      console.warn('[mentor-dashboard] coachdebug failed:', e?.message || e);
+    }
+
+    renderCoachingPicker();
+    loadCoaching();
   }
 
   async function loadPayouts() {
