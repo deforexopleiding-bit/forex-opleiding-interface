@@ -67,6 +67,29 @@
     .month-bar .bar.zero { background: var(--bg-elev-2, rgba(100,116,139,0.18)); }
     .month-bar .bar-label { font-size: 10.5px; color: var(--text-faint); margin-top: 2px; text-transform: uppercase; }
     .month-bar .bar-amount { font-size: 10.5px; color: var(--text-dim); font-variant-numeric: tabular-nums; }
+
+    /* Mijn studenten — kaarten + uitklap */
+    .student-card { background: var(--bg-elev); border: 1px solid var(--border); border-radius: 10px; margin-bottom: 10px; overflow: hidden; }
+    .student-head { display: grid; grid-template-columns: 1fr auto auto auto; gap: 14px; align-items: center; padding: 12px 14px; cursor: pointer; }
+    .student-head:hover { background: rgba(99,102,241,0.04); }
+    .student-name { font-size: 14px; font-weight: 600; }
+    .student-meta { font-size: 11.5px; color: var(--text-faint); margin-top: 2px; }
+    .student-stat { font-size: 12px; color: var(--text-dim); font-variant-numeric: tabular-nums; white-space: nowrap; }
+    .student-stat strong { color: var(--text); font-weight: 700; }
+    .student-caret { color: var(--text-faint); transition: transform .15s; }
+    .student-card.open .student-caret { transform: rotate(90deg); }
+    .student-body { display: none; padding: 14px 16px 16px; border-top: 1px solid var(--border); background: var(--bg); }
+    .student-card.open .student-body { display: block; }
+    .progress-bar { width: 100%; height: 10px; background: var(--bg-elev-2, rgba(100,116,139,0.18)); border-radius: 5px; overflow: hidden; margin-top: 6px; }
+    .progress-bar > div { height: 100%; background: linear-gradient(90deg, var(--accent, #6366f1), rgba(99,102,241,0.7)); transition: width .25s; }
+    .task-row { display: flex; gap: 8px; align-items: center; padding: 6px 0; font-size: 12.5px; border-bottom: 1px dashed var(--border); }
+    .task-row:last-child { border-bottom: 0; }
+    .task-progress { font-size: 11px; color: var(--text-faint); font-variant-numeric: tabular-nums; white-space: nowrap; }
+    @media (max-width: 880px) {
+      .student-head { grid-template-columns: 1fr auto; }
+      .student-stat { display: none; }
+      .student-stat:first-of-type { display: inline; }
+    }
   </style>
 </head>
 <body>
@@ -83,6 +106,7 @@
   <div class="tab-strip" role="tablist">
     <button class="tab-btn active" data-tab="grootboek" type="button">Grootboek</button>
     <button class="tab-btn" data-tab="verdiensten" type="button">Verdiensten</button>
+    <button class="tab-btn" data-tab="studenten" type="button">Mijn studenten</button>
   </div>
 
   <!-- Tab: Grootboek (bestaande secties) -->
@@ -151,6 +175,14 @@
         <h2><i class="ti ti-school"></i> Coaching</h2>
         <div class="empty-state"><i class="ti ti-clock-hour-4"></i>Binnenkort beschikbaar (wacht op bubble-koppeling).</div>
       </div>
+    </div>
+  </div>
+
+  <!-- Tab: Mijn studenten (PR2b) -->
+  <div id="tabStudenten" class="tab-panel" hidden>
+    <div class="section">
+      <h2><i class="ti ti-users"></i> Mijn studenten</h2>
+      <div id="studentsWrap"></div>
     </div>
   </div>
 </div>
@@ -282,7 +314,7 @@
   }
 
   // ── Tab-wiring ────────────────────────────────────────────────────────────
-  const _vState = { loaded: false, payoutsLoaded: false };
+  const _vState = { loaded: false, payoutsLoaded: false, studentsLoaded: false };
 
   function activateTab(name) {
     document.querySelectorAll('.tab-btn').forEach((b) => {
@@ -290,7 +322,9 @@
     });
     document.getElementById('tabGrootboek').hidden    = (name !== 'grootboek');
     document.getElementById('tabVerdiensten').hidden  = (name !== 'verdiensten');
+    document.getElementById('tabStudenten').hidden    = (name !== 'studenten');
     if (name === 'verdiensten' && !_vState.loaded) loadVerdiensten();
+    if (name === 'studenten' && !_vState.studentsLoaded) loadStudents();
   }
 
   function activateSubtab(name) {
@@ -437,6 +471,178 @@
       console.error('[mentor-dashboard] verdiensten:', e?.message || e);
       setError('projection12mWrap', 'Verdiensten ophalen mislukt: ' + (e?.message || e));
       setError('eventBonusWrap',   'Verdiensten ophalen mislukt: ' + (e?.message || e));
+    }
+  }
+
+  // ── Mijn studenten (PR2b) ────────────────────────────────────────────────
+  function _stPct(done, total) {
+    const d = Number(done) || 0;
+    const t = Number(total) || 0;
+    if (t <= 0) return 0;
+    return Math.max(0, Math.min(100, Math.round((d / t) * 100)));
+  }
+
+  function renderStudents(payload) {
+    const wrap = document.getElementById('studentsWrap');
+    if (!wrap) return;
+    if (!payload || payload.linked === false) {
+      wrap.innerHTML = `
+        <div class="empty-state">
+          <i class="ti ti-link-off"></i>
+          Je account is nog niet gekoppeld aan een bubble-mentor — vraag een admin om de koppeling te leggen via Admin > Integraties > Mentor↔Bubble.
+        </div>`;
+      return;
+    }
+    const list = Array.isArray(payload.students) ? payload.students : [];
+    if (list.length === 0) {
+      wrap.innerHTML = `<div class="empty-state"><i class="ti ti-users-off"></i>Geen studenten gevonden onder jouw mentorschap.</div>`;
+      return;
+    }
+    wrap.innerHTML = list.map((s) => {
+      const sid       = esc(s.bubble_student_id);
+      const name      = esc(s.name || s.email || '(geen naam)');
+      const email     = esc(s.email || '');
+      const program   = s.program ? `<span class="badge badge-blue">${esc(s.program)}</span>` : '';
+      const onboard   = s.onboarding_status ? `<span class="badge badge-amber">${esc(s.onboarding_status)}</span>` : '';
+      const callsTotal  = Number(s.calls_1on1_total) || 0;
+      const callsDone   = Number(s.calls_1on1_done) || 0;
+      const groupTotal  = Number(s.group_total) || 0;
+      const groupDone   = Number(s.group_done) || 0;
+      const noShows     = Number(s.no_shows) || 0;
+      return `
+        <div class="student-card" data-student-id="${sid}">
+          <div class="student-head" data-toggle="${sid}">
+            <div>
+              <div class="student-name">${name} ${program} ${onboard}</div>
+              <div class="student-meta">${email}</div>
+            </div>
+            <div class="student-stat" title="1-op-1-calls voltooid / totaal"><strong>${callsDone}/${callsTotal || '—'}</strong> 1-op-1</div>
+            <div class="student-stat" title="Group-calls voltooid / totaal"><strong>${groupDone}/${groupTotal || '—'}</strong> groep</div>
+            <div class="student-stat" title="No-shows"><i class="ti ti-alert-triangle" style="color:${noShows > 0 ? '#b45309' : 'var(--text-faint)'}"></i> ${noShows}</div>
+            <i class="ti ti-chevron-right student-caret"></i>
+          </div>
+          <div class="student-body" id="student-body-${sid}">
+            <div style="color:var(--text-faint);font-size:12.5px;text-align:center;padding:20px"><span class="skeleton" style="width:120px"></span></div>
+          </div>
+        </div>`;
+    }).join('');
+    // Click-handlers binden voor toggle.
+    wrap.querySelectorAll('.student-head[data-toggle]').forEach((head) => {
+      head.addEventListener('click', () => toggleStudent(head.dataset.toggle));
+    });
+  }
+
+  // Cache zodat re-open van een kaart geen extra fetch doet.
+  const _stDetailCache = new Map();
+
+  async function toggleStudent(studentId) {
+    const card = document.querySelector(`.student-card[data-student-id="${CSS.escape(studentId)}"]`);
+    if (!card) return;
+    const wasOpen = card.classList.contains('open');
+    // Sluit alle anderen (1 open tegelijk houdt 't overzichtelijk).
+    document.querySelectorAll('.student-card.open').forEach((c) => c.classList.remove('open'));
+    if (wasOpen) return;
+    card.classList.add('open');
+    if (_stDetailCache.has(studentId)) {
+      renderStudentDetail(studentId, _stDetailCache.get(studentId));
+      return;
+    }
+    const body = document.getElementById('student-body-' + studentId);
+    if (body) body.innerHTML = `<div style="color:var(--text-faint);font-size:12.5px;padding:10px;text-align:center">Laden…</div>`;
+    try {
+      const apiFetch = window.AgentShared?.apiFetch;
+      const r = await apiFetch('/api/mentor-student-detail?student_id=' + encodeURIComponent(studentId));
+      const d = await r.json();
+      if (!r.ok) throw new Error(d?.error || 'detail fetch failed');
+      _stDetailCache.set(studentId, d);
+      renderStudentDetail(studentId, d);
+    } catch (e) {
+      console.error('[mentor-dashboard] student-detail:', e?.message || e);
+      if (body) body.innerHTML = `<div class="empty-state" style="border-color:#fecaca;color:#b91c1c"><i class="ti ti-alert-triangle"></i>${esc(e?.message || 'Detail ophalen mislukt')}</div>`;
+    }
+  }
+
+  function renderStudentDetail(studentId, d) {
+    const body = document.getElementById('student-body-' + studentId);
+    if (!body) return;
+    const progress = (d && Number.isFinite(Number(d.progress))) ? Math.max(0, Math.min(100, Number(d.progress))) : null;
+    const sessions = Array.isArray(d?.sessions) ? d.sessions : [];
+    const tasks    = Array.isArray(d?.tasks) ? d.tasks : [];
+
+    const sessionsHtml = sessions.length === 0
+      ? `<div style="color:var(--text-faint);font-size:12.5px;padding:8px 0">Geen 1-op-1-sessies vastgelegd.</div>`
+      : `
+        <table class="data-table" style="margin-top:6px">
+          <thead><tr><th>Datum</th><th>Agenda</th><th>Stage</th><th>Status</th></tr></thead>
+          <tbody>
+            ${sessions.slice(0, 25).map((s) => {
+              const badge = s.no_show
+                ? '<span class="badge badge-amber">No-show</span>'
+                : (s.is_done ? '<span class="badge badge-green">Voltooid</span>' : '<span class="badge badge-grey">Gepland</span>');
+              return `
+                <tr>
+                  <td>${fmtDateNL(s.date)}</td>
+                  <td>${esc(s.agenda || '—')}</td>
+                  <td>${esc(s.stage || '—')}</td>
+                  <td>${badge}</td>
+                </tr>`;
+            }).join('')}
+          </tbody>
+        </table>`;
+
+    const tasksHtml = tasks.length === 0
+      ? `<div style="color:var(--text-faint);font-size:12.5px;padding:8px 0">Geen taken gevonden.</div>`
+      : `<div style="margin-top:6px">
+          ${tasks.map((t) => {
+            const items = (t.items && t.items.length)
+              ? `<div style="margin-top:2px;color:var(--text-dim);font-size:11.5px">${esc(t.items.join(' · '))}</div>`
+              : '';
+            return `
+              <div class="task-row">
+                <div style="flex:1">
+                  <strong>${esc(t.type_of_task || 'Taak')}</strong>
+                  ${items}
+                </div>
+                <span class="task-progress">${Math.round(Number(t.progress) || 0)}%</span>
+              </div>`;
+          }).join('')}
+        </div>`;
+
+    body.innerHTML = `
+      <div style="margin-bottom:14px">
+        <div style="display:flex;align-items:center;gap:10px;font-size:12px;color:var(--text-dim)">
+          <span>Traject-voortgang</span>
+          <span style="margin-left:auto;font-variant-numeric:tabular-nums">${progress == null ? '—' : (progress + '%')}</span>
+        </div>
+        <div class="progress-bar"><div style="width:${progress == null ? 0 : progress}%"></div></div>
+      </div>
+
+      <h3 style="font-size:13px;font-weight:700;margin:14px 0 4px;color:var(--text)"><i class="ti ti-calendar"></i> 1-op-1 sessies</h3>
+      ${sessionsHtml}
+
+      <h3 style="font-size:13px;font-weight:700;margin:18px 0 4px;color:var(--text)"><i class="ti ti-list-check"></i> Taken</h3>
+      ${tasksHtml}
+    `;
+  }
+
+  async function loadStudents() {
+    _vState.studentsLoaded = true;
+    const apiFetch = window.AgentShared?.apiFetch;
+    if (typeof apiFetch !== 'function') {
+      setError('studentsWrap', 'apiFetch niet beschikbaar.');
+      return;
+    }
+    try { if (window._authSharedReady) await window._authSharedReady; } catch {}
+    const wrap = document.getElementById('studentsWrap');
+    if (wrap) wrap.innerHTML = `<div style="color:var(--text-faint);font-size:12.5px;padding:14px;text-align:center">Studenten laden…</div>`;
+    try {
+      const r = await apiFetch('/api/mentor-my-students');
+      const d = await r.json();
+      if (!r.ok) throw new Error(d?.error || 'students fetch failed');
+      renderStudents(d);
+    } catch (e) {
+      console.error('[mentor-dashboard] students:', e?.message || e);
+      setError('studentsWrap', 'Studenten ophalen mislukt: ' + (e?.message || e));
     }
   }
 
