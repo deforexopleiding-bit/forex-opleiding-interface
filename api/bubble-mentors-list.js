@@ -14,16 +14,9 @@
 
 import { createUserClient } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
-import { bubbleList } from './_lib/bubble.js';
+import { bubbleList, bubbleUserDisplay } from './_lib/bubble.js';
 
 const HARD_CAP = 500;
-
-function joinName(first, last) {
-  const a = (first || '').trim();
-  const b = (last  || '').trim();
-  const both = (a + ' ' + b).trim();
-  return both || null;
-}
 
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
@@ -41,6 +34,7 @@ export default async function handler(req, res) {
   }
 
   const q = typeof req.query?.q === 'string' ? req.query.q.trim().toLowerCase() : '';
+  const debugKeys = req.query?.debug === 'keys';
 
   try {
     const constraints = [
@@ -48,11 +42,29 @@ export default async function handler(req, res) {
     ];
     const { results } = await bubbleList('user', constraints, { limit: HARD_CAP });
 
-    let mentors = (results || []).map((u) => ({
-      bubble_user_id: String(u._id || ''),
-      name:           joinName(u['first name'], u['last name']),
-      email:          (u.email || '').toString().toLowerCase() || null,
-    })).filter((m) => m.bubble_user_id);
+    // Tijdelijke debug-tak: KEYS-ONLY uitvoer zodat we de echte Bubble-shape
+    // kunnen zien zonder namen/e-mails/IDs te lekken. Admin-gated via dezelfde
+    // permission als de reguliere lijst (events.team_member.link).
+    if (debugKeys) {
+      const sample = (results && results[0]) || null;
+      return res.status(200).json({
+        debug: {
+          count       : Array.isArray(results) ? results.length : 0,
+          sampleKeys  : sample ? Object.keys(sample) : [],
+          authShape   : (sample && sample.authentication) ? Object.keys(sample.authentication) : null,
+          emailNested : !!(sample && sample.authentication && sample.authentication.email),
+        },
+      });
+    }
+
+    let mentors = (results || []).map((u) => {
+      const { name, email } = bubbleUserDisplay(u);
+      return {
+        bubble_user_id: String(u._id || ''),
+        name,
+        email,
+      };
+    }).filter((m) => m.bubble_user_id);
 
     if (q) {
       mentors = mentors.filter((m) => {
