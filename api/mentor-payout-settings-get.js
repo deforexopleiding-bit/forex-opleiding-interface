@@ -8,7 +8,8 @@
 // Response 200:
 //   { ok, mentor_user_id,
 //     config:    { travel_enabled, travel_day_rate_incl },
-//     recurring: [ { id, label, amount_incl, active }, ... ] }
+//     recurring: [ { id, label, amount_incl, active, start_month }, ... ] }
+//     (start_month is 'YYYY-MM-DD' = 1e v/d maand, of null voor "vanaf altijd")
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
@@ -46,7 +47,7 @@ export default async function handler(req, res) {
         .maybeSingle(),
       supabaseAdmin
         .from('mentor_recurring_items')
-        .select('id, label, amount_incl, active')
+        .select('id, label, amount_incl, active, start_month')
         .eq('mentor_user_id', mentorUserId)
         .order('label', { ascending: true }),
     ]);
@@ -65,6 +66,7 @@ export default async function handler(req, res) {
         label       : String(r.label || ''),
         amount_incl : Number(r.amount_incl) || 0,
         active      : !!r.active,
+        start_month : r.start_month || null,
       })),
     });
   } catch (e) {
