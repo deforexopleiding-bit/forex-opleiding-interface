@@ -64,6 +64,17 @@ function pickTaskItems(v) {
   return [];
 }
 
+// Eerste niet-undefined waarde uit een lijst van kandidaat-keys.
+// Voor Bubble suffix-conventie (key_text / key_number / key_boolean) met
+// bare-name fallback voor pre-conventie data.
+function readFirst(u, keys) {
+  if (!u) return undefined;
+  for (const k of keys) {
+    if (u[k] !== undefined) return u[k];
+  }
+  return undefined;
+}
+
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
   res.setHeader('Content-Type', 'application/json');
@@ -117,38 +128,50 @@ export default async function handler(req, res) {
     }
 
     // OWNERSHIP-CHECK: haal de student-user op en valideer mentor-koppeling.
+    // Suffix-conventie: 'mentor_user' (User-link). Bare-name 'mentor' als
+    // fallback voor evt. pre-conventie data.
     const studentUser = await bubbleGet('user', studentId);
     if (!studentUser) return res.status(404).json({ error: 'Student niet gevonden' });
-    const ownerMentor = String(studentUser.mentor || '').trim();
+    const ownerMentor = String(readFirst(studentUser, ['mentor_user', 'mentor']) || '').trim();
     if (!ownerMentor || ownerMentor !== tm.bubble_user_id) {
       return res.status(403).json({ error: 'Student valt niet onder jouw mentorschap' });
     }
 
-    // Sessies + taken parallel ophalen.
-    const [{ results: sessionRows }, { results: taskRows }] = await Promise.all([
-      bubbleList('1-1-session', [{ key: 'member', constraint_type: 'equals', value: studentId }], { limit: 500 }),
-      bubbleList('student-task', [{ key: 'member', constraint_type: 'equals', value: studentId }], { limit: 500 }),
+    // Sessies + taken parallel ophalen. Constraint-keys: 'member_user'
+    // (suffix-conventie, User-link), met 'member' als fallback indien Bubble
+    // het constraint-veld ooit bare-name accepteerde.
+    const [sessionResp, taskResp] = await Promise.all([
+      bubbleList('1-1-session', [{ key: 'member_user', constraint_type: 'equals', value: studentId }], { limit: 500 }),
+      bubbleList('student-task', [{ key: 'member_user', constraint_type: 'equals', value: studentId }], { limit: 500 }),
     ]);
+    const sessionRows = sessionResp?.results || [];
+    const taskRows    = taskResp?.results    || [];
 
-    const sessions = (sessionRows || []).map((s) => {
-      const date = s['starting date'] || s['completed date'] || null;
+    const sessions = sessionRows.map((s) => {
+      const date = readFirst(s, ['starting_date_date', 'starting date', 'completed_date_date', 'completed date']) || null;
+      const agendaRaw = readFirst(s, ['agenda_text', 'Agenda']);
+      const agenda = (typeof agendaRaw === 'string') ? agendaRaw : (agendaRaw?.display || null);
       return {
         date,
-        is_done : asBool(s.isDone),
-        no_show : asBool(s.NoShow),
-        agenda  : (typeof s.Agenda === 'string') ? s.Agenda : (s.Agenda?.display || null),
-        stage   : pickOption(s.stage),
+        is_done : asBool(readFirst(s, ['isdone_boolean', 'isDone'])),
+        no_show : asBool(readFirst(s, ['noshow_boolean', 'NoShow'])),
+        agenda,
+        stage   : pickOption(readFirst(s, ['stage_text', 'stage'])),
       };
     }).sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')));
 
-    const tasks = (taskRows || []).map((t) => ({
-      id           : String(t._id || ''),
-      progress     : Number.isFinite(Number(t.progress)) ? Number(t.progress) : 0,
-      due_date     : t.due_date || null,
-      end_date     : t.end_date || null,
-      type_of_task : pickOption(t.type_of_task),
-      items        : pickTaskItems(t['Task Item']),
-    }));
+    const tasks = taskRows.map((t) => {
+      const progressRaw = readFirst(t, ['progress_number', 'progress']);
+      const items = pickTaskItems(readFirst(t, ['task_item_list_custom_task_item', 'Task Item']));
+      return {
+        id           : String(t._id || ''),
+        progress     : Number.isFinite(Number(progressRaw)) ? Number(progressRaw) : 0,
+        due_date     : readFirst(t, ['due_date_date', 'due_date']) || null,
+        end_date     : readFirst(t, ['end_date_date', 'end_date']) || null,
+        type_of_task : pickOption(readFirst(t, ['type_of_task_option_os___type_of_task', 'type_of_task'])),
+        items,
+      };
+    });
 
     const progress = tasks.length
       ? Math.max(0, Math.min(100, tasks.reduce((m, t) => Math.max(m, t.progress || 0), 0)))

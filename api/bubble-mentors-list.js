@@ -34,28 +34,13 @@ export default async function handler(req, res) {
   }
 
   const q = typeof req.query?.q === 'string' ? req.query.q.trim().toLowerCase() : '';
-  const debugKeys = req.query?.debug === 'keys';
 
   try {
+    // Bubble suffix-conventie voor option-set 'roles': 'role_option_os___roles'.
     const constraints = [
-      { key: 'role', constraint_type: 'equals', value: 'mentor' },
+      { key: 'role_option_os___roles', constraint_type: 'equals', value: 'mentor' },
     ];
     const { results } = await bubbleList('user', constraints, { limit: HARD_CAP });
-
-    // Tijdelijke debug-tak: KEYS-ONLY uitvoer zodat we de echte Bubble-shape
-    // kunnen zien zonder namen/e-mails/IDs te lekken. Admin-gated via dezelfde
-    // permission als de reguliere lijst (events.team_member.link).
-    if (debugKeys) {
-      const sample = (results && results[0]) || null;
-      return res.status(200).json({
-        debug: {
-          count       : Array.isArray(results) ? results.length : 0,
-          sampleKeys  : sample ? Object.keys(sample) : [],
-          authShape   : (sample && sample.authentication) ? Object.keys(sample.authentication) : null,
-          emailNested : !!(sample && sample.authentication && sample.authentication.email),
-        },
-      });
-    }
 
     let mentors = (results || []).map((u) => {
       const { name, email } = bubbleUserDisplay(u);
