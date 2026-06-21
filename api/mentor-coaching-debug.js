@@ -124,10 +124,12 @@ export default async function handler(req, res) {
       .eq('is_active', true)
       .maybeSingle();
     if (tmErr) throw new Error('team_members lookup: ' + tmErr.message);
-    if (!tm?.bubble_user_id) {
+    const seppeBubbleId = tm?.bubble_user_id || null;
+    if (!seppeBubbleId) {
       return res.status(200).json({
         ok                    : true,
         mentor_user_id        : mentorUserId,
+        seppeBubbleId         : null,
         period_month          : period.monthStartIso,
         from                  : period.from,
         to                    : period.to,
@@ -143,7 +145,7 @@ export default async function handler(req, res) {
 
     // Studenten ophalen — zelfde constraints als de helper.
     const studentsConstraints = [
-      { key: 'mentor_user',            constraint_type: 'equals', value: tm.bubble_user_id },
+      { key: 'mentor_user',            constraint_type: 'equals', value: seppeBubbleId },
       { key: 'role_option_os___roles', constraint_type: 'equals', value: 'student' },
     ];
     const { results: studentRows } = await bubbleList('user', studentsConstraints, { limit: 500 });
@@ -212,6 +214,7 @@ export default async function handler(req, res) {
       const startDt  = readFirst(s, ['starting_date_date', 'starting date']);
       const memberId = readFirst(s, ['member_user', 'member']);
       const lt       = pickOption(readFirst(s, ['learn_type1_option_os___learning_type']));
+      const cbVal    = readFirst(s, ['Created By', 'created_by']);
       const inWin    = inRange(compDt,  period.fromMs, period.toMsIncl);
       const inWinSt  = inRange(startDt, period.fromMs, period.toMsIncl);
 
@@ -225,6 +228,7 @@ export default async function handler(req, res) {
             ns  : !!ns,
             m   : memberId ? String(memberId) : null,
             lt  : lt,
+            cb  : cbVal ? String(cbVal) : null,
           });
         }
         // byLearnType + totals — alleen voor in-range done sessies.
@@ -259,9 +263,91 @@ export default async function handler(req, res) {
 
     const sessionSampleKeys = sessionRows[0] ? Object.keys(sessionRows[0]) : [];
 
+    // ── createdByProbe ────────────────────────────────────────────────────
+    // Fetch ALLE 1-1-sessions met starting_date_date binnen [monthStart, monthEnd),
+    // ZONDER student-filter. Doel: kunnen we via "Created By" zien dat de mentor
+    // sessies heeft aangemaakt die NIET in z'n huidige 36 student-bucket vallen?
+    // (bv. omdat een student van mentor-koppeling is veranderd).
+    //
+    // Bubble's 'greater than' / 'less than' op date-constraints zijn STRIKT;
+    // we sturen monthStart-1ms (zodat de 1e wél meedoet) en monthEnd+1d
+    // (zodat de laatste dag wél meedoet).
+    let createdByProbe = null;
+    try {
+      const PROBE_CAP = 3000;
+      const fromIsoStrict = new Date(period.fromMs - 1).toISOString();
+      const toIsoStrict   = new Date(period.toMsIncl + 1).toISOString();
+      const probeConstraints = [
+        { key: 'starting_date_date', constraint_type: 'greater than', value: fromIsoStrict },
+        { key: 'starting_date_date', constraint_type: 'less than',    value: toIsoStrict   },
+      ];
+      const { results: probeRows } = await bubbleList(
+        '1-1-session',
+        probeConstraints,
+        { limit: PROBE_CAP },
+      );
+      const probeArr = probeRows || [];
+      const fetched  = probeArr.length;
+      const capped   = fetched >= PROBE_CAP;
+
+      // cb_histogram: top-12 distinct Created By → count (desc).
+      const cbCount = new Map();
+      let seppeDoneNotNs = 0;
+      let seppeNoShow   = 0;
+      let seppeTotal    = 0;
+      const seppeStudentIdsSet = new Set();
+      const studentIdsSet      = new Set(studentIds);
+      for (const s of probeArr) {
+        const cb = readFirst(s, ['Created By', 'created_by']);
+        const cbKey = cb ? String(cb) : '(none)';
+        cbCount.set(cbKey, (cbCount.get(cbKey) || 0) + 1);
+
+        if (cb && String(cb) === seppeBubbleId) {
+          seppeTotal += 1;
+          const done = asBool(readFirst(s, ['isdone_boolean', 'isDone']));
+          const ns   = asBool(readFirst(s, ['noshow_boolean', 'NoShow']));
+          const sd   = readFirst(s, ['starting_date_date', 'starting date']);
+          const inWinStart = inRange(sd, period.fromMs, period.toMsIncl);
+          if (done && inWinStart) {
+            if (ns) seppeNoShow    += 1;
+            else    seppeDoneNotNs += 1;
+          }
+          const m = readFirst(s, ['member_user', 'member']);
+          if (m) seppeStudentIdsSet.add(String(m));
+        }
+      }
+
+      const cb_histogram = Array.from(cbCount.entries())
+        .map(([cb, count]) => ({ cb, count }))
+        .sort((a, b) => b.count - a.count)
+        .slice(0, 12);
+
+      const seppeStudentIds = Array.from(seppeStudentIdsSet);
+      const driftedStudents = seppeStudentIds.filter((sid) => !studentIdsSet.has(sid));
+
+      createdByProbe = {
+        fetched,
+        capped,
+        month_total_all  : fetched,
+        cb_histogram,
+        seppe_match: {
+          done_not_noshow: seppeDoneNotNs,
+          noshow         : seppeNoShow,
+          total          : seppeTotal,
+        },
+        seppe_students_count      : seppeStudentIds.length,
+        drifted_students_count    : driftedStudents.length,
+        drifted_students          : driftedStudents.slice(0, 50),
+      };
+    } catch (e) {
+      console.warn('[mentor-coaching-debug] createdByProbe faalde:', e?.message || e);
+      createdByProbe = { error: e?.message || String(e) };
+    }
+
     return res.status(200).json({
       ok                    : true,
       mentor_user_id        : mentorUserId,
+      seppeBubbleId,
       period_month          : period.monthStartIso,
       from                  : period.from,
       to                    : period.to,
@@ -277,6 +363,7 @@ export default async function handler(req, res) {
       total_done_not_noshow,
       total_noshow,
       counted,
+      createdByProbe,
     });
   } catch (e) {
     console.error('[mentor-coaching-debug]', e?.message || e);
