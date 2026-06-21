@@ -117,7 +117,7 @@ export default async function handler(req, res) {
       const onboardingStatus = pickOption(readFirst(u, ['onboarding_status_option_os___onboarding_status', 'Onboarding Status']));
       const membership       = pickOption(readFirst(u, ['membership_option_os___membership', 'membership']));
       const callsDone   = num(readFirst(u, ['1_call_completed_number',   '1_call_completed']));
-      const callsTotal  = num(readFirst(u, ['1_call_total_number',       '1_call_total', '1_call_alpha_total_number', '1_call_alpha_total']));
+      const callsTotal  = num(readFirst(u, ['1_call_alpha_total_number', '1_call_total_number', '1_call_delta_total_number', '1_call_alpha_total']));
       const groupDone   = num(readFirst(u, ['group_call_completed_number', 'group_call_completed']));
       const groupTotal  = num(readFirst(u, ['group_call_total_number',     'group_call_total']));
       const noShows     = num(readFirst(u, ['no_show_count_number',       'no show count']));
