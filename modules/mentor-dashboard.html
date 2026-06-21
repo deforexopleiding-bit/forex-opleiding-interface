@@ -137,13 +137,26 @@
   <!-- Tab: Verdiensten -->
   <div id="tabVerdiensten" class="tab-panel" hidden>
     <div class="subtab-strip" role="tablist">
-      <button class="subtab-btn active" data-subtab="overzicht"   type="button">Overzicht</button>
-      <button class="subtab-btn"        data-subtab="event-bonus" type="button">Event-bonus</button>
-      <button class="subtab-btn"        data-subtab="uitbetalingen" type="button">Uitbetalingen</button>
+      <button class="subtab-btn active" data-subtab="overzicht"    type="button">Overzicht</button>
       <button class="subtab-btn"        data-subtab="coaching"     type="button">Coaching</button>
+      <button class="subtab-btn"        data-subtab="events"       type="button">Events</button>
+      <button class="subtab-btn"        data-subtab="uitbetalingen" type="button">Uitbetalingen</button>
     </div>
 
     <div id="subOverzicht" class="subtab-panel">
+      <div class="kpi-row" id="kpiDashboard">
+        <div class="kpi-card"><div class="kpi-label">Verdiend totaal</div><div class="kpi-value"><span class="skeleton"></span></div><div class="kpi-sub">Bonus + coaching</div></div>
+        <div class="kpi-card"><div class="kpi-label">Deze maand</div><div class="kpi-value"><span class="skeleton"></span></div><div class="kpi-sub">Termijn deze maand</div></div>
+        <div class="kpi-card"><div class="kpi-label">Coaching deze maand</div><div class="kpi-value"><span class="skeleton"></span></div><div class="kpi-sub">1-op-1 + team + no-show + funded</div></div>
+        <div class="kpi-card"><div class="kpi-label">Open</div><div class="kpi-value"><span class="skeleton"></span></div><div class="kpi-sub">Niet-betaalde termijnen</div></div>
+      </div>
+      <div class="section">
+        <h2><i class="ti ti-chart-pie"></i> Bron-verdeling</h2>
+        <div id="sourceSplitWrap"></div>
+      </div>
+    </div>
+
+    <div id="subEvents" class="subtab-panel" hidden>
       <div class="kpi-row" id="kpiVerdiensten">
         <div class="kpi-card"><div class="kpi-label">Deze maand</div><div class="kpi-value"><span class="skeleton"></span></div><div class="kpi-sub">Te ontvangen uit termijnen</div></div>
         <div class="kpi-card"><div class="kpi-label">Volgende maand</div><div class="kpi-value"><span class="skeleton"></span></div><div class="kpi-sub">Te ontvangen uit termijnen</div></div>
@@ -154,9 +167,6 @@
         <h2><i class="ti ti-chart-bar"></i> 12-maands projectie</h2>
         <div id="projection12mWrap"></div>
       </div>
-    </div>
-
-    <div id="subEventBonus" class="subtab-panel" hidden>
       <div class="section">
         <h2><i class="ti ti-coin-euro"></i> Bonus per event / sale</h2>
         <div id="eventBonusWrap"></div>
@@ -315,7 +325,13 @@
   }
 
   // ── Tab-wiring ────────────────────────────────────────────────────────────
-  const _vState = { loaded: false, payoutsLoaded: false, studentsLoaded: false };
+  const _vState = {
+    loaded: false,              // events-loaders (kpiVerdiensten/projection12m/eventBonus)
+    payoutsLoaded: false,
+    studentsLoaded: false,
+    coachingInited: false,
+    dashboardLoaded: false,
+  };
 
   function activateTab(name) {
     document.querySelectorAll('.tab-btn').forEach((b) => {
@@ -324,7 +340,8 @@
     document.getElementById('tabGrootboek').hidden    = (name !== 'grootboek');
     document.getElementById('tabVerdiensten').hidden  = (name !== 'verdiensten');
     document.getElementById('tabStudenten').hidden    = (name !== 'studenten');
-    if (name === 'verdiensten' && !_vState.loaded) loadVerdiensten();
+    // Verdiensten-tab opent op "overzicht" — dashboard lazy-laden zodra de tab actief wordt.
+    if (name === 'verdiensten' && !_vState.dashboardLoaded) loadDashboard();
     if (name === 'studenten' && !_vState.studentsLoaded) loadStudents();
   }
 
@@ -333,11 +350,13 @@
       b.classList.toggle('active', b.dataset.subtab === name);
     });
     document.getElementById('subOverzicht').hidden     = (name !== 'overzicht');
-    document.getElementById('subEventBonus').hidden    = (name !== 'event-bonus');
+    document.getElementById('subEvents').hidden        = (name !== 'events');
     document.getElementById('subUitbetalingen').hidden = (name !== 'uitbetalingen');
     document.getElementById('subCoaching').hidden      = (name !== 'coaching');
+    if (name === 'overzicht'    && !_vState.dashboardLoaded) loadDashboard();
+    if (name === 'events'       && !_vState.loaded)         loadVerdiensten();
     if (name === 'uitbetalingen' && !_vState.payoutsLoaded) loadPayouts();
-    if (name === 'coaching' && !_vState.coachingInited) initCoaching();
+    if (name === 'coaching'     && !_vState.coachingInited) initCoaching();
   }
 
   function wireTabs() {
@@ -473,6 +492,97 @@
       console.error('[mentor-dashboard] verdiensten:', e?.message || e);
       setError('projection12mWrap', 'Verdiensten ophalen mislukt: ' + (e?.message || e));
       setError('eventBonusWrap',   'Verdiensten ophalen mislukt: ' + (e?.message || e));
+    }
+  }
+
+  // ── Overzicht-dashboard (bonus + coaching gecombineerd) ─────────────────
+  function setDashboardKpis({ verdiendTotaal, dezeMaand, coachingMaand, open }) {
+    const row = document.getElementById('kpiDashboard');
+    if (!row) return;
+    row.innerHTML =
+      `<div class="kpi-card"><div class="kpi-label">Verdiend totaal</div><div class="kpi-value">${fmtEUR(verdiendTotaal)}</div><div class="kpi-sub">Bonus + coaching</div></div>` +
+      `<div class="kpi-card"><div class="kpi-label">Deze maand</div><div class="kpi-value">${fmtEUR(dezeMaand)}</div><div class="kpi-sub">Termijn deze maand</div></div>` +
+      `<div class="kpi-card"><div class="kpi-label">Coaching deze maand</div><div class="kpi-value">${fmtEUR(coachingMaand)}</div><div class="kpi-sub">1-op-1 + team + no-show + funded</div></div>` +
+      `<div class="kpi-card"><div class="kpi-label">Open</div><div class="kpi-value">${fmtEUR(open)}</div><div class="kpi-sub">Niet-betaalde termijnen</div></div>`;
+  }
+
+  function renderSourceSplit(bonusTotal, coachingTotal) {
+    const wrap = document.getElementById('sourceSplitWrap');
+    if (!wrap) return;
+    const b = Math.max(0, Number(bonusTotal)    || 0);
+    const c = Math.max(0, Number(coachingTotal) || 0);
+    const sum = b + c;
+    if (sum <= 0) {
+      wrap.innerHTML = `<div class="empty-state"><i class="ti ti-chart-pie-off"></i>Nog geen verdiensten — bron-verdeling verschijnt zodra er bedragen geboekt zijn.</div>`;
+      return;
+    }
+    const bPct = Math.round((b / sum) * 100);
+    const cPct = 100 - bPct;
+    wrap.innerHTML = `
+      <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px;font-size:12.5px;color:var(--text-dim)">
+        <span><strong style="color:var(--text)">Bonus (event)</strong> · ${fmtEUR(b)} <span style="color:var(--text-faint)">(${bPct}%)</span></span>
+        <span><strong style="color:var(--text)">Coaching</strong> · ${fmtEUR(c)} <span style="color:var(--text-faint)">(${cPct}%)</span></span>
+      </div>
+      <div style="display:flex;height:18px;border-radius:9px;overflow:hidden;background:var(--bg-elev);border:1px solid var(--border)">
+        ${b > 0 ? `<div title="Bonus (event): ${fmtEUR(b)}" style="width:${bPct}%;background:var(--accent,#6366f1)"></div>` : ''}
+        ${c > 0 ? `<div title="Coaching: ${fmtEUR(c)}" style="width:${cPct}%;background:#10b981"></div>` : ''}
+      </div>
+      <div style="margin-top:6px;font-size:11.5px;color:var(--text-faint)">Som: ${fmtEUR(sum)}</div>
+    `;
+  }
+
+  function _todayIsoUtc() {
+    const n = new Date();
+    return `${n.getUTCFullYear()}-${String(n.getUTCMonth()+1).padStart(2,'0')}-${String(n.getUTCDate()).padStart(2,'0')}`;
+  }
+
+  async function loadDashboard() {
+    _vState.dashboardLoaded = true;
+    const apiFetch = window.AgentShared?.apiFetch;
+    if (typeof apiFetch !== 'function') {
+      setError('sourceSplitWrap', 'apiFetch niet beschikbaar.');
+      return;
+    }
+    try { if (window._authSharedReady) await window._authSharedReady; } catch {}
+
+    // Huidige maand range voor coaching-deze-maand call.
+    const today = _todayIsoUtc();
+    const ref   = _parseDateOnly(today);
+    const monthFrom = _dateOnlyUtc(_firstOfMonth(ref));
+    const monthTo   = _dateOnlyUtc(_lastOfMonth(ref));
+
+    try {
+      // Drie calls parallel: bonus-overview + coaching huidige maand + coaching all-time.
+      const [bonusResp, coachMonthResp, coachAllResp] = await Promise.all([
+        apiFetch('/api/mentor-bonus-overview'),
+        apiFetch(`/api/mentor-coaching-earnings?from=${encodeURIComponent(monthFrom)}&to=${encodeURIComponent(monthTo)}`),
+        apiFetch(`/api/mentor-coaching-earnings?from=2020-01-01&to=${encodeURIComponent(today)}`),
+      ]);
+      const bonus      = await bonusResp.json();
+      const coachMonth = await coachMonthResp.json();
+      const coachAll   = await coachAllResp.json();
+      if (!bonusResp.ok)      throw new Error(bonus?.error      || 'bonus-overview failed');
+      if (!coachMonthResp.ok) throw new Error(coachMonth?.error || 'coaching-month failed');
+      if (!coachAllResp.ok)   throw new Error(coachAll?.error   || 'coaching-all failed');
+
+      const t = bonus.totals || {};
+      const bonusEarned    = Number(t.earned_total)   || 0;
+      const bonusDezeMaand = Number(t.deze_maand)     || 0;
+      const bonusOpen      = Number(t.open)           || 0;
+      const coachingMaand  = Number(coachMonth.grand_total) || 0;
+      const coachingTotal  = Number(coachAll.grand_total)   || 0;
+      const verdiendTotaal = bonusEarned + coachingTotal;
+
+      setDashboardKpis({
+        verdiendTotaal,
+        dezeMaand:    bonusDezeMaand,
+        coachingMaand,
+        open:         bonusOpen,
+      });
+      renderSourceSplit(bonusEarned, coachingTotal);
+    } catch (e) {
+      console.error('[mentor-dashboard] dashboard:', e?.message || e);
+      setError('sourceSplitWrap', 'Dashboard ophalen mislukt: ' + (e?.message || e));
     }
   }
 
