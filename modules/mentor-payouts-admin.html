@@ -1,0 +1,392 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Payout-rapporten · De Forex Opleiding</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/dist/tabler-icons.min.css" />
+  <link rel="stylesheet" href="/modules/shared/agent-shared.css" />
+  <link rel="stylesheet" href="/styles/sales-redesign.css" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; }
+    body { font-family: 'Inter', system-ui, sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; -webkit-font-smoothing: antialiased; }
+    .app { margin-left: 220px; padding: 24px 28px 60px; max-width: 1280px; }
+
+    /* Diepblauw brand-accent voor payout-pagina; valt netjes terug op default accent. */
+    .app { --brand-deep: #0a2f63; --brand-azure: #1e6cd6; }
+
+    .page-header { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 18px; gap: 12px; flex-wrap: wrap; }
+    .page-header h1 { font-size: 22px; font-weight: 700; color: var(--text); }
+    .page-header p  { font-size: 13px; color: var(--text-dim); margin-top: 2px; }
+
+    .toolbar { display: flex; align-items: center; gap: 12px; margin-bottom: 22px; padding: 12px 14px; background: var(--bg-elev); border: 1px solid var(--border); border-radius: 10px; flex-wrap: wrap; }
+    .toolbar label { font-size: 12px; font-weight: 600; color: var(--text-dim); }
+    .toolbar input[type=month] { padding: 7px 10px; font-size: 13.5px; border: 1px solid var(--border); border-radius: 7px; background: var(--bg); color: var(--text); font-family: inherit; min-width: 160px; }
+    .toolbar .spacer { flex: 1; }
+    .btn-primary { display: inline-flex; align-items: center; gap: 6px; padding: 8px 14px; font-size: 13px; font-weight: 600; border: 0; border-radius: 7px; background: var(--brand-deep); color: #fff; cursor: pointer; transition: background 0.15s; font-family: inherit; }
+    .btn-primary:hover:not([disabled]) { background: var(--brand-azure); }
+    .btn-primary[disabled] { opacity: 0.55; cursor: progress; }
+    .gen-status { font-size: 12px; color: var(--text-faint); }
+
+    .kpi-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-bottom: 22px; }
+    .kpi-card { background: var(--bg-elev); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; }
+    .kpi-label { font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-dim); font-weight: 600; }
+    .kpi-value { font-size: 22px; font-weight: 700; margin-top: 4px; color: var(--text); }
+    .kpi-sub   { font-size: 11.5px; color: var(--text-dim); margin-top: 2px; }
+    @media (max-width: 880px) {
+      .kpi-row { grid-template-columns: repeat(2, 1fr); }
+      .app { margin-left: 0; padding: 14px; }
+    }
+
+    .section { margin-bottom: 28px; }
+    .section h2 { font-size: 15px; font-weight: 700; margin-bottom: 10px; color: var(--text); display: flex; align-items: center; gap: 8px; }
+    .section h2 i { color: var(--text-dim); }
+
+    .data-table { width: 100%; border-collapse: collapse; background: var(--bg-elev); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+    .data-table th, .data-table td { padding: 10px 12px; text-align: left; font-size: 13px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+    .data-table th { background: rgba(10,47,99,0.04); font-weight: 600; color: var(--text-dim); font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.03em; }
+    .data-table tr:last-child td { border-bottom: 0; }
+    .data-table td.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+    .data-table tbody tr.row-main { cursor: pointer; transition: background 0.1s; }
+    .data-table tbody tr.row-main:hover { background: rgba(10,47,99,0.04); }
+    .data-table tbody tr.row-detail td { background: rgba(10,47,99,0.025); padding: 14px 18px; }
+    .caret { display: inline-block; transition: transform 0.15s; color: var(--text-faint); width: 12px; }
+    .caret.open { transform: rotate(90deg); }
+
+    .badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; white-space: nowrap; }
+    .badge-grey   { background: rgba(100,116,139,0.18); color: #475569; }
+    .badge-blue   { background: rgba(20,115,214,0.16); color: #1160bd; }
+    .badge-green  { background: rgba(34,197,94,0.13);  color: #15803d; }
+    .badge-amber  { background: rgba(245,158,11,0.16); color: #b45309; }
+    .badge-deep   { background: rgba(10,47,99,0.12);   color: #0a2f63; }
+
+    .empty-state { background: var(--bg-elev); border: 1px dashed var(--border); border-radius: 10px; padding: 24px 16px; text-align: center; font-size: 13px; color: var(--text-dim); }
+    .empty-state i { font-size: 26px; display: block; margin-bottom: 6px; opacity: 0.6; }
+
+    .skeleton { display: inline-block; width: 80px; height: 16px; background: linear-gradient(90deg, rgba(0,0,0,0.05), rgba(0,0,0,0.10), rgba(0,0,0,0.05)); border-radius: 4px; animation: sk 1.2s infinite; }
+    @keyframes sk { 0% { background-position: 0% 0; } 100% { background-position: 200% 0; } }
+
+    .lines-table { width: 100%; border-collapse: collapse; margin-top: 4px; }
+    .lines-table th, .lines-table td { padding: 8px 10px; font-size: 12.5px; border-bottom: 1px solid var(--border); }
+    .lines-table th { font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-faint); font-weight: 600; text-align: left; }
+    .lines-table td.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+    .lines-table tfoot td { font-weight: 700; border-top: 2px solid var(--border); border-bottom: 0; }
+
+    .detail-meta { font-size: 11.5px; color: var(--text-dim); margin-bottom: 8px; display: flex; gap: 16px; flex-wrap: wrap; }
+    .detail-meta strong { color: var(--text); font-weight: 600; }
+  </style>
+</head>
+<body>
+<div id="sidebar-mount"></div>
+
+<div class="app">
+  <div class="page-header">
+    <div>
+      <h1>Payout-rapporten (admin)</h1>
+      <p>Genereer concept-rapporten per mentor + maand. De rapporten worden pas zichtbaar voor mentors zodra ze door finance/strateeg zijn goedgekeurd (fase 2). Bedragen incl. btw.</p>
+    </div>
+  </div>
+
+  <div class="toolbar">
+    <label for="periodMonth">Maand:</label>
+    <input type="month" id="periodMonth" />
+    <button type="button" class="btn-primary" id="btnGenerate">
+      <i class="ti ti-refresh"></i>Genereer rapporten
+    </button>
+    <span class="gen-status" id="genStatus"></span>
+    <span class="spacer"></span>
+  </div>
+
+  <div class="kpi-row" id="kpiRow">
+    <div class="kpi-card"><div class="kpi-label">Rapporten</div><div class="kpi-value"><span class="skeleton"></span></div><div class="kpi-sub">Mentors deze maand</div></div>
+    <div class="kpi-card"><div class="kpi-label">Bonus totaal</div><div class="kpi-value"><span class="skeleton"></span></div><div class="kpi-sub">Som incl. btw</div></div>
+    <div class="kpi-card"><div class="kpi-label">Coaching totaal</div><div class="kpi-value"><span class="skeleton"></span></div><div class="kpi-sub">Som incl. btw</div></div>
+    <div class="kpi-card"><div class="kpi-label">Totaal te betalen</div><div class="kpi-value"><span class="skeleton"></span></div><div class="kpi-sub">Incl. btw</div></div>
+  </div>
+
+  <div class="section">
+    <h2><i class="ti ti-receipt"></i> Per mentor</h2>
+    <div id="payoutsWrap">
+      <div class="empty-state">Selecteer een maand en klik "Genereer rapporten" om te starten.</div>
+    </div>
+  </div>
+</div>
+
+<script src="/modules/shared/supabase-client.js"></script>
+<script src="/modules/shared/agent-shared.js"></script>
+<script src="/modules/shared/theme-shared.js"></script>
+<script src="/modules/shared/permissions.js"></script>
+<script src="/modules/shared/sidebar.js"></script>
+<script>
+(function () {
+  'use strict';
+
+  const fmtEUR = (n) => {
+    const v = Number(n) || 0;
+    return v.toLocaleString('nl-NL', { style: 'currency', currency: 'EUR', minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  };
+  const fmtDateTimeNL = (iso) => {
+    if (!iso) return '—';
+    try {
+      const d = new Date(iso);
+      return d.toLocaleString('nl-NL', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+    } catch { return iso; }
+  };
+  const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+
+  // Status -> { label, cls } badge-map. Concepten in deep-blauw zodat ze visueel
+  // onderscheidbaar zijn van goedgekeurd (groen) en uitbetaald (blauw).
+  const STATUS_BADGE = {
+    open        : { label: 'Open',         cls: 'badge-grey'  },
+    concept     : { label: 'Concept',      cls: 'badge-deep'  },
+    goedgekeurd : { label: 'Goedgekeurd',  cls: 'badge-green' },
+    uitbetaald  : { label: 'Uitbetaald',   cls: 'badge-blue'  },
+  };
+  function statusBadge(status) {
+    const b = STATUS_BADGE[status] || { label: status || '—', cls: 'badge-grey' };
+    return `<span class="badge ${b.cls}">${esc(b.label)}</span>`;
+  }
+
+  // Default = vorige maand (YYYY-MM).
+  function defaultPeriodMonth() {
+    const n = new Date();
+    let y = n.getUTCFullYear();
+    let m = n.getUTCMonth(); // 0..11, dit is huidige maand index — vorige = huidige - 1.
+    // Zonder -1 zou het de huidige maand zijn; in voorrige maand renderen.
+    m -= 1;
+    if (m < 0) { m = 11; y -= 1; }
+    return `${y}-${String(m + 1).padStart(2, '0')}`;
+  }
+
+  function setKpis({ rapporten, bonus, coaching, total }) {
+    document.getElementById('kpiRow').innerHTML =
+      `<div class="kpi-card"><div class="kpi-label">Rapporten</div><div class="kpi-value">${rapporten}</div><div class="kpi-sub">Mentors deze maand</div></div>` +
+      `<div class="kpi-card"><div class="kpi-label">Bonus totaal</div><div class="kpi-value">${fmtEUR(bonus)}</div><div class="kpi-sub">Som incl. btw</div></div>` +
+      `<div class="kpi-card"><div class="kpi-label">Coaching totaal</div><div class="kpi-value">${fmtEUR(coaching)}</div><div class="kpi-sub">Som incl. btw</div></div>` +
+      `<div class="kpi-card"><div class="kpi-label">Totaal te betalen</div><div class="kpi-value">${fmtEUR(total)}</div><div class="kpi-sub">Incl. btw</div></div>`;
+  }
+
+  function renderEmpty(msg) {
+    document.getElementById('payoutsWrap').innerHTML = `<div class="empty-state">${esc(msg)}</div>`;
+    setKpis({ rapporten: 0, bonus: 0, coaching: 0, total: 0 });
+  }
+
+  function renderError(msg) {
+    document.getElementById('payoutsWrap').innerHTML = `<div class="empty-state" style="border-color:#fecaca;color:#b91c1c"><i class="ti ti-alert-triangle"></i>${esc(msg)}</div>`;
+  }
+
+  function renderTable(payouts) {
+    if (!Array.isArray(payouts) || payouts.length === 0) {
+      renderEmpty('Geen rapporten voor deze maand — klik "Genereer rapporten" om ze aan te maken.');
+      return;
+    }
+    let bonusSum = 0, coachingSum = 0, totalSum = 0;
+    for (const p of payouts) {
+      bonusSum    += Number(p.bonus_total)    || 0;
+      coachingSum += Number(p.coaching_total) || 0;
+      totalSum    += Number(p.total)          || 0;
+    }
+    setKpis({ rapporten: payouts.length, bonus: bonusSum, coaching: coachingSum, total: totalSum });
+
+    const rows = payouts.map((p, idx) => `
+      <tr class="row-main" data-payout-id="${esc(p.id)}" data-row-idx="${idx}">
+        <td style="width:18px"><span class="caret" id="caret-${idx}"><i class="ti ti-caret-right-filled"></i></span></td>
+        <td>
+          <div style="font-weight:600">${esc(p.mentor_name || '—')}</div>
+          <div style="font-size:11.5px;color:var(--text-faint)">${esc(p.mentor_email || '')}</div>
+        </td>
+        <td class="num">${fmtEUR(p.bonus_total)}</td>
+        <td class="num">${fmtEUR(p.coaching_total)}</td>
+        <td class="num"><strong>${fmtEUR(p.total)}</strong></td>
+        <td class="num">${fmtEUR(p.total_excl)}</td>
+        <td class="num">${fmtEUR(p.btw_amount)}</td>
+        <td>${statusBadge(p.status)}</td>
+      </tr>
+      <tr class="row-detail" id="detail-${idx}" hidden>
+        <td colspan="8">
+          <div id="detail-body-${idx}" style="font-size:12.5px;color:var(--text-faint);padding:4px 0">Laden…</div>
+        </td>
+      </tr>
+    `).join('');
+
+    document.getElementById('payoutsWrap').innerHTML = `
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th></th>
+            <th>Mentor</th>
+            <th class="num">Bonus (incl)</th>
+            <th class="num">Coaching (incl)</th>
+            <th class="num">Totaal incl</th>
+            <th class="num">Totaal excl</th>
+            <th class="num">Btw</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>
+    `;
+
+    document.querySelectorAll('.row-main').forEach((tr) => {
+      tr.addEventListener('click', () => toggleDetail(tr));
+    });
+  }
+
+  function renderDetail(idx, detail) {
+    const host = document.getElementById('detail-body-' + idx);
+    if (!host) return;
+    const p = detail || {};
+    const lines = Array.isArray(p.lines) ? p.lines : [];
+    const lineRows = lines.length === 0
+      ? `<tr><td colspan="5" style="text-align:center;color:var(--text-faint);padding:14px">Geen regels.</td></tr>`
+      : lines.map((l) => {
+          const qty       = (l.qty == null) ? '—' : String(l.qty);
+          const unitIncl  = (l.unit_incl == null) ? '—' : fmtEUR(l.unit_incl);
+          return `
+            <tr>
+              <td>${esc(l.label || l.kind || '—')}</td>
+              <td class="num">${esc(qty)}</td>
+              <td class="num">${esc(unitIncl)}</td>
+              <td class="num">${fmtEUR(l.amount_incl)}</td>
+              <td class="num">${fmtEUR(l.amount_excl)}</td>
+            </tr>`;
+        }).join('');
+
+    const meta = [];
+    if (p.generated_at) meta.push(`Gegenereerd: <strong>${esc(fmtDateTimeNL(p.generated_at))}</strong>`);
+    if (p.approved_at)  meta.push(`Goedgekeurd: <strong>${esc(fmtDateTimeNL(p.approved_at))}</strong>`);
+    if (p.paid_at)      meta.push(`Uitbetaald: <strong>${esc(fmtDateTimeNL(p.paid_at))}</strong>`);
+
+    host.innerHTML = `
+      <div class="detail-meta">${meta.join(' · ') || '<em>Nog niet gegenereerd</em>'}</div>
+      <table class="lines-table">
+        <thead>
+          <tr>
+            <th>Categorie</th>
+            <th class="num">Aantal</th>
+            <th class="num">Tarief incl</th>
+            <th class="num">Bedrag incl</th>
+            <th class="num">Bedrag excl</th>
+          </tr>
+        </thead>
+        <tbody>${lineRows}</tbody>
+        <tfoot>
+          <tr>
+            <td colspan="3" style="text-align:right">Totaal</td>
+            <td class="num">${fmtEUR(p.total)}</td>
+            <td class="num">${fmtEUR(p.total_excl)}</td>
+          </tr>
+        </tfoot>
+      </table>
+    `;
+  }
+
+  // Cache van detail-fetches per payout-id zodat klap-toggle geen 2e fetch doet.
+  const _detailCache = new Map();
+  async function toggleDetail(tr) {
+    const idx = tr.dataset.rowIdx;
+    const payoutId = tr.dataset.payoutId;
+    const detailRow = document.getElementById('detail-' + idx);
+    const caret = document.getElementById('caret-' + idx);
+    if (!detailRow) return;
+    const isHidden = detailRow.hidden;
+    detailRow.hidden = !isHidden;
+    if (caret) caret.classList.toggle('open', isHidden);
+    if (!isHidden) return; // zojuist gesloten — niets te doen
+
+    if (_detailCache.has(payoutId)) {
+      renderDetail(idx, _detailCache.get(payoutId));
+      return;
+    }
+    const apiFetch = window.AgentShared?.apiFetch;
+    if (typeof apiFetch !== 'function') {
+      document.getElementById('detail-body-' + idx).innerHTML = '<em>apiFetch niet beschikbaar.</em>';
+      return;
+    }
+    try {
+      const r = await apiFetch(`/api/mentor-payout-detail?payout_id=${encodeURIComponent(payoutId)}`);
+      const d = await r.json();
+      if (!r.ok) throw new Error(d?.error || 'detail-fetch faalde');
+      _detailCache.set(payoutId, d.payout);
+      renderDetail(idx, d.payout);
+    } catch (e) {
+      document.getElementById('detail-body-' + idx).innerHTML =
+        `<em style="color:#b91c1c">Detail laden mislukt: ${esc(e?.message || e)}</em>`;
+    }
+  }
+
+  async function loadList() {
+    const periodMonth = document.getElementById('periodMonth').value;
+    if (!periodMonth) { renderEmpty('Kies een maand.'); return; }
+    const apiFetch = window.AgentShared?.apiFetch;
+    if (typeof apiFetch !== 'function') { renderError('apiFetch niet beschikbaar.'); return; }
+    try {
+      if (window._authSharedReady) await window._authSharedReady;
+    } catch {}
+    try {
+      _detailCache.clear();
+      const r = await apiFetch(`/api/mentor-payouts-admin-list?period_month=${encodeURIComponent(periodMonth)}`);
+      const d = await r.json();
+      if (!r.ok) throw new Error(d?.error || 'lijst-fetch faalde');
+      renderTable(d.payouts || []);
+    } catch (e) {
+      console.error('[mentor-payouts-admin] list:', e?.message || e);
+      renderError('Rapporten ophalen mislukt: ' + (e?.message || e));
+    }
+  }
+
+  async function generateNow() {
+    const periodMonth = document.getElementById('periodMonth').value;
+    if (!periodMonth) { alert('Kies eerst een maand.'); return; }
+    const apiFetch = window.AgentShared?.apiFetch;
+    if (typeof apiFetch !== 'function') return;
+    const btn    = document.getElementById('btnGenerate');
+    const status = document.getElementById('genStatus');
+    btn.disabled = true;
+    status.textContent = 'Bezig met genereren…';
+    try {
+      if (window._authSharedReady) await window._authSharedReady;
+      const r = await apiFetch('/api/mentor-payout-generate', {
+        method : 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body   : JSON.stringify({ period_month: periodMonth }),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d?.error || 'generate faalde');
+      const total   = Array.isArray(d.mentors) ? d.mentors.length : 0;
+      const skipped = (d.mentors || []).filter((m) => m.skipped).length;
+      const errors  = (d.mentors || []).filter((m) => m.error).length;
+      let msg = `${total} mentors verwerkt`;
+      if (skipped) msg += ` · ${skipped} overgeslagen (al definitief)`;
+      if (errors)  msg += ` · ${errors} fout(en)`;
+      status.textContent = msg;
+      await loadList();
+    } catch (e) {
+      console.error('[mentor-payouts-admin] generate:', e?.message || e);
+      status.textContent = 'Fout: ' + (e?.message || e);
+    } finally {
+      btn.disabled = false;
+    }
+  }
+
+  function wire() {
+    document.getElementById('btnGenerate').addEventListener('click', generateNow);
+    document.getElementById('periodMonth').addEventListener('change', loadList);
+  }
+
+  async function init() {
+    document.getElementById('periodMonth').value = defaultPeriodMonth();
+    wire();
+    try { if (window._authSharedReady) await window._authSharedReady; } catch {}
+    await loadList();
+  }
+
+  document.addEventListener('DOMContentLoaded', init);
+})();
+</script>
+</body>
+</html>
