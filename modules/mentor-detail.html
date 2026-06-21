@@ -483,11 +483,12 @@
     const r = _payoutSettings.recurring;
 
     const recurringRows = r.length === 0
-      ? `<tr><td colspan="4" style="text-align:center;color:var(--text-faint);padding:14px">Nog geen vaste posten.</td></tr>`
+      ? `<tr><td colspan="5" style="text-align:center;color:var(--text-faint);padding:14px">Nog geen vaste posten.</td></tr>`
       : r.map((it) => `
           <tr data-rec-id="${esc(it.id)}">
             <td>${esc(it.label)}</td>
             <td class="num">${fmtEUR(it.amount_incl)}</td>
+            <td>${_fmtStartMonth(it.start_month)}</td>
             <td>${it.active ? '<span class="badge badge-green">Actief</span>' : '<span class="badge badge-grey">Inactief</span>'}</td>
             <td class="num">
               <button type="button" class="ps-btn-secondary ps-rec-edit"  data-id="${esc(it.id)}">Bewerken</button>
@@ -533,6 +534,7 @@
             <tr>
               <th>Label</th>
               <th class="num">Bedrag (incl)</th>
+              <th>Vanaf</th>
               <th>Status</th>
               <th class="num">Acties</th>
             </tr>
@@ -542,6 +544,8 @@
         <div class="ps-row" style="margin-top:6px">
           <input type="text"   id="psRecLabel"  placeholder="Label (bv. Telefoonvergoeding)" />
           <input type="number" id="psRecAmount" min="0" step="0.01" placeholder="Bedrag incl" />
+          <label for="psRecStart" style="margin-left:4px">Vanaf:</label>
+          <input type="month"  id="psRecStart" title="Leeg = vanaf altijd" />
           <label class="ps-toggle"><input type="checkbox" id="psRecActive" checked /> Actief</label>
           <button type="button" class="ps-btn-primary" id="psAddRec">Toevoegen</button>
           <span class="ps-status" id="psRecStatus"></span>
@@ -584,16 +588,36 @@
     } finally { btn.disabled = false; }
   }
 
+  // Toont start_month-veld (DB-formaat 'YYYY-MM-DD') als leesbare maand,
+  // of '— altijd —' als NULL/leeg.
+  function _fmtStartMonth(v) {
+    if (!v) return '<span style="color:var(--text-faint)">— altijd —</span>';
+    const m = String(v).match(/^(\d{4})-(\d{2})/);
+    if (!m) return esc(v);
+    const monthShort = ['', 'jan', 'feb', 'mrt', 'apr', 'mei', 'jun', 'jul', 'aug', 'sep', 'okt', 'nov', 'dec'];
+    const mo = parseInt(m[2], 10);
+    return `${monthShort[mo] || m[2]} ${m[1]}`;
+  }
+
+  // 'YYYY-MM-DD' → 'YYYY-MM' (voor <input type="month">). NULL/'' blijft ''.
+  function _toMonthInput(v) {
+    if (!v) return '';
+    const m = String(v).match(/^(\d{4})-(\d{2})/);
+    return m ? `${m[1]}-${m[2]}` : '';
+  }
+
   async function addRecurring() {
     const apiFetch = window.AgentShared?.apiFetch;
     if (typeof apiFetch !== 'function') return;
     const labelEl  = document.getElementById('psRecLabel');
     const amountEl = document.getElementById('psRecAmount');
+    const startEl  = document.getElementById('psRecStart');
     const activeEl = document.getElementById('psRecActive');
     const status   = document.getElementById('psRecStatus');
     const btn      = document.getElementById('psAddRec');
     const label    = (labelEl.value || '').trim();
     const amount   = Number(amountEl.value) || 0;
+    const start    = (startEl.value || '').trim() || null; // 'YYYY-MM' of null
     if (!label) { status.textContent = 'Label vereist.'; return; }
     if (amount < 0) { status.textContent = 'Bedrag moet ≥ 0.'; return; }
     btn.disabled = true; status.textContent = 'Toevoegen…';
@@ -606,11 +630,12 @@
           label,
           amount_incl   : amount,
           active        : activeEl.checked,
+          start_month   : start,
         }),
       });
       const d = await r.json();
       if (!r.ok) throw new Error(d?.error || 'insert faalde');
-      labelEl.value = ''; amountEl.value = ''; activeEl.checked = true;
+      labelEl.value = ''; amountEl.value = ''; startEl.value = ''; activeEl.checked = true;
       status.textContent = '';
       await loadPayoutSettings(_payoutSettings.mentorUserId);
     } catch (e) {
@@ -625,6 +650,8 @@
     if (nieuweLabel === null) return;
     const nieuwBedrag  = window.prompt('Bedrag incl. btw:', String(item.amount_incl));
     if (nieuwBedrag === null) return;
+    const startPrompt  = window.prompt('Vanaf maand (YYYY-MM; leeg = altijd):', _toMonthInput(item.start_month));
+    if (startPrompt === null) return;
     const actiefStr    = window.prompt('Actief? (ja/nee):', item.active ? 'ja' : 'nee');
     if (actiefStr === null) return;
     const apiFetch = window.AgentShared?.apiFetch;
@@ -638,6 +665,7 @@
           label      : (nieuweLabel || '').trim(),
           amount_incl: Number(nieuwBedrag) || 0,
           active     : /^(ja|j|y|yes|1|true)$/i.test((actiefStr || '').trim()),
+          start_month: (startPrompt || '').trim() || null,
         }),
       });
       const d = await r.json();

@@ -10,7 +10,10 @@
 //                          maar wel gevalideerd als aanwezig),
 //     label: string (1..200),
 //     amount_incl: number (>= 0),
-//     active: bool (default true) }
+//     active: bool (default true),
+//     start_month?: 'YYYY-MM' | 'YYYY-MM-DD' | '' | null
+//       — vanaf welke maand de post meetelt; leeg/ontbrekend = vanaf altijd
+//       (NULL in DB). Wordt genormaliseerd naar 1e van de maand. }
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
@@ -18,6 +21,22 @@ import { requirePermission } from './_lib/requirePermission.js';
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function round2(n) { return Math.round((Number(n) || 0) * 100) / 100; }
+
+// 'YYYY-MM' of 'YYYY-MM-DD' → 'YYYY-MM-01' (NULL als input leeg of ongeldig).
+// Geeft false terug bij EXPLICIET ongeldige string (niet-leeg + niet-parsbaar)
+// zodat de caller een 400 kan returnen i.p.v. stilzwijgend NULL te bewaren.
+function normalizeStartMonth(v) {
+  if (v === null || v === undefined || v === '') return { ok: true, value: null };
+  if (typeof v !== 'string') return { ok: false };
+  const s = v.trim();
+  if (!s) return { ok: true, value: null };
+  const m = s.match(/^(\d{4})-(\d{2})(?:-\d{2})?$/);
+  if (!m) return { ok: false };
+  const y = Number(m[1]), mo = Number(m[2]);
+  if (!Number.isInteger(y) || y < 2020 || y > 2100) return { ok: false };
+  if (!Number.isInteger(mo) || mo < 1 || mo > 12)  return { ok: false };
+  return { ok: true, value: `${y}-${String(mo).padStart(2, '0')}-01` };
+}
 
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
@@ -42,20 +61,22 @@ export default async function handler(req, res) {
   const label        = typeof body.label === 'string' ? body.label.trim() : '';
   const amountIncl   = round2(body.amount_incl);
   const active       = body.active === undefined ? true : !!body.active;
+  const sm           = normalizeStartMonth(body.start_month);
 
   if (id && !UUID_RE.test(id))                       return res.status(400).json({ error: 'id (uuid) ongeldig' });
   if (mentorUserId && !UUID_RE.test(mentorUserId))   return res.status(400).json({ error: 'mentor_user_id (uuid) ongeldig' });
   if (!label || label.length > 200)                  return res.status(400).json({ error: 'label vereist (1..200 chars)' });
   if (!Number.isFinite(amountIncl) || amountIncl < 0) return res.status(400).json({ error: 'amount_incl moet >= 0 zijn' });
+  if (!sm.ok)                                         return res.status(400).json({ error: 'start_month moet YYYY-MM zijn (of leeg)' });
 
   try {
     if (id) {
       // UPDATE — mentor_user_id wordt NIET overschreven (eigenaarschap immutable).
       const { data, error } = await supabaseAdmin
         .from('mentor_recurring_items')
-        .update({ label, amount_incl: amountIncl, active })
+        .update({ label, amount_incl: amountIncl, active, start_month: sm.value })
         .eq('id', id)
-        .select('id, mentor_user_id, label, amount_incl, active')
+        .select('id, mentor_user_id, label, amount_incl, active, start_month')
         .single();
       if (error) throw new Error('recurring update: ' + error.message);
       return res.status(200).json({ ok: true, item: data });
@@ -68,8 +89,9 @@ export default async function handler(req, res) {
           label,
           amount_incl   : amountIncl,
           active,
+          start_month   : sm.value,
         })
-        .select('id, mentor_user_id, label, amount_incl, active')
+        .select('id, mentor_user_id, label, amount_incl, active, start_month')
         .single();
       if (error) throw new Error('recurring insert: ' + error.message);
       return res.status(200).json({ ok: true, item: data });

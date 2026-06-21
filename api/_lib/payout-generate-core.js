@@ -155,12 +155,15 @@ export async function computeAndUpsertConcept({ mentorUserId, monthStart, actorI
     travelTotal = round2(travelDays * travelRate);
   }
 
-  // 6) RECURRING — actieve vaste posten.
+  // 6) RECURRING — actieve vaste posten. Een post telt alleen mee als
+  //    start_month IS NULL (vanaf altijd) OF start_month <= huidige maand
+  //    (post is al ingegaan).
   const { data: recurringRows, error: recErr } = await supabaseAdmin
     .from('mentor_recurring_items')
-    .select('label, amount_incl')
+    .select('label, amount_incl, start_month')
     .eq('mentor_user_id', mentorUserId)
-    .eq('active', true);
+    .eq('active', true)
+    .or(`start_month.is.null,start_month.lte.${period.start}`);
   if (recErr) throw new Error(`recurring fetch (${mentorUserId}): ${recErr.message}`);
   const recurringItems = (recurringRows || []).map((r) => ({
     label       : String(r.label || ''),
