@@ -16,7 +16,16 @@
 //       id, mentor_user_id, mentor_name, mentor_email, period_month, status,
 //       bonus_total, coaching_total, total, total_excl, btw_amount,
 //       generated_at, approved_at, approved_by, paid_at, created_at,
-//       lines: [{ id, kind, label, qty, unit_incl, amount_incl, amount_excl }, ...]
+//       lines: [
+//         { id, kind, label, qty, unit_incl, amount_incl, amount_excl },
+//         // kinds: bonus | coaching_1on1 | coaching_team | coaching_noshow |
+//         //        coaching_funded | reiskosten | vast | handmatig
+//       ],
+//       adjustments: [
+//         // alle mentor_payout_adjustments voor (mentor, period); UI gebruikt
+//         // dit om edit/delete-knoppen aan handmatige posten te koppelen.
+//         { id, label, amount_incl, amount_excl }
+//       ]
 //   } }
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
@@ -68,13 +77,31 @@ export default async function handler(req, res) {
       }
     }
 
-    // 3) Lines ophalen.
-    const { data: linesRaw, error: lineErr } = await supabaseAdmin
+    // 3) Lines + adjustments parallel ophalen. Adjustments worden alleen
+    //    aan admins/manager getoond — bij owner-view (mentor zelf) tonen we
+    //    een lege array zodat de UI geen edit/delete-knoppen kan renderen.
+    const BTW_RATE = 1.21;
+    const round2   = (n) => Math.round((Number(n) || 0) * 100) / 100;
+
+    const linesPromise = supabaseAdmin
       .from('mentor_payout_lines')
       .select('id, kind, label, qty, unit_incl, amount_incl, amount_excl')
       .eq('payout_id', payoutId)
       .order('id', { ascending: true });
+
+    const adjPromise = isOwner
+      ? Promise.resolve({ data: [], error: null })
+      : supabaseAdmin
+          .from('mentor_payout_adjustments')
+          .select('id, label, amount_incl')
+          .eq('mentor_user_id', payout.mentor_user_id)
+          .eq('period_month', payout.period_month)
+          .order('id', { ascending: true });
+
+    const [{ data: linesRaw, error: lineErr }, { data: adjRaw, error: adjErr }] =
+      await Promise.all([linesPromise, adjPromise]);
     if (lineErr) throw new Error('lines fetch: ' + lineErr.message);
+    if (adjErr)  throw new Error('adjustments fetch: ' + adjErr.message);
 
     const lines = (linesRaw || []).map((l) => ({
       id          : l.id,
@@ -85,6 +112,16 @@ export default async function handler(req, res) {
       amount_incl : Number(l.amount_incl) || 0,
       amount_excl : Number(l.amount_excl) || 0,
     }));
+
+    const adjustments = (adjRaw || []).map((a) => {
+      const inc = Number(a.amount_incl) || 0;
+      return {
+        id          : a.id,
+        label       : String(a.label || ''),
+        amount_incl : inc,
+        amount_excl : round2(inc / BTW_RATE),
+      };
+    });
 
     // 4) Mentor-info (naam/email).
     let mentor_name = null;
@@ -120,6 +157,7 @@ export default async function handler(req, res) {
         paid_at         : payout.paid_at,
         created_at      : payout.created_at,
         lines,
+        adjustments,
       },
     });
   } catch (e) {
