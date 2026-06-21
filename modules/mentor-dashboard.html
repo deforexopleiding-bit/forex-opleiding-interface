@@ -646,6 +646,9 @@
           wrap.innerHTML = '';
           wrap.appendChild(pre);
         }
+        // Stop hier: anders overschrijft de normale renderStudents() het
+        // debug-blok meteen weer.
+        return;
       }
     } catch (e) {
       console.warn('[mentor-dashboard] studentdebug failed:', e?.message || e);
