@@ -460,15 +460,25 @@
       wrap.innerHTML = `<div class="empty-state"><i class="ti ti-receipt-off"></i>Nog geen uitbetalings-batches.</div>`;
       return;
     }
+    // Status-badges: concept/open zien mentors niet (gefilterd in self-list);
+    // hier ontvangen we alleen goedgekeurd + uitbetaald.
+    const statusBadge = (st) => {
+      if (st === 'uitbetaald')  return '<span class="badge badge-blue">Uitbetaald</span>';
+      if (st === 'goedgekeurd') return '<span class="badge badge-green">Goedgekeurd</span>';
+      return '<span class="badge badge-grey">' + esc(st || '—') + '</span>';
+    };
     const rows = payouts.map((p) => {
-      const badge = p.status === 'uitbetaald'
-        ? '<span class="badge badge-blue">Uitbetaald</span>'
-        : '<span class="badge badge-amber">Open</span>';
+      // Bij goedgekeurde rapporten een CTA: factuur insturen voor het bedrag incl. btw.
+      const cta = (p.status === 'goedgekeurd')
+        ? `<div style="margin-top:4px;font-size:11.5px;color:var(--text-dim)">
+             📨 Stuur je factuur voor dit bedrag (<strong>${fmtEUR(p.total)}</strong> incl. btw).
+           </div>`
+        : '';
       return `
         <tr>
-          <td>${esc(p.period_month || '—')}</td>
+          <td>${esc(p.period_month || '—')}${cta}</td>
           <td class="num">${fmtEUR(p.total)}</td>
-          <td>${badge}</td>
+          <td>${statusBadge(p.status)}</td>
           <td>${fmtDateNL(p.created_at)}</td>
           <td>${p.paid_at ? fmtDateNL(p.paid_at) : '—'}</td>
         </tr>`;

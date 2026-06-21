@@ -285,8 +285,22 @@
             </td>
           </tr>`).join('');
 
+    // Fase 2 — alleen bij status 'concept' de Akkoord-knop renderen.
+    const showApproveBtn = (p.status === 'concept');
+    const approveBlock = showApproveBtn ? `
+      <div style="margin:6px 0 10px">
+        <button type="button" class="approve-btn"
+                data-payout-id="${esc(p.id)}"
+                data-idx="${esc(idx)}"
+                style="display:inline-flex;align-items:center;gap:6px;padding:7px 13px;font-size:12.5px;font-weight:600;border:0;border-radius:7px;background:#15803d;color:#fff;cursor:pointer;font-family:inherit">
+          ✅ Akkoord & mail versturen
+        </button>
+        <span class="approve-status" id="approve-status-${esc(idx)}" style="font-size:11.5px;color:var(--text-faint);margin-left:8px"></span>
+      </div>` : '';
+
     host.innerHTML = `
       <div class="detail-meta">${meta.join(' · ') || '<em>Nog niet gegenereerd</em>'}</div>
+      ${approveBlock}
       <div style="margin:-4px 0 10px">
         <button type="button" class="coach-debug-btn"
                 data-mentor-id="${esc(p.mentor_user_id)}"
@@ -359,6 +373,44 @@
       debugBtn.addEventListener('click', () =>
         runCoachingDebug(debugBtn.dataset.mentorId, debugBtn.dataset.period, debugBtn.dataset.idx)
       );
+    }
+    const approveBtn = host.querySelector('.approve-btn');
+    if (approveBtn) {
+      approveBtn.addEventListener('click', () =>
+        approvePayout(approveBtn.dataset.payoutId, approveBtn.dataset.idx, approveBtn)
+      );
+    }
+  }
+
+  // ── Akkoord & mail versturen (fase 2) ─────────────────────────────────
+  async function approvePayout(payoutId, idx, btn) {
+    const apiFetch = window.AgentShared?.apiFetch;
+    if (typeof apiFetch !== 'function') return;
+    const status = document.getElementById('approve-status-' + idx);
+    if (!window.confirm('Rapport goedkeuren? Er wordt direct een mail naar de mentor verstuurd.')) return;
+    btn.disabled = true;
+    if (status) status.textContent = 'Goedkeuren…';
+    try {
+      const r = await apiFetch('/api/mentor-payout-approve', {
+        method : 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body   : JSON.stringify({ payout_id: payoutId }),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d?.error || 'approve faalde');
+      if (status) {
+        status.textContent = d.emailSent
+          ? '✅ Goedgekeurd · mail verstuurd'
+          : '✅ Goedgekeurd · ⚠️ let op: mail niet verzonden (' + (d.emailReason || 'onbekend') + ')';
+      }
+      btn.style.display = 'none';
+      // Detail-cache verversen + tabel-kop opnieuw laden zodat status-badge bijwerkt.
+      _detailCache.delete(payoutId);
+      await refetchDetail(payoutId, idx);
+      await loadList();
+    } catch (e) {
+      if (status) status.textContent = 'Fout: ' + (e?.message || e);
+      btn.disabled = false;
     }
   }
 
