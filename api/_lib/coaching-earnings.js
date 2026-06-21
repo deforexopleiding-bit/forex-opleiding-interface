@@ -129,15 +129,19 @@ export async function computeCoachingEarnings({ bubbleUserId, from, to }) {
     }
   }
 
+  // 1-op-1 (€35): isDone && GEEN no-show && completed_date in range.
+  // No-show (€25): no-show && completed_date in range. (Was starting_date —
+  // dat veroorzaakte dubbeltelling/onverwachte bedragen omdat no-shows soms
+  // op een ander datumveld stonden dan de afgewikkelde sessies.)
   let oneOnOne = 0;
   let noShow   = 0;
   for (const s of sessionRows) {
-    const done    = asBool(readFirst(s, ['isdone_boolean', 'isDone']));
-    const ns      = asBool(readFirst(s, ['noshow_boolean', 'NoShow']));
-    const compDt  = readFirst(s, ['completed_date_date', 'completed date']);
-    const startDt = readFirst(s, ['starting_date_date', 'starting date']);
-    if (done && inRange(compDt,  fromMs, toMsInclusive)) oneOnOne += 1;
-    if (ns   && inRange(startDt, fromMs, toMsInclusive)) noShow   += 1;
+    const done   = asBool(readFirst(s, ['isdone_boolean', 'isDone']));
+    const ns     = asBool(readFirst(s, ['noshow_boolean', 'NoShow']));
+    const compDt = readFirst(s, ['completed_date_date', 'completed date']);
+    const inWin  = inRange(compDt, fromMs, toMsInclusive);
+    if (done && !ns && inWin) oneOnOne += 1;
+    if (ns         && inWin) noShow   += 1;
   }
 
   // STAP C — teamtrainingen met deze mentor als tutor.
