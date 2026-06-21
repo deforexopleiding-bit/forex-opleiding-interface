@@ -13,7 +13,7 @@
 //   { breakdown:  { one_on_one, team, no_show, funded }, grand_total,
 //     students_count, sessions_fetched, team_count_raw,
 //     _meta: { fetchedRaw, afterCbFilter, alphaDone, alphaNoshow,
-//              cbConstraintApplied, fetchPaths } }
+//              orphanCallsSkipped, cbConstraintApplied, fetchPaths } }
 //
 // ─── Attributie (sinds Created-By-omzetting) ─────────────────────────────
 // 1-op-1 sessies worden geattribueerd op session['Created By'] = mentor —
@@ -25,8 +25,12 @@
 //   - session.learn_type1_option_os___learning_type      === 'Alpha Program'
 //   - session.isdone_boolean                             === true
 //   - session.starting_date_date in [from, to] (inclusief)
-// GEEN eis op member_user (orphans tellen mee). GEEN dedup (dubbele calls
-// tellen — same-day-dupes zijn business intent, niet een bug).
+// Call-tak (€35) vereist een gekoppelde student (member_user truthy + non-empty).
+// Orphan-calls (Alpha + done + !noshow zonder member_user) worden overgeslagen
+// en in _meta.orphanCallsSkipped geteld voor transparantie.
+// No-show-tak (€25) telt ongeacht member_user — een geboekte sessie waar geen
+// student opdaagt moet ook zonder koppeling betaald worden.
+// GEEN dedup (dubbele calls tellen — same-day-dupes zijn business intent).
 //
 // Bedragen:
 //   calls (€35)  = isdone && !noshow
@@ -115,6 +119,7 @@ export async function computeCoachingEarnings({ bubbleUserId, from, to }) {
         afterCbFilter       : 0,
         alphaDone           : 0,
         alphaNoshow         : 0,
+        orphanCallsSkipped  : 0,
         cbConstraintApplied : false,
         fetchPaths          : [],
       },
@@ -173,10 +178,12 @@ export async function computeCoachingEarnings({ bubbleUserId, from, to }) {
   }
 
   // JS-veiligheidsnet: ongeacht of server-side cb-constraint pakte, hier
-  // is de filtering autoritatief. Geen member_user-eis, geen dedup.
+  // is de filtering autoritatief. Geen dedup. Call-tak vereist member_user;
+  // no-show-tak telt ongeacht koppeling.
   let oneOnOne = 0;
   let noShow   = 0;
   let afterCbFilter = 0;
+  let orphanCallsSkipped = 0;
   for (const s of sessionRows) {
     const cb = readFirst(s, ['Created By', 'created_by']);
     if (!cb || String(cb) !== bubbleUserId) continue;
@@ -192,8 +199,14 @@ export async function computeCoachingEarnings({ bubbleUserId, from, to }) {
     if (!inRange(sd, fromMs, toMsInclusive)) continue;
 
     const ns = asBool(readFirst(s, ['noshow_boolean', 'NoShow']));
-    if (ns) noShow   += 1;
-    else    oneOnOne += 1;
+    if (ns) {
+      noShow += 1;
+    } else {
+      const member = readFirst(s, ['member_user']);
+      const hasMember = !!member && String(member).trim() !== '';
+      if (hasMember) oneOnOne           += 1;
+      else           orphanCallsSkipped += 1;
+    }
   }
 
   // ── Team-trainingen (€50) — ONGEWIJZIGD via tutor_user ────────────────
@@ -241,6 +254,7 @@ export async function computeCoachingEarnings({ bubbleUserId, from, to }) {
       afterCbFilter,
       alphaDone           : oneOnOne,
       alphaNoshow         : noShow,
+      orphanCallsSkipped,
       cbConstraintApplied,
       fetchPaths,
     },
