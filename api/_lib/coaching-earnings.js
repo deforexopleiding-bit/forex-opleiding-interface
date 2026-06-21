@@ -1,21 +1,39 @@
 // api/_lib/coaching-earnings.js
 //
-// Gedeelde helper voor coaching-verdiensten. Wordt gebruikt door zowel
-// mentor-coaching-earnings.js (UI op de Coaching-tab) als mentor-payout-generate.js
-// (snapshot voor maand-rapport). Door dezelfde helper te gebruiken matcht het
-// rapport exact wat de mentor op de Coaching-tab ziet.
+// Gedeelde helper voor coaching-verdiensten. Wordt gebruikt door:
+//   - mentor-coaching-earnings.js (UI op de Coaching-tab van mentor-dashboard)
+//   - mentor-payout-generate.js  (snapshot voor maand-rapport)
+//   - mentor-detail.html (admin per-mentor)
+// Door dezelfde helper te gebruiken matcht het rapport exact wat de mentor zelf ziet.
 //
-// Input:
+// Input (ongewijzigd):
 //   { bubbleUserId: string, from: 'YYYY-MM-DD', to: 'YYYY-MM-DD' (inclusief) }
 //
 // Output (incl btw — tarieven 35/50/25/100):
-//   { one_on_one : { count, rate, total },
-//     team       : { count, rate, total },
-//     no_show    : { count, rate, total },
-//     funded     : { count, rate, total },
-//     grand_total: number }
+//   { breakdown:  { one_on_one, team, no_show, funded }, grand_total,
+//     students_count, sessions_fetched, team_count_raw,
+//     _meta: { fetchedRaw, afterCbFilter, alphaDone, alphaNoshow,
+//              cbConstraintApplied, fetchPaths } }
 //
-// Funded telt altijd 0 (placeholder voor latere certificaat-koppeling).
+// ─── Attributie (sinds Created-By-omzetting) ─────────────────────────────
+// 1-op-1 sessies worden geattribueerd op session['Created By'] = mentor —
+// niet langer via de huidige mentor_user-koppeling van de student. Reden:
+// mentoren maken zelf sessies aan in Bubble, en wisselingen in
+// student-mentor-relaties veranderen historische telling niet meer (geen
+// "drifted students"-fenomeen). Filterregels:
+//   - session['Created By']                              === mentorBubbleId
+//   - session.learn_type1_option_os___learning_type      === 'Alpha Program'
+//   - session.isdone_boolean                             === true
+//   - session.starting_date_date in [from, to] (inclusief)
+// GEEN eis op member_user (orphans tellen mee). GEEN dedup (dubbele calls
+// tellen — same-day-dupes zijn business intent, niet een bug).
+//
+// Bedragen:
+//   calls (€35)  = isdone && !noshow
+//   noshow (€25) = isdone && noshow
+//
+// Team-coaching (€50) blijft ongewijzigd via tutor_user op team-training.
+// Funded (€100) telt voorlopig altijd 0.
 
 import { bubbleList } from './bubble.js';
 
@@ -25,7 +43,6 @@ export const RATE_NOSHOW = 25;
 export const RATE_FUNDED = 100;
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
-const IN_BATCH_LIMIT = 30;
 
 function asBool(v) {
   if (v === true || v === false) return v;
@@ -43,6 +60,17 @@ function readFirst(u, keys) {
     if (u[k] !== undefined) return u[k];
   }
   return undefined;
+}
+
+// Bubble option-set → leesbare string ('Alpha Program' etc).
+function pickOption(v) {
+  if (v == null) return null;
+  if (typeof v === 'string') return v.trim() || null;
+  if (typeof v === 'object') {
+    const d = v.display || v.text || v.value || null;
+    return d ? String(d).trim() || null : null;
+  }
+  return null;
 }
 
 function dayStartMs(s) {
@@ -73,14 +101,24 @@ export function emptyBreakdown() {
 
 // Hoofdfunctie. Gooit door op bubble-errors zodat de caller (endpoint of
 // generate-script) zelf de error kan mappen naar HTTP-status.
-//
-// Retourneert ALTIJD een { breakdown, grand_total } shape — bij missende
-// bubble-koppeling moet de caller dat vooraf opvangen (deze helper neemt aan
-// dat bubbleUserId geldig is).
 export async function computeCoachingEarnings({ bubbleUserId, from, to }) {
   if (!bubbleUserId) {
     const b = emptyBreakdown();
-    return { breakdown: b, grand_total: 0, students_count: 0, sessions_fetched: 0, team_count_raw: 0 };
+    return {
+      breakdown        : b,
+      grand_total      : 0,
+      students_count   : 0,
+      sessions_fetched : 0,
+      team_count_raw   : 0,
+      _meta            : {
+        fetchedRaw          : 0,
+        afterCbFilter       : 0,
+        alphaDone           : 0,
+        alphaNoshow         : 0,
+        cbConstraintApplied : false,
+        fetchPaths          : [],
+      },
+    };
   }
   if (!DATE_RE.test(String(from || '')) || !DATE_RE.test(String(to || ''))) {
     throw new Error('coaching-earnings: from/to moeten YYYY-MM-DD zijn');
@@ -91,60 +129,74 @@ export async function computeCoachingEarnings({ bubbleUserId, from, to }) {
   const toMsInclusive = toMs + (24 * 60 * 60 * 1000) - 1;
   if (fromMs > toMsInclusive) throw new Error('coaching-earnings: from > to');
 
-  // STAP A — studenten van deze mentor.
-  const studentsConstraints = [
-    { key: 'mentor_user',            constraint_type: 'equals', value: bubbleUserId },
-    { key: 'role_option_os___roles', constraint_type: 'equals', value: 'student' },
+  // Bubble greater-than/less-than op date-constraints zijn strikt; stuur
+  // monthStart-1ms en monthEnd+1ms zodat de randen wél meedoen.
+  const fromIsoStrict = new Date(fromMs - 1).toISOString();
+  const toIsoStrict   = new Date(toMsInclusive + 1).toISOString();
+  const dateConstraints = [
+    { key: 'starting_date_date', constraint_type: 'greater than', value: fromIsoStrict },
+    { key: 'starting_date_date', constraint_type: 'less than',    value: toIsoStrict   },
   ];
-  const { results: studentRows } = await bubbleList('user', studentsConstraints, { limit: 500 });
-  const studentIds = (studentRows || []).map((u) => String(u._id || '')).filter(Boolean);
+  const cbConstraint = { key: 'Created By', constraint_type: 'equals', value: bubbleUserId };
 
-  // STAP B — 1-op-1 sessies voor die studenten (batched i.v.m. 'in' URL-limiet).
+  // ── 1-op-1 sessies — Created-By-attributie ─────────────────────────────
+  // Probeer eerst server-side filter op Created By (efficiënt voor brede ranges).
+  // Bij falen vallen we terug op alleen de date-constraints; JS filtert dan.
+  const FETCH_CAP = 3000;
+  const fetchPaths = [];
   let sessionRows = [];
-  if (studentIds.length > 0) {
-    if (studentIds.length <= IN_BATCH_LIMIT) {
-      try {
-        const { results } = await bubbleList(
-          '1-1-session',
-          [{ key: 'member_user', constraint_type: 'in', value: studentIds }],
-          { limit: 2000 },
-        );
-        sessionRows = results || [];
-      } catch (e) {
-        console.warn('[coaching-earnings] in-constraint sessions faalde, fallback per-student:', e?.message || e);
-        sessionRows = [];
-      }
-    }
-    if (sessionRows.length === 0 && studentIds.length > 0) {
-      for (let i = 0; i < studentIds.length; i += IN_BATCH_LIMIT) {
-        const batch = studentIds.slice(i, i + IN_BATCH_LIMIT);
-        const batchResults = await Promise.all(batch.map((sid) =>
-          bubbleList('1-1-session',
-            [{ key: 'member_user', constraint_type: 'equals', value: sid }],
-            { limit: 500 },
-          ).then((r) => r.results || []).catch(() => [])
-        ));
-        for (const arr of batchResults) sessionRows.push(...arr);
-      }
+  let cbConstraintApplied = false;
+  try {
+    const { results } = await bubbleList(
+      '1-1-session',
+      [...dateConstraints, cbConstraint],
+      { limit: FETCH_CAP },
+    );
+    sessionRows = results || [];
+    cbConstraintApplied = true;
+    fetchPaths.push('date+cb');
+  } catch (e) {
+    console.warn('[coaching-earnings] Created-By server-constraint faalde, fallback date-only:', e?.message || e);
+    try {
+      const { results } = await bubbleList(
+        '1-1-session',
+        dateConstraints,
+        { limit: FETCH_CAP },
+      );
+      sessionRows = results || [];
+      fetchPaths.push('date-only');
+    } catch (e2) {
+      console.warn('[coaching-earnings] 1-1-session fetch faalde:', e2?.message || e2);
+      sessionRows = [];
+      fetchPaths.push('date-only-failed');
     }
   }
 
-  // 1-op-1 (€35): isDone && GEEN no-show && completed_date in range.
-  // No-show (€25): no-show && completed_date in range. (Was starting_date —
-  // dat veroorzaakte dubbeltelling/onverwachte bedragen omdat no-shows soms
-  // op een ander datumveld stonden dan de afgewikkelde sessies.)
+  // JS-veiligheidsnet: ongeacht of server-side cb-constraint pakte, hier
+  // is de filtering autoritatief. Geen member_user-eis, geen dedup.
   let oneOnOne = 0;
   let noShow   = 0;
+  let afterCbFilter = 0;
   for (const s of sessionRows) {
-    const done   = asBool(readFirst(s, ['isdone_boolean', 'isDone']));
-    const ns     = asBool(readFirst(s, ['noshow_boolean', 'NoShow']));
-    const compDt = readFirst(s, ['completed_date_date', 'completed date']);
-    const inWin  = inRange(compDt, fromMs, toMsInclusive);
-    if (done && !ns && inWin) oneOnOne += 1;
-    if (ns         && inWin) noShow   += 1;
+    const cb = readFirst(s, ['Created By', 'created_by']);
+    if (!cb || String(cb) !== bubbleUserId) continue;
+    afterCbFilter += 1;
+
+    const lt = pickOption(readFirst(s, ['learn_type1_option_os___learning_type']));
+    if (lt !== 'Alpha Program') continue;
+
+    const done = asBool(readFirst(s, ['isdone_boolean', 'isDone']));
+    if (!done) continue;
+
+    const sd = readFirst(s, ['starting_date_date', 'starting date']);
+    if (!inRange(sd, fromMs, toMsInclusive)) continue;
+
+    const ns = asBool(readFirst(s, ['noshow_boolean', 'NoShow']));
+    if (ns) noShow   += 1;
+    else    oneOnOne += 1;
   }
 
-  // STAP C — teamtrainingen met deze mentor als tutor.
+  // ── Team-trainingen (€50) — ONGEWIJZIGD via tutor_user ────────────────
   let teamRows = [];
   try {
     const { results } = await bubbleList(
@@ -178,8 +230,19 @@ export async function computeCoachingEarnings({ bubbleUserId, from, to }) {
   return {
     breakdown,
     grand_total,
-    students_count   : studentIds.length,
+    // students_count is sinds Created-By-attributie irrelevant — de mentor's
+    // huidige student-bucket bepaalt niet meer de telling. Houden we op 0
+    // i.p.v. de oude student-walk te doen (extra Bubble-roundtrip).
+    students_count   : 0,
     sessions_fetched : sessionRows.length,
     team_count_raw   : teamRows.length,
+    _meta: {
+      fetchedRaw          : sessionRows.length,
+      afterCbFilter,
+      alphaDone           : oneOnOne,
+      alphaNoshow         : noShow,
+      cbConstraintApplied,
+      fetchPaths,
+    },
   };
 }
