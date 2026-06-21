@@ -310,6 +310,8 @@ export default async function handler(req, res) {
       // waarde = array van starting_date_date strings (volgorde van fetch).
       const seppe_alpha = { done_not_noshow: 0, noshow: 0 };
       const alphaDupeMap = new Map();
+      // Per-student bucket voor Alpha: member_user → { calls, noshow, days }.
+      const alphaPerStudent = new Map();
 
       for (const s of probeArr) {
         const cb = readFirst(s, ['Created By', 'created_by']);
@@ -339,13 +341,27 @@ export default async function handler(req, res) {
               if (ns) seppe_alpha.noshow          += 1;
               else    seppe_alpha.done_not_noshow += 1;
 
-              if (!ns) {
-                const member = readFirst(s, ['member_user', 'member']);
-                const day = sd ? String(sd).slice(0, 10) : null;
-                if (member && day) {
-                  const k = `${String(member)}|${day}`;
-                  if (!alphaDupeMap.has(k)) alphaDupeMap.set(k, []);
-                  alphaDupeMap.get(k).push(String(sd));
+              // Per-student tellingen voor Alpha (calls = !ns; noshow = ns).
+              // Days alleen op !ns (same-day-dupes wegschrijven én days-array).
+              const member = readFirst(s, ['member_user', 'member']);
+              if (member) {
+                const memberStr = String(member);
+                let bucket = alphaPerStudent.get(memberStr);
+                if (!bucket) {
+                  bucket = { calls: 0, noshow: 0, days: [] };
+                  alphaPerStudent.set(memberStr, bucket);
+                }
+                if (ns) {
+                  bucket.noshow += 1;
+                } else {
+                  bucket.calls += 1;
+                  const day = sd ? String(sd).slice(0, 10) : null;
+                  if (day) {
+                    const k = `${memberStr}|${day}`;
+                    if (!alphaDupeMap.has(k)) alphaDupeMap.set(k, []);
+                    alphaDupeMap.get(k).push(String(sd));
+                  }
+                  if (sd) bucket.days.push(String(sd));
                 }
               }
             }
@@ -383,6 +399,46 @@ export default async function handler(req, res) {
         sample: dupeSample,
       };
 
+      // ── seppe_alpha_split / per_student / drifted_detail ────────────────
+      // current = member ∈ huidige student-bucket (studentIdsSet); drifted = rest.
+      const seppe_alpha_split = {
+        current : { calls: 0, noshow: 0 },
+        drifted : { calls: 0, noshow: 0 },
+      };
+      const seppe_alpha_per_student = [];
+      const seppe_drifted_detail   = [];
+      for (const [memberStr, bucket] of alphaPerStudent.entries()) {
+        const isCurrent = studentIdsSet.has(memberStr);
+        const target = isCurrent ? seppe_alpha_split.current : seppe_alpha_split.drifted;
+        target.calls  += bucket.calls;
+        target.noshow += bucket.noshow;
+
+        seppe_alpha_per_student.push({
+          member_user: memberStr,
+          current    : isCurrent,
+          calls      : bucket.calls,
+          noshow     : bucket.noshow,
+        });
+
+        if (!isCurrent) {
+          // days normaliseren naar YYYY-MM-DD, dedup + sort ascending.
+          const daysSet = new Set();
+          for (const d of bucket.days) {
+            if (!d) continue;
+            const ymd = String(d).slice(0, 10);
+            if (ymd) daysSet.add(ymd);
+          }
+          const days = Array.from(daysSet).sort();
+          seppe_drifted_detail.push({
+            member_user: memberStr,
+            calls      : bucket.calls,
+            noshow     : bucket.noshow,
+            days,
+          });
+        }
+      }
+      seppe_alpha_per_student.sort((a, b) => b.calls - a.calls);
+
       createdByProbe = {
         fetched,
         capped,
@@ -395,6 +451,9 @@ export default async function handler(req, res) {
         },
         seppe_by_learntype,
         seppe_alpha,
+        seppe_alpha_split,
+        seppe_alpha_per_student,
+        seppe_drifted_detail,
         seppe_alpha_same_day_dupes,
         seppe_students_count      : seppeStudentIds.length,
         drifted_students_count    : driftedStudents.length,
