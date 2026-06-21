@@ -454,6 +454,9 @@
     }).join('');
   }
 
+  // Per payout_id gecachet detail; voorkomt re-fetch bij heen-en-weer klappen.
+  const _payoutDetailCache = new Map();
+
   function renderPayouts(payouts) {
     const wrap = document.getElementById('payoutsWrap');
     if (!Array.isArray(payouts) || payouts.length === 0) {
@@ -467,7 +470,7 @@
       if (st === 'goedgekeurd') return '<span class="badge badge-green">Goedgekeurd</span>';
       return '<span class="badge badge-grey">' + esc(st || '—') + '</span>';
     };
-    const rows = payouts.map((p) => {
+    const rows = payouts.map((p, idx) => {
       // Bij goedgekeurde rapporten een CTA: factuur insturen voor het bedrag incl. btw.
       // Bij uitbetaalde rapporten verdwijnt deze CTA (status !== 'goedgekeurd').
       const cta = (p.status === 'goedgekeurd')
@@ -475,19 +478,157 @@
              📨 Stuur je factuur voor dit bedrag (<strong>${fmtEUR(p.total)}</strong> incl. btw).
            </div>`
         : '';
+      const hasId = !!p.id;
+      const toggle = hasId
+        ? `<button type="button" class="payout-toggle" data-payout-id="${esc(p.id)}" data-idx="${idx}"
+                   style="display:inline-flex;align-items:center;gap:4px;padding:3px 8px;font-size:11.5px;font-weight:600;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);cursor:pointer;font-family:inherit;margin-top:6px">
+             <span class="payout-toggle-caret" id="po-caret-${idx}">▸</span> Bekijk opbouw
+           </button>` : '';
       return `
         <tr>
-          <td>${esc(p.period_month || '—')}${cta}</td>
+          <td>${esc(p.period_month || '—')}${cta}${toggle}</td>
           <td class="num">${fmtEUR(p.total)}</td>
           <td>${statusBadge(p.status)}</td>
           <td>${fmtDateNL(p.created_at)}</td>
           <td>${p.paid_at ? fmtDateNL(p.paid_at) : '—'}</td>
+        </tr>
+        <tr class="payout-detail-row" id="po-detail-${idx}" hidden>
+          <td colspan="5" style="background:rgba(10,47,99,0.025);padding:14px 18px">
+            <div id="po-detail-body-${idx}" style="font-size:12.5px;color:var(--text-faint)">Laden…</div>
+          </td>
         </tr>`;
     }).join('');
     wrap.innerHTML = `
       <table class="data-table">
         <thead><tr><th>Periode</th><th class="num">Totaal</th><th>Status</th><th>Aangemaakt</th><th>Uitbetaald</th></tr></thead>
         <tbody>${rows}</tbody>
+      </table>`;
+    wrap.querySelectorAll('.payout-toggle').forEach((btn) => {
+      btn.addEventListener('click', () => togglePayoutDetail(btn.dataset.payoutId, btn.dataset.idx));
+    });
+  }
+
+  // Lazy GET /api/mentor-payout-detail bij eerste open; cache verzilvert
+  // tweede open. Auth-header gaat automatisch mee via apiFetch (zoals andere
+  // calls in dit bestand).
+  async function togglePayoutDetail(payoutId, idx) {
+    const row    = document.getElementById('po-detail-' + idx);
+    const caret  = document.getElementById('po-caret-' + idx);
+    if (!row) return;
+    const wasHidden = row.hidden;
+    row.hidden = !wasHidden;
+    if (caret) caret.textContent = wasHidden ? '▾' : '▸';
+    if (!wasHidden) return; // zojuist gesloten
+
+    if (_payoutDetailCache.has(payoutId)) {
+      renderPayoutDetail(idx, _payoutDetailCache.get(payoutId));
+      return;
+    }
+    const body = document.getElementById('po-detail-body-' + idx);
+    if (body) body.innerHTML = `<span style="color:var(--text-faint);font-size:12.5px">Laden…</span>`;
+    const apiFetch = window.AgentShared?.apiFetch;
+    if (typeof apiFetch !== 'function') {
+      if (body) body.innerHTML = `<em style="color:#b91c1c">apiFetch niet beschikbaar.</em>`;
+      return;
+    }
+    try {
+      if (window._authSharedReady) await window._authSharedReady;
+    } catch {}
+    try {
+      const r = await apiFetch('/api/mentor-payout-detail?payout_id=' + encodeURIComponent(payoutId));
+      const d = await r.json();
+      if (!r.ok) throw new Error(d?.error || 'detail-fetch faalde');
+      _payoutDetailCache.set(payoutId, d.payout);
+      renderPayoutDetail(idx, d.payout);
+    } catch (e) {
+      console.error('[mentor-dashboard] payout-detail:', e?.message || e);
+      const body2 = document.getElementById('po-detail-body-' + idx);
+      if (body2) body2.innerHTML = `<em style="color:#b91c1c">Opbouw ophalen mislukt: ${esc(e?.message || e)}</em>`;
+    }
+  }
+
+  // Map line.kind → leesbare label (NL).
+  function _payoutKindLabel(kind) {
+    switch (kind) {
+      case 'bonus':            return 'Event-bonus';
+      case 'coaching_1on1':    return 'Coaching · 1-op-1';
+      case 'coaching_team':    return 'Coaching · teamtraining';
+      case 'coaching_noshow':  return 'Coaching · no-show';
+      case 'coaching_funded':  return 'Coaching · funded';
+      case 'reiskosten':       return 'Reiskosten';
+      case 'vast':             return 'Vaste maandpost';
+      case 'handmatig':        return 'Handmatige correctie';
+      default:                 return kind || '—';
+    }
+  }
+
+  function renderPayoutDetail(idx, payout) {
+    const body = document.getElementById('po-detail-body-' + idx);
+    if (!body || !payout) return;
+
+    const lines = Array.isArray(payout.lines) ? payout.lines : [];
+    const adjustments = Array.isArray(payout.adjustments) ? payout.adjustments : [];
+
+    const meta = [];
+    if (payout.approved_at) meta.push(`Goedgekeurd op <strong>${esc(fmtDateNL(payout.approved_at))}</strong>`);
+    if (payout.paid_at)     meta.push(`Uitbetaald op <strong>${esc(fmtDateNL(payout.paid_at))}</strong>`);
+    if (payout.generated_at) meta.push(`Gegenereerd op <strong>${esc(fmtDateNL(payout.generated_at))}</strong>`);
+
+    const lineRows = lines.map((l) => {
+      const qtyTxt = (l.qty != null && l.qty !== '' && l.unit_incl != null)
+        ? `${esc(l.qty)} × ${fmtEUR(l.unit_incl)}`
+        : '';
+      const labelTxt = l.label || _payoutKindLabel(l.kind);
+      return `
+        <tr>
+          <td>${esc(labelTxt)}</td>
+          <td class="num">${esc(qtyTxt)}</td>
+          <td class="num">${fmtEUR(l.amount_incl)}</td>
+        </tr>`;
+    }).join('');
+
+    // Handmatige adjustments — endpoint geeft ze ook al als 'handmatig'-line
+    // mee, dus alleen tonen als er geen handmatig-lines tussen lines zitten
+    // (voorkomt dubbele weergave). Dat is een veiligheid: in praktijk komen
+    // ze altijd via lines binnen.
+    const hasHandmatigInLines = lines.some((l) => l.kind === 'handmatig');
+    const adjRows = (!hasHandmatigInLines && adjustments.length > 0)
+      ? adjustments.map((a) => `
+          <tr>
+            <td>${esc(a.label || 'Handmatige correctie')}</td>
+            <td class="num"></td>
+            <td class="num">${fmtEUR(a.amount_incl)}</td>
+          </tr>`).join('')
+      : '';
+
+    const allRows = (lineRows + adjRows) ||
+      `<tr><td colspan="3" style="text-align:center;color:var(--text-faint);padding:14px">Geen regels.</td></tr>`;
+
+    body.innerHTML = `
+      ${meta.length ? `<div style="font-size:12px;color:var(--text-dim);margin-bottom:10px;display:flex;gap:14px;flex-wrap:wrap">${meta.join(' · ')}</div>` : ''}
+      <table class="data-table" style="background:var(--bg-elev)">
+        <thead>
+          <tr>
+            <th>Omschrijving</th>
+            <th class="num">Aantal</th>
+            <th class="num">Bedrag (incl. btw)</th>
+          </tr>
+        </thead>
+        <tbody>${allRows}</tbody>
+        <tfoot>
+          <tr>
+            <td colspan="2" style="text-align:right;font-size:11.5px;color:var(--text-dim)">Subtotaal excl. btw</td>
+            <td class="num" style="font-size:11.5px;color:var(--text-dim)">${fmtEUR(payout.total_excl)}</td>
+          </tr>
+          <tr>
+            <td colspan="2" style="text-align:right;font-size:11.5px;color:var(--text-dim)">BTW 21%</td>
+            <td class="num" style="font-size:11.5px;color:var(--text-dim)">${fmtEUR(payout.btw_amount)}</td>
+          </tr>
+          <tr style="background:rgba(10,47,99,0.06)">
+            <td colspan="2" style="text-align:right;font-weight:700">Totaal incl.</td>
+            <td class="num" style="font-weight:700">${fmtEUR(payout.total)}</td>
+          </tr>
+        </tfoot>
       </table>`;
   }
 
