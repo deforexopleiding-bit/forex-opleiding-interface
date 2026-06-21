@@ -108,6 +108,31 @@ export default async function handler(req, res) {
     ];
     const { results } = await bubbleList('user', constraints, { limit: 500 });
 
+    // Tijdelijke debug-tak (?debug=1) — keys + caller-id + 1 student-sample.
+    // GEEN namen/e-mails: alleen veld-keys, bubble-IDs (interne) en call-tellers.
+    if (req.query?.debug === '1') {
+      const firstRaw = (results && results[0]) || null;
+      return res.status(200).json({
+        debug: {
+          caller_bubble_id : tm.bubble_user_id,
+          count            : Array.isArray(results) ? results.length : 0,
+          sampleKeys       : firstRaw ? Object.keys(firstRaw) : [],
+          mentorField      : {
+            value        : firstRaw ? (firstRaw.mentor ?? null) : null,
+            type         : firstRaw ? typeof firstRaw.mentor : 'undefined',
+            isArray      : firstRaw ? Array.isArray(firstRaw.mentor) : false,
+            matchesCaller: firstRaw ? (String(firstRaw.mentor || '') === String(tm.bubble_user_id || '')) : false,
+          },
+          callProbe        : {
+            '1_call_completed'  : firstRaw ? (firstRaw['1_call_completed']   ?? null) : null,
+            '1_call_alpha_total': firstRaw ? (firstRaw['1_call_alpha_total'] ?? null) : null,
+            '1_call_delta_total': firstRaw ? (firstRaw['1_call_delta_total'] ?? null) : null,
+            'no show count'     : firstRaw ? (firstRaw['no show count']      ?? null) : null,
+          },
+        },
+      });
+    }
+
     // 3) Map → API-shape.
     const students = (results || []).map((u) => {
       const { name, email } = bubbleUserDisplay(u);
