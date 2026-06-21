@@ -42,16 +42,15 @@ function num(v) {
   return Number.isFinite(n) ? n : 0;
 }
 
-// Programma → welk total-veld telt mee voor de 1-op-1-progress.
-// Alpha gebruikt 1_call_alpha_total, Delta 1_call_delta_total. Gamma/onbekend
-// → val terug op het hoogste van beide totalen (een student volgt er maar één).
-function pickCallsTotal(program, u) {
-  const a = num(u['1_call_alpha_total']);
-  const d = num(u['1_call_delta_total']);
-  const p = (program || '').toLowerCase();
-  if (p.includes('alpha')) return a;
-  if (p.includes('delta')) return d;
-  return a || d || 0;
+// Lees eerste niet-undefined uit een lijst van kandidaat-keys. Gebruikt voor
+// Bubble's suffix-conventie (key_text / key_number / key_option_os___name)
+// met bare-name als fallback voor pre-conventie data.
+function readFirst(u, keys) {
+  if (!u) return undefined;
+  for (const k of keys) {
+    if (u[k] !== undefined) return u[k];
+  }
+  return undefined;
 }
 
 export default async function handler(req, res) {
@@ -101,44 +100,27 @@ export default async function handler(req, res) {
       return res.status(200).json({ ok: true, scope, linked: false, students: [] });
     }
 
-    // 2) Bubble: alle 'user'-rijen met mentor=bubble_user_id + role=student.
+    // 2) Bubble: alle 'user'-rijen met mentor_user=bubble_user_id + role=student.
+    //    Suffix-conventie: 'mentor_user' (User-link) + 'role_option_os___roles'
+    //    (option-set 'roles'). De waarde voor option-set role-constraint is de
+    //    leesbare optie 'student'.
     const constraints = [
-      { key: 'mentor', constraint_type: 'equals', value: tm.bubble_user_id },
-      { key: 'role',   constraint_type: 'equals', value: 'student' },
+      { key: 'mentor_user',              constraint_type: 'equals', value: tm.bubble_user_id },
+      { key: 'role_option_os___roles',   constraint_type: 'equals', value: 'student' },
     ];
     const { results } = await bubbleList('user', constraints, { limit: 500 });
 
-    // Tijdelijke debug-tak (?debug=1) — keys + caller-id + 1 student-sample.
-    // GEEN namen/e-mails: alleen veld-keys, bubble-IDs (interne) en call-tellers.
-    if (req.query?.debug === '1') {
-      const firstRaw = (results && results[0]) || null;
-      return res.status(200).json({
-        debug: {
-          caller_bubble_id : tm.bubble_user_id,
-          count            : Array.isArray(results) ? results.length : 0,
-          sampleKeys       : firstRaw ? Object.keys(firstRaw) : [],
-          mentorField      : {
-            value        : firstRaw ? (firstRaw.mentor ?? null) : null,
-            type         : firstRaw ? typeof firstRaw.mentor : 'undefined',
-            isArray      : firstRaw ? Array.isArray(firstRaw.mentor) : false,
-            matchesCaller: firstRaw ? (String(firstRaw.mentor || '') === String(tm.bubble_user_id || '')) : false,
-          },
-          callProbe        : {
-            '1_call_completed'  : firstRaw ? (firstRaw['1_call_completed']   ?? null) : null,
-            '1_call_alpha_total': firstRaw ? (firstRaw['1_call_alpha_total'] ?? null) : null,
-            '1_call_delta_total': firstRaw ? (firstRaw['1_call_delta_total'] ?? null) : null,
-            'no show count'     : firstRaw ? (firstRaw['no show count']      ?? null) : null,
-          },
-        },
-      });
-    }
-
-    // 3) Map → API-shape.
+    // 3) Map → API-shape (suffix-keys met bare-name fallback).
     const students = (results || []).map((u) => {
       const { name, email } = bubbleUserDisplay(u);
-      const program          = pickOption(u['learning type']);
-      const onboardingStatus = pickOption(u['Onboarding Status']);
-      const membership       = pickOption(u.membership) || (typeof u.membership === 'string' ? u.membership : null);
+      const program          = pickOption(readFirst(u, ['learning_type_option_os___learning_type', 'learning type']));
+      const onboardingStatus = pickOption(readFirst(u, ['onboarding_status_option_os___onboarding_status', 'Onboarding Status']));
+      const membership       = pickOption(readFirst(u, ['membership_option_os___membership', 'membership']));
+      const callsDone   = num(readFirst(u, ['1_call_completed_number',   '1_call_completed']));
+      const callsTotal  = num(readFirst(u, ['1_call_total_number',       '1_call_total', '1_call_alpha_total_number', '1_call_alpha_total']));
+      const groupDone   = num(readFirst(u, ['group_call_completed_number', 'group_call_completed']));
+      const groupTotal  = num(readFirst(u, ['group_call_total_number',     'group_call_total']));
+      const noShows     = num(readFirst(u, ['no_show_count_number',       'no show count']));
       return {
         bubble_student_id : String(u._id || ''),
         name,
@@ -146,11 +128,11 @@ export default async function handler(req, res) {
         program,
         membership,
         onboarding_status : onboardingStatus,
-        calls_1on1_done   : num(u['1_call_completed']),
-        calls_1on1_total  : pickCallsTotal(program, u),
-        group_done        : num(u['group_call_completed']),
-        group_total       : num(u['group_call_total']),
-        no_shows          : num(u['no show count']),
+        calls_1on1_done   : callsDone,
+        calls_1on1_total  : callsTotal,
+        group_done        : groupDone,
+        group_total       : groupTotal,
+        no_shows          : noShows,
       };
     }).filter((s) => s.bubble_student_id);
 

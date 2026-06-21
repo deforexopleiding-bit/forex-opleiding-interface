@@ -98,8 +98,11 @@ function pick(u, keys) {
 }
 export function bubbleUserDisplay(u) {
   if (!u || typeof u !== 'object') return { name: '', email: null };
-  const firstName = pick(u, ['first name', 'first_name', 'First Name', 'firstname', 'voornaam', 'Voornaam']);
-  const lastName  = pick(u, ['last name',  'last_name',  'Last Name',  'lastname',  'achternaam','Achternaam']);
+  // Bubble Data API suffix-conventie: <field>_<type>. Voornaam staat onder
+  // 'name_text' en achternaam onder 'last_name_text'. We zetten die bovenaan
+  // de pick-lijst; bare-name varianten blijven als fallback.
+  const firstName = pick(u, ['name_text', 'first name', 'first_name', 'First Name', 'firstname', 'voornaam', 'Voornaam']);
+  const lastName  = pick(u, ['last_name_text', 'last name',  'last_name',  'Last Name',  'lastname',  'achternaam','Achternaam']);
   let name = [firstName, lastName].filter(Boolean).join(' ').trim();
   if (!name) {
     name = pick(u, ['name', 'Name', 'full_name', 'Full Name', 'volledige naam']) || '';
