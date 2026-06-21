@@ -297,6 +297,20 @@ export default async function handler(req, res) {
       let seppeTotal    = 0;
       const seppeStudentIdsSet = new Set();
       const studentIdsSet      = new Set(studentIds);
+
+      // Per learn_type tellingen voor Seppe-sessies (alleen done in maand-range).
+      const seppe_by_learntype = {};
+      function ensureLtBucket(key) {
+        if (!seppe_by_learntype[key]) {
+          seppe_by_learntype[key] = { done_not_noshow: 0, noshow: 0, total: 0 };
+        }
+        return seppe_by_learntype[key];
+      }
+      // Alpha-only counters + dupe-detectie. Sleutel = `${member_user}|${day}`,
+      // waarde = array van starting_date_date strings (volgorde van fetch).
+      const seppe_alpha = { done_not_noshow: 0, noshow: 0 };
+      const alphaDupeMap = new Map();
+
       for (const s of probeArr) {
         const cb = readFirst(s, ['Created By', 'created_by']);
         const cbKey = cb ? String(cb) : '(none)';
@@ -311,6 +325,30 @@ export default async function handler(req, res) {
           if (done && inWinStart) {
             if (ns) seppeNoShow    += 1;
             else    seppeDoneNotNs += 1;
+
+            // Per-learntype + alpha-bucket en dupe-detectie alleen op done sessies
+            // in de maand (anders wordt het signaal vertroebeld met out-of-range).
+            const lt = pickOption(readFirst(s, ['learn_type1_option_os___learning_type']));
+            const ltKey = lt || '(none)';
+            const bucket = ensureLtBucket(ltKey);
+            bucket.total += 1;
+            if (ns) bucket.noshow          += 1;
+            else    bucket.done_not_noshow += 1;
+
+            if (ltKey === 'Alpha Program') {
+              if (ns) seppe_alpha.noshow          += 1;
+              else    seppe_alpha.done_not_noshow += 1;
+
+              if (!ns) {
+                const member = readFirst(s, ['member_user', 'member']);
+                const day = sd ? String(sd).slice(0, 10) : null;
+                if (member && day) {
+                  const k = `${String(member)}|${day}`;
+                  if (!alphaDupeMap.has(k)) alphaDupeMap.set(k, []);
+                  alphaDupeMap.get(k).push(String(sd));
+                }
+              }
+            }
           }
           const m = readFirst(s, ['member_user', 'member']);
           if (m) seppeStudentIdsSet.add(String(m));
@@ -325,6 +363,26 @@ export default async function handler(req, res) {
       const seppeStudentIds = Array.from(seppeStudentIdsSet);
       const driftedStudents = seppeStudentIds.filter((sid) => !studentIdsSet.has(sid));
 
+      // Same-day dupes: groepen met >1 entry. dupe_extra = som van (size-1).
+      let dupe_groups = 0;
+      let dupe_extra  = 0;
+      const dupeSample = [];
+      for (const [key, times] of alphaDupeMap.entries()) {
+        if (times.length > 1) {
+          dupe_groups += 1;
+          dupe_extra  += (times.length - 1);
+          if (dupeSample.length < 15) {
+            const [member, day] = key.split('|');
+            dupeSample.push({ member_user: member, day, times });
+          }
+        }
+      }
+      const seppe_alpha_same_day_dupes = {
+        dupe_groups,
+        dupe_extra,
+        sample: dupeSample,
+      };
+
       createdByProbe = {
         fetched,
         capped,
@@ -335,6 +393,9 @@ export default async function handler(req, res) {
           noshow         : seppeNoShow,
           total          : seppeTotal,
         },
+        seppe_by_learntype,
+        seppe_alpha,
+        seppe_alpha_same_day_dupes,
         seppe_students_count      : seppeStudentIds.length,
         drifted_students_count    : driftedStudents.length,
         drifted_students          : driftedStudents.slice(0, 50),
