@@ -470,10 +470,10 @@
     // 1) Sidebar-links verbergen zonder <module>.module.access.
     //    Dashboard speciaal: zichtbaar als user OFWEL module.access OF sales.view
     //    heeft (sales-rol heeft alleen die laatste).
-    //    Mentoren beheer speciaal: zichtbaar als user minstens ÉÉN van de drie
+    //    Mentoren beheer speciaal: zichtbaar als user minstens ÉÉN van de vier
     //    onderliggende rechten heeft (mentor.admin.view / mentor.payout.manage /
-    //    mentor.funded.admin) — de pagina zelf verbergt de specifieke tabs op
-    //    basis van per-tab rechten.
+    //    mentor.funded.admin / mentor.assessments.admin) — de pagina zelf verbergt
+    //    de specifieke tabs op basis van per-tab rechten.
     Object.keys(MODULE_FEATURE_MAP).forEach(function (modKey) {
       var link = document.querySelector('#sidebar-mount [data-module="' + modKey + '"]');
       if (!link) return;
@@ -481,7 +481,7 @@
         var ok = perms.has('dashboard.module.access') || perms.has('dashboard.sales.view');
         if (!ok) link.style.display = 'none';
       } else if (modKey === 'mentoren-beheer') {
-        var okM = perms.has('mentor.admin.view') || perms.has('mentor.payout.manage') || perms.has('mentor.funded.admin');
+        var okM = perms.has('mentor.admin.view') || perms.has('mentor.payout.manage') || perms.has('mentor.funded.admin') || perms.has('mentor.assessments.admin');
         if (!okM) link.style.display = 'none';
       } else if (!perms.has(MODULE_FEATURE_MAP[modKey])) {
         link.style.display = 'none';
@@ -499,7 +499,7 @@
       return;
     }
     if (cur === 'mentoren-beheer') {
-      var okMB = perms.has('mentor.admin.view') || perms.has('mentor.payout.manage') || perms.has('mentor.funded.admin');
+      var okMB = perms.has('mentor.admin.view') || perms.has('mentor.payout.manage') || perms.has('mentor.funded.admin') || perms.has('mentor.assessments.admin');
       if (!okMB) blockPageAccess();
       return;
     }

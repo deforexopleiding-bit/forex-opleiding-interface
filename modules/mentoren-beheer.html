@@ -64,9 +64,10 @@
 
   <!-- Hoofdtabs — per-tab gegate via window.RBAC; verborgen als gebruiker geen recht heeft. -->
   <div class="mb-tabs" role="tablist">
-    <button type="button" class="mb-tab" data-mb-tab="overview" data-perm="mentor.admin.view">Mentor-overzicht</button>
-    <button type="button" class="mb-tab" data-mb-tab="payouts"  data-perm="mentor.payout.manage">Payout-rapporten</button>
-    <button type="button" class="mb-tab" data-mb-tab="funded"   data-perm="mentor.funded.admin">Certificaten</button>
+    <button type="button" class="mb-tab" data-mb-tab="overview"    data-perm="mentor.admin.view">Mentor-overzicht</button>
+    <button type="button" class="mb-tab" data-mb-tab="payouts"     data-perm="mentor.payout.manage">Payout-rapporten</button>
+    <button type="button" class="mb-tab" data-mb-tab="funded"      data-perm="mentor.funded.admin">Certificaten</button>
+    <button type="button" class="mb-tab" data-mb-tab="assessments" data-perm="mentor.assessments.admin">Beoordelingen</button>
   </div>
 
   <div id="emptyPerm" class="empty-perm" hidden>
@@ -85,6 +86,10 @@
   <div class="mb-panel" data-mb-tab="funded">
     <iframe class="mb-frame" id="frame-funded" title="Certificaten"
             data-tab-src="/modules/funded-certificates-admin.html"></iframe>
+  </div>
+  <div class="mb-panel" data-mb-tab="assessments">
+    <iframe class="mb-frame" id="frame-assessments" title="Beoordelingen"
+            data-tab-src="/modules/student-assessments-admin.html"></iframe>
   </div>
 </div>
 

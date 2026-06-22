@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Beoordelingen · De Forex Opleiding</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/dist/tabler-icons.min.css" />
+  <link rel="stylesheet" href="/modules/shared/agent-shared.css" />
+  <link rel="stylesheet" href="/styles/sales-redesign.css" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; }
+    body { font-family: 'Inter', system-ui, sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; -webkit-font-smoothing: antialiased; }
+    .app { margin-left: 220px; padding: 24px 28px 60px; max-width: 1280px; --brand-deep:#0a2f63; --brand-azure:#1e6cd6; }
+
+    .page-header { display:flex; align-items:baseline; justify-content:space-between; margin-bottom:18px; gap:12px; flex-wrap:wrap; }
+    .page-header h1 { font-size:22px; font-weight:700; color:var(--text); }
+    .page-header p  { font-size:13px; color:var(--text-dim); margin-top:2px; }
+
+    .toolbar { display:flex; align-items:center; gap:12px; margin-bottom:18px; padding:12px 14px; background:var(--bg-elev); border:1px solid var(--border); border-radius:10px; flex-wrap:wrap; }
+    .toolbar label { font-size:12px; font-weight:600; color:var(--text-dim); }
+    .toolbar select,
+    .toolbar input[type=search],
+    .toolbar input[type=month] {
+      padding:7px 10px; font-size:13.5px; border:1px solid var(--border); border-radius:7px;
+      background:var(--bg); color:var(--text); font-family:inherit; min-width:160px;
+    }
+    .toolbar input[type=search] { min-width:220px; }
+
+    .counter { font-size:12.5px; color:var(--text-dim); margin-bottom:12px; }
+    .counter strong { color:var(--text); font-variant-numeric:tabular-nums; }
+
+    .data-table { width:100%; border-collapse:collapse; background:var(--bg-elev); border:1px solid var(--border); border-radius:10px; overflow:hidden; }
+    .data-table th, .data-table td { padding:10px 12px; text-align:left; font-size:13px; border-bottom:1px solid var(--border); vertical-align:top; }
+    .data-table th { background:rgba(10,47,99,0.04); font-weight:600; color:var(--text-dim); font-size:11.5px; text-transform:uppercase; letter-spacing:0.03em; }
+    .data-table tr:last-child td { border-bottom:0; }
+    .data-table td.num { text-align:right; font-variant-numeric:tabular-nums; white-space:nowrap; }
+    .data-table th.num { text-align:right; }
+
+    .empty-state { background:var(--bg-elev); border:1px dashed var(--border); border-radius:10px; padding:24px 16px; text-align:center; font-size:13px; color:var(--text-dim); }
+    .empty-state i { font-size:26px; display:block; margin-bottom:6px; opacity:0.6; }
+
+    .skeleton { display:inline-block; width:80px; height:16px; background:linear-gradient(90deg, rgba(0,0,0,0.05), rgba(0,0,0,0.10), rgba(0,0,0,0.05)); border-radius:4px; animation:sk 1.2s infinite; }
+    @keyframes sk { 0% { background-position:0% 0; } 100% { background-position:200% 0; } }
+
+    /* Status-badges per assessment-status — kleurkeuze conform spec. */
+    .a-badge { display:inline-block; padding:2px 9px; border-radius:10px; font-size:11.5px; font-weight:600; white-space:nowrap; }
+    .a-badge.op_schema   { background:rgba(34,197,94,0.14);  color:#15803d; }
+    .a-badge.aandacht    { background:rgba(245,158,11,0.16); color:#b45309; }
+    .a-badge.risico      { background:rgba(220,38,38,0.13);  color:#b91c1c; }
+    .a-badge.niet_actief { background:rgba(100,116,139,0.18); color:#475569; }
+
+    .a-note {
+      max-width: 280px; white-space: pre-wrap; word-break: break-word;
+      font-size: 12.5px; color: var(--text);
+    }
+    .a-note.empty { color: var(--text-faint); }
+
+    @media (max-width: 880px) { .app { margin-left:0; padding:14px; } }
+  </style>
+</head>
+<body>
+<div id="sidebar-mount"></div>
+
+<div class="app">
+  <div class="page-header">
+    <div>
+      <h1>Beoordelingen (admin)</h1>
+      <p>Maandelijkse student-assessments van alle mentors. Read-only — bewerken doet de mentor zelf in het mentor-dashboard.</p>
+    </div>
+  </div>
+
+  <div class="toolbar">
+    <label for="monthFilter">Maand:</label>
+    <input type="month" id="monthFilter" />
+    <label for="mentorFilter">Mentor:</label>
+    <select id="mentorFilter">
+      <option value="">— alle mentoren —</option>
+    </select>
+    <label for="searchBox">Student:</label>
+    <input type="search" id="searchBox" placeholder="Naam student…" />
+  </div>
+
+  <div class="counter" id="counter"><span class="skeleton" style="width:120px"></span></div>
+
+  <div id="tableWrap">
+    <div class="empty-state"><span class="skeleton" style="width:160px"></span></div>
+  </div>
+</div>
+
+<script src="/modules/shared/supabase-client.js"></script>
+<script src="/modules/shared/agent-shared.js"></script>
+<script src="/modules/shared/theme-shared.js"></script>
+<script src="/modules/shared/permissions.js"></script>
+<script src="/modules/shared/sidebar.js"></script>
+<script>
+(function () {
+  'use strict';
+
+  const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+
+  const STATUS_LABEL = {
+    op_schema   : 'Op schema',
+    aandacht    : 'Aandacht nodig',
+    risico      : 'Risico op uitval',
+    niet_actief : 'Niet actief',
+  };
+
+  function fmtDateNL(iso) {
+    if (!iso) return '—';
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return '—';
+    return d.toLocaleDateString('nl-NL', { day: '2-digit', month: 'short', year: 'numeric' });
+  }
+  function fmtMonthNL(ymd) {
+    if (!ymd) return '—';
+    const m = String(ymd).match(/^(\d{4})-(\d{2})/);
+    if (!m) return esc(String(ymd));
+    const months = ['', 'jan', 'feb', 'mrt', 'apr', 'mei', 'jun', 'jul', 'aug', 'sep', 'okt', 'nov', 'dec'];
+    const idx = parseInt(m[2], 10);
+    return `${months[idx] || m[2]} ${m[1]}`;
+  }
+
+  function currentMonthYM() {
+    const n = new Date();
+    return `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, '0')}`;
+  }
+
+  // State
+  let _allRows       = [];          // alle rijen uit /api/assessments-admin-list (server-side gefilterd op maand)
+  let _mentorFilter  = '';          // mentor_user_id of '' voor alles (client-side)
+  let _searchQuery   = '';          // student-naam (client-side)
+  let _monthFilter   = currentMonthYM();
+
+  function setCounter(visible, total) {
+    const c = document.getElementById('counter');
+    if (!c) return;
+    if (total === 0) {
+      c.innerHTML = 'Geen beoordelingen.';
+    } else if (visible === total) {
+      c.innerHTML = `<strong>${total}</strong> beoordeling${total === 1 ? '' : 'en'}`;
+    } else {
+      c.innerHTML = `<strong>${visible}</strong> van <strong>${total}</strong> beoordeling${total === 1 ? '' : 'en'} zichtbaar`;
+    }
+  }
+
+  function applyFilters() {
+    const q = _searchQuery.trim().toLowerCase();
+    const mid = _mentorFilter;
+    return _allRows.filter((r) => {
+      if (mid && r.mentor_user_id !== mid) return false;
+      if (!q) return true;
+      return String(r.student_name || '').toLowerCase().includes(q);
+    });
+  }
+
+  function renderTable() {
+    const wrap = document.getElementById('tableWrap');
+    if (!wrap) return;
+    const rows = applyFilters();
+    setCounter(rows.length, _allRows.length);
+
+    if (_allRows.length === 0) {
+      wrap.innerHTML = `<div class="empty-state"><i class="ti ti-clipboard-x"></i>Geen beoordelingen voor deze selectie.</div>`;
+      return;
+    }
+    if (rows.length === 0) {
+      wrap.innerHTML = `<div class="empty-state"><i class="ti ti-search-off"></i>Geen resultaten voor het huidige filter.</div>`;
+      return;
+    }
+
+    const body = rows.map((r) => {
+      const mentor = `
+        <div style="font-weight:600">${esc(r.mentor_name || '—')}</div>`;
+      const student = `
+        <div style="font-weight:600">${esc(r.student_name || '—')}</div>`;
+      const statusKey = r.status || '';
+      const statusLabel = STATUS_LABEL[statusKey] || esc(statusKey || '—');
+      const statusHtml = statusKey
+        ? `<span class="a-badge ${esc(statusKey)}">${esc(statusLabel)}</span>`
+        : '—';
+
+      const isInactive = (statusKey === 'niet_actief');
+      const scoreHtml = isInactive
+        ? '<span style="color:var(--text-faint)">—</span>'
+        : (r.score == null ? '—' : esc(String(r.score)));
+      const activeHtml = isInactive
+        ? '<span style="color:var(--text-faint)">—</span>'
+        : (r.active_tasks_done == null ? '—' : (r.active_tasks_done ? 'Ja' : 'Nee'));
+      const noteText = isInactive
+        ? ''
+        : (r.note || '');
+      const noteHtml = isInactive
+        ? '<span style="color:var(--text-faint)">—</span>'
+        : (noteText
+            ? `<div class="a-note">${esc(noteText)}</div>`
+            : `<div class="a-note empty">—</div>`);
+
+      return `
+        <tr>
+          <td>${mentor}</td>
+          <td>${student}</td>
+          <td>${esc(fmtMonthNL(r.period_month))}</td>
+          <td>${statusHtml}</td>
+          <td class="num">${scoreHtml}</td>
+          <td>${activeHtml}</td>
+          <td>${noteHtml}</td>
+          <td>${esc(fmtDateNL(r.updated_at))}</td>
+        </tr>`;
+    }).join('');
+
+    wrap.innerHTML = `
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Mentor</th>
+            <th>Student</th>
+            <th>Maand</th>
+            <th>Status</th>
+            <th class="num">Cijfer</th>
+            <th>Actief &amp; taken</th>
+            <th>Notitie</th>
+            <th>Bijgewerkt</th>
+          </tr>
+        </thead>
+        <tbody>${body}</tbody>
+      </table>`;
+  }
+
+  function populateMentorFilter() {
+    const sel = document.getElementById('mentorFilter');
+    if (!sel) return;
+    const map = new Map();
+    for (const r of _allRows) {
+      if (r.mentor_user_id && !map.has(r.mentor_user_id)) {
+        map.set(r.mentor_user_id, r.mentor_name || r.mentor_user_id);
+      }
+    }
+    const entries = Array.from(map.entries()).sort((a, b) =>
+      String(a[1] || '').localeCompare(String(b[1] || ''), 'nl')
+    );
+    const current = sel.value;
+    sel.innerHTML = '<option value="">— alle mentoren —</option>' +
+      entries.map(([id, name]) => `<option value="${esc(id)}"${current === id ? ' selected' : ''}>${esc(name)}</option>`).join('');
+  }
+
+  function renderError(msg) {
+    const wrap = document.getElementById('tableWrap');
+    if (wrap) wrap.innerHTML = `<div class="empty-state" style="border-color:#fecaca;color:#b91c1c"><i class="ti ti-alert-triangle"></i>${esc(msg)}</div>`;
+    const c = document.getElementById('counter');
+    if (c) c.textContent = '';
+  }
+
+  function renderLoading() {
+    const wrap = document.getElementById('tableWrap');
+    if (wrap) wrap.innerHTML = `<div class="empty-state"><span class="skeleton" style="width:160px"></span></div>`;
+    const c = document.getElementById('counter');
+    if (c) c.innerHTML = `<span class="skeleton" style="width:120px"></span>`;
+  }
+
+  async function loadAll() {
+    const apiFetch = window.AgentShared?.apiFetch;
+    if (typeof apiFetch !== 'function') {
+      renderError('apiFetch niet beschikbaar.');
+      return;
+    }
+    try { if (window._authSharedReady) await window._authSharedReady; } catch {}
+    renderLoading();
+    try {
+      const qs = new URLSearchParams();
+      if (_monthFilter) qs.set('month', _monthFilter);
+      const url = '/api/assessments-admin-list' + (qs.toString() ? ('?' + qs.toString()) : '');
+      const r = await apiFetch(url);
+      let d = null;
+      try { d = await r.json(); } catch {}
+      if (r.status === 401) { renderError('Niet (meer) ingelogd — log opnieuw in.'); return; }
+      if (r.status === 403) { renderError('Geen rechten om beoordelingen in te zien (mentor.assessments.admin).'); return; }
+      if (!r.ok) { renderError('Ophalen mislukt: ' + (d?.error || ('HTTP ' + r.status))); return; }
+      _allRows = Array.isArray(d?.rows) ? d.rows : [];
+      populateMentorFilter();
+      renderTable();
+    } catch (e) {
+      console.error('[student-assessments-admin]', e?.message || e);
+      renderError('Beoordelingen ophalen mislukt: ' + (e?.message || e));
+    }
+  }
+
+  function wire() {
+    const month = document.getElementById('monthFilter');
+    if (month) {
+      month.value = _monthFilter;
+      month.addEventListener('change', () => {
+        const v = month.value || '';
+        // Lege maand = "geen filter" → server-side alles. Behoud lokale state.
+        _monthFilter = v;
+        loadAll();
+      });
+    }
+    const sel = document.getElementById('mentorFilter');
+    if (sel) sel.addEventListener('change', () => {
+      _mentorFilter = sel.value;
+      renderTable();
+    });
+    const search = document.getElementById('searchBox');
+    if (search) search.addEventListener('input', () => {
+      _searchQuery = search.value || '';
+      renderTable();
+    });
+  }
+
+  function init() { wire(); loadAll(); }
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init);
+  } else {
+    init();
+  }
+})();
+</script>
+</body>
+</html>
