@@ -79,6 +79,10 @@
     {
       "path": "/api/cron-events-automations",
       "schedule": "* * * * *"
+    },
+    {
+      "path": "/api/cron/generate-monthly-concepts",
+      "schedule": "0 6 * * *"
     }
   ],
   "headers": [
