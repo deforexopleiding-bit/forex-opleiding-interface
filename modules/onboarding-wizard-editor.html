@@ -1395,28 +1395,38 @@
   // disabled (read-only). Geen netwerk; bestanden tonen we als naam.
   function renderPreviewBlock(b) {
     if (!b) return null;
+    // Lokale helper voor de preview — vervangt de eerdere el(...)-aanroepen
+    // (die crashten omdat el() in dit bestand geen helper-functie is maar de
+    // module-scope variabelen voor #wvModal/#confirmModal). Houdt 'm klein +
+    // class+textContent-only zodat we niets per ongeluk als HTML injecteren.
+    function mk(tag, cls, text) {
+      const e = document.createElement(tag);
+      if (cls)  e.className   = cls;
+      if (text != null) e.textContent = text;
+      return e;
+    }
+
     const wrap = document.createElement('div'); wrap.className = 'pv-block';
     if (b.type === 'heading') {
-      const e = document.createElement('div'); e.className = 'pv-h'; e.textContent = b.text || ''; wrap.appendChild(e); return wrap;
+      wrap.appendChild(mk('div', 'pv-h', b.text || '')); return wrap;
     }
     if (b.type === 'paragraph') {
-      const e = document.createElement('div'); e.className = 'pv-p'; e.textContent = b.text || ''; wrap.appendChild(e); return wrap;
+      wrap.appendChild(mk('div', 'pv-p', b.text || '')); return wrap;
     }
     if (b.type === 'divider') {
       wrap.innerHTML = '<hr class="pv-div"/>'; return wrap;
     }
     if (b.type === 'image') {
-      const e = document.createElement('div'); e.className = 'pv-p';
-      e.textContent = b.src ? '🖼 ' + (b.alt || b.src) : '(geen afbeelding gekozen)';
-      wrap.appendChild(e); return wrap;
+      wrap.appendChild(mk('div', 'pv-p', b.src ? '🖼 ' + (b.alt || b.src) : '(geen afbeelding gekozen)'));
+      return wrap;
     }
     if (b.type === 'stats') {
       const items = Array.isArray(b.items) ? b.items.filter((it) => it && (it.value || it.label)) : [];
       if (items.length === 0) {
-        wrap.appendChild(el('div', { class: 'pv-help', text: '(nog geen stats-items)' }));
+        wrap.appendChild(mk('div', 'pv-help', '(nog geen stats-items)'));
         return wrap;
       }
-      if (b.title) wrap.appendChild(el('div', { class: 'pv-h', text: b.title }));
+      if (b.title) wrap.appendChild(mk('div', 'pv-h', b.title));
       const grid = document.createElement('div');
       grid.style.cssText = 'display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin:6px 0';
       for (const it of items) {
@@ -1446,10 +1456,10 @@
     if (b.type === 'embed') {
       const url = String(b.url || '').trim();
       if (!url || !/^https:\/\//i.test(url)) {
-        wrap.appendChild(el('div', { class: 'pv-help', text: url ? '(URL is niet https — wordt overgeslagen)' : '(nog geen embed-URL ingesteld)' }));
+        wrap.appendChild(mk('div', 'pv-help', url ? '(URL is niet https — wordt overgeslagen)' : '(nog geen embed-URL ingesteld)'));
         return wrap;
       }
-      if (b.title) wrap.appendChild(el('div', { class: 'pv-h', text: b.title }));
+      if (b.title) wrap.appendChild(mk('div', 'pv-h', b.title));
       const h = Number(b.height);
       const heightPx = (Number.isFinite(h) && Number.isInteger(h)) ? Math.max(200, Math.min(1200, h)) : 700;
       const cont = document.createElement('div');
@@ -1468,15 +1478,14 @@
 
     // Field-label
     if (b.label || b.type === 'file_download') {
-      const labEl = document.createElement('div'); labEl.className = 'pv-label';
-      labEl.textContent = b.label || (b.type === 'file_download' ? 'Download' : '');
+      const labEl = mk('div', 'pv-label', b.label || (b.type === 'file_download' ? 'Download' : ''));
       if (b.required && b.type !== 'file_download') {
-        const sp = document.createElement('span'); sp.className = 'req'; sp.textContent = ' *'; labEl.appendChild(sp);
+        const sp = mk('span', 'req', ' *'); labEl.appendChild(sp);
       }
       wrap.appendChild(labEl);
     }
     if (b.help) {
-      const h = document.createElement('div'); h.className = 'pv-help'; h.textContent = b.help; wrap.appendChild(h);
+      wrap.appendChild(mk('div', 'pv-help', b.help));
     }
 
     if (b.type === 'short_text' || b.type === 'email' || b.type === 'tel') {
@@ -1492,49 +1501,120 @@
       wrap.appendChild(s);
     } else if (b.type === 'single_choice' || b.type === 'multi_choice') {
       for (const o of (b.options || [])) {
-        const r = document.createElement('label'); r.className = 'pv-opt-row';
+        const r = mk('label', 'pv-opt-row');
         const i = document.createElement('input'); i.type = (b.type === 'single_choice') ? 'radio' : 'checkbox'; i.disabled = true;
         r.appendChild(i);
         const t = document.createElement('span'); t.textContent = o.label || ''; r.appendChild(t);
         wrap.appendChild(r);
       }
     } else if (b.type === 'scale') {
-      const row = document.createElement('div'); row.className = 'pv-scale';
+      const row = mk('div', 'pv-scale');
       const mn = Number.isFinite(b.min) ? b.min : 1;
       const mx = Number.isFinite(b.max) ? b.max : 10;
       for (let i = mn; i <= mx; i++) {
-        const bt = document.createElement('button'); bt.className = 'pv-scale-btn'; bt.disabled = true; bt.textContent = String(i);
+        const bt = mk('button', 'pv-scale-btn', String(i)); bt.disabled = true;
         row.appendChild(bt);
       }
       wrap.appendChild(row);
     } else if (b.type === 'consent') {
-      const r = document.createElement('label'); r.className = 'pv-opt-row';
+      const r = mk('label', 'pv-opt-row');
       const i = document.createElement('input'); i.type = 'checkbox'; i.disabled = true;
       r.appendChild(i);
       const t = document.createElement('span'); t.textContent = b.label || '';
       r.appendChild(t);
       wrap.appendChild(r);
     } else if (b.type === 'file_download') {
-      if (b.requires_consent) {
-        const c = document.createElement('label'); c.className = 'pv-opt-row';
-        const i = document.createElement('input'); i.type = 'checkbox'; i.disabled = true;
-        c.appendChild(i);
-        const t = document.createElement('span'); t.textContent = b.consent_label || 'Ik ga akkoord.';
-        c.appendChild(t);
-        wrap.appendChild(c);
-      }
-      const files = document.createElement('div'); files.className = 'pv-files';
-      if (!Array.isArray(b.files) || b.files.length === 0) {
-        const e = document.createElement('div'); e.className = 'pv-help'; e.textContent = '(nog geen bestanden)';
-        files.appendChild(e);
-      } else {
-        for (const f of b.files) {
-          const fa = document.createElement('div'); fa.className = 'pv-file';
-          fa.innerHTML = `<span>${esc(f.name || f.path || 'download')}</span><span>↓</span>`;
-          files.appendChild(fa);
+      // Demonstratie-flow voor strateeg: laat zien hoe de waiver-pop-up
+      // werkt in de publieke wizard, maar PUREL visueel (geen netwerk,
+      // geen opslaan, niet-werkende download-items).
+      const files = Array.isArray(b.files) ? b.files : [];
+      const requires = !!b.requires_consent;
+      const host = mk('div'); host.style.marginTop = '4px';
+      wrap.appendChild(host);
+
+      function fileItemsHtml() {
+        if (files.length === 0) {
+          return '<div class="pv-help">(nog geen bestanden)</div>';
         }
+        return files.map((f) => `<div class="pv-file"><span>${esc(f.name || f.path || 'download')}</span><span>↓</span></div>`).join('');
       }
-      wrap.appendChild(files);
+
+      function renderIdle() {
+        host.innerHTML = '';
+        if (files.length === 0) {
+          host.innerHTML = '<div class="pv-help">(nog geen bestanden — student ziet pas een download-knop zodra je bestanden uploadt)</div>';
+          return;
+        }
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.style.cssText = 'display:inline-flex;align-items:center;gap:8px;padding:12px 18px;min-height:48px;border:0;border-radius:10px;cursor:pointer;background:linear-gradient(180deg,#1473d6,#1160bd);color:#fff;font-family:inherit;font-weight:700;font-size:14.5px;box-shadow:0 3px 10px rgba(20,115,214,0.20)';
+        btn.innerHTML = '<span style="font-size:16px">⬇️</span><span>Downloaden</span><span style="font-size:12px;font-weight:600;opacity:0.92">' + esc(files.length + ' bestand' + (files.length === 1 ? '' : 'en')) + '</span>';
+        btn.addEventListener('click', () => { requires ? renderConfirm() : renderAccepted(); });
+        host.appendChild(btn);
+      }
+
+      function renderConfirm() {
+        host.innerHTML = '';
+        const banner = document.createElement('div');
+        banner.style.cssText = 'background:rgba(245,158,11,0.12);border:1px solid rgba(245,158,11,0.30);color:#b45309;padding:14px 16px;border-radius:12px;font-size:13.5px;line-height:1.55;margin-bottom:10px';
+        const strong = document.createElement('strong');
+        strong.textContent = '⚠️ Belangrijk — afstand van bedenktijd';
+        banner.appendChild(strong);
+        const p = document.createElement('div'); p.style.marginTop = '6px';
+        p.textContent = b.consent_label || 'Ik ga akkoord met de voorwaarden.';
+        banner.appendChild(p);
+        host.appendChild(banner);
+
+        if (files.length > 0) {
+          const fp = document.createElement('div');
+          fp.style.cssText = 'font-size:12.5px;color:#5c6b7d;line-height:1.55;margin-bottom:10px';
+          fp.textContent = 'Je krijgt na bevestiging direct toegang tot ' + files.length + ' bestand' + (files.length === 1 ? '' : 'en') + ':';
+          const ul = document.createElement('ul'); ul.style.cssText = 'margin:6px 0 0;padding-left:20px';
+          for (const f of files) {
+            const li = document.createElement('li'); li.style.marginBottom = '2px';
+            li.textContent = f.name || f.path || 'download';
+            ul.appendChild(li);
+          }
+          fp.appendChild(ul);
+          host.appendChild(fp);
+        }
+
+        const row = document.createElement('div');
+        row.style.cssText = 'display:flex;gap:10px;flex-wrap:wrap;margin-top:6px';
+        const cancel = document.createElement('button');
+        cancel.type = 'button';
+        cancel.style.cssText = 'flex:0 1 auto;min-height:42px;padding:10px 14px;border-radius:10px;font-family:inherit;font-weight:700;font-size:13.5px;border:1.5px solid #dde6f1;background:#fff;color:#16263f;cursor:pointer';
+        cancel.textContent = 'Annuleren';
+        cancel.addEventListener('click', renderIdle);
+        const confirm = document.createElement('button');
+        confirm.type = 'button';
+        confirm.style.cssText = 'flex:1 1 auto;min-height:42px;padding:10px 14px;border-radius:10px;font-family:inherit;font-weight:700;font-size:13.5px;border:1.5px solid #0a2f63;background:#0a2f63;color:#fff;cursor:pointer';
+        confirm.textContent = 'Ik zie af van mijn 14-dagen bedenktijd en download';
+        confirm.addEventListener('click', renderAccepted);
+        row.appendChild(cancel);
+        row.appendChild(confirm);
+        host.appendChild(row);
+      }
+
+      function renderAccepted() {
+        host.innerHTML = '';
+        if (requires) {
+          const ok = document.createElement('div');
+          ok.style.cssText = 'display:flex;align-items:flex-start;gap:10px;padding:12px 14px;border-radius:10px;background:rgba(34,197,94,0.13);border:1px solid rgba(34,197,94,0.30);color:#15803d;font-size:13.5px;font-weight:600;line-height:1.45;margin-bottom:8px';
+          const check = document.createElement('span'); check.style.fontSize = '16px'; check.textContent = '✓';
+          ok.appendChild(check);
+          const txt = document.createElement('span');
+          txt.textContent = 'Akkoord gegeven (voorbeeld) — student heeft afstand gedaan van zijn 14-dagen bedenktijd.';
+          ok.appendChild(txt);
+          host.appendChild(ok);
+        }
+        const list = document.createElement('div'); list.className = 'pv-files';
+        list.innerHTML = fileItemsHtml();
+        host.appendChild(list);
+      }
+
+      // Init.
+      renderIdle();
     }
     return wrap;
   }
