@@ -583,6 +583,7 @@
         <tr>
           <td>${esc(labelTxt)}</td>
           <td class="num">${esc(qtyTxt)}</td>
+          <td class="num">${fmtEUR(l.amount_excl)}</td>
           <td class="num">${fmtEUR(l.amount_incl)}</td>
         </tr>`;
     }).join('');
@@ -597,12 +598,13 @@
           <tr>
             <td>${esc(a.label || 'Handmatige correctie')}</td>
             <td class="num"></td>
+            <td class="num">${fmtEUR(a.amount_excl)}</td>
             <td class="num">${fmtEUR(a.amount_incl)}</td>
           </tr>`).join('')
       : '';
 
     const allRows = (lineRows + adjRows) ||
-      `<tr><td colspan="3" style="text-align:center;color:var(--text-faint);padding:14px">Geen regels.</td></tr>`;
+      `<tr><td colspan="4" style="text-align:center;color:var(--text-faint);padding:14px">Geen regels.</td></tr>`;
 
     body.innerHTML = `
       ${meta.length ? `<div style="font-size:12px;color:var(--text-dim);margin-bottom:10px;display:flex;gap:14px;flex-wrap:wrap">${meta.join(' · ')}</div>` : ''}
@@ -610,8 +612,9 @@
         <thead>
           <tr>
             <th>Omschrijving</th>
-            <th class="num">Aantal</th>
-            <th class="num">Bedrag (incl. btw)</th>
+            <th class="num" style="white-space:nowrap;width:1%">Aantal</th>
+            <th class="num">Excl. btw</th>
+            <th class="num">Incl. btw</th>
           </tr>
         </thead>
         <tbody>${allRows}</tbody>
@@ -619,13 +622,15 @@
           <tr>
             <td colspan="2" style="text-align:right;font-size:11.5px;color:var(--text-dim)">Subtotaal excl. btw</td>
             <td class="num" style="font-size:11.5px;color:var(--text-dim)">${fmtEUR(payout.total_excl)}</td>
+            <td class="num"></td>
           </tr>
           <tr>
             <td colspan="2" style="text-align:right;font-size:11.5px;color:var(--text-dim)">BTW 21%</td>
             <td class="num" style="font-size:11.5px;color:var(--text-dim)">${fmtEUR(payout.btw_amount)}</td>
+            <td class="num"></td>
           </tr>
           <tr style="background:rgba(10,47,99,0.06)">
-            <td colspan="2" style="text-align:right;font-weight:700">Totaal incl.</td>
+            <td colspan="3" style="text-align:right;font-weight:700">Totaal incl.</td>
             <td class="num" style="font-weight:700">${fmtEUR(payout.total)}</td>
           </tr>
         </tfoot>
