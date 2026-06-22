@@ -117,7 +117,21 @@ export const DEFAULT_WIZARD_STRUCTURE = {
       id: 'trading_robot',
       title: 'Trading-robot',
       blocks: [
-        { id: 'tr_p1', type: 'paragraph', text: 'We bieden een optionele trading-robot aan die je kan ondersteunen bij geautomatiseerde setups. Hieronder kun je aangeven wat voor jou past — er is geen druk; ook "geen interesse" is een prima antwoord.' },
+        { id: 'tr_h1', type: 'heading',   text: 'Onze trading-robot' },
+        { id: 'tr_p1', type: 'paragraph', text: 'Naast de mentor-begeleiding bieden we een eigen trading-robot aan. Hij draait al ruim 3 jaar live op echte markten en behaalt gemiddeld 3–7% per maand. Instap is mogelijk vanaf €500. Volledig optioneel — kies wat bij jou past.' },
+        {
+          id: 'tr_st1',
+          type: 'stats',
+          items: [
+            { value: '3–7%',     label: 'Gemiddeld rendement per maand', sub: 'Bewezen op live capital' },
+            { value: '±3 jaar',  label: 'Live track record',             sub: 'Sinds 2023 onafgebroken actief' },
+            { value: 'vanaf €500', label: 'Instapbedrag',                sub: 'Geen verborgen kosten' },
+          ],
+        },
+        // Screenshots van performance/dashboard — admin voegt de afbeelding later toe.
+        { id: 'tr_img1', type: 'image', src: '', alt: 'Performance-screenshot van de trading-robot' },
+        // GoHighLevel-agenda voor een korte intro-call — admin plakt de booking-URL.
+        { id: 'tr_emb1', type: 'embed', url: '', height: 720, title: 'Plan een korte robot-intro (optioneel)' },
         {
           id: 'tr_b1',
           type: 'single_choice',
@@ -125,10 +139,8 @@ export const DEFAULT_WIZARD_STRUCTURE = {
           label: 'Heb je interesse in onze trading-robot?',
           required: true,
           options: [
-            { value: 'ja_meer_info',     label: 'Ja, ik wil meer informatie' },
-            { value: 'ja_direct',        label: 'Ja, ik wil deze graag meteen gebruiken' },
-            { value: 'misschien_later',  label: 'Misschien later in het traject' },
-            { value: 'nee',              label: 'Nee, geen interesse' },
+            { value: 'ja_interesse', label: 'Ja, ik heb interesse (vanaf €500)' },
+            { value: 'nee',          label: 'Nee, geen interesse' },
           ],
         },
       ],
@@ -210,6 +222,9 @@ import crypto from 'node:crypto';
 const ALLOWED_BLOCK_TYPES = new Set([
   // Info-only
   'heading', 'paragraph', 'image', 'divider',
+  // Rich content
+  'embed',             // https-iframe (bv. GoHighLevel-agenda/booking)
+  'stats',             // kaarten-grid met value/label/sub
   // Tekst-invoer
   'short_text', 'long_text', 'email', 'tel',
   // Numeriek
@@ -341,6 +356,40 @@ export function normalizeStructure(input) {
         continue;
       }
       if (type === 'divider') {
+        page.blocks.push(out);
+        continue;
+      }
+      if (type === 'embed') {
+        // url: alleen https:// (anders leeg laten; renderer slaat 'm dan over).
+        const rawUrl = _str(rawBlock.url, 1024).trim();
+        out.url = /^https:\/\//i.test(rawUrl) ? rawUrl : '';
+        // height: integer 200..1200 (default 700).
+        const h = Number(rawBlock.height);
+        out.height = (Number.isFinite(h) && Number.isInteger(h))
+          ? Math.max(200, Math.min(1200, h))
+          : 700;
+        const title = _str(rawBlock.title, 240).trim();
+        if (title) out.title = title;
+        page.blocks.push(out);
+        continue;
+      }
+      if (type === 'stats') {
+        const title = _str(rawBlock.title, 240).trim();
+        if (title) out.title = title;
+        const rawItems = Array.isArray(rawBlock.items) ? rawBlock.items : [];
+        const items = [];
+        for (const it of rawItems) {
+          if (!it || typeof it !== 'object') continue;
+          const value = _str(it.value, 60).trim();
+          const label = _str(it.label, 200).trim();
+          const sub   = _str(it.sub,   200).trim();
+          if (!value && !label) continue;       // volledig lege rij → drop
+          const item = { value, label };
+          if (sub) item.sub = sub;
+          items.push(item);
+          if (items.length >= 12) break;        // hard cap
+        }
+        out.items = items;
         page.blocks.push(out);
         continue;
       }
