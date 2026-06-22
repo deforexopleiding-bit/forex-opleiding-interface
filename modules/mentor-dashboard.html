@@ -145,6 +145,9 @@
          als travel_enabled en nog niet ingediend voor de vorige maand. -->
     <div id="dashTravelReminder" hidden></div>
 
+    <!-- Beoordelingen-reminder: amber balk als X<Y assessments deze maand. -->
+    <div id="dashAssessmentBar" hidden></div>
+
     <!-- Stat-kaarten — auto-fit grid die zich aan het scherm aanpast. -->
     <div id="dashStatGrid" class="dash-stat-grid">
       <div class="empty-state" style="grid-column:1/-1"><span class="skeleton" style="width:160px"></span></div>
@@ -802,6 +805,42 @@
     return String(name || '').replace(/[^A-Za-z0-9._-]/g, '_').replace(/_+/g, '_').slice(0, 120) || 'cert';
   }
 
+  // ── Student-assessments (per maand, per mentor+student) ───────────────
+  // Map student_id → laatste assessment-rij voor de huidige maand.
+  const _assessments = new Map();
+  // Laatste students-list (uit /api/mentor-my-students) — hergebruikt voor
+  // het bepalen van Y in de amber teller-balk zonder een extra fetch.
+  let _lastStudentsList = null;
+  const _ASSESS_STATUS_LABEL = {
+    op_schema   : 'Op schema',
+    aandacht    : 'Aandacht nodig',
+    risico      : 'Risico op uitval',
+    niet_actief : 'Niet actief',
+  };
+
+  async function loadAssessmentsMap() {
+    _assessments.clear();
+    const apiFetch = window.AgentShared?.apiFetch;
+    if (typeof apiFetch !== 'function') return;
+    try {
+      const r = await apiFetch('/api/mentor-assessments-self');
+      const d = await r.json();
+      if (!r.ok) throw new Error(d?.error || 'assessments fetch failed');
+      for (const a of (d.assessments || [])) {
+        if (a && a.student_id) _assessments.set(String(a.student_id), a);
+      }
+    } catch (e) {
+      console.warn('[mentor-dashboard] assessments:', e?.message || e);
+    }
+  }
+
+  function _assessBadgeHtml(studentId) {
+    const a = _assessments.get(String(studentId));
+    if (!a) return '<span class="badge badge-amber">⚠️ Open</span>';
+    if (a.status === 'niet_actief') return '<span class="badge badge-grey">— Niet actief</span>';
+    return '<span class="badge badge-green">✅ Beoordeeld</span>';
+  }
+
   async function loadFundedCertsMap() {
     _fundedCerts.clear();
     const apiFetch = window.AgentShared?.apiFetch;
@@ -855,26 +894,169 @@
               <div class="funded-row" id="funded-row-${sid}" style="margin-top:6px">
                 ${_renderFundedRowHtml(rawSid, rawName, cert)}
               </div>
+              <div class="assess-row" id="assess-row-${sid}" style="margin-top:6px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+                ${_assessBadgeHtml(rawSid)}
+                <button type="button" class="assess-toggle-btn" data-student-id="${sid}" data-student-name="${esc(rawName)}"
+                        style="padding:4px 10px;font-size:11.5px;font-weight:600;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);cursor:pointer;font-family:inherit">
+                  📝 Beoordelen
+                </button>
+              </div>
             </div>
             <div class="student-stat" title="1-op-1-calls voltooid / totaal"><strong>${callsDone}/${callsTotal || '—'}</strong> 1-op-1</div>
             <div class="student-stat" title="No-shows"><i class="ti ti-alert-triangle" style="color:${noShows > 0 ? '#b45309' : 'var(--text-faint)'}"></i> ${noShows}</div>
             <i class="ti ti-chevron-right student-caret"></i>
           </div>
+          <div class="assess-form" id="assess-form-${sid}" hidden style="padding:12px 18px;background:rgba(10,47,99,0.03);border-top:1px solid var(--border)"></div>
           <div class="student-body" id="student-body-${sid}">
             <div style="color:var(--text-faint);font-size:12.5px;text-align:center;padding:20px"><span class="skeleton" style="width:120px"></span></div>
           </div>
         </div>`;
     }).join('');
     // Click-handlers binden voor toggle. De head-handler skipt klikken die
-    // uit de funded-row komen (upload-knop / replace-link) zodat de kaart
-    // niet uitklapt als de mentor een bestand kiest.
+    // uit de funded-row of assess-row komen zodat de kaart niet uitklapt
+    // als de mentor een bestand kiest of een assessment-knop indrukt.
     wrap.querySelectorAll('.student-head[data-toggle]').forEach((head) => {
       head.addEventListener('click', (e) => {
-        if (e.target && e.target.closest('.funded-row')) return;
+        if (e.target && (e.target.closest('.funded-row') || e.target.closest('.assess-row'))) return;
         toggleStudent(head.dataset.toggle);
       });
     });
     _wireFundedRowButtons(wrap);
+    _wireAssessmentButtons(wrap);
+  }
+
+  function _wireAssessmentButtons(wrap) {
+    wrap.querySelectorAll('.assess-toggle-btn').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        toggleAssessmentForm(btn.dataset.studentId, btn.dataset.studentName || '');
+      });
+    });
+  }
+
+  function toggleAssessmentForm(sid, studentName) {
+    const form = document.getElementById('assess-form-' + sid);
+    if (!form) return;
+    if (!form.hidden) {
+      form.hidden = true;
+      form.innerHTML = '';
+      return;
+    }
+    form.hidden = false;
+    const a = _assessments.get(String(sid)) || null;
+    const status = a?.status || 'op_schema';
+    const score  = (a && a.score != null) ? Number(a.score) : '';
+    const activeYes = a ? !!a.active_tasks_done : true;
+    const note   = a?.note || '';
+    const hideDetails = (status === 'niet_actief');
+    form.innerHTML = `
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px;margin-bottom:10px">
+        <label style="display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--text-dim);font-weight:600">
+          Status
+          <select class="assess-status" data-student-id="${esc(sid)}"
+                  style="padding:7px 10px;font-size:13px;border:1px solid var(--border);border-radius:7px;background:var(--bg);color:var(--text);font-family:inherit">
+            <option value="op_schema"  ${status==='op_schema'  ? 'selected':''}>Op schema</option>
+            <option value="aandacht"   ${status==='aandacht'   ? 'selected':''}>Aandacht nodig</option>
+            <option value="risico"     ${status==='risico'     ? 'selected':''}>Risico op uitval</option>
+            <option value="niet_actief"${status==='niet_actief'? 'selected':''}>Student niet actief (geen beoordeling)</option>
+          </select>
+        </label>
+        <label class="assess-score-wrap" style="display:${hideDetails?'none':'flex'};flex-direction:column;gap:4px;font-size:12px;color:var(--text-dim);font-weight:600">
+          Cijfer (1–10)
+          <input type="number" class="assess-score" min="1" max="10" step="1" value="${score===''?'':esc(String(score))}"
+                 style="padding:7px 10px;font-size:13px;border:1px solid var(--border);border-radius:7px;background:var(--bg);color:var(--text);font-family:inherit"/>
+        </label>
+        <label class="assess-active-wrap" style="display:${hideDetails?'none':'flex'};flex-direction:column;gap:4px;font-size:12px;color:var(--text-dim);font-weight:600">
+          Actief &amp; taken gedaan
+          <select class="assess-active"
+                  style="padding:7px 10px;font-size:13px;border:1px solid var(--border);border-radius:7px;background:var(--bg);color:var(--text);font-family:inherit">
+            <option value="yes" ${activeYes ? 'selected' : ''}>Ja</option>
+            <option value="no"  ${!activeYes ? 'selected' : ''}>Nee</option>
+          </select>
+        </label>
+      </div>
+      <label class="assess-note-wrap" style="display:${hideDetails?'none':'block'};margin-bottom:10px">
+        <div style="font-size:12px;color:var(--text-dim);font-weight:600;margin-bottom:4px">Notitie</div>
+        <textarea class="assess-note" rows="2"
+                  style="width:100%;padding:7px 10px;font-size:13px;border:1px solid var(--border);border-radius:7px;background:var(--bg);color:var(--text);font-family:inherit;resize:vertical">${esc(note)}</textarea>
+      </label>
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+        <button type="button" class="assess-save-btn"
+                data-student-id="${esc(sid)}" data-student-name="${esc(studentName)}"
+                style="padding:7px 14px;font-size:13px;font-weight:600;border:0;border-radius:7px;background:#0a2f63;color:#fff;cursor:pointer;font-family:inherit">
+          Opslaan
+        </button>
+        <button type="button" class="assess-cancel-btn" data-student-id="${esc(sid)}"
+                style="padding:7px 12px;font-size:13px;font-weight:600;border:1px solid var(--border);border-radius:7px;background:var(--bg);color:var(--text);cursor:pointer;font-family:inherit">
+          Annuleren
+        </button>
+        <span class="assess-status-msg" id="assess-msg-${esc(sid)}" style="font-size:11.5px;color:var(--text-faint)"></span>
+      </div>`;
+
+    // Status-wissel toont/verbergt details binnen het form.
+    const statusEl = form.querySelector('.assess-status');
+    statusEl.addEventListener('change', () => {
+      const hide = (statusEl.value === 'niet_actief');
+      form.querySelectorAll('.assess-score-wrap, .assess-active-wrap').forEach((el) => {
+        el.style.display = hide ? 'none' : 'flex';
+      });
+      const noteWrap = form.querySelector('.assess-note-wrap');
+      if (noteWrap) noteWrap.style.display = hide ? 'none' : 'block';
+    });
+
+    form.querySelector('.assess-cancel-btn').addEventListener('click', () => {
+      form.hidden = true; form.innerHTML = '';
+    });
+    form.querySelector('.assess-save-btn').addEventListener('click', () =>
+      saveAssessment(sid, studentName, form)
+    );
+  }
+
+  async function saveAssessment(sid, studentName, form) {
+    const apiFetch = window.AgentShared?.apiFetch;
+    if (typeof apiFetch !== 'function') return;
+    const status = form.querySelector('.assess-status')?.value || '';
+    const msg = document.getElementById('assess-msg-' + sid);
+
+    const body = { student_id: sid, student_name: studentName || '', status };
+    if (status !== 'niet_actief') {
+      const scoreNum = Number(form.querySelector('.assess-score')?.value);
+      if (!Number.isFinite(scoreNum) || !Number.isInteger(scoreNum) || scoreNum < 1 || scoreNum > 10) {
+        if (msg) { msg.style.color = '#b91c1c'; msg.textContent = 'Cijfer moet 1–10 zijn.'; }
+        return;
+      }
+      body.score = scoreNum;
+      body.active_tasks_done = (form.querySelector('.assess-active')?.value === 'yes');
+      const noteVal = form.querySelector('.assess-note')?.value || '';
+      body.note = noteVal.trim() || null;
+    }
+
+    const btn = form.querySelector('.assess-save-btn');
+    if (btn) btn.disabled = true;
+    if (msg) { msg.style.color = 'var(--text-faint)'; msg.textContent = 'Opslaan…'; }
+    try {
+      const r = await apiFetch('/api/mentor-assessment-save', {
+        method : 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body   : JSON.stringify(body),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d?.error || 'opslaan faalde');
+      // Map updaten met verse rij + UI verversen.
+      _assessments.set(String(sid), d.assessment);
+      const badgeRow = document.getElementById('assess-row-' + sid);
+      if (badgeRow) {
+        const first = badgeRow.querySelector('.badge');
+        if (first) first.outerHTML = _assessBadgeHtml(sid);
+      }
+      // Dashboard-teller verversen.
+      _refreshAssessmentBar();
+      if (msg) { msg.style.color = '#15803d'; msg.textContent = '✓ Opgeslagen.'; }
+      setTimeout(() => { form.hidden = true; form.innerHTML = ''; }, 700);
+    } catch (e) {
+      if (msg) { msg.style.color = '#b91c1c'; msg.textContent = 'Fout: ' + (e?.message || e); }
+      if (btn) btn.disabled = false;
+    }
   }
 
   // Render het funded-segment: groene badge bij bestaande claim + vervang-link,
@@ -1136,15 +1318,19 @@
     const wrap = document.getElementById('studentsWrap');
     if (wrap) wrap.innerHTML = `<div style="color:var(--text-faint);font-size:12.5px;padding:14px;text-align:center">Studenten laden…</div>`;
     try {
-      // Parallel: studenten + funded-certs. _fundedCerts is leeg als de fetch
-      // faalt; render-functie valt dan terug op de upload-knop.
-      const [r, _] = await Promise.all([
+      // Parallel: studenten + funded-certs + assessments. _fundedCerts /
+      // _assessments zijn leeg als hun fetch faalt; render valt terug op
+      // upload-knop respectievelijk "Open" badge.
+      const [r, _f, _a] = await Promise.all([
         apiFetch('/api/mentor-my-students'),
         loadFundedCertsMap(),
+        loadAssessmentsMap(),
       ]);
       const d = await r.json();
       if (!r.ok) throw new Error(d?.error || 'students fetch failed');
+      _lastStudentsList = Array.isArray(d?.students) ? d.students : [];
       renderStudents(d);
+      _refreshAssessmentBar();
     } catch (e) {
       console.error('[mentor-dashboard] students:', e?.message || e);
       setError('studentsWrap', 'Studenten ophalen mislukt: ' + (e?.message || e));
@@ -1660,6 +1846,42 @@
     bar.innerHTML = '';
   }
 
+  // Beoordelingen-reminder: amber balk "X van Y gedaan" als X<Y voor deze maand.
+  // Y = aantal studenten (uit _lastStudentsList of een meegegeven students-list).
+  // X = aantal _assessments-rows (server returnt alleen huidige-maand rijen).
+  function _renderAssessmentReminderBar(studentsList) {
+    const el = document.getElementById('dashAssessmentBar');
+    if (!el) return;
+    el.hidden = true;
+    el.innerHTML = '';
+
+    const list = Array.isArray(studentsList)
+      ? studentsList
+      : (Array.isArray(_lastStudentsList) ? _lastStudentsList : null);
+    if (!list || list.length === 0) return;
+    const Y = list.length;
+    const X = _assessments.size;
+    if (X >= Y) return;
+
+    el.hidden = false;
+    el.className = 'dash-status-bar';
+    el.style.cssText = 'background:rgba(245,158,11,0.10);border:1px solid rgba(245,158,11,0.35);color:#92400e;padding:12px 16px;border-radius:10px;margin-bottom:16px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-size:13.5px;line-height:1.5';
+    el.innerHTML = `
+      <i class="ti ti-clipboard-list"></i>
+      <span>📋 Beoordelingen deze maand: <strong>${X} van ${Y}</strong> gedaan — beoordeel je studenten.</span>
+      <button type="button" id="dashAssessmentBarBtn"
+              style="margin-left:auto;padding:6px 12px;font-size:12.5px;font-weight:600;border:0;border-radius:7px;background:#92400e;color:#fff;cursor:pointer;font-family:inherit">
+        Naar studenten
+      </button>`;
+    const btn = document.getElementById('dashAssessmentBarBtn');
+    if (btn) btn.addEventListener('click', () => { activateTab('studenten'); });
+  }
+
+  // Verversen na save in de student-kaart — gebruik laatst-bekende students-list.
+  function _refreshAssessmentBar() {
+    _renderAssessmentReminderBar(_lastStudentsList);
+  }
+
   function _statCard(label, value, sub) {
     return `<div class="dash-stat-card">
       <div class="ds-label">${esc(label)}</div>
@@ -1695,8 +1917,9 @@
       apiFetch('/api/mentor-my-calendar'),
       apiFetch('/api/mentor-payouts-list-self'),
       apiFetch(`/api/mentor-travel-days-self?period_month=${encodeURIComponent(month.first.slice(0,7))}`),
+      loadAssessmentsMap(),
     ];
-    const [bonusR, coachMonthR, coachYtdR, studentsR, calendarR, payoutsR, travelR] =
+    const [bonusR, coachMonthR, coachYtdR, studentsR, calendarR, payoutsR, travelR, _assessR] =
       await Promise.allSettled(tasks);
 
     async function jsonOk(settled) {
@@ -1717,6 +1940,11 @@
     _renderStatusBar(payouts?.payouts || []);
     // Reiskosten-reminder (fire-and-forget; doet zelf venster-check + fetch).
     _renderTravelReminder(travel);
+    // Beoordelingen-balk: gebruik students-list uit dezelfde fetch zodat we
+    // niet hoeven te wachten op de studenten-tab. Cache 'm voor save-refresh.
+    const _studentsArr = Array.isArray(students?.students) ? students.students : [];
+    _lastStudentsList = _studentsArr;
+    _renderAssessmentReminderBar(_studentsArr);
 
     const bonusTotals     = bonus?.totals || {};
     const bonusEarnedYTD  = Number(bonusTotals.earned_total) || 0;
