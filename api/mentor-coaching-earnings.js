@@ -99,6 +99,7 @@ export default async function handler(req, res) {
 
     const result = await computeCoachingEarnings({
       bubbleUserId: tm.bubble_user_id,
+      mentorUserId: effectiveUserId,
       from,
       to,
     });
