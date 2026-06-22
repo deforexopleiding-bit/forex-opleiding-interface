@@ -15,6 +15,10 @@
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
+import {
+  findAvailabilityBlock,
+  buildAvailabilityView,
+} from './_lib/onboarding-wizard-default.js';
 
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
@@ -35,6 +39,7 @@ export default async function handler(req, res) {
     const { data: rows, error: rowErr } = await supabaseAdmin
       .from('onboardings')
       .select(`id, customer_id, customer_name, status, current_step,
+               answers,
                started_at, completed_at, created_at,
                traject:onboarding_trajecten(label)`)
       .eq('mentor_user_id', user.id)
@@ -60,16 +65,41 @@ export default async function handler(req, res) {
       }
     }
 
-    const students = list.map((r) => ({
-      onboarding_id : r.id,
-      customer_name : r.customer_name || null,
-      traject_label : r.traject?.label || null,
-      status        : r.status,
-      current_step  : r.current_step || null,
-      paid          : paidSet.has(r.customer_id),
-      started_at    : r.started_at,
-      completed_at  : r.completed_at,
-    }));
+    // Availability-blok 1× per request resolven uit de GEPUBLICEERDE
+    // wizard-structuur. Antwoord per row wordt daarna naar label-vorm
+    // gemapped door buildAvailabilityView (geen UI-formatting hier;
+    // mentor-dashboard verzorgt de "Ma: Ochtend"-render).
+    let availabilityBlock = null;
+    try {
+      const { data: wiz, error: wizErr } = await supabaseAdmin
+        .from('onboarding_wizard')
+        .select('published_structure')
+        .eq('id', 1)
+        .maybeSingle();
+      if (wizErr) {
+        console.warn('[mentor-future-students-self] wizard config fetch:', wizErr.message);
+      } else {
+        availabilityBlock = findAvailabilityBlock(wiz?.published_structure);
+      }
+    } catch (e) {
+      console.warn('[mentor-future-students-self] wizard config exception:', e?.message || e);
+    }
+
+    const students = list.map((r) => {
+      const ans = (r.answers && typeof r.answers === 'object') ? r.answers : {};
+      const availability = availabilityBlock ? buildAvailabilityView(availabilityBlock, ans) : null;
+      return {
+        onboarding_id : r.id,
+        customer_name : r.customer_name || null,
+        traject_label : r.traject?.label || null,
+        status        : r.status,
+        current_step  : r.current_step || null,
+        paid          : paidSet.has(r.customer_id),
+        availability,
+        started_at    : r.started_at,
+        completed_at  : r.completed_at,
+      };
+    });
 
     return res.status(200).json({ ok: true, students });
   } catch (e) {

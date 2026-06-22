@@ -25,6 +25,10 @@
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
+import {
+  findAvailabilityBlock,
+  buildAvailabilityView,
+} from './_lib/onboarding-wizard-default.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -126,12 +130,15 @@ export default async function handler(req, res) {
       }
     }
 
-    // Bedenktijd-waiver-key resolven uit de GEPUBLICEERDE wizard-structuur
-    // (1× per request — niet per row). We zoeken het EERSTE blok dat
-    // is_waiver=true heeft en pakken zijn consent_key. Zonder gepubliceerde
-    // structuur of zonder waiver-blok → waiverKey blijft null en elke row
-    // krijgt waiver=null.
-    let waiverKey = null;
+    // GEPUBLICEERDE wizard-structuur 1× per request laden voor twee
+    // afgeleide velden per row:
+    //   - waiverKey: consent_key van het EERSTE blok met is_waiver=true.
+    //   - availabilityBlock: het EERSTE blok van type 'availability'
+    //     (gebruikt om antwoorden naar labels te resolven).
+    // Geen gepubliceerde structuur / geen blok → respectievelijke vlag
+    // blijft null en elke row krijgt waiver=null / availability=null.
+    let waiverKey         = null;
+    let availabilityBlock = null;
     try {
       const { data: wiz, error: wizErr } = await supabaseAdmin
         .from('onboarding_wizard')
@@ -141,7 +148,9 @@ export default async function handler(req, res) {
       if (wizErr) {
         console.warn('[onboardings-admin-list] wizard config fetch:', wizErr.message);
       } else {
-        waiverKey = findWaiverConsentKey(wiz?.published_structure);
+        const pub = wiz?.published_structure;
+        waiverKey         = findWaiverConsentKey(pub);
+        availabilityBlock = findAvailabilityBlock(pub);
       }
     } catch (e) {
       console.warn('[onboardings-admin-list] wizard config exception:', e?.message || e);
@@ -153,6 +162,7 @@ export default async function handler(req, res) {
       const waiver = waiverKey
         ? { agreed: ans[waiverKey] === true, at: ans[waiverKey + '_at'] || null }
         : null;
+      const availability = availabilityBlock ? buildAvailabilityView(availabilityBlock, ans) : null;
       return {
         id             : r.id,
         customer_id    : r.customer_id,
@@ -167,6 +177,7 @@ export default async function handler(req, res) {
         current_step   : r.current_step || null,
         paid           : paidSet.has(r.customer_id),
         waiver,
+        availability,
         started_at     : r.started_at,
         completed_at   : r.completed_at,
         assigned_at    : r.assigned_at,
