@@ -46,7 +46,9 @@
     // lucide "receipt" — payout-rapport admin (finance/strateeg).
     'mentor-payouts-admin': '<path d="M4 4h16v18l-3-2-2 2-2-2-2 2-2-2-2 2-3-2z"/><line x1="8" y1="9" x2="16" y2="9"/><line x1="8" y1="13" x2="16" y2="13"/>',
     // lucide "certificate" — funded-certificaten admin.
-    'funded-certificates-admin': '<rect x="3" y="4" width="18" height="14" rx="2"/><circle cx="12" cy="11" r="3"/><path d="M9 21l3-3 3 3"/>'
+    'funded-certificates-admin': '<rect x="3" y="4" width="18" height="14" rx="2"/><circle cx="12" cy="11" r="3"/><path d="M9 21l3-3 3 3"/>',
+    // lucide "users-cog" — Mentoren beheer (consolidatie van 3 admin-modules).
+    'mentoren-beheer': '<circle cx="9" cy="7" r="4"/><path d="M3 21v-2a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v2"/><circle cx="18" cy="14" r="2"/><path d="M18 9v2M18 17v2M22 14h-2M14 14h2"/>'
   };
 
   function svg(key) {
@@ -88,16 +90,11 @@
           // mentor.module.access (zie MODULE_FEATURE_MAP). Voor andere rollen
           // verbergt applyModuleGating de link.
           navLink('mentor-dashboard', '/modules/mentor-dashboard.html', 'Mentor-dashboard') +
-          // Mentor-detail PR-4 — admin-view per mentor; gated via
-          // mentor.admin.view (manager+). Mentors zelf zien 'm dus niet.
-          navLink('mentor-detail', '/modules/mentor-detail.html', 'Mentor-overzicht (admin)') +
-          // Payout fase 1 — concept-rapporten per mentor + maand; gated via
-          // mentor.payout.manage (manager+/finance). Mentors zelf zien 'm niet;
-          // wel hun eigen rapport via mentor-dashboard zodra status>=goedgekeurd.
-          navLink('mentor-payouts-admin', '/modules/mentor-payouts-admin.html', 'Payout-rapporten (admin)') +
-          // Funded-certificaten — admin-overzicht van geclaimde €100-bonussen
-          // met signed download-URLs; gated via mentor.funded.admin.
-          navLink('funded-certificates-admin', '/modules/funded-certificates-admin.html', 'Certificaten (admin)') +
+          // Mentoren beheer — consolidatie van Mentor-overzicht / Payout-rapporten /
+          // Certificaten (admin). De drie pagina's blijven bestaan via directe URL,
+          // maar de sidebar toont alleen nog dit ene item. Zichtbaarheid: zodra de
+          // user minstens één van de drie rechten heeft (zie applyModuleGating).
+          navLink('mentoren-beheer', '/modules/mentoren-beheer.html', 'Mentoren beheer') +
           navLink('onboarding', '/modules/onboarding-overzicht.html', 'Onboarding') +
           // Finance — Mega-restructure: badge voor Open Acties (F1 finance-taken) hangt
           // nu inline op de Finance nav-item zelf. Open Acties is verhuisd naar
@@ -430,9 +427,14 @@
     // mentor.admin.view via de role_permissions grant; mentors zelf niet.
     'mentor-detail': 'mentor.admin.view',
     // Payout fase 1 — finance/strateeg-tool. mentor.payout.manage (manager+).
+    // Page-gate blijft op de directe URL actief (defense-in-depth).
     'mentor-payouts-admin': 'mentor.payout.manage',
-    // Funded-certificaten admin (alle €100-claims + downloads).
+    // Funded-certificaten admin (alle €100-claims + downloads). Page-gate
+    // blijft op de directe URL actief.
     'funded-certificates-admin': 'mentor.funded.admin',
+    // Mentoren beheer — speciaal: ANY-of-3 (zie applyModuleGating onderaan).
+    // Geen vaste feature_key hier; de OR-check is daar gehardcodeerd.
+    'mentoren-beheer': '__any_mentor_admin__',
     'finance': 'finance.module.access',
     // Open Acties (F1 finance-taken) is verhuisd naar Finance > Wanbetalers > Open Acties
     // sub-tab — geen eigen sidebar-link meer. Badge hangt nu op de Finance nav-item zelf.
@@ -468,12 +470,19 @@
     // 1) Sidebar-links verbergen zonder <module>.module.access.
     //    Dashboard speciaal: zichtbaar als user OFWEL module.access OF sales.view
     //    heeft (sales-rol heeft alleen die laatste).
+    //    Mentoren beheer speciaal: zichtbaar als user minstens ÉÉN van de drie
+    //    onderliggende rechten heeft (mentor.admin.view / mentor.payout.manage /
+    //    mentor.funded.admin) — de pagina zelf verbergt de specifieke tabs op
+    //    basis van per-tab rechten.
     Object.keys(MODULE_FEATURE_MAP).forEach(function (modKey) {
       var link = document.querySelector('#sidebar-mount [data-module="' + modKey + '"]');
       if (!link) return;
       if (modKey === 'dashboard') {
         var ok = perms.has('dashboard.module.access') || perms.has('dashboard.sales.view');
         if (!ok) link.style.display = 'none';
+      } else if (modKey === 'mentoren-beheer') {
+        var okM = perms.has('mentor.admin.view') || perms.has('mentor.payout.manage') || perms.has('mentor.funded.admin');
+        if (!okM) link.style.display = 'none';
       } else if (!perms.has(MODULE_FEATURE_MAP[modKey])) {
         link.style.display = 'none';
       }
@@ -487,6 +496,11 @@
     // index.html doet zelf een redirect naar /modules/sales-dashboard.html.
     if (cur === 'dashboard') {
       if (!perms.has('dashboard.module.access') && !perms.has('dashboard.sales.view')) blockPageAccess();
+      return;
+    }
+    if (cur === 'mentoren-beheer') {
+      var okMB = perms.has('mentor.admin.view') || perms.has('mentor.payout.manage') || perms.has('mentor.funded.admin');
+      if (!okMB) blockPageAccess();
       return;
     }
     var fk = MODULE_FEATURE_MAP[cur];
