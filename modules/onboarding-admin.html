@@ -1,0 +1,650 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Onboarding · De Forex Opleiding</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/dist/tabler-icons.min.css" />
+  <link rel="stylesheet" href="/modules/shared/agent-shared.css" />
+  <link rel="stylesheet" href="/styles/sales-redesign.css" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; }
+    body { font-family: 'Inter', system-ui, sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; -webkit-font-smoothing: antialiased; }
+    .app { margin-left: 220px; padding: 24px 28px 60px; max-width: 1400px; --brand-deep:#0a2f63; --brand-azure:#1e6cd6; }
+
+    .page-header { display:flex; align-items:baseline; justify-content:space-between; margin-bottom:14px; gap:12px; flex-wrap:wrap; }
+    .page-header h1 { font-size:22px; font-weight:700; color:var(--text); }
+    .page-header p  { font-size:13px; color:var(--text-dim); margin-top:2px; }
+
+    .ob-tabs { display:flex; gap:6px; border-bottom:1px solid var(--border); margin-bottom:14px; flex-wrap:wrap; }
+    .ob-tab {
+      padding:9px 16px; font-size:13px; font-weight:600; color:var(--text-dim);
+      background:transparent; border:0; border-bottom:2px solid transparent;
+      cursor:pointer; font-family:inherit; margin-bottom:-1px;
+    }
+    .ob-tab:hover { color:var(--text); }
+    .ob-tab.active { color:var(--brand-deep); border-bottom-color:var(--brand-deep); }
+
+    .toolbar { display:flex; align-items:center; gap:12px; margin-bottom:16px; padding:12px 14px; background:var(--bg-elev); border:1px solid var(--border); border-radius:10px; flex-wrap:wrap; }
+    .toolbar label { font-size:12px; font-weight:600; color:var(--text-dim); }
+    .toolbar select, .toolbar input[type=search] {
+      padding:7px 10px; font-size:13.5px; border:1px solid var(--border); border-radius:7px;
+      background:var(--bg); color:var(--text); font-family:inherit; min-width:180px;
+    }
+    .toolbar input[type=search] { min-width:240px; }
+    .toolbar .spacer { flex:1; }
+    .toolbar .refresh-btn {
+      padding:7px 12px; font-size:12.5px; font-weight:600; border:1px solid var(--border); border-radius:7px;
+      background:var(--bg); color:var(--text); cursor:pointer; font-family:inherit;
+    }
+    .toolbar .refresh-btn:hover { background:var(--bg-elev); }
+
+    .counter { font-size:12.5px; color:var(--text-dim); margin-bottom:12px; }
+    .counter strong { color:var(--text); font-variant-numeric:tabular-nums; }
+
+    .data-table { width:100%; border-collapse:collapse; background:var(--bg-elev); border:1px solid var(--border); border-radius:10px; overflow:hidden; }
+    .data-table th, .data-table td { padding:10px 12px; text-align:left; font-size:13px; border-bottom:1px solid var(--border); vertical-align:top; }
+    .data-table th { background:rgba(10,47,99,0.04); font-weight:600; color:var(--text-dim); font-size:11.5px; text-transform:uppercase; letter-spacing:0.03em; }
+    .data-table tr:last-child td { border-bottom:0; }
+
+    .empty-state { background:var(--bg-elev); border:1px dashed var(--border); border-radius:10px; padding:24px 16px; text-align:center; font-size:13px; color:var(--text-dim); }
+    .empty-state i { font-size:26px; display:block; margin-bottom:6px; opacity:0.6; }
+
+    .skeleton { display:inline-block; width:80px; height:16px; background:linear-gradient(90deg, rgba(0,0,0,0.05), rgba(0,0,0,0.10), rgba(0,0,0,0.05)); border-radius:4px; animation:sk 1.2s infinite; }
+    @keyframes sk { 0% { background-position:0% 0; } 100% { background-position:200% 0; } }
+
+    /* Status- en betalings-badges */
+    .ob-badge { display:inline-block; padding:2px 9px; border-radius:10px; font-size:11.5px; font-weight:600; white-space:nowrap; }
+    .ob-badge.aangemeld    { background:rgba(20,115,214,0.14);  color:#1160bd; }
+    .ob-badge.bezig        { background:rgba(245,158,11,0.16);  color:#b45309; }
+    .ob-badge.afgerond     { background:rgba(34,197,94,0.14);   color:#15803d; }
+    .ob-badge.gearchiveerd { background:rgba(100,116,139,0.18); color:#475569; }
+    .ob-badge.paid-yes     { background:rgba(34,197,94,0.14);   color:#15803d; }
+    .ob-badge.paid-no      { background:rgba(100,116,139,0.18); color:#475569; }
+
+    .ob-row-actions { display:flex; gap:6px; flex-wrap:wrap; align-items:center; }
+    .ob-act {
+      display:inline-flex; align-items:center; gap:4px; padding:5px 9px; font-size:11.5px; font-weight:600;
+      border:1px solid var(--border); border-radius:6px; background:var(--bg); color:var(--text);
+      cursor:pointer; font-family:inherit; text-decoration:none; white-space:nowrap;
+    }
+    .ob-act:hover { background:var(--bg-elev); }
+    .ob-act.danger { color:#b91c1c; border-color:#fecaca; }
+    .ob-act.danger:hover { background:rgba(220,38,38,0.06); }
+    .ob-act.primary { background:var(--brand-deep); color:#fff; border-color:var(--brand-deep); }
+    .ob-act.primary:hover { background:var(--brand-azure); border-color:var(--brand-azure); }
+
+    /* Inline mentor-edit cell */
+    .ob-mentor-cell { display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
+    .ob-mentor-cell select {
+      padding:5px 7px; font-size:12px; border:1px solid var(--border); border-radius:6px;
+      background:var(--bg); color:var(--text); font-family:inherit; max-width:170px;
+    }
+    .ob-mentor-cell .save-btn {
+      padding:4px 9px; font-size:11.5px; font-weight:600; border:0; border-radius:6px;
+      background:#059669; color:#fff; cursor:pointer; font-family:inherit;
+    }
+    .ob-mentor-cell .save-btn[disabled] { opacity:0.5; cursor:default; }
+
+    /* Detail-modal */
+    .ob-modal { position:fixed; inset:0; background:rgba(15,23,42,0.45); display:none; align-items:flex-start; justify-content:center; z-index:200; padding:40px 14px; overflow:auto; }
+    .ob-modal.open { display:flex; }
+    .ob-modal-card { background:var(--bg); border:1px solid var(--border); border-radius:12px; width:100%; max-width:760px; max-height:90vh; overflow:auto; box-shadow:0 20px 50px rgba(15,23,42,0.25); }
+    .ob-modal-h { display:flex; align-items:center; justify-content:space-between; padding:14px 18px; border-bottom:1px solid var(--border); position:sticky; top:0; background:var(--bg); }
+    .ob-modal-h h2 { font-size:15px; font-weight:700; }
+    .ob-modal-x { background:transparent; border:0; color:var(--text-dim); cursor:pointer; font-size:18px; line-height:1; padding:4px 8px; border-radius:6px; }
+    .ob-modal-x:hover { background:var(--bg-elev); color:var(--text); }
+    .ob-modal-body { padding:18px; font-size:13px; line-height:1.55; }
+    .ob-modal-body dl { display:grid; grid-template-columns: 180px 1fr; gap:6px 12px; margin-bottom:14px; }
+    .ob-modal-body dt { color:var(--text-dim); font-weight:600; }
+    .ob-modal-body dd { color:var(--text); word-break:break-word; }
+    .ob-modal-body h3 { font-size:11.5px; text-transform:uppercase; letter-spacing:.05em; color:var(--text-faint); margin:12px 0 6px; font-weight:700; }
+    .ob-modal-body pre { background:var(--bg-elev); border:1px solid var(--border); border-radius:8px; padding:10px 12px; font-size:12px; overflow:auto; max-height:300px; }
+
+    @media (max-width: 880px) { .app { margin-left:0; padding:14px; } }
+  </style>
+</head>
+<body>
+<div id="sidebar-mount"></div>
+
+<div class="app">
+  <div class="page-header">
+    <div>
+      <h1>Onboarding</h1>
+      <p>Overzicht van alle aangemelde onboardings — mentor-toewijzing, archief en wizard-status.</p>
+    </div>
+  </div>
+
+  <div class="ob-tabs" role="tablist">
+    <button type="button" class="ob-tab active" data-scope="active"   id="tab-active">Actief</button>
+    <button type="button" class="ob-tab"        data-scope="archived" id="tab-archived">Archief</button>
+  </div>
+
+  <div class="toolbar">
+    <label for="searchBox">Zoeken:</label>
+    <input type="search" id="searchBox" placeholder="Klantnaam…" />
+    <label for="trajectFilter">Traject:</label>
+    <select id="trajectFilter">
+      <option value="">— alle trajecten —</option>
+    </select>
+    <label for="mentorFilter">Mentor:</label>
+    <select id="mentorFilter">
+      <option value="">— alle mentoren —</option>
+    </select>
+    <div class="spacer"></div>
+    <button type="button" class="refresh-btn" id="refreshBtn">
+      <i class="ti ti-refresh"></i> Vernieuwen
+    </button>
+  </div>
+
+  <div class="counter" id="counter"><span class="skeleton" style="width:120px"></span></div>
+
+  <div id="tableWrap">
+    <div class="empty-state"><span class="skeleton" style="width:160px"></span></div>
+  </div>
+</div>
+
+<!-- Detail-modal — opent bij klik op 'Bekijk'. -->
+<div class="ob-modal" id="obDetailModal" role="dialog" aria-modal="true" aria-labelledby="obDetailTitle" hidden>
+  <div class="ob-modal-card">
+    <div class="ob-modal-h">
+      <h2 id="obDetailTitle">Onboarding-detail</h2>
+      <button type="button" class="ob-modal-x" id="obDetailClose" aria-label="Sluiten">&times;</button>
+    </div>
+    <div class="ob-modal-body" id="obDetailBody">
+      <div class="empty-state"><span class="skeleton" style="width:160px"></span></div>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script src="/modules/shared/supabase-client.js"></script>
+<script src="/modules/shared/agent-shared.js"></script>
+<script src="/modules/shared/theme-shared.js"></script>
+<script src="/modules/shared/permissions.js"></script>
+<script src="/modules/shared/sidebar.js"></script>
+<script>
+(function () {
+  'use strict';
+
+  const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+
+  function toast(msg, kind) {
+    const el = document.getElementById('toast');
+    if (!el) return;
+    el.textContent = msg;
+    el.className = 'toast show ' + (kind || '');
+    setTimeout(() => el.classList.remove('show'), 2400);
+  }
+
+  function fmtDateNL(iso) {
+    if (!iso) return '—';
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return '—';
+    return d.toLocaleDateString('nl-NL', { day: '2-digit', month: 'short', year: 'numeric' });
+  }
+  function fmtDateTimeNL(iso) {
+    if (!iso) return '—';
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return '—';
+    return d.toLocaleString('nl-NL', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+  }
+
+  const STATUS_LABEL = {
+    aangemeld    : 'Aangemeld',
+    bezig        : 'Bezig',
+    afgerond     : 'Afgerond',
+    gearchiveerd : 'Gearchiveerd',
+  };
+  // Voortgang per status — UX-uitleg zonder wizard-koppeling.
+  function progressLabel(row) {
+    const st = row?.status || '';
+    if (st === 'afgerond')     return 'Afgerond';
+    if (st === 'gearchiveerd') return '—';
+    if (st === 'bezig')        return row?.current_step ? ('Stap ' + esc(row.current_step)) : 'Wizard bezig';
+    return 'Wizard nog niet gestart';
+  }
+
+  // State
+  let _scope         = 'active';
+  let _qSearch       = '';
+  let _trajectId     = '';
+  let _mentorFilter  = '';
+  let _rows          = [];
+  let _trajecten     = [];
+  let _trajectenLoaded = false;
+  let _mentors       = [];
+  let _mentorsLoaded = false;
+  let _mentorsBlocked = false;          // true bij 403 op /api/mentor-admin-list
+  let _canAssign     = false;
+  let _searchTimer   = null;
+
+  function mentorNameById(uid) {
+    if (!uid) return null;
+    const m = _mentors.find((x) => x.user_id === uid);
+    return m ? (m.name || m.email || uid) : null;
+  }
+
+  function setCounter(n) {
+    const c = document.getElementById('counter');
+    if (!c) return;
+    if (n === 0) {
+      c.textContent = _scope === 'archived'
+        ? 'Geen gearchiveerde onboardings.'
+        : 'Geen actieve onboardings.';
+    } else {
+      c.innerHTML = `<strong>${n}</strong> ${n === 1 ? 'onboarding' : 'onboardings'} in ${_scope === 'archived' ? 'archief' : 'actief'}`;
+    }
+  }
+
+  function renderError(msg) {
+    const wrap = document.getElementById('tableWrap');
+    if (wrap) wrap.innerHTML = `<div class="empty-state" style="border-color:#fecaca;color:#b91c1c"><i class="ti ti-alert-triangle"></i>${esc(msg)}</div>`;
+    const c = document.getElementById('counter');
+    if (c) c.textContent = '';
+  }
+
+  function renderLoading() {
+    const wrap = document.getElementById('tableWrap');
+    if (wrap) wrap.innerHTML = `<div class="empty-state"><span class="skeleton" style="width:160px"></span></div>`;
+    const c = document.getElementById('counter');
+    if (c) c.innerHTML = `<span class="skeleton" style="width:120px"></span>`;
+  }
+
+  function renderTable() {
+    const wrap = document.getElementById('tableWrap');
+    if (!wrap) return;
+    setCounter(_rows.length);
+
+    if (_rows.length === 0) {
+      wrap.innerHTML = `<div class="empty-state"><i class="ti ti-inbox-off"></i>Geen onboardings voor deze selectie.</div>`;
+      return;
+    }
+
+    const body = _rows.map((r) => rowHtml(r)).join('');
+    wrap.innerHTML = `
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Klant</th>
+            <th>Traject</th>
+            <th>Status</th>
+            <th>Betaling</th>
+            <th>Mentor</th>
+            <th>Voortgang</th>
+            <th>Aangemeld</th>
+            <th style="text-align:right">Acties</th>
+          </tr>
+        </thead>
+        <tbody>${body}</tbody>
+      </table>`;
+
+    wireRowHandlers();
+  }
+
+  function trajectLabelHtml(r) {
+    const lbl = r.traject_label || '—';
+    const calls = (r.calls != null) ? `<div style="font-size:11.5px;color:var(--text-faint)">${r.calls} call${r.calls === 1 ? '' : 's'}</div>` : '';
+    return `<div style="font-weight:600">${esc(lbl)}</div>${calls}`;
+  }
+
+  function paidBadgeHtml(paid) {
+    return paid
+      ? '<span class="ob-badge paid-yes">Betaald</span>'
+      : '<span class="ob-badge paid-no">Nog niet betaald</span>';
+  }
+
+  function statusBadgeHtml(st) {
+    const cls = ['aangemeld','bezig','afgerond','gearchiveerd'].includes(st) ? st : 'aangemeld';
+    return `<span class="ob-badge ${cls}">${esc(STATUS_LABEL[st] || st || '—')}</span>`;
+  }
+
+  function mentorCellHtml(r) {
+    const name = r.mentor_name || (r.mentor_user_id ? mentorNameById(r.mentor_user_id) : null);
+    if (!_canAssign || _mentorsBlocked) {
+      return `<div>${esc(name || '—')}</div>`;
+    }
+    // Inline edit-pattern: select + save-btn. Save staat default-disabled tot
+    // de waarde verandert.
+    const cur = r.mentor_user_id || '';
+    const opts = ['<option value="">— geen / ontkoppelen —</option>']
+      .concat(_mentors.map((m) => {
+        const sel = (m.user_id === cur) ? ' selected' : '';
+        const lbl = m.name || m.email || m.user_id;
+        return `<option value="${esc(m.user_id)}"${sel}>${esc(lbl)}</option>`;
+      }))
+      .join('');
+    return `
+      <div class="ob-mentor-cell" data-row-id="${esc(r.id)}" data-cur="${esc(cur)}">
+        <select class="ob-mentor-sel">${opts}</select>
+        <button type="button" class="save-btn" disabled>Opslaan</button>
+      </div>`;
+  }
+
+  function actionsCellHtml(r) {
+    const isArchived = (r.status === 'gearchiveerd');
+    const archBtn = isArchived
+      ? `<button type="button" class="ob-act" data-act="restore" data-id="${esc(r.id)}"><i class="ti ti-archive-off"></i>Herstellen</button>`
+      : `<button type="button" class="ob-act danger" data-act="archive" data-id="${esc(r.id)}"><i class="ti ti-archive"></i>Archiveer</button>`;
+    return `
+      <div class="ob-row-actions" style="justify-content:flex-end">
+        <button type="button" class="ob-act" data-act="copy" data-token="${esc(r.token || '')}"><i class="ti ti-copy"></i>Link</button>
+        <button type="button" class="ob-act primary" data-act="view" data-id="${esc(r.id)}"><i class="ti ti-eye"></i>Bekijk</button>
+        ${archBtn}
+      </div>`;
+  }
+
+  function rowHtml(r) {
+    return `
+      <tr data-row-id="${esc(r.id)}">
+        <td><div style="font-weight:600">${esc(r.customer_name || '—')}</div></td>
+        <td>${trajectLabelHtml(r)}</td>
+        <td>${statusBadgeHtml(r.status)}</td>
+        <td>${paidBadgeHtml(!!r.paid)}</td>
+        <td>${mentorCellHtml(r)}</td>
+        <td>${esc(progressLabel(r))}</td>
+        <td>${esc(fmtDateNL(r.created_at))}</td>
+        <td style="text-align:right">${actionsCellHtml(r)}</td>
+      </tr>`;
+  }
+
+  function wireRowHandlers() {
+    // Mentor inline edit (alleen aanwezig als _canAssign && !blocked).
+    document.querySelectorAll('.ob-mentor-cell').forEach((cell) => {
+      const sel = cell.querySelector('select');
+      const btn = cell.querySelector('button.save-btn');
+      if (!sel || !btn) return;
+      const orig = cell.dataset.cur || '';
+      sel.addEventListener('change', () => {
+        btn.disabled = (sel.value === orig);
+      });
+      btn.addEventListener('click', () => {
+        const rowId = cell.dataset.rowId;
+        const newVal = sel.value;
+        saveMentor(rowId, newVal || null, btn, cell);
+      });
+    });
+
+    // Action-knoppen.
+    document.querySelectorAll('.ob-act').forEach((b) => {
+      b.addEventListener('click', () => {
+        const act = b.dataset.act;
+        if (act === 'copy')    return copyLink(b.dataset.token, b);
+        if (act === 'view')    return openDetail(b.dataset.id);
+        if (act === 'archive') return doArchive(b.dataset.id, 'archive');
+        if (act === 'restore') return doArchive(b.dataset.id, 'restore');
+      });
+    });
+  }
+
+  async function copyLink(token, btn) {
+    if (!token) { toast('Geen token op deze onboarding', 'error'); return; }
+    const url = location.origin + '/modules/onboarding.html?t=' + encodeURIComponent(token);
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(url);
+      } else {
+        // execCommand-fallback voor oudere browsers.
+        const ta = document.createElement('textarea');
+        ta.value = url;
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+      }
+      const orig = btn.innerHTML;
+      btn.innerHTML = '<i class="ti ti-check"></i>Gekopieerd';
+      setTimeout(() => { btn.innerHTML = orig; }, 1500);
+    } catch (e) {
+      toast('Kopiëren mislukt', 'error');
+    }
+  }
+
+  async function saveMentor(onboardingId, mentorUserId, btn, cell) {
+    if (!onboardingId) return;
+    btn.disabled = true;
+    const origText = btn.textContent;
+    btn.textContent = 'Bezig…';
+    try {
+      const r = await window.AgentShared.apiFetch('/api/onboarding-assign-mentor', {
+        method  : 'POST',
+        headers : { 'Content-Type': 'application/json' },
+        body    : JSON.stringify({ onboarding_id: onboardingId, mentor_user_id: mentorUserId }),
+      });
+      let d = null; try { d = await r.json(); } catch {}
+      if (!r.ok) throw new Error(d?.error || ('HTTP ' + r.status));
+      // Lokale state bijwerken + visuele bevestiging zonder volledige refetch.
+      const row = _rows.find((x) => x.id === onboardingId);
+      if (row) {
+        row.mentor_user_id = mentorUserId || null;
+        row.mentor_name    = mentorUserId ? mentorNameById(mentorUserId) : null;
+        row.assigned_at    = d?.assigned_at || null;
+      }
+      cell.dataset.cur = mentorUserId || '';
+      btn.textContent = '✓ Opgeslagen';
+      setTimeout(() => { btn.textContent = origText; }, 1400);
+      toast('Mentor bijgewerkt', 'success');
+    } catch (e) {
+      btn.disabled = false;
+      btn.textContent = origText;
+      toast('Mentor opslaan mislukt: ' + (e?.message || e), 'error');
+    }
+  }
+
+  async function doArchive(onboardingId, action) {
+    if (!onboardingId) return;
+    const verb = (action === 'archive') ? 'archiveren' : 'herstellen';
+    if (!confirm(`Weet je zeker dat je deze onboarding wilt ${verb}?`)) return;
+    try {
+      const r = await window.AgentShared.apiFetch('/api/onboarding-archive', {
+        method  : 'POST',
+        headers : { 'Content-Type': 'application/json' },
+        body    : JSON.stringify({ onboarding_id: onboardingId, action }),
+      });
+      let d = null; try { d = await r.json(); } catch {}
+      if (!r.ok) throw new Error(d?.error || ('HTTP ' + r.status));
+      toast((action === 'archive' ? 'Gearchiveerd' : 'Hersteld') + ' (' + (d?.status || '?') + ')', 'success');
+      loadList();
+    } catch (e) {
+      toast('Actie mislukt: ' + (e?.message || e), 'error');
+    }
+  }
+
+  // ── Detail-modal ─────────────────────────────────────────────────────
+  function _closeDetail() {
+    const m = document.getElementById('obDetailModal');
+    m.classList.remove('open');
+    m.setAttribute('hidden', '');
+  }
+  function _wireDetailModal() {
+    const m  = document.getElementById('obDetailModal');
+    const x  = document.getElementById('obDetailClose');
+    if (!m) return;
+    if (x) x.addEventListener('click', _closeDetail);
+    m.addEventListener('click', (ev) => { if (ev.target === m) _closeDetail(); });
+    document.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Escape' && m.classList.contains('open')) _closeDetail();
+    });
+  }
+
+  async function openDetail(id) {
+    if (!id) return;
+    const m  = document.getElementById('obDetailModal');
+    const bd = document.getElementById('obDetailBody');
+    m.removeAttribute('hidden');
+    m.classList.add('open');
+    bd.innerHTML = `<div class="empty-state"><span class="skeleton" style="width:160px"></span></div>`;
+    try {
+      const r = await window.AgentShared.apiFetch('/api/onboarding-detail?id=' + encodeURIComponent(id));
+      let d = null; try { d = await r.json(); } catch {}
+      if (r.status === 404) { bd.innerHTML = `<div class="empty-state">Onboarding niet gevonden.</div>`; return; }
+      if (r.status === 401) { bd.innerHTML = `<div class="empty-state" style="color:#b91c1c">Niet (meer) ingelogd.</div>`; return; }
+      if (r.status === 403) { bd.innerHTML = `<div class="empty-state" style="color:#b91c1c">Geen rechten (onboarding.admin).</div>`; return; }
+      if (!r.ok) { bd.innerHTML = `<div class="empty-state" style="color:#b91c1c">Ophalen mislukt: ${esc(d?.error || ('HTTP ' + r.status))}</div>`; return; }
+      const o = d?.onboarding || {};
+      const link = (o.token) ? (location.origin + '/modules/onboarding.html?t=' + encodeURIComponent(o.token)) : null;
+      const answersJson = (o.answers && typeof o.answers === 'object')
+        ? JSON.stringify(o.answers, null, 2)
+        : null;
+      bd.innerHTML = `
+        <dl>
+          <dt>Klant</dt>            <dd>${esc(o.customer_name || '—')}</dd>
+          <dt>Traject</dt>          <dd>${esc(o.traject_label || '—')}${o.traject_type ? ' <span class="ob-badge paid-no">' + esc(o.traject_type) + '</span>' : ''}${o.calls != null ? ' · ' + o.calls + ' call' + (o.calls===1?'':'s') : ''}${o.duur_maanden != null ? ' · ' + o.duur_maanden + ' mnd' : ''}</dd>
+          <dt>Status</dt>           <dd>${statusBadgeHtml(o.status)}</dd>
+          <dt>Betaling</dt>         <dd>${paidBadgeHtml(!!o.paid)}</dd>
+          <dt>Mentor</dt>           <dd>${esc(o.mentor_name || (o.mentor_user_id || '—'))}</dd>
+          <dt>Wizard-stap</dt>      <dd>${esc(o.current_step || '—')}</dd>
+          <dt>Aangemeld</dt>        <dd>${esc(fmtDateTimeNL(o.created_at))}</dd>
+          <dt>Toegewezen</dt>       <dd>${esc(fmtDateTimeNL(o.assigned_at))}</dd>
+          <dt>Gestart</dt>          <dd>${esc(fmtDateTimeNL(o.started_at))}</dd>
+          <dt>Afgerond</dt>         <dd>${esc(fmtDateTimeNL(o.completed_at))}</dd>
+          <dt>Gearchiveerd</dt>     <dd>${esc(fmtDateTimeNL(o.archived_at))}</dd>
+          ${link ? `<dt>Persoonlijke link</dt><dd style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;word-break:break-all">${esc(link)}</dd>` : ''}
+        </dl>
+        <h3>Vragenlijst-antwoorden</h3>
+        ${answersJson
+          ? `<pre>${esc(answersJson)}</pre>`
+          : `<div class="empty-state"><i class="ti ti-clipboard-off"></i>Nog geen antwoorden — wizard nog niet gestart of nog niet ingevuld.</div>`}`;
+    } catch (e) {
+      bd.innerHTML = `<div class="empty-state" style="color:#b91c1c">Ophalen mislukt: ${esc(e?.message || e)}</div>`;
+    }
+  }
+
+  // ── Fetch ─────────────────────────────────────────────────────────────
+  async function loadList() {
+    const apiFetch = window.AgentShared?.apiFetch;
+    if (typeof apiFetch !== 'function') { renderError('apiFetch niet beschikbaar.'); return; }
+    renderLoading();
+    try {
+      const qs = new URLSearchParams();
+      qs.set('scope', _scope);
+      if (_qSearch)      qs.set('q',              _qSearch);
+      if (_trajectId)    qs.set('traject_id',     _trajectId);
+      if (_mentorFilter) qs.set('mentor_user_id', _mentorFilter);
+      const r = await apiFetch('/api/onboardings-admin-list?' + qs.toString());
+      let d = null; try { d = await r.json(); } catch {}
+      if (r.status === 401) { renderError('Niet (meer) ingelogd — log opnieuw in.'); return; }
+      if (r.status === 403) { renderError('Geen rechten (onboarding.admin).');       return; }
+      if (!r.ok)            { renderError('Ophalen mislukt: ' + (d?.error || ('HTTP ' + r.status))); return; }
+      _rows = Array.isArray(d?.rows) ? d.rows : [];
+      renderTable();
+    } catch (e) {
+      console.error('[onboarding-admin] list:', e?.message || e);
+      renderError('Ophalen mislukt: ' + (e?.message || e));
+    }
+  }
+
+  async function ensureTrajectenLoaded() {
+    if (_trajectenLoaded) return;
+    const sel = document.getElementById('trajectFilter');
+    try {
+      const r = await window.AgentShared.apiFetch('/api/onboarding-trajecten-list');
+      let d = null; try { d = await r.json(); } catch {}
+      if (!r.ok) throw new Error(d?.error || ('HTTP ' + r.status));
+      _trajecten = Array.isArray(d?.trajecten) ? d.trajecten : [];
+      _trajectenLoaded = true;
+      sel.innerHTML = '<option value="">— alle trajecten —</option>'
+        + _trajecten.map((t) => `<option value="${esc(t.id)}">${esc(t.label || t.key || t.id)}</option>`).join('');
+    } catch (e) {
+      console.warn('[onboarding-admin] trajecten:', e?.message || e);
+      // Filter blijft "— alle —"; geen blocking.
+    }
+  }
+
+  async function ensureMentorsLoaded() {
+    if (_mentorsLoaded) return;
+    // Hergebruik bestaande bron uit mentor-detail.html / mentor-payouts-admin.html.
+    const sel = document.getElementById('mentorFilter');
+    try {
+      const r = await window.AgentShared.apiFetch('/api/mentor-admin-list');
+      let d = null; try { d = await r.json(); } catch {}
+      if (r.status === 403) {
+        // User mag wel onboarding.admin maar niet mentor.admin.view — dan kan
+        // hij de mentor-lijst niet zien. UI valt elegant terug: dropdown
+        // disabled, inline edit verborgen.
+        _mentorsBlocked = true;
+        _mentorsLoaded  = true;
+        sel.disabled = true;
+        sel.title = 'Geen rechten om mentoren te lezen (mentor.admin.view)';
+        return;
+      }
+      if (!r.ok) throw new Error(d?.error || ('HTTP ' + r.status));
+      _mentors = Array.isArray(d?.mentors) ? d.mentors : [];
+      _mentorsLoaded = true;
+      sel.innerHTML = '<option value="">— alle mentoren —</option>'
+        + _mentors.map((m) => `<option value="${esc(m.user_id)}">${esc(m.name || m.email || m.user_id)}</option>`).join('');
+    } catch (e) {
+      console.warn('[onboarding-admin] mentors:', e?.message || e);
+      // Geen blocking; filter blijft leeg.
+    }
+  }
+
+  // ── Wiring ────────────────────────────────────────────────────────────
+  function wireTabs() {
+    document.querySelectorAll('.ob-tab').forEach((b) => {
+      b.addEventListener('click', () => {
+        const next = b.dataset.scope;
+        if (next === _scope) return;
+        _scope = next;
+        document.querySelectorAll('.ob-tab').forEach((x) => x.classList.toggle('active', x === b));
+        loadList();
+      });
+    });
+  }
+
+  function wireFilters() {
+    const search = document.getElementById('searchBox');
+    if (search) search.addEventListener('input', () => {
+      _qSearch = search.value || '';
+      clearTimeout(_searchTimer);
+      _searchTimer = setTimeout(loadList, 280);
+    });
+    const trajectSel = document.getElementById('trajectFilter');
+    if (trajectSel) trajectSel.addEventListener('change', () => {
+      _trajectId = trajectSel.value || '';
+      loadList();
+    });
+    const mentorSel = document.getElementById('mentorFilter');
+    if (mentorSel) mentorSel.addEventListener('change', () => {
+      _mentorFilter = mentorSel.value || '';
+      loadList();
+    });
+    const refresh = document.getElementById('refreshBtn');
+    if (refresh) refresh.addEventListener('click', loadList);
+  }
+
+  async function init() {
+    try { if (window._authSharedReady) await window._authSharedReady; } catch {}
+    // RBAC: bepaal of mentor-assign zichtbaar mag zijn. Page-gate (onboarding.admin)
+    // doet sidebar.js al; we vertrouwen ook server-side requirePermission.
+    try {
+      if (window.RBAC && typeof window.RBAC.ensurePermissionsLoaded === 'function') {
+        await window.RBAC.ensurePermissionsLoaded();
+        _canAssign = !!window.RBAC.canSync && window.RBAC.canSync('onboarding.assign_mentor');
+      }
+    } catch (e) { console.warn('[onboarding-admin] RBAC load faalde:', e?.message || e); }
+
+    _wireDetailModal();
+    wireTabs();
+    wireFilters();
+
+    // Trajecten + mentoren parallel — beide fail-soft.
+    await Promise.all([ensureTrajectenLoaded(), ensureMentorsLoaded()]);
+
+    loadList();
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init);
+  } else {
+    init();
+  }
+})();
+</script>
+</body>
+</html>
