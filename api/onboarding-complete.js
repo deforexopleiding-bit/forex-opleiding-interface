@@ -19,7 +19,10 @@
 // (GEEN Bubble-call — provisioning komt in Fase 2.)
 
 import { supabaseAdmin } from './supabase.js';
-import { validateRequired } from './_lib/onboarding-wizard-default.js';
+import {
+  DEFAULT_WIZARD_STRUCTURE,
+  validateRequired,
+} from './_lib/onboarding-wizard-default.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -58,7 +61,29 @@ export default async function handler(req, res) {
     }
 
     const answers = (ob.answers && typeof ob.answers === 'object') ? ob.answers : {};
-    const { ok: valid, missing } = validateRequired(answers);
+
+    // Valideer tegen de gepubliceerde structuur (fail-soft → DEFAULT).
+    // We willen voorkomen dat een rij die volledig is ingevuld tegen een
+    // oudere/nieuwere structuur faalt; we gebruiken altijd de versie die
+    // de student op dit moment in de wizard ziet.
+    let publishedStructure = null;
+    try {
+      const { data: wiz, error: wizErr } = await supabaseAdmin
+        .from('onboarding_wizard')
+        .select('published_structure')
+        .eq('id', 1)
+        .maybeSingle();
+      if (wizErr) {
+        console.warn('[onboarding-complete] wizard config fetch:', wizErr.message);
+      } else if (wiz?.published_structure?.pages) {
+        publishedStructure = wiz.published_structure;
+      }
+    } catch (e) {
+      console.warn('[onboarding-complete] wizard config exception:', e?.message || e);
+    }
+    const struct = publishedStructure || DEFAULT_WIZARD_STRUCTURE;
+
+    const { ok: valid, missing } = validateRequired(answers, struct);
     if (!valid) {
       return res.status(400).json({
         error   : 'Niet alle verplichte velden zijn ingevuld.',
