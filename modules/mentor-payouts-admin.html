@@ -145,6 +145,17 @@
       return d.toLocaleString('nl-NL', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
     } catch { return iso; }
   };
+  // fmtDateNL — datum-only NL ("21 jun 2026"). Veilig bij lege/ongeldige
+  // input → '—' (consistent met fmtDateTimeNL). Wordt o.a. gebruikt in het
+  // actie-feedback blok ("Goedgekeurd op …").
+  const fmtDateNL = (iso) => {
+    if (!iso) return '—';
+    try {
+      const d = new Date(iso);
+      if (Number.isNaN(d.getTime())) return '—';
+      return d.toLocaleDateString('nl-NL', { day: '2-digit', month: 'short', year: 'numeric' });
+    } catch { return '—'; }
+  };
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
 
   // Status -> { label, cls } badge-map. Concepten in deep-blauw zodat ze visueel
