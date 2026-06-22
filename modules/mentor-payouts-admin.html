@@ -51,6 +51,10 @@
     .data-table th { background: rgba(10,47,99,0.04); font-weight: 600; color: var(--text-dim); font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.03em; }
     .data-table tr:last-child td { border-bottom: 0; }
     .data-table td.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+    /* Headers met class="num" lijnen rechts uit zodat ze recht boven hun
+       bedrag-/aantal-kolom staan. Zonder deze regel viel <th class="num"> terug
+       op de default-th uitlijning (links). */
+    .data-table th.num { text-align: right; }
     .data-table tbody tr.row-main { cursor: pointer; transition: background 0.1s; }
     .data-table tbody tr.row-main:hover { background: rgba(10,47,99,0.04); }
     .data-table tbody tr.row-detail td { background: rgba(10,47,99,0.025); padding: 14px 18px; }
@@ -74,6 +78,10 @@
     .lines-table th, .lines-table td { padding: 8px 10px; font-size: 12.5px; border-bottom: 1px solid var(--border); }
     .lines-table th { font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-faint); font-weight: 600; text-align: left; }
     .lines-table td.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+    /* Th.num moet ná de generieke 'text-align: left' op th komen om die te
+       overschrijven. Lijnt opbouw-headers en handmatige-posten-headers
+       (Bedrag-kolommen, Aantal) recht boven hun cijfers uit. */
+    .lines-table th.num { text-align: right; }
     .lines-table tfoot td { font-weight: 700; border-top: 2px solid var(--border); border-bottom: 0; }
 
     .detail-meta { font-size: 11.5px; color: var(--text-dim); margin-bottom: 8px; display: flex; gap: 16px; flex-wrap: wrap; }
