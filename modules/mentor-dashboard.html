@@ -237,11 +237,15 @@
     </div>
   </div>
 
-  <!-- Tab: Toekomstige studenten (placeholder) -->
+  <!-- Tab: Toekomstige studenten — voedt zich uit /api/mentor-future-students-self
+       (onboardings die aan deze mentor zijn toegewezen en niet gearchiveerd zijn). -->
   <div id="tabToekomst" class="tab-panel" hidden>
     <div class="section">
       <h2><i class="ti ti-user-plus"></i> Toekomstige studenten</h2>
-      <div class="empty-state"><i class="ti ti-clock"></i>Binnenkort beschikbaar — na de onboarding-build.</div>
+      <p style="font-size:12.5px;color:var(--text-dim);margin:-4px 0 10px">
+        Aangemelde studenten die nog niet in jouw vaste begeleiding zitten. <strong>De eerste call plan je pas in zodra de betaling binnen is.</strong>
+      </p>
+      <div id="futureStudentsWrap"><div class="empty-state"><i class="ti ti-clock"></i>Laden…</div></div>
     </div>
   </div>
 </div>
@@ -346,6 +350,7 @@
     coachingInited: false,
     dashboardLoaded: false,
     landingLoaded: false,       // nieuwe Dashboard-landing tab
+    futureLoaded: false,        // F0.4 — toekomstige studenten (onboardings)
   };
 
   function activateTab(name) {
@@ -361,6 +366,7 @@
     // Verdiensten-tab opent op "overzicht" — dashboard lazy-laden zodra de tab actief wordt.
     if (name === 'verdiensten' && !_vState.dashboardLoaded) loadDashboard();
     if (name === 'studenten'   && !_vState.studentsLoaded)  loadStudents();
+    if (name === 'toekomst'    && !_vState.futureLoaded)    loadFutureStudents();
   }
 
   function activateSubtab(name) {
@@ -1334,6 +1340,81 @@
     } catch (e) {
       console.error('[mentor-dashboard] students:', e?.message || e);
       setError('studentsWrap', 'Studenten ophalen mislukt: ' + (e?.message || e));
+    }
+  }
+
+  // ── F0.4 Toekomstige studenten (onboardings) ────────────────────────────
+  // Voedt zich uit /api/mentor-future-students-self. Status-mapping en
+  // paid-poort zijn UX-laag bovenop de raw rows van het endpoint.
+  const _FUTURE_STATUS = {
+    aangemeld : { label: 'Aangemeld',           cls: 'badge-blue'  },
+    bezig     : { label: 'Onboarding bezig',    cls: 'badge-amber' },
+    afgerond  : { label: 'Onboarding afgerond', cls: 'badge-green' },
+  };
+
+  function _futureStatusBadge(st) {
+    const s = _FUTURE_STATUS[st];
+    if (!s) return `<span class="badge badge-grey">${esc(st || '—')}</span>`;
+    return `<span class="badge ${s.cls}">${esc(s.label)}</span>`;
+  }
+
+  function _futurePaidBadge(paid) {
+    return paid
+      ? '<span class="badge badge-green" title="Betaling is binnen — je mag een eerste call inplannen.">💶 Betaald · eerste call mag</span>'
+      : '<span class="badge badge-amber" title="Wacht tot de betaling binnen is voordat je een eerste call inplant.">⏳ Nog niet betaald · nog niet inplannen</span>';
+  }
+
+  function _renderFutureStudents(students) {
+    const wrap = document.getElementById('futureStudentsWrap');
+    if (!wrap) return;
+    const list = Array.isArray(students) ? students : [];
+    if (list.length === 0) {
+      wrap.innerHTML = `<div class="empty-state"><i class="ti ti-user-question"></i>Je hebt nog geen toekomstige studenten toegewezen gekregen.</div>`;
+      return;
+    }
+    wrap.innerHTML = list.map((s) => {
+      const completed = (s.status === 'afgerond' && s.completed_at)
+        ? `<div class="student-meta" style="margin-top:4px">Afgerond op ${esc(fmtDateNL(s.completed_at))}</div>`
+        : '';
+      return `
+        <div class="student-card" style="cursor:default">
+          <div class="student-head" style="cursor:default;grid-template-columns:1fr auto">
+            <div>
+              <div class="student-name">${esc(s.customer_name || '—')}</div>
+              <div class="student-meta">${esc(s.traject_label || '—')}</div>
+              ${completed}
+            </div>
+            <div class="student-stat" style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end;align-items:center">
+              ${_futurePaidBadge(!!s.paid)}
+              ${_futureStatusBadge(s.status)}
+            </div>
+          </div>
+        </div>`;
+    }).join('');
+  }
+
+  async function loadFutureStudents() {
+    _vState.futureLoaded = true;
+    const apiFetch = window.AgentShared?.apiFetch;
+    if (typeof apiFetch !== 'function') {
+      setError('futureStudentsWrap', 'apiFetch niet beschikbaar.');
+      return;
+    }
+    try { if (window._authSharedReady) await window._authSharedReady; } catch {}
+    const wrap = document.getElementById('futureStudentsWrap');
+    if (wrap) wrap.innerHTML = `<div style="color:var(--text-faint);font-size:12.5px;padding:14px;text-align:center">Toekomstige studenten laden…</div>`;
+    try {
+      const r = await apiFetch('/api/mentor-future-students-self');
+      let d = null;
+      try { d = await r.json(); } catch {}
+      if (!r.ok) throw new Error(d?.error || ('HTTP ' + r.status));
+      _renderFutureStudents(Array.isArray(d?.students) ? d.students : []);
+    } catch (e) {
+      console.error('[mentor-dashboard] future-students:', e?.message || e);
+      setError('futureStudentsWrap', 'Toekomstige studenten ophalen mislukt: ' + (e?.message || e));
+      // Allow retry op volgende tab-opening — vlag resetten zodat lazy-loader
+      // het opnieuw mag proberen na bv. een netwerk-onderbreking.
+      _vState.futureLoaded = false;
     }
   }
 
