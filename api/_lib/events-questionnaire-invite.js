@@ -28,7 +28,7 @@ import { sendEventWhatsAppTemplate } from './events-send.js';
 import { logComms, mapMailStatus, mapSendStatus } from './comms-log.js';
 
 const PUBLIC_BASE_URL = process.env.PUBLIC_BASE_URL || 'https://forex-opleiding-interface.vercel.app';
-const TEMPLATE_NAME   = process.env.EVENTS_QUESTIONNAIRE_TEMPLATE_NAME || 'vragenlijst_herinnering';
+const TEMPLATE_NAME   = process.env.EVENTS_QUESTIONNAIRE_TEMPLATE_NAME || 'vragenlijst_herinnering_v3';
 const TEMPLATE_LANG   = 'nl';
 
 function escHtml(s) {
