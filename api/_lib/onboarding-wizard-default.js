@@ -106,7 +106,8 @@ export const DEFAULT_WIZARD_STRUCTURE = {
           label: 'Cursusmateriaal & startbestanden',
           files: [],                        // wordt later door admin gevuld
           requires_consent: true,
-          consent_label: 'Ik begrijp dat ik door deze materialen te downloaden uitdrukkelijk afstand doe van de wettelijke bedenktijd van 14 dagen.',
+          is_waiver: true,                  // gemarkeerd als 14-dagen-bedenktijd-waiver
+          consent_label: 'Ik verklaar uitdrukkelijk afstand te doen van mijn wettelijke bedenktijd van 14 dagen. Ik begrijp dat ik na het downloaden van het digitale cursusmateriaal geen herroepingsrecht meer heb.',
           consent_key: 'waiver_bedenktijd_digitaal',
         },
       ],
@@ -405,6 +406,14 @@ export function normalizeStructure(input) {
         out.help              = help || undefined;
         out.files             = _normalizeFiles(rawBlock.files);
         out.requires_consent  = !!rawBlock.requires_consent;
+        // is_waiver markeert dat de consent juridisch een 14-dagen-bedenktijd-
+        // waiver is (i.p.v. een gewone voorwaarde-acceptatie). Effect:
+        //   - admin-overzicht toont een dedicated 'Bedenktijd'-kolom.
+        //   - publieke renderer toont de pop-up-waiver-flow met expliciete
+        //     "Ik zie af van mijn bedenktijd"-knop i.p.v. een inline-vinkje.
+        // Alleen zinvol in combinatie met requires_consent=true; wordt
+        // hieronder genegeerd zonder consent.
+        out.is_waiver         = !!rawBlock.is_waiver;
         if (out.requires_consent) {
           out.consent_label = _str(rawBlock.consent_label, 600).trim()
             || 'Ik ga akkoord met de voorwaarden.';
@@ -413,6 +422,10 @@ export function normalizeStructure(input) {
           while (usedKeys.has(ck)) ck = 'waiver_' + crypto.randomUUID().slice(0, 6);
           usedKeys.add(ck);
           out.consent_key = ck;
+        } else {
+          // is_waiver heeft geen betekenis zonder consent — strip 'm zodat
+          // de structuur zelf-consistent blijft.
+          out.is_waiver = false;
         }
         page.blocks.push(out);
         continue;

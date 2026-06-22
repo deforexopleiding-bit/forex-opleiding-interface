@@ -1155,6 +1155,23 @@
       ckIn.addEventListener('input', () => { b.consent_key = slugifyKey(ckIn.value); ckIn.value = b.consent_key; setDirty(true); });
       ck.appendChild(ckIn);
       host.appendChild(ck);
+
+      // is_waiver-toggle — markeert dit blok als 14-dagen-bedenktijd-waiver.
+      // Effect: admin-overzicht toont een dedicated 'Bedenktijd'-kolom met
+      // de akkoord-datum; publieke renderer toont een pop-up-flow ipv inline
+      // checkbox. is_waiver alleen zinvol mét requires_consent.
+      const iwRow = document.createElement('div'); iwRow.className = 'field-row';
+      iwRow.innerHTML = `<label class="lbl">14-dagen bedenktijd-waiver?</label>`;
+      const iwLbl = document.createElement('label'); iwLbl.className = 'req-toggle';
+      const iwCb  = document.createElement('input'); iwCb.type = 'checkbox'; iwCb.checked = !!b.is_waiver;
+      iwCb.addEventListener('change', () => {
+        b.is_waiver = iwCb.checked;
+        setDirty(true);
+      });
+      iwLbl.appendChild(iwCb);
+      iwLbl.appendChild(document.createTextNode(' Markeer als juridische bedenktijd-waiver (verschijnt in admin-overzicht als "Bedenktijd"-kolom; in de wizard als pop-up i.p.v. inline-vinkje)'));
+      iwRow.appendChild(iwLbl);
+      host.appendChild(iwRow);
     }
 
     // Files-lijst + upload-knop

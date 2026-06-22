@@ -241,6 +241,103 @@
     .file-empty { font-size: 13.5px; color: var(--text-mute); padding: 12px 14px;
       border: 1.5px dashed var(--border); border-radius: 10px; background: #fafcff; }
 
+    /* Download-knop (file_download met requires_consent) */
+    .dl-cta-btn {
+      display: flex; align-items: center; justify-content: space-between; gap: 12px;
+      width: 100%;
+      padding: 14px 18px; min-height: 52px;
+      border: 0; border-radius: 12px; cursor: pointer;
+      background: linear-gradient(180deg, var(--azure), var(--azure-h));
+      color: #ffffff; font-family: inherit; font-weight: 700; font-size: 15px;
+      box-shadow: 0 4px 12px rgba(20,115,214,0.20);
+      transition: transform .04s, box-shadow .12s;
+    }
+    .dl-cta-btn:active { transform: translateY(1px); }
+    .dl-cta-btn .icon { font-size: 18px; }
+    .dl-cta-btn .count { font-size: 12px; font-weight: 600; opacity: 0.92; }
+
+    /* Status-banner na akkoord */
+    .dl-ok-banner {
+      display: flex; align-items: flex-start; gap: 10px;
+      padding: 12px 14px; border-radius: 10px;
+      background: var(--ok-tint); border: 1px solid rgba(34,197,94,0.30);
+      color: var(--ok); font-size: 13.5px; line-height: 1.5; font-weight: 600;
+      margin-bottom: 8px;
+    }
+    .dl-ok-banner .check { font-size: 16px; }
+    .dl-ok-banner .when { font-weight: 500; color: var(--text-mute); margin-top: 2px; display: block; }
+
+    /* Waiver pop-up (modal) — mobile-first full-screen op smal scherm */
+    .wv-modal {
+      position: fixed; inset: 0; z-index: 110;
+      display: none; align-items: center; justify-content: center;
+      background: rgba(15,23,42,0.55);
+      padding: 0;
+    }
+    .wv-modal.open { display: flex; }
+    .wv-card {
+      background: var(--bg-card); color: var(--text);
+      width: 100%; max-width: 560px;
+      height: 100%; max-height: 100vh;
+      display: flex; flex-direction: column;
+      border-radius: 0;
+      box-shadow: 0 20px 60px rgba(15,23,42,0.40);
+    }
+    @media (min-width: 560px) {
+      .wv-modal { padding: 24px; align-items: center; }
+      .wv-card { height: auto; max-height: 90vh; border-radius: 16px; }
+    }
+    .wv-h {
+      display: flex; align-items: center; justify-content: space-between; gap: 10px;
+      padding: calc(env(safe-area-inset-top, 0px) + 14px) 18px 12px;
+      border-bottom: 1px solid var(--border);
+      flex: 0 0 auto;
+    }
+    .wv-h h2 {
+      font-family: var(--font-display); font-size: 17px; font-weight: 700;
+      color: var(--primary); letter-spacing: -0.01em;
+    }
+    .wv-x {
+      background: transparent; border: 0; color: var(--text-mute);
+      cursor: pointer; font-size: 22px; line-height: 1;
+      padding: 6px 10px; border-radius: 8px;
+    }
+    .wv-x:hover { background: var(--bg-elev); color: var(--text); }
+    .wv-b {
+      flex: 1 1 auto; overflow: auto;
+      padding: 16px 18px;
+    }
+    .wv-waiver {
+      background: var(--warn-bg);
+      border: 1px solid var(--warn-bord);
+      color: var(--warn-text);
+      padding: 14px 16px;
+      border-radius: 12px;
+      font-size: 14px;
+      line-height: 1.55;
+      margin-bottom: 14px;
+    }
+    .wv-files-preview { font-size: 13px; color: var(--text-mute); line-height: 1.6; }
+    .wv-files-preview ul { margin: 6px 0 0; padding-left: 20px; }
+    .wv-files-preview li { margin-bottom: 3px; }
+    .wv-f {
+      display: flex; gap: 10px;
+      padding: 12px 18px calc(env(safe-area-inset-bottom, 0px) + 12px);
+      border-top: 1px solid var(--border);
+      background: rgba(255,255,255,0.97);
+      flex: 0 0 auto;
+    }
+    .wv-f .btn { flex: 1; min-height: 48px; padding: 12px 14px; border-radius: 10px;
+      font-family: inherit; font-weight: 700; font-size: 14.5px;
+      border: 1.5px solid var(--border); background: #ffffff; color: var(--text); cursor: pointer; }
+    .wv-f .btn.primary { background: var(--primary); border-color: var(--primary); color: #ffffff; }
+    .wv-f .btn.primary:hover { background: var(--primary-h); border-color: var(--primary-h); }
+    .wv-f .btn:disabled { opacity: 0.55; cursor: default; }
+    @media (min-width: 560px) {
+      .wv-f .btn { flex: 0 1 auto; min-width: 140px; }
+      .wv-f { justify-content: flex-end; }
+    }
+
     /* Sticky footer */
     .footer-bar {
       position: fixed; left: 0; right: 0; bottom: 0;
@@ -322,6 +419,23 @@
   </div>
 </div>
 
+<!-- Waiver-pop-up — gedeeld tussen alle file_download-blokken met
+     requires_consent=true. State + handlers worden door _openWaiverModal()
+     gevuld per blok. Full-screen op mobiel, gecentreerde card op desktop. -->
+<div class="wv-modal" id="wvModal" role="dialog" aria-modal="true" aria-labelledby="wvTitle" hidden>
+  <div class="wv-card">
+    <div class="wv-h">
+      <h2 id="wvTitle">Bevestig je downloads</h2>
+      <button type="button" class="wv-x" id="wvClose" aria-label="Sluiten">&times;</button>
+    </div>
+    <div class="wv-b" id="wvBody"></div>
+    <div class="wv-f">
+      <button type="button" class="btn" id="wvCancel">Annuleren</button>
+      <button type="button" class="btn primary" id="wvConfirm">Ik zie af van mijn bedenktijd en download</button>
+    </div>
+  </div>
+</div>
+
 <script>
 (function () {
   'use strict';
@@ -359,6 +473,152 @@
     if (Array.isArray(v))      return v.length === 0;
     if (typeof v === 'number') return !Number.isFinite(v);
     return false;
+  }
+
+  // ── Waiver-modal (gedeeld) ────────────────────────────────────────────
+  // _ctx = { consentKey, files, blockNode, onConfirmed }
+  let _waiverCtx   = null;
+  let _waiverWired = false;
+  function _wireWaiverOnce() {
+    if (_waiverWired) return;
+    _waiverWired = true;
+    const m       = document.getElementById('wvModal');
+    const close   = () => _closeWaiverModal();
+    const xBtn    = document.getElementById('wvClose');
+    const cancel  = document.getElementById('wvCancel');
+    const confirm = document.getElementById('wvConfirm');
+    if (xBtn)    xBtn.addEventListener('click',    close);
+    if (cancel)  cancel.addEventListener('click',  close);
+    if (m) m.addEventListener('click', (ev) => { if (ev.target === m) close(); });
+    document.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Escape' && m.classList.contains('open')) close();
+    });
+    if (confirm) confirm.addEventListener('click', _confirmWaiver);
+  }
+  function _openWaiverModal(ctx) {
+    _wireWaiverOnce();
+    _waiverCtx = ctx || null;
+    const body = document.getElementById('wvBody');
+    body.innerHTML = '';
+    // Waiver-tekst (oranje banner).
+    const w = document.createElement('div');
+    w.className = 'wv-waiver';
+    w.appendChild(el('strong', { text: '⚠️ Belangrijk — afstand van bedenktijd' }));
+    const p = document.createElement('div'); p.style.marginTop = '6px';
+    p.textContent = ctx.consentLabel || 'Ik ga akkoord met de voorwaarden.';
+    w.appendChild(p);
+    body.appendChild(w);
+    // Bestanden-preview.
+    if (Array.isArray(ctx.files) && ctx.files.length > 0) {
+      const fp = document.createElement('div'); fp.className = 'wv-files-preview';
+      fp.appendChild(document.createTextNode('Je krijgt na bevestiging direct toegang tot ' + ctx.files.length + ' bestand' + (ctx.files.length === 1 ? '' : 'en') + ':'));
+      const ul = document.createElement('ul');
+      for (const f of ctx.files) {
+        const li = document.createElement('li');
+        li.textContent = f.name || f.url || 'Download';
+        ul.appendChild(li);
+      }
+      fp.appendChild(ul);
+      body.appendChild(fp);
+    }
+    // Reset confirm-knop.
+    const confirm = document.getElementById('wvConfirm');
+    confirm.disabled = false;
+    confirm.textContent = 'Ik zie af van mijn bedenktijd en download';
+    // Open.
+    const m = document.getElementById('wvModal');
+    m.removeAttribute('hidden');
+    m.classList.add('open');
+    document.body.style.overflow = 'hidden';
+  }
+  function _closeWaiverModal() {
+    const m = document.getElementById('wvModal');
+    m.classList.remove('open');
+    m.setAttribute('hidden', '');
+    document.body.style.overflow = '';
+    _waiverCtx = null;
+  }
+  async function _confirmWaiver() {
+    const ctx = _waiverCtx;
+    if (!ctx || !ctx.consentKey) return;
+    const confirm = document.getElementById('wvConfirm');
+    confirm.disabled = true;
+    const origText = confirm.textContent;
+    confirm.textContent = 'Bezig…';
+    const nowIso = new Date().toISOString();
+    const patch = {};
+    patch[ctx.consentKey]          = true;
+    patch[ctx.consentKey + '_at']  = nowIso;
+    try {
+      // Sync naar de DB; bij 4xx/5xx blokkeren we de download zodat
+      // de audit-trail consistent blijft.
+      const ok = await _postPatch(patch);
+      if (!ok) {
+        confirm.disabled = false;
+        confirm.textContent = origText;
+        return;
+      }
+      // Lokale state na succesvolle save.
+      State.answers[ctx.consentKey]         = true;
+      State.answers[ctx.consentKey + '_at'] = nowIso;
+      // Clear error-state op block-niveau (validateCurrentStep gebruikt
+      // .has-error op het wrap-element).
+      if (ctx.blockNode) ctx.blockNode.classList.remove('has-error');
+      _closeWaiverModal();
+      // Re-render het blok ná close (caller-callback) — zo komt de
+      // "Akkoord gegeven"-banner + vrije downloads tevoorschijn.
+      if (typeof ctx.onConfirmed === 'function') ctx.onConfirmed();
+      // Open de downloads in een korte staggered loop. Eén tab krijgt
+      // automatisch focus; meerdere tabs kunnen door pop-up-blockers
+      // worden geweigerd, daarom doen we 'm zacht (best effort).
+      const files = Array.isArray(ctx.files) ? ctx.files : [];
+      for (let i = 0; i < files.length; i++) {
+        const f = files[i];
+        if (!f || !f.url) continue;
+        try { window.open(f.url, '_blank', 'noopener'); } catch (e) { /* pop-up geblokkeerd — knop blijft beschikbaar */ }
+      }
+    } catch (e) {
+      console.warn('[onboarding] waiver-confirm:', e?.message || e);
+      alert('Opslaan mislukt: ' + (e?.message || e) + '\n\nProbeer het opnieuw.');
+      confirm.disabled = false;
+      confirm.textContent = origText;
+    }
+  }
+
+  // Generieke patch-call naar step-save voor ad-hoc updates (zoals
+  // de waiver-bevestiging). current_step blijft de huidige zodat de
+  // server-side state-machine consistent blijft.
+  async function _postPatch(patch) {
+    if (!TOKEN_NEW) return false;
+    try {
+      const r = await fetch('/api/onboarding-step-save?t=' + encodeURIComponent(TOKEN_NEW), {
+        method  : 'POST',
+        headers : { 'Content-Type': 'application/json' },
+        body    : JSON.stringify({ answers: patch, current_step: State.stepIdx }),
+      });
+      let d = null; try { d = await r.json(); } catch {}
+      if (r.status === 404) {
+        renderStatus({ icon: '🔗', title: 'Deze link is niet (meer) geldig',
+          body: 'De link werkt niet meer. Vraag je mentor om een nieuwe.' });
+        return false;
+      }
+      if (r.status === 409) {
+        // Mocht de onboarding tussendoor afgerond/gearchiveerd zijn.
+        if ((d?.error || '').toLowerCase().includes('afgerond')) {
+          State.status = 'afgerond';
+          showCompleted();
+          return false;
+        }
+        renderStatus({ icon: '🔒', title: 'Onboarding is gesloten',
+          body: 'Deze onboarding is afgesloten. Neem contact op met je mentor.' });
+        return false;
+      }
+      if (!r.ok) throw new Error(d?.error || ('HTTP ' + r.status));
+      return true;
+    } catch (e) {
+      console.warn('[onboarding] post-patch:', e?.message || e);
+      throw e;
+    }
   }
 
   // ── Render: status-pagina's ───────────────────────────────────────────
@@ -679,59 +939,105 @@
       if (b.label) wrap.appendChild(el('div', { class: 'blk-heading', text: b.label }));
       const consentKey = b.consent_key || null;
       const requires   = !!b.requires_consent && !!consentKey;
-      let consented = requires ? (State.answers[consentKey] === true) : true;
-      const links = [];
-
-      function refreshLinks() {
-        for (const node of links) {
-          node.setAttribute('aria-disabled', consented ? 'false' : 'true');
-          if (consented) node.removeAttribute('tabindex'); else node.setAttribute('tabindex', '-1');
-        }
-      }
-
-      if (requires) {
-        const cRow = el('label', { class: 'consent-row' + (consented ? ' is-on' : '') });
-        const cInp = el('input', {
-          type: 'checkbox', name: consentKey,
-          onchange: (ev) => {
-            consented = !!ev.target.checked;
-            State.answers[consentKey] = consented;
-            cRow.classList.toggle('is-on', consented);
-            wrap.classList.remove('has-error');
-            refreshLinks();
-          },
-        });
-        if (consented) cInp.checked = true;
-        cRow.appendChild(cInp);
-        cRow.appendChild(el('span', { class: 'txt' }, [
-          document.createTextNode(b.consent_label || 'Ik ga akkoord met de voorwaarden.'),
-          el('span', { class: 'req', text: ' *' }),
-        ]));
-        wrap.appendChild(cRow);
-        wrap.appendChild(el('div', { class: 'field-error', text: 'Vink dit aan om de bestanden te kunnen downloaden.' }));
-      }
-
       const files = Array.isArray(b.files) ? b.files : [];
-      const fileList = el('div', { class: 'file-list' });
-      if (files.length === 0) {
-        fileList.appendChild(el('div', { class: 'file-empty',
+      let consented = requires ? (State.answers[consentKey] === true) : true;
+
+      // Container voor de body — wordt herrenderd bij toestandswissel
+      // (vóór akkoord = CTA-knop; ná akkoord = banner + vrije downloads).
+      const body = el('div', { class: 'dl-body', 'data-dl-host': '1' });
+      wrap.appendChild(body);
+
+      function renderEmpty() {
+        body.innerHTML = '';
+        body.appendChild(el('div', { class: 'file-empty',
           text: 'Bestanden worden binnenkort beschikbaar gesteld. Je kunt deze stap nu al voltooien.' }));
-      } else {
+      }
+
+      function renderUnlocked() {
+        body.innerHTML = '';
+        if (requires) {
+          // Toon de "Akkoord gegeven"-banner met timestamp uit answers.
+          const atIso = State.answers[consentKey + '_at'] || null;
+          const banner = el('div', { class: 'dl-ok-banner' });
+          banner.appendChild(el('span', { class: 'check', text: '✓' }));
+          const txt = el('div', {}, [
+            document.createTextNode('Akkoord gegeven — je hebt afstand gedaan van je 14-dagen bedenktijd.'),
+          ]);
+          if (atIso) {
+            const d = new Date(atIso);
+            if (!Number.isNaN(d.getTime())) {
+              txt.appendChild(el('span', { class: 'when',
+                text: 'Op ' + d.toLocaleString('nl-NL', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) }));
+            }
+          }
+          banner.appendChild(txt);
+          body.appendChild(banner);
+        }
+        const fileList = el('div', { class: 'file-list' });
         for (const f of files) {
-          const a = el('a', {
+          fileList.appendChild(el('a', {
             class: 'file-link', href: f.url || '#', target: '_blank', rel: 'noopener noreferrer',
-            'aria-disabled': consented ? 'false' : 'true',
+            'aria-disabled': 'false',
           }, [
             el('span', { text: f.name || f.url || 'Download' }),
             el('span', { class: 'arr', text: '↓' }),
-          ]);
-          if (!consented) a.setAttribute('tabindex', '-1');
-          links.push(a);
-          fileList.appendChild(a);
+          ]));
         }
+        body.appendChild(fileList);
       }
-      wrap.appendChild(fileList);
-      refreshLinks();
+
+      function renderLocked() {
+        body.innerHTML = '';
+        // Sticky lijst van bestand-namen zodat student weet WAT 'ie krijgt na akkoord.
+        if (files.length > 0) {
+          const preview = el('div', { class: 'file-empty', style: 'text-align:left' });
+          preview.appendChild(el('div', { style: 'font-weight:600;margin-bottom:6px', text: 'Beschikbaar na akkoord:' }));
+          const ul = document.createElement('ul');
+          ul.style.cssText = 'margin:0;padding-left:20px;color:var(--text);font-weight:500';
+          for (const f of files) {
+            const li = document.createElement('li');
+            li.style.cssText = 'margin-bottom:3px';
+            li.textContent = f.name || f.url || 'Download';
+            ul.appendChild(li);
+          }
+          preview.appendChild(ul);
+          body.appendChild(preview);
+        }
+        const btn = el('button', {
+          type: 'button',
+          class: 'dl-cta-btn',
+          style: 'margin-top:10px',
+          onClick: () => _openWaiverModal({
+            label        : b.label || 'Download',
+            consentLabel : b.consent_label || 'Ik ga akkoord met de voorwaarden.',
+            consentKey   : consentKey,
+            files        : files,
+            blockNode    : wrap,
+            onConfirmed  : () => { consented = true; renderUnlocked(); },
+          }),
+        }, [
+          el('span', {}, [
+            el('span', { class: 'icon', text: '⬇️ ' }),
+            document.createTextNode(files.length > 1 ? 'Bekijk voorwaarden & download' : 'Bekijk voorwaarden & download'),
+          ]),
+          el('span', { class: 'count', text: files.length + ' bestand' + (files.length === 1 ? '' : 'en') }),
+        ]);
+        body.appendChild(btn);
+        // Validatie-error placeholder (zichtbaar wanneer pagina probeert "Volgende" zonder akkoord).
+        body.appendChild(el('div', { class: 'field-error',
+          text: 'Bevestig eerst de bedenktijd-waiver om de bestanden te kunnen downloaden.' }));
+      }
+
+      // Initiële render.
+      if (files.length === 0) {
+        renderEmpty();
+      } else if (!requires) {
+        renderUnlocked();
+      } else if (consented) {
+        renderUnlocked();
+      } else {
+        renderLocked();
+      }
       return wrap;
     }
     return null;
