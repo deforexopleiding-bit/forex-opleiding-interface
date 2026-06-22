@@ -1549,6 +1549,20 @@
     return `${months[idx] || m[2]} ${m[1]}`;
   }
 
+  // 'Staat klaar / stuur je factuur'-reminder is alleen relevant kort na de
+  // maandelijkse generate (1e vrijdag van de huidige maand). Na 7 dagen
+  // verdwijnt 'ie zodat het dashboard niet maanden blijft hangen op een nog
+  // niet uitbetaald rapport. Cutoff = einde van (1e vrijdag + 7 dagen),
+  // lokale tijd.
+  function _approvedReminderActive() {
+    const now = new Date();
+    const y = now.getFullYear();
+    const mo = now.getMonth();
+    const offset = (5 - new Date(y, mo, 1).getDay() + 7) % 7;        // 5 = vrijdag
+    const cutoff = new Date(y, mo, 1 + offset + 7, 23, 59, 59, 999); // 1e vrijdag + 7 dagen, einde dag
+    return now <= cutoff;
+  }
+
   function _renderStatusBar(payouts) {
     const bar = document.getElementById('dashStatusBar');
     if (!bar) return;
@@ -1556,7 +1570,7 @@
     // Self-list filtert al op goedgekeurd/uitbetaald; pak meest recente goedgekeurd,
     // anders meest recente uitbetaald.
     const approved = list.find((p) => p.status === 'goedgekeurd');
-    if (approved) {
+    if (approved && _approvedReminderActive()) {
       bar.hidden = false;
       bar.className = 'dash-status-bar is-ok';
       bar.innerHTML = `<i class="ti ti-receipt-tax"></i>
