@@ -2,47 +2,992 @@
 <html lang="nl">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <title>Onboarding · De Forex Opleiding</title>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <meta name="robots" content="noindex, nofollow" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet" />
   <style>
-    *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
-    body{font-family:'Inter',system-ui,sans-serif;background:#0b1220;color:#e7ecf3;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px}
-    .card{background:#121a2b;border:1px solid #243049;border-radius:16px;padding:36px;max-width:480px;width:100%;text-align:center}
-    h1{font-size:22px;font-weight:800;margin-bottom:10px}
-    p{font-size:14px;color:#9fb0c9;line-height:1.6;margin-bottom:14px}
-    .btn{display:inline-block;margin-top:10px;padding:12px 22px;background:#0891b2;color:#fff;border:none;border-radius:10px;font:inherit;font-weight:600;cursor:pointer}
-    .ok{color:#34d399;font-weight:700}
+    :root {
+      --bg         : #f2f6fb;
+      --bg-card    : #ffffff;
+      --text       : #16263f;
+      --text-mute  : #5c6b7d;
+      --text-faint : #8597af;
+      --border     : #dde6f1;
+      --primary    : #0a2f63;
+      --primary-h  : #082850;
+      --azure      : #1473d6;
+      --azure-h    : #1160bd;
+      --accent     : #1f9fe0;
+      --accent-tint: rgba(31, 159, 224, 0.16);
+      --danger     : #dc2626;
+      --danger-tint: rgba(220,38,38,0.10);
+      --warn-bg    : rgba(245,158,11,0.12);
+      --warn-text  : #b45309;
+      --warn-bord  : rgba(245,158,11,0.3);
+      --ok         : #15803d;
+      --ok-tint    : rgba(34,197,94,0.16);
+      --focus      : rgba(20, 115, 214, 0.25);
+      --safe-bot   : env(safe-area-inset-bottom, 0px);
+      --safe-top   : env(safe-area-inset-top, 0px);
+      --font-display: 'Space Grotesk', 'Inter', system-ui, sans-serif;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; min-height: 100vh; }
+    body {
+      font-family: 'Inter', system-ui, -apple-system, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      -webkit-font-smoothing: antialiased;
+      line-height: 1.5;
+      font-size: 16px;            /* iOS-zoom voorkomen op inputs */
+    }
+
+    /* Sticky progress-bar bovenaan */
+    .progress {
+      position: sticky;
+      top: 0;
+      z-index: 50;
+      padding: calc(var(--safe-top) + 12px) 20px 12px;
+      background: rgba(242,246,251,0.96);
+      backdrop-filter: blur(8px);
+      border-bottom: 1px solid var(--border);
+    }
+    .progress-meta {
+      display: flex; justify-content: space-between; align-items: center;
+      font-size: 12.5px; color: var(--text-mute); font-weight: 600;
+      margin-bottom: 8px; letter-spacing: 0.01em;
+    }
+    .progress-meta .brand {
+      color: var(--primary); font-family: var(--font-display); font-weight: 700;
+      font-size: 13.5px; letter-spacing: -0.01em;
+    }
+    .progress-track {
+      width: 100%; height: 6px; background: #e3eaf3;
+      border-radius: 999px; overflow: hidden;
+    }
+    .progress-fill {
+      height: 100%; background: linear-gradient(90deg, var(--primary), var(--accent));
+      width: 0%; transition: width .25s ease;
+    }
+
+    /* Page-wrapper: bottom-padding = ruimte voor sticky footer */
+    .page {
+      max-width: 640px; margin: 0 auto;
+      padding: 18px 18px calc(120px + var(--safe-bot));
+    }
+
+    .hello {
+      font-family: var(--font-display);
+      font-size: 22px; font-weight: 700; color: var(--primary);
+      margin: 8px 0 4px; letter-spacing: -0.01em;
+    }
+    .hello .wave { display: inline-block; transform: translateY(-1px); }
+    .lead { color: var(--text-mute); font-size: 14.5px; margin-bottom: 18px; }
+
+    .card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 22px 20px;
+      margin-bottom: 14px;
+      box-shadow: 0 2px 8px rgba(15,23,42,0.04);
+    }
+
+    .step-title {
+      font-family: var(--font-display);
+      font-size: 20px; font-weight: 700; color: var(--primary);
+      margin-bottom: 6px; letter-spacing: -0.01em;
+    }
+    .step-sub { color: var(--text-mute); font-size: 14px; margin-bottom: 14px; }
+
+    /* Blokken */
+    .blk { margin-bottom: 18px; }
+    .blk:last-child { margin-bottom: 0; }
+    .blk-heading {
+      font-family: var(--font-display);
+      font-size: 17px; font-weight: 700; color: var(--primary);
+      margin: 8px 0 6px; letter-spacing: -0.01em;
+    }
+    .blk-paragraph { font-size: 14.5px; color: var(--text); margin: 4px 0 6px; line-height: 1.6; }
+    .blk-divider { border: 0; border-top: 1px solid var(--border); margin: 14px 0; }
+    .blk-image { width: 100%; height: auto; border-radius: 12px; display: block; }
+
+    /* Field-blocks */
+    .field-label {
+      display: block; font-size: 14.5px; font-weight: 600;
+      color: var(--text); margin-bottom: 8px; line-height: 1.45;
+    }
+    .field-label .req { color: var(--danger); margin-left: 2px; }
+    .field-help {
+      display: block; font-size: 12.5px; color: var(--text-mute);
+      margin-top: -4px; margin-bottom: 8px; line-height: 1.5;
+    }
+    .field-error {
+      display: none; margin-top: 6px; font-size: 12.5px;
+      color: var(--danger); font-weight: 600;
+    }
+    .blk.has-error .field-error { display: block; }
+    .blk.has-error .field-input,
+    .blk.has-error .field-textarea,
+    .blk.has-error .field-select { border-color: var(--danger); background: var(--danger-tint); }
+    .blk.has-error .option-row { border-color: var(--danger); }
+
+    .field-input, .field-textarea, .field-select {
+      width: 100%; min-height: 48px;
+      padding: 12px 14px; font-size: 16px; line-height: 1.4;
+      border: 1.5px solid var(--border); border-radius: 10px;
+      background: #ffffff; color: var(--text); font-family: inherit;
+      transition: border-color .15s, box-shadow .15s;
+    }
+    .field-textarea { min-height: 110px; resize: vertical; padding-top: 12px; }
+    .field-input:focus, .field-textarea:focus, .field-select:focus {
+      outline: 0; border-color: var(--azure);
+      box-shadow: 0 0 0 4px var(--focus);
+    }
+
+    /* Choices: hele rij tappbaar */
+    .options { display: grid; gap: 10px; }
+    .option-row {
+      display: flex; align-items: center; gap: 12px;
+      min-height: 48px;
+      padding: 12px 14px;
+      border: 1.5px solid var(--border); border-radius: 10px;
+      background: #ffffff;
+      cursor: pointer; user-select: none;
+      transition: background .12s, border-color .12s;
+    }
+    .option-row:active { background: #f3f7fc; }
+    .option-row.is-on { border-color: var(--azure); background: rgba(20,115,214,0.06); }
+    .option-row input { flex: 0 0 auto; width: 20px; height: 20px; accent-color: var(--azure); margin: 0; }
+    .option-row .lbl { font-size: 15px; line-height: 1.35; flex: 1; }
+
+    /* Scale (segmented 1..N) */
+    .scale-wrap { display: flex; gap: 6px; flex-wrap: wrap; }
+    .scale-btn {
+      flex: 1 0 calc(20% - 6px); min-width: 44px;
+      min-height: 48px; padding: 10px 6px;
+      border: 1.5px solid var(--border); border-radius: 10px;
+      background: #ffffff; color: var(--text);
+      font-family: inherit; font-weight: 600; font-size: 15px;
+      cursor: pointer; transition: all .12s;
+    }
+    .scale-btn:hover { border-color: var(--azure); }
+    .scale-btn.is-on { background: var(--azure); border-color: var(--azure); color: #fff; }
+    .scale-meta { display: flex; justify-content: space-between; font-size: 12px; color: var(--text-faint); margin-top: 6px; }
+
+    /* Consent / file_download */
+    .consent-row { display: flex; align-items: flex-start; gap: 12px; padding: 12px 14px;
+      border: 1.5px solid var(--border); border-radius: 10px; background: #ffffff; cursor: pointer; min-height: 48px; }
+    .consent-row.is-on { border-color: var(--azure); background: rgba(20,115,214,0.06); }
+    .consent-row input { flex: 0 0 auto; width: 20px; height: 20px; margin-top: 2px; accent-color: var(--azure); }
+    .consent-row .txt { flex: 1; font-size: 14.5px; line-height: 1.5; }
+
+    .file-list { display: grid; gap: 10px; margin-top: 6px; }
+    .file-link {
+      display: flex; align-items: center; justify-content: space-between; gap: 12px;
+      padding: 14px 16px; min-height: 48px;
+      border: 1.5px solid var(--border); border-radius: 10px;
+      background: #f8fbff;
+      text-decoration: none; color: var(--primary); font-weight: 600; font-size: 14.5px;
+      transition: background .12s;
+    }
+    .file-link:hover { background: #eef5fd; }
+    .file-link[aria-disabled="true"] { opacity: 0.5; pointer-events: none; cursor: default; }
+    .file-link .arr { color: var(--azure); font-weight: 800; font-size: 16px; }
+    .file-empty { font-size: 13.5px; color: var(--text-mute); padding: 12px 14px;
+      border: 1.5px dashed var(--border); border-radius: 10px; background: #fafcff; }
+
+    /* Sticky footer */
+    .footer-bar {
+      position: fixed; left: 0; right: 0; bottom: 0;
+      padding: 12px 18px calc(12px + var(--safe-bot));
+      background: rgba(255,255,255,0.97);
+      backdrop-filter: blur(8px);
+      border-top: 1px solid var(--border);
+      z-index: 60;
+    }
+    .footer-row {
+      max-width: 640px; margin: 0 auto;
+      display: flex; gap: 12px; align-items: center;
+    }
+    .btn {
+      flex: 1; min-height: 52px;
+      padding: 14px 18px;
+      font-family: inherit; font-size: 16px; font-weight: 700;
+      border-radius: 12px; border: 1.5px solid var(--border);
+      cursor: pointer;
+      transition: background .12s, border-color .12s, transform .04s;
+      background: #ffffff; color: var(--text);
+    }
+    .btn:active { transform: translateY(1px); }
+    .btn.primary {
+      background: var(--primary); border-color: var(--primary); color: #ffffff;
+    }
+    .btn.primary:hover { background: var(--primary-h); border-color: var(--primary-h); }
+    .btn:disabled { opacity: 0.55; cursor: default; }
+    .btn.ghost { background: transparent; color: var(--text-mute); }
+
+    /* Status-pages (loading / error / done) */
+    .status-card {
+      text-align: center; padding: 40px 24px;
+    }
+    .status-card .icon { font-size: 44px; margin-bottom: 10px; }
+    .status-card h1 {
+      font-family: var(--font-display);
+      font-size: 24px; font-weight: 700; color: var(--primary);
+      margin-bottom: 8px; letter-spacing: -0.01em;
+    }
+    .status-card p { color: var(--text-mute); font-size: 15px; margin-bottom: 14px; }
+
+    /* Skeleton voor loader */
+    .sk { display: inline-block; height: 16px; background: linear-gradient(90deg,#e3eaf3,#eef3fa,#e3eaf3);
+      background-size: 200% 100%; animation: sk 1.2s infinite; border-radius: 4px; width: 80%; }
+    @keyframes sk { 0% { background-position: 0% 0; } 100% { background-position: 200% 0; } }
+
+    /* Wide screens: iets meer ruimte */
+    @media (min-width: 720px) {
+      .page { padding: 32px 24px calc(120px + var(--safe-bot)); }
+      .hello { font-size: 26px; }
+      .card  { padding: 28px 26px; }
+      .scale-btn { flex: 0 0 auto; min-width: 56px; }
+    }
   </style>
 </head>
 <body>
-  <div class="card" id="card"><p>Laden…</p></div>
+
+<div class="progress" id="progressEl" hidden>
+  <div class="progress-meta">
+    <span class="brand">De Forex Opleiding</span>
+    <span id="progressLabel">Stap –</span>
+  </div>
+  <div class="progress-track"><div class="progress-fill" id="progressFill"></div></div>
+</div>
+
+<div class="page" id="pageEl">
+  <div class="card status-card" id="bootstrap">
+    <div class="icon">⏳</div>
+    <h1>Onboarding laden…</h1>
+    <p><span class="sk"></span></p>
+  </div>
+</div>
+
+<div class="footer-bar" id="footerBar" hidden>
+  <div class="footer-row">
+    <button type="button" class="btn ghost" id="prevBtn">← Vorige</button>
+    <button type="button" class="btn primary" id="nextBtn">Volgende →</button>
+  </div>
+</div>
+
 <script>
-const token = new URLSearchParams(location.search).get('token');
-const card = document.getElementById('card');
-async function load(){
-  if(!token){ card.innerHTML='<h1>Onboarding</h1><p>Ongeldige link.</p>'; return; }
-  try{
-    const r = await fetch('/api/onboarding?token='+encodeURIComponent(token));
-    const d = await r.json();
-    if(!r.ok) throw new Error(d.error||'Niet gevonden');
-    if(d.status==='completed'){ card.innerHTML='<h1>Bedankt!</h1><p class="ok">Je onboarding is al afgerond.</p>'; return; }
-    card.innerHTML = `<h1>Welkom${d.first_name?(', '+d.first_name):''}!</h1>
-      <p>Fijn dat je erbij bent bij De Forex Opleiding. Het onboarding-formulier komt binnenkort beschikbaar.</p>
-      <p>Klik hieronder om je aanmelding te bevestigen, dan plannen we je eerste call in.</p>
-      <button class="btn" id="done">Markeer als afgerond</button>`;
-    document.getElementById('done').addEventListener('click', complete);
-  }catch(e){ card.innerHTML='<h1>Onboarding</h1><p>'+(e.message||'Er ging iets mis')+'</p>'; }
-}
-async function complete(){
-  const btn=document.getElementById('done'); btn.disabled=true; btn.textContent='Bezig…';
-  try{
-    const r = await fetch('/api/onboarding',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token})});
-    const d = await r.json(); if(!r.ok||d.success===false) throw new Error(d.error||'Mislukt');
-    card.innerHTML='<h1>Bedankt!</h1><p class="ok">Je onboarding is afgerond. We nemen snel contact op voor je eerste call.</p>';
-  }catch(e){ btn.disabled=false; btn.textContent='Markeer als afgerond'; alert('Mislukt: '+e.message); }
-}
-load();
+(function () {
+  'use strict';
+
+  // ── URL-params ────────────────────────────────────────────────────────
+  const params       = new URLSearchParams(location.search);
+  const TOKEN_NEW    = params.get('t');                    // F1a uuid-token
+  const TOKEN_LEGACY = params.get('token');                // pre-F0 customers.onboarding_token
+
+  // ── Helpers ───────────────────────────────────────────────────────────
+  function esc(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, (c) =>
+      ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+  }
+  function el(tag, attrs, children) {
+    const e = document.createElement(tag);
+    if (attrs) for (const k of Object.keys(attrs)) {
+      const v = attrs[k];
+      if (v == null || v === false) continue;
+      if (k === 'class')   e.className = v;
+      else if (k === 'html') e.innerHTML = v;
+      else if (k === 'text') e.textContent = v;
+      else if (k.startsWith('on') && typeof v === 'function') e.addEventListener(k.slice(2).toLowerCase(), v);
+      else e.setAttribute(k, v);
+    }
+    if (Array.isArray(children)) for (const c of children) {
+      if (c == null) continue;
+      e.appendChild(typeof c === 'string' ? document.createTextNode(c) : c);
+    }
+    return e;
+  }
+  function isEmpty(v) {
+    if (v == null) return true;
+    if (typeof v === 'string') return v.trim() === '';
+    if (Array.isArray(v))      return v.length === 0;
+    if (typeof v === 'number') return !Number.isFinite(v);
+    return false;
+  }
+
+  // ── Render: status-pagina's ───────────────────────────────────────────
+  function renderStatus(opts) {
+    document.getElementById('progressEl').hidden = true;
+    document.getElementById('footerBar').hidden  = true;
+    const page = document.getElementById('pageEl');
+    page.innerHTML = '';
+    const card = el('div', { class: 'card status-card' }, [
+      el('div', { class: 'icon', text: opts.icon || '' }),
+      el('h1',  { text: opts.title }),
+      opts.bodyHtml ? el('p', { html: opts.bodyHtml }) : (opts.body ? el('p', { text: opts.body }) : null),
+      opts.action ? el('button', {
+        class: 'btn primary', type: 'button', style: 'flex:0 0 auto;margin-top:6px',
+        text: opts.action.label, onClick: opts.action.onClick
+      }) : null,
+    ]);
+    page.appendChild(card);
+  }
+
+  // ── State ─────────────────────────────────────────────────────────────
+  const State = {
+    firstName: null,
+    pages: [],
+    answers: {},
+    stepIdx: 0,                  // 0-based index in pages[]
+    status: null,                // 'aangemeld'|'bezig'|'afgerond'|'gearchiveerd'
+    saving: false,
+    completing: false,
+  };
+
+  // ── Render: meerstaps-wizard ──────────────────────────────────────────
+  function totalSteps() { return State.pages.length; }
+  function updateProgress() {
+    const n = totalSteps();
+    document.getElementById('progressLabel').textContent =
+      `Stap ${State.stepIdx + 1} van ${n}`;
+    const pct = n > 0 ? Math.max(2, Math.round(((State.stepIdx + 1) / n) * 100)) : 0;
+    document.getElementById('progressFill').style.width = pct + '%';
+  }
+
+  function renderWizardShell() {
+    document.getElementById('progressEl').hidden = false;
+    document.getElementById('footerBar').hidden  = false;
+    const page = document.getElementById('pageEl');
+    page.innerHTML = '';
+    if (State.firstName || State.stepIdx === 0) {
+      const helloText = State.firstName
+        ? `Hoi ${State.firstName} `
+        : 'Welkom ';
+      const hello = el('div', { class: 'hello' }, [
+        document.createTextNode(helloText),
+        el('span', { class: 'wave', text: '👋' }),
+      ]);
+      page.appendChild(hello);
+      page.appendChild(el('p', { class: 'lead', text:
+        'Deze korte vragenlijst (5 minuten) helpt je mentor je traject persoonlijk te maken. Je kunt later verder gaan via dezelfde link.' }));
+    }
+    page.appendChild(el('div', { id: 'stepHost' }));
+    renderCurrentStep();
+    updateProgress();
+  }
+
+  function renderCurrentStep() {
+    const host = document.getElementById('stepHost');
+    host.innerHTML = '';
+    const p = State.pages[State.stepIdx];
+    if (!p) return;
+    const card = el('div', { class: 'card', id: 'stepCard' });
+    if (p.title) card.appendChild(el('h2', { class: 'step-title', text: p.title }));
+    for (const b of (p.blocks || [])) {
+      const node = renderBlock(b);
+      if (node) card.appendChild(node);
+    }
+    host.appendChild(card);
+
+    const isLast = (State.stepIdx === totalSteps() - 1);
+    document.getElementById('nextBtn').textContent = isLast ? 'Afronden ✓' : 'Volgende →';
+    document.getElementById('prevBtn').style.visibility = (State.stepIdx === 0) ? 'hidden' : 'visible';
+    // Scroll terug naar boven bij elke stap.
+    window.scrollTo({ top: 0, behavior: 'instant' in window ? 'instant' : 'auto' });
+  }
+
+  function renderBlock(b) {
+    if (!b || typeof b !== 'object') return null;
+    const t = b.type;
+    if (t === 'heading')   return el('div', { class: 'blk' }, [el('div', { class: 'blk-heading', text: b.text || '' })]);
+    if (t === 'paragraph') return el('div', { class: 'blk' }, [el('div', { class: 'blk-paragraph', text: b.text || '' })]);
+    if (t === 'divider')   return el('hr',  { class: 'blk-divider' });
+    if (t === 'image') {
+      return el('div', { class: 'blk' }, [
+        el('img', { class: 'blk-image', src: b.src || '', alt: b.alt || '' }),
+      ]);
+    }
+
+    // Field-blocks
+    const key = b.key;
+    if (!key && t !== 'file_download') return null;
+    const wrap = el('div', { class: 'blk', 'data-block-key': key || ('fd_' + (b.id || '')) , 'data-block-type': t });
+
+    function addLabel(label, required, help) {
+      if (label) {
+        const labEl = el('label', { class: 'field-label' }, [
+          document.createTextNode(label),
+          required ? el('span', { class: 'req', text: '*' }) : null,
+        ]);
+        wrap.appendChild(labEl);
+      }
+      if (help) wrap.appendChild(el('div', { class: 'field-help', text: help }));
+    }
+    function addError(msg) {
+      wrap.appendChild(el('div', { class: 'field-error', text: msg || 'Dit veld is verplicht.' }));
+    }
+
+    const cur = State.answers[key];
+
+    if (t === 'short_text' || t === 'email' || t === 'tel') {
+      addLabel(b.label, b.required, b.help);
+      const inp = el('input', {
+        class: 'field-input', type: t === 'short_text' ? 'text' : t,
+        name: key, autocomplete: t === 'email' ? 'email' : (t === 'tel' ? 'tel' : 'off'),
+        value: typeof cur === 'string' ? cur : (cur == null ? '' : String(cur)),
+        oninput: (ev) => { State.answers[key] = ev.target.value; wrap.classList.remove('has-error'); },
+      });
+      wrap.appendChild(inp);
+      addError();
+      return wrap;
+    }
+    if (t === 'long_text') {
+      addLabel(b.label, b.required, b.help);
+      const inp = el('textarea', {
+        class: 'field-textarea', name: key,
+        oninput: (ev) => { State.answers[key] = ev.target.value; wrap.classList.remove('has-error'); },
+      });
+      inp.value = typeof cur === 'string' ? cur : (cur == null ? '' : String(cur));
+      wrap.appendChild(inp);
+      addError();
+      return wrap;
+    }
+    if (t === 'number') {
+      addLabel(b.label, b.required, b.help);
+      const inp = el('input', {
+        class: 'field-input', type: 'number', inputmode: 'numeric', name: key,
+        min: (b.min != null ? String(b.min) : null),
+        max: (b.max != null ? String(b.max) : null),
+        value: (cur == null || cur === '') ? '' : String(cur),
+        oninput: (ev) => {
+          const v = ev.target.value;
+          State.answers[key] = (v === '' ? null : Number(v));
+          wrap.classList.remove('has-error');
+        },
+      });
+      wrap.appendChild(inp);
+      addError();
+      return wrap;
+    }
+    if (t === 'select') {
+      addLabel(b.label, b.required, b.help);
+      const sel = el('select', {
+        class: 'field-select', name: key,
+        onchange: (ev) => { State.answers[key] = ev.target.value; wrap.classList.remove('has-error'); },
+      });
+      sel.appendChild(el('option', { value: '', text: '— kies —' }));
+      for (const o of (b.options || [])) {
+        const opt = el('option', { value: o.value, text: o.label });
+        if (cur === o.value) opt.selected = true;
+        sel.appendChild(opt);
+      }
+      wrap.appendChild(sel);
+      addError();
+      return wrap;
+    }
+    if (t === 'single_choice') {
+      addLabel(b.label, b.required, b.help);
+      const list = el('div', { class: 'options' });
+      for (const o of (b.options || [])) {
+        const inputId = `${key}__${o.value}`;
+        const row = el('label', { class: 'option-row' + (cur === o.value ? ' is-on' : ''), for: inputId });
+        const inp = el('input', {
+          type: 'radio', id: inputId, name: key, value: o.value,
+          onchange: (ev) => {
+            State.answers[key] = ev.target.value;
+            list.querySelectorAll('.option-row').forEach((r) => r.classList.toggle('is-on', r === row));
+            wrap.classList.remove('has-error');
+          },
+        });
+        if (cur === o.value) inp.checked = true;
+        row.appendChild(inp);
+        row.appendChild(el('span', { class: 'lbl', text: o.label }));
+        list.appendChild(row);
+      }
+      wrap.appendChild(list);
+      addError();
+      return wrap;
+    }
+    if (t === 'multi_choice') {
+      addLabel(b.label, b.required, b.help);
+      const arr = Array.isArray(cur) ? cur.slice() : [];
+      State.answers[key] = arr;     // normaliseer naar array zodat patch ook nieuwe lege-array stuurt
+      const list = el('div', { class: 'options' });
+      for (const o of (b.options || [])) {
+        const inputId = `${key}__${o.value}`;
+        const checked = arr.includes(o.value);
+        const row = el('label', { class: 'option-row' + (checked ? ' is-on' : ''), for: inputId });
+        const inp = el('input', {
+          type: 'checkbox', id: inputId, name: key, value: o.value,
+          onchange: (ev) => {
+            const v = ev.target.value;
+            const i = arr.indexOf(v);
+            if (ev.target.checked && i < 0) arr.push(v);
+            else if (!ev.target.checked && i >= 0) arr.splice(i, 1);
+            row.classList.toggle('is-on', ev.target.checked);
+            wrap.classList.remove('has-error');
+          },
+        });
+        if (checked) inp.checked = true;
+        row.appendChild(inp);
+        row.appendChild(el('span', { class: 'lbl', text: o.label }));
+        list.appendChild(row);
+      }
+      wrap.appendChild(list);
+      addError();
+      return wrap;
+    }
+    if (t === 'scale') {
+      addLabel(b.label, b.required, b.help);
+      const min = Number.isFinite(b.min) ? Number(b.min) : 1;
+      const max = Number.isFinite(b.max) ? Number(b.max) : 10;
+      const row = el('div', { class: 'scale-wrap' });
+      for (let i = min; i <= max; i++) {
+        const btn = el('button', {
+          type: 'button',
+          class: 'scale-btn' + (cur === i ? ' is-on' : ''),
+          text: String(i),
+          onClick: () => {
+            State.answers[key] = i;
+            row.querySelectorAll('.scale-btn').forEach((x, idx) => x.classList.toggle('is-on', (idx + min) === i));
+            wrap.classList.remove('has-error');
+          },
+        });
+        row.appendChild(btn);
+      }
+      wrap.appendChild(row);
+      wrap.appendChild(el('div', { class: 'scale-meta' }, [
+        el('span', { text: `${min} = laag` }),
+        el('span', { text: `${max} = hoog` }),
+      ]));
+      addError();
+      return wrap;
+    }
+    if (t === 'consent') {
+      // consent gebruikt key direct; label = waiver/akkoord tekst.
+      const checked = (cur === true);
+      const row = el('label', { class: 'consent-row' + (checked ? ' is-on' : '') });
+      const inp = el('input', {
+        type: 'checkbox', name: key,
+        onchange: (ev) => {
+          State.answers[key] = !!ev.target.checked;
+          row.classList.toggle('is-on', !!ev.target.checked);
+          wrap.classList.remove('has-error');
+        },
+      });
+      if (checked) inp.checked = true;
+      row.appendChild(inp);
+      row.appendChild(el('span', { class: 'txt' }, [
+        document.createTextNode(b.label || ''),
+        b.required ? el('span', { class: 'req', text: ' *' }) : null,
+      ]));
+      wrap.appendChild(row);
+      if (b.help) wrap.appendChild(el('div', { class: 'field-help', text: b.help }));
+      addError('Vink dit aan om verder te gaan.');
+      return wrap;
+    }
+    if (t === 'file_download') {
+      // Header-label staat los van consent.
+      if (b.label) wrap.appendChild(el('div', { class: 'blk-heading', text: b.label }));
+      const consentKey = b.consent_key || null;
+      const requires   = !!b.requires_consent && !!consentKey;
+      let consented = requires ? (State.answers[consentKey] === true) : true;
+      const links = [];
+
+      function refreshLinks() {
+        for (const node of links) {
+          node.setAttribute('aria-disabled', consented ? 'false' : 'true');
+          if (consented) node.removeAttribute('tabindex'); else node.setAttribute('tabindex', '-1');
+        }
+      }
+
+      if (requires) {
+        const cRow = el('label', { class: 'consent-row' + (consented ? ' is-on' : '') });
+        const cInp = el('input', {
+          type: 'checkbox', name: consentKey,
+          onchange: (ev) => {
+            consented = !!ev.target.checked;
+            State.answers[consentKey] = consented;
+            cRow.classList.toggle('is-on', consented);
+            wrap.classList.remove('has-error');
+            refreshLinks();
+          },
+        });
+        if (consented) cInp.checked = true;
+        cRow.appendChild(cInp);
+        cRow.appendChild(el('span', { class: 'txt' }, [
+          document.createTextNode(b.consent_label || 'Ik ga akkoord met de voorwaarden.'),
+          el('span', { class: 'req', text: ' *' }),
+        ]));
+        wrap.appendChild(cRow);
+        wrap.appendChild(el('div', { class: 'field-error', text: 'Vink dit aan om de bestanden te kunnen downloaden.' }));
+      }
+
+      const files = Array.isArray(b.files) ? b.files : [];
+      const fileList = el('div', { class: 'file-list' });
+      if (files.length === 0) {
+        fileList.appendChild(el('div', { class: 'file-empty',
+          text: 'Bestanden worden binnenkort beschikbaar gesteld. Je kunt deze stap nu al voltooien.' }));
+      } else {
+        for (const f of files) {
+          const a = el('a', {
+            class: 'file-link', href: f.url || '#', target: '_blank', rel: 'noopener noreferrer',
+            'aria-disabled': consented ? 'false' : 'true',
+          }, [
+            el('span', { text: f.name || f.url || 'Download' }),
+            el('span', { class: 'arr', text: '↓' }),
+          ]);
+          if (!consented) a.setAttribute('tabindex', '-1');
+          links.push(a);
+          fileList.appendChild(a);
+        }
+      }
+      wrap.appendChild(fileList);
+      refreshLinks();
+      return wrap;
+    }
+    return null;
+  }
+
+  // ── Validatie + navigatie ─────────────────────────────────────────────
+  function validateCurrentStep() {
+    const p = State.pages[State.stepIdx];
+    if (!p) return { ok: true, missing: [] };
+    const missing = [];
+    let firstMissingNode = null;
+    const host = document.getElementById('stepHost');
+    for (const b of (p.blocks || [])) {
+      if (!b) continue;
+      if (b.type === 'consent') {
+        if (b.required && State.answers[b.key] !== true) {
+          missing.push(b.key);
+          const node = host.querySelector(`[data-block-key="${b.key}"]`);
+          if (node) { node.classList.add('has-error'); if (!firstMissingNode) firstMissingNode = node; }
+        }
+        continue;
+      }
+      if (b.type === 'file_download') {
+        if (b.requires_consent && b.consent_key && State.answers[b.consent_key] !== true) {
+          missing.push(b.consent_key);
+          // file_download wrap heeft data-block-key='fd_<id>' — toon error in dezelfde wrap.
+          const fdNode = host.querySelector(`[data-block-type="file_download"]`);
+          if (fdNode) { fdNode.classList.add('has-error'); if (!firstMissingNode) firstMissingNode = fdNode; }
+        }
+        continue;
+      }
+      if (b.required && b.key) {
+        if (isEmpty(State.answers[b.key])) {
+          missing.push(b.key);
+          const node = host.querySelector(`[data-block-key="${b.key}"]`);
+          if (node) { node.classList.add('has-error'); if (!firstMissingNode) firstMissingNode = node; }
+        }
+      }
+    }
+    if (firstMissingNode) firstMissingNode.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    return { ok: missing.length === 0, missing };
+  }
+
+  function pageAnswerKeys(p) {
+    const keys = [];
+    for (const b of (p.blocks || [])) {
+      if (!b) continue;
+      if (b.type === 'consent' && b.key) keys.push(b.key);
+      else if (b.type === 'file_download') { if (b.consent_key) keys.push(b.consent_key); }
+      else if (b.key) keys.push(b.key);
+    }
+    return keys;
+  }
+  function pickPatch(p) {
+    const out = {};
+    for (const k of pageAnswerKeys(p)) {
+      if (Object.prototype.hasOwnProperty.call(State.answers, k)) out[k] = State.answers[k];
+    }
+    return out;
+  }
+
+  async function saveStep(targetIdx) {
+    if (State.saving) return false;
+    State.saving = true;
+    const nextBtn = document.getElementById('nextBtn');
+    const origText = nextBtn.textContent;
+    nextBtn.disabled = true;
+    nextBtn.textContent = 'Opslaan…';
+    const p = State.pages[State.stepIdx];
+    const patch = pickPatch(p);
+    try {
+      const r = await fetch('/api/onboarding-step-save?t=' + encodeURIComponent(TOKEN_NEW), {
+        method  : 'POST',
+        headers : { 'Content-Type': 'application/json' },
+        body    : JSON.stringify({ answers: patch, current_step: targetIdx }),
+      });
+      let d = null; try { d = await r.json(); } catch {}
+      if (r.status === 404) {
+        renderStatus({
+          icon : '🔗',
+          title: 'Deze link is niet (meer) geldig',
+          body : 'De link werkt niet meer. Vraag je mentor om een nieuwe.',
+        });
+        return false;
+      }
+      if (r.status === 409) {
+        if ((d?.error || '').toLowerCase().includes('afgerond')) {
+          State.status = 'afgerond';
+          showCompleted();
+          return false;
+        }
+        renderStatus({
+          icon : '🔒',
+          title: 'Onboarding is gesloten',
+          body : 'Deze onboarding is afgesloten. Neem contact op met je mentor.',
+        });
+        return false;
+      }
+      if (!r.ok) throw new Error(d?.error || ('HTTP ' + r.status));
+      return true;
+    } catch (e) {
+      console.warn('[onboarding] step-save:', e?.message || e);
+      alert('Opslaan mislukt: ' + (e?.message || e) + '\n\nProbeer het opnieuw.');
+      return false;
+    } finally {
+      State.saving = false;
+      nextBtn.disabled = false;
+      nextBtn.textContent = origText;
+    }
+  }
+
+  async function gotoNext() {
+    const isLast = (State.stepIdx === totalSteps() - 1);
+    const v = validateCurrentStep();
+    if (!v.ok) return;
+    if (isLast) {
+      // Save current page eerst (zodat antwoorden zeker in DB staan), dan complete.
+      const saved = await saveStep(State.stepIdx);
+      if (!saved) return;
+      await doComplete();
+      return;
+    }
+    const targetIdx = State.stepIdx + 1;
+    const saved = await saveStep(targetIdx);
+    if (!saved) return;
+    State.stepIdx = targetIdx;
+    renderCurrentStep();
+    updateProgress();
+  }
+  function gotoPrev() {
+    if (State.stepIdx === 0) return;
+    State.stepIdx -= 1;
+    renderCurrentStep();
+    updateProgress();
+  }
+
+  async function doComplete() {
+    if (State.completing) return;
+    State.completing = true;
+    const nextBtn = document.getElementById('nextBtn');
+    nextBtn.disabled = true;
+    nextBtn.textContent = 'Afronden…';
+    try {
+      const r = await fetch('/api/onboarding-complete?t=' + encodeURIComponent(TOKEN_NEW), { method: 'POST' });
+      let d = null; try { d = await r.json(); } catch {}
+      if (r.ok) { showCompleted(); return; }
+      if (r.status === 400 && Array.isArray(d?.missing) && d.missing.length > 0) {
+        // Spring naar de eerste pagina met een ontbrekend veld + markeer.
+        const target = findFirstPageWithKey(d.missing[0]);
+        if (target >= 0) {
+          State.stepIdx = target;
+          renderCurrentStep();
+          updateProgress();
+          // Markeer alle missing keys op die pagina.
+          requestAnimationFrame(() => markMissingOnCurrentPage(d.missing));
+          alert('Er ontbreken nog verplichte antwoorden. Vul deze aan om af te ronden.');
+        } else {
+          alert('Er ontbreken nog verplichte antwoorden: ' + d.missing.join(', '));
+        }
+        return;
+      }
+      if (r.status === 404) {
+        renderStatus({ icon: '🔗', title: 'Deze link is niet (meer) geldig',
+          body: 'De link werkt niet meer. Vraag je mentor om een nieuwe.' });
+        return;
+      }
+      if (r.status === 409) {
+        renderStatus({ icon: '🔒', title: 'Onboarding is gesloten',
+          body: 'Deze onboarding is afgesloten. Neem contact op met je mentor.' });
+        return;
+      }
+      throw new Error(d?.error || ('HTTP ' + r.status));
+    } catch (e) {
+      console.warn('[onboarding] complete:', e?.message || e);
+      alert('Afronden mislukt: ' + (e?.message || e) + '\n\nProbeer het opnieuw.');
+    } finally {
+      State.completing = false;
+      nextBtn.disabled = false;
+      nextBtn.textContent = (State.stepIdx === totalSteps() - 1) ? 'Afronden ✓' : 'Volgende →';
+    }
+  }
+
+  function findFirstPageWithKey(k) {
+    for (let i = 0; i < State.pages.length; i++) {
+      const p = State.pages[i];
+      for (const b of (p.blocks || [])) {
+        if (!b) continue;
+        if (b.key === k) return i;
+        if (b.consent_key === k) return i;
+      }
+    }
+    return -1;
+  }
+  function markMissingOnCurrentPage(missingKeys) {
+    const host = document.getElementById('stepHost');
+    if (!host) return;
+    const set = new Set(missingKeys);
+    host.querySelectorAll('[data-block-key]').forEach((node) => {
+      const k = node.getAttribute('data-block-key') || '';
+      if (set.has(k)) node.classList.add('has-error');
+    });
+    const first = host.querySelector('.has-error');
+    if (first) first.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
+
+  function showCompleted() {
+    State.status = 'afgerond';
+    renderStatus({
+      icon: '✅',
+      title: 'Bedankt! We nemen het over.',
+      bodyHtml: 'Je mentor heeft een melding gekregen en neemt zo snel mogelijk contact op om je eerste call in te plannen.<br><br>Je mag deze pagina nu sluiten.',
+    });
+  }
+
+  // ── Boot ──────────────────────────────────────────────────────────────
+  async function bootNewFlow() {
+    if (!TOKEN_NEW) {
+      renderStatus({ icon: '🔗', title: 'Deze link is niet (meer) geldig',
+        body: 'Geen geldige onboarding-link gevonden. Vraag je mentor om een nieuwe.' });
+      return;
+    }
+    let r, d;
+    try {
+      r = await fetch('/api/onboarding-wizard-get?t=' + encodeURIComponent(TOKEN_NEW));
+      try { d = await r.json(); } catch {}
+    } catch (e) {
+      renderStatus({
+        icon: '⚠️', title: 'Verbinding mislukt',
+        body: 'We konden de onboarding niet laden. Controleer je internet en probeer opnieuw.',
+        action: { label: 'Opnieuw proberen', onClick: bootNewFlow },
+      });
+      return;
+    }
+    if (r.status === 404 || r.status === 400) {
+      renderStatus({ icon: '🔗', title: 'Deze link is niet (meer) geldig',
+        body: 'De link werkt niet meer. Vraag je mentor om een nieuwe.' });
+      return;
+    }
+    if (!r.ok) {
+      renderStatus({
+        icon: '⚠️', title: 'Er ging iets mis',
+        body: (d?.error || ('HTTP ' + r.status)) + ' — probeer opnieuw.',
+        action: { label: 'Opnieuw proberen', onClick: bootNewFlow },
+      });
+      return;
+    }
+
+    State.firstName = d?.customer_first_name || null;
+    State.pages     = Array.isArray(d?.pages) ? d.pages : [];
+    State.answers   = (d?.answers && typeof d.answers === 'object') ? d.answers : {};
+    State.status    = d?.status || null;
+    const cs = Number(d?.current_step);
+    State.stepIdx   = (Number.isFinite(cs) && cs >= 0 && cs < State.pages.length) ? cs : 0;
+
+    if (State.status === 'afgerond') { showCompleted(); return; }
+    if (State.status === 'gearchiveerd') {
+      renderStatus({ icon: '🔒', title: 'Onboarding is gesloten',
+        body: 'Deze onboarding is afgesloten. Neem contact op met je mentor.' });
+      return;
+    }
+    if (State.pages.length === 0) {
+      renderStatus({ icon: '⏳', title: 'Onboarding nog niet beschikbaar',
+        body: 'De vragenlijst is nog niet ingericht. Probeer het later opnieuw.' });
+      return;
+    }
+
+    renderWizardShell();
+    document.getElementById('nextBtn').addEventListener('click', gotoNext);
+    document.getElementById('prevBtn').addEventListener('click', gotoPrev);
+  }
+
+  // ── Legacy fallback: pre-F0 customer.onboarding_token-flow ────────────
+  // De oude welkomstmail (api/sales-onboarding-send) wijst naar
+  //   /modules/onboarding.html?token=<customers.onboarding_token>
+  // en gebruikt /api/onboarding voor GET/POST. We laten die flow doorwerken
+  // zolang Jeffrey hem niet uitfaseert — anders zouden bestaande
+  // welkomstlinks doodlopen.
+  async function bootLegacyFlow() {
+    document.getElementById('progressEl').hidden = true;
+    document.getElementById('footerBar').hidden  = true;
+    const page = document.getElementById('pageEl');
+    page.innerHTML = '';
+    const card = el('div', { class: 'card status-card' });
+    card.appendChild(el('div', { class: 'icon', text: '👋' }));
+    card.appendChild(el('h1', { id: 'lgTitle', text: 'Onboarding laden…' }));
+    card.appendChild(el('p',  { id: 'lgBody', html: '<span class="sk"></span>' }));
+    card.appendChild(el('div',{ id: 'lgActions', style: 'display:flex;gap:12px;justify-content:center;flex-wrap:wrap' }));
+    page.appendChild(card);
+
+    try {
+      const r = await fetch('/api/onboarding?token=' + encodeURIComponent(TOKEN_LEGACY));
+      const d = await r.json();
+      if (!r.ok) throw new Error(d?.error || 'Niet gevonden');
+      if (d.status === 'completed') {
+        document.getElementById('lgTitle').textContent = 'Bedankt!';
+        document.getElementById('lgBody').textContent  = 'Je onboarding is al afgerond.';
+        return;
+      }
+      document.getElementById('lgTitle').textContent = 'Welkom' + (d.first_name ? (', ' + d.first_name) : '') + '!';
+      document.getElementById('lgBody').textContent  =
+        'Fijn dat je erbij bent bij De Forex Opleiding. Klik hieronder om je aanmelding te bevestigen — dan plannen we je eerste call in.';
+      const btn = el('button', {
+        class: 'btn primary', type: 'button', style: 'flex:0 0 auto',
+        text: 'Markeer als afgerond',
+        onClick: async (ev) => {
+          const b = ev.currentTarget;
+          b.disabled = true; b.textContent = 'Bezig…';
+          try {
+            const r2 = await fetch('/api/onboarding', {
+              method: 'POST', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ token: TOKEN_LEGACY }),
+            });
+            const d2 = await r2.json();
+            if (!r2.ok || d2.success === false) throw new Error(d2.error || 'Mislukt');
+            document.getElementById('lgTitle').textContent = 'Bedankt!';
+            document.getElementById('lgBody').textContent  = 'Je onboarding is afgerond. We nemen snel contact op voor je eerste call.';
+            document.getElementById('lgActions').innerHTML = '';
+          } catch (e) {
+            b.disabled = false; b.textContent = 'Markeer als afgerond';
+            alert('Mislukt: ' + (e?.message || e));
+          }
+        },
+      });
+      document.getElementById('lgActions').appendChild(btn);
+    } catch (e) {
+      document.getElementById('lgTitle').textContent = 'Onboarding';
+      document.getElementById('lgBody').textContent  = e?.message || 'Er ging iets mis.';
+    }
+  }
+
+  // Routing: NIEUWE wizard (?t=) heeft voorrang; anders legacy (?token=);
+  // anders algemene "ongeldige link"-staat.
+  if (TOKEN_NEW)         bootNewFlow();
+  else if (TOKEN_LEGACY) bootLegacyFlow();
+  else {
+    renderStatus({ icon: '🔗', title: 'Deze link is niet (meer) geldig',
+      body: 'Geen geldige onboarding-link gevonden. Vraag je mentor om een nieuwe.' });
+  }
+})();
 </script>
 </body>
 </html>
