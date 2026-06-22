@@ -763,6 +763,44 @@
     return Math.max(0, Math.min(100, Math.round((d / t) * 100)));
   }
 
+  // ── Funded-certificaten (per student claim) ───────────────────────────
+  // Map student_id → cert-row uit /api/mentor-funded-certs-self.
+  // Wordt parallel met de studenten-fetch geladen zodat de kaarten in één
+  // pass kunnen renderen.
+  const _fundedCerts = new Map();
+  const _FUNDED_MAX_BYTES = 10 * 1024 * 1024;            // 10MB
+  const _FUNDED_ACCEPT    = '.pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png';
+  const _FUNDED_BUCKET    = 'funded-certificates';
+
+  function _fmtFundedMonth(ymd) {
+    if (!ymd) return '';
+    const m = String(ymd).match(/^(\d{4})-(\d{2})/);
+    if (!m) return esc(String(ymd));
+    const months = ['', 'jan', 'feb', 'mrt', 'apr', 'mei', 'jun', 'jul', 'aug', 'sep', 'okt', 'nov', 'dec'];
+    const idx = parseInt(m[2], 10);
+    return `${months[idx] || m[2]} ${m[1]}`;
+  }
+
+  function _safeFilename(name) {
+    return String(name || '').replace(/[^A-Za-z0-9._-]/g, '_').replace(/_+/g, '_').slice(0, 120) || 'cert';
+  }
+
+  async function loadFundedCertsMap() {
+    _fundedCerts.clear();
+    const apiFetch = window.AgentShared?.apiFetch;
+    if (typeof apiFetch !== 'function') return;
+    try {
+      const r = await apiFetch('/api/mentor-funded-certs-self');
+      const d = await r.json();
+      if (!r.ok) throw new Error(d?.error || 'funded-certs fetch failed');
+      for (const c of (d.certs || [])) {
+        if (c && c.student_id) _fundedCerts.set(String(c.student_id), c);
+      }
+    } catch (e) {
+      console.warn('[mentor-dashboard] funded-certs:', e?.message || e);
+    }
+  }
+
   function renderStudents(payload) {
     const wrap = document.getElementById('studentsWrap');
     if (!wrap) return;
@@ -781,19 +819,25 @@
     }
     wrap.innerHTML = list.map((s) => {
       const sid       = esc(s.bubble_student_id);
+      const rawSid    = String(s.bubble_student_id);
       const name      = esc(s.name || s.email || '(geen naam)');
+      const rawName   = String(s.name || s.email || '');
       const email     = esc(s.email || '');
       const program   = s.program ? `<span class="badge badge-blue">${esc(s.program)}</span>` : '';
       const onboard   = s.onboarding_status ? `<span class="badge badge-amber">${esc(s.onboarding_status)}</span>` : '';
       const callsTotal  = Number(s.calls_1on1_total) || 0;
       const callsDone   = Number(s.calls_1on1_done) || 0;
       const noShows     = Number(s.no_shows) || 0;
+      const cert = _fundedCerts.get(rawSid) || null;
       return `
         <div class="student-card" data-student-id="${sid}">
           <div class="student-head" data-toggle="${sid}">
             <div>
               <div class="student-name">${name} ${program} ${onboard}</div>
               <div class="student-meta">${email}</div>
+              <div class="funded-row" id="funded-row-${sid}" style="margin-top:6px">
+                ${_renderFundedRowHtml(rawSid, rawName, cert)}
+              </div>
             </div>
             <div class="student-stat" title="1-op-1-calls voltooid / totaal"><strong>${callsDone}/${callsTotal || '—'}</strong> 1-op-1</div>
             <div class="student-stat" title="No-shows"><i class="ti ti-alert-triangle" style="color:${noShows > 0 ? '#b45309' : 'var(--text-faint)'}"></i> ${noShows}</div>
@@ -804,10 +848,171 @@
           </div>
         </div>`;
     }).join('');
-    // Click-handlers binden voor toggle.
+    // Click-handlers binden voor toggle. De head-handler skipt klikken die
+    // uit de funded-row komen (upload-knop / replace-link) zodat de kaart
+    // niet uitklapt als de mentor een bestand kiest.
     wrap.querySelectorAll('.student-head[data-toggle]').forEach((head) => {
-      head.addEventListener('click', () => toggleStudent(head.dataset.toggle));
+      head.addEventListener('click', (e) => {
+        if (e.target && e.target.closest('.funded-row')) return;
+        toggleStudent(head.dataset.toggle);
+      });
     });
+    _wireFundedRowButtons(wrap);
+  }
+
+  // Render het funded-segment: groene badge bij bestaande claim + vervang-link,
+  // anders een upload-knop. Bevat ook een verborgen file-input per student.
+  function _renderFundedRowHtml(studentId, studentName, cert) {
+    const sidAttr  = esc(studentId);
+    const nameAttr = esc(studentName);
+    const inputId  = 'funded-file-' + sidAttr;
+    const statusId = 'funded-status-' + sidAttr;
+    const hiddenInput = `
+      <input type="file" id="${inputId}" class="funded-file" data-student-id="${sidAttr}" data-student-name="${nameAttr}"
+             accept="${_FUNDED_ACCEPT}" hidden />`;
+    if (cert) {
+      const monthTxt = _fmtFundedMonth(cert.funded_month);
+      return `
+        ${hiddenInput}
+        <span class="badge badge-green" style="margin-right:6px">✓ Certificaat — bonus actief${monthTxt ? ' (sinds ' + esc(monthTxt) + ')' : ''}</span>
+        <button type="button" class="funded-btn-link" data-student-id="${sidAttr}" data-student-name="${nameAttr}"
+                style="background:none;border:0;color:var(--accent-violet,#6d28d9);font-size:11.5px;font-weight:600;cursor:pointer;padding:0;text-decoration:underline;font-family:inherit">
+          Vervang
+        </button>
+        <span class="funded-status" id="${statusId}" style="margin-left:8px;font-size:11.5px;color:var(--text-faint)"></span>`;
+    }
+    return `
+      ${hiddenInput}
+      <button type="button" class="funded-btn-upload" data-student-id="${sidAttr}" data-student-name="${nameAttr}"
+              style="display:inline-flex;align-items:center;gap:5px;padding:5px 10px;font-size:11.5px;font-weight:600;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);cursor:pointer;font-family:inherit">
+        📄 Certificaat uploaden
+      </button>
+      <span class="funded-status" id="${statusId}" style="margin-left:8px;font-size:11.5px;color:var(--text-faint)"></span>`;
+  }
+
+  function _wireFundedRowButtons(wrap) {
+    wrap.querySelectorAll('.funded-btn-upload, .funded-btn-link').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const sid = btn.dataset.studentId;
+        const input = document.getElementById('funded-file-' + sid);
+        if (input) input.click();
+      });
+    });
+    wrap.querySelectorAll('input.funded-file').forEach((input) => {
+      input.addEventListener('change', async () => {
+        const sid  = input.dataset.studentId;
+        const name = input.dataset.studentName || '';
+        const file = input.files && input.files[0];
+        if (!file) return;
+        await uploadFundedCert(sid, name, file);
+        input.value = ''; // reset, zodat opnieuw kiezen 't change-event opnieuw vuurt
+      });
+    });
+  }
+
+  function _setFundedStatus(sid, html, tone) {
+    const el = document.getElementById('funded-status-' + sid);
+    if (!el) return;
+    const color = tone === 'err' ? '#b91c1c' : tone === 'ok' ? '#15803d' : 'var(--text-faint)';
+    el.style.color = color;
+    el.innerHTML = html || '';
+  }
+
+  function _updateFundedRow(sid, studentName) {
+    const cert = _fundedCerts.get(String(sid)) || null;
+    const row = document.getElementById('funded-row-' + sid);
+    if (!row) return;
+    row.innerHTML = _renderFundedRowHtml(sid, studentName, cert);
+    // Her-wiring na innerHTML-vervanging.
+    const card = row.closest('.student-card');
+    if (card) _wireFundedRowButtons(card);
+  }
+
+  async function uploadFundedCert(studentId, studentName, file) {
+    // 1) Type + grootte-check client-side.
+    const allowed = ['application/pdf', 'image/jpeg', 'image/png'];
+    const nameLower = (file.name || '').toLowerCase();
+    const allowedExt = /\.(pdf|jpe?g|png)$/i.test(nameLower);
+    if (file.type && !allowed.includes(file.type) && !allowedExt) {
+      _setFundedStatus(studentId, 'Type niet toegestaan — gebruik PDF, JPG of PNG.', 'err');
+      return;
+    }
+    if (file.size > _FUNDED_MAX_BYTES) {
+      _setFundedStatus(studentId, 'Bestand > 10MB — maak het kleiner.', 'err');
+      return;
+    }
+
+    _setFundedStatus(studentId, 'Uploaden…', 'info');
+
+    // 2) Sessie → uid voor map-prefix.
+    let uid = null;
+    try {
+      if (window._authSharedReady) await window._authSharedReady;
+      const session = window.AuthShared && (await window.AuthShared.getSession());
+      uid = session?.user?.id || null;
+    } catch (e) { /* uid blijft null */ }
+    if (!uid) {
+      _setFundedStatus(studentId, 'Sessie niet beschikbaar — log opnieuw in.', 'err');
+      return;
+    }
+
+    // 3) Upload naar Supabase Storage (RLS borgt: alleen je eigen map).
+    const safe = _safeFilename(file.name || 'cert');
+    const filePath = `${uid}/${studentId}/${Date.now()}_${safe}`;
+    try {
+      if (!window.supabase || !window.supabase.storage) {
+        throw new Error('Supabase-client niet beschikbaar');
+      }
+      const { error: upErr } = await window.supabase.storage
+        .from(_FUNDED_BUCKET)
+        .upload(filePath, file, {
+          contentType: file.type || 'application/octet-stream',
+          upsert     : false,
+        });
+      if (upErr) throw new Error(upErr.message || 'upload faalde');
+    } catch (e) {
+      console.error('[funded-upload] storage:', e?.message || e);
+      _setFundedStatus(studentId, 'Upload mislukt: ' + esc(e?.message || e), 'err');
+      return;
+    }
+
+    // 4) Save-claim registreren (server doet pad-prefix + bubble-ownership check).
+    try {
+      const apiFetch = window.AgentShared?.apiFetch;
+      if (typeof apiFetch !== 'function') throw new Error('apiFetch niet beschikbaar');
+      const r = await apiFetch('/api/mentor-funded-cert-save', {
+        method : 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body   : JSON.stringify({
+          student_id   : studentId,
+          student_name : studentName || '',
+          file_path    : filePath,
+          file_name    : file.name || safe,
+        }),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d?.error || 'save faalde');
+
+      _fundedCerts.set(String(studentId), {
+        student_id      : studentId,
+        student_name    : studentName || null,
+        funded_month    : d.funded_month,
+        file_name       : file.name || safe,
+        last_uploaded_at: new Date().toISOString(),
+      });
+      _updateFundedRow(studentId, studentName);
+      if (d.newly_claimed) {
+        _setFundedStatus(studentId, '€100-bonus geactiveerd.', 'ok');
+        setTimeout(() => _setFundedStatus(studentId, '', 'info'), 4000);
+      } else {
+        _setFundedStatus(studentId, 'Bestand bijgewerkt.', 'ok');
+        setTimeout(() => _setFundedStatus(studentId, '', 'info'), 3000);
+      }
+    } catch (e) {
+      console.error('[funded-upload] save:', e?.message || e);
+      _setFundedStatus(studentId, 'Opslaan mislukt: ' + esc(e?.message || e), 'err');
+    }
   }
 
   // Cache zodat re-open van een kaart geen extra fetch doet.
@@ -914,7 +1119,12 @@
     const wrap = document.getElementById('studentsWrap');
     if (wrap) wrap.innerHTML = `<div style="color:var(--text-faint);font-size:12.5px;padding:14px;text-align:center">Studenten laden…</div>`;
     try {
-      const r = await apiFetch('/api/mentor-my-students');
+      // Parallel: studenten + funded-certs. _fundedCerts is leeg als de fetch
+      // faalt; render-functie valt dan terug op de upload-knop.
+      const [r, _] = await Promise.all([
+        apiFetch('/api/mentor-my-students'),
+        loadFundedCertsMap(),
+      ]);
       const d = await r.json();
       if (!r.ok) throw new Error(d?.error || 'students fetch failed');
       renderStudents(d);
