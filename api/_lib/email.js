@@ -1,24 +1,35 @@
 // api/_lib/email.js
 //
-// Dunne fail-soft helper rond Resend. Bedoeld voor transactionele mail (bv.
-// payout-approve naar mentor). Gooit nooit — een ontbrekende key of HTTP-fout
-// wordt teruggemeld via { sent:false, reason } zodat de caller een hint kan
-// tonen ("mail niet verzonden") zonder dat de business-actie zelf faalt.
+// Dunne fail-soft transactionele mailer. Sinds deze versie via Strato SMTP
+// (nodemailer) i.p.v. Resend — Strato is de mailbox van DFO en heeft een
+// vertrouwde domeinreputatie. Signatuur ongewijzigd: callers (bv.
+// mentor-payout-approve.js) hoeven niets aan te passen.
 //
-// Auth: Authorization: Bearer process.env.RESEND_API_KEY.
-// From: 'De Forex Opleiding <noreply@deforexopleiding.nl>' (vast).
+// Auth: SMTP_USER + SMTP_PASS (Strato mailbox-credentials).
+// Host: SMTP_HOST default 'smtp.strato.de'.
+// Port: SMTP_PORT default 465 (TLS on connect via `secure:true`).
+// From: SMTP_FROM default `De Forex Opleiding <${SMTP_USER}>`.
 //
 // Gebruik:
 //   const result = await sendMail({ to, subject, html });
 //   if (!result.sent) console.warn('mail miste:', result.reason);
+//
+// Belangrijk:
+//   - Ontbreekt SMTP_USER of SMTP_PASS → { sent:false, reason:'smtp_not_configured' }.
+//   - Gooit NOOIT — alle fouten worden teruggemeld via { sent:false, reason }.
+//   - Geen transporter.verify() — dat zou een extra roundtrip per send doen.
 
-const FROM = 'De Forex Opleiding <noreply@deforexopleiding.nl>';
-const RESEND_URL = 'https://api.resend.com/emails';
+import nodemailer from 'nodemailer';
 
 export async function sendMail({ to, subject, html }) {
-  const apiKey = process.env.RESEND_API_KEY || null;
-  if (!apiKey) {
-    return { sent: false, reason: 'RESEND_API_KEY ontbreekt' };
+  const SMTP_HOST = process.env.SMTP_HOST || 'smtp.strato.de';
+  const SMTP_PORT = Number(process.env.SMTP_PORT || 465);
+  const SMTP_USER = process.env.SMTP_USER || null;
+  const SMTP_PASS = process.env.SMTP_PASS || null;
+  const SMTP_FROM = process.env.SMTP_FROM || (SMTP_USER ? `De Forex Opleiding <${SMTP_USER}>` : null);
+
+  if (!SMTP_USER || !SMTP_PASS) {
+    return { sent: false, reason: 'smtp_not_configured' };
   }
   if (!to || (Array.isArray(to) && to.length === 0)) {
     return { sent: false, reason: 'to ontbreekt' };
@@ -26,31 +37,30 @@ export async function sendMail({ to, subject, html }) {
   if (!subject) return { sent: false, reason: 'subject ontbreekt' };
   if (!html)    return { sent: false, reason: 'html ontbreekt' };
 
-  let resp;
+  let transporter;
   try {
-    resp = await fetch(RESEND_URL, {
-      method : 'POST',
-      headers: {
-        'Authorization': 'Bearer ' + apiKey,
-        'Content-Type' : 'application/json',
-      },
-      body: JSON.stringify({
-        from   : FROM,
-        to     : Array.isArray(to) ? to : [to],
-        subject,
-        html,
-      }),
+    transporter = nodemailer.createTransport({
+      host             : SMTP_HOST,
+      port             : SMTP_PORT,
+      secure           : SMTP_PORT === 465,
+      auth             : { user: SMTP_USER, pass: SMTP_PASS },
+      connectionTimeout: 10000,
+      greetingTimeout  : 10000,
+      socketTimeout    : 15000,
     });
   } catch (e) {
-    return { sent: false, reason: 'netwerk-fout: ' + (e?.message || e) };
+    return { sent: false, reason: 'transport: ' + (e?.message || e) };
   }
 
-  const text = await resp.text().catch(() => '');
-  let json = null;
-  try { json = text ? JSON.parse(text) : null; } catch {}
-  if (!resp.ok) {
-    const msg = json?.message || json?.error || text.slice(0, 200) || ('HTTP ' + resp.status);
-    return { sent: false, reason: 'Resend ' + resp.status + ': ' + msg };
+  try {
+    const info = await transporter.sendMail({
+      from: SMTP_FROM,
+      to,
+      subject,
+      html,
+    });
+    return { sent: true, id: info?.messageId || null };
+  } catch (e) {
+    return { sent: false, reason: e?.message || String(e) };
   }
-  return { sent: true, id: json?.id || null };
 }
