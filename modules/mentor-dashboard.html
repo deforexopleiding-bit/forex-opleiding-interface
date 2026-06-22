@@ -36,6 +36,11 @@
     .data-table th { background: rgba(0,0,0,0.02); font-weight: 600; color: var(--text-dim); font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.03em; }
     .data-table tr:last-child td { border-bottom: 0; }
     .data-table td.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+    /* Headers met class="num" lijnen rechts uit zodat ze recht boven hun
+       bedrag-/aantal-kolom staan. Zonder deze regel viel <th class="num"> terug
+       op de default-th text-align (links) en raakte de kolomtitel mis-uitgelijnd
+       met de cijfers eronder. */
+    .data-table th.num { text-align: right; }
 
     .badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; white-space: nowrap; }
     .badge-green  { background: rgba(34,197,94,0.13);  color: #15803d; }
