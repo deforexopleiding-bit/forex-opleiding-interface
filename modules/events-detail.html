@@ -889,6 +889,10 @@ function renderAttendeesTab() {
         // Fase 3b: "Stuur keuze-link" — gegate op events.attendee.edit
         // (operationele actie op bestaande rij; geen aparte invite-key).
         if (canEditAtt) kebabItems.push(`<button class="kebab-item" data-action="send-invite" data-id="${esc(a.id)}"><i class="ti ti-send"></i> Stuur keuze-link</button>`);
+        // Stuur vragenlijst-link — alleen tonen als attendee nog GEEN assessment heeft ingevuld.
+        if (canEditAtt && !a.assessment_response_id) {
+          kebabItems.push(`<button class="kebab-item" data-action="send-questionnaire" data-id="${esc(a.id)}"><i class="ti ti-clipboard-text"></i> Stuur vragenlijst</button>`);
+        }
         // Verplaatsen: creëert nieuwe rij op doel-event → gegated op create-rechten.
         // Alleen tonen voor "live" rijen; reeds geswitchte rij is een audit-end-state.
         if (canAdd && a.status !== 'switched_to_other_event') {
@@ -1047,6 +1051,7 @@ function renderAttendeesTab() {
       document.querySelectorAll('.kebab-menu.show').forEach((m) => m.classList.remove('show'));
       if (action === 'edit') return openAttEdit(id);
       if (action === 'send-invite') return sendInviteToAttendee(id);
+      if (action === 'send-questionnaire') return sendQuestionnaireToAttendee(id);
       if (action === 'move') return openAttMoveModal(id);
       if (action === 'create-quotation') return openQuotationWizardFromAttendee(id);
       if (action === 'tag-add') return openTagAddModal(id);
@@ -1089,6 +1094,42 @@ async function sendInviteToAttendee(attendeeId) {
     window.AgentShared.showToast(parts.join(' · '), kind);
   } catch (e) {
     console.error('[sendInviteToAttendee]', e);
+    window.AgentShared.showToast('Versturen mislukt: ' + (e?.message || 'onbekende fout'), 'error');
+  }
+}
+
+// ── Vragenlijst-link sturen (assessment) ────────────────────────────────────
+//
+// Operator klikt "Stuur vragenlijst" in het kebab-menu van een attendee →
+// POST /api/events-attendee-send-questionnaire. Endpoint stuurt beide
+// kanalen onafhankelijk; per-kanaal-resultaat in een korte toast.
+async function sendQuestionnaireToAttendee(attendeeId) {
+  if (!attendeeId) return;
+  if (!confirm('Stuur de persoonlijke vragenlijst-link via WhatsApp + e-mail?')) return;
+  try {
+    const r = await window.AgentShared.apiFetch('/api/events-attendee-send-questionnaire', {
+      method : 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body   : JSON.stringify({ attendee_id: attendeeId }),
+    });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) {
+      window.AgentShared.showToast(j.error || ('Versturen mislukt (HTTP ' + r.status + ')'), 'error');
+      return;
+    }
+    const parts = [];
+    const mail = j.mail || {};
+    const wa   = j.whatsapp || {};
+    if (mail.ok)           parts.push('e-mail verstuurd');
+    else if (mail.skipped) parts.push('e-mail overgeslagen (' + (mail.reason || '?') + ')');
+    else                   parts.push('e-mail mislukt' + (mail.error ? ': ' + mail.error : ''));
+    if (wa.ok)             parts.push('WhatsApp verstuurd');
+    else if (wa.skipped)   parts.push('WhatsApp overgeslagen (' + (wa.reason || '?') + ')');
+    else                   parts.push('WhatsApp mislukt' + (wa.error ? ': ' + wa.error : ''));
+    const kind = (mail.ok || wa.ok) ? 'success' : 'error';
+    window.AgentShared.showToast('Vragenlijst — ' + parts.join(' · '), kind);
+  } catch (e) {
+    console.error('[sendQuestionnaireToAttendee]', e);
     window.AgentShared.showToast('Versturen mislukt: ' + (e?.message || 'onbekende fout'), 'error');
   }
 }
