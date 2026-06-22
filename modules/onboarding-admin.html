@@ -275,6 +275,7 @@
             <th>Traject</th>
             <th>Status</th>
             <th>Betaling</th>
+            <th>Bedenktijd</th>
             <th>Mentor</th>
             <th>Voortgang</th>
             <th>Aangemeld</th>
@@ -297,6 +298,20 @@
     return paid
       ? '<span class="ob-badge paid-yes">Betaald</span>'
       : '<span class="ob-badge paid-no">Nog niet betaald</span>';
+  }
+
+  // Bedenktijd-waiver-badge. waiver = { agreed, at } | null.
+  //   null            → '—'  (geen waiver-blok in gepubliceerde structuur)
+  //   { agreed:false }→ grijs 'Niet afgezien'
+  //   { agreed:true } → groen 'Afgezien ✓ (datum)' (met date als beschikbaar)
+  function waiverBadgeHtml(waiver) {
+    if (!waiver) return '<span style="color:var(--text-faint)">—</span>';
+    if (!waiver.agreed) return '<span class="ob-badge paid-no">Niet afgezien</span>';
+    const d = waiver.at ? new Date(waiver.at) : null;
+    const label = (d && !Number.isNaN(d.getTime()))
+      ? 'Afgezien ✓ (' + d.toLocaleDateString('nl-NL', { day: '2-digit', month: 'short', year: 'numeric' }) + ')'
+      : 'Afgezien ✓';
+    return `<span class="ob-badge paid-yes" title="${esc(waiver.at || '')}">${esc(label)}</span>`;
   }
 
   function statusBadgeHtml(st) {
@@ -346,6 +361,7 @@
         <td>${trajectLabelHtml(r)}</td>
         <td>${statusBadgeHtml(r.status)}</td>
         <td>${paidBadgeHtml(!!r.paid)}</td>
+        <td>${waiverBadgeHtml(r.waiver || null)}</td>
         <td>${mentorCellHtml(r)}</td>
         <td>${esc(progressLabel(r))}</td>
         <td>${esc(fmtDateNL(r.created_at))}</td>
@@ -497,6 +513,7 @@
           <dt>Traject</dt>          <dd>${esc(o.traject_label || '—')}${o.traject_type ? ' <span class="ob-badge paid-no">' + esc(o.traject_type) + '</span>' : ''}${o.calls != null ? ' · ' + o.calls + ' call' + (o.calls===1?'':'s') : ''}${o.duur_maanden != null ? ' · ' + o.duur_maanden + ' mnd' : ''}</dd>
           <dt>Status</dt>           <dd>${statusBadgeHtml(o.status)}</dd>
           <dt>Betaling</dt>         <dd>${paidBadgeHtml(!!o.paid)}</dd>
+          <dt>Bedenktijd</dt>       <dd>${waiverBadgeHtml(o.waiver || null)}</dd>
           <dt>Mentor</dt>           <dd>${esc(o.mentor_name || (o.mentor_user_id || '—'))}</dd>
           <dt>Wizard-stap</dt>      <dd>${esc(o.current_step || '—')}</dd>
           <dt>Aangemeld</dt>        <dd>${esc(fmtDateTimeNL(o.created_at))}</dd>

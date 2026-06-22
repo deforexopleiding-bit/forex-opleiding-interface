@@ -18,6 +18,22 @@ import { requirePermission } from './_lib/requirePermission.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+// Loop door alle blokken van de gepubliceerde structuur en pak de
+// consent_key van het EERSTE file_download/consent-blok met is_waiver=true.
+// Geeft null wanneer geen waiver-blok bestaat.
+function findWaiverConsentKey(structure) {
+  if (!structure || typeof structure !== 'object') return null;
+  const pages = Array.isArray(structure.pages) ? structure.pages : [];
+  for (const p of pages) {
+    for (const b of (p?.blocks || [])) {
+      if (!b || !b.is_waiver) continue;
+      if (b.type === 'file_download' && b.consent_key) return b.consent_key;
+      if (b.type === 'consent'       && b.key)         return b.key;
+    }
+  }
+  return null;
+}
+
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
   res.setHeader('Content-Type', 'application/json');
@@ -75,6 +91,31 @@ export default async function handler(req, res) {
       paid = !!inv;
     }
 
+    // Bedenktijd-waiver bepalen uit de gepubliceerde wizard-structuur.
+    // Fail-soft: bij DB-glitch of geen gepubliceerde structuur → waiver=null.
+    let waiver = null;
+    try {
+      const { data: wiz, error: wizErr } = await supabaseAdmin
+        .from('onboarding_wizard')
+        .select('published_structure')
+        .eq('id', 1)
+        .maybeSingle();
+      if (wizErr) {
+        console.warn('[onboarding-detail] wizard config fetch:', wizErr.message);
+      } else {
+        const waiverKey = findWaiverConsentKey(wiz?.published_structure);
+        if (waiverKey) {
+          const ans = (row.answers && typeof row.answers === 'object') ? row.answers : {};
+          waiver = {
+            agreed : ans[waiverKey] === true,
+            at     : ans[waiverKey + '_at'] || null,
+          };
+        }
+      }
+    } catch (e) {
+      console.warn('[onboarding-detail] wizard config exception:', e?.message || e);
+    }
+
     const t = row.traject || null;
     return res.status(200).json({
       ok: true,
@@ -93,6 +134,7 @@ export default async function handler(req, res) {
         current_step   : row.current_step || null,
         answers        : row.answers || null,
         paid,
+        waiver,
         token          : row.token,
         started_at     : row.started_at,
         completed_at   : row.completed_at,

@@ -32,6 +32,22 @@ function escapeIlike(s) {
   return String(s || '').replace(/([%_,])/g, '\\$1');
 }
 
+// Loop door alle blokken van de gepubliceerde structuur en pak de
+// consent_key van het EERSTE file_download/consent-blok met is_waiver=true.
+// Geeft null wanneer geen waiver-blok bestaat.
+function findWaiverConsentKey(structure) {
+  if (!structure || typeof structure !== 'object') return null;
+  const pages = Array.isArray(structure.pages) ? structure.pages : [];
+  for (const p of pages) {
+    for (const b of (p?.blocks || [])) {
+      if (!b || !b.is_waiver) continue;
+      if (b.type === 'file_download' && b.consent_key) return b.consent_key;
+      if (b.type === 'consent'       && b.key)         return b.key;
+    }
+  }
+  return null;
+}
+
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
   res.setHeader('Content-Type', 'application/json');
@@ -64,7 +80,7 @@ export default async function handler(req, res) {
     let q = supabaseAdmin
       .from('onboardings')
       .select(`id, customer_id, customer_name, traject_id, mentor_user_id,
-               status, current_step, started_at, completed_at, assigned_at,
+               status, current_step, answers, started_at, completed_at, assigned_at,
                archived_at, created_at, token,
                traject:onboarding_trajecten(label, type, calls)`)
       .order('created_at', { ascending: false })
@@ -110,8 +126,33 @@ export default async function handler(req, res) {
       }
     }
 
+    // Bedenktijd-waiver-key resolven uit de GEPUBLICEERDE wizard-structuur
+    // (1× per request — niet per row). We zoeken het EERSTE blok dat
+    // is_waiver=true heeft en pakken zijn consent_key. Zonder gepubliceerde
+    // structuur of zonder waiver-blok → waiverKey blijft null en elke row
+    // krijgt waiver=null.
+    let waiverKey = null;
+    try {
+      const { data: wiz, error: wizErr } = await supabaseAdmin
+        .from('onboarding_wizard')
+        .select('published_structure')
+        .eq('id', 1)
+        .maybeSingle();
+      if (wizErr) {
+        console.warn('[onboardings-admin-list] wizard config fetch:', wizErr.message);
+      } else {
+        waiverKey = findWaiverConsentKey(wiz?.published_structure);
+      }
+    } catch (e) {
+      console.warn('[onboardings-admin-list] wizard config exception:', e?.message || e);
+    }
+
     const out = list.map((r) => {
       const t = r.traject || null;
+      const ans = (r.answers && typeof r.answers === 'object') ? r.answers : {};
+      const waiver = waiverKey
+        ? { agreed: ans[waiverKey] === true, at: ans[waiverKey + '_at'] || null }
+        : null;
       return {
         id             : r.id,
         customer_id    : r.customer_id,
@@ -125,6 +166,7 @@ export default async function handler(req, res) {
         status         : r.status,
         current_step   : r.current_step || null,
         paid           : paidSet.has(r.customer_id),
+        waiver,
         started_at     : r.started_at,
         completed_at   : r.completed_at,
         assigned_at    : r.assigned_at,
