@@ -199,6 +199,16 @@
     document.getElementById('payoutsWrap').innerHTML = `<div class="empty-state" style="border-color:#fecaca;color:#b91c1c"><i class="ti ti-alert-triangle"></i>${esc(msg)}</div>`;
   }
 
+  // Bulk-state. Beide reset bij elke loadList (zie clearBulkState).
+  const _selection      = new Set();       // payout_id's
+  const _payoutsByPid   = new Map();       // payout_id → row-object (uit list)
+  let   _bulkRunning    = false;           // disable knoppen tijdens batch
+  function clearBulkState() {
+    _selection.clear();
+    _payoutsByPid.clear();
+    _bulkRunning = false;
+  }
+
   function renderTable(payouts) {
     if (!Array.isArray(payouts) || payouts.length === 0) {
       renderEmpty('Geen rapporten voor deze maand — klik "Genereer rapporten" om ze aan te maken.');
@@ -212,8 +222,22 @@
     }
     setKpis({ rapporten: payouts.length, bonus: bonusSum, coaching: coachingSum, total: totalSum });
 
+    // Sync payouts naar Map zodat bulk-handlers status + mentor_name kunnen lezen.
+    _payoutsByPid.clear();
+    for (const p of payouts) {
+      if (p && p.id) _payoutsByPid.set(p.id, p);
+    }
+    // Selectie cappen op nu nog bestaande payout-ids.
+    for (const pid of [..._selection]) {
+      if (!_payoutsByPid.has(pid)) _selection.delete(pid);
+    }
+
     const rows = payouts.map((p, idx) => `
       <tr class="row-main" data-payout-id="${esc(p.id)}" data-row-idx="${idx}">
+        <td style="width:34px;text-align:center" class="cb-cell">
+          <input type="checkbox" class="row-cb" data-payout-id="${esc(p.id)}"
+                 ${_selection.has(p.id) ? 'checked' : ''} />
+        </td>
         <td style="width:18px"><span class="caret" id="caret-${idx}"><i class="ti ti-caret-right-filled"></i></span></td>
         <td>
           <div style="font-weight:600">${esc(p.mentor_name || '—')}</div>
@@ -227,16 +251,28 @@
         <td>${statusBadge(p.status)}</td>
       </tr>
       <tr class="row-detail" id="detail-${idx}" hidden>
-        <td colspan="8">
+        <td colspan="9">
           <div id="detail-body-${idx}" style="font-size:12.5px;color:var(--text-faint);padding:4px 0">Laden…</div>
         </td>
       </tr>
     `).join('');
 
     document.getElementById('payoutsWrap').innerHTML = `
+      <div id="bulkBar" style="display:none;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:12px;padding:10px 14px;background:rgba(10,47,99,0.06);border:1px solid var(--border);border-radius:10px">
+        <span id="bulkSelCount" style="font-size:13px;font-weight:600;color:var(--text)">0 geselecteerd</span>
+        <span style="flex:1"></span>
+        <button type="button" id="bulkGenBtn"     class="bulk-btn" style="background:var(--brand-deep,#0a2f63);color:#fff;border:0">⚙️ Genereer geselecteerde</button>
+        <button type="button" id="bulkApproveBtn" class="bulk-btn" style="background:#15803d;color:#fff;border:0">✅ Keur geselecteerde goed (+mail)</button>
+        <button type="button" id="bulkPaidBtn"    class="bulk-btn" style="background:#0a2f63;color:#fff;border:0">💶 Markeer geselecteerde uitbetaald</button>
+      </div>
+      <div id="bulkProgress" style="display:none;margin-bottom:12px;font-size:12px;color:var(--text-dim)"></div>
+      <div id="bulkResults"  style="display:none;margin-bottom:12px"></div>
       <table class="data-table">
         <thead>
           <tr>
+            <th style="width:34px;text-align:center">
+              <input type="checkbox" id="bulkSelAll" title="Selecteer alles" />
+            </th>
             <th></th>
             <th>Mentor</th>
             <th class="num">Bonus (incl)</th>
@@ -249,11 +285,262 @@
         </thead>
         <tbody>${rows}</tbody>
       </table>
+      <style>
+        #payoutsWrap .bulk-btn { display:inline-flex; align-items:center; gap:6px; padding:7px 12px;
+          font-size:12.5px; font-weight:600; border-radius:7px; cursor:pointer; font-family:inherit; }
+        #payoutsWrap .bulk-btn[disabled] { opacity:0.55; cursor:not-allowed; }
+        #payoutsWrap .row-cb, #payoutsWrap #bulkSelAll { cursor: pointer; width: 16px; height: 16px; accent-color: #0a2f63; }
+        #payoutsWrap .cb-cell { cursor: default; }
+        @media (max-width: 720px) {
+          #bulkBar > button { flex: 1 1 100%; }
+        }
+      </style>
     `;
 
+    // Wiring: row-main blijft klikbaar voor detail-toggle, behalve wanneer
+    // de klik in de checkbox-cell valt.
     document.querySelectorAll('.row-main').forEach((tr) => {
-      tr.addEventListener('click', () => toggleDetail(tr));
+      tr.addEventListener('click', (e) => {
+        if (e.target && (e.target.classList.contains('row-cb') || e.target.closest('.cb-cell'))) return;
+        toggleDetail(tr);
+      });
     });
+    document.querySelectorAll('.row-cb').forEach((cb) => {
+      cb.addEventListener('click', (e) => e.stopPropagation());
+      cb.addEventListener('change', () => {
+        const pid = cb.dataset.payoutId;
+        if (!pid) return;
+        if (cb.checked) _selection.add(pid);
+        else            _selection.delete(pid);
+        refreshBulkBar();
+      });
+    });
+    const selAll = document.getElementById('bulkSelAll');
+    if (selAll) {
+      selAll.addEventListener('change', () => {
+        const checked = selAll.checked;
+        document.querySelectorAll('.row-cb').forEach((cb) => {
+          cb.checked = checked;
+          const pid = cb.dataset.payoutId;
+          if (!pid) return;
+          if (checked) _selection.add(pid);
+          else         _selection.delete(pid);
+        });
+        refreshBulkBar();
+      });
+    }
+    const btnGen     = document.getElementById('bulkGenBtn');
+    const btnApprove = document.getElementById('bulkApproveBtn');
+    const btnPaid    = document.getElementById('bulkPaidBtn');
+    if (btnGen)     btnGen.addEventListener('click', () => bulkGenerate());
+    if (btnApprove) btnApprove.addEventListener('click', () => bulkApprove());
+    if (btnPaid)    btnPaid.addEventListener('click', () => bulkMarkPaid());
+
+    refreshBulkBar();
+  }
+
+  function refreshBulkBar() {
+    const bar  = document.getElementById('bulkBar');
+    const cnt  = document.getElementById('bulkSelCount');
+    if (!bar || !cnt) return;
+    const n = _selection.size;
+    bar.style.display = (n > 0) ? 'flex' : 'none';
+    cnt.textContent = n + ' geselecteerd';
+    // Sel-all checkbox-staat afleiden uit huidig DOM.
+    const all = document.getElementById('bulkSelAll');
+    if (all) {
+      const total   = document.querySelectorAll('.row-cb').length;
+      const checked = document.querySelectorAll('.row-cb:checked').length;
+      all.checked      = (total > 0 && checked === total);
+      all.indeterminate = (checked > 0 && checked < total);
+    }
+    // Knoppen disabled tijdens batch.
+    ['bulkGenBtn','bulkApproveBtn','bulkPaidBtn'].forEach((id) => {
+      const b = document.getElementById(id);
+      if (b) b.disabled = _bulkRunning;
+    });
+  }
+
+  // ── Bulk-acties ────────────────────────────────────────────────────────
+  // Sequentieel per geselecteerde rij; live voortgang + persistent
+  // resultatenpaneel. Eén fout stopt de hele batch NIET; we rapporteren 'm.
+  function _bulkSelectedRows() {
+    const out = [];
+    for (const pid of _selection) {
+      const r = _payoutsByPid.get(pid);
+      if (r) out.push(r);
+    }
+    return out;
+  }
+
+  function _renderBulkProgress(actionLabel, done, total) {
+    const el = document.getElementById('bulkProgress');
+    if (!el) return;
+    el.style.display = 'block';
+    el.textContent = `${actionLabel}… ${done}/${total}`;
+  }
+
+  function _renderBulkResults(results) {
+    const el = document.getElementById('bulkResults');
+    if (!el) return;
+    el.style.display = 'block';
+    const okN   = results.filter((r) => r.outcome === 'ok').length;
+    const skipN = results.filter((r) => r.outcome === 'skip').length;
+    const errN  = results.filter((r) => r.outcome === 'err').length;
+    const lines = results.map((r) => {
+      const name = esc(r.mentor_name || r.mentor_user_id || '—');
+      if (r.outcome === 'ok') {
+        return `<div style="color:#15803d">✓ <strong>${name}</strong>${r.detail ? ' — ' + esc(r.detail) : ''}</div>`;
+      }
+      if (r.outcome === 'skip') {
+        return `<div style="color:#b45309">⏭️ <strong>${name}</strong> — overgeslagen (${esc(r.reason || 'onbekende reden')})</div>`;
+      }
+      return `<div style="color:#b91c1c">✗ <strong>${name}</strong> — ${esc(r.reason || 'fout')}</div>`;
+    }).join('');
+    el.innerHTML = `
+      <div style="padding:10px 12px;border:1px solid var(--border);border-radius:8px;background:var(--bg-elev)">
+        <div style="font-size:12.5px;font-weight:700;margin-bottom:6px;color:var(--text)">
+          Resultaat — ${okN} gelukt · ${skipN} overgeslagen · ${errN} fout
+        </div>
+        <div style="font-size:12px;line-height:1.7">${lines || '<em>geen rijen</em>'}</div>
+      </div>`;
+  }
+
+  async function bulkGenerate() {
+    if (_bulkRunning) return;
+    const rows = _bulkSelectedRows();
+    if (rows.length === 0) return;
+    const apiFetch = window.AgentShared?.apiFetch;
+    if (typeof apiFetch !== 'function') return;
+    const periodMonth = document.getElementById('periodMonth').value;
+    if (!periodMonth) return;
+    _bulkRunning = true; refreshBulkBar();
+    const results = [];
+    for (let i = 0; i < rows.length; i++) {
+      const p = rows[i];
+      _renderBulkProgress('Genereren', i, rows.length);
+      try {
+        const r = await apiFetch('/api/mentor-payout-generate', {
+          method : 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body   : JSON.stringify({
+            period_month  : periodMonth,
+            mentor_user_id: p.mentor_user_id,
+          }),
+        });
+        const d = await r.json();
+        if (!r.ok) throw new Error(d?.error || 'generate faalde');
+        // /generate retourneert mentors:[{...,skipped?:bool,reason?:string}]
+        const m = (d.mentors && d.mentors[0]) || null;
+        if (m && m.skipped) {
+          results.push({ mentor_name: p.mentor_name, outcome: 'skip', reason: m.reason || 'al definitief' });
+        } else if (m && m.error) {
+          results.push({ mentor_name: p.mentor_name, outcome: 'err', reason: m.error });
+        } else {
+          results.push({ mentor_name: p.mentor_name, outcome: 'ok' });
+        }
+      } catch (e) {
+        results.push({ mentor_name: p.mentor_name, outcome: 'err', reason: e?.message || String(e) });
+      }
+      _renderBulkResults(results);
+    }
+    _renderBulkProgress('Genereren', rows.length, rows.length);
+    _bulkRunning = false;
+    await loadList(); // selectie + results worden gewist door _detailCache+_actionFeedback+clearBulkState
+    _renderBulkResults(results); // resultatenpaneel terugzetten ná lijst-refresh
+  }
+
+  async function bulkApprove() {
+    if (_bulkRunning) return;
+    const rows = _bulkSelectedRows();
+    if (rows.length === 0) return;
+    const eligible = rows.filter((p) => p.status === 'concept');
+    const ineligible = rows.length - eligible.length;
+    const confirmMsg = `Weet je zeker? ${eligible.length} rapport(en) goedkeuren en mailen?` +
+      (ineligible > 0 ? ` (${ineligible} overgeslagen — niet in concept)` : '');
+    if (!window.confirm(confirmMsg)) return;
+    const apiFetch = window.AgentShared?.apiFetch;
+    if (typeof apiFetch !== 'function') return;
+    _bulkRunning = true; refreshBulkBar();
+    const results = [];
+    for (let i = 0; i < rows.length; i++) {
+      const p = rows[i];
+      _renderBulkProgress('Goedkeuren', i, rows.length);
+      if (p.status !== 'concept') {
+        results.push({ mentor_name: p.mentor_name, outcome: 'skip', reason: 'niet in concept (status=' + (p.status || '—') + ')' });
+        _renderBulkResults(results);
+        continue;
+      }
+      try {
+        const r = await apiFetch('/api/mentor-payout-approve', {
+          method : 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body   : JSON.stringify({ payout_id: p.id }),
+        });
+        const d = await r.json();
+        if (!r.ok) throw new Error(d?.error || 'approve faalde');
+        const detail = d.emailSent
+          ? 'goedgekeurd · mail verstuurd'
+          : 'goedgekeurd · mail NIET verzonden (' + (d.emailReason || 'onbekend') + ')';
+        results.push({ mentor_name: p.mentor_name, outcome: 'ok', detail });
+      } catch (e) {
+        results.push({ mentor_name: p.mentor_name, outcome: 'err', reason: e?.message || String(e) });
+      }
+      _renderBulkResults(results);
+    }
+    _renderBulkProgress('Goedkeuren', rows.length, rows.length);
+    _bulkRunning = false;
+    await loadList();
+    _renderBulkResults(results);
+  }
+
+  async function bulkMarkPaid() {
+    if (_bulkRunning) return;
+    const rows = _bulkSelectedRows();
+    if (rows.length === 0) return;
+    const eligible = rows.filter((p) => p.status === 'goedgekeurd');
+    const ineligible = rows.length - eligible.length;
+    const confirmMsg = `Weet je zeker? ${eligible.length} rapport(en) markeren als uitbetaald? Dit boekt de ledger-entries definitief in.` +
+      (ineligible > 0 ? ` (${ineligible} overgeslagen — niet goedgekeurd)` : '');
+    if (!window.confirm(confirmMsg)) return;
+    const apiFetch = window.AgentShared?.apiFetch;
+    if (typeof apiFetch !== 'function') return;
+    _bulkRunning = true; refreshBulkBar();
+    const results = [];
+    for (let i = 0; i < rows.length; i++) {
+      const p = rows[i];
+      _renderBulkProgress('Markeren uitbetaald', i, rows.length);
+      if (p.status !== 'goedgekeurd') {
+        results.push({ mentor_name: p.mentor_name, outcome: 'skip', reason: 'niet goedgekeurd (status=' + (p.status || '—') + ')' });
+        _renderBulkResults(results);
+        continue;
+      }
+      try {
+        const r = await apiFetch('/api/mentor-payout-mark-paid', {
+          method : 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body   : JSON.stringify({ payout_id: p.id }),
+        });
+        const d = await r.json();
+        if (!r.ok) {
+          if (d?.code === 'BONUS_DRIFT') {
+            results.push({ mentor_name: p.mentor_name, outcome: 'err', reason: 'bonusbedrag gewijzigd — opnieuw goedkeuren' });
+          } else {
+            throw new Error(d?.error || 'markeren faalde');
+          }
+        } else {
+          const n = Number(d.ledger_marked) || 0;
+          results.push({ mentor_name: p.mentor_name, outcome: 'ok', detail: n + ' grootboek' + (n === 1 ? 'regel' : 'regels') + ' geboekt' });
+        }
+      } catch (e) {
+        results.push({ mentor_name: p.mentor_name, outcome: 'err', reason: e?.message || String(e) });
+      }
+      _renderBulkResults(results);
+    }
+    _renderBulkProgress('Markeren uitbetaald', rows.length, rows.length);
+    _bulkRunning = false;
+    await loadList();
+    _renderBulkResults(results);
   }
 
   function renderDetail(idx, detail) {
@@ -839,6 +1126,7 @@
     try {
       _detailCache.clear();
       _actionFeedback.clear();
+      clearBulkState();
       const r = await apiFetch(`/api/mentor-payouts-admin-list?period_month=${encodeURIComponent(periodMonth)}`);
       const d = await r.json();
       if (!r.ok) throw new Error(d?.error || 'lijst-fetch faalde');
