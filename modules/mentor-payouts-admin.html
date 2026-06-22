@@ -312,6 +312,7 @@
       </div>` : '';
 
     host.innerHTML = `
+      ${_renderActionFeedback(p.id)}
       <div class="detail-meta">${meta.join(' · ') || '<em>Nog niet gegenereerd</em>'}</div>
       ${approveBlock}
       ${paidBlock}
@@ -418,24 +419,35 @@
       });
       const d = await r.json();
       if (!r.ok) {
-        // BONUS_DRIFT krijgt een specifieke, actiegerichte melding.
+        // BONUS_DRIFT krijgt een specifieke, actiegerichte melding — blijvend
+        // boven het detail-blok zodat de admin het ziet ná de re-render.
         if (d?.code === 'BONUS_DRIFT') {
-          if (status) status.textContent = '⚠️ Bonusbedrag is gewijzigd sinds goedkeuren. Keur het rapport opnieuw goed voordat je het op uitbetaald zet.';
+          _actionFeedback.set(payoutId, {
+            tone: 'warn',
+            html: '⚠️ <strong>Bonusbedrag is gewijzigd sinds goedkeuren.</strong> Keur het rapport opnieuw goed voordat je het op uitbetaald zet.',
+          });
+          _detailCache.delete(payoutId);
+          await refetchDetail(payoutId, idx);
           btn.disabled = false;
           return;
         }
         throw new Error(d?.error || 'markeren faalde');
       }
-      if (status) {
-        const n = Number(d.ledger_marked) || 0;
-        status.textContent = '✅ Uitbetaald · ' + n + ' ledger-' + (n === 1 ? 'entry' : 'entries') + ' definitief geboekt';
-      }
-      btn.style.display = 'none';
+      const n = Number(d.ledger_marked) || 0;
+      _actionFeedback.set(payoutId, {
+        tone: 'ok',
+        html: '✓ <strong>Uitbetaald</strong> — ' + n + ' grootboek' + (n === 1 ? 'regel' : 'regels') + ' gemarkeerd.',
+      });
       _detailCache.delete(payoutId);
       await refetchDetail(payoutId, idx);
       await loadList();
     } catch (e) {
-      if (status) status.textContent = 'Fout: ' + (e?.message || e);
+      _actionFeedback.set(payoutId, {
+        tone: 'err',
+        html: '⚠️ Markeren als uitbetaald mislukt — ' + esc(e?.message || e),
+      });
+      _detailCache.delete(payoutId);
+      try { await refetchDetail(payoutId, idx); } catch {}
       btn.disabled = false;
     }
   }
@@ -456,18 +468,35 @@
       });
       const d = await r.json();
       if (!r.ok) throw new Error(d?.error || 'approve faalde');
-      if (status) {
-        status.textContent = d.emailSent
-          ? '✅ Goedgekeurd · mail verstuurd'
-          : '✅ Goedgekeurd · ⚠️ let op: mail niet verzonden (' + (d.emailReason || 'onbekend') + ')';
+
+      // Blijvende feedback opbouwen: 1) goedgekeurd-regel, 2) mail-status regel.
+      const dateNL = d.approved_at ? fmtDateNL(d.approved_at) : '—';
+      const lines = [];
+      lines.push('✓ <strong>Goedgekeurd</strong> op ' + esc(dateNL) + '.');
+      if (d.emailSent) {
+        const recip = d.mentor_email ? esc(d.mentor_email) : 'de mentor';
+        lines.push('📧 Mail verstuurd naar <strong>' + recip + '</strong>.');
+      } else {
+        const reason = esc(d.emailReason || 'onbekend');
+        lines.push('⚠️ <strong>Mail NIET verzonden</strong> — reden: ' + reason + '.');
       }
-      btn.style.display = 'none';
+      _actionFeedback.set(payoutId, {
+        // Zelfs als de goedkeuring lukte: bij mail-fail tonen we het hele
+        // blok in 'warn'-stijl zodat de admin de mail-issue niet mist.
+        tone: d.emailSent ? 'ok' : 'warn',
+        html: lines.join('<br>'),
+      });
       // Detail-cache verversen + tabel-kop opnieuw laden zodat status-badge bijwerkt.
       _detailCache.delete(payoutId);
       await refetchDetail(payoutId, idx);
       await loadList();
     } catch (e) {
-      if (status) status.textContent = 'Fout: ' + (e?.message || e);
+      _actionFeedback.set(payoutId, {
+        tone: 'err',
+        html: '⚠️ Goedkeuren mislukt — ' + esc(e?.message || e),
+      });
+      _detailCache.delete(payoutId);
+      try { await refetchDetail(payoutId, idx); } catch {}
       btn.disabled = false;
     }
   }
@@ -593,6 +622,23 @@
 
   // Cache van detail-fetches per payout-id zodat klap-toggle geen 2e fetch doet.
   const _detailCache = new Map();
+  // Persistente actie-feedback per payout-id. Overleeft re-renders van het
+  // detail-paneel (refetchDetail), wordt pas gewist bij sluiten van het
+  // detail of bij een nieuwe loadList. Vorm: { tone: 'ok'|'warn'|'err', html }.
+  const _actionFeedback = new Map();
+  function _renderActionFeedback(payoutId) {
+    const fb = _actionFeedback.get(payoutId);
+    if (!fb) return '';
+    const palette = (fb.tone === 'warn')
+      ? { bg: 'rgba(245,158,11,0.10)', bd: '#fde68a', fg: '#b45309' }
+      : (fb.tone === 'err')
+        ? { bg: 'rgba(239,68,68,0.10)', bd: '#fecaca', fg: '#b91c1c' }
+        : { bg: 'rgba(21,128,61,0.08)', bd: '#bbf7d0', fg: '#15803d' };
+    return `
+      <div class="action-feedback" style="margin:0 0 12px;padding:10px 12px;border:1px solid ${palette.bd};background:${palette.bg};color:${palette.fg};border-radius:8px;font-size:12.5px;line-height:1.5">
+        ${fb.html}
+      </div>`;
+  }
   async function toggleDetail(tr) {
     const idx = tr.dataset.rowIdx;
     const payoutId = tr.dataset.payoutId;
@@ -635,6 +681,7 @@
     } catch {}
     try {
       _detailCache.clear();
+      _actionFeedback.clear();
       const r = await apiFetch(`/api/mentor-payouts-admin-list?period_month=${encodeURIComponent(periodMonth)}`);
       const d = await r.json();
       if (!r.ok) throw new Error(d?.error || 'lijst-fetch faalde');
