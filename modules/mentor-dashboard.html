@@ -42,6 +42,27 @@
        met de cijfers eronder. */
     .data-table th.num { text-align: right; }
 
+    /* Dashboard-landing layout — auto-fit grid voor stat-kaarten + status-balk. */
+    .dash-status-bar {
+      padding: 12px 16px; border-radius: 10px; margin-bottom: 16px;
+      font-size: 13.5px; line-height: 1.5; display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    }
+    .dash-status-bar.is-ok   { background: rgba(21,128,61,0.10); border: 1px solid rgba(21,128,61,0.30); color: #15803d; }
+    .dash-status-bar.is-paid { background: rgba(100,116,139,0.10); border: 1px solid var(--border); color: var(--text-dim); }
+    .dash-status-bar strong  { color: inherit; }
+
+    .dash-stat-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 14px; margin-bottom: 22px;
+    }
+    .dash-stat-card {
+      background: var(--bg-elev); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px;
+    }
+    .dash-stat-card .ds-label { font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-dim); font-weight: 600; }
+    .dash-stat-card .ds-value { font-size: 22px; font-weight: 700; margin-top: 4px; color: var(--text); font-variant-numeric: tabular-nums; }
+    .dash-stat-card .ds-sub   { font-size: 11.5px; color: var(--text-dim); margin-top: 2px; }
+
     .badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; white-space: nowrap; }
     .badge-green  { background: rgba(34,197,94,0.13);  color: #15803d; }
     .badge-amber  { background: rgba(245,158,11,0.16); color: #b45309; }
@@ -109,33 +130,30 @@
   </div>
 
   <div class="tab-strip" role="tablist">
-    <button class="tab-btn active" data-tab="grootboek" type="button">Grootboek</button>
-    <button class="tab-btn" data-tab="verdiensten" type="button">Verdiensten</button>
-    <button class="tab-btn" data-tab="studenten" type="button">Mijn studenten</button>
+    <button class="tab-btn active" data-tab="dashboard"   type="button">Dashboard</button>
+    <button class="tab-btn"        data-tab="verdiensten" type="button">Verdiensten</button>
+    <button class="tab-btn"        data-tab="studenten"   type="button">Mijn studenten</button>
+    <button class="tab-btn"        data-tab="toekomst"    type="button">Toekomstige studenten</button>
   </div>
 
-  <!-- Tab: Grootboek (bestaande secties) -->
-  <div id="tabGrootboek" class="tab-panel">
-    <div class="kpi-row" id="kpiRow">
-      <div class="kpi-card"><div class="kpi-label">Saldo (netto)</div><div class="kpi-value"><span class="skeleton"></span></div><div class="kpi-sub">Vrijgegeven minus uitgaven</div></div>
-      <div class="kpi-card"><div class="kpi-label">Bonuspot bruto</div><div class="kpi-value"><span class="skeleton"></span></div><div class="kpi-sub">Alle statussen samen</div></div>
-      <div class="kpi-card"><div class="kpi-label">Komende events</div><div class="kpi-value"><span class="skeleton"></span></div><div class="kpi-sub">Vanaf vandaag</div></div>
-      <div class="kpi-card"><div class="kpi-label">Events totaal</div><div class="kpi-value"><span class="skeleton"></span></div><div class="kpi-sub">Verleden + toekomst</div></div>
+  <!-- Tab: Dashboard (landing) -->
+  <div id="tabDashboard" class="tab-panel">
+    <!-- Rapportstatus-balk: groene 'staat klaar' bij goedgekeurd, neutraal bij uitbetaald, weg als niets. -->
+    <div id="dashStatusBar" hidden></div>
+
+    <!-- Stat-kaarten — auto-fit grid die zich aan het scherm aanpast. -->
+    <div id="dashStatGrid" class="dash-stat-grid">
+      <div class="empty-state" style="grid-column:1/-1"><span class="skeleton" style="width:160px"></span></div>
     </div>
 
     <div class="section">
-      <h2><i class="ti ti-coin"></i> Bonussen per event</h2>
-      <div id="bonusByEventWrap"></div>
-    </div>
-
-    <div class="section">
-      <h2><i class="ti ti-calendar-event"></i> Mijn komende sessies</h2>
+      <h2><i class="ti ti-calendar-event"></i> Komende sessies</h2>
       <div id="calendarWrap"></div>
     </div>
 
     <div class="section">
-      <h2><i class="ti ti-list-details"></i> Mijn events (compleet)</h2>
-      <div id="myEventsWrap"></div>
+      <h2><i class="ti ti-user-plus"></i> Toekomstige studenten</h2>
+      <div class="empty-state"><i class="ti ti-clock"></i>Binnenkort beschikbaar — na de onboarding-build.</div>
     </div>
   </div>
 
@@ -176,6 +194,10 @@
         <h2><i class="ti ti-coin-euro"></i> Bonus per event / sale</h2>
         <div id="eventBonusWrap"></div>
       </div>
+      <div class="section">
+        <h2><i class="ti ti-list-details"></i> Mijn events (compleet)</h2>
+        <div id="myEventsWrap"></div>
+      </div>
     </div>
 
     <div id="subUitbetalingen" class="subtab-panel" hidden>
@@ -205,6 +227,14 @@
     <div class="section">
       <h2><i class="ti ti-users"></i> Mijn studenten</h2>
       <div id="studentsWrap"></div>
+    </div>
+  </div>
+
+  <!-- Tab: Toekomstige studenten (placeholder) -->
+  <div id="tabToekomst" class="tab-panel" hidden>
+    <div class="section">
+      <h2><i class="ti ti-user-plus"></i> Toekomstige studenten</h2>
+      <div class="empty-state"><i class="ti ti-clock"></i>Binnenkort beschikbaar — na de onboarding-build.</div>
     </div>
   </div>
 </div>
@@ -258,40 +288,6 @@
       .join(' ');
   }
 
-  function setKpis({ netto, bonuspot, upcoming, total }) {
-    const row = document.getElementById('kpiRow');
-    row.innerHTML =
-      `<div class="kpi-card"><div class="kpi-label">Saldo (netto)</div><div class="kpi-value">${fmtEUR(netto)}</div><div class="kpi-sub">Vrijgegeven minus uitgaven</div></div>` +
-      `<div class="kpi-card"><div class="kpi-label">Bonuspot bruto</div><div class="kpi-value">${fmtEUR(bonuspot)}</div><div class="kpi-sub">Alle statussen samen</div></div>` +
-      `<div class="kpi-card"><div class="kpi-label">Komende events</div><div class="kpi-value">${upcoming}</div><div class="kpi-sub">Vanaf vandaag</div></div>` +
-      `<div class="kpi-card"><div class="kpi-label">Events totaal</div><div class="kpi-value">${total}</div><div class="kpi-sub">Verleden + toekomst</div></div>`;
-  }
-
-  function renderBonusByEvent(byEvent) {
-    const wrap = document.getElementById('bonusByEventWrap');
-    if (!Array.isArray(byEvent) || byEvent.length === 0) {
-      wrap.innerHTML = `<div class="empty-state"><i class="ti ti-coin-off"></i>Nog geen bonus-regels in het grootboek.</div>`;
-      return;
-    }
-    const rows = byEvent.map((c) => {
-      const chips = statusChips(c.per_status);
-      return `
-        <tr>
-          <td>${esc(c.event_title || '—')}</td>
-          <td>${fmtDateNL(c.starts_at)}</td>
-          <td class="num">${fmtEUR(c.bonuspot)}</td>
-          <td class="num">${fmtEUR(c.uitgaven)}</td>
-          <td class="num"><strong>${fmtEUR(c.netto)}</strong></td>
-          <td>${chips || '<span class="badge badge-grey">—</span>'}</td>
-        </tr>`;
-    }).join('');
-    wrap.innerHTML = `
-      <table class="data-table">
-        <thead><tr><th>Event</th><th>Datum</th><th class="num">Bonus bruto</th><th class="num">Uitgaven</th><th class="num">Netto</th><th>Status</th></tr></thead>
-        <tbody>${rows}</tbody>
-      </table>`;
-  }
-
   function renderCalendar(events) {
     const wrap = document.getElementById('calendarWrap');
     if (!Array.isArray(events) || events.length === 0) {
@@ -342,18 +338,22 @@
     studentsLoaded: false,
     coachingInited: false,
     dashboardLoaded: false,
+    landingLoaded: false,       // nieuwe Dashboard-landing tab
   };
 
   function activateTab(name) {
     document.querySelectorAll('.tab-btn').forEach((b) => {
       b.classList.toggle('active', b.dataset.tab === name);
     });
-    document.getElementById('tabGrootboek').hidden    = (name !== 'grootboek');
+    document.getElementById('tabDashboard').hidden    = (name !== 'dashboard');
     document.getElementById('tabVerdiensten').hidden  = (name !== 'verdiensten');
     document.getElementById('tabStudenten').hidden    = (name !== 'studenten');
+    document.getElementById('tabToekomst').hidden     = (name !== 'toekomst');
+    // Dashboard-landing lazy laden bij eerste opening.
+    if (name === 'dashboard'   && !_vState.landingLoaded)   loadOverviewDashboard();
     // Verdiensten-tab opent op "overzicht" — dashboard lazy-laden zodra de tab actief wordt.
     if (name === 'verdiensten' && !_vState.dashboardLoaded) loadDashboard();
-    if (name === 'studenten' && !_vState.studentsLoaded) loadStudents();
+    if (name === 'studenten'   && !_vState.studentsLoaded)  loadStudents();
   }
 
   function activateSubtab(name) {
@@ -650,13 +650,26 @@
       return;
     }
     try { if (window._authSharedReady) await window._authSharedReady; } catch {}
+    // Parallel: bonus-overview (KPI's + projectie + bonus-per-event) +
+    // my-events (Mijn events compleet — verplaatst uit het oude Grootboek).
     try {
-      const r = await apiFetch('/api/mentor-bonus-overview');
-      const d = await r.json();
-      if (!r.ok) throw new Error(d?.error || 'bonus-overview failed');
+      const [bonusResp, myEventsResp] = await Promise.all([
+        apiFetch('/api/mentor-bonus-overview'),
+        apiFetch('/api/mentor-my-events?scope=all'),
+      ]);
+      const d = await bonusResp.json();
+      if (!bonusResp.ok) throw new Error(d?.error || 'bonus-overview failed');
       setVerdienstenKpis(d.totals || { earned_total: 0, betaald_uit: 0, open: 0, deze_maand: 0, volgende_maand: 0 });
       renderProjection12m(d.projection_12m || []);
       renderEventBonus(d.per_event || []);
+      try {
+        const ev = await myEventsResp.json();
+        if (myEventsResp.ok) renderMyEvents(ev.events || []);
+        else throw new Error(ev?.error || 'my-events failed');
+      } catch (eEv) {
+        console.error('[mentor-dashboard] my-events:', eEv?.message || eEv);
+        setError('myEventsWrap', 'Events ophalen mislukt: ' + (eEv?.message || eEv));
+      }
     } catch (e) {
       console.error('[mentor-dashboard] verdiensten:', e?.message || e);
       setError('projection12mWrap', 'Verdiensten ophalen mislukt: ' + (e?.message || e));
@@ -1503,68 +1516,166 @@
     });
   }
 
-  async function loadAll() {
-    const apiFetch = window.AgentShared?.apiFetch;
-    if (typeof apiFetch !== 'function') {
-      ['bonusByEventWrap','calendarWrap','myEventsWrap'].forEach((id) => setError(id, 'apiFetch niet beschikbaar (agent-shared.js niet geladen?).'));
+  // ── Dashboard-landing (nieuwe default-tab) ──────────────────────────────
+  // Combineert: rapportstatus-balk + stat-kaarten + komende sessies.
+  // Hergebruikt bestaande endpoints: /api/mentor-bonus-overview,
+  // /api/mentor-coaching-earnings (maand + YTD), /api/mentor-my-students,
+  // /api/mentor-my-calendar, /api/mentor-payouts-list-self,
+  // /api/mentor-travel-days-self. Reiskosten-kaart alleen renderen als
+  // travel_enabled true is.
+  function _todayIsoUtcLanding() {
+    const n = new Date();
+    return `${n.getUTCFullYear()}-${String(n.getUTCMonth()+1).padStart(2,'0')}-${String(n.getUTCDate()).padStart(2,'0')}`;
+  }
+  function _monthRangeUtc() {
+    const n = new Date();
+    const y = n.getUTCFullYear();
+    const m = n.getUTCMonth() + 1;
+    const first = `${y}-${String(m).padStart(2,'0')}-01`;
+    const last  = new Date(Date.UTC(y, m, 0));
+    const lastIso = `${last.getUTCFullYear()}-${String(last.getUTCMonth()+1).padStart(2,'0')}-${String(last.getUTCDate()).padStart(2,'0')}`;
+    return { first, last: lastIso };
+  }
+  function _ytdRangeUtc() {
+    const n = new Date();
+    return { first: `${n.getUTCFullYear()}-01-01`, last: _todayIsoUtcLanding() };
+  }
+  function _periodMonthNL(periodMonthIso) {
+    if (!periodMonthIso) return '';
+    const m = String(periodMonthIso).match(/^(\d{4})-(\d{2})/);
+    if (!m) return periodMonthIso;
+    const months = ['', 'januari','februari','maart','april','mei','juni','juli','augustus','september','oktober','november','december'];
+    const idx = parseInt(m[2], 10);
+    return `${months[idx] || m[2]} ${m[1]}`;
+  }
+
+  function _renderStatusBar(payouts) {
+    const bar = document.getElementById('dashStatusBar');
+    if (!bar) return;
+    const list = Array.isArray(payouts) ? payouts : [];
+    // Self-list filtert al op goedgekeurd/uitbetaald; pak meest recente goedgekeurd,
+    // anders meest recente uitbetaald.
+    const approved = list.find((p) => p.status === 'goedgekeurd');
+    if (approved) {
+      bar.hidden = false;
+      bar.className = 'dash-status-bar is-ok';
+      bar.innerHTML = `<i class="ti ti-receipt-tax"></i>
+        <span>Je rapport voor <strong>${esc(_periodMonthNL(approved.period_month))}</strong> staat klaar
+          (<strong>${fmtEUR(approved.total)}</strong>) — stuur je factuur.</span>`;
       return;
     }
+    const paid = list.find((p) => p.status === 'uitbetaald');
+    if (paid) {
+      bar.hidden = false;
+      bar.className = 'dash-status-bar is-paid';
+      bar.innerHTML = `<i class="ti ti-receipt-2"></i>
+        <span>Laatste rapport (<strong>${esc(_periodMonthNL(paid.period_month))}</strong>) uitbetaald.</span>`;
+      return;
+    }
+    bar.hidden = true;
+    bar.innerHTML = '';
+  }
 
-    // Eerst auth-shared awaiten zodat de Bearer-token klaar staat.
+  function _statCard(label, value, sub) {
+    return `<div class="dash-stat-card">
+      <div class="ds-label">${esc(label)}</div>
+      <div class="ds-value">${value}</div>
+      <div class="ds-sub">${esc(sub || '')}</div>
+    </div>`;
+  }
+
+  function _renderStatGrid(stats) {
+    const grid = document.getElementById('dashStatGrid');
+    if (!grid) return;
+    grid.innerHTML = stats.map((s) => _statCard(s.label, s.value, s.sub)).join('');
+  }
+
+  async function loadOverviewDashboard() {
+    _vState.landingLoaded = true;
+    const apiFetch = window.AgentShared?.apiFetch;
+    if (typeof apiFetch !== 'function') {
+      setError('dashStatGrid', 'apiFetch niet beschikbaar.');
+      setError('calendarWrap', 'apiFetch niet beschikbaar.');
+      return;
+    }
     try { if (window._authSharedReady) await window._authSharedReady; } catch {}
 
-    let ledger = null, myEvents = null, calendar = null;
+    const month = _monthRangeUtc();
+    const ytd   = _ytdRangeUtc();
 
-    try {
-      const r = await apiFetch('/api/mentor-ledger-overview');
-      const d = await r.json();
-      if (!r.ok) throw new Error(d?.error || 'ledger fetch failed');
-      ledger = d;
-    } catch (e) {
-      console.error('[mentor-dashboard] ledger:', e?.message || e);
-      setError('bonusByEventWrap', 'Bonussen ophalen mislukt: ' + (e?.message || e));
+    const tasks = [
+      apiFetch('/api/mentor-bonus-overview'),
+      apiFetch(`/api/mentor-coaching-earnings?from=${encodeURIComponent(month.first)}&to=${encodeURIComponent(month.last)}`),
+      apiFetch(`/api/mentor-coaching-earnings?from=${encodeURIComponent(ytd.first)}&to=${encodeURIComponent(ytd.last)}`),
+      apiFetch('/api/mentor-my-students'),
+      apiFetch('/api/mentor-my-calendar'),
+      apiFetch('/api/mentor-payouts-list-self'),
+      apiFetch(`/api/mentor-travel-days-self?period_month=${encodeURIComponent(month.first.slice(0,7))}`),
+    ];
+    const [bonusR, coachMonthR, coachYtdR, studentsR, calendarR, payoutsR, travelR] =
+      await Promise.allSettled(tasks);
+
+    async function jsonOk(settled) {
+      if (settled.status !== 'fulfilled') return null;
+      try {
+        const j = await settled.value.json();
+        return settled.value.ok ? j : null;
+      } catch { return null; }
     }
+    const bonus      = await jsonOk(bonusR);
+    const coachMonth = await jsonOk(coachMonthR);
+    const coachYtd   = await jsonOk(coachYtdR);
+    const students   = await jsonOk(studentsR);
+    const calendar   = await jsonOk(calendarR);
+    const payouts    = await jsonOk(payoutsR);
+    const travel     = await jsonOk(travelR);
 
-    try {
-      const r = await apiFetch('/api/mentor-my-events?scope=all');
-      const d = await r.json();
-      if (!r.ok) throw new Error(d?.error || 'my-events fetch failed');
-      myEvents = d;
-    } catch (e) {
-      console.error('[mentor-dashboard] my-events:', e?.message || e);
-      setError('myEventsWrap', 'Eigen events ophalen mislukt: ' + (e?.message || e));
+    _renderStatusBar(payouts?.payouts || []);
+
+    const bonusTotals     = bonus?.totals || {};
+    const bonusEarnedYTD  = Number(bonusTotals.earned_total) || 0;
+    const bonusDezeMaand  = Number(bonusTotals.deze_maand)   || 0;
+    const bonusOpen       = Number(bonusTotals.open)         || 0;
+    const coachingMaand   = Number(coachMonth?.grand_total)  || 0;
+    const coachingYTD     = Number(coachYtd?.grand_total)    || 0;
+    const totaalStudenten = Array.isArray(students?.students) ? students.students.length : 0;
+    const verdiendMaand   = bonusDezeMaand + coachingMaand;
+    const verdiendYTD     = bonusEarnedYTD + coachingYTD;
+    const paidList        = (payouts?.payouts || []).filter((p) => p.status === 'uitbetaald');
+    const laatsteUitbet   = paidList[0] || null;
+
+    const stats = [
+      { label: 'Verdiensten deze maand',  value: fmtEUR(verdiendMaand),                 sub: 'Events-bonus + coaching' },
+      { label: 'Coaching deze maand',     value: fmtEUR(coachingMaand),                 sub: '1-op-1 + team + no-show + funded' },
+      { label: 'Events-bonus deze maand', value: fmtEUR(bonusDezeMaand),                sub: 'Termijn deze maand' },
+      { label: 'Totaal studenten',        value: String(totaalStudenten),               sub: 'Onder jouw mentorschap' },
+      { label: 'Openstaand',              value: fmtEUR(bonusOpen),                     sub: 'Niet-betaalde termijnen' },
+      { label: 'Laatste uitbetaling',     value: laatsteUitbet ? fmtEUR(laatsteUitbet.total) : '—', sub: laatsteUitbet ? _periodMonthNL(laatsteUitbet.period_month) : 'Nog geen uitbetalingen' },
+      { label: 'Verdiend dit jaar (YTD)', value: fmtEUR(verdiendYTD),                   sub: 'Bonus + coaching, 1 jan t/m vandaag' },
+    ];
+    // Reiskosten-kaart alleen als finance travel_enabled aanzet.
+    if (travel && travel.travel_enabled) {
+      const days = Number(travel.days) || 0;
+      const rate = Number(travel.day_rate_incl) || 0;
+      const reisAmt = Math.round(days * rate * 100) / 100;
+      stats.push({
+        label: 'Reiskosten deze maand',
+        value: fmtEUR(reisAmt),
+        sub  : `${days} dag${days === 1 ? '' : 'en'} × ${fmtEUR(rate)}`,
+      });
     }
+    _renderStatGrid(stats);
 
-    try {
-      const r = await apiFetch('/api/mentor-my-calendar');
-      const d = await r.json();
-      if (!r.ok) throw new Error(d?.error || 'calendar fetch failed');
-      calendar = d;
-    } catch (e) {
-      console.error('[mentor-dashboard] calendar:', e?.message || e);
-      setError('calendarWrap', 'Kalender ophalen mislukt: ' + (e?.message || e));
-    }
-
-    const totals = ledger?.totals || { netto: 0, bonuspot: 0 };
-    const evtList = myEvents?.events || [];
-    const calList = calendar?.events || [];
-    setKpis({
-      netto:    totals.netto,
-      bonuspot: totals.bonuspot,
-      upcoming: calList.length,
-      total:    evtList.length,
-    });
-
-    if (ledger) renderBonusByEvent(ledger.byEvent || []);
-    if (calendar) renderCalendar(calList);
-    if (myEvents)  renderMyEvents(evtList);
+    // Komende sessies — hergebruikt renderCalendar uit oude Grootboek-flow.
+    if (calendar) renderCalendar(calendar.events || []);
+    else setError('calendarWrap', 'Kalender ophalen mislukt.');
   }
 
   if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', () => { wireTabs(); loadAll(); });
+    document.addEventListener('DOMContentLoaded', () => { wireTabs(); activateTab('dashboard'); });
   } else {
     wireTabs();
-    loadAll();
+    activateTab('dashboard');
   }
 })();
 </script>
