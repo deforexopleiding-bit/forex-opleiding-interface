@@ -340,7 +340,7 @@
   // Block-type lijst. Info-only vs field — sturen we ook UI. Rich-content
   // types (embed/stats) behoren tot info-only voor RBAC/required-validatie
   // maar krijgen wel hun eigen UI/config-form.
-  const FIELD_TYPES = ['short_text','long_text','email','tel','number','single_choice','multi_choice','select','scale','consent','file_download'];
+  const FIELD_TYPES = ['short_text','long_text','email','tel','number','single_choice','multi_choice','select','scale','availability','consent','file_download'];
   const INFO_TYPES  = ['heading','paragraph','image','divider','embed','stats'];
   const ALL_TYPES   = INFO_TYPES.concat(FIELD_TYPES);
   const TYPE_LABEL = {
@@ -359,9 +359,27 @@
     multi_choice   : 'Meerdere keuzes',
     select         : 'Dropdown',
     scale          : 'Schaal (1–10)',
+    availability   : 'Beschikbaarheid (matrix)',
     consent        : 'Akkoord-vinkje',
     file_download  : 'Bestand-download',
   };
+
+  // Defaults voor availability — moeten matchen met api/_lib/onboarding-wizard-default.js
+  // zodat editor + server dezelfde waarden gebruiken bij een leeg blok.
+  const AVAILABILITY_DEFAULT_DAYS = [
+    { value: 'ma', label: 'Maandag'   },
+    { value: 'di', label: 'Dinsdag'   },
+    { value: 'wo', label: 'Woensdag'  },
+    { value: 'do', label: 'Donderdag' },
+    { value: 'vr', label: 'Vrijdag'   },
+    { value: 'za', label: 'Zaterdag'  },
+    { value: 'zo', label: 'Zondag'    },
+  ];
+  const AVAILABILITY_DEFAULT_DAYPARTS = [
+    { value: 'ochtend', label: 'Ochtend' },
+    { value: 'middag',  label: 'Middag'  },
+    { value: 'avond',   label: 'Avond'   },
+  ];
 
   // ── Dirty-tracking ────────────────────────────────────────────────────
   function setDirty(b) {
@@ -615,6 +633,17 @@
     if (type === 'scale') {
       const key = uniqueKey('schaal', State.draft, null);
       return { id, type, key, label: '', required: false, help: '', min: 1, max: 10 };
+    }
+    if (type === 'availability') {
+      const key = uniqueKey('beschikbaarheid', State.draft, null);
+      return {
+        id, type, key,
+        label    : 'Wanneer kun je meestal?',
+        required : true,                  // default true conform server-normalize
+        help     : '',
+        days     : AVAILABILITY_DEFAULT_DAYS.map((d) => ({ ...d })),
+        dayparts : AVAILABILITY_DEFAULT_DAYPARTS.map((d) => ({ ...d })),
+      };
     }
     if (type === 'number') {
       const key = uniqueKey('getal', State.draft, null);
@@ -900,11 +929,80 @@
       addScaleMinMax(host, b);
     } else if (b.type === 'number') {
       addNumberMinMax(host, b);
+    } else if (b.type === 'availability') {
+      addAvailabilityEditor(host, b);
     } else if (b.type === 'consent') {
       addConsentExtras(host, b);
     } else if (b.type === 'file_download') {
       addFileDownloadEditor(host, b);
     }
+  }
+
+  // Availability-editor: twee parallelle lijst-editors (dagen + dagdelen).
+  // Beide rijen werken net als de options-editor: label + value met
+  // auto-slug, reorder up/down + del. Bij lege lijst toont 'ie een hint.
+  function addAvailabilityEditor(host, b) {
+    if (!Array.isArray(b.days))     b.days     = [];
+    if (!Array.isArray(b.dayparts)) b.dayparts = [];
+    addList('Dagen', b.days, 'dag', host, 'ma');
+    addList('Dagdelen', b.dayparts, 'dagdeel', host, 'ochtend');
+  }
+  function addList(title, arr, kind, host, defaultValueSlug) {
+    const row = document.createElement('div'); row.className = 'field-row';
+    row.innerHTML = `<label class="lbl">${esc(title)}</label>`;
+    const list = document.createElement('div'); list.className = 'opts-list';
+    function refresh() {
+      list.innerHTML = '';
+      arr.forEach((opt, i) => {
+        const r = document.createElement('div'); r.className = 'opts-row';
+        r.innerHTML = `
+          <input type="text" placeholder="Label (zichtbaar)" value="${esc(opt.label || '')}" data-fld="label" />
+          <input type="text" placeholder="Waarde (intern)"   value="${esc(opt.value || '')}" data-fld="value" />
+          <button type="button" class="icon-btn" data-act="up"   ${i === 0 ? 'disabled' : ''}><i class="ti ti-chevron-up"></i></button>
+          <button type="button" class="icon-btn" data-act="down" ${i === arr.length - 1 ? 'disabled' : ''}><i class="ti ti-chevron-down"></i></button>
+          <button type="button" class="icon-btn" data-act="del"><i class="ti ti-trash"></i></button>
+        `;
+        const [labelInp, valueInp] = r.querySelectorAll('input');
+        labelInp.addEventListener('input', () => { opt.label = labelInp.value; setDirty(true); });
+        valueInp.addEventListener('input', () => {
+          opt.value = slugifyKey(valueInp.value);
+          valueInp.value = opt.value;
+          setDirty(true);
+        });
+        r.querySelector('[data-act="up"]').addEventListener('click', () => {
+          if (i === 0) return;
+          [arr[i-1], arr[i]] = [arr[i], arr[i-1]];
+          setDirty(true); refresh();
+        });
+        r.querySelector('[data-act="down"]').addEventListener('click', () => {
+          if (i === arr.length - 1) return;
+          [arr[i+1], arr[i]] = [arr[i], arr[i+1]];
+          setDirty(true); refresh();
+        });
+        r.querySelector('[data-act="del"]').addEventListener('click', () => {
+          arr.splice(i, 1);
+          setDirty(true); refresh();
+        });
+        list.appendChild(r);
+      });
+      if (arr.length === 0) {
+        const empty = document.createElement('div'); empty.className = 'help';
+        empty.style.color = 'var(--text-faint)';
+        empty.textContent = `Nog geen ${title.toLowerCase()} — voeg er minstens 1 toe (lege lijst wordt bij opslaan vervangen door defaults).`;
+        list.appendChild(empty);
+      }
+    }
+    refresh();
+    row.appendChild(list);
+    const add = document.createElement('button');
+    add.type = 'button'; add.className = 'btn-base'; add.style.marginTop = '8px';
+    add.innerHTML = '<i class="ti ti-plus"></i> ' + kind.charAt(0).toUpperCase() + kind.slice(1) + ' toevoegen';
+    add.addEventListener('click', () => {
+      arr.push({ value: '', label: '' });
+      setDirty(true); refresh();
+    });
+    row.appendChild(add);
+    host.appendChild(row);
   }
 
   function addLabelRow(host, b) {
@@ -1516,6 +1614,40 @@
         row.appendChild(bt);
       }
       wrap.appendChild(row);
+    } else if (b.type === 'availability') {
+      // Toon de matrix read-only — chips zijn alleen visueel, geen selected
+      // state nodig (preview demonstreert de structuur, niet een ingevulde
+      // status).
+      const days     = Array.isArray(b.days)     ? b.days     : [];
+      const dayparts = Array.isArray(b.dayparts) ? b.dayparts : [];
+      if (days.length === 0 || dayparts.length === 0) {
+        wrap.appendChild(mk('div', 'pv-help', '(geen dagen of dagdelen gedefinieerd — bij opslaan worden de defaults gebruikt)'));
+      } else {
+        const list = document.createElement('div');
+        list.style.cssText = 'display:flex;flex-direction:column;gap:8px';
+        for (const d of days) {
+          const row = document.createElement('div');
+          row.style.cssText = 'display:flex;flex-direction:column;gap:8px;padding:10px 12px;border:1.5px solid #dde6f1;border-radius:10px;background:#fff';
+          const dayEl = document.createElement('div');
+          dayEl.style.cssText = 'font-size:14px;font-weight:600;color:#16263f';
+          dayEl.textContent = d.label || d.value;
+          row.appendChild(dayEl);
+          const chips = document.createElement('div');
+          chips.style.cssText = 'display:flex;flex-wrap:wrap;gap:6px';
+          for (const dp of dayparts) {
+            const chip = document.createElement('span');
+            chip.style.cssText = 'display:inline-flex;align-items:center;justify-content:center;min-height:36px;padding:6px 12px;border-radius:999px;border:1.5px solid #dde6f1;background:#fff;color:#16263f;font-weight:600;font-size:13px';
+            chip.textContent = dp.label || dp.value;
+            chips.appendChild(chip);
+          }
+          row.appendChild(chips);
+          // Bij wijdere preview: dag-label links + chips rechts (alleen
+          // visueel — we passen geen media-queries toe binnen inline-CSS,
+          // de mobile-stacked variant is voldoende voor de admin-preview).
+          list.appendChild(row);
+        }
+        wrap.appendChild(list);
+      }
     } else if (b.type === 'consent') {
       const r = mk('label', 'pv-opt-row');
       const i = document.createElement('input'); i.type = 'checkbox'; i.disabled = true;

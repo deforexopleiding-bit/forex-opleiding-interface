@@ -219,6 +219,40 @@
     .scale-btn.is-on { background: var(--azure); border-color: var(--azure); color: #fff; }
     .scale-meta { display: flex; justify-content: space-between; font-size: 12px; color: var(--text-faint); margin-top: 6px; }
 
+    /* Availability matrix — per dag een rij; chips ≥40px tap-target. */
+    .av-list { display: flex; flex-direction: column; gap: 8px; }
+    .av-row {
+      display: flex; flex-direction: column; gap: 8px;
+      padding: 10px 12px;
+      border: 1.5px solid var(--border); border-radius: 10px;
+      background: #ffffff;
+    }
+    .av-row.has-any { border-color: var(--azure); background: rgba(20,115,214,0.04); }
+    .av-day {
+      font-size: 14px; font-weight: 600; color: var(--text);
+    }
+    .av-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+    .av-chip {
+      display: inline-flex; align-items: center; justify-content: center;
+      min-height: 40px; padding: 8px 14px;
+      border-radius: 999px; border: 1.5px solid var(--border);
+      background: #ffffff; color: var(--text);
+      font-family: inherit; font-weight: 600; font-size: 13.5px;
+      cursor: pointer; user-select: none;
+      transition: background .12s, border-color .12s, color .12s, transform .04s;
+    }
+    .av-chip:active { transform: translateY(1px); }
+    .av-chip:hover { border-color: var(--azure); }
+    .av-chip.is-on {
+      background: var(--azure); border-color: var(--azure); color: #ffffff;
+      box-shadow: 0 2px 6px rgba(20,115,214,0.20);
+    }
+    @media (min-width: 560px) {
+      .av-row { flex-direction: row; align-items: center; gap: 14px; }
+      .av-day { flex: 0 0 110px; }
+      .av-chips { flex: 1; }
+    }
+
     /* Consent / file_download */
     .consent-row { display: flex; align-items: flex-start; gap: 12px; padding: 12px 14px;
       border: 1.5px solid var(--border); border-radius: 10px; background: #ffffff; cursor: pointer; min-height: 48px; }
@@ -911,6 +945,57 @@
       addError();
       return wrap;
     }
+    if (t === 'availability') {
+      addLabel(b.label, b.required, b.help);
+      // Genormaliseer huidige answer naar { dayValue: [daypartValue, ...] }.
+      const cur0 = State.answers[key];
+      const map = (cur0 && typeof cur0 === 'object' && !Array.isArray(cur0)) ? { ...cur0 } : {};
+      State.answers[key] = map;
+      const days     = Array.isArray(b.days)     && b.days.length     > 0 ? b.days     : [];
+      const dayparts = Array.isArray(b.dayparts) && b.dayparts.length > 0 ? b.dayparts : [];
+      const list = el('div', { class: 'av-list' });
+      for (const d of days) {
+        const row = el('div', { class: 'av-row' });
+        function refreshRow() {
+          const has = Array.isArray(map[d.value]) && map[d.value].length > 0;
+          row.classList.toggle('has-any', has);
+        }
+        row.appendChild(el('div', { class: 'av-day', text: d.label || d.value }));
+        const chips = el('div', { class: 'av-chips' });
+        for (const dp of dayparts) {
+          const on = Array.isArray(map[d.value]) && map[d.value].indexOf(dp.value) >= 0;
+          const chip = el('button', {
+            type: 'button',
+            class: 'av-chip' + (on ? ' is-on' : ''),
+            'aria-pressed': on ? 'true' : 'false',
+            text: dp.label || dp.value,
+            onClick: (ev) => {
+              const arr = Array.isArray(map[d.value]) ? map[d.value].slice() : [];
+              const i = arr.indexOf(dp.value);
+              if (i >= 0) arr.splice(i, 1);
+              else        arr.push(dp.value);
+              if (arr.length === 0) delete map[d.value];
+              else                   map[d.value] = arr;
+              State.answers[key] = map;
+              const isOn = (i < 0);
+              ev.currentTarget.classList.toggle('is-on', isOn);
+              ev.currentTarget.setAttribute('aria-pressed', isOn ? 'true' : 'false');
+              wrap.classList.remove('has-error');
+              refreshRow();
+            },
+          });
+          chips.appendChild(chip);
+        }
+        row.appendChild(chips);
+        refreshRow();
+        list.appendChild(row);
+      }
+      wrap.appendChild(list);
+      // Required-error (zichtbaar via .has-error op wrap).
+      wrap.appendChild(el('div', { class: 'field-error',
+        text: 'Selecteer minstens één dagdeel om verder te gaan.' }));
+      return wrap;
+    }
     if (t === 'consent') {
       // consent gebruikt key direct; label = waiver/akkoord tekst.
       const checked = (cur === true);
@@ -1066,6 +1151,23 @@
           // file_download wrap heeft data-block-key='fd_<id>' — toon error in dezelfde wrap.
           const fdNode = host.querySelector(`[data-block-type="file_download"]`);
           if (fdNode) { fdNode.classList.add('has-error'); if (!firstMissingNode) firstMissingNode = fdNode; }
+        }
+        continue;
+      }
+      if (b.type === 'availability') {
+        if (b.required && b.key) {
+          const v = State.answers[b.key];
+          let ok = false;
+          if (v && typeof v === 'object' && !Array.isArray(v)) {
+            for (const dk of Object.keys(v)) {
+              if (Array.isArray(v[dk]) && v[dk].length > 0) { ok = true; break; }
+            }
+          }
+          if (!ok) {
+            missing.push(b.key);
+            const node = host.querySelector(`[data-block-key="${b.key}"]`);
+            if (node) { node.classList.add('has-error'); if (!firstMissingNode) firstMissingNode = node; }
+          }
         }
         continue;
       }
