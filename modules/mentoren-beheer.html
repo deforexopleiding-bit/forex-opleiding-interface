@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Mentoren beheer · De Forex Opleiding</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/dist/tabler-icons.min.css" />
+  <link rel="stylesheet" href="/modules/shared/agent-shared.css" />
+  <link rel="stylesheet" href="/styles/sales-redesign.css" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; }
+    body { font-family: 'Inter', system-ui, sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; -webkit-font-smoothing: antialiased; }
+    .app { margin-left: 220px; padding: 24px 28px 24px; --brand-deep:#0a2f63; --brand-azure:#1e6cd6; }
+
+    .page-header { margin-bottom: 14px; }
+    .page-header h1 { font-size: 22px; font-weight: 700; color: var(--text); }
+    .page-header p  { font-size: 13px; color: var(--text-dim); margin-top: 2px; }
+
+    .mb-tabs { display:flex; gap:6px; border-bottom:1px solid var(--border); margin-bottom: 14px; flex-wrap: wrap; }
+    .mb-tab {
+      padding: 9px 16px; font-size: 13px; font-weight: 600; color: var(--text-dim);
+      background: transparent; border: 0; border-bottom: 2px solid transparent;
+      cursor: pointer; font-family: inherit; margin-bottom: -1px;
+    }
+    .mb-tab:hover { color: var(--text); }
+    .mb-tab.active { color: var(--brand-deep); border-bottom-color: var(--brand-deep); }
+    .mb-tab[hidden] { display: none; }
+
+    .mb-panel { display: none; }
+    .mb-panel.active { display: block; }
+
+    /* Iframe gedraagt zich als full-bleed module-canvas. Eigen scroll binnen. */
+    .mb-frame {
+      width: 100%;
+      height: calc(100vh - 200px);
+      min-height: 540px;
+      border: 0;
+      background: var(--bg);
+    }
+
+    .empty-perm {
+      padding: 32px 16px; text-align:center; font-size: 13px; color: var(--text-dim);
+      background: var(--bg-elev); border: 1px dashed var(--border); border-radius: 10px;
+    }
+
+    @media (max-width: 880px) {
+      .app { margin-left: 0; padding: 14px; }
+      .mb-frame { height: calc(100vh - 240px); }
+    }
+  </style>
+</head>
+<body>
+<div id="sidebar-mount"></div>
+
+<div class="app">
+  <div class="page-header">
+    <h1>Mentoren beheer</h1>
+    <p>Eén plek voor alle mentor-admin taken: overzicht per mentor, payout-rapporten en funded-certificaten.</p>
+  </div>
+
+  <!-- Hoofdtabs — per-tab gegate via window.RBAC; verborgen als gebruiker geen recht heeft. -->
+  <div class="mb-tabs" role="tablist">
+    <button type="button" class="mb-tab" data-mb-tab="overview" data-perm="mentor.admin.view">Mentor-overzicht</button>
+    <button type="button" class="mb-tab" data-mb-tab="payouts"  data-perm="mentor.payout.manage">Payout-rapporten</button>
+    <button type="button" class="mb-tab" data-mb-tab="funded"   data-perm="mentor.funded.admin">Certificaten</button>
+  </div>
+
+  <div id="emptyPerm" class="empty-perm" hidden>
+    Je hebt geen rechten voor deze sub-modules.
+  </div>
+
+  <!-- Lazy iframes — src wordt pas gezet bij eerste tab-opening. -->
+  <div class="mb-panel" data-mb-tab="overview">
+    <iframe class="mb-frame" id="frame-overview" title="Mentor-overzicht"
+            data-tab-src="/modules/mentor-detail.html"></iframe>
+  </div>
+  <div class="mb-panel" data-mb-tab="payouts">
+    <iframe class="mb-frame" id="frame-payouts" title="Payout-rapporten"
+            data-tab-src="/modules/mentor-payouts-admin.html"></iframe>
+  </div>
+  <div class="mb-panel" data-mb-tab="funded">
+    <iframe class="mb-frame" id="frame-funded" title="Certificaten"
+            data-tab-src="/modules/funded-certificates-admin.html"></iframe>
+  </div>
+</div>
+
+<script src="/modules/shared/supabase-client.js"></script>
+<script src="/modules/shared/agent-shared.js"></script>
+<script src="/modules/shared/theme-shared.js"></script>
+<script src="/modules/shared/permissions.js"></script>
+<script src="/modules/shared/sidebar.js"></script>
+<script>
+(function () {
+  'use strict';
+
+  // ── Aanpak ─────────────────────────────────────────────────────────────
+  // De drie onderliggende modules zijn full-page HTML-bestanden met eigen
+  // sidebar-mount, eigen scripts (AuthShared/RBAC/AgentShared) en eigen
+  // renderers. Inline-include zou JS-conflicts geven (dubbele warmup, dubbele
+  // event-handlers, naming-collisions). We kiezen iframes per tab voor 100%
+  // script-isolatie en hergebruik zonder herschrijving:
+  //   - Lazy: iframe.src wordt pas gezet bij eerste tab-opening.
+  //   - Style-injectie post-load (same-origin → contentDocument toegankelijk):
+  //     verbergt de sidebar + 220px-padding binnen de iframe zodat de
+  //     gebruiker geen dubbele sidebar/header ziet.
+  //   - Directe URLs (/modules/mentor-detail.html etc.) blijven werken voor
+  //     backwards-compat en deeplinks.
+
+  // Permission-cache.
+  let _perms = null;
+  async function loadPerms() {
+    if (_perms) return _perms;
+    try {
+      if (!window.RBAC || typeof window.RBAC.ensurePermissionsLoaded !== 'function') {
+        _perms = { has: () => true }; // fail-open: laat sidebar.js page-gate de rest doen
+        return _perms;
+      }
+      _perms = await window.RBAC.ensurePermissionsLoaded();
+    } catch (e) {
+      console.warn('[mentoren-beheer] perms load faalde:', e?.message || e);
+      _perms = { has: () => true };
+    }
+    return _perms;
+  }
+
+  // Verberg tabs waarvoor de gebruiker geen recht heeft. Super_admin (*) of
+  // (perms.has(p)) → tab zichtbaar.
+  function applyTabPerms(perms) {
+    const wildcard = perms.has && perms.has('*');
+    document.querySelectorAll('.mb-tab').forEach((btn) => {
+      const need = btn.dataset.perm;
+      const ok = wildcard || (need && perms.has(need));
+      btn.hidden = !ok;
+    });
+  }
+
+  function visibleTabs() {
+    return Array.from(document.querySelectorAll('.mb-tab')).filter((b) => !b.hidden);
+  }
+
+  // Style-injectie zodra een iframe geladen is — verbergt de eigen sidebar
+  // van de geneste pagina en haalt de margin-left van .app weg.
+  function injectEmbedStyles(iframe) {
+    try {
+      const doc = iframe.contentDocument;
+      if (!doc || !doc.head) return;
+      // Voorkom dubbele injectie.
+      if (doc.getElementById('__mb_embed_style')) return;
+      const s = doc.createElement('style');
+      s.id = '__mb_embed_style';
+      s.textContent =
+        '#sidebar-mount{display:none!important}' +
+        '.app{margin-left:0!important;max-width:none!important;padding:14px 18px 32px!important}' +
+        'body{background:transparent!important}';
+      doc.head.appendChild(s);
+    } catch (e) {
+      // Same-origin behoort dit nooit te triggeren; log alleen ter info.
+      console.warn('[mentoren-beheer] style-injectie faalde:', e?.message || e);
+    }
+  }
+
+  function activateTab(name) {
+    document.querySelectorAll('.mb-tab').forEach((b) => {
+      b.classList.toggle('active', b.dataset.mbTab === name);
+    });
+    document.querySelectorAll('.mb-panel').forEach((p) => {
+      p.classList.toggle('active', p.dataset.mbTab === name);
+    });
+    const frame = document.getElementById('frame-' + name);
+    if (frame && !frame.dataset.loaded) {
+      const src = frame.dataset.tabSrc;
+      if (src) {
+        // Style-injectie hangen vóór src zetten → wordt automatisch bij
+        // elke load-event van deze iframe getriggerd.
+        frame.addEventListener('load', () => injectEmbedStyles(frame));
+        frame.src = src;
+        frame.dataset.loaded = '1';
+      }
+    }
+  }
+
+  function wireTabs() {
+    document.querySelectorAll('.mb-tab').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        if (btn.hidden) return;
+        activateTab(btn.dataset.mbTab);
+      });
+    });
+  }
+
+  async function init() {
+    wireTabs();
+    try { if (window._authSharedReady) await window._authSharedReady; } catch {}
+    const perms = await loadPerms();
+    applyTabPerms(perms);
+    const tabs = visibleTabs();
+    if (tabs.length === 0) {
+      document.getElementById('emptyPerm').hidden = false;
+      return;
+    }
+    // Default = eerste zichtbare tab.
+    activateTab(tabs[0].dataset.mbTab);
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init);
+  } else {
+    init();
+  }
+})();
+</script>
+</body>
+</html>
