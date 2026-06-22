@@ -108,6 +108,10 @@ export default async function handler(req, res) {
         .maybeSingle();
       if (tdErr) throw new Error('travel-days lookup: ' + tdErr.message);
       const days = Number(tdRow?.days) || 0;
+      // submitted=true zodra er een rij bestaat (ongeacht of days=0).
+      // Mentor-dashboard gebruikt dit voor de reiskosten-reminder vlak vóór
+      // de 1e vrijdag — niet ingevuld is het signaal.
+      const submitted = !!tdRow;
 
       return res.status(200).json({
         ok            : true,
@@ -115,6 +119,7 @@ export default async function handler(req, res) {
         travel_enabled: travelEnabled,
         day_rate_incl : dayRateIncl,
         days,
+        submitted,
         editable,
         status,
       });

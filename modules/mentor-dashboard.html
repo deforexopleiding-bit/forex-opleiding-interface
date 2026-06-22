@@ -141,6 +141,10 @@
     <!-- Rapportstatus-balk: groene 'staat klaar' bij goedgekeurd, neutraal bij uitbetaald, weg als niets. -->
     <div id="dashStatusBar" hidden></div>
 
+    <!-- Reiskosten-reminder: amber balk in venster [1e vrijdag - 2 dagen, 1e vrijdag eod]
+         als travel_enabled en nog niet ingediend voor de vorige maand. -->
+    <div id="dashTravelReminder" hidden></div>
+
     <!-- Stat-kaarten — auto-fit grid die zich aan het scherm aanpast. -->
     <div id="dashStatGrid" class="dash-stat-grid">
       <div class="empty-state" style="grid-column:1/-1"><span class="skeleton" style="width:160px"></span></div>
@@ -1563,6 +1567,72 @@
     return now <= cutoff;
   }
 
+  // Reiskosten-reminder. Toont een amber balk vanaf 2 dagen vóór de 1e vrijdag
+  // van de huidige maand t/m die vrijdag eod, alleen als travel_enabled true
+  // is en de mentor nog geen rij heeft voor de VORIGE maand (= de maand die
+  // a.s. vrijdag automatisch in het concept-rapport gaat).
+  async function _renderTravelReminder(travelCurrentMonth) {
+    const el = document.getElementById('dashTravelReminder');
+    if (!el) return;
+    el.hidden = true;
+    el.innerHTML = '';
+
+    // Snelle exit: travel niet aan voor deze mentor → niets te doen.
+    if (!travelCurrentMonth || !travelCurrentMonth.travel_enabled) return;
+
+    // Venster: [1e vrijdag huidige maand - 2 dagen 00:00, 1e vrijdag eod].
+    const now = new Date();
+    const y = now.getFullYear();
+    const mo = now.getMonth();
+    const off = (5 - new Date(y, mo, 1).getDay() + 7) % 7; // 5 = vrijdag
+    const firstFri = new Date(y, mo, 1 + off);
+    const winStart = new Date(y, mo, 1 + off - 2, 0, 0, 0, 0);
+    const winEnd   = new Date(y, mo, 1 + off,    23, 59, 59, 999);
+    if (now < winStart || now > winEnd) return;
+
+    // Target = vorige maand (1e v/d maand).
+    const prev = new Date(y, mo, 0); // dag 0 = laatste van vorige maand
+    const targetMonth = `${prev.getFullYear()}-${String(prev.getMonth()+1).padStart(2,'0')}-01`;
+
+    const apiFetch = window.AgentShared?.apiFetch;
+    if (typeof apiFetch !== 'function') return;
+    let data = null;
+    try {
+      const r = await apiFetch('/api/mentor-travel-days-self?period_month=' + encodeURIComponent(targetMonth.slice(0,7)));
+      const j = await r.json();
+      if (r.ok) data = j;
+    } catch (e) {
+      console.warn('[mentor-dashboard] travel-reminder fetch faalde:', e?.message || e);
+      return;
+    }
+    if (!data || !data.travel_enabled || data.submitted) return;
+
+    const targetLabel = _periodMonthNL(targetMonth);
+    const friLabel    = firstFri.toLocaleDateString('nl-NL', { day: '2-digit', month: 'short' });
+
+    el.hidden = false;
+    el.className = 'dash-status-bar';
+    el.style.cssText = 'background:rgba(245,158,11,0.10);border:1px solid rgba(245,158,11,0.35);color:#92400e;padding:12px 16px;border-radius:10px;margin-bottom:16px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-size:13.5px;line-height:1.5';
+    el.innerHTML = `
+      <i class="ti ti-alert-triangle"></i>
+      <span>⚠️ Vul je reiskosten voor <strong>${esc(targetLabel)}</strong> in vóór vrijdag <strong>${esc(friLabel)}</strong> — anders missen ze in je uitbetaling.</span>
+      <button type="button" id="dashTravelReminderBtn"
+              style="margin-left:auto;padding:6px 12px;font-size:12.5px;font-weight:600;border:0;border-radius:7px;background:#92400e;color:#fff;cursor:pointer;font-family:inherit">
+        Naar reiskosten
+      </button>`;
+    const btn = document.getElementById('dashTravelReminderBtn');
+    if (btn) {
+      btn.addEventListener('click', () => {
+        activateTab('verdiensten');
+        activateSubtab('uitbetalingen');
+        setTimeout(() => {
+          const sec = document.getElementById('travelCardSection');
+          if (sec && sec.scrollIntoView) sec.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }, 80);
+      });
+    }
+  }
+
   function _renderStatusBar(payouts) {
     const bar = document.getElementById('dashStatusBar');
     if (!bar) return;
@@ -1645,6 +1715,8 @@
     const travel     = await jsonOk(travelR);
 
     _renderStatusBar(payouts?.payouts || []);
+    // Reiskosten-reminder (fire-and-forget; doet zelf venster-check + fetch).
+    _renderTravelReminder(travel);
 
     const bonusTotals     = bonus?.totals || {};
     const bonusEarnedYTD  = Number(bonusTotals.earned_total) || 0;
