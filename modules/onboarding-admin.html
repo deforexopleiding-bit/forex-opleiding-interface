@@ -276,6 +276,7 @@
             <th>Status</th>
             <th>Betaling</th>
             <th>Bedenktijd</th>
+            <th>Beschikbaarheid</th>
             <th>Mentor</th>
             <th>Voortgang</th>
             <th>Aangemeld</th>
@@ -304,6 +305,43 @@
   //   null            → '—'  (geen waiver-blok in gepubliceerde structuur)
   //   { agreed:false }→ grijs 'Niet afgezien'
   //   { agreed:true } → groen 'Afgezien ✓ (datum)' (met date als beschikbaar)
+  // Korte 2-letter dag-prefix uit een dag-label ("Maandag" → "Ma",
+  // "Dinsdag" → "Di", etc.). Eerste letter hoofdletter; rest geknipt
+  // op 2 chars. Bij eenletterige labels behouden we wat er is.
+  function _shortDayPrefix(label) {
+    const s = String(label || '').trim();
+    if (!s) return '';
+    return s.slice(0, 2);
+  }
+
+  // Compacte ééndregel-weergave voor de lijst-kolom.
+  //   av = { days:[{label, dayparts:[...]}, ...] } | null
+  //   → "Ma: Ochtend, Avond · Wo: Middag"
+  //   → "—" bij null / lege days.
+  function renderAvailabilityShort(av) {
+    if (!av || !Array.isArray(av.days) || av.days.length === 0) {
+      return '<span style="color:var(--text-faint)">—</span>';
+    }
+    const parts = av.days.map((d) => {
+      const dp = (d.dayparts || []).join(', ');
+      return esc(_shortDayPrefix(d.label)) + ': ' + esc(dp);
+    });
+    return '<span style="font-size:12.5px;line-height:1.5">' + parts.join(' · ') + '</span>';
+  }
+
+  // Volledige weergave voor de detail-modal — alle dagen + dagdelen
+  // met de full labels uit de wizard-structuur.
+  function renderAvailabilityFull(av) {
+    if (!av || !Array.isArray(av.days) || av.days.length === 0) {
+      return '<span style="color:var(--text-faint)">—</span>';
+    }
+    const items = av.days.map((d) => {
+      const dp = (d.dayparts || []).join(', ');
+      return '<li><strong>' + esc(d.label) + '</strong>: ' + esc(dp) + '</li>';
+    }).join('');
+    return '<ul style="margin:0;padding-left:20px;font-size:13px;line-height:1.55">' + items + '</ul>';
+  }
+
   function waiverBadgeHtml(waiver) {
     if (!waiver) return '<span style="color:var(--text-faint)">—</span>';
     if (!waiver.agreed) return '<span class="ob-badge paid-no">Niet afgezien</span>';
@@ -362,6 +400,7 @@
         <td>${statusBadgeHtml(r.status)}</td>
         <td>${paidBadgeHtml(!!r.paid)}</td>
         <td>${waiverBadgeHtml(r.waiver || null)}</td>
+        <td>${renderAvailabilityShort(r.availability || null)}</td>
         <td>${mentorCellHtml(r)}</td>
         <td>${esc(progressLabel(r))}</td>
         <td>${esc(fmtDateNL(r.created_at))}</td>
@@ -514,6 +553,7 @@
           <dt>Status</dt>           <dd>${statusBadgeHtml(o.status)}</dd>
           <dt>Betaling</dt>         <dd>${paidBadgeHtml(!!o.paid)}</dd>
           <dt>Bedenktijd</dt>       <dd>${waiverBadgeHtml(o.waiver || null)}</dd>
+          <dt>Beschikbaarheid</dt>  <dd>${renderAvailabilityFull(o.availability || null)}</dd>
           <dt>Mentor</dt>           <dd>${esc(o.mentor_name || (o.mentor_user_id || '—'))}</dd>
           <dt>Wizard-stap</dt>      <dd>${esc(o.current_step || '—')}</dd>
           <dt>Aangemeld</dt>        <dd>${esc(fmtDateTimeNL(o.created_at))}</dd>

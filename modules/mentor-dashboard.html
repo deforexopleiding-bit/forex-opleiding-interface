@@ -1399,6 +1399,17 @@
     if (btn) btn.addEventListener('click', () => { activateTab('toekomst'); });
   }
 
+  // Compacte beschikbaarheid-rendering: "Ma: Ochtend, Avond · Wo: Middag".
+  // av-vorm: { days:[{label, dayparts:[...]}, ...] } | null.
+  function _shortAvailability(av) {
+    if (!av || !Array.isArray(av.days) || av.days.length === 0) return null;
+    return av.days.map((d) => {
+      const dp = (d.dayparts || []).join(', ');
+      const short = String(d.label || '').trim().slice(0, 2);
+      return short + ': ' + dp;
+    }).join(' · ');
+  }
+
   function _renderFutureStudents(students) {
     const wrap = document.getElementById('futureStudentsWrap');
     if (!wrap) return;
@@ -1411,12 +1422,15 @@
       const completed = (s.status === 'afgerond' && s.completed_at)
         ? `<div class="student-meta" style="margin-top:4px">Afgerond op ${esc(fmtDateNL(s.completed_at))}</div>`
         : '';
+      const avShort = _shortAvailability(s.availability);
+      const avLine  = `<div class="student-meta" style="margin-top:4px"><strong style="color:var(--text-dim)">Beschikbaarheid:</strong> ${avShort ? esc(avShort) : '<span style="color:var(--text-faint)">—</span>'}</div>`;
       return `
         <div class="student-card" style="cursor:default">
           <div class="student-head" style="cursor:default;grid-template-columns:1fr auto">
             <div>
               <div class="student-name">${esc(s.customer_name || '—')}</div>
               <div class="student-meta">${esc(s.traject_label || '—')}</div>
+              ${avLine}
               ${completed}
             </div>
             <div class="student-stat" style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end;align-items:center">

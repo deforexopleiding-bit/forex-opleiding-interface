@@ -15,6 +15,10 @@
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
+import {
+  findAvailabilityBlock,
+  buildAvailabilityView,
+} from './_lib/onboarding-wizard-default.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -91,9 +95,15 @@ export default async function handler(req, res) {
       paid = !!inv;
     }
 
-    // Bedenktijd-waiver bepalen uit de gepubliceerde wizard-structuur.
-    // Fail-soft: bij DB-glitch of geen gepubliceerde structuur → waiver=null.
-    let waiver = null;
+    // GEPUBLICEERDE wizard-structuur 1× per request laden voor twee
+    // afgeleide velden:
+    //   - waiver: consent_key uit het EERSTE blok met is_waiver=true.
+    //   - availability: het EERSTE blok van type 'availability',
+    //     gemapped naar label-vorm via buildAvailabilityView.
+    // Fail-soft: bij DB-glitch of geen gepubliceerde structuur →
+    // beide velden blijven null.
+    let waiver       = null;
+    let availability = null;
     try {
       const { data: wiz, error: wizErr } = await supabaseAdmin
         .from('onboarding_wizard')
@@ -103,14 +113,17 @@ export default async function handler(req, res) {
       if (wizErr) {
         console.warn('[onboarding-detail] wizard config fetch:', wizErr.message);
       } else {
-        const waiverKey = findWaiverConsentKey(wiz?.published_structure);
+        const pub = wiz?.published_structure;
+        const ans = (row.answers && typeof row.answers === 'object') ? row.answers : {};
+        const waiverKey = findWaiverConsentKey(pub);
         if (waiverKey) {
-          const ans = (row.answers && typeof row.answers === 'object') ? row.answers : {};
           waiver = {
             agreed : ans[waiverKey] === true,
             at     : ans[waiverKey + '_at'] || null,
           };
         }
+        const availabilityBlock = findAvailabilityBlock(pub);
+        availability = availabilityBlock ? buildAvailabilityView(availabilityBlock, ans) : null;
       }
     } catch (e) {
       console.warn('[onboarding-detail] wizard config exception:', e?.message || e);
@@ -135,6 +148,7 @@ export default async function handler(req, res) {
         answers        : row.answers || null,
         paid,
         waiver,
+        availability,
         token          : row.token,
         started_at     : row.started_at,
         completed_at   : row.completed_at,

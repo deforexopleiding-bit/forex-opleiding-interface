@@ -499,6 +499,73 @@ export function collectFileRefs(struct) {
 }
 
 /**
+ * Loop door alle blokken van de structuur en geef het EERSTE
+ * availability-blok terug (met key + days[] + dayparts[]). Wordt
+ * gebruikt door admin-overzicht + detail + mentor-self om antwoorden
+ * naar labels te resolven en als per-onboarding 'availability'-veld
+ * te hangen.
+ *
+ * Spiegel van het findWaiverConsentKey-patroon — zelfde fail-soft
+ * vorm (returnt null bij geen blok / geen structuur).
+ *
+ * @param {object} structure  — { pages:[...] }
+ * @returns {object|null}     — het availability-block of null
+ */
+export function findAvailabilityBlock(structure) {
+  if (!structure || typeof structure !== 'object') return null;
+  const pages = Array.isArray(structure.pages) ? structure.pages : [];
+  for (const p of pages) {
+    for (const b of (p?.blocks || [])) {
+      if (b && b.type === 'availability' && b.key) return b;
+    }
+  }
+  return null;
+}
+
+/**
+ * Map een raw answers[<availability.key>] naar een label-gerichte
+ * structuur die UI direct kan renderen:
+ *   { days: [ { label:'Maandag', dayparts:['Ochtend','Avond'] }, ... ] }
+ *
+ * - Alleen dagen met >=1 dagdeel komen in de output.
+ * - Volgorde respecteert block.days[]; dagdelen-volgorde respecteert
+ *   block.dayparts[].
+ * - Onbekende dag/dagdeel-values (die niet in de structuur staan)
+ *   worden gedropt — voorkomt UI-vervuiling bij wizard-rename na
+ *   eerdere afronding.
+ *
+ * Returnt null wanneer block ontbreekt of antwoord leeg/onbruikbaar is.
+ *
+ * @param {object|null} block    — uit findAvailabilityBlock
+ * @param {object|null} answers  — onboardings.answers (jsonb)
+ * @returns {{ days:{label:string,dayparts:string[]}[] }|null}
+ */
+export function buildAvailabilityView(block, answers) {
+  if (!block || !block.key) return null;
+  const ans = (answers && typeof answers === 'object') ? answers : {};
+  const raw = ans[block.key];
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  const dayList     = Array.isArray(block.days)     ? block.days     : [];
+  const daypartList = Array.isArray(block.dayparts) ? block.dayparts : [];
+  const out = [];
+  for (const d of dayList) {
+    if (!d || !d.value) continue;
+    const arr = Array.isArray(raw[d.value]) ? raw[d.value] : [];
+    if (arr.length === 0) continue;
+    const labels = [];
+    for (const dp of daypartList) {
+      if (dp && dp.value && arr.indexOf(dp.value) >= 0) {
+        labels.push(dp.label || dp.value);
+      }
+    }
+    if (labels.length === 0) continue;
+    out.push({ label: d.label || d.value, dayparts: labels });
+  }
+  if (out.length === 0) return null;
+  return { days: out };
+}
+
+/**
  * Server-side validator. Itereert alle blocks in pages en verzamelt de
  * answer-keys die nog ontbreken voor een geldige afronding.
  *
