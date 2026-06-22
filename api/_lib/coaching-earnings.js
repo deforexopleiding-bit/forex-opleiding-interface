@@ -40,6 +40,7 @@
 // Funded (€100) telt voorlopig altijd 0.
 
 import { bubbleList } from './bubble.js';
+import { supabaseAdmin } from '../supabase.js';
 
 export const RATE_1ON1   = 35;
 export const RATE_TEAM   = 50;
@@ -105,7 +106,13 @@ export function emptyBreakdown() {
 
 // Hoofdfunctie. Gooit door op bubble-errors zodat de caller (endpoint of
 // generate-script) zelf de error kan mappen naar HTTP-status.
-export async function computeCoachingEarnings({ bubbleUserId, from, to }) {
+//
+// Sinds funded-certificaten (PR Funded-Backend) accepteert deze functie ook
+// `mentorUserId` (optioneel). Ontbreekt die → funded telt 0 en gedrag is
+// verder identiek. Met mentorUserId tellen we mentor_funded_certificates
+// rijen waar funded_month in [from, to) (half-open). De claim-maand is
+// 1× per (mentor, student); bij her-upload schuift de maand niet op.
+export async function computeCoachingEarnings({ bubbleUserId, mentorUserId, from, to }) {
   if (!bubbleUserId) {
     const b = emptyBreakdown();
     return {
@@ -229,11 +236,35 @@ export async function computeCoachingEarnings({ bubbleUserId, from, to }) {
     if (done && inRange(dt, fromMs, toMsInclusive)) team += 1;
   }
 
+  // Funded (€100) — tel mentor_funded_certificates voor (mentor, periode).
+  // Half-open interval [from, to). 'to' is een YYYY-MM-DD; bij maand-range
+  // is dat ook de 1e v/d volgende maand zodra de caller dat zo aanroept.
+  // Voor de payout-generate-core wordt 'to' echter de laatste dag van de
+  // maand (inclusief). Daarom: count alle rijen WHERE funded_month >= from
+  // AND funded_month <= to (inclusief), wat hetzelfde effect heeft voor
+  // funded_month-waarden die altijd op de 1e v/d maand staan.
+  let funded = 0;
+  if (mentorUserId) {
+    try {
+      const { count, error: fundedErr } = await supabaseAdmin
+        .from('mentor_funded_certificates')
+        .select('id', { count: 'exact', head: true })
+        .eq('mentor_user_id', mentorUserId)
+        .gte('funded_month', from)
+        .lte('funded_month', to);
+      if (fundedErr) throw new Error(fundedErr.message);
+      funded = Number(count) || 0;
+    } catch (e) {
+      console.warn('[coaching-earnings] funded fetch faalde:', e?.message || e);
+      funded = 0;
+    }
+  }
+
   const breakdown = {
     one_on_one : { count: oneOnOne, rate: RATE_1ON1,   total: oneOnOne * RATE_1ON1   },
     team       : { count: team,     rate: RATE_TEAM,   total: team     * RATE_TEAM   },
     no_show    : { count: noShow,   rate: RATE_NOSHOW, total: noShow   * RATE_NOSHOW },
-    funded     : { count: 0,        rate: RATE_FUNDED, total: 0                       },
+    funded     : { count: funded,   rate: RATE_FUNDED, total: funded   * RATE_FUNDED },
   };
   const grand_total = breakdown.one_on_one.total
                     + breakdown.team.total

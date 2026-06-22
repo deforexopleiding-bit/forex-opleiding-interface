@@ -120,6 +120,7 @@ export async function computeAndUpsertConcept({ mentorUserId, monthStart, actorI
     try {
       const r = await computeCoachingEarnings({
         bubbleUserId,
+        mentorUserId,
         from: period.start,
         to  : period.last,
       });
