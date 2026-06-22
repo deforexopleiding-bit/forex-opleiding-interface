@@ -152,34 +152,15 @@ export const DEFAULT_WIZARD_STRUCTURE = {
       id: 'beschikbaarheid',
       title: 'Beschikbaarheid',
       blocks: [
-        { id: 'bs_p1', type: 'paragraph', text: 'Op welke momenten ben je doorgaans beschikbaar voor 1-op-1 calls met je mentor?' },
+        { id: 'bs_p1', type: 'paragraph', text: 'Tik aan in welke dagdelen je doorgaans beschikbaar bent voor 1-op-1 calls met je mentor. Hoe meer momenten, hoe makkelijker we een vast ritme inplannen.' },
         {
-          id: 'bs_b1',
-          type: 'multi_choice',
-          key: 'dagen_beschikbaar',
-          label: 'Op welke dagen kun je meestal?',
+          id: 'bs_av1',
+          type: 'availability',
+          key: 'beschikbaarheid',
+          label: 'Wanneer kun je meestal?',
           required: true,
-          options: [
-            { value: 'ma', label: 'Maandag' },
-            { value: 'di', label: 'Dinsdag' },
-            { value: 'wo', label: 'Woensdag' },
-            { value: 'do', label: 'Donderdag' },
-            { value: 'vr', label: 'Vrijdag' },
-            { value: 'za', label: 'Zaterdag' },
-            { value: 'zo', label: 'Zondag' },
-          ],
-        },
-        {
-          id: 'bs_b2',
-          type: 'multi_choice',
-          key: 'dagdelen_beschikbaar',
-          label: 'En in welke dagdelen?',
-          required: true,
-          options: [
-            { value: 'ochtend', label: 'Ochtend (08:00 – 12:00)' },
-            { value: 'middag',  label: 'Middag (12:00 – 17:00)' },
-            { value: 'avond',   label: 'Avond (17:00 – 22:00)' },
-          ],
+          // days + dayparts blijven leeg → normalizeStructure vult ze met
+          // de NL-defaults (ma..zo / ochtend/middag/avond).
         },
       ],
     },
@@ -233,6 +214,8 @@ const ALLOWED_BLOCK_TYPES = new Set([
   // Keuzes
   'single_choice', 'multi_choice', 'select',
   'scale',
+  // Beschikbaarheid (per-dag dagdelen matrix)
+  'availability',
   // Akkoord + downloads
   'consent', 'file_download',
 ]);
@@ -240,8 +223,26 @@ const ALLOWED_BLOCK_TYPES = new Set([
 const FIELD_BLOCK_TYPES = new Set([
   'short_text', 'long_text', 'email', 'tel',
   'number', 'single_choice', 'multi_choice', 'select',
-  'scale', 'consent', 'file_download',
+  'scale', 'availability', 'consent', 'file_download',
 ]);
+
+// Defaults voor availability — 7 dagen + 3 dagdelen. Wanneer normalize
+// een availability-blok zonder days/dayparts ontvangt vult 'ie deze
+// arrays automatisch in zodat de editor en wizard meteen werken.
+const AVAILABILITY_DEFAULT_DAYS = [
+  { value: 'ma', label: 'Maandag'   },
+  { value: 'di', label: 'Dinsdag'   },
+  { value: 'wo', label: 'Woensdag'  },
+  { value: 'do', label: 'Donderdag' },
+  { value: 'vr', label: 'Vrijdag'   },
+  { value: 'za', label: 'Zaterdag'  },
+  { value: 'zo', label: 'Zondag'    },
+];
+const AVAILABILITY_DEFAULT_DAYPARTS = [
+  { value: 'ochtend', label: 'Ochtend' },
+  { value: 'middag',  label: 'Middag'  },
+  { value: 'avond',   label: 'Avond'   },
+];
 
 function _isEmptyAnswer(val) {
   if (val === null || val === undefined) return true;
@@ -454,6 +455,13 @@ export function normalizeStructure(input) {
         if (rawBlock.max != null && Number.isFinite(Number(rawBlock.max))) out.max = Number(rawBlock.max);
       } else if (type === 'consent') {
         // label is de waiver-tekst; required wordt al hierboven gezet.
+      } else if (type === 'availability') {
+        // required default = true zodat een nieuw blok meteen verplicht is.
+        if (rawBlock.required === undefined) out.required = true;
+        const days     = _normalizeOptions(rawBlock.days);
+        const dayparts = _normalizeOptions(rawBlock.dayparts);
+        out.days     = (days.length     > 0) ? days     : AVAILABILITY_DEFAULT_DAYS.slice();
+        out.dayparts = (dayparts.length > 0) ? dayparts : AVAILABILITY_DEFAULT_DAYPARTS.slice();
       }
       page.blocks.push(out);
     }
@@ -516,6 +524,20 @@ export function validateRequired(answers, structure) {
       if (b.type === 'file_download') {
         if (b.requires_consent && b.consent_key && ans[b.consent_key] !== true) {
           missing.push(b.consent_key);
+        }
+        continue;
+      }
+      if (b.type === 'availability') {
+        // Vervuld = object met minstens 1 dag die een niet-lege array heeft.
+        if (b.required === true && b.key) {
+          const v = ans[b.key];
+          let ok = false;
+          if (v && typeof v === 'object' && !Array.isArray(v)) {
+            for (const dayKey of Object.keys(v)) {
+              if (Array.isArray(v[dayKey]) && v[dayKey].length > 0) { ok = true; break; }
+            }
+          }
+          if (!ok) missing.push(b.key);
         }
         continue;
       }
