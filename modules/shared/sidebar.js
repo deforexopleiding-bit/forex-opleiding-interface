@@ -96,6 +96,10 @@
           // user minstens één van de drie rechten heeft (zie applyModuleGating).
           navLink('mentoren-beheer', '/modules/mentoren-beheer.html', 'Mentoren beheer') +
           navLink('onboarding', '/modules/onboarding-overzicht.html', 'Onboarding') +
+          // F0 admin-dashboard op de nieuwe `onboardings`-tabel. Aparte
+          // sidebar-entry naast de legacy `onboarding-overzicht`-link
+          // (customers.onboarding_status-flow) tot legacy uitgefaseerd is.
+          navLink('onboarding-admin', '/modules/onboarding-admin.html', 'Onboarding (admin)') +
           // Finance — Mega-restructure: badge voor Open Acties (F1 finance-taken) hangt
           // nu inline op de Finance nav-item zelf. Open Acties is verhuisd naar
           // /modules/finance.html?tab=wanbetalers&sub=open-acties (sub-tab onder Wanbetalers).
@@ -435,6 +439,9 @@
     // Mentoren beheer — speciaal: ANY-of-3 (zie applyModuleGating onderaan).
     // Geen vaste feature_key hier; de OR-check is daar gehardcodeerd.
     'mentoren-beheer': '__any_mentor_admin__',
+    // F0 onboarding-admin (nieuwe `onboardings`-tabel) — read/write op
+    // onboarding.admin. Aparte module naast legacy `onboarding-overzicht`.
+    'onboarding-admin': 'onboarding.admin',
     'finance': 'finance.module.access',
     // Open Acties (F1 finance-taken) is verhuisd naar Finance > Wanbetalers > Open Acties
     // sub-tab — geen eigen sidebar-link meer. Badge hangt nu op de Finance nav-item zelf.
