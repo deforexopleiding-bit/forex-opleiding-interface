@@ -202,12 +202,230 @@ export const DEFAULT_WIZARD_STRUCTURE = {
 
 // Helpers ────────────────────────────────────────────────────────────────
 
+import crypto from 'node:crypto';
+
+// Block-types die door normalizeStructure toegestaan zijn. Onbekende types
+// worden tijdens normalisatie gedropt (geen crash). Houd in sync met de
+// renderer in modules/onboarding.html.
+const ALLOWED_BLOCK_TYPES = new Set([
+  // Info-only
+  'heading', 'paragraph', 'image', 'divider',
+  // Tekst-invoer
+  'short_text', 'long_text', 'email', 'tel',
+  // Numeriek
+  'number',
+  // Keuzes
+  'single_choice', 'multi_choice', 'select',
+  'scale',
+  // Akkoord + downloads
+  'consent', 'file_download',
+]);
+// Veld-blokken hebben een answer-key (en validate-logica).
+const FIELD_BLOCK_TYPES = new Set([
+  'short_text', 'long_text', 'email', 'tel',
+  'number', 'single_choice', 'multi_choice', 'select',
+  'scale', 'consent', 'file_download',
+]);
+
 function _isEmptyAnswer(val) {
   if (val === null || val === undefined) return true;
   if (typeof val === 'string') return val.trim() === '';
   if (Array.isArray(val))      return val.length === 0;
   if (typeof val === 'number') return !Number.isFinite(val);
   return false;
+}
+
+function _newId(prefix) {
+  return (prefix || 'b') + '_' + crypto.randomUUID().slice(0, 8);
+}
+
+function _str(v, max) {
+  if (v == null) return '';
+  const s = String(v);
+  return (typeof max === 'number') ? s.slice(0, max) : s;
+}
+
+function _normalizeOptions(raw) {
+  if (!Array.isArray(raw)) return [];
+  const out = [];
+  const seen = new Set();
+  for (const o of raw) {
+    if (!o || typeof o !== 'object') continue;
+    const value = _str(o.value, 120).trim();
+    const label = _str(o.label, 240).trim();
+    if (!value || seen.has(value)) continue;
+    seen.add(value);
+    out.push({ value, label: label || value });
+  }
+  return out;
+}
+
+function _normalizeFiles(raw) {
+  if (!Array.isArray(raw)) return [];
+  const out = [];
+  const seenPaths = new Set();
+  for (const f of raw) {
+    if (!f || typeof f !== 'object') continue;
+    const path = _str(f.path, 512).trim();
+    const name = _str(f.name, 240).trim();
+    if (!path) continue;            // path is required
+    if (seenPaths.has(path)) continue;
+    seenPaths.add(path);
+    out.push({ path, name: name || path.split('/').pop() || 'download' });
+  }
+  return out;
+}
+
+/**
+ * Valideert + saneert een ingebrachte wizard-structuur. Genereert ontbrekende
+ * ids, whitelist't block-types, dropt onbekende types, garandeert stabiele
+ * answer-keys voor veld-blokken. Idempotent — een al-genormaliseerde struct
+ * komt ongewijzigd terug.
+ *
+ * Gooit Error('STRUCTURE_INVALID: <reden>') bij grof-ongeldige input
+ * (geen object, geen pages-array, etc).
+ *
+ * @param {object} input — { pages:[{ id?, title?, blocks:[...] }] }
+ * @returns {object} — { version, pages:[...] }
+ */
+export function normalizeStructure(input) {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) {
+    throw new Error('STRUCTURE_INVALID: structure moet een object zijn');
+  }
+  const rawPages = input.pages;
+  if (!Array.isArray(rawPages)) {
+    throw new Error('STRUCTURE_INVALID: pages[] ontbreekt');
+  }
+  const usedPageIds  = new Set();
+  const usedBlockIds = new Set();
+  const usedKeys     = new Set();
+
+  const pages = [];
+  for (const rawPage of rawPages) {
+    if (!rawPage || typeof rawPage !== 'object') continue;
+    let pageId = _str(rawPage.id, 64).trim();
+    if (!pageId || usedPageIds.has(pageId)) pageId = _newId('p');
+    while (usedPageIds.has(pageId)) pageId = _newId('p');
+    usedPageIds.add(pageId);
+
+    const page = {
+      id     : pageId,
+      title  : _str(rawPage.title, 240).trim() || null,
+      blocks : [],
+    };
+
+    const rawBlocks = Array.isArray(rawPage.blocks) ? rawPage.blocks : [];
+    for (const rawBlock of rawBlocks) {
+      if (!rawBlock || typeof rawBlock !== 'object') continue;
+      const type = _str(rawBlock.type, 32).trim();
+      if (!ALLOWED_BLOCK_TYPES.has(type)) continue;     // drop unknown
+
+      let blockId = _str(rawBlock.id, 64).trim();
+      if (!blockId || usedBlockIds.has(blockId)) blockId = _newId('b');
+      while (usedBlockIds.has(blockId)) blockId = _newId('b');
+      usedBlockIds.add(blockId);
+
+      const out = { id: blockId, type };
+
+      // Info-only blocks
+      if (type === 'paragraph' || type === 'heading') {
+        out.text = _str(rawBlock.text, 4000);
+        page.blocks.push(out);
+        continue;
+      }
+      if (type === 'image') {
+        out.src = _str(rawBlock.src, 1024).trim();
+        out.alt = _str(rawBlock.alt, 240);
+        if (!out.src) continue;        // image zonder src is zinloos → drop
+        page.blocks.push(out);
+        continue;
+      }
+      if (type === 'divider') {
+        page.blocks.push(out);
+        continue;
+      }
+
+      // Veld-blokken: gemeenschappelijke shape.
+      const label    = _str(rawBlock.label, 600).trim();
+      const required = !!rawBlock.required;
+      const help     = _str(rawBlock.help,  600);
+
+      // file_download gebruikt een eigen answer-pad (consent_key).
+      if (type === 'file_download') {
+        out.label             = label || 'Download';
+        out.help              = help || undefined;
+        out.files             = _normalizeFiles(rawBlock.files);
+        out.requires_consent  = !!rawBlock.requires_consent;
+        if (out.requires_consent) {
+          out.consent_label = _str(rawBlock.consent_label, 600).trim()
+            || 'Ik ga akkoord met de voorwaarden.';
+          let ck = _str(rawBlock.consent_key, 64).trim().replace(/[^A-Za-z0-9_]/g, '_');
+          if (!ck || usedKeys.has(ck)) ck = 'waiver_' + crypto.randomUUID().slice(0, 6);
+          while (usedKeys.has(ck)) ck = 'waiver_' + crypto.randomUUID().slice(0, 6);
+          usedKeys.add(ck);
+          out.consent_key = ck;
+        }
+        page.blocks.push(out);
+        continue;
+      }
+
+      // Andere veld-blokken: stabiele key verplicht.
+      let key = _str(rawBlock.key, 64).trim().replace(/[^A-Za-z0-9_]/g, '_');
+      if (!key || usedKeys.has(key)) key = 'f_' + crypto.randomUUID().slice(0, 8);
+      while (usedKeys.has(key)) key = 'f_' + crypto.randomUUID().slice(0, 8);
+      usedKeys.add(key);
+
+      out.key      = key;
+      out.label    = label || 'Vraag';
+      out.required = required;
+      if (help) out.help = help;
+
+      if (type === 'single_choice' || type === 'multi_choice' || type === 'select') {
+        out.options = _normalizeOptions(rawBlock.options);
+      } else if (type === 'scale') {
+        const min = Number.isFinite(Number(rawBlock.min)) ? Number(rawBlock.min) : 1;
+        const max = Number.isFinite(Number(rawBlock.max)) ? Number(rawBlock.max) : 10;
+        out.min = Math.max(0, Math.min(min, 100));
+        out.max = Math.max(out.min + 1, Math.min(max, 100));
+      } else if (type === 'number') {
+        if (rawBlock.min != null && Number.isFinite(Number(rawBlock.min))) out.min = Number(rawBlock.min);
+        if (rawBlock.max != null && Number.isFinite(Number(rawBlock.max))) out.max = Number(rawBlock.max);
+      } else if (type === 'consent') {
+        // label is de waiver-tekst; required wordt al hierboven gezet.
+      }
+      page.blocks.push(out);
+    }
+
+    pages.push(page);
+  }
+
+  return {
+    version : Number.isFinite(Number(input.version)) ? Number(input.version) : 1,
+    pages,
+  };
+}
+
+/**
+ * Verzamelt alle storage-paths uit file_download-blokken (files[].path) in
+ * een structuur. Nuttig voor garbage-collection bij publish/save (te
+ * verwijderen paths = oude paths minus nieuwe).
+ *
+ * @param {object} struct
+ * @returns {string[]} unieke paths
+ */
+export function collectFileRefs(struct) {
+  const out = new Set();
+  if (!struct || typeof struct !== 'object') return [];
+  for (const page of (struct.pages || [])) {
+    for (const b of (page?.blocks || [])) {
+      if (b && b.type === 'file_download' && Array.isArray(b.files)) {
+        for (const f of b.files) {
+          if (f && typeof f.path === 'string' && f.path.trim()) out.add(f.path.trim());
+        }
+      }
+    }
+  }
+  return Array.from(out);
 }
 
 /**
