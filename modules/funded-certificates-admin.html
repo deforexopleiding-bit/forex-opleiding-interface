@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Certificaten · De Forex Opleiding</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/dist/tabler-icons.min.css" />
+  <link rel="stylesheet" href="/modules/shared/agent-shared.css" />
+  <link rel="stylesheet" href="/styles/sales-redesign.css" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; }
+    body { font-family: 'Inter', system-ui, sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; -webkit-font-smoothing: antialiased; }
+    .app { margin-left: 220px; padding: 24px 28px 60px; max-width: 1280px; --brand-deep:#0a2f63; --brand-azure:#1e6cd6; }
+
+    .page-header { display:flex; align-items:baseline; justify-content:space-between; margin-bottom:18px; gap:12px; flex-wrap:wrap; }
+    .page-header h1 { font-size:22px; font-weight:700; color:var(--text); }
+    .page-header p  { font-size:13px; color:var(--text-dim); margin-top:2px; }
+
+    .toolbar { display:flex; align-items:center; gap:12px; margin-bottom:18px; padding:12px 14px; background:var(--bg-elev); border:1px solid var(--border); border-radius:10px; flex-wrap:wrap; }
+    .toolbar label { font-size:12px; font-weight:600; color:var(--text-dim); }
+    .toolbar select, .toolbar input[type=search] { padding:7px 10px; font-size:13.5px; border:1px solid var(--border); border-radius:7px; background:var(--bg); color:var(--text); font-family:inherit; min-width:200px; }
+
+    .counter { font-size:12.5px; color:var(--text-dim); margin-bottom:12px; }
+    .counter strong { color:var(--text); font-variant-numeric:tabular-nums; }
+
+    .data-table { width:100%; border-collapse:collapse; background:var(--bg-elev); border:1px solid var(--border); border-radius:10px; overflow:hidden; }
+    .data-table th, .data-table td { padding:10px 12px; text-align:left; font-size:13px; border-bottom:1px solid var(--border); vertical-align:middle; }
+    .data-table th { background:rgba(10,47,99,0.04); font-weight:600; color:var(--text-dim); font-size:11.5px; text-transform:uppercase; letter-spacing:0.03em; }
+    .data-table tr:last-child td { border-bottom:0; }
+    .data-table td.num { text-align:right; font-variant-numeric:tabular-nums; white-space:nowrap; }
+    .data-table th.num { text-align:right; }
+
+    .empty-state { background:var(--bg-elev); border:1px dashed var(--border); border-radius:10px; padding:24px 16px; text-align:center; font-size:13px; color:var(--text-dim); }
+    .empty-state i { font-size:26px; display:block; margin-bottom:6px; opacity:0.6; }
+
+    .skeleton { display:inline-block; width:80px; height:16px; background:linear-gradient(90deg, rgba(0,0,0,0.05), rgba(0,0,0,0.10), rgba(0,0,0,0.05)); border-radius:4px; animation:sk 1.2s infinite; }
+    @keyframes sk { 0% { background-position:0% 0; } 100% { background-position:200% 0; } }
+
+    .dl-btn { display:inline-flex; align-items:center; gap:5px; padding:5px 10px; font-size:12px; font-weight:600; border:1px solid var(--border); border-radius:6px; background:var(--bg); color:var(--text); cursor:pointer; font-family:inherit; text-decoration:none; }
+    .dl-btn:hover { background:var(--bg-elev); }
+    .dl-btn[disabled], .dl-btn.disabled { opacity:0.5; cursor:not-allowed; }
+
+    @media (max-width: 880px) { .app { margin-left:0; padding:14px; } }
+  </style>
+</head>
+<body>
+<div id="sidebar-mount"></div>
+
+<div class="app">
+  <div class="page-header">
+    <div>
+      <h1>Certificaten (admin)</h1>
+      <p>Overzicht van alle geclaimde funded-certificaten — €100 per uniek (mentor, student). Downloads zijn 1u geldig.</p>
+    </div>
+  </div>
+
+  <div class="toolbar">
+    <label for="mentorFilter">Mentor:</label>
+    <select id="mentorFilter">
+      <option value="">— alle mentors —</option>
+    </select>
+    <label for="searchBox">Zoeken:</label>
+    <input type="search" id="searchBox" placeholder="Naam, mentor, bestand…" />
+  </div>
+
+  <div class="counter" id="counter"><span class="skeleton" style="width:120px"></span></div>
+
+  <div id="tableWrap">
+    <div class="empty-state"><span class="skeleton" style="width:160px"></span></div>
+  </div>
+</div>
+
+<script src="/modules/shared/supabase-client.js"></script>
+<script src="/modules/shared/agent-shared.js"></script>
+<script src="/modules/shared/theme-shared.js"></script>
+<script src="/modules/shared/permissions.js"></script>
+<script src="/modules/shared/sidebar.js"></script>
+<script>
+(function () {
+  'use strict';
+
+  const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+
+  function fmtDateNL(iso) {
+    if (!iso) return '—';
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return '—';
+    return d.toLocaleDateString('nl-NL', { day: '2-digit', month: 'short', year: 'numeric' });
+  }
+  function fmtDateTimeNL(iso) {
+    if (!iso) return '—';
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return '—';
+    return d.toLocaleString('nl-NL', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+  }
+  function fmtFundedMonth(ymd) {
+    if (!ymd) return '—';
+    const m = String(ymd).match(/^(\d{4})-(\d{2})/);
+    if (!m) return esc(String(ymd));
+    const months = ['', 'januari', 'februari', 'maart', 'april', 'mei', 'juni', 'juli', 'augustus', 'september', 'oktober', 'november', 'december'];
+    const idx = parseInt(m[2], 10);
+    return `${months[idx] || m[2]} ${m[1]}`;
+  }
+
+  // State
+  let _allCerts    = [];           // alle rijen uit /api/funded-certs-admin-list
+  let _mentorFilter = '';          // mentor_user_id of '' voor alles
+  let _searchQuery  = '';
+
+  function setCounter(visible, total) {
+    const c = document.getElementById('counter');
+    if (!c) return;
+    if (total === 0) {
+      c.innerHTML = 'Geen certificaten.';
+    } else if (visible === total) {
+      c.innerHTML = `<strong>${total}</strong> certifica${total === 1 ? 'at' : 'ten'}`;
+    } else {
+      c.innerHTML = `<strong>${visible}</strong> van <strong>${total}</strong> certifica${total === 1 ? 'at' : 'ten'} zichtbaar`;
+    }
+  }
+
+  function applyFilters() {
+    const q = _searchQuery.trim().toLowerCase();
+    const mid = _mentorFilter;
+    return _allCerts.filter((c) => {
+      if (mid && c.mentor_user_id !== mid) return false;
+      if (!q) return true;
+      const hay = [
+        c.mentor_name || '', c.mentor_email || '',
+        c.student_name || '', c.student_id || '',
+        c.file_name || '',
+      ].join(' ').toLowerCase();
+      return hay.includes(q);
+    });
+  }
+
+  function renderTable() {
+    const wrap = document.getElementById('tableWrap');
+    if (!wrap) return;
+    const rows = applyFilters();
+    setCounter(rows.length, _allCerts.length);
+
+    if (_allCerts.length === 0) {
+      wrap.innerHTML = `<div class="empty-state"><i class="ti ti-certificate-off"></i>Nog geen funded-certificaten geclaimd.</div>`;
+      return;
+    }
+    if (rows.length === 0) {
+      wrap.innerHTML = `<div class="empty-state"><i class="ti ti-search-off"></i>Geen resultaten voor het huidige filter.</div>`;
+      return;
+    }
+
+    const body = rows.map((c) => {
+      const mentor = `
+        <div style="font-weight:600">${esc(c.mentor_name || '—')}</div>
+        <div style="font-size:11.5px;color:var(--text-faint)">${esc(c.mentor_email || '')}</div>`;
+      const student = `
+        <div style="font-weight:600">${esc(c.student_name || '—')}</div>
+        ${c.file_name ? `<div style="font-size:11.5px;color:var(--text-faint)">${esc(c.file_name)}</div>` : ''}`;
+      const dl = c.download_url
+        ? `<a class="dl-btn" href="${esc(c.download_url)}" target="_blank" rel="noopener noreferrer">
+             <i class="ti ti-download"></i> Download
+           </a>`
+        : `<span class="dl-btn disabled" title="Signed URL niet beschikbaar">
+             <i class="ti ti-alert-triangle"></i> n.v.t.
+           </span>`;
+      return `
+        <tr>
+          <td>${mentor}</td>
+          <td>${student}</td>
+          <td>${esc(fmtFundedMonth(c.funded_month))}</td>
+          <td>${esc(fmtDateTimeNL(c.last_uploaded_at))}</td>
+          <td>${dl}</td>
+        </tr>`;
+    }).join('');
+
+    wrap.innerHTML = `
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Mentor</th>
+            <th>Student</th>
+            <th>Maand</th>
+            <th>Geüpload op</th>
+            <th>Download</th>
+          </tr>
+        </thead>
+        <tbody>${body}</tbody>
+      </table>`;
+  }
+
+  function populateMentorFilter() {
+    const sel = document.getElementById('mentorFilter');
+    if (!sel) return;
+    const map = new Map();
+    for (const c of _allCerts) {
+      if (c.mentor_user_id && !map.has(c.mentor_user_id)) {
+        map.set(c.mentor_user_id, c.mentor_name || c.mentor_email || c.mentor_user_id);
+      }
+    }
+    const entries = Array.from(map.entries()).sort((a, b) =>
+      String(a[1] || '').localeCompare(String(b[1] || ''), 'nl')
+    );
+    const current = sel.value;
+    sel.innerHTML = '<option value="">— alle mentors —</option>' +
+      entries.map(([id, name]) => `<option value="${esc(id)}"${current === id ? ' selected' : ''}>${esc(name)}</option>`).join('');
+  }
+
+  function renderError(msg) {
+    const wrap = document.getElementById('tableWrap');
+    if (wrap) wrap.innerHTML = `<div class="empty-state" style="border-color:#fecaca;color:#b91c1c"><i class="ti ti-alert-triangle"></i>${esc(msg)}</div>`;
+    const c = document.getElementById('counter');
+    if (c) c.textContent = '';
+  }
+
+  async function loadAll() {
+    const apiFetch = window.AgentShared?.apiFetch;
+    if (typeof apiFetch !== 'function') {
+      renderError('apiFetch niet beschikbaar.');
+      return;
+    }
+    try { if (window._authSharedReady) await window._authSharedReady; } catch {}
+    try {
+      const r = await apiFetch('/api/funded-certs-admin-list');
+      const d = await r.json();
+      if (!r.ok) throw new Error(d?.error || 'fetch faalde');
+      _allCerts = Array.isArray(d.certs) ? d.certs : [];
+      populateMentorFilter();
+      renderTable();
+    } catch (e) {
+      console.error('[funded-certs-admin]', e?.message || e);
+      renderError('Certificaten ophalen mislukt: ' + (e?.message || e));
+    }
+  }
+
+  function wire() {
+    const sel = document.getElementById('mentorFilter');
+    if (sel) sel.addEventListener('change', () => {
+      _mentorFilter = sel.value;
+      renderTable();
+    });
+    const search = document.getElementById('searchBox');
+    if (search) search.addEventListener('input', () => {
+      _searchQuery = search.value || '';
+      renderTable();
+    });
+  }
+
+  function init() { wire(); loadAll(); }
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init);
+  } else {
+    init();
+  }
+})();
+</script>
+</body>
+</html>

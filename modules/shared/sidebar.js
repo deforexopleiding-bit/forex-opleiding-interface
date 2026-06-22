@@ -44,7 +44,9 @@
     // lucide "users-shield" — admin per-mentor meekijken; eenvoudige user+shield.
     'mentor-detail': '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M19 16l3 1.5V21l-3 1.5-3-1.5v-3.5z"/>',
     // lucide "receipt" — payout-rapport admin (finance/strateeg).
-    'mentor-payouts-admin': '<path d="M4 4h16v18l-3-2-2 2-2-2-2 2-2-2-2 2-3-2z"/><line x1="8" y1="9" x2="16" y2="9"/><line x1="8" y1="13" x2="16" y2="13"/>'
+    'mentor-payouts-admin': '<path d="M4 4h16v18l-3-2-2 2-2-2-2 2-2-2-2 2-3-2z"/><line x1="8" y1="9" x2="16" y2="9"/><line x1="8" y1="13" x2="16" y2="13"/>',
+    // lucide "certificate" — funded-certificaten admin.
+    'funded-certificates-admin': '<rect x="3" y="4" width="18" height="14" rx="2"/><circle cx="12" cy="11" r="3"/><path d="M9 21l3-3 3 3"/>'
   };
 
   function svg(key) {
@@ -93,6 +95,9 @@
           // mentor.payout.manage (manager+/finance). Mentors zelf zien 'm niet;
           // wel hun eigen rapport via mentor-dashboard zodra status>=goedgekeurd.
           navLink('mentor-payouts-admin', '/modules/mentor-payouts-admin.html', 'Payout-rapporten (admin)') +
+          // Funded-certificaten — admin-overzicht van geclaimde €100-bonussen
+          // met signed download-URLs; gated via mentor.funded.admin.
+          navLink('funded-certificates-admin', '/modules/funded-certificates-admin.html', 'Certificaten (admin)') +
           navLink('onboarding', '/modules/onboarding-overzicht.html', 'Onboarding') +
           // Finance — Mega-restructure: badge voor Open Acties (F1 finance-taken) hangt
           // nu inline op de Finance nav-item zelf. Open Acties is verhuisd naar
@@ -426,6 +431,8 @@
     'mentor-detail': 'mentor.admin.view',
     // Payout fase 1 — finance/strateeg-tool. mentor.payout.manage (manager+).
     'mentor-payouts-admin': 'mentor.payout.manage',
+    // Funded-certificaten admin (alle €100-claims + downloads).
+    'funded-certificates-admin': 'mentor.funded.admin',
     'finance': 'finance.module.access',
     // Open Acties (F1 finance-taken) is verhuisd naar Finance > Wanbetalers > Open Acties
     // sub-tab — geen eigen sidebar-link meer. Badge hangt nu op de Finance nav-item zelf.
