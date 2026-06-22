@@ -311,11 +311,41 @@
         <span class="paid-status" id="paid-status-${esc(idx)}" style="font-size:11.5px;color:var(--text-faint);margin-left:8px"></span>
       </div>` : '';
 
+    // Heropen — alleen bij status 'goedgekeurd'. Zelfde gate als markeer-uitbetaald
+    // (mentor.payout.manage); naast de paid-knop zodat finance kan switchen.
+    const showReopenBtn = (p.status === 'goedgekeurd');
+    const reopenBlock = showReopenBtn ? `
+      <div style="margin:6px 0 10px">
+        <button type="button" class="reopen-btn"
+                data-payout-id="${esc(p.id)}"
+                data-idx="${esc(idx)}"
+                style="display:inline-flex;align-items:center;gap:6px;padding:7px 13px;font-size:12.5px;font-weight:600;border:1px solid var(--border);border-radius:7px;background:var(--bg);color:var(--text);cursor:pointer;font-family:inherit">
+          ↩️ Heropen (terug naar concept)
+        </button>
+      </div>` : '';
+
+    // Terugdraaien — alleen bij status 'uitbetaald'. Client-side verbergen
+    // als de user de feature_key 'mentor.payout.revert' niet heeft; lukt die
+    // RBAC-lookup niet (geen window.RBAC), dan tonen we de knop toch en
+    // leunen we op de 403 uit de endpoint.
+    const showRevertBtn = (p.status === 'uitbetaald') && _revertAllowed();
+    const revertBlock = showRevertBtn ? `
+      <div style="margin:6px 0 10px">
+        <button type="button" class="revert-btn"
+                data-payout-id="${esc(p.id)}"
+                data-idx="${esc(idx)}"
+                style="display:inline-flex;align-items:center;gap:6px;padding:7px 13px;font-size:12.5px;font-weight:600;border:1px solid #fecaca;border-radius:7px;background:#fff5f5;color:#b91c1c;cursor:pointer;font-family:inherit">
+          ⏪ Terugdraaien (ontboeken)
+        </button>
+      </div>` : '';
+
     host.innerHTML = `
       ${_renderActionFeedback(p.id)}
       <div class="detail-meta">${meta.join(' · ') || '<em>Nog niet gegenereerd</em>'}</div>
       ${approveBlock}
       ${paidBlock}
+      ${reopenBlock}
+      ${revertBlock}
       <div style="margin:-4px 0 10px">
         <button type="button" class="coach-debug-btn"
                 data-mentor-id="${esc(p.mentor_user_id)}"
@@ -400,6 +430,122 @@
       paidBtn.addEventListener('click', () =>
         markPaid(paidBtn.dataset.payoutId, paidBtn.dataset.idx, paidBtn)
       );
+    }
+    const reopenBtn = host.querySelector('.reopen-btn');
+    if (reopenBtn) {
+      reopenBtn.addEventListener('click', () =>
+        reopenPayout(reopenBtn.dataset.payoutId, reopenBtn.dataset.idx, reopenBtn)
+      );
+    }
+    const revertBtn = host.querySelector('.revert-btn');
+    if (revertBtn) {
+      revertBtn.addEventListener('click', () =>
+        revertPayout(revertBtn.dataset.payoutId, revertBtn.dataset.idx, revertBtn)
+      );
+    }
+  }
+
+  // ── Permission-cache: client-side check voor revert-knop ───────────────
+  // Pagina zelf is al gegate op mentor.payout.manage; mentor.payout.revert is
+  // super_admin-only. Cache na 1e lookup; fail-open (knop tonen) als RBAC
+  // helper niet beschikbaar is — we leunen dan op de 403 uit het endpoint.
+  let _revertAllowedCache = null;  // null | true | false
+  function _revertAllowed() {
+    if (_revertAllowedCache !== null) return _revertAllowedCache;
+    try {
+      const perms = window.RBAC && window.RBAC.getCachedPermissions && window.RBAC.getCachedPermissions();
+      if (perms && typeof perms.has === 'function') {
+        _revertAllowedCache = !!(perms.has('*') || perms.has('mentor.payout.revert'));
+        return _revertAllowedCache;
+      }
+    } catch (e) { /* fail-open */ }
+    _revertAllowedCache = true;  // niet zeker → toon de knop; endpoint blokkeert
+    return _revertAllowedCache;
+  }
+  // Async preload zodat _revertAllowed() bij eerste render kan teruggrijpen.
+  (async () => {
+    try {
+      if (window.RBAC && typeof window.RBAC.ensurePermissionsLoaded === 'function') {
+        const perms = await window.RBAC.ensurePermissionsLoaded();
+        _revertAllowedCache = !!(perms && (perms.has('*') || perms.has('mentor.payout.revert')));
+      }
+    } catch (e) { /* fail-open */ }
+  })();
+
+  // ── Heropen (goedgekeurd → concept) ────────────────────────────────────
+  async function reopenPayout(payoutId, idx, btn) {
+    const apiFetch = window.AgentShared?.apiFetch;
+    if (typeof apiFetch !== 'function') return;
+    if (!window.confirm('Rapport heropenen? De status gaat terug naar concept; daarna kun je weer wijzigingen doen of opnieuw goedkeuren.')) return;
+    btn.disabled = true;
+    try {
+      const r = await apiFetch('/api/mentor-payout-reopen', {
+        method : 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body   : JSON.stringify({ payout_id: payoutId }),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d?.error || 'heropen faalde');
+      _actionFeedback.set(payoutId, {
+        tone: 'ok',
+        html: '✓ <strong>Heropend</strong> — weer bewerkbaar als concept.',
+      });
+      _detailCache.delete(payoutId);
+      await refetchDetail(payoutId, idx);
+      await loadList();
+    } catch (e) {
+      _actionFeedback.set(payoutId, {
+        tone: 'err',
+        html: '⚠️ Heropenen mislukt — ' + esc(e?.message || e),
+      });
+      _detailCache.delete(payoutId);
+      try { await refetchDetail(payoutId, idx); } catch {}
+      btn.disabled = false;
+    }
+  }
+
+  // ── Terugdraaien (uitbetaald → goedgekeurd, ledger ontboeken) ──────────
+  async function revertPayout(payoutId, idx, btn) {
+    const apiFetch = window.AgentShared?.apiFetch;
+    if (typeof apiFetch !== 'function') return;
+    if (!window.confirm('Definitief terugdraaien? Alle ledger-entries die aan dit rapport gekoppeld zijn worden ONTBOEKT en het rapport gaat terug naar goedgekeurd. Doe dit alleen bij een geconstateerde fout.')) return;
+    btn.disabled = true;
+    try {
+      const r = await apiFetch('/api/mentor-payout-revert', {
+        method : 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body   : JSON.stringify({ payout_id: payoutId }),
+      });
+      const d = await r.json();
+      if (!r.ok) {
+        if (r.status === 403) {
+          _actionFeedback.set(payoutId, {
+            tone: 'err',
+            html: '⚠️ Alleen <strong>super_admin</strong> mag terugdraaien.',
+          });
+          _detailCache.delete(payoutId);
+          try { await refetchDetail(payoutId, idx); } catch {}
+          btn.disabled = false;
+          return;
+        }
+        throw new Error(d?.error || 'terugdraaien faalde');
+      }
+      const n = Number(d.ledger_unmarked) || 0;
+      _actionFeedback.set(payoutId, {
+        tone: 'ok',
+        html: '✓ <strong>Teruggedraaid</strong> — ' + n + ' grootboek' + (n === 1 ? 'regel' : 'regels') + ' ontboekt.',
+      });
+      _detailCache.delete(payoutId);
+      await refetchDetail(payoutId, idx);
+      await loadList();
+    } catch (e) {
+      _actionFeedback.set(payoutId, {
+        tone: 'err',
+        html: '⚠️ Terugdraaien mislukt — ' + esc(e?.message || e),
+      });
+      _detailCache.delete(payoutId);
+      try { await refetchDetail(payoutId, idx); } catch {}
+      btn.disabled = false;
     }
   }
 
