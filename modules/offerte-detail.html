@@ -30,6 +30,26 @@
     .totals .row.big { font-weight:800; font-size:14px; border-top:1px solid var(--border); padding-top:6px; margin-top:4px; }
     .btn-danger { background: var(--red,#dc2626); color:#fff; }
     .btn-success { background:#059669; color:#fff; }
+
+    /* Onboarding-aanmelden modal (F0.2) — minimaal modal-patroon i.l.m. de
+       toast-overlay-stijl. Reactivere CSS-classes (.btn etc) komen van
+       sales-redesign.css / agent-shared.css; hier alleen modal-shell. */
+    .ob-modal { position:fixed; inset:0; background:rgba(15,23,42,0.45); display:none; align-items:center; justify-content:center; z-index:200; padding:14px; }
+    .ob-modal.open { display:flex; }
+    .ob-modal-card { background:var(--bg); border:1px solid var(--border); border-radius:12px; width:100%; max-width:520px; max-height:90vh; overflow:auto; box-shadow:0 20px 50px rgba(15,23,42,0.25); }
+    .ob-modal-h { display:flex; align-items:center; justify-content:space-between; padding:14px 18px; border-bottom:1px solid var(--border); }
+    .ob-modal-h h2 { font-size:15px; font-weight:700; }
+    .ob-modal-x { background:transparent; border:0; color:var(--text-dim); cursor:pointer; font-size:18px; line-height:1; padding:4px 8px; border-radius:6px; }
+    .ob-modal-x:hover { background:var(--bg-elev); color:var(--text); }
+    .ob-modal-body { padding:18px; }
+    .ob-modal-body label { display:block; font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.05em; color:var(--text-faint); margin-bottom:6px; }
+    .ob-modal-body .read-only { padding:8px 10px; background:var(--bg-elev); border:1px solid var(--border); border-radius:7px; font-size:13.5px; color:var(--text); margin-bottom:14px; }
+    .ob-modal-body select { width:100%; padding:8px 10px; font-size:13.5px; border:1px solid var(--border); border-radius:7px; background:var(--bg); color:var(--text); font-family:inherit; margin-bottom:14px; }
+    .ob-modal-body .ob-error { background:rgba(220,38,38,0.08); border:1px solid rgba(220,38,38,0.25); color:#b91c1c; padding:9px 11px; border-radius:7px; font-size:12.5px; margin-bottom:12px; }
+    .ob-modal-body .ob-success { background:rgba(5,150,105,0.10); border:1px solid rgba(5,150,105,0.30); color:#047857; padding:11px 13px; border-radius:8px; font-size:13px; margin-bottom:12px; line-height:1.45; }
+    .ob-modal-body .ob-link-row { display:flex; gap:6px; align-items:stretch; margin-top:8px; }
+    .ob-modal-body .ob-link-input { flex:1; padding:7px 9px; font-size:12px; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; border:1px solid var(--border); border-radius:6px; background:var(--bg-elev); color:var(--text); }
+    .ob-modal-f { display:flex; justify-content:flex-end; gap:8px; padding:12px 18px; border-top:1px solid var(--border); background:var(--bg-elev); }
   </style>
 </head>
 <body>
@@ -53,9 +73,35 @@
 
 <div class="toast" id="toast"></div>
 
+<!-- Onboarding-aanmelden modal (F0.2). Verborgen tot user klikt op
+     "Onboarding-traject aanmelden" in de actie-zone. -->
+<div class="ob-modal" id="obModal" role="dialog" aria-modal="true" aria-labelledby="obModalTitle" hidden>
+  <div class="ob-modal-card">
+    <div class="ob-modal-h">
+      <h2 id="obModalTitle">Onboarding-traject aanmelden</h2>
+      <button type="button" class="ob-modal-x" id="obModalClose" aria-label="Sluiten">&times;</button>
+    </div>
+    <div class="ob-modal-body" id="obModalBody">
+      <div id="obStepForm">
+        <label>Klant</label>
+        <div class="read-only" id="obCustomerLabel">—</div>
+        <label for="obTrajectSel">Traject</label>
+        <select id="obTrajectSel"><option value="">Trajecten laden…</option></select>
+        <div id="obError" class="ob-error" hidden></div>
+      </div>
+      <div id="obStepDone" hidden></div>
+    </div>
+    <div class="ob-modal-f" id="obModalFooter">
+      <button type="button" class="btn btn-ghost" id="obCancelBtn">Annuleren</button>
+      <button type="button" class="btn btn-success" id="obSubmitBtn" disabled>Aanmelden</button>
+    </div>
+  </div>
+</div>
+
 <script src="/modules/shared/supabase-client.js"></script>
 <script src="/modules/shared/agent-shared.js"></script>
 <script src="/modules/shared/theme-shared.js"></script>
+<script src="/modules/shared/permissions.js"></script>
 <script>
 const STATUS = { draft:{l:'Concept',c:'#64748b'}, sent:{l:'Verzonden',c:'#0891b2'}, accepted:{l:'Bevestigd',c:'#059669'}, declined:{l:'Afgewezen',c:'#b91c1c'}, expired:{l:'Verlopen',c:'#94a3b8'} };
 function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
@@ -67,12 +113,27 @@ function avatarInitials(n){ const p=String(n||'').trim().split(/\s+/).filter(Boo
 function avatarHtml(n){ return `<span class="sr-avatar sr-av-${avatarHash(n)}">${esc(avatarInitials(n))}</span>`; }
 const dealId = new URLSearchParams(location.search).get('id');
 
+// State voor de F0.2 onboarding-aanmeld-knop. Pas zichtbaar als de
+// gebruiker 'onboarding.create' heeft; server gate't sowieso.
+let _canCreateOnb = false;
+// Snapshot van de huidige customer-context voor de modal (uit render()).
+let _obCtx = { customerId: null, customerName: '' };
+
 async function init(){
   await window._authSharedReady;
   const profile = await window.AuthShared?.requireAuth();
   if (!profile) return;
   if (window.AgentShared) await window.AgentShared.renderUserSection(profile);
+  // RBAC: bepaal of de F0 onboarding-aanmeld-knop zichtbaar mag zijn.
+  try {
+    if (window.RBAC && typeof window.RBAC.ensurePermissionsLoaded === 'function') {
+      await window.RBAC.ensurePermissionsLoaded();
+      _canCreateOnb = !!window.RBAC.canSync && window.RBAC.canSync('onboarding.create');
+    }
+  } catch (e) { console.warn('[offerte-detail] RBAC load faalde:', e?.message || e); }
   document.getElementById('refreshBtn').addEventListener('click', () => { toast('Verversen…'); load(); });
+  // Modal-handlers één keer wiren (modal-DOM is statisch).
+  _wireObModal();
   if (!dealId){ document.getElementById('detailBody').innerHTML='<div class="sub">Geen offerte-id.</div>'; return; }
   load();
 }
@@ -165,7 +226,17 @@ function render(d){
   if (st==='accepted' || st==='signed'){
     const isRetentie = (d.entity || '').toLowerCase().includes('retentie');
     const onbBtn = isRetentie ? '' : onboardingButton(c.id, c.onboarding_status, c.onboarding_sent_at, c.onboarding_completed_at);
-    btns = `<a class="btn btn-success" href="/modules/subscription-wizard.html?deal_id=${esc(deal.id)}">Omzetten naar abonnement</a> ${onbBtn} <button class="btn btn-ghost" onclick="editConfirm('${esc(deal.id)}')">Bewerken</button> ${tlBtn}`;
+    // Snapshot klant-context voor de F0.2 modal.
+    _obCtx.customerId   = c.id || null;
+    _obCtx.customerName = c.is_company ? (c.company_name||'') : ((c.first_name||'')+' '+(c.last_name||'')).trim();
+    // Nieuwe F0.2-knop: traject-keuze + create. Alleen tonen bij recht
+    // 'onboarding.create' en geldige customer_id. Aparte label
+    // ("Onboarding-traject aanmelden") om verwarring te voorkomen met
+    // de bestaande legacy "Aanmelden onboarding"-knop (welkomstmail-flow).
+    const obF0Btn = (_canCreateOnb && _obCtx.customerId)
+      ? `<button class="btn" style="background:#0a2f63;color:#fff" onclick="openObModal()" type="button"><i class="ti ti-clipboard-plus"></i> Onboarding-traject aanmelden</button>`
+      : '';
+    btns = `<a class="btn btn-success" href="/modules/subscription-wizard.html?deal_id=${esc(deal.id)}">Omzetten naar abonnement</a> ${onbBtn} ${obF0Btn} <button class="btn btn-ghost" onclick="editConfirm('${esc(deal.id)}')">Bewerken</button> ${tlBtn}`;
   } else if (st==='sent'){
     btns = `<button class="btn" onclick="doSend()">Opnieuw versturen</button> <button class="btn" style="background:#f59e0b;color:#fff" onclick="doMarkAccepted()">Markeer als getekend</button> <button class="btn btn-danger" onclick="doDelete()">Verwijderen</button> ${tlBtn}`;
   } else if (st==='draft'){
@@ -211,9 +282,158 @@ async function doDelete(){
   catch(e){ toast('Verwijderen mislukt: '+e.message,'error'); }
 }
 
+// ── F0.2 Onboarding-traject aanmelden ─────────────────────────────────
+// Modal-handlers (één keer in init() gewired) + open/submit/copy.
+let _obTrajecten = [];
+let _obTrajectenLoaded = false;
+
+function _wireObModal(){
+  const m  = document.getElementById('obModal');
+  const x  = document.getElementById('obModalClose');
+  const c  = document.getElementById('obCancelBtn');
+  const sb = document.getElementById('obSubmitBtn');
+  const sel= document.getElementById('obTrajectSel');
+  if (!m) return;
+  const close = () => closeObModal();
+  if (x) x.addEventListener('click', close);
+  if (c) c.addEventListener('click', close);
+  // Klik op overlay (buiten de card) sluit.
+  m.addEventListener('click', (ev) => { if (ev.target === m) close(); });
+  // Esc sluit.
+  document.addEventListener('keydown', (ev) => {
+    if (ev.key === 'Escape' && m.classList.contains('open')) close();
+  });
+  if (sel) sel.addEventListener('change', () => {
+    sb.disabled = !sel.value;
+  });
+  if (sb) sb.addEventListener('click', submitObCreate);
+}
+
+function _resetObModal(){
+  // Stap terug naar formulier-staat, ook na een eerdere success.
+  document.getElementById('obStepForm').hidden = false;
+  document.getElementById('obStepDone').hidden = true;
+  document.getElementById('obStepDone').innerHTML = '';
+  document.getElementById('obError').hidden = true;
+  document.getElementById('obError').textContent = '';
+  document.getElementById('obModalFooter').style.display = '';
+  const sb = document.getElementById('obSubmitBtn');
+  sb.disabled = true;
+  sb.textContent = 'Aanmelden';
+  const cb = document.getElementById('obCancelBtn');
+  cb.textContent = 'Annuleren';
+}
+
+function _showObError(msg){
+  const el = document.getElementById('obError');
+  el.textContent = msg;
+  el.hidden = false;
+}
+
+async function _ensureObTrajectenLoaded(){
+  if (_obTrajectenLoaded) return;
+  const sel = document.getElementById('obTrajectSel');
+  try {
+    const r = await window.AgentShared.apiFetch('/api/onboarding-trajecten-list');
+    let d = null; try { d = await r.json(); } catch {}
+    if (!r.ok) throw new Error(d?.error || ('HTTP ' + r.status));
+    _obTrajecten = Array.isArray(d?.trajecten) ? d.trajecten : [];
+    _obTrajectenLoaded = true;
+    sel.innerHTML = '<option value="">— kies traject —</option>'
+      + _obTrajecten.map(t => `<option value="${esc(t.id)}">${esc(t.label || t.key || t.id)}</option>`).join('');
+  } catch (e) {
+    sel.innerHTML = '<option value="">Laden mislukt</option>';
+    _showObError('Trajecten ophalen mislukt: ' + (e?.message || e));
+  }
+}
+
+function openObModal(){
+  if (!_obCtx.customerId) { toast('Geen klant-id beschikbaar', 'error'); return; }
+  _resetObModal();
+  document.getElementById('obCustomerLabel').textContent = _obCtx.customerName || _obCtx.customerId;
+  const sel = document.getElementById('obTrajectSel');
+  sel.value = '';
+  document.getElementById('obSubmitBtn').disabled = true;
+  const m = document.getElementById('obModal');
+  m.removeAttribute('hidden');
+  m.classList.add('open');
+  _ensureObTrajectenLoaded();
+}
+
+function closeObModal(){
+  const m = document.getElementById('obModal');
+  m.classList.remove('open');
+  m.setAttribute('hidden', '');
+}
+
+async function submitObCreate(){
+  const sel = document.getElementById('obTrajectSel');
+  const sb  = document.getElementById('obSubmitBtn');
+  const trajectId = (sel.value || '').trim();
+  if (!_obCtx.customerId || !trajectId) return;
+  document.getElementById('obError').hidden = true;
+  sb.disabled = true;
+  sb.textContent = 'Bezig…';
+  try {
+    const r = await window.AgentShared.apiFetch('/api/onboarding-create', {
+      method  : 'POST',
+      headers : { 'Content-Type': 'application/json' },
+      body    : JSON.stringify({ customer_id: _obCtx.customerId, traject_id: trajectId }),
+    });
+    let d = null; try { d = await r.json(); } catch {}
+    if (r.status === 409) {
+      _showObError('Er bestaat al een (actieve) onboarding voor deze klant.');
+      sb.disabled = false;
+      sb.textContent = 'Aanmelden';
+      return;
+    }
+    if (!r.ok) throw new Error(d?.error || ('HTTP ' + r.status));
+    // Succes — toon link + copy-knop.
+    const linkPath = d?.link || '';
+    const fullLink = linkPath ? (location.origin + linkPath) : '';
+    const done = document.getElementById('obStepDone');
+    done.innerHTML = `
+      <div class="ob-success">
+        <strong>✓ Aangemeld.</strong> De persoonlijke onboarding-link is hieronder kopieerbaar.
+      </div>
+      <label>Persoonlijke link</label>
+      <div class="ob-link-row">
+        <input type="text" class="ob-link-input" id="obLinkInput" readonly value="${esc(fullLink)}" />
+        <button type="button" class="btn" id="obCopyBtn">📋 Kopieer link</button>
+      </div>
+      <div class="sub" style="margin-top:10px;font-size:11.5px;color:var(--text-faint)">
+        Status: <strong>${esc(d?.onboarding?.status || 'aangemeld')}</strong>
+      </div>`;
+    document.getElementById('obStepForm').hidden = true;
+    done.hidden = false;
+    sb.style.display = 'none';
+    document.getElementById('obCancelBtn').textContent = 'Sluiten';
+    const cp = document.getElementById('obCopyBtn');
+    cp.addEventListener('click', async () => {
+      const v = document.getElementById('obLinkInput').value;
+      try {
+        if (navigator.clipboard?.writeText) await navigator.clipboard.writeText(v);
+        else {
+          const inp = document.getElementById('obLinkInput');
+          inp.select(); inp.setSelectionRange(0, v.length);
+          document.execCommand('copy');
+        }
+        cp.textContent = '✓ Gekopieerd';
+        setTimeout(() => { cp.textContent = '📋 Kopieer link'; }, 1800);
+      } catch (e) {
+        toast('Kopiëren mislukt — selecteer handmatig', 'error');
+      }
+    });
+    toast('Onboarding aangemeld', 'success');
+  } catch (e) {
+    _showObError('Aanmelden mislukt: ' + (e?.message || e));
+    sb.disabled = false;
+    sb.textContent = 'Aanmelden';
+  }
+}
+
 init();
 </script>
-<script src="/modules/shared/permissions.js"></script>
 <script src="/modules/shared/sidebar.js"></script>
 </body>
 </html>
