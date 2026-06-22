@@ -115,6 +115,47 @@
     .blk-divider { border: 0; border-top: 1px solid var(--border); margin: 14px 0; }
     .blk-image { width: 100%; height: auto; border-radius: 12px; display: block; }
 
+    /* Stats-grid: auto-fit kaarten, stapelt op mobiel (min 140px). */
+    .stats-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+      gap: 10px;
+      margin: 8px 0 6px;
+    }
+    .stat-card {
+      background: linear-gradient(180deg, rgba(20,115,214,0.05), rgba(20,115,214,0.02));
+      border: 1.5px solid rgba(20,115,214,0.20);
+      border-radius: 12px;
+      padding: 14px 14px;
+      text-align: left;
+    }
+    .stat-value {
+      font-family: var(--font-display);
+      font-size: 26px; font-weight: 700; color: var(--azure);
+      letter-spacing: -0.01em; line-height: 1.15;
+    }
+    .stat-label {
+      font-size: 12.5px; font-weight: 600; color: var(--text);
+      margin-top: 4px; line-height: 1.35;
+    }
+    .stat-sub {
+      font-size: 11.5px; color: var(--text-mute);
+      margin-top: 2px; line-height: 1.4;
+    }
+
+    /* Embed-iframe: width 100%, height ingesteld via inline style; geen
+       horizontale overflow op mobiel. */
+    .embed-wrap {
+      position: relative; width: 100%;
+      border: 1px solid var(--border); border-radius: 12px;
+      overflow: hidden; background: var(--bg-card);
+      margin: 6px 0 2px;
+    }
+    .embed-iframe {
+      display: block; width: 100%; height: 100%;
+      border: 0; background: transparent;
+    }
+
     /* Field-blocks */
     .field-label {
       display: block; font-size: 14.5px; font-weight: 600;
@@ -408,9 +449,51 @@
     if (t === 'paragraph') return el('div', { class: 'blk' }, [el('div', { class: 'blk-paragraph', text: b.text || '' })]);
     if (t === 'divider')   return el('hr',  { class: 'blk-divider' });
     if (t === 'image') {
+      // Skippen als er nog geen src is — voorkomt 1px broken-image-icoon.
+      if (!b.src) return null;
       return el('div', { class: 'blk' }, [
-        el('img', { class: 'blk-image', src: b.src || '', alt: b.alt || '' }),
+        el('img', { class: 'blk-image', src: b.src, alt: b.alt || '' }),
       ]);
+    }
+    if (t === 'stats') {
+      const items = Array.isArray(b.items) ? b.items : [];
+      if (items.length === 0) return null;
+      const wrap = el('div', { class: 'blk' });
+      if (b.title) wrap.appendChild(el('div', { class: 'blk-heading', text: b.title }));
+      const grid = el('div', { class: 'stats-grid' });
+      for (const it of items) {
+        const card = el('div', { class: 'stat-card' });
+        card.appendChild(el('div', { class: 'stat-value', text: it.value || '' }));
+        if (it.label) card.appendChild(el('div', { class: 'stat-label', text: it.label }));
+        if (it.sub)   card.appendChild(el('div', { class: 'stat-sub',   text: it.sub   }));
+        grid.appendChild(card);
+      }
+      wrap.appendChild(grid);
+      return wrap;
+    }
+    if (t === 'embed') {
+      // URL is door normalizeStructure server-side al gefilterd op https://;
+      // we sanity-checken hier nogmaals zodat een ontwikkelde of legacy
+      // structuur niet plots iets non-https in een iframe-src kan zetten.
+      const url = String(b.url || '').trim();
+      if (!/^https:\/\//i.test(url)) return null;
+      const h = Number(b.height);
+      const heightPx = (Number.isFinite(h) && Number.isInteger(h)) ? Math.max(200, Math.min(1200, h)) : 700;
+      const wrap = el('div', { class: 'blk' });
+      if (b.title) wrap.appendChild(el('div', { class: 'blk-heading', text: b.title }));
+      const cont = el('div', { class: 'embed-wrap', style: 'height:' + heightPx + 'px' });
+      // Geen rauwe HTML — we zetten src en attributen via setAttribute.
+      const iframe = document.createElement('iframe');
+      iframe.className = 'embed-iframe';
+      iframe.src = url;
+      iframe.title = String(b.title || 'Embedded content');
+      iframe.loading = 'lazy';
+      iframe.referrerPolicy = 'no-referrer';
+      iframe.setAttribute('sandbox',
+        'allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox');
+      cont.appendChild(iframe);
+      wrap.appendChild(cont);
+      return wrap;
     }
 
     // Field-blocks

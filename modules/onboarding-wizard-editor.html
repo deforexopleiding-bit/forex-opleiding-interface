@@ -337,15 +337,19 @@
     previewIdx   : 0,
   };
 
-  // Block-type lijst (15 types). Info-only vs field — sturen we ook UI.
+  // Block-type lijst. Info-only vs field — sturen we ook UI. Rich-content
+  // types (embed/stats) behoren tot info-only voor RBAC/required-validatie
+  // maar krijgen wel hun eigen UI/config-form.
   const FIELD_TYPES = ['short_text','long_text','email','tel','number','single_choice','multi_choice','select','scale','consent','file_download'];
-  const INFO_TYPES  = ['heading','paragraph','image','divider'];
+  const INFO_TYPES  = ['heading','paragraph','image','divider','embed','stats'];
   const ALL_TYPES   = INFO_TYPES.concat(FIELD_TYPES);
   const TYPE_LABEL = {
     heading        : 'Kop',
     paragraph      : 'Paragraaf',
     image          : 'Afbeelding',
     divider        : 'Scheidingslijn',
+    embed          : 'Embed (iframe)',
+    stats          : 'Stats-kaarten',
     short_text     : 'Tekst (kort)',
     long_text      : 'Tekst (lang)',
     email          : 'E-mail',
@@ -583,6 +587,12 @@
     if (type === 'paragraph') return { id, type, text: '' };
     if (type === 'image')     return { id, type, src: '', alt: '' };
     if (type === 'divider')   return { id, type };
+    if (type === 'embed')     return { id, type, url: '', height: 700, title: '' };
+    if (type === 'stats')     return { id, type, title: '', items: [
+      { value: '', label: '', sub: '' },
+      { value: '', label: '', sub: '' },
+      { value: '', label: '', sub: '' },
+    ] };
     if (type === 'file_download') {
       return {
         id, type,
@@ -753,6 +763,128 @@
       alt.addEventListener('input', () => { b.alt = alt.value; setDirty(true); });
       altRow.appendChild(alt);
       host.appendChild(altRow);
+      return;
+    }
+    if (b.type === 'embed') {
+      // URL — alleen https:// wordt door server geaccepteerd; toon inline waarschuwing.
+      const urlRow = document.createElement('div'); urlRow.className = 'field-row';
+      urlRow.innerHTML = `<label class="lbl">Embed-URL (https)</label>`;
+      const url = document.createElement('input'); url.type = 'url'; url.value = b.url || '';
+      url.placeholder = 'https://… (bijv. GoHighLevel-agenda)';
+      const warn = document.createElement('div'); warn.className = 'help';
+      function refreshUrlWarn() {
+        const v = (b.url || '').trim();
+        if (!v) {
+          warn.className = 'help';
+          warn.textContent = "Plak hier de iframe-URL. Wordt overgeslagen als 'ie leeg blijft.";
+        } else if (!/^https:\/\//i.test(v)) {
+          warn.className = 'err';
+          warn.textContent = "⚠️ URL moet met \"https://\" beginnen — anders wordt 'ie bij opslaan leeggemaakt.";
+        } else {
+          warn.className = 'help';
+          warn.textContent = 'OK — wordt in een iframe getoond aan de student.';
+        }
+      }
+      url.addEventListener('input', () => { b.url = url.value; refreshUrlWarn(); setDirty(true); });
+      urlRow.appendChild(url);
+      urlRow.appendChild(warn);
+      host.appendChild(urlRow);
+      refreshUrlWarn();
+
+      // Height + title in 2-koloms.
+      const grid = document.createElement('div'); grid.className = 'field-row field-grid-2';
+      const hWrap = document.createElement('div');
+      hWrap.innerHTML = `<label class="lbl">Hoogte (px)</label>`;
+      const hInp = document.createElement('input'); hInp.type = 'number'; hInp.min = '200'; hInp.max = '1200';
+      hInp.value = String(Number.isFinite(b.height) ? b.height : 700);
+      hInp.addEventListener('input', () => {
+        const v = parseInt(hInp.value, 10);
+        if (Number.isFinite(v)) b.height = Math.max(200, Math.min(1200, v));
+        setDirty(true);
+      });
+      hWrap.appendChild(hInp);
+      grid.appendChild(hWrap);
+
+      const tWrap = document.createElement('div');
+      tWrap.innerHTML = `<label class="lbl">Titel (optioneel)</label>`;
+      const tInp = document.createElement('input'); tInp.type = 'text'; tInp.value = b.title || '';
+      tInp.placeholder = 'Bijv. Plan een intro-call';
+      tInp.addEventListener('input', () => { b.title = tInp.value; setDirty(true); });
+      tWrap.appendChild(tInp);
+      grid.appendChild(tWrap);
+      host.appendChild(grid);
+      return;
+    }
+    if (b.type === 'stats') {
+      if (!Array.isArray(b.items)) b.items = [];
+      // Optionele titel.
+      const tRow = document.createElement('div'); tRow.className = 'field-row';
+      tRow.innerHTML = `<label class="lbl">Sectie-titel (optioneel)</label>`;
+      const t = document.createElement('input'); t.type = 'text'; t.value = b.title || '';
+      t.placeholder = 'Bijv. Track-record in cijfers';
+      t.addEventListener('input', () => { b.title = t.value; setDirty(true); });
+      tRow.appendChild(t);
+      host.appendChild(tRow);
+
+      // Items-editor (value/label/sub rijen).
+      const sRow = document.createElement('div'); sRow.className = 'field-row';
+      sRow.innerHTML = `<label class="lbl">Stats-items (max 12)</label>`;
+      const list = document.createElement('div'); list.className = 'opts-list';
+      function refreshItems() {
+        list.innerHTML = '';
+        b.items.forEach((it, i) => {
+          const r = document.createElement('div');
+          r.style.cssText = 'display:grid;grid-template-columns:1fr 1.5fr 1.5fr auto auto auto;gap:6px;align-items:center';
+          r.innerHTML = `
+            <input type="text" placeholder="Value (groot)"  value="${esc(it.value || '')}" data-fld="value" />
+            <input type="text" placeholder="Label"          value="${esc(it.label || '')}" data-fld="label" />
+            <input type="text" placeholder="Sub (optioneel)" value="${esc(it.sub   || '')}" data-fld="sub"   />
+            <button type="button" class="icon-btn" data-act="up"   ${i === 0 ? 'disabled' : ''}><i class="ti ti-chevron-up"></i></button>
+            <button type="button" class="icon-btn" data-act="down" ${i === b.items.length - 1 ? 'disabled' : ''}><i class="ti ti-chevron-down"></i></button>
+            <button type="button" class="icon-btn" data-act="del"><i class="ti ti-trash"></i></button>
+          `;
+          // Style inputs zoals opts-row inputs.
+          r.querySelectorAll('input').forEach((inp) => {
+            inp.style.cssText = 'padding:7px 9px;font-size:13px;border:1.5px solid var(--border);border-radius:7px;background:var(--bg);color:var(--text);font-family:inherit;width:100%';
+          });
+          const [vInp, lInp, sInp] = r.querySelectorAll('input');
+          vInp.addEventListener('input', () => { it.value = vInp.value; setDirty(true); });
+          lInp.addEventListener('input', () => { it.label = lInp.value; setDirty(true); });
+          sInp.addEventListener('input', () => { it.sub   = sInp.value; setDirty(true); });
+          r.querySelector('[data-act="up"]').addEventListener('click', () => {
+            if (i === 0) return;
+            [b.items[i-1], b.items[i]] = [b.items[i], b.items[i-1]];
+            setDirty(true); refreshItems();
+          });
+          r.querySelector('[data-act="down"]').addEventListener('click', () => {
+            if (i === b.items.length - 1) return;
+            [b.items[i+1], b.items[i]] = [b.items[i], b.items[i+1]];
+            setDirty(true); refreshItems();
+          });
+          r.querySelector('[data-act="del"]').addEventListener('click', () => {
+            b.items.splice(i, 1);
+            setDirty(true); refreshItems();
+          });
+          list.appendChild(r);
+        });
+        if (b.items.length === 0) {
+          const e = document.createElement('div'); e.className = 'help';
+          e.style.color = 'var(--text-faint)'; e.textContent = 'Nog geen stats — voeg er minstens 2–3 toe.';
+          list.appendChild(e);
+        }
+      }
+      refreshItems();
+      sRow.appendChild(list);
+      const add = document.createElement('button');
+      add.type = 'button'; add.className = 'btn-base'; add.style.marginTop = '8px';
+      add.innerHTML = '<i class="ti ti-plus"></i> Item toevoegen';
+      add.addEventListener('click', () => {
+        if (b.items.length >= 12) { toast('Maximaal 12 items', 'error'); return; }
+        b.items.push({ value: '', label: '', sub: '' });
+        setDirty(true); refreshItems();
+      });
+      sRow.appendChild(add);
+      host.appendChild(sRow);
       return;
     }
 
@@ -1260,6 +1392,61 @@
       const e = document.createElement('div'); e.className = 'pv-p';
       e.textContent = b.src ? '🖼 ' + (b.alt || b.src) : '(geen afbeelding gekozen)';
       wrap.appendChild(e); return wrap;
+    }
+    if (b.type === 'stats') {
+      const items = Array.isArray(b.items) ? b.items.filter((it) => it && (it.value || it.label)) : [];
+      if (items.length === 0) {
+        wrap.appendChild(el('div', { class: 'pv-help', text: '(nog geen stats-items)' }));
+        return wrap;
+      }
+      if (b.title) wrap.appendChild(el('div', { class: 'pv-h', text: b.title }));
+      const grid = document.createElement('div');
+      grid.style.cssText = 'display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin:6px 0';
+      for (const it of items) {
+        const card = document.createElement('div');
+        card.style.cssText = 'background:linear-gradient(180deg,rgba(20,115,214,0.05),rgba(20,115,214,0.02));border:1.5px solid rgba(20,115,214,0.20);border-radius:12px;padding:14px';
+        const v = document.createElement('div');
+        v.style.cssText = "font-family:'Space Grotesk','Inter',sans-serif;font-size:24px;font-weight:700;color:#1473d6;line-height:1.15;letter-spacing:-0.01em";
+        v.textContent = it.value || '';
+        card.appendChild(v);
+        if (it.label) {
+          const l = document.createElement('div');
+          l.style.cssText = 'font-size:12.5px;font-weight:600;color:#16263f;margin-top:4px;line-height:1.35';
+          l.textContent = it.label;
+          card.appendChild(l);
+        }
+        if (it.sub) {
+          const s = document.createElement('div');
+          s.style.cssText = 'font-size:11.5px;color:#5c6b7d;margin-top:2px;line-height:1.4';
+          s.textContent = it.sub;
+          card.appendChild(s);
+        }
+        grid.appendChild(card);
+      }
+      wrap.appendChild(grid);
+      return wrap;
+    }
+    if (b.type === 'embed') {
+      const url = String(b.url || '').trim();
+      if (!url || !/^https:\/\//i.test(url)) {
+        wrap.appendChild(el('div', { class: 'pv-help', text: url ? '(URL is niet https — wordt overgeslagen)' : '(nog geen embed-URL ingesteld)' }));
+        return wrap;
+      }
+      if (b.title) wrap.appendChild(el('div', { class: 'pv-h', text: b.title }));
+      const h = Number(b.height);
+      const heightPx = (Number.isFinite(h) && Number.isInteger(h)) ? Math.max(200, Math.min(1200, h)) : 700;
+      const cont = document.createElement('div');
+      cont.style.cssText = 'position:relative;width:100%;height:' + heightPx + 'px;border:1px solid #dde6f1;border-radius:12px;overflow:hidden;background:#fff;margin:6px 0 2px';
+      const iframe = document.createElement('iframe');
+      iframe.src = url;
+      iframe.title = String(b.title || 'Embedded content');
+      iframe.loading = 'lazy';
+      iframe.referrerPolicy = 'no-referrer';
+      iframe.setAttribute('sandbox', 'allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox');
+      iframe.style.cssText = 'display:block;width:100%;height:100%;border:0;background:transparent';
+      cont.appendChild(iframe);
+      wrap.appendChild(cont);
+      return wrap;
     }
 
     // Field-label
