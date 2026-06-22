@@ -100,6 +100,9 @@
           // sidebar-entry naast de legacy `onboarding-overzicht`-link
           // (customers.onboarding_status-flow) tot legacy uitgefaseerd is.
           navLink('onboarding-admin', '/modules/onboarding-admin.html', 'Onboarding (admin)') +
+          // F1b — editor voor de wizard-structuur (block-builder + publish).
+          // Aparte entry, gegate op onboarding.wizard.edit.
+          navLink('onboarding-wizard-editor', '/modules/onboarding-wizard-editor.html', 'Onboarding-wizard') +
           // Finance — Mega-restructure: badge voor Open Acties (F1 finance-taken) hangt
           // nu inline op de Finance nav-item zelf. Open Acties is verhuisd naar
           // /modules/finance.html?tab=wanbetalers&sub=open-acties (sub-tab onder Wanbetalers).
@@ -442,6 +445,9 @@
     // F0 onboarding-admin (nieuwe `onboardings`-tabel) — read/write op
     // onboarding.admin. Aparte module naast legacy `onboarding-overzicht`.
     'onboarding-admin': 'onboarding.admin',
+    // F1b — wizard-editor (block-builder + publish). RBAC-gate op de
+    // dedicated 'onboarding.wizard.edit' permission.
+    'onboarding-wizard-editor': 'onboarding.wizard.edit',
     'finance': 'finance.module.access',
     // Open Acties (F1 finance-taken) is verhuisd naar Finance > Wanbetalers > Open Acties
     // sub-tab — geen eigen sidebar-link meer. Badge hangt nu op de Finance nav-item zelf.

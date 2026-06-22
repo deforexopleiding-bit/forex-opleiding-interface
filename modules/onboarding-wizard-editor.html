@@ -1,0 +1,1391 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Onboarding-wizard editor · De Forex Opleiding</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/dist/tabler-icons.min.css" />
+  <link rel="stylesheet" href="/modules/shared/agent-shared.css" />
+  <link rel="stylesheet" href="/styles/sales-redesign.css" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; }
+    body { font-family: 'Inter', system-ui, sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; -webkit-font-smoothing: antialiased; }
+    .app { margin-left: 220px; padding: 24px 28px 80px; max-width: 1400px; --brand-deep:#0a2f63; --brand-azure:#1473d6; --brand-accent:#1f9fe0; }
+
+    .page-header { display:flex; align-items:flex-start; justify-content:space-between; margin-bottom:18px; gap:16px; flex-wrap:wrap; }
+    .page-header h1 { font-size:22px; font-weight:800; color:var(--text); font-family:'Space Grotesk','Inter',system-ui,sans-serif; letter-spacing:-0.01em; }
+    .page-header p  { font-size:13px; color:var(--text-dim); margin-top:2px; }
+
+    /* Header-rechts: opslaan/publiceren + indicator + meta */
+    .header-actions { display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
+    .meta-row { font-size:11.5px; color:var(--text-faint); margin-top:6px; line-height:1.5; }
+    .meta-row strong { color:var(--text-dim); }
+    .dirty-pill {
+      display:inline-flex; align-items:center; gap:5px; padding:4px 9px; border-radius:999px;
+      font-size:11px; font-weight:700; letter-spacing:0.02em;
+      background:rgba(245,158,11,0.13); color:#b45309; border:1px solid rgba(245,158,11,0.30);
+    }
+    .saved-pill {
+      display:inline-flex; align-items:center; gap:5px; padding:4px 9px; border-radius:999px;
+      font-size:11px; font-weight:700; letter-spacing:0.02em;
+      background:rgba(34,197,94,0.13); color:#15803d; border:1px solid rgba(34,197,94,0.30);
+    }
+
+    .btn-base {
+      display:inline-flex; align-items:center; gap:6px;
+      padding:8px 14px; font-size:13.5px; font-weight:600;
+      border:1px solid var(--border); border-radius:8px;
+      background:var(--bg); color:var(--text); cursor:pointer; font-family:inherit;
+      transition:background .12s, border-color .12s;
+    }
+    .btn-base:hover { background:var(--bg-elev); }
+    .btn-base:disabled { opacity:0.55; cursor:default; }
+    .btn-base.primary { background:var(--brand-deep); border-color:var(--brand-deep); color:#fff; }
+    .btn-base.primary:hover { background:#082850; }
+    .btn-base.accent  { background:var(--brand-azure); border-color:var(--brand-azure); color:#fff; }
+    .btn-base.accent:hover { background:#1160bd; }
+    .btn-base.danger  { color:#b91c1c; border-color:#fecaca; }
+    .btn-base.danger:hover { background:rgba(220,38,38,0.06); }
+    .btn-base.ghost   { background:transparent; }
+
+    /* Layout */
+    .editor-grid {
+      display:grid;
+      grid-template-columns: 280px 1fr;
+      gap: 18px;
+    }
+    @media (max-width: 880px) {
+      .app { margin-left: 0; padding: 14px 14px 80px; }
+      .editor-grid { grid-template-columns: 1fr; }
+    }
+
+    /* Pages list (links) */
+    .pages-panel {
+      background: var(--bg-elev); border:1px solid var(--border); border-radius:12px;
+      padding: 14px;
+      align-self: start;
+      position: sticky; top: 14px;
+    }
+    .pages-panel h3 { font-size:11px; text-transform:uppercase; letter-spacing:.05em; color:var(--text-faint); font-weight:700; margin-bottom:10px; }
+    .pages-list { display:flex; flex-direction:column; gap:4px; margin-bottom:10px; }
+    .page-item {
+      display:flex; align-items:center; gap:6px;
+      padding: 8px 8px 8px 10px;
+      border:1px solid var(--border); border-radius:8px;
+      background:var(--bg);
+      cursor:pointer; font-size:13px;
+      transition:background .12s, border-color .12s;
+    }
+    .page-item:hover { background:var(--bg-elev); }
+    .page-item.is-on { background:rgba(20,115,214,0.08); border-color:var(--brand-azure); }
+    .page-item .pname { flex:1; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .page-item .pnum  { font-size:10.5px; color:var(--text-faint); font-weight:700; min-width:18px; text-align:right; }
+    .page-item .pacts { display:flex; gap:2px; }
+    .icon-btn {
+      width:24px; height:24px; padding:0; border:1px solid var(--border); border-radius:6px;
+      background:var(--bg); color:var(--text-dim); cursor:pointer;
+      display:inline-flex; align-items:center; justify-content:center; font-size:12px;
+    }
+    .icon-btn:hover { background:var(--bg-elev); color:var(--text); }
+    .icon-btn:disabled { opacity:0.4; cursor:default; }
+
+    /* Block-editor (rechts) */
+    .blocks-panel { display:flex; flex-direction:column; gap:14px; }
+    .page-meta-card {
+      background:var(--bg-elev); border:1px solid var(--border); border-radius:12px;
+      padding:14px 16px;
+    }
+    .page-meta-card label { display:block; font-size:11px; text-transform:uppercase; letter-spacing:.05em; color:var(--text-faint); font-weight:700; margin-bottom:6px; }
+    .page-meta-card input[type=text] {
+      width:100%; padding:9px 12px; font-size:14.5px; border:1.5px solid var(--border); border-radius:8px;
+      background:var(--bg); color:var(--text); font-family:inherit;
+    }
+    .page-meta-card input[type=text]:focus { outline:0; border-color:var(--brand-azure); box-shadow:0 0 0 4px rgba(20,115,214,0.18); }
+
+    .block-card {
+      background:var(--bg-elev); border:1px solid var(--border); border-radius:12px;
+      padding:14px 16px;
+    }
+    .block-head {
+      display:flex; align-items:center; gap:10px; margin-bottom:10px;
+      padding-bottom:10px; border-bottom:1px dashed var(--border);
+      flex-wrap:wrap;
+    }
+    .block-head .type-badge {
+      display:inline-block; padding:3px 9px; border-radius:999px;
+      background:rgba(20,115,214,0.12); color:var(--brand-azure);
+      font-size:11px; font-weight:700; letter-spacing:0.02em;
+      font-family:'Space Grotesk','Inter',system-ui,sans-serif;
+    }
+    .block-head .type-badge.info  { background:rgba(100,116,139,0.15); color:#475569; }
+    .block-head .spacer { flex:1; }
+    .block-head .key-mono { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:11.5px; color:var(--text-faint); }
+    .block-head .acts { display:flex; gap:4px; flex-wrap:wrap; }
+
+    .field-row { margin-bottom:12px; }
+    .field-row:last-child { margin-bottom: 0; }
+    .field-row label.lbl { display:block; font-size:11px; text-transform:uppercase; letter-spacing:.05em; color:var(--text-faint); font-weight:700; margin-bottom:6px; }
+    .field-row input[type=text],
+    .field-row input[type=number],
+    .field-row input[type=url],
+    .field-row textarea,
+    .field-row select {
+      width:100%; padding:9px 11px; font-size:14px; border:1.5px solid var(--border); border-radius:8px;
+      background:var(--bg); color:var(--text); font-family:inherit;
+    }
+    .field-row textarea { min-height:80px; resize:vertical; }
+    .field-row input:focus, .field-row textarea:focus, .field-row select:focus {
+      outline:0; border-color:var(--brand-azure); box-shadow:0 0 0 4px rgba(20,115,214,0.18);
+    }
+    .field-row .help { font-size:11.5px; color:var(--text-faint); margin-top:4px; }
+    .field-row .warn { font-size:11.5px; color:#b45309; margin-top:4px; font-weight:600; }
+    .field-row .err  { font-size:11.5px; color:#b91c1c; margin-top:4px; font-weight:600; }
+
+    .req-toggle { display:inline-flex; align-items:center; gap:8px; cursor:pointer; font-size:13px; }
+    .req-toggle input { width:18px; height:18px; accent-color:var(--brand-azure); }
+
+    /* Two-column on wide screens for short fields */
+    .field-grid-2 { display:grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    @media (max-width: 640px) { .field-grid-2 { grid-template-columns: 1fr; } }
+
+    /* Options-editor */
+    .opts-list { display:flex; flex-direction:column; gap:6px; }
+    .opts-row { display:grid; grid-template-columns: 1fr 1fr auto auto auto; gap:6px; align-items:center; }
+    .opts-row input { width:100%; padding:7px 9px; font-size:13px; border:1.5px solid var(--border); border-radius:7px; background:var(--bg); color:var(--text); font-family:inherit; }
+
+    /* File-list */
+    .files-list { display:flex; flex-direction:column; gap:6px; }
+    .file-row {
+      display:flex; align-items:center; gap:8px; padding:8px 10px;
+      background:var(--bg); border:1px solid var(--border); border-radius:8px;
+      font-size:13.5px;
+    }
+    .file-row .fname { flex:1; word-break: break-all; }
+    .file-row .fpath { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:11.5px; color:var(--text-faint); }
+
+    .upload-progress { font-size:11.5px; color:var(--text-dim); margin-top:6px; }
+    .upload-progress.err { color:#b91c1c; font-weight:600; }
+
+    /* Block-type picker */
+    .add-row { margin-top:6px; }
+    .type-picker {
+      display:grid;
+      grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+      gap:6px;
+      padding:12px;
+      background:var(--bg); border:1px dashed var(--border); border-radius:10px;
+      margin-top:8px;
+    }
+    .type-picker button {
+      padding:9px 8px; font-size:12.5px; font-weight:600;
+      border:1px solid var(--border); border-radius:8px; background:var(--bg-elev); color:var(--text);
+      cursor:pointer; font-family:inherit;
+      transition:background .12s, border-color .12s;
+    }
+    .type-picker button:hover { background:#fff; border-color:var(--brand-azure); color:var(--brand-azure); }
+
+    /* Modal (preview + confirm) */
+    .modal { position:fixed; inset:0; background:rgba(15,23,42,0.45); display:none; align-items:flex-start; justify-content:center; z-index:200; padding:32px 14px; overflow:auto; }
+    .modal.open { display:flex; }
+    .modal-card { background:var(--bg); border:1px solid var(--border); border-radius:14px; width:100%; max-width:760px; max-height:90vh; overflow:auto; box-shadow:0 20px 50px rgba(15,23,42,0.25); }
+    .modal-h { display:flex; align-items:center; justify-content:space-between; padding:14px 18px; border-bottom:1px solid var(--border); position:sticky; top:0; background:var(--bg); z-index:2; }
+    .modal-h h2 { font-size:15px; font-weight:700; font-family:'Space Grotesk','Inter',system-ui,sans-serif; color:var(--brand-deep); letter-spacing:-0.01em; }
+    .modal-x { background:transparent; border:0; color:var(--text-dim); cursor:pointer; font-size:18px; line-height:1; padding:4px 8px; border-radius:6px; }
+    .modal-x:hover { background:var(--bg-elev); color:var(--text); }
+    .modal-b { padding:18px; }
+    .modal-f { display:flex; justify-content:flex-end; gap:8px; padding:12px 18px; border-top:1px solid var(--border); background:var(--bg-elev); position:sticky; bottom:0; }
+
+    /* Preview-paneel — match publieke wizard-look */
+    .pv {
+      max-width: 640px; margin: 0 auto; padding-top: 4px;
+      --pv-primary:#0a2f63; --pv-azure:#1473d6;
+    }
+    .pv .pv-hello { font-family:'Space Grotesk','Inter',sans-serif; font-size:22px; font-weight:700; color:var(--pv-primary); margin-bottom:8px; }
+    .pv .pv-card { background:#fff; border:1px solid #dde6f1; border-radius:14px; padding:20px 18px; margin-bottom:14px; box-shadow:0 2px 8px rgba(15,23,42,0.04); }
+    .pv .pv-page-title { font-family:'Space Grotesk','Inter',sans-serif; font-size:18px; font-weight:700; color:var(--pv-primary); margin-bottom:6px; }
+    .pv .pv-block { margin-bottom:14px; }
+    .pv .pv-h { font-family:'Space Grotesk','Inter',sans-serif; font-size:16px; font-weight:700; color:var(--pv-primary); margin-bottom:4px; }
+    .pv .pv-p { font-size:14px; color:#16263f; line-height:1.55; }
+    .pv .pv-div { border:0; border-top:1px solid #dde6f1; margin:12px 0; }
+    .pv .pv-img { width:100%; height:auto; border-radius:10px; }
+    .pv .pv-label { font-size:13.5px; font-weight:600; margin-bottom:6px; color:#16263f; }
+    .pv .pv-label .req { color:#dc2626; margin-left:2px; }
+    .pv .pv-help { font-size:12px; color:#5c6b7d; margin:-2px 0 6px; }
+    .pv .pv-input,
+    .pv .pv-textarea,
+    .pv .pv-select {
+      width:100%; min-height:42px; padding:9px 12px; font-size:14.5px;
+      border:1.5px solid #dde6f1; border-radius:8px; background:#fff; color:#16263f; font-family:inherit;
+    }
+    .pv .pv-textarea { min-height:80px; resize:none; }
+    .pv .pv-opt-row { display:flex; align-items:center; gap:10px; padding:8px 11px; border:1.5px solid #dde6f1; border-radius:8px; background:#fff; min-height:42px; margin-bottom:6px; font-size:14px; }
+    .pv .pv-opt-row input { width:18px; height:18px; accent-color:var(--pv-azure); }
+    .pv .pv-scale { display:flex; gap:5px; flex-wrap:wrap; }
+    .pv .pv-scale-btn { flex:1 0 auto; min-width:38px; padding:8px 4px; border:1.5px solid #dde6f1; border-radius:8px; background:#fff; color:#16263f; font-weight:600; font-size:13px; }
+    .pv .pv-files .pv-file { display:flex; align-items:center; justify-content:space-between; padding:10px 12px; border:1.5px solid #dde6f1; border-radius:8px; background:#f8fbff; color:var(--pv-primary); font-weight:600; font-size:13.5px; margin-bottom:6px; }
+
+    .empty-state { background:var(--bg-elev); border:1px dashed var(--border); border-radius:10px; padding:24px 16px; text-align:center; font-size:13px; color:var(--text-dim); }
+    .skeleton { display:inline-block; width:80px; height:16px; background:linear-gradient(90deg, rgba(0,0,0,0.05), rgba(0,0,0,0.10), rgba(0,0,0,0.05)); border-radius:4px; animation:sk 1.2s infinite; }
+    @keyframes sk { 0% { background-position:0% 0; } 100% { background-position:200% 0; } }
+  </style>
+</head>
+<body>
+<div id="sidebar-mount"></div>
+
+<div class="app">
+  <div class="page-header">
+    <div>
+      <h1>Onboarding-wizard editor</h1>
+      <p>Bewerk de structuur van de publieke vragenlijst. Concept-versie wordt opgeslagen apart van wat live staat — pas bij <strong>Publiceren</strong> gaat 'ie naar studenten.</p>
+      <div class="meta-row" id="metaRow"><span class="skeleton" style="width:240px"></span></div>
+    </div>
+    <div class="header-actions" id="headerActions">
+      <span class="skeleton" style="width:140px"></span>
+    </div>
+  </div>
+
+  <div id="rootWrap">
+    <div class="empty-state"><span class="skeleton" style="width:200px"></span></div>
+  </div>
+</div>
+
+<!-- Confirm + Preview modals -->
+<div class="modal" id="confirmModal" hidden>
+  <div class="modal-card" style="max-width:480px">
+    <div class="modal-h">
+      <h2 id="confirmTitle">Bevestigen</h2>
+      <button type="button" class="modal-x" data-confirm-close>&times;</button>
+    </div>
+    <div class="modal-b" id="confirmBody">…</div>
+    <div class="modal-f">
+      <button type="button" class="btn-base ghost" data-confirm-close>Annuleren</button>
+      <button type="button" class="btn-base accent" id="confirmOkBtn">Doorgaan</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal" id="previewModal" hidden>
+  <div class="modal-card" style="max-width:760px">
+    <div class="modal-h">
+      <h2>Voorbeeld — zoals de student het ziet</h2>
+      <button type="button" class="modal-x" data-preview-close>&times;</button>
+    </div>
+    <div class="modal-b" id="previewBody"></div>
+    <div class="modal-f">
+      <button type="button" class="btn-base" id="previewPrev">← Vorige</button>
+      <span style="flex:1;text-align:center;font-size:12.5px;color:var(--text-dim)" id="previewMeta">—</span>
+      <button type="button" class="btn-base accent" id="previewNext">Volgende →</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script src="/modules/shared/supabase-client.js"></script>
+<script src="/modules/shared/agent-shared.js"></script>
+<script src="/modules/shared/theme-shared.js"></script>
+<script src="/modules/shared/permissions.js"></script>
+<script src="/modules/shared/sidebar.js"></script>
+<script>
+(function () {
+  'use strict';
+
+  // ── Helpers ───────────────────────────────────────────────────────────
+  const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+  function toast(msg, kind) {
+    const el = document.getElementById('toast');
+    if (!el) return;
+    el.textContent = msg;
+    el.className = 'toast show ' + (kind || '');
+    setTimeout(() => el.classList.remove('show'), 2400);
+  }
+  function fmtDateTimeNL(iso) {
+    if (!iso) return '—';
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return '—';
+    return d.toLocaleString('nl-NL', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+  }
+  function newId(prefix) {
+    const r = (typeof crypto?.randomUUID === 'function') ? crypto.randomUUID().slice(0, 8)
+      : Math.random().toString(36).slice(2, 10);
+    return (prefix || 'b') + '_' + r;
+  }
+  function slugifyKey(s) {
+    return String(s || '')
+      .toLowerCase()
+      .normalize('NFKD').replace(/[̀-ͯ]/g, '')
+      .replace(/[^a-z0-9]+/g, '_')
+      .replace(/^_+|_+$/g, '')
+      .slice(0, 48);
+  }
+  function clone(o) { return JSON.parse(JSON.stringify(o)); }
+
+  // ── State ─────────────────────────────────────────────────────────────
+  const State = {
+    draft        : { version: 1, pages: [] },
+    published    : null,
+    defaultStruct: { version: 1, pages: [] },
+    meta         : {},
+    selectedIdx  : 0,
+    dirty        : false,
+    saving       : false,
+    publishing   : false,
+    previewIdx   : 0,
+  };
+
+  // Block-type lijst (15 types). Info-only vs field — sturen we ook UI.
+  const FIELD_TYPES = ['short_text','long_text','email','tel','number','single_choice','multi_choice','select','scale','consent','file_download'];
+  const INFO_TYPES  = ['heading','paragraph','image','divider'];
+  const ALL_TYPES   = INFO_TYPES.concat(FIELD_TYPES);
+  const TYPE_LABEL = {
+    heading        : 'Kop',
+    paragraph      : 'Paragraaf',
+    image          : 'Afbeelding',
+    divider        : 'Scheidingslijn',
+    short_text     : 'Tekst (kort)',
+    long_text      : 'Tekst (lang)',
+    email          : 'E-mail',
+    tel            : 'Telefoon',
+    number         : 'Getal',
+    single_choice  : 'Eén keuze',
+    multi_choice   : 'Meerdere keuzes',
+    select         : 'Dropdown',
+    scale          : 'Schaal (1–10)',
+    consent        : 'Akkoord-vinkje',
+    file_download  : 'Bestand-download',
+  };
+
+  // ── Dirty-tracking ────────────────────────────────────────────────────
+  function setDirty(b) {
+    State.dirty = !!b;
+    renderHeaderActions();
+  }
+  window.addEventListener('beforeunload', (ev) => {
+    if (State.dirty) {
+      ev.preventDefault();
+      ev.returnValue = '';
+      return '';
+    }
+  });
+
+  // ── Uniqueness helpers ────────────────────────────────────────────────
+  function collectKeys(struct, skipBlockId) {
+    const out = new Set();
+    for (const p of (struct?.pages || [])) {
+      for (const b of (p?.blocks || [])) {
+        if (skipBlockId && b.id === skipBlockId) continue;
+        if (b.type === 'file_download' && b.consent_key) out.add(b.consent_key);
+        else if (b.key) out.add(b.key);
+      }
+    }
+    return out;
+  }
+  function uniqueKey(base, struct, skipBlockId) {
+    const taken = collectKeys(struct, skipBlockId);
+    let candidate = base && base.length > 0 ? base : 'veld';
+    let i = 2;
+    while (taken.has(candidate)) {
+      candidate = base + '_' + i;
+      i++;
+    }
+    return candidate;
+  }
+
+  // ── Render: header-actions + meta ─────────────────────────────────────
+  function renderHeaderActions() {
+    const host = document.getElementById('headerActions');
+    if (!host) return;
+    const dirtyTag = State.dirty
+      ? '<span class="dirty-pill"><i class="ti ti-circle-filled" style="font-size:8px"></i> Niet-opgeslagen wijzigingen</span>'
+      : '<span class="saved-pill"><i class="ti ti-check" style="font-size:12px"></i> Opgeslagen</span>';
+    host.innerHTML = `
+      ${dirtyTag}
+      <button type="button" class="btn-base" id="previewBtn"><i class="ti ti-eye"></i> Voorbeeld</button>
+      <button type="button" class="btn-base accent" id="saveBtn" ${State.saving ? 'disabled' : ''}>
+        <i class="ti ti-device-floppy"></i> ${State.saving ? 'Opslaan…' : 'Concept opslaan'}
+      </button>
+      <button type="button" class="btn-base primary" id="publishBtn" ${State.publishing ? 'disabled' : ''}>
+        <i class="ti ti-cloud-upload"></i> ${State.publishing ? 'Publiceren…' : 'Publiceren'}
+      </button>`;
+    document.getElementById('previewBtn').addEventListener('click', openPreview);
+    document.getElementById('saveBtn').addEventListener('click', doSave);
+    document.getElementById('publishBtn').addEventListener('click', confirmPublish);
+  }
+  function renderMeta() {
+    const el = document.getElementById('metaRow');
+    if (!el) return;
+    const m = State.meta || {};
+    const draft = m.draft_updated_at ? `Laatst opgeslagen <strong>${fmtDateTimeNL(m.draft_updated_at)}</strong>` : 'Nog geen concept opgeslagen';
+    const pub   = m.published_at     ? `Laatst gepubliceerd <strong>${fmtDateTimeNL(m.published_at)}</strong>` : 'Nog niets gepubliceerd';
+    el.innerHTML = `${draft} · ${pub}`;
+  }
+
+  // ── Render: root grid ─────────────────────────────────────────────────
+  function renderRoot() {
+    const root = document.getElementById('rootWrap');
+    if (!root) return;
+    root.innerHTML = `
+      <div class="editor-grid">
+        <div class="pages-panel" id="pagesPanel"></div>
+        <div class="blocks-panel" id="blocksPanel"></div>
+      </div>`;
+    renderPagesPanel();
+    renderBlocksPanel();
+  }
+
+  // ── Pages-panel (links) ───────────────────────────────────────────────
+  function renderPagesPanel() {
+    const host = document.getElementById('pagesPanel');
+    if (!host) return;
+    const pages = State.draft.pages || [];
+    const items = pages.map((p, i) => {
+      const isOn = (i === State.selectedIdx);
+      const title = (p.title && p.title.trim()) || `Pagina ${i + 1}`;
+      return `
+        <div class="page-item ${isOn ? 'is-on' : ''}" data-page-idx="${i}">
+          <span class="pnum">${i + 1}</span>
+          <span class="pname">${esc(title)}</span>
+          <div class="pacts">
+            <button type="button" class="icon-btn" data-page-act="up"     data-page-idx="${i}" ${i === 0 ? 'disabled' : ''} title="Omhoog"><i class="ti ti-chevron-up"></i></button>
+            <button type="button" class="icon-btn" data-page-act="down"   data-page-idx="${i}" ${i === pages.length - 1 ? 'disabled' : ''} title="Omlaag"><i class="ti ti-chevron-down"></i></button>
+            <button type="button" class="icon-btn" data-page-act="delete" data-page-idx="${i}" title="Verwijderen"><i class="ti ti-trash"></i></button>
+          </div>
+        </div>`;
+    }).join('') || '<div class="empty-state" style="padding:16px 12px;font-size:12.5px">Nog geen pagina\'s.</div>';
+
+    host.innerHTML = `
+      <h3>Pagina's (${pages.length})</h3>
+      <div class="pages-list">${items}</div>
+      <button type="button" class="btn-base ghost" id="addPageBtn" style="width:100%;justify-content:center">
+        <i class="ti ti-plus"></i> Pagina toevoegen
+      </button>`;
+
+    host.querySelectorAll('[data-page-idx]').forEach((node) => {
+      if (node.classList.contains('page-item')) {
+        node.addEventListener('click', (ev) => {
+          if (ev.target.closest('[data-page-act]')) return;
+          State.selectedIdx = Number(node.dataset.pageIdx);
+          renderRoot();
+        });
+      }
+    });
+    host.querySelectorAll('[data-page-act]').forEach((b) => {
+      b.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        const idx = Number(b.dataset.pageIdx);
+        const act = b.dataset.pageAct;
+        if (act === 'up')     movePage(idx, -1);
+        if (act === 'down')   movePage(idx,  1);
+        if (act === 'delete') deletePage(idx);
+      });
+    });
+    document.getElementById('addPageBtn').addEventListener('click', addPage);
+  }
+
+  function addPage() {
+    State.draft.pages.push({ id: newId('p'), title: '', blocks: [] });
+    State.selectedIdx = State.draft.pages.length - 1;
+    setDirty(true); renderRoot();
+  }
+  function deletePage(idx) {
+    if (idx < 0 || idx >= State.draft.pages.length) return;
+    if (!confirm(`Pagina ${idx + 1} verwijderen? Inclusief alle blokken hierop.`)) return;
+    State.draft.pages.splice(idx, 1);
+    if (State.selectedIdx >= State.draft.pages.length) State.selectedIdx = Math.max(0, State.draft.pages.length - 1);
+    setDirty(true); renderRoot();
+  }
+  function movePage(idx, delta) {
+    const j = idx + delta;
+    if (j < 0 || j >= State.draft.pages.length) return;
+    const arr = State.draft.pages;
+    [arr[idx], arr[j]] = [arr[j], arr[idx]];
+    if (State.selectedIdx === idx)      State.selectedIdx = j;
+    else if (State.selectedIdx === j)   State.selectedIdx = idx;
+    setDirty(true); renderRoot();
+  }
+
+  // ── Blocks-panel (midden/rechts) ──────────────────────────────────────
+  function renderBlocksPanel() {
+    const host = document.getElementById('blocksPanel');
+    if (!host) return;
+    const page = State.draft.pages[State.selectedIdx];
+    if (!page) {
+      host.innerHTML = `<div class="empty-state">Voeg een pagina toe om te beginnen.</div>`;
+      return;
+    }
+
+    // Page-meta-card (titel)
+    const metaCard = document.createElement('div');
+    metaCard.className = 'page-meta-card';
+    metaCard.innerHTML = `
+      <label>Pagina-titel</label>
+      <input type="text" id="pageTitleInput" value="${esc(page.title || '')}" placeholder="Bijv. Welkom, Intake, Beschikbaarheid…" />
+      <div class="help" style="font-size:11.5px;color:var(--text-faint);margin-top:6px">Wordt boven de blokken getoond op deze pagina.</div>
+    `;
+    host.innerHTML = '';
+    host.appendChild(metaCard);
+    metaCard.querySelector('#pageTitleInput').addEventListener('input', (ev) => {
+      page.title = ev.target.value;
+      setDirty(true);
+      // Sidebar refreshen voor de titel-update.
+      renderPagesPanel();
+    });
+
+    // Block-cards
+    for (let i = 0; i < (page.blocks || []).length; i++) {
+      host.appendChild(renderBlockCard(page, page.blocks[i], i));
+    }
+
+    // "+ Blok toevoegen" rij
+    const addRow = document.createElement('div');
+    addRow.className = 'add-row';
+    addRow.innerHTML = `
+      <button type="button" class="btn-base accent" id="addBlockBtn" style="width:100%;justify-content:center">
+        <i class="ti ti-plus"></i> Blok toevoegen
+      </button>
+      <div class="type-picker" id="typePicker" hidden></div>
+    `;
+    host.appendChild(addRow);
+    addRow.querySelector('#addBlockBtn').addEventListener('click', () => {
+      const picker = document.getElementById('typePicker');
+      picker.hidden = !picker.hidden;
+      if (!picker.hidden && !picker.dataset.built) {
+        picker.innerHTML = ALL_TYPES.map((t) =>
+          `<button type="button" data-add-type="${esc(t)}">${esc(TYPE_LABEL[t] || t)}</button>`
+        ).join('');
+        picker.dataset.built = '1';
+        picker.querySelectorAll('[data-add-type]').forEach((btn) => {
+          btn.addEventListener('click', () => {
+            addBlock(btn.dataset.addType);
+            picker.hidden = true;
+          });
+        });
+      }
+    });
+  }
+
+  function addBlock(type) {
+    const page = State.draft.pages[State.selectedIdx];
+    if (!page) return;
+    const newBlock = makeDefaultBlock(type);
+    page.blocks = Array.isArray(page.blocks) ? page.blocks : [];
+    page.blocks.push(newBlock);
+    setDirty(true);
+    renderBlocksPanel();
+  }
+  function makeDefaultBlock(type) {
+    const id = newId('b');
+    if (type === 'heading')   return { id, type, text: 'Kop' };
+    if (type === 'paragraph') return { id, type, text: '' };
+    if (type === 'image')     return { id, type, src: '', alt: '' };
+    if (type === 'divider')   return { id, type };
+    if (type === 'file_download') {
+      return {
+        id, type,
+        label: 'Cursusmateriaal',
+        files: [],
+        requires_consent: false,
+        consent_label: '',
+        consent_key: '',
+        help: '',
+      };
+    }
+    if (type === 'consent') {
+      const key = uniqueKey('akkoord', State.draft, null);
+      return { id, type, key, label: '', required: true, help: '' };
+    }
+    if (type === 'single_choice' || type === 'multi_choice' || type === 'select') {
+      const key = uniqueKey('veld', State.draft, null);
+      return { id, type, key, label: '', required: false, help: '', options: [] };
+    }
+    if (type === 'scale') {
+      const key = uniqueKey('schaal', State.draft, null);
+      return { id, type, key, label: '', required: false, help: '', min: 1, max: 10 };
+    }
+    if (type === 'number') {
+      const key = uniqueKey('getal', State.draft, null);
+      return { id, type, key, label: '', required: false, help: '' };
+    }
+    // short_text / long_text / email / tel
+    const key = uniqueKey('veld', State.draft, null);
+    return { id, type, key, label: '', required: false, help: '' };
+  }
+
+  function renderBlockCard(page, block, idx) {
+    const card = document.createElement('div');
+    card.className = 'block-card';
+    card.dataset.blockId = block.id;
+
+    const isInfo = INFO_TYPES.includes(block.type);
+    const keyMono = (block.type === 'file_download')
+      ? (block.requires_consent && block.consent_key ? `key: ${block.consent_key}` : '')
+      : (block.key ? `key: ${block.key}` : '');
+
+    // HEAD
+    const head = document.createElement('div');
+    head.className = 'block-head';
+    head.innerHTML = `
+      <span class="type-badge ${isInfo ? 'info' : ''}">${esc(TYPE_LABEL[block.type] || block.type)}</span>
+      <span class="key-mono">${esc(keyMono)}</span>
+      <span class="spacer"></span>
+      <div class="acts">
+        <button type="button" class="icon-btn" data-blk-act="up"   ${idx === 0 ? 'disabled' : ''} title="Omhoog"><i class="ti ti-chevron-up"></i></button>
+        <button type="button" class="icon-btn" data-blk-act="down" ${idx === (page.blocks.length - 1) ? 'disabled' : ''} title="Omlaag"><i class="ti ti-chevron-down"></i></button>
+        <button type="button" class="icon-btn" data-blk-act="dup"  title="Dupliceren"><i class="ti ti-copy"></i></button>
+        <button type="button" class="icon-btn" data-blk-act="del"  title="Verwijderen"><i class="ti ti-trash"></i></button>
+      </div>
+    `;
+    card.appendChild(head);
+    head.querySelector('[data-blk-act="up"]'  ).addEventListener('click', () => moveBlock(idx, -1));
+    head.querySelector('[data-blk-act="down"]').addEventListener('click', () => moveBlock(idx,  1));
+    head.querySelector('[data-blk-act="dup"]' ).addEventListener('click', () => duplicateBlock(idx));
+    head.querySelector('[data-blk-act="del"]' ).addEventListener('click', () => deleteBlock(idx));
+
+    // BODY (config per type)
+    const body = document.createElement('div');
+    body.className = 'block-body';
+    renderBlockBody(body, block);
+    card.appendChild(body);
+
+    return card;
+  }
+
+  function moveBlock(idx, delta) {
+    const page = State.draft.pages[State.selectedIdx];
+    if (!page) return;
+    const j = idx + delta;
+    if (j < 0 || j >= page.blocks.length) return;
+    [page.blocks[idx], page.blocks[j]] = [page.blocks[j], page.blocks[idx]];
+    setDirty(true); renderBlocksPanel();
+  }
+  function duplicateBlock(idx) {
+    const page = State.draft.pages[State.selectedIdx];
+    if (!page) return;
+    const copy = clone(page.blocks[idx]);
+    copy.id = newId('b');
+    // Genereer nieuwe unieke key voor veld-blokken om collision te voorkomen.
+    if (copy.type === 'file_download') {
+      if (copy.requires_consent && copy.consent_key) {
+        copy.consent_key = uniqueKey(copy.consent_key, State.draft, copy.id);
+      }
+    } else if (copy.key) {
+      copy.key = uniqueKey(copy.key, State.draft, copy.id);
+    }
+    page.blocks.splice(idx + 1, 0, copy);
+    setDirty(true); renderBlocksPanel();
+  }
+  function deleteBlock(idx) {
+    const page = State.draft.pages[State.selectedIdx];
+    if (!page) return;
+    if (!confirm('Dit blok verwijderen?')) return;
+    page.blocks.splice(idx, 1);
+    setDirty(true); renderBlocksPanel();
+  }
+
+  // ── Per-type config form ──────────────────────────────────────────────
+  function renderBlockBody(host, b) {
+    host.innerHTML = '';
+    if (b.type === 'divider') {
+      host.innerHTML = `<div class="help" style="color:var(--text-faint);font-size:12.5px">Geen instellingen — geeft een dunne lijn weer.</div>`;
+      return;
+    }
+    if (b.type === 'heading' || b.type === 'paragraph') {
+      const row = document.createElement('div'); row.className = 'field-row';
+      row.innerHTML = `<label class="lbl">Tekst</label>`;
+      const ta = document.createElement('textarea');
+      ta.value = b.text || '';
+      ta.placeholder = (b.type === 'heading') ? 'Bijv. Welkom bij De Forex Opleiding' : 'Vrije tekst — wordt 1-op-1 getoond aan de student.';
+      ta.addEventListener('input', () => { b.text = ta.value; setDirty(true); });
+      row.appendChild(ta);
+      host.appendChild(row);
+      return;
+    }
+    if (b.type === 'image') {
+      // image-upload + alt
+      const upRow = document.createElement('div'); upRow.className = 'field-row';
+      upRow.innerHTML = `<label class="lbl">Afbeelding</label>`;
+      const fileInput = document.createElement('input'); fileInput.type = 'file'; fileInput.accept = 'image/*'; fileInput.style.display = 'none';
+      const pickBtn = document.createElement('button'); pickBtn.type = 'button'; pickBtn.className = 'btn-base'; pickBtn.innerHTML = '<i class="ti ti-upload"></i> Afbeelding uploaden';
+      const status = document.createElement('div'); status.className = 'upload-progress';
+      const preview = document.createElement('div');
+      function refreshPreview() {
+        preview.innerHTML = b.src
+          ? `<div class="file-row" style="margin-top:6px">
+               <div class="fname">📷 <span class="fpath">${esc(b.src)}</span></div>
+               <button type="button" class="icon-btn" data-rm-img title="Verwijderen"><i class="ti ti-trash"></i></button>
+             </div>`
+          : '<div class="help" style="color:var(--text-faint);font-size:12.5px;margin-top:6px">Nog geen afbeelding gekozen.</div>';
+        const rm = preview.querySelector('[data-rm-img]');
+        if (rm) rm.addEventListener('click', () => { b.src = ''; setDirty(true); refreshPreview(); });
+      }
+      pickBtn.addEventListener('click', () => fileInput.click());
+      fileInput.addEventListener('change', async (ev) => {
+        const file = ev.target.files?.[0];
+        if (!file) return;
+        try {
+          status.classList.remove('err'); status.textContent = 'Uploaden…';
+          const { path } = await uploadFile(file);
+          b.src = path;
+          setDirty(true);
+          status.textContent = '✓ Geüpload';
+          setTimeout(() => { status.textContent = ''; }, 1800);
+          refreshPreview();
+        } catch (e) {
+          status.classList.add('err');
+          status.textContent = 'Upload mislukt: ' + (e?.message || e);
+        }
+      });
+      upRow.appendChild(pickBtn);
+      upRow.appendChild(fileInput);
+      upRow.appendChild(preview);
+      upRow.appendChild(status);
+      host.appendChild(upRow);
+      refreshPreview();
+
+      const altRow = document.createElement('div'); altRow.className = 'field-row';
+      altRow.innerHTML = `<label class="lbl">Alt-tekst (toegankelijkheid)</label>`;
+      const alt = document.createElement('input'); alt.type = 'text'; alt.value = b.alt || '';
+      alt.placeholder = 'Beschrijving van de afbeelding';
+      alt.addEventListener('input', () => { b.alt = alt.value; setDirty(true); });
+      altRow.appendChild(alt);
+      host.appendChild(altRow);
+      return;
+    }
+
+    // Veld-blokken: label / key / required / help / type-specifieke config
+    addLabelRow(host, b);
+    if (b.type !== 'file_download') addKeyRow(host, b);
+    if (b.type !== 'consent' && b.type !== 'file_download') addRequiredAndHelpRow(host, b);
+    else                                                    addHelpRow(host, b);
+
+    if (b.type === 'single_choice' || b.type === 'multi_choice' || b.type === 'select') {
+      addOptionsEditor(host, b);
+    } else if (b.type === 'scale') {
+      addScaleMinMax(host, b);
+    } else if (b.type === 'number') {
+      addNumberMinMax(host, b);
+    } else if (b.type === 'consent') {
+      addConsentExtras(host, b);
+    } else if (b.type === 'file_download') {
+      addFileDownloadEditor(host, b);
+    }
+  }
+
+  function addLabelRow(host, b) {
+    const row = document.createElement('div'); row.className = 'field-row';
+    row.innerHTML = `<label class="lbl">${b.type === 'consent' ? 'Akkoord-tekst' : (b.type === 'file_download' ? 'Sectie-titel' : 'Vraag / label')}</label>`;
+    const isMultiline = (b.type === 'consent' || b.type === 'paragraph');
+    const tag = isMultiline ? 'textarea' : 'input';
+    const inp = document.createElement(tag);
+    if (tag === 'input') inp.type = 'text';
+    inp.value = b.label || '';
+    inp.placeholder = (b.type === 'consent')
+      ? 'Bijv. Ik ga akkoord met de voorwaarden.'
+      : (b.type === 'file_download' ? 'Bijv. Cursusmateriaal' : 'Stel je vraag…');
+    inp.addEventListener('input', () => {
+      b.label = inp.value;
+      // Auto-suggest key uit label voor veld-blokken (alleen als key nog niet handmatig gezet is via slug).
+      if (FIELD_TYPES.includes(b.type) && b.type !== 'file_download' && b.type !== 'consent') {
+        const slug = slugifyKey(inp.value);
+        if (slug && (!b._keyTouched || !b.key)) {
+          b.key = uniqueKey(slug, State.draft, b.id);
+          const keyInput = host.querySelector('[data-key-input]');
+          if (keyInput) keyInput.value = b.key;
+          refreshKeyWarning(host, b);
+        }
+      }
+      setDirty(true);
+      // Type-badge / key-mono in head moet ook refreshen — eenvoudige re-render van panel.
+      // We doen dat alleen na key-wijziging om flikker te beperken.
+    });
+    host.appendChild(row);
+    row.appendChild(inp);
+  }
+
+  function addKeyRow(host, b) {
+    const row = document.createElement('div'); row.className = 'field-row';
+    row.innerHTML = `<label class="lbl">Antwoord-sleutel (key)</label>`;
+    const inp = document.createElement('input');
+    inp.type = 'text';
+    inp.value = b.key || '';
+    inp.dataset.keyInput = '1';
+    inp.placeholder = 'bijv. ervaring_trading';
+    inp.addEventListener('input', () => {
+      b._keyTouched = true;
+      const sane = slugifyKey(inp.value);
+      b.key = sane;
+      inp.value = sane;        // toon dezelfde sanitization terug
+      refreshKeyWarning(host, b);
+      setDirty(true);
+    });
+    row.appendChild(inp);
+    const warn = document.createElement('div');
+    warn.className = 'help';
+    warn.dataset.keyWarn = '1';
+    row.appendChild(warn);
+    host.appendChild(row);
+    refreshKeyWarning(host, b);
+  }
+  function refreshKeyWarning(host, b) {
+    const warn = host.querySelector('[data-key-warn]');
+    if (!warn) return;
+    if (!b.key) {
+      warn.className = 'warn';
+      warn.textContent = '⚠️ Verplichte sleutel ontbreekt — krijgt automatisch een waarde toegewezen bij opslaan.';
+      return;
+    }
+    const taken = collectKeys(State.draft, b.id);
+    if (taken.has(b.key)) {
+      warn.className = 'err';
+      warn.textContent = `⚠️ Sleutel "${b.key}" wordt al ergens anders gebruikt — het systeem zal 'm bij opslaan automatisch hernoemen.`;
+    } else {
+      warn.className = 'help';
+      warn.textContent = 'Lowercase, geen spaties. Gebruikt om antwoorden in de database op te slaan.';
+    }
+  }
+
+  function addRequiredAndHelpRow(host, b) {
+    const row = document.createElement('div'); row.className = 'field-row field-grid-2';
+    const reqWrap = document.createElement('div');
+    reqWrap.innerHTML = `<label class="lbl">Verplicht?</label>`;
+    const lbl = document.createElement('label'); lbl.className = 'req-toggle';
+    const cb  = document.createElement('input'); cb.type = 'checkbox'; cb.checked = !!b.required;
+    cb.addEventListener('change', () => { b.required = cb.checked; setDirty(true); });
+    lbl.appendChild(cb);
+    lbl.appendChild(document.createTextNode(' Verplicht in te vullen'));
+    reqWrap.appendChild(lbl);
+    row.appendChild(reqWrap);
+
+    const helpWrap = document.createElement('div');
+    helpWrap.innerHTML = `<label class="lbl">Hulptekst (optioneel)</label>`;
+    const help = document.createElement('input'); help.type = 'text'; help.value = b.help || '';
+    help.placeholder = 'Korte uitleg onder het veld';
+    help.addEventListener('input', () => { b.help = help.value; setDirty(true); });
+    helpWrap.appendChild(help);
+    row.appendChild(helpWrap);
+
+    host.appendChild(row);
+  }
+  function addHelpRow(host, b) {
+    const row = document.createElement('div'); row.className = 'field-row';
+    row.innerHTML = `<label class="lbl">Hulptekst (optioneel)</label>`;
+    const help = document.createElement('input'); help.type = 'text'; help.value = b.help || '';
+    help.placeholder = 'Korte uitleg';
+    help.addEventListener('input', () => { b.help = help.value; setDirty(true); });
+    row.appendChild(help);
+    host.appendChild(row);
+  }
+
+  function addOptionsEditor(host, b) {
+    if (!Array.isArray(b.options)) b.options = [];
+    const row = document.createElement('div'); row.className = 'field-row';
+    row.innerHTML = `<label class="lbl">Antwoord-opties</label>`;
+    const list = document.createElement('div'); list.className = 'opts-list';
+    function refresh() {
+      list.innerHTML = '';
+      b.options.forEach((opt, i) => {
+        const r = document.createElement('div'); r.className = 'opts-row';
+        r.innerHTML = `
+          <input type="text" placeholder="Label (zichtbaar)" value="${esc(opt.label || '')}" data-fld="label" />
+          <input type="text" placeholder="Waarde (intern)"   value="${esc(opt.value || '')}" data-fld="value" />
+          <button type="button" class="icon-btn" data-act="up"   ${i === 0 ? 'disabled' : ''}><i class="ti ti-chevron-up"></i></button>
+          <button type="button" class="icon-btn" data-act="down" ${i === b.options.length - 1 ? 'disabled' : ''}><i class="ti ti-chevron-down"></i></button>
+          <button type="button" class="icon-btn" data-act="del"><i class="ti ti-trash"></i></button>
+        `;
+        const [labelInp, valueInp] = r.querySelectorAll('input');
+        labelInp.addEventListener('input', () => { opt.label = labelInp.value; setDirty(true); });
+        valueInp.addEventListener('input', () => {
+          opt.value = slugifyKey(valueInp.value);
+          valueInp.value = opt.value;
+          setDirty(true);
+        });
+        r.querySelector('[data-act="up"]').addEventListener('click', () => {
+          if (i === 0) return;
+          [b.options[i-1], b.options[i]] = [b.options[i], b.options[i-1]];
+          setDirty(true); refresh();
+        });
+        r.querySelector('[data-act="down"]').addEventListener('click', () => {
+          if (i === b.options.length - 1) return;
+          [b.options[i+1], b.options[i]] = [b.options[i], b.options[i+1]];
+          setDirty(true); refresh();
+        });
+        r.querySelector('[data-act="del"]').addEventListener('click', () => {
+          b.options.splice(i, 1);
+          setDirty(true); refresh();
+        });
+        list.appendChild(r);
+      });
+      if (b.options.length === 0) {
+        const empty = document.createElement('div'); empty.className = 'help';
+        empty.style.color = 'var(--text-faint)'; empty.textContent = 'Nog geen opties — voeg er minstens 2 toe.';
+        list.appendChild(empty);
+      }
+    }
+    refresh();
+    row.appendChild(list);
+    const add = document.createElement('button');
+    add.type = 'button'; add.className = 'btn-base'; add.style.marginTop = '8px';
+    add.innerHTML = '<i class="ti ti-plus"></i> Optie toevoegen';
+    add.addEventListener('click', () => {
+      b.options.push({ value: '', label: '' });
+      setDirty(true); refresh();
+    });
+    row.appendChild(add);
+    host.appendChild(row);
+  }
+
+  function addScaleMinMax(host, b) {
+    if (!Number.isFinite(b.min)) b.min = 1;
+    if (!Number.isFinite(b.max)) b.max = 10;
+    const row = document.createElement('div'); row.className = 'field-row field-grid-2';
+    const a = document.createElement('div'); a.innerHTML = `<label class="lbl">Minimum</label>`;
+    const minI = document.createElement('input'); minI.type = 'number'; minI.value = String(b.min);
+    minI.addEventListener('input', () => { const v = parseInt(minI.value, 10); if (Number.isFinite(v)) { b.min = v; setDirty(true); } });
+    a.appendChild(minI); row.appendChild(a);
+    const c = document.createElement('div'); c.innerHTML = `<label class="lbl">Maximum</label>`;
+    const maxI = document.createElement('input'); maxI.type = 'number'; maxI.value = String(b.max);
+    maxI.addEventListener('input', () => { const v = parseInt(maxI.value, 10); if (Number.isFinite(v)) { b.max = v; setDirty(true); } });
+    c.appendChild(maxI); row.appendChild(c);
+    host.appendChild(row);
+  }
+  function addNumberMinMax(host, b) {
+    const row = document.createElement('div'); row.className = 'field-row field-grid-2';
+    const a = document.createElement('div'); a.innerHTML = `<label class="lbl">Minimum (optioneel)</label>`;
+    const minI = document.createElement('input'); minI.type = 'number'; minI.value = (b.min != null ? String(b.min) : '');
+    minI.addEventListener('input', () => {
+      const v = minI.value === '' ? null : Number(minI.value);
+      if (v === null) delete b.min;
+      else if (Number.isFinite(v)) b.min = v;
+      setDirty(true);
+    });
+    a.appendChild(minI); row.appendChild(a);
+    const c = document.createElement('div'); c.innerHTML = `<label class="lbl">Maximum (optioneel)</label>`;
+    const maxI = document.createElement('input'); maxI.type = 'number'; maxI.value = (b.max != null ? String(b.max) : '');
+    maxI.addEventListener('input', () => {
+      const v = maxI.value === '' ? null : Number(maxI.value);
+      if (v === null) delete b.max;
+      else if (Number.isFinite(v)) b.max = v;
+      setDirty(true);
+    });
+    c.appendChild(maxI); row.appendChild(c);
+    host.appendChild(row);
+  }
+  function addConsentExtras(host, b) {
+    // consent heeft al label (= waiver-tekst), key, help. Hier alleen required-toggle.
+    const row = document.createElement('div'); row.className = 'field-row';
+    row.innerHTML = `<label class="lbl">Verplicht?</label>`;
+    const lbl = document.createElement('label'); lbl.className = 'req-toggle';
+    const cb  = document.createElement('input'); cb.type = 'checkbox'; cb.checked = b.required !== false;
+    cb.addEventListener('change', () => { b.required = cb.checked; setDirty(true); });
+    lbl.appendChild(cb);
+    lbl.appendChild(document.createTextNode(' Student moet aanvinken om verder te gaan'));
+    row.appendChild(lbl);
+    host.appendChild(row);
+  }
+
+  function addFileDownloadEditor(host, b) {
+    if (!Array.isArray(b.files)) b.files = [];
+
+    // Help-row al via addHelpRow boven; consent-toggle hier:
+    const tog = document.createElement('div'); tog.className = 'field-row';
+    tog.innerHTML = `<label class="lbl">Wettelijke bedenktijd-waiver</label>`;
+    const lbl = document.createElement('label'); lbl.className = 'req-toggle';
+    const cb  = document.createElement('input'); cb.type = 'checkbox'; cb.checked = !!b.requires_consent;
+    cb.addEventListener('change', () => {
+      b.requires_consent = cb.checked;
+      if (cb.checked) {
+        if (!b.consent_key)   b.consent_key   = uniqueKey('waiver', State.draft, b.id);
+        if (!b.consent_label) b.consent_label = 'Ik begrijp dat ik door deze materialen te downloaden afstand doe van de wettelijke bedenktijd van 14 dagen.';
+      }
+      setDirty(true);
+      renderBlockBody(host, b);          // her-render om consent-velden te tonen/verbergen
+    });
+    lbl.appendChild(cb);
+    lbl.appendChild(document.createTextNode(' Student moet eerst aanvinken voordat downloads vrijkomen (14-dagen bedenktijd-waiver)'));
+    tog.appendChild(lbl);
+    host.appendChild(tog);
+
+    if (b.requires_consent) {
+      const a = document.createElement('div'); a.className = 'field-row';
+      a.innerHTML = `<label class="lbl">Waiver-tekst (akkoord-tekst)</label>`;
+      const ta = document.createElement('textarea'); ta.value = b.consent_label || '';
+      ta.addEventListener('input', () => { b.consent_label = ta.value; setDirty(true); });
+      a.appendChild(ta);
+      host.appendChild(a);
+
+      const ck = document.createElement('div'); ck.className = 'field-row';
+      ck.innerHTML = `<label class="lbl">Sleutel voor het akkoord (consent_key)</label>`;
+      const ckIn = document.createElement('input'); ckIn.type = 'text'; ckIn.value = b.consent_key || '';
+      ckIn.addEventListener('input', () => { b.consent_key = slugifyKey(ckIn.value); ckIn.value = b.consent_key; setDirty(true); });
+      ck.appendChild(ckIn);
+      host.appendChild(ck);
+    }
+
+    // Files-lijst + upload-knop
+    const fRow = document.createElement('div'); fRow.className = 'field-row';
+    fRow.innerHTML = `<label class="lbl">Bestanden</label>`;
+    const list = document.createElement('div'); list.className = 'files-list';
+    function refresh() {
+      list.innerHTML = '';
+      if (b.files.length === 0) {
+        const empty = document.createElement('div'); empty.className = 'help';
+        empty.style.color = 'var(--text-faint)'; empty.textContent = 'Nog geen bestanden — upload PDF/afbeelding/zip om aan studenten beschikbaar te maken.';
+        list.appendChild(empty);
+        return;
+      }
+      b.files.forEach((f, i) => {
+        const r = document.createElement('div'); r.className = 'file-row';
+        r.innerHTML = `
+          <div class="fname">📄 <strong>${esc(f.name || f.path || 'bestand')}</strong> <span class="fpath">${esc(f.path || '')}</span></div>
+          <button type="button" class="icon-btn" data-rm-file><i class="ti ti-trash"></i></button>
+        `;
+        r.querySelector('[data-rm-file]').addEventListener('click', () => {
+          b.files.splice(i, 1);
+          setDirty(true); refresh();
+        });
+        list.appendChild(r);
+      });
+    }
+    refresh();
+    fRow.appendChild(list);
+
+    const upWrap = document.createElement('div'); upWrap.style.marginTop = '8px';
+    const file = document.createElement('input'); file.type = 'file'; file.style.display = 'none';
+    const btn  = document.createElement('button'); btn.type = 'button'; btn.className = 'btn-base';
+    btn.innerHTML = '<i class="ti ti-upload"></i> Bestand uploaden';
+    const status = document.createElement('div'); status.className = 'upload-progress';
+    btn.addEventListener('click', () => file.click());
+    file.addEventListener('change', async (ev) => {
+      const f = ev.target.files?.[0];
+      if (!f) return;
+      try {
+        status.classList.remove('err'); status.textContent = 'Uploaden…';
+        const { path, name } = await uploadFile(f);
+        b.files.push({ path, name });
+        setDirty(true);
+        status.textContent = '✓ Geüpload';
+        setTimeout(() => { status.textContent = ''; }, 1800);
+        refresh();
+        file.value = '';
+      } catch (e) {
+        status.classList.add('err');
+        status.textContent = 'Upload mislukt: ' + (e?.message || e);
+      }
+    });
+    upWrap.appendChild(btn);
+    upWrap.appendChild(file);
+    upWrap.appendChild(status);
+    fRow.appendChild(upWrap);
+
+    host.appendChild(fRow);
+  }
+
+  // ── File-upload via signed URL ────────────────────────────────────────
+  async function uploadFile(file) {
+    const apiFetch = window.AgentShared?.apiFetch;
+    if (typeof apiFetch !== 'function') throw new Error('apiFetch niet beschikbaar');
+    const r1 = await apiFetch('/api/onboarding-wizard-file-upload', {
+      method  : 'POST',
+      headers : { 'Content-Type': 'application/json' },
+      body    : JSON.stringify({ filename: file.name || 'upload', content_type: file.type || null }),
+    });
+    let d1 = null; try { d1 = await r1.json(); } catch {}
+    if (!r1.ok) throw new Error(d1?.error || ('HTTP ' + r1.status));
+    if (!d1?.signed_url || !d1?.path) throw new Error('lege signed-URL respons');
+    // Direct PUT naar Supabase. Supabase signed-upload accepteert raw body PUT.
+    const r2 = await fetch(d1.signed_url, {
+      method  : 'PUT',
+      headers : { 'Content-Type': file.type || 'application/octet-stream', 'x-upsert': 'true' },
+      body    : file,
+    });
+    if (!r2.ok) {
+      let txt = ''; try { txt = await r2.text(); } catch {}
+      throw new Error('storage-upload faalde (HTTP ' + r2.status + (txt ? ': ' + txt.slice(0, 120) : '') + ')');
+    }
+    return { path: d1.path, name: d1.name || file.name || 'bestand' };
+  }
+
+  // ── Save / Publish ────────────────────────────────────────────────────
+  async function doSave() {
+    const apiFetch = window.AgentShared?.apiFetch;
+    if (typeof apiFetch !== 'function') return;
+    if (State.saving) return;
+    State.saving = true; renderHeaderActions();
+    try {
+      const r = await apiFetch('/api/onboarding-wizard-config-save', {
+        method  : 'POST',
+        headers : { 'Content-Type': 'application/json' },
+        body    : JSON.stringify({ structure: State.draft }),
+      });
+      let d = null; try { d = await r.json(); } catch {}
+      if (!r.ok) throw new Error(d?.error || ('HTTP ' + r.status));
+      if (d?.structure) {
+        // Server-genormaliseerde versie overnemen (key-dedup, dropped types).
+        State.draft = d.structure;
+        if (State.selectedIdx >= State.draft.pages.length) State.selectedIdx = Math.max(0, State.draft.pages.length - 1);
+      }
+      State.meta.draft_updated_at = new Date().toISOString();
+      setDirty(false);
+      toast('Concept opgeslagen', 'success');
+      renderMeta();
+      renderRoot();
+    } catch (e) {
+      console.error('[wizard-editor] save:', e?.message || e);
+      toast('Opslaan mislukt: ' + (e?.message || e), 'error');
+    } finally {
+      State.saving = false; renderHeaderActions();
+    }
+  }
+
+  function confirmPublish() {
+    showConfirm({
+      title : 'Wizard publiceren?',
+      body  : 'Dit zet de wizard live voor <strong>nieuwe én lopende</strong> studenten. Niet-opgeslagen wijzigingen worden eerst opgeslagen en daarna gepubliceerd.',
+      okText: 'Publiceren',
+      okClass: 'primary',
+      onOk  : doPublish,
+    });
+  }
+  async function doPublish() {
+    const apiFetch = window.AgentShared?.apiFetch;
+    if (typeof apiFetch !== 'function') return;
+    if (State.publishing) return;
+    State.publishing = true; renderHeaderActions();
+    try {
+      const r = await apiFetch('/api/onboarding-wizard-config-publish', {
+        method  : 'POST',
+        headers : { 'Content-Type': 'application/json' },
+        body    : JSON.stringify({ structure: State.draft }),
+      });
+      let d = null; try { d = await r.json(); } catch {}
+      if (!r.ok) throw new Error(d?.error || ('HTTP ' + r.status));
+      if (d?.structure) {
+        State.draft = d.structure;
+        State.published = d.structure;
+        if (State.selectedIdx >= State.draft.pages.length) State.selectedIdx = Math.max(0, State.draft.pages.length - 1);
+      }
+      const nowIso = new Date().toISOString();
+      State.meta.draft_updated_at = nowIso;
+      State.meta.published_at     = nowIso;
+      setDirty(false);
+      toast('Wizard gepubliceerd', 'success');
+      renderMeta();
+      renderRoot();
+    } catch (e) {
+      console.error('[wizard-editor] publish:', e?.message || e);
+      toast('Publiceren mislukt: ' + (e?.message || e), 'error');
+    } finally {
+      State.publishing = false; renderHeaderActions();
+    }
+  }
+
+  // ── Confirm dialog ────────────────────────────────────────────────────
+  function showConfirm({ title, body, okText, okClass, onOk }) {
+    const m = document.getElementById('confirmModal');
+    document.getElementById('confirmTitle').textContent = title || 'Bevestigen';
+    document.getElementById('confirmBody').innerHTML = body || '';
+    const ok = document.getElementById('confirmOkBtn');
+    ok.textContent = okText || 'Doorgaan';
+    ok.className = 'btn-base ' + (okClass || 'accent');
+    function close() { m.classList.remove('open'); m.setAttribute('hidden',''); }
+    function _ok() { close(); if (typeof onOk === 'function') onOk(); }
+    ok.onclick = _ok;
+    m.querySelectorAll('[data-confirm-close]').forEach((b) => b.onclick = close);
+    m.classList.add('open'); m.removeAttribute('hidden');
+  }
+
+  // ── Preview-modal — render-logica zoals publieke wizard, read-only ───
+  function openPreview() {
+    State.previewIdx = 0;
+    const m = document.getElementById('previewModal');
+    m.classList.add('open'); m.removeAttribute('hidden');
+    document.getElementById('previewPrev').onclick = () => { if (State.previewIdx > 0) { State.previewIdx -= 1; renderPreview(); } };
+    document.getElementById('previewNext').onclick = () => {
+      if (State.previewIdx < (State.draft.pages.length - 1)) { State.previewIdx += 1; renderPreview(); }
+    };
+    m.querySelectorAll('[data-preview-close]').forEach((b) => b.onclick = () => { m.classList.remove('open'); m.setAttribute('hidden',''); });
+    renderPreview();
+  }
+  function renderPreview() {
+    const body = document.getElementById('previewBody');
+    const meta = document.getElementById('previewMeta');
+    const total = State.draft.pages.length;
+    if (total === 0) {
+      body.innerHTML = `<div class="empty-state">Nog geen pagina's om te tonen.</div>`;
+      meta.textContent = '0 pagina\'s';
+      return;
+    }
+    const p = State.draft.pages[State.previewIdx] || State.draft.pages[0];
+    const wrap = document.createElement('div'); wrap.className = 'pv';
+    if (State.previewIdx === 0) {
+      const hello = document.createElement('div'); hello.className = 'pv-hello'; hello.textContent = 'Hoi 👋';
+      wrap.appendChild(hello);
+    }
+    const card = document.createElement('div'); card.className = 'pv-card';
+    if (p.title) {
+      const t = document.createElement('div'); t.className = 'pv-page-title'; t.textContent = p.title;
+      card.appendChild(t);
+    }
+    for (const b of (p.blocks || [])) {
+      const node = renderPreviewBlock(b);
+      if (node) card.appendChild(node);
+    }
+    wrap.appendChild(card);
+    body.innerHTML = '';
+    body.appendChild(wrap);
+    meta.textContent = `Pagina ${State.previewIdx + 1} van ${total}`;
+    document.getElementById('previewPrev').disabled = (State.previewIdx === 0);
+    document.getElementById('previewNext').disabled = (State.previewIdx === total - 1);
+  }
+
+  // Vereenvoudigde preview-renderer — match publieke wizard-look maar
+  // disabled (read-only). Geen netwerk; bestanden tonen we als naam.
+  function renderPreviewBlock(b) {
+    if (!b) return null;
+    const wrap = document.createElement('div'); wrap.className = 'pv-block';
+    if (b.type === 'heading') {
+      const e = document.createElement('div'); e.className = 'pv-h'; e.textContent = b.text || ''; wrap.appendChild(e); return wrap;
+    }
+    if (b.type === 'paragraph') {
+      const e = document.createElement('div'); e.className = 'pv-p'; e.textContent = b.text || ''; wrap.appendChild(e); return wrap;
+    }
+    if (b.type === 'divider') {
+      wrap.innerHTML = '<hr class="pv-div"/>'; return wrap;
+    }
+    if (b.type === 'image') {
+      const e = document.createElement('div'); e.className = 'pv-p';
+      e.textContent = b.src ? '🖼 ' + (b.alt || b.src) : '(geen afbeelding gekozen)';
+      wrap.appendChild(e); return wrap;
+    }
+
+    // Field-label
+    if (b.label || b.type === 'file_download') {
+      const labEl = document.createElement('div'); labEl.className = 'pv-label';
+      labEl.textContent = b.label || (b.type === 'file_download' ? 'Download' : '');
+      if (b.required && b.type !== 'file_download') {
+        const sp = document.createElement('span'); sp.className = 'req'; sp.textContent = ' *'; labEl.appendChild(sp);
+      }
+      wrap.appendChild(labEl);
+    }
+    if (b.help) {
+      const h = document.createElement('div'); h.className = 'pv-help'; h.textContent = b.help; wrap.appendChild(h);
+    }
+
+    if (b.type === 'short_text' || b.type === 'email' || b.type === 'tel') {
+      const i = document.createElement('input'); i.className = 'pv-input'; i.disabled = true; i.placeholder = ''; wrap.appendChild(i);
+    } else if (b.type === 'long_text') {
+      const i = document.createElement('textarea'); i.className = 'pv-textarea'; i.disabled = true; wrap.appendChild(i);
+    } else if (b.type === 'number') {
+      const i = document.createElement('input'); i.type = 'number'; i.className = 'pv-input'; i.disabled = true; wrap.appendChild(i);
+    } else if (b.type === 'select') {
+      const s = document.createElement('select'); s.className = 'pv-select'; s.disabled = true;
+      s.appendChild(new Option('— kies —', ''));
+      for (const o of (b.options || [])) s.appendChild(new Option(o.label, o.value));
+      wrap.appendChild(s);
+    } else if (b.type === 'single_choice' || b.type === 'multi_choice') {
+      for (const o of (b.options || [])) {
+        const r = document.createElement('label'); r.className = 'pv-opt-row';
+        const i = document.createElement('input'); i.type = (b.type === 'single_choice') ? 'radio' : 'checkbox'; i.disabled = true;
+        r.appendChild(i);
+        const t = document.createElement('span'); t.textContent = o.label || ''; r.appendChild(t);
+        wrap.appendChild(r);
+      }
+    } else if (b.type === 'scale') {
+      const row = document.createElement('div'); row.className = 'pv-scale';
+      const mn = Number.isFinite(b.min) ? b.min : 1;
+      const mx = Number.isFinite(b.max) ? b.max : 10;
+      for (let i = mn; i <= mx; i++) {
+        const bt = document.createElement('button'); bt.className = 'pv-scale-btn'; bt.disabled = true; bt.textContent = String(i);
+        row.appendChild(bt);
+      }
+      wrap.appendChild(row);
+    } else if (b.type === 'consent') {
+      const r = document.createElement('label'); r.className = 'pv-opt-row';
+      const i = document.createElement('input'); i.type = 'checkbox'; i.disabled = true;
+      r.appendChild(i);
+      const t = document.createElement('span'); t.textContent = b.label || '';
+      r.appendChild(t);
+      wrap.appendChild(r);
+    } else if (b.type === 'file_download') {
+      if (b.requires_consent) {
+        const c = document.createElement('label'); c.className = 'pv-opt-row';
+        const i = document.createElement('input'); i.type = 'checkbox'; i.disabled = true;
+        c.appendChild(i);
+        const t = document.createElement('span'); t.textContent = b.consent_label || 'Ik ga akkoord.';
+        c.appendChild(t);
+        wrap.appendChild(c);
+      }
+      const files = document.createElement('div'); files.className = 'pv-files';
+      if (!Array.isArray(b.files) || b.files.length === 0) {
+        const e = document.createElement('div'); e.className = 'pv-help'; e.textContent = '(nog geen bestanden)';
+        files.appendChild(e);
+      } else {
+        for (const f of b.files) {
+          const fa = document.createElement('div'); fa.className = 'pv-file';
+          fa.innerHTML = `<span>${esc(f.name || f.path || 'download')}</span><span>↓</span>`;
+          files.appendChild(fa);
+        }
+      }
+      wrap.appendChild(files);
+    }
+    return wrap;
+  }
+
+  // ── Boot ──────────────────────────────────────────────────────────────
+  async function init() {
+    try { if (window._authSharedReady) await window._authSharedReady; } catch {}
+
+    // Page-gate via RBAC (defense-in-depth — sidebar.js doet 'm ook).
+    try {
+      if (window.RBAC && typeof window.RBAC.ensurePermissionsLoaded === 'function') {
+        await window.RBAC.ensurePermissionsLoaded();
+        if (!window.RBAC.canSync || !window.RBAC.canSync('onboarding.wizard.edit')) {
+          document.getElementById('rootWrap').innerHTML = `<div class="empty-state" style="border-color:#fecaca;color:#b91c1c">Geen rechten om de wizard te bewerken (onboarding.wizard.edit).</div>`;
+          document.getElementById('headerActions').innerHTML = '';
+          return;
+        }
+      }
+    } catch (e) { console.warn('[wizard-editor] RBAC:', e?.message || e); }
+
+    const apiFetch = window.AgentShared?.apiFetch;
+    if (typeof apiFetch !== 'function') {
+      document.getElementById('rootWrap').innerHTML = `<div class="empty-state" style="border-color:#fecaca;color:#b91c1c">apiFetch niet beschikbaar.</div>`;
+      return;
+    }
+    try {
+      const r = await apiFetch('/api/onboarding-wizard-config-get');
+      let d = null; try { d = await r.json(); } catch {}
+      if (r.status === 403) {
+        document.getElementById('rootWrap').innerHTML = `<div class="empty-state" style="border-color:#fecaca;color:#b91c1c">Geen rechten (onboarding.wizard.edit).</div>`;
+        document.getElementById('headerActions').innerHTML = '';
+        return;
+      }
+      if (!r.ok) throw new Error(d?.error || ('HTTP ' + r.status));
+      State.draft         = d?.draft   || d?.default || { version: 1, pages: [] };
+      State.published     = d?.published || null;
+      State.defaultStruct = d?.default || { version: 1, pages: [] };
+      State.meta          = d?.meta    || {};
+      State.selectedIdx   = 0;
+      State.dirty         = false;
+      renderHeaderActions();
+      renderMeta();
+      renderRoot();
+    } catch (e) {
+      console.error('[wizard-editor] init:', e?.message || e);
+      document.getElementById('rootWrap').innerHTML = `<div class="empty-state" style="border-color:#fecaca;color:#b91c1c"><i class="ti ti-alert-triangle"></i> Laden mislukt: ${esc(e?.message || e)}</div>`;
+    }
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init);
+  } else {
+    init();
+  }
+})();
+</script>
+</body>
+</html>
