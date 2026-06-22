@@ -239,6 +239,7 @@ export default async function handler(req, res) {
       total_excl  : Number(updated.total_excl) || 0,
       btw_amount  : Number(updated.btw_amount) || 0,
       period_month: updated.period_month,
+      mentor_email: mentorEmail,
       emailSent,
       emailReason,
     });
