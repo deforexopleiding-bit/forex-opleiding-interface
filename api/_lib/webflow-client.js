@@ -256,10 +256,15 @@ const HARDCODED_FIELD_SLUGS = {
   location   : 'locatie-2',
   content    : 'event-content',
   // Blok 2 PR 3: Gastenlijst-veld voor "<bevestigd>/<capaciteit>" label.
-  // Best guess slug uit Webflow-conventie (lowercase NL). Bij mismatch
-  // valt resolveSlug() terug op displayName-match 'Gastenlijst' uit
-  // FIELD_NAME_MAP hieronder, of skipt het veld + console.warn.
-  gastenlijst: 'gastenlijst',
+  // Webflow CMS slug is 'manual-sign-ups' (legacy naam — toen het veld
+  // werd aangemaakt heette het anders; rename in Webflow is destructief
+  // dus is 'ie blijven staan). Onze interne logica noemt dit
+  // 'gastenlijst' (NL-term in UI/code).
+  // PR #288 (clone-leak-fix) had dit per ongeluk aangepast naar
+  // 'gastenlijst' maar het Webflow schema is niet mee-veranderd —
+  // resultaat: elke CREATE faalde met VALIDATION_FAIL "Field not
+  // described in schema". Terug naar 'manual-sign-ups'.
+  gastenlijst: 'manual-sign-ups',
 };
 
 // Map van logische naam -> kandidaat-displayName voor FALLBACK matching.
@@ -833,12 +838,18 @@ export async function createLiveItem({ event, descriptionHtml }) {
   delete fieldData._id;
   delete fieldData.id;
   delete fieldData['cms-locale-id'];
-  // Per-event state-velden mogen NIET uit het template erven (zoals 'gastenlijst':
-  // dat is een runtime-counter die per event uniek is). Strip + initialiseer
-  // expliciet op "0/<capacity>" zodat de site direct correct rendert; de
-  // bestaande syncGastenlijstWebflow flow updatet 'm vanaf de eerste registratie.
-  delete fieldData.gastenlijst;
-  fieldData.gastenlijst = formatGastenlijstLabel(0, event?.capacity);
+  // Per-event state-velden mogen NIET uit het template erven (zoals
+  // 'manual-sign-ups' / intern 'gastenlijst': dat is een runtime-counter
+  // die per event uniek is). Strip + initialiseer expliciet op
+  // "0/<capacity>" zodat de site direct correct rendert; de bestaande
+  // syncGastenlijstWebflow flow updatet 'm vanaf de eerste registratie.
+  //
+  // Webflow CMS slug is 'manual-sign-ups' (legacy naam). Onze interne
+  // logica noemt dit 'gastenlijst' (NL-term in UI/code). PR #288 had
+  // dit aangepast naar 'gastenlijst' maar het Webflow schema is niet
+  // mee-veranderd — daarom terug naar 'manual-sign-ups'.
+  delete fieldData['manual-sign-ups'];
+  fieldData['manual-sign-ups'] = formatGastenlijstLabel(0, event?.capacity);
 
   // Stap 3: bouw override-set + apply. buildFieldData zet name/slug/time/locatie-2/event-content.
   const overrides = buildFieldData({ event, descriptionHtml, schema });
