@@ -31,10 +31,19 @@ function authHeaders(token) {
   };
 }
 
-async function bubbleRequest(url, { token }) {
+async function bubbleRequest(url, { token, method, body } = {}) {
+  const opts = {
+    method : method || 'GET',
+    headers: authHeaders(token),
+  };
+  if (body !== undefined && body !== null) {
+    // PATCH / POST → JSON body. Headers krijgen Content-Type erbij.
+    opts.headers = { ...opts.headers, 'Content-Type': 'application/json' };
+    opts.body    = typeof body === 'string' ? body : JSON.stringify(body);
+  }
   let resp;
   try {
-    resp = await fetch(url, { method: 'GET', headers: authHeaders(token) });
+    resp = await fetch(url, opts);
   } catch (e) {
     const err = new Error('bubble fetch netwerk-fout: ' + (e?.message || e));
     err.code = 'BUBBLE_NETWORK';
@@ -53,6 +62,13 @@ async function bubbleRequest(url, { token }) {
     throw err;
   }
   return { status: resp.status, json };
+}
+
+// Bubble REST splitst data-API (`/obj/...`) en workflow-API (`/wf/...`).
+// BUBBLE_API_ROOT eindigt op `/obj` (zie env-example) — voor workflows
+// strippen we die suffix zodat we `${rootNoObj}/wf/<name>` kunnen bouwen.
+function stripObjSuffix(root) {
+  return String(root).replace(/\/obj\/?$/, '');
 }
 
 // Lijst-call met paginatie. Bubble levert pagina's van max 100 per response.
@@ -127,4 +143,49 @@ export async function bubbleGet(type, id) {
   const { status, json } = await bubbleRequest(url, { token });
   if (status === 404) return null;
   return json?.response || null;
+}
+
+// Bubble workflow triggeren via /wf/<name>. Body wordt als JSON gestuurd.
+// Bubble retourneert typisch { status:'success', response:{...} }; we geven
+// hier het hele JSON-object terug zodat callers .response.<field> of een
+// fallback kunnen lezen.
+export async function bubbleWorkflow(name, body = {}) {
+  const { token, root } = readConfig();
+  const wfRoot = stripObjSuffix(root);
+  const url = `${wfRoot}/wf/${encodeURIComponent(name)}`;
+  const { json } = await bubbleRequest(url, { token, method: 'POST', body });
+  return json || {};
+}
+
+// PATCH op een object: zelfde URL-shape als bubbleGet (/obj/<type>/<id>).
+// Bubble accepteert een platte JSON-body met de te updaten velden.
+// 'type' wordt 1-op-1 doorgegeven (mapping zoals 'user', '1-1-session'
+// ligt bij de caller, identiek aan bubbleGet/bubbleList).
+//
+// Returnt true bij 2xx; gooit Error met .code='BUBBLE_HTTP_<status>' op fout
+// zodat fail-soft callers de status onderscheiden van netwerk-fouten.
+export async function bubblePatch(type, id, fields) {
+  const { token, root } = readConfig();
+  const safeId = encodeURIComponent(String(id));
+  const url = `${root}/${encodeURIComponent(type)}/${safeId}`;
+  await bubbleRequest(url, { token, method: 'PATCH', body: fields || {} });
+  return true;
+}
+
+// User opzoeken op e-mail. Bubble's Data API ondersteunt constraints; we
+// vragen er max 1 op zodat de helper meteen óf het eerste hit-object óf
+// null returnt — geen lijst-loop bij callers.
+//
+// Email-normalisatie: lowercase + trim. Bubble's eigen email-veld is
+// case-insensitive maar custom-velden kunnen casing bewaren — de
+// authenticatie-route gebruikt sowieso lower-case, dus dat is de match-vorm.
+export async function bubbleFindUserByEmail(email) {
+  const raw = typeof email === 'string' ? email.trim().toLowerCase() : '';
+  if (!raw) return null;
+  const { results } = await bubbleList(
+    'user',
+    [{ key: 'email', constraint_type: 'equals', value: raw }],
+    { limit: 1 }
+  );
+  return Array.isArray(results) && results.length > 0 ? results[0] : null;
 }
