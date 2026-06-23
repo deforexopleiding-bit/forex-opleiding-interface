@@ -94,15 +94,32 @@ export async function logComms(args = {}) {
 }
 
 /**
- * Helper: map een sendEventMail-result naar log-status + reason.
- *   { success:true }  → 'sent'
- *   { success:false } → 'failed' (met error als reason)
+ * Helper: map een mail-result naar log-status + reason.
+ *
+ * Accepteert beide shapes — anders zou mail die wel doorkomt toch als
+ * 'failed' worden gelogd (en de status-badge in events-detail "Mislukt"
+ * tonen):
+ *   - mailer.js sendEventMail direct:
+ *       { success: true|false, error?, messageId?, from }
+ *   - hulper-funcs (events-invite, events-questionnaire-invite):
+ *       { ok: true|false, skipped?, reason?, error?, messageId? }
+ *
+ * Beide leveren dezelfde semantiek; deze mapper hoort daar tolerant in
+ * te zijn.
+ *   { success:true | ok:true }    → 'sent'
+ *   { skipped:true }              → 'skipped' (met reason)
+ *   anders                        → 'failed' (met error als reason)
  */
 export function mapMailStatus(mailResult) {
   if (!mailResult || typeof mailResult !== 'object') {
     return { status: 'failed', reason: 'no result' };
   }
-  if (mailResult.success === true) return { status: 'sent', reason: null };
+  if (mailResult.success === true || mailResult.ok === true) {
+    return { status: 'sent', reason: null };
+  }
+  if (mailResult.skipped === true) {
+    return { status: 'skipped', reason: mailResult.reason || 'skipped' };
+  }
   return { status: 'failed', reason: mailResult.error || 'mail send failed' };
 }
 
