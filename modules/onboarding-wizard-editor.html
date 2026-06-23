@@ -24,6 +24,26 @@
     .header-actions { display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
     .meta-row { font-size:11.5px; color:var(--text-faint); margin-top:6px; line-height:1.5; }
     .meta-row strong { color:var(--text-dim); }
+
+    /* Flow-type segmented control (1op1 / membership) */
+    .flow-switch {
+      display:inline-flex; gap:0; margin-top:10px;
+      border:1px solid var(--border); border-radius:8px; padding:3px;
+      background:var(--bg-elev);
+    }
+    .flow-switch button {
+      padding:6px 14px; font-size:12.5px; font-weight:600;
+      border:0; border-radius:6px; background:transparent;
+      color:var(--text-dim); cursor:pointer; font-family:inherit;
+      transition:background .12s, color .12s;
+    }
+    .flow-switch button:hover { color:var(--text); }
+    .flow-switch button.active {
+      background:var(--brand-deep); color:#fff;
+    }
+    .flow-switch button.active:hover { color:#fff; }
+    .flow-switch button:disabled { opacity:0.55; cursor:default; }
+    .flow-label-suffix { color:var(--brand-azure); font-weight:700; }
     .dirty-pill {
       display:inline-flex; align-items:center; gap:5px; padding:4px 9px; border-radius:999px;
       font-size:11px; font-weight:700; letter-spacing:0.02em;
@@ -239,8 +259,12 @@
 <div class="app">
   <div class="page-header">
     <div>
-      <h1>Onboarding-wizard editor</h1>
+      <h1 id="pageH1">Onboarding-wizard editor — <span class="flow-label-suffix" id="flowLabel">1-op-1 begeleiding</span></h1>
       <p>Bewerk de structuur van de publieke vragenlijst. Concept-versie wordt opgeslagen apart van wat live staat — pas bij <strong>Publiceren</strong> gaat 'ie naar studenten.</p>
+      <div class="flow-switch" id="flowSwitch" role="tablist" aria-label="Wizard-flow">
+        <button type="button" role="tab" class="active" data-flow="1op1"      aria-selected="true">1-op-1 begeleiding</button>
+        <button type="button" role="tab"                data-flow="membership" aria-selected="false">Membership</button>
+      </div>
       <div class="meta-row" id="metaRow"><span class="skeleton" style="width:240px"></span></div>
     </div>
     <div class="header-actions" id="headerActions">
@@ -326,6 +350,7 @@
 
   // ── State ─────────────────────────────────────────────────────────────
   const State = {
+    flowType     : '1op1',                       // '1op1' | 'membership' — actieve wizard-flow
     draft        : { version: 1, pages: [] },
     published    : null,
     defaultStruct: { version: 1, pages: [] },
@@ -334,8 +359,19 @@
     dirty        : false,
     saving       : false,
     publishing   : false,
+    switching    : false,                        // tijdens reload bij flow-switch
     previewIdx   : 0,
   };
+
+  // Whitelist + labels — moet matchen met api/_lib/onboarding-wizard-default.js
+  // (WIZARD_FLOW_TYPES). Onbekende inputs in de UI worden voorkomen door de
+  // segmented control (alleen 2 vaste knoppen).
+  const FLOW_TYPES  = ['1op1', 'membership'];
+  const FLOW_LABEL  = {
+    '1op1'      : '1-op-1 begeleiding',
+    'membership': 'Membership',
+  };
+  function flowLabel(t) { return FLOW_LABEL[t] || t; }
 
   // Block-type lijst. Info-only vs field — sturen we ook UI. Rich-content
   // types (embed/stats) behoren tot info-only voor RBAC/required-validatie
@@ -380,6 +416,108 @@
     { value: 'middag',  label: 'Middag'  },
     { value: 'avond',   label: 'Avond'   },
   ];
+
+  // ── Flow-type schakelaar ──────────────────────────────────────────────
+  // Render: active-class op de juiste knop + H1-suffix bijwerken. Geen
+  // DOM-flicker bij annulering: we updaten pas NA bevestigde state-wijziging.
+  function renderFlowSwitch() {
+    const lbl = document.getElementById('flowLabel');
+    if (lbl) lbl.textContent = flowLabel(State.flowType);
+    const host = document.getElementById('flowSwitch');
+    if (!host) return;
+    host.querySelectorAll('button[data-flow]').forEach((b) => {
+      const isActive = b.dataset.flow === State.flowType;
+      b.classList.toggle('active', isActive);
+      b.setAttribute('aria-selected', isActive ? 'true' : 'false');
+      b.disabled = !!State.switching;
+    });
+  }
+
+  function wireFlowSwitch() {
+    const host = document.getElementById('flowSwitch');
+    if (!host) return;
+    host.querySelectorAll('button[data-flow]').forEach((b) => {
+      b.addEventListener('click', () => {
+        const target = b.dataset.flow;
+        requestFlowSwitch(target);
+      });
+    });
+  }
+
+  function requestFlowSwitch(targetFlow) {
+    if (!FLOW_TYPES.includes(targetFlow)) return;
+    if (State.switching) return;
+    if (targetFlow === State.flowType) return;
+    if (State.saving || State.publishing) {
+      toast('Wacht tot opslaan/publiceren klaar is', 'info');
+      return;
+    }
+    if (State.dirty) {
+      showConfirm({
+        title : 'Wisselen van flow?',
+        body  : 'Niet-opgeslagen wijzigingen op de <strong>'
+              + esc(flowLabel(State.flowType))
+              + '</strong>-wizard gaan verloren. Toch wisselen naar de <strong>'
+              + esc(flowLabel(targetFlow))
+              + '</strong>-wizard?',
+        okText : 'Wisselen',
+        okClass: 'danger',
+        onOk   : () => doSwitchFlow(targetFlow),
+      });
+      return;
+    }
+    doSwitchFlow(targetFlow);
+  }
+
+  async function doSwitchFlow(targetFlow) {
+    State.switching = true;
+    renderFlowSwitch();
+    try {
+      // State volledig resetten zodat een oude draft van flow A niet per
+      // ongeluk als initieel voor flow B telt. selectedIdx terug naar 0.
+      State.flowType    = targetFlow;
+      State.draft       = { version: 1, pages: [] };
+      State.published   = null;
+      State.meta        = {};
+      State.selectedIdx = 0;
+      State.dirty       = false;
+      await loadConfigForFlow(targetFlow);
+    } finally {
+      State.switching = false;
+      renderFlowSwitch();
+    }
+  }
+
+  // Laden van de config voor één flow_type. Hergebruikt door init en
+  // doSwitchFlow. Zet State op de geretourneerde draft/published/meta;
+  // rendert header/meta/root opnieuw. Gooit door zodat de aanroeper
+  // (init / switch) een eigen error-state kan tonen indien nodig.
+  async function loadConfigForFlow(flowType) {
+    const apiFetch = window.AgentShared?.apiFetch;
+    if (typeof apiFetch !== 'function') {
+      throw new Error('apiFetch niet beschikbaar');
+    }
+    const r = await apiFetch('/api/onboarding-wizard-config-get?type=' + encodeURIComponent(flowType));
+    let d = null; try { d = await r.json(); } catch {}
+    if (r.status === 403) {
+      const wrap = document.getElementById('rootWrap');
+      if (wrap) wrap.innerHTML = `<div class="empty-state" style="border-color:#fecaca;color:#b91c1c">Geen rechten (onboarding.wizard.edit).</div>`;
+      const ha = document.getElementById('headerActions');
+      if (ha) ha.innerHTML = '';
+      return;
+    }
+    if (!r.ok) throw new Error(d?.error || ('HTTP ' + r.status));
+    State.draft         = d?.draft   || d?.default || { version: 1, pages: [] };
+    State.published     = d?.published || null;
+    State.defaultStruct = d?.default || { version: 1, pages: [] };
+    State.meta          = d?.meta    || {};
+    State.selectedIdx   = 0;
+    State.dirty         = false;
+    renderHeaderActions();
+    renderMeta();
+    renderRoot();
+    renderFlowSwitch();
+  }
 
   // ── Dirty-tracking ────────────────────────────────────────────────────
   function setDirty(b) {
@@ -1363,7 +1501,7 @@
     if (State.saving) return;
     State.saving = true; renderHeaderActions();
     try {
-      const r = await apiFetch('/api/onboarding-wizard-config-save', {
+      const r = await apiFetch('/api/onboarding-wizard-config-save?type=' + encodeURIComponent(State.flowType), {
         method  : 'POST',
         headers : { 'Content-Type': 'application/json' },
         body    : JSON.stringify({ structure: State.draft }),
@@ -1389,9 +1527,17 @@
   }
 
   function confirmPublish() {
+    const lbl = flowLabel(State.flowType);
+    // Flow-specifieke wording in de dialog zodat de admin er bewust van
+    // is welke wizard hij live zet (en de andere flow blijft ongemoeid).
+    const audience = State.flowType === 'membership'
+      ? 'nieuwe én lopende membership-studenten'
+      : 'nieuwe én lopende 1-op-1-studenten';
     showConfirm({
       title : 'Wizard publiceren?',
-      body  : 'Dit zet de wizard live voor <strong>nieuwe én lopende</strong> studenten. Niet-opgeslagen wijzigingen worden eerst opgeslagen en daarna gepubliceerd.',
+      body  : 'Dit publiceert de <strong>' + esc(lbl) + '</strong>-wizard live voor <strong>'
+            + esc(audience) + '</strong>. Niet-opgeslagen wijzigingen worden eerst opgeslagen en daarna gepubliceerd. '
+            + 'De andere flow blijft ongewijzigd.',
       okText: 'Publiceren',
       okClass: 'primary',
       onOk  : doPublish,
@@ -1403,7 +1549,7 @@
     if (State.publishing) return;
     State.publishing = true; renderHeaderActions();
     try {
-      const r = await apiFetch('/api/onboarding-wizard-config-publish', {
+      const r = await apiFetch('/api/onboarding-wizard-config-publish?type=' + encodeURIComponent(State.flowType), {
         method  : 'POST',
         headers : { 'Content-Type': 'application/json' },
         body    : JSON.stringify({ structure: State.draft }),
@@ -1772,24 +1918,11 @@
       document.getElementById('rootWrap').innerHTML = `<div class="empty-state" style="border-color:#fecaca;color:#b91c1c">apiFetch niet beschikbaar.</div>`;
       return;
     }
+    // Wire de flow-switch éénmalig en zet 'm op de actuele state.
+    wireFlowSwitch();
+    renderFlowSwitch();
     try {
-      const r = await apiFetch('/api/onboarding-wizard-config-get');
-      let d = null; try { d = await r.json(); } catch {}
-      if (r.status === 403) {
-        document.getElementById('rootWrap').innerHTML = `<div class="empty-state" style="border-color:#fecaca;color:#b91c1c">Geen rechten (onboarding.wizard.edit).</div>`;
-        document.getElementById('headerActions').innerHTML = '';
-        return;
-      }
-      if (!r.ok) throw new Error(d?.error || ('HTTP ' + r.status));
-      State.draft         = d?.draft   || d?.default || { version: 1, pages: [] };
-      State.published     = d?.published || null;
-      State.defaultStruct = d?.default || { version: 1, pages: [] };
-      State.meta          = d?.meta    || {};
-      State.selectedIdx   = 0;
-      State.dirty         = false;
-      renderHeaderActions();
-      renderMeta();
-      renderRoot();
+      await loadConfigForFlow(State.flowType);
     } catch (e) {
       console.error('[wizard-editor] init:', e?.message || e);
       document.getElementById('rootWrap').innerHTML = `<div class="empty-state" style="border-color:#fecaca;color:#b91c1c"><i class="ti ti-alert-triangle"></i> Laden mislukt: ${esc(e?.message || e)}</div>`;
