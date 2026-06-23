@@ -303,6 +303,31 @@
               </div>
             </div>
           </div>
+
+          <!-- Bubble-schema-diagnostiek — read-only super_admin probe.
+               Roept /api/bubble-schema-probe aan en toont uitsluitend
+               field_keys + field_types (geen PII). Card altijd zichtbaar
+               voor admin-tab-bezoekers; endpoint zelf gate't 403 voor
+               niet-super_admins en de UI toont die foutmelding netjes. -->
+          <div class="integration-card" id="card-bubble-schema" style="border:1px solid var(--border);border-radius:10px;padding:18px;margin-top:12px">
+            <div style="display:flex;align-items:flex-start;gap:14px">
+              <div style="font-size:26px;color:var(--text-dim);line-height:1"><i class="ti ti-flask"></i></div>
+              <div style="flex:1;min-width:0">
+                <div style="font-size:15px;font-weight:700">Bubble-schema (diagnostiek)</div>
+                <div style="font-size:12.5px;color:var(--text-dim);margin-bottom:10px">
+                  Vraag 1 record op van een Bubble-objecttype en bekijk welke property-keys + JS-typen aanwezig zijn.
+                  <strong>Geen waarden/PII</strong> — uitsluitend keys + types. Alleen super_admin.
+                </div>
+                <div id="bubbleProbeActions" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px">
+                  <button class="btn btn-sm" type="button" id="bubbleProbeUserBtn"><i class="ti ti-user"></i> Haal User-velden op</button>
+                  <button class="btn btn-sm" type="button" id="bubbleProbeSessionBtn"><i class="ti ti-clock"></i> Haal Session-velden op</button>
+                  <button class="btn btn-sm" type="button" id="bubbleProbeCopyBtn" disabled style="margin-left:auto"><i class="ti ti-copy"></i> Kopieer</button>
+                </div>
+                <div id="bubbleProbeStatus" style="font-size:12px;color:var(--text-dim);margin-bottom:8px"></div>
+                <pre id="bubbleProbeOut" style="background:var(--bg-elev);border:1px solid var(--border);border-radius:8px;padding:10px 12px;font-size:12px;line-height:1.45;overflow:auto;max-height:340px;margin:0;display:none;font-family:ui-monospace,SFMono-Regular,Menlo,monospace"></pre>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -921,7 +946,7 @@ function switchAdminTab(name) {
   const inviteBtn = document.querySelector('.page-header .btn-primary');
   if (inviteBtn) inviteBtn.style.display = name === 'gebruikers' ? '' : 'none';
   if (name === 'rechten' && !rbacLoaded) loadPermissionsMatrix();
-  if (name === 'integraties') { loadTlStatus(); loadWebhooks(); loadTemplateSetting(); loadWebflowAutoPublishState(); loadMentorBubbleSection(); }
+  if (name === 'integraties') { loadTlStatus(); loadWebhooks(); loadTemplateSetting(); loadWebflowAutoPublishState(); loadMentorBubbleSection(); wireBubbleProbe(); }
   if (name === 'approval-queue') {
     wireApprovOnce();
     loadApprovalQueue();
@@ -1551,6 +1576,115 @@ const _mb = { mentors: [], bubbleUsers: [], activeRowId: null };
 
 function _mbEsc(s) {
   return String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+}
+
+// ── Bubble-schema-probe (super_admin diagnostiek) ───────────────────────────
+// Roept /api/bubble-schema-probe?type=<...> aan via AgentShared.apiFetch
+// (Bearer-JWT wordt automatisch geinjecteerd). Endpoint zelf gate't op
+// super_admin + is_active; bij 403 toont de UI de fout-string netjes.
+//
+// Output: { type, count, field_keys[], field_types{} } in een <pre>.
+// Geen waarden in de response — alleen keys + types, dus geen PII-risico
+// in de UI-state of clipboard.
+let _bubbleProbeWired = false;
+function wireBubbleProbe() {
+  if (_bubbleProbeWired) return;
+  _bubbleProbeWired = true;
+  const userBtn   = document.getElementById('bubbleProbeUserBtn');
+  const sesBtn    = document.getElementById('bubbleProbeSessionBtn');
+  const copyBtn   = document.getElementById('bubbleProbeCopyBtn');
+  if (userBtn) userBtn.addEventListener('click', () => _runBubbleProbe('user'));
+  if (sesBtn)  sesBtn.addEventListener('click',  () => _runBubbleProbe('one-on-one-session'));
+  if (copyBtn) copyBtn.addEventListener('click', _copyBubbleProbe);
+}
+
+async function _runBubbleProbe(probeType) {
+  const status = document.getElementById('bubbleProbeStatus');
+  const out    = document.getElementById('bubbleProbeOut');
+  const copy   = document.getElementById('bubbleProbeCopyBtn');
+  const userBt = document.getElementById('bubbleProbeUserBtn');
+  const sesBt  = document.getElementById('bubbleProbeSessionBtn');
+  if (!status || !out) return;
+  // Disable knoppen tijdens fetch zodat dubbele klik niet meerdere round-trips
+  // veroorzaakt.
+  if (userBt) userBt.disabled = true;
+  if (sesBt)  sesBt.disabled  = true;
+  if (copy)   copy.disabled   = true;
+  status.style.color = 'var(--text-dim)';
+  status.textContent = 'Ophalen van Bubble-schema voor "' + probeType + '"…';
+  out.style.display = 'none';
+  out.textContent = '';
+  try {
+    const r = await window.AgentShared.apiFetch(
+      '/api/bubble-schema-probe?type=' + encodeURIComponent(probeType)
+    );
+    let body = null;
+    try { body = await r.json(); } catch {}
+    if (r.status === 401) {
+      status.style.color = 'var(--danger,#b91c1c)';
+      status.textContent = '✗ Niet (meer) ingelogd — log opnieuw in.';
+      return;
+    }
+    if (r.status === 403) {
+      status.style.color = 'var(--danger,#b91c1c)';
+      status.textContent = '✗ Geen rechten — alleen super_admin (' + (body?.error || 'Forbidden') + ')';
+      return;
+    }
+    if (r.status === 502 || r.status === 503) {
+      status.style.color = 'var(--danger,#b91c1c)';
+      status.textContent = '✗ Bubble onbereikbaar: ' + (body?.error || ('HTTP ' + r.status)) +
+        (body?.detail ? ' — ' + body.detail : '');
+      return;
+    }
+    if (!r.ok) {
+      status.style.color = 'var(--danger,#b91c1c)';
+      status.textContent = '✗ Fout: ' + (body?.error || ('HTTP ' + r.status));
+      return;
+    }
+    // Success — render JSON ingesprongen.
+    const formatted = JSON.stringify(body, null, 2);
+    out.textContent = formatted;
+    out.style.display = '';
+    status.style.color = 'var(--text-dim)';
+    const count = Number(body?.count) || 0;
+    const keyCount = Array.isArray(body?.field_keys) ? body.field_keys.length : 0;
+    status.textContent = '✓ Schema opgehaald — ' + count + ' record' + (count === 1 ? '' : 's') +
+      ', ' + keyCount + ' veld' + (keyCount === 1 ? '' : 'en') + ' gevonden.';
+    if (copy) copy.disabled = false;
+  } catch (e) {
+    console.error('[bubble-schema-probe]', e);
+    status.style.color = 'var(--danger,#b91c1c)';
+    status.textContent = '✗ Onverwachte fout: ' + (e?.message || e);
+  } finally {
+    if (userBt) userBt.disabled = false;
+    if (sesBt)  sesBt.disabled  = false;
+  }
+}
+
+async function _copyBubbleProbe() {
+  const out  = document.getElementById('bubbleProbeOut');
+  const copy = document.getElementById('bubbleProbeCopyBtn');
+  if (!out || !out.textContent) return;
+  const txt = out.textContent;
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(txt);
+    } else {
+      const ta = document.createElement('textarea');
+      ta.value = txt;
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      document.body.removeChild(ta);
+    }
+    if (copy) {
+      const orig = copy.innerHTML;
+      copy.innerHTML = '<i class="ti ti-check"></i> Gekopieerd';
+      setTimeout(() => { copy.innerHTML = orig; }, 1600);
+    }
+  } catch (e) {
+    console.error('[bubble-schema-probe copy]', e);
+  }
 }
 
 async function loadMentorBubbleSection() {
