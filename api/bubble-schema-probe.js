@@ -16,6 +16,16 @@
 // Gebruik:
 //   GET /api/bubble-schema-probe?type=user
 //   GET /api/bubble-schema-probe?type=one-on-one-session
+//   GET /api/bubble-schema-probe?type=user&options=1
+//
+// Twee modi:
+//   - Standaard (geen options=1): schema-introspectie. Returnt UNION van
+//     property-keys + types + per-key presence-counts. Geen waarden.
+//   - Options-mode (?options=1): alleen voor type 'user'. Returnt distinct
+//     waarden van een hard-coded WHITELIST van option-set velden (zie
+//     OPTION_FIELDS_BY_TYPE). NOG STEEDS GEEN waarden uit niet-whitelisted
+//     velden — uitsluitend de option-set-enum-keys uit de 4 toegestane
+//     velden, max OPTION_DISTINCT_CAP=50 distinct per veld.
 //
 // Het type-param is whitelisted:
 //   - 'user'                → Bubble object 'user'
@@ -55,6 +65,27 @@ const TYPE_MAP = {
 // we kiezen 200 als balans tussen schema-coverage en round-trips
 // (~2 calls naar Bubble per probe, ~1-3 sec).
 const SAMPLE_LIMIT = 200;
+
+// Per-type whitelist van velden waarvoor we — onder ?options=1 — de
+// SET van distinct waarden mogen teruggeven. Strikt: alleen categorie/
+// option-set-velden van Bubble (geen vrije tekst, geen PII zoals
+// e-mail/voornaam). Toevoegen vereist expliciete review.
+//
+// Bubble suffix-conventie '<key>_option_os___<set>' duidt op een
+// option-set veld; de waarden zijn enum-keys (geen vrije tekst).
+const OPTION_FIELDS_BY_TYPE = {
+  user: [
+    'membership_option_os___membership',
+    'onboarding_status_option_os___onboarding_status',
+    'role_option_os___roles',
+    'learning_type_option_os___learning_type',
+  ],
+};
+
+// Cap aantal distinct waarden per veld. Voorkomt dat een per-ongeluk
+// vrij-tekst-veld dat hier whitelist-geslipt is alsnog veel waarden
+// uitspuugt. 50 is meer dan genoeg voor een normale option-set.
+const OPTION_DISTINCT_CAP = 50;
 
 function typeOf(v) {
   if (v === null) return 'null';
@@ -99,6 +130,22 @@ export default async function handler(req, res) {
       });
     }
 
+    // Options-mode: ?options=1. Alleen voor een type met een whitelist
+    // (momenteel uitsluitend 'user'). Onder deze modus returnen we niet
+    // het schema maar distinct waarden van WHITELISTED option-set velden.
+    const optionsRaw  = typeof req.query?.options === 'string' ? req.query.options.trim() : '';
+    const optionsMode = optionsRaw === '1' || optionsRaw === 'true';
+    const optionFields = optionsMode ? (OPTION_FIELDS_BY_TYPE[probeKey] || null) : null;
+    if (optionsMode && !optionFields) {
+      // 400 i.p.v. silent fallback: voorkomt dat een caller per ongeluk
+      // het schema terugkrijgt voor een type waarvoor 'ie option-values
+      // verwacht had.
+      return res.status(400).json({
+        error: 'options=1 is alleen ondersteund voor type ' +
+               Object.keys(OPTION_FIELDS_BY_TYPE).join(', '),
+      });
+    }
+
     let records;
     try {
       // limit=200 — paginatie ingebouwd in bubbleList. We samplen tot 200
@@ -122,6 +169,41 @@ export default async function handler(req, res) {
       return res.status(502).json({
         error : 'Bubble API onbereikbaar',
         detail,
+      });
+    }
+
+    // Options-mode: vroeg-return met uitsluitend distinct waarden van de
+    // whitelisted option-set velden. GEEN andere velden, geen waarden uit
+    // niet-whitelisted velden. Maximaal OPTION_DISTINCT_CAP per veld om
+    // PII-leak via per ongeluk geslipt vrij-tekst-veld te voorkomen.
+    if (optionsMode) {
+      const optionValues = {};
+      // Init: lege array per whitelisted veld zodat de UI altijd weet
+      // welke velden bevraagd zijn (ook bij 0 records).
+      for (const f of optionFields) optionValues[f] = new Set();
+      for (const rec of records) {
+        if (!rec || typeof rec !== 'object') continue;
+        for (const f of optionFields) {
+          const v = rec[f];
+          if (v === null || v === undefined) continue;
+          // Optie-set-velden zijn strings (enum-keys). Defensive: alleen
+          // strings + trimmen + non-empty toelaten. Arrays/objects worden
+          // overgeslagen — voorkomt nested PII per ongeluk in de output.
+          if (typeof v !== 'string') continue;
+          const str = v.trim();
+          if (!str) continue;
+          if (optionValues[f].size >= OPTION_DISTINCT_CAP) continue;
+          optionValues[f].add(str);
+        }
+      }
+      const out = {};
+      for (const f of optionFields) {
+        out[f] = Array.from(optionValues[f]).sort((a, b) => a.localeCompare(b));
+      }
+      return res.status(200).json({
+        type          : probeKey,
+        sampled       : records.length,
+        option_values : out,
       });
     }
 
