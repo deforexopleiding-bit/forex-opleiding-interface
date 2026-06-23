@@ -3,51 +3,37 @@
 // F2 Blok 1 - hourly auto-close van events waarvan de signup-deadline
 // gepasseerd is.
 //
-// Deadline-definitie (lock OQ1 / OQ2):
-//   now >= midnight(starts_at - 1 day, Europe/Amsterdam)
+// Deadline-definitie (sinds 2026-06-22 — vereenvoudigde semantiek):
+//   now >= starts_at - N hours
 //
-// Praktische vertaling: zodra de NL-kalenderdag van "starts_at - 1 dag"
-// is aangebroken (00:00 NL), sluiten de signups. Equivalent: vanaf
-// 00:00 NL de dag VOOR het event.
+// Waarbij N komt uit app_settings.key='events_signups_auto_close_hours_before'
+// (jsonb { hours: <int> }, default 24). Operator past N aan via Events →
+// Instellingen → Signup-deadline.
 //
-// Implementatie: bereken in JS de cutoff "morgen 00:00 NL" (in UTC),
-// en filter `starts_at < cutoff`. Alles wat eerder start dan morgen-
-// middernacht-NL voldoet aan de deadline-conditie.
+// Voorbeeld bij N=24:
+//   - Event op 13 juni 19:00 starts_at → cutoff = 12 juni 19:00.
+//   - now >= 12 juni 19:00 → event MOET sluiten.
 //
-// Voorbeeld: vandaag is 12 juni 14:00 NL. Cutoff = 13 juni 00:00 NL.
-//   - Event op 13 juni 19:00 starts_at < cutoff?  Nee, want starts_at
-//     (13 juni 19:00) > 13 juni 00:00 NL.
-//   - Maar wacht: deadline = midnight(13 juni - 1 dag) = 12 juni 00:00 NL.
-//     Die is gepasseerd. Dus event MOET sluiten.
-//   - Conclusie: deze rekensom klopt niet. Herzien:
+// EXACT, niet meer midnight-NL semantiek. Het oude model "00:00 NL de
+// dag VOOR het event" was lastig te communiceren en gevoelig voor
+// DST/midnight-edge-cases; deze versie is een rechttoe-rechtaan
+// timestamp-vergelijking.
 //
-// Juiste vertaling:
-//   deadline(event) = midnight(starts_at - 1 day, NL)
-//   We willen events waar now >= deadline(event).
-//   <=> deadline(event) <= now
-//   <=> midnight(starts_at - 1 day, NL) <= now
-//   <=> starts_at - 1 day < (volgende_midnight_na_now, NL)
-//   <=> starts_at < now_NL_day + 1 day + 1 day = now_NL_day + 2 days @ 00:00 NL
-//
-// Hmm dat klopt ook niet helemaal als je strict bent met midnight-grenzen.
-// Eenvoudigere route: doe de check per-event in JS na een ruime SQL-pre-filter.
-//
-// Pre-filter SQL: status='published' AND signups_closed=false AND
-//   starts_at < now() + interval '3 days'
-// (alle events die in de komende 3 dagen starten of al gestart zijn).
-//
-// In JS: per event reken `deadlineMs = amsterdamMidnightUtcMs(startsAt - 1d)`.
-//   Als Date.now() >= deadlineMs -> kandidaat voor auto-close.
-//
-// Per match:
-//   1. UPDATE events SET signups_closed=true, signups_closed_at=now(),
-//        signups_closed_reason='auto_time',
-//        signups_closed_by_user_id=NULL
-//      (lock OQ1: 3-veld model, NULL voor cron-write).
-//   2. AWAIT closeSignupsOutbound(event.id)
-//      - Webflow: PATCH item naar isDraft=true (staged record blijft)
-//      - GHL: recompute upcoming-labels (event valt uit de set)
-//   3. Logging in summary; orchestrator zelf schrijft event_sync_log.
+// Implementatie:
+//   1. Lees hoursBefore uit app_settings (fail-soft → default 24).
+//   2. Pre-filter SQL: status='published' AND signups_closed=false AND
+//      starts_at < now() + (hoursBefore + 24)h. Buffer van +24h zodat we
+//      events die net binnen het venster vallen niet missen.
+//   3. JS-filter per event: nowMs >= startsAtMs - hoursBefore * 3600_000.
+//   4. Per match:
+//        a. UPDATE events SET signups_closed=true, signups_closed_at=now(),
+//             signups_closed_reason='auto_time',
+//             signups_closed_by_user_id=NULL
+//           (lock OQ1: 3-veld model, NULL voor cron-write).
+//        b. AWAIT closeSignupsOutbound(event.id)
+//           - Webflow: PATCH item naar isDraft=true (staged record blijft)
+//           - GHL: recompute upcoming-labels (event valt uit de set)
+//        c. Logging in summary; orchestrator zelf schrijft event_sync_log.
 //
 // Per-event try/catch (lesson learned 3 - nooit early-return op 1 faal-item).
 //
@@ -56,14 +42,15 @@
 //
 // Auth: Authorization: Bearer $CRON_SECRET (checkCronAuth).
 // Methodes: GET (Vercel cron) + POST (handmatige debug-trigger).
-// Schedule: 0 * * * * (hourly UTC; DST-immuun door SQL-side
-// timestamptz comparisons + JS NL-midnight berekening).
+// Schedule: 0 * * * * (hourly UTC).
 
 import { checkCronAuth, supabaseAdmin } from './supabase.js';
 import { closeSignupsOutbound } from './_lib/event-sync-orchestrator.js';
 
-const BATCH_LIMIT = 50;
-const ABORT_MS    = 50_000;
+const BATCH_LIMIT       = 50;
+const ABORT_MS          = 50_000;
+const DEFAULT_HOURS     = 24;
+const SETTING_KEY       = 'events_signups_auto_close_hours_before';
 
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
@@ -79,6 +66,7 @@ export default async function handler(req, res) {
 
   const startedAt = Date.now();
   const summary = {
+    hours_before: DEFAULT_HOURS,
     pre_filter_rows: 0,
     processed: 0,
     closed: 0,
@@ -89,9 +77,33 @@ export default async function handler(req, res) {
   };
 
   try {
-    // Pre-filter: alles wat in komende ~3 dagen start (of al gestart is) is
-    // potentieel een kandidaat. Cron draait elk uur, dus ruim genoeg.
-    const future = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString();
+    // Globale setting lezen (fail-soft → default).
+    let hoursBefore = DEFAULT_HOURS;
+    try {
+      const { data: settingRow, error: setErr } = await supabaseAdmin
+        .from('app_settings')
+        .select('value')
+        .eq('key', SETTING_KEY)
+        .maybeSingle();
+      if (setErr) {
+        console.warn('[cron-events-signups-auto-close] app_settings fetch:', setErr.message);
+      } else {
+        const raw = Number(settingRow?.value?.hours);
+        if (Number.isFinite(raw) && Number.isInteger(raw) && raw >= 0) {
+          hoursBefore = raw;
+        } else if (settingRow) {
+          console.warn('[cron-events-signups-auto-close] invalid hours setting, fallback to 24');
+        }
+      }
+    } catch (e) {
+      console.warn('[cron-events-signups-auto-close] app_settings exception:', e?.message || e);
+    }
+    summary.hours_before = hoursBefore;
+
+    // Pre-filter: alle events die binnen (hoursBefore + 24)h starten. Buffer
+    // van +24h zodat we events die kortelings ingepland zijn niet missen.
+    const bufferMs = (hoursBefore + 24) * 3_600_000;
+    const future = new Date(Date.now() + bufferMs).toISOString();
 
     const { data: rows, error: selErr } = await supabaseAdmin
       .from('events')
@@ -105,7 +117,17 @@ export default async function handler(req, res) {
 
     summary.pre_filter_rows = (rows || []).length;
 
-    const candidates = (rows || []).filter((r) => isPastDeadlineAmsterdam(r.starts_at));
+    // Per-event deadline-check: cutoff = starts_at - hoursBefore * 3600_000.
+    const nowMs = Date.now();
+    const cutoffOffsetMs = hoursBefore * 3_600_000;
+    const candidates = (rows || []).filter((r) => {
+      if (!r.starts_at) return false;
+      const startsAtMs = new Date(r.starts_at).getTime();
+      if (!Number.isFinite(startsAtMs)) return false;
+      const deadlineMs = startsAtMs - cutoffOffsetMs;
+      return nowMs >= deadlineMs;
+    });
+
     const batch = candidates.slice(0, BATCH_LIMIT);
     summary.processed = batch.length;
 
@@ -171,121 +193,4 @@ export default async function handler(req, res) {
     console.error('[cron-events-signups-auto-close] fatal', e);
     return res.status(500).json(summary);
   }
-}
-
-// ----------------------------------------------------------------------------
-// Deadline-check helpers (DST-safe via Intl + iteratieve offset-resolve)
-// ----------------------------------------------------------------------------
-
-/**
- * Deadline-check: is now >= midnight(starts_at - 1 day, Europe/Amsterdam)?
- *
- * Stappen:
- *   1. Bepaal de NL-kalenderdag (yyyy-mm-dd) van starts_at.
- *   2. Trek 1 dag af (NL-tijd, DST-veilig via 12:00 UTC pivot).
- *   3. Bouw absolute UTC-ms voor 00:00 NL van die dag.
- *   4. Vergelijk met Date.now().
- */
-function isPastDeadlineAmsterdam(startsAtIso) {
-  if (!startsAtIso) return false;
-  const start = new Date(startsAtIso);
-  if (Number.isNaN(start.getTime())) return false;
-
-  const startNl = nlDateParts(start);
-  if (!startNl) return false;
-
-  // Dag voor het event (NL-tijd). 12:00 UTC pivot is DST-veilig: 1 etmaal
-  // eraf landt altijd in de gewenste vorige NL-kalenderdag.
-  const noonUtc = new Date(Date.UTC(startNl.y, startNl.m - 1, startNl.d, 12, 0, 0));
-  const dayBefore = new Date(noonUtc.getTime() - 24 * 60 * 60 * 1000);
-  const beforeNl = nlDateParts(dayBefore);
-  if (!beforeNl) return false;
-
-  const deadlineMs = amsterdamMidnightUtcMs(beforeNl.y, beforeNl.m, beforeNl.d);
-  if (deadlineMs === null) return false;
-
-  return Date.now() >= deadlineMs;
-}
-
-/** Geef { y, m, d } voor `date` IN Europe/Amsterdam. */
-function nlDateParts(date) {
-  try {
-    const parts = new Intl.DateTimeFormat('en-CA', {
-      timeZone: 'Europe/Amsterdam',
-      year: 'numeric', month: '2-digit', day: '2-digit',
-    }).formatToParts(date);
-    const y = parseInt(parts.find((p) => p.type === 'year')?.value, 10);
-    const m = parseInt(parts.find((p) => p.type === 'month')?.value, 10);
-    const d = parseInt(parts.find((p) => p.type === 'day')?.value, 10);
-    if (!y || !m || !d) return null;
-    return { y, m, d };
-  } catch {
-    return null;
-  }
-}
-
-/**
- * Bouw UTC-ms voor 00:00 Europe/Amsterdam op gegeven NL-kalenderdatum.
- *
- * Strategie:
- *   1. Eerste schatting via huidige offset (CET=+60 / CEST=+120).
- *   2. Verifieer of de schatting in NL-tijd inderdaad 00:00 op (y, m, d) toont.
- *   3. DST-correctie: probeer +/-1u, +/-2u indien nodig (DST-overgangsdag).
- */
-function amsterdamMidnightUtcMs(year, month, day) {
-  try {
-    const guess1 = new Date(Date.UTC(year, month - 1, day, 0, 0, 0));
-    const offset1 = amsterdamOffsetMinutes(guess1);
-    const ms1 = guess1.getTime() - offset1 * 60_000;
-
-    if (verifyNlMidnight(ms1, year, month, day)) return ms1;
-
-    for (const deltaHours of [-1, 1, -2, 2]) {
-      const ms2 = ms1 + deltaHours * 3600_000;
-      if (verifyNlMidnight(ms2, year, month, day)) return ms2;
-    }
-    return ms1; // hooguit 1u afwijking op DST-overgangsdag
-  } catch {
-    return null;
-  }
-}
-
-function verifyNlMidnight(utcMs, year, month, day) {
-  const parts = new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'Europe/Amsterdam',
-    year: 'numeric', month: '2-digit', day: '2-digit',
-    hour: '2-digit', minute: '2-digit', hour12: false,
-  }).formatToParts(new Date(utcMs));
-  const y = parseInt(parts.find((p) => p.type === 'year')?.value, 10);
-  const m = parseInt(parts.find((p) => p.type === 'month')?.value, 10);
-  const d = parseInt(parts.find((p) => p.type === 'day')?.value, 10);
-  const h = parseInt(parts.find((p) => p.type === 'hour')?.value, 10);
-  const mn = parseInt(parts.find((p) => p.type === 'minute')?.value, 10);
-  return y === year && m === month && d === day && h === 0 && mn === 0;
-}
-
-/**
- * Geef offset (minuten) van Europe/Amsterdam tov UTC op gegeven tijdstip.
- * Resultaat: 60 (CET) of 120 (CEST).
- */
-function amsterdamOffsetMinutes(date) {
-  const tzParts = new Intl.DateTimeFormat('en-US', {
-    timeZone: 'Europe/Amsterdam',
-    timeZoneName: 'shortOffset',
-  }).formatToParts(date);
-  const tzName = tzParts.find((p) => p.type === 'timeZoneName')?.value || '';
-  const m = tzName.match(/[+-]\d{1,2}(?::?\d{2})?/);
-  if (!m) return 60; // veilige fallback CET
-  const raw = m[0];
-  const sign = raw.startsWith('-') ? -1 : 1;
-  const body = raw.slice(1);
-  let hours = 0, mins = 0;
-  if (body.includes(':')) {
-    const [h, mm] = body.split(':');
-    hours = parseInt(h, 10);
-    mins = parseInt(mm, 10);
-  } else {
-    hours = parseInt(body, 10);
-  }
-  return sign * (hours * 60 + (mins || 0));
 }
