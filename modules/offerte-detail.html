@@ -45,6 +45,13 @@
     .ob-modal-body label { display:block; font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.05em; color:var(--text-faint); margin-bottom:6px; }
     .ob-modal-body .read-only { padding:8px 10px; background:var(--bg-elev); border:1px solid var(--border); border-radius:7px; font-size:13.5px; color:var(--text); margin-bottom:14px; }
     .ob-modal-body select { width:100%; padding:8px 10px; font-size:13.5px; border:1px solid var(--border); border-radius:7px; background:var(--bg); color:var(--text); font-family:inherit; margin-bottom:14px; }
+    .ob-modal-body select:disabled { opacity:0.6; cursor:not-allowed; }
+    /* Type-segmented (1op1 / membership) — segmented control boven het traject-veld. */
+    .ob-type-switch { display:flex; gap:0; margin-bottom:14px; border:1px solid var(--border); border-radius:8px; padding:3px; background:var(--bg-elev); }
+    .ob-type-switch button { flex:1; padding:8px 12px; font-size:12.5px; font-weight:600; border:0; border-radius:6px; background:transparent; color:var(--text-dim); cursor:pointer; font-family:inherit; transition:background .12s, color .12s; }
+    .ob-type-switch button:hover { color:var(--text); }
+    .ob-type-switch button.active { background:#0a2f63; color:#fff; }
+    .ob-type-switch button.active:hover { color:#fff; }
     .ob-modal-body .ob-error { background:rgba(220,38,38,0.08); border:1px solid rgba(220,38,38,0.25); color:#b91c1c; padding:9px 11px; border-radius:7px; font-size:12.5px; margin-bottom:12px; }
     .ob-modal-body .ob-success { background:rgba(5,150,105,0.10); border:1px solid rgba(5,150,105,0.30); color:#047857; padding:11px 13px; border-radius:8px; font-size:13px; margin-bottom:12px; line-height:1.45; }
     .ob-modal-body .ob-link-row { display:flex; gap:6px; align-items:stretch; margin-top:8px; }
@@ -85,8 +92,13 @@
       <div id="obStepForm">
         <label>Klant</label>
         <div class="read-only" id="obCustomerLabel">—</div>
+        <label>Type begeleiding</label>
+        <div class="ob-type-switch" id="obTypeSwitch" role="tablist" aria-label="Type begeleiding">
+          <button type="button" role="tab" data-ob-type="1op1"      aria-selected="false">1-op-1 begeleiding</button>
+          <button type="button" role="tab" data-ob-type="membership" aria-selected="false">Membership</button>
+        </div>
         <label for="obTrajectSel">Traject</label>
-        <select id="obTrajectSel"><option value="">Trajecten laden…</option></select>
+        <select id="obTrajectSel" disabled><option value="">Kies eerst een type</option></select>
         <div id="obError" class="ob-error" hidden></div>
       </div>
       <div id="obStepDone" hidden></div>
@@ -284,8 +296,13 @@ async function doDelete(){
 
 // ── F0.2 Onboarding-traject aanmelden ─────────────────────────────────
 // Modal-handlers (één keer in init() gewired) + open/submit/copy.
-let _obTrajecten = [];
-let _obTrajectenLoaded = false;
+let _obTrajecten        = [];
+let _obTrajectenLoaded  = false;
+let _obSelectedType     = null;   // '1op1' | 'membership' | null
+
+// Whitelist + helper. Matcht api/_lib/onboarding-wizard-default.js
+// (WIZARD_FLOW_TYPES) en is de UI-tegenhanger van traject.type.
+const OB_TYPES = ['1op1', 'membership'];
 
 function _wireObModal(){
   const m  = document.getElementById('obModal');
@@ -293,6 +310,7 @@ function _wireObModal(){
   const c  = document.getElementById('obCancelBtn');
   const sb = document.getElementById('obSubmitBtn');
   const sel= document.getElementById('obTrajectSel');
+  const sw = document.getElementById('obTypeSwitch');
   if (!m) return;
   const close = () => closeObModal();
   if (x) x.addEventListener('click', close);
@@ -307,6 +325,64 @@ function _wireObModal(){
     sb.disabled = !sel.value;
   });
   if (sb) sb.addEventListener('click', submitObCreate);
+  if (sw) {
+    sw.querySelectorAll('button[data-ob-type]').forEach((b) => {
+      b.addEventListener('click', () => _selectObType(b.dataset.obType));
+    });
+  }
+}
+
+// Renders de active-class op de juiste knop in de type-switch.
+function _renderObTypeSwitch(){
+  const sw = document.getElementById('obTypeSwitch');
+  if (!sw) return;
+  sw.querySelectorAll('button[data-ob-type]').forEach((b) => {
+    const isActive = b.dataset.obType === _obSelectedType;
+    b.classList.toggle('active', isActive);
+    b.setAttribute('aria-selected', isActive ? 'true' : 'false');
+  });
+}
+
+// (Her)vult <select id="obTrajectSel"> met alleen de trajecten van het
+// huidige type. Reset altijd de huidige keuze + disable de submit-knop.
+// Lege filter → disabled option "Geen trajecten voor dit type", submit
+// blijft uit. Geen type gekozen → disabled placeholder.
+function _renderObTrajectOptions(){
+  const sel = document.getElementById('obTrajectSel');
+  const sb  = document.getElementById('obSubmitBtn');
+  if (!sel) return;
+  if (sb) sb.disabled = true;
+  if (!_obSelectedType) {
+    sel.disabled  = true;
+    sel.innerHTML = '<option value="">Kies eerst een type</option>';
+    return;
+  }
+  if (!_obTrajectenLoaded) {
+    sel.disabled  = true;
+    sel.innerHTML = '<option value="">Trajecten laden…</option>';
+    return;
+  }
+  const filtered = _obTrajecten.filter((t) => t && t.type === _obSelectedType);
+  if (filtered.length === 0) {
+    sel.disabled  = true;
+    sel.innerHTML = '<option value="">Geen trajecten voor dit type</option>';
+    return;
+  }
+  sel.disabled  = false;
+  sel.innerHTML = '<option value="">— kies traject —</option>'
+    + filtered.map((t) => `<option value="${esc(t.id)}">${esc(t.label || t.key || t.id)}</option>`).join('');
+  sel.value = '';
+}
+
+// Type-keuze: zet de actieve flow + verbird de traject-lijst. Wisselen
+// reset altijd de eerdere traject-keuze (submit gaat uit) — voorkomt dat
+// een onzichtbaar geworden traject-id alsnog gesubmit wordt.
+function _selectObType(type){
+  if (!OB_TYPES.includes(type)) return;
+  if (_obSelectedType === type) return;
+  _obSelectedType = type;
+  _renderObTypeSwitch();
+  _renderObTrajectOptions();
 }
 
 function _resetObModal(){
@@ -320,8 +396,14 @@ function _resetObModal(){
   const sb = document.getElementById('obSubmitBtn');
   sb.disabled = true;
   sb.textContent = 'Aanmelden';
+  sb.style.display = '';
   const cb = document.getElementById('obCancelBtn');
   cb.textContent = 'Annuleren';
+  // Type-keuze + traject-lijst terug naar lege start-staat zodat een
+  // heropende modal schoon begint.
+  _obSelectedType = null;
+  _renderObTypeSwitch();
+  _renderObTrajectOptions();
 }
 
 function _showObError(msg){
@@ -332,17 +414,18 @@ function _showObError(msg){
 
 async function _ensureObTrajectenLoaded(){
   if (_obTrajectenLoaded) return;
-  const sel = document.getElementById('obTrajectSel');
   try {
     const r = await window.AgentShared.apiFetch('/api/onboarding-trajecten-list');
     let d = null; try { d = await r.json(); } catch {}
     if (!r.ok) throw new Error(d?.error || ('HTTP ' + r.status));
     _obTrajecten = Array.isArray(d?.trajecten) ? d.trajecten : [];
     _obTrajectenLoaded = true;
-    sel.innerHTML = '<option value="">— kies traject —</option>'
-      + _obTrajecten.map(t => `<option value="${esc(t.id)}">${esc(t.label || t.key || t.id)}</option>`).join('');
+    // Hervul de select op basis van de huidige type-keuze (kan nog leeg
+    // zijn — dan blijft de placeholder staan).
+    _renderObTrajectOptions();
   } catch (e) {
-    sel.innerHTML = '<option value="">Laden mislukt</option>';
+    const sel = document.getElementById('obTrajectSel');
+    if (sel) sel.innerHTML = '<option value="">Laden mislukt</option>';
     _showObError('Trajecten ophalen mislukt: ' + (e?.message || e));
   }
 }
@@ -351,9 +434,6 @@ function openObModal(){
   if (!_obCtx.customerId) { toast('Geen klant-id beschikbaar', 'error'); return; }
   _resetObModal();
   document.getElementById('obCustomerLabel').textContent = _obCtx.customerName || _obCtx.customerId;
-  const sel = document.getElementById('obTrajectSel');
-  sel.value = '';
-  document.getElementById('obSubmitBtn').disabled = true;
   const m = document.getElementById('obModal');
   m.removeAttribute('hidden');
   m.classList.add('open');
