@@ -63,6 +63,7 @@ export default async function handler(req, res) {
                status, current_step, answers, token,
                started_at, completed_at, assigned_at, archived_at,
                created_by, created_at, updated_at,
+               bubble_provisioned, bubble_provisioned_at, bubble_provision_error, bubble_user_id,
                traject:onboarding_trajecten(label, type, calls, duur_maanden)`)
       .eq('id', id)
       .maybeSingle();
@@ -157,6 +158,10 @@ export default async function handler(req, res) {
         created_by     : row.created_by || null,
         created_at     : row.created_at,
         updated_at     : row.updated_at  || null,
+        bubble_provisioned     : row.bubble_provisioned === true,
+        bubble_provisioned_at  : row.bubble_provisioned_at || null,
+        bubble_provision_error : row.bubble_provision_error || null,
+        bubble_user_id         : row.bubble_user_id || null,
       },
     });
   } catch (e) {
