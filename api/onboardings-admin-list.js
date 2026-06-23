@@ -86,6 +86,7 @@ export default async function handler(req, res) {
       .select(`id, customer_id, customer_name, traject_id, mentor_user_id,
                status, current_step, answers, started_at, completed_at, assigned_at,
                archived_at, created_at, token,
+               bubble_provisioned, bubble_provisioned_at, bubble_provision_error, bubble_user_id,
                traject:onboarding_trajecten(label, type, calls)`)
       .order('created_at', { ascending: false })
       .limit(1000);
@@ -184,6 +185,10 @@ export default async function handler(req, res) {
         archived_at    : r.archived_at,
         created_at     : r.created_at,
         token          : r.token,
+        bubble_provisioned     : r.bubble_provisioned === true,
+        bubble_provisioned_at  : r.bubble_provisioned_at || null,
+        bubble_provision_error : r.bubble_provision_error || null,
+        bubble_user_id         : r.bubble_user_id || null,
       };
     });
 

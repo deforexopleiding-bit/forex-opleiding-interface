@@ -65,6 +65,10 @@
     .ob-badge.gearchiveerd { background:rgba(100,116,139,0.18); color:#475569; }
     .ob-badge.paid-yes     { background:rgba(34,197,94,0.14);   color:#15803d; }
     .ob-badge.paid-no      { background:rgba(100,116,139,0.18); color:#475569; }
+    /* Bubble-provisioning status (F2) */
+    .ob-badge.bubble-ok    { background:rgba(34,197,94,0.14);   color:#15803d; }
+    .ob-badge.bubble-fail  { background:rgba(220,38,38,0.14);   color:#b91c1c; cursor:help; }
+    .ob-badge.bubble-none  { background:rgba(100,116,139,0.18); color:#475569; }
 
     .ob-row-actions { display:flex; gap:6px; flex-wrap:wrap; align-items:center; }
     .ob-act {
@@ -280,6 +284,7 @@
             <th>Mentor</th>
             <th>Voortgang</th>
             <th>Aangemeld</th>
+            <th>Bubble</th>
             <th style="text-align:right">Acties</th>
           </tr>
         </thead>
@@ -299,6 +304,24 @@
     return paid
       ? '<span class="ob-badge paid-yes">Betaald</span>'
       : '<span class="ob-badge paid-no">Nog niet betaald</span>';
+  }
+
+  // Bubble-provisioning-status (F2). Drie states:
+  //   bubble_provisioned=true            → groen "✓ Aangemaakt" (tooltip = aanmaakdatum)
+  //   bubble_provisioned=false + error   → rood  "⚠ Mislukt"     (tooltip = error-tekst)
+  //   anders (nog niet geprobeerd)       → grijs "—"
+  function bubbleBadgeHtml(r) {
+    const ok    = r && r.bubble_provisioned === true;
+    const err   = r && r.bubble_provision_error ? String(r.bubble_provision_error) : '';
+    const stamp = r && r.bubble_provisioned_at  ? String(r.bubble_provisioned_at)  : '';
+    if (ok) {
+      const tooltip = stamp ? fmtDateTimeNL(stamp) : 'Aangemaakt';
+      return `<span class="ob-badge bubble-ok" title="${esc(tooltip)}">✓ Aangemaakt</span>`;
+    }
+    if (err) {
+      return `<span class="ob-badge bubble-fail" title="${esc(err)}">⚠ Mislukt</span>`;
+    }
+    return '<span class="ob-badge bubble-none">—</span>';
   }
 
   // Bedenktijd-waiver-badge. waiver = { agreed, at } | null.
@@ -404,6 +427,7 @@
         <td>${mentorCellHtml(r)}</td>
         <td>${esc(progressLabel(r))}</td>
         <td>${esc(fmtDateNL(r.created_at))}</td>
+        <td>${bubbleBadgeHtml(r)}</td>
         <td style="text-align:right">${actionsCellHtml(r)}</td>
       </tr>`;
   }
@@ -561,14 +585,95 @@
           <dt>Gestart</dt>          <dd>${esc(fmtDateTimeNL(o.started_at))}</dd>
           <dt>Afgerond</dt>         <dd>${esc(fmtDateTimeNL(o.completed_at))}</dd>
           <dt>Gearchiveerd</dt>     <dd>${esc(fmtDateTimeNL(o.archived_at))}</dd>
+          <dt>Bubble-status</dt>    <dd>${bubbleBadgeHtml(o)}${o.bubble_provisioned_at ? ' <span style="color:var(--text-faint);font-size:12px">· ' + esc(fmtDateTimeNL(o.bubble_provisioned_at)) + '</span>' : ''}</dd>
+          ${o.bubble_user_id        ? `<dt>Bubble user-id</dt><dd style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;word-break:break-all">${esc(o.bubble_user_id)}</dd>` : ''}
+          ${o.bubble_provision_error ? `<dt>Bubble-fout</dt><dd style="color:#b91c1c;white-space:pre-wrap;font-size:12.5px">${esc(o.bubble_provision_error)}</dd>` : ''}
+          ${(!o.bubble_provisioned)
+            ? `<dt>Bubble-actie</dt><dd>
+                 <button type="button" class="ob-act primary" id="bubbleRetryBtn" data-id="${esc(o.id)}">
+                   <i class="ti ti-refresh"></i>Bubble opnieuw aanmaken
+                 </button>
+                 <span id="bubbleRetryStatus" style="margin-left:8px;font-size:12.5px;color:var(--text-dim)"></span>
+               </dd>`
+            : ''}
           ${link ? `<dt>Persoonlijke link</dt><dd style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;word-break:break-all">${esc(link)}</dd>` : ''}
         </dl>
         <h3>Vragenlijst-antwoorden</h3>
         ${answersJson
           ? `<pre>${esc(answersJson)}</pre>`
           : `<div class="empty-state"><i class="ti ti-clipboard-off"></i>Nog geen antwoorden — wizard nog niet gestart of nog niet ingevuld.</div>`}`;
+      // Bubble-retry knop wiren (alleen aanwezig als onboarding niet-provisioned).
+      const retryBtn = document.getElementById('bubbleRetryBtn');
+      if (retryBtn) {
+        retryBtn.addEventListener('click', () => {
+          doProvisionRetry(retryBtn.dataset.id || '', retryBtn);
+        });
+      }
     } catch (e) {
       bd.innerHTML = `<div class="empty-state" style="color:#b91c1c">Ophalen mislukt: ${esc(e?.message || e)}</div>`;
+    }
+  }
+
+  // ── Bubble-provisioning retry ────────────────────────────────────────
+  // Roept /api/onboarding-provision-retry aan voor één onboarding. Endpoint
+  // is fail-soft: 200 met { ok, partial?, error? }. We zetten de knop op
+  // disabled tijdens de call, tonen inline status (spinner-tekst), en bij
+  // succes refreshen we de lijst + heropenen we de detail-modal zodat de
+  // nieuwe badge-status meteen zichtbaar is.
+  async function doProvisionRetry(onboardingId, btn) {
+    if (!onboardingId) return;
+    const status = document.getElementById('bubbleRetryStatus');
+    if (btn) btn.disabled = true;
+    if (status) {
+      status.style.color  = 'var(--text-dim)';
+      status.textContent  = 'Bezig met aanmaken in Bubble…';
+    }
+    try {
+      const r = await window.AgentShared.apiFetch('/api/onboarding-provision-retry', {
+        method  : 'POST',
+        headers : { 'Content-Type': 'application/json' },
+        body    : JSON.stringify({ onboarding_id: onboardingId }),
+      });
+      let d = null; try { d = await r.json(); } catch {}
+      if (r.status === 401) {
+        if (status) { status.style.color = '#b91c1c'; status.textContent = '✗ Niet (meer) ingelogd.'; }
+        return;
+      }
+      if (r.status === 403) {
+        if (status) { status.style.color = '#b91c1c'; status.textContent = '✗ Geen rechten (onboarding.admin).'; }
+        return;
+      }
+      if (!r.ok) {
+        if (status) { status.style.color = '#b91c1c'; status.textContent = '✗ Mislukt: ' + (d?.error || ('HTTP ' + r.status)); }
+        return;
+      }
+      // Endpoint geeft altijd 200; success vs partial vs hard-fail uit body.
+      if (d && d.ok === true) {
+        if (status) {
+          status.style.color = '#15803d';
+          status.textContent = d.skipped ? '✓ Al aangemaakt' : '✓ Gelukt';
+        }
+        toast(d.skipped ? 'Was al aangemaakt' : 'Bubble-account aangemaakt', 'success');
+        // Lijst verversen + modal heropenen met verse data.
+        loadList();
+        setTimeout(() => { openDetail(onboardingId); }, 250);
+        return;
+      }
+      // partial of harde fail.
+      const errMsg = (d?.error || 'Onbekende fout');
+      if (status) {
+        status.style.color = '#b91c1c';
+        status.textContent = (d?.partial ? '⚠ Gedeeltelijk: ' : '✗ Mislukt: ') + errMsg;
+      }
+      toast((d?.partial ? 'Gedeeltelijk gelukt: ' : 'Bubble-aanmaak mislukt: ') + errMsg, 'error');
+      // Bij partial heeft de retry een bubble_user_id opgeslagen — een volgende
+      // poging kan zinvol zijn. Re-enable de knop zodat de admin nogmaals kan
+      // proberen na onderzoek.
+      if (btn) btn.disabled = false;
+    } catch (e) {
+      console.error('[onboarding-admin] retry:', e?.message || e);
+      if (status) { status.style.color = '#b91c1c'; status.textContent = '✗ Onverwachte fout: ' + (e?.message || e); }
+      if (btn) btn.disabled = false;
     }
   }
 
