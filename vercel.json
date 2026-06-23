@@ -83,6 +83,10 @@
     {
       "path": "/api/cron/generate-monthly-concepts",
       "schedule": "0 6 * * *"
+    },
+    {
+      "path": "/api/cron/archive-completed-onboardings",
+      "schedule": "30 3 * * *"
     }
   ],
   "headers": [
