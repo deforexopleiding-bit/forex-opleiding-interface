@@ -81,11 +81,16 @@ async function sendQuestionnaireMail({ firstName, vragenlijstLink, eventTitle, e
   const text = `Hoi ${naam}, vul de vragenlijst in voor ${titleStr}${datumLine}: ${vragenlijstLink} — Team De Forex Opleiding`;
 
   try {
-    await sendEventMail({ to: toEmail, subject, text, html });
-    return { ok: true };
+    const result = await sendEventMail({ to: toEmail, subject, text, html });
+    if (!result || result.success !== true) {
+      const reason = result?.error || 'unknown mailer error';
+      console.error('[events-questionnaire-invite] mail send failed:', reason, '| to:', toEmail);
+      return { ok: false, error: reason };
+    }
+    return { ok: true, messageId: result.messageId || null };
   } catch (e) {
-    console.error('[events-questionnaire-invite] mail:', e?.message || e);
-    return { ok: false, error: e?.message || 'mail send failed' };
+    console.error('[events-questionnaire-invite] mail throw:', e?.message || e, '| to:', toEmail);
+    return { ok: false, error: e?.message || 'mail send failed (throw)' };
   }
 }
 
