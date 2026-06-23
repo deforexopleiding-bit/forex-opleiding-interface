@@ -526,6 +526,7 @@ function renderPage(canCreate, canViewInbox, canManageSignupInbox) {
         <button class="evs-sub-tab" data-evsub="assessment"><i class="ti ti-file-text"></i> Vragenlijst</button>
         <button class="evs-sub-tab" data-evsub="simone"><i class="ti ti-robot"></i> Simone-config</button>
         <button class="evs-sub-tab" data-evsub="automations"><i class="ti ti-bolt"></i> Automations</button>
+        <button class="evs-sub-tab" data-evsub="signup-deadline"><i class="ti ti-clock-hour-4"></i> Signup-deadline</button>
         <button class="evs-sub-tab" data-evsub="niveau"><i class="ti ti-photo"></i> Niveau-foto's</button>
       </nav>
 
@@ -642,6 +643,28 @@ function renderPage(canCreate, canViewInbox, canManageSignupInbox) {
       <section class="evs-sub-section" data-evsubsec="automations">
         <iframe id="evAutomationsFrame" data-src="/modules/events-automations.html?embed=1"
                 style="width:100%; height:calc(100vh - 220px); min-height:620px; border:0; border-radius:10px; background:var(--bg); display:block"></iframe>
+      </section>
+
+      <!-- ── Sub-sectie: Signup-deadline ── -->
+      <section class="evs-sub-section" data-evsubsec="signup-deadline">
+        <div class="aq-section-card">
+          <div style="font-size:15px;font-weight:700;margin-bottom:6px">Aanmeldingen automatisch sluiten</div>
+          <div style="font-size:12.5px;color:var(--text-dim);margin-bottom:14px;max-width:720px;line-height:1.55">
+            Hoe lang vóór het event-start moeten aanmeldingen automatisch sluiten?
+            Bijvoorbeeld <strong>24 uur</strong> = sluiten op event-tijd minus 24 uur (exact, op de minuut).
+            Cron-job draait elk uur en sluit kandidaten in batches.
+          </div>
+          <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:4px">
+            <label for="autoCloseHoursInput" style="font-size:13px;font-weight:600">Uren voor start:</label>
+            <input type="number" id="autoCloseHoursInput" min="0" max="720" step="1"
+                   style="width:120px;padding:7px 10px;border:1px solid var(--border);border-radius:7px;background:var(--bg);color:var(--text);font-family:inherit;font-size:14px" />
+            <button type="button" id="autoCloseSaveBtn" class="btn btn-primary" style="padding:7px 14px">
+              <i class="ti ti-device-floppy"></i> Opslaan
+            </button>
+            <span id="autoCloseStatus" style="margin-left:6px;font-size:13px;color:var(--text-dim)"></span>
+          </div>
+          <div id="autoCloseMeta" style="font-size:11.5px;color:var(--text-faint);margin-top:10px"></div>
+        </div>
       </section>
 
       <!-- ── Sub-sectie: Niveau-foto's (lokale modal) ── -->
@@ -1182,6 +1205,12 @@ function _evSelectSettingsSubTab(name) {
     const fr = document.getElementById('evAutomationsFrame');
     if (fr && !fr.src && fr.dataset.src) fr.src = fr.dataset.src;
   }
+  // Signup-deadline lazy-load: GET huidige instelling bij eerste opening,
+  // wire save-handler éénmalig.
+  if (name === 'signup-deadline') {
+    _ensureAutoCloseWired();
+    _loadAutoCloseSetting();
+  }
   // Lazy load triggers
   if (name === 'assessment' && !_evSettingsState.assessmentLoaded) {
     _evSettingsState.assessmentLoaded = true;
@@ -1197,6 +1226,91 @@ function _evSelectSettingsSubTab(name) {
   if (name === 'simone' && !_evSettingsState.simoneLoaded) {
     _evSettingsState.simoneLoaded = true;
     try { loadSimoneConfig(); } catch (e) { console.error('[settings/simone]', e); }
+  }
+}
+
+// ── Signup-deadline (auto-close hours-before) ────────────────────────────────
+// Lazy-loaded bij eerste opening van de Signup-deadline sub-tab. Houdt
+// status-element gescheiden van toast zodat de operator naast het input-veld
+// direct feedback ziet.
+function _ensureAutoCloseWired() {
+  if (_ensureAutoCloseWired._wired) return;
+  _ensureAutoCloseWired._wired = true;
+  const btn = document.getElementById('autoCloseSaveBtn');
+  if (btn) btn.addEventListener('click', _saveAutoCloseSetting);
+}
+async function _loadAutoCloseSetting() {
+  const input  = document.getElementById('autoCloseHoursInput');
+  const status = document.getElementById('autoCloseStatus');
+  const meta   = document.getElementById('autoCloseMeta');
+  if (!input) return;
+  if (status) { status.textContent = 'Laden…'; status.style.color = ''; }
+  try {
+    const r = await window.AgentShared.apiFetch('/api/events-settings-auto-close-get');
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(j.error || ('HTTP ' + r.status));
+    const hours = Number.isFinite(Number(j.hours)) ? Number(j.hours) : 24;
+    input.value = String(hours);
+    if (status) status.textContent = '';
+    if (meta) {
+      const parts = [];
+      if (j.updated_at) {
+        try {
+          const d = new Date(j.updated_at);
+          if (!Number.isNaN(d.getTime())) {
+            parts.push('Laatst opgeslagen: ' + d.toLocaleString('nl-NL', { day:'2-digit', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit' }));
+          }
+        } catch {}
+      }
+      meta.textContent = parts.join(' · ');
+    }
+  } catch (e) {
+    console.error('[settings/signup-deadline] load', e);
+    if (status) {
+      status.textContent = 'Laden mislukt: ' + (e?.message || 'onbekend');
+      status.style.color = '#b91c1c';
+    }
+  }
+}
+async function _saveAutoCloseSetting() {
+  const input  = document.getElementById('autoCloseHoursInput');
+  const btn    = document.getElementById('autoCloseSaveBtn');
+  const status = document.getElementById('autoCloseStatus');
+  const meta   = document.getElementById('autoCloseMeta');
+  if (!input) return;
+  const hoursNum = parseInt(input.value, 10);
+  if (!Number.isFinite(hoursNum) || hoursNum < 0 || hoursNum > 720) {
+    if (status) { status.textContent = 'Vul een geheel getal tussen 0 en 720 in.'; status.style.color = '#b91c1c'; }
+    return;
+  }
+  if (btn) btn.disabled = true;
+  if (status) { status.textContent = 'Opslaan…'; status.style.color = ''; }
+  try {
+    const r = await window.AgentShared.apiFetch('/api/events-settings-auto-close-update', {
+      method : 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body   : JSON.stringify({ hours: hoursNum }),
+    });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(j.error || ('HTTP ' + r.status));
+    if (status) {
+      status.textContent = 'Opgeslagen ✓';
+      status.style.color = '#15803d';
+      setTimeout(() => { if (status.textContent === 'Opgeslagen ✓') status.textContent = ''; }, 2400);
+    }
+    if (meta && j.updated_at) {
+      try {
+        const d = new Date(j.updated_at);
+        if (!Number.isNaN(d.getTime())) {
+          meta.textContent = 'Laatst opgeslagen: ' + d.toLocaleString('nl-NL', { day:'2-digit', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit' });
+        }
+      } catch {}
+    }
+  } catch (e) {
+    console.error('[settings/signup-deadline] save', e);
+    if (status) { status.textContent = 'Opslaan mislukt: ' + (e?.message || 'onbekend'); status.style.color = '#b91c1c'; }
+  } finally {
+    if (btn) btn.disabled = false;
   }
 }
 
