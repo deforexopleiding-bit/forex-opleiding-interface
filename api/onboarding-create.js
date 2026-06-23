@@ -24,6 +24,7 @@
 import crypto from 'node:crypto';
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
+import { provisionOnboardingStudent } from './_lib/onboarding-provision.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -112,10 +113,23 @@ export default async function handler(req, res) {
       .single();
     if (insErr) throw new Error('onboarding insert: ' + insErr.message);
 
+    // Fase 2 — Bubble-provisioning. Fail-soft: een Bubble-fout mag de
+    // aanmelding NIET 500'en. De onboarding + token zijn al gemaakt; de
+    // provisioning-status komt mee in de response zodat de admin-UI
+    // direct kan tonen of er een retry nodig is.
+    let provision = { ok: false, error: 'unknown' };
+    try {
+      provision = await provisionOnboardingStudent(inserted.id);
+    } catch (e) {
+      console.error('[onboarding-create] provision threw:', e?.message || e);
+      provision = { ok: false, error: e?.message || 'provision-threw' };
+    }
+
     return res.status(200).json({
       ok         : true,
       onboarding : inserted,
       link       : '/modules/onboarding.html?t=' + encodeURIComponent(inserted.token),
+      provision  : provision,
     });
   } catch (e) {
     console.error('[onboarding-create]', e?.message || e);
