@@ -321,6 +321,7 @@
                 <div id="bubbleProbeActions" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px">
                   <button class="btn btn-sm" type="button" id="bubbleProbeUserBtn"><i class="ti ti-user"></i> Haal User-velden op</button>
                   <button class="btn btn-sm" type="button" id="bubbleProbeSessionBtn"><i class="ti ti-clock"></i> Haal Session-velden op</button>
+                  <button class="btn btn-sm" type="button" id="bubbleProbeOptionsBtn"><i class="ti ti-tags"></i> Haal option-waarden op</button>
                   <button class="btn btn-sm" type="button" id="bubbleProbeCopyBtn" disabled style="margin-left:auto"><i class="ti ti-copy"></i> Kopieer</button>
                 </div>
                 <div id="bubbleProbeStatus" style="font-size:12px;color:var(--text-dim);margin-bottom:8px"></div>
@@ -1592,32 +1593,39 @@ function wireBubbleProbe() {
   _bubbleProbeWired = true;
   const userBtn   = document.getElementById('bubbleProbeUserBtn');
   const sesBtn    = document.getElementById('bubbleProbeSessionBtn');
+  const optBtn    = document.getElementById('bubbleProbeOptionsBtn');
   const copyBtn   = document.getElementById('bubbleProbeCopyBtn');
   if (userBtn) userBtn.addEventListener('click', () => _runBubbleProbe('user'));
   if (sesBtn)  sesBtn.addEventListener('click',  () => _runBubbleProbe('one-on-one-session'));
+  if (optBtn)  optBtn.addEventListener('click',  () => _runBubbleProbe('user', { options: true }));
   if (copyBtn) copyBtn.addEventListener('click', _copyBubbleProbe);
 }
 
-async function _runBubbleProbe(probeType) {
+async function _runBubbleProbe(probeType, opts) {
+  const optionsMode = !!(opts && opts.options);
   const status = document.getElementById('bubbleProbeStatus');
   const out    = document.getElementById('bubbleProbeOut');
   const copy   = document.getElementById('bubbleProbeCopyBtn');
   const userBt = document.getElementById('bubbleProbeUserBtn');
   const sesBt  = document.getElementById('bubbleProbeSessionBtn');
+  const optBt  = document.getElementById('bubbleProbeOptionsBtn');
   if (!status || !out) return;
   // Disable knoppen tijdens fetch zodat dubbele klik niet meerdere round-trips
   // veroorzaakt.
   if (userBt) userBt.disabled = true;
   if (sesBt)  sesBt.disabled  = true;
+  if (optBt)  optBt.disabled  = true;
   if (copy)   copy.disabled   = true;
   status.style.color = 'var(--text-dim)';
-  status.textContent = 'Ophalen van Bubble-schema voor "' + probeType + '"…';
+  status.textContent = optionsMode
+    ? 'Ophalen van option-waarden voor "' + probeType + '"…'
+    : 'Ophalen van Bubble-schema voor "' + probeType + '"…';
   out.style.display = 'none';
   out.textContent = '';
   try {
-    const r = await window.AgentShared.apiFetch(
-      '/api/bubble-schema-probe?type=' + encodeURIComponent(probeType)
-    );
+    const url = '/api/bubble-schema-probe?type=' + encodeURIComponent(probeType) +
+      (optionsMode ? '&options=1' : '');
+    const r = await window.AgentShared.apiFetch(url);
     let body = null;
     try { body = await r.json(); } catch {}
     if (r.status === 401) {
@@ -1646,10 +1654,24 @@ async function _runBubbleProbe(probeType) {
     out.textContent = formatted;
     out.style.display = '';
     status.style.color = 'var(--text-dim)';
-    const count = Number(body?.count) || 0;
-    const keyCount = Array.isArray(body?.field_keys) ? body.field_keys.length : 0;
-    status.textContent = '✓ Schema opgehaald — ' + count + ' record' + (count === 1 ? '' : 's') +
-      ', ' + keyCount + ' veld' + (keyCount === 1 ? '' : 'en') + ' gevonden.';
+    if (optionsMode) {
+      const sampled = Number(body?.sampled) || 0;
+      const vals = body?.option_values || {};
+      const fldCount = Object.keys(vals).length;
+      let totalDistinct = 0;
+      for (const k of Object.keys(vals)) {
+        if (Array.isArray(vals[k])) totalDistinct += vals[k].length;
+      }
+      status.textContent = '✓ Option-waarden opgehaald — ' + sampled + ' record' +
+        (sampled === 1 ? '' : 's') + ' gesampled, ' + fldCount + ' veld' +
+        (fldCount === 1 ? '' : 'en') + ', ' + totalDistinct + ' distinct waarde' +
+        (totalDistinct === 1 ? '' : 'n') + ' totaal.';
+    } else {
+      const count = Number(body?.count) || 0;
+      const keyCount = Array.isArray(body?.field_keys) ? body.field_keys.length : 0;
+      status.textContent = '✓ Schema opgehaald — ' + count + ' record' + (count === 1 ? '' : 's') +
+        ', ' + keyCount + ' veld' + (keyCount === 1 ? '' : 'en') + ' gevonden.';
+    }
     if (copy) copy.disabled = false;
   } catch (e) {
     console.error('[bubble-schema-probe]', e);
@@ -1658,6 +1680,7 @@ async function _runBubbleProbe(probeType) {
   } finally {
     if (userBt) userBt.disabled = false;
     if (sesBt)  sesBt.disabled  = false;
+    if (optBt)  optBt.disabled  = false;
   }
 }
 
