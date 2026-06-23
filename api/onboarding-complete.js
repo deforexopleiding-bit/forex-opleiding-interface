@@ -22,6 +22,7 @@ import { supabaseAdmin } from './supabase.js';
 import {
   DEFAULT_WIZARD_STRUCTURE,
   validateRequired,
+  resolveFlowType,
 } from './_lib/onboarding-wizard-default.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -43,7 +44,7 @@ export default async function handler(req, res) {
   try {
     const { data: ob, error: obErr } = await supabaseAdmin
       .from('onboardings')
-      .select('id, status, answers, completed_at')
+      .select('id, traject_id, status, answers, completed_at')
       .eq('token', token)
       .maybeSingle();
     if (obErr) {
@@ -62,16 +63,34 @@ export default async function handler(req, res) {
 
     const answers = (ob.answers && typeof ob.answers === 'object') ? ob.answers : {};
 
-    // Valideer tegen de gepubliceerde structuur (fail-soft → DEFAULT).
-    // We willen voorkomen dat een rij die volledig is ingevuld tegen een
-    // oudere/nieuwere structuur faalt; we gebruiken altijd de versie die
-    // de student op dit moment in de wizard ziet.
+    // Flow-type bepalen (identiek aan onboarding-wizard-get).
+    let flowType = '1op1';
+    if (ob.traject_id) {
+      try {
+        const { data: traj, error: trajErr } = await supabaseAdmin
+          .from('onboarding_trajecten')
+          .select('type')
+          .eq('id', ob.traject_id)
+          .maybeSingle();
+        if (trajErr) {
+          console.warn('[onboarding-complete] traject lookup:', trajErr.message);
+        } else {
+          flowType = resolveFlowType(traj?.type);
+        }
+      } catch (e) {
+        console.warn('[onboarding-complete] traject exception:', e?.message || e);
+      }
+    }
+
+    // Valideer tegen de gepubliceerde structuur van DEZE flow_type
+    // (fail-soft → DEFAULT). Zelfde structuur die de student ziet in de
+    // wizard, zodat een wijziging op '1op1' geen 'membership' breekt.
     let publishedStructure = null;
     try {
       const { data: wiz, error: wizErr } = await supabaseAdmin
         .from('onboarding_wizard')
         .select('published_structure')
-        .eq('id', 1)
+        .eq('flow_type', flowType)
         .maybeSingle();
       if (wizErr) {
         console.warn('[onboarding-complete] wizard config fetch:', wizErr.message);

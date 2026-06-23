@@ -22,6 +22,18 @@
 // missing[] bevat de answer-keys die ontbreken — voor consent op
 // file_download is dat `consent_key`, voor overige veld-blokken `key`.
 
+// Flow-type whitelist + resolver. Sinds de wizard per flow-type een eigen
+// structuur heeft (tabel onboarding_wizard.flow_type uniek), bepaalt het
+// traject z'n type welke rij we lezen/schrijven. Onbekende input valt
+// terug op '1op1' — dat is het oudste/canonieke pad en voorkomt dat een
+// student een 500 ziet door een typo in traject.type.
+export const WIZARD_FLOW_TYPES = ['1op1', 'membership'];
+export function resolveFlowType(trajectType) {
+  const raw = typeof trajectType === 'string' ? trajectType.trim() : '';
+  if (WIZARD_FLOW_TYPES.includes(raw)) return raw;
+  return '1op1';
+}
+
 export const DEFAULT_WIZARD_STRUCTURE = {
   version: 1,
   pages: [

@@ -23,7 +23,10 @@
 //   }
 
 import { supabaseAdmin } from './supabase.js';
-import { DEFAULT_WIZARD_STRUCTURE } from './_lib/onboarding-wizard-default.js';
+import {
+  DEFAULT_WIZARD_STRUCTURE,
+  resolveFlowType,
+} from './_lib/onboarding-wizard-default.js';
 
 const UUID_RE        = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const STORAGE_BUCKET = 'onboarding-files';
@@ -93,7 +96,7 @@ export default async function handler(req, res) {
   try {
     const { data: ob, error: obErr } = await supabaseAdmin
       .from('onboardings')
-      .select('id, customer_id, status, current_step, answers')
+      .select('id, customer_id, traject_id, status, current_step, answers')
       .eq('token', token)
       .maybeSingle();
     if (obErr) {
@@ -120,14 +123,36 @@ export default async function handler(req, res) {
       }
     }
 
-    // Wizard-structuur: gepubliceerde versie wint, met fallback op default.
-    // Lees fail-soft — bij DB-glitch valt 'ie terug op de hardcoded default.
+    // Flow-type bepalen: traject_id → onboarding_trajecten.type → resolver.
+    // Fail-soft: een DB-glitch op de traject-lookup mag de wizard niet 500'en.
+    // Bij onbekend/leeg type valt resolveFlowType terug op '1op1'.
+    let flowType = '1op1';
+    if (ob.traject_id) {
+      try {
+        const { data: traj, error: trajErr } = await supabaseAdmin
+          .from('onboarding_trajecten')
+          .select('type')
+          .eq('id', ob.traject_id)
+          .maybeSingle();
+        if (trajErr) {
+          console.warn('[onboarding-wizard-get] traject lookup:', trajErr.message);
+        } else {
+          flowType = resolveFlowType(traj?.type);
+        }
+      } catch (e) {
+        console.warn('[onboarding-wizard-get] traject exception:', e?.message || e);
+      }
+    }
+
+    // Wizard-structuur: gepubliceerde versie van DEZE flow_type wint, met
+    // fallback op default. Lees fail-soft — bij DB-glitch valt 'ie terug op
+    // de hardcoded default.
     let publishedPages = null;
     try {
       const { data: wiz, error: wizErr } = await supabaseAdmin
         .from('onboarding_wizard')
         .select('published_structure')
-        .eq('id', 1)
+        .eq('flow_type', flowType)
         .maybeSingle();
       if (wizErr) {
         console.warn('[onboarding-wizard-get] wizard config fetch:', wizErr.message);
@@ -149,6 +174,7 @@ export default async function handler(req, res) {
       current_step        : (ob.current_step == null) ? null : Number(ob.current_step),
       answers             : (ob.answers && typeof ob.answers === 'object') ? ob.answers : {},
       pages               : pagesOut,
+      flow_type           : flowType,
     });
   } catch (e) {
     console.error('[onboarding-wizard-get] fatal:', e?.message || e);
