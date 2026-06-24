@@ -35,12 +35,19 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: 'GET only' });
   }
 
-  // Auth-gate — zelfde permission als de link-endpoint (finance.inbox.send).
+  // Auth-gate — zelfde permission als de link-endpoint.
+  // B1 — additieve OR-chain (finance/events/onboarding-send). Search hoort
+  // bij de link-flow; alle 3 modules moeten een conv aan een klant kunnen
+  // koppelen vanuit hun eigen inbox-UI.
   const supabase = createUserClient(req);
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return res.status(401).json({ error: 'Niet geauthenticeerd' });
-  if (!(await requirePermission(req, 'finance.inbox.send'))) {
-    return res.status(403).json({ error: 'Geen rechten (finance.inbox.send)' });
+  const hasFinanceSend    = await requirePermission(req, 'finance.inbox.send');
+  const hasSimoneUse      = hasFinanceSend ? true : await requirePermission(req, 'events.simone.use');
+  const hasOnboardingSend = (hasFinanceSend || hasSimoneUse)
+    ? true : await requirePermission(req, 'onboarding.inbox.send');
+  if (!hasFinanceSend && !hasSimoneUse && !hasOnboardingSend) {
+    return res.status(403).json({ error: 'Geen rechten (finance.inbox.send, events.simone.use of onboarding.inbox.send)' });
   }
 
   const q = String(req.query.q || '').trim();
