@@ -14,6 +14,11 @@
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     html, body { height: 100%; }
     body { font-family: 'Inter', system-ui, sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; -webkit-font-smoothing: antialiased; }
+    /* Brand-vars op :root zodat elementen BUITEN .app (zoals de detail-modal,
+       die als sibling van .app rendert) ook de juiste kleuren krijgen.
+       .app blijft z'n eigen scope hebben — geen wijziging aan bestaande
+       cascading. */
+    :root { --brand-deep:#0a2f63; --brand-azure:#1e6cd6; }
     .app { margin-left: 220px; padding: 24px 28px 60px; max-width: 1400px; --brand-deep:#0a2f63; --brand-azure:#1e6cd6; }
 
     .page-header { display:flex; align-items:baseline; justify-content:space-between; margin-bottom:14px; gap:12px; flex-wrap:wrap; }
@@ -143,8 +148,11 @@
     .ob-act:hover { background:var(--bg-elev); }
     .ob-act.danger { color:#b91c1c; border-color:#fecaca; }
     .ob-act.danger:hover { background:rgba(220,38,38,0.06); }
-    .ob-act.primary { background:var(--brand-deep); color:#fff; border-color:var(--brand-deep); }
-    .ob-act.primary:hover { background:var(--brand-azure); border-color:var(--brand-azure); }
+    /* Fallback-waarden zodat de primary-knop NOOIT onzichtbaar is, zelfs als
+       een ancestor de --brand-* vars per ongeluk niet zet (bv. een modal die
+       buiten .app gerenderd wordt en :root nog niet bereikt). */
+    .ob-act.primary { background:var(--brand-deep,#0a2f63); color:#fff; border-color:var(--brand-deep,#0a2f63); }
+    .ob-act.primary:hover { background:var(--brand-azure,#1e6cd6); border-color:var(--brand-azure,#1e6cd6); }
 
     /* Inline mentor-edit cell */
     .ob-mentor-cell { display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
