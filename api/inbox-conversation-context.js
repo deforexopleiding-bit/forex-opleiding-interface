@@ -121,11 +121,17 @@ export default async function handler(req, res) {
   }
 
   // Auth-gate — zelfde permission als de andere read-side inbox-endpoints.
+  // B1 — additieve OR-chain (finance/events/onboarding). Short-circuit
+  // preserveert performance voor finance- en events-callers.
   const supabase = createUserClient(req);
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return res.status(401).json({ error: 'Niet geauthenticeerd' });
-  if (!(await requirePermission(req, 'finance.inbox.view'))) {
-    return res.status(403).json({ error: 'Geen rechten (finance.inbox.view)' });
+  const hasFinanceView    = await requirePermission(req, 'finance.inbox.view');
+  const hasEventsView     = hasFinanceView ? true : await requirePermission(req, 'events.inbox.view');
+  const hasOnboardingView = (hasFinanceView || hasEventsView)
+    ? true : await requirePermission(req, 'onboarding.inbox.view');
+  if (!hasFinanceView && !hasEventsView && !hasOnboardingView) {
+    return res.status(403).json({ error: 'Geen rechten (finance.inbox.view, events.inbox.view of onboarding.inbox.view)' });
   }
 
   const q = req.query || {};

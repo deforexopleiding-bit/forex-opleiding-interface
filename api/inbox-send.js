@@ -43,15 +43,17 @@ export default async function handler(req, res) {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return res.status(401).json({ error: 'Niet geauthenticeerd' });
 
-  // Coarse-grained upfront gate: tenminste één van finance.inbox.send of
-  // events.simone.use moet granted zijn. De definitieve module-check gebeurt
-  // ná conv-load (autoritatief op conv.phone_number_id → whatsapp_module_config).
-  // Finance-callers met finance.inbox.send blijven byte-identiek: hun upfront-
-  // 403 bestaat nog, alleen het foutbericht is licht uitgebreid.
-  const hasFinanceSend = await requirePermission(req, 'finance.inbox.send');
-  const hasSimoneUse   = hasFinanceSend ? true : await requirePermission(req, 'events.simone.use');
-  if (!hasFinanceSend && !hasSimoneUse) {
-    return res.status(403).json({ error: 'Geen rechten (finance.inbox.send of events.simone.use)' });
+  // Coarse-grained upfront gate: tenminste één van finance.inbox.send,
+  // events.simone.use of onboarding.inbox.send moet granted zijn. De
+  // definitieve module-check gebeurt ná conv-load (autoritatief op
+  // conv.phone_number_id → whatsapp_module_config). Finance-callers met
+  // finance.inbox.send blijven byte-identiek dankzij short-circuit.
+  const hasFinanceSend    = await requirePermission(req, 'finance.inbox.send');
+  const hasSimoneUse      = hasFinanceSend ? true : await requirePermission(req, 'events.simone.use');
+  const hasOnboardingSend = (hasFinanceSend || hasSimoneUse)
+    ? true : await requirePermission(req, 'onboarding.inbox.send');
+  if (!hasFinanceSend && !hasSimoneUse && !hasOnboardingSend) {
+    return res.status(403).json({ error: 'Geen rechten (finance.inbox.send, events.simone.use of onboarding.inbox.send)' });
   }
 
   const body = req.body || {};
@@ -144,7 +146,10 @@ export default async function handler(req, res) {
     if (convModule === 'events' && !hasSimoneUse) {
       return res.status(403).json({ error: 'Geen rechten (events.simone.use voor events-conv)' });
     }
-    if (convModule !== 'events' && !hasFinanceSend) {
+    if (convModule === 'onboarding' && !hasOnboardingSend) {
+      return res.status(403).json({ error: 'Geen rechten (onboarding.inbox.send voor onboarding-conv)' });
+    }
+    if (convModule !== 'events' && convModule !== 'onboarding' && !hasFinanceSend) {
       return res.status(403).json({ error: 'Geen rechten (finance.inbox.send voor finance-conv)' });
     }
 

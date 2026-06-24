@@ -36,8 +36,14 @@ export default async function handler(req, res) {
   const supabase = createUserClient(req);
   const { data: { user }, error: userErr } = await supabase.auth.getUser();
   if (userErr || !user) return res.status(401).json({ error: 'Niet geauthenticeerd' });
-  if (!(await requirePermission(req, 'finance.inbox.send'))) {
-    return res.status(403).json({ error: 'Geen rechten (finance.inbox.send)' });
+  // B1 — additieve OR-chain (finance/events/onboarding-send) parallel met
+  // inbox-template-list.js.
+  const hasFinanceSend    = await requirePermission(req, 'finance.inbox.send');
+  const hasSimoneUse      = hasFinanceSend ? true : await requirePermission(req, 'events.simone.use');
+  const hasOnboardingSend = (hasFinanceSend || hasSimoneUse)
+    ? true : await requirePermission(req, 'onboarding.inbox.send');
+  if (!hasFinanceSend && !hasSimoneUse && !hasOnboardingSend) {
+    return res.status(403).json({ error: 'Geen rechten (finance.inbox.send, events.simone.use of onboarding.inbox.send)' });
   }
 
   // Query-param parsing

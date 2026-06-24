@@ -64,10 +64,13 @@ export default async function handler(req, res) {
   const supabase = createUserClient(req);
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return res.status(401).json({ error: 'Niet geauthenticeerd' });
-  const hasFinanceSend = await requirePermission(req, 'finance.inbox.send');
-  const hasSimoneUse   = hasFinanceSend ? true : await requirePermission(req, 'events.simone.use');
-  if (!hasFinanceSend && !hasSimoneUse) {
-    return res.status(403).json({ error: 'Geen rechten (finance.inbox.send of events.simone.use)' });
+  // B1 — onboarding.inbox.send als 3e additieve OR.
+  const hasFinanceSend    = await requirePermission(req, 'finance.inbox.send');
+  const hasSimoneUse      = hasFinanceSend ? true : await requirePermission(req, 'events.simone.use');
+  const hasOnboardingSend = (hasFinanceSend || hasSimoneUse)
+    ? true : await requirePermission(req, 'onboarding.inbox.send');
+  if (!hasFinanceSend && !hasSimoneUse && !hasOnboardingSend) {
+    return res.status(403).json({ error: 'Geen rechten (finance.inbox.send, events.simone.use of onboarding.inbox.send)' });
   }
 
   const body = req.body || {};

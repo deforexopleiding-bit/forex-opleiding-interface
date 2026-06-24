@@ -1,15 +1,18 @@
 // api/inbox-conversations-list.js
 // GET → lijst whatsapp_conversations met klant-koppeling en 24h-window flag.
 //
-// Module-scoping (Fase 1 events-inbox): parameter ?module=finance|events.
+// Module-scoping (Fase 1 events-inbox + B1 onboarding-inbox):
+// parameter ?module=finance|events|onboarding.
 //   - Default 'finance' (backward-compat: bestaande callers blijven exact
 //     hetzelfde gedrag krijgen — query, pnId-lookup en permissie ongewijzigd).
-//   - module='events': zelfde query maar gefilterd op de events-phone_number_id
-//     uit whatsapp_module_config WHERE module='events' AND is_active=true.
+//   - module='events':     gefilterd op events-phone_number_id uit
+//                          whatsapp_module_config (Fase 1).
+//   - module='onboarding': idem onboarding-phone_number_id (B1).
 //
 // Permission per module (parallelle takken):
-//   module='finance' -> finance.inbox.view (zoals voor)
-//   module='events'  -> events.inbox.view  (Fase 1 nieuw)
+//   module='finance'    -> finance.inbox.view (zoals voor)
+//   module='events'     -> events.inbox.view  (Fase 1)
+//   module='onboarding' -> onboarding.inbox.view (B1)
 //
 // Andere modules worden geweigerd (400) zodat we niet per ongeluk een
 // nieuwe agent introduceren zonder permission-key te registreren.
@@ -30,8 +33,9 @@ import { requirePermission } from './_lib/requirePermission.js';
 const TWENTY_FOUR_HOURS_MS = 24 * 60 * 60 * 1000;
 
 const MODULE_PERMISSIONS = {
-  finance: 'finance.inbox.view',
-  events : 'events.inbox.view',
+  finance   : 'finance.inbox.view',
+  events    : 'events.inbox.view',
+  onboarding: 'onboarding.inbox.view',
 };
 
 export default async function handler(req, res) {

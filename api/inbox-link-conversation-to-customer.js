@@ -86,10 +86,13 @@ export default async function handler(req, res) {
   // FIX 3 — additief: events.simone.use ook accepteren (parallel met
   // inbox-send.js / inbox-send-template.js). Finance-callers met
   // finance.inbox.send blijven byte-identiek werken.
-  const hasFinanceSend = await requirePermission(req, 'finance.inbox.send');
-  const hasSimoneUse   = hasFinanceSend ? true : await requirePermission(req, 'events.simone.use');
-  if (!hasFinanceSend && !hasSimoneUse) {
-    return res.status(403).json({ error: 'Geen rechten (finance.inbox.send of events.simone.use)' });
+  // B1 — onboarding.inbox.send als 3e additieve OR.
+  const hasFinanceSend    = await requirePermission(req, 'finance.inbox.send');
+  const hasSimoneUse      = hasFinanceSend ? true : await requirePermission(req, 'events.simone.use');
+  const hasOnboardingSend = (hasFinanceSend || hasSimoneUse)
+    ? true : await requirePermission(req, 'onboarding.inbox.send');
+  if (!hasFinanceSend && !hasSimoneUse && !hasOnboardingSend) {
+    return res.status(403).json({ error: 'Geen rechten (finance.inbox.send, events.simone.use of onboarding.inbox.send)' });
   }
 
   // Body parsing

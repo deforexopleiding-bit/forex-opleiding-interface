@@ -36,10 +36,14 @@ export default async function handler(req, res) {
   if (!user) return res.status(401).json({ error: 'Niet geauthenticeerd' });
   // FIX 3 — additief: events.inbox.view ook accepteren. Finance-callers met
   // finance.inbox.view blijven byte-identiek werken (short-circuit).
-  const hasFinanceView = await requirePermission(req, 'finance.inbox.view');
-  const hasEventsView  = hasFinanceView ? true : await requirePermission(req, 'events.inbox.view');
-  if (!hasFinanceView && !hasEventsView) {
-    return res.status(403).json({ error: 'Geen rechten (finance.inbox.view of events.inbox.view)' });
+  // B1 — onboarding.inbox.view als 3e additieve OR; short-circuit preserveert
+  // performance voor finance/events-callers.
+  const hasFinanceView    = await requirePermission(req, 'finance.inbox.view');
+  const hasEventsView     = hasFinanceView ? true : await requirePermission(req, 'events.inbox.view');
+  const hasOnboardingView = (hasFinanceView || hasEventsView)
+    ? true : await requirePermission(req, 'onboarding.inbox.view');
+  if (!hasFinanceView && !hasEventsView && !hasOnboardingView) {
+    return res.status(403).json({ error: 'Geen rechten (finance.inbox.view, events.inbox.view of onboarding.inbox.view)' });
   }
 
   const q = req.query || {};
