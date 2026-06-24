@@ -156,16 +156,28 @@ export async function provisionOnboardingStudent(onboardingId) {
   // we hebben een fallback voor het geval de workflow geen id retourneert
   // (oudere Bubble-versies stoppen na 'Sign up the user' en laten het
   // returnen aan een latere stap die per ongeluk ontbreekt).
+  // Diagnostische capture: bewaar de ruwe workflow-respons + (eventueel)
+  // de gevangen error-shape. Wordt alleen mee-geserialiseerd in de
+  // bubble_provision_error wanneer ZOWEL workflow ALS e-mail-fallback geen
+  // user-id opleverden, zodat we Bubble's response kunnen debuggen zonder
+  // permanente noise. create_student_basic geeft alleen status + user_id
+  // terug (geen secrets/tokens), dus dit is veilig om kort te dumpen.
   let bubbleUserId = null;
+  let wfRaw    = null;       // ruwe workflow-respons indien fetch slaagde
+  let wfError  = null;       // { code, message } indien workflow threw
   try {
-    const wf = await bubbleWorkflow('create_student_basic', {
+    wfRaw = await bubbleWorkflow('create_student_basic', {
       email,
       first_name: firstName,
       last_name : lastName,
     });
-    bubbleUserId = extractUserIdFromWf(wf);
+    bubbleUserId = extractUserIdFromWf(wfRaw);
   } catch (e) {
-    const msg = 'workflow create_student_basic: ' + (e?.code || '') + ' ' + (e?.message || e);
+    wfError = {
+      code:    (e && e.code)    ? String(e.code)    : null,
+      message: (e && e.message) ? String(e.message) : String(e),
+    };
+    const msg = 'workflow create_student_basic: ' + (wfError.code || '') + ' ' + (wfError.message || '');
     console.error('[onboarding-provision] WF fail:', msg);
     // Workflow zelf faalde — accountcreatie onzeker. Probeer fallback-lookup;
     // mogelijk bestaat de user al en heeft de workflow alleen op een latere
@@ -189,7 +201,17 @@ export async function provisionOnboardingStudent(onboardingId) {
   }
 
   if (!bubbleUserId) {
-    const msg = 'Bubble-user kon niet worden aangemaakt of gevonden (' + email + ')';
+    // Voeg een veilige, beknopte JSON-dump van de workflow-respons (of de
+    // gevangen error-shape) toe zodat we Bubble's gedrag kunnen debuggen
+    // zonder een nieuwe code-deploy. Cap op 600 chars om DB-bloat te
+    // voorkomen.
+    let diag = '';
+    if (wfError) {
+      try { diag = ' | wf_error=' + JSON.stringify(wfError).slice(0, 600); } catch {}
+    } else if (wfRaw !== null && wfRaw !== undefined) {
+      try { diag = ' | wf_raw=' + JSON.stringify(wfRaw).slice(0, 600); } catch {}
+    }
+    const msg = 'Bubble-user kon niet worden aangemaakt of gevonden (' + email + ')' + diag;
     await writeProvisionError(onboardingId, msg);
     return { ok: false, error: msg };
   }
