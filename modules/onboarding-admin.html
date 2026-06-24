@@ -744,6 +744,15 @@
                  <span id="bubbleRetryStatus" style="margin-left:8px;font-size:12.5px;color:var(--text-dim)"></span>
                </dd>`
             : ''}
+          <dt>WhatsApp-uitnodiging</dt><dd>
+            ${o.invite_sent_at
+              ? '<span style="background:rgba(34,197,94,0.14);color:#15803d;padding:2px 9px;border-radius:10px;font-size:11.5px;font-weight:600">✓ Verstuurd</span> <span style="color:var(--text-faint);font-size:12px">· ' + esc(fmtDateTimeNL(o.invite_sent_at)) + '</span>'
+              : '<span style="background:rgba(100,116,139,0.18);color:#475569;padding:2px 9px;border-radius:10px;font-size:11.5px;font-weight:600">— Nog niet verstuurd</span>'}
+            <button type="button" class="ob-act primary" id="oiInviteSendBtn" data-id="${esc(o.id)}" data-already-sent="${o.invite_sent_at ? '1' : '0'}" style="margin-left:8px;background:#d97706;border-color:#d97706">
+              <i class="ti ti-send"></i> ${o.invite_sent_at ? 'Opnieuw versturen' : 'Stuur WhatsApp-uitnodiging'}
+            </button>
+            <span id="oiInviteSendStatus" style="margin-left:8px;font-size:12.5px;color:var(--text-dim)"></span>
+          </dd>
           ${link ? `<dt>Persoonlijke link</dt><dd style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;word-break:break-all">${esc(link)}</dd>` : ''}
         </dl>
         <h3>Vragenlijst-antwoorden</h3>
@@ -755,6 +764,15 @@
       if (retryBtn) {
         retryBtn.addEventListener('click', () => {
           doProvisionRetry(retryBtn.dataset.id || '', retryBtn);
+        });
+      }
+      // Invite-knop wiren (altijd aanwezig; tekst+force-flag verschillen
+      // wanneer invite_sent_at gevuld is).
+      const inviteBtn = document.getElementById('oiInviteSendBtn');
+      if (inviteBtn) {
+        inviteBtn.addEventListener('click', () => {
+          const alreadySent = inviteBtn.dataset.alreadySent === '1';
+          doSendInvite(inviteBtn.dataset.id || '', inviteBtn, { force: alreadySent });
         });
       }
     } catch (e) {
@@ -821,6 +839,74 @@
     } catch (e) {
       console.error('[onboarding-admin] retry:', e?.message || e);
       if (status) { status.style.color = '#b91c1c'; status.textContent = '✗ Onverwachte fout: ' + (e?.message || e); }
+      if (btn) btn.disabled = false;
+    }
+  }
+
+  // ── Onboarding-invite (WhatsApp) ─────────────────────────────────────
+  // Roept /api/onboarding-invite-send aan voor één onboarding. Endpoint is
+  // fail-soft: 200 met { sent, reason?, error?, ... }. Bij { force:true }
+  // overschrijft de helper invite_sent_at (gebruikt voor 'Opnieuw versturen').
+  // We zetten de knop op disabled tijdens de call + tonen inline status;
+  // bij succes refreshen we de lijst + heropenen we de detail-modal.
+  async function doSendInvite(onboardingId, btn, opts) {
+    if (!onboardingId) return;
+    const force = !!(opts && opts.force);
+    const status = document.getElementById('oiInviteSendStatus');
+    if (force && !confirm('Deze klant heeft al een uitnodiging gehad. Toch opnieuw versturen?')) return;
+    if (btn) btn.disabled = true;
+    if (status) {
+      status.style.color = 'var(--text-dim)';
+      status.textContent = 'Bezig met versturen…';
+    }
+    try {
+      const r = await window.AgentShared.apiFetch('/api/onboarding-invite-send', {
+        method  : 'POST',
+        headers : { 'Content-Type': 'application/json' },
+        body    : JSON.stringify({ onboarding_id: onboardingId, force }),
+      });
+      let d = null; try { d = await r.json(); } catch {}
+      if (r.status === 401) {
+        if (status) { status.style.color = '#b91c1c'; status.textContent = '✗ Niet (meer) ingelogd.'; }
+        return;
+      }
+      if (r.status === 403) {
+        if (status) { status.style.color = '#b91c1c'; status.textContent = '✗ Geen rechten (onboarding.inbox.send).'; }
+        return;
+      }
+      if (!r.ok) {
+        if (status) { status.style.color = '#b91c1c'; status.textContent = '✗ Mislukt: ' + (d?.error || ('HTTP ' + r.status)); }
+        return;
+      }
+      // 200 — sent vs reason.
+      if (d && d.sent === true) {
+        if (status) { status.style.color = '#15803d'; status.textContent = '✓ Verstuurd' + (d.meta_wamid ? ' (wamid ' + String(d.meta_wamid).slice(0, 12) + '…)' : ''); }
+        toast(force ? 'WhatsApp-uitnodiging opnieuw verstuurd' : 'WhatsApp-uitnodiging verstuurd', 'success');
+        loadList();
+        setTimeout(() => { openDetail(onboardingId); }, 350);
+        return;
+      }
+      // sent=false → toon reason+error.
+      const reason = d?.reason || 'onbekend';
+      const errMsg = d?.error ? (' — ' + d.error) : '';
+      const label = ({
+        'geen-template-config'   : 'Geen template geconfigureerd (joost_config.knowledge_base.invite.template_name)',
+        'geen-module-config'     : 'Onboarding-WhatsApp-lijn niet actief in whatsapp_module_config',
+        'geen-telefoon'          : 'Klant heeft geen telefoonnummer',
+        'already-sent'           : 'Al verstuurd (gebruik Opnieuw versturen)',
+        'template-niet-gevonden' : 'Template-naam niet gevonden in whatsapp_meta_templates',
+        'template-niet-approved' : 'Template-status is niet APPROVED',
+        'archived'               : 'Onboarding is gearchiveerd',
+        'no-token'               : 'Geen token op deze onboarding',
+        'no-customer'            : 'Geen klant aan deze onboarding gekoppeld',
+        'invite-uit-gezet'       : 'Invite-flag staat uit (joost_config.knowledge_base.invite.enabled=false)',
+      })[reason] || ('reason=' + reason);
+      if (status) { status.style.color = '#b45309'; status.textContent = '⚠ Niet verstuurd: ' + label + errMsg; }
+      toast('Niet verstuurd: ' + label, 'info');
+    } catch (e) {
+      console.error('[onboarding-admin] invite:', e?.message || e);
+      if (status) { status.style.color = '#b91c1c'; status.textContent = '✗ Onverwachte fout: ' + (e?.message || e); }
+    } finally {
       if (btn) btn.disabled = false;
     }
   }

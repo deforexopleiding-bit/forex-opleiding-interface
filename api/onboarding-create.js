@@ -25,6 +25,7 @@ import crypto from 'node:crypto';
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
 import { provisionOnboardingStudent } from './_lib/onboarding-provision.js';
+import { sendOnboardingInvite } from './_lib/onboarding-invite.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -125,11 +126,30 @@ export default async function handler(req, res) {
       provision = { ok: false, error: e?.message || 'provision-threw' };
     }
 
+    // Fase C1 — Onboarding-invite (WhatsApp-template). Fail-soft: helper
+    // gooit NOOIT door (alle fouten als {sent:false, reason}). Geen send
+    // wanneer module of template niet geconfigureerd is — dat is verwacht
+    // gedrag, geen error. Reden komt mee in response zodat de admin-UI
+    // de status kan tonen.
+    let invite = { sent: false, reason: 'unknown' };
+    try {
+      invite = await sendOnboardingInvite({
+        onboardingId: inserted.id,
+        force:        false,
+        sentByUserId: user.id,
+        source:       'auto-after-provision',
+      });
+    } catch (e) {
+      console.error('[onboarding-create] invite threw:', e?.message || e);
+      invite = { sent: false, reason: 'invite-threw', error: e?.message || 'unknown' };
+    }
+
     return res.status(200).json({
       ok         : true,
       onboarding : inserted,
       link       : '/modules/onboarding.html?t=' + encodeURIComponent(inserted.token),
       provision  : provision,
+      invite     : invite,
     });
   } catch (e) {
     console.error('[onboarding-create]', e?.message || e);
