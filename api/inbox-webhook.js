@@ -36,6 +36,7 @@ import { getModuleContextByPhoneNumberId } from './_lib/module-context.js';
 import { extractEmail, findCustomerByEmail } from './_lib/email-extractor.js';
 import { runJoostSuggest } from './_lib/joost-suggest-core.js';
 import { runSimoneSuggest } from './_lib/simone-suggest-core.js';
+import { runOnboardingSuggest } from './_lib/onboarding-agent-core.js';
 import { waitUntil } from '@vercel/functions';
 
 // Vercel-eis: bodyParser uit zodat we de raw body kunnen lezen voor HMAC.
@@ -634,6 +635,67 @@ function triggerSimoneAutoSuggest({ conversationId, triggeredByMessageId, autono
         '[inbox-webhook] reactive suggest threw module=' + modLabel +
         ' conv=' + conversationId +
         ' agent=simone: ' + (e && e.message)
+      );
+    })
+  );
+}
+
+/**
+ * Reactieve Onboarding-suggest trigger (onboarding-agent, Fase A).
+ * Sibling van triggerSimoneAutoSuggest — zelfde waitUntil + fire-and-forget
+ * shape, zelfde observability-log-format, maar 'agent=onboarding' tag in
+ * de logs en runOnboardingSuggest in plaats van runSimoneSuggest.
+ *
+ * Persist naar joost_suggestions met module='onboarding' (door
+ * runOnboardingSuggest). Geen autonomous chain in Fase A — die komt
+ * pas in Fase B (api/onboarding-send-autonomous).
+ */
+function triggerOnboardingAutoSuggest({ conversationId, triggeredByMessageId, clientIp, module }) {
+  const modLabel = module || 'onboarding';
+  console.log(
+    '[inbox-webhook] reactive suggest start module=' + modLabel +
+    ' conv=' + conversationId +
+    ' agent=onboarding'
+  );
+
+  waitUntil(
+    runOnboardingSuggest({
+      supabase:             supabaseAdmin,
+      conversationId,
+      triggeredByMessageId: triggeredByMessageId || null,
+      autoTriggered:        true,
+      requestedByUserId:    null,
+      clientIp:             clientIp || null,
+    }).then((result) => {
+      if (result.status !== 200) {
+        console.warn(
+          '[inbox-webhook] reactive suggest skipped: status=' + result.status +
+          ' module=' + modLabel +
+          ' conv=' + conversationId +
+          ' agent=onboarding' +
+          ' body=' + JSON.stringify(result.body || {}).slice(0, 200)
+        );
+        return;
+      }
+      const suggestionId = result.body?.suggestion?.id || null;
+      const intent       = result.body?.suggestion?.detected_intent || null;
+      const needsHuman   = result.body?.suggestion?.needs_human === true;
+      console.log(
+        '[inbox-webhook] reactive suggest done id=' + (suggestionId || '<no-id>') +
+        ' module=' + modLabel +
+        ' conv=' + conversationId +
+        ' agent=onboarding' +
+        ' intent=' + (intent || '?') +
+        ' needs_human=' + (needsHuman ? 'yes' : 'no')
+      );
+      // Geen autonomous chain in Fase A. Een latere Fase B leest
+      // result.body.suggestion.would_auto_send + needs_human om te
+      // beslissen of /api/onboarding-send-autonomous mag vuren.
+    }).catch((e) => {
+      console.warn(
+        '[inbox-webhook] reactive suggest threw module=' + modLabel +
+        ' conv=' + conversationId +
+        ' agent=onboarding: ' + (e && e.message)
       );
     })
   );
@@ -1410,6 +1472,58 @@ export default async function handler(req, res) {
                                 module:                jcfg.module || moduleCtx?.module || null,
                               });
                             }
+                          }
+                        }
+                      }
+                    }
+                  }
+
+                  // ── Onboarding-tak (Fase A) ────────────────────────────────
+                  // Mutually exclusive met finance- en events-tak. Persist
+                  // naar joost_suggestions met module='onboarding'. Gates:
+                  //   - whatsapp_module_config.module='onboarding' + is_active
+                  //   - joost_config WHERE module='onboarding' + is_enabled
+                  //   - feature_flags.reactive_suggest_enabled = true (per-mod)
+                  //   - body >= 5 chars + niet in TRIVIAL_REPLIES
+                  //   - anti-loop: geen outbound binnen 60s
+                  // Geen customer_id-vereiste: matching gebeurt code-side
+                  // (customers.phone) in runOnboardingSuggest met no-match
+                  // fallback naar general-purpose onboarding-assistent.
+                  const isOnboardingLijn = !!(moduleCtx
+                    && moduleCtx.module === 'onboarding'
+                    && moduleCtx.is_active === true);
+                  if (isOnboardingLijn) {
+                    const { data: ocfg, error: ocfgErr } = await supabaseAdmin
+                      .from('joost_config')
+                      .select('module, is_enabled, feature_flags')
+                      .eq('module', 'onboarding')
+                      .maybeSingle();
+                    if (ocfgErr) {
+                      console.warn('[inbox-webhook] joost_config (onboarding) lookup fail:', ocfgErr.message);
+                    } else if (ocfg && ocfg.is_enabled === true) {
+                      const oFlags = (ocfg.feature_flags && typeof ocfg.feature_flags === 'object')
+                        ? ocfg.feature_flags : {};
+                      const oReactiveEnabled = oFlags.reactive_suggest_enabled === true;
+                      if (!oReactiveEnabled) {
+                        // Gate-redenering-log: maakt zichtbaar dat de onboarding-tak
+                        // het inbound zag maar bewust geskipt is (default-OFF na seed).
+                        console.log(
+                          '[inbox-webhook] reactive suggest skipped (onboarding): ' +
+                          'reactive_suggest_enabled=false conv=' + conv.id
+                        );
+                      } else {
+                        const trimmed = String(insRes.body || '').trim();
+                        const lower = trimmed.toLowerCase();
+                        const isTriggerable = trimmed.length >= 5 && !TRIVIAL_REPLIES.has(lower);
+                        if (isTriggerable) {
+                          const noLoop = await hasNoRecentOutbound(conv.id, 60);
+                          if (noLoop) {
+                            triggerOnboardingAutoSuggest({
+                              conversationId:       conv.id,
+                              triggeredByMessageId: insRes.messageId,
+                              clientIp:             getClientIp(req),
+                              module:               ocfg.module || moduleCtx?.module || null,
+                            });
                           }
                         }
                       }
