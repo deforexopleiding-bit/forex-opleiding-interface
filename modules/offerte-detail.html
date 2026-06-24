@@ -236,19 +236,16 @@ function render(d){
   const tlBtn = deal.tl_quotation_id ? `<a class="btn btn-ghost" href="https://focus.teamleader.eu/quotations/${esc(deal.tl_quotation_id)}" target="_blank">↗ Open in TL</a>` : '';
   let btns='';
   if (st==='accepted' || st==='signed'){
-    const isRetentie = (d.entity || '').toLowerCase().includes('retentie');
-    const onbBtn = isRetentie ? '' : onboardingButton(c.id, c.onboarding_status, c.onboarding_sent_at, c.onboarding_completed_at);
     // Snapshot klant-context voor de F0.2 modal.
     _obCtx.customerId   = c.id || null;
     _obCtx.customerName = c.is_company ? (c.company_name||'') : ((c.first_name||'')+' '+(c.last_name||'')).trim();
-    // Nieuwe F0.2-knop: traject-keuze + create. Alleen tonen bij recht
-    // 'onboarding.create' en geldige customer_id. Aparte label
-    // ("Onboarding-traject aanmelden") om verwarring te voorkomen met
-    // de bestaande legacy "Aanmelden onboarding"-knop (welkomstmail-flow).
+    // F0.2-knop: traject-keuze + create. Alleen tonen bij recht
+    // 'onboarding.create' en geldige customer_id. Vervangt de oude
+    // legacy welkomstmail-knop (verwijderd in chore/remove-legacy-onboarding-button).
     const obF0Btn = (_canCreateOnb && _obCtx.customerId)
       ? `<button class="btn" style="background:#0a2f63;color:#fff" onclick="openObModal()" type="button"><i class="ti ti-clipboard-plus"></i> Onboarding-traject aanmelden</button>`
       : '';
-    btns = `<a class="btn btn-success" href="/modules/subscription-wizard.html?deal_id=${esc(deal.id)}">Omzetten naar abonnement</a> ${onbBtn} ${obF0Btn} <button class="btn btn-ghost" onclick="editConfirm('${esc(deal.id)}')">Bewerken</button> ${tlBtn}`;
+    btns = `<a class="btn btn-success" href="/modules/subscription-wizard.html?deal_id=${esc(deal.id)}">Omzetten naar abonnement</a> ${obF0Btn} <button class="btn btn-ghost" onclick="editConfirm('${esc(deal.id)}')">Bewerken</button> ${tlBtn}`;
   } else if (st==='sent'){
     btns = `<button class="btn" onclick="doSend()">Opnieuw versturen</button> <button class="btn" style="background:#f59e0b;color:#fff" onclick="doMarkAccepted()">Markeer als getekend</button> <button class="btn btn-danger" onclick="doDelete()">Verwijderen</button> ${tlBtn}`;
   } else if (st==='draft'){
@@ -260,16 +257,6 @@ function render(d){
   A.innerHTML = btns;
 }
 
-function onboardingButton(customerId, status, sentAt, completedAt){
-  if (status === 'completed') return `<button class="btn btn-ghost" disabled title="${completedAt ? fmtDate(completedAt) : ''}">Onboarding afgerond ✓</button>`;
-  if (status === 'sent') return `<button class="btn btn-ghost" disabled title="${sentAt ? fmtDate(sentAt) : ''}">Onboarding verzonden ✓</button>`;
-  return `<button class="btn" style="background:#0891b2;color:#fff" onclick="doOnboarding('${esc(customerId)}')">Aanmelden onboarding</button>`;
-}
-async function doOnboarding(customerId){
-  if(!confirm('Welkomstmail + onboarding-link naar de klant sturen?')) return;
-  try { const r=await window.AgentShared.apiFetch('/api/sales-onboarding-send',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({customer_id:customerId})}); const d=await r.json(); if(!r.ok||d.success===false)throw new Error(d.error||'HTTP '+r.status); toast(d.mail_sent?'Onboarding verzonden':'Onboarding gemarkeerd (mail mislukt: '+(d.mail_error||'')+')', d.mail_sent?'success':'error'); load(); }
-  catch(e){ toast('Mislukt: '+e.message,'error'); }
-}
 async function doMarkAccepted(){
   if(!confirm('Markeert deze offerte handmatig als getekend (gebruik vóór de TL-webhook actief is). Doorgaan?')) return;
   try { const r=await window.AgentShared.apiFetch('/api/sales-quotation-mark-accepted',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({deal_id:dealId})}); const d=await r.json(); if(!r.ok||d.success===false)throw new Error(d.error||'HTTP '+r.status); toast('Gemarkeerd als getekend','success'); load(); }
