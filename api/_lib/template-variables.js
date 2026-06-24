@@ -139,6 +139,13 @@ export const AVAILABLE_VARIABLES = [
   { key: 'attendee.keuze_link',      label: 'Keuze-link',      category: 'attendee', example: 'https://forex-opleiding-interface.vercel.app/modules/event-keuze.html?t=00000000-0000-0000-0000-000000000000',   requires_context: 'attendee' },
   { key: 'attendee.vragenlijst_link', label: 'Vragenlijst-link', category: 'attendee', example: 'https://forex-opleiding-interface.vercel.app/modules/assessment.html?t=00000000-0000-0000-0000-000000000000', requires_context: 'attendee' },
 
+  // ── onboarding (Comms C1) — vereist context.onboarding (onboardings-row).
+  //   Onboarding-invite-flow geeft een onboarding-context mee zodat we de
+  //   persoonlijke wizard-link + traject-naam + status kunnen renderen.
+  { key: 'onboarding.wizard_link',  label: 'Wizard-link',     category: 'onboarding', example: 'https://forex-opleiding-interface.vercel.app/modules/onboarding.html?t=00000000-0000-0000-0000-000000000000', requires_context: 'onboarding' },
+  { key: 'onboarding.traject_label', label: 'Traject-label',  category: 'onboarding', example: 'Forex Masterclass 1-op-1', requires_context: 'onboarding' },
+  { key: 'onboarding.status',       label: 'Onboarding-status', category: 'onboarding', example: 'aangemeld', requires_context: 'onboarding' },
+
   // ── datum ──────────────────────────────────────────────────────────────
   { key: 'datum.vandaag',     label: 'Datum vandaag', category: 'datum', example: '09-06-2026',  requires_context: null },
   { key: 'datum.deze_maand',  label: 'Deze maand',    category: 'datum', example: 'juni 2026',   requires_context: null },
@@ -419,6 +426,23 @@ function getEventValue(event, key) {
 // productie wijst, niet naar de deployment-specifieke VERCEL_URL.
 const PUBLIC_BASE_URL = process.env.PUBLIC_BASE_URL || 'https://forex-opleiding-interface.vercel.app';
 
+// Onboarding-vars (Comms C1) — vereist context.onboarding met minstens
+// `token` voor de wizard-link. traject_label en status zijn optioneel.
+// Geen context.onboarding → lege string (no-crash).
+function getOnboardingValue(onboarding, key) {
+  if (!onboarding) return '';
+  switch (key) {
+    case 'onboarding.wizard_link': {
+      const token = onboarding.token;
+      if (!token) return '';
+      return `${PUBLIC_BASE_URL}/modules/onboarding.html?t=${encodeURIComponent(String(token))}`;
+    }
+    case 'onboarding.traject_label': return String(onboarding.traject_label || '');
+    case 'onboarding.status':        return String(onboarding.status || '');
+    default: return '';
+  }
+}
+
 function getAttendeeValue(attendee, key) {
   if (!attendee) return '';
   switch (key) {
@@ -474,8 +498,9 @@ export function resolveVariableValue(key, context) {
     case 'invoice':  return getInvoiceValue(context && context.invoice, key);
     case 'klant':    return getKlantAggregateValue(context && context.openInvoices, key);
     case 'afdeling': return getAfdelingValue(key, context && context.moduleContext);
-    case 'event':    return getEventValue(context && context.event, key);
-    case 'attendee': return getAttendeeValue(context && context.attendee, key);
+    case 'event':      return getEventValue(context && context.event, key);
+    case 'attendee':   return getAttendeeValue(context && context.attendee, key);
+    case 'onboarding': return getOnboardingValue(context && context.onboarding, key);
     default: return '';
   }
 }
