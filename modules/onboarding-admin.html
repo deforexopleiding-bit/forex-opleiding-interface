@@ -20,6 +20,70 @@
     .page-header h1 { font-size:22px; font-weight:700; color:var(--text); }
     .page-header p  { font-size:13px; color:var(--text-dim); margin-top:2px; }
 
+    /* Onboarding-inbox shell (port van evx-* uit events.html — prefix oi- om
+       botsing te vermijden en zodat events.html ongewijzigd blijft). */
+    .oi-shell { display:grid; grid-template-columns:340px 1fr; gap:0; border:1px solid var(--border); border-radius:10px; overflow:hidden; height:calc(100vh - 260px); min-height:540px; background:var(--bg-elev); }
+    .oi-list-pane { border-right:1px solid var(--border); display:flex; flex-direction:column; overflow:hidden; background:var(--bg); min-width:0; }
+    .oi-list-header { padding:10px 12px; border-bottom:1px solid var(--border); display:flex; align-items:center; justify-content:space-between; gap:8px; flex-shrink:0; }
+    .oi-list-body { flex:1; overflow-y:auto; padding:6px; min-height:0; }
+    .oi-thread-pane { display:flex; flex-direction:column; overflow:hidden; min-width:0; background:var(--bg); }
+    .oi-thread-header { padding:12px 16px; border-bottom:1px solid var(--border); display:flex; align-items:center; gap:10px; flex-shrink:0; }
+    .oi-thread-messages { flex:1; overflow-y:auto; padding:14px; display:flex; flex-direction:column; gap:8px; background:var(--bg-elev); min-height:0; }
+    .oi-thread-footer { border-top:1px solid var(--border); padding:10px 12px; flex-shrink:0; background:var(--bg); }
+    .oi-thread-empty { flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:8px; padding:24px; text-align:center; color:var(--text-faint); }
+    .oi-conv-row { padding:9px 10px; cursor:pointer; border-radius:8px; display:flex; gap:10px; align-items:center; margin-bottom:2px; border:1px solid transparent; transition:background-color .12s, border-color .12s; }
+    .oi-conv-row:hover { background:var(--bg-elev); }
+    .oi-conv-row.active { background:rgba(9,61,84,0.10); border-color:rgba(9,61,84,0.18); }
+    .oi-conv-avatar { width:36px; height:36px; border-radius:50%; background:var(--bg-elev); display:inline-flex; align-items:center; justify-content:center; font-weight:700; font-size:13px; color:var(--text-dim); flex-shrink:0; }
+    .oi-conv-body { flex:1; min-width:0; display:flex; flex-direction:column; gap:1px; }
+    .oi-conv-toprow { display:flex; align-items:center; gap:6px; }
+    .oi-conv-name { font-size:13.5px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; flex:1; min-width:0; }
+    .oi-conv-time { font-size:10.5px; color:var(--text-faint); flex-shrink:0; }
+    .oi-conv-preview { font-size:12px; color:var(--text-dim); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .oi-conv-meta { display:flex; align-items:center; gap:6px; margin-top:1px; }
+    .oi-conv-handoff { background:rgba(220,38,38,0.15); color:#b91c1c; border-radius:10px; padding:2px 8px; font-size:10.5px; font-weight:700; letter-spacing:.04em; }
+    .oi-24h-dot { display:inline-block; width:9px; height:9px; border-radius:50%; flex-shrink:0; margin-left:4px; }
+    .oi-24h-dot.open { background:#059669; box-shadow:0 0 0 2px rgba(5,150,105,0.18); }
+    .oi-24h-dot.closed { background:#dc2626; box-shadow:0 0 0 2px rgba(220,38,38,0.18); }
+    .oi-ctx-strip { display:flex; align-items:center; gap:10px; padding:8px 14px; background:var(--bg-elev); border-bottom:1px solid var(--border); font-size:12.5px; color:var(--text-dim); flex-wrap:wrap; flex-shrink:0; }
+    .oi-ctx-label { font-weight:700; color:var(--text-faint); text-transform:uppercase; font-size:10.5px; letter-spacing:.04em; }
+    /* Mila suggestion card (port van evx-sim-*, accent oranje voor onboarding) */
+    .oi-sim-card { border:1px solid #d97706; border-radius:10px; background:rgba(217,119,6,0.05); padding:12px; margin:6px 14px 0 14px; }
+    .oi-sim-card.needs-human { border-color:#dc2626; background:rgba(220,38,38,0.06); }
+    .oi-sim-head { display:flex; align-items:center; gap:8px; margin-bottom:8px; }
+    .oi-sim-head .ti { color:#d97706; }
+    .oi-sim-card.needs-human .oi-sim-head .ti { color:#dc2626; }
+    .oi-sim-title { font-weight:700; font-size:12.5px; color:#d97706; }
+    .oi-sim-card.needs-human .oi-sim-title { color:#dc2626; }
+    .oi-sim-meta { font-size:11px; color:var(--text-dim); margin-left:auto; }
+    .oi-sim-quote { background:var(--bg); border:1px solid var(--border); border-radius:8px; padding:8px 10px; font-size:13px; color:var(--text); white-space:pre-wrap; line-height:1.45; }
+    .oi-sim-actions { display:flex; gap:8px; margin-top:10px; align-items:center; flex-wrap:wrap; }
+    .oi-sim-actions .btn-dismiss { background:transparent; border:1px solid var(--border); color:var(--text-faint); padding:5px 10px; border-radius:7px; font-size:11.5px; cursor:pointer; font-family:inherit; margin-left:auto; }
+    .oi-sim-actions .btn-dismiss:hover { color:var(--text-dim); }
+    /* Tab-badge (rood, naast 'Inbox'-tab) */
+    .oi-tab-badge { background:rgba(220,38,38,0.15); color:#b91c1c; border-radius:10px; padding:1px 8px; font-size:10.5px; font-weight:700; margin-left:6px; display:none; }
+    /* Skeleton rij */
+    .oi-skel-row { height:48px; background:linear-gradient(90deg, var(--bg-elev) 0%, var(--bg) 50%, var(--bg-elev) 100%); border-radius:8px; margin-bottom:4px; opacity:.5; }
+    /* Template-picker modal (port van evx-modal-*) */
+    .oi-modal-overlay { position:fixed; inset:0; background:rgba(0,0,0,0.55); z-index:9999; display:none; align-items:flex-start; justify-content:center; padding:60px 16px; overflow-y:auto; }
+    .oi-modal-overlay.show { display:flex; }
+    .oi-modal-card { background:var(--bg); border:1px solid var(--border); border-radius:12px; width:100%; max-width:560px; padding:16px 18px; box-shadow:0 12px 40px rgba(0,0,0,0.25); }
+    .oi-modal-header { display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; }
+    .oi-modal-title { font-size:14.5px; font-weight:700; color:var(--text); }
+    .oi-modal-search { width:100%; padding:8px 10px; border:1px solid var(--border); border-radius:8px; background:var(--bg-elev); font-size:13px; color:var(--text); font-family:inherit; margin-bottom:8px; }
+    .oi-modal-list { max-height:360px; overflow-y:auto; display:flex; flex-direction:column; gap:4px; }
+    .oi-modal-item { padding:9px 10px; border:1px solid var(--border); border-radius:8px; cursor:pointer; background:var(--bg-elev); transition:background-color .12s, border-color .12s; }
+    .oi-modal-item:hover { background:var(--bg); border-color:var(--text-faint); }
+    .oi-modal-item .iname { font-size:13px; font-weight:600; color:var(--text); }
+    .oi-modal-item .imeta { font-size:11.5px; color:var(--text-dim); margin-top:2px; }
+    .oi-modal-footer { display:flex; gap:8px; justify-content:flex-end; margin-top:12px; }
+    @media (max-width:880px) {
+      .oi-shell { grid-template-columns:1fr; height:auto; min-height:0; }
+      .oi-list-pane { border-right:none; }
+      .oi-shell.thread-open .oi-list-pane { display:none; }
+      .oi-shell:not(.thread-open) .oi-thread-pane { display:none; }
+    }
+
     .ob-tabs { display:flex; gap:6px; border-bottom:1px solid var(--border); margin-bottom:14px; flex-wrap:wrap; }
     .ob-tab {
       padding:9px 16px; font-size:13px; font-weight:600; color:var(--text-dim);
@@ -126,29 +190,113 @@
   <div class="ob-tabs" role="tablist">
     <button type="button" class="ob-tab active" data-scope="active"   id="tab-active">Actief</button>
     <button type="button" class="ob-tab"        data-scope="archived" id="tab-archived">Archief</button>
-  </div>
-
-  <div class="toolbar">
-    <label for="searchBox">Zoeken:</label>
-    <input type="search" id="searchBox" placeholder="Klantnaam…" />
-    <label for="trajectFilter">Traject:</label>
-    <select id="trajectFilter">
-      <option value="">— alle trajecten —</option>
-    </select>
-    <label for="mentorFilter">Mentor:</label>
-    <select id="mentorFilter">
-      <option value="">— alle mentoren —</option>
-    </select>
-    <div class="spacer"></div>
-    <button type="button" class="refresh-btn" id="refreshBtn">
-      <i class="ti ti-refresh"></i> Vernieuwen
+    <button type="button" class="ob-tab"        data-scope="inbox"    id="tab-inbox" style="display:none">
+      Inbox<span class="oi-tab-badge" id="oiInboxManualBadge">0</span>
     </button>
   </div>
 
-  <div class="counter" id="counter"><span class="skeleton" style="width:120px"></span></div>
+  <!-- Lijst-pane (Actief / Archief) — bestaande gedrag ongewijzigd. -->
+  <div id="pane-list">
+    <div class="toolbar">
+      <label for="searchBox">Zoeken:</label>
+      <input type="search" id="searchBox" placeholder="Klantnaam…" />
+      <label for="trajectFilter">Traject:</label>
+      <select id="trajectFilter">
+        <option value="">— alle trajecten —</option>
+      </select>
+      <label for="mentorFilter">Mentor:</label>
+      <select id="mentorFilter">
+        <option value="">— alle mentoren —</option>
+      </select>
+      <div class="spacer"></div>
+      <button type="button" class="refresh-btn" id="refreshBtn">
+        <i class="ti ti-refresh"></i> Vernieuwen
+      </button>
+    </div>
 
-  <div id="tableWrap">
-    <div class="empty-state"><span class="skeleton" style="width:160px"></span></div>
+    <div class="counter" id="counter"><span class="skeleton" style="width:120px"></span></div>
+
+    <div id="tableWrap">
+      <div class="empty-state"><span class="skeleton" style="width:160px"></span></div>
+    </div>
+  </div>
+
+  <!-- Inbox-pane (B2 port van #ev-pane-inbox) — verborgen tot Inbox-tab actief. -->
+  <div id="pane-inbox" style="display:none">
+    <div class="oi-shell" id="oiInboxShell">
+      <aside id="oiInboxListPane" class="oi-list-pane">
+        <div class="oi-list-header">
+          <div style="font-size:12.5px;font-weight:600;color:var(--text)">Gesprekken</div>
+          <button type="button" class="refresh-btn" id="oiInboxRefresh" title="Vernieuwen" style="padding:4px 8px;font-size:12px">
+            <i class="ti ti-refresh"></i>
+          </button>
+        </div>
+        <div id="oiInboxList" class="oi-list-body">
+          <div class="oi-skel-row"></div><div class="oi-skel-row"></div>
+        </div>
+      </aside>
+
+      <section id="oiThreadPane" class="oi-thread-pane">
+        <div id="oiThreadEmpty" class="oi-thread-empty">
+          <i class="ti ti-message-circle" style="font-size:36px;color:var(--text-faint)"></i>
+          <div style="font-size:13.5px;font-weight:600;color:var(--text)">Selecteer een gesprek</div>
+          <div style="font-size:12px;color:var(--text-faint);max-width:320px">
+            Kies een conversatie links om de berichten te zien en met Mila te beantwoorden.
+          </div>
+        </div>
+
+        <div id="oiThreadContent" style="display:none;flex:1;min-height:0;flex-direction:column">
+          <div class="oi-thread-header">
+            <button type="button" id="oiThreadBack" title="Terug naar lijst" style="background:transparent;border:1px solid var(--border);border-radius:6px;padding:4px 8px;cursor:pointer;color:var(--text-dim)">
+              <i class="ti ti-arrow-left"></i>
+            </button>
+            <div style="flex:1;min-width:0">
+              <div id="oiThreadName" style="font-size:14.5px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">—</div>
+              <div id="oiThreadPhone" style="font-size:11.5px;color:var(--text-faint)">—</div>
+            </div>
+            <span id="oiThreadWindowBadge" style="font-size:10px;font-weight:700;padding:3px 8px;border-radius:10px;text-transform:uppercase;letter-spacing:.04em">—</span>
+          </div>
+
+          <div id="oiCustomerStrip" class="oi-ctx-strip" style="display:none"></div>
+
+          <div id="oiThreadMessages" class="oi-thread-messages">
+            <div style="color:var(--text-faint);font-size:12px;text-align:center;padding:20px">Laden…</div>
+          </div>
+
+          <div id="oiSuggestionPanel" style="padding:0 14px"></div>
+
+          <div class="oi-thread-footer">
+            <div style="display:flex;gap:8px;align-items:flex-start">
+              <button type="button" class="refresh-btn" id="oiAskMilaBtn" style="background:#d97706;color:#fff;white-space:nowrap" title="Vraag Mila om een suggestie">
+                <i class="ti ti-sparkles"></i> Vraag Mila
+              </button>
+              <button type="button" class="refresh-btn" id="oiTemplateBtn" title="Verstuur een goedgekeurde Meta-template" style="padding:6px 10px">
+                <i class="ti ti-template"></i>
+              </button>
+              <textarea id="oiComposeTextarea" placeholder="Typ een vrij bericht…" style="flex:1;min-height:62px;max-height:140px;font-family:inherit;font-size:13px;padding:8px 10px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);resize:vertical"></textarea>
+              <button type="button" class="refresh-btn" id="oiSendBtn" style="background:var(--brand-deep);color:#fff" title="Versturen">
+                <i class="ti ti-send"></i> Versturen
+              </button>
+            </div>
+            <div id="oiThreadHint" style="font-size:11.5px;color:var(--text-faint);margin-top:4px"></div>
+          </div>
+        </div>
+      </section>
+    </div>
+  </div>
+</div>
+
+<!-- Template-picker modal (port van evx-modal-*) -->
+<div id="oiTemplateModal" class="oi-modal-overlay" role="dialog" aria-modal="true">
+  <div class="oi-modal-card">
+    <div class="oi-modal-header">
+      <div class="oi-modal-title">Kies template</div>
+      <button type="button" id="oiTemplateClose" style="background:transparent;border:none;font-size:18px;color:var(--text-faint);cursor:pointer">&times;</button>
+    </div>
+    <input type="search" id="oiTemplateSearch" class="oi-modal-search" placeholder="Zoek template…" />
+    <div id="oiTemplateList" class="oi-modal-list">
+      <div style="color:var(--text-faint);font-size:12px;padding:10px">Laden…</div>
+    </div>
   </div>
 </div>
 
@@ -754,7 +902,19 @@
         if (next === _scope) return;
         _scope = next;
         document.querySelectorAll('.ob-tab').forEach((x) => x.classList.toggle('active', x === b));
-        loadList();
+        // Tab-switch: 'inbox' toggelt naar de Mila-inbox-pane; 'active'/'archived'
+        // gebruiken de bestaande lijst.
+        const paneList  = document.getElementById('pane-list');
+        const paneInbox = document.getElementById('pane-inbox');
+        if (next === 'inbox') {
+          if (paneList)  paneList.style.display  = 'none';
+          if (paneInbox) paneInbox.style.display = '';
+          loadOnboardingInbox();
+        } else {
+          if (paneInbox) paneInbox.style.display = 'none';
+          if (paneList)  paneList.style.display  = '';
+          loadList();
+        }
       });
     });
   }
@@ -794,11 +954,658 @@
     _wireDetailModal();
     wireTabs();
     wireFilters();
+    wireOnboardingInbox();
+
+    // Inbox-tab tonen alleen met onboarding.inbox.view-permissie. Page-gate
+    // (onboarding.admin) is door sidebar.js al gedaan; deze tab is een
+    // separate read-scope. Bij ontbrekende RBAC.canSync (timing) verbergen
+    // we de tab; server-side gate'n endpoints sowieso.
+    try {
+      const canInbox = !!(window.RBAC?.canSync?.('onboarding.inbox.view'));
+      const tab = document.getElementById('tab-inbox');
+      if (tab) tab.style.display = canInbox ? '' : 'none';
+      if (canInbox) {
+        // Initiële badge-fetch + 60s poll-interval (parallel met events-pattern).
+        _oiRefreshInboxManualBadge();
+        if (!window._oiInboxBadgeTimer) {
+          window._oiInboxBadgeTimer = setInterval(_oiRefreshInboxManualBadge, 60000);
+          window.addEventListener('beforeunload', () => {
+            if (window._oiInboxBadgeTimer) { clearInterval(window._oiInboxBadgeTimer); window._oiInboxBadgeTimer = null; }
+          });
+        }
+      }
+    } catch (e) { console.warn('[onboarding-admin] inbox tab gate:', e?.message || e); }
 
     // Trajecten + mentoren parallel — beide fail-soft.
     await Promise.all([ensureTrajectenLoaded(), ensureMentorsLoaded()]);
 
     loadList();
+  }
+
+  // ────────────────────────────────────────────────────────────────────────
+  // Onboarding-inbox (B2 port van events.html inbox-tab).
+  //
+  // Twee-paneel-shell:
+  //   - LINKS: gesprekken voor module=onboarding via /api/inbox-conversations-list
+  //   - RECHTS: thread + composer + Mila-suggestiepaneel
+  //
+  // State volledig lokaal (_oiState); raakt _scope / _rows niet. apiFetch
+  // is window.AgentShared.apiFetch (Bearer-token automatisch). Realtime is
+  // bewust ge-skipt — handmatige refresh-knop + 60s badge-poll.
+  // ────────────────────────────────────────────────────────────────────────
+  const _oiState = {
+    convId:              null,
+    conv:                null,
+    canSendText:         false,
+    suggestion:          null,
+    editingSuggestionId: null,
+  };
+  const _oiTplState = { items: [], filter: '', loaded: false, sendingFor: null };
+
+  function _oiAvatarInitial(s) {
+    const txt = String(s || '?').trim();
+    const m = txt.match(/[A-Za-z0-9]/);
+    return (m ? m[0] : '?').toUpperCase();
+  }
+
+  // Update "Handmatig overnemen"-tab-badge. Bron: items met unread_count > 0
+  // (proxy voor "wacht op handmatige reactie" — gespiegeld aan events).
+  function _oiUpdateInboxManualBadge(items) {
+    const badge = document.getElementById('oiInboxManualBadge');
+    if (!badge) return;
+    if (!Array.isArray(items)) { badge.style.display = 'none'; return; }
+    let n = 0;
+    for (const it of items) {
+      if (Number(it && it.unread_count) > 0) n++;
+    }
+    if (n > 0) { badge.textContent = String(n); badge.style.display = ''; }
+    else       { badge.style.display = 'none'; }
+  }
+
+  async function _oiRefreshInboxManualBadge() {
+    try {
+      const r = await window.AgentShared.apiFetch('/api/inbox-conversations-list?module=onboarding&limit=100');
+      if (!r.ok) return;
+      const j = await r.json().catch(() => ({}));
+      if (!j || j.configured === false) {
+        const badge = document.getElementById('oiInboxManualBadge');
+        if (badge) badge.style.display = 'none';
+        return;
+      }
+      _oiUpdateInboxManualBadge(Array.isArray(j.items) ? j.items : []);
+    } catch (_e) { /* stille no-op */ }
+  }
+
+  function _oiShowThreadView() {
+    const shell = document.getElementById('oiInboxShell');
+    const empty = document.getElementById('oiThreadEmpty');
+    const cont  = document.getElementById('oiThreadContent');
+    if (shell) shell.classList.add('thread-open');
+    if (empty) empty.style.display = 'none';
+    if (cont)  cont.style.display  = 'flex';
+  }
+  function _oiShowListView() {
+    const shell = document.getElementById('oiInboxShell');
+    const empty = document.getElementById('oiThreadEmpty');
+    const cont  = document.getElementById('oiThreadContent');
+    if (shell) shell.classList.remove('thread-open');
+    if (empty) empty.style.display = '';
+    if (cont)  cont.style.display  = 'none';
+    _oiState.convId = null;
+    _oiState.conv = null;
+    _oiState.suggestion = null;
+    _oiState.editingSuggestionId = null;
+    document.querySelectorAll('#oiInboxList .oi-conv-row.active').forEach((el) => el.classList.remove('active'));
+  }
+
+  async function loadOnboardingInbox() {
+    const list = document.getElementById('oiInboxList');
+    if (!list) return;
+    list.innerHTML = '<div class="oi-skel-row"></div><div class="oi-skel-row"></div>';
+    try {
+      const r = await window.AgentShared.apiFetch('/api/inbox-conversations-list?module=onboarding&limit=100');
+      if (!r.ok) {
+        const j = await r.json().catch(() => ({}));
+        list.innerHTML = '<div class="empty-state" style="color:#b91c1c;font-size:13px;padding:16px">Fout: ' + esc(j.error || ('HTTP ' + r.status)) + '</div>';
+        return;
+      }
+      const j = await r.json();
+      if (!j.configured) {
+        list.innerHTML = '<div class="empty-state" style="padding:24px;text-align:center">'
+          + '<i class="ti ti-plug-connected-x" style="font-size:24px;color:var(--text-faint)"></i>'
+          + '<div style="font-size:14px;font-weight:600;margin-top:6px">Onboarding-lijn nog niet geconfigureerd</div>'
+          + '<div style="font-size:12.5px;color:var(--text-dim);margin-top:4px">' + esc(j.warning || 'Vraag een admin om whatsapp_module_config met module=onboarding op is_active=true te zetten.') + '</div>'
+          + '</div>';
+        return;
+      }
+      const items = Array.isArray(j.items) ? j.items : [];
+      _oiUpdateInboxManualBadge(items);
+      if (items.length === 0) {
+        list.innerHTML = '<div class="empty-state" style="padding:24px;text-align:center">'
+          + '<i class="ti ti-inbox" style="font-size:24px;color:var(--text-faint)"></i>'
+          + '<div style="font-size:14px;font-weight:600;margin-top:6px">Nog geen onboarding-conversaties</div>'
+          + '<div style="font-size:12.5px;color:var(--text-dim);margin-top:4px">Inbound op de onboarding-WhatsApp-lijn verschijnt hier.</div>'
+          + '</div>';
+        return;
+      }
+      const activeId = _oiState.convId || null;
+      list.innerHTML = items.map((it) => {
+        const preview    = (it.last_message_preview || '').slice(0, 80);
+        const nameLabel  = it.customer_name || it.display_name || it.phone_number || '(geen naam)';
+        const subtitle   = it.customer_name && it.display_name && it.display_name !== it.customer_name
+          ? it.display_name : (it.phone_number || '');
+        const timeShort  = it.last_message_at ? esc(fmtDateNL(it.last_message_at)) : '';
+        const isActive   = activeId && it.id === activeId ? ' active' : '';
+        const dotCls     = it.can_send_text ? 'open' : 'closed';
+        const dotTitle   = it.can_send_text ? '24h-venster open — vrij bericht toegestaan' : '24h-venster verlopen — alleen template';
+        // "Handmatig overnemen"-badge: gebruikt unread_count > 0 als proxy
+        // voor needs_human (events-pattern). Een conv die nog ongelezen
+        // inbound heeft = wacht op een handmatig/Mila-antwoord.
+        const handoff = Number(it.unread_count) > 0
+          ? '<span class="oi-conv-handoff" title="Wacht op handmatig of Mila-antwoord">Handmatig overnemen</span>'
+          : '';
+        return ''
+          + '<div class="oi-conv-row' + isActive + '" data-conv-id="' + esc(it.id) + '"'
+          + ' data-phone="' + esc(it.phone_number || '') + '"'
+          + ' data-display="' + esc(it.display_name || '') + '"'
+          + ' data-customer="' + esc(it.customer_name || '') + '">'
+          +   '<div class="oi-conv-avatar">' + esc(_oiAvatarInitial(nameLabel)) + '</div>'
+          +   '<div class="oi-conv-body">'
+          +     '<div class="oi-conv-toprow">'
+          +       '<div class="oi-conv-name">' + esc(nameLabel) + '</div>'
+          +       '<div class="oi-conv-time">' + timeShort + '</div>'
+          +       '<span class="oi-24h-dot ' + dotCls + '" title="' + esc(dotTitle) + '"></span>'
+          +     '</div>'
+          +     '<div class="oi-conv-preview">' + esc(preview || subtitle || '—') + '</div>'
+          +     (handoff ? '<div class="oi-conv-meta">' + handoff + '</div>' : '')
+          +   '</div>'
+          + '</div>';
+      }).join('');
+      list.querySelectorAll('.oi-conv-row[data-conv-id]').forEach((row) => {
+        row.addEventListener('click', () => openOnboardingConv({
+          id:          row.dataset.convId,
+          phone:       row.dataset.phone || '',
+          displayName: row.dataset.display || '',
+          customer:    row.dataset.customer || '',
+        }));
+      });
+    } catch (e) {
+      list.innerHTML = '<div class="empty-state" style="color:#b91c1c;font-size:13px;padding:16px">Fout: ' + esc(e?.message || e) + '</div>';
+    }
+  }
+
+  async function openOnboardingConv({ id, phone, displayName, customer }) {
+    if (!id) return;
+    _oiState.convId = id;
+    _oiState.suggestion = null;
+    _oiState.editingSuggestionId = null;
+    _oiShowThreadView();
+    document.querySelectorAll('#oiInboxList .oi-conv-row.active').forEach((el) => el.classList.remove('active'));
+    const newRow = document.querySelector('#oiInboxList .oi-conv-row[data-conv-id="' + id.replace(/"/g, '') + '"]');
+    if (newRow) newRow.classList.add('active');
+
+    document.getElementById('oiThreadName').textContent  = customer || displayName || phone || 'Onbekend';
+    document.getElementById('oiThreadPhone').textContent = phone || '—';
+    const badge = document.getElementById('oiThreadWindowBadge');
+    badge.textContent = '…';
+    badge.style.background = 'var(--bg-elev)';
+    badge.style.color = 'var(--text-dim)';
+    document.getElementById('oiThreadMessages').innerHTML = '<div style="color:var(--text-faint);font-size:12px;text-align:center;padding:20px">Laden…</div>';
+    document.getElementById('oiSuggestionPanel').innerHTML = '';
+    document.getElementById('oiComposeTextarea').value = '';
+    document.getElementById('oiThreadHint').textContent = '';
+
+    try {
+      const params = new URLSearchParams({ conversation_id: id, limit: '200', mark_as_read: 'true' });
+      const r = await window.AgentShared.apiFetch('/api/inbox-messages-list?' + params.toString());
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        document.getElementById('oiThreadMessages').innerHTML =
+          '<div style="color:#b91c1c;font-size:12px;padding:14px">Fout: ' + esc(d.error || ('HTTP ' + r.status)) + '</div>';
+        return;
+      }
+      _oiState.conv = d.conversation || null;
+      _oiState.canSendText = !!(d.conversation && d.conversation.can_send_text);
+      _renderOiThread(d.items || []);
+      _applyOiComposeState();
+      // Context-strip via /api/inbox-conversation-context (klant + tel + matches).
+      _loadOiCustomerStrip(id);
+      // Refresh lijst (badge + active-state).
+      loadOnboardingInbox();
+      // Laatste suggestion ophalen (PROPOSED, < 60min).
+      _loadLatestMilaSuggestion(id);
+    } catch (e) {
+      document.getElementById('oiThreadMessages').innerHTML =
+        '<div style="color:#b91c1c;font-size:12px;padding:14px">Fout: ' + esc(e?.message || e) + '</div>';
+    }
+  }
+
+  function _renderOiThread(items) {
+    const wrap = document.getElementById('oiThreadMessages');
+    if (!wrap) return;
+    if (!items || items.length === 0) {
+      wrap.innerHTML = '<div style="color:var(--text-faint);font-size:12px;text-align:center;padding:20px">Nog geen berichten in deze conversatie.</div>';
+    } else {
+      wrap.innerHTML = items.map((m) => {
+        const inbound = m.direction === 'in';
+        const align   = inbound ? 'flex-start' : 'flex-end';
+        const bg      = inbound ? 'var(--bg-elev)' : '#093d54';
+        const color   = inbound ? 'var(--text)' : '#ffffff';
+        const time    = m.created_at ? fmtDateTimeNL(m.created_at) : '';
+        const body    = String(m.body || (m.template_name ? '[template:' + m.template_name + ']' : '[media]'));
+        return '<div style="display:flex;justify-content:' + align + '">'
+          + '<div style="max-width:70%;background:' + bg + ';color:' + color + ';padding:7px 11px;border-radius:10px;font-size:13px;line-height:1.4">'
+          + '<div style="white-space:pre-wrap;word-wrap:break-word">' + esc(body) + '</div>'
+          + '<div style="font-size:10px;opacity:0.65;margin-top:3px;text-align:right">' + esc(time) + '</div>'
+          + '</div></div>';
+      }).join('');
+    }
+    wrap.scrollTop = wrap.scrollHeight;
+    const badge = document.getElementById('oiThreadWindowBadge');
+    if (_oiState.canSendText) {
+      badge.textContent = '24h open';
+      badge.style.background = 'rgba(5,150,105,0.15)';
+      badge.style.color = '#059669';
+      badge.title = '24h-venster nog open — vrije tekst toegestaan';
+    } else {
+      badge.textContent = '24h verlopen';
+      badge.style.background = 'rgba(245,158,11,0.18)';
+      badge.style.color = '#b45309';
+      badge.title = 'Servicewindow verlopen — alleen templates';
+    }
+  }
+
+  function _applyOiComposeState() {
+    const ta = document.getElementById('oiComposeTextarea');
+    const sendBtn = document.getElementById('oiSendBtn');
+    const hint = document.getElementById('oiThreadHint');
+    if (_oiState.canSendText) {
+      if (ta) { ta.disabled = false; ta.placeholder = 'Typ een vrij bericht…'; }
+      if (sendBtn) { sendBtn.disabled = false; sendBtn.title = 'Versturen'; }
+      if (hint) hint.textContent = '';
+    } else {
+      if (ta) { ta.disabled = true; ta.placeholder = '24h-venster verlopen — alleen templates'; }
+      if (sendBtn) { sendBtn.disabled = true; sendBtn.title = '24h-venster verlopen'; }
+      if (hint) hint.textContent = '24h-venster verlopen sinds laatste inbound — vrije tekst niet meer toegestaan.';
+    }
+  }
+
+  async function _loadOiCustomerStrip(convId) {
+    const strip = document.getElementById('oiCustomerStrip');
+    if (!strip) return;
+    strip.style.display = 'none';
+    strip.innerHTML = '';
+    try {
+      const r = await window.AgentShared.apiFetch('/api/inbox-conversation-context?conversation_id=' + encodeURIComponent(convId));
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) return;
+      const c = d?.customer || null;
+      const conv = d?.conversation || null;
+      if (!c && (!conv || !conv.phone_number)) return;
+      strip.style.display = '';
+      const parts = [];
+      if (c) {
+        parts.push('<span class="oi-ctx-label"><i class="ti ti-user"></i> Klant</span>');
+        parts.push('<strong>' + esc(c.name || c.email || '(klant)') + '</strong>');
+        if (c.email) parts.push('<span style="color:var(--text-faint)">' + esc(c.email) + '</span>');
+      } else {
+        parts.push('<span class="oi-ctx-label"><i class="ti ti-user-off"></i> Geen koppeling</span>');
+        parts.push('<span style="color:var(--text-faint)">Dit nummer is nog niet aan een klant gekoppeld.</span>');
+      }
+      if (conv && conv.phone_number) {
+        parts.push('<span style="margin-left:auto;color:var(--text-faint);font-size:11.5px">' + esc(conv.phone_number) + '</span>');
+      }
+      strip.innerHTML = parts.join(' ');
+    } catch (e) { /* fail-soft */ }
+  }
+
+  async function _loadLatestMilaSuggestion(convId) {
+    try {
+      const r = await window.AgentShared.apiFetch('/api/joost-suggestions-recent?' +
+        new URLSearchParams({ module: 'onboarding', conversation_id: convId, max_age_minutes: '60' }).toString());
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) { _renderMilaSuggestion(null, d.error || ('HTTP ' + r.status)); return; }
+      _oiState.suggestion = d.suggestion || null;
+      _renderMilaSuggestion(_oiState.suggestion, null);
+    } catch (e) {
+      _renderMilaSuggestion(null, e?.message || String(e));
+    }
+  }
+
+  // Render het Mila-suggestiepaneel. Bij needs_human (uit suggestion top-level
+  // OF uit context_snapshot.handoff.needs_human) tonen we een rode banner
+  // i.p.v. de normale "Gebruiken/Aanpassen"-knop. Bewerken kan altijd —
+  // de medewerker mag zelf besluiten.
+  function _renderMilaSuggestion(sugg, errMsg) {
+    const wrap = document.getElementById('oiSuggestionPanel');
+    if (!wrap) return;
+    if (errMsg) {
+      wrap.innerHTML = '<div style="color:#b45309;font-size:12px;background:rgba(245,158,11,0.1);border:1px solid rgba(245,158,11,0.3);border-radius:8px;padding:8px 10px;margin:6px 14px 0 14px">Suggestie laden mislukt: ' + esc(errMsg) + '</div>';
+      return;
+    }
+    if (!sugg) { wrap.innerHTML = ''; return; }
+    const needsHuman = !!(sugg.needs_human
+      || (sugg.context_snapshot && sugg.context_snapshot.handoff && sugg.context_snapshot.handoff.needs_human));
+    const conf = (typeof sugg.confidence === 'number') ? (Math.round(sugg.confidence * 100) + '%') : '—';
+    const intent = sugg.detected_intent || '?';
+    const reasoning = sugg.reasoning ? '<div style="font-size:11px;color:var(--text-dim);margin-top:6px;font-style:italic">Reasoning: ' + esc(sugg.reasoning) + '</div>' : '';
+
+    if (needsHuman) {
+      wrap.innerHTML = ''
+        + '<div class="oi-sim-card needs-human">'
+        +   '<div class="oi-sim-head">'
+        +     '<i class="ti ti-alert-triangle"></i>'
+        +     '<span class="oi-sim-title">⚠ Handmatig overnemen — Mila twijfelt</span>'
+        +     '<span class="oi-sim-meta">intent: ' + esc(intent) + ' · confidence ' + conf + '</span>'
+        +   '</div>'
+        +   '<div class="oi-sim-quote">' + esc(sugg.suggested_reply || '(geen tekst)') + '</div>'
+        +   reasoning
+        +   '<div class="oi-sim-actions">'
+        +     '<button type="button" class="refresh-btn" id="oiMilaEditBtn" style="background:transparent;border:1px solid #dc2626;color:#dc2626" title="Open in composer ter handmatige bewerking"><i class="ti ti-edit"></i> Aanpassen</button>'
+        +     '<button type="button" class="btn-dismiss" id="oiMilaDismissBtn">Sluiten</button>'
+        +   '</div>'
+        + '</div>';
+      const editBtn = document.getElementById('oiMilaEditBtn');
+      const dismissBtn = document.getElementById('oiMilaDismissBtn');
+      if (editBtn) editBtn.addEventListener('click', () => editMilaInComposer(sugg));
+      if (dismissBtn) dismissBtn.addEventListener('click', () => dismissMilaSuggestion(sugg));
+      return;
+    }
+
+    wrap.innerHTML = ''
+      + '<div class="oi-sim-card">'
+      +   '<div class="oi-sim-head">'
+      +     '<i class="ti ti-sparkles"></i>'
+      +     '<span class="oi-sim-title">Mila-suggestie</span>'
+      +     (sugg.auto_triggered ? '<span style="background:#d97706;color:#fff;font-size:9.5px;font-weight:700;padding:2px 7px;border-radius:8px;letter-spacing:.04em">AUTO</span>' : '')
+      +     '<span class="oi-sim-meta">intent: ' + esc(intent) + ' · ' + conf + '</span>'
+      +   '</div>'
+      +   '<div class="oi-sim-quote">' + esc(sugg.suggested_reply || '') + '</div>'
+      +   reasoning
+      +   '<div class="oi-sim-actions">'
+      +     '<button type="button" class="refresh-btn" id="oiMilaUseBtn" style="background:#d97706;color:#fff" title="Verstuur de suggestie ongewijzigd"><i class="ti ti-check"></i> Gebruiken</button>'
+      +     '<button type="button" class="refresh-btn" id="oiMilaEditBtn" style="background:transparent;border:1px solid #d97706;color:#d97706" title="Kopieer naar het tekstveld om aan te passen"><i class="ti ti-edit"></i> Bewerken</button>'
+      +     '<button type="button" class="btn-dismiss" id="oiMilaDismissBtn">Negeren</button>'
+      +   '</div>'
+      + '</div>';
+    const useBtn = document.getElementById('oiMilaUseBtn');
+    const editBtn = document.getElementById('oiMilaEditBtn');
+    const dismissBtn = document.getElementById('oiMilaDismissBtn');
+    if (useBtn) useBtn.addEventListener('click', () => useMilaAsIs(sugg));
+    if (editBtn) editBtn.addEventListener('click', () => editMilaInComposer(sugg));
+    if (dismissBtn) dismissBtn.addEventListener('click', () => dismissMilaSuggestion(sugg));
+  }
+
+  async function askMila() {
+    const convId = _oiState.convId;
+    if (!convId) return;
+    const btn = document.getElementById('oiAskMilaBtn');
+    if (btn) { btn.disabled = true; btn.innerHTML = '<i class="ti ti-loader-2"></i> Mila denkt na…'; }
+    try {
+      const r = await window.AgentShared.apiFetch('/api/onboarding-suggest', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ conversation_id: convId }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        toast(d.error || ('HTTP ' + r.status), 'error');
+        return;
+      }
+      if (d?.suggestion) {
+        _oiState.suggestion = d.suggestion;
+        _renderMilaSuggestion(d.suggestion, null);
+      } else {
+        await _loadLatestMilaSuggestion(convId);
+      }
+    } catch (e) {
+      toast(e?.message || String(e), 'error');
+    } finally {
+      if (btn) { btn.disabled = false; btn.innerHTML = '<i class="ti ti-sparkles"></i> Vraag Mila'; }
+    }
+  }
+
+  async function useMilaAsIs(sugg) {
+    const convId = _oiState.convId;
+    if (!convId || !sugg) return;
+    if (!_oiState.canSendText) {
+      toast('24h-venster verlopen — vrij bericht niet meer toegestaan', 'error');
+      return;
+    }
+    const text = String(sugg.suggested_reply || '').trim();
+    if (!text) { toast('Suggestie is leeg', 'error'); return; }
+    const btn = document.getElementById('oiMilaUseBtn');
+    if (btn) btn.disabled = true;
+    try {
+      const sr = await window.AgentShared.apiFetch('/api/inbox-send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ conversation_id: convId, mode: 'text', body: text }),
+      });
+      const sd = await sr.json().catch(() => ({}));
+      if (!sr.ok) {
+        toast(sd.error || ('HTTP ' + sr.status), 'error');
+        if (btn) btn.disabled = false;
+        return;
+      }
+      window.AgentShared.apiFetch('/api/joost-mark-outcome', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ suggestion_id: sugg.id, status: 'USED_AS_IS', final_sent_text: text }),
+      }).catch(() => {});
+      toast('Mila-suggestie verstuurd', 'success');
+      _oiState.suggestion = null;
+      document.getElementById('oiSuggestionPanel').innerHTML = '';
+      openOnboardingConv({ id: convId, phone: _oiState.conv?.phone_number || '', displayName: _oiState.conv?.display_name || '', customer: _oiState.conv?.customer_name || '' });
+    } catch (e) {
+      toast(e?.message || String(e), 'error');
+      if (btn) btn.disabled = false;
+    }
+  }
+
+  function editMilaInComposer(sugg) {
+    if (!sugg) return;
+    const ta = document.getElementById('oiComposeTextarea');
+    if (ta) {
+      ta.value = String(sugg.suggested_reply || '');
+      ta.focus();
+      try { ta.setSelectionRange(ta.value.length, ta.value.length); } catch {}
+    }
+    _oiState.editingSuggestionId = sugg.id;
+    toast('Mila-tekst in composer geladen — pas aan en verstuur', 'success');
+  }
+
+  async function dismissMilaSuggestion(sugg) {
+    if (!sugg) return;
+    const btn = document.getElementById('oiMilaDismissBtn');
+    if (btn) btn.disabled = true;
+    try {
+      const r = await window.AgentShared.apiFetch('/api/joost-mark-outcome', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ suggestion_id: sugg.id, status: 'DISMISSED' }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        toast(d.error || ('HTTP ' + r.status), 'error');
+        if (btn) btn.disabled = false;
+        return;
+      }
+      _oiState.suggestion = null;
+      document.getElementById('oiSuggestionPanel').innerHTML = '';
+      toast('Suggestie genegeerd', 'success');
+    } catch (e) {
+      toast(e?.message || String(e), 'error');
+      if (btn) btn.disabled = false;
+    }
+  }
+
+  async function sendOiComposeText() {
+    const convId = _oiState.convId;
+    if (!convId) return;
+    const ta = document.getElementById('oiComposeTextarea');
+    const text = ta ? String(ta.value || '').trim() : '';
+    if (!text) { toast('Bericht is leeg', 'error'); return; }
+    const btn = document.getElementById('oiSendBtn');
+    if (btn) btn.disabled = true;
+    try {
+      const r = await window.AgentShared.apiFetch('/api/inbox-send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ conversation_id: convId, mode: 'text', body: text }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        toast(d.error || ('HTTP ' + r.status), 'error');
+        if (btn) btn.disabled = false;
+        return;
+      }
+      // Als de operator een suggestie heeft "Aangepast" en daarna vrij verstuurt
+      // → markeer als USED_EDITED (fail-soft).
+      if (_oiState.editingSuggestionId) {
+        const eid = _oiState.editingSuggestionId;
+        _oiState.editingSuggestionId = null;
+        window.AgentShared.apiFetch('/api/joost-mark-outcome', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ suggestion_id: eid, status: 'USED_EDITED', final_sent_text: text }),
+        }).catch(() => {});
+      }
+      toast('Bericht verstuurd', 'success');
+      if (ta) ta.value = '';
+      openOnboardingConv({ id: convId, phone: _oiState.conv?.phone_number || '', displayName: _oiState.conv?.display_name || '', customer: _oiState.conv?.customer_name || '' });
+    } catch (e) {
+      toast(e?.message || String(e), 'error');
+      if (btn) btn.disabled = false;
+    }
+  }
+
+  // ── Template-picker (gecondenseerd port van events evx-modal-flow) ────
+  async function openOiTemplatePicker() {
+    const convId = _oiState.convId;
+    if (!convId) { toast('Selecteer eerst een gesprek', 'error'); return; }
+    const overlay = document.getElementById('oiTemplateModal');
+    if (!overlay) return;
+    overlay.classList.add('show');
+    _oiTplState.filter = '';
+    const search = document.getElementById('oiTemplateSearch');
+    if (search) search.value = '';
+    await _loadOiTemplates(convId);
+  }
+  function closeOiTemplatePicker() {
+    const overlay = document.getElementById('oiTemplateModal');
+    if (overlay) overlay.classList.remove('show');
+  }
+  async function _loadOiTemplates(convId) {
+    const list = document.getElementById('oiTemplateList');
+    if (!list) return;
+    list.innerHTML = '<div style="color:var(--text-faint);font-size:12px;padding:10px">Templates laden…</div>';
+    try {
+      const r = await window.AgentShared.apiFetch('/api/inbox-template-list?conversation_id=' + encodeURIComponent(convId));
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        list.innerHTML = '<div style="color:#b91c1c;font-size:12px;padding:10px">Fout: ' + esc(d.error || ('HTTP ' + r.status)) + '</div>';
+        return;
+      }
+      _oiTplState.items = Array.isArray(d?.items) ? d.items : (Array.isArray(d?.templates) ? d.templates : []);
+      _oiTplState.loaded = true;
+      _renderOiTemplateList();
+    } catch (e) {
+      list.innerHTML = '<div style="color:#b91c1c;font-size:12px;padding:10px">Fout: ' + esc(e?.message || e) + '</div>';
+    }
+  }
+  function _renderOiTemplateList() {
+    const list = document.getElementById('oiTemplateList');
+    if (!list) return;
+    const filter = (_oiTplState.filter || '').toLowerCase();
+    const items = (_oiTplState.items || []).filter((t) => {
+      if (!filter) return true;
+      const haystack = (t.name || t.template_name || '') + ' ' + (t.language || '') + ' ' + (t.category || '');
+      return haystack.toLowerCase().includes(filter);
+    });
+    if (items.length === 0) {
+      list.innerHTML = '<div style="color:var(--text-faint);font-size:12px;padding:10px">Geen templates gevonden.</div>';
+      return;
+    }
+    list.innerHTML = items.map((t) => {
+      const name = t.name || t.template_name || '(zonder naam)';
+      const lang = t.language || 'nl';
+      const cat  = t.category || '';
+      return ''
+        + '<div class="oi-modal-item" data-tpl-name="' + esc(name) + '" data-tpl-lang="' + esc(lang) + '">'
+        +   '<div class="iname">' + esc(name) + '</div>'
+        +   '<div class="imeta">' + esc(lang) + (cat ? ' · ' + esc(cat) : '') + '</div>'
+        + '</div>';
+    }).join('');
+    list.querySelectorAll('.oi-modal-item[data-tpl-name]').forEach((el) => {
+      el.addEventListener('click', () => {
+        const tpl = { name: el.dataset.tplName, language: el.dataset.tplLang };
+        if (confirm('Template "' + tpl.name + '" verzenden naar dit gesprek?')) {
+          sendOiTemplate(tpl);
+        }
+      });
+    });
+  }
+  async function sendOiTemplate(tpl) {
+    const convId = _oiState.convId;
+    if (!convId || !tpl) return;
+    _oiTplState.sendingFor = tpl.name;
+    closeOiTemplatePicker();
+    try {
+      const r = await window.AgentShared.apiFetch('/api/inbox-send-template', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          conversation_id: convId,
+          template_name:   tpl.name,
+          language:        tpl.language || 'nl',
+        }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        toast(d.error || ('HTTP ' + r.status), 'error');
+        return;
+      }
+      toast('Template verstuurd', 'success');
+      openOnboardingConv({ id: convId, phone: _oiState.conv?.phone_number || '', displayName: _oiState.conv?.display_name || '', customer: _oiState.conv?.customer_name || '' });
+    } catch (e) {
+      toast(e?.message || String(e), 'error');
+    } finally {
+      _oiTplState.sendingFor = null;
+    }
+  }
+
+  function wireOnboardingInbox() {
+    const refreshBtn = document.getElementById('oiInboxRefresh');
+    if (refreshBtn) refreshBtn.addEventListener('click', loadOnboardingInbox);
+    const backBtn = document.getElementById('oiThreadBack');
+    if (backBtn) backBtn.addEventListener('click', _oiShowListView);
+    const askBtn = document.getElementById('oiAskMilaBtn');
+    if (askBtn) askBtn.addEventListener('click', askMila);
+    const sendBtn = document.getElementById('oiSendBtn');
+    if (sendBtn) sendBtn.addEventListener('click', sendOiComposeText);
+    const tplBtn = document.getElementById('oiTemplateBtn');
+    if (tplBtn) tplBtn.addEventListener('click', openOiTemplatePicker);
+    const tplClose = document.getElementById('oiTemplateClose');
+    if (tplClose) tplClose.addEventListener('click', closeOiTemplatePicker);
+    const tplSearch = document.getElementById('oiTemplateSearch');
+    if (tplSearch) tplSearch.addEventListener('input', () => {
+      _oiTplState.filter = tplSearch.value || '';
+      _renderOiTemplateList();
+    });
+    // Cmd/Ctrl-Enter in composer → versturen.
+    const ta = document.getElementById('oiComposeTextarea');
+    if (ta) ta.addEventListener('keydown', (ev) => {
+      if ((ev.ctrlKey || ev.metaKey) && ev.key === 'Enter') {
+        ev.preventDefault();
+        sendOiComposeText();
+      }
+    });
+    // Klik op modal-overlay sluit picker.
+    const modal = document.getElementById('oiTemplateModal');
+    if (modal) modal.addEventListener('click', (ev) => {
+      if (ev.target === modal) closeOiTemplatePicker();
+    });
   }
 
   if (document.readyState === 'loading') {
