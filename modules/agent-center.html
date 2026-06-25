@@ -1370,6 +1370,15 @@ async function loadAgentsActivity() {
     const profile = await window.AuthShared.requireAuth();
     if (!profile) return;
 
+    // Bug-fix: can() = canSync() = false zolang window.RBAC._permsCache
+    // nog niet geladen is. Bij eerste page-load (lege cache) toonde de gate
+    // hieronder ten onrechte 'Geen toegang'. Wachten op de RBAC-prefetch
+    // mirror finance.html regel 2923. Faal-soft: bij ontbrekende RBAC of
+    // fetch-fout gaat de gate door op false → forbidden-card (oude gedrag).
+    if (window.RBAC && typeof window.RBAC.ensurePermissionsLoaded === 'function') {
+      try { await window.RBAC.ensurePermissionsLoaded(); } catch (e) { console.warn('[agent-center] perms load', e); }
+    }
+
     if (!can('admin.joost_config')) {
       document.getElementById('page-content').innerHTML = `
         <div class="forbidden-card">
