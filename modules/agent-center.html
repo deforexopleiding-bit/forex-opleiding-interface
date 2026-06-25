@@ -640,6 +640,44 @@
       gap: 8px;
     }
 
+    /* ─── Top-level view-schakelaar (Agents ⇄ Kanalen) ────────────────────── */
+    .ac-view-toggle {
+      display: inline-flex;
+      background: var(--surface-card-hover);
+      border: 1px solid var(--border-subtle);
+      border-radius: 99px;
+      padding: 3px;
+      gap: 2px;
+    }
+    .ac-view-toggle button {
+      background: transparent;
+      border: none;
+      color: var(--text-secondary);
+      cursor: pointer;
+      padding: 6px 14px;
+      border-radius: 99px;
+      font-size: 12.5px;
+      font-weight: 600;
+      font-family: inherit;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      transition: background .15s ease, color .15s ease;
+    }
+    .ac-view-toggle button:hover { color: var(--text-primary); }
+    .ac-view-toggle button.active {
+      background: var(--brand-primary);
+      color: var(--text-inverse);
+      box-shadow: 0 1px 2px rgba(0,0,0,0.1);
+    }
+
+    /* Kanalen-view: host voor finance-instellingen mount. De Joost-sub-tab van
+       die module verbergen — die zit al in de Agents-hub (Joost-kaart → editor
+       met Algemeen/Autonomy/Decision Log). */
+    #kanalenView { margin-top: 18px; }
+    #kanalenMount #fiTabs [data-fi-sub="joost"] { display: none !important; }
+    #kanalenView .ac-loading { padding: 40px 20px; }
+
     /* ─── Joost sub-tabs (finance-only) ───────────────────────────────────── */
     .joost-subtabs {
       display: flex;
@@ -1026,6 +1064,10 @@
 <script src="/modules/shared/theme-shared.js"></script>
 <script src="/modules/shared/permissions.js"></script>
 <script src="/modules/shared/sidebar.js"></script>
+<!-- Kanalen-view: hergebruik bestaande Templates + Connection UIs uit
+     finance-instellingen.js. Module mount idempotent op #kanalenMount; we
+     verbergen z'n eigen Joost-sub-tab (zit al in de Agents-hub). -->
+<script src="/modules/shared/finance-instellingen.js"></script>
 
 <script>
 // ── Constants ────────────────────────────────────────────────────────────────
@@ -1064,6 +1106,9 @@ const state = {
   // Fase 2 — per-agent activity stats (read-only). Module-keyed voor trio,
   // 'lisa' sentinel voor Lisa. null = nog niet geladen of fout.
   activity: null,
+  // Top-level view-toggle (Agents ⇄ Kanalen). Default 'agents'.
+  activeView: 'agents',
+  kanalenMounted: false,
   // Joost-only sub-tab state (finance). Andere modules tonen geen tabs.
   joostActiveSub: 'algemeen',
   joostAutonomySaving: false,
@@ -1360,6 +1405,13 @@ function renderHub() {
   const online = state.agents.filter((a) => a.type === 'joost_config' ? a.is_enabled === true : a.is_active === true).length;
   const total  = state.agents.length;
 
+  // Schakelaar Agents ⇄ Kanalen — zichtbaar als de gebruiker minstens één
+  // Kanalen-recht heeft (admin.whatsapp_templates OR admin.whatsapp_config).
+  // admin.joost_config (page-gate) heeft op de Kanalen-view geen toegevoegde
+  // waarde — Joost-config beheer zit al in de Agents-hub.
+  const canKanalen = can('admin.whatsapp_templates') || can('admin.whatsapp_config');
+  const cur = state.activeView === 'kanalen' ? 'kanalen' : 'agents';
+
   document.getElementById('page-content').innerHTML = `
     <div class="ac-header">
       <div class="ac-core" aria-hidden="true">
@@ -1370,23 +1422,96 @@ function renderHub() {
       <div class="ac-title-wrap">
         <div class="ac-title">Agent command center</div>
         <div class="ac-sub">Centrale controle over alle AI-agents. Klik een agent om z'n gedrag inline aan te passen.</div>
+        ${canKanalen ? `
+          <div class="ac-view-toggle" id="acViewToggle" style="margin-top:10px">
+            <button type="button" data-view="agents"  class="${cur === 'agents'  ? 'active' : ''}"><i class="ti ti-robot"></i> Agents</button>
+            <button type="button" data-view="kanalen" class="${cur === 'kanalen' ? 'active' : ''}"><i class="ti ti-plug"></i> Kanalen</button>
+          </div>` : ''}
       </div>
       <div class="ac-status">
         <span class="live-dot"></span>${online}/${total} actief
       </div>
     </div>
 
-    ${renderDeck()}
-
-    <div class="ac-grid" id="acGrid">
-      ${state.agents.map(renderAgentCard).join('')}
+    <div id="agentsView" style="${cur === 'agents' ? '' : 'display:none'}">
+      ${renderDeck()}
+      <div class="ac-grid" id="acGrid">
+        ${state.agents.map(renderAgentCard).join('')}
+      </div>
+      <div class="ac-editor" id="acEditor" aria-live="polite"></div>
     </div>
 
-    <div class="ac-editor" id="acEditor" aria-live="polite"></div>
+    <div id="kanalenView" style="${cur === 'kanalen' ? '' : 'display:none'}">
+      <div id="kanalenMount">
+        <div class="ac-loading"><i class="ti ti-loader-2"></i> Kanalen laden…</div>
+      </div>
+    </div>
   `;
 
   document.getElementById('acGrid').addEventListener('click', onCardClick);
   acApplyCoreIntensity();
+
+  const tog = document.getElementById('acViewToggle');
+  if (tog) {
+    tog.addEventListener('click', (ev) => {
+      const b = ev.target.closest('button[data-view]');
+      if (b) acSwitchView(b.dataset.view);
+    });
+  }
+
+  // Bij directe (her-)render terwijl Kanalen al actief is: zorg dat de mount
+  // (her)gebruikt wordt. Mount is idempotent en wordt slechts één keer
+  // uitgevoerd dankzij window.FinanceInstellingen.__loaded en host-mount-guard.
+  if (cur === 'kanalen' && canKanalen) mountKanalenView();
+}
+
+function acSwitchView(view) {
+  if (view !== 'agents' && view !== 'kanalen') return;
+  if (view === state.activeView) return;
+  // Permissie-check: Kanalen vereist een van beide rechten.
+  if (view === 'kanalen' && !(can('admin.whatsapp_templates') || can('admin.whatsapp_config'))) {
+    toastErr('Geen rechten voor Kanalen (admin.whatsapp_templates of admin.whatsapp_config)');
+    return;
+  }
+  state.activeView = view;
+  // DOM-toggle zonder volledige re-render (behoudt editor-state in Agents-view).
+  const agents = document.getElementById('agentsView');
+  const kanalen = document.getElementById('kanalenView');
+  if (agents)  agents.style.display  = view === 'agents'  ? '' : 'none';
+  if (kanalen) kanalen.style.display = view === 'kanalen' ? '' : 'none';
+  document.querySelectorAll('#acViewToggle button[data-view]').forEach((b) => {
+    b.classList.toggle('active', b.dataset.view === view);
+  });
+  if (view === 'kanalen') mountKanalenView();
+}
+window.acSwitchView = acSwitchView;
+
+// Mount finance-instellingen.js (Templates + Connection) op #kanalenMount.
+// Module is idempotent: bij tweede aanroep no-op. Direct na mount klikken
+// we op de templates-tab (Joost-sub-tab verbergen we via CSS) zodat de
+// gebruiker meteen op WhatsApp Templates landt.
+function mountKanalenView() {
+  const host = document.getElementById('kanalenMount');
+  if (!host) return;
+  if (!window.FinanceInstellingen || typeof window.FinanceInstellingen.mount !== 'function') {
+    host.innerHTML = `<div class="ac-loading" style="color:var(--color-danger-text)">Finance-instellingen-script ontbreekt. Reload de pagina.</div>`;
+    return;
+  }
+  try {
+    window.FinanceInstellingen.mount({ host });
+    state.kanalenMounted = true;
+  } catch (e) {
+    console.error('[agent-center] kanalen mount:', e?.message || e);
+    host.innerHTML = `<div class="ac-loading" style="color:var(--color-danger-text)">Kanalen laden mislukt: ${esc(e?.message || e)}</div>`;
+    return;
+  }
+  // Auto-switch naar Templates. Mount cleart altijd naar default-sub bij
+  // eerste keer; tweede aanroep behoudt actieve sub-tab. We forceren via
+  // de templates-knop zodat gebruiker niet op de verborgen Joost-tab strandt.
+  try {
+    const tplBtn = host.querySelector('#fiTabs [data-fi-sub="templates"]');
+    if (tplBtn && !tplBtn.classList.contains('active')) tplBtn.click();
+  } catch {}
 }
 
 function renderAgentCard(a) {
