@@ -108,12 +108,16 @@ export default async function handler(req, res) {
     if (!customer.email) return res.status(200).json({ sent: false, reason: 'geen-email' });
 
     // 3) Workflow opnieuw aanroepen voor een VERS temp_password.
+    //    BUBBLE_WF_SECRET wordt meegestuurd zodat Bubble de publieke
+    //    workflow kan beveiligen. Lege string bij ontbrekende env.
+    //    Reist alleen outbound; diagnostiek logt geen request-body.
     let tempPassword = null;
     try {
       const wf = await bubbleWorkflow('create_student_basic', {
         email:      String(customer.email).trim().toLowerCase(),
         first_name: String(customer.first_name || '').trim(),
         last_name:  String(customer.last_name  || '').trim(),
+        secret:     (process.env.BUBBLE_WF_SECRET || ''),
       });
       tempPassword = extractTempPasswordFromWf(wf);
     } catch (e) {

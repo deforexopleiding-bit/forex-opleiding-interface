@@ -187,10 +187,17 @@ export async function provisionOnboardingStudent(onboardingId) {
   // de helper een 'reason'.
   let tempPassword = null;
   try {
+    // Gedeeld secret voor de publieke Bubble-workflow (BUBBLE_WF_SECRET).
+    // Bubble valideert dit straks server-side; vóór die check negeert
+    // Bubble de extra param. Lege string bij ontbrekende env zodat we
+    // nu niets breken; ná de Bubble-check is misconfig een terechte fail.
+    // NB: het secret zit ALLEEN in de outbound body — bubble.js noch onze
+    // diagnostics (wf_raw/wf_error) loggen de request-body, dus geen leak.
     wfRaw = await bubbleWorkflow('create_student_basic', {
       email,
       first_name: firstName,
       last_name : lastName,
+      secret    : (process.env.BUBBLE_WF_SECRET || ''),
     });
     bubbleUserId = extractUserIdFromWf(wfRaw);
     tempPassword = extractTempPasswordFromWf(wfRaw);
