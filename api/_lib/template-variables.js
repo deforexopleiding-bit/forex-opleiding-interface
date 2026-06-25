@@ -145,6 +145,8 @@ export const AVAILABLE_VARIABLES = [
   { key: 'onboarding.wizard_link',  label: 'Wizard-link',     category: 'onboarding', example: 'https://forex-opleiding-interface.vercel.app/modules/onboarding.html?t=00000000-0000-0000-0000-000000000000', requires_context: 'onboarding' },
   { key: 'onboarding.traject_label', label: 'Traject-label',  category: 'onboarding', example: 'Forex Masterclass 1-op-1', requires_context: 'onboarding' },
   { key: 'onboarding.status',       label: 'Onboarding-status', category: 'onboarding', example: 'aangemeld', requires_context: 'onboarding' },
+  { key: 'onboarding.login_url',    label: 'Login-URL Bubble', category: 'onboarding', example: 'https://dashboard.deforexopleiding.nl', requires_context: 'onboarding' },
+  { key: 'onboarding.temp_password', label: 'Tijdelijk wachtwoord (alleen credentials-flow)', category: 'onboarding', example: 'Aw9!Xq2p', requires_context: 'onboarding' },
 
   // ── datum ──────────────────────────────────────────────────────────────
   { key: 'datum.vandaag',     label: 'Datum vandaag', category: 'datum', example: '09-06-2026',  requires_context: null },
@@ -439,6 +441,8 @@ function getOnboardingValue(onboarding, key) {
     }
     case 'onboarding.traject_label': return String(onboarding.traject_label || '');
     case 'onboarding.status':        return String(onboarding.status || '');
+    case 'onboarding.login_url':     return String(onboarding.login_url || '');
+    case 'onboarding.temp_password': return String(onboarding.temp_password || '');
     default: return '';
   }
 }

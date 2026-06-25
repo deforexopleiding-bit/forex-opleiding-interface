@@ -62,6 +62,10 @@ function toE164Plus(phone) {
  *                                              Wordt NIET aangeroepen bij dry=true.
  * @param {boolean} [opts.dry=false]         - report-only modus; geen Meta-send
  *                                              en geen persist + geen postSendUpdate.
+ * @param {object} [opts.extraOnboardingCtx] - extra velden die in de onboarding-
+ *                                              context worden gemerged (bv. temp_password,
+ *                                              login_url) voor de credentials-flow.
+ *                                              Worden NIET gepersist.
  * @returns {Promise<{
  *   sent: boolean, dry?: boolean,
  *   reason?: string, error?: string,
@@ -79,6 +83,7 @@ export async function sendOnboardingTemplateGeneric({
   auditAction = 'onboarding.template.sent',
   postSendUpdate = null,
   dry = false,
+  extraOnboardingCtx = null,
 } = {}) {
   if (!onboardingId) return { sent: false, reason: 'no-onboarding-id' };
   if (!templateName) return { sent: false, reason: 'no-template-name' };
@@ -150,6 +155,12 @@ export async function sendOnboardingTemplateGeneric({
       status:        ob.status,
       traject_label: ob.traject?.label || null,
     };
+    // Caller-specifieke extra context (bv. credentials-flow met
+    // temp_password + login_url). NIET gepersist; alleen voor de
+    // variabelen-resolver van deze ene template-send.
+    if (extraOnboardingCtx && typeof extraOnboardingCtx === 'object') {
+      Object.assign(onboardingCtx, extraOnboardingCtx);
+    }
     const ctx = { customer, onboarding: onboardingCtx, moduleContext };
     let resolved = {};
     if (bodyMapping && typeof bodyMapping === 'object' && Object.keys(bodyMapping).length > 0) {
