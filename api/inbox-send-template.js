@@ -162,6 +162,40 @@ export default async function handler(req, res) {
     if (!conv) return res.status(404).json({ error: 'Conversation niet gevonden' });
     if (!conv.phone_number) return res.status(400).json({ error: 'Conversation heeft geen phone_number' });
 
+    // ─── Refined module-check (parallel met inbox-send.js) ──────────────────
+    // Autoritatieve module-bepaling op basis van conv.phone_number_id →
+    // whatsapp_module_config. Voorkomt dat een gebruiker met alleen
+    // events.simone.use namens finance verstuurt (of omgekeerd), en zelfde
+    // voor onboarding. Default = finance bij onbekende pnId → preserve
+    // byte-identiek gedrag voor pre-multi-line conv-rijen.
+    let convModule = 'finance';
+    if (conv.phone_number_id) {
+      try {
+        const { data: convMod, error: convModErr } = await supabaseAdmin
+          .from('whatsapp_module_config')
+          .select('module')
+          .eq('phone_number_id', conv.phone_number_id)
+          .eq('is_active', true)
+          .maybeSingle();
+        if (convModErr) {
+          console.error('[inbox-send-template] conv-module lookup:', convModErr.message);
+        } else if (convMod?.module) {
+          convModule = String(convMod.module).toLowerCase();
+        }
+      } catch (e) {
+        console.error('[inbox-send-template] conv-module exception:', e.message);
+      }
+    }
+    if (convModule === 'events' && !hasSimoneUse) {
+      return res.status(403).json({ error: 'Geen rechten (events.simone.use voor events-conv)' });
+    }
+    if (convModule === 'onboarding' && !hasOnboardingSend) {
+      return res.status(403).json({ error: 'Geen rechten (onboarding.inbox.send voor onboarding-conv)' });
+    }
+    if (convModule !== 'events' && convModule !== 'onboarding' && !hasFinanceSend) {
+      return res.status(403).json({ error: 'Geen rechten (finance.inbox.send voor finance-conv)' });
+    }
+
     // Persistente attendee-koppeling vult de context als er geen expliciete
     // context_event_attendee_id is meegegeven. Expliciete waarde uit body
     // wint altijd (operator-override).
