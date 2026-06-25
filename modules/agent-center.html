@@ -235,6 +235,71 @@
     .ac-channel .ch-on  { color: var(--color-success-text); }
     .ac-channel .ch-off { color: var(--color-neutral-text); }
 
+    /* Fase 2 — live stats-rij op de kaarten. */
+    .ac-stats {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 8px 10px;
+      background: var(--surface-page);
+      border: 1px solid var(--border-subtle);
+      border-radius: 8px;
+      font-size: 11.5px;
+      color: var(--text-secondary);
+      flex-wrap: wrap;
+      min-height: 36px;
+      animation: ac-fade-in .25s ease;
+    }
+    .ac-stats.skeleton {
+      color: var(--text-tertiary);
+      background: repeating-linear-gradient(
+        135deg,
+        var(--surface-page) 0px,
+        var(--surface-page) 10px,
+        var(--surface-card-hover) 10px,
+        var(--surface-card-hover) 20px
+      );
+      animation: ac-skeleton-pulse 1.8s ease-in-out infinite;
+    }
+    @keyframes ac-skeleton-pulse {
+      0%, 100% { opacity: 1; }
+      50%      { opacity: .55; }
+    }
+    .ac-stats .stat {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      font-weight: 600;
+      color: var(--text-primary);
+    }
+    .ac-stats .stat .label {
+      color: var(--text-tertiary);
+      font-weight: 500;
+      margin-left: 2px;
+    }
+    .ac-stats .stat.warn {
+      color: var(--color-warning-text);
+    }
+    .ac-stats .stat.warn .pulse-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--color-warning);
+      box-shadow: 0 0 0 3px var(--color-warning-soft);
+      animation: ac-warn-pulse 1.4s ease-in-out infinite;
+      margin-right: 2px;
+    }
+    @keyframes ac-warn-pulse {
+      0%, 100% { transform: scale(1);  opacity: 1;   }
+      50%      { transform: scale(.75); opacity: .55; }
+    }
+    .ac-stats .last-activity {
+      margin-left: auto;
+      font-size: 11px;
+      color: var(--text-tertiary);
+      font-weight: 500;
+    }
+
     .ac-cta {
       margin-top: auto;
       font-size: 12px;
@@ -624,7 +689,10 @@
       .ac-core .core-orbit,
       .ac-core .core-ring,
       .ac-status .live-dot,
-      .ac-status-pill .pulse {
+      .ac-status-pill .pulse,
+      .ac-stats,
+      .ac-stats.skeleton,
+      .ac-stats .stat.warn .pulse-dot {
         animation: none !important;
       }
       .ac-editor { animation: none !important; }
@@ -668,6 +736,9 @@ const MODELS = ['claude-sonnet-4-6', 'claude-opus-4-7', 'claude-haiku-4-5'];
 const state = {
   agents: [],
   loadingHub: true,
+  // Fase 2 — per-agent activity stats (read-only). Module-keyed voor trio,
+  // 'lisa' sentinel voor Lisa. null = nog niet geladen of fout.
+  activity: null,
   activeModule: null,           // module-key van de open joost-editor (null = geen)
   editingCfg: null,             // huidige joost_config-shape (read-modify-write)
   editingDirty: false,
@@ -699,6 +770,72 @@ function toastOk(msg) {
 }
 function can(key) { return window.RBAC?.canSync?.(key) || false; }
 
+// ── Fase 2 — stats helpers ──────────────────────────────────────────────────
+function relTime(iso) {
+  if (!iso) return '—';
+  const t = new Date(iso).getTime();
+  if (!Number.isFinite(t)) return '—';
+  const diffSec = Math.round((Date.now() - t) / 1000);
+  if (diffSec < 60)        return 'net actief';
+  if (diffSec < 3600)      return Math.floor(diffSec / 60)   + ' min geleden';
+  if (diffSec < 86400)     return Math.floor(diffSec / 3600) + ' u geleden';
+  if (diffSec < 7 * 86400) return Math.floor(diffSec / 86400) + ' d geleden';
+  return new Date(iso).toLocaleDateString('nl-NL', { day: '2-digit', month: 'short' });
+}
+
+// Bouw de stats-rij voor een agent. key='lisa' of moduleKey voor het trio.
+// Geeft skeleton-placeholder terug tot state.activity is geladen.
+function renderAgentStats(key) {
+  if (!state.activity) {
+    return `<div class="ac-stats skeleton"><span><i class="ti ti-loader-2"></i> Live stats laden…</span></div>`;
+  }
+  if (key === 'lisa') {
+    const s = state.activity.lisa || {};
+    const warn = (s.human_takeover || 0) > 0;
+    return `
+      <div class="ac-stats">
+        <span class="stat"><strong>${esc(String(s.conversations_today || 0))}</strong><span class="label">gesprekken</span></span>
+        <span class="stat"><strong>${esc(String(s.qualified || 0))}</strong><span class="label">gekwalificeerd</span></span>
+        <span class="stat"><strong>${esc(String(s.call_booked || 0))}</strong><span class="label">call(s) geboekt</span></span>
+        ${warn ? `<span class="stat warn"><span class="pulse-dot"></span><strong>${esc(String(s.human_takeover))}</strong><span class="label">mens actief</span></span>` : ''}
+        <span class="last-activity">${esc(relTime(s.last_activity_at))}</span>
+      </div>
+    `;
+  }
+  const t = (state.activity.trio || []).find((r) => r.module === key);
+  if (!t) {
+    return `<div class="ac-stats"><span class="stat" style="color:var(--text-tertiary)"><i class="ti ti-x"></i> stats niet beschikbaar</span></div>`;
+  }
+  const warn = (t.handoffs || 0) > 0;
+  return `
+    <div class="ac-stats">
+      <span class="stat"><strong>${esc(String(t.open_suggestions || 0))}</strong><span class="label">open</span></span>
+      ${warn ? `<span class="stat warn"><span class="pulse-dot"></span><strong>${esc(String(t.handoffs))}</strong><span class="label">handoff</span></span>` : ''}
+      <span class="stat"><strong>${esc(String(t.messages_today || 0))}</strong><span class="label">berichten vandaag</span></span>
+      <span class="stat"><strong>${esc(String(t.active_conversations || 0))}</strong><span class="label">actief</span></span>
+      <span class="last-activity">${esc(relTime(t.last_activity_at))}</span>
+    </div>
+  `;
+}
+
+// Niet-blokkerend laden van /api/agents-activity. Faal → kaart blijft werken
+// zonder stats (we vervangen de skeleton door een grijze 'niet beschikbaar').
+async function loadAgentsActivity() {
+  try {
+    const r = await window.AgentShared.apiFetch('/api/agents-activity');
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok || data?.ok !== true) throw new Error(data?.error || ('HTTP ' + r.status));
+    state.activity = data;
+  } catch (e) {
+    console.warn('[agent-center] activity:', e?.message || e);
+    state.activity = { trio: [], lisa: null, team_totals: { open_suggestions: 0, handoffs: 0 } };
+  }
+  // Alleen de hub-grid opnieuw renderen — niet de hele pagina, zodat
+  // editor-state (Joost of Lisa) behouden blijft.
+  const grid = document.getElementById('acGrid');
+  if (grid) grid.innerHTML = state.agents.map(renderAgentCard).join('');
+}
+
 // ── Boot ─────────────────────────────────────────────────────────────────────
 (async function init() {
   try {
@@ -718,6 +855,9 @@ function can(key) { return window.RBAC?.canSync?.(key) || false; }
 
     await loadAgents();
     renderHub();
+    // Fase 2 — niet-blokkerend: stats laden en kaarten verrijken zodra
+    // ze binnen zijn. Faal blijft fail-soft binnen loadAgentsActivity.
+    loadAgentsActivity();
   } catch (e) {
     console.error('[agent-center] init', e);
     toastErr('Pagina laden mislukt: ' + (e?.message || e));
@@ -784,6 +924,7 @@ function renderAgentCard(a) {
           <i class="ti ti-version"></i>
           <span>Versie ${esc(String(a.version ?? '—'))}</span>
         </div>
+        ${renderAgentStats('lisa')}
         <div class="ac-cta">
           <span><i class="ti ti-settings"></i> Gedrag bewerken</span>
           <span class="arrow"><i class="ti ti-arrow-right"></i></span>
@@ -815,6 +956,7 @@ function renderAgentCard(a) {
           ? `<span class="${channel.is_active ? 'ch-on' : 'ch-off'}">${esc(info.channelLabel)} · ${channel.is_active ? 'verbonden' : 'niet actief'}</span>`
           : `<span class="ch-off">${esc(info.channelLabel)} · geen kanaal-config</span>`}
       </div>
+      ${renderAgentStats(a.module)}
       <div class="ac-cta">
         <span><i class="ti ti-settings"></i> Gedrag bewerken</span>
         <span class="arrow"><i class="ti ti-arrow-right"></i></span>
