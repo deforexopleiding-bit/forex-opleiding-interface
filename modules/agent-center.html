@@ -640,6 +640,72 @@
       gap: 8px;
     }
 
+    /* ─── Joost sub-tabs (finance-only) ───────────────────────────────────── */
+    .joost-subtabs {
+      display: flex;
+      gap: 4px;
+      flex-wrap: wrap;
+      border-bottom: 1px solid var(--border-subtle);
+      margin-bottom: 16px;
+    }
+    .joost-subtab {
+      background: transparent;
+      border: none;
+      border-bottom: 2px solid transparent;
+      color: var(--text-secondary);
+      cursor: pointer;
+      padding: 8px 14px;
+      font-size: 13px;
+      font-weight: 600;
+      font-family: inherit;
+      transition: color .15s ease, border-color .15s ease;
+    }
+    .joost-subtab:hover { color: var(--text-primary); }
+    .joost-subtab.active {
+      color: var(--brand-primary);
+      border-bottom-color: var(--brand-primary);
+    }
+    .joost-sub-section { display: none; }
+    .joost-sub-section.active { display: block; }
+
+    /* Decision Log tabel */
+    .joost-decisions-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+    .joost-decisions-table th { text-align: left; font-weight: 600; color: var(--text-tertiary); padding: 6px 8px; border-bottom: 1px solid var(--border-subtle); font-size: 11px; text-transform: uppercase; letter-spacing: .04em; }
+    .joost-decisions-table td { padding: 7px 8px; border-bottom: 1px solid var(--border-subtle); color: var(--text-primary); vertical-align: top; }
+    .joost-decisions-table tr.clickable { cursor: pointer; }
+    .joost-decisions-table tr.clickable:hover td { background: var(--surface-card-hover); }
+    .joost-decisions-table tr.detail td {
+      background: var(--surface-page);
+      padding: 0;
+    }
+    .joost-decisions-table .detail-pre {
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 11.5px;
+      background: var(--surface-page);
+      padding: 10px 12px;
+      white-space: pre-wrap;
+      word-break: break-word;
+      color: var(--text-secondary);
+    }
+    .joost-decisions-status { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; }
+    .joost-decisions-status.allow   { background: var(--color-success-soft); color: var(--color-success-text); }
+    .joost-decisions-status.block   { background: var(--color-danger-soft);  color: var(--color-danger-text); }
+    .joost-decisions-status.other   { background: var(--color-neutral-soft); color: var(--color-neutral-text); }
+    .joost-decisions-refresh {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 10px;
+      font-size: 11.5px;
+      color: var(--text-tertiary);
+    }
+    .joost-decisions-refresh .live-dot {
+      width: 6px; height: 6px; border-radius: 50%;
+      background: var(--color-success);
+      box-shadow: 0 0 0 3px var(--color-success-soft);
+      animation: ac-blink 1.6s ease-in-out infinite;
+    }
+
     /* ─── Lisa sub-tabs (Fase 1c) ─────────────────────────────────────────── */
     .lisa-subtabs {
       display: flex;
@@ -821,7 +887,8 @@
       .ac-stats,
       .ac-stats.skeleton,
       .ac-stats .stat.warn .pulse-dot,
-      .ac-tile.attention .pulse-dot {
+      .ac-tile.attention .pulse-dot,
+      .joost-decisions-refresh .live-dot {
         animation: none !important;
       }
       .ac-editor { animation: none !important; }
@@ -862,12 +929,39 @@ const MODULE_INFO = {
 };
 const MODELS = ['claude-sonnet-4-6', 'claude-opus-4-7', 'claude-haiku-4-5'];
 
+// Joost-only sub-tab strip (alleen finance). Algemeen blijft de bestaande
+// editor; Autonomy en Decision Log porten finance-instellingen.js.
+const JOOST_SUB_TABS = ['algemeen', 'autonomy', 'decisions'];
+const JOOST_SUB_TAB_LABELS = {
+  algemeen:  'Algemeen',
+  autonomy:  'Autonomy',
+  decisions: 'Decision Log',
+};
+// Vijf E2-feature-flags die de Autonomy-tab beheert. Read-modify-write op
+// joost_config.feature_flags zodat ongerelateerde keys (reactive_suggest_enabled
+// / auto_send_enabled / etc.) behouden blijven.
+const JOOST_E2_FLAGS = [
+  ['e2_decision_engine_logs',    'Decision-engine logs',     'Audit-log van elke autonomy-beslissing (aanbevolen aan).', true],
+  ['e2_reactive_autonomy',       'Reactieve autonomy',       'Joost mag in real-time reageren op inbound berichten.',     false],
+  ['e2_arrangement_negotiation', 'Arrangement-onderhandeling','Joost mag onderhandelen over splitsing / uitstel.',         false],
+  ['e2_outbound_executor',       'Outbound executor',        'Joost mag autonoom outbound berichten versturen.',          false],
+  ['e2_outbound_cron',           'Outbound cron',            'Tijdgebonden outbound-cron mag draaien.',                   false],
+];
+const JOOST_DECISIONS_REFRESH_MS = 30000;
+
 const state = {
   agents: [],
   loadingHub: true,
   // Fase 2 — per-agent activity stats (read-only). Module-keyed voor trio,
   // 'lisa' sentinel voor Lisa. null = nog niet geladen of fout.
   activity: null,
+  // Joost-only sub-tab state (finance). Andere modules tonen geen tabs.
+  joostActiveSub: 'algemeen',
+  joostAutonomySaving: false,
+  joostDecisionsLoaded: false,
+  joostDecisions: [],
+  joostDecisionsTimer: null,  // setInterval handle — moet netjes worden opgeruimd
+  joostDecisionsLastRefresh: null,
   activeModule: null,           // module-key van de open joost-editor (null = geen)
   editingCfg: null,             // huidige joost_config-shape (read-modify-write)
   editingDirty: false,
@@ -1264,6 +1358,12 @@ async function openEditor(moduleKey) {
   // editors tegelijk denkt te hebben.
   if (state.activeIsLisa && state.lisaDirty
       && !confirm('Niet-opgeslagen Lisa-wijzigingen weggooien?')) return;
+  // Eventueel lopende Decision Log-poll (vorige joost-editor sessie) stoppen
+  // vóór nieuwe editor opent.
+  acStopJoostDecisionsTimer();
+  state.joostActiveSub = 'algemeen';
+  state.joostDecisionsLoaded = false;
+  state.joostDecisions = [];
   state.activeIsLisa = false;
   state.lisaCfg = null;
   state.lisaDirty = false;
@@ -1294,6 +1394,12 @@ async function openEditor(moduleKey) {
 function closeEditor() {
   if (state.activeIsLisa) return closeLisaEditor();
   if (state.editingDirty && !confirm('Niet-opgeslagen wijzigingen weggooien?')) return;
+  // Decision Log poll netjes stoppen vóór state-reset (Lesson 20:
+  // badge/poll-cleanup; voorkomt lekkende intervals na sluiten).
+  acStopJoostDecisionsTimer();
+  state.joostActiveSub = 'algemeen';
+  state.joostDecisionsLoaded = false;
+  state.joostDecisions = [];
   state.activeModule = null;
   state.editingCfg = null;
   state.editingDirty = false;
@@ -1330,6 +1436,9 @@ function renderEditor() {
   const handoffThreshold   = Number.isFinite(Number(ac.handoff_threshold))   ? ac.handoff_threshold   : 0.5;
   const autoSendThreshold  = Number.isFinite(Number(ac.auto_send_threshold)) ? ac.auto_send_threshold : 0.85;
 
+  const isFinance = c.module === 'finance';
+  const joostSub = state.joostActiveSub || 'algemeen';
+
   document.getElementById('acEditor').innerHTML = `
     <div class="ed-head">
       <div>
@@ -1339,6 +1448,16 @@ function renderEditor() {
       <button class="ed-close" type="button" onclick="acCloseEditor()"><i class="ti ti-x"></i> Sluiten</button>
     </div>
 
+    ${isFinance ? `
+    <div class="joost-subtabs" id="joostSubtabs">
+      ${JOOST_SUB_TABS.map((s) => `
+        <button type="button" class="joost-subtab ${joostSub === s ? 'active' : ''}" data-joost-sub="${esc(s)}">
+          ${esc(JOOST_SUB_TAB_LABELS[s])}
+        </button>
+      `).join('')}
+    </div>` : ''}
+
+    <div class="${isFinance ? 'joost-sub-section ' + (joostSub === 'algemeen' ? 'active' : '') : ''}" ${isFinance ? 'data-joost-sub="algemeen"' : ''}>
     <div class="ed-section">
       <h3>Identiteit</h3>
       <div class="ed-row-2">
@@ -1425,7 +1544,32 @@ function renderEditor() {
         <button class="btn-primary" type="button" id="acSaveBtn" onclick="acSave()"><i class="ti ti-device-floppy"></i> Opslaan</button>
       </div>
     </div>
+    </div>${/* sluit Algemeen-sub-section */ ''}
+
+    ${isFinance ? `
+    <div class="joost-sub-section ${joostSub === 'autonomy' ? 'active' : ''}" data-joost-sub="autonomy">
+      ${renderJoostAutonomy()}
+    </div>
+
+    <div class="joost-sub-section ${joostSub === 'decisions' ? 'active' : ''}" data-joost-sub="decisions">
+      ${renderJoostDecisionsShell()}
+    </div>` : ''}
   `;
+
+  // Joost-only sub-tab click + initial bindings.
+  if (isFinance) {
+    const tabs = document.getElementById('joostSubtabs');
+    if (tabs) {
+      tabs.addEventListener('click', (ev) => {
+        const b = ev.target.closest('.joost-subtab[data-joost-sub]');
+        if (b) acJoostSwitchSub(b.dataset.joostSub);
+      });
+    }
+    bindJoostAutonomy();
+    // Decision Log lazy-binding: pas bij switch naar 'decisions' starten we
+    // de fetch + 30s-interval (geen verspilling als tab niet geopend wordt).
+    if (joostSub === 'decisions') startJoostDecisions();
+  }
 
   // Toggle-click-handlers.
   for (const id of ['tEnabled', 'tReactive', 'tAutoSend']) {
@@ -1545,6 +1689,273 @@ async function acSave() {
   }
 }
 window.acSave = acSave;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// JOOST — sub-tabs (finance-only): Algemeen / Autonomy / Decision Log.
+// Port van modules/shared/finance-instellingen.js (view-joost-autonomy +
+// view-joost-decisions). UITSLUITEND bestaande endpoints:
+//   GET  /api/joost-autonomy-decisions-list?limit=50
+//   POST /api/joost-config-upsert  (read-modify-write op feature_flags)
+// ─────────────────────────────────────────────────────────────────────────────
+
+function acJoostSwitchSub(sub) {
+  if (!JOOST_SUB_TABS.includes(sub)) return;
+  const prev = state.joostActiveSub;
+  state.joostActiveSub = sub;
+  document.querySelectorAll('#joostSubtabs .joost-subtab').forEach((b) => {
+    b.classList.toggle('active', b.dataset.joostSub === sub);
+  });
+  document.querySelectorAll('#acEditor [data-joost-sub]').forEach((el) => {
+    // alleen sub-sections togglen (subtabs hebben ook data-joost-sub maar
+    // ZIJN niet de sub-section — die check via classList).
+    if (el.classList.contains('joost-sub-section')) {
+      el.classList.toggle('active', el.dataset.joostSub === sub);
+    }
+  });
+  // Decision Log: starten/stoppen van de 30s-poll bij wisselen.
+  if (sub === 'decisions') {
+    startJoostDecisions();
+  } else if (prev === 'decisions') {
+    acStopJoostDecisionsTimer();
+  }
+}
+window.acJoostSwitchSub = acJoostSwitchSub;
+
+// ── Autonomy (5 E2-feature-flags, read-modify-write) ──
+function renderJoostAutonomy() {
+  const ff = (state.editingCfg && state.editingCfg.feature_flags && typeof state.editingCfg.feature_flags === 'object')
+    ? state.editingCfg.feature_flags : {};
+  const toggles = JOOST_E2_FLAGS.map(([key, label, help, defaultOn]) => {
+    const cur = ff[key];
+    const on = (cur === undefined) ? !!defaultOn : !!cur;
+    return `
+      <div class="ed-toggle">
+        <div class="lbl">${esc(label)}
+          <small>${esc(help)} · <code>${esc(key)}</code></small>
+        </div>
+        <span class="toggle ${on ? 'on' : ''}" id="jaut_${esc(key)}" role="button" tabindex="0" data-e2-flag="${esc(key)}"></span>
+      </div>
+    `;
+  }).join('');
+  return `
+    <div class="ed-section">
+      <h3>Autonomy — E2 feature-flags</h3>
+      <div class="ed-help" style="margin-bottom:10px">
+        Conservatief default: alleen <code>e2_decision_engine_logs</code> staat aan.
+        Andere flags activeren autonome acties — pas aanzetten als je Decision Log
+        hebt bekeken en zeker bent dat het gedrag klopt.
+      </div>
+      ${toggles}
+    </div>
+
+    <div class="ed-footer">
+      <div></div>
+      <div class="right">
+        <span class="save-info" id="acJoostAutoSaveInfo"></span>
+        <button class="btn-primary" type="button" id="acJoostAutoSaveBtn" onclick="acJoostSaveAutonomy()">
+          <i class="ti ti-device-floppy"></i> Autonomy opslaan
+        </button>
+      </div>
+    </div>
+  `;
+}
+
+function bindJoostAutonomy() {
+  document.querySelectorAll('#acEditor [data-e2-flag]').forEach((el) => {
+    el.addEventListener('click', () => {
+      el.classList.toggle('on');
+    });
+  });
+}
+
+function setJoostAutoSaveInfo(msg, kind) {
+  const el = document.getElementById('acJoostAutoSaveInfo');
+  if (!el) return;
+  el.classList.remove('error', 'ok');
+  if (kind === 'error') el.classList.add('error');
+  if (kind === 'ok')    el.classList.add('ok');
+  el.textContent = msg || '';
+}
+
+async function acJoostSaveAutonomy() {
+  if (state.joostAutonomySaving) return;
+  if (!state.editingCfg || state.editingCfg.module !== 'finance') return;
+  setJoostAutoSaveInfo('', null);
+
+  // Read-modify-write: behoud bestaande feature_flags (reactive_suggest_enabled,
+  // auto_send_enabled, etc.) en overschrijf alleen de 5 E2-keys.
+  const prevFlags = (state.editingCfg.feature_flags && typeof state.editingCfg.feature_flags === 'object')
+    ? state.editingCfg.feature_flags : {};
+  const merged = { ...prevFlags };
+  for (const [key] of JOOST_E2_FLAGS) {
+    const el = document.getElementById('jaut_' + key);
+    if (el) merged[key] = el.classList.contains('on');
+  }
+
+  state.joostAutonomySaving = true;
+  const btn = document.getElementById('acJoostAutoSaveBtn');
+  if (btn) btn.disabled = true;
+  setJoostAutoSaveInfo('Opslaan…');
+  try {
+    const r = await window.AgentShared.apiFetch('/api/joost-config-upsert', {
+      method: 'POST',
+      body:   JSON.stringify({ module: 'finance', feature_flags: merged }),
+    });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(data?.error || ('HTTP ' + r.status));
+    // Update lokale state met de server-respons zodat een latere save van
+    // het Algemeen-tab (persona/kb/etc.) de versgesavde flags niet overschrijft.
+    if (data.config) state.editingCfg = data.config;
+    setJoostAutoSaveInfo('Opgeslagen ' + new Date().toLocaleTimeString('nl-NL'), 'ok');
+    toastOk('Autonomy-flags opgeslagen');
+  } catch (e) {
+    setJoostAutoSaveInfo('Opslaan mislukt: ' + (e?.message || e), 'error');
+    toastErr('Opslaan mislukt: ' + (e?.message || e));
+  } finally {
+    state.joostAutonomySaving = false;
+    if (btn) btn.disabled = false;
+  }
+}
+window.acJoostSaveAutonomy = acJoostSaveAutonomy;
+
+// ── Decision Log (read-only, 30s auto-refresh) ──
+function renderJoostDecisionsShell() {
+  return `
+    <div class="ed-section">
+      <h3>Decision Log</h3>
+      <div class="joost-decisions-refresh">
+        <span class="live-dot"></span>
+        <span>Auto-refresh elke 30s.</span>
+        <span id="acJoostDecisionsRefreshNote" style="margin-left:auto"></span>
+      </div>
+      <div id="acJoostDecisionsHost">
+        <div class="ac-loading"><i class="ti ti-loader-2"></i> Beslissingen laden…</div>
+      </div>
+    </div>
+  `;
+}
+
+function decisionStatusClass(dec) {
+  const blocked = dec && (dec.blocked_reason || (typeof dec.status === 'string' && dec.status.startsWith('BLOCKED')));
+  if (blocked) return 'block';
+  const sent = dec && (dec.status === 'SENT_AUTONOMOUSLY' || dec.action === 'allow');
+  if (sent) return 'allow';
+  return 'other';
+}
+function decisionStatusLabel(dec) {
+  if (!dec) return '—';
+  if (dec.blocked_reason) return 'BLOCKED · ' + dec.blocked_reason;
+  if (dec.status) return dec.status;
+  if (dec.action) return dec.action;
+  return '—';
+}
+
+function startJoostDecisions() {
+  if (!state.editingCfg || state.editingCfg.module !== 'finance') return;
+  // Eerste fetch + 30s-interval. Bestaande interval eerst opruimen (dubbele
+  // start mag geen lekkende intervals geven).
+  acStopJoostDecisionsTimer();
+  loadJoostDecisions();
+  state.joostDecisionsTimer = setInterval(loadJoostDecisions, JOOST_DECISIONS_REFRESH_MS);
+}
+
+function acStopJoostDecisionsTimer() {
+  if (state.joostDecisionsTimer) {
+    clearInterval(state.joostDecisionsTimer);
+    state.joostDecisionsTimer = null;
+  }
+}
+window.acStopJoostDecisionsTimer = acStopJoostDecisionsTimer;
+
+// Final safety net — page unload moet ALTIJD het 30s-interval opruimen,
+// ook als de gebruiker direct de tab sluit zonder editor expliciet te sluiten.
+window.addEventListener('beforeunload', () => { acStopJoostDecisionsTimer(); });
+
+async function loadJoostDecisions() {
+  // Defensief: als editor inmiddels gesloten is, niet meer renderen.
+  if (!state.editingCfg || state.editingCfg.module !== 'finance' || state.joostActiveSub !== 'decisions') {
+    acStopJoostDecisionsTimer();
+    return;
+  }
+  const host = document.getElementById('acJoostDecisionsHost');
+  const note = document.getElementById('acJoostDecisionsRefreshNote');
+  if (!host) { acStopJoostDecisionsTimer(); return; }
+  try {
+    const r = await window.AgentShared.apiFetch('/api/joost-autonomy-decisions-list?limit=50');
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(data?.error || ('HTTP ' + r.status));
+    const rows = Array.isArray(data?.decisions) ? data.decisions
+               : Array.isArray(data?.rows)      ? data.rows
+               : Array.isArray(data)            ? data
+               : [];
+    state.joostDecisions = rows;
+    state.joostDecisionsLoaded = true;
+    state.joostDecisionsLastRefresh = new Date();
+    renderJoostDecisions();
+    if (note) {
+      const d = state.joostDecisionsLastRefresh;
+      const pad = (n) => String(n).padStart(2, '0');
+      note.textContent = 'Laatste refresh ' + pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds());
+    }
+  } catch (e) {
+    if (!state.joostDecisionsLoaded) {
+      host.innerHTML = `<div class="ac-loading" style="color:var(--color-danger-text)">Beslissingen laden mislukt: ${esc(e?.message || e)}</div>`;
+    } else if (note) {
+      note.textContent = 'Refresh-fout: ' + (e?.message || e);
+    }
+  }
+}
+
+function renderJoostDecisions() {
+  const host = document.getElementById('acJoostDecisionsHost');
+  if (!host) return;
+  const rows = state.joostDecisions || [];
+  if (rows.length === 0) {
+    host.innerHTML = `<div class="ac-loading">Geen autonomy-beslissingen gevonden in audit_log.</div>`;
+    return;
+  }
+  const tbody = rows.map((rr, i) => {
+    const d = rr.decision || {};
+    const statusCls = decisionStatusClass(d);
+    const statusTxt = decisionStatusLabel(d);
+    const created  = rr.created_at ? new Date(rr.created_at).toLocaleString('nl-NL') : '—';
+    const convId   = rr.conversation_id ? String(rr.conversation_id).slice(0, 8) + '…' : '—';
+    const intent   = d.intent || (d.detected_intent || '—');
+    const conf     = (d.confidence != null) ? String(d.confidence) : '—';
+    const reason   = d.reason || rr.reason_text || '—';
+    const detailJson = esc(JSON.stringify(rr, null, 2));
+    return `
+      <tr class="clickable" data-row-idx="${i}">
+        <td>${esc(created)}</td>
+        <td><span class="joost-decisions-status ${statusCls}">${esc(statusTxt)}</span></td>
+        <td><code>${esc(convId)}</code></td>
+        <td>${esc(intent)}</td>
+        <td>${esc(conf)}</td>
+        <td>${esc(reason)}</td>
+      </tr>
+      <tr class="detail" id="jdRowDetail_${i}" style="display:none">
+        <td colspan="6"><pre class="detail-pre">${detailJson}</pre></td>
+      </tr>
+    `;
+  }).join('');
+  host.innerHTML = `
+    <div style="overflow-x:auto">
+      <table class="joost-decisions-table">
+        <thead><tr>
+          <th>Tijd</th><th>Status</th><th>Conv</th><th>Intent</th><th>Conf</th><th>Reden</th>
+        </tr></thead>
+        <tbody>${tbody}</tbody>
+      </table>
+    </div>
+  `;
+  host.querySelectorAll('tr.clickable[data-row-idx]').forEach((tr) => {
+    tr.addEventListener('click', () => {
+      const i = tr.getAttribute('data-row-idx');
+      const det = document.getElementById('jdRowDetail_' + i);
+      if (det) det.style.display = det.style.display === 'none' ? '' : 'none';
+    });
+  });
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Lisa-editor (Fase 1b) — port van modules/lisa.html
@@ -1667,6 +2078,11 @@ async function openLisaEditor() {
   // Switch vanuit Joost-editor: dirty-confirm.
   if (state.activeModule && state.editingDirty
       && !confirm('Niet-opgeslagen wijzigingen weggooien?')) return;
+  // Joost Decision Log-poll stoppen bij switch naar Lisa.
+  acStopJoostDecisionsTimer();
+  state.joostActiveSub = 'algemeen';
+  state.joostDecisionsLoaded = false;
+  state.joostDecisions = [];
   state.activeModule = null;
   state.editingCfg = null;
   state.editingDirty = false;
