@@ -334,6 +334,119 @@
 
     .ac-loading { padding: 60px 20px; text-align: center; color: var(--text-tertiary); font-size: 13px; }
 
+    /* ─── Lisa-editor specifieke onderdelen (Fase 1b) ─────────────────────── */
+    .kw-chips { display: flex; flex-wrap: wrap; gap: 6px; padding: 6px 8px; background: var(--surface-page); border: 1px solid var(--border-default); border-radius: 8px; min-height: 38px; align-items: center; }
+    .kw-chip { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; background: var(--brand-primary-soft); color: var(--brand-primary); border-radius: 99px; font-size: 12px; font-weight: 600; }
+    .kw-chip .kw-x { cursor: pointer; opacity: .6; line-height: 1; font-weight: 800; }
+    .kw-chip .kw-x:hover { opacity: 1; color: var(--color-danger); }
+    .kw-input { flex: 1; min-width: 140px; background: transparent; border: none; outline: none; font-size: 12.5px; font-family: inherit; color: var(--text-primary); padding: 4px 2px; }
+
+    .fu-list { display: grid; gap: 10px; }
+    .fu-step {
+      background: var(--surface-page);
+      border: 1px solid var(--border-subtle);
+      border-radius: 10px;
+      padding: 12px 14px;
+    }
+    .fu-step-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+    .fu-step-head strong { font-size: 12.5px; font-weight: 700; color: var(--text-primary); }
+    .fu-step-del { background: transparent; border: 1px solid var(--border-default); color: var(--text-secondary); cursor: pointer; padding: 2px 9px; border-radius: 6px; font-size: 13px; font-family: inherit; line-height: 1; }
+    .fu-step-del:hover { color: var(--color-danger); border-color: var(--color-danger); }
+    .fu-phases { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
+    .fu-phases label { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--text-secondary); cursor: pointer; padding: 2px 8px; border: 1px solid var(--border-subtle); border-radius: 99px; background: var(--surface-1); }
+    .fu-phases label:has(input:checked) { background: var(--brand-primary-soft); border-color: var(--brand-primary); color: var(--brand-primary); }
+    .fu-meta { display: flex; gap: 10px; align-items: center; margin-top: 4px; font-size: 11.5px; color: var(--text-tertiary); }
+    .fu-meta .ai-flag { margin-left: auto; padding: 2px 8px; border-radius: 99px; background: var(--surface-card-hover); color: var(--text-secondary); font-weight: 600; }
+    .fu-meta .ai-flag.on { background: var(--brand-primary-soft); color: var(--brand-primary); }
+
+    .lisa-version-bar {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 12px;
+      background: var(--surface-page);
+      border: 1px solid var(--border-subtle);
+      border-radius: 10px;
+      font-size: 12px;
+      color: var(--text-secondary);
+      margin-bottom: 14px;
+    }
+    .lisa-version-bar .badge {
+      padding: 2px 8px;
+      border-radius: 99px;
+      font-weight: 700;
+      font-size: 11px;
+      letter-spacing: .04em;
+    }
+    .lisa-version-bar .badge.draft  { background: var(--color-warning-soft); color: var(--color-warning-text); }
+    .lisa-version-bar .badge.live   { background: var(--color-success-soft); color: var(--color-success-text); }
+    .lisa-version-bar .ver-toggle {
+      margin-left: auto;
+      background: transparent;
+      border: 1px solid var(--border-default);
+      color: var(--text-secondary);
+      padding: 4px 10px;
+      border-radius: 7px;
+      font-size: 11.5px;
+      font-weight: 600;
+      cursor: pointer;
+      font-family: inherit;
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+    }
+    .lisa-version-bar .ver-toggle:hover { background: var(--surface-card-hover); color: var(--text-primary); }
+
+    .lisa-history {
+      margin-bottom: 14px;
+      padding: 10px 12px;
+      background: var(--surface-page);
+      border: 1px solid var(--border-subtle);
+      border-radius: 10px;
+    }
+    .lisa-history-row {
+      display: grid;
+      grid-template-columns: 70px 70px 1fr auto;
+      gap: 10px;
+      align-items: center;
+      padding: 6px 0;
+      font-size: 12px;
+      border-bottom: 1px solid var(--border-subtle);
+    }
+    .lisa-history-row:last-child { border-bottom: none; }
+    .lisa-history-row code { color: var(--text-primary); font-size: 11.5px; }
+    .lisa-history-row .note { color: var(--text-tertiary); font-size: 11.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .lisa-history-row .badge { padding: 2px 7px; border-radius: 99px; font-size: 10px; font-weight: 700; text-align: center; }
+    .lisa-history-row .badge.live  { background: var(--color-success-soft); color: var(--color-success-text); }
+    .lisa-history-row .badge.draft { background: var(--color-warning-soft); color: var(--color-warning-text); }
+    .lisa-history-row .badge.old   { background: var(--color-neutral-soft); color: var(--color-neutral-text); }
+    .lisa-history-row .rb-btn {
+      background: transparent;
+      border: 1px solid var(--border-default);
+      color: var(--text-secondary);
+      padding: 3px 9px;
+      border-radius: 6px;
+      font-size: 11.5px;
+      font-weight: 600;
+      cursor: pointer;
+      font-family: inherit;
+    }
+    .lisa-history-row .rb-btn:hover { background: var(--color-warning-soft); color: var(--color-warning-text); border-color: var(--color-warning); }
+    .lisa-history-row .rb-btn:disabled { opacity: .4; cursor: not-allowed; }
+
+    .perm-warn {
+      padding: 10px 12px;
+      background: var(--color-warning-soft);
+      border: 1px solid var(--color-warning);
+      color: var(--color-warning-text);
+      border-radius: 8px;
+      font-size: 12.5px;
+      margin-bottom: 12px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
     @media (prefers-reduced-motion: reduce) {
       .ac-core .core-disc,
       .ac-core .core-orbit,
@@ -383,11 +496,20 @@ const MODELS = ['claude-sonnet-4-6', 'claude-opus-4-7', 'claude-haiku-4-5'];
 const state = {
   agents: [],
   loadingHub: true,
-  activeModule: null,           // module-key van de open editor (null = geen)
+  activeModule: null,           // module-key van de open joost-editor (null = geen)
   editingCfg: null,             // huidige joost_config-shape (read-modify-write)
   editingDirty: false,
   saving: false,
   saveMsg: null,
+  // Fase 1b — Lisa-editor state. Aparte velden om de joost-flow byte-identiek
+  // te laten (Lisa-versionering werkt anders: save_draft + publish + rollback).
+  activeIsLisa: false,
+  lisaCfg: null,                // huidige (draft of actieve) lisa_config-shape
+  lisaActiveVersion: null,      // versie die nu live is (kan != lisaCfg.version bij open draft)
+  lisaDirty: false,
+  lisaSaving: false,
+  lisaHistoryOpen: false,
+  lisaHistory: [],              // history-rijen wanneer panel geopend is
 };
 
 const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -468,8 +590,9 @@ function renderHub() {
 function renderAgentCard(a) {
   if (a.type === 'lisa') {
     const isOnline = a.is_active === true;
+    const isActive = state.activeIsLisa === true;
     return `
-      <div class="ac-card read-only">
+      <div class="ac-card ${isActive ? 'active' : ''}" data-lisa="true">
         <div class="ac-card-head">
           <div class="ac-avatar lisa">${esc((a.persona_name || 'L').charAt(0).toUpperCase())}</div>
           <div style="flex:1;min-width:0">
@@ -484,8 +607,9 @@ function renderAgentCard(a) {
           <i class="ti ti-version"></i>
           <span>Versie ${esc(String(a.version ?? '—'))}</span>
         </div>
-        <div class="ac-cta placeholder">
-          <span><i class="ti ti-info-circle"></i> Inline-instellingen volgen in Fase 1b</span>
+        <div class="ac-cta">
+          <span><i class="ti ti-settings"></i> Gedrag bewerken</span>
+          <span class="arrow"><i class="ti ti-arrow-right"></i></span>
         </div>
       </div>
     `;
@@ -523,6 +647,9 @@ function renderAgentCard(a) {
 }
 
 async function onCardClick(ev) {
+  // Lisa-kaart eerst (heeft data-lisa, geen data-module).
+  const lisaCard = ev.target.closest('.ac-card[data-lisa]');
+  if (lisaCard) return openLisaEditor();
   const card = ev.target.closest('.ac-card[data-module]');
   if (!card) return;
   const moduleKey = card.dataset.module;
@@ -530,8 +657,15 @@ async function onCardClick(ev) {
   await openEditor(moduleKey);
 }
 
-// ── Editor ───────────────────────────────────────────────────────────────────
+// ── Editor (Joost / Simone / Mila — module-aware joost_config) ──────────────
 async function openEditor(moduleKey) {
+  // Switch vanuit Lisa-editor: reset Lisa-state zodat de hub niet 2 actieve
+  // editors tegelijk denkt te hebben.
+  if (state.activeIsLisa && state.lisaDirty
+      && !confirm('Niet-opgeslagen Lisa-wijzigingen weggooien?')) return;
+  state.activeIsLisa = false;
+  state.lisaCfg = null;
+  state.lisaDirty = false;
   state.activeModule = moduleKey;
   state.editingCfg = null;
   state.editingDirty = false;
@@ -557,6 +691,7 @@ async function openEditor(moduleKey) {
 }
 
 function closeEditor() {
+  if (state.activeIsLisa) return closeLisaEditor();
   if (state.editingDirty && !confirm('Niet-opgeslagen wijzigingen weggooien?')) return;
   state.activeModule = null;
   state.editingCfg = null;
@@ -566,6 +701,19 @@ function closeEditor() {
   document.getElementById('acGrid').innerHTML = state.agents.map(renderAgentCard).join('');
 }
 window.acCloseEditor = closeEditor;
+
+function closeLisaEditor() {
+  if (state.lisaDirty && !confirm('Niet-opgeslagen Lisa-wijzigingen weggooien?')) return;
+  state.activeIsLisa = false;
+  state.lisaCfg = null;
+  state.lisaDirty = false;
+  state.lisaHistoryOpen = false;
+  state.lisaHistory = [];
+  document.getElementById('acEditor').classList.remove('visible');
+  document.getElementById('acEditor').innerHTML = '';
+  document.getElementById('acGrid').innerHTML = state.agents.map(renderAgentCard).join('');
+}
+window.acCloseLisaEditor = closeLisaEditor;
 
 function renderEditor() {
   const c = state.editingCfg;
@@ -792,6 +940,630 @@ async function acSave() {
   }
 }
 window.acSave = acSave;
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Lisa-editor (Fase 1b) — port van modules/lisa.html
+//  Endpoint: /api/lisa-config  (GET ?which=latest, POST ?action=save_draft|publish|rollback|history)
+// ─────────────────────────────────────────────────────────────────────────────
+
+const LISA_EMOJI_OPTIONS = ['nooit', 'spaarzaam', 'normaal', 'veel'];
+const LISA_FU_PHASES     = ['intro', 'doel', 'situatie', 'band', 'call'];
+const LISA_PHASE_LABELS  = { intro: 'Intro', doel: 'Doel', situatie: 'Situatie', band: 'Band', call: 'Call' };
+const LISA_FU_MAX_STEPS  = 5;
+const LISA_DEFAULT_THRESHOLD = 200;
+
+// Normaliseer een lisa_config-row naar een werkbare editor-shape.
+// Zorgt dat arrays bestaan + default-waarden landen zodat de UI nooit op
+// undefined struikelt. Backwards-compatible voor losse oudere shapes.
+function normaliseLisaCfg(row) {
+  const r = (row && typeof row === 'object') ? row : {};
+  return {
+    id:                  r.id || null,
+    version:             Number.isFinite(Number(r.version)) ? Number(r.version) : null,
+    is_active:           r.is_active === true,
+    persona_name:        String(r.persona_name || 'Lisa'),
+    persona_age:         String(r.persona_age || ''),
+    persona_background:  String(r.persona_background || ''),
+    persona_tone:        String(r.persona_tone || ''),
+    persona_writing_style: String(r.persona_writing_style || ''),
+    emoji_usage:         LISA_EMOJI_OPTIONS.includes(r.emoji_usage) ? r.emoji_usage : 'spaarzaam',
+    dos:                 Array.isArray(r.dos)   ? r.dos.map(String)   : [],
+    donts:               Array.isArray(r.donts) ? r.donts.map(String) : [],
+    followup_enabled:    r.followup_enabled === true,
+    followup_ai_threshold_chars: Number.isFinite(Number(r.followup_ai_threshold_chars))
+      ? Math.max(0, Math.min(2000, Number(r.followup_ai_threshold_chars)))
+      : LISA_DEFAULT_THRESHOLD,
+    stop_keywords:       Array.isArray(r.stop_keywords)
+      ? r.stop_keywords.map((k) => String(k).trim().toLowerCase()).filter(Boolean) : [],
+    followup_sequence:   Array.isArray(r.followup_sequence)
+      ? r.followup_sequence.slice(0, LISA_FU_MAX_STEPS).map((s) => ({
+          delay_hours: Math.max(1, Math.min(720, parseInt(s?.delay_hours, 10) || 24)),
+          template:    String(s?.template || ''),
+          use_ai:      s?.use_ai === true,
+          phase_in:    Array.isArray(s?.phase_in) ? s.phase_in.filter((p) => LISA_FU_PHASES.includes(p)) : [],
+        }))
+      : [],
+  };
+}
+
+async function openLisaEditor() {
+  // Switch vanuit Joost-editor: dirty-confirm.
+  if (state.activeModule && state.editingDirty
+      && !confirm('Niet-opgeslagen wijzigingen weggooien?')) return;
+  state.activeModule = null;
+  state.editingCfg = null;
+  state.editingDirty = false;
+  state.activeIsLisa = true;
+  state.lisaCfg = null;
+  state.lisaDirty = false;
+  state.lisaHistoryOpen = false;
+  state.lisaHistory = [];
+  // Highlight Lisa-kaart.
+  document.getElementById('acGrid').innerHTML = state.agents.map(renderAgentCard).join('');
+  const ed = document.getElementById('acEditor');
+  ed.classList.add('visible');
+  ed.innerHTML = `<div class="ac-loading"><i class="ti ti-loader-2"></i> Lisa-config laden…</div>`;
+
+  try {
+    // ?which=latest geeft draft OF actieve versie (wat het hoogste versie-nr heeft).
+    // Editor bewerkt de open draft als die bestaat; anders entry-point voor nieuwe draft.
+    const r = await window.AgentShared.apiFetch('/api/lisa-config?which=latest');
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(data?.error || ('HTTP ' + r.status));
+    state.lisaCfg = normaliseLisaCfg(data?.config || null);
+    state.lisaActiveVersion = data?.active_version ?? null;
+    renderLisaEditor();
+    try { ed.scrollIntoView({ behavior: 'smooth', block: 'start' }); } catch {}
+  } catch (e) {
+    ed.innerHTML = `<div class="ac-loading" style="color:var(--color-danger-text)">Laden mislukt: ${esc(e?.message || e)}</div>`;
+  }
+}
+window.acOpenLisaEditor = openLisaEditor;
+
+function renderLisaEditor() {
+  const c = state.lisaCfg;
+  if (!c) return;
+  const canEdit    = can('lisa.config.edit');
+  const canPublish = can('lisa.config.publish');
+  const liveVer    = state.lisaActiveVersion;
+  const isOpenDraft = (liveVer != null && c.version != null && c.version > liveVer && c.is_active === false);
+  const versionLabel = isOpenDraft
+    ? `Concept v${c.version} — live: v${liveVer ?? '—'}`
+    : (c.version != null ? `Live v${c.version}` : 'Nog geen versie');
+  const versionBadge = isOpenDraft
+    ? `<span class="badge draft">DRAFT</span>`
+    : (c.is_active ? `<span class="badge live">LIVE</span>` : `<span class="badge old">—</span>`);
+
+  const permWarnHtml = !canEdit ? `
+    <div class="perm-warn">
+      <i class="ti ti-info-circle"></i>
+      <span>Je kunt Lisa zien maar niet bewerken — vereist <code>lisa.config.edit</code>.</span>
+    </div>` : '';
+
+  document.getElementById('acEditor').innerHTML = `
+    <div class="ed-head">
+      <div>
+        <h2>${esc(c.persona_name || 'Lisa')} <span style="font-weight:500;color:var(--text-tertiary)">· Marketing — GoHighLevel follow-ups</span></h2>
+        <div class="ed-sub">Versioned config · ${esc(versionLabel)}</div>
+      </div>
+      <button class="ed-close" type="button" onclick="acCloseLisaEditor()"><i class="ti ti-x"></i> Sluiten</button>
+    </div>
+
+    ${permWarnHtml}
+
+    <div class="lisa-version-bar">
+      ${versionBadge}
+      <span><i class="ti ti-version"></i> Huidige versie ${c.version != null ? 'v' + esc(String(c.version)) : '—'}${liveVer != null ? ' · live v' + esc(String(liveVer)) : ''}</span>
+      <button class="ver-toggle" type="button" onclick="acLisaToggleHistory()">
+        <i class="ti ti-history"></i> ${state.lisaHistoryOpen ? 'Verberg versies' : 'Alle versies'}
+      </button>
+    </div>
+
+    <div id="acLisaHistory" style="${state.lisaHistoryOpen ? '' : 'display:none'}"></div>
+
+    <div class="ed-section">
+      <h3>Persona</h3>
+      <div class="ed-row-2">
+        <div class="ed-field">
+          <label>Naam <span class="req">*</span></label>
+          <input type="text" id="lf_persona_name" maxlength="100" value="${esc(c.persona_name)}" />
+        </div>
+        <div class="ed-field">
+          <label>Leeftijd</label>
+          <input type="text" id="lf_persona_age" maxlength="20" value="${esc(c.persona_age)}" />
+        </div>
+      </div>
+      <div class="ed-field">
+        <label>Achtergrondverhaal</label>
+        <textarea id="lf_persona_background" rows="3">${esc(c.persona_background)}</textarea>
+      </div>
+      <div class="ed-row-2">
+        <div class="ed-field">
+          <label>Toon</label>
+          <input type="text" id="lf_persona_tone" maxlength="200" value="${esc(c.persona_tone)}" />
+        </div>
+        <div class="ed-field">
+          <label>Emoji-gebruik</label>
+          <select id="lf_emoji_usage">
+            ${LISA_EMOJI_OPTIONS.map((v) => `<option value="${esc(v)}" ${c.emoji_usage === v ? 'selected' : ''}>${esc(v)}</option>`).join('')}
+          </select>
+        </div>
+      </div>
+      <div class="ed-field">
+        <label>Schrijfstijl <span style="color:var(--text-tertiary);font-weight:400">(voorbeelden van hoe Lisa schrijft)</span></label>
+        <textarea id="lf_persona_writing_style" rows="3">${esc(c.persona_writing_style)}</textarea>
+      </div>
+    </div>
+
+    <div class="ed-section">
+      <h3>Gedrag — do's & don'ts</h3>
+      <div class="ed-field">
+        <label>Do's <span style="color:var(--text-tertiary);font-weight:400">(één per regel)</span></label>
+        <textarea id="lf_dos" rows="4">${esc(c.dos.join('\n'))}</textarea>
+      </div>
+      <div class="ed-field">
+        <label>Don'ts <span style="color:var(--text-tertiary);font-weight:400">(één per regel)</span></label>
+        <textarea id="lf_donts" rows="4">${esc(c.donts.join('\n'))}</textarea>
+      </div>
+    </div>
+
+    <div class="ed-section">
+      <h3>Follow-up sequence</h3>
+      <div class="ed-toggle">
+        <div class="lbl">Follow-up aan
+          <small>Master-schakelaar — uit = geen automatische opvolg-berichten.</small>
+        </div>
+        <span class="toggle ${c.followup_enabled ? 'on' : ''}" id="lf_followup_enabled" role="button" tabindex="0"></span>
+      </div>
+      <div class="ed-field">
+        <label>AI-drempel (tekens)</label>
+        <input type="number" id="lf_followup_threshold" min="0" max="2000" step="50" value="${esc(String(c.followup_ai_threshold_chars))}" />
+        <div class="ed-help">Templates boven deze lengte worden door AI gegenereerd (anders letterlijk). 0–2000.</div>
+      </div>
+      <div class="ed-field">
+        <label>Stop-keywords <span style="color:var(--text-tertiary);font-weight:400">(enter om toe te voegen)</span></label>
+        <div class="kw-chips" id="lf_stop_chips">
+          ${c.stop_keywords.map((k, i) => `<span class="kw-chip">${esc(k)}<span class="kw-x" data-stop-idx="${i}">&times;</span></span>`).join('')}
+          <input type="text" class="kw-input" id="lf_stop_input" placeholder="bv. afmelden" />
+        </div>
+        <div class="ed-help">Lowercase, woord-/zinsstart match. Komt boven de standaard stop-set.</div>
+      </div>
+
+      <div class="ed-field">
+        <label>Stappen <span style="color:var(--text-tertiary);font-weight:400">(max ${LISA_FU_MAX_STEPS})</span></label>
+        <div class="fu-list" id="lf_fu_list">${c.followup_sequence.map(renderLisaFuStep).join('')}</div>
+        <div style="margin-top:8px">
+          <button class="btn-secondary" type="button" id="lf_fu_add" onclick="acLisaAddFuStep()" ${c.followup_sequence.length >= LISA_FU_MAX_STEPS ? 'disabled' : ''}>
+            <i class="ti ti-plus"></i> ${c.followup_sequence.length >= LISA_FU_MAX_STEPS ? 'Max bereikt' : 'Stap toevoegen'}
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <div class="ed-section">
+      <h3>Publiceren</h3>
+      <div class="ed-field">
+        <label>Notitie bij publicatie <span style="color:var(--text-tertiary);font-weight:400">(optioneel)</span></label>
+        <input type="text" id="lf_pub_notes" maxlength="500" placeholder="bv. Tone bijgesteld na Q2-feedback" />
+      </div>
+    </div>
+
+    <div class="ed-footer">
+      <button class="btn-secondary" type="button" onclick="acCloseLisaEditor()"><i class="ti ti-arrow-left"></i> Sluiten</button>
+      <div class="right">
+        <span class="save-info" id="acLisaSaveInfo"></span>
+        <button class="btn-secondary" type="button" id="acLisaDraftBtn" onclick="acLisaSaveDraft()" ${canEdit ? '' : 'disabled'} title="${canEdit ? 'Concept opslaan zonder live te zetten' : 'lisa.config.edit vereist'}"><i class="ti ti-device-floppy"></i> Concept opslaan</button>
+        <button class="btn-primary" type="button" id="acLisaPubBtn" onclick="acLisaPublish()" ${canPublish ? '' : 'disabled'} title="${canPublish ? 'Live zetten' : 'lisa.config.publish vereist'}"><i class="ti ti-cloud-upload"></i> Publiceren</button>
+      </div>
+    </div>
+  `;
+
+  // Listeners.
+  // Toggle.
+  document.getElementById('lf_followup_enabled').addEventListener('click', () => {
+    const el = document.getElementById('lf_followup_enabled');
+    el.classList.toggle('on');
+    state.lisaCfg.followup_enabled = el.classList.contains('on');
+    state.lisaDirty = true;
+  });
+  // Generic dirty-tracking voor tekstvelden + AI-flag herrendering bij threshold.
+  document.querySelectorAll('#acEditor input, #acEditor textarea, #acEditor select').forEach((el) => {
+    el.addEventListener('input',  () => { state.lisaDirty = true; });
+    el.addEventListener('change', () => { state.lisaDirty = true; });
+  });
+  document.getElementById('lf_followup_threshold').addEventListener('input', () => {
+    const n = parseInt(document.getElementById('lf_followup_threshold').value, 10);
+    state.lisaCfg.followup_ai_threshold_chars = isNaN(n) ? LISA_DEFAULT_THRESHOLD : Math.max(0, Math.min(2000, n));
+    rerenderLisaFuList();
+  });
+  // Stop-keyword input — Enter om toe te voegen.
+  document.getElementById('lf_stop_input').addEventListener('keydown', (ev) => {
+    if (ev.key !== 'Enter') return;
+    ev.preventDefault();
+    const inp = ev.target;
+    const v = inp.value.trim().toLowerCase();
+    if (!v) return;
+    if (!state.lisaCfg.stop_keywords.includes(v)) {
+      state.lisaCfg.stop_keywords.push(v);
+      state.lisaDirty = true;
+      rerenderLisaStopChips();
+    }
+    inp.value = '';
+  });
+  // Klik op een chip-x.
+  document.getElementById('lf_stop_chips').addEventListener('click', (ev) => {
+    const x = ev.target.closest('.kw-x[data-stop-idx]');
+    if (!x) return;
+    const i = parseInt(x.dataset.stopIdx, 10);
+    if (Number.isFinite(i)) {
+      state.lisaCfg.stop_keywords.splice(i, 1);
+      state.lisaDirty = true;
+      rerenderLisaStopChips();
+    }
+  });
+
+  // Followup-step listeners (delegated).
+  document.getElementById('lf_fu_list').addEventListener('input',  onLisaFuInput);
+  document.getElementById('lf_fu_list').addEventListener('change', onLisaFuInput);
+  document.getElementById('lf_fu_list').addEventListener('click',  onLisaFuClick);
+
+  if (state.lisaHistoryOpen) loadAndRenderLisaHistory();
+}
+
+function lisaFuWouldUseAi(s) {
+  const tpl = String(s.template || '');
+  const threshold = state.lisaCfg.followup_ai_threshold_chars || LISA_DEFAULT_THRESHOLD;
+  return s.use_ai === true || tpl.length >= threshold;
+}
+
+function renderLisaFuStep(s, i) {
+  const phasesHtml = LISA_FU_PHASES.map((p) => `
+    <label>
+      <input type="checkbox" data-fu-phase="${esc(p)}" data-idx="${i}" ${s.phase_in.includes(p) ? 'checked' : ''} />
+      ${esc(LISA_PHASE_LABELS[p])}
+    </label>`).join('');
+  const ai = lisaFuWouldUseAi(s);
+  return `
+    <div class="fu-step" data-fu-step="${i}">
+      <div class="fu-step-head">
+        <strong>Stap ${i + 1}</strong>
+        <button class="fu-step-del" type="button" data-fu-act="remove" data-idx="${i}" title="Verwijderen">×</button>
+      </div>
+      <div class="ed-field">
+        <label>Wacht (uur na laatste Lisa-bericht) <span style="color:var(--text-tertiary);font-weight:400">— 1 t/m 720</span></label>
+        <input type="number" min="1" max="720" value="${esc(String(s.delay_hours))}" data-fu-field="delay_hours" data-idx="${i}" style="max-width:140px" />
+      </div>
+      <div class="ed-field">
+        <label>Template / instructie</label>
+        <textarea rows="3" data-fu-field="template" data-idx="${i}">${esc(s.template)}</textarea>
+        <div class="fu-meta">
+          <span data-fu-chars="${i}">${(s.template || '').length} tekens</span>
+          <span class="ai-flag ${ai ? 'on' : ''}" data-fu-aiflag="${i}">${ai ? '🤖 AI' : '📝 Letterlijk'}</span>
+        </div>
+      </div>
+      <div class="ed-field">
+        <label>Alleen bij deze fases <span style="color:var(--text-tertiary);font-weight:400">(leeg = altijd)</span></label>
+        <div class="fu-phases">${phasesHtml}</div>
+      </div>
+      <label class="fu-meta" style="cursor:pointer">
+        <input type="checkbox" data-fu-field="use_ai" data-idx="${i}" ${s.use_ai ? 'checked' : ''} />
+        <span style="color:var(--text-tertiary);font-size:11.5px">AI-generatie forceren (auto-aan boven de drempel)</span>
+      </label>
+    </div>`;
+}
+
+function rerenderLisaFuList() {
+  const host = document.getElementById('lf_fu_list');
+  if (!host) return;
+  host.innerHTML = state.lisaCfg.followup_sequence.map(renderLisaFuStep).join('');
+  const addBtn = document.getElementById('lf_fu_add');
+  if (addBtn) {
+    const max = state.lisaCfg.followup_sequence.length >= LISA_FU_MAX_STEPS;
+    addBtn.disabled = max;
+    addBtn.innerHTML = max ? '<i class="ti ti-plus"></i> Max bereikt' : '<i class="ti ti-plus"></i> Stap toevoegen';
+  }
+}
+
+function rerenderLisaStopChips() {
+  const host = document.getElementById('lf_stop_chips');
+  if (!host) return;
+  const input = host.querySelector('#lf_stop_input');
+  const inputVal = input ? input.value : '';
+  host.innerHTML = state.lisaCfg.stop_keywords.map((k, i) => `<span class="kw-chip">${esc(k)}<span class="kw-x" data-stop-idx="${i}">&times;</span></span>`).join('')
+    + `<input type="text" class="kw-input" id="lf_stop_input" placeholder="bv. afmelden" value="${esc(inputVal)}" />`;
+  // Re-bind enter.
+  document.getElementById('lf_stop_input').addEventListener('keydown', (ev) => {
+    if (ev.key !== 'Enter') return;
+    ev.preventDefault();
+    const inp = ev.target;
+    const v = inp.value.trim().toLowerCase();
+    if (!v) return;
+    if (!state.lisaCfg.stop_keywords.includes(v)) {
+      state.lisaCfg.stop_keywords.push(v);
+      state.lisaDirty = true;
+      rerenderLisaStopChips();
+    }
+    inp.value = '';
+  });
+  // Focus terug.
+  try { document.getElementById('lf_stop_input').focus(); } catch {}
+}
+
+function onLisaFuInput(ev) {
+  const t = ev.target.closest('[data-fu-field][data-idx], [data-fu-phase][data-idx]');
+  if (!t) return;
+  const i = parseInt(t.dataset.idx, 10);
+  const s = state.lisaCfg.followup_sequence[i];
+  if (!s) return;
+  state.lisaDirty = true;
+  if (t.dataset.fuField === 'delay_hours') {
+    const n = parseInt(t.value, 10) || 0;
+    s.delay_hours = Math.max(1, Math.min(720, n));
+  } else if (t.dataset.fuField === 'template') {
+    s.template = t.value;
+    // Live AI-flag + char-count update.
+    const chars = document.querySelector(`[data-fu-chars="${i}"]`);
+    const ai = document.querySelector(`[data-fu-aiflag="${i}"]`);
+    if (chars) chars.textContent = String(t.value.length) + ' tekens';
+    const wouldAi = lisaFuWouldUseAi(s);
+    if (ai) {
+      ai.textContent = wouldAi ? '🤖 AI' : '📝 Letterlijk';
+      ai.classList.toggle('on', wouldAi);
+    }
+  } else if (t.dataset.fuField === 'use_ai') {
+    s.use_ai = t.checked === true;
+    const ai = document.querySelector(`[data-fu-aiflag="${i}"]`);
+    const wouldAi = lisaFuWouldUseAi(s);
+    if (ai) {
+      ai.textContent = wouldAi ? '🤖 AI' : '📝 Letterlijk';
+      ai.classList.toggle('on', wouldAi);
+    }
+  } else if (t.dataset.fuPhase) {
+    const p = t.dataset.fuPhase;
+    const idx = s.phase_in.indexOf(p);
+    if (t.checked && idx < 0) s.phase_in.push(p);
+    else if (!t.checked && idx >= 0) s.phase_in.splice(idx, 1);
+  }
+}
+
+function onLisaFuClick(ev) {
+  const btn = ev.target.closest('[data-fu-act="remove"][data-idx]');
+  if (!btn) return;
+  const i = parseInt(btn.dataset.idx, 10);
+  if (!Number.isFinite(i)) return;
+  if (!confirm('Stap ' + (i + 1) + ' verwijderen?')) return;
+  state.lisaCfg.followup_sequence.splice(i, 1);
+  state.lisaDirty = true;
+  rerenderLisaFuList();
+}
+
+function acLisaAddFuStep() {
+  if (state.lisaCfg.followup_sequence.length >= LISA_FU_MAX_STEPS) return;
+  state.lisaCfg.followup_sequence.push({ delay_hours: 24, template: '', use_ai: false, phase_in: [] });
+  state.lisaDirty = true;
+  rerenderLisaFuList();
+}
+window.acLisaAddFuStep = acLisaAddFuStep;
+
+function readLisaForm() {
+  const c = state.lisaCfg;
+  c.persona_name        = (document.getElementById('lf_persona_name').value || '').trim();
+  c.persona_age         = (document.getElementById('lf_persona_age').value  || '').trim();
+  c.persona_background  = document.getElementById('lf_persona_background').value || '';
+  c.persona_tone        = (document.getElementById('lf_persona_tone').value || '').trim();
+  c.persona_writing_style = document.getElementById('lf_persona_writing_style').value || '';
+  c.emoji_usage         = document.getElementById('lf_emoji_usage').value;
+  c.dos                 = (document.getElementById('lf_dos').value || '').split('\n').map((s) => s.trim()).filter(Boolean);
+  c.donts               = (document.getElementById('lf_donts').value || '').split('\n').map((s) => s.trim()).filter(Boolean);
+
+  if (!c.persona_name) return { err: 'Persona-naam is verplicht.' };
+  if (c.persona_name.length > 100) return { err: 'Persona-naam: max 100 tekens.' };
+  if (!LISA_EMOJI_OPTIONS.includes(c.emoji_usage)) return { err: 'Emoji-gebruik: ongeldige waarde.' };
+  const thr = c.followup_ai_threshold_chars;
+  if (!Number.isInteger(thr) || thr < 0 || thr > 2000) return { err: 'AI-drempel: 0–2000.' };
+  for (let i = 0; i < c.followup_sequence.length; i++) {
+    const s = c.followup_sequence[i];
+    if (!Number.isInteger(s.delay_hours) || s.delay_hours < 1 || s.delay_hours > 720) {
+      return { err: 'Stap ' + (i + 1) + ': delay_hours 1–720 vereist.' };
+    }
+  }
+
+  return {
+    payload: {
+      persona_name:                c.persona_name,
+      persona_age:                 c.persona_age,
+      persona_background:          c.persona_background,
+      persona_tone:                c.persona_tone,
+      persona_writing_style:       c.persona_writing_style,
+      emoji_usage:                 c.emoji_usage,
+      dos:                         c.dos,
+      donts:                       c.donts,
+      followup_enabled:            c.followup_enabled === true,
+      followup_ai_threshold_chars: c.followup_ai_threshold_chars,
+      stop_keywords:               c.stop_keywords,
+      followup_sequence:           c.followup_sequence.map((s) => ({
+        delay_hours: s.delay_hours,
+        template:    s.template,
+        use_ai:      s.use_ai === true,
+        phase_in:    Array.isArray(s.phase_in) ? s.phase_in.slice() : [],
+      })),
+    },
+  };
+}
+
+function setLisaSaveInfo(msg, kind) {
+  const el = document.getElementById('acLisaSaveInfo');
+  if (!el) return;
+  el.classList.remove('error', 'ok');
+  if (kind === 'error') el.classList.add('error');
+  if (kind === 'ok')    el.classList.add('ok');
+  el.textContent = msg || '';
+}
+
+async function acLisaSaveDraft() {
+  if (state.lisaSaving) return;
+  setLisaSaveInfo('', null);
+  const { err, payload } = readLisaForm();
+  if (err) { setLisaSaveInfo(err, 'error'); return; }
+  state.lisaSaving = true;
+  const btn = document.getElementById('acLisaDraftBtn');
+  if (btn) btn.disabled = true;
+  setLisaSaveInfo('Opslaan…');
+  try {
+    const r = await window.AgentShared.apiFetch('/api/lisa-config?action=save_draft', {
+      method: 'POST',
+      body:   JSON.stringify(payload),
+    });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok || data?.ok !== true) throw new Error(data?.error || ('HTTP ' + r.status));
+    setLisaSaveInfo(data?.message || 'Concept opgeslagen', 'ok');
+    state.lisaDirty = false;
+    toastOk(data?.message || 'Concept opgeslagen');
+    // Reload zodat de versie-badge actueel is.
+    await reloadLisa();
+  } catch (e) {
+    setLisaSaveInfo('Opslaan mislukt: ' + (e?.message || e), 'error');
+    toastErr('Opslaan mislukt: ' + (e?.message || e));
+  } finally {
+    state.lisaSaving = false;
+    if (btn) btn.disabled = false;
+  }
+}
+window.acLisaSaveDraft = acLisaSaveDraft;
+
+async function acLisaPublish() {
+  if (state.lisaSaving) return;
+  setLisaSaveInfo('', null);
+  const { err, payload } = readLisaForm();
+  if (err) { setLisaSaveInfo(err, 'error'); return; }
+  const notes = (document.getElementById('lf_pub_notes').value || '').trim();
+  if (notes) payload.notes = notes;
+  if (!confirm('Deze versie LIVE zetten? Vorige versie wordt automatisch gedeactiveerd.')) return;
+  state.lisaSaving = true;
+  const btn = document.getElementById('acLisaPubBtn');
+  if (btn) btn.disabled = true;
+  setLisaSaveInfo('Publiceren…');
+  try {
+    const r = await window.AgentShared.apiFetch('/api/lisa-config?action=publish', {
+      method: 'POST',
+      body:   JSON.stringify(payload),
+    });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok || data?.ok !== true) throw new Error(data?.error || ('HTTP ' + r.status));
+    setLisaSaveInfo(data?.message || 'Live', 'ok');
+    state.lisaDirty = false;
+    toastOk(data?.message || 'Live');
+    // Hub-rij refreshen (versie + active-status) + editor opnieuw laden.
+    await loadAgents();
+    await reloadLisa();
+  } catch (e) {
+    setLisaSaveInfo('Publiceren mislukt: ' + (e?.message || e), 'error');
+    toastErr('Publiceren mislukt: ' + (e?.message || e));
+  } finally {
+    state.lisaSaving = false;
+    if (btn) btn.disabled = false;
+  }
+}
+window.acLisaPublish = acLisaPublish;
+
+async function reloadLisa() {
+  try {
+    const r = await window.AgentShared.apiFetch('/api/lisa-config?which=latest');
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(data?.error || ('HTTP ' + r.status));
+    state.lisaCfg = normaliseLisaCfg(data?.config || null);
+    state.lisaActiveVersion = data?.active_version ?? null;
+    renderLisaEditor();
+  } catch (e) {
+    // Geen renderEditor wijziging — UI blijft op huidige state.
+    console.warn('[agent-center] reloadLisa', e?.message || e);
+  }
+}
+
+async function acLisaToggleHistory() {
+  state.lisaHistoryOpen = !state.lisaHistoryOpen;
+  const host = document.getElementById('acLisaHistory');
+  if (!host) return;
+  host.style.display = state.lisaHistoryOpen ? '' : 'none';
+  // Toggle-label op de versie-bar bijwerken zonder volledig her-render.
+  const tog = document.querySelector('.lisa-version-bar .ver-toggle');
+  if (tog) tog.innerHTML = `<i class="ti ti-history"></i> ${state.lisaHistoryOpen ? 'Verberg versies' : 'Alle versies'}`;
+  if (state.lisaHistoryOpen) await loadAndRenderLisaHistory();
+}
+window.acLisaToggleHistory = acLisaToggleHistory;
+
+async function loadAndRenderLisaHistory() {
+  const host = document.getElementById('acLisaHistory');
+  if (!host) return;
+  host.innerHTML = `<div class="lisa-history"><div class="ac-loading" style="padding:20px 12px"><i class="ti ti-loader-2"></i> Versies laden…</div></div>`;
+  try {
+    const r = await window.AgentShared.apiFetch('/api/lisa-config?action=history');
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(data?.error || ('HTTP ' + r.status));
+    state.lisaHistory = Array.isArray(data?.versions) ? data.versions : [];
+    renderLisaHistoryRows();
+  } catch (e) {
+    host.innerHTML = `<div class="lisa-history"><div class="ac-loading" style="color:var(--color-danger-text);padding:20px 12px">Laden mislukt: ${esc(e?.message || e)}</div></div>`;
+  }
+}
+
+function renderLisaHistoryRows() {
+  const host = document.getElementById('acLisaHistory');
+  if (!host) return;
+  const canPublish = can('lisa.config.publish');
+  const rows = state.lisaHistory.map((v) => {
+    const label = v.is_active ? 'live' : ((v.notes || '').toLowerCase() === 'draft' ? 'draft' : 'old');
+    const labelTxt = v.is_active ? 'LIVE' : (label === 'draft' ? 'DRAFT' : '—');
+    const created = v.created_at ? new Date(v.created_at).toLocaleString('nl-NL') : '—';
+    const disabled = !canPublish || v.is_active;
+    return `
+      <div class="lisa-history-row">
+        <code>v${esc(String(v.version))}</code>
+        <span class="badge ${esc(label)}">${esc(labelTxt)}</span>
+        <span class="note" title="${esc(v.notes || '')}">${esc(v.notes || '—')} · ${esc(created)}</span>
+        <button class="rb-btn" type="button" data-rollback-id="${esc(v.id)}" ${disabled ? 'disabled' : ''} title="${disabled ? (v.is_active ? 'Al live' : 'lisa.config.publish vereist') : 'Terugzetten als nieuwe versie'}">
+          <i class="ti ti-rotate-2"></i> Rollback
+        </button>
+      </div>`;
+  }).join('');
+  host.innerHTML = `<div class="lisa-history">${rows || '<div class="ac-loading" style="padding:20px 12px">Nog geen versies.</div>'}</div>`;
+  host.addEventListener('click', onLisaHistoryClick, { once: true });
+}
+
+async function onLisaHistoryClick(ev) {
+  const btn = ev.target.closest('[data-rollback-id]');
+  if (!btn || btn.disabled) {
+    // Re-bind voor volgende klik (we hebben once:true gebruikt).
+    document.getElementById('acLisaHistory').addEventListener('click', onLisaHistoryClick, { once: true });
+    return;
+  }
+  const versionId = btn.dataset.rollbackId;
+  if (!versionId) return;
+  if (!confirm('Deze versie terugzetten als nieuwe live versie? Er wordt een kopie aangemaakt.')) {
+    document.getElementById('acLisaHistory').addEventListener('click', onLisaHistoryClick, { once: true });
+    return;
+  }
+  btn.disabled = true;
+  setLisaSaveInfo('Rollback…');
+  try {
+    const r = await window.AgentShared.apiFetch('/api/lisa-config?action=rollback', {
+      method: 'POST',
+      body:   JSON.stringify({ version_id: versionId }),
+    });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok || data?.ok !== true) throw new Error(data?.error || ('HTTP ' + r.status));
+    setLisaSaveInfo(data?.message || 'Teruggezet', 'ok');
+    toastOk(data?.message || 'Teruggezet');
+    state.lisaDirty = false;
+    await loadAgents();
+    await reloadLisa();
+    if (state.lisaHistoryOpen) await loadAndRenderLisaHistory();
+  } catch (e) {
+    setLisaSaveInfo('Rollback mislukt: ' + (e?.message || e), 'error');
+    toastErr('Rollback mislukt: ' + (e?.message || e));
+    btn.disabled = false;
+  }
+}
 </script>
 </body>
 </html>
