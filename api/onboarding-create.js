@@ -27,6 +27,7 @@ import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
 import { provisionOnboardingStudent } from './_lib/onboarding-provision.js';
 import { sendOnboardingInvite } from './_lib/onboarding-invite.js';
+import { enrollForTrigger as enrollOnboardingAutomations } from './_lib/onboarding-automation-engine.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -171,6 +172,19 @@ export default async function handler(req, res) {
       console.error('[onboarding-create] invite threw:', e?.message || e);
       invite = { sent: false, reason: 'invite-threw', error: e?.message || 'unknown' };
     }
+
+    // Fase 1 onboarding-automations — fire-and-forget hook voor
+    // 'on_onboarding_created'. NIET awaited zodat een automation-fout
+    // de aanmelding nooit kan vertragen. Cron-poll vangt eventuele
+    // missers binnen 1 minuut alsnog op via enrollDueOnboardings().
+    Promise.resolve(
+      enrollOnboardingAutomations({
+        onboardingId: inserted.id,
+        triggerType:  'on_onboarding_created',
+      }),
+    ).catch((e) => {
+      console.error('[onboarding-create] automation enroll fail:', e?.message || e);
+    });
 
     return res.status(200).json({
       ok         : true,
