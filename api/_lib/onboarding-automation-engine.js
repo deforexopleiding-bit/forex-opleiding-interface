@@ -31,7 +31,7 @@
 
 import { supabaseAdmin } from '../supabase.js';
 import { sendOnboardingTemplateGeneric } from './onboarding-template-send.js';
-import { sendMail } from '../mailer.js';
+import { sendMail, sendOnboardingMail } from '../mailer.js';
 
 const UNIT_MS = { minutes: 60_000, hours: 3_600_000, days: 86_400_000 };
 const MAX_SEND_ATTEMPTS = 3;
@@ -513,7 +513,11 @@ export async function stepDueRuns({ now = new Date(), limit = 100, abortMs = 50_
               subj = subj.split(k).join(v);
               bod  = bod.split(k).join(v);
             }
-            const result = await sendMail({
+            // sendOnboardingMail = eigen onboarding@-transport (auth = onboarding@).
+            // Veilige fallback naar info@ als ONBOARDING_MAIL_PASS ontbreekt;
+            // de send_internal_notification-tak hieronder blijft op sendMail
+            // (info@) want dat is interne team-mail, geen klant-mail.
+            const result = await sendOnboardingMail({
               to,
               subject: subj,
               text:    bod,
