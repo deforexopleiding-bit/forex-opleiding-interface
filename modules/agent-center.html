@@ -447,6 +447,178 @@
       gap: 8px;
     }
 
+    /* ─── Lisa sub-tabs (Fase 1c) ─────────────────────────────────────────── */
+    .lisa-subtabs {
+      display: flex;
+      gap: 4px;
+      flex-wrap: wrap;
+      border-bottom: 1px solid var(--border-subtle);
+      margin-bottom: 16px;
+      padding-bottom: 0;
+    }
+    .lisa-subtab {
+      background: transparent;
+      border: none;
+      border-bottom: 2px solid transparent;
+      color: var(--text-secondary);
+      cursor: pointer;
+      padding: 8px 14px;
+      font-size: 13px;
+      font-weight: 600;
+      font-family: inherit;
+      transition: color .15s ease, border-color .15s ease;
+    }
+    .lisa-subtab:hover { color: var(--text-primary); }
+    .lisa-subtab.active {
+      color: var(--brand-primary);
+      border-bottom-color: var(--brand-primary);
+    }
+    .lisa-sub-section { display: none; }
+    .lisa-sub-section.active { display: block; }
+
+    /* Fase-tabs (binnen sub=fases) */
+    .lisa-fase-tabs {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+      margin-bottom: 14px;
+    }
+    .lisa-fase-tab {
+      background: var(--surface-card-hover);
+      border: 1px solid var(--border-subtle);
+      color: var(--text-secondary);
+      cursor: pointer;
+      padding: 6px 14px;
+      border-radius: 99px;
+      font-size: 12px;
+      font-weight: 600;
+      font-family: inherit;
+    }
+    .lisa-fase-tab.active {
+      background: var(--brand-primary);
+      border-color: var(--brand-primary);
+      color: var(--text-inverse);
+    }
+
+    /* KB-cards (producten + FAQ) */
+    .kb-card {
+      position: relative;
+      background: var(--surface-page);
+      border: 1px solid var(--border-subtle);
+      border-radius: 10px;
+      padding: 12px 14px;
+      margin-bottom: 10px;
+    }
+    .kb-card-del {
+      position: absolute;
+      top: 8px;
+      right: 8px;
+      background: transparent;
+      border: 1px solid var(--border-default);
+      color: var(--text-secondary);
+      cursor: pointer;
+      padding: 2px 9px;
+      border-radius: 6px;
+      font-size: 13px;
+      line-height: 1;
+      font-family: inherit;
+    }
+    .kb-card-del:hover { color: var(--color-danger); border-color: var(--color-danger); }
+    .kb-empty {
+      padding: 16px;
+      text-align: center;
+      color: var(--text-tertiary);
+      font-size: 12.5px;
+      border: 1px dashed var(--border-subtle);
+      border-radius: 8px;
+      margin-bottom: 8px;
+    }
+    .kb-list-add {
+      background: transparent;
+      border: 1px dashed var(--border-default);
+      color: var(--text-secondary);
+      cursor: pointer;
+      padding: 6px 12px;
+      border-radius: 8px;
+      font-size: 12.5px;
+      font-weight: 600;
+      font-family: inherit;
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+    }
+    .kb-list-add:hover { color: var(--brand-primary); border-color: var(--brand-primary); background: var(--brand-primary-soft); }
+    .kb-section-head {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 8px;
+      margin-top: 4px;
+    }
+    .kb-section-head h4 {
+      font-size: 13px;
+      font-weight: 700;
+      color: var(--text-primary);
+    }
+    .kb-section-head .spacer { flex: 1; }
+
+    /* Tag-filter chips */
+    .kb-tf-chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-bottom: 6px;
+    }
+    .kb-tf-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 11px;
+      border-radius: 99px;
+      font-size: 12px;
+      font-weight: 600;
+      color: #ffffff;
+      cursor: pointer;
+      opacity: .55;
+      transition: opacity .15s ease, transform .15s ease;
+      user-select: none;
+      border: 1px solid transparent;
+    }
+    .kb-tf-chip:hover { opacity: .8; }
+    .kb-tf-chip.active { opacity: 1; transform: translateY(-1px); }
+    .kb-tf-chip .tf-count {
+      padding: 1px 7px;
+      border-radius: 99px;
+      background: rgba(255, 255, 255, 0.25);
+      font-size: 10.5px;
+      font-weight: 700;
+    }
+    .kb-count-line { font-size: 12px; color: var(--text-secondary); }
+
+    /* FAQ keyword input + chips */
+    .faq-kw-wrap {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      padding: 6px 8px;
+      background: var(--surface-1);
+      border: 1px solid var(--border-default);
+      border-radius: 8px;
+      min-height: 38px;
+      align-items: center;
+    }
+    .faq-kw-input {
+      flex: 1;
+      min-width: 140px;
+      background: transparent;
+      border: none;
+      outline: none;
+      font-size: 12.5px;
+      font-family: inherit;
+      color: var(--text-primary);
+      padding: 4px 2px;
+    }
+
     @media (prefers-reduced-motion: reduce) {
       .ac-core .core-disc,
       .ac-core .core-orbit,
@@ -510,6 +682,11 @@ const state = {
   lisaSaving: false,
   lisaHistoryOpen: false,
   lisaHistory: [],              // history-rijen wanneer panel geopend is
+  // Fase 1c — sub-tab + fase-selectie + kb-meta cache.
+  lisaActiveSub: 'persona',
+  lisaActiveFase: 'intro',
+  lisaKbTags: [],               // [{id, name, color}]
+  lisaKbLinks: [],              // [{item_id, tag_id}]
 };
 
 const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -951,12 +1128,31 @@ const LISA_FU_PHASES     = ['intro', 'doel', 'situatie', 'band', 'call'];
 const LISA_PHASE_LABELS  = { intro: 'Intro', doel: 'Doel', situatie: 'Situatie', band: 'Band', call: 'Call' };
 const LISA_FU_MAX_STEPS  = 5;
 const LISA_DEFAULT_THRESHOLD = 200;
+// Fase 1c — sub-tab keys.
+const LISA_SUB_TABS = ['persona', 'dosdonts', 'fases', 'kb', 'followup'];
+const LISA_SUB_TAB_LABELS = {
+  persona:  'Persona',
+  dosdonts: "Do's & Don'ts",
+  fases:    'Fases',
+  kb:       'Kennisbank',
+  followup: 'Follow-up',
+};
 
 // Normaliseer een lisa_config-row naar een werkbare editor-shape.
 // Zorgt dat arrays bestaan + default-waarden landen zodat de UI nooit op
 // undefined struikelt. Backwards-compatible voor losse oudere shapes.
 function normaliseLisaCfg(row) {
   const r = (row && typeof row === 'object') ? row : {};
+  // Fase 1c — phases mappen van phase_<f> jsonb-rij naar cfg.phases[f].
+  const phases = {};
+  for (const f of LISA_FU_PHASES) {
+    const p = (r['phase_' + f] && typeof r['phase_' + f] === 'object') ? r['phase_' + f] : {};
+    phases[f] = {
+      system:     String(p.system || ''),
+      transition: String(p.transition || ''),
+      examples:   Array.isArray(p.examples) ? p.examples.map(String) : [],
+    };
+  }
   return {
     id:                  r.id || null,
     version:             Number.isFinite(Number(r.version)) ? Number(r.version) : null,
@@ -969,6 +1165,30 @@ function normaliseLisaCfg(row) {
     emoji_usage:         LISA_EMOJI_OPTIONS.includes(r.emoji_usage) ? r.emoji_usage : 'spaarzaam',
     dos:                 Array.isArray(r.dos)   ? r.dos.map(String)   : [],
     donts:               Array.isArray(r.donts) ? r.donts.map(String) : [],
+    // Fase 1c — fase-funnel (5 fases) + kennisbank.
+    phases,
+    kb_products:         Array.isArray(r.kb_products)
+      ? r.kb_products.filter((p) => p && typeof p === 'object').map((p) => ({
+          naam:         String(p.naam || ''),
+          beschrijving: String(p.beschrijving || ''),
+          prijs:        String(p.prijs || ''),
+          doelgroep:    String(p.doelgroep || ''),
+          duur:         String(p.duur || ''),
+        }))
+      : [],
+    kb_faq:              Array.isArray(r.kb_faq)
+      ? r.kb_faq.filter((q) => q && typeof q === 'object').map((q) => ({
+          vraag:    String(q.vraag || ''),
+          antwoord: String(q.antwoord || ''),
+          keywords: Array.isArray(q.keywords)
+            ? q.keywords.map((k) => String(k).trim().toLowerCase()).filter(Boolean) : [],
+        }))
+      : [],
+    kb_pricing:          String(r.kb_pricing || ''),
+    kb_usps:             String(r.kb_usps || ''),
+    kb_tag_filter:       Array.isArray(r.kb_tag_filter)
+      ? r.kb_tag_filter.map((t) => String(t).trim()).filter(Boolean) : [],
+    kb_use_general_kb:   r.kb_use_general_kb !== false,
     followup_enabled:    r.followup_enabled === true,
     followup_ai_threshold_chars: Number.isFinite(Number(r.followup_ai_threshold_chars))
       ? Math.max(0, Math.min(2000, Number(r.followup_ai_threshold_chars)))
@@ -986,6 +1206,30 @@ function normaliseLisaCfg(row) {
   };
 }
 
+// Kb-meta lazy-laden (best-effort, één keer per editor-sessie).
+async function loadLisaKbMeta() {
+  if (state.lisaKbTags.length > 0) return; // al geladen
+  try {
+    const [tg, lk] = await Promise.all([
+      window.AgentShared.apiFetch('/api/kb-tags?action=list').then((r) => r.json()).catch(() => ({})),
+      window.AgentShared.apiFetch('/api/kb-item-tags?action=all_with_tags').then((r) => r.json()).catch(() => ({})),
+    ]);
+    state.lisaKbTags  = Array.isArray(tg?.tags)  ? tg.tags  : [];
+    state.lisaKbLinks = Array.isArray(lk?.links) ? lk.links : [];
+  } catch (e) {
+    console.warn('[agent-center] loadLisaKbMeta:', e?.message || e);
+  }
+}
+function lisaKbTagByName(name) { return state.lisaKbTags.find((t) => t.name === name) || null; }
+function lisaKbCountByTagId(tagId) { return state.lisaKbLinks.filter((l) => l.tag_id === tagId).length; }
+function lisaKbAvailableCount() {
+  const ids = new Set(state.lisaCfg.kb_tag_filter.map((n) => (lisaKbTagByName(n) || {}).id).filter(Boolean));
+  if (!ids.size) return 0;
+  const items = new Set();
+  state.lisaKbLinks.forEach((l) => { if (ids.has(l.tag_id)) items.add(l.item_id); });
+  return items.size;
+}
+
 async function openLisaEditor() {
   // Switch vanuit Joost-editor: dirty-confirm.
   if (state.activeModule && state.editingDirty
@@ -998,6 +1242,8 @@ async function openLisaEditor() {
   state.lisaDirty = false;
   state.lisaHistoryOpen = false;
   state.lisaHistory = [];
+  state.lisaActiveSub = 'persona';
+  state.lisaActiveFase = 'intro';
   // Highlight Lisa-kaart.
   document.getElementById('acGrid').innerHTML = state.agents.map(renderAgentCard).join('');
   const ed = document.getElementById('acEditor');
@@ -1012,6 +1258,9 @@ async function openLisaEditor() {
     if (!r.ok) throw new Error(data?.error || ('HTTP ' + r.status));
     state.lisaCfg = normaliseLisaCfg(data?.config || null);
     state.lisaActiveVersion = data?.active_version ?? null;
+    // Fase 1c — kb-tags + links pre-laden zodat de Kennisbank-tab direct werkt.
+    // Best-effort: bij faal is de tag-filter leeg en toont een lege-state.
+    loadLisaKbMeta();
     renderLisaEditor();
     try { ed.scrollIntoView({ behavior: 'smooth', block: 'start' }); } catch {}
   } catch (e) {
@@ -1061,54 +1310,130 @@ function renderLisaEditor() {
 
     <div id="acLisaHistory" style="${state.lisaHistoryOpen ? '' : 'display:none'}"></div>
 
-    <div class="ed-section">
-      <h3>Persona</h3>
-      <div class="ed-row-2">
-        <div class="ed-field">
-          <label>Naam <span class="req">*</span></label>
-          <input type="text" id="lf_persona_name" maxlength="100" value="${esc(c.persona_name)}" />
+    <div class="lisa-subtabs" id="lf_subtabs">
+      ${LISA_SUB_TABS.map((s) => `
+        <button type="button" class="lisa-subtab ${state.lisaActiveSub === s ? 'active' : ''}" data-sub="${esc(s)}">
+          ${esc(LISA_SUB_TAB_LABELS[s])}
+        </button>
+      `).join('')}
+    </div>
+
+    <div class="lisa-sub-section ${state.lisaActiveSub === 'persona' ? 'active' : ''}" data-lisa-sub="persona">
+      <div class="ed-section">
+        <h3>Persona</h3>
+        <div class="ed-row-2">
+          <div class="ed-field">
+            <label>Naam <span class="req">*</span></label>
+            <input type="text" id="lf_persona_name" maxlength="100" value="${esc(c.persona_name)}" />
+          </div>
+          <div class="ed-field">
+            <label>Leeftijd</label>
+            <input type="text" id="lf_persona_age" maxlength="20" value="${esc(c.persona_age)}" />
+          </div>
         </div>
         <div class="ed-field">
-          <label>Leeftijd</label>
-          <input type="text" id="lf_persona_age" maxlength="20" value="${esc(c.persona_age)}" />
+          <label>Achtergrondverhaal</label>
+          <textarea id="lf_persona_background" rows="3">${esc(c.persona_background)}</textarea>
         </div>
-      </div>
-      <div class="ed-field">
-        <label>Achtergrondverhaal</label>
-        <textarea id="lf_persona_background" rows="3">${esc(c.persona_background)}</textarea>
-      </div>
-      <div class="ed-row-2">
+        <div class="ed-row-2">
+          <div class="ed-field">
+            <label>Toon</label>
+            <input type="text" id="lf_persona_tone" maxlength="200" value="${esc(c.persona_tone)}" />
+          </div>
+          <div class="ed-field">
+            <label>Emoji-gebruik</label>
+            <select id="lf_emoji_usage">
+              ${LISA_EMOJI_OPTIONS.map((v) => `<option value="${esc(v)}" ${c.emoji_usage === v ? 'selected' : ''}>${esc(v)}</option>`).join('')}
+            </select>
+          </div>
+        </div>
         <div class="ed-field">
-          <label>Toon</label>
-          <input type="text" id="lf_persona_tone" maxlength="200" value="${esc(c.persona_tone)}" />
+          <label>Schrijfstijl <span style="color:var(--text-tertiary);font-weight:400">(voorbeelden van hoe Lisa schrijft)</span></label>
+          <textarea id="lf_persona_writing_style" rows="3">${esc(c.persona_writing_style)}</textarea>
         </div>
-        <div class="ed-field">
-          <label>Emoji-gebruik</label>
-          <select id="lf_emoji_usage">
-            ${LISA_EMOJI_OPTIONS.map((v) => `<option value="${esc(v)}" ${c.emoji_usage === v ? 'selected' : ''}>${esc(v)}</option>`).join('')}
-          </select>
-        </div>
-      </div>
-      <div class="ed-field">
-        <label>Schrijfstijl <span style="color:var(--text-tertiary);font-weight:400">(voorbeelden van hoe Lisa schrijft)</span></label>
-        <textarea id="lf_persona_writing_style" rows="3">${esc(c.persona_writing_style)}</textarea>
       </div>
     </div>
 
-    <div class="ed-section">
-      <h3>Gedrag — do's & don'ts</h3>
-      <div class="ed-field">
-        <label>Do's <span style="color:var(--text-tertiary);font-weight:400">(één per regel)</span></label>
-        <textarea id="lf_dos" rows="4">${esc(c.dos.join('\n'))}</textarea>
-      </div>
-      <div class="ed-field">
-        <label>Don'ts <span style="color:var(--text-tertiary);font-weight:400">(één per regel)</span></label>
-        <textarea id="lf_donts" rows="4">${esc(c.donts.join('\n'))}</textarea>
+    <div class="lisa-sub-section ${state.lisaActiveSub === 'dosdonts' ? 'active' : ''}" data-lisa-sub="dosdonts">
+      <div class="ed-section">
+        <h3>Gedrag — do's & don'ts</h3>
+        <div class="ed-field">
+          <label>Do's <span style="color:var(--text-tertiary);font-weight:400">(één per regel)</span></label>
+          <textarea id="lf_dos" rows="4">${esc(c.dos.join('\n'))}</textarea>
+        </div>
+        <div class="ed-field">
+          <label>Don'ts <span style="color:var(--text-tertiary);font-weight:400">(één per regel)</span></label>
+          <textarea id="lf_donts" rows="4">${esc(c.donts.join('\n'))}</textarea>
+        </div>
       </div>
     </div>
 
-    <div class="ed-section">
-      <h3>Follow-up sequence</h3>
+    <div class="lisa-sub-section ${state.lisaActiveSub === 'fases' ? 'active' : ''}" data-lisa-sub="fases">
+      <div class="ed-section">
+        <h3>Funnel-fases</h3>
+        <div class="lisa-fase-tabs" id="lf_fase_tabs">
+          ${LISA_FU_PHASES.map((f) => `
+            <button type="button" class="lisa-fase-tab ${state.lisaActiveFase === f ? 'active' : ''}" data-fase="${esc(f)}">
+              ${esc(LISA_PHASE_LABELS[f])}
+            </button>
+          `).join('')}
+        </div>
+        <div id="lf_fase_panel">${renderLisaFasePanel(state.lisaActiveFase)}</div>
+      </div>
+    </div>
+
+    <div class="lisa-sub-section ${state.lisaActiveSub === 'kb' ? 'active' : ''}" data-lisa-sub="kb">
+      <div class="ed-section">
+        <h3>🛍 Producten</h3>
+        <div class="kb-section-head">
+          <span style="font-size:12px;color:var(--text-tertiary)">Wat kan Lisa aanbieden?</span>
+          <span class="spacer"></span>
+          <button class="kb-list-add" type="button" id="lf_kb_add_product"><i class="ti ti-plus"></i> Product toevoegen</button>
+        </div>
+        <div id="lf_kb_products">${renderLisaProducts()}</div>
+      </div>
+
+      <div class="ed-section">
+        <h3>❓ Veelgestelde vragen</h3>
+        <div class="kb-section-head">
+          <span style="font-size:12px;color:var(--text-tertiary)">Vraag + antwoord + trigger-keywords.</span>
+          <span class="spacer"></span>
+          <button class="kb-list-add" type="button" id="lf_kb_add_faq"><i class="ti ti-plus"></i> FAQ toevoegen</button>
+        </div>
+        <div id="lf_kb_faqs">${renderLisaFaqs()}</div>
+      </div>
+
+      <div class="ed-section">
+        <h3>🏷 Algemene Kennisbank</h3>
+        <div class="ed-toggle">
+          <div class="lbl">Gebruik algemene Kennisbank-items
+            <small>Lisa mag putten uit kennisbank-items met de geselecteerde tags.</small>
+          </div>
+          <span class="toggle ${c.kb_use_general_kb ? 'on' : ''}" id="lf_kb_use_general" role="button" tabindex="0"></span>
+        </div>
+        <div id="lf_kb_tag_wrap" style="${c.kb_use_general_kb ? '' : 'display:none'}">
+          <label style="font-size:12px;font-weight:500;color:var(--text-secondary);display:block;margin-bottom:6px">Selecteer welke tags Lisa mag gebruiken:</label>
+          <div class="kb-tf-chips" id="lf_kb_tag_chips">${renderLisaTagFilterChips()}</div>
+          <div class="kb-count-line" id="lf_kb_count_line">${renderLisaKbCountLine()}</div>
+        </div>
+      </div>
+
+      <div class="ed-section">
+        <h3>ℹ️ Extra info</h3>
+        <div class="ed-field">
+          <label>Prijzen <span style="color:var(--text-tertiary);font-weight:400">(vrije tekst)</span></label>
+          <textarea id="lf_kb_pricing" rows="3">${esc(c.kb_pricing)}</textarea>
+        </div>
+        <div class="ed-field">
+          <label>USP's <span style="color:var(--text-tertiary);font-weight:400">(unique selling points)</span></label>
+          <textarea id="lf_kb_usps" rows="3">${esc(c.kb_usps)}</textarea>
+        </div>
+      </div>
+    </div>
+
+    <div class="lisa-sub-section ${state.lisaActiveSub === 'followup' ? 'active' : ''}" data-lisa-sub="followup">
+      <div class="ed-section">
+        <h3>Follow-up sequence</h3>
       <div class="ed-toggle">
         <div class="lbl">Follow-up aan
           <small>Master-schakelaar — uit = geen automatische opvolg-berichten.</small>
@@ -1137,6 +1462,7 @@ function renderLisaEditor() {
             <i class="ti ti-plus"></i> ${c.followup_sequence.length >= LISA_FU_MAX_STEPS ? 'Max bereikt' : 'Stap toevoegen'}
           </button>
         </div>
+      </div>
       </div>
     </div>
 
@@ -1206,6 +1532,30 @@ function renderLisaEditor() {
   document.getElementById('lf_fu_list').addEventListener('input',  onLisaFuInput);
   document.getElementById('lf_fu_list').addEventListener('change', onLisaFuInput);
   document.getElementById('lf_fu_list').addEventListener('click',  onLisaFuClick);
+
+  // Fase 1c — Sub-tab strip click.
+  document.getElementById('lf_subtabs').addEventListener('click', (ev) => {
+    const b = ev.target.closest('.lisa-subtab[data-sub]');
+    if (b) acLisaSwitchSub(b.dataset.sub);
+  });
+
+  // Fase-tabs click + initial bind van fase-panel.
+  document.getElementById('lf_fase_tabs').addEventListener('click', (ev) => {
+    const b = ev.target.closest('.lisa-fase-tab[data-fase]');
+    if (b) acLisaSwitchFase(b.dataset.fase);
+  });
+  bindLisaFasePanel();
+
+  // Kennisbank: use_general toggle + delegated event-binding.
+  document.getElementById('lf_kb_use_general').addEventListener('click', () => {
+    const el = document.getElementById('lf_kb_use_general');
+    el.classList.toggle('on');
+    state.lisaCfg.kb_use_general_kb = el.classList.contains('on');
+    state.lisaDirty = true;
+    document.getElementById('lf_kb_tag_wrap').style.display = state.lisaCfg.kb_use_general_kb ? '' : 'none';
+    rerenderLisaTagFilterChips();
+  });
+  bindLisaKbPanel();
 
   if (state.lisaHistoryOpen) loadAndRenderLisaHistory();
 }
@@ -1345,16 +1695,351 @@ function acLisaAddFuStep() {
 }
 window.acLisaAddFuStep = acLisaAddFuStep;
 
+// ─── Fase 1c — sub-tab switching ───────────────────────────────────────────
+function acLisaSwitchSub(sub) {
+  if (!LISA_SUB_TABS.includes(sub)) return;
+  state.lisaActiveSub = sub;
+  // Highlight juiste tab.
+  document.querySelectorAll('#lf_subtabs .lisa-subtab').forEach((b) => {
+    b.classList.toggle('active', b.dataset.sub === sub);
+  });
+  // Toon juiste section.
+  document.querySelectorAll('#acEditor .lisa-sub-section').forEach((el) => {
+    el.classList.toggle('active', el.dataset.lisaSub === sub);
+  });
+}
+window.acLisaSwitchSub = acLisaSwitchSub;
+
+// ─── Fase 1c — Fases-tab (funnel) ──────────────────────────────────────────
+function renderLisaFasePanel(faseKey) {
+  const p = (state.lisaCfg.phases && state.lisaCfg.phases[faseKey]) || { system: '', transition: '', examples: [] };
+  const exs = p.examples.map((v, i) => `
+    <div style="display:flex;gap:6px;align-items:flex-start;margin-bottom:6px">
+      <textarea rows="2" style="flex:1" data-fase-ex-idx="${i}">${esc(v)}</textarea>
+      <button class="fu-step-del" type="button" data-fase-ex-remove="${i}" title="Verwijderen">×</button>
+    </div>`).join('');
+  return `
+    <div class="ed-field">
+      <label>System prompt — fase ${esc(LISA_PHASE_LABELS[faseKey])}</label>
+      <textarea id="lf_fase_system" rows="6">${esc(p.system)}</textarea>
+    </div>
+    <div class="ed-field">
+      <label>Overgangscriteria <span style="color:var(--text-tertiary);font-weight:400">— wanneer door naar de volgende fase?</span></label>
+      <textarea id="lf_fase_transition" rows="3">${esc(p.transition)}</textarea>
+    </div>
+    <div class="ed-field">
+      <label>Voorbeeldberichten</label>
+      <div id="lf_fase_examples">${exs}</div>
+      <button class="kb-list-add" type="button" id="lf_fase_add_example"><i class="ti ti-plus"></i> Voeg voorbeeld toe</button>
+    </div>
+  `;
+}
+
+function acLisaSwitchFase(faseKey) {
+  if (!LISA_FU_PHASES.includes(faseKey)) return;
+  // Commit huidige fase eerst (lees DOM-velden naar state).
+  commitLisaFasePanel();
+  state.lisaActiveFase = faseKey;
+  document.querySelectorAll('#lf_fase_tabs .lisa-fase-tab').forEach((b) => {
+    b.classList.toggle('active', b.dataset.fase === faseKey);
+  });
+  document.getElementById('lf_fase_panel').innerHTML = renderLisaFasePanel(faseKey);
+  bindLisaFasePanel();
+}
+window.acLisaSwitchFase = acLisaSwitchFase;
+
+function commitLisaFasePanel() {
+  const f = state.lisaActiveFase;
+  if (!f || !state.lisaCfg?.phases?.[f]) return;
+  const sys = document.getElementById('lf_fase_system');
+  const tr  = document.getElementById('lf_fase_transition');
+  if (sys) state.lisaCfg.phases[f].system = sys.value;
+  if (tr)  state.lisaCfg.phases[f].transition = tr.value;
+  // Examples worden live bij elke input gesynchroniseerd; geen DOM-commit nodig.
+}
+
+function bindLisaFasePanel() {
+  const panel = document.getElementById('lf_fase_panel');
+  if (!panel) return;
+  const f = state.lisaActiveFase;
+  panel.addEventListener('input', (ev) => {
+    if (!state.lisaCfg?.phases?.[f]) return;
+    state.lisaDirty = true;
+    const t = ev.target;
+    if (t.id === 'lf_fase_system')     state.lisaCfg.phases[f].system = t.value;
+    if (t.id === 'lf_fase_transition') state.lisaCfg.phases[f].transition = t.value;
+    if (t.dataset.faseExIdx != null) {
+      const i = parseInt(t.dataset.faseExIdx, 10);
+      if (Number.isFinite(i)) state.lisaCfg.phases[f].examples[i] = t.value;
+    }
+  });
+  panel.addEventListener('click', (ev) => {
+    if (!state.lisaCfg?.phases?.[f]) return;
+    const rm = ev.target.closest('[data-fase-ex-remove]');
+    if (rm) {
+      const i = parseInt(rm.dataset.faseExRemove, 10);
+      if (Number.isFinite(i)) {
+        state.lisaCfg.phases[f].examples.splice(i, 1);
+        state.lisaDirty = true;
+        document.getElementById('lf_fase_panel').innerHTML = renderLisaFasePanel(f);
+        bindLisaFasePanel();
+      }
+      return;
+    }
+    if (ev.target.closest('#lf_fase_add_example')) {
+      state.lisaCfg.phases[f].examples.push('');
+      state.lisaDirty = true;
+      document.getElementById('lf_fase_panel').innerHTML = renderLisaFasePanel(f);
+      bindLisaFasePanel();
+    }
+  });
+}
+
+// ─── Fase 1c — Kennisbank-tab (producten + FAQ + tag-filter + extra info) ──
+function renderLisaProducts() {
+  const arr = state.lisaCfg.kb_products;
+  if (!arr.length) return `<div class="kb-empty">Nog geen producten. Voeg toe wat Lisa kan aanbieden.</div>`;
+  return arr.map((p, i) => `
+    <div class="kb-card" data-prod-idx="${i}">
+      <button class="kb-card-del" type="button" data-prod-remove="${i}" title="Verwijderen">×</button>
+      <div class="ed-field">
+        <label>Naam</label>
+        <input type="text" data-prod-field="naam" value="${esc(p.naam)}" />
+      </div>
+      <div class="ed-field">
+        <label>Beschrijving</label>
+        <textarea rows="2" data-prod-field="beschrijving">${esc(p.beschrijving)}</textarea>
+      </div>
+      <div class="ed-row-2">
+        <div class="ed-field">
+          <label>Prijs</label>
+          <input type="text" data-prod-field="prijs" value="${esc(p.prijs)}" />
+        </div>
+        <div class="ed-field">
+          <label>Doelgroep</label>
+          <input type="text" data-prod-field="doelgroep" value="${esc(p.doelgroep)}" placeholder="Beginners" />
+        </div>
+      </div>
+      <div class="ed-field">
+        <label>Duur</label>
+        <input type="text" data-prod-field="duur" value="${esc(p.duur)}" placeholder="3-6 maanden" />
+      </div>
+    </div>
+  `).join('');
+}
+
+function renderLisaFaqs() {
+  const arr = state.lisaCfg.kb_faq;
+  if (!arr.length) return `<div class="kb-empty">Nog geen FAQ. Lisa weet nog niets te beantwoorden.</div>`;
+  return arr.map((q, i) => {
+    const kws = q.keywords.map((k, ki) => `<span class="kw-chip">${esc(k)}<span class="kw-x" data-faq-kw-remove="${i}:${ki}">&times;</span></span>`).join('');
+    return `
+      <div class="kb-card" data-faq-idx="${i}">
+        <button class="kb-card-del" type="button" data-faq-remove="${i}" title="Verwijderen">×</button>
+        <div class="ed-field">
+          <label>Vraag</label>
+          <input type="text" data-faq-field="vraag" value="${esc(q.vraag)}" />
+        </div>
+        <div class="ed-field">
+          <label>Antwoord</label>
+          <textarea rows="3" data-faq-field="antwoord">${esc(q.antwoord)}</textarea>
+        </div>
+        <div class="ed-field">
+          <label>Trigger-keywords <span style="color:var(--text-tertiary);font-weight:400">— typ + Enter</span></label>
+          <div class="faq-kw-wrap" data-faq-kw-host="${i}">
+            ${kws}
+            <input type="text" class="faq-kw-input" data-faq-kw-input="${i}" placeholder="Bv: prijs, kosten, tarief" />
+          </div>
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+function renderLisaTagFilterChips() {
+  const tags = state.lisaKbTags;
+  if (!tags.length) {
+    return `<span style="font-size:12px;color:var(--text-tertiary)">Geen tags — maak ze aan in de Kennisbank-module.</span>`;
+  }
+  const sel = new Set(state.lisaCfg.kb_tag_filter);
+  return tags.map((t) => `
+    <span class="kb-tf-chip ${sel.has(t.name) ? 'active' : ''}" style="background:${esc(t.color || '#64748b')}" data-tag-toggle="${esc(t.name)}">
+      ${esc(t.name)}<span class="tf-count">${lisaKbCountByTagId(t.id)}</span>
+    </span>
+  `).join('');
+}
+
+function renderLisaKbCountLine() {
+  if (!state.lisaCfg.kb_use_general_kb) return '';
+  const n = lisaKbAvailableCount();
+  return `<span><strong>${n}</strong> item${n === 1 ? '' : 's'} uit Kennisbank beschikbaar voor Lisa</span>`;
+}
+
+function rerenderLisaProducts() {
+  const host = document.getElementById('lf_kb_products');
+  if (host) host.innerHTML = renderLisaProducts();
+}
+function rerenderLisaFaqs() {
+  const host = document.getElementById('lf_kb_faqs');
+  if (host) host.innerHTML = renderLisaFaqs();
+}
+function rerenderLisaTagFilterChips() {
+  const chipsHost = document.getElementById('lf_kb_tag_chips');
+  const lineHost  = document.getElementById('lf_kb_count_line');
+  if (chipsHost) chipsHost.innerHTML = renderLisaTagFilterChips();
+  if (lineHost)  lineHost.innerHTML  = renderLisaKbCountLine();
+}
+
+// Delegated event-binding voor het hele Kennisbank-paneel.
+function bindLisaKbPanel() {
+  const panel = document.querySelector('[data-lisa-sub="kb"]');
+  if (!panel) return;
+
+  // Producten + FAQ + tag-filter clicks.
+  panel.addEventListener('click', (ev) => {
+    // Producten add/remove.
+    if (ev.target.closest('#lf_kb_add_product')) {
+      state.lisaCfg.kb_products.push({ naam: '', beschrijving: '', prijs: '', doelgroep: '', duur: '' });
+      state.lisaDirty = true;
+      rerenderLisaProducts();
+      return;
+    }
+    const prodRm = ev.target.closest('[data-prod-remove]');
+    if (prodRm) {
+      const i = parseInt(prodRm.dataset.prodRemove, 10);
+      if (Number.isFinite(i)) {
+        if (!confirm('Product verwijderen?')) return;
+        state.lisaCfg.kb_products.splice(i, 1);
+        state.lisaDirty = true;
+        rerenderLisaProducts();
+      }
+      return;
+    }
+    // FAQ add/remove.
+    if (ev.target.closest('#lf_kb_add_faq')) {
+      state.lisaCfg.kb_faq.push({ vraag: '', antwoord: '', keywords: [] });
+      state.lisaDirty = true;
+      rerenderLisaFaqs();
+      return;
+    }
+    const faqRm = ev.target.closest('[data-faq-remove]');
+    if (faqRm) {
+      const i = parseInt(faqRm.dataset.faqRemove, 10);
+      if (Number.isFinite(i)) {
+        if (!confirm('FAQ verwijderen?')) return;
+        state.lisaCfg.kb_faq.splice(i, 1);
+        state.lisaDirty = true;
+        rerenderLisaFaqs();
+      }
+      return;
+    }
+    // FAQ keyword chip-x.
+    const kwRm = ev.target.closest('[data-faq-kw-remove]');
+    if (kwRm) {
+      const [iStr, kiStr] = (kwRm.dataset.faqKwRemove || '').split(':');
+      const i  = parseInt(iStr,  10);
+      const ki = parseInt(kiStr, 10);
+      if (Number.isFinite(i) && Number.isFinite(ki)) {
+        state.lisaCfg.kb_faq[i].keywords.splice(ki, 1);
+        state.lisaDirty = true;
+        rerenderLisaFaqs();
+      }
+      return;
+    }
+    // Tag-filter chip toggle.
+    const tagChip = ev.target.closest('[data-tag-toggle]');
+    if (tagChip) {
+      const name = tagChip.dataset.tagToggle;
+      const idx  = state.lisaCfg.kb_tag_filter.indexOf(name);
+      if (idx >= 0) state.lisaCfg.kb_tag_filter.splice(idx, 1);
+      else          state.lisaCfg.kb_tag_filter.push(name);
+      state.lisaDirty = true;
+      rerenderLisaTagFilterChips();
+      return;
+    }
+  });
+
+  // Producten + FAQ input dirty-track + state-sync.
+  panel.addEventListener('input', (ev) => {
+    const t = ev.target;
+    // Product-field.
+    const prodCard = t.closest('[data-prod-idx]');
+    if (prodCard && t.dataset.prodField) {
+      const i = parseInt(prodCard.dataset.prodIdx, 10);
+      const p = state.lisaCfg.kb_products[i];
+      if (p) {
+        p[t.dataset.prodField] = t.value;
+        state.lisaDirty = true;
+      }
+      return;
+    }
+    // FAQ-field.
+    const faqCard = t.closest('[data-faq-idx]');
+    if (faqCard && t.dataset.faqField) {
+      const i = parseInt(faqCard.dataset.faqIdx, 10);
+      const q = state.lisaCfg.kb_faq[i];
+      if (q) {
+        q[t.dataset.faqField] = t.value;
+        state.lisaDirty = true;
+      }
+      return;
+    }
+    // Pricing / USPs.
+    if (t.id === 'lf_kb_pricing') { state.lisaCfg.kb_pricing = t.value; state.lisaDirty = true; return; }
+    if (t.id === 'lf_kb_usps')    { state.lisaCfg.kb_usps    = t.value; state.lisaDirty = true; return; }
+  });
+
+  // FAQ keyword Enter.
+  panel.addEventListener('keydown', (ev) => {
+    const inp = ev.target.closest('.faq-kw-input[data-faq-kw-input]');
+    if (!inp) return;
+    if (ev.key !== 'Enter') return;
+    ev.preventDefault();
+    const i = parseInt(inp.dataset.faqKwInput, 10);
+    if (!Number.isFinite(i)) return;
+    const v = inp.value.trim().toLowerCase();
+    if (!v) return;
+    if (!Array.isArray(state.lisaCfg.kb_faq[i].keywords)) state.lisaCfg.kb_faq[i].keywords = [];
+    if (!state.lisaCfg.kb_faq[i].keywords.includes(v)) {
+      state.lisaCfg.kb_faq[i].keywords.push(v);
+      state.lisaDirty = true;
+      rerenderLisaFaqs();
+      // Re-focus na re-render.
+      try { document.querySelector(`[data-faq-kw-input="${i}"]`)?.focus(); } catch {}
+    }
+    inp.value = '';
+  });
+}
+
 function readLisaForm() {
   const c = state.lisaCfg;
-  c.persona_name        = (document.getElementById('lf_persona_name').value || '').trim();
-  c.persona_age         = (document.getElementById('lf_persona_age').value  || '').trim();
-  c.persona_background  = document.getElementById('lf_persona_background').value || '';
-  c.persona_tone        = (document.getElementById('lf_persona_tone').value || '').trim();
-  c.persona_writing_style = document.getElementById('lf_persona_writing_style').value || '';
-  c.emoji_usage         = document.getElementById('lf_emoji_usage').value;
-  c.dos                 = (document.getElementById('lf_dos').value || '').split('\n').map((s) => s.trim()).filter(Boolean);
-  c.donts               = (document.getElementById('lf_donts').value || '').split('\n').map((s) => s.trim()).filter(Boolean);
+  // Persona/dosdonts-velden zijn alleen aanwezig in DOM wanneer de bijbehorende
+  // sub-tab in dit page-render geopend is geweest. De velden worden bij elke
+  // sub-tab switch UIT/IN de DOM gehouden via display:none, dus elementen
+  // BESTAAN doorgaans. Defensief: skip als element ontbreekt.
+  const pn = document.getElementById('lf_persona_name');
+  if (pn) c.persona_name = (pn.value || '').trim();
+  const pa = document.getElementById('lf_persona_age');
+  if (pa) c.persona_age = (pa.value || '').trim();
+  const pb = document.getElementById('lf_persona_background');
+  if (pb) c.persona_background = pb.value || '';
+  const pt = document.getElementById('lf_persona_tone');
+  if (pt) c.persona_tone = (pt.value || '').trim();
+  const pw = document.getElementById('lf_persona_writing_style');
+  if (pw) c.persona_writing_style = pw.value || '';
+  const em = document.getElementById('lf_emoji_usage');
+  if (em) c.emoji_usage = em.value;
+  const ds = document.getElementById('lf_dos');
+  if (ds) c.dos = (ds.value || '').split('\n').map((s) => s.trim()).filter(Boolean);
+  const dn = document.getElementById('lf_donts');
+  if (dn) c.donts = (dn.value || '').split('\n').map((s) => s.trim()).filter(Boolean);
+  // KB extra info (pricing + usps zitten in DOM zodra Kennisbank-tab is bezocht).
+  const kp = document.getElementById('lf_kb_pricing');
+  if (kp) c.kb_pricing = kp.value || '';
+  const ku = document.getElementById('lf_kb_usps');
+  if (ku) c.kb_usps = ku.value || '';
+  // Commit huidige Fase-panel (system + transition) naar state vóór save.
+  commitLisaFasePanel();
 
   if (!c.persona_name) return { err: 'Persona-naam is verplicht.' };
   if (c.persona_name.length > 100) return { err: 'Persona-naam: max 100 tekens.' };
@@ -1368,6 +2053,17 @@ function readLisaForm() {
     }
   }
 
+  // Phase_<f> jsonb-objecten samenstellen vanuit cfg.phases.
+  const phaseFields = {};
+  for (const f of LISA_FU_PHASES) {
+    const p = c.phases[f] || { system: '', transition: '', examples: [] };
+    phaseFields['phase_' + f] = {
+      system:     String(p.system || ''),
+      transition: String(p.transition || ''),
+      examples:   Array.isArray(p.examples) ? p.examples.map(String).filter((s) => s.length > 0) : [],
+    };
+  }
+
   return {
     payload: {
       persona_name:                c.persona_name,
@@ -1378,6 +2074,25 @@ function readLisaForm() {
       emoji_usage:                 c.emoji_usage,
       dos:                         c.dos,
       donts:                       c.donts,
+      // Fase 1c — phases + kennisbank meesturen (server EDIT_FIELDS accepteert).
+      ...phaseFields,
+      kb_products:                 c.kb_products.map((p) => ({
+        naam:         String(p.naam || ''),
+        beschrijving: String(p.beschrijving || ''),
+        prijs:        String(p.prijs || ''),
+        doelgroep:    String(p.doelgroep || ''),
+        duur:         String(p.duur || ''),
+      })),
+      kb_faq:                      c.kb_faq.map((q) => ({
+        vraag:    String(q.vraag || ''),
+        antwoord: String(q.antwoord || ''),
+        keywords: Array.isArray(q.keywords)
+          ? q.keywords.map((k) => String(k).trim().toLowerCase()).filter(Boolean) : [],
+      })),
+      kb_pricing:                  c.kb_pricing,
+      kb_usps:                     c.kb_usps,
+      kb_tag_filter:               c.kb_tag_filter.slice(),
+      kb_use_general_kb:           c.kb_use_general_kb === true,
       followup_enabled:            c.followup_enabled === true,
       followup_ai_threshold_chars: c.followup_ai_threshold_chars,
       stop_keywords:               c.stop_keywords,
