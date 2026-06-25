@@ -1066,8 +1066,10 @@
     <button class="sr-seg" id="navWanbetalers" data-view="wanbetalers" type="button" style="display:none">Wanbetalers</button>
     <button class="sr-seg" id="navCamtBank" data-view="camtbank" type="button" style="display:none">Bank</button>
     <button class="sr-seg" data-view="roadmap" type="button">Roadmap</button>
-    <!-- Groep D: Instellingen tab (Joost AI / WhatsApp Templates / Afdeling-config). -->
-    <button class="sr-seg" id="navInstellingen" data-view="instellingen" type="button">Instellingen</button>
+    <!-- Groep D: Instellingen — knop verborgen sinds Agent center. Joost AI /
+         WhatsApp Templates / Afdeling-config staan nu in /modules/agent-center.html
+         (Agents-view voor Joost-config, Kanalen-view voor Templates + Verbindingen).
+         #view-instellingen + mountFinanceInstellingenHost-branches blijven dormant. -->
   </div>
 
   <!-- ===== Dashboard-view (Groep C: 12 KPIs + 3 charts) =====
@@ -11431,12 +11433,13 @@
           // ?conversation=<uuid> impliciet richten op inbox sub-tab.
           if (!initialSub && params.get('conversation')) _wbActiveSub = 'inbox';
           setView('wanbetalers');
-        } else if (initialTab && ['dashboard','facturen','klanten','camtbank','bank','roadmap','instellingen'].includes(initialTab)) {
+        } else if (initialTab && ['dashboard','facturen','klanten','camtbank','bank','roadmap'].includes(initialTab)) {
           setView(initialTab);
-          // Voor 'instellingen': ?sub=joost|templates|connection wordt door
-          // FinanceInstellingen.mount() zelf gelezen uit location.search.
-        } else if (!initialTab) {
-          // Default landing-tab is Dashboard (Groep C).
+        } else {
+          // Geen tab OF onbekende/verborgen tab (waaronder legacy ?tab=instellingen
+          // — die staat sinds de Agent center-migratie niet meer in de whitelist;
+          // Joost AI / WhatsApp Templates / Afdeling-config beheer je nu in
+          // /modules/agent-center.html). Default landing-tab is Dashboard.
           setView('dashboard');
         }
       } catch (_) { /* fail-safe: default view-facturen blijft actief */ }
