@@ -105,6 +105,37 @@
     .editor-banner { padding: 10px 12px; margin-bottom: 12px; background: rgba(239,68,68,0.1); border: 1px solid #ef4444; border-radius: 8px; color: #ef4444; font-size: 13px; display: none; }
     .editor-banner.visible { display: block; }
 
+    /* Modal (runs) */
+    .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.6); z-index: 500; display: flex; align-items: center; justify-content: center; backdrop-filter: blur(4px); padding: 20px; }
+    .modal-overlay.hidden { display: none !important; }
+    .modal-card { background: var(--bg-elev); border: 1px solid var(--border); border-radius: 14px; width: 100%; max-width: 760px; max-height: calc(100vh - 40px); display: flex; flex-direction: column; }
+    .modal-header { display: flex; align-items: center; justify-content: space-between; padding: 16px 20px; border-bottom: 1px solid var(--border); }
+    .modal-title { font-size: 15px; font-weight: 700; }
+    .modal-close { background: transparent; border: none; color: var(--text-faint); font-size: 18px; cursor: pointer; padding: 4px; line-height: 1; }
+    .modal-body { padding: 18px 20px; overflow-y: auto; }
+    .modal-footer { display: flex; justify-content: flex-end; gap: 8px; padding: 14px 20px; border-top: 1px solid var(--border); }
+
+    .runs-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+    .runs-table th { text-align: left; font-weight: 600; color: var(--text-faint); padding: 6px 8px; border-bottom: 1px solid var(--border); font-size: 11px; text-transform: uppercase; letter-spacing: .04em; }
+    .runs-table td { padding: 7px 8px; border-bottom: 1px solid var(--border); color: var(--text); }
+    .runs-table tr:last-child td { border-bottom: none; }
+    .runs-table tr.clickable { cursor: pointer; }
+    .runs-table tr.clickable:hover td { background: var(--bg-elev-2); }
+    .runs-status { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; }
+    .runs-status.active     { background: rgba(245,158,11,0.15); color:#b45309; }
+    .runs-status.completed  { background: rgba(5,150,105,0.15); color:#059669; }
+    .runs-status.exited     { background: var(--bg-elev-2); color: var(--text-faint); border: 1px solid var(--border); }
+    .runs-status.cancelled  { background: rgba(148,163,184,0.2); color: var(--text-faint); }
+    .runs-status.failed     { background: rgba(220,38,38,0.15); color:#b91c1c; }
+
+    .log-list { display: grid; gap: 8px; font-size: 12.5px; }
+    .log-row { background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 9px 11px; }
+    .log-row .log-head { display: flex; gap: 8px; align-items: center; margin-bottom: 4px; font-weight: 600; color: var(--text); }
+    .log-row .log-idx { display: inline-block; min-width: 22px; padding: 1px 6px; background: var(--bg-elev-2); border: 1px solid var(--border); border-radius: 10px; font-size: 10.5px; font-weight: 700; text-align: center; color: var(--text-faint); }
+    .log-row .log-type { color: var(--brand-primary, #093d54); }
+    .log-row .log-ts { margin-left: auto; font-size: 11px; color: var(--text-faint); font-weight: 500; }
+    .log-row pre { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11.5px; background: var(--bg-elev-2); border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px; white-space: pre-wrap; word-break: break-word; color: var(--text-dim); margin-top: 4px; }
+
     @media (max-width: 880px) {
       .app { margin-left: 0; padding: 14px; }
       .form-row-2 { grid-template-columns: 1fr; }
@@ -118,6 +149,21 @@
 
 <div class="app" id="page-content">
   <!-- gevuld door init() -->
+</div>
+
+<!-- ── Modal: runs-historie (Fase 3a) ─────────────────────────────── -->
+<div class="modal-overlay hidden" id="runsModal" role="dialog" aria-modal="true">
+  <div class="modal-card">
+    <div class="modal-header">
+      <div class="modal-title" id="runsModalTitle">Run-historie</div>
+      <button class="modal-close" type="button" onclick="closeRunsModal()">&#x2715;</button>
+    </div>
+    <div class="modal-body" id="runsModalBody"></div>
+    <div class="modal-footer">
+      <button class="btn-secondary" type="button" id="runsBackBtn" style="display:none" onclick="backToRunsList()"><i class="ti ti-arrow-left"></i> Terug</button>
+      <button class="btn-secondary" type="button" onclick="closeRunsModal()">Sluiten</button>
+    </div>
+  </div>
 </div>
 
 <script src="/modules/shared/supabase-client.js"></script>
@@ -293,6 +339,7 @@ function renderList() {
           <span class="toggle ${a.enabled ? 'on' : ''}" data-toggle="${esc(a.id)}" title="${a.enabled ? 'Aan — klik om uit te zetten' : 'Uit — klik om aan te zetten'}"></span>
           <span>${a.enabled ? 'Aan' : 'Uit'}</span>
         </span>
+        <button class="btn-ghost" type="button" data-act="runs" data-aid="${esc(a.id)}"><i class="ti ti-history"></i> Runs</button>
         ${canEdit ? `<button class="btn-secondary" type="button" data-act="edit" data-aid="${esc(a.id)}"><i class="ti ti-edit"></i> Bewerken</button>` : ''}
         ${canEdit ? `<button class="btn-danger" type="button" data-act="delete" data-aid="${esc(a.id)}"><i class="ti ti-trash"></i></button>` : ''}
       </div>
@@ -329,6 +376,7 @@ async function onListClick(ev) {
   if (t.dataset.act === 'new') return startEditor(null);
   if (t.dataset.act === 'edit') { const a = state.automations.find((x) => x.id === t.dataset.aid); if (a) startEditor(a); return; }
   if (t.dataset.act === 'delete') return deleteAutomation(t.dataset.aid);
+  if (t.dataset.act === 'runs')   return openRunsModal(t.dataset.aid);
   if (t.dataset.toggle) return toggleEnabled(t.dataset.toggle, t);
 }
 
@@ -902,6 +950,124 @@ async function saveEditor() {
     if (btn) btn.disabled = false;
   }
 }
+
+// ── Runs modal (Fase 3a) ────────────────────────────────────────────────────
+// Twee weergaven: lijst van runs per automation + detail van één run (log).
+// We onthouden de huidige automation in _runsState zodat de "Terug"-knop
+// in de detail-view de juiste lijst opnieuw kan tonen.
+const _runsState = { automationId: null, automationName: null };
+
+async function openRunsModal(automationId) {
+  const a = state.automations.find((x) => x.id === automationId);
+  _runsState.automationId   = automationId;
+  _runsState.automationName = a?.name || '';
+  document.getElementById('runsModalTitle').textContent = `Run-historie · ${a?.name || ''}`;
+  document.getElementById('runsBackBtn').style.display = 'none';
+  document.getElementById('runsModalBody').innerHTML = `<div class="empty-state" style="padding:30px 12px"><i class="ti ti-loader-2"></i> Laden…</div>`;
+  document.getElementById('runsModal').classList.remove('hidden');
+  await loadRunsForAutomation(automationId);
+}
+
+async function loadRunsForAutomation(automationId) {
+  try {
+    const r = await window.AgentShared.apiFetch('/api/onboarding-automation-runs?automation_id=' + encodeURIComponent(automationId));
+    const data = await r.json();
+    if (!r.ok) throw new Error(data?.error || 'runs failed');
+    const runs = Array.isArray(data.runs) ? data.runs : [];
+    if (runs.length === 0) {
+      document.getElementById('runsModalBody').innerHTML = `<div class="empty-state" style="padding:30px 12px">Nog geen runs voor deze automation.</div>`;
+      return;
+    }
+
+    // Verzamel onboarding_ids zodat we per run de klant-naam erbij kunnen
+    // tonen (read-only join via onboardings-admin-list zou duurder zijn —
+    // we doen geen extra fetch en tonen de id-prefix).
+    document.getElementById('runsModalBody').innerHTML = `
+      <table class="runs-table">
+        <thead><tr>
+          <th>Status</th><th>Stap</th><th>Onboarding</th><th>Volgende run</th><th>Gestart</th><th>Laatste fout</th>
+        </tr></thead>
+        <tbody>
+          ${runs.map((r) => `
+            <tr class="clickable" data-run-id="${esc(r.id)}">
+              <td><span class="runs-status ${esc(r.status)}">${esc(r.status)}</span></td>
+              <td>${esc(String(r.current_step_index ?? '—'))}</td>
+              <td title="${esc(r.onboarding_id || '')}">${esc(String(r.onboarding_id || '').slice(0, 8))}…</td>
+              <td>${esc(fmtDate(r.next_run_at))}</td>
+              <td>${esc(fmtDate(r.started_at))}</td>
+              <td style="color:var(--text-faint)">${esc(r.last_error || '')}</td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+      <div class="form-help" style="margin-top:8px">Klik op een rij voor de stap-log.</div>
+    `;
+    document.querySelectorAll('#runsModalBody tr.clickable[data-run-id]').forEach((row) => {
+      row.addEventListener('click', () => openRunDetail(row.getAttribute('data-run-id')));
+    });
+  } catch (e) {
+    document.getElementById('runsModalBody').innerHTML = `<div class="empty-state" style="padding:30px 12px">Laden mislukt: ${esc(e?.message || e)}</div>`;
+  }
+}
+
+async function openRunDetail(runId) {
+  if (!runId) return;
+  document.getElementById('runsModalTitle').textContent = `Run · ${runId.slice(0, 8)}…`;
+  document.getElementById('runsBackBtn').style.display = '';
+  document.getElementById('runsModalBody').innerHTML = `<div class="empty-state" style="padding:30px 12px"><i class="ti ti-loader-2"></i> Laden…</div>`;
+  try {
+    const r = await window.AgentShared.apiFetch('/api/onboarding-automation-runs?run_id=' + encodeURIComponent(runId));
+    const data = await r.json();
+    if (!r.ok) throw new Error(data?.error || 'run-detail failed');
+    const run = data.run || null;
+    const log = Array.isArray(data.log) ? data.log : [];
+
+    const metaTable = run ? `
+      <table class="runs-table" style="margin-bottom:14px">
+        <tbody>
+          <tr><th style="width:140px">Status</th><td><span class="runs-status ${esc(run.status)}">${esc(run.status)}</span></td></tr>
+          <tr><th>Huidige stap</th><td>${esc(String(run.current_step_index ?? '—'))}</td></tr>
+          <tr><th>Volgende run</th><td>${esc(fmtDate(run.next_run_at))}</td></tr>
+          <tr><th>Gestart</th><td>${esc(fmtDate(run.started_at))}</td></tr>
+          <tr><th>Afgerond</th><td>${esc(fmtDate(run.completed_at))}</td></tr>
+          <tr><th>Onboarding</th><td><code>${esc(run.onboarding_id || '')}</code></td></tr>
+          <tr><th>Automation</th><td><code>${esc(run.automation_id || '')}</code></td></tr>
+          ${run.last_error ? `<tr><th>Laatste fout</th><td style="color:#b91c1c">${esc(run.last_error)}</td></tr>` : ''}
+        </tbody>
+      </table>` : '<div class="empty-state" style="padding:20px 12px">Run niet gevonden.</div>';
+
+    const logHtml = log.length === 0
+      ? '<div class="empty-state" style="padding:20px 12px">Nog geen log-rijen voor deze run.</div>'
+      : `<div class="log-list">${log.map((r) => `
+          <div class="log-row">
+            <div class="log-head">
+              <span class="log-idx">${esc(String(r.step_index ?? '?'))}</span>
+              <span class="log-type">${esc(r.step_type || 'unknown')}</span>
+              <span class="log-ts">${esc(fmtDate(r.executed_at))}</span>
+            </div>
+            ${r.result ? `<pre>${esc(JSON.stringify(r.result, null, 2))}</pre>` : ''}
+          </div>
+        `).join('')}</div>`;
+
+    document.getElementById('runsModalBody').innerHTML = metaTable + logHtml;
+  } catch (e) {
+    document.getElementById('runsModalBody').innerHTML = `<div class="empty-state" style="padding:30px 12px">Laden mislukt: ${esc(e?.message || e)}</div>`;
+  }
+}
+
+function backToRunsList() {
+  const a = state.automations.find((x) => x.id === _runsState.automationId);
+  document.getElementById('runsModalTitle').textContent = `Run-historie · ${a?.name || _runsState.automationName || ''}`;
+  document.getElementById('runsBackBtn').style.display = 'none';
+  document.getElementById('runsModalBody').innerHTML = `<div class="empty-state" style="padding:30px 12px"><i class="ti ti-loader-2"></i> Laden…</div>`;
+  loadRunsForAutomation(_runsState.automationId);
+}
+
+function closeRunsModal() {
+  document.getElementById('runsModal').classList.add('hidden');
+}
+window.closeRunsModal = closeRunsModal;
+window.backToRunsList = backToRunsList;
 </script>
 </body>
 </html>
