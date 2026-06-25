@@ -350,7 +350,10 @@
     <div class="tabs">
       <button class="tab active" data-tab="live"    onclick="switchTab('live')"><i class="ti ti-messages"></i> Live</button>
       <button class="tab" data-tab="stats"   onclick="switchTab('stats')"><i class="ti ti-chart-bar"></i> Stats</button>
-      <button class="tab" data-tab="config"  onclick="switchTab('config')"><i class="ti ti-settings"></i> Config</button>
+      <!-- Config-tab verborgen sinds Agent center. Lisa's volledige config
+           (Persona/Do's/Fases/Kennisbank/Follow-up/Instellingen) staat nu in
+           /modules/agent-center.html. #panel-config blijft dormant als platte
+           placeholder; switchTab('config') werkt nog maar toont alleen die hint. -->
       <button class="tab" data-tab="sandbox" onclick="switchTab('sandbox')"><i class="ti ti-flask"></i> Sandbox</button>
       <button class="tab" data-tab="logs"    onclick="switchTab('logs')"><i class="ti ti-history"></i> Logs</button>
     </div>
