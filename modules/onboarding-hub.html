@@ -250,16 +250,19 @@
     <div id="ob-overzicht-host"></div>
   </section>
 
-  <!-- Wizard-sectie (Fase 1: placeholder; Fase 2 trekt onboarding-wizard-editor inline). -->
+  <!-- Wizard-sectie (Fase 2: inline mount van onboarding-wizard.js). Gegate op
+       onboarding.wizard.edit; zonder die permission tonen we een nette
+       melding i.p.v. de editor. Mount is lazy: gebeurt pas wanneer de
+       Wizard-sectie voor het eerst wordt geopend, idempotent bij re-open. -->
   <section class="ob-sectie" id="ob-sectie-wizard" data-sectie="wizard">
-    <div class="ob-placeholder">
-      <h2><i class="ti ti-edit"></i> Wizard-editor</h2>
-      <p>De wizard-structuur (block-builder + publish) staat tijdelijk nog als losse pagina.
-         In Fase 2 wordt deze hier inline geladen.</p>
-      <a class="btn-cta" href="/modules/onboarding-wizard-editor.html">
-        <i class="ti ti-external-link"></i> Open Wizard-editor
-      </a>
+    <div id="ob-wizard-perm-banner" style="display:none">
+      <div style="background:rgba(220,38,38,0.08);border:1px solid rgba(220,38,38,0.3);
+        color:#b91c1c;padding:16px 20px;border-radius:10px;font-size:13.5px;max-width:620px">
+        <strong>Geen rechten</strong><br/>Je hebt geen <code>onboarding.wizard.edit</code>-permissie.
+        Vraag een admin om toegang als je de wizard wilt bewerken.
+      </div>
     </div>
+    <div id="ob-wizard-host"></div>
   </section>
 
   <!-- Automations-sectie (Fase 1: placeholder; Fase 3 trekt onboarding-automations inline). -->
@@ -281,6 +284,7 @@
 <script src="/modules/shared/permissions.js"></script>
 <script src="/modules/shared/sidebar.js"></script>
 <script src="/modules/shared/onboarding-overzicht.js"></script>
+<script src="/modules/shared/onboarding-wizard.js"></script>
 <script>
 (function () {
   'use strict';
@@ -315,6 +319,32 @@
     return true;
   }
 
+  // ── Wizard-sectie lazy-mount (Fase 2). Gegate op onboarding.wizard.edit.
+  // Idempotent: window.OnboardingWizard.mount detecteert re-mount op
+  // dezelfde host en doet dan niets. Bij ontbrekende permission tonen we
+  // een banner i.p.v. de editor. Server-side gates op
+  // onboarding-wizard-config-save/-publish/-file-upload blijven autoritatief.
+  let _wizardMounted = false;
+  function mountWizardIfNeeded() {
+    if (_wizardMounted) return;
+    const host = document.getElementById('ob-wizard-host');
+    const banner = document.getElementById('ob-wizard-perm-banner');
+    if (!host) return;
+    const canEdit = !!(window.RBAC && window.RBAC.canSync && window.RBAC.canSync('onboarding.wizard.edit'));
+    if (!canEdit) {
+      if (banner) banner.style.display = '';
+      host.style.display = 'none';
+      _wizardMounted = true; // permission-decision is final voor deze sessie
+      return;
+    }
+    if (!window.OnboardingWizard || typeof window.OnboardingWizard.mount !== 'function') {
+      console.warn('[onboarding-hub] OnboardingWizard niet geladen');
+      return;
+    }
+    window.OnboardingWizard.mount({ host });
+    _wizardMounted = true;
+  }
+
   // ── Sectie-toggle (DOM-toggle, geen re-render). ────────────────────────
   function wireSectieNav() {
     const nav = document.getElementById('obSectieNav');
@@ -329,6 +359,8 @@
       document.querySelectorAll('.ob-sectie[data-sectie]').forEach((s) => {
         s.classList.toggle('active', s.dataset.sectie === next);
       });
+      // Lazy mount: Wizard pas opbouwen bij eerste opening.
+      if (next === 'wizard') mountWizardIfNeeded();
     });
   }
 
