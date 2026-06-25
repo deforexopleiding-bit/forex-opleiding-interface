@@ -65,6 +65,7 @@ export default async function handler(req, res) {
                created_by, created_at,
                bubble_provisioned, bubble_provisioned_at, bubble_provision_error, bubble_user_id,
                invite_sent_at,
+               credentials_email_sent_at, credentials_wa_sent_at,
                traject:onboarding_trajecten(label, type, calls, duur_maanden)`)
       .eq('id', id)
       .maybeSingle();
@@ -161,8 +162,10 @@ export default async function handler(req, res) {
         bubble_provisioned     : row.bubble_provisioned === true,
         bubble_provisioned_at  : row.bubble_provisioned_at || null,
         bubble_provision_error : row.bubble_provision_error || null,
-        bubble_user_id         : row.bubble_user_id || null,
-        invite_sent_at         : row.invite_sent_at || null,
+        bubble_user_id            : row.bubble_user_id || null,
+        invite_sent_at            : row.invite_sent_at || null,
+        credentials_email_sent_at : row.credentials_email_sent_at || null,
+        credentials_wa_sent_at    : row.credentials_wa_sent_at || null,
       },
     });
   } catch (e) {

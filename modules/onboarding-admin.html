@@ -761,6 +761,20 @@
             </button>
             <span id="oiInviteSendStatus" style="margin-left:8px;font-size:12.5px;color:var(--text-dim)"></span>
           </dd>
+          <dt>Inloggegevens</dt><dd>
+            ${o.credentials_email_sent_at
+              ? '<span style="background:rgba(34,197,94,0.14);color:#15803d;padding:2px 9px;border-radius:10px;font-size:11.5px;font-weight:600">✓ E-mail verstuurd</span> <span style="color:var(--text-faint);font-size:12px">· ' + esc(fmtDateTimeNL(o.credentials_email_sent_at)) + '</span>'
+              : '<span style="background:rgba(100,116,139,0.18);color:#475569;padding:2px 9px;border-radius:10px;font-size:11.5px;font-weight:600">— E-mail nog niet verstuurd</span>'}
+            ${o.credentials_wa_sent_at
+              ? ' <span style="background:rgba(34,197,94,0.14);color:#15803d;padding:2px 9px;border-radius:10px;font-size:11.5px;font-weight:600;margin-left:6px">✓ WA verstuurd</span> <span style="color:var(--text-faint);font-size:12px">· ' + esc(fmtDateTimeNL(o.credentials_wa_sent_at)) + '</span>'
+              : ''}
+            ${o.bubble_provisioned
+              ? `<button type="button" class="ob-act primary" id="oiCredentialsWaBtn" data-id="${esc(o.id)}" style="margin-left:8px;background:#10b981;border-color:#10b981">
+                   <i class="ti ti-brand-whatsapp"></i> Inloggegevens via WhatsApp
+                 </button>
+                 <span id="oiCredentialsWaStatus" style="margin-left:8px;font-size:12.5px;color:var(--text-dim)"></span>`
+              : '<span style="color:var(--text-faint);font-size:12px;margin-left:8px">(beschikbaar na Bubble-provisioning)</span>'}
+          </dd>
           ${link ? `<dt>Persoonlijke link</dt><dd style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;word-break:break-all">${esc(link)}</dd>` : ''}
         </dl>
         <h3>Vragenlijst-antwoorden</h3>
@@ -781,6 +795,13 @@
         inviteBtn.addEventListener('click', () => {
           const alreadySent = inviteBtn.dataset.alreadySent === '1';
           doSendInvite(inviteBtn.dataset.id || '', inviteBtn, { force: alreadySent });
+        });
+      }
+      // Credentials-WhatsApp knop wiren (alleen aanwezig bij bubble_provisioned=true).
+      const credWaBtn = document.getElementById('oiCredentialsWaBtn');
+      if (credWaBtn) {
+        credWaBtn.addEventListener('click', () => {
+          doSendCredentialsWa(credWaBtn.dataset.id || '', credWaBtn);
         });
       }
     } catch (e) {
@@ -913,6 +934,70 @@
       toast('Niet verstuurd: ' + label, 'info');
     } catch (e) {
       console.error('[onboarding-admin] invite:', e?.message || e);
+      if (status) { status.style.color = '#b91c1c'; status.textContent = '✗ Onverwachte fout: ' + (e?.message || e); }
+    } finally {
+      if (btn) btn.disabled = false;
+    }
+  }
+
+  // ── Inloggegevens via WhatsApp ───────────────────────────────────────
+  // POST /api/onboarding-credentials-resend. Endpoint roept create_student_basic
+  // opnieuw aan voor een vers temp_password, stuurt dan de WA-credentials-
+  // template en zet credentials_wa_sent_at. Fail-soft over 200 (sent/reason).
+  async function doSendCredentialsWa(onboardingId, btn) {
+    if (!onboardingId) return;
+    const status = document.getElementById('oiCredentialsWaStatus');
+    if (btn) btn.disabled = true;
+    if (status) {
+      status.style.color = 'var(--text-dim)';
+      status.textContent = 'Bezig met versturen…';
+    }
+    try {
+      const r = await window.AgentShared.apiFetch('/api/onboarding-credentials-resend', {
+        method  : 'POST',
+        headers : { 'Content-Type': 'application/json' },
+        body    : JSON.stringify({ onboarding_id: onboardingId }),
+      });
+      let d = null; try { d = await r.json(); } catch {}
+      if (r.status === 401) {
+        if (status) { status.style.color = '#b91c1c'; status.textContent = '✗ Niet (meer) ingelogd.'; }
+        return;
+      }
+      if (r.status === 403) {
+        if (status) { status.style.color = '#b91c1c'; status.textContent = '✗ Geen rechten (onboarding.inbox.send).'; }
+        return;
+      }
+      if (!r.ok) {
+        if (status) { status.style.color = '#b91c1c'; status.textContent = '✗ Mislukt: ' + (d?.error || ('HTTP ' + r.status)); }
+        return;
+      }
+      if (d && d.sent === true) {
+        if (status) { status.style.color = '#15803d'; status.textContent = '✓ Verstuurd' + (d.meta_wamid ? ' (wamid ' + String(d.meta_wamid).slice(0, 12) + '…)' : ''); }
+        toast('Inloggegevens via WhatsApp verstuurd', 'success');
+        loadList();
+        setTimeout(() => { openDetail(onboardingId); }, 350);
+        return;
+      }
+      const reason = d?.reason || 'onbekend';
+      const errMsg = d?.error ? (' — ' + d.error) : '';
+      const label = ({
+        'geen-template-config'  : 'Geen credentials-template geconfigureerd (joost_config.knowledge_base.credentials.template_name)',
+        'credentials-uit-gezet' : 'Credentials-flow staat uit (knowledge_base.credentials.enabled=false)',
+        'geen-module-config'    : 'Onboarding-WhatsApp-lijn niet actief in whatsapp_module_config',
+        'geen-telefoon'         : 'Klant heeft geen telefoonnummer',
+        'geen-temp-password'    : 'Bubble-workflow gaf geen tijdelijk wachtwoord terug',
+        'niet-geprovisioned'    : 'Onboarding heeft nog geen Bubble-account',
+        'workflow-fail'         : 'Bubble-workflow gefaald',
+        'template-niet-gevonden': 'Template-naam niet gevonden in whatsapp_meta_templates',
+        'template-niet-approved': 'Template-status is niet APPROVED',
+        'archived'              : 'Onboarding is gearchiveerd',
+        'no-customer'           : 'Geen klant aan deze onboarding gekoppeld',
+        'geen-email'            : 'Klant heeft geen e-mailadres',
+      })[reason] || ('reason=' + reason);
+      if (status) { status.style.color = '#b45309'; status.textContent = '⚠ Niet verstuurd: ' + label + errMsg; }
+      toast('Niet verstuurd: ' + label, 'info');
+    } catch (e) {
+      console.error('[onboarding-admin] cred-wa:', e?.message || e);
       if (status) { status.style.color = '#b91c1c'; status.textContent = '✗ Onverwachte fout: ' + (e?.message || e); }
     } finally {
       if (btn) btn.disabled = false;

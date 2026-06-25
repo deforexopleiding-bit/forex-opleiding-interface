@@ -27,6 +27,7 @@ import {
   bubblePatch,
   bubbleFindUserByEmail,
 } from './bubble.js';
+import { sendCredentialsEmail } from './onboarding-credentials.js';
 
 // Maand-arithmetiek met clamp op laatste dag van de maand (15 → +1 = 15;
 // 31 jan + 1 maand = 28/29 feb). Bubble-side wordt dit als datum opgeslagen
@@ -53,6 +54,21 @@ function extractUserIdFromWf(wfResponse) {
   const r = wfResponse.response;
   if (r && typeof r === 'object' && typeof r.user_id === 'string' && r.user_id.trim()) {
     return r.user_id.trim();
+  }
+  return null;
+}
+
+// Idem voor het tijdelijke wachtwoord — Bubble-workflow stuurt 'm typisch
+// onder response.temp_password OF direct als temp_password. Returnt null
+// als beide ontbreken; in dat geval slaan we de credentials-mail/wa over.
+function extractTempPasswordFromWf(wfResponse) {
+  if (!wfResponse || typeof wfResponse !== 'object') return null;
+  if (typeof wfResponse.temp_password === 'string' && wfResponse.temp_password.trim()) {
+    return wfResponse.temp_password.trim();
+  }
+  const r = wfResponse.response;
+  if (r && typeof r === 'object' && typeof r.temp_password === 'string' && r.temp_password.trim()) {
+    return r.temp_password.trim();
   }
   return null;
 }
@@ -165,6 +181,11 @@ export async function provisionOnboardingStudent(onboardingId) {
   let bubbleUserId = null;
   let wfRaw    = null;       // ruwe workflow-respons indien fetch slaagde
   let wfError  = null;       // { code, message } indien workflow threw
+  // Tijdelijk wachtwoord uit Bubble — alleen in memory; NIET in DB persisten.
+  // Wordt na succesvolle provision gebruikt om sendCredentialsEmail aan
+  // te roepen. Bij ontbreken slaan we de credentials-mail over en logt
+  // de helper een 'reason'.
+  let tempPassword = null;
   try {
     wfRaw = await bubbleWorkflow('create_student_basic', {
       email,
@@ -172,6 +193,7 @@ export async function provisionOnboardingStudent(onboardingId) {
       last_name : lastName,
     });
     bubbleUserId = extractUserIdFromWf(wfRaw);
+    tempPassword = extractTempPasswordFromWf(wfRaw);
   } catch (e) {
     wfError = {
       code:    (e && e.code)    ? String(e.code)    : null,
@@ -281,6 +303,38 @@ export async function provisionOnboardingStudent(onboardingId) {
     // Bubble-side is alles goed; DB-write faalde. Geef partial: caller weet
     // dan dat het Bubble-deel klaar is.
     return { ok: false, partial: true, bubble_user_id: bubbleUserId, error: msg };
+  }
+
+  // CREDENTIALS-MAIL — fail-soft, niet-blokkerend voor het ok:true-pad.
+  // Alleen versturen wanneer Bubble's workflow een temp_password meegaf.
+  // We persisten het wachtwoord NIET; alleen credentials_email_sent_at bij
+  // succes als idempotentie-marker / zichtbaarheid in de admin-UI.
+  if (tempPassword) {
+    try {
+      const credEmailRes = await sendCredentialsEmail({
+        onboarding: { id: onboardingId },
+        customer,
+        tempPassword,
+        // loginUrl: default uit env BUBBLE_LOGIN_URL
+      });
+      if (credEmailRes && credEmailRes.sent === true) {
+        try {
+          await supabaseAdmin
+            .from('onboardings')
+            .update({ credentials_email_sent_at: nowIso })
+            .eq('id', onboardingId);
+        } catch (dbE) {
+          console.error('[onboarding-provision] cred-email mark fail:', dbE?.message || dbE);
+        }
+      } else {
+        console.warn('[onboarding-provision] cred-email niet verzonden:',
+          credEmailRes?.reason || 'unknown');
+      }
+    } catch (e) {
+      console.error('[onboarding-provision] cred-email exception:', e?.message || e);
+    }
+  } else {
+    console.warn('[onboarding-provision] geen temp_password in WF-respons — credentials-mail geskipt');
   }
 
   return { ok: true, bubble_user_id: bubbleUserId };
