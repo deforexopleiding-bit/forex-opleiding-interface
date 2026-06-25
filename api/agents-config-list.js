@@ -83,6 +83,24 @@ export default async function handler(req, res) {
       console.warn('[agents-config-list] lisa_config:', e?.message || e);
     }
 
+    // 3b) Lisa runtime — live_mode_enabled vlag uit singleton lisa_settings.
+    // Wordt als kanaal-status getoond ('Instagram · actief/inactief'), zodat
+    // Lisa-kaart consistent is met de trio (WhatsApp-channel pill). Read-only
+    // boolean, geen extra PII. Bij faal: channel=null → kaart blijft werken.
+    let lisaLiveMode = null;
+    try {
+      const { data: ls } = await supabaseAdmin
+        .from('lisa_settings')
+        .select('live_mode_enabled')
+        .eq('id', 1)
+        .maybeSingle();
+      if (ls && typeof ls.live_mode_enabled === 'boolean') {
+        lisaLiveMode = ls.live_mode_enabled;
+      }
+    } catch (e) {
+      console.warn('[agents-config-list] lisa_settings:', e?.message || e);
+    }
+
     // 4) Bouw agent-shapes.
     const agents = (jc || []).map((r) => ({
       type:         'joost_config',
@@ -102,6 +120,11 @@ export default async function handler(req, res) {
       is_active:    lisaRow?.is_active === true,
       version:      lisaRow?.version ?? null,
       created_at:   lisaRow?.created_at || null,
+      // Kanaal-status (consistent met trio): label + active boolean. null bij
+      // ontbreken/fout zodat de UI 'm kan tonen als neutraal '—'.
+      channel:      (lisaLiveMode === null)
+                      ? null
+                      : { label: 'Instagram', active: lisaLiveMode === true },
     });
 
     return res.status(200).json({ ok: true, agents });

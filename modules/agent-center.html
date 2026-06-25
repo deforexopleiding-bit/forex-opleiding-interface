@@ -1282,19 +1282,32 @@ function renderHub() {
 
 function renderAgentCard(a) {
   if (a.type === 'lisa') {
-    const isOnline = a.is_active === true;
     const isActive = state.activeIsLisa === true;
+    // Status-pill rechtsboven wordt gevoed door het Instagram-kanaal
+    // (lisa_settings.live_mode_enabled). Bij channel===null fallback naar
+    // neutraal '—'. Consistent met de trio (WhatsApp-kanaal-pill).
+    const ch = a.channel || null;
+    const liveKnown = !!ch;
+    const liveOn    = !!ch && ch.active === true;
+    const pillCls   = !liveKnown ? 'offline' : (liveOn ? 'online' : 'offline');
+    const pillTxt   = !liveKnown ? '—' : (liveOn ? 'Actief' : 'Inactief');
     return `
       <div class="ac-card ${isActive ? 'active' : ''}" data-lisa="true">
         <div class="ac-card-head">
           <div class="ac-avatar lisa">${esc((a.persona_name || 'L').charAt(0).toUpperCase())}</div>
           <div style="flex:1;min-width:0">
             <h3>${esc(a.persona_name || 'Lisa')}</h3>
-            <div class="role">Marketing — GoHighLevel follow-ups</div>
+            <div class="role">Instagram — DM &amp; leadkwalificatie</div>
           </div>
-          <span class="ac-status-pill ${isOnline ? 'online' : 'offline'}">
-            <span class="pulse"></span>${isOnline ? 'Online' : 'Offline'}
+          <span class="ac-status-pill ${pillCls}">
+            <span class="pulse"></span>${esc(pillTxt)}
           </span>
+        </div>
+        <div class="ac-channel">
+          <i class="ti ti-brand-instagram"></i>
+          ${liveKnown
+            ? `<span class="${liveOn ? 'ch-on' : 'ch-off'}">${esc(ch.label || 'Instagram')} · ${liveOn ? 'actief' : 'inactief'}</span>`
+            : `<span class="ch-off">Instagram · —</span>`}
         </div>
         <div class="ac-channel">
           <i class="ti ti-version"></i>
@@ -2146,7 +2159,7 @@ function renderLisaEditor() {
   document.getElementById('acEditor').innerHTML = `
     <div class="ed-head">
       <div>
-        <h2>${esc(c.persona_name || 'Lisa')} <span style="font-weight:500;color:var(--text-tertiary)">· Marketing — GoHighLevel follow-ups</span></h2>
+        <h2>${esc(c.persona_name || 'Lisa')} <span style="font-weight:500;color:var(--text-tertiary)">· Instagram — DM &amp; leadkwalificatie</span></h2>
         <div class="ed-sub">Versioned config · ${esc(versionLabel)}</div>
       </div>
       <button class="ed-close" type="button" onclick="acCloseLisaEditor()"><i class="ti ti-x"></i> Sluiten</button>
