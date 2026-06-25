@@ -61,7 +61,7 @@ export default async function handler(req, res) {
       .from('onboardings')
       .select(`id, customer_id, customer_name, traject_id, mentor_user_id,
                status, current_step, answers, token,
-               started_at, completed_at, assigned_at, archived_at,
+               started_at, completed_at, assigned_at, archived_at, start_date,
                created_by, created_at,
                bubble_provisioned, bubble_provisioned_at, bubble_provision_error, bubble_user_id,
                invite_sent_at,
@@ -157,6 +157,7 @@ export default async function handler(req, res) {
         completed_at   : row.completed_at,
         assigned_at    : row.assigned_at,
         archived_at    : row.archived_at,
+        start_date     : row.start_date || null,
         created_by     : row.created_by || null,
         created_at     : row.created_at,
         bubble_provisioned     : row.bubble_provisioned === true,

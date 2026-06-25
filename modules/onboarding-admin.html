@@ -737,6 +737,7 @@
           <dt>Mentor</dt>           <dd>${esc(o.mentor_name || (o.mentor_user_id || '—'))}</dd>
           <dt>Wizard-stap</dt>      <dd>${esc(o.current_step || '—')}</dd>
           <dt>Aangemeld</dt>        <dd>${esc(fmtDateTimeNL(o.created_at))}</dd>
+          <dt>Startdatum</dt>       <dd>${o.start_date ? esc(fmtDateNL(o.start_date)) : '<span style="color:var(--text-faint)">— niet ingesteld (basis = nu)</span>'}</dd>
           <dt>Toegewezen</dt>       <dd>${esc(fmtDateTimeNL(o.assigned_at))}</dd>
           <dt>Gestart</dt>          <dd>${esc(fmtDateTimeNL(o.started_at))}</dd>
           <dt>Afgerond</dt>         <dd>${esc(fmtDateTimeNL(o.completed_at))}</dd>

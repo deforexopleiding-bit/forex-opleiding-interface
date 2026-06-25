@@ -8,7 +8,8 @@
 // Permission: onboarding.create.
 //
 // Body:
-//   { customer_id (uuid), traject_id (uuid) }
+//   { customer_id (uuid), traject_id (uuid),
+//     start_date?  (yyyy-mm-dd; optioneel, ongeldig → null) }
 //
 // Validaties:
 //   - customer_id en traject_id moeten bestaan → anders 400/404.
@@ -28,6 +29,29 @@ import { provisionOnboardingStudent } from './_lib/onboarding-provision.js';
 import { sendOnboardingInvite } from './_lib/onboarding-invite.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+// Normaliseer een start_date input. Accepteert yyyy-mm-dd OF een ISO-
+// datetime; ongeldig/leeg → null. Returnt een yyyy-mm-dd-string (Postgres
+// date-kolom verwacht dat formaat).
+function normalizeStartDate(raw) {
+  if (raw == null) return null;
+  const s = String(raw).trim();
+  if (!s) return null;
+  // ISO-datum (yyyy-mm-dd) direct.
+  if (DATE_RE.test(s)) {
+    const d = new Date(s + 'T00:00:00Z');
+    if (Number.isFinite(d.getTime())) return s;
+    return null;
+  }
+  // ISO-datetime: pak het date-deel.
+  const d = new Date(s);
+  if (!Number.isFinite(d.getTime())) return null;
+  const yyyy = d.getUTCFullYear();
+  const mm   = String(d.getUTCMonth() + 1).padStart(2, '0');
+  const dd   = String(d.getUTCDate()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd}`;
+}
 
 function customerDisplayName(c) {
   if (!c) return null;
@@ -58,6 +82,9 @@ export default async function handler(req, res) {
 
   const customerId = typeof body.customer_id === 'string' ? body.customer_id.trim() : '';
   const trajectId  = typeof body.traject_id  === 'string' ? body.traject_id.trim()  : '';
+  // start_date is optioneel: lege/ongeldige input → null (provisioning valt
+  // dan terug op now, identiek aan het oude gedrag).
+  const startDate  = normalizeStartDate(body.start_date);
   if (!UUID_RE.test(customerId)) return res.status(400).json({ error: 'customer_id (uuid) vereist' });
   if (!UUID_RE.test(trajectId))  return res.status(400).json({ error: 'traject_id (uuid) vereist' });
 
@@ -108,6 +135,7 @@ export default async function handler(req, res) {
         traject_id   : trajectId,
         token,
         status       : 'aangemeld',
+        start_date   : startDate,
         created_by   : user.id,
       })
       .select('id, token, status')
