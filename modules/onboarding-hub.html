@@ -1,0 +1,395 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Onboarding · De Forex Opleiding</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/dist/tabler-icons.min.css" />
+  <link rel="stylesheet" href="/modules/shared/agent-shared.css" />
+  <link rel="stylesheet" href="/styles/sales-redesign.css" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; }
+    body { font-family: 'Inter', system-ui, sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; -webkit-font-smoothing: antialiased; }
+    :root { --brand-deep:#0a2f63; --brand-azure:#1e6cd6; }
+    .app { margin-left: 220px; padding: 24px 28px 60px; max-width: 1400px; --brand-deep:#0a2f63; --brand-azure:#1e6cd6; }
+
+    .page-header { display:flex; align-items:baseline; justify-content:space-between; margin-bottom:14px; gap:12px; flex-wrap:wrap; }
+    .page-header h1 { font-size:22px; font-weight:700; color:var(--text); }
+    .page-header p  { font-size:13px; color:var(--text-dim); margin-top:2px; }
+
+    /* Hub-sectie-nav (Overzicht / Wizard / Automations). Aparte klassen
+       zodat ze niet botsen met de onderliggende .ob-tabs (Actief/Archief/
+       Inbox) die binnen de Overzicht-mount renderen. */
+    .ob-sectie-nav {
+      display:flex; gap:4px; flex-wrap:wrap;
+      border-bottom:1px solid var(--border);
+      margin-bottom:18px;
+    }
+    .ob-sectie-tab {
+      background:transparent; border:none;
+      border-bottom:2px solid transparent;
+      color:var(--text-dim); cursor:pointer;
+      padding:10px 18px; font-size:13.5px; font-weight:600;
+      font-family:inherit; margin-bottom:-1px;
+      display:inline-flex; align-items:center; gap:6px;
+      transition: color .15s ease, border-color .15s ease;
+    }
+    .ob-sectie-tab:hover { color:var(--text); }
+    .ob-sectie-tab.active {
+      color:var(--brand-deep);
+      border-bottom-color:var(--brand-deep);
+    }
+    .ob-sectie { display:none; }
+    .ob-sectie.active { display:block; }
+
+    /* Compacte tellers boven Overzicht — afgeleid uit de geladen lijst via
+       een MutationObserver in deze pagina. Geen extra endpoint. */
+    .ob-stats { display:grid; grid-template-columns:repeat(auto-fit, minmax(170px, 1fr)); gap:10px; margin-bottom:14px; }
+    .ob-stat {
+      background:var(--bg-elev); border:1px solid var(--border); border-radius:10px;
+      padding:10px 14px;
+    }
+    .ob-stat .ob-stat-label { font-size:11px; font-weight:700; letter-spacing:.04em; text-transform:uppercase; color:var(--text-faint); }
+    .ob-stat .ob-stat-value { font-size:20px; font-weight:700; color:var(--text); margin-top:2px; font-variant-numeric:tabular-nums; }
+
+    /* Placeholder-blok voor Wizard/Automations — Fase 2/3 trekt ze inline. */
+    .ob-placeholder {
+      background:var(--bg-elev); border:1px solid var(--border); border-radius:10px;
+      padding:24px; max-width:680px;
+    }
+    .ob-placeholder h2 { font-size:16px; font-weight:700; margin-bottom:6px; color:var(--text); display:inline-flex; align-items:center; gap:6px; }
+    .ob-placeholder p  { font-size:13px; color:var(--text-dim); line-height:1.55; margin-bottom:14px; }
+    .ob-placeholder a.btn-cta {
+      display:inline-flex; align-items:center; gap:6px;
+      background:var(--brand-deep); color:#fff; text-decoration:none;
+      padding:9px 16px; border-radius:8px; font-size:13.5px; font-weight:600;
+    }
+    .ob-placeholder a.btn-cta:hover { background:var(--brand-azure); }
+
+    /* ─────────────────────────────────────────────────────────────────────
+       Onderstaand CSS-blok is verbatim overgenomen uit
+       modules/onboarding-admin.html zodat de OnboardingOverzicht-mount
+       onveranderd presenteert. Geen styling-wijzigingen.
+       ───────────────────────────────────────────────────────────────────── */
+
+    /* Onboarding-inbox shell (oi-prefix tegen evx-botsing). */
+    .oi-shell { display:grid; grid-template-columns:340px 1fr; gap:0; border:1px solid var(--border); border-radius:10px; overflow:hidden; height:calc(100vh - 260px); min-height:540px; background:var(--bg-elev); }
+    .oi-list-pane { border-right:1px solid var(--border); display:flex; flex-direction:column; overflow:hidden; background:var(--bg); min-width:0; }
+    .oi-list-header { padding:10px 12px; border-bottom:1px solid var(--border); display:flex; align-items:center; justify-content:space-between; gap:8px; flex-shrink:0; }
+    .oi-list-body { flex:1; overflow-y:auto; padding:6px; min-height:0; }
+    .oi-thread-pane { display:flex; flex-direction:column; overflow:hidden; min-width:0; background:var(--bg); }
+    .oi-thread-header { padding:12px 16px; border-bottom:1px solid var(--border); display:flex; align-items:center; gap:10px; flex-shrink:0; }
+    .oi-thread-messages { flex:1; overflow-y:auto; padding:14px; display:flex; flex-direction:column; gap:8px; background:var(--bg-elev); min-height:0; }
+    .oi-thread-footer { border-top:1px solid var(--border); padding:10px 12px; flex-shrink:0; background:var(--bg); }
+    .oi-thread-empty { flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:8px; padding:24px; text-align:center; color:var(--text-faint); }
+    .oi-conv-row { padding:9px 10px; cursor:pointer; border-radius:8px; display:flex; gap:10px; align-items:center; margin-bottom:2px; border:1px solid transparent; transition:background-color .12s, border-color .12s; }
+    .oi-conv-row:hover { background:var(--bg-elev); }
+    .oi-conv-row.active { background:rgba(9,61,84,0.10); border-color:rgba(9,61,84,0.18); }
+    .oi-conv-avatar { width:36px; height:36px; border-radius:50%; background:var(--bg-elev); display:inline-flex; align-items:center; justify-content:center; font-weight:700; font-size:13px; color:var(--text-dim); flex-shrink:0; }
+    .oi-conv-body { flex:1; min-width:0; display:flex; flex-direction:column; gap:1px; }
+    .oi-conv-toprow { display:flex; align-items:center; gap:6px; }
+    .oi-conv-name { font-size:13.5px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; flex:1; min-width:0; }
+    .oi-conv-time { font-size:10.5px; color:var(--text-faint); flex-shrink:0; }
+    .oi-conv-preview { font-size:12px; color:var(--text-dim); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .oi-conv-meta { display:flex; align-items:center; gap:6px; margin-top:1px; }
+    .oi-conv-handoff { background:rgba(220,38,38,0.15); color:#b91c1c; border-radius:10px; padding:2px 8px; font-size:10.5px; font-weight:700; letter-spacing:.04em; }
+    .oi-24h-dot { display:inline-block; width:9px; height:9px; border-radius:50%; flex-shrink:0; margin-left:4px; }
+    .oi-24h-dot.open { background:#059669; box-shadow:0 0 0 2px rgba(5,150,105,0.18); }
+    .oi-24h-dot.closed { background:#dc2626; box-shadow:0 0 0 2px rgba(220,38,38,0.18); }
+    .oi-ctx-strip { display:flex; align-items:center; gap:10px; padding:8px 14px; background:var(--bg-elev); border-bottom:1px solid var(--border); font-size:12.5px; color:var(--text-dim); flex-wrap:wrap; flex-shrink:0; }
+    .oi-ctx-label { font-weight:700; color:var(--text-faint); text-transform:uppercase; font-size:10.5px; letter-spacing:.04em; }
+    .oi-sim-card { border:1px solid #d97706; border-radius:10px; background:rgba(217,119,6,0.05); padding:12px; margin:6px 14px 0 14px; }
+    .oi-sim-card.needs-human { border-color:#dc2626; background:rgba(220,38,38,0.06); }
+    .oi-sim-head { display:flex; align-items:center; gap:8px; margin-bottom:8px; }
+    .oi-sim-head .ti { color:#d97706; }
+    .oi-sim-card.needs-human .oi-sim-head .ti { color:#dc2626; }
+    .oi-sim-title { font-weight:700; font-size:12.5px; color:#d97706; }
+    .oi-sim-card.needs-human .oi-sim-title { color:#dc2626; }
+    .oi-sim-meta { font-size:11px; color:var(--text-dim); margin-left:auto; }
+    .oi-sim-quote { background:var(--bg); border:1px solid var(--border); border-radius:8px; padding:8px 10px; font-size:13px; color:var(--text); white-space:pre-wrap; line-height:1.45; }
+    .oi-sim-actions { display:flex; gap:8px; margin-top:10px; align-items:center; flex-wrap:wrap; }
+    .oi-sim-actions .btn-dismiss { background:transparent; border:1px solid var(--border); color:var(--text-faint); padding:5px 10px; border-radius:7px; font-size:11.5px; cursor:pointer; font-family:inherit; margin-left:auto; }
+    .oi-sim-actions .btn-dismiss:hover { color:var(--text-dim); }
+    .oi-tab-badge { background:rgba(220,38,38,0.15); color:#b91c1c; border-radius:10px; padding:1px 8px; font-size:10.5px; font-weight:700; margin-left:6px; display:none; }
+    .oi-skel-row { height:48px; background:linear-gradient(90deg, var(--bg-elev) 0%, var(--bg) 50%, var(--bg-elev) 100%); border-radius:8px; margin-bottom:4px; opacity:.5; }
+    .oi-modal-overlay { position:fixed; inset:0; background:rgba(0,0,0,0.55); z-index:9999; display:none; align-items:flex-start; justify-content:center; padding:60px 16px; overflow-y:auto; }
+    .oi-modal-overlay.show { display:flex; }
+    .oi-modal-card { background:var(--bg); border:1px solid var(--border); border-radius:12px; width:100%; max-width:560px; padding:16px 18px; box-shadow:0 12px 40px rgba(0,0,0,0.25); }
+    .oi-modal-header { display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; }
+    .oi-modal-title { font-size:14.5px; font-weight:700; color:var(--text); }
+    .oi-modal-search { width:100%; padding:8px 10px; border:1px solid var(--border); border-radius:8px; background:var(--bg-elev); font-size:13px; color:var(--text); font-family:inherit; margin-bottom:8px; }
+    .oi-modal-list { max-height:360px; overflow-y:auto; display:flex; flex-direction:column; gap:4px; }
+    .oi-modal-item { padding:9px 10px; border:1px solid var(--border); border-radius:8px; cursor:pointer; background:var(--bg-elev); transition:background-color .12s, border-color .12s; }
+    .oi-modal-item:hover { background:var(--bg); border-color:var(--text-faint); }
+    .oi-modal-item .iname { font-size:13px; font-weight:600; color:var(--text); }
+    .oi-modal-item .imeta { font-size:11.5px; color:var(--text-dim); margin-top:2px; }
+    .oi-modal-footer { display:flex; gap:8px; justify-content:flex-end; margin-top:12px; }
+    @media (max-width:880px) {
+      .oi-shell { grid-template-columns:1fr; height:auto; min-height:0; }
+      .oi-list-pane { border-right:none; }
+      .oi-shell.thread-open .oi-list-pane { display:none; }
+      .oi-shell:not(.thread-open) .oi-thread-pane { display:none; }
+    }
+
+    .ob-tabs { display:flex; gap:6px; border-bottom:1px solid var(--border); margin-bottom:14px; flex-wrap:wrap; }
+    .ob-tab {
+      padding:9px 16px; font-size:13px; font-weight:600; color:var(--text-dim);
+      background:transparent; border:0; border-bottom:2px solid transparent;
+      cursor:pointer; font-family:inherit; margin-bottom:-1px;
+    }
+    .ob-tab:hover { color:var(--text); }
+    .ob-tab.active { color:var(--brand-deep); border-bottom-color:var(--brand-deep); }
+
+    .toolbar { display:flex; align-items:center; gap:12px; margin-bottom:16px; padding:12px 14px; background:var(--bg-elev); border:1px solid var(--border); border-radius:10px; flex-wrap:wrap; }
+    .toolbar label { font-size:12px; font-weight:600; color:var(--text-dim); }
+    .toolbar select, .toolbar input[type=search] {
+      padding:7px 10px; font-size:13.5px; border:1px solid var(--border); border-radius:7px;
+      background:var(--bg); color:var(--text); font-family:inherit; min-width:180px;
+    }
+    .toolbar input[type=search] { min-width:240px; }
+    .toolbar .spacer { flex:1; }
+    .toolbar .refresh-btn {
+      padding:7px 12px; font-size:12.5px; font-weight:600; border:1px solid var(--border); border-radius:7px;
+      background:var(--bg); color:var(--text); cursor:pointer; font-family:inherit;
+    }
+    .toolbar .refresh-btn:hover { background:var(--bg-elev); }
+
+    .counter { font-size:12.5px; color:var(--text-dim); margin-bottom:12px; }
+    .counter strong { color:var(--text); font-variant-numeric:tabular-nums; }
+
+    .data-table { width:100%; border-collapse:collapse; background:var(--bg-elev); border:1px solid var(--border); border-radius:10px; overflow:hidden; }
+    .data-table th, .data-table td { padding:10px 12px; text-align:left; font-size:13px; border-bottom:1px solid var(--border); vertical-align:top; }
+    .data-table th { background:rgba(10,47,99,0.04); font-weight:600; color:var(--text-dim); font-size:11.5px; text-transform:uppercase; letter-spacing:0.03em; }
+    .data-table tr:last-child td { border-bottom:0; }
+
+    .empty-state { background:var(--bg-elev); border:1px dashed var(--border); border-radius:10px; padding:24px 16px; text-align:center; font-size:13px; color:var(--text-dim); }
+    .empty-state i { font-size:26px; display:block; margin-bottom:6px; opacity:0.6; }
+
+    .skeleton { display:inline-block; width:80px; height:16px; background:linear-gradient(90deg, rgba(0,0,0,0.05), rgba(0,0,0,0.10), rgba(0,0,0,0.05)); border-radius:4px; animation:sk 1.2s infinite; }
+    @keyframes sk { 0% { background-position:0% 0; } 100% { background-position:200% 0; } }
+
+    .ob-badge { display:inline-block; padding:2px 9px; border-radius:10px; font-size:11.5px; font-weight:600; white-space:nowrap; }
+    .ob-badge.aangemeld    { background:rgba(20,115,214,0.14);  color:#1160bd; }
+    .ob-badge.bezig        { background:rgba(245,158,11,0.16);  color:#b45309; }
+    .ob-badge.afgerond     { background:rgba(34,197,94,0.14);   color:#15803d; }
+    .ob-badge.gearchiveerd { background:rgba(100,116,139,0.18); color:#475569; }
+    .ob-badge.paid-yes     { background:rgba(34,197,94,0.14);   color:#15803d; }
+    .ob-badge.paid-no      { background:rgba(100,116,139,0.18); color:#475569; }
+    .ob-badge.bubble-ok    { background:rgba(34,197,94,0.14);   color:#15803d; }
+    .ob-badge.bubble-fail  { background:rgba(220,38,38,0.14);   color:#b91c1c; cursor:help; }
+    .ob-badge.bubble-none  { background:rgba(100,116,139,0.18); color:#475569; }
+
+    .ob-row-actions { display:flex; gap:6px; flex-wrap:wrap; align-items:center; }
+    .ob-act {
+      display:inline-flex; align-items:center; gap:4px; padding:5px 9px; font-size:11.5px; font-weight:600;
+      border:1px solid var(--border); border-radius:6px; background:var(--bg); color:var(--text);
+      cursor:pointer; font-family:inherit; text-decoration:none; white-space:nowrap;
+    }
+    .ob-act:hover { background:var(--bg-elev); }
+    .ob-act.danger { color:#b91c1c; border-color:#fecaca; }
+    .ob-act.danger:hover { background:rgba(220,38,38,0.06); }
+    .ob-act.primary { background:var(--brand-deep,#0a2f63); color:#fff; border-color:var(--brand-deep,#0a2f63); }
+    .ob-act.primary:hover { background:var(--brand-azure,#1e6cd6); border-color:var(--brand-azure,#1e6cd6); }
+
+    .ob-mentor-cell { display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
+    .ob-mentor-cell select {
+      padding:5px 7px; font-size:12px; border:1px solid var(--border); border-radius:6px;
+      background:var(--bg); color:var(--text); font-family:inherit; max-width:170px;
+    }
+    .ob-mentor-cell .save-btn {
+      padding:4px 9px; font-size:11.5px; font-weight:600; border:0; border-radius:6px;
+      background:#059669; color:#fff; cursor:pointer; font-family:inherit;
+    }
+    .ob-mentor-cell .save-btn[disabled] { opacity:0.5; cursor:default; }
+
+    .ob-modal { position:fixed; inset:0; background:rgba(15,23,42,0.45); display:none; align-items:flex-start; justify-content:center; z-index:200; padding:40px 14px; overflow:auto; }
+    .ob-modal.open { display:flex; }
+    .ob-modal-card { background:var(--bg); border:1px solid var(--border); border-radius:12px; width:100%; max-width:760px; max-height:90vh; overflow:auto; box-shadow:0 20px 50px rgba(15,23,42,0.25); }
+    .ob-modal-h { display:flex; align-items:center; justify-content:space-between; padding:14px 18px; border-bottom:1px solid var(--border); position:sticky; top:0; background:var(--bg); }
+    .ob-modal-h h2 { font-size:15px; font-weight:700; }
+    .ob-modal-x { background:transparent; border:0; color:var(--text-dim); cursor:pointer; font-size:18px; line-height:1; padding:4px 8px; border-radius:6px; }
+    .ob-modal-x:hover { background:var(--bg-elev); color:var(--text); }
+    .ob-modal-body { padding:18px; font-size:13px; line-height:1.55; }
+    .ob-modal-body dl { display:grid; grid-template-columns: 180px 1fr; gap:6px 12px; margin-bottom:14px; }
+    .ob-modal-body dt { color:var(--text-dim); font-weight:600; }
+    .ob-modal-body dd { color:var(--text); word-break:break-word; }
+    .ob-modal-body h3 { font-size:11.5px; text-transform:uppercase; letter-spacing:.05em; color:var(--text-faint); margin:12px 0 6px; font-weight:700; }
+    .ob-modal-body pre { background:var(--bg-elev); border:1px solid var(--border); border-radius:8px; padding:10px 12px; font-size:12px; overflow:auto; max-height:300px; }
+
+    @media (max-width: 880px) { .app { margin-left:0; padding:14px; } }
+  </style>
+</head>
+<body>
+<div id="sidebar-mount"></div>
+
+<div class="app">
+  <div class="page-header">
+    <div>
+      <h1>Onboarding</h1>
+      <p>Hub voor het volledige onboarding-traject &mdash; overzicht, wizard-editor en lifecycle-automations.</p>
+    </div>
+  </div>
+
+  <nav class="ob-sectie-nav" id="obSectieNav" role="tablist">
+    <button type="button" class="ob-sectie-tab active" data-sectie="overzicht"><i class="ti ti-list-details"></i> Overzicht</button>
+    <button type="button" class="ob-sectie-tab" data-sectie="wizard"><i class="ti ti-edit"></i> Wizard</button>
+    <button type="button" class="ob-sectie-tab" data-sectie="automations"><i class="ti ti-bolt"></i> Automations</button>
+  </nav>
+
+  <!-- Overzicht-sectie: OnboardingOverzicht-mount + compacte client-side tellers. -->
+  <section class="ob-sectie active" id="ob-sectie-overzicht" data-sectie="overzicht">
+    <div class="ob-stats" id="obStats" style="display:none">
+      <div class="ob-stat"><div class="ob-stat-label">In onboarding</div><div class="ob-stat-value" id="obStatBezig">&mdash;</div></div>
+      <div class="ob-stat"><div class="ob-stat-label">Wacht op mentor</div><div class="ob-stat-value" id="obStatGeenMentor">&mdash;</div></div>
+      <div class="ob-stat"><div class="ob-stat-label">Afgerond</div><div class="ob-stat-value" id="obStatAfgerond">&mdash;</div></div>
+    </div>
+    <div id="ob-overzicht-host"></div>
+  </section>
+
+  <!-- Wizard-sectie (Fase 1: placeholder; Fase 2 trekt onboarding-wizard-editor inline). -->
+  <section class="ob-sectie" id="ob-sectie-wizard" data-sectie="wizard">
+    <div class="ob-placeholder">
+      <h2><i class="ti ti-edit"></i> Wizard-editor</h2>
+      <p>De wizard-structuur (block-builder + publish) staat tijdelijk nog als losse pagina.
+         In Fase 2 wordt deze hier inline geladen.</p>
+      <a class="btn-cta" href="/modules/onboarding-wizard-editor.html">
+        <i class="ti ti-external-link"></i> Open Wizard-editor
+      </a>
+    </div>
+  </section>
+
+  <!-- Automations-sectie (Fase 1: placeholder; Fase 3 trekt onboarding-automations inline). -->
+  <section class="ob-sectie" id="ob-sectie-automations" data-sectie="automations">
+    <div class="ob-placeholder">
+      <h2><i class="ti ti-bolt"></i> Automations</h2>
+      <p>De visuele editor voor lifecycle-flows (e-mail / WhatsApp triggers) staat tijdelijk nog
+         als losse pagina. In Fase 3 wordt deze hier inline geladen.</p>
+      <a class="btn-cta" href="/modules/onboarding-automations.html">
+        <i class="ti ti-external-link"></i> Open Automations
+      </a>
+    </div>
+  </section>
+</div>
+
+<script src="/modules/shared/supabase-client.js"></script>
+<script src="/modules/shared/agent-shared.js"></script>
+<script src="/modules/shared/theme-shared.js"></script>
+<script src="/modules/shared/permissions.js"></script>
+<script src="/modules/shared/sidebar.js"></script>
+<script src="/modules/shared/onboarding-overzicht.js"></script>
+<script>
+(function () {
+  'use strict';
+
+  // ── Page-gate (onboarding.admin) ───────────────────────────────────────
+  // Mirror van #422-fix: ALTIJD await ensurePermissionsLoaded vóór canSync.
+  // Anders krijgt de eerste page-load false vanwege lege RBAC-cache. Server
+  // blijft autoritatief (zelfde gate op alle onderliggende endpoints).
+  async function pageGate() {
+    try { if (window._authSharedReady) await window._authSharedReady; } catch (_) {}
+    try {
+      if (window.RBAC && typeof window.RBAC.ensurePermissionsLoaded === 'function') {
+        await window.RBAC.ensurePermissionsLoaded();
+      }
+    } catch (e) {
+      console.warn('[onboarding-hub] RBAC load faalde:', e && e.message ? e.message : e);
+    }
+    const ok = !!(window.RBAC && window.RBAC.canSync && window.RBAC.canSync('onboarding.admin'));
+    if (!ok) {
+      const root = document.querySelector('.app');
+      if (root) {
+        root.innerHTML =
+          '<div class="page-header"><div><h1>Onboarding</h1></div></div>' +
+          '<div style="background:rgba(220,38,38,0.08);border:1px solid rgba(220,38,38,0.3);' +
+          'color:#b91c1c;padding:16px 20px;border-radius:10px;font-size:13.5px;max-width:560px">' +
+          '<strong>Geen rechten</strong><br/>Je hebt geen <code>onboarding.admin</code>-permissie. ' +
+          'Vraag een admin om toegang als je dit dashboard nodig hebt.' +
+          '</div>';
+      }
+      return false;
+    }
+    return true;
+  }
+
+  // ── Sectie-toggle (DOM-toggle, geen re-render). ────────────────────────
+  function wireSectieNav() {
+    const nav = document.getElementById('obSectieNav');
+    if (!nav) return;
+    nav.addEventListener('click', (ev) => {
+      const btn = ev.target.closest('.ob-sectie-tab[data-sectie]');
+      if (!btn) return;
+      const next = btn.dataset.sectie;
+      document.querySelectorAll('#obSectieNav .ob-sectie-tab').forEach((b) => {
+        b.classList.toggle('active', b === btn);
+      });
+      document.querySelectorAll('.ob-sectie[data-sectie]').forEach((s) => {
+        s.classList.toggle('active', s.dataset.sectie === next);
+      });
+    });
+  }
+
+  // ── Compacte tellers — afgeleid uit de geladen Overzicht-lijst via
+  // MutationObserver op #ob-overzicht-host. Geen extra endpoint-call.
+  // Tellers: in-onboarding ('bezig'), wacht-op-mentor (lege mentor-cell
+  // of '—'), afgerond ('afgerond'). Verberg bij archief/inbox-tab waar
+  // de tabel leeg of irrelevant is.
+  function wireOverzichtStats() {
+    const host = document.getElementById('ob-overzicht-host');
+    const stats = document.getElementById('obStats');
+    if (!host || !stats) return;
+    const update = () => {
+      const rows = host.querySelectorAll('table.data-table tbody tr[data-row-id]');
+      if (rows.length === 0) { stats.style.display = 'none'; return; }
+      let bezig = 0, afgerond = 0, geenMentor = 0;
+      rows.forEach((tr) => {
+        const statusBadge = tr.querySelector('.ob-badge.bezig, .ob-badge.afgerond');
+        if (statusBadge && statusBadge.classList.contains('bezig'))    bezig++;
+        if (statusBadge && statusBadge.classList.contains('afgerond')) afgerond++;
+        const mentorCell = tr.querySelector('.ob-mentor-cell');
+        if (mentorCell) {
+          const sel = mentorCell.querySelector('select');
+          if (sel && sel.value === '') geenMentor++;
+        } else {
+          const tds = tr.querySelectorAll('td');
+          const mentorText = tds[6] ? (tds[6].textContent || '').trim() : '';
+          if (!mentorText || mentorText === '—') geenMentor++;
+        }
+      });
+      const elB = document.getElementById('obStatBezig');
+      const elM = document.getElementById('obStatGeenMentor');
+      const elA = document.getElementById('obStatAfgerond');
+      if (elB) elB.textContent = String(bezig);
+      if (elM) elM.textContent = String(geenMentor);
+      if (elA) elA.textContent = String(afgerond);
+      stats.style.display = '';
+    };
+    const obs = new MutationObserver(update);
+    obs.observe(host, { childList: true, subtree: true });
+  }
+
+  async function bootstrap() {
+    const ok = await pageGate();
+    if (!ok) return;
+    wireSectieNav();
+    wireOverzichtStats();
+    const overviewHost = document.getElementById('ob-overzicht-host');
+    if (overviewHost && window.OnboardingOverzicht && typeof window.OnboardingOverzicht.mount === 'function') {
+      window.OnboardingOverzicht.mount({ host: overviewHost });
+    } else {
+      console.warn('[onboarding-hub] OnboardingOverzicht niet geladen of host ontbreekt');
+    }
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', bootstrap);
+  } else {
+    bootstrap();
+  }
+})();
+</script>
+</body>
+</html>
