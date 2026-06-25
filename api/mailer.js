@@ -33,22 +33,37 @@ function getTransport() {
 }
 
 /**
- * Verstuur een email via Strato SMTP.
+ * Verstuur een email via Strato SMTP (info@-transport).
  *
- * @param {{ to: string|string[], subject: string, text: string, html: string }} opts
+ * @param {object} opts
+ * @param {string|string[]} opts.to
+ * @param {string}          opts.subject
+ * @param {string}          [opts.text]
+ * @param {string}          [opts.html]
+ * @param {string}          [opts.from]       - Optionele override voor het From-adres.
+ *                                              Standaard 'info@deforexopleiding.nl'.
+ *                                              Strato accepteert alleen aliassen van het
+ *                                              auth-account (= info@); andere adressen
+ *                                              kunnen door SPF/DKIM tegengehouden worden.
+ * @param {string}          [opts.fromName]   - Optionele override voor de zichtbare naam.
+ *                                              Standaard 'De Forex Opleiding'.
  * @returns {Promise<{success: boolean, messageId?: string, error?: string}>}
  */
-export async function sendMail({ to, subject, text, html }) {
+export async function sendMail({ to, subject, text, html, from, fromName } = {}) {
   if (!to || !subject || (!text && !html)) {
     return { success: false, error: 'Missing required fields' };
   }
 
   const recipients = Array.isArray(to) ? to : [to];
+  // Default-gedrag identiek aan vóór deze uitbreiding: from = info@ + 'De Forex
+  // Opleiding'. Callers kunnen via opts overrides meegeven (additief).
+  const useFromAddr = (typeof from === 'string' && from.trim()) ? from.trim() : FROM_ADDRESS;
+  const useFromName = (typeof fromName === 'string' && fromName.trim()) ? fromName.trim() : FROM_NAME;
 
   try {
     const transport = getTransport();
     const info = await transport.sendMail({
-      from: `"${FROM_NAME}" <${FROM_ADDRESS}>`,
+      from: `"${useFromName}" <${useFromAddr}>`,
       to: recipients.join(', '),
       subject,
       text: text || stripHtml(html),

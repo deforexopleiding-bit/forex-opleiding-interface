@@ -27,8 +27,14 @@
 // + credentials_wa_sent_at houden alleen het tijdstip bij (zichtbaarheid).
 
 import { supabaseAdmin } from '../supabase.js';
-import { sendEventMail, wrapEmailHtml } from '../mailer.js';
+import { sendMail, wrapEmailHtml } from '../mailer.js';
 import { sendOnboardingTemplateGeneric } from './onboarding-template-send.js';
+
+// Onboarding-welkomstmail komt van info@deforexopleiding.nl (niet events@).
+// Strato auth't dit account via IMAP_PASS_INFO. Overschrijfbaar via env zodat
+// Jeffrey zonder code-deploy van afzender kan wisselen (bv. naar 'welkom@').
+const ONBOARDING_MAIL_FROM      = process.env.ONBOARDING_MAIL_FROM      || 'info@deforexopleiding.nl';
+const ONBOARDING_MAIL_FROM_NAME = process.env.ONBOARDING_MAIL_FROM_NAME || 'De Forex Opleiding';
 
 function defaultLoginUrl() {
   return (process.env.BUBBLE_LOGIN_URL && process.env.BUBBLE_LOGIN_URL.trim())
@@ -92,11 +98,17 @@ export async function sendCredentialsEmail({ onboarding, customer, tempPassword,
     `;
     const html = wrapEmailHtml(subject, bodyHtml);
 
-    const result = await sendEventMail({
-      to:      customer.email,
+    // sendMail (info@-transport) i.p.v. sendEventMail (events@-transport)
+    // zodat de welkomstmail van info@deforexopleiding.nl komt, met de
+    // 'De Forex Opleiding'-display-naam. Strato auth't dit account via
+    // IMAP_PASS_INFO; verzending vanaf info@ is per definitie toegestaan.
+    const result = await sendMail({
+      to:       customer.email,
       subject,
       html,
-      text:    `Hoi ${naam}, je inloggegevens voor De Forex Opleiding:\n\nInloglink: ${url}\nGebruikersnaam: ${customer.email}\nTijdelijk wachtwoord: ${tempPassword}\n\nLog direct in en stel je eigen wachtwoord in.\n— De Forex Opleiding`,
+      text:     `Hoi ${naam}, je inloggegevens voor De Forex Opleiding:\n\nInloglink: ${url}\nGebruikersnaam: ${customer.email}\nTijdelijk wachtwoord: ${tempPassword}\n\nLog direct in en stel je eigen wachtwoord in.\n— De Forex Opleiding`,
+      from:     ONBOARDING_MAIL_FROM,
+      fromName: ONBOARDING_MAIL_FROM_NAME,
     });
     if (!result || result.success !== true) {
       return { sent: false, reason: 'mail-fail', message_id: null };
