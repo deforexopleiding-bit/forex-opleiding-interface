@@ -2187,22 +2187,14 @@ async function renderOnboardingCard() {
     const accepted = (d.quotations || []).find(q => q.tl_quotation_status === 'accepted' || q.tl_quotation_status === 'signed');
     const isRetentie = accepted && (accepted.traject_label || '').toLowerCase().includes('retentie');
     if (accepted && !isRetentie) {
-      wrap.innerHTML = `<button class="btn btn-primary btn-sm" onclick="sendOnboarding()">Aanmelden onboarding</button>`;
+      // Aanmelden loopt sinds chore/remove-legacy-onboarding-button via de
+      // offerte-detail-pagina ("Onboarding-traject aanmelden"-knop) en de
+      // F0.2 modal-flow. Hier alleen een uitleg-tekst, geen actie-knop.
+      wrap.innerHTML = '<span class="cust-empty">Aanmelden via de offerte.</span>';
     } else {
       wrap.innerHTML = '<span class="cust-empty">Wordt zichtbaar na offerte-ondertekening.</span>';
     }
   } catch { wrap.innerHTML = '<span class="cust-empty">Wordt zichtbaar na offerte-ondertekening.</span>'; }
-}
-async function sendOnboarding() {
-  if (!confirm('Welkomstmail + onboarding-link naar de klant sturen?')) return;
-  try {
-    const r = await window.AgentShared.apiFetch('/api/sales-onboarding-send', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ customer_id: detailState.customerId }) });
-    const d = await r.json();
-    if (!r.ok || d.success === false) throw new Error(d.error || 'HTTP ' + r.status);
-    if (detailState.customer) { detailState.customer.onboarding_status = 'sent'; detailState.customer.onboarding_sent_at = new Date().toISOString(); }
-    window.AgentShared?.showToast(d.mail_sent ? 'Onboarding verzonden' : 'Onboarding gemarkeerd (mail mislukt)', d.mail_sent ? 'success' : 'error');
-    renderOnboardingCard();
-  } catch (e) { window.AgentShared?.showToast('Mislukt: ' + e.message, 'error'); }
 }
 
 async function renderCommunicatieTab() {

@@ -118,7 +118,6 @@
         <div class="sr-grid sr-grid-4" style="margin-bottom:12px">
           <a class="sr-stat sr-i-blue" href="/modules/sales.html?tab=offertes"><div class="sr-stat-l"><i class="ti ti-file-text"></i>Mijn open offertes</div><div class="sr-stat-v" id="dashMyQuotes">–</div><div class="sr-stat-d" id="dashMyQuotesD"></div></a>
           <a class="sr-stat sr-i-amber" href="/modules/sales.html?tab=rapporten"><div class="sr-stat-l"><i class="ti ti-coin"></i>Bonus deze maand</div><div class="sr-stat-v" id="dashMyBonus">–</div><div class="sr-stat-d">pending · uitkering 1e v/d maand</div></a>
-          <a class="sr-stat sr-i-purple" href="/modules/onboarding-overzicht.html"><div class="sr-stat-l"><i class="ti ti-rocket"></i>Onboarding</div><div class="sr-stat-v" id="dashOnboarding">–</div><div class="sr-stat-d">wachten op call</div></a>
           <a class="sr-stat sr-i-pink" href="/modules/sales.html?tab=retentie"><div class="sr-stat-l"><i class="ti ti-refresh"></i>Retentie</div><div class="sr-stat-v" id="dashRetention">–</div><div class="sr-stat-d" id="dashRetentionD"></div></a>
         </div>
         <div class="sr-grid sr-grid-2" style="margin-bottom:12px">
@@ -866,10 +865,6 @@ document.getElementById('sendConfirm').addEventListener('click', doSendQuotation
 document.getElementById('quotSearch').addEventListener('input', () => { clearTimeout(window._qs); window._qs = setTimeout(loadQuotations, 250); });
 document.getElementById('quotMineToggle').addEventListener('change', () => loadQuotations());
 
-// ── Onboardings ──
-// (Onboardings is een eigen module geworden: modules/onboarding-overzicht.html.
-//  De tab + loader zijn hier verwijderd; ?tab=onboardings redirect staat in init.)
-
 // ── Retentie ──
 let retSeg = 'alle', retSort = { key: 'end', dir: 'asc' }, retItems = [];
 async function loadRetentie() {
@@ -1551,8 +1546,6 @@ function avatarHtml(name, size) { return `<span class="sr-avatar sr-av-${avatarH
   if (can('sales.reports.view')) { const rb = document.getElementById('tab-btn-reports'); if (rb) rb.style.display = ''; }
   // ?tab=klanten|quotations|trajecten|products → direct juiste tab openen.
   const wantTab = new URLSearchParams(location.search).get('tab');
-  // Onboardings is een eigen module → oude ?tab=onboardings redirect.
-  if (wantTab === 'onboardings') { location.replace('/modules/onboarding-overzicht.html'); return; }
   // ?sub= voor Aanbod (trajecten|producten); oude ?tab=trajecten/producten → aanbod.
   const wantSub = new URLSearchParams(location.search).get('sub');
   if (wantTab === 'producten' || wantTab === 'products' || wantSub === 'producten') aanbodSub = 'producten';

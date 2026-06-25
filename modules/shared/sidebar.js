@@ -95,11 +95,9 @@
           // maar de sidebar toont alleen nog dit ene item. Zichtbaarheid: zodra de
           // user minstens één van de drie rechten heeft (zie applyModuleGating).
           navLink('mentoren-beheer', '/modules/mentoren-beheer.html', 'Mentoren beheer') +
-          navLink('onboarding', '/modules/onboarding-overzicht.html', 'Onboarding') +
-          // F0 admin-dashboard op de nieuwe `onboardings`-tabel. Aparte
-          // sidebar-entry naast de legacy `onboarding-overzicht`-link
-          // (customers.onboarding_status-flow) tot legacy uitgefaseerd is.
-          navLink('onboarding-admin', '/modules/onboarding-admin.html', 'Onboarding (admin)') +
+          // Onboarding-admin (F0). Het admin-dashboard op de
+          // `onboardings`-tabel; gegate op de onboarding.admin-permissie.
+          navLink('onboarding-admin', '/modules/onboarding-admin.html', 'Onboarding') +
           // F1b — editor voor de wizard-structuur (block-builder + publish).
           // Aparte entry, gegate op onboarding.wizard.edit.
           navLink('onboarding-wizard-editor', '/modules/onboarding-wizard-editor.html', 'Onboarding-wizard') +
@@ -148,7 +146,6 @@
     var cur = currentModule();
     // sales-dashboard.html highlight valt onder Dashboard-link in de sidebar
     if (cur === 'sales-dashboard') cur = 'dashboard';
-    if (cur === 'onboarding-overzicht') cur = 'onboarding';
     // events-detail.html + events-wizard.html + events-automations.html highlighten onder de Events-link
     if (cur === 'events-detail' || cur === 'events-wizard' || cur === 'events-automations') cur = 'events';
     // open-acties.html is verhuisd naar Finance > Wanbetalers > Open Acties sub-tab.
@@ -442,8 +439,7 @@
     // Mentoren beheer — speciaal: ANY-of-3 (zie applyModuleGating onderaan).
     // Geen vaste feature_key hier; de OR-check is daar gehardcodeerd.
     'mentoren-beheer': '__any_mentor_admin__',
-    // F0 onboarding-admin (nieuwe `onboardings`-tabel) — read/write op
-    // onboarding.admin. Aparte module naast legacy `onboarding-overzicht`.
+    // F0 onboarding-admin (`onboardings`-tabel) — read/write op onboarding.admin.
     'onboarding-admin': 'onboarding.admin',
     // F1b — wizard-editor (block-builder + publish). RBAC-gate op de
     // dedicated 'onboarding.wizard.edit' permission.
