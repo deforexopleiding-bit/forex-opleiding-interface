@@ -524,7 +524,7 @@ function renderPage(canCreate, canViewInbox, canManageSignupInbox) {
       </div>
       <nav class="evs-sub-tabs" id="evSettingsSubTabs">
         <button class="evs-sub-tab" data-evsub="assessment"><i class="ti ti-file-text"></i> Vragenlijst</button>
-        <button class="evs-sub-tab" data-evsub="simone"><i class="ti ti-robot"></i> Simone-config</button>
+        <button class="evs-sub-tab" data-evsub="simone"><i class="ti ti-flask"></i> Simone testen</button>
         <button class="evs-sub-tab" data-evsub="automations"><i class="ti ti-bolt"></i> Automations</button>
         <button class="evs-sub-tab" data-evsub="signup-deadline"><i class="ti ti-clock-hour-4"></i> Signup-deadline</button>
         <button class="evs-sub-tab" data-evsub="niveau"><i class="ti ti-photo"></i> Niveau-foto's</button>
@@ -615,21 +615,22 @@ function renderPage(canCreate, canViewInbox, canManageSignupInbox) {
         </div>
       </section>
 
-      <!-- ── Sub-sectie: Simone-config (verhuisd uit admin.html#simone-config) ── -->
+      <!-- ── Sub-sectie: Simone testen (sandbox-only).
+           De volledige Simone-config zit sinds PR #423 in het Agent center
+           (events Autonomy-tab). Hier blijft alleen de "🧪 Test Simone"-sandbox
+           en een banner met link naar het Agent center. -->
       <section class="evs-sub-section" data-evsubsec="simone">
         <div class="aq-section-card">
           <div class="aq-section-header" style="justify-content:space-between">
             <div>
               <div style="font-size:15px;font-weight:700">Simone — events-agent</div>
               <div style="font-size:12px;color:var(--text-faint);font-weight:400;margin-top:4px;max-width:720px">
-                Configuratie voor de events-agent op <code>joost_config</code> waar <code>module='events'</code>.
-                Simone is <strong>suggest-only</strong> — geen autonomous-send. Vul de prompt-template aan en flip <em>reactieve auto-suggest</em> aan
-                zodra je live wilt (events-inbound triggert dan in-process Simone).
+                Test hier hoe Simone op een voorbeeld-vraag reageert. De volledige
+                configuratie (persona, prompt, intents, communicatie-limieten,
+                personality, autonomie) staat in het
+                <a href="/modules/agent-center.html" style="color:var(--brand-primary, #093d54);text-decoration:underline">Agent center</a>
+                → Simone-kaart → Autonomy.
               </div>
-            </div>
-            <div style="display:flex;gap:8px">
-              <button class="btn btn-sm" onclick="loadSimoneConfig()" title="Opnieuw laden"><i class="ti ti-refresh"></i></button>
-              <button class="btn btn-sm btn-primary" id="simoneCfgSaveBtn" onclick="saveSimoneConfig()" disabled><i class="ti ti-device-floppy"></i> Opslaan</button>
             </div>
           </div>
           <div id="simoneCfgBanner" style="display:none;margin:8px 0 0;padding:10px 14px;border-radius:8px;font-size:13px"></div>
@@ -2380,25 +2381,25 @@ function _scMarkDirty() {
 async function loadSimoneConfig() {
   const wrap = document.getElementById('simoneCfgForm');
   if (!wrap) return;
-  wrap.innerHTML = '<div style="font-size:12.5px;color:var(--text-faint)">Laden…</div>';
   _scShowBanner('', null);
+  // Config-form is verhuisd naar het Agent center (PR #423). Deze tab
+  // toont alleen nog de sandbox + verhuisd-banner; toch fetchen we kort
+  // _simoneCfg op zodat de banner-helpers en sandbox (die niets uit
+  // _simoneCfg leest) consistent blijven werken als de tab her-opent.
   try {
     const r = await window.AgentShared.apiFetch('/api/joost-config-get?module=events');
     const d = await r.json().catch(() => ({}));
-    if (!r.ok) {
-      wrap.innerHTML = '<div style="color:#b91c1c;font-size:13px">Fout: ' + esc(d.error || ('HTTP ' + r.status)) + '</div>';
-      return;
+    if (r.ok) {
+      _simoneCfg = d.config || {};
+      _simoneCfgDirty = false;
     }
-    _simoneCfg = d.config || {};
-    _simoneCfgDirty = false;
-    document.getElementById('simoneCfgSaveBtn').disabled = true;
-    renderSimoneConfigForm();
-    if (_simoneCfg.is_default) {
-      _scShowBanner('Geen joost_config-rij voor module=events; getoonde waarden zijn defaults. Eerste opslaan creëert de rij.', 'info');
-    }
-  } catch (e) {
-    wrap.innerHTML = '<div style="color:#b91c1c;font-size:13px">Fout: ' + esc(e.message) + '</div>';
+  } catch (_) {
+    // Stil — sandbox heeft _simoneCfg niet nodig om te werken.
   }
+  // Save-knop bestaat niet meer in dit paneel; null-safe degraderen.
+  const saveBtn = document.getElementById('simoneCfgSaveBtn');
+  if (saveBtn) saveBtn.disabled = true;
+  renderSimoneConfigForm();
 }
 
 // Intent-keys voor de events-agent. Cancel_or_reschedule + escalation_needed
@@ -2487,7 +2488,60 @@ function _scPersonality() {
 
 function renderSimoneConfigForm() {
   const wrap = document.getElementById('simoneCfgForm');
-  if (!wrap || !_simoneCfg) return;
+  if (!wrap) return;
+
+  // PR #423: volledige Simone-configuratie zit nu in het Agent center
+  // (events Autonomy-tab). Deze tab toont nog uitsluitend:
+  //   1) Verhuisd-banner met diepe link naar het Agent center
+  //   2) "🧪 Test Simone" sandbox (work-surface — blijft)
+  // De voorheen-zichtbare config-blokken (Algemeen / Persona / Per-intent /
+  // Communicatie-limieten / Persoonlijkheid / Pauzeer / Opslaan) zijn
+  // verwijderd uit de render. De bijbehorende save- en update-functies
+  // blijven als dormant code aanwezig en zijn null-safe gemaakt.
+  wrap.innerHTML =
+      '<div style="display:flex;flex-direction:column;gap:18px">'
+
+    // ── Verhuisd-banner ────────────────────────────────────────────────────
+    +   '<section style="background:rgba(59,130,246,0.10);border:1px solid rgba(59,130,246,0.3);border-radius:10px;padding:14px 16px;display:flex;gap:12px;align-items:flex-start">'
+    +     '<i class="ti ti-arrow-right-circle" style="font-size:22px;color:#1d4ed8;flex-shrink:0;margin-top:2px"></i>'
+    +     '<div style="flex:1;min-width:0">'
+    +       '<div style="font-size:13.5px;font-weight:700;color:#1e3a8a;margin-bottom:4px">Simone\'s configuratie is verhuisd</div>'
+    +       '<div style="font-size:12.5px;color:#1e40af;line-height:1.55">'
+    +         'Persona, prompt, intents, communicatie-limieten en persoonlijkheid van Simone bewerk je in het '
+    +         '<a href="/modules/agent-center.html" style="color:#1d4ed8;text-decoration:underline;font-weight:600">Agent center</a> '
+    +         '→ Simone-kaart → Autonomy. Hier blijft alleen de sandbox om te testen.'
+    +       '</div>'
+    +     '</div>'
+    +     '<a href="/modules/agent-center.html" class="btn btn-sm btn-primary" style="flex-shrink:0;text-decoration:none">'
+    +       '<i class="ti ti-external-link"></i> Open Agent center'
+    +     '</a>'
+    +   '</section>'
+
+    // ── 🧪 Test Simone (sandbox) — work-surface, behouden ─────────────────
+    +   '<section style="background:var(--bg-elev);border:1px solid var(--border);border-radius:10px;padding:12px 14px">'
+    +     '<div style="font-size:12px;font-weight:700;color:var(--text-faint);text-transform:uppercase;letter-spacing:.04em;margin-bottom:8px">🧪 Test Simone</div>'
+    +     '<div style="font-size:12.5px;color:var(--text-dim);margin-bottom:8px">Typ een voorbeeld-klantvraag en zie direct welk antwoord Simone genereert + of \'t autonoom verstuurd zou worden. Maakt tijdelijk een dummy gesprek aan dat na de test direct weer verwijderd wordt.</div>'
+    +     '<textarea id="scSandboxInput" rows="3" placeholder="Typ een voorbeeld-vraag van een prospect…" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-family:inherit;font-size:13px;resize:vertical"></textarea>'
+    +     '<div style="display:flex;gap:8px;margin-top:8px">'
+    +       '<button class="btn btn-sm btn-primary" type="button" id="scSandboxRunBtn" onclick="runSimoneSandbox()"><i class="ti ti-flask"></i> Test</button>'
+    +       '<button class="btn btn-sm" type="button" id="scSandboxResetBtn" onclick="resetSimoneSandbox()" style="display:none"><i class="ti ti-trash"></i> Wissen</button>'
+    +     '</div>'
+    +     '<div id="scSandboxOutput" style="display:none;margin-top:12px"></div>'
+    +   '</section>'
+
+    + '</div>';
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Dormant code hieronder. De config-form is verhuisd naar agent-center.html
+// (PR #423). Onderstaande _renderSimoneConfigFormFull() bevat de oude render
+// (Algemeen / Persona / Intents / Communicatie / Persoonlijkheid + Pauzeer +
+// Opslaan) zodat de logica + scTip-helpers en SC_TIPS niet als "onbekend dood
+// hout" verschijnen, en saveSimoneConfig hieronder hetzelfde shape kan blijven
+// gebruiken als het ooit nodig blijkt. Niet aangeroepen vanuit de UI.
+// eslint-disable-next-line no-unused-vars
+function _renderSimoneConfigFormFull() {
+  if (!_simoneCfg) return;
   const ff = (_simoneCfg.feature_flags && typeof _simoneCfg.feature_flags === 'object') ? _simoneCfg.feature_flags : {};
   const isEnabled       = _simoneCfg.is_enabled !== false;
   const reactive        = ff.reactive_suggest_enabled === true;
@@ -2798,20 +2852,33 @@ function _scPauseAll() {
 }
 
 async function saveSimoneConfig() {
+  // Config-form is verhuisd naar het Agent center (PR #423). Deze save-flow
+  // wordt vanuit deze tab niet meer aangeroepen — alle DOM-reads zijn
+  // null-safe gemaakt zodat ontbrekende sc*-elementen geen TypeError gooien.
+  // Functie blijft dormant aanwezig zodat externe verwijzingen blijven
+  // werken en de logica beschikbaar is voor evt. terugschakelen.
   if (!_simoneCfg) return;
+  const formRoot = document.getElementById('simoneCfgForm');
+  const scPersonaName = formRoot && document.getElementById('scPersonaName');
+  if (!scPersonaName) {
+    // Config-form is niet meer aanwezig (verhuisd-banner-modus). No-op met
+    // duidelijke melding — geen JS-error, geen mutaties richting backend.
+    _scShowBanner('Configuratie bewerken doe je in het Agent center.', 'info');
+    return;
+  }
   const btn = document.getElementById('simoneCfgSaveBtn');
   if (btn) btn.disabled = true;
   _scShowBanner('Opslaan…', 'info');
   try {
-    const personaName = (document.getElementById('scPersonaName').value || '').trim();
-    const personaTone = (document.getElementById('scPersonaTone').value || '').trim();
-    const systemPrompt = document.getElementById('scSystemPrompt').value || '';
-    const isEnabled  = !!document.getElementById('scIsEnabled').checked;
-    const reactive   = !!document.getElementById('scReactiveEnabled').checked;
-    const autonomous = !!document.getElementById('scAutonomousEnabled').checked;
-    const model      = document.getElementById('scModel').value || 'claude-sonnet-4-6';
-    const tempRaw    = Number(document.getElementById('scTemperature').value);
-    const ctxRaw     = Number(document.getElementById('scContextCount').value);
+    const personaName = (document.getElementById('scPersonaName')?.value || '').trim();
+    const personaTone = (document.getElementById('scPersonaTone')?.value || '').trim();
+    const systemPrompt = document.getElementById('scSystemPrompt')?.value || '';
+    const isEnabled  = !!document.getElementById('scIsEnabled')?.checked;
+    const reactive   = !!document.getElementById('scReactiveEnabled')?.checked;
+    const autonomous = !!document.getElementById('scAutonomousEnabled')?.checked;
+    const model      = document.getElementById('scModel')?.value || 'claude-sonnet-4-6';
+    const tempRaw    = Number(document.getElementById('scTemperature')?.value);
+    const ctxRaw     = Number(document.getElementById('scContextCount')?.value);
     const temperature = Number.isFinite(tempRaw) ? Math.min(1, Math.max(0, tempRaw)) : 0.3;
     const context_message_count = Number.isInteger(ctxRaw) ? Math.min(50, Math.max(5, ctxRaw)) : 20;
 
@@ -2838,24 +2905,24 @@ async function saveSimoneConfig() {
       .filter((n) => Number.isInteger(n) && n >= 1 && n <= 7)
       .sort((a, b) => a - b);
     const communication_limits = {
-      max_messages_per_conversation_per_day: Math.max(0, Math.min(50, Number(document.getElementById('scMaxPerDay').value) || 3)),
-      max_messages_per_conversation_total:   Math.max(0, Math.min(500, Number(document.getElementById('scMaxTotal').value) || 20)),
-      cooldown_after_outbound_minutes:       Math.max(0, Math.min(1440, Number(document.getElementById('scCooldown').value) || 30)),
-      no_reply_pause_threshold:              Math.max(0, Math.min(20, Number(document.getElementById('scNoReplyTh').value) || 3)),
-      no_reply_pause_duration_hours:         Math.max(1, Math.min(720, Number(document.getElementById('scNoReplyHrs').value) || 48)),
-      office_hours_only:  !!document.getElementById('scOhOn').checked,
-      office_hours_tz:    (document.getElementById('scOhTz').value || 'Europe/Amsterdam').trim(),
+      max_messages_per_conversation_per_day: Math.max(0, Math.min(50, Number(document.getElementById('scMaxPerDay')?.value) || 3)),
+      max_messages_per_conversation_total:   Math.max(0, Math.min(500, Number(document.getElementById('scMaxTotal')?.value) || 20)),
+      cooldown_after_outbound_minutes:       Math.max(0, Math.min(1440, Number(document.getElementById('scCooldown')?.value) || 30)),
+      no_reply_pause_threshold:              Math.max(0, Math.min(20, Number(document.getElementById('scNoReplyTh')?.value) || 3)),
+      no_reply_pause_duration_hours:         Math.max(1, Math.min(720, Number(document.getElementById('scNoReplyHrs')?.value) || 48)),
+      office_hours_only:  !!document.getElementById('scOhOn')?.checked,
+      office_hours_tz:    (document.getElementById('scOhTz')?.value || 'Europe/Amsterdam').trim(),
       office_hours_days:  ohDays.length > 0 ? ohDays : [1,2,3,4,5],
-      office_hours_start: document.getElementById('scOhStart').value || '08:30',
-      office_hours_end:   document.getElementById('scOhEnd').value   || '21:00',
+      office_hours_start: document.getElementById('scOhStart')?.value || '08:30',
+      office_hours_end:   document.getElementById('scOhEnd')?.value   || '21:00',
     };
 
     // Persoonlijkheid.
     const personality = {
       tone:            personaTone || 'vriendelijk-professioneel',
-      use_tutoyeer:    !!document.getElementById('scTutoyeer').checked,
-      max_message_chars: Math.max(50, Math.min(4096, Number(document.getElementById('scMaxChars').value) || 480)),
-      emoji_policy:    document.getElementById('scEmojiPolicy').value || 'sparingly',
+      use_tutoyeer:    !!document.getElementById('scTutoyeer')?.checked,
+      max_message_chars: Math.max(50, Math.min(4096, Number(document.getElementById('scMaxChars')?.value) || 480)),
+      emoji_policy:    document.getElementById('scEmojiPolicy')?.value || 'sparingly',
     };
 
     // Full read-modify-write op feature_flags + autonomy_config: behoud
