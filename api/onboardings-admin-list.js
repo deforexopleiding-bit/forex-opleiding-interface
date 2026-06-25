@@ -89,7 +89,11 @@ export default async function handler(req, res) {
                bubble_provisioned, bubble_provisioned_at, bubble_provision_error, bubble_user_id,
                traject:onboarding_trajecten(label, type, calls)`)
       .order('created_at', { ascending: false })
-      .limit(1000);
+      .limit(1000)
+      // Fase 3b — verberg test-onboardings (automation-tester) uit de echte
+      // admin-lijst. Test-rijen zijn herkenbaar aan customer_name-prefix
+      // 'TEST · ' maar de is_test boolean is autoritatief.
+      .eq('is_test', false);
     if (scope === 'archived') q = q.eq('status', 'gearchiveerd');
     else                       q = q.neq('status', 'gearchiveerd');
     if (mentorFilter)  q = q.eq('mentor_user_id', mentorFilter);

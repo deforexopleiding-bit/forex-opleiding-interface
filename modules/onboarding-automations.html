@@ -105,7 +105,9 @@
     .editor-banner { padding: 10px 12px; margin-bottom: 12px; background: rgba(239,68,68,0.1); border: 1px solid #ef4444; border-radius: 8px; color: #ef4444; font-size: 13px; display: none; }
     .editor-banner.visible { display: block; }
 
-    /* Modal (runs) */
+    /* Modal — gedeeld door Runs-modal (Fase 3a) + Tester-modal (Fase 3b).
+       Default max-width 760px is groot genoeg voor de Runs-tabel; de Tester-
+       modal overschrijft 'm inline op de .modal-card-div naar 520px. */
     .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.6); z-index: 500; display: flex; align-items: center; justify-content: center; backdrop-filter: blur(4px); padding: 20px; }
     .modal-overlay.hidden { display: none !important; }
     .modal-card { background: var(--bg-elev); border: 1px solid var(--border); border-radius: 14px; width: 100%; max-width: 760px; max-height: calc(100vh - 40px); display: flex; flex-direction: column; }
@@ -115,6 +117,7 @@
     .modal-body { padding: 18px 20px; overflow-y: auto; }
     .modal-footer { display: flex; justify-content: flex-end; gap: 8px; padding: 14px 20px; border-top: 1px solid var(--border); }
 
+    /* Runs-modal styling (Fase 3a) */
     .runs-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
     .runs-table th { text-align: left; font-weight: 600; color: var(--text-faint); padding: 6px 8px; border-bottom: 1px solid var(--border); font-size: 11px; text-transform: uppercase; letter-spacing: .04em; }
     .runs-table td { padding: 7px 8px; border-bottom: 1px solid var(--border); color: var(--text); }
@@ -135,6 +138,7 @@
     .log-row .log-type { color: var(--brand-primary, #093d54); }
     .log-row .log-ts { margin-left: auto; font-size: 11px; color: var(--text-faint); font-weight: 500; }
     .log-row pre { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11.5px; background: var(--bg-elev-2); border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px; white-space: pre-wrap; word-break: break-word; color: var(--text-dim); margin-top: 4px; }
+
 
     @media (max-width: 880px) {
       .app { margin-left: 0; padding: 14px; }
@@ -162,6 +166,46 @@
     <div class="modal-footer">
       <button class="btn-secondary" type="button" id="runsBackBtn" style="display:none" onclick="backToRunsList()"><i class="ti ti-arrow-left"></i> Terug</button>
       <button class="btn-secondary" type="button" onclick="closeRunsModal()">Sluiten</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Modal: automation-tester (Fase 3b) ─────────────────────────── -->
+<div class="modal-overlay hidden" id="automationTestModal" role="dialog" aria-modal="true">
+  <div class="modal-card" style="max-width:520px">
+    <div class="modal-header">
+      <div class="modal-title">Automation testen</div>
+      <button class="modal-close" type="button" onclick="closeTestModal()">&#x2715;</button>
+    </div>
+    <div class="modal-body">
+      <div id="automationTestBanner" style="display:none;margin-bottom:10px;padding:8px 12px;border-radius:6px;font-size:12px;white-space:pre-wrap"></div>
+      <div style="font-size:12.5px;color:var(--text-dim);margin-bottom:10px">
+        Maakt een test-klant + test-onboarding (<code>is_test=true</code>) aan en triggert deze automation direct. Wait-stappen versnellen naar 15s. Test-rijen verschijnen NIET in de gewone onboarding-lijst.
+      </div>
+      <div class="form-field">
+        <label>Volledige naam <span class="req">*</span></label>
+        <input id="atName" type="text" value="Jeffrey Test" maxlength="80" />
+      </div>
+      <div class="form-field">
+        <label>E-mail <span class="req">*</span></label>
+        <input id="atEmail" type="email" placeholder="jij@example.com" />
+      </div>
+      <div class="form-field">
+        <label>Telefoon (E.164) <span class="req">*</span></label>
+        <input id="atPhone" type="tel" placeholder="+31612345678" />
+        <div class="form-help">E.164-formaat: +31… (geen spaties / streepjes).</div>
+      </div>
+      <div class="form-field">
+        <label>Traject <span class="req">*</span></label>
+        <select id="atTraject">
+          <option value="">Laden…</option>
+        </select>
+        <div class="form-help">Test-onboarding krijgt dit traject (wordt door de wizard NIET echt doorlopen).</div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn-secondary" type="button" onclick="closeTestModal()">Annuleer</button>
+      <button class="btn-primary" type="button" id="atStartBtn" onclick="submitTestRun()"><i class="ti ti-flask"></i> Start test</button>
     </div>
   </div>
 </div>
@@ -340,6 +384,7 @@ function renderList() {
           <span>${a.enabled ? 'Aan' : 'Uit'}</span>
         </span>
         <button class="btn-ghost" type="button" data-act="runs" data-aid="${esc(a.id)}"><i class="ti ti-history"></i> Runs</button>
+        ${canEdit ? `<button class="btn-ghost" type="button" data-act="test" data-aid="${esc(a.id)}" title="Trigger een test-run met fake gegevens"><i class="ti ti-flask"></i> Test</button>` : ''}
         ${canEdit ? `<button class="btn-secondary" type="button" data-act="edit" data-aid="${esc(a.id)}"><i class="ti ti-edit"></i> Bewerken</button>` : ''}
         ${canEdit ? `<button class="btn-danger" type="button" data-act="delete" data-aid="${esc(a.id)}"><i class="ti ti-trash"></i></button>` : ''}
       </div>
@@ -377,6 +422,7 @@ async function onListClick(ev) {
   if (t.dataset.act === 'edit') { const a = state.automations.find((x) => x.id === t.dataset.aid); if (a) startEditor(a); return; }
   if (t.dataset.act === 'delete') return deleteAutomation(t.dataset.aid);
   if (t.dataset.act === 'runs')   return openRunsModal(t.dataset.aid);
+  if (t.dataset.act === 'test')   return openTestModal(t.dataset.aid);
   if (t.dataset.toggle) return toggleEnabled(t.dataset.toggle, t);
 }
 
@@ -1068,6 +1114,113 @@ function closeRunsModal() {
 }
 window.closeRunsModal = closeRunsModal;
 window.backToRunsList = backToRunsList;
+
+// ── Tester (Fase 3b) ────────────────────────────────────────────────────────
+// Opens modal, vult traject-dropdown via /api/onboarding-trajecten-list,
+// POST'et naar /api/onboarding-automation-test bij submit.
+const _atState = { automationId: null, trajectsLoaded: false, trajectsCache: [] };
+
+function _atShowBanner(msg, kind) {
+  const el = document.getElementById('automationTestBanner');
+  if (!el) return;
+  if (!msg) { el.style.display = 'none'; el.textContent = ''; return; }
+  const palette = kind === 'error'
+    ? 'background:rgba(220,38,38,.08);border:1px solid rgba(220,38,38,.3);color:#b91c1c'
+    : kind === 'success'
+      ? 'background:rgba(16,185,129,.08);border:1px solid rgba(16,185,129,.3);color:#059669'
+      : 'background:rgba(99,102,241,.08);border:1px solid rgba(99,102,241,.3);color:#6366f1';
+  el.style.cssText = 'display:block;margin-bottom:10px;padding:8px 12px;border-radius:6px;font-size:12px;white-space:pre-wrap;' + palette;
+  el.textContent = msg;
+}
+
+async function openTestModal(automationId) {
+  if (!automationId) return;
+  if (!can('onboarding.automation.edit')) { toastErr('Geen rechten (onboarding.automation.edit)'); return; }
+  _atState.automationId = automationId;
+  _atShowBanner('', null);
+  document.getElementById('automationTestModal').classList.remove('hidden');
+  const sel = document.getElementById('atTraject');
+  if (!_atState.trajectsLoaded) {
+    sel.innerHTML = '<option value="">Laden…</option>';
+    try {
+      const r = await window.AgentShared.apiFetch('/api/onboarding-trajecten-list');
+      const data = await r.json();
+      if (!r.ok) throw new Error(data?.error || ('HTTP ' + r.status));
+      const items = Array.isArray(data?.trajecten) ? data.trajecten
+                  : Array.isArray(data?.items)     ? data.items
+                  : Array.isArray(data?.rows)      ? data.rows
+                  : Array.isArray(data)            ? data
+                  : [];
+      // Alleen actieve trajecten als is_active-veld bestaat (anders allemaal).
+      const list = items.filter((t) => t && (t.is_active !== false));
+      _atState.trajectsCache = list;
+      _atState.trajectsLoaded = true;
+      if (list.length === 0) {
+        sel.innerHTML = '<option value="">Geen trajecten gevonden</option>';
+      } else {
+        sel.innerHTML = list.map((t, i) => {
+          const label = t.label || t.name || ('Traject ' + (t.id || '').slice(0, 8));
+          const typ = t.type ? ' · ' + t.type : '';
+          return '<option value="' + esc(t.id) + '"' + (i === 0 ? ' selected' : '') + '>' + esc(label + typ) + '</option>';
+        }).join('');
+      }
+    } catch (e) {
+      sel.innerHTML = '<option value="">Fout: ' + esc(e?.message || 'onbekend') + '</option>';
+    }
+  }
+}
+
+function closeTestModal() {
+  document.getElementById('automationTestModal').classList.add('hidden');
+}
+window.closeTestModal = closeTestModal;
+
+async function submitTestRun() {
+  _atShowBanner('', null);
+  const automationId = _atState.automationId;
+  if (!automationId) return;
+  const trajectId = document.getElementById('atTraject').value || '';
+  const name      = (document.getElementById('atName').value  || '').trim();
+  const email     = (document.getElementById('atEmail').value || '').trim();
+  const phone     = (document.getElementById('atPhone').value || '').trim();
+  if (!trajectId) { _atShowBanner('Kies een traject.', 'error'); return; }
+  if (!name)      { _atShowBanner('Naam is verplicht.', 'error'); return; }
+  if (!email)     { _atShowBanner('E-mail is verplicht.', 'error'); return; }
+  if (!phone)     { _atShowBanner('Telefoon (E.164) is verplicht.', 'error'); return; }
+
+  const btn = document.getElementById('atStartBtn');
+  if (btn) btn.disabled = true;
+  _atShowBanner('Test starten…', 'info');
+  try {
+    const r = await window.AgentShared.apiFetch('/api/onboarding-automation-test', {
+      method: 'POST',
+      body: JSON.stringify({
+        automation_id: automationId,
+        traject_id:    trajectId,
+        name,
+        email,
+        phone,
+      }),
+    });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) { _atShowBanner(data?.error || ('HTTP ' + r.status), 'error'); return; }
+    toastOk('Test gestart — bekijk Runs voor de voortgang');
+    closeTestModal();
+    // Open Runs-modal als die functie aanwezig is (Fase 3a). Anders een
+    // simpele toast met de run_id zodat de gebruiker 'm via een andere weg
+    // kan opzoeken.
+    if (typeof window.openRunsModal === 'function') {
+      try { window.openRunsModal(automationId); } catch (e) { /* niet-blokkerend */ }
+    } else if (data?.run_id) {
+      toastOk('Run-id: ' + String(data.run_id).slice(0, 8) + '…');
+    }
+  } catch (e) {
+    _atShowBanner('Starten mislukt: ' + (e?.message || e), 'error');
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+window.submitTestRun = submitTestRun;
 </script>
 </body>
 </html>

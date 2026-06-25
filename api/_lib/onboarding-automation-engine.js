@@ -38,6 +38,13 @@ const MAX_SEND_ATTEMPTS = 3;
 const RETRY_BACKOFF_MS = 5 * 60_000;
 const ONBOARDING_STATUSES = ['aangemeld','bezig','afgerond','gearchiveerd'];
 
+// Fase 3b automation-tester — test-runs (run.is_test=true) versnellen wait-
+// stappen naar deze duur ongeacht waitConfig.unit/amount. 15s = lang genoeg
+// dat de engine z'n DB-write doet en weer wordt opgepikt door de eerstvolgende
+// cron-tick, kort genoeg dat de hele flow in minuten te doorlopen is.
+// Mirror van events-automation-engine.js TEST_WAIT_MS.
+const TEST_WAIT_MS = 15 * 1000;
+
 // ── Pure helpers ────────────────────────────────────────────────────────────
 
 export function computeNextRunAt(waitConfig, fromMs) {
@@ -102,6 +109,12 @@ export async function advanceRun({ run, onboarding, traject, conditionState, now
 
     if (type === 'wait') {
       nextRunAt = computeNextRunAt(step.config, nowMs);
+      // Fase 3b — test-runs versnellen elke wait naar TEST_WAIT_MS. Override
+      // gebeurt NA computeNextRunAt zodat de pure helper unit-testbaar blijft
+      // zonder is_test-context.
+      if (run.is_test === true) {
+        nextRunAt = new Date(nowMs + TEST_WAIT_MS);
+      }
       idx += 1; attempts = 0; status = 'active';
       break;
     }
@@ -191,6 +204,11 @@ async function loadCandidatesForAutomation(auto, now) {
     .from('onboardings')
     .select('id, status, created_at, completed_at, automation_enabled, archived_at')
     .eq('automation_enabled', true)
+    // Fase 3b — test-onboardings (is_test=true) krijgen hun runs direct
+    // ingeschoten door /api/onboarding-automation-test. De candidate-poll
+    // mag ze daarom NIET oppakken voor andere automations (anders schiet
+    // elke enabled automation sends naar het test-contact).
+    .eq('is_test', false)
     .is('archived_at', null)
     .limit(500);
 
