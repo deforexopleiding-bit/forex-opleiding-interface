@@ -24,6 +24,7 @@ import {
   validateRequired,
   resolveFlowType,
 } from './_lib/onboarding-wizard-default.js';
+import { enrollForTrigger as enrollOnboardingAutomations } from './_lib/onboarding-automation-engine.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -123,6 +124,17 @@ export default async function handler(req, res) {
       console.error('[onboarding-complete] update:', updErr.message);
       return res.status(500).json({ error: 'Afronden mislukt.' });
     }
+
+    // Fase 1 onboarding-automations — fire-and-forget hook voor
+    // 'on_wizard_completed'. NIET awaited; cron-poll vangt missers op.
+    Promise.resolve(
+      enrollOnboardingAutomations({
+        onboardingId: ob.id,
+        triggerType:  'on_wizard_completed',
+      }),
+    ).catch((e) => {
+      console.error('[onboarding-complete] automation enroll fail:', e?.message || e);
+    });
 
     return res.status(200).json({ ok: true });
   } catch (e) {
