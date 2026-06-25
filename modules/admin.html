@@ -329,6 +329,39 @@
               </div>
             </div>
           </div>
+
+          <!-- WhatsApp Cloud API — éénmalige nummer-registratie. Roept
+               POST {graph}/{phone_number_id}/register aan met onze eigen
+               system-user token. Bedoeld voor super_admin tijdens setup van
+               een nieuwe Cloud API-lijn (bv. onboarding-nummer). Bestaande
+               geregistreerde lijnen (finance, events) hoeven dit niet
+               opnieuw. -->
+          <div class="integration-card" id="card-whatsapp-register" style="border:1px solid var(--border);border-radius:10px;padding:18px;margin-top:12px">
+            <div style="display:flex;align-items:flex-start;gap:14px">
+              <div style="font-size:26px;color:var(--text-dim);line-height:1"><i class="ti ti-brand-whatsapp"></i></div>
+              <div style="flex:1;min-width:0">
+                <div style="font-size:15px;font-weight:700">WhatsApp-nummer registreren</div>
+                <div style="font-size:12.5px;color:var(--text-dim);margin-bottom:10px">
+                  Éénmalige registratie van een Cloud API phone_number_id met PIN. Gebruikt onze app-token
+                  (META_WHATSAPP_ACCESS_TOKEN) — Explorer-tokens falen hier op error_subcode 33.
+                  <strong>Alleen super_admin.</strong>
+                </div>
+                <div style="display:grid;grid-template-columns:1fr 1fr auto;gap:8px;align-items:end;margin-bottom:10px">
+                  <label style="font-size:11.5px;color:var(--text-dim);display:flex;flex-direction:column;gap:4px">
+                    phone_number_id
+                    <input type="text" id="waRegPnId" inputmode="numeric" autocomplete="off" placeholder="bv. 123456789012345" style="padding:6px 9px;border:1px solid var(--border);border-radius:7px;font-size:13px;font-family:inherit;background:var(--bg);color:var(--text)" />
+                  </label>
+                  <label style="font-size:11.5px;color:var(--text-dim);display:flex;flex-direction:column;gap:4px">
+                    PIN (6 cijfers)
+                    <input type="password" id="waRegPin" inputmode="numeric" autocomplete="off" maxlength="6" pattern="\d{6}" placeholder="••••••" style="padding:6px 9px;border:1px solid var(--border);border-radius:7px;font-size:13px;font-family:inherit;background:var(--bg);color:var(--text);letter-spacing:.12em" />
+                  </label>
+                  <button class="btn btn-sm" type="button" id="waRegBtn"><i class="ti ti-key"></i> Registreren</button>
+                </div>
+                <div id="waRegStatus" style="font-size:12.5px;color:var(--text-dim);margin-bottom:8px"></div>
+                <pre id="waRegOut" style="background:var(--bg-elev);border:1px solid var(--border);border-radius:8px;padding:10px 12px;font-size:12px;line-height:1.45;overflow:auto;max-height:240px;margin:0;display:none;font-family:ui-monospace,SFMono-Regular,Menlo,monospace"></pre>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -947,7 +980,7 @@ function switchAdminTab(name) {
   const inviteBtn = document.querySelector('.page-header .btn-primary');
   if (inviteBtn) inviteBtn.style.display = name === 'gebruikers' ? '' : 'none';
   if (name === 'rechten' && !rbacLoaded) loadPermissionsMatrix();
-  if (name === 'integraties') { loadTlStatus(); loadWebhooks(); loadTemplateSetting(); loadWebflowAutoPublishState(); loadMentorBubbleSection(); wireBubbleProbe(); }
+  if (name === 'integraties') { loadTlStatus(); loadWebhooks(); loadTemplateSetting(); loadWebflowAutoPublishState(); loadMentorBubbleSection(); wireBubbleProbe(); wireWaRegister(); }
   if (name === 'approval-queue') {
     wireApprovOnce();
     loadApprovalQueue();
@@ -1707,6 +1740,119 @@ async function _copyBubbleProbe() {
     }
   } catch (e) {
     console.error('[bubble-schema-probe copy]', e);
+  }
+}
+
+// ── WhatsApp-nummer registreren (super_admin, éénmalig per nieuw nummer) ──
+// Wire-pattern gespiegeld aan wireBubbleProbe: idempotent guard zodat
+// switchAdminTab('integraties') 'm meermaals mag aanroepen zonder dubbele
+// listeners.
+let _waRegWired = false;
+function wireWaRegister() {
+  if (_waRegWired) return;
+  _waRegWired = true;
+  const btn = document.getElementById('waRegBtn');
+  if (btn) btn.addEventListener('click', _runWaRegister);
+  // Enter in een van beide inputs triggert de knop.
+  const pn  = document.getElementById('waRegPnId');
+  const pin = document.getElementById('waRegPin');
+  for (const inp of [pn, pin]) {
+    if (inp) inp.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Enter') { ev.preventDefault(); _runWaRegister(); }
+    });
+  }
+}
+
+async function _runWaRegister() {
+  const pnEl  = document.getElementById('waRegPnId');
+  const pinEl = document.getElementById('waRegPin');
+  const btn   = document.getElementById('waRegBtn');
+  const status = document.getElementById('waRegStatus');
+  const out    = document.getElementById('waRegOut');
+  if (!pnEl || !pinEl || !btn || !status || !out) return;
+
+  const phoneNumberId = (pnEl.value || '').trim();
+  const pin           = (pinEl.value || '').trim();
+
+  // Client-side basisvalidatie. Server valideert opnieuw (autoritatief).
+  if (!/^\d+$/.test(phoneNumberId)) {
+    status.style.color = 'var(--danger,#b91c1c)';
+    status.textContent = '✗ phone_number_id moet uitsluitend cijfers bevatten.';
+    return;
+  }
+  if (!/^\d{6}$/.test(pin)) {
+    status.style.color = 'var(--danger,#b91c1c)';
+    status.textContent = '✗ PIN moet exact 6 cijfers zijn.';
+    return;
+  }
+
+  btn.disabled = true;
+  out.style.display = 'none';
+  out.textContent = '';
+  status.style.color = 'var(--text-dim)';
+  status.textContent = 'Registreren bij Meta…';
+
+  try {
+    const r = await window.AgentShared.apiFetch('/api/whatsapp-register-number', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ phone_number_id: phoneNumberId, pin }),
+    });
+    let d = null; try { d = await r.json(); } catch {}
+
+    if (r.status === 401) {
+      status.style.color = 'var(--danger,#b91c1c)';
+      status.textContent = '✗ Niet (meer) ingelogd — log opnieuw in.';
+      return;
+    }
+    if (r.status === 403) {
+      status.style.color = 'var(--danger,#b91c1c)';
+      status.textContent = '✗ Alleen super_admin (' + (d?.error || 'Forbidden') + ').';
+      return;
+    }
+    if (r.status === 503) {
+      status.style.color = 'var(--danger,#b91c1c)';
+      status.textContent = '✗ Server niet geconfigureerd: ' + (d?.error || 'HTTP 503');
+      return;
+    }
+    if (r.status === 502) {
+      status.style.color = 'var(--danger,#b91c1c)';
+      status.textContent = '✗ Meta netwerk-fout: ' + (d?.detail || d?.error || 'HTTP 502');
+      return;
+    }
+    if (r.status === 400) {
+      status.style.color = 'var(--danger,#b91c1c)';
+      status.textContent = '✗ ' + (d?.error || 'Ongeldige input');
+      return;
+    }
+    if (!r.ok) {
+      status.style.color = 'var(--danger,#b91c1c)';
+      status.textContent = '✗ Fout: ' + (d?.error || ('HTTP ' + r.status));
+      return;
+    }
+
+    // 200 — d.success kan true of false zijn (Meta-zijde-uitkomst).
+    out.textContent = JSON.stringify(d, null, 2);
+    out.style.display = '';
+    if (d && d.success === true) {
+      status.style.color = '#15803d';
+      status.textContent = '✓ Nummer geregistreerd bij Meta. PIN ook in WhatsApp Business Manager bevestigen.';
+      // Veilige UX: leeg de PIN zodat hij niet zichtbaar in de input blijft.
+      pinEl.value = '';
+    } else {
+      const me = d?.meta_error || {};
+      const codeStr = (me.code != null) ? (' code=' + me.code) : '';
+      const subStr  = (me.error_subcode != null) ? (' subcode=' + me.error_subcode) : '';
+      const msg     = me.message || me.error_user_msg || me.error_user_title || 'onbekende Meta-fout';
+      status.style.color = 'var(--danger,#b91c1c)';
+      status.textContent = '✗ Meta weigerde de registratie (status ' + (d?.status || '?') + codeStr + subStr + '): ' + msg;
+    }
+  } catch (e) {
+    console.error('[whatsapp-register-number]', e);
+    status.style.color = 'var(--danger,#b91c1c)';
+    status.textContent = '✗ Onverwachte fout: ' + (e?.message || e);
+  } finally {
+    btn.disabled = false;
   }
 }
 
