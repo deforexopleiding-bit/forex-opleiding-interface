@@ -100,7 +100,7 @@ export async function provisionOnboardingStudent(onboardingId) {
   try {
     const { data, error } = await supabaseAdmin
       .from('onboardings')
-      .select('id, customer_id, traject_id, status, bubble_provisioned, bubble_user_id')
+      .select('id, customer_id, traject_id, status, bubble_provisioned, bubble_user_id, start_date')
       .eq('id', onboardingId)
       .maybeSingle();
     if (error) throw error;
@@ -243,9 +243,27 @@ export async function provisionOnboardingStudent(onboardingId) {
   const now = new Date();
   const nowIso = now.toISOString();
   const durationMonths = Number(traject.duur_maanden);
+
+  // Einddatum-basis: pak start_date als die in de toekomst ligt; anders now.
+  // Hiermee krijgt de klant de "gratis gap" tussen aanmelden en startdatum
+  // bovenop de volle looptijd. Geen start_date / verleden → identiek aan
+  // het oude gedrag (basis = now).
+  //
+  // onboardings.start_date is een Postgres date-kolom; supabaseAdmin geeft
+  // 'm terug als 'yyyy-mm-dd'-string. Parse naar UTC-midnight om timezone-
+  // verschuiving te voorkomen.
+  let basis = now;
+  const rawStart = onboarding && onboarding.start_date;
+  if (rawStart) {
+    const parsed = new Date(String(rawStart) + (String(rawStart).includes('T') ? '' : 'T00:00:00Z'));
+    if (Number.isFinite(parsed.getTime()) && parsed.getTime() > now.getTime()) {
+      basis = parsed;
+    }
+  }
+
   const endIso = (Number.isFinite(durationMonths) && durationMonths > 0)
-    ? addMonths(now, durationMonths).toISOString()
-    : nowIso; // Defensieve fallback: 0/NULL → einddatum gelijk aan start.
+    ? addMonths(basis, durationMonths).toISOString()
+    : basis.toISOString(); // Defensieve fallback: 0/NULL → einddatum gelijk aan basis.
 
   const patch = {
     name_text                                           : firstName,

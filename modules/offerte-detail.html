@@ -46,6 +46,7 @@
     .ob-modal-body .read-only { padding:8px 10px; background:var(--bg-elev); border:1px solid var(--border); border-radius:7px; font-size:13.5px; color:var(--text); margin-bottom:14px; }
     .ob-modal-body select { width:100%; padding:8px 10px; font-size:13.5px; border:1px solid var(--border); border-radius:7px; background:var(--bg); color:var(--text); font-family:inherit; margin-bottom:14px; }
     .ob-modal-body select:disabled { opacity:0.6; cursor:not-allowed; }
+    .ob-modal-body input[type="date"] { width:100%; padding:8px 10px; font-size:13.5px; border:1px solid var(--border); border-radius:7px; background:var(--bg); color:var(--text); font-family:inherit; margin-bottom:14px; }
     /* Type-segmented (1op1 / membership) — segmented control boven het traject-veld. */
     .ob-type-switch { display:flex; gap:0; margin-bottom:14px; border:1px solid var(--border); border-radius:8px; padding:3px; background:var(--bg-elev); }
     .ob-type-switch button { flex:1; padding:8px 12px; font-size:12.5px; font-weight:600; border:0; border-radius:6px; background:transparent; color:var(--text-dim); cursor:pointer; font-family:inherit; transition:background .12s, color .12s; }
@@ -99,6 +100,12 @@
         </div>
         <label for="obTrajectSel">Traject</label>
         <select id="obTrajectSel" disabled><option value="">Kies eerst een type</option></select>
+        <label for="obStartDate">Startdatum</label>
+        <input type="date" id="obStartDate" />
+        <div style="font-size:11.5px;color:var(--text-faint);margin:-8px 0 14px;line-height:1.45">
+          Vooringevuld uit de offerte. Aanpasbaar. De looptijd in Bubble loopt vanaf deze datum
+          (of vanaf nu als de datum in het verleden ligt) — toegang start direct.
+        </div>
         <div id="obError" class="ob-error" hidden></div>
       </div>
       <div id="obStepDone" hidden></div>
@@ -129,7 +136,7 @@ const dealId = new URLSearchParams(location.search).get('id');
 // gebruiker 'onboarding.create' heeft; server gate't sowieso.
 let _canCreateOnb = false;
 // Snapshot van de huidige customer-context voor de modal (uit render()).
-let _obCtx = { customerId: null, customerName: '' };
+let _obCtx = { customerId: null, customerName: '', startDate: null };
 
 async function init(){
   await window._authSharedReady;
@@ -239,6 +246,11 @@ function render(d){
     // Snapshot klant-context voor de F0.2 modal.
     _obCtx.customerId   = c.id || null;
     _obCtx.customerName = c.is_company ? (c.company_name||'') : ((c.first_name||'')+' '+(c.last_name||'')).trim();
+    // Offerte-startdatum als prefill voor de aanmeld-modal. Eerste keuze
+    // is payment_start_date (= 'Startdatum cursus' op de detail-pagina);
+    // fallback op start_date. Normaliseer naar yyyy-mm-dd (Postgres date).
+    const rawStart = deal.payment_start_date || deal.start_date || null;
+    _obCtx.startDate = (typeof rawStart === 'string' && rawStart) ? rawStart.slice(0, 10) : null;
     // F0.2-knop: traject-keuze + create. Alleen tonen bij recht
     // 'onboarding.create' en geldige customer_id. Vervangt de oude
     // legacy welkomstmail-knop (verwijderd in chore/remove-legacy-onboarding-button).
@@ -391,6 +403,9 @@ function _resetObModal(){
   _obSelectedType = null;
   _renderObTypeSwitch();
   _renderObTrajectOptions();
+  // Start-datum legen — openObModal prefilled 'm opnieuw uit _obCtx.
+  const dt = document.getElementById('obStartDate');
+  if (dt) dt.value = '';
 }
 
 function _showObError(msg){
@@ -421,6 +436,10 @@ function openObModal(){
   if (!_obCtx.customerId) { toast('Geen klant-id beschikbaar', 'error'); return; }
   _resetObModal();
   document.getElementById('obCustomerLabel').textContent = _obCtx.customerName || _obCtx.customerId;
+  // Prefill startdatum uit de offerte (payment_start_date / start_date). Leeg
+  // → veld blijft leeg en de admin kan handmatig invullen of laten staan.
+  const dt = document.getElementById('obStartDate');
+  if (dt) dt.value = _obCtx.startDate || '';
   const m = document.getElementById('obModal');
   m.removeAttribute('hidden');
   m.classList.add('open');
@@ -441,11 +460,17 @@ async function submitObCreate(){
   document.getElementById('obError').hidden = true;
   sb.disabled = true;
   sb.textContent = 'Bezig…';
+  // Optionele startdatum uit het input-veld. Leeg → null (server valt
+  // dan terug op now in de provisioning-stap, identiek aan oud gedrag).
+  const dtEl = document.getElementById('obStartDate');
+  const startDate = dtEl && dtEl.value ? dtEl.value : null;
+  const payload = { customer_id: _obCtx.customerId, traject_id: trajectId };
+  if (startDate) payload.start_date = startDate;
   try {
     const r = await window.AgentShared.apiFetch('/api/onboarding-create', {
       method  : 'POST',
       headers : { 'Content-Type': 'application/json' },
-      body    : JSON.stringify({ customer_id: _obCtx.customerId, traject_id: trajectId }),
+      body    : JSON.stringify(payload),
     });
     let d = null; try { d = await r.json(); } catch {}
     if (r.status === 409) {
