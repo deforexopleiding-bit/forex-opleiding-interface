@@ -139,6 +139,70 @@ export async function sendEventMail({ to, subject, text, html, attachments }) {
   }
 }
 
+// ── Onboarding-afzender (onboarding@deforexopleiding.nl) ─────────────────────
+// Mirror van getEventsTransport / sendEventMail. Aparte SMTP-auth zodat de
+// From-header gelijk is aan het auth-account → SPF/DKIM accepteert het en
+// de bezorgbaarheid blijft hoog. Veilig fallback naar info@-transport zolang
+// ONBOARDING_MAIL_PASS niet gezet is — geen onboarding-mail mag stilvallen
+// op een ontbrekende env-var.
+const ONBOARDING_FROM_ADDRESS = 'onboarding@deforexopleiding.nl';
+const ONBOARDING_FROM_NAME    = 'De Forex Opleiding';
+let cachedOnboardingTransport = null;
+
+function getOnboardingTransport() {
+  if (cachedOnboardingTransport) return cachedOnboardingTransport;
+  const pass = process.env.ONBOARDING_MAIL_PASS;
+  if (!pass) return null; // niet geconfigureerd → caller valt terug op info@
+  cachedOnboardingTransport = nodemailer.createTransport({
+    host: 'smtp.strato.com',
+    port: 465,
+    secure: true,
+    auth: { user: process.env.ONBOARDING_MAIL_USER || ONBOARDING_FROM_ADDRESS, pass },
+  });
+  return cachedOnboardingTransport;
+}
+
+/**
+ * Verstuur onboarding-mail vanaf onboarding@deforexopleiding.nl.
+ * Valt veilig terug op info@ als ONBOARDING_MAIL_PASS ontbreekt.
+ *
+ * Mirror van sendEventMail (zelfde return-shape, zelfde fallback-logica).
+ *
+ * @returns {Promise<{success:boolean, messageId?:string, from:string, fallback:boolean, error?:string}>}
+ */
+export async function sendOnboardingMail({ to, subject, text, html, attachments } = {}) {
+  if (!to || !subject || (!text && !html)) {
+    return { success: false, from: ONBOARDING_FROM_ADDRESS, fallback: false, error: 'Missing required fields' };
+  }
+  const recipients = Array.isArray(to) ? to : [to];
+  const onbTransport = getOnboardingTransport();
+  const useOnb = !!onbTransport;
+  const fromAddr = useOnb
+    ? (process.env.ONBOARDING_MAIL_USER || ONBOARDING_FROM_ADDRESS)
+    : FROM_ADDRESS;
+  const fromName = useOnb
+    ? (process.env.ONBOARDING_MAIL_FROM_NAME || ONBOARDING_FROM_NAME)
+    : FROM_NAME;
+  try {
+    const transport = onbTransport || getTransport();
+    const mail = {
+      from: `"${fromName}" <${fromAddr}>`,
+      to: recipients.join(', '),
+      subject,
+      text: text || stripHtml(html),
+      html,
+    };
+    if (Array.isArray(attachments) && attachments.length > 0) {
+      mail.attachments = attachments;
+    }
+    const info = await transport.sendMail(mail);
+    return { success: true, messageId: info.messageId, from: fromAddr, fallback: !useOnb };
+  } catch (err) {
+    console.error('[mailer] sendOnboardingMail error:', err.message);
+    return { success: false, from: fromAddr, fallback: !useOnb, error: err.message };
+  }
+}
+
 export function wrapEmailHtml(title, bodyHtml, opts = {}) {
   const footerInner = (opts && opts.footerHtml) || `<p style="margin:0; color:#6b7280; font-size:12px;">
                 Agency Command Center — Follow-up Module<br>
