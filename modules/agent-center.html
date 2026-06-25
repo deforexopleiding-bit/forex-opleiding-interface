@@ -706,6 +706,115 @@
       animation: ac-blink 1.6s ease-in-out infinite;
     }
 
+    /* ─── Joost Autonomy — preset-knoppen + intent-cards + advanced ──────── */
+    .joost-presets {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 10px;
+      margin-bottom: 8px;
+    }
+    .joost-preset {
+      text-align: left;
+      background: var(--surface-card);
+      border: 1px solid var(--border-subtle);
+      border-radius: 10px;
+      padding: 10px 12px;
+      cursor: pointer;
+      font-family: inherit;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      transition: border-color .15s ease, transform .15s ease;
+    }
+    .joost-preset:hover { border-color: var(--brand-primary); }
+    .joost-preset.active {
+      border-color: var(--brand-primary);
+      background: var(--brand-primary-soft);
+      box-shadow: 0 0 0 3px var(--brand-primary-soft);
+    }
+    .joost-preset .p-label { font-size: 13.5px; font-weight: 700; color: var(--text-primary); }
+    .joost-preset .p-sub   { font-size: 11.5px; color: var(--text-tertiary); font-weight: 500; }
+
+    .joost-intents { display: grid; gap: 10px; }
+    .joost-intent-card {
+      background: var(--surface-page);
+      border: 1px solid var(--border-subtle);
+      border-radius: 10px;
+      padding: 10px 12px;
+    }
+    .joost-intent-card .ji-head { margin-bottom: 8px; }
+    .joost-intent-card .ji-title { font-size: 13px; font-weight: 700; color: var(--text-primary); }
+    .joost-intent-card .ji-sub   { font-size: 11.5px; color: var(--text-tertiary); }
+    .joost-intent-card .ji-sub code { background: var(--surface-card-hover); padding: 1px 5px; border-radius: 4px; }
+    .joost-intent-card .ji-row {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+      gap: 10px;
+      align-items: end;
+    }
+    .joost-intent-card .ji-field { display: flex; flex-direction: column; gap: 4px; }
+    .joost-intent-card .ji-field > span {
+      font-size: 12px;
+      color: var(--text-secondary);
+      font-weight: 500;
+      display: flex;
+      align-items: baseline;
+      gap: 4px;
+    }
+    .joost-intent-card .ji-field > span small { color: var(--text-tertiary); font-weight: 400; }
+    .joost-intent-card .ji-field select,
+    .joost-intent-card .ji-field input[type=number] {
+      padding: 7px 9px;
+      background: var(--surface-1);
+      border: 1px solid var(--border-default);
+      border-radius: 8px;
+      color: var(--text-primary);
+      font-size: 13px;
+      font-family: inherit;
+    }
+    .joost-intent-card .ji-field input[type=range] {
+      width: 100%;
+      accent-color: var(--brand-primary);
+    }
+
+    .joost-mandate-types { display: grid; gap: 8px; }
+    .jm-type {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      padding: 8px 10px;
+      background: var(--surface-page);
+      border: 1px solid var(--border-subtle);
+      border-radius: 8px;
+      cursor: pointer;
+    }
+    .jm-type input { margin-top: 3px; flex-shrink: 0; accent-color: var(--brand-primary); }
+    .jm-type .jm-label { display: flex; flex-direction: column; gap: 2px; font-size: 13px; color: var(--text-primary); font-weight: 600; }
+    .jm-type .jm-label small { font-size: 11.5px; color: var(--text-tertiary); font-weight: 400; }
+    .jm-type .jm-label code { background: var(--surface-card-hover); padding: 1px 5px; border-radius: 4px; font-size: 11px; }
+
+    .joost-advanced {
+      background: var(--surface-page);
+      border: 1px solid var(--border-subtle);
+      border-radius: 10px;
+      padding: 8px 12px;
+      margin-bottom: 12px;
+    }
+    .joost-advanced > summary {
+      cursor: pointer;
+      font-size: 12.5px;
+      font-weight: 700;
+      color: var(--text-secondary);
+      list-style: none;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 0;
+    }
+    .joost-advanced > summary::-webkit-details-marker { display: none; }
+    .joost-advanced[open] > summary i { transform: rotate(90deg); }
+    .joost-advanced > summary i { transition: transform .15s ease; }
+
     /* ─── Lisa sub-tabs (Fase 1c) ─────────────────────────────────────────── */
     .lisa-subtabs {
       display: flex;
@@ -1734,39 +1843,341 @@ function acJoostSwitchSub(sub) {
 }
 window.acJoostSwitchSub = acJoostSwitchSub;
 
-// ── Autonomy (5 E2-feature-flags, read-modify-write) ──
+// ─────────────────────────────────────────────────────────────────────────────
+//  AUTONOMY — herontwerp: presets + mensentaal-controls. Alle 6 blokken
+//  zijn bewerkbaar (vriendelijk of via 'Geavanceerd'). Onderliggende opslag
+//  identiek aan finance-instellingen.js: feature_flags (e2_*) + autonomy_config
+//  (intents / arrangement_mandate / communication_limits / personality /
+//  outbound). Read-modify-write zodat andere keys (zoals handoff_threshold)
+//  behouden blijven.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const JOOST_INTENTS = [
+  { key: 'payment_promise',     label: 'Klant belooft te betalen',  help: 'Klant zegt toe te betalen op een bepaalde datum.', hasMaxMsg: true  },
+  { key: 'arrangement_request', label: 'Klant vraagt een regeling', help: 'Klant wil uitstel, termijnen, pauze of kwijtschelding.', hasMaxMsg: true  },
+  { key: 'dispute',             label: 'Klant betwist de factuur',  help: 'Klant geeft aan dat het bedrag of de factuur niet klopt.', hasMaxMsg: false },
+  { key: 'question',            label: 'Algemene vraag',            help: 'Vraag over bedrag, datum, betaal-link, etc.', hasMaxMsg: true  },
+  { key: 'unsubscribe',         label: 'Klant wil afmelden',        help: 'Klant geeft aan geen berichten meer te willen.', hasMaxMsg: false },
+  { key: 'other',               label: 'Overig',                    help: 'Vangnet — alles wat niet in een ander type valt.', hasMaxMsg: true  },
+];
+const JOOST_INTENT_MODES = [
+  ['disabled',   'Uit'],
+  ['draft',      'Stelt voor'],
+  ['autonomous', 'Handelt zelf'],
+];
+const JOOST_MANDATE_TYPES = [
+  ['UITSTEL',           'Uitstel geven',         'Betaaldatum opschuiven (één factuur).'],
+  ['SPLITSING',         'In termijnen splitsen', 'Factuur splitsen in meerdere termijnen.'],
+  ['ABONNEMENT_PAUZE',  'Abonnement pauzeren',   'Abonnement tijdelijk pauzeren.'],
+  ['ABONNEMENT_STOP',   'Abonnement stoppen',    'Abonnement beëindigen.'],
+  ['KWIJTSCHELDING',    'Kwijtschelden',         'Schuld (deels) afschrijven.'],
+];
+
+// Defaults gespiegeld op finance-instellingen.js:
+const JOOST_AC_DEFAULTS = {
+  intent: { mode: 'disabled', confidence_threshold: 0.75, max_messages_per_conv: 5 },
+  mandate: {
+    allowed_types: [], max_termijnen: 6, min_termijn_bedrag: 25,
+    max_uitstel_dagen: 30, min_to_negotiate: 50, max_auto_propose: 5,
+  },
+  comm: {
+    max_per_day: 3, max_total: 20, min_seconds_between: 30,
+    office_hours_only: false, office_start: '09:00', office_end: '17:00',
+  },
+  pers: { max_sentences: 3, use_emojis: false },
+  outb: { max_outbound_per_conv_per_day: 2, no_reply_days_per_step: [3, 7, 14] },
+};
+
+// Presets — vooraf-vullen, NIET auto-saven (de gebruiker ziet altijd de
+// resulterende detail-controls en klikt zelf "Opslaan").
+const JOOST_PRESETS = {
+  off: {
+    label: 'Uit', subtitle: 'Joost reageert niet — alleen logging blijft staan.',
+    apply: (cur) => {
+      const ff = { ...(cur.ff || {}),
+        e2_reactive_autonomy: false,
+        e2_arrangement_negotiation: false,
+        e2_outbound_executor: false,
+        e2_outbound_cron: false,
+        // e2_decision_engine_logs ongemoeid (default true bij undefined)
+      };
+      const ac = { ...(cur.ac || {}) };
+      ac.intents = Object.fromEntries(JOOST_INTENTS.map((i) => [i.key, {
+        ...(ac.intents?.[i.key] || JOOST_AC_DEFAULTS.intent),
+        mode: 'disabled',
+      }]));
+      return { ff, ac };
+    },
+  },
+  suggest: {
+    label: 'Meedenken', subtitle: 'Joost stelt voor; jij blijft beslissen.',
+    apply: (cur) => {
+      const ff = { ...(cur.ff || {}),
+        e2_decision_engine_logs: true,
+        e2_reactive_autonomy: true,
+        e2_arrangement_negotiation: false,
+        e2_outbound_executor: false,
+        e2_outbound_cron: false,
+      };
+      const ac = { ...(cur.ac || {}) };
+      ac.intents = Object.fromEntries(JOOST_INTENTS.map((i) => [i.key, {
+        ...(ac.intents?.[i.key] || JOOST_AC_DEFAULTS.intent),
+        mode: 'draft',
+      }]));
+      return { ff, ac };
+    },
+  },
+  autonomous: {
+    label: 'Zelfstandig', subtitle: 'Joost handelt zelf op veilige intents; gevoelige blijven concept.',
+    apply: (cur) => {
+      const ff = { ...(cur.ff || {}),
+        e2_decision_engine_logs: true,
+        e2_reactive_autonomy: true,
+        e2_arrangement_negotiation: true,
+        e2_outbound_executor: true,
+        e2_outbound_cron: true,
+      };
+      const ac = { ...(cur.ac || {}) };
+      const safe = new Set(['payment_promise', 'question', 'other']);
+      ac.intents = Object.fromEntries(JOOST_INTENTS.map((i) => [i.key, {
+        ...(ac.intents?.[i.key] || JOOST_AC_DEFAULTS.intent),
+        mode: safe.has(i.key) ? 'autonomous' : 'draft',
+      }]));
+      // Mandaat-types + limieten NOOIT door een preset wijzigen.
+      return { ff, ac };
+    },
+  },
+  custom: {
+    label: 'Maatwerk', subtitle: 'Geen wijzigingen — pas zelf onder de detail-controls aan.',
+    apply: (cur) => ({ ff: { ...(cur.ff || {}) }, ac: { ...(cur.ac || {}) } }),
+  },
+};
+
+// Detecteer welke preset PRECIES bij de huidige state past. 'custom' als niets
+// matcht. Wordt enkel gebruikt om de juiste knop een 'active' rand te geven.
+function detectJoostPreset(ff, ac) {
+  const probe = (key) => {
+    const expected = JOOST_PRESETS[key].apply({ ff: { ...ff }, ac: { ...ac } });
+    // Vergelijk e2_*-flags en intent-modes — wij wijzigen niets anders.
+    const expFF = expected.ff || {};
+    for (const k of ['e2_reactive_autonomy', 'e2_arrangement_negotiation', 'e2_outbound_executor', 'e2_outbound_cron']) {
+      if (!!ff[k] !== !!expFF[k]) return false;
+    }
+    const expIntents = (expected.ac && expected.ac.intents) || {};
+    for (const i of JOOST_INTENTS) {
+      const cur = (ac.intents || {})[i.key]?.mode || 'disabled';
+      const exp = expIntents[i.key]?.mode || 'disabled';
+      if (cur !== exp) return false;
+    }
+    return true;
+  };
+  if (probe('off'))        return 'off';
+  if (probe('suggest'))    return 'suggest';
+  if (probe('autonomous')) return 'autonomous';
+  return 'custom';
+}
+
 function renderJoostAutonomy() {
   const ff = (state.editingCfg && state.editingCfg.feature_flags && typeof state.editingCfg.feature_flags === 'object')
     ? state.editingCfg.feature_flags : {};
-  const toggles = JOOST_E2_FLAGS.map(([key, label, help, defaultOn]) => {
-    const cur = ff[key];
-    const on = (cur === undefined) ? !!defaultOn : !!cur;
-    return `
-      <div class="ed-toggle">
-        <div class="lbl">${esc(label)}
-          <small>${esc(help)} · <code>${esc(key)}</code></small>
-        </div>
-        <span class="toggle ${on ? 'on' : ''}" id="jaut_${esc(key)}" role="button" tabindex="0" data-e2-flag="${esc(key)}"></span>
-      </div>
-    `;
-  }).join('');
+  const ac = (state.editingCfg && state.editingCfg.autonomy_config && typeof state.editingCfg.autonomy_config === 'object')
+    ? state.editingCfg.autonomy_config : {};
+  const activePreset = detectJoostPreset(ff, ac);
+
+  const intents = ac.intents || {};
+  const mandate = { ...JOOST_AC_DEFAULTS.mandate, ...(ac.arrangement_mandate || {}) };
+  const comm    = { ...JOOST_AC_DEFAULTS.comm,    ...(ac.communication_limits || {}) };
+  const pers    = { ...JOOST_AC_DEFAULTS.pers,    ...(ac.personality || {}) };
+  const outb    = { ...JOOST_AC_DEFAULTS.outb,    ...(ac.outbound || {}) };
+  const noReplySteps = Array.isArray(outb.no_reply_days_per_step) ? outb.no_reply_days_per_step : [3,7,14];
+
   return `
     <div class="ed-section">
-      <h3>Autonomy — E2 feature-flags</h3>
-      <div class="ed-help" style="margin-bottom:10px">
-        Conservatief default: alleen <code>e2_decision_engine_logs</code> staat aan.
-        Andere flags activeren autonome acties — pas aanzetten als je Decision Log
-        hebt bekeken en zeker bent dat het gedrag klopt.
+      <h3>Hoeveel vrijheid heeft Joost?</h3>
+      <div class="joost-presets" id="joostPresets">
+        ${Object.entries(JOOST_PRESETS).map(([k, p]) => `
+          <button type="button" class="joost-preset ${activePreset === k ? 'active' : ''}" data-preset="${esc(k)}">
+            <span class="p-label">${esc(p.label)}</span>
+            <span class="p-sub">${esc(p.subtitle)}</span>
+          </button>
+        `).join('')}
       </div>
-      ${toggles}
+      <div class="ed-help" id="joostPresetHint">Huidige stand: <strong>${esc(JOOST_PRESETS[activePreset].label)}</strong> — ${esc(JOOST_PRESETS[activePreset].subtitle)}</div>
     </div>
 
-    <div class="ed-footer">
+    <div class="ed-section">
+      <h3>Wat doet Joost per type bericht?</h3>
+      <div class="joost-intents">
+        ${JOOST_INTENTS.map((i) => {
+          const cur = intents[i.key] || JOOST_AC_DEFAULTS.intent;
+          const mode = cur.mode || 'disabled';
+          const conf = Number.isFinite(Number(cur.confidence_threshold)) ? Number(cur.confidence_threshold) : 0.75;
+          const confPct = Math.round(conf * 100);
+          const maxMsg = Number.isFinite(Number(cur.max_messages_per_conv)) ? Number(cur.max_messages_per_conv) : 5;
+          return `
+            <div class="joost-intent-card" data-intent="${esc(i.key)}">
+              <div class="ji-head">
+                <div class="ji-title">${esc(i.label)}</div>
+                <div class="ji-sub">${esc(i.help)} · <code>${esc(i.key)}</code></div>
+              </div>
+              <div class="ji-row">
+                <label class="ji-field">
+                  <span>Reactie</span>
+                  <select data-intent-field="mode">
+                    ${JOOST_INTENT_MODES.map(([v, l]) => `<option value="${esc(v)}" ${mode === v ? 'selected' : ''}>${esc(l)}</option>`).join('')}
+                  </select>
+                </label>
+                <label class="ji-field">
+                  <span>Voorzichtig ↔ Snel <small>(${confPct}%)</small></span>
+                  <input type="range" min="0" max="100" step="1" value="${confPct}" data-intent-field="confidence_threshold" />
+                </label>
+                ${i.hasMaxMsg ? `
+                  <label class="ji-field">
+                    <span>Max. berichten per gesprek</span>
+                    <input type="number" min="0" step="1" value="${esc(String(maxMsg))}" data-intent-field="max_messages_per_conv" />
+                  </label>
+                ` : ''}
+              </div>
+            </div>
+          `;
+        }).join('')}
+      </div>
+    </div>
+
+    <div class="ed-section">
+      <h3>Wat mag Joost zelf regelen?</h3>
+      <div class="ed-help" style="margin-bottom:10px">
+        Vink alleen aan wat je echt door Joost wil laten voorstellen. Limieten gelden voor àlle voorstellen, ook handmatig.
+      </div>
+      <div class="joost-mandate-types">
+        ${JOOST_MANDATE_TYPES.map(([key, label, help]) => {
+          const checked = Array.isArray(mandate.allowed_types) && mandate.allowed_types.includes(key);
+          return `
+            <label class="jm-type">
+              <input type="checkbox" data-mandate-type="${esc(key)}" ${checked ? 'checked' : ''} />
+              <span class="jm-label">${esc(label)}<small>${esc(help)} · <code>${esc(key)}</code></small></span>
+            </label>
+          `;
+        }).join('')}
+      </div>
+      <div class="ed-row-2" style="margin-top:14px">
+        <div class="ed-field">
+          <label>Max. termijnen</label>
+          <input type="number" id="jm_max_termijnen" min="1" step="1" value="${esc(String(mandate.max_termijnen))}" />
+        </div>
+        <div class="ed-field">
+          <label>Min. bedrag per termijn (€)</label>
+          <input type="number" id="jm_min_termijn_bedrag" min="0" step="1" value="${esc(String(mandate.min_termijn_bedrag))}" />
+        </div>
+      </div>
+      <div class="ed-row-2">
+        <div class="ed-field">
+          <label>Max. dagen uitstel</label>
+          <input type="number" id="jm_max_uitstel_dagen" min="0" step="1" value="${esc(String(mandate.max_uitstel_dagen))}" />
+        </div>
+        <div class="ed-field">
+          <label>Onderhandelt niet onder (€)</label>
+          <input type="number" id="jm_min_to_negotiate" min="0" step="1" value="${esc(String(mandate.min_to_negotiate))}" />
+        </div>
+      </div>
+      <div class="ed-field">
+        <label>Max. voorstellen per dag</label>
+        <input type="number" id="jm_max_auto_propose" min="0" step="1" value="${esc(String(mandate.max_auto_propose))}" />
+      </div>
+    </div>
+
+    <div class="ed-section">
+      <h3>Hoe communiceert Joost?</h3>
+      <div class="ed-row-2">
+        <div class="ed-field">
+          <label>Max. berichten per dag</label>
+          <input type="number" id="jc_max_per_day" min="0" step="1" value="${esc(String(comm.max_per_day))}" />
+        </div>
+        <div class="ed-field">
+          <label>Max. berichten per gesprek</label>
+          <input type="number" id="jc_max_total" min="0" step="1" value="${esc(String(comm.max_total))}" />
+        </div>
+      </div>
+      <div class="ed-field">
+        <label>Min. tijd tussen berichten (seconden)</label>
+        <input type="number" id="jc_min_seconds_between" min="0" step="1" value="${esc(String(comm.min_seconds_between))}" />
+      </div>
+      <div class="ed-toggle">
+        <div class="lbl">Alleen tijdens kantooruren
+          <small>Buiten kantooruren wacht Joost tot de volgende werkdag.</small>
+        </div>
+        <span class="toggle ${comm.office_hours_only ? 'on' : ''}" id="jc_office_hours_only" role="button" tabindex="0"></span>
+      </div>
+      <div class="ed-row-2">
+        <div class="ed-field">
+          <label>Kantooruren — start</label>
+          <input type="time" id="jc_office_start" value="${esc(String(comm.office_start || '').slice(0,5))}" />
+        </div>
+        <div class="ed-field">
+          <label>Kantooruren — eind</label>
+          <input type="time" id="jc_office_end" value="${esc(String(comm.office_end || '').slice(0,5))}" />
+        </div>
+      </div>
+      <div class="ed-row-2">
+        <div class="ed-field">
+          <label>Max. zinnen per bericht</label>
+          <input type="number" id="jp_max_sentences" min="1" step="1" value="${esc(String(pers.max_sentences))}" />
+        </div>
+        <div class="ed-field" style="display:flex;align-items:flex-end">
+          <div class="ed-toggle" style="flex:1">
+            <div class="lbl">Emoji's gebruiken</div>
+            <span class="toggle ${pers.use_emojis ? 'on' : ''}" id="jp_use_emojis" role="button" tabindex="0"></span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="ed-section">
+      <h3>Proactieve follow-ups</h3>
+      <div class="ed-field">
+        <label>Max. proactieve berichten per gesprek per dag</label>
+        <input type="number" id="jo_max_per_conv_per_day" min="0" step="1" value="${esc(String(outb.max_outbound_per_conv_per_day))}" />
+      </div>
+      <div class="ed-help" style="margin-bottom:6px">Stuur herinnering na X dagen zonder reactie (cadans):</div>
+      <div class="ed-row-2">
+        <div class="ed-field">
+          <label>1e herinnering na (dagen)</label>
+          <input type="number" id="jo_no_reply_step1" min="0" step="1" value="${esc(String(noReplySteps[0] ?? 3))}" />
+        </div>
+        <div class="ed-field">
+          <label>2e herinnering na (dagen)</label>
+          <input type="number" id="jo_no_reply_step2" min="0" step="1" value="${esc(String(noReplySteps[1] ?? 7))}" />
+        </div>
+      </div>
+      <div class="ed-field">
+        <label>3e herinnering na (dagen)</label>
+        <input type="number" id="jo_no_reply_step3" min="0" step="1" value="${esc(String(noReplySteps[2] ?? 14))}" />
+      </div>
+    </div>
+
+    <details class="joost-advanced">
+      <summary><i class="ti ti-chevron-right"></i> Geavanceerd — ruwe feature-flags</summary>
+      <div class="ed-help" style="margin:10px 0">
+        Deze schakelaars zijn de ruwe E2-flags. De vriendelijke controls hierboven zetten ze automatisch op de juiste waarden. Wijzig hier alleen als je weet wat je doet.
+      </div>
+      ${JOOST_E2_FLAGS.map(([key, label, help, defaultOn]) => {
+        const cur = ff[key];
+        const on = (cur === undefined) ? !!defaultOn : !!cur;
+        return `
+          <div class="ed-toggle">
+            <div class="lbl">${esc(label)}<small>${esc(help)} · <code>${esc(key)}</code></small></div>
+            <span class="toggle ${on ? 'on' : ''}" id="jaut_${esc(key)}" role="button" tabindex="0" data-e2-flag="${esc(key)}"></span>
+          </div>
+        `;
+      }).join('')}
+    </details>
+
+    <div class="ed-footer" style="margin-top:8px">
       <div></div>
       <div class="right">
         <span class="save-info" id="acJoostAutoSaveInfo"></span>
         <button class="btn-primary" type="button" id="acJoostAutoSaveBtn" onclick="acJoostSaveAutonomy()">
-          <i class="ti ti-device-floppy"></i> Autonomy opslaan
+          <i class="ti ti-device-floppy"></i> Opslaan
         </button>
       </div>
     </div>
@@ -1774,11 +2185,137 @@ function renderJoostAutonomy() {
 }
 
 function bindJoostAutonomy() {
-  document.querySelectorAll('#acEditor [data-e2-flag]').forEach((el) => {
-    el.addEventListener('click', () => {
-      el.classList.toggle('on');
+  // Toggles (e2-flags + office_hours_only + use_emojis).
+  document.querySelectorAll('#acEditor [data-e2-flag], #acEditor #jc_office_hours_only, #acEditor #jp_use_emojis').forEach((el) => {
+    el.addEventListener('click', () => el.classList.toggle('on'));
+  });
+
+  // Presets — vooraf-vullen door huidige DOM-state te lezen, preset toe te
+  // passen op een gemerge'd object, en dan de hele tab te her-renderen.
+  // De preset zet GEEN auto-save.
+  const presetsHost = document.getElementById('joostPresets');
+  if (presetsHost) {
+    presetsHost.addEventListener('click', (ev) => {
+      const btn = ev.target.closest('[data-preset]');
+      if (!btn) return;
+      const presetKey = btn.dataset.preset;
+      if (!JOOST_PRESETS[presetKey]) return;
+      // Lees huidige form-state in een transient acState, mege met preset,
+      // schrijf terug in state.editingCfg en re-render.
+      const cur = readJoostAutonomyForm();
+      const out = JOOST_PRESETS[presetKey].apply({ ff: cur.ff, ac: cur.ac });
+      state.editingCfg.feature_flags = { ...cur.ff, ...out.ff };
+      state.editingCfg.autonomy_config = { ...cur.ac, ...out.ac };
+      // Re-render binnen de bestaande sub-section.
+      const host = document.querySelector('#acEditor [data-joost-sub="autonomy"]');
+      if (host) {
+        host.innerHTML = renderJoostAutonomy();
+        bindJoostAutonomy();
+      }
+    });
+  }
+
+  // Live percentage-label-update voor de confidence-sliders.
+  document.querySelectorAll('#acEditor input[data-intent-field="confidence_threshold"]').forEach((sl) => {
+    sl.addEventListener('input', () => {
+      const card = sl.closest('.joost-intent-card');
+      const small = card?.querySelector('.ji-field small');
+      if (small) small.textContent = '(' + sl.value + '%)';
     });
   });
+}
+
+// Lees de complete autonomy-form-state uit de DOM tot een merge-baar object.
+// Mist een veld in de DOM (bv. omdat het in 'Geavanceerd' niet bestaat) → val
+// terug op state.editingCfg-waarde of default.
+function readJoostAutonomyForm() {
+  const prevFF = (state.editingCfg?.feature_flags && typeof state.editingCfg.feature_flags === 'object')
+    ? state.editingCfg.feature_flags : {};
+  const prevAC = (state.editingCfg?.autonomy_config && typeof state.editingCfg.autonomy_config === 'object')
+    ? state.editingCfg.autonomy_config : {};
+
+  // Feature-flags — uit Geavanceerd-blok.
+  const ff = { ...prevFF };
+  for (const [key] of JOOST_E2_FLAGS) {
+    const el = document.getElementById('jaut_' + key);
+    if (el) ff[key] = el.classList.contains('on');
+  }
+
+  // Intents.
+  const intents = {};
+  for (const i of JOOST_INTENTS) {
+    const card = document.querySelector(`.joost-intent-card[data-intent="${i.key}"]`);
+    if (!card) {
+      intents[i.key] = prevAC.intents?.[i.key] || { ...JOOST_AC_DEFAULTS.intent };
+      continue;
+    }
+    const modeEl = card.querySelector('[data-intent-field="mode"]');
+    const confEl = card.querySelector('[data-intent-field="confidence_threshold"]');
+    const maxEl  = card.querySelector('[data-intent-field="max_messages_per_conv"]');
+    const mode   = modeEl?.value || 'disabled';
+    const conf   = Math.max(0, Math.min(1, (parseInt(confEl?.value, 10) || 75) / 100));
+    const row = { mode, confidence_threshold: Math.round(conf * 100) / 100 };
+    if (i.hasMaxMsg) {
+      const mx = parseInt(maxEl?.value, 10);
+      row.max_messages_per_conv = Number.isFinite(mx) && mx >= 0 ? mx : 5;
+    }
+    intents[i.key] = row;
+  }
+
+  // Mandate.
+  const allowed = Array.from(document.querySelectorAll('input[data-mandate-type]'))
+    .filter((cb) => cb.checked)
+    .map((cb) => cb.dataset.mandateType)
+    .filter((t) => JOOST_MANDATE_TYPES.some(([k]) => k === t));
+  const numVal = (id, def) => {
+    const n = parseInt(document.getElementById(id)?.value, 10);
+    return Number.isFinite(n) && n >= 0 ? n : def;
+  };
+  const arrangement_mandate = {
+    allowed_types: allowed,
+    max_termijnen:      numVal('jm_max_termijnen',       6),
+    min_termijn_bedrag: numVal('jm_min_termijn_bedrag', 25),
+    max_uitstel_dagen:  numVal('jm_max_uitstel_dagen',  30),
+    min_to_negotiate:   numVal('jm_min_to_negotiate',   50),
+    max_auto_propose:   numVal('jm_max_auto_propose',    5),
+  };
+
+  // Communication + personality.
+  const office_start = (document.getElementById('jc_office_start')?.value || '09:00').slice(0,5);
+  const office_end   = (document.getElementById('jc_office_end')?.value   || '17:00').slice(0,5);
+  const communication_limits = {
+    max_per_day:         numVal('jc_max_per_day',          3),
+    max_total:           numVal('jc_max_total',           20),
+    min_seconds_between: numVal('jc_min_seconds_between', 30),
+    office_hours_only:   !!document.getElementById('jc_office_hours_only')?.classList.contains('on'),
+    office_start,
+    office_end,
+  };
+  const personality = {
+    max_sentences: numVal('jp_max_sentences', 3),
+    use_emojis:    !!document.getElementById('jp_use_emojis')?.classList.contains('on'),
+  };
+
+  // Outbound.
+  const outbound = {
+    max_outbound_per_conv_per_day: numVal('jo_max_per_conv_per_day', 2),
+    no_reply_days_per_step: [
+      numVal('jo_no_reply_step1', 3),
+      numVal('jo_no_reply_step2', 7),
+      numVal('jo_no_reply_step3', 14),
+    ],
+  };
+
+  const ac = {
+    ...prevAC,
+    intents,
+    arrangement_mandate,
+    communication_limits,
+    personality,
+    outbound,
+  };
+
+  return { ff, ac };
 }
 
 function setJoostAutoSaveInfo(msg, kind) {
@@ -1790,20 +2327,34 @@ function setJoostAutoSaveInfo(msg, kind) {
   el.textContent = msg || '';
 }
 
+function validateJoostAutonomy(payload) {
+  const ac = payload.autonomy_config || {};
+  // Office-tijden HH:MM.
+  const re = /^\d{2}:\d{2}$/;
+  const cl = ac.communication_limits || {};
+  if (cl.office_start && !re.test(cl.office_start)) return 'Kantooruren-start moet HH:MM zijn.';
+  if (cl.office_end   && !re.test(cl.office_end))   return 'Kantooruren-eind moet HH:MM zijn.';
+  // Allowed_types alleen toegestane set.
+  const allowedSet = new Set(JOOST_MANDATE_TYPES.map(([k]) => k));
+  for (const t of (ac.arrangement_mandate?.allowed_types || [])) {
+    if (!allowedSet.has(t)) return 'Onbekend mandaat-type: ' + t;
+  }
+  return null;
+}
+
 async function acJoostSaveAutonomy() {
   if (state.joostAutonomySaving) return;
   if (!state.editingCfg || state.editingCfg.module !== 'finance') return;
   setJoostAutoSaveInfo('', null);
 
   // Read-modify-write: behoud bestaande feature_flags (reactive_suggest_enabled,
-  // auto_send_enabled, etc.) en overschrijf alleen de 5 E2-keys.
-  const prevFlags = (state.editingCfg.feature_flags && typeof state.editingCfg.feature_flags === 'object')
-    ? state.editingCfg.feature_flags : {};
-  const merged = { ...prevFlags };
-  for (const [key] of JOOST_E2_FLAGS) {
-    const el = document.getElementById('jaut_' + key);
-    if (el) merged[key] = el.classList.contains('on');
-  }
+  // auto_send_enabled, etc.) en autonomy_config (handoff_threshold,
+  // auto_send_threshold). readJoostAutonomyForm doet ...prevFF / ...prevAC.
+  const { ff, ac } = readJoostAutonomyForm();
+  const payload = { module: 'finance', feature_flags: ff, autonomy_config: ac };
+
+  const err = validateJoostAutonomy(payload);
+  if (err) { setJoostAutoSaveInfo(err, 'error'); return; }
 
   state.joostAutonomySaving = true;
   const btn = document.getElementById('acJoostAutoSaveBtn');
@@ -1812,15 +2363,20 @@ async function acJoostSaveAutonomy() {
   try {
     const r = await window.AgentShared.apiFetch('/api/joost-config-upsert', {
       method: 'POST',
-      body:   JSON.stringify({ module: 'finance', feature_flags: merged }),
+      body:   JSON.stringify(payload),
     });
     const data = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(data?.error || ('HTTP ' + r.status));
-    // Update lokale state met de server-respons zodat een latere save van
-    // het Algemeen-tab (persona/kb/etc.) de versgesavde flags niet overschrijft.
+    // Update lokale state met de server-respons.
     if (data.config) state.editingCfg = data.config;
     setJoostAutoSaveInfo('Opgeslagen ' + new Date().toLocaleTimeString('nl-NL'), 'ok');
-    toastOk('Autonomy-flags opgeslagen');
+    toastOk('Autonomy opgeslagen');
+    // Re-render zodat preset-detectie ook update + canonieke server-response.
+    const host = document.querySelector('#acEditor [data-joost-sub="autonomy"]');
+    if (host) {
+      host.innerHTML = renderJoostAutonomy();
+      bindJoostAutonomy();
+    }
   } catch (e) {
     setJoostAutoSaveInfo('Opslaan mislukt: ' + (e?.message || e), 'error');
     toastErr('Opslaan mislukt: ' + (e?.message || e));
