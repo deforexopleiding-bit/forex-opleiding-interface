@@ -50,20 +50,31 @@
       position: relative;
       flex-shrink: 0;
     }
+    /* Fase 3 — reactieve core. CSS custom properties worden door JS gezet
+       (acApplyCoreIntensity) op basis van team-activiteit. Defaults vallen
+       terug op de Fase 1-waarden. */
+    .ac-core {
+      --core-orbit-dur: 18s;
+      --core-ring-dur:  24s;
+      --core-disc-dur:  3.6s;
+      --core-disc-scale: 1.05;
+      --core-disc-glow-soft:    var(--brand-primary-soft);
+      --core-disc-glow-strong:  var(--brand-primary-soft-hover);
+    }
     .ac-core .core-disc {
       position: absolute;
       inset: 22px;
       border-radius: 50%;
       background: linear-gradient(135deg, var(--brand-primary), var(--brand-primary-hover));
-      box-shadow: 0 0 0 4px var(--brand-primary-soft);
-      animation: ac-pulse 3.6s ease-in-out infinite;
+      box-shadow: 0 0 0 4px var(--core-disc-glow-soft);
+      animation: ac-pulse var(--core-disc-dur) ease-in-out infinite;
     }
     .ac-core .core-orbit {
       position: absolute;
       inset: 0;
       border: 1.5px dashed var(--border-default);
       border-radius: 50%;
-      animation: ac-spin 18s linear infinite;
+      animation: ac-spin var(--core-orbit-dur) linear infinite;
     }
     .ac-core .core-orbit::before,
     .ac-core .core-orbit::after {
@@ -82,7 +93,7 @@
       inset: 8px;
       border: 1px solid var(--border-default);
       border-radius: 50%;
-      animation: ac-spin 24s linear infinite reverse;
+      animation: ac-spin var(--core-ring-dur) linear infinite reverse;
     }
     .ac-core .core-ring::before {
       content: '';
@@ -139,6 +150,123 @@
     @keyframes ac-blink {
       0%, 100% { opacity: 1;   transform: scale(1); }
       50%      { opacity: .55; transform: scale(.8); }
+    }
+
+    /* ─── Fase 3 — command deck (team-overzicht) ──────────────────────────── */
+    .ac-deck {
+      background: var(--surface-1);
+      border: 1px solid var(--border-subtle);
+      border-radius: 14px;
+      padding: 16px 18px;
+      box-shadow: var(--shadow-sm);
+      margin-bottom: 18px;
+      position: relative;
+      overflow: hidden;
+    }
+    .ac-deck::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      background: radial-gradient(circle at right top, var(--brand-primary-soft) 0%, transparent 60%);
+      opacity: .35;
+    }
+    .ac-deck-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+      gap: 10px;
+      position: relative;
+      z-index: 1;
+    }
+    .ac-tile {
+      background: var(--surface-card);
+      border: 1px solid var(--border-subtle);
+      border-radius: 10px;
+      padding: 10px 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      min-width: 0;
+      transition: transform .25s ease, box-shadow .25s ease;
+    }
+    .ac-tile .label {
+      font-size: 11px;
+      color: var(--text-tertiary);
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: .05em;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+    }
+    .ac-tile .value {
+      font-size: 26px;
+      font-weight: 800;
+      color: var(--text-primary);
+      letter-spacing: -.5px;
+      line-height: 1.1;
+    }
+    .ac-tile.skeleton .value { color: var(--text-tertiary); }
+    .ac-tile.attention {
+      border-color: var(--color-warning);
+      background: linear-gradient(135deg, var(--color-warning-soft) 0%, var(--surface-card) 70%);
+    }
+    .ac-tile.attention .value { color: var(--color-warning-text); }
+    .ac-tile.attention .label { color: var(--color-warning-text); }
+    .ac-tile.attention .pulse-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--color-warning);
+      box-shadow: 0 0 0 3px var(--color-warning-soft);
+      animation: ac-warn-pulse 1.4s ease-in-out infinite;
+    }
+
+    .ac-attention-strip {
+      margin-top: 12px;
+      padding-top: 12px;
+      border-top: 1px dashed var(--border-subtle);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+      position: relative;
+      z-index: 1;
+    }
+    .ac-attention-strip .strip-label {
+      font-size: 11.5px;
+      color: var(--color-warning-text);
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: .04em;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .ac-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 10px;
+      border-radius: 99px;
+      background: var(--color-warning-soft);
+      border: 1px solid var(--color-warning);
+      color: var(--color-warning-text);
+      font-size: 12px;
+      font-weight: 600;
+    }
+    .ac-chip strong { font-weight: 800; }
+    .ac-chip-calm {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 10px;
+      border-radius: 99px;
+      background: var(--color-success-soft);
+      border: 1px solid var(--color-success);
+      color: var(--color-success-text);
+      font-size: 12px;
+      font-weight: 600;
     }
 
     /* ─── Agent-grid ───────────────────────────────────────────────────────── */
@@ -692,11 +820,12 @@
       .ac-status-pill .pulse,
       .ac-stats,
       .ac-stats.skeleton,
-      .ac-stats .stat.warn .pulse-dot {
+      .ac-stats .stat.warn .pulse-dot,
+      .ac-tile.attention .pulse-dot {
         animation: none !important;
       }
       .ac-editor { animation: none !important; }
-      .ac-card { transition: none !important; }
+      .ac-card, .ac-tile { transition: none !important; }
       .ac-card:hover { transform: none !important; }
     }
 
@@ -818,6 +947,139 @@ function renderAgentStats(key) {
   `;
 }
 
+// ── Fase 3 — team-totalen + aandacht-strip + reactieve core ────────────────
+// UI-only: hergebruikt state.activity uit Fase 2 (geen extra fetch).
+
+// Agent-naam ophalen uit hub-state (persona_name uit joost_config). Module-key
+// fallback ("finance"/"events"/"onboarding") als de naam nog niet binnen is.
+function agentName(moduleKey) {
+  const a = (state.agents || []).find((x) => x.module === moduleKey);
+  if (a?.persona_name) return a.persona_name;
+  return ({ finance: 'Joost', events: 'Simone', onboarding: 'Mila' })[moduleKey] || moduleKey;
+}
+
+// Som over trio + lisa voor de 4 team-tegels. Volledig client-side; werkt
+// onafhankelijk van of agents-activity team_totals al voorrekent.
+function computeDeckTotals() {
+  const a = state.activity;
+  if (!a) return null;
+  const trio = Array.isArray(a.trio) ? a.trio : [];
+  const lisa = a.lisa || {};
+  const trioOpen      = trio.reduce((acc, r) => acc + (r.open_suggestions     || 0), 0);
+  const trioHandoff   = trio.reduce((acc, r) => acc + (r.handoffs             || 0), 0);
+  const trioMsgs      = trio.reduce((acc, r) => acc + (r.messages_today       || 0), 0);
+  const trioActive    = trio.reduce((acc, r) => acc + (r.active_conversations || 0), 0);
+  return {
+    open_suggestions:     trioOpen,                                  // open joost-suggesties
+    attention:            trioHandoff + (lisa.human_takeover || 0),  // handoffs + lisa takeover
+    conversations_today:  trioActive  + (lisa.conversations_today || 0),
+    messages_today:       trioMsgs    + (lisa.messages_today || 0),
+  };
+}
+
+// Lijst van agents met openstaande "aandacht"-werk (handoff of takeover).
+function computeAttentionList() {
+  const a = state.activity;
+  if (!a) return [];
+  const out = [];
+  for (const r of (Array.isArray(a.trio) ? a.trio : [])) {
+    if ((r.handoffs || 0) > 0) {
+      out.push({ name: agentName(r.module), count: r.handoffs, kind: 'handoff' });
+    }
+  }
+  if (a.lisa && (a.lisa.human_takeover || 0) > 0) {
+    out.push({ name: agentName('lisa') === 'lisa' ? 'Lisa' : 'Lisa', count: a.lisa.human_takeover, kind: 'takeover' });
+  }
+  out.sort((x, y) => y.count - x.count);
+  return out;
+}
+
+function renderDeck() {
+  const t = computeDeckTotals();
+  if (!t) {
+    return `
+      <div class="ac-deck" id="acDeck">
+        <div class="ac-deck-grid">
+          <div class="ac-tile skeleton"><span class="label"><i class="ti ti-bolt"></i> Open</span><span class="value">—</span></div>
+          <div class="ac-tile skeleton"><span class="label"><i class="ti ti-alert-triangle"></i> Aandacht</span><span class="value">—</span></div>
+          <div class="ac-tile skeleton"><span class="label"><i class="ti ti-messages"></i> Gesprekken</span><span class="value">—</span></div>
+          <div class="ac-tile skeleton"><span class="label"><i class="ti ti-message-2"></i> Berichten</span><span class="value">—</span></div>
+        </div>
+      </div>`;
+  }
+  const att = computeAttentionList();
+  const attentionWarn = t.attention > 0;
+  const stripHtml = att.length > 0
+    ? `
+      <div class="ac-attention-strip">
+        <span class="strip-label"><i class="ti ti-alert-triangle"></i> Aandacht nodig</span>
+        ${att.map((a) => `<span class="ac-chip"><strong>${esc(a.name)}</strong> · ${esc(String(a.count))} ${esc(a.kind)}${a.count === 1 ? '' : 's'}</span>`).join('')}
+      </div>`
+    : `
+      <div class="ac-attention-strip">
+        <span class="ac-chip-calm"><i class="ti ti-circle-check"></i> Niets om aandacht aan te geven — alles loopt</span>
+      </div>`;
+
+  return `
+    <div class="ac-deck" id="acDeck">
+      <div class="ac-deck-grid">
+        <div class="ac-tile">
+          <span class="label"><i class="ti ti-bolt"></i> Open suggesties</span>
+          <span class="value">${esc(String(t.open_suggestions))}</span>
+        </div>
+        <div class="ac-tile ${attentionWarn ? 'attention' : ''}">
+          <span class="label">${attentionWarn ? '<span class="pulse-dot"></span>' : '<i class="ti ti-alert-triangle"></i>'} Aandacht nodig</span>
+          <span class="value">${esc(String(t.attention))}</span>
+        </div>
+        <div class="ac-tile">
+          <span class="label"><i class="ti ti-messages"></i> Gesprekken vandaag</span>
+          <span class="value">${esc(String(t.conversations_today))}</span>
+        </div>
+        <div class="ac-tile">
+          <span class="label"><i class="ti ti-message-2"></i> Berichten vandaag</span>
+          <span class="value">${esc(String(t.messages_today))}</span>
+        </div>
+      </div>
+      ${stripHtml}
+    </div>
+  `;
+}
+
+// Reactieve core: zet CSS custom properties op .ac-core op basis van team-
+// activiteit. Hoge totale activiteit → sneller draaien + sterker pulseren.
+// Defensief: bij null/onbekend laat de defaults staan.
+function acApplyCoreIntensity() {
+  const core = document.querySelector('.ac-core');
+  if (!core) return;
+  const t = computeDeckTotals();
+  if (!t) {
+    core.style.removeProperty('--core-orbit-dur');
+    core.style.removeProperty('--core-ring-dur');
+    core.style.removeProperty('--core-disc-dur');
+    core.style.removeProperty('--core-disc-glow-strong');
+    return;
+  }
+  const totalActivity = t.conversations_today + t.messages_today;
+  // Normaliseer 0..1 met asymptoot bij 50 (per dag); snelste regime boven 50.
+  const activityScore  = Math.min(1, totalActivity / 50);
+  const attentionScore = t.attention > 0 ? Math.min(1, 0.4 + t.attention * 0.15) : 0;
+  // Combineer: aandacht heeft hogere prioriteit dan generiek volume.
+  const score = Math.min(1, Math.max(activityScore * 0.6, attentionScore));
+  // Mapping naar duraties. Snellere min-waarden bij hoge score.
+  const orbit = 18 - score * 8;   // 18 → 10s
+  const ring  = 24 - score * 10;  // 24 → 14s
+  const disc  = 3.6 - score * 1.6; // 3.6 → 2.0s
+  core.style.setProperty('--core-orbit-dur', orbit.toFixed(2) + 's');
+  core.style.setProperty('--core-ring-dur',  ring.toFixed(2)  + 's');
+  core.style.setProperty('--core-disc-dur',  disc.toFixed(2)  + 's');
+  // Bij aandacht: glow oranje-getint; anders brand-primary.
+  if (t.attention > 0) {
+    core.style.setProperty('--core-disc-glow-strong', 'var(--color-warning-soft)');
+  } else {
+    core.style.setProperty('--core-disc-glow-strong', 'var(--brand-primary-soft-hover)');
+  }
+}
+
 // Niet-blokkerend laden van /api/agents-activity. Faal → kaart blijft werken
 // zonder stats (we vervangen de skeleton door een grijze 'niet beschikbaar').
 async function loadAgentsActivity() {
@@ -834,6 +1096,17 @@ async function loadAgentsActivity() {
   // editor-state (Joost of Lisa) behouden blijft.
   const grid = document.getElementById('acGrid');
   if (grid) grid.innerHTML = state.agents.map(renderAgentCard).join('');
+  // Fase 3 — command deck + reactieve core verversen met dezelfde data.
+  const deck = document.getElementById('acDeck');
+  if (deck) {
+    // renderDeck() retourneert een complete <div class="ac-deck">; pak de
+    // body daarvan zodat we de bestaande wrapper-id behouden.
+    const tmp = document.createElement('div');
+    tmp.innerHTML = renderDeck();
+    const fresh = tmp.firstElementChild;
+    if (fresh) deck.innerHTML = fresh.innerHTML;
+  }
+  acApplyCoreIntensity();
 }
 
 // ── Boot ─────────────────────────────────────────────────────────────────────
@@ -894,6 +1167,8 @@ function renderHub() {
       </div>
     </div>
 
+    ${renderDeck()}
+
     <div class="ac-grid" id="acGrid">
       ${state.agents.map(renderAgentCard).join('')}
     </div>
@@ -902,6 +1177,7 @@ function renderHub() {
   `;
 
   document.getElementById('acGrid').addEventListener('click', onCardClick);
+  acApplyCoreIntensity();
 }
 
 function renderAgentCard(a) {
