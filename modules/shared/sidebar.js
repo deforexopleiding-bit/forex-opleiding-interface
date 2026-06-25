@@ -105,9 +105,11 @@
           // maar de sidebar toont alleen nog dit ene item. Zichtbaarheid: zodra de
           // user minstens één van de drie rechten heeft (zie applyModuleGating).
           navLink('mentoren-beheer', '/modules/mentoren-beheer.html', 'Mentoren beheer') +
-          // Onboarding-admin (F0). Het admin-dashboard op de
-          // `onboardings`-tabel; gegate op de onboarding.admin-permissie.
-          navLink('onboarding-admin', '/modules/onboarding-admin.html', 'Onboarding') +
+          // Onboarding (F0 admin-dashboard, sinds Hub-merge Fase 1 op /modules/onboarding-hub.html).
+          // /modules/onboarding.html blijft de klant-facing wizard (token-link); de hub krijgt
+          // een eigen URL zodat bestaande onboarding-uitnodigingen niet breken. Gegate op
+          // onboarding.admin (zelfde permission-key als de oude admin-pagina).
+          navLink('onboarding-admin', '/modules/onboarding-hub.html', 'Onboarding') +
           // F1b — editor voor de wizard-structuur (block-builder + publish).
           // Aparte entry, gegate op onboarding.wizard.edit.
           navLink('onboarding-wizard-editor', '/modules/onboarding-wizard-editor.html', 'Onboarding-wizard') +
