@@ -27,6 +27,9 @@
     taken: '<rect x="3" y="3" width="18" height="18" rx="2"/><line x1="9" y1="9" x2="15" y2="9"/><line x1="9" y1="13" x2="15" y2="13"/><line x1="9" y1="17" x2="12" y2="17"/>',
     kennisbank: '<path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/>',
     agents: '<circle cx="12" cy="8" r="4"/><path d="M20 21a8 8 0 1 0-16 0"/>',
+    // lucide "broadcast" — centrale agent-controle (Fase 1 hub voor alle
+    // joost_config-agents + read-only Lisa-status).
+    'agent-center': '<path d="M5 20a14 14 0 0 1 0-16"/><path d="M9.5 16.5a8 8 0 0 1 0-9"/><circle cx="12" cy="12" r="2"/><path d="M14.5 16.5a8 8 0 0 0 0-9"/><path d="M19 20a14 14 0 0 0 0-16"/>',
     meetings: '<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>',
     'control-center': '<rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/>',
     'follow-up': '<path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/>',
@@ -82,6 +85,10 @@
           '<a class="nav-item" data-module="taken" href="/modules/taken.html">' + svg('taken') + 'Takenbeheer<span class="nav-badge" id="navTakenBadge"></span></a>' +
           navLink('kennisbank', '/modules/kennisbank.html', 'Kennisbank') +
           navLink('agents', '/modules/agents.html', 'AI Agents') +
+          // Agent command center (Fase 1) — centrale hub voor joost_config-agents
+          // (Joost / Simone / Mila) + read-only Lisa-status. Gegate op
+          // admin.joost_config; pagina-init doet defense-in-depth check.
+          navLink('agent-center', '/modules/agent-center.html', 'Agent center') +
           navLink('meetings', '/modules/meetings.html', 'Vergaderruimte') +
           navLink('control-center', '/modules/control-center.html', 'Control Center') +
           navLink('follow-up', '/modules/follow-up.html', 'Follow-up') +
@@ -416,6 +423,9 @@
     'taken': 'taken.module.access',
     'kennisbank': 'kennisbank.module.access',
     'agents': 'agents.module.access',
+    // Agent command center (Fase 1) — admin-only hub. Page-init checkt zelf
+    // óók via window.RBAC.canSync (defense-in-depth, mirror events-automations).
+    'agent-center': 'admin.joost_config',
     'meetings': 'meetings.module.access',
     'control-center': 'controlcenter.module.access',
     'follow-up': 'followup.module.access',
