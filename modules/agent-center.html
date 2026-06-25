@@ -678,6 +678,136 @@
     #kanalenMount #fiTabs [data-fi-sub="joost"] { display: none !important; }
     #kanalenView .ac-loading { padding: 40px 20px; }
 
+    /* ─── Simone sub-tabs + Autonomy-tab (events-only) ─────────────────────
+       Eigen klasses zodat Joost-styling (.joost-subtabs / .joost-presets /
+       .joost-intent-card) niet verspreidt naar events. Hoofdstijl is identiek
+       — code-locale duplicatie voorkomen we via dezelfde rules listing. */
+    .simone-subtabs {
+      display: flex; gap: 4px; flex-wrap: wrap;
+      border-bottom: 1px solid var(--border-subtle);
+      margin-bottom: 16px;
+    }
+    .simone-subtab {
+      background: transparent; border: none;
+      border-bottom: 2px solid transparent;
+      color: var(--text-secondary);
+      cursor: pointer; padding: 8px 14px;
+      font-size: 13px; font-weight: 600; font-family: inherit;
+      transition: color .15s ease, border-color .15s ease;
+    }
+    .simone-subtab:hover { color: var(--text-primary); }
+    .simone-subtab.active {
+      color: var(--brand-primary);
+      border-bottom-color: var(--brand-primary);
+    }
+    .simone-sub-section { display: none; }
+    .simone-sub-section.active { display: block; }
+
+    .simone-presets {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 10px; margin-bottom: 8px;
+    }
+    .simone-preset {
+      text-align: left;
+      background: var(--surface-card);
+      border: 1px solid var(--border-subtle);
+      border-radius: 10px; padding: 10px 12px;
+      cursor: pointer; font-family: inherit;
+      display: flex; flex-direction: column; gap: 2px;
+      transition: border-color .15s ease, transform .15s ease;
+    }
+    .simone-preset:hover { border-color: var(--brand-primary); }
+    .simone-preset.active {
+      border-color: var(--brand-primary);
+      background: var(--brand-primary-soft);
+      box-shadow: 0 0 0 3px var(--brand-primary-soft);
+    }
+    .simone-preset .p-label { font-size: 13.5px; font-weight: 700; color: var(--text-primary); }
+    .simone-preset .p-sub   { font-size: 11.5px; color: var(--text-tertiary); font-weight: 500; }
+
+    .simone-intents { display: grid; gap: 10px; }
+    .simone-intent-card {
+      background: var(--surface-page);
+      border: 1px solid var(--border-subtle);
+      border-radius: 10px; padding: 10px 12px;
+    }
+    .simone-intent-card .si-head { margin-bottom: 8px; }
+    .simone-intent-card .si-title { font-size: 13px; font-weight: 700; color: var(--text-primary); }
+    .simone-intent-card .si-sub   { font-size: 11.5px; color: var(--text-tertiary); }
+    .simone-intent-card .si-sub code { background: var(--surface-card-hover); padding: 1px 5px; border-radius: 4px; }
+    .simone-intent-card .si-row {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+      gap: 10px; align-items: end;
+    }
+    .simone-intent-card .si-field { display: flex; flex-direction: column; gap: 4px; }
+    .simone-intent-card .si-field > span {
+      font-size: 12px; color: var(--text-secondary); font-weight: 500;
+      display: flex; align-items: baseline; gap: 4px;
+    }
+    .simone-intent-card .si-field > span small { color: var(--text-tertiary); font-weight: 400; }
+    .simone-intent-card .si-field select,
+    .simone-intent-card .si-field input[type=number] {
+      padding: 7px 9px;
+      background: var(--surface-1);
+      border: 1px solid var(--border-default);
+      border-radius: 8px; color: var(--text-primary);
+      font-size: 13px; font-family: inherit;
+    }
+    .simone-intent-card .si-field input[type=range] {
+      width: 100%; accent-color: var(--brand-primary);
+    }
+
+    .simone-locked-row {
+      display: flex; align-items: center; justify-content: space-between;
+      gap: 10px; padding: 8px 10px;
+      background: var(--surface-page);
+      border: 1px dashed var(--border-subtle);
+      border-radius: 8px;
+      opacity: .85;
+      font-size: 12.5px; color: var(--text-secondary);
+    }
+    .simone-locked-row .sl-label { font-weight: 600; color: var(--text-primary); }
+    .simone-locked-row .sl-tag {
+      font-size: 11px; font-style: italic; color: var(--text-tertiary);
+    }
+
+    .simone-day-picker { display: flex; flex-wrap: wrap; gap: 8px; }
+    .simone-day-picker label {
+      display: inline-flex; align-items: center; gap: 4px;
+      font-size: 12px; color: var(--text-secondary);
+    }
+    .simone-day-picker input { accent-color: var(--brand-primary); }
+
+    .simone-advanced {
+      background: var(--surface-page);
+      border: 1px solid var(--border-subtle);
+      border-radius: 10px;
+      padding: 8px 12px; margin-bottom: 12px;
+    }
+    .simone-advanced > summary {
+      cursor: pointer;
+      font-size: 12.5px; font-weight: 700;
+      color: var(--text-secondary);
+      list-style: none;
+      display: flex; align-items: center; gap: 6px;
+      padding: 4px 0;
+    }
+    .simone-advanced > summary::-webkit-details-marker { display: none; }
+    .simone-advanced[open] > summary i { transform: rotate(90deg); }
+    .simone-advanced > summary i { transition: transform .15s ease; }
+
+    .simone-perm-banner {
+      background: var(--color-warning-soft);
+      color: var(--color-warning-text);
+      border: 1px solid var(--color-warning-text);
+      border-radius: 8px;
+      padding: 8px 12px;
+      font-size: 12.5px;
+      margin-bottom: 12px;
+    }
+
     /* ─── Joost sub-tabs (finance-only) ───────────────────────────────────── */
     .joost-subtabs {
       display: flex;
@@ -1100,6 +1230,131 @@ const JOOST_E2_FLAGS = [
 ];
 const JOOST_DECISIONS_REFRESH_MS = 30000;
 
+// ── Simone (events) sub-tab strip. Spiegelt JOOST_SUB_TABS maar zonder
+//    Decision Log — daar is geen Simone-equivalent voor. Sub-tab key
+//    'algemeen' valt samen met de generieke editor; 'autonomy' is de
+//    events-only Autonomy-tab (preset-kiezer + intents + comm + personality).
+const SIMONE_SUB_TABS = ['algemeen', 'autonomy'];
+const SIMONE_SUB_TAB_LABELS = {
+  algemeen: 'Algemeen',
+  autonomy: 'Autonomy',
+};
+
+// Intents waar Simone iets mee mag (5 keuzes). Spiegelt SC_INTENT_KEYS in
+// events.html. NB: cancel_or_reschedule + escalation_needed + other zijn
+// hardcoded-disabled in saveSimoneConfig() en blijven dat ook hier —
+// daarom alleen-tekst ("altijd een mens") onderaan de intent-lijst.
+const SIMONE_INTENTS = [
+  { key: 'event_info',          label: 'Event-info',         help: 'Vragen over inhoud/programma van een training.' },
+  { key: 'date_location',       label: 'Datum / locatie',    help: 'Vragen over datum, tijd of locatie.' },
+  { key: 'registration_intent', label: 'Aanmeld-intentie',   help: 'Iemand wil zich inschrijven of vraagt hoe.' },
+  { key: 'logistics',           label: 'Logistiek',          help: 'Parkeren, route, wat meenemen, inlooptijd.' },
+  { key: 'general_question',    label: 'Algemene vraag',     help: 'Vragen die niet in de andere types vallen.' },
+];
+// 3 intents die hardcoded altijd naar een mens gaan — read-only weergave.
+const SIMONE_LOCKED_INTENTS = [
+  { key: 'cancel_or_reschedule', label: 'Annuleren / verzetten' },
+  { key: 'escalation_needed',    label: 'Klachten / escalatie' },
+];
+const SIMONE_INTENT_MODES = [
+  ['disabled',   'Uit (mens beslist)'],
+  ['autonomous', 'Handelt zelf'],
+];
+
+// Sub-defaults voor de Autonomy-tab. Spiegelt SC-defaults in events.html
+// (renderSimoneConfigForm) zodat een eerste-save geen onverwachte waarden
+// schrijft. Office-hours default = aan + ma-vr 08:30-21:00.
+const SIMONE_AC_DEFAULTS = {
+  intent: { mode: 'disabled', min_confidence: 0.85 },
+  comm:   {
+    max_messages_per_conversation_per_day: 3,
+    max_messages_per_conversation_total:   20,
+    cooldown_after_outbound_minutes:       30,
+    no_reply_pause_threshold:              3,
+    no_reply_pause_duration_hours:         48,
+    office_hours_only:  true,
+    office_hours_tz:    'Europe/Amsterdam',
+    office_hours_days:  [1, 2, 3, 4, 5],
+    office_hours_start: '08:30',
+    office_hours_end:   '21:00',
+  },
+  pers:   {
+    use_tutoyeer:      true,
+    max_message_chars: 480,
+    emoji_policy:      'sparingly',
+  },
+};
+
+// Drie ruwe feature-flags voor de Geavanceerd-section. Read-modify-write
+// — andere flags (uit toekomstige features) blijven onaangeraakt.
+const SIMONE_RAW_FLAGS = [
+  ['is_enabled_master',         'Master-schakelaar',          'Hoofdschakelaar — uit = Simone reageert helemaal niet.',                   false, 'is_enabled'],
+  ['reactive_suggest_enabled',  'Reactieve suggesties',       'Bij inbound bericht direct concept-antwoord klaarzetten.',                 false, 'feature_flags'],
+  ['events_reactive_autonomy',  'Autonoom versturen',         'Master-gate voor autonomous send — moet aan voordat de engine zelf verstuurt.', false, 'feature_flags'],
+];
+const SIMONE_EMOJI_OPTIONS = [
+  ['never',     'Nooit'],
+  ['sparingly', 'Spaarzaam'],
+  ['welcome',   'Welkom'],
+];
+
+// Presets — vooraf-vullen, NIET auto-saven. De gebruiker ziet de resultaat-
+// controls en klikt zelf "Opslaan". Comm-limieten + personality NOOIT door
+// een preset aangeraakt.
+const SIMONE_PRESETS = {
+  off: {
+    label: 'Uit', subtitle: 'Simone reageert niet — alleen suggesties blijven uit.',
+    apply: (cur) => {
+      const ff = { ...(cur.ff || {}),
+        reactive_suggest_enabled: false,
+        events_reactive_autonomy: false,
+      };
+      const ac = { ...(cur.ac || {}) };
+      ac.intents = Object.fromEntries(SIMONE_INTENTS.map((i) => [i.key, {
+        ...(ac.intents?.[i.key] || SIMONE_AC_DEFAULTS.intent),
+        mode: 'disabled',
+      }]));
+      return { ff, ac, is_enabled: false };
+    },
+  },
+  suggest: {
+    label: 'Meedenken', subtitle: 'Simone stelt voor; jij beslist of het bericht weg gaat.',
+    apply: (cur) => {
+      const ff = { ...(cur.ff || {}),
+        reactive_suggest_enabled: true,
+        events_reactive_autonomy: false,
+      };
+      const ac = { ...(cur.ac || {}) };
+      ac.intents = Object.fromEntries(SIMONE_INTENTS.map((i) => [i.key, {
+        ...(ac.intents?.[i.key] || SIMONE_AC_DEFAULTS.intent),
+        mode: 'disabled',
+      }]));
+      return { ff, ac, is_enabled: true };
+    },
+  },
+  autonomous: {
+    label: 'Zelfstandig', subtitle: 'Simone handelt zelf op event-info + datum/locatie + logistiek + algemene vragen.',
+    apply: (cur) => {
+      const ff = { ...(cur.ff || {}),
+        reactive_suggest_enabled: true,
+        events_reactive_autonomy: true,
+      };
+      const ac = { ...(cur.ac || {}) };
+      const safe = new Set(['event_info', 'date_location', 'logistics', 'general_question']);
+      ac.intents = Object.fromEntries(SIMONE_INTENTS.map((i) => [i.key, {
+        ...(ac.intents?.[i.key] || SIMONE_AC_DEFAULTS.intent),
+        mode: safe.has(i.key) ? 'autonomous' : 'disabled',
+      }]));
+      // Comm-limieten + personality NOOIT door preset aangeraakt.
+      return { ff, ac, is_enabled: true };
+    },
+  },
+  custom: {
+    label: 'Maatwerk', subtitle: 'Geen wijzigingen — pas zelf hieronder aan.',
+    apply: (cur) => ({ ff: { ...(cur.ff || {}) }, ac: { ...(cur.ac || {}) }, is_enabled: cur.is_enabled }),
+  },
+};
+
 const state = {
   agents: [],
   loadingHub: true,
@@ -1112,6 +1367,10 @@ const state = {
   // Joost-only sub-tab state (finance). Andere modules tonen geen tabs.
   joostActiveSub: 'algemeen',
   joostAutonomySaving: false,
+  // Simone-only sub-tab state (events). Mirror van joostActiveSub maar
+  // zonder Decision Log.
+  simoneActiveSub: 'algemeen',
+  simoneAutonomySaving: false,
   joostDecisionsLoaded: false,
   joostDecisions: [],
   joostDecisionsTimer: null,  // setInterval handle — moet netjes worden opgeruimd
@@ -1693,7 +1952,9 @@ function renderEditor() {
   const autoSendThreshold  = Number.isFinite(Number(ac.auto_send_threshold)) ? ac.auto_send_threshold : 0.85;
 
   const isFinance = c.module === 'finance';
-  const joostSub = state.joostActiveSub || 'algemeen';
+  const isEvents  = c.module === 'events';
+  const joostSub  = state.joostActiveSub  || 'algemeen';
+  const simoneSub = state.simoneActiveSub || 'algemeen';
 
   document.getElementById('acEditor').innerHTML = `
     <div class="ed-head">
@@ -1713,7 +1974,16 @@ function renderEditor() {
       `).join('')}
     </div>` : ''}
 
-    <div class="${isFinance ? 'joost-sub-section ' + (joostSub === 'algemeen' ? 'active' : '') : ''}" ${isFinance ? 'data-joost-sub="algemeen"' : ''}>
+    ${isEvents ? `
+    <div class="simone-subtabs" id="simoneSubtabs">
+      ${SIMONE_SUB_TABS.map((s) => `
+        <button type="button" class="simone-subtab ${simoneSub === s ? 'active' : ''}" data-simone-sub="${esc(s)}">
+          ${esc(SIMONE_SUB_TAB_LABELS[s])}
+        </button>
+      `).join('')}
+    </div>` : ''}
+
+    <div class="${isFinance ? 'joost-sub-section ' + (joostSub === 'algemeen' ? 'active' : '') : isEvents ? 'simone-sub-section ' + (simoneSub === 'algemeen' ? 'active' : '') : ''}" ${isFinance ? 'data-joost-sub="algemeen"' : isEvents ? 'data-simone-sub="algemeen"' : ''}>
     <div class="ed-section">
       <h3>Identiteit</h3>
       <div class="ed-row-2">
@@ -1763,6 +2033,11 @@ function renderEditor() {
         </div>
         <span class="toggle ${c.is_enabled ? 'on' : ''}" id="tEnabled" role="button" tabindex="0"></span>
       </div>
+      ${isEvents ? `
+      <div class="ed-help" style="margin-top:8px">
+        Reactieve suggesties + autonoom versturen voor Simone zit in het tabblad <strong>Autonomy</strong>.
+      </div>
+      ` : `
       <div class="ed-toggle">
         <div class="lbl">Reactieve suggestie
           <small>Genereer suggesties bij inbound berichten op deze module.</small>
@@ -1775,8 +2050,10 @@ function renderEditor() {
         </div>
         <span class="toggle ${ff.auto_send_enabled ? 'on' : ''}" id="tAutoSend" role="button" tabindex="0"></span>
       </div>
+      `}
     </div>
 
+    ${isEvents ? '' : `
     <div class="ed-section">
       <h3>Autonomie-drempels</h3>
       <div class="ed-row-2">
@@ -1792,6 +2069,7 @@ function renderEditor() {
         </div>
       </div>
     </div>
+    `}
 
     <div class="ed-footer">
       <button class="btn-secondary" type="button" onclick="acCloseEditor()"><i class="ti ti-arrow-left"></i> Sluiten</button>
@@ -1810,6 +2088,11 @@ function renderEditor() {
     <div class="joost-sub-section ${joostSub === 'decisions' ? 'active' : ''}" data-joost-sub="decisions">
       ${renderJoostDecisionsShell()}
     </div>` : ''}
+
+    ${isEvents ? `
+    <div class="simone-sub-section ${simoneSub === 'autonomy' ? 'active' : ''}" data-simone-sub="autonomy">
+      ${renderSimoneAutonomy()}
+    </div>` : ''}
   `;
 
   // Joost-only sub-tab click + initial bindings.
@@ -1827,10 +2110,25 @@ function renderEditor() {
     if (joostSub === 'decisions') startJoostDecisions();
   }
 
-  // Toggle-click-handlers.
-  for (const id of ['tEnabled', 'tReactive', 'tAutoSend']) {
-    document.getElementById(id).addEventListener('click', () => {
-      const el = document.getElementById(id);
+  // Simone-only sub-tab click + initial bindings.
+  if (isEvents) {
+    const stabs = document.getElementById('simoneSubtabs');
+    if (stabs) {
+      stabs.addEventListener('click', (ev) => {
+        const b = ev.target.closest('.simone-subtab[data-simone-sub]');
+        if (b) acSimoneSwitchSub(b.dataset.simoneSub);
+      });
+    }
+    bindSimoneAutonomy();
+  }
+
+  // Toggle-click-handlers. tReactive/tAutoSend bestaan niet voor events
+  // (verplaatst naar Autonomy-tab); tEnabled is altijd aanwezig.
+  const toggleIds = isEvents ? ['tEnabled'] : ['tEnabled', 'tReactive', 'tAutoSend'];
+  for (const id of toggleIds) {
+    const el = document.getElementById(id);
+    if (!el) continue;
+    el.addEventListener('click', () => {
       el.classList.toggle('on');
       state.editingDirty = true;
     });
@@ -1860,22 +2158,29 @@ function readForm() {
 
   // Read-modify-write merge zodat we onbekende keys van andere flags/configs
   // NIET overschrijven of weggooien (e2_*, _bus_, etc).
-  const feature_flags = { ...ffPrev,
-    reactive_suggest_enabled: document.getElementById('tReactive').classList.contains('on'),
-    auto_send_enabled:        document.getElementById('tAutoSend').classList.contains('on'),
-  };
-  const handoff = Number(document.getElementById('fHandoff').value);
-  const autoS   = Number(document.getElementById('fAutoSend').value);
-  if (!Number.isFinite(handoff) || handoff < 0 || handoff > 1) {
-    return { err: 'Handoff-drempel: getal tussen 0 en 1.' };
+  //
+  // Voor module='events' (Simone) wonen reactive_suggest_enabled +
+  // events_reactive_autonomy in de Autonomy-tab; deze generieke editor
+  // schrijft die velden NIET (read-modify-write laat ze ongemoeid). Idem
+  // voor handoff_threshold / auto_send_threshold / auto_send_enabled —
+  // die leest Simone niet (zie api/simone-autonomy-evaluate.js).
+  const feature_flags  = { ...ffPrev };
+  const autonomy_config = { ...acPrev };
+  if (c.module !== 'events') {
+    feature_flags.reactive_suggest_enabled = document.getElementById('tReactive').classList.contains('on');
+    feature_flags.auto_send_enabled        = document.getElementById('tAutoSend').classList.contains('on');
+
+    const handoff = Number(document.getElementById('fHandoff').value);
+    const autoS   = Number(document.getElementById('fAutoSend').value);
+    if (!Number.isFinite(handoff) || handoff < 0 || handoff > 1) {
+      return { err: 'Handoff-drempel: getal tussen 0 en 1.' };
+    }
+    if (!Number.isFinite(autoS) || autoS < 0 || autoS > 1) {
+      return { err: 'Auto-send drempel: getal tussen 0 en 1.' };
+    }
+    autonomy_config.handoff_threshold   = Math.round(handoff * 100) / 100;
+    autonomy_config.auto_send_threshold = Math.round(autoS   * 100) / 100;
   }
-  if (!Number.isFinite(autoS) || autoS < 0 || autoS > 1) {
-    return { err: 'Auto-send drempel: getal tussen 0 en 1.' };
-  }
-  const autonomy_config = { ...acPrev,
-    handoff_threshold:   Math.round(handoff * 100) / 100,
-    auto_send_threshold: Math.round(autoS   * 100) / 100,
-  };
 
   const temp = Number(document.getElementById('fTemp').value);
   if (!Number.isFinite(temp) || temp < 0 || temp > 1) {
@@ -2520,6 +2825,511 @@ async function acJoostSaveAutonomy() {
   }
 }
 window.acJoostSaveAutonomy = acJoostSaveAutonomy;
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  SIMONE (events) — Autonomy-tab. Spiegelt de Joost-architectuur:
+//  preset-kiezer (vooraf-vullen, NIET auto-save) + intent-kaarten + comm-blok
+//  + personality + Geavanceerd-block. UITSLUITEND /api/joost-config-upsert
+//  (read-modify-write). De semantiek (intents, communication_limits,
+//  personality) komt 1-op-1 uit events.html zodat api/simone-autonomy-evaluate
+//  + api/simone-send-autonomous dezelfde shape blijven lezen.
+// ─────────────────────────────────────────────────────────────────────────────
+
+function acSimoneSwitchSub(sub) {
+  if (!SIMONE_SUB_TABS.includes(sub)) return;
+  state.simoneActiveSub = sub;
+  document.querySelectorAll('#simoneSubtabs .simone-subtab').forEach((b) => {
+    b.classList.toggle('active', b.dataset.simoneSub === sub);
+  });
+  document.querySelectorAll('#acEditor [data-simone-sub]').forEach((el) => {
+    if (el.classList.contains('simone-sub-section')) {
+      el.classList.toggle('active', el.dataset.simoneSub === sub);
+    }
+  });
+}
+window.acSimoneSwitchSub = acSimoneSwitchSub;
+
+// Detecteer welke preset PRECIES bij de huidige state past. 'custom' fallback.
+function detectSimonePreset(ff, ac, isEnabled) {
+  const probe = (key) => {
+    const expected = SIMONE_PRESETS[key].apply({ ff: { ...ff }, ac: { ...ac }, is_enabled: isEnabled });
+    const expFF = expected.ff || {};
+    for (const k of ['reactive_suggest_enabled', 'events_reactive_autonomy']) {
+      if (!!ff[k] !== !!expFF[k]) return false;
+    }
+    if (!!isEnabled !== !!expected.is_enabled) return false;
+    const expIntents = (expected.ac && expected.ac.intents) || {};
+    for (const i of SIMONE_INTENTS) {
+      const cur = (ac.intents || {})[i.key]?.mode || 'disabled';
+      const exp = expIntents[i.key]?.mode || 'disabled';
+      if (cur !== exp) return false;
+    }
+    return true;
+  };
+  if (probe('off'))        return 'off';
+  if (probe('suggest'))    return 'suggest';
+  if (probe('autonomous')) return 'autonomous';
+  return 'custom';
+}
+
+// Of de huidige user admin.simone_config heeft. Fail-soft als RBAC niet
+// klaar is — de server is autoritatief, dus UI degradeert naar 'geen rechten'.
+function _simoneCanConfig() {
+  try {
+    return !!(window.RBAC && typeof window.RBAC.canSync === 'function' && window.RBAC.canSync('admin.simone_config'));
+  } catch (e) {
+    return false;
+  }
+}
+
+function renderSimoneAutonomy() {
+  const cfg = state.editingCfg || {};
+  const ff  = (cfg.feature_flags    && typeof cfg.feature_flags    === 'object') ? cfg.feature_flags    : {};
+  const ac  = (cfg.autonomy_config  && typeof cfg.autonomy_config  === 'object') ? cfg.autonomy_config  : {};
+  const isEnabled = cfg.is_enabled !== false;
+  const activePreset = detectSimonePreset(ff, ac, isEnabled);
+
+  const intents = ac.intents || {};
+  const comm    = { ...SIMONE_AC_DEFAULTS.comm, ...(ac.communication_limits || {}) };
+  const pers    = { ...SIMONE_AC_DEFAULTS.pers, ...(ac.personality || {}) };
+  const personaTone = cfg.persona_tone || pers.tone || '';
+
+  const ohOn      = comm.office_hours_only !== false;
+  const ohTz      = comm.office_hours_tz   || 'Europe/Amsterdam';
+  const ohDays    = Array.isArray(comm.office_hours_days) ? comm.office_hours_days : [1,2,3,4,5];
+  const ohStart   = String(comm.office_hours_start || '08:30').slice(0,5);
+  const ohEnd     = String(comm.office_hours_end   || '21:00').slice(0,5);
+  const dayLabels = ['ma','di','wo','do','vr','za','zo'];
+
+  const allowed = _simoneCanConfig();
+  const permBanner = allowed ? '' :
+    `<div class="simone-perm-banner">Je hebt geen <code>admin.simone_config</code>-rechten. De configuratie is read-only — opslaan is uitgeschakeld.</div>`;
+
+  return `
+    ${permBanner}
+
+    <div class="ed-section">
+      <h3>Hoeveel vrijheid heeft Simone?</h3>
+      <div class="simone-presets" id="simonePresets">
+        ${Object.entries(SIMONE_PRESETS).map(([k, p]) => `
+          <button type="button" class="simone-preset ${activePreset === k ? 'active' : ''}" data-preset="${esc(k)}">
+            <span class="p-label">${esc(p.label)}</span>
+            <span class="p-sub">${esc(p.subtitle)}</span>
+          </button>
+        `).join('')}
+      </div>
+      <div class="ed-help">
+        Huidige stand: <strong>${esc(SIMONE_PRESETS[activePreset].label)}</strong> — ${esc(SIMONE_PRESETS[activePreset].subtitle)}
+      </div>
+    </div>
+
+    <div class="ed-section">
+      <h3>Wat doet Simone per type vraag?</h3>
+      <div class="ed-help" style="margin-bottom:10px">
+        Per intent: Simone reageert zelf <em>óf</em> stuurt door naar een mens. Onder de drempel: altijd een mens.
+        <br/><strong>Annuleren / verzetten · Klachten → altijd een mens</strong> (vast).
+      </div>
+      <div class="simone-intents">
+        ${SIMONE_INTENTS.map((i) => {
+          const cur = intents[i.key] || SIMONE_AC_DEFAULTS.intent;
+          const mode = cur.mode === 'autonomous' ? 'autonomous' : 'disabled';
+          const conf = Number.isFinite(Number(cur.min_confidence)) ? Number(cur.min_confidence) : 0.85;
+          const confPct = Math.round(conf * 100);
+          return `
+            <div class="simone-intent-card" data-intent="${esc(i.key)}">
+              <div class="si-head">
+                <div class="si-title">${esc(i.label)}</div>
+                <div class="si-sub">${esc(i.help)} · <code>${esc(i.key)}</code></div>
+              </div>
+              <div class="si-row">
+                <label class="si-field">
+                  <span>Reactie</span>
+                  <select data-intent-field="mode">
+                    ${SIMONE_INTENT_MODES.map(([v, l]) => `<option value="${esc(v)}" ${mode === v ? 'selected' : ''}>${esc(l)}</option>`).join('')}
+                  </select>
+                </label>
+                <label class="si-field">
+                  <span>Voorzichtig ↔ Snel <small>(${confPct}%)</small></span>
+                  <input type="range" min="0" max="100" step="1" value="${confPct}" data-intent-field="min_confidence" />
+                </label>
+              </div>
+            </div>
+          `;
+        }).join('')}
+        ${SIMONE_LOCKED_INTENTS.map((i) => `
+          <div class="simone-locked-row" data-locked-intent="${esc(i.key)}">
+            <span class="sl-label">${esc(i.label)}</span>
+            <span class="sl-tag">altijd een mens — niet aanpasbaar</span>
+          </div>
+        `).join('')}
+      </div>
+    </div>
+
+    <div class="ed-section">
+      <h3>Hoe communiceert Simone?</h3>
+      <div class="ed-toggle">
+        <div class="lbl">Alleen tijdens kantooruren
+          <small>Buiten kantooruren wacht Simone tot de eerstvolgende werkdag.</small>
+        </div>
+        <span class="toggle ${ohOn ? 'on' : ''}" id="sc_office_hours_only" role="button" tabindex="0"></span>
+      </div>
+      <div class="ed-row-2">
+        <div class="ed-field">
+          <label>Tijdzone</label>
+          <input type="text" id="sc_office_tz" maxlength="64" value="${esc(ohTz)}" />
+          <div class="ed-help">Standaard <code>Europe/Amsterdam</code>.</div>
+        </div>
+        <div class="ed-field">
+          <label>Werkdagen</label>
+          <div class="simone-day-picker" id="sc_office_days">
+            ${dayLabels.map((lbl, idx) => {
+              const d = idx + 1;
+              const on = ohDays.includes(d);
+              return `<label><input type="checkbox" data-sc-day="${d}" ${on ? 'checked' : ''} /> ${esc(lbl)}</label>`;
+            }).join('')}
+          </div>
+        </div>
+      </div>
+      <div class="ed-row-2">
+        <div class="ed-field">
+          <label>Kantooruren — start</label>
+          <input type="time" id="sc_office_start" value="${esc(ohStart)}" />
+        </div>
+        <div class="ed-field">
+          <label>Kantooruren — eind</label>
+          <input type="time" id="sc_office_end" value="${esc(ohEnd)}" />
+        </div>
+      </div>
+      <div class="ed-row-2">
+        <div class="ed-field">
+          <label>Max. berichten per gesprek per dag</label>
+          <input type="number" id="sc_max_per_day" min="0" max="50" step="1" value="${esc(String(comm.max_messages_per_conversation_per_day))}" />
+        </div>
+        <div class="ed-field">
+          <label>Max. berichten per gesprek totaal</label>
+          <input type="number" id="sc_max_total" min="0" max="500" step="1" value="${esc(String(comm.max_messages_per_conversation_total))}" />
+        </div>
+      </div>
+      <div class="ed-row-2">
+        <div class="ed-field">
+          <label>Cooldown na een autonoom bericht (minuten)</label>
+          <input type="number" id="sc_cooldown" min="0" max="1440" step="1" value="${esc(String(comm.cooldown_after_outbound_minutes))}" />
+        </div>
+        <div class="ed-field">
+          <label>Stop na X berichten zonder reactie</label>
+          <input type="number" id="sc_noreply_th" min="0" max="20" step="1" value="${esc(String(comm.no_reply_pause_threshold))}" />
+        </div>
+      </div>
+      <div class="ed-field">
+        <label>Pauzeer-duur na "stilte" (uren)</label>
+        <input type="number" id="sc_noreply_hrs" min="1" max="720" step="1" value="${esc(String(comm.no_reply_pause_duration_hours))}" />
+      </div>
+    </div>
+
+    <div class="ed-section">
+      <h3>Hoe schrijft Simone?</h3>
+      <div class="ed-toggle">
+        <div class="lbl">Tutoyeren ("je" i.p.v. "u")
+          <small>Aan = je, uit = u.</small>
+        </div>
+        <span class="toggle ${pers.use_tutoyeer ? 'on' : ''}" id="sc_tutoyeer" role="button" tabindex="0"></span>
+      </div>
+      <div class="ed-row-2">
+        <div class="ed-field">
+          <label>Max. tekens per bericht</label>
+          <input type="number" id="sc_max_chars" min="50" max="4096" step="10" value="${esc(String(pers.max_message_chars))}" />
+          <div class="ed-help">Houd WhatsApp-bericht compact; ≈ paar zinnen op 480.</div>
+        </div>
+        <div class="ed-field">
+          <label>Emoji-gebruik</label>
+          <select id="sc_emoji_policy">
+            ${SIMONE_EMOJI_OPTIONS.map(([v, l]) => `<option value="${esc(v)}" ${pers.emoji_policy === v ? 'selected' : ''}>${esc(l)}</option>`).join('')}
+          </select>
+        </div>
+      </div>
+    </div>
+
+    <details class="simone-advanced">
+      <summary><i class="ti ti-chevron-right"></i> Geavanceerd — ruwe feature-flags + toon</summary>
+      <div class="ed-help" style="margin:10px 0">
+        Onderstaande schakelaars zijn de ruwe vlaggen. De preset-kiezer en intent-kaarten hierboven zetten ze automatisch. Wijzig hier alleen bij twijfel.
+      </div>
+      ${SIMONE_RAW_FLAGS.map(([key, label, help, defaultOn, origin]) => {
+        const cur = origin === 'is_enabled'
+          ? (cfg.is_enabled === true || cfg.is_enabled === undefined)
+          : ff[key];
+        const on = (cur === undefined) ? !!defaultOn : !!cur;
+        return `
+          <div class="ed-toggle">
+            <div class="lbl">${esc(label)}<small>${esc(help)} · <code>${esc(key)}</code></small></div>
+            <span class="toggle ${on ? 'on' : ''}" id="sc_raw_${esc(key)}" role="button" tabindex="0" data-sc-raw-flag="${esc(key)}" data-sc-raw-origin="${esc(origin)}"></span>
+          </div>
+        `;
+      }).join('')}
+      <div class="ed-field" style="margin-top:8px">
+        <label>Toon (persona_tone)</label>
+        <input type="text" id="sc_persona_tone" maxlength="500" value="${esc(personaTone)}" />
+        <div class="ed-help">Korte toon-omschrijving; ook beschikbaar in de Algemeen-tab.</div>
+      </div>
+    </details>
+
+    <div class="ed-footer" style="margin-top:8px">
+      <button type="button" class="btn-secondary" onclick="acSimonePauseAll()" ${allowed ? '' : 'disabled'}>
+        <i class="ti ti-player-pause"></i> Pauzeer Simone
+      </button>
+      <div class="right">
+        <span class="save-info" id="acSimoneAutoSaveInfo"></span>
+        <button class="btn-primary" type="button" id="acSimoneAutoSaveBtn" onclick="acSimoneSaveAutonomy()" ${allowed ? '' : 'disabled'}>
+          <i class="ti ti-device-floppy"></i> Opslaan
+        </button>
+      </div>
+    </div>
+  `;
+}
+
+function bindSimoneAutonomy() {
+  // Generieke toggles (office_hours_only, tutoyeer, raw flags).
+  document.querySelectorAll('#acEditor #sc_office_hours_only, #acEditor #sc_tutoyeer, #acEditor [data-sc-raw-flag]').forEach((el) => {
+    el.addEventListener('click', () => el.classList.toggle('on'));
+  });
+
+  // Preset-knoppen — read DOM-state, apply preset, re-render.
+  const host = document.getElementById('simonePresets');
+  if (host) {
+    host.addEventListener('click', (ev) => {
+      const btn = ev.target.closest('[data-preset]');
+      if (!btn) return;
+      const key = btn.dataset.preset;
+      if (!SIMONE_PRESETS[key]) return;
+      const cur = readSimoneAutonomyForm();
+      const out = SIMONE_PRESETS[key].apply({ ff: cur.ff, ac: cur.ac, is_enabled: cur.is_enabled });
+      state.editingCfg.feature_flags   = { ...cur.ff, ...out.ff };
+      state.editingCfg.autonomy_config = { ...cur.ac, ...out.ac };
+      if (out.is_enabled !== undefined) state.editingCfg.is_enabled = !!out.is_enabled;
+      // Synchroniseer de Algemeen-tab tEnabled-toggle visueel.
+      const tEn = document.getElementById('tEnabled');
+      if (tEn) tEn.classList.toggle('on', !!state.editingCfg.is_enabled);
+      // Re-render binnen de bestaande sub-section.
+      const target = document.querySelector('#acEditor [data-simone-sub="autonomy"]');
+      if (target) {
+        target.innerHTML = renderSimoneAutonomy();
+        bindSimoneAutonomy();
+      }
+    });
+  }
+
+  // Live percentage-label-update voor de confidence-sliders.
+  document.querySelectorAll('#acEditor .simone-intent-card input[data-intent-field="min_confidence"]').forEach((sl) => {
+    sl.addEventListener('input', () => {
+      const card  = sl.closest('.simone-intent-card');
+      const small = card?.querySelector('.si-field small');
+      if (small) small.textContent = '(' + sl.value + '%)';
+    });
+  });
+}
+
+// Lees de complete Simone-autonomy-form-state uit de DOM tot een merge-baar
+// object. Mist een veld in de DOM (bv. omdat het in 'Geavanceerd' niet bestaat)
+// → val terug op state.editingCfg-waarde of default.
+function readSimoneAutonomyForm() {
+  const cfg    = state.editingCfg || {};
+  const prevFF = (cfg.feature_flags    && typeof cfg.feature_flags    === 'object') ? cfg.feature_flags    : {};
+  const prevAC = (cfg.autonomy_config  && typeof cfg.autonomy_config  === 'object') ? cfg.autonomy_config  : {};
+
+  // ── Raw flags + is_enabled (uit Geavanceerd) ──
+  const ff = { ...prevFF };
+  let is_enabled = cfg.is_enabled !== false;
+  for (const [key, , , , origin] of SIMONE_RAW_FLAGS) {
+    const el = document.getElementById('sc_raw_' + key);
+    if (!el) continue;
+    const on = el.classList.contains('on');
+    if (origin === 'is_enabled') is_enabled = on;
+    else                          ff[key]    = on;
+  }
+  // tEnabled in de Algemeen-tab wint als gebruiker daar wisselde.
+  const tEn = document.getElementById('tEnabled');
+  if (tEn) is_enabled = tEn.classList.contains('on');
+
+  // ── Intents (5 keuzes + 3 hardcoded-disabled) ──
+  const intents = {};
+  for (const i of SIMONE_INTENTS) {
+    const card = document.querySelector(`.simone-intent-card[data-intent="${i.key}"]`);
+    if (!card) {
+      intents[i.key] = prevAC.intents?.[i.key] || { ...SIMONE_AC_DEFAULTS.intent };
+      continue;
+    }
+    const modeEl = card.querySelector('[data-intent-field="mode"]');
+    const confEl = card.querySelector('[data-intent-field="min_confidence"]');
+    const mode   = modeEl?.value === 'autonomous' ? 'autonomous' : 'disabled';
+    const conf   = Math.max(0, Math.min(1, (parseInt(confEl?.value, 10) || 85) / 100));
+    intents[i.key] = { mode, min_confidence: Math.round(conf * 100) / 100 };
+  }
+  // Hardcoded-disabled (events.html semantiek behouden).
+  intents.cancel_or_reschedule = { mode: 'disabled' };
+  intents.escalation_needed    = { mode: 'disabled' };
+  intents.other                = { mode: 'disabled' };
+
+  // ── Communication limits ──
+  const numVal = (id, def, min, max) => {
+    const n = parseInt(document.getElementById(id)?.value, 10);
+    if (!Number.isFinite(n)) return def;
+    if (min != null && n < min) return min;
+    if (max != null && n > max) return max;
+    return n;
+  };
+  const ohDays = Array.from(document.querySelectorAll('#sc_office_days input[data-sc-day]'))
+    .filter((el) => el.checked)
+    .map((el) => Number(el.dataset.scDay))
+    .filter((n) => Number.isInteger(n) && n >= 1 && n <= 7)
+    .sort((a, b) => a - b);
+  const oh_start = String(document.getElementById('sc_office_start')?.value || '08:30').slice(0,5);
+  const oh_end   = String(document.getElementById('sc_office_end')?.value   || '21:00').slice(0,5);
+  const oh_tz    = (document.getElementById('sc_office_tz')?.value || 'Europe/Amsterdam').trim() || 'Europe/Amsterdam';
+  const communication_limits = {
+    max_messages_per_conversation_per_day: numVal('sc_max_per_day',   3,  0, 50),
+    max_messages_per_conversation_total:   numVal('sc_max_total',    20,  0, 500),
+    cooldown_after_outbound_minutes:       numVal('sc_cooldown',     30,  0, 1440),
+    no_reply_pause_threshold:              numVal('sc_noreply_th',    3,  0, 20),
+    no_reply_pause_duration_hours:         numVal('sc_noreply_hrs',  48,  1, 720),
+    office_hours_only:  !!document.getElementById('sc_office_hours_only')?.classList.contains('on'),
+    office_hours_tz:    oh_tz,
+    office_hours_days:  ohDays.length > 0 ? ohDays : [1,2,3,4,5],
+    office_hours_start: oh_start,
+    office_hours_end:   oh_end,
+  };
+
+  // ── Personality ──
+  const personality = {
+    tone:              ((document.getElementById('sc_persona_tone')?.value || '').trim()) || (prevAC.personality?.tone) || (cfg.persona_tone) || 'vriendelijk-professioneel',
+    use_tutoyeer:      !!document.getElementById('sc_tutoyeer')?.classList.contains('on'),
+    max_message_chars: numVal('sc_max_chars', 480, 50, 4096),
+    emoji_policy:      (() => {
+      const v = document.getElementById('sc_emoji_policy')?.value || 'sparingly';
+      return SIMONE_EMOJI_OPTIONS.some(([k]) => k === v) ? v : 'sparingly';
+    })(),
+  };
+
+  const ac = {
+    ...prevAC,
+    intents,
+    communication_limits,
+    personality,
+  };
+
+  return { ff, ac, is_enabled, persona_tone: personality.tone };
+}
+
+function setSimoneAutoSaveInfo(msg, kind) {
+  const el = document.getElementById('acSimoneAutoSaveInfo');
+  if (!el) return;
+  el.classList.remove('error', 'ok');
+  if (kind === 'error') el.classList.add('error');
+  if (kind === 'ok')    el.classList.add('ok');
+  el.textContent = msg || '';
+}
+
+function validateSimoneAutonomy(payload) {
+  const ac = payload.autonomy_config || {};
+  const re = /^\d{2}:\d{2}$/;
+  const cl = ac.communication_limits || {};
+  if (cl.office_hours_start && !re.test(cl.office_hours_start)) return 'Kantooruren-start moet HH:MM zijn.';
+  if (cl.office_hours_end   && !re.test(cl.office_hours_end))   return 'Kantooruren-eind moet HH:MM zijn.';
+  if (cl.office_hours_only && cl.office_hours_start && cl.office_hours_end && cl.office_hours_start >= cl.office_hours_end) {
+    return 'Kantooruren — start moet vóór eind liggen.';
+  }
+  const pers = ac.personality || {};
+  if (pers.max_message_chars != null && (pers.max_message_chars < 50 || pers.max_message_chars > 4096)) {
+    return 'Max. tekens per bericht: tussen 50 en 4096.';
+  }
+  // Intents-check: 5 keys aanwezig met geldige mode-strings.
+  const validModes = new Set(['disabled', 'autonomous']);
+  for (const i of SIMONE_INTENTS) {
+    const row = ac.intents?.[i.key];
+    if (!row || !validModes.has(row.mode)) return `Intent "${i.key}" heeft een ongeldige reactie-mode.`;
+    if (row.min_confidence != null && (row.min_confidence < 0 || row.min_confidence > 1)) {
+      return `Intent "${i.key}" confidence moet tussen 0 en 1 liggen.`;
+    }
+  }
+  return null;
+}
+
+async function acSimoneSaveAutonomy() {
+  if (state.simoneAutonomySaving) return;
+  if (!state.editingCfg || state.editingCfg.module !== 'events') return;
+  if (!_simoneCanConfig()) {
+    setSimoneAutoSaveInfo('Geen rechten (admin.simone_config).', 'error');
+    return;
+  }
+  setSimoneAutoSaveInfo('', null);
+
+  const { ff, ac, is_enabled, persona_tone } = readSimoneAutonomyForm();
+  const payload = {
+    module:           'events',
+    is_enabled:       !!is_enabled,
+    persona_tone:     persona_tone || 'vriendelijk-professioneel',
+    feature_flags:    ff,
+    autonomy_config:  ac,
+  };
+
+  const err = validateSimoneAutonomy(payload);
+  if (err) { setSimoneAutoSaveInfo(err, 'error'); return; }
+
+  state.simoneAutonomySaving = true;
+  const btn = document.getElementById('acSimoneAutoSaveBtn');
+  if (btn) btn.disabled = true;
+  setSimoneAutoSaveInfo('Opslaan…');
+  try {
+    const r = await window.AgentShared.apiFetch('/api/joost-config-upsert', {
+      method: 'POST',
+      body:   JSON.stringify(payload),
+    });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(data?.error || ('HTTP ' + r.status));
+    if (data.config) state.editingCfg = data.config;
+    setSimoneAutoSaveInfo('Opgeslagen ' + new Date().toLocaleTimeString('nl-NL'), 'ok');
+    toastOk('Simone-autonomy opgeslagen');
+    // Re-render zodat preset-detectie + canonieke server-respons up-to-date is.
+    const target = document.querySelector('#acEditor [data-simone-sub="autonomy"]');
+    if (target) {
+      target.innerHTML = renderSimoneAutonomy();
+      bindSimoneAutonomy();
+    }
+    // Hub-kaartjes verversen (is_enabled-pill kan veranderd zijn).
+    try { await loadAgents(); renderHub(); state.activeModule = 'events'; } catch (_) {}
+  } catch (e) {
+    setSimoneAutoSaveInfo('Opslaan mislukt: ' + (e?.message || e), 'error');
+    toastErr('Opslaan mislukt: ' + (e?.message || e));
+  } finally {
+    state.simoneAutonomySaving = false;
+    if (btn) btn.disabled = false;
+  }
+}
+window.acSimoneSaveAutonomy = acSimoneSaveAutonomy;
+
+// Pauzeer Simone — UI-only: zet 3 flags uit (is_enabled, reactive_suggest,
+// events_reactive_autonomy) en intent-modes naar disabled. De gebruiker
+// klikt zelf "Opslaan" — geen auto-save (consistent met preset-kiezer).
+function acSimonePauseAll() {
+  if (!state.editingCfg || state.editingCfg.module !== 'events') return;
+  if (!_simoneCanConfig()) {
+    setSimoneAutoSaveInfo('Geen rechten (admin.simone_config).', 'error');
+    return;
+  }
+  const cur = readSimoneAutonomyForm();
+  const out = SIMONE_PRESETS.off.apply({ ff: cur.ff, ac: cur.ac, is_enabled: cur.is_enabled });
+  state.editingCfg.feature_flags   = { ...cur.ff, ...out.ff };
+  state.editingCfg.autonomy_config = { ...cur.ac, ...out.ac };
+  state.editingCfg.is_enabled      = false;
+  const tEn = document.getElementById('tEnabled');
+  if (tEn) tEn.classList.remove('on');
+  const target = document.querySelector('#acEditor [data-simone-sub="autonomy"]');
+  if (target) {
+    target.innerHTML = renderSimoneAutonomy();
+    bindSimoneAutonomy();
+  }
+  setSimoneAutoSaveInfo('Pauze-keuzes gezet — klik Opslaan om door te voeren.', null);
+}
+window.acSimonePauseAll = acSimonePauseAll;
 
 // ── Decision Log (read-only, 30s auto-refresh) ──
 function renderJoostDecisionsShell() {
