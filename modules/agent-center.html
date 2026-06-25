@@ -887,6 +887,12 @@ const state = {
   lisaActiveFase: 'intro',
   lisaKbTags: [],               // [{id, name, color}]
   lisaKbLinks: [],              // [{item_id, tag_id}]
+  // Lisa settings (lisa_settings singleton, id=1, DIRECT live) — strikt
+  // gescheiden van lisaCfg. Eigen state, eigen fetch, eigen save.
+  lisaSettings: null,
+  lisaSettingsLoaded: false,
+  lisaSettingsDirty: false,
+  lisaSettingsSaving: false,
 };
 
 const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -1299,11 +1305,15 @@ window.acCloseEditor = closeEditor;
 
 function closeLisaEditor() {
   if (state.lisaDirty && !confirm('Niet-opgeslagen Lisa-wijzigingen weggooien?')) return;
+  if (state.lisaSettingsDirty && !confirm('Niet-opgeslagen Lisa-instellingen weggooien?')) return;
   state.activeIsLisa = false;
   state.lisaCfg = null;
   state.lisaDirty = false;
   state.lisaHistoryOpen = false;
   state.lisaHistory = [];
+  state.lisaSettings = null;
+  state.lisaSettingsLoaded = false;
+  state.lisaSettingsDirty = false;
   document.getElementById('acEditor').classList.remove('visible');
   document.getElementById('acEditor').innerHTML = '';
   document.getElementById('acGrid').innerHTML = state.agents.map(renderAgentCard).join('');
@@ -1546,15 +1556,20 @@ const LISA_FU_PHASES     = ['intro', 'doel', 'situatie', 'band', 'call'];
 const LISA_PHASE_LABELS  = { intro: 'Intro', doel: 'Doel', situatie: 'Situatie', band: 'Band', call: 'Call' };
 const LISA_FU_MAX_STEPS  = 5;
 const LISA_DEFAULT_THRESHOLD = 200;
-// Fase 1c — sub-tab keys.
-const LISA_SUB_TABS = ['persona', 'dosdonts', 'fases', 'kb', 'followup'];
+// Fase 1c — sub-tab keys. + (deze PR) settings als 6e sub-tab voor lisa_settings.
+// STRIKT GESCHEIDEN van lisa_config draft/publish: andere tabel, ander endpoint
+// (/api/lisa-settings), eigen save-knop, eigen state. DIRECT live bij save —
+// geen versionering.
+const LISA_SUB_TABS = ['persona', 'dosdonts', 'fases', 'kb', 'followup', 'settings'];
 const LISA_SUB_TAB_LABELS = {
   persona:  'Persona',
   dosdonts: "Do's & Don'ts",
   fases:    'Fases',
   kb:       'Kennisbank',
   followup: 'Follow-up',
+  settings: 'Instellingen',
 };
+const LISA_DELAY_MODES = ['fixed', 'random', 'per_phase'];
 
 // Normaliseer een lisa_config-row naar een werkbare editor-shape.
 // Zorgt dat arrays bestaan + default-waarden landen zodat de UI nooit op
@@ -1662,6 +1677,11 @@ async function openLisaEditor() {
   state.lisaHistory = [];
   state.lisaActiveSub = 'persona';
   state.lisaActiveFase = 'intro';
+  // Settings reset (eigen state, eigen fetch).
+  state.lisaSettings = null;
+  state.lisaSettingsLoaded = false;
+  state.lisaSettingsDirty = false;
+  state.lisaSettingsSaving = false;
   // Highlight Lisa-kaart.
   document.getElementById('acGrid').innerHTML = state.agents.map(renderAgentCard).join('');
   const ed = document.getElementById('acEditor');
@@ -1884,7 +1904,16 @@ function renderLisaEditor() {
       </div>
     </div>
 
-    <div class="ed-section">
+    <div class="lisa-sub-section ${state.lisaActiveSub === 'settings' ? 'active' : ''}" data-lisa-sub="settings">
+      <div id="acLisaSettingsHost">
+        <div class="ac-loading"><i class="ti ti-loader-2"></i> Instellingen laden…</div>
+      </div>
+    </div>
+
+    <!-- Publiceren-section + draft/publish-knoppen horen UITSLUITEND bij de
+         lisa_config flow. Bij settings-tab verbergen we ze (settings heeft
+         een eigen save-knop binnen de Instellingen-sub-section). -->
+    <div class="ed-section" data-lisa-config-only="true">
       <h3>Publiceren</h3>
       <div class="ed-field">
         <label>Notitie bij publicatie <span style="color:var(--text-tertiary);font-weight:400">(optioneel)</span></label>
@@ -1894,7 +1923,7 @@ function renderLisaEditor() {
 
     <div class="ed-footer">
       <button class="btn-secondary" type="button" onclick="acCloseLisaEditor()"><i class="ti ti-arrow-left"></i> Sluiten</button>
-      <div class="right">
+      <div class="right" data-lisa-config-only="true">
         <span class="save-info" id="acLisaSaveInfo"></span>
         <button class="btn-secondary" type="button" id="acLisaDraftBtn" onclick="acLisaSaveDraft()" ${canEdit ? '' : 'disabled'} title="${canEdit ? 'Concept opslaan zonder live te zetten' : 'lisa.config.edit vereist'}"><i class="ti ti-device-floppy"></i> Concept opslaan</button>
         <button class="btn-primary" type="button" id="acLisaPubBtn" onclick="acLisaPublish()" ${canPublish ? '' : 'disabled'} title="${canPublish ? 'Live zetten' : 'lisa.config.publish vereist'}"><i class="ti ti-cloud-upload"></i> Publiceren</button>
@@ -2125,8 +2154,372 @@ function acLisaSwitchSub(sub) {
   document.querySelectorAll('#acEditor .lisa-sub-section').forEach((el) => {
     el.classList.toggle('active', el.dataset.lisaSub === sub);
   });
+  // STRIKTE SCHEIDING: bij Instellingen-tab verbergen we de lisa_config
+  // 'Publiceren'-section en draft/publish-knoppen, zodat settings nooit
+  // per ongeluk via de config-save-flow loopt. Sluiten-knop blijft staan.
+  document.querySelectorAll('#acEditor [data-lisa-config-only]').forEach((el) => {
+    el.style.display = (sub === 'settings') ? 'none' : '';
+  });
+  // Lazy-load settings bij eerste keer dat tab geopend wordt.
+  if (sub === 'settings' && !state.lisaSettingsLoaded) {
+    loadLisaSettings();
+  } else if (sub === 'settings') {
+    renderLisaSettings();
+  }
 }
 window.acLisaSwitchSub = acLisaSwitchSub;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// LISA SETTINGS — lisa_settings (singleton, id=1, DIRECT live).
+// STRIKT GESCHEIDEN van lisa_config:
+//   - andere tabel    : lisa_settings (één rij) i.t.t. lisa_config (versioned).
+//   - ander endpoint  : /api/lisa-settings (GET / POST-PATCH).
+//   - eigen state     : state.lisaSettings + state.lisaSettings* flags.
+//   - eigen save-knop : binnen Instellingen-tab; geen draft/publish-vorm.
+//   - eigen permission: write achter lisa.config.publish (server autoritatief).
+// readLisaForm / acLisaSaveDraft / acLisaPublish raken settings-velden NOOIT
+// aan; settings-payload bevat NOOIT lisa_config-velden.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const LISA_SETTINGS_FIELDS = [
+  'live_mode_enabled',
+  'office_hours_start', 'office_hours_end', 'office_hours_timezone',
+  'ghl_webhook_active',
+  'response_delay_mode',
+  'response_delay_fixed_seconds',
+  'response_delay_min_seconds',
+  'response_delay_max_seconds',
+  'response_delay_per_phase',
+  'typing_indicator_enabled',
+  'post_link_followup_enabled',
+  'post_link_step1_hours', 'post_link_step2_hours', 'post_link_step3_hours',
+];
+
+function normaliseLisaSettings(s) {
+  const r = (s && typeof s === 'object') ? s : {};
+  const pp = (r.response_delay_per_phase && typeof r.response_delay_per_phase === 'object'
+    && !Array.isArray(r.response_delay_per_phase)) ? r.response_delay_per_phase : {};
+  return {
+    // boolean flags
+    live_mode_enabled:           r.live_mode_enabled === true,
+    ghl_webhook_active:          r.ghl_webhook_active !== false, // default true
+    typing_indicator_enabled:    r.typing_indicator_enabled !== false,
+    post_link_followup_enabled:  r.post_link_followup_enabled !== false,
+    // office hours
+    office_hours_start:    String(r.office_hours_start || '07:00:00').slice(0, 8),
+    office_hours_end:      String(r.office_hours_end   || '23:30:00').slice(0, 8),
+    office_hours_timezone: String(r.office_hours_timezone || 'Europe/Amsterdam'),
+    // delay
+    response_delay_mode:           LISA_DELAY_MODES.includes(r.response_delay_mode) ? r.response_delay_mode : 'random',
+    response_delay_fixed_seconds:  clampInt(r.response_delay_fixed_seconds, 0, 600, 45),
+    response_delay_min_seconds:    clampInt(r.response_delay_min_seconds,   0, 600, 30),
+    response_delay_max_seconds:    clampInt(r.response_delay_max_seconds,   0, 600, 90),
+    response_delay_per_phase: {
+      intro:    clampInt(pp.intro,    0, 600, 30),
+      doel:     clampInt(pp.doel,     0, 600, 60),
+      situatie: clampInt(pp.situatie, 0, 600, 75),
+      band:     clampInt(pp.band,     0, 600, 60),
+      call:     clampInt(pp.call,     0, 600, 45),
+    },
+    // post-link
+    post_link_step1_hours: clampInt(r.post_link_step1_hours, 1, 168, 4),
+    post_link_step2_hours: clampInt(r.post_link_step2_hours, 1, 168, 24),
+    post_link_step3_hours: clampInt(r.post_link_step3_hours, 1, 168, 72),
+    // read-only info (niet meegesturen bij save)
+    ghl_webhook_last_received_at: r.ghl_webhook_last_received_at || null,
+  };
+}
+
+function clampInt(v, min, max, def) {
+  const n = parseInt(v, 10);
+  if (!Number.isFinite(n)) return def;
+  return Math.max(min, Math.min(max, n));
+}
+
+async function loadLisaSettings() {
+  const host = document.getElementById('acLisaSettingsHost');
+  if (host) host.innerHTML = `<div class="ac-loading"><i class="ti ti-loader-2"></i> Instellingen laden…</div>`;
+  try {
+    const r = await window.AgentShared.apiFetch('/api/lisa-settings');
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(data?.error || ('HTTP ' + r.status));
+    state.lisaSettings = normaliseLisaSettings(data?.settings || null);
+    state.lisaSettingsLoaded = true;
+    state.lisaSettingsDirty = false;
+    renderLisaSettings();
+  } catch (e) {
+    if (host) host.innerHTML = `<div class="ac-loading" style="color:var(--color-danger-text)">Instellingen laden mislukt: ${esc(e?.message || e)}</div>`;
+  }
+}
+
+function renderLisaSettings() {
+  const s = state.lisaSettings;
+  const host = document.getElementById('acLisaSettingsHost');
+  if (!host) return;
+  if (!s) {
+    host.innerHTML = `<div class="ac-loading"><i class="ti ti-loader-2"></i> Instellingen laden…</div>`;
+    return;
+  }
+  const canPublish = can('lisa.config.publish');
+  const mode = s.response_delay_mode;
+  const lastWebhook = s.ghl_webhook_last_received_at
+    ? new Date(s.ghl_webhook_last_received_at).toLocaleString('nl-NL')
+    : '—';
+
+  const permWarnHtml = !canPublish ? `
+    <div class="perm-warn" style="margin-bottom:14px">
+      <i class="ti ti-info-circle"></i>
+      <span>Instellingen opslaan vereist <code>lisa.config.publish</code> (live-werking).</span>
+    </div>` : '';
+
+  host.innerHTML = `
+    ${permWarnHtml}
+
+    <div class="ed-section">
+      <h3>Live mode</h3>
+      <div class="ed-toggle">
+        <div class="lbl">Lisa live op Instagram
+          <small>Aan = Lisa beantwoordt nieuwe Instagram-DM's binnen kantooruren. Direct effect.</small>
+        </div>
+        <span class="toggle ${s.live_mode_enabled ? 'on' : ''}" id="ls_live_mode" role="button" tabindex="0"></span>
+      </div>
+      <div class="ed-row-2">
+        <div class="ed-field">
+          <label>Kantooruren — start</label>
+          <input type="time" id="ls_office_start" value="${esc(s.office_hours_start.slice(0, 5))}" />
+        </div>
+        <div class="ed-field">
+          <label>Kantooruren — eind</label>
+          <input type="time" id="ls_office_end" value="${esc(s.office_hours_end.slice(0, 5))}" />
+        </div>
+      </div>
+      <div class="ed-field">
+        <label>Tijdzone</label>
+        <input type="text" id="ls_office_tz" value="${esc(s.office_hours_timezone)}" maxlength="64" />
+        <div class="ed-help">IANA-tijdzone (bv. <code>Europe/Amsterdam</code>).</div>
+      </div>
+    </div>
+
+    <div class="ed-section">
+      <h3>GoHighLevel webhook</h3>
+      <div class="ed-toggle">
+        <div class="lbl">GHL webhook actief
+          <small>Lisa ontvangt nieuwe Instagram-DM's via GHL-webhook. Direct effect.</small>
+        </div>
+        <span class="toggle ${s.ghl_webhook_active ? 'on' : ''}" id="ls_ghl_active" role="button" tabindex="0"></span>
+      </div>
+      <div class="ed-field">
+        <label>Laatst ontvangen</label>
+        <input type="text" value="${esc(lastWebhook)}" readonly style="opacity:.7" />
+        <div class="ed-help">Read-only — wordt door GHL-webhook bijgewerkt.</div>
+      </div>
+    </div>
+
+    <div class="ed-section">
+      <h3>Response-delay & typing</h3>
+      <div class="ed-field">
+        <label>Modus</label>
+        <select id="ls_delay_mode">
+          <option value="fixed"     ${mode === 'fixed'     ? 'selected' : ''}>Vaste tijd</option>
+          <option value="random"    ${mode === 'random'    ? 'selected' : ''}>Random (min–max)</option>
+          <option value="per_phase" ${mode === 'per_phase' ? 'selected' : ''}>Per fase</option>
+        </select>
+      </div>
+      <div class="ed-field" data-delay-mode="fixed" style="${mode === 'fixed' ? '' : 'display:none'}">
+        <label>Seconden wachten vóór antwoord</label>
+        <input type="number" id="ls_delay_fixed" min="0" max="600" step="1" value="${esc(String(s.response_delay_fixed_seconds))}" />
+      </div>
+      <div class="ed-row-2" data-delay-mode="random" style="${mode === 'random' ? '' : 'display:none'}">
+        <div class="ed-field">
+          <label>Min seconden</label>
+          <input type="number" id="ls_delay_min" min="0" max="600" step="1" value="${esc(String(s.response_delay_min_seconds))}" />
+        </div>
+        <div class="ed-field">
+          <label>Max seconden</label>
+          <input type="number" id="ls_delay_max" min="0" max="600" step="1" value="${esc(String(s.response_delay_max_seconds))}" />
+        </div>
+      </div>
+      <div data-delay-mode="per_phase" style="${mode === 'per_phase' ? '' : 'display:none'}">
+        <label style="font-size:12px;font-weight:500;color:var(--text-secondary);display:block;margin-bottom:4px">Seconden per fase</label>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:8px;margin-bottom:10px">
+          ${LISA_FU_PHASES.map((f) => `
+            <div class="ed-field" style="margin-bottom:0">
+              <label>${esc(LISA_PHASE_LABELS[f])}</label>
+              <input type="number" id="ls_delay_phase_${esc(f)}" data-phase="${esc(f)}" min="0" max="600" step="1" value="${esc(String(s.response_delay_per_phase[f] ?? 45))}" />
+            </div>
+          `).join('')}
+        </div>
+      </div>
+      <div class="ed-toggle">
+        <div class="lbl">Typing-indicator versturen
+          <small>"Lisa is aan het typen…" tonen tijdens de delay.</small>
+        </div>
+        <span class="toggle ${s.typing_indicator_enabled ? 'on' : ''}" id="ls_typing" role="button" tabindex="0"></span>
+      </div>
+      <div class="ed-help">Een antwoord wordt na de delay verstuurd door de cron (1×/min), dus reken op delay + tot ~60s.</div>
+    </div>
+
+    <div class="ed-section">
+      <h3>Post-link follow-up (na agenda-link)</h3>
+      <div class="ed-toggle">
+        <div class="lbl">Post-link follow-ups actief
+          <small>Lisa vraagt automatisch om bevestiging als de volger na de agenda-link niet reageert (3 checks).</small>
+        </div>
+        <span class="toggle ${s.post_link_followup_enabled ? 'on' : ''}" id="ls_postlink" role="button" tabindex="0"></span>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px">
+        <div class="ed-field">
+          <label>1e check (uren)</label>
+          <input type="number" id="ls_postlink_step1" min="1" max="168" step="1" value="${esc(String(s.post_link_step1_hours))}" />
+        </div>
+        <div class="ed-field">
+          <label>2e check (uren)</label>
+          <input type="number" id="ls_postlink_step2" min="1" max="168" step="1" value="${esc(String(s.post_link_step2_hours))}" />
+        </div>
+        <div class="ed-field">
+          <label>3e check (uren)</label>
+          <input type="number" id="ls_postlink_step3" min="1" max="168" step="1" value="${esc(String(s.post_link_step3_hours))}" />
+        </div>
+      </div>
+    </div>
+
+    <div class="ed-footer" style="margin-top:4px">
+      <div style="font-size:11.5px;color:var(--text-tertiary)">
+        <i class="ti ti-bolt"></i> Direct live: bij opslaan worden de instellingen meteen actief
+        (geen draft/publish-stap; los van Lisa's persona-config).
+      </div>
+      <div class="right">
+        <span class="save-info" id="acLisaSettingsInfo"></span>
+        <button class="btn-primary" type="button" id="acLisaSettingsSaveBtn" onclick="acLisaSettingsSave()" ${canPublish ? '' : 'disabled'} title="${canPublish ? 'Instellingen DIRECT live zetten' : 'lisa.config.publish vereist'}">
+          <i class="ti ti-bolt"></i> Instellingen opslaan
+        </button>
+      </div>
+    </div>
+  `;
+
+  // Toggles.
+  for (const id of ['ls_live_mode', 'ls_ghl_active', 'ls_typing', 'ls_postlink']) {
+    document.getElementById(id).addEventListener('click', () => {
+      const el = document.getElementById(id);
+      el.classList.toggle('on');
+      state.lisaSettingsDirty = true;
+    });
+  }
+  // Mode-switch toont/verbergt juiste blok.
+  document.getElementById('ls_delay_mode').addEventListener('change', (ev) => {
+    state.lisaSettingsDirty = true;
+    const m = ev.target.value;
+    document.querySelectorAll('[data-delay-mode]').forEach((el) => {
+      el.style.display = el.dataset.delayMode === m ? '' : 'none';
+    });
+  });
+  // Generic dirty-track.
+  host.querySelectorAll('input, select').forEach((el) => {
+    el.addEventListener('input',  () => { state.lisaSettingsDirty = true; });
+    el.addEventListener('change', () => { state.lisaSettingsDirty = true; });
+  });
+}
+
+function readLisaSettingsForm() {
+  // STRIKT: deze functie leest UITSLUITEND uit /ls_*/ DOM-velden en bouwt een
+  // payload die ALLEEN LISA_SETTINGS_FIELDS-keys bevat. Geen overlap met
+  // lisa_config velden mogelijk.
+  const mode = document.getElementById('ls_delay_mode').value;
+  if (!LISA_DELAY_MODES.includes(mode)) return { err: 'Ongeldige delay-modus.' };
+
+  const fixed = clampInt(document.getElementById('ls_delay_fixed').value, 0, 600, 45);
+  const min   = clampInt(document.getElementById('ls_delay_min').value,   0, 600, 30);
+  const max   = clampInt(document.getElementById('ls_delay_max').value,   0, 600, 90);
+  if (mode === 'random' && min > max) {
+    return { err: 'Min seconden mag niet groter zijn dan max seconden.' };
+  }
+
+  const perPhase = {};
+  for (const f of LISA_FU_PHASES) {
+    const el = document.getElementById('ls_delay_phase_' + f);
+    perPhase[f] = clampInt(el ? el.value : 45, 0, 600, 45);
+  }
+
+  const step1 = clampInt(document.getElementById('ls_postlink_step1').value, 1, 168, 4);
+  const step2 = clampInt(document.getElementById('ls_postlink_step2').value, 1, 168, 24);
+  const step3 = clampInt(document.getElementById('ls_postlink_step3').value, 1, 168, 72);
+
+  const officeStart = (document.getElementById('ls_office_start').value || '').trim();
+  const officeEnd   = (document.getElementById('ls_office_end').value   || '').trim();
+  const officeTz    = (document.getElementById('ls_office_tz').value    || '').trim() || 'Europe/Amsterdam';
+  if (!/^\d{2}:\d{2}(:\d{2})?$/.test(officeStart) || !/^\d{2}:\d{2}(:\d{2})?$/.test(officeEnd)) {
+    return { err: 'Kantooruren: gebruik formaat HH:MM.' };
+  }
+
+  return {
+    payload: {
+      live_mode_enabled:           document.getElementById('ls_live_mode').classList.contains('on'),
+      office_hours_start:          officeStart.length === 5 ? officeStart + ':00' : officeStart,
+      office_hours_end:            officeEnd.length   === 5 ? officeEnd   + ':00' : officeEnd,
+      office_hours_timezone:       officeTz,
+      ghl_webhook_active:          document.getElementById('ls_ghl_active').classList.contains('on'),
+      response_delay_mode:         mode,
+      response_delay_fixed_seconds: fixed,
+      response_delay_min_seconds:   min,
+      response_delay_max_seconds:   max,
+      response_delay_per_phase:     perPhase,
+      typing_indicator_enabled:    document.getElementById('ls_typing').classList.contains('on'),
+      post_link_followup_enabled:  document.getElementById('ls_postlink').classList.contains('on'),
+      post_link_step1_hours:       step1,
+      post_link_step2_hours:       step2,
+      post_link_step3_hours:       step3,
+    },
+  };
+}
+
+function setLisaSettingsInfo(msg, kind) {
+  const el = document.getElementById('acLisaSettingsInfo');
+  if (!el) return;
+  el.classList.remove('error', 'ok');
+  if (kind === 'error') el.classList.add('error');
+  if (kind === 'ok')    el.classList.add('ok');
+  el.textContent = msg || '';
+}
+
+async function acLisaSettingsSave() {
+  if (state.lisaSettingsSaving) return;
+  setLisaSettingsInfo('', null);
+  const { err, payload } = readLisaSettingsForm();
+  if (err) { setLisaSettingsInfo(err, 'error'); return; }
+  // Defensief: valideer dat NIETS uit lisa_config (incl. phase_*/kb_*) per
+  // ongeluk in payload zit.
+  for (const k of Object.keys(payload)) {
+    if (!LISA_SETTINGS_FIELDS.includes(k)) {
+      setLisaSettingsInfo('Onbekend veld in payload: ' + k, 'error');
+      return;
+    }
+  }
+  state.lisaSettingsSaving = true;
+  const btn = document.getElementById('acLisaSettingsSaveBtn');
+  if (btn) btn.disabled = true;
+  setLisaSettingsInfo('Opslaan…');
+  try {
+    const r = await window.AgentShared.apiFetch('/api/lisa-settings', {
+      method: 'POST',
+      body:   JSON.stringify(payload),
+    });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(data?.error || ('HTTP ' + r.status));
+    state.lisaSettings = normaliseLisaSettings(data?.settings || null);
+    state.lisaSettingsDirty = false;
+    setLisaSettingsInfo('Direct actief ' + new Date().toLocaleTimeString('nl-NL'), 'ok');
+    toastOk('Instellingen DIRECT live');
+    // Re-render zodat UI in sync is met canonieke server-respons (bv. office_hours-clamp).
+    renderLisaSettings();
+  } catch (e) {
+    setLisaSettingsInfo('Opslaan mislukt: ' + (e?.message || e), 'error');
+    toastErr('Opslaan mislukt: ' + (e?.message || e));
+  } finally {
+    state.lisaSettingsSaving = false;
+    if (btn) btn.disabled = false;
+  }
+}
+window.acLisaSettingsSave = acLisaSettingsSave;
 
 // ─── Fase 1c — Fases-tab (funnel) ──────────────────────────────────────────
 function renderLisaFasePanel(faseKey) {
