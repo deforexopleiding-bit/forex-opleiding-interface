@@ -10,7 +10,10 @@
 // `max_age_minutes`-venster (default 10 minuten — past bij de versheid van een
 // inbox-conversatie zonder eindeloos oude suggesties te tonen).
 //
-// Permission: finance.joost.use (consistent met joost-suggest endpoint).
+// Permission per module:
+//   finance     → finance.joost.use      (consistent met joost-suggest)
+//   events      → events.simone.use      (consistent met simone-suggest)
+//   onboarding  → onboarding.mila.use    (consistent met onboarding-suggest)
 //
 // Query params:
 //   conversation_id   uuid    (verplicht)
@@ -56,12 +59,17 @@ export default async function handler(req, res) {
   const moduleKey = typeof req.query.module === 'string'
     ? req.query.module.trim().toLowerCase()
     : 'finance';
-  if (moduleKey !== 'finance' && moduleKey !== 'events') {
-    return res.status(400).json({ error: 'module moet finance of events zijn' });
+  if (moduleKey !== 'finance' && moduleKey !== 'events' && moduleKey !== 'onboarding') {
+    return res.status(400).json({ error: 'module moet finance, events of onboarding zijn' });
   }
 
   // ---- Permission (per module) ----
-  const permKey = moduleKey === 'events' ? 'events.simone.use' : 'finance.joost.use';
+  const PERM_BY_MODULE = {
+    finance:    'finance.joost.use',
+    events:     'events.simone.use',
+    onboarding: 'onboarding.mila.use',
+  };
+  const permKey = PERM_BY_MODULE[moduleKey];
   if (!(await requirePermission(req, permKey))) {
     return res.status(403).json({ error: 'Geen rechten (' + permKey + ')' });
   }
@@ -86,11 +94,12 @@ export default async function handler(req, res) {
   try {
     const cutoffIso = new Date(Date.now() - maxAgeMin * 60 * 1000).toISOString();
 
-    // Voor module=events filteren we strikt op module='events' zodat we geen
-    // finance-suggestion teruggeven aan de Simone-UI. Voor module=finance
-    // (default) skippen we de eq-filter zodat byte-identiek pre-stap-2c gedrag
-    // behouden blijft (legacy rijen zonder module-discriminator matchen
-    // gewoon mee — backwards-compat met de pre-E1.x history).
+    // Voor module=events en module=onboarding filteren we strikt op die
+    // exact-match module zodat we geen finance-suggestion teruggeven aan de
+    // Simone-/Mila-UI. Voor module=finance (default) skippen we de eq-filter
+    // zodat byte-identiek pre-stap-2c gedrag behouden blijft (legacy rijen
+    // zonder module-discriminator matchen gewoon mee — backwards-compat met
+    // de pre-E1.x history).
     let q = supabaseAdmin
       .from('joost_suggestions')
       .select(`
@@ -102,7 +111,8 @@ export default async function handler(req, res) {
       .gte('created_at', cutoffIso)
       .order('created_at', { ascending: false })
       .limit(1);
-    if (moduleKey === 'events') q = q.eq('module', 'events');
+    if (moduleKey === 'events')     q = q.eq('module', 'events');
+    if (moduleKey === 'onboarding') q = q.eq('module', 'onboarding');
     const { data, error } = await q;
 
     if (error) throw new Error('joost-suggestions-lookup: ' + error.message);
