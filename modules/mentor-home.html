@@ -367,8 +367,12 @@
     // Te-doen tellers — onafhankelijke loaders schrijven naar deze keys
     // en triggeren renderTodo(). State-key vermist => geen item.
     todoCounters: {
-      assessmentsOpen: 0,   // van loadAndRenderAssessments
-      waitingReplies : 0,   // van loadAndRenderWaitingReplies (inbox onboarding)
+      // Assessments-teller is derived: assessmentsToDo = totalStudents − assessedCount.
+      // null = nog niet geladen; renderTodo() laat dan de regel weg (verschijnt
+      // vanzelf zodra beide loaders binnen zijn — idempotent).
+      totalStudents : null,  // van loadAndRenderStudents (length van mijn-studenten)
+      assessedCount : null,  // van loadAndRenderAssessments (distinct student_id deze maand)
+      waitingReplies: 0,     // van loadAndRenderWaitingReplies (inbox onboarding)
     },
   };
 
@@ -528,6 +532,13 @@
     const students = payload?.students || [];
     document.getElementById('kpiStudents').textContent = String(students.length);
 
+    // Te-doen-teller (assessments) is derived: totaal - reeds beoordeeld.
+    // Schrijf het totaal naar state + herrender; assessment-loader doet
+    // hetzelfde voor de beoordeeld-teller. Idempotent: last writer wint
+    // niets weg, beide writes raken aparte keys.
+    state.todoCounters.totalStudents = students.length;
+    renderTodo();
+
     const wrap = document.getElementById('mhStudents');
     if (!wrap) return;
     if (!payload?.linked) {
@@ -568,7 +579,6 @@
       if (r.ok) payload = await r.json();
     } catch (e) { /* fail-soft */ }
     const list = payload?.assessments || [];
-    const open = list.filter((a) => a.status !== 'completed' && a.status !== 'done');
     const wrap = document.getElementById('mhAssessments');
     if (wrap) {
       if (list.length === 0) {
@@ -583,10 +593,15 @@
       }
     }
 
-    // Te doen-blok: schrijf naar state + herrender. waiting-replies wordt
-    // parallel geladen en triggert zelf renderTodo() — beide updates zijn
-    // idempotent en lezen uit dezelfde state.
-    state.todoCounters.assessmentsOpen = open.length;
+    // Te-doen-teller is derived (totaal − beoordeeld). Elke record in
+    // payload.assessments = 1 beoordeling; statussen op_schema/aandacht/
+    // risico/niet_actief tellen ALLEMAAL als 'beoordeeld' — dus we filteren
+    // niet meer op status. We tellen distinct student_id zodat meerdere
+    // records voor dezelfde student niet dubbel meetellen.
+    const distinctAssessed = new Set(
+      list.map((a) => a?.student_id).filter((id) => id != null && id !== '')
+    ).size;
+    state.todoCounters.assessedCount = distinctAssessed;
     renderTodo();
   }
 
@@ -612,16 +627,23 @@
   function renderTodo() {
     const wrap = document.getElementById('mhTodo');
     if (!wrap) return;
-    const assessmentsOpen = Number(state.todoCounters.assessmentsOpen) || 0;
-    const waitingReplies  = Number(state.todoCounters.waitingReplies)  || 0;
+    // Derived assessments-teller: totaal studenten − reeds beoordeeld.
+    // Zolang totalStudents nog null is (mentor-my-students nog niet binnen)
+    // laten we de regel weg — geen valse 'klaar'-claim of 'N=jouw aantal'
+    // op moment dat één bron nog ontbreekt. Na de students-load roept de
+    // loader renderTodo() opnieuw aan en verschijnt de regel alsnog.
+    const total     = state.todoCounters.totalStudents;
+    const assessed  = Number(state.todoCounters.assessedCount) || 0;
+    const assessmentsToDo = (total == null) ? null : Math.max(0, Number(total) - assessed);
+    const waitingReplies  = Number(state.todoCounters.waitingReplies) || 0;
     const items = [];
-    if (assessmentsOpen > 0) {
+    if (assessmentsToDo != null && assessmentsToDo > 0) {
       items.push({
         href: '/modules/mentor-dashboard.html#assessments',
         icon: 'ti-clipboard-check',
         title: 'Assessments beoordelen',
-        sub: assessmentsOpen + ' student(en) wachten op je beoordeling',
-        count: assessmentsOpen,
+        sub: assessmentsToDo + ' student(en) wachten op je beoordeling',
+        count: assessmentsToDo,
       });
     }
     if (waitingReplies > 0) {
