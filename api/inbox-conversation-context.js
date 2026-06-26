@@ -40,6 +40,7 @@
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
+import { checkOnboardingConvAccess } from './_lib/onboardingScope.js';
 import { customerDisplayName } from './_lib/customer-name.js';
 
 const TWENTY_FOUR_HOURS_MS = 24 * 60 * 60 * 1000;
@@ -143,13 +144,22 @@ export default async function handler(req, res) {
 
   try {
     // 1) Conversation ophalen. 404 als 'ie niet bestaat zodat UI helder kan reageren.
+    // Fase 2b: phone_number_id meeselecteren voor de onboarding-conv-ACL hook.
     const { data: conv, error: convErr } = await supabaseAdmin
       .from('whatsapp_conversations')
-      .select('id, phone_number, customer_id, last_inbound_at')
+      .select('id, phone_number, phone_number_id, customer_id, last_inbound_at')
       .eq('id', convId)
       .maybeSingle();
     if (convErr) throw new Error('conversation lookup: ' + convErr.message);
     if (!conv) return res.status(404).json({ error: 'Conversation niet gevonden' });
+
+    // Fase 2b: mentor-scoping op onboarding-tak. Hook skipt direct voor
+    // seesAll en voor finance/events-convs.
+    const acl = await checkOnboardingConvAccess(req, {
+      phoneNumberId: conv.phone_number_id,
+      customerId:    conv.customer_id,
+    });
+    if (!acl.ok) return res.status(acl.status).json({ error: acl.error });
 
     // 24h customer-service window — server-side bepaald zodat client geen
     // klok-skew problemen heeft. Spiegelt inbox-messages-list.js + inbox-send.js.

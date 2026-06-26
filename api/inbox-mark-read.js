@@ -11,6 +11,7 @@
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
+import { checkOnboardingConvAccess } from './_lib/onboardingScope.js';
 import { markAsRead, getConfigStatus, MetaNotConfiguredError } from './_lib/meta-whatsapp.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -43,14 +44,23 @@ export default async function handler(req, res) {
   if (!UUID_RE.test(convId)) return res.status(400).json({ error: 'conversation_id moet geldige uuid zijn' });
 
   try {
-    // Conversation bestaat-check
+    // Conversation bestaat-check. Fase 2b: phone_number_id + customer_id
+    // meeselecteren voor de onboarding-ACL-hook.
     const { data: conv, error: convErr } = await supabaseAdmin
       .from('whatsapp_conversations')
-      .select('id, unread_count')
+      .select('id, unread_count, phone_number_id, customer_id')
       .eq('id', convId)
       .maybeSingle();
     if (convErr) throw new Error('conversation lookup: ' + convErr.message);
     if (!conv) return res.status(404).json({ error: 'Conversation niet gevonden' });
+
+    // Fase 2b: mentor-scoping op onboarding-tak. Hook skipt voor seesAll
+    // en voor finance/events-convs.
+    const acl = await checkOnboardingConvAccess(req, {
+      phoneNumberId: conv.phone_number_id,
+      customerId:    conv.customer_id,
+    });
+    if (!acl.ok) return res.status(acl.status).json({ error: acl.error });
 
     // Lokale reset (altijd doen, ook als Meta niet beschikbaar)
     if ((conv.unread_count || 0) > 0) {

@@ -39,6 +39,7 @@
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
+import { checkOnboardingConvAccess } from './_lib/onboardingScope.js';
 import { getClientIp } from './_lib/audit-customer.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -180,6 +181,30 @@ export default async function handler(req, res) {
     const permKey = current.module === 'events' ? 'events.simone.use' : 'finance.joost.use';
     if (!(await requirePermission(req, permKey))) {
       return res.status(403).json({ error: 'Geen rechten (' + permKey + ')' });
+    }
+
+    // Fase 2b: voor onboarding-suggesties → mentor mag alleen z'n eigen.
+    // Conv-fetch voor de ACL hook. Hook skipt voor seesAll en voor
+    // finance/events-convs. Bij module=onboarding zonder geldige conv-link:
+    // fail-closed (return 403 — strikter is veiliger).
+    if (current.module === 'onboarding' && current.conversation_id) {
+      try {
+        const { data: convAcl } = await supabaseAdmin
+          .from('whatsapp_conversations')
+          .select('phone_number_id, customer_id')
+          .eq('id', current.conversation_id)
+          .maybeSingle();
+        if (convAcl) {
+          const acl = await checkOnboardingConvAccess(req, {
+            phoneNumberId: convAcl.phone_number_id,
+            customerId:    convAcl.customer_id,
+          });
+          if (!acl.ok) return res.status(acl.status).json({ error: acl.error });
+        }
+      } catch (e) {
+        console.error('[joost-mark-outcome] ACL lookup:', e?.message || e);
+        return res.status(500).json({ error: 'Toegangscontrole faalde' });
+      }
     }
 
     // ========================================================================

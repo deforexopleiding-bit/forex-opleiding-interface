@@ -41,6 +41,7 @@
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
+import { checkOnboardingConvAccess } from './_lib/onboardingScope.js';
 import { getClientIp } from './_lib/audit-customer.js';
 import { sendTemplate, getConfigStatus, MetaNotConfiguredError } from './_lib/meta-whatsapp.js';
 import { buildMetaVariablesFromMapping, AVAILABLE_VARIABLES } from './_lib/template-variables.js';
@@ -161,6 +162,14 @@ export default async function handler(req, res) {
     if (convErr) throw new Error('conversation lookup: ' + convErr.message);
     if (!conv) return res.status(404).json({ error: 'Conversation niet gevonden' });
     if (!conv.phone_number) return res.status(400).json({ error: 'Conversation heeft geen phone_number' });
+
+    // Fase 2b: mentor-scoping op onboarding-tak. Hook skipt voor seesAll
+    // en voor finance/events-convs. VEILIGHEID: vóór de template-send.
+    const acl = await checkOnboardingConvAccess(req, {
+      phoneNumberId: conv.phone_number_id,
+      customerId:    conv.customer_id,
+    });
+    if (!acl.ok) return res.status(acl.status).json({ error: acl.error });
 
     // ─── Refined module-check (parallel met inbox-send.js) ──────────────────
     // Autoritatieve module-bepaling op basis van conv.phone_number_id →

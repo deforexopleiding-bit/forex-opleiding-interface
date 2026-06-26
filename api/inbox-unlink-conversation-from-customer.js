@@ -30,6 +30,7 @@
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
+import { isMentorOnly } from './_lib/onboardingScope.js';
 import { getClientIp } from './_lib/audit-customer.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -71,6 +72,11 @@ export default async function handler(req, res) {
     ? true : await requirePermission(req, 'onboarding.inbox.send');
   if (!hasFinanceSend && !hasSimoneUse && !hasOnboardingSend) {
     return res.status(403).json({ error: 'Geen rechten (finance.inbox.send, events.simone.use of onboarding.inbox.send)' });
+  }
+
+  // Fase 2b: een view_own-only-mentor mag GEEN klant-koppelingen ontkoppelen.
+  if (await isMentorOnly(req)) {
+    return res.status(403).json({ error: 'Mentor mag geen klant-koppelingen wijzigen' });
   }
 
   const body = req.body || {};

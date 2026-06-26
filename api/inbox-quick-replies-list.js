@@ -20,6 +20,7 @@
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
+import { checkOnboardingConvAccess } from './_lib/onboardingScope.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -53,9 +54,10 @@ export default async function handler(req, res) {
 
   try {
     // 1) Conversation-lookup voor afzendlijn (phone_number_id) als hint.
+    // Fase 2b: customer_id meeselecteren voor onboarding-ACL.
     const { data: conv, error: convErr } = await supabaseAdmin
       .from('whatsapp_conversations')
-      .select('id, phone_number_id')
+      .select('id, phone_number_id, customer_id')
       .eq('id', convId)
       .maybeSingle();
     if (convErr) {
@@ -63,6 +65,14 @@ export default async function handler(req, res) {
       return res.status(500).json({ error: convErr.message });
     }
     if (!conv) return res.status(404).json({ error: 'Conversation niet gevonden' });
+
+    // Fase 2b: mentor-scoping op onboarding-tak. Hook skipt voor seesAll
+    // en voor finance/events-convs.
+    const acl = await checkOnboardingConvAccess(req, {
+      phoneNumberId: conv.phone_number_id,
+      customerId:    conv.customer_id,
+    });
+    if (!acl.ok) return res.status(acl.status).json({ error: acl.error });
 
     // 2) Bepaal business_account_id (zelfde fallback als inbox-template-list).
     let businessAccountId = null;

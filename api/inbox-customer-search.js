@@ -25,6 +25,7 @@
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
+import { isMentorOnly } from './_lib/onboardingScope.js';
 import { customerDisplayName } from './_lib/customer-name.js';
 
 export default async function handler(req, res) {
@@ -48,6 +49,13 @@ export default async function handler(req, res) {
     ? true : await requirePermission(req, 'onboarding.inbox.send');
   if (!hasFinanceSend && !hasSimoneUse && !hasOnboardingSend) {
     return res.status(403).json({ error: 'Geen rechten (finance.inbox.send, events.simone.use of onboarding.inbox.send)' });
+  }
+
+  // Fase 2b: een view_own-only-mentor mag NIET door alle klanten zoeken
+  // (dit endpoint is voor admins die conversaties handmatig willen koppelen).
+  // Finance/events-gebruikers (zonder onboarding.view_own) blijven ongewijzigd.
+  if (await isMentorOnly(req)) {
+    return res.status(403).json({ error: 'Mentor mag niet door alle klanten zoeken' });
   }
 
   const q = String(req.query.q || '').trim();
