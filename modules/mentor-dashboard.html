@@ -847,6 +847,39 @@
     return '<span class="badge badge-green">✅ Beoordeeld</span>';
   }
 
+  // ── Overdue-facturen per student (rode badge) ───────────────────────────
+  // Map lowercased-email → aantal TE LATE facturen. Server-scoped via
+  // mentor_user_id → onboardings.customer_id; UI doet alleen lookup.
+  const _overdueByEmail = new Map();
+  async function loadOverdueMap() {
+    _overdueByEmail.clear();
+    const apiFetch = window.AgentShared?.apiFetch;
+    if (typeof apiFetch !== 'function') return;
+    try {
+      const r = await apiFetch('/api/mentor-students-invoice-status');
+      const d = await r.json();
+      if (!r.ok) throw new Error(d?.error || 'overdue fetch failed');
+      const byEmail = (d && typeof d.byEmail === 'object' && d.byEmail) ? d.byEmail : {};
+      for (const [email, count] of Object.entries(byEmail)) {
+        const n = Number(count) || 0;
+        if (n > 0) _overdueByEmail.set(String(email).toLowerCase(), n);
+      }
+    } catch (e) {
+      console.warn('[mentor-dashboard] overdue:', e?.message || e);
+    }
+  }
+
+  function _overdueBadgeHtml(email) {
+    const e = String(email || '').trim().toLowerCase();
+    if (!e) return '';
+    const n = _overdueByEmail.get(e) || 0;
+    if (n <= 0) return '';
+    const label = (n === 1) ? '1 factuur te laat' : (n + ' facturen te laat');
+    // Inline danger-stijl — consistent met andere mentor-home overdue-badge,
+    // werkt zonder een nieuwe .badge-red CSS-klasse in te voeren.
+    return `<span class="badge" style="background:rgba(220,38,38,0.16);color:#991b1b">${label}</span>`;
+  }
+
   async function loadFundedCertsMap() {
     _fundedCerts.clear();
     const apiFetch = window.AgentShared?.apiFetch;
@@ -887,6 +920,7 @@
       const email     = esc(s.email || '');
       const program   = s.program ? `<span class="badge badge-blue">${esc(s.program)}</span>` : '';
       const onboard   = s.onboarding_status ? `<span class="badge badge-amber">${esc(s.onboarding_status)}</span>` : '';
+      const overdue   = _overdueBadgeHtml(s.email);
       const callsTotal  = Number(s.calls_1on1_total) || 0;
       const callsDone   = Number(s.calls_1on1_done) || 0;
       const noShows     = Number(s.no_shows) || 0;
@@ -895,7 +929,7 @@
         <div class="student-card" data-student-id="${sid}">
           <div class="student-head" data-toggle="${sid}">
             <div>
-              <div class="student-name">${name} ${program} ${onboard}</div>
+              <div class="student-name">${name} ${program} ${onboard} ${overdue}</div>
               <div class="student-meta">${email}</div>
               <div class="funded-row" id="funded-row-${sid}" style="margin-top:6px">
                 ${_renderFundedRowHtml(rawSid, rawName, cert)}
@@ -1327,10 +1361,11 @@
       // Parallel: studenten + funded-certs + assessments. _fundedCerts /
       // _assessments zijn leeg als hun fetch faalt; render valt terug op
       // upload-knop respectievelijk "Open" badge.
-      const [r, _f, _a] = await Promise.all([
+      const [r, _f, _a, _o] = await Promise.all([
         apiFetch('/api/mentor-my-students'),
         loadFundedCertsMap(),
         loadAssessmentsMap(),
+        loadOverdueMap(),
       ]);
       const d = await r.json();
       if (!r.ok) throw new Error(d?.error || 'students fetch failed');

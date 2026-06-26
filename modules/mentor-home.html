@@ -364,6 +364,11 @@
     to:     null,
     profile: null,
     upcomingCache: null, // hergebruik upcoming voor KPI + hero + sidebar
+    // Map lowercased-email -> aantal te-late facturen (van
+    // /api/mentor-students-invoice-status). null = nog niet geladen.
+    // De badges worden post-render geïnjecteerd zodat een trage overdue-
+    // fetch de studenten-render niet vertraagt.
+    overdueByEmail: null,
     // Te-doen tellers — onafhankelijke loaders schrijven naar deze keys
     // en triggeren renderTodo(). State-key vermist => geen item.
     todoCounters: {
@@ -561,7 +566,8 @@
       else if (status && /actief|live|onboarded/i.test(status)) { badgeCls = 'ok'; }
       const sid = s.bubble_student_id || '';
       const url = '/modules/mentor-dashboard.html#student=' + encodeURIComponent(sid);
-      return '<a href="' + esc(url) + '" class="mh-student-card" style="text-decoration:none">' +
+      const emailLc = String(s.email || '').trim().toLowerCase();
+      return '<a href="' + esc(url) + '" class="mh-student-card" data-student-email="' + esc(emailLc) + '" style="text-decoration:none">' +
                '<div>' +
                  '<div class="mh-student-name">' + esc(s.name || s.email || '—') + '</div>' +
                  '<div class="mh-student-meta">' + esc(label) + (s.program ? ' · ' + esc(s.program) : '') + '</div>' +
@@ -570,6 +576,46 @@
                '<span class="mh-student-badge ' + badgeCls + '">' + esc(badgeTxt) + '</span>' +
              '</a>';
     }).join('');
+    // Inject overdue-badges als de fetch al binnen is; anders doet de
+    // overdue-loader het zelf na completion (idempotent).
+    applyOverdueBadges();
+  }
+
+  /* ── Overdue-facturen badge (per student-card) ───────────────────────────
+     Loader fetcht /api/mentor-students-invoice-status (server-scoped via
+     mentor_user_id) en plakt een rode "N facturen te laat"-badge op elke
+     .mh-student-card waar de lowercased email matched. Fail-soft. */
+  async function loadAndRenderOverdueBadges() {
+    let payload = null;
+    try {
+      const r = await window.AgentShared.apiFetch('/api/mentor-students-invoice-status');
+      if (r.ok) payload = await r.json();
+    } catch (e) { /* fail-soft */ }
+    state.overdueByEmail = (payload && typeof payload.byEmail === 'object' && payload.byEmail) ? payload.byEmail : {};
+    applyOverdueBadges();
+  }
+
+  function applyOverdueBadges() {
+    if (!state.overdueByEmail) return;
+    document.querySelectorAll('.mh-student-card[data-student-email]').forEach((card) => {
+      const email = (card.dataset.studentEmail || '').toLowerCase();
+      const count = email ? (Number(state.overdueByEmail[email]) || 0) : 0;
+      let badge = card.querySelector('.mh-overdue-badge');
+      if (count > 0) {
+        const label = (count === 1) ? '1 factuur te laat' : (count + ' facturen te laat');
+        if (!badge) {
+          badge = document.createElement('span');
+          badge.className = 'mh-student-badge mh-overdue-badge';
+          badge.style.background = 'rgba(220,38,38,0.16)';
+          badge.style.color      = '#991b1b';
+          badge.style.marginLeft = '6px';
+          card.appendChild(badge);
+        }
+        badge.textContent = label;
+      } else if (badge) {
+        badge.remove();
+      }
+    });
   }
 
   async function loadAndRenderAssessments() {
@@ -893,6 +939,7 @@
     loadAndRenderTaken().catch((e) => console.warn('[mh] taken', e?.message || e));
     loadAndRenderOffertes().catch((e) => console.warn('[mh] offertes', e?.message || e));
     loadAndRenderWaitingReplies().catch((e) => console.warn('[mh] waiting-replies', e?.message || e));
+    loadAndRenderOverdueBadges().catch((e) => console.warn('[mh] overdue-badges', e?.message || e));
   })();
 
   if (window._authSharedReady) {
