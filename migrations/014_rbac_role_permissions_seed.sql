@@ -196,7 +196,10 @@ INSERT INTO public.role_permissions (role, feature_key, allowed) VALUES
   ('mentor','events.inbox.view',true),
   ('mentor','kennisbank.module.access',true),
   ('mentor','taken.module.access',true),
-  ('mentor','meetings.module.access',true)
+  ('mentor','meetings.module.access',true),
+  ('mentor','onboarding.view_own',true),
+  ('mentor','onboarding.inbox.view',true),
+  ('mentor','onboarding.inbox.send',true)
 ON CONFLICT (role, feature_key) DO NOTHING;
 
 COMMIT;
@@ -373,5 +376,8 @@ COMMIT;
 --   ('mentor','events.inbox.view'),
 --   ('mentor','kennisbank.module.access'),
 --   ('mentor','taken.module.access'),
---   ('mentor','meetings.module.access')
+--   ('mentor','meetings.module.access'),
+--   ('mentor','onboarding.view_own'),
+--   ('mentor','onboarding.inbox.view'),
+--   ('mentor','onboarding.inbox.send')
 -- );
