@@ -36,8 +36,36 @@ window._authSharedReady = (async function () {
   // 3. Create browser Supabase client
   window.supabase = window.supabase.createClient(supabaseUrl, supabaseAnonKey);
 
+  // ── Role-based landing-URL map ─────────────────────────────────────────
+  // Primaire rol (profiles.role) → URL waar deze rol na login op moet
+  // landen + waar de Dashboard-nav-link naar wijst. Whitelist-mapping;
+  // onbekende of ontbrekende rollen vallen terug op '/index.html'
+  // (NOOIT een lege string of redirect-loop). Manager landt bewust op
+  // Control-center (operationeel commando-cabin), sales op het sales-
+  // dashboard (dat zelf doorverwijst naar sales.html?tab=dashboard) en
+  // mentor op het mentor-dashboard. Super_admin / admin / marketing /
+  // administratie / viewer / anders → '/index.html' (default).
+  const ROLE_LANDING = {
+    super_admin:    '/index.html',
+    admin:          '/index.html',
+    manager:        '/modules/control-center.html',
+    sales:          '/modules/sales-dashboard.html',
+    mentor:         '/modules/mentor-dashboard.html',
+    marketing:      '/index.html',
+    administratie:  '/index.html',
+    viewer:         '/index.html',
+  };
+  function getRoleLandingUrl(role) {
+    if (typeof role === 'string' && ROLE_LANDING[role]) return ROLE_LANDING[role];
+    return '/index.html';
+  }
+
   // 4. AuthShared helpers
   window.AuthShared = {
+    // Role-landing helpers (exposed zodat sidebar.js + login.html dezelfde
+    // mapping gebruiken — single source of truth).
+    ROLE_LANDING,
+    getRoleLandingUrl,
     async getSession() {
       const { data } = await window.supabase.auth.getSession();
       return data?.session || null;
