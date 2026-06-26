@@ -96,16 +96,57 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: 'Target heeft geen e-mailadres' });
     }
 
-    // ── Anti-escalatie ──────────────────────────────────────────────────
-    // (a) super_admin is NOOIT impersoneerbaar (ook niet door een super_admin).
-    if (target.role === 'super_admin') {
-      return res.status(403).json({ error: 'super_admin is niet impersoneerbaar' });
+    // ── Volledige rol-set ophalen (KRITIEK voor anti-escalatie) ─────────
+    // De anti-escalatie MOET op de volledige rol-set draaien (profiles.role
+    // + user_roles), niet alleen op de primaire rol. user_has_permission()
+    // (en daarmee de super_admin-bypass) doet een union over user_roles, dus
+    // een target met een lage primaire rol maar super_admin/admin/manager in
+    // user_roles is óók super_admin-equivalent — en mag dus niet
+    // geïmpersoneerd worden door een lager-geprivilegieerde caller.
+    //
+    // FAIL-CLOSED: bij elke fout op deze fetch weigeren we de impersonatie
+    // i.p.v. door te vallen op de zwakkere profiles.role-check.
+    const { data: userRolesRows, error: rolesErr } = await supabaseAdmin
+      .from('user_roles')
+      .select('role')
+      .eq('user_id', targetId);
+    if (rolesErr) {
+      console.error('[admin-impersonate] user_roles lookup:', rolesErr.message);
+      return res.status(403).json({ error: 'Target-rol niet impersoneerbaar' });
     }
-    // (b) Manager mag alleen sales/mentor/marketing/administratie/viewer.
-    if (callerRole === 'manager' && !MANAGER_TARGET_ROLES.has(target.role)) {
-      return res.status(403).json({
-        error: `Manager mag rol '${target.role}' niet impersoneren`,
-      });
+    const targetRoleSet = new Set();
+    if (target.role) targetRoleSet.add(target.role);
+    for (const r of (userRolesRows || [])) {
+      if (r && typeof r.role === 'string' && r.role) targetRoleSet.add(r.role);
+    }
+    // Defensief: lege rol-set is óók verdacht (een actieve user hoort minstens
+    // 1 rol te hebben). Fail-closed.
+    if (targetRoleSet.size === 0) {
+      console.error('[admin-impersonate] target heeft 0 rollen (verdacht):', targetId);
+      return res.status(403).json({ error: 'Target-rol niet impersoneerbaar' });
+    }
+
+    // ── Anti-escalatie ──────────────────────────────────────────────────
+    // Beslissingen baseren op targetRoleSet (volledige rol-set), niet meer
+    // op target.role alleen. Foutmeldingen blijven generiek — we lekken de
+    // rollenlijst van de target NIET naar de caller.
+    //
+    // (a) Bevat de volledige rol-set 'super_admin'? NOOIT impersoneerbaar,
+    //     ook niet door een super_admin-caller (anti-laterale-clone).
+    if (targetRoleSet.has('super_admin')) {
+      return res.status(403).json({ error: 'Target-rol niet impersoneerbaar' });
+    }
+    // (b) Voor manager-caller MOETEN alle rollen van de target in de manager-
+    //     whitelist zitten. Eén "hogere" rol (admin/manager/super_admin) in
+    //     user_roles → 403, ook als de primaire rol op profiles bv. 'sales'
+    //     staat. Dit dicht de escalatie-route via de secundaire-rollen
+    //     volledig.
+    if (callerRole === 'manager') {
+      for (const role of targetRoleSet) {
+        if (!MANAGER_TARGET_ROLES.has(role)) {
+          return res.status(403).json({ error: 'Target-rol niet impersoneerbaar' });
+        }
+      }
     }
 
     // ── Token minten (magiclink, single-use, zonder mail) ──────────────

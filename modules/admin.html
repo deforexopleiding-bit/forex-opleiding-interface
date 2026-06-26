@@ -2196,10 +2196,27 @@ function canImpersonateClient(targetUser) {
   if (!currentProfile || !targetUser) return false;
   if (targetUser.id === currentProfile.id) return false;
   if (!targetUser.is_active) return false;
-  if (targetUser.role === 'super_admin') return false;
+  // Volledige rol-set: u.all_roles uit /api/admin-users + fallback op u.role.
+  // Server-anti-escalatie draait op user_roles ∪ profiles.role; client-side
+  // doen we hetzelfde zodat de knop niet getoond wordt voor onmogelijke
+  // impersonaties. Server blijft autoritatief.
+  const roleSet = new Set();
+  if (Array.isArray(targetUser.all_roles)) {
+    for (const r of targetUser.all_roles) {
+      if (typeof r === 'string' && r) roleSet.add(r);
+    }
+  }
+  if (typeof targetUser.role === 'string' && targetUser.role) roleSet.add(targetUser.role);
+  if (roleSet.size === 0) return false; // verdacht — verberg knop
+  // (a) Bevat super_admin? NOOIT impersoneerbaar.
+  if (roleSet.has('super_admin')) return false;
   if (currentProfile.role === 'super_admin') return true;
   if (currentProfile.role === 'manager') {
-    return IMPERSONATION_MANAGER_TARGETS.has(targetUser.role);
+    // Alle rollen moeten in de manager-whitelist zitten.
+    for (const r of roleSet) {
+      if (!IMPERSONATION_MANAGER_TARGETS.has(r)) return false;
+    }
+    return true;
   }
   return false;
 }
