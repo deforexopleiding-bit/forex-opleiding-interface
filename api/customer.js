@@ -5,13 +5,19 @@
 //   POST   (body)             → nieuwe klant aanmaken                [2A.3 commit 1]
 //   PATCH  ?id=<uuid> (body)  → klant bijwerken                      [2A.3 commit 2]
 //
-// Auth: verifyAdmin(req) op ALLE methods (ADMIN_ROLES gate — consistent met
-// /api/customers; granulaire customer.* check volgt bij matrix-wide rollout).
+// Auth (method-gesplitst):
+//   GET    → verifyAdmin(req) OF requirePermission(req,'customer.module.access').
+//            Manager/sales/mentor hebben customer.module.access via migratie
+//            014/015 + de klanten.html page-gate; READ moet voor hen open zijn
+//            anders kunnen ze geen klant openen vanuit aanwezige/onboarding.
+//   POST   → verifyAdmin(req) — admin-only (writes blijven beschermd).
+//   PATCH  → verifyAdmin(req) — admin-only.
 //
 // Audit: POST/PATCH/archive schrijven naar audit_log via _lib/audit-customer.js
 // (fail-soft — audit-fail breekt de mutatie niet).
 
 import { supabaseAdmin, verifyAdmin } from './supabase.js';
+import { requirePermission } from './_lib/requirePermission.js';
 import { logCustomerAudit } from './_lib/audit-customer.js';
 import { tlFetch } from './_lib/teamleader-token.js';
 
@@ -35,14 +41,40 @@ export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
   res.setHeader('Content-Type', 'application/json');
 
-  const admin = await verifyAdmin(req);
-  if (!admin) {
-    return res.status(403).json({ error: 'Toegang geweigerd. Admin-rol vereist.' });
+  // Method-resolve VOOR auth — zo krijgen onbekende methods 405 i.p.v. 403,
+  // wat clients sneller naar de juiste oorzaak leidt.
+  if (req.method === 'GET') {
+    // GET = read-only detail. Admin mag altijd; niet-admin mag mits hij de
+    // customer.module.access-key heeft (manager/sales/mentor via 014/015).
+    // Identiek aan de page-gate op klanten.html — anders kan een mentor de
+    // klant openen vanuit aanwezige/onboarding maar het detail niet laden.
+    const admin = await verifyAdmin(req);
+    if (!admin) {
+      const allowed = await requirePermission(req, 'customer.module.access');
+      if (!allowed) {
+        return res.status(403).json({ error: 'Toegang geweigerd. customer.module.access vereist.' });
+      }
+    }
+    return handleGet(req, res);
   }
 
-  if (req.method === 'GET')   return handleGet(req, res);
-  if (req.method === 'POST')  return handlePost(req, res, admin);
-  if (req.method === 'PATCH') return handlePatch(req, res, admin);
+  if (req.method === 'POST') {
+    // Create blijft admin-only — geen verbreding naar manager/sales/mentor.
+    const admin = await verifyAdmin(req);
+    if (!admin) {
+      return res.status(403).json({ error: 'Toegang geweigerd. Admin-rol vereist.' });
+    }
+    return handlePost(req, res, admin);
+  }
+
+  if (req.method === 'PATCH') {
+    // Update blijft admin-only.
+    const admin = await verifyAdmin(req);
+    if (!admin) {
+      return res.status(403).json({ error: 'Toegang geweigerd. Admin-rol vereist.' });
+    }
+    return handlePatch(req, res, admin);
+  }
 
   res.setHeader('Allow', 'GET, POST, PATCH');
   return res.status(405).json({ error: `Method ${req.method} not allowed` });
