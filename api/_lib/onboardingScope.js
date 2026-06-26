@@ -67,3 +67,174 @@ export async function getOnboardingScope(req) {
     return empty;
   }
 }
+
+// Fase 2b — inbox-scoping. Hulp-functies voor het filteren van de
+// onboarding-tak van het gedeelde inbox-systeem voor een view_own-mentor.
+
+/**
+ * Returnt de unieke set customer_id's waar de gegeven user (typisch een
+ * view_own-mentor) als mentor aan gekoppeld is via een onboarding-rij.
+ * Wordt door inbox-conversations-list?module=onboarding gebruikt als
+ * harde server-side WHERE-clause: customer_id IN (...).
+ *
+ * Onboardings zonder customer_id worden overgeslagen — die hebben sowieso
+ * geen WhatsApp-conversatie en horen niet in de set. is_test=true rijen
+ * blijven we hier WEL meenemen (komen niet in de echte inbox, geen lek).
+ *
+ * Fail-closed: bij elke fout returnt deze functie een lege array. Met een
+ * lege array filtert de caller naar 0 hits — strikter is veiliger dan
+ * fail-open (geen lijst < verkeerde mentor's lijst).
+ *
+ * @param {string} userId  auth.users.id
+ * @returns {Promise<string[]>}
+ */
+export async function getMentorCustomerIds(userId) {
+  if (!userId || typeof userId !== 'string') return [];
+  try {
+    const { data, error } = await supabaseAdmin
+      .from('onboardings')
+      .select('customer_id')
+      .eq('mentor_user_id', userId)
+      .not('customer_id', 'is', null);
+    if (error) {
+      console.error('[onboardingScope.getMentorCustomerIds]', error.message);
+      return [];
+    }
+    const set = new Set();
+    for (const r of (data || [])) {
+      if (r && typeof r.customer_id === 'string') set.add(r.customer_id);
+    }
+    return Array.from(set);
+  } catch (err) {
+    console.error('[onboardingScope.getMentorCustomerIds] exception:', err?.message || err);
+    return [];
+  }
+}
+
+/**
+ * Per-conversatie ownership-guard. Returnt true als de user als mentor aan
+ * minstens één onboarding van customerId gekoppeld is. Wordt door alle
+ * per-conv inbox-endpoints (messages-list / context / send / template /
+ * mark-read / suggest / etc.) aangeroepen NA de autoritatieve conv→module-
+ * resolve, voor conversaties in de onboarding-tak.
+ *
+ * customerId=null/undefined → false (een conv zonder customer kan een
+ * mentor sowieso niet "bezitten" — admin moet 'm eerst koppelen).
+ *
+ * Fail-closed: bij elke fout returnt false (denied is veiliger dan allow).
+ *
+ * @param {string} userId
+ * @param {string|null} customerId
+ * @returns {Promise<boolean>}
+ */
+export async function mentorOwnsCustomer(userId, customerId) {
+  if (!userId || typeof userId !== 'string') return false;
+  if (!customerId || typeof customerId !== 'string') return false;
+  try {
+    const { data, error } = await supabaseAdmin
+      .from('onboardings')
+      .select('id')
+      .eq('mentor_user_id', userId)
+      .eq('customer_id', customerId)
+      .limit(1)
+      .maybeSingle();
+    if (error) {
+      console.error('[onboardingScope.mentorOwnsCustomer]', error.message);
+      return false;
+    }
+    return !!data;
+  } catch (err) {
+    console.error('[onboardingScope.mentorOwnsCustomer] exception:', err?.message || err);
+    return false;
+  }
+}
+
+/**
+ * Resolve de inbox-module van een conversatie via z'n phone_number_id.
+ * Returnt 'finance' | 'events' | 'onboarding' | null. null bij onbekend
+ * pn-id of fout — caller behandelt dat als "niet-onboarding" (skipt de
+ * onboarding-specifieke ownership-guard).
+ *
+ * @param {string|null} phoneNumberId
+ * @returns {Promise<string|null>}
+ */
+export async function resolveConversationModule(phoneNumberId) {
+  if (!phoneNumberId || typeof phoneNumberId !== 'string') return null;
+  try {
+    const { data, error } = await supabaseAdmin
+      .from('whatsapp_module_config')
+      .select('module')
+      .eq('phone_number_id', phoneNumberId)
+      .eq('is_active', true)
+      .maybeSingle();
+    if (error) {
+      console.error('[onboardingScope.resolveConversationModule]', error.message);
+      return null;
+    }
+    return (data && typeof data.module === 'string') ? data.module : null;
+  } catch (err) {
+    console.error('[onboardingScope.resolveConversationModule] exception:', err?.message || err);
+    return null;
+  }
+}
+
+/**
+ * Block-helper voor klant-doorzoeken / koppel-endpoints (customer-search /
+ * link-conv-to-customer / unlink / attendee-search / link-conv-to-attendee /
+ * inbox-conversation-by-customer). Een view_own-only-mentor mag NIET:
+ *   - door alle klanten in de admin-customer-zoek heen.
+ *   - conversaties zelf aan andere klanten/attendees koppelen of ontkoppelen.
+ *   - finance-WABA-conv-id's enumeren voor klant-ids die niet van 'm zijn.
+ *
+ * Returnt true als de caller geblokkeerd moet worden (mentor-only),
+ * anders false (finance/events/admin → bestaand gedrag).
+ *
+ * @returns {Promise<boolean>}
+ */
+export async function isMentorOnly(req) {
+  const scope = await getOnboardingScope(req);
+  return !!(scope.seesOwn && !scope.seesAll);
+}
+
+/**
+ * Centrale per-conversatie ownership-check voor de onboarding-tak.
+ *
+ * Gebruik na de bestaande OR-gate + na de conv-fetch:
+ *   const acl = await checkOnboardingConvAccess(req, { phoneNumberId, customerId });
+ *   if (!acl.ok) return res.status(acl.status).json({ error: acl.error });
+ *
+ * Logica:
+ *   - scope.seesAll (onboarding.admin / super_admin) → ALTIJD ok (bestaand
+ *     gedrag, geen extra DB-call voor module-resolve).
+ *   - !seesAll:
+ *       - resolveConversationModule(phoneNumberId).
+ *       - module !== 'onboarding' → ok (conv hoort bij finance/events tak;
+ *         daar is de bestaande view/send-gate van het endpoint
+ *         autoritatief, scope-check niet relevant).
+ *       - module === 'onboarding':
+ *           - !seesOwn → 403 (alleen onboarding.view_own-houders mogen
+ *             onboarding-convs zien zonder onboarding.admin).
+ *           - !mentorOwnsCustomer(userId, customerId) → 403 (mentor mag
+ *             alleen z'n eigen studenten).
+ *
+ * Fail-closed: een view_own-only-user zonder bekende customerId
+ * (customerId=null) krijgt 403 op de onboarding-tak. Een unbekende
+ * convModule (resolve faalde) wordt als "niet-onboarding" behandeld; het
+ * onderliggende endpoint heeft 'm dan via z'n eigen gate moeten blokken.
+ *
+ * @returns {Promise<{ok:true} | {ok:false, status:number, error:string}>}
+ */
+export async function checkOnboardingConvAccess(req, { phoneNumberId, customerId }) {
+  const scope = await getOnboardingScope(req);
+  if (scope.seesAll) return { ok: true };
+  const convModule = await resolveConversationModule(phoneNumberId);
+  if (convModule !== 'onboarding') return { ok: true };
+  if (!scope.seesOwn) {
+    return { ok: false, status: 403, error: 'Geen toegang tot onboarding-conversaties (onboarding.view_own vereist)' };
+  }
+  const owns = await mentorOwnsCustomer(scope.userId, customerId);
+  if (!owns) {
+    return { ok: false, status: 403, error: 'Geen toegang tot deze onboarding-conversatie' };
+  }
+  return { ok: true };
+}

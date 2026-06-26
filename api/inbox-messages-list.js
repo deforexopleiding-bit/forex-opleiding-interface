@@ -19,6 +19,7 @@
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
+import { checkOnboardingConvAccess } from './_lib/onboardingScope.js';
 
 const TWENTY_FOUR_HOURS_MS = 24 * 60 * 60 * 1000;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -60,10 +61,11 @@ export default async function handler(req, res) {
 
   try {
     // Parent conversation eerst, zodat we 404 kunnen geven als 'ie niet bestaat.
+    // Fase 2b: phone_number_id meeselecteren voor de onboarding-conv-ACL hook.
     const { data: conv, error: convErr } = await supabaseAdmin
       .from('whatsapp_conversations')
       .select(
-        'id, phone_number, display_name, customer_id, attendee_id, status, last_message_at, ' +
+        'id, phone_number, display_name, phone_number_id, customer_id, attendee_id, status, last_message_at, ' +
         'last_inbound_at, unread_count, ' +
         'customer:customers(id, first_name, last_name, company_name), ' +
         'attendee:event_attendees!attendee_id(id, first_name, last_name, email, ' +
@@ -73,6 +75,15 @@ export default async function handler(req, res) {
       .maybeSingle();
     if (convErr) throw new Error('conversation lookup: ' + convErr.message);
     if (!conv) return res.status(404).json({ error: 'Conversation niet gevonden' });
+
+    // Fase 2b: voor onboarding-convs → mentor mag alleen z'n eigen. Hook
+    // skipt direct voor seesAll (onboarding.admin / super_admin) en voor
+    // niet-onboarding-convs (finance/events). Zie checkOnboardingConvAccess.
+    const acl = await checkOnboardingConvAccess(req, {
+      phoneNumberId: conv.phone_number_id,
+      customerId:    conv.customer_id,
+    });
+    if (!acl.ok) return res.status(acl.status).json({ error: acl.error });
 
     // Messages — oudste eerst voor chronologische chat-weergave
     const { data: msgs, error: msgErr, count } = await supabaseAdmin

@@ -23,6 +23,7 @@
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
+import { isMentorOnly } from './_lib/onboardingScope.js';
 
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
@@ -42,6 +43,12 @@ export default async function handler(req, res) {
     ? true : await requirePermission(req, 'onboarding.inbox.view');
   if (!hasFinanceView && !hasEventsView && !hasOnboardingView) {
     return res.status(403).json({ error: 'Geen rechten (finance.inbox.view, events.inbox.view of onboarding.inbox.view)' });
+  }
+
+  // Fase 2b: dit endpoint resolved finance-WABA conv-id's voor een
+  // customer_id. Een view_own-only-mentor mag niet enumereren — 403.
+  if (await isMentorOnly(req)) {
+    return res.status(403).json({ error: 'Mentor mag geen finance-conversaties opzoeken' });
   }
 
   const customerId = String((req.query && req.query.customer_id) || '').trim();

@@ -23,6 +23,7 @@
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
+import { checkOnboardingConvAccess } from './_lib/onboardingScope.js';
 import { getClientIp } from './_lib/audit-customer.js';
 import { sendText, sendTemplate, getConfigStatus, MetaNotConfiguredError } from './_lib/meta-whatsapp.js';
 
@@ -111,15 +112,26 @@ export default async function handler(req, res) {
       console.error('[inbox-send] module-config exception:', e.message);
     }
 
-    // Conversation ophalen — voor phone_number + 24h check
+    // Conversation ophalen — voor phone_number + 24h check + Fase 2b ACL.
     const { data: conv, error: convErr } = await supabaseAdmin
       .from('whatsapp_conversations')
-      .select('id, phone_number, phone_number_id, last_inbound_at, last_message_preview')
+      .select('id, phone_number, phone_number_id, customer_id, last_inbound_at, last_message_preview')
       .eq('id', convId)
       .maybeSingle();
     if (convErr) throw new Error('conversation lookup: ' + convErr.message);
     if (!conv) return res.status(404).json({ error: 'Conversation niet gevonden' });
     if (!conv.phone_number) return res.status(400).json({ error: 'Conversation heeft geen phone_number' });
+
+    // Fase 2b: voor onboarding-convs → mentor mag alleen z'n eigen students
+    // antwoorden. Hook skipt voor seesAll en voor finance/events-convs.
+    // VEILIGHEID: deze guard zit VÓÓR het versturen van de boodschap zelf,
+    // zodat geen Meta-call kan plaatsvinden voor een conv die niet van
+    // deze mentor is.
+    const acl = await checkOnboardingConvAccess(req, {
+      phoneNumberId: conv.phone_number_id,
+      customerId:    conv.customer_id,
+    });
+    if (!acl.ok) return res.status(acl.status).json({ error: acl.error });
 
     // Refined module-permission check: derive de module van deze conv via
     // conv.phone_number_id -> whatsapp_module_config. Voorkomt dat een gebruiker

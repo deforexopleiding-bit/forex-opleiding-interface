@@ -45,6 +45,7 @@
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
+import { checkOnboardingConvAccess } from './_lib/onboardingScope.js';
 import { getClientIp } from './_lib/audit-customer.js';
 import { runOnboardingSuggest } from './_lib/onboarding-agent-core.js';
 
@@ -96,6 +97,30 @@ export default async function handler(req, res) {
   }
 
   const autoTriggered = body.auto_triggered === true;
+
+  // ---- Fase 2b: mentor-scoping op onboarding-tak ----
+  // Lookup minimaal conv-velden voor de ACL hook. Hook skipt voor seesAll
+  // (admin) en voor finance/events-convs (waar dit endpoint sowieso niet
+  // van toepassing is — onboarding.mila.use staat los van die modules).
+  try {
+    const { data: convAcl } = await supabaseAdmin
+      .from('whatsapp_conversations')
+      .select('phone_number_id, customer_id')
+      .eq('id', convId)
+      .maybeSingle();
+    if (convAcl) {
+      const acl = await checkOnboardingConvAccess(req, {
+        phoneNumberId: convAcl.phone_number_id,
+        customerId:    convAcl.customer_id,
+      });
+      if (!acl.ok) return res.status(acl.status).json({ error: acl.error });
+    }
+    // Geen convAcl → runOnboardingSuggest geeft straks z'n eigen 404.
+  } catch (e) {
+    console.error('[onboarding-suggest] ACL lookup:', e?.message || e);
+    // Strict: bij fout op de ACL-fetch faal-closed (geen leak).
+    return res.status(500).json({ error: 'Toegangscontrole faalde' });
+  }
 
   // ---- Core call ----
   try {
