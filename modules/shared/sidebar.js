@@ -599,11 +599,108 @@
     });
   }
 
+  // ── Impersonation-banner ─────────────────────────────────────────────────
+  // Persistente rode banner bovenin elke pagina zolang AuthShared.isImpersonating()
+  // true is. Toont "Je bekijkt als <naam> (<rol>)" + een "Terug naar jezelf"-knop.
+  //
+  // De banner is fixed-top en duwt de body met top-padding naar beneden zodat
+  // content niet onder de banner valt. Idempotent: 2e mount-call vervangt de
+  // bestaande banner i.p.v. dubbel renderen.
+  //
+  // Fail-safe: als origin-sessie ontbreekt of setSession faalt, signOut +
+  // /login.html (nooit vasthangen in een vreemde sessie).
+  function renderImpersonationBanner() {
+    var existing = document.getElementById('impersonation-banner');
+    if (!window.AuthShared || typeof window.AuthShared.isImpersonating !== 'function'
+        || !window.AuthShared.isImpersonating()) {
+      if (existing) existing.remove();
+      document.body.style.paddingTop = '';
+      return;
+    }
+    var state = window.AuthShared.getImpersonationState() || {};
+    var label = state.target_name || state.target_email || 'onbekend';
+    var role  = state.target_role || '';
+    var escFn = function (s) {
+      return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+        return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c];
+      });
+    };
+    var html =
+      '<div style="background:#dc2626;color:#fff;padding:10px 18px;display:flex;align-items:center;justify-content:space-between;gap:14px;font-size:13.5px;font-family:Inter,system-ui,sans-serif;font-weight:600;box-shadow:0 2px 8px rgba(0,0,0,0.25)">' +
+        '<div style="display:flex;align-items:center;gap:10px;flex:1;min-width:0">' +
+          '<svg style="width:16px;height:16px;flex-shrink:0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">' +
+            '<path d="M12 9v4M12 17h.01"/><circle cx="12" cy="12" r="10"/>' +
+          '</svg>' +
+          '<span style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">Je bekijkt als <strong>' + escFn(label) + '</strong>' +
+          (role ? ' <span style="opacity:.85;font-weight:500">(' + escFn(role) + ')</span>' : '') +
+          '</span>' +
+        '</div>' +
+        '<button type="button" id="impersonation-stop-btn" style="background:#fff;color:#dc2626;border:0;border-radius:6px;padding:6px 14px;font-size:12.5px;font-weight:700;cursor:pointer;font-family:inherit;white-space:nowrap">' +
+          '&larr; Terug naar jezelf' +
+        '</button>' +
+      '</div>';
+    if (existing) {
+      existing.innerHTML = html;
+    } else {
+      var div = document.createElement('div');
+      div.id = 'impersonation-banner';
+      div.style.position = 'fixed';
+      div.style.top = '0';
+      div.style.left = '0';
+      div.style.right = '0';
+      div.style.zIndex = '99999';
+      div.innerHTML = html;
+      document.body.appendChild(div);
+    }
+    var bannerEl = document.getElementById('impersonation-banner');
+    if (bannerEl) document.body.style.paddingTop = bannerEl.offsetHeight + 'px';
+    var btn = document.getElementById('impersonation-stop-btn');
+    if (btn) btn.addEventListener('click', stopImpersonation);
+  }
+
+  async function stopImpersonation() {
+    var btn = document.getElementById('impersonation-stop-btn');
+    if (btn) { btn.disabled = true; btn.textContent = 'Bezig…'; }
+    var origin = window.AuthShared ? window.AuthShared.getImpersonationOrigin() : null;
+    // FAIL-SAFE: geen / corrupte origin-sessie → signOut + /login.html
+    // zodat de gebruiker nooit vast komt te zitten in een vreemde sessie.
+    if (!origin || !origin.access_token || !origin.refresh_token) {
+      try { if (window.AuthShared) window.AuthShared.clearImpersonationState(); } catch (e) {}
+      try { if (window.AuthShared) window.AuthShared.clearImpersonationOrigin(); } catch (e) {}
+      try {
+        if (window.supabase && window.supabase.auth) await window.supabase.auth.signOut();
+      } catch (e) { /* niet-blokkerend */ }
+      window.location.href = '/login.html?error=impersonation_lost';
+      return;
+    }
+    try {
+      var r = await window.AuthShared.setSession({
+        access_token:  origin.access_token,
+        refresh_token: origin.refresh_token,
+      });
+      if (r && r.error) throw new Error(r.error.message || String(r.error));
+      window.AuthShared.clearImpersonationOrigin();
+      window.AuthShared.clearImpersonationState();
+      window.location.href = '/index.html';
+    } catch (e) {
+      // Fail-safe bij setSession-fout: alles wegmieteren + signOut + login.
+      try { window.AuthShared.clearImpersonationOrigin(); } catch (_) {}
+      try { window.AuthShared.clearImpersonationState(); } catch (_) {}
+      try { await window.supabase.auth.signOut(); } catch (_) {}
+      window.location.href = '/login.html?error=impersonation_restore';
+    }
+  }
+  // Beschikbaar maken voor externe scripts (bv. login-page error-handler).
+  window.stopImpersonation = stopImpersonation;
+
   function mountSidebar() {
     var mount = document.getElementById('sidebar-mount');
     if (!mount || mount.dataset.mounted === '1') return;
     mount.innerHTML = buildSidebarHtml();
     mount.dataset.mounted = '1';
+
+    // Impersonatie-banner (fail-soft, idempotent).
+    try { renderImpersonationBanner(); } catch (e) { console.warn('[sidebar] impersonation banner:', e?.message || e); }
 
     highlightActive();
     updateTakenBadge();
