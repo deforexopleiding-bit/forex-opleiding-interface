@@ -74,6 +74,43 @@
     .admin-tab { background:transparent; border:none; padding:10px 16px; font-size:13px; font-weight:600; color:var(--text-faint); cursor:pointer; border-bottom:2px solid transparent; font-family:inherit; }
     .admin-tab:hover { color:var(--text); }
     .admin-tab.active { color:var(--text); border-bottom-color:var(--brand-primary); }
+    /* ── Menu beheer (sidebar layout-laag) ── */
+    .mm-row {
+      display:flex; align-items:center; gap:10px;
+      padding:9px 12px; margin-bottom:6px;
+      border:1px solid var(--border); border-radius:8px;
+      background:var(--bg-elev);
+      cursor:grab; user-select:none;
+      transition: background .12s, border-color .12s, opacity .15s;
+    }
+    .mm-row:hover { background:var(--bg-elev-2, var(--surface-card-hover)); }
+    .mm-row.mm-dragging { opacity:.5; cursor:grabbing; }
+    .mm-row.mm-drop-target { border-color:var(--brand-primary); box-shadow:0 0 0 3px rgba(59,130,246,0.15); }
+    .mm-grip { color:var(--text-faint); font-size:18px; line-height:1; cursor:grab; flex-shrink:0; }
+    .mm-row.mm-dragging .mm-grip { cursor:grabbing; }
+    .mm-label { flex:1; font-size:13.5px; font-weight:600; color:var(--text); }
+    .mm-key { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:11.5px; color:var(--text-faint); background:var(--bg); padding:2px 7px; border-radius:5px; }
+    .mm-status { font-size:11.5px; color:var(--text-dim); min-width:64px; text-align:right; }
+    .mm-toggle {
+      position:relative; width:38px; height:22px;
+      border-radius:11px; border:0; cursor:pointer;
+      background:rgba(100,116,139,0.35);
+      transition: background .15s;
+      font-family:inherit;
+    }
+    .mm-toggle:hover { background:rgba(100,116,139,0.5); }
+    .mm-toggle.on { background:var(--color-success, #16a34a); }
+    .mm-toggle.on:hover { background:#15803d; }
+    .mm-toggle .mm-toggle-ball {
+      position:absolute; top:3px; left:3px;
+      width:16px; height:16px; border-radius:50%;
+      background:#fff;
+      transition: transform .15s;
+    }
+    .mm-toggle.on .mm-toggle-ball { transform: translateX(16px); }
+    @media (prefers-reduced-motion: reduce) {
+      .mm-row, .mm-toggle, .mm-toggle .mm-toggle-ball { transition:none; }
+    }
     /* ── Approval-queue ── */
     .approvals-tab-badge { display:inline-block; min-width:18px; padding:1px 6px; border-radius:10px; background:var(--color-danger,#dc2626); color:#fff; font-size:10px; font-weight:700; line-height:1.4; margin-left:6px; vertical-align:middle; text-align:center; }
     .approvals-tab-badge.hidden { display:none; }
@@ -170,6 +207,7 @@
       <button class="admin-tab" data-tab="approval-queue" data-view="approval-queue" id="approvalsTabBtn" onclick="switchAdminTab('approval-queue')" style="display:none">Approval-queue <span id="approvalsTabBadge" class="approvals-tab-badge hidden">0</span></button>
       <button class="admin-tab" data-tab="assessment" id="assessmentTabBtn" onclick="switchAdminTab('assessment')" style="display:none">Assessment-vragen</button>
       <button class="admin-tab" data-tab="simone-config" id="simoneCfgTabBtn" onclick="switchAdminTab('simone-config')" style="display:none">Simone-config</button>
+      <button class="admin-tab" data-tab="menu-manager" id="menuMgrTabBtn" onclick="switchAdminTab('menu-manager')" style="display:none">Menu beheer</button>
       <!-- Joost (AI) tab VERHUISD naar Finance > Instellingen (Groep D, juni 2026). -->
       <!-- WhatsApp Connection + WhatsApp Templates VERHUISD naar Finance > Instellingen (PR-4, juni 2026). -->
     </div>
@@ -478,6 +516,36 @@
               <i class="ti ti-external-link"></i> Open in Events → Instellingen
             </a>
           </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Menu beheer (sidebar layout-laag bovenop RBAC) ─────────────────
+         Drag-and-drop herorderen + per-item zichtbaarheid-toggle. Server
+         gegate op admin.sidebar (super_admin bypasst). Wijzigingen worden
+         opgeslagen in app_settings.sidebar_layout en bij de volgende
+         sidebar-mount (herladen) toegepast. RBAC blijft autoritatief —
+         een item toont alleen als de toggle aan staat ÉN de user RBAC-
+         toegang heeft. De 'admin'-entry mag nooit verborgen worden
+         (anti-lockout) en heeft daarom geen verberg-toggle. -->
+    <div id="tab-menu-manager" class="admin-tab-panel" style="display:none">
+      <div class="section-card">
+        <div class="section-header">
+          <span>Menu beheer</span>
+          <button class="btn btn-sm btn-primary" type="button" id="menuMgrSaveBtn" onclick="saveMenuManager()" disabled>
+            <i class="ti ti-device-floppy"></i> Opslaan
+          </button>
+        </div>
+        <div style="font-size:12.5px;color:var(--text-dim);margin:4px 14px 14px;line-height:1.5;max-width:760px">
+          Sleep items om de volgorde te wijzigen. Zet de toggle uit om een item te verbergen.
+          Verborgen items zijn voor iedereen onzichtbaar — ongeacht hun permissies. RBAC blijft
+          autoritatief: een zichtbaar item toont alleen voor wie er recht op heeft. De
+          <strong>Admin</strong>-knop kan nooit verborgen worden zodat deze beheerpagina bereikbaar blijft.
+          Wijzigingen zijn pas zichtbaar na herladen van de pagina.
+        </div>
+        <div id="menuMgrBanner" style="display:none;margin:0 14px 12px;padding:8px 12px;border-radius:8px;font-size:12.5px"></div>
+        <div id="menuMgrList" style="padding:0 14px 14px">
+          <div style="color:var(--text-faint);font-size:13px;padding:8px">Laden&hellip;</div>
         </div>
       </div>
     </div>
@@ -974,6 +1042,8 @@ function switchAdminTab(name) {
   if (aqPanel) aqPanel.style.display = name === 'assessment' ? '' : 'none';
   const scPanel = document.getElementById('tab-simone-config');
   if (scPanel) scPanel.style.display = name === 'simone-config' ? '' : 'none';
+  const mmPanel = document.getElementById('tab-menu-manager');
+  if (mmPanel) mmPanel.style.display = name === 'menu-manager' ? '' : 'none';
   // WhatsApp Connection + WhatsApp Templates panels VERHUISD naar Finance >
   // Instellingen (PR-4). Joost-config tab VERHUISD naar Finance > Instellingen
   // (Groep D, juni 2026).
@@ -985,6 +1055,9 @@ function switchAdminTab(name) {
     wireApprovOnce();
     loadApprovalQueue();
   }
+  // Menu beheer: lazy load + eenmalig wiren. Idempotent zodat re-open de
+  // huidige (mogelijk dirty) draft niet weggooit.
+  if (name === 'menu-manager') loadMenuManager();
   // STAP 7 — Assessment-vragen en Simone-config zijn fysiek verhuisd naar
   // Events → Instellingen. De oude loader-functies blijven dead-code in dit
   // bestand voor incrementele rollback; we roepen ze niet meer aan zodat er
@@ -1193,6 +1266,20 @@ async function init() {
     if (allowSimone) {
       const sb = document.getElementById('simoneCfgTabBtn');
       if (sb) sb.style.display = '';
+    }
+  } catch (_) { /* RBAC niet geladen — tab blijft verborgen */ }
+
+  // Menu beheer tab: super_admin OF can(admin.sidebar). Beheert de
+  // app-brede sidebar-layout (volgorde + per-item zichtbaarheid). Server-
+  // side gate op POST /api/sidebar-layout-save is autoritatief.
+  try {
+    let allowMenu = currentProfile.role === 'super_admin';
+    if (!allowMenu && window.RBAC && typeof window.RBAC.can === 'function') {
+      allowMenu = await window.RBAC.can('admin.sidebar');
+    }
+    if (allowMenu) {
+      const mb = document.getElementById('menuMgrTabBtn');
+      if (mb) mb.style.display = '';
     }
   } catch (_) { /* RBAC niet geladen — tab blijft verborgen */ }
 
@@ -3377,6 +3464,242 @@ async function refreshApprovalsTabBadge() {
 // + loadSimoneConfig/renderSimoneConfigForm/saveSimoneConfig leven sinds
 // stap 7 (PR #253) in modules/events.html. Tab-button + redirect-banner
 // blijven hier zodat /modules/admin.html#simone-config werkt.
+
+// ────────────────────────────────────────────────────────────────────────────
+// MENU BEHEER — sidebar layout-laag bovenop RBAC
+// ────────────────────────────────────────────────────────────────────────────
+// Editor voor app_settings.sidebar_layout: drag-and-drop volgorde + per-item
+// visibility-toggle. Server-side gate op POST /api/sidebar-layout-save is
+// autoritatief; deze UI is alleen pre-emptive UX (de tab-knop verschijnt
+// pas bij admin.sidebar of super_admin).
+//
+// Items-bron: hardcoded ITEM_DEFS (label + icon-key) — moet matchen met de
+// nav-keys in modules/shared/sidebar.js. Een mismatch is gracieus: items
+// die in de layout staan maar niet in ITEM_DEFS verschijnen onderaan als
+// "(onbekend)"; items in ITEM_DEFS die niet in de layout staan worden als
+// nieuw toegevoegd onderaan met visible=true. De 'admin'-entry kan niet
+// verborgen worden (anti-lockout) en heeft daarom geen toggle.
+
+const MENU_ITEM_DEFS = [
+  { key: 'dashboard',          label: 'Dashboard' },
+  { key: 'email',              label: 'E-mail' },
+  { key: 'lisa',               label: 'AI Agents (Lisa)' },
+  { key: 'taken',              label: 'Takenbeheer' },
+  { key: 'kennisbank',         label: 'Kennisbank' },
+  { key: 'agents',             label: 'AI Agents' },
+  { key: 'agent-center',       label: 'Agent center' },
+  { key: 'meetings',           label: 'Vergaderruimte' },
+  { key: 'control-center',     label: 'Control Center' },
+  { key: 'follow-up',          label: 'Follow-up' },
+  { key: 'sales',              label: 'Sales' },
+  { key: 'events',             label: 'Events' },
+  { key: 'mentor-dashboard',   label: 'Mentor-dashboard' },
+  { key: 'mentoren-beheer',    label: 'Mentoren beheer' },
+  { key: 'onboarding-admin',   label: 'Onboarding' },
+  { key: 'finance',            label: 'Finance' },
+  { key: 'tickets',            label: 'Tickets' },
+  { key: 'admin',              label: 'Admin' },
+];
+const MENU_LOCKED_KEYS = new Set(['admin']); // anti-lockout
+
+let _menuMgrItems = null;   // [{ key, visible }] in huidige UI-volgorde
+let _menuMgrDirty = false;
+let _menuMgrLoaded = false;
+let _menuMgrSaving = false;
+
+function _menuMgrLabel(key) {
+  const def = MENU_ITEM_DEFS.find(d => d.key === key);
+  return def ? def.label : (key + ' (onbekend)');
+}
+
+function _menuMgrShowBanner(text, kind) {
+  const el = document.getElementById('menuMgrBanner');
+  if (!el) return;
+  if (!text) { el.style.display = 'none'; el.textContent = ''; return; }
+  const palette = kind === 'success'
+    ? { bg: 'rgba(5,150,105,0.12)',  col: '#059669', border: 'rgba(5,150,105,0.30)' }
+    : kind === 'error'
+    ? { bg: 'rgba(220,38,38,0.12)',  col: '#b91c1c', border: 'rgba(220,38,38,0.30)' }
+    : { bg: 'rgba(59,130,246,0.12)', col: '#1d4ed8', border: 'rgba(59,130,246,0.30)' };
+  el.style.background = palette.bg;
+  el.style.color      = palette.col;
+  el.style.border     = '1px solid ' + palette.border;
+  el.textContent      = text;
+  el.style.display    = '';
+}
+
+function _menuMgrMarkDirty() {
+  _menuMgrDirty = true;
+  const btn = document.getElementById('menuMgrSaveBtn');
+  if (btn) btn.disabled = false;
+}
+
+function _menuMgrMergeDefaultsAndConfig(config) {
+  // Start met config-items in hun opgeslagen volgorde (overall layout-wens
+  // van de admin); append daarna alle ITEM_DEFS-items die nog niet voorkomen
+  // (nieuwe modules toegevoegd na de laatste save) als visible=true.
+  const seen = new Set();
+  const out  = [];
+  const configItems = (config && Array.isArray(config.items)) ? config.items : [];
+  for (const c of configItems) {
+    if (!c || typeof c.key !== 'string') continue;
+    if (seen.has(c.key)) continue;
+    seen.add(c.key);
+    const locked = MENU_LOCKED_KEYS.has(c.key);
+    out.push({ key: c.key, visible: locked ? true : c.visible !== false });
+  }
+  for (const def of MENU_ITEM_DEFS) {
+    if (seen.has(def.key)) continue;
+    seen.add(def.key);
+    out.push({ key: def.key, visible: true });
+  }
+  return out;
+}
+
+async function loadMenuManager() {
+  if (_menuMgrLoaded) return; // bestaande draft niet wegmieteren
+  _menuMgrShowBanner('', null);
+  try {
+    let config = null;
+    try {
+      const r = await window.AgentShared.apiFetch('/api/app-settings?key=sidebar_layout');
+      if (r.ok) {
+        const d = await r.json();
+        config = d && d.value;
+      }
+      // 404 = nog niet geconfigureerd; default-volgorde uit ITEM_DEFS wordt gebruikt.
+    } catch (e) {
+      console.warn('[menu-manager] layout fetch faalde, gebruik defaults:', e?.message || e);
+    }
+    _menuMgrItems = _menuMgrMergeDefaultsAndConfig(config);
+    _menuMgrLoaded = true;
+    _menuMgrDirty = false;
+    const saveBtn = document.getElementById('menuMgrSaveBtn');
+    if (saveBtn) saveBtn.disabled = true;
+    renderMenuManager();
+  } catch (e) {
+    console.error('[menu-manager] load', e?.message || e);
+    _menuMgrShowBanner('Laden mislukt: ' + (e?.message || e), 'error');
+  }
+}
+
+function renderMenuManager() {
+  const wrap = document.getElementById('menuMgrList');
+  if (!wrap || !Array.isArray(_menuMgrItems)) return;
+  if (_menuMgrItems.length === 0) {
+    wrap.innerHTML = '<div style="color:var(--text-faint);font-size:13px;padding:8px">Geen items.</div>';
+    return;
+  }
+  const rows = _menuMgrItems.map((it, idx) => {
+    const label  = _menuMgrLabel(it.key);
+    const locked = MENU_LOCKED_KEYS.has(it.key);
+    const onCls  = it.visible ? 'on' : '';
+    const lockTip = locked ? ' title="Beschermd: kan niet verborgen worden"' : '';
+    const toggle = locked
+      ? '<span style="font-size:11px;color:var(--text-faint);padding:4px 10px;border:1px dashed var(--border);border-radius:6px"><i class="ti ti-lock"></i> beschermd</span>'
+      : '<button type="button" class="mm-toggle ' + onCls + '" data-mm-toggle="' + idx + '" aria-label="' + (it.visible ? 'Verbergen' : 'Zichtbaar maken') + '"' + lockTip + '>' +
+          '<span class="mm-toggle-ball"></span>' +
+        '</button>';
+    return ''
+      + '<div class="mm-row" draggable="true" data-mm-idx="' + idx + '" data-mm-key="' + it.key + '">'
+      +   '<span class="mm-grip" title="Sleep om volgorde te wijzigen"><i class="ti ti-grip-vertical"></i></span>'
+      +   '<span class="mm-label">' + label + '</span>'
+      +   '<code class="mm-key">' + it.key + '</code>'
+      +   '<span class="mm-status">' + (it.visible ? 'Zichtbaar' : 'Verborgen') + '</span>'
+      +   toggle
+      + '</div>';
+  }).join('');
+  wrap.innerHTML = rows;
+  _menuMgrWireRows();
+}
+
+function _menuMgrWireRows() {
+  const wrap = document.getElementById('menuMgrList');
+  if (!wrap) return;
+
+  // Visibility-toggles.
+  wrap.querySelectorAll('[data-mm-toggle]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const idx = parseInt(btn.getAttribute('data-mm-toggle'), 10);
+      if (!Number.isInteger(idx) || idx < 0 || idx >= _menuMgrItems.length) return;
+      const it = _menuMgrItems[idx];
+      if (MENU_LOCKED_KEYS.has(it.key)) return; // beschermd
+      it.visible = !it.visible;
+      _menuMgrMarkDirty();
+      renderMenuManager();
+    });
+  });
+
+  // Drag-and-drop via HTML5 native. Bij drop reorderen we _menuMgrItems
+  // en re-renderen; geen DOM-fiddling tussendoor (anti-flikker).
+  let dragFromIdx = null;
+  wrap.querySelectorAll('.mm-row').forEach((row) => {
+    row.addEventListener('dragstart', (ev) => {
+      dragFromIdx = parseInt(row.getAttribute('data-mm-idx'), 10);
+      row.classList.add('mm-dragging');
+      try { ev.dataTransfer.effectAllowed = 'move'; ev.dataTransfer.setData('text/plain', String(dragFromIdx)); } catch (_) {}
+    });
+    row.addEventListener('dragend', () => {
+      row.classList.remove('mm-dragging');
+      wrap.querySelectorAll('.mm-row.mm-drop-target').forEach((r) => r.classList.remove('mm-drop-target'));
+      dragFromIdx = null;
+    });
+    row.addEventListener('dragover', (ev) => {
+      ev.preventDefault();
+      try { ev.dataTransfer.dropEffect = 'move'; } catch (_) {}
+      wrap.querySelectorAll('.mm-row.mm-drop-target').forEach((r) => r.classList.remove('mm-drop-target'));
+      row.classList.add('mm-drop-target');
+    });
+    row.addEventListener('dragleave', () => {
+      row.classList.remove('mm-drop-target');
+    });
+    row.addEventListener('drop', (ev) => {
+      ev.preventDefault();
+      row.classList.remove('mm-drop-target');
+      const toIdx = parseInt(row.getAttribute('data-mm-idx'), 10);
+      const fromIdx = dragFromIdx;
+      dragFromIdx = null;
+      if (!Number.isInteger(fromIdx) || !Number.isInteger(toIdx)) return;
+      if (fromIdx === toIdx) return;
+      const moved = _menuMgrItems.splice(fromIdx, 1)[0];
+      _menuMgrItems.splice(toIdx, 0, moved);
+      _menuMgrMarkDirty();
+      renderMenuManager();
+    });
+  });
+}
+
+async function saveMenuManager() {
+  if (_menuMgrSaving || !_menuMgrDirty || !Array.isArray(_menuMgrItems)) return;
+  _menuMgrSaving = true;
+  const btn = document.getElementById('menuMgrSaveBtn');
+  if (btn) btn.disabled = true;
+  _menuMgrShowBanner('Opslaan…', null);
+  try {
+    // Defense-in-depth: forceer admin=visible voor de send (server doet 't ook).
+    const payload = {
+      items: _menuMgrItems.map((it) => ({
+        key: it.key,
+        visible: MENU_LOCKED_KEYS.has(it.key) ? true : it.visible !== false,
+      })),
+    };
+    const r = await window.AgentShared.apiFetch('/api/sidebar-layout-save', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify(payload),
+    });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(d?.error || ('HTTP ' + r.status));
+    _menuMgrDirty = false;
+    _menuMgrShowBanner('Opgeslagen — herlaad de pagina om de wijzigingen in de sidebar te zien.', 'success');
+  } catch (e) {
+    console.error('[menu-manager] save', e?.message || e);
+    _menuMgrShowBanner('Opslaan mislukt: ' + (e?.message || e), 'error');
+    if (btn) btn.disabled = false;
+  } finally {
+    _menuMgrSaving = false;
+  }
+}
 
 init();
 </script>

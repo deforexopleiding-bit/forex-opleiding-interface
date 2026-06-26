@@ -531,6 +531,65 @@
     if (fk && !perms.has(fk)) blockPageAccess();
   }
 
+  // ── Layout-laag (admin-config bovenop RBAC) ────────────────────────────────
+  // app_settings.sidebar_layout = { items: [{ key, visible }] } in
+  // gewenste sidebar-volgorde. Toegepast NA buildSidebarHtml, VÓÓR
+  // applyModuleGating zodat RBAC autoritatief blijft (visible=true + geen
+  // RBAC = nog steeds verborgen). Fail-open: 404 / fetch-fout → niets doen
+  // en laat default-volgorde + alles-zichtbaar staan. De 'admin'-entry
+  // wordt nooit verborgen (anti-lockout) en kan niet uit de DOM raken.
+  async function applySidebarLayout() {
+    var nav, items, layout;
+    try {
+      if (!window.AgentShared || typeof window.AgentShared.apiFetch !== 'function') return;
+      var res = await window.AgentShared.apiFetch('/api/app-settings?key=sidebar_layout');
+      if (!res.ok) return; // 404/500 → fail-open
+      var data = await res.json();
+      layout = data && data.value;
+      if (!layout || !Array.isArray(layout.items) || layout.items.length === 0) return;
+    } catch (e) {
+      return; // network/JSON error → fail-open
+    }
+
+    nav = document.querySelector('#sidebar-mount .sidebar-nav');
+    if (!nav) return;
+
+    // Index per nav-key → DOM-element (uitsluitend nav-items met data-module).
+    items = {};
+    Array.prototype.forEach.call(nav.querySelectorAll('[data-module]'), function (el) {
+      var k = el.getAttribute('data-module');
+      if (k) items[k] = el;
+    });
+
+    // 1) Verberg-toggle volgens config. Skip 'admin' (anti-lockout) — die
+    //    blijft altijd zichtbaar voor wie er RBAC-recht op heeft (applyAdminGating
+    //    + applyModuleGating sturen 'm); de layout-laag mag 'm niet uitzetten.
+    layout.items.forEach(function (cfg) {
+      if (!cfg || typeof cfg.key !== 'string') return;
+      if (cfg.key === 'admin') return; // beschermd
+      var el = items[cfg.key];
+      if (!el) return;
+      if (cfg.visible === false) {
+        el.style.display = 'none';
+        el.dataset.layoutHidden = '1'; // marker voor debug/inspectie
+      }
+    });
+
+    // 2) Volgorde toepassen: re-attach in config-volgorde.
+    //    Items die niet in de config staan (nieuwe modules, of de
+    //    "Binnenkort"-sectie + concepts) behouden hun originele positie
+    //    door eerst de config-items naar de top te schuiven; daarna laat
+    //    de DOM de niet-genoemde items op hun relatieve plek.
+    var insertAnchor = nav.firstChild;
+    layout.items.forEach(function (cfg) {
+      if (!cfg || typeof cfg.key !== 'string') return;
+      var el = items[cfg.key];
+      if (!el) return;
+      nav.insertBefore(el, insertAnchor);
+      insertAnchor = el.nextSibling;
+    });
+  }
+
   function mountSidebar() {
     var mount = document.getElementById('sidebar-mount');
     if (!mount || mount.dataset.mounted === '1') return;
@@ -551,6 +610,11 @@
     if (window.AgentShared && typeof window.AgentShared.renderUserSection === 'function') {
       window.AgentShared.renderUserSection();
     }
+    // Sidebar-layout laag (admin-config) BOVENOP RBAC: filter + sort items
+    // volgens app_settings.sidebar_layout. Fail-open bij fetch-fout zodat
+    // een lege/onbereikbare config nooit een lege sidebar oplevert. De
+    // RBAC module-gating eronder blijft autoritatief.
+    applySidebarLayout();
     // RBAC module-gating (fail-open): laadt permissions, verbergt ontoegankelijke
     // sidebar-links én blokkeert de pagina-content bij directe URL zonder toegang.
     applyModuleGating();
