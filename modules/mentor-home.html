@@ -538,7 +538,7 @@
       wrap.innerHTML = '<div class="mh-empty"><i class="ti ti-user-off"></i>Nog geen studenten gekoppeld.</div>';
       return;
     }
-    wrap.innerHTML = students.slice(0, 8).map((s) => {
+    wrap.innerHTML = students.slice(0, 5).map((s) => {
       const done   = Number(s.calls_1on1_done)  || 0;
       const total  = Number(s.calls_1on1_total) || 0;
       const pct    = total > 0 ? Math.min(100, Math.round((done / total) * 100)) : 0;
@@ -706,25 +706,96 @@
     }).join('');
   }
 
+  /* ── Taken & afspraken (combineert mentor-taken-self + mentor-my-calendar) ── */
+  // Beide subsecties laden onafhankelijk in eigen state-keys; herrender doet
+  // niets als één van beide nog null is (nog niet geladen) — pas wanneer
+  // beide een definitieve waarde hebben (array of falsy) is de lege staat
+  // betrouwbaar te beoordelen.
+  const calendarState = {
+    taken     : null, // null = nog niet geladen; [] = geen taken
+    afspraken : null, // null = nog niet geladen; [] = geen afspraken
+  };
+
+  function prioBadge(p) {
+    const v = String(p || '').toLowerCase().trim();
+    if (!v || v === 'normaal') return '';
+    const palette = {
+      hoog    : { bg:'#fee2e2', fg:'#991b1b', label:'Hoog' },
+      urgent  : { bg:'#fee2e2', fg:'#991b1b', label:'Urgent' },
+      laag    : { bg:'#eef2f6', fg:'#4b5563', label:'Laag' },
+    };
+    const x = palette[v] || { bg:'#fef3c7', fg:'#92400e', label: p };
+    return '<span style="display:inline-block;margin-left:6px;padding:1px 6px;border-radius:999px;font-size:10px;font-weight:600;background:' + x.bg + ';color:' + x.fg + '">' + esc(x.label) + '</span>';
+  }
+
+  function renderCalendarCombined() {
+    const wrap = document.getElementById('mhCalendar');
+    if (!wrap) return;
+    // Wachten tot beide loaders klaar zijn — anders kan een tussenrender
+    // de zijde tonen die wel klaar is en de andere als "leeg" wegfilteren.
+    if (calendarState.taken === null || calendarState.afspraken === null) return;
+
+    const taken     = Array.isArray(calendarState.taken)     ? calendarState.taken     : [];
+    const afspraken = Array.isArray(calendarState.afspraken) ? calendarState.afspraken : [];
+
+    if (taken.length === 0 && afspraken.length === 0) {
+      wrap.innerHTML = '<div class="mh-empty"><i class="ti ti-check"></i>Niets openstaand.</div>';
+      return;
+    }
+
+    const parts = [];
+
+    if (taken.length > 0) {
+      parts.push(
+        '<div style="font-size:11px;font-weight:600;color:var(--text-dim);text-transform:uppercase;letter-spacing:0.04em;margin-bottom:4px">Taken</div>' +
+        taken.slice(0, 5).map((t) => {
+          const titel    = esc(t.titel || '—');
+          const deadline = t.deadline ? esc(fmtDate(t.deadline)) : 'Geen deadline';
+          const badge    = prioBadge(t.prioriteit);
+          return '<div class="mh-side-item" style="display:block">' +
+                   '<div style="font-size:13px;font-weight:600;color:var(--text)">' + titel + badge + '</div>' +
+                   '<div class="mh-side-time">' + deadline + '</div>' +
+                 '</div>';
+        }).join('')
+      );
+    }
+
+    if (afspraken.length > 0) {
+      parts.push(
+        '<div style="font-size:11px;font-weight:600;color:var(--text-dim);text-transform:uppercase;letter-spacing:0.04em;margin:' + (taken.length > 0 ? '10px 0 4px' : '0 0 4px') + '">Afspraken</div>' +
+        afspraken.slice(0, 5).map((e) => {
+          return '<div class="mh-side-item" style="display:block">' +
+                   '<div style="font-size:13px;font-weight:600;color:var(--text)">' + esc(e.title || '—') + '</div>' +
+                   '<div class="mh-side-time">' + esc(fmtDate(e.starts_at)) + (e.starts_at ? ' · ' + esc(fmtTime(e.starts_at)) : '') + '</div>' +
+                 '</div>';
+        }).join('')
+      );
+    }
+
+    wrap.innerHTML = parts.join('');
+  }
+
+  async function loadAndRenderTaken() {
+    let payload = null;
+    try {
+      const r = await window.AgentShared.apiFetch('/api/mentor-taken-self');
+      if (r.ok) payload = await r.json();
+    } catch (e) { /* fail-soft */ }
+    // payload null bij fout → geen taken voor de render. We zetten leeg
+    // i.p.v. blokkerend null houden, anders blijft de skeleton hangen als
+    // taken faalt maar afspraken slaagt.
+    calendarState.taken = Array.isArray(payload?.items) ? payload.items : [];
+    renderCalendarCombined();
+  }
+
   async function loadAndRenderCalendar() {
     let payload = null;
     try {
       const r = await window.AgentShared.apiFetch('/api/mentor-my-calendar');
       if (r.ok) payload = await r.json();
     } catch (e) { /* fail-soft */ }
-    const events = payload?.events || [];
-    const wrap = document.getElementById('mhCalendar');
-    if (!wrap) return;
-    if (events.length === 0) {
-      wrap.innerHTML = '<div class="mh-empty"><i class="ti ti-calendar-off"></i>Geen geplande afspraken.</div>';
-      return;
-    }
-    wrap.innerHTML = events.slice(0, 5).map((e) => {
-      return '<div class="mh-side-item" style="display:block">' +
-               '<div style="font-size:13px;font-weight:600;color:var(--text)">' + esc(e.title || '—') + '</div>' +
-               '<div class="mh-side-time">' + esc(fmtDate(e.starts_at)) + (e.starts_at ? ' · ' + esc(fmtTime(e.starts_at)) : '') + '</div>' +
-             '</div>';
-    }).join('');
+    calendarState.afspraken = Array.isArray(payload?.events) ? payload.events : [];
+    renderCalendarCombined();
   }
 
   /* ── Init + wiring ─────────────────────────────────────────────── */
@@ -797,6 +868,7 @@
     loadAndRenderStudents().catch((e) => console.warn('[mh] students', e?.message || e));
     loadAndRenderAssessments().catch((e) => console.warn('[mh] assessments', e?.message || e));
     loadAndRenderCalendar().catch((e) => console.warn('[mh] calendar', e?.message || e));
+    loadAndRenderTaken().catch((e) => console.warn('[mh] taken', e?.message || e));
     loadAndRenderOffertes().catch((e) => console.warn('[mh] offertes', e?.message || e));
     loadAndRenderWaitingReplies().catch((e) => console.warn('[mh] waiting-replies', e?.message || e));
   })();
