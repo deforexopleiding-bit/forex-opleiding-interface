@@ -207,7 +207,7 @@
   <div class="mh-header">
     <div class="mh-greet">
       <h1 id="mhGreet">Welkom terug</h1>
-      <p>Jouw mentor-overzicht — studenten, sessies en bonus in één oogopslag.</p>
+      <p>Jouw mentor-overzicht — studenten, events en bonus in één oogopslag.</p>
     </div>
     <div class="mh-actions">
       <a href="/modules/mentor-dashboard.html" class="mh-act-btn"><i class="ti ti-user"></i> Student openen</a>
@@ -238,7 +238,7 @@
     <div class="mh-kpi"><div class="mh-kpi-label">Verdiend totaal</div><div class="mh-kpi-value" id="kpiTotal"><span class="mh-skel" style="width:60px"></span></div><div class="mh-kpi-sub">all-time</div></div>
     <div class="mh-kpi"><div class="mh-kpi-label">Verdiend in periode</div><div class="mh-kpi-value" id="kpiPeriod"><span class="mh-skel" style="width:60px"></span></div><div class="mh-kpi-sub" id="kpiPeriodSub">&mdash;</div></div>
     <div class="mh-kpi"><div class="mh-kpi-label">Actieve studenten</div><div class="mh-kpi-value" id="kpiStudents"><span class="mh-skel" style="width:40px"></span></div><div class="mh-kpi-sub">gekoppeld</div></div>
-    <div class="mh-kpi"><div class="mh-kpi-label">Komende sessies</div><div class="mh-kpi-value" id="kpiSessions"><span class="mh-skel" style="width:40px"></span></div><div class="mh-kpi-sub">upcoming</div></div>
+    <div class="mh-kpi"><div class="mh-kpi-label">Komende events</div><div class="mh-kpi-value" id="kpiSessions"><span class="mh-skel" style="width:40px"></span></div><div class="mh-kpi-sub">upcoming</div></div>
   </div>
 
   <!-- ── Hoofd-grid (links: hoofdkolom · rechts: zijbalk) ────────── -->
@@ -273,9 +273,9 @@
 
     <!-- RECHTER zijbalk -->
     <div class="mh-col">
-      <!-- Komende sessies -->
+      <!-- Komende events -->
       <div class="mh-card">
-        <div class="mh-card-head"><div class="mh-card-title"><i class="ti ti-calendar"></i> Komende sessies</div></div>
+        <div class="mh-card-head"><div class="mh-card-title"><i class="ti ti-calendar"></i> Komende events</div></div>
         <div id="mhUpcoming" class="mh-side-list"><span class="mh-skel"></span></div>
       </div>
 
@@ -364,6 +364,12 @@
     to:     null,
     profile: null,
     upcomingCache: null, // hergebruik upcoming voor KPI + hero + sidebar
+    // Te-doen tellers — onafhankelijke loaders schrijven naar deze keys
+    // en triggeren renderTodo(). State-key vermist => geen item.
+    todoCounters: {
+      assessmentsOpen: 0,   // van loadAndRenderAssessments
+      waitingReplies : 0,   // van loadAndRenderWaitingReplies (inbox onboarding)
+    },
   };
 
   function computeRange(period) {
@@ -577,13 +583,37 @@
       }
     }
 
-    // Te doen-blok: alleen assessment-deel; combineer met "Reageren" als best-effort.
-    renderTodo(open.length);
+    // Te doen-blok: schrijf naar state + herrender. waiting-replies wordt
+    // parallel geladen en triggert zelf renderTodo() — beide updates zijn
+    // idempotent en lezen uit dezelfde state.
+    state.todoCounters.assessmentsOpen = open.length;
+    renderTodo();
   }
 
-  function renderTodo(assessmentsOpen) {
+  // Wacht-op-antwoord-teller (Te-doen): leest unread_count uit het
+  // onboarding-gescopete inbox-endpoint. Schrijft alleen naar state +
+  // herrendert; geen UI-render direct hier zodat assessment-load en deze
+  // load onafhankelijk klaar mogen zijn in willekeurige volgorde.
+  async function loadAndRenderWaitingReplies() {
+    let payload = null;
+    try {
+      // inbox-conversations-list?module=onboarding is server-side al
+      // mentor-gescopet (alleen eigen studenten); we tellen items met
+      // unread_count > 0.
+      const r = await window.AgentShared.apiFetch('/api/inbox-conversations-list?module=onboarding&limit=100');
+      if (r.ok) payload = await r.json();
+    } catch (e) { /* fail-soft */ }
+    const items = Array.isArray(payload?.items) ? payload.items : [];
+    const waiting = items.filter((it) => Number(it?.unread_count) > 0).length;
+    state.todoCounters.waitingReplies = waiting;
+    renderTodo();
+  }
+
+  function renderTodo() {
     const wrap = document.getElementById('mhTodo');
     if (!wrap) return;
+    const assessmentsOpen = Number(state.todoCounters.assessmentsOpen) || 0;
+    const waitingReplies  = Number(state.todoCounters.waitingReplies)  || 0;
     const items = [];
     if (assessmentsOpen > 0) {
       items.push({
@@ -594,16 +624,17 @@
         count: assessmentsOpen,
       });
     }
-    // Best-effort: link naar onboarding-inbox (waar mentor messages kan beantwoorden).
-    items.push({
-      href: '/modules/onboarding-hub.html#inbox',
-      icon: 'ti-message-circle',
-      title: 'Reageren in inbox',
-      sub: 'Open je WhatsApp-gesprekken met studenten',
-      count: null,
-    });
+    if (waitingReplies > 0) {
+      items.push({
+        href: '/modules/onboarding-hub.html#inbox',
+        icon: 'ti-message-circle',
+        title: 'Wacht op antwoord',
+        sub: waitingReplies + ' student(en) wacht(en) op antwoord',
+        count: waitingReplies,
+      });
+    }
     if (items.length === 0) {
-      wrap.innerHTML = '<div class="mh-empty"><i class="ti ti-check"></i>Niets openstaand — top.</div>';
+      wrap.innerHTML = '<div class="mh-empty"><i class="ti ti-check"></i>Geen open gesprekken — niets openstaand.</div>';
       return;
     }
     wrap.innerHTML = items.map((it) => {
@@ -614,6 +645,63 @@
                  '<div class="mh-todo-sub">' + esc(it.sub) + '</div>' +
                '</div>' +
                (it.count ? '<span class="mh-todo-count">' + it.count + '</span>' : '') +
+             '</a>';
+    }).join('');
+  }
+
+  /* ── Offertes (self-scoped) ─────────────────────────────────────── */
+  function fmtEur(n) {
+    const v = Number(n);
+    if (!Number.isFinite(v)) return '€0';
+    try {
+      return new Intl.NumberFormat('nl-NL', {
+        style: 'currency', currency: 'EUR',
+        minimumFractionDigits: 0, maximumFractionDigits: 0,
+      }).format(Math.round(v));
+    } catch (_) { return '€' + Math.round(v); }
+  }
+
+  function dealStatusBadge(status) {
+    const s = String(status || '').toLowerCase().trim();
+    if (!s) return '';
+    // Kleur-mapping; onbekende status → neutrale grijs-tint.
+    const palette = {
+      draft       : { bg: '#eef2f6', fg: '#4b5563', label: 'Concept' },
+      sent        : { bg: '#dbeafe', fg: '#1d4ed8', label: 'Verzonden' },
+      accepted    : { bg: '#dcfce7', fg: '#166534', label: 'Geaccepteerd' },
+      rejected    : { bg: '#fee2e2', fg: '#991b1b', label: 'Afgewezen' },
+      expired     : { bg: '#fef3c7', fg: '#92400e', label: 'Verlopen' },
+      converted   : { bg: '#e0e7ff', fg: '#3730a3', label: 'Omgezet' },
+      open        : { bg: '#dbeafe', fg: '#1d4ed8', label: 'Open' },
+      won         : { bg: '#dcfce7', fg: '#166534', label: 'Gewonnen' },
+      lost        : { bg: '#fee2e2', fg: '#991b1b', label: 'Verloren' },
+    };
+    const p = palette[s] || { bg: '#eef2f6', fg: '#4b5563', label: status };
+    return '<span style="display:inline-block;padding:1px 6px;border-radius:999px;font-size:10.5px;font-weight:600;background:' + p.bg + ';color:' + p.fg + '">' + esc(p.label) + '</span>';
+  }
+
+  async function loadAndRenderOffertes() {
+    const wrap = document.getElementById('mhDeals');
+    if (!wrap) return;
+    let payload = null;
+    try {
+      const r = await window.AgentShared.apiFetch('/api/mentor-offertes-self');
+      if (r.ok) payload = await r.json();
+    } catch (e) { /* fail-soft */ }
+    const items = Array.isArray(payload?.items) ? payload.items : [];
+    if (items.length === 0) {
+      wrap.innerHTML = '<div class="mh-empty"><i class="ti ti-file-off"></i>Nog geen offertes.<br/><span style="font-size:11px">Maak een offerte aan via Sales-wizard.</span></div>';
+      return;
+    }
+    wrap.innerHTML = items.map((d) => {
+      const href = '/modules/offerte-detail.html?id=' + encodeURIComponent(d.id);
+      const name = esc(d.customer_name || '—');
+      const amount = fmtEur(d.total_amount);
+      const badge = dealStatusBadge(d.status);
+      const sub = [amount, badge].filter(Boolean).join(' · ');
+      return '<a href="' + esc(href) + '" class="mh-side-item" style="display:block;text-decoration:none;color:inherit">' +
+               '<div style="font-size:13px;font-weight:600;color:var(--text)">' + name + '</div>' +
+               '<div class="mh-side-time">' + sub + '</div>' +
              '</a>';
     }).join('');
   }
@@ -709,6 +797,8 @@
     loadAndRenderStudents().catch((e) => console.warn('[mh] students', e?.message || e));
     loadAndRenderAssessments().catch((e) => console.warn('[mh] assessments', e?.message || e));
     loadAndRenderCalendar().catch((e) => console.warn('[mh] calendar', e?.message || e));
+    loadAndRenderOffertes().catch((e) => console.warn('[mh] offertes', e?.message || e));
+    loadAndRenderWaitingReplies().catch((e) => console.warn('[mh] waiting-replies', e?.message || e));
   })();
 
   if (window._authSharedReady) {
