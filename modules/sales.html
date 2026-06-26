@@ -99,7 +99,7 @@
     <button class="tab" data-tab="subscriptions" role="tab">Abonnementen</button>
     <button class="tab" data-tab="retentie" role="tab">Retentie</button>
     <button class="tab" data-tab="aanbod" role="tab">Aanbod</button>
-    <button class="tab" data-tab="reports" role="tab" id="tab-btn-reports" style="display:none">Rapporten</button>
+    <button class="tab" data-tab="reports" role="tab" id="tab-btn-reports">Rapporten</button>
   </div>
 
   <!-- ── Tab: Dashboard (default landing — absorbeert sales-dashboard.html) ── -->
@@ -397,6 +397,40 @@ function toast(msg, kind) {
   setTimeout(() => el.classList.remove('show'), 2200);
 }
 function can(key) { if (!state.perms) return true; if (state.perms.has('*')) return true; return state.perms.has(key); }
+
+/* ── Per-tab RBAC ──────────────────────────────────────────────────────────
+   Mapping data-tab → feature_key. Tabs zonder mapping vallen niet onder de
+   gate (vrije content). Server-side gates blijven autoritatief op de
+   onderliggende endpoints. */
+const SALES_TAB_PERM = {
+  dashboard     : 'sales.tab.dashboard',
+  customers     : 'sales.tab.customers',
+  quotations    : 'sales.tab.quotations',
+  subscriptions : 'sales.tab.subscriptions',
+  retentie      : 'sales.tab.retentie',
+  aanbod        : 'sales.tab.aanbod',
+  reports       : 'sales.tab.reports',
+};
+function tabAllowed(t) {
+  const key = SALES_TAB_PERM[t];
+  if (!key) return true;     // niet-gegate tabs blijven zichtbaar
+  return can(key);
+}
+function applyTabGates() {
+  // Verberg de tab-knop ALS de key niet permit; haalt ook .active af zodat
+  // een verborgen tab niet als 'huidige selectie' rondzweeft.
+  document.querySelectorAll('.tab[data-tab]').forEach((btn) => {
+    const t = btn.dataset.tab;
+    const allowed = tabAllowed(t);
+    btn.style.display = allowed ? '' : 'none';
+    if (!allowed) btn.classList.remove('active');
+  });
+}
+function firstVisibleTabKey() {
+  const btn = Array.from(document.querySelectorAll('.tab[data-tab]'))
+    .find((b) => b && b.style.display !== 'none');
+  return btn ? btn.dataset.tab : null;
+}
 
 // ── Tab switching ──
 document.querySelectorAll('.tab').forEach(t => {
@@ -1539,23 +1573,47 @@ function avatarHtml(name, size) { return `<span class="sr-avatar sr-av-${avatarH
   const profile = await window.AuthShared?.requireAuth();
   if (!profile) return;
   if (window.AgentShared) await window.AgentShared.renderUserSection(profile);
+  // Perms MOETEN binnen zijn voordat we gating + default-tab kiezen. can()
+  // is fail-open zolang state.perms null is — daarom dicht-bewaken vóór de
+  // tab-rendering plaatsvindt.
   try {
     if (window.RBAC?.ensurePermissionsLoaded) state.perms = await window.RBAC.ensurePermissionsLoaded();
   } catch {}
-  // Rapporten-tab alleen tonen met permission (super_admin = '*').
-  if (can('sales.reports.view')) { const rb = document.getElementById('tab-btn-reports'); if (rb) rb.style.display = ''; }
+
+  // Verberg verboden tabs (incl. Rapporten — vervangt de oude
+  // tab-btn-reports/style:display:none + JS-reveal die op een andere key
+  // (sales.reports.view) hing.
+  applyTabGates();
+
   // ?tab=klanten|quotations|trajecten|products → direct juiste tab openen.
   const wantTab = new URLSearchParams(location.search).get('tab');
   // ?sub= voor Aanbod (trajecten|producten); oude ?tab=trajecten/producten → aanbod.
   const wantSub = new URLSearchParams(location.search).get('sub');
   if (wantTab === 'producten' || wantTab === 'products' || wantSub === 'producten') aanbodSub = 'producten';
   const tabMap = { dashboard: 'dashboard', klanten: 'customers', customers: 'customers', offertes: 'quotations', quotations: 'quotations', onboardings: 'onboardings', abonnementen: 'subscriptions', subscriptions: 'subscriptions', retentie: 'retentie', aanbod: 'aanbod', trajecten: 'aanbod', producten: 'aanbod', products: 'aanbod', rapporten: 'reports', reports: 'reports' };
-  const target = tabMap[wantTab];
-  if (target && target !== 'dashboard') {
-    const btn = document.querySelector(`.tab[data-tab="${target}"]`);
-    if (btn) { btn.click(); return; }
+
+  // URL-target alleen accepteren als de user 'm mag (URL-bypass afvangen).
+  // Anders fallback naar dashboard, en daarna nogmaals fallback naar de
+  // eerste zichtbare tab als ook dashboard verborgen is.
+  let target = tabMap[wantTab] || 'dashboard';
+  if (!tabAllowed(target)) target = 'dashboard';
+  if (!tabAllowed(target)) target = firstVisibleTabKey();
+
+  if (!target) {
+    // Geen enkele zichtbare tab → niets meer te tonen. Server-side gate
+    // had de pagina al kunnen weigeren; defensief geen render hier.
+    return;
   }
-  loadDashboard();
+
+  if (target === 'dashboard') {
+    loadDashboard();
+    return;
+  }
+  const btn = document.querySelector(`.tab[data-tab="${target}"]`);
+  if (btn) { btn.click(); return; }
+  // Vangnet (geen knop gevonden om de een of andere reden): toon dashboard
+  // als dat zichtbaar is, anders niets.
+  if (tabAllowed('dashboard')) loadDashboard();
 })();
 </script>
 <script src="/modules/shared/permissions.js"></script>
