@@ -14,7 +14,7 @@
 // 404 bij onbekend id.
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
-import { requirePermission } from './_lib/requirePermission.js';
+import { getOnboardingScope } from './_lib/onboardingScope.js';
 import {
   findAvailabilityBlock,
   buildAvailabilityView,
@@ -49,8 +49,13 @@ export default async function handler(req, res) {
   const supabase = createUserClient(req);
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return res.status(401).json({ error: 'Niet geauthenticeerd' });
-  if (!(await requirePermission(req, 'onboarding.admin'))) {
-    return res.status(403).json({ error: 'Geen rechten (onboarding.admin)' });
+
+  // Fase 2a: scope-uitbreiding. Beide rollen mogen één detail opvragen,
+  // maar een view_own-only-user mag uitsluitend z'n eigen onboardings —
+  // die check doen we NA de DB-fetch (zie ownership-guard hieronder).
+  const scopeInfo = await getOnboardingScope(req);
+  if (!scopeInfo.seesAll && !scopeInfo.seesOwn) {
+    return res.status(403).json({ error: 'Geen rechten (onboarding.admin of onboarding.view_own)' });
   }
 
   const id = typeof req.query?.id === 'string' ? req.query.id.trim() : '';
@@ -71,6 +76,15 @@ export default async function handler(req, res) {
       .maybeSingle();
     if (rowErr) throw new Error('onboarding fetch: ' + rowErr.message);
     if (!row)  return res.status(404).json({ error: 'Onboarding niet gevonden' });
+
+    // Fase 2a: ownership-guard. Een view_own-only-user mag uitsluitend
+    // z'n eigen onboardings opvragen. Bewust 403 ipv 404 zodat de mentor
+    // ziet dat de row bestaat maar niet zijn/haar is (geen info-leak via
+    // raden van uuid's; alle uuid's zijn al 122-bit onkraakbaar).
+    // seesAll-pad blijft ongewijzigd: skipt deze guard volledig.
+    if (!scopeInfo.seesAll && row.mentor_user_id !== scopeInfo.userId) {
+      return res.status(403).json({ error: 'Geen toegang tot deze onboarding' });
+    }
 
     // Mentor-naam ophalen indien toegewezen.
     let mentorName = null;
