@@ -40,15 +40,15 @@ window._authSharedReady = (async function () {
   // Primaire rol (profiles.role) → URL waar deze rol na login op moet
   // landen + waar de Dashboard-nav-link naar wijst. Whitelist-mapping;
   // onbekende of ontbrekende rollen vallen terug op '/index.html'
-  // (NOOIT een lege string of redirect-loop). Manager landt bewust op
-  // Control-center (operationeel commando-cabin), sales op het sales-
-  // dashboard (dat zelf doorverwijst naar sales.html?tab=dashboard) en
-  // mentor op het mentor-dashboard. Super_admin / admin / marketing /
-  // administratie / viewer / anders → '/index.html' (default).
+  // (NOOIT een lege string of redirect-loop). Manager landt op het
+  // hoofd-dashboard (/index.html); sales op het sales-dashboard (dat
+  // zelf doorverwijst naar sales.html?tab=dashboard) en mentor op het
+  // mentor-dashboard. Super_admin / admin / marketing / administratie /
+  // viewer / anders → '/index.html' (default).
   const ROLE_LANDING = {
     super_admin:    '/index.html',
     admin:          '/index.html',
-    manager:        '/modules/control-center.html',
+    manager:        '/index.html',
     sales:          '/modules/sales-dashboard.html',
     mentor:         '/modules/mentor-dashboard.html',
     marketing:      '/index.html',
@@ -79,11 +79,19 @@ window._authSharedReady = (async function () {
     async getProfile() {
       const user = await this.getUser();
       if (!user) return null;
-      const { data } = await window.supabase
+      // Niet alleen `data` destructureren — bij elke .single()-glitch
+      // (PostgREST 406, RLS-race, network) zou een stille null hier de
+      // role-based routing kapot kunnen maken (bv. Dashboard-link valt
+      // terug op /index.html i.p.v. mentor-/sales-dashboard).
+      const { data, error } = await window.supabase
         .from('profiles')
         .select('*')
         .eq('id', user.id)
         .single();
+      if (error) {
+        console.warn('[AuthShared.getProfile] supabase error:', error.message || error);
+        return null;
+      }
       return data || null;
     },
 

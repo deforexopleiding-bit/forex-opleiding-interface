@@ -11388,6 +11388,35 @@
       if (canInboxView || canDunningView) {
         const nw = document.getElementById('navWanbetalers'); if (nw) nw.style.display = '';
       }
+      // Polish: Facturen-tab vereist finance.invoice.view; Klanten-tab
+      // vereist finance.dunning.view (finance-customers endpoint deelt
+      // dezelfde gate als finance-dunning). UX-laag — server-side gates
+      // blijven autoritatief. Sales (invoice.* + subscription.push, GEEN
+      // dunning) krijgt zo geen 403 op de Klanten-tab. Default-tab
+      // fallback: als Facturen verborgen is en de huidige active-tab
+      // 'facturen' is, switchen we naar de eerstvolgende zichtbare.
+      const canInvoiceView = can('finance.invoice.view');
+      const navFacturen    = document.querySelector('#financeNav [data-view="facturen"]');
+      if (navFacturen && !canInvoiceView) navFacturen.style.display = 'none';
+      const navKlanten = document.getElementById('navKlanten');
+      if (navKlanten && !canDunningView) navKlanten.style.display = 'none';
+      // Default-tab fallback: zoek de eerste zichtbare tab. Voorkeur:
+      // Dashboard > Facturen > Klanten > Wanbetalers > Bank > Roadmap.
+      try {
+        var visibleTabs = Array.prototype.filter.call(
+          document.querySelectorAll('#financeNav [data-view]'),
+          function (b) { return b && b.style.display !== 'none' && b.offsetParent !== null; }
+        );
+        // Als de huidige actieve tab niet zichtbaar is OF default 'facturen'
+        // verborgen → switch naar de eerste zichtbare.
+        var activeBtn = document.querySelector('#financeNav .sr-seg.active');
+        var activeView = activeBtn ? activeBtn.dataset.view : null;
+        var activeStillVisible = activeBtn && activeBtn.style.display !== 'none';
+        if (!activeStillVisible && visibleTabs.length > 0) {
+          var fallbackView = visibleTabs[0].dataset.view;
+          if (fallbackView && typeof setView === 'function') setView(fallbackView);
+        }
+      } catch (e) { /* niet-blokkerend */ }
       // Verberg saldo-kaart en/of transactie-blok per ontbrekende permission.
       // Beide ontbreken → locked-banner tonen, main hide (zelfde patroon als
       // invLocked); daar zorgt setView('bank') automatisch voor via deze guard.
