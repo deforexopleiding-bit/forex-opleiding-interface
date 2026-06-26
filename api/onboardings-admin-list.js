@@ -24,7 +24,7 @@
 //   } ] }
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
-import { requirePermission } from './_lib/requirePermission.js';
+import { getOnboardingScope } from './_lib/onboardingScope.js';
 import {
   findAvailabilityBlock,
   buildAvailabilityView,
@@ -63,15 +63,24 @@ export default async function handler(req, res) {
   const supabase = createUserClient(req);
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return res.status(401).json({ error: 'Niet geauthenticeerd' });
-  if (!(await requirePermission(req, 'onboarding.admin'))) {
-    return res.status(403).json({ error: 'Geen rechten (onboarding.admin)' });
+
+  // Fase 2a: scope-uitbreiding. seesAll == oude onboarding.admin-pad
+  // (manager/super_admin). seesOwn == nieuwe onboarding.view_own (mentor
+  // ziet alleen eigen studenten).
+  const scopeInfo = await getOnboardingScope(req);
+  if (!scopeInfo.seesAll && !scopeInfo.seesOwn) {
+    return res.status(403).json({ error: 'Geen rechten (onboarding.admin of onboarding.view_own)' });
   }
 
   const scopeRaw = typeof req.query?.scope === 'string' ? req.query.scope.trim().toLowerCase() : '';
   const scope = (scopeRaw === 'archived') ? 'archived' : 'active';
 
+  // mentor_user_id-query-param mag alleen door seesAll-users gezet worden.
+  // Een view_own-only user die per ongeluk OF expres ?mentor_user_id=<andere>
+  // meestuurt mag NOOIT andermans rijen zien — daarom forceren we 'm hieronder
+  // op userId, ongeacht wat de query zegt.
   const mentorFilter = typeof req.query?.mentor_user_id === 'string' ? req.query.mentor_user_id.trim() : '';
-  if (mentorFilter && !UUID_RE.test(mentorFilter)) {
+  if (scopeInfo.seesAll && mentorFilter && !UUID_RE.test(mentorFilter)) {
     return res.status(400).json({ error: 'mentor_user_id (uuid) ongeldig' });
   }
   const trajectFilter = typeof req.query?.traject_id === 'string' ? req.query.traject_id.trim() : '';
@@ -96,7 +105,17 @@ export default async function handler(req, res) {
       .eq('is_test', false);
     if (scope === 'archived') q = q.eq('status', 'gearchiveerd');
     else                       q = q.neq('status', 'gearchiveerd');
-    if (mentorFilter)  q = q.eq('mentor_user_id', mentorFilter);
+    // Fase 2a: data-isolatie. Een view_own-only-user krijgt ALTIJD een
+    // hard server-side filter op z'n eigen userId, ongeacht of de client
+    // (per ongeluk of expres) een ander mentor_user_id meestuurt. Voor
+    // seesAll-users blijft het bestaande gedrag: optionele filter via
+    // ?mentor_user_id=. Volgorde is belangrijk — eerst gate, dan optionele
+    // admin-filter zou onnodig zijn want de userId-filter is al strenger.
+    if (!scopeInfo.seesAll) {
+      q = q.eq('mentor_user_id', scopeInfo.userId);
+    } else if (mentorFilter) {
+      q = q.eq('mentor_user_id', mentorFilter);
+    }
     if (trajectFilter) q = q.eq('traject_id',     trajectFilter);
     if (qRaw)          q = q.ilike('customer_name', `%${escapeIlike(qRaw)}%`);
 

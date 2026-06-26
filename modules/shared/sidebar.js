@@ -508,6 +508,14 @@
       } else if (modKey === 'mentoren-beheer') {
         var okM = perms.has('mentor.admin.view') || perms.has('mentor.payout.manage') || perms.has('mentor.funded.admin') || perms.has('mentor.assessments.admin');
         if (!okM) link.style.display = 'none';
+      } else if (modKey === 'onboarding-admin') {
+        // Fase 2a: Onboarding-hub-entry zichtbaar voor onboarding.admin
+        // (manager/super_admin) ÉN voor onboarding.view_own (mentor ziet
+        // alleen eigen studenten, server-side scoped). De hub-pagina zelf
+        // gate't met dezelfde OR-check; alle admin-acties blijven gegate
+        // op hun eigen feature_keys (server-side autoritatief).
+        var okOnb = perms.has('onboarding.admin') || perms.has('onboarding.view_own');
+        if (!okOnb) link.style.display = 'none';
       } else if (!perms.has(MODULE_FEATURE_MAP[modKey])) {
         link.style.display = 'none';
       }

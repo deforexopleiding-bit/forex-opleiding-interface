@@ -305,15 +305,29 @@
     } catch (e) {
       console.warn('[onboarding-hub] RBAC load faalde:', e && e.message ? e.message : e);
     }
-    const ok = !!(window.RBAC && window.RBAC.canSync && window.RBAC.canSync('onboarding.admin'));
-    if (!ok) {
+    // Fase 2a: hub-toegang uitgebreid met onboarding.view_own zodat een
+    // mentor de hub kan openen en z'n eigen studenten kan zien. Wizard
+    // en Automations blijven onboarding.wizard.edit resp.
+    // onboarding.automation.view-gegate (zie mountWizardIfNeeded /
+    // mountAutomationsIfNeeded hieronder) — een view_own-only-mentor
+    // krijgt daar dus de bestaande "Geen rechten"-banner per sectie.
+    // Server-side blijft autoritatief: alle admin-acties (archive /
+    // provision-retry / invite-send / credentials-resend / wizard.save /
+    // automation.save / etc.) blijven gegate op hun eigen feature_keys
+    // en geven 403 bij een view_own-only-user.
+    var rbac = window.RBAC;
+    var canSee = !!(rbac && rbac.canSync && (
+      rbac.canSync('onboarding.admin') ||
+      rbac.canSync('onboarding.view_own')
+    ));
+    if (!canSee) {
       const root = document.querySelector('.app');
       if (root) {
         root.innerHTML =
           '<div class="page-header"><div><h1>Onboarding</h1></div></div>' +
           '<div style="background:rgba(220,38,38,0.08);border:1px solid rgba(220,38,38,0.3);' +
           'color:#b91c1c;padding:16px 20px;border-radius:10px;font-size:13.5px;max-width:560px">' +
-          '<strong>Geen rechten</strong><br/>Je hebt geen <code>onboarding.admin</code>-permissie. ' +
+          '<strong>Geen rechten</strong><br/>Je hebt geen <code>onboarding.admin</code> of <code>onboarding.view_own</code>-permissie. ' +
           'Vraag een admin om toegang als je dit dashboard nodig hebt.' +
           '</div>';
       }
