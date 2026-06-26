@@ -1,0 +1,700 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Dashboard · De Forex Opleiding</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/dist/tabler-icons.min.css" />
+  <link rel="stylesheet" href="/modules/shared/agent-shared.css" />
+  <link rel="stylesheet" href="/styles/sales-redesign.css" />
+  <script src="/modules/shared/supabase-client.js"></script>
+  <script src="/modules/shared/agent-shared.js"></script>
+  <script src="/modules/shared/theme-shared.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; }
+    body { font-family: 'Inter', system-ui, sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; -webkit-font-smoothing: antialiased; }
+    .app { margin-left: 220px; padding: 24px 28px 60px; max-width: 1400px; }
+    @media (max-width:880px) { .app { margin-left:0; padding:14px; } }
+
+    /* Header ----------------------------------------------------------- */
+    .mh-header { display:flex; align-items:flex-start; justify-content:space-between; gap:16px; flex-wrap:wrap; margin-bottom:18px; }
+    .mh-greet h1 { font-size:22px; font-weight:800; color:var(--text); letter-spacing:-0.3px; }
+    .mh-greet p  { font-size:13px; color:var(--text-dim); margin-top:2px; }
+    .mh-actions  { display:flex; gap:8px; flex-wrap:wrap; }
+    .mh-act-btn {
+      display:inline-flex; align-items:center; gap:6px;
+      padding:8px 14px; font-size:12.5px; font-weight:600;
+      background:var(--bg-elev); color:var(--text); border:1px solid var(--border); border-radius:8px;
+      cursor:pointer; font-family:inherit; text-decoration:none;
+      transition:background .12s, border-color .12s;
+    }
+    .mh-act-btn:hover { background:var(--bg-elev-2, var(--surface-card-hover)); border-color:var(--text-faint); }
+    .mh-act-btn.primary { background:var(--brand-primary, #093d54); color:#fff; border-color:var(--brand-primary, #093d54); }
+    .mh-act-btn.primary:hover { background:#0b4a66; }
+
+    /* Periode-kiezer ---------------------------------------------------- */
+    .mh-period { display:flex; align-items:center; gap:10px; margin-bottom:18px; flex-wrap:wrap; }
+    .mh-seg {
+      display:inline-flex; gap:0;
+      background:var(--bg-elev); border:1px solid var(--border); border-radius:8px; padding:3px;
+    }
+    .mh-seg button {
+      background:transparent; border:0; padding:6px 14px;
+      font:inherit; font-size:12px; font-weight:600;
+      color:var(--text-dim); cursor:pointer; border-radius:6px;
+      transition:background .12s, color .12s;
+    }
+    .mh-seg button:hover { color:var(--text); }
+    .mh-seg button.active { background:var(--brand-primary, #093d54); color:#fff; }
+    .mh-period .mh-range-info { font-size:11.5px; color:var(--text-dim); }
+    .mh-custom-pickers { display:none; gap:6px; align-items:center; }
+    .mh-custom-pickers.show { display:inline-flex; }
+    .mh-custom-pickers input[type=date] {
+      padding:5px 8px; font-size:12px; border:1px solid var(--border); border-radius:6px;
+      background:var(--bg); color:var(--text); font-family:inherit;
+    }
+
+    /* KPI-rij ----------------------------------------------------------- */
+    .mh-kpi-row {
+      display:grid; grid-template-columns:repeat(auto-fit, minmax(135px, 1fr));
+      gap:10px; margin-bottom:22px;
+    }
+    .mh-kpi {
+      background:var(--bg-elev); border:1px solid var(--border); border-radius:10px;
+      padding:12px 14px;
+    }
+    .mh-kpi-label { font-size:10.5px; text-transform:uppercase; letter-spacing:0.05em; color:var(--text-faint); font-weight:700; }
+    .mh-kpi-value { font-size:21px; font-weight:700; margin-top:3px; color:var(--text); font-variant-numeric:tabular-nums; }
+    .mh-kpi-sub   { font-size:11px; color:var(--text-dim); margin-top:1px; }
+
+    /* Layout B — hoofdkolom + zijbalk ---------------------------------- */
+    .mh-grid {
+      display:grid;
+      grid-template-columns:repeat(auto-fit, minmax(250px, 1fr));
+      gap:18px;
+      align-items:start;
+    }
+    @media (min-width:1080px) {
+      .mh-grid { grid-template-columns:minmax(0, 2fr) minmax(0, 1fr); }
+    }
+    .mh-col { display:flex; flex-direction:column; gap:16px; min-width:0; }
+
+    /* Kaart-basis ------------------------------------------------------- */
+    .mh-card {
+      background:var(--bg-elev); border:1px solid var(--border); border-radius:10px;
+      padding:14px 16px; overflow:hidden;
+    }
+    .mh-card-head {
+      display:flex; align-items:center; justify-content:space-between;
+      gap:8px; margin-bottom:10px;
+    }
+    .mh-card-title { font-size:13.5px; font-weight:700; color:var(--text); display:inline-flex; align-items:center; gap:6px; }
+    .mh-card-title i { color:var(--text-faint); }
+    .mh-card-sub { font-size:11.5px; color:var(--text-dim); margin-top:-6px; margin-bottom:10px; }
+
+    /* Hero: eerstvolgend event ----------------------------------------- */
+    .mh-hero {
+      background:linear-gradient(135deg, rgba(9,61,84,0.06), rgba(31,159,224,0.04));
+      border:1px solid rgba(9,61,84,0.18);
+    }
+    .mh-hero .mh-hero-title { font-size:18px; font-weight:800; color:var(--text); margin-bottom:4px; }
+    .mh-hero .mh-hero-meta  { font-size:13px; color:var(--text-dim); margin-bottom:14px; line-height:1.6; }
+    .mh-hero .mh-hero-meta strong { color:var(--text); font-weight:600; }
+
+    /* Student-cards ---------------------------------------------------- */
+    .mh-student-list { display:flex; flex-direction:column; gap:8px; }
+    .mh-student-card {
+      display:grid; grid-template-columns:1fr auto; gap:8px;
+      padding:10px 12px; border:1px solid var(--border); border-radius:8px;
+      background:var(--bg);
+      cursor:pointer; transition:border-color .12s, background .12s;
+    }
+    .mh-student-card:hover { border-color:var(--brand-primary, #093d54); background:var(--bg-elev); }
+    .mh-student-name { font-size:13px; font-weight:600; color:var(--text); }
+    .mh-student-meta { font-size:11.5px; color:var(--text-dim); margin-top:2px; }
+    .mh-progress {
+      width:100%; height:6px; background:var(--bg-elev); border-radius:3px; overflow:hidden; margin-top:6px;
+    }
+    .mh-progress-fill { height:100%; background:linear-gradient(90deg, #1f9fe0, #093d54); border-radius:3px; transition:width .3s ease; }
+    .mh-student-badge {
+      display:inline-block; padding:2px 8px; border-radius:10px;
+      font-size:10.5px; font-weight:700; letter-spacing:0.02em; white-space:nowrap;
+      align-self:flex-start;
+    }
+    .mh-student-badge.waiting { background:rgba(245,158,11,0.16); color:#b45309; }
+    .mh-student-badge.ok      { background:rgba(34,197,94,0.14);  color:#15803d; }
+    .mh-student-badge.neutral { background:var(--bg-elev); color:var(--text-dim); border:1px solid var(--border); }
+
+    /* Te-doen lijst ----------------------------------------------------- */
+    .mh-todo { display:flex; flex-direction:column; gap:6px; }
+    .mh-todo-item {
+      display:flex; align-items:center; gap:10px;
+      padding:10px 12px; border:1px solid var(--border); border-radius:8px;
+      background:var(--bg);
+      cursor:pointer; text-decoration:none; color:inherit;
+    }
+    .mh-todo-item:hover { background:var(--bg-elev); border-color:var(--text-faint); }
+    .mh-todo-icon {
+      width:32px; height:32px; border-radius:8px;
+      background:rgba(31,159,224,0.10); color:#1f9fe0;
+      display:inline-flex; align-items:center; justify-content:center;
+      flex-shrink:0;
+    }
+    .mh-todo-body { flex:1; min-width:0; }
+    .mh-todo-title { font-size:13px; font-weight:600; color:var(--text); }
+    .mh-todo-sub   { font-size:11.5px; color:var(--text-dim); margin-top:1px; }
+    .mh-todo-count {
+      font-size:11px; font-weight:700; color:#fff;
+      background:#dc2626; padding:2px 8px; border-radius:10px; min-width:18px; text-align:center;
+    }
+
+    /* Zijbalk-kaartjes ------------------------------------------------- */
+    .mh-side-list { display:flex; flex-direction:column; gap:6px; }
+    .mh-side-item {
+      display:flex; align-items:center; gap:8px;
+      padding:8px 10px; border:1px solid var(--border); border-radius:8px;
+      background:var(--bg);
+      font-size:12.5px;
+    }
+    .mh-side-item .mh-side-time { font-size:11px; color:var(--text-dim); margin-top:1px; }
+    .mh-side-grid {
+      display:grid; grid-template-columns:1fr 1fr; gap:8px;
+    }
+    .mh-side-stat {
+      background:var(--bg); border:1px solid var(--border); border-radius:8px; padding:8px 10px;
+    }
+    .mh-side-stat-label { font-size:10px; text-transform:uppercase; letter-spacing:0.04em; color:var(--text-faint); font-weight:700; }
+    .mh-side-stat-value { font-size:15px; font-weight:700; color:var(--text); margin-top:2px; font-variant-numeric:tabular-nums; }
+
+    /* Skeleton + lege staten ------------------------------------------- */
+    .mh-skel {
+      display:block; height:14px; width:80%; border-radius:4px;
+      background:linear-gradient(90deg, rgba(0,0,0,0.05), rgba(0,0,0,0.10), rgba(0,0,0,0.05));
+      background-size:200% 100%; animation:mh-sk 1.2s infinite;
+    }
+    .mh-skel + .mh-skel { margin-top:6px; }
+    @keyframes mh-sk { 0% { background-position:0% 0; } 100% { background-position:200% 0; } }
+    .mh-empty {
+      padding:14px; background:var(--bg); border:1px dashed var(--border); border-radius:8px;
+      font-size:12.5px; color:var(--text-dim); text-align:center;
+    }
+    .mh-empty i { font-size:18px; display:block; margin:0 auto 4px; color:var(--text-faint); }
+
+    /* Kennisbank --------------------------------------------------------*/
+    .mh-kb-grid { display:grid; grid-template-columns:1fr 1fr; gap:6px; }
+    .mh-kb-link {
+      display:flex; align-items:center; gap:6px;
+      padding:8px 10px; border:1px solid var(--border); border-radius:8px;
+      background:var(--bg); font-size:12px; color:var(--text); text-decoration:none;
+      transition:border-color .12s, background .12s;
+    }
+    .mh-kb-link:hover { border-color:var(--brand-primary, #093d54); background:var(--bg-elev); }
+    .mh-kb-link i { color:var(--brand-primary, #093d54); }
+
+    /* Helper: tabular num */
+    .num { font-variant-numeric:tabular-nums; }
+  </style>
+</head>
+<body>
+<div id="sidebar-mount"></div>
+
+<div class="app" id="appContent">
+  <!-- ── Header ───────────────────────────────────────────────────── -->
+  <div class="mh-header">
+    <div class="mh-greet">
+      <h1 id="mhGreet">Welkom terug</h1>
+      <p>Jouw mentor-overzicht — studenten, sessies en bonus in één oogopslag.</p>
+    </div>
+    <div class="mh-actions">
+      <a href="/modules/mentor-dashboard.html" class="mh-act-btn"><i class="ti ti-user"></i> Student openen</a>
+      <a href="/modules/onboarding-hub.html#inbox" class="mh-act-btn"><i class="ti ti-message-circle"></i> Reageren</a>
+      <a href="/modules/mentor-dashboard.html#assessments" class="mh-act-btn"><i class="ti ti-clipboard-check"></i> Assessment</a>
+      <a href="/modules/sales-wizard.html" class="mh-act-btn primary"><i class="ti ti-plus"></i> Nieuwe offerte</a>
+    </div>
+  </div>
+
+  <!-- ── Periode-kiezer ───────────────────────────────────────────── -->
+  <div class="mh-period">
+    <div class="mh-seg" id="mhPeriodSeg" role="tablist">
+      <button type="button" data-period="day"     role="tab">Dag</button>
+      <button type="button" data-period="week"    role="tab">Week</button>
+      <button type="button" data-period="month"   role="tab" class="active">Maand</button>
+      <button type="button" data-period="custom"  role="tab">Aangepast</button>
+    </div>
+    <div class="mh-custom-pickers" id="mhCustomPickers">
+      <input type="date" id="mhFromDate" />
+      <span style="color:var(--text-dim);font-size:12px">tot</span>
+      <input type="date" id="mhToDate" />
+    </div>
+    <span class="mh-range-info" id="mhRangeInfo">&mdash;</span>
+  </div>
+
+  <!-- ── KPI-rij (4) ──────────────────────────────────────────────── -->
+  <div class="mh-kpi-row">
+    <div class="mh-kpi"><div class="mh-kpi-label">Verdiend totaal</div><div class="mh-kpi-value" id="kpiTotal"><span class="mh-skel" style="width:60px"></span></div><div class="mh-kpi-sub">all-time</div></div>
+    <div class="mh-kpi"><div class="mh-kpi-label">Verdiend in periode</div><div class="mh-kpi-value" id="kpiPeriod"><span class="mh-skel" style="width:60px"></span></div><div class="mh-kpi-sub" id="kpiPeriodSub">&mdash;</div></div>
+    <div class="mh-kpi"><div class="mh-kpi-label">Actieve studenten</div><div class="mh-kpi-value" id="kpiStudents"><span class="mh-skel" style="width:40px"></span></div><div class="mh-kpi-sub">gekoppeld</div></div>
+    <div class="mh-kpi"><div class="mh-kpi-label">Komende sessies</div><div class="mh-kpi-value" id="kpiSessions"><span class="mh-skel" style="width:40px"></span></div><div class="mh-kpi-sub">upcoming</div></div>
+  </div>
+
+  <!-- ── Hoofd-grid (links: hoofdkolom · rechts: zijbalk) ────────── -->
+  <div class="mh-grid">
+    <!-- LINKER hoofdkolom -->
+    <div class="mh-col">
+      <!-- 1) Eerstvolgend event (hero) -->
+      <div class="mh-card mh-hero">
+        <div class="mh-card-head">
+          <div class="mh-card-title"><i class="ti ti-calendar-event"></i> Eerstvolgend event</div>
+        </div>
+        <div id="mhHeroBody"><span class="mh-skel" style="width:70%"></span><span class="mh-skel" style="width:50%"></span></div>
+      </div>
+
+      <!-- 2) Mijn studenten -->
+      <div class="mh-card">
+        <div class="mh-card-head">
+          <div class="mh-card-title"><i class="ti ti-users"></i> Mijn studenten</div>
+          <a href="/modules/mentor-dashboard.html#students" style="font-size:11.5px;color:var(--brand-primary,#093d54);text-decoration:none">Alles bekijken &rarr;</a>
+        </div>
+        <div id="mhStudents" class="mh-student-list"><span class="mh-skel"></span><span class="mh-skel" style="width:75%"></span></div>
+      </div>
+
+      <!-- 3) Te doen -->
+      <div class="mh-card">
+        <div class="mh-card-head">
+          <div class="mh-card-title"><i class="ti ti-checklist"></i> Te doen</div>
+        </div>
+        <div id="mhTodo" class="mh-todo"><span class="mh-skel"></span><span class="mh-skel" style="width:70%"></span></div>
+      </div>
+    </div>
+
+    <!-- RECHTER zijbalk -->
+    <div class="mh-col">
+      <!-- Komende sessies -->
+      <div class="mh-card">
+        <div class="mh-card-head"><div class="mh-card-title"><i class="ti ti-calendar"></i> Komende sessies</div></div>
+        <div id="mhUpcoming" class="mh-side-list"><span class="mh-skel"></span></div>
+      </div>
+
+      <!-- Verdiensten & bonus -->
+      <div class="mh-card">
+        <div class="mh-card-head"><div class="mh-card-title"><i class="ti ti-cash"></i> Verdiensten &amp; bonus</div></div>
+        <div id="mhEarnings"><span class="mh-skel"></span><span class="mh-skel" style="width:50%"></span></div>
+      </div>
+
+      <!-- Offertes (best-effort) -->
+      <div class="mh-card">
+        <div class="mh-card-head">
+          <div class="mh-card-title"><i class="ti ti-file-text"></i> Offertes</div>
+          <a href="/modules/sales-wizard.html" style="font-size:11.5px;color:var(--brand-primary,#093d54);text-decoration:none">+ Nieuw</a>
+        </div>
+        <div id="mhDeals">
+          <div class="mh-empty"><i class="ti ti-file-off"></i>Nog geen offertes gekoppeld.<br/><span style="font-size:11px">Maak een offerte aan via Sales-wizard.</span></div>
+        </div>
+      </div>
+
+      <!-- Assessments -->
+      <div class="mh-card">
+        <div class="mh-card-head"><div class="mh-card-title"><i class="ti ti-clipboard-check"></i> Assessments</div></div>
+        <div id="mhAssessments"><span class="mh-skel"></span></div>
+      </div>
+
+      <!-- Taken & afspraken (my-calendar) -->
+      <div class="mh-card">
+        <div class="mh-card-head"><div class="mh-card-title"><i class="ti ti-calendar-plus"></i> Taken &amp; afspraken</div></div>
+        <div id="mhCalendar" class="mh-side-list"><span class="mh-skel"></span></div>
+      </div>
+
+      <!-- Kennisbank-shortcuts -->
+      <div class="mh-card">
+        <div class="mh-card-head"><div class="mh-card-title"><i class="ti ti-books"></i> Kennisbank</div></div>
+        <div class="mh-kb-grid">
+          <a href="/modules/kennisbank.html" class="mh-kb-link"><i class="ti ti-book"></i> Hoofdpagina</a>
+          <a href="/modules/kennisbank.html#mentor" class="mh-kb-link"><i class="ti ti-bookmark"></i> Voor mentoren</a>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+(function () {
+  'use strict';
+
+  /* ── Helpers ────────────────────────────────────────────────────── */
+  const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  function ymd(d) {
+    const dt = (d instanceof Date) ? d : new Date(d);
+    const y = dt.getFullYear();
+    const m = String(dt.getMonth() + 1).padStart(2, '0');
+    const dd = String(dt.getDate()).padStart(2, '0');
+    return y + '-' + m + '-' + dd;
+  }
+  function eur(n) {
+    const v = Number(n);
+    if (!isFinite(v)) return '€ 0';
+    return '€ ' + v.toLocaleString('nl-NL', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+  }
+  function fmtDate(iso) {
+    if (!iso) return '—';
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return '—';
+    return d.toLocaleDateString('nl-NL', { day:'2-digit', month:'short', year:'numeric' });
+  }
+  function fmtTime(iso) {
+    if (!iso) return '';
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return '';
+    return d.toLocaleTimeString('nl-NL', { hour:'2-digit', minute:'2-digit' });
+  }
+  function periodLabel(period, from, to) {
+    if (period === 'day')    return 'vandaag';
+    if (period === 'week')   return 'deze week';
+    if (period === 'month')  return 'deze maand';
+    return from + ' → ' + to;
+  }
+
+  /* ── Periode-state ──────────────────────────────────────────────── */
+  const state = {
+    period: 'month',   // default
+    from:   null,
+    to:     null,
+    profile: null,
+    upcomingCache: null, // hergebruik upcoming voor KPI + hero + sidebar
+  };
+
+  function computeRange(period) {
+    const now = new Date();
+    if (period === 'day') {
+      return { from: ymd(now), to: ymd(now) };
+    }
+    if (period === 'week') {
+      // Maandag t/m zondag van de huidige week (NL: ISO-week).
+      const d = new Date(now);
+      const day = (d.getDay() + 6) % 7; // ma=0..zo=6
+      const mon = new Date(d); mon.setDate(d.getDate() - day);
+      const sun = new Date(mon); sun.setDate(mon.getDate() + 6);
+      return { from: ymd(mon), to: ymd(sun) };
+    }
+    if (period === 'month') {
+      const first = new Date(now.getFullYear(), now.getMonth(), 1);
+      const last  = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+      return { from: ymd(first), to: ymd(last) };
+    }
+    // custom — gebruik current state of vandaag fallback
+    return {
+      from: state.from || ymd(now),
+      to:   state.to   || ymd(now),
+    };
+  }
+
+  function updateRangeInfo() {
+    const info = document.getElementById('mhRangeInfo');
+    if (!info) return;
+    info.textContent = state.from === state.to
+      ? state.from
+      : (state.from + ' → ' + state.to);
+  }
+
+  /* ── Sidebar mount ─────────────────────────────────────────────── */
+  // sidebar-mount div is leeg; sidebar.js mount-zichzelf na _authSharedReady.
+
+  /* ── Render-blokken (elk afzonderlijk, fail-safe) ───────────────── */
+
+  function renderGreet() {
+    const el = document.getElementById('mhGreet');
+    if (!el) return;
+    const p = state.profile || {};
+    const first = (p.full_name || '').split(' ')[0]
+               || (p.email ? p.email.split('@')[0] : '');
+    el.textContent = first ? 'Welkom terug, ' + first : 'Welkom terug';
+  }
+
+  async function loadAndRenderEarnings() {
+    // Verdiend totaal (all-time) + Verdiend in periode + zijbalk-blok.
+    const allTimeBtn = '/api/mentor-coaching-earnings?from=2020-01-01&to=' + ymd(new Date());
+    const periodBtn  = '/api/mentor-coaching-earnings?from=' + state.from + '&to=' + state.to;
+    const bonusBtn   = '/api/mentor-bonus-overview';
+    let totalAll = null, totalPeriod = null, bonus = null;
+    await Promise.all([
+      window.AgentShared.apiFetch(allTimeBtn).then(r => r.ok ? r.json() : null).then(d => { totalAll = d?.grand_total ?? 0; }).catch(() => {}),
+      window.AgentShared.apiFetch(periodBtn).then(r => r.ok ? r.json() : null).then(d => { totalPeriod = d?.grand_total ?? 0; }).catch(() => {}),
+      window.AgentShared.apiFetch(bonusBtn).then(r => r.ok ? r.json() : null).then(d => { bonus = d; }).catch(() => {}),
+    ]);
+    document.getElementById('kpiTotal').textContent  = (totalAll  == null) ? '—' : eur(totalAll);
+    document.getElementById('kpiPeriod').textContent = (totalPeriod == null) ? '—' : eur(totalPeriod);
+    document.getElementById('kpiPeriodSub').textContent = periodLabel(state.period, state.from, state.to);
+
+    const ewrap = document.getElementById('mhEarnings');
+    if (ewrap) {
+      const t = bonus?.totals || {};
+      ewrap.innerHTML =
+        '<div class="mh-side-grid">' +
+          '<div class="mh-side-stat"><div class="mh-side-stat-label">Verdiend</div><div class="mh-side-stat-value">' + eur(totalAll || 0) + '</div></div>' +
+          '<div class="mh-side-stat"><div class="mh-side-stat-label">In periode</div><div class="mh-side-stat-value">' + eur(totalPeriod || 0) + '</div></div>' +
+          '<div class="mh-side-stat"><div class="mh-side-stat-label">Bonus open</div><div class="mh-side-stat-value">' + eur(t.open || 0) + '</div></div>' +
+          '<div class="mh-side-stat"><div class="mh-side-stat-label">Bonus uitbet.</div><div class="mh-side-stat-value">' + eur(t.betaald_uit || 0) + '</div></div>' +
+        '</div>';
+    }
+  }
+
+  async function loadAndRenderEvents() {
+    let payload = null;
+    try {
+      const r = await window.AgentShared.apiFetch('/api/mentor-my-events?scope=upcoming');
+      if (r.ok) payload = await r.json();
+    } catch (e) { /* fail-soft */ }
+    const events = (payload?.events || []).slice().sort((a, b) => (a.starts_at || '').localeCompare(b.starts_at || ''));
+    state.upcomingCache = events;
+    // KPI komende sessies
+    document.getElementById('kpiSessions').textContent = String(events.length);
+
+    // Hero: eerstvolgend
+    const hero = document.getElementById('mhHeroBody');
+    if (hero) {
+      if (events.length === 0) {
+        hero.innerHTML = '<div class="mh-empty"><i class="ti ti-calendar-off"></i>Geen komende sessies.<br/><span style="font-size:11px">Zodra een event aan jou wordt toegewezen, verschijnt het hier.</span></div>';
+      } else {
+        const e = events[0];
+        const url = '/modules/events.html?id=' + encodeURIComponent(e.event_id);
+        const datePart = fmtDate(e.starts_at);
+        const timePart = fmtTime(e.starts_at);
+        hero.innerHTML =
+          '<div class="mh-hero-title">' + esc(e.title || 'Untitled event') + '</div>' +
+          '<div class="mh-hero-meta">' +
+            '<i class="ti ti-clock"></i> <strong>' + esc(datePart) + (timePart ? ' · ' + esc(timePart) : '') + '</strong>' +
+          '</div>' +
+          '<a href="' + esc(url) + '" class="mh-act-btn primary"><i class="ti ti-arrow-right"></i> Event openen</a>';
+      }
+    }
+
+    // Zijbalk: komende sessies (max 5)
+    const upWrap = document.getElementById('mhUpcoming');
+    if (upWrap) {
+      if (events.length === 0) {
+        upWrap.innerHTML = '<div class="mh-empty"><i class="ti ti-calendar-off"></i>Geen komende sessies.</div>';
+      } else {
+        upWrap.innerHTML = events.slice(0, 5).map((e) => {
+          const url = '/modules/events.html?id=' + encodeURIComponent(e.event_id);
+          return '<a href="' + esc(url) + '" class="mh-side-item" style="text-decoration:none;color:inherit;cursor:pointer">' +
+                   '<div style="flex:1;min-width:0">' +
+                     '<div style="font-weight:600;color:var(--text);font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + esc(e.title || '—') + '</div>' +
+                     '<div class="mh-side-time">' + esc(fmtDate(e.starts_at)) + (e.starts_at ? ' · ' + esc(fmtTime(e.starts_at)) : '') + '</div>' +
+                   '</div>' +
+                 '</a>';
+        }).join('');
+      }
+    }
+  }
+
+  async function loadAndRenderStudents() {
+    let payload = null;
+    try {
+      const r = await window.AgentShared.apiFetch('/api/mentor-my-students');
+      if (r.ok) payload = await r.json();
+    } catch (e) { /* fail-soft */ }
+    const students = payload?.students || [];
+    document.getElementById('kpiStudents').textContent = String(students.length);
+
+    const wrap = document.getElementById('mhStudents');
+    if (!wrap) return;
+    if (!payload?.linked) {
+      wrap.innerHTML = '<div class="mh-empty"><i class="ti ti-user-question"></i>Nog geen Bubble-koppeling — vraag een admin om je <code>team_members.bubble_user_id</code> te zetten.</div>';
+      return;
+    }
+    if (students.length === 0) {
+      wrap.innerHTML = '<div class="mh-empty"><i class="ti ti-user-off"></i>Nog geen studenten gekoppeld.</div>';
+      return;
+    }
+    wrap.innerHTML = students.slice(0, 8).map((s) => {
+      const done   = Number(s.calls_1on1_done)  || 0;
+      const total  = Number(s.calls_1on1_total) || 0;
+      const pct    = total > 0 ? Math.min(100, Math.round((done / total) * 100)) : 0;
+      const label  = total > 0 ? ('Call ' + done + '/' + total) : 'Geen 1-op-1 plan';
+      const status = s.onboarding_status || '';
+      let badgeCls = 'neutral', badgeTxt = status || s.program || '—';
+      if (status && /wacht/i.test(status))  { badgeCls = 'waiting'; }
+      else if (s.no_shows > 0)               { badgeCls = 'waiting'; badgeTxt = 'No-show ' + s.no_shows; }
+      else if (status && /actief|live|onboarded/i.test(status)) { badgeCls = 'ok'; }
+      const sid = s.bubble_student_id || '';
+      const url = '/modules/mentor-dashboard.html#student=' + encodeURIComponent(sid);
+      return '<a href="' + esc(url) + '" class="mh-student-card" style="text-decoration:none">' +
+               '<div>' +
+                 '<div class="mh-student-name">' + esc(s.name || s.email || '—') + '</div>' +
+                 '<div class="mh-student-meta">' + esc(label) + (s.program ? ' · ' + esc(s.program) : '') + '</div>' +
+                 (total > 0 ? '<div class="mh-progress"><div class="mh-progress-fill" style="width:' + pct + '%"></div></div>' : '') +
+               '</div>' +
+               '<span class="mh-student-badge ' + badgeCls + '">' + esc(badgeTxt) + '</span>' +
+             '</a>';
+    }).join('');
+  }
+
+  async function loadAndRenderAssessments() {
+    let payload = null;
+    try {
+      const r = await window.AgentShared.apiFetch('/api/mentor-assessments-self');
+      if (r.ok) payload = await r.json();
+    } catch (e) { /* fail-soft */ }
+    const list = payload?.assessments || [];
+    const open = list.filter((a) => a.status !== 'completed' && a.status !== 'done');
+    const wrap = document.getElementById('mhAssessments');
+    if (wrap) {
+      if (list.length === 0) {
+        wrap.innerHTML = '<div class="mh-empty"><i class="ti ti-clipboard-off"></i>Geen openstaande assessments.</div>';
+      } else {
+        wrap.innerHTML = list.slice(0, 5).map((a) => {
+          return '<div class="mh-side-item" style="display:block">' +
+                   '<div style="font-size:13px;font-weight:600;color:var(--text)">' + esc(a.student_name || '—') + '</div>' +
+                   '<div class="mh-side-time">' + esc(a.status || '—') + (a.score != null ? ' · score ' + a.score : '') + '</div>' +
+                 '</div>';
+        }).join('');
+      }
+    }
+
+    // Te doen-blok: alleen assessment-deel; combineer met "Reageren" als best-effort.
+    renderTodo(open.length);
+  }
+
+  function renderTodo(assessmentsOpen) {
+    const wrap = document.getElementById('mhTodo');
+    if (!wrap) return;
+    const items = [];
+    if (assessmentsOpen > 0) {
+      items.push({
+        href: '/modules/mentor-dashboard.html#assessments',
+        icon: 'ti-clipboard-check',
+        title: 'Assessments beoordelen',
+        sub: assessmentsOpen + ' student(en) wachten op je beoordeling',
+        count: assessmentsOpen,
+      });
+    }
+    // Best-effort: link naar onboarding-inbox (waar mentor messages kan beantwoorden).
+    items.push({
+      href: '/modules/onboarding-hub.html#inbox',
+      icon: 'ti-message-circle',
+      title: 'Reageren in inbox',
+      sub: 'Open je WhatsApp-gesprekken met studenten',
+      count: null,
+    });
+    if (items.length === 0) {
+      wrap.innerHTML = '<div class="mh-empty"><i class="ti ti-check"></i>Niets openstaand — top.</div>';
+      return;
+    }
+    wrap.innerHTML = items.map((it) => {
+      return '<a href="' + esc(it.href) + '" class="mh-todo-item">' +
+               '<div class="mh-todo-icon"><i class="ti ' + esc(it.icon) + '"></i></div>' +
+               '<div class="mh-todo-body">' +
+                 '<div class="mh-todo-title">' + esc(it.title) + '</div>' +
+                 '<div class="mh-todo-sub">' + esc(it.sub) + '</div>' +
+               '</div>' +
+               (it.count ? '<span class="mh-todo-count">' + it.count + '</span>' : '') +
+             '</a>';
+    }).join('');
+  }
+
+  async function loadAndRenderCalendar() {
+    let payload = null;
+    try {
+      const r = await window.AgentShared.apiFetch('/api/mentor-my-calendar');
+      if (r.ok) payload = await r.json();
+    } catch (e) { /* fail-soft */ }
+    const events = payload?.events || [];
+    const wrap = document.getElementById('mhCalendar');
+    if (!wrap) return;
+    if (events.length === 0) {
+      wrap.innerHTML = '<div class="mh-empty"><i class="ti ti-calendar-off"></i>Geen geplande afspraken.</div>';
+      return;
+    }
+    wrap.innerHTML = events.slice(0, 5).map((e) => {
+      return '<div class="mh-side-item" style="display:block">' +
+               '<div style="font-size:13px;font-weight:600;color:var(--text)">' + esc(e.title || '—') + '</div>' +
+               '<div class="mh-side-time">' + esc(fmtDate(e.starts_at)) + (e.starts_at ? ' · ' + esc(fmtTime(e.starts_at)) : '') + '</div>' +
+             '</div>';
+    }).join('');
+  }
+
+  /* ── Init + wiring ─────────────────────────────────────────────── */
+  function applyPeriod(period) {
+    state.period = period;
+    if (period !== 'custom') {
+      const r = computeRange(period);
+      state.from = r.from;
+      state.to   = r.to;
+    } else {
+      const f = document.getElementById('mhFromDate').value;
+      const t = document.getElementById('mhToDate').value;
+      const now = ymd(new Date());
+      state.from = f || now;
+      state.to   = t || now;
+    }
+    updateRangeInfo();
+    // Toggle custom-pickers
+    const cp = document.getElementById('mhCustomPickers');
+    if (cp) cp.classList.toggle('show', period === 'custom');
+    // Update active button
+    document.querySelectorAll('#mhPeriodSeg button').forEach((b) => {
+      b.classList.toggle('active', b.dataset.period === period);
+    });
+    // Reload tijd-gebonden blokken (earnings)
+    loadAndRenderEarnings().catch(() => {});
+  }
+
+  function wirePeriodSeg() {
+    document.querySelectorAll('#mhPeriodSeg button').forEach((b) => {
+      b.addEventListener('click', () => applyPeriod(b.dataset.period));
+    });
+    const from = document.getElementById('mhFromDate');
+    const to   = document.getElementById('mhToDate');
+    if (from) from.addEventListener('change', () => applyPeriod('custom'));
+    if (to)   to.addEventListener('change',   () => applyPeriod('custom'));
+    // Init: vul custom-pickers met huidige maand-range zodat een custom-switch
+    // niet leeg start.
+    const init = computeRange('month');
+    if (from) from.value = init.from;
+    if (to)   to.value   = init.to;
+  }
+
+  (async () => {
+    try { if (window._authSharedReady) await window._authSharedReady; } catch (_) {}
+
+    const profile = await window.AuthShared?.requireAuth();
+    if (!profile) return;
+    state.profile = profile;
+    renderGreet();
+
+    // Page-gate: alleen mentor.module.access. Server-gates blijven autoritatief
+    // op alle mentor-* endpoints; deze is alleen pre-emptive UX.
+    try {
+      if (window.RBAC?.ensurePermissionsLoaded) {
+        await window.RBAC.ensurePermissionsLoaded();
+        if (!window.RBAC.canSync || !window.RBAC.canSync('mentor.module.access')) {
+          window.location.replace('/index.html');
+          return;
+        }
+      }
+    } catch (e) { /* fail-open */ }
+
+    // Init periode-state + UI
+    wirePeriodSeg();
+    applyPeriod('month'); // default + triggert eerste earnings-load
+
+    // Niet-tijdgebonden blokken parallel laden — elk eigen try/catch.
+    loadAndRenderEvents().catch((e) => console.warn('[mh] events', e?.message || e));
+    loadAndRenderStudents().catch((e) => console.warn('[mh] students', e?.message || e));
+    loadAndRenderAssessments().catch((e) => console.warn('[mh] assessments', e?.message || e));
+    loadAndRenderCalendar().catch((e) => console.warn('[mh] calendar', e?.message || e));
+  })();
+
+  if (window._authSharedReady) {
+    window._authSharedReady.then(() => window.AgentShared?.renderUserSection());
+  }
+})();
+</script>
+<script src="/modules/shared/permissions.js"></script>
+<script src="/modules/shared/sidebar.js"></script>
+<script src="/modules/shared/quick-task-button.js" data-module="Dashboard" defer></script>
+</body>
+</html>

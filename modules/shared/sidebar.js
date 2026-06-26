@@ -156,6 +156,11 @@
     var cur = currentModule();
     // sales-dashboard.html highlight valt onder Dashboard-link in de sidebar
     if (cur === 'sales-dashboard') cur = 'dashboard';
+    // mentor-home.html is de nieuwe landing voor de mentor-rol — alias naar
+    // de bovenste Dashboard-link zodat die actief oplicht (zelfde pattern
+    // als sales-dashboard hierboven). mentor-dashboard.html blijft een
+    // aparte sidebar-entry voor de detailpagina.
+    if (cur === 'mentor-home') cur = 'dashboard';
     // events-detail.html + events-wizard.html + events-automations.html highlighten onder de Events-link
     if (cur === 'events-detail' || cur === 'events-wizard' || cur === 'events-automations') cur = 'events';
     // open-acties.html is verhuisd naar Finance > Wanbetalers > Open Acties sub-tab.
