@@ -280,7 +280,10 @@
 
 <div id="sidebar-mount"></div>
 
-<div class="app">
+<!-- Anti-flicker: main content blijft visibility:hidden tot de rol-bounce
+     hieronder klaar is. Gebounce'te rollen (mentor/sales/…) zien NOOIT
+     manager-data zichtbaar of geladen. -->
+<div class="app" id="appRoot" style="visibility:hidden">
 
   <!-- HEADER -->
   <div class="dash-header">
@@ -1046,12 +1049,37 @@ document.getElementById('refreshBtn')?.addEventListener('click', () => loadDashb
   await window._authSharedReady;
   const profile = await window.AuthShared?.requireAuth();
   if (!profile) return;
-  // Sales-rol heeft eigen dashboard-variant. Behoud van oude index-redirect.
-  if (profile.role === 'sales') {
-    window.location.replace('/modules/sales-dashboard.html');
-    return;
+  // ── Rol-bounce (FIX 1, security-kritisch) ─────────────────────────
+  // Elke rol met een eigen landing-URL wordt hier doorgestuurd VOORDAT
+  // de manager-data laadt. Voorkomt dat lagere rollen (mentor/sales)
+  // ooit het manager/super-admin dashboard zien of de bijbehorende
+  // KPI-endpoints aanroepen. Single-source mapping via
+  // AuthShared.getRoleLandingUrl (zelfde tabel als login.html en
+  // sidebar.applyDashboardRouting). Geen redirect-loop: alle doel-
+  // dashboards hebben hun eigen page-gate die "/index.html"-landings
+  // niet terug-bounce't.
+  //   - admin / manager / super_admin / marketing / administratie /
+  //     viewer → landing '/index.html' → blijven hier.
+  //   - sales → '/modules/sales-dashboard.html'.
+  //   - mentor → '/modules/mentor-home.html'.
+  //   - onbekende rol → fallback '/index.html' (whitelist in helper).
+  try {
+    const landing = (window.AuthShared && typeof window.AuthShared.getRoleLandingUrl === 'function')
+      ? window.AuthShared.getRoleLandingUrl(profile.role)
+      : '/index.html';
+    if (landing && landing !== '/index.html') {
+      window.location.replace(landing);
+      return; // STOP — geen loadDashboard(), geen render, geen verdere fetches
+    }
+  } catch (e) {
+    // Fail-open: als helper ontbreekt, laat de user op /index.html. Tweede
+    // bounce-laag verderop (RBAC-gate via permissions) blijft autoritatief.
+    console.warn('[index] role-bounce fout, fail-open op /index.html:', e?.message || e);
   }
+  // Vanaf hier: rol blijft op /index.html → reveal de UI en laad data.
   state.profile = profile;
+  const appRoot = document.getElementById('appRoot');
+  if (appRoot) appRoot.style.visibility = '';
   loadDashboard();
 })();
 

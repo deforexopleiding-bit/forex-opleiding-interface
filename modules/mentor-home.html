@@ -442,12 +442,27 @@
   }
 
   async function loadAndRenderEvents() {
+    // FIX 2: mentors worden vooraf NIET aan events gekoppeld, dus
+    // /api/mentor-my-events?scope=upcoming was leeg. Gebruik nu de
+    // bedrijfsbrede /api/events-list (gegate op events.event.view —
+    // mentor heeft die). Default-status-filter is draft+published, dus
+    // cancelled/archived blijven uit; we filteren extra op
+    // starts_at >= vandaag (kort van de events-list intrinsiek niet
+    // upcoming-only) en sorteren ASC. Endpoint-default sort = starts_at
+    // ASC, dus volgorde klopt al; client-side filter is defensief.
     let payload = null;
     try {
-      const r = await window.AgentShared.apiFetch('/api/mentor-my-events?scope=upcoming');
+      const r = await window.AgentShared.apiFetch('/api/events-list?limit=50');
       if (r.ok) payload = await r.json();
     } catch (e) { /* fail-soft */ }
-    const events = (payload?.events || []).slice().sort((a, b) => (a.starts_at || '').localeCompare(b.starts_at || ''));
+    const nowIso = new Date().toISOString();
+    const events = (payload?.items || [])
+      .filter((e) => e && e.starts_at && e.starts_at >= nowIso)
+      .filter((e) => {
+        const st = String(e.status || '').toLowerCase();
+        return st !== 'cancelled' && st !== 'archived' && st !== 'geannuleerd';
+      })
+      .sort((a, b) => (a.starts_at || '').localeCompare(b.starts_at || ''));
     state.upcomingCache = events;
     // KPI komende sessies
     document.getElementById('kpiSessions').textContent = String(events.length);
@@ -456,16 +471,23 @@
     const hero = document.getElementById('mhHeroBody');
     if (hero) {
       if (events.length === 0) {
-        hero.innerHTML = '<div class="mh-empty"><i class="ti ti-calendar-off"></i>Geen komende sessies.<br/><span style="font-size:11px">Zodra een event aan jou wordt toegewezen, verschijnt het hier.</span></div>';
+        hero.innerHTML = '<div class="mh-empty"><i class="ti ti-calendar-off"></i>Geen komende events.<br/><span style="font-size:11px">Zodra er events gepubliceerd zijn, verschijnen ze hier.</span></div>';
       } else {
         const e = events[0];
-        const url = '/modules/events.html?id=' + encodeURIComponent(e.event_id);
+        const url = '/modules/events-detail.html?id=' + encodeURIComponent(e.id);
         const datePart = fmtDate(e.starts_at);
         const timePart = fmtTime(e.starts_at);
+        // Deelnemers-tellingen alleen tonen als endpoint die levert
+        // (events-list returnt attendee_count_active op rij-niveau).
+        const attendeeCount = (typeof e.attendee_count_active === 'number') ? e.attendee_count_active : null;
+        const locStr = e.location ? ('<i class="ti ti-map-pin"></i> <strong>' + esc(e.location) + '</strong>') : '';
+        const attStr = (attendeeCount != null) ? ('<i class="ti ti-users"></i> <strong>' + attendeeCount + ' deelnemers</strong>') : '';
         hero.innerHTML =
           '<div class="mh-hero-title">' + esc(e.title || 'Untitled event') + '</div>' +
           '<div class="mh-hero-meta">' +
             '<i class="ti ti-clock"></i> <strong>' + esc(datePart) + (timePart ? ' · ' + esc(timePart) : '') + '</strong>' +
+            (locStr ? ' &nbsp;·&nbsp; ' + locStr : '') +
+            (attStr ? ' &nbsp;·&nbsp; ' + attStr : '') +
           '</div>' +
           '<a href="' + esc(url) + '" class="mh-act-btn primary"><i class="ti ti-arrow-right"></i> Event openen</a>';
       }
@@ -475,14 +497,15 @@
     const upWrap = document.getElementById('mhUpcoming');
     if (upWrap) {
       if (events.length === 0) {
-        upWrap.innerHTML = '<div class="mh-empty"><i class="ti ti-calendar-off"></i>Geen komende sessies.</div>';
+        upWrap.innerHTML = '<div class="mh-empty"><i class="ti ti-calendar-off"></i>Geen komende events.</div>';
       } else {
         upWrap.innerHTML = events.slice(0, 5).map((e) => {
-          const url = '/modules/events.html?id=' + encodeURIComponent(e.event_id);
+          const url = '/modules/events-detail.html?id=' + encodeURIComponent(e.id);
+          const locTail = e.location ? ' · ' + esc(e.location) : '';
           return '<a href="' + esc(url) + '" class="mh-side-item" style="text-decoration:none;color:inherit;cursor:pointer">' +
                    '<div style="flex:1;min-width:0">' +
                      '<div style="font-weight:600;color:var(--text);font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + esc(e.title || '—') + '</div>' +
-                     '<div class="mh-side-time">' + esc(fmtDate(e.starts_at)) + (e.starts_at ? ' · ' + esc(fmtTime(e.starts_at)) : '') + '</div>' +
+                     '<div class="mh-side-time">' + esc(fmtDate(e.starts_at)) + (e.starts_at ? ' · ' + esc(fmtTime(e.starts_at)) : '') + locTail + '</div>' +
                    '</div>' +
                  '</a>';
         }).join('');
