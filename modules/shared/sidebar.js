@@ -42,9 +42,6 @@
     events: '<rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/><rect x="8" y="14" width="8" height="5" rx="1"/>',
     tickets: '<path d="M2 9a3 3 0 0 1 0 6v2a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-2a3 3 0 0 1 0-6V7a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2Z"/><path d="M13 5v2"/><path d="M13 11v2"/><path d="M13 17v2"/>',
     onboarding: '<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>',
-    // lucide "zap" — automation-flow voor onboarding (visueel onderscheid van
-    // de basis-onboarding-icoon hierboven). Fase 2 sidebar-entry.
-    'onboarding-automations': '<polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>',
     // lucide "graduation-cap" — onderscheid van events (calendar) en agents (avatar).
     'mentor-dashboard': '<path d="M22 10v6M2 10l10-5 10 5-10 5z"/><path d="M6 12v5c3 3 9 3 12 0v-5"/>',
     // lucide "users-shield" — admin per-mentor meekijken; eenvoudige user+shield.
@@ -110,13 +107,10 @@
           // een eigen URL zodat bestaande onboarding-uitnodigingen niet breken. Gegate op
           // onboarding.admin (zelfde permission-key als de oude admin-pagina).
           navLink('onboarding-admin', '/modules/onboarding-hub.html', 'Onboarding') +
-          // F1b — editor voor de wizard-structuur (block-builder + publish).
-          // Aparte entry, gegate op onboarding.wizard.edit.
-          navLink('onboarding-wizard-editor', '/modules/onboarding-wizard-editor.html', 'Onboarding-wizard') +
-          // Onboarding-automations (Fase 2) — visuele editor voor de lifecycle-flows
-          // (port van events-automations). Gegate op onboarding.automation.view; de
-          // page-init checkt zelf óók via window.RBAC.canSync (defense-in-depth).
-          navLink('onboarding-automations', '/modules/onboarding-automations.html', 'Onboarding-automations') +
+          // Wizard-editor + Automations zijn sinds Hub-merge Fase 2/3 secties
+          // binnen /modules/onboarding-hub.html. De losse sidebar-entries zijn
+          // hier verwijderd. De standalone-pagina's blijven via directe URL
+          // bereikbaar als safety-net (dormant).
           // Finance — Mega-restructure: badge voor Open Acties (F1 finance-taken) hangt
           // nu inline op de Finance nav-item zelf. Open Acties is verhuisd naar
           // /modules/finance.html?tab=wanbetalers&sub=open-acties (sub-tab onder Wanbetalers).
@@ -459,14 +453,12 @@
     // Geen vaste feature_key hier; de OR-check is daar gehardcodeerd.
     'mentoren-beheer': '__any_mentor_admin__',
     // F0 onboarding-admin (`onboardings`-tabel) — read/write op onboarding.admin.
+    // Sinds Hub-merge wijst de entry naar /modules/onboarding-hub.html waar
+    // Overzicht / Wizard / Automations als secties zitten. De RBAC-mappings
+    // voor 'onboarding-wizard-editor' (onboarding.wizard.edit) en
+    // 'onboarding-automations' (onboarding.automation.view) zijn samen met
+    // hun nav-entries verwijderd — ze hadden geen externe consumers.
     'onboarding-admin': 'onboarding.admin',
-    // F1b — wizard-editor (block-builder + publish). RBAC-gate op de
-    // dedicated 'onboarding.wizard.edit' permission.
-    'onboarding-wizard-editor': 'onboarding.wizard.edit',
-    // Onboarding-automations (Fase 2) — visuele editor + lijst. RBAC-gate
-    // op 'onboarding.automation.view'. Page-init checkt zelf óók via
-    // window.RBAC.canSync (defense-in-depth, mirror events-automations.html).
-    'onboarding-automations': 'onboarding.automation.view',
     'finance': 'finance.module.access',
     // Open Acties (F1 finance-taken) is verhuisd naar Finance > Wanbetalers > Open Acties
     // sub-tab — geen eigen sidebar-link meer. Badge hangt nu op de Finance nav-item zelf.
