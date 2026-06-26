@@ -186,17 +186,40 @@
   // ontbrekende rol → '/index.html' (whitelist-fallback in de helper).
   // index.html behoudt zelf de defensive role==='sales'-redirect die er al
   // stond — die blijft ongewijzigd.
+  //
+  // KRITIEK: mountSidebar() doet GEEN await _authSharedReady (loop direct
+  // op DOMContentLoaded). Bij eerste page-load kan de Supabase-sessie-
+  // warmup nog niet klaar zijn waardoor getSession()/getUser()/getProfile()
+  // null returnt → role-mapping valt terug op '/index.html'. We waiten
+  // hier expliciet op _authSharedReady zodat de routing pas runt nadat de
+  // sessie hersteld is. Op latere mounts (snelle storage-cache) heeft dat
+  // geen merkbare cost.
   async function applyDashboardRouting() {
     try {
       var link = document.querySelector('#sidebar-mount [data-module="dashboard"]');
       if (!link) return;
+      // Wacht op session-warmup zodat getProfile betrouwbaar resolved.
+      try { if (window._authSharedReady) await window._authSharedReady; } catch (_) {}
       if (!window.AuthShared || typeof window.AuthShared.getProfile !== 'function') return;
       if (typeof window.AuthShared.getRoleLandingUrl !== 'function') return;
       var profile = await window.AuthShared.getProfile();
+      if (!profile) {
+        // Eénmalig re-try met session-warmup voor de zeldzame race waarbij
+        // _authSharedReady wel resolved is maar getSession nog niet hot is.
+        try { await window.AuthShared.getSession(); } catch (_) {}
+        profile = await window.AuthShared.getProfile();
+      }
       var role = profile && profile.role;
+      if (!role) {
+        console.warn('[sidebar.applyDashboardRouting] geen rol uit profiel — laat default-link staan');
+        return; // bewust GEEN '/index.html' setten — laat hardcoded default staan
+      }
       var url = window.AuthShared.getRoleLandingUrl(role) || '/index.html';
       link.setAttribute('href', url);
-    } catch (e) { /* fail-open: laat default dashboard-link staan */ }
+    } catch (e) {
+      console.warn('[sidebar.applyDashboardRouting]', e && e.message ? e.message : e);
+      /* fail-open: laat default dashboard-link staan */
+    }
   }
 
   // Taken-badge: telt open taken (status != 'done') waar user assignee is.
