@@ -50,7 +50,7 @@ window._authSharedReady = (async function () {
     admin:          '/index.html',
     manager:        '/index.html',
     sales:          '/modules/sales-dashboard.html',
-    mentor:         '/modules/mentor-dashboard.html',
+    mentor:         '/modules/mentor-home.html',
     marketing:      '/index.html',
     administratie:  '/index.html',
     viewer:         '/index.html',
