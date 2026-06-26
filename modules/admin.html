@@ -2164,6 +2164,7 @@ async function loadUsers() {
             ? `<span style="color:var(--text-faint);font-size:12px">Jij</span>`
             : isActive
               ? `<button class="action-btn" onclick="resendInvite('${esc(u.email)}')">&#8634; Opnieuw uitnodigen</button>
+                 ${canImpersonateClient(u) ? `<button class="action-btn impersonate-btn" onclick="impersonateUser('${u.id}', '${esc(u.full_name || u.email)}')" title="Login als deze gebruiker"><i class="ti ti-user-check"></i> Login als</button>` : ''}
                  <button class="action-btn" onclick="deactivateUser('${u.id}', '${esc(u.email)}')">Deactiveer</button>`
               : `<button class="action-btn" onclick="reactivateUser('${u.id}')">Heractiveer</button>`}
         </td>
@@ -2182,6 +2183,91 @@ async function loadUsers() {
 }
 
 function esc(s) { return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+// ─────────────────────────────────────────────────────────────────────────
+// Impersonation ("Login als") — client-side helpers. Server is autoritatief
+// (api/admin-impersonate.js doet gate + anti-escalatie + audit); deze
+// client-side checks zijn alleen UX zodat we de knop niet tonen wanneer 'ie
+// toch geweigerd zou worden.
+// ─────────────────────────────────────────────────────────────────────────
+const IMPERSONATION_MANAGER_TARGETS = new Set(['sales','mentor','marketing','administratie','viewer']);
+
+function canImpersonateClient(targetUser) {
+  if (!currentProfile || !targetUser) return false;
+  if (targetUser.id === currentProfile.id) return false;
+  if (!targetUser.is_active) return false;
+  if (targetUser.role === 'super_admin') return false;
+  if (currentProfile.role === 'super_admin') return true;
+  if (currentProfile.role === 'manager') {
+    return IMPERSONATION_MANAGER_TARGETS.has(targetUser.role);
+  }
+  return false;
+}
+
+async function impersonateUser(targetUserId, targetLabel) {
+  if (!targetUserId) return;
+  const label = targetLabel || 'deze gebruiker';
+  if (!confirm('Login als ' + label + '?\n\nJe wordt direct ingelogd; je eigen sessie wordt bewaard zodat je later terug kunt.')) return;
+
+  // 1) Bewaar de origin-sessie VÓÓR verifyOtp 'm overschrijft.
+  let originSession;
+  try {
+    originSession = await window.AuthShared.getSession();
+  } catch (e) {
+    alert('Eigen sessie ophalen mislukt: ' + (e && e.message ? e.message : e));
+    return;
+  }
+  if (!originSession || !originSession.access_token || !originSession.refresh_token) {
+    alert('Geen geldige eigen sessie gevonden — log opnieuw in en probeer dan nogmaals.');
+    return;
+  }
+  if (!window.AuthShared.saveImpersonationOrigin(originSession)) {
+    alert('Kon eigen sessie niet veilig bewaren (localStorage). Impersonation afgebroken.');
+    return;
+  }
+
+  try {
+    // 2) Server mintt magiclink (geen mail, geen target-uitlog).
+    const r = await apiRequest('POST', '/api/admin-impersonate', { target_user_id: targetUserId });
+    if (r && r.error) throw new Error(r.error);
+    if (!r || !r.token_hash || !r.type || !r.target) {
+      throw new Error('Onvolledig server-antwoord');
+    }
+    const target = r.target;
+
+    // 3) Marker zetten BEFORE verifyOtp zodat de banner direct na redirect
+    //    zichtbaar is (Supabase persist'd de nieuwe sessie ook in
+    //    localStorage; daarom nu setten).
+    window.AuthShared.setImpersonationState({
+      target_name:  target.name,
+      target_email: target.email,
+      target_role:  target.role,
+      started_at:   new Date().toISOString(),
+    });
+
+    // 4) Wissel naar de target-sessie via verifyOtp.
+    const { error: vErr } = await window.supabase.auth.verifyOtp({
+      token_hash: r.token_hash,
+      type:       r.type,
+    });
+    if (vErr) throw new Error('verifyOtp: ' + vErr.message);
+
+    // 5) Redirect naar de target-landing zodat de flow consistent is met
+    //    een normale login (role-based landing + RBAC-gating verloopt
+    //    daarna automatisch).
+    let landing = '/index.html';
+    if (window.AuthShared.getRoleLandingUrl) {
+      landing = window.AuthShared.getRoleLandingUrl(target.role) || '/index.html';
+    }
+    window.location.href = landing;
+  } catch (e) {
+    // Cleanup: origin-bewaring + marker terugdraaien zodat de admin niet
+    // in een halve impersonation-staat hangt.
+    window.AuthShared.clearImpersonationOrigin();
+    window.AuthShared.clearImpersonationState();
+    alert('Impersonatie mislukt: ' + (e && e.message ? e.message : e));
+  }
+}
 
 async function changeRole(userId, newRole) {
   try {

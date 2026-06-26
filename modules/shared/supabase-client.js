@@ -141,6 +141,89 @@ window._authSharedReady = (async function () {
       const session = await this.getSession();
       return session?.access_token || null;
     },
+
+    // ── Impersonation (admin "Login als <user>") ─────────────────────────
+    // Schone wrapper rond supabase.auth.setSession. Wordt gebruikt door de
+    // impersonation-flow voor zowel het verifyOtp-pad (na server-side mint)
+    // als voor het "Terug naar jezelf"-pad (origin-sessie herstellen).
+    async setSession({ access_token, refresh_token }) {
+      if (!access_token || !refresh_token) {
+        return { data: null, error: new Error('access_token + refresh_token vereist') };
+      }
+      try {
+        const { data, error } = await window.supabase.auth.setSession({
+          access_token, refresh_token,
+        });
+        return { data, error };
+      } catch (e) {
+        return { data: null, error: e };
+      }
+    },
+
+    // Bewaar de origin-sessie (de eigen admin-sessie van VÓÓR impersonation)
+    // in een aparte storage-sleutel zodat we 'm later kunnen terugzetten.
+    // De Supabase-storage-key (sb-<ref>-auth-token) wordt straks overschreven
+    // door verifyOtp; daarom MOETEN we de tokens vooraf hier kopiëren.
+    saveImpersonationOrigin(originSession) {
+      if (!originSession || !originSession.access_token || !originSession.refresh_token) {
+        return false;
+      }
+      try {
+        localStorage.setItem('impersonation_origin', JSON.stringify({
+          access_token:  originSession.access_token,
+          refresh_token: originSession.refresh_token,
+        }));
+        return true;
+      } catch (e) { return false; }
+    },
+    getImpersonationOrigin() {
+      try {
+        const raw = localStorage.getItem('impersonation_origin');
+        if (!raw) return null;
+        const o = JSON.parse(raw);
+        if (!o || typeof o !== 'object' || !o.access_token || !o.refresh_token) return null;
+        return o;
+      } catch (e) { return null; }
+    },
+    clearImpersonationOrigin() {
+      try { localStorage.removeItem('impersonation_origin'); } catch (e) {}
+    },
+
+    // Marker-state met target-info. Wordt door de banner (sidebar.js)
+    // gebruikt om "Je bekijkt als <naam>" te tonen. Verschilt van
+    // origin-sessie omdat we 'm willen kunnen lezen zonder de
+    // (mogelijk verlopen) origin-tokens te raken.
+    setImpersonationState(state) {
+      if (!state || typeof state !== 'object') return false;
+      try {
+        localStorage.setItem('impersonation_state', JSON.stringify({
+          target_name:  state.target_name || '',
+          target_email: state.target_email || '',
+          target_role:  state.target_role  || '',
+          started_at:   state.started_at   || new Date().toISOString(),
+        }));
+        return true;
+      } catch (e) { return false; }
+    },
+    getImpersonationState() {
+      try {
+        const raw = localStorage.getItem('impersonation_state');
+        if (!raw) return null;
+        const s = JSON.parse(raw);
+        if (!s || typeof s !== 'object') return null;
+        return s;
+      } catch (e) { return null; }
+    },
+    clearImpersonationState() {
+      try { localStorage.removeItem('impersonation_state'); } catch (e) {}
+    },
+
+    // Shortcut voor banner-conditionals.
+    isImpersonating() {
+      try {
+        return !!localStorage.getItem('impersonation_state');
+      } catch (e) { return false; }
+    },
   };
 
   // Sessie-herstel forceren vóór de IIFE returnt. Zonder deze warmup is er een
