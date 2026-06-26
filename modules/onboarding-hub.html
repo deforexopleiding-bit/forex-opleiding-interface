@@ -265,16 +265,18 @@
     <div id="ob-wizard-host"></div>
   </section>
 
-  <!-- Automations-sectie (Fase 1: placeholder; Fase 3 trekt onboarding-automations inline). -->
+  <!-- Automations-sectie (Fase 3: inline mount van onboarding-automations.js).
+       Gegate op onboarding.automation.view; zonder die permission tonen we
+       een nette melding i.p.v. de editor. Mount is lazy + idempotent. -->
   <section class="ob-sectie" id="ob-sectie-automations" data-sectie="automations">
-    <div class="ob-placeholder">
-      <h2><i class="ti ti-bolt"></i> Automations</h2>
-      <p>De visuele editor voor lifecycle-flows (e-mail / WhatsApp triggers) staat tijdelijk nog
-         als losse pagina. In Fase 3 wordt deze hier inline geladen.</p>
-      <a class="btn-cta" href="/modules/onboarding-automations.html">
-        <i class="ti ti-external-link"></i> Open Automations
-      </a>
+    <div id="ob-automations-perm-banner" style="display:none">
+      <div style="background:rgba(220,38,38,0.08);border:1px solid rgba(220,38,38,0.3);
+        color:#b91c1c;padding:16px 20px;border-radius:10px;font-size:13.5px;max-width:620px">
+        <strong>Geen rechten</strong><br/>Je hebt geen <code>onboarding.automation.view</code>-permissie.
+        Vraag een admin om toegang als je de lifecycle-automations wilt zien of bewerken.
+      </div>
     </div>
+    <div id="ob-automations-host"></div>
   </section>
 </div>
 
@@ -285,6 +287,7 @@
 <script src="/modules/shared/sidebar.js"></script>
 <script src="/modules/shared/onboarding-overzicht.js"></script>
 <script src="/modules/shared/onboarding-wizard.js"></script>
+<script src="/modules/shared/onboarding-automations.js"></script>
 <script>
 (function () {
   'use strict';
@@ -317,6 +320,31 @@
       return false;
     }
     return true;
+  }
+
+  // ── Automations-sectie lazy-mount (Fase 3). Gegate op
+  // onboarding.automation.view. Identiek patroon als Wizard hieronder:
+  // idempotent + RBAC-gate + banner-degradatie. Server-side gates op
+  // onboarding-automation-save/-delete/-test blijven autoritatief.
+  let _automationsMounted = false;
+  function mountAutomationsIfNeeded() {
+    if (_automationsMounted) return;
+    const host = document.getElementById('ob-automations-host');
+    const banner = document.getElementById('ob-automations-perm-banner');
+    if (!host) return;
+    const canView = !!(window.RBAC && window.RBAC.canSync && window.RBAC.canSync('onboarding.automation.view'));
+    if (!canView) {
+      if (banner) banner.style.display = '';
+      host.style.display = 'none';
+      _automationsMounted = true; // permission-decision is final voor deze sessie
+      return;
+    }
+    if (!window.OnboardingAutomations || typeof window.OnboardingAutomations.mount !== 'function') {
+      console.warn('[onboarding-hub] OnboardingAutomations niet geladen');
+      return;
+    }
+    window.OnboardingAutomations.mount({ host });
+    _automationsMounted = true;
   }
 
   // ── Wizard-sectie lazy-mount (Fase 2). Gegate op onboarding.wizard.edit.
@@ -359,8 +387,9 @@
       document.querySelectorAll('.ob-sectie[data-sectie]').forEach((s) => {
         s.classList.toggle('active', s.dataset.sectie === next);
       });
-      // Lazy mount: Wizard pas opbouwen bij eerste opening.
-      if (next === 'wizard') mountWizardIfNeeded();
+      // Lazy mount: Wizard / Automations pas opbouwen bij eerste opening.
+      if (next === 'wizard')      mountWizardIfNeeded();
+      if (next === 'automations') mountAutomationsIfNeeded();
     });
   }
 
