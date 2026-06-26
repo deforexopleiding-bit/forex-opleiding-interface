@@ -178,23 +178,24 @@
     } catch (e) { /* niet ingelogd → admin-link blijft verborgen */ }
   }
 
-  // Dashboard-link href op basis van permissions (niet langer hardcoded op rol).
-  // - dashboard.module.access  → /index.html (default voor admin/manager/etc)
-  // - alleen dashboard.sales.view → /modules/sales-dashboard.html (sales-rol)
-  // - geen van beide → applyModuleGating verbergt de link
-  // index.html doet zelf óók een redirect bij role==='sales' (defense-in-depth).
+  // Dashboard-link href op basis van PRIMAIRE rol (profiles.role) — single
+  // source of truth via AuthShared.getRoleLandingUrl, identieke mapping als
+  // de post-login-redirect in login.html. Zet ALLEEN het href-attribute;
+  // doet zelf GEEN redirect (loop-preventie: de hele app heeft maar één
+  // redirect-bron, namelijk login.html's redirectAfterLogin). Onbekende /
+  // ontbrekende rol → '/index.html' (whitelist-fallback in de helper).
+  // index.html behoudt zelf de defensive role==='sales'-redirect die er al
+  // stond — die blijft ongewijzigd.
   async function applyDashboardRouting() {
     try {
-      if (!window.RBAC || typeof window.RBAC.ensurePermissionsLoaded !== 'function') return;
-      var perms = await window.RBAC.ensurePermissionsLoaded();
-      if (perms.has('*')) return; // super_admin → laat default /index.html staan
       var link = document.querySelector('#sidebar-mount [data-module="dashboard"]');
       if (!link) return;
-      if (perms.has('dashboard.module.access')) {
-        link.setAttribute('href', '/index.html');
-      } else if (perms.has('dashboard.sales.view')) {
-        link.setAttribute('href', '/modules/sales-dashboard.html');
-      }
+      if (!window.AuthShared || typeof window.AuthShared.getProfile !== 'function') return;
+      if (typeof window.AuthShared.getRoleLandingUrl !== 'function') return;
+      var profile = await window.AuthShared.getProfile();
+      var role = profile && profile.role;
+      var url = window.AuthShared.getRoleLandingUrl(role) || '/index.html';
+      link.setAttribute('href', url);
     } catch (e) { /* fail-open: laat default dashboard-link staan */ }
   }
 

@@ -477,10 +477,36 @@
       return 'Er is een fout opgetreden. Probeer opnieuw.';
     }
 
-    /* ── Redirect after login ── */
-    function redirectAfterLogin() {
-      const returnTo = new URLSearchParams(location.search).get('returnTo') || '/index.html';
-      window.location.href = returnTo;
+    /* ── Redirect after login ──
+       Voorrang voor expliciete returnTo (deeplink / magic-link intent).
+       Zonder returnTo: gebruik role-based landing via AuthShared
+       (manager → control-center, sales → sales-dashboard,
+       mentor → mentor-dashboard, anders → /index.html).
+       Loop-preventie:
+         - Helper getRoleLandingUrl whitelist'd; onbekende/lege rol → /index.html.
+         - We zijn altijd op /login.html; doel ≠ /login.html → kan niet loopen.
+         - Bij profile-fetch-fout vallen we terug op /index.html (huidige
+           gedrag); nooit een lege string of de huidige URL als doel. */
+    async function redirectAfterLogin() {
+      const returnTo = new URLSearchParams(location.search).get('returnTo');
+      if (returnTo) {
+        window.location.href = returnTo;
+        return;
+      }
+      let target = '/index.html';
+      try {
+        if (window.AuthShared && typeof window.AuthShared.getProfile === 'function') {
+          const profile = await window.AuthShared.getProfile();
+          const role = profile && profile.role;
+          if (window.AuthShared.getRoleLandingUrl) {
+            target = window.AuthShared.getRoleLandingUrl(role) || '/index.html';
+          }
+        }
+      } catch (e) {
+        // Fail-open: bij fetch-fout terug naar default /index.html.
+        target = '/index.html';
+      }
+      window.location.href = target;
     }
 
     /* ── Main init (waits for AuthShared) ── */
@@ -498,7 +524,7 @@
       // Redirect if already logged in
       const session = await window.AuthShared.getSession();
       if (session) {
-        redirectAfterLogin();
+        await redirectAfterLogin();
         return;
       }
 
