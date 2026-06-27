@@ -420,10 +420,11 @@
     const s = document.createElement('style');
     s.id = 'ob-kebab-styles';
     s.textContent = `
-      .ob-kebab{display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;padding:0;
-        border:1px solid var(--border,#e2e8f0);border-radius:7px;background:var(--bg-elev,#fff);
-        color:var(--text-dim,#475569);cursor:pointer;font-size:16px;line-height:1;}
-      .ob-kebab:hover{background:var(--bg-elev,#f1f5f9);}
+      .ob-kebab{display:inline-flex;align-items:center;justify-content:center;width:32px;height:32px;padding:0;
+        border:none;border-radius:50%;background:transparent;color:var(--text-dim,#64748b);
+        cursor:pointer;font-size:18px;line-height:1;transition:background .12s ease,color .12s ease;}
+      .ob-kebab:hover{background:var(--bg-elev,#f1f5f9);color:var(--text,#0f172a);}
+      .ob-kebab:focus-visible{outline:2px solid var(--brand-azure,#1e6cd6);outline-offset:1px;}
       .ob-act-menu{position:fixed;z-index:9999;min-width:178px;background:var(--bg,#fff);
         border:1px solid var(--border,#e2e8f0);border-radius:10px;box-shadow:0 10px 30px rgba(0,0,0,.16);
         padding:5px;display:none;}
