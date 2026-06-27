@@ -810,6 +810,18 @@ let _takenAssignedByMe  = [];
 // Wordt gebruikt voor de KPI 'Mijn taken' en voor het highlighten van
 // eigen reacties in de thread.
 let currentUserId = null;
+// UI-hint of de huidige user super_admin is. Server doet de echte check
+// (api/taken.js isSuperAdmin); deze flag verbergt enkel knoppen die de
+// huidige user toch zou worden geweigerd.
+let currentIsSuperAdmin = false;
+
+// Bepaalt of de huidige user een taak mag bewerken/verwijderen.
+// Server-side identieke regel: maker OF super_admin (manager NIET).
+function canEditTask(t) {
+  if (!t) return false;
+  if (currentIsSuperAdmin) return true;
+  return !!currentUserId && t.createdById === currentUserId;
+}
 
 // Cross-rol assignee-bron uit /api/profiles-list (alle actieve gebruikers).
 let _profilesList = null;
@@ -922,18 +934,40 @@ function fromRow(r) {
   };
 }
 
-function syncTaakToSupabase(taak) {
-  window.AgentShared.apiFetch('/api/taken', {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ task: taak })
-  }).catch(() => {});
+async function syncTaakToSupabase(taak) {
+  try {
+    const r = await window.AgentShared.apiFetch('/api/taken', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ task: taak })
+    });
+    if (r.ok) return true;
+    let msg = 'Opslaan mislukt';
+    try { const d = await r.json(); if (d?.error) msg = d.error; } catch (_) {}
+    if (window.AgentShared?.showToast) window.AgentShared.showToast(msg, 'error');
+    else alert(msg);
+    return false;
+  } catch (e) {
+    if (window.AgentShared?.showToast) window.AgentShared.showToast('Netwerkfout', 'error');
+    return false;
+  }
 }
 
-function deleteTaakFromSupabase(id) {
-  window.AgentShared.apiFetch('/api/taken', {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ action: 'delete', id })
-  }).catch(() => {});
+async function deleteTaakFromSupabase(id) {
+  try {
+    const r = await window.AgentShared.apiFetch('/api/taken', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'delete', id })
+    });
+    if (r.ok) return true;
+    let msg = 'Verwijderen mislukt';
+    try { const d = await r.json(); if (d?.error) msg = d.error; } catch (_) {}
+    if (window.AgentShared?.showToast) window.AgentShared.showToast(msg, 'error');
+    else alert(msg);
+    return false;
+  } catch (e) {
+    if (window.AgentShared?.showToast) window.AgentShared.showToast('Netwerkfout', 'error');
+    return false;
+  }
 }
 
 function defaultCollegas() {
@@ -1153,18 +1187,47 @@ function escHtml(s) {
 function onDragOver(e) { e.preventDefault(); e.currentTarget.classList.add('drag-over'); }
 function onDragLeave(e) { e.currentTarget.classList.remove('drag-over'); }
 
-function onDrop(e, newStatus) {
+async function onDrop(e, newStatus) {
   e.currentTarget.classList.remove('drag-over');
-  if (!dragId) return;
-  const t = taakById(dragId);
+  const dropId = dragId;
+  dragId = null;
+  if (!dropId) return;
+  const t = taakById(dropId);
   if (!t) return;
+  const oldStatus  = t.status;
+  const oldAfgerond = t.afgerondOp;
+  if (oldStatus === newStatus) return;
+  // Optimistic UI
   t.status = newStatus;
   if (newStatus === 'done' && !t.afgerondOp) t.afgerondOp = new Date().toISOString();
   if (newStatus !== 'done') t.afgerondOp = null;
-  dragId = null;
   save('taken_lijst', taken);
-  syncTaakToSupabase(t);
   render();
+  // Server-side status-only update (creator/assignee/super_admin).
+  try {
+    const r = await window.AgentShared.apiFetch('/api/taken', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'status_change', id: dropId, status: newStatus })
+    });
+    if (!r.ok) {
+      // Rollback
+      t.status = oldStatus;
+      t.afgerondOp = oldAfgerond;
+      save('taken_lijst', taken);
+      render();
+      let msg = 'Status wijzigen mislukt';
+      try { const d = await r.json(); if (d?.error) msg = d.error; } catch (_) {}
+      if (window.AgentShared?.showToast) window.AgentShared.showToast(msg, 'error');
+      else alert(msg);
+    }
+  } catch (err) {
+    t.status = oldStatus;
+    t.afgerondOp = oldAfgerond;
+    save('taken_lijst', taken);
+    render();
+    if (window.AgentShared?.showToast) window.AgentShared.showToast('Netwerkfout', 'error');
+    else alert('Netwerkfout bij status wijzigen');
+  }
 }
 
 // ════════════════════════════════════════════════════
@@ -1257,6 +1320,10 @@ function saveNieuweTaak() {
   if (editMode && detailId) {
     const t = taakById(detailId);
     if (t) {
+      if (!canEditTask(t)) {
+        if (window.AgentShared?.showToast) window.AgentShared.showToast('Alleen de maker kan deze taak bewerken.', 'error');
+        return;
+      }
       t.titel          = titel;
       t.omschrijving   = document.getElementById('fOmschrijving').value.trim();
       t.prioriteit     = document.getElementById('fPrioriteit').value;
@@ -1335,6 +1402,34 @@ function openDetail(id) {
   `;
 
   document.getElementById('detailNotities').value = t.notities || '';
+
+  // ── Ownership-gating ──────────────────────────────────────────────────
+  // Server is leidend (api/taken.js permitAny + ownership-check). De UI hint:
+  // alleen creator OF super_admin mag Bewerken/Opslaan/Verwijderen. Status
+  // wijzigen + reageren blijven voor toegewezene/creator/super_admin mogelijk.
+  const canEdit  = canEditTask(t);
+  const notiTa   = document.getElementById('detailNotities');
+  const editBtn  = document.getElementById('takenEditBtn');
+  const saveBtn  = document.getElementById('takenSaveDetailBtn');
+  const delBtn   = document.getElementById('takenDeleteBtn');
+  if (notiTa)  { notiTa.readOnly = !canEdit; notiTa.style.opacity = canEdit ? '' : '0.75'; }
+  if (editBtn) editBtn.style.display = canEdit ? '' : 'none';
+  if (saveBtn) saveBtn.style.display = canEdit ? '' : 'none';
+  if (delBtn)  delBtn.style.display  = canEdit ? '' : 'none';
+  // Hint-element (idempotent): toon alleen voor niet-eigenaar.
+  let hint = document.getElementById('detailOwnershipHint');
+  if (!hint) {
+    hint = document.createElement('div');
+    hint.id = 'detailOwnershipHint';
+    hint.style.cssText = 'margin:8px 0 0;font-size:12px;color:var(--text-faint);font-style:italic';
+    const actions = document.querySelector('#overlayDetail .detail-actions');
+    if (actions && actions.parentNode) actions.parentNode.insertBefore(hint, actions);
+  }
+  if (hint) {
+    hint.textContent = canEdit ? '' : 'Alleen de maker kan deze taak bewerken.';
+    hint.style.display = canEdit ? 'none' : '';
+  }
+
   // Reactie-thread (lazy fetch). Toon "Laden…" tot de fetch klaar is.
   const cbox = document.getElementById('detailComments');
   if (cbox) cbox.innerHTML = '<div style="color:var(--text-faint);font-size:12px;padding:4px 0">Laden…</div>';
@@ -1412,43 +1507,89 @@ function closeDetail() {
   detailId = null;
 }
 
-function setDetailStatus(st) {
+async function setDetailStatus(st) {
   if (!detailId) return;
   const t = taakById(detailId);
   if (!t) return;
+  const oldStatus  = t.status;
+  const oldAfgerond = t.afgerondOp;
+  if (oldStatus === st) return;
+  // Optimistic UI
   t.status = st;
   if (st === 'done' && !t.afgerondOp) t.afgerondOp = new Date().toISOString();
   if (st !== 'done') t.afgerondOp = null;
   document.querySelectorAll('.status-btn').forEach(b => b.classList.toggle('active', b.dataset.s === st));
   save('taken_lijst', taken);
-  syncTaakToSupabase(t);
   render();
+  // Server-side status-only update (creator/assignee/super_admin).
+  try {
+    const r = await window.AgentShared.apiFetch('/api/taken', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'status_change', id: detailId, status: st })
+    });
+    if (!r.ok) {
+      // Rollback
+      t.status = oldStatus;
+      t.afgerondOp = oldAfgerond;
+      document.querySelectorAll('.status-btn').forEach(b => b.classList.toggle('active', b.dataset.s === oldStatus));
+      save('taken_lijst', taken);
+      render();
+      let msg = 'Status wijzigen mislukt';
+      try { const d = await r.json(); if (d?.error) msg = d.error; } catch (_) {}
+      if (window.AgentShared?.showToast) window.AgentShared.showToast(msg, 'error');
+      else alert(msg);
+    }
+  } catch (err) {
+    t.status = oldStatus;
+    t.afgerondOp = oldAfgerond;
+    document.querySelectorAll('.status-btn').forEach(b => b.classList.toggle('active', b.dataset.s === oldStatus));
+    save('taken_lijst', taken);
+    render();
+    if (window.AgentShared?.showToast) window.AgentShared.showToast('Netwerkfout', 'error');
+    else alert('Netwerkfout bij status wijzigen');
+  }
 }
 
-function saveDetail() {
+async function saveDetail() {
   if (!detailId) return;
   const t = taakById(detailId);
   if (!t) return;
+  if (!canEditTask(t)) {
+    if (window.AgentShared?.showToast) window.AgentShared.showToast('Alleen de maker kan deze taak bewerken.', 'error');
+    return;
+  }
   t.notities = document.getElementById('detailNotities').value;
   save('taken_lijst', taken);
-  syncTaakToSupabase(t);
+  const ok = await syncTaakToSupabase(t);
+  if (!ok) return;
   closeDetail();
   render();
 }
 
 function editTaakFromDetail() {
   const id = detailId;
+  const t = taakById(id);
+  if (!canEditTask(t)) {
+    if (window.AgentShared?.showToast) window.AgentShared.showToast('Alleen de maker kan deze taak bewerken.', 'error');
+    return;
+  }
   closeDetail();
   openEditTaak(id);
 }
 
-function deleteTaak() {
+async function deleteTaak() {
   if (!detailId) return;
+  const t = taakById(detailId);
+  if (!canEditTask(t)) {
+    if (window.AgentShared?.showToast) window.AgentShared.showToast('Alleen de maker kan deze taak verwijderen.', 'error');
+    return;
+  }
   if (!confirm('Taak verwijderen?')) return;
   const id = detailId;
+  const ok = await deleteTaakFromSupabase(id);
+  if (!ok) return; // server-403 → niets lokaal wijzigen
   taken = taken.filter(t => t.id !== id);
   save('taken_lijst', taken);
-  deleteTaakFromSupabase(id);
   closeDetail();
   render();
 }
@@ -1526,6 +1667,16 @@ async function init() {
   const profile = await window.AuthShared.requireAuth();
   if (!profile) return;
   currentUserId = profile.id || null;
+  // UI-hint: super_admin via primaire rol OF user_roles union (zelfde
+  // bron als RBAC-permissions in de browser). Server-side dekt isSuperAdmin().
+  currentIsSuperAdmin = (profile.role === 'super_admin');
+  try {
+    if (!currentIsSuperAdmin && window.RBAC?.ensurePermissionsLoaded) {
+      await window.RBAC.ensurePermissionsLoaded();
+      const roles = (typeof window.RBAC.getUserRoles === 'function' && window.RBAC.getUserRoles()) || [];
+      if (roles.includes('super_admin')) currentIsSuperAdmin = true;
+    }
+  } catch (_) {}
   // adminNavLink wordt nu centraal door sidebar.js gegate (RBAC-voorbereiding)
   // Ensure all collegas have ids
   collegas = collegas.map(c => ({ id: c.id || crypto.randomUUID(), naam: c.naam || '', kleur: c.kleur || '#22d3ee' }));

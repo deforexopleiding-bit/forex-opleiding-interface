@@ -8,6 +8,53 @@ function toUuidOrNull(id) {
 
 const VALID_TASK_STATUSES = ['todo', 'progress', 'done'];
 
+// Permission-fallback: probeer keys in volgorde, eerste hit = allow.
+// Voorkomt dat nieuwere keys (taken.task.edit / .status_change) iedereen
+// blokkeren voordat ze in permission_settings zijn gepushed.
+async function permitAny(req, ...keys) {
+  for (const k of keys) {
+    if (await requirePermission(req, k)) return true;
+  }
+  return false;
+}
+
+// super_admin via profiles.role OF user_roles (multi-role union). Manager telt NIET.
+// Pattern uit admin-impersonate.js / requirePermission RPC.
+async function isSuperAdmin(userId) {
+  if (!userId) return false;
+  try {
+    const { data: prof } = await supabaseAdmin
+      .from('profiles')
+      .select('role')
+      .eq('id', userId)
+      .maybeSingle();
+    if (prof?.role === 'super_admin') return true;
+    const { data: roles } = await supabaseAdmin
+      .from('user_roles')
+      .select('role')
+      .eq('user_id', userId);
+    return (roles || []).some((r) => r && r.role === 'super_admin');
+  } catch (e) {
+    console.warn('[taken] isSuperAdmin lookup faalde:', e?.message || e);
+    return false;
+  }
+}
+
+async function isAssignee(taskId, userId) {
+  if (!taskId || !userId) return false;
+  const { data, error } = await supabaseAdmin
+    .from('taken_assignees')
+    .select('assignee_id')
+    .eq('task_id', taskId)
+    .eq('assignee_id', userId)
+    .limit(1);
+  if (error) {
+    console.warn('[taken] isAssignee lookup:', error.message);
+    return false;
+  }
+  return Array.isArray(data) && data.length > 0;
+}
+
 function toRow(task) {
   return {
     id:             task.id,
@@ -145,15 +192,12 @@ export default async function handler(req, res) {
   }
 
   if (req.method === 'POST') {
-    const { task, action, id, tasks } = req.body || {};
+    const { task, action, id, tasks, status: statusParam } = req.body || {};
     const { data: { user: authUser } } = await supabase.auth.getUser();
     const userId = authUser?.id || null;
     if (!userId) return res.status(401).json({ error: 'Niet geauthenticeerd' });
 
-    // Permission-gate per action.
-    const needed = action === 'delete' ? 'taken.task.delete' : 'taken.task.create';
-    const allowed = await requirePermission(req, needed);
-    if (!allowed) return res.status(403).json({ error: `Geen rechten voor ${needed}` });
+    const superAdmin = await isSuperAdmin(userId);
 
     const checkStatus = (row) => {
       if (row.status && !VALID_TASK_STATUSES.includes(row.status)) {
@@ -162,8 +206,57 @@ export default async function handler(req, res) {
       return null;
     };
 
-    // Bulk upsert — migratie vanuit localStorage
+    // ── action: 'status_change' ──────────────────────────────────────────
+    // Aparte status-only path. Creator OF assignee OF super_admin mag de
+    // status verzetten (drag-drop, status-strip). Niet voor edit/delete.
+    if (action === 'status_change') {
+      if (!(await permitAny(req, 'taken.task.status_change', 'taken.task.create'))) {
+        return res.status(403).json({ error: 'Geen rechten voor taken.task.status_change' });
+      }
+      if (!id) return res.status(400).json({ error: 'id vereist' });
+      const newStatus = (typeof statusParam === 'string' ? statusParam.trim() : '');
+      if (!VALID_TASK_STATUSES.includes(newStatus)) {
+        return res.status(400).json({ error: `Ongeldige status "${newStatus}". Toegestaan: ${VALID_TASK_STATUSES.join(', ')}` });
+      }
+      try {
+        const { data: existing, error: lkErr } = await supabaseAdmin
+          .from('taken_items')
+          .select('id, created_by, assigned_to_id, status')
+          .eq('id', id)
+          .maybeSingle();
+        if (lkErr) throw lkErr;
+        if (!existing) return res.status(404).json({ error: 'Taak niet gevonden' });
+
+        let canChange = superAdmin
+          || existing.created_by === userId
+          || existing.assigned_to_id === userId;
+        if (!canChange) canChange = await isAssignee(id, userId);
+        if (!canChange) {
+          return res.status(403).json({ error: 'Alleen de maker, toegewezene of super_admin mag de status wijzigen' });
+        }
+
+        const patch = {
+          status: newStatus,
+          afgerond_op: newStatus === 'done' ? new Date().toISOString() : null,
+          updated_at: new Date().toISOString(),
+        };
+        const { error: upErr } = await supabaseAdmin.from('taken_items').update(patch).eq('id', id);
+        if (upErr) throw upErr;
+        return res.status(200).json({ ok: true, status: newStatus });
+      } catch (err) {
+        console.error('[taken] status_change fout:', err.message);
+        return res.status(500).json({ error: err.message });
+      }
+    }
+
+    // ── action: 'bulk_upsert' ────────────────────────────────────────────
+    // Migratie vanuit localStorage. Ownership ook hier: bestaande rijen
+    // alleen bijwerken als caller=eigenaar OF super_admin; niet-eigen rijen
+    // worden overgeslagen (log).
     if (action === 'bulk_upsert' && Array.isArray(tasks)) {
+      if (!(await requirePermission(req, 'taken.task.create'))) {
+        return res.status(403).json({ error: 'Geen rechten voor taken.task.create' });
+      }
       try {
         const rows = tasks.filter(t => t.id).map(toRow);
         if (!rows.length) return res.status(200).json({ ok: true, count: 0 });
@@ -174,29 +267,66 @@ export default async function handler(req, res) {
         }
 
         const ids = rows.map(r => r.id);
-        const { data: existing } = await supabase.from('taken_items').select('id').in('id', ids);
-        const existingIds = new Set((existing || []).map(r => r.id));
+        const { data: existing } = await supabaseAdmin
+          .from('taken_items')
+          .select('id, created_by')
+          .in('id', ids);
+        const existingMap = new Map((existing || []).map((r) => [r.id, r]));
 
-        // Split: nieuw (creator-velden erbij) vs bestaand (geen creator-velden overschrijven)
-        const newRows    = rows.filter(r => !existingIds.has(r.id)).map(r => ({ ...r, created_by: userId, owner_id: userId, created_by_id: userId }));
-        const updateRows = rows.filter(r =>  existingIds.has(r.id));
+        const newRows = [];
+        const updateRows = [];
+        const skipped = [];
+        for (const r of rows) {
+          const ex = existingMap.get(r.id);
+          if (ex) {
+            if (superAdmin || ex.created_by === userId) {
+              updateRows.push(r); // toRow() bevat geen created_by → blijft ongewijzigd
+            } else {
+              skipped.push(r.id);
+            }
+          } else {
+            newRows.push({ ...r, created_by: userId, owner_id: userId, created_by_id: userId });
+          }
+        }
 
-        if (newRows.length)    { const { error: e1 } = await supabase.from('taken_items').insert(newRows);                          if (e1) throw e1; }
-        if (updateRows.length) { const { error: e2 } = await supabase.from('taken_items').upsert(updateRows, { onConflict: 'id' }); if (e2) throw e2; }
+        if (newRows.length)    { const { error: e1 } = await supabaseAdmin.from('taken_items').insert(newRows);                          if (e1) throw e1; }
+        if (updateRows.length) { const { error: e2 } = await supabaseAdmin.from('taken_items').upsert(updateRows, { onConflict: 'id' }); if (e2) throw e2; }
 
-        console.log(`[taken] bulk_upsert: ${rows.length} taken gesynchroniseerd (${newRows.length} nieuw, ${updateRows.length} bijgewerkt)`);
-        return res.status(200).json({ ok: true, count: rows.length });
+        if (skipped.length) {
+          console.warn(`[taken] bulk_upsert ownership-skip: ${skipped.length} taken (niet eigen, geen super_admin)`);
+        }
+        console.log(`[taken] bulk_upsert: ${rows.length} taken (${newRows.length} nieuw, ${updateRows.length} bijgewerkt, ${skipped.length} overgeslagen)`);
+        return res.status(200).json({ ok: true, count: newRows.length + updateRows.length, skipped: skipped.length });
       } catch (err) {
         console.error('[taken] BULK fout:', err.message);
         return res.status(500).json({ error: err.message });
       }
     }
 
+    // ── action: 'delete' ─────────────────────────────────────────────────
+    // Alleen creator OF super_admin. super_admin → delete by id.
+    // Anders delete .eq('id', id).eq('created_by', userId); bij 0 rijen → 403.
     if (action === 'delete') {
       if (!id) return res.status(400).json({ error: 'id vereist' });
+      if (!(await requirePermission(req, 'taken.task.delete'))) {
+        return res.status(403).json({ error: 'Geen rechten voor taken.task.delete' });
+      }
       try {
-        const { error } = await supabase.from('taken_items').delete().eq('id', id);
+        if (superAdmin) {
+          const { error } = await supabaseAdmin.from('taken_items').delete().eq('id', id);
+          if (error) throw error;
+          return res.status(200).json({ ok: true });
+        }
+        const { data, error } = await supabaseAdmin
+          .from('taken_items')
+          .delete()
+          .eq('id', id)
+          .eq('created_by', userId)
+          .select('id');
         if (error) throw error;
+        if (!Array.isArray(data) || data.length === 0) {
+          return res.status(403).json({ error: 'Alleen de maker of super_admin mag deze taak verwijderen' });
+        }
         return res.status(200).json({ ok: true });
       } catch (err) {
         console.error('[taken] DELETE fout:', err.message);
@@ -204,6 +334,7 @@ export default async function handler(req, res) {
       }
     }
 
+    // ── { task }-upsert: split nieuw vs bestaand ─────────────────────────
     if (task) {
       if (!task.id) return res.status(400).json({ error: 'task.id vereist' });
       try {
@@ -211,17 +342,45 @@ export default async function handler(req, res) {
         const statusErr = checkStatus(row);
         if (statusErr) return res.status(400).json({ error: statusErr });
 
-        const { data: existing } = await supabase.from('taken_items').select('id').eq('id', row.id).maybeSingle();
+        const { data: existing } = await supabaseAdmin
+          .from('taken_items')
+          .select('id, created_by')
+          .eq('id', row.id)
+          .maybeSingle();
+
         if (existing) {
-          const { error } = await supabase.from('taken_items').upsert(row, { onConflict: 'id' });
+          // EDIT — alleen creator OF super_admin.
+          if (!(await permitAny(req, 'taken.task.edit', 'taken.task.create'))) {
+            return res.status(403).json({ error: 'Geen rechten voor taken.task.edit' });
+          }
+          if (!(superAdmin || existing.created_by === userId)) {
+            return res.status(403).json({ error: 'Alleen de maker of super_admin mag deze taak bewerken' });
+          }
+          // toRow() bevat geen created_by-veld → created_by wordt nooit overschreven.
+          const { error } = await supabaseAdmin.from('taken_items').upsert(row, { onConflict: 'id' });
           if (error) throw error;
         } else {
-          // INSERT: created_by=user.id (XOR met created_by_agent — user-pad, agent blijft NULL)
-          const { error } = await supabase.from('taken_items').insert({ ...row, created_by: userId, owner_id: userId, created_by_id: userId });
+          // NIEUW — taken.task.create vereist; created_by = userId.
+          if (!(await requirePermission(req, 'taken.task.create'))) {
+            return res.status(403).json({ error: 'Geen rechten voor taken.task.create' });
+          }
+          const { error } = await supabaseAdmin
+            .from('taken_items')
+            .insert({ ...row, created_by: userId, owner_id: userId, created_by_id: userId });
           if (error) {
             if (error.code === '23505') {
-              console.warn('[taken] race-condition duplicate key, fallback naar update');
-              const { error: upErr } = await supabase.from('taken_items').upsert(row, { onConflict: 'id' });
+              // Race: row is intussen aangemaakt door dezelfde caller; alleen eigen
+              // record bijwerken (zelfde created_by-guard als reguliere edit).
+              console.warn('[taken] race-condition duplicate key, fallback naar update voor eigen rij');
+              const { data: existing2 } = await supabaseAdmin
+                .from('taken_items')
+                .select('created_by')
+                .eq('id', row.id)
+                .maybeSingle();
+              if (!existing2 || !(superAdmin || existing2.created_by === userId)) {
+                return res.status(409).json({ error: 'Taak bestaat al en is niet van jou' });
+              }
+              const { error: upErr } = await supabaseAdmin.from('taken_items').upsert(row, { onConflict: 'id' });
               if (upErr) throw upErr;
             } else {
               throw error;
