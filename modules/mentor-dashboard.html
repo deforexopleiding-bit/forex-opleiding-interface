@@ -1422,7 +1422,7 @@
   function _futurePaidBadge(paid) {
     return paid
       ? '<span class="badge badge-green" title="Betaling is binnen — je mag een eerste call inplannen.">💶 Betaald · eerste call mag</span>'
-      : '<span class="badge badge-amber" title="Wacht tot de betaling binnen is voordat je een eerste call inplant.">⏳ Nog niet betaald · nog niet inplannen</span>';
+      : '<span class="badge badge-amber" title="Plan gerust; controleer de betaling vóór de call plaatsvindt.">⏳ Nog niet betaald · plan de eerste call alvast (check betaling vóór de call)</span>';
   }
 
   // Mini-overzicht op de Dashboard-landing. Wordt aangeroepen door
@@ -1445,7 +1445,7 @@
     const M = list.filter((s) => !!s.paid).length;
     const payLine = (M > 0)
       ? `<span class="badge badge-green" style="font-size:11.5px">💶 ${M} betaald · klaar voor de eerste call</span>`
-      : `<span class="badge badge-amber" style="font-size:11.5px">⏳ Nog geen betaling binnen — eerste call nog niet inplannen</span>`;
+      : `<span class="badge badge-amber" style="font-size:11.5px" title="Plan gerust; controleer de betaling vóór de call plaatsvindt.">⏳ Nog niet betaald — plan de eerste call alvast (check betaling vóór de call)</span>`;
     el.innerHTML = `
       <div class="dash-status-bar" style="background:var(--bg-elev);border:1px solid var(--border);color:var(--text)">
         <i class="ti ti-user-plus" style="color:var(--text-dim)"></i>
