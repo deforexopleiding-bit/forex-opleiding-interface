@@ -52,6 +52,27 @@ function findWaiverConsentKey(structure) {
   return null;
 }
 
+// Berekent bedenktijd-status. waiver={agreed,at}|null, offerteOp=iso|null.
+// Vervallen bij: (a) afstand-waiver, of (b) offerte+14d verstreken.
+// Gedupliceerd naast api/onboarding-detail.js' computeBedenktijd zodat
+// beide endpoints dezelfde shape leveren (zelfde pattern als
+// findWaiverConsentKey hierboven).
+function computeBedenktijd(waiver, offerteOp) {
+  let vervaltOp = null;
+  if (offerteOp) {
+    const d = new Date(offerteOp);
+    if (!isNaN(d)) { d.setDate(d.getDate() + 14); vervaltOp = d.toISOString(); }
+  }
+  const waived = waiver && waiver.agreed === true;
+  if (waived)
+    return { status:'vervallen', reason:'afstand',    waived_at:(waiver.at||null), offerte_op:offerteOp, vervalt_op:vervaltOp };
+  if (vervaltOp && Date.now() > new Date(vervaltOp).getTime())
+    return { status:'vervallen', reason:'verstreken', waived_at:null,              offerte_op:offerteOp, vervalt_op:vervaltOp };
+  if (vervaltOp)
+    return { status:'lopend',    reason:null,         waived_at:null,              offerte_op:offerteOp, vervalt_op:vervaltOp };
+  return   { status:'onbekend',  reason:null,         waived_at:(waived?waiver.at:null), offerte_op:null,  vervalt_op:null };
+}
+
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
   res.setHeader('Content-Type', 'application/json');
@@ -181,6 +202,32 @@ export default async function handler(req, res) {
       console.warn('[onboardings-admin-list] wizard config exception:', e?.message || e);
     }
 
+    // Gebatchte deals-lookup voor bedenktijd (trigger b): per uniek
+    // customer_id de meest recente getekende/geaccepteerde offerte.
+    // Fail-soft: bij DB-glitch blijft dealByCust leeg en valt elke row
+    // terug op offerteOp=null → bedenktijd status 'onbekend' (of
+    // 'vervallen/afstand' als de waiver al gezet is).
+    const dealByCust = {};
+    if (customerIds.length > 0) {
+      try {
+        const { data: dls, error: dlErr } = await supabaseAdmin
+          .from('deals')
+          .select('customer_id, tl_quotation_accepted_at, tl_quotation_signed_at')
+          .in('customer_id', customerIds)
+          .not('tl_quotation_accepted_at', 'is', null)
+          .order('tl_quotation_accepted_at', { ascending: false });
+        if (dlErr) {
+          console.warn('[onboardings-admin-list] deals fetch:', dlErr.message);
+        } else {
+          for (const d of (dls || [])) {
+            if (d?.customer_id && !dealByCust[d.customer_id]) dealByCust[d.customer_id] = d; // eerste = meest recent
+          }
+        }
+      } catch (e) {
+        console.warn('[onboardings-admin-list] deals exception:', e?.message || e);
+      }
+    }
+
     const out = list.map((r) => {
       const t = r.traject || null;
       const ans = (r.answers && typeof r.answers === 'object') ? r.answers : {};
@@ -188,6 +235,9 @@ export default async function handler(req, res) {
         ? { agreed: ans[waiverKey] === true, at: ans[waiverKey + '_at'] || null }
         : null;
       const availability = availabilityBlock ? buildAvailabilityView(availabilityBlock, ans) : null;
+      const dealRow = r.customer_id ? (dealByCust[r.customer_id] || null) : null;
+      const offerteOp = dealRow ? (dealRow.tl_quotation_signed_at || dealRow.tl_quotation_accepted_at || null) : null;
+      const bedenktijd = computeBedenktijd(waiver, offerteOp);
       return {
         id             : r.id,
         customer_id    : r.customer_id,
@@ -202,6 +252,7 @@ export default async function handler(req, res) {
         current_step   : r.current_step || null,
         paid           : paidSet.has(r.customer_id),
         waiver,
+        bedenktijd,
         availability,
         started_at     : r.started_at,
         completed_at   : r.completed_at,

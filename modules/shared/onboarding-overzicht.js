@@ -342,6 +342,48 @@
     return `<span class="ob-badge paid-yes" title="${esc(waiver.at || '')}">${esc(label)}</span>`;
   }
 
+  // dd-mm formatter voor bedenktijd-labels. ISO → '08-07'.
+  function _bedenktijdDdMm(iso) {
+    if (!iso) return '';
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return '';
+    const pad = (n) => String(n).padStart(2, '0');
+    return pad(d.getDate()) + '-' + pad(d.getMonth() + 1);
+  }
+
+  // Bedenktijd-badge — rijkere weergave die de waiver-trigger (a) én de
+  // offerte+14d-trigger (b) samenvat. Backward-compat: zonder bedenktijd-
+  // payload valt 'm terug op de bestaande waiverBadgeHtml.
+  function bedenktijdBadge(bt, waiver) {
+    if (!bt) return waiverBadgeHtml(waiver);
+    if (bt.status === 'onbekend') return '<span style="color:var(--text-faint)">—</span>';
+    if (bt.status === 'lopend') {
+      const vervalt = _bedenktijdDdMm(bt.vervalt_op);
+      const offerte = _bedenktijdDdMm(bt.offerte_op);
+      const titleParts = [];
+      if (offerte) titleParts.push('Offerte getekend ' + offerte);
+      const title = titleParts.join(' · ');
+      return '<span class="ob-badge" title="' + esc(title) + '" '
+        + 'style="background:rgba(214,158,20,.14);color:#8a5a00;border-color:rgba(214,158,20,.35)">'
+        + 'Loopt — vervalt ' + esc(vervalt) + '</span>';
+    }
+    if (bt.status === 'vervallen') {
+      if (bt.reason === 'afstand') {
+        const waived = _bedenktijdDdMm(bt.waived_at);
+        const label = waived ? ('Afstand gedaan ' + waived) : 'Afstand gedaan';
+        return '<span class="ob-badge paid-yes" title="' + esc(bt.waived_at || '') + '">' + esc(label) + '</span>';
+      }
+      if (bt.reason === 'verstreken') {
+        const vervalt = _bedenktijdDdMm(bt.vervalt_op);
+        const offerte = _bedenktijdDdMm(bt.offerte_op);
+        const title = offerte ? ('14 dagen na offerte (' + offerte + ')') : '';
+        const label = vervalt ? ('Verstreken ' + vervalt) : 'Verstreken';
+        return '<span class="ob-badge paid-yes" title="' + esc(title) + '">' + esc(label) + '</span>';
+      }
+    }
+    return waiverBadgeHtml(waiver);
+  }
+
   function statusBadgeHtml(st) {
     const cls = ['aangemeld','bezig','afgerond','gearchiveerd'].includes(st) ? st : 'aangemeld';
     return `<span class="ob-badge ${cls}">${esc(STATUS_LABEL[st] || st || '—')}</span>`;
@@ -389,7 +431,7 @@
         <td>${trajectLabelHtml(r)}</td>
         <td>${statusBadgeHtml(r.status)}</td>
         <td>${paidBadgeHtml(!!r.paid)}</td>
-        <td>${waiverBadgeHtml(r.waiver || null)}</td>
+        <td>${bedenktijdBadge(r.bedenktijd || null, r.waiver || null)}</td>
         <td>${renderAvailabilityShort(r.availability || null)}</td>
         <td>${mentorCellHtml(r)}</td>
         <td>${esc(progressLabel(r))}</td>
@@ -544,7 +586,7 @@
           <dt>Traject</dt>          <dd>${esc(o.traject_label || '—')}${o.traject_type ? ' <span class="ob-badge paid-no">' + esc(o.traject_type) + '</span>' : ''}${o.calls != null ? ' · ' + o.calls + ' call' + (o.calls===1?'':'s') : ''}${o.duur_maanden != null ? ' · ' + o.duur_maanden + ' mnd' : ''}</dd>
           <dt>Status</dt>           <dd>${statusBadgeHtml(o.status)}</dd>
           <dt>Betaling</dt>         <dd>${paidBadgeHtml(!!o.paid)}</dd>
-          <dt>Bedenktijd</dt>       <dd>${waiverBadgeHtml(o.waiver || null)}</dd>
+          <dt>Bedenktijd</dt>       <dd>${bedenktijdBadge(o.bedenktijd || null, o.waiver || null)}</dd>
           <dt>Beschikbaarheid</dt>  <dd>${renderAvailabilityFull(o.availability || null)}</dd>
           <dt>Mentor</dt>           <dd>${esc(o.mentor_name || (o.mentor_user_id || '—'))}</dd>
           <dt>Wizard-stap</dt>      <dd>${esc(o.current_step || '—')}</dd>
