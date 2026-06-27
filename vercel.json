@@ -95,6 +95,10 @@
     {
       "path": "/api/cron/onboarding-automations",
       "schedule": "* * * * *"
+    },
+    {
+      "path": "/api/cron/noshow-detect",
+      "schedule": "0 6 * * *"
     }
   ],
   "headers": [

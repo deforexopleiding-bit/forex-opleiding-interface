@@ -166,6 +166,14 @@
     <!-- Pane: Aandachtspunten -->
     <div class="so-pane" id="soPaneSignals">
       <div class="so-status-strip">
+        <label>
+          Type:
+          <select id="apTypeFilter" style="padding:5px 8px;border:1px solid var(--border);border-radius:6px;background:var(--bg);font-family:inherit;font-size:12px;color:var(--text)">
+            <option value="all">Alle</option>
+            <option value="meldingen">Meldingen (mentor)</option>
+            <option value="no_show">No-shows (auto)</option>
+          </select>
+        </label>
         <label><input type="checkbox" id="apShowHistory" /> Toon afgehandelde historie</label>
         <span id="apCountInfo" style="margin-left:auto"></span>
       </div>
@@ -266,6 +274,7 @@ const state = {
   signals        : [],          // raw lijst student_signals (admin-shape)
   signalsLoaded  : false,
   apShowHistory  : false,       // toggle: ook afgehandelde tonen?
+  apTypeFilter   : 'all',       // 'all' | 'meldingen' | 'no_show'
   apHandleRow    : null,        // huidige rij in de handle-modal
   apHandleBusy   : false,
 };
@@ -711,6 +720,7 @@ const SIGNAL_TYPE_LABELS = {
   niet_bereikbaar     : 'Niet bereikbaar',
   geen_reactie_bellen : 'Geen reactie — bellen',
   anders              : 'Anders',
+  no_show             : 'No-show',
 };
 const SIGNAL_STATUS_LABELS = {
   open             : 'Open',
@@ -722,9 +732,12 @@ function renderSignalsTable() {
   const tbody = document.getElementById('apTbody');
   if (!tbody) return;
   // Filter op show-history toggle (server kan ook 'all' returnen wanneer toggle aan).
-  const list = state.apShowHistory
+  let list = state.apShowHistory
     ? state.signals
     : state.signals.filter((s) => s.status === 'open' || s.status === 'opnieuw_opvolgen');
+  // Type-filter.
+  if (state.apTypeFilter === 'no_show')        list = list.filter((s) => s.type === 'no_show');
+  else if (state.apTypeFilter === 'meldingen') list = list.filter((s) => s.type !== 'no_show');
   const info = document.getElementById('apCountInfo');
   if (info) info.textContent = list.length + ' ' + (list.length === 1 ? 'punt' : 'punten');
   if (list.length === 0) {
@@ -740,12 +753,30 @@ function renderSignalsTable() {
     const action = (s.status !== 'afgehandeld')
       ? '<button type="button" class="so-btn primary ap-handle-btn" data-idx="' + idx + '"><i class="ti ti-check"></i> Afhandelen</button>'
       : '<span class="so-mentor-none">afgehandeld</span>';
+    // No-show rijen krijgen extra labels: auto-bron + reden van mentor (of "wacht op reden").
+    const isNoshow   = (s.type === 'no_show');
+    const autoBadge  = (s.source === 'auto_noshow')
+      ? '<span class="ap-badge open" style="background:rgba(59,130,246,0.14);color:#1d4ed8;margin-left:6px">auto</span>'
+      : '';
+    const typeCell   = '<div class="ap-type">' + esc(SIGNAL_TYPE_LABELS[s.type] || s.type) + autoBadge + '</div>';
+    let toelCell;
+    if (isNoshow) {
+      // toelichting = "No-show op <datum>" (vanuit cron) of de mentor-reden
+      // na reason_given_at.
+      const base = s.toelichting ? '<div class="ap-toel">' + esc(s.toelichting) + '</div>' : '';
+      const reasonNote = s.reason_given_at
+        ? '<div class="ap-toel" style="color:#15803d;margin-top:2px">Reden gegeven door mentor</div>'
+        : '<div class="ap-toel" style="color:#b45309;margin-top:2px">Wacht op reden</div>';
+      toelCell = (base + reasonNote) || '—';
+    } else {
+      toelCell = s.toelichting ? '<div class="ap-toel">' + esc(s.toelichting) + '</div>' : '—';
+    }
     return '<tr>' +
       '<td><div class="so-name">' + esc(s.student_name || '—') + '</div></td>' +
       '<td class="ap-contact">' + contact + '</td>' +
       '<td>' + esc(s.mentor_name || '—') + '</td>' +
-      '<td><div class="ap-type">' + esc(SIGNAL_TYPE_LABELS[s.type] || s.type) + '</div></td>' +
-      '<td>' + (s.toelichting ? '<div class="ap-toel">' + esc(s.toelichting) + '</div>' : '—') + '</td>' +
+      '<td>' + typeCell + '</td>' +
+      '<td>' + toelCell + '</td>' +
       '<td>' + esc(dtStr) + '</td>' +
       '<td><span class="ap-badge ' + esc(s.status) + '">' + esc(SIGNAL_STATUS_LABELS[s.status] || s.status) + '</span></td>' +
       '<td>' + action + '</td>' +
@@ -764,6 +795,11 @@ function wireSignalsHandlers() {
   if (toggle) toggle.addEventListener('change', () => {
     state.apShowHistory = toggle.checked;
     loadSignals(); // server-status-filter wijzigt
+  });
+  const typeF = document.getElementById('apTypeFilter');
+  if (typeF) typeF.addEventListener('change', () => {
+    state.apTypeFilter = typeF.value || 'all';
+    renderSignalsTable(); // client-side filter, geen refetch nodig
   });
   document.getElementById('apMbClose').addEventListener('click', closeHandleModal);
   document.getElementById('apMbCancel').addEventListener('click', closeHandleModal);

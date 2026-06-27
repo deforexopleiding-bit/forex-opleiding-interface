@@ -767,12 +767,25 @@
         count: waitingReplies,
       });
     }
+    // C — no-show reden geven: open no_show-signals zonder reden.
+    const noshowOpen = countOpenNoshowsWithoutReason();
+    if (noshowOpen > 0) {
+      items.push({
+        href: '#mhNoshowOpen',
+        icon: 'ti-flag-3',
+        title: noshowOpen + ' no-show(s) — geef reden',
+        sub: 'Vul kort in waarom de student niet kwam',
+        count: noshowOpen,
+        action: 'open-noshow-modal',
+      });
+    }
     if (items.length === 0) {
       wrap.innerHTML = '<div class="mh-empty"><i class="ti ti-check"></i>Geen open gesprekken — niets openstaand.</div>';
       return;
     }
     wrap.innerHTML = items.map((it) => {
-      return '<a href="' + esc(it.href) + '" class="mh-todo-item">' +
+      const dataAct = it.action ? ' data-action="' + esc(it.action) + '"' : '';
+      return '<a href="' + esc(it.href) + '" class="mh-todo-item"' + dataAct + '>' +
                '<div class="mh-todo-icon"><i class="ti ' + esc(it.icon) + '"></i></div>' +
                '<div class="mh-todo-body">' +
                  '<div class="mh-todo-title">' + esc(it.title) + '</div>' +
@@ -781,6 +794,133 @@
                (it.count ? '<span class="mh-todo-count">' + it.count + '</span>' : '') +
              '</a>';
     }).join('');
+    // Wire de no-show-modal-triggers (replace defaults; modal blijft 1x mount).
+    wrap.querySelectorAll('a.mh-todo-item[data-action="open-noshow-modal"]').forEach((a) => {
+      a.addEventListener('click', (ev) => {
+        ev.preventDefault();
+        openNoshowReasonModal();
+      });
+    });
+  }
+
+  /* ── C — No-show reden-modal ─────────────────────────────────────────────
+     Bouwt een lijstje van eigen open no_show-signals zonder reden, met per
+     stuk een textarea. Submit triggert POST per signal en update state. */
+  function countOpenNoshowsWithoutReason() {
+    if (!state.signalsByStudent) return 0;
+    let n = 0;
+    for (const sig of state.signalsByStudent.values()) {
+      if (sig && sig.type === 'no_show'
+          && (sig.status === 'open' || sig.status === 'opnieuw_opvolgen')
+          && !sig.reason_given_at) n++;
+    }
+    return n;
+  }
+
+  function ensureNoshowModalMounted() {
+    if (document.getElementById('mhNsMb')) return;
+    const wrap = document.createElement('div');
+    wrap.innerHTML =
+      '<div id="mhNsMb" class="ss-mb" role="dialog" aria-modal="true">' +
+      '  <div class="ss-mw" style="width:min(520px,94vw)">' +
+      '    <div class="ss-mh">' +
+      '      <div class="ss-mh-title"><i class="ti ti-flag-3"></i> Reden bij no-show(s)</div>' +
+      '      <button type="button" class="ss-mh-close" id="mhNsClose" aria-label="Sluiten">×</button>' +
+      '    </div>' +
+      '    <div class="ss-mc" id="mhNsBody"></div>' +
+      '    <div class="ss-mf">' +
+      '      <button type="button" id="mhNsCancel">Sluiten</button>' +
+      '    </div>' +
+      '  </div>' +
+      '</div>';
+    document.body.appendChild(wrap);
+    document.getElementById('mhNsClose').addEventListener('click', closeNoshowModal);
+    document.getElementById('mhNsCancel').addEventListener('click', closeNoshowModal);
+    document.getElementById('mhNsMb').addEventListener('click', (ev) => {
+      if (ev.target === ev.currentTarget) closeNoshowModal();
+    });
+    document.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Escape' && document.getElementById('mhNsMb').classList.contains('show')) closeNoshowModal();
+    });
+  }
+  function closeNoshowModal() {
+    const el = document.getElementById('mhNsMb');
+    if (el) el.classList.remove('show');
+  }
+  function openNoshowReasonModal() {
+    ensureNoshowModalMounted();
+    const body = document.getElementById('mhNsBody');
+    const list = [];
+    if (state.signalsByStudent) {
+      for (const sig of state.signalsByStudent.values()) {
+        if (sig && sig.type === 'no_show'
+            && (sig.status === 'open' || sig.status === 'opnieuw_opvolgen')
+            && !sig.reason_given_at) list.push(sig);
+      }
+    }
+    if (list.length === 0) {
+      body.innerHTML = '<div style="font-size:13px;color:var(--text-dim)">Geen no-shows zonder reden.</div>';
+    } else {
+      body.innerHTML = list.map((s) => {
+        const title = esc(s.student_name || s.student_email || '—');
+        const when  = s.toelichting ? esc(s.toelichting) : '';
+        return '<div data-sig-id="' + esc(s.id) + '" style="border:1px solid var(--border);border-radius:8px;padding:10px;margin-bottom:8px">' +
+                 '<div style="font-size:13px;font-weight:600;color:var(--text)">' + title + '</div>' +
+                 (when ? '<div style="font-size:11.5px;color:var(--text-dim);margin-top:2px">' + when + '</div>' : '') +
+                 '<label style="display:block;font-size:11.5px;font-weight:600;color:var(--text-dim);margin:8px 0 4px">Reden</label>' +
+                 '<textarea maxlength="2000" rows="2" style="width:100%;padding:6px 8px;border:1px solid var(--border);border-radius:6px;background:var(--bg);font-family:inherit;font-size:13px;color:var(--text)" placeholder="Korte toelichting"></textarea>' +
+                 '<div class="ss-mc-err" style="font-size:12px;color:#991b1b;margin-top:6px;display:none"></div>' +
+                 '<div style="display:flex;justify-content:flex-end;margin-top:6px"><button type="button" class="mh-ns-save" style="padding:5px 11px;font-size:12px;font-weight:600;border:1px solid transparent;border-radius:6px;background:var(--brand-primary,#093d54);color:#fff;cursor:pointer;font-family:inherit"><i class="ti ti-check"></i> Opslaan</button></div>' +
+               '</div>';
+      }).join('');
+      body.querySelectorAll('div[data-sig-id]').forEach((row) => {
+        row.querySelector('.mh-ns-save').addEventListener('click', () => submitNoshowReason(row));
+      });
+    }
+    document.getElementById('mhNsMb').classList.add('show');
+  }
+  async function submitNoshowReason(row) {
+    const sigId = row.dataset.sigId || '';
+    const ta = row.querySelector('textarea');
+    const err = row.querySelector('.ss-mc-err');
+    const reason = (ta.value || '').trim();
+    if (!reason) {
+      err.textContent = 'Vul een korte reden in.';
+      err.style.display = 'block';
+      return;
+    }
+    err.style.display = 'none';
+    try {
+      const r = await window.AgentShared.apiFetch('/api/student-signals-reason', {
+        method  : 'POST',
+        headers : { 'Content-Type': 'application/json' },
+        body    : JSON.stringify({ signal_id: sigId, reason: reason }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        err.textContent = d?.error || ('Fout: HTTP ' + r.status);
+        err.style.display = 'block';
+        return;
+      }
+      // Lokale state bijwerken zodat de teller meteen klopt + herrender.
+      if (state.signalsByStudent) {
+        for (const sig of state.signalsByStudent.values()) {
+          if (sig && sig.id === sigId) {
+            sig.toelichting = reason;
+            sig.reason_given_at = new Date().toISOString();
+            break;
+          }
+        }
+      }
+      row.remove();
+      renderTodo();
+      // Sluit modal als geen rijen meer.
+      const body = document.getElementById('mhNsBody');
+      if (body && !body.querySelector('div[data-sig-id]')) closeNoshowModal();
+    } catch (e) {
+      err.textContent = e?.message || 'Onbekende fout';
+      err.style.display = 'block';
+    }
   }
 
   /* ── Offertes (self-scoped) ─────────────────────────────────────── */
