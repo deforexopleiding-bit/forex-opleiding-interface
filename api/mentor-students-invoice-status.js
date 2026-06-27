@@ -43,6 +43,18 @@ function isSafeForIlikeOr(email) {
     && !email.includes(',') && !email.includes('(') && !email.includes(')');
 }
 
+// Escape LIKE/ILIKE wildcards zodat ilike een exacte (case-insensitive)
+// equality wordt i.p.v. patroon-matching. Volgorde is belangrijk: eerst de
+// backslash zelf (zodat we onze eigen escapes daarna niet nog eens escapen),
+// dan % en _. Een mailadres als 'foo_bar@x.nl' zou anders elk adres met een
+// willekeurig char op die positie matchen (false positives + leak-risico).
+function escapeIlikePattern(s) {
+  return String(s)
+    .replace(/\\/g, '\\\\')
+    .replace(/%/g, '\\%')
+    .replace(/_/g, '\\_');
+}
+
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
   res.setHeader('Content-Type', 'application/json');
@@ -95,7 +107,7 @@ export default async function handler(req, res) {
     const emailToCustomerIds = new Map(); // lowercased-email → Set<customer_id>
     for (let i = 0; i < safeEmails.length; i += ILIKE_CHUNK) {
       const slice = safeEmails.slice(i, i + ILIKE_CHUNK);
-      const filter = slice.map((e) => `email.ilike.${e}`).join(',');
+      const filter = slice.map((e) => `email.ilike.${escapeIlikePattern(e)}`).join(',');
       const { data: rows, error: cErr } = await supabaseAdmin
         .from('customers')
         .select('id, email')
@@ -150,11 +162,15 @@ export default async function handler(req, res) {
       byEmail[eLc] = (byEmail[eLc] || 0) + 1;
     }
 
-    // 9. Alleen entries > 0 in de response (al impliciet — we tellen
-    //    alleen upwards). Strip ter defensie de 0-keys mocht een
-    //    toekomstige wijziging er per ongeluk een laten staan.
+    // 9. Defense-in-depth: alleen keys overhouden die in de oorspronkelijke
+    //    student-e-mailset zitten. Mocht een toekomstige regex-fout of een
+    //    DB-side e-mail met case-variant per ongeluk een niet-student
+    //    matchen, dan filtert deze stap die weg vóór de response. De data
+    //    zou er sowieso al niet in moeten zitten — dit is de gordel-en-
+    //    bretels-laag, niet de eerste lijn.
+    const studentEmailSet = new Set(emails); // 'emails' is al lowercased + getrimd
     for (const k of Object.keys(byEmail)) {
-      if (!(byEmail[k] > 0)) delete byEmail[k];
+      if (!(byEmail[k] > 0) || !studentEmailSet.has(k)) delete byEmail[k];
     }
 
     return res.status(200).json({ byEmail });
