@@ -99,6 +99,10 @@
     {
       "path": "/api/cron/noshow-detect",
       "schedule": "0 6 * * *"
+    },
+    {
+      "path": "/api/cron/future-call-reminder",
+      "schedule": "0 7 * * *"
     }
   ],
   "headers": [
