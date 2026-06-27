@@ -100,7 +100,15 @@ export default async function handler(req, res) {
     const results = await fetchBubbleStudents(bubbleUserId);
 
     // 3) Map → API-shape (suffix-keys met bare-name fallback).
-    const students = (results || []).map((u) => {
+    //    Filter gearchiveerde studenten eruit — voorkomt dat de mentor-lijst
+    //    blijft groeien terwijl studenten al niet meer in begeleiding zijn.
+    //    Bubble yes/no veld 'archived' (API-key 'archived_boolean'); we lezen
+    //    defensief ook de kale 'archived' (pre-conventie).
+    const activeResults = (results || []).filter((u) => {
+      const raw = (u && (u.archived_boolean !== undefined ? u.archived_boolean : u.archived));
+      return !(raw === true || raw === 'true');
+    });
+    const students = activeResults.map((u) => {
       const { name, email } = bubbleUserDisplay(u);
       const program          = pickOption(readFirst(u, ['learning_type_option_os___learning_type', 'learning type']));
       const onboardingStatus = pickOption(readFirst(u, ['onboarding_status_option_os___onboarding_status', 'Onboarding Status']));

@@ -194,6 +194,10 @@ export function mapBubbleStudentRow(u) {
     if (typeof raw === 'object' && raw._id) return String(raw._id) || null;
     return null;
   })();
+  // Archived-vlag — Bubble yes/no veld. API-key bij convention is
+  // 'archived_boolean'; oudere/kale 'archived' werkt als fallback.
+  const archivedRaw = _readFirst(u, ['archived_boolean', 'archived']);
+  const archived = (archivedRaw === true || archivedRaw === 'true');
   return {
     bubble_student_id     : String(u?._id || ''),
     name,
@@ -207,5 +211,6 @@ export function mapBubbleStudentRow(u) {
     group_total           : groupTotal,
     no_shows              : noShows,
     mentor_bubble_user_id : mentorBubbleId,
+    archived              : archived,
   };
 }
