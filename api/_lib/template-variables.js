@@ -142,6 +142,13 @@ export const AVAILABLE_VARIABLES = [
   // ── onboarding (Comms C1) — vereist context.onboarding (onboardings-row).
   //   Onboarding-invite-flow geeft een onboarding-context mee zodat we de
   //   persoonlijke wizard-link + traject-naam + status kunnen renderen.
+  //   Callers die alleen een customer hebben kunnen vóór resolveVariables
+  //   loadOnboardingForCustomer(supabaseClient, customer.id) aanroepen om
+  //   context.onboarding op te halen (meest recente onboardings-rij).
+  { key: 'onboarding.persoonlijke_link', label: 'Persoonlijke onboarding-link', category: 'onboarding', example: 'https://forex-opleiding-interface.vercel.app/modules/onboarding.html?t=00000000-0000-0000-0000-000000000000', requires_context: 'onboarding' },
+  { key: 'onboarding.startdatum',   label: 'Startdatum',          category: 'onboarding', example: '20-06-2026', requires_context: 'onboarding' },
+  { key: 'onboarding.traject',      label: 'Traject',             category: 'onboarding', example: 'Forex Masterclass 1-op-1', requires_context: 'onboarding' },
+  { key: 'onboarding.mentor',       label: 'Toegewezen mentor',   category: 'onboarding', example: 'Dave de Jong', requires_context: 'onboarding' },
   { key: 'onboarding.wizard_link',  label: 'Wizard-link',     category: 'onboarding', example: 'https://forex-opleiding-interface.vercel.app/modules/onboarding.html?t=00000000-0000-0000-0000-000000000000', requires_context: 'onboarding' },
   { key: 'onboarding.traject_label', label: 'Traject-label',  category: 'onboarding', example: 'Forex Masterclass 1-op-1', requires_context: 'onboarding' },
   { key: 'onboarding.status',       label: 'Onboarding-status', category: 'onboarding', example: 'aangemeld', requires_context: 'onboarding' },
@@ -434,16 +441,59 @@ const PUBLIC_BASE_URL = process.env.PUBLIC_BASE_URL || 'https://forex-opleiding-
 function getOnboardingValue(onboarding, key) {
   if (!onboarding) return '';
   switch (key) {
-    case 'onboarding.wizard_link': {
+    case 'onboarding.wizard_link':
+    case 'onboarding.persoonlijke_link': {
+      // Beide keys produceren exact dezelfde persoonlijke link
+      // (base-URL + /modules/onboarding.html?t=<token>), identiek aan
+      // de URL die onboarding-hub bouwt.
       const token = onboarding.token;
       if (!token) return '';
       return `${PUBLIC_BASE_URL}/modules/onboarding.html?t=${encodeURIComponent(String(token))}`;
     }
+    case 'onboarding.startdatum':    return onboarding.start_date ? formatDateNl(onboarding.start_date) : '';
+    case 'onboarding.traject':       return String(onboarding.traject_label || '');
+    case 'onboarding.mentor':        return String(onboarding.mentor_name || '');
     case 'onboarding.traject_label': return String(onboarding.traject_label || '');
     case 'onboarding.status':        return String(onboarding.status || '');
     case 'onboarding.login_url':     return String(onboarding.login_url || '');
     case 'onboarding.temp_password': return String(onboarding.temp_password || '');
     default: return '';
+  }
+}
+
+/**
+ * Laadt de meest recente onboardings-rij voor een klant. Bedoeld als
+ * pre-resolve helper voor callers die alleen een customer hebben maar
+ * onboarding.*-variabelen willen renderen.
+ *
+ *   const onboarding = await loadOnboardingForCustomer(supabaseAdmin, customer.id);
+ *   const ctx = { customer, invoice, openInvoices, onboarding };
+ *   const out = resolveVariables(text, mapping, ctx);
+ *
+ * Selecteert alle kolommen die onboarding.*-resolvers gebruiken
+ * (token, start_date, traject_label, mentor_name, status). Sorteert op
+ * created_at desc + limit 1. Fail-soft: bij geen klant, DB-fout of geen
+ * rij returnt null — callers hoeven niet te try/catchen, resolveVariables
+ * geeft dan zelf '' voor onboarding.*-keys.
+ */
+export async function loadOnboardingForCustomer(supabaseClient, customerId) {
+  if (!supabaseClient || !customerId) return null;
+  try {
+    const { data, error } = await supabaseClient
+      .from('onboardings')
+      .select('id, token, start_date, traject_label, mentor_name, status, created_at')
+      .eq('customer_id', customerId)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (error) {
+      console.warn('[template-variables] loadOnboardingForCustomer:', error.message);
+      return null;
+    }
+    return data || null;
+  } catch (e) {
+    console.warn('[template-variables] loadOnboardingForCustomer fout:', e?.message || e);
+    return null;
   }
 }
 
