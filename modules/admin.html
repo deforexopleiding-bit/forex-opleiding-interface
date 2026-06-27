@@ -205,8 +205,6 @@
       <button class="admin-tab" data-tab="rechten" id="rechtenTabBtn" onclick="switchAdminTab('rechten')" style="display:none">Rechten</button>
       <button class="admin-tab" data-tab="integraties" onclick="switchAdminTab('integraties')">Integraties</button>
       <button class="admin-tab" data-tab="approval-queue" data-view="approval-queue" id="approvalsTabBtn" onclick="switchAdminTab('approval-queue')" style="display:none">Approval-queue <span id="approvalsTabBadge" class="approvals-tab-badge hidden">0</span></button>
-      <button class="admin-tab" data-tab="assessment" id="assessmentTabBtn" onclick="switchAdminTab('assessment')" style="display:none">Assessment-vragen</button>
-      <button class="admin-tab" data-tab="simone-config" id="simoneCfgTabBtn" onclick="switchAdminTab('simone-config')" style="display:none">Simone-config</button>
       <button class="admin-tab" data-tab="menu-manager" id="menuMgrTabBtn" onclick="switchAdminTab('menu-manager')" style="display:none">Menu beheer</button>
       <!-- Joost (AI) tab VERHUISD naar Finance > Instellingen (Groep D, juni 2026). -->
       <!-- WhatsApp Connection + WhatsApp Templates VERHUISD naar Finance > Instellingen (PR-4, juni 2026). -->
@@ -475,51 +473,6 @@
     <!-- ── Joost (AI) configuratie — VERHUISD naar Finance > Instellingen (Groep D) — zie modules/shared/finance-instellingen.js ── -->
 
     <!-- ── Assessment-vragen editor (forward-only config) ────────────────── -->
-    <!-- STAP 7 — Assessment-vragen-editor is fysiek verhuisd naar
-         Events → Instellingen → Vragenlijst. Tab-pane toont een banner +
-         deeplink-knop zodat bookmarks op /modules/admin.html#assessment
-         niet breken. Oude JS-functies blijven dead-code in dit bestand
-         voor incrementele rollback (zie switchAdminTab-comment). -->
-    <div id="tab-assessment" class="admin-tab-panel" style="display:none">
-      <div class="section-card">
-        <div style="display:flex;align-items:flex-start;gap:14px;padding:14px;border:1px solid var(--border);border-radius:10px;background:rgba(59,130,246,0.08)">
-          <div style="width:36px;height:36px;border-radius:8px;background:rgba(59,130,246,0.2);color:#1d4ed8;display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0">
-            <i class="ti ti-arrow-right"></i>
-          </div>
-          <div style="flex:1;min-width:0">
-            <div style="font-size:14.5px;font-weight:700;color:var(--text)">Assessment-vragen zijn verhuisd</div>
-            <div style="font-size:12.5px;color:var(--text-dim);margin-top:4px;max-width:680px;line-height:1.5">
-              De vragenlijst-editor zit nu in <strong>Events → Instellingen → Vragenlijst</strong>. Endpoints, RBAC en datamodel zijn ongewijzigd.
-            </div>
-            <a href="/modules/events.html#settings-assessment" class="btn btn-sm btn-primary" style="margin-top:12px;text-decoration:none;display:inline-flex;align-items:center;gap:6px">
-              <i class="ti ti-external-link"></i> Open in Events → Instellingen
-            </a>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- STAP 7 — Simone-config is fysiek verhuisd naar
-         Events → Instellingen → Simone-config. -->
-    <div id="tab-simone-config" class="admin-tab-panel" style="display:none">
-      <div class="section-card">
-        <div style="display:flex;align-items:flex-start;gap:14px;padding:14px;border:1px solid var(--border);border-radius:10px;background:rgba(124,58,237,0.08)">
-          <div style="width:36px;height:36px;border-radius:8px;background:rgba(124,58,237,0.2);color:#7c3aed;display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0">
-            <i class="ti ti-robot"></i>
-          </div>
-          <div style="flex:1;min-width:0">
-            <div style="font-size:14.5px;font-weight:700;color:var(--text)">Simone-config is verhuisd</div>
-            <div style="font-size:12.5px;color:var(--text-dim);margin-top:4px;max-width:680px;line-height:1.5">
-              De AI-config voor Simone zit nu in <strong>Events → Instellingen → Simone-config</strong>. Endpoints, RBAC en datamodel zijn ongewijzigd.
-            </div>
-            <a href="/modules/events.html#settings-simone" class="btn btn-sm btn-primary" style="margin-top:12px;text-decoration:none;display:inline-flex;align-items:center;gap:6px">
-              <i class="ti ti-external-link"></i> Open in Events → Instellingen
-            </a>
-          </div>
-        </div>
-      </div>
-    </div>
-
     <!-- ── Menu beheer (sidebar layout-laag bovenop RBAC) ─────────────────
          Drag-and-drop herorderen + per-item zichtbaarheid-toggle. Server
          gegate op admin.sidebar (super_admin bypasst). Wijzigingen worden
@@ -1049,10 +1002,6 @@ function switchAdminTab(name) {
   if (approvPanel) approvPanel.style.display = name === 'approval-queue' ? '' : 'none';
   const approvView = document.getElementById('view-approval-queue');
   if (approvView) approvView.hidden = name !== 'approval-queue';
-  const aqPanel = document.getElementById('tab-assessment');
-  if (aqPanel) aqPanel.style.display = name === 'assessment' ? '' : 'none';
-  const scPanel = document.getElementById('tab-simone-config');
-  if (scPanel) scPanel.style.display = name === 'simone-config' ? '' : 'none';
   const mmPanel = document.getElementById('tab-menu-manager');
   if (mmPanel) mmPanel.style.display = name === 'menu-manager' ? '' : 'none';
   // WhatsApp Connection + WhatsApp Templates panels VERHUISD naar Finance >
@@ -1069,15 +1018,10 @@ function switchAdminTab(name) {
   // Menu beheer: lazy load + eenmalig wiren. Idempotent zodat re-open de
   // huidige (mogelijk dirty) draft niet weggooit.
   if (name === 'menu-manager') loadMenuManager();
-  // STAP 7 — Assessment-vragen en Simone-config zijn fysiek verhuisd naar
-  // Events → Instellingen. De oude loader-functies blijven dead-code in dit
-  // bestand voor incrementele rollback; we roepen ze niet meer aan zodat er
-  // geen console-errors komen op IDs die nu in events.html leven.
-  // De tab-buttons + redirect-banners (zie tab-content hieronder) blijven
-  // bestaan zodat /modules/admin.html#assessment + #simone-config blijven
-  // werken en de operator naar de hub kan klikken.
   // WhatsApp Templates + Connection init VERHUISD: zie
   // modules/shared/finance-instellingen.js (Finance > Instellingen).
+  // Assessment-vragen + Simone-config VERHUISD naar Events → Instellingen;
+  // deeplinks #assessment / #simone-config redirecten via legacyRedirectMap.
 }
 
 async function loadPermissionsMatrix() {
@@ -1253,33 +1197,6 @@ async function init() {
     }
   } catch (_) { /* RBAC niet geladen — tab blijft verborgen */ }
 
-  // Assessment-vragen tab: super_admin OF can(admin.joost_config).
-  // Hergebruikt joost_config-permissie: assessment-routing is semantisch
-  // dezelfde AI/scoring-config-tier.
-  try {
-    let allowAQ = currentProfile.role === 'super_admin';
-    if (!allowAQ && window.RBAC && typeof window.RBAC.can === 'function') {
-      allowAQ = await window.RBAC.can('admin.joost_config');
-    }
-    if (allowAQ) {
-      const ab = document.getElementById('assessmentTabBtn');
-      if (ab) ab.style.display = '';
-    }
-  } catch (_) { /* RBAC niet geladen — tab blijft verborgen */ }
-
-  // Simone-config tab: super_admin OF can(admin.simone_config). Mirror van
-  // de Joost-config-tab in Finance > Instellingen; events-agent suggest-only.
-  try {
-    let allowSimone = currentProfile.role === 'super_admin';
-    if (!allowSimone && window.RBAC && typeof window.RBAC.can === 'function') {
-      allowSimone = await window.RBAC.can('admin.simone_config');
-    }
-    if (allowSimone) {
-      const sb = document.getElementById('simoneCfgTabBtn');
-      if (sb) sb.style.display = '';
-    }
-  } catch (_) { /* RBAC niet geladen — tab blijft verborgen */ }
-
   // Menu beheer tab: super_admin OF can(admin.sidebar). Beheert de
   // app-brede sidebar-layout (volgorde + per-item zichtbaarheid). Server-
   // side gate op POST /api/sidebar-layout-save is autoritatief.
@@ -1320,12 +1237,14 @@ async function init() {
       'whatsapp-templates':  '/modules/finance.html?tab=instellingen&sub=templates',
       'whatsapp-connection': '/modules/finance.html?tab=instellingen&sub=connection',
       'joost-config':        '/modules/finance.html?tab=instellingen&sub=joost',
+      'assessment':          '/modules/events.html#settings-assessment',
+      'simone-config':       '/modules/events.html#settings-simone',
     };
     if (hash && legacyRedirectMap[hash]) {
       location.replace(legacyRedirectMap[hash]);
       return;
     }
-    var allowedHashes = ['approval-queue', 'integraties', 'rechten', 'gebruikers', 'assessment', 'simone-config'];
+    var allowedHashes = ['approval-queue', 'integraties', 'rechten', 'gebruikers'];
     if (hash && allowedHashes.indexOf(hash) !== -1) switchAdminTab(hash);
   } catch (_) { /* fail-soft */ }
 }
@@ -2635,8 +2554,8 @@ function approvTruncate(s, n) {
 // ── Assessment-vragen editor VERHUISD naar Events → Instellingen ──
 //
 // State + helpers + loaders + render/edit/save handlers + reorder/toggle
-// leven sinds stap 7 (PR #253) in modules/events.html. Tab-button +
-// redirect-banner blijven hier zodat /modules/admin.html#assessment werkt.
+// leven sinds stap 7 (PR #253) in modules/events.html. Deeplink
+// /modules/admin.html#assessment redirect via legacyRedirectMap.
 
 async function loadApprovalQueue() {
   const tbody = document.getElementById('approvalQueueTbody');
@@ -3576,8 +3495,8 @@ async function refreshApprovalsTabBadge() {
 //
 // State (_simoneCfg/_simoneCfgDirty) + helpers (_scShowBanner/_scMarkDirty)
 // + loadSimoneConfig/renderSimoneConfigForm/saveSimoneConfig leven sinds
-// stap 7 (PR #253) in modules/events.html. Tab-button + redirect-banner
-// blijven hier zodat /modules/admin.html#simone-config werkt.
+// stap 7 (PR #253) in modules/events.html. Deeplink
+// /modules/admin.html#simone-config redirect via legacyRedirectMap.
 
 // ────────────────────────────────────────────────────────────────────────────
 // MENU BEHEER — sidebar layout-laag bovenop RBAC
