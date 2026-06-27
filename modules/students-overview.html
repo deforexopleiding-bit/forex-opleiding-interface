@@ -201,6 +201,22 @@
   </div>
 </div>
 
+<!-- D — Beoordelingshistorie-modal (admin-only, lazy-loaded) -->
+<div id="ahMb" class="so-mb" role="dialog" aria-modal="true" aria-labelledby="ahMbTitle">
+  <div class="so-mw" style="width:min(640px,94vw)">
+    <div class="so-mh">
+      <div class="so-mh-title" id="ahMbTitle"><i class="ti ti-history"></i> Beoordelingshistorie</div>
+      <button type="button" class="so-mh-close" id="ahMbClose" aria-label="Sluiten">×</button>
+    </div>
+    <div class="so-mc" id="ahMbBody" style="max-height:60vh;overflow:auto">
+      <div class="so-empty" style="padding:18px 8px">Laden…</div>
+    </div>
+    <div class="so-mf">
+      <button type="button" class="so-btn" id="ahMbCancel">Sluiten</button>
+    </div>
+  </div>
+</div>
+
 <!-- Handle-modal voor Aandachtspunten -->
 <div id="apMb" class="so-mb" role="dialog" aria-modal="true" aria-labelledby="apMbTitle">
   <div class="so-mw">
@@ -277,10 +293,26 @@ const state = {
   apTypeFilter   : 'all',       // 'all' | 'meldingen' | 'no_show'
   apHandleRow    : null,        // huidige rij in de handle-modal
   apHandleBusy   : false,
+  // D — Beoordelingshistorie (admin-only)
+  canAssessHistory : false,     // RBAC.canSync('students.all.view')
+  ahCache          : new Map(), // bubble_student_id -> { history } cache
+  ahCurrentSid     : null,      // huidige open student in modal
 };
 
 function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 function lc(s)  { return String(s == null ? '' : s).trim().toLowerCase(); }
+
+// D — Klikbare assessment-cel die de historie-modal opent. Voor non-admins
+// gewoon dezelfde badge zonder click-affordance.
+function renderAssessCell(r, assess) {
+  const badge = '<span class="so-badge ' + esc(assess) + '">' + esc(assessLabel(assess)) + '</span>';
+  if (!state.canAssessHistory) return badge;
+  const idx = (typeof r._viewIdx === 'number') ? r._viewIdx : 0;
+  return '<span class="so-assess-history" data-row-idx="' + idx + '" title="Beoordelingshistorie bekijken" style="cursor:pointer;display:inline-flex;align-items:center;gap:5px">' +
+           badge +
+           '<i class="ti ti-history" style="font-size:13px;color:var(--text-dim)"></i>' +
+         '</span>';
+}
 
 function assessLabel(s) {
   if (s === 'op_schema')  return 'Op schema';
@@ -387,18 +419,30 @@ function renderTable() {
       '<td>' + (r.program ? '<span class="so-prog">' + esc(r.program) + '</span>' : '—') + '</td>' +
       '<td>' + renderMentorCell(r) + '</td>' +
       '<td>' + (callsTotal > 0 ? (callsDone + '/' + callsTotal) : '—') + '</td>' +
-      '<td><span class="so-badge ' + esc(assess) + '">' + esc(assessLabel(assess)) + '</span></td>' +
+      '<td>' + renderAssessCell(r, assess) + '</td>' +
       '<td>' + (noShows > 0 ? '<span class="so-noshow">' + noShows + '</span>' : noShows) + '</td>' +
       '<td>' + (overdue > 0 ? '<span class="so-overdue">' + overdue + '</span>' : '0') + '</td>' +
       '</tr>';
   }).join('');
-  // Click → open student (negeer kliks op de Wijzig-knop)
+  // Click → open student (negeer kliks op de Wijzig-knop én op de history-trigger)
   tbody.querySelectorAll('tr[data-href]').forEach((tr) => {
     tr.addEventListener('click', (ev) => {
-      if (ev.target.closest('.so-mentor-edit')) return;
+      if (ev.target.closest('.so-mentor-edit'))    return;
+      if (ev.target.closest('.so-assess-history')) return;
       window.location.href = tr.dataset.href;
     });
   });
+  // Wire de Beoordelings-historie-triggers (alleen voor admins).
+  if (state.canAssessHistory) {
+    tbody.querySelectorAll('.so-assess-history[data-row-idx]').forEach((el) => {
+      el.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        const idx = Number(el.dataset.rowIdx);
+        const row = state.view[idx];
+        if (row) openAssessHistory(row);
+      });
+    });
+  }
   // Wire de Wijzig-knoppen
   tbody.querySelectorAll('.so-mentor-edit[data-row-idx]').forEach((btn) => {
     btn.addEventListener('click', (ev) => {
@@ -666,8 +710,129 @@ async function loadData() {
   wireSignalsHandlers();
   loadSignals(); // achtergrond, vult ook de tab-teller
 
+  // D — Beoordelingshistorie (admin-only). Page-gate stond al, hier
+  // expliciet zodat een fail-open RBAC-check de history-trigger niet
+  // per ongeluk toont aan non-admins.
+  try {
+    state.canAssessHistory = !!(window.RBAC?.canSync && window.RBAC.canSync('students.all.view'));
+  } catch (e) { state.canAssessHistory = false; }
+  if (state.canAssessHistory) wireAssessHistoryHandlers();
+
   loadData();
 })();
+
+/* ── D — Beoordelingshistorie ──────────────────────────────────────────── */
+function wireAssessHistoryHandlers() {
+  document.getElementById('ahMbClose').addEventListener('click', closeAssessHistory);
+  document.getElementById('ahMbCancel').addEventListener('click', closeAssessHistory);
+  document.getElementById('ahMb').addEventListener('click', (ev) => {
+    if (ev.target === ev.currentTarget) closeAssessHistory();
+  });
+  document.addEventListener('keydown', (ev) => {
+    if (ev.key === 'Escape' && document.getElementById('ahMb').classList.contains('show')) closeAssessHistory();
+  });
+}
+function closeAssessHistory() {
+  document.getElementById('ahMb').classList.remove('show');
+  state.ahCurrentSid = null;
+}
+
+const ASSESS_LABEL_MAP = {
+  op_schema   : 'Op schema',
+  aandacht    : 'Aandacht',
+  risico      : 'Risico',
+  niet_actief : 'Niet actief',
+};
+function fmtPeriodMonth(iso) {
+  if (!iso || typeof iso !== 'string') return '—';
+  // iso = 'YYYY-MM-DD' (eerste van de maand). Render als 'mrt 2026' in NL.
+  const parts = iso.split('-');
+  if (parts.length < 2) return iso;
+  const y = Number(parts[0]);
+  const m = Number(parts[1]);
+  if (!Number.isFinite(y) || !Number.isFinite(m) || m < 1 || m > 12) return iso;
+  try {
+    const d = new Date(Date.UTC(y, m - 1, 1));
+    return d.toLocaleDateString('nl-NL', { month: 'short', year: 'numeric', timeZone: 'UTC' });
+  } catch (e) { return iso; }
+}
+function fmtUpdatedAt(iso) {
+  if (!iso) return '—';
+  try {
+    const d = new Date(iso);
+    return d.toLocaleDateString('nl-NL', { day: '2-digit', month: 'short', year: 'numeric' });
+  } catch (e) { return iso; }
+}
+
+async function openAssessHistory(row) {
+  if (!state.canAssessHistory || !row || !row.bubble_student_id) return;
+  const sid = String(row.bubble_student_id);
+  state.ahCurrentSid = sid;
+  document.getElementById('ahMbTitle').innerHTML =
+    '<i class="ti ti-history"></i> Beoordelingshistorie — ' + esc(row.name || row.email || '—');
+  const body = document.getElementById('ahMbBody');
+  body.innerHTML = '<div class="so-empty" style="padding:18px 8px">Laden…</div>';
+  document.getElementById('ahMb').classList.add('show');
+
+  // Cache check — voorkomt herhaalde fetches als dezelfde student herhaaldelijk wordt geopend.
+  if (state.ahCache.has(sid)) {
+    renderAssessHistory(state.ahCache.get(sid));
+    return;
+  }
+  try {
+    const r = await window.AgentShared.apiFetch('/api/student-assessment-history?student_id=' + encodeURIComponent(sid));
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(d?.error || ('HTTP ' + r.status));
+    const list = Array.isArray(d?.history) ? d.history : [];
+    state.ahCache.set(sid, list);
+    // Race-guard: alleen renderen als deze student nog steeds open is.
+    if (state.ahCurrentSid === sid) renderAssessHistory(list);
+  } catch (e) {
+    if (state.ahCurrentSid !== sid) return;
+    body.innerHTML = '<div class="so-error" style="padding:18px 8px">Laden mislukt: ' + esc(e?.message || e) + '</div>';
+  }
+}
+
+function renderAssessHistory(history) {
+  const body = document.getElementById('ahMbBody');
+  if (!history || history.length === 0) {
+    body.innerHTML = '<div class="so-empty" style="padding:18px 8px"><i class="ti ti-clipboard-off"></i> Nog geen beoordelingen.</div>';
+    return;
+  }
+  // Tabel: maand · status · score · taken-afgerond · mentor · note · laatst bijgewerkt.
+  body.innerHTML =
+    '<table class="so-table" style="border:0">' +
+      '<thead><tr>' +
+        '<th>Maand</th>' +
+        '<th>Status</th>' +
+        '<th>Score</th>' +
+        '<th>Taken</th>' +
+        '<th>Mentor</th>' +
+        '<th>Notitie</th>' +
+        '<th>Bijgewerkt</th>' +
+      '</tr></thead>' +
+      '<tbody>' +
+        history.map((h) => {
+          const st        = h.status || '';
+          const stLabel   = ASSESS_LABEL_MAP[st] || st || '—';
+          const stBadge   = st ? ('<span class="so-badge ' + esc(st) + '">' + esc(stLabel) + '</span>') : '—';
+          const score     = (h.score == null) ? '—' : esc(String(h.score));
+          const tasks     = (h.active_tasks_done == null) ? '—' : (h.active_tasks_done ? 'Ja' : 'Nee');
+          const mentor    = h.mentor_name || '<span class="so-mentor-none">—</span>';
+          const note      = h.note ? esc(h.note) : '—';
+          return '<tr>' +
+            '<td>' + esc(fmtPeriodMonth(h.period_month)) + '</td>' +
+            '<td>' + stBadge + '</td>' +
+            '<td>' + score + '</td>' +
+            '<td>' + tasks + '</td>' +
+            '<td>' + mentor + '</td>' +
+            '<td style="max-width:200px;white-space:normal">' + note + '</td>' +
+            '<td>' + esc(fmtUpdatedAt(h.updated_at)) + '</td>' +
+            '</tr>';
+        }).join('') +
+      '</tbody>' +
+    '</table>';
+}
 
 /* ── B2 — Tab-switcher ──────────────────────────────────────────────────── */
 function wireTabs() {
