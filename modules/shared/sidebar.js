@@ -51,6 +51,8 @@
     'mentor-detail': '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M19 16l3 1.5V21l-3 1.5-3-1.5v-3.5z"/>',
     // lucide "receipt" — payout-rapport admin (finance/strateeg).
     'mentor-payouts-admin': '<path d="M4 4h16v18l-3-2-2 2-2-2-2 2-2-2-2 2-3-2z"/><line x1="8" y1="9" x2="16" y2="9"/><line x1="8" y1="13" x2="16" y2="13"/>',
+    // lucide "school" — admin-brede studenten-overzichtspagina (A1).
+    'students-overview': '<path d="M22 10v6M2 10l10-5 10 5-10 5z"/><path d="M6 12v5c3 3 9 3 12 0v-5"/><circle cx="12" cy="22" r="0.5"/>',
     // lucide "certificate" — funded-certificaten admin.
     'funded-certificates-admin': '<rect x="3" y="4" width="18" height="14" rx="2"/><circle cx="12" cy="11" r="3"/><path d="M9 21l3-3 3 3"/>',
     // lucide "users-cog" — Mentoren beheer (consolidatie van 3 admin-modules).
@@ -105,6 +107,9 @@
           // maar de sidebar toont alleen nog dit ene item. Zichtbaarheid: zodra de
           // user minstens één van de drie rechten heeft (zie applyModuleGating).
           navLink('mentoren-beheer', '/modules/mentoren-beheer.html', 'Mentoren beheer') +
+          // A1 — Alle studenten org-breed (super_admin + manager). Page-gate
+          // blijft op de directe URL actief; sidebar verbergt voor andere rollen.
+          navLink('students-overview', '/modules/students-overview.html', 'Alle studenten') +
           // Onboarding (F0 admin-dashboard, sinds Hub-merge Fase 1 op /modules/onboarding-hub.html).
           // /modules/onboarding.html blijft de klant-facing wizard (token-link); de hub krijgt
           // een eigen URL zodat bestaande onboarding-uitnodigingen niet breken. Gegate op
@@ -478,6 +483,8 @@
     // Payout fase 1 — finance/strateeg-tool. mentor.payout.manage (manager+).
     // Page-gate blijft op de directe URL actief (defense-in-depth).
     'mentor-payouts-admin': 'mentor.payout.manage',
+    // A1 — Alle studenten overzicht (manager via 016; super_admin via '*').
+    'students-overview': 'students.all.view',
     // Funded-certificaten admin (alle €100-claims + downloads). Page-gate
     // blijft op de directe URL actief.
     'funded-certificates-admin': 'mentor.funded.admin',
