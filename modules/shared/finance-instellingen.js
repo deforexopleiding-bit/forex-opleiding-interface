@@ -1976,6 +1976,13 @@
     { key: 'attendee.telefoon',   label: 'Telefoon',       category: 'attendee', example: '+31 6 12345678' },
     { key: 'attendee.keuze_link',      label: 'Keuze-link',      category: 'attendee', example: 'https://forex-opleiding-interface.vercel.app/modules/event-keuze.html?t=...' },
     { key: 'attendee.vragenlijst_link', label: 'Vragenlijst-link', category: 'attendee', example: 'https://forex-opleiding-interface.vercel.app/modules/assessment.html?t=...' },
+    // onboarding — server-side resolved op basis van meest recente onboardings-rij
+    // voor de klant (server doet de DB-lookup; preview toont placeholder).
+    { key: 'onboarding.persoonlijke_link', label: 'Persoonlijke onboarding-link', category: 'onboarding', example: 'https://forex-opleiding-interface.vercel.app/modules/onboarding.html?t=...' },
+    { key: 'onboarding.startdatum',        label: 'Startdatum',                    category: 'onboarding', example: '20-06-2026' },
+    { key: 'onboarding.traject',           label: 'Traject',                       category: 'onboarding', example: 'Forex Masterclass 1-op-1' },
+    { key: 'onboarding.mentor',            label: 'Toegewezen mentor',             category: 'onboarding', example: 'Dave de Jong' },
+    { key: 'onboarding.status',            label: 'Onboarding-status',             category: 'onboarding', example: 'aangemeld' },
     // datum
     { key: 'datum.vandaag',     label: 'Datum vandaag', category: 'datum', example: '09-06-2026' },
     { key: 'datum.deze_maand',  label: 'Deze maand',    category: 'datum', example: 'juni 2026' },
@@ -1983,20 +1990,21 @@
   ];
 
   const WA_VAR_CATEGORY_LABELS = {
-    customer: 'Klantgegevens',
-    invoice:  'Factuur',
-    klant:    'Klant (aggregaties)',
-    afdeling: 'Afdeling (contact-info)',
-    bedrijf:  'Bedrijfsgegevens',
-    event:    'Event',
-    attendee: 'Deelnemer',
-    datum:    'Datum',
+    customer:   'Klantgegevens',
+    invoice:    'Factuur',
+    klant:      'Klant (aggregaties)',
+    afdeling:   'Afdeling (contact-info)',
+    bedrijf:    'Bedrijfsgegevens',
+    event:      'Event',
+    attendee:   'Deelnemer',
+    onboarding: 'Onboarding',
+    datum:      'Datum',
   };
   // Voorkeursvolgorde voor bekende categorieën. Onbekende categorieën uit
   // WA_VAR_REGISTRY worden bij render automatisch achter de bekende geplakt
   // (in volgorde van eerste verschijning), zodat toekomstige categorieën
   // direct in de picker verschijnen zonder code-wijziging.
-  const WA_VAR_CATEGORY_ORDER = ['customer', 'invoice', 'klant', 'afdeling', 'bedrijf', 'event', 'attendee', 'datum'];
+  const WA_VAR_CATEGORY_ORDER = ['customer', 'invoice', 'klant', 'afdeling', 'bedrijf', 'event', 'attendee', 'onboarding', 'datum'];
   // Groep-structuur (afdelings-koppen) boven de categorie-secties. Elke
   // groep heeft een title (NL-label, getoond als kop) en categories[]
   // (welke categorie-keys eronder vallen). Een categorie die in geen groep
@@ -2006,6 +2014,7 @@
   const WA_VAR_CATEGORY_GROUPS = [
     { title: 'Klant & facturatie', categories: ['customer', 'invoice', 'klant'] },
     { title: 'Events',             categories: ['event', 'attendee'] },
+    { title: 'Onboarding',         categories: ['onboarding'] },
     { title: 'Algemeen',           categories: ['afdeling', 'bedrijf', 'datum'] },
   ];
   const WA_VAR_GROUPS_FALLBACK_TITLE = 'Overig';
