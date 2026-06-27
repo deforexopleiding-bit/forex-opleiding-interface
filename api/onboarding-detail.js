@@ -38,6 +38,26 @@ function findWaiverConsentKey(structure) {
   return null;
 }
 
+// Berekent bedenktijd-status. waiver={agreed,at}|null, offerteOp=iso|null.
+// Vervallen bij: (a) afstand-waiver, of (b) offerte+14d verstreken.
+// Read-time pure functie — geen DB, geen cron; alle callers krijgen
+// dezelfde shape.
+function computeBedenktijd(waiver, offerteOp) {
+  let vervaltOp = null;
+  if (offerteOp) {
+    const d = new Date(offerteOp);
+    if (!isNaN(d)) { d.setDate(d.getDate() + 14); vervaltOp = d.toISOString(); }
+  }
+  const waived = waiver && waiver.agreed === true;
+  if (waived)
+    return { status:'vervallen', reason:'afstand',    waived_at:(waiver.at||null), offerte_op:offerteOp, vervalt_op:vervaltOp };
+  if (vervaltOp && Date.now() > new Date(vervaltOp).getTime())
+    return { status:'vervallen', reason:'verstreken', waived_at:null,              offerte_op:offerteOp, vervalt_op:vervaltOp };
+  if (vervaltOp)
+    return { status:'lopend',    reason:null,         waived_at:null,              offerte_op:offerteOp, vervalt_op:vervaltOp };
+  return   { status:'onbekend',  reason:null,         waived_at:(waived?waiver.at:null), offerte_op:null,  vervalt_op:null };
+}
+
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
   res.setHeader('Content-Type', 'application/json');
@@ -146,6 +166,27 @@ export default async function handler(req, res) {
       console.warn('[onboarding-detail] wizard config exception:', e?.message || e);
     }
 
+    // Bedenktijd (trigger b): meest recente getekende/geaccepteerde offerte
+    // van deze klant. signed_at wint van accepted_at als beide gevuld zijn.
+    // Geen deal of geen accepted_at → offerteOp blijft null → bedenktijd
+    // status 'onbekend' (tenzij waiver al gezet → 'vervallen/afstand').
+    let offerteOp = null;
+    if (row.customer_id) {
+      try {
+        const { data: dl } = await supabaseAdmin
+          .from('deals')
+          .select('tl_quotation_accepted_at, tl_quotation_signed_at')
+          .eq('customer_id', row.customer_id)
+          .not('tl_quotation_accepted_at', 'is', null)
+          .order('tl_quotation_accepted_at', { ascending: false })
+          .limit(1).maybeSingle();
+        if (dl) offerteOp = dl.tl_quotation_signed_at || dl.tl_quotation_accepted_at || null;
+      } catch (e) {
+        console.warn('[onboarding-detail] offerte fetch:', e?.message || e);
+      }
+    }
+    const bedenktijd = computeBedenktijd(waiver, offerteOp);
+
     const t = row.traject || null;
     return res.status(200).json({
       ok: true,
@@ -165,6 +206,7 @@ export default async function handler(req, res) {
         answers        : row.answers || null,
         paid,
         waiver,
+        bedenktijd,
         availability,
         token          : row.token,
         started_at     : row.started_at,
