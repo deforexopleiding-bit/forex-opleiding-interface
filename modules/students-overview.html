@@ -91,6 +91,13 @@
     .ap-toel { font-size:11.5px; color:var(--text-dim); margin-top:2px; }
     .ap-contact a { color:var(--brand-primary,#093d54); text-decoration:none; margin-right:6px; }
     .ap-contact a:hover { text-decoration:underline; }
+    /* F2 — Archief */
+    .so-archive-btn { padding:4px 8px; font-size:11.5px; font-weight:600; border:1px solid var(--border); border-radius:6px; background:var(--bg); color:var(--text-dim); cursor:pointer; font-family:inherit; }
+    .so-archive-btn:not(:disabled):hover { background:var(--bg-elev); color:#991b1b; border-color:#991b1b; }
+    .so-archive-btn:disabled { cursor:not-allowed; opacity:0.5; }
+    .so-restore-btn { padding:4px 10px; font-size:11.5px; font-weight:600; border:1px solid var(--border); border-radius:6px; background:var(--bg); color:var(--brand-primary,#093d54); cursor:pointer; font-family:inherit; display:inline-flex; align-items:center; gap:4px; }
+    .so-restore-btn:not(:disabled):hover { background:rgba(9,61,84,0.08); }
+    .so-restore-btn:disabled { cursor:not-allowed; opacity:0.5; }
   </style>
 </head>
 <body>
@@ -106,10 +113,11 @@
       </div>
     </div>
 
-    <!-- B2 — Tab-switcher (Studenten | Aandachtspunten) -->
+    <!-- B2 + F2 — Tab-switcher (Studenten | Aandachtspunten | Archief) -->
     <div class="so-tabs" id="soTabs">
       <button type="button" class="so-tab active" data-pane="students"><i class="ti ti-users"></i> Studenten</button>
       <button type="button" class="so-tab" data-pane="signals"><i class="ti ti-flag"></i> Aandachtspunten <span class="so-tab-count" id="soTabSignalsCount" style="display:none">0</span></button>
+      <button type="button" class="so-tab" data-pane="archive"><i class="ti ti-archive"></i> Archief <span class="so-tab-count" id="soTabArchiveCount" style="background:var(--bg-elev);color:var(--text-dim);border:1px solid var(--border);display:none">0</span></button>
     </div>
 
     <!-- Pane: Studenten -->
@@ -156,12 +164,38 @@
           </tr>
         </thead>
         <tbody id="soTbody">
-          <tr><td colspan="8" class="so-empty">Studenten laden…</td></tr>
+          <tr><td colspan="9" class="so-empty">Studenten laden…</td></tr>
         </tbody>
       </table>
     </div>
 
     </div><!-- /Pane: Studenten -->
+
+    <!-- Pane: Archief (F2) -->
+    <div class="so-pane" id="soPaneArchive">
+      <div class="so-status-strip">
+        <span id="arCountInfo"></span>
+      </div>
+      <div class="so-table-wrap">
+        <table class="so-table">
+          <thead>
+            <tr id="arThead">
+              <th>Naam</th>
+              <th>E-mail</th>
+              <th>Programma</th>
+              <th>Mentor</th>
+              <th>Beoordeling</th>
+              <th>No-shows</th>
+              <th>Te late facturen</th>
+              <th>Actie</th>
+            </tr>
+          </thead>
+          <tbody id="arTbody">
+            <tr><td colspan="8" class="so-empty">Archief laden…</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
 
     <!-- Pane: Aandachtspunten -->
     <div class="so-pane" id="soPaneSignals">
@@ -274,8 +308,10 @@
 'use strict';
 
 const state = {
-  rows : [],          // alle studenten (raw uit endpoint)
-  view : [],          // gefilterd + gesorteerd
+  rowsAll : [],       // alle studenten (raw uit endpoint, incl. archived)
+  rows : [],          // actieve studenten (archived !== true) — voor Studenten-tab
+  view : [],          // gefilterd + gesorteerd (actieve set)
+  archiveRows : [],   // archived === true — voor Archief-tab
   sort : { key: 'name', dir: 'asc' },
   toggles : { overdue:false, open:false, noshow:false, noment:false },
   // A2 — Mentor (her)toewijzen
@@ -297,6 +333,9 @@ const state = {
   canAssessHistory : false,     // RBAC.canSync('students.all.view')
   ahCache          : new Map(), // bubble_student_id -> { history } cache
   ahCurrentSid     : null,      // huidige open student in modal
+  // F2 — Archief
+  canArchive       : false,     // RBAC.canSync('students.all.view')
+  archiveBusy      : new Set(), // bubble_student_id-set, voorkomt dubbele klikken
 };
 
 function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
@@ -400,8 +439,9 @@ function applySort() {
 
 function renderTable() {
   const tbody = document.getElementById('soTbody');
+  const cols = state.canArchive ? 9 : 8;
   if (state.view.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="8" class="so-empty">Geen studenten gevonden met deze filters.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="' + cols + '" class="so-empty">Geen studenten gevonden met deze filters.</td></tr>';
     updateSortIndicators();
     return;
   }
@@ -422,6 +462,9 @@ function renderTable() {
       '<td>' + renderAssessCell(r, assess) + '</td>' +
       '<td>' + (noShows > 0 ? '<span class="so-noshow">' + noShows + '</span>' : noShows) + '</td>' +
       '<td>' + (overdue > 0 ? '<span class="so-overdue">' + overdue + '</span>' : '0') + '</td>' +
+      (state.canArchive
+        ? ('<td><button type="button" class="so-archive-btn" data-row-idx="' + r._viewIdx + '" title="Archiveren"><i class="ti ti-archive"></i></button></td>')
+        : '') +
       '</tr>';
   }).join('');
   // Click → open student (negeer kliks op de Wijzig-knop én op de history-trigger)
@@ -429,9 +472,21 @@ function renderTable() {
     tr.addEventListener('click', (ev) => {
       if (ev.target.closest('.so-mentor-edit'))    return;
       if (ev.target.closest('.so-assess-history')) return;
+      if (ev.target.closest('.so-archive-btn'))    return;
       window.location.href = tr.dataset.href;
     });
   });
+  // Wire de Archiveer-knoppen (alleen voor admins).
+  if (state.canArchive) {
+    tbody.querySelectorAll('.so-archive-btn[data-row-idx]').forEach((btn) => {
+      btn.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        const idx = Number(btn.dataset.rowIdx);
+        const row = state.view[idx];
+        if (row) postArchive(row, 'archive');
+      });
+    });
+  }
   // Wire de Beoordelings-historie-triggers (alleen voor admins).
   if (state.canAssessHistory) {
     tbody.querySelectorAll('.so-assess-history[data-row-idx]').forEach((el) => {
@@ -651,10 +706,14 @@ async function loadData() {
     const r = await window.AgentShared.apiFetch('/api/students-overview');
     const d = await r.json();
     if (!r.ok) throw new Error(d?.error || 'students fetch failed');
-    state.rows = Array.isArray(d?.students) ? d.students : [];
+    state.rowsAll     = Array.isArray(d?.students) ? d.students : [];
+    state.rows        = state.rowsAll.filter((r) => r && r.archived !== true);
+    state.archiveRows = state.rowsAll.filter((r) => r && r.archived === true);
     renderKPIs();
     populateFilters();
     applyFilters();
+    renderArchiveTable();
+    updateArchiveTabCount();
   } catch (e) {
     console.error('[students-overview]', e?.message || e);
     tbody.innerHTML = '<tr><td colspan="8" class="so-error">Laden mislukt: ' + esc(e?.message || e) + '</td></tr>';
@@ -717,6 +776,8 @@ async function loadData() {
     state.canAssessHistory = !!(window.RBAC?.canSync && window.RBAC.canSync('students.all.view'));
   } catch (e) { state.canAssessHistory = false; }
   if (state.canAssessHistory) wireAssessHistoryHandlers();
+  // F2 — Archief-acties (zelfde gate als history; server-side enforced).
+  state.canArchive = state.canAssessHistory;
 
   loadData();
 })();
@@ -849,6 +910,93 @@ function switchPane(p) {
     el.classList.toggle('active', el.id === ('soPane' + p[0].toUpperCase() + p.slice(1)));
   });
 }
+
+/* ── F2 — Archief tab ──────────────────────────────────────────────────── */
+function updateArchiveTabCount() {
+  const el = document.getElementById('soTabArchiveCount');
+  if (!el) return;
+  const n = Array.isArray(state.archiveRows) ? state.archiveRows.length : 0;
+  if (n > 0) { el.textContent = String(n); el.style.display = ''; }
+  else       { el.style.display = 'none'; }
+}
+
+function renderArchiveTable() {
+  const tbody = document.getElementById('arTbody');
+  if (!tbody) return;
+  const info = document.getElementById('arCountInfo');
+  const list = Array.isArray(state.archiveRows) ? state.archiveRows : [];
+  if (info) info.textContent = list.length + ' gearchiveerd';
+  if (list.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="8" class="so-empty">Geen gearchiveerde studenten.</td></tr>';
+    return;
+  }
+  // Sort op naam — geen sortable headers nodig; archief is een eindlijst.
+  const sorted = list.slice().sort((a, b) => lc(a.name).localeCompare(lc(b.name)));
+  tbody.innerHTML = sorted.map((r, idx) => {
+    const assess  = r.assessment_status || 'open';
+    const noShows = Number(r.no_shows) || 0;
+    const overdue = Number(r.overdue_count) || 0;
+    const programCell = r.program ? ('<span class="so-prog">' + esc(r.program) + '</span>') : '—';
+    const mentorCell  = r.mentor_name ? esc(r.mentor_name) : '<span class="so-mentor-none">geen mentor</span>';
+    const actionCell  = state.canArchive
+      ? ('<button type="button" class="so-restore-btn" data-ar-idx="' + idx + '" title="Terugzetten"><i class="ti ti-arrow-back-up"></i> Terugzetten</button>')
+      : '—';
+    return '<tr>' +
+      '<td><div class="so-name">' + esc(r.name || '—') + '</div></td>' +
+      '<td><div class="so-email">' + esc(r.email || '—') + '</div></td>' +
+      '<td>' + programCell + '</td>' +
+      '<td>' + mentorCell + '</td>' +
+      '<td><span class="so-badge ' + esc(assess) + '">' + esc(assessLabel(assess)) + '</span></td>' +
+      '<td>' + (noShows > 0 ? '<span class="so-noshow">' + noShows + '</span>' : noShows) + '</td>' +
+      '<td>' + (overdue > 0 ? '<span class="so-overdue">' + overdue + '</span>' : '0') + '</td>' +
+      '<td>' + actionCell + '</td>' +
+      '</tr>';
+  }).join('');
+  if (state.canArchive) {
+    tbody.querySelectorAll('.so-restore-btn[data-ar-idx]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const idx = Number(btn.dataset.arIdx);
+        const r = sorted[idx];
+        if (r) postArchive(r, 'restore');
+      });
+    });
+  }
+}
+
+async function postArchive(row, action) {
+  if (!row || !row.bubble_student_id) return;
+  const sid = row.bubble_student_id;
+  if (state.archiveBusy.has(sid)) return;
+  state.archiveBusy.add(sid);
+  try {
+    const r = await window.AgentShared.apiFetch('/api/student-archive', {
+      method  : 'POST',
+      headers : { 'Content-Type': 'application/json' },
+      body    : JSON.stringify({ bubble_student_id: sid, action: action }),
+    });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) {
+      showToast('err', d?.error || ('Fout: HTTP ' + r.status));
+      return;
+    }
+    // Lokale state update: zet archived-flag in rowsAll en hersplits.
+    const raw = state.rowsAll.find((x) => x && x.bubble_student_id === sid);
+    if (raw) raw.archived = (action === 'archive');
+    state.rows        = state.rowsAll.filter((x) => x && x.archived !== true);
+    state.archiveRows = state.rowsAll.filter((x) => x && x.archived === true);
+    renderKPIs();
+    populateFilters();
+    applyFilters();
+    renderArchiveTable();
+    updateArchiveTabCount();
+    showToast('ok', action === 'archive' ? 'Student gearchiveerd' : 'Student teruggezet');
+  } catch (e) {
+    showToast('err', e?.message || 'Onbekende fout');
+  } finally {
+    state.archiveBusy.delete(sid);
+  }
+}
+// showToast() bestaat al elders in dit file (reassign-flow) en hergebruikt #soToast.
 
 /* ── B2 — Aandachtspunten: load + render + handle ──────────────────────── */
 async function loadSignals() {

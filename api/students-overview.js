@@ -213,6 +213,7 @@ export default async function handler(req, res) {
         no_shows           : s.no_shows,
         assessment_status  : assess,
         overdue_count      : overdue,
+        archived           : !!s.archived,
       };
     });
 
