@@ -50,6 +50,29 @@
     .so-empty, .so-error { padding: 28px 14px; text-align:center; color: var(--text-dim); font-size: 13px; }
     .so-skel { display:inline-block; width:50px; height:10px; border-radius:5px; background:linear-gradient(90deg, var(--bg) 25%, var(--bg-elev) 50%, var(--bg) 75%); background-size: 200% 100%; animation: so-skel 1.2s infinite; }
     @keyframes so-skel { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+
+    /* A2 — Mentor (her)toewijzen */
+    .so-mentor-edit { margin-left:6px; padding:0; border:none; background:transparent; color:var(--text-dim); cursor:pointer; font-size:11.5px; vertical-align:middle; }
+    .so-mentor-edit:not(:disabled):hover { color:var(--brand-primary,#093d54); }
+    .so-mentor-edit:disabled { cursor:not-allowed; opacity:0.5; }
+    .so-toast { position:fixed; right:18px; bottom:18px; padding:10px 14px; border-radius:8px; font-size:12.5px; font-weight:600; color:#fff; z-index:1001; box-shadow:0 4px 12px rgba(0,0,0,0.18); pointer-events:none; opacity:0; transform:translateY(8px); transition:opacity 180ms ease, transform 180ms ease; }
+    .so-toast.show  { opacity:1; transform:translateY(0); pointer-events:auto; }
+    .so-toast.ok    { background:#15803d; }
+    .so-toast.err   { background:#991b1b; }
+    /* Modal */
+    .so-mb { position:fixed; inset:0; background:rgba(0,0,0,0.45); display:none; align-items:center; justify-content:center; z-index:1000; }
+    .so-mb.show { display:flex; }
+    .so-mw { background:var(--bg-elev); border:1px solid var(--border); border-radius:10px; width: min(420px, 92vw); box-shadow:0 12px 36px rgba(0,0,0,0.24); }
+    .so-mh { padding:12px 14px; border-bottom:1px solid var(--border); display:flex; align-items:center; justify-content:space-between; }
+    .so-mh-title { font-size:13.5px; font-weight:700; color:var(--text); display:flex; align-items:center; gap:6px; }
+    .so-mh-close { background:transparent; border:none; cursor:pointer; color:var(--text-dim); font-size:18px; }
+    .so-mc { padding:14px; }
+    .so-mc label { display:block; font-size:11.5px; font-weight:600; color:var(--text-dim); margin-bottom:4px; }
+    .so-mc select { width:100%; padding:7px 9px; border:1px solid var(--border); border-radius:7px; background:var(--bg); font-family:inherit; font-size:13px; color:var(--text); }
+    .so-mc .so-mc-hint { font-size:11px; color:var(--text-dim); margin-top:6px; }
+    .so-mc .so-mc-err { font-size:12px; color:#991b1b; margin-top:8px; display:none; }
+    .so-mc .so-mc-err.show { display:block; }
+    .so-mf { padding:10px 14px; border-top:1px solid var(--border); display:flex; justify-content:flex-end; gap:8px; }
   </style>
 </head>
 <body>
@@ -111,6 +134,28 @@
   </div>
 </div>
 
+<!-- A2 — Mentor (her)toewijzen modal + toast -->
+<div id="soMb" class="so-mb" role="dialog" aria-modal="true" aria-labelledby="soMbTitle">
+  <div class="so-mw">
+    <div class="so-mh">
+      <div class="so-mh-title" id="soMbTitle"><i class="ti ti-user-edit"></i> Mentor (her)toewijzen</div>
+      <button type="button" class="so-mh-close" id="soMbClose" aria-label="Sluiten">×</button>
+    </div>
+    <div class="so-mc">
+      <div id="soMbStudent" style="font-size:12.5px;color:var(--text-dim);margin-bottom:8px"></div>
+      <label for="soMbSelect">Mentor</label>
+      <select id="soMbSelect"></select>
+      <div class="so-mc-hint">Kies "Ontkoppelen" om de mentor weg te halen.</div>
+      <div class="so-mc-err" id="soMbErr"></div>
+    </div>
+    <div class="so-mf">
+      <button type="button" class="so-btn" id="soMbCancel">Annuleren</button>
+      <button type="button" class="so-btn primary" id="soMbSave"><i class="ti ti-check"></i> Opslaan</button>
+    </div>
+  </div>
+</div>
+<div id="soToast" class="so-toast"></div>
+
 <script src="/modules/shared/supabase-client.js"></script>
 <script src="/modules/shared/agent-shared.js"></script>
 <script src="/modules/shared/permissions.js"></script>
@@ -123,6 +168,13 @@ const state = {
   view : [],          // gefilterd + gesorteerd
   sort : { key: 'name', dir: 'asc' },
   toggles : { overdue:false, open:false, noshow:false, noment:false },
+  // A2 — Mentor (her)toewijzen
+  canAssign       : false,      // RBAC.canSync('onboarding.assign_mentor')
+  mentors         : [],         // [{ user_id, name, email, team_member_id }]
+  mentorsLoaded   : false,      // true zodra de fetch klaar is (succes of fout)
+  mentorsLoadFail : false,      // true bij fetch-fout → control disabled met hint
+  pickerRow       : null,       // huidige rij die in de picker zit
+  pickerBusy      : false,      // true tijdens POST
 };
 
 function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
@@ -219,7 +271,8 @@ function renderTable() {
     updateSortIndicators();
     return;
   }
-  tbody.innerHTML = state.view.map((r) => {
+  tbody.innerHTML = state.view.map((r, i) => {
+    r._viewIdx = i; // gebruikt door renderMentorCell voor de Wijzig-knop-wireup
     const href = '/modules/mentor-dashboard.html#student=' + encodeURIComponent(r.bubble_student_id || '');
     const callsTotal = Number(r.calls_1on1_total) || 0;
     const callsDone  = Number(r.calls_1on1_done)  || 0;
@@ -230,18 +283,164 @@ function renderTable() {
       '<td><div class="so-name">' + esc(r.name || '—') + '</div></td>' +
       '<td><div class="so-email">' + esc(r.email || '—') + '</div></td>' +
       '<td>' + (r.program ? '<span class="so-prog">' + esc(r.program) + '</span>' : '—') + '</td>' +
-      '<td>' + (r.mentor_name ? esc(r.mentor_name) : '<span class="so-mentor-none">geen mentor</span>') + '</td>' +
+      '<td>' + renderMentorCell(r) + '</td>' +
       '<td>' + (callsTotal > 0 ? (callsDone + '/' + callsTotal) : '—') + '</td>' +
       '<td><span class="so-badge ' + esc(assess) + '">' + esc(assessLabel(assess)) + '</span></td>' +
       '<td>' + (noShows > 0 ? '<span class="so-noshow">' + noShows + '</span>' : noShows) + '</td>' +
       '<td>' + (overdue > 0 ? '<span class="so-overdue">' + overdue + '</span>' : '0') + '</td>' +
       '</tr>';
   }).join('');
-  // Click → open student
+  // Click → open student (negeer kliks op de Wijzig-knop)
   tbody.querySelectorAll('tr[data-href]').forEach((tr) => {
-    tr.addEventListener('click', () => { window.location.href = tr.dataset.href; });
+    tr.addEventListener('click', (ev) => {
+      if (ev.target.closest('.so-mentor-edit')) return;
+      window.location.href = tr.dataset.href;
+    });
+  });
+  // Wire de Wijzig-knoppen
+  tbody.querySelectorAll('.so-mentor-edit[data-row-idx]').forEach((btn) => {
+    btn.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      const idx = Number(btn.dataset.rowIdx);
+      const row = state.view[idx];
+      if (!row || btn.disabled) return;
+      openAssignPicker(row);
+    });
   });
   updateSortIndicators();
+}
+
+/* ── A2 — Mentor cell + (her)toewijzen ──────────────────────────────────── */
+function renderMentorCell(r) {
+  // state.view-index voor wire-up zonder DOM-traversal. renderTable loopt
+  // sequentieel — gebruik counter via state.view.indexOf(r) is O(n²); plak
+  // 'm liever in state.view._idx tijdens de map. Hier doen we 'm cheap via
+  // een marker in r._viewIdx (gezet in renderTable hieronder).
+  const idx = r._viewIdx;
+  const nameHtml = r.mentor_name
+    ? esc(r.mentor_name)
+    : '<span class="so-mentor-none">geen mentor</span>';
+  if (!state.canAssign) return nameHtml;
+  let disabled = false, reason = '';
+  if (!r.onboarding_id) { disabled = true; reason = 'Geen onboarding-record'; }
+  else if (state.mentorsLoadFail) { disabled = true; reason = 'Mentorenlijst niet beschikbaar'; }
+  else if (!state.mentorsLoaded)  { disabled = true; reason = 'Mentorenlijst laden…'; }
+  else if (state.mentors.length === 0) { disabled = true; reason = 'Geen actieve mentoren'; }
+  const btn = '<button type="button" class="so-mentor-edit"'
+    + ' data-row-idx="' + idx + '"'
+    + ' title="' + esc(disabled ? reason : 'Mentor (her)toewijzen') + '"'
+    + (disabled ? ' disabled' : '')
+    + '><i class="ti ti-edit"></i></button>';
+  return nameHtml + btn;
+}
+
+async function loadMentors() {
+  state.mentorsLoaded   = false;
+  state.mentorsLoadFail = false;
+  try {
+    const r = await window.AgentShared.apiFetch('/api/mentor-admin-list');
+    const d = await r.json();
+    if (!r.ok) throw new Error(d?.error || 'mentors fetch failed');
+    // Alleen mentoren met team_member_id zijn assignable (assign-endpoint
+    // vereist team_members.type='mentor' & is_active=true op user_id).
+    state.mentors = (Array.isArray(d?.mentors) ? d.mentors : [])
+      .filter((m) => m && m.user_id && m.team_member_id)
+      .map((m) => ({
+        user_id        : m.user_id,
+        name           : m.name || m.email || '(naamloos)',
+        email          : m.email || '',
+        team_member_id : m.team_member_id,
+      }));
+  } catch (e) {
+    console.warn('[students-overview] mentors:', e?.message || e);
+    state.mentors = [];
+    state.mentorsLoadFail = true;
+  }
+  state.mentorsLoaded = true;
+  // Herrender om Wijzig-knop disabled-states te updaten — alleen als de
+  // tabel al gerenderd is.
+  if (state.rows.length) renderTable();
+}
+
+/* Modal handling */
+function showToast(kind, text) {
+  const el = document.getElementById('soToast');
+  el.classList.remove('ok','err');
+  el.classList.add(kind);
+  el.textContent = text;
+  el.classList.add('show');
+  setTimeout(() => el.classList.remove('show'), 2400);
+}
+function openAssignPicker(row) {
+  state.pickerRow = row;
+  state.pickerBusy = false;
+  document.getElementById('soMbStudent').textContent =
+    (row.name || row.email || '—') + (row.email ? ' · ' + row.email : '');
+  const sel = document.getElementById('soMbSelect');
+  const current = row.mentor_user_id || '';
+  const options = ['<option value="">— Ontkoppelen (geen mentor) —</option>']
+    .concat(state.mentors
+      .slice()
+      .sort((a, b) => (a.name || '').localeCompare(b.name || ''))
+      .map((m) => '<option value="' + esc(m.user_id) + '"'
+        + (m.user_id === current ? ' selected' : '')
+        + '>' + esc(m.name) + '</option>'));
+  sel.innerHTML = options.join('');
+  // Voorkeur: huidige mentor is automatisch geselecteerd; bij 'geen mentor'
+  // landt de browser op de eerste option (Ontkoppelen).
+  const err = document.getElementById('soMbErr');
+  err.classList.remove('show');
+  err.textContent = '';
+  document.getElementById('soMb').classList.add('show');
+}
+function closeAssignPicker() {
+  document.getElementById('soMb').classList.remove('show');
+  state.pickerRow = null;
+}
+function showPickerError(msg) {
+  const err = document.getElementById('soMbErr');
+  err.textContent = msg;
+  err.classList.add('show');
+}
+async function saveAssignment() {
+  if (state.pickerBusy || !state.pickerRow) return;
+  const row = state.pickerRow;
+  if (!row.onboarding_id) { showPickerError('Geen onboarding-record voor deze student'); return; }
+  const sel = document.getElementById('soMbSelect');
+  const newUid = sel.value || null;
+  state.pickerBusy = true;
+  const saveBtn = document.getElementById('soMbSave');
+  saveBtn.disabled = true;
+  try {
+    const r = await window.AgentShared.apiFetch('/api/onboarding-assign-mentor', {
+      method  : 'POST',
+      headers : { 'Content-Type': 'application/json' },
+      body    : JSON.stringify({ onboarding_id: row.onboarding_id, mentor_user_id: newUid }),
+    });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) {
+      let msg = d?.error || ('Fout: HTTP ' + r.status);
+      if (r.status === 409) msg = d?.error || 'Onboarding is gearchiveerd';
+      if (r.status === 400) msg = d?.error || 'Ongeldige invoer';
+      if (r.status === 403) msg = d?.error || 'Geen rechten';
+      showPickerError(msg);
+      return;
+    }
+    // Success: update local state.
+    const newMentor = newUid ? state.mentors.find((m) => m.user_id === newUid) : null;
+    row.mentor_user_id = newUid || null;
+    row.mentor_name    = newMentor ? newMentor.name : null;
+    renderKPIs();
+    populateFilters();        // mentor-set kan veranderd zijn (alleen relevant bij ontkoppel-uniek)
+    applyFilters();           // her-render tabel + sort
+    closeAssignPicker();
+    showToast('ok', newUid ? 'Mentor opgeslagen' : 'Mentor ontkoppeld');
+  } catch (e) {
+    showPickerError(e?.message || 'Onbekende fout');
+  } finally {
+    state.pickerBusy = false;
+    saveBtn.disabled = false;
+  }
 }
 
 function updateSortIndicators() {
@@ -339,6 +538,27 @@ async function loadData() {
   wireFilters();
   document.getElementById('soExportBtn').addEventListener('click', exportCsv);
   document.getElementById('soReloadBtn').addEventListener('click', loadData);
+
+  // A2 — Mentor (her)toewijzen wiring. UI-gate op onboarding.assign_mentor;
+  // server-side blijft autoritatief op /api/onboarding-assign-mentor.
+  try {
+    state.canAssign = !!(window.RBAC?.canSync && window.RBAC.canSync('onboarding.assign_mentor'));
+  } catch (e) { state.canAssign = false; }
+  if (state.canAssign) {
+    loadMentors(); // fail-soft; herrendert tabel als rows al binnen zijn
+    document.getElementById('soMbClose').addEventListener('click', closeAssignPicker);
+    document.getElementById('soMbCancel').addEventListener('click', closeAssignPicker);
+    document.getElementById('soMbSave').addEventListener('click', saveAssignment);
+    document.getElementById('soMb').addEventListener('click', (ev) => {
+      if (ev.target === ev.currentTarget) closeAssignPicker(); // backdrop-click
+    });
+    document.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Escape' && document.getElementById('soMb').classList.contains('show')) {
+        closeAssignPicker();
+      }
+    });
+  }
+
   loadData();
 })();
 </script>
