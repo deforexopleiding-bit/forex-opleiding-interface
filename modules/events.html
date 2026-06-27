@@ -5178,7 +5178,7 @@ function _siRenderRows(rows) {
     return;
   }
   list.innerHTML = '<div class="sr-tablewrap"><table class="sr-table">'
-    + '<thead><tr><th>Naam</th><th>Email / Telefoon</th><th>Event-label</th><th>Status</th><th>Ontvangen</th><th style="text-align:right">Actie</th></tr></thead>'
+    + '<thead><tr><th>Naam</th><th>Email / Telefoon</th><th>Event-label</th><th>Status</th><th>Vragenlijst</th><th>Ingevuld op</th><th>Ontvangen</th><th style="text-align:right">Actie</th></tr></thead>'
     + '<tbody>'
     + rows.map((r) => {
         const naam   = [r.first_name, r.last_name].filter(Boolean).join(' ').trim() || '—';
@@ -5197,26 +5197,61 @@ function _siRenderRows(rows) {
         const matchedEvt = r.matched_event
           ? '<div style="font-size:11px;color:var(--text-faint);margin-top:3px">→ ' + esc(r.matched_event.title || '?') + '</div>'
           : '';
+        // Vragenlijst-cellen: ✓ groen bij filled, ✗ rood bij niet (ook voor
+        // niet-matched rijen — die hebben simpelweg geen attendee).
+        const qFilled = !!r.questionnaire_filled;
+        const questionnaireCell = qFilled
+          ? '<span title="Vragenlijst ingevuld" style="display:inline-flex;align-items:center;gap:3px;color:#059669;font-weight:700;font-size:12px"><i class="ti ti-check"></i> ✓</span>'
+          : '<span title="Geen vragenlijst" style="display:inline-flex;align-items:center;gap:3px;color:var(--text-faint);font-size:12px"><i class="ti ti-x"></i> ✗</span>';
+        const filledAtCell = qFilled
+          ? '<span style="font-size:11.5px;color:var(--text-dim)">' + esc(fmtDate(r.questionnaire_filled_at)) + '</span>'
+          : '<span style="color:var(--text-faint);font-size:11.5px">—</span>';
+
         const isActionable = r.match_status === 'no_match' || r.match_status === 'ambiguous' || r.match_status === 'invalid_payload';
+        const isMatched    = !!r.matched_event_id;
         const actionCell = isActionable
           ? '<button class="sr-iconbtn" data-resolve-id="' + esc(r.id) + '" title="Koppel aan event"><i class="ti ti-link"></i> Koppel</button>'
-          : '<span style="font-size:11px;color:var(--text-faint)">read-only</span>';
-        return '<tr>'
+          : (isMatched
+              ? '<span class="sr-iconbtn" data-nav-id="' + esc(r.id) + '" style="display:inline-flex;align-items:center;gap:4px;color:var(--accent-cyan,#2563eb);font-weight:600;font-size:11.5px"><i class="ti ti-arrow-right"></i> Aanwezigen</span>'
+              : '<span style="font-size:11px;color:var(--text-faint)">read-only</span>');
+        // Klikbare matched rij → doorklik naar event-detail Aanwezigen-tab.
+        const rowAttrs = isMatched
+          ? ' class="si-row-clickable" data-nav-id="' + esc(r.id) + '" style="cursor:pointer" title="Open Aanwezigen-tab van dit event"'
+          : '';
+        return '<tr' + rowAttrs + '>'
           + '<td>' + esc(naam) + '</td>'
           + '<td>' + email + (phone ? '<div style="font-size:11.5px;color:var(--text-dim);margin-top:2px">' + phone + '</div>' : '') + '</td>'
           + '<td>' + labelCell + cands + matchedEvt + '</td>'
           + '<td>' + status + '</td>'
+          + '<td>' + questionnaireCell + '</td>'
+          + '<td>' + filledAtCell + '</td>'
           + '<td style="font-size:11.5px;color:var(--text-dim)">' + esc(fmtDate(r.received_at)) + '</td>'
           + '<td style="text-align:right">' + actionCell + '</td>'
           + '</tr>';
       }).join('')
     + '</tbody></table></div>';
   list.querySelectorAll('button[data-resolve-id]').forEach((btn) => {
-    btn.addEventListener('click', () => {
+    btn.addEventListener('click', (e) => {
+      // Klik op koppel-knop mag de matched-rij-navigatie niet triggeren
+      // (komt hier overigens niet voor — actionable rij ≠ matched — maar
+      // defensief).
+      e.stopPropagation();
       const id = btn.dataset.resolveId;
       const row = rows.find((r) => r.id === id);
       if (row) openSignupResolveModal(row);
     });
+  });
+  // Matched rij of "→ Aanwezigen"-cel → navigeer naar event-detail Aanwezigen-tab.
+  const navigateMatched = (id) => {
+    const row = rows.find((r) => r.id === id);
+    if (!row || !row.matched_event_id) return;
+    window.location.href = '/modules/events-detail.html?id=' + encodeURIComponent(row.matched_event_id) + '&tab=attendees';
+  };
+  list.querySelectorAll('tr.si-row-clickable').forEach((tr) => {
+    tr.addEventListener('click', () => navigateMatched(tr.dataset.navId));
+  });
+  list.querySelectorAll('span[data-nav-id]').forEach((sp) => {
+    sp.addEventListener('click', (e) => { e.stopPropagation(); navigateMatched(sp.dataset.navId); });
   });
 }
 

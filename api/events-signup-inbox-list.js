@@ -81,8 +81,61 @@ export default async function handler(req, res) {
     const { data: rows, error: rowErr } = await q;
     if (rowErr) throw new Error('rows fetch: ' + rowErr.message);
 
+    // ── Vragenlijst-status per matched-attendee ────────────────────────
+    // Voor elke rij met matched_attendee_id zoeken we de bijbehorende
+    // assessment_response_id en (indien aanwezig) de invuldatum. Dat zijn
+    // twee batched queries (geen N+1). Fail-soft: bij DB-fout krijgt elke
+    // rij filled=false, datum=null — geen 500.
+    const attendeeIds = Array.from(new Set(
+      (rows || []).map((r) => r.matched_attendee_id).filter(Boolean)
+    ));
+    const responseIdByAttendee = new Map();
+    const filledAtByResponse   = new Map();
+    if (attendeeIds.length > 0) {
+      try {
+        const { data: attRows, error: attErr } = await supabaseAdmin
+          .from('event_attendees')
+          .select('id, assessment_response_id')
+          .in('id', attendeeIds);
+        if (attErr) {
+          console.error('[events-signup-inbox-list attendees]', attErr.message);
+        } else {
+          for (const a of (attRows || [])) {
+            if (a && a.id) responseIdByAttendee.set(a.id, a.assessment_response_id || null);
+          }
+        }
+        const responseIds = Array.from(new Set(
+          Array.from(responseIdByAttendee.values()).filter(Boolean)
+        ));
+        if (responseIds.length > 0) {
+          const { data: respRows, error: respErr } = await supabaseAdmin
+            .from('assessment_responses')
+            .select('id, submitted_at, created_at')
+            .in('id', responseIds);
+          if (respErr) {
+            console.error('[events-signup-inbox-list responses]', respErr.message);
+          } else {
+            for (const r of (respRows || [])) {
+              if (r && r.id) filledAtByResponse.set(r.id, r.submitted_at || r.created_at || null);
+            }
+          }
+        }
+      } catch (e) {
+        console.error('[events-signup-inbox-list questionnaire-fetch]', e?.message || e);
+      }
+    }
+
+    const enriched = (rows || []).map((r) => {
+      const respId = r.matched_attendee_id ? responseIdByAttendee.get(r.matched_attendee_id) : null;
+      return {
+        ...r,
+        questionnaire_filled    : !!respId,
+        questionnaire_filled_at : respId ? (filledAtByResponse.get(respId) || null) : null,
+      };
+    });
+
     return res.status(200).json({
-      rows: rows || [],
+      rows: enriched,
       counts,
       limit,
       offset,

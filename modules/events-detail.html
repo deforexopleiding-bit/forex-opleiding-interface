@@ -2868,6 +2868,12 @@ async function init() {
     renderNotFound();
     return;
   }
+  // Optionele ?tab=… deeplink (info|attendees|audit|mentors). 'mentors'
+  // valt verderop in renderPage() terug op 'info' als event niet completed.
+  const tabParam = (params.get('tab') || '').toLowerCase();
+  if (['info', 'attendees', 'audit', 'mentors'].includes(tabParam)) {
+    state.tab = tabParam;
+  }
 
   // Skeleton tijdens eerste fetch
   document.getElementById('page-content').innerHTML = `
