@@ -13,6 +13,7 @@
   <script src="/modules/shared/supabase-client.js"></script>
   <script src="/modules/shared/agent-shared.js"></script>
   <script src="/modules/shared/theme-shared.js"></script>
+  <script src="/modules/shared/student-signals.js"></script>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     html, body { height: 100%; }
@@ -369,6 +370,10 @@
     // De badges worden post-render geïnjecteerd zodat een trage overdue-
     // fetch de studenten-render niet vertraagt.
     overdueByEmail: null,
+    // Map bubble_student_id -> first active signal (van
+    // /api/student-signals-list?status=open,opnieuw_opvolgen). null = nog
+    // niet geladen. Bijbehorende "Gemeld"-badge via DOM-injection.
+    signalsByStudent: null,
     // Te-doen tellers — onafhankelijke loaders schrijven naar deze keys
     // en triggeren renderTodo(). State-key vermist => geen item.
     todoCounters: {
@@ -567,18 +572,79 @@
       const sid = s.bubble_student_id || '';
       const url = '/modules/mentor-dashboard.html#student=' + encodeURIComponent(sid);
       const emailLc = String(s.email || '').trim().toLowerCase();
-      return '<a href="' + esc(url) + '" class="mh-student-card" data-student-email="' + esc(emailLc) + '" style="text-decoration:none">' +
+      return '<a href="' + esc(url) + '" class="mh-student-card" data-student-id="' + esc(sid) + '" data-student-email="' + esc(emailLc) + '" data-student-name="' + esc(s.name || s.email || '') + '" style="text-decoration:none">' +
                '<div>' +
                  '<div class="mh-student-name">' + esc(s.name || s.email || '—') + '</div>' +
                  '<div class="mh-student-meta">' + esc(label) + (s.program ? ' · ' + esc(s.program) : '') + '</div>' +
                  (total > 0 ? '<div class="mh-progress"><div class="mh-progress-fill" style="width:' + pct + '%"></div></div>' : '') +
                '</div>' +
-               '<span class="mh-student-badge ' + badgeCls + '">' + esc(badgeTxt) + '</span>' +
+               '<div style="display:flex;flex-direction:column;gap:6px;align-items:flex-end;flex-shrink:0">' +
+                 '<span class="mh-student-badge ' + badgeCls + '">' + esc(badgeTxt) + '</span>' +
+                 (window.StudentSignals ? window.StudentSignals.buttonHtml() : '') +
+               '</div>' +
              '</a>';
     }).join('');
     // Inject overdue-badges als de fetch al binnen is; anders doet de
     // overdue-loader het zelf na completion (idempotent).
     applyOverdueBadges();
+    applySignalBadges();
+    wireSignalButtons();
+  }
+
+  /* ── Student-signals (Gemeld-badge + Melden-knop) ───────────────────────
+     Loader fetcht actieve signals via shared helper; render-cyclus
+     plakt de badge in elke kaart waar de bubble_student_id matched.
+     Click op de Melden-knop opent de shared signal-modal. */
+  async function loadAndRenderSignals() {
+    if (!window.StudentSignals) return;
+    state.signalsByStudent = await window.StudentSignals.fetchActiveSignals();
+    applySignalBadges();
+  }
+  function applySignalBadges() {
+    if (!state.signalsByStudent) return;
+    document.querySelectorAll('.mh-student-card[data-student-id]').forEach((card) => {
+      const sid = card.dataset.studentId || '';
+      const sig = sid ? state.signalsByStudent.get(sid) : null;
+      let badge = card.querySelector('.ss-badge');
+      if (sig) {
+        if (!badge) {
+          badge = document.createElement('span');
+          badge.className = 'ss-badge';
+          badge.textContent = 'Gemeld';
+          const stack = card.querySelector('div[style*="flex-direction:column"]');
+          if (stack) stack.insertBefore(badge, stack.firstChild);
+          else card.appendChild(badge);
+        }
+      } else if (badge) {
+        badge.remove();
+      }
+    });
+  }
+  function wireSignalButtons() {
+    if (!window.StudentSignals) return;
+    document.querySelectorAll('.mh-student-card .ss-signal-btn').forEach((btn) => {
+      if (btn.dataset.ssWired) return;
+      btn.dataset.ssWired = '1';
+      const trigger = (ev) => {
+        ev.preventDefault();
+        ev.stopPropagation();
+        const card = btn.closest('.mh-student-card');
+        if (!card) return;
+        window.StudentSignals.openCreate({
+          bubble_student_id : card.dataset.studentId || '',
+          name              : card.dataset.studentName || '',
+          email             : card.dataset.studentEmail || '',
+        }, (signal) => {
+          if (!state.signalsByStudent) state.signalsByStudent = new Map();
+          state.signalsByStudent.set(signal.bubble_student_id, signal);
+          applySignalBadges();
+        });
+      };
+      btn.addEventListener('click', trigger);
+      btn.addEventListener('keydown', (ev) => {
+        if (ev.key === 'Enter' || ev.key === ' ') trigger(ev);
+      });
+    });
   }
 
   /* ── Overdue-facturen badge (per student-card) ───────────────────────────
@@ -940,7 +1006,11 @@
     loadAndRenderOffertes().catch((e) => console.warn('[mh] offertes', e?.message || e));
     loadAndRenderWaitingReplies().catch((e) => console.warn('[mh] waiting-replies', e?.message || e));
     loadAndRenderOverdueBadges().catch((e) => console.warn('[mh] overdue-badges', e?.message || e));
+    loadAndRenderSignals().catch((e) => console.warn('[mh] signals', e?.message || e));
   })();
+
+  // Mount shared signal-modal eenmalig zodra de helper geladen is.
+  if (window.StudentSignals) window.StudentSignals.ensureModalMounted();
 
   if (window._authSharedReady) {
     window._authSharedReady.then(() => window.AgentShared?.renderUserSection());
