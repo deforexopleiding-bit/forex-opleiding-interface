@@ -1626,8 +1626,41 @@
       .modal-close { background:transparent; border:none; color:var(--text-faint); font-size:16px; cursor:pointer; padding:4px; line-height:1; }
       .modal-body { padding:20px; }
       .modal-footer { display:flex; justify-content:flex-end; gap:8px; padding:14px 20px; border-top:1px solid var(--border); }
+      /* ID-gescoopte overlay + card-basis voor onze 3 modals.
+         Finance.html bevat .modal-overlay/.modal-card al; daar zijn deze
+         ID-regels redundant (gelijke specificiteit, identieke waarden -> no-op
+         visueel). Op host-pagina's ZONDER die basis-CSS (bv. agent-center.html)
+         zorgen ze dat de modal toch fixed-overlay + gecentreerd rendert i.p.v.
+         in document-flow onderaan vallen.
+         .hidden moet hier hogere specificiteit hebben dan de ID-only regel
+         hierboven, anders blijft de modal altijd zichtbaar; ID+class wint van
+         ID-only en !important is extra dichtgetimmerd. */
+      #waConfEditModal,
+      #waMetaEditModal,
+      #waQrEditModal {
+        position:fixed; inset:0; z-index:600;
+        display:flex; align-items:center; justify-content:center;
+        background:rgba(0,0,0,0.6);
+        backdrop-filter:blur(4px);
+        padding:20px;
+      }
+      #waConfEditModal.hidden,
+      #waMetaEditModal.hidden,
+      #waQrEditModal.hidden { display:none !important; }
+      #waConfEditModal .modal-card,
+      #waMetaEditModal .modal-card,
+      #waQrEditModal .modal-card {
+        background:var(--bg-elev);
+        border:1px solid var(--border);
+        border-radius:14px;
+        max-width:520px;
+        width:100%;
+      }
       /* Scope-specifiek: onze 3 modals laten hun header/body/footer hun eigen
-         padding bepalen ipv de generic modal-card padding van finance.html. */
+         padding bepalen ipv de generic modal-card padding van finance.html.
+         Scope-specifieke max-width-overrides per modal (zie ensureMeta… etc)
+         worden later geinjecteerd en winnen op cascade-volgorde — die regels
+         blijven intact. */
       #waConfEditModal .modal-card,
       #waMetaEditModal .modal-card,
       #waQrEditModal .modal-card { padding:0; }
