@@ -21,7 +21,8 @@
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
-import { bubbleList, bubbleUserDisplay } from './_lib/bubble.js';
+import { bubbleUserDisplay } from './_lib/bubble.js';
+import { getMentorBubbleId, fetchBubbleStudents } from './_lib/mentorStudents.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -88,27 +89,15 @@ export default async function handler(req, res) {
   }
 
   try {
-    // 1) Resolve bubble_user_id via team_members.
-    const { data: tm, error: tmErr } = await supabaseAdmin
-      .from('team_members')
-      .select('id, bubble_user_id, is_active')
-      .eq('user_id', effectiveUserId)
-      .eq('is_active', true)
-      .maybeSingle();
-    if (tmErr) throw new Error('team_members lookup: ' + tmErr.message);
-    if (!tm?.bubble_user_id) {
+    // 1+2) Resolve bubble_user_id + Bubble students via gedeelde helper.
+    // Single source of truth voor "wie zijn de studenten van deze mentor?" —
+    // andere mentor-readers (overdue-badge etc.) gebruiken dezelfde helper
+    // zodat de scope niet meer uit elkaar kan lopen.
+    const bubbleUserId = await getMentorBubbleId(effectiveUserId);
+    if (!bubbleUserId) {
       return res.status(200).json({ ok: true, scope, linked: false, students: [] });
     }
-
-    // 2) Bubble: alle 'user'-rijen met mentor_user=bubble_user_id + role=student.
-    //    Suffix-conventie: 'mentor_user' (User-link) + 'role_option_os___roles'
-    //    (option-set 'roles'). De waarde voor option-set role-constraint is de
-    //    leesbare optie 'student'.
-    const constraints = [
-      { key: 'mentor_user',              constraint_type: 'equals', value: tm.bubble_user_id },
-      { key: 'role_option_os___roles',   constraint_type: 'equals', value: 'student' },
-    ];
-    const { results } = await bubbleList('user', constraints, { limit: 500 });
+    const results = await fetchBubbleStudents(bubbleUserId);
 
     // 3) Map → API-shape (suffix-keys met bare-name fallback).
     const students = (results || []).map((u) => {
