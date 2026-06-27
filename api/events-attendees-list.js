@@ -173,11 +173,15 @@ export default async function handler(req, res) {
       (rows || []).map((r) => r.assessment_response_id).filter(Boolean)
     ));
     const taalByResponse = new Map();
+    // Vragenlijst-invuldatum: canonieke kolom is submitted_at (zie
+    // assessment-submit.js); fallback created_at voor zeldzame oudere
+    // inzendingen waar submitted_at NULL is.
+    const filledAtByResponse = new Map();
     if (responseIds.length > 0) {
       try {
         const { data: respRows, error: respErr } = await supabaseAdmin
           .from('assessment_responses')
-          .select('id, answers')
+          .select('id, answers, submitted_at, created_at')
           .in('id', responseIds);
         if (respErr) {
           console.error('[events-attendees-list responses]', respErr.message);
@@ -188,6 +192,7 @@ export default async function handler(req, res) {
               ? a.taal.trim().toLowerCase()
               : null;
             taalByResponse.set(rr.id, t || null);
+            filledAtByResponse.set(rr.id, rr.submitted_at || rr.created_at || null);
           }
         }
       } catch (e) {
@@ -200,6 +205,9 @@ export default async function handler(req, res) {
       tags: tagsByAttendee.get(r.id) || [],
       has_signed_deal: !!(r.deal_id && signedDealIds.has(r.deal_id)),
       taal: r.assessment_response_id ? (taalByResponse.get(r.assessment_response_id) || null) : null,
+      questionnaire_filled_at: r.assessment_response_id
+        ? (filledAtByResponse.get(r.assessment_response_id) || null)
+        : null,
     }));
 
     // byStatus counts (zonder paginatie, zonder status-filter, met search).
