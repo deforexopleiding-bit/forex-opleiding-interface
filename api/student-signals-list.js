@@ -68,7 +68,7 @@ export default async function handler(req, res) {
   try {
     let query = supabaseAdmin
       .from('student_signals')
-      .select('id, bubble_student_id, student_name, student_email, type, toelichting, mentor_user_id, status, uitkomst_type, uitkomst, handled_at, created_at')
+      .select('id, bubble_student_id, student_name, student_email, type, source, toelichting, mentor_user_id, status, uitkomst_type, uitkomst, handled_at, reason_given_at, created_at')
       .order('created_at', { ascending: false })
       .limit(1000);
     if (statusFilter) query = query.in('status', statusFilter);
@@ -82,7 +82,9 @@ export default async function handler(req, res) {
 
     // Mentor-modus: geen verrijking, return rauw.
     if (!isAdmin) {
-      return res.status(200).json({ signals: rows.map((r) => ({ ...r, phone: null, mentor_name: null })) });
+      return res.status(200).json({
+        signals: rows.map((r) => ({ ...r, phone: null, mentor_name: null })),
+      });
     }
 
     // Admin-modus: mentor_name + phone (fail-soft).
