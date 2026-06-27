@@ -73,6 +73,24 @@
     .so-mc .so-mc-err { font-size:12px; color:#991b1b; margin-top:8px; display:none; }
     .so-mc .so-mc-err.show { display:block; }
     .so-mf { padding:10px 14px; border-top:1px solid var(--border); display:flex; justify-content:flex-end; gap:8px; }
+
+    /* B2 — Tab-switcher + Aandachtspunten */
+    .so-tabs { display:flex; gap:4px; border-bottom:1px solid var(--border); margin-bottom: 14px; }
+    .so-tab  { padding:9px 14px; font-size:13px; font-weight:600; border:none; border-bottom:2px solid transparent; background:transparent; color:var(--text-dim); cursor:pointer; font-family:inherit; display:inline-flex; align-items:center; gap:6px; }
+    .so-tab.active { color:var(--brand-primary,#093d54); border-bottom-color:var(--brand-primary,#093d54); }
+    .so-tab .so-tab-count { display:inline-block; background:rgba(220,38,38,0.18); color:#991b1b; border-radius:999px; padding:0 7px; font-size:10.5px; font-weight:700; min-width:18px; text-align:center; }
+    .so-pane { display:none; }
+    .so-pane.active { display:block; }
+    .so-status-strip { display:flex; gap:8px; align-items:center; margin-bottom:10px; font-size:12.5px; color:var(--text-dim); }
+    .so-status-strip label { display:inline-flex; align-items:center; gap:5px; cursor:pointer; }
+    .ap-badge { display:inline-block; padding:1px 7px; border-radius:999px; font-size:10.5px; font-weight:600; }
+    .ap-badge.open             { background:rgba(245,158,11,0.18); color:#b45309; }
+    .ap-badge.opnieuw_opvolgen { background:rgba(59,130,246,0.14); color:#1d4ed8; }
+    .ap-badge.afgehandeld      { background:rgba(34,197,94,0.16);  color:#15803d; }
+    .ap-type { font-weight:600; color:var(--text); font-size:12.5px; }
+    .ap-toel { font-size:11.5px; color:var(--text-dim); margin-top:2px; }
+    .ap-contact a { color:var(--brand-primary,#093d54); text-decoration:none; margin-right:6px; }
+    .ap-contact a:hover { text-decoration:underline; }
   </style>
 </head>
 <body>
@@ -87,6 +105,15 @@
         <button id="soReloadBtn" class="so-btn primary" type="button"><i class="ti ti-refresh"></i> Vernieuwen</button>
       </div>
     </div>
+
+    <!-- B2 — Tab-switcher (Studenten | Aandachtspunten) -->
+    <div class="so-tabs" id="soTabs">
+      <button type="button" class="so-tab active" data-pane="students"><i class="ti ti-users"></i> Studenten</button>
+      <button type="button" class="so-tab" data-pane="signals"><i class="ti ti-flag"></i> Aandachtspunten <span class="so-tab-count" id="soTabSignalsCount" style="display:none">0</span></button>
+    </div>
+
+    <!-- Pane: Studenten -->
+    <div class="so-pane active" id="soPaneStudents">
 
     <!-- KPI-strip -->
     <div class="so-kpis">
@@ -111,6 +138,8 @@
       <button type="button" class="so-toggle" data-tgl="noment">Zonder mentor</button>
     </div>
 
+    <!-- (Studenten-pane sluiten gebeurt onder de tabel.) -->
+
     <!-- Tabel -->
     <div class="so-table-wrap">
       <table class="so-table">
@@ -130,6 +159,63 @@
           <tr><td colspan="8" class="so-empty">Studenten laden…</td></tr>
         </tbody>
       </table>
+    </div>
+
+    </div><!-- /Pane: Studenten -->
+
+    <!-- Pane: Aandachtspunten -->
+    <div class="so-pane" id="soPaneSignals">
+      <div class="so-status-strip">
+        <label><input type="checkbox" id="apShowHistory" /> Toon afgehandelde historie</label>
+        <span id="apCountInfo" style="margin-left:auto"></span>
+      </div>
+      <div class="so-table-wrap">
+        <table class="so-table">
+          <thead>
+            <tr>
+              <th>Student</th>
+              <th>Contact</th>
+              <th>Mentor</th>
+              <th>Type</th>
+              <th>Toelichting</th>
+              <th>Datum</th>
+              <th>Status</th>
+              <th>Actie</th>
+            </tr>
+          </thead>
+          <tbody id="apTbody">
+            <tr><td colspan="8" class="so-empty">Aandachtspunten laden…</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- Handle-modal voor Aandachtspunten -->
+<div id="apMb" class="so-mb" role="dialog" aria-modal="true" aria-labelledby="apMbTitle">
+  <div class="so-mw">
+    <div class="so-mh">
+      <div class="so-mh-title" id="apMbTitle"><i class="ti ti-check"></i> Aandachtspunt afhandelen</div>
+      <button type="button" class="so-mh-close" id="apMbClose" aria-label="Sluiten">×</button>
+    </div>
+    <div class="so-mc">
+      <div id="apMbInfo" style="font-size:12.5px;color:var(--text-dim);margin-bottom:8px"></div>
+      <label for="apMbType">Uitkomst</label>
+      <select id="apMbType">
+        <option value="opgelost">Opgelost</option>
+        <option value="geen_gehoor_opnieuw">Geen gehoor — opnieuw opvolgen</option>
+        <option value="student_gestopt">Student gestopt</option>
+        <option value="anders">Anders</option>
+      </select>
+      <label for="apMbText">Toelichting (optioneel)</label>
+      <textarea id="apMbText" maxlength="2000" style="width:100%;min-height:80px;padding:7px 9px;border:1px solid var(--border);border-radius:7px;background:var(--bg);font-family:inherit;font-size:13px;color:var(--text)"></textarea>
+      <div class="so-mc-err" id="apMbErr"></div>
+    </div>
+    <div class="so-mf">
+      <button type="button" class="so-btn" id="apMbCancel">Annuleren</button>
+      <button type="button" class="so-btn primary" id="apMbSave"><i class="ti ti-check"></i> Afhandelen</button>
     </div>
   </div>
 </div>
@@ -175,6 +261,13 @@ const state = {
   mentorsLoadFail : false,      // true bij fetch-fout → control disabled met hint
   pickerRow       : null,       // huidige rij die in de picker zit
   pickerBusy      : false,      // true tijdens POST
+  // B2 — Aandachtspunten-tab
+  currentPane    : 'students',  // 'students' | 'signals'
+  signals        : [],          // raw lijst student_signals (admin-shape)
+  signalsLoaded  : false,
+  apShowHistory  : false,       // toggle: ook afgehandelde tonen?
+  apHandleRow    : null,        // huidige rij in de handle-modal
+  apHandleBusy   : false,
 };
 
 function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
@@ -559,8 +652,183 @@ async function loadData() {
     });
   }
 
+  // B2 — Tab-switcher + Aandachtspunten
+  wireTabs();
+  wireSignalsHandlers();
+  loadSignals(); // achtergrond, vult ook de tab-teller
+
   loadData();
 })();
+
+/* ── B2 — Tab-switcher ──────────────────────────────────────────────────── */
+function wireTabs() {
+  document.querySelectorAll('.so-tab[data-pane]').forEach((b) => {
+    b.addEventListener('click', () => switchPane(b.dataset.pane));
+  });
+}
+function switchPane(p) {
+  state.currentPane = p;
+  document.querySelectorAll('.so-tab[data-pane]').forEach((b) => {
+    b.classList.toggle('active', b.dataset.pane === p);
+  });
+  document.querySelectorAll('.so-pane').forEach((el) => {
+    el.classList.toggle('active', el.id === ('soPane' + p[0].toUpperCase() + p.slice(1)));
+  });
+}
+
+/* ── B2 — Aandachtspunten: load + render + handle ──────────────────────── */
+async function loadSignals() {
+  const tbody = document.getElementById('apTbody');
+  if (tbody) tbody.innerHTML = '<tr><td colspan="8" class="so-empty">Aandachtspunten laden…</td></tr>';
+  const status = state.apShowHistory ? 'all' : 'open,opnieuw_opvolgen';
+  try {
+    const r = await window.AgentShared.apiFetch('/api/student-signals-list?status=' + encodeURIComponent(status));
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(d?.error || 'signals fetch failed');
+    state.signals = Array.isArray(d?.signals) ? d.signals : [];
+  } catch (e) {
+    console.warn('[students-overview] signals:', e?.message || e);
+    state.signals = [];
+    if (tbody) tbody.innerHTML = '<tr><td colspan="8" class="so-error">Aandachtspunten ophalen mislukt: ' + esc(e?.message || e) + '</td></tr>';
+    return;
+  }
+  state.signalsLoaded = true;
+  renderSignalsTable();
+  updateSignalsTabCount();
+}
+
+function updateSignalsTabCount() {
+  const active = state.signals.filter((s) => s.status === 'open' || s.status === 'opnieuw_opvolgen').length;
+  const el = document.getElementById('soTabSignalsCount');
+  if (!el) return;
+  if (active > 0) { el.textContent = String(active); el.style.display = ''; }
+  else            { el.style.display = 'none'; }
+}
+
+const SIGNAL_TYPE_LABELS = {
+  eerste_call         : 'Eerste call lukt niet',
+  reageert_niet       : 'Reageert niet',
+  niet_bereikbaar     : 'Niet bereikbaar',
+  geen_reactie_bellen : 'Geen reactie — bellen',
+  anders              : 'Anders',
+};
+const SIGNAL_STATUS_LABELS = {
+  open             : 'Open',
+  opnieuw_opvolgen : 'Opnieuw opvolgen',
+  afgehandeld      : 'Afgehandeld',
+};
+
+function renderSignalsTable() {
+  const tbody = document.getElementById('apTbody');
+  if (!tbody) return;
+  // Filter op show-history toggle (server kan ook 'all' returnen wanneer toggle aan).
+  const list = state.apShowHistory
+    ? state.signals
+    : state.signals.filter((s) => s.status === 'open' || s.status === 'opnieuw_opvolgen');
+  const info = document.getElementById('apCountInfo');
+  if (info) info.textContent = list.length + ' ' + (list.length === 1 ? 'punt' : 'punten');
+  if (list.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="8" class="so-empty">Geen aandachtspunten ' + (state.apShowHistory ? '' : 'actief') + '.</td></tr>';
+    return;
+  }
+  tbody.innerHTML = list.map((s, idx) => {
+    const dt = s.created_at ? new Date(s.created_at) : null;
+    const dtStr = dt ? dt.toLocaleDateString('nl-NL', { day:'2-digit', month:'short', year:'numeric' }) : '—';
+    const mailto = s.student_email ? '<a href="mailto:' + esc(s.student_email) + '">' + esc(s.student_email) + '</a>' : '';
+    const tel    = s.phone         ? '<a href="tel:' + esc(s.phone) + '">' + esc(s.phone) + '</a>' : '';
+    const contact = [mailto, tel].filter(Boolean).join(' · ') || '—';
+    const action = (s.status !== 'afgehandeld')
+      ? '<button type="button" class="so-btn primary ap-handle-btn" data-idx="' + idx + '"><i class="ti ti-check"></i> Afhandelen</button>'
+      : '<span class="so-mentor-none">afgehandeld</span>';
+    return '<tr>' +
+      '<td><div class="so-name">' + esc(s.student_name || '—') + '</div></td>' +
+      '<td class="ap-contact">' + contact + '</td>' +
+      '<td>' + esc(s.mentor_name || '—') + '</td>' +
+      '<td><div class="ap-type">' + esc(SIGNAL_TYPE_LABELS[s.type] || s.type) + '</div></td>' +
+      '<td>' + (s.toelichting ? '<div class="ap-toel">' + esc(s.toelichting) + '</div>' : '—') + '</td>' +
+      '<td>' + esc(dtStr) + '</td>' +
+      '<td><span class="ap-badge ' + esc(s.status) + '">' + esc(SIGNAL_STATUS_LABELS[s.status] || s.status) + '</span></td>' +
+      '<td>' + action + '</td>' +
+      '</tr>';
+  }).join('');
+  tbody.querySelectorAll('.ap-handle-btn[data-idx]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const idx = Number(btn.dataset.idx);
+      openHandleModal(list[idx]);
+    });
+  });
+}
+
+function wireSignalsHandlers() {
+  const toggle = document.getElementById('apShowHistory');
+  if (toggle) toggle.addEventListener('change', () => {
+    state.apShowHistory = toggle.checked;
+    loadSignals(); // server-status-filter wijzigt
+  });
+  document.getElementById('apMbClose').addEventListener('click', closeHandleModal);
+  document.getElementById('apMbCancel').addEventListener('click', closeHandleModal);
+  document.getElementById('apMbSave').addEventListener('click', submitHandle);
+  document.getElementById('apMb').addEventListener('click', (ev) => {
+    if (ev.target === ev.currentTarget) closeHandleModal();
+  });
+  document.addEventListener('keydown', (ev) => {
+    if (ev.key === 'Escape' && document.getElementById('apMb').classList.contains('show')) closeHandleModal();
+  });
+}
+function openHandleModal(signal) {
+  if (!signal) return;
+  state.apHandleRow = signal;
+  state.apHandleBusy = false;
+  document.getElementById('apMbInfo').textContent =
+    (signal.student_name || '—') + (signal.student_email ? ' · ' + signal.student_email : '');
+  document.getElementById('apMbType').value = 'opgelost';
+  document.getElementById('apMbText').value = '';
+  const err = document.getElementById('apMbErr');
+  err.textContent = ''; err.classList.remove('show');
+  document.getElementById('apMb').classList.add('show');
+}
+function closeHandleModal() {
+  document.getElementById('apMb').classList.remove('show');
+  state.apHandleRow = null;
+}
+async function submitHandle() {
+  if (state.apHandleBusy || !state.apHandleRow) return;
+  const signal = state.apHandleRow;
+  const uitkomstType = document.getElementById('apMbType').value || '';
+  const uitkomst     = document.getElementById('apMbText').value || '';
+  const err          = document.getElementById('apMbErr');
+  const saveBtn      = document.getElementById('apMbSave');
+  state.apHandleBusy = true; saveBtn.disabled = true;
+  try {
+    const r = await window.AgentShared.apiFetch('/api/student-signals-handle', {
+      method  : 'POST',
+      headers : { 'Content-Type': 'application/json' },
+      body    : JSON.stringify({ signal_id: signal.id, uitkomst_type: uitkomstType, uitkomst: uitkomst || null }),
+    });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) {
+      let msg = d?.error || ('Fout: HTTP ' + r.status);
+      if (r.status === 404) msg = 'Aandachtspunt bestaat niet (meer)';
+      if (r.status === 400) msg = d?.error || 'Ongeldige invoer';
+      if (r.status === 403) msg = d?.error || 'Geen rechten';
+      err.textContent = msg; err.classList.add('show');
+      return;
+    }
+    // Update lokaal: nieuwe status + uitkomst.
+    signal.status = (uitkomstType === 'geen_gehoor_opnieuw') ? 'opnieuw_opvolgen' : 'afgehandeld';
+    signal.uitkomst_type = uitkomstType;
+    signal.uitkomst      = uitkomst || null;
+    signal.handled_at    = new Date().toISOString();
+    renderSignalsTable();
+    updateSignalsTabCount();
+    closeHandleModal();
+  } catch (e) {
+    err.textContent = e?.message || 'Onbekende fout';
+    err.classList.add('show');
+  } finally {
+    state.apHandleBusy = false; saveBtn.disabled = false;
+  }
+}
 </script>
 </body>
 </html>

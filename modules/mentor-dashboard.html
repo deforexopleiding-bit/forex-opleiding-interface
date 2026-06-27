@@ -253,6 +253,7 @@
 <script src="/modules/shared/supabase-client.js"></script>
 <script src="/modules/shared/agent-shared.js"></script>
 <script src="/modules/shared/theme-shared.js"></script>
+<script src="/modules/shared/student-signals.js"></script>
 <script src="/modules/shared/permissions.js"></script>
 <script src="/modules/shared/sidebar.js"></script>
 <script>
@@ -851,6 +852,27 @@
   // Map lowercased-email → aantal TE LATE facturen. Server-scoped via
   // mentor_user_id → onboardings.customer_id; UI doet alleen lookup.
   const _overdueByEmail = new Map();
+  // ── Student-signals (Gemeld-badge + Melden-knop) ────────────────────────
+  // Map bubble_student_id -> first active signal. Eén fetch in loadStudents()
+  // (Promise.all); UI in renderStudents via _signalBadgeHtml.
+  const _signalsByStudent = new Map();
+  async function loadSignalsMap() {
+    _signalsByStudent.clear();
+    if (!window.StudentSignals) return;
+    const m = await window.StudentSignals.fetchActiveSignals();
+    for (const [k, v] of m.entries()) _signalsByStudent.set(k, v);
+  }
+  function _signalBadgeHtml(sid) {
+    return _signalsByStudent.has(String(sid)) && window.StudentSignals
+      ? window.StudentSignals.badgeHtml() : '';
+  }
+  function _signalButtonHtml(sid, name, email) {
+    if (!window.StudentSignals) return '';
+    return '<span class="ss-signal-trigger" data-sid="' + esc(sid) + '"'
+      + ' data-name="' + esc(name) + '" data-email="' + esc(email) + '">'
+      + window.StudentSignals.buttonHtml() + '</span>';
+  }
+
   async function loadOverdueMap() {
     _overdueByEmail.clear();
     const apiFetch = window.AgentShared?.apiFetch;
@@ -921,6 +943,8 @@
       const program   = s.program ? `<span class="badge badge-blue">${esc(s.program)}</span>` : '';
       const onboard   = s.onboarding_status ? `<span class="badge badge-amber">${esc(s.onboarding_status)}</span>` : '';
       const overdue   = _overdueBadgeHtml(s.email);
+      const signalTag = _signalBadgeHtml(rawSid);
+      const signalBtn = _signalButtonHtml(rawSid, rawName, s.email || '');
       const callsTotal  = Number(s.calls_1on1_total) || 0;
       const callsDone   = Number(s.calls_1on1_done) || 0;
       const noShows     = Number(s.no_shows) || 0;
@@ -929,7 +953,7 @@
         <div class="student-card" data-student-id="${sid}">
           <div class="student-head" data-toggle="${sid}">
             <div>
-              <div class="student-name">${name} ${program} ${onboard} ${overdue}</div>
+              <div class="student-name">${name} ${program} ${onboard} ${overdue} ${signalTag}</div>
               <div class="student-meta">${email}</div>
               <div class="funded-row" id="funded-row-${sid}" style="margin-top:6px">
                 ${_renderFundedRowHtml(rawSid, rawName, cert)}
@@ -940,6 +964,7 @@
                         style="padding:4px 10px;font-size:11.5px;font-weight:600;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);cursor:pointer;font-family:inherit">
                   📝 Beoordelen
                 </button>
+                ${signalBtn}
               </div>
             </div>
             <div class="student-stat" title="1-op-1-calls voltooid / totaal"><strong>${callsDone}/${callsTotal || '—'}</strong> 1-op-1</div>
@@ -1361,11 +1386,12 @@
       // Parallel: studenten + funded-certs + assessments. _fundedCerts /
       // _assessments zijn leeg als hun fetch faalt; render valt terug op
       // upload-knop respectievelijk "Open" badge.
-      const [r, _f, _a, _o] = await Promise.all([
+      const [r, _f, _a, _o, _s] = await Promise.all([
         apiFetch('/api/mentor-my-students'),
         loadFundedCertsMap(),
         loadAssessmentsMap(),
         loadOverdueMap(),
+        loadSignalsMap(),
       ]);
       const d = await r.json();
       if (!r.ok) throw new Error(d?.error || 'students fetch failed');
@@ -2153,6 +2179,32 @@
     // Komende sessies — hergebruikt renderCalendar uit oude Grootboek-flow.
     if (calendar) renderCalendar(calendar.events || []);
     else setError('calendarWrap', 'Kalender ophalen mislukt.');
+  }
+
+  // Student-signals: mount modal eenmalig + delegated click-handler op de
+  // signal-trigger (spans worden bij elke renderStudents() opnieuw aangemaakt;
+  // document-level delegation is daarmee correct + idempotent).
+  if (window.StudentSignals) {
+    window.StudentSignals.ensureModalMounted();
+    document.addEventListener('click', (ev) => {
+      const trigger = ev.target.closest('.ss-signal-trigger');
+      if (!trigger) return;
+      ev.preventDefault();
+      ev.stopPropagation();
+      const sid   = trigger.dataset.sid   || '';
+      const name  = trigger.dataset.name  || '';
+      const email = trigger.dataset.email || '';
+      window.StudentSignals.openCreate(
+        { bubble_student_id: sid, name: name, email: email },
+        (signal) => {
+          _signalsByStudent.set(String(signal.bubble_student_id), signal);
+          // Herlaad studenten-render zodat de Gemeld-badge meekomt.
+          if (typeof _lastStudentsList === 'object' && _lastStudentsList) {
+            renderStudents({ students: _lastStudentsList });
+          }
+        }
+      );
+    });
   }
 
   if (document.readyState === 'loading') {

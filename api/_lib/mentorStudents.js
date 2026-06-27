@@ -98,6 +98,30 @@ export async function getMentorStudentEmails(effectiveUserId) {
 }
 
 /**
+ * Volledige student-shapes van de eigen mentor — voor server-side
+ * ownership-checks waar zowel bubble_student_id als name/email nodig zijn
+ * (bv. student-signals-create: check eigendom + vul student_name/email
+ * server-side i.p.v. client-controlled).
+ *
+ * @param {string} effectiveUserId  auth.users.id
+ * @returns {Promise<{ linked: boolean, students: Array<{
+ *   bubble_student_id, name, email,
+ *   program, membership, onboarding_status,
+ *   calls_1on1_done, calls_1on1_total, group_done, group_total, no_shows,
+ *   mentor_bubble_user_id
+ * }> }>}
+ */
+export async function getMentorStudents(effectiveUserId) {
+  const bubbleUserId = await getMentorBubbleId(effectiveUserId);
+  if (!bubbleUserId) return { linked: false, students: [] };
+  const results = await fetchBubbleStudents(bubbleUserId);
+  const students = results
+    .map(mapBubbleStudentRow)
+    .filter((s) => s && s.bubble_student_id);
+  return { linked: true, students };
+}
+
+/**
  * Fetcht ALLE Bubble 'user'-rijen met role=student ORG-BREED (zonder
  * mentor_user-constraint). Voor admin-readers (overzicht over alle
  * mentoren). bubbleList paginiert intern via z'n cursor-loop; we
