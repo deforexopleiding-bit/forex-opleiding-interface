@@ -154,12 +154,10 @@ export const AVAILABLE_VARIABLES = [
   { key: 'onboarding.status',       label: 'Onboarding-status', category: 'onboarding', example: 'aangemeld', requires_context: 'onboarding' },
   { key: 'onboarding.login_url',    label: 'Login-URL Bubble', category: 'onboarding', example: 'https://dashboard.deforexopleiding.nl', requires_context: 'onboarding' },
   { key: 'onboarding.temp_password', label: 'Tijdelijk wachtwoord (alleen credentials-flow)', category: 'onboarding', example: 'Aw9!Xq2p', requires_context: 'onboarding' },
-  // Credentials-flow voor 'Stuur inloggegevens via WhatsApp' — bubble_gebruikersnaam
-  // mag uit customer.email of (fallback) onboarding.bubble_username komen;
-  // bubble_wachtwoord is een alias van onboarding.temp_password die door de
-  // credentials-knop met een vers wachtwoord wordt gevuld.
+  // Bubble gebruikersnaam = klant-email. Geen wachtwoord-variabele
+  // (WA-credentials-flow is verwijderd nadat Meta wachtwoord-via-WA
+  // templates niet meer goedkeurt — UTILITY-policy).
   { key: 'onboarding.bubble_gebruikersnaam', label: 'Bubble gebruikersnaam (klant-email)', category: 'onboarding', example: 'klant@example.com', requires_context: 'customer' },
-  { key: 'onboarding.bubble_wachtwoord',     label: 'Bubble wachtwoord (tijdelijk)',       category: 'onboarding', example: 'Aw9!Xq2p',           requires_context: 'onboarding' },
 
   // ── datum ──────────────────────────────────────────────────────────────
   { key: 'datum.vandaag',     label: 'Datum vandaag', category: 'datum', example: '09-06-2026',  requires_context: null },
@@ -551,18 +549,15 @@ export function resolveVariableValue(key, context) {
   const v = VAR_BY_KEY.get(key);
   if (!v) return '';
 
-  // Special-cases voor de credentials-flow: deze 2 keys hangen tussen
-  // onboarding (wachtwoord) en customer (gebruikersnaam = klant-email) in.
-  // Pure fail-soft: lege string bij ontbrekende context, nooit throwen.
-  // Raken expliciet alleen deze 2 keys; alle andere onboarding.*-resolutie
-  // valt door naar getOnboardingValue ongewijzigd.
+  // Special-case voor onboarding.bubble_gebruikersnaam: deze key hangt
+  // tussen onboarding en customer (= klant-email) in. Pure fail-soft: lege
+  // string bij ontbrekende context, nooit throwen. Raakt expliciet alleen
+  // deze key; alle andere onboarding.*-resolutie valt door naar
+  // getOnboardingValue ongewijzigd.
   if (key === 'onboarding.bubble_gebruikersnaam') {
     const email = (context && context.customer && context.customer.email) || null;
     const fallback = (context && context.onboarding && context.onboarding.bubble_username) || null;
     return String(email || fallback || '');
-  }
-  if (key === 'onboarding.bubble_wachtwoord') {
-    return String((context && context.onboarding && context.onboarding.temp_password) || '');
   }
 
   switch (v.category) {

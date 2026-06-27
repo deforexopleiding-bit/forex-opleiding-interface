@@ -1,8 +1,8 @@
 // api/_lib/onboarding-credentials.js
 //
-// Twee herbruikbare helpers voor het versturen van Bubble-inloggegevens
-// (e-mail + WhatsApp) naar een net-aangemaakte onboarding-student. Beide
-// fail-soft: gooien NOOIT door naar de caller.
+// Helper voor het versturen van Bubble-inloggegevens via e-mail naar een
+// net-aangemaakte onboarding-student. Fail-soft: gooit NOOIT door naar de
+// caller.
 //
 // EMAIL — sendCredentialsEmail({onboarding, customer, tempPassword, loginUrl})
 //   * Gebruikt sendEventMail + wrapEmailHtml uit api/mailer.js (zelfde
@@ -12,23 +12,17 @@
 //   * Geen DB-write — caller bepaalt of/wat ie persist (typisch
 //     credentials_email_sent_at = now bij sent=true).
 //
-// WHATSAPP — sendCredentialsWhatsApp({onboarding, customer, tempPassword,
-//                                     sentByUserId, source})
-//   * Gebruikt sendOnboardingTemplateGeneric (geen nieuwe Meta-client).
-//   * Template-naam + language uit
-//     joost_config.knowledge_base.credentials.{template_name, language, enabled}.
-//   * Lege template_name → {sent:false, reason:'geen-template-config'}.
-//   * enabled=false (default true) → {sent:false, reason:'credentials-uit-gezet'}.
-//   * extraOnboardingCtx levert temp_password + login_url aan
-//     {{onboarding.temp_password}} / {{onboarding.login_url}} placeholders.
-//
 // TIJDELIJK WACHTWOORD wordt NOOIT in de DB gepersist — alleen meegegeven
-// aan de buitenwereld via mail/WA en daarna verloren. credentials_email_sent_at
-// + credentials_wa_sent_at houden alleen het tijdstip bij (zichtbaarheid).
+// aan de buitenwereld via mail en daarna verloren. credentials_email_sent_at
+// houdt alleen het tijdstip bij (zichtbaarheid).
+//
+// HISTORIE: er bestond ook een sendCredentialsWhatsApp + endpoint
+// onboarding-credentials-resend voor een WhatsApp-credentials-flow. Verwijderd
+// nadat Meta de wachtwoord-via-WA templates niet meer goedkeurt (UTILITY-
+// category-policy). DB-kolom credentials_wa_sent_at blijft bestaan (historische
+// data); read-pad in onboarding-detail.js laat 'm passeren.
 
-import { supabaseAdmin } from '../supabase.js';
 import { sendOnboardingMail, wrapEmailHtml } from '../mailer.js';
-import { sendOnboardingTemplateGeneric } from './onboarding-template-send.js';
 
 // Onboarding-welkomstmail vertrekt vanaf onboarding@deforexopleiding.nl via
 // het eigen SMTP-transport in mailer.sendOnboardingMail (auth-user = From,
@@ -114,66 +108,4 @@ export async function sendCredentialsEmail({ onboarding, customer, tempPassword,
     console.error('[onboarding-credentials] email fail:', e?.message || e);
     return { sent: false, reason: 'email-exception', error: e?.message || String(e) };
   }
-}
-
-// ─────────────────────────────────────────────────────────────────────────
-// WHATSAPP
-// ─────────────────────────────────────────────────────────────────────────
-
-/**
- * Stuur de inloggegevens via WhatsApp (template).
- *
- * @param {object} opts
- * @param {string} opts.onboardingId   - uuid van de onboarding (verplicht voor send-pipeline)
- * @param {string} opts.tempPassword   - tijdelijk wachtwoord uit Bubble-workflow
- * @param {string|null} [opts.sentByUserId]
- * @param {string} [opts.source='manual']
- * @returns {Promise<{sent:boolean, reason?:string, error?:string, ...}>}
- */
-export async function sendCredentialsWhatsApp({
-  onboardingId,
-  tempPassword,
-  sentByUserId = null,
-  source = 'manual',
-} = {}) {
-  if (!onboardingId) return { sent: false, reason: 'no-onboarding-id' };
-  if (!tempPassword) return { sent: false, reason: 'geen-temp-password' };
-
-  // Config lezen (template_name + language + enabled).
-  let templateName = '';
-  let languageCode = 'nl';
-  try {
-    const { data: jcfg, error: jErr } = await supabaseAdmin
-      .from('joost_config')
-      .select('knowledge_base')
-      .eq('module', 'onboarding')
-      .maybeSingle();
-    if (jErr) return { sent: false, reason: 'db-error', error: 'joost_config: ' + jErr.message };
-    const kb = (jcfg?.knowledge_base && typeof jcfg.knowledge_base === 'object') ? jcfg.knowledge_base : {};
-    const cfg = (kb.credentials && typeof kb.credentials === 'object') ? kb.credentials : {};
-    templateName = typeof cfg.template_name === 'string' ? cfg.template_name.trim() : '';
-    languageCode = typeof cfg.language === 'string' && cfg.language.trim()
-      ? cfg.language.trim().toLowerCase() : 'nl';
-    const credentialsEnabled = cfg.enabled !== false;
-    if (!credentialsEnabled) return { sent: false, reason: 'credentials-uit-gezet' };
-    if (!templateName) return { sent: false, reason: 'geen-template-config' };
-  } catch (e) {
-    console.error('[onboarding-credentials] cfg fail:', e?.message || e);
-    return { sent: false, reason: 'cfg-exception', error: e?.message || String(e) };
-  }
-
-  const loginUrl = defaultLoginUrl();
-
-  return await sendOnboardingTemplateGeneric({
-    onboardingId,
-    templateName,
-    languageCode,
-    source,
-    sentByUserId,
-    auditAction: 'onboarding.credentials.sent',
-    extraOnboardingCtx: {
-      temp_password: tempPassword,
-      login_url:     loginUrl,
-    },
-  });
 }
