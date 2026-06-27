@@ -40,7 +40,7 @@ export default async function handler(req, res) {
       .from('onboardings')
       .select(`id, customer_id, customer_name, status, current_step,
                answers,
-               started_at, completed_at, created_at,
+               started_at, completed_at, created_at, start_date,
                traject:onboarding_trajecten(label)`)
       .eq('mentor_user_id', user.id)
       .neq('status', 'gearchiveerd')
@@ -98,6 +98,7 @@ export default async function handler(req, res) {
         availability,
         started_at    : r.started_at,
         completed_at  : r.completed_at,
+        start_date    : r.start_date || null,
       };
     });
 

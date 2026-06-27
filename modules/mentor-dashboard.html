@@ -1485,6 +1485,7 @@
         : '';
       const avShort = _shortAvailability(s.availability);
       const avLine  = `<div class="student-meta" style="margin-top:4px"><strong style="color:var(--text-dim)">Beschikbaarheid:</strong> ${avShort ? esc(avShort) : '<span style="color:var(--text-faint)">—</span>'}</div>`;
+      const startLine = `<div class="student-meta" style="margin-top:4px"><strong style="color:var(--text-dim)">Startdatum:</strong> ${s.start_date ? esc(fmtDateNL(s.start_date)) : '<span style="color:var(--text-faint)">— niet ingesteld</span>'}</div>`;
       return `
         <div class="student-card" style="cursor:default">
           <div class="student-head" style="cursor:default;grid-template-columns:1fr auto">
@@ -1492,6 +1493,7 @@
               <div class="student-name">${esc(s.customer_name || '—')}</div>
               <div class="student-meta">${esc(s.traject_label || '—')}</div>
               ${avLine}
+              ${startLine}
               ${completed}
             </div>
             <div class="student-stat" style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end;align-items:center">
