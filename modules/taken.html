@@ -1745,6 +1745,15 @@ async function init() {
   }
   // Server-side scoped fetch — vervangt loadTakenFromSupabase().
   loadTaken().catch((e) => console.warn('[taken] loadTaken init', e?.message || e));
+
+  // Globale sidebar-knop (modules/shared/quick-task.js) roept dit aan na
+  // succesvol aanmaken zodat het board op de Takenbeheer-pagina meteen
+  // ververst — anders zou je de taak pas zien na handmatige refresh.
+  window.__takenReload = async () => {
+    try { await loadTaken(); render(); } catch (e) {
+      console.warn('[taken] __takenReload:', e?.message || e);
+    }
+  };
 }
 
 init();

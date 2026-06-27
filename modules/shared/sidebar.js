@@ -731,6 +731,32 @@
   // Beschikbaar maken voor externe scripts (bv. login-page error-handler).
   window.stopImpersonation = stopImpersonation;
 
+  // Globale "Nieuwe taak"-knop: dynamische lazy-load van quick-task.js.
+  // Pad wordt afgeleid uit deze sidebar.js' eigen src zodat het zowel onder
+  // /modules/shared/ als achter een andere base-prefix werkt. Eénmalig
+  // (data-flag) zodat herhaalde mountSidebar()-calls niet stapelen.
+  function loadQuickTask() {
+    try {
+      if (window.__quickTaskScriptLoaded) return;
+      window.__quickTaskScriptLoaded = true;
+      var ownSrc = null;
+      var nodes = document.querySelectorAll('script[src]');
+      for (var i = 0; i < nodes.length; i++) {
+        var s = nodes[i].getAttribute('src') || '';
+        if (/\/sidebar\.js(\?|$)/.test(s)) { ownSrc = s; break; }
+      }
+      var url = ownSrc ? ownSrc.replace(/sidebar\.js(\?.*)?$/, 'quick-task.js$1') : '/modules/shared/quick-task.js';
+      var tag = document.createElement('script');
+      tag.src = url;
+      tag.defer = true;
+      tag.dataset.role = 'quick-task';
+      document.head.appendChild(tag);
+    } catch (e) {
+      // Quick-task is non-essential — sidebar mag nooit breken op deze load.
+      try { console.warn('[sidebar] quick-task lazy-load:', e?.message || e); } catch (_) {}
+    }
+  }
+
   function mountSidebar() {
     var mount = document.getElementById('sidebar-mount');
     if (!mount || mount.dataset.mounted === '1') return;
@@ -765,6 +791,8 @@
     // Laat pagina-scripts weten dat de sidebar-DOM klaar is (bv. nav-badge updates
     // die anders kunnen racen met de mount).
     window.dispatchEvent(new CustomEvent('sidebar:mounted'));
+    // Globale "Nieuwe taak"-knop: gegate op taken.task.create binnen quick-task.js.
+    loadQuickTask();
   }
 
   // Expose refresh-trigger voor externe modules (tickets-detail.html na PATCH).
