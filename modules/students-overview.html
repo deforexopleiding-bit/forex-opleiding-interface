@@ -98,6 +98,32 @@
     .so-restore-btn { padding:4px 10px; font-size:11.5px; font-weight:600; border:1px solid var(--border); border-radius:6px; background:var(--bg); color:var(--brand-primary,#093d54); cursor:pointer; font-family:inherit; display:inline-flex; align-items:center; gap:4px; }
     .so-restore-btn:not(:disabled):hover { background:rgba(9,61,84,0.08); }
     .so-restore-btn:disabled { cursor:not-allowed; opacity:0.5; }
+    /* Student-detail modal */
+    .sd-tabs { display:flex; gap:2px; border-bottom:1px solid var(--border); padding:0 14px; }
+    .sd-tab  { padding:9px 12px; font-size:12.5px; font-weight:600; border:none; border-bottom:2px solid transparent; background:transparent; color:var(--text-dim); cursor:pointer; font-family:inherit; display:inline-flex; align-items:center; gap:6px; }
+    .sd-tab.active { color:var(--brand-primary,#093d54); border-bottom-color:var(--brand-primary,#093d54); }
+    .sd-pane { display:none; }
+    .sd-pane.active { display:block; }
+    .sd-mw  { width: min(820px, 95vw); max-height:88vh; display:flex; flex-direction:column; }
+    .sd-mc  { overflow:auto; flex:1; }
+    .sd-kv  { display:grid; grid-template-columns: 130px 1fr; gap:6px 12px; font-size:13px; padding:14px; }
+    .sd-kv dt { color:var(--text-dim); }
+    .sd-kv dd { margin:0; color:var(--text); }
+    .sd-fin-strip { display:flex; gap:10px; padding:12px 14px; border-bottom:1px solid var(--border); }
+    .sd-fin-cell  { flex:1; padding:8px 12px; border:1px solid var(--border); border-radius:8px; background:var(--bg); }
+    .sd-fin-label { font-size:11px; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.04em; }
+    .sd-fin-value { font-size:18px; font-weight:700; color:var(--text); margin-top:2px; }
+    .sd-fin-good  { padding:14px; background:rgba(34,197,94,0.10); border:1px solid rgba(34,197,94,0.3); border-radius:8px; margin:14px; text-align:center; color:#15803d; font-weight:600; }
+    .sd-inv-status   { display:inline-block; padding:1px 7px; border-radius:999px; font-size:10.5px; font-weight:600; }
+    .sd-inv-status.open                  { background:rgba(245,158,11,0.18); color:#b45309; }
+    .sd-inv-status.partially_paid        { background:rgba(245,158,11,0.18); color:#b45309; }
+    .sd-inv-status.overdue               { background:rgba(220,38,38,0.16); color:#991b1b; }
+    .sd-inv-status.paid                  { background:rgba(34,197,94,0.16); color:#15803d; }
+    .sd-inv-status.credited              { background:var(--bg-elev); color:var(--text-dim); border:1px solid var(--border); }
+    .sd-inv-status.partially_credited    { background:var(--bg-elev); color:var(--text-dim); border:1px solid var(--border); }
+    .sd-inv-status.draft, .sd-inv-status.concept { background:var(--bg-elev); color:var(--text-dim); border:1px solid var(--border); }
+    .sd-call-done   { color:#15803d; font-weight:600; }
+    .sd-call-noshow { color:#991b1b; font-weight:600; }
   </style>
 </head>
 <body>
@@ -235,6 +261,50 @@
   </div>
 </div>
 
+<!-- G — Student-detail-modal (5 tabs, lazy per tab) -->
+<div id="sdMb" class="so-mb" role="dialog" aria-modal="true" aria-labelledby="sdMbTitle">
+  <div class="so-mw sd-mw">
+    <div class="so-mh">
+      <div class="so-mh-title" id="sdMbTitle"><i class="ti ti-user"></i> Student</div>
+      <button type="button" class="so-mh-close" id="sdMbClose" aria-label="Sluiten">×</button>
+    </div>
+    <div class="sd-tabs" id="sdTabs">
+      <button type="button" class="sd-tab active" data-tab="persoonlijk"><i class="ti ti-user"></i> Persoonlijk</button>
+      <button type="button" class="sd-tab" data-tab="financieel"><i class="ti ti-receipt-euro"></i> Financieel</button>
+      <button type="button" class="sd-tab" data-tab="calls"><i class="ti ti-phone"></i> Calls</button>
+      <button type="button" class="sd-tab" data-tab="beoordelingen"><i class="ti ti-clipboard-check"></i> Beoordelingen</button>
+      <button type="button" class="sd-tab" data-tab="signals"><i class="ti ti-flag"></i> Aandachtspunten</button>
+    </div>
+    <div class="sd-mc">
+      <div class="sd-pane active" id="sdPanePersoonlijk"><div class="so-empty" style="padding:28px">Laden…</div></div>
+      <div class="sd-pane" id="sdPaneFinancieel"><div class="so-empty" style="padding:28px">Open de tab om te laden.</div></div>
+      <div class="sd-pane" id="sdPaneCalls"><div class="so-empty" style="padding:28px">Open de tab om te laden.</div></div>
+      <div class="sd-pane" id="sdPaneBeoordelingen"><div class="so-empty" style="padding:28px">Open de tab om te laden.</div></div>
+      <div class="sd-pane" id="sdPaneSignals"><div class="so-empty" style="padding:28px">Open de tab om te laden.</div></div>
+    </div>
+    <div class="so-mf">
+      <button type="button" class="so-btn" id="sdMbCancel">Sluiten</button>
+    </div>
+  </div>
+</div>
+
+<!-- F2.1 — Archiveer-bevestigingsdialog -->
+<div id="arcMb" class="so-mb" role="dialog" aria-modal="true" aria-labelledby="arcMbTitle">
+  <div class="so-mw" style="width:min(420px,92vw)">
+    <div class="so-mh">
+      <div class="so-mh-title" id="arcMbTitle"><i class="ti ti-archive"></i> Student archiveren</div>
+      <button type="button" class="so-mh-close" id="arcMbClose" aria-label="Sluiten">×</button>
+    </div>
+    <div class="so-mc">
+      <div id="arcMbText" style="font-size:13px;color:var(--text)">Weet je zeker?</div>
+    </div>
+    <div class="so-mf">
+      <button type="button" class="so-btn" id="arcMbCancel">Annuleren</button>
+      <button type="button" class="so-btn primary" id="arcMbConfirm" style="background:#991b1b;border-color:transparent"><i class="ti ti-archive"></i> Archiveren</button>
+    </div>
+  </div>
+</div>
+
 <!-- D — Beoordelingshistorie-modal (admin-only, lazy-loaded) -->
 <div id="ahMb" class="so-mb" role="dialog" aria-modal="true" aria-labelledby="ahMbTitle">
   <div class="so-mw" style="width:min(640px,94vw)">
@@ -336,6 +406,11 @@ const state = {
   // F2 — Archief
   canArchive       : false,     // RBAC.canSync('students.all.view')
   archiveBusy      : new Set(), // bubble_student_id-set, voorkomt dubbele klikken
+  archivePending   : null,      // row waarvoor de bevestigingsdialog open staat
+  // G — Student-detail-modal
+  sdCurrentRow     : null,      // huidige rij in modal
+  sdActiveTab      : 'persoonlijk',
+  sdCache          : new Map(), // bubble_student_id -> { persoonlijk?, financieel?, calls?, beoordelingen?, signals? }
 };
 
 function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
@@ -453,7 +528,7 @@ function renderTable() {
     const noShows    = Number(r.no_shows) || 0;
     const overdue    = Number(r.overdue_count) || 0;
     const assess     = r.assessment_status || 'open';
-    return '<tr data-href="' + esc(href) + '">' +
+    return '<tr data-row-idx="' + r._viewIdx + '">' +
       '<td><div class="so-name">' + esc(r.name || '—') + '</div></td>' +
       '<td><div class="so-email">' + esc(r.email || '—') + '</div></td>' +
       '<td>' + (r.program ? '<span class="so-prog">' + esc(r.program) + '</span>' : '—') + '</td>' +
@@ -467,23 +542,25 @@ function renderTable() {
         : '') +
       '</tr>';
   }).join('');
-  // Click → open student (negeer kliks op de Wijzig-knop én op de history-trigger)
-  tbody.querySelectorAll('tr[data-href]').forEach((tr) => {
+  // Click → open student-detail-modal (negeer kliks op actie-knoppen).
+  tbody.querySelectorAll('tr[data-row-idx]').forEach((tr) => {
     tr.addEventListener('click', (ev) => {
       if (ev.target.closest('.so-mentor-edit'))    return;
       if (ev.target.closest('.so-assess-history')) return;
       if (ev.target.closest('.so-archive-btn'))    return;
-      window.location.href = tr.dataset.href;
+      const idx = Number(tr.dataset.rowIdx);
+      const row = state.view[idx];
+      if (row) openStudentDetail(row);
     });
   });
-  // Wire de Archiveer-knoppen (alleen voor admins).
+  // Wire de Archiveer-knoppen (alleen voor admins) — opent bevestigingsdialog.
   if (state.canArchive) {
     tbody.querySelectorAll('.so-archive-btn[data-row-idx]').forEach((btn) => {
       btn.addEventListener('click', (ev) => {
         ev.stopPropagation();
         const idx = Number(btn.dataset.rowIdx);
         const row = state.view[idx];
-        if (row) postArchive(row, 'archive');
+        if (row) openArchiveConfirm(row);
       });
     });
   }
@@ -778,6 +855,9 @@ async function loadData() {
   if (state.canAssessHistory) wireAssessHistoryHandlers();
   // F2 — Archief-acties (zelfde gate als history; server-side enforced).
   state.canArchive = state.canAssessHistory;
+  if (state.canArchive) wireArchiveConfirmHandlers();
+  // G — Student-detail-modal handlers (rij-click triggert openStudentDetail).
+  wireSdHandlers();
 
   loadData();
 })();
@@ -997,6 +1077,319 @@ async function postArchive(row, action) {
   }
 }
 // showToast() bestaat al elders in dit file (reassign-flow) en hergebruikt #soToast.
+
+/* ── F2.1 — Archiveer-bevestigingsdialog ───────────────────────────────── */
+function openArchiveConfirm(row) {
+  if (!row) return;
+  state.archivePending = row;
+  document.getElementById('arcMbText').innerHTML =
+    'Weet je zeker dat je <strong>' + esc(row.name || row.email || '—') + '</strong> wilt archiveren?'
+    + '<br/><br/><span style="color:var(--text-dim);font-size:12px">De student verdwijnt uit de actieve lijst en uit de mentor-lijst. Je kunt de student later terugzetten via het Archief-tabblad.</span>';
+  document.getElementById('arcMb').classList.add('show');
+}
+function closeArchiveConfirm() {
+  document.getElementById('arcMb').classList.remove('show');
+  state.archivePending = null;
+}
+async function confirmArchive() {
+  const row = state.archivePending;
+  closeArchiveConfirm();
+  if (row) await postArchive(row, 'archive');
+}
+function wireArchiveConfirmHandlers() {
+  document.getElementById('arcMbClose').addEventListener('click', closeArchiveConfirm);
+  document.getElementById('arcMbCancel').addEventListener('click', closeArchiveConfirm);
+  document.getElementById('arcMbConfirm').addEventListener('click', confirmArchive);
+  document.getElementById('arcMb').addEventListener('click', (ev) => {
+    if (ev.target === ev.currentTarget) closeArchiveConfirm();
+  });
+  document.addEventListener('keydown', (ev) => {
+    if (ev.key === 'Escape' && document.getElementById('arcMb').classList.contains('show')) closeArchiveConfirm();
+  });
+}
+
+/* ── G — Student-detail modal ──────────────────────────────────────────── */
+function openStudentDetail(row) {
+  if (!row || !row.bubble_student_id) return;
+  state.sdCurrentRow = row;
+  state.sdActiveTab = 'persoonlijk';
+  document.getElementById('sdMbTitle').innerHTML =
+    '<i class="ti ti-user"></i> ' + esc(row.name || row.email || '—');
+  // Reset tab-UI naar Persoonlijk.
+  document.querySelectorAll('.sd-tab[data-tab]').forEach((b) => b.classList.toggle('active', b.dataset.tab === 'persoonlijk'));
+  document.querySelectorAll('.sd-pane').forEach((el) => el.classList.toggle('active', el.id === 'sdPanePersoonlijk'));
+  // Reset andere panes naar lazy-prompt zodat ze opnieuw fetchen op klik (zonder cache reset).
+  ['Financieel','Calls','Beoordelingen','Signals'].forEach((k) => {
+    document.getElementById('sdPane' + k).innerHTML = '<div class="so-empty" style="padding:28px">Open de tab om te laden.</div>';
+  });
+  document.getElementById('sdMb').classList.add('show');
+  renderSdTab('persoonlijk'); // Persoonlijk renderen meteen (data is al lokaal beschikbaar).
+}
+function closeStudentDetail() {
+  document.getElementById('sdMb').classList.remove('show');
+  state.sdCurrentRow = null;
+}
+function wireSdHandlers() {
+  document.getElementById('sdMbClose').addEventListener('click', closeStudentDetail);
+  document.getElementById('sdMbCancel').addEventListener('click', closeStudentDetail);
+  document.getElementById('sdMb').addEventListener('click', (ev) => {
+    if (ev.target === ev.currentTarget) closeStudentDetail();
+  });
+  document.addEventListener('keydown', (ev) => {
+    if (ev.key === 'Escape' && document.getElementById('sdMb').classList.contains('show')) closeStudentDetail();
+  });
+  document.querySelectorAll('.sd-tab[data-tab]').forEach((b) => {
+    b.addEventListener('click', () => {
+      const t = b.dataset.tab;
+      state.sdActiveTab = t;
+      document.querySelectorAll('.sd-tab[data-tab]').forEach((x) => x.classList.toggle('active', x === b));
+      const paneId = 'sdPane' + t[0].toUpperCase() + t.slice(1);
+      document.querySelectorAll('.sd-pane').forEach((el) => el.classList.toggle('active', el.id === paneId));
+      renderSdTab(t);
+    });
+  });
+}
+
+/* Tab-renderers — lazy + cache via state.sdCache.get(sid)[tab] */
+async function renderSdTab(tab) {
+  const row = state.sdCurrentRow;
+  if (!row) return;
+  const sid = row.bubble_student_id;
+  if (!state.sdCache.has(sid)) state.sdCache.set(sid, {});
+  const cache = state.sdCache.get(sid);
+
+  if (tab === 'persoonlijk') {
+    // Persoonlijk combineert rij-basics (al beschikbaar) + klantgegevens
+    // (via student-detail endpoint customer-blok). Lazy-fetch alleen het detail.
+    let detail = cache.detail;
+    if (!detail) {
+      try {
+        const r = await window.AgentShared.apiFetch('/api/student-detail?bubble_student_id=' + encodeURIComponent(sid) + (row.email ? '&email=' + encodeURIComponent(row.email) : ''));
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(d?.error || ('HTTP ' + r.status));
+        detail = d;
+        cache.detail = d;
+      } catch (e) {
+        document.getElementById('sdPanePersoonlijk').innerHTML =
+          '<div class="so-error" style="padding:18px">Laden mislukt: ' + esc(e?.message || e) + '</div>';
+        return;
+      }
+    }
+    renderSdPersoonlijk(row, detail);
+    return;
+  }
+  if (tab === 'financieel') {
+    let detail = cache.detail;
+    if (!detail) {
+      // Persoonlijk hadn't been loaded yet; fetch detail nu.
+      try {
+        const r = await window.AgentShared.apiFetch('/api/student-detail?bubble_student_id=' + encodeURIComponent(sid) + (row.email ? '&email=' + encodeURIComponent(row.email) : ''));
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(d?.error || ('HTTP ' + r.status));
+        detail = d;
+        cache.detail = d;
+      } catch (e) {
+        document.getElementById('sdPaneFinancieel').innerHTML =
+          '<div class="so-error" style="padding:18px">Laden mislukt: ' + esc(e?.message || e) + '</div>';
+        return;
+      }
+    }
+    renderSdFinancieel(detail);
+    return;
+  }
+  if (tab === 'calls') {
+    let detail = cache.detail;
+    if (!detail) {
+      try {
+        const r = await window.AgentShared.apiFetch('/api/student-detail?bubble_student_id=' + encodeURIComponent(sid) + (row.email ? '&email=' + encodeURIComponent(row.email) : ''));
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(d?.error || ('HTTP ' + r.status));
+        detail = d;
+        cache.detail = d;
+      } catch (e) {
+        document.getElementById('sdPaneCalls').innerHTML =
+          '<div class="so-error" style="padding:18px">Laden mislukt: ' + esc(e?.message || e) + '</div>';
+        return;
+      }
+    }
+    renderSdCalls(detail);
+    return;
+  }
+  if (tab === 'beoordelingen') {
+    let list = cache.assessments;
+    if (!list) {
+      try {
+        const r = await window.AgentShared.apiFetch('/api/student-assessment-history?student_id=' + encodeURIComponent(sid));
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(d?.error || ('HTTP ' + r.status));
+        list = Array.isArray(d?.history) ? d.history : [];
+        cache.assessments = list;
+      } catch (e) {
+        document.getElementById('sdPaneBeoordelingen').innerHTML =
+          '<div class="so-error" style="padding:18px">Laden mislukt: ' + esc(e?.message || e) + '</div>';
+        return;
+      }
+    }
+    renderSdBeoordelingen(list);
+    return;
+  }
+  if (tab === 'signals') {
+    let list = cache.signals;
+    if (!list) {
+      try {
+        const r = await window.AgentShared.apiFetch('/api/student-signals-list?status=all&bubble_student_id=' + encodeURIComponent(sid));
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(d?.error || ('HTTP ' + r.status));
+        list = Array.isArray(d?.signals) ? d.signals : [];
+        cache.signals = list;
+      } catch (e) {
+        document.getElementById('sdPaneSignals').innerHTML =
+          '<div class="so-error" style="padding:18px">Laden mislukt: ' + esc(e?.message || e) + '</div>';
+        return;
+      }
+    }
+    renderSdSignals(list);
+    return;
+  }
+}
+
+function renderSdPersoonlijk(row, detail) {
+  const c = detail?.customer || null;
+  const addr = c ? [c.address_street, c.address_number].map((x) => x || '').join(' ').trim() : '';
+  const addr2 = c ? [c.address_postal, c.address_city].map((x) => x || '').join(' ').trim() : '';
+  const klantLink = c?.customer_id
+    ? '<a href="/modules/klanten.html?id=' + encodeURIComponent(c.customer_id) + '" style="color:var(--brand-primary,#093d54)" target="_blank" rel="noopener">Bekijk klant →</a>'
+    : '<span class="so-mentor-none">geen gekoppelde klant</span>';
+  const programCell = row.program ? ('<span class="so-prog">' + esc(row.program) + '</span>') : '—';
+  const mentorCell  = row.mentor_name ? esc(row.mentor_name) : '<span class="so-mentor-none">geen mentor</span>';
+  const phoneCell   = c?.phone ? ('<a href="tel:' + esc(c.phone) + '">' + esc(c.phone) + '</a>') : '—';
+  const addrText    = [addr, addr2].filter(Boolean).join(', ');
+  const addrCell    = addrText ? esc(addrText) : '—';
+  document.getElementById('sdPanePersoonlijk').innerHTML =
+    '<dl class="sd-kv">' +
+      '<dt>Naam</dt><dd>' + esc(row.name || '—') + '</dd>' +
+      '<dt>E-mail</dt><dd>' + esc(row.email || '—') + '</dd>' +
+      '<dt>Programma</dt><dd>' + programCell + '</dd>' +
+      '<dt>Membership</dt><dd>' + esc(row.membership || '—') + '</dd>' +
+      '<dt>Onboarding-status</dt><dd>' + esc(row.onboarding_status || '—') + '</dd>' +
+      '<dt>Mentor</dt><dd>' + mentorCell + '</dd>' +
+      '<dt>Telefoon</dt><dd>' + phoneCell + '</dd>' +
+      '<dt>Adres</dt><dd>' + addrCell + '</dd>' +
+      '<dt>Klant</dt><dd>' + klantLink + '</dd>' +
+    '</dl>';
+}
+
+function renderSdFinancieel(detail) {
+  const f = detail?.financial || { open_count: 0, overdue_count: 0, open_total: 0, items: [] };
+  const items = Array.isArray(f.items) ? f.items : [];
+  const open  = Number(f.open_count) || 0;
+  const ov    = Number(f.overdue_count) || 0;
+  const tot   = Number(f.open_total) || 0;
+  let html = '';
+  html += '<div class="sd-fin-strip">'
+        +   '<div class="sd-fin-cell"><div class="sd-fin-label">Open facturen</div><div class="sd-fin-value">' + open + '</div></div>'
+        +   '<div class="sd-fin-cell"><div class="sd-fin-label">Te laat</div><div class="sd-fin-value" style="color:' + (ov > 0 ? '#991b1b' : 'var(--text)') + '">' + ov + '</div></div>'
+        +   '<div class="sd-fin-cell"><div class="sd-fin-label">Totaal open</div><div class="sd-fin-value">' + fmtEur(tot) + '</div></div>'
+        + '</div>';
+  if (open === 0 && ov === 0) {
+    html += '<div class="sd-fin-good"><i class="ti ti-check"></i> Alles in orde — geen openstaande facturen.</div>';
+  }
+  if (items.length === 0) {
+    html += '<div class="so-empty" style="padding:18px">Geen facturen.</div>';
+  } else {
+    html += '<table class="so-table" style="border:0">'
+         +   '<thead><tr><th>Nummer</th><th>Status</th><th>Bedrag</th><th>Vervaldatum</th></tr></thead>'
+         +   '<tbody>' + items.map((inv) => {
+              const dt = inv.due_date ? new Date(inv.due_date) : null;
+              const dtStr = dt ? dt.toLocaleDateString('nl-NL', { day:'2-digit', month:'short', year:'numeric' }) : '—';
+              return '<tr>' +
+                '<td>' + esc(inv.invoice_number || inv.id || '—') + '</td>' +
+                '<td><span class="sd-inv-status ' + esc(inv.display_status || inv.status || 'unknown') + '">' + esc(inv.display_status || inv.status || '—') + '</span></td>' +
+                '<td>' + fmtEur(inv.amount_total) + '</td>' +
+                '<td>' + esc(dtStr) + '</td>' +
+              '</tr>';
+            }).join('') + '</tbody>'
+         + '</table>';
+  }
+  document.getElementById('sdPaneFinancieel').innerHTML = html;
+}
+
+function renderSdCalls(detail) {
+  const calls = Array.isArray(detail?.calls) ? detail.calls : [];
+  if (calls.length === 0) {
+    document.getElementById('sdPaneCalls').innerHTML = '<div class="so-empty" style="padding:18px"><i class="ti ti-phone-off"></i> Geen calls.</div>';
+    return;
+  }
+  const html = '<table class="so-table" style="border:0">'
+             +   '<thead><tr><th>Datum</th><th>Afgerond</th><th>No-show</th><th>Tijd</th></tr></thead>'
+             +   '<tbody>' + calls.map((c) => {
+                  const d = c.date ? new Date(c.date) : null;
+                  const dStr = d ? d.toLocaleDateString('nl-NL', { day:'2-digit', month:'short', year:'numeric' }) : '—';
+                  return '<tr>' +
+                    '<td>' + esc(dStr) + '</td>' +
+                    '<td>' + (c.done   ? '<span class="sd-call-done">Ja</span>'   : '—') + '</td>' +
+                    '<td>' + (c.noshow ? '<span class="sd-call-noshow">Ja</span>' : '—') + '</td>' +
+                    '<td>' + esc(c.time || '—') + '</td>' +
+                  '</tr>';
+                }).join('') + '</tbody>'
+             + '</table>';
+  document.getElementById('sdPaneCalls').innerHTML = html;
+}
+
+function renderSdBeoordelingen(history) {
+  if (!history || history.length === 0) {
+    document.getElementById('sdPaneBeoordelingen').innerHTML = '<div class="so-empty" style="padding:18px"><i class="ti ti-clipboard-off"></i> Nog geen beoordelingen.</div>';
+    return;
+  }
+  const html = '<table class="so-table" style="border:0">'
+             +   '<thead><tr><th>Maand</th><th>Status</th><th>Score</th><th>Taken</th><th>Mentor</th><th>Notitie</th></tr></thead>'
+             +   '<tbody>' + history.map((h) => {
+                  const st = h.status || '';
+                  const label = (ASSESS_LABEL_MAP && ASSESS_LABEL_MAP[st]) || st || '—';
+                  return '<tr>' +
+                    '<td>' + esc(fmtPeriodMonth(h.period_month)) + '</td>' +
+                    '<td><span class="so-badge ' + esc(st) + '">' + esc(label) + '</span></td>' +
+                    '<td>' + ((h.score == null) ? '—' : esc(String(h.score))) + '</td>' +
+                    '<td>' + ((h.active_tasks_done == null) ? '—' : (h.active_tasks_done ? 'Ja' : 'Nee')) + '</td>' +
+                    '<td>' + esc(h.mentor_name || '—') + '</td>' +
+                    '<td style="max-width:200px;white-space:normal">' + (h.note ? esc(h.note) : '—') + '</td>' +
+                  '</tr>';
+                }).join('') + '</tbody>'
+             + '</table>';
+  document.getElementById('sdPaneBeoordelingen').innerHTML = html;
+}
+
+function renderSdSignals(signals) {
+  if (!signals || signals.length === 0) {
+    document.getElementById('sdPaneSignals').innerHTML = '<div class="so-empty" style="padding:18px"><i class="ti ti-flag-off"></i> Geen aandachtspunten.</div>';
+    return;
+  }
+  const html = '<table class="so-table" style="border:0">'
+             +   '<thead><tr><th>Type</th><th>Toelichting</th><th>Datum</th><th>Status</th></tr></thead>'
+             +   '<tbody>' + signals.map((s) => {
+                  const dt = s.created_at ? new Date(s.created_at) : null;
+                  const dtStr = dt ? dt.toLocaleDateString('nl-NL', { day:'2-digit', month:'short', year:'numeric' }) : '—';
+                  const typeLabel = (SIGNAL_TYPE_LABELS && SIGNAL_TYPE_LABELS[s.type]) || s.type || '—';
+                  const statusLabel = (SIGNAL_STATUS_LABELS && SIGNAL_STATUS_LABELS[s.status]) || s.status || '—';
+                  return '<tr>' +
+                    '<td>' + esc(typeLabel) + '</td>' +
+                    '<td style="max-width:280px;white-space:normal">' + (s.toelichting ? esc(s.toelichting) : '—') + '</td>' +
+                    '<td>' + esc(dtStr) + '</td>' +
+                    '<td><span class="ap-badge ' + esc(s.status) + '">' + esc(statusLabel) + '</span></td>' +
+                  '</tr>';
+                }).join('') + '</tbody>'
+             + '</table>';
+  document.getElementById('sdPaneSignals').innerHTML = html;
+}
+
+/* fmtEur helper (zelfde patroon als mentor-home) */
+function fmtEur(n) {
+  const v = Number(n);
+  if (!Number.isFinite(v)) return '€0';
+  try {
+    return new Intl.NumberFormat('nl-NL', { style: 'currency', currency: 'EUR', minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(v);
+  } catch (e) { return '€' + v.toFixed(2); }
+}
 
 /* ── B2 — Aandachtspunten: load + render + handle ──────────────────────── */
 async function loadSignals() {
